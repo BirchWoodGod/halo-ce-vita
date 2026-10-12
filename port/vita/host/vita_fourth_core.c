@@ -13,7 +13,7 @@ Vita3K refuses it too (SCE_KERNEL_ERROR_ILLEGAL_CPU_AFFINITY_MASK). So each
 helper asks, reads its mask back, and stays where it was when refused or
 given another mask.
 
-"Fourth core helpers" (HALO_CPU3_AUX, Graphics > Advanced; read at
+"Fourth core helpers" (HALO_CPU3_AUX, Graphics > Performance; read at
 start-up) has the levels of Bruno Santana's modified build, whose setting
 this follows (he found the fourth core usable with CapUnlocker, and the
 whole tick there too much for it: the fourth core above 90% and the game at
@@ -167,7 +167,7 @@ int vita_host_fourth_core_join(const char *role, int level)
 	{
 		char message[200];
 
-		snprintf(message, sizeof(message), "fourth core: %s stays on cores 0-2 (Graphics > Advanced > Fourth core "
+		snprintf(message, sizeof(message), "fourth core: %s stays on cores 0-2 (Graphics > Performance > Fourth core "
 			"helpers: %s)", role, vita_host_fourth_core_level() ? "Audio" : "Off");
 		vita_host_log(message);
 		watch(role, 0);

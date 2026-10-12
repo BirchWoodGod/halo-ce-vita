@@ -7,10 +7,10 @@ or in the menus, and a panel over the game shows the Vita's settings in
 four tabs that L and R switch between: Graphics, General, Audio and
 Multiplayer, and Dev once "Show dev settings" (General, Advanced) is on.
 No tab is longer than a screen: the rows few players change open from a
-row marked > as a page of their own (Graphics' Display and Advanced;
-General's Button layout, Touch zones, Gyro settings and Advanced;
-Multiplayer's Play and Modded maps; Dev's A/B switches), and circle goes
-back.
+row marked > as a page of their own (Graphics' Screen, First person,
+Detail and Performance; General's Button layout, Touch zones, Gyro
+settings and Advanced; Multiplayer's Play and Modded maps; Dev's A/B
+switches), and circle goes back.
 Up and down choose a line, left and right change it, cross does what an
 action line says, circle (or SELECT + down again) closes the panel; the
 game sees no buttons while it is open. Each row's value is drawn in a
@@ -42,10 +42,11 @@ menu_fits).
 
 The Profile row at the top of Graphics sets the speed-related rows at once
 (Performance, Balanced - the defaults - or Quality); it reads Custom when
-those rows match none of them (the render resolution, its Dynamic minimum
-and the particles, on the tab, and the detail and update rates, the sun
-rays, the shadows, lights, effects and particle density and the AI's think
-rate, under Advanced, and Audio's sound updates and occlusion). All three
+those rows match none of them (the render resolution and its Dynamic
+minimum, on the tab; the model detail, distant objects, shadows, lights,
+effects, sun rays, particles and particle density, under Detail; the
+scenery and lighting update rates and the AI's think rate, under
+Performance; and Audio's sound updates and occlusion). All three
 are Dynamic resolution, from 50%, 63% and 75%; Quality is otherwise the
 Xbox game's every one but the AI's think rate (Adaptive). Rows marked *
 apply after a restart (the sound voices, the network, most dev switches).
@@ -220,8 +221,10 @@ enum
 	TAB_DEV,
 	TAB_COUNT,
 
-	PAGE_GRAPHICS_ADVANCED = TAB_COUNT,
-	PAGE_GRAPHICS_DISPLAY,
+	PAGE_GRAPHICS_SCREEN = TAB_COUNT,
+	PAGE_GRAPHICS_FIRST_PERSON,
+	PAGE_GRAPHICS_DETAIL,
+	PAGE_GRAPHICS_PERFORMANCE,
 	PAGE_BUTTONS,
 	PAGE_TOUCH,
 	PAGE_GYRO,
@@ -243,8 +246,10 @@ static const struct
 	{ "Audio", TAB_AUDIO },
 	{ "Multiplayer", TAB_MULTIPLAYER },
 	{ "Dev", TAB_DEV },
-	{ "Advanced", TAB_GRAPHICS },
-	{ "Display", TAB_GRAPHICS },
+	{ "Screen", TAB_GRAPHICS },
+	{ "First person", TAB_GRAPHICS },
+	{ "Detail", TAB_GRAPHICS },
+	{ "Performance", TAB_GRAPHICS },
 	{ "Button layout", TAB_CONTROLS },
 	{ "Touch zones", TAB_CONTROLS },
 	{ "Gyro settings", TAB_CONTROLS },
@@ -340,62 +345,63 @@ static struct setting settings[] = {
 		"Up to 60 FPS: frames between the 30 Hz ticks", 0, TAB_GRAPHICS },
 	{ "FPS counter", "HALO_FRAMERATE_COUNTER", 0, 2, { "0", "1" }, { "Off", "On" },
 		"The game's frame counter, bottom right", 0, TAB_GRAPHICS },
-	{ "Smooth weapon motion", "HALO_INTERPOLATE_FIRST_PERSON", 0, 2, { "1", "0" }, { "On", "Off" },
-		"The weapon's animation blended between game ticks", 0, TAB_GRAPHICS },
-	/* (the particle budget, port/linux/game/particle_budget.c: the
-	particles a fight's effects make - an entry's count and a long life span
-	cut, those too small to see at their distance not made; muzzle flashes,
-	the first-person weapon's and scripted effects whole. Live; Reduced in
-	every profile. Particle density, under Advanced, draws fewer of
-	those made) */
-	{ "Particles", "HALO_PARTICLE_BUDGET", 0, 3, { "full", "reduced", "low" }, { "Full", "Reduced", "Low" },
-		"Fewer sparks, smoke and debris in big fights", 1, TAB_GRAPHICS },
-	/* (the picture's framing and scaling, set once: on a page of their
-	own, which keeps the tab to a screen with Dynamic minimum shown; the
-	row says the first two, page_summary) */
-	PAGE_ROW("Display", "Aspect ratio, upscale filter, first-person legs", TAB_GRAPHICS, PAGE_GRAPHICS_DISPLAY),
+	/* (then four pages, which keep the tab to ten rows with Dynamic minimum
+	shown: the picture's framing and scaling, set once - the row says both,
+	page_summary -; first person; the detail rows; the update rates) */
+	PAGE_ROW("Screen", "Aspect ratio, upscale filter", TAB_GRAPHICS, PAGE_GRAPHICS_SCREEN),
 	{ "Aspect ratio", "HALO_DISPLAY_WIDTH", 0, 2, { "848", "640" }, { "16:9", "4:3" },
-		"4:3: the Xbox's framing, black bars", 0, PAGE_GRAPHICS_DISPLAY },
+		"4:3: the Xbox's framing, black bars", 0, PAGE_GRAPHICS_SCREEN },
 	{ "Upscale filter", "HALO_UPSCALE_FILTER", 0, 2, { "0", "1" }, { "Smooth", "Sharp" },
-		"Scaling to the screen: Sharp = crisp pixels", 0, PAGE_GRAPHICS_DISPLAY },
+		"Scaling to the screen: Sharp = crisp pixels", 0, PAGE_GRAPHICS_SCREEN },
+	PAGE_ROW("First person", "First-person legs, smooth weapon motion", TAB_GRAPHICS, PAGE_GRAPHICS_FIRST_PERSON),
 	/* (port/linux/game/first_person_legs.c, from OpenCE: your own body
 	drawn from the waist down in first person, one more model a frame on
-	foot. On by default and in every profile; on its page, not the tab,
-	which is ten rows already. Live) */
+	foot. On by default and in every profile. Live) */
 	{ "First-person legs", "HALO_FIRST_PERSON_LEGS", 0, 2, { "0", "1" }, { "Off", "On" },
-		"Your legs when you look down, as others see them", 1, PAGE_GRAPHICS_DISPLAY },
-	PAGE_ROW("Advanced", "Detail and update rates (the Profile sets them)", TAB_GRAPHICS, PAGE_GRAPHICS_ADVANCED),
+		"Your legs when you look down, as others see them", 1, PAGE_GRAPHICS_FIRST_PERSON },
+	{ "Smooth weapon motion", "HALO_INTERPOLATE_FIRST_PERSON", 0, 2, { "1", "0" }, { "On", "Off" },
+		"The weapon's animation blended between game ticks", 0, PAGE_GRAPHICS_FIRST_PERSON },
+	PAGE_ROW("Detail", "Models, shadows, lights, effects, particles", TAB_GRAPHICS, PAGE_GRAPHICS_DETAIL),
 	{ "Model detail", "HALO_MODEL_LOD_SCALE", 0, 4, { "1", "0.75", "0.5", "0.35" },
 		{ "High", "Medium", "Low", "Lowest" }, "Level of detail of characters and vehicles", 1,
-		PAGE_GRAPHICS_ADVANCED },
+		PAGE_GRAPHICS_DETAIL },
 	{ "Hide distant objects", "HALO_MIN_OBJECT_PIXELS", 0, 4, { "0", "4", "8", "12" },
-		{ "Off", "Tiny", "Small", "Medium" }, "Skip objects this small on screen", 2, PAGE_GRAPHICS_ADVANCED },
+		{ "Off", "Tiny", "Small", "Medium" }, "Skip objects this small on screen", 2, PAGE_GRAPHICS_DETAIL },
 	/* (Bruno Santana's settings, his variables and values, so his build's
 	settings.txt carries over: render_objects.c's shadows - Near only for
 	objects over 60 pixels across, the Xbox's 30 -, object_lights.c's
 	dynamic lights cap, render.c's passes, render_particles.c's density) */
 	{ "Object shadows", "HALO_VITA_SHADOWS", 0, 3, { "2", "1", "0" }, { "Full", "Near only", "Off" },
-		"Shadows under characters and vehicles", 2, PAGE_GRAPHICS_ADVANCED },
+		"Shadows under characters and vehicles", 2, PAGE_GRAPHICS_DETAIL },
 	{ "Dynamic lights", "HALO_MAX_SCENE_LIGHTS", 0, 4, { "0", "8", "4", "2" }, { "All", "8", "4", "2" },
-		"The most lights from shots and blasts a frame", 2, PAGE_GRAPHICS_ADVANCED },
+		"The most lights from shots and blasts a frame", 2, PAGE_GRAPHICS_DETAIL },
 	{ "Effects quality", "HALO_VITA_EFFECTS_QUALITY", 0, 3, { "2", "1", "0" },
 		{ "Full", "Performance", "Minimal" }, "Performance: no reflections, specular, grass", 0,
-		PAGE_GRAPHICS_ADVANCED },
-	{ "Particle density", "HALO_PARTICLE_RENDER_DIVISOR", 0, 4, { "1", "2", "3", "4" },
-		{ "Full", "Half", "Third", "Quarter" }, "Smoke, sparks, debris drawn (your gun's: all)", 0,
-		PAGE_GRAPHICS_ADVANCED },
+		PAGE_GRAPHICS_DETAIL },
 	/* (the sun's glow and rays, rasterizer_lights.c: seven small scenes a
 	frame while the sun is in view) */
 	{ "Sun rays", "HALO_SUN_RAYS", 0, 2, { "1", "0" }, { "On", "Off" },
-		"The sun's glow and light shafts outdoors", 1, PAGE_GRAPHICS_ADVANCED },
+		"The sun's glow and light shafts outdoors", 1, PAGE_GRAPHICS_DETAIL },
 	/* (decals.c: decals under 2 pixels across are not made. Off as on the
 	Xbox, in no profile yet: to be tried on hardware) */
 	{ "Tiny decals", "HALO_DECAL_MIN_PIXELS", 0, 2, { "0", "2" }, { "Shown", "Skipped" },
-		"Bullet holes too small to see", 0, PAGE_GRAPHICS_ADVANCED },
+		"Bullet holes too small to see", 0, PAGE_GRAPHICS_DETAIL },
+	/* (the particle budget, port/linux/game/particle_budget.c: the
+	particles a fight's effects make - an entry's count and a long life span
+	cut, those too small to see at their distance not made; muzzle flashes,
+	the first-person weapon's and scripted effects whole. Live; Reduced in
+	every profile. Particle density, under it, draws fewer of those made) */
+	{ "Particles", "HALO_PARTICLE_BUDGET", 0, 3, { "full", "reduced", "low" }, { "Full", "Reduced", "Low" },
+		"Fewer sparks, smoke and debris in big fights", 1, PAGE_GRAPHICS_DETAIL },
+	{ "Particle density", "HALO_PARTICLE_RENDER_DIVISOR", 0, 4, { "1", "2", "3", "4" },
+		{ "Full", "Half", "Third", "Quarter" }, "Smoke, sparks, debris drawn (your gun's: all)", 0,
+		PAGE_GRAPHICS_DETAIL },
+	PAGE_ROW("Performance", "Update rates, AI think rate, fourth core helpers", TAB_GRAPHICS,
+		PAGE_GRAPHICS_PERFORMANCE),
 	{ "Scenery updates", "HALO_SCENERY_UPDATE_DIVISOR", 0, 3, { "1", "2", "4" },
-		{ "Every tick", "Half", "Quarter" }, "How often static props are updated", 2, PAGE_GRAPHICS_ADVANCED },
+		{ "Every tick", "Half", "Quarter" }, "How often static props are updated", 2, PAGE_GRAPHICS_PERFORMANCE },
 	{ "Object lighting", "HALO_LIGHTING_REFRESH_DIVISOR", 0, 3, { "1", "2", "3" },
-		{ "Full", "Half", "Third" }, "How often object lighting is recomputed", 2, PAGE_GRAPHICS_ADVANCED },
+		{ "Full", "Half", "Third" }, "How often object lighting is recomputed", 2, PAGE_GRAPHICS_PERFORMANCE },
 	/* (actors.c, Bruno Santana's variable and values: how often an actor
 	thinks - its perception, situation, emotions and decision -, its
 	movement and firing every tick; Adaptive by its distance to the nearest
@@ -403,7 +409,7 @@ static struct setting settings[] = {
 	settings.txt naming it loads as the profile has this row) */
 	{ "AI think rate", "HALO_AI_THINK_DIVISOR", 0, 4, { "1", "0", "2", "3" },
 		{ "Every tick", "Adaptive", "15 Hz", "10 Hz" }, "Adaptive: far-off enemies think less often", 1,
-		PAGE_GRAPHICS_ADVANCED },
+		PAGE_GRAPHICS_PERFORMANCE },
 	/* (vita_fourth_core.c, with Bruno Santana's levels and variable, so his
 	build's settings.txt carries over: Audio puts the sound mixer on the
 	fourth core, All async the mixer, GXM's display queue, the cache file
@@ -413,7 +419,7 @@ static struct setting settings[] = {
 	where each went. Off until the hardware says what it is worth; in no
 	profile) */
 	{ "Fourth core helpers", "HALO_CPU3_AUX", 1, 3, { "0", "1", "2" }, { "Off", "Audio", "All async" },
-		"Needs CapUnlocker: audio, or all background work", 2, PAGE_GRAPHICS_ADVANCED },
+		"Needs CapUnlocker: audio, or all background work", 2, PAGE_GRAPHICS_PERFORMANCE },
 
 	/* (the port's own text: this panel, its messages over the game, the
 	PC menus' and co-op's lines; lang.c, port/vita/app0/lang. Its choices
@@ -2521,7 +2527,7 @@ static void page_summary(char *text, int size, const struct setting *setting)
 		else
 			snprintf(text, (size_t)size, "%s", T("Off"));
 		break;
-	case PAGE_GRAPHICS_DISPLAY:
+	case PAGE_GRAPHICS_SCREEN:
 		snprintf(text, (size_t)size, "%s, %s", T(setting_named("HALO_DISPLAY_WIDTH")->names[choice_of("HALO_DISPLAY_WIDTH")]),
 			T(setting_named("HALO_UPSCALE_FILTER")->names[choice_of("HALO_UPSCALE_FILTER")]));
 		break;

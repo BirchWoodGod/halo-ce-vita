@@ -1,6 +1,6 @@
 #!/bin/bash
 # Your own legs in first person (display.first_person_legs,
-# HALO_FIRST_PERSON_LEGS; the Vita's settings panel: Graphics > Display >
+# HALO_FIRST_PERSON_LEGS; the Vita's settings panel: Graphics > First person >
 # First-person legs), from OpenCE (port/linux/game/first_person_legs.c): the
 # player's own body drawn from the waist down when looking down, set back
 # behind the eye as far as keeps the open waist out of the view.
