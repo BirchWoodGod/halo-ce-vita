@@ -4799,6 +4799,12 @@ short game_engine_player_get_custom_motion_sensor_positions(
 	return count;
 }
 
+/* port: declared, not left implicit: an undeclared call reads its result as a whole
+int, where these narrower results fill only part of the register (an x86 build with
+link-time optimisation read the rest as garbage: every init.txt command was refused as
+"playing in another's game"; the Vita's ARM ABI widens them, but see tools/vita_build.py) */
+short hud_get_nav_point_render_type(short local_player_index, real_point3d const *head, real_point3d const *position, long reference_object_index);
+
 void game_engine_render_nav_points(
 	short local_player_index)
 {
@@ -6141,6 +6147,12 @@ real_point3d *game_engine_get_goal_position(
 
 	return position;
 }
+
+/* port: declared, not left implicit: an undeclared call reads its result as a whole
+int, where these narrower results fill only part of the register (an x86 build with
+link-time optimisation read the rest as garbage: every init.txt command was refused as
+"playing in another's game"; the Vita's ARM ABI widens them, but see tools/vita_build.py) */
+short find_nav_point(char const *name);
 
 void game_engine_set_goal_position(
 	short goal_index,

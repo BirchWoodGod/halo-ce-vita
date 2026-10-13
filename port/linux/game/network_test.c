@@ -1049,6 +1049,12 @@ static void network_test_vehicle(
 	}
 }
 
+/* port: declared, not left implicit: an undeclared call reads its result as a whole
+int, where these narrower results fill only part of the register (an x86 build with
+link-time optimisation read the rest as garbage: every init.txt command was refused as
+"playing in another's game"; the Vita's ARM ABI widens them, but see tools/vita_build.py) */
+boolean unit_get_seat_entrance_point(long unit_index, long parent_unit_index, short seat_index, real_point3d *entrance_point, real_point3d *seat_point, real_point3d *hint_point);
+
 /* both machines stand the last player at the driver's entrance of the
 nearest vehicle no one rides (a joining machine's player then holds the
 action button, as a player getting in does) */
@@ -1104,6 +1110,12 @@ static void network_test_vehicle_approach(
 	}
 	platform_log("network test: no vehicle to get into");
 }
+
+/* port: declared, not left implicit: an undeclared call reads its result as a whole
+int, where these narrower results fill only part of the register (an x86 build with
+link-time optimisation read the rest as garbage: every init.txt command was refused as
+"playing in another's game"; the Vita's ARM ABI widens them, but see tools/vita_build.py) */
+boolean player_handle_powerup(long player_index, short powerup_type, short duration);
 
 /* the host gives the last player a second weapon, lying about */
 static void network_test_second_weapon(

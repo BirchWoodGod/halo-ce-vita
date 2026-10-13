@@ -85,8 +85,9 @@ parser.add_argument(
     "--lto",
     choices=["full", "thin", "off"],
     default="full",
-    help="link-time optimisation of the native ports (Linux, Windows): full (the default: the whole game "
-    "optimised as one module, the fastest code and the slowest links), thin (parallel and incremental) or off",
+    help="link-time optimisation of the native ports (Linux, Windows) and of the Vita build's clang side "
+    "(the game and platform layer; thin is full there): full (the default: the whole game optimised as one "
+    "module, the fastest code and the slowest links), thin (parallel and incremental) or off",
 )
 parser.add_argument(
     "--portable",
@@ -109,7 +110,8 @@ parser.add_argument(
     "--pgo-profile",
     metavar="PROFDATA",
     type=Path,
-    help="native ports: profile-guided optimisation from this profile instead",
+    help="native ports: profile-guided optimisation from this profile instead; the Vita build's clang side "
+    "uses one only when given here (triage/vita-lto-1.1.1.md: a harness's front-end instrumented profile)",
 )
 parser.add_argument(
     "--linux-d3d",

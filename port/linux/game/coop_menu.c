@@ -92,6 +92,12 @@ static void coop_menu_string(
 	text[length] = 0;
 }
 
+/* port: declared, not left implicit: an undeclared call reads its result as a whole
+int, where these narrower results fill only part of the register (an x86 build with
+link-time optimisation read the rest as garbage: every init.txt command was refused as
+"playing in another's game"; the Vita's ARM ABI widens them, but see tools/vita_build.py) */
+short main_get_solo_level_from_name(char const *name);
+
 void coop_menu_level_name(
 	char const *map_name,
 	wchar_t *text,

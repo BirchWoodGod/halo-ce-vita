@@ -21,7 +21,7 @@ from .ninja_syntax import Writer
 from .vita_shader_generator_id import SOURCES as SHADER_GENERATOR_NAMES
 from .linux_build import (MBEDTLS_DIR, GAME_FLAGS, PLATFORM_FLAGS, XDK_INCLUDE, TOML_DIR, KCP_DIR, ZLIB_DIR, ZLIB_SOURCES,
                           ZLIB_DEFINES, MONOCYPHER_DIR, MONOCYPHER_SOURCES, EXPAT_DIR, EXPAT_SOURCES, musl_math_sources,
-                          LIBOGG_INCLUDE, ogg_sound_sources,
+                          LIBOGG_INCLUDE, ogg_sound_sources, PROFILE_USE_FLAGS,
                           MUSL_MATH_DIR, LIBMSPACK_DIR, LIBMSPACK_SOURCES, LIBMSPACK_FLAGS,
                           ANDROID_VARIADIC_PROTOTYPE_FILES, xdk_headers, _quote)
 
@@ -164,6 +164,21 @@ def vita_update_test_defines(sln: Any) -> List[str]:
     return defines
 
 
+def vita_pgo_profile(sln: Any) -> Optional[Path]:
+    """configure.py --pgo-profile's profile for the Vita build's clang side,
+    unless --pgo off; none otherwise. There is no Vita profile in pgo/: the
+    Vita cannot write one, and the Linux profiles were recorded from other
+    code (most of a hot file's functions do not match: objects.c 83 of
+    ~130). A profile recorded by the x86 or ARM harness built with clang's
+    front-end instrumentation (-fprofile-instr-generate, whose function
+    hashes follow the source rather than the target's code) fits the Vita's
+    game code: triage/vita-lto-1.1.1.md says how one was made"""
+    explicit = getattr(sln, "port_pgo_profile", None)
+    if not explicit or getattr(sln, "port_pgo", "use") == "off":
+        return None
+    return Path(explicit)
+
+
 def vita_sdk(sln: Any) -> Path:
     explicit = getattr(sln, "vita_sdk", None) or os.environ.get("VITASDK")
     return Path(explicit) if explicit else Path.home() / "vitasdk"
@@ -201,11 +216,28 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
         depfile="$out.d",
         deps="gcc",
     )
-    # link-time optimisation of the clang side: the game and platform objects
-    # are bitcode, partially linked into one relocatable object by lld
+    # link-time optimisation of the clang side (configure.py --lto full or
+    # thin): the game and platform objects are bitcode, partially linked into
+    # one relocatable object by lld, optimised as one module at -O2 as each
+    # file is without it (and as the Linux builds' links are: -O3 made the
+    # code 31% larger than without LTO against -O2's 17%, on a Cortex-A9 of
+    # 32 KB of instruction cache). lld -r leaves the game's common symbols
+    # (-fcommon: the MSVC ABI's tentative definitions) common, for the final
+    # link to place, yet also writes a COMMON section of their size that no
+    # symbol is in; the final link took that 1.3 MB into .bss besides the
+    # symbols' own room, so it is removed. The decompiled files are built
+    # with -w, and some call functions they never declare: such a call reads
+    # a whole int, where a boolean or short result fills part of the
+    # register. ARM's ABI has the callee widen it, so the Vita reads the
+    # right value, but the x86 harness built with LTO did not (every init.txt
+    # command refused as "playing in another's game"); the calls whose
+    # results are narrower than an int are declared now (clang
+    # -Wimplicit-function-declaration lists the rest: ints, pointers, void)
     n.rule(
         name="vita_lto",
-        command="ld.lld -r -m armelf_linux_eabi --lto-O3 -mllvm -mcpu=cortex-a9 -mllvm -float-abi=hard -mllvm -emulated-tls -o $out @$out.rsp",
+        command=("ld.lld -r -m armelf_linux_eabi --lto-O2 -mllvm -mcpu=cortex-a9 -mllvm -float-abi=hard "
+                 "-mllvm -emulated-tls -o $out @$out.rsp && "
+                 "$vita_sdk_bin/arm-vita-eabi-objcopy --remove-section=COMMON $out"),
         description="VITA LTO $out",
         rspfile="$out.rsp",
         rspfile_content="$in_newline",
@@ -233,19 +265,25 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
     )
 
     lto = getattr(sln, "port_lto", "off") != "off"
+    profile = vita_pgo_profile(sln)
+    if profile:
+        n.comment(f"profile-guided optimisation from {profile} (configure.py --pgo-profile)")
     test_defines = vita_update_test_defines(sln)
     if test_defines:
         n.comment("TEST BUILD of the updater (not for release): " + " ".join(test_defines))
     abi = " ".join(VITA_ABI_FLAGS + [f"--sysroot={_quote(sysroot)}", f"-isystem {_quote(sysroot / 'include')}"] +
                    (["-DHALO_RELEASE"] if getattr(sln, "port_release", False) else []) +
-                   (["-flto"] if lto else []) + test_defines)
+                   (["-flto"] if lto else []) +
+                   ([f"-fprofile-use={_quote(profile.resolve())}", *PROFILE_USE_FLAGS] if profile else []) +
+                   test_defines)
     port_include = LINUX_DIR / "include"
     vita_include = VITA_DIR / "include"
     sdk_flags = f"-idirafter {XDK_INCLUDE}"
     excluded = set(config.get("exclude_sources", []))
     objects: List[Path] = []
     clang_objects: List[Path] = []
-    implicit = [*xdk_headers(), prefix_header, semantics_header, platform_semantics_header]
+    implicit = [*xdk_headers(), prefix_header, semantics_header, platform_semantics_header] + \
+        ([profile] if profile else [])
 
     def add(source: Path, rule: str, cflags: str, extra: Optional[List[Path]] = None) -> None:
         obj = obj_dir / source.with_suffix(".o")
