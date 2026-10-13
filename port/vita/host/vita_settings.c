@@ -149,6 +149,11 @@ from it, vita_ce_installer.c), and "Map downloads": whether a
 host's map is offered for download in a game joined without it (Ask, the
 default, warns in a game joined from the public lobby; Not public games
 asks only in the others; Never: port/linux/game/map_share.c).
+"MCC mods" (HALO_MCC_MODS, experimental, Off by default; shown while the
+mods folder has a folder in it) lets the Campaign's level list offer a
+Halo: The Master Chief Collection mod's Halo: CE Anniversary maps from
+ux0:data/haloce-vita/mods, played alone and offline
+(port/linux/game/custom_edition_mods.c, docs/mcc_cea_maps.md).
 
 Dev holds a few switches for testers (each a debug environment variable;
 most are read once, at start-up, and say so; the renderer's A/B ones on a
@@ -624,6 +629,13 @@ static struct setting settings[] = {
 	maps themselves follow on the page, page_lines) */
 	{ "PC maps", "HALO_CUSTOM_EDITION", 0, 2, { "0", "1" }, { "Off", "On" },
 		"Experimental: Custom Edition maps in the map list", 0, PAGE_MAPS },
+	/* (a mod's Halo: CE Anniversary maps in ux0:data/haloce-vita/mods,
+	offered after the campaign's levels and played alone, offline:
+	port/linux/game/custom_edition_mods.c; off by default, and shown only
+	while the mods folder has a folder in it or the row is on:
+	setting_shown) */
+	{ "MCC mods", "HALO_MCC_MODS", 0, 2, { "0", "1" }, { "Off", "On" },
+		"Experimental: mods folder's MCC maps, solo, offline", 0, PAGE_MAPS },
 	/* (shown while a Custom Edition installer is in ux0:data/haloce-vita
 	and the resource maps are missing: vita_ce_installer.c) */
 	{ "Extract PC files", NULL, 0, 0, { NULL }, { NULL }, "The three files out of the Halo CE installer",
@@ -864,6 +876,9 @@ static int maps_have_custom_edition;
 /* a Custom Edition installer to take them from: vita_ce_installer_state's
 (0 none, 1 there, 2 being read) and its file name */
 static int maps_installer_state;
+/* whether the mods folder (DATA_DIRECTORY/mods) has a folder in it: the
+MCC mods row is shown then */
+static int maps_mods_present;
 static char maps_installer[64];
 /* the maps turned off: their names, commas between (HALO_MAPS_DISABLED) */
 static char maps_disabled[1024];
@@ -1134,6 +1149,8 @@ static int setting_shown(const struct setting *setting)
 		return !network_is("adhoc");
 	if (setting->action == ACTION_CE_EXTRACT)
 		return maps_installer_state == 1;
+	if (setting->variable && !strcmp(setting->variable, "HALO_MCC_MODS"))
+		return maps_mods_present || choice_of("HALO_MCC_MODS");
 	if (setting->variable && (!strcmp(setting->variable, "HALO_BOT_SKILL") || !strcmp(setting->variable, "HALO_BOT_TEAMS") ||
 		!strcmp(setting->variable, "HALO_BOT_VEHICLES") || !strcmp(setting->variable, "HALO_BOT_ROUTES") ||
 		!strcmp(setting->variable, "HALO_BOT_PLAYLIST")))
@@ -1802,6 +1819,18 @@ static void maps_scan(void)
 	if (map_scroll >= map_count)
 		map_scroll = 0;
 	maps_installer_state = maps_missing[0] ? vita_ce_installer_state(maps_installer, sizeof(maps_installer)) : 0;
+	maps_mods_present = 0;
+	folder = opendir(DATA_DIRECTORY "/mods");
+	while (folder && !maps_mods_present && (entry = readdir(folder)) != NULL)
+	{
+		char path[512];
+		struct stat status;
+
+		snprintf(path, sizeof(path), "%s/%s", DATA_DIRECTORY "/mods", entry->d_name);
+		maps_mods_present = entry->d_name[0] != '.' && stat(path, &status) == 0 && S_ISDIR(status.st_mode);
+	}
+	if (folder)
+		closedir(folder);
 }
 
 static void size_text(char *text, int size, unsigned long long bytes)

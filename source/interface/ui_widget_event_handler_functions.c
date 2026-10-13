@@ -928,6 +928,7 @@ boolean network_game_server_port_cooperative_menu(short *rounds);
 #include "interface/ui_widget_definitions.h"
 #ifdef HALO_LINUX
 #include "custom_edition_maps.h"
+#include "custom_edition_mods.h"
 #endif
 
 /* ---------- constants */
@@ -6377,6 +6378,13 @@ boolean ui_widget_port_cooperative_campaign_host(
 
 	csstrncpy(map_name, main_get_map_name(), sizeof(map_name) - 1);
 	map_name[sizeof(map_name) - 1] = 0;
+	/* (a mod's Halo: CE Anniversary map plays offline only: it is no
+	campaign level a network game takes, custom_edition_mods.h) */
+	if (custom_edition_mods_level_name(map_name))
+	{
+		error(2, "co-op: '%s' is a mod's Halo: CE Anniversary map, which plays offline only", map_name);
+		return FALSE;
+	}
 	if (difficulty < 0 || difficulty > 3 || !custom_edition_maps_campaign_level(map_name))
 		return FALSE;
 	if (!transport_network_available())

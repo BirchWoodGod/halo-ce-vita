@@ -144,6 +144,9 @@ halo_linux_source_fixups.h). */
 void *halo_custom_edition_tag_cache(void);
 /* Whether Halo Custom Edition maps may run (HALO_CUSTOM_EDITION). */
 int halo_custom_edition_enabled(void);
+/* Whether a mod's Halo: CE Anniversary maps in the mods folder may be listed
+and played, offline (HALO_MCC_MODS, experimental; needs PC maps on). */
+int halo_mcc_mods_enabled(void);
 /* A Custom Edition map's tag cache of `bytes`: the window above when it is
 reserved, else memory of its own (the Vita, which cannot have the window),
 whose tags are then moved there (custom_edition_cache.c); NULL when there is

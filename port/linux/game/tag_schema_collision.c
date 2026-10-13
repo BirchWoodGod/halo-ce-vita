@@ -1339,6 +1339,18 @@ static void structure_material_check(
 	long surface_index;
 	long end;
 
+	/* (port) a Halo: CE Anniversary map's material has no vertex data: its
+	vertices are in the map's file, as many as its counts say (each range
+	checked there as the map loaded, cache_file_formats.c, and as the bsp
+	loads, custom_edition_geometry.c); its counts are checked below as the
+	tools make them */
+	if (uncompressed && !vertex_data_size && tag_validate_structure_vertices_are_in_file(validation) &&
+		material->vertices.count >= 0 && material->lightmap_vertices.count >= 0 &&
+		material->vertices.count <= MAXIMUM_VERTICES_PER_STRUCTURE_MATERIAL &&
+		material->lightmap_vertices.count <= MAXIMUM_VERTICES_PER_STRUCTURE_MATERIAL)
+	{
+		vertex_data_size = material->vertices.count * vertex_size + material->lightmap_vertices.count * lightmap_vertex_size;
+	}
 	if (material->first_surface_index < 0 || material->surface_count < 0 ||
 		material->first_surface_index > structure_bsp->surfaces.count - material->surface_count)
 	{

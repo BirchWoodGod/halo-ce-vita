@@ -114,6 +114,23 @@ static void block_warm(struct xbox_adpcm_encoder *encoder)
 	encoder->block_frames = 0;
 }
 
+/* (a sink's) the staged blocks given to it */
+static void staging_flush(struct xbox_adpcm_encoder *encoder)
+{
+	if (!encoder->sink || !encoder->staged_blocks || encoder->stopped)
+	{
+		encoder->staged_blocks = 0;
+		return;
+	}
+	if (!encoder->sink(encoder->sink_context, encoder->output, encoder->staged_blocks * encoder->block_bytes,
+		(encoder->blocks_written - encoder->staged_blocks) * encoder->block_bytes))
+	{
+		encoder->stopped = 1;
+		encoder->full = 1;
+	}
+	encoder->staged_blocks = 0;
+}
+
 static void block_encode(struct xbox_adpcm_encoder *encoder)
 {
 	int channels = encoder->channels;
@@ -127,7 +144,8 @@ static void block_encode(struct xbox_adpcm_encoder *encoder)
 		for (channel = 0; channel < channels; channel++)
 			encoder->block[frame][channel] = frame ? encoder->block[frame - 1][channel] : 0;
 
-	data = encoder->output + encoder->blocks_written * encoder->block_bytes;
+	data = encoder->output +
+		(encoder->sink ? encoder->staged_blocks : encoder->blocks_written) * encoder->block_bytes;
 	memset(data, 0, encoder->block_bytes);
 	for (channel = 0; channel < channels; channel++)
 	{
@@ -154,6 +172,8 @@ static void block_encode(struct xbox_adpcm_encoder *encoder)
 	encoder->block_frames = 0;
 	if (encoder->blocks_written >= encoder->output_blocks)
 		encoder->full = 1;
+	if (encoder->sink && ++encoder->staged_blocks >= encoder->staging_blocks)
+		staging_flush(encoder);
 }
 
 /* ---------- public code */
@@ -202,16 +222,30 @@ void xbox_adpcm_encoder_warm(
 		block_warm(encoder);
 }
 
-int xbox_adpcm_encoder_continue(
+/* (xbox_adpcm_encoder_continue and _continue_sink) the next output: a
+plain one at `output`, or with a sink one of `output_bytes` staged in
+`output` (`staging_bytes`) */
+static int encoder_continue(
 	struct xbox_adpcm_encoder *encoder,
 	void *output,
-	uint32_t output_bytes)
+	uint32_t output_bytes,
+	uint32_t staging_bytes,
+	xbox_adpcm_sink_proc sink,
+	void *sink_context)
 {
 	encoder->blocks_written = 0;
 	encoder->truncated = 0;
 	encoder->sum_of_squares = 0.0;
 	encoder->peak = 0;
-	if (!output || encoder->channels < 1 || encoder->channels > XBOX_ADPCM_MAXIMUM_CHANNELS)
+	/* (a sink's fields are this output's alone: one left from the output
+	before would take this one's blocks, at the staging's place) */
+	encoder->sink = NULL;
+	encoder->sink_context = NULL;
+	encoder->staging_blocks = 0;
+	encoder->staged_blocks = 0;
+	encoder->stopped = 0;
+	if (!output || encoder->channels < 1 || encoder->channels > XBOX_ADPCM_MAXIMUM_CHANNELS ||
+		(sink && staging_bytes < encoder->block_bytes))
 	{
 		encoder->output = NULL;
 		encoder->output_blocks = 0;
@@ -221,11 +255,65 @@ int xbox_adpcm_encoder_continue(
 	}
 	encoder->output = (uint8_t *)output;
 	encoder->output_blocks = output_bytes / encoder->block_bytes;
+	if (sink)
+	{
+		encoder->sink = sink;
+		encoder->sink_context = sink_context;
+		encoder->staging_blocks = staging_bytes / encoder->block_bytes;
+	}
 	encoder->full = encoder->output_blocks == 0;
 	/* (the frames held are this output's first, unless they warm it) */
 	encoder->frames = encoder->warm_frames ? 0 : (uint32_t)encoder->block_frames;
 	if (!encoder->full && !encoder->warm_frames && encoder->block_frames == XBOX_ADPCM_BLOCK_SAMPLES)
 		block_encode(encoder);
+	return 1;
+}
+
+int xbox_adpcm_encoder_continue(
+	struct xbox_adpcm_encoder *encoder,
+	void *output,
+	uint32_t output_bytes)
+{
+	return encoder_continue(encoder, output, output_bytes, 0, NULL, NULL);
+}
+
+int xbox_adpcm_encoder_continue_sink(
+	struct xbox_adpcm_encoder *encoder,
+	void *staging,
+	uint32_t staging_bytes,
+	uint32_t output_bytes,
+	xbox_adpcm_sink_proc sink,
+	void *sink_context)
+{
+	if (!sink)
+		return encoder_continue(encoder, NULL, 0, 0, NULL, NULL);
+	return encoder_continue(encoder, staging, output_bytes, staging_bytes, sink, sink_context);
+}
+
+int xbox_adpcm_encoder_begin_sink(
+	struct xbox_adpcm_encoder *encoder,
+	void *staging,
+	uint32_t staging_bytes,
+	uint32_t output_bytes,
+	int channels,
+	xbox_adpcm_sink_proc sink,
+	void *sink_context)
+{
+	if (!sink || !xbox_adpcm_encoder_begin(encoder, staging, output_bytes, channels))
+	{
+		memset(encoder, 0, sizeof(*encoder));
+		encoder->full = 1;
+		return 0;
+	}
+	encoder->staging_blocks = staging_bytes / encoder->block_bytes;
+	if (!encoder->staging_blocks)
+	{
+		memset(encoder, 0, sizeof(*encoder));
+		encoder->full = 1;
+		return 0;
+	}
+	encoder->sink = sink;
+	encoder->sink_context = sink_context;
 	return 1;
 }
 
@@ -331,8 +419,20 @@ uint32_t xbox_adpcm_encoder_finish(
 	if (encoder->block_frames && !encoder->full)
 		block_encode(encoder);
 	/* the rest is silence: blocks of zeros (a first sample of 0 and
-	nibbles of 0 are 0 throughout) */
-	if (encoder->blocks_written < encoder->output_blocks)
+	nibbles of 0 are 0 throughout); a sink's staged a block at a time */
+	if (encoder->sink)
+	{
+		while (encoder->blocks_written < encoder->output_blocks && !encoder->stopped)
+		{
+			memset(encoder->output + encoder->staged_blocks * encoder->block_bytes, 0, encoder->block_bytes);
+			encoder->blocks_written++;
+			if (++encoder->staged_blocks >= encoder->staging_blocks)
+				staging_flush(encoder);
+		}
+		staging_flush(encoder);
+		encoder->full = 1;
+	}
+	else if (encoder->blocks_written < encoder->output_blocks)
 	{
 		memset(encoder->output + encoder->blocks_written * encoder->block_bytes, 0,
 			(size_t)(encoder->output_blocks - encoder->blocks_written) * encoder->block_bytes);

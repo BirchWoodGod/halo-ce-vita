@@ -61,6 +61,9 @@ void hud_draw_set_scope_centered(
 	boolean centered);
 boolean hud_static_element_shown_by_zoom(
 	struct static_hud_element_definition const *element);
+real hud_mcc_bitmap_scale(
+	long bitmap_group_index,
+	boolean on_canvas);
 #endif
 
 long get_return_eip(

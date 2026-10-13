@@ -3,8 +3,10 @@ CACHE_FILE_FORMATS.H
 
 Recognition, validation and loading of the Halo 1 map files that this build
 did not ship with: Halo Custom Edition caches (version 609), the OpenSauce
-extension of their header (".yelo" maps), and the Custom Edition resource
-maps bitmaps.map, sounds.map and loc.map. docs/custom_edition_caches.md
+extension of their header (".yelo" maps), the Custom Edition resource
+maps bitmaps.map, sounds.map and loc.map, and (port) Halo: CE Anniversary
+caches (MCC's version 13, docs/mcc_cea_maps.md), which are Custom Edition
+caches linked elsewhere, with their structure BSPs' vertices outside them. docs/custom_edition_caches.md
 defines what each milestone (recognize, load, run) means, which of them this
 module reaches, and the evidence behind every layout used here.
 
@@ -33,6 +35,8 @@ against the file or buffer it refers to before it is used.
 
 #define CACHE_FILE_VERSION_XBOX 5
 #define CACHE_FILE_VERSION_CUSTOM_EDITION 609
+/* (port) Halo: CE Anniversary, MCC's Halo 1 (Invader's CACHE_FILE_MCC_CEA) */
+#define CACHE_FILE_VERSION_MCC_CEA 13
 
 /* Halo PC and Custom Edition keep tag data at a fixed address, as the Xbox
 does at 0x803A6000: 0x40440000, above a 0x440000-byte game state at
@@ -46,6 +50,34 @@ top of that room. */
 #define CUSTOM_EDITION_CACHE_FILE_MAXIMUM_BYTES 0x18000000UL
 #define CUSTOM_EDITION_CACHE_FILE_MAXIMUM_BYTES_UPGRADED 0x24000000UL
 
+/* (port) A Halo: CE Anniversary cache links its tag data to 0x50000000, with
+64 MB of room above it, and its structure BSPs to the top of that room
+(Invader's map.hpp and build_workload.cpp; every one of Ruby's Rebalanced
+Halo: CE's ten maps). Its tag data and each structure BSP keep the layouts
+of a Custom Edition cache's, but for the BSP's header: where Custom Edition
+has (none of) the Xbox's vertex buffer arrays, the CEA header says where in
+the file the BSP's vertices are, which Custom Edition keeps in the BSP.
+This build gives such a map a tag cache of its tag data and, after it, room
+for its largest structure BSP, which every structure BSP is loaded into
+(MCC_CEA_STRUCTURE_BSP_ALIGNMENT apart from the tag data), and reads the
+vertices from the file as the BSP loads. The file is at most
+MCC_CEA_CACHE_FILE_MAXIMUM_BYTES long (the combined offset space's room for
+a map, custom_edition_cache.c), and the tag cache at most
+MCC_CEA_TAG_CACHE_MAXIMUM_BYTES: OpenSauce's memory upgrades' 34.5 MB, what
+this build gives the largest Custom Edition map. */
+#define MCC_CEA_TAG_CACHE_ADDRESS 0x50000000UL
+#define MCC_CEA_TAG_SPACE_BYTES 0x04000000UL
+#define MCC_CEA_TAG_CACHE_MAXIMUM_BYTES CUSTOM_EDITION_TAG_CACHE_BYTES_UPGRADED
+#define MCC_CEA_CACHE_FILE_MAXIMUM_BYTES 0x40000000UL
+#define MCC_CEA_STRUCTURE_BSP_ALIGNMENT 0x10000UL
+/* the CEA header's flags (Invader's CacheFileHeaderCEAFlags): it may take
+bitmaps and sounds from MCC's bitmaps.map and sounds.map (this build loads
+only the tags it holds itself: a tag marked as held elsewhere refuses it),
+and it is classic only */
+#define MCC_CEA_HEADER_FLAGS_DEFINED 0x7
+/* the scenario's structure BSP references (MAXIMUM_STRUCTURE_BSPS_PER_SCENARIO) */
+#define CACHE_FILE_MAXIMUM_STRUCTURE_BSPS 32
+
 enum cache_file_format
 {
 	_cache_file_format_unrecognized,
@@ -56,6 +88,11 @@ enum cache_file_format
 	_cache_file_format_other_cache,
 	_cache_file_format_custom_edition_cache,
 	_cache_file_format_resource_map,
+	/* (port) version 13, Halo: CE Anniversary (MCC): loaded as a Custom
+	Edition cache only where the caller says it may be (a mod's campaign,
+	offline: custom_edition_cache.c); every check of the Custom Edition
+	format leaves it out */
+	_cache_file_format_mcc_cea_cache,
 
 	NUMBER_OF_CACHE_FILE_FORMATS
 };
@@ -160,6 +197,11 @@ enum cache_file_status
 	_cache_file_status_bad_resource_data_range,
 	_cache_file_status_tag_cache_overflow,
 
+	/* (port) Halo: CE Anniversary caches */
+	_cache_file_status_bad_mcc_cea_header,
+	_cache_file_status_bad_object_names,
+	_cache_file_status_script_parameters,
+
 	NUMBER_OF_CACHE_FILE_STATUSES
 };
 
@@ -227,10 +269,40 @@ struct cache_file_identity
 	char build[CACHE_FILE_STRING_BYTES];
 	int has_opensauce_header;
 	struct opensauce_cache_header opensauce;
+	/* (port) the room above CUSTOM_EDITION_TAG_CACHE_ADDRESS a Custom
+	Edition cache without OpenSauce's memory upgrades puts its structure
+	BSPs at the top of, when that is more than Custom Edition's 23 MB and no
+	more than the upgrades' 1.5 times it: a map built with a larger tag
+	space (Invader's --tag-space), as port/tools/mcc_map_convert.py builds
+	Halo: CE Anniversary maps; 0 otherwise (cache_file_identify) */
+	uint32_t structure_bsp_tag_cache_bytes;
+
+	/* (port) a Halo: CE Anniversary cache's header flags
+	(MCC_CEA_HEADER_FLAGS_DEFINED), and the tag cache it is given: its tag
+	data and, MCC_CEA_STRUCTURE_BSP_ALIGNMENT apart, its largest structure
+	BSP (structure_bsp_tag_cache_bytes then holds the whole) */
+	uint16_t mcc_cea_flags;
+	uint32_t mcc_cea_structure_bsp_offset;
 
 	/* resource maps */
 	enum resource_map_type resource_map_type;
 	int32_t resource_item_count;
+};
+
+/* (port) A structure BSP of a Halo: CE Anniversary cache as the map links
+it: where it is in the file, its size, the address its pointers are linked
+to, and where in the file its vertices are (its header's two CEA fields).
+The load moves its reference to the tag cache's room for structure BSPs
+(the report's mcc_cea_structure_bsp_address): the game reads it there, and
+custom_edition_cache.c moves its pointers from linked_address there and
+reads its vertices from the file. */
+struct mcc_cea_structure_bsp
+{
+	uint32_t file_offset;
+	uint32_t size;
+	uint32_t linked_address;
+	uint32_t vertices_offset;
+	uint32_t vertices_size;
 };
 
 struct resource_map_item
@@ -248,6 +320,10 @@ struct resource_map
 	int32_t item_count;
 	struct resource_map_item *items;
 	char *names;
+	/* (port) the items in the order of their data's offsets, made when a
+	Halo: CE Anniversary map's pixels or samples are first looked for in
+	them (by offset: resource_map_item_at); freed with the rest */
+	struct resource_map_item *items_by_offset;
 };
 
 struct custom_edition_load_report
@@ -278,6 +354,10 @@ struct custom_edition_load_report
 	int32_t structure_bsp_materials_checked;
 	int32_t bitmap_data_ranges_checked;
 	int32_t sound_sample_ranges_checked;
+	/* (port) a Halo: CE Anniversary map's sound permutations whose samples
+	are in a sounds.map the map was not given (MCC's own, which are FMOD
+	banks), made silent */
+	int32_t mcc_cea_sound_permutations_silent;
 	int32_t relocated_pointer_count;
 	uint32_t computed_checksum;
 	uint32_t trailing_bytes;
@@ -288,6 +368,32 @@ struct custom_edition_load_report
 	int32_t checksum_deferred;
 	uint32_t checksum_before_model_data;
 	uint32_t tag_data_crc;
+	/* (port) a Halo: CE Anniversary cache's structure BSPs
+	(structure_bsp_count of them), and where they are all loaded (the
+	header checksum is not taken: MCC's covers other bytes) */
+	uint32_t mcc_cea_structure_bsp_address;
+	struct mcc_cea_structure_bsp mcc_cea_structure_bsps[CACHE_FILE_MAXIMUM_STRUCTURE_BSPS];
+};
+
+/* (port) what mcc_cea_cache_fix changed */
+struct mcc_cea_fix_report
+{
+	/* the scenario's script syntax nodes, MCC's array of 32767 with holes,
+	packed into this build's array of 19001: how many there are */
+	int32_t script_nodes_packed;
+	/* object names past this build's 512 that the scripts, AI
+	conversations or command lists name, moved into the places of names
+	nothing names; and the names left past 512, which name nothing now */
+	int32_t object_names_moved;
+	int32_t object_names_dropped;
+	/* DXT bitmaps not marked compressed, marked so, their mipmaps cut to
+	those their pixels hold whole */
+	int32_t bitmaps_marked_compressed;
+	/* bitmaps whose flags MCC's tools set and Custom Edition's never do
+	(CEA's environment flag) were cleared */
+	int32_t bitmaps_flags_cleared;
+	/* the tag of the problem, when there was one, else NONE (-1) */
+	int32_t problem_tag_index;
 };
 
 /* (port) The game's loader (custom_edition_cache.c) reads the map named
@@ -396,6 +502,12 @@ struct custom_edition_conversion_report
 	int32_t shaders_mistyped;
 	/* bitmaps given their own tag and the state of a bitmap not yet drawn */
 	int32_t bitmaps_prepared;
+	/* (port) uncompressed 2D bitmaps of other dimensions than powers of two,
+	without mipmaps, not marked linear (sprites of Halo: CE Anniversary
+	maps rebuilt by Invader, which marks only interface bitmaps' so), made
+	linear: the layout of every unswizzled bitmap, which this build draws
+	only so at those dimensions */
+	int32_t bitmaps_made_linear;
 	/* 1 when the scenario's script syntax nodes, upgraded by OpenSauce, were
 	made this build's number */
 	int32_t script_nodes_reduced;
@@ -412,6 +524,14 @@ struct custom_edition_conversion_report
 	/* Ogg Vorbis sounds made Xbox ADPCM ones, which the sound cache decodes
 	as it loads them (custom_edition_sounds.c) */
 	int32_t sounds_ogg_vorbis;
+	/* (port) their permutations, the streams' bytes and the Xbox ADPCM
+	bytes the sound cache gives them (0 for one the loader could not size,
+	which the sound cache measures as it loads it): what the decoding costs
+	and what a sound cache file holds (custom_edition_sounds.c) */
+	int32_t sound_permutations_ogg_vorbis;
+	int32_t sound_permutations_ogg_vorbis_unsized;
+	uint32_t sound_ogg_vorbis_bytes;
+	uint32_t sound_ogg_vorbis_adpcm_bytes;
 	/* 16-bit PCM permutations of Xbox ADPCM sounds, which the sound cache
 	encodes to Xbox ADPCM as it loads them (custom_edition_sounds.c) */
 	int32_t sound_permutations_pcm;
@@ -431,6 +551,14 @@ struct custom_edition_conversion_report
 	overlay items, which Halo PC does not halve by their own flag, and
 	numbers, whose digits hud_draw_numbers halves */
 	int32_t hud_placements_kept;
+	/* (port) 1 when the HUD is Halo: CE Anniversary's, laid out by MCC on
+	a canvas twice the Xbox's 640x480 (its hud_globals remaps HUD bitmaps
+	to MCC's remastered ones: custom_edition_cache_convert), and the
+	placements, waypoint and damage indicator margins and digit metrics
+	brought to the Xbox's canvas; hud_draw.c draws what no placement scales
+	by it (custom_edition_cache_hud_mcc_canvas) */
+	int32_t hud_mcc_canvas;
+	int32_t hud_mcc_placements;
 	/* 1 when the multiplayer hint that a key shows the score was made to
 	name the Xbox button */
 	int32_t score_hint_converted;
@@ -471,7 +599,9 @@ enum cache_file_format cache_file_header_format(
 
 /* The room for tag data a Custom Edition cache needs at
 CUSTOM_EDITION_TAG_CACHE_ADDRESS: 23 MB, or 1.5 times that with memory
-upgrades. */
+upgrades, or what its structure BSPs say it was built for, up to that
+(structure_bsp_tag_cache_bytes); for a Halo: CE Anniversary cache, its tag
+data and its largest structure BSP. */
 uint32_t custom_edition_tag_cache_bytes(
 	struct cache_file_identity const *identity);
 
@@ -495,7 +625,11 @@ void resource_map_close(
 
 /* Loads a Custom Edition cache into `tag_cache`, which stands for the
 `tag_cache_bytes` bytes at CUSTOM_EDITION_TAG_CACHE_ADDRESS and must be at
-least custom_edition_tag_cache_bytes() long. The map's tag data is copied to
+least custom_edition_tag_cache_bytes() long. With `mcc_cea_allowed`, a Halo:
+CE Anniversary cache is loaded too, at MCC_CEA_TAG_CACHE_ADDRESS (its
+linked address, custom_edition_cache_linked_address), with its structure
+BSP references moved to the room after its tag data (struct
+mcc_cea_structure_bsp); without, it is refused as an unknown version. The map's tag data is copied to
 the start, the tags kept in resource maps are placed after it with their
 addresses resolved, and every structure BSP, bitmap and sound sample range is
 checked. `resource_maps` is indexed by resource_map_type; entries may be NULL
@@ -507,7 +641,27 @@ enum cache_file_status custom_edition_cache_load(
 	struct resource_map *const resource_maps[NUMBER_OF_RESOURCE_MAP_TYPES],
 	uint8_t *tag_cache,
 	uint32_t tag_cache_bytes,
+	int mcc_cea_allowed,
 	struct custom_edition_load_report *report);
+
+/* (port) Makes the tags of a Halo: CE Anniversary cache that
+custom_edition_cache_load filled (`loaded_bytes` of `tag_cache` in use)
+what this build takes where MCC has more room or other values, as
+port/tools/mcc_map_convert.py makes them for Invader: the scenario's script
+syntax nodes packed into this build's array (more than it holds refuse the
+map), the object names past this build's 512 that are named by the scripts,
+AI conversations or command lists moved into the places of names nothing
+names (more than 512 such names refuse the map), the rest past 512 dropped
+(what names them names nothing), bitmaps' flags that only MCC sets cleared,
+and DXT bitmaps not marked compressed marked so, their mipmaps cut to those
+their pixels hold whole. Indices out
+of range, enumerators past their values, a sixth weapon type and MCC's own
+script functions are made harmless as any map's are (tag_validate.c,
+custom_edition_scripts.c). Returns the first problem. */
+enum cache_file_status mcc_cea_cache_fix(
+	uint8_t *tag_cache,
+	uint32_t loaded_bytes,
+	struct mcc_cea_fix_report *report);
 
 /* Says that the pointers of the tag cache custom_edition_cache_load filled
 now point to `address`, where the tag cache is, rather than to
@@ -517,7 +671,9 @@ then translate them from there. The next custom_edition_cache_load starts
 from CUSTOM_EDITION_TAG_CACHE_ADDRESS again. */
 void custom_edition_cache_tags_moved(
 	uint32_t address);
-/* CUSTOM_EDITION_TAG_CACHE_ADDRESS, for the units that move the pointers */
+/* the address the tags of the last cache loaded are linked to:
+CUSTOM_EDITION_TAG_CACHE_ADDRESS, or a Halo: CE Anniversary cache's
+MCC_CEA_TAG_CACHE_ADDRESS, for the units that move the pointers */
 uint32_t custom_edition_cache_linked_address(
 	void);
 

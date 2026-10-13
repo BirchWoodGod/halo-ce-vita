@@ -34,6 +34,16 @@
 #                              streams' last pages (the 300th and 600th
 #                              sound, 22 kHz mono), and the 1052nd, a 16-bit
 #                              PCM one (22 kHz mono)
+# Then the sound cache file (custom_edition_sounds.c: d:\sound_cache\
+# extinction.sndcache, made by the first run, the background's filling off):
+# extinction again with the same sounds, which must all be read from it
+# ("ogg sound (sound cache)"), none decoded, and played by the mixer whole
+# at the RMS the first run's decoded ADPCM played at (within 1%); then with
+# the file damaged (bytes of each entry's ADPCM and of an entry changed),
+# cut short, and of another map (its header's map size changed): each
+# damaged entry must be refused and the permutation decoded again and
+# played as before, a cut file's entries past its end and the other map's
+# file refused whole (made anew), never a crash or an assertion.
 #
 #   run_ce_ogg_sound_test.sh
 #   HALO_TEST_VITA          the harness (default build/linux/halo of this tree)
@@ -79,13 +89,12 @@ for name in bitmaps sounds loc; do
 	fi
 done
 
-run() { # MAP SOUND_COMMANDS EXPECTED_SOUNDS
-	local map=$1 sounds=$2 expected=$3 log commands
-	if [ ! -e "$ce_maps/$map.map" ]; then
-		echo "SKIP ($map): not in $ce_maps (HALO_TEST_CE_MAPS)"
-		return
-	fi
-	rm -rf "$out/$map"
+# play MAP SOUND_COMMANDS [LOG]: the harness on MAP (its folder made once:
+# a later run keeps its data, the sound cache file with it), the sound
+# commands, the main menu
+play() {
+	local map=$1 sounds=$2 commands
+	log="$out/$map/${3:-run}.log"
 	mkdir -p "$out/$map/data/maps" "$out/$map/save" "$out/$map/bin"
 	for file in "$(cd "$data" && pwd)"/maps/*.map; do
 		ln -sfn "$file" "$out/$map/data/maps/"
@@ -96,17 +105,74 @@ run() { # MAP SOUND_COMMANDS EXPECTED_SOUNDS
 	done
 	cp "$binary" "$out/$map/bin/halo"
 	commands="M240:map_name levels\\test\\$map\\$map;${sounds}L420:@menu;"
-	log="$out/$map/run.log"
 	(cd "$out/$map" && exec env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=offscreen HALO_DATA_ROOT="$out/$map/data" \
 		HALO_SAVE_ROOT="$out/$map/save" HALO_NO_VSYNC=1 HALO_FRAME_CAP=30 HALO_EXIT_AFTER=45 HALO_FULLSCREEN=0 \
 		HALO_HIDDEN_WINDOW=1 HALO_TICK_THREAD=1 HALO_UPDATE_AUTO=false HALO_NET_ONLINE=false \
 		HALO_CUSTOM_EDITION=1 HALO_WINDOW_FLOOR_KB=22528 HALO_OGG_TRACE=1 HALO_AUDIO_PACKET_TRACE=1 \
-		"HALO_TEST_COMMANDS=$commands" timeout -k 5 165 "$out/$map/bin/halo" > "$log" 2>&1)
-	local code=$?
+		HALO_SOUND_CACHE_PREFILL=0 "HALO_TEST_COMMANDS=$commands" timeout -k 5 165 "$out/$map/bin/halo" > "$log" 2>&1)
+	code=$?
 	rm -rf "$out/$map/bin"
 	[ "$code" = 0 ] || fail "$map" "the harness exited with $code ($log)"
 	grep -aE "ASSERT|assertion|EXCEPTION|halt_and_catch_fire" "$log" | head -3 | sed 's/^/  /'
 	grep -aqE "ASSERT|assertion|EXCEPTION|halt_and_catch_fire" "$log" && fail "$map" "an assertion or exception ($log)"
+}
+
+# played LOG KIND: each permutation decoded ("ogg sound: ...", KIND decoded)
+# or read from the sound cache file ("ogg sound (sound cache): ...", KIND
+# cached), and the mixer's packets from its ADPCM: "name bytes played rms"
+played() {
+	awk -v kind="$2" '
+		function hex(text,   value, index_, digit) {
+			value = 0
+			sub(/^0x/, "", text)
+			for (index_ = 1; index_ <= length(text); index_++) {
+				digit = index("0123456789abcdef", tolower(substr(text, index_, 1))) - 1
+				value = value * 16 + digit
+			}
+			return value
+		}
+		function finish() {
+			if (current == "") return
+			printf "%s|%d|%d|%d\n", current, bytes, played, played_frames ? sqrt(played_squares / played_frames) : 0
+			current = ""
+		}
+		(kind == "decoded" && /ogg sound: .* of .*: / && / frames /) ||
+		(kind == "cached" && /ogg sound \(sound cache\): .* of .*: /) {
+			finish()
+			line = $0
+			sub(/.*ogg sound( \(sound cache\))?: /, "", line)
+			current = line; sub(/: [^:]*$/, "", current); sub(/: decoded.*/, "", current)
+			if (kind == "decoded") { bytes = line; sub(/.*adpcm /, "", bytes); sub(/ bytes.*/, "", bytes) }
+			else { bytes = line; sub(/.*: /, "", bytes); sub(/ bytes.*/, "", bytes) }
+			bytes += 0
+			start = line; sub(/.* at /, "", start); start = hex(start)
+			played = 0; played_squares = 0; played_frames = 0
+			next
+		}
+		/test command at tick/ { finish() }
+		/mixer: played / && current != "" {
+			line = $0
+			address = line; sub(/.* packet at /, "", address); sub(/ .*/, "", address); address = hex(address)
+			if (address >= start && address < start + bytes) {
+				size = line; sub(/.*\(/, "", size); sub(/ bytes.*/, "", size)
+				packet_frames = line; sub(/.*mixer: played /, "", packet_frames); sub(/ frames.*/, "", packet_frames)
+				packet_rms = line; sub(/.*rms /, "", packet_rms)
+				played += size
+				played_squares += packet_rms * packet_rms * packet_frames
+				played_frames += packet_frames
+			}
+		}
+		END { finish() }' "$1"
+}
+
+run() { # MAP SOUND_COMMANDS EXPECTED_SOUNDS
+	local map=$1 sounds=$2 expected=$3 log code
+	if [ ! -e "$ce_maps/$map.map" ]; then
+		echo "SKIP ($map): not in $ce_maps (HALO_TEST_CE_MAPS)"
+		return
+	fi
+	rm -rf "$out/$map"
+	play "$map" "$sounds"
 	grep -aE "does not decode|has no length|not in the map" "$log" "$out/$map/data/debug.txt" 2>/dev/null | head -3 |
 		sed 's/^/  /'
 	grep -aqE "does not decode|has no length|not in the map" "$log" "$out/$map/data/debug.txt" 2>/dev/null &&
@@ -182,8 +248,101 @@ run() { # MAP SOUND_COMMANDS EXPECTED_SOUNDS
 	grep -a "Ogg Vorbis permutations decoded with the map" "$log" | sed 's/^halo-linux: /  /'
 }
 
+# cached MAP SOUND_COMMANDS LABEL EXPECT_READ EXPECT_DECODED: MAP again
+# with its sound cache file as it is now: EXPECT_READ of the first run's Ogg
+# Vorbis permutations read from the file and EXPECT_DECODED decoded, each
+# played whole at the first run's RMS within 1%
+cached() {
+	local map=$1 sounds=$2 label=$3 expect_read=$4 expect_decoded=$5 code
+	play "$map" "$sounds" "$label"
+	played "$out/$map/run.log" decoded > "$out/$map/first.txt"
+	{ played "$log" cached | sed 's/^/cached|/'; played "$log" decoded | sed 's/^/decoded|/'; } > "$out/$map/$label.txt"
+	awk -F'|' -v map="$map" -v label="$label" -v expect_read="$expect_read" -v expect_decoded="$expect_decoded" '
+		FILENAME ~ /first.txt$/ { rms[$1] = $4; next }
+		{
+			count[$1]++
+			if (!($2 in rms)) next
+			printf "  %s %s: %s %s, %d bytes, the mixer played %d, rms %d (first run %d)\n", map, label, $1, $2, $3, $4, $5, rms[$2]
+			if ($4 != $3 || $5 < rms[$2] * 0.99 || $5 > rms[$2] * 1.01) {
+				printf "FAIL (%s %s): %s not played as the first run played it\n", map, label, $2; bad = 1
+			}
+		}
+		END {
+			if (count["cached"] + 0 != expect_read || count["decoded"] + 0 != expect_decoded) {
+				printf "FAIL (%s %s): %d read from the sound cache file and %d decoded, not %d and %d\n", map, label,
+					count["cached"], count["decoded"], expect_read, expect_decoded
+				bad = 1
+			}
+			exit bad
+		}' "$out/$map/first.txt" "$out/$map/$label.txt" || status=1
+	grep -a "sound cache: \(made\|opened\)\|entries\? .*refused" "$log" | head -4 | sed 's/^halo-linux: /  /'
+}
+
 mkdir -p "$out"
-run extinction 'L60:@sound sound\dialog\multiplayer1\slayer;L150:@sound sound\sfx\weapons\gunfire_sounds\fire2;L250:@sound vehicles\scarab\bolt\bolt_impact;L330:@sound vehicles\newghost\sounds\fire;L380:@sound vehicles\spectre\open;' 5
+extinction_sounds='L60:@sound sound\dialog\multiplayer1\slayer;L150:@sound sound\sfx\weapons\gunfire_sounds\fire2;L250:@sound vehicles\scarab\bolt\bolt_impact;L330:@sound vehicles\newghost\sounds\fire;L380:@sound vehicles\spectre\open;'
+run extinction "$extinction_sounds" 5
+if [ -e "$out/extinction/run.log" ]; then
+	cache="$out/extinction/data/sound_cache/extinction.sndcache"
+	if [ ! -s "$cache" ]; then
+		fail extinction "no sound cache file ($cache)"
+	else
+		# (the first run decoded two Ogg Vorbis permutations: slayer and fire2)
+		cached extinction "$extinction_sounds" again 2 0
+		# every entry's ADPCM damaged (its middle byte), and the first entry
+		# itself: each refused and decoded again
+		python3 - "$cache" <<'PYTHON'
+import struct, sys
+path = sys.argv[1]
+data = bytearray(open(path, "rb").read())
+count = struct.unpack_from("<I", data, 20)[0]
+for index in range(count):
+    entry = 128 + 32 * index
+    data_offset, = struct.unpack_from("<I", data, entry + 16)
+    adpcm_bytes, = struct.unpack_from("<I", data, entry + 8)
+    if data_offset and data_offset + adpcm_bytes <= len(data):
+        data[data_offset + adpcm_bytes // 2] ^= 0x55
+open(path, "wb").write(bytes(data))
+PYTHON
+		cached extinction "$extinction_sounds" damaged 0 2
+		grep -aq "refused: its ADPCM damaged" "$log" || fail extinction "damaged ADPCM not refused ($log)"
+		cached extinction "$extinction_sounds" mended 2 0
+		# cut short in the middle of the last ADPCM: that entry refused as
+		# the file opens, the other read
+		size=$(stat -c %s "$cache")
+		truncate -s $((size - 1000)) "$cache"
+		cached extinction "$extinction_sounds" cut 1 1
+		# an entry changed: refused as the file opens
+		python3 - "$cache" <<'PYTHON'
+import struct, sys
+path = sys.argv[1]
+data = bytearray(open(path, "rb").read())
+count = struct.unpack_from("<I", data, 20)[0]
+for index in range(count):
+    entry = 128 + 32 * index
+    if any(data[entry:entry + 32]):
+        data[entry + 20] ^= 1
+open(path, "wb").write(bytes(data))
+PYTHON
+		cached extinction "$extinction_sounds" entries 0 2
+		# another map's file (its header's map size, its CRC-32 made good):
+		# made anew
+		python3 - "$cache" <<'PYTHON'
+import struct, sys, zlib
+path = sys.argv[1]
+data = bytearray(open(path, "rb").read())
+struct.pack_into("<I", data, 24, struct.unpack_from("<I", data, 24)[0] + 1)
+# (the game's CRC-32 from 0, no inversions: zlib's with them undone)
+struct.pack_into("<I", data, 124, ~zlib.crc32(bytes(data[:124]), 0xFFFFFFFF) & 0xFFFFFFFF)
+open(path, "wb").write(bytes(data))
+PYTHON
+		cached extinction "$extinction_sounds" other 0 2
+		grep -aq "sound cache: made .*the old one: another map's" "$log" ||
+			fail extinction "another map's sound cache file not made anew ($log)"
+		# garbage: made anew
+		head -c 300000 /dev/urandom > "$cache"
+		cached extinction "$extinction_sounds" garbage 0 2
+	fi
+fi
 run Covenant_V_Marines_Beta_5 'L60:@sound <protected> 300;L150:@sound <protected> 600;L250:@sound <protected> 1052;' 3
 if [ "$status" = 0 ]; then
 	echo "PASS: Custom Edition Ogg Vorbis and 16-bit PCM sounds decoded and played ($out)"

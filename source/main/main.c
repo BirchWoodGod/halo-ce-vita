@@ -404,6 +404,8 @@ void platform_log(const char *format, ...);
 #ifdef HALO_LINUX
 #include "load_profile.h"
 #include "custom_edition_cache.h" /* port: custom_edition_level_name */
+#include "custom_edition_maps.h" /* port: custom_edition_maps_campaign_next_level */
+#include "custom_edition_mods.h" /* port: custom_edition_mods_level_name */
 #endif
 #include "render/render.h"
 #include "text/draw_string.h"
@@ -1351,8 +1353,9 @@ short main_get_solo_level_from_name(
 #ifdef HALO_LINUX
 	/* port: a Custom Edition campaign map (custom_maps\firefight-airlock)
 	is never one of the campaign's levels, whatever its name holds: not its
-	saved game, its progress or its next level (custom_edition_cache.h) */
-	if (custom_edition_level_name(name))
+	saved game, its progress or its next level (custom_edition_cache.h);
+	nor is a mod's map (mods\ruby_a10, custom_edition_mods.h) */
+	if (custom_edition_level_name(name) || custom_edition_mods_level_name(name))
 		return NONE;
 #endif
 	csstrncpy(lower_name, name, NUMBEROF(lower_name) - 1);
@@ -2519,6 +2522,17 @@ static void main_won_map_private(
 	(OpenCE's main.c, ce41b41d, rolls the credits instead) */
 	if (level == NONE)
 	{
+		/* port: a mod's campaign rebuilt as Custom Edition maps (ruby_a10,
+		ruby_a30 ...: custom_edition_maps_campaign_next_level) goes on to
+		its next map */
+		char const *next_level_name = custom_edition_maps_campaign_next_level(main_globals.soloplayer_map_name);
+
+		if (next_level_name)
+		{
+			error(_error_silent, "won '%s': on to '%s'", main_globals.soloplayer_map_name, next_level_name);
+			main_set_map_name(next_level_name);
+			return;
+		}
 		error(_error_silent, "won '%s', not a campaign level: back to the main menu", main_globals.soloplayer_map_name);
 		return;
 	}

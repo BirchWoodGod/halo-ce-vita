@@ -1428,8 +1428,9 @@ long scenario_tags_load(
 			halo_loaded_tag_count = cache_file_globals.tag_header->tag_count;
 			cache_file_globals.tags_loaded = TRUE;
 			result = cache_file_globals.tag_header->scenario_tag_index;
-			/* (its sounds too long for a permutation made chains of them:
-			custom_edition_sounds.c) */
+			/* (port: its sounds too long for a permutation made chains of
+			them, and its Ogg Vorbis sounds' sound cache file opened on the
+			decoding thread: custom_edition_sounds.c) */
 			custom_edition_sounds_map_loaded();
 		}
 		else
@@ -1726,7 +1727,12 @@ boolean scenario_structure_bsp_load(
 		}
 	}
 	else
-		custom_edition_cache_structure_bsp_moved(reference->base_address, reference->file_size);
+		custom_edition_cache_structure_bsp_moved(reference->base_address, reference->file_size, reference->file_offset);
+#elif defined(HALO_LINUX)
+	/* (port: a Custom Edition map's tags may be linked elsewhere than they
+	are in every build: a Halo: CE Anniversary map's always are) */
+	if (custom_edition_cache_tags_loaded())
+		custom_edition_cache_structure_bsp_moved(reference->base_address, reference->file_size, reference->file_offset);
 #endif
 #ifdef HALO_LINUX
 	halo_load_profile_add(_halo_load_bsp_relocate, started, 0);

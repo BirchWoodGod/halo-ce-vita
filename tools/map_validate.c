@@ -34,6 +34,16 @@ from OpenCE, MrBruh's "Validate map tags before loading" and "Check Custom
 Edition maps in map_validate": this tree's game loads OpenSauce maps, and
 this checks them as it does, in a tag cache of their size.)
 
+(port) A Halo: CE Anniversary map (MCC's version 13, docs/mcc_cea_maps.md)
+is checked as the game checks one from a mod's folder: loaded with no
+resource maps, its tags made this build's (mcc_cea_cache_fix), converted,
+moved from 0x50000000 (port/linux/src/tag_relocate.c) into a tag cache of
+its own with an unmapped page at each end, and checked; each structure bsp
+read into the room after the tags, matched with what the load checked, its
+pointers moved from where the map links it, and checked
+(custom_edition_cache_structure_bsp_moved). Its materials' vertices, in the
+file, are read as the bsp loads (custom_edition_geometry.c): not here.
+
 usage: map_validate [--strict] [--quiet] [--maps folder] [--fuzz iterations [--seed n] [--log file]] map.map...
 */
 
@@ -48,6 +58,7 @@ usage: map_validate [--strict] [--quiet] [--maps folder] [--fuzz iterations [--s
 
 #include "zlib_prefixed.h"
 #include "../port/linux/game/cache_file_formats.h"
+#include "../port/linux/include/tag_relocate.h"
 
 /* ---------- constants */
 
@@ -141,6 +152,7 @@ struct tag_validate_file_range
 };
 unsigned char tag_validate_custom_edition_tags(void *tag_header, long loaded_size, unsigned long tag_cache_size,
 	struct tag_validate_file_range const *file_ranges, short file_range_count, char const *map_name);
+void tag_validate_structure_vertices_in_file(unsigned char in_file);
 
 static int quiet;
 /* (fuzzing: each bsp is checked twice, and whether a second check of one
@@ -153,6 +165,30 @@ void tag_validate_report(char const *message)
 {
 	if (!quiet)
 		printf("%s\n", message);
+}
+
+/* (the platform layer's, which tag_relocate.c calls: its log, and
+xbox_memory.c's blocks of memory, zeroed) */
+void platform_log(const char *format, ...)
+{
+	va_list arguments;
+
+	if (quiet)
+		return;
+	va_start(arguments, format);
+	vprintf(format, arguments);
+	va_end(arguments);
+	printf("\n");
+}
+
+void *halo_custom_edition_memory_alloc(unsigned long bytes)
+{
+	return calloc(1, bytes ? bytes : 1);
+}
+
+void halo_custom_edition_memory_free(void *address)
+{
+	free(address);
 }
 
 /* (the game's printf family, which the validator calls by these names:
@@ -734,6 +770,85 @@ static void custom_edition_resources_close(struct custom_edition_resources *reso
 	}
 }
 
+/* (port) a Halo: CE Anniversary map's structure bsps and their vertices in
+its file, as its first check found them: where some of fuzzing's changes go */
+static struct mcc_cea_structure_bsp fuzz_structure_bsps[CACHE_FILE_MAXIMUM_STRUCTURE_BSPS];
+static long fuzz_structure_bsp_count;
+
+/* (port) a Halo: CE Anniversary map's structure bsp, as the game loads one
+(scenario_structure_bsp_load, custom_edition_cache_structure_bsp_moved): its
+reference one the load checked, read into the room after the tags, its CEA
+header fields taken off, its pointers moved from where the map links it to
+there and then to where it is, and checked: 0 if it plays, 1 if refused */
+static int mcc_cea_structure_bsp_check(struct memory_file *map, struct custom_edition_load_report const *report,
+	unsigned char *tag_cache, struct scenario_structure_bsp_reference *reference, char const *name, long index)
+{
+	struct mcc_cea_structure_bsp const *found = NULL;
+	unsigned char *slot = tag_cache + (report->mcc_cea_structure_bsp_address - MCC_CEA_TAG_CACHE_ADDRESS);
+	unsigned char *bsp = reference->base_address;
+	unsigned long loaded_bytes = report->tag_data_bytes + report->resource_tag_bytes;
+	unsigned long structure;
+	unsigned long vertices_size;
+	long bsp_index;
+
+	for (bsp_index = 0; bsp_index < report->structure_bsp_count; bsp_index++)
+	{
+		if (report->mcc_cea_structure_bsps[bsp_index].file_offset == (uint32_t)reference->file_offset &&
+			report->mcc_cea_structure_bsps[bsp_index].size == (uint32_t)reference->file_size)
+		{
+			found = &report->mcc_cea_structure_bsps[bsp_index];
+			break;
+		}
+	}
+	/* (the game reads file_size bytes to base_address before it matches
+	them: both must be what the load checked, whatever the tags' check
+	corrected, or the read goes where nothing checked it) */
+	if (!found || bsp != slot)
+	{
+		printf("%s: fuzz seed %lu: structure bsp %ld would be read where its load did not check it\n", name,
+			fuzz_seed, index);
+		recheck_failed = 1;
+		return 1;
+	}
+	memset(tag_cache + loaded_bytes, 0xCD, report->tag_cache_bytes - loaded_bytes);
+	memcpy(bsp, map->bytes + found->file_offset, found->size);
+	memcpy(&vertices_size, bsp + 4, 4);
+	if (found->vertices_size && vertices_size != found->vertices_size)
+	{
+		if (!quiet)
+			printf("%s: its structure bsp %ld is not one its load checked\n", name, index);
+		return 1;
+	}
+	memset(bsp + 4, 0, 16);
+	halo_tag_relocate_linked_structure_bsp_rebase(bsp, found->size, found->linked_address,
+		report->mcc_cea_structure_bsp_address);
+	halo_tag_relocate_linked_structure_bsp(tag_cache, bsp, found->size);
+	/* (cache_files.c: the header's pointer within what was read) */
+	memcpy(&structure, bsp, 4);
+	if (structure < (unsigned long)bsp || structure - (unsigned long)bsp >= found->size)
+	{
+		if (!quiet)
+			printf("%s: its structure bsp %ld has a wrong header\n", name, index);
+		return 1;
+	}
+	if (!tag_validate_structure_bsp(reference->tag_index, bsp, (long)found->size))
+		return 1;
+	if (recheck)
+	{
+		long before = tag_validate_corrections();
+
+		if (!tag_validate_structure_bsp(reference->tag_index, bsp, (long)found->size) ||
+			tag_validate_corrections() != before)
+		{
+			printf("%s: fuzz seed %lu: structure bsp %ld as corrected is not clean when checked again\n", name,
+				fuzz_seed, index);
+			recheck_failed = 1;
+		}
+	}
+
+	return 0;
+}
+
 /* a Custom Edition map (map, with its resources) loaded, converted and
 checked where the game does it, then each of its structure bsps: 0 if it
 plays (its corrections counted), 1 if it is refused. *loaded_bytes is how
@@ -751,12 +866,26 @@ static int custom_edition_check(struct memory_file *map, struct custom_edition_r
 	long bsp_count;
 	long index;
 	int refused = 0;
+	/* (port) a Halo: CE Anniversary map's, loaded as from a mod's folder */
+	struct mcc_cea_fix_report fix;
+	int mcc_cea;
 
 	*corrections = 0;
 	*loaded_bytes = 0;
 	memset(tag_cache, 0xCD, custom_edition_tag_cache_size);
-	status = custom_edition_cache_load(&map->source, resources->maps, tag_cache, custom_edition_tag_cache_size,
+	tag_validate_structure_vertices_in_file(0);
+	status = custom_edition_cache_load(&map->source, resources->maps, tag_cache, custom_edition_tag_cache_size, 1,
 		&report);
+	mcc_cea = report.identity.format == _cache_file_format_mcc_cea_cache;
+	if (status == _cache_file_status_ok && mcc_cea && !fuzz_structure_bsp_count)
+	{
+		fuzz_structure_bsp_count = report.structure_bsp_count;
+		memcpy(fuzz_structure_bsps, report.mcc_cea_structure_bsps, sizeof(fuzz_structure_bsps));
+	}
+	if (status == _cache_file_status_ok && mcc_cea)
+	{
+		status = mcc_cea_cache_fix(tag_cache, report.tag_data_bytes, &fix);
+	}
 	if (status != _cache_file_status_ok)
 	{
 		if (!quiet)
@@ -775,6 +904,20 @@ static int custom_edition_check(struct memory_file *map, struct custom_edition_r
 		if (!quiet)
 			printf("%s: its conversion refuses it: %s\n", name, cache_file_status_describe(status));
 		return 1;
+	}
+	/* (port) its tags moved from where they are linked, as the game moves
+	them (custom_edition_cache_tags_convert); its structure bsps' vertices
+	in its file */
+	if (mcc_cea)
+	{
+		if (!halo_tag_relocate_linked_tags(tag_cache, *loaded_bytes, custom_edition_cache_linked_address(),
+			report.tag_cache_bytes))
+		{
+			printf("%s: out of memory moving its tags\n", name);
+			return 1;
+		}
+		custom_edition_cache_tags_moved((uint32_t)(unsigned long)tag_cache);
+		tag_validate_structure_vertices_in_file(1);
 	}
 	ranges[range_count].offset = 0;
 	ranges[range_count++].size = report.identity.file_length;
@@ -818,6 +961,12 @@ static int custom_edition_check(struct memory_file *map, struct custom_edition_r
 		unsigned long address = (unsigned long)reference->base_address;
 		unsigned long top = CUSTOM_EDITION_TAG_CACHE_ADDRESS + report.tag_cache_bytes;
 
+		if (mcc_cea)
+		{
+			if (mcc_cea_structure_bsp_check(map, &report, tag_cache, reference, name, index))
+				refused = 1;
+			continue;
+		}
 		if (reference->file_offset < CACHE_FILE_HEADER_SIZE || reference->file_size < 0x18 ||
 			(unsigned long)reference->file_offset > report.identity.file_length ||
 			(unsigned long)reference->file_size > report.identity.file_length - (unsigned long)reference->file_offset ||
@@ -867,11 +1016,17 @@ static int custom_edition_validate(char const *path, unsigned char *tag_cache, l
 	unsigned long *claimed = NULL;
 	long claimed_count = 0;
 	long refusals = 0;
+	/* (port) a Halo: CE Anniversary map's tag cache, and where its tags are
+	linked */
+	unsigned char *mcc_cea_tag_cache = NULL;
+	unsigned long mcc_cea_tag_cache_bytes = 0;
+	unsigned long link_address = CUSTOM_EDITION_TAG_CACHE_ADDRESS;
 	long corrected = 0;
 	long iteration;
 	int failed = 0;
 
 	*corrections = 0;
+	fuzz_structure_bsp_count = 0;
 	if (!memory_file_open(&map, path))
 	{
 		printf("%s: cannot be read\n", name);
@@ -885,12 +1040,37 @@ static int custom_edition_validate(char const *path, unsigned char *tag_cache, l
 		return 1;
 	}
 	custom_edition_tag_cache_size = custom_edition_tag_cache_bytes(&identity);
+	/* (port) a Halo: CE Anniversary map's tags in a tag cache of their own,
+	elsewhere than they are linked (as the game always has them), with an
+	unmapped page before and after it: a read or write past either end
+	stops the check */
+	if (identity.format == _cache_file_format_mcc_cea_cache)
+	{
+		unsigned long page = (unsigned long)sysconf(_SC_PAGESIZE);
+
+		mcc_cea_tag_cache_bytes = (custom_edition_tag_cache_size + page - 1) & ~(page - 1);
+		mcc_cea_tag_cache = mmap(NULL, mcc_cea_tag_cache_bytes + 2 * page, PROT_NONE,
+			MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+		if (mcc_cea_tag_cache == MAP_FAILED ||
+			mprotect(mcc_cea_tag_cache + page, mcc_cea_tag_cache_bytes, PROT_READ | PROT_WRITE))
+		{
+			printf("%s: no room for its tag cache\n", name);
+			memory_file_close(&map);
+			return 1;
+		}
+		/* (its end against the page after it) */
+		tag_cache = mcc_cea_tag_cache + page + (mcc_cea_tag_cache_bytes - custom_edition_tag_cache_size);
+		mcc_cea_tag_cache_bytes += 2 * page;
+		link_address = MCC_CEA_TAG_CACHE_ADDRESS;
+	}
 	custom_edition_resources_open(&resources, path);
 	if (!iterations)
 	{
 		failed = custom_edition_check(&map, &resources, tag_cache, name, corrections, &loaded_bytes);
 		custom_edition_resources_close(&resources);
 		memory_file_close(&map);
+		if (mcc_cea_tag_cache)
+			munmap(mcc_cea_tag_cache, mcc_cea_tag_cache_bytes);
 		return failed;
 	}
 
@@ -938,6 +1118,18 @@ static int custom_edition_validate(char const *path, unsigned char *tag_cache, l
 				fuzz_random() % map.size;
 			unsigned long value;
 
+			/* (port: a Halo: CE Anniversary map's, half of those anywhere in
+			the file in its structure bsps and their vertices instead) */
+			if (choice == 7 && fuzz_structure_bsp_count && fuzz_random() % 2)
+			{
+				struct mcc_cea_structure_bsp const *bsp =
+					&fuzz_structure_bsps[fuzz_random() % fuzz_structure_bsp_count];
+
+				offset = fuzz_random() % 4 || !bsp->vertices_size ?
+					bsp->file_offset + fuzz_random() % bsp->size :
+					bsp->vertices_offset + fuzz_random() % bsp->vertices_size;
+			}
+
 			offset &= ~3UL;
 			if (offset + 4 > map.size)
 				offset = identity.tag_data_offset;
@@ -952,8 +1144,8 @@ static int custom_edition_validate(char const *path, unsigned char *tag_cache, l
 			case 4: value = 0x80000000UL; break;
 			case 5: value = 0x7FFFFFFFUL; break;
 			case 6: value = 0xFFFF; break;
-			case 7: value = CUSTOM_EDITION_TAG_CACHE_ADDRESS + fuzz_random() % identity.tag_data_size; break;
-			default: value = CUSTOM_EDITION_TAG_CACHE_ADDRESS + fuzz_random() % custom_edition_tag_cache_size; break;
+			case 7: value = link_address + fuzz_random() % identity.tag_data_size; break;
+			default: value = link_address + fuzz_random() % custom_edition_tag_cache_size; break;
 			}
 			memcpy(map.bytes + offset, &value, 4);
 		}
@@ -1014,6 +1206,8 @@ static int custom_edition_validate(char const *path, unsigned char *tag_cache, l
 	free(claimed);
 	custom_edition_resources_close(&resources);
 	memory_file_close(&map);
+	if (mcc_cea_tag_cache)
+		munmap(mcc_cea_tag_cache, mcc_cea_tag_cache_bytes);
 
 	return failed;
 }
@@ -1113,6 +1307,7 @@ int main(int argc, char **argv)
 				printf("%s: a resource map, passed over\n", argv[argument]);
 			continue;
 		case _cache_file_format_custom_edition_cache:
+		case _cache_file_format_mcc_cea_cache:
 			if (custom_edition_validate(argv[argument], custom_edition_tag_cache, &corrections, seed, fuzz_iterations))
 			{
 				if (!fuzz_iterations)

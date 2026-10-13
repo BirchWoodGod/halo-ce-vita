@@ -44,6 +44,9 @@ void object_list_add_reference(
 	long object_list_index);
 void object_list_remove_reference(
 	long object_list_index);
+#ifdef HALO_LINUX
+boolean object_lists_nearly_full(void);
+#endif
 void object_list_gc(
 	void);
 
