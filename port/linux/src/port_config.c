@@ -139,6 +139,12 @@ static const struct config_setting config_settings[] =
 		"Anniversary maps in the data folder's mods folder are offered after the\n"
 		"campaign's levels and played alone, offline (docs/mcc_cea_maps.md). Needs\n"
 		"game.custom_edition. Never on any network." },
+	{ "game.pc_map_vehicles", _config_string, "\"xbox\"", "HALO_PC_MAP_VEHICLES", _environment_value, _platform_all,
+		"A Custom Edition map's vehicles in a game of this machine's alone (split\n"
+		"screen or offline, with or without bots): \"xbox\" the Warthogs, Ghosts and\n"
+		"Scorpions it places; \"pc\" every vehicle it places, as Halo PC does\n"
+		"(Banshees, Rocket Warthogs, gun turrets); \"all\" every one it allows in\n"
+		"the game type too (Blood Gulch's Banshees). Network games keep \"xbox\"." },
 
 	{ "game.language", _config_string, "\"\"", "HALO_LANGUAGE", _environment_value, _platform_all,
 		"The language the game asks the Xbox for: \"ja\", \"de\", \"fr\", \"es\" or \"it\";\n"

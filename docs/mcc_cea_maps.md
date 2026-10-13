@@ -18,6 +18,11 @@ of them, `maps/a10.map` to `maps/d40.map`. This build plays them two ways:
 No map, tag or other mod data is in this repository: players copy or
 convert their own.
 
+MCC's own multiplayer maps (Halo PC's: Blood Gulch's Banshees, the Rocket
+Warthog, gun turrets, the fuel rod) convert too, for local games:
+[MCC's PC multiplayer maps](#mccs-pc-multiplayer-maps) (branch
+`feat/mcc-pc-maps`).
+
 ## Playing a mod natively
 
 Copy the mod's whole folder (Steam keeps it in
@@ -278,7 +283,8 @@ description and picture from the mod's `campaign/*.json` and thumbnails;
 a desktop (four at a time), 2.5 GB. The mod's files are only read, by
 Invader; its scripts are recompiled from their source by Invader's compiler
 and run by the game's interpreter. A map that takes tags from MCC's shared
-caches (not classic only) is refused.
+caches (not classic only) needs `--mcc-maps` and `--sound-maps`: [MCC's PC
+multiplayer maps](#mccs-pc-multiplayer-maps).
 
 ## Converted maps on the Vita
 
@@ -290,6 +296,133 @@ the stock `a10.map` ... stay as they are. A converted level won goes on to
 the next of its prefix (`ruby_a10` to `ruby_a30`: `custom_edition_maps_campaign_next_level`),
 on the same difficulty; there is no campaign save or profile progress for
 them (Save and Quit keeps the stock campaign's).
+
+## MCC's PC multiplayer maps
+
+MCC's `halo1/maps` holds Halo PC's seven multiplayer maps as version 13
+caches: `bloodgulch`, `dangercanyon`, `deathisland`, `gephyrophobia`,
+`icefields`, `infinity` and `timberland` (none of the Xbox's; the Vita's
+Xbox maps have no Banshee, Rocket Warthog, gun turret or fuel rod in
+multiplayer: triage/mp-banshee-fuelrod-1.1.1.md). They are not classic
+maps: each keeps its bitmaps (445-494) and sounds (333-340) in MCC's
+resource maps, some 800 external tags, which the converter refused. It
+takes them now (`feat/mcc-pc-maps`):
+
+```
+python3 port/tools/mcc_map_convert.py --invader <invader build> \
+    --output <folder> --prefix pc_ \
+    --mcc-maps "<MCC>/halo1/maps" --sound-maps <the Xbox maps folder> \
+    "<MCC>/halo1/maps/bloodgulch.map" ...
+```
+
+- **Bitmaps** from MCC's `halo1/maps/bitmaps.map` (`--mcc-maps`): the
+  folder invader-extract reads holds it alone.
+- **Sounds**: MCC keeps no `sounds.map` (its sounds are in its FMOD banks).
+  Given Halo PC's `sounds.map` (MCC's `custom_edition` folder) in its place,
+  Invader read MCC's offsets in it and extracted noise for 160 of Blood
+  Gulch's sounds (an RMS of 22860 against the Xbox tag's 2227, correlation
+  0.03): never do that. The converter takes each such sound's tag, by
+  path, from the player's Xbox maps (`--sound-maps`, multiplayer maps
+  first; Xbox ADPCM, which the game plays without decoding): 323-330 a
+  map. Halo PC added 16 the Xbox maps lack (`PC_ONLY_SOUNDS`): the fuel
+  rod's explosion, overheat, melee and impact, the rocket launcher's reload
+  and the menu's back and cursor are given the Xbox sound most like them
+  (the campaign fuel rod's explosion, the plasma rifle's overheat, the
+  rocket launcher's melee and impact, ...); the flamethrower's burnout,
+  empty and impact, the hit "ting", and a few ambiences (Timberland's
+  stream and waterfall, Infinity's beam emitter, an electric hum) are made
+  silent, a tenth of a second of the class named. Each is listed in the
+  map's `.log`.
+- A multiplayer scenario may have no scripts. The rest is as for a classic
+  map (one lens flare reflection fixed a map).
+
+The seven take 51 s on a desktop (the Xbox maps' sounds extracted once a
+run) and are 96-110 MB each (every bitmap and sound in the map: they rely
+on no resource map), 6.9-11.1 MiB of tag space (of 23); `map_validate
+--strict` under AddressSanitizer: 0 corrections. They are Custom Edition
+multiplayer maps like any other in the maps folder (PC maps on; Halo PC's
+`bitmaps.map`, `sounds.map` and `loc.map` there as for any).
+
+### Vehicles and weapons in local games
+
+Their placements (October 2026):
+
+| Map | Banshees | Gun turrets | Fuel rods | Other vehicles |
+| --- | --- | --- | --- | --- |
+| Blood Gulch | 2, allowed only | - | 1 | Warthog and Rocket Warthog a team by default; more of them, Ghosts and Scorpions allowed |
+| Danger Canyon | - | - | 2 | Ghosts, Warthogs, Rocket Warthogs by default; Scorpions allowed |
+| Death Island | 4 by default | 2 | 3 | |
+| Gephyrophobia | 4 by default | 4 | 2 | |
+| Ice Fields | - | - | 2 | |
+| Infinity | 8 (6 in Slayer) | 8 | 4 | |
+| Timberland | - | - | 2 | |
+
+A Custom Edition map places the vehicles whose spawn flags name the game
+type by default (custom_edition_objects.c), and of those an Xbox variant's
+default set keeps Warthogs, Ghosts and Scorpions
+(`game_engine_vehicle_placement_allowed`, OpenCE's rule), so Halo PC's
+maps lose their Banshees, Rocket Warthogs and turrets. **PC map vehicles**
+(`game.pc_map_vehicles`, HALO_PC_MAP_VEHICLES; the Vita's Settings >
+Multiplayer > Modded maps, shown while PC maps is on) changes that in a
+game of this machine's alone (split screen or offline, with or without
+bots: `network_game_is_splitscreen_local`):
+
+- **Xbox** (the default): as before;
+- **PC**: every type the placements' default flags name, as Halo PC's
+  default set (Death Island's, Gephyrophobia's and Infinity's Banshees and
+  turrets, the Rocket Warthogs);
+- **Allowed**: also every placement the map allows in the game type (Blood
+  Gulch's two Banshees, and its every Ghost and Scorpion: 28 vehicles).
+
+PC and Allowed take the place of the Xbox variant's vehicle set (Slayer's
+own is Warthogs alone), as a PC host's set does; a variant with no
+vehicles keeps none.
+
+Every machine of a network game places a map's vehicles itself and no
+wire carries this choice, so a network game's vehicles (hosted, joined,
+the dedicated server's) are never changed by it, and nothing on any wire
+changes. The bots drive the ground vehicles and man the turrets as on any
+map; a Banshee is the players' (the bots fly none).
+
+The fuel rod (Halo PC's `weapons\plasma_cannon`) needs nothing: it is past
+the Xbox's weapon list in the PC globals (index 14), so a game's normal
+weapon set leaves it where the map lays it (the other sets remap it as any
+weapon); Halo PC's flamethrower is a rocket launcher, as the Xbox game
+makes it (`game_engine_remap_weapon`).
+
+`port/vita/tests/run_mcc_pc_maps_test.sh` (HALO_TEST_MCC_PC_MAPS, or MCC's
+folder and Invader to convert them first) plays each in a local Slayer
+game with four bots and Allowed, and Blood Gulch with Xbox and PC
+(October 13 2026, gxm-null harness; ranges over three or four runs: the
+scripted player is no pilot, and a Banshee that meets a wall climbs and
+gets no further, so a flight is 10 units off and 1 up, or 2 up):
+
+| Game | Placed | The player's Banshee flight |
+| --- | --- | --- |
+| Blood Gulch, Allowed | 2 Banshees, 1 fuel rod lying | 38.7-72.7 units, up 1.7-3.9 |
+| Death Island | 4 Banshees, 3 fuel rods | 7.9-91.5 units, up 2.6-2.8 |
+| Gephyrophobia | 4 Banshees, 2 fuel rods | 59.9-91.5 units, up 2.5-2.9 |
+| Infinity | 6 Banshees, 4 fuel rods | 5.1-58.0 units, up 2.5-8.8 (it starts in a base's hangar) |
+| Danger Canyon, Ice Fields, Timberland | no Banshee; 2 fuel rods each | - |
+| Blood Gulch, Xbox | 2 Warthogs, no Rocket Warthog or Banshee | - |
+| Blood Gulch, PC | 2 Warthogs, 2 Rocket Warthogs, no Banshee | - |
+
+`map_validate --fuzz` (AddressSanitizer, undefined-behaviour trapping,
+32-bit) on pc_bloodgulch, pc_deathisland, pc_infinity and pc_timberland:
+6400 runs, no crash. The game reads them with the Custom Edition loader
+alone (no new parser); the converter, which reads MCC's files through
+Invader, runs on the player's PC.
+
+Not tried on a Vita: their load, memory (96-110 MB files whose tags are
+7-11 MB) and frame rate.
+
+**Network**: a converted map is an ordinary Custom Edition map: listed in
+the multiplayer map list with PC maps on, hostable in a system link or
+online game (where PC map vehicles is Xbox), and offered to a joiner who
+lacks it by map sharing (`custom_edition_maps_shareable` refuses only stock
+names, mods folder maps and disabled maps), as Ruby's converted campaign
+maps already are. Whether MCC-derived maps may be shared so is the owner's
+to decide; nothing here changes it.
 
 ## Measured (gxm-null harness, x86)
 

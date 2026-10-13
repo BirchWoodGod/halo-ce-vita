@@ -1570,7 +1570,7 @@ with the values it saved, but the co-op pair (gone: co-op is hosted from
 the Campaign screen) and Online games (now Visibility, by OpenCE's name);
 and the rows added since (Sun rays, Button icons, Map downloads, Max
 players, Visibility, Fourth core helpers, Latency meter, Particles,
-First-person legs, MCC mods; the Play page's two texts) */
+First-person legs, MCC mods, PC map vehicles; the Play page's two texts) */
 static void test_variables_kept(void)
 {
 	static const char *const variables[] = {
@@ -1593,6 +1593,7 @@ static void test_variables_kept(void)
 		"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR", "HALO_INTERPOLATION", "HALO_LATENCY_METER", "HALO_BOTS", "HALO_BOT_SKILL", "HALO_BOT_TEAMS",
 		"HALO_BOT_VEHICLES", "HALO_BOT_ROUTES", "HALO_BOT_PLAYLIST", "HALO_NET_COOP_PLAYERS", "HALO_NET_REMOTE_LOD",
 		"HALO_LANGUAGE", "HALO_UPDATE_CHANNEL", "HALO_PARTICLE_BUDGET", "HALO_FIRST_PERSON_LEGS", "HALO_MCC_MODS",
+		"HALO_PC_MAP_VEHICLES",
 	};
 	int index, all = 1, choices = 0;
 
@@ -2816,6 +2817,31 @@ int main(void)
 	press(VITA_BUTTON_CIRCLE);
 	rmdir("ux0:data/haloce-vita/mods/ruby");
 	rmdir("ux0:data/haloce-vita/mods");
+
+	/* PC map vehicles: no row while PC maps is off; with it on, Xbox, and
+	right PC, then Allowed (HALO_PC_MAP_VEHICLES, live); back to Xbox, and PC
+	maps off again hides it */
+	open_page("Modded maps");
+	check(!strstr(menu, "\nPC map vehicles\x02"), "PC maps off: no PC map vehicles row");
+	to_line("PC maps");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nPC map vehicles\x02  Xbox >") != NULL && menu_fits(), "PC maps on: the PC map vehicles row, Xbox");
+	to_line("PC map vehicles");
+	check(strstr(menu, "\n\x05" "Local games: PC maps' Banshees, turrets. Allowed: all the map allows\n") != NULL,
+		"PC map vehicles' help");
+	press(VITA_BUTTON_RIGHT);
+	check(getenv("HALO_PC_MAP_VEHICLES") && !strcmp(getenv("HALO_PC_MAP_VEHICLES"), "pc"), "right: PC");
+	press(VITA_BUTTON_RIGHT);
+	check(getenv("HALO_PC_MAP_VEHICLES") && !strcmp(getenv("HALO_PC_MAP_VEHICLES"), "all") &&
+		strstr(menu, "\nPC map vehicles\x02< Allowed  \n"), "right again: Allowed");
+	press(VITA_BUTTON_LEFT);
+	press(VITA_BUTTON_LEFT);
+	check(getenv("HALO_PC_MAP_VEHICLES") && !strcmp(getenv("HALO_PC_MAP_VEHICLES"), "xbox"), "left twice: Xbox again");
+	to_line("PC maps");
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_CUSTOM_EDITION"), "0") && !strstr(menu, "\nPC map vehicles\x02"),
+		"PC maps off again: the row goes");
+	press(VITA_BUTTON_CIRCLE);
 
 	/* ---------- Dev, behind its switch */
 	press(VITA_BUTTON_R);

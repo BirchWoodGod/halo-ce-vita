@@ -154,6 +154,12 @@ mods folder has a folder in it) lets the Campaign's level list offer a
 Halo: The Master Chief Collection mod's Halo: CE Anniversary maps from
 ux0:data/haloce-vita/mods, played alone and offline
 (port/linux/game/custom_edition_mods.c, docs/mcc_cea_maps.md).
+"PC map vehicles" (HALO_PC_MAP_VEHICLES, shown while PC maps is on): a
+Custom Edition map's vehicles in a game of this Vita's alone (split screen,
+offline, with or without bots; never a network game's): Xbox, the default,
+its Warthogs, Ghosts and Scorpions; PC, every vehicle it places, as Halo PC
+(Banshees, Rocket Warthogs, gun turrets); Allowed, every one it allows in
+the game type too (port/linux/game/custom_edition_objects.c).
 
 Dev holds a few switches for testers (each a debug environment variable;
 most are read once, at start-up, and say so; the renderer's A/B ones on a
@@ -631,6 +637,11 @@ static struct setting settings[] = {
 	setting_shown) */
 	{ "MCC mods", "HALO_MCC_MODS", 0, 2, { "0", "1" }, { "Off", "On" },
 		"Experimental: mods folder's MCC maps, solo, offline", 0, PAGE_MAPS },
+	/* (a Custom Edition map's vehicles in a local game: Halo PC's Banshees,
+	Rocket Warthogs and gun turrets, port/linux/game/custom_edition_objects.c;
+	shown while PC maps is on or the row is not Xbox: setting_shown) */
+	{ "PC map vehicles", "HALO_PC_MAP_VEHICLES", 0, 3, { "xbox", "pc", "all" }, { "Xbox", "PC", "Allowed" },
+		"Local games: PC maps' Banshees, turrets. Allowed: all the map allows", 0, PAGE_MAPS },
 	/* (shown while a Custom Edition installer is in ux0:data/haloce-vita
 	and the resource maps are missing: vita_ce_installer.c) */
 	{ "Extract PC files", NULL, 0, 0, { NULL }, { NULL }, "The three files out of the Halo CE installer",
@@ -1146,6 +1157,8 @@ static int setting_shown(const struct setting *setting)
 		return maps_installer_state == 1;
 	if (setting->variable && !strcmp(setting->variable, "HALO_MCC_MODS"))
 		return maps_mods_present || choice_of("HALO_MCC_MODS");
+	if (setting->variable && !strcmp(setting->variable, "HALO_PC_MAP_VEHICLES"))
+		return choice_of("HALO_CUSTOM_EDITION") || choice_of("HALO_PC_MAP_VEHICLES");
 	if (setting->variable && (!strcmp(setting->variable, "HALO_BOT_SKILL") || !strcmp(setting->variable, "HALO_BOT_TEAMS") ||
 		!strcmp(setting->variable, "HALO_BOT_VEHICLES") || !strcmp(setting->variable, "HALO_BOT_ROUTES") ||
 		!strcmp(setting->variable, "HALO_BOT_PLAYLIST")))
