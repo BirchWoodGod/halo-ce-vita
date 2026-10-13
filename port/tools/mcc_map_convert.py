@@ -40,17 +40,41 @@ build refuses an MCC map's tags without:
    upgrades allow, which this port reads from the map's structure BSP
    addresses.
 
+A map that takes its bitmaps and sounds from MCC's resource maps (MCC's own
+multiplayer maps: bloodgulch.map, dangercanyon.map ... in halo1/maps,
+"Classic: No" and some 800 external tags each) needs two more folders:
+
+5. --mcc-maps, MCC's halo1/maps, whose bitmaps.map invader-extract reads
+   the map's bitmaps from (only it: MCC keeps no sounds.map there, its
+   sounds are in its FMOD banks, and given Halo PC's sounds.map in its
+   place Invader reads MCC's offsets in it and extracts noise: never);
+6. --sound-maps, the player's Xbox maps (the maps folder this port plays),
+   whose sound tags stand in for the sounds MCC keeps outside the map: the
+   same tags, by path, as Xbox ADPCM, which the game plays without decoding
+   (multiplayer maps' first). The few Halo PC added (the fuel rod's,
+   PC_ONLY_SOUNDS) are given an Xbox sound like them or made silent; each
+   is listed in the log.
+
+Such a map is built under its new name too (--prefix pc_: pc_bloodgulch),
+a Custom Edition multiplayer map like any other in the maps folder.
+
 The mod's files are only read, by Invader. Nothing they hold is run: the
 scripts are recompiled from their source by Invader's script compiler and
 run by the game's own interpreter.
 
     mcc_map_convert.py --invader DIR --output DIR [--prefix ruby_] MAP.map...
+    mcc_map_convert.py --invader DIR --output DIR --prefix pc_ \
+        --mcc-maps MCC/halo1/maps --sound-maps XBOX/maps MCC/halo1/maps/bloodgulch.map
 
 --invader   a folder with invader-extract, invader-build, invader-edit and
             invader-info (an Invader build, 0.55 or later)
 --output    where the Custom Edition maps go, named <prefix><map>.map
 --work      the extracted tags (default: a folder in --output, deleted
             once a map is built unless --keep-work)
+--mcc-maps  MCC's halo1/maps folder (its bitmaps.map), for a map that takes
+            its bitmaps from it
+--sound-maps the Xbox maps (a10.map, bloodgulch.map ...), whose sounds stand
+            in for those a map keeps in MCC's sound banks
 """
 
 import argparse
@@ -89,6 +113,38 @@ STOCK_SCENARIO_NAMES = {
 
 # the longest map name this port lists (custom_edition_maps.c)
 MAXIMUM_MAP_NAME_LENGTH = 25
+
+# The sounds of MCC's multiplayer maps that Halo PC added and no Xbox map
+# has (October 2026: 16 of the 354 the seven PC maps keep outside them),
+# each given the Xbox sound most like it, or none (silence, of the class
+# given): their tags are Halo PC's, which this tool does not read
+PC_ONLY_SOUNDS = {
+	# the fuel rod gun (Halo PC's plasma_cannon): the Xbox campaign's
+	"sound/sfx/weapons/plasma_cannon/plasma_cannon_explosion": ("sound/sfx/weapons/fuel rod gun/explosion", None),
+	"sound/sfx/weapons/plasma_cannon/overheat": ("sound/sfx/weapons/plasma rifle/overheat", None),
+	"sound/sfx/weapons/weapon_anims/plasma_cannon_overheat": ("sound/sfx/weapons/plasma rifle/overheat", None),
+	"sound/sfx/weapons/weapon_anims/fuelrod_melee": ("sound/sfx/weapons/weapon_anims/rocket_melee", None),
+	"sound/sfx/impulse/melee/fuelrod_impact": ("sound/sfx/impulse/melee/rlauncher_impact", None),
+	"sound/sfx/weapons/rocket launcher/reload": ("sound/sfx/weapons/weapon_anims/rocket_reload_f", None),
+	"sound/sfx/ui/back": ("sound/sfx/ui/forward", None),
+	"sound/sfx/ui/cursor": ("sound/sfx/ui/forward", None),
+	# (the flamethrower is a rocket launcher in this game's multiplayer:
+	# game_engine_remap_weapon)
+	"sound/sfx/weapons/flamethrower/burnout": (None, "weapon_idle"),
+	"sound/sfx/weapons/flamethrower/empty": (None, "weapon_empty"),
+	"sound/sfx/weapons/flamethrower/impact": (None, "projectile_impact"),
+	"sound/sfx/impulse/ting/ting": (None, "game_event"),
+	"sound/sfx/ambience/interiors/elechumm": (None, "ambient_machinery"),
+	"levels/test/timberland/sound/timberland_stream": (None, "ambient_nature"),
+	"levels/test/timberland/sound/timberland_waterfall": (None, "ambient_nature"),
+	"levels/test/infinity/devices/beam emitter red/beam_emitter": (None, "device_machinery"),
+}
+# the class of a silent sound PC_ONLY_SOUNDS does not name
+SILENT_SOUND_CLASS = "game_event"
+# a silent sound: a tenth of a second of 22 kHz mono
+SILENT_SOUND_FRAMES = 2205
+# the resource maps a maps folder holds besides levels
+RESOURCE_MAP_NAMES = {"bitmaps.map", "sounds.map", "loc.map"}
 
 
 class ConversionError(Exception):
@@ -567,6 +623,86 @@ def write_level_text(mod, stem, output, name):
 	return False
 
 
+def write_silent_wav(path):
+	"""SILENT_SOUND_FRAMES of 16-bit 22 kHz mono silence"""
+	samples = bytes(2 * SILENT_SOUND_FRAMES)
+	header = b"RIFF" + struct.pack("<I", 36 + len(samples)) + b"WAVE" + b"fmt " + \
+		struct.pack("<IHHIIHH", 16, 1, 1, 22050, 44100, 2, 16) + b"data" + struct.pack("<I", len(samples))
+	with open(path, "wb") as file:
+		file.write(header + samples)
+
+
+def xbox_sound_pool(arguments, log):
+	"""the sound tags of the Xbox maps in --sound-maps, extracted once a run
+	into the work folder (a multiplayer map's first: a sound both have is
+	taken from it)"""
+	if arguments.sound_pool:
+		return arguments.sound_pool
+	invader = arguments.invader
+	pool = os.path.join(arguments.work, "xbox-sounds")
+	os.makedirs(pool, exist_ok=True)
+	maps = []
+	for name in sorted(os.listdir(arguments.sound_maps)):
+		path = os.path.join(arguments.sound_maps, name)
+		if not name.lower().endswith(".map") or name.lower() in RESOURCE_MAP_NAMES or not os.path.isfile(path):
+			continue
+		engine = run([tool(invader, "invader-info"), "-T", "engine", path], log, check=False).strip()
+		if "Xbox" not in engine:
+			continue
+		kind = run([tool(invader, "invader-info"), "-T", "map_type", path], log, check=False).strip()
+		maps.append((0 if kind.lower().startswith("multiplayer") else 1, name, path))
+	if not maps:
+		raise ConversionError(f"no Xbox maps in {arguments.sound_maps} (--sound-maps)")
+	for _, _, path in sorted(maps):
+		run([tool(invader, "invader-extract"), "-n", "-s", "*.sound", "-t", pool, path], log, check=False)
+	arguments.sound_pool = pool
+	return pool
+
+
+def note(log, text):
+	with open(log, "a", encoding="utf-8") as file:
+		file.write(text + "\n")
+
+
+def fill_external_sounds(arguments, tags, work, sounds, log):
+	"""each sound the map keeps in MCC's sound banks (`sounds`, tag paths)
+	given the player's Xbox map's tag of the same path, else PC_ONLY_SOUNDS'
+	stand-in, else silence; returns how many were taken, stood in for and
+	made silent"""
+	invader = arguments.invader
+	pool = xbox_sound_pool(arguments, log)
+	taken = stood_in = silent = 0
+	for sound in sounds:
+		relative = sound.replace("\\", "/")
+		stem = relative[:-len(".sound")] if relative.endswith(".sound") else relative
+		target = os.path.join(tags, stem + ".sound")
+		if os.path.exists(target):
+			continue
+		own = os.path.join(pool, stem + ".sound")
+		stand_in, sound_class = PC_ONLY_SOUNDS.get(stem, (None, SILENT_SOUND_CLASS))
+		source = None
+		if os.path.isfile(own):
+			source = own
+			taken += 1
+		elif stand_in and os.path.isfile(os.path.join(pool, stand_in + ".sound")):
+			source = os.path.join(pool, stand_in + ".sound")
+			note(log, f"(sound {stem}: in no Xbox map; given {stand_in})")
+			stood_in += 1
+		if source:
+			os.makedirs(os.path.dirname(target), exist_ok=True)
+			shutil.copyfile(source, target)
+			continue
+		# (silence: a tenth of a second, of the class given)
+		data = os.path.join(work, "silent-data")
+		folder = os.path.join(data, stem)
+		os.makedirs(folder, exist_ok=True)
+		write_silent_wav(os.path.join(folder, os.path.basename(stem) + ".wav"))
+		run([tool(invader, "invader-sound"), "-d", data, "-t", tags, "-c", sound_class, "-F", "xbox_adpcm", stem], log)
+		note(log, f"(sound {stem}: in no Xbox map; silent)")
+		silent += 1
+	return taken, stood_in, silent
+
+
 def convert(arguments, path):
 	invader = arguments.invader
 	stem = os.path.splitext(os.path.basename(path))[0]
@@ -589,10 +725,36 @@ def convert(arguments, path):
 	engine = map_info(invader, path, "engine", log)
 	if "Anniversary" not in engine and "MCC" not in engine:
 		raise ConversionError(f"{path}: not a Halo: CE Anniversary map ({engine})")
-	if map_info(invader, path, "external_tags_count", log) not in ("0", ""):
-		# (a map that takes tags from MCC's bitmaps.map and sounds.map:
-		# invader-extract would need them, -m)
-		raise ConversionError(f"{path}: takes tags from MCC's resource maps; only maps that keep their own (classic maps) are converted")
+	external = map_info(invader, path, "external_tags_count", log)
+	external_sounds = []
+	resources = None
+	if external not in ("0", ""):
+		# (a map that takes tags from MCC's bitmaps.map and sounds.map, as
+		# MCC's own multiplayer maps do: its bitmaps from MCC's bitmaps.map,
+		# its sounds from the Xbox maps; any other kind is refused)
+		bitmaps = int(map_info(invader, path, "external_bitmaps_count", log) or 0)
+		sounds = int(map_info(invader, path, "external_sounds_count", log) or 0)
+		if not external.isdigit() or bitmaps + sounds != int(external):
+			raise ConversionError(f"{path}: takes other tags than bitmaps and sounds from MCC's resource maps")
+		if not arguments.mcc_maps or not arguments.sound_maps:
+			raise ConversionError(f"{path}: takes {bitmaps} bitmaps and {sounds} sounds from MCC's resource maps: "
+				"give --mcc-maps (MCC's halo1/maps, its bitmaps.map) and --sound-maps (the Xbox maps, for the sounds)")
+		bitmaps_map = os.path.join(arguments.mcc_maps, "bitmaps.map")
+		if bitmaps and not os.path.isfile(bitmaps_map):
+			raise ConversionError(f"no bitmaps.map in {arguments.mcc_maps} (--mcc-maps)")
+		# (a folder of MCC's bitmaps.map alone: never a sounds.map, which
+		# Invader would read MCC's sound offsets in)
+		resources = os.path.join(work, "resources")
+		os.makedirs(resources)
+		if bitmaps:
+			try:
+				os.symlink(os.path.realpath(bitmaps_map), os.path.join(resources, "bitmaps.map"))
+			except OSError:
+				shutil.copyfile(bitmaps_map, os.path.join(resources, "bitmaps.map"))
+		external_sounds = [line.strip() for line in run([tool(invader, "invader-info"), "-T", "external_sounds", path],
+			log).splitlines() if line.strip()]
+		if len(external_sounds) != sounds:
+			raise ConversionError(f"{path}: invader-info listed {len(external_sounds)} of its {sounds} external sounds")
 	scenario = map_info(invader, path, "scenario_path", log)
 
 	unmarked = unmarked_dxt_bitmaps(path)
@@ -602,16 +764,26 @@ def convert(arguments, path):
 		mark_dxt_bitmaps_compressed(path, unmarked, source_map)
 
 	print(f"{stem}: extracting the tags", flush=True)
-	extracted = run([tool(invader, "invader-extract"), "-G", "-n", "-t", tags, source_map], log)
+	extracted = run([tool(invader, "invader-extract")] + (["-m", resources] if resources else ["-G"]) +
+		["-n", "-t", tags, source_map], log)
 	if source_map != path:
 		os.remove(source_map)
-	if "Failed to extract" in extracted:
+	# (the sounds kept in MCC's sound banks fail, and only they)
+	errors = re.search(r"Extracted \d+ out of \d+ matched tags with (\d+) errors", extracted)
+	if ("Failed to extract" in extracted or errors) and \
+			(not errors or int(errors.group(1)) != len(external_sounds) or
+				any(os.path.exists(os.path.join(tags, sound.replace("\\", "/"))) for sound in external_sounds)):
 		raise ConversionError(f"invader-extract could not extract every tag; see {log}")
+	sounds_taken = sounds_stood_in = sounds_silent = 0
+	if external_sounds:
+		print(f"{stem}: the sounds, from the Xbox maps", flush=True)
+		sounds_taken, sounds_stood_in, sounds_silent = fill_external_sounds(arguments, tags, work, external_sounds, log)
 
 	print(f"{stem}: the scripts", flush=True)
 	scenario_tag = os.path.join(tags, scenario.replace("\\", "/") + ".scenario")
 	texts = scenario_source(scenario_tag)
-	if not texts:
+	# (a multiplayer map may have no scripts)
+	if not texts and edit(invader, tags, ["-C", "scripts", scenario + ".scenario"], log, check=False).strip() != "0":
 		raise ConversionError(f"{path}: no script source in its scenario")
 	scripts = os.path.join(data, os.path.dirname(scenario.replace("\\", "/")), "scripts")
 	os.makedirs(scripts)
@@ -655,7 +827,9 @@ def convert(arguments, path):
 		f"{lens_flares} lens flare reflections fixed, {len(unmarked)} DXT bitmaps marked compressed, "
 		f"{names_unshared} shared object names and missing HUD sequences removed, "
 		f"{names_lost} object names past the game's {MAXIMUM_OBJECT_NAMES} unnamed, "
-		f"{summary.group(0) if summary else ''}", flush=True)
+		+ (f"{sounds_taken} sounds from the Xbox maps, {sounds_stood_in} of Halo PC's given an Xbox one, "
+			f"{sounds_silent} silent, " if external_sounds else "")
+		+ f"{summary.group(0) if summary else ''}", flush=True)
 	# (the mod's folder: the maps folder's parent, as Steam keeps it)
 	write_level_text(os.path.dirname(os.path.dirname(os.path.abspath(path))), stem, arguments.output, name)
 	if not arguments.keep_work:
@@ -670,8 +844,11 @@ def main():
 	parser.add_argument("--prefix", default="")
 	parser.add_argument("--work")
 	parser.add_argument("--keep-work", action="store_true")
+	parser.add_argument("--mcc-maps")
+	parser.add_argument("--sound-maps")
 	parser.add_argument("maps", nargs="+")
 	arguments = parser.parse_args()
+	arguments.sound_pool = None
 	os.makedirs(arguments.output, exist_ok=True)
 	if not arguments.work:
 		arguments.work = tempfile.mkdtemp(prefix="mcc_map_convert.", dir=arguments.output)
@@ -682,6 +859,8 @@ def main():
 		except (ConversionError, OSError) as exception:
 			print(f"{path}: {exception}", file=sys.stderr, flush=True)
 			failed += 1
+	if not arguments.keep_work and arguments.sound_pool and os.path.isdir(arguments.sound_pool):
+		shutil.rmtree(arguments.sound_pool)
 	if not arguments.keep_work and os.path.isdir(arguments.work) and not os.listdir(arguments.work):
 		os.rmdir(arguments.work)
 	return 1 if failed else 0
