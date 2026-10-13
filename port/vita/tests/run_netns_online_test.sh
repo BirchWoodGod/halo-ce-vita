@@ -177,7 +177,25 @@
 #            the client silent for 2 s twice): every 20 to 50 s a 1.4 s round
 #            trip (700 ms 150 ms each way, 3% lost) for 10 to 30 s, then
 #            nothing at all for 3 s (the latency meter's "silent for 2 s"
-#            past its threshold), then its own netem again (flap.log)
+#            past its threshold), then its own netem again (flap.log). No
+#            copy may log an assertion of the camera's observer (observer.c:
+#            coopstarts)
+#   coopstarts co-op starts over and over: HALO_TEST_COOP_PAIRS hosts (4),
+#            each behind a NAT of its own with a joiner behind another,
+#            start co-op on HALO_TEST_COOP_LEVEL (c40) at once, play
+#            HALO_TEST_SECONDS (75) and end; HALO_TEST_COOP_ROUNDS times (6:
+#            24 starts), every joiner's link HALO_TEST_NETEM_JOIN ("delay
+#            80ms 40ms loss 1%") and every copy with the Vita's Performance
+#            rows (HALO_TEST_ENV adds to them). Oct 13 2026: at one c40 co-op start in six, a frame
+#            that passed no time left the camera's focus at the world's
+#            origin, the next transition snapped with a velocity of the jump
+#            over one frame (~43,000 units/s), and the insertion's 10 s camera
+#            ran off the map with it (observer.c's observer_snap_without_time):
+#            a debug client halted on the observer's focus assertion, a
+#            debug host logged it skipped. Every host must reach its game,
+#            and no copy may log an assertion of the camera's observer
+#            (soft or fatal) or crash; a build with assertions compiled out
+#            proves nothing here
 #   coopmenu co-op from the campaign's menus, over system link on one LAN
 #            (online off), every press scripted (HALO_TEST_PAD): the host
 #            goes Campaign, a new profile, The Pillar of Autumn, Heroic and Y
@@ -424,6 +442,17 @@ mode=${1:-code}
 [ "$mode" = latency ] && [ -z "${HALO_TEST_NETEM:-}${HALO_TEST_NETEM_HOST:-}${HALO_TEST_NETEM_JOIN:-}" ] &&
 	export HALO_TEST_NETEM="delay 40ms"
 # (dedicatedfullcache: a jittery link unless one is given)
+# (coopstarts: the joiners' links a home connection's, and the Vita's
+# Performance rows, the start's fault's conditions: with neither, one start
+# in 24 met it; with both, one in two of the first pair's, whose joiner alone
+# had the link)
+if [ "$mode" = coopstarts ]; then
+	[ -z "${HALO_TEST_NETEM:-}${HALO_TEST_NETEM_HOST:-}${HALO_TEST_NETEM_JOIN:-}" ] &&
+		export HALO_TEST_NETEM_JOIN="delay 80ms 40ms loss 1%"
+	export HALO_TEST_ENV="HALO_SCENERY_UPDATE_DIVISOR=4 HALO_LIGHTING_REFRESH_DIVISOR=3 HALO_SOUND_OBSTRUCTION_TICKS=6
+		HALO_PARTICLE_RENDER_DIVISOR=4 HALO_SOUND_MANAGER_DIVISOR=2 HALO_PARTICLE_BUDGET=reduced HALO_MODEL_LOD_SCALE=0.75
+		HALO_MIN_OBJECT_PIXELS=8 HALO_INTERPOLATE_FIRST_PERSON=1 ${HALO_TEST_ENV:-}"
+fi
 [ "$mode" = dedicatedfullcache ] && [ -z "${HALO_TEST_NETEM:-}${HALO_TEST_NETEM_HOST:-}${HALO_TEST_NETEM_JOIN:-}" ] &&
 	export HALO_TEST_NETEM="delay 80ms 70ms"
 vita=${HALO_TEST_VITA:-$root/build/linux/halo}
@@ -447,6 +476,7 @@ seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = mapmidmixed ] && seconds=${HALO_TEST_SECONDS:-300}
 [ "$mode" = swat ] && seconds=${HALO_TEST_SECONDS:-500}
 [ "$mode" = swatmixed ] && seconds=${HALO_TEST_SECONDS:-500}
+[ "$mode" = coopstarts ] && seconds=${HALO_TEST_SECONDS:-75}
 rejoin=${HALO_TEST_REJOIN:-0}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_netns_test.$$}
 . "$here/test_out.sh"
@@ -1529,9 +1559,79 @@ coop)
 		echo "$name's seconds with all $((joiners + 1)) players alive: $all"
 		[ "$all" -ge 15 ] || fail "$name saw all $((joiners + 1)) players alive for $all s (15 wanted)"
 	done
+	# (the camera: no assertion of the observer's in any copy, coopstarts)
+	if grep -aq 'SOURCE\\camera\\observer\.c' "$out"/*/run.log "$out"/*/data/debug.txt 2>/dev/null; then
+		grep -ah 'SOURCE\\camera\\observer\.c' "$out"/*/run.log "$out"/*/data/debug.txt 2>/dev/null | head -3
+		fail "the camera's observer asserted (its focus off the map)"
+	fi
 	# (a co-op game is private unless chosen: network.coop_public, OpenCE's)
 	if [ "${HALO_TEST_COOP_LAN:-0}" != 1 ] && grep -q 'publish .* hcev/3/lobby/s/[0-9a-f]\{32\} [1-9][0-9]* B retained' "$out/broker.log"; then
 		fail "the co-op game was listed in the public games (it is private unless chosen)"
+	fi
+	;;
+coopstarts)
+	level=${HALO_TEST_COOP_LEVEL:-c40}
+	pairs=${HALO_TEST_COOP_PAIRS:-4}
+	rounds=${HALO_TEST_COOP_ROUNDS:-6}
+	# (each pair's host and joiner behind NATs of their own, made once and
+	# used every round; the first pair the test's own host and join sides)
+	for p in $(seq 2 "$pairs"); do
+		side "h$p" "10.10.$((20 + p))" "192.168.$((20 + p))"
+		HALO_TEST_NETEM=${HALO_TEST_NETEM_JOIN:-${HALO_TEST_NETEM:-}} side "j$p" "10.10.$((40 + p))" "192.168.$((40 + p))"
+	done
+	h1_machine=$host_machine j1_machine=$join_machine
+	# (each copy two processors of its own, from HALO_TEST_COOP_FIRST_CPU
+	# (0): the eight copies of four pairs take 0-15)
+	coop_cores() {
+		local first=$(( ${HALO_TEST_COOP_FIRST_CPU:-0} + $1 * 2 ))
+		echo "$first-$((first + 1))"
+	}
+	starts=0
+	for round in $(seq 1 "$rounds"); do
+		round_pids=
+		for p in $(seq 1 "$pairs"); do
+			eval "hm=\$h${p}_machine jm=\$j${p}_machine"
+			cores=$(coop_cores $(( (p - 1) * 2 )))
+			run_copy "r${round}h$p" "$hm" "$vita" "$cores" HALO_NET_COOP_LEVEL=$level HALO_NETWORK_TEST=host:${level##*\\} \
+				HALO_NETWORK_TEST_START=20 HALO_TEST_INPUT=bot:1:look HALO_NET_COOP_PLAYERS=2 HALO_NET_ONLINE=true
+			round_pids="$round_pids $last_pid"
+		done
+		for p in $(seq 1 "$pairs"); do
+			eval "jm=\$j${p}_machine"
+			code=
+			for i in $(seq 1 90); do
+				code=$(sed -n 's/.*others join with the code \([A-Z0-9]\{4\}-[A-Z0-9]\{4\}\).*/\1/p' \
+					"$out/r${round}h$p/run.log" 2>/dev/null | head -1)
+				[ -n "$code" ] && break
+				sleep 1
+			done
+			[ -n "$code" ] || { fail "round $round host $p never showed a code"; continue; }
+			cores=$(coop_cores $(( (p - 1) * 2 + 1 )))
+			run_copy "r${round}j$p" "$jm" "$vita" "$cores" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$code \
+				HALO_TEST_INPUT=bot:2:look
+			round_pids="$round_pids $last_pid"
+		done
+		wait $round_pids 2>/dev/null
+		for p in $(seq 1 "$pairs"); do
+			if grep -aq "system link: in a network game" "$out/r${round}h$p/run.log"; then
+				starts=$((starts + 1))
+			else
+				fail "round $round host $p never started its game"
+			fi
+		done
+		echo "round $round: $starts co-op starts so far"
+		# (the copies' folders hold the map's cache files: 0.3 GB each)
+		for p in $(seq 1 "$pairs"); do rm -rf "$out/r${round}h$p/save" "$out/r${round}j$p/save"; done
+	done
+	echo "co-op starts: $starts of $((pairs * rounds))"
+	bad=$(grep -al 'SOURCE\\camera\\observer\.c' "$out"/*/run.log "$out"/*/data/debug.txt 2>/dev/null)
+	if [ -n "$bad" ]; then
+		grep -ah 'SOURCE\\camera\\observer\.c' $bad | head -4
+		fail "the camera's observer asserted in $(echo "$bad" | wc -l) logs (its focus off the map)"
+	fi
+	if grep -aqE "segmentation fault|halt_and_catch_fire" "$out"/*/run.log; then
+		grep -alE "segmentation fault|halt_and_catch_fire" "$out"/*/run.log | head -3
+		fail "a copy crashed"
 	fi
 	;;
 coopmenuonline)
@@ -3104,7 +3204,7 @@ CHECK
 	fi
 	;;
 *)
-	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed" >&2
+	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed" >&2
 	exit 2
 	;;
 esac
