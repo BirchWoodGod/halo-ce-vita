@@ -110,7 +110,8 @@ parser.add_argument(
     "--pgo-profile",
     metavar="PROFDATA",
     type=Path,
-    help="native ports: profile-guided optimisation from this profile instead",
+    help="native ports: profile-guided optimisation from this profile instead; the Vita build's clang side "
+    "uses one only when given here (triage/vita-lto-1.1.1.md: a harness's front-end instrumented profile)",
 )
 parser.add_argument(
     "--linux-d3d",
