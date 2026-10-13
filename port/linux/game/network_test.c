@@ -68,7 +68,9 @@ button a second later, to pick it up). HALO_NETWORK_TEST_PLAYER_DRIVES
 (seconds; a "local:" game) seats this machine's player as the nearest
 Warthog's driver (one no one drives, within 30 units) that many seconds in, the scripted player letting go of
 everything for 20 seconds (the vehicle stops: the offline bots get in beside
-it, run_bots_test.sh), then driving it about as it walks.
+it, run_bots_test.sh), then driving it about as it walks;
+HALO_NETWORK_TEST_PLAYER_VEHICLE names another (a part of its tag's name:
+"banshee", run_mcc_pc_maps_test.sh), the nearest anywhere on the map.
 
 Called from the main loop every frame (main.c).
 */
@@ -1018,12 +1020,19 @@ static void network_test_vehicle(
 			real distance = distance_squared3d(position, vehicle_position);
 
 			/* (HALO_NETWORK_TEST_PLAYER_DRIVES: a Warthog no one drives, near:
-			not one across the map, at the other team's base) */
-			if (first_player && (unit_get(vehicles.index)->unit.driver_object_index != NONE ||
-				!strstr(tag_get_name(object_get(vehicles.index)->definition_index), "warthog") ||
-				distance > 30.0f * 30.0f))
+			not one across the map, at the other team's base; or the vehicle
+			HALO_NETWORK_TEST_PLAYER_VEHICLE names, anywhere) */
+			if (first_player)
 			{
-				continue;
+				char const *kind = getenv("HALO_NETWORK_TEST_PLAYER_VEHICLE");
+				boolean named = kind && kind[0];
+
+				if (unit_get(vehicles.index)->unit.driver_object_index != NONE ||
+					!strstr(tag_get_name(object_get(vehicles.index)->definition_index), named ? kind : "warthog") ||
+					(!named && distance > 30.0f * 30.0f))
+				{
+					continue;
+				}
 			}
 			if (nearest_index == NONE || distance < nearest_distance)
 			{

@@ -6694,6 +6694,15 @@ boolean game_engine_vehicle_placement_allowed(
 
 	if (!game_engine || placement->palette_entry_index == NONE)
 		return TRUE;
+#ifdef HALO_LINUX
+	/* port: a Custom Edition map's local game with Halo PC's vehicles
+	(PC map vehicles, port/linux/game/custom_edition_objects.c): every type
+	its placements choose, as the PC vehicle set's, in place of the Xbox
+	variant's set (Slayer's own is Warthogs alone); one with no vehicles
+	never gets here (custom_edition_vehicles_by_placement) */
+	if (custom_edition_vehicles_every_type())
+		return TRUE;
+#endif
 	side = global_variant.universal_variant.teams ? game_engine_nearest_team(&placement->position) : 0;
 	set = options->vehicle_set[side];
 	if (set == VARIANT_VEHICLE_SET_PC)

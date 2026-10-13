@@ -406,6 +406,12 @@ boolean custom_edition_vehicles_by_placement(
 running game. */
 boolean custom_edition_vehicle_placement_allowed(
 	struct scenario_object_datum const *placement);
+/* Whether a Custom Edition map's local game places every type of vehicle
+its placements choose (PC map vehicles "pc" or "all"), Banshees, Rocket
+Warthogs and gun turrets too, where an Xbox variant's sets keep Warthogs,
+Ghosts and Scorpions (also declared in halo_linux_source_fixups.h). */
+boolean custom_edition_vehicles_every_type(
+	void);
 
 /* ---------- prototypes/CUSTOM_EDITION_GEOMETRY.C */
 

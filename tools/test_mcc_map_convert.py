@@ -157,3 +157,132 @@ def test_level_text_is_written_from_the_mods_campaign_files(tmp_path):
         "The Pillar of Autumn", "", "Escape intact as", "Covenant forces board", "your ship."]
     assert (out / "ruby_a10.bmp").read_bytes()[:2] == b"BM"
     assert not convert.write_level_text(str(mod), "b30", str(out), "ruby_b30")
+
+
+# ---------- MCC's multiplayer maps: their sounds from the Xbox maps (fake
+# Invader tools: small Python scripts that do what the converter asks of
+# them, no game data)
+
+def fake_tool(folder, name, body):
+    path = folder / name
+    path.write_text("#!" + sys.executable + "\nimport os, sys\n" + body)
+    path.chmod(0o755)
+    return path
+
+
+class Arguments:
+    def __init__(self, invader, work, pool=None, mcc_maps=None, sound_maps=None):
+        self.invader = str(invader)
+        self.work = str(work)
+        self.sound_pool = str(pool) if pool else None
+        self.mcc_maps = mcc_maps
+        self.sound_maps = sound_maps
+        self.prefix = "pc_"
+        self.keep_work = False
+
+
+def test_a_silent_sound_is_a_tenth_of_a_second_of_22_khz_mono(tmp_path):
+    path = tmp_path / "silence.wav"
+    convert.write_silent_wav(str(path))
+    data = path.read_bytes()
+    assert data[:4] == b"RIFF" and data[8:16] == b"WAVEfmt "
+    assert struct.unpack_from("<IHHIIHH", data, 16) == (16, 1, 1, 22050, 44100, 2, 16)
+    assert data[36:40] == b"data" and struct.unpack_from("<I", data, 40)[0] == 2 * convert.SILENT_SOUND_FRAMES
+    assert set(data[44:]) == {0} and len(data) == 44 + 2 * convert.SILENT_SOUND_FRAMES
+
+
+def test_external_sounds_come_from_the_xbox_maps_else_a_stand_in_else_silence(tmp_path):
+    invader = tmp_path / "invader"
+    invader.mkdir()
+    # (invader-sound -d DATA -t TAGS -c CLASS -F FORMAT PATH: the tag made
+    # from DATA/PATH's wav, here its arguments written as the tag)
+    fake_tool(invader, "invader-sound",
+        "a = sys.argv[1:]\n"
+        "tags = a[a.index('-t') + 1]; path = a[-1]\n"
+        "assert os.path.isfile(os.path.join(a[a.index('-d') + 1], path, os.path.basename(path) + '.wav'))\n"
+        "os.makedirs(os.path.dirname(os.path.join(tags, path + '.sound')), exist_ok=True)\n"
+        "open(os.path.join(tags, path + '.sound'), 'w').write(' '.join(a))\n")
+    pool = tmp_path / "pool"
+    for name, text in (("sound/sfx/ui/teleporter_loop.sound", "xbox teleporter"),
+            ("sound/sfx/weapons/fuel rod gun/explosion.sound", "xbox fuel rod explosion")):
+        (pool / name).parent.mkdir(parents=True, exist_ok=True)
+        (pool / name).write_text(text)
+    tags = tmp_path / "tags"
+    (tags / "sound/sfx/ui").mkdir(parents=True)
+    (tags / "sound/sfx/ui/shield_hit.sound").write_text("already there")
+    work = tmp_path / "work"
+    work.mkdir()
+    log = tmp_path / "log"
+    sounds = ["sound/sfx/ui/teleporter_loop.sound",
+        "sound/sfx/weapons/plasma_cannon/plasma_cannon_explosion.sound",
+        "levels/test/timberland/sound/timberland_stream.sound",
+        "sound/sfx/nowhere/unknown.sound",
+        "sound/sfx/ui/shield_hit.sound"]
+    counts = convert.fill_external_sounds(Arguments(invader, work, pool), str(tags), str(work), sounds, str(log))
+    assert counts == (1, 1, 2)
+    assert (tags / "sound/sfx/ui/teleporter_loop.sound").read_text() == "xbox teleporter"
+    assert (tags / "sound/sfx/weapons/plasma_cannon/plasma_cannon_explosion.sound").read_text() == "xbox fuel rod explosion"
+    stream = (tags / "levels/test/timberland/sound/timberland_stream.sound").read_text()
+    assert "-c ambient_nature" in stream and "-F xbox_adpcm" in stream
+    assert "-c " + convert.SILENT_SOUND_CLASS in (tags / "sound/sfx/nowhere/unknown.sound").read_text()
+    assert (tags / "sound/sfx/ui/shield_hit.sound").read_text() == "already there"
+    text = log.read_text()
+    assert "plasma_cannon_explosion: in no Xbox map; given sound/sfx/weapons/fuel rod gun/explosion" in text
+    assert "timberland_stream: in no Xbox map; silent" in text
+
+
+def test_every_pc_only_stand_in_is_a_sound_the_xbox_maps_have():
+    # (a stand-in is never itself one of Halo PC's own, and silence has a class)
+    for path, (stand_in, sound_class) in convert.PC_ONLY_SOUNDS.items():
+        assert (stand_in is None) != (sound_class is None), path
+        assert stand_in not in convert.PC_ONLY_SOUNDS
+        assert not path.endswith(".sound") and not (stand_in or "").endswith(".sound")
+
+
+def test_the_sound_pool_is_the_xbox_maps_multiplayer_first(tmp_path):
+    invader = tmp_path / "invader"
+    invader.mkdir()
+    fake_tool(invader, "invader-info",
+        "a = sys.argv[1:]; kind = a[a.index('-T') + 1]; name = os.path.basename(a[-1])\n"
+        "xbox = name in ('a10.map', 'bloodgulch.map')\n"
+        "print({'engine': 'Halo: Combat Evolved (Xbox NTSC-US)' if xbox else 'Halo Custom Edition',\n"
+        "    'map_type': 'Multiplayer' if name == 'bloodgulch.map' else 'Singleplayer'}[kind])\n")
+    fake_tool(invader, "invader-extract",
+        "a = sys.argv[1:]\n"
+        "open(os.path.join(a[a.index('-t') + 1], 'order'), 'a').write(os.path.basename(a[-1]) + ' ' + a[a.index('-s') + 1] + '\\n')\n")
+    maps = tmp_path / "maps"
+    maps.mkdir()
+    for name in ("a10.map", "bloodgulch.map", "custom.map", "bitmaps.map", "notes.txt"):
+        (maps / name).write_bytes(b"x")
+    work = tmp_path / "work"
+    work.mkdir()
+    arguments = Arguments(invader, work, sound_maps=str(maps))
+    pool = convert.xbox_sound_pool(arguments, str(tmp_path / "log"))
+    assert (Path(pool) / "order").read_text().splitlines() == ["bloodgulch.map *.sound", "a10.map *.sound"]
+    assert convert.xbox_sound_pool(arguments, str(tmp_path / "log")) == pool
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    with pytest.raises(convert.ConversionError):
+        convert.xbox_sound_pool(Arguments(invader, work, sound_maps=str(empty)), str(tmp_path / "log"))
+
+
+@pytest.mark.parametrize("case", ["other kinds", "no folders", "no bitmaps.map"])
+def test_a_map_of_mccs_resource_maps_is_refused_without_what_it_needs(tmp_path, case):
+    invader = tmp_path / "invader"
+    invader.mkdir()
+    counts = {"external_tags_count": "5" if case == "other kinds" else "4", "external_bitmaps_count": "2",
+        "external_sounds_count": "2"}
+    fake_tool(invader, "invader-info",
+        "a = sys.argv[1:]; kind = a[a.index('-T') + 1]\n"
+        f"print({dict(counts, engine='Halo: Combat Evolved Anniversary (MCC)')!r}.get(kind, ''))\n")
+    mcc = tmp_path / "mcc"
+    mcc.mkdir()
+    (mcc / "bloodgulch.map").write_bytes(b"x")
+    arguments = Arguments(invader, tmp_path / "work", mcc_maps=None if case == "no folders" else str(mcc),
+        sound_maps=None if case == "no folders" else str(tmp_path))
+    arguments.output = str(tmp_path / "out")
+    (tmp_path / "out").mkdir()
+    with pytest.raises(convert.ConversionError) as refused:
+        convert.convert(arguments, str(mcc / "bloodgulch.map"))
+    assert {"other kinds": "other tags than bitmaps and sounds", "no folders": "--mcc-maps",
+        "no bitmaps.map": "no bitmaps.map"}[case] in str(refused.value)

@@ -120,6 +120,9 @@ player is told why, and the caller goes back to the menu
 (port/linux/game/custom_edition_cache.c) */
 unsigned char custom_edition_cache_load_failure_show(char const *map_name);
 unsigned char custom_edition_vehicle_placement_allowed(struct scenario_object_datum const *placement);
+/* whether such a map's local game places every type of vehicle its
+placements choose (PC map vehicles: custom_edition_objects.c) */
+unsigned char custom_edition_vehicles_every_type(void);
 
 /* while TRUE, drawing shifts right to center 640-column layouts */
 void halo_screen_ui_offset(unsigned char centered);
