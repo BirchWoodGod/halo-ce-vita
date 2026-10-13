@@ -369,9 +369,12 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
     n.build(outputs=eboot, rule="vita_eboot", inputs=velf)
     n.build(outputs=sfo, rule="vita_sfo", implicit=[Path("tools/vita_build.py"), VERSION_HEADER])
     assets = []
+    # (the LiveArea's and the bubble's images: the VPK made again when one changes)
+    sce_sys_files = []
     for asset in sorted((VITA_DIR / "sce_sys").rglob("*")) if (VITA_DIR / "sce_sys").is_dir() else []:
         if asset.is_file():
             assets.append(f"-a {_quote(asset)}={_quote(asset.relative_to(VITA_DIR))}")
+            sce_sys_files.append(asset)
     # files at the root of app0: (the shipped shader programs, port/vita/app0/shaders.pak:
     # tools/vita_shader_pack.py)
     # The pack goes in stamped with this build's generator id (made again when
@@ -390,7 +393,7 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
                         implicit=[generator_header, Path("tools/vita_shader_pack.py")])
             assets.append(f"-a {_quote(source)}={_quote(asset.relative_to(VITA_DIR / 'app0'))}")
             app0_files.append(source)
-    n.build(outputs=vpk, rule="vita_vpk", inputs=[eboot, sfo], implicit=app0_files,
+    n.build(outputs=vpk, rule="vita_vpk", inputs=[eboot, sfo], implicit=sce_sys_files + app0_files,
             variables={"sfo": str(sfo), "eboot": str(eboot), "assets": " ".join(assets)})
     n.build(outputs="vita", rule="phony", inputs=[vpk])
     n.newline()
