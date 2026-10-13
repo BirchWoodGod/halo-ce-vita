@@ -2416,10 +2416,42 @@ void vita_texture_cache_begin_frame(void)
 /* (a map gone: d3d8_gxm.c, the worker and the GPU idle, the decodes
 quiesced) every texture forgotten - decoded again at its next use - and the
 pool's segments but its first given back (vgxm_pool_release): the CDRAM
-bytes freed */
+bytes freed. The textures' entries are freed as well: an entry is the
+texture at one address of one format and size, and was kept for the
+session, so each map's textures at addresses no map before had used added
+theirs to the C heap for good (~150 entries, 20 KB, a multiplayer map, the
+most of the ~50 KB a map change the C heap crept by in the harness's bot
+playlist: triage/heap-creep-1.1.1.md). Their texels went with the pool
+above; a texture the next map draws makes its entry again, as the first
+map's did */
+static unsigned long texture_entries_free(void)
+{
+	unsigned long bucket, count = 0;
+
+	for (bucket = 0; bucket < TEXTURE_BUCKET_COUNT; bucket++)
+	{
+		struct texture_entry **link = &texture_buckets[bucket];
+		struct texture_entry *entry;
+
+		while ((entry = *link) != NULL)
+		{
+			/* (one a decode still holds - none, quiesced - is kept) */
+			if (entry->job)
+			{
+				link = &entry->next;
+				continue;
+			}
+			*link = entry->next;
+			free(entry);
+			count++;
+		}
+	}
+	return count;
+}
+
 unsigned long vita_texture_pool_release(void)
 {
-	unsigned long freed;
+	unsigned long freed, entries;
 
 	pool_reuse = NULL;
 	pool_reuse_size = 0;
@@ -2427,6 +2459,10 @@ unsigned long vita_texture_pool_release(void)
 	pool_last_size = 0;
 	freed = vgxm_pool_release();
 	pool_serial++;
+	entries = texture_entries_free();
+	if (entries)
+		platform_log("textures: %lu entries (%lu KB) freed with the map", entries,
+			(unsigned long)(entries * sizeof(struct texture_entry) / 1024));
 	/* (the next map starts with no pressure) */
 	if (texture_pressure)
 		platform_log("texture pool: the pressure back to 0 with the map gone (%lu textures were drawn smaller, %lu KB "
