@@ -56,6 +56,12 @@ data is shipped):
   from the rigid part above it (the distances to that part's particles
   kept between those the cone allows), its half-angle the animation graph
   node's range (halved, 6 to 90 degrees) or the mod's for that joint;
+- the knees, an Elite's and a Jackal's horselinks and the elbows are
+  hinges: the bone below kept within 10 degrees of the plane square to the
+  joint node's up axis (as it stood at the death, turned with the bone
+  above) and bent only the way it bends - every character's dying pose
+  bends a knee or an elbow toward its node's -up, a horselink toward +up -,
+  straight at most (5 degrees over);
 - a node's pose is its pose at death turned as its part has turned since
   (the rigid parts by their fitted rotation, a bone by the turn that takes
   its direction then to its direction now, carried from its parent's), and
@@ -71,21 +77,25 @@ a particle put out of one surface into another (a corner) goes back to
 where it stood. The particles of a rigid part near its centre (the hips by
 the pelvis, the clavicles and neck by the chest) get a vector only once a
 point test finds them in solid structure: the centre's sphere stands for
-them. The ragdoll is kept near where the game
-has its body's root node (the clusters the body is drawn from follow it):
-drawn along the ground a little each tick when more than a metre off.
+them.
 The particles' radius is the animation graph's limp body node radius (3 cm
 by default), one and a half that for the pelvis, chest and head.
 
 The death: unit_died (not a feigned one) names the body; the next tick it
 starts from its pose then, moving as the body moves (the game has already
-thrown it with the blow's acceleration), and the blow that killed it
+thrown it with the blow's acceleration) but no faster than 6 m/s - Halo's
+blasts throw a body at 15 m/s and more, 20 m and further, a ragdoll 3 or 4
+m; a local player's own, which the camera follows, as the game threw it -,
+and the blow that killed it
 (object_damage_aftermath) adds to that: an explosion throws each particle
 away from its centre, the nearest the most; a shot or a blow pushes the
 particle nearest its line (at least 1.7 m/s, the mod's). A body killed by a
 shot or a blow first follows its death animation for a quarter of a second,
 let go of a little more each tick, so the game's death reactions still
-start the fall; one killed by an explosion is thrown at once.
+start the fall; one killed by an explosion is thrown at once. Where the game
+has the body (thrown further) does not bound the ragdoll: the render finds a
+ragdoll in the cluster it lies in (render_ragdolls_find), not only in the
+clusters the game has its body in; past 150 m from it, it is let go.
 
 The budget, for the Vita's tick: four ragdolls awake at most
 (HALO_RAGDOLLS_ACTIVE), twelve kept (asleep, their pose drawn as they came
@@ -197,13 +207,15 @@ enum
 	RAGDOLL_SLEEP_AGE = 20,
 	/* awake this long at most */
 	RAGDOLL_AWAKE_TICKS = 300,
+	/* the game's body still thrown about this long after the death: its
+	moves are not the end of a ragdoll asleep */
+	RAGDOLL_FLIGHT_TICKS = 150,
 	/* ragdolls started a tick at most */
 	RAGDOLL_STARTS_PER_TICK = 2,
 	/* awake this long at least before put to sleep for another, and still
-	this long, or awake this long */
+	this long */
 	RAGDOLL_ROOM_TICKS = 30,
 	RAGDOLL_ROOM_STILL_TICKS = 3,
-	RAGDOLL_ROOM_ANYWAY_TICKS = 90,
 	/* following the death animation (a shot's or a blow's death) */
 	RAGDOLL_FOLLOW_TICKS = 8,
 	/* a remembered plane, kept this many ticks without touching it */
@@ -256,6 +268,15 @@ enum
 #define RAGDOLL_MAXIMUM_RADIUS 0.07f
 /* air drag a step (of 1: none; the game's bodies fly without any) */
 #define RAGDOLL_DAMPING 0.999f
+/* a hinge's child out of its plane by more than this share of its bone
+(sin 10 degrees), and bent the wrong way past this share (sin 5) */
+#define RAGDOLL_HINGE_SLACK 0.17f
+#define RAGDOLL_HINGE_OVER 0.087f
+/* the most a body's own motion starts its ragdoll with (6 m/s: thrown 3
+or 4 m, the length of a body or two; Halo's blasts throw its bodies at 15
+m/s and more, 20 m and further), world units a tick; a local player's
+own body, which the camera follows, as the game threw it */
+#define RAGDOLL_LAUNCH_SPEED (6.0f / 3.048f / TICKS_PER_SECOND)
 /* friction against the world, static and kinetic (a body sticks on slopes
 up to about 40 degrees) */
 #define RAGDOLL_STATIC_FRICTION 0.85f
@@ -275,14 +296,10 @@ up to about 40 degrees) */
 /* the most an impulse adds to a particle (8 m/s; the mod's 12 throws the
 whole body, which the game has already thrown here) */
 #define RAGDOLL_MAXIMUM_IMPULSE (8.0f / 3.048f / TICKS_PER_SECOND)
-/* a ragdoll farther than this from where the game has its body's root
-node (world units: 1 m) is drawn toward it, by this share of the rest a
-tick */
-#define RAGDOLL_TETHER_SLACK 0.3f
-#define RAGDOLL_TETHER_PULL 0.1f
 /* a ragdoll this far from its body's root node is let go (world units:
-15 m) */
-#define RAGDOLL_TETHER 5.0f
+150 m; a blast throws the game's body 40 m and more, its ragdoll a few:
+only a body put elsewhere) */
+#define RAGDOLL_TETHER 50.0f
 /* asleep, its body moved this far by the game: let go (world units: 6 m) */
 #define RAGDOLL_BODY_MOVED 2.0f
 /* the drawn sphere: around the particles, this much more */
@@ -348,6 +365,17 @@ struct ragdoll_particle
 	short child;
 	short child_count;
 	short cluster;
+	/* a knee or an elbow: it bends one way only, about this axis (as it
+	stood at the death, carried by its parent's turn), its child on the
+	side cross(parent to it, it to its child) . axis > 0 */
+	boolean hinge;
+	real_vector3d hinge_axis;
+	/* how far the step's rounds pushed it out of the planes it touches
+	(its friction's measure, ragdoll_plane_keep) */
+	real pushed;
+	/* its turn is wanted while stepping (a hinge's parent, and theirs up
+	to a rigid part's centre) */
+	boolean turned;
 	/* it meets the world with a vector each tick it moves (one near the
 	centre of its rigid part only once its centre has gone into solid
 	structure: the centre's sphere stands for it) */
@@ -383,7 +411,7 @@ struct ragdoll
 	long object_index;
 	unsigned long map_generation;
 	short state;
-	short node_count, particle_count, constraint_count, cluster_count;
+	short node_count, particle_count, constraint_count, cluster_count, hinge_count;
 	short still_ticks;
 	short follow_ticks;
 	long age;
@@ -406,8 +434,14 @@ struct ragdoll
 	real_matrix4x3 pose[RAGDOLL_MAXIMUM_NODES];
 	real_point3d center;
 	real radius;
-	/* where its body was the last tick it was awake */
+	/* where its body was the last tick it was awake (or, the first five
+	seconds, the last tick: the game's body thrown further than its own) */
 	real_point3d body;
+	/* the tick it started on (ragdoll_ticks) */
+	unsigned long started_tick;
+	/* the cluster its middle is in (NONE: none), the render's: it is
+	drawn when that cluster is (ragdolls_drawn) */
+	short drawn_cluster;
 };
 
 struct ragdoll_pending
@@ -1269,6 +1303,63 @@ static boolean ragdoll_build(
 		}
 	}
 
+	/* (the hinges: a knee, a horselink, an elbow - a bone with a bone
+	above and one below - bends about its node's up axis, as every
+	character's dying pose has it: a knee or an elbow its child toward
+	-up's side, an Elite's or Jackal's horselink toward +up's; another
+	hinge of the animation graph's the way it was bent at the death, if it
+	was bent 10 degrees) */
+	for (index = 0; index < ragdoll->particle_count; index++)
+	{
+		struct ragdoll_particle *joint = &ragdoll->particles[index];
+		struct model_node const *node = TAG_BLOCK_GET_ELEMENT(&model->nodes, joint->node_index, struct model_node);
+		struct ragdoll_graph_node const *graph_node = ragdoll_graph_node_get(graph, joint->node_index);
+		real_vector3d above, below, bend;
+		real sign = 0.f;
+		short up;
+
+		if (joint->parent == NONE || joint->child == NONE ||
+			ragdoll_in_cluster_together(ragdoll, index, joint->child) ||
+			ragdoll_in_cluster_together(ragdoll, index, joint->parent))
+		{
+			continue;
+		}
+		ragdoll_between(&ragdoll->particles[joint->parent].position, &joint->position, &above);
+		ragdoll_between(&joint->position, &ragdoll->particles[joint->child].position, &below);
+		if (ragdoll_normalize(&above) < 1e-4f || ragdoll_normalize(&below) < 1e-4f)
+			continue;
+		ragdoll_cross(&above, &below, &bend);
+		if (ragdoll_name_has(node->name, "horselink"))
+			sign = 1.f;
+		else if (ragdoll_name_has(node->name, "calf") || ragdoll_name_has(node->name, "forearm"))
+			sign = -1.f;
+		else if (graph_node && TEST_FLAG(graph_node->flags, _ragdoll_joint_hinge_bit) &&
+			ragdoll_length(&bend) > RAGDOLL_HINGE_SLACK)
+		{
+			sign = ragdoll_dot(&bend, &live[joint->node_index].up) > 0.f ? 1.f : -1.f;
+		}
+		if (sign == 0.f)
+			continue;
+		joint->hinge = TRUE;
+		joint->hinge_axis.i = live[joint->node_index].up.i * sign;
+		joint->hinge_axis.j = live[joint->node_index].up.j * sign;
+		joint->hinge_axis.k = live[joint->node_index].up.k * sign;
+		if (ragdoll_normalize(&joint->hinge_axis) < 1e-4f)
+		{
+			joint->hinge = FALSE;
+			continue;
+		}
+		ragdoll->hinge_count++;
+		/* (its parent's turn carries the axis: that particle's and its
+		ancestors' up to a rigid part's centre are found as it steps) */
+		for (up = joint->parent; up != NONE; up = ragdoll->particles[up].parent)
+		{
+			ragdoll->particles[up].turned = TRUE;
+			if (ragdoll->particles[up].cluster != NONE)
+				break;
+		}
+	}
+
 	/* (each node's matrix at the death: a particle's in the world, any
 	other's in its parent's) */
 	for (index = 0; index < node_count; index++)
@@ -1565,6 +1656,36 @@ static boolean ragdoll_start_outside(
 	return TRUE;
 }
 
+/* the body is a local player's own unit (its dead camera follows where
+the game has it) */
+static boolean ragdoll_local_player_body(
+	long object_index)
+{
+	short local_player_index;
+
+	for (local_player_index = 0; local_player_index < MAXIMUM_LOCAL_PLAYERS; local_player_index++)
+	{
+		long player_index = local_player_get_player_index(local_player_index);
+
+		struct player_datum *player = player_index != NONE ? player_get(player_index) : NULL;
+
+		/* (player_died has it as its dead unit) */
+		if (player && (player->unit_index == object_index || player->dead_unit_index == object_index))
+			return TRUE;
+	}
+	return FALSE;
+}
+
+/* the cluster a point is in (NONE: none, outside the structure) */
+static short ragdoll_cluster_of(
+	real_point3d const *point)
+{
+	struct location location;
+
+	scenario_location_from_point(&location, point);
+	return location.cluster_index;
+}
+
 /* a body whose pose is to be a ragdoll's from now (FALSE: none made) */
 static boolean ragdoll_start(
 	long object_index,
@@ -1599,9 +1720,22 @@ static boolean ragdoll_start(
 	ragdoll->map_generation = halo_map_generation;
 	ragdoll->state = _ragdoll_awake;
 	ragdoll->started = ragdoll->woken = ++ragdoll_sequence;
-	/* (the body's own motion, as the game threw it, a tick's in substeps) */
+	/* (the body's own motion, as the game threw it, a tick's in substeps;
+	no faster than a blast plausibly throws a body, but a local player's
+	own, which the camera follows) */
 	if (!ragdoll_finite((real_point3d const *)&velocity))
 		velocity = *global_zero_vector3d;
+	if (!ragdoll_local_player_body(object_index))
+	{
+		real speed = ragdoll_length(&velocity);
+
+		if (speed > RAGDOLL_LAUNCH_SPEED)
+		{
+			velocity.i *= RAGDOLL_LAUNCH_SPEED / speed;
+			velocity.j *= RAGDOLL_LAUNCH_SPEED / speed;
+			velocity.k *= RAGDOLL_LAUNCH_SPEED / speed;
+		}
+	}
 	for (index = 0; index < ragdoll->particle_count; index++)
 	{
 		struct ragdoll_particle *particle = &ragdoll->particles[index];
@@ -1616,14 +1750,17 @@ static boolean ragdoll_start(
 	ragdoll->center = object->object.bounding_sphere_center;
 	ragdoll->radius = object->object.bounding_sphere_radius;
 	ragdoll->body = object->object.position;
+	ragdoll->started_tick = ragdoll_ticks;
+	ragdoll->drawn_cluster = ragdoll_cluster_of(&ragdoll->center);
 	ragdoll_slot_by_object[absolute_index] = (unsigned char)(slot + 1);
 	ragdoll_stats.started++;
 	ragdoll_stats.start_us += vita_host_time_us() - started_us;
 	if (ragdolls_log_level())
 	{
-		platform_log("ragdolls: %08lx (%s) started in slot %d: %d particles, %d constraints, %d rigid parts; "
+		platform_log("ragdolls: %08lx (%s) started in slot %d: %d particles, %d constraints, %d rigid parts, %d hinges; "
 			"%s %.3f wu/tick, follows its death %d ticks", (unsigned long)object_index, ragdoll_object_name(object_index),
 			(int)slot, (int)ragdoll->particle_count, (int)ragdoll->constraint_count, (int)ragdoll->cluster_count,
+			(int)ragdoll->hinge_count,
 			note ? (note->explosion ? "an explosion" : "a blow") : "no blow", note ? (double)note->speed : 0.0,
 			(int)ragdoll->follow_ticks);
 	}
@@ -1733,12 +1870,17 @@ static boolean ragdoll_plane_keep(
 	real_vector3d motion, along;
 	real depth, away, into, slide;
 
-	if (distance >= particle->radius)
-		return distance < particle->radius + RAGDOLL_TOUCHING;
+	if (distance >= particle->radius + RAGDOLL_TOUCHING)
+		return FALSE;
 	ragdoll_between(&particle->previous, &particle->position, &motion);
-	away = MAX(0.f, ragdoll_dot(&motion, normal));
-	depth = particle->radius - distance;
+	/* (the step's rounds' pushes out of it are no motion away) */
+	away = MAX(0.f, ragdoll_dot(&motion, normal) - particle->pushed);
+	depth = MAX(0.f, particle->radius - distance);
 	ragdoll_move(&particle->position, normal, depth);
+	/* (and the step's rounds' pushes out of it) */
+	depth += particle->pushed;
+	if (depth <= 0.f)
+		return TRUE;
 	ragdoll_between(&particle->previous, &particle->position, &motion);
 	into = ragdoll_dot(&motion, normal);
 	along.i = motion.i - normal->i * into;
@@ -1871,6 +2013,146 @@ static void ragdoll_collide(
 	}
 }
 
+/* the turn of a particle's part since the death (its parent's found
+first): a rigid part's centre's by its fitted rotation, a bone's by the
+turn taking its direction then, carried by its parent's, to its direction
+now, any other's its parent's */
+static void ragdoll_turn(
+	struct ragdoll *ragdoll,
+	short index)
+{
+	struct ragdoll_particle *particle = &ragdoll->particles[index];
+	struct ragdoll_rotation parent_delta;
+
+	if (particle->parent != NONE)
+		parent_delta = ragdoll->particles[particle->parent].delta;
+	else
+		ragdoll_rotation_identity(&parent_delta);
+	if (particle->cluster != NONE)
+		ragdoll_rotation_from_quaternion(ragdoll->clusters[particle->cluster].quaternion, &particle->delta);
+	else if (particle->child != NONE)
+	{
+		real_vector3d expected, now;
+		struct ragdoll_rotation turn;
+
+		ragdoll_rotate(&parent_delta, &particle->handoff_direction, &expected);
+		ragdoll_between(&particle->position, &ragdoll->particles[particle->child].position, &now);
+		if (ragdoll_normalize(&now) < 1e-6f || ragdoll_normalize(&expected) < 1e-6f)
+			particle->delta = parent_delta;
+		else
+		{
+			ragdoll_rotation_between(&expected, &now, &turn);
+			ragdoll_rotation_multiply(&turn, &parent_delta, &particle->delta);
+		}
+	}
+	else
+		particle->delta = parent_delta;
+}
+
+/* the knees and elbows bent the way they bend: the child kept in the
+plane square to the hinge's axis (within 10 degrees) and on its side of
+the bone above (straight at most, 5 degrees over); its distance from the
+joint as it was */
+static void ragdoll_solve_hinges(
+	struct ragdoll *ragdoll)
+{
+	static int enabled = -1;
+	short index;
+
+	/* (debug) HALO_RAGDOLLS_HINGES=0: knees and elbows bend either way, as
+	before the hinges (their angle alone limited) */
+	if (enabled < 0)
+		enabled = !getenv("HALO_RAGDOLLS_HINGES") || atoi(getenv("HALO_RAGDOLLS_HINGES")) != 0;
+	if (!ragdoll->hinge_count || !enabled)
+		return;
+	for (index = 0; index < ragdoll->particle_count; index++)
+	{
+		if (ragdoll->particles[index].turned)
+			ragdoll_turn(ragdoll, index);
+	}
+	for (index = 0; index < ragdoll->particle_count; index++)
+	{
+		struct ragdoll_particle const *joint = &ragdoll->particles[index];
+		struct ragdoll_particle *child;
+		real_vector3d axis, above, below, side;
+		real length, off, limit, along, bent;
+
+
+		if (!joint->hinge)
+			continue;
+		child = &ragdoll->particles[joint->child];
+		ragdoll_rotate(&ragdoll->particles[joint->parent].delta, &joint->hinge_axis, &axis);
+		ragdoll_between(&ragdoll->particles[joint->parent].position, &joint->position, &above);
+		ragdoll_between(&joint->position, &child->position, &below);
+		length = ragdoll_length(&below);
+		if (ragdoll_normalize(&above) < 1e-5f || length < 1e-5f)
+			continue;
+		/* (out of the plane: back to within 10 degrees of it) */
+		off = ragdoll_dot(&below, &axis);
+		limit = RAGDOLL_HINGE_SLACK * length;
+		if (off > limit || off < -limit)
+			ragdoll_move((real_point3d *)&below, &axis, (off > 0.f ? limit : -limit) - off);
+		/* (bent the wrong way: straightened, 5 degrees over at most) */
+		ragdoll_cross(&above, &below, &side);
+		bent = ragdoll_dot(&side, &axis);
+		if (bent < -RAGDOLL_HINGE_OVER * length)
+		{
+			real_vector3d across;
+
+			along = ragdoll_dot(&below, &above);
+			ragdoll_cross(&axis, &above, &across);
+			/* (along the bone above, a little over its line) */
+			off = ragdoll_dot(&below, &axis);
+			below.i = above.i * MAX(along, 0.f) + axis.i * off - across.i * RAGDOLL_HINGE_OVER * length;
+			below.j = above.j * MAX(along, 0.f) + axis.j * off - across.j * RAGDOLL_HINGE_OVER * length;
+			below.k = above.k * MAX(along, 0.f) + axis.k * off - across.k * RAGDOLL_HINGE_OVER * length;
+		}
+		if (ragdoll_normalize(&below) < 1e-6f)
+			continue;
+		/* (the child and the joint moved toward it by their masses: a foot
+		on the ground straightens a knee by the knee) */
+		{
+			real_point3d target = joint->position;
+			real_vector3d correction;
+			real weights = joint->inverse_mass + child->inverse_mass;
+			struct ragdoll_particle *bent_joint = &ragdoll->particles[index];
+
+			ragdoll_move(&target, &below, length);
+			ragdoll_between(&child->position, &target, &correction);
+			ragdoll_move(&child->position, &correction, child->inverse_mass / weights);
+			ragdoll_move(&bent_joint->position, &correction, -bent_joint->inverse_mass / weights);
+		}
+	}
+}
+
+/* the planes a particle touches, kept to within a step's rounds: out to its
+radius (its motion and friction the step's end's, ragdoll_plane_keep) */
+static void ragdoll_solve_planes(
+	struct ragdoll *ragdoll)
+{
+	short index, plane;
+
+	for (index = 0; index < ragdoll->particle_count; index++)
+	{
+		struct ragdoll_particle *particle = &ragdoll->particles[index];
+
+		for (plane = 0; plane < RAGDOLL_PLANES; plane++)
+		{
+			struct ragdoll_plane const *touched = &particle->planes[plane];
+			real distance;
+
+			if (touched->ticks <= 0)
+				continue;
+			distance = ragdoll_dot(&touched->normal, (real_vector3d const *)&particle->position) - touched->d;
+			if (distance < particle->radius)
+			{
+				ragdoll_move(&particle->position, &touched->normal, particle->radius - distance);
+				particle->pushed += particle->radius - distance;
+			}
+		}
+	}
+}
+
 /* the turn of each particle's part since the death, and the pose drawn:
 a particle's node at the particle, turned so; any other carried by its
 parent */
@@ -1881,34 +2163,7 @@ static void ragdoll_pose(
 	short index;
 
 	for (index = 0; index < ragdoll->particle_count; index++)
-	{
-		struct ragdoll_particle *particle = &ragdoll->particles[index];
-		struct ragdoll_rotation parent_delta;
-
-		if (particle->parent != NONE)
-			parent_delta = ragdoll->particles[particle->parent].delta;
-		else
-			ragdoll_rotation_identity(&parent_delta);
-		if (particle->cluster != NONE)
-			ragdoll_rotation_from_quaternion(ragdoll->clusters[particle->cluster].quaternion, &particle->delta);
-		else if (particle->child != NONE)
-		{
-			real_vector3d expected, now;
-			struct ragdoll_rotation turn;
-
-			ragdoll_rotate(&parent_delta, &particle->handoff_direction, &expected);
-			ragdoll_between(&particle->position, &ragdoll->particles[particle->child].position, &now);
-			if (ragdoll_normalize(&now) < 1e-6f || ragdoll_normalize(&expected) < 1e-6f)
-				particle->delta = parent_delta;
-			else
-			{
-				ragdoll_rotation_between(&expected, &now, &turn);
-				ragdoll_rotation_multiply(&turn, &parent_delta, &particle->delta);
-			}
-		}
-		else
-			particle->delta = parent_delta;
-	}
+		ragdoll_turn(ragdoll, index);
 	for (index = 0; index < ragdoll->node_count; index++)
 	{
 		short node_index = ragdoll->node_order[index];
@@ -1945,6 +2200,7 @@ static void ragdoll_pose(
 	ragdoll->center.y = 0.5f * (low.y + high.y);
 	ragdoll->center.z = 0.5f * (low.z + high.z);
 	ragdoll->radius = 0.5f * ragdoll_distance(&low, &high) + RAGDOLL_SPHERE_MARGIN;
+	ragdoll->drawn_cluster = ragdoll_cluster_of(&ragdoll->center);
 }
 
 /* a tick of an awake ragdoll; FALSE: let go (why in reason) */
@@ -1973,6 +2229,7 @@ static boolean ragdoll_step(
 			particle->previous = particle->position;
 			ragdoll_move(&particle->position, &motion, RAGDOLL_DAMPING);
 			particle->position.z -= step_gravity;
+			particle->pushed = 0.f;
 		}
 		/* (a body killed by a shot or a blow follows its death animation
 		at first, let go of a little more each tick: drawn toward where the
@@ -2010,6 +2267,14 @@ static boolean ragdoll_step(
 		{
 			ragdoll_solve_constraints(ragdoll);
 			ragdoll_solve_clusters(ragdoll);
+			/* (the hinges and the planes touched every second round: a
+			foot on the ground straightens its knee by moving the knee,
+			then the bones and the rigid parts take it up) */
+			if (iteration & 1)
+			{
+				ragdoll_solve_hinges(ragdoll);
+				ragdoll_solve_planes(ragdoll);
+			}
 		}
 		for (index = 0; index < ragdoll->particle_count; index++)
 		{
@@ -2025,29 +2290,6 @@ static boolean ragdoll_step(
 				{
 					particle->planes[plane].ticks = RAGDOLL_PLANE_TICKS;
 				}
-			}
-		}
-	}
-	/* (kept near where the game has the body: its root node, which its
-	sphere and the clusters it is drawn from follow - the whole ragdoll
-	drawn along the ground a little each tick, beyond a slack, nothing
-	added to its motion) */
-	{
-		struct ragdoll_particle const *root = &ragdoll->particles[0];
-		real_vector3d toward;
-		real distance;
-
-		ragdoll_between(&root->position, &live[root->node_index].position, &toward);
-		toward.k = 0.f;
-		distance = ragdoll_normalize(&toward);
-		if (distance > RAGDOLL_TETHER_SLACK)
-		{
-			real shift = (distance - RAGDOLL_TETHER_SLACK) * RAGDOLL_TETHER_PULL;
-
-			for (index = 0; index < ragdoll->particle_count; index++)
-			{
-				ragdoll_move(&ragdoll->particles[index].position, &toward, shift);
-				ragdoll_move(&ragdoll->particles[index].previous, &toward, shift);
 			}
 		}
 	}
@@ -2141,8 +2383,9 @@ static struct object_datum *ragdoll_body(
 }
 
 /* an awake ragdoll that may be put to sleep for a new one: one awake a
-second at least and nearly at rest, or awake three seconds, the stillest of
-them (the longest still, then the one awake longest); NONE: none */
+second at least and nearly at rest (one still falling, frozen, hung in the
+air), the stillest of them (the longest still, then the one awake
+longest); NONE: none */
 static short ragdoll_room(
 	void)
 {
@@ -2155,7 +2398,7 @@ static short ragdoll_room(
 		/* (not one still falling: frozen in the air while its body flies
 		on) */
 		if (ragdoll->state != _ragdoll_awake || ragdoll->awake_ticks < RAGDOLL_ROOM_TICKS ||
-			(ragdoll->still_ticks < RAGDOLL_ROOM_STILL_TICKS && ragdoll->awake_ticks < RAGDOLL_ROOM_ANYWAY_TICKS))
+			ragdoll->still_ticks < RAGDOLL_ROOM_STILL_TICKS)
 		{
 			continue;
 		}
@@ -2274,6 +2517,23 @@ void ragdolls_note_damage(
 					ragdoll_object_name(object_index));
 		}
 		ragdoll_apply_note(ragdoll, note);
+		/* (the whole body thrown as object_damage_aftermath throws it -
+		a little upward -, no faster than a body's launch) */
+		{
+			real_vector3d direction = note->direction;
+			real speed = MIN(note->speed, RAGDOLL_LAUNCH_SPEED);
+
+			direction.k += 0.45f;
+			if (speed > 0.f && ragdoll_normalize(&direction) > 1e-5f)
+			{
+				for (index = 0; index < ragdoll->particle_count; index++)
+				{
+					ragdoll->particles[index].previous.x -= direction.i * speed / RAGDOLL_SUBSTEPS;
+					ragdoll->particles[index].previous.y -= direction.j * speed / RAGDOLL_SUBSTEPS;
+					ragdoll->particles[index].previous.z -= direction.k * speed / RAGDOLL_SUBSTEPS;
+				}
+			}
+		}
 	}
 }
 
@@ -2388,8 +2648,12 @@ void ragdolls_tick(
 		}
 		/* (asleep, its body moved far by the game - pushed by a vehicle,
 		put elsewhere by a script; a blast that strikes it wakes it, as it
-		throws the body -: drawn as the game has it again) */
-		if (ragdoll->state == _ragdoll_asleep &&
+		throws the body -: drawn as the game has it again; not while the
+		game's body is still flying from the death, thrown further than the
+		ragdoll) */
+		if (ragdoll->state == _ragdoll_asleep && ragdoll_ticks - ragdoll->started_tick < RAGDOLL_FLIGHT_TICKS)
+			ragdoll->body = object->object.position;
+		else if (ragdoll->state == _ragdoll_asleep &&
 			ragdoll_distance(&ragdoll->body, &object->object.position) > RAGDOLL_BODY_MOVED)
 		{
 			ragdoll_release(slot, _ragdoll_released_body_moved);
@@ -2434,36 +2698,6 @@ void ragdolls_tick(
 
 /* ---------- the render's poses */
 
-/* the sphere around the ragdoll and the body's own (the game's, around its
-root node): the render finds an object in the clusters the game put it in
-by its sphere, and tests the sphere it is given against those clusters'
-frustums - the ragdoll's alone, lying a little off where the game has its
-body, could be outside them, and the body was not drawn */
-static void ragdoll_sphere_union(
-	struct ragdoll const *ragdoll,
-	real_point3d *center,
-	real *radius)
-{
-	real distance = ragdoll_distance(center, &ragdoll->center);
-	real_vector3d toward;
-	real low, high;
-
-	if (distance + ragdoll->radius <= *radius)
-		return;
-	if (distance + *radius <= ragdoll->radius)
-	{
-		*center = ragdoll->center;
-		*radius = ragdoll->radius;
-		return;
-	}
-	ragdoll_between(center, &ragdoll->center, &toward);
-	ragdoll_normalize(&toward);
-	low = -*radius;
-	high = distance + ragdoll->radius;
-	ragdoll_move(center, &toward, 0.5f * (low + high));
-	*radius = 0.5f * (high - low);
-}
-
 boolean ragdolls_object_has_pose(
 	long object_index)
 {
@@ -2483,8 +2717,10 @@ boolean ragdolls_pose_override(
 		return FALSE;
 	ragdoll_stats.copied++;
 	memcpy(matrices, ragdoll->pose, node_count * sizeof(real_matrix4x3));
-	/* (center and radius come as the body's) */
-	ragdoll_sphere_union(ragdoll, center, radius);
+	/* (the detail level, the lighting's and fog's centroid: the drawn
+	body's) */
+	*center = ragdoll->center;
+	*radius = ragdoll->radius;
 	return TRUE;
 }
 
@@ -2505,14 +2741,43 @@ boolean ragdolls_live_bounding_sphere(
 	real *radius)
 {
 	struct ragdoll const *ragdoll = ragdoll_of_object(object_index);
-	struct object_datum *object = ragdoll ? object_try_and_get(object_index) : NULL;
 
-	if (!object)
+	if (!ragdoll)
 		return FALSE;
-	*center = object->object.bounding_sphere_center;
-	*radius = object->object.bounding_sphere_radius;
-	ragdoll_sphere_union(ragdoll, center, radius);
+	*center = ragdoll->center;
+	*radius = ragdoll->radius;
 	return TRUE;
+}
+
+/* the ragdolls kept, their spheres and the clusters their middles are in
+(the tick's thread copying the poses, or the render with no tick
+running): the render draws one in a cluster it draws, wherever the game
+has its body (render_interpolation.c) */
+short ragdolls_drawn_list(
+	long *objects,
+	real_point3d *centers,
+	real *radii,
+	short *clusters,
+	short maximum)
+{
+	short slot, count = 0;
+
+	for (slot = 0; slot < RAGDOLL_SLOTS && count < maximum; slot++)
+	{
+		struct ragdoll const *ragdoll = &ragdolls[slot];
+
+		if (ragdoll->state == _ragdoll_free || ragdoll->map_generation != halo_map_generation ||
+			ragdoll->drawn_cluster == NONE)
+		{
+			continue;
+		}
+		objects[count] = ragdoll->object_index;
+		centers[count] = ragdoll->center;
+		radii[count] = ragdoll->radius;
+		clusters[count] = ragdoll->drawn_cluster;
+		count++;
+	}
+	return count;
 }
 
 /* ---------- tests */
@@ -2576,7 +2841,7 @@ static void ragdoll_test_check(
 	void)
 {
 	short slot, index;
-	short kept = 0, awake = 0, particles = 0, outside = 0, not_a_number = 0;
+	short kept = 0, awake = 0, particles = 0, outside = 0, not_a_number = 0, hinges = 0, wrong = 0;
 	real farthest = 0.f;
 
 	for (slot = 0; slot < RAGDOLL_SLOTS; slot++)
@@ -2614,6 +2879,32 @@ static void ragdoll_test_check(
 			if (!ragdoll_finite(&ragdoll->pose[index].position) || !ragdoll_finite((real_point3d const *)&ragdoll->pose[index].forward))
 				not_a_number++;
 		}
+		/* (a hinge bent the wrong way more than 10 degrees, or 20 out of
+		its plane) */
+		for (index = 0; index < ragdoll->particle_count; index++)
+		{
+			struct ragdoll_particle const *joint = &ragdoll->particles[index];
+			real_vector3d axis, above, below, side;
+
+			if (!joint->hinge)
+				continue;
+			hinges++;
+			ragdoll_rotate(&ragdoll->particles[joint->parent].delta, &joint->hinge_axis, &axis);
+			ragdoll_between(&ragdoll->particles[joint->parent].position, &joint->position, &above);
+			ragdoll_between(&joint->position, &ragdoll->particles[joint->child].position, &below);
+			ragdoll_normalize(&above);
+			ragdoll_normalize(&below);
+			ragdoll_cross(&above, &below, &side);
+			if (ragdoll_dot(&side, &axis) < -0.174f || ragdoll_dot(&below, &axis) > 0.342f ||
+				ragdoll_dot(&below, &axis) < -0.342f)
+			{
+				wrong++;
+				platform_log("ragdolls check: hinge: %08lx (%s) %s, %ld ticks: particle %d (node %d) bent %.3f, out of its plane %.3f",
+					(unsigned long)ragdoll->object_index, ragdoll_object_name(ragdoll->object_index),
+					ragdoll->state == _ragdoll_awake ? "awake" : "asleep", ragdoll->age, (int)index, (int)joint->node_index,
+					(double)ragdoll_dot(&side, &axis), (double)ragdoll_dot(&below, &axis));
+			}
+		}
 		if (object)
 		{
 			real_matrix4x3 const *live = (real_matrix4x3 const *)object_header_block_get(ragdoll->object_index,
@@ -2633,8 +2924,8 @@ static void ragdoll_test_check(
 		}
 	}
 	platform_log("ragdolls check: %d kept, %d awake, %d particles, %d in solid structure, %d not a number, "
-		"farthest from its body's root %.3f", (int)kept, (int)awake, (int)particles, (int)outside, (int)not_a_number,
-		(double)farthest);
+		"farthest from its body's root %.3f, %d of %d hinges bent the wrong way", (int)kept, (int)awake, (int)particles,
+		(int)outside, (int)not_a_number, (double)farthest, (int)wrong, (int)hinges);
 }
 
 void ragdolls_test_command(

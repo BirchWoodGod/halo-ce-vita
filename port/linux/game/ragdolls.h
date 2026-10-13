@@ -42,6 +42,10 @@ boolean ragdolls_pose_override(long object_index, real_matrix4x3 *matrices, shor
 the pose, or NULL */
 real_matrix4x3 *ragdolls_live_node_matrices(long object_index);
 boolean ragdolls_live_bounding_sphere(long object_index, real_point3d *center, real *radius);
+/* the ragdolls kept, their spheres and the clusters their middles are in
+(the tick's thread, or the render with no tick running) */
+enum { RAGDOLLS_DRAWN_MAXIMUM = 12 };
+short ragdolls_drawn_list(long *objects, real_point3d *centers, real *radii, short *clusters, short maximum);
 
 /* ---------- tests (main.c's "@ragdoll ...", at the top of the main loop,
 the tick joined) */

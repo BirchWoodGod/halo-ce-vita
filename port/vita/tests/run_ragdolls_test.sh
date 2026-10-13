@@ -115,7 +115,8 @@ stats() {
 }
 
 # check NAME TICK FIELD: from the "ragdolls check:" line of the @ragdoll
-# check at that tick (kept, awake, particles, solid, nan, farthest)
+# check at that tick (kept, awake, particles, solid, nan, farthest, wrong,
+# hinges)
 check() {
 	awk -v tick="$2" -v field="$3" '
 		$0 ~ "test command at tick " tick ": @ragdoll check$" { want = 1; next }
@@ -127,8 +128,8 @@ check() {
 			for (i = 1; i <= n; i++)
 				if (words[i] ~ /^[0-9.]+$/)
 					numbers[++count] = words[i]
-			split("kept awake particles solid nan farthest", names, " ")
-			for (i = 1; i <= 6; i++)
+			split("kept awake particles solid nan farthest wrong hinges", names, " ")
+			for (i = 1; i <= 8; i++)
 				if (names[i] == field)
 					print numbers[i]
 			exit
@@ -217,8 +218,8 @@ for c in "${started[@]}"; do
 		expect "$c" "settled: by tick 2400 $kept kept, $awake awake; some asleep at rest" \
 			sh -c "[ '${awake:-9}' = 0 ] && [ '${kept:-0}' -gt 0 ] && grep -aq 'asleep: at rest' '$log'"
 		for t in 1700 2400; do
-			expect "$c" "tick $t: none in solid structure ($(check "$c" $t solid) of $(check "$c" $t particles) particles), none not a number ($(check "$c" $t nan)), nearest its body ($(check "$c" $t farthest))" \
-				sh -c "[ '$(check "$c" $t solid)' = 0 ] && [ '$(check "$c" $t nan)' = 0 ] && awk 'BEGIN { exit !($(check "$c" $t farthest) + 0 <= 5) }'"
+			expect "$c" "tick $t: none in solid structure ($(check "$c" $t solid) of $(check "$c" $t particles) particles), none not a number ($(check "$c" $t nan)), within 150 m of its body (farthest $(check "$c" $t farthest)), no knee or elbow bent the wrong way ($(check "$c" $t wrong) of $(check "$c" $t hinges))" \
+				sh -c "[ '$(check "$c" $t solid)' = 0 ] && [ '$(check "$c" $t nan)' = 0 ] && awk 'BEGIN { exit !($(check "$c" $t farthest) + 0 <= 50) }' && [ '$(check "$c" $t wrong)' = 0 ] && [ '$(check "$c" $t hinges)' -gt 0 ]"
 		done
 		expect "$c" "never not a number ($(stats "$c" 2400 nan))" test "$(stats "$c" 2400 nan)" = 0
 		expect "$c" "drawn: $(stats "$c" 2400 copied) poses copied with the tick's for the render" gt "$(stats "$c" 2400 copied)" 100
@@ -254,8 +255,8 @@ for c in "${started[@]}"; do
 	a10)
 		expect "$c" "crewmen made ragdolls ($(stats "$c" 630 started))" \
 			sh -c "[ '$(stats "$c" 630 started)' -gt 0 ] && grep -aq 'ragdolls: .*(crewman.*started' '$log'"
-		expect "$c" "settled ($(stats "$c" 1300 awake) awake), none in solid, none not a number" \
-			sh -c "[ '$(stats "$c" 1300 awake)' = 0 ] && [ '$(check "$c" 1300 solid)' = 0 ] && [ '$(check "$c" 1300 nan)' = 0 ]" ;;
+		expect "$c" "settled ($(stats "$c" 1300 awake) awake), none in solid, none not a number, no hinge bent the wrong way ($(check "$c" 1300 wrong) of $(check "$c" 1300 hinges))" \
+			sh -c "[ '$(stats "$c" 1300 awake)' = 0 ] && [ '$(check "$c" 1300 solid)' = 0 ] && [ '$(check "$c" 1300 nan)' = 0 ] && [ '$(check "$c" 1300 wrong)' = 0 ]" ;;
 	bloodgulch)
 		expect "$c" "the player's body a ragdoll ($(stats "$c" 310 started))" gt "$(stats "$c" 310 started)" 0
 		expect "$c" "none in solid, none not a number" sh -c "[ '$(check "$c" 700 solid)' = 0 ] && [ '$(check "$c" 700 nan)' = 0 ]" ;;

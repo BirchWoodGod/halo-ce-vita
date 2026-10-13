@@ -676,6 +676,21 @@ static void find_rendered_objects(
 		object_unmarked_function,
 		object_mark_function);
 
+#ifdef HALO_LINUX
+	/* port: the dead bodies' ragdolls, found in the clusters they lie in,
+	wherever the game has their bodies (port/linux/game/ragdolls.c,
+	render_interpolation.c) */
+	{
+		short render_ragdolls_find(long *result, short maximum, boolean (*unmarked)(long object_index),
+			long (*mark)(long object_index));
+
+		render_object_globals.rendered_object_count += render_ragdolls_find(
+			&render_object_globals.rendered_object_indices[render_object_globals.rendered_object_count],
+			MAXIMUM_RENDERED_OBJECTS - render_object_globals.rendered_object_count,
+			object_unmarked_function,
+			object_mark_function);
+	}
+#endif
 	object_marker_end();
 
 	if (render_object_globals.rendered_object_count == MAXIMUM_RENDERED_OBJECTS &&

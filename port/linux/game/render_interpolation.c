@@ -58,6 +58,8 @@ capture). Whether the frames between ticks are drawn at all is main.c's
 #include "structures/structures.h"
 #include "structures/structure_bsp_definitions.h"
 #include "render_epoch.h"
+#include "render/render.h"
+#include "render/render_cameras_internal.h"
 #include "ragdolls.h"
 
 #include <math.h>
@@ -986,6 +988,13 @@ struct tick_pose_buffer
 	time then */
 	long tick;
 	long game_time;
+	/* the ragdolls then (ragdolls.c): drawn in the clusters they lie in
+	(render_ragdolls_find) */
+	short ragdoll_count;
+	long ragdoll_objects[RAGDOLLS_DRAWN_MAXIMUM];
+	real_point3d ragdoll_centers[RAGDOLLS_DRAWN_MAXIMUM];
+	real ragdoll_radii[RAGDOLLS_DRAWN_MAXIMUM];
+	short ragdoll_clusters[RAGDOLLS_DRAWN_MAXIMUM];
 	/* (interpolation) the local players' views' corrections */
 	struct
 	{
@@ -1476,6 +1485,8 @@ static void tick_poses_capture(int which)
 		if (tick_pose_stats.wanted)
 			tick_pose_stats.captured_objects++;
 	}
+	buffer->ragdoll_count = ragdolls_drawn_list(buffer->ragdoll_objects, buffer->ragdoll_centers, buffer->ragdoll_radii,
+		buffer->ragdoll_clusters, RAGDOLLS_DRAWN_MAXIMUM);
 	buffer->map_generation = halo_map_generation;
 	tick_pose_captured = which;
 	if (tick_pose_stats.wanted)
@@ -1810,6 +1821,66 @@ real_matrix4x3 *render_interpolation_object_node_matrices(long object_index)
 	if (!drawn)
 		return ragdoll_live_node_matrices(object_index);
 	return (drawn->blended ? blend_matrices : tick_pose_latest()->matrices) + drawn->first_matrix;
+}
+
+/* (render_objects.c's find_rendered_objects) the dead bodies' ragdolls not
+found in the clusters the game has their bodies in, found in the cluster
+each lies in when the frame draws it and in its view there: a blast throws
+the game's body far further than its ragdoll (ragdolls.c) */
+short render_ragdolls_find(
+	long *result,
+	short maximum,
+	boolean (*unmarked)(long object_index),
+	long (*mark)(long object_index))
+{
+	long live_objects[RAGDOLLS_DRAWN_MAXIMUM];
+	real_point3d live_centers[RAGDOLLS_DRAWN_MAXIMUM];
+	real live_radii[RAGDOLLS_DRAWN_MAXIMUM];
+	short live_clusters[RAGDOLLS_DRAWN_MAXIMUM];
+	long const *objects = live_objects;
+	real_point3d const *centers = live_centers;
+	real const *radii = live_radii;
+	short const *clusters = live_clusters;
+	struct tick_pose_buffer const *buffer = NULL;
+	short count, index, found = 0;
+
+	if (interpolation_rendering)
+		buffer = tick_pose_latest();
+	else if (tick_pose_rendering)
+		buffer = &tick_pose_buffers[tick_pose_published];
+	if (buffer)
+	{
+		count = buffer->ragdoll_count;
+		objects = buffer->ragdoll_objects;
+		centers = buffer->ragdoll_centers;
+		radii = buffer->ragdoll_radii;
+		clusters = buffer->ragdoll_clusters;
+	}
+	else if (frame_drawing && !tick_pose_tick_in_flight && !halo_epoch_on_mutator())
+		count = ragdolls_drawn_list(live_objects, live_centers, live_radii, live_clusters, RAGDOLLS_DRAWN_MAXIMUM);
+	else
+		count = 0;
+	for (index = 0; index < count && found < maximum; index++)
+	{
+		short rendered_index;
+
+		if (!object_try_and_get(objects[index]) || !unmarked(objects[index]))
+			continue;
+		for (rendered_index = 0; rendered_index < render.rendered_cluster_count; rendered_index++)
+		{
+			struct rendered_cluster *rendered = rendered_cluster_get(rendered_index);
+
+			if (render.cluster_index != NONE && rendered->cluster_index != clusters[index])
+				continue;
+			if (render.cluster_index == NONE || render_frustum_sphere_visible(&rendered->frustum, &centers[index], radii[index]))
+			{
+				result[found++] = objects[index];
+				mark(objects[index]);
+			}
+			break;
+		}
+	}
+	return found;
 }
 
 /* the object's bounding sphere as its pose has it (render_objects.c); FALSE
