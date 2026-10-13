@@ -454,6 +454,12 @@ static boolean network_game_client_handle_message_server_graceful_game_exit_post
 
 /* ---------- public code */
 
+/* port: declared, not left implicit: an undeclared call reads its result as a whole
+int, where these narrower results fill only part of the register (an x86 build with
+link-time optimisation read the rest as garbage: every init.txt command was refused as
+"playing in another's game"; the Vita's ARM ABI widens them, but see tools/vita_build.py) */
+boolean network_connection_last_read_was_unreliable(void);
+
 boolean network_game_client_handle_message(
 	struct network_game_client *client,
 	word *message,

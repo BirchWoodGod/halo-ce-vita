@@ -1384,6 +1384,12 @@ static boolean multiplayer_level_list_dispose(
 	struct widget_instance *widget,
 	struct event_record *event,
 	boolean *widget_deleted);
+/* port: declared, not left implicit: an undeclared call reads its result as a whole
+int, where these narrower results fill only part of the register (an x86 build with
+link-time optimisation read the rest as garbage: every init.txt command was refused as
+"playing in another's game"; the Vita's ARM ABI widens them, but see tools/vita_build.py) */
+boolean network_game_is_splitscreen_local(void);
+
 static boolean multiplayer_level_select(
 	struct widget_instance *widget,
 	struct event_record *event,
@@ -1682,6 +1688,12 @@ static boolean new_campaign_if_no_custom_player_profiles_exist(
 	struct widget_instance *widget,
 	struct event_record *event,
 	boolean *widget_deleted);
+/* port: declared, not left implicit: an undeclared call reads its result as a whole
+int, where these narrower results fill only part of the register (an x86 build with
+link-time optimisation read the rest as garbage: every init.txt command was refused as
+"playing in another's game"; the Vita's ARM ABI widens them, but see tools/vita_build.py) */
+boolean game_state_test_persistent_storage(char *map_name, short *difficulty, boolean *corrupted);
+
 static boolean solo_level_initialize_list_single_player(
 	struct widget_instance *widget,
 	struct event_record *event,
