@@ -201,11 +201,28 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
         depfile="$out.d",
         deps="gcc",
     )
-    # link-time optimisation of the clang side: the game and platform objects
-    # are bitcode, partially linked into one relocatable object by lld
+    # link-time optimisation of the clang side (configure.py --lto full or
+    # thin): the game and platform objects are bitcode, partially linked into
+    # one relocatable object by lld, optimised as one module at -O2 as each
+    # file is without it (and as the Linux builds' links are: -O3 made the
+    # code 31% larger than without LTO against -O2's 17%, on a Cortex-A9 of
+    # 32 KB of instruction cache). lld -r leaves the game's common symbols
+    # (-fcommon: the MSVC ABI's tentative definitions) common, for the final
+    # link to place, yet also writes a COMMON section of their size that no
+    # symbol is in; the final link took that 1.3 MB into .bss besides the
+    # symbols' own room, so it is removed. The decompiled files are built
+    # with -w, and some call functions they never declare: such a call reads
+    # a whole int, where a boolean or short result fills part of the
+    # register. ARM's ABI has the callee widen it, so the Vita reads the
+    # right value, but the x86 harness built with LTO did not (every init.txt
+    # command refused as "playing in another's game"); the calls whose
+    # results are narrower than an int are declared now (clang
+    # -Wimplicit-function-declaration lists the rest: ints, pointers, void)
     n.rule(
         name="vita_lto",
-        command="ld.lld -r -m armelf_linux_eabi --lto-O3 -mllvm -mcpu=cortex-a9 -mllvm -float-abi=hard -mllvm -emulated-tls -o $out @$out.rsp",
+        command=("ld.lld -r -m armelf_linux_eabi --lto-O2 -mllvm -mcpu=cortex-a9 -mllvm -float-abi=hard "
+                 "-mllvm -emulated-tls -o $out @$out.rsp && "
+                 "$vita_sdk_bin/arm-vita-eabi-objcopy --remove-section=COMMON $out"),
         description="VITA LTO $out",
         rspfile="$out.rsp",
         rspfile_content="$in_newline",
