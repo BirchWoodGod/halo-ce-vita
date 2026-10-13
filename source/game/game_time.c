@@ -615,6 +615,16 @@ void game_time_update(
 #endif
 						HALO_RUN_MARK(_run_game_ticks);
 						render_interpolation_tick();
+#ifdef HALO_LINUX
+						/* port: the dead bodies' ragdolls a tick on, after the
+						game's (port/linux/game/ragdolls.c: their own state
+						only, none of the game's) */
+						{
+							void ragdolls_tick(void);
+
+							ragdolls_tick();
+						}
+#endif
 						game_time_globals->server_time++;
 						game_time_globals->local_time++;
 						/* the distributed netcode's per-tick state */

@@ -4320,7 +4320,10 @@ every vehicle and scenery object is, "@seat" which vehicle and seat each
 player's unit rides in, "@look pitch [zoom]" turns the first local
 player's view to that pitch (degrees, down negative) and, given, sets its
 zoom level (-1 none), and "@legs" logs the frames its own legs were drawn in
-(display.first_person_legs, first_person_legs.c), and "@shot name"
+(display.first_person_legs, first_person_legs.c), "@ragdoll boom|kill
+[count] [range]" sets off a grenade's explosion beside (or kills) the
+nearest living characters and "@ragdoll stats|check" logs the dead bodies'
+ragdolls (display.ragdolls, ragdolls.c), and "@shot name"
 has the next frame presented saved as name.bmp in HALO_SCREENSHOT_DIR
 (the desktop GL device; on the Vita its display, as name<frame>.bmp);
 "@set VARIABLE value" changes a setting as the Vita's settings panel does
@@ -4534,6 +4537,15 @@ static void main_test_commands_update(
 
 			platform_log("test command: first-person legs drawn in %lu frames (set back %.3f, at most %.3f)", frames,
 				(double)set_back_last, (double)set_back_most);
+		}
+		/* (@ragdoll boom|kill [count] [range], stats, check: the dead
+		bodies' ragdolls, port/linux/game/ragdolls.c and
+		run_ragdolls_test.sh) */
+		else if (!strncmp(commands[index].command, "@ragdoll", 8))
+		{
+			void ragdolls_test_command(char const *arguments);
+
+			ragdolls_test_command(commands[index].command + 8);
 		}
 		else if (!strcmp(commands[index].command, "@seat"))
 		{

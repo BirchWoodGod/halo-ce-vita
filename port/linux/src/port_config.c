@@ -107,6 +107,11 @@ static const struct config_setting config_settings[] =
 	{ "display.first_person_legs", _config_boolean, "true", "HALO_FIRST_PERSON_LEGS", _environment_value, _platform_all,
 		"Your own legs in first person, seen looking down: your body as others\n"
 		"see it, drawn from the waist down, moving as it moves." },
+	/* (port/linux/game/ragdolls.c; the Vita's settings panel's Ragdolls
+	row, Graphics > Detail. Live) */
+	{ "display.ragdolls", _config_boolean, "true", "HALO_RAGDOLLS", _environment_value, _platform_all,
+		"Dead bodies fall limp, thrown by the blow that killed them, and come\n"
+		"to rest where they land; only the picture changes." },
 	/* (port/linux/game/particle_budget.c; the Vita's settings panel's
 	Particles row, Reduced in all three of its profiles) */
 	{ "graphics.particles", _config_string, "\"full\"", "HALO_PARTICLE_BUDGET", _environment_value, _platform_all,

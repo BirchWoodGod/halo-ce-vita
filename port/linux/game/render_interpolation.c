@@ -58,6 +58,7 @@ capture). Whether the frames between ticks are drawn at all is main.c's
 #include "structures/structures.h"
 #include "structures/structure_bsp_definitions.h"
 #include "render_epoch.h"
+#include "ragdolls.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -163,6 +164,9 @@ static struct interpolated_first_person interpolated_first_person[MAXIMUM_LOCAL_
 static long interpolation_tick;
 static long interpolation_frame;
 static boolean interpolation_rendering;
+/* between render_interpolation_frame_begin and _end, whatever is drawn
+(ragdoll_live_drawn) */
+static boolean frame_drawing;
 /* the fraction of a tick the clock had run past the latest snapshot, and
 the blend between the two snapshots it puts the frame at */
 static real interpolation_fraction = 1.0f;
@@ -657,6 +661,7 @@ void render_interpolation_frame_begin(void)
 		interpolation_last_drawn_tick = NONE;
 	}
 	first_person_rendering = interpolation_rendering || halo_first_person_interpolation_enabled();
+	frame_drawing = TRUE;
 	if (interpolation_rendering)
 	{
 		first_person_tick = interpolation_drawn_tick;
@@ -674,6 +679,7 @@ void render_interpolation_frame_begin(void)
 
 void render_interpolation_frame_end(void)
 {
+	frame_drawing = FALSE;
 	interpolation_rendering = FALSE;
 	first_person_rendering = FALSE;
 	tick_pose_frame_end();
@@ -1411,8 +1417,11 @@ static void tick_poses_capture(int which)
 		static scenery, whose recompute writes the matrices it had - half
 		the objects and nodes of a level, kept out of the copy, and out of
 		interpolation, as in Bruno Santana's build) */
-		if (object->object.parent_object_index == NONE && !TEST_FLAG(header->flags, _object_header_active_bit))
+		if (object->object.parent_object_index == NONE && !TEST_FLAG(header->flags, _object_header_active_bit) &&
+			!ragdolls_object_has_pose(iterator.index))
+		{
 			continue;
+		}
 		if (header->type == _object_type_scenery && object->object.animation.animation_graph_index == NONE &&
 			object->object.parent_object_index == NONE && object->object.first_child_object_index == NONE)
 		{
@@ -1449,6 +1458,9 @@ static void tick_poses_capture(int which)
 		entry->capture = buffer->capture;
 		entry->center = object->object.bounding_sphere_center;
 		entry->radius = object->object.bounding_sphere_radius;
+		/* (a dead body's ragdoll: its pose drawn, the game's kept;
+		ragdolls.c, which this thread steps) */
+		ragdolls_pose_override(iterator.index, buffer->matrices + used, node_count, &entry->center, &entry->radius);
 		if (corrections && object_corrections && object_corrections[absolute_index].object_index == iterator.index)
 		{
 			entry->correction = object_corrections[absolute_index].drawn;
@@ -1767,6 +1779,21 @@ static struct interpolated_object *interpolated_object_get(long object_index)
 	return drawn;
 }
 
+/* (port/linux/game/ragdolls.c) a dead body's ragdoll drawn with the live
+poses: only by the render, while it draws a frame (not the tick's reads,
+nor the game thread's own between frames), and with no tick running (the
+tick's thread steps the ragdolls; while it runs, the frame draws the copy
+of their poses the tick made, tick_poses_capture) */
+static boolean ragdoll_live_drawn(long object_index)
+{
+	return frame_drawing && !tick_pose_tick_in_flight && !halo_epoch_on_mutator() && object_index != NONE;
+}
+
+static real_matrix4x3 *ragdoll_live_node_matrices(long object_index)
+{
+	return ragdoll_live_drawn(object_index) ? ragdolls_live_node_matrices(object_index) : NULL;
+}
+
 /* the object's nodes as the frame draws them: the threaded tick's poses,
 blended between two with interpolation; NULL: the live ones */
 real_matrix4x3 *render_interpolation_object_node_matrices(long object_index)
@@ -1774,10 +1801,14 @@ real_matrix4x3 *render_interpolation_object_node_matrices(long object_index)
 	struct interpolated_object *drawn;
 
 	if (!interpolation_rendering)
-		return tick_pose_node_matrices(object_index);
+	{
+		real_matrix4x3 *matrices = tick_pose_node_matrices(object_index);
+
+		return matrices ? matrices : ragdoll_live_node_matrices(object_index);
+	}
 	drawn = interpolated_object_get(object_index);
 	if (!drawn)
-		return NULL;
+		return ragdoll_live_node_matrices(object_index);
 	return (drawn->blended ? blend_matrices : tick_pose_latest()->matrices) + drawn->first_matrix;
 }
 
@@ -1792,14 +1823,14 @@ boolean render_tick_pose_bounding_sphere(long object_index, real_point3d *center
 		struct interpolated_object *drawn = interpolated_object_get(object_index);
 
 		if (!drawn)
-			return FALSE;
+			return ragdoll_live_drawn(object_index) && ragdolls_live_bounding_sphere(object_index, center, radius);
 		*center = drawn->center;
 		*radius = drawn->radius;
 		return TRUE;
 	}
 	entry = tick_pose_entry_get(object_index);
 	if (!entry)
-		return FALSE;
+		return ragdoll_live_drawn(object_index) && ragdolls_live_bounding_sphere(object_index, center, radius);
 	*center = entry->center;
 	*radius = entry->radius;
 	return TRUE;
