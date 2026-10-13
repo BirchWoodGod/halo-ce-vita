@@ -89,6 +89,9 @@ symbols in this file:
 #include "math/periodic_functions.h"
 #include "objects/widgets/widget_types.h"
 #include "render.h"
+#ifdef HALO_LINUX
+#include "render/render_cameras_internal.h" /* port: render_frustum_sphere_visible */
+#endif
 #include "scenario/scenario.h"
 #include "tag_files/tag_groups.h"
 #include "rasterizer_widgets.h"
@@ -589,9 +592,28 @@ void rasterizer_lens_flare_submit(
 				&camera_offset);
 			camera_distance= dot_product3d(&global_window_parameters.camera.forward, &camera_offset);
 
+#ifdef HALO_LINUX
+			/* port (from OpenCE 744040c8, xshxdex98, and b1a71709's first-person
+			exception): none out of view either (behind the camera, off the
+			screen). Its occlusion test would count no pixels, so it would not
+			be drawn, yet each test is a draw of its own: a level of many lights
+			submitted hundreds a frame, each a recorded draw and a visibility
+			slot on the Vita (d3d8_gxm.c). The sphere takes in the test's
+			offset point and size (rasterizer_lens_flares_submit_occlusion_tests:
+			the point moved up to 1.41 occlusion radii, the test one radius
+			across). Not the first-person weapon's, which OpenCE draws at the
+			weapon's own projection, not this frustum's: few, and left as they were */
+			if ((parameters->definition->far_fade_distance==0.0f ||
+				camera_distance<parameters->definition->far_fade_distance) &&
+				(parameters->compressed_light_color&LENS_FLARE_LIGHT_COLOR_ALPHA_MASK)>0 &&
+				((parameters->compressed_window_index&_lens_flare_first_person_weapon_flag) ||
+				render_frustum_sphere_visible(&global_window_parameters.frustum, &parameters->position,
+					3.0f * parameters->definition->occlusion_radius)))
+#else
 			if ((parameters->definition->far_fade_distance==0.0f ||
 				camera_distance<parameters->definition->far_fade_distance) &&
 				(parameters->compressed_light_color&LENS_FLARE_LIGHT_COLOR_ALPHA_MASK)>0)
+#endif
 			{
 				struct rasterizer_lens_flare_submit_parameters *lens_flare_parameters=
 					lens_flare_parameters_get((short)local_lens_flare_count++);
