@@ -313,11 +313,17 @@ struct fragment_entry
 	unsigned long shader;
 	/* as vertex_variant's */
 	char *pending_source;
+	/* (fragment_cache_trim) fragment_clock at its last use */
+	unsigned long last_used;
 };
 
 #define FRAGMENT_BUCKETS 1024
 
 static struct fragment_entry *fragment_buckets[FRAGMENT_BUCKETS];
+/* (fragment_shader_get) the entry found last, the entries, and a count of
+the lookups, which stamps each entry used */
+static struct fragment_entry *fragment_last;
+static unsigned long fragment_count, fragment_clock;
 
 /* ---------- render targets */
 
@@ -2275,14 +2281,16 @@ typedef char pixel_shader_key_size_assert[sizeof(struct nv2a_pixel_shader_key) %
 
 static unsigned long fragment_shader_get(const struct nv2a_pixel_shader_key *key)
 {
-	static struct fragment_entry *last;
+	struct fragment_entry *last = fragment_last;
 	unsigned long hash;
 	struct fragment_entry **bucket;
 	struct fragment_entry *entry;
 	char *source;
 
+	fragment_clock++;
 	if (last && !memcmp(&last->key, key, sizeof(*key)))
 	{
+		last->last_used = fragment_clock;
 		if (last->pending_source)
 			fragment_entry_resolve(last);
 		return last->shader;
@@ -2293,13 +2301,20 @@ static unsigned long fragment_shader_get(const struct nv2a_pixel_shader_key *key
 	{
 		if (entry->hash == hash && !memcmp(&entry->key, key, sizeof(*key)))
 		{
-			last = entry;
+			fragment_last = entry;
+			entry->last_used = fragment_clock;
 			if (entry->pending_source)
 				fragment_entry_resolve(entry);
 			return entry->shader;
 		}
 	}
 	entry = calloc(1, sizeof(*entry));
+	/* (no room: drawn without a program this time, as one that does not
+	compile; asked again at its next draw) */
+	if (!entry)
+		return 0;
+	fragment_count++;
+	entry->last_used = fragment_clock;
 	entry->hash = hash;
 	entry->key = *key;
 	source = nv2a_pixel_shader_to_cg(key);
@@ -2311,8 +2326,72 @@ static unsigned long fragment_shader_get(const struct nv2a_pixel_shader_key *key
 	fragment_entry_resolve(entry);
 	entry->next = *bucket;
 	*bucket = entry;
-	last = entry;
+	fragment_last = entry;
 	return entry->shader;
+}
+
+static int compare_unsigned_longs(const void *a, const void *b)
+{
+	unsigned long x = *(const unsigned long *)a, y = *(const unsigned long *)b;
+
+	return x < y ? -1 : x > y;
+}
+
+/* (renderer_map_unloaded, the worker idle) The pixel shader keys met are
+kept for the session, each the 300-byte key of a program (the program
+itself is the shader cache's, vita_gxm.c, found again by its source): a
+new map's keys added theirs to the C heap for good, ~90 a multiplayer map in
+the harness's bot playlist (851 after nine maps, 27 KB a map change:
+triage/heap-creep-1.1.1.md). Past FRAGMENT_CACHE_CAP of them, those used
+longest ago are freed down to three quarters of it; a key used again makes
+its entry again, its program found in the shader cache (its Cg written
+again, not compiled). HALO_FRAGMENT_CACHE_CAP=n sets the cap (the harness's
+tests make it small) */
+#define FRAGMENT_CACHE_CAP 1024
+
+static void fragment_cache_trim(void)
+{
+	static long cap = -1;
+	unsigned long *stamps, count = 0, bucket, keep, threshold, freed = 0;
+	struct fragment_entry *entry, **link;
+
+	if (cap < 0)
+	{
+		const char *setting = getenv("HALO_FRAGMENT_CACHE_CAP");
+
+		cap = setting && atol(setting) > 0 ? atol(setting) : FRAGMENT_CACHE_CAP;
+	}
+	if (fragment_count <= (unsigned long)cap)
+		return;
+	stamps = malloc(fragment_count * sizeof(*stamps));
+	if (!stamps)
+		return;
+	for (bucket = 0; bucket < FRAGMENT_BUCKETS; bucket++)
+		for (entry = fragment_buckets[bucket]; entry && count < fragment_count; entry = entry->next)
+			stamps[count++] = entry->last_used;
+	keep = (unsigned long)cap * 3 / 4;
+	qsort(stamps, count, sizeof(*stamps), compare_unsigned_longs);
+	/* (those used before the keep-th newest go; one compiling still is kept) */
+	threshold = count > keep ? stamps[count - keep] : 0;
+	free(stamps);
+	for (bucket = 0; bucket < FRAGMENT_BUCKETS; bucket++)
+	{
+		link = &fragment_buckets[bucket];
+		while ((entry = *link) != NULL)
+		{
+			if (entry->last_used < threshold && !entry->pending_source)
+			{
+				*link = entry->next;
+				free(entry);
+				fragment_count--;
+				freed++;
+				continue;
+			}
+			link = &entry->next;
+		}
+	}
+	fragment_last = NULL;
+	platform_log("pixel shaders: %lu keys used longest ago forgotten, %lu kept (cap %ld)", freed, fragment_count, cap);
 }
 
 static unsigned long stage_texture_mode(int stage)
@@ -5002,6 +5081,7 @@ static void renderer_map_unloaded(void)
 	vita_texture_decodes_quiesce();
 	freed = vita_texture_pool_release();
 	trimmed = vgxm_memory_trim();
+	fragment_cache_trim();
 	/* (screen targets made smaller for want of CDRAM: the full size tried
 	again at the next present, screen_settings_apply) */
 	if (screen_scale_lowered)
