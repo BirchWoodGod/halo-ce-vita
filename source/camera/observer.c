@@ -1303,6 +1303,70 @@ static void observer_pass_time(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) A frame that passes no time (observer_update with no seconds
+elapsed, as some of a network co-op level's first frames are, on the host
+and the client) skips observer_pass_time, so a command that asks to snap
+(its timers run out and forced: a new camera's first command) took no
+effect there: the focus stayed where observer_clear left it at the new map,
+the world's origin.
+The next command, an ordinary 0.9 s transition from the origin to the
+player, asked more than the focus's 1500 units/s/s, was snapped at once by
+observer_update_accelerations, and observer_update_velocities gave the snap
+the jump over that one frame as a velocity: about 43,000 units/s. The
+insertion's 10 s camera then started from that velocity, and the focus ran
+off the map at 16,000 to 38,000 units/s for seconds (beyond the observer's
++-5000 world: the assertion of its focus, a debug client's halt; on a
+release build the camera drawn from outside the level). Seen at one c40
+co-op start in six, host and client alike (fix/coop-crash, Oct 13 2026).
+Here such a frame snaps as a frame with time would - each parameter whose
+timer has run out to the command's value - and with nothing to divide the
+jump by, leaves it no velocity or acceleration. */
+static void observer_snap_without_time(
+	short local_player_index)
+{
+	struct observer *observer = observer_get(local_player_index);
+	real *position = observer->parameters;
+	real const *target = observer->last_command.parameters;
+	real *velocity = observer->velocities.n;
+	real *acceleration = observer->accelerations.n;
+	real const *timer = observer->last_command.parameter_timers;
+	short parameter_index;
+
+	if (TEST_FLAG(observer->pending_command->flags, _observer_command_freeze_camera_bit) ||
+		!TEST_FLAG(observer->last_command.flags, _observer_command_valid_bit))
+	{
+		return;
+	}
+	for (parameter_index = 0;
+		parameter_index < NUMBER_OF_OBSERVER_COMMAND_PARAMETERS;
+		parameter_index++)
+	{
+		short real_count = observer_parameter_real_counts[parameter_index];
+		short derivative_count = observer_parameter_derivative_real_counts[parameter_index];
+		short value_index;
+
+		if (*timer <= 0.f)
+		{
+			for (value_index = 0; value_index < real_count; value_index++)
+				position[value_index] = target[value_index];
+			for (value_index = 0; value_index < derivative_count; value_index++)
+			{
+				velocity[value_index] = 0.f;
+				acceleration[value_index] = 0.f;
+			}
+		}
+		position += real_count;
+		target += real_count;
+		velocity += derivative_count;
+		acceleration += derivative_count;
+		timer++;
+	}
+
+	return;
+}
+#endif
+
 void observer_update(
 	real time_delta_sec)
 {
@@ -1333,6 +1397,12 @@ void observer_update(
 			{
 				observer_pass_time(local_player_index);
 			}
+#ifdef HALO_LINUX
+			else
+			{
+				observer_snap_without_time(local_player_index);
+			}
+#endif
 			observer_postcheck(local_player_index);
 
 			match_assert(
