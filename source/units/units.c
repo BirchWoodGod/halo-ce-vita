@@ -2879,6 +2879,15 @@ void unit_died(
 		}
 
 		unit->unit.time_of_death = game_time_get();
+#ifdef HALO_LINUX
+		/* port: the body may go limp, a ragdoll's pose drawn for it from
+		the next tick (port/linux/game/ragdolls.c; only the picture) */
+		{
+			void ragdolls_unit_died(long unit_index);
+
+			ragdolls_unit_died(unit_index);
+		}
+#endif
 	}
 
 	unit->unit.flags &= ~(

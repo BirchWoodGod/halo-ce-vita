@@ -94,6 +94,8 @@
 "Minimal" = "Mínima"
 "Particle density" = "Densidad de partículas"
 "Smoke, sparks, debris drawn (your gun's: all)" = "Humo, chispas, escombros dibujados (los de tu arma: todos)"
+"Ragdolls" = "Cuerpos con física"
+"Dead bodies fall limp where they land" = "Los cuerpos caen inertes donde aterrizan"
 "Half" = "Mitad"
 "Third" = "Un tercio"
 "Quarter" = "Un cuarto"

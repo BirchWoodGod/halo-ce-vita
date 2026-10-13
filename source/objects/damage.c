@@ -1040,6 +1040,15 @@ static void object_damage_aftermath(
 	struct damage_effect_definition *damage_effect =
 		damage_effect_definition_get(damage->definition_index);
 
+#ifdef HALO_LINUX
+	/* port: the blow, for the ragdoll of a death it brings or one it
+	strikes (port/linux/game/ragdolls.c; only the picture) */
+	{
+		void ragdolls_note_damage(long object_index, struct damage_data const *damage);
+
+		ragdolls_note_damage(object_index, damage);
+	}
+#endif
 	if (object_definition->object.acceleration_scale > _real_epsilon)
 	{
 		real_vector3d direction = damage->direction;

@@ -175,6 +175,8 @@ void network_coop_note_object_new(long object_index);
 /* port/linux/game/first_person_legs.c's (from OpenCE): the last map's
 waist and mesh forgotten */
 void first_person_legs_reset(void);
+/* port/linux/game/ragdolls.c's: the last map's ragdolls let go */
+void ragdolls_reset(void);
 #endif
 /* port/linux/game/network_coop.c's: the scripts' attaching, on co-op's clients */
 void network_coop_note_attach(long parent_index, char const *parent_marker_name, long child_index,
@@ -1292,6 +1294,8 @@ void objects_initialize_for_new_map(
 	/* port: the last map's waist and mesh forgotten
 	(port/linux/game/first_person_legs.c) */
 	first_person_legs_reset();
+	/* port: the last map's ragdolls let go (port/linux/game/ragdolls.c) */
+	ragdolls_reset();
 #endif
 	
 	data_make_valid(object_header_data);

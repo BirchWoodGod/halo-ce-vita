@@ -396,6 +396,11 @@ static struct setting settings[] = {
 	{ "Particle density", "HALO_PARTICLE_RENDER_DIVISOR", 0, 4, { "1", "2", "3", "4" },
 		{ "Full", "Half", "Third", "Quarter" }, "Smoke, sparks, debris drawn (your gun's: all)", 0,
 		PAGE_GRAPHICS_DETAIL },
+	/* (port/linux/game/ragdolls.c: a dead body falls limp, a few at once
+	simulated on the tick's thread, only the picture changes. On by
+	default and in every profile. Live) */
+	{ "Ragdolls", "HALO_RAGDOLLS", 0, 2, { "0", "1" }, { "Off", "On" },
+		"Dead bodies fall limp where they land", 1, PAGE_GRAPHICS_DETAIL },
 	PAGE_ROW("Performance", "Update rates, AI think rate, fourth core helpers", TAB_GRAPHICS,
 		PAGE_GRAPHICS_PERFORMANCE),
 	{ "Scenery updates", "HALO_SCENERY_UPDATE_DIVISOR", 0, 3, { "1", "2", "4" },

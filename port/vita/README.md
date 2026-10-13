@@ -182,7 +182,7 @@ of `settings.txt`: a file from an older version loads as it is.
 | FPS counter | Off | the game's own frame counter, bottom right |
 | Screen > | 16:9, Smooth | Aspect ratio, Upscale filter |
 | First person > | | First-person legs, Smooth weapon motion |
-| Detail > | | Model detail to Particle density (most of them set by the Profile) |
+| Detail > | | Model detail to Ragdolls (most of them set by the Profile) |
 | Performance > | | Scenery updates, Object lighting, AI think rate, Fourth core helpers |
 
 Graphics, **Screen**:
@@ -212,6 +212,7 @@ Graphics, **Detail**:
 | Tiny decals | Shown | Skipped: bullet holes and marks under 2 pixels across are not made. In no profile yet: being tried |
 | Particles (P) | Reduced | the particles a fight's shots, impacts and explosions make (applies at once). Full (the Xbox's), Reduced (every profile's), Low: an effect's big bursts cut (the assault rifle's 20-40 sparks at an impact on metal: 10-16, Low 5-9; a single flash or a puff or two kept), sparks, smoke, dust and casings gone sooner (a life over 0.7 s: half the rest, Low a quarter), the counts cut further with several hundred live, and a particle too small to be seen at its distance from the camera not made (Low: nor one well behind the camera); in multiplayer a spark or puff out of view goes after a sixth of a second (Low: a tenth) instead of half a second. Muzzle flashes, your own weapon's, cutscenes', scripts' and a map's ambient effects (fires, steam, waterfalls) kept whole. Fewer made, unlike Particle density's fewer drawn: the game's own work in a big fight drops (below) |
 | Particle density (P) | Full | Half, Third, Quarter: that share of the smoke, sparks and debris drawn (each particle drawn or not for its whole life; your own weapon's and the effects on weapons, units and vehicles all drawn) |
+| Ragdolls | On | a character killed falls limp, thrown by the blow that killed it (a grenade throws its arms and legs apart), and comes to rest on the ground, steps or rocks where it lands, instead of its death animation's last pose laid on the ground (applies at once; the idea from jojoxdk's Halo 1 MCC Box3D Physics Mod). Only the picture changes: hit boxes, checkpoints and the network are as before, and each player's Vita simulates its own. Four fall at once at most and twelve are kept; one at rest costs nothing more. Off: the bodies as the Xbox lays them |
 
 Graphics, **Performance**:
 

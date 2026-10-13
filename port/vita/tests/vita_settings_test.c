@@ -1500,6 +1500,7 @@ static void test_graphics_layout(void)
 		{ PAGE_GRAPHICS_DETAIL, "Tiny decals", "HALO_DECAL_MIN_PIXELS", "0|2", 0, "0" },
 		{ PAGE_GRAPHICS_DETAIL, "Particles", "HALO_PARTICLE_BUDGET", "full|reduced|low", 0, "reduced" },
 		{ PAGE_GRAPHICS_DETAIL, "Particle density", "HALO_PARTICLE_RENDER_DIVISOR", "1|2|3|4", 0, "1" },
+		{ PAGE_GRAPHICS_DETAIL, "Ragdolls", "HALO_RAGDOLLS", "0|1", 0, "1" },
 		{ TAB_GRAPHICS, "Performance", NULL, NULL, 0, NULL },
 		{ PAGE_GRAPHICS_PERFORMANCE, "Scenery updates", "HALO_SCENERY_UPDATE_DIVISOR", "1|2|4", 0, "4" },
 		{ PAGE_GRAPHICS_PERFORMANCE, "Object lighting", "HALO_LIGHTING_REFRESH_DIVISOR", "1|2|3", 0, "3" },
@@ -1559,7 +1560,7 @@ static void test_graphics_layout(void)
 	check(all && row == count && pages_opened == 4,
 		"Graphics: Profile, Render resolution, Dynamic minimum, Frame limit, Frame interpolation, FPS counter; "
 		"Screen (Aspect ratio, Upscale filter), First person (First-person legs, Smooth weapon motion), Detail "
-		"(Model detail ... Particles, Particle density), Performance (Scenery updates, Object lighting, AI think "
+		"(Model detail ... Particles, Particle density, Ragdolls), Performance (Scenery updates, Object lighting, AI think "
 		"rate, Fourth core helpers*): each row's variable, values, default and restart as before");
 	check(settings[0].variable && !strcmp(settings[0].variable, "HALO_PROFILE") && !strcmp(settings[1].variable, "HALO_RENDER_SCALE") &&
 		!strcmp(settings[2].variable, "HALO_DYNAMIC_RES_MIN"), "Profile still settings[0], Render resolution and its minimum after it");
@@ -1592,7 +1593,7 @@ static void test_variables_kept(void)
 		"HALO_VITA_SHADOWS", "HALO_MAX_SCENE_LIGHTS", "HALO_VITA_EFFECTS_QUALITY", "HALO_PARTICLE_RENDER_DIVISOR",
 		"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR", "HALO_INTERPOLATION", "HALO_LATENCY_METER", "HALO_BOTS", "HALO_BOT_SKILL", "HALO_BOT_TEAMS",
 		"HALO_BOT_VEHICLES", "HALO_BOT_ROUTES", "HALO_BOT_PLAYLIST", "HALO_NET_COOP_PLAYERS", "HALO_NET_REMOTE_LOD",
-		"HALO_LANGUAGE", "HALO_UPDATE_CHANNEL", "HALO_PARTICLE_BUDGET", "HALO_FIRST_PERSON_LEGS",
+		"HALO_LANGUAGE", "HALO_UPDATE_CHANNEL", "HALO_PARTICLE_BUDGET", "HALO_FIRST_PERSON_LEGS", "HALO_RAGDOLLS",
 	};
 	int index, all = 1, choices = 0;
 
@@ -2636,16 +2637,36 @@ int main(void)
 		!strcmp(menu_line(8, line, sizeof(line)), "Tiny decals\x02  Shown >") &&
 		!strcmp(menu_line(9, line, sizeof(line)), "Particles\x02< Reduced >") &&
 		!strcmp(menu_line(10, line, sizeof(line)), "Particle density\x02  Full >") &&
-		!strncmp(menu_line(11, line, sizeof(line)), "\x05Level of detail", 16) && menu_rows() == 9 && menu_fits() &&
+		!strcmp(menu_line(11, line, sizeof(line)), "Ragdolls\x02< On  ") &&
+		!strncmp(menu_line(12, line, sizeof(line)), "\x05Level of detail", 16) && menu_rows() == 10 && menu_fits() &&
 		menu_height_fits() && !strstr(menu, "*\x02"),
 		"Graphics, Detail: model detail (Medium), distant objects (Small), shadows (Off), lights (4), effects (Full), "
-		"sun rays (Off), tiny decals (Shown), Particles (Reduced), particle density (Full); all live");
+		"sun rays (Off), tiny decals (Shown), Particles (Reduced), particle density (Full), Ragdolls (On); all live");
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_MODEL_LOD_SCALE"), "1") && !strcmp(settings[0].names[settings[0].choice], "Custom"),
 		"a detail row changed on its page (Model detail High): the profile Custom");
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(settings[0].names[settings[0].choice], "Balanced"), "... and Balanced again");
 	test_particles_row();
+	/* (port/linux/game/ragdolls.c reads it again as the generation
+	changes: no restart, no profile's) */
+	{
+		unsigned long generation;
+
+		check(to_line("Ragdolls") && strstr(menu, "\n\x05" "Dead bodies fall limp where they land\n") && menu_fits() &&
+			getenv("HALO_RAGDOLLS") && !strcmp(getenv("HALO_RAGDOLLS"), "1"),
+			"Ragdolls: On by default, in the environment, its help line fits");
+		generation = halo_settings_generation;
+		press(VITA_BUTTON_LEFT);
+		check(!strcmp(getenv("HALO_RAGDOLLS"), "0") && halo_settings_generation != generation &&
+			strstr(file_text(SETTINGS_FILE), "HALO_RAGDOLLS=0\n") &&
+			!strcmp(menu_line(menu_selected, line, sizeof(line)), "Ragdolls\x02  Off >") && !restart_pending &&
+			!strcmp(settings[0].names[settings[0].choice], "Balanced"),
+			"Ragdolls Off: in the environment and settings.txt at once, no restart, the profile kept");
+		press(VITA_BUTTON_RIGHT);
+		check(!strcmp(getenv("HALO_RAGDOLLS"), "1") && strstr(file_text(SETTINGS_FILE), "HALO_RAGDOLLS=1\n"),
+			"... and On again");
+	}
 	press(VITA_BUTTON_CIRCLE);
 	check(menu_visible && strstr(menu, "\t*Graphics") && !strstr(menu, "\n\x03") &&
 		!strcmp(menu_line(menu_selected, line, sizeof(line)), "Detail\x02  >"),
