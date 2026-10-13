@@ -934,10 +934,11 @@ static struct
 static __thread int heap_census_busy;
 
 /* (HALO_HEAP_CENSUS_FILE=path) every site's bytes, count and callers at
-the exit, one line each, for comparing two builds */
-static void heap_census_write(void)
+the exit, one line each, for comparing two builds (and, with
+HALO_HEAP_CENSUS_EACH=1, at every census too, as path.<n>.<when>: what a
+map change leaves, site by site, for triage/heap-creep's census_series.py) */
+static void heap_census_write_to(const char *path)
 {
-	const char *path = getenv("HALO_HEAP_CENSUS_FILE");
 	FILE *file;
 	unsigned long index;
 
@@ -960,6 +961,11 @@ static void heap_census_write(void)
 		fclose(file);
 	}
 	heap_census_busy = 0;
+}
+
+static void heap_census_write(void)
+{
+	heap_census_write_to(getenv("HALO_HEAP_CENSUS_FILE"));
 }
 
 static int heap_census_on(void)
@@ -1132,6 +1138,18 @@ void platform_heap_census_log(const char *when)
 	for (index = 0; index < HEAP_CENSUS_SITES; index++)
 		heap_census.sites[index].reported_bytes = heap_census.sites[index].bytes;
 	pthread_mutex_unlock(&heap_census.lock);
+	{
+		static unsigned long census_number;
+		const char *path = getenv("HALO_HEAP_CENSUS_FILE");
+		const char *each = getenv("HALO_HEAP_CENSUS_EACH");
+		char numbered[512];
+
+		if (path && *path && each && atoi(each))
+		{
+			snprintf(numbered, sizeof(numbered), "%s.%03lu.%s", path, census_number++, when);
+			heap_census_write_to(numbered);
+		}
+	}
 }
 
 void *malloc(size_t size)
