@@ -3523,10 +3523,22 @@ void main_rasterizer_throttle(
 			profile_idle_start();
 			while ((__int64)rasterizer_globals.frame_and_vertical_blank_index < target_index)
 			{
+#ifdef HALO_LINUX
+				/* port (from OpenCE e799d081): the native builds sleep
+				between looks. The Xbox spun here; on a port each look at the
+				clock is a system call, and a game held to the vertical blank
+				(display.vsync on, display.interpolation off) spent its main
+				thread asking the time, on the Vita while the vertical blank's
+				own thread waited for a core. A millisecond is well inside a
+				frame */
+				(void)precache_in_progress;
+				Sleep(1);
+#else
 				if (precache_in_progress)
 				{
 					Sleep(1);
 				}
+#endif
 				if (system_milliseconds() > start_milliseconds + 1000)
 				{
 					console_warning(
