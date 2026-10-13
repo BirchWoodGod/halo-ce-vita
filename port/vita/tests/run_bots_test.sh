@@ -113,6 +113,26 @@
 #   precision2  precision on Hang 'em High (HALO_TEST_PRECISION_MAP)
 #   precisions  precision, precisionlanes and precision2
 #   tactics  lanes, vantage, roles and the precision cases
+#   teleporters  CTF, 8 bots on both teams, Heroic, not fighting, on foot
+#            (HALO_BOT_VEHICLES=0), Bot routes Direct, every bot killed
+#            every 40 s (HALO_TEST_COMMANDS' @kill: it respawns at its base
+#            and sets off for the other's flag again): Blood Gulch's two
+#            teleporters (from beside each base's flag out to the canyon)
+#            logged, and taken as shortcuts (bots.c's bots_shortcut_weigh):
+#            bots sent through one as a shortcut five times at least
+#            (halo.log's moves line), two bots at least, one each way (the
+#            teleporters line), never a defender (halo.log's roles line);
+#            the shortcuts' census sane (sent no more than taken, taken no
+#            more than weighed); every shortcut taken, sent and failed
+#            printed
+#   teleporters2  teleporters on Chill Out (HALO_TEST_TELEPORTER_MAP): three
+#            times at least (SKIP without the map)
+#   lastway  Oddball on Chiron TL34 (putput), 8 bots, not fighting: its
+#            rooms are joined by teleporters alone, the last way to a goal
+#            the walkable surfaces do not reach (bots_search_teleporter):
+#            bots sent through as the last way three times at least (SKIP
+#            without putput.map)
+#   teleports  teleporters, teleporters2 and lastway
 #
 # The vehicle cases: the bots must take the vehicles - their census in
 # halo.log every ten seconds (bots.c: riding, driving, gunning, the distance
@@ -183,7 +203,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_bots_test.$$}
 test_out_begin "$out"
 bots=${HALO_TEST_BOTS:-6}
 cases=${*:-slayer teams}
-cases=$(echo " $cases " | sed 's/ vehicles / vctf vslayer vteams iron /; s/ new / powerups turret ladders /; s/ playlists / playlist playlistcancel /; s/ tactics / lanes vantage roles precisions /; s/ precisions / precision precisionlanes precision2 /')
+cases=$(echo " $cases " | sed 's/ vehicles / vctf vslayer vteams iron /; s/ new / powerups turret ladders /; s/ playlists / playlist playlistcancel /; s/ tactics / lanes vantage roles precisions /; s/ precisions / precision precisionlanes precision2 /; s/ teleports / teleporters teleporters2 lastway /')
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 ce_resources=${HALO_TEST_CE_RESOURCES:-}
 if [ -z "$ce_resources" ]; then
@@ -205,6 +225,7 @@ case_bots() { # NAME
 	precision*) echo 4 ;;
 	vantage) echo 6 ;;
 	roles) echo 8 ;;
+	teleporters* | lastway) echo 8 ;;
 	*) echo "$bots" ;;
 	esac
 }
@@ -379,6 +400,30 @@ for name in $cases; do
 		run "$name" slayer MAP="$precision_map" HALO_BOT_SKILL=heroic HALO_BOT_PEACEFUL=1 HALO_BOT_VEHICLES=0 \
 			HALO_BOT_ROUTES=$routes "HALO_TEST_COMMANDS=$commands" & ;;
 	roles) run roles ctf HALO_BOT_SKILL=heroic HALO_BOT_TEAMS=even & ;;
+	teleporters | teleporters2)
+		# (every bot killed every 40 s from the 40th (HALO_TEST_COMMANDS'
+		# @kill): each respawns at its own base, and leaves it again for the
+		# other's flag - the way the teleporters shorten)
+		teleporter_map=$map
+		[ "$name" = teleporters2 ] && teleporter_map=${HALO_TEST_TELEPORTER_MAP:-chillout}
+		if [ ! -e "$data/maps/$teleporter_map.map" ]; then
+			echo "SKIP ($name): no $teleporter_map.map in $data/maps"
+			continue
+		fi
+		commands=""
+		for tick in $(seq 1200 1200 $(( (seconds - 15) * 30 ))); do
+			for player in $(seq 1 "$(case_bots "$name")"); do
+				commands="${commands}L$tick:@kill $player;"
+			done
+		done
+		run "$name" ctf MAP="$teleporter_map" HALO_BOT_SKILL=heroic HALO_BOT_TEAMS=even HALO_BOT_PEACEFUL=1 \
+			HALO_BOT_VEHICLES=0 HALO_BOT_ROUTES=direct "HALO_TEST_COMMANDS=$commands" & ;;
+	lastway)
+		if [ ! -e "$data/maps/putput.map" ]; then
+			echo "SKIP (lastway): no putput.map (Chiron TL34) in $data/maps"
+			continue
+		fi
+		run lastway oddball MAP=putput HALO_BOT_SKILL=heroic HALO_BOT_PEACEFUL=1 & ;;
 	playlist)
 		(seconds=$playlist_seconds
 			run playlist slayer MAP=chillout HALO_BOT_SKILL=heroic HALO_NETWORK_TEST_SCORE=3 HALO_BOT_PLAYLIST=all \
@@ -495,6 +540,69 @@ if name == "ladders":
         fail("no ladders found")
     elif climbs < 1:
         fail("no bot climbed a ladder (%d gone to)" % moves_number(r"gone to (\d+)"))
+    sys.exit(1 if failed else 0)
+# (the teleporter cases: bots.c's shortcuts through the map's teleporters,
+# and the last way on Chiron TL34; halo.log's moves line's census, the
+# teleporters line, each shortcut taken and each bot sent)
+if name in ("teleporters", "teleporters2", "lastway"):
+    text = open(log, errors="replace").read().splitlines()
+    found = [line.split("bots: ", 1)[1].strip() for line in text if re.search(r"bots: teleporter \d+ at \(", line)]
+    print("  %d teleporters: %s" % (len(found), "; ".join(found)))
+    census = re.search(r"teleporters (\d+) \(shortcuts: weighed (\d+), taken (\d+), through (\d+), failed (\d+), dropped (\d+); "
+        r"through as the last way (\d+), by chance (\d+)\)", moves[-1]) if moves else None
+    if not census:
+        fail("no teleporters' census in halo.log's moves line")
+        sys.exit(1)
+    count, weighed, taken, through, failed_count, dropped, last_way, chance = [int(v) for v in census.groups()]
+    print("  shortcuts: weighed %d, taken %d, through %d, failed %d, dropped %d; through as the last way %d, by chance %d" %
+        (weighed, taken, through, failed_count, dropped, last_way, chance))
+    per = [line.split("teleporters at tick", 1)[1].strip() for line in text if "bots: teleporters at tick" in line]
+    last_tick = per[-1].split(":", 1)[0] if per else ""
+    sent_by = {}
+    for line in per:
+        if line.split(":", 1)[0] == last_tick:
+            for m in re.finditer(r"(\d+) sent (\d+) \(shortcut (\d+), last way (\d+), chance (\d+)\) failed (\d+)", line):
+                sent_by[int(m.group(1))] = [int(v) for v in m.groups()[1:]]
+    print("  by teleporter: %s" % ", ".join("%d sent %d (shortcut %d, last way %d, chance %d) failed %d" % tuple([k] + v)
+        for k, v in sorted(sent_by.items())))
+    events = [line.split("bots: ", 1)[1].strip() for line in text if re.search(r"bots: (bot \d+ (to|through|off) teleporter|teleporter \d+ failed)", line)]
+    for line in events[:40]:
+        print("  %s" % line)
+    if len(events) > 40:
+        print("  ... %d more" % (len(events) - 40))
+    if count != len(found):
+        fail("the census counts %d teleporters, halo.log logged %d" % (count, len(found)))
+    if name == "lastway":
+        if count < 10:
+            fail("%d teleporters found on Chiron TL34" % count)
+        if last_way < 3:
+            fail("bots sent through as the last way %d times (3 asked)" % last_way)
+        sys.exit(1 if failed else 0)
+    if count < 2:
+        fail("%d teleporters found on %s" % (count, "Blood Gulch" if name == "teleporters" else "the map"))
+    if through > taken or taken > weighed:
+        fail("the census is not sane: weighed %d, taken %d, through %d" % (weighed, taken, through))
+    # (each bot sent, to the census's moves line: the last's count)
+    last_moves = max(i for i, line in enumerate(text) if "bots: moves at tick" in line)
+    sent = [(int(m.group(1)), int(m.group(2))) for line in text[:last_moves] for m in [re.search(r"bots: bot (\d+) through teleporter (\d+)", line)] if m]
+    if len(sent) != through:
+        fail("%d bots sent logged, the census counts %d" % (len(sent), through))
+    least = 5 if name == "teleporters" else 3
+    if through < least:
+        fail("bots sent through a teleporter as a shortcut %d times (%d asked)" % (through, least))
+    if len(set(bot for bot, teleporter in sent)) < 2:
+        fail("one bot alone took the teleporters")
+    if name == "teleporters" and len(set(teleporter for bot, teleporter in sent)) < 2:
+        fail("the bots took one of Blood Gulch's teleporters alone (one each way asked)")
+    # (never a defender: halo.log's last roles line)
+    defenders = set()
+    for line in text:
+        if "bots: roles (" in line:
+            defenders = set(int(m.group(1)) for m in re.finditer(r"bot (\d+) team \d+ defender", line))
+    takers = set(int(m.group(1)) for line in text for m in [re.search(r"bots: bot (\d+) to teleporter", line)] if m)
+    print("  takers %s, defenders %s" % (sorted(takers), sorted(defenders)))
+    if takers & defenders:
+        fail("a defender took a teleporter: bots %s" % sorted(takers & defenders))
     sys.exit(1 if failed else 0)
 # (the precision cases: the bot given the sniper rifle, which holds a vantage
 # point)
