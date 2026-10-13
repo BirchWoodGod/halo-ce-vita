@@ -78,6 +78,10 @@ static struct
 {
 	unsigned char *window;
 	unsigned long bias;
+	/* port: what a relocated pointer is moved by: the bias, but for a
+	structure BSP linked elsewhere than it is loaded in the window
+	(halo_tag_relocate_linked_structure_bsp_rebase) */
+	unsigned long store_bias;
 	/* the address the data are linked to, the size of the window there and
 	its words */
 	unsigned long link_base, link_size, words;
@@ -139,12 +143,15 @@ static unsigned char *relocate_word(unsigned char *location)
 {
 	unsigned long word = (unsigned long)(location - relocation.window) / 4;
 	unsigned long value;
+	unsigned int stored;
 
 	if (word >= relocation.words)
 		return NULL;
 	memcpy(&value, location, 4);
+	/* (relocated already: where it points in this process, from where it
+	was moved to) */
 	if (relocation.relocated[word / 8] & (1 << (word % 8)))
-		return (unsigned char *)value;
+		return (unsigned char *)(value - relocation.store_bias + relocation.bias);
 	if (value - relocation.link_base >= relocation.link_size)
 	{
 		if (value)
@@ -153,9 +160,9 @@ static unsigned char *relocate_word(unsigned char *location)
 	}
 	relocation.relocated[word / 8] |= (unsigned char)(1 << (word % 8));
 	relocation.pointers++;
-	value += relocation.bias;
-	memcpy(location, &value, 4);
-	return (unsigned char *)value;
+	stored = (unsigned int)(value + relocation.store_bias);
+	memcpy(location, &stored, 4);
+	return (unsigned char *)(value + relocation.bias);
 }
 
 /* port: an inconsistency the walk found (HALO_TAG_RELOCATION_REPORT=1 logs
@@ -314,6 +321,7 @@ static void begin(void *tag_cache)
 	relocation.report = value && value[0] == '1';
 	relocation.window = tag_cache;
 	relocation.bias = (unsigned long)tag_cache - relocation.link_base;
+	relocation.store_bias = relocation.bias;
 	relocation.pointers = relocation.outside = relocation.walked = relocation.invalid = relocation.stale = 0;
 }
 
@@ -493,6 +501,52 @@ void halo_tag_relocate_linked_structure_bsp(void *tag_cache, void *bsp, unsigned
 	if (structure && loaded((unsigned long)(structure - relocation.bias)))
 		walk(TAG_LAYOUT_STRUCTURE_BSP, structure);
 	finish("custom edition structure bsp", size);
+}
+
+/* port: A Halo: CE Anniversary map's structure BSP (custom_edition_cache.c)
+is read into its tag cache at to_link, as the tags are linked, but its own
+pointers are linked to from_link, where MCC loads it: they are moved to
+to_link (with a walk of their own: the BSP's layout, its pointers into
+itself alone), and then as any other structure BSP's (above). */
+void halo_tag_relocate_linked_structure_bsp_rebase(void *bsp, unsigned long size, unsigned long from_link,
+	unsigned long to_link)
+{
+	unsigned char *header = bsp;
+	unsigned char *structure;
+	unsigned char *relocated;
+	unsigned char *instances = relocation.instances;
+	long instance_count = relocation.instance_count;
+
+	if (size < 0x18 || size > 0x10000000UL)
+		return;
+	relocated = halo_custom_edition_memory_alloc(size / 32 + 1);
+	if (!relocated)
+	{
+		/* (its pointers stay where they point: the game finds the bsp's
+		blocks outside the tag cache and refuses it) */
+		platform_log("tag-relocate: out of memory moving a structure bsp");
+		return;
+	}
+	relocation.link_base = from_link;
+	relocation.link_size = size;
+	relocation.words = size / 4;
+	relocation.relocated = relocated;
+	begin(bsp);
+	relocation.store_bias = to_link - from_link;
+	/* (pointers are followed into the bsp alone; references are checked
+	against the tags' instances, as the bsp's later walk does) */
+	relocation.tags_end = from_link;
+	relocation.bsp_start = from_link;
+	relocation.bsp_end = from_link + size;
+	relocation.instances = instances;
+	relocation.instance_count = instance_count;
+	structure = relocate_word(header);
+	if (structure && loaded((unsigned long)(structure - relocation.bias)))
+		walk(TAG_LAYOUT_STRUCTURE_BSP, structure);
+	finish("halo: ce anniversary structure bsp moved", size);
+	halo_custom_edition_memory_free(relocated);
+	relocation.instances = instances;
+	relocation.instance_count = instance_count;
 }
 
 void halo_tag_relocate_linked_release(void)

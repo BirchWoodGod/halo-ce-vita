@@ -72,6 +72,9 @@ void *halo_custom_edition_tag_cache(void);
 /* whether Custom Edition maps may run, and a map's tag cache when the
 window above is not there (port/linux/src/xbox_memory.c) */
 int halo_custom_edition_enabled(void);
+/* whether the mods folder's Halo: CE Anniversary maps may be listed and
+played (HALO_MCC_MODS: port/linux/src/xbox_memory.c) */
+int halo_mcc_mods_enabled(void);
 void *halo_custom_edition_tag_cache_acquire(unsigned long bytes);
 void halo_custom_edition_tag_cache_release(void);
 /* zeroed memory blocks of their own for a Custom Edition map's converted

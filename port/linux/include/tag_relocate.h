@@ -19,6 +19,11 @@ int halo_tag_relocate_linked_tags(void *tag_cache, unsigned long size, unsigned 
 	unsigned long window_bytes);
 /* a structure BSP of those, just read to bsp inside their tag cache */
 void halo_tag_relocate_linked_structure_bsp(void *tag_cache, void *bsp, unsigned long size);
+/* port: a Halo: CE Anniversary map's structure BSP of `size` bytes, just read
+to `bsp` inside that tag cache, where its tags link it to `to_link`: its
+pointers, which the map links to `from_link`, moved to `to_link` first */
+void halo_tag_relocate_linked_structure_bsp_rebase(void *bsp, unsigned long size, unsigned long from_link,
+	unsigned long to_link);
 /* that tag cache is gone */
 void halo_tag_relocate_linked_release(void);
 

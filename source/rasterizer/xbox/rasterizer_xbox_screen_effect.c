@@ -279,6 +279,21 @@ static void rasterizer_screen_effect_set_texture_transforms(
 		from its second level at its first's size (bitmap_placed_width) */
 		convolution_size.i = bitmap_placed_width(convolution_bitmap);
 		convolution_size.j = bitmap_placed_height(convolution_bitmap);
+#ifdef HALO_LINUX
+		/* (port) a Halo: CE Anniversary scope's mask (a weapon HUD's screen
+		effect: the sniper rifle's 1024x512, the pistol's 512, twice the
+		Xbox's with Halo PC's half HUD scale) at the Xbox's size
+		(hud_draw.c hud_mcc_bitmap_scale; 1 on any other map) */
+		if (convolution_bitmap == parameters->convolution_mask &&
+			convolution_bitmap->tag_index != NONE &&
+			!TEST_FLAG(convolution_bitmap->flags, _bitmap_linear_bit))
+		{
+			real mask_scale = hud_mcc_bitmap_scale(convolution_bitmap->tag_index, FALSE);
+
+			convolution_size.i *= mask_scale;
+			convolution_size.j *= mask_scale;
+		}
+#endif
 		scanline_size.i = bitmap_placed_width(scanline_bitmap);
 		scanline_size.j = bitmap_placed_height(scanline_bitmap);
 		noise_size.i = bitmap_placed_width(noise_bitmap);

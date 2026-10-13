@@ -1570,7 +1570,7 @@ with the values it saved, but the co-op pair (gone: co-op is hosted from
 the Campaign screen) and Online games (now Visibility, by OpenCE's name);
 and the rows added since (Sun rays, Button icons, Map downloads, Max
 players, Visibility, Fourth core helpers, Latency meter, Particles,
-First-person legs; the Play page's two texts) */
+First-person legs, MCC mods; the Play page's two texts) */
 static void test_variables_kept(void)
 {
 	static const char *const variables[] = {
@@ -1592,7 +1592,7 @@ static void test_variables_kept(void)
 		"HALO_VITA_SHADOWS", "HALO_MAX_SCENE_LIGHTS", "HALO_VITA_EFFECTS_QUALITY", "HALO_PARTICLE_RENDER_DIVISOR",
 		"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR", "HALO_INTERPOLATION", "HALO_LATENCY_METER", "HALO_BOTS", "HALO_BOT_SKILL", "HALO_BOT_TEAMS",
 		"HALO_BOT_VEHICLES", "HALO_BOT_ROUTES", "HALO_BOT_PLAYLIST", "HALO_NET_COOP_PLAYERS", "HALO_NET_REMOTE_LOD",
-		"HALO_LANGUAGE", "HALO_UPDATE_CHANNEL", "HALO_PARTICLE_BUDGET", "HALO_FIRST_PERSON_LEGS",
+		"HALO_LANGUAGE", "HALO_UPDATE_CHANNEL", "HALO_PARTICLE_BUDGET", "HALO_FIRST_PERSON_LEGS", "HALO_MCC_MODS",
 	};
 	int index, all = 1, choices = 0;
 
@@ -2795,6 +2795,27 @@ int main(void)
 		menu_fits(), "cross starts it: the row goes, the warning says it is under way");
 	installer_state = 0;
 	press(VITA_BUTTON_CIRCLE);
+
+	/* MCC mods (experimental, off by default): no row without a folder in
+	ux0:data/haloce-vita/mods; with one, the row, Off, and right turns it on
+	(HALO_MCC_MODS, live) */
+	open_page("Modded maps");
+	check(!strstr(menu, "\nMCC mods\x02"), "no mods folder: no MCC mods row");
+	press(VITA_BUTTON_CIRCLE);
+	mkdir("ux0:data/haloce-vita/mods", 0777);
+	mkdir("ux0:data/haloce-vita/mods/ruby", 0777);
+	open_page("Modded maps");
+	check(strstr(menu, "\nMCC mods\x02  Off >") != NULL && menu_fits(), "a mod's folder: the MCC mods row, Off");
+	to_line("MCC mods");
+	check(strstr(menu, "\n\x05" "Experimental: mods folder's MCC maps, solo, offline\n") != NULL, "MCC mods' help");
+	press(VITA_BUTTON_RIGHT);
+	check(getenv("HALO_MCC_MODS") && !strcmp(getenv("HALO_MCC_MODS"), "1") && strstr(menu, "\nMCC mods\x02< On  \n"),
+		"right: MCC mods On");
+	press(VITA_BUTTON_LEFT);
+	check(getenv("HALO_MCC_MODS") && !strcmp(getenv("HALO_MCC_MODS"), "0"), "left: Off again");
+	press(VITA_BUTTON_CIRCLE);
+	rmdir("ux0:data/haloce-vita/mods/ruby");
+	rmdir("ux0:data/haloce-vita/mods");
 
 	/* ---------- Dev, behind its switch */
 	press(VITA_BUTTON_R);

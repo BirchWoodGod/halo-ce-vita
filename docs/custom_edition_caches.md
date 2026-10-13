@@ -201,12 +201,18 @@ a mod-set cache with the stock resource maps instead, for inspection only
 (OpenSauce itself refuses such a map). `--dump-tags` writes the converted
 tags to a file, as they would sit at `0x40440000`.
 
-Loading, step by step (`custom_edition_cache_load`):
+Loading, step by step (`custom_edition_cache_load`; a Halo: CE
+Anniversary cache, version 13, from a mod's folder takes the same steps,
+linked to 0x50000000, with its structure BSPs' vertices in the file:
+[mcc_cea_maps.md](mcc_cea_maps.md#playing-a-mod-natively)):
 
 1. The header: signatures, version 609, terminated strings, file length
    within the file and the size limit (`0x18000000`, or `0x24000000` with
    OpenSauce memory upgrades), no compression, tag data within the file and
-   the tag cache (23 MB, or 1.5 times that with memory upgrades). An
+   the tag cache (23 MB, or 1.5 times that with memory upgrades, or, for a
+   map without OpenSauce's header, the room its structure BSPs reach up to
+   that: a map built for a larger tag space, as Invader's `--tag-space`
+   builds Halo: CE Anniversary maps, [mcc_cea_maps.md](mcc_cea_maps.md)). An
    OpenSauce header at offset `0x70` is checked as OpenSauce checks it:
    header version 1 or 2, `project_yellow` and `project_yellow_globals` tag
    versions 2, memory upgrade factor at most 1.5, no undefined flags, a mod
@@ -272,6 +278,37 @@ changed:
   any other compression (Halo PC's IMA ADPCM), or whose permutations are
   not all of the sound's own, are made unplayable, by emptying their pitch
   ranges, which the game skips.
+- **The sound cache file** (`custom_edition_sounds.c`). Each Ogg Vorbis
+  permutation's Xbox ADPCM, once made, is kept beside the map and read from
+  there the next time instead of decoded: a mod's map's in
+  `ux0:data/haloce-vita/mods/<mod>/cache/<map>.sndcache`, a maps folder
+  map's in `ux0:data/haloce-vita/sound_cache/<map>.sndcache` (Linux and the
+  other ports: the data root's). While the decoding thread has nothing to
+  do it fills the file in the background, the shortest permutations first
+  (on the Vita at priority 189, below every other thread); a permutation the
+  sound cache asks for stops it. The file holds a header (version, the map
+  file's name, size and header CRC-32, `sounds.map`'s size, the CRC-32 of
+  the list of permutations), a table of 32-byte entries, one a permutation
+  in the order of their streams (where its ADPCM is, the CRC-32s of the
+  stream it was made from and of the ADPCM, its own CRC-32 with its index),
+  then the ADPCM. A header that is not the map's makes a new file; an entry
+  that does not check, is not its permutation's or points outside the file
+  is empty; when one is read the stream and the ADPCM must have the
+  entry's CRC-32s, else it is emptied on disk and the permutation decoded.
+  An entry is written after its ADPCM. Only permutations whose length the
+  loader knows are listed (not a protected map's measured ones), nothing is
+  written without sound (`audio.enabled` false, the dedicated server), and
+  a write that fails ends the file's writes for the map. Settings:
+  `HALO_SOUND_CACHE=0` (no file: every permutation decoded as it loads),
+  `HALO_SOUND_CACHE_PREFILL=0` (no background filling),
+  `HALO_SOUND_CACHE_MB` (the most a file holds, 512), and on the Vita
+  `HALO_OGG_DECODER_PRIORITY` (64-191). The block a deleted permutation's
+  decoding was filling is written only under the lock while it is still
+  that decoding's, so the deleting thread (the tick) no longer waits for
+  the decoding to stop, and the decoder reads the map through handles of
+  its own, never holding `custom_edition_cache_read`'s lock.
+  run_ce_ogg_sound_test.sh plays extinction's sounds from the file, and
+  with it damaged, cut short, of another map and garbage.
 - **16-bit PCM permutations** (compression 0, little-endian in Halo PC's
   caches) of Xbox ADPCM sounds: Halo PC plays a sound's permutations each
   in its own compression, and maps built with mods mix them

@@ -74,6 +74,9 @@ symbols in this file:
 #include "scenario/scenario_definitions.h"
 #include "tag_files/tag_files.h"
 #include "tag_files/tag_groups.h"
+#ifdef HALO_LINUX
+#include "custom_edition_cache.h" /* port: port/linux/game/custom_edition_cache.c */
+#endif
 #include "units/unit_definitions.h"
 #include "units/units.h"
 
@@ -437,6 +440,12 @@ static void render_weapon_hud(
 static boolean weapon_hud_state_index_valid(
 	short state_index,
 	short state_count);
+#ifdef HALO_LINUX
+static struct hud_absolute_placement_definition const *weapon_hud_element_anchor(
+	struct hud_absolute_placement_definition const *hud_anchor,
+	short element_anchor,
+	struct hud_absolute_placement_definition *own_anchor);
+#endif
 
 /* ---------- globals */
 
@@ -1399,6 +1408,35 @@ static boolean weapon_hud_state_index_valid(
 	return FALSE;
 }
 
+#ifdef HALO_LINUX
+/* port: Halo: CE Anniversary's weapon HUD elements (statics, meters,
+numbers and overlays) may be anchored where their HUD is not: MCC keeps
+an element's own anchor (Invader's HUDInterfaceChildAnchor: 0 its HUD's,
+1-5 top left to centre, 6-9 MCC's own edge centres) in the header's
+padding, which the Xbox's and Halo PC's tags leave zero. Ruby's Rebalanced
+Halo: CE's sniper rifle anchors its range ladders to the centre (-355,0 and
+355,0 on MCC's canvas), where its HUD anchors the top left: drawn from the
+top left they were off the screen. A map whose HUD is Halo: CE
+Anniversary's (custom_edition_cache_hud_mcc_canvas) draws such an element
+from its own corner or the centre; an edge centre, which this build's HUD
+has not, from its HUD's anchor as before. */
+static struct hud_absolute_placement_definition const *weapon_hud_element_anchor(
+	struct hud_absolute_placement_definition const *hud_anchor,
+	short element_anchor,
+	struct hud_absolute_placement_definition *own_anchor)
+{
+	if (custom_edition_cache_hud_mcc_canvas() &&
+		element_anchor > 0 &&
+		element_anchor <= _hud_anchor_center + 1)
+	{
+		*own_anchor = *hud_anchor;
+		own_anchor->corner = element_anchor - 1;
+		return own_anchor;
+	}
+	return hud_anchor;
+}
+#endif
+
 static void render_weapon_hud(
 	long hud_index,
 	short local_player_index,
@@ -1419,6 +1457,9 @@ static void render_weapon_hud(
 	short state_index;
 	short map_type_flags;
 	short element_index;
+#ifdef HALO_LINUX
+	struct hud_absolute_placement_definition own_anchor;
+#endif
 
 	csmemset(
 		stack_buffer,
@@ -1783,7 +1824,11 @@ static void render_weapon_hud(
 #endif
 			hud_draw_static_element(
 				local_player_index,
+#ifdef HALO_LINUX
+				weapon_hud_element_anchor(&definition->absolute_placement, element->header.pad, &own_anchor),
+#else
 				&definition->absolute_placement,
+#endif
 				&element->static_element,
 				state_flags[state_index],
 				hud_state->last_weapon_flash_time[state_index]);
@@ -1812,7 +1857,11 @@ static void render_weapon_hud(
 			value = (byte)number_values[state_index];
 			hud_draw_meter(
 				local_player_index,
+#ifdef HALO_LINUX
+				weapon_hud_element_anchor(&definition->absolute_placement, element->header.pad, &own_anchor),
+#else
 				&definition->absolute_placement,
+#endif
 				&element->meter_element,
 				value,
 				value,
@@ -1884,7 +1933,11 @@ static void render_weapon_hud(
 
 			hud_draw_numbers(
 				local_player_index,
+#ifdef HALO_LINUX
+				weapon_hud_element_anchor(&definition->absolute_placement, element->header.pad, &own_anchor),
+#else
 				&definition->absolute_placement,
+#endif
 				&element->number_element,
 				value,
 				decimal_value,
@@ -1910,7 +1963,11 @@ static void render_weapon_hud(
 			state_index = element->state_type;
 			hud_draw_weapon_overlays(
 				local_player_index,
+#ifdef HALO_LINUX
+				weapon_hud_element_anchor(&definition->absolute_placement, element->pad, &own_anchor),
+#else
 				&definition->absolute_placement,
+#endif
 				&element->overlays,
 				overlay_flags[state_index],
 				hud_state->last_weapon_flash_time[state_index],

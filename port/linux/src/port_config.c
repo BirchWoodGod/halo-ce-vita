@@ -134,6 +134,11 @@ static const struct config_setting config_settings[] =
 		"Experimental: Halo Custom Edition (PC) maps in the maps folder are offered in\n"
 		"the multiplayer map list and run (docs/custom_edition_caches.md). Modded Xbox\n"
 		"maps need no setting." },
+	{ "game.mcc_mods", _config_boolean, "false", "HALO_MCC_MODS", _environment_set_is_true, _platform_all,
+		"Experimental: a Halo: The Master Chief Collection campaign mod's Halo: CE\n"
+		"Anniversary maps in the data folder's mods folder are offered after the\n"
+		"campaign's levels and played alone, offline (docs/mcc_cea_maps.md). Needs\n"
+		"game.custom_edition. Never on any network." },
 
 	{ "game.language", _config_string, "\"\"", "HALO_LANGUAGE", _environment_value, _platform_all,
 		"The language the game asks the Xbox for: \"ja\", \"de\", \"fr\", \"es\" or \"it\";\n"

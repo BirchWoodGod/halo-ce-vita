@@ -795,7 +795,14 @@ void hud_render_damage_indicators(
 						_hud_anchor_center,
 						&corner,
 						clip,
+#ifdef HALO_LINUX
+						/* port: Halo: CE Anniversary's, twice the Xbox's
+						with Halo PC's half HUD scale, at the Xbox's size
+						(hud_draw.c hud_mcc_bitmap_scale) */
+						scale * hud_mcc_bitmap_scale(bitmap_group_index, FALSE),
+#else
 						scale,
+#endif
 						theta,
 						definition->color,
 						FALSE);

@@ -536,8 +536,17 @@ enum ogg_sound_status ogg_sound_transcode(
 
 		/* the stream ended before this piece: silence, and still kept as
 		ended (no piece after it decodes the stream again to find that) */
-		xbox_adpcm_encoder_begin(&silence, request->output, request->output_bytes, request->channels);
+		if (request->sink)
+		{
+			xbox_adpcm_encoder_begin_sink(&silence, request->output, request->staging_bytes, request->output_bytes,
+				request->channels, request->sink, request->sink_context);
+		}
+		else
+		{
+			xbox_adpcm_encoder_begin(&silence, request->output, request->output_bytes, request->channels);
+		}
 		result->frames_padded = xbox_adpcm_encoder_finish(&silence);
+		result->stopped = silence.stopped;
 		result->resumed = 1;
 		result->kept = 1;
 		result->frames_skipped = request->first_frame - state->next_frame;
@@ -573,7 +582,17 @@ enum ogg_sound_status ogg_sound_transcode(
 				(size_t)(state->encoder.block_frames - (int)skip) * sizeof(state->encoder.block[0]));
 			state->encoder.block_frames -= (int)skip;
 		}
-		xbox_adpcm_encoder_continue(&state->encoder, request->output, request->output_bytes);
+		if (request->sink ?
+			!xbox_adpcm_encoder_continue_sink(&state->encoder, request->output, request->staging_bytes, request->output_bytes,
+				request->sink, request->sink_context) :
+			!xbox_adpcm_encoder_continue(&state->encoder, request->output, request->output_bytes))
+		{
+			/* (the kept decoding let go: the request is not usable) */
+			state->kept = 0;
+			state->heap = NULL;
+			result->status = _ogg_sound_bad_arguments;
+			return result->status;
+		}
 		result->resumed = 1;
 		result->frames_skipped = skip;
 		result->stream_channels = state->info.channels;
@@ -586,7 +605,19 @@ enum ogg_sound_status ogg_sound_transcode(
 		memset(state, 0, sizeof(*state));
 		state->channels = request->channels;
 		state->output_rate = request->rate;
-		xbox_adpcm_encoder_begin(&state->encoder, request->output, request->output_bytes, request->channels);
+		if (request->sink)
+		{
+			if (!xbox_adpcm_encoder_begin_sink(&state->encoder, request->output, request->staging_bytes,
+				request->output_bytes, request->channels, request->sink, request->sink_context))
+			{
+				result->status = _ogg_sound_bad_arguments;
+				return result->status;
+			}
+		}
+		else
+		{
+			xbox_adpcm_encoder_begin(&state->encoder, request->output, request->output_bytes, request->channels);
+		}
 		/* (the frames before the first decoded and left out, warming the
 		encoder as they would have the whole output's) */
 		state->encoder.skip_frames = request->first_frame % XBOX_ADPCM_BLOCK_SAMPLES;
@@ -624,11 +655,14 @@ enum ogg_sound_status ogg_sound_transcode(
 	/* (frames skipped short of the output: none of it was reached) */
 	result->frames_skipped -= state->encoder.skip_frames + state->encoder.warm_frames;
 	result->truncated |= state->encoder.truncated;
+	result->stopped = state->encoder.stopped;
 	result->sum_of_squares = state->encoder.sum_of_squares;
 	result->peak = state->encoder.peak;
 	result->status = status;
+	/* (not one a sink stopped: its output was let go, and so is the
+	decoding) */
 	if (status == _ogg_sound_ok && request->keep && (state->finished || state->encoder.full) &&
-		request->first_frame <= UINT32_MAX - state->encoder.frames)
+		!state->encoder.stopped && request->first_frame <= UINT32_MAX - state->encoder.frames)
 	{
 		/* kept for the next piece (one the output filled before the
 		stream's end, or one the stream ended in: what follows is silence) */
@@ -673,7 +707,18 @@ enum ogg_sound_status ogg_sound_transcode(
 	struct ogg_sound_result *result)
 {
 	memset(result, 0, sizeof(*result));
-	if (request && request->output)
+	if (request && request->output && request->sink)
+	{
+		struct xbox_adpcm_encoder encoder;
+
+		if (xbox_adpcm_encoder_begin_sink(&encoder, request->output, request->staging_bytes, request->output_bytes,
+			request->channels, request->sink, request->sink_context))
+		{
+			xbox_adpcm_encoder_finish(&encoder);
+			result->stopped = encoder.stopped;
+		}
+	}
+	else if (request && request->output)
 		memset(request->output, 0, request->output_bytes);
 	result->status = _ogg_sound_unsupported_format;
 	return result->status;
