@@ -112,6 +112,23 @@ What a bot does each tick, in a player's terms:
   climbable pipes) is left be. There is no other climbing: a stuck bot
   jumps and sidesteps as before (halo.log's moves line counted what stood
   before stuck bots: low walls a jump clears were a few in a hundred).
+- Teleporters as shortcuts (port; bots_shortcut_weigh): a bot on foot whose
+  goal the walkable surfaces do reach walked there before, through no
+  teleporter however much shorter (Blood Gulch's, from beside each base's
+  flag out to the middle of the canyon; Battle Creek's between the bases).
+  Now, as a search to its goal answers, it weighs the map's teleporters
+  (each source flag with the first target of its channel, the one the game
+  sends a player to): the walk to an entrance and on from its exit against
+  the walk the search found; the best, 80% of the walk at most and 15 units
+  shorter, is weighed again with the walk from its exit measured by a search
+  of its own, and taken: the bot goes onto the entrance and on from where
+  it comes out. Never driving, never a defender, nor a bot on a side lane;
+  to the objective, a roaming place or an enemy last seen alone (items,
+  powerups and vehicles come first - a bot fresh from its base with a
+  vehicle near weighs none for its first ten seconds - a fight stops its
+  clock); two bots to a teleporter at most at once. One that fails a bot (not sent from its
+  entrance, or not come to in time) is left be thirty seconds, for the map
+  after three failures and none sent.
 - Roles, routes and vantage points (port: bots_roles.c, bots_routes.c and
   bots_vantage.c, steering the bot through bots_tactics.h's hooks here: its
   goal, its searches' goal, its look and its fight). Each team's bots have
@@ -158,8 +175,11 @@ the bots stay the same from run to run). halo.log has each minute of play's
 bot line: their ticks' time (us/tick), the searches and how many failed;
 port: and its moves line: the times a bot stood stuck and what was before
 it, the powerups gone for and taken, the bodies restored, the ladders and
-their climbs; and its tactics line (bots_roles.c): the lanes taken and given
-up, the vantage points held and left, the defenders' posts.
+their climbs, the teleporters' shortcuts weighed, taken, gone through, failed
+and dropped (and the bots sent as the last way or by chance), with its
+teleporters line (each teleporter's bots sent and failures); and its tactics
+line (bots_roles.c): the lanes taken and given up, the vantage points held
+and left, the defenders' posts. The map's teleporters are logged once.
 */
 
 #include "cseries.h"
@@ -269,6 +289,19 @@ saw no further from the turret than this; and the most turrets kept */
 #define BOTS_TURRET_REACH 12.0f
 #define BOTS_TURRET_RANGE 60.0f
 #define BOTS_MAXIMUM_TURRETS 16
+/* port: teleporters as shortcuts (bots_shortcut_weigh): taken when the way
+through (the walk to the entrance, and from the exit to the goal) is no more
+than this share of the walk, and this many units shorter at least; a bot
+weighs them again no sooner than this after (and not for the same goal);
+at most this many bots go for one teleporter at once */
+#define BOTS_SHORTCUT_SHARE 0.8f
+#define BOTS_SHORTCUT_GAIN 15.0f
+#define BOTS_SHORTCUT_WEIGH_SECONDS 5
+#define BOTS_SHORTCUT_BOTS 2
+/* port: a teleporter that failed a bot (it stood on the entrance and was
+not sent, or did not come to it in time) left be this long; one that
+failed three times and never sent a bot, left be for the map */
+#define BOTS_SHORTCUT_REST_SECONDS 30
 
 enum
 {
@@ -356,6 +389,34 @@ enum
 	_bots_search_done,
 };
 
+/* port: what a path search is for: the bot's path, the walk from a
+teleporter's exit to the bot's goal (measured, not walked: bots_shortcut_
+weigh), or the bot's path to the teleporter's entrance it takes */
+enum
+{
+	_bots_search_for_path = 0,
+	_bots_search_for_exit,
+	_bots_search_for_entrance,
+};
+
+/* port: a bot's teleporter shortcut (bots_shortcut_weigh): none, the walk
+from its exit being measured, or on the way to its entrance */
+enum
+{
+	_bots_shortcut_none = 0,
+	_bots_shortcut_measuring,
+	_bots_shortcut_going,
+};
+
+/* port: how a bot came to go through a teleporter (halo.log's census) */
+enum
+{
+	_bots_through_shortcut = 0,
+	_bots_through_last_way,
+	_bots_through_by_chance,
+	NUMBER_OF_BOTS_THROUGH,
+};
+
 /* ---------- structures */
 
 struct bots_skill_definition
@@ -430,9 +491,11 @@ struct bots_search
 	long start_surface_index;
 	real_point3d goal_point;
 	long goal_surface_index;
-	/* asked at this tick, for this goal (the bot's goal serial) */
+	/* asked at this tick, for this goal (the bot's goal serial); port: and
+what for (_bots_search_for_path ...) */
 	long asked_tick;
 	long goal_serial;
+	short purpose;
 	/* the answer */
 	boolean found;
 	struct path_state state_memory;
@@ -510,6 +573,29 @@ struct bots_bot
 	long via_climb_tick;
 	long via_top_tick;
 	boolean ladder_jump;
+	/* port: a teleporter as a shortcut to a goal it could walk to
+	(bots_shortcut_weigh): how far along (_bots_shortcut_none ...), which
+	teleporter, for which goal (its serial, and where it was), the walk it
+	was weighed against (as little as it is, for a search that stopped
+	short), the way to its entrance as weighed (and whether a search to it
+	has said how far it is: taken once it has) and the walk from its exit,
+	measured; when it gives up going there, since when it stands on the
+	entrance (0 off it); and when it next weighs the teleporters, the goal it
+	last weighed them for */
+	short shortcut_phase;
+	long shortcut_index;
+	long shortcut_serial;
+	real_point3d shortcut_goal;
+	real shortcut_walk;
+	boolean shortcut_walk_short;
+	real shortcut_entrance;
+	boolean shortcut_entrance_known;
+	real shortcut_beyond;
+	long shortcut_tick;
+	long shortcut_deadline_tick;
+	long shortcut_on_tick;
+	long shortcut_weigh_tick;
+	long shortcut_weighed_serial;
 	/* its path ends short of the goal (the search found no way there: a
 	platform the walkable surfaces do not reach, Wizard's flags'); at its
 	end, straight on with jumps until then, and the game's goals left a
@@ -632,9 +718,20 @@ static struct
 		real climb_direction;
 		real top_z;
 		/* the times bots climbed it, and failed to (a climbable surface no
-		biped goes up, Damnation's: left be after three, none up it) */
+		biped goes up, Damnation's: left be after three, none up it); port: a
+		teleporter's, the times bots went for it as a shortcut and it failed
+		them (bots_shortcut_fail) */
 		long climbs;
 		long failures;
+		/* port: a teleporter's channel (its source flag's team index), the
+		exit's ground and surface (where a search measures the walk on from:
+		bots_shortcut_weigh), when it is gone for again after a failure, and
+		the times it sent a bot, by how the bot came to it (halo.log) */
+		short channel;
+		real_point3d exit_ground;
+		long exit_surface_index;
+		long rest_until_tick;
+		long through[NUMBER_OF_BOTS_THROUGH];
 	} teleporters[BOTS_MAXIMUM_TELEPORTERS];
 	struct bots_bot bots[BOTS_MAXIMUM];
 	/* the skill setting, read once a tick (bots_update_actions) for every
@@ -717,6 +814,18 @@ static struct
 	long ladder_count;
 	long ladder_tries;
 	long ladder_climbs;
+	/* port: the teleporters as shortcuts (bots_shortcut_weigh): the map's
+	teleporters (not the ladders), the walks from an exit measured, the
+	shortcuts taken, the bots sent through by how they came (a shortcut, the
+	last way to a goal the walkable surfaces do not reach, by chance), those
+	that failed (bots_shortcut_fail), and those dropped on the way (another
+	goal, a vehicle, the entrance further than it was weighed) */
+	long teleporter_shortcuts;
+	long shortcut_measures;
+	long shortcut_takes;
+	long shortcut_through[NUMBER_OF_BOTS_THROUGH];
+	long shortcut_failures;
+	long shortcut_drops;
 	/* port: the powerups bots went for and took (by kind), and the times a
 	bot's body was restored (a health pack, gone for or walked over) */
 	long powerups_sought[NUMBER_OF_BOTS_POWERUPS];
@@ -2332,6 +2441,9 @@ static void bots_prepare_ladders(struct collision_bsp const *bsp)
 		}
 		if (foot_surface == NONE || landing_surface == NONE)
 			continue;
+		/* (no shortcut: bots_shortcut_weigh takes teleporters alone) */
+		csmemset(&bots_globals.teleporters[teleporter], 0, sizeof(bots_globals.teleporters[teleporter]));
+		bots_globals.teleporters[teleporter].exit_surface_index = NONE;
 		bots_globals.teleporters[teleporter].entrance = foot;
 		bots_globals.teleporters[teleporter].entrance_surface_index = foot_surface;
 		bots_globals.teleporters[teleporter].exit = landing;
@@ -2378,13 +2490,23 @@ static void bots_prepare_map(void)
 		bots_add_roam_point(&equipment->position);
 	}
 	/* (the teleporters: a source flag's channel is its team index, and the
-	target flag of that channel is where it comes out) */
+	target flag of that channel is where it comes out; port: the first of
+	the channel's targets, in the flags' order, as the game sends a player
+	to it alone - game_engine.c's game_engine_update_teleporter takes the
+	first find_netgame_flags finds - so a channel with more exits than one
+	sends every player to its first, and so the bots know it. A two-way
+	teleporter is two sources, each with the other's channel; a one-way one
+	a source alone, its target no entrance. Each logged, a shortcut's
+	exit's ground with it) */
 	bots_globals.teleporter_count = 0;
+	bots_globals.teleporter_shortcuts = 0;
 	for (index = 0; index < scenario->netgame_flags.count && bots_globals.teleporter_count < BOTS_MAXIMUM_TELEPORTERS; index++)
 	{
 		struct scenario_netgame_flag *source =
 			TAG_BLOCK_GET_ELEMENT(&scenario->netgame_flags, index, struct scenario_netgame_flag);
-		long target_index;
+		long target_index, exits = 0;
+		long teleporter = bots_globals.teleporter_count;
+		boolean paired = FALSE;
 
 		if (source->type != _netgame_flag_teleporter_source)
 			continue;
@@ -2392,20 +2514,38 @@ static void bots_prepare_map(void)
 		{
 			struct scenario_netgame_flag *target =
 				TAG_BLOCK_GET_ELEMENT(&scenario->netgame_flags, target_index, struct scenario_netgame_flag);
-			long teleporter = bots_globals.teleporter_count;
 
 			if (target->type != _netgame_flag_teleporter_target || target->team_index != source->team_index)
 				continue;
+			exits++;
+			if (paired)
+				continue;
+			paired = TRUE;
+			csmemset(&bots_globals.teleporters[teleporter], 0, sizeof(bots_globals.teleporters[teleporter]));
 			bots_globals.teleporters[teleporter].entrance_surface_index =
 				bots_surface_below(&source->position, &bots_globals.teleporters[teleporter].entrance);
 			bots_globals.teleporters[teleporter].exit = target->position;
 			bots_globals.teleporters[teleporter].ladder = FALSE;
-			bots_globals.teleporters[teleporter].climbs = 0;
-			bots_globals.teleporters[teleporter].failures = 0;
-			if (bots_globals.teleporters[teleporter].entrance_surface_index != NONE)
-				bots_globals.teleporter_count++;
-			break;
+			bots_globals.teleporters[teleporter].channel = source->team_index;
+			bots_globals.teleporters[teleporter].exit_surface_index =
+				bots_surface_below(&target->position, &bots_globals.teleporters[teleporter].exit_ground);
 		}
+		if (!paired || bots_globals.teleporters[teleporter].entrance_surface_index == NONE)
+		{
+			platform_log("bots: teleporter at (%.1f %.1f %.1f) channel %d: %s", source->position.x, source->position.y,
+				source->position.z, (int)source->team_index, paired ? "on no ground (left out)" : "no exit (left out)");
+			continue;
+		}
+		bots_globals.teleporter_count++;
+		if (bots_globals.teleporters[teleporter].exit_surface_index != NONE)
+			bots_globals.teleporter_shortcuts++;
+		platform_log("bots: teleporter %ld at (%.1f %.1f %.1f) to (%.1f %.1f %.1f) channel %d, %.0f units%s%s",
+			teleporter + 1, source->position.x, source->position.y, source->position.z,
+			bots_globals.teleporters[teleporter].exit.x, bots_globals.teleporters[teleporter].exit.y,
+			bots_globals.teleporters[teleporter].exit.z, (int)source->team_index,
+			(double)bots_distance3d(&source->position, &bots_globals.teleporters[teleporter].exit),
+			exits > 1 ? " (the first of the channel's exits, as the game sends a player)" : "",
+			bots_globals.teleporters[teleporter].exit_surface_index == NONE ? " (its exit on no ground: no shortcut)" : "");
 	}
 	for (index = 0; index < scenario->players.count; index += 2)
 	{
@@ -2577,6 +2717,12 @@ void bots_initialize_for_new_map(void)
 	bots_globals.ladder_count = 0;
 	bots_globals.ladder_climbs = 0;
 	bots_globals.ladder_tries = 0;
+	bots_globals.teleporter_shortcuts = 0;
+	bots_globals.shortcut_measures = 0;
+	bots_globals.shortcut_takes = 0;
+	csmemset(bots_globals.shortcut_through, 0, sizeof(bots_globals.shortcut_through));
+	bots_globals.shortcut_failures = 0;
+	bots_globals.shortcut_drops = 0;
 	csmemset(bots_globals.powerups_sought, 0, sizeof(bots_globals.powerups_sought));
 	csmemset(bots_globals.powerups_taken, 0, sizeof(bots_globals.powerups_taken));
 	bots_globals.bodies_restored = 0;
@@ -2722,6 +2868,10 @@ static void bots_helper_start(void)
 	platform_log("bots: path searches %s", bots_helper.synchronous ? "in the tick" : "on a helper thread");
 }
 
+/* port: (teleporters as shortcuts, below) */
+static boolean bots_shortcut_same_goal(struct bots_bot *bot, real_point3d const *position);
+static void bots_shortcut_drop(struct bots_bot *bot, char const *why);
+
 /* asks for a path from where the bot's unit is to its goal */
 static void bots_search_ask(struct bots_bot *bot, long unit_index)
 {
@@ -2767,9 +2917,30 @@ static void bots_search_ask(struct bots_bot *bot, long unit_index)
 	search->start_surface_index = start_surface_index;
 	search->goal_point = bot->goal_point;
 	search->goal_surface_index = bot->goal_surface_index;
+	search->purpose = _bots_search_for_path;
+	/* port: a teleporter as a shortcut (bots_shortcut_weigh), for this goal
+	on foot alone: the walk from its exit to the goal measured (the bot
+	walks its path meanwhile), then the bot's path to its entrance */
+	if (bot->shortcut_phase != _bots_shortcut_none &&
+		(vehicle_index != NONE || !bots_shortcut_same_goal(bot, &start)))
+	{
+		bots_shortcut_drop(bot, vehicle_index != NONE ? "riding" : "another goal");
+	}
+	if (bot->shortcut_phase == _bots_shortcut_measuring)
+	{
+		search->purpose = _bots_search_for_exit;
+		search->start_point = bots_globals.teleporters[bot->shortcut_index].exit_ground;
+		search->start_surface_index = bots_globals.teleporters[bot->shortcut_index].exit_surface_index;
+	}
+	else if (bot->shortcut_phase == _bots_shortcut_going)
+	{
+		search->purpose = _bots_search_for_entrance;
+		search->goal_point = bots_globals.teleporters[bot->shortcut_index].entrance;
+		search->goal_surface_index = bots_globals.teleporters[bot->shortcut_index].entrance_surface_index;
+	}
 	/* port: Bot routes Lanes or Mixed (bots_routes.c): on foot, to the
 	waypoint of the bot's lane on its way */
-	if (vehicle_index == NONE && (bot->goal_kind == _bots_goal_objective || bot->goal_kind == _bots_goal_roam ||
+	else if (vehicle_index == NONE && (bot->goal_kind == _bots_goal_objective || bot->goal_kind == _bots_goal_roam ||
 		bot->goal_kind == _bots_goal_enemy))
 	{
 		bots_routes_search_goal(search->bot_index, &start, &search->goal_point, &search->goal_surface_index);
@@ -2864,9 +3035,18 @@ static boolean bots_search_teleporter(struct bots_bot *bot, struct bots_search *
 		real beyond = bots_distance3d(&bots_globals.teleporters[index].exit, &search->goal_point);
 		real cost;
 
-		/* port: (a ladder no bot got up, tried three times: none) */
+		/* port: (a ladder no bot got up, tried three times: none; and a
+		teleporter that failed bots three times as a shortcut and never sent
+		one: bots_shortcut_fail) */
 		if (bots_globals.teleporters[index].ladder && bots_globals.teleporters[index].failures >= 3 &&
 			!bots_globals.teleporters[index].climbs)
+		{
+			continue;
+		}
+		if (!bots_globals.teleporters[index].ladder && bots_globals.teleporters[index].failures >= 3 &&
+			!bots_globals.teleporters[index].through[_bots_through_shortcut] &&
+			!bots_globals.teleporters[index].through[_bots_through_last_way] &&
+			!bots_globals.teleporters[index].through[_bots_through_by_chance])
 		{
 			continue;
 		}
@@ -2904,6 +3084,455 @@ static boolean bots_search_teleporter(struct bots_bot *bot, struct bots_search *
 				bot->via_point.x, bot->via_point.y, bot->via_point.z, search->goal_point.x, search->goal_point.y, search->goal_point.z);
 	}
 	return TRUE;
+}
+
+/* ---------- port: teleporters as shortcuts
+
+A goal the walkable surfaces reach was walked to the whole way, through no
+teleporter however much shorter it was (Blood Gulch's, from beside each
+base's flag out to the middle of the canyon, half the way to the other base;
+Battle Creek's between the bases). Now a bot on foot weighs the map's
+teleporters as a search to its goal answers: the walk (the search's own, the
+surfaces' entry points apart; as near as it came and on in a straight line,
+for a search that stopped short) against the way through one - the walk to
+its entrance (the same search's, when it came to it; else a straight line,
+as short as it can be) and from its exit on to the goal (a straight line
+first). The one whose way through is least, 80% of the walk at most and 15
+units shorter at least, is weighed again with the walk from its exit
+measured: a search from the exit's ground to the goal (the bot walks its
+path meanwhile; nothing of it is walked). Still as short, the bot takes it
+(an entrance weighed by a straight line, once its first search there says
+how far it is, and it is still short enough): its searches go to the
+entrance, it walks onto it as onto the last way's (bots_search_teleporter:
+the path's end, then onto the flag), and goes on from where it comes out
+with a new search (no teleporter weighed again for that goal). Not for every
+bot, nor every goal: on foot alone (a vehicle does not go through: a driver
+drives on, and getting out is the vehicle's to weigh); to the game's
+objective, a roaming place or an enemy last seen (an item or a vehicle is
+near, and comes first; a fight goes on first, its clock stopped; a bot fresh
+from its base with a vehicle near weighs them once its ten fresh seconds are
+over, its base's vehicles weighed first); never a defender (bots_roles.c: it
+keeps about its flag, or its hill), nor a bot on a side lane (bots_routes.c:
+the lanes spread a team out, the teleporter would gather it again); two bots
+at most go for one teleporter at once, and a bot weighs them once a goal,
+five seconds apart at least. A teleporter that fails a bot - it stood on the
+entrance two seconds and was not sent (another player on the exit blocks it:
+game_engine.c), or did not come to it in time (the walk there at a slow
+pace, and eight seconds), or its search finds no way to the entrance
+(Damnation's upper one, from below) - is left be thirty seconds by every
+bot, and one that failed three times and never sent a bot, for the map (the
+last way too, as a ladder no bot got up). halo.log has the map's
+teleporters, each shortcut taken, each bot sent and each failure, and each
+minute's census in the moves line and the teleporters line (each
+teleporter's bots sent, by how they came to it: a shortcut, the last way, or
+by chance) */
+
+/* whether bots take teleporters as shortcuts (HALO_BOT_SHORTCUTS=0: never,
+the bots as before, for a comparison) */
+static boolean bots_shortcuts_enabled(void)
+{
+	static int enabled = -1;
+
+	if (enabled < 0)
+	{
+		char const *setting = getenv("HALO_BOT_SHORTCUTS");
+
+		enabled = setting && setting[0] && !atoi(setting) ? 0 : 1;
+	}
+	return enabled != 0;
+}
+
+/* the goals a shortcut is taken to: the game's objective (a vantage point
+too), a roaming place, an enemy last seen */
+static boolean bots_shortcut_goal_kind(struct bots_bot const *bot)
+{
+	return bot->goal_kind == _bots_goal_objective || bot->goal_kind == _bots_goal_roam ||
+		bot->goal_kind == _bots_goal_enemy;
+}
+
+/* whether the way through (to the entrance and from the exit) is short
+enough against the walk */
+static boolean bots_shortcut_pays(real walk, real through)
+{
+	return through <= walk * BOTS_SHORTCUT_SHARE && walk - through >= BOTS_SHORTCUT_GAIN;
+}
+
+/* whether the bot's goal is still the one its shortcut was taken for: the
+same, or one of the kinds a shortcut is taken to that moved a little (an
+enemy last seen further on, the ball's carrier, another roaming place
+beside it), or moved further and the teleporter still clearly short of the
+way there in straight lines (the walk there as short as it can be: the
+enemy chased on through it); the shortcut then for it */
+static boolean bots_shortcut_same_goal(struct bots_bot *bot, real_point3d const *position)
+{
+	real_point3d const *entrance = &bots_globals.teleporters[bot->shortcut_index].entrance;
+	real_point3d const *exit = &bots_globals.teleporters[bot->shortcut_index].exit_ground;
+
+	if (!bots_shortcut_goal_kind(bot))
+		return FALSE;
+	if (bot->goal_serial == bot->shortcut_serial)
+		return TRUE;
+	if (bots_distance3d(&bot->goal_point, &bot->shortcut_goal) > 8.0f &&
+		!bots_shortcut_pays(bots_distance3d(position, &bot->goal_point),
+			bots_distance3d(position, entrance) + bots_distance3d(exit, &bot->goal_point)))
+	{
+		return FALSE;
+	}
+	bot->shortcut_serial = bot->goal_serial;
+	bot->shortcut_goal = bot->goal_point;
+	return TRUE;
+}
+
+/* (debug: HALO_BOT_SHORTCUT_LOG) a goal's kind */
+static char const *bots_goal_kind_name(short kind)
+{
+	return kind == _bots_goal_objective ? " (objective)" : kind == _bots_goal_roam ? " (roaming)" :
+		kind == _bots_goal_enemy ? " (an enemy)" : "";
+}
+
+/* the times a teleporter sent a bot, however it came to it */
+static long bots_teleporter_sent(long index)
+{
+	long kind, sent = 0;
+
+	for (kind = 0; kind < NUMBER_OF_BOTS_THROUGH; kind++)
+		sent += bots_globals.teleporters[index].through[kind];
+	return sent;
+}
+
+/* whether a teleporter is one to go for as a shortcut now: a teleporter
+(not a ladder) whose exit is on the level's ground, not left be */
+static boolean bots_shortcut_usable(long index, long now)
+{
+	return !bots_globals.teleporters[index].ladder && bots_globals.teleporters[index].exit_surface_index != NONE &&
+		now >= bots_globals.teleporters[index].rest_until_tick &&
+		!(bots_globals.teleporters[index].failures >= 3 && !bots_teleporter_sent(index));
+}
+
+/* the bots going for a teleporter as a shortcut (or weighing it), but one */
+static long bots_shortcut_claimers(long index, struct bots_bot const *except)
+{
+	long bot_index, count = 0;
+
+	for (bot_index = 0; bot_index < BOTS_MAXIMUM; bot_index++)
+	{
+		struct bots_bot const *other = &bots_globals.bots[bot_index];
+
+		if (other != except && other->player_index != NONE && other->shortcut_phase != _bots_shortcut_none &&
+			other->shortcut_index == index)
+		{
+			count++;
+		}
+	}
+	return count;
+}
+
+/* how far a search walked to a surface it came to, and on to the point on
+it (the surfaces' entry points apart: the raw way, a little longer than the
+smoothed path walked, as long for every way weighed); a negative for one it
+did not come to */
+static real bots_search_walk(struct path_state const *state, long surface_index, real_point3d const *point)
+{
+	short node_index = surface_index != NONE ? path_node_from_hash_table((struct path_state *)state, surface_index) : NONE;
+
+	if (node_index == NONE || node_index < 0 || node_index >= state->node_count)
+		return -1.0f;
+	return state->node_list[node_index].path_distance_from_origin +
+		bots_distance3d(&state->node_list[node_index].entry_point, point);
+}
+
+/* the shortcut let go (another goal, riding, another teleporter, its
+searches to the entrance unanswered): the bot's path to its goal again, the
+teleporters not weighed again for this goal */
+static void bots_shortcut_drop(struct bots_bot *bot, char const *why)
+{
+	if (bot->shortcut_phase == _bots_shortcut_none)
+		return;
+	if (bot->shortcut_phase == _bots_shortcut_going && bot->shortcut_entrance_known)
+	{
+		bots_globals.shortcut_drops++;
+		platform_log("bots: bot %ld off teleporter %ld (%s) after %.0f s", (long)(bot - bots_globals.bots) + 1,
+			bot->shortcut_index + 1, why, (double)(game_time_get() - bot->shortcut_tick) / TICKS_PER_SECOND);
+	}
+	if (bot->shortcut_phase == _bots_shortcut_going)
+	{
+		if (bot->via_teleporter && bot->via_index == bot->shortcut_index)
+			bot->via_teleporter = FALSE;
+		bot->path.valid = FALSE;
+	}
+	bot->shortcut_phase = _bots_shortcut_none;
+	bot->shortcut_weighed_serial = bot->goal_serial;
+}
+
+/* the teleporter failed the bot (not sent from its entrance, or not come to
+in time): left be a while by every bot (for the map after three failures,
+none sent), the bot on to its goal on foot */
+static void bots_shortcut_fail(struct bots_bot *bot, char const *why, long now)
+{
+	long index = bot->shortcut_index;
+
+	bots_globals.teleporters[index].failures++;
+	bots_globals.teleporters[index].rest_until_tick = now + TICKS_PER_SECOND * BOTS_SHORTCUT_REST_SECONDS;
+	bots_globals.shortcut_failures++;
+	platform_log("bots: teleporter %ld failed bot %ld (%s) after %.0f s: left be %s", index + 1,
+		(long)(bot - bots_globals.bots) + 1, why, (double)(now - bot->shortcut_tick) / TICKS_PER_SECOND,
+		bots_shortcut_usable(index, bots_globals.teleporters[index].rest_until_tick) ? "a while" : "for the map");
+	if (bot->via_teleporter && bot->via_index == index)
+		bot->via_teleporter = FALSE;
+	bot->shortcut_phase = _bots_shortcut_none;
+	bot->shortcut_weighed_serial = bot->goal_serial;
+	bot->path.valid = FALSE;
+	bot->path_tick = now - TICKS_PER_SECOND;
+}
+
+/* whether bots take vehicles and one a bot may drive is near (25 units:
+its base's), not destroyed nor closed to players */
+static boolean bots_shortcut_vehicle_near(real_point3d const *position)
+{
+	struct object_iterator iterator;
+
+	if (!bots_vehicles_enabled())
+		return FALSE;
+	object_iterator_new(&iterator, _object_mask_vehicle, 0);
+	while (object_iterator_next(&iterator))
+	{
+		struct unit_datum *vehicle = unit_get(iterator.index);
+
+		if (!TEST_FLAG(vehicle->object.damage_flags, _object_dead_bit) &&
+			!TEST_FLAG(vehicle->unit.flags, _unit_not_enterable_by_player_bit) && bots_vehicle_drivable(iterator.index) &&
+			bots_distance2d(&vehicle->object.position, position) < 25.0f)
+		{
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
+/* a search for the bot's path answered: the teleporters weighed against the
+walk it found (above), the best one's exit measured next. Its path stands
+meanwhile */
+static void bots_shortcut_weigh(struct bots_bot *bot, struct bots_search *search, boolean reached)
+{
+	struct path_state const *state = &search->state_memory;
+	long bot_index = (long)(bot - bots_globals.bots);
+	struct bots_tactics_bot const *tactics = &bots_tactics_bots[bot_index];
+	long now = game_time_get(), index, best = NONE;
+	real walk, best_through = REAL_MAX, best_entrance = 0.0f;
+	boolean best_known = FALSE;
+
+	if (!bots_globals.teleporter_shortcuts || !bots_shortcuts_enabled() || bot->shortcut_phase != _bots_shortcut_none ||
+		search->purpose != _bots_search_for_path || search->radius > BOTS_PATH_RADIUS || !bots_shortcut_goal_kind(bot) ||
+		bot->goal_serial == bot->shortcut_weighed_serial || now < bot->shortcut_weigh_tick)
+	{
+		return;
+	}
+	/* (the search went to the goal itself, not a lane's waypoint; never a
+	defender, nor a bot on a side lane; a bot fresh from its base with a
+	vehicle about weighs them once the vehicles are weighed, its base's
+	first: bots_vehicle_consider, a teleporter beside its flag taken at once
+	would leave them all behind - Blood Gulch's) */
+	if (bots_distance3d(&search->goal_point, &bot->goal_point) > 0.5f || tactics->role == _bots_role_defender ||
+		(tactics->lane != 0 && !tactics->lane_given_up) ||
+		(now - bot->spawn_tick < TICKS_PER_SECOND * BOTS_VEHICLE_FRESH_SECONDS && bots_shortcut_vehicle_near(&search->start_point)))
+	{
+		return;
+	}
+	bot->shortcut_weigh_tick = now + TICKS_PER_SECOND * BOTS_SHORTCUT_WEIGH_SECONDS;
+	bot->shortcut_weighed_serial = bot->goal_serial;
+	/* (the walk: to the goal, else as near as the search came and on in a
+	straight line - one stopped short, or out of nodes: Blood Gulch's from
+	base to base takes more surfaces than a search holds; a search spent,
+	the goal on ground it does not walk to, is the last way's, bots_search_
+	teleporter) */
+	if (reached)
+		walk = bots_search_walk(state, search->goal_surface_index, &search->goal_point);
+	else if ((state->heap_count > 1 || state->node_count >= PATH_NODE_LIST_SIZE) && state->closest_node_index >= 0 &&
+		state->closest_node_index < state->node_count)
+		walk = state->node_list[state->closest_node_index].path_distance_from_origin + state->closest_distance;
+	else
+		return;
+	if (walk < BOTS_SHORTCUT_GAIN * 2.0f)
+		return;
+	for (index = 0; index < bots_globals.teleporter_count; index++)
+	{
+		real entrance, through;
+		boolean known;
+
+		if (!bots_shortcut_usable(index, now) || bots_shortcut_claimers(index, bot) >= BOTS_SHORTCUT_BOTS)
+			continue;
+		/* (an exit where the bot is: no way on) */
+		if (bots_distance3d(&bots_globals.teleporters[index].exit_ground, &search->start_point) < 8.0f)
+			continue;
+		entrance = bots_search_walk(state, bots_globals.teleporters[index].entrance_surface_index,
+			&bots_globals.teleporters[index].entrance);
+		known = entrance >= 0.0f;
+		if (!known)
+			entrance = bots_distance3d(&search->start_point, &bots_globals.teleporters[index].entrance);
+		through = entrance + bots_distance3d(&bots_globals.teleporters[index].exit_ground, &search->goal_point);
+		/* (debug) HALO_BOT_SHORTCUT_LOG=1: each teleporter weighed */
+		if (getenv("HALO_BOT_SHORTCUT_LOG"))
+		{
+			platform_log("bots: shortcut bot %ld from (%.1f %.1f %.1f) to (%.1f %.1f %.1f)%s: the walk %.0f%s, teleporter %ld "
+				"%.0f to it%s and %.0f on: %s", bot_index + 1, search->start_point.x, search->start_point.y,
+				search->start_point.z, search->goal_point.x, search->goal_point.y, search->goal_point.z,
+				bots_goal_kind_name(bot->goal_kind), (double)walk, reached ? "" : " (short)", index + 1, (double)entrance,
+				known ? "" : " (straight)", (double)(through - entrance), bots_shortcut_pays(walk, through) ? "pays" : "no");
+		}
+		if (bots_shortcut_pays(walk, through) && through < best_through)
+		{
+			best = index;
+			best_through = through;
+			best_entrance = entrance;
+			best_known = known;
+		}
+	}
+	if (best == NONE)
+		return;
+	bot->shortcut_phase = _bots_shortcut_measuring;
+	bot->shortcut_index = best;
+	bot->shortcut_serial = bot->goal_serial;
+	bot->shortcut_goal = bot->goal_point;
+	bot->shortcut_walk = walk;
+	bot->shortcut_walk_short = !reached;
+	bot->shortcut_entrance = best_entrance;
+	bot->shortcut_entrance_known = best_known;
+	bot->shortcut_tick = now;
+	/* (the measuring search asked next tick; given up if not answered in
+	ten seconds) */
+	bot->shortcut_deadline_tick = now + TICKS_PER_SECOND * 10;
+	bot->path_tick = now - TICKS_PER_SECOND * 4 - 1;
+}
+
+/* the shortcut taken: halo.log's line, and the time it has to come to the
+entrance (the walk there at a slow pace, a unit and a half a second, and
+eight seconds) */
+static void bots_shortcut_take(struct bots_bot *bot, long now)
+{
+	bot->shortcut_tick = now;
+	bot->shortcut_deadline_tick = now + (long)(TICKS_PER_SECOND * (8.0f + bot->shortcut_entrance / 1.5f));
+	bots_globals.shortcut_takes++;
+	platform_log("bots: bot %ld to teleporter %ld for (%.1f %.1f %.1f): %.0f units to it and %.0f from its exit, the walk %.0f%s",
+		(long)(bot - bots_globals.bots) + 1, bot->shortcut_index + 1, bot->goal_point.x, bot->goal_point.y,
+		bot->goal_point.z, (double)bot->shortcut_entrance, (double)bot->shortcut_beyond, (double)bot->shortcut_walk,
+		bot->shortcut_walk_short ? " at least" : "");
+}
+
+/* the walk from the teleporter's exit to the goal measured: the shortcut
+taken when the way through is still short enough */
+static void bots_shortcut_measured(struct bots_bot *bot, struct bots_search *search)
+{
+	struct path_state const *state = &search->state_memory;
+	long now = game_time_get();
+	real beyond;
+
+	if (bot->shortcut_phase != _bots_shortcut_measuring || search->goal_serial != bot->shortcut_serial)
+		return;
+	bots_globals.shortcut_measures++;
+	/* (to the goal; a search out of nodes, as near as it came and on in a
+	straight line, as the walk it is weighed against was) */
+	beyond = state->node_count > 0 ? bots_search_walk(state, search->goal_surface_index, &search->goal_point) : -1.0f;
+	if (beyond < 0.0f && state->node_count >= PATH_NODE_LIST_SIZE && state->closest_node_index >= 0 &&
+		state->closest_node_index < state->node_count)
+	{
+		beyond = state->node_list[state->closest_node_index].path_distance_from_origin + state->closest_distance;
+	}
+	/* (debug) HALO_BOT_SHORTCUT_LOG=1: the walk from the exit */
+	if (getenv("HALO_BOT_SHORTCUT_LOG"))
+	{
+		platform_log("bots: shortcut bot %ld from teleporter %ld's exit (%.1f %.1f %.1f) s%ld: %.0f on (nodes %d heap %d closest %.1f)",
+			(long)(bot - bots_globals.bots) + 1, bot->shortcut_index + 1, search->start_point.x, search->start_point.y,
+			search->start_point.z, search->start_surface_index, (double)beyond, (int)state->node_count,
+			(int)state->heap_count, (double)state->closest_distance);
+	}
+	if (beyond < 0.0f || !bots_shortcut_pays(bot->shortcut_walk, bot->shortcut_entrance + beyond))
+	{
+		bot->shortcut_phase = _bots_shortcut_none;
+		return;
+	}
+	/* (its searches to the entrance next: the shortcut taken now, or once
+	the first says how far the entrance is, when weighed by a straight line) */
+	bot->shortcut_phase = _bots_shortcut_going;
+	bot->shortcut_beyond = beyond;
+	bot->shortcut_on_tick = 0;
+	bot->path_tick = now - TICKS_PER_SECOND * 4 - 1;
+	if (bot->shortcut_entrance_known)
+		bots_shortcut_take(bot, now);
+	else
+		bot->shortcut_deadline_tick = now + TICKS_PER_SECOND * 10;
+}
+
+/* a search to the teleporter's entrance answered: the walk there, weighed
+by a straight line, checked (no longer short enough, the shortcut not taken
+after all); TRUE when the path to it (or towards it) stands */
+static boolean bots_shortcut_entrance_answer(struct bots_bot *bot, struct bots_search *search, boolean reached)
+{
+	if (bot->shortcut_phase != _bots_shortcut_going || search->goal_serial != bot->shortcut_serial)
+		return FALSE;
+	/* (the search spent, the entrance not among the surfaces the bot walks
+	to: a failure, Damnation's upper one from below; a search that stopped
+	short is a way towards it, the next from nearer) */
+	if (!reached && search->state_memory.heap_count <= 1 && search->state_memory.node_count < PATH_NODE_LIST_SIZE)
+	{
+		bots_shortcut_fail(bot, "no way to its entrance", game_time_get());
+		return FALSE;
+	}
+	if (!reached)
+		return TRUE;
+	if (!bot->shortcut_entrance_known)
+	{
+		real entrance = bots_search_walk(&search->state_memory, search->goal_surface_index, &search->goal_point);
+
+		/* (further than the straight line said, and no longer short enough:
+		not taken after all) */
+		if (!bots_shortcut_pays(bot->shortcut_walk, entrance + bot->shortcut_beyond))
+		{
+			bot->shortcut_phase = _bots_shortcut_none;
+			return FALSE;
+		}
+		bot->shortcut_entrance_known = TRUE;
+		bot->shortcut_entrance = entrance;
+		bots_shortcut_take(bot, game_time_get());
+	}
+	return TRUE;
+}
+
+/* the bot moved further than a step at once: sent by a teleporter when it
+was at one's entrance and is at its exit (halo.log's census, by how it came
+to it); its shortcut done, or dropped for another teleporter */
+static void bots_teleporter_landed(struct bots_bot *bot, real_point3d const *from, real_point3d const *to, long now)
+{
+	long index, kind;
+
+	for (index = 0; index < bots_globals.teleporter_count; index++)
+	{
+		if (bots_globals.teleporters[index].ladder || bots_distance3d(&bots_globals.teleporters[index].exit, to) > 2.0f ||
+			bots_distance2d(&bots_globals.teleporters[index].entrance, from) > 1.5f ||
+			fabs(bots_globals.teleporters[index].entrance.z - from->z) > 2.0f)
+		{
+			continue;
+		}
+		break;
+	}
+	if (index >= bots_globals.teleporter_count)
+		return;
+	if (bot->shortcut_phase == _bots_shortcut_going && bot->shortcut_index == index)
+		kind = _bots_through_shortcut;
+	else if (bot->via_teleporter && bot->via_index == index)
+		kind = _bots_through_last_way;
+	else
+		kind = _bots_through_by_chance;
+	bots_globals.teleporters[index].through[kind]++;
+	bots_globals.shortcut_through[kind]++;
+	if (kind == _bots_through_shortcut)
+	{
+		platform_log("bots: bot %ld through teleporter %ld after %.0f s, to (%.1f %.1f %.1f)", (long)(bot - bots_globals.bots) + 1,
+			index + 1, (double)(now - bot->shortcut_tick) / TICKS_PER_SECOND, bot->goal_point.x, bot->goal_point.y,
+			bot->goal_point.z);
+		bot->shortcut_phase = _bots_shortcut_none;
+		bot->shortcut_weighed_serial = bot->goal_serial;
+	}
+	else
+		bots_shortcut_drop(bot, "another teleporter");
 }
 
 /* the search's way to its destination (or as near as it came): each
@@ -3076,14 +3705,37 @@ static void bots_search_take(struct bots_bot *bot, boolean alive)
 	search = &bots_globals.search_slots[bot->search_slot];
 	if (bots_search_state(search) != _bots_search_done)
 		return;
-	if (alive && search->goal_serial == bot->goal_serial)
+	/* port: the walk from a teleporter's exit measured (no path of the
+	bot's: bots_shortcut_measured) */
+	if (alive && search->goal_serial == bot->goal_serial && search->purpose == _bots_search_for_exit)
+		bots_shortcut_measured(bot, search);
+	/* port: a path to a teleporter's entrance, the shortcut since dropped:
+	none, a new search soon */
+	else if (alive && search->goal_serial == bot->goal_serial && search->purpose == _bots_search_for_entrance &&
+		bot->shortcut_phase != _bots_shortcut_going)
+	{
+		bot->path.valid = FALSE;
+		bot->path_tick = game_time_get() - TICKS_PER_SECOND;
+	}
+	else if (alive && search->goal_serial == bot->goal_serial)
 	{
 		struct path_state *state = &search->state_memory;
 		struct path_result path;
 		unsigned long long started = vita_host_time_us();
 		boolean reached = state->node_count > 0 &&
 			path_node_from_hash_table(state, search->goal_surface_index) != NONE;
+		boolean entrance = search->purpose == _bots_search_for_entrance;
 
+		/* port: (to a teleporter's entrance, the shortcut: the walk there
+		checked, or the shortcut dropped and a new search soon) */
+		if (entrance && !bots_shortcut_entrance_answer(bot, search, reached))
+		{
+			bot->path.valid = FALSE;
+			bot->path_tick = game_time_get() - TICKS_PER_SECOND;
+			bot->search_slot = NONE;
+			bots_search_set_state(search, _bots_search_idle);
+			return;
+		}
 		if (state->node_count >= PATH_NODE_LIST_SIZE)
 			bots_globals.search_overflows++;
 		if (!reached)
@@ -3099,17 +3751,31 @@ static void bots_search_take(struct bots_bot *bot, boolean alive)
 		}
 		csmemset(&path, 0, sizeof(path));
 		bot->via_teleporter = FALSE;
-		if (bots_search_build(bot, search, reached, &path))
+		if (bots_search_build(bot, search, reached, &path) ||
+			(entrance && bots_distance2d(&search->start_point, &search->goal_point) < 1.0f))
 		{
 			if (bots_path_stalls(&path, &search->start_point) &&
 				bots_path_unsmoothed(&search->state_memory, &search->start_point, &path))
 			{
 				bots_globals.search_unsmoothed++;
 			}
+			/* port: (to a teleporter's entrance, the shortcut: onto it at
+			the path's end, as onto the last way's; on it already, onto it) */
+			if (entrance && reached)
+			{
+				bot->via_teleporter = TRUE;
+				bot->via_point = search->goal_point;
+				bot->via_tick = game_time_get();
+				bot->via_index = bot->shortcut_index;
+				bot->via_climb_tick = 0;
+				bot->via_top_tick = 0;
+			}
 			bot->path = path;
 			bot->path.step_index = 0;
 			bot->path_failures = 0;
-			bot->path_short = !reached && !bot->via_teleporter;
+			/* (port: towards a teleporter's entrance it has yet to come to,
+			no climbing on to the goal: the next search from nearer) */
+			bot->path_short = !reached && !bot->via_teleporter && !entrance;
 			if (!bot->path_short)
 				bot->climb_until_tick = 0;
 		}
@@ -3133,6 +3799,10 @@ static void bots_search_take(struct bots_bot *bot, boolean alive)
 			bot->path.valid = FALSE;
 		}
 		bot->path_tick = game_time_get();
+		/* port: the teleporters weighed against the walk found (a path's
+		search alone) */
+		if (bot->path.valid)
+			bots_shortcut_weigh(bot, search, reached);
 		bots_globals.search_us += vita_host_time_us() - started;
 	}
 	bot->search_slot = NONE;
@@ -5716,6 +6386,45 @@ static void bots_bot_trace(struct bots_bot *bot, long bot_index, struct bots_tic
 	}
 }
 
+/* port: (teleporters as shortcuts) each tick on foot: a shortcut given up
+on in time (the measure never answered, the entrance not come to), and the
+teleporter failed when the bot stands on its entrance and is not sent; a
+fight stops the clock */
+static void bots_shortcut_update(struct bots_bot *bot, struct bots_tick *tick)
+{
+	real_point3d const *entrance;
+
+	if (bot->shortcut_phase == _bots_shortcut_none)
+		return;
+	if (tick->fighting)
+		bot->shortcut_deadline_tick++;
+	if (bot->shortcut_phase == _bots_shortcut_measuring)
+	{
+		if (tick->now > bot->shortcut_deadline_tick)
+			bot->shortcut_phase = _bots_shortcut_none;
+		return;
+	}
+	entrance = &bots_globals.teleporters[bot->shortcut_index].entrance;
+	if (bots_distance2d(entrance, &tick->position) < 0.6f && fabs(entrance->z - tick->position.z) < 1.5f)
+	{
+		if (!bot->shortcut_on_tick)
+			bot->shortcut_on_tick = tick->now;
+		else if (tick->now - bot->shortcut_on_tick > TICKS_PER_SECOND * 2)
+		{
+			bots_shortcut_fail(bot, "stood on it, not sent", tick->now);
+			return;
+		}
+	}
+	else
+		bot->shortcut_on_tick = 0;
+	/* (not taken yet, its searches to the entrance yet to say how far it
+	is: let go, no failure of the teleporter's) */
+	if (tick->now > bot->shortcut_deadline_tick && !bot->shortcut_entrance_known)
+		bots_shortcut_drop(bot, "no answer");
+	else if (tick->now > bot->shortcut_deadline_tick)
+		bots_shortcut_fail(bot, "not come to in time", tick->now);
+}
+
 static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_action *action)
 {
 	struct bots_tick tick;
@@ -5751,6 +6460,8 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 		bots_vehicle_forget(bot);
 		bot->ride_vehicle_index = NONE;
 		bots_tactics_bot_dead(bot_index);
+		/* port: (and its teleporter shortcut) */
+		bot->shortcut_phase = _bots_shortcut_none;
 		return;
 	}
 	tick.unit = unit_get(tick.player->unit_index);
@@ -5770,6 +6481,7 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 		bot->climb_until_tick = 0;
 		bot->path_short = FALSE;
 		bot->via_teleporter = FALSE;
+		bot->shortcut_phase = _bots_shortcut_none;
 		bot->escape_until_tick = 0;
 		bot->last_position = tick.object->object.position;
 		bots_vehicle_forget(bot);
@@ -5797,7 +6509,10 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 			bots_globals.turret_kills += tick.player->statistics.kills[0] - bot->kills_seen;
 	}
 	bot->kills_seen = tick.player->statistics.kills[0];
-	/* (through a teleporter: a new path from where it came out) */
+	/* (through a teleporter: a new path from where it came out; port: which
+	one and how it came to it, halo.log's census) */
+	if (bots_distance3d(&tick.position, &bot->last_position) > 3.0f && tick.object->object.parent_object_index == NONE)
+		bots_teleporter_landed(bot, &bot->last_position, &tick.position, tick.now);
 	if (bots_distance3d(&tick.position, &bot->last_position) > 3.0f && bot->goal_kind != _bots_goal_none &&
 		tick.object->object.parent_object_index == NONE)
 	{
@@ -5856,7 +6571,11 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 	/* port: riding a vehicle: driving, gunning or riding along, and out
 	(the lines profile's walk) */
 	if (vehicle_index != NONE)
+	{
+		/* port: (a teleporter shortcut is on foot alone) */
+		bots_shortcut_drop(bot, "riding");
 		bots_bot_ride(bot, &tick, vehicle_index);
+	}
 	else
 	{
 		if (bot->target_player_index != NONE && tick.now - bot->target_seen_tick <= TICKS_PER_SECOND / 2)
@@ -5880,6 +6599,8 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 		bots_turret_consider(bot, &tick);
 		bots_profile_part(_bots_part_goal, &started);
 		bots_search_take(bot, TRUE);
+		/* port: (its teleporter shortcut: in time, or failed) */
+		bots_shortcut_update(bot, &tick);
 		bots_profile_part(_bots_part_take, &started);
 		if (!tick.fighting)
 		{
@@ -5988,13 +6709,41 @@ static void bots_report(void)
 		bots_globals.stand_visits, bots_globals.ball_grabs, line);
 	platform_log("bots: moves at tick %ld: stuck %ld (a low wall %ld, a tall one %ld, nothing %ld), goals given up %ld; "
 		"powerups gone for/taken: health %ld/%ld, overshield %ld/%ld, camouflage %ld/%ld; bodies restored %ld; "
-		"ladders %ld, gone to %ld, climbed %ld",
+		"ladders %ld, gone to %ld, climbed %ld; teleporters %ld (shortcuts: weighed %ld, taken %ld, through %ld, "
+		"failed %ld, dropped %ld; through as the last way %ld, by chance %ld)",
 		now, bots_globals.stuck_events, bots_globals.stuck_low, bots_globals.stuck_tall, bots_globals.stuck_clear,
 		bots_globals.stuck_giveups, bots_globals.powerups_sought[_bots_powerup_health],
 		bots_globals.powerups_taken[_bots_powerup_health], bots_globals.powerups_sought[_bots_powerup_overshield],
 		bots_globals.powerups_taken[_bots_powerup_overshield], bots_globals.powerups_sought[_bots_powerup_camouflage],
 		bots_globals.powerups_taken[_bots_powerup_camouflage], bots_globals.bodies_restored, bots_globals.ladder_count,
-		bots_globals.ladder_tries, bots_globals.ladder_climbs);
+		bots_globals.ladder_tries, bots_globals.ladder_climbs, bots_globals.teleporter_count - bots_globals.ladder_count,
+		bots_globals.shortcut_measures, bots_globals.shortcut_takes, bots_globals.shortcut_through[_bots_through_shortcut],
+		bots_globals.shortcut_failures, bots_globals.shortcut_drops, bots_globals.shortcut_through[_bots_through_last_way],
+		bots_globals.shortcut_through[_bots_through_by_chance]);
+	/* port: (each teleporter's bots sent, by how they came to it, and its
+	failures as a shortcut: the map's teleporters' census; a line more for
+	every ten or so - Chiron TL34's thirty) */
+	if (bots_globals.teleporter_count > bots_globals.ladder_count)
+	{
+		length = 0;
+		for (index = 0; index < bots_globals.teleporter_count; index++)
+		{
+			if (!bots_globals.teleporters[index].ladder)
+			{
+				length += snprintf(line + length, sizeof(line) - (size_t)length,
+					"%s %ld sent %ld (shortcut %ld, last way %ld, chance %ld) failed %ld", length ? ";" : "", index + 1,
+					bots_teleporter_sent(index), bots_globals.teleporters[index].through[_bots_through_shortcut],
+					bots_globals.teleporters[index].through[_bots_through_last_way],
+					bots_globals.teleporters[index].through[_bots_through_by_chance], bots_globals.teleporters[index].failures);
+			}
+			if (length > 0 && (length > (int)sizeof(line) - 100 || index + 1 >= bots_globals.teleporter_count))
+			{
+				line[MIN(length, (int)sizeof(line) - 1)] = 0;
+				platform_log("bots: teleporters at tick %ld:%s", now, line);
+				length = 0;
+			}
+		}
+	}
 	/* port: (the lanes, vantage points and posts: bots_tactics.h) */
 	bots_tactics_report(now);
 	if (bots_profile.enabled > 0)
