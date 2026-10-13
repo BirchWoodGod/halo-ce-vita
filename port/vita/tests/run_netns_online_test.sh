@@ -170,7 +170,14 @@
 #            (1; the host takes joiners + 1: network.coop_players),
 #            HALO_TEST_COOP_STAGGER seconds apart
 #            (1; past the host's start, HALO_NETWORK_TEST_START 20, a late
-#            join); HALO_TEST_COOP_HOST_ENV: more for the host
+#            join); HALO_TEST_COOP_HOST_ENV: more for the host;
+#            HALO_TEST_COOP_FLAP=1: the first joiner's link swings as a bad
+#            home connection's does (a tester's co-op host, Oct 13 2026, saw
+#            its client's round trip go from 160 ms to 1.8 s and back, and
+#            the client silent for 2 s twice): every 20 to 50 s a 1.4 s round
+#            trip (700 ms 150 ms each way, 3% lost) for 10 to 30 s, then
+#            nothing at all for 3 s (the latency meter's "silent for 2 s"
+#            past its threshold), then its own netem again (flap.log)
 #   coopmenu co-op from the campaign's menus, over system link on one LAN
 #            (online off), every press scripted (HALO_TEST_PAD): the host
 #            goes Campaign, a new profile, The Pillar of Autumn, Heroic and Y
@@ -1487,6 +1494,24 @@ coop)
 		join_pids="$join_pids $last_pid"
 		[ "$i" -lt "$joiners" ] && sleep "$stagger"
 	done
+	# (HALO_TEST_COOP_FLAP: the first joiner's upload slow, then silent, then
+	# itself again, over and over, until the copies end)
+	if [ "${HALO_TEST_COOP_FLAP:-0}" = 1 ] && [ "${HALO_TEST_COOP_LAN:-0}" != 1 ]; then
+		(
+			normal=${HALO_TEST_NETEM_JOIN:-${HALO_TEST_NETEM:-delay 0ms}}
+			while :; do
+				sleep $((20 + RANDOM % 30))
+				in_ns "$join_router" tc qdisc replace dev w_join root netem limit 10000 delay 700ms 150ms loss 3%
+				echo "slow $(date +%s)" >> "$out/flap.log"
+				sleep $((10 + RANDOM % 20))
+				in_ns "$join_router" tc qdisc replace dev w_join root netem limit 10000 $normal loss 100%
+				echo "silent $(date +%s)" >> "$out/flap.log"
+				sleep 3
+				in_ns "$join_router" tc qdisc replace dev w_join root netem limit 10000 $normal
+				echo "normal $(date +%s)" >> "$out/flap.log"
+			done
+		) & pids="$pids $!"
+	fi
 	wait $join_pids $host_pid 2>/dev/null
 	grep -a "co-op" "$out/host/data/debug.txt" | head -40 > "$out/host.summary"
 	grep -a "co-op" "$out/joiner/data/debug.txt" | head -40 > "$out/joiner.summary"
