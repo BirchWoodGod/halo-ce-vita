@@ -1142,6 +1142,7 @@ short custom_edition_maps_crossplay_check(
 	else if (local.file == _crossplay_map_file_custom_edition)
 	{
 		error(_error_silent, "crossplay: the PC host's Custom Edition map '%s' (0x%08lX) is this machine's", file, host_version);
+		custom_edition_cache_crossplay_map_chosen(file, host_version);
 	}
 
 	return verdict;

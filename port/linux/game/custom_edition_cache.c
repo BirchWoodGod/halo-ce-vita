@@ -824,6 +824,62 @@ boolean network_game_client_crossplay_map_version(
 	char const *level_name,
 	unsigned long *version);
 
+static void remembered_answers_forget(
+	char const *name);
+
+/* (crossplay) the PC host's map the join's check last found here, and its
+version (custom_edition_cache_crossplay_map_chosen): the lobby precaches the
+map before the client's game record holds the host's settings */
+static struct
+{
+	char name[CROSSPLAY_MAP_FILE_BYTES];
+	unsigned long version;
+} crossplay_map_chosen;
+static volatile int crossplay_map_chosen_lock;
+
+void custom_edition_cache_crossplay_map_chosen(
+	char const *file_name,
+	unsigned long version)
+{
+	while (__atomic_exchange_n(&crossplay_map_chosen_lock, 1, __ATOMIC_ACQUIRE))
+	{
+	}
+	csstrncpy(crossplay_map_chosen.name, file_name ? file_name : "", sizeof(crossplay_map_chosen.name) - 1);
+	crossplay_map_chosen.name[sizeof(crossplay_map_chosen.name) - 1] = 0;
+	crossplay_map_chosen.version = version;
+	__atomic_store_n(&crossplay_map_chosen_lock, 0, __ATOMIC_RELEASE);
+	/* (what was found of that name before, by another version or none) */
+	if (file_name && file_name[0])
+	{
+		remembered_answers_forget(file_name);
+	}
+
+	return;
+}
+
+/* the version of the PC host's map `name` (a file name) this machine plays:
+its game record's, or the join's check's while that has none */
+static boolean custom_edition_crossplay_map_version(
+	char const *map_name,
+	unsigned long *version)
+{
+	char const *name = tag_name_strip_path(map_name);
+	boolean chosen;
+
+	if (network_game_client_crossplay_map_version(map_name, version) && *version)
+	{
+		return TRUE;
+	}
+	while (__atomic_exchange_n(&crossplay_map_chosen_lock, 1, __ATOMIC_ACQUIRE))
+	{
+	}
+	chosen = crossplay_map_chosen.name[0] && crossplay_map_chosen.version && !csstrcasecmp(crossplay_map_chosen.name, name);
+	*version = chosen ? crossplay_map_chosen.version : 0;
+	__atomic_store_n(&crossplay_map_chosen_lock, 0, __ATOMIC_RELEASE);
+
+	return chosen;
+}
+
 /* the file that holds the map `map_name` names: <maps>\<name>.map, or the
 OpenSauce <maps>\<name>.yelo when there is no .map. With crossplay on, in a
 PC host's game on that level with a version (OpenCE's network version 29):
@@ -837,7 +893,7 @@ static boolean custom_edition_map_path(
 	char const *name = tag_name_strip_path(map_name);
 	unsigned long version;
 
-	if (network_wire_crossplay() && network_game_client_crossplay_map_version(map_name, &version) && version)
+	if (network_wire_crossplay() && custom_edition_crossplay_map_version(map_name, &version))
 	{
 		return custom_edition_crossplay_version_path(name, version, path);
 	}

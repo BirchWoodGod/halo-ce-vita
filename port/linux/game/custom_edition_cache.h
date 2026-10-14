@@ -108,6 +108,13 @@ partition takes), a Custom Edition cache (its version, its hash's first 32
 bits), or a file this game cannot take (why: its cache_file_status); and
 whether PC maps is on. */
 struct crossplay_local_map;
+/* (crossplay) the PC host's Custom Edition map the join's check found
+playable here, by its file name, and its version: the cache loader takes
+the file of that version for it until the client's game record says
+otherwise (custom_edition_maps_crossplay_check) */
+void custom_edition_cache_crossplay_map_chosen(
+	char const *file_name,
+	unsigned long version);
 void custom_edition_cache_crossplay_facts(
 	char const *file_name,
 	unsigned long host_version,
