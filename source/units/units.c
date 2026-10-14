@@ -6354,6 +6354,13 @@ void unit_record_damage(
 	short preserved_attacker_index;
 	short best_new_attacker_index;
 	boolean found_attacker;
+	struct player_datum *attacker_player = attacker_player_index != NONE ?
+		player_try_and_get(attacker_player_index) : NULL;
+
+	/* port: damage can outlive its player (an older checkpoint's): a handle
+	that is no player's now is neither recorded nor read */
+	if (!attacker_player)
+		attacker_player_index = NONE;
 
 	unit = unit_get(unit_index);
 	found_attacker = FALSE;
@@ -6434,9 +6441,10 @@ void unit_record_damage(
 	if (notify_ai && attacker_team != NONE &&
 		game_team_is_enemy(unit->object.owner_team_index, attacker_team))
 	{
-		if (attacker_player_index != NONE)
+		/* port: (the player looked up above) */
+		if (attacker_player)
 		{
-			player_unit_index = player_get(attacker_player_index)->unit_index;
+			player_unit_index = attacker_player->unit_index;
 			if (player_unit_index != NONE)
 			{
 				attacker_unit_index = player_unit_index;
