@@ -58,6 +58,7 @@ run() { # NAME SECONDS COMMANDS [VAR=value...]
 	(cd "$out/$name" && exec env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=offscreen HALO_DATA_ROOT="$out/$name/data" \
 		HALO_SAVE_ROOT="$out/$name/save" HALO_NO_VSYNC=1 HALO_FRAME_CAP=30 HALO_EXIT_AFTER="$seconds" HALO_FULLSCREEN=0 \
 		HALO_HIDDEN_WINDOW=1 HALO_NO_AUDIO=1 HALO_TICK_THREAD=1 HALO_UPDATE_AUTO=false HALO_NET_ONLINE=false \
+		HALO_UPDATE_CHANNEL=experimental \
 		HALO_UI_LOG=1 "HALO_TEST_COMMANDS=$commands" "$@" ${wrapper:-} timeout -k 5 $((seconds + 90)) "$binary" \
 		> "$out/$name/run.log" 2>&1)
 	echo $? > "$out/$name/exit"
