@@ -101,13 +101,23 @@ unsigned long custom_edition_cache_map_identity(
 	char const *map_name);
 /* What this machine's file of the map file `file_name` (a name without a
 folder or extension, crossplay_map_name_parse's) is, for the crossplay join
-(crossplay_maps.h): absent, an Xbox cache (and whether a multiplayer map the
-cache partition takes), a Custom Edition cache (its header's checksum, raw),
-or a file this game cannot take (why: its cache_file_status); and whether
-PC maps is on. */
+(crossplay_maps.h), of the host's version `host_version` (its file of that
+version when it has one, <name>.map or <name>_<digits>.map, else its
+<name>.map): absent, an Xbox cache (and whether a multiplayer map the cache
+partition takes), a Custom Edition cache (its version, its hash's first 32
+bits), or a file this game cannot take (why: its cache_file_status); and
+whether PC maps is on. */
 struct crossplay_local_map;
+/* (crossplay) the PC host's Custom Edition map the join's check found
+playable here, by its file name, and its version: the cache loader takes
+the file of that version for it until the client's game record says
+otherwise (custom_edition_maps_crossplay_check) */
+void custom_edition_cache_crossplay_map_chosen(
+	char const *file_name,
+	unsigned long version);
 void custom_edition_cache_crossplay_facts(
 	char const *file_name,
+	unsigned long host_version,
 	struct crossplay_local_map *local);
 /* The file of the map `map_name` names, in the maps folder: its ".map",
 else its OpenSauce ".yelo" (`path_size` characters); FALSE when there is

@@ -136,10 +136,13 @@
 #               hosts on LANs of their own, each with our client: Blood Gulch
 #               (levels\test\bloodgulch\bloodgulch, version 0: the Xbox map
 #               on both, joins and plays), custom_maps\<XPPC_CE_MAP> (its
-#               raw checksum) with our client holding the same file and PC
-#               maps on (joins and plays), and the same map with our client
-#               without it (refused with the map named, joining nothing, no
-#               map share query); controls: OpenCE clients on the first two.
+#               version, the hash's first 32 bits, since OpenCE's 29) with
+#               our client holding the same file as <name>.map, as
+#               <name>_<digits>.map, and beside another version as
+#               <name>.map, PC maps on (joins and plays the host's version),
+#               with another version only (refused as such), and without it
+#               (refused with the map named, joining nothing, no map share
+#               query); controls: OpenCE clients on the first two.
 #               Needs XPPC_CE_MAP (or HALO_TEST_CE_MAP), a Custom Edition map
 #               needing no resource maps here (Invader's pcgulch.map), and
 #               XPPC_CE_RESOURCES, a folder with Custom Edition's bitmaps.map,
@@ -158,10 +161,10 @@
 #               game ends within seconds, before its kills could score or the
 #               spawn, damage and rejoin steps have time). Control: an OpenCE
 #               client
-#   crossold    an older PC host (network version 26: OpenCE 6399ed9d,
-#               ChupathingyCE 8cb79900, XPPC_OLD_BUILDS's opence/ and
-#               chupa/) since the crossplay wire joins 28 alone (OpenCE
-#               b1ef7f7e, ChupathingyCE 35fc7e8b): on a LAN our client sees
+#   crossold    an older PC host (XPPC_OLD_BUILDS's opence/ and chupa/: of
+#               network version 28, OpenCE b1ef7f7e and ChupathingyCE
+#               35fc7e8b, or 26) since the crossplay wire joins 29 alone
+#               (OpenCE 8102e711, ChupathingyCE 7d6d8f24): on a LAN our client sees
 #               the game, joins none of it and tells the player the host
 #               runs an older OpenCE or ChupathingyCE, naming both versions;
 #               over the internet (OpenCE's, from the server browser) it never
@@ -1146,13 +1149,13 @@ crossmaps)
 	for f in "$data"/maps/*.map; do ln -sfn "$f" "$out/maps-with-ce/$(basename "$f")"; done
 	ln -sfn "$(readlink -f "$ce_map")" "$out/maps-with-ce/$ce_name.map"
 	export copy_custom_maps=$out/custom_maps
-	# (an OpenCE host of network version 27 and later names a map of its
-	# custom_maps folder by its hash, renaming the file there (the link in
-	# this run's folder, never the map): custom_maps\<name>_<8 hex digits>.
-	# Our client with <name>.map, with <name>_<digits>.map (an OpenCE
-	# player's copy), and with another version of <name>.map (one byte of
-	# its header's checksum changed: neither its checksum nor its hash the
-	# host's))
+	# (an OpenCE host of network version 29 names a Custom Edition map by
+	# its own name, custom_maps\<name>, and sends its version, its hash's
+	# first 32 bits. Our client with <name>.map; with only
+	# <name>_<8 hex digits>.map (as OpenCE saves a download beside another
+	# version); with another version of <name>.map (one byte of its header's
+	# checksum changed, so its hash); and with that other version as
+	# <name>.map beside the host's as <name>_<digits>.map)
 	ce_digits=$(python3 -I - "$(readlink -f "$ce_map")" <<'EOF'
 import hashlib, sys
 data = open(sys.argv[1], "rb").read()
@@ -1164,42 +1167,49 @@ for offset in range(0, len(data), 0x40000):
 print(whole.hexdigest()[:8])
 EOF
 )
-	mkdir -p "$out/maps-with-ce-hashed" "$out/maps-with-ce-differ"
+	[ "$ce_digits" = 00000000 ] && ce_digits=00000001
+	ce_version=$(printf '0x%08X' "0x$ce_digits")
+	mkdir -p "$out/maps-with-ce-hashed" "$out/maps-with-ce-differ" "$out/maps-with-ce-beside"
 	for f in "$data"/maps/*.map; do
 		ln -sfn "$f" "$out/maps-with-ce-hashed/$(basename "$f")"
 		ln -sfn "$f" "$out/maps-with-ce-differ/$(basename "$f")"
+		ln -sfn "$f" "$out/maps-with-ce-beside/$(basename "$f")"
 	done
 	ln -sfn "$(readlink -f "$ce_map")" "$out/maps-with-ce-hashed/${ce_name}_$ce_digits.map"
+	ln -sfn "$(readlink -f "$ce_map")" "$out/maps-with-ce-beside/${ce_name}_$ce_digits.map"
 	cp "$(readlink -f "$ce_map")" "$out/maps-with-ce-differ/$ce_name.map"
 	python3 -I - "$out/maps-with-ce-differ/$ce_name.map" <<'EOF'
 import sys
 with open(sys.argv[1], "r+b") as f:
     f.seek(0x64); b = f.read(1); f.seek(0x64); f.write(bytes([b[0] ^ 0x5A]))
 EOF
+	ln -sfn "$out/maps-with-ce-differ/$ce_name.map" "$out/maps-with-ce-beside/$ce_name.map"
 	control xmap-stock-opence && pair xmap-stock-opence lan opence opence
 	control xmap-ce-opence && host_game="custom_maps\\$ce_name" host_variants=slayer pair xmap-ce-opence lan opence opence
-	test_names="xmap-stock-ours xmap-ce-ours xmap-cehashed-ours"
+	test_names="xmap-stock-ours xmap-ce-ours xmap-cehashed-ours xmap-cebeside-ours"
 	host_variants=slayer pair xmap-stock-ours lan opence ours
 	client_maps=$out/maps-with-ce client_extra=HALO_CUSTOM_EDITION=1 host_game="custom_maps\\$ce_name" host_variants=slayer \
 		pair xmap-ce-ours lan opence ours
 	client_maps=$out/maps-with-ce-hashed client_extra=HALO_CUSTOM_EDITION=1 host_game="custom_maps\\$ce_name" host_variants=slayer \
 		pair xmap-cehashed-ours lan opence ours
+	client_maps=$out/maps-with-ce-beside client_extra=HALO_CUSTOM_EDITION=1 host_game="custom_maps\\$ce_name" host_variants=slayer \
+		pair xmap-cebeside-ours lan opence ours
 	client_extra=HALO_CUSTOM_EDITION=1 host_game="custom_maps\\$ce_name" host_variants=slayer pair xmap-cemissing-ours lan opence ours
 	client_maps=$out/maps-with-ce-differ client_extra=HALO_CUSTOM_EDITION=1 host_game="custom_maps\\$ce_name" host_variants=slayer \
 		pair xmap-cediffer-ours lan opence ours
 	run_our_modes
-	# (the hashed name the host gave, and that our client played its file
-	# for it, hashed)
-	for name in xmap-ce-ours xmap-cehashed-ours; do
-		named=$(grep -aoE "join: the host's map is custom_maps.${ce_name}(_[0-9a-f]{8})? " "$out/$name/client/run.log" 2>/dev/null |
+	# (the map by its own name with its version, and our client's file of
+	# that version found for it: <name>.map, or <name>_<digits>.map)
+	for name in xmap-ce-ours xmap-cehashed-ours xmap-cebeside-ours; do
+		named=$(grep -aoE "join: the host's map is [^ ]* \(copy 0x[0-9A-F]{8}\)" "$out/$name/client/run.log" 2>/dev/null |
 			head -1 | sed 's/^join: //')
-		hashed=$(grep -aoE "crossplay: .*hashed: [0-9a-f]{8}" "$out/$name/client/data/debug.txt" 2>/dev/null | head -1)
-		echo "--- $name: ${named:-no map named}; ${hashed:-no file hashed}"
+		file=$ce_name.map
+		[ "$name" = xmap-ce-ours ] || file=${ce_name}_$ce_digits.map
+		hashed=$(grep -aoE "crossplay: [^ ]*$file hashed: version $ce_digits" "$out/$name/client/data/debug.txt" 2>/dev/null | head -1)
+		echo "--- $name: ${named:-no map named}; ${hashed:-$file not found of the version of the host}"
 		case $named in
-		*"${ce_name}_$ce_digits "*)
-			echo "$hashed" | grep -q "hashed: $ce_digits" || our_results="$our_results $name:hash-not-checked" ;;
-		*"custom_maps"?"$ce_name "*) echo "  (the host named it without its hash: an OpenCE of before version 27?)" ;;
-		*) our_results="$our_results $name:map-not-named" ;;
+		*"custom_maps"?"$ce_name (copy $ce_version)") [ -n "$hashed" ] || our_results="$our_results $name:version-not-found" ;;
+		*) our_results="$our_results $name:map-not-named-$(echo "$named" | tr ' ' '_')" ;;
 		esac
 	done
 	# (another version: refused as such, never joined)
@@ -1396,8 +1406,8 @@ EOF
 	done
 	;;
 crossold)
-	# older PC hosts (network version 26) since the crossplay wire joins 28
-	# alone: seen, not joined, the player told why; over the internet never
+	# older PC hosts (XPPC_OLD_BUILDS: 28 or 26) since the crossplay wire
+	# joins 29 alone: seen, not joined, the player told why; over the internet never
 	# listed (OpenCE's listing carries its version)
 	old_names="old-lan-opence old-net-opence"
 	pair old-lan-opence lan oldopence ours

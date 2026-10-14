@@ -8,18 +8,19 @@ paths, ChupathingyCE's maps_md\ and maps_pc\), hostile ones among them
 (paths climbing out of the maps folder, device and resource map names, no
 end, too long, characters a file system takes for something else), and the
 verdict for every kind of file this machine may have of the map named:
-missing, the Xbox's, a Custom Edition copy with the host's checksum or
-another, one that cannot load, resource maps missing, PC maps off. The
-hashed names of OpenCE's network version 27 (custom_maps\<name>_<8 hex>):
-the base held to a whole name's rules, the digits lowercase hex or no hash,
-and the file hash (OpenCE's map_share_files.c) against vectors worked out
-apart (Python's hashlib, the same construction).
+missing, the Xbox's, a Custom Edition copy of the host's version or
+another, one that cannot load, resource maps missing, PC maps off. A Custom
+Edition map's version as OpenCE's network version 29 sends it (its hash's
+first 32 bits, never 0), the file name of another version
+(<name>_<8 hex>), and the file hash (OpenCE's map_share_files.c) against
+vectors worked out apart (Python's hashlib, the same construction).
 
-With real maps, the checksum a PC host sends is the one this machine reads:
-cache_file_identify's checksum of a Custom Edition map is the raw field at
-0x64 of its header (what OpenCE's custom_edition_map_checksum sends), and an
-Xbox map identifies as one; the Custom Edition map's hash is the one the
-runner worked out of it apart (CROSSPLAY_MAPS_TEST_CE_HASH, 64 hex digits).
+With real maps, cache_file_identify's checksum of a Custom Edition map is
+the raw field at 0x64 of its header (what OpenCE's hosts of 22 to 28 sent,
+custom_edition_map_checksum), and an
+Xbox map identifies as one; the Custom Edition map's hash (whose first 32
+bits are the version an OpenCE host sends) is the one the runner worked out
+of it apart (CROSSPLAY_MAPS_TEST_CE_HASH, 64 hex digits).
   CROSSPLAY_MAPS_TEST_CE_MAP=<a Custom Edition .map> (Invader's pcgulch.map)
   CROSSPLAY_MAPS_TEST_XBOX_MAP=<an Xbox .map> (bloodgulch.map)
 Built by run_crossplay_maps_test.sh as map_share_test.c is.
@@ -88,39 +89,16 @@ static void test_names(void)
 	check_parse("custom_maps\\abcdefghijklmnopqrstuvwxy", _crossplay_map_kind_custom_edition, "abcdefghijklmnopqrstuvwxy");
 	check_parse("custom_maps\\abcdefghijklmnopqrstuvwxyz", _crossplay_map_kind_invalid, "");
 	check_parse("levels\\test\\x\\abcdefghijklmnopqrstuvwxyz", _crossplay_map_kind_invalid, "");
-	/* OpenCE's hashed names (v27): a base of up to 25 and 8 lowercase hex
-	digits, 34 in all */
+	/* a name ending in what looks like a version's digits is a plain name
+	since OpenCE's 29 (the version is the record's): held to 25 */
 	check_parse("custom_maps\\pcgulch_0e2b3ee4", _crossplay_map_kind_custom_edition, "pcgulch_0e2b3ee4");
-	check_parse("custom_maps\\hugeass_1a2b3c4d", _crossplay_map_kind_custom_edition, "hugeass_1a2b3c4d");
-	check_parse("custom_maps\\bloodgulch_ffffffff", _crossplay_map_kind_custom_edition, "bloodgulch_ffffffff");
-	check_parse("custom_maps\\abcdefghijklmnopqrstuvwxy_00000000", _crossplay_map_kind_custom_edition,
-		"abcdefghijklmnopqrstuvwxy_00000000");
-	check_parse("custom_maps\\abcdefghijklmnopqrstuvwxyz_00000000", _crossplay_map_kind_invalid, "");
-	check_parse("custom_maps\\x_12345678", _crossplay_map_kind_custom_edition, "x_12345678");
-	check_parse("custom_maps\\my_map_old", _crossplay_map_kind_custom_edition, "my_map_old");
-	/* (no hash: a plain name, held to 25: uppercase digits, too few, too
-	many, no underscore) */
-	check_parse("custom_maps\\pcgulch_0E2B3EE4", _crossplay_map_kind_custom_edition, "pcgulch_0E2B3EE4");
-	check_parse("custom_maps\\pcgulch_0e2b3ee", _crossplay_map_kind_custom_edition, "pcgulch_0e2b3ee");
-	check_parse("custom_maps\\pcgulch-0e2b3ee4", _crossplay_map_kind_custom_edition, "pcgulch-0e2b3ee4");
-	check_parse("custom_maps\\abcdefghijklmnopqrst_0E2B3EE4", _crossplay_map_kind_invalid, "");
-	check_parse("custom_maps\\abcdefghijklmnopqrst_0e2b3ee4g", _crossplay_map_kind_invalid, "");
-	/* (hostile ones: the base held to a whole name's rules) */
-	/* (no base: no hash, as OpenCE's map_share_name_hashed has it, so a
-	plain name) */
-	check_parse("custom_maps\\_0e2b3ee4", _crossplay_map_kind_custom_edition, "_0e2b3ee4");
+	check_parse("custom_maps\\abcdefghijklmnop_0e2b3ee4", _crossplay_map_kind_custom_edition, "abcdefghijklmnop_0e2b3ee4");
+	check_parse("custom_maps\\abcdefghijklmnopq_0e2b3ee4", _crossplay_map_kind_invalid, "");
+	check_parse("custom_maps\\abcdefghijklmnopqrstuvwxy_00000000", _crossplay_map_kind_invalid, "");
 	check_parse("custom_maps\\.._0e2b3ee4", _crossplay_map_kind_invalid, "");
 	check_parse("custom_maps\\..\\x_0e2b3ee4", _crossplay_map_kind_invalid, "");
-	check_parse("custom_maps\\con_0e2b3ee4", _crossplay_map_kind_invalid, "");
-	check_parse("custom_maps\\bitmaps_0e2b3ee4", _crossplay_map_kind_invalid, "");
-	check_parse("custom_maps\\ lead_0e2b3ee4", _crossplay_map_kind_invalid, "");
+	check_parse("custom_maps\\con_0e2b3ee4", _crossplay_map_kind_custom_edition, "con_0e2b3ee4");
 	check_parse("custom_maps\\a*b_0e2b3ee4", _crossplay_map_kind_invalid, "");
-	check_parse("custom_maps\\100%n_0e2b3ee4", _crossplay_map_kind_invalid, "");
-	check_parse("custom_maps\\sub\\x_0e2b3ee4", _crossplay_map_kind_invalid, "");
-	/* (a hash means nothing to the other kinds: their own limits) */
-	check_parse("levels\\test\\pcgulch_0e2b3ee4\\pcgulch_0e2b3ee4", _crossplay_map_kind_xbox, "pcgulch_0e2b3ee4");
-	check_parse("levels\\test\\x\\abcdefghijklmnopqrst_0e2b3ee4", _crossplay_map_kind_invalid, "");
-	check_parse("maps_md\\hugeass_0e2b3ee4.md", _crossplay_map_kind_halomd, "hugeass_0e2b3ee4");
 
 	/* hostile names: none looks at a file */
 	check_parse("", _crossplay_map_kind_invalid, "");
@@ -175,26 +153,31 @@ static void test_names(void)
 		crossplay_map_file_is_stock("a10") && !crossplay_map_file_is_stock("pcgulch") && !crossplay_map_file_is_stock(NULL));
 }
 
-static void test_hashed(void)
+static void test_versions(void)
 {
-	char base[CROSSPLAY_MAP_FILE_BYTES];
-	unsigned long prefix = 1;
+	unsigned char hash[CROSSPLAY_MAP_HASH_BYTES];
+	char named[CROSSPLAY_MAP_FILE_BYTES];
 
-	CHECK(crossplay_map_name_hashed("pcgulch_0e2b3ee4", base, &prefix) && !strcmp(base, "pcgulch") &&
-		prefix == 0x0E2B3EE4UL);
-	CHECK(crossplay_map_name_hashed("x_ffffffff", base, &prefix) && !strcmp(base, "x") && prefix == 0xFFFFFFFFUL);
-	CHECK(crossplay_map_name_hashed("my_map_00000000", NULL, &prefix) && prefix == 0);
-	CHECK(crossplay_map_name_hashed("a_12345678", base, NULL) && !strcmp(base, "a"));
-	CHECK(!crossplay_map_name_hashed("pcgulch", base, &prefix) && !strcmp(base, "pcgulch") && prefix == 0);
-	CHECK(!crossplay_map_name_hashed("pcgulch_0E2B3EE4", base, NULL) && !strcmp(base, "pcgulch_0E2B3EE4"));
-	CHECK(!crossplay_map_name_hashed("_0e2b3ee4", base, NULL));
-	CHECK(!crossplay_map_name_hashed("pcgulch_0e2b3ee", base, NULL));
-	CHECK(!crossplay_map_name_hashed("pcgulch0e2b3ee4", base, NULL));
-	CHECK(!crossplay_map_name_hashed("pcgulch_0e2b3ee4 ", base, NULL));
-	CHECK(!crossplay_map_name_hashed("", base, NULL) && !base[0]);
-	CHECK(!crossplay_map_name_hashed(NULL, base, NULL) && !base[0]);
-	/* (longer than any parsed name: no hash, nothing copied) */
-	CHECK(!crossplay_map_name_hashed("abcdefghijklmnopqrstuvwxyzabcdefghijklm_0e2b3ee4", base, NULL) && !base[0]);
+	memset(hash, 0, sizeof(hash));
+	hash[0] = 0x69; hash[1] = 0xcd; hash[2] = 0x51; hash[3] = 0xeb; hash[4] = 0xff;
+	CHECK(crossplay_map_hash_version(hash) == 0x69CD51EBUL);
+	/* (0 is no version: a hash of first bits 0 is version 1, as OpenCE's) */
+	memset(hash, 0, 4);
+	CHECK(crossplay_map_hash_version(hash) == 1);
+	hash[3] = 1;
+	CHECK(crossplay_map_hash_version(hash) == 1);
+	memset(hash, 0xFF, 4);
+	CHECK(crossplay_map_hash_version(hash) == 0xFFFFFFFFUL);
+	/* another version's file name: the name and the version's 8 digits */
+	CHECK(crossplay_map_version_file_name("pcgulch", 0x69CD51EBUL, named) && !strcmp(named, "pcgulch_69cd51eb"));
+	CHECK(crossplay_map_version_file_name("x", 1, named) && !strcmp(named, "x_00000001"));
+	CHECK(crossplay_map_version_file_name("abcdefghijklmnopqrstuvwxy", 0xABCUL, named) &&
+		!strcmp(named, "abcdefghijklmnopqrstuvwxy_00000abc") &&
+		strlen(named) == CROSSPLAY_MAP_MAXIMUM_VERSION_FILE_LENGTH);
+	CHECK(!crossplay_map_version_file_name("pcgulch", 0, named) && !named[0]);
+	CHECK(!crossplay_map_version_file_name("abcdefghijklmnopqrstuvwxyz", 1, named) && !named[0]);
+	CHECK(!crossplay_map_version_file_name("", 1, named) && !named[0]);
+	CHECK(!crossplay_map_version_file_name(NULL, 1, named) && !named[0]);
 }
 
 /* a file held in memory, read as a map file is */
@@ -248,7 +231,7 @@ static void test_file_hash(void)
 	CHECK(crossplay_map_file_hash(memory_read, &size, size, buffer, sizeof(buffer), hash));
 	hex(hash, text);
 	CHECK(!strcmp(text, "a313ad5bbb3aa0e884cc1c10527a29d07e7517cb04269010f7a7a188e6c723a5"));
-	CHECK(crossplay_map_hash_prefix(hash) == 0xA313AD5BUL);
+	CHECK(crossplay_map_hash_version(hash) == 0xA313AD5BUL);
 	/* (any buffer size, one that splits pieces unevenly too: the same) */
 	memory_reads = 0;
 	CHECK(crossplay_map_file_hash(memory_read, &size, size, small, sizeof(small), hash));
@@ -292,13 +275,13 @@ static void test_printable(void)
 	CHECK(!shown[0]);
 }
 
-static struct crossplay_local_map local_map(short file, unsigned long checksum)
+static struct crossplay_local_map local_map(short file, unsigned long version)
 {
 	struct crossplay_local_map local;
 
 	memset(&local, 0, sizeof(local));
 	local.file = file;
-	local.checksum = checksum;
+	local.version = version;
 	local.pc_maps_on = 1;
 	local.xbox_multiplayer = file == _crossplay_map_file_xbox;
 	return local;
@@ -346,7 +329,7 @@ static void test_verdicts(void)
 	VERDICT(_crossplay_map_kind_xbox, "mygulch", 0, local_map(_crossplay_map_file_unusable, 0), _crossplay_map_unusable);
 	VERDICT(_crossplay_map_kind_xbox, "mygulch", 1, local_map(_crossplay_map_file_xbox, 0), _crossplay_map_identity_unknown);
 
-	/* Custom Edition maps: the host's copy, by its header's checksum */
+	/* Custom Edition maps: the host's version, its hash's first 32 bits */
 	VERDICT(_crossplay_map_kind_custom_edition, "pcgulch", HOST, local_map(_crossplay_map_file_custom_edition, HOST),
 		_crossplay_map_playable);
 	VERDICT(_crossplay_map_kind_custom_edition, "pcgulch", HOST, local_map(_crossplay_map_file_custom_edition, HOST + 1),
@@ -370,24 +353,7 @@ static void test_verdicts(void)
 	VERDICT(_crossplay_map_kind_custom_edition, "pcgulch", HOST, local, _crossplay_map_needs_pc_maps);
 	/* (another copy is said first: turning PC maps on would not help) */
 	VERDICT(_crossplay_map_kind_custom_edition, "pcgulch", HOST + 1, local, _crossplay_map_custom_edition_different);
-	/* a hashed name (v27): this file's hash must be the name's, whatever
-	its checksum, and with a host that sends no checksum too */
-	VERDICT(_crossplay_map_kind_custom_edition, "pcgulch_0e2b3ee4", HOST, local_map(_crossplay_map_file_custom_edition, HOST),
-		_crossplay_map_playable);
-	local = local_map(_crossplay_map_file_custom_edition, HOST);
-	local.hash_mismatch = 1;
-	VERDICT(_crossplay_map_kind_custom_edition, "pcgulch_0e2b3ee4", HOST, local, _crossplay_map_custom_edition_different);
-	VERDICT(_crossplay_map_kind_custom_edition, "pcgulch_0e2b3ee4", 0, local, _crossplay_map_custom_edition_different);
-	VERDICT(_crossplay_map_kind_custom_edition, "pcgulch_0e2b3ee4", HOST + 1, local_map(_crossplay_map_file_custom_edition, HOST),
-		_crossplay_map_custom_edition_different);
-	/* (another kind of file said as such before its hash) */
-	VERDICT(_crossplay_map_kind_custom_edition, "bloodgulch_0e2b3ee4", HOST, local_map(_crossplay_map_file_xbox, 0),
-		_crossplay_map_custom_edition_is_xbox_here);
-	VERDICT(_crossplay_map_kind_custom_edition, "pcgulch_0e2b3ee4", HOST, local_map(_crossplay_map_file_absent, 0),
-		_crossplay_map_missing);
-	/* (a plain name ignores what the hash says: there is none) */
-	VERDICT(_crossplay_map_kind_custom_edition, "pcgulch", HOST, local, _crossplay_map_playable);
-	/* (the checksum's 32 bits: a record's long) */
+	/* (the version's 32 bits: a record's long) */
 	VERDICT(_crossplay_map_kind_custom_edition, "pcgulch", (unsigned long)(long)(int)0xFB74B9F4,
 		local_map(_crossplay_map_file_custom_edition, HOST), _crossplay_map_playable);
 
@@ -447,8 +413,8 @@ static void test_real_map(char const *path, int custom_edition)
 		CHECK(identity.format == _cache_file_format_custom_edition_cache);
 		/* (what OpenCE's host sends in map.version) */
 		CHECK(identity.checksum == raw);
-		/* (and the hash its name would end in: the runner's, worked out
-		apart) */
+		/* (and its hash, whose first 32 bits are its version: the
+		runner's, worked out apart) */
 		{
 			unsigned char hash[CROSSPLAY_MAP_HASH_BYTES];
 			static unsigned char buffer[0x10000];
@@ -458,7 +424,7 @@ static void test_real_map(char const *path, int custom_edition)
 			CHECK(crossplay_map_file_hash((crossplay_map_read_proc)stdio_read, file, (uint32_t)size, buffer, sizeof(buffer),
 				hash));
 			hex(hash, text);
-			printf("%s: hash %s (named <name>_%08lx)\n", path, text, crossplay_map_hash_prefix(hash));
+			printf("%s: hash %s (version %08lx)\n", path, text, crossplay_map_hash_version(hash));
 			if (want && want[0])
 				CHECK(!strcmp(text, want));
 		}
@@ -476,7 +442,7 @@ static void test_real_map(char const *path, int custom_edition)
 int main(void)
 {
 	test_names();
-	test_hashed();
+	test_versions();
 	test_file_hash();
 	test_printable();
 	test_verdicts();

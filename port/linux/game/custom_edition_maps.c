@@ -945,8 +945,9 @@ unsigned long custom_edition_maps_network_identity(
 		return 0;
 	}
 	/* (on the crossplay wire, what map.version means there, OpenCE's since its
-	network version 22 (cache_files_map_version, CC0): a Custom Edition map's
-	(custom_maps\<name>) raw header checksum, else 0. This build hosts no
+	network version 29 (cache_files_map_version, 3e0ba551, CC0): a Custom
+	Edition map's (custom_maps\<name>) version, its hash's first 32 bits,
+	else 0. This build hosts no
 	crossplay game but the network test's stand-in for a PC host
 	(network_test.c); the legacy wire's identity below is as it was) */
 	if (network_game_record_format_current() == _network_game_record_crossplay)
@@ -958,8 +959,8 @@ unsigned long custom_edition_maps_network_identity(
 		{
 			return 0;
 		}
-		custom_edition_cache_crossplay_facts(file, &local);
-		return local.file == _crossplay_map_file_custom_edition ? local.checksum : 0;
+		custom_edition_cache_crossplay_facts(file, 0, &local);
+		return local.file == _crossplay_map_file_custom_edition ? local.version : 0;
 	}
 	name = tag_name_strip_path(level_name);
 	/* (a Halo PC map named as an Xbox level, which this machine plays with
@@ -1110,7 +1111,7 @@ short custom_edition_maps_crossplay_check(
 	folder: crossplay_map_name_parse's file name, no folder) */
 	if (kind == _crossplay_map_kind_xbox || kind == _crossplay_map_kind_custom_edition)
 	{
-		custom_edition_cache_crossplay_facts(file, &local);
+		custom_edition_cache_crossplay_facts(file, kind == _crossplay_map_kind_custom_edition ? host_version : 0, &local);
 		if (kind == _crossplay_map_kind_xbox && crossplay_map_file_is_stock(file) && !host_version)
 		{
 			local.stock_problem = custom_edition_maps_stock_problem(level_name, 0, why, why_size);
@@ -1141,6 +1142,7 @@ short custom_edition_maps_crossplay_check(
 	else if (local.file == _crossplay_map_file_custom_edition)
 	{
 		error(_error_silent, "crossplay: the PC host's Custom Edition map '%s' (0x%08lX) is this machine's", file, host_version);
+		custom_edition_cache_crossplay_map_chosen(file, host_version);
 	}
 
 	return verdict;

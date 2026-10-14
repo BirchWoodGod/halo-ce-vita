@@ -9,15 +9,16 @@ names the map, and its map.version (which the Xbox game left 0) says which
 copy of it the host plays, with OpenCE's meaning since its network version
 22 (4e8ed2f1, 9d309f8d; CC0):
 
-- custom_maps\<file>: a Halo Custom Edition map (cache version 609), its
-  map.version the raw checksum in the map's cache header (0: the host could
-  not read one, and nothing is compared). Since OpenCE's network version 27
-  (a2aad18f, its map sharing; CC0) a host names a map in its custom_maps
-  folder by its hash: custom_maps\<file>_<8 lowercase hex digits>, the
-  first digits of the map file's hash (BLAKE2b, crossplay_map_file_hash).
-  This machine plays it from <file>_<digits>.map (an OpenCE player's copy)
-  or <file>.map, either only when the file's hash begins with those digits
-  and its checksum is the host's; a name with no hash is taken as before;
+- custom_maps\<file>: a Halo Custom Edition map (cache version 609), by its
+  own name. Since OpenCE's network version 29 (3e0ba551, build-206; CC0)
+  its map.version is the map's version: the first 32 bits of the map
+  file's hash (BLAKE2b, crossplay_map_file_hash; never 0,
+  crossplay_map_hash_version), where 22 to 28 sent the header checksum (and
+  27 and 28 a hashed name). This machine plays the host's version: its
+  <file>.map, or else <file>_<8 hex digits of the version>.map (as OpenCE
+  saves a download beside another version of its name), whichever's hash
+  is that version (0: the host could not hash its map, and <file>.map is
+  played with nothing compared);
 - maps_md\<file>.md and maps_pc\<file>.pc: ChupathingyCE's HaloMD and Halo PC
   retail maps (cache version 7, halo_map_families.h), which no OpenCE build
   and not this one plays;
@@ -28,7 +29,7 @@ copy of it the host plays, with OpenCE's meaning since its network version
   the builds this one plays with (cache_files.c), whose regions play
   together. Halo PC's own versions of the multiplayer levels are other maps
   (other tags): on a PC host they are Custom Edition maps,
-  custom_maps\bloodgulch, compared by checksum like any other.
+  custom_maps\bloodgulch, compared by version like any other.
 
 The Vita keeps every map in one folder (ux0:data/haloce-vita/maps): the map
 <file>.map (or OpenSauce's <file>.yelo) there is the one compared. This machine
@@ -57,13 +58,14 @@ the game's side, the file looked at, is custom_edition_maps.c's
 #define CROSSPLAY_MAP_MAXIMUM_NAME_LENGTH 63
 /* a map file's name, without its extension (the map list's and map
 sharing's limit, MAP_SHARE_MAXIMUM_NAME_LENGTH), and room for it with a
-hash after it */
+version after it (crossplay_map_version_file_name) */
 #define CROSSPLAY_MAP_MAXIMUM_FILE_LENGTH 25
 #define CROSSPLAY_MAP_FILE_BYTES 40
-/* a hashed name's end (OpenCE's MAP_SHARE_NAME_DIGITS): '_' and this many
-lowercase hexadecimal digits, the first of the file's hash */
+/* the end of the file name of another version of a map (OpenCE's
+MAP_SHARE_NAME_DIGITS): '_' and this many lowercase hexadecimal digits, its
+version's */
 #define CROSSPLAY_MAP_HASH_DIGITS 8
-#define CROSSPLAY_MAP_MAXIMUM_HASHED_FILE_LENGTH (CROSSPLAY_MAP_MAXIMUM_FILE_LENGTH + 1 + CROSSPLAY_MAP_HASH_DIGITS)
+#define CROSSPLAY_MAP_MAXIMUM_VERSION_FILE_LENGTH (CROSSPLAY_MAP_MAXIMUM_FILE_LENGTH + 1 + CROSSPLAY_MAP_HASH_DIGITS)
 /* a map file's hash (OpenCE's map_share_files.c: BLAKE2b of 32 bytes of the
 label "OpenCE map 1", the file's size, 4 bytes little-endian, and the
 BLAKE2b hashes of its pieces of this size, the last shorter) */
@@ -120,8 +122,8 @@ enum crossplay_map_verdict
 	_crossplay_map_identity_unknown,
 	/* no file of that name */
 	_crossplay_map_missing,
-	/* a Custom Edition map whose checksum is not the host's, or whose hash
-	is not the one the host's name for it ends in */
+	/* a Custom Edition map of another version than the host's (its hash's
+	first 32 bits not the record's map version) */
 	_crossplay_map_custom_edition_different,
 	/* a Custom Edition map the host names, an Xbox map here (Halo PC's
 	Blood Gulch, custom_maps\bloodgulch, and this machine's bloodgulch.map
@@ -156,8 +158,9 @@ struct crossplay_local_map
 	short file;
 	/* cache_file_formats.h's enum cache_file_status, for an unusable file */
 	short status;
-	/* a Custom Edition cache's header checksum, raw */
-	unsigned long checksum;
+	/* a Custom Edition cache's version: its hash's first 32 bits
+	(crossplay_map_hash_version; 0 if it could not be read whole) */
+	unsigned long version;
 	/* an Xbox cache: a multiplayer map the cache partition takes
 	(custom_edition_cache_xbox_multiplayer) */
 	int xbox_multiplayer;
@@ -169,10 +172,6 @@ struct crossplay_local_map
 	int resource_maps_missing;
 	/* PC maps (game.custom_edition) on */
 	int pc_maps_on;
-	/* the host names the map by its hash (crossplay_map_name_hashed), and
-	this file's hash does not begin with the name's digits (or could not be
-	read whole) */
-	int hash_mismatch;
 };
 
 /* reads `size` bytes at `offset` of a file into `buffer`: nonzero if all
@@ -189,17 +188,7 @@ short crossplay_map_name_parse(
 	long size,
 	char file[CROSSPLAY_MAP_FILE_BYTES]);
 
-/* Whether a Custom Edition map's file name (crossplay_map_name_parse's)
-is a hashed one, <base>_<CROSSPLAY_MAP_HASH_DIGITS lowercase hex digits>:
-nonzero with the base name in `base` (CROSSPLAY_MAP_FILE_BYTES) and the
-digits' value in *prefix (either may be NULL); else 0, `base` the whole
-name. The parse took only a base that is a name of its own. */
-int crossplay_map_name_hashed(
-	char const *file,
-	char base[CROSSPLAY_MAP_FILE_BYTES],
-	unsigned long *prefix);
-
-/* A map file's hash, as OpenCE names its maps by (CROSSPLAY_MAP_HASH_BYTES
+/* A map file's hash, as OpenCE tells its maps' versions by (CROSSPLAY_MAP_HASH_BYTES
 in `hash`), read through `read` (`size` bytes) in pieces of at most
 `buffer_size` bytes into `buffer`; nonzero if the file was read whole. */
 int crossplay_map_file_hash(
@@ -210,10 +199,21 @@ int crossplay_map_file_hash(
 	uint32_t buffer_size,
 	unsigned char hash[CROSSPLAY_MAP_HASH_BYTES]);
 
-/* the value of a hash's first CROSSPLAY_MAP_HASH_DIGITS digits, as a name
-writes them (the first bytes, big-endian) */
-unsigned long crossplay_map_hash_prefix(
+/* the version of a map of this hash, as a game record's map.version gives
+it: its first 32 bits (the first bytes, big-endian), never 0 (OpenCE's
+map_share_hash_version: 0 is a version nothing is compared for) */
+unsigned long crossplay_map_hash_version(
 	unsigned char const hash[CROSSPLAY_MAP_HASH_BYTES]);
+
+/* the file name, without its extension, of another version of the map
+`file` (a name crossplay_map_name_parse took, at most
+CROSSPLAY_MAP_MAXIMUM_FILE_LENGTH): <file>_<the version's 8 lowercase hex
+digits>, in `named` (CROSSPLAY_MAP_FILE_BYTES); 0, `named` empty, for a
+version 0 or a file name of another length */
+int crossplay_map_version_file_name(
+	char const *file,
+	unsigned long version,
+	char named[CROSSPLAY_MAP_FILE_BYTES]);
 
 /* Whether `file` names one of the Xbox's levels (multiplayer or campaign),
 in letters of either case. */
@@ -232,9 +232,8 @@ short crossplay_map_verdict(
 	struct crossplay_local_map const *local);
 
 /* The record's map name, `size` bytes, as a message may show it: its file
-name when it has one (a hashed one with its hash: at most
-CROSSPLAY_MAP_MAXIMUM_HASHED_FILE_LENGTH), else at most
-CROSSPLAY_MAP_MAXIMUM_FILE_LENGTH characters of the name, any but letters, digits, '_', '-', '.', ' ' and
+name when it has one, else at most CROSSPLAY_MAP_MAXIMUM_FILE_LENGTH
+characters of the name, any but letters, digits, '_', '-', '.', ' ' and
 brackets as '?'; in `printable` (CROSSPLAY_MAP_FILE_BYTES). */
 void crossplay_map_name_printable(
 	char const *name,

@@ -197,8 +197,8 @@ is refused all the same.
 **Two wires, one switch** (`docs/crossplay.md`; `network.crossplay`,
 the Vita's Crossplay row; `port/linux/include/network_wire.h`). Off, the
 default, is the legacy Vita wire above, byte for byte as betas 1-4 speak it.
-On, the machine speaks upstream's wire as of OpenCE b1ef7f7e (network
-version 28, as ChupathingyCE 35fc7e8b: its advertisement flags, where 0x02 is a game under way; its
+On, the machine speaks upstream's wire as of OpenCE 8102e711 (network
+version 29, as ChupathingyCE 7d6d8f24: its advertisement flags, where 0x02 is a game under way; its
 constant join token; signalling on `hceu` with message version 4 and a
 WebRTC block of kind none; listing format 1 under `hceu-lobby-1`; the
 13,120-byte settings record; upstream's simulation fixes 1f87b4ff,
@@ -207,9 +207,11 @@ message but must be the same on every machine of a game:
 `network_wire_v28_rules`: a multiplayer script's `switch_bsp` keeps the
 game's first BSP, dynamic lights and the flashlight stay on past the Xbox's
 player and vehicle limits, a second weapon picked up while firing is
-readied) and joins only PC hosts and servers of an accepted version (28
-alone: a host of 26 or 27 plays those otherwise, so it is refused rather
-than played wrong); it hosts nothing, and sends none of this tree's own
+readied; and version 29's map identity: a Custom Edition map by its own
+name, the record's map version its hash's first 32 bits) and joins only PC
+hosts and servers of an accepted version (29 alone: a host of 26 or 27
+plays those otherwise, and one of 28 names a map's version otherwise, so it
+is refused rather than played wrong); it hosts nothing, and sends none of this tree's own
 messages (map sharing, codes, relays, the ping table). A PC co-op game and
 a PC game of more than 16 players are joined after asking once
 (Experimental: `port/linux/src/crossplay_guard.c`). The switch is read

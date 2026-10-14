@@ -49,9 +49,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 TESTS = ROOT / "port/vita/tests"
 
-# the pinned upstream (docs/crossplay.md: OpenCE b1ef7f7e, network version 28;
-# ChupathingyCE 35fc7e8b announces the same)
-OPENCE_COMMIT = "b1ef7f7e"
+# the pinned upstream (docs/crossplay.md: OpenCE 8102e711, build-206, network
+# version 29; ChupathingyCE 7d6d8f24, 0.7.5b, announces the same)
+OPENCE_COMMIT = "8102e711"
 # the tree the legacy Vita wire was released from: next-1.1 as 1.1.0-beta.4
 # was built (network version 18)
 LEGACY_COMMIT = "50ae7395"
@@ -729,7 +729,7 @@ def run(arguments):
 		report.gap("G5", "FAIL", f"Vita build: listing formats {formats}, hceu-lobby-1 {'yes' if label else 'no'}")
 
 	# --- the rest
-	report.gap("G6", "MANUAL", "map identity on the wire (custom_maps\\<name>_<8 hex> since v27): T3's own tests "
+	report.gap("G6", "MANUAL", "map identity on the wire (since v29 custom_maps\\<name> and the hash's first 32 bits): T3's own tests "
 		"(run_crossplay_maps_test.sh, netns crossmaps)")
 	p2p = ours.text("port/linux/src/p2p.c")
 	ping_send = source_function(p2p, "inner[0] = _packet_ping_table;")
@@ -745,7 +745,7 @@ def run(arguments):
 def main():
 	parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
 	parser.add_argument("--opence", default=os.environ.get("OPENCE_DIR",
-		str(Path.home() / "halo-test-out/opence-review.wnFA/OpenCE")), help="a clone of OpenCE with OPENCE_COMMIT")
+		str(Path.home() / "halo-test-out/xpv29.M6zO/OpenCE")), help="a clone of OpenCE with OPENCE_COMMIT")
 	parser.add_argument("--work", help="where to build (default: a new folder under TMPDIR, deleted on a pass)")
 	parser.add_argument("--expected-open", help="the gaps not yet closed, comma-separated (default: EXPECTED_OPEN)")
 	parser.add_argument("--keep", action="store_true", help="keep the work folder")
