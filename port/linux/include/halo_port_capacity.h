@@ -63,14 +63,8 @@ objects, noncollideable objects, lights) */
 #define HALO_PORT_MAXIMUM_CACHED_OBJECT_RENDER_STATES 1024 /* (256) */
 /* objects one explosion can damage */
 #define HALO_PORT_MAXIMUM_AREA_OF_EFFECT_OBJECTS 256 /* (64) */
-/* script object lists, and the object references they all share. The
-lists of a tick's scripts are freed after it (object_list_gc): a Halo PC
-map whose scripts test (players) in many places a tick took more than the
-Xbox's 48 (coldsnap's), and its game halted. Upstream's sizes (OpenCE's):
-95 KB more of the game state, 2 MB of it still free; a campaign save of an
-earlier build is refused (allocation checksum) and its level starts over */
-#define HALO_PORT_MAXIMUM_OBJECT_LISTS_PER_MAP 1024 /* (48) */
-#define HALO_PORT_MAXIMUM_LISTED_OBJECTS_PER_MAP 8192 /* (128) */
+/* object references shared by all script object lists */
+#define HALO_PORT_MAXIMUM_LISTED_OBJECTS_PER_MAP 1024 /* (128) */
 
 /* ---------- effects, particles, lights and sounds */
 
