@@ -142,6 +142,15 @@
 #            the joiner's), both must say "connection problem" in the
 #            blackout and recover after it, and the game play on
 #   lan      online off, both copies on one LAN (system link over Wi-Fi)
+#   spooflan lan, and a machine on the LAN sends datagrams as from each
+#            copy (its address: a LAN's datagrams are known by it alone) to
+#            the other, from HALO_TEST_SPOOF_AT seconds (60) after the
+#            joiner starts to its end: the netcode's messages stamped with a
+#            tick far ahead (which had every newer one of the copy's taken
+#            for stale, its player frozen on the host), and a client's
+#            readiness, hits and Discord user (which the host takes only
+#            over its connection). Both must drop them (logged), and the
+#            joiner's player go on moving on the host
 #   adhoc    online off, ad hoc on: the two machines' only link to each other
 #            is an emulated ad hoc group (HALO_NET_ADHOC_EMULATE)
 #   many     online off, the host and HALO_TEST_JOINERS joiners (3) on one
@@ -1451,6 +1460,80 @@ lan)
 	# (the latency meter on a LAN: the two machines' waits for their next tick
 	# alone, two ticks at most, 67 ms)
 	check_latency 0 90
+	;;
+spooflan)
+	# lan, and from the host's router (on the LAN, a raw socket) datagrams
+	# whose source is the other copy's address: the netcode's messages of
+	# no entries stamped about 1.1e9 ticks ahead, to the host as from the
+	# joiner and to the joiner as from the host, and the kinds a client
+	# sends reliably, to the host as from the joiner
+	holder; lan=$held
+	in_ns "$host_router" ip link add l2_host type veth peer name m2_host
+	in_ns "$host_router" ip link set m2_host netns "$lan"
+	in_ns "$host_router" ip link set l2_host master b_host
+	in_ns "$host_router" ip link set l2_host up
+	in_ns "$lan" ip link set lo up
+	in_ns "$lan" ip addr add 192.168.1.3/24 broadcast 192.168.1.255 dev m2_host
+	in_ns "$lan" ip link set m2_host up
+	in_ns "$lan" ip route add default via 192.168.1.1
+	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env HALO_NET_ONLINE=false; host_pid=$last_pid
+	sleep 5
+	run_copy joiner "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join HALO_TEST_INPUT=bot:2
+	join_pid=$last_pid
+	sleep "${HALO_TEST_SPOOF_AT:-60}"
+	in_ns "$host_router" timeout $((seconds + 30)) python3 - <<'PYTHON' &
+import socket, struct, time
+raw = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_RAW)
+def send(source, destination, port, kind, game_time, index):
+    # a message header (its size, big-endian, the data type: 2) and a
+    # distributed message's header (port/linux/game/network_distributed.h)
+    payload = struct.pack('>H', 8 << 4 | 2 << 2) + struct.pack('<BBl', kind, 0, game_time)
+    udp = struct.pack('>HHHH', port ^ 1, port, 8 + len(payload), 0) + payload
+    header = struct.pack('>BBHHHBBH4s4s', 0x45, 0, 20 + len(udp), index & 0xFFFF, 0, 64, 17, 0,
+        socket.inet_aton(source), socket.inet_aton(destination))
+    raw.sendto(header + udp, (destination, 0))
+index = 0
+print('spoofing', flush=True)
+while True:
+    ahead = 0x40000000 + index
+    # (to the host as the joiner: predictions, inputs; readiness, hits, its
+    # Discord user)
+    for kind in (1, 14):
+        send('192.168.1.3', '192.168.1.2', 5150, kind, ahead, index)
+    for kind in (9, 11, 18):
+        send('192.168.1.3', '192.168.1.2', 5150, kind, 0, index)
+    # (to the joiner as the host: units, objects, statistics)
+    for kind in (2, 3, 6):
+        send('192.168.1.2', '192.168.1.3', 5151, kind, ahead, index)
+    index += 1
+    time.sleep(0.1)
+PYTHON
+	spoof_pid=$!; pids="$pids $spoof_pid"
+	wait $join_pid $host_pid 2>/dev/null
+	kill $spoof_pid 2>/dev/null
+	two=$(grep -a "network test: tick" "$out/joiner/run.log" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+	echo "joiner's seconds with two players playing: $two"
+	[ "$two" -ge 60 ] || fail "the joiner played the host's game for $two s with two players (60 wanted)"
+	for side in host joiner; do
+		grep -aq "stamped [0-9]* ticks from its sender's latest in a datagram; dropped" "$out/$side/data/debug.txt" ||
+			fail "the $side did not drop the datagrams stamped ahead"
+	done
+	# (the joiner's player on the host, its last 40 seconds: where it is
+	# each second, the host's own player, local, left out)
+	moves=$(grep -a "network test: tick" "$out/host/run.log" | grep -a "| playing" | tail -40 | python3 -c '
+import re, sys
+last, moves = None, 0
+for line in sys.stdin:
+    local = re.search(r"\| local (-?\d+) ", line)
+    for player, x, y, z in re.findall(r" player (\d+): \((\S+) (\S+) (\S+)\)", line):
+        if local and player == local.group(1):
+            continue
+        if last is not None and (x, y, z) != last:
+            moves += 1
+        last = (x, y, z)
+print(moves)')
+	echo "the joiner's player moved on the host in $moves of its last 40 seconds"
+	[ "${moves:-0}" -ge 10 ] || fail "the joiner's player stood still on the host while datagrams as from it came (frozen)"
 	;;
 adhoc)
 	# a link between the two machines alone stands for the ad hoc group
