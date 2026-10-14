@@ -41,6 +41,12 @@ unsigned int network_wire_version(void)
 	return network_wire_crossplay() ? HALO_PORT_CROSSPLAY_NETWORK_VERSION : HALO_PORT_NETWORK_VERSION;
 }
 
+int network_wire_v28_rules(void)
+{
+	/* (every version the crossplay wire joins is 28) */
+	return network_wire_crossplay() && HALO_PORT_CROSSPLAY_NETWORK_VERSION >= 28;
+}
+
 int network_wire_version_accepted(unsigned int version)
 {
 	size_t index;

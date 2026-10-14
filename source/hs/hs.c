@@ -2808,6 +2808,8 @@ symbols in this file:
 #include "structures/structure_visibility.h"
 #include "tag_files/files.h"
 #include "coop_scripts.h" /* port: port/linux/game/coop_scripts.c */
+#include "game/game_engine.h" /* port: game_engine_running */
+#include "network_wire.h" /* port: network version 28's rules */
 
 /* ---------- constants */
 
@@ -14307,11 +14309,23 @@ void hs_node_gc(
 	return;
 }
 
+/* port: network version 28 (OpenCE c3365b1c, b71bd6a0; ChupathingyCE
+2bc7d41a, 645c875a; CC0): some multiplayer maps keep a copy of the place
+for each game type, with its own sky. The script's first switch_bsp is the
+copy for the type the host started. A later switch to another copy reloads
+the level every couple of seconds, so that request is ignored. Cleared for
+each map. Only with network_wire_v28_rules: a PC host of 28 keeps the first,
+so its clients must too, and the legacy wire switches as the betas do. */
+static short scripted_multiplayer_bsp = NONE;
+static boolean scripted_multiplayer_bsp_reported = FALSE;
+
 void hs_initialize_for_new_map(
 	void)
 {
 	struct scenario *scenario;
 
+	scripted_multiplayer_bsp = NONE;
+	scripted_multiplayer_bsp_reported = FALSE;
 	scenario = global_scenario_index != NONE ? global_scenario_get() : NULL;
 	hs_allocate();
 	if (scenario && scenario->hs_syntax_data.size)
@@ -15702,7 +15716,42 @@ HS_EVALUATE_VOID_FROM_ARGUMENTS(debug_player_teleport_evaluate, struct hs_argume
 HS_EVALUATE_VOID_STRING(main_set_map_name_evaluate, main_set_map_name)
 HS_EVALUATE_VOID_STRING(main_set_multiplayer_map_name_evaluate, main_set_multiplayer_map_name)
 HS_EVALUATE_VOID_UNSIGNED_SHORT(main_set_difficulty_evaluate, main_set_difficulty)
-HS_EVALUATE_VOID_FROM_ARGUMENTS(scenario_switch_structure_bsp_evaluate, struct hs_arguments_word, (scenario_switch_structure_bsp(arguments->value)))
+/* port: a campaign script still switches, and so does a player walking
+through a BSP trigger (main_switch_structure_bsp, not this); a multiplayer
+script past its first, on version 28's rules, does not (above) */
+static void scenario_switch_structure_bsp_evaluate(
+	short function_index,
+	long thread_index,
+	boolean initialize)
+{
+	struct hs_arguments_word const *arguments;
+	short structure_bsp_index;
+
+	arguments = (struct hs_arguments_word const *)hs_macro_function_evaluate(function_index, thread_index, initialize);
+	if (arguments)
+	{
+		structure_bsp_index = (short)arguments->value;
+		if (!network_wire_v28_rules() || !game_engine_running() || global_structure_bsp_index_get() == NONE)
+		{
+			scripted_multiplayer_bsp = NONE;
+			scripted_multiplayer_bsp_reported = FALSE;
+			scenario_switch_structure_bsp(structure_bsp_index);
+		}
+		else if (scripted_multiplayer_bsp == NONE ||
+			scripted_multiplayer_bsp == structure_bsp_index)
+		{
+			scripted_multiplayer_bsp = structure_bsp_index;
+			scenario_switch_structure_bsp(structure_bsp_index);
+		}
+		else if (!scripted_multiplayer_bsp_reported)
+		{
+			scripted_multiplayer_bsp_reported = TRUE;
+			error(_error_silent, "switch_bsp from a script is ignored after the multiplayer game has chosen its bsp");
+		}
+		hs_return(thread_index, 0);
+	}
+	return;
+}
 HS_EVALUATE_VOID_STRING(main_crash_evaluate, main_crash)
 HS_EVALUATE_VOID_STRING(debug_dump_memory_for_file_evaluate, debug_dump_memory_for_file)
 HS_EVALUATE_VOID_STRING(profile_dump_to_file_evaluate, profile_dump_to_file)

@@ -49,6 +49,15 @@ unsigned int network_wire_version(void);
 /* whether a host announcing the version can be joined on this machine's
 wire: legacy, exactly 18; crossplay, the accepted list (28) */
 int network_wire_version_accepted(unsigned int version);
+/* nonzero when this machine plays network version 28's rules (OpenCE
+5a7c655a, build-201; ChupathingyCE 6f5064f6): the crossplay wire, whose
+hosts are all of 28 (network_wire_version_accepted). They change no
+message, so every machine of a game must agree on them: a script's
+switch_bsp keeps a multiplayer game's first BSP (hs.c), dynamic lights and
+the flashlight stay on past the Xbox's player and vehicle limits
+(game_engine.c), a second weapon picked up while firing is readied
+(units.c). The legacy wire plays the betas' (0). */
+int network_wire_v28_rules(void);
 /* nonzero (and why, static text for the player, in why) when this machine
 must not host a game others can join: on the crossplay wire */
 int network_wire_hosting_refused(const char **why);
