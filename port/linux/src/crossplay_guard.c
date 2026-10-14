@@ -175,11 +175,16 @@ void crossplay_guard_forget(void)
 
 int crossplay_guard_test_answer(void)
 {
+#ifdef HALO_RELEASE
+	/* (the automated tests' answer, never a release build's: the player's) */
+	return -1;
+#else
 	const char *answer = getenv("HALO_CROSSPLAY_LARGE_ANSWER");
 
 	if (!answer || !answer[0])
 		return -1;
 	return !strcmp(answer, "yes") || !strcmp(answer, "1");
+#endif
 }
 
 const char *crossplay_guard_badge(int crossplay, int dedicated)

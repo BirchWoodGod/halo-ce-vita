@@ -2296,11 +2296,14 @@ void network_game_client_accepted_into_game(
 		/* port (the tests: run_netns_online_test.sh fullcache): the lobby's
 		precache at once, as a frame of the pregame does when the host's
 		game settings are a frame or more behind its acceptance (the
-		internet's), which a test's link seldom makes happen */
+		internet's), which a test's link seldom makes happen; never in
+		release builds */
+#ifndef HALO_RELEASE
 		if (getenv("HALO_TEST_PRECACHE_AT_ACCEPT") && atoi(getenv("HALO_TEST_PRECACHE_AT_ACCEPT")))
 		{
 			network_game_client_update_precache_status(client);
 		}
+#endif
 #endif
 
 		network_game_generate_local_machine_name(settings_request.machine_name);

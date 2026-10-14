@@ -390,9 +390,14 @@ static void typing_begin(short typing, char const *title, char const *text, int 
 	__atomic_store_n(&halo_text_input_state, HALO_TEXT_INPUT_REQUESTED, __ATOMIC_RELEASE);
 #else
 	{
-		/* (HALO_TEST_TEXT_INPUT: the next answer, "!" a cancel; none: cancelled) */
+		/* (HALO_TEST_TEXT_INPUT: the next answer, "!" a cancel; none, or a
+		release build: cancelled) */
 		static int answered;
+#ifndef HALO_RELEASE
 		char const *answers = getenv("HALO_TEST_TEXT_INPUT");
+#else
+		char const *answers = NULL;
+#endif
 		int index = 0;
 		char answer[HALO_TEXT_INPUT_SIZE];
 		int length = 0;

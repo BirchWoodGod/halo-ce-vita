@@ -6680,7 +6680,9 @@ boolean game_engine_vehicle_placement_allowed(
 	short side, type;
 	byte set;
 
-	if (!game_engine || placement->palette_entry_index == NONE)
+	/* port: a palette entry the scenario has, else as NONE: a map's index
+	out of range is refused by object_new_from_scenario, and not read here */
+	if (!game_engine || !VALID_INDEX(placement->palette_entry_index, palette->count))
 		return TRUE;
 	side = global_variant.universal_variant.teams ? game_engine_nearest_team(&placement->position) : 0;
 	set = options->vehicle_set[side];
@@ -7427,6 +7429,14 @@ static void internal_rasterize_target_name(
 		}
 	}
 
+	/* port: the name shown fades out over ticks after its player is
+	looked away from, and that player can have left the game and his slot
+	been taken since (network_game_spawn_player): no name then */
+	if (player->player_display_index != NONE && !player_try_and_get(player->player_display_index))
+	{
+		player->player_display_index = NONE;
+		player->player_display_count = 0;
+	}
 	if (player->player_display_index != NONE)
 	{
 		struct player_datum *target_player = player_get(player->player_display_index);
@@ -8286,7 +8296,10 @@ boolean game_engine_get_state_message(
 			long current_message = *(volatile long *)&player->state_message;
 			long current_message_player_index = *(volatile long *)&player->state_message_player_index;
 
-			if (current_message != NONE && current_message_player_index != NONE)
+			/* (and the message's player still a player: the hill's or the
+			ball's, whose slot another player can take once he quits) */
+			if (current_message != NONE && current_message_player_index != NONE &&
+				player_try_and_get(current_message_player_index))
 			{
 				result = multiplayer_message_internal(
 					player_index,

@@ -326,7 +326,11 @@ static void test_pad_parse(void)
 		{ "ls", -1, XINPUT_GAMEPAD_LEFT_THUMB }, { "rs", -1, XINPUT_GAMEPAD_RIGHT_THUMB },
 		{ "wait", -1, 0 },
 	};
+#ifndef HALO_RELEASE
 	const char *setting = getenv("HALO_TEST_PAD");
+#else
+	const char *setting = NULL; /* (the tests' presses, never in release builds) */
+#endif
 	char text[2048];
 	char *token, *token_end;
 
