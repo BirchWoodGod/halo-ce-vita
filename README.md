@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/logo.png" alt="Halo CE for PS Vita logo: a PS Vita with the Halo ring on its screen" width="160">
+
 # Halo: Combat Evolved for the PS Vita
 
 **A native PlayStation Vita port of Halo: Combat Evolved, built from the decompilation of the Xbox game.**
@@ -9,6 +11,7 @@
 [![Downloads](https://img.shields.io/github/downloads/BirchWoodGod/halo-ce-vita/total?color=blue)](https://github.com/BirchWoodGod/halo-ce-vita/releases)
 [![License: GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-orange)](LICENSE)
 [![Platform: PS Vita](https://img.shields.io/badge/platform-PS%20Vita%20%2F%20PS%20TV-003791)](#requirements)
+[![Discord](https://img.shields.io/badge/Discord-join%20the%20server-5865F2?logo=discord&logoColor=white)](https://discord.gg/Ed7sbCgAF5)
 
 [**Download**](https://github.com/BirchWoodGod/halo-ce-vita/releases) ·
 [Install](#install) ·
@@ -16,7 +19,8 @@
 [Controls](#controls) ·
 [Performance](#performance) ·
 [Roadmap](ROADMAP.md) ·
-[Report a problem](#reporting-a-crash-or-a-problem)
+[Report a problem](#reporting-a-crash-or-a-problem) ·
+[Discord](https://discord.gg/Ed7sbCgAF5)
 
 <img src="docs/screenshots/warthog-beach.png" alt="A Warthog on The Silent Cartographer's beach, on a PS Vita" width="90%">
 
@@ -609,6 +613,9 @@ choose the campaign again with the same profile and difficulty. **Save and
 Quit** from the pause menu is the safest way to stop.
 
 ## Reporting problems
+
+Questions and finding people to play with: the
+[Discord server](https://discord.gg/Ed7sbCgAF5).
 
 ### Reporting a crash or a problem
 
