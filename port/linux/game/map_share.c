@@ -98,7 +98,8 @@ Choices:
   it.
 - HALO_MAP_SHARE=0 turns it off (joiners are refused as before; a host
   still answers). HALO_MAP_SHARE_ANSWER=yes|no answers the question without
-  asking (the automated tests: a hidden window shows nothing),
+  asking (the automated tests: a hidden window shows nothing; not in
+  release builds),
   HALO_MAP_SHARE_CANCEL_AT=<bytes> cancels a download that far in (once a
   run), and
   HALO_MAP_SHARE_HOST_SILENT=1 has a host ignore the requests, as one of a
@@ -1879,7 +1880,9 @@ static void map_share_client_ask(
 		(unsigned long)download->size, download->pc_maps_only ? ", PC maps only" : download->turn_on_pc_maps ?
 		", and PC maps" : "", download->resume_from ? ", a part kept" : "", download->host_name,
 		download->public_game ? ", a public game" : "", download->in_progress ? ", its game in progress" : "");
+#ifndef HALO_RELEASE
 	if (!getenv("HALO_MAP_SHARE_ANSWER"))
+#endif
 	{
 		platform_ask_question(T("Halo: custom map"), text);
 	}
@@ -1893,12 +1896,16 @@ static void map_share_client_ask(
 static int map_share_client_answer(
 	void)
 {
+#ifndef HALO_RELEASE
+	/* (the automated tests', never in release builds: a map taken without
+	the player's yes) */
 	char const *answer = getenv("HALO_MAP_SHARE_ANSWER");
 
 	if (answer)
 	{
 		return !csstrcasecmp(answer, "yes") || !csstrcmp(answer, "1");
 	}
+#endif
 
 	return platform_question_answer();
 }
