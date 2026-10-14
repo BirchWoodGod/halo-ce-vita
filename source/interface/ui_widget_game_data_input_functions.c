@@ -714,8 +714,12 @@ void ui_widget_game_data_function_invoke(
 	if (function >= 256 && function < 0x8000)
 	{
 		extern void pc_menu_game_data_function_invoke(struct widget_instance *widget, long function);
+		extern boolean pc_menu_tag(long tag_index);
 
-		pc_menu_game_data_function_invoke(widget, function - 256);
+		/* (only the port's own menus' tags: a map's widget runs none, as
+		ui_widget_event_handler_functions.c ui_widget_function_denied) */
+		if (pc_menu_tag(widget->definition_tag_index))
+			pc_menu_game_data_function_invoke(widget, function - 256);
 		return;
 	}
 #endif

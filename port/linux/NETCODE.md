@@ -512,7 +512,13 @@ Unity's Netcode for Entities, lightyear, netfox and the Ares source):
   (its header's game time); an unreliable one (the units, the input, the
   objects, the statistics, what units carry, the damage) that arrives after
   a newer of its kind is dropped, so a late datagram never puts anything
-  back.
+  back. A datagram's source address is all that says whose it is, so every
+  machine drops one stamped more than 20 seconds from the latest tick it
+  had from that machine (one stamped far ahead would have the machine's
+  newer ones taken for stale); a message over the connection is taken
+  whatever its tick. The host takes a client's hits, Discord user and
+  readiness only over its connection (ChupathingyCE's,
+  `network_distributed.c`).
 - **Taken at the tick.** The host takes a client's players' and vehicles'
   positions (the latest of each) at its next tick, not as each arrives.
 - **Fewer bytes.** Vectors travel in 16 bits a part, shields and health in

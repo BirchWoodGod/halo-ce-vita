@@ -8,6 +8,7 @@ threads, asynchronous procedure calls, time, memory and debug output.
 #include "platform.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <sched.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -676,11 +677,48 @@ DWORD WINAPI GetTickCount(void)
 	return base_ms + (DWORD)since / 1000UL;
 }
 #else
+/* The game's clocks count from when it started, as the Xbox's count from
+power-on (and the Vita's above, the process's time): not from the machine's
+boot. Its code keeps times in signed 32-bit variables, which a host up for
+more than 24.8 days (2^31 ms since boot) overflows: a hosted game then timed
+out its own clients ("timeout in network_connection_idle"). They start at
+10 s, about where an Xbox's clock is by the time the game runs, so a time
+of 0 is still long ago (OpenCE, e9746abb). In whole seconds, so that the
+nanoseconds still take only a 32-bit division (a 64-bit one is a library
+call on 32-bit ARM). HALO_TEST_UPTIME_SECONDS (not in release builds) has
+the machine up that much longer, for the tests */
+static void platform_clock_now(struct timespec *now)
+{
+	static long start_seconds = LONG_MIN;
+	long expected = LONG_MIN;
+	long seconds;
+
+	clock_gettime(CLOCK_MONOTONIC, now);
+	seconds = (long)now->tv_sec;
+#ifndef HALO_RELEASE
+	{
+		static long uptime_seconds = -1;
+
+		if (uptime_seconds < 0)
+		{
+			const char *setting = getenv("HALO_TEST_UPTIME_SECONDS");
+
+			uptime_seconds = setting ? strtol(setting, NULL, 10) : 0;
+			if (uptime_seconds < 0)
+				uptime_seconds = 0;
+		}
+		seconds += uptime_seconds;
+	}
+#endif
+	__atomic_compare_exchange_n(&start_seconds, &expected, seconds - 10, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED);
+	now->tv_sec = (time_t)(seconds - __atomic_load_n(&start_seconds, __ATOMIC_RELAXED));
+}
+
 DWORD WINAPI GetTickCount(void)
 {
 	struct timespec now;
 
-	clock_gettime(CLOCK_MONOTONIC, &now);
+	platform_clock_now(&now);
 	return (DWORD)((unsigned long long)now.tv_sec * 1000ULL + (unsigned long)now.tv_nsec / 1000000UL);
 }
 #endif
@@ -697,8 +735,10 @@ BOOL WINAPI QueryPerformanceCounter(LARGE_INTEGER *count)
 #ifdef HALO_VITA
 	count->QuadPart = (LONGLONG)vita_host_time_us();
 	return TRUE;
+#else
+	/* (from when the game started, as GetTickCount) */
+	platform_clock_now(&now);
 #endif
-	clock_gettime(CLOCK_MONOTONIC, &now);
 	/* (a 32-bit division of the nanoseconds: the 64-bit one is a library
 	call on 32-bit ARM, and the game reads the counter thousands of times
 	a frame) */
