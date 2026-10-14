@@ -1522,6 +1522,16 @@ static void network_game_client_crossplay_map_refusal_show(
 	part, never the host's text as it is) */
 	if (kind == _crossplay_map_kind_invalid)
 		crossplay_map_name_printable(map->name, (long)sizeof(map->name), file);
+	/* (a Custom Edition map named for its hash, OpenCE's since its version
+	27: named by the file a player knows, <name>.map, which plays when it is
+	the host's version, as the host's <name>_<digits>.map does) */
+	if (kind == _crossplay_map_kind_custom_edition)
+	{
+		char base[CROSSPLAY_MAP_FILE_BYTES];
+
+		if (crossplay_map_name_hashed(file, base, NULL))
+			csstrncpy(file, base, sizeof(file) - 1);
+	}
 	title = custom_edition_maps_level_title(file);
 	message[0] = 0;
 	switch (verdict)

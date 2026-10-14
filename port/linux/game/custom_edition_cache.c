@@ -39,6 +39,7 @@ read.
 #include "custom_edition_maps.h"
 #include "crossplay_maps.h"
 #include "map_share_protocol.h"
+#include "network_wire.h"
 #include "tag_schema.h"
 #include "../src/lang.h"
 #ifdef HALO_RELOCATABLE_TAG_CACHE
@@ -642,14 +643,13 @@ static boolean file_path_exists(
 	return file_exists(file_reference_create_from_path(&reference, path, FALSE));
 }
 
-/* the file that holds the map `map_name` names: <maps>\<name>.map, or the
-OpenSauce <maps>\<name>.yelo when there is no .map */
-static boolean custom_edition_map_path(
-	char const *map_name,
+/* <maps>\<name>.map, or the OpenSauce <maps>\<name>.yelo when there is no
+.map, in `path`: whether it is there */
+static boolean maps_folder_map_path(
+	char const *name,
 	char *path)
 {
 	char const *directory = cache_files_map_directory();
-	char const *name = tag_name_strip_path(map_name);
 
 	if (strlen(directory) + strlen(name) + strlen(OPENSAUCE_MAP_FILE_EXTENSION) >= MAP_PATH_SIZE)
 	{
@@ -662,6 +662,144 @@ static boolean custom_edition_map_path(
 	}
 
 	return file_path_exists(path);
+}
+
+/* (crossplay) the hashes of the map files a PC host's hashed names were
+looked for in (custom_edition_map_hash_matches), by path and size: a map is
+read whole for its hash, and the join and the load look for its name again
+and again. The Vita reads a 50 MB map in a few seconds; it is read once. */
+enum
+{
+	REMEMBERED_HASHES = 4,
+};
+static struct
+{
+	char path[MAP_PATH_SIZE];
+	uint32_t size;
+	boolean read;
+	unsigned long prefix;
+} remembered_hashes[REMEMBERED_HASHES];
+static short next_remembered_hash;
+static volatile int remembered_hashes_lock;
+
+/* whether the map file at `path` has a hash (crossplay_map_file_hash, as
+OpenCE names its maps by) whose first digits are `prefix`; FALSE too when
+it cannot be read whole */
+static boolean custom_edition_map_hash_matches(
+	char const *path,
+	unsigned long prefix)
+{
+	struct custom_edition_file file;
+	unsigned char hash[CROSSPLAY_MAP_HASH_BYTES];
+	byte buffer[IDENTITY_READ_BYTES];
+	unsigned long started;
+	boolean read = FALSE;
+	unsigned long found = 0;
+	short index;
+
+	if (strlen(path) >= MAP_PATH_SIZE || !custom_edition_file_open(&file, path))
+	{
+		return FALSE;
+	}
+	while (__atomic_exchange_n(&remembered_hashes_lock, 1, __ATOMIC_ACQUIRE))
+	{
+	}
+	for (index = 0; index < REMEMBERED_HASHES; index++)
+	{
+		if (remembered_hashes[index].path[0] && remembered_hashes[index].size == file.source.size &&
+			!strcmp(remembered_hashes[index].path, path))
+		{
+			read = remembered_hashes[index].read;
+			found = remembered_hashes[index].prefix;
+			break;
+		}
+	}
+	__atomic_store_n(&remembered_hashes_lock, 0, __ATOMIC_RELEASE);
+	if (index < REMEMBERED_HASHES)
+	{
+		custom_edition_file_close(&file);
+		return read && found == (prefix & 0xFFFFFFFFUL);
+	}
+	started = system_milliseconds();
+	read = crossplay_map_file_hash(file.source.read, file.source.context, file.source.size, buffer, sizeof(buffer), hash);
+	custom_edition_file_close(&file);
+	found = read ? crossplay_map_hash_prefix(hash) : 0;
+	error(_error_silent, "crossplay: %s hashed: %s%08lx, %lu bytes in %lu ms", path, read ? "" : "unread, ", found,
+		(unsigned long)file.source.size, system_milliseconds() - started);
+	while (__atomic_exchange_n(&remembered_hashes_lock, 1, __ATOMIC_ACQUIRE))
+	{
+	}
+	index = next_remembered_hash;
+	next_remembered_hash = (short)((next_remembered_hash + 1) % REMEMBERED_HASHES);
+	csstrncpy(remembered_hashes[index].path, path, MAP_PATH_SIZE - 1);
+	remembered_hashes[index].path[MAP_PATH_SIZE - 1] = 0;
+	remembered_hashes[index].size = file.source.size;
+	remembered_hashes[index].read = read;
+	remembered_hashes[index].prefix = found;
+	__atomic_store_n(&remembered_hashes_lock, 0, __ATOMIC_RELEASE);
+
+	return read && found == (prefix & 0xFFFFFFFFUL);
+}
+
+/* (crossplay) the base name and digits of a PC host's Custom Edition map
+named for its hash (custom_maps\<base>_<8 hex digits>, OpenCE's since its
+network version 27: crossplay_maps.h), held to the crossplay check's rules
+(crossplay_map_name_parse); FALSE for any other name, and on the legacy
+wire, whose names have no hash */
+static boolean custom_edition_hashed_name(
+	char const *name,
+	char base[CROSSPLAY_MAP_FILE_BYTES],
+	unsigned long *prefix)
+{
+	char level_name[CROSSPLAY_MAP_MAXIMUM_NAME_LENGTH + 1];
+	char file[CROSSPLAY_MAP_FILE_BYTES];
+
+	if (!network_wire_crossplay() ||
+		strlen(CROSSPLAY_MAP_CUSTOM_EDITION_PREFIX) + strlen(name) >= sizeof(level_name))
+	{
+		return FALSE;
+	}
+	sprintf(level_name, "%s%s", CROSSPLAY_MAP_CUSTOM_EDITION_PREFIX, name);
+
+	return crossplay_map_name_parse(level_name, (long)sizeof(level_name), file) == _crossplay_map_kind_custom_edition &&
+		crossplay_map_name_hashed(file, base, prefix);
+}
+
+/* the file that holds the map `map_name` names: <maps>\<name>.map, or the
+OpenSauce <maps>\<name>.yelo when there is no .map. With crossplay on, a
+PC host's map named for its hash that this machine has by its base name
+(<maps>\<base>.map, as a player copies a map from Halo PC): that file, when
+it is a Custom Edition map whose hash begins with the name's digits, as
+ChupathingyCE plays one (a8cb4905, CC0); never another version */
+static boolean custom_edition_map_path(
+	char const *map_name,
+	char *path)
+{
+	char const *name = tag_name_strip_path(map_name);
+	char base[CROSSPLAY_MAP_FILE_BYTES];
+	unsigned long prefix;
+	struct custom_edition_file file;
+	struct cache_file_identity identity;
+	boolean custom_edition = FALSE;
+
+	if (maps_folder_map_path(name, path))
+	{
+		return TRUE;
+	}
+	if (!custom_edition_hashed_name(name, base, &prefix) || !maps_folder_map_path(base, path))
+	{
+		return FALSE;
+	}
+	/* (only a Custom Edition map is hashed: an Xbox map of that name is not
+	the host's, and is not read whole to say so) */
+	if (custom_edition_file_open(&file, path))
+	{
+		custom_edition = cache_file_identify(&file.source, &identity) == _cache_file_status_ok &&
+			identity.format == _cache_file_format_custom_edition_cache;
+		custom_edition_file_close(&file);
+	}
+
+	return custom_edition && custom_edition_map_hash_matches(path, prefix);
 }
 
 /* A cache's resource map of `type`: <maps>\bitmaps.map and so on, or for an
@@ -1517,11 +1655,22 @@ void custom_edition_cache_crossplay_facts(
 	struct custom_edition_file file;
 	struct cache_file_identity identity;
 	enum cache_file_status status;
+	char base[CROSSPLAY_MAP_FILE_BYTES];
+	unsigned long prefix = 0;
+	boolean hashed;
 
 	csmemset(local, 0, sizeof(*local));
 	local->file = _crossplay_map_file_absent;
 	local->pc_maps_on = halo_custom_edition_enabled();
-	if (!file_name || !file_name[0] || !custom_edition_map_path(file_name, path))
+	if (!file_name || !file_name[0])
+	{
+		return;
+	}
+	/* (a hashed name, crossplay_maps.h: <name>_<digits>.map, else
+	<name>.map, whichever version it is, said as what it is; its hash is
+	compared below) */
+	hashed = custom_edition_hashed_name(file_name, base, &prefix);
+	if (!custom_edition_map_path(file_name, path) && (!hashed || !maps_folder_map_path(base, path)))
 	{
 		return;
 	}
@@ -1538,6 +1687,9 @@ void custom_edition_cache_crossplay_facts(
 		local->file = _crossplay_map_file_custom_edition;
 		/* (the header's checksum as it is: OpenCE's custom_edition_map_checksum) */
 		local->checksum = identity.checksum;
+		/* (the file found for a hashed name, whichever its name: its hash
+		begins with the name's digits, or it is another version) */
+		local->hash_mismatch = hashed && !custom_edition_map_hash_matches(path, prefix);
 	}
 	else if (status == _cache_file_status_ok && identity.format == _cache_file_format_xbox_cache)
 	{
