@@ -151,7 +151,15 @@ void object_list_add(
 	long object_list_index,
 	long object_index)
 {
-	struct object_list_header_datum *list = object_list_header_get(object_list_index);
+	struct object_list_header_datum *list;
+
+	/* port: no list (object_list_new found none free): the objects are
+	not listed, as when the listed objects run out, rather than the game
+	halting */
+	if (object_list_index == NONE)
+		return;
+
+	list = object_list_header_get(object_list_index);
 	reference_list_add(object_list_data, &list->first_reference_index, object_index);
 	list->count++;
 
