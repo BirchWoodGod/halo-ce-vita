@@ -78,7 +78,7 @@ processor, and its Direct3D rendering is translated to the Vita's GPU.
 
 | | |
 | --- | --- |
-| 🌐 **Online play** | The PC version's multiplayer menus (from OpenCE): a server browser of public games, **Join by code**, and Create Game with lobby name, max players, public or private and a password. Needs the [Halo PC files](#halo-pc-files). With **Crossplay** on (Multiplayer tab) the Vita joins PC games instead: hosts and servers running current OpenCE or ChupathingyCE (network version 28). |
+| 🌐 **Online play** | The PC version's multiplayer menus (from OpenCE): a server browser of public games, **Join by code**, and Create Game with lobby name, max players, public or private and a password. Needs the [Halo PC files](#halo-pc-files). With **Crossplay** on (Multiplayer tab) the Vita joins PC games instead: hosts and servers running current OpenCE or ChupathingyCE (network version 29: OpenCE build-206, ChupathingyCE 0.7.5b and later). |
 | 🖥️ **Dedicated servers** | Official US servers in the server browser (Slayer, Big Team, Oddball, King of the Hill), and [your own](#dedicated-servers) on a Linux PC or a Raspberry Pi. |
 | 📶 **Ad hoc** | Vitas side by side with no router, next to **Same Wi-Fi** (system link). |
 | 🤝 **[Co-op campaign](#co-op-campaign)** | **Two** Vitas, or three or four (experimental), Private or Public. |

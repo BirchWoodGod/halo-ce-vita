@@ -9,11 +9,11 @@ ChupathingyCE 8cb79900 (0.7.2e, network version 26, accepts 11 to 30) and
 DamnationCE 7be58b2b (0.3.40, network version 26, accepts 26 only).
 Target: 1.1.0-beta.5 for the first phase.
 
-**Update, Oct 13 2026: the crossplay wire is network version 28** (section
-10.5): OpenCE b1ef7f7e (build-201 and later) and ChupathingyCE 35fc7e8b
-(0.7.4e and later) announce it. The Vita joins exactly 28; hosts of 26 and
-27 (DamnationCE 7be58b2b among them) are refused with a message saying the
-host runs an older version.
+**Update, Oct 14 2026: the crossplay wire is network version 29** (section
+10.6): OpenCE 8102e711 (build-206 and later) and ChupathingyCE 7d6d8f24
+(0.7.5b; 29 since 0.7.5a) announce it. The Vita joins exactly 29; hosts of
+26 to 28 (DamnationCE 7be58b2b among them) are refused with a message
+saying the host runs an older version. (Oct 13 it became 28: section 10.5.)
 
 Note on the brief: since it was written, OpenCE moved to **network version 26**
 ("Internet play with browsers", 6dc423fd, Oct 11). ChupathingyCE (PR #187) and
@@ -336,7 +336,7 @@ commit and in NETCODE.md.
 | Wire | Spoken with | Announced as |
 |---|---|---|
 | **Legacy Vita wire, "v18"** | betas 1–4 | Exactly today's: hcev topics, listing format 2, 13,092-byte record, Vita token XOR, flags 0x02/0x04 |
-| **Crossplay wire** | everyone else | OpenCE's: hceu, format 1, 13,120-byte record, constant token, the version the table says to announce (28 since Oct 13: section 10.5) |
+| **Crossplay wire** | everyone else | OpenCE's: hceu, format 1, 13,120-byte record, constant token, the version the table says to announce (29 since Oct 14: section 10.6) |
 
 **Hosts** speak one wire per game, chosen by the crossplay setting:
 - off: legacy;
@@ -370,8 +370,9 @@ crossplay wire (section 8), and the "19" number is never released.
 
 ### 5.2 The signed crossplay table (phase 2, used by servers from phase 1)
 
-**Floor.** The table is built in as the floor: announce 28, accept 28..28 for
-the crossplay wire (26..26 until Oct 13: section 10.5).
+**Floor.** The table is built in as the floor: announce 29, accept 29..29 for
+the crossplay wire (26..26 until Oct 13, 28..28 until Oct 14: sections 10.5,
+10.6).
 
 **Fetch:**
 - From `https://raw.githubusercontent.com/<our repo>/crossplay-table/crossplay.json`
@@ -460,8 +461,7 @@ since network version 22 (`port/linux/game/crossplay_maps.c`,
 |---|---|---|
 | `levels\test\<n>\<n>` (a multiplayer level) | 0 | its `<n>.map` is the Xbox map, whole (NTSC 2276 or PAL 2342) |
 | another level path (a modded Xbox map) | 0 | its `<n>.map` is an Xbox multiplayer cache |
-| `custom_maps\<n>` (a CE map) | raw CE header checksum (0: nothing compared) | its `<n>.map`/`.yelo` is a CE cache with that checksum, its resource maps are there and PC maps is on |
-| `custom_maps\<n>_<8 hex>` (a CE map named for its hash, OpenCE v27+: section 10.5) | raw CE header checksum | its `<n>_<8 hex>.map` or else its `<n>.map` is a CE cache with that checksum **and** a file hash beginning with those digits, its resource maps are there and PC maps is on |
+| `custom_maps\<n>` (a CE map) | since v29 (section 10.6): its version, the first 32 bits of the map file's hash (never 0; 0: nothing compared) | its `<n>.map`, or else its `<n>_<8 hex digits of the version>.map`, is a CE cache of that version, its resource maps are there and PC maps is on. (22 to 28 sent the raw header checksum; 27 and 28 a hashed name: section 10.5) |
 | `maps_md\<n>.md`, `maps_pc\<n>.pc` (ChupathingyCE's HaloMD and Halo PC retail, cache v7) | checksum | never |
 | one of the game's own maps with a version, or a name refused | | never |
 
@@ -934,7 +934,7 @@ wire choice and no Vita host on the crossplay wire.
   run (the panel's Crossplay row now applies after a restart). Ad hoc and
   the dedicated server are always legacy. The crossplay wire speaks 26 and
   joins the versions of a compiled-in list (26 alone) until T10's table
-  (28 alone since Oct 13: section 10.5).
+  (28 alone since Oct 13, 29 alone since Oct 14: sections 10.5, 10.6).
 - **Off** changes no byte: the legacy wire's topics, message version 3,
   relays, listing format 2, token XOR, flags and the 13,092-byte record are
   as before, and the four OpenCE behaviour fixes ported in c4835524
@@ -1067,6 +1067,9 @@ Vita's frame rate in a PC co-op game (owner-run).
 
 ### 10.5 Network version 28 (Oct 13 2026)
 
+(Superseded by 10.6 the next day for the version and the map names: the
+rules ported here stay.)
+
 Branch feat/xp-v28. Current OpenCE and ChupathingyCE hosts announce 28; our
 client joined only 26, so it could join none of them.
 
@@ -1161,6 +1164,62 @@ OpenCE b1ef7f7e, ChupathingyCE 35fc7e8b, and for the refusals OpenCE
 against a PC host on hardware); a sky-cycling multiplayer map (none in the
 test data: the rule is OpenCE's and ChupathingyCE's line for line); a PC
 player downloading a map from the host while our client is in its game.
+
+### 10.6 Network version 29 (Oct 14 2026)
+
+Branch feat/xp-v29. OpenCE released build-206 (8102e711) and ChupathingyCE
+0.7.5b (7d6d8f24), both announcing 29; our 28 client refused them all.
+
+**What changed between 28 and 29** (OpenCE b1ef7f7e..8102e711, 5 commits,
+and ChupathingyCE 35fc7e8b..7d6d8f24, 50 commits, read in full) [V]:
+
+| Upstream | What | Wire or simulation? | Here |
+|---|---|---|---|
+| OpenCE 3e0ba551 (29; Chupa a501871f) | a Custom Edition map's level name is its own again (`custom_maps\hugeass`) and the record's map version is the first 32 bits of the map file's hash (0 made 1), where 22-28 sent the header checksum and 27-28 a hashed name; maps are no longer renamed, a download beside another version is saved `<name>_<8 hex>.map` | wire: what the level name and map version mean | ported (below) |
+| OpenCE 52e33a39, 6d64abdb | map sharing and Custom Edition loading hardened (tag names in tag data, lightmap vertices, game globals without camera/player/first-person blocks refused, snprintf for long tag names), p2p virtual addresses not reused across machines | local | not ported here (our loader has its own validation; a candidate for later) |
+| OpenCE 37ded328 | harness tests for clang 23 | none | |
+| Chupa 33f2e7e9, a122e2d2 | Delta: its own hosts advertise a wire id; a presumed-additive next number | Chupa's own extension (reserved bytes after OpenCE's) | nothing: our client reads OpenCE's version and flags only |
+| Chupa 92aaf638 | co-op: a client gives an AI unit a grenade type from the host's inventory, so its throws are seen | client-local display | not ported (co-op only, not wire; a later candidate) |
+| Chupa 2e7c88b5, abc42998, 0cbcac04, fd9c9183 and the rest | co-op respawns, checkpoint timing (the host's), field of view and match timer, HUD sound, menus, Android, settings | host-side or local | nothing |
+
+No simulation rule changed: 29 keeps 28's (`network_wire_v28_rules`).
+
+**The decision: exactly 29.** A 28 and a 29 machine read the same record
+as different maps (a hashed name and a checksum against a plain name and a
+hash version), so a 28 host is refused like 26 and 27, with the
+older-version message. ChupathingyCE's client takes both meanings; we keep
+one meaning and one test matrix on release day.
+
+**Map identity** (`crossplay_maps.c`, `custom_edition_cache.c`). The name is
+held to the same rules as before (at most 25 characters, map sharing's file
+name rules, no device or resource map name, no separator, drive or `..`);
+a name ending in what looks like a hash is just a name. With the host's
+version (nonzero) our client takes `<name>.map`, else
+`<name>_<8 lowercase hex digits of the version>.map`, whichever is a Custom
+Edition cache whose hash is that version; another version is never played
+in its place. The cache loader asks the client's game record for the
+version of the level it loads (`network_game_client_crossplay_map_version`),
+so a player with both versions loads the host's. With version 0 (a host that
+could not hash its map) `<name>.map` plays, nothing compared, as OpenCE's
+clients do. A file that is another version is refused as such; none, by
+name. Hashes are cached per file for the run (x86: 46 MB in about 120 ms;
+measure on hardware).
+
+**Tests** (OpenCE 8102e711, ChupathingyCE 7d6d8f24 from build_pc_crossplay.sh;
+`crossold` against the 28 builds of 10.5):
+
+| Test | Result |
+|---|---|
+| network_wire_test (on, off, ad hoc, release, dedicated), p2p_lobby, lang | PASS: 29 joined; 26, 27, 28, 30, 31 refused |
+| wire contract against OpenCE 8102e711 | PASS: baseline S1-S4, S6, S7, L1/L2; G15 announces 29 |
+| crossplay_maps_test (ASan, UBSan), fuzz crossplay_maps (60 s) | PASS: versions (0 as 1), another version's file name, the hash against hashlib and a real map (pcgulch: version `69cd51eb`) |
+| run_crossplay_maps_test.sh, stand-in host | PASS: stock, ce, cemissing, cediffer, cexbox, cever, cebeside, ceverwrong (the first cever run found the lobby precaching before the record held the version: fixed, 1e12bb2c) |
+| `run_netns_crossplay_test.sh all` | PASS: pcself, chupaopence, opencelan, opencehost, crosstls, chupahost, chupaserver, crossctf, crossmaps, crossmixed, crossrefuse, crossbig, crosscoop, crossold; SKIP damnserver (DamnationCE 7be58b2b is 26; its co-op game left out of crosscoop) and crossversion (T10) |
+| crossmaps detail | the OpenCE host named `custom_maps\pcgulch (copy 0x69CD51EB)`; our client found `pcgulch.map`, only `pcgulch_69cd51eb.map`, and `pcgulch_69cd51eb.map` beside another version's `pcgulch.map`, each of version `69cd51eb`; another version and none refused by name |
+| crossold detail | OpenCE b1ef7f7e and ChupathingyCE 35fc7e8b (28) on a LAN refused with the older-version message; over the internet dropped for their version, never listed |
+| Crossplay off: `code`, `lan`, `coop`, `dedicated` | PASS |
+| a10, b30 150 s threaded single player | exit 0, no assertion |
+| Vita release build (`--lto off --pgo off --portable --release`, `ninja vita`) | compiles: eboot.bin, halo.vpk (93c3dedd) |
 
 ---
 
