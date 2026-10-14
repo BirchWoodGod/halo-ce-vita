@@ -858,10 +858,14 @@ static char blip_type_get(
 	units out of vehicles and players' units away: the owner looked up
 	once (a second lookup could find no player after the first found
 	one), and the vehicle's gunner and driver read once and checked (read
-	again after the check, unit_get(NONE) crashed as one got out) */
-	controlling_local_player_index = owner_player_index == NONE
-		? NONE
-		: player_get(owner_player_index)->local_player_index;
+	again after the check, unit_get(NONE) crashed as one got out); a unit
+	whose player is gone (his slot taken by another,
+	network_game_player_forget) is no local player's */
+	{
+		struct player_datum *owner = owner_player_index == NONE ? NULL : player_try_and_get(owner_player_index);
+
+		controlling_local_player_index = owner ? owner->local_player_index : NONE;
+	}
 #else
 	controlling_local_player_index = owner_player_index == NONE
 		? NONE
