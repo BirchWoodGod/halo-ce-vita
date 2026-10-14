@@ -151,9 +151,13 @@
 #   crossctf    Capture the Flag (the network test's ctf variant: every game
 #               above is Slayer's, the host never reaching its second game):
 #               an OpenCE and a ChupathingyCE host on LANs of their own, our
-#               client joining each; every step but the score and the game's
-#               end (kills do not score in CTF), the flags' objects on both
-#               sides. Control: an OpenCE client
+#               client joining each and playing the game to its end with the
+#               flags' objects on both sides: discover, version, join,
+#               settings, play, kills, the end of the game, stability, and the
+#               scoreboard at the end the same on both (the network test's CTF
+#               game ends within seconds, before its kills could score or the
+#               spawn, damage and rejoin steps have time). Control: an OpenCE
+#               client
 #   crossold    an older PC host (network version 26: OpenCE 6399ed9d,
 #               ChupathingyCE 8cb79900, XPPC_OLD_BUILDS's opence/ and
 #               chupa/) since the crossplay wire joins 28 alone (OpenCE
@@ -1360,8 +1364,9 @@ crosscoopfuzz)
 	done
 	;;
 crossctf)
-	# Capture the Flag on PC hosts: every step but the score and the game's
-	# end, which kills do not make in CTF
+	# Capture the Flag on PC hosts, to the game's end (seconds long in the
+	# network test: no time for the spawn, damage and rejoin steps, and its
+	# kills do not score), the scoreboard at the end the same on both
 	control ctf-opence-opence && host_variants=ctf pair ctf-opence-opence lan opence opence
 	host_variants=ctf pair ctf-opence-ours lan opence ours
 	host_variants=ctf pair ctf-chupa-ours lan chupa ours
@@ -1371,15 +1376,22 @@ crossctf)
 		failed=$(python3 -I - "$out/$name/check.json" <<'EOF'
 import json, sys
 steps = json.load(open(sys.argv[1]))["steps"]
-print(" ".join(s for s in ("discover", "signal", "version", "join", "settings", "play", "spawn", "kills",
-    "client_damage", "rejoin", "stability") if not steps.get(s, {}).get("pass")))
+import re
+failed = [s for s in ("discover", "signal", "version", "join", "settings", "play", "kills", "end_of_game",
+    "stability") if not steps.get(s, {}).get("pass")]
+# (the score step's scoreboards: host's and client's alike, whoever won)
+boards = re.findall(r"(host|client) (\{[^}]*\})", steps.get("score", {}).get("detail", ""))
+if len(boards) < 2 or len({b for _, b in boards}) != 1:
+    failed.append("scoreboard")
+print(" ".join(failed))
 EOF
 )
-		echo "--- $name: ${failed:+failed: $failed}${failed:-every step but score and end of game passed}"
-		grep -aE "^  $name (play|kills|client_damage|stability):" "$out/$name/check.txt" | sed 's/^/  /'
+		echo "--- $name: ${failed:+failed: $failed}${failed:-played to the end, the scoreboards alike}"
+		grep -aE "^  $name (play|kills|score|end_of_game|stability):" "$out/$name/check.txt" | sed 's/^/  /'
 		case " $control_names " in
 		*" $name "*) [ -z "$failed" ] || { controls_ok=0; echo "BROKEN ($mode): the control $name failed: $failed"; } ;;
-		*) our_results="$our_results $name:${failed:+$(echo "$failed" | tr ' ' ',')}${failed:-pass}" ;;
+		*) [ -n "$failed" ] && our_results="$our_results $name:$(echo "$failed" | tr ' ' ',')" ||
+			our_results="$our_results $name:pass" ;;
 		esac
 	done
 	;;
