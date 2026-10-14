@@ -2033,7 +2033,12 @@ static void object_delete_initial_recursive(
 	struct object_header_datum *header = object_header_get(object_index);
 	struct object_datum *object = object_get(object_index);
 
-	if (game_engine_running() && object->object.type == _object_type_weapon)
+	/* port: a client of the distributed netcode deletes the host's objects
+	on the host's word, a flag the host returns or resets included, so a
+	client's flag deletion is no bug (ChupathingyCE 2ec77029, CC0: it halted
+	debug builds in CTF games online; release builds check nothing) */
+	if (game_engine_running() && object->object.type == _object_type_weapon &&
+		!network_game_distributed_client())
 	{
 		match_assert("c:\\halo\\SOURCE\\objects\\objects.c", 829, !(weapon_is_flag(object_index)));
 	}
