@@ -9,8 +9,8 @@ Off as shipped.
   it: Vitas play only Vitas (halo_port_limits.h), hcev signalling (message
   version 3, relays after the addresses), listing format 2, the Vita join
   token, the 13,092-byte settings record, and the betas' simulation.
-- On: OpenCE's wire as at the pinned OpenCE b1ef7f7e (network version 28,
-  as ChupathingyCE 35fc7e8b announces it):
+- On: OpenCE's wire as at the pinned OpenCE 8102e711 (build-206, network
+  version 29, as ChupathingyCE 7d6d8f24 (0.7.5b) announces it):
   hceu signalling (message version 4, a WebRTC block of kind none, no
   relays), listing format 1, OpenCE's advertisement flags (0x02 a game in
   progress), its constant join token, its 13,120-byte record and the
@@ -32,14 +32,18 @@ Not 26 or 27 beside it: 28 plays a script's switch_bsp, the flashlight and
 dynamic lights and a second weapon picked up while firing otherwise than
 they do, with no message changed to tell, so a client of one with a host of
 the other plays on wrong rather than being refused (docs/crossplay.md 5.1).
+Not 28 either: 29 names a Custom Edition map and says which version it is
+otherwise (the map's own name, and its hash's first 32 bits as the record's
+map version, where 28 sent a hashed name and the header checksum), so the
+same record means another map to each (crossplay_maps.h).
 */
 
 #ifndef __NETWORK_WIRE_H
 #define __NETWORK_WIRE_H
 
-/* the crossplay wire's network version: OpenCE's at b1ef7f7e (build-201
-and after), ChupathingyCE's since 6f5064f6 (0.7.4e) */
-#define HALO_PORT_CROSSPLAY_NETWORK_VERSION 28
+/* the crossplay wire's network version: OpenCE's at 8102e711 (build-206
+and after), ChupathingyCE's since a501871f (0.7.5a) */
+#define HALO_PORT_CROSSPLAY_NETWORK_VERSION 29
 
 /* nonzero on the crossplay wire */
 int network_wire_crossplay(void);
@@ -47,11 +51,11 @@ int network_wire_crossplay(void);
 (18), or HALO_PORT_CROSSPLAY_NETWORK_VERSION */
 unsigned int network_wire_version(void);
 /* whether a host announcing the version can be joined on this machine's
-wire: legacy, exactly 18; crossplay, the accepted list (28) */
+wire: legacy, exactly 18; crossplay, the accepted list (29) */
 int network_wire_version_accepted(unsigned int version);
 /* nonzero when this machine plays network version 28's rules (OpenCE
-5a7c655a, build-201; ChupathingyCE 6f5064f6): the crossplay wire, whose
-hosts are all of 28 (network_wire_version_accepted). They change no
+5a7c655a, build-201; ChupathingyCE 6f5064f6), which 29 keeps: the
+crossplay wire, whose hosts are all of 29 (network_wire_version_accepted). They change no
 message, so every machine of a game must agree on them: a script's
 switch_bsp keeps a multiplayer game's first BSP (hs.c), dynamic lights and
 the flashlight stay on past the Xbox's player and vehicle limits

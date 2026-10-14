@@ -4,8 +4,9 @@ NETWORK_WIRE_TEST.C
 The network wire switch (port/linux/src/network_wire.c, docs/crossplay.md
 T4): network.crossplay read once and kept for the run (a change takes a
 restart); Off, the legacy Vita wire (network version 18, hosting allowed);
-On, the crossplay wire (OpenCE's version 28 joined, nothing else: not 26 or
-27, whose hosts play a few things otherwise with no message to tell; hosting
+On, the crossplay wire (OpenCE's version 29 joined, nothing else: not 26 or
+27, whose hosts play a few things otherwise with no message to tell, nor 28,
+whose hosts name a Custom Edition map's version otherwise; hosting
 refused, with the player told to turn Crossplay off); ad hoc play always on
 the legacy wire; the dedicated server (HALO_DEDICATED_SERVER) never on the
 crossplay wire. Built by run_network_wire_test.sh, once for each case
@@ -66,15 +67,16 @@ int main(int argc, char **argv)
 	if (!strcmp(which, "on"))
 	{
 		check(network_wire_crossplay(), "Crossplay on: the crossplay wire");
-		check(network_wire_version() == 28, "it speaks OpenCE's network version 28");
-		check(network_wire_version_accepted(28), "it joins a host of version 28");
+		check(network_wire_version() == 29, "it speaks OpenCE's network version 29");
+		check(network_wire_version_accepted(29), "it joins a host of version 29");
 		check(network_wire_v28_rules(), "and plays version 28's rules (switch_bsp, lights, a second weapon)");
-		check(!network_wire_version_accepted(26) && !network_wire_version_accepted(27),
-			"not an older PC host of version 26 or 27 (played otherwise, no message to tell)");
+		check(!network_wire_version_accepted(26) && !network_wire_version_accepted(27) &&
+			!network_wire_version_accepted(28),
+			"not an older PC host of version 26, 27 or 28 (played or maps named otherwise, no message to tell)");
 		check(!network_wire_version_accepted(18) && !network_wire_version_accepted(25) &&
-			!network_wire_version_accepted(29) && !network_wire_version_accepted(30) &&
+			!network_wire_version_accepted(30) && !network_wire_version_accepted(31) &&
 			!network_wire_version_accepted(0) && !network_wire_version_accepted(0xFFFF),
-			"and of no other version (18, 25, 29, 30, 0, 65535)");
+			"and of no other version (18, 25, 30, 31, 0, 65535)");
 		check(network_wire_hosting_refused(&why) && why && strstr(why, "turn Crossplay off"),
 			"hosting refused, the player told to turn Crossplay off");
 		setenv("HALO_TEST_CROSSPLAY_HOST", "1", 1);
@@ -104,7 +106,7 @@ int main(int argc, char **argv)
 			"it speaks network version 18, as betas 1-4");
 		check(!network_wire_v28_rules(), "and plays the betas' rules, not version 28's");
 		check(network_wire_version_accepted(18) && !network_wire_version_accepted(26) &&
-			!network_wire_version_accepted(28) && !network_wire_version_accepted(19) &&
+			!network_wire_version_accepted(29) && !network_wire_version_accepted(19) &&
 			!network_wire_version_accepted(17),
 			"it joins a host of version 18 only");
 		why = NULL;
