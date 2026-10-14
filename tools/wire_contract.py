@@ -49,8 +49,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 TESTS = ROOT / "port/vita/tests"
 
-# the pinned upstream (docs/crossplay.md: OpenCE 6399ed9d, network version 26)
-OPENCE_COMMIT = "6399ed9d"
+# the pinned upstream (docs/crossplay.md: OpenCE b1ef7f7e, network version 28;
+# ChupathingyCE 35fc7e8b announces the same)
+OPENCE_COMMIT = "b1ef7f7e"
 # the tree the legacy Vita wire was released from: next-1.1 as 1.1.0-beta.4
 # was built (network version 18)
 LEGACY_COMMIT = "50ae7395"
@@ -232,7 +233,7 @@ def macros(text, pattern):
 
 ENUM_SOURCES = {
 	"messages": ("source/networking/network_messages.h", r"_message_\w+"),
-	"distributed": ("port/linux/game/network_distributed.h", r"_distributed_message_\w+"),
+	"distributed": ("port/linux/game/network_distributed.h", r"(_distributed_message_\w+|NUMBER_OF_DISTRIBUTED_MESSAGES)"),
 	"options": ("source/game/game_engine.h",
 		r"(_friendly_fire_\w+|_radar_players_\w+|_loadout_\w+|_variant_vehicle_\w+|VARIANT_VEHICLE_SET_\w+|"
 		r"MAXIMUM_VARIANT_VEHICLE_COUNT|NUMBER_OF_(FRIENDLY_FIRE_MODES|RADAR_PLAYERS|LOADOUTS|LOADOUT_WEAPONS|"
@@ -505,7 +506,9 @@ def run(arguments):
 			" (gated by the capability handshake: T6)")) if extra else "no messages past upstream's")
 
 	# --- distributed kinds
-	ours_kinds, their_kinds = ov.get("distributed", {}), tv.get("distributed", {})
+	ours_kinds, their_kinds = dict(ov.get("distributed", {})), dict(tv.get("distributed", {}))
+	our_kind_count = ours_kinds.pop("NUMBER_OF_DISTRIBUTED_MESSAGES", None)
+	their_kinds.pop("NUMBER_OF_DISTRIBUTED_MESSAGES", None)
 	shared = [name for name in their_kinds if name in ours_kinds]
 	different = [f"{name} {ours_kinds[name]} vs {their_kinds[name]}" for name in shared if ours_kinds[name] != their_kinds[name]]
 	report.base("S2 distributed kinds both have: numbers", not different,
@@ -526,6 +529,22 @@ def run(arguments):
 	kinds_gap("G11", voice, {their_kinds.get(n) for n in voice} |
 		{their_kinds.get("_distributed_message_votekick"), their_kinds.get("_distributed_message_votekick_status")})
 
+	# --- S6: upstream's map sharing (its network version 27: kinds 83-86),
+	# which this build does not play: none of ours at those numbers, and all
+	# past our kinds, so the bounds check drops them as unknown, in the lobby
+	# (no game in progress) and in a game alike
+	share = {n: v for n, v in their_kinds.items() if n.startswith("_distributed_message_map_share")}
+	handler = source_function(ours.text("port/linux/game/network_distributed.c"),
+		"void network_distributed_handle_message(")
+	problems = [f"{v} is our {n}" for n, v in ours_kinds.items() if v in share.values()]
+	if our_kind_count is None or any(v < our_kind_count for v in share.values()):
+		problems.append(f"upstream's {sorted(share.values())} not past our {our_kind_count} kinds")
+	if not re.search(r"header\.type\s*>=\s*NUMBER_OF_DISTRIBUTED_MESSAGES", handler) or \
+		not re.search(r"!game_in_progress\(\)", handler):
+		problems.append("network_distributed_handle_message has no bounds or lobby check")
+	report.base("S6 upstream's map sharing kinds dropped here", bool(share) and not problems,
+		"; ".join(problems) or (f"{', '.join(f'{v} {n[21:]}' for n, v in sorted(share.items(), key=lambda i: i[1]))}: "
+			f"past our {our_kind_count} kinds, dropped as unknown" if share else "upstream has none (not v27+?)"))
 	# --- G1, G7, G8: the record
 	problems = []
 	for record in ("network_game", "game_variant_options"):
@@ -700,7 +719,8 @@ def run(arguments):
 		report.gap("G5", "FAIL", f"Vita build: listing formats {formats}, hceu-lobby-1 {'yes' if label else 'no'}")
 
 	# --- the rest
-	report.gap("G6", "MANUAL", "map identity on the wire: T3's own test (netns badmap/mapmid)")
+	report.gap("G6", "MANUAL", "map identity on the wire (custom_maps\\<name>_<8 hex> since v27): T3's own tests "
+		"(run_crossplay_maps_test.sh, netns crossmaps)")
 	p2p = ours.text("port/linux/src/p2p.c")
 	ping_send = source_function(p2p, "inner[0] = _packet_ping_table;")
 	ping_take = source_function(p2p, "ping_table_received(peer, inner + 1")
@@ -715,7 +735,7 @@ def run(arguments):
 def main():
 	parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
 	parser.add_argument("--opence", default=os.environ.get("OPENCE_DIR",
-		str(Path.home() / "halo-test-out/crossplay-D5yr/OpenCE")), help="a clone of OpenCE with OPENCE_COMMIT")
+		str(Path.home() / "halo-test-out/opence-review.wnFA/OpenCE")), help="a clone of OpenCE with OPENCE_COMMIT")
 	parser.add_argument("--work", help="where to build (default: a new folder under TMPDIR, deleted on a pass)")
 	parser.add_argument("--expected-open", help="the gaps not yet closed, comma-separated (default: EXPECTED_OPEN)")
 	parser.add_argument("--keep", action="store_true", help="keep the work folder")

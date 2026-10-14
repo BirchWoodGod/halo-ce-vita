@@ -3,7 +3,7 @@ NETWORK_GAME_RECORD.H
 
 The game settings record (struct network_game, network_game_manager.h) as
 each wire sends it. In memory this build keeps OpenCE's record (its network
-version 26, 13,120 bytes at 128 machines and players): the Xbox game's,
+versions 26 to 28, 13,120 bytes at 128 machines and players): the Xbox game's,
 co-op's switches in the byte the Xbox left as padding (cooperative_flags,
 OpenCE's version 19), and the gametype's PC options before the local data
 (struct game_variant_options, OpenCE's version 11; the PC vehicle set of

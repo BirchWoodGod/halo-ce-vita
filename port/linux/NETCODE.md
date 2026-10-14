@@ -197,8 +197,8 @@ is refused all the same.
 **Two wires, one switch** (`docs/crossplay.md`; `network.crossplay`,
 the Vita's Crossplay row; `port/linux/include/network_wire.h`). Off, the
 default, is the legacy Vita wire above, byte for byte as betas 1-4 speak it.
-On, the machine speaks upstream's wire as of OpenCE 6399ed9d (network
-version 26: its advertisement flags, where 0x02 is a game under way; its
+On, the machine speaks upstream's wire as of OpenCE b1ef7f7e (network
+version 28, as ChupathingyCE 35fc7e8b: its advertisement flags, where 0x02 is a game under way; its
 constant join token; signalling on `hceu` with message version 4 and a
 WebRTC block of kind none; listing format 1 under `hceu-lobby-1`; the
 13,120-byte settings record; upstream's simulation fixes 1f87b4ff,

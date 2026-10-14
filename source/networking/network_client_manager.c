@@ -3709,6 +3709,26 @@ boolean network_game_client_advertised_game_compatible(
 				T("This game is on the Vita-to-Vita network (Crossplay off).\n\n"
 				"Crossplay is on: turn it off (Settings, Multiplayer) and restart to join Vita games."));
 		}
+		/* (port: an older PC host, of a build before OpenCE's build-201 or
+		ChupathingyCE's 0.7.4e (26: DamnationCE's still): its game plays a
+		few things otherwise than ours with no message changed, so it is
+		refused rather than played wrong, network_wire.h) */
+		else if (distributed && theirs < ours)
+		{
+			snprintf(message, sizeof(message),
+				T("This PC game's host runs an older version of OpenCE or ChupathingyCE (network version %u). "
+				"Crossplay joins hosts of network version %u, the current OpenCE and ChupathingyCE.\n\n"
+				"Ask the host to update, or join another game."),
+				theirs, ours);
+		}
+		else if (distributed)
+		{
+			snprintf(message, sizeof(message),
+				T("This PC game's host runs a newer version of OpenCE or ChupathingyCE (network version %u) "
+				"than this game can join (%u).\n\n"
+				"Update the game, or join another game."),
+				theirs, ours);
+		}
 		else
 		{
 			snprintf(message, sizeof(message),
@@ -3718,8 +3738,9 @@ boolean network_game_client_advertised_game_compatible(
 		}
 		if (tell)
 		{
-			network_event("not joining a host of network version %u%s (crossplay: this machine joins %u)", theirs,
-				distributed ? "" : " with the lockstep netcode", ours);
+			network_event("not joining a host of network version %u%s (crossplay: this machine joins %u)%s", theirs,
+				distributed ? "" : " with the lockstep netcode", ours,
+				distributed && theirs < ours ? ": an older PC build" : distributed ? ": a newer PC build" : "");
 			platform_show_message(T("Halo: cannot join this game"), message);
 		}
 		return FALSE;

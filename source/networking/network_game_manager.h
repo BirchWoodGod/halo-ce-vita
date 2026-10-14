@@ -52,7 +52,7 @@ enum
 };
 
 /* The game settings record, as this build keeps it: OpenCE's (its network
-version 26: 13,120 bytes at 128 machines and players). The crossplay wire
+versions 26 to 28: 13,120 bytes at 128 machines and players). The crossplay wire
 sends it as it is; the legacy Vita wire (network version 18, betas 1-4)
 without cooperative_flags and variant_options (13,092 bytes):
 port/linux/game/network_game_record.c translates at the send and the
