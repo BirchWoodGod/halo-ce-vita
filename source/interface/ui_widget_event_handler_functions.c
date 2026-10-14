@@ -3738,6 +3738,89 @@ static boolean multiplayer_profiles_list_initialize(
 	return TRUE;
 }
 
+#ifdef HALO_LINUX
+/* port: whether a widget of a map's may not run an event handler's function
+(OpenCE, 6f0f2992). A widget's handlers name the functions they run by their
+index in the function table, which nothing checks, so a game map's widget (a
+map shared by a host: map_share.c) could run the main menu's functions
+(deleting player and playlist profiles, saving them, running the demos) and
+the port's own (menu_functions.c: hosting, joining a code or a browser's
+server), on its created event too, as its screen opens. The shipped game
+maps' widgets (their pause screens) run none of these: the port's own menus'
+tags (pc_menu_tag, added to ui.map only) may run the port's, and the main
+menu (ui.map, a name no shared map may have) the main menu's. Logged once */
+static boolean ui_widget_function_denied(
+	struct widget_instance *widget,
+	word function_index)
+{
+	extern boolean pc_menu_tag(long tag_index);
+	extern boolean main_menu_is_active(void);
+	static short const main_menu_functions[] =
+	{
+		41, /* mp profile change name */
+		60, /* mp profile save changes */
+		64, 65, 66, 67, /* player profile begin and end editing, change name, save changes */
+		68, 69, 70, 71, /* player profile controller settings */
+		74, 75, 76, 77, 78, 79, 80, /* profile deletion and creation */
+		86, 87, /* the demos */
+	};
+	static boolean logged = FALSE;
+	boolean denied = FALSE;
+	short index;
+
+	if (pc_menu_tag(widget->definition_tag_index))
+		return FALSE;
+	if (function_index >= 256 && function_index < 0x8000)
+	{
+		denied = TRUE;
+	}
+	else if (!main_menu_is_active())
+	{
+		for (index = 0; index < (short)NUMBEROF(main_menu_functions); index++)
+		{
+			if (function_index == (word)main_menu_functions[index])
+				denied = TRUE;
+		}
+	}
+	if (denied && !logged)
+	{
+		logged = TRUE;
+		error(2, "a map's widget may not run event handler function %d; it is skipped",
+			function_index);
+	}
+
+	return denied;
+}
+
+#ifndef HALO_RELEASE
+/* port: (tests: run_menus_test.sh's pause case) HALO_TEST_WIDGET_FUNCTION,
+a function ui_widget_function_denied is asked about the first time a widget
+of the main menu's runs one, and the first time a game map's does: its
+answer logged, the function never run */
+static void ui_widget_function_test(
+	struct widget_instance *widget)
+{
+	extern boolean main_menu_is_active(void);
+	extern void platform_log(char const *format, ...);
+	static long function = -2;
+	static boolean asked[2];
+	short main_menu = main_menu_is_active() ? 1 : 0;
+
+	if (function == -2)
+	{
+		char const *setting = getenv("HALO_TEST_WIDGET_FUNCTION");
+
+		function = setting ? strtol(setting, NULL, 10) : NONE;
+	}
+	if (function < 0 || function >= 0x8000 || asked[main_menu])
+		return;
+	asked[main_menu] = TRUE;
+	platform_log("widgets: function %ld from %s's widget %s", function, main_menu ? "the main menu" : "a game map",
+		ui_widget_function_denied(widget, (word)function) ? "refused" : "allowed");
+}
+#endif
+#endif
+
 boolean ui_widget_event_handler_function_invoke(
 	struct widget_instance *widget,
 	struct event_record *event,
@@ -3750,6 +3833,15 @@ boolean ui_widget_event_handler_function_invoke(
 		widget != NULL && widget_deleted != NULL,
 		"(widget != NULL) && (widget_deleted != NULL)");
 #ifdef HALO_LINUX
+#ifndef HALO_RELEASE
+	ui_widget_function_test(widget);
+#endif
+	/* port: a map's own widgets (not the menus' tags the port adds) may not
+	run what changes the player's files or settings: ui_widget_function_denied
+	(failed, as an invalid function is, so the handler opens and closes no
+	screens after it: OpenCE, 378cb0d4) */
+	if (ui_widget_function_denied(widget, function_index))
+		return FALSE;
 	/* port: the menus' own functions (port/linux/game/menu_functions.c),
 	from PC_MENU_FUNCTION_BASE (halo_menus.h) */
 	if (function_index >= 256 && function_index < 0x8000)
