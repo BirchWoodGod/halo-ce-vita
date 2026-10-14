@@ -142,6 +142,10 @@
 #            the joiner's), both must say "connection problem" in the
 #            blackout and recover after it, and the game play on
 #   lan      online off, both copies on one LAN (system link over Wi-Fi)
+#   uptime   lan, both machines up for 25 days (HALO_TEST_UPTIME_SECONDS,
+#            test builds only: 2^31 ms of a machine's uptime overflowed the
+#            game's signed times, and a host timed out its own player after
+#            about 15 s; xbox_kernel.c's clocks count from the game's start)
 #   spooflan lan, and a machine on the LAN sends datagrams as from each
 #            copy (its address: a LAN's datagrams are known by it alone) to
 #            the other, from HALO_TEST_SPOOF_AT seconds (60) after the
@@ -462,6 +466,8 @@ if [ "$mode" = coopstarts ]; then
 		HALO_PARTICLE_RENDER_DIVISOR=4 HALO_SOUND_MANAGER_DIVISOR=2 HALO_PARTICLE_BUDGET=reduced HALO_MODEL_LOD_SCALE=0.75
 		HALO_MIN_OBJECT_PIXELS=8 HALO_INTERPOLATE_FIRST_PERSON=1 ${HALO_TEST_ENV:-}"
 fi
+# (uptime: the machines up for 25 days unless told otherwise)
+[ "$mode" = uptime ] && export HALO_TEST_ENV="HALO_TEST_UPTIME_SECONDS=${HALO_TEST_UPTIME_SECONDS:-2160000} ${HALO_TEST_ENV:-}"
 [ "$mode" = dedicatedfullcache ] && [ -z "${HALO_TEST_NETEM:-}${HALO_TEST_NETEM_HOST:-}${HALO_TEST_NETEM_JOIN:-}" ] &&
 	export HALO_TEST_NETEM="delay 80ms 70ms"
 vita=${HALO_TEST_VITA:-$root/build/linux/halo}
@@ -1436,7 +1442,7 @@ PYTHON
 	echo "joiner's seconds with two players playing: $two"
 	[ "$two" -ge 60 ] || fail "the joiner played the host's game for $two s with two players (60 wanted)"
 	;;
-lan)
+lan|uptime)
 	# online off, both on the host's LAN: system link as on a Wi-Fi network
 	# (the Vita's default), the baseline for the others
 	holder; lan=$held
