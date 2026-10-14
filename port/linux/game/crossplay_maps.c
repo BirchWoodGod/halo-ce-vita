@@ -7,10 +7,10 @@ since its network version 22 (4e8ed2f1 "Tell a joining player which map
 they are missing", 9d309f8d "Refuse a Custom Edition map of another version
 than the host's"; cache_files_map_version and custom_edition_map_checksum at
 6399ed9d), as DamnationCE (7be58b2b) has them, and ChupathingyCE's families
-(halo_map_families.h, map_family_wire_name, 8cb79900); the hashed names of
-OpenCE's network version 27 (a2aad18f, map_share_files.c's
-map_share_name_hashed and its file hash, as at b1ef7f7e), as ChupathingyCE
-plays them from a map of the base name (a8cb4905); all CC0.
+(halo_map_families.h, map_family_wire_name, 8cb79900); a Custom Edition
+map's version as OpenCE's network version 29 has it (3e0ba551,
+map_share_files.c's file hash and map_share_hash_version, at 8102e711), as
+ChupathingyCE plays it (a501871f); all CC0.
 */
 
 #include "crossplay_maps.h"
@@ -59,47 +59,6 @@ static int suffix_is(
 	return length >= suffix_length && prefix_is(name + length - suffix_length, suffix);
 }
 
-/* whether `name` (`length` characters) ends in '_' and
-CROSSPLAY_MAP_HASH_DIGITS lowercase hexadecimal digits, with a character
-before them (OpenCE's map_share_name_hashed: its digits are written in
-lowercase, and an uppercase one is no hash, so the name is a plain one) */
-static int hashed_end(
-	char const *name,
-	size_t length,
-	unsigned long *prefix)
-{
-	unsigned long value = 0;
-	size_t index;
-
-	if (length < CROSSPLAY_MAP_HASH_DIGITS + 2 || name[length - CROSSPLAY_MAP_HASH_DIGITS - 1] != '_')
-	{
-		return 0;
-	}
-	for (index = length - CROSSPLAY_MAP_HASH_DIGITS; index < length; index++)
-	{
-		char character = name[index];
-
-		if (character >= '0' && character <= '9')
-		{
-			value = (value << 4) | (unsigned long)(character - '0');
-		}
-		else if (character >= 'a' && character <= 'f')
-		{
-			value = (value << 4) | (unsigned long)(character - 'a' + 10);
-		}
-		else
-		{
-			return 0;
-		}
-	}
-	if (prefix)
-	{
-		*prefix = value & 0xFFFFFFFFUL;
-	}
-
-	return 1;
-}
-
 /* whether `file` is a name a map file may have here: map sharing's rules,
 which keep out the characters a file system takes for something else,
 device names and the resource maps' and ui's names; the Xbox's levels'
@@ -112,37 +71,6 @@ static int file_name_taken(
 }
 
 /* ---------- public code */
-
-int crossplay_map_name_hashed(
-	char const *file,
-	char base[CROSSPLAY_MAP_FILE_BYTES],
-	unsigned long *prefix)
-{
-	size_t length = file ? strlen(file) : 0;
-	int hashed;
-
-	if (prefix)
-	{
-		*prefix = 0;
-	}
-	if (length >= CROSSPLAY_MAP_FILE_BYTES)
-	{
-		if (base)
-		{
-			base[0] = 0;
-		}
-		return 0;
-	}
-	hashed = hashed_end(file, length, prefix);
-	if (base)
-	{
-		length = hashed ? length - CROSSPLAY_MAP_HASH_DIGITS - 1 : length;
-		memcpy(base, file ? file : "", length);
-		base[length] = 0;
-	}
-
-	return hashed;
-}
 
 int crossplay_map_file_hash(
 	crossplay_map_read_proc read,
@@ -199,11 +127,39 @@ int crossplay_map_file_hash(
 	return 1;
 }
 
-unsigned long crossplay_map_hash_prefix(
+unsigned long crossplay_map_hash_version(
 	unsigned char const hash[CROSSPLAY_MAP_HASH_BYTES])
 {
-	return (unsigned long)hash[0] << 24 | (unsigned long)hash[1] << 16 | (unsigned long)hash[2] << 8 |
-		(unsigned long)hash[3];
+	unsigned long version = (unsigned long)hash[0] << 24 | (unsigned long)hash[1] << 16 |
+		(unsigned long)hash[2] << 8 | (unsigned long)hash[3];
+
+	/* (0 is a version nothing is compared for) */
+	return version ? version : 1;
+}
+
+int crossplay_map_version_file_name(
+	char const *file,
+	unsigned long version,
+	char named[CROSSPLAY_MAP_FILE_BYTES])
+{
+	size_t length = file ? strlen(file) : 0;
+	static char const digits[] = "0123456789abcdef";
+	short index;
+
+	named[0] = 0;
+	if (!version || !length || length > CROSSPLAY_MAP_MAXIMUM_FILE_LENGTH)
+	{
+		return 0;
+	}
+	memcpy(named, file, length);
+	named[length] = '_';
+	for (index = 0; index < CROSSPLAY_MAP_HASH_DIGITS; index++)
+	{
+		named[length + 1 + index] = digits[(version >> (4 * (CROSSPLAY_MAP_HASH_DIGITS - 1 - index))) & 15];
+	}
+	named[length + 1 + CROSSPLAY_MAP_HASH_DIGITS] = 0;
+
+	return 1;
 }
 
 int crossplay_map_file_is_stock(
@@ -290,28 +246,6 @@ short crossplay_map_name_parse(
 		}
 		leaf_length -= strlen(extension);
 	}
-	/* (a Custom Edition map named for its hash, OpenCE's since its version
-	27: the base before it is held to the rules of a whole name, and the
-	whole is that and the hash; the rest as before) */
-	if (kind == _crossplay_map_kind_custom_edition && hashed_end(leaf, leaf_length, NULL))
-	{
-		char base[CROSSPLAY_MAP_FILE_BYTES];
-		size_t base_length = leaf_length - CROSSPLAY_MAP_HASH_DIGITS - 1;
-
-		if (base_length > CROSSPLAY_MAP_MAXIMUM_FILE_LENGTH)
-		{
-			return _crossplay_map_kind_invalid;
-		}
-		memcpy(base, leaf, base_length);
-		base[base_length] = 0;
-		if (!file_name_taken(base))
-		{
-			return _crossplay_map_kind_invalid;
-		}
-		memcpy(file, leaf, leaf_length);
-		file[leaf_length] = 0;
-		return kind;
-	}
 	if (!leaf_length || leaf_length > CROSSPLAY_MAP_MAXIMUM_FILE_LENGTH)
 	{
 		return _crossplay_map_kind_invalid;
@@ -378,15 +312,10 @@ short crossplay_map_verdict(
 		default:
 			return _crossplay_map_unusable;
 		}
-		/* (0: a host that could not read its own map's checksum; nothing to
-		compare, as OpenCE's clients do) */
-		if (host_version && (local->checksum & 0xFFFFFFFFUL) != (host_version & 0xFFFFFFFFUL))
-		{
-			return _crossplay_map_custom_edition_different;
-		}
-		/* (named for its hash: this file's must begin with the name's digits,
-		whatever the checksum says; another version of the map otherwise) */
-		if (crossplay_map_name_hashed(file, NULL, NULL) && local->hash_mismatch)
+		/* (the host's version, its hash's first 32 bits since OpenCE's 29;
+		0: a host that could not hash its own map, nothing to compare, as
+		OpenCE's clients do) */
+		if (host_version && (local->version & 0xFFFFFFFFUL) != (host_version & 0xFFFFFFFFUL))
 		{
 			return _crossplay_map_custom_edition_different;
 		}
