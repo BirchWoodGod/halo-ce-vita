@@ -6680,7 +6680,9 @@ boolean game_engine_vehicle_placement_allowed(
 	short side, type;
 	byte set;
 
-	if (!game_engine || placement->palette_entry_index == NONE)
+	/* port: a palette entry the scenario has, else as NONE: a map's index
+	out of range is refused by object_new_from_scenario, and not read here */
+	if (!game_engine || !VALID_INDEX(placement->palette_entry_index, palette->count))
 		return TRUE;
 	side = global_variant.universal_variant.teams ? game_engine_nearest_team(&placement->position) : 0;
 	set = options->vehicle_set[side];
