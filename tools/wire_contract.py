@@ -545,6 +545,16 @@ def run(arguments):
 	report.base("S6 upstream's map sharing kinds dropped here", bool(share) and not problems,
 		"; ".join(problems) or (f"{', '.join(f'{v} {n[21:]}' for n, v in sorted(share.items(), key=lambda i: i[1]))}: "
 			f"past our {our_kind_count} kinds, dropped as unknown" if share else "upstream has none (not v27+?)"))
+	# --- S7: this build's map sharing messages (Bungie 36/37) from a host:
+	# ignored on the crossplay wire (a PC host never sends them; one that did
+	# would be a stranger feeding the downloader)
+	handler_text = ours.text("source/networking/network_client_message_handler.c")
+	answer = handler_text[handler_text.find("case _message_server_map_download_answer:"):]
+	answer = answer[:answer.find("default:")] if "case _message_server_map_download_answer:" in handler_text else ""
+	report.base("S7 our map sharing messages ignored on the crossplay wire", "network_wire_crossplay()" in answer,
+		"a host's map download answer/data dropped with Crossplay on" if "network_wire_crossplay()" in answer else
+		"network_client_message_handler.c takes them whatever the wire")
+
 	# --- G1, G7, G8: the record
 	problems = []
 	for record in ("network_game", "game_variant_options"):
