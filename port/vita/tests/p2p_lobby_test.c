@@ -15,7 +15,7 @@ listing) and opened by its password alone; and the Vita's own: a listing
 signed under the PCs' label, or of OpenCE's format 1, or of another network
 version, turned away; names cleaned as players' are; the entries' Rules and
 Players lines. And on the crossplay wire (network_wire.h, crossplay_checks):
-an OpenCE host's listing (format 1, "hceu-lobby-1", network version 26)
+an OpenCE host's listing (format 1, "hceu-lobby-1", network version 28)
 taken, read as OpenCE's (its flags only), and joined by its invite; the
 Vitas' format 2, their label and another version turned away. Prints PASS
 or the failures.
@@ -1119,7 +1119,7 @@ static void crossplay_checks(void)
 	check(entry_of(slot, &entry) && !strcmp(entry.name, "PC game") && !strcmp(entry.map, "Blood Gulch") &&
 		entry.players == 5 && entry.maximum == 128 && entry.open && entry.in_progress && !entry.pc_map &&
 		entry.dedicated && !entry.locked && !entry.own && entry.compatible && entry.score_limit == 0,
-		"crossplay: an OpenCE host's listing (format 1, hceu-lobby-1, version 26) is taken, its flags OpenCE's");
+		"crossplay: an OpenCE host's listing (format 1, hceu-lobby-1, version 28) is taken, its flags OpenCE's");
 	{
 		unsigned char parts[P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE];
 		char text[2 * sizeof(parts) + 1];

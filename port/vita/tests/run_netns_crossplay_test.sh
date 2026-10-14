@@ -148,6 +148,25 @@
 #               folder; else SKIP. Until T4 our
 #               client stops at the version (XFAIL); the map check itself
 #               runs today against a stand-in host: run_crossplay_maps_test.sh
+#   crossctf    Capture the Flag (the network test's ctf variant: every game
+#               above is Slayer's, the host never reaching its second game):
+#               an OpenCE and a ChupathingyCE host on LANs of their own, our
+#               client joining each and playing the game to its end with the
+#               flags' objects on both sides: discover, version, join,
+#               settings, play, kills, the end of the game, stability, and the
+#               scoreboard at the end the same on both (the network test's CTF
+#               game ends within seconds, before its kills could score or the
+#               spawn, damage and rejoin steps have time). Control: an OpenCE
+#               client
+#   crossold    an older PC host (network version 26: OpenCE 6399ed9d,
+#               ChupathingyCE 8cb79900, XPPC_OLD_BUILDS's opence/ and
+#               chupa/) since the crossplay wire joins 28 alone (OpenCE
+#               b1ef7f7e, ChupathingyCE 35fc7e8b): on a LAN our client sees
+#               the game, joins none of it and tells the player the host
+#               runs an older OpenCE or ChupathingyCE, naming both versions;
+#               over the internet (OpenCE's, from the server browser) it never
+#               lists the game (its listing's version). SKIP without
+#               XPPC_OLD_BUILDS
 #   all         every mode above, one after the other (expected failures as
 #               XFAIL), and a summary
 #
@@ -162,7 +181,13 @@
 # never failing.
 #
 #   XPPC_BUILDS        a folder with build_pc_crossplay.sh's opence/, chupa/
-#                      and damnation/ (their BUILD_INFO commits are printed)
+#                      and damnation/ (their BUILD_INFO commits are printed).
+#                      A build of another network version than our crossplay
+#                      wire's (DamnationCE 7be58b2b is 26) is not played: its
+#                      games are left out with a note (crossold checks how
+#                      such a host is refused)
+#   XPPC_OLD_BUILDS    crossold's: build_pc_crossplay.sh's opence/ (and
+#                      chupa/) of an older network version
 #   XPPC_OPENCE, XPPC_CHUPA, XPPC_CHUPA_SERVER, XPPC_DAMNATION  the binaries
 #                      instead (default: XPPC_BUILDS's)
 #   HALO_TEST_VITA     our Vita-path Linux build (build/linux/halo)
@@ -211,7 +236,10 @@ expected_fail=${XPPC_EXPECTED_FAIL:-}
 mode=${1:-}
 
 case $mode in
-pcself|chupaopence|opencelan|opencehost|crosstls|chupahost|chupaserver|damnserver|crossrefuse|crossbig|crossmixed|crosscoop) ;;
+pcself|chupaopence|opencelan|opencehost|crosstls|chupahost|chupaserver|damnserver|crossrefuse|crossbig|crossmixed|crosscoop|crossctf) ;;
+crossold)
+	[ -n "${XPPC_OLD_BUILDS:-}" ] && [ -x "$XPPC_OLD_BUILDS/opence/src/build/linux/halo" ] ||
+		{ echo "SKIP (crossold): wants XPPC_OLD_BUILDS (an older OpenCE build: build_pc_crossplay.sh opence ... 6399ed9d)"; exit 0; } ;;
 crosscoopcensus) ;;
 crosscoopfuzz)
 	grep -aq "net fuzz twin: one message in" "${HALO_TEST_VITA:-$root/build/linux/halo}" 2>/dev/null ||
@@ -236,7 +264,7 @@ all)
 	status=0
 	mkdir -p "$HOME/halo-test-out"
 	all_log=$(mktemp "$HOME/halo-test-out/xppc-all.XXXX")
-	for m in pcself chupaopence opencelan opencehost crosstls chupahost chupaserver damnserver crossmaps crossmixed crossrefuse crossbig crosscoop crossversion; do
+	for m in pcself chupaopence opencelan opencehost crosstls chupahost chupaserver damnserver crossctf crossmaps crossmixed crossrefuse crossbig crosscoop crossold crossversion; do
 		echo "=== $m"
 		HALO_TEST_OUT=${HALO_TEST_OUT:+$HALO_TEST_OUT/$m} "$0" "$m" | tee "$all_log"
 		rc=${PIPESTATUS[0]}
@@ -264,6 +292,23 @@ opence=${XPPC_OPENCE:-${builds:+$builds/opence/src/build/linux/halo}}
 chupa=${XPPC_CHUPA:-${builds:+$builds/chupa/src/build/linux/halo}}
 chupa_server=${XPPC_CHUPA_SERVER:-${builds:+$builds/chupa/src/build/server-x86/chupathingyce-server}}
 damnation=${XPPC_DAMNATION:-${builds:+$builds/damnation/src/build/linux/halo}}
+old_opence=${XPPC_OLD_BUILDS:+$XPPC_OLD_BUILDS/opence/src/build/linux/halo}
+old_chupa=${XPPC_OLD_BUILDS:+$XPPC_OLD_BUILDS/chupa/src/build/linux/halo}
+# the network version a PC build announces (its source's halo_port_limits.h,
+# beside its binary: build_pc_crossplay.sh's src), and ours on the crossplay
+# wire; a build of another is not played (empty: not known, played)
+pc_version() { # pc_version BINARY
+	sed -n 's/^#define HALO_PORT_NETWORK_VERSION \([0-9]*\).*/\1/p' \
+		"$(dirname "$1")/../../port/linux/include/halo_port_limits.h" 2>/dev/null | head -1
+}
+our_version=$(sed -n 's/^#define HALO_PORT_CROSSPLAY_NETWORK_VERSION \([0-9]*\).*/\1/p' "$root/port/linux/include/network_wire.h")
+plays_ours() { # plays_ours BINARY NAME: 0 if the build's version is ours (or not known); else says so
+	local version
+	version=$(pc_version "$1")
+	[ -z "$version" ] || [ "$version" = "$our_version" ] && return 0
+	echo "--- $2 left out: the build announces network version $version, the crossplay wire joins $our_version (crossold: refused)"
+	return 1
+}
 vita=${HALO_TEST_VITA:-$root/build/linux/halo}
 data=${HALO_TEST_DATA:-$root/../data2276}
 seconds=${XPPC_SECONDS:-240}
@@ -277,7 +322,7 @@ need() { # need NAME PATH: the binary must be there
 	[ -n "$2" ] && [ -x "$2" ] || { echo "BROKEN ($mode): no $1 (${2:-unset}): XPPC_BUILDS or its own variable"; exit 2; }
 }
 need OpenCE "$opence"
-case $mode in chupaopence|chupahost|crosscoop) need ChupathingyCE "$chupa" ;; esac
+case $mode in chupaopence|chupahost|crosscoop|crossctf) need ChupathingyCE "$chupa" ;; esac
 [ "$mode" = chupaserver ] && need "ChupathingyCE's server" "$chupa_server"
 case $mode in damnserver|crosscoop|crosscoopfuzz) need DamnationCE "$damnation" ;; esac
 [ "$mode" = crosscoopfuzz ] && need ChupathingyCE "$chupa"
@@ -458,6 +503,8 @@ run_copy() {
 		case $kind in
 		opence) binary=$opence ;;
 		chupa) binary=$chupa ;;
+		oldopence) binary=$old_opence ;;
+		oldchupa) binary=$old_chupa ;;
 		chupaserver) binary=$chupa_server ;;
 		damnation) binary=$damnation ;;
 		esac
@@ -944,6 +991,11 @@ chupahost)
 	;;
 chupaserver|damnserver)
 	kind=$mode
+	if [ "$mode" = damnserver ] && ! plays_ours "$damnation" "DamnationCE's server"; then
+		echo "SKIP ($mode): DamnationCE's build is of network version $(pc_version "$damnation"), not $our_version"
+		echo "logs in $out"
+		exit 0
+	fi
 	# (over the internet: ChupathingyCE's server is listed in the server
 	# browser (HALO_DEDICATED_PUBLIC); DamnationCE's only on its game list
 	# (halo.milenko.org, off here), so its clients open its invite)
@@ -1094,21 +1146,81 @@ crossmaps)
 	for f in "$data"/maps/*.map; do ln -sfn "$f" "$out/maps-with-ce/$(basename "$f")"; done
 	ln -sfn "$(readlink -f "$ce_map")" "$out/maps-with-ce/$ce_name.map"
 	export copy_custom_maps=$out/custom_maps
+	# (an OpenCE host of network version 27 and later names a map of its
+	# custom_maps folder by its hash, renaming the file there (the link in
+	# this run's folder, never the map): custom_maps\<name>_<8 hex digits>.
+	# Our client with <name>.map, with <name>_<digits>.map (an OpenCE
+	# player's copy), and with another version of <name>.map (one byte of
+	# its header's checksum changed: neither its checksum nor its hash the
+	# host's))
+	ce_digits=$(python3 -I - "$(readlink -f "$ce_map")" <<'EOF'
+import hashlib, sys
+data = open(sys.argv[1], "rb").read()
+whole = hashlib.blake2b(digest_size=32)
+whole.update(b"OpenCE map 1")
+whole.update(len(data).to_bytes(4, "little"))
+for offset in range(0, len(data), 0x40000):
+    whole.update(hashlib.blake2b(data[offset:offset + 0x40000], digest_size=32).digest())
+print(whole.hexdigest()[:8])
+EOF
+)
+	mkdir -p "$out/maps-with-ce-hashed" "$out/maps-with-ce-differ"
+	for f in "$data"/maps/*.map; do
+		ln -sfn "$f" "$out/maps-with-ce-hashed/$(basename "$f")"
+		ln -sfn "$f" "$out/maps-with-ce-differ/$(basename "$f")"
+	done
+	ln -sfn "$(readlink -f "$ce_map")" "$out/maps-with-ce-hashed/${ce_name}_$ce_digits.map"
+	cp "$(readlink -f "$ce_map")" "$out/maps-with-ce-differ/$ce_name.map"
+	python3 -I - "$out/maps-with-ce-differ/$ce_name.map" <<'EOF'
+import sys
+with open(sys.argv[1], "r+b") as f:
+    f.seek(0x64); b = f.read(1); f.seek(0x64); f.write(bytes([b[0] ^ 0x5A]))
+EOF
 	control xmap-stock-opence && pair xmap-stock-opence lan opence opence
 	control xmap-ce-opence && host_game="custom_maps\\$ce_name" host_variants=slayer pair xmap-ce-opence lan opence opence
-	test_names="xmap-stock-ours xmap-ce-ours"
+	test_names="xmap-stock-ours xmap-ce-ours xmap-cehashed-ours"
 	host_variants=slayer pair xmap-stock-ours lan opence ours
 	client_maps=$out/maps-with-ce client_extra=HALO_CUSTOM_EDITION=1 host_game="custom_maps\\$ce_name" host_variants=slayer \
 		pair xmap-ce-ours lan opence ours
+	client_maps=$out/maps-with-ce-hashed client_extra=HALO_CUSTOM_EDITION=1 host_game="custom_maps\\$ce_name" host_variants=slayer \
+		pair xmap-cehashed-ours lan opence ours
 	client_extra=HALO_CUSTOM_EDITION=1 host_game="custom_maps\\$ce_name" host_variants=slayer pair xmap-cemissing-ours lan opence ours
+	client_maps=$out/maps-with-ce-differ client_extra=HALO_CUSTOM_EDITION=1 host_game="custom_maps\\$ce_name" host_variants=slayer \
+		pair xmap-cediffer-ours lan opence ours
 	run_our_modes
+	# (the hashed name the host gave, and that our client played its file
+	# for it, hashed)
+	for name in xmap-ce-ours xmap-cehashed-ours; do
+		named=$(grep -aoE "join: the host's map is custom_maps.${ce_name}(_[0-9a-f]{8})? " "$out/$name/client/run.log" 2>/dev/null |
+			head -1 | sed 's/^join: //')
+		hashed=$(grep -aoE "crossplay: .*hashed: [0-9a-f]{8}" "$out/$name/client/data/debug.txt" 2>/dev/null | head -1)
+		echo "--- $name: ${named:-no map named}; ${hashed:-no file hashed}"
+		case $named in
+		*"${ce_name}_$ce_digits "*)
+			echo "$hashed" | grep -q "hashed: $ce_digits" || our_results="$our_results $name:hash-not-checked" ;;
+		*"custom_maps"?"$ce_name "*) echo "  (the host named it without its hash: an OpenCE of before version 27?)" ;;
+		*) our_results="$our_results $name:map-not-named" ;;
+		esac
+	done
+	# (another version: refused as such, never joined)
+	name=xmap-cediffer-ours
+	want="Your $ce_name.map isn't the same version as the PC host's"
+	got=$(grep -ahF "$want" "$out/$name/client/run.log" "$out/$name/client/data/debug.txt" 2>/dev/null | head -1)
+	joined=$(sed -n "/join: the host's map is custom_maps.$ce_name[_ ]/,\$ p" "$out/$name/client/run.log" 2>/dev/null |
+		grep -ac "network test: tick [0-9]* ")
+	echo "--- $name: our client played ${joined:-0} ticks; the refusal: ${got:-none}"
+	if [ -n "$got" ] && [ "${joined:-0}" = 0 ]; then
+		our_results="$our_results $name:pass"
+	else
+		our_results="$our_results $name:refusal-${got:+said}-ticks-${joined:-0}"
+	fi
 	# (the map our client lacks: refused, the map named, never asked of the
 	# host, never joined)
 	name=xmap-cemissing-ours
 	want="The PC host is playing the map $ce_name, which isn't in your maps folder"
 	got=$(grep -ahF "$want" "$out/$name/client/run.log" "$out/$name/client/data/debug.txt" 2>/dev/null | head -1)
 	# (ticks played after the host's settings named its map: its game)
-	joined=$(sed -n "/join: the host's map is custom_maps.$ce_name /,\$ p" "$out/$name/client/run.log" 2>/dev/null |
+	joined=$(sed -n "/join: the host's map is custom_maps.$ce_name[_ ]/,\$ p" "$out/$name/client/run.log" 2>/dev/null |
 		grep -ac "network test: tick [0-9]* ")
 	asked=$(grep -acE "map share: asking the host|asking the host for its map" "$out/$name/client/run.log" 2>/dev/null)
 	echo "--- $name: our client played ${joined:-0} ticks, asked the host for the map ${asked:-0} times; the refusal: ${got:-none}"
@@ -1135,7 +1247,8 @@ crosscoop)
 	control coop-opence-opence && coop_game coop-opence-opence opence opence
 	coop_game coop-opence-ours opence ours
 	coop_game coop-chupa-ours chupa ours
-	coop_game coop-damnation-ours damnation ours
+	coop_damnation=coop-damnation-ours
+	plays_ours "$damnation" "DamnationCE's co-op game" && coop_game coop-damnation-ours damnation ours || coop_damnation=
 	coop_game coop4-opence-ours opence "ours opence opence"
 	coop_game coop-opence-no opence ours HALO_CROSSPLAY_LARGE_ANSWER=no
 	wait_pairs
@@ -1144,7 +1257,7 @@ crosscoop)
 		echo "--- control $name: ${played:-0} s with two players alive"
 		[ "${played:-0}" -ge 30 ] || { controls_ok=0; echo "BROKEN ($mode): the control $name played ${played:-0} s"; }
 	done
-	for name in coop-opence-ours coop-chupa-ours coop-damnation-ours coop4-opence-ours coop-opence-no; do
+	for name in coop-opence-ours coop-chupa-ours $coop_damnation coop4-opence-ours coop-opence-no; do
 		grep -aq "network test: hosting" "$out/$name/host/run.log" ||
 			{ controls_ok=0; echo "BROKEN ($mode): the host of $name never hosted"; }
 		coop_check "$name" $([ "$name" = coop-opence-no ] && echo no)
@@ -1249,6 +1362,84 @@ crosscoopfuzz)
 		fi
 		our_results="$our_results $name:$result"
 	done
+	;;
+crossctf)
+	# Capture the Flag on PC hosts, to the game's end (seconds long in the
+	# network test: no time for the spawn, damage and rejoin steps, and its
+	# kills do not score), the scoreboard at the end the same on both
+	control ctf-opence-opence && host_variants=ctf pair ctf-opence-opence lan opence opence
+	host_variants=ctf pair ctf-opence-ours lan opence ours
+	host_variants=ctf pair ctf-chupa-ours lan chupa ours
+	wait_pairs
+	for name in $control_names ctf-opence-ours ctf-chupa-ours; do
+		check_pair "$name" > /dev/null
+		failed=$(python3 -I - "$out/$name/check.json" <<'EOF'
+import json, sys
+steps = json.load(open(sys.argv[1]))["steps"]
+import re
+failed = [s for s in ("discover", "signal", "version", "join", "settings", "play", "kills", "end_of_game",
+    "stability") if not steps.get(s, {}).get("pass")]
+# (the score step's scoreboards: host's and client's alike, whoever won)
+boards = re.findall(r"(host|client) (\{[^}]*\})", steps.get("score", {}).get("detail", ""))
+if len(boards) < 2 or len({b for _, b in boards}) != 1:
+    failed.append("scoreboard")
+print(" ".join(failed))
+EOF
+)
+		echo "--- $name: ${failed:+failed: $failed}${failed:-played to the end, the scoreboards alike}"
+		grep -aE "^  $name (play|kills|score|end_of_game|stability):" "$out/$name/check.txt" | sed 's/^/  /'
+		case " $control_names " in
+		*" $name "*) [ -z "$failed" ] || { controls_ok=0; echo "BROKEN ($mode): the control $name failed: $failed"; } ;;
+		*) [ -n "$failed" ] && our_results="$our_results $name:$(echo "$failed" | tr ' ' ',')" ||
+			our_results="$our_results $name:pass" ;;
+		esac
+	done
+	;;
+crossold)
+	# older PC hosts (network version 26) since the crossplay wire joins 28
+	# alone: seen, not joined, the player told why; over the internet never
+	# listed (OpenCE's listing carries its version)
+	old_names="old-lan-opence old-net-opence"
+	pair old-lan-opence lan oldopence ours
+	pair old-net-opence net oldopence ours
+	if [ -x "$old_chupa" ]; then
+		old_names="$old_names old-lan-chupa"
+		pair old-lan-chupa lan oldchupa ours
+	fi
+	wait_pairs
+	old_version=$(pc_version "$old_opence")
+	for name in $old_names; do
+		hostlog=$out/$name/host/run.log clientlog=$out/$name/client/run.log
+		clientdebug=$out/$name/client/data/debug.txt
+		hosted=$(grep -ac "network test: hosting" "$hostlog" 2>/dev/null)
+		players=$(grep -ac "network test: player 1 is named" "$hostlog" 2>/dev/null)
+		# (the network test's join, not its tick lines: the main menu's own
+		# scenario logs those before any game)
+		joined=$(grep -ac "network test: joining" "$clientlog" 2>/dev/null)
+		said=$(cat "$clientlog" "$clientdebug" 2>/dev/null |
+			grep -ac "not joining a host of network version ${old_version:-[0-9]*} (crossplay: this machine joins $our_version): an older PC build")
+		told=$(cat "$clientlog" "$clientdebug" 2>/dev/null | grep -ac "runs an older version of OpenCE or ChupathingyCE")
+		listed=$(grep -ac "the public games list" "$clientlog" 2>/dev/null)
+		result=pass
+		if [ "${hosted:-0}" = 0 ]; then
+			controls_ok=0; echo "BROKEN ($mode): the older host of $name never hosted"
+		fi
+		case $name in
+		old-net-*)
+			# (heard, and dropped for its version: the browser's summary)
+			dropped=$(grep -ac "dropped [0-9]* of another version" "$clientlog" 2>/dev/null)
+			{ [ "${listed:-0}" = 0 ] && [ "${dropped:-0}" -ge 1 ] && [ "${players:-0}" = 0 ] && [ "${joined:-0}" = 0 ]; } ||
+				result="listed-$listed-dropped-$dropped-players-$players-joined-$joined" ;;
+		*)
+			{ [ "${said:-0}" -ge 1 ] && [ "${told:-0}" -ge 1 ] && [ "${players:-0}" = 0 ] && [ "${joined:-0}" = 0 ]; } ||
+				result="said-$said-told-$told-players-$players-joined-$joined" ;;
+		esac
+		echo "--- $name (network version ${old_version:-?}): $result"
+		grep -ahE "not joining|older version of OpenCE|of another version|the public games list" "$clientlog" "$clientdebug" 2>/dev/null |
+			sed 's/^[0-9.]* [0-9:]*  //; s/^halo-linux: //' | sort | uniq -c | head -4 | sed 's/^/  /'
+		our_results="$our_results $name:$result"
+	done
+	echo "--- the brokers' topics"; broker_topics
 	;;
 crossbig)
 	# large PC games (section 6, the owner's Oct 11 2026): an OpenCE host's

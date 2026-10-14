@@ -14,8 +14,10 @@ read once and kept for the run.
 #include <stdlib.h>
 #include <string.h>
 
-/* the versions a crossplay client joins: the pinned OpenCE's (6399ed9d).
-ChupathingyCE and DamnationCE hosts announce the same (docs/crossplay.md 2) */
+/* the versions a crossplay client joins: the pinned OpenCE's (b1ef7f7e),
+which ChupathingyCE hosts announce too (35fc7e8b). Exactly that one: 26 and
+27 play otherwise with no message to tell (network_wire.h); DamnationCE
+(7be58b2b) is still 26, and refused (docs/crossplay.md 5.1) */
 static const unsigned short crossplay_accepted_versions[] = { HALO_PORT_CROSSPLAY_NETWORK_VERSION };
 
 int network_wire_crossplay(void)
@@ -37,6 +39,12 @@ int network_wire_crossplay(void)
 unsigned int network_wire_version(void)
 {
 	return network_wire_crossplay() ? HALO_PORT_CROSSPLAY_NETWORK_VERSION : HALO_PORT_NETWORK_VERSION;
+}
+
+int network_wire_v28_rules(void)
+{
+	/* (every version the crossplay wire joins is 28) */
+	return network_wire_crossplay() && HALO_PORT_CROSSPLAY_NETWORK_VERSION >= 28;
 }
 
 int network_wire_version_accepted(unsigned int version)

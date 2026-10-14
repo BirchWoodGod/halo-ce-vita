@@ -10,11 +10,15 @@ crossplay_map_name_parse took, by the file name it gave.
 
 An input is the map version (4 bytes), what this machine's file is (8
 bytes: its kind, the checksum's 4 bytes, then flags: Xbox multiplayer map,
-stock problem, resource maps missing, PC maps on), then the name's bytes
-(at most 0x80, as the record's field). Whatever the input:
+stock problem, resource maps missing, PC maps on, a status byte, then
+whether the file's hash is not a hashed name's), then the name's bytes (at
+most 0x80, as the record's field). Whatever the input:
 - a name taken gives a file name of at most 25 characters that map sharing
-  would take (or one of the Xbox's levels' names), with no separator, drive
-  or climb, and never a name past the record's field;
+  would take (or one of the Xbox's levels' names), or a Custom Edition one
+  named for its hash (OpenCE's v27): such a base, '_' and 8 lowercase hex
+  digits; with no separator, drive or climb, and never a name past the
+  record's field;
+- a hashed name's map is played only when its file's hash is the name's;
 - the name a message may show has at most 25 characters of the safe ones;
 - the verdict is one there is, and a name refused is refused whatever the
   file.
@@ -30,15 +34,35 @@ Built as net_fuzz_map_share.c is, by run_net_fuzz_test.sh.
 
 #define RECORD_NAME_BYTES 0x80
 
-static void check_file_name(char const *file)
+static void check_file_name(char const *file, short kind)
 {
 	size_t length = strnlen(file, CROSSPLAY_MAP_FILE_BYTES);
+	char base[CROSSPLAY_MAP_FILE_BYTES];
+	unsigned long prefix;
 	size_t index;
+	int hashed;
 
-	if (length == CROSSPLAY_MAP_FILE_BYTES || length == 0 || length > CROSSPLAY_MAP_MAXIMUM_FILE_LENGTH)
+	if (length == CROSSPLAY_MAP_FILE_BYTES || length == 0)
 		abort();
-	if (!map_share_name_valid(file) && !map_share_name_is_stock(file))
-		abort();
+	hashed = crossplay_map_name_hashed(file, base, &prefix);
+	/* (a hash only after a Custom Edition map's name; any other name is
+	held to 25 whole) */
+	if (hashed && kind == _crossplay_map_kind_custom_edition)
+	{
+		if (length > CROSSPLAY_MAP_MAXIMUM_HASHED_FILE_LENGTH || !base[0] ||
+			strlen(base) + 1 + CROSSPLAY_MAP_HASH_DIGITS != length || strncmp(base, file, strlen(base)) ||
+			prefix > 0xFFFFFFFFUL)
+			abort();
+		if (!map_share_name_valid(base) && !map_share_name_is_stock(base))
+			abort();
+	}
+	else
+	{
+		if (length > CROSSPLAY_MAP_MAXIMUM_FILE_LENGTH)
+			abort();
+		if (!map_share_name_valid(file) && !map_share_name_is_stock(file))
+			abort();
+	}
 	for (index = 0; index < length; index++)
 	{
 		if (file[index] == '\\' || file[index] == '/' || file[index] == ':' || (unsigned char)file[index] < 0x20 ||
@@ -74,7 +98,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	local.resource_maps_missing = (data[9] >> 2) & 1;
 	local.pc_maps_on = (data[9] >> 3) & 1;
 	local.status = (short)data[10];
-	(void)data[11];
+	local.hash_mismatch = data[11] & 1;
 	name_size = size - 12 < RECORD_NAME_BYTES ? size - 12 : RECORD_NAME_BYTES;
 	/* (exactly the bytes given, on the heap: AddressSanitizer sees a read
 	past them) */
@@ -98,7 +122,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	}
 	else
 	{
-		check_file_name(file);
+		check_file_name(file, kind);
 		/* (a name taken was ended within the bytes given) */
 		if (!memchr(name, 0, name_size))
 			abort();
@@ -116,7 +140,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	which) */
 	if (verdict == _crossplay_map_playable && kind == _crossplay_map_kind_custom_edition &&
 		(local.file != _crossplay_map_file_custom_edition || (version && local.checksum != version) ||
-			!local.pc_maps_on || local.resource_maps_missing))
+			!local.pc_maps_on || local.resource_maps_missing ||
+			(crossplay_map_name_hashed(file, NULL, NULL) && local.hash_mismatch)))
 		abort();
 	/* (one of the game's own maps is never compared, and never played with a
 	version) */
@@ -129,7 +154,11 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	for (index = CROSSPLAY_MAP_FILE_BYTES; index < sizeof(shown); index++)
 		if (shown[index] != 0x5A)
 			abort();
-	if (strnlen(shown, CROSSPLAY_MAP_FILE_BYTES) > CROSSPLAY_MAP_MAXIMUM_FILE_LENGTH)
+	/* (a name taken shown as its file name, a hashed one with its hash; any
+	other cut to 25) */
+	if (strnlen(shown, CROSSPLAY_MAP_FILE_BYTES) > (kind == _crossplay_map_kind_invalid ?
+		CROSSPLAY_MAP_MAXIMUM_FILE_LENGTH : CROSSPLAY_MAP_MAXIMUM_HASHED_FILE_LENGTH) ||
+		(kind != _crossplay_map_kind_invalid && strcmp(shown, file)))
 		abort();
 	for (index = 0; shown[index]; index++)
 	{
@@ -158,6 +187,8 @@ int net_fuzz_checks(void)
 		"maps_md\\hugeass.md",
 		"maps_pc\\bloodgulch.pc",
 		"custom_maps\\..\\..\\x",
+		"custom_maps\\pcgulch_69cd51eb",
+		"custom_maps\\.._69cd51eb",
 	};
 	char const *folder = getenv("NET_FUZZ_SEED_DIR");
 	int failures = 0;
@@ -176,7 +207,8 @@ int net_fuzz_checks(void)
 		seed[9] = 0x09;
 		memcpy(seed + 12, names[index], length);
 		LLVMFuzzerTestOneInput(seed, 12 + length);
-		if ((crossplay_map_name_parse(names[index], (long)length, file) == _crossplay_map_kind_invalid) != (index == 5))
+		if ((crossplay_map_name_parse(names[index], (long)length, file) == _crossplay_map_kind_invalid) !=
+			(index == 5 || index == 7))
 		{
 			__builtin_printf("FAIL crossplay maps: seed '%s'\n", names[index]);
 			failures++;

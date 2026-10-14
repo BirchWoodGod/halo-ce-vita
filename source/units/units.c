@@ -695,6 +695,7 @@ symbols in this file:
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
 #include "coop_scripts.h" /* port: port/linux/game/coop_scripts.c */
 #include "coop_enemies.h" /* port: port/linux/game/coop_enemies.c */
+#include "network_wire.h" /* port: network version 28's rules */
 
 /* port: the control and animation impulses the host's actors give their
 units go to the clients' copies (port/linux/game/network_actors.c) */
@@ -8524,9 +8525,31 @@ boolean unit_add_weapon_to_inventory(
 				break;
 
 			case _unit_add_weapon_starting:
-				if (!TEST_FLAG(unit->unit.control_flags, _unit_control_weapon_primary_trigger_bit))
+				/* port: network version 28 (OpenCE 2598dbe8, ChupathingyCE
+				96436597; CC0): a second weapon, into the empty slot of a
+				one-weapon loadout, is the one in hand. While the trigger was
+				down this left the choice on the weapon already held, and the
+				next action put that choice back, so the new one stayed
+				holstered. Every machine of a game must choose alike: only
+				with network_wire_v28_rules (a PC host of 28); the legacy wire
+				as the betas */
 				{
-					player_control_set_desired_weapon(unit_index, inventory_index);
+					boolean holding_another = FALSE;
+					short slot;
+
+					for (slot = 0; network_wire_v28_rules() && slot < MAXIMUM_WEAPONS_PER_UNIT; slot++)
+					{
+						if (slot != inventory_index &&
+							unit->unit.weapon_object_indices[slot] != NONE)
+						{
+							holding_another = TRUE;
+						}
+					}
+					if (holding_another ||
+						!TEST_FLAG(unit->unit.control_flags, _unit_control_weapon_primary_trigger_bit))
+					{
+						player_control_set_desired_weapon(unit_index, inventory_index);
+					}
 				}
 
 			case _unit_add_weapon_replace:

@@ -53,6 +53,7 @@ same datum index (identifier and all), so that any message can name one:
 #include "models/model_animation_definitions.h"
 #include "models/model_definitions.h"
 #include "units/units.h"
+#include "units/bipeds.h"
 #include "units/biped_definitions.h"
 #include "units/vehicle_definitions.h"
 #include "units/vehicle_datum.h"
@@ -673,6 +674,52 @@ static boolean distributed_vehicle_unsteered(
 		unit_get(vehicle->unit.driver_object_index)->unit.player_index == NONE;
 }
 
+/* the object if it is a body (a dead biped), else NULL; only on the
+crossplay wire, where the two below apply (OpenCE e791cf9a, CC0: a client's
+own display, no message changed; the legacy wire's bodies as the betas') */
+static struct biped_datum *distributed_body_get(
+	long object_index)
+{
+	struct biped_datum *biped;
+
+	if (!network_wire_crossplay())
+		return NULL;
+	biped = (struct biped_datum *)object_try_and_get_and_verify_type(object_index, _object_mask_biped);
+	return biped && TEST_FLAG(biped->object.damage_flags, _object_dead_bit) ? biped : NULL;
+}
+
+/* A body lying limp here, which the host moves: its pose, fixed in the world
+where it came to rest (bipeds.c), would stay there as the body goes, drawn
+hanging in the air or in a wall. Unfixed, as the push of the explosion that
+moved the host's body would have unfixed it here (that push reaches only the
+machines that see the body's player, network_damage.c); it lies limp again
+where it comes to rest (units.c). */
+static void distributed_body_unfix_pose(
+	long object_index)
+{
+	if (distributed_body_get(object_index))
+		biped_stop_limp_body_physics(object_index);
+}
+
+/* A body at rest or moving as the host has it. Moving, its pose goes with
+it, however close it is. At rest, it is on the ground, as the host's is:
+not airborne, which only its physics clears, and rest stops its physics
+(bipeds.c); left airborne, it would keep the pose of its fall, in the air,
+and never lie limp. */
+static void distributed_body_set_at_rest(
+	long object_index,
+	boolean at_rest)
+{
+	struct biped_datum *biped = distributed_body_get(object_index);
+
+	if (!biped)
+		return;
+	if (!at_rest)
+		distributed_body_unfix_pose(object_index);
+	else
+		SET_FLAG(biped->biped.flags, _biped_airborne_bit, FALSE);
+}
+
 /* whether this machine's player drives the unit: it is their biped, or the
 vehicle they drive */
 static boolean distributed_unit_driven_here(
@@ -710,6 +757,7 @@ static void distributed_object_move(
 	offset.i = object->object.position.x - position->x;
 	offset.j = object->object.position.y - position->y;
 	offset.k = object->object.position.z - position->z;
+	distributed_body_unfix_pose(object_index);
 	object_set_position(object_index, position, forward, up);
 	if (velocity)
 		object->object.translational_velocity = *velocity;
@@ -780,6 +828,7 @@ boolean network_objects_reconcile(
 		offset.i = object->object.position.x - blended.x;
 		offset.j = object->object.position.y - blended.y;
 		offset.k = object->object.position.z - blended.z;
+		distributed_body_unfix_pose(object_index);
 		object_set_position(object_index, &blended, &valid_forward, &valid_up);
 		if (!distributed_object_follows_host(object_index))
 			render_interpolation_correct_object(object_index, &offset);
@@ -2622,6 +2671,7 @@ void network_objects_handle_states(
 		at_rest = TEST_FLAG(state->flags, _distributed_object_at_rest_bit) || distributed_vehicle_unsteered(state->object_index);
 		if (!own_vehicle)
 			SET_FLAG(object->object.flags, _object_at_rest_bit, at_rest);
+		distributed_body_set_at_rest(state->object_index, at_rest);
 		dx = state->position.x - object->object.position.x;
 		dy = state->position.y - object->object.position.y;
 		dz = state->position.z - object->object.position.z;

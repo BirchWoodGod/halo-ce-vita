@@ -543,6 +543,7 @@ symbols in this file:
 #include "game_engine.h"
 #ifdef HALO_LINUX
 #include "network_game_record.h" /* (port) the wire */
+#include "network_wire.h" /* (port) network version 28's rules */
 #endif
 #include "game_engine_list.h"
 #include "game_engine_place.h"
@@ -3466,7 +3467,16 @@ static void game_engine_build_lighting(
 			player_count++;
 	}
 
-	if (global_variant.universal_variant.vehicle_set != _game_engine_vehicles_none)
+	/* port: network version 28 (OpenCE 417de7e2, ChupathingyCE f05544ff;
+	CC0): the Xbox turned dynamic lights off past 13 players, or past 8
+	with two vehicles, and the flashlight off past 4 players or 4 vehicles,
+	so a match on a map with a few vehicles had a flashlight and the next
+	one did not. A host of 28 leaves both on (the beam is a dynamic light),
+	and so must its clients, which see its units' lights in their states:
+	the crossplay wire (network_wire_v28_rules). The legacy wire as the
+	betas */
+	if (!network_wire_v28_rules() &&
+		global_variant.universal_variant.vehicle_set != _game_engine_vehicles_none)
 	{
 		if (global_variant.game_engine_index == game_engine_race)
 		{
@@ -3503,15 +3513,17 @@ static void game_engine_build_lighting(
 		}
 	}
 
-	if ((player_count > 8 && object_count >= 2) ||
-		player_count >= 13)
+	if (!network_wire_v28_rules() &&
+		((player_count > 8 && object_count >= 2) ||
+		player_count >= 13))
 	{
 		SET_FLAG(game_engine_globals.flags, _game_engine_disable_dynamic_light_bit, TRUE);
 	}
 
-	if (player_count > 4 ||
+	if (!network_wire_v28_rules() &&
+		(player_count > 4 ||
 		object_count >= 4 ||
-		TEST_FLAG(game_engine_globals.flags, _game_engine_disable_dynamic_light_bit))
+		TEST_FLAG(game_engine_globals.flags, _game_engine_disable_dynamic_light_bit)))
 	{
 		SET_FLAG(game_engine_globals.flags, _game_engine_disable_integrated_lights_bit, TRUE);
 	}
