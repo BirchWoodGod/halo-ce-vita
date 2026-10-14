@@ -101,7 +101,7 @@ Choices:
   asking (the automated tests: a hidden window shows nothing; not in
   release builds),
   HALO_MAP_SHARE_CANCEL_AT=<bytes> cancels a download that far in (once a
-  run), and
+  run; not in release builds), and
   HALO_MAP_SHARE_HOST_SILENT=1 has a host ignore the requests, as one of a
   version without map sharing does.
 */
@@ -2695,9 +2695,14 @@ boolean map_share_client_update(
 	case _client_starting:
 	case _client_receiving:
 	{
-		/* (the tests' cut: once a run, so that a download continued goes on) */
+		/* (the tests' cut: once a run, so that a download continued goes on;
+		never in release builds) */
 		static boolean cancelled_at;
+#ifndef HALO_RELEASE
 		unsigned long cancel_at = cancelled_at ? 0 : map_share_environment_number("HALO_MAP_SHARE_CANCEL_AT", 0);
+#else
+		unsigned long cancel_at = 0;
+#endif
 
 		if (platform_progress_cancelled() || (cancel_at && download->receiver.received >= cancel_at))
 		{
@@ -2983,12 +2988,14 @@ void map_share_server_handle_request(
 	{
 		return;
 	}
+#ifndef HALO_RELEASE
 	/* (the automated tests' host of a version without map sharing, which
-	ignores the request) */
+	ignores the request; never in release builds) */
 	if (getenv("HALO_MAP_SHARE_HOST_SILENT"))
 	{
 		return;
 	}
+#endif
 
 	switch (request.command)
 	{

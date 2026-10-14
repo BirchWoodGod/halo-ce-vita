@@ -53,7 +53,11 @@ int halo_movie_open_failed_for_now(void)
 
 HBINK __stdcall BinkOpen(const char *name, unsigned long flags)
 {
+#ifndef HALO_RELEASE
 	const char *setting = getenv("HALO_TEST_MOVIE_FAILS_FOR_NOW");
+#else
+	const char *setting = NULL; /* (a test's, never in release builds) */
+#endif
 
 	(void)flags;
 	open_failed_for_now = setting && atoi(setting) != 0;
