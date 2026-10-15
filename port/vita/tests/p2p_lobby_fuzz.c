@@ -21,7 +21,7 @@ input's first byte says how:
 and its second its flags: retained, a clock step (expiry, tombstones), a
 query heard, the browser toggled. With the first byte's 0x40 the input is
 heard on the crossplay wire (network_wire.h: OpenCE's listings, format 1,
-"hceu-lobby-1", version 26; mode 1 signs it so). The p2p_lobby_test.c
+"hceu-lobby-1", version 29; mode 1 signs it so). The p2p_lobby_test.c
 stand-ins serve.
 */
 

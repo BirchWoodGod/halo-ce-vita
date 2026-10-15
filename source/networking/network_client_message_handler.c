@@ -202,6 +202,7 @@ symbols in this file:
 #include "networking/network_messages.h"
 #include "map_share.h"
 #include "network_game_record.h"
+#include "network_wire.h"
 #include "net_fuzz_twin.h"
 
 /* port/linux/game/network_distributed.c's */
@@ -711,10 +712,19 @@ boolean network_game_client_handle_message(
 						break;
 
 					/* port: map sharing (port/linux/game/map_share.c), the
-					host's alone */
+					host's alone, and a Vita's: on the crossplay wire the host
+					is a PC's, which has none of these messages (OpenCE's own
+					map sharing, its version 27, is distributed kinds 83-86,
+					dropped as unknown); one that sent them would be feeding
+					the downloader what no PC build sends, so they are dropped
+					unread (docs/crossplay.md 6.1) */
 					case _message_server_map_download_answer:
 					case _message_server_map_download_data:
-						if (network_game_client_address_matches_server(client, source_address))
+						if (network_wire_crossplay())
+						{
+							network_event("ignoring a map share message on the crossplay wire");
+						}
+						else if (network_game_client_address_matches_server(client, source_address))
 						{
 							if (packet_type == _message_server_map_download_answer)
 								map_share_client_handle_answer(client, message, message_size);

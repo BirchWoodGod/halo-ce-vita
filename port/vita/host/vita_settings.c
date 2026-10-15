@@ -1310,6 +1310,7 @@ static void save(void)
 	file = fopen(SETTINGS_FILE ".new", "w");
 	if (!file)
 		return;
+	fprintf(file, "HALO_SETTINGS_BUILD=%s\n", HALO_VITA_VERSION);
 	for (index = 0; index < SETTING_COUNT; index++)
 		if (settings[index].kind == KIND_CHOICE && !(settings[index].dev && settings[index].choice == 0))
 			fprintf(file, "%s=%s\n", settings[index].variable, settings[index].values[settings[index].choice]);
@@ -1425,6 +1426,8 @@ void vita_settings_load(void)
 	/* the rows settings.txt names, and the profile it was saved with */
 	char named[SETTING_COUNT];
 	int saved_profile = -1;
+	/* (the build that wrote settings.txt: HALO_SETTINGS_BUILD, from 1.1.0) */
+	char saved_build[24] = "";
 	/* the Play page's texts as env.txt and settings.txt give them, and
 	whether settings.txt named them */
 	char texts[PLAY_TEXT_COUNT][PLAY_TEXT_LENGTH + 1];
@@ -1537,6 +1540,11 @@ void vita_settings_load(void)
 				texts_named[text] = 1;
 				continue;
 			}
+			if (strcmp(line, "HALO_SETTINGS_BUILD") == 0)
+			{
+				snprintf(saved_build, sizeof(saved_build), "%s", equals + 1);
+				continue;
+			}
 			if (strcmp(line, "HALO_NET_LOBBY_PUBLIC") == 0)
 			{
 				snprintf(old_public_value, sizeof(old_public_value), "%s", equals + 1);
@@ -1576,6 +1584,22 @@ void vita_settings_load(void)
 			}
 		}
 		fclose(file);
+	}
+	/* a pre-release build saved Experimental as its Update channel, which
+	was no choice (Stable greyed out): a release build starts such a
+	settings.txt - no HALO_SETTINGS_BUILD, or a pre-release's - on Stable;
+	one a release wrote keeps the player's choice */
+	if (!update_build_is_prerelease(HALO_VITA_VERSION))
+	{
+		struct setting *channel = setting_named("HALO_UPDATE_CHANNEL");
+
+		if (named[channel - settings] && strcmp(channel->values[channel->choice], "experimental") == 0 &&
+			(!saved_build[0] || update_build_is_prerelease(saved_build)))
+		{
+			channel->choice = find_choice(channel, "stable");
+			vita_host_log("settings: the Update channel a pre-release build saved (Experimental) starts on Stable "
+				"in this release");
+		}
 	}
 	if (old_public && !named[setting_named("HALO_NET_HOST_PUBLIC") - settings])
 	{

@@ -197,13 +197,21 @@ is refused all the same.
 **Two wires, one switch** (`docs/crossplay.md`; `network.crossplay`,
 the Vita's Crossplay row; `port/linux/include/network_wire.h`). Off, the
 default, is the legacy Vita wire above, byte for byte as betas 1-4 speak it.
-On, the machine speaks upstream's wire as of OpenCE 6399ed9d (network
-version 26: its advertisement flags, where 0x02 is a game under way; its
+On, the machine speaks upstream's wire as of OpenCE 8102e711 (network
+version 29, as ChupathingyCE 7d6d8f24: its advertisement flags, where 0x02 is a game under way; its
 constant join token; signalling on `hceu` with message version 4 and a
 WebRTC block of kind none; listing format 1 under `hceu-lobby-1`; the
 13,120-byte settings record; upstream's simulation fixes 1f87b4ff,
-22fe5628, 792711ca and ab3c388c) and joins only PC hosts and servers of an
-accepted version; it hosts nothing, and sends none of this tree's own
+22fe5628, 792711ca and ab3c388c; and version 28's rules, which change no
+message but must be the same on every machine of a game:
+`network_wire_v28_rules`: a multiplayer script's `switch_bsp` keeps the
+game's first BSP, dynamic lights and the flashlight stay on past the Xbox's
+player and vehicle limits, a second weapon picked up while firing is
+readied; and version 29's map identity: a Custom Edition map by its own
+name, the record's map version its hash's first 32 bits) and joins only PC
+hosts and servers of an accepted version (29 alone: a host of 26 or 27
+plays those otherwise, and one of 28 names a map's version otherwise, so it
+is refused rather than played wrong); it hosts nothing, and sends none of this tree's own
 messages (map sharing, codes, relays, the ping table). A PC co-op game and
 a PC game of more than 16 players are joined after asking once
 (Experimental: `port/linux/src/crossplay_guard.c`). The switch is read
@@ -368,7 +376,12 @@ a pregame keep-alive every five seconds from the host
    would leave a falling body hanging until its turn round all of them),
    and a few of those at rest, round them all. A client takes the host's
    word on whether each is at rest even when its copy is close enough to
-   leave where it is. A client puts its copies there, and the difference is
+   leave where it is. On the crossplay wire a body's pose goes with it
+   (OpenCE e791cf9a): one lying limp that the host moves stops lying limp
+   (the blast that moved the host's reaches only the machines that see the
+   body's player), and one the host has at rest is on the ground, so it lies
+   limp again where it stops instead of keeping the pose of its fall in the
+   air. A client puts its copies there, and the difference is
    drawn fading over a few ticks (`render_interpolation.c`) instead of a
    jump. A client drives its own player's vehicle and sends where it is,
    which the host takes within a tolerance, as it does its own player's
@@ -512,7 +525,13 @@ Unity's Netcode for Entities, lightyear, netfox and the Ares source):
   (its header's game time); an unreliable one (the units, the input, the
   objects, the statistics, what units carry, the damage) that arrives after
   a newer of its kind is dropped, so a late datagram never puts anything
-  back.
+  back. A datagram's source address is all that says whose it is, so every
+  machine drops one stamped more than 20 seconds from the latest tick it
+  had from that machine (one stamped far ahead would have the machine's
+  newer ones taken for stale); a message over the connection is taken
+  whatever its tick. The host takes a client's hits, Discord user and
+  readiness only over its connection (ChupathingyCE's,
+  `network_distributed.c`).
 - **Taken at the tick.** The host takes a client's players' and vehicles'
   positions (the latest of each) at its next tick, not as each arrives.
 - **Fewer bytes.** Vectors travel in 16 bits a part, shields and health in

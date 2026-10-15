@@ -2,16 +2,16 @@
 # The crossplay join's map check (docs/crossplay.md T3; port/linux/game/
 # crossplay_maps.c, custom_edition_maps_crossplay_check): with crossplay on,
 # this machine joins only PC hosts, whose game settings name a map as OpenCE
-# does since its network version 22: custom_maps\<name> and the raw header
-# checksum for a Custom Edition map, the Xbox's own maps by their level paths
-# with 0. PC hosts have no map download: a map missing here, another copy or
+# does since its network version 29: custom_maps\<name> and its version (its
+# hash's first 32 bits) for a Custom Edition map, the Xbox's own maps by
+# their level paths with 0. PC hosts have no map download: a map missing here, another copy or
 # one that cannot load is refused, naming it, and never asked of the host.
 #
 # 1. unit: crossplay_maps_test.c (names, hostile ones among them, and the
 #    verdict for every kind of file), built as map_share_test.c is, with
-#    AddressSanitizer and UBSan; with the maps below, the checksum this
-#    machine reads of the Custom Edition map is the header's raw field (what
-#    an OpenCE host sends).
+#    AddressSanitizer and UBSan; with the maps below, the Custom Edition
+#    map's hash (its first 32 bits what an OpenCE host of 29 sends) is the
+#    one worked out here apart.
 # 2. stand-in (HALO_TEST_CE_MAP given, and not CROSSPLAY_MAPS_UNIT_ONLY=1): a
 #    PC host's map naming end to end, before T4's wire lets our client reach
 #    a real PC host (run_netns_crossplay_test.sh crossmaps is that, expected
@@ -24,16 +24,28 @@
 #      stock      the host on Blood Gulch (levels\test\bloodgulch\bloodgulch,
 #                 0): the joiner plays
 #      ce         the host on custom_maps\<map> (HALO_TEST_CE_MAP), the joiner
-#                 with the same file and PC maps on: plays, the checksum the
+#                 with the same file and PC maps on: plays, the version the
 #                 host's
 #      cemissing  the joiner without the map: refused, the map named, no map
 #                 share query sent (map sharing is this port's alone)
 #      cediffer   the joiner with another copy (one byte of its header's
-#                 checksum changed): refused as another version, no query
+#                 checksum changed, so its hash): refused as another version
 #      cexbox     the host on custom_maps\bloodgulch (Halo PC's Blood Gulch,
 #                 the CE map copied under that name), the joiner with the
 #                 Xbox's bloodgulch.map: refused, said to be an Xbox map
-#    CROSSPLAY_MAPS_CASES picks some ("stock ce cemissing cediffer cexbox").
+#    and the versions of OpenCE's network version 29 (the host on
+#    custom_maps\<map>, map.version its hash's first 32 bits, worked out
+#    here apart), the joiner's file found by name and version:
+#      cever      the joiner with only <map>_<8 hex digits of the version>.map
+#                 (as OpenCE saves a download beside another version): plays
+#                 it, the loader taking that file
+#      cebeside   the joiner with another version as <map>.map and the host's
+#                 as <map>_<digits>.map: plays the host's
+#      ceverwrong the joiner with another version under the host's version's
+#                 file name, <map>_<digits>.map, and none else: refused, never
+#                 loaded
+#    CROSSPLAY_MAPS_CASES picks some ("stock ce cemissing cediffer cexbox
+#    cever cebeside ceverwrong").
 #   HALO_TEST_CE_MAP   a Custom Edition multiplayer map whose resource maps
 #                      are not needed (Invader's pcgulch.map); the stand-in
 #                      part is skipped without it
@@ -79,8 +91,24 @@ clang=${CLANG:-$(sed -n 's/^linux_cc = //p' "$root/build.ninja" 2>/dev/null | he
 		"$out"/zlib/*.o -no-pie -Wl,--gc-sections -o "$out/crossplay_maps_test"
 	echo "crossplay_maps_test: ${sanitize:-no sanitizers}"
 ) || fail "the unit test did not build"
+# (a Custom Edition map's hash, whose first 32 bits OpenCE sends as its version, worked out here
+# apart from crossplay_maps.c: map_share_files.c's construction)
+map_hash() { # map_hash FILE -> 64 hex digits
+	python3 -I - "$1" <<'EOF'
+import hashlib, sys
+data = open(sys.argv[1], "rb").read()
+whole = hashlib.blake2b(digest_size=32)
+whole.update(b"OpenCE map 1")
+whole.update(len(data).to_bytes(4, "little"))
+for offset in range(0, len(data), 0x40000):
+    whole.update(hashlib.blake2b(data[offset:offset + 0x40000], digest_size=32).digest())
+print(whole.hexdigest())
+EOF
+}
+ce_hash=
+[ -n "$ce_map" ] && [ -f "$ce_map" ] && ce_hash=$(map_hash "$ce_map")
 if [ -x "$out/crossplay_maps_test" ]; then
-	CROSSPLAY_MAPS_TEST_CE_MAP=$ce_map CROSSPLAY_MAPS_TEST_XBOX_MAP=$data/maps/bloodgulch.map \
+	CROSSPLAY_MAPS_TEST_CE_MAP=$ce_map CROSSPLAY_MAPS_TEST_CE_HASH=$ce_hash CROSSPLAY_MAPS_TEST_XBOX_MAP=$data/maps/bloodgulch.map \
 		"$out/crossplay_maps_test" || status=1
 fi
 
@@ -91,27 +119,39 @@ elif [ -z "$ce_map" ] || [ ! -f "$ce_map" ]; then
 	echo "(no HALO_TEST_CE_MAP: the stand-in's netns cases skipped)"
 else
 	ce_name=$(basename "$ce_map" .map)
-	checksum=$(python3 -c 'import struct,sys; print("0x%08X" % struct.unpack_from("<I", open(sys.argv[1], "rb").read(0x68), 0x64)[0])' "$ce_map")
+	# (the version an OpenCE host of 29 sends: the hash's first 32 bits, 0 as 1)
+	ce_digits=${ce_hash:0:8}
+	[ "$ce_digits" = 00000000 ] && ce_digits=00000001
+	checksum=$(printf '0x%08X' "0x$ce_digits")
 	# a maps folder: the data's maps (links), then extras: "with" the CE map,
 	# "differ" another copy of it, "pcbloodgulch" the CE map as bloodgulch.map
-	maps_folder() { # maps_folder NAME [with|differ|pcbloodgulch]
+	# another version of the map: a copy, one byte of its header's checksum
+	# changed (so its hash too)
+	differ_copy() { # differ_copy PATH
+		cp "$ce_map" "$1"
+		python3 -I - "$1" <<'EOF'
+import sys
+with open(sys.argv[1], "r+b") as f:
+    f.seek(0x64); b = f.read(1); f.seek(0x64); f.write(bytes([b[0] ^ 0x5A]))
+EOF
+	}
+	maps_folder() { # maps_folder NAME [with|differ|pcbloodgulch|verfile|beside|verwrong]
 		local d=$out/data-$1
 		mkdir -p "$d/maps"
 		for f in "$data"/maps/*.map; do ln -sfn "$(readlink -f "$f")" "$d/maps/$(basename "$f")"; done
 		case ${2:-} in
 		with) ln -sfn "$(readlink -f "$ce_map")" "$d/maps/$ce_name.map" ;;
-		differ)
-			cp "$ce_map" "$d/maps/$ce_name.map"
-			# (the header's checksum, one byte of it: another version's)
-			python3 - "$d/maps/$ce_name.map" <<'EOF'
-import sys
-with open(sys.argv[1], "r+b") as f:
-    f.seek(0x64); b = f.read(1); f.seek(0x64); f.write(bytes([b[0] ^ 0x5A]))
-EOF
-			;;
+		differ) differ_copy "$d/maps/$ce_name.map" ;;
 		pcbloodgulch)
 			rm -f "$d/maps/bloodgulch.map"
 			ln -sfn "$(readlink -f "$ce_map")" "$d/maps/bloodgulch.map" ;;
+		# (the host's version under its version's file name, alone or beside
+		# another version as <map>.map; another version under that name)
+		verfile) ln -sfn "$(readlink -f "$ce_map")" "$d/maps/${ce_name}_$ce_digits.map" ;;
+		beside)
+			ln -sfn "$(readlink -f "$ce_map")" "$d/maps/${ce_name}_$ce_digits.map"
+			differ_copy "$d/maps/$ce_name.map" ;;
+		verwrong) differ_copy "$d/maps/${ce_name}_$ce_digits.map" ;;
 		esac
 		echo "$d"
 	}
@@ -147,7 +187,7 @@ EOF
 		played "$name" && fail "$name: the joiner played instead of refusing"
 	}
 	host_maps=$(maps_folder host with)
-	cases=${CROSSPLAY_MAPS_CASES:-stock ce cemissing cediffer cexbox}
+	cases=${CROSSPLAY_MAPS_CASES:-stock ce cemissing cediffer cexbox cever cebeside ceverwrong}
 	for c in $cases; do
 		case $c in
 		stock)
@@ -159,7 +199,7 @@ EOF
 		ce)
 			run_case ce "host:custom_maps\\$ce_name:slayer" "$host_maps" "$(maps_folder joiner-ce with)"
 			grep -aq "join: the host's map is custom_maps.$ce_name (copy $checksum)" "$out/ce/joiner/run.log" ||
-				fail "ce: the host did not name custom_maps\\$ce_name with its checksum $checksum"
+				fail "ce: the host did not name custom_maps\\$ce_name with its version $checksum"
 			grep -aq "the PC host's Custom Edition map '$ce_name' ($checksum) is this machine's" "$out/ce/joiner/data/debug.txt" ||
 				fail "ce: the joiner did not find its copy the host's"
 			played ce || fail "ce: the joiner did not play" ;;
@@ -173,6 +213,17 @@ EOF
 			run_case cexbox 'host:custom_maps\bloodgulch:slayer' "$(maps_folder host-pcbloodgulch pcbloodgulch)" \
 				"$(maps_folder joiner-xbox)"
 			refused cexbox "The PC host is playing the PC \(Custom Edition\) map Blood Gulch, but your bloodgulch.map is an Xbox map" ;;
+		cever|cebeside)
+			run_case $c "host:custom_maps\\$ce_name:slayer" "$host_maps" \
+				"$(maps_folder joiner-$c $([ $c = cever ] && echo verfile || echo beside))"
+			grep -aq "join: the host's map is custom_maps.$ce_name (copy $checksum)" "$out/$c/joiner/run.log" ||
+				fail "$c: the host did not name custom_maps\\$ce_name with its version $checksum"
+			grep -aq "crossplay: .*${ce_name}_$ce_digits.map hashed: version $ce_digits" "$out/$c/joiner/data/debug.txt" ||
+				fail "$c: the joiner did not find its ${ce_name}_$ce_digits.map of the host's version"
+			played $c || fail "$c: the joiner did not play" ;;
+		ceverwrong)
+			run_case ceverwrong "host:custom_maps\\$ce_name:slayer" "$host_maps" "$(maps_folder joiner-ceverwrong verwrong)"
+			refused ceverwrong "The PC host is playing the map $ce_name, which isn't in your maps folder" ;;
 		*) fail "unknown case $c" ;;
 		esac
 	done

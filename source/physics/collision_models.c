@@ -5,6 +5,7 @@ COLLISION_MODELS.C
 /* ---------- headers */
 
 #include "cseries.h"
+#include "cseries/errors.h" /* port: error */
 #include "collisions.h"
 
 #include "collision_bsp.h"
@@ -13,6 +14,7 @@ COLLISION_MODELS.C
 #include "collision_models.h"
 #include "collision_usage.h"
 
+#include "objects/object_definitions.h" /* port: MAXIMUM_REGIONS_PER_OBJECT */
 #include "objects/object_types.h"
 #include "objects/objects.h"
 #include "tag_files/tag_groups.h"
@@ -51,8 +53,14 @@ void collision_bsp_get_features_in_sphere(
 		long object_index,
 		struct collision_feature_list *features);
 void render_debug_collision_bsp(struct collision_bsp *bsp, const real_matrix4x3 *matrix);
+static boolean collision_node_region_valid(
+	struct collision_node const *collision_node);
 
 /* ---------- globals */
+
+/* port: whether a map's malformed collision model was reported (once each) */
+static boolean warned_about_collision_model_nodes;
+static boolean warned_about_collision_model_regions;
 
 /* ---------- public code */
 
@@ -67,10 +75,33 @@ boolean collision_model_instance_new(
 
 	if (object_definition->object.collision_model.index != NONE)
 	{
+		long node_count;
+
 		instance->object_index = object_index;
 		instance->model = collision_model_definition_get(object_definition->object.collision_model.index);
 		instance->region_permutation_indices = object->object.region_permutations;
 		instance->matrices = object_get_node_matrices(object_index);
+
+		/* port: a collision model (from the map) with more nodes than its
+		object has node matrices (its model's nodes: the retail collision
+		models have no more) tests only those the object has */
+		node_count = object->object.node_matrices.size / (long)sizeof(real_matrix4x3);
+		if (instance->model->nodes.count > node_count)
+		{
+			if (!warned_about_collision_model_nodes)
+			{
+				error(_error_silent, "collision model %s has %ld nodes, its object %ld",
+					tag_get_name(object_definition->object.collision_model.index),
+					(long)instance->model->nodes.count,
+					node_count);
+				warned_about_collision_model_nodes = TRUE;
+			}
+		}
+		else
+		{
+			node_count = instance->model->nodes.count;
+		}
+		instance->node_count = (short)MAX(node_count, 0);
 
 		result = TRUE;
 	}
@@ -90,11 +121,12 @@ boolean collision_model_test_sphere(
 	real_point3d transformed_center;
 	real_matrix4x3 inverted_matrix;
 
-	for (node_index = 0; node_index < instance->model->nodes.count; ++node_index)
+	/* port: (instance->node_count, collision_node_region_valid) */
+	for (node_index = 0; node_index < instance->node_count; ++node_index)
 	{
 		collision_node = TAG_BLOCK_GET_ELEMENT(&instance->model->nodes, node_index, struct collision_node);
 
-		if (collision_node->region_index != NONE)
+		if (collision_node_region_valid(collision_node))
 		{
 			perm = instance->region_permutation_indices[collision_node->region_index];
 
@@ -126,11 +158,12 @@ boolean collision_model_test_point(
 	short perm;
 	real_point3d transformed_point;
 
-	for (i = 0; i < instance->model->nodes.count; i++)
+	/* port: (instance->node_count, collision_node_region_valid) */
+	for (i = 0; i < instance->node_count; i++)
 	{
 		collision_node = TAG_BLOCK_GET_ELEMENT(&instance->model->nodes, i, struct collision_node);
 
-		if (collision_node->region_index != NONE)
+		if (collision_node_region_valid(collision_node))
 		{
 			perm = instance->region_permutation_indices[collision_node->region_index];
 
@@ -173,11 +206,12 @@ boolean collision_model_test_vector(
 
 	result->bsp_result.t = FLT_MAX;
 
-	for (node_index = 0; node_index < instance->model->nodes.count; ++node_index)
+	/* port: (instance->node_count, collision_node_region_valid) */
+	for (node_index = 0; node_index < instance->node_count; ++node_index)
 	{
 		struct collision_node const *collision_node = TAG_BLOCK_GET_ELEMENT(&instance->model->nodes, node_index, struct collision_node);
 
-		if (collision_node->region_index != NONE)
+		if (collision_node_region_valid(collision_node))
 		{
 			short perm = instance->region_permutation_indices[collision_node->region_index];
 
@@ -238,11 +272,12 @@ boolean collision_model_test_pill(
 
 	return_val = FALSE;
 
-	for (i = 0; i < instance->model->nodes.count; i++)
+	/* port: (instance->node_count, collision_node_region_valid) */
+	for (i = 0; i < instance->node_count; i++)
 	{
 		collision_node = TAG_BLOCK_GET_ELEMENT(&instance->model->nodes, i, struct collision_node);
 
-		if (collision_node->region_index != NONE)
+		if (collision_node_region_valid(collision_node))
 		{
 			perm = instance->region_permutation_indices[collision_node->region_index];
 
@@ -303,11 +338,12 @@ boolean collision_model_get_features_in_sphere(
 
 	return_val = FALSE;
 
-	for (i = 0; i < instance->model->nodes.count; i++)
+	/* port: (instance->node_count, collision_node_region_valid) */
+	for (i = 0; i < instance->node_count; i++)
 	{
 		collision_node = TAG_BLOCK_GET_ELEMENT(&instance->model->nodes, i, struct collision_node);
 
-		if (collision_node->region_index != NONE)
+		if (collision_node_region_valid(collision_node))
 		{
 			perm = instance->region_permutation_indices[collision_node->region_index];
 
@@ -360,11 +396,12 @@ void render_debug_collision_model(
 	short i;
 	short perm;
 
-	for (i = 0; i < instance->model->nodes.count; i++)
+	/* port: (instance->node_count, collision_node_region_valid) */
+	for (i = 0; i < instance->node_count; i++)
 	{
 		collision_node = TAG_BLOCK_GET_ELEMENT(&instance->model->nodes, i, struct collision_node);
 
-		if (collision_node->region_index != NONE)
+		if (collision_node_region_valid(collision_node))
 		{
 			perm = instance->region_permutation_indices[collision_node->region_index];
 
@@ -384,3 +421,29 @@ void render_debug_collision_model(
 }
 
 /* ---------- private code */
+
+/* port: whether a collision node is tested: one of no region (NONE) is
+not, as before, nor is one whose region (from the map) is none of an
+object's MAXIMUM_REGIONS_PER_OBJECT (the retail ones are at most 4) */
+static boolean collision_node_region_valid(
+	struct collision_node const *collision_node)
+{
+	if (collision_node->region_index == NONE)
+	{
+		return FALSE;
+	}
+	if (collision_node->region_index < 0 ||
+		collision_node->region_index >= MAXIMUM_REGIONS_PER_OBJECT)
+	{
+		if (!warned_about_collision_model_regions)
+		{
+			error(_error_silent, "a collision node's region #%d is not one of an object's %d",
+				collision_node->region_index,
+				MAXIMUM_REGIONS_PER_OBJECT);
+			warned_about_collision_model_regions = TRUE;
+		}
+		return FALSE;
+	}
+
+	return TRUE;
+}

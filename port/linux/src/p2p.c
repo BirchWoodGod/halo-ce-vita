@@ -4019,11 +4019,13 @@ static void update_hosting(void)
 void p2p_set_game_accepts_remote(int accepts)
 {
 	accepts = accepts != 0;
-	/* (a test's: HALO_TEST_HOST_LOCAL_GAME=1 hosts a Split Screen game for
-	internet play, listed, as beta.2 did, though its server answers no other
-	machine: run_netns_online_test.sh unjoinable) */
+#ifndef HALO_RELEASE
+	/* (a test's, never in release builds: HALO_TEST_HOST_LOCAL_GAME=1 hosts
+	a Split Screen game for internet play, listed, as beta.2 did, though its
+	server answers no other machine: run_netns_online_test.sh unjoinable) */
 	if (!accepts && getenv("HALO_TEST_HOST_LOCAL_GAME") && atoi(getenv("HALO_TEST_HOST_LOCAL_GAME")))
 		accepts = 1;
+#endif
 	if (accepts == p2p.game_accepts_remote)
 		return;
 	pthread_mutex_lock(&p2p_lock);

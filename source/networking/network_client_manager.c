@@ -396,6 +396,7 @@ symbols in this file:
 #ifdef HALO_LINUX
 #include "tag_files/tag_files.h"
 #include "custom_edition_maps.h"
+#include "custom_edition_cache.h" /* port: custom_edition_level_name */
 #include "network_wire.h"
 #include "crossplay_maps.h"
 #include "network_game_record.h"
@@ -1202,6 +1203,31 @@ void network_game_client_get_remote_server_address(
 	network_connection_get_address(client->connection, address, NULL);
 
 	return;
+}
+
+/* port: (crossplay) the version of the map the PC host's game this
+machine is in is on, when that is the level `level_name` (by its file name,
+letters of either case): the record's map.version, which since OpenCE's
+network version 29 tells a Custom Edition map's version by its hash
+(crossplay_maps.h). The cache loader takes the file of that version
+(custom_edition_cache.c's custom_edition_map_path). FALSE off the crossplay
+wire, out of a game, or on another level. */
+boolean network_game_client_crossplay_map_version(
+	char const *level_name,
+	unsigned long *version)
+{
+	struct network_game_client *client = global_network_game_client_get();
+	char name[sizeof(client->game.map.name) + 1];
+
+	*version = 0;
+	if (!network_wire_crossplay() || !level_name || !client || client->state < _network_game_client_state_pregame)
+		return FALSE;
+	csmemcpy(name, client->game.map.name, sizeof(client->game.map.name));
+	name[sizeof(client->game.map.name)] = 0;
+	if (!custom_edition_level_name(name) || csstrcasecmp(tag_name_strip_path(name), tag_name_strip_path(level_name)))
+		return FALSE;
+	*version = (unsigned long)client->game.map.version & 0xFFFFFFFFUL;
+	return TRUE;
 }
 
 struct network_game *network_game_client_get_game(
@@ -2302,11 +2328,14 @@ void network_game_client_accepted_into_game(
 		/* port (the tests: run_netns_online_test.sh fullcache): the lobby's
 		precache at once, as a frame of the pregame does when the host's
 		game settings are a frame or more behind its acceptance (the
-		internet's), which a test's link seldom makes happen */
+		internet's), which a test's link seldom makes happen; never in
+		release builds */
+#ifndef HALO_RELEASE
 		if (getenv("HALO_TEST_PRECACHE_AT_ACCEPT") && atoi(getenv("HALO_TEST_PRECACHE_AT_ACCEPT")))
 		{
 			network_game_client_update_precache_status(client);
 		}
+#endif
 #endif
 
 		network_game_generate_local_machine_name(settings_request.machine_name);
@@ -3715,6 +3744,26 @@ boolean network_game_client_advertised_game_compatible(
 				T("This game is on the Vita-to-Vita network (Crossplay off).\n\n"
 				"Crossplay is on: turn it off (Settings, Multiplayer) and restart to join Vita games."));
 		}
+		/* (port: an older PC host, of a build before OpenCE's build-201 or
+		ChupathingyCE's 0.7.4e (26: DamnationCE's still): its game plays a
+		few things otherwise than ours with no message changed, so it is
+		refused rather than played wrong, network_wire.h) */
+		else if (distributed && theirs < ours)
+		{
+			snprintf(message, sizeof(message),
+				T("This PC game's host runs an older version of OpenCE or ChupathingyCE (network version %u). "
+				"Crossplay joins hosts of network version %u, the current OpenCE and ChupathingyCE.\n\n"
+				"Ask the host to update, or join another game."),
+				theirs, ours);
+		}
+		else if (distributed)
+		{
+			snprintf(message, sizeof(message),
+				T("This PC game's host runs a newer version of OpenCE or ChupathingyCE (network version %u) "
+				"than this game can join (%u).\n\n"
+				"Update the game, or join another game."),
+				theirs, ours);
+		}
 		else
 		{
 			snprintf(message, sizeof(message),
@@ -3724,8 +3773,9 @@ boolean network_game_client_advertised_game_compatible(
 		}
 		if (tell)
 		{
-			network_event("not joining a host of network version %u%s (crossplay: this machine joins %u)", theirs,
-				distributed ? "" : " with the lockstep netcode", ours);
+			network_event("not joining a host of network version %u%s (crossplay: this machine joins %u)%s", theirs,
+				distributed ? "" : " with the lockstep netcode", ours,
+				distributed && theirs < ours ? ": an older PC build" : distributed ? ": a newer PC build" : "");
 			platform_show_message(T("Halo: cannot join this game"), message);
 		}
 		return FALSE;

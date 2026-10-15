@@ -7,11 +7,15 @@ since its network version 22 (4e8ed2f1 "Tell a joining player which map
 they are missing", 9d309f8d "Refuse a Custom Edition map of another version
 than the host's"; cache_files_map_version and custom_edition_map_checksum at
 6399ed9d), as DamnationCE (7be58b2b) has them, and ChupathingyCE's families
-(halo_map_families.h, map_family_wire_name, 8cb79900); all CC0.
+(halo_map_families.h, map_family_wire_name, 8cb79900); a Custom Edition
+map's version as OpenCE's network version 29 has it (3e0ba551,
+map_share_files.c's file hash and map_share_hash_version, at 8102e711), as
+ChupathingyCE plays it (a501871f); all CC0.
 */
 
 #include "crossplay_maps.h"
 #include "map_share_protocol.h"
+#include "../../third_party/monocypher/monocypher.h" /* (BLAKE2b, the map hash) */
 
 #include <stddef.h>
 #include <string.h>
@@ -55,7 +59,108 @@ static int suffix_is(
 	return length >= suffix_length && prefix_is(name + length - suffix_length, suffix);
 }
 
+/* whether `file` is a name a map file may have here: map sharing's rules,
+which keep out the characters a file system takes for something else,
+device names and the resource maps' and ui's names; the Xbox's levels'
+names besides, which a Custom Edition map may have (Halo PC's Blood Gulch
+is custom_maps\bloodgulch) */
+static int file_name_taken(
+	char const *file)
+{
+	return map_share_name_valid(file) || map_share_name_is_stock(file);
+}
+
 /* ---------- public code */
+
+int crossplay_map_file_hash(
+	crossplay_map_read_proc read,
+	void *context,
+	uint32_t size,
+	void *buffer,
+	uint32_t buffer_size,
+	unsigned char hash[CROSSPLAY_MAP_HASH_BYTES])
+{
+	static char const label[] = "OpenCE map 1";
+	unsigned char size_bytes[4];
+	unsigned char piece_hash[CROSSPLAY_MAP_HASH_BYTES];
+	crypto_blake2b_ctx whole;
+	uint32_t offset;
+
+	memset(hash, 0, CROSSPLAY_MAP_HASH_BYTES);
+	if (!read || !buffer || !buffer_size)
+	{
+		return 0;
+	}
+	size_bytes[0] = (unsigned char)size;
+	size_bytes[1] = (unsigned char)(size >> 8);
+	size_bytes[2] = (unsigned char)(size >> 16);
+	size_bytes[3] = (unsigned char)(size >> 24);
+	crypto_blake2b_init(&whole, CROSSPLAY_MAP_HASH_BYTES);
+	crypto_blake2b_update(&whole, (unsigned char const *)label, sizeof(label) - 1);
+	crypto_blake2b_update(&whole, size_bytes, sizeof(size_bytes));
+	/* (each piece hashed as it is read, a buffer at a time: no piece held
+	whole) */
+	for (offset = 0; offset < size; )
+	{
+		uint32_t piece_end = size - offset < CROSSPLAY_MAP_HASH_PIECE_BYTES ? size : offset + CROSSPLAY_MAP_HASH_PIECE_BYTES;
+		crypto_blake2b_ctx piece;
+
+		crypto_blake2b_init(&piece, CROSSPLAY_MAP_HASH_BYTES);
+		while (offset < piece_end)
+		{
+			uint32_t count = piece_end - offset < buffer_size ? piece_end - offset : buffer_size;
+
+			if (!read(context, offset, count, buffer))
+			{
+				crypto_wipe(&piece, sizeof(piece));
+				crypto_wipe(&whole, sizeof(whole));
+				return 0;
+			}
+			crypto_blake2b_update(&piece, buffer, count);
+			offset += count;
+		}
+		crypto_blake2b_final(&piece, piece_hash);
+		crypto_blake2b_update(&whole, piece_hash, sizeof(piece_hash));
+	}
+	crypto_blake2b_final(&whole, hash);
+
+	return 1;
+}
+
+unsigned long crossplay_map_hash_version(
+	unsigned char const hash[CROSSPLAY_MAP_HASH_BYTES])
+{
+	unsigned long version = (unsigned long)hash[0] << 24 | (unsigned long)hash[1] << 16 |
+		(unsigned long)hash[2] << 8 | (unsigned long)hash[3];
+
+	/* (0 is a version nothing is compared for) */
+	return version ? version : 1;
+}
+
+int crossplay_map_version_file_name(
+	char const *file,
+	unsigned long version,
+	char named[CROSSPLAY_MAP_FILE_BYTES])
+{
+	size_t length = file ? strlen(file) : 0;
+	static char const digits[] = "0123456789abcdef";
+	short index;
+
+	named[0] = 0;
+	if (!version || !length || length > CROSSPLAY_MAP_MAXIMUM_FILE_LENGTH)
+	{
+		return 0;
+	}
+	memcpy(named, file, length);
+	named[length] = '_';
+	for (index = 0; index < CROSSPLAY_MAP_HASH_DIGITS; index++)
+	{
+		named[length + 1 + index] = digits[(version >> (4 * (CROSSPLAY_MAP_HASH_DIGITS - 1 - index))) & 15];
+	}
+	named[length + 1 + CROSSPLAY_MAP_HASH_DIGITS] = 0;
+
+	return 1;
+}
 
 int crossplay_map_file_is_stock(
 	char const *file)
@@ -147,12 +252,8 @@ short crossplay_map_name_parse(
 	}
 	memcpy(file, leaf, leaf_length);
 	file[leaf_length] = 0;
-	/* (a name a map file may have here: map sharing's rules, which keep out
-	the characters a file system takes for something else, device names and
-	the resource maps' and ui's names; the Xbox's levels' names besides,
-	which a Custom Edition map may have: Halo PC's Blood Gulch is
-	custom_maps\bloodgulch) */
-	if (!map_share_name_valid(file) && !map_share_name_is_stock(file))
+	/* (a name a map file may have here: file_name_taken) */
+	if (!file_name_taken(file))
 	{
 		file[0] = 0;
 		return _crossplay_map_kind_invalid;
@@ -211,9 +312,10 @@ short crossplay_map_verdict(
 		default:
 			return _crossplay_map_unusable;
 		}
-		/* (0: a host that could not read its own map's checksum; nothing to
-		compare, as OpenCE's clients do) */
-		if (host_version && (local->checksum & 0xFFFFFFFFUL) != (host_version & 0xFFFFFFFFUL))
+		/* (the host's version, its hash's first 32 bits since OpenCE's 29;
+		0: a host that could not hash its own map, nothing to compare, as
+		OpenCE's clients do) */
+		if (host_version && (local->version & 0xFFFFFFFFUL) != (host_version & 0xFFFFFFFFUL))
 		{
 			return _crossplay_map_custom_edition_different;
 		}

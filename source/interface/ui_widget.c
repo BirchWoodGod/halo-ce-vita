@@ -4991,9 +4991,9 @@ short remap_sticks_for_local_player(
 static unsigned long __stdcall filesystem_initialization_thread_proc(
 	void *input)
 {
-#ifdef HALO_LINUX
+#if defined(HALO_LINUX) && !defined(HALO_RELEASE)
 	{
-		/* (test) HALO_TEST_FILESYSTEM_CHECK_MS=<ms>: the checks take that
+		/* (test, never in release builds) HALO_TEST_FILESYSTEM_CHECK_MS=<ms>: the checks take that
 		much longer, as on a Vita's memory card (5-10 s, more at a first
 		start), for the harness (port/vita/tests/run_no_movies_test.sh) */
 		extern char *getenv(const char *name);

@@ -11,7 +11,7 @@
 # WIRE_CONTRACT_EXPECTED_OPEN=G2,G3,...): a gate as the crossplay tasks land.
 #   OPENCE_DIR   a clone of OpenCE holding the pinned commit (read only:
 #                exported with git archive), default
-#                ~/halo-test-out/crossplay-D5yr/OpenCE
+#                ~/halo-test-out/xpv29.M6zO/OpenCE (8102e711)
 #   HALO_TEST_OUT, HALO_TEST_KEEP   the work folder (test_out.sh)
 # Needs the Linux build configured in this tree (build.ninja) and git.
 set -u

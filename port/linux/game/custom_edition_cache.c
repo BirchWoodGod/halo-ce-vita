@@ -50,6 +50,7 @@ each one, and their vertices read from the file as they load
 #include "custom_edition_maps.h"
 #include "crossplay_maps.h"
 #include "map_share_protocol.h"
+#include "network_wire.h"
 #include "tag_schema.h"
 #include "../src/lang.h"
 #include "custom_edition_mods.h"
@@ -672,22 +673,14 @@ static boolean file_path_exists(
 	return file_exists(file_reference_create_from_path(&reference, path, FALSE));
 }
 
-/* the file that holds the map `map_name` names: <maps>\<name>.map, or the
-OpenSauce <maps>\<name>.yelo when there is no .map; with `from_mods`, else
-the mod map of that name (custom_edition_mods.c), and *from_mods says which
-(a mod map is only loaded from there, and only by a caller that asks) */
-static boolean custom_edition_map_path(
-	char const *map_name,
-	char *path,
-	boolean *from_mods)
+/* <maps>\<name>.map, or the OpenSauce <maps>\<name>.yelo when there is no
+.map, in `path`: whether it is there */
+static boolean maps_folder_map_path(
+	char const *name,
+	char *path)
 {
 	char const *directory = cache_files_map_directory();
-	char const *name = tag_name_strip_path(map_name);
 
-	if (from_mods)
-	{
-		*from_mods = FALSE;
-	}
 	if (strlen(directory) + strlen(name) + strlen(OPENSAUCE_MAP_FILE_EXTENSION) >= MAP_PATH_SIZE)
 	{
 		return FALSE;
@@ -697,7 +690,252 @@ static boolean custom_edition_map_path(
 	{
 		sprintf(path, "%s%s%s", directory, name, OPENSAUCE_MAP_FILE_EXTENSION);
 	}
-	if (file_path_exists(path))
+
+	return file_path_exists(path);
+}
+
+/* (crossplay) the versions of the map files a PC host's game was looked
+for in (custom_edition_map_hash_version), by path and size: a map is read
+whole for its hash, and the join and the load look for its file again and
+again. The Vita reads a 50 MB map in a few seconds; it is read once. */
+enum
+{
+	REMEMBERED_HASHES = 8,
+};
+static struct
+{
+	char path[MAP_PATH_SIZE];
+	uint32_t size;
+	boolean read;
+	unsigned long version;
+} remembered_hashes[REMEMBERED_HASHES];
+static short next_remembered_hash;
+static volatile int remembered_hashes_lock;
+
+/* the version of the map file at `path`, as OpenCE's game record gives it
+since its network version 29: its hash's first 32 bits
+(crossplay_map_hash_version); FALSE when it cannot be read whole */
+static boolean custom_edition_map_hash_version(
+	char const *path,
+	unsigned long *version)
+{
+	struct custom_edition_file file;
+	unsigned char hash[CROSSPLAY_MAP_HASH_BYTES];
+	byte buffer[IDENTITY_READ_BYTES];
+	unsigned long started;
+	boolean read = FALSE;
+	unsigned long found = 0;
+	short index;
+
+	*version = 0;
+	if (strlen(path) >= MAP_PATH_SIZE || !custom_edition_file_open(&file, path))
+	{
+		return FALSE;
+	}
+	while (__atomic_exchange_n(&remembered_hashes_lock, 1, __ATOMIC_ACQUIRE))
+	{
+	}
+	for (index = 0; index < REMEMBERED_HASHES; index++)
+	{
+		if (remembered_hashes[index].path[0] && remembered_hashes[index].size == file.source.size &&
+			!strcmp(remembered_hashes[index].path, path))
+		{
+			read = remembered_hashes[index].read;
+			found = remembered_hashes[index].version;
+			break;
+		}
+	}
+	__atomic_store_n(&remembered_hashes_lock, 0, __ATOMIC_RELEASE);
+	if (index < REMEMBERED_HASHES)
+	{
+		custom_edition_file_close(&file);
+		*version = found;
+		return read;
+	}
+	started = system_milliseconds();
+	read = crossplay_map_file_hash(file.source.read, file.source.context, file.source.size, buffer, sizeof(buffer), hash);
+	custom_edition_file_close(&file);
+	found = read ? crossplay_map_hash_version(hash) : 0;
+	error(_error_silent, "crossplay: %s hashed: %s%08lx, %lu bytes in %lu ms", path, read ? "version " : "unread, ", found,
+		(unsigned long)file.source.size, system_milliseconds() - started);
+	while (__atomic_exchange_n(&remembered_hashes_lock, 1, __ATOMIC_ACQUIRE))
+	{
+	}
+	index = next_remembered_hash;
+	next_remembered_hash = (short)((next_remembered_hash + 1) % REMEMBERED_HASHES);
+	csstrncpy(remembered_hashes[index].path, path, MAP_PATH_SIZE - 1);
+	remembered_hashes[index].path[MAP_PATH_SIZE - 1] = 0;
+	remembered_hashes[index].size = file.source.size;
+	remembered_hashes[index].read = read;
+	remembered_hashes[index].version = found;
+	__atomic_store_n(&remembered_hashes_lock, 0, __ATOMIC_RELEASE);
+	*version = found;
+
+	return read;
+}
+
+/* whether the file at `path` is a Custom Edition cache (read only from its
+header: an Xbox map is not hashed to say it is not the host's) */
+static boolean custom_edition_map_file_is_custom_edition(
+	char const *path)
+{
+	struct custom_edition_file file;
+	struct cache_file_identity identity;
+	boolean custom_edition = FALSE;
+
+	if (custom_edition_file_open(&file, path))
+	{
+		custom_edition = cache_file_identify(&file.source, &identity) == _cache_file_status_ok &&
+			identity.format == _cache_file_format_custom_edition_cache;
+		custom_edition_file_close(&file);
+	}
+
+	return custom_edition;
+}
+
+/* (crossplay) a PC host's Custom Edition map of the version `version`
+(OpenCE's network version 29: crossplay_maps.h): <maps>\<name>.map, or else
+<maps>\<name>_<the version's 8 hex digits>.map (as OpenCE saves a download
+beside another version of its name), whichever is a Custom Edition cache of
+that version, in `path`. The name is held to the crossplay check's rules
+(crossplay_map_name_parse) before any file is looked for. FALSE if neither
+is: another version is never played in its place. */
+static boolean custom_edition_crossplay_version_path(
+	char const *name,
+	unsigned long version,
+	char *path)
+{
+	char level_name[CROSSPLAY_MAP_MAXIMUM_NAME_LENGTH + 1];
+	char file[CROSSPLAY_MAP_FILE_BYTES];
+	char named[CROSSPLAY_MAP_FILE_BYTES];
+	unsigned long found;
+	short attempt;
+
+	if (!version || strlen(CROSSPLAY_MAP_CUSTOM_EDITION_PREFIX) + strlen(name) >= sizeof(level_name))
+	{
+		return FALSE;
+	}
+	sprintf(level_name, "%s%s", CROSSPLAY_MAP_CUSTOM_EDITION_PREFIX, name);
+	if (crossplay_map_name_parse(level_name, (long)sizeof(level_name), file) != _crossplay_map_kind_custom_edition)
+	{
+		return FALSE;
+	}
+	/* (the name; the name and the version's digits; for version 1, which a
+	hash of first digits 00000000 has too, those digits) */
+	for (attempt = 0; attempt < 3; attempt++)
+	{
+		if (attempt == 0)
+		{
+			csstrncpy(named, file, sizeof(named) - 1);
+			named[sizeof(named) - 1] = 0;
+		}
+		else if (!crossplay_map_version_file_name(file, attempt == 1 ? version : 0xFFFFFFFFUL, named) ||
+			(attempt == 2 && version != 1))
+		{
+			continue;
+		}
+		if (attempt == 2)
+		{
+			memset(named + strlen(file) + 1, '0', CROSSPLAY_MAP_HASH_DIGITS);
+		}
+		if (maps_folder_map_path(named, path) && custom_edition_map_file_is_custom_edition(path) &&
+			custom_edition_map_hash_version(path, &found) && found == (version & 0xFFFFFFFFUL))
+		{
+			return TRUE;
+		}
+	}
+
+	return FALSE;
+}
+
+/* (crossplay) the network game's map version, when this machine is in a
+PC host's game on that level: network_client_manager.c's */
+boolean network_game_client_crossplay_map_version(
+	char const *level_name,
+	unsigned long *version);
+
+static void remembered_answers_forget(
+	char const *name);
+
+/* (crossplay) the PC host's map the join's check last found here, and its
+version (custom_edition_cache_crossplay_map_chosen): the lobby precaches the
+map before the client's game record holds the host's settings */
+static struct
+{
+	char name[CROSSPLAY_MAP_FILE_BYTES];
+	unsigned long version;
+} crossplay_map_chosen;
+static volatile int crossplay_map_chosen_lock;
+
+void custom_edition_cache_crossplay_map_chosen(
+	char const *file_name,
+	unsigned long version)
+{
+	while (__atomic_exchange_n(&crossplay_map_chosen_lock, 1, __ATOMIC_ACQUIRE))
+	{
+	}
+	csstrncpy(crossplay_map_chosen.name, file_name ? file_name : "", sizeof(crossplay_map_chosen.name) - 1);
+	crossplay_map_chosen.name[sizeof(crossplay_map_chosen.name) - 1] = 0;
+	crossplay_map_chosen.version = version;
+	__atomic_store_n(&crossplay_map_chosen_lock, 0, __ATOMIC_RELEASE);
+	/* (what was found of that name before, by another version or none) */
+	if (file_name && file_name[0])
+	{
+		remembered_answers_forget(file_name);
+	}
+
+	return;
+}
+
+/* the version of the PC host's map `name` (a file name) this machine plays:
+its game record's, or the join's check's while that has none */
+static boolean custom_edition_crossplay_map_version(
+	char const *map_name,
+	unsigned long *version)
+{
+	char const *name = tag_name_strip_path(map_name);
+	boolean chosen;
+
+	if (network_game_client_crossplay_map_version(map_name, version) && *version)
+	{
+		return TRUE;
+	}
+	while (__atomic_exchange_n(&crossplay_map_chosen_lock, 1, __ATOMIC_ACQUIRE))
+	{
+	}
+	chosen = crossplay_map_chosen.name[0] && crossplay_map_chosen.version && !csstrcasecmp(crossplay_map_chosen.name, name);
+	*version = chosen ? crossplay_map_chosen.version : 0;
+	__atomic_store_n(&crossplay_map_chosen_lock, 0, __ATOMIC_RELEASE);
+
+	return chosen;
+}
+
+/* the file that holds the map `map_name` names: <maps>\<name>.map, or the
+OpenSauce <maps>\<name>.yelo when there is no .map; with `from_mods`, else
+the mod map of that name (custom_edition_mods.c), and *from_mods says which
+(a mod map is only loaded from there, and only by a caller that asks). With
+crossplay on, in a PC host's game on that level with a version (OpenCE's
+network version 29): the file of that version
+(custom_edition_crossplay_version_path), and none if this machine has none,
+as OpenCE's custom_edition_map_path (8102e711, CC0) takes it: another
+version's tags are not the host's, and a mod map is never the host's */
+static boolean custom_edition_map_path(
+	char const *map_name,
+	char *path,
+	boolean *from_mods)
+{
+	char const *name = tag_name_strip_path(map_name);
+	unsigned long version;
+
+	if (from_mods)
+	{
+		*from_mods = FALSE;
+	}
+	if (network_wire_crossplay() && custom_edition_crossplay_map_version(map_name, &version))
+	{
+		return custom_edition_crossplay_version_path(name, version, path);
+	}
+	if (maps_folder_map_path(name, path))
 	{
 		return TRUE;
 	}
@@ -1635,6 +1873,7 @@ unsigned long custom_edition_cache_map_identity(
 
 void custom_edition_cache_crossplay_facts(
 	char const *file_name,
+	unsigned long host_version,
 	struct crossplay_local_map *local)
 {
 	char path[MAP_PATH_SIZE];
@@ -1645,7 +1884,14 @@ void custom_edition_cache_crossplay_facts(
 	csmemset(local, 0, sizeof(*local));
 	local->file = _crossplay_map_file_absent;
 	local->pc_maps_on = halo_custom_edition_enabled();
-	if (!file_name || !file_name[0] || !custom_edition_map_path(file_name, path, NULL))
+	if (!file_name || !file_name[0])
+	{
+		return;
+	}
+	/* (the host's version, as <name>.map or <name>_<digits>.map; else this
+	machine's <name>.map, whatever it is, said as what it is: another
+	version is told from its version below) */
+	if (!custom_edition_crossplay_version_path(file_name, host_version, path) && !maps_folder_map_path(file_name, path))
 	{
 		return;
 	}
@@ -1660,8 +1906,8 @@ void custom_edition_cache_crossplay_facts(
 	if (status == _cache_file_status_ok && identity.format == _cache_file_format_custom_edition_cache)
 	{
 		local->file = _crossplay_map_file_custom_edition;
-		/* (the header's checksum as it is: OpenCE's custom_edition_map_checksum) */
-		local->checksum = identity.checksum;
+		/* (its version: its hash's first 32 bits, as OpenCE's 29 sends) */
+		custom_edition_map_hash_version(path, &local->version);
 	}
 	else if (status == _cache_file_status_ok && identity.format == _cache_file_format_xbox_cache)
 	{

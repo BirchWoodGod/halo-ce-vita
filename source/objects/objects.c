@@ -2030,6 +2030,12 @@ void objects_scripting_set_scale(
 	return;
 }
 
+/* port: declared, not left implicit: an undeclared call reads its result as a whole
+int, where these narrower results fill only part of the register (an x86 build with
+link-time optimisation read the rest as garbage: every init.txt command was refused as
+"playing in another's game"; the Vita's ARM ABI widens them, but see tools/vita_build.py) */
+boolean network_game_distributed_client(void);
+
 static void object_delete_initial_recursive(
 	long object_index,
 	boolean delete_siblings)
@@ -2037,7 +2043,12 @@ static void object_delete_initial_recursive(
 	struct object_header_datum *header = object_header_get(object_index);
 	struct object_datum *object = object_get(object_index);
 
-	if (game_engine_running() && object->object.type == _object_type_weapon)
+	/* port: a client of the distributed netcode deletes the host's objects
+	on the host's word, a flag the host returns or resets included, so a
+	client's flag deletion is no bug (ChupathingyCE 2ec77029, CC0: it halted
+	debug builds in CTF games online; release builds check nothing) */
+	if (game_engine_running() && object->object.type == _object_type_weapon &&
+		!network_game_distributed_client())
 	{
 		match_assert("c:\\halo\\SOURCE\\objects\\objects.c", 829, !(weapon_is_flag(object_index)));
 	}
@@ -5072,12 +5083,6 @@ static boolean objects_remote_lod_active(void)
 	}
 	return active;
 }
-
-/* port: declared, not left implicit: an undeclared call reads its result as a whole
-int, where these narrower results fill only part of the register (an x86 build with
-link-time optimisation read the rest as garbage: every init.txt command was refused as
-"playing in another's game"; the Vita's ARM ABI widens them, but see tools/vita_build.py) */
-boolean network_game_distributed_client(void);
 
 static boolean objects_remote_lod_skipped(
 	short absolute_index,

@@ -13,11 +13,17 @@
 #           are added again
 #   xbox    without the Halo PC files: the Xbox's Multiplayer screen, nothing
 #           added
+#   pause   Campaign from the main menu (a new profile, Normal), the level's
+#           pause menu, Quit to Main Menu: a game map's widget runs its
+#           function and is back at the main menu, and asked about deleting
+#           a profile (HALO_TEST_WIDGET_FUNCTION=76, never run) the main
+#           menu's widget may, a game map's may not
+#           (ui_widget_event_handler_functions.c ui_widget_function_denied)
 #
 # Each must log no "is not a tag index" (a tag of ours read as the empty
 # one), no assertion or exception, and exit by itself.
 #
-#   run_menus_test.sh [CASE...]      (default: fresh level xbox)
+#   run_menus_test.sh [CASE...]      (default: fresh level xbox pause)
 #   HALO_TEST_VITA        the harness (default build/linux/halo of this tree)
 #   HALO_TEST_DATA        a folder with the game's maps folder (the Xbox maps)
 #   HALO_TEST_DATA_MENUS  the same with Halo PC's bitmaps.map and loc.map in
@@ -38,7 +44,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox}
+cases=${*:-fresh level xbox pause}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
 
@@ -91,6 +97,23 @@ check() { # NAME SCREENS_WANTED
 	fi
 }
 
+# (pause: Campaign, a new profile, Normal, the level started; its cinematic
+# skipped, the pause menu, down to Quit to Main Menu, A)
+pause_pad=${HALO_TEST_PAUSE_PAD:-"a:150:3000 start:150:3000 wait:150:6000 a:150:45000 start:150:3000 down:150:800 down:150:800 down:150:800 a:150:3000 wait:150:8000"}
+check_pause() {
+	local log=$out/pause/run.log
+	echo "--- pause"
+	grep -aE "ui: screen|widgets: |test pad: " "$log" | head -40
+	[ "$(cat "$out/pause/exit")" = 0 ] || fail pause "exit $(cat "$out/pause/exit")"
+	grep -aqiE "assert|exception|halt" "$log" && fail pause "an assertion, exception or halt"
+	grep -aq "widgets: function 76 from the main menu's widget allowed" "$log" ||
+		fail pause "the main menu's widgets may not delete a profile"
+	grep -aq "widgets: function 76 from a game map's widget refused" "$log" ||
+		fail pause "a game map's widget may delete a profile"
+	[ "$(grep -ac 'ui: screen ui.shell.main_menu.main_menu' "$log")" -ge 2 ] ||
+		fail pause "the pause menu's Quit to Main Menu did not go back to the main menu"
+}
+
 for case in $cases; do
 	case $case in
 	fresh)
@@ -100,11 +123,15 @@ for case in $cases; do
 		init_line='map_name levels\a10\a10' run level "$menus_data" 90 "$pad" "HALO_TEST_COMMANDS=L150:@quit"
 		grep -aq "ui: screen ui.shell.main_menu.main_menu" "$out/level/run.log" || fail level "the level did not go back to the main menu"
 		check level pc ;;
+	pause)
+		run pause "$menus_data" "${HALO_TEST_PAUSE_SECONDS:-120}" "$pause_pad" "HALO_TEST_COMMANDS=L150:@skip" \
+			HALO_TEST_WIDGET_FUNCTION=76
+		check_pause ;;
 	xbox)
 		run xbox "$data" 40 "$pad"
 		check xbox xbox ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"

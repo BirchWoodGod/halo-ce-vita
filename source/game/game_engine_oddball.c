@@ -943,14 +943,19 @@ static void oddball_engine_update(
 		for (ball_index = 0; ball_index < ball_spawn_count; ball_index++)
 		{
 			long owner_player_index = oddball_globals.current_ball_owner[ball_index];
+			/* port: an owner who quit keeps the ball (it passes by killing
+			him, and his unit was deleted, not killed), and his slot can be
+			another's since (network_game_spawn_player), as can the owner a
+			client is sent: a handle no player has marks no goal */
+			struct player_datum *owner = owner_player_index == NONE ? NULL : player_try_and_get(owner_player_index);
 
-			if (owner_player_index == NONE)
+			if (!owner)
 			{
 				game_engine_clear_goal_position((short)ball_index);
 			}
 			else
 			{
-				long unit_index = player_get(owner_player_index)->unit_index;
+				long unit_index = owner->unit_index;
 
 				if (unit_index != NONE)
 				{
