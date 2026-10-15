@@ -418,6 +418,37 @@ boolean autoaim_compute_target(
 	return result;
 }
 
+#ifdef HALO_LINUX
+/* (port) autoaim_compute_target's answer and its angle under maximum_angle,
+as autoaim_compute_target(...) && fabs(target_angle) < maximum_angle reads
+them, the angle tested first: the line of sight, a ray through the
+structure and the objects, is cast only for a target in that cone. The
+same values (the target point, the direction and the angle are worked out
+as there, from the same inputs), the same answer. */
+boolean autoaim_target_within_angle(
+	long object_index,
+	real_point3d const *position,
+	real_vector3d const *direction,
+	long unit_index,
+	double maximum_angle)
+{
+	real_point3d target_position;
+	real_vector3d target_direction;
+	real target_distance;
+	real target_angle;
+
+	object_compute_autoaim_target(object_index, position, direction, &target_position);
+	vector_from_points3d(position, &target_position, &target_direction);
+	target_distance= normalize3d(&target_direction);
+	if (target_distance==0.f)
+		return FALSE;
+	target_angle= arccosine(PIN(dot_product3d(direction, &target_direction), -1.f, 1.f));
+	if (!(fabs(target_angle) < maximum_angle))
+		return FALSE;
+	return aim_assist_clear_line_of_sight(position, &target_position, unit_index, object_index);
+}
+#endif
+
 static short find_aim_assist_targets_recursive(
 	struct aim_assist_parameters const *parameters,
 	long object_index,
