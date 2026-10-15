@@ -40,11 +40,8 @@ It is not an emulator: the game's own code is compiled for the Vita's ARM
 processor, and its Direct3D rendering is translated to the Vita's GPU.
 
 > [!NOTE]
-> **1.1.0 beta 3 is the recommended version.** It is still a beta, but it is
-> more stable than 1.0.3, so it is the [latest release](https://github.com/BirchWoodGod/halo-ce-vita/releases/latest)
-> until 1.1.0 is final. This README describes 1.1.0.
-> [1.0.3](https://github.com/BirchWoodGod/halo-ce-vita/releases/tag/v1.0.3)
-> is still on the releases page.
+> **[1.1.0](https://github.com/BirchWoodGod/halo-ce-vita/releases/latest) is the current release**, and this README describes it.
+> Install it over 1.0.3 or any 1.1.0 beta: maps, saves and settings carry over.
 
 > [!IMPORTANT]
 > **No game data is included.** You need your own **Xbox** copy of Halo:
@@ -109,10 +106,9 @@ processor, and its Direct3D rendering is translated to the Vita's GPU.
 ### Known issues
 
 - The biggest fights still drop frames (see [Performance](#performance)).
-- Downloading a map to join a game under way works from dedicated servers
-  (with `sv_map_download 1`) when the joiner has 1.1.0-beta.3 or later. A
-  Vita host offers it from beta 4; until then, join a Vita's game while it
-  is in the lobby.
+- Downloading a map to join a game under way needs a host on 1.1.0 (or a
+  dedicated server with `sv_map_download 1`); with an older Vita host, join
+  while its game is in the lobby.
 - In co-op the host's Vita runs everyone's AI and the level's scripts, so it
   slows down with three or four players: co-op takes two by default, and
   three or four are experimental.
@@ -366,7 +362,7 @@ Edition map, it is also offered to turn PC maps on). In the lobby, the
 host's lobby shows each download's progress, and the match waits for it. A
 Vita that joins a dedicated server's game already under way downloads the
 map first, out of the game, at a lower speed that leaves the players' game
-alone, and then joins it (a Vita host does this from beta 4). A download that stops goes on from where it stopped next time. A joiner still needs its own Halo PC files for a Custom Edition map.
+alone, and then joins it (a Vita host on 1.1.0 does this too). A download that stops goes on from where it stopped next time. A joiner still needs its own Halo PC files for a Custom Edition map.
 In a game from the public server browser the question warns that the host
 is a stranger: only accept maps from players you trust. **Map downloads**
 (Modded maps) is **Ask** (the default), **Not public games** or **Never**,
@@ -399,10 +395,13 @@ controller** does; this is where each is on the Vita as shipped:
 The settings panel's **General** tab:
 
 - **Check for updates** is its first row: press Cross and the game asks
-  GitHub for the newest version (nothing is downloaded). The answer shows
-  right under it, beside the build's version: "Version 1.1.0-beta.3 - Up to
-  date", or, in amber, "Update available: 1.1.0-beta.4" and where to get it
-  (github.com/BirchWoodGod/halo-ce-vita/releases).
+  GitHub for the newest version. The answer shows right under it, beside the
+  build's version: "Version 1.1.0 - Up to date", or, in amber, "Update
+  available" with the version. Press it again and the game asks whether to
+  download it; it checks the download against the project's signature and keeps it as
+  `ux0:data/haloce-vita/update/halo-<version>.vpk`. Install that file with
+  VitaShell; nothing is installed for you, and a file that doesn't match the
+  signature is never kept.
 - Look sensitivity, Invert look, Crouch, Gyro aiming and Rear touch guard,
   then the pages below.
 - **Button layout** puts each Xbox button (A, B, X, Y, Black, White, the
@@ -424,8 +423,8 @@ The settings panel's **General** tab:
   Tilt steering. Lay the Vita still for a second now and then: that teaches
   it the gyroscope's drift.
 - **Advanced**: Stick deadzone, **Reset controls**, Show dev settings, and
-  the **Update channel** Check for updates looks at (Experimental: betas
-  too; Stable: releases only, greyed out on a beta build).
+  the **Update channel** Check for updates looks at (Stable, the default:
+  releases only; Experimental: betas too).
 
 ## Settings panel
 
