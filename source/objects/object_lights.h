@@ -59,6 +59,12 @@ void lights_illumination_at_point(union real_point3d const *point, struct locati
 
 void light_disconnect_from_map(long light_index);
 void light_reconnect_to_map(long light_index);
+#ifdef HALO_LINUX
+/* (port) an object's attached light taken off the map and put back as the
+object's lighting is recomputed (objects.c's object_connect_lights), a dark
+one left off it (object_lights.c, HALO_DARK_LIGHTS) */
+void light_attached_reconnect(long light_index, boolean disconnect, boolean reconnect);
+#endif
 void lights_disconnect_from_structure_bsp(
 	void);
 void lights_reconnect_to_structure_bsp(
