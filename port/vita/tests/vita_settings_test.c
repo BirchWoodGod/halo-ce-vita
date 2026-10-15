@@ -2328,6 +2328,27 @@ static void test_updates(void)
 			strstr(file_text(SETTINGS_FILE), "HALO_UPDATE_CHANNEL=experimental\n"), "Experimental chosen, saved");
 		press(VITA_BUTTON_RIGHT);
 		check(!strcmp(getenv("HALO_UPDATE_CHANNEL"), "stable"), "back to Stable");
+		check(strstr(file_text(SETTINGS_FILE), "HALO_SETTINGS_BUILD=" HALO_VITA_VERSION "\n") != NULL,
+			"settings.txt names the build that wrote it");
+		/* (a beta's settings.txt: its Experimental was no choice, so Stable;
+		one this release wrote keeps Experimental) */
+		write_file(SETTINGS_FILE, "HALO_UPDATE_CHANNEL=experimental\n", sizeof("HALO_UPDATE_CHANNEL=experimental\n") - 1);
+		log_text[0] = 0;
+		vita_settings_load();
+		check(!strcmp(getenv("HALO_UPDATE_CHANNEL"), "stable") &&
+			strstr(log_text, "settings: the Update channel a pre-release build saved (Experimental) starts on Stable"),
+			"a beta's settings.txt (no build line) with Experimental: Stable, logged");
+		write_file(SETTINGS_FILE, "HALO_SETTINGS_BUILD=1.1.0-beta.5\nHALO_UPDATE_CHANNEL=experimental\n",
+			sizeof("HALO_SETTINGS_BUILD=1.1.0-beta.5\nHALO_UPDATE_CHANNEL=experimental\n") - 1);
+		vita_settings_load();
+		check(!strcmp(getenv("HALO_UPDATE_CHANNEL"), "stable"), "a beta-written settings.txt with Experimental: Stable");
+		write_file(SETTINGS_FILE, "HALO_SETTINGS_BUILD=" HALO_VITA_VERSION "\nHALO_UPDATE_CHANNEL=experimental\n",
+			sizeof("HALO_SETTINGS_BUILD=" HALO_VITA_VERSION "\nHALO_UPDATE_CHANNEL=experimental\n") - 1);
+		log_text[0] = 0;
+		vita_settings_load();
+		check(!strcmp(getenv("HALO_UPDATE_CHANNEL"), "experimental") && !strstr(log_text, "starts on Stable"),
+			"a release-written settings.txt keeps Experimental");
+		vita_settings_set("HALO_UPDATE_CHANNEL", "stable");
 	}
 	/* Check for updates: General's first row, in the background, its
 	answer beside the version under it; the controls' rows after a gap */
