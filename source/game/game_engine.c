@@ -2240,6 +2240,38 @@ void game_engine_post_rasterize_post_game(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) Whether any biped the search below can take (find_closest_player_
+callback: not invisible, not dead, not the player's own) stands within the
+20 world units of the camera that it asks of the one it chooses
+(distance_squared < 400.0f, from the same camera position to the same
+object position). With none, the search - every collideable object of
+every cluster the camera's cluster can see, then each living biped's
+autoaim test - chooses none, so it is not made; with any, it is made as
+before. In a 32-player game it cost the Pi 0.55 ms a frame, and the Vita
+some 5 ms, with no one near most of the time. */
+static boolean find_closest_player_candidate_near(
+	long unit_index,
+	long player_index)
+{
+	struct object_iterator iterator;
+	struct object_datum *object;
+	real_point3d camera_position;
+
+	unit_get_camera_position(unit_index, &camera_position);
+	object_iterator_new(&iterator, _object_mask_biped, 0);
+	while ((object = object_iterator_next(&iterator)) != NULL)
+	{
+		if (find_closest_player_callback(iterator.index, &player_index) &&
+			distance_squared3d(&camera_position, &object->object.position) < 400.0f)
+		{
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+#endif
+
 static long find_closest_player_index(
 	long player_index)
 {
@@ -2264,7 +2296,8 @@ static long find_closest_player_index(
 
 	if (best_object_index == NONE &&
 		unit_index != NONE &&
-		object_try_and_get_and_verify_type(unit_index, _object_mask_unit))
+		object_try_and_get_and_verify_type(unit_index, _object_mask_unit) &&
+		find_closest_player_candidate_near(unit_index, player_index))
 #else
 	long unit_index = player->unit_index;
 
@@ -2301,6 +2334,31 @@ static long find_closest_player_index(
 			real target_distance;
 			real target_angle;
 
+#ifdef HALO_LINUX
+			/* (port) the same tests, the cheap ones first: a candidate
+			more than 20 units away, or outside the 7.5 degrees, is passed
+			over before its line of sight is cast (autoaim_target_within_
+			angle; up to 32 rays a frame through the structure and every
+			object, for players across the map). None of them changes
+			anything, so the one chosen is the one chosen before. */
+			(void)target_position;
+			(void)target_direction;
+			(void)target_distance;
+			(void)target_angle;
+			if (distance_squared < 400.0f &&
+				distance_squared < 900.0f &&
+				(candidate->unit.active_camouflage < 1.0f ||
+					player->player_display_index == player_index_from_unit_index(candidate_object_index)) &&
+				autoaim_target_within_angle(
+					object_indices[object_index],
+					&camera_position,
+					&facing_direction,
+					unit_index,
+					0.13083334267139435))
+			{
+				best_object_index = object_indices[object_index];
+			}
+#else
 			if ((candidate->unit.active_camouflage < 1.0f ||
 				player->player_display_index == player_index_from_unit_index(candidate_object_index)) &&
 				autoaim_compute_target(
@@ -2318,6 +2376,7 @@ static long find_closest_player_index(
 			{
 				best_object_index = object_indices[object_index];
 			}
+#endif
 		}
 	}
 
@@ -7425,16 +7484,13 @@ static void internal_rasterize_target_name(
 
 	player = player_get(player_index);
 	target_player_index = NONE;
-	if (player->local_player_index != NONE && player->unit_index != NONE)
-	{
-		target_player_index = find_closest_player_index(player_index);
-		if (target_player_index == player_index)
-			target_player_index = NONE;
-	}
 
 	/* This is drawn once a frame, several frames per tick
 	(render_interpolation.c): the hold time counts ticks, as it did on the
-	Xbox. */
+	Xbox. (port) The player aimed at is looked for only on the frame that
+	counts the tick, the one frame that reads it: a frame between ticks
+	threw the search away (in a 32-player game a quarter of the Pi's
+	render, triage/perf-111-crossplay.md). */
 	{
 		static long last_game_times[MAXIMUM_LOCAL_PLAYERS];
 		long *last_game_time = NULL;
@@ -7446,6 +7502,12 @@ static void internal_rasterize_target_name(
 		}
 		if (!last_game_time || *last_game_time != game_time_get())
 		{
+			if (player->local_player_index != NONE && player->unit_index != NONE)
+			{
+				target_player_index = find_closest_player_index(player_index);
+				if (target_player_index == player_index)
+					target_player_index = NONE;
+			}
 			if (last_game_time)
 				*last_game_time = game_time_get();
 	if (player->player_display_index != target_player_index)
