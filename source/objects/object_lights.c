@@ -2336,6 +2336,92 @@ void light_reconnect_to_map(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) HALO_DARK_LIGHTS (1, the default; 0 off). Every unit's, weapon's
+and vehicle's attached lights are taken off the map and put back every
+tick the object's lighting is recomputed (objects.c, object_connect_lights:
+the dynamic lighting flag is never cleared), each with its marker found by
+name, its sphere's clusters walked and its cluster references remade. In a
+multiplayer game most of them are dark: the players' flashlights off, the
+weapons' muzzle flashes between shots (a 32-player crossplay game of moving
+stand-ins: 60% of the lights put back, the rest the plasma weapons'
+flares; the lights were 15-20% of a client's tick,
+triage/perf-111-crossplay.md). The render alone reads the lights' cluster
+lists (lights_preprocess_scene, lights_find_for_object_dynamic; the units'
+illumination is debug only, units.c), and it passes over a dark light: one
+whose colour, worked out from its object's function value and change
+colour as lights_preprocess_scene works it out, is black is given no
+rasterizer light, no lens flare and no new radius, and an object it
+reaches takes nothing from it (rasterizer_light_index NONE). So an
+attached light that is dark when its object's lighting is recomputed -
+after the object's function values, the values the render reads - is left
+off the map (taken off if it was on), its marker not looked up, and is put
+back as before the tick its colour is not black. What a dark light no
+longer does: take one of the MAXIMUM_RENDERED_LIGHTS (128) places of a
+scene's visible lights, which only a scene of more than 128 showed.
+Unattached lights (effects') and a light whose object it cannot get are
+put back as before. */
+static boolean light_attached_dark(
+	struct light_datum const *light)
+{
+	struct point_light_definition *definition;
+	struct object_datum *object;
+	real_rgb_color const *change_color;
+	real_rgb_color color;
+	real intensity;
+
+	if (light->parent_light_index != NONE || light->object_index == NONE)
+		return FALSE;
+	object = object_try_and_get(light->object_index);
+	if (!object)
+		return FALSE;
+	definition = light_definition_get(light->definition_index);
+	object_get_function_value(light->object_index, light->function_index, &intensity);
+	change_color = light->color_function_index == NONE
+		? global_real_rgb_white
+		: &object->object.outgoing_change_colors[light->color_function_index];
+	rgb_colors_interpolate_and_scale(
+		&color,
+		definition->color_interpolation_flags,
+		&definition->color_lower_bound,
+		&definition->color_upper_bound,
+		change_color,
+		intensity);
+	return color.red == 0.0f && color.green == 0.0f && color.blue == 0.0f;
+}
+
+static boolean light_dark_lights_enabled(
+	void)
+{
+	static int enabled = -1;
+
+	if (enabled < 0)
+	{
+		char const *setting = getenv("HALO_DARK_LIGHTS");
+
+		enabled = setting && *setting ? atoi(setting) != 0 : 1;
+	}
+	return enabled;
+}
+
+void light_attached_reconnect(
+	long light_index,
+	boolean disconnect,
+	boolean reconnect)
+{
+	struct light_datum *light = light_get(light_index);
+	boolean connects = TEST_FLAG(light->flags, _point_light_connects_to_map_bit);
+
+	/* (one left off the map below has nothing to take off) */
+	if (disconnect && (!connects || TEST_FLAG(light->flags, _point_light_connected_to_map_bit)))
+		light_disconnect_from_map(light_index);
+	if (reconnect && !(connects && light_dark_lights_enabled() && light_attached_dark(light)))
+		light_reconnect_to_map(light_index);
+
+	return;
+}
+#endif
+
 static void find_point_lights_for_object_in_cluster(
 	long object_index,
 	short cluster_index,

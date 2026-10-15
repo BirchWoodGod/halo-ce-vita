@@ -5466,6 +5466,10 @@ static void object_connect_lights(
 		{
 			if (!object->object.attachment_types[i] && object->object.attachment_indices[i]!=NONE)
 			{
+#ifdef HALO_LINUX
+				/* (port: a dark light left off the map, object_lights.c) */
+				light_attached_reconnect(object->object.attachment_indices[i], disconnect, reconnect);
+#else
 				if (disconnect)
 				{
 					light_disconnect_from_map(object->object.attachment_indices[i]);
@@ -5474,6 +5478,7 @@ static void object_connect_lights(
 				{
 					light_reconnect_to_map(object->object.attachment_indices[i]);
 				}
+#endif
 			}
 		}
 	}
