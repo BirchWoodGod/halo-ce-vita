@@ -183,6 +183,7 @@ Multiplayer tab's way.
 #include "vita_controls.h"
 #include "vita_gxm.h"
 #include "vita_host.h"
+#include "../../linux/game/kevin_content.h"
 #include "vita_update.h"
 #include "vita_update_verify.h"
 #include "vita_version.h"
@@ -290,6 +291,8 @@ enum
 	ACTION_CE_EXTRACT,
 	/* a look for a newer version (update_notify.c), in the background */
 	ACTION_UPDATE_CHECK,
+	ACTION_KEVIN_SPAWN,
+	ACTION_KEVIN_RESULT,
 };
 
 struct setting
@@ -393,6 +396,10 @@ static struct setting settings[] = {
 	every profile. Particle density, under it, draws fewer of those made) */
 	{ "Particles", "HALO_PARTICLE_BUDGET", 0, 3, { "full", "reduced", "low" }, { "Full", "Reduced", "Low" },
 		"Fewer sparks, smoke and debris in big fights", 1, PAGE_GRAPHICS_DETAIL },
+	{ "Ribbon tracers", "HALO_KEVIN_TRACERS", 0, 2, { "1", "0" }, { "Enhanced", "Original" },
+		"Visible rifle ribbons and sniper smoke; visual effects only", 1, PAGE_GRAPHICS_DETAIL },
+	{ "Combat effects", "HALO_KEVIN_COMBAT_FX", 0, 2, { "1", "0" }, { "Full", "Budgeted" },
+		"Full blood, impacts, flames and scorches under particle budgets", 1, PAGE_GRAPHICS_DETAIL },
 	{ "Particle density", "HALO_PARTICLE_RENDER_DIVISOR", 0, 4, { "1", "2", "3", "4" },
 		{ "Full", "Half", "Third", "Quarter" }, "Smoke, sparks, debris drawn (your gun's: all)", 0,
 		PAGE_GRAPHICS_DETAIL },
@@ -563,6 +570,11 @@ static struct setting settings[] = {
 		"Team games: bots on both teams, or all against you", 0, TAB_MULTIPLAYER },
 	{ "  Bot vehicles", "HALO_BOT_VEHICLES", 0, 2, { "1", "0" }, { "On", "Off" },
 		"Bots drive and ride the map's vehicles", 0, TAB_MULTIPLAYER },
+	{ "Ghosts of Lockout", "HALO_KEVIN_GHOST_CHANCE", 0, 6, { "0", "5", "10", "25", "50", "100" },
+		{ "Off", "5% each", "10% each", "25% each", "50% each", "Always" },
+		"ChaoticSPARTAN1 and KodeBreaker16; independent chance each match", 0, TAB_MULTIPLAYER },
+	{ "Bot colors", "HALO_KEVIN_BOT_COLORS", 0, 2, { "1", "0" }, { "Personal", "Random" },
+		"Non-team games: Chaotic green, Kode teal; team colors stay red/blue", 0, TAB_MULTIPLAYER },
 	/* (port/linux/game/bots_routes.c: Direct as before, everyone down the
 	middle; Lanes and Mixed spread the attackers over the map's side lanes.
 	Live: read each second) */
@@ -618,7 +630,20 @@ static struct setting settings[] = {
 	list; off by default while their colours are wrong on the Vita; the
 	maps themselves follow on the page, page_lines) */
 	{ "PC maps", "HALO_CUSTOM_EDITION", 0, 2, { "0", "1" }, { "Off", "On" },
-		"Experimental: Custom Edition maps in the map list", 0, PAGE_MAPS },
+		"Experimental: retail PC and Custom Edition maps", 0, PAGE_MAPS },
+	{ "Campaign pickups", "HALO_KEVIN_CAMPAIGN_EXTRAS", 0, 2, { "0", "1" }, { "Off", "On" },
+		"Adds flame/fuel-rod pickups in compatible campaign areas; local play", 0, PAGE_MAPS },
+	{ "Local PC weapons", "HALO_KEVIN_PC_WEAPONS", 0, 2, { "1", "0" }, { "On", "Original" },
+		"Keeps the Flamethrower on maps containing its assets", 1, PAGE_MAPS },
+	{ "Place item", "HALO_KEVIN_SPAWN_ITEM", 0, 8, { "1", "2", "3", "4", "5", "6", "7", "8" },
+		{ "Flamethrower", "Fuel Rod Gun", "Banshee", "Rocket Warthog", "Warthog", "Ghost", "Scorpion", "Gun turret" },
+		"Use Place near player below; requires this map's assets", 0, PAGE_MAPS },
+	{ "Place near player", NULL, 0, 0, { NULL }, { NULL },
+		"Local play only; close the panel, then check Placement result", 0,
+		PAGE_MAPS, KIND_ACTION, ACTION_KEVIN_SPAWN },
+	{ "Placement result", NULL, 0, 0, { NULL }, { NULL },
+		"Shows whether the last requested item was placed", 0,
+		PAGE_MAPS, KIND_ACTION, ACTION_KEVIN_RESULT },
 	/* (shown while a Custom Edition installer is in ux0:data/haloce-vita
 	and the resource maps are missing: vita_ce_installer.c) */
 	{ "Extract PC files", NULL, 0, 0, { NULL }, { NULL }, "The three files out of the Halo CE installer",
@@ -3396,6 +3421,21 @@ static void act(const struct setting *setting)
 {
 	switch (setting->action)
 	{
+	case ACTION_KEVIN_SPAWN:
+		kevin_content_request(atoi(getenv("HALO_KEVIN_SPAWN_ITEM") ? getenv("HALO_KEVIN_SPAWN_ITEM") : "1"));
+		set_notice("%s", "Close the panel to place the item, then check Placement result.");
+		break;
+	case ACTION_KEVIN_RESULT:
+		{
+			int result = kevin_content_result();
+			const char *text = result == 1 ? "Placed near the player." :
+				result == -1 ? "Local games only." : result == -2 ? "This map does not contain that item's assets." :
+				result == -3 ? "No clear ground nearby. Move to an open area and try again." :
+				result == -4 ? "The game could not place the item." : result == -5 ? "No active player." :
+				"No completed request. Close the panel while a game is running.";
+			vita_settings_message("Placement result", text);
+		}
+		break;
 	/* (in the background: the answer shows under the version as it comes) */
 	case ACTION_UPDATE_CHECK:
 		/* port: an update found: the press downloads it, or says where it

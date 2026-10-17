@@ -4256,6 +4256,23 @@ static void network_game_server_countdown_started(
 	struct network_game_server *server)
 {
 	(void)server;
+#ifdef HALO_VITA
+	/* kaboggs: choose rare personal profiles once for this local match. */
+	if (network_game_is_splitscreen_local()) {
+		extern void kevin_bots_begin(int count);
+		extern void kevin_bots_profile(int index, struct network_player *player);
+		long slot, count=0;
+		for (slot=0;slot<MAXIMUM_NETWORK_PLAYER_COUNT;++slot)
+			if (network_player_is_valid(&server->game.players[slot]) &&
+				bots_machine_is_bot(server->game.players[slot].machine_index)) ++count;
+		kevin_bots_begin((int)count);
+		for (slot=0;slot<MAXIMUM_NETWORK_PLAYER_COUNT;++slot) {
+			struct network_player *player=&server->game.players[slot];
+			if (network_player_is_valid(player) && bots_machine_is_bot(player->machine_index))
+				kevin_bots_profile(player->machine_index-BOTS_FIRST_MACHINE,player);
+		}
+	}
+#endif
 	csmemset(network_game_server_countdown_slowed, 0, sizeof(network_game_server_countdown_slowed));
 }
 
