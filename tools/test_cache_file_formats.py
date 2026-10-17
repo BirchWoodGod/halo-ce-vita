@@ -743,6 +743,22 @@ def test_minimal_custom_edition_cache_loads_with_every_resource(report_tool, tmp
     assert report["convert"] == "ok"
 
 
+def test_retail_pc_version_uses_validated_pc_conversion(report_tool, tmp_path):
+    """Retail v7 keeps the PC tag layout; it must pass the same bounds checks."""
+    path = patched(Map().write(tmp_path), 4, "<i", 7)
+    returncode, report = report_one(report_tool, path)
+    assert returncode == 0
+    assert report["version"] == "7"
+    assert report["identify"] == report["load"] == report["convert"] == "ok"
+    # Recognition must not bypass tag-index validation.
+    data = bytearray(path.read_bytes())
+    tag_offset = struct.unpack_from("<I", data, 0x10)[0]
+    struct.pack_into("<I", data, tag_offset, 0xFFFFFFFC)
+    path.write_bytes(data)
+    returncode, report = report_one(report_tool, path)
+    assert returncode == 1 and report["load"] != "ok"
+
+
 def test_relocation_counts_every_resource_pointer(report_tool, tmp_path):
     """bitmap: sequences, sprites, bitmaps (3); sound: pitch ranges,
     permutations, mouth data (3); strings: block + 2 strings (3); font:
@@ -1021,6 +1037,27 @@ def test_bitmaps_name_their_own_tag(report_tool, tmp_path):
         assert u32_at(tags, bitmap + 0x20) == ((cache.salt + index) << 16 | index), name
         assert u32_at(tags, bitmap + 0x24) == NONE
         assert u32_at(tags, bitmap + 0x28) == 0 and u32_at(tags, bitmap + 0x2C) == 0
+
+
+@pytest.mark.parametrize("stale_offset", [0, 0xA6C90, 0x7FFFFFFF])
+def test_pc_bitmap_group_does_not_add_stale_editor_pixel_offset(report_tool, tmp_path, stale_offset):
+    """kaboggs: Timberland waterfall must keep its absolute pixel range."""
+    cache = Map()
+    path = cache.write(tmp_path)
+    raw = bytearray(path.read_bytes())
+    tag_offset = struct.unpack_from("<I", raw, 0x10)[0]
+    group = cache.addresses["test\\in map bitmap"]
+    struct.pack_into("<I", raw, tag_offset + group - BASE + 0x38, stale_offset)
+    path.write_bytes(raw)
+    dump = tmp_path / "converted_tags.bin"
+    returncode, report = report_one(report_tool, path, "--dump-tags", dump)
+    assert returncode == 0 and report["convert"] == "ok"
+    tags = dump.read_bytes()
+    bitmap = u32_at(tags, group + 0x64)
+    assert u32_at(tags, group + 0x38) == 0
+    original_bitmap = struct.unpack_from("<I", raw, tag_offset + group - BASE + 0x64)[0]
+    original_pixels = struct.unpack_from("<I", raw, tag_offset + original_bitmap - BASE + 0x18)[0]
+    assert u32_at(tags, bitmap + 0x18) == original_pixels
 
 
 def sound_parts(tags, cache):
@@ -1372,7 +1409,7 @@ def test_compressed_xbox_caches_are_recognized(report_tool, tmp_path):
 
 def test_other_cache_versions_are_named_not_loaded(report_tool, tmp_path):
     path = tmp_path / "pc.map"
-    path.write_bytes(xbox_header(build=b"01.00.00.0564", version=7))
+    path.write_bytes(xbox_header(build=b"01.00.00.0564", version=8))
     returncode, report = report_one(report_tool, path)
     assert returncode == 1
     assert report["format"] == "cache of an unknown version"
