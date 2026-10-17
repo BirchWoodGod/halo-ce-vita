@@ -1,5 +1,8 @@
 # Install helper for Halo CE for PS Vita
 
+Optional experimental retail-PC map staging (installed files or supported
+loose-file ISO9660 images): [source command and precautions](README-pc-content.md).
+
 `halo_ce_vita_installer.py` gathers your own game files in the layout the
 Vita build needs (the main [README](../../README.md#install) gives it) and
 copies them to the Vita over VitaShell's FTP. It is one Python file for
