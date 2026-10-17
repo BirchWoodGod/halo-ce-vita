@@ -33,6 +33,8 @@ against the file or buffer it refers to before it is used.
 
 #define CACHE_FILE_VERSION_XBOX 5
 #define CACHE_FILE_VERSION_CUSTOM_EDITION 609
+/* kaboggs: retail PC cache experiment, reusing the existing PC conversion. */
+#define CACHE_FILE_VERSION_PC_RETAIL 7
 
 /* Halo PC and Custom Edition keep tag data at a fixed address, as the Xbox
 does at 0x803A6000: 0x40440000, above a 0x440000-byte game state at

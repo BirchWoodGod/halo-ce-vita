@@ -380,6 +380,7 @@ s_data_file_item) */
 /* bitmap group (OpenSauce bitmap_group.hpp: s_bitmap_group 0x6C,
 s_bitmap_group_sequence 0x40, s_bitmap_group_sprite 0x20, s_bitmap_data 0x30) */
 #define BITMAP_GROUP_BYTES 0x6C
+#define BITMAP_GROUP_PIXEL_DATA_OFFSET 0x30
 #define BITMAP_GROUP_BITMAPS_OFFSET 0x60
 #define BITMAP_DATA_BYTES 0x30
 #define BITMAP_DATA_FLAGS_OFFSET 0x0E
@@ -1305,6 +1306,7 @@ static enum cache_file_status cache_header_identify(
 		identity->format = _cache_file_format_xbox_cache;
 		break;
 	case CACHE_FILE_VERSION_CUSTOM_EDITION:
+	case CACHE_FILE_VERSION_PC_RETAIL:
 		identity->format = _cache_file_format_custom_edition_cache;
 		break;
 	default:
@@ -2325,6 +2327,7 @@ enum cache_file_format cache_file_header_format(
 		format = _cache_file_format_xbox_cache;
 		break;
 	case CACHE_FILE_VERSION_CUSTOM_EDITION:
+	case CACHE_FILE_VERSION_PC_RETAIL:
 		format = _cache_file_format_custom_edition_cache;
 		*has_opensauce_header =
 			read_u32(bytes + CACHE_HEADER_OPENSAUCE_OFFSET) == OPENSAUCE_HEADER_SIGNATURE;
@@ -3041,6 +3044,12 @@ static void bitmaps_prepare(
 	int32_t bitmap_count;
 	uint32_t bitmaps_offset;
 	int32_t bitmap_index;
+
+	/* kaboggs: PC bitmap offsets already address the map/resource file.
+	 * The Xbox cache adds pixel_data.file_offset when it first draws them.
+	 * Retail Timberland's waterfall retains a nonzero editing-kit value here;
+	 * adding it corrupts a valid texture range and can stall the renderer. */
+	write_u32(state->tag_cache + group_offset + BITMAP_GROUP_PIXEL_DATA_OFFSET + TAG_DATA_FILE_OFFSET_OFFSET, 0);
 
 	if (!loaded_block_get(
 		state->tag_cache + group_offset + BITMAP_GROUP_BITMAPS_OFFSET,

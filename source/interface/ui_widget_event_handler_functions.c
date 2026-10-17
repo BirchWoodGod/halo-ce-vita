@@ -1012,6 +1012,10 @@ struct event_handler_globals
 };
 #pragma pack(pop)
 
+#ifdef HALO_VITA
+#include "../../port/linux/game/kevin_gametype_rules.h"
+#endif
+
 struct playlist_profile_item_options_prefix
 {
 	byte unknown00[0x20];
@@ -4011,7 +4015,16 @@ static boolean playlist_profile_change_item_options(
 		while (option_spinner && option_spinner->type != 2)
 			option_spinner = option_spinner->next;
 		match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 2621, option_spinner, "expected 'vehicle set' option spinner list");
-		switch (option_spinner->data3C.selected_index)
+		#ifdef HALO_VITA
+        {
+            int native;
+            /* kaboggs: the regular gametype save retains custom flags. */
+            *(unsigned long *)(profile + 0x20) = kevin_vehicle_choice_set(*(unsigned long *)(profile + 0x20),
+                option_spinner->data3C.selected_index, &native);
+            *(long *)(profile + 0x48) = native;
+        }
+#else
+        switch (option_spinner->data3C.selected_index)
 		{
 		case 0: *(long *)(profile + 0x48) = 0; break;
 		case 1: *(long *)(profile + 0x48) = 1; break;
@@ -4023,13 +4036,24 @@ static boolean playlist_profile_change_item_options(
 			break;
 		}
 
+#endif
+
 		list_item = list_item->next;
 		match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 2633, list_item, "expected 'weapon set' item");
 		option_spinner = list_item->child;
 		while (option_spinner && option_spinner->type != 2)
 			option_spinner = option_spinner->next;
 		match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 2635, option_spinner, "expected 'weapon set' option spinner list");
-		switch (option_spinner->data3C.selected_index)
+		#ifdef HALO_VITA
+        {
+            int native;
+            /* kaboggs: the regular gametype save retains custom flags. */
+            *(unsigned long *)(profile + 0x20) = kevin_weapon_choice_set(*(unsigned long *)(profile + 0x20),
+                option_spinner->data3C.selected_index, &native);
+            *(long *)(profile + 0x44) = native;
+        }
+#else
+        switch (option_spinner->data3C.selected_index)
 		{
 		case 0: *(long *)(profile + 0x44) = 0; break;
 		case 1: *(long *)(profile + 0x44) = 1; break;
@@ -4046,6 +4070,8 @@ static boolean playlist_profile_change_item_options(
 			error(2, "unknown option selected in 'weapon set' option spinner list");
 			break;
 		}
+
+#endif
 
 		list_item = list_item->next;
 		match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 2654, list_item, "expected 'starting equipment' item");
@@ -5088,7 +5114,10 @@ static boolean playlist_profile_initialize_item_options(
 		while (option_spinner && option_spinner->type != 2)
 			option_spinner = option_spinner->next;
 		match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 3388, option_spinner, "expected 'vehicle set' option spinner list");
-		switch (profile->vehicle_set)
+		#ifdef HALO_VITA
+        option_spinner->data3C.selected_index = kevin_vehicle_choice_get(profile->flags, profile->vehicle_set);
+#else
+        switch (profile->vehicle_set)
 		{
 		case 0: option_spinner->data3C.selected_index = 0; break;
 		case 1: option_spinner->data3C.selected_index = 1; break;
@@ -5098,13 +5127,18 @@ static boolean playlist_profile_initialize_item_options(
 		default: option_spinner->data3C.selected_index = 0; break;
 		}
 
+#endif
+
 		list_item = list_item->next;
 		match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 3400, list_item, "expected 'weapon set' item");
 		option_spinner = list_item->child;
 		while (option_spinner && option_spinner->type != 2)
 			option_spinner = option_spinner->next;
 		match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 3402, option_spinner, "expected 'weapon set' option spinner list");
-		switch (profile->weapon_set)
+		#ifdef HALO_VITA
+        option_spinner->data3C.selected_index = kevin_weapon_choice_get(profile->flags, profile->weapon_set);
+#else
+        switch (profile->weapon_set)
 		{
 		case 0: option_spinner->data3C.selected_index = 0; break;
 		case 1: option_spinner->data3C.selected_index = 1; break;
@@ -5119,6 +5153,8 @@ static boolean playlist_profile_initialize_item_options(
 		case 10: option_spinner->data3C.selected_index = 10; break;
 		default: option_spinner->data3C.selected_index = 0; break;
 		}
+
+#endif
 
 		list_item = list_item->next;
 		match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 3421, list_item, "expected 'starting equipment' item");

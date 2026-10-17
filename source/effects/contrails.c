@@ -67,6 +67,9 @@ symbols in this file:
 /* ---------- headers */
 
 #include "effects/contrails.h"
+#ifdef HALO_VITA
+#include "kevin_fx.h"
+#endif
 
 #include "bitmaps/bitmap_group.h"
 #include "cseries/errors.h"
@@ -616,6 +619,9 @@ static void contrail_update_points(
 	struct contrail_definition *definition = contrail_definition_get(contrail->definition_index);
 	long contrail_point_indices[MAXIMUM_CONTRAIL_POINTS];
 	short instance_index;
+#ifdef HALO_VITA
+	int trace_kind=kevin_tracers_enabled()?kevin_trace_kind(tag_get_name(contrail->definition_index)):0;
+#endif
 
 	for (instance_index = 0;
 		instance_index < MAXIMUM_CONTRAIL_INSTANCES;
@@ -630,7 +636,18 @@ static void contrail_update_points(
 
 			if (!TEST_FLAG(contrail_point->flags, _contrail_point_expired_bit))
 			{
+#ifdef HALO_VITA
+				real point_step=dt;
+				if (trace_kind==1 && definition->render_type==_contrail_render_type_viewer && definition->states.count>=2) {
+					const struct contrail_point_state *first=TAG_BLOCK_GET_ELEMENT(&definition->states,0,struct contrail_point_state);
+					point_step=kevin_trace_step(dt,first->duration_upper_bound,first->transition_duration_upper_bound,
+						contrail_point->state_index,TEST_FLAG(contrail_point->flags,_contrail_point_new_bit),
+						TEST_FLAG(contrail_point->flags,_contrail_point_transitioning_bit));
+				}
+				contrail_point->time = point_step * contrail_point->delta + contrail_point->time;
+#else
 				contrail_point->time = dt * contrail_point->delta + contrail_point->time;
+#endif
 
 				while (contrail_point->delta == 0.0f || contrail_point->time > 1.0f)
 				{

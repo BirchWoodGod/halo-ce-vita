@@ -1836,13 +1836,17 @@ def staged_uploads(staging: str) -> List[UploadItem]:
     """What the steps gathered in `staging`, with where each goes on the
     Vita (README.md's layout): default.xbe, maps/*.map (the game's, Halo PC's
     and any custom maps put there), movies/*.mp4."""
+    if os.path.lexists(os.path.join(staging, '.pc-content-incomplete')):
+        raise InstallerError("PC content staging is incomplete; finish staging before uploading.")
     items = []
-    xbe = os.path.join(staging, STAGING_XBE)
+    xbe = safe_join(staging, STAGING_XBE)
     if os.path.isfile(xbe):
         items.append(UploadItem(xbe, VITA_GAME_FOLDER, STAGING_XBE, os.path.getsize(xbe)))
-    for folder, suffixes in ((STAGING_MAPS, (".map", ".yelo")), (STAGING_MOVIES, (".mp4",))):
-        directory = os.path.join(staging, folder)
-        if not os.path.isdir(directory):
+    for folder, suffixes in ((STAGING_MAPS, (".map", ".yelo", ".bmp")),
+                             (STAGING_MAPS + "/menu_resources", (".map",)),
+                             (STAGING_MOVIES, (".mp4",))):
+        directory = safe_join(staging, *folder.split('/'))
+        if not os.path.isdir(directory) or os.path.islink(directory):
             continue
         for name in sorted(os.listdir(directory)):
             full = os.path.join(directory, name)

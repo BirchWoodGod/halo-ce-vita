@@ -212,6 +212,9 @@ and left, the defenders' posts. The map's teleporters are logged once.
 #include "cache/cache_files.h"
 
 #include "bots.h"
+#ifdef HALO_VITA
+#include "kevin_bots.h"
+#endif
 #include "bots_tactics.h"
 
 #include <math.h>
@@ -6428,12 +6431,25 @@ static void bots_shortcut_update(struct bots_bot *bot, struct bots_tick *tick)
 static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_action *action)
 {
 	struct bots_tick tick;
+#ifdef HALO_VITA
+	struct bots_skill_definition ghost_skill;
+#endif
 	real vitality;
 	unsigned long long started = bots_profile.enabled > 0 ? vita_host_time_us() : 0;
 	long vehicle_index;
 
 	csmemset(&tick, 0, sizeof(tick));
 	tick.skill = &bots_skills[bots_globals.skill];
+#ifdef HALO_VITA
+	/* kaboggs: Chaotic's stronger aim and faster bursts use the real weapon simulation. */
+	if (kevin_bots_kind((int)bot_index)==1) {
+		ghost_skill=*tick.skill;
+		ghost_skill.aim_error_degrees=MIN(ghost_skill.aim_error_degrees,4.f);
+		ghost_skill.aim_settle_seconds=MIN(ghost_skill.aim_settle_seconds,.6f);
+		ghost_skill.pause_ticks=MAX(1,ghost_skill.pause_ticks*4/5);
+		tick.skill=&ghost_skill;
+	}
+#endif
 	tick.player = player_get(bot->player_index);
 	tick.now = game_time_get();
 	tick.throttle_scale = 1.0f;
@@ -6470,6 +6486,19 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 	{
 		/* (spawned: it looks the way its unit faces) */
 		bot->unit_index = tick.player->unit_index;
+#ifdef HALO_VITA
+		/* kaboggs: original Ghost profiles' independent per-spawn camouflage rolls. */
+		{
+			int kind=kevin_bots_kind((int)bot_index);
+			int chance=kind==2?25:kind==1?10:0;
+			if (chance && bots_random(bot)%100UL<(unsigned long)chance) {
+				player_handle_powerup_minor(bot->player_index,_player_powerup_active_camouflage,60*TICKS_PER_SECOND);
+				tick.unit->unit.active_camouflage=1.f;
+				platform_log("Ghosts of Lockout: %s active camouflage for 60 seconds",
+					kind==1?"ChaoticSPARTAN1":"KodeBreaker16");
+			}
+		}
+#endif
 		bot->yaw = (real)atan2(tick.object->object.forward.j, tick.object->object.forward.i);
 		bot->pitch = 0.0f;
 		bot->last_vitality = tick.object->object.body_vitality + tick.object->object.shield_vitality;

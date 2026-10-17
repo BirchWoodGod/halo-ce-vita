@@ -37,6 +37,9 @@ symbols in this file:
 #include "rasterizer/rasterizer.h"
 #include "render.h"
 #include "tag_files/tag_files.h"
+#ifdef HALO_VITA
+#include "kevin_fx.h"
+#endif
 
 /* ---------- constants */
 
@@ -134,6 +137,9 @@ void render_contrail(
 	short vertex_count;
 	long triangle_buffer_index;
 	long vertex_buffer_index;
+#ifdef HALO_VITA
+	int trace_kind=kevin_tracers_enabled()?kevin_trace_kind(tag_get_name(contrail->definition_index)):0;
+#endif
 
 	bitmap = bitmap_group_get_bitmap_from_sequence(
 		definition->bitmap.index,
@@ -226,6 +232,13 @@ void render_contrail(
 				width = state->width;
 				if (state->scale_flags & (1 << _contrail_state_width_bit))
 					width *= point->density;
+#ifdef HALO_VITA
+				if (trace_kind) {
+					real_vector3d from_eye;
+					vector_from_points3d(&render.camera.position,&point->position,&from_eye);
+					width=kevin_trace_width(trace_kind,width,magnitude3d(&from_eye));
+				}
+#endif
 				half_width = width;
 				color.alpha = (state->color_upper_bound.alpha - state->color_lower_bound.alpha) * color_scale + state->color_lower_bound.alpha;
 				color.red = (state->color_upper_bound.red - state->color_lower_bound.red) * color_scale + state->color_lower_bound.red;
@@ -251,6 +264,13 @@ void render_contrail(
 					next_width = next_state->width;
 					if (next_state->scale_flags & (1 << _contrail_state_width_bit))
 						next_width *= point->density;
+#ifdef HALO_VITA
+						if (trace_kind) {
+							real_vector3d from_eye;
+							vector_from_points3d(&render.camera.position,&point->position,&from_eye);
+							next_width=kevin_trace_width(trace_kind,next_width,magnitude3d(&from_eye));
+						}
+#endif
 					next_color.alpha = (next_state->color_upper_bound.alpha - next_state->color_lower_bound.alpha) * next_color_scale + next_state->color_lower_bound.alpha;
 					next_color.red = (next_state->color_upper_bound.red - next_state->color_lower_bound.red) * next_color_scale + next_state->color_lower_bound.red;
 					next_color.green = (next_state->color_upper_bound.green - next_state->color_lower_bound.green) * next_color_scale + next_state->color_lower_bound.green;
@@ -481,8 +501,15 @@ point_torn:
 			}
 			if (!(definition->flags & (1 << _contrail_last_point_unfaded_bit)))
 			{
+#ifdef HALO_VITA
+				/* kaboggs: a two-point rifle ribbon otherwise fades both ends to zero. */
+				byte tail_alpha=trace_kind==1 && vertex_count==4?96:0;
+				((byte *)&vertices[vertex_count - 1].color)[3] = tail_alpha;
+				((byte *)&vertices[vertex_count - 2].color)[3] = tail_alpha;
+#else
 				((byte *)&vertices[vertex_count - 1].color)[3] = 0;
 				((byte *)&vertices[vertex_count - 2].color)[3] = 0;
+#endif
 			}
 			if (segment_count > 0)
 			{

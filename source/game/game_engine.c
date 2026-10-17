@@ -544,6 +544,14 @@ symbols in this file:
 #ifdef HALO_LINUX
 #include "network_game_record.h" /* (port) the wire */
 #include "network_wire.h" /* (port) network version 28's rules */
+#include "custom_edition_cache.h"
+#endif
+#ifdef HALO_VITA
+#include "kevin_bots.h"
+#include "kevin_content_game.h"
+#define KEVIN_PLAYER_NAME(player) kevin_bots_display_name(player)
+#else
+#define KEVIN_PLAYER_NAME(player) ((player)->name)
 #endif
 #include "game_engine_list.h"
 #include "game_engine_place.h"
@@ -1867,7 +1875,7 @@ static void game_engine_rasterize_in_game_score(
 				NUMBEROF(row_string),
 				L"\t%s\t%s\t%s",
 				place_string,
-				player->name,
+				KEVIN_PLAYER_NAME(player),
 				status_string);
 
 			if (has_teams)
@@ -2133,7 +2141,7 @@ void game_engine_post_rasterize_post_game(
 			draw_string_set_color(
 				&team_colors[PIN(team_index, 0, 1)]);
 		}
-		usnprintf(row_string, NUMBEROF(row_string), L" \t \t%s", player->name);
+		usnprintf(row_string, NUMBEROF(row_string), L" \t \t%s", KEVIN_PLAYER_NAME(player));
 		row_string[NUMBEROF(row_string) - 1] = 0;
 		drawline(row_string, draw_row, 0);
 		draw_string_set_color(&winner_color);
@@ -6724,6 +6732,12 @@ long game_engine_remap_vehicle(
 {
 	long result = vehicle_definition_index;
 
+#ifdef HALO_VITA
+	/* kaboggs: a saved local gametype explicitly enables this real tag. */
+	if (kevin_gametype_vehicle_allowed(vehicle_definition_index))
+		return vehicle_definition_index;
+#endif
+
 #ifdef HALO_LINUX
 	/* a Halo Custom Edition map's vehicles are chosen by their placements,
 	and its scripts may create any (port/linux/game/custom_edition_objects.c) */
@@ -6910,6 +6924,11 @@ long game_engine_remap_weapon(
 	long weapon_list_index =
 		weapon_definition_index_to_list_index(weapon_definition_index);
 
+#ifdef HALO_VITA
+	if (kevin_gametype_weapon_allowed(weapon_definition_index))
+		return weapon_definition_index;
+#endif
+
 	if (weapon_list_index == _weapon_list_ball ||
 		weapon_list_index == _weapon_list_flag ||
 		weapon_list_index == NONE)
@@ -6921,7 +6940,21 @@ long game_engine_remap_weapon(
 	if (game_engine_sole_weapon_list_index() != NONE)
 		return list_index_to_weapon_definition_index(game_engine_sole_weapon_list_index());
 
-	if (weapon_list_index == _weapon_list_flamethrower)
+	/* kaboggs: keep the PC flamethrower in local PC-map games.
+	Crossplay keeps upstream's weapon substitution for wire compatibility. */
+	if (weapon_list_index == _weapon_list_flamethrower
+#ifdef HALO_LINUX
+		&& ((!custom_edition_cache_tags_loaded()
+#ifdef HALO_VITA
+			&& !((game_connection() == _game_connection_local ||
+				(game_connection() == _game_connection_network_server && network_game_is_splitscreen_local())) &&
+				getenv("HALO_KEVIN_PC_WEAPONS") && atoi(getenv("HALO_KEVIN_PC_WEAPONS")) &&
+				tag_loaded('weap', "weapons\\flamethrower\\flamethrower") != NONE)
+#endif
+			) ||
+			network_game_record_format_current() == _network_game_record_crossplay)
+#endif
+	)
 		weapon_list_index = _weapon_list_rocket_launcher;
 #ifdef HALO_LINUX
 	/* port: and on the crossplay wire the gravity rifle, a cut weapon, as

@@ -1210,6 +1210,75 @@ static void *widget_build(long widget_index)
 	return definition;
 }
 
+/* kaboggs: extend the actual Edit Gametypes / Item Options spinners.
+ * Replace only the copied tag table's string-list definitions. The original
+ * UI tags stay intact and menu_tags_release restores them before freeing us. */
+static void kevin_gametype_strings(struct cache_file_tag_instance *instances)
+{
+#ifdef HALO_VITA
+    static char const *const paths[] = {
+        "ui\\shell\\main_menu\\settings_select\\multiplayer_setup\\item_options_edit\\var_vehicle_set",
+        "ui\\shell\\main_menu\\settings_select\\multiplayer_setup\\item_options_edit\\var_weapon_set",
+        "ui\\shell\\main_menu\\settings_select\\multiplayer_setup\\item_options_edit\\cap_item_options"
+    };
+    static char const *const vehicles[]={"All+PC","Banshees","Rocket Warthogs"};
+    static char const *const weapons[]={"No grenades","Normal + PC","+ Flamethrowers","+ Fuel Rod Guns"};
+    static char const *const help[]={
+        "Adds Warthogs, Ghosts, Scorpions, Rocket Warthogs, Banshees and gun turrets on large vehicle maps. Local games only.",
+        "Banshees spawn automatically at both bases on large vehicle maps. Local games only.",
+        "Rocket Warthogs spawn at both bases on large vehicle maps. Local games only.",
+        "No grenades spawn on the map.",
+        "Normal map weapons plus Flamethrower and Fuel Rod pickups near both bases. Local games only.",
+        "Normal map weapons plus Flamethrower pickups near both bases. Local games only.",
+        "Normal map weapons plus Fuel Rod pickups near both bases. Local games only."
+    };
+    long indices[3],which;
+    struct string_list *original[3],*extra,*merged;
+    struct string_list_entry *entries;
+    for (which=0;which<3;++which) {
+        indices[which]=tag_loaded(UNICODE_STRING_LIST_TAG,paths[which]);
+        if (indices[which]==NONE) return;
+        original[which]=tag_get(UNICODE_STRING_LIST_TAG,indices[which]);
+    }
+    if (original[0]->strings.count!=5 ||
+        (original[1]->strings.count!=10 && original[1]->strings.count!=11) ||
+        original[2]->strings.count!=9+original[1]->strings.count) return;
+    for (which=0;which<2;++which) {
+        long old=original[which]->strings.count;
+        long start=which?old-10:0;
+        long added=which?14-old:3;
+        extra=string_list_build(which?weapons+start:vehicles,added);
+        merged=allocate(sizeof(*merged));
+        entries=allocate((old+added)*sizeof(*entries));
+        if (!extra || !merged || !entries || build.failed) return;
+        merged->strings=original[which]->strings;
+        merged->strings.count=old+added;merged->strings.address=entries;
+        memcpy(entries,original[which]->strings.address,old*sizeof(*entries));
+        memcpy(entries+old,extra->strings.address,added*sizeof(*entries));
+        if (!which) {
+            static const char *const original_label[]={"Original"};
+            struct string_list *label=string_list_build(original_label,1);
+            if (!label || build.failed) return;
+            entries[0]=*(struct string_list_entry *)label->strings.address;
+        }
+        instances[DATUM_INDEX_TO_ABSOLUTE_INDEX(indices[which])].base_address=merged;
+    }
+    /* Help indices are the sum of all preceding spinner lengths. */
+    extra=string_list_build(help,7);
+    merged=allocate(sizeof(*merged));entries=allocate(26*sizeof(*entries));
+    if (!extra || !merged || !entries || build.failed) return;
+    merged->strings=original[2]->strings;merged->strings.count=26;merged->strings.address=entries;
+    memcpy(entries,original[2]->strings.address,7*sizeof(*entries));
+    memcpy(entries+7,extra->strings.address,3*sizeof(*entries));
+    memcpy(entries+10,(struct string_list_entry *)original[2]->strings.address+7,10*sizeof(*entries));
+    memcpy(entries+20,(struct string_list_entry *)extra->strings.address+3,4*sizeof(*entries));
+    memcpy(entries+24,(struct string_list_entry *)original[2]->strings.address+original[2]->strings.count-2,2*sizeof(*entries));
+    instances[DATUM_INDEX_TO_ABSOLUTE_INDEX(indices[2])].base_address=merged;
+#else
+    (void)instances;
+#endif
+}
+
 /* the tag table with count more entries, the existing ones as they are */
 static struct cache_file_tag_instance *instances_grow(long count, long *first_index, long *first_salt)
 {
@@ -1342,7 +1411,31 @@ static int menu_resource_read(void *context, uint32_t offset, uint32_t size, voi
 	return done == size;
 }
 
-/* the maps folder's <name>.map, a Custom Edition resource map of the type */
+/* kaboggs: retail gameplay maps need their own resource-file offsets.
+ * Read CE menu art from maps/menu_resources when both files are present;
+ * preserve the original resource layout for installations without it.
+ * The art prereader and the game must choose exactly the same directory. */
+static char const *menu_resource_directory(void)
+{
+	static char directory[300];
+	static char const *const names[] = { "bitmaps", "loc" };
+	char path[320];
+	int index;
+
+	snprintf(directory, sizeof(directory), "%smenu_resources\\", cache_files_map_directory());
+	for (index = 0; index < 2; index++)
+	{
+		DWORD attributes;
+
+		snprintf(path, sizeof(path), "%s%s.map", directory, names[index]);
+		attributes = GetFileAttributesA(path);
+		if (attributes == (DWORD)-1 || (attributes & FILE_ATTRIBUTE_DIRECTORY))
+			return cache_files_map_directory();
+	}
+	return directory;
+}
+
+/* the selected menu folder's <name>.map, a CE resource map of the type */
 static boolean menu_resource_open(struct menu_resource_file *file, char const *name, enum resource_map_type type,
 	boolean index)
 {
@@ -1351,7 +1444,7 @@ static boolean menu_resource_open(struct menu_resource_file *file, char const *n
 	enum cache_file_status status;
 
 	memset(file, 0, sizeof(*file));
-	snprintf(path, sizeof(path), "%s%s.map", cache_files_map_directory(), name);
+	snprintf(path, sizeof(path), "%s%s.map", menu_resource_directory(), name);
 	file->handle = CreateFileA(path, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
 	if (file->handle == INVALID_HANDLE_VALUE)
 		return FALSE;
@@ -1806,7 +1899,7 @@ static void menu_tags_art_preread(void)
 	if (!paths)
 		return;
 	memset(&plan, 0, sizeof(plan));
-	plan.map_directory = cache_files_map_directory();
+	plan.map_directory = menu_resource_directory();
 	plan.bitmap_paths = paths + at;
 	for (index = 0; index < menu_tags.bitmap_resource_count; index++)
 		paths[at++] = menu_tags.bitmap_resources[index].path;
@@ -1842,7 +1935,7 @@ static boolean menu_resource_files_present(void)
 		char path[300];
 		DWORD attributes;
 
-		snprintf(path, sizeof(path), "%s%s.map", cache_files_map_directory(), names[index]);
+		snprintf(path, sizeof(path), "%s%s.map", menu_resource_directory(), names[index]);
 		attributes = GetFileAttributesA(path);
 		if (attributes == (DWORD)-1 || (attributes & FILE_ATTRIBUTE_DIRECTORY))
 			return FALSE;
@@ -1918,6 +2011,7 @@ void menu_tags_loaded(
 	instances = build.failed ? NULL : instances_grow(total, &build.first_index, &build.first_salt);
 	if (!instances)
 		goto failed;
+	kevin_gametype_strings(instances);
 	/* each new tag's index */
 	for (index = 0; index < widget_count; index++)
 	{
