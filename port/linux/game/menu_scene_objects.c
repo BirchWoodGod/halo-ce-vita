@@ -223,6 +223,9 @@ static struct
 	/* the scene could not be made (a pack failed): not tried again until
 	another is asked for */
 	boolean refused;
+	/* another scene asked for: the objects standing let go by the update
+	first */
+	boolean replaced;
 	/* the scene's objects stand now */
 	boolean made;
 	unsigned long long made_at;
@@ -1375,8 +1378,7 @@ void menu_scene_objects_want(
 		menu_scene_objects.slots[index].pack[0] = 0;
 	/* (made again from the start, another description or another camera:
 	the update lets the objects standing go first) */
-	for (index = 0; index < MAXIMUM_MENU_SCENE_OBJECTS; index++)
-		menu_scene_objects.slots[index].refused = TRUE;
+	menu_scene_objects.replaced = TRUE;
 }
 
 void menu_scene_objects_update(
@@ -1404,19 +1406,12 @@ void menu_scene_objects_update(
 			stale = index < MAXIMUM_MENU_SCENE_OBJECTS;
 		}
 		if (index < MAXIMUM_MENU_SCENE_OBJECTS)
-		{
 			wanted |= object->wanted;
-			/* (another scene asked for: the one standing let go first) */
-			stale |= object->refused && object->object_index != NONE;
-		}
 	}
-	if (stale)
-	{
+	/* (another scene asked for: the one standing let go first) */
+	if (stale || menu_scene_objects.replaced)
 		scene_forget(TRUE);
-		menu_scene_objects.made = FALSE;
-	}
-	for (index = 0; index < MAXIMUM_MENU_SCENE_OBJECTS; index++)
-		menu_scene_objects.slots[index].refused = FALSE;
+	menu_scene_objects.replaced = FALSE;
 	if (!wanted || !halo_main_menu_idle() || !halo_menu_style_halo3())
 	{
 		scene_forget(TRUE);
