@@ -4,9 +4,11 @@ VITA_SETTINGS_TEST.C
 A desktop test of the settings panel (port/vita/host/vita_settings.c,
 included whole), with the calls it makes into internet play (p2p.h), ad hoc
 play (vita_net.c) and the renderer (vgxm_menu_set) recorded instead: the
-panel opened with SELECT+START, its four tabs (and Dev) switched with L and
-R, no page longer than a screen (ten rows on a tab at most, the values in
-a column, a help line and a line of the panel's buttons), the pages a row
+panel opened with SELECT+START on its first tab, its five tabs (Game,
+Controls, Video, Sound, Multiplayer, as Halo Online's settings; and Dev)
+switched with L and R, each tab's rows under its headings (not chosen: up
+and down step over them), no page longer than a screen (the values in a
+column, a help line and a line of the panel's buttons), the pages a row
 opens and circle going back; the Multiplayer tab and its Play page (the
 rows each Connection has, Host a game's steps, the lobby name and password
 typed on the system's keyboard and kept as printable ASCII, Max players,
@@ -19,7 +21,7 @@ maps page (a folder of fake maps: listed, turned off and on, deleted after
 a confirmation, the map in play kept; Map downloads' three choices), the
 Dev tab behind its switch (switches saved only while on, the timing
 variables, Save report's folder),
-General' pages (Button layout and Touch zones in Xbox terms, Gyro
+Controls' pages (Button layout and Touch zones in Xbox terms, Gyro
 settings with the gyroscope's line, saved and read back), Button icons
 (PlayStation at once, the panel then naming the Xbox buttons by what they
 do and the guide the Vita's buttons, a remap followed by the game's icon,
@@ -579,7 +581,7 @@ static int menu_fits(void)
 		else if (label < length)
 			fits = label <= 22 && length - label - 1 <= 24;
 		else
-			fits = length - (at[0] == '\x03' || at[0] == '\x04' || at[0] == '!') <= 46;
+			fits = length - (at[0] == '\x03' || at[0] == '\x04' || at[0] == '\x08' || at[0] == '!') <= 46;
 		if (!fits)
 		{
 			printf("too long: %.*s\n", bytes, at);
@@ -590,11 +592,13 @@ static int menu_fits(void)
 	return 1;
 }
 
-/* the settings panel's lines fit its height (vita_gxm.c menu_build, at
-960x544: the rows from 76 pixels down, 28 a row, 36 for a page's title,
-14 for a gap; the chosen row's bar, 22 pixels under its line's top, above
-the rule at 468 over the help and the buttons): 14 lines on a tab, 12 on a
-page; a screen without a tab bar fits by its own height */
+/* the settings panel's lines fit its height (vita_gxm.c menu_build, the
+classic panel, at 960x544: the rows from 76 pixels down, 28 a row, 22 for a
+heading ('\x08'), 36 for a page's title, 14 for a gap; the chosen row's
+bar, 22 pixels under its line's top, above the rule at 468 over the help
+and the buttons: 392 pixels for the lines; the Halo 3 menus' panel fits its
+rows to its height, so a page that fits this fits both); a screen without a
+tab bar fits by its own height */
 static int menu_height_fits(void)
 {
 	const char *at = menu;
@@ -612,6 +616,8 @@ static int menu_height_fits(void)
 			;
 		else if (at[0] == '\x03')
 			y += 36;
+		else if (at[0] == '\x08')
+			y += 22;
 		else if (!bytes)
 			y += 14;
 		else
@@ -658,7 +664,76 @@ static int open_page(const char *label)
 	return strstr(menu, title) != NULL;
 }
 
-/* ---------- the General tab and its pages */
+/* the page's headings and rows in order, "|" between them: a heading
+('\x08') as "=" and its name, a row by its label (a '*' after it: a
+restart's); the lines that are not rows left out. Its headings only with
+`headings_only` */
+static const char *outline_of(char *text, int size, int headings_only)
+{
+	const char *at = menu;
+	int used = 0, first = 1;
+
+	text[0] = 0;
+	while (*at)
+	{
+		int length = (int)strcspn(at, "\n");
+		int label = (int)strcspn(at, "\x02\n");
+
+		if (used < size && at[0] == '\x08')
+		{
+			used += snprintf(text + used, (size_t)(size - used), "%s%s%.*s", first ? "" : "|", headings_only ? "" : "=",
+				length - 1, at + 1);
+			first = 0;
+		}
+		else if (used < size && !headings_only && label < length)
+		{
+			used += snprintf(text + used, (size_t)(size - used), "%s%.*s", first ? "" : "|", label, at);
+			first = 0;
+		}
+		at += length + (at[length] == '\n');
+	}
+	return text;
+}
+
+/* down through the page's rows as many times as it has them, then up as
+many: each press on a row (never a heading, nor a line that is not a row),
+every row chosen once each way, and back on the row it started on */
+static int steps_skip_headings(void)
+{
+	char line[128];
+	int rows = menu_rows(), start = menu_selected, pass, index, good = 1;
+
+	for (pass = 0; pass < 2; pass++)
+	{
+		unsigned long long chosen = 0;
+		int count = 0;
+
+		for (index = 0; index < rows; index++)
+		{
+			press(pass ? VITA_BUTTON_UP : VITA_BUTTON_DOWN);
+			menu_line(menu_selected, line, sizeof(line));
+			if (menu_selected < 1 || menu_selected > 63 || line[0] == '\x08' || !strchr(line, '\x02'))
+			{
+				printf("chosen: line %d, %s\n", menu_selected, line);
+				good = 0;
+			}
+			else if (!(chosen & (1ULL << menu_selected)))
+			{
+				chosen |= 1ULL << menu_selected;
+				count++;
+			}
+		}
+		if (count != rows || menu_selected != start)
+		{
+			printf("%s: %d of %d rows chosen, on line %d (from %d)\n", pass ? "up" : "down", count, rows, menu_selected,
+				start);
+			good = 0;
+		}
+	}
+	return good;
+}
+
+/* ---------- the Controls tab and its pages */
 
 /* one frame with these buttons held and these touch zones */
 static int frame_touch(unsigned long buttons, unsigned long touch)
@@ -685,40 +760,62 @@ static void test_controls_tab(void)
 		!strcmp(getenv("HALO_XBOX_A"), "cross") && !strcmp(getenv("HALO_XBOX_WHITE"), "right") &&
 		!strcmp(getenv("HALO_XBOX_BACK"), "select"), "a 1.0 settings.txt: touch zones Off, Xbox buttons as shipped");
 	open_panel();
-	to_tab("General");
+	to_tab("Controls");
 	count = menu_lines(&longest, diagram, sizeof(diagram));
 	printf("%s\n--\n", menu);
-	check(!strcmp(menu_line(1, line, sizeof(line)), "Check for updates\x02  >") &&
-		!strcmp(menu_line(2, line, sizeof(line)), "\x04" "Version " HALO_VITA_VERSION) &&
-		!strcmp(menu_line(3, line, sizeof(line)), "") &&
-		!strncmp(menu_line(4, line, sizeof(line)), "Look sensitivity\x02", 17) &&
-		!strncmp(menu_line(5, line, sizeof(line)), "Invert look\x02", 12) &&
+	check(!strcmp(menu_line(1, line, sizeof(line)), "\x08Look") &&
+		!strncmp(menu_line(2, line, sizeof(line)), "Look sensitivity\x02", 17) &&
+		!strncmp(menu_line(3, line, sizeof(line)), "Invert look\x02", 12) &&
+		!strcmp(menu_line(4, line, sizeof(line)), "Stick deadzone\x02< 10% >") &&
+		!strcmp(menu_line(5, line, sizeof(line)), "\x08" "Buttons") &&
 		!strncmp(menu_line(6, line, sizeof(line)), "Crouch\x02", 7) &&
-		!strncmp(menu_line(7, line, sizeof(line)), "Gyro aiming\x02", 12) &&
-		!strncmp(menu_line(8, line, sizeof(line)), "Rear touch guard\x02", 17) &&
-		!strcmp(menu_line(9, line, sizeof(line)), "Button layout\x02  As shipped  >") &&
-		!strcmp(menu_line(10, line, sizeof(line)), "Touch zones\x02  Off  >") &&
+		!strcmp(menu_line(7, line, sizeof(line)), "Button layout\x02  As shipped  >") &&
+		!strcmp(menu_line(8, line, sizeof(line)), "Reset controls\x02  >") &&
+		!strcmp(menu_line(9, line, sizeof(line)), "\x08Gyro") &&
+		!strncmp(menu_line(10, line, sizeof(line)), "Gyro aiming\x02", 12) &&
 		!strcmp(menu_line(11, line, sizeof(line)), "Gyro settings\x02  >") &&
-		!strcmp(menu_line(12, line, sizeof(line)), "Advanced\x02  >"),
-		"General: Check for updates, the version under it, a gap; look, invert, crouch, gyro aiming, rear guard; "
-		"then Button layout, Touch zones, Gyro settings, Advanced");
-	check(to_line("Check for updates") && menu_selected == 1 &&
-		strstr(menu, "\n\x05" "Asks GitHub for the newest version; again to download it\n") &&
-		strstr(menu, "\n\x06L/R: tabs   Cross: select   Circle: close"), "Check for updates: its help, cross presses it");
+		!strcmp(menu_line(12, line, sizeof(line)), "\x08Touch") &&
+		!strncmp(menu_line(13, line, sizeof(line)), "Rear touch guard\x02", 17) &&
+		!strcmp(menu_line(14, line, sizeof(line)), "Touch zones\x02  Off  >") &&
+		menu_line(15, line, sizeof(line))[0] == '\x05' && menu_line(16, line, sizeof(line))[0] == '\x06',
+		"Controls: Look (sensitivity, invert, Stick deadzone 10%: the 1.0 file's), Buttons (Crouch, Button layout, "
+		"Reset controls), Gyro (Gyro aiming, Gyro settings), Touch (Rear touch guard, Touch zones)");
+	check(menu_selected == 2 && strstr(menu, "\n\x05Right stick turning speed\n") &&
+		strstr(menu, "\n\x06L/R: tabs   Left/right: change   Circle: close"),
+		"Controls opens on Look sensitivity, its first row (not the heading over it)");
 	check(!strstr(menu, "\nTouch top left\x02") && !strstr(menu, "\nA\x02") && !strstr(menu, "\nGyro sensitivity\x02") &&
-		!strstr(menu, "\nStick deadzone\x02") && !strstr(menu, "\nShow dev settings\x02"),
-		"General: the zones, the buttons, the gyro's details and the rare rows on their pages");
-	check(menu_rows() == 10 && count == 15 && menu_fits() && menu_height_fits(),
-		"General: 10 rows, the version line and a gap (and the tab bar, help, buttons), each fits");
+		!strstr(menu, "Check for updates") && !strstr(menu, "Version ") && !strstr(menu, "\nShow dev settings\x02") &&
+		!strstr(menu, "\nUpdate channel\x02") && !strstr(menu, "\nButton icons\x02") && !strstr(menu, "\nAdvanced\x02"),
+		"Controls: the zones, the buttons, the gyro's details on their pages; the update check, Update channel, "
+		"Show dev settings and Button icons on Game (no Advanced page)");
+	check(menu_rows() == 10 && count == 17 && menu_fits() && menu_height_fits(),
+		"Controls: 10 rows, 4 headings (and the tab bar, help, buttons), each fits");
 	check(strstr(menu, "\nRear touch guard\x02< Normal >") && !strcmp(getenv("HALO_TOUCH_REAR_GUARD"), "normal"),
 		"Rear touch guard: Normal as shipped (a 1.0 settings.txt has none)");
-	check(!diagram[0], "General: no zone diagram");
+	check(!diagram[0], "Controls: no zone diagram");
+	/* (the headings stepped over: down from Stick deadzone, Crouch; up from
+	Gyro aiming, Reset controls; up from the first row, the last) */
+	to_line("Stick deadzone");
+	check(menu_selected == 4 && strstr(menu, "\n\x05Raise if the sticks drift\n"), "Stick deadzone: on the tab, its help");
+	press(VITA_BUTTON_DOWN);
+	check(menu_selected == 6 && !strncmp(menu_line(menu_selected, line, sizeof(line)), "Crouch\x02", 7),
+		"down from Stick deadzone: Crouch (the Buttons heading stepped over)");
+	to_line("Gyro aiming");
+	press(VITA_BUTTON_UP);
+	check(menu_selected == 8 && !strcmp(menu_line(menu_selected, line, sizeof(line)), "Reset controls\x02  >"),
+		"up from Gyro aiming: Reset controls (the Gyro heading stepped over)");
 	to_line("Look sensitivity");
+	press(VITA_BUTTON_UP);
+	check(menu_selected == 14 && !strncmp(menu_line(menu_selected, line, sizeof(line)), "Touch zones\x02", 12),
+		"up from the first row: the last, Touch zones (not the Look heading)");
+	press(VITA_BUTTON_DOWN);
+	check(menu_selected == 2, "down from the last row: the first, Look sensitivity (not the Look heading)");
 	check(strstr(menu, "\n\x06L/R: tabs   Left/right: change   Circle: close") != NULL,
 		"the panel's buttons on one line: a value row's, on a tab");
 
 	/* Touch zones: its page, the zones drawn beside */
-	check(open_page("Touch zones") && strstr(menu, "\n\x03" "General > Touch zones\n"), "Touch zones opens its page");
+	check(open_page("Touch zones") && strstr(menu, "\n\x03" "Controls > Touch zones\n") && !strchr(menu, '\x08'),
+		"Touch zones opens its page (no headings on it)");
 	count = menu_lines(&longest, diagram, sizeof(diagram));
 	printf("%s\n--\n", menu);
 	check(strstr(menu, "\nTouch top left\x02") && strstr(menu, "\nTouch top right\x02") &&
@@ -747,9 +844,9 @@ static void test_controls_tab(void)
 	check(!strcmp(getenv("HALO_TOUCH_TOP_RIGHT"), "back") && strstr(menu, "< Back  ") && !strcmp(diagram, "-S--A- alaaea"),
 		"Touch top right: Back, the last choice; the rear zone still marked set");
 	press(VITA_BUTTON_CIRCLE);
-	check(menu_visible && strstr(menu, "*General") && !strstr(menu, "\n\x03") &&
+	check(menu_visible && strstr(menu, "*Controls") && !strstr(menu, "\n\x03") &&
 		!strncmp(menu_line(menu_selected, line, sizeof(line)), "Touch zones\x02  2 on  >", 21),
-		"circle: back to General, on Touch zones, which says two are on");
+		"circle: back to Controls, on Touch zones, which says two are on");
 
 	/* the rear guard, on the tab */
 	to_line("Rear touch guard");
@@ -768,15 +865,16 @@ static void test_controls_tab(void)
 		VITA_REAR_GUARD_LIGHT, "Rear touch guard: Light, as the touch reader takes it");
 
 	/* Button layout: the Xbox buttons by name */
-	check(open_page("Button layout") && strstr(menu, "\n\x03" "General > Button layout\n"), "Button layout opens its page");
+	check(open_page("Button layout") && strstr(menu, "\n\x03" "Controls > Button layout\n"), "Button layout opens its page");
 	printf("%s\n--\n", menu);
 	check(strstr(menu, "\nA\x02") && strstr(menu, "\nB\x02") && strstr(menu, "\nX\x02") && strstr(menu, "\nY\x02") &&
 		strstr(menu, "\nBlack\x02") && strstr(menu, "\nWhite\x02") && strstr(menu, "\nLeft trigger\x02") &&
 		strstr(menu, "\nRight trigger\x02") && strstr(menu, "\nLeft stick click\x02") &&
-		strstr(menu, "\nRight stick click\x02") && strstr(menu, "\nBack\x02") && menu_rows() == 12 &&
-		!strstr(menu, " button") && menu_fits(), "Button layout: the eleven Xbox buttons by name, each fits");
-	check(!strcmp(menu_line(2, line, sizeof(line)), "Button icons\x02  Xbox >") &&
-		vita_button_icons_playstation() == 0, "Button layout: Button icons first, Xbox as shipped");
+		strstr(menu, "\nRight stick click\x02") && strstr(menu, "\nBack\x02") && menu_rows() == 11 &&
+		!strstr(menu, " button") && !strchr(menu, '\x08') && menu_fits() && menu_height_fits(),
+		"Button layout: the eleven Xbox buttons by name (no headings), each fits");
+	check(!strncmp(menu_line(2, line, sizeof(line)), "A\x02", 2) && !strstr(menu, "Button icons") &&
+		vita_button_icons_playstation() == 0, "Button layout: A first, Button icons on Game (Xbox as shipped)");
 	to_line("White");
 	menu_lines(&longest, diagram, sizeof(diagram));
 	check(!diagram[0], "a button's row: no zone diagram");
@@ -787,7 +885,7 @@ static void test_controls_tab(void)
 	check(config.zone_xbox[VITA_ZONE_REAR_LEFT] == VITA_XBOX_Y && config.zone_xbox[VITA_ZONE_TOP_RIGHT] == VITA_XBOX_BACK &&
 		config.xbox_button[VITA_XBOX_WHITE] == VITA_BUTTON_LEFT, "the pad reads the panel's choices");
 	press(VITA_BUTTON_CIRCLE);
-	check(strstr(menu, "\nButton layout\x02  Custom  >") != NULL, "back on General: Button layout says Custom");
+	check(strstr(menu, "\nButton layout\x02  Custom  >") != NULL, "back on Controls: Button layout says Custom");
 	press(VITA_BUTTON_CIRCLE);
 	check(!menu_visible && frame_touch(0, 1UL << VITA_ZONE_REAR_LEFT) == 0,
 		"circle on a tab closes the panel: the touch zones reach the game");
@@ -806,23 +904,20 @@ static void test_controls_tab(void)
 		!strcmp(getenv("HALO_XBOX_RIGHT_TRIGGER"), "r") && !strcmp(getenv("HALO_TOUCH_REAR_GUARD"), "light"),
 		"settings.txt round trip: zones, the rear guard and buttons back at start-up");
 
-	/* Advanced: the deadzone, Reset controls (Show dev settings kept) */
+	/* the deadzone and Reset controls, on the tab (Show dev settings, on
+	Game, kept) */
 	open_panel();
-	check(strstr(menu, "*General") && !strstr(menu, "\n\x03"), "the panel opens again on the tab's own page");
-	to_line("Advanced");
-	check(strstr(menu, "\n\x05" "Stick deadzone, Reset controls, dev settings, Update channel\n") != NULL,
-		"the Advanced row's help says what is there");
-	check(open_page("Advanced") && strstr(menu, "\n\x03" "General > Advanced\n") &&
-		!strncmp(menu_line(2, line, sizeof(line)), "Stick deadzone\x02", 15) &&
-		!strcmp(menu_line(3, line, sizeof(line)), "Reset controls\x02  >") &&
-		!strncmp(menu_line(4, line, sizeof(line)), "Show dev settings\x02", 18) &&
-		!strncmp(menu_line(5, line, sizeof(line)), "Update channel\x02", 15) && menu_rows() == 4 && menu_fits() &&
-		!strstr(menu, "Check for updates") && !strstr(menu, "Version "),
-		"General, Advanced: Stick deadzone, Reset controls, Show dev settings, Update channel (Check for updates and "
-		"the version on the tab)");
+	check(strstr(menu, "*Controls") && !strstr(menu, "\n\x03"), "the panel opens again on the tab's own page");
+	to_line("Stick deadzone");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("XV_DEADZONE"), "15") && strstr(file_text(SETTINGS_FILE), "XV_DEADZONE=15\n") &&
+		!strcmp(menu_line(menu_selected, line, sizeof(line)), "Stick deadzone\x02< 15%  "),
+		"Stick deadzone 15%: in the environment and settings.txt, the last");
 	to_line("Reset controls");
-	check(strstr(menu, "\n\x06L/R: tabs   Cross: select   Circle: back") != NULL, "an action row's buttons: cross selects");
-	/* (the Update channel, on the same page, is no control: kept) */
+	check(menu_selected == 8 && strstr(menu, "\n\x05" "Look, crouch, buttons, touch as shipped (gyro kept)\n") &&
+		strstr(menu, "\n\x06L/R: tabs   Cross: select   Circle: close") != NULL,
+		"Reset controls: under Buttons, its help; an action row's buttons: cross selects");
+	/* (the Update channel, on Game, is no control: kept) */
 	channel = setting_named("HALO_UPDATE_CHANNEL");
 	channel_kept = channel->choice;
 	channel->choice = !shipped_choice[channel - settings];
@@ -841,13 +936,14 @@ static void test_controls_tab(void)
 		strstr(file_text(SETTINGS_FILE), "HALO_TOUCH_REAR_GUARD=normal\n"),
 		"Reset controls: zones Off, the rear guard Normal, buttons, look, crouch, deadzone as shipped, saved");
 	check(!strcmp(getenv("HALO_DEV_SETTINGS"), "1") && strstr(menu, "|Dev"), "Reset controls keeps Show dev settings");
+	check(strstr(menu, "\nButton layout\x02  As shipped  >") && strstr(menu, "\nTouch zones\x02  Off  >") &&
+		strstr(menu, "\nStick deadzone\x02  Off >") && menu_fits() && menu_height_fits(),
+		"on Controls: buttons as shipped, touch zones Off, the deadzone Off");
 	press(VITA_BUTTON_CIRCLE);
-	check(strstr(menu, "\nButton layout\x02  As shipped  >") && strstr(menu, "\nTouch zones\x02  Off  >"),
-		"back on General: buttons as shipped, touch zones Off");
-	press(VITA_BUTTON_CIRCLE);
+	check(!menu_visible, "circle on Controls closes the panel");
 }
 
-/* ---------- gyro aiming: its row on General, its page */
+/* ---------- gyro aiming: its row on Controls, its page */
 
 static void test_gyro_page(void)
 {
@@ -861,9 +957,12 @@ static void test_gyro_page(void)
 		!strcmp(getenv("HALO_GYRO_TURN"), "yaw") && !strcmp(getenv("HALO_GYRO_ASSIST"), "1"),
 		"a 1.0 settings.txt: gyro Off, button L, 1.5x, normal, yaw, aim assist on");
 	open_panel();
-	to_tab("General");
+	to_tab("Controls");
+	/* (Reset controls' notice, on the help line for 4 s, gone) */
+	clock_us += 5000000;
 	to_line("Gyro aiming");
-	check(strstr(menu, "Turn the Vita to aim") != NULL, "Gyro aiming's help line");
+	check(strstr(menu, "Turn the Vita to aim") != NULL && !strcmp(menu_line(menu_selected - 1, line, sizeof(line)), "\x08Gyro"),
+		"Gyro aiming's help line; the Gyro heading over it");
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(getenv("HALO_GYRO"), "on") && strstr(file_text(SETTINGS_FILE), "HALO_GYRO=on\n"),
 		"Gyro aiming On: in the environment and settings.txt");
@@ -873,7 +972,7 @@ static void test_gyro_page(void)
 	check(open_page("Gyro settings"), "Gyro settings opens its page");
 	count = menu_lines(&longest, diagram, sizeof(diagram));
 	printf("%s\n--\n", menu);
-	check(!strcmp(menu_line(1, line, sizeof(line)), "\x03" "General > Gyro settings") &&
+	check(!strcmp(menu_line(1, line, sizeof(line)), "\x03" "Controls > Gyro settings") &&
 		strstr(menu_line(2, line, sizeof(line)), "Gyro button\x02") && strstr(line, "< L >") &&
 		strstr(menu_line(3, line, sizeof(line)), "Gyro sensitivity\x02") && strstr(line, "< 1.5x >") &&
 		strstr(menu_line(4, line, sizeof(line)), "Gyro vertical\x02") && strstr(line, "Normal") &&
@@ -929,13 +1028,11 @@ static void test_gyro_page(void)
 
 	/* Reset controls leaves the gyro's rows (as when they had a tab) */
 	open_panel();
-	to_tab("General");
-	open_page("Advanced");
-	to_line("Reset controls");
+	to_tab("Controls");
+	check(to_line("Reset controls"), "Controls: Reset controls");
 	press(VITA_BUTTON_CROSS);
 	check(!strcmp(getenv("HALO_GYRO"), "hold") && !strcmp(getenv("HALO_GYRO_SENS"), "250"),
 		"Reset controls leaves gyro aiming and its settings");
-	press(VITA_BUTTON_CIRCLE);
 	press(VITA_BUTTON_CIRCLE);
 }
 
@@ -1023,6 +1120,10 @@ static void test_multiplayer_tab(void)
 		strstr(menu, "\n\x04Online: ready") && !strstr(menu, "Online menus"),
 		"before the game says: this Vita's name, no game, internet play's line");
 	check(menu_rows() == 8 && menu_fits(), "Multiplayer: eight rows, 46 characters a line");
+	check(!strcmp(outline_of(labels, sizeof(labels), 0), "=Network|Connection*|Crossplay*|Join with a code|=Bots|Bots|"
+		"=Games|Co-op players|Unseen players|Modded maps|Latency meter") && menu_height_fits(),
+		"Multiplayer: Network over Connection, Bots over Bots, Games over Co-op players ... Latency meter; it fits the "
+		"panel's height");
 	/* the offline bots: Bots on, its skill and teams rows below it, live */
 	to_line("Bots");
 	press(VITA_BUTTON_RIGHT);
@@ -1032,6 +1133,9 @@ static void test_multiplayer_tab(void)
 	check(!strcmp(labels, "Connection*|Crossplay*|Join with a code|Bots|  Bot skill|  Bot teams|  Bot vehicles|  Bot routes|  Bot playlist|Co-op players|Unseen players|Modded maps|Latency meter") &&
 		getenv("HALO_BOTS") && !strcmp(getenv("HALO_BOTS"), "3") && !strstr(menu, "Restart the game") && menu_fits(),
 		"Bots 3: Bot skill, Bot teams, Bot vehicles, Bot routes and Bot playlist below it, live");
+	check(!strcmp(outline_of(labels, sizeof(labels), 0), "=Network|Connection*|Crossplay*|Join with a code|=Bots|Bots|"
+		"  Bot skill|  Bot teams|  Bot vehicles|  Bot routes|  Bot playlist|=Games|Co-op players|Unseen players|"
+		"Modded maps|Latency meter"), "Bots 3: the bot rows under the Bots heading, Games after them");
 	to_line("  Bot skill");
 	press(VITA_BUTTON_RIGHT);
 	check(getenv("HALO_BOT_SKILL") && !strcmp(getenv("HALO_BOT_SKILL"), "heroic"), "Bot skill: Normal, then Heroic");
@@ -1087,6 +1191,17 @@ static void test_multiplayer_tab(void)
 	check(!strcmp(labels, "Connection*|Crossplay*|Join with a code|Bots|Co-op players|Unseen players|Modded maps|Latency meter") &&
 		strstr(menu, "\n\x04Online menus need bitmaps.map, loc.map: README\n") && menu_fits(),
 		"the Xbox's menus (no bitmaps.map, loc.map): one line says what the online menus need; Join with a code stays");
+	/* (that line too, on the classic panel - the Halo CE menus' -: short of
+	room, the first heading, Network, gives way; the Halo 3 menus' panel
+	fits its rows to its height, every heading kept) */
+	vita_settings_set("HALO_MENU_STYLE", "classic");
+	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
+	check(menu_height_fits() && !strstr(menu, "Network") && !strncmp(menu_line(1, line, sizeof(line)), "Connection*\x02", 12) &&
+		!strcmp(outline_of(labels, sizeof(labels), 1), "Bots|Games"),
+		"the classic panel with that line: Network gives way, Bots and Games stay; the tab fits its height");
+	vita_settings_set("HALO_MENU_STYLE", "halo3");
+	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
+	check(!strcmp(outline_of(labels, sizeof(labels), 1), "Network|Bots|Games"), "the Halo 3 panel: every heading kept");
 
 	/* the hosted game's settings, as the game's Server Setup sets them
 	(vita_settings_set): applied at once and kept in settings.txt */
@@ -1196,6 +1311,22 @@ static void test_multiplayer_tab(void)
 	rows_of(labels, sizeof(labels), &info);
 	check(!strcmp(labels, "Connection*|Ad hoc room|Join the room|Join with a code|Bots|Co-op players|Unseen players|Modded maps|Latency meter"),
 		"Ad hoc chosen: the room's rows on the tab (the code's too, while Online runs)");
+	check(!strcmp(outline_of(labels, sizeof(labels), 0), "=Network|Connection*|Ad hoc room|Join the room|Join with a code|"
+		"=Bots|Bots|=Games|Co-op players|Unseen players|Modded maps|Latency meter"),
+		"Ad hoc chosen: the room's rows under Network");
+	/* (the classic panel: nine rows and four lines - the headings give way
+	till the tab fits) */
+	vita_settings_set("HALO_MENU_STYLE", "classic");
+	clock_us += 5000000;
+	press(VITA_BUTTON_DOWN);
+	press(VITA_BUTTON_UP);
+	check(menu_height_fits() && menu_rows() == 9 && strstr(menu_line(menu_selected, line, sizeof(line)), "Connection*\x02"),
+		"the classic panel, Ad hoc chosen while Online runs: the tab fits its height (headings given way), Connection "
+		"still chosen");
+	vita_settings_set("HALO_MENU_STYLE", "halo3");
+	press(VITA_BUTTON_DOWN);
+	press(VITA_BUTTON_UP);
+	check(!strcmp(outline_of(labels, sizeof(labels), 1), "Network|Bots|Games"), "... the Halo 3 panel: every heading kept");
 	to_line("Join the room");
 	press(VITA_BUTTON_CROSS);
 	check(adhoc_connects == 0 && strstr(menu, "Restart the game for Ad hoc first"), "Join the room waits for the restart");
@@ -1478,55 +1609,28 @@ static void test_online_rows(void)
 	to_line("Save report");
 }
 
-/* the Graphics tab and its pages (the owner's layout, 1.1.0-beta.5): the
-tab's six rows and four pages - Screen, First person, Detail, Performance -
-each page's rows in order; every row with its variable, values, default and
-restart as before the regrouping (the profiles' rows: test_bruno_rows,
-test_particles_row), nothing else on them */
-static void test_graphics_layout(void)
+/* the tabs' rows in order (Halo Online's settings' arrangement, the owner's,
+Oct 18 2026; the headings over them: test_headings): each with its variable,
+values, default and restart as before the regrouping, nothing else on the
+tab; Video's two pages, Detail and Performance, with theirs (the profiles'
+rows: test_bruno_rows, test_particles_row). A page's row has no variable
+and names the page it opens; an action's, its action */
+struct layout_row
 {
-	static const struct
-	{
-		int page;
-		const char *label, *variable, *values;
-		int restart;
-		const char *shipped;
-	} rows[] = {
-		{ TAB_GRAPHICS, "Profile", "HALO_PROFILE", "performance|balanced|quality|custom", 0, "balanced" },
-		{ TAB_GRAPHICS, "Render resolution", "HALO_RENDER_SCALE", "1|0.875|0.75|0.625|0.5|dynamic", 0, "dynamic" },
-		{ TAB_GRAPHICS, "Dynamic minimum", "HALO_DYNAMIC_RES_MIN", "0.5|0.625|0.75", 0, "0.625" },
-		{ TAB_GRAPHICS, "Frame limit", "HALO_FRAME_CAP", "30|60|0", 0, "30" },
-		{ TAB_GRAPHICS, "Frame interpolation", "HALO_INTERPOLATION", "false|true", 0, "false" },
-		{ TAB_GRAPHICS, "FPS counter", "HALO_FRAMERATE_COUNTER", "0|1", 0, "0" },
-		{ TAB_GRAPHICS, "Screen", NULL, NULL, 0, NULL },
-		{ PAGE_GRAPHICS_SCREEN, "Aspect ratio", "HALO_DISPLAY_WIDTH", "848|640", 0, "848" },
-		{ PAGE_GRAPHICS_SCREEN, "Upscale filter", "HALO_UPSCALE_FILTER", "0|1", 0, "0" },
-		{ PAGE_GRAPHICS_SCREEN, "Menu style", "HALO_MENU_STYLE", "classic|halo3", 0, "classic" },
-		{ TAB_GRAPHICS, "First person", NULL, NULL, 0, NULL },
-		{ PAGE_GRAPHICS_FIRST_PERSON, "First-person legs", "HALO_FIRST_PERSON_LEGS", "0|1", 0, "1" },
-		{ PAGE_GRAPHICS_FIRST_PERSON, "Smooth weapon motion", "HALO_INTERPOLATE_FIRST_PERSON", "1|0", 0, "1" },
-		{ TAB_GRAPHICS, "Detail", NULL, NULL, 0, NULL },
-		{ PAGE_GRAPHICS_DETAIL, "Model detail", "HALO_MODEL_LOD_SCALE", "1|0.75|0.5|0.35", 0, "0.75" },
-		{ PAGE_GRAPHICS_DETAIL, "Hide distant objects", "HALO_MIN_OBJECT_PIXELS", "0|4|8|12", 0, "8" },
-		{ PAGE_GRAPHICS_DETAIL, "Object shadows", "HALO_VITA_SHADOWS", "2|1|0", 0, "0" },
-		{ PAGE_GRAPHICS_DETAIL, "Dynamic lights", "HALO_MAX_SCENE_LIGHTS", "0|8|4|2", 0, "4" },
-		{ PAGE_GRAPHICS_DETAIL, "Effects quality", "HALO_VITA_EFFECTS_QUALITY", "2|1|0", 0, "2" },
-		{ PAGE_GRAPHICS_DETAIL, "Sun rays", "HALO_SUN_RAYS", "1|0", 0, "0" },
-		{ PAGE_GRAPHICS_DETAIL, "Tiny decals", "HALO_DECAL_MIN_PIXELS", "0|2", 0, "0" },
-		{ PAGE_GRAPHICS_DETAIL, "Particles", "HALO_PARTICLE_BUDGET", "full|reduced|low", 0, "reduced" },
-		{ PAGE_GRAPHICS_DETAIL, "Particle density", "HALO_PARTICLE_RENDER_DIVISOR", "1|2|3|4", 0, "1" },
-		{ PAGE_GRAPHICS_DETAIL, "Ragdolls", "HALO_RAGDOLLS", "0|1", 0, "1" },
-		{ TAB_GRAPHICS, "Performance", NULL, NULL, 0, NULL },
-		{ PAGE_GRAPHICS_PERFORMANCE, "Scenery updates", "HALO_SCENERY_UPDATE_DIVISOR", "1|2|4", 0, "4" },
-		{ PAGE_GRAPHICS_PERFORMANCE, "Object lighting", "HALO_LIGHTING_REFRESH_DIVISOR", "1|2|3", 0, "3" },
-		{ PAGE_GRAPHICS_PERFORMANCE, "AI think rate", "HALO_AI_THINK_DIVISOR", "1|0|2|3", 0, "0" },
-		{ PAGE_GRAPHICS_PERFORMANCE, "Fourth core helpers", "HALO_CPU3_AUX", "0|1|2", 1, "2" },
-	};
-	static const int opened[] = { PAGE_GRAPHICS_SCREEN, PAGE_GRAPHICS_FIRST_PERSON, PAGE_GRAPHICS_DETAIL,
-		PAGE_GRAPHICS_PERFORMANCE };
-	static const char *const names[] = { "Screen", "First person", "Detail", "Performance" };
-	int count = (int)(sizeof(rows) / sizeof(rows[0]));
-	int index, row = 0, all = 1, pages_opened = 0;
+	int page;
+	const char *label, *variable, *values;
+	int restart;
+	const char *shipped;
+	/* (a row with no variable: ACTION_PAGE and the page it opens, or the
+	action) */
+	int action, opens;
+};
+
+/* the rows on tab `tab_index` (and, with `with_pages`, on the pages it
+opens), in settings[]'s order, are `rows` */
+static int layout_is(int tab_index, int with_pages, const struct layout_row *rows, int count)
+{
+	int index, row = 0, all = 1;
 
 	for (index = 0; index < SETTING_COUNT; index++)
 	{
@@ -1534,27 +1638,25 @@ static void test_graphics_layout(void)
 		char values[160];
 		int choice, length = 0;
 
-		if (setting->page != TAB_GRAPHICS && pages[setting->page].tab != TAB_GRAPHICS)
+		if (pages[setting->page].tab != tab_index || (!with_pages && setting->page != tab_index))
 			continue;
 		if (row >= count || strcmp(setting->label, rows[row].label) != 0 || setting->page != rows[row].page)
 		{
-			printf("graphics row %d: %s (page %d)\n", row, setting->label, setting->page);
+			printf("%s row %d: %s (page %d)\n", pages[tab_index].name, row, setting->label, setting->page);
 			all = 0;
 			row++;
 			continue;
 		}
 		if (!rows[row].variable)
 		{
-			/* (a page's row) */
-			if (setting->kind != KIND_ACTION || setting->action != ACTION_PAGE || setting->variable ||
-				pages_opened >= 4 || setting->opens != opened[pages_opened] ||
-				strcmp(pages[setting->opens].name, names[pages_opened]) != 0 ||
-				pages[setting->opens].tab != TAB_GRAPHICS || !setting->help)
+			/* (a page's row, or an action's) */
+			if (setting->kind != KIND_ACTION || setting->action != rows[row].action || setting->variable ||
+				!setting->help || (rows[row].action == ACTION_PAGE && (setting->opens != rows[row].opens ||
+				pages[setting->opens].tab != tab_index)))
 			{
-				printf("graphics page row: %s\n", setting->label);
+				printf("%s action or page row: %s\n", pages[tab_index].name, setting->label);
 				all = 0;
 			}
-			pages_opened++;
 			row++;
 			continue;
 		}
@@ -1566,19 +1668,245 @@ static void test_graphics_layout(void)
 			strcmp(values, rows[row].values) != 0 || setting->restart != rows[row].restart || setting->dev ||
 			strcmp(setting->values[shipped_choice[index]], rows[row].shipped) != 0)
 		{
-			printf("graphics row: %s (%s, %s, default %s)\n", setting->label, setting->variable ? setting->variable : "-",
-				values, setting->values[shipped_choice[index]]);
+			printf("%s row: %s (%s, %s, default %s)\n", pages[tab_index].name, setting->label,
+				setting->variable ? setting->variable : "-", values, setting->values[shipped_choice[index]]);
 			all = 0;
 		}
 		row++;
 	}
-	check(all && row == count && pages_opened == 4,
-		"Graphics: Profile, Render resolution, Dynamic minimum, Frame limit, Frame interpolation, FPS counter; "
-		"Screen (Aspect ratio, Upscale filter, Menu style), First person (First-person legs, Smooth weapon motion), Detail "
-		"(Model detail ... Particles, Particle density, Ragdolls), Performance (Scenery updates, Object lighting, AI think "
-		"rate, Fourth core helpers*): each row's variable, values, default and restart as before");
+	if (row != count)
+		printf("%s: %d rows, not %d\n", pages[tab_index].name, row, count);
+	return all && row == count;
+}
+
+static void test_tab_layouts(void)
+{
+	/* (the Update channel a build starts on: a pre-release's Experimental) */
+	const char *channel = update_build_is_prerelease(HALO_VITA_VERSION) ? "experimental" : "stable";
+	char languages[64];
+	const struct layout_row game[] = {
+		/* (Halo 3's menus as shipped from 1.1.1: the owner's) */
+		{ TAB_GAME, "Menu style", "HALO_MENU_STYLE", "classic|halo3", 0, "halo3" },
+		{ TAB_GAME, "Button icons", "HALO_BUTTON_ICONS", "xbox|playstation", 0, "xbox" },
+		{ TAB_GAME, "Language", "HALO_LANGUAGE", languages, 0, "auto" },
+		{ TAB_GAME, "FPS counter", "HALO_FRAMERATE_COUNTER", "0|1", 0, "0" },
+		{ TAB_GAME, "First-person legs", "HALO_FIRST_PERSON_LEGS", "0|1", 0, "1" },
+		{ TAB_GAME, "Smooth weapon motion", "HALO_INTERPOLATE_FIRST_PERSON", "1|0", 0, "1" },
+		{ TAB_GAME, "Check for updates", NULL, NULL, 0, NULL, ACTION_UPDATE_CHECK },
+		{ TAB_GAME, "Update channel", "HALO_UPDATE_CHANNEL", "experimental|stable", 0, channel },
+		{ TAB_GAME, "Show dev settings", "HALO_DEV_SETTINGS", "0|1", 0, "0" },
+	};
+	static const struct layout_row controls[] = {
+		{ TAB_CONTROLS, "Look sensitivity", "XV_LOOK_SENS", "50|75|100|125|150|200", 0, "100" },
+		{ TAB_CONTROLS, "Invert look", "XV_INVERT_Y", "0|1", 0, "0" },
+		{ TAB_CONTROLS, "Stick deadzone", "XV_DEADZONE", "0|5|10|15", 0, "0" },
+		{ TAB_CONTROLS, "Crouch", "HALO_CROUCH_TOGGLE", "1|0", 0, "1" },
+		{ TAB_CONTROLS, "Button layout", NULL, NULL, 0, NULL, ACTION_PAGE, PAGE_BUTTONS },
+		{ TAB_CONTROLS, "Reset controls", NULL, NULL, 0, NULL, ACTION_RESET_CONTROLS },
+		{ TAB_CONTROLS, "Gyro aiming", "HALO_GYRO", "off|on|zoomed|hold", 0, "off" },
+		{ TAB_CONTROLS, "Gyro settings", NULL, NULL, 0, NULL, ACTION_PAGE, PAGE_GYRO },
+		{ TAB_CONTROLS, "Rear touch guard", "HALO_TOUCH_REAR_GUARD", "off|light|normal|strong", 0, "normal" },
+		{ TAB_CONTROLS, "Touch zones", NULL, NULL, 0, NULL, ACTION_PAGE, PAGE_TOUCH },
+	};
+	static const struct layout_row video[] = {
+		{ TAB_GRAPHICS, "Profile", "HALO_PROFILE", "performance|balanced|quality|custom", 0, "balanced" },
+		{ TAB_GRAPHICS, "Render resolution", "HALO_RENDER_SCALE", "1|0.875|0.75|0.625|0.5|dynamic", 0, "dynamic" },
+		{ TAB_GRAPHICS, "Dynamic minimum", "HALO_DYNAMIC_RES_MIN", "0.5|0.625|0.75", 0, "0.625" },
+		{ TAB_GRAPHICS, "Frame limit", "HALO_FRAME_CAP", "30|60|0", 0, "30" },
+		{ TAB_GRAPHICS, "Frame interpolation", "HALO_INTERPOLATION", "false|true", 0, "false" },
+		{ TAB_GRAPHICS, "Aspect ratio", "HALO_DISPLAY_WIDTH", "848|640", 0, "848" },
+		{ TAB_GRAPHICS, "Upscale filter", "HALO_UPSCALE_FILTER", "0|1", 0, "0" },
+		{ TAB_GRAPHICS, "Detail", NULL, NULL, 0, NULL, ACTION_PAGE, PAGE_GRAPHICS_DETAIL },
+		{ TAB_GRAPHICS, "Performance", NULL, NULL, 0, NULL, ACTION_PAGE, PAGE_GRAPHICS_PERFORMANCE },
+		{ PAGE_GRAPHICS_DETAIL, "Model detail", "HALO_MODEL_LOD_SCALE", "1|0.75|0.5|0.35", 0, "0.75" },
+		{ PAGE_GRAPHICS_DETAIL, "Hide distant objects", "HALO_MIN_OBJECT_PIXELS", "0|4|8|12", 0, "8" },
+		{ PAGE_GRAPHICS_DETAIL, "Object shadows", "HALO_VITA_SHADOWS", "2|1|0", 0, "0" },
+		{ PAGE_GRAPHICS_DETAIL, "Dynamic lights", "HALO_MAX_SCENE_LIGHTS", "0|8|4|2", 0, "4" },
+		{ PAGE_GRAPHICS_DETAIL, "Effects quality", "HALO_VITA_EFFECTS_QUALITY", "2|1|0", 0, "2" },
+		{ PAGE_GRAPHICS_DETAIL, "Sun rays", "HALO_SUN_RAYS", "1|0", 0, "0" },
+		{ PAGE_GRAPHICS_DETAIL, "Tiny decals", "HALO_DECAL_MIN_PIXELS", "0|2", 0, "0" },
+		{ PAGE_GRAPHICS_DETAIL, "Particles", "HALO_PARTICLE_BUDGET", "full|reduced|low", 0, "reduced" },
+		{ PAGE_GRAPHICS_DETAIL, "Particle density", "HALO_PARTICLE_RENDER_DIVISOR", "1|2|3|4", 0, "1" },
+		{ PAGE_GRAPHICS_DETAIL, "Ragdolls", "HALO_RAGDOLLS", "0|1", 0, "1" },
+		{ PAGE_GRAPHICS_PERFORMANCE, "Scenery updates", "HALO_SCENERY_UPDATE_DIVISOR", "1|2|4", 0, "4" },
+		{ PAGE_GRAPHICS_PERFORMANCE, "Object lighting", "HALO_LIGHTING_REFRESH_DIVISOR", "1|2|3", 0, "3" },
+		{ PAGE_GRAPHICS_PERFORMANCE, "AI think rate", "HALO_AI_THINK_DIVISOR", "1|0|2|3", 0, "0" },
+		{ PAGE_GRAPHICS_PERFORMANCE, "Fourth core helpers", "HALO_CPU3_AUX", "0|1|2", 1, "2" },
+	};
+	static const struct layout_row sound[] = {
+		{ TAB_AUDIO, "Sound voices", "HALO_SOUND_CHANNELS", "16|24|32|0", 1, "0" },
+		{ TAB_AUDIO, "Sound occlusion", "HALO_SOUND_OBSTRUCTION_TICKS", "1|3|6", 0, "3" },
+		{ TAB_AUDIO, "Sound updates", "HALO_SOUND_MANAGER_DIVISOR", "1|2|3", 0, "2" },
+	};
+	int index, length = snprintf(languages, sizeof(languages), "auto|en");
+
+	/* (the Language row's choices: Automatic, English, then each language
+	file's code) */
+	for (index = 1; index < lang_count(); index++)
+		length += snprintf(languages + length, sizeof(languages) - length, "|%s", lang_code(index));
+	check(TAB_GAME == 0 && TAB_CONTROLS == 1 && TAB_GRAPHICS == 2 && TAB_AUDIO == 3 && TAB_MULTIPLAYER == 4 &&
+		TAB_DEV == 5 && TAB_COUNT == 6 && !strcmp(pages[TAB_GAME].name, "Game") &&
+		!strcmp(pages[TAB_CONTROLS].name, "Controls") && !strcmp(pages[TAB_GRAPHICS].name, "Video") &&
+		!strcmp(pages[TAB_AUDIO].name, "Sound") && !strcmp(pages[TAB_MULTIPLAYER].name, "Multiplayer") &&
+		!strcmp(pages[TAB_DEV].name, "Dev"), "the tabs in order: Game, Controls, Video, Sound, Multiplayer, Dev");
+	check(layout_is(TAB_GAME, 1, game, (int)(sizeof(game) / sizeof(game[0]))),
+		"Game: Menu style (Halo 3 as shipped), Button icons, Language, FPS counter; First-person legs, Smooth weapon "
+		"motion; Check for updates, Update channel, Show dev settings: each row's variable, values, default and restart "
+		"as before; no page of its own");
+	check(layout_is(TAB_CONTROLS, 0, controls, (int)(sizeof(controls) / sizeof(controls[0]))),
+		"Controls: Look sensitivity, Invert look, Stick deadzone; Crouch, Button layout, Reset controls; Gyro aiming, "
+		"Gyro settings; Rear touch guard, Touch zones: each row's variable, values, default and restart as before");
+	check(layout_is(TAB_GRAPHICS, 1, video, (int)(sizeof(video) / sizeof(video[0]))),
+		"Video: Profile, Render resolution, Dynamic minimum, Frame limit, Frame interpolation, Aspect ratio, Upscale "
+		"filter, Detail, Performance; Detail (Model detail ... Particles, Particle density, Ragdolls), Performance "
+		"(Scenery updates, Object lighting, AI think rate, Fourth core helpers*): each row's variable, values, default "
+		"and restart as before");
+	check(layout_is(TAB_AUDIO, 1, sound, (int)(sizeof(sound) / sizeof(sound[0]))),
+		"Sound: Sound voices*, Sound occlusion, Sound updates (Language on Game): as before");
+	{
+		/* (the Controls tab's pages: their rows only theirs) */
+		int buttons = 0, touch = 0, gyro = 0, other = 0;
+
+		for (index = 0; index < SETTING_COUNT; index++)
+			if (pages[settings[index].page].tab == TAB_CONTROLS && settings[index].page != TAB_CONTROLS)
+			{
+				buttons += settings[index].page == PAGE_BUTTONS && !strncmp(settings[index].variable, "HALO_XBOX_", 10);
+				touch += settings[index].page == PAGE_TOUCH && !strncmp(settings[index].variable, "HALO_TOUCH_", 11);
+				gyro += settings[index].page == PAGE_GYRO && !strncmp(settings[index].variable, "HALO_GYRO_", 10);
+				other += settings[index].page != PAGE_BUTTONS && settings[index].page != PAGE_TOUCH &&
+					settings[index].page != PAGE_GYRO;
+			}
+		check(buttons == 11 && touch == 6 && gyro == 5 && !other && setting_named("HALO_BUTTON_ICONS")->page == TAB_GAME,
+			"Controls' pages: Button layout the eleven Xbox buttons (Button icons on Game), Touch zones the six zones, "
+			"Gyro settings the gyro's five");
+	}
+	{
+		/* (the old layout's names: no page or tab has them) */
+		int old = 0;
+
+		for (index = 0; index < PAGE_COUNT; index++)
+			old |= !strcmp(pages[index].name, "Screen") || !strcmp(pages[index].name, "First person") ||
+				!strcmp(pages[index].name, "Advanced") || !strcmp(pages[index].name, "General") ||
+				!strcmp(pages[index].name, "Graphics") || !strcmp(pages[index].name, "Audio");
+		check(!old && PAGE_GRAPHICS_DETAIL == TAB_COUNT && PAGE_COUNT == TAB_COUNT + 8 &&
+			!strcmp(pages[PAGE_GRAPHICS_DETAIL].name, "Detail") && !strcmp(pages[PAGE_GRAPHICS_PERFORMANCE].name, "Performance") &&
+			!strcmp(pages[PAGE_BUTTONS].name, "Button layout") && !strcmp(pages[PAGE_TOUCH].name, "Touch zones") &&
+			!strcmp(pages[PAGE_GYRO].name, "Gyro settings") && !strcmp(pages[PAGE_PLAY].name, "Play") &&
+			!strcmp(pages[PAGE_MAPS].name, "Modded maps") && !strcmp(pages[PAGE_DEV_AB].name, "A/B switches"),
+			"the pages rows open: Detail, Performance, Button layout, Touch zones, Gyro settings, Play, Modded maps, A/B "
+			"switches (no Screen, First person or Advanced page; no General, Graphics or Audio tab)");
+	}
 	check(settings[0].variable && !strcmp(settings[0].variable, "HALO_PROFILE") && !strcmp(settings[1].variable, "HALO_RENDER_SCALE") &&
 		!strcmp(settings[2].variable, "HALO_DYNAMIC_RES_MIN"), "Profile still settings[0], Render resolution and its minimum after it");
+}
+
+/* the headings over a tab's rows (Halo Online's, headings[]): each above
+the row it names, on that row's tab, a line of its own marked '\x08' in the
+panel's text (vita_gxm.c draws it smaller: 22 pixels); never chosen, up and
+down step over them; none on Sound, Dev or a page a row opens */
+static void test_headings(void)
+{
+	static const struct
+	{
+		const char *tab, *outline;
+	} tabs[] = {
+		{ "Game", "=Interface|Menu style|Button icons|Language|FPS counter|=First person|First-person legs|"
+			"Smooth weapon motion|=Updates|Check for updates|Update channel|Show dev settings" },
+		{ "Controls", "=Look|Look sensitivity|Invert look|Stick deadzone|=Buttons|Crouch|Button layout|Reset controls|"
+			"=Gyro|Gyro aiming|Gyro settings|=Touch|Rear touch guard|Touch zones" },
+		{ "Video", "=Quality|Profile|Render resolution|Dynamic minimum|Frame limit|Frame interpolation|=Screen|"
+			"Aspect ratio|Upscale filter|=More|Detail|Performance" },
+		{ "Sound", "Sound voices*|Sound occlusion|Sound updates" },
+		{ "Multiplayer", "=Network|Connection*|Crossplay*|Join with a code|=Bots|Bots|=Games|Co-op players|"
+			"Unseen players|Modded maps|Latency meter" },
+	};
+	char outline[512], line[128];
+	int index, all = 1, steps = 1, fits = 1, marked = 1;
+
+	/* (the table: each heading over a row of its tab) */
+	for (index = 0; index < (int)(sizeof(headings) / sizeof(headings[0])); index++)
+	{
+		int setting, rows = 0;
+
+		for (setting = 0; setting < SETTING_COUNT; setting++)
+			rows += settings[setting].page == headings[index].page && !strcmp(settings[setting].label, headings[index].row);
+		if (rows != 1 || headings[index].page >= TAB_COUNT || headings[index].page == TAB_AUDIO ||
+			headings[index].page == TAB_DEV || !headings[index].name[0])
+		{
+			printf("heading %s: over %s, page %d\n", headings[index].name, headings[index].row, headings[index].page);
+			all = 0;
+		}
+	}
+	check(all && (int)(sizeof(headings) / sizeof(headings[0])) == 13,
+		"the headings: thirteen, each over one row of its tab (none on Sound, Dev or a page a row opens)");
+	/* each tab: its headings and rows in order, each heading a line of its
+	own, the page fitting the panel; down and up through it */
+	all = 1;
+	for (index = 0; index < (int)(sizeof(tabs) / sizeof(tabs[0])); index++)
+	{
+		const char *at;
+
+		if (!to_tab(tabs[index].tab) || strcmp(outline_of(outline, sizeof(outline), 0), tabs[index].outline) != 0)
+		{
+			printf("%s: %s\n%s\n--\n", tabs[index].tab, outline, menu);
+			all = 0;
+		}
+		for (at = strstr(menu, "\n\x08"); at; at = strstr(at + 1, "\n\x08"))
+		{
+			int length = (int)strcspn(at + 1, "\n");
+
+			/* (a name, not a row: no value; a row under it) */
+			if (length < 2 || memchr(at + 1, '\x02', (size_t)length) || !at[1 + length] ||
+				!memchr(at + 2 + length, '\x02', strcspn(at + 2 + length, "\n")))
+				marked = 0;
+		}
+		if (!menu_fits() || !menu_height_fits())
+			fits = 0;
+		if (!steps_skip_headings())
+		{
+			printf("(%s)\n", tabs[index].tab);
+			steps = 0;
+		}
+	}
+	check(all, "each tab's headings and rows in order: Game (Interface, First person, Updates), Controls (Look, Buttons, "
+		"Gyro, Touch), Video (Quality, Screen, More), Sound (none), Multiplayer (Network, Bots, Games)");
+	check(marked, "a heading: '\\n\\x08' and its name, a line of its own with no value, a row right under it");
+	check(fits, "each tab with its headings: every line fits, and the page the panel's height");
+	check(steps, "down and up through each tab: every row chosen once each way, never a heading");
+	to_tab("Game");
+	check(strstr(menu, "\t*Game|") && strstr(menu, "\n\x08Interface\nMenu style\x02") &&
+		strstr(menu, "\nFPS counter\x02  Off >\n\x08" "First person\nFirst-person legs\x02") &&
+		strstr(menu, "\nSmooth weapon motion\x02  On >\n\x08Updates\nCheck for updates\x02"),
+		"Game's text: Interface, First person and Updates each on a line of its own, marked '\\x08', over its rows");
+	{
+		/* (the lines a page has: a heading's passive, right before its row) */
+		struct line lines[MAXIMUM_LINES];
+		int count, at, good = 1, found = 0;
+
+		to_tab("Controls");
+		count = page_lines(lines);
+		for (at = 0; at < count; at++)
+			if (lines[at].type == LINE_HEADING)
+			{
+				found++;
+				if (!line_passive(&lines[at]) || at + 1 >= count || lines[at + 1].type != LINE_SETTING)
+					good = 0;
+			}
+		check(good && found == 4 && lines[0].type == LINE_HEADING && !strcmp(lines[0].text, "Look") &&
+			lines[4].type == LINE_HEADING && !strcmp(lines[4].text, "Buttons"),
+			"Controls' lines: four headings (Look first), each not chosen (passive), each right before its row");
+		/* (a heading remembered as the line chosen - a row hidden since -:
+		the panel chooses a row instead) */
+		page_selected[page] = 4;
+		show();
+		check(page_selected[page] == 1 && menu_selected == 2 &&
+			!strncmp(menu_line(menu_selected, line, sizeof(line)), "Look sensitivity\x02", 17),
+			"a heading remembered as the chosen line: the panel chooses the first row, never the heading");
+		press(VITA_BUTTON_RIGHT);
+		check(!strcmp(getenv("XV_LOOK_SENS"), "125"), "... and a press changes that row");
+		press(VITA_BUTTON_LEFT);
+	}
+	to_tab("Game");
 }
 
 /* every settings variable 1.0.3 had (its settings.txt) is still a row,
@@ -1699,7 +2027,7 @@ static int profile_rows_are(int profile, char *report, int size)
 	return 1;
 }
 
-/* Bruno Santana's settings (Graphics > Detail and Performance, and Audio's
+/* Bruno Santana's settings (Video > Detail and Performance, and Sound's
 Sound updates):
 his variables and values, so his build's settings.txt carries over; each in
 the profiles (1.1.0-beta.4's redone Balanced and Quality: Balanced without
@@ -1796,13 +2124,13 @@ static void test_bruno_rows(void)
 	vita_settings_set("HALO_PROFILE", "balanced");
 }
 
-/* Fourth core helpers (Graphics > Performance; vita_fourth_core.c): Bruno
+/* Fourth core helpers (Video > Performance; vita_fourth_core.c): Bruno
 Santana's levels and variable (HALO_CPU3_AUX: Off, Audio, All async), Off
 by default and in no profile, a level saved and in the environment the next
 start reads, a restart's row, the profile left as it was; his build's
 settings.txt line read; back Off */
 /* Particles (the particle budget, port/linux/game/particle_budget.c): on
-Graphics > Detail, Full, Reduced, Low; Reduced by default and in every profile
+Video > Detail, Full, Reduced, Low; Reduced by default and in every profile
 (Full cost Quality 16% more CPU in a 15-bot Chill Out fight); live (no restart), saved as a word; a change by
 hand makes the profile Custom */
 static void test_particles_row(void)
@@ -1820,7 +2148,7 @@ static void test_particles_row(void)
 		!strcmp(row->values[0], "full") && !strcmp(row->values[1], "reduced") && !strcmp(row->values[2], "low") &&
 		!strcmp(row->values[shipped_choice[row - settings]], "reduced") && getenv("HALO_PARTICLE_BUDGET") &&
 		!strcmp(getenv("HALO_PARTICLE_BUDGET"), "reduced"),
-		"Particles: on Graphics > Detail, Full, Reduced, Low (full, reduced, low); Reduced by default, in the environment, live");
+		"Particles: on Video > Detail, Full, Reduced, Low (full, reduced, low); Reduced by default, in the environment, live");
 	check(in_profile >= 0 && !strcmp(profile_values[0][in_profile], "reduced") &&
 		!strcmp(profile_values[1][in_profile], "reduced") && !strcmp(profile_values[2][in_profile], "reduced"),
 		"Particles in the profiles: Reduced in all three");
@@ -1850,7 +2178,9 @@ static void test_particles_row(void)
 	vita_settings_set("HALO_PROFILE", "balanced");
 	check(!strcmp(getenv("HALO_PARTICLE_BUDGET"), "reduced") && !strcmp(settings[0].names[settings[0].choice], "Balanced"),
 		"Balanced: Reduced particles");
-	while (menu_selected > 2)
+	/* (back up to the page's first row: bounded, so a row gone cannot
+	loop) */
+	for (index = 0; index < 20 && menu_selected > 2; index++)
 		press(VITA_BUTTON_UP);
 }
 
@@ -1859,22 +2189,22 @@ static void test_fourth_core(void)
 	struct setting *row = setting_named("HALO_CPU3_AUX");
 	int profile = settings[0].choice;
 	char line[128];
+	int index;
 
 	check(row && row->page == PAGE_GRAPHICS_PERFORMANCE && row->restart && row->count == 3 &&
 		!strcmp(row->values[row->choice], "2") && !strcmp(row->names[0], "Off") && !strcmp(row->names[1], "Audio") &&
 		!strcmp(row->names[2], "All async") && !strcmp(row->values[1], "1") && !strcmp(row->values[2], "2") &&
 		getenv("HALO_CPU3_AUX") && !strcmp(getenv("HALO_CPU3_AUX"), "2"),
-		"Fourth core helpers: on Graphics > Performance, Off, Audio, All async; All async by default (HALO_CPU3_AUX=2: without CapUnlocker the helpers stay where they are), after a restart");
+		"Fourth core helpers: on Video > Performance, Off, Audio, All async; All async by default (HALO_CPU3_AUX=2: without CapUnlocker the helpers stay where they are), after a restart");
 	check(strstr(row->help, "Needs CapUnlocker") && strstr(row->help, "background work"), "Fourth core helpers: the help names the plugin (the README's words)");
 	{
-		int index, in_profile = 0;
+		int in_profile = 0;
 
 		for (index = 0; index < PROFILE_ROWS; index++)
 			in_profile |= !strcmp(profile_variables[index], "HALO_CPU3_AUX");
 		check(!in_profile, "no profile sets Fourth core helpers");
 	}
-	while (strncmp(menu_line(menu_selected, line, sizeof(line)), "Fourth core helpers", 19) != 0 && menu_selected < 13)
-		press(VITA_BUTTON_DOWN);
+	check(to_line("Fourth core helpers"), "Fourth core helpers: its row on Performance");
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_CPU3_AUX"), "1") && strstr(file_text(SETTINGS_FILE), "HALO_CPU3_AUX=1\n") &&
 		!strcmp(menu_line(menu_selected, line, sizeof(line)), "Fourth core helpers*\x02< Audio >") &&
@@ -1894,7 +2224,7 @@ static void test_fourth_core(void)
 	press(VITA_BUTTON_RIGHT);
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(getenv("HALO_CPU3_AUX"), "2"), "Fourth core helpers back to All async");
-	while (menu_selected > 2)
+	for (index = 0; index < 20 && menu_selected > 2; index++)
 		press(VITA_BUTTON_UP);
 	/* (as after the restart it asked for: the rows after this one say
 	what they do, not that a restart waits) */
@@ -1943,9 +2273,10 @@ static void test_button_icons(void)
 	int longest;
 
 	open_panel();
-	to_tab("General");
-	check(open_page("Button layout") && to_line("Button icons") &&
-		strstr(menu, "\n\x05Halo's prompts: Xbox icons, or the Vita's\n"), "Button icons: its row and help");
+	to_tab("Game");
+	check(to_line("Button icons") && !strcmp(menu_line(menu_selected, line, sizeof(line)), "Button icons\x02  Xbox >") &&
+		strstr(menu, "\n\x05Halo's prompts: Xbox icons, or the Vita's\n"),
+		"Button icons: its row on Game, under Interface (Xbox as shipped), its help");
 	generation = halo_settings_generation;
 	press(VITA_BUTTON_RIGHT);
 	printf("%s\n--\n", menu);
@@ -1956,8 +2287,10 @@ static void test_button_icons(void)
 	check(!strstr(menu, "Button icons*"), "Button icons: live, no *");
 	/* (the panel keeps the Xbox controller's names with either: the icons
 	change in the game only) */
-	check(strstr(menu, "\nA\x02  Cross >") && strstr(menu, "\nBlack\x02") && !strstr(menu, "\nJump\x02") &&
-		menu_rows() == 12 && menu_fits(), "PlayStation: the Button layout's rows keep the Xbox's names, each fits");
+	to_tab("Controls");
+	check(open_page("Button layout") && strstr(menu, "\nA\x02  Cross >") && strstr(menu, "\nBlack\x02") &&
+		!strstr(menu, "\nJump\x02") && menu_rows() == 11 && menu_fits(),
+		"PlayStation: the Button layout's rows keep the Xbox's names, each fits");
 	/* a remap: the game's icon follows (vita_controls.c) */
 	to_line("X");
 	press(VITA_BUTTON_RIGHT);
@@ -1968,8 +2301,8 @@ static void test_button_icons(void)
 	press(VITA_BUTTON_LEFT);
 	press(VITA_BUTTON_CIRCLE);
 	check(strstr(menu, "\nButton layout\x02  As shipped  >") != NULL,
-		"back on General: Button icons is not the layout (As shipped)");
-	check(strstr(menu, "\nCrouch\x02") != NULL, "General: Crouch keeps its label");
+		"back on Controls: Button icons is not the layout (As shipped)");
+	check(strstr(menu, "\nCrouch\x02") != NULL, "Controls: Crouch keeps its label");
 
 	/* the touch zones: the Xbox's names too */
 	check(open_page("Touch zones") && to_line("Rear touch left"), "Touch zones opens");
@@ -1980,7 +2313,7 @@ static void test_button_icons(void)
 	vita_controls_config_load(&config);
 	check(vita_button_glyph(&config, 0, 0) == VITA_GLYPH_CROSS, "A on Cross and a zone: Cross shows");
 	press(VITA_BUTTON_LEFT);
-	to_tab("General");
+	to_tab("Controls");
 
 	/* the guide's steps: the menus' Xbox buttons, and which Vita button each is */
 	to_tab("Multiplayer");
@@ -1993,17 +2326,19 @@ static void test_button_icons(void)
 	press(VITA_BUTTON_CIRCLE);
 
 	/* Reset controls keeps it; Xbox again puts the Xbox's terms back */
-	to_tab("General");
-	check(open_page("Advanced") && to_line("Reset controls"), "Advanced: Reset controls");
+	to_tab("Controls");
+	check(to_line("Reset controls"), "Controls: Reset controls");
 	press(VITA_BUTTON_CROSS);
 	check(!strcmp(getenv("HALO_BUTTON_ICONS"), "playstation"), "Reset controls keeps the Button icons");
-	to_tab("General");
-	check(open_page("Button layout") && to_line("Button icons"), "Button layout again");
+	to_tab("Game");
+	check(to_line("Button icons"), "Game: Button icons again");
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_BUTTON_ICONS"), "xbox") && !vita_button_icons_playstation() &&
-		strstr(menu, "\nA\x02  Cross >") && strstr(menu, "\nBlack\x02") && !strstr(menu, "\nJump\x02") &&
-		strstr(file_text(SETTINGS_FILE), "HALO_BUTTON_ICONS=xbox\n"), "Xbox again: the Xbox's names");
-	(void)line;
+		strstr(menu, "\nButton icons\x02  Xbox >") && strstr(file_text(SETTINGS_FILE), "HALO_BUTTON_ICONS=xbox\n"),
+		"Button icons Xbox again: saved");
+	to_tab("Controls");
+	check(open_page("Button layout") && strstr(menu, "\nA\x02  Cross >") && strstr(menu, "\nBlack\x02") &&
+		!strstr(menu, "\nJump\x02"), "Xbox again: the Xbox's names");
 	press(VITA_BUTTON_CIRCLE);
 	press(VITA_BUTTON_CIRCLE);
 }
@@ -2021,11 +2356,11 @@ the pages' names included. */
 
 /* the tab bar fits between L and R at the narrower spacing the renderer
 falls back to (vita_gxm.c menu_tabs: a name and a character, 8 pixels
-between, in the 880 - 104 pixels there are) */
+between two, in the 880 - 104 pixels from the first tab to the R) */
 static int tab_bar_fits(void)
 {
 	const char *at = menu + 1;
-	int width = 0;
+	int width = -8;
 
 	while (*at && *at != '\n')
 	{
@@ -2059,7 +2394,8 @@ static int menu_lines_fit(void)
 	return 1;
 }
 
-/* each page, each line of it chosen, each value of each row: fits */
+/* each page, each line of it chosen, each value of each row: fits; a
+heading chosen is not (the panel chooses a row instead) */
 static int every_page_fits(int *shown)
 {
 	int fits = 1, page_index;
@@ -2080,6 +2416,17 @@ static int every_page_fits(int *shown)
 			(*shown)++;
 			if (!menu_fits() || !tab_bar_fits() || !menu_height_fits())
 				fits = 0;
+			if (lines[line].type == LINE_HEADING)
+			{
+				char chosen[128];
+
+				menu_line(menu_selected, chosen, sizeof(chosen));
+				if (page_selected[page] == line || chosen[0] == '\x08' || !strchr(chosen, '\x02'))
+				{
+					printf("a heading chosen: %s, page %d\n", lines[line].text, page);
+					fits = 0;
+				}
+			}
 			if (lines[line].type == LINE_SETTING && settings[lines[line].index].kind == KIND_CHOICE)
 			{
 				struct setting *setting = &settings[lines[line].index];
@@ -2100,7 +2447,7 @@ static int every_page_fits(int *shown)
 			}
 		}
 	}
-	tab = page = TAB_GRAPHICS;
+	tab = page = TAB_GAME;
 	return fits;
 }
 
@@ -2129,36 +2476,72 @@ static void test_languages(void)
 	tab = page = TAB_GRAPHICS;
 	show();
 	printf("%s\n--\n", menu);
-	check(!strncmp(menu, "\t*Gráficos|General|Audio|Multijugador", sizeof("\t*Gráficos|General|Audio|Multijugador") - 1) && strstr(menu, "\nPerfil\x02") &&
-		menu_fits() && tab_bar_fits(), "the panel in Spanish at once: Gráficos, Perfil ...");
-	tab = page = TAB_AUDIO;
+	check(!strncmp(menu, "\tJuego|Controles|*Vídeo|Sonido|Multijugador", sizeof("\tJuego|Controles|*Vídeo|Sonido|Multijugador") - 1) &&
+		strstr(menu, "\n\x08" "Calidad\nPerfil\x02") && menu_fits() && tab_bar_fits(),
+		"the panel in Spanish at once: Juego, Controles, Vídeo, Sonido, Multijugador; Calidad over Perfil ...");
+	{
+		/* the headings in Spanish, each tab's in order (es.txt) */
+		static const struct
+		{
+			int tab;
+			const char *headings;
+		} spanish[] = {
+			{ TAB_GAME, "Interfaz|Primera persona|Actualizaciones" },
+			{ TAB_CONTROLS, "Mirar|Botones|Giroscopio|Táctil" },
+			{ TAB_GRAPHICS, "Calidad|Pantalla|Más" },
+			{ TAB_AUDIO, "" },
+			{ TAB_MULTIPLAYER, "Red|Bots|Partidas" },
+		};
+		char headings_shown[128];
+		int all = 1;
+
+		for (index = 0; index < (int)(sizeof(spanish) / sizeof(spanish[0])); index++)
+		{
+			tab = page = spanish[index].tab;
+			page_selected[page] = 0;
+			show();
+			if (strcmp(outline_of(headings_shown, sizeof(headings_shown), 1), spanish[index].headings) != 0 ||
+				!menu_fits() || !tab_bar_fits())
+			{
+				printf("%s\n--\n", menu);
+				all = 0;
+			}
+		}
+		check(all, "Spanish headings: Interfaz, Primera persona, Actualizaciones; Mirar, Botones, Giroscopio, Táctil; "
+			"Calidad, Pantalla, Más; Red, Bots, Partidas (none on Sonido); each fits");
+	}
+	tab = page = TAB_GAME;
 	show();
-	check(strstr(menu, "\nIdioma\x02< Español ") != NULL, "Audio: Idioma, Español (its own name)");
+	check(!strncmp(menu, "\t*Juego|", 8) && strstr(menu, "\nIdioma\x02< Español ") != NULL,
+		"Juego: Idioma, Español (its own name)");
 	lang_missing(NULL, 0);
 
 	/* every page, line and value; with Show dev settings, the Dev tab's
-	too */
+	too; on the classic panel (the Halo CE menus), whose height
+	menu_height_fits checks */
+	vita_settings_set("HALO_MENU_STYLE", "classic");
 	vita_settings_set("HALO_DEV_SETTINGS", "1");
 	check(every_page_fits(&shown), "Spanish: every page, each line chosen, each row's every value fits");
 	printf("(%d pages shown)\n", shown);
 	vita_settings_set("HALO_DEV_SETTINGS", "0");
-	/* (General with each answer of the update check: the version and the
+	/* (Game with each answer of the update check: the version and the
 	answer still fit, beside each other or not, and so do the tab's rows) */
 	{
 		static const int statuses[] = { UPDATE_STATUS_NONE, UPDATE_STATUS_CHECKING, UPDATE_STATUS_UP_TO_DATE,
 			UPDATE_STATUS_AVAILABLE, UPDATE_STATUS_NO_CONNECTION, UPDATE_STATUS_FAILED };
 		int fits = 1;
 
-		tab = page = TAB_CONTROLS;
+		tab = page = TAB_GAME;
 		page_selected[page] = 0;
 		snprintf(update_version_value, sizeof(update_version_value), "1.1.0-beta.10");
 		for (index = 0; index < (int)(sizeof(statuses) / sizeof(statuses[0])); index++)
 		{
 			update_status_value = statuses[index];
 			show();
-			if (!menu_fits() || !menu_height_fits() || menu_rows() != 10 ||
-				strncmp(menu_line(1, line, sizeof(line)), "Buscar actualizaciones\x02", 23) ||
-				strncmp(menu_line(2, line, sizeof(line)), "\x04Versión ", 10))
+			/* (on the classic panel: Interfaz giving way when the lines run
+			to three) */
+			if (!menu_fits() || !menu_height_fits() || menu_rows() != 9 ||
+				!strstr(menu, "\n\x08" "Actualizaciones\nBuscar actualizaciones\x02  >\n\x04Versión "))
 			{
 				printf("(update status %d)\n%s\n--\n", statuses[index], menu);
 				fits = 0;
@@ -2167,8 +2550,9 @@ static void test_languages(void)
 				printf("%s\n--\n", menu);
 		}
 		check(fits && update_status_value == UPDATE_STATUS_FAILED &&
-			strstr(menu, "No se pudo comprobar ahora\n\n"),
-			"Spanish: General with each answer of the update check fits, Buscar actualizaciones first");
+			strstr(menu, "No se pudo comprobar ahora\nCanal de actualización\x02"),
+			"Spanish: Juego with each answer of the update check fits, Buscar actualizaciones under Actualizaciones, "
+			"Canal de actualización under its lines");
 		update_status_value = UPDATE_STATUS_UP_TO_DATE;
 		show();
 		check(strstr(menu, "\n\x04Versión " HALO_VITA_VERSION " - Actualizado\n") != NULL,
@@ -2176,6 +2560,7 @@ static void test_languages(void)
 		update_status_value = UPDATE_STATUS_NONE;
 		update_version_value[0] = 0;
 	}
+	vita_settings_set("HALO_MENU_STYLE", "halo3");
 	/* (the screens actions open, and the messages over the game) */
 	tab = page = TAB_MULTIPLAYER;
 	screen = SCREEN_CODE;
@@ -2242,7 +2627,7 @@ static void test_languages(void)
 	frame(0);
 
 	/* every string the panel has: its rows' labels, values and help, the
-	pages' names, each with a Spanish entry */
+	pages' names and the headings, each with a Spanish entry */
 	for (index = 0; index < SETTING_COUNT; index++)
 	{
 		const struct setting *setting = &settings[index];
@@ -2257,6 +2642,8 @@ static void test_languages(void)
 	}
 	for (index = 0; index < PAGE_COUNT; index++)
 		T(pages[index].name);
+	for (index = 0; index < (int)(sizeof(headings) / sizeof(headings[0])); index++)
+		T(headings[index].name);
 	for (index = 0; index < 3; index++)
 		T(map_downloads_help[index]);
 	missing = lang_missing(report, sizeof(report));
@@ -2278,17 +2665,17 @@ static void test_languages(void)
 	snprintf(system_language, sizeof(system_language), "en");
 	language_apply();
 	vita_settings_set("HALO_LANGUAGE", "en");
-	tab = page = TAB_GRAPHICS;
+	tab = page = TAB_GAME;
 	open_panel();
-	check(!strcmp(lang_current(), "en") && strstr(menu, "\t*Graphics|") && strstr(menu, "\nProfile\x02"),
-		"English again, at once");
+	check(!strcmp(lang_current(), "en") && strstr(menu, "\t*Game|Controls|Video|Sound|Multiplayer") &&
+		strstr(menu, "\n\x08Interface\nMenu style\x02"), "English again, at once");
 	menu_line(0, line, sizeof(line));
 	close_panel();
 	vita_settings_set("HALO_LANGUAGE", "auto");
 }
 
-/* ---------- the update check: General's first rows, its channel on General >
-Advanced */
+/* ---------- the update check: Game's Updates rows, Check for updates and
+its lines, then its channel */
 
 /* the page redrawn (a frame after half a second) */
 static void redraw(void)
@@ -2302,10 +2689,12 @@ static void test_updates(void)
 	char line[160];
 	int prerelease = update_build_is_prerelease(HALO_VITA_VERSION);
 
+	/* (the Halo CE menus: the classic panel, the one whose height
+	menu_height_fits checks; the Halo 3 menus' again at the end) */
+	vita_settings_set("HALO_MENU_STYLE", "classic");
 	open_panel();
-	to_tab("General");
-	check(open_page("Advanced"), "General, Advanced opens");
-	check(to_line("Update channel"), "the Update channel row, on Advanced");
+	to_tab("Game");
+	check(to_line("Update channel") && !strstr(menu, "\n\x03"), "the Update channel row, on Game");
 	printf("%s\n--\n", menu);
 	if (prerelease)
 	{
@@ -2367,30 +2756,49 @@ static void test_updates(void)
 			"a release-written settings.txt keeps Experimental");
 		vita_settings_set("HALO_UPDATE_CHANNEL", "stable");
 	}
-	/* Check for updates: General's first row, in the background, its
-	answer beside the version under it; the controls' rows after a gap */
-	press(VITA_BUTTON_CIRCLE);
-	check(strstr(menu, "*General") && !strstr(menu, "\n\x03") && to_line("Check for updates") && menu_selected == 1 &&
-		!update_requests, "back on General: Check for updates its first row, nothing asked before the press");
-	check(!strcmp(menu_line(2, line, sizeof(line)), "\x04" "Version " HALO_VITA_VERSION) &&
-		!strcmp(menu_line(3, line, sizeof(line)), "") && !strncmp(menu_line(4, line, sizeof(line)), "Look sensitivity\x02", 17),
-		"no look yet: the version alone under it, then a gap and the controls");
+	/* Check for updates: the first row under Updates, in the background,
+	its answer beside the version under it; the Update channel and Show dev
+	settings under its lines */
+	check(strstr(menu, "\t*Game|") && !strstr(menu, "\n\x03") && to_line("Check for updates") && menu_selected == 10 &&
+		!strcmp(menu_line(9, line, sizeof(line)), "\x08Updates") && !update_requests,
+		"Game: Check for updates under the Updates heading, nothing asked before the press");
+	check(strstr(menu, "\n\x05" "Asks GitHub for the newest version; again to download it\n") &&
+		strstr(menu, "\n\x06L/R: tabs   Cross: select   Circle: close"), "Check for updates: its help, cross presses it");
+	check(!strcmp(menu_line(11, line, sizeof(line)), "\x04" "Version " HALO_VITA_VERSION) &&
+		!strncmp(menu_line(12, line, sizeof(line)), "Update channel\x02", 15) &&
+		!strncmp(menu_line(13, line, sizeof(line)), "Show dev settings\x02", 18),
+		"no look yet: the version alone under it, then Update channel and Show dev settings (no gap)");
+	press(VITA_BUTTON_UP);
+	check(menu_selected == 8 && !strncmp(menu_line(menu_selected, line, sizeof(line)), "Smooth weapon motion\x02", 21),
+		"up from Check for updates: Smooth weapon motion (the Updates heading stepped over)");
+	press(VITA_BUTTON_DOWN);
+	check(menu_selected == 10, "... and down: Check for updates again");
 	press(VITA_BUTTON_CROSS);
 	redraw();
-	check(update_requests == 1 && !strcmp(menu_line(2, line, sizeof(line)), "\x04" "Version " HALO_VITA_VERSION " - Checking...") &&
+	check(update_requests == 1 && !strcmp(menu_line(11, line, sizeof(line)), "\x04" "Version " HALO_VITA_VERSION " - Checking...") &&
 		menu_fits() && menu_height_fits(), "pressed: Checking..., beside the version");
 	update_status_value = UPDATE_STATUS_AVAILABLE;
 	snprintf(update_version_value, sizeof(update_version_value), "1.1.0-beta.4");
 	redraw();
 	printf("%s\n--\n", menu);
-	check(strstr(menu, "\nCheck for updates\x02  >\n\x04" "Version " HALO_VITA_VERSION "\n"
-		"!Update available: 1.1.0-beta.4\n!github.com/BirchWoodGod/halo-ce-vita/releases\n\nLook sensitivity\x02") &&
-		menu_fits() && menu_height_fits() && menu_rows() == 10,
+	check(strstr(menu, "\n\x08Updates\nCheck for updates\x02  >\n\x04" "Version " HALO_VITA_VERSION "\n"
+		"!Update available: 1.1.0-beta.4\n!github.com/BirchWoodGod/halo-ce-vita/releases\nUpdate channel\x02") &&
+		menu_fits() && menu_height_fits() && menu_rows() == 9,
 		"an update: under the version, in amber, the new version and where to get it; all of the tab still fits");
+	check(!strstr(menu, "Interface") && !strncmp(menu_line(1, line, sizeof(line)), "Menu style\x02", 11) &&
+		strstr(menu, "\n\x08" "First person\n") && menu_selected == 9,
+		"the classic panel, short of room: the first heading, Interface, gives way (the tab bar over Menu style); First "
+		"person and Updates stay, Check for updates still chosen");
+	vita_settings_set("HALO_MENU_STYLE", "halo3");
+	redraw();
+	check(strstr(menu, "\n\x08Interface\nMenu style\x02") && strstr(menu, "\n\x08Updates\nCheck for updates\x02") &&
+		menu_selected == 10, "the Halo 3 panel (its rows fitted to its height): every heading kept");
+	vita_settings_set("HALO_MENU_STYLE", "classic");
+	redraw();
 	/* (a build with the update key: the next press downloads it) */
 	test_update_key = 1;
 	redraw();
-	check(strstr(menu, "\n!Update available: 1.1.0-beta.4\n!Press again to download it\n\nLook sensitivity\x02") &&
+	check(strstr(menu, "\n!Update available: 1.1.0-beta.4\n!Press again to download it\nUpdate channel\x02") &&
 		menu_fits() && menu_height_fits(), "with the update key: press again to download it");
 	to_line("Check for updates");
 	press(VITA_BUTTON_CROSS);
@@ -2400,7 +2808,7 @@ static void test_updates(void)
 	redraw();
 	printf("%s\n--\n", menu);
 	check(strstr(menu, "\n!VitaShell: ux0:data/haloce-vita/update/\n!halo-1.1.0-beta.4.vpk (verified, to install)\n"
-		"\nLook sensitivity\x02") && menu_fits() && menu_height_fits() && menu_rows() == 10,
+		"Update channel\x02") && menu_fits() && menu_height_fits() && menu_rows() == 9,
 		"downloaded: where the VPK is, for VitaShell; all of the tab still fits");
 	update_status_value = UPDATE_STATUS_NONE;
 	redraw();
@@ -2409,29 +2817,35 @@ static void test_updates(void)
 	update_ready_version[0] = 0;
 	test_update_key = 0;
 	redraw();
-	to_line("Look sensitivity");
+	to_line("Update channel");
 	press(VITA_BUTTON_UP);
-	check(menu_selected == 1, "up from the first control: Check for updates (the info lines are stepped over)");
+	check(!strcmp(menu_line(menu_selected, line, sizeof(line)), "Check for updates\x02  >"),
+		"up from Update channel: Check for updates (the info lines are stepped over)");
 	update_status_value = UPDATE_STATUS_UP_TO_DATE;
 	snprintf(update_version_value, sizeof(update_version_value), "%s", HALO_VITA_VERSION);
 	redraw();
-	check(!strcmp(menu_line(2, line, sizeof(line)), "\x04" "Version " HALO_VITA_VERSION " - Up to date") &&
-		!strstr(menu, "github.com") && !strcmp(menu_line(3, line, sizeof(line)), "") && menu_fits(), "up to date");
+	check(!strcmp(menu_line(11, line, sizeof(line)), "\x04" "Version " HALO_VITA_VERSION " - Up to date") &&
+		!strstr(menu, "github.com") && !strncmp(menu_line(12, line, sizeof(line)), "Update channel\x02", 15) && menu_fits(),
+		"up to date");
 	update_status_value = UPDATE_STATUS_NO_CONNECTION;
 	redraw();
 	/* (beside the version while the line is 46 characters at most: a
 	release's short version; else on a line of its own) */
 	check(strstr(menu, sizeof("Version " HALO_VITA_VERSION " - Couldn't check: no connection") - 1 <= 46 ?
-		"\n\x04" "Version " HALO_VITA_VERSION " - Couldn't check: no connection\n\n" :
-		"\n\x04" "Version " HALO_VITA_VERSION "\n\x04" "Couldn't check: no connection\n\n") && menu_fits(),
+		"\n\x04" "Version " HALO_VITA_VERSION " - Couldn't check: no connection\nUpdate channel\x02" :
+		"\n\x04" "Version " HALO_VITA_VERSION "\n\x04" "Couldn't check: no connection\nUpdate channel\x02") && menu_fits(),
 		"no connection: beside the version, or on a line of its own when that is too long");
 	update_status_value = UPDATE_STATUS_FAILED;
 	redraw();
-	check(strstr(menu, "Couldn't check right now\n\n") && menu_fits() && menu_height_fits(), "could not check");
+	check(strstr(menu, "Couldn't check right now\nUpdate channel\x02") && menu_fits() && menu_height_fits(), "could not check");
 	update_status_value = UPDATE_STATUS_NONE;
 	redraw();
 	check(!strstr(menu, "Couldn't") && !strstr(menu, "Checking"), "no look yet: no line");
+	check(strstr(menu, "\n\x08Interface\nMenu style\x02") && menu_height_fits(),
+		"room again (the version alone): Interface back");
 	press(VITA_BUTTON_CIRCLE);
+	check(!menu_visible, "circle on Game closes the panel");
+	vita_settings_set("HALO_MENU_STYLE", "halo3");
 
 	/* the update download's dialogs as vita_update.c drives them, from its
 	thread: the question, the progress line, then the line withdrawn and the
@@ -2460,36 +2874,47 @@ static void test_updates(void)
 	check(!menu_visible && !strstr(menu, "Checking the download"),
 		"closing it leaves nothing over the game (no progress line again)");
 	open_panel();
-	check(menu_visible && strstr(menu, "*General") != NULL, "the panel opens again as before");
+	check(menu_visible && strstr(menu, "\t*Game|") != NULL, "the panel opens again as before (on Game)");
 	press(VITA_BUTTON_CIRCLE);
 }
 
 /* ---------- the restart offer: a change that applies after a restart,
 the panel closed at the main menu (close_panel) */
 
-/* the Menu style row (Graphics > Screen): the menus as Halo CE's or Halo 3's
-(port/linux/game/menu_tags.c reads HALO_MENU_STYLE each time a screen
-opens): live, no restart */
+/* the Menu style row (Game, under Interface): the menus as Halo CE's or
+Halo 3's (port/linux/game/menu_tags.c reads HALO_MENU_STYLE each time a
+screen opens): Halo 3 as shipped from 1.1.1 (the owner's), live, no
+restart; a settings.txt that chose Halo CE keeps it */
 static void test_menu_style_row(void)
 {
+	struct setting *style = setting_named("HALO_MENU_STYLE");
 	unsigned long generation;
+	char line[128];
 
+	check(style && style->page == TAB_GAME && !strcmp(style->values[shipped_choice[style - settings]], "halo3") &&
+		!strcmp(style->names[shipped_choice[style - settings]], "Halo 3"), "Menu style: Halo 3 as shipped");
 	open_panel();
-	to_tab("Graphics");
-	check(open_page("Screen") && to_line("Menu style") &&
+	to_tab("Game");
+	check(to_line("Menu style") && menu_selected == 2 && !strcmp(menu_line(1, line, sizeof(line)), "\x08Interface") &&
 		strstr(menu, "\n\x05" "Halo 3: the new menus over the Halo ring. Halo CE: the original menus.\n") && menu_fits(),
-		"Menu style: its row on Graphics > Screen and its help");
+		"Menu style: Game's first row, under Interface, and its help");
+	check(!strcmp(getenv("HALO_MENU_STYLE"), "halo3") && strstr(menu, "\nMenu style\x02< Halo 3  "),
+		"Menu style: Halo 3 (no settings.txt naming it), in the environment");
 	generation = halo_settings_generation;
 	restart_pending = 0;
-	press(VITA_BUTTON_RIGHT);
-	check(!strcmp(getenv("HALO_MENU_STYLE"), "halo3") && halo_settings_generation != generation &&
-		strstr(file_text(SETTINGS_FILE), "HALO_MENU_STYLE=halo3\n") && strstr(menu, "\nMenu style\x02< Halo 3  "),
-		"Menu style Halo 3: in the environment and settings.txt at once");
-	check(!strstr(menu, "Menu style*") && !restart_pending, "Menu style: live, no restart");
 	press(VITA_BUTTON_LEFT);
-	check(!strcmp(getenv("HALO_MENU_STYLE"), "classic") && strstr(menu, "\nMenu style\x02  Halo CE >"),
-		"Menu style back to Halo CE");
-	press(VITA_BUTTON_CIRCLE);
+	check(!strcmp(getenv("HALO_MENU_STYLE"), "classic") && halo_settings_generation != generation &&
+		strstr(file_text(SETTINGS_FILE), "HALO_MENU_STYLE=classic\n") && strstr(menu, "\nMenu style\x02  Halo CE >"),
+		"Menu style Halo CE: in the environment and settings.txt at once");
+	check(!strstr(menu, "Menu style*") && !restart_pending, "Menu style: live, no restart");
+	/* (the next start: settings.txt's Halo CE kept) */
+	style->choice = shipped_choice[style - settings];
+	unsetenv("HALO_MENU_STYLE");
+	vita_settings_load();
+	check(!strcmp(getenv("HALO_MENU_STYLE"), "classic") && style->choice == 0, "Menu style Halo CE: read back from settings.txt");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_MENU_STYLE"), "halo3") && strstr(menu, "\nMenu style\x02< Halo 3  ") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_MENU_STYLE=halo3\n"), "Menu style back to Halo 3, saved");
 	press(VITA_BUTTON_CIRCLE);
 }
 
@@ -2561,7 +2986,7 @@ int main(void)
 	test_variables_kept();
 	setenv("HALO_VITA_NETWORK", "online", 1);
 	vita_settings_load();
-	test_graphics_layout();
+	test_tab_layouts();
 	check(!strcmp(getenv("HALO_NET_ONLINE"), "true") && !strcmp(getenv("HALO_NET_ALLOW_UPNP"), "false"),
 		"Network Online: internet play on, without UPnP");
 	check(!strcmp(getenv("HALO_NET_LOBBY_NAME"), "vitauser"), "the lobby name is the Vita's user name");
@@ -2572,7 +2997,7 @@ int main(void)
 	check(!frame(0), "closed: the game gets the buttons");
 	/* SELECT + D-pad down: open at once, neither button the game's; held,
 	once; again, closed; SELECT alone still the game's (Back, the scoreboard) */
-	check(frame(VITA_BUTTON_SELECT | VITA_BUTTON_DOWN) && menu_visible && strstr(menu, "\t*Graphics|"),
+	check(frame(VITA_BUTTON_SELECT | VITA_BUTTON_DOWN) && menu_visible && strstr(menu, "\t*Game|"),
 		"SELECT + down opens the panel at once, the game gets neither");
 	check(frame(VITA_BUTTON_SELECT | VITA_BUTTON_DOWN) && menu_visible, "SELECT + down held: still open, once per press");
 	frame(0);
@@ -2584,29 +3009,63 @@ int main(void)
 	frame(0);
 	open_panel();
 	printf("%s\n--\n", menu);
-	check(menu_visible && menu[0] == '\t' && strstr(menu, "\t*Graphics|General|Audio|Multiplayer\n"),
-		"SELECT+START opens the Graphics tab; four tabs (Dev hidden)");
-	check(!strncmp(menu_line(1, line, sizeof(line)), "Profile\x02", 8) &&
-		!strncmp(menu_line(2, line, sizeof(line)), "Render resolution\x02", 18) &&
-		!strncmp(menu_line(3, line, sizeof(line)), "Dynamic minimum\x02", 16) &&
-		!strncmp(menu_line(4, line, sizeof(line)), "Frame limit\x02", 12) &&
-		!strncmp(menu_line(5, line, sizeof(line)), "Frame interpolation\x02", 20) &&
-		!strcmp(menu_line(6, line, sizeof(line)), "FPS counter\x02  Off >") &&
-		!strcmp(menu_line(7, line, sizeof(line)), "Screen\x02  16:9, Smooth  >") &&
-		!strcmp(menu_line(8, line, sizeof(line)), "First person\x02  >") &&
-		!strcmp(menu_line(9, line, sizeof(line)), "Detail\x02  >") &&
-		!strcmp(menu_line(10, line, sizeof(line)), "Performance\x02  >") &&
-		!strncmp(menu_line(11, line, sizeof(line)), "\x05Sets resolution", 16) &&
-		!strncmp(menu_line(12, line, sizeof(line)), "\x06L/R: tabs", 10) && menu_height_fits(),
-		"Graphics: Profile, Render resolution, Dynamic minimum, Frame limit, Frame interpolation, FPS counter, "
-		"Screen (16:9, Smooth), First person, Detail, Performance; help, buttons");
-	check(menu_fits() && menu_rows() == 10, "Graphics: ten rows with Dynamic minimum shown, each fits");
-	check(!strstr(menu, "Aspect ratio") && !strstr(menu, "Upscale filter") && !strstr(menu, "First-person legs") &&
-		!strstr(menu, "Smooth weapon motion") && !strstr(menu, "Model detail") && !strstr(menu, "\nParticles") &&
+	check(menu_visible && menu[0] == '\t' && strstr(menu, "\t*Game|Controls|Video|Sound|Multiplayer\n"),
+		"SELECT+START opens the Game tab, the first; five tabs: Game, Controls, Video, Sound, Multiplayer (Dev hidden)");
+	/* Game: Halo Online's Interface, First person and Updates */
+	check(!strcmp(menu_line(1, line, sizeof(line)), "\x08Interface") &&
+		!strcmp(menu_line(2, line, sizeof(line)), "Menu style\x02< Halo 3  ") &&
+		!strcmp(menu_line(3, line, sizeof(line)), "Button icons\x02  Xbox >") &&
+		!strcmp(menu_line(4, line, sizeof(line)), "Language\x02  Automatic >") &&
+		!strcmp(menu_line(5, line, sizeof(line)), "FPS counter\x02  Off >") &&
+		!strcmp(menu_line(6, line, sizeof(line)), "\x08" "First person") &&
+		!strcmp(menu_line(7, line, sizeof(line)), "First-person legs\x02< On  ") &&
+		!strcmp(menu_line(8, line, sizeof(line)), "Smooth weapon motion\x02  On >") &&
+		!strcmp(menu_line(9, line, sizeof(line)), "\x08Updates") &&
+		!strcmp(menu_line(10, line, sizeof(line)), "Check for updates\x02  >") &&
+		!strcmp(menu_line(11, line, sizeof(line)), "\x04" "Version " HALO_VITA_VERSION) &&
+		!strncmp(menu_line(12, line, sizeof(line)), "Update channel\x02", 15) &&
+		!strcmp(menu_line(13, line, sizeof(line)), "Show dev settings\x02  Off >") &&
+		!strcmp(menu_line(14, line, sizeof(line)), "\x05" "Halo 3: the new menus over the Halo ring. Halo CE: the original menus.") &&
+		!strncmp(menu_line(15, line, sizeof(line)), "\x06L/R: tabs", 10) && menu_height_fits(),
+		"Game: Interface (Menu style Halo 3, Button icons, Language, FPS counter), First person (First-person legs, "
+		"Smooth weapon motion), Updates (Check for updates and the version, Update channel, Show dev settings); help, buttons");
+	check(menu_selected == 2 && menu_fits() && menu_rows() == 9 && !strstr(menu, "*\x02"),
+		"Game: Menu style chosen first (not the heading over it); nine rows, each fits, all live (no *)");
+	check(!strstr(menu, "Profile") && !strstr(menu, "Aspect ratio") && !strstr(menu, "Look sensitivity") &&
+		!strstr(menu, "Stick deadzone") && !strstr(menu, "Sound voices") && !strstr(menu, "\nScreen\x02") &&
+		!strstr(menu, "\nFirst person\x02") && !strstr(menu, "\nAdvanced\x02"),
+		"Game: no other tab's rows, no page rows (no Screen, First person or Advanced)");
+	check(!strcmp(getenv("HALO_MENU_STYLE"), "halo3") && !strstr(file_text(SETTINGS_FILE), "HALO_MENU_STYLE"),
+		"no settings.txt naming it: Menu style Halo 3, the shipped default, in the environment the game reads");
+	test_headings();
+
+	/* Video: Quality, Screen, More */
+	check(to_tab("Video") && strstr(menu, "\tGame|Controls|*Video|Sound|Multiplayer\n"), "R: Video");
+	printf("%s\n--\n", menu);
+	check(!strcmp(menu_line(1, line, sizeof(line)), "\x08Quality") &&
+		!strncmp(menu_line(2, line, sizeof(line)), "Profile\x02", 8) &&
+		!strncmp(menu_line(3, line, sizeof(line)), "Render resolution\x02", 18) &&
+		!strncmp(menu_line(4, line, sizeof(line)), "Dynamic minimum\x02", 16) &&
+		!strncmp(menu_line(5, line, sizeof(line)), "Frame limit\x02", 12) &&
+		!strncmp(menu_line(6, line, sizeof(line)), "Frame interpolation\x02", 20) &&
+		!strcmp(menu_line(7, line, sizeof(line)), "\x08Screen") &&
+		!strcmp(menu_line(8, line, sizeof(line)), "Aspect ratio\x02  16:9 >") &&
+		!strcmp(menu_line(9, line, sizeof(line)), "Upscale filter\x02  Smooth >") &&
+		!strcmp(menu_line(10, line, sizeof(line)), "\x08More") &&
+		!strcmp(menu_line(11, line, sizeof(line)), "Detail\x02  >") &&
+		!strcmp(menu_line(12, line, sizeof(line)), "Performance\x02  >") &&
+		!strncmp(menu_line(13, line, sizeof(line)), "\x05Sets resolution", 16) &&
+		!strncmp(menu_line(14, line, sizeof(line)), "\x06L/R: tabs", 10) && menu_height_fits() && menu_selected == 2,
+		"Video: Quality (Profile, Render resolution, Dynamic minimum, Frame limit, Frame interpolation), Screen (Aspect "
+		"ratio 16:9, Upscale filter Smooth), More (Detail, Performance); help, buttons; Profile chosen first");
+	check(menu_fits() && menu_rows() == 9, "Video: nine rows with Dynamic minimum shown, each fits");
+	check(!strstr(menu, "FPS counter") && !strstr(menu, "First-person legs") && !strstr(menu, "Smooth weapon motion") &&
+		!strstr(menu, "Menu style") && !strstr(menu, "Model detail") && !strstr(menu, "\nParticles") &&
 		!strstr(menu, "Particle density") && !strstr(menu, "Scenery updates") && !strstr(menu, "AI think rate") &&
-		!strstr(menu, "Fourth core helpers") && !strstr(menu, "Display") && !strstr(menu, "Advanced"),
-		"Graphics: the aspect ratio and upscale filter under Screen, legs and weapon motion under First person, "
-		"the detail rows and particles under Detail, the update rates under Performance (no Display, no Advanced)");
+		!strstr(menu, "Fourth core helpers") && !strstr(menu, "\nScreen\x02") && !strstr(menu, "First person") &&
+		!strstr(menu, "Display") && !strstr(menu, "Advanced"),
+		"Video: the detail rows and particles under Detail, the update rates under Performance; FPS counter, first "
+		"person and Menu style on Game (no Screen, First person, Display or Advanced page)");
 	check(strstr(menu, "\nProfile\x02< Balanced >") && strstr(menu, "\nRender resolution\x02< Dynamic  ") &&
 		strstr(menu, "\nDynamic minimum\x02< 63% >") && strstr(menu, "\nFrame limit\x02  30 FPS >"),
 		"values in a column: '< ' or two spaces before each; Balanced: Dynamic, from 63%");
@@ -2629,8 +3088,8 @@ int main(void)
 			"Render resolution 75%: in the environment and settings.txt at once (the minimum kept), the profile Custom");
 		press(VITA_BUTTON_DOWN);
 		press(VITA_BUTTON_UP);
-		check(!strstr(menu, "Dynamic minimum") && !strncmp(menu_line(3, line, sizeof(line)), "Frame limit\x02", 12) &&
-			menu_rows() == 9, "not Dynamic: the Dynamic minimum row hidden");
+		check(!strstr(menu, "Dynamic minimum") && !strncmp(menu_line(4, line, sizeof(line)), "Frame limit\x02", 12) &&
+			menu_rows() == 8, "not Dynamic: the Dynamic minimum row hidden");
 		vita_settings_set("HALO_RENDER_SCALE", "0.3");
 		check(!strcmp(getenv("HALO_RENDER_SCALE"), "0.5"), "a scale off the list goes to the nearest number, not Dynamic");
 		vita_settings_set("HALO_RENDER_SCALE", "dynamic");
@@ -2638,7 +3097,7 @@ int main(void)
 			!strcmp(settings[0].names[settings[0].choice], "Balanced"), "Dynamic again (from 63%): Balanced again");
 		press(VITA_BUTTON_DOWN);
 		press(VITA_BUTTON_UP);
-		check(!strncmp(menu_line(3, line, sizeof(line)), "Dynamic minimum\x02", 16) && menu_rows() == 10 && menu_fits(),
+		check(!strncmp(menu_line(4, line, sizeof(line)), "Dynamic minimum\x02", 16) && menu_rows() == 9 && menu_fits(),
 			"Dynamic: the Dynamic minimum row shows, under it");
 		vita_settings_set("HALO_DYNAMIC_RES_MIN", "0.75");
 		check(!strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.75") &&
@@ -2648,46 +3107,46 @@ int main(void)
 		check(!strcmp(settings[0].names[settings[0].choice], "Balanced"), "back to 63%: Balanced again");
 	}
 	{
-		/* Screen: the aspect ratio and the upscale filter, on a page of
-		their own (live, no *); the row says both. First person: the
-		first-person legs and the weapon's motion (live, no *) */
-		unsigned long generation;
-
-		check(to_line("Screen") && strstr(menu, "\n\x05" "Aspect ratio, upscale filter, menu style\n") &&
-			menu_fits(), "Screen: its help says what is there");
-		check(open_page("Screen") && strstr(menu, "\n\x03Graphics > Screen\n") &&
-			!strcmp(menu_line(2, line, sizeof(line)), "Aspect ratio\x02  16:9 >") &&
-			!strcmp(menu_line(3, line, sizeof(line)), "Upscale filter\x02  Smooth >") &&
-			!strcmp(menu_line(4, line, sizeof(line)), "Menu style\x02  Halo CE >") && menu_rows() == 3 &&
-			menu_fits() && menu_height_fits() && !strstr(menu, "Aspect ratio*") && !strstr(menu, "Upscale filter*"),
-			"Graphics, Screen: Aspect ratio (16:9), Upscale filter (Smooth), live");
+		/* Screen: the aspect ratio and the upscale filter, on the tab under
+		their heading (live, no *) */
+		check(to_line("Aspect ratio") && menu_selected == 8 && strstr(menu, "\n\x05" "4:3: the Xbox's framing, black bars\n") &&
+			menu_fits() && !strstr(menu, "Aspect ratio*") && !strstr(menu, "Upscale filter*"),
+			"Video, Screen: Aspect ratio (16:9) on the tab under its heading, its help; live");
 		press(VITA_BUTTON_RIGHT);
 		check(!strcmp(getenv("HALO_DISPLAY_WIDTH"), "640") && strstr(file_text(SETTINGS_FILE), "HALO_DISPLAY_WIDTH=640\n") &&
+			!strcmp(menu_line(8, line, sizeof(line)), "Aspect ratio\x02< 4:3  ") &&
 			!strcmp(settings[0].names[settings[0].choice], "Balanced"), "Aspect ratio 4:3: saved, the profile kept");
 		press(VITA_BUTTON_DOWN);
-		check(strstr(menu, "\n\x05Scaling to the screen: Sharp = crisp pixels\n") && menu_fits(),
+		check(menu_selected == 9 && strstr(menu, "\n\x05Scaling to the screen: Sharp = crisp pixels\n") && menu_fits(),
 			"Upscale filter: its help line fits");
 		press(VITA_BUTTON_RIGHT);
 		check(!strcmp(getenv("HALO_UPSCALE_FILTER"), "1") && strstr(file_text(SETTINGS_FILE), "HALO_UPSCALE_FILTER=1\n") &&
-			!strcmp(menu_line(3, line, sizeof(line)), "Upscale filter\x02< Sharp  ") &&
+			!strcmp(menu_line(9, line, sizeof(line)), "Upscale filter\x02< Sharp  ") &&
 			!strcmp(settings[0].names[settings[0].choice], "Balanced"), "Upscale filter Sharp: saved, the profile kept");
-		press(VITA_BUTTON_CIRCLE);
-		check(menu_visible && strstr(menu, "\t*Graphics") && !strstr(menu, "\n\x03") &&
-			!strcmp(menu_line(menu_selected, line, sizeof(line)), "Screen\x02  4:3, Sharp  >") && menu_fits(),
-			"circle: back to Graphics, on Screen, which says 4:3, Sharp");
+		press(VITA_BUTTON_DOWN);
+		check(menu_selected == 11 && !strcmp(menu_line(menu_selected, line, sizeof(line)), "Detail\x02  >"),
+			"down from Upscale filter: Detail (the More heading stepped over)");
+		press(VITA_BUTTON_UP);
+		press(VITA_BUTTON_UP);
+		press(VITA_BUTTON_UP);
+		check(menu_selected == 6 && !strncmp(menu_line(menu_selected, line, sizeof(line)), "Frame interpolation\x02", 20),
+			"up from Aspect ratio: Frame interpolation (the Screen heading stepped over)");
 		vita_settings_set("HALO_DISPLAY_WIDTH", "848");
 		vita_settings_set("HALO_UPSCALE_FILTER", "0");
+	}
+	{
+		/* Game's First person: the first-person legs and the weapon's
+		motion (live, no *); the FPS counter, under Interface (live) */
+		unsigned long generation;
 
-		check(to_line("First person") && strstr(menu, "\n\x05" "First-person legs, smooth weapon motion\n") &&
-			!strcmp(menu_line(menu_selected, line, sizeof(line)), "First person\x02  >") && menu_fits(),
-			"First person: its help says what is there");
-		check(open_page("First person") && strstr(menu, "\n\x03Graphics > First person\n") &&
-			!strcmp(menu_line(2, line, sizeof(line)), "First-person legs\x02< On  ") &&
-			!strcmp(menu_line(3, line, sizeof(line)), "Smooth weapon motion\x02  On >") && menu_rows() == 2 &&
+		check(to_tab("Game") && to_line("First-person legs") && menu_selected == 7 &&
+			!strcmp(menu_line(6, line, sizeof(line)), "\x08" "First person") &&
+			!strcmp(menu_line(7, line, sizeof(line)), "First-person legs\x02< On  ") &&
+			!strcmp(menu_line(8, line, sizeof(line)), "Smooth weapon motion\x02  On >") &&
 			menu_fits() && menu_height_fits() && !strstr(menu, "First-person legs*") &&
 			!strstr(menu, "Smooth weapon motion*") && !strcmp(getenv("HALO_FIRST_PERSON_LEGS"), "1") &&
 			!strcmp(getenv("HALO_INTERPOLATE_FIRST_PERSON"), "1"),
-			"Graphics, First person: First-person legs (On), Smooth weapon motion (On), both in the environment, live");
+			"Game, First person: First-person legs (On), Smooth weapon motion (On), both in the environment, live");
 		/* (port/linux/game/first_person_legs.c reads it again as the
 		generation changes) */
 		check(strstr(menu, "\n\x05Your legs when you look down, as others see them\n") && menu_fits(),
@@ -2696,7 +3155,7 @@ int main(void)
 		press(VITA_BUTTON_LEFT);
 		check(!strcmp(getenv("HALO_FIRST_PERSON_LEGS"), "0") && halo_settings_generation != generation &&
 			strstr(file_text(SETTINGS_FILE), "HALO_FIRST_PERSON_LEGS=0\n") &&
-			!strcmp(menu_line(2, line, sizeof(line)), "First-person legs\x02  Off >") && !strstr(notice, "Restart") &&
+			!strcmp(menu_line(7, line, sizeof(line)), "First-person legs\x02  Off >") && !strstr(notice, "Restart") &&
 			!strcmp(settings[0].names[settings[0].choice], "Balanced"),
 			"First-person legs Off: in the environment and settings.txt at once, no restart, the profile kept");
 		press(VITA_BUTTON_RIGHT);
@@ -2709,17 +3168,30 @@ int main(void)
 		press(VITA_BUTTON_RIGHT);
 		check(!strcmp(getenv("HALO_INTERPOLATE_FIRST_PERSON"), "0") && halo_settings_generation != generation &&
 			strstr(file_text(SETTINGS_FILE), "HALO_INTERPOLATE_FIRST_PERSON=0\n") &&
-			!strcmp(menu_line(3, line, sizeof(line)), "Smooth weapon motion\x02< Off  ") && !strstr(notice, "Restart") &&
+			!strcmp(menu_line(8, line, sizeof(line)), "Smooth weapon motion\x02< Off  ") && !strstr(notice, "Restart") &&
 			!strcmp(settings[0].names[settings[0].choice], "Balanced"),
 			"Smooth weapon motion Off: in the environment and settings.txt at once, no restart, the profile kept");
 		press(VITA_BUTTON_LEFT);
 		check(!strcmp(getenv("HALO_INTERPOLATE_FIRST_PERSON"), "1") &&
 			strstr(file_text(SETTINGS_FILE), "HALO_INTERPOLATE_FIRST_PERSON=1\n"), "... and On again");
-		press(VITA_BUTTON_CIRCLE);
-		check(menu_visible && strstr(menu, "\t*Graphics") && !strstr(menu, "\n\x03") &&
-			!strcmp(menu_line(menu_selected, line, sizeof(line)), "First person\x02  >"),
-			"circle: back to Graphics, on First person");
-		while (menu_selected > 2)
+		press(VITA_BUTTON_UP);
+		press(VITA_BUTTON_UP);
+		check(menu_selected == 5 && !strncmp(menu_line(menu_selected, line, sizeof(line)), "FPS counter\x02", 12),
+			"up from First-person legs: FPS counter (the First person heading stepped over)");
+		check(strstr(menu, "\n\x05The game's frame counter, bottom right\n") && menu_fits(), "FPS counter: its help line fits");
+		generation = halo_settings_generation;
+		press(VITA_BUTTON_RIGHT);
+		check(!strcmp(getenv("HALO_FRAMERATE_COUNTER"), "1") && halo_settings_generation != generation &&
+			strstr(file_text(SETTINGS_FILE), "HALO_FRAMERATE_COUNTER=1\n") &&
+			!strcmp(menu_line(5, line, sizeof(line)), "FPS counter\x02< On  ") && !strstr(notice, "Restart") &&
+			!strcmp(settings[0].names[settings[0].choice], "Balanced"),
+			"FPS counter On: in the environment and settings.txt at once, no restart, the profile kept");
+		press(VITA_BUTTON_LEFT);
+		check(!strcmp(getenv("HALO_FRAMERATE_COUNTER"), "0"), "... and Off again");
+		for (index = 0; index < 20 && menu_selected > 2; index++)
+			press(VITA_BUTTON_UP);
+		check(to_tab("Video") && menu_selected == 6, "back on Video: on Frame interpolation, as left");
+		for (index = 0; index < 20 && menu_selected > 2; index++)
 			press(VITA_BUTTON_UP);
 	}
 	{
@@ -2744,11 +3216,12 @@ int main(void)
 		check(!strcmp(getenv("HALO_INTERPOLATION"), "false") &&
 			strstr(file_text(SETTINGS_FILE), "HALO_INTERPOLATION=false\n"), "... and Off again");
 	}
-	/* Graphics' Detail: the detail rows (most of them the profile's), the
+	/* Video's Detail: the detail rows (most of them the profile's), the
 	particles made and drawn */
-	check(to_line("Detail") && strstr(menu, "\n\x05" "Models, shadows, lights, effects, particles\n") && menu_fits(),
-		"Detail: its help says what is there");
-	check(open_page("Detail") && strstr(menu, "\n\x03Graphics > Detail\n") &&
+	check(to_line("Detail") && !strcmp(menu_line(menu_selected - 1, line, sizeof(line)), "\x08More") &&
+		strstr(menu, "\n\x05" "Models, shadows, lights, effects, particles\n") && menu_fits(),
+		"Detail: under More, its help says what is there");
+	check(open_page("Detail") && strstr(menu, "\n\x03Video > Detail\n") && !strchr(menu, '\x08') &&
 		!strcmp(menu_line(2, line, sizeof(line)), "Model detail\x02< Medium >") &&
 		!strcmp(menu_line(3, line, sizeof(line)), "Hide distant objects\x02< Small >") &&
 		!strcmp(menu_line(4, line, sizeof(line)), "Object shadows\x02< Off  ") &&
@@ -2761,8 +3234,9 @@ int main(void)
 		!strcmp(menu_line(11, line, sizeof(line)), "Ragdolls\x02< On  ") &&
 		!strncmp(menu_line(12, line, sizeof(line)), "\x05Level of detail", 16) && menu_rows() == 10 && menu_fits() &&
 		menu_height_fits() && !strstr(menu, "*\x02"),
-		"Graphics, Detail: model detail (Medium), distant objects (Small), shadows (Off), lights (4), effects (Full), "
-		"sun rays (Off), tiny decals (Shown), Particles (Reduced), particle density (Full), Ragdolls (On); all live");
+		"Video, Detail: model detail (Medium), distant objects (Small), shadows (Off), lights (4), effects (Full), "
+		"sun rays (Off), tiny decals (Shown), Particles (Reduced), particle density (Full), Ragdolls (On); all live; "
+		"no headings on a page");
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_MODEL_LOD_SCALE"), "1") && !strcmp(settings[0].names[settings[0].choice], "Custom"),
 		"a detail row changed on its page (Model detail High): the profile Custom");
@@ -2789,19 +3263,19 @@ int main(void)
 			"... and On again");
 	}
 	press(VITA_BUTTON_CIRCLE);
-	check(menu_visible && strstr(menu, "\t*Graphics") && !strstr(menu, "\n\x03") &&
+	check(menu_visible && strstr(menu, "|*Video|") && !strstr(menu, "\n\x03") &&
 		!strcmp(menu_line(menu_selected, line, sizeof(line)), "Detail\x02  >"),
-		"circle: back to Graphics, on Detail");
-	/* Graphics' Performance: the update rates, the AI's, the fourth core */
+		"circle: back to Video, on Detail");
+	/* Video's Performance: the update rates, the AI's, the fourth core */
 	check(to_line("Performance") && strstr(menu, "\n\x05" "Update rates, AI think rate, fourth core helpers\n") &&
 		menu_fits(), "Performance: its help says what is there");
-	check(open_page("Performance") && strstr(menu, "\n\x03Graphics > Performance\n") &&
+	check(open_page("Performance") && strstr(menu, "\n\x03Video > Performance\n") && !strchr(menu, '\x08') &&
 		!strcmp(menu_line(2, line, sizeof(line)), "Scenery updates\x02< Quarter  ") &&
 		!strcmp(menu_line(3, line, sizeof(line)), "Object lighting\x02< Third  ") &&
 		!strcmp(menu_line(4, line, sizeof(line)), "AI think rate\x02< Adaptive >") &&
 		!strcmp(menu_line(5, line, sizeof(line)), "Fourth core helpers*\x02< All async  ") && menu_rows() == 4 &&
 		menu_fits() && menu_height_fits() && !strstr(menu, "Scenery updates*") && !strstr(menu, "AI think rate*"),
-		"Graphics, Performance: scenery (Quarter), lighting (Third), AI think rate (Adaptive), fourth core helpers "
+		"Video, Performance: scenery (Quarter), lighting (Third), AI think rate (Adaptive), fourth core helpers "
 		"(All async, after a restart)");
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_SCENERY_UPDATE_DIVISOR"), "2") && !strcmp(settings[0].names[settings[0].choice], "Custom") &&
@@ -2811,20 +3285,30 @@ int main(void)
 	test_bruno_rows();
 	test_fourth_core();
 	press(VITA_BUTTON_CIRCLE);
-	check(menu_visible && strstr(menu, "\t*Graphics") && !strstr(menu, "\n\x03") &&
+	check(menu_visible && strstr(menu, "|*Video|") && !strstr(menu, "\n\x03") &&
 		!strcmp(menu_line(menu_selected, line, sizeof(line)), "Performance\x02  >"),
-		"circle: back to Graphics, on Performance");
+		"circle: back to Video, on Performance");
+	/* L and R through the tabs, wrapping at either end */
 	press(VITA_BUTTON_L);
-	check(strstr(menu, "*Multiplayer") != NULL, "L from the first tab wraps to the last shown");
+	check(strstr(menu, "|*Controls|") && strstr(menu, "Look sensitivity"), "L from Video: Controls");
+	press(VITA_BUTTON_L);
+	check(strstr(menu, "\t*Game|") && strstr(menu, "Menu style"), "L: Game");
+	press(VITA_BUTTON_L);
+	check(strstr(menu, "|*Multiplayer\n") != NULL, "L from the first tab, Game, wraps to the last shown");
+	press(VITA_BUTTON_R);
+	check(strstr(menu, "\t*Game|") != NULL, "R from the last: Game again");
 	press(VITA_BUTTON_R);
 	press(VITA_BUTTON_R);
-	check(strstr(menu, "*General") && strstr(menu, "Look sensitivity"), "R: General");
 	press(VITA_BUTTON_R);
-	check(strstr(menu, "*Audio") && strstr(menu, "\nLanguage\x02  Automatic >") && strstr(menu, "\nSound voices*\x02") &&
-		strstr(menu, "\nSound occlusion\x02") && strstr(menu, "\nSound updates\x02< Every 2nd >") && menu_rows() == 4 &&
-		menu_fits(), "R: Audio: Language (Automatic), then the sound rows");
+	check(strstr(menu, "|*Sound|") && strstr(menu, "\nSound voices*\x02") && strstr(menu, "\nSound occlusion\x02") &&
+		strstr(menu, "\nSound updates\x02< Every 2nd >") && menu_rows() == 3 && !strstr(menu, "Language") &&
+		!strchr(menu, '\x08') && menu_fits() && menu_height_fits(),
+		"R, R, R: Sound: the sound rows, no heading (Language on Game)");
+	check(!strncmp(menu_line(1, line, sizeof(line)), "Sound voices*\x02", 14) && menu_selected == 1,
+		"Sound: Sound voices first, chosen");
 	press(VITA_BUTTON_R);
-	check(!strncmp(menu, "\tGraphics|General|Audio|*Multiplayer\n", sizeof("\tGraphics|General|Audio|*Multiplayer\n") - 1), "R: Multiplayer");
+	check(!strncmp(menu, "\tGame|Controls|Video|Sound|*Multiplayer\n", sizeof("\tGame|Controls|Video|Sound|*Multiplayer\n") - 1),
+		"R: Multiplayer");
 	printf("%s\n--\n", menu);
 
 	test_multiplayer_tab();
@@ -2914,7 +3398,7 @@ int main(void)
 		strstr(menu, "Deleted cemap.map") && !strstr(menu, "!Missing"), "cross deletes it (and its picture); no CE map, no warning");
 	check(strstr(log_text, "settings: map cemap.map deleted") != NULL, "halo.log says what was deleted");
 	press(VITA_BUTTON_UP);
-	while (strncmp(menu_line(menu_selected, line, sizeof(line)), "PC maps", 7))
+	for (index = 0; index < 20 && strncmp(menu_line(menu_selected, line, sizeof(line)), "PC maps", 7); index++)
 		press(VITA_BUTTON_UP);
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(getenv("HALO_CUSTOM_EDITION"), "1") && strstr(menu, "!Missing: sounds.map loc.map"),
@@ -2986,13 +3470,12 @@ int main(void)
 
 	/* ---------- Dev, behind its switch */
 	press(VITA_BUTTON_R);
-	check(strstr(menu, "*Graphics") != NULL, "R from Multiplayer: Graphics (Dev hidden)");
-	to_tab("General");
-	open_page("Advanced");
-	to_line("Show dev settings");
+	check(strstr(menu, "\t*Game|") != NULL, "R from Multiplayer: Game (Dev hidden)");
+	check(to_line("Show dev settings") && menu_selected == 13 && strstr(menu, "\n\x05The Dev tab: switches for testers, Save report\n"),
+		"Show dev settings: Game's last row, under Updates, its help");
 	press(VITA_BUTTON_RIGHT);
-	check(strstr(menu, "\t*Graphics|*General") == NULL && strstr(menu, "|Multiplayer|Dev\n") != NULL,
-		"Show dev settings (General, Advanced): the Dev tab");
+	check(strstr(menu, "\t*Game|Controls|Video|Sound|Multiplayer|Dev\n") && menu_fits() && tab_bar_fits() &&
+		strstr(menu, "\nShow dev settings\x02< On  "), "Show dev settings (Game): the Dev tab, last");
 	to_tab("Dev");
 	printf("%s\n--\n", menu);
 	check(!strncmp(menu_line(1, line, sizeof(line)), "Performance logging*\x02", 21) &&
@@ -3058,6 +3541,14 @@ int main(void)
 	test_online_rows();
 	press(VITA_BUTTON_CIRCLE);
 	check(!menu_visible, "circle closes the panel");
+	/* (Show dev settings turned off - the game's @set, a settings.txt -
+	with the panel last on Dev: it opens on the first tab, Game) */
+	vita_settings_set("HALO_DEV_SETTINGS", "0");
+	open_panel();
+	check(menu_visible && strstr(menu, "\t*Game|Controls|Video|Sound|Multiplayer\n"),
+		"Dev hidden since the panel was last on it: it opens on Game, the first tab");
+	press(VITA_BUTTON_CIRCLE);
+	vita_settings_set("HALO_DEV_SETTINGS", "1");
 
 	/* the next start: the dev switches on say test mode in halo.log */
 	log_text[0] = 0;
@@ -3423,8 +3914,8 @@ int main(void)
 				}
 			}
 			check(all && !strcmp(settings[0].names[settings[0].choice], "Custom"),
-				"a settings.txt saved with the Display and Advanced pages: every row as saved (now on Screen, First person, "
-				"Detail, Performance and the tab), Custom");
+				"a settings.txt saved with the Display and Advanced pages: every row as saved (now on Video and its Detail "
+				"and Performance, and Game), Custom");
 			/* (back to the defaults) */
 			for (index = 0; index < (int)(sizeof(defaults) / sizeof(defaults[0])); index++)
 				vita_settings_set(defaults[index][0], defaults[index][1]);

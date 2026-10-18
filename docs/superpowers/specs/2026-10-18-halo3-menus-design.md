@@ -19,6 +19,8 @@ picture and lobby screens that Halo CE's menus don't have.
 
 ## Goals
 
+0. **As faithful to Halo 3 (Xbox 360) as possible** (owner, Oct 18 00:03): where a mockup and the real Halo 3 screen differ, Halo 3 wins (references: Halo 3 screenshots and Halo Online captures outside the repo).
+
 1. A **Halo 3 menu kit**: one look and one set of building blocks, used
    by every new screen.
 2. A **Menu style** setting with two values: **Halo 3** (the default

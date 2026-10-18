@@ -4348,6 +4348,7 @@ a pass of its own (h3_draw). Without the fonts: the panel as before */
 #define H3_VALUE_CHOSEN 0xFFE0D1C2u
 #define H3_ARROW 0xFF68A8E7u
 #define H3_TAB 0xFF8A7C6Fu
+#define H3_HEADING 0xFFCCB49Fu
 #define H3_TAB_SHOWN 0xFFF2F2F2u
 #define H3_HELP 0xFFD3CBC3u
 #define H3_BUTTON_TEXT 0xFFECECECu
@@ -4773,6 +4774,8 @@ static unsigned int h3_panel(struct overlay_vertex *vertices, unsigned int count
 
 		if (mark == '\x03')
 			y += 26.0f;
+		else if (mark == '\x08')
+			y += 24.0f;
 		else if (!mark)
 			units += 0.5f;
 		else if (mark != '\x05' && mark != '\x06')
@@ -4803,6 +4806,14 @@ static unsigned int h3_panel(struct overlay_vertex *vertices, unsigned int count
 		{
 			h3_text(&h3.small, H3_LEFT, y + small_cap, H3_VALUE, line + 1, 1);
 			y += 26.0f;
+			continue;
+		}
+		/* (a heading, centred over the rows, as Halo Online's) */
+		if (line[0] == '\x08')
+		{
+			h3_text(&h3.item, H3_LEFT + (row_width - overlay_face_width(&h3.item, line + 1, 1)) / 2.0f,
+				y + 4.0f + item_cap, H3_HEADING, line + 1, 1);
+			y += 24.0f;
 			continue;
 		}
 		if (!line[0])
@@ -5003,7 +5014,8 @@ static void h3_draw(void)
 /* the settings panel. With a tab bar (a first line that starts with a
 tab, vita_settings.c show_list): the panel the height of the screen, the
 tab bar at its top, a page's title ('\x03'), the rows (label '\x02' value)
-with the chosen one on a bar, lines that are not rows ('\x04', dimmer), an
+with the chosen one on a bar, lines that are not rows ('\x04', dimmer), a
+heading over rows ('\x08', smaller), an
 empty line for a gap, the chosen row's help ('\x05') and the panel's
 buttons ('\x06') on the last two lines, and the touch zones' diagram (a
 line of '\x01' and zone marks) at the right. Without one (a message, a
@@ -5070,6 +5082,12 @@ static unsigned int menu_build(struct overlay_vertex *vertices, unsigned int cou
 			{
 				count = overlay_text(vertices, count, limit, x, y, 2.0f, MENU_ACCENT, line + 1);
 				y += 36.0f;
+				continue;
+			}
+			if (line[0] == '\x08')
+			{
+				count = overlay_text(vertices, count, limit, x, y + 2.0f, 1.5f, MENU_TAB, line + 1);
+				y += 22.0f;
 				continue;
 			}
 			if (!line[0])
