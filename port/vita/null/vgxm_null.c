@@ -17,6 +17,7 @@ their Cg; they are never compiled.
 #include "platform.h"
 #include "vita_gxm.h"
 #include "vita_host.h"
+#include "vita_controls.h"
 
 #include <pthread.h>
 #include <stddef.h>
@@ -106,6 +107,35 @@ void vita_host_pad_read(struct vita_host_pad *pad)
 {
 	memset(pad, 0, sizeof(*pad));
 	pad->lx = pad->ly = pad->rx = pad->ry = 128;
+}
+
+/* (the menus' touch pointer, d3d8_gxm.c halo_ui_pointer_update: no front
+screen here, no settings panel; vita_controls.c is the Vita's) */
+int vita_settings_panel_open(void)
+{
+	return 0;
+}
+
+int vita_host_front_touches(struct vita_touch_contact *out, int maximum)
+{
+	(void)out;
+	(void)maximum;
+	return 0;
+}
+
+int vita_touch_pointer(struct vita_touch_pointer *pointer, const struct vita_touch_contact *contacts, int count,
+	unsigned long long now_us, int screen_width, short *x, short *y, int *tap, int *moved)
+{
+	(void)pointer;
+	(void)contacts;
+	(void)count;
+	(void)now_us;
+	(void)screen_width;
+	(void)x;
+	(void)y;
+	*tap = 0;
+	*moved = 0;
+	return 0;
 }
 
 /* ---------- the renderer */
