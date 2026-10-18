@@ -2644,7 +2644,12 @@ static int appear_offline_now(void)
 /* whether friends want the brokers: internet play runs and friends are on */
 static int friends_on(void)
 {
+#ifdef HALO_DEDICATED_SERVER
+	/* (a dedicated server has no player of its own: no friends) */
+	return 0;
+#else
 	return friends->online && friends->has_identity && setting_on("friends.enabled", "HALO_FRIENDS");
+#endif
 }
 
 int p2p_friends_wanted(void)
@@ -2774,6 +2779,11 @@ void p2p_friends_update(const struct p2p_friends_host *host)
 	int index, handled = 0, signatures = 0, keys = 0;
 	int was_online, was_on, appear_offline, joinable;
 
+#ifdef HALO_DEDICATED_SERVER
+	/* (no identity made, nothing heard or sent) */
+	(void)host;
+	return;
+#endif
 	pthread_mutex_lock(&friends_lock);
 	load();
 	was_online = friends->online;

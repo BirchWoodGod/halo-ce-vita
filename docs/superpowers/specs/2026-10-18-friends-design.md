@@ -201,9 +201,14 @@ under p2p_signal's 540-byte limit.
 
 - Inbound queue: 64 messages; past it, dropped. Per pass of the p2p thread
   at most 16 handled. Requests (inbox): 10 at once, one more each 2 s;
-  sealed boxes (an X25519 each): 10 at once, one more each 500 ms. A
-  friend's presence: one a second (the newest wins); invites: one each 10 s
-  per friend, 8 pending at most.
+  sealed boxes (an X25519 each): 10 at once, one more each 500 ms; pair
+  messages that no friend's key opens (each is tried with every key): 20 at
+  once, one more each 250 ms, then pair messages wait a while. A friend's
+  presence: 6 at once, one more each 2 s (their own sends are paced far
+  below: this caps a flood); invites: one each 10 s per friend, 8 pending at
+  most. Friends' publishes keep the brokers' reserve for joiners' and hosts'
+  signalling (they never starve it).
+- Dedicated servers have no friends (no identity is made there).
 - Every length is checked against the message's size before it is read; a
   message is taken whole or dropped. Names are printable ASCII, 16
   characters at most, cleaned as player names are (no "|", no outer spaces)
