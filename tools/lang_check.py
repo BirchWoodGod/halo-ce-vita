@@ -98,10 +98,11 @@ def source_keys(root: Path):
 
 
 def xml_keys(root: Path):
-    """the PC menus' texts (menu_files.c translates each as it reads it: the
+    """the menus' texts, the Halo 3 set's (menus/halo3) too (menu_files.c
+    translates each as it reads it: the
     attribute's text, its \\n made a new line)"""
     keys = {}
-    for path in sorted((root / MENUS_DIR).glob("*.xml")):
+    for path in sorted((root / MENUS_DIR).rglob("*.xml")):
         text = path.read_text(encoding="utf-8")
         for match in re.finditer(r'<string\s+text="([^"]*)"', text):
             key = xml_text(match.group(1))
