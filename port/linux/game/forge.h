@@ -111,9 +111,38 @@ boolean forge_map_available(
 
 /* (the lobby's START FORGE) a local game of the map, in Forge mode: the
 game variant (free for all, no score or time limit) and the map set, and
-the game started as "main menu switch to solo game" starts it */
-void forge_game_start(
+the game started as "main menu switch to solo game" starts it; with a map
+variant's file of the map (variant_file, else NULL), that read and checked
+first, and placed as the session starts. FALSE, with why, if the variant
+could not be read: nothing is started */
+boolean forge_game_start(
+	short map_index,
+	char const *variant_file,
+	char *why,
+	int why_size);
+
+/* a lobby map's short name (bloodgulch: its map variants' folder), and the
+map of a short name (NONE if none) */
+char const *forge_map_short(
 	short map_index);
+short forge_map_of_short(
+	char const *map_name);
+
+/* (the Forge menu's SAVE MAP VARIANT, its name typed) the session's
+objects saved as a map variant titled title, at the next forge_update; the
+session's own variant's file replaced when the title is its. What came of
+it (its words, said in the Forge menu) and a count that moves on each time
+one is done */
+void forge_save_request(
+	char const *title,
+	char const *author);
+long forge_save_result(
+	char *status,
+	int size);
+
+/* the map variant the session plays (loaded or last saved), "" for none */
+char const *forge_variant_title(
+	void);
 
 /* whether a Forge game is played (the session), and whether its player is
 the monitor now */

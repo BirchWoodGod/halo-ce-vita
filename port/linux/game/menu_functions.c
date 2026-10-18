@@ -72,7 +72,9 @@ halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
 #include "../src/system_link_shortcut.h"
 #include "forge.h"
 #include "../src/port_config.h"
+#include "../src/forge_store.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -178,6 +180,21 @@ enum
 	_function_h3_campaign_host,
 	_function_h3_campaign_focus,
 	_function_h3_scene,
+	_function_forge_variant_set,
+	_function_forge_variant_focus,
+	_function_forge_variant_page_up,
+	_function_forge_variant_page_down,
+	_function_forge_save,
+	_function_fileshare_init,
+	_function_fileshare_focus,
+	_function_fileshare_page_up,
+	_function_fileshare_page_down,
+	_function_fileshare_kind,
+	_function_fileshare_rename,
+	_function_fileshare_ask_delete,
+	_function_fileshare_delete,
+	_function_fileshare_open,
+	_function_fileshare_enter,
 };
 
 /* in port_game_data_input_names' order */
@@ -205,6 +222,9 @@ enum
 	_input_h3_maps,
 	_input_h3_gametypes,
 	_input_h3_campaign_networks,
+	_input_forge_variants,
+	_input_fileshare,
+	_input_fileshare_question,
 };
 
 /* what a line of typing is for */
@@ -215,6 +235,8 @@ enum
 	_typing_lobby_name,
 	_typing_lobby_password,
 	_typing_code,
+	_typing_forge_name,
+	_typing_fileshare_rename,
 };
 
 /* the password and code screens' help lines (their strings' order) */
@@ -399,18 +421,17 @@ static void text_show(struct widget_instance *widget, char const *text)
 active profile's name; with none yet (a first start), the player's name
 (network.player_name: on the Vita its user name), else "Player". Not the
 game's "get active plyr profile name", which asserts without a profile */
-static void h3_nameplate_update(struct widget_instance *widget)
+static void h3_player_name(char *name, int size)
 {
 	long profile_index = player_ui_get_active_player_profile_index(0);
 	struct player_profile profile;
-	char name[64];
 	int length = 0, index;
 
 	name[0] = 0;
 	if (profile_index != NONE && player_profile_get(profile_index, &profile))
 	{
 		for (index = 0; index < MAXIMUM_PLAYER_PROFILE_NAME_LENGTH && profile.player_name[index] &&
-			length < (int)sizeof(name) - 4; index++)
+			length < size - 4; index++)
 		{
 			unsigned long code = (unsigned short)profile.player_name[index];
 
@@ -431,8 +452,15 @@ static void h3_nameplate_update(struct widget_instance *widget)
 		name[length] = 0;
 	}
 	if (!name[0])
-		snprintf(name, sizeof(name), "%s", getenv("HALO_NET_PLAYER_NAME") && getenv("HALO_NET_PLAYER_NAME")[0] ?
+		snprintf(name, (size_t)size, "%s", getenv("HALO_NET_PLAYER_NAME") && getenv("HALO_NET_PLAYER_NAME")[0] ?
 			getenv("HALO_NET_PLAYER_NAME") : "Player");
+}
+
+static void h3_nameplate_update(struct widget_instance *widget)
+{
+	char name[64];
+
+	h3_player_name(name, sizeof(name));
 	text_show(widget, name);
 }
 
@@ -1074,7 +1102,19 @@ static struct
 	int page;
 	/* what was last said in the log */
 	char said[160];
+	/* the lobby's map variant (none: an empty file name), and its
+	picker's rows (NONE first), the one chosen there, a trigger's page */
+	char variant_file[FORGE_FILE_NAME_SIZE];
+	char variant_title[FORGE_FILE_TITLE_SIZE];
+	struct browser_view variant_view;
+	int variant_chosen;
+	int variant_page;
+	/* why START FORGE did not start (the lobby's note), until another
+	choice */
+	char note[FORGE_STORE_WHY_SIZE];
 } h3_forge;
+
+static void h3_forge_variant_check(void);
 
 /* the lobby opened: Blood Gulch the first time (Halo 3's first Forge map
 is its open one), a map of the maps folder; what was chosen since, after */
@@ -1089,7 +1129,10 @@ static void h3_forge_lobby_initialize(void)
 	}
 	for (index = 0; index < forge_map_count() && !forge_map_available(h3_forge.map); index++)
 		h3_forge.map = (short)((h3_forge.map + 1) % forge_map_count());
-	platform_log("menus: forge lobby: %s", forge_map_name(h3_forge.map));
+	h3_forge_variant_check();
+	h3_forge.note[0] = 0;
+	platform_log("menus: forge lobby: %s%s%s", forge_map_name(h3_forge.map), h3_forge.variant_file[0] ? ", map variant " : "",
+		h3_forge.variant_title);
 }
 
 /* the lobby's map row, picture (map_picture: its frame of ui.map's
@@ -1107,7 +1150,15 @@ static void h3_forge_lobby_update(struct widget_instance *widget)
 	snprintf(text, sizeof(text), "%s: %s", T("MAP"), T(forge_map_name(h3_forge.map)));
 	h3_capitals(text);
 	text_show(named(screen, "map_row"), text);
-	snprintf(text, sizeof(text), T("Edit Objects on %s"), T(forge_map_name(h3_forge.map)));
+	snprintf(text, sizeof(text), "%s: %s", T("MAP VARIANT"), h3_forge.variant_file[0] ? h3_forge.variant_title : T("NONE"));
+	h3_capitals(text);
+	text_show(named(screen, "variant_row"), text);
+	/* (the note: why START FORGE did not start, else the game's rules) */
+	text_show(named(screen, "note"), h3_forge.note[0] ? h3_forge.note : T("No score or time limit."));
+	if (h3_forge.variant_file[0])
+		snprintf(text, sizeof(text), T("%s on %s"), h3_forge.variant_title, T(forge_map_name(h3_forge.map)));
+	else
+		snprintf(text, sizeof(text), T("Edit Objects on %s"), T(forge_map_name(h3_forge.map)));
 	text_show(named(screen, "caption"), available ? text : T("No multiplayer map is in the maps folder."));
 	if (strcmp(text, h3_forge.said))
 	{
@@ -1345,13 +1396,42 @@ static void h3_forge_browser_back(void)
 }
 
 /* the Forge menu's title (FORGE · <map>) and its monitor row's words */
+static boolean typing_done(short typing, char *text, int size);
+static void h3_forge_save(void);
+
 static void h3_forge_title_update(struct widget_instance *widget)
 {
 	struct widget_instance *screen = screen_of(widget);
 	char const *scenario = main_get_map_name();
-	char text[128];
+	char text[FORGE_STORE_WHY_SIZE + 64];
 	short index;
 	char const *name = "";
+
+	/* (SAVE MAP VARIANT's name typed: forge.c saves it at its next update,
+	and its words come back here) */
+	if (typing_done(_typing_forge_name, text, FORGE_FILE_TITLE_SIZE))
+	{
+		char author[FORGE_FILE_AUTHOR_SIZE];
+
+		if (text[0])
+		{
+			h3_player_name(author, sizeof(author));
+			forge_save_request(text, author);
+			platform_log("menus: forge: save the map variant as \"%s\"", text);
+		}
+	}
+	{
+		char status[FORGE_STORE_WHY_SIZE];
+
+		forge_save_result(status, sizeof(status));
+		if (status[0])
+			snprintf(text, sizeof(text), "%s", status);
+		else if (forge_variant_title()[0])
+			snprintf(text, sizeof(text), T("Map variant: %s"), forge_variant_title());
+		else
+			snprintf(text, sizeof(text), "%s", T("Nothing saved yet."));
+		text_show(named(screen, "status"), text);
+	}
 
 	for (index = 0; scenario && index < forge_map_count(); index++)
 	{
@@ -2415,6 +2495,565 @@ static boolean code_join(void)
 	return TRUE;
 }
 
+/* ---- map variants (port/linux/src/forge_store.h): the Forge lobby's MAP
+VARIANT and its picker (halo3/forge_lobby.xml), the Forge menu's SAVE MAP
+VARIANT (halo3/forge.xml), and File Share (halo3/fileshare.xml). The files
+are read (each through the validator) when a screen that lists them opens,
+or after a change, never each frame */
+
+#define VARIANT_ROWS 12
+
+/* whose the list of map variants is */
+enum
+{
+	_variants_nobody,
+	_variants_lobby,
+	_variants_fileshare,
+};
+
+/* File Share's kinds */
+enum
+{
+	_fileshare_map_variants,
+	_fileshare_game_variants,
+	NUMBER_OF_FILESHARE_KINDS
+};
+
+static struct
+{
+	/* the lobby picker's (one map's: map_name) or File Share's (every
+	map's) */
+	short owner;
+	char map_name[FORGE_FILE_MAP_NAME_SIZE];
+	struct forge_store_entry entries[FORGE_STORE_MAXIMUM_LISTED];
+	short count;
+} h3_variants;
+
+static struct
+{
+	short kind;
+	struct browser_view view;
+	int chosen;
+	int page;
+	/* what the last action came to */
+	char status[FORGE_STORE_WHY_SIZE];
+	/* the map variant asked about (deleted, renamed): its map and file */
+	char asked_map[FORGE_FILE_MAP_NAME_SIZE];
+	char asked_file[FORGE_FILE_NAME_SIZE];
+	char asked_title[FORGE_FILE_TITLE_SIZE];
+	char said[192];
+} h3_fileshare;
+
+/* whether text can be typed: the Vita's keyboard, or the tests' answers
+(HALO_TEST_TEXT_INPUT); elsewhere a name is not asked for */
+static boolean typing_available(void)
+{
+#ifdef HALO_VITA
+	return TRUE;
+#elif !defined(HALO_RELEASE)
+	return getenv("HALO_TEST_TEXT_INPUT") != NULL;
+#else
+	return FALSE;
+#endif
+}
+
+/* the map variants of a map (map_name) or of every map (NULL) read for a
+screen, unless they are its already (again, with again) */
+static void h3_variants_list(short owner, char const *map_name, boolean again)
+{
+	if (!again && h3_variants.owner == owner &&
+		!strcmp(h3_variants.map_name, map_name ? map_name : ""))
+	{
+		return;
+	}
+	h3_variants.count = (short)forge_store_list(map_name, h3_variants.entries, FORGE_STORE_MAXIMUM_LISTED);
+	h3_variants.owner = owner;
+	snprintf(h3_variants.map_name, sizeof(h3_variants.map_name), "%s", map_name ? map_name : "");
+	platform_log("menus: %d map variants%s%s", h3_variants.count, map_name ? " of " : "", map_name ? map_name : "");
+}
+
+/* a map's name (forge.c's, translated) by its short name, the short name
+itself for one not in the lobby's list */
+static char const *h3_variant_map_name(char const *map_name)
+{
+	short map_index = forge_map_of_short(map_name);
+
+	return map_index != NONE ? T(forge_map_name(map_index)) : map_name;
+}
+
+/* a map variant's details for a pane (File Share's, with its map) */
+static void h3_variant_details(struct forge_store_entry const *entry, boolean in_fileshare, char *text, int size)
+{
+	int length = 0;
+
+	text[0] = 0;
+	if (in_fileshare)
+		length += snprintf(text + length, (size_t)(size - length), T("Map: %s\n"), h3_variant_map_name(entry->map_name));
+	if (entry->damaged)
+	{
+		snprintf(text + length, (size_t)(size - length), "%s", in_fileshare ?
+			T("This file is damaged and can't be used.\nTriangle deletes it.") :
+			T("This file is damaged and can't be used.\nDelete it in File Share."));
+		return;
+	}
+	length += snprintf(text + length, (size_t)(size - length), T("Objects: %d\n"), entry->objects);
+	if (entry->author[0] && length < size)
+		length += snprintf(text + length, (size_t)(size - length), T("Created by: %s\n"), entry->author);
+	if (entry->date[0] && length < size)
+		length += snprintf(text + length, (size_t)(size - length), T("Saved: %s\n"), entry->date);
+	if (entry->description[0] && length < size)
+		snprintf(text + length, (size_t)(size - length), "%s", entry->description);
+}
+
+/* the lobby's map variant still a file of its map (deleted, or another map
+chosen: none) */
+static void h3_forge_variant_check(void)
+{
+	if (h3_forge.variant_file[0] && !forge_store_exists(forge_map_short(h3_forge.map), h3_forge.variant_file))
+	{
+		platform_log("menus: forge lobby: the map variant %s is gone", h3_forge.variant_file);
+		h3_forge.variant_file[0] = 0;
+		h3_forge.variant_title[0] = 0;
+	}
+}
+
+/* (port forge variants) the picker's rows (item_0 to item_11): NONE, then
+the map's map variants, scrolling; the focused one's picture and details */
+static void h3_forge_variants_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *child, *focus = NULL, *found;
+	long index, focused_row = NONE;
+	int target;
+	int count;
+	char text[256];
+
+	h3_variants_list(_variants_lobby, forge_map_short(h3_forge.map), FALSE);
+	count = h3_variants.count + 1;
+	for (index = 0, child = list->child; child; child = child->next, index++)
+	{
+		if (child == list->focused_child)
+			focused_row = index;
+	}
+	target = browser_view_follow(&h3_forge.variant_view, VARIANT_ROWS, count, (int)focused_row, h3_forge.variant_chosen,
+		h3_forge.variant_page);
+	h3_forge.variant_page = 0;
+	h3_forge.variant_chosen = target;
+	for (index = 0, child = list->child; child; child = child->next, index++)
+	{
+		boolean shown = index < h3_forge.variant_view.visible;
+		long shown_index = h3_forge.variant_view.offset + index;
+
+		widget_instance_set_visibility_recursive(child, shown);
+		child->disabled = !shown;
+		if (!shown)
+			continue;
+		if (shown_index == 0)
+			snprintf(text, sizeof(text), "%s", T("NONE"));
+		else if (h3_variants.entries[shown_index - 1].damaged)
+			snprintf(text, sizeof(text), "%s", T("DAMAGED FILE"));
+		else
+			snprintf(text, sizeof(text), "%s", h3_variants.entries[shown_index - 1].title);
+		h3_capitals(text);
+		text_show(child, text);
+		if (index == h3_forge.variant_view.row)
+			focus = child;
+	}
+	if (focus && focus != list->focused_child)
+		ui_widget_port_give_focus(list, focus);
+	if ((found = named(screen, "picture")) != NULL)
+		found->animation.current_frame_index = h3_forge.map;
+	if (target <= 0)
+	{
+		text_show(named(screen, "info_name"), T("NONE"));
+		text_show(named(screen, "info_text"), T("The map as it is: nothing placed yet."));
+	}
+	else
+	{
+		struct forge_store_entry const *entry = &h3_variants.entries[target - 1];
+
+		text_show(named(screen, "info_name"), entry->title);
+		h3_variant_details(entry, FALSE, text, sizeof(text));
+		text_show(named(screen, "info_text"), text);
+	}
+	{
+		char said[192];
+
+		snprintf(said, sizeof(said), "%s (%d of %d)", target <= 0 ? "NONE" : h3_variants.entries[target - 1].title,
+			target + 1, count);
+		if (strcmp(said, h3_forge.said))
+		{
+			snprintf(h3_forge.said, sizeof(h3_forge.said), "%s", said);
+			platform_log("menus: forge variants: %s", said);
+		}
+	}
+}
+
+/* (port forge variant set) the picker's choice: NONE or a map variant (not
+a damaged one: FALSE, the picker stays) */
+static boolean h3_forge_variant_set(struct widget_instance *widget)
+{
+	long index = h3_forge.variant_view.offset + h3_child_index(widget);
+
+	if (index <= 0 || index > h3_variants.count || h3_variants.owner != _variants_lobby)
+	{
+		h3_forge.variant_file[0] = 0;
+		h3_forge.variant_title[0] = 0;
+		platform_log("menus: forge lobby: map variant none");
+	}
+	else
+	{
+		struct forge_store_entry const *entry = &h3_variants.entries[index - 1];
+
+		if (entry->damaged)
+		{
+			platform_log("menus: forge lobby: the map variant %s is damaged", entry->file_name);
+			return FALSE;
+		}
+		snprintf(h3_forge.variant_file, sizeof(h3_forge.variant_file), "%s", entry->file_name);
+		snprintf(h3_forge.variant_title, sizeof(h3_forge.variant_title), "%s", entry->title);
+		platform_log("menus: forge lobby: map variant %s (%s)", entry->title, entry->file_name);
+	}
+	h3_forge.note[0] = 0;
+	return TRUE;
+}
+
+/* (port forge variant focus) the picker opened: the map's files read, the
+focus on the lobby's choice */
+static void h3_forge_variant_focus(void)
+{
+	short index;
+
+	h3_variants_list(_variants_lobby, forge_map_short(h3_forge.map), TRUE);
+	browser_view_reset(&h3_forge.variant_view);
+	h3_forge.variant_page = 0;
+	h3_forge.variant_chosen = 0;
+	h3_forge.said[0] = 0;
+	for (index = 0; index < h3_variants.count && h3_forge.variant_file[0]; index++)
+	{
+		if (!strcmp(h3_variants.entries[index].file_name, h3_forge.variant_file))
+			h3_forge.variant_chosen = index + 1;
+	}
+}
+
+/* (the Forge menu's SAVE MAP VARIANT) the name asked for on the system's
+keyboard (the variant's own, else "<map> Variant"), then saved by forge.c
+(h3_forge_title_update hands the name on); where no keyboard is, saved at
+once under that name */
+static void h3_forge_save(void)
+{
+	char name[FORGE_FILE_TITLE_SIZE];
+	char author[FORGE_FILE_AUTHOR_SIZE];
+	char const *scenario = main_get_map_name();
+	char const *map = "";
+	short index;
+
+	for (index = 0; scenario && index < forge_map_count(); index++)
+	{
+		if (!_stricmp(scenario, forge_map_path(index)))
+			map = T(forge_map_name(index));
+	}
+	if (forge_variant_title()[0])
+		snprintf(name, sizeof(name), "%s", forge_variant_title());
+	else
+		snprintf(name, sizeof(name), T("%s Variant"), map[0] ? map : T("Forge"));
+	if (typing_available())
+	{
+		typing_begin(_typing_forge_name, T("Map variant name"), name, FORGE_FILE_TITLE_SIZE - 1, FALSE);
+		return;
+	}
+	h3_player_name(author, sizeof(author));
+	sanitize(name, sizeof(name), name);
+	forge_save_request(name, author);
+}
+
+/* ---- File Share */
+
+static short h3_fileshare_count(void)
+{
+	return h3_fileshare.kind == _fileshare_map_variants ? h3_variants.count : h3_mp.gametype_count;
+}
+
+/* the map variant chosen, NULL for none (or game variants shown) */
+static struct forge_store_entry const *h3_fileshare_entry(void)
+{
+	if (h3_fileshare.kind != _fileshare_map_variants || h3_variants.owner != _variants_fileshare ||
+		h3_fileshare.chosen < 0 || h3_fileshare.chosen >= h3_variants.count)
+	{
+		return NULL;
+	}
+	return &h3_variants.entries[h3_fileshare.chosen];
+}
+
+static void h3_fileshare_status(char const *format, ...)
+{
+	va_list arguments;
+
+	va_start(arguments, format);
+	vsnprintf(h3_fileshare.status, sizeof(h3_fileshare.status), format, arguments);
+	va_end(arguments);
+	platform_log("menus: fileshare: %s", h3_fileshare.status);
+}
+
+/* (port fileshare) the rows (row_0 to row_11: row_name, row_map), the
+kind, the chosen one's picture and details, what the last action came to;
+a name typed for Rename taken */
+static void h3_fileshare_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *child, *focus = NULL, *found;
+	long index, focused_row = NONE;
+	int target;
+	int count;
+	char text[320], line[160];
+
+	if (typing_done(_typing_fileshare_rename, text, FORGE_FILE_TITLE_SIZE))
+	{
+		char why[FORGE_STORE_WHY_SIZE];
+
+		if (!text[0])
+			h3_fileshare_status("%s", T("That name can't be used."));
+		else if (forge_store_rename(h3_fileshare.asked_map, h3_fileshare.asked_file, text, why, sizeof(why)))
+		{
+			h3_fileshare_status(T("Renamed \"%s\"."), text);
+			if (!strcmp(h3_fileshare.asked_file, h3_forge.variant_file) &&
+				!strcmp(h3_fileshare.asked_map, forge_map_short(h3_forge.map)))
+			{
+				snprintf(h3_forge.variant_title, sizeof(h3_forge.variant_title), "%s", text);
+			}
+		}
+		else
+			h3_fileshare_status("%s", why);
+		h3_variants.owner = _variants_nobody;
+	}
+	h3_variants_list(_variants_fileshare, NULL, FALSE);
+	count = h3_fileshare_count();
+	for (index = 0, child = list->child; child; child = child->next)
+	{
+		if (strncmp(child->name, "row_", 4))
+			continue;
+		if (child == list->focused_child)
+			focused_row = index;
+		index++;
+	}
+	target = browser_view_follow(&h3_fileshare.view, VARIANT_ROWS, count, (int)focused_row, h3_fileshare.chosen,
+		h3_fileshare.page);
+	h3_fileshare.page = 0;
+	h3_fileshare.chosen = target;
+	for (index = 0, child = list->child; child; child = child->next)
+	{
+		long shown = h3_fileshare.view.offset + index;
+
+		if (strncmp(child->name, "row_", 4))
+			continue;
+		if (index >= h3_fileshare.view.visible)
+		{
+			widget_instance_set_visibility_recursive(child, FALSE);
+			child->disabled = TRUE;
+			index++;
+			continue;
+		}
+		widget_instance_set_visibility_recursive(child, TRUE);
+		child->disabled = FALSE;
+		if (h3_fileshare.kind == _fileshare_map_variants)
+		{
+			struct forge_store_entry const *entry = &h3_variants.entries[shown];
+
+			if (entry->damaged)
+				snprintf(text, sizeof(text), "%s", T("DAMAGED FILE"));
+			else
+				snprintf(text, sizeof(text), "%s", entry->title);
+			snprintf(line, sizeof(line), "%s", h3_variant_map_name(entry->map_name));
+		}
+		else
+		{
+			snprintf(text, sizeof(text), "%s", h3_mp.gametype_names[shown]);
+			line[0] = 0;
+		}
+		h3_capitals(text);
+		text_show(named(child, "row_name"), text);
+		text_show(named(child, "row_map"), line);
+		if (index == h3_fileshare.view.row)
+			focus = child;
+		index++;
+	}
+	if (focus && focus != list->focused_child)
+		ui_widget_port_give_focus(list, focus);
+	for (child = list->child; child; child = child->next)
+	{
+		if (!strncmp(child->name, "row_", 4))
+			child->animation.current_frame_index = child == focus ? 1 : 0;
+	}
+	/* (the kind, the count, the pane, the status) */
+	snprintf(text, sizeof(text), "%s  \xc2\xb7  %s", h3_fileshare.kind == _fileshare_map_variants ? T("MAP VARIANTS") :
+		T("map variants"), h3_fileshare.kind == _fileshare_game_variants ? T("GAME VARIANTS") : T("game variants"));
+	text_show(named(screen, "kind"), text);
+	snprintf(text, sizeof(text), h3_fileshare.kind == _fileshare_map_variants ? T("%d map variants") :
+		T("%d game variants"), count);
+	text_show(named(screen, "count"), text);
+	found = named(screen, "picture");
+	if (h3_fileshare.kind == _fileshare_map_variants && target >= 0 && target < h3_variants.count)
+	{
+		struct forge_store_entry const *entry = &h3_variants.entries[target];
+		short map_index = forge_map_of_short(entry->map_name);
+
+		if (found)
+		{
+			widget_instance_set_visibility_recursive(found, map_index != NONE);
+			found->animation.current_frame_index = map_index != NONE ? map_index : 0;
+		}
+		text_show(named(screen, "info_name"), entry->title);
+		h3_variant_details(entry, TRUE, text, sizeof(text));
+		text_show(named(screen, "info_text"), text);
+		snprintf(line, sizeof(line), "%s (%s)", entry->title, entry->map_name);
+	}
+	else if (h3_fileshare.kind == _fileshare_game_variants && target >= 0 && target < h3_mp.gametype_count)
+	{
+		if (found)
+			widget_instance_set_visibility_recursive(found, FALSE);
+		text_show(named(screen, "info_name"), h3_mp.gametype_names[target]);
+		text_show(named(screen, "info_text"), T("A game variant.\nGame variants are made and changed in\nMULTIPLAYER, GAME."));
+		snprintf(line, sizeof(line), "%s", h3_mp.gametype_names[target]);
+	}
+	else
+	{
+		if (found)
+			widget_instance_set_visibility_recursive(found, FALSE);
+		if (h3_fileshare.kind == _fileshare_map_variants)
+		{
+			text_show(named(screen, "info_name"), T("NO MAP VARIANTS"));
+			text_show(named(screen, "info_text"), T("Make one in Forge: place objects, then\nStart, SAVE MAP VARIANT."));
+		}
+		else
+		{
+			text_show(named(screen, "info_name"), T("NO GAME VARIANTS"));
+			text_show(named(screen, "info_text"), "");
+		}
+		snprintf(line, sizeof(line), "none");
+	}
+	text_show(named(screen, "status"), h3_fileshare.status);
+	/* (game variants are only listed: their actions' keys hidden) */
+	{
+		static char const *const actions[] = { "a_butn", "open", "x_butn", "rename", "y_butn", "delete" };
+
+		for (index = 0; index < (long)NUMBEROF(actions); index++)
+		{
+			if ((found = named(screen, actions[index])) != NULL)
+				widget_instance_set_visibility_recursive(found, h3_fileshare.kind == _fileshare_map_variants);
+		}
+	}
+	{
+		char said[192];
+
+		snprintf(said, sizeof(said), "%s: %s (%d of %d)", h3_fileshare.kind == _fileshare_map_variants ? "map variants" :
+			"game variants", line, target + 1, count);
+		if (strcmp(said, h3_fileshare.said))
+		{
+			snprintf(h3_fileshare.said, sizeof(h3_fileshare.said), "%s", said);
+			platform_log("menus: fileshare: %s", said);
+		}
+	}
+}
+
+/* (port fileshare rename) Square: the chosen map variant's new name typed */
+static void h3_fileshare_rename(void)
+{
+	struct forge_store_entry const *entry = h3_fileshare_entry();
+
+	if (!entry || entry->damaged)
+	{
+		h3_fileshare_status("%s", h3_fileshare.kind == _fileshare_map_variants ? T("There is no map variant to rename.") :
+			T("Game variants are changed in MULTIPLAYER, GAME."));
+		return;
+	}
+	if (!typing_available())
+	{
+		h3_fileshare_status("%s", T("Renaming needs the PS Vita's keyboard."));
+		return;
+	}
+	snprintf(h3_fileshare.asked_map, sizeof(h3_fileshare.asked_map), "%s", entry->map_name);
+	snprintf(h3_fileshare.asked_file, sizeof(h3_fileshare.asked_file), "%s", entry->file_name);
+	snprintf(h3_fileshare.asked_title, sizeof(h3_fileshare.asked_title), "%s", entry->title);
+	typing_begin(_typing_fileshare_rename, T("Map variant name"), entry->title, FORGE_FILE_TITLE_SIZE - 1, FALSE);
+}
+
+/* (port fileshare ask delete) Triangle: the chosen map variant asked about
+(the question screen opens), FALSE with none */
+static boolean h3_fileshare_ask_delete(void)
+{
+	struct forge_store_entry const *entry = h3_fileshare_entry();
+
+	if (!entry)
+	{
+		h3_fileshare_status("%s", h3_fileshare.kind == _fileshare_map_variants ? T("There is no map variant to delete.") :
+			T("Game variants are changed in MULTIPLAYER, GAME."));
+		return FALSE;
+	}
+	snprintf(h3_fileshare.asked_map, sizeof(h3_fileshare.asked_map), "%s", entry->map_name);
+	snprintf(h3_fileshare.asked_file, sizeof(h3_fileshare.asked_file), "%s", entry->file_name);
+	snprintf(h3_fileshare.asked_title, sizeof(h3_fileshare.asked_title), "%s", entry->title);
+	platform_log("menus: fileshare: delete %s/%s? asked", entry->map_name, entry->file_name);
+	return TRUE;
+}
+
+/* (port fileshare delete) the question's A: the map variant asked about
+deleted */
+static void h3_fileshare_delete(void)
+{
+	if (!h3_fileshare.asked_file[0])
+		return;
+	if (forge_store_delete(h3_fileshare.asked_map, h3_fileshare.asked_file))
+	{
+		h3_fileshare_status(T("Deleted \"%s\"."), h3_fileshare.asked_title);
+		if (!strcmp(h3_fileshare.asked_file, h3_forge.variant_file) &&
+			!strcmp(h3_fileshare.asked_map, forge_map_short(h3_forge.map)))
+		{
+			h3_forge.variant_file[0] = 0;
+			h3_forge.variant_title[0] = 0;
+		}
+	}
+	else
+	{
+		h3_fileshare_status(T("\"%s\" couldn't be deleted."), h3_fileshare.asked_title);
+	}
+	h3_fileshare.asked_file[0] = 0;
+	h3_variants.owner = _variants_nobody;
+}
+
+/* (port fileshare open) A: the Forge lobby, on the chosen map variant's
+map with it chosen; FALSE (the lobby does not open) when it cannot be */
+static boolean h3_fileshare_open(void)
+{
+	struct forge_store_entry const *entry = h3_fileshare_entry();
+	short map_index;
+
+	if (!entry)
+	{
+		h3_fileshare_status("%s", h3_fileshare.kind == _fileshare_map_variants ? T("There is no map variant to open.") :
+			T("Game variants are played from MULTIPLAYER."));
+		return FALSE;
+	}
+	if (entry->damaged)
+	{
+		h3_fileshare_status("%s", T("This file is damaged and can't be used."));
+		return FALSE;
+	}
+	map_index = forge_map_of_short(entry->map_name);
+	if (map_index == NONE || !forge_map_available(map_index))
+	{
+		h3_fileshare_status(T("%s isn't in the maps folder."), h3_variant_map_name(entry->map_name));
+		return FALSE;
+	}
+	h3_forge.initialized = TRUE;
+	h3_forge.map = map_index;
+	snprintf(h3_forge.variant_file, sizeof(h3_forge.variant_file), "%s", entry->file_name);
+	snprintf(h3_forge.variant_title, sizeof(h3_forge.variant_title), "%s", entry->title);
+	h3_forge.note[0] = 0;
+	h3_fileshare.status[0] = 0;
+	platform_log("menus: fileshare: open %s/%s in Forge", entry->map_name, entry->file_name);
+	return TRUE;
+}
+
 /* ---------- public code */
 
 boolean pc_menu_event_function_invoke(
@@ -2568,8 +3207,14 @@ boolean pc_menu_event_function_invoke(
 		h3_forge_lobby_initialize();
 		return TRUE;
 	case _function_forge_map_set:
-		if (forge_map_available((short)h3_child_index(widget)))
+		if (forge_map_available((short)h3_child_index(widget)) && h3_forge.map != (short)h3_child_index(widget))
+		{
 			h3_forge.map = (short)h3_child_index(widget);
+			/* (another map: its own variants, none chosen) */
+			h3_forge.variant_file[0] = 0;
+			h3_forge.variant_title[0] = 0;
+			h3_forge.note[0] = 0;
+		}
 		platform_log("menus: forge lobby: %s", forge_map_name(h3_forge.map));
 		return TRUE;
 	case _function_forge_map_focus:
@@ -2580,8 +3225,13 @@ boolean pc_menu_event_function_invoke(
 		with no map to play) */
 		if (!forge_map_available(h3_forge.map))
 			return FALSE;
-		platform_log("menus: forge lobby: start %s", forge_map_path(h3_forge.map));
-		forge_game_start(h3_forge.map);
+		platform_log("menus: forge lobby: start %s%s%s", forge_map_path(h3_forge.map),
+			h3_forge.variant_file[0] ? " with the map variant " : "", h3_forge.variant_file);
+		if (!forge_game_start(h3_forge.map, h3_forge.variant_file, h3_forge.note, sizeof(h3_forge.note)))
+		{
+			platform_log("menus: forge lobby: not started: %s", h3_forge.note);
+			return FALSE;
+		}
 		return TRUE;
 	case _function_forge_browser_init:
 		h3_forge.page = 0;
@@ -2652,6 +3302,60 @@ boolean pc_menu_event_function_invoke(
 	case _function_h3_setup_hold:
 		setup_hold(widget);
 		return TRUE;
+	case _function_forge_variant_set:
+		return h3_forge_variant_set(widget);
+	case _function_forge_variant_focus:
+		h3_forge_variant_focus();
+		return TRUE;
+	case _function_forge_variant_page_up:
+		h3_forge.variant_page = -1;
+		return TRUE;
+	case _function_forge_variant_page_down:
+		h3_forge.variant_page = 1;
+		return TRUE;
+	case _function_forge_save:
+		h3_forge_save();
+		return TRUE;
+	case _function_fileshare_enter:
+		/* (the main menu's FILE SHARE: map variants, nothing said yet; back
+		from a question or the lobby what was said stays) */
+		h3_fileshare.kind = _fileshare_map_variants;
+		h3_fileshare.status[0] = 0;
+		return TRUE;
+	case _function_fileshare_init:
+		h3_variants_list(_variants_fileshare, NULL, TRUE);
+		h3_mp_gametypes_read();
+		h3_fileshare.said[0] = 0;
+		return TRUE;
+	case _function_fileshare_focus:
+		browser_view_reset(&h3_fileshare.view);
+		h3_fileshare.chosen = 0;
+		h3_fileshare.page = 0;
+		return TRUE;
+	case _function_fileshare_page_up:
+		h3_fileshare.page = -1;
+		return TRUE;
+	case _function_fileshare_page_down:
+		h3_fileshare.page = 1;
+		return TRUE;
+	case _function_fileshare_kind:
+		h3_fileshare.kind = (short)((h3_fileshare.kind + 1) % NUMBER_OF_FILESHARE_KINDS);
+		if (h3_fileshare.kind == _fileshare_game_variants)
+			h3_mp_gametypes_read();
+		browser_view_reset(&h3_fileshare.view);
+		h3_fileshare.chosen = 0;
+		h3_fileshare.status[0] = 0;
+		return TRUE;
+	case _function_fileshare_rename:
+		h3_fileshare_rename();
+		return TRUE;
+	case _function_fileshare_ask_delete:
+		return h3_fileshare_ask_delete();
+	case _function_fileshare_delete:
+		h3_fileshare_delete();
+		return TRUE;
+	case _function_fileshare_open:
+		return h3_fileshare_open();
 	case _function_coop_campaign:
 	case _function_unwired:
 	default:
@@ -2731,6 +3435,23 @@ void pc_menu_game_data_function_invoke(
 	case _input_h3_campaign_networks:
 		h3_pick_update(widget, NUMBER_OF_H3_CAMPAIGN_NETWORKS, "campnet_picture", "campnet_text");
 		break;
+	case _input_forge_variants:
+		if (widget->type == _ui_widget_type_column_list)
+			h3_forge_variants_update(widget);
+		break;
+	case _input_fileshare:
+		if (widget->type == _ui_widget_type_column_list)
+			h3_fileshare_update(widget);
+		break;
+	case _input_fileshare_question:
+	{
+		char text[192];
+
+		snprintf(text, sizeof(text), T("\"%s\" on %s will be deleted.\nThis can't be undone."), h3_fileshare.asked_title,
+			h3_variant_map_name(h3_fileshare.asked_map));
+		text_show(widget, text);
+		break;
+	}
 	default:
 		break;
 	}

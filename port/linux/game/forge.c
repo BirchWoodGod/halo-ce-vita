@@ -150,9 +150,11 @@ Each logs what it did ("forge: ...").
 #include "units/vehicle_definitions.h"
 
 #include "forge.h"
+#include "forge_files.h"
 #include "halo_menus.h"
 #include "tag_schema.h"
 #include "../src/lang.h"
+#include "../src/forge_store.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -219,6 +221,12 @@ enum
 #define FORGE_MINIMUM_HOLD_DISTANCE 0.5f
 #define FORGE_MAXIMUM_HOLD_DISTANCE 40.f
 #define FORGE_STICK_DEAD_ZONE 0.15f
+/* a placed object's respawn time unless its properties say (Halo 3's
+default) */
+#define FORGE_DEFAULT_RESPAWN_SECONDS 30
+/* how far outside the structure's world bounds a map variant's object may
+be (a vehicle parked at the edge) */
+#define FORGE_WORLD_BOUNDS_MARGIN 10.f
 
 /* the in-game set's screens (halo3/forge.xml) */
 #define FORGE_BROWSER_SCREEN "h3/forge/browser/screen"
@@ -394,7 +402,8 @@ struct forge_palette_entry
 	char name[FORGE_NAME_SIZE];
 };
 
-/* an object this session placed (the budget's) */
+/* an object this session placed (the budget's, and what a map variant
+saves) */
 struct forge_placed
 {
 	long object_index;
@@ -402,7 +411,14 @@ struct forge_placed
 	character) */
 	long tag_index;
 	boolean ai;
+	/* its properties (a map variant's record's): team (NONE neutral),
+	respawn time, FORGE_RECORD_* flags */
+	signed char team;
+	unsigned char flags;
+	unsigned short respawn_seconds;
 };
+
+typedef char verify_forge_file_records[FORGE_FILE_MAXIMUM_RECORDS == FORGE_MAXIMUM_OBJECTS ? 1 : -1];
 
 /* ---------- globals */
 
@@ -491,6 +507,18 @@ static struct
 	long hud_label_font_index;
 	long hud_crosshair_font_index;
 	boolean hud_font_looked_up;
+	/* the map variant the session plays (its title, its file: a save under
+	its title replaces it), one read for the session to apply as it starts
+	(forge_variant_layout), a save asked for by the Forge menu (its title)
+	and what it came to (said there) */
+	char variant_title[FORGE_FILE_TITLE_SIZE];
+	char variant_file[FORGE_FILE_NAME_SIZE];
+	boolean variant_pending;
+	volatile boolean save_requested;
+	char save_title[FORGE_FILE_TITLE_SIZE];
+	char save_author[FORGE_FILE_AUTHOR_SIZE];
+	char save_status[FORGE_STORE_WHY_SIZE];
+	volatile long save_generation;
 } forge_globals = { FALSE, "", FALSE, FALSE, 0, NONE, FALSE, NONE, 0.f, { 0.f }, { 0.f }, _forge_speed_normal };
 
 /* ---------- private code */
@@ -842,6 +870,9 @@ static void forge_placed_add(
 	forge_globals.placed[forge_globals.placed_count].object_index = object_index;
 	forge_globals.placed[forge_globals.placed_count].tag_index = tag_index;
 	forge_globals.placed[forge_globals.placed_count].ai = ai;
+	forge_globals.placed[forge_globals.placed_count].team = NONE;
+	forge_globals.placed[forge_globals.placed_count].flags = FORGE_RECORD_PLACE_AT_START;
+	forge_globals.placed[forge_globals.placed_count].respawn_seconds = FORGE_DEFAULT_RESPAWN_SECONDS;
 	forge_globals.placed_count++;
 	if (ai)
 		forge_globals.ai_count++;
@@ -1243,23 +1274,34 @@ static void forge_delete(
 	return;
 }
 
-/* a palette tag spawned in front of the camera (before the structure),
-and held, within the budget; the object, or NONE */
-static long forge_spawn(
-	long tag_index)
+/* why forge_place placed nothing */
+enum
+{
+	_forge_place_ok,
+	_forge_place_budget,
+	_forge_place_ai_budget,
+	_forge_place_refused,
+};
+
+/* a palette tag placed at position, facing forward with up up, within the
+budget (an actor variant: its unit, given a free actor); the object, or
+NONE with why in *refusal (the player told unless quiet) */
+static long forge_place(
+	long tag_index,
+	real_point3d const *position,
+	real_vector3d const *forward,
+	real_vector3d const *up,
+	boolean quiet,
+	short *refusal)
 {
 	struct object_placement_data placement;
-	real_point3d position;
-	real_vector3d forward;
 	long definition_index = tag_index;
 	long actor_variant_index = NONE;
 	long object_index;
-	real distance;
 	short entry = forge_palette_of_tag(tag_index);
 	char name[FORGE_NAME_SIZE];
 
-	if (!forge_camera_get(&position, &forward))
-		return NONE;
+	*refusal = _forge_place_ok;
 	if (entry != NONE)
 		snprintf(name, sizeof(name), "%s", forge_globals.palette[entry].name);
 	else
@@ -1268,7 +1310,9 @@ static long forge_spawn(
 	forge_placed_update();
 	if (forge_globals.placed_count >= FORGE_MAXIMUM_OBJECTS)
 	{
-		forge_notice(T("Budget full: %d objects. Delete one to place another."), FORGE_MAXIMUM_OBJECTS);
+		*refusal = _forge_place_budget;
+		if (!quiet)
+			forge_notice(T("Budget full: %d objects. Delete one to place another."), FORGE_MAXIMUM_OBJECTS);
 		return NONE;
 	}
 	/* (a character: its actor variant's unit, then a free actor of that
@@ -1277,37 +1321,34 @@ static long forge_spawn(
 	{
 		if (forge_globals.ai_count >= FORGE_MAXIMUM_AI)
 		{
-			forge_notice(T("AI budget full: %d characters."), FORGE_MAXIMUM_AI);
+			*refusal = _forge_place_ai_budget;
+			if (!quiet)
+				forge_notice(T("AI budget full: %d characters."), FORGE_MAXIMUM_AI);
 			return NONE;
 		}
 		actor_variant_index = tag_index;
 		definition_index = actor_variant_definition_get(tag_index)->unit_reference.index;
 		if (definition_index == NONE)
 		{
-			forge_notice(T("%s cannot be placed here"), name);
+			*refusal = _forge_place_refused;
+			if (!quiet)
+				forge_notice(T("%s cannot be placed here"), name);
 			return NONE;
 		}
 	}
-	distance = MIN(4.f, forge_structure_distance(&position, &forward) - 1.f);
-	distance = MAX(distance, FORGE_MINIMUM_HOLD_DISTANCE);
 	object_placement_data_new(&placement, definition_index, NONE);
 	SET_FLAG(placement.flags, _new_object_never_automatically_delete_bit, TRUE);
-	placement.position.x = position.x + forward.i * distance;
-	placement.position.y = position.y + forward.j * distance;
-	placement.position.z = position.z + forward.k * distance;
-	/* (facing the camera, upright) */
-	placement.forward.i = -forward.i;
-	placement.forward.j = -forward.j;
-	placement.forward.k = 0.f;
-	if (normalize3d(&placement.forward) < 0.0001f)
-		placement.forward = *global_forward3d;
-	placement.up = *global_up3d;
+	placement.position = *position;
+	placement.forward = *forward;
+	placement.up = *up;
 	forge_placing_exact = 1;
 	object_index = object_new(&placement);
 	forge_placing_exact = 0;
 	if (object_index == NONE)
 	{
-		forge_notice(T("%s cannot be placed here"), name);
+		*refusal = _forge_place_refused;
+		if (!quiet)
+			forge_notice(T("%s cannot be placed here"), name);
 		return NONE;
 	}
 	if (actor_variant_index != NONE)
@@ -1318,15 +1359,51 @@ static long forge_spawn(
 	}
 	forge_placed_add(object_index, tag_index, actor_variant_index != NONE);
 	forge_globals.spawned_count++;
-	platform_log("forge: spawned %s (%s, %s) at %.2f %.2f %.2f facing %.2f %.2f %.2f; budget %d/%d objects, %d/%d AI",
-		name, forge_tag_leaf(tag_index), entry != NONE ? forge_category_log_names[forge_globals.palette[entry].category] : "?",
-		placement.position.x, placement.position.y, placement.position.z, placement.forward.i, placement.forward.j,
-		placement.forward.k, forge_globals.placed_count, FORGE_MAXIMUM_OBJECTS, forge_globals.ai_count, FORGE_MAXIMUM_AI);
-	forge_notice(T("Placed %s"), name);
+	if (!quiet)
+	{
+		platform_log("forge: spawned %s (%s, %s) at %.2f %.2f %.2f facing %.2f %.2f %.2f; budget %d/%d objects, %d/%d AI",
+			name, forge_tag_leaf(tag_index), entry != NONE ? forge_category_log_names[forge_globals.palette[entry].category] : "?",
+			placement.position.x, placement.position.y, placement.position.z, placement.forward.i, placement.forward.j,
+			placement.forward.k, forge_globals.placed_count, FORGE_MAXIMUM_OBJECTS, forge_globals.ai_count, FORGE_MAXIMUM_AI);
+		forge_notice(T("Placed %s"), name);
+	}
+
+	return object_index;
+}
+
+/* a palette tag spawned in front of the camera (before the structure),
+and held, within the budget; the object, or NONE */
+static long forge_spawn(
+	long tag_index)
+{
+	real_point3d position;
+	real_vector3d forward;
+	real_point3d point;
+	real_vector3d facing;
+	long object_index;
+	real distance;
+	short refusal;
+
+	if (!forge_camera_get(&position, &forward))
+		return NONE;
+	distance = MIN(4.f, forge_structure_distance(&position, &forward) - 1.f);
+	distance = MAX(distance, FORGE_MINIMUM_HOLD_DISTANCE);
+	point.x = position.x + forward.i * distance;
+	point.y = position.y + forward.j * distance;
+	point.z = position.z + forward.k * distance;
+	/* (facing the camera, upright) */
+	facing.i = -forward.i;
+	facing.j = -forward.j;
+	facing.k = 0.f;
+	if (normalize3d(&facing) < 0.0001f)
+		facing = *global_forward3d;
+	object_index = forge_place(tag_index, &point, &facing, global_up3d, FALSE, &refusal);
+	if (object_index == NONE)
+		return NONE;
 	forge_globals.held_object_index = object_index;
 	forge_globals.held_distance = distance;
-	forge_globals.held_forward = placement.forward;
-	forge_globals.held_up = placement.up;
+	forge_globals.held_forward = facing;
+	forge_globals.held_up = *global_up3d;
 
 	return object_index;
 }
@@ -1578,6 +1655,335 @@ static void forge_menu_open_pause(
 	platform_log("forge: the Forge menu opened");
 }
 
+/* ---- map variants (forge_files.h: the file; forge_store.h: the memory
+card) */
+
+/* the map variant read for the session to apply as it starts, or the one
+being saved (one at a time: the start's is applied before any save) */
+static struct forge_file_layout forge_variant_layout;
+
+/* a scenario's short name (levels\test\bloodgulch\bloodgulch: bloodgulch),
+FALSE if it is not one a map variant may name */
+static boolean forge_map_short_name(
+	char const *scenario,
+	char *name,
+	int size)
+{
+	char const *slash = scenario ? strrchr(scenario, '\\') : NULL;
+	int index;
+
+	snprintf(name, (size_t)size, "%s", slash ? slash + 1 : scenario ? scenario : "");
+	for (index = 0; name[index]; index++)
+	{
+		if (name[index] >= 'A' && name[index] <= 'Z')
+			name[index] = (char)(name[index] - 'A' + 'a');
+	}
+	return forge_file_map_name_valid(name);
+}
+
+/* a facing (forward, up) as yaw, pitch and roll, and back: yaw about up
+from +x, pitch up from the ground, roll about forward (the up of no roll,
+upright as yaw and pitch leave it, turned toward the left) */
+static void forge_angles_from_facing(
+	real_vector3d const *forward,
+	real_vector3d const *up,
+	float angles[3])
+{
+	real_vector3d left;
+	real_vector3d upright;
+	real yaw = arctangent(forward->j, forward->i);
+	real pitch = arcsine(PIN(forward->k, -1.f, 1.f));
+
+	left.i = -sine(yaw);
+	left.j = cosine(yaw);
+	left.k = 0.f;
+	cross_product3d(forward, &left, &upright);
+	angles[0] = forge_file_angle_reduce(yaw);
+	angles[1] = forge_file_angle_reduce(pitch);
+	angles[2] = forge_file_angle_reduce(arctangent(-dot_product3d(up, &left), dot_product3d(up, &upright)));
+}
+
+static void forge_facing_from_angles(
+	float const angles[3],
+	real_vector3d *forward,
+	real_vector3d *up)
+{
+	real_vector3d left;
+	real_vector3d upright;
+	real cosine_pitch = cosine(angles[1]);
+
+	forward->i = cosine_pitch * cosine(angles[0]);
+	forward->j = cosine_pitch * sine(angles[0]);
+	forward->k = sine(angles[1]);
+	left.i = -sine(angles[0]);
+	left.j = cosine(angles[0]);
+	left.k = 0.f;
+	cross_product3d(forward, &left, &upright);
+	up->i = upright.i * cosine(angles[2]) - left.i * sine(angles[2]);
+	up->j = upright.j * cosine(angles[2]) - left.j * sine(angles[2]);
+	up->k = upright.k * cosine(angles[2]) - left.k * sine(angles[2]);
+	if (normalize3d(forward) < 0.0001f)
+		*forward = *global_forward3d;
+	if (normalize3d(up) < 0.0001f)
+		*up = *global_up3d;
+}
+
+/* the session's placed objects as a map variant (its paths, its records:
+place, facing and properties); FALSE with why if the map is not one a
+variant may be of. The map's own objects are not in it, as the budget
+does not count them */
+static boolean forge_variant_capture(
+	struct forge_file_layout *layout,
+	char const *title,
+	char const *author,
+	char *why,
+	int why_size)
+{
+	short index;
+	short skipped = 0;
+
+	csmemset(layout, 0, sizeof(*layout));
+	if (global_scenario_index == NONE ||
+		!forge_map_short_name(tag_get_name(global_scenario_index), layout->map_name, sizeof(layout->map_name)))
+	{
+		snprintf(why, (size_t)why_size, "%s", T("Map variants can't be saved on this map."));
+		return FALSE;
+	}
+	layout->map_hash = (unsigned int)cache_files_get_checksum();
+	forge_placed_update();
+	for (index = 0; index < forge_globals.placed_count && index < FORGE_MAXIMUM_OBJECTS; index++)
+	{
+		struct forge_placed const *placed = &forge_globals.placed[index];
+		struct object_datum *object = object_try_and_get(placed->object_index);
+		struct forge_file_record *record;
+		unsigned long group_tag = tag_get_group_tag(placed->tag_index);
+		char const *name = tag_get_name(placed->tag_index);
+		real_vector3d forward;
+		real_vector3d up;
+		short path;
+		short axis;
+
+		if (!object)
+			continue;
+		if (!name || !forge_file_group_allowed((unsigned int)group_tag) || !forge_file_path_valid(name, (int)strlen(name)) ||
+			layout->record_count >= FORGE_FILE_MAXIMUM_RECORDS)
+		{
+			skipped++;
+			continue;
+		}
+		for (path = 0; path < layout->path_count; path++)
+		{
+			if (layout->paths[path].group_tag == (unsigned int)group_tag && !strcmp(layout->paths[path].path, name))
+				break;
+		}
+		if (path == layout->path_count)
+		{
+			if (layout->path_count >= FORGE_FILE_MAXIMUM_PATHS)
+			{
+				skipped++;
+				continue;
+			}
+			layout->paths[path].group_tag = (unsigned int)group_tag;
+			snprintf(layout->paths[path].path, sizeof(layout->paths[path].path), "%s", name);
+			layout->path_count++;
+		}
+		record = &layout->records[layout->record_count];
+		csmemset(record, 0, sizeof(*record));
+		record->path_index = (unsigned short)path;
+		record->kind = _forge_record_object;
+		record->team = placed->team;
+		record->respawn_seconds = (unsigned short)MIN(placed->respawn_seconds, FORGE_FILE_MAXIMUM_RESPAWN_SECONDS);
+		record->count = 1;
+		record->flags = (unsigned char)(placed->flags & FORGE_RECORD_FLAGS_KNOWN);
+		record->position[0] = object->object.position.x;
+		record->position[1] = object->object.position.y;
+		record->position[2] = object->object.position.z;
+		forward = placed->object_index == forge_globals.held_object_index ? forge_globals.held_forward : object->object.forward;
+		up = placed->object_index == forge_globals.held_object_index ? forge_globals.held_up : object->object.up;
+		forge_angles_from_facing(&forward, &up, record->angles);
+		for (axis = 0; axis < 3; axis++)
+		{
+			if (!(record->position[axis] > -FORGE_FILE_MAXIMUM_COORDINATE + 1.f &&
+				record->position[axis] < FORGE_FILE_MAXIMUM_COORDINATE - 1.f))
+			{
+				break;
+			}
+		}
+		if (axis < 3)
+		{
+			skipped++;
+			continue;
+		}
+		layout->record_count++;
+	}
+	if (skipped)
+		platform_log("forge: %d placed objects left out of the map variant", skipped);
+	snprintf(layout->title, sizeof(layout->title), "%s", title);
+	if (author && forge_file_text_valid(author, (int)sizeof(layout->author)))
+		snprintf(layout->author, sizeof(layout->author), "%s", author);
+	forge_store_date_now(layout->date, sizeof(layout->date));
+	return TRUE;
+}
+
+/* (forge_update) the save the Forge menu asked for: the session's objects
+written as a map variant, under the title typed (the session's own
+variant's file when it has that title), and what came of it said */
+static void forge_variant_save(
+	void)
+{
+	char why[FORGE_STORE_WHY_SIZE];
+	char saved[FORGE_FILE_NAME_SIZE];
+	char title[FORGE_FILE_TITLE_SIZE];
+	char author[FORGE_FILE_AUTHOR_SIZE];
+	char const *file_name = NULL;
+	boolean done = FALSE;
+
+	forge_globals.save_requested = FALSE;
+	snprintf(title, sizeof(title), "%s", forge_globals.save_title);
+	snprintf(author, sizeof(author), "%s", forge_globals.save_author);
+	why[0] = 0;
+	if (!title[0] || !forge_file_text_valid(title, (int)sizeof(title)))
+	{
+		snprintf(forge_globals.save_status, sizeof(forge_globals.save_status), "%s", T("That name can't be used."));
+	}
+	else if (!forge_variant_capture(&forge_variant_layout, title, author, why, sizeof(why)))
+	{
+		snprintf(forge_globals.save_status, sizeof(forge_globals.save_status), "%s", why);
+	}
+	else
+	{
+		if (forge_globals.variant_file[0] && !strcmp(title, forge_globals.variant_title))
+			file_name = forge_globals.variant_file;
+		if (forge_store_save(&forge_variant_layout, file_name, saved, sizeof(saved), why, sizeof(why)))
+		{
+			snprintf(forge_globals.variant_title, sizeof(forge_globals.variant_title), "%s", title);
+			snprintf(forge_globals.variant_file, sizeof(forge_globals.variant_file), "%s", saved);
+			if (forge_variant_layout.record_count == 1)
+				snprintf(forge_globals.save_status, sizeof(forge_globals.save_status), T("Saved \"%s\": 1 object."), title);
+			else
+				snprintf(forge_globals.save_status, sizeof(forge_globals.save_status), T("Saved \"%s\": %d objects."), title,
+					forge_variant_layout.record_count);
+			platform_log("forge: map variant \"%s\" saved as %s/%s, %d objects", title, forge_variant_layout.map_name, saved,
+				forge_variant_layout.record_count);
+			done = TRUE;
+		}
+		else
+		{
+			snprintf(forge_globals.save_status, sizeof(forge_globals.save_status), "%s", why);
+		}
+	}
+	if (!done)
+		platform_log("forge: the map variant was not saved: %s", forge_globals.save_status);
+	forge_notice("%s", forge_globals.save_status);
+	__atomic_add_fetch(&forge_globals.save_generation, 1, __ATOMIC_RELEASE);
+}
+
+/* (the session's start) the map variant read for it placed: each record's
+tag found by its path among the palette's (the browser's tags: nothing
+else is ever placed), its place inside the structure's world, within the
+budget. A record whose tag the map does not have, or that cannot be
+placed, is skipped and counted, never the variant refused (it passed the
+validator whole before it was read) */
+static void forge_variant_apply(
+	struct forge_file_layout const *layout)
+{
+	long tags[FORGE_FILE_MAXIMUM_PATHS];
+	short placed = 0;
+	short missing = 0;
+	short outside = 0;
+	short over_budget = 0;
+	short refused = 0;
+	short other_kinds = 0;
+	short skipped;
+	short index;
+	struct structure_bsp *structure = global_structure_bsp_get();
+
+	forge_palette_ready();
+	for (index = 0; index < layout->path_count && index < FORGE_FILE_MAXIMUM_PATHS; index++)
+	{
+		short entry;
+
+		tags[index] = NONE;
+		for (entry = 0; entry < forge_globals.palette_count; entry++)
+		{
+			long tag_index = forge_globals.palette[entry].tag_index;
+			char const *name = tag_get_name(tag_index);
+
+			if ((unsigned int)tag_get_group_tag(tag_index) == layout->paths[index].group_tag && name &&
+				!_stricmp(name, layout->paths[index].path))
+			{
+				tags[index] = tag_index;
+				break;
+			}
+		}
+		if (tags[index] == NONE)
+			platform_log("forge: the map variant's %s is not on this map: its objects are skipped", layout->paths[index].path);
+	}
+	for (index = 0; index < layout->record_count && index < FORGE_FILE_MAXIMUM_RECORDS; index++)
+	{
+		struct forge_file_record const *record = &layout->records[index];
+		real_point3d position;
+		real_vector3d forward;
+		real_vector3d up;
+		long object_index;
+		short refusal;
+
+		if (record->kind != _forge_record_object)
+		{
+			other_kinds++;
+			continue;
+		}
+		if (record->path_index >= layout->path_count || tags[record->path_index] == NONE)
+		{
+			missing++;
+			continue;
+		}
+		position.x = record->position[0];
+		position.y = record->position[1];
+		position.z = record->position[2];
+		if (structure && (position.x < structure->world_bounds.x0 - FORGE_WORLD_BOUNDS_MARGIN ||
+			position.x > structure->world_bounds.x1 + FORGE_WORLD_BOUNDS_MARGIN ||
+			position.y < structure->world_bounds.y0 - FORGE_WORLD_BOUNDS_MARGIN ||
+			position.y > structure->world_bounds.y1 + FORGE_WORLD_BOUNDS_MARGIN ||
+			position.z < structure->world_bounds.z0 - FORGE_WORLD_BOUNDS_MARGIN ||
+			position.z > structure->world_bounds.z1 + FORGE_WORLD_BOUNDS_MARGIN))
+		{
+			outside++;
+			continue;
+		}
+		forge_facing_from_angles(record->angles, &forward, &up);
+		object_index = forge_place(tags[record->path_index], &position, &forward, &up, TRUE, &refusal);
+		if (object_index == NONE)
+		{
+			if (refusal == _forge_place_budget || refusal == _forge_place_ai_budget)
+				over_budget++;
+			else
+				refused++;
+			continue;
+		}
+		if (forge_globals.placed_count > 0)
+		{
+			struct forge_placed *entry = &forge_globals.placed[forge_globals.placed_count - 1];
+
+			entry->team = record->team;
+			entry->flags = record->flags;
+			entry->respawn_seconds = record->respawn_seconds;
+		}
+		placed++;
+	}
+	if (layout->map_hash != (unsigned int)cache_files_get_checksum())
+		platform_log("forge: the map variant was made with another copy of this map (%08x, this one %08lx)", layout->map_hash,
+			(unsigned long)cache_files_get_checksum());
+	skipped = (short)(missing + outside + over_budget + refused + other_kinds);
+	platform_log("forge: map variant \"%s\" applied: %d placed, %d skipped (%d missing tags, %d outside the map, %d past the "
+		"budget, %d refused, %d not objects)", layout->title, placed, skipped, missing, outside, over_budget, refused,
+		other_kinds);
+	if (skipped)
+		forge_notice(T("Map variant %s: %d placed, %d skipped"), layout->title, placed, skipped);
+	else
+		forge_notice(T("Map variant %s: %d placed"), layout->title, placed);
+}
+
 /* the session: the Forge game asked for, once its map is the one loaded
 and its player has spawned, starts with the monitor; another map's state
 is gone */
@@ -1610,6 +2016,11 @@ static void forge_session_update(
 		{
 			forge_globals.game_requested = FALSE;
 			platform_log("forge: the Forge game of %s starts", forge_globals.game_map);
+			if (forge_globals.variant_pending)
+			{
+				forge_globals.variant_pending = FALSE;
+				forge_variant_apply(&forge_variant_layout);
+			}
 		}
 	}
 }
@@ -1921,14 +2332,37 @@ boolean forge_map_available(
 	return file != NULL;
 }
 
-void forge_game_start(
-	short map_index)
+boolean forge_game_start(
+	short map_index,
+	char const *variant_file,
+	char *why,
+	int why_size)
 {
 	struct game_variant variant;
 	static wchar_t const name[] = L"Forge";
+	char map_name[FORGE_FILE_MAP_NAME_SIZE];
 
 	if (map_index < 0 || map_index >= forge_map_count())
-		return;
+		return FALSE;
+	/* (the map variant chosen, read and checked whole before the game is
+	asked for: one that cannot be read starts nothing) */
+	forge_globals.variant_pending = FALSE;
+	forge_globals.variant_title[0] = 0;
+	forge_globals.variant_file[0] = 0;
+	if (variant_file && variant_file[0])
+	{
+		if (!forge_map_short_name(forge_maps[map_index].path, map_name, sizeof(map_name)) ||
+			!forge_store_load(map_name, variant_file, &forge_variant_layout, why, why_size))
+		{
+			platform_log("forge: the map variant %s of %s was not read: %s", variant_file, forge_maps[map_index].path, why);
+			return FALSE;
+		}
+		snprintf(forge_globals.variant_title, sizeof(forge_globals.variant_title), "%s", forge_variant_layout.title);
+		snprintf(forge_globals.variant_file, sizeof(forge_globals.variant_file), "%s", variant_file);
+		forge_globals.variant_pending = TRUE;
+		platform_log("forge: map variant \"%s\" (%s, %d objects) for the Forge game", forge_variant_layout.title, variant_file,
+			forge_variant_layout.record_count);
+	}
 	/* (free for all slayer: the map's own vehicles and weapons, players
 	respawning at once; a score no one alone reaches - a kill of the
 	player's own is the only score, AI's kills are not a player's - and no
@@ -1951,6 +2385,59 @@ void forge_game_start(
 	/* (as "main menu switch to solo game": the map loads after the main
 	menu's fade) */
 	main_menu_switch_to_single_player();
+	return TRUE;
+}
+
+char const *forge_map_short(
+	short map_index)
+{
+	static char names[NUMBEROF(forge_maps)][FORGE_FILE_MAP_NAME_SIZE];
+
+	if (map_index < 0 || map_index >= forge_map_count())
+		return "";
+	if (!names[map_index][0])
+		forge_map_short_name(forge_maps[map_index].path, names[map_index], sizeof(names[map_index]));
+	return names[map_index];
+}
+
+short forge_map_of_short(
+	char const *map_name)
+{
+	short map_index;
+
+	for (map_index = 0; map_name && map_index < forge_map_count(); map_index++)
+	{
+		if (!strcmp(forge_map_short(map_index), map_name))
+			return map_index;
+	}
+	return NONE;
+}
+
+void forge_save_request(
+	char const *title,
+	char const *author)
+{
+	snprintf(forge_globals.save_title, sizeof(forge_globals.save_title), "%s", title ? title : "");
+	snprintf(forge_globals.save_author, sizeof(forge_globals.save_author), "%s", author ? author : "");
+	forge_globals.save_status[0] = 0;
+	forge_globals.save_requested = TRUE;
+}
+
+long forge_save_result(
+	char *status,
+	int size)
+{
+	long generation = __atomic_load_n(&forge_globals.save_generation, __ATOMIC_ACQUIRE);
+
+	if (status && size > 0)
+		snprintf(status, (size_t)size, "%s", forge_globals.save_status);
+	return generation;
+}
+
+char const *forge_variant_title(
+	void)
+{
+	return forge_globals.variant_title;
 }
 
 void forge_map_loaded(
@@ -2121,6 +2608,13 @@ void forge_update(
 		forge_globals.test_sticks_frames--;
 	forge_session_update();
 	forge_game_playing = forge_globals.active || forge_globals.game_active;
+	if (forge_globals.save_requested)
+	{
+		if (forge_game_playing && !forge_globals.game_requested)
+			forge_variant_save();
+		else
+			forge_globals.save_requested = FALSE;
+	}
 	if (!forge_game_playing)
 		return;
 	player_index = local_player_get_player_index(forge_globals.local_player_index);
@@ -2600,6 +3094,12 @@ boolean forge_command(
 		if (object_try_and_get(forge_globals.held_object_index))
 			forge_drop();
 		return forge_spawn(forge_globals.palette[index].tag_index) != NONE;
+	}
+	if (!strcmp(word, "save"))
+	{
+		/* ("save <title>": as the Forge menu's SAVE MAP VARIANT) */
+		forge_save_request(rest, "");
+		return TRUE;
 	}
 	if (!strcmp(word, "fill"))
 	{

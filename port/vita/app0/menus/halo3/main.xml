@@ -53,8 +53,8 @@ art is this folder's own (tools/halo3_menu_art.py). -->
 
 	<!-- the items: START SOLO GAME and CAMPAIGN do what the Xbox's "load campaign" does (a new
 	profile first if there is none); MULTIPLAYER the Xbox's multiplayer screen (OpenCE's stands for
-	it, with the server browser); FORGE its lobby (halo3/forge_lobby.xml); FILE SHARE says it comes
-	later, until it does;
+	it, with the server browser); FORGE its lobby (halo3/forge_lobby.xml); FILE SHARE the files this
+	PS Vita keeps (halo3/fileshare.xml: map variants);
 	CUSTOMIZATION the player profiles (name, colour), as the Xbox's settings -->
 	<widget name="h3/main/solo" type="text" width="190" height="20" bitmap="h3/item" font="h3/font_item" color="#FFE6ECF2" text_x="8" text_y="3" string_list="h3/main_items" string_index="0">
 		<on event="a start" run="new game if no plyr profiles" open="ui\shell\main_menu\load_campaign_player_profile" branch="true" label="load_campaign"/>
@@ -69,7 +69,7 @@ art is this folder's own (tools/halo3_menu_art.py). -->
 		<on event="a start" open="h3/forge/lobby"/>
 	</widget>
 	<widget name="h3/main/fileshare" type="text" width="190" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/main_items" string_index="7">
-		<on event="a start" open="h3/soon/fileshare"/>
+		<on event="a start" run="port fileshare enter" open="h3/fileshare/screen"/>
 	</widget>
 	<widget name="h3/main/customization" type="text" width="190" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/main_items" string_index="11">
 		<on event="a start" open="ui\shell\main_menu\settings_select\player_setup\player_profile_select_screen" label="settings"/>

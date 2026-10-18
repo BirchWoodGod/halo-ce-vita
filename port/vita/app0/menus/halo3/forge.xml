@@ -8,7 +8,8 @@ pause screen (ingame.txt; its fonts and pictures are halo3/pause.xml's, the same
   and R step through them, A on an object places it in the monitor's hand, B goes back, Square
   closes it;
 - the Forge menu, Start in a Forge game (menu_tags.c opens it for the level's pause screen): resume,
-  the monitor or the Spartan, leave (asked first: nothing is saved yet), the controls at the right;
+  the monitor or the Spartan, save the map variant (its name typed on the system's keyboard: port
+  forge save; what came of it said under the menu), leave (asked first), the controls at the right;
 - the question before leaving.
 The art is this folder's own (tools/halo3_menu_art.py). -->
 <menus>
@@ -34,8 +35,9 @@ The art is this folder's own (tools/halo3_menu_art.py). -->
 		<string text="LEAVE FORGE"/>
 		<string text="CONTROLS"/>
 		<string text="LEAVE FORGE?"/>
-		<string text="Everything placed is lost when you leave.\nSaving and sharing come in a later update."/>
+		<string text="Anything not saved is lost when you leave.\nSAVE MAP VARIANT keeps what you placed."/>
 		<string text="Leave"/>
+		<string text="SAVE MAP VARIANT"/>
 	</strings>
 
 	<!-- the object browser: its rows (a name, a count), written by port forge browser -->
@@ -166,18 +168,24 @@ The art is this folder's own (tools/halo3_menu_art.py). -->
 	<widget name="h3/forge/pause/toggle" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3">
 		<on event="a" run="port forge toggle" close="all"/>
 	</widget>
+	<widget name="h3/forge/pause/save" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/forge_menu" string_index="10">
+		<on event="a" run="port forge save"/>
+	</widget>
 	<widget name="h3/forge/pause/leave" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/forge_menu" string_index="5">
 		<on event="a start" open="h3/forge/leave/screen"/>
 	</widget>
 	<widget name="h3/forge/pause/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<child widget="h3/forge/pause/resume" x="0" y="0"/>
 		<child widget="h3/forge/pause/toggle" x="0" y="24"/>
-		<child widget="h3/forge/pause/leave" x="0" y="48"/>
+		<child widget="h3/forge/pause/save" x="0" y="48"/>
+		<child widget="h3/forge/pause/leave" x="0" y="72"/>
 	</widget>
 	<widget name="h3/forge/pause/title" type="text" left="56" top="49" width="540" height="26" font="h3/font_title" color="#FFF4F4F4">
 		<data input="port forge title"/>
 	</widget>
-	<widget name="h3/forge/pause/column" left="48" top="112" width="236" height="88" bitmap="h3/column"/>
+	<widget name="h3/forge/pause/column" left="48" top="112" width="236" height="112" bitmap="h3/column"/>
+	<!-- (what the last save came to, and the map variant played: port forge title writes it) -->
+	<widget name="h3/forge/pause/status" type="text" left="56" top="232" width="236" height="64" font="h3/font_small" color="#FF9FD8FF"/>
 	<widget name="h3/forge/pause/controls_panel" left="300" top="150" width="320" height="150" bitmap="h3/panel"/>
 	<widget name="h3/forge/pause/controls_caption" type="text" left="312" top="156" width="296" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/forge_menu" string_index="6"/>
 	<widget name="h3/forge/pause/controls_rule" left="312" top="174" width="296" height="2" bitmap="h3/rule"/>
@@ -193,6 +201,7 @@ The art is this folder's own (tools/halo3_menu_art.py). -->
 		<child widget="h3/pause/players"/>
 		<child widget="h3/pause/nameplate"/>
 		<child widget="h3/forge/pause/column"/>
+		<child widget="h3/forge/pause/status"/>
 		<child widget="h3/forge/pause/controls_panel"/>
 		<child widget="h3/forge/pause/controls_caption"/>
 		<child widget="h3/forge/pause/controls_rule"/>
