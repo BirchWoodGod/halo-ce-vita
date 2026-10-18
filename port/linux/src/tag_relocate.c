@@ -352,6 +352,37 @@ static void use_xbox_window(void)
 a Custom Edition map loads, custom_edition_cache.c; NULL: none) */
 void (*halo_tag_relocate_progress)(void);
 
+/* the bytes of a struct of a layout the walk reads: to its last field's
+end (a block 12, a data 20, a reference 16, a pointer 4, a struct its own) */
+static unsigned long layout_extent(unsigned short struct_index, int depth)
+{
+	const struct tag_layout_struct *layout = &tag_layout_structs[struct_index];
+	unsigned long extent = 0;
+	unsigned short index;
+
+	if (depth > 32)
+		return (unsigned long)-1;
+	for (index = 0; index < layout->field_count; index++)
+	{
+		const struct tag_layout_field *field = &tag_layout_fields[layout->first_field + index];
+		unsigned long end = field->offset;
+
+		switch (field->kind)
+		{
+		case _tag_field_block: end += 12; break;
+		case _tag_field_data: end += 20; break;
+		case _tag_field_reference: end += 16; break;
+		case _tag_field_pointer: end += 4; break;
+		case _tag_field_struct:
+			end += field->child != NO_LAYOUT ? layout_extent(field->child, depth + 1) : 0;
+			break;
+		}
+		if (end > extent)
+			extent = end;
+	}
+	return extent;
+}
+
 /* walks the tags of every instance */
 static void relocate_instances(unsigned char *instances, long count)
 {
@@ -389,8 +420,15 @@ static void relocate_instances(unsigned char *instances, long count)
 		{
 			if (tag_layout_groups[group].group_tag == group_tag)
 			{
-				if (tag_layout_groups[group].root != NO_LAYOUT)
+				/* port: and all of the root the walk reads in the loaded
+				region (its first byte in it is not enough at the region's end:
+				a crafted map's last tag); a root that is not is left for the
+				tag check, which refuses it */
+				if (tag_layout_groups[group].root != NO_LAYOUT &&
+					region_fits((unsigned long)(base - relocation.bias), layout_extent(tag_layout_groups[group].root, 0)))
+				{
 					walk(tag_layout_groups[group].root, base);
+				}
 				break;
 			}
 		}
@@ -638,6 +676,7 @@ int halo_tag_layout_field(unsigned short layout, long index, struct halo_tag_lay
 unsigned long halo_tag_relocate_pack(void *blob, unsigned long size, unsigned long link_base)
 {
 	unsigned char *header = blob;
+	long index;
 	unsigned char *instances;
 	unsigned char *bits;
 	long count, vertex_buffer_count, index_buffer_count;
@@ -701,13 +740,28 @@ unsigned long halo_tag_relocate_pack(void *blob, unsigned long size, unsigned lo
 			relocate_buffers(index_buffers, index_buffer_count);
 		}
 	}
+	/* (each tag's root, all the walk reads of it, in the pack: the walk
+	checks blocks' elements whole, but a root only by its first byte, which
+	a map's tag cache window covers past its tags and a pack does not) */
+	for (index = 0; index < count && !relocation.invalid; index++)
+	{
+		unsigned char *instance = instances + index * 32;
+		unsigned long group_tag, base;
+		unsigned short root;
+
+		memcpy(&group_tag, instance, 4);
+		memcpy(&base, instance + 20, 4);
+		root = halo_tag_layout_root(group_tag);
+		if (root == HALO_TAG_LAYOUT_UNKNOWN ||
+			(root != NO_LAYOUT && (base < link_base || !region_fits(base, layout_extent(root, 0)))))
+		{
+			walk_invalid("pack tag root", group_tag, base, size);
+		}
+	}
 	if (!relocation.invalid)
 	{
-		long index;
-
 		relocate_instances(instances, count);
-		/* (every tag's root and name in the pack, of a group with a layout:
-		relocate_instances passes over the others) */
+		/* (every tag's name in the pack too) */
 		for (index = 0; index < count && !relocation.invalid; index++)
 		{
 			unsigned char *instance = instances + index * 32;
