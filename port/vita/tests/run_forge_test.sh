@@ -788,7 +788,7 @@ for c in $cases; do
 			fail "$c: not dropped on the grid ($(tr '\n' ' ' < "$out/edit/drops.txt"))"
 		fi
 		expect "$c" "saved" "forge: map variant \"Edit Test\" saved as bloodgulch/edit_test.hmv, 2 objects"
-		if grep -aq "record 0: vehicles.warthog.warthog kind 0 team 0 respawn 45 flags 0 " "$out/edit/dump.txt"; then
+		if grep -aq "record 0: vehicles.warthog.warthog kind 0 team 0 ai team 0 respawn 45 flags 0 " "$out/edit/dump.txt"; then
 			echo "  ok: $c: the file keeps the Warthog's properties"
 		else
 			fail "$c: the file lacks the properties: $(cat "$out/edit/dump.txt")"
