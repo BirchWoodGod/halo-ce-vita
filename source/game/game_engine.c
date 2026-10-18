@@ -559,6 +559,9 @@ symbols in this file:
 #ifdef HALO_VITA
 #include "interface/hud_draw.h" /* (port) hud_vita_score_hint */
 #endif
+#ifdef HALO_LINUX
+#include "forge.h" /* port: port/linux/game/forge.c */
+#endif
 #include "interface/hud_messaging.h"
 #include "interface/player_ui.h"
 #include "interface/terminal.h"
@@ -8368,7 +8371,12 @@ boolean game_engine_get_state_message(
 				message,
 				message_character_count);
 		}
-		else if (game_time_get() < 15 * TICKS_PER_SECOND)
+		else if (game_time_get() < 15 * TICKS_PER_SECOND
+#ifdef HALO_LINUX
+			/* port: not in Forge (forge.c): a game of no score */
+			&& !forge_game_active()
+#endif
+			)
 		{
 			result = multiplayer_message_internal(
 				player_index,

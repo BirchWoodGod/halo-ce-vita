@@ -319,8 +319,10 @@ static struct
 	/* the typing asked for */
 	short typing;
 	/* Server Setup's START: the System Link list, once the profile is
-	chosen, gives way to a new game's map list */
+	chosen, gives way to a new game's map list; create_system_link: the
+	Halo 3 lobby's START GAME on SYSTEM LINK asked it, not Create Game */
 	boolean create_pending;
+	boolean create_system_link;
 	/* (the Halo 3 Create Game: its GAME TYPE or MAP picker opened, port h3
 	setup hold) what the screen showed, which it shows again when it is back
 	(setup_initialize) rather than the settings' */
@@ -2040,6 +2042,7 @@ static boolean setup_start(struct widget_instance *widget)
 	setting_set("HALO_NET_HOST_PUBLIC", spinner && spinner->parameters.list.selected_index == 1 ? "false" : "true");
 	setting_set("HALO_NET_LOBBY_PASSWORD", menu_functions.lobby_password);
 	menu_functions.create_pending = TRUE;
+	menu_functions.create_system_link = FALSE;
 	platform_log("menus: Server Setup: %s, %s players, %s%s; the profile, then the map list", menu_functions.lobby_name,
 		value, spinner && spinner->parameters.list.selected_index == 1 ? "private" : "public",
 		menu_functions.lobby_password[0] ? ", a password" : "");
@@ -2268,6 +2271,7 @@ boolean pc_menu_event_function_invoke(
 		is chosen, gives way to a new game's map list, as Server Setup's
 		START does: pc_menu_functions_screen) */
 		menu_functions.create_pending = TRUE;
+		menu_functions.create_system_link = TRUE;
 		platform_log("menus: h3 mp: host a system link game; the profile, then the map list");
 		return TRUE;
 	case _function_h3_browse_system_link:
@@ -2387,14 +2391,18 @@ long pc_menu_functions_screen(
 	if (menu_functions.create_pending && tag_index == tag_loaded(UI_WIDGET_DEFINITION_TAG, server_list_screen))
 	{
 		long map_select = tag_loaded(UI_WIDGET_DEFINITION_TAG, map_select_screen);
+		/* (which screen asked: Create Game's, online, or the Halo 3 lobby's
+		START GAME on SYSTEM LINK) */
+		char const *asked = menu_functions.create_system_link ? "Multiplayer > System Link" : "Create Game > Internet";
 
 		menu_functions.create_pending = FALSE;
+		menu_functions.create_system_link = FALSE;
 		if (map_select != NONE && ui_widget_port_start_network_game_server())
 		{
-			platform_log("menus: Create Game > Internet: the game's server started; the map list");
+			platform_log("menus: %s: the game's server started; the map list", asked);
 			return map_select;
 		}
-		platform_log("menus: Create Game > Internet: the server did not start; the System Link list");
+		platform_log("menus: %s: the server did not start; the System Link list", asked);
 	}
 	return tag_index;
 }

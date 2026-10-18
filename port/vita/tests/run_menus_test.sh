@@ -305,6 +305,8 @@ for case in $cases; do
 		grep -aq "ui: screen pc.h3.network.screen" "$log" || fail h3mp "NETWORK did not open its picker"
 		grep -aq "ui: screen pc.h3.mp.offline" "$log" || fail h3mp "ONLINE did not say internet play is off"
 		grep -aq "menus: h3 mp: host a system link game" "$log" || fail h3mp "START GAME did not host a system link game"
+		grep -aq "menus: Multiplayer > System Link: the game's server started; the map list" "$log" ||
+			fail h3mp "the server did not start (or the log named another screen)"
 		grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected.connected_map_select_wrapper" "$log" ||
 			fail h3mp "the profile did not lead to the map list"
 		grep -aq "ui: screen pc.mp.screen" "$log" && fail h3mp "OpenCE's Multiplayer screen opened with Menu style Halo 3" ;;
