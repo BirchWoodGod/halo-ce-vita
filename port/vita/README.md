@@ -800,7 +800,7 @@ Useful ones:
 | `platform/` | built with the game's ABI: the Direct3D device (`d3d8_gxm.c`), the NV2A register combiner and vertex program translators (`nv2a_psh_cg.c`, `nv2a_vsh_cg.c`), texture decoding, Bink |
 | `include/` | the boundary between the two (`vita_host.h`, `vita_gxm.h`) |
 | `null/` | the do-nothing GXM for the Linux test build |
-| `sce_sys/` | LiveArea images |
+| `sce_sys/` | LiveArea images, made from the owner's art (`art/livearea-art.jpg`) by `tools/livearea_art.sh` |
 | `app0/` | files in the VPK beside the eboot: the shipped shaders, the brokers and relays, the PC menus' XML, the translations (`lang/`) |
 
 ## Help wanted
