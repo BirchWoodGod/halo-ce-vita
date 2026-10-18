@@ -2458,7 +2458,7 @@ void hud_draw_numbers(
 	return;
 }
 
-#ifdef HALO_VITA
+#ifdef HALO_BUTTON_GLYPHS
 /* ---------- (port) the Vita's button icons
 
 The settings panel's Button icons, PlayStation (vita_controls.h): each of
@@ -2466,31 +2466,59 @@ the game's button icons - the HUD's prompts (hud_messaging.c), the icons in
 the menus' and the HUD's text (ui_widget.c draw_string_and_hack_in_icons)
 and the menus' button hints (the a_butn ... widgets, ui_widget.c) - shows
 the Vita button its Xbox button is on now (vita_pad.c, which follows the
-Button layout and the touch zones). Cross, circle, square and triangle are
-drawn here, centred where the Xbox icon's sprite would be and as tall as
-it: two strokes, a ring, a square, a triangle, quads of the game's own
-white bitmap (the virtual keyboard's caret), in the PlayStation's own
-colours (cross blue, circle red, square pink, triangle green), with the
-alpha the callers give (the Xbox icon's, from hud_globals' button icons,
-as it fades). The others
-(L, R, Start, Select, the D-pad, the touch zones) are words in the game's
-font, drawn by the callers as the icons that are text are. */
+Button layout and the touch zones), in the look of the Halo 3 menus' own
+icons: a dark round button with its symbol in the PlayStation's colours
+(cross blue, circle red, square pink, triangle green), L and R on a dark
+tab, START, SELECT and the D-pad's directions on a round button too. They
+are the menus' art, drawn by tools/halo3_menu_art.py at twice the menus'
+size into one picture of the menus folder (halo3/glyph_atlas.png, read the
+first time one is drawn: menu_tags.c menu_tags_png_texture), drawn here
+square, centred where the Xbox icon's sprite would be and as tall as it,
+at the alpha the callers give (the Xbox icon's, from hud_globals' button
+icons, as it fades). Without the picture (the menus folder missing) cross,
+circle, square and triangle are drawn in code - two strokes, a ring, a
+square, a triangle, quads of the game's own white bitmap (the virtual
+keyboard's caret), in the same colours - and the others are words in the
+game's font ("L", "START", "D-pad down"), drawn by the callers as the
+icons that are text are. The touch zones are always words ("rear touch
+left").
+
+The Linux harness has them too, for its tests: HALO_BUTTON_ICONS=playstation
+there shows the Vita's shipped layout (port/linux/src/button_glyphs.c). */
 
 #include "input/input.h"
 #include "tag_files/tag_files.h"
 #include "tag_files/tag_groups.h"
-#include "vita_controls.h"
+#include "../../port/vita/include/vita_controls.h" /* port: the glyphs, VITA_GLYPH_* */
 #include "../../port/linux/src/lang.h" /* port: port/linux/src/lang.c */
 
 #include <string.h>
 
+#ifdef HALO_VITA
 /* (vita_pad.c) */
 int vita_pad_button_glyph(short gamepad_button);
 int vita_pad_play_button_glyph(short gamepad_button);
+#else
+/* (port/linux/src/button_glyphs.c, and ui_widget.c: whether the menus are
+up, which the Vita's pad is told each frame) */
+int halo_button_glyph(short gamepad_button, int menus);
+int ui_widget_menus_active(void);
+#define vita_pad_button_glyph(gamepad_button) halo_button_glyph((gamepad_button), ui_widget_menus_active())
+#endif
+
+/* (menu_tags.c) */
+boolean menu_tags_png_texture(char const *png, long width, long height, long smallest, struct bitmap_data *bitmap);
 
 enum
 {
-	VITA_GLYPH_RING_SEGMENTS = 24
+	VITA_GLYPH_RING_SEGMENTS = 24,
+	/* the atlas: 32x32 cells, four to a row, from VITA_GLYPH_CROSS to
+	VITA_GLYPH_SELECT (tools/halo3_menu_art.py ATLAS_GLYPHS), its mipmaps
+	down to 16x16 cells */
+	VITA_GLYPH_ATLAS_SIZE = 128,
+	VITA_GLYPH_ATLAS_CELL = 32,
+	VITA_GLYPH_ATLAS_SMALLEST = 64,
+	VITA_GLYPH_ATLAS_LAST = VITA_GLYPH_SELECT
 };
 
 short hud_vita_button_glyph(
@@ -2503,6 +2531,7 @@ short hud_vita_button_glyph(
 	return (short)vita_pad_button_glyph(icon_index);
 }
 
+#ifdef HALO_VITA
 /* the multiplayer score hint (game_engine.c), "Hold BACK for score" in
 the Xbox maps and a Custom Edition map's (cache_file_formats.c), names the
 Vita button the Xbox's Back is on in play: SELECT as shipped. A face button
@@ -2516,6 +2545,7 @@ void hud_vita_score_hint(
 	if (name && buffer_size > 0)
 		vita_text_name_button(buffer, (int)buffer_size, L"BACK", name);
 }
+#endif
 
 /* the glyph of a menu's button hint widget, by its bitmap
 (ui\shell\bitmaps\a_butn, b_butn, x_butn, y_butn, a_butn_sm, b_butn_sm);
@@ -2542,12 +2572,49 @@ short hud_vita_menu_button_glyph(
 	return hud_vita_button_glyph((short)(letter - "abxy"));
 }
 
-/* the face button (_icon_a_button ... _icon_y_button) whose Xbox icon's
-colour a drawn glyph takes; NONE for one that is text */
+/* the face button (_icon_a_button ... _icon_y_button) a glyph is (cross,
+circle, square, triangle: A B X Y in the menus' layout); NONE for another */
 short hud_vita_glyph_face_icon(
 	short glyph)
 {
 	return glyph >= VITA_GLYPH_CROSS && glyph <= VITA_GLYPH_TRIANGLE ? glyph - VITA_GLYPH_CROSS : NONE;
+}
+
+/* the atlas's texture (halo3/glyph_atlas.png), made the first time it is
+wanted; NULL if it could not be (tried once) */
+static struct bitmap_data *vita_glyph_atlas(
+	void)
+{
+	static struct bitmap_data atlas;
+	static short state; /* 0 not tried, 1 made, -1 not to be had */
+
+	if (!state)
+	{
+		state = menu_tags_png_texture("halo3/glyph_atlas.png", VITA_GLYPH_ATLAS_SIZE, VITA_GLYPH_ATLAS_SIZE,
+			VITA_GLYPH_ATLAS_SMALLEST, &atlas) ? 1 : -1;
+	}
+
+	return state > 0 && atlas.hardware_format ? &atlas : NULL;
+}
+
+/* whether a glyph is drawn in the Xbox icon's place (hud_vita_glyph_draw):
+any but a touch zone with the atlas, the face buttons without it */
+boolean hud_vita_glyph_drawn(
+	short glyph)
+{
+	if (glyph >= VITA_GLYPH_CROSS && glyph <= VITA_GLYPH_ATLAS_LAST && vita_glyph_atlas())
+		return TRUE;
+
+	return hud_vita_glyph_face_icon(glyph) != NONE;
+}
+
+/* the word a glyph that is not drawn shows in the Xbox icon's place (a
+touch zone; L, START, the D-pad ... without the atlas); NULL for one that
+is drawn, or none */
+wchar_t const *hud_vita_glyph_word(
+	short glyph)
+{
+	return hud_vita_glyph_drawn(glyph) ? NULL : hud_vita_glyph_text(glyph);
 }
 
 /* the word of a glyph that is text (in the style of the game's own icon
@@ -2652,9 +2719,11 @@ boolean hud_vita_glyph_draw_in_rect(
 	pixel32 color)
 {
 	/* (cross, circle, square, triangle: the PlayStation's colours, the
+	Halo 3 menus' own - tools/halo3_menu_art.py GLYPH_COLOURS - at the
 	caller's alpha) */
-	static pixel32 const face_colors[4] = { 0x006EA8F0, 0x00F05A5A, 0x00E08CD8, 0x0030D0A0 };
-	long white_index = tag_loaded(BITMAP_GROUP_TAG, "ui\\shell\\bitmaps\\white");
+	static pixel32 const face_colors[4] = { 0x009CC2FF, 0x00FF7A7A, 0x00FF9BE4, 0x004FE0A8 };
+	struct bitmap_data *atlas = vita_glyph_atlas();
+	long white_index;
 	struct bitmap_data *white;
 	real width = rectangle->x1 - rectangle->x0;
 	real height = rectangle->y1 - rectangle->y0;
@@ -2668,6 +2737,49 @@ boolean hud_vita_glyph_draw_in_rect(
 	real_point2d outer[VITA_GLYPH_RING_SEGMENTS];
 	real_point2d inner[VITA_GLYPH_RING_SEGMENTS];
 
+	/* the Halo 3 menus' icon, from the atlas: a square as tall as the
+	sprite (its round button then as tall as the Xbox's oval in it; no
+	wider than a quarter more than the sprite), on its middle; white, the
+	caller's alpha */
+	if (atlas && glyph >= VITA_GLYPH_CROSS && glyph <= VITA_GLYPH_ATLAS_LAST)
+	{
+		struct dynamic_screen_vertex vertices[4];
+		struct rasterizer_dynamic_screen_geometry_parameters parameters;
+		short cell = glyph - VITA_GLYPH_CROSS;
+		real side = height < width * 1.25f ? height : width * 1.25f;
+		real u0 = (real)((cell % 4) * VITA_GLYPH_ATLAS_CELL) / VITA_GLYPH_ATLAS_SIZE;
+		real v0 = (real)((cell / 4) * VITA_GLYPH_ATLAS_CELL) / VITA_GLYPH_ATLAS_SIZE;
+		real span = (real)VITA_GLYPH_ATLAS_CELL / VITA_GLYPH_ATLAS_SIZE;
+		short vertex_index;
+
+		for (vertex_index = 0; vertex_index < 4; vertex_index++)
+		{
+			/* (the corners as hud_draw_bitmap_internal winds them: top
+			left, top right, bottom right, bottom left) */
+			boolean right = ((vertex_index + 1) & 2) != 0;
+			boolean bottom = vertex_index > 1;
+
+			vertices[vertex_index].position.x = x + (right ? 0.5f : -0.5f) * side;
+			vertices[vertex_index].position.y = y + (bottom ? 0.5f : -0.5f) * side;
+			vertices[vertex_index].texture_coordinates.x = u0 + (right ? span : 0.0f);
+			vertices[vertex_index].texture_coordinates.y = v0 + (bottom ? span : 0.0f);
+			vertices[vertex_index].color = 0x00FFFFFF | (color & 0xFF000000);
+		}
+		csmemset(&parameters, 0, sizeof(parameters));
+		parameters.map_texture_scale[0].i = 1.0f;
+		parameters.map_texture_scale[0].j = 1.0f;
+		parameters.map_scale[0].i = 1.0f;
+		parameters.map_scale[0].j = 1.0f;
+		/* (the picture's alpha is not multiplied in: blended as the menus'
+		PNGs are, draw_bitmap_in_rect) */
+		parameters.framebuffer_blend_function = _shader_framebuffer_blend_function_alpha_blend;
+		parameters.map[0] = atlas;
+		rasterizer_psuedo_dynamic_screen_quad_draw(&parameters, vertices);
+		return TRUE;
+	}
+
+	/* without it, the face buttons' symbols in code */
+	white_index = tag_loaded(BITMAP_GROUP_TAG, "ui\\shell\\bitmaps\\white");
 	if (white_index == NONE || hud_vita_glyph_face_icon(glyph) == NONE)
 		return FALSE;
 	color = face_colors[hud_vita_glyph_face_icon(glyph)] | (color & 0xFF000000);

@@ -40,6 +40,9 @@ EXPECTED = {
     'forge_emblem.png': (64, 64),
     'glyph_l.png': (16, 16),
     'glyph_r.png': (16, 16),
+    # (not a widget's: the in-game button icons with Button icons PlayStation,
+    # hud_draw.c, twelve 32x32 cells in VITA_GLYPH_CROSS ... SELECT's order)
+    'glyph_atlas.png': (128, 128),
     # (the multiplayer screens: the value arrows, the server browser's badges)
     'arrow_left.png': (8, 16),
     'arrow_right.png': (8, 16),
@@ -152,6 +155,25 @@ class ArtTest(unittest.TestCase):
                 self.assertLessEqual(abs(got - want), 3)
             with Image.open(os.path.join(folder, 'row_on.png')) as image:
                 self.assertEqual(image.getpixel((127, 8))[3], 0)
+
+    def test_glyph_atlas(self):
+        # (the in-game icons: the menus' glyphs at twice their size, each in
+        # its cell, in the colours of the menus' (cross blue, circle red,
+        # square pink, triangle green), the cells after SELECT empty)
+        with tempfile.TemporaryDirectory() as folder:
+            generate(folder)
+            with Image.open(os.path.join(folder, 'glyph_atlas.png')) as atlas:
+                cells = [atlas.crop(((i % 4) * 32, (i // 4) * 32, (i % 4) * 32 + 32, (i // 4) * 32 + 32))
+                         for i in range(16)]
+            for index in range(12):
+                self.assertGreater(cells[index].getpixel((16, 16))[3], 0, index)
+                self.assertEqual(cells[index].getpixel((0, 0))[3], 0, index)
+            for index in range(12, 16):
+                self.assertIsNone(cells[index].getbbox(), index)
+            for index, want in enumerate(((156, 194, 255), (255, 122, 122), (255, 155, 228), (79, 224, 168))):
+                pixels = [p for p in cells[index].getdata() if p[3] == 255]
+                best = min(pixels, key=lambda p: sum(abs(a - b) for a, b in zip(p[:3], want)))
+                self.assertLessEqual(sum(abs(a - b) for a, b in zip(best[:3], want)), 24, index)
 
 
 if __name__ == '__main__':

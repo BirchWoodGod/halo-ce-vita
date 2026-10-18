@@ -69,8 +69,9 @@ right edges, the rear pad's halves; vita_controls.c says where they are
 and when a finger counts; Rear touch guard keeps the hands holding the
 Vita off the rear ones) presses an Xbox button, and the page draws the
 zones beside its rows (touch_diagram). Button layout's first row, Button
-icons, chooses the game's button icons: Xbox (the default, the game's own)
-or PlayStation, each icon then showing the Vita button its Xbox button is
+icons, chooses the game's button icons: Xbox (the game's own; the default,
+VITA_BUTTON_ICONS_DEFAULT in vita_controls.h) or PlayStation (the Halo 3
+menus' icons), each icon then showing the Vita button its Xbox button is
 on now (vita_controls.h, source/interface/hud_draw.c; live, kept by Reset
 controls); with PlayStation the panel too names the Xbox buttons by what
 they do (Jump, Melee...) and the guide's steps the Vita's buttons. Gyro settings: gyro aiming
@@ -450,7 +451,7 @@ static struct setting settings[] = {
 	in the menus and in play: vita_controls.h; not part of the layout,
 	which Reset controls and the page's summary leave out) */
 	{ "Button icons", "HALO_BUTTON_ICONS", 0, 2, { VITA_BUTTON_ICONS_VALUES }, { VITA_BUTTON_ICONS_NAMES },
-		"Halo's prompts: Xbox icons, or the Vita's", 0, TAB_GAME },
+		"Halo's prompts: Xbox icons, or the Vita's", VITA_BUTTON_ICONS_DEFAULT, TAB_GAME },
 
 	/* (the port's own text: this panel, its messages over the game, the
 	PC menus' and co-op's lines; lang.c, port/vita/app0/lang. Its choices

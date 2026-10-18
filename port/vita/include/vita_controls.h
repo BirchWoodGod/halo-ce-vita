@@ -264,11 +264,12 @@ void vita_controls_map(const struct vita_controls_config *config, struct vita_co
 /* ---------- button icons
 
 The panel's Button icons (HALO_BUTTON_ICONS, Controls > Button layout):
-Xbox, the default, leaves the game's button icons as they are; PlayStation
-shows in their place the Vita button each Xbox button is on now, the
-mapping above's (in the menus the fixed layout, in play the Button layout
-and the touch zones), drawn by the game's HUD (source/interface/hud_draw.c)
-from these */
+Xbox (the default: VITA_BUTTON_ICONS_DEFAULT, below) leaves the game's
+button icons as they are; PlayStation shows in their place the Vita button
+each Xbox button is on now, the mapping above's (in the menus the fixed
+layout, in play the Button layout and the touch zones), drawn by the game's
+HUD (source/interface/hud_draw.c) from these in the Halo 3 menus' look
+(app0:menus/halo3/glyph_atlas.png) */
 enum
 {
 	/* on no Vita button (Black in the menus, a button set to None and no
@@ -299,7 +300,14 @@ enum
 #define VITA_BUTTON_ICONS_VALUES "xbox", "playstation"
 #define VITA_BUTTON_ICONS_NAMES "Xbox", "PlayStation"
 
-/* whether HALO_BUTTON_ICONS asks for PlayStation's (Xbox if unset) */
+/* THE default of the Button icons, the one place it is set: 0 Xbox, 1
+PlayStation (an index into VITA_BUTTON_ICONS_VALUES). The settings panel's
+row starts on it (vita_settings.c), and HALO_BUTTON_ICONS unset or not
+known is it (vita_button_icons_playstation; the Linux harness's too) */
+#define VITA_BUTTON_ICONS_DEFAULT 0
+
+/* whether HALO_BUTTON_ICONS asks for PlayStation's (the default,
+VITA_BUTTON_ICONS_DEFAULT, if unset or not known) */
 int vita_button_icons_playstation(void);
 
 /* the glyph of the Vita button an Xbox controller button is on: the

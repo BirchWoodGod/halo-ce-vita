@@ -409,9 +409,10 @@ The settings panel's **General** tab:
   play (the menus keep Cross / Circle and the D-pad). Its first row, **Button
   icons**, is **Xbox** by default (the game's own icons); **PlayStation**
   makes every prompt in the HUD and the menus show the Vita button that does
-  it now (Cross, Circle, Square and Triangle in the PlayStation's colours, L,
-  R, Start, Select, the D-pad and touch zones by name). The panel keeps the
-  Xbox names either way.
+  it now, in the Halo 3 menus' style (Cross, Circle, Square and Triangle in
+  the PlayStation's colours on a dark round button, and L, R, Start, Select
+  and the D-pad likewise; touch zones by name). The panel keeps the Xbox
+  names either way.
 - **Touch zones**: the front screen's top corners and left and right edges,
   and the rear pad's halves, can each press an Xbox button (all Off until
   set). **Rear touch guard** keeps the hands holding the Vita from pressing

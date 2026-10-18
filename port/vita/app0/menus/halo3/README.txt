@@ -76,6 +76,10 @@ What is here
   port/vita/app0/menus/halo3): the panels, the orange bars, the strips, the
   PlayStation button icons, the nameplates, the HALO title, and three fonts
   from Saira Semi Condensed (SIL Open Font License, tools/fonts/OFL.txt).
+  glyph_atlas.png is no screen's: the same button icons at twice their size
+  (and SELECT and the D-pad's directions), which the game draws in place of
+  the Xbox's in play and in the Halo CE menus when the settings panel's
+  Button icons is PlayStation (source/interface/hud_draw.c).
   The server browser's badges (badge_*.png: the words VITA and PC on a plate,
   a padlock beside them) and the value arrows (arrow_*.png) are drawn there
   too, no maker's logo. The profiles' colour swatches (swatch_*.png: the
