@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- The Halo 3-style Forge lobby (the main menu's FORGE): laid out as Halo 3's - the column at the
-left (FORGE LOBBY, Network, Map, START FORGE, Ready, the map's picture with Forge's emblem, "Edit
+left (FORGE LOBBY, Network, Map, Extra Objects, START FORGE, Ready, the map's picture with Forge's emblem, "Edit
 Objects on <map>"), the nameplate at the right; Map opens a picker as Halo 3's Select Map (the
 multiplayer maps in the maps folder, each its picture and description), and the map chosen its
 variants, as Halo 3's: the map itself first, then the player's saved map variants of it
 (port/linux/src/forge_store.c), each its details; B goes back to the maps. START FORGE starts a
 local game of the map in Forge mode (port/linux/game/forge.c), the variant chosen placed as it
-starts. The maps' pictures and descriptions are ui.map's own, the rest this folder's art. -->
+starts. Extra Objects chooses the scene packs it brings (other maps' objects: the Covenant's
+vehicles, the dropships, the Covenant AI), built in the background while the lobby is open. The maps' pictures and descriptions are ui.map's own, the rest this folder's art. -->
 <menus>
 	<bitmap name="h3/mp_maps">
 		<frame map="ui\shell\bitmaps\mp_map_grafix" index="0"/>
@@ -35,6 +36,7 @@ starts. The maps' pictures and descriptions are ui.map's own, the rest this fold
 		<string text="Select"/>
 		<string text="SELECT MAP"/>
 		<string text="Leave"/>
+		<string text="EXTRA OBJECTS"/>
 	</strings>
 
 	<!-- the lobby -->
@@ -43,21 +45,25 @@ starts. The maps' pictures and descriptions are ui.map's own, the rest this fold
 	<widget name="h3/forge/map_row" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3">
 		<on event="a" open="h3/forge/maps/screen"/>
 	</widget>
+	<widget name="h3/forge/packs_row" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3">
+		<on event="a" open="h3/forge/packs/screen"/>
+	</widget>
 	<widget name="h3/forge/start_row" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/forge_text" string_index="2">
 		<on event="a start" run="port forge start"/>
 	</widget>
 	<widget name="h3/forge/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<child widget="h3/forge/map_row" x="0" y="0"/>
-		<child widget="h3/forge/start_row" x="0" y="20"/>
+		<child widget="h3/forge/packs_row" x="0" y="20"/>
+		<child widget="h3/forge/start_row" x="0" y="40"/>
 	</widget>
-	<widget name="h3/forge/rule2" left="8" top="112" width="250" height="2" bitmap="h3/rule"/>
-	<widget name="h3/forge/ready" type="text" left="16" top="117" width="240" height="18" font="h3/font_item" color="#FFE6ECF2" text_y="1" string_list="h3/forge_text" string_index="3"/>
-	<widget name="h3/forge/ready_sub" type="text" left="16" top="133" width="240" height="16" font="h3/font_small" color="#FF9FB6CC" text_y="1" string_list="h3/forge_text" string_index="4"/>
-	<widget name="h3/forge/map_picture" left="16" top="156" width="140" height="114" bitmap="h3/mp_maps"/>
-	<widget name="h3/forge/emblem" left="22" top="162" width="64" height="64" bitmap="h3/forge_emblem"/>
-	<widget name="h3/forge/caption" type="text" left="16" top="276" width="240" height="20" font="h3/font_item" color="#FFEEF2F6" text_y="1"/>
+	<widget name="h3/forge/rule2" left="8" top="132" width="250" height="2" bitmap="h3/rule"/>
+	<widget name="h3/forge/ready" type="text" left="16" top="137" width="240" height="18" font="h3/font_item" color="#FFE6ECF2" text_y="1" string_list="h3/forge_text" string_index="3"/>
+	<widget name="h3/forge/ready_sub" type="text" left="16" top="153" width="240" height="16" font="h3/font_small" color="#FF9FB6CC" text_y="1" string_list="h3/forge_text" string_index="4"/>
+	<widget name="h3/forge/map_picture" left="16" top="176" width="140" height="114" bitmap="h3/mp_maps"/>
+	<widget name="h3/forge/emblem" left="22" top="182" width="64" height="64" bitmap="h3/forge_emblem"/>
+	<widget name="h3/forge/caption" type="text" left="16" top="296" width="240" height="20" font="h3/font_item" color="#FFEEF2F6" text_y="1"/>
 	<!-- (the variant's words, or why START FORGE did not start: port forge lobby) -->
-	<widget name="h3/forge/note" type="text" left="16" top="300" width="240" height="60" font="h3/font_small" color="#FF9FB6CC" text_y="1"/>
+	<widget name="h3/forge/note" type="text" left="16" top="320" width="240" height="60" font="h3/font_small" color="#FF9FB6CC" text_y="1"/>
 	<widget name="h3/forge/a_butn" left="16" top="447" width="16" height="16" bitmap="h3/glyph_cross"/>
 	<widget name="h3/forge/select" type="text" left="36" top="446" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/forge_text" string_index="5"/>
 	<widget name="h3/forge/b_butn" left="110" top="447" width="16" height="16" bitmap="h3/glyph_circle"/>
@@ -176,5 +182,44 @@ starts. The maps' pictures and descriptions are ui.map's own, the rest this fold
 		<child widget="h3/pick/b_butn"/>
 		<child widget="h3/pick/back"/>
 		<child widget="h3/forge/maps/list" x="52" y="84"/>
+	</widget>
+
+	<!-- EXTRA OBJECTS: the scene packs Forge brings (port forge packs: each on or off, A to change;
+	built in the background from the player's own campaign maps while the lobby is open, its
+	progress and what stops one at the right) -->
+	<widget name="h3/forge/packs/title" type="text" left="52" top="46" width="400" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/forge_text" string_index="8"/>
+	<widget name="h3/forge/packs/item_0" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a" run="port forge pack toggle"/>
+	</widget>
+	<widget name="h3/forge/packs/item_1" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a" run="port forge pack toggle"/>
+	</widget>
+	<widget name="h3/forge/packs/item_2" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a" run="port forge pack toggle"/>
+	</widget>
+	<widget name="h3/forge/packs/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port forge packs"/>
+		<child widget="h3/forge/packs/item_0" y="0"/>
+		<child widget="h3/forge/packs/item_1" y="19"/>
+		<child widget="h3/forge/packs/item_2" y="38"/>
+	</widget>
+	<widget name="h3/forge/packs/info_name" type="text" left="320" top="84" width="266" height="20" font="h3/font_item" color="#FFF2F6FA" text_y="1"/>
+	<widget name="h3/forge/packs/info_text" type="text" left="320" top="106" width="266" height="90" font="h3/font_small" color="#FFCFD9E3"/>
+	<widget name="h3/forge/packs/info_state" type="text" left="320" top="200" width="266" height="60" font="h3/font_small" color="#FF9FD8FF"/>
+	<widget name="h3/forge/packs/screen" flags="pass_unhandled_to_focused_child">
+		<on event="b back" back="true"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/pick/panel"/>
+		<child widget="h3/forge/packs/title"/>
+		<child widget="h3/pick/rule"/>
+		<child widget="h3/forge/packs/info_name"/>
+		<child widget="h3/forge/packs/info_text"/>
+		<child widget="h3/forge/packs/info_state"/>
+		<child widget="h3/pick/strip"/>
+		<child widget="h3/pick/a_butn"/>
+		<child widget="h3/pick/select"/>
+		<child widget="h3/pick/b_butn"/>
+		<child widget="h3/pick/back"/>
+		<child widget="h3/forge/packs/list" x="52" y="84"/>
 	</widget>
 </menus>

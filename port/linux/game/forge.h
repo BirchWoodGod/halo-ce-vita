@@ -27,6 +27,8 @@ enum
 	FORGE_MAXIMUM_AI = 32,
 	/* a readable name's bytes (UTF-8) */
 	FORGE_NAME_SIZE = 64,
+	/* the scene packs Forge offers (forge.c forge_packs) */
+	FORGE_PACK_COUNT = 3,
 };
 
 /* the object browser's categories, in its order */
@@ -167,6 +169,40 @@ char const *forge_panel_map_short(
 	int map_index);
 int forge_panel_map_available(
 	int map_index);
+
+/* the scene packs Forge offers (other maps' objects, built on the machine:
+scene_packs.h), in their order: how many, each one's name (translated) and
+description, whether the lobby brings it (the vehicles' are on by default),
+and its state now (scene_packs.h's _scene_pack_state_*: building, with how
+far; failed, with why), as built for the lobby */
+short forge_pack_count(
+	void);
+char const *forge_pack_label(
+	short pack);
+char const *forge_pack_description(
+	short pack);
+boolean forge_pack_enabled(
+	short pack);
+void forge_pack_set(
+	short pack,
+	boolean enabled);
+short forge_pack_status(
+	short pack,
+	long *progress,
+	char *why,
+	int why_size);
+
+/* (the lobby, as it opens and each frame) the packs it brings built in the
+background, if they are not (once each) */
+void forge_packs_prebuild(
+	void);
+
+/* the first pack the lobby brings that is still being built (its label and
+how far), FALSE if none is */
+boolean forge_packs_building(
+	char *label,
+	int size,
+	long *progress);
 
 /* the map variant the session plays (loaded or last saved), "" for none */
 char const *forge_variant_title(

@@ -73,6 +73,7 @@ halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
 #include "forge.h"
 #include "../src/port_config.h"
 #include "../src/forge_store.h"
+#include "scene_packs.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -201,6 +202,7 @@ enum
 	_function_forge_property_next,
 	_function_forge_property_previous,
 	_function_forge_close,
+	_function_forge_pack_toggle,
 };
 
 /* in port_game_data_input_names' order */
@@ -231,6 +233,7 @@ enum
 	_input_fileshare,
 	_input_fileshare_question,
 	_input_forge_properties,
+	_input_forge_packs,
 };
 
 /* what a line of typing is for */
@@ -1179,8 +1182,36 @@ static void h3_forge_lobby_update(struct widget_instance *widget)
 		snprintf(text, sizeof(text), "%s: %s", T("MAP"), T(forge_map_name(h3_forge.map)));
 	h3_capitals(text);
 	text_show(named(screen, "map_row"), text);
-	/* (the note: why START FORGE did not start, else the game's rules) */
-	text_show(named(screen, "note"), h3_forge.note[0] ? h3_forge.note : T("No score or time limit."));
+	/* (EXTRA OBJECTS: how many of the packs it brings; those built in the
+	background meanwhile) */
+	{
+		short pack, on = 0;
+
+		for (pack = 0; pack < forge_pack_count(); pack++)
+			on += forge_pack_enabled(pack) ? 1 : 0;
+		snprintf(text, sizeof(text), T("%s: %d OF %d"), T("EXTRA OBJECTS"), on, forge_pack_count());
+		h3_capitals(text);
+		text_show(named(screen, "packs_row"), text);
+		forge_packs_prebuild();
+	}
+	/* (the note: why START FORGE did not start, else a pack being built,
+	else the game's rules) */
+	{
+		char label[64];
+		long progress = 0;
+
+		if (h3_forge.note[0])
+			text_show(named(screen, "note"), h3_forge.note);
+		else if (forge_packs_building(label, sizeof(label), &progress))
+		{
+			char line[160];
+
+			snprintf(line, sizeof(line), T("Building %s... %ld%%"), label, progress);
+			text_show(named(screen, "note"), line);
+		}
+		else
+			text_show(named(screen, "note"), T("No score or time limit."));
+	}
 	if (h3_forge.variant_file[0])
 		snprintf(text, sizeof(text), T("%s on %s"), h3_forge.variant_title, T(forge_map_name(h3_forge.map)));
 	else
@@ -2927,6 +2958,56 @@ static void h3_forge_properties_update(struct widget_instance *list)
 	}
 }
 
+/* (port forge packs) EXTRA OBJECTS' rows (item_0 to item_2: each pack, on
+or off), the focused one's description and state: ready, being built and
+how far, or why it cannot be; the packs on built in the background */
+static void h3_forge_packs_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *child;
+	short pack, focused = 0;
+	char text[256], why[160];
+	long progress = 0;
+	short state;
+	static char said[192];
+
+	forge_packs_prebuild();
+	for (pack = 0, child = list->child; child; child = child->next, pack++)
+	{
+		boolean shown = pack < forge_pack_count();
+
+		widget_instance_set_visibility_recursive(child, shown);
+		child->disabled = !shown;
+		if (!shown)
+			continue;
+		snprintf(text, sizeof(text), "%s: %s", forge_pack_label(pack), forge_pack_enabled(pack) ? T("ON") : T("OFF"));
+		h3_capitals(text);
+		text_show(child, text);
+		if (child == list->focused_child)
+			focused = pack;
+	}
+	text_show(named(screen, "info_name"), forge_pack_label(focused));
+	text_show(named(screen, "info_text"), forge_pack_description(focused));
+	state = forge_pack_status(focused, &progress, why, sizeof(why));
+	if (!forge_pack_enabled(focused))
+		snprintf(text, sizeof(text), "%s", T("Off: Forge leaves its objects out."));
+	else if (state == _scene_pack_state_building)
+		snprintf(text, sizeof(text), T("Building it... %ld%%"), progress);
+	else if (state == _scene_pack_state_failed)
+		snprintf(text, sizeof(text), T("Unavailable: %s"), why);
+	else if (state == _scene_pack_state_ready || state == _scene_pack_state_loaded)
+		snprintf(text, sizeof(text), "%s", T("Ready: its objects are in the object browser."));
+	else
+		text[0] = 0;
+	text_show(named(screen, "info_state"), text);
+	snprintf(why, sizeof(why), "%s: %s", forge_pack_label(focused), text);
+	if (strcmp(why, said) && state != _scene_pack_state_building)
+	{
+		snprintf(said, sizeof(said), "%s", why);
+		platform_log("menus: forge packs: %s", said);
+	}
+}
+
 /* ---- File Share */
 
 static short h3_fileshare_count(void)
@@ -3386,6 +3467,21 @@ boolean pc_menu_event_function_invoke(
 		with no map to play) */
 		if (!forge_map_available(h3_forge.map))
 			return FALSE;
+		{
+			char label[64];
+			long progress = 0;
+
+			/* (a pack still being built: not now - its build on the map's
+			load would hold the screen for as long) */
+			if (forge_packs_building(label, sizeof(label), &progress))
+			{
+				snprintf(h3_forge.note, sizeof(h3_forge.note),
+					T("Still building %s (%ld%%).\nSTART FORGE when it is done, or\nturn it off in EXTRA OBJECTS."), label,
+					progress);
+				platform_log("menus: forge lobby: not started: %s is being built (%ld%%)", label, progress);
+				return FALSE;
+			}
+		}
 		platform_log("menus: forge lobby: start %s%s%s", forge_map_path(h3_forge.map),
 			h3_forge.variant_file[0] ? " with the map variant " : "", h3_forge.variant_file);
 		if (!forge_game_start(h3_forge.map, h3_forge.variant_file, h3_forge.note, sizeof(h3_forge.note)))
@@ -3490,6 +3586,14 @@ boolean pc_menu_event_function_invoke(
 	case _function_forge_close:
 		forge_menus_close_request();
 		return TRUE;
+	case _function_forge_pack_toggle:
+	{
+		short pack = (short)h3_child_index(widget);
+
+		forge_pack_set(pack, !forge_pack_enabled(pack));
+		h3_forge.note[0] = 0;
+		return TRUE;
+	}
 	case _function_fileshare_enter:
 		/* (the main menu's FILE SHARE: map variants, nothing said yet; back
 		from a question or the lobby what was said stays) */
@@ -3612,6 +3716,10 @@ void pc_menu_game_data_function_invoke(
 	case _input_fileshare:
 		if (widget->type == _ui_widget_type_column_list)
 			h3_fileshare_update(widget);
+		break;
+	case _input_forge_packs:
+		if (widget->type == _ui_widget_type_column_list)
+			h3_forge_packs_update(widget);
 		break;
 	case _input_forge_properties:
 		if (widget->type == _ui_widget_type_column_list)

@@ -365,7 +365,7 @@ static char const *const port_function_names[] =
 	"port fileshare kind", "port fileshare rename", "port fileshare ask delete", "port fileshare delete",
 	"port fileshare open", "port fileshare enter",
 	"port forge undo", "port forge redo", "port forge snap", "port forge property next", "port forge property previous",
-	"port forge close",
+	"port forge close", "port forge pack toggle",
 };
 
 /* the port's game data functions (menu_functions.c), from
@@ -380,7 +380,7 @@ static char const *const port_game_data_input_names[] =
 	"port h3 mp lobby", "port h3 networks", "port h3 maps", "port h3 gametypes",
 	"port h3 campaign networks",
 	"port fileshare", "port fileshare question",
-	"port forge properties",
+	"port forge properties", "port forge packs",
 };
 
 static struct

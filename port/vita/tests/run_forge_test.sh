@@ -54,6 +54,19 @@
 #               listed, A opens the Forge lobby on the map with the variant
 #   fstouch     FILE SHARE by taps (HALO_TEST_TAPS): the main menu's row,
 #               Rename, a row (the Forge lobby), the lobby's Leave, Back
+#   packs       other maps' objects (scene packs, built from the player's own
+#               campaign maps): the lobby's EXTRA OBJECTS (Covenant vehicles
+#               and dropships on by default, Covenant AI turned on), START
+#               FORGE refused while a pack builds, then started; a Banshee, a
+#               Pelican and an Elite placed through the browser (the AI
+#               category); saved: the map variant names its packs; loaded
+#               again in a new run with Covenant AI off in the lobby: the
+#               variant brings it, its objects placed; the Pelican's seats
+#   smallmap    Chill Out: the Warthog (the map's own tags) and the Banshee (a
+#               pack's) in the browser, both placed
+#   packmaps    (not by default) every multiplayer map with every pack on
+#               (HALO_TEST_FORGE_PACKS): what each loads or leaves out, the
+#               tag cache they hold and leave; a table in its log
 #   panel       Forge from the settings panel's Forge and File Share page, for
 #               Menu style Halo CE (its request, HALO_SYSTEM_LINK_TEST=forge:):
 #               Blood Gulch with the test's good map variant starts and places
@@ -65,7 +78,7 @@
 # HALO_TEST_KEEP=1, or copied to HALO_TEST_SHOTS when it is set.
 #
 #   run_forge_test.sh [CASE...]      (default: v1 budget b30 off files variants
-#                                     edit fileshare fstouch panel)
+#                                     edit fileshare fstouch panel packs smallmap)
 #   HALO_TEST_VITA        the harness (default build/linux/halo of this tree)
 #   HALO_TEST_DATA_MENUS  a folder with the game's maps folder (the Xbox maps)
 #                         and the Halo PC bitmaps.map and loc.map (never in the
@@ -82,7 +95,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_forge_test.$$}
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-v1 budget b30 off files variants edit fileshare fstouch panel}
+cases=${*:-v1 budget b30 off files variants edit fileshare fstouch panel packs smallmap}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
 
@@ -163,7 +176,7 @@ b30='map_name levels\\b30\\b30'
 
 # (v1: the main menu: down to FORGE; the lobby: Map, down, A: Wizard, its
 # variants (Halo 3's), A: Wizard itself; Map, up, A: Blood Gulch, A: the map
-# itself; down, START FORGE. In the level: forward and up, Square, A
+# itself; down past EXTRA OBJECTS, START FORGE. In the level: forward and up, Square, A
 # on VEHICLES, down twice, A: a Warthog in the monitor's hand; L + right stick
 # right (turned), L + up (pushed away), R (dropped); Square, R (the next
 # category), down, A: a weapon, R (dropped: it falls); Square, R twice
@@ -178,7 +191,7 @@ b30='map_name levels\\b30\\b30'
 v1pad="wait:150:3000 @00-main-menu:0:300 down:150:600 down:150:600 down:150:600 a:150:2500 @01-lobby:0:300"
 v1pad="$v1pad a:150:2000 @02-map-picker:0:300 down:150:700 a:150:1500 @02b-wizard-variants:0:300 a:150:2000"
 v1pad="$v1pad a:150:2000 up:150:700 a:150:1500 a:150:2000"
-v1pad="$v1pad @03-lobby-blood-gulch:0:300 down:150:600 a:150:1500 level:150:2500 @04-monitor:0:300"
+v1pad="$v1pad @03-lobby-blood-gulch:0:300 down:150:600 down:150:600 a:150:1500 level:150:2500 @04-monitor:0:300"
 v1pad="$v1pad lup:1200:300 a:600:600 @05-flown:0:300 x:150:1500 @06-browser:0:300 a:150:1200"
 v1pad="$v1pad @07-browser-vehicles:0:300 down:150:600 down:150:600 a:150:1500 @08-warthog-held:0:300"
 v1pad="$v1pad lt+rright:900:300 lt+rup:500:600 @09-turned-pushed:0:300 rt:150:2500 @10-dropped:0:300"
@@ -196,7 +209,7 @@ v1pad="$v1pad @19-leave-forge:0:300 a:150:9000 @20-main-menu-again:0:300"
 # name typed), B; a boulder from SCENERY, dropped; Start, SAVE MAP VARIANT
 # (the same name: the file replaced), down to LEAVE FORGE, leave)
 lobby="wait:150:3000 down:150:600 down:150:600 down:150:600 a:150:2500"
-savepad="$lobby down:150:600 a:150:1500 level:150:2500 x:150:1500 a:150:1200 down:150:600 down:150:600"
+savepad="$lobby down:150:600 down:150:600 a:150:1500 level:150:2500 x:150:1500 a:150:1200 down:150:600 down:150:600"
 savepad="$savepad a:150:1500 rt:150:2000 start:150:2000 down:150:600 down:150:600 a:150:2500 @00-saved:0:300 b:150:1500"
 savepad="$savepad x:150:1500 rt:150:800 rt:150:800 rt:150:1200 a:150:1500 rt:150:2000 start:150:2000 down:150:600"
 savepad="$savepad down:150:600 a:150:2500 @01-saved-again:0:300 down:150:600 down:150:600 down:150:600 down:150:600"
@@ -206,7 +219,7 @@ savepad="$savepad a:150:1500 a:150:9000"
 pick() {
 	local p="$lobby a:150:2000 a:150:1500 @00-picker:0:300" i
 	for i in $(seq 1 "$1"); do p="$p down:150:700"; done
-	echo "$p @01-picked:0:300 a:150:2000 @02-lobby:0:300 down:150:600 a:150:1500 level:150:3000 @03-placed:0:300"
+	echo "$p @01-picked:0:300 a:150:2000 @02-lobby:0:300 down:150:600 down:150:600 a:150:1500 level:150:3000 @03-placed:0:300"
 }
 # (full: Sample Gulch chosen and started; Start, SAVE MAP VARIANT twice:
 # over its file, then as a new one, both failing)
@@ -227,7 +240,7 @@ fspad="$fspad @07-main-menu:0:300"
 # boulder from SCENERY, R (dropped on the grid), R (grabbed), left
 # (carried), R (dropped: moved, on the grid); Start, down to UNDO, A (the
 # move undone), B; Start, SAVE MAP VARIANT (typed), B)
-editpad="$lobby down:150:600 a:150:1500 level:150:2500 x:150:1500 a:150:1200 down:150:600 down:150:600"
+editpad="$lobby down:150:600 down:150:600 a:150:1500 level:150:2500 x:150:1500 a:150:1200 down:150:600 down:150:600"
 editpad="$editpad a:150:1500 x:150:1500 @00-properties:0:300 a:150:800 down:150:600 a:150:800 down:150:600 a:150:800"
 editpad="$editpad @01-properties-set:0:300 b:150:1200 rt:150:2000 start:150:2000 down:150:600 down:150:600 down:150:600"
 editpad="$editpad a:150:1500 @02-undone:0:300 down:150:600 a:150:1500 @03-redone:0:300 down:150:600 a:150:1200"
@@ -240,7 +253,8 @@ edit_runs() {
 	local store="$out/edit-store"
 	rm -rf "$store"
 	mkdir -p "$store"
-	run edit 90 "" "" "$editpad" HALO_MENU_STYLE=halo3 HALO_SAVE_ROOT="$store" "HALO_TEST_TEXT_INPUT=Edit Test"
+	run edit 90 "" "" "$editpad" HALO_MENU_STYLE=halo3 HALO_SAVE_ROOT="$store" "HALO_TEST_TEXT_INPUT=Edit Test" \
+		HALO_TEST_FORGE_PACKS=none
 	"$out/forge_files_test" --dump "$store/forge/bloodgulch/edit_test.hmv" > "$out/edit/dump.txt" 2>&1
 }
 
@@ -248,13 +262,13 @@ variants_runs() {
 	local store="$out/variants-store"
 	rm -rf "$store"
 	mkdir -p "$store"
-	run variants-save 90 "" "" "$savepad" HALO_MENU_STYLE=halo3 HALO_SAVE_ROOT="$store" \
+	run variants-save 90 "" "" "$savepad" HALO_MENU_STYLE=halo3 HALO_SAVE_ROOT="$store" HALO_TEST_FORGE_PACKS=none \
 		"HALO_TEST_TEXT_INPUT=Gulch Test|Gulch Test"
 	samples "$store"
 	md5sum "$store/forge/bloodgulch/good.hmv" > "$out/variants-good.md5"
 	run variants-load 50 "" "" "$(pick 1)" HALO_MENU_STYLE=halo3 HALO_SAVE_ROOT="$store"
 	run variants-missing 50 "" "" "$(pick 2)" HALO_MENU_STYLE=halo3 HALO_SAVE_ROOT="$store"
-	run variants-damaged 50 "" "" "$lobby a:150:2000 a:150:1500 down:150:700 down:150:700 down:150:700 @00-damaged:0:300 b:150:1500 b:150:1500 down:150:600 a:150:1500 level:150:2500 @01-none:0:300" \
+	run variants-damaged 50 "" "" "$lobby a:150:2000 a:150:1500 down:150:700 down:150:700 down:150:700 @00-damaged:0:300 b:150:1500 b:150:1500 down:150:600 down:150:600 a:150:1500 level:150:2500 @01-none:0:300" \
 		HALO_MENU_STYLE=halo3 HALO_SAVE_ROOT="$store"
 	run variants-full 60 "" "" "$fullpad" HALO_MENU_STYLE=halo3 HALO_SAVE_ROOT="$store" HALO_TEST_FORGE_WRITE_FAIL=1 \
 		"HALO_TEST_TEXT_INPUT=Sample Gulch|Brand New"
@@ -269,6 +283,60 @@ fileshare_runs() {
 	samples "$store"
 	run fileshare 60 "" "" "$fspad" HALO_MENU_STYLE=halo3 HALO_SAVE_ROOT="$store" "HALO_TEST_TEXT_INPUT=Renamed Gulch"
 	find "$store" -type f | sort > "$out/fileshare-files.txt"
+}
+
+# (packs: FORGE; EXTRA OBJECTS, down to Covenant AI, A (on), B; START FORGE
+# at once: refused, a pack is being built; a moment, START FORGE. In the
+# level: Square, A (VEHICLES), A (the Banshee), R (dropped); Square, down
+# three (the Pelican), A, R; Square, R four times (AI), A (an Elite), R;
+# Start, SAVE MAP VARIANT (typed), B)
+packspad="$lobby down:150:500 a:150:1500 @00-extra-objects:0:300 down:150:400 down:150:400 a:150:100 @01-ai-on:0:200"
+packspad="$packspad b:150:100 down:150:100 a:150:1200 @02-refused:0:300 wait:150:6000 a:150:1500 level:150:3000"
+packspad="$packspad x:150:1500 a:150:1200 @03-vehicles:0:300 a:150:1500 rt:150:2000 x:150:1200 down:150:500 down:150:500"
+packspad="$packspad down:150:500 a:150:1500 lup:400:300 rt:150:2000 @04-pelican:0:300 x:150:1200 rt:150:600 rt:150:600"
+packspad="$packspad rt:150:600 rt:150:1200 @05-ai:0:300 a:150:1500 rt:150:3000 @06-elite:0:300 start:150:2000"
+packspad="$packspad down:150:600 down:150:600 a:150:2500 @07-saved:0:300 b:150:1500"
+# (smallmap: Square, A (VEHICLES), A (the Banshee), R; Square, down six (the
+# Warthog), A, R)
+smallpad="wait:150:1000 level:150:3000 x:150:1500 a:150:1200 @00-vehicles:0:300 a:150:1500 rt:150:2000 x:150:1200"
+smallpad="$smallpad down:150:400 down:150:400 down:150:400 down:150:400 down:150:400 down:150:400 a:150:1500 rt:150:2000"
+smallpad="$smallpad @01-placed:0:300"
+
+packs_runs() {
+	local store="$out/packs-store"
+	rm -rf "$store"
+	mkdir -p "$store"
+	run packs 120 "" "L900:forge seats pelican" "$packspad" HALO_MENU_STYLE=halo3 HALO_SAVE_ROOT="$store" \
+		"HALO_TEST_TEXT_INPUT=Pack Test"
+	"$out/forge_files_test" --dump "$store/forge/bloodgulch/pack_test.hmv" > "$out/packs/dump.txt" 2>&1
+	run packs-load 70 "" "" "$(pick 1)" HALO_MENU_STYLE=halo3 HALO_SAVE_ROOT="$store"
+	mkdir -p "$out/packs"
+}
+
+smallmap_runs() {
+	local store="$out/smallmap-store"
+	rm -rf "$store"
+	mkdir -p "$store"
+	run smallmap 70 "" "L300:forge list vehicles" "$smallpad" HALO_MENU_STYLE=classic HALO_SAVE_ROOT="$store" \
+		HALO_SYSTEM_LINK_TEST=forge:6
+}
+
+# (every multiplayer map, every pack: forge.c's maps in their order)
+packmaps_runs() {
+	local store="$out/packmaps-store" index
+	rm -rf "$store"
+	mkdir -p "$store"
+	for index in 0 1 2 3 4 5 6 7 8 9 10 11 12; do
+		while [ "$(jobs -rp | wc -l)" -ge "$jobs" ]; do
+			wait -n
+		done
+		run "packmaps-$index" 45 "" "L150:forge list vehicles;L155:forge list characters" "" HALO_MENU_STYLE=classic \
+			HALO_SAVE_ROOT="$store" HALO_SYSTEM_LINK_TEST=forge:$index \
+			HALO_TEST_FORGE_PACKS=covenant_vehicles,dropships,covenant_ai &
+	done
+	wait
+	mkdir -p "$out/packmaps"
+	echo 0 > "$out/packmaps/exit"
 }
 
 panel_runs() {
@@ -315,7 +383,8 @@ for c in $cases; do
 			echo "SKIP: v1: no Halo PC bitmaps.map and loc.map in $data/maps"
 			continue
 		fi
-		run "$c" 110 "" "" "$v1pad" HALO_MENU_STYLE=halo3 & ;;
+		# (no packs: the map's own three vehicles, as v1 was written)
+		run "$c" 110 "" "" "$v1pad" HALO_MENU_STYLE=halo3 HALO_TEST_FORGE_PACKS=none & ;;
 	budget)
 		run "$c" 50 "$bloodgulch" "L200:forge on;L210:forge fill 260 boulder;L230:forge budget;L240:@shot 00-budget-full;L260:forge delete;L270:forge budget;L280:forge spawn boulder;L285:forge drop;L290:forge budget;L300:@shot 01-budget-after" "" & ;;
 	b30)
@@ -351,6 +420,18 @@ for c in $cases; do
 		fstouch_runs & ;;
 	panel)
 		panel_runs & ;;
+	packs)
+		if [ "$menus_files" = 0 ]; then
+			echo "SKIP: packs: no Halo PC bitmaps.map and loc.map in $data/maps"
+			continue
+		fi
+		packs_runs & ;;
+	smallmap)
+		smallmap_runs & ;;
+	packmaps)
+		# (the maps two at a time: the cases' slots all its own)
+		wait
+		packmaps_runs ;;
 	*) echo "unknown case $c"; exit 2 ;;
 	esac
 done
@@ -365,6 +446,57 @@ for c in $cases; do
 			fail "files: the map variant files' test failed ($out/files/run.log)"
 			tail -20 "$out/files/run.log"
 		fi
+		continue
+	fi
+	if [ "$c" = packmaps ]; then
+		printf '%-16s %-62s %s\n' map "packs loaded / left out (the tag cache held, free after them)" palette
+		for index in 0 1 2 3 4 5 6 7 8 9 10 11 12; do
+			r="packmaps-$index"
+			checked "$r" || continue
+			l="$out/$r/run.log"
+			map=$(grep -a "forge: a Forge game of" "$l" | head -1 | grep -ao '[^\\]* asked for' | sed 's/ asked for//')
+			packs=$(grep -a "forge: packs: loaded:" "$l" | head -1 | sed 's/.*forge: packs: //')
+			free=$(grep -a "scene packs: .*: loaded from" "$l" | tail -1 | sed 's/.*held by packs, \([0-9]* KB\) free after them.*/\1 free/')
+			veh=$(grep -a "forge: palette vehicles:" "$l" | tail -1 | sed 's/.*: //')
+			ai=$(grep -a "forge: palette characters:" "$l" | tail -1 | sed 's/.*: //')
+			printf '%-16s %-62s vehicles %s, AI %s\n' "$map" "$packs ($free)" "$veh" "$ai"
+			grep -aq "forge: the Forge game of .* starts" "$l" || fail "$r: the Forge game did not start"
+		done
+		continue
+	fi
+	if [ "$c" = packs ]; then
+		checked packs
+		checked packs-load
+		expect packs "EXTRA OBJECTS opened" "ui: screen pc.h3.forge.packs.screen"
+		expect packs "the vehicles' packs built for the lobby" "forge: packs: covenant_vehicles wanted for the lobby"
+		expect packs "Covenant AI turned on" "forge: packs: covenant_ai on"
+		expect packs "START FORGE refused while it builds" "menus: forge lobby: not started: Covenant AI is being built"
+		expect packs "then started, the three packs loaded" \
+			"forge: packs: loaded: Covenant vehicles, Dropships, Covenant AI; left out: none"
+		expect packs "the Banshee placed through the browser" "forge: spawned Banshee \\(banshee, vehicles\\)"
+		expect packs "the Pelican placed through the browser" "forge: spawned Pelican \\(pelican, vehicles\\)"
+		expect packs "an Elite placed through the AI category" \
+			"forge: spawned Elite Major Needler \\(elite major needler, characters\\)"
+		expect packs "the Elite has its actor" "forge: elite given a free actor \\([0-9a-f]{8}\\)"
+		expect packs "the Pelican's seats said" "forge: seat 0: P-driver, driver"
+		expect packs "saved" "forge: map variant \"Pack Test\" saved as bloodgulch/pack_test.hmv, 3 objects"
+		if grep -q "^pack [0-9]: covenant_vehicles " "$out/packs/dump.txt" && grep -q "^pack [0-9]: dropships " "$out/packs/dump.txt" &&
+			grep -q "^pack [0-9]: covenant_ai " "$out/packs/dump.txt"; then
+			echo "  ok: packs: the map variant names its three packs"
+		else
+			fail "packs: the map variant's packs: $(cat "$out/packs/dump.txt")"
+		fi
+		expect packs-load "Covenant AI off in the lobby: the variant brings it" \
+			"forge: packs: loaded: Covenant vehicles, Dropships, Covenant AI; left out: none"
+		expect packs-load "the variant's three objects placed" "forge: map variant \"Pack Test\" applied: 3 placed, 0 skipped"
+		continue
+	fi
+	if [ "$c" = smallmap ]; then
+		checked smallmap
+		expect smallmap "Chill Out: the Warthog (its own) in the browser" "forge: vehicles [0-9]+: Warthog \\(vehicles.warthog.warthog\\)"
+		expect smallmap "and the Banshee (a pack's)" "forge: vehicles [0-9]+: Banshee \\(vehicles.banshee.banshee\\)"
+		expect smallmap "the Banshee placed" "forge: spawned Banshee \\(banshee, vehicles\\)"
+		expect smallmap "the Warthog placed" "forge: spawned Warthog \\(warthog, vehicles\\)"
 		continue
 	fi
 	if [ "$c" = panel ]; then
@@ -548,7 +680,7 @@ done
 
 if [ -n "${HALO_TEST_SHOTS:-}" ]; then
 	mkdir -p "$HALO_TEST_SHOTS"
-	for c in $cases variants-save variants-load variants-missing variants-damaged variants-full panel-damaged; do
+	for c in $cases variants-save variants-load variants-missing variants-damaged variants-full panel-damaged packs-load; do
 		for shot in "$out/$c"/shots/*.bmp; do
 			[ -f "$shot" ] && cp "$shot" "$HALO_TEST_SHOTS/$c-$(basename "$shot")"
 		done

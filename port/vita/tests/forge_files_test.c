@@ -721,6 +721,9 @@ static int dump(char const *path)
 	}
 	printf("map %s title \"%s\" author \"%s\" date \"%s\" paths %d records %d\n", decoded.map_name, decoded.title,
 		decoded.author, decoded.date, decoded.path_count, decoded.record_count);
+	for (index = 0; index < decoded.pack_count; index++)
+		printf("pack %d: %s %08x%08x\n", index, decoded.packs[index].name, decoded.packs[index].recipe[1],
+			decoded.packs[index].recipe[0]);
 	for (index = 0; index < decoded.record_count; index++)
 	{
 		struct forge_file_record const *record = &decoded.records[index];

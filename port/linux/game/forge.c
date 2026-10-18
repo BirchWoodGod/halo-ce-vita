@@ -148,10 +148,13 @@ Each logs what it did ("forge: ...").
 #include "units/biped_definitions.h"
 #include "units/units.h"
 #include "units/vehicle_definitions.h"
+#include "units/unit_definitions.h"
 
 #include "forge.h"
 #include "forge_files.h"
 #include "halo_menus.h"
+#include "scene_pack.h"
+#include "scene_packs.h"
 #include "tag_schema.h"
 #include "../src/lang.h"
 #include "../src/forge_store.h"
@@ -262,7 +265,7 @@ enum
 /* the browser's categories' names (forge.h's order) */
 static char const *const forge_category_names[NUMBER_OF_FORGE_CATEGORIES] =
 {
-	N_("VEHICLES"), N_("WEAPONS"), N_("EQUIPMENT"), N_("SCENERY"), N_("CHARACTERS"),
+	N_("VEHICLES"), N_("WEAPONS"), N_("EQUIPMENT"), N_("SCENERY"), N_("AI"),
 };
 /* (the log's) */
 static char const *const forge_category_log_names[NUMBER_OF_FORGE_CATEGORIES] =
@@ -294,6 +297,26 @@ static struct
 	{ "levels\\test\\longest\\longest", N_("Longest") },
 };
 
+/* the scene packs Forge offers (scene_packs.h: app0:packs/<name>.txt, built
+on the player's machine from the player's own campaign maps), in the order
+they are loaded: when the tag cache cannot take them all, the first ones
+are kept. The vehicles' are on unless turned off in the lobby; the AI is
+asked for. (The multiplayer maps' own vehicles - the Warthog, the Ghost,
+the Scorpion - are in every Xbox multiplayer map's tags already: no pack
+brings them) */
+static struct
+{
+	char const *name;
+	char const *label;
+	char const *description;
+	boolean on_by_default;
+} const forge_packs[FORGE_PACK_COUNT] =
+{
+	{ "covenant_vehicles", N_("Covenant vehicles"), N_("The Banshee, the Wraith and the Shade.\nBuilt from your Assault on the Control\nRoom or Two Betrayals map."), TRUE },
+	{ "dropships", N_("Dropships"), N_("The Pelican and the Covenant dropship.\nBuilt from your The Silent Cartographer\nor Halo map."), TRUE },
+	{ "covenant_ai", N_("Covenant AI"), N_("Grunts, jackals, elites and a hunter, who\nfight as in the campaign. Built from your\nAssault on the Control Room map."), FALSE },
+};
+
 /* our own names for the multiplayer maps' objects (and the campaign's
 common ones), by the last part of the tag's name ("_mp" taken off); an
 ammunition's ("<weapon> ammo") is its weapon's, "%s Ammo" */
@@ -312,6 +335,7 @@ static struct
 	{ "c gun turret", N_("Shade") },
 	{ "wraith", N_("Wraith") },
 	{ "pelican", N_("Pelican") },
+	{ "c_dropship", N_("Covenant Dropship") },
 	/* weapons */
 	{ "assault rifle", N_("Assault Rifle") },
 	{ "pistol", N_("Pistol") },
@@ -586,6 +610,13 @@ static struct
 	/* what the last thing asked from the Forge menu came to (said under
 	it) */
 	char menu_status[FORGE_STORE_WHY_SIZE];
+	/* the packs: the lobby's choice (a bit each, forge_packs' order; set
+	from their defaults once), the session's (the lobby's and its map
+	variant's), and what came of them as its map loaded */
+	boolean packs_chosen;
+	unsigned long packs_enabled;
+	unsigned long packs_session;
+	char packs_report[FORGE_LINE_SIZE];
 } forge_globals = { FALSE, "", FALSE, FALSE, 0, NONE, FALSE, NONE, 0.f, { 0.f }, { 0.f }, _forge_speed_normal };
 
 /* ---------- private code */
@@ -706,6 +737,9 @@ static short forge_tag_category(
 	case CONTROL_DEFINITION_TAG:
 		return _forge_category_scenery;
 	case ACTOR_VARIANT_DEFINITION_TAG:
+		/* (not a vehicle's crew: a dropship's gunner, a turret's) */
+		if (!strncmp(name, "vehicles\\", 9))
+			return NONE;
 		return actor_variant_definition_get(tag_index)->unit_reference.index != NONE ?
 			_forge_category_characters : NONE;
 	}
@@ -753,6 +787,11 @@ static void forge_palette_build(
 			/* (an iterator of a group walks its children's tags too:
 			only the group's own) */
 			if (tag_get_group_tag(tag_index) != groups[group_index] || (category = forge_tag_category(tag_index)) == NONE)
+				continue;
+			/* (a pack's copy of a tag the map has, or an earlier pack: the
+			first one's, the map's own when it has it, so that each object
+			is offered once) */
+			if (tag_get_name(tag_index) && tag_loaded((long)groups[group_index], tag_get_name(tag_index)) != tag_index)
 				continue;
 			entry = &forge_globals.palette[forge_globals.palette_count++];
 			entry->tag_index = tag_index;
@@ -2115,6 +2154,101 @@ static void forge_properties_open(
 	platform_log("forge: the object's properties opened");
 }
 
+/* ---- the scene packs (scene_packs.h): the lobby's choice, built in the
+background as it is open; loaded as a Forge game's map loads, before its
+objects (forge_map_loaded), in forge_packs' order while the tag cache has
+room, a pack whose objects the map has already left out */
+
+static short forge_pack_of_name(
+	char const *name)
+{
+	short pack;
+
+	for (pack = 0; pack < FORGE_PACK_COUNT; pack++)
+	{
+		if (!strcmp(forge_packs[pack].name, name))
+			return pack;
+	}
+	return NONE;
+}
+
+static void forge_packs_defaults(
+	void)
+{
+	short pack;
+
+	if (forge_globals.packs_chosen)
+		return;
+	forge_globals.packs_chosen = TRUE;
+	forge_globals.packs_enabled = 0;
+	for (pack = 0; pack < FORGE_PACK_COUNT; pack++)
+	{
+		if (forge_packs[pack].on_by_default)
+			forge_globals.packs_enabled |= 1UL << pack;
+	}
+#ifndef HALO_RELEASE
+	/* (debug: the tests' choice, the packs' names with commas between, or
+	"none") */
+	{
+		char const *setting = getenv("HALO_TEST_FORGE_PACKS");
+
+		if (setting && *setting)
+		{
+			forge_globals.packs_enabled = 0;
+			for (pack = 0; pack < FORGE_PACK_COUNT; pack++)
+			{
+				if (strstr(setting, forge_packs[pack].name))
+					forge_globals.packs_enabled |= 1UL << pack;
+			}
+		}
+	}
+#endif
+}
+
+/* (the Forge game's map loaded) the session's packs loaded, what came of
+each said in the log and kept for the HUD */
+static void forge_packs_load(
+	void)
+{
+	short pack;
+	int length = 0;
+	char loaded[FORGE_LINE_SIZE];
+	int loaded_length = 0;
+
+	forge_globals.packs_report[0] = 0;
+	loaded[0] = 0;
+	for (pack = 0; pack < FORGE_PACK_COUNT; pack++)
+	{
+		char why[SCENE_PACK_WHY_SIZE];
+		long progress;
+
+		if (!(forge_globals.packs_session & (1UL << pack)))
+			continue;
+		if (scene_packs_recipe_covered(forge_packs[pack].name))
+		{
+			platform_log("forge: packs: %s: the map has its objects already", forge_packs[pack].name);
+			continue;
+		}
+		if (scene_packs_load_now(forge_packs[pack].name))
+		{
+			platform_log("forge: packs: %s loaded (%lu KB of the tag cache held by packs now)", forge_packs[pack].name,
+				scene_packs_reserved_bytes() / 1024);
+			if (loaded_length < (int)sizeof(loaded))
+				loaded_length += snprintf(loaded + loaded_length, sizeof(loaded) - (size_t)loaded_length, "%s%s",
+					loaded_length ? ", " : "", T(forge_packs[pack].label));
+			continue;
+		}
+		scene_packs_status(forge_packs[pack].name, &progress, why, sizeof(why));
+		platform_log("forge: packs: %s left out: %s", forge_packs[pack].name, why[0] ? why : "it could not be loaded");
+		if (length < (int)sizeof(forge_globals.packs_report))
+			length += snprintf(forge_globals.packs_report + length, sizeof(forge_globals.packs_report) - (size_t)length,
+				"%s%s", length ? ", " : "", T(forge_packs[pack].label));
+	}
+	platform_log("forge: packs: loaded: %s; left out: %s; %lu KB of the tag cache held by packs", loaded[0] ? loaded : "none",
+		forge_globals.packs_report[0] ? forge_globals.packs_report : "none", scene_packs_reserved_bytes() / 1024);
+	forge_globals.palette_built = FALSE;
+}
+
 /* ---- map variants (forge_files.h: the file; forge_store.h: the memory
 card) */
 
@@ -2275,6 +2409,32 @@ static boolean forge_variant_capture(
 			continue;
 		}
 		layout->record_count++;
+	}
+	/* (the packs the records' tags are of: named, by recipe and hash, so
+	that loading the variant brings them) */
+	for (index = 0; index < layout->record_count; index++)
+	{
+		long tag_index = tag_loaded((long)layout->paths[layout->records[index].path_index].group_tag,
+			layout->paths[layout->records[index].path_index].path);
+		char const *owner;
+		short pack;
+
+		if (tag_index == NONE || (owner = scene_packs_owner(tag_index)) == NULL)
+			continue;
+		for (pack = 0; pack < layout->pack_count; pack++)
+		{
+			if (!strcmp(layout->packs[pack].name, owner))
+				break;
+		}
+		if (pack == layout->pack_count && pack < FORGE_FILE_MAXIMUM_PACKS && forge_pack_of_name(owner) != NONE)
+		{
+			unsigned long long hash = scene_packs_recipe_hash(owner);
+
+			layout->packs[pack].recipe[0] = (unsigned int)(hash & 0xFFFFFFFFUL);
+			layout->packs[pack].recipe[1] = (unsigned int)(hash >> 32);
+			snprintf(layout->packs[pack].name, sizeof(layout->packs[pack].name), "%s", owner);
+			layout->pack_count++;
+		}
 	}
 	if (skipped)
 		platform_log("forge: %d placed objects left out of the map variant", skipped);
@@ -2475,6 +2635,8 @@ static void forge_session_update(
 		{
 			forge_globals.game_requested = FALSE;
 			platform_log("forge: the Forge game of %s starts", forge_globals.game_map);
+			if (forge_globals.packs_report[0])
+				forge_notice(T("Left out (no room): %s"), forge_globals.packs_report);
 			if (forge_globals.variant_pending)
 			{
 				forge_globals.variant_pending = FALSE;
@@ -2808,6 +2970,8 @@ boolean forge_game_start(
 	forge_globals.variant_pending = FALSE;
 	forge_globals.variant_title[0] = 0;
 	forge_globals.variant_file[0] = 0;
+	forge_packs_defaults();
+	forge_globals.packs_session = forge_globals.packs_enabled;
 	if (variant_file && variant_file[0])
 	{
 		if (!forge_map_short_name(forge_maps[map_index].path, map_name, sizeof(map_name)) ||
@@ -2819,6 +2983,32 @@ boolean forge_game_start(
 		snprintf(forge_globals.variant_title, sizeof(forge_globals.variant_title), "%s", forge_variant_layout.title);
 		snprintf(forge_globals.variant_file, sizeof(forge_globals.variant_file), "%s", variant_file);
 		forge_globals.variant_pending = TRUE;
+		/* (the packs it names, ours only: brought with the lobby's; one of
+		another recipe's version is brought as it is now, and its records
+		skipped if their tags are not in it) */
+		{
+			short index;
+
+			for (index = 0; index < forge_variant_layout.pack_count; index++)
+			{
+				short pack = forge_pack_of_name(forge_variant_layout.packs[index].name);
+				unsigned long long hash;
+
+				if (pack == NONE)
+				{
+					platform_log("forge: the map variant names a pack Forge does not offer (%s): its objects are skipped",
+						forge_variant_layout.packs[index].name);
+					continue;
+				}
+				forge_globals.packs_session |= 1UL << pack;
+				hash = scene_packs_recipe_hash(forge_packs[pack].name);
+				if ((unsigned int)(hash & 0xFFFFFFFFUL) != forge_variant_layout.packs[index].recipe[0] ||
+					(unsigned int)(hash >> 32) != forge_variant_layout.packs[index].recipe[1])
+				{
+					platform_log("forge: the map variant's %s pack was another version of it", forge_packs[pack].name);
+				}
+			}
+		}
 		platform_log("forge: map variant \"%s\" (%s, %d objects) for the Forge game", forge_variant_layout.title, variant_file,
 			forge_variant_layout.record_count);
 	}
@@ -2912,6 +3102,97 @@ char const *forge_variant_title(
 	void)
 {
 	return forge_globals.variant_title;
+}
+
+short forge_pack_count(
+	void)
+{
+	return FORGE_PACK_COUNT;
+}
+
+char const *forge_pack_label(
+	short pack)
+{
+	return pack >= 0 && pack < FORGE_PACK_COUNT ? T(forge_packs[pack].label) : "";
+}
+
+char const *forge_pack_description(
+	short pack)
+{
+	return pack >= 0 && pack < FORGE_PACK_COUNT ? T(forge_packs[pack].description) : "";
+}
+
+boolean forge_pack_enabled(
+	short pack)
+{
+	forge_packs_defaults();
+	return pack >= 0 && pack < FORGE_PACK_COUNT && (forge_globals.packs_enabled & (1UL << pack)) != 0;
+}
+
+void forge_pack_set(
+	short pack,
+	boolean enabled)
+{
+	forge_packs_defaults();
+	if (pack < 0 || pack >= FORGE_PACK_COUNT)
+		return;
+	if (enabled)
+		forge_globals.packs_enabled |= 1UL << pack;
+	else
+		forge_globals.packs_enabled &= ~(1UL << pack);
+	platform_log("forge: packs: %s %s", forge_packs[pack].name, enabled ? "on" : "off");
+}
+
+short forge_pack_status(
+	short pack,
+	long *progress,
+	char *why,
+	int why_size)
+{
+	if (pack < 0 || pack >= FORGE_PACK_COUNT)
+		return _scene_pack_state_none;
+	return scene_packs_status(forge_packs[pack].name, progress, why, why_size);
+}
+
+void forge_packs_prebuild(
+	void)
+{
+	short pack;
+
+	forge_packs_defaults();
+	for (pack = 0; pack < FORGE_PACK_COUNT; pack++)
+	{
+		if ((forge_globals.packs_enabled & (1UL << pack)) &&
+			scene_packs_status(forge_packs[pack].name, NULL, NULL, 0) == _scene_pack_state_none)
+		{
+			platform_log("forge: packs: %s wanted for the lobby: %s", forge_packs[pack].name,
+				scene_packs_state_name(scene_packs_prebuild(forge_packs[pack].name)));
+		}
+	}
+}
+
+boolean forge_packs_building(
+	char *label,
+	int size,
+	long *progress)
+{
+	short pack;
+
+	for (pack = 0; pack < FORGE_PACK_COUNT; pack++)
+	{
+		long done = 0;
+
+		if ((forge_globals.packs_enabled & (1UL << pack)) &&
+			scene_packs_status(forge_packs[pack].name, &done, NULL, 0) == _scene_pack_state_building)
+		{
+			if (label && size > 0)
+				snprintf(label, (size_t)size, "%s", T(forge_packs[pack].label));
+			if (progress)
+				*progress = done;
+			return TRUE;
+		}
+	}
+	return FALSE;
 }
 
 void forge_undo_request(
@@ -3010,6 +3291,9 @@ void forge_map_loaded(
 	forge_globals.game_active = forge_globals.game_requested && scenario_name &&
 		!_stricmp(scenario_name, forge_globals.game_map);
 	forge_game_playing = forge_globals.game_active;
+	/* (the session's packs, before the map's objects are placed) */
+	if (forge_globals.game_active)
+		forge_packs_load();
 	if (!forge_globals.game_active)
 		forge_globals.game_requested = FALSE;
 	else
@@ -3672,6 +3956,37 @@ boolean forge_command(
 		if (object_try_and_get(forge_globals.held_object_index))
 			forge_drop();
 		return forge_spawn(forge_globals.palette[index].tag_index) != NONE;
+	}
+	if (!strcmp(word, "seats"))
+	{
+		/* ("seats <name>": a vehicle of the palette's seats: label, driver
+		or gunner, a built-in actor) */
+		short index;
+
+		forge_palette_ready();
+		index = forge_palette_find(rest);
+		if (index == NONE || tag_get_group_tag(forge_globals.palette[index].tag_index) != VEHICLE_DEFINITION_TAG)
+		{
+			platform_log("forge: seats: no vehicle named %s", rest);
+			return FALSE;
+		}
+		{
+			struct unit_definition *unit = tag_get(UNIT_DEFINITION_TAG, forge_globals.palette[index].tag_index);
+			long seat;
+
+			platform_log("forge: seats of %s: %ld", forge_globals.palette[index].name, (long)unit->unit.seats.count);
+			for (seat = 0; seat < unit->unit.seats.count; seat++)
+			{
+				struct unit_seat *element = TAG_BLOCK_GET_ELEMENT(&unit->unit.seats, seat, struct unit_seat);
+
+				platform_log("forge: seat %ld: %s%s%s%s%s", seat, element->label,
+					TEST_FLAG(element->flags, _unit_seat_driver_bit) ? ", driver" : "",
+					TEST_FLAG(element->flags, _unit_seat_gunner_bit) ? ", gunner" : "",
+					element->built_in_actor_reference.index != NONE ? ", built-in actor " : "",
+					element->built_in_actor_reference.index != NONE ? tag_get_name(element->built_in_actor_reference.index) : "");
+			}
+		}
+		return TRUE;
 	}
 	if (!strcmp(word, "undo") || !strcmp(word, "redo"))
 	{

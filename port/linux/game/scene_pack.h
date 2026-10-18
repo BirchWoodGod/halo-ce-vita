@@ -150,6 +150,9 @@ struct scene_pack_build_result
 	unsigned long file_bytes;
 	/* the source map's bytes inflated (or read) for it */
 	unsigned long long source_bytes;
+	/* how far it is, 0 to 100 (read by another thread while it builds:
+	the source map read twice, each read half of it) */
+	long volatile progress;
 	unsigned long long microseconds;
 	char why[SCENE_PACK_WHY_SIZE];
 };

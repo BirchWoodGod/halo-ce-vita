@@ -113,13 +113,15 @@ struct scene_pack_slot
 	short range;
 	FILE *file;
 	char why[SCENE_PACK_WHY_SIZE];
+	/* (Forge's lobby: scene_packs_prebuild) built, not loaded */
+	boolean build_only;
 };
 
 /* ---------- globals */
 
 static struct
 {
-	struct scene_pack_slot packs[MAXIMUM_LOADED_SCENE_PACKS];
+	struct scene_pack_slot packs[MAXIMUM_SCENE_PACK_SLOTS];
 	short pack_count;
 	/* the tag cache's bytes after the map's tags the loaded packs hold */
 	unsigned long reserved;
@@ -445,7 +447,7 @@ static struct scene_pack_slot *slot_new(char const *name)
 	char file_name[SCENE_PACK_NAME_SIZE + 8];
 	char why[SCENE_PACK_WHY_SIZE];
 
-	if (scene_packs.pack_count >= MAXIMUM_LOADED_SCENE_PACKS || !name || strlen(name) >= SCENE_PACK_NAME_SIZE)
+	if (scene_packs.pack_count >= MAXIMUM_SCENE_PACK_SLOTS || !name || strlen(name) >= SCENE_PACK_NAME_SIZE)
 		return NULL;
 	slot = &scene_packs.packs[scene_packs.pack_count++];
 	memset(slot, 0, sizeof(*slot));
@@ -512,7 +514,136 @@ short scene_packs_want(
 			return _scene_pack_state_failed;
 		build_thread_start();
 	}
+	/* (one built only, wanted now: loaded as any) */
+	slot->build_only = FALSE;
 	return state_get(slot);
+}
+
+short scene_packs_prebuild(
+	char const *name)
+{
+	struct scene_pack_slot *slot;
+	long count;
+
+	if (!scene_packs_enabled() || !name || !*name || cache_file_tag_data_size() <= 0 ||
+		custom_edition_cache_tags_loaded() || !cache_files_tag_instances(&count))
+	{
+		return _scene_pack_state_none;
+	}
+	slot = slot_find(name);
+	if (!slot)
+	{
+		slot = slot_new(name);
+		if (!slot)
+			return _scene_pack_state_failed;
+		slot->build_only = TRUE;
+		build_thread_start();
+	}
+	return state_get(slot);
+}
+
+short scene_packs_status(
+	char const *name,
+	long *progress,
+	char *why,
+	long why_size)
+{
+	struct scene_pack_slot *slot = name ? slot_find(name) : NULL;
+	short state;
+
+	if (progress)
+		*progress = 0;
+	if (why && why_size > 0)
+		why[0] = 0;
+	if (!slot)
+		return _scene_pack_state_none;
+	state = state_get(slot);
+	if (progress)
+		*progress = state == _scene_pack_state_building ? PIN(slot->build.progress, 0, 99) :
+			state == _scene_pack_state_failed ? 0 : 100;
+	if (why && why_size > 0 && state == _scene_pack_state_failed)
+		snprintf(why, (size_t)why_size, "%s", slot->why);
+	return state;
+}
+
+char const *scene_packs_owner(
+	long tag_index)
+{
+	short index;
+	long absolute = tag_index & 0xFFFF;
+
+	if (tag_index == NONE)
+		return NULL;
+	for (index = 0; index < scene_packs.pack_count; index++)
+	{
+		struct scene_pack_slot const *slot = &scene_packs.packs[index];
+
+		if (state_get(slot) == _scene_pack_state_loaded && absolute >= slot->first_index &&
+			absolute < slot->first_index + slot->count)
+		{
+			return slot->name;
+		}
+	}
+	return NULL;
+}
+
+/* a recipe read and parsed (app0:packs/<name>.txt), into recipe: FALSE if
+it cannot be */
+static boolean recipe_read(char const *name, struct scene_pack_recipe *recipe)
+{
+	unsigned char *text;
+	unsigned long size = 0;
+	char file_name[SCENE_PACK_NAME_SIZE + 8];
+	char why[SCENE_PACK_WHY_SIZE];
+	boolean parsed;
+
+	if (!name || strlen(name) >= SCENE_PACK_NAME_SIZE)
+		return FALSE;
+	snprintf(file_name, sizeof(file_name), "%s.txt", name);
+	text = halo_packs_file_read(file_name, &size);
+	if (!text)
+		return FALSE;
+	parsed = scene_pack_recipe_parse((char const *)text, (long)size, recipe, why, sizeof(why)) && !strcmp(recipe->name, name);
+	halo_menus_file_free(text);
+	return parsed;
+}
+
+unsigned long long scene_packs_recipe_hash(
+	char const *name)
+{
+	struct scene_pack_slot *slot = name ? slot_find(name) : NULL;
+	struct scene_pack_recipe *recipe;
+	unsigned long long hash = 0;
+
+	if (slot && slot->recipe && state_get(slot) != _scene_pack_state_failed)
+		return slot->recipe->hash;
+	recipe = malloc(sizeof(*recipe));
+	if (recipe && recipe_read(name, recipe))
+		hash = recipe->hash;
+	if (recipe)
+		free(recipe);
+	return hash;
+}
+
+boolean scene_packs_recipe_covered(
+	char const *name)
+{
+	struct scene_pack_recipe *recipe = malloc(sizeof(*recipe));
+	boolean covered = FALSE;
+	short index;
+
+	if (recipe && recipe_read(name, recipe) && recipe->root_count > 0)
+	{
+		covered = TRUE;
+		for (index = 0; index < recipe->root_count; index++)
+		{
+			if (tag_loaded((long)recipe->roots[index].group_tag, recipe->roots[index].path) == NONE)
+				covered = FALSE;
+		}
+	}
+	if (recipe)
+		free(recipe);
+	return covered;
 }
 
 boolean scene_packs_load_now(
@@ -599,7 +730,7 @@ void scene_packs_update(
 	{
 		struct scene_pack_slot *slot = &scene_packs.packs[index];
 
-		if (state_get(slot) == _scene_pack_state_ready)
+		if (state_get(slot) == _scene_pack_state_ready && !slot->build_only)
 			slot_load(slot);
 	}
 	build_thread_start();
