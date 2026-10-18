@@ -36,6 +36,17 @@ EXPECTED = {
     'glyph_square.png': (16, 16),
     'glyph_start.png': (16, 16),
     'title_halo.png': (256, 64),
+    # (Forge: its lobby's emblem, the object browser's L and R)
+    'forge_emblem.png': (64, 64),
+    'glyph_l.png': (16, 16),
+    'glyph_r.png': (16, 16),
+    # (the multiplayer screens: the value arrows, the server browser's badges)
+    'arrow_left.png': (8, 16),
+    'arrow_right.png': (8, 16),
+    'badge_pc.png': (64, 16),
+    'badge_pc_locked.png': (64, 16),
+    'badge_vita.png': (64, 16),
+    'badge_vita_locked.png': (64, 16),
 }
 
 
