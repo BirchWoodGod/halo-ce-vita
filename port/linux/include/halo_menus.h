@@ -183,6 +183,9 @@ int halo_menu_style_halo3(void);
 /* the same begun on a thread of its own (once), which halo_menus_load waits
 for */
 void halo_menus_preload(void);
+/* the menus a level's map gets (ingame.txt: the Halo 3 pause screen), read
+the first time one loads; NULL when there are none or they have a problem */
+struct halo_menus const *halo_menus_load_ingame(void);
 /* a file of the menus folder (a frame's PNG), read whole, NULL if it cannot
 be read; halo_menus_file_free lets it go (the platform layer's heap, not
 the game's) */

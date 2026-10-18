@@ -149,6 +149,7 @@ enum
 	_input_h3_campaign,
 	_input_h3_missions,
 	_input_h3_difficulties,
+	_input_h3_mission_title,
 };
 
 /* what a line of typing is for */
@@ -442,6 +443,8 @@ game), as its level and difficulty lists do */
 void main_set_map_name(char *map_name);
 void main_set_difficulty(word difficulty);
 boolean game_state_test_persistent_storage(char *map_name, short *difficulty, boolean *corrupted);
+char *main_get_map_name(void);
+short game_difficulty_level_get(void);
 static void string_show(struct widget_instance *widget, short index);
 
 static char const *const h3_level_paths[NUMBER_OF_SINGLE_PLAYER_LEVELS] =
@@ -501,6 +504,29 @@ static void h3_capitals(char *text)
 		if (*text >= 'a' && *text <= 'z')
 			*text = (char)(*text - 'a' + 'A');
 	}
+}
+
+/* (the Halo 3 pause screen's title, port h3 mission title) the level played
+and its difficulty, "THE PILLAR OF AUTUMN · HEROIC"; a level not of the
+campaign, its map's name */
+static void h3_mission_title_update(struct widget_instance *widget)
+{
+	char const *map = main_get_map_name(), *name = NULL, *slash;
+	short difficulty = PIN(game_difficulty_level_get(), 0, 3);
+	char text[96];
+	short level;
+
+	for (level = 0; level < NUMBER_OF_SINGLE_PLAYER_LEVELS && map; level++)
+		if (!_stricmp(map, h3_level_paths[level]))
+			name = T(h3_level_names[level]);
+	if (!name)
+	{
+		slash = map ? strrchr(map, '\\') : NULL;
+		name = slash ? slash + 1 : map ? map : "";
+	}
+	snprintf(text, sizeof(text), "%s \xc2\xb7 %s", name, T(h3_difficulty_names[difficulty]));
+	h3_capitals(text);
+	text_show(widget, text);
 }
 
 /* (the lobby opened) the level last played, on Normal the first time; what
@@ -1446,6 +1472,9 @@ void pc_menu_game_data_function_invoke(
 		break;
 	case _input_h3_difficulties:
 		h3_pick_update(widget, 4, "difficulty_emblem", "difficulty_text");
+		break;
+	case _input_h3_mission_title:
+		h3_mission_title_update(widget);
 		break;
 	default:
 		break;

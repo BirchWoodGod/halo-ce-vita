@@ -109,15 +109,16 @@ void halo_menus_file_free(unsigned char *data)
 }
 
 /* the files menus.txt lists */
-static void files_gather(void)
+/* the files a list names (menus.txt, ingame.txt), added to files */
+static void files_gather(char const *list_name)
 {
 	unsigned long size = 0;
-	unsigned char *list = halo_menus_file_read("menus.txt", &size);
+	unsigned char *list = halo_menus_file_read(list_name, &size);
 	unsigned long position = 0;
 
 	if (!list)
 	{
-		platform_log("menus: %smenus.txt cannot be read; the game's own menus", folder);
+		platform_log("menus: %s%s cannot be read; the game's own menus", folder, list_name);
 		return;
 	}
 	while (position < size)
@@ -884,27 +885,24 @@ static int read_file(struct reader *reader, const struct menu_file *file)
 
 /* ---------- public code */
 
-static struct halo_menus const *menus_load(void)
+/* a list's files read into menus (0: none, or a problem); need_root: the
+list must name the Multiplayer screen's stand-in (menus.txt's; the in-game
+list, ingame.txt, has only Halo 3 screens) */
+static int menus_read(char const *list_name, int need_root, struct halo_menus *menus)
 {
-	static int read;
-	static struct halo_menus menus;
-	static int succeeded;
 	struct reader reader;
-	long index;
+	long index, first = file_count;
 	unsigned long long gather_started, parse_started;
 
-	if (read)
-		return succeeded ? &menus : NULL;
-	read = 1;
 	gather_started = platform_microseconds_now();
-	files_gather();
+	files_gather(list_name);
 	parse_started = platform_microseconds_now();
 	memset(&reader, 0, sizeof(reader));
-	for (index = 0; index < file_count && !reader.failed; index++)
+	for (index = first; index < file_count && !reader.failed; index++)
 		read_file(&reader, &files[index]);
 	/* (the files' text is not kept: the elements hold copies of what they
 	need; their paths stay, for the problems the game logs) */
-	for (index = 0; index < file_count; index++)
+	for (index = first; index < file_count; index++)
 	{
 		free((void *)files[index].data);
 		files[index].data = NULL;
@@ -917,19 +915,31 @@ static struct halo_menus const *menus_load(void)
 	if (reader.failed || !reader.menus.widget_count)
 	{
 		if (reader.failed)
-			platform_log("menus: the files have a problem; using the game's own menus");
-		return NULL;
+			platform_log("menus: the files have a problem (%s); using the game's own menus", list_name);
+		return 0;
 	}
-	if (!reader.menus.root)
+	if (need_root && !reader.menus.root)
 	{
 		platform_log("menus: no <menus root=...> names the Multiplayer screen; the game's own menus");
-		return NULL;
+		return 0;
 	}
-	menus = reader.menus;
-	succeeded = 1;
-	platform_log("menus: %ld files read in %llu us, parsed in %llu us", file_count, parse_started - gather_started,
-		platform_microseconds_now() - parse_started);
-	return &menus;
+	*menus = reader.menus;
+	platform_log("menus: %s: %ld files read in %llu us, parsed in %llu us", list_name, file_count - first,
+		parse_started - gather_started, platform_microseconds_now() - parse_started);
+	return 1;
+}
+
+static struct halo_menus const *menus_load(void)
+{
+	static int read;
+	static struct halo_menus menus;
+	static int succeeded;
+
+	if (read)
+		return succeeded ? &menus : NULL;
+	read = 1;
+	succeeded = menus_read("menus.txt", 1, &menus);
+	return succeeded ? &menus : NULL;
 }
 
 long halo_menus_utf16(char const *utf8, unsigned short *out, long capacity)
@@ -1010,11 +1020,12 @@ void halo_menus_preload(void)
 	pthread_mutex_unlock(&preload_lock);
 }
 
+/* (Halo 3 unless "classic": the default since 1.1.1, the owner's call) */
 int halo_menu_style_halo3(void)
 {
 	char const *style = getenv("HALO_MENU_STYLE");
 
-	return style && !strcmp(style, "halo3");
+	return !style || strcmp(style, "classic") != 0;
 }
 
 struct halo_menus const *halo_menus_load(void)
@@ -1030,6 +1041,22 @@ struct halo_menus const *halo_menus_load(void)
 	result = preload_started ? preload_result : menus_load();
 	pthread_mutex_unlock(&preload_lock);
 	return result;
+}
+
+struct halo_menus const *halo_menus_load_ingame(void)
+{
+	static int read;
+	static struct halo_menus menus;
+	static int succeeded;
+
+	pthread_mutex_lock(&preload_lock);
+	if (!read)
+	{
+		read = 1;
+		succeeded = menus_read("ingame.txt", 0, &menus);
+	}
+	pthread_mutex_unlock(&preload_lock);
+	return succeeded ? &menus : NULL;
 }
 
 /* ---------- the Halo PC pictures and text, read ahead (halo_menus.h) */

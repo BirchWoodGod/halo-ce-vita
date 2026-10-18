@@ -353,6 +353,7 @@ static char const *const port_game_data_input_names[] =
 	"unwired",
 	"port mp update desc", "port browser update", "port password update", "port setup update", "port code update",
 	"port h3 nameplate", "port h3 servers", "port h3 campaign", "port h3 missions", "port h3 difficulties",
+	"port h3 mission title",
 };
 
 static struct
@@ -1998,7 +1999,9 @@ void menu_tags_preload(
 }
 
 /* ui.map's tags loaded: ours added, if the player's Halo PC data is there
-(only their names and the XML: the rest at first use) */
+(only their names and the XML: the rest at first use). A level's map (any
+other): the in-game set (ingame.txt: the Halo 3 pause screen), the same way,
+with no Multiplayer screen */
 void menu_tags_loaded(
 	char const *map_name)
 {
@@ -2006,12 +2009,12 @@ void menu_tags_loaded(
 	struct cache_file_tag_instance *instances;
 	long widget_count, own_lists = 0, total, index;
 	unsigned long long started = vita_host_time_us(), checked, read;
+	boolean ingame = strcmp(map_name, "ui") != 0;
 
 	menu_tags.root_tag = menu_tags.xbox_root_tag = NONE;
-	if (strcmp(map_name, "ui"))
-		return;
 	/* (until they are added: the Xbox's menus) */
-	halo_pc_menus_state = -1;
+	if (!ingame)
+		halo_pc_menus_state = -1;
 	if (getenv("HALO_MENUS") && !strcmp(getenv("HALO_MENUS"), "xbox"))
 		return;
 	/* (the player's Halo PC data: only that the files are there; what they
@@ -2019,7 +2022,7 @@ void menu_tags_loaded(
 	if (!menu_resource_files_present())
 		return;
 	checked = vita_host_time_us();
-	menus = halo_menus_load();
+	menus = ingame ? halo_menus_load_ingame() : halo_menus_load();
 	if (!menus)
 		return;
 	read = vita_host_time_us();
@@ -2042,8 +2045,8 @@ void menu_tags_loaded(
 			problem(menus->widgets[index].file, menus->widgets[index].line, "two widgets are named",
 				menus->widgets[index].name);
 	}
-	menu_tags.xbox_root_tag = tag_loaded(UI_WIDGET_DEFINITION_TAG, XBOX_MULTIPLAYER_SCREEN);
-	if (menu_tags.xbox_root_tag == NONE || widget_named(menus->root) == NONE)
+	menu_tags.xbox_root_tag = ingame ? NONE : tag_loaded(UI_WIDGET_DEFINITION_TAG, XBOX_MULTIPLAYER_SCREEN);
+	if (!ingame && (menu_tags.xbox_root_tag == NONE || widget_named(menus->root) == NONE))
 	{
 		platform_log("menus: there is no screen %s (the Xbox's, or ours: %s)", XBOX_MULTIPLAYER_SCREEN, menus->root);
 		goto failed;
@@ -2123,7 +2126,7 @@ void menu_tags_loaded(
 		instances[DATUM_INDEX_TO_ABSOLUTE_INDEX(build.widget_tags[index])].base_address = widget_build(index);
 	if (build.failed)
 		goto failed;
-	menu_tags.root_tag = build.widget_tags[widget_named(menus->root)];
+	menu_tags.root_tag = ingame ? NONE : build.widget_tags[widget_named(menus->root)];
 	/* (the Halo 3 set: each screen and the Xbox screen it stands for, both
 	there) */
 	menu_tags.h3_count = 0;
@@ -2136,7 +2139,7 @@ void menu_tags_loaded(
 
 		if (from == NONE || widget == NONE)
 		{
-			problem(screen->file, screen->line, from == NONE ? "ui.map has no screen" : "no widget is named",
+			problem(screen->file, screen->line, from == NONE ? "the map has no screen" : "no widget is named",
 				from == NONE ? screen->replaces : screen->root);
 			continue;
 		}
@@ -2150,18 +2153,19 @@ void menu_tags_loaded(
 		platform_log("menus: Halo 3 set: %ld of %ld screens (Menu style %s)", menu_tags.h3_count, menus->screen_count,
 			halo_menu_style_halo3() ? "Halo 3" : "Halo CE");
 	menu_tags.loaded = TRUE;
-	halo_pc_menus_state = 1;
+	if (!ingame)
+		halo_pc_menus_state = 1;
 	menu_tags_art_preread();
-	platform_log("menus: OpenCE's multiplayer screens: %ld widgets, %ld string lists and %ld bitmaps added to "
-		"ui.map's %ld tags in %lu us (the Halo PC files checked %lu, the XML read %lu, the tags %lu; the pictures "
-		"and text are read when they first open)",
-		widget_count, own_lists + menus->string_list_count, menus->bitmap_count, build.first_index,
+	platform_log("menus: %s: %ld widgets, %ld string lists and %ld bitmaps added to "
+		"%s.map's %ld tags in %lu us (the Halo PC files checked %lu, the XML read %lu, the tags %lu; the pictures "
+		"and text are read when they first open)", ingame ? "the in-game screens" : "OpenCE's multiplayer screens",
+		widget_count, own_lists + menus->string_list_count, menus->bitmap_count, map_name, build.first_index,
 		(unsigned long)(vita_host_time_us() - started), (unsigned long)(checked - started),
 		(unsigned long)(read - checked), (unsigned long)(vita_host_time_us() - read));
 	goto done;
 
 failed:
-	platform_log("menus: OpenCE's multiplayer screens not added; the game's own");
+	platform_log("menus: %s not added; the game's own", ingame ? "the in-game screens" : "OpenCE's multiplayer screens");
 	menu_tags_release();
 
 done:
@@ -2267,14 +2271,17 @@ long menu_tags_screen(
 				if (!menu_tags.h3_left_out_said)
 					platform_log("menus: Halo 3 set left out: its pictures could not be read; the game's own screens");
 				menu_tags.h3_left_out_said = TRUE;
-				halo_pc_menus_state = -1;
+				/* (the settings panel's word on the online menus: ui.map's) */
+				if (menu_tags.root_tag != NONE)
+					halo_pc_menus_state = -1;
 				return tag_index;
 			}
 			platform_log("menus: Halo 3 screen %s for %s", menu_tags.h3_root[index], menu_tags.h3_replaces[index]);
 			return menu_tags.h3_to[index];
 		}
 	}
-	if (tag_index == menu_tags.xbox_root_tag && menu_tags.art >= 0)
+	/* (a level's map has no Multiplayer screen: NONE) */
+	if (tag_index != NONE && tag_index == menu_tags.xbox_root_tag && menu_tags.art >= 0)
 	{
 		if (!menu_tags.art)
 		{

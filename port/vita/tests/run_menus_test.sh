@@ -28,6 +28,9 @@
 #            main menu opens its dialog, the dialog's Back icon closes it
 #   h3resume a profile's saved game (a10 on Normal, saved and quit): the lobby
 #            says at Last Checkpoint, and on Heroic that it replaces it
+#   h3pause  a level's map gets the in-game set (ingame.txt): in The Silent
+#            Cartographer, Start opens the Halo 3 pause screen; SAVE AND QUIT
+#            saves and goes back to the Halo 3 main menu
 #   h3campaign  a profile with every level (HALO_TEST_PROFILE, never in the
 #            repository; skipped without): CAMPAIGN, the profile, the Halo 3
 #            campaign lobby; Mission: The Silent Cartographer, Difficulty:
@@ -63,7 +66,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
 
@@ -79,6 +82,8 @@ fi
 mkdir -p "$out"
 
 run() { # NAME DATA SECONDS PAD [VAR=value...]
+	# (Menu style Halo CE unless the case says otherwise: the classic cases' pads walk
+	# Halo CE's menus; Halo 3 has been the default since 1.1.1)
 	local name=$1 folder=$2 seconds=$3 pad=$4
 	shift 4
 	rm -rf "$out/$name"
@@ -96,7 +101,7 @@ run() { # NAME DATA SECONDS PAD [VAR=value...]
 	(cd "$out/$name" && exec env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=offscreen HALO_DATA_ROOT="$out/$name/data" \
 		HALO_SAVE_ROOT="$out/$name/save" HALO_NO_VSYNC=1 HALO_FRAME_CAP=30 HALO_EXIT_AFTER="$seconds" HALO_FULLSCREEN=0 \
 		HALO_HIDDEN_WINDOW=1 HALO_NO_AUDIO=1 HALO_TICK_THREAD=1 HALO_UPDATE_AUTO=false HALO_NET_ONLINE=false \
-		HALO_UI_LOG=1 "HALO_TEST_PAD=$pad" "$@" timeout -k 5 $((seconds + 90)) "$binary" > "$out/$name/run.log" 2>&1)
+		HALO_UI_LOG=1 HALO_MENU_STYLE=classic "HALO_TEST_PAD=$pad" "$@" timeout -k 5 $((seconds + 90)) "$binary" > "$out/$name/run.log" 2>&1)
 	echo $? > "$out/$name/exit"
 }
 
@@ -224,6 +229,24 @@ for case in $cases; do
 			fail h3resume "the lobby did not say the saved game goes on from its checkpoint"
 		grep -aq "menus: h3 campaign caption: The Pillar of Autumn on Heroic.at Mission Start (replaces the saved game)" "$log" ||
 			fail h3resume "another difficulty did not warn that it replaces the saved game" ;;
+	h3pause)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "--- h3pause"; echo "SKIP: no HALO_TEST_PROFILE (a blam.sav with every level)"; continue
+		fi
+		# (the lobby: Mission, The Silent Cartographer, Start Game; in the level - a10's start
+		# is the cryo tube, no pausing - Start: the Halo 3 pause screen; down to SAVE AND QUIT, A)
+		profile_from=$HALO_TEST_PROFILE run h3pause "$menus_data" 170 "wait:150:3000 down:150:700 a wait:150:3000 a wait:150:3000 a wait:150:2500 down:150:600 down:150:600 down:150:600 a wait:150:2500 down:150:600 down:150:600 a wait:150:60000 start:150:4000 wait:150:4000 down:150:1500 wait:150:4000 down:150:800 down:150:800 a:150:4000 wait:150:20000" \
+			HALO_MENU_STYLE=halo3 HALO_TEST_COMMANDS=L150:@skip
+		log=$out/h3pause/run.log
+		echo "--- h3pause"
+		grep -aq "menus: the in-game screens: .* added to b30.map" "$log" || fail h3pause "the in-game screens were not built into b30.map"
+		grep -aq "menus: Halo 3 screen h3/pause/screen for ui.shell.solo_game.pause_game.pause_game" "$log" ||
+			fail h3pause "the Halo 3 pause screen did not stand for the level's"
+		grep -aq "ui: screen ui.shell.error.warning_saving_file_screen_ingame" "$log" ||
+			fail h3pause "SAVE AND QUIT did not save"
+		grep -a "ui: screen" "$log" | tail -1 | grep -q 'pc.h3.main.screen' ||
+			fail h3pause "SAVE AND QUIT did not go back to the Halo 3 main menu"
+		grep -aqiE "assert|exception|halt" "$log" && fail h3pause "an assertion, exception or halt" ;;
 	h3campaign)
 		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
 			echo "--- h3campaign"; echo "SKIP: no HALO_TEST_PROFILE (a blam.sav with every level)"; continue
@@ -241,7 +264,7 @@ for case in $cases; do
 		grep -aq "menus: h3 campaign: start levels.b30.b30 on Heroic" "$log" || fail h3campaign "Start Game did not start b30 on Heroic"
 		grep -aq "memory: loaded levels.b30.b30" "$log" || fail h3campaign "b30 did not load" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"
