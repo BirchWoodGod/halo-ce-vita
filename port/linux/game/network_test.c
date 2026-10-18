@@ -1214,8 +1214,8 @@ static void network_test_pickup(
 
 		position.z += 0.1f;
 		object_set_position(last->unit_index, &position, NULL, NULL);
-		platform_log("network test: the last player stands on weapon %lx (%lx)", nearest_index,
-			object_get(nearest_index)->definition_index);
+		platform_log("network test: the last player stands on weapon %lx (%lx) at (%.3f %.3f %.3f)", nearest_index,
+			object_get(nearest_index)->definition_index, position.x, position.y, position.z);
 	}
 }
 

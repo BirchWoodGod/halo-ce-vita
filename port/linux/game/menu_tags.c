@@ -74,6 +74,7 @@ long menu_tags_screen(long tag_index);
 boolean pc_menu_tag(long tag_index);
 char const *pc_menu_function_name(long function_index);
 char const *pc_menu_game_data_input_name(long function_index);
+boolean menu_tags_png_texture(char const *png, long width, long height, long smallest, struct bitmap_data *bitmap);
 /* (system_link_shortcut.c's, for the settings panel) */
 extern volatile int halo_pc_menus_state;
 /* menu_functions.c's: a screen of the game's that the menus' flows open
@@ -2051,6 +2052,107 @@ static boolean menu_resource_files_present(void)
 }
 
 /* ---------- public code */
+
+/* (hud_draw.c: the in-game PlayStation button icons, halo3/glyph_atlas.png)
+a PNG of the menus folder, `width` x `height` (powers of two), made a
+texture of its own in `bitmap` with its mipmaps down to `smallest` pixels
+across (each the average of four of the one above), kept by the caller
+for as long as it likes: no map's tags hold it, so no map's unloading
+lets it go. FALSE (and `bitmap` cleared) if the PNG cannot be read or made
+a texture. The render thread's, with the rasterizer up */
+boolean menu_tags_png_texture(
+	char const *png,
+	long width,
+	long height,
+	long smallest,
+	struct bitmap_data *bitmap)
+{
+	unsigned long size = 0;
+	byte *data;
+	byte *pixels;
+	byte *mipmapped;
+	long level_width, level_height, total, levels;
+
+	memset(bitmap, 0, sizeof(*bitmap));
+	if (width <= 0 || height <= 0 || width > 2048 || height > 2048 || (width & (width - 1)) ||
+		(height & (height - 1)))
+		return FALSE;
+	data = halo_menus_file_read(png, &size);
+	pixels = data && size <= MAXIMUM_PNG_BYTES ? png_decode(data, size, width, height) : NULL;
+	halo_menus_file_free(data);
+	if (!pixels)
+	{
+		platform_log("menus: %s cannot be read (an 8-bit RGB or RGBA PNG of %ldx%ld)", png, width, height);
+		return FALSE;
+	}
+	/* the levels, one after another (bitmap_mipmap_address) */
+	total = 0;
+	levels = 0;
+	for (level_width = width, level_height = height;; level_width /= 2, level_height /= 2)
+	{
+		total += level_width * level_height * 4;
+		if (level_width / 2 < MAX(smallest, 1) || level_height / 2 < 1)
+			break;
+		levels++;
+	}
+	mipmapped = realloc(pixels, total);
+	if (!mipmapped)
+	{
+		free(pixels);
+		return FALSE;
+	}
+	pixels = mipmapped;
+	{
+		byte *above = pixels;
+		long level;
+
+		level_width = width;
+		level_height = height;
+		for (level = 0; level < levels; level++)
+		{
+			byte *below = above + level_width * level_height * 4;
+			long x, y, channel;
+
+			for (y = 0; y < level_height / 2; y++)
+			{
+				for (x = 0; x < level_width / 2; x++)
+				{
+					byte const *top = above + ((y * 2) * level_width + x * 2) * 4;
+					byte const *bottom = top + level_width * 4;
+
+					for (channel = 0; channel < 4; channel++)
+						below[(y * (level_width / 2) + x) * 4 + channel] =
+							(byte)((top[channel] + top[4 + channel] + bottom[channel] + bottom[4 + channel] + 2) / 4);
+				}
+			}
+			above = below;
+			level_width /= 2;
+			level_height /= 2;
+		}
+	}
+	bitmap->signature = BITMAP_GROUP_TAG;
+	bitmap->width = (short)width;
+	bitmap->height = (short)height;
+	bitmap->depth = 1;
+	bitmap->type = _bitmap_type_2d;
+	bitmap->format = _bitmap_format_a8r8g8b8;
+	bitmap->flags = FLAG(_bitmap_has_power_of_two_dimensions_bit);
+	bitmap->mipmap_count = (short)levels;
+	bitmap->tag_index = NONE;
+	bitmap->cache_block_index = NONE;
+	bitmap->pixels_size = total;
+	bitmap->base_address = pixels;
+	if (!rasterizer_bitmap_new(bitmap) || !bitmap->hardware_format)
+	{
+		free(pixels);
+		memset(bitmap, 0, sizeof(*bitmap));
+		return FALSE;
+	}
+	rasterizer_bitmap_changed(bitmap);
+	bitmap->base_address = NULL;
+	free(pixels);
+	return TRUE;
+}
 
 /* (scenario_tags_load, before ui.map's tags are read) the menus' XML read
 on a thread of its own meanwhile, if the Halo PC files are there */

@@ -789,11 +789,15 @@ static void test_button_glyphs(void)
 
 	clear_environment();
 	unsetenv("HALO_BUTTON_ICONS");
-	check(!vita_button_icons_playstation(), "button icons: the Xbox's unless asked (HALO_BUTTON_ICONS unset)");
+	check(vita_button_icons_playstation() == (VITA_BUTTON_ICONS_DEFAULT == 1),
+		"button icons: the default (VITA_BUTTON_ICONS_DEFAULT) unless asked (HALO_BUTTON_ICONS unset)");
 	setenv("HALO_BUTTON_ICONS", "playstation", 1);
 	check(vita_button_icons_playstation(), "button icons: playstation");
+	setenv("HALO_BUTTON_ICONS", "xbox", 1);
+	check(!vita_button_icons_playstation(), "button icons: xbox");
 	setenv("HALO_BUTTON_ICONS", "nonsense", 1);
-	check(!vita_button_icons_playstation(), "button icons: a value not known is the Xbox's");
+	check(vita_button_icons_playstation() == (VITA_BUTTON_ICONS_DEFAULT == 1),
+		"button icons: a value not known is the default");
 	unsetenv("HALO_BUTTON_ICONS");
 
 	vita_controls_config_load(&config);

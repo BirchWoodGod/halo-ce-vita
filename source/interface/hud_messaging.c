@@ -553,19 +553,22 @@ static void render_state_bitmap(
 	real_rectangle2d const *clip = NULL;
 	real scale;
 	point2d point;
-#ifdef HALO_VITA
+#ifdef HALO_BUTTON_GLYPHS
 	/* (port) the Vita's button icons, PlayStation's (hud_draw.c): a button
-	icon shows the Vita button its Xbox button is on, a word in the font or
-	drawn in the sprite's place in the colour of the Xbox face button there */
+	icon shows the Vita button its Xbox button is on, drawn in the sprite's
+	place (the Halo 3 menus' icon, at the alpha of the Xbox icon there) or
+	a word in the font */
 	struct icon_hud_element_definition const *button_icons = hud_globals->messaging.button_icons.address;
 	long button_icon_count = hud_globals->messaging.button_icons.count;
 	short glyph = icon >= button_icons && icon < button_icons + button_icon_count ?
 		hud_vita_button_glyph((short)(icon - button_icons)) : NONE;
-	short face_icon = hud_vita_glyph_face_icon(glyph);
+	boolean glyph_drawn = hud_vita_glyph_drawn(glyph);
+	/* (the glyph's colours are its own: the alpha is the Xbox icon's) */
+	pixel32 glyph_color = TEST_FLAG(icon->flags, _hud_icon_use_color_bit) ? icon->color : color;
 
-	if (hud_vita_glyph_text(glyph))
+	if (hud_vita_glyph_word(glyph))
 	{
-		render_state_text(bounds, cursor_bounds, hud_vita_glyph_text(glyph), FALSE);
+		render_state_text(bounds, cursor_bounds, hud_vita_glyph_word(glyph), FALSE);
 		return;
 	}
 #endif
@@ -594,15 +597,15 @@ static void render_state_bitmap(
 
 			point.x = (short)(icon->offset.x * canvas_scale + cursor_bounds->x0);
 			point.y = (short)(cursor_bounds->y1 - icon->offset.y * canvas_scale);
-#ifdef HALO_VITA
-			if (face_icon == NONE || face_icon >= button_icon_count || !hud_vita_glyph_draw(
+#ifdef HALO_BUTTON_GLYPHS
+			if (!glyph_drawn || !hud_vita_glyph_draw(
 				glyph,
 				bitmap,
 				_hud_corner_bottom_left,
 				&point,
 				clip,
 				bitmap_scale,
-				TEST_FLAG(button_icons[face_icon].flags, _hud_icon_use_color_bit) ? button_icons[face_icon].color : color))
+				glyph_color))
 #endif
 			hud_draw_bitmap_direct(
 				bitmap,
@@ -626,15 +629,15 @@ static void render_state_bitmap(
 #endif
 		point.x = (short)(icon->offset.x * scale + cursor_bounds->x0);
 		point.y = (short)(cursor_bounds->y1 - icon->offset.y * scale);
-#ifdef HALO_VITA
-		if (face_icon == NONE || face_icon >= button_icon_count || !hud_vita_glyph_draw(
+#ifdef HALO_BUTTON_GLYPHS
+		if (!glyph_drawn || !hud_vita_glyph_draw(
 			glyph,
 			bitmap,
 			_hud_corner_bottom_left,
 			&point,
 			clip,
 			scale,
-			TEST_FLAG(button_icons[face_icon].flags, _hud_icon_use_color_bit) ? button_icons[face_icon].color : color))
+			glyph_color))
 #endif
 		hud_draw_bitmap_direct(
 			bitmap,
@@ -1822,7 +1825,14 @@ void hud_messaging_update(
 									&hud_globals->messaging.button_icons,
 									icon_index,
 									struct icon_hud_element_definition);
-								if (TEST_FLAG(icon->flags, _hud_icon_use_text_bit))
+								/* (port) an icon that is a word (the D-pad's, "D-pad
+								up") is the Vita's button with the Button icons
+								PlayStation, drawn or a word (render_state_bitmap) */
+								if (TEST_FLAG(icon->flags, _hud_icon_use_text_bit)
+#ifdef HALO_BUTTON_GLYPHS
+									&& !hud_vita_button_glyph(icon_index)
+#endif
+									)
 								{
 									real_argb_color text_color;
 									wchar_t const *icon_text;

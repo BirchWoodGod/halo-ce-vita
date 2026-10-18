@@ -942,7 +942,8 @@ static void test_controls_tab(void)
 		!strstr(menu, " button") && !strchr(menu, '\x08') && menu_fits() && menu_height_fits(),
 		"Button layout: the eleven Xbox buttons by name (no headings), each fits");
 	check(!strncmp(menu_line(2, line, sizeof(line)), "A\x02", 2) && !strstr(menu, "Button icons") &&
-		vita_button_icons_playstation() == 0, "Button layout: A first, Button icons on Game (Xbox as shipped)");
+		vita_button_icons_playstation() == (VITA_BUTTON_ICONS_DEFAULT == 1),
+		"Button layout: A first, Button icons on Game (as shipped: VITA_BUTTON_ICONS_DEFAULT)");
 	to_line("White");
 	menu_lines(&longest, diagram, sizeof(diagram));
 	check(!diagram[0], "a button's row: no zone diagram");
@@ -2040,7 +2041,8 @@ static void test_tab_layouts(void)
 	const struct layout_row game[] = {
 		/* (Halo 3's menus as shipped from 1.1.1: the owner's) */
 		{ TAB_GAME, "Menu style", "HALO_MENU_STYLE", "classic|halo3", 0, "halo3" },
-		{ TAB_GAME, "Button icons", "HALO_BUTTON_ICONS", "xbox|playstation", 0, "xbox" },
+		{ TAB_GAME, "Button icons", "HALO_BUTTON_ICONS", "xbox|playstation", 0,
+			VITA_BUTTON_ICONS_DEFAULT ? "playstation" : "xbox" },
 		{ TAB_GAME, "Language", "HALO_LANGUAGE", languages, 0, "auto" },
 		{ TAB_GAME, "FPS counter", "HALO_FRAMERATE_COUNTER", "0|1", 0, "0" },
 		{ TAB_GAME, "First-person legs", "HALO_FIRST_PERSON_LEGS", "0|1", 0, "1" },
@@ -2634,6 +2636,8 @@ static void test_game_text_input(void)
 
 static void test_button_icons(void)
 {
+	/* (the row as shipped: VITA_BUTTON_ICONS_DEFAULT's choice) */
+	const char *shipped_row = VITA_BUTTON_ICONS_DEFAULT ? "Button icons\x02< PlayStation  " : "Button icons\x02  Xbox >";
 	struct vita_controls_config config;
 	char diagram[16], line[128];
 	unsigned long generation;
@@ -2641,9 +2645,12 @@ static void test_button_icons(void)
 
 	open_panel();
 	to_tab("Game");
-	check(to_line("Button icons") && !strcmp(menu_line(menu_selected, line, sizeof(line)), "Button icons\x02  Xbox >") &&
+	check(to_line("Button icons") && !strcmp(menu_line(menu_selected, line, sizeof(line)), shipped_row) &&
 		strstr(menu, "\n\x05Halo's prompts: Xbox icons, or the Vita's\n"),
-		"Button icons: its row on Game, under Interface (Xbox as shipped), its help");
+		"Button icons: its row on Game, under Interface (as shipped: VITA_BUTTON_ICONS_DEFAULT), its help");
+	/* (from Xbox on, whichever is the default) */
+	if (VITA_BUTTON_ICONS_DEFAULT)
+		press(VITA_BUTTON_LEFT);
 	generation = halo_settings_generation;
 	press(VITA_BUTTON_RIGHT);
 	printf("%s\n--\n", menu);
@@ -3382,7 +3389,8 @@ int main(void)
 	/* Game: Halo Online's Interface, First person and Updates */
 	check(!strcmp(menu_line(1, line, sizeof(line)), "\x08Interface") &&
 		!strcmp(menu_line(2, line, sizeof(line)), "Menu style\x02< Halo 3  ") &&
-		!strcmp(menu_line(3, line, sizeof(line)), "Button icons\x02  Xbox >") &&
+		!strcmp(menu_line(3, line, sizeof(line)),
+			VITA_BUTTON_ICONS_DEFAULT ? "Button icons\x02< PlayStation  " : "Button icons\x02  Xbox >") &&
 		!strcmp(menu_line(4, line, sizeof(line)), "Language\x02  Automatic >") &&
 		!strcmp(menu_line(5, line, sizeof(line)), "FPS counter\x02  Off >") &&
 		!strcmp(menu_line(6, line, sizeof(line)), "\x08" "First person") &&

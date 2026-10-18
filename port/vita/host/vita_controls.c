@@ -278,7 +278,11 @@ int vita_button_icons_playstation(void)
 {
 	const char *value = getenv("HALO_BUTTON_ICONS");
 
-	return value && strcmp(value, "playstation") == 0;
+	if (value && strcmp(value, "playstation") == 0)
+		return 1;
+	if (value && strcmp(value, "xbox") == 0)
+		return 0;
+	return VITA_BUTTON_ICONS_DEFAULT == 1;
 }
 
 static int glyph_of_button(unsigned long button)

@@ -286,23 +286,31 @@ and draft flags looked at; the request carries the User-Agent
 "HaloCEVita/<version>" and nothing else about the player or the Vita.
 
 **Button icons** (`HALO_BUTTON_ICONS`, xbox or playstation; live, kept by
-Reset controls): with PlayStation each of the game's button icons - the
-HUD's prompts (`source/interface/hud_messaging.c`), the icons in the menus'
-and the HUD's text and the menus' button hints (`ui_widget.c`) - shows the
+Reset controls; the default, Xbox, is `VITA_BUTTON_ICONS_DEFAULT` in
+`port/vita/include/vita_controls.h`, the one place it is set): with
+PlayStation each of the game's button icons - the HUD's prompts
+(`source/interface/hud_messaging.c`), the icons in the menus' and the HUD's
+text, the menus' button hints and the pause menu (`ui_widget.c`) - shows the
 Vita button its Xbox button is on now (`vita_button_glyph` in
 `port/vita/host/vita_controls.c`): in play the Button layout's, else the
 first touch zone set to it; in the menus the fixed layout (A Cross, B
-Circle, X Square, Y Triangle, the triggers L and R, Back Select). Cross,
-Circle, Square and Triangle are drawn in code (`source/interface/hud_draw.c`:
-two strokes, a ring, a square, a triangle, of the game's own white bitmap),
-centred in the Xbox icon's sprite and as tall as its button, in the
-PlayStation's own colours (Cross blue, Circle red, Square pink, Triangle
-green); L, R, START, SELECT, the D-pad ("D-pad down") and the
-touch zones ("rear touch left") are words in the game's font. An Xbox
-button on no Vita button and no zone keeps its Xbox icon; so do the
-sticks' icons (move, look). The settings panel keeps the Xbox controller's
-names (A, B, X, Y, Black, White ...) with either setting: the Button icons
-change the game's icons only.
+Circle, X Square, Y Triangle, the triggers L and R, the D-pad, Start, Back
+Select). They are the Halo 3 menus' own icons (`source/interface/hud_draw.c`):
+a dark round button with the symbol in the menus' colours (Cross blue,
+Circle red, Square pink, Triangle green), L and R on a dark tab, START,
+SELECT and the D-pad's directions on the round button too, drawn by
+`tools/halo3_menu_art.py` into `app0:menus/halo3/glyph_atlas.png` (twice the
+menus' size; read the first time one is drawn) and drawn centred in the
+Xbox icon's sprite and as tall as it, at its alpha. Without that picture
+Cross, Circle, Square and Triangle are drawn in code (two strokes, a ring, a
+square, a triangle, of the game's own white bitmap) in the same colours, and
+L, R, START, SELECT and the D-pad are words in the game's font; the touch
+zones are always words ("rear touch left"). An Xbox button on no Vita
+button and no zone keeps its Xbox icon; so do the sticks' icons (move,
+look). The Halo 3 menus show their PlayStation icons with either setting.
+The settings panel keeps the Xbox controller's names (A, B, X, Y, Black,
+White ...) with either setting: the Button icons change the game's icons
+only.
 
 The Touch zones page draws the front screen and the rear pad beside the
 rows: the chosen row's zone blue (dark blue while Off), the zones set to an

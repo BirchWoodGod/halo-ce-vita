@@ -170,16 +170,23 @@ GLYPH_COLOURS = {
     'triangle': (79, 224, 168),
     'square': (255, 155, 228),
     'start': (228, 232, 236),
+    # (SELECT and the D-pad: START's)
+    'select': (228, 232, 236),
+    'up': (228, 232, 236),
+    'down': (228, 232, 236),
+    'left': (228, 232, 236),
+    'right': (228, 232, 236),
 }
 
 
-def glyph(kind):
+def glyph(kind, size=16):
     # a PlayStation button: a dark round button, its symbol in its colour
+    # (16x16 for the menus; the in-game atlas below draws the same at 32)
     scale = 4
-    size = 64 * scale
-    image = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+    canvas = 64 * scale
+    image = Image.new('RGBA', (canvas, canvas), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
-    centre = size / 2
+    centre = canvas / 2
     radius = 29 * scale
     for step in range(radius, 0, -1):
         t = step / radius
@@ -201,26 +208,80 @@ def glyph(kind):
         draw.line(points + [points[0]], fill=colour, width=width, joint='curve')
     elif kind == 'square':
         draw.rectangle([centre - s * .85, centre - s * .85, centre + s * .85, centre + s * .85], outline=colour, width=width)
+    elif kind == 'select':
+        # the Vita's SELECT: a small pill, beside START's play triangle
+        draw.rounded_rectangle([centre - s * .95, centre - s * .42, centre + s * .95, centre + s * .42],
+                               radius=s * .42, fill=colour)
+    elif kind in DPAD_ARMS:
+        # a D-pad direction: the pad's cross, dim, and the arm pressed lit,
+        # wider and pointed (readable at the HUD's size)
+        arm, half = s * 1.1, s * .3
+        dim = (84, 90, 100, 255)
+        for dx, dy in DPAD_ARMS.values():
+            draw.rectangle(dpad_arm(centre, dx, dy, arm * .9, half), fill=dim)
+        draw.rectangle([centre - half, centre - half, centre + half, centre + half], fill=dim)
+        dx, dy = DPAD_ARMS[kind]
+        wide, base, tip = s * .5, s * .05, arm
+        # (an arrow along the arm: its square base, then its point)
+        px, py = -dy, dx
+        mid = arm * .55
+        points = [(centre + dx * base + px * wide, centre + dy * base + py * wide),
+                  (centre + dx * mid + px * wide, centre + dy * mid + py * wide),
+                  (centre + dx * tip, centre + dy * tip),
+                  (centre + dx * mid - px * wide, centre + dy * mid - py * wide),
+                  (centre + dx * base - px * wide, centre + dy * base - py * wide)]
+        draw.polygon(points, fill=colour)
     else:  # start: the Vita's START, a small play triangle
         draw.polygon([(centre - s * .55, centre - s * .8), (centre + s * .85, centre), (centre - s * .55, centre + s * .8)],
                      fill=colour)
-    return image.resize((16, 16), Image.Resampling.LANCZOS)
+    return image.resize((size, size), Image.Resampling.LANCZOS)
 
 
-def shoulder(letter):
+# the D-pad's arms: the direction each points (the screen's y down)
+DPAD_ARMS = {'up': (0, -1), 'down': (0, 1), 'left': (-1, 0), 'right': (1, 0)}
+
+
+def dpad_arm(centre, dx, dy, arm, half):
+    # one arm of the D-pad's cross: from the middle square out to `arm`
+    if dx:
+        x0, x1 = sorted((centre + dx * half, centre + dx * arm))
+        return [x0, centre - half, x1, centre + half]
+    y0, y1 = sorted((centre + dy * half, centre + dy * arm))
+    return [centre - half, y0, centre + half, y1]
+
+
+def shoulder(letter, size=16):
     # the Vita's L or R: a dark rounded tab with its letter (as the round
     # buttons' glyphs, its colour the START glyph's)
     scale = 4
-    size = 64 * scale
-    image = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+    canvas = 64 * scale
+    image = Image.new('RGBA', (canvas, canvas), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
     box = [6 * scale, 14 * scale, 58 * scale, 50 * scale]
     draw.rounded_rectangle(box, radius=14 * scale, fill=(44, 48, 55, 255),
                            outline=(255, 255, 255, alpha(.3)), width=2 * scale)
     font = ImageFont.truetype(os.path.join(FONTS, 'SairaSemiCondensed-Medium.ttf'), 34 * scale)
     width = draw.textlength(letter, font=font)
-    draw.text(((size - width) / 2, 6 * scale), letter, font=font, fill=GLYPH_COLOURS['start'] + (255,))
-    return image.resize((16, 16), Image.Resampling.LANCZOS)
+    draw.text(((canvas - width) / 2, 6 * scale), letter, font=font, fill=GLYPH_COLOURS['start'] + (255,))
+    return image.resize((size, size), Image.Resampling.LANCZOS)
+
+
+# the in-game button icons (Button icons PlayStation: source/interface/hud_draw.c
+# draws the HUD's prompts, the Halo CE menus' text and button hints and the
+# pause menu with these): the same glyphs as the menus', at twice their size,
+# GLYPH_CELL square each, four to a row, in the order of the game's
+# VITA_GLYPH_CROSS ... VITA_GLYPH_SELECT (port/vita/include/vita_controls.h);
+# the cells after them are empty
+GLYPH_CELL = 32
+ATLAS_GLYPHS = ('cross', 'circle', 'square', 'triangle', 'L', 'R', 'up', 'down', 'left', 'right', 'start', 'select')
+
+
+def glyph_atlas():
+    image = Image.new('RGBA', (GLYPH_CELL * 4, GLYPH_CELL * 4), (0, 0, 0, 0))
+    for index, kind in enumerate(ATLAS_GLYPHS):
+        cell = shoulder(kind, GLYPH_CELL) if kind in ('L', 'R') else glyph(kind, GLYPH_CELL)
+        image.paste(cell, ((index % 4) * GLYPH_CELL, (index // 4) * GLYPH_CELL))
+    return image
 
 
 def forge_emblem():
@@ -464,6 +525,7 @@ ART = {
     'glyph_start.png': lambda: glyph('start'),
     'glyph_l.png': lambda: shoulder('L'),
     'glyph_r.png': lambda: shoulder('R'),
+    'glyph_atlas.png': glyph_atlas,
     'forge_emblem.png': forge_emblem,
     'title_halo.png': title_halo,
     'badge_vita.png': lambda: badge('VITA', (38, 104, 178), False),
