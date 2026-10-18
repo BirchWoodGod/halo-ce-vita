@@ -1123,6 +1123,13 @@ static void get_local_player_input_blob(
 					real yaw_spin_scale;
 					real pitch_spin_scale;
 					real_euler_angles2d look_delta;
+#ifdef HALO_LINUX
+					/* port: the aim assist's target motion and whether the
+					stick's look took its adhesion, for the direct aim below
+					(the Vita's gyro, halo_linux_look_assist) */
+					real_euler_angles2d look_assist_velocity = {0.f, 0.f};
+					boolean look_assist_applied = FALSE;
+#endif
 
 					if (input_state->buttons[_button_scope_zoom] &&
 						controls_enable_doubled_spin)
@@ -1212,6 +1219,9 @@ static void get_local_player_input_blob(
 							&control->magnetism_level,
 							&target_angular_position,
 							&target_angular_velocity);
+#ifdef HALO_LINUX
+						look_assist_velocity = target_angular_velocity;
+#endif
 						if (player_magnetism_flag && control->magnetism_level > 0.f &&
 							(fabs(clamped_yaw) > _real_epsilon ||
 							fabs(clamped_pitch) > _real_epsilon ||
@@ -1242,6 +1252,9 @@ static void get_local_player_input_blob(
 								look_delta.yaw * input_scale;
 							look_delta.pitch = target_angular_velocity.pitch * magnetism_scale +
 								look_delta.pitch * input_scale;
+#ifdef HALO_LINUX
+							look_assist_applied = TRUE;
+#endif
 						}
 					}
 
@@ -1255,6 +1268,7 @@ static void get_local_player_input_blob(
 					{
 						/* direct mouse aim (port/linux/src/xinput_sdl.c) */
 						extern int halo_linux_mouse_look(short gamepad_index, real *yaw, real *pitch);
+						extern int halo_linux_look_assist(short gamepad_index);
 						real mouse_yaw;
 						real mouse_pitch;
 
@@ -1268,6 +1282,42 @@ static void get_local_player_input_blob(
 
 								mouse_yaw *= inverse_zoom;
 								mouse_pitch *= inverse_zoom;
+							}
+							/* port: the stick's aim assist on these turns too when
+							the source asks for it (the Vita's gyro, its Gyro aim
+							assist setting; a desktop mouse never): the friction
+							slows them as it slows the stick, and the adhesion
+							follows the target when the stick's look did not take
+							it this frame, with the stick's game speed and limits */
+							if (halo_linux_look_assist(gamepad_index) && player_magnetism_flag &&
+								control->magnetism_level > 0.f)
+							{
+								real input_scale = 1.f - control->magnetism_level *
+									PIN(constants->magnetism_friction, 0.f, 1.f);
+
+								mouse_yaw *= input_scale;
+								mouse_pitch *= input_scale;
+								if (!look_assist_applied &&
+									(fabs(mouse_yaw) > _real_epsilon || fabs(mouse_pitch) > _real_epsilon))
+								{
+									real game_speed = game_time_get_speed();
+									real magnetism_scale = control->magnetism_level *
+										PIN(constants->magnetism_adhesion, 0.f, 1.f);
+									real facing_scale = time_delta_sec * TICKS_PER_SECOND;
+
+									if (game_players_are_double_speed())
+									{
+										game_speed *= 0.5f;
+									}
+									mouse_yaw += facing_scale * magnetism_scale * PIN(
+										look_assist_velocity.yaw * game_speed,
+										-DEGREES_TO_RADIANS(6.f),
+										DEGREES_TO_RADIANS(6.f));
+									mouse_pitch += facing_scale * magnetism_scale * PIN(
+										look_assist_velocity.pitch * game_speed,
+										-DEGREES_TO_RADIANS(3.f),
+										DEGREES_TO_RADIANS(3.f));
+								}
 							}
 							input->facing_delta.yaw += mouse_yaw;
 							input->facing_delta.pitch += mouse_pitch;

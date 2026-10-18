@@ -392,6 +392,7 @@ void vita_gyro_config_load(struct vita_gyro_config *config)
 	const char *sensitivity = getenv("HALO_GYRO_SENS");
 	const char *invert = getenv("HALO_GYRO_INVERT_Y");
 	const char *turn = getenv("HALO_GYRO_TURN");
+	const char *assist = getenv("HALO_GYRO_ASSIST");
 	int index, percent;
 
 	config->mode = VITA_GYRO_OFF;
@@ -405,6 +406,7 @@ void vita_gyro_config_load(struct vita_gyro_config *config)
 	config->sensitivity = percent / 100.0f;
 	config->invert_y = invert ? atoi(invert) != 0 : 0;
 	config->turn = turn && strcmp(turn, "roll") == 0 ? VITA_GYRO_TURN_ROLL : VITA_GYRO_TURN_YAW;
+	config->assist = assist ? atoi(assist) != 0 : 1;
 }
 
 static float gyro_absolute(float value)

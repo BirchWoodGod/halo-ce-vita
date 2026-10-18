@@ -135,6 +135,22 @@ int halo_linux_mouse_look(short gamepad_index, float *yaw, float *pitch)
 	return TRUE;
 }
 
+/* (source/game/player_control.c) whether the stick's aim assist, its
+friction and adhesion, acts on halo_linux_mouse_look's turns too: the
+Vita's gyro when its Gyro aim assist setting is on; never a desktop mouse,
+which aims unassisted as on Halo PC */
+int halo_linux_look_assist(short gamepad_index)
+{
+#ifdef HALO_VITA
+	extern int vita_pad_gyro_assist(short gamepad_index);
+
+	return vita_pad_gyro_assist(gamepad_index);
+#else
+	(void)gamepad_index;
+	return FALSE;
+#endif
+}
+
 /* collects the motion the game has not asked for yet; motion that nobody
 consumes for a few polls (menus, cutscenes) is dropped so it cannot jerk
 the view later */
