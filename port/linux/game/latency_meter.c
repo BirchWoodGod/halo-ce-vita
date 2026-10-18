@@ -150,10 +150,13 @@ static pixel32 latency_pixel(
 boolean latency_meter_shown(
 	void)
 {
+	extern int halo_main_menu_loaded(void);
 	short connection = game_connection();
 
+	/* (not over the menus' map: the System Link list's search and the game's
+	lobby make a network client there, with no game played) */
 	return (connection == _game_connection_network_client || connection == _game_connection_network_server) &&
-		game_in_progress() && game_engine_in_play() && latency_meter_enabled();
+		game_in_progress() && game_engine_in_play() && !halo_main_menu_loaded() && latency_meter_enabled();
 }
 
 /* ... and over the screen: not over a co-op cutscene (but a connection

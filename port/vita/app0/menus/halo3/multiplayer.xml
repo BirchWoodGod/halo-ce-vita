@@ -6,9 +6,10 @@ functions (menu_functions.c "port mp/browser/setup/code ..."): laid out as Halo 
 lobby - MULTIPLAYER LOBBY's column at the left (NETWORK, GAME, MAP, START GAME, EDIT GAME TYPES,
 BROWSE GAMES, JOIN WITH CODE, Ready, the map's picture and "<game> on <map>"), the players at the
 right, the buttons in the column's foot. NETWORK, GAME and MAP open pickers as Halo 3's Select Map;
-BROWSE GAMES the server browser in Halo 3's style (VITA and PC badges, the orange bar), START GAME
-on ONLINE Create Game. The map pictures and descriptions are ui.map's own; the rest this folder's
-art (tools/halo3_menu_art.py). -->
+BROWSE GAMES the server browser in Halo 3's style (VITA and PC badges, the orange bar) - on SYSTEM
+LINK and AD HOC the LAN browser, its look (halo3/network.xml) -, START GAME on ONLINE Create Game.
+The map pictures and descriptions are ui.map's own; the rest this folder's art
+(tools/halo3_menu_art.py). -->
 <menus root="h3/mp/screen" replaces="ui\shell\main_menu\multiplayer_type_select\multiplayer_type_select_screen">
 	<bitmap name="h3/mp_maps">
 		<frame map="ui\shell\bitmaps\mp_map_grafix" index="0"/>
@@ -79,11 +80,13 @@ art (tools/halo3_menu_art.py). -->
 	<strings name="h3/networks">
 		<string text="ONLINE"/>
 		<string text="SYSTEM LINK"/>
+		<string text="AD HOC"/>
 		<string text="OFFLINE"/>
 	</strings>
 	<strings name="h3/network_text">
 		<string text="Play on the Internet: browse the public\ngames, join one with its code, or host\nyour own. It needs the settings panel's\nMultiplayer tab, Connection: Online."/>
-		<string text="Play with the PS Vitas on your Wi-Fi\nnetwork (Connection: Same Wi-Fi), or near\nyou (Connection: Ad hoc), as the Xbox's\nSystem Link."/>
+		<string text="Play with the PS Vitas on your Wi-Fi\nnetwork, as the Xbox's System Link. It\nneeds the settings panel's Connection:\nSame Wi-Fi (or Online)."/>
+		<string text="Play with the PS Vitas near you, with no\nrouter: the system's dialog joins them\nfirst. It needs the settings panel's\nConnection: Ad hoc."/>
 		<string text="Play on this PS Vita alone: split screen,\nwith several controllers."/>
 	</strings>
 	<strings name="h3/maps">
@@ -120,9 +123,11 @@ art (tools/halo3_menu_art.py). -->
 	</strings>
 
 	<!-- the lobby: NETWORK, GAME and MAP open their pickers; START GAME hosts as the network says
-	(ONLINE: Create Game; SYSTEM LINK: the System Link screen's profile, then the new game's map
-	list, as its Y; OFFLINE: split screen's), as do BROWSE GAMES (ONLINE: the server browser;
-	SYSTEM LINK: the System Link list) - the rows of the other networks hidden (port h3 mp lobby);
+	(ONLINE: Create Game; SYSTEM LINK and AD HOC: the System Link screen's profile, then the new
+	game's map list, as its Y; OFFLINE: split screen's), as do BROWSE GAMES (ONLINE: the server
+	browser; SYSTEM LINK and AD HOC: the profile, then the LAN browser, halo3/network.xml) - AD
+	HOC's rows first join the ad hoc group when the Vita is out of it (the joining dialog, which
+	goes on itself) - the rows of the other networks hidden (port h3 mp lobby);
 	EDIT GAME TYPES the Xbox's own; ONLINE's rows need internet play, else the screen saying how
 	to turn it on -->
 	<widget name="h3/mp/network_row" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3">
@@ -141,6 +146,10 @@ art (tools/halo3_menu_art.py). -->
 		<on event="a start" run="port h3 host system link"/>
 		<on event="a start" run="error if no network connection" open="ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen"/>
 	</widget>
+	<widget name="h3/mp/start_adhoc" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFE6ECF2" text_x="8" text_y="3" string_list="h3/mp_text" string_index="1">
+		<on event="a start" run="port h3 adhoc host" otherwise="h3/adhoc/joining"/>
+		<on event="a start" run="error if no network connection" open="ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen"/>
+	</widget>
 	<widget name="h3/mp/start_offline" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFE6ECF2" text_x="8" text_y="3" string_list="h3/mp_text" string_index="1">
 		<on event="a start" open="ui\shell\main_menu\multiplayer_type_select\split_screen\4way_profile_select\4way_start2join_screen"/>
 	</widget>
@@ -154,6 +163,10 @@ art (tools/halo3_menu_art.py). -->
 		<on event="a start" run="port h3 browse system link"/>
 		<on event="a start" run="error if no network connection" open="ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen"/>
 	</widget>
+	<widget name="h3/mp/browse_adhoc" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/mp_text" string_index="2">
+		<on event="a start" run="port h3 adhoc browse" otherwise="h3/adhoc/joining"/>
+		<on event="a start" run="error if no network connection" open="ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen"/>
+	</widget>
 	<widget name="h3/mp/code_row" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/mp_text" string_index="3">
 		<on event="a start" run="port mp require online" open="h3/code/screen" otherwise="h3/mp/offline"/>
 	</widget>
@@ -163,10 +176,12 @@ art (tools/halo3_menu_art.py). -->
 		<child widget="h3/mp/map_row" x="0" y="46"/>
 		<child widget="h3/mp/start_online" x="0" y="72"/>
 		<child widget="h3/mp/start_link" x="0" y="72"/>
+		<child widget="h3/mp/start_adhoc" x="0" y="72"/>
 		<child widget="h3/mp/start_offline" x="0" y="72"/>
 		<child widget="h3/mp/edit_row" x="0" y="92"/>
 		<child widget="h3/mp/browse_online" x="0" y="112"/>
 		<child widget="h3/mp/browse_link" x="0" y="112"/>
+		<child widget="h3/mp/browse_adhoc" x="0" y="112"/>
 		<child widget="h3/mp/code_row" x="0" y="132"/>
 	</widget>
 	<widget name="h3/mp/column" left="8" top="12" width="250" height="456" bitmap="h3/column"/>
@@ -236,10 +251,14 @@ art (tools/halo3_menu_art.py). -->
 	<widget name="h3/network/item_0" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/networks" string_index="0">
 		<on event="a" run="port h3 network set" back="true" otherwise="h3/mp/offline"/>
 	</widget>
+	<!-- (SYSTEM LINK and AD HOC: the restart dialog when the connection is the other's) -->
 	<widget name="h3/network/item_1" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/networks" string_index="1">
-		<on event="a" run="port h3 network set" back="true" otherwise="h3/mp/offline"/>
+		<on event="a" run="port h3 network set" back="true" otherwise="h3/adhoc/restart"/>
 	</widget>
 	<widget name="h3/network/item_2" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/networks" string_index="2">
+		<on event="a" run="port h3 network set" back="true" otherwise="h3/adhoc/restart"/>
+	</widget>
+	<widget name="h3/network/item_3" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/networks" string_index="3">
 		<on event="a" run="port h3 network set" back="true" otherwise="h3/mp/offline"/>
 	</widget>
 	<widget name="h3/network/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
@@ -248,6 +267,7 @@ art (tools/halo3_menu_art.py). -->
 		<child widget="h3/network/item_0" y="0"/>
 		<child widget="h3/network/item_1" y="19"/>
 		<child widget="h3/network/item_2" y="38"/>
+		<child widget="h3/network/item_3" y="57"/>
 	</widget>
 	<widget name="h3/network/network_text" type="text" left="320" top="84" width="266" height="120" font="h3/font_small" color="#FFCFD9E3" string_list="h3/network_text"/>
 	<widget name="h3/network/screen" flags="pass_unhandled_to_focused_child">

@@ -104,6 +104,10 @@ menus need bitmaps.map, loc.map: README" (halo_pc_menus_state).
   side without a router, in the room chosen on the tab (the group joined
   through the system's ad hoc dialog when the game's System Link screen
   needs it); or Online (internet play, port/linux/src/p2p.c; experimental).
+  The game's Halo 3 lobbies ask for the same (their AD HOC: the dialog
+  joins the room's group, or the Connection is set and the game restarted
+  at once after they asked the player: game_adhoc_requests,
+  system_link_shortcut.h).
 - "Join with a code" (Online, on a Vita without the PC menus, whose Direct
   Link does it in the game) types the host's code in with the D-pad, then
   shows Join's steps with how the lookup goes, and Cross opens the game's
@@ -4044,6 +4048,56 @@ int vita_settings_panel_open(void)
 	return panel_open;
 }
 
+/* (each frame) ad hoc play from the game's Halo 3 menus (system_link_shortcut.h,
+port/linux/game/menu_functions.c): the group's state for them, and their
+requests - the room's group joined through the system's dialog, as the
+guide's Host and Join join it (the room and the dialog way the tab's), or
+the Connection set and the game restarted at once, which the player said
+yes to in the game's menus (at the main menu only, where a restart loses
+nothing: else the panel's own offer, as for a change made on it) */
+static void game_adhoc_requests(void)
+{
+	int request = __atomic_load_n(&halo_adhoc_request, __ATOMIC_ACQUIRE);
+	int adhoc = !strcmp(running_network, "adhoc");
+
+	if (request == HALO_ADHOC_REQUEST_JOIN)
+	{
+		/* (not over the panel, whose own buttons the dialog would take) */
+		if (adhoc && vita_adhoc_state(NULL, 0) != 1 && vita_adhoc_state(NULL, 0) != 2)
+		{
+			if (panel_open)
+				close_panel();
+			vita_adhoc_connect(choice_of("HALO_ADHOC_DIALOG_MODE"), choice_of("HALO_ADHOC_ROOM") + 1);
+			vita_host_log("settings: ad hoc: joining the room's group (the game's menus)");
+		}
+	}
+	/* (the group's state set before the request is taken: the game, seeing
+	it taken, reads the join's own state, never the one before) */
+	__atomic_store_n(&halo_adhoc_group, adhoc ? vita_adhoc_state(NULL, 0) : HALO_ADHOC_GROUP_OFF, __ATOMIC_RELEASE);
+	if (request == HALO_ADHOC_REQUEST_NONE)
+		return;
+	__atomic_store_n(&halo_adhoc_request, HALO_ADHOC_REQUEST_NONE, __ATOMIC_RELEASE);
+	if (request == HALO_ADHOC_REQUEST_RESTART_ADHOC || request == HALO_ADHOC_REQUEST_RESTART_WIFI)
+	{
+		char line[96];
+
+		vita_settings_set("HALO_VITA_NETWORK", request == HALO_ADHOC_REQUEST_RESTART_ADHOC ? "adhoc" : "wifi");
+		if (!halo_main_menu_idle())
+		{
+			vita_host_log("settings: Connection set from the game's menus; the restart waits for the main menu");
+			return;
+		}
+		/* (asked already in the game's menus: no second question) */
+		restart_offered = 1;
+		vita_host_log("settings: restarting the game for the Connection the game's menus chose");
+		/* (it does not come back unless it failed) */
+		snprintf(line, sizeof(line), "settings: the restart failed (0x%08X)", (unsigned int)vita_host_restart_game());
+		vita_host_log(line);
+		vita_settings_message(T("Halo CE"),
+			T("The game could not restart itself: close it and start it again for the change."));
+	}
+}
+
 int vita_settings_input(const struct vita_host_pad *pad)
 {
 	unsigned long buttons = pad->buttons;
@@ -4058,6 +4112,7 @@ int vita_settings_input(const struct vita_host_pad *pad)
 
 	previous_buttons = buttons;
 	held_after_close &= buttons;
+	game_adhoc_requests();
 	if (held_after_close && !panel_open)
 		return 1;
 	/* (the system's ad hoc dialog reads the pad itself: the game must not

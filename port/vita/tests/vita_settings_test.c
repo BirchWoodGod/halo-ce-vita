@@ -52,6 +52,8 @@ volatile int halo_multiplayer_status[SYSTEM_LINK_STATUS_COUNT];
 volatile int halo_pc_menus_state;
 volatile int halo_text_input_state;
 volatile int halo_settings_panel_request;
+volatile int halo_adhoc_request;
+volatile int halo_adhoc_group;
 char halo_text_input_title[HALO_TEXT_INPUT_SIZE];
 char halo_text_input_text[HALO_TEXT_INPUT_SIZE];
 int halo_text_input_maximum;
@@ -1366,6 +1368,43 @@ static void test_multiplayer_tab(void)
 	press(VITA_BUTTON_CROSS);
 	check(adhoc_connects == 1 && strstr(menu, "In room 2's group already"), "in the group already: it says so");
 	press(VITA_BUTTON_CIRCLE);
+	/* the game's Halo 3 menus (AD HOC): the group's state each frame, and
+	their join - the dialog, as the panel's own, the panel closed - asked
+	once (system_link_shortcut.h) */
+	check(halo_adhoc_group == HALO_ADHOC_GROUP_IN, "the game's menus see the group joined");
+	adhoc_state_value = 0;
+	frame(0);
+	check(halo_adhoc_group == HALO_ADHOC_GROUP_NONE, "... and left");
+	open_panel();
+	halo_adhoc_request = HALO_ADHOC_REQUEST_JOIN;
+	frame(0);
+	check(adhoc_connects == 2 && adhoc_room == 2 && !menu_visible && halo_adhoc_request == HALO_ADHOC_REQUEST_NONE &&
+		halo_adhoc_group == HALO_ADHOC_GROUP_JOINING, "the game's menus' join: the dialog (room 2), the panel closed");
+	halo_adhoc_request = HALO_ADHOC_REQUEST_JOIN;
+	frame(0);
+	check(adhoc_connects == 2 && halo_adhoc_request == HALO_ADHOC_REQUEST_NONE, "... not again while the dialog is up");
+	adhoc_state_value = 2;
+	frame(0);
+	check(halo_adhoc_group == HALO_ADHOC_GROUP_IN, "... then in the group");
+	/* their Connection: Same Wi-Fi set and the game restarted at once at
+	the main menu (asked in the game's menus: no question of the panel's);
+	not at the main menu, only set */
+	main_menu_idle_now = 0;
+	restarts_asked = 0;
+	halo_adhoc_request = HALO_ADHOC_REQUEST_RESTART_WIFI;
+	frame(0);
+	check(!strcmp(getenv("HALO_VITA_NETWORK"), "wifi") && restarts_asked == 0 &&
+		halo_adhoc_request == HALO_ADHOC_REQUEST_NONE, "the game's menus' Same Wi-Fi away from the main menu: set, no restart");
+	vita_settings_set("HALO_VITA_NETWORK", "adhoc");
+	main_menu_idle_now = 1;
+	halo_adhoc_request = HALO_ADHOC_REQUEST_RESTART_WIFI;
+	frame(0);
+	frame(0);
+	check(!strcmp(getenv("HALO_VITA_NETWORK"), "wifi") && restarts_asked == 1 && strstr(menu, "could not restart itself"),
+		"the game's menus' Same Wi-Fi at the main menu: set, the game restarted (here it says it could not)");
+	press(VITA_BUTTON_CROSS);
+	main_menu_idle_now = 0;
+	restarts_asked = 0;
 
 	/* Same Wi-Fi: Connection and Modded maps */
 	vita_settings_set("HALO_VITA_NETWORK", "wifi");

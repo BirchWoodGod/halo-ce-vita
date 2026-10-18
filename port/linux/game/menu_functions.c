@@ -45,6 +45,19 @@ internet play with:
   System Link screen's profile, then the new game's map list, as Server
   Setup's START), BROWSE GAMES and JOIN WITH CODE. GAME and MAP are what the
   Xbox's game type and map lists open on (kept as they keep them).
+- Its BROWSE GAMES on SYSTEM LINK or AD HOC opens the Halo 3 LAN browser
+  ("port h3 lan ...", halo3/network.xml) in place of the Xbox's System Link
+  list, after the same profile screen: the server browser's rows, sorts and
+  pages over the games the System Link list would show (the game's own
+  discovery, network_game_client_listed_games: each field checked there),
+  A joining one as A on its row there joins it
+  (ui_widget_port_join_advertised_game: the same checks, the game's lobby
+  next). System Link has no passwords: no row is locked.
+- AD HOC (and the campaign lobby's AD HOC CO-OP) is ad hoc play: with the
+  connection Ad hoc, the ad hoc room's group is joined first through the
+  system's dialog when the Vita is not in it ("port h3 adhoc ..."); with
+  another connection, or SYSTEM LINK with Ad hoc, a dialog offers to set the
+  connection and restart, the connection being set up only at start-up.
 
 Text is typed on the Vita's system keyboard (system_link_shortcut.h
 halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
@@ -72,6 +85,7 @@ halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
 #include "../src/system_link_shortcut.h"
 #include "forge.h"
 #include "../src/port_config.h"
+#include "networking/network_client_manager.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -92,6 +106,10 @@ boolean ui_widget_port_cooperative_campaign_host_level(struct widget_instance *w
 void ui_widget_port_give_focus(struct widget_instance *list, struct widget_instance *child);
 boolean system_link_shortcut_open(void);
 struct widget_instance *ui_widget_port_active_screen(short local_player_index);
+boolean ui_widget_port_join_advertised_game(struct widget_instance *list, void const *server, boolean *widget_deleted);
+boolean transport_network_available(void);
+/* menu_tags.c's: a screen of the set by its widget's name (NONE: none) */
+long menu_tags_ingame_screen(char const *name);
 extern int (*halo_test_setting_hook)(const char *variable, const char *value);
 extern volatile unsigned long halo_settings_generation;
 
@@ -113,6 +131,14 @@ static char const server_list_screen[] =
 static char const map_select_screen[] =
 	"ui\\shell\\main_menu\\multiplayer_type_select\\connected\\connected_map_select_wrapper";
 static char const password_screen_name[] = "pc\\join\\password\\screen";
+static char const profiles_screen[] =
+	"ui\\shell\\main_menu\\multiplayer_type_select\\connected\\4way_profile_select\\4way_start2join_screen";
+static char const pregame_screen[] =
+	"ui\\shell\\main_menu\\multiplayer_type_select\\connected\\pregame\\connected_pregame_screen";
+/* the Halo 3 LAN browser (halo3/network.xml), and how long it says it is
+looking before it says it found none */
+static char const lan_screen[] = "h3/lan/screen";
+#define LAN_LOOKING_MILLISECONDS 4000
 
 /* in port_function_names' order (menu_tags.c) */
 enum
@@ -179,6 +205,15 @@ enum
 	_function_h3_campaign_focus,
 	_function_h3_scene,
 	_function_settings_panel,
+	_function_h3_lan_init,
+	_function_h3_lan_dispose,
+	_function_h3_lan_refresh,
+	_function_h3_adhoc_host,
+	_function_h3_adhoc_browse,
+	_function_h3_adhoc_coop,
+	_function_h3_adhoc_join,
+	_function_h3_adhoc_cancel,
+	_function_h3_adhoc_restart,
 };
 
 /* in port_game_data_input_names' order */
@@ -206,6 +241,8 @@ enum
 	_input_h3_maps,
 	_input_h3_gametypes,
 	_input_h3_campaign_networks,
+	_input_h3_adhoc_joining,
+	_input_h3_adhoc_restart,
 };
 
 /* what a line of typing is for */
@@ -348,6 +385,14 @@ static struct
 	to join it anyway, the answer awaited */
 	boolean large_asked;
 	struct p2p_lobby_entry large_entry;
+	/* the Halo 3 lobby's BROWSE GAMES on SYSTEM LINK or AD HOC: the System
+	Link list, once the profile is chosen, gives way to the Halo 3 LAN
+	browser; lan: the browser's rows are the System Link list's games (the
+	LAN browser), since when it looks (lan_since), its list as last logged */
+	boolean browse_lan_pending;
+	boolean lan;
+	unsigned long lan_since;
+	char lan_said[192];
 } menu_functions;
 
 /* ---------- private code */
@@ -525,19 +570,222 @@ static char const *const h3_level_names[NUMBER_OF_SINGLE_PLAYER_LEVELS] =
 };
 static char const *const h3_difficulty_names[4] = { "Easy", "Normal", "Heroic", "Legendary" };
 
+/* ---- ad hoc play in the Halo 3 lobbies (the multiplayer lobby's AD HOC,
+the campaign lobby's AD HOC CO-OP). The connection the Vita plays over is
+the settings panel's (Same Wi-Fi, Ad hoc or Online), set up once as the game
+starts (the network, ad hoc play's bridge, p2p_adhoc.c, and this machine's
+address with it): so AD HOC with another connection, or SYSTEM LINK with Ad
+hoc (no Wi-Fi address then), opens a dialog that offers to set the
+connection and restart the game (h3/adhoc/restart: the Vita's host does
+both, system_link_shortcut.h). With the connection Ad hoc, AD HOC's START
+GAME and BROWSE GAMES, and AD HOC CO-OP's START GAME, first join the ad hoc
+room's group through the system's dialog when the Vita is not in it, as the
+panel's Host and Join do (h3/adhoc/joining), then go on as they would have:
+the profile and the map list, the profile and the LAN browser, or co-op
+hosted and the game's lobby. */
+
+static char const *setting_get(char const *variable, char const *otherwise);
+
+enum
+{
+	_h3_adhoc_then_none,
+	_h3_adhoc_then_host,
+	_h3_adhoc_then_browse,
+	_h3_adhoc_then_coop,
+};
+
+static struct
+{
+	/* the restart dialog's connection (HALO_ADHOC_REQUEST_RESTART_ADHOC or
+	_WIFI), and whether the restart was asked */
+	int restart_to;
+	boolean restart_asked;
+	/* the joining dialog: what follows the group joined, whether the join
+	was asked, and that next step, to be opened from the main loop
+	(open_then); co-op not hosted then (coop_failed) */
+	short then;
+	boolean join_asked;
+	boolean open_then;
+	boolean coop_failed;
+	char said[160];
+} h3_adhoc;
+
+/* whether the connection serves a lobby's network: ad hoc play the
+connection Ad hoc, system link another; else FALSE, the restart dialog's
+connection set */
+static boolean h3_adhoc_connection_serves(boolean adhoc, char const *what)
+{
+	if (adhoc == (config_boolean("network.adhoc") != 0))
+		return TRUE;
+	h3_adhoc.restart_to = adhoc ? HALO_ADHOC_REQUEST_RESTART_ADHOC : HALO_ADHOC_REQUEST_RESTART_WIFI;
+	h3_adhoc.restart_asked = FALSE;
+	platform_log("menus: h3 adhoc: %s chosen, the connection %s: the restart dialog", what,
+		adhoc ? "not Ad hoc" : "Ad hoc");
+	return FALSE;
+}
+
+/* (port h3 adhoc host, browse, coop: the first handler of AD HOC's START
+GAME and BROWSE GAMES, of AD HOC CO-OP's START GAME) in the group, TRUE:
+the row's next handler goes on (START GAME's host and BROWSE GAMES's LAN
+browser set up here, as SYSTEM LINK's are); else FALSE, and the joining
+dialog opens, which joins it and then goes on itself */
+static boolean h3_adhoc_ready(short then)
+{
+	if (__atomic_load_n(&halo_adhoc_group, __ATOMIC_ACQUIRE) == HALO_ADHOC_GROUP_IN)
+	{
+		if (then == _h3_adhoc_then_host)
+		{
+			menu_functions.create_pending = TRUE;
+			menu_functions.create_system_link = TRUE;
+			platform_log("menus: h3 mp: host an ad hoc game; the profile, then the map list");
+		}
+		else if (then == _h3_adhoc_then_browse)
+		{
+			menu_functions.create_pending = FALSE;
+			menu_functions.browse_lan_pending = TRUE;
+			platform_log("menus: h3 mp: browse the ad hoc games; the profile, then the LAN browser");
+		}
+		return TRUE;
+	}
+	h3_adhoc.then = then;
+	h3_adhoc.join_asked = FALSE;
+	h3_adhoc.open_then = FALSE;
+	h3_adhoc.coop_failed = FALSE;
+	platform_log("menus: h3 adhoc: not in the ad hoc group: the joining dialog first");
+	return FALSE;
+}
+
+/* (port h3 adhoc join: the joining dialog opened, or its A) the group
+joined through the system's dialog (the Vita's host: system_link_shortcut.h) */
+static void h3_adhoc_join(void)
+{
+	int group = __atomic_load_n(&halo_adhoc_group, __ATOMIC_ACQUIRE);
+
+	if (group == HALO_ADHOC_GROUP_IN || group == HALO_ADHOC_GROUP_JOINING || group == HALO_ADHOC_GROUP_OFF ||
+		__atomic_load_n(&halo_adhoc_request, __ATOMIC_ACQUIRE) != HALO_ADHOC_REQUEST_NONE)
+	{
+		return;
+	}
+	h3_adhoc.join_asked = TRUE;
+	h3_adhoc.coop_failed = FALSE;
+	__atomic_store_n(&halo_adhoc_request, HALO_ADHOC_REQUEST_JOIN, __ATOMIC_RELEASE);
+	platform_log("menus: h3 adhoc: the system's dialog asked for (ad hoc room %s)", setting_get("HALO_ADHOC_ROOM", "1"));
+}
+
+/* (port h3 adhoc joining: the joining dialog's text, each frame) how the
+join goes; joined, the step that follows is opened from the main loop */
+static void h3_adhoc_joining_update(struct widget_instance *widget)
+{
+	struct widget_instance *screen = screen_of(widget);
+	int group = __atomic_load_n(&halo_adhoc_group, __ATOMIC_ACQUIRE);
+	boolean asking = h3_adhoc.join_asked &&
+		__atomic_load_n(&halo_adhoc_request, __ATOMIC_ACQUIRE) == HALO_ADHOC_REQUEST_JOIN;
+	char text[256];
+	boolean failed = FALSE;
+
+	if (h3_adhoc.coop_failed)
+		snprintf(text, sizeof(text), "%s", T("In the ad hoc group, but co-op was not\n"
+			"hosted. Go back and try START GAME again."));
+	else if (asking || group == HALO_ADHOC_GROUP_JOINING || (group == HALO_ADHOC_GROUP_NONE && h3_adhoc.join_asked))
+	{
+		snprintf(text, sizeof(text), T("The system's dialog joins the PS Vitas\nnear you, in ad hoc room %s."),
+			setting_get("HALO_ADHOC_ROOM", "1"));
+	}
+	else if (group == HALO_ADHOC_GROUP_IN)
+	{
+		snprintf(text, sizeof(text), "%s", T("In the ad hoc group."));
+		if (h3_adhoc.then != _h3_adhoc_then_none && !h3_adhoc.open_then)
+			h3_adhoc.open_then = TRUE;
+	}
+	else if (group == HALO_ADHOC_GROUP_OFF)
+		snprintf(text, sizeof(text), "%s", T("Ad hoc play needs the settings panel's\nConnection: Ad hoc."));
+	else
+	{
+		failed = TRUE;
+		snprintf(text, sizeof(text), "%s", T("The PS Vita did not join the ad hoc group.\n"
+			"Press A to try again, or choose another\nAd hoc dialog way (settings panel, Dev tab)."));
+	}
+	text_show(named(screen, "adhoc_text"), text);
+	/* (A, Try again: after a failure only) */
+	if (named(screen, "again"))
+		widget_instance_set_visibility_recursive(named(screen, "again"), failed);
+	if (named(screen, "a_butn"))
+	{
+		widget_instance_set_visibility_recursive(named(screen, "a_butn"), failed);
+		named(screen, "a_butn")->disabled = !failed;
+	}
+	/* (said when it changes: the tests read it) */
+	if (strcmp(text, h3_adhoc.said))
+	{
+		char line[256];
+		char *newline;
+
+		snprintf(h3_adhoc.said, sizeof(h3_adhoc.said), "%s", text);
+		snprintf(line, sizeof(line), "%s", text);
+		while ((newline = strchr(line, '\n')) != NULL)
+			*newline = ' ';
+		platform_log("menus: h3 adhoc: the joining dialog says \"%s\"", line);
+	}
+}
+
+/* (port h3 adhoc restart text: the restart dialog's title and text) */
+static void h3_adhoc_restart_update(struct widget_instance *widget)
+{
+	struct widget_instance *screen = screen_of(widget);
+	boolean adhoc = h3_adhoc.restart_to == HALO_ADHOC_REQUEST_RESTART_ADHOC;
+	char text[320];
+
+	text_show(named(screen, "restart_title"), adhoc ? T("AD HOC NEEDS A RESTART") : T("SYSTEM LINK NEEDS A RESTART"));
+	if (h3_adhoc.restart_asked)
+	{
+#ifdef HALO_VITA
+		snprintf(text, sizeof(text), "%s", T("Restarting..."));
+#else
+		/* (no Vita host: nothing set, nothing restarted - system_link_shortcut.c) */
+		snprintf(text, sizeof(text), "%s", T("This build has no ad hoc play: nothing\nwas changed."));
+#endif
+	}
+	else if (adhoc)
+	{
+		snprintf(text, sizeof(text), "%s", T("Ad hoc play is for the PS Vitas near you,\nwith no router. It needs the "
+			"settings\npanel's Connection: Ad hoc, which takes\neffect when the game starts.\n\n"
+			"Set it and restart the game now?"));
+	}
+	else
+	{
+		snprintf(text, sizeof(text), "%s", T("System Link plays with the PS Vitas on\nyour Wi-Fi network. It needs the "
+			"settings\npanel's Connection: Same Wi-Fi, which\ntakes effect when the game starts.\n\n"
+			"Set it and restart the game now?"));
+	}
+	text_show(named(screen, "restart_text"), text);
+}
+
+/* (port h3 adhoc restart: the restart dialog's A) the Vita's host sets the
+connection and restarts the game (system_link_shortcut.h) */
+static void h3_adhoc_restart(void)
+{
+	if (h3_adhoc.restart_to != HALO_ADHOC_REQUEST_RESTART_ADHOC && h3_adhoc.restart_to != HALO_ADHOC_REQUEST_RESTART_WIFI)
+		return;
+	h3_adhoc.restart_asked = TRUE;
+	__atomic_store_n(&halo_adhoc_request, h3_adhoc.restart_to, __ATOMIC_RELEASE);
+	platform_log("menus: h3 adhoc: Connection %s and a restart asked for",
+		h3_adhoc.restart_to == HALO_ADHOC_REQUEST_RESTART_ADHOC ? "Ad hoc" : "Same Wi-Fi");
+}
+
 /* the lobby's NETWORK: LOCAL (this Vita alone: the level started as the
 Xbox's difficulty list's A starts it), or co-op hosted as the old Campaign
 screen's Y on the difficulty hosts it (coop_menu.c): ONLINE CO-OP over
 internet play (the settings panel's Connection: Online; its code shown in
-the waiting screen), SYSTEM LINK CO-OP (or AD HOC CO-OP, the connection Ad
-hoc) for the Vitas on the same Wi-Fi or near. The port hosts a network game
-one way, over the connection the Vita runs: the two co-op choices differ in
-what they ask of it, ONLINE needing internet play. */
+the waiting screen), SYSTEM LINK CO-OP for the Vitas on the same Wi-Fi, AD
+HOC CO-OP for the Vitas near (the connection Ad hoc: its group joined
+first). The port hosts a network game one way, over the connection the Vita
+runs: the co-op choices differ in what they ask of it. */
 enum
 {
 	_h3_campaign_local,
 	_h3_campaign_online,
 	_h3_campaign_system_link,
+	_h3_campaign_adhoc,
 	NUMBER_OF_H3_CAMPAIGN_NETWORKS
 };
 
@@ -587,7 +835,9 @@ static char const *h3_campaign_network_name(short network)
 	if (network == _h3_campaign_online)
 		return T("ONLINE CO-OP");
 	if (network == _h3_campaign_system_link)
-		return config_boolean("network.adhoc") ? T("AD HOC CO-OP") : T("SYSTEM LINK CO-OP");
+		return T("SYSTEM LINK CO-OP");
+	if (network == _h3_campaign_adhoc)
+		return T("AD HOC CO-OP");
 	return T("LOCAL");
 }
 
@@ -598,10 +848,11 @@ static boolean h3_campaign_network_set(struct widget_instance *widget);
 
 /* (the settings panel's Host co-op campaign, system_link_shortcut.c: the
 Campaign screen opened for co-op) the lobby opens on co-op, online with
-internet play */
+internet play, ad hoc with the connection Ad hoc */
 void menu_functions_h3_campaign_coop(void)
 {
-	h3_campaign.network = internet_play() ? _h3_campaign_online : _h3_campaign_system_link;
+	h3_campaign.network = internet_play() ? _h3_campaign_online : config_boolean("network.adhoc") ?
+		_h3_campaign_adhoc : _h3_campaign_system_link;
 	platform_log("menus: h3 campaign: network %s (host co-op campaign)", h3_campaign_network_name(h3_campaign.network));
 }
 
@@ -656,7 +907,7 @@ static void h3_campaign_initialize(void)
 	/* (internet play turned off since ONLINE CO-OP was chosen: co-op over
 	the connection the Vita has now) */
 	if (h3_campaign.network == _h3_campaign_online && !internet_play())
-		h3_campaign.network = _h3_campaign_system_link;
+		h3_campaign.network = config_boolean("network.adhoc") ? _h3_campaign_adhoc : _h3_campaign_system_link;
 	{
 		boolean corrupted = FALSE;
 
@@ -719,14 +970,23 @@ static void h3_campaign_update(struct widget_instance *widget)
 	}
 	if ((found = named(screen, "start_coop")) != NULL)
 	{
-		widget_instance_set_visibility_recursive(found, h3_campaign.network != _h3_campaign_local);
-		found->disabled = h3_campaign.network == _h3_campaign_local;
+		boolean shown = h3_campaign.network == _h3_campaign_online || h3_campaign.network == _h3_campaign_system_link;
+
+		widget_instance_set_visibility_recursive(found, shown);
+		found->disabled = !shown;
+	}
+	/* (AD HOC CO-OP's: its group joined first) */
+	if ((found = named(screen, "start_adhoc")) != NULL)
+	{
+		widget_instance_set_visibility_recursive(found, h3_campaign.network == _h3_campaign_adhoc);
+		found->disabled = h3_campaign.network != _h3_campaign_adhoc;
 	}
 	if (h3_campaign.network == _h3_campaign_online)
 		snprintf(text, sizeof(text), "%s", T("Co-op online: joined by your code."));
 	else if (h3_campaign.network == _h3_campaign_system_link)
-		snprintf(text, sizeof(text), "%s", config_boolean("network.adhoc") ?
-			T("Co-op with the PS Vitas near you.") : T("Co-op with the PS Vitas on your Wi-Fi."));
+		snprintf(text, sizeof(text), "%s", T("Co-op with the PS Vitas on your Wi-Fi."));
+	else if (h3_campaign.network == _h3_campaign_adhoc)
+		snprintf(text, sizeof(text), "%s", T("Co-op with the PS Vitas near you."));
 	else
 		snprintf(text, sizeof(text), "%s", T("This party is local to this PS Vita."));
 	text_show(named(screen, "ready_sub"), text);
@@ -811,6 +1071,13 @@ static boolean h3_campaign_network_set(struct widget_instance *widget)
 		platform_log("menus: h3 campaign: ONLINE CO-OP chosen, internet play is off");
 		return FALSE;
 	}
+	/* (SYSTEM LINK CO-OP with the connection Ad hoc, AD HOC CO-OP with
+	another: the restart dialog) */
+	if ((network == _h3_campaign_system_link || network == _h3_campaign_adhoc) &&
+		!h3_adhoc_connection_serves(network == _h3_campaign_adhoc, h3_campaign_network_name(network)))
+	{
+		return FALSE;
+	}
 	h3_campaign.network = network;
 	platform_log("menus: h3 campaign: network %s", h3_campaign_network_name(network));
 	return TRUE;
@@ -829,7 +1096,8 @@ static boolean h3_campaign_host(struct widget_instance *widget, struct event_rec
 	if (h3_campaign.network == _h3_campaign_local)
 		return FALSE;
 	platform_log("menus: h3 campaign: host co-op %s on %s (%s)", level, h3_difficulty_names[h3_campaign.difficulty],
-		h3_campaign.network == _h3_campaign_online ? "online" : "system link");
+		h3_campaign.network == _h3_campaign_online ? "online" : h3_campaign.network == _h3_campaign_adhoc ? "ad hoc" :
+		"system link");
 	/* (the level chosen as the Xbox's level list chooses it, before its
 	difficulty list: its map change not deferred, which would load it - and
 	end the network game - at the next frame) */
@@ -1411,12 +1679,13 @@ static void sanitize(char *out, int size, char const *text)
 	out[length] = 0;
 }
 
-/* whether internet play runs (the panel's Connection: Online) */
+/* whether internet play runs (the panel's Connection: Online); ad hoc play
+runs internet play's tunnel too (p2p_adhoc.c), but reaches no internet */
 static boolean internet_play(void)
 {
 	char text[96];
 
-	return p2p_status(text, sizeof(text)) != 0;
+	return !config_boolean("network.adhoc") && p2p_status(text, sizeof(text)) != 0;
 }
 
 /* a Play page setting, set as the settings panel sets it (on the Vita:
@@ -1447,16 +1716,18 @@ the Xbox's Multiplayer screen, as OpenCE's does with Menu style Halo CE, and
 opens the same flows (the server browser, Create Game, the code, the System
 Link and split screen screens), laid out as Halo 3's custom games lobby. Its
 NETWORK is the lobby's own choice, ONLINE (internet play: the settings
-panel's Connection Online), SYSTEM LINK (Same Wi-Fi, or AD HOC with the
-connection Ad hoc) or OFFLINE (split screen), and picks what START GAME and
-BROWSE GAMES open. GAME and MAP are the game type and the map the Xbox's
-lists, after START GAME, open on (the ones last used: kept as the Xbox's
-lists keep them, saved_game_files.c), chosen in pickers as Halo 3's. */
+panel's Connection Online), SYSTEM LINK (the Vitas on the same Wi-Fi), AD
+HOC (the Vitas near, the connection Ad hoc: ad hoc play above) or OFFLINE
+(split screen), and picks what START GAME and BROWSE GAMES open. GAME and
+MAP are the game type and the map the Xbox's lists, after START GAME, open
+on (the ones last used: kept as the Xbox's lists keep them,
+saved_game_files.c), chosen in pickers as Halo 3's. */
 
 enum
 {
 	_h3_network_online,
 	_h3_network_system_link,
+	_h3_network_adhoc,
 	_h3_network_offline,
 	NUMBER_OF_H3_NETWORKS
 };
@@ -1511,7 +1782,7 @@ static char const *h3_network_name(short network)
 	if (network == _h3_network_offline)
 		return T("OFFLINE");
 	/* (the connection Ad hoc: system link over the Vitas' own network) */
-	return config_boolean("network.adhoc") ? T("AD HOC") : T("SYSTEM LINK");
+	return network == _h3_network_adhoc ? T("AD HOC") : T("SYSTEM LINK");
 }
 
 /* a name of the game's (UTF-16) as UTF-8 */
@@ -1602,15 +1873,17 @@ static void h3_mp_map_read(void)
 }
 
 /* (the lobby opened) the network the first time (ONLINE with internet play,
-else SYSTEM LINK), then the player's; the map and game type the Xbox's
-lists would open on */
+AD HOC with the connection Ad hoc, else SYSTEM LINK), then the player's;
+the map and game type the Xbox's lists would open on */
 static void h3_mp_initialize(void)
 {
 	if (!h3_mp.initialized)
 	{
 		h3_mp.initialized = TRUE;
-		h3_mp.network = internet_play() ? _h3_network_online : _h3_network_system_link;
+		h3_mp.network = internet_play() ? _h3_network_online : config_boolean("network.adhoc") ? _h3_network_adhoc :
+			_h3_network_system_link;
 	}
+	menu_functions.browse_lan_pending = FALSE;
 	h3_mp_map_read();
 	h3_mp_gametypes_read();
 }
@@ -1633,16 +1906,16 @@ static char const *h3_mp_gametype_name(void)
 /* (port h3 mp lobby: the lobby, and Create Game's GAME TYPE and MAP rows)
 the rows' values (network_row, game_row, map_row; game_value and
 map_value), the rows each network offers (start_online, start_link,
-start_offline, browse_online, browse_link, code_row), the map's picture
-(map_picture: ui.map's mp_map_grafix), the caption, the players and the
-status (players, ready, ready_sub) */
+start_adhoc, start_offline, browse_online, browse_link, browse_adhoc,
+code_row), the map's picture (map_picture: ui.map's mp_map_grafix), the
+caption, the players and the status (players, ready, ready_sub) */
 static void h3_mp_lobby_update(struct widget_instance *widget)
 {
-	static char const *const rows[] = { "start_online", "start_link", "start_offline", "browse_online", "browse_link",
-		"code_row" };
+	static char const *const rows[] = { "start_online", "start_link", "start_adhoc", "start_offline", "browse_online",
+		"browse_link", "browse_adhoc", "code_row" };
 	/* (each row's network: the code's ONLINE's) */
-	static short const row_networks[] = { _h3_network_online, _h3_network_system_link, _h3_network_offline,
-		_h3_network_online, _h3_network_system_link, _h3_network_online };
+	static short const row_networks[] = { _h3_network_online, _h3_network_system_link, _h3_network_adhoc,
+		_h3_network_offline, _h3_network_online, _h3_network_system_link, _h3_network_adhoc, _h3_network_online };
 	struct widget_instance *screen = screen_of(widget);
 	struct widget_instance *found;
 	char text[192], said[192];
@@ -1685,7 +1958,7 @@ static void h3_mp_lobby_update(struct widget_instance *widget)
 	snprintf(text, sizeof(text), T("%s on %s"), h3_mp_gametype_name(), h3_mp_map_name());
 	text_show(named(screen, "caption"), text);
 	/* ("1 Player (16 max)": the most players a game of that network takes) */
-	maximum = h3_mp.network == _h3_network_offline ? 4 : h3_mp.network == _h3_network_system_link ? 16 :
+	maximum = h3_mp.network == _h3_network_offline ? 4 : h3_mp.network != _h3_network_online ? 16 :
 		(int)PIN(atol(setting_get("HALO_NET_MAX_PLAYERS", "16")), 2, 16);
 	snprintf(text, sizeof(text), T("1 Player (%d max)"), maximum);
 	text_show(named(screen, "players"), text);
@@ -1694,8 +1967,9 @@ static void h3_mp_lobby_update(struct widget_instance *widget)
 		snprintf(text, sizeof(text), "%s", network_wire_crossplay() ? T("Crossplay is on: turn it off to host") :
 			T("Host a game on the Internet, or join one."));
 	else if (h3_mp.network == _h3_network_system_link)
-		snprintf(text, sizeof(text), "%s", config_boolean("network.adhoc") ? T("Play with the PS Vitas near you.") :
-			T("Play with the PS Vitas on your Wi-Fi network."));
+		snprintf(text, sizeof(text), "%s", T("Play with the PS Vitas on your Wi-Fi network."));
+	else if (h3_mp.network == _h3_network_adhoc)
+		snprintf(text, sizeof(text), "%s", T("Play with the PS Vitas near you."));
 	else
 		snprintf(text, sizeof(text), "%s", T("This party is local to this PS Vita."));
 	text_show(named(screen, "ready_sub"), text);
@@ -1769,7 +2043,9 @@ static void h3_mp_map_set(struct widget_instance *widget)
 }
 
 /* (port h3 network set) the network picker's choice; ONLINE only with
-internet play (else FALSE: the screen saying how to turn it on opens) */
+internet play (else FALSE: the screen saying how to turn it on opens), AD
+HOC only with the connection Ad hoc and SYSTEM LINK with another (else
+FALSE: the restart dialog opens) */
 static boolean h3_mp_network_set(struct widget_instance *widget)
 {
 	short network = (short)PIN(h3_child_index(widget), 0, NUMBER_OF_H3_NETWORKS - 1);
@@ -1777,6 +2053,11 @@ static boolean h3_mp_network_set(struct widget_instance *widget)
 	if (network == _h3_network_online && !internet_play())
 	{
 		platform_log("menus: h3 mp: ONLINE chosen, internet play is off");
+		return FALSE;
+	}
+	if ((network == _h3_network_system_link || network == _h3_network_adhoc) &&
+		!h3_adhoc_connection_serves(network == _h3_network_adhoc, h3_network_name(network)))
+	{
 		return FALSE;
 	}
 	h3_mp.network = network;
@@ -1935,7 +2216,8 @@ N made-up games after those listed, for the browser's scrolling and sorts
 (run_netns_online_test.sh browserscroll); not joinable. With
 HALO_TEST_BROWSER_PC=1 too, both platforms (run_menus_test.sh h3browser):
 every second one a PC game (its badge PC, as the crossplay wire's), every
-third from the third one with a password */
+third from the third one with a password (not in the LAN browser: System
+Link has none; run_menus_test.sh h3lan) */
 static void browser_test_games(void)
 {
 #ifndef HALO_RELEASE
@@ -1961,11 +2243,167 @@ static void browser_test_games(void)
 		{
 			if (index % 2)
 				snprintf(entry->badge, sizeof(entry->badge), "%s", T("PC"));
-			entry->locked = index % 3 == 2;
+			entry->locked = index % 3 == 2 && !menu_functions.lan;
 		}
 	}
 #endif
 }
+
+/* ---- the Halo 3 LAN browser (halo3/network.xml): the server browser's
+screen and rules over the games the System Link list shows - the game's own
+discovery (network_client_manager.c: its advertisements, every field
+checked there, network_game_client_listed_games) - with BROWSE GAMES on
+SYSTEM LINK or AD HOC */
+
+/* a scenario's name as the game lists show it: an Xbox map's or campaign
+level's title, else the name itself */
+static char const *lan_map_title(char const *map)
+{
+	short index;
+
+	for (index = 0; index < H3_MAP_COUNT; index++)
+	{
+		char const *leaf = strrchr(h3_map_paths[index], '\\');
+
+		if (leaf && !_stricmp(leaf + 1, map))
+			return h3_map_names[index];
+	}
+	for (index = 0; index < NUMBER_OF_SINGLE_PLAYER_LEVELS; index++)
+	{
+		char const *leaf = strrchr(h3_level_paths[index], '\\');
+
+		if (leaf && !_stricmp(leaf + 1, map))
+			return h3_level_names[index];
+	}
+	return map;
+}
+
+/* the browser's games: the System Link list's, as the online browser's
+entries (p2p_lobby_entry: the same rows, sorts and lines) - each one's id
+its advertisement's, the name and map as checked, the gametype the game
+engine's name, the players; the badge VITA, or PC for a PC build's game (a
+crossplay host's, with its badges) */
+static void lan_entries(void)
+{
+	static char const *const engines[] = { "", "CTF", "Slayer", "Oddball", "King of the Hill", "Race" };
+	static char const *const difficulties[] = { "Easy", "Normal", "Heroic", "Legendary" };
+	/* (the System Link list holds 9 at most: network_client_manager.c) */
+	static struct network_listed_game listed[16];
+	short count = network_game_client_listed_games(listed, (short)NUMBEROF(listed));
+	short index;
+
+	menu_functions.game_count = 0;
+	for (index = 0; index < count; index++)
+	{
+		struct network_listed_game const *game = &listed[index];
+		struct p2p_lobby_entry *entry = &menu_functions.games[menu_functions.game_count++];
+		int length;
+
+		memset(entry, 0, sizeof(*entry));
+		snprintf(entry->id, sizeof(entry->id), "%s", game->id);
+		snprintf(entry->name, sizeof(entry->name), "%s", game->name);
+		snprintf(entry->map, sizeof(entry->map), "%s", lan_map_title(game->map));
+		entry->coop = game->cooperative;
+		snprintf(entry->gametype, sizeof(entry->gametype), "%s", entry->coop ? T("Co-op") :
+			game->engine_type >= 0 && game->engine_type < (short)NUMBEROF(engines) ? engines[game->engine_type] : "");
+		entry->players = game->players;
+		entry->maximum = game->maximum;
+		entry->open = game->open;
+		entry->has_teams = game->has_teams;
+		entry->compatible = 1;
+		/* (the crossplay wire's hosts are PC builds, with the online browser's
+		badges; else a Vita's games are the Vitas', a PC build's the PCs') */
+		if (network_wire_crossplay())
+		{
+			int verdict = crossplay_guard_judge(entry->coop, entry->players, entry->maximum);
+
+			entry->experimental = verdict != CROSSPLAY_GUARD_OK;
+			snprintf(entry->badge, sizeof(entry->badge), "%s%s", crossplay_guard_badge(1, 0),
+				crossplay_guard_badge_suffix(verdict));
+		}
+#ifndef HALO_PORT_VITA_NETWORK
+		else
+			snprintf(entry->badge, sizeof(entry->badge), "%s", T("PC"));
+#endif
+		/* the Rules line, as the online browser's: "Slayer on Blood Gulch",
+		"Co-op: The Pillar of Autumn, Heroic", ": full or starting" */
+		if (entry->coop)
+		{
+			length = snprintf(entry->rules, sizeof(entry->rules), T("Co-op: %s%s%s"), entry->map, ", ",
+				T(difficulties[PIN(game->difficulty, 0, 3)]));
+		}
+		else
+		{
+			length = snprintf(entry->rules, sizeof(entry->rules), T("%s on %s"), entry->gametype[0] ? entry->gametype :
+				T("A game"), entry->map);
+		}
+		length = PIN(length, 0, (int)sizeof(entry->rules) - 1);
+		if (!entry->open)
+			snprintf(entry->rules + length, sizeof(entry->rules) - (size_t)length, "%s", T(": full or starting"));
+		snprintf(entry->players_line, sizeof(entry->players_line), T("%d of %d"), entry->players, entry->maximum);
+	}
+}
+
+/* (each frame) the browser's title and status: SYSTEM LINK GAMES or AD HOC
+GAMES, how many games (looking for a few seconds after it opens), and with
+none, why, in the list's space; the list logged as it changes */
+static void lan_status(struct widget_instance *screen, char *line, int line_size, char *message, int message_size)
+{
+	boolean adhoc = config_boolean("network.adhoc") != 0;
+	boolean looking = system_milliseconds() - menu_functions.lan_since < LAN_LOOKING_MILLISECONDS;
+	char said[192];
+	long index;
+
+	text_show(named(screen, "lan_title"), adhoc ? T("AD HOC GAMES") : T("SYSTEM LINK GAMES"));
+	message[0] = 0;
+	if (menu_functions.status[0])
+		snprintf(line, line_size, "%s", menu_functions.status);
+	else if (!menu_functions.game_count)
+		snprintf(line, line_size, "%s", looking ? T("Looking for games...") : T("No games found"));
+	else if (menu_functions.game_count == 1)
+		snprintf(line, line_size, "%s", adhoc ? T("1 game near you") : T("1 game on your network"));
+	else
+	{
+		snprintf(line, line_size, adhoc ? T("%ld games near you") : T("%ld games on your network"),
+			menu_functions.game_count);
+	}
+	if (menu_functions.game_count > BROWSER_ROWS && !menu_functions.status[0])
+	{
+		size_t length = strlen(line);
+
+		snprintf(line + length, line_size - length, ", %ld-%ld", (long)menu_functions.view.offset + 1,
+			(long)menu_functions.view.offset + menu_functions.entry_count);
+	}
+	if (menu_functions.game_count && !menu_functions.status[0])
+	{
+		static char const *const sorts[NUMBER_OF_BROWSER_SORTS] = { "by players", "by name", "by map", "by gametype" };
+		size_t length = strlen(line);
+
+		snprintf(line + length, line_size - length, ", %s", T(sorts[menu_functions.sort]));
+	}
+	if (!menu_functions.game_count && !looking)
+		snprintf(message, message_size, "%s", adhoc ? T("No games found near you") : T("No games found on your network"));
+	/* (the list as it changes: the tests read it) */
+	snprintf(said, sizeof(said), "%ld", menu_functions.game_count);
+	for (index = 0; index < menu_functions.game_count && index < 4; index++)
+	{
+		struct p2p_lobby_entry const *entry = &menu_functions.games[index];
+		size_t length = strlen(said);
+
+		snprintf(said + length, sizeof(said) - length, "%s%s (%s, %s, %d/%d%s)", index ? ", " : ": ", entry->name,
+			entry->map, entry->gametype, entry->players, entry->maximum, entry->badge[0] ? ", PC" : "");
+	}
+	if (strcmp(said, menu_functions.lan_said))
+	{
+		snprintf(menu_functions.lan_said, sizeof(menu_functions.lan_said), "%s", said);
+		platform_log("menus: the LAN browser lists %s", said);
+	}
+}
+
+/* A on a row: its game, if still listed, joined as A on its row in the
+System Link list joins it (the game's checks; its lobby next, the browser
+deleted: *widget_deleted) */
+static boolean lan_join(struct widget_instance *widget, boolean *widget_deleted);
 
 static void browser_update(struct widget_instance *list)
 {
@@ -1974,9 +2412,14 @@ static void browser_update(struct widget_instance *list)
 	char line[96], message[128];
 	long index, focused_row = NONE, chosen = NONE, target;
 
-	join_watch();
-	browser_large_watch();
-	menu_functions.game_count = p2p_lobby_entries(menu_functions.games, P2P_LOBBY_MAXIMUM_ENTRIES);
+	if (menu_functions.lan)
+		lan_entries();
+	else
+	{
+		join_watch();
+		browser_large_watch();
+		menu_functions.game_count = p2p_lobby_entries(menu_functions.games, P2P_LOBBY_MAXIMUM_ENTRIES);
+	}
 	browser_test_games();
 	browser_list_sort(menu_functions.games, (int)menu_functions.game_count, menu_functions.sort);
 	/* the row the menus focus (a step up or down past the first or last
@@ -2100,7 +2543,9 @@ static void browser_update(struct widget_instance *list)
 	list's own space (the browser_message line): the brokers out of reach,
 	or reached with no public games (p2p_lobby_browse_status) */
 	message[0] = 0;
-	if (menu_functions.status[0])
+	if (menu_functions.lan)
+		lan_status(screen, line, (int)sizeof(line), message, (int)sizeof(message));
+	else if (menu_functions.status[0])
 		snprintf(line, sizeof(line), "%s", menu_functions.status);
 	else if (!internet_play())
 		snprintf(line, sizeof(line), "%s", T("Internet play is off"));
@@ -2219,10 +2664,12 @@ static void browser_large_watch(void)
 		browser_large_answered(answer);
 }
 
-static boolean browser_join(struct widget_instance *widget)
+static boolean browser_join(struct widget_instance *widget, boolean *widget_deleted)
 {
 	struct p2p_lobby_entry const *entry = browser_entry(widget);
 
+	if (menu_functions.lan)
+		return lan_join(widget, widget_deleted);
 	/* (a question unanswered stays no lock: a game chosen again asks anew) */
 	if (!entry)
 		return TRUE;
@@ -2254,6 +2701,39 @@ static boolean browser_join(struct widget_instance *widget)
 		return TRUE;
 	}
 	browser_join_entry(entry);
+	return TRUE;
+}
+
+static boolean lan_join(struct widget_instance *widget, boolean *widget_deleted)
+{
+	struct p2p_lobby_entry const *entry = browser_entry(widget);
+	/* (the System Link list's widget, for the game: the row's list) */
+	struct widget_instance *list = widget && widget->parent && !strncmp(widget->name, "row_", 4) ? widget->parent :
+		widget;
+	void const *server;
+	char name[P2P_LOBBY_NAME_SIZE];
+
+	if (!entry)
+		return TRUE;
+	menu_functions.chosen = *entry;
+	menu_functions.chosen_valid = TRUE;
+	menu_functions.status[0] = 0;
+	snprintf(name, sizeof(name), "%s", entry->name);
+	server = network_game_client_listed_game_by_id(entry->id);
+	if (!server)
+	{
+		snprintf(menu_functions.status, sizeof(menu_functions.status), "%s", T("That game is gone"));
+		platform_log("menus: the LAN browser's game %s is no longer listed", name);
+		return TRUE;
+	}
+	platform_log("menus: the LAN browser joins %s", name);
+	if (!ui_widget_port_join_advertised_game(list, server, widget_deleted))
+	{
+		/* (the player told why by the game: a closed game, another network
+		version) */
+		snprintf(menu_functions.status, sizeof(menu_functions.status), "%s", T("Not joined"));
+		platform_log("menus: the LAN browser's game %s was not joined", name);
+	}
 	return TRUE;
 }
 
@@ -2424,7 +2904,6 @@ boolean pc_menu_event_function_invoke(
 	long function_index,
 	boolean *widget_deleted)
 {
-	(void)widget_deleted;
 	switch (function_index)
 	{
 	case _function_mp_screen_init:
@@ -2469,7 +2948,7 @@ boolean pc_menu_event_function_invoke(
 		menu_functions.page = 1;
 		return TRUE;
 	case _function_browser_join:
-		return browser_join(widget);
+		return browser_join(widget, widget_deleted);
 	case _function_password_init:
 		menu_functions.password[0] = 0;
 		menu_functions.password_help = _help_ask;
@@ -2638,7 +3117,12 @@ boolean pc_menu_event_function_invoke(
 		platform_log("menus: h3 mp: host a system link game; the profile, then the map list");
 		return TRUE;
 	case _function_h3_browse_system_link:
+		/* (BROWSE GAMES on SYSTEM LINK: the System Link list, once the
+		profile is chosen, gives way to the Halo 3 LAN browser:
+		pc_menu_functions_screen) */
 		menu_functions.create_pending = FALSE;
+		menu_functions.browse_lan_pending = TRUE;
+		platform_log("menus: h3 mp: browse the system link games; the profile, then the LAN browser");
 		return TRUE;
 	case _function_h3_map_set:
 		h3_mp_map_set(widget);
@@ -2663,6 +3147,48 @@ boolean pc_menu_event_function_invoke(
 		return TRUE;
 	case _function_h3_setup_hold:
 		setup_hold(widget);
+		return TRUE;
+	/* (the Halo 3 LAN browser: the server browser's functions in its mode,
+	its game list the System Link list's, which the game's own "initialize
+	net game server list" starts, and Square starts again, after these) */
+	case _function_h3_lan_init:
+		menu_functions.lan = TRUE;
+		menu_functions.status[0] = 0;
+		menu_functions.chosen_valid = FALSE;
+		menu_functions.page = 0;
+		menu_functions.lan_since = system_milliseconds();
+		menu_functions.lan_said[0] = 0;
+		browser_view_reset(&menu_functions.view);
+		platform_log("menus: the LAN browser (%s)", config_boolean("network.adhoc") ? "ad hoc" : "system link");
+		return TRUE;
+	case _function_h3_lan_dispose:
+		menu_functions.lan = FALSE;
+		return TRUE;
+	case _function_h3_lan_refresh:
+		menu_functions.status[0] = 0;
+		menu_functions.lan_since = system_milliseconds();
+		platform_log("menus: the LAN browser looks again");
+		return TRUE;
+	/* (ad hoc play: AD HOC's and AD HOC CO-OP's rows, the joining and the
+	restart dialogs) */
+	case _function_h3_adhoc_host:
+		return h3_adhoc_ready(_h3_adhoc_then_host);
+	case _function_h3_adhoc_browse:
+		return h3_adhoc_ready(_h3_adhoc_then_browse);
+	case _function_h3_adhoc_coop:
+		return h3_adhoc_ready(_h3_adhoc_then_coop);
+	case _function_h3_adhoc_join:
+		h3_adhoc_join();
+		return TRUE;
+	case _function_h3_adhoc_cancel:
+		/* (the joining dialog gone: what was to follow with it, unless the
+		main loop is opening it now) */
+		if (!h3_adhoc.open_then)
+			h3_adhoc.then = _h3_adhoc_then_none;
+		h3_adhoc.said[0] = 0;
+		return TRUE;
+	case _function_h3_adhoc_restart:
+		h3_adhoc_restart();
 		return TRUE;
 	case _function_coop_campaign:
 	case _function_unwired:
@@ -2743,6 +3269,12 @@ void pc_menu_game_data_function_invoke(
 	case _input_h3_campaign_networks:
 		h3_pick_update(widget, NUMBER_OF_H3_CAMPAIGN_NETWORKS, "campnet_picture", "campnet_text");
 		break;
+	case _input_h3_adhoc_joining:
+		h3_adhoc_joining_update(widget);
+		break;
+	case _input_h3_adhoc_restart:
+		h3_adhoc_restart_update(widget);
+		break;
 	default:
 		break;
 	}
@@ -2770,7 +3302,66 @@ long pc_menu_functions_screen(
 		}
 		platform_log("menus: %s: the server did not start; the System Link list", asked);
 	}
+	/* (the Halo 3 lobby's BROWSE GAMES on SYSTEM LINK or AD HOC: the Halo 3
+	LAN browser, which starts the same search, with the profile screen
+	behind it as the System Link list has) */
+	if (menu_functions.browse_lan_pending && tag_index == tag_loaded(UI_WIDGET_DEFINITION_TAG, server_list_screen))
+	{
+		long lan = menu_tags_ingame_screen(lan_screen);
+
+		menu_functions.browse_lan_pending = FALSE;
+		if (lan != NONE)
+		{
+			platform_log("menus: the Halo 3 LAN browser for the System Link list");
+			return lan;
+		}
+		platform_log("menus: no Halo 3 LAN browser: the System Link list");
+	}
 	return tag_index;
+}
+
+/* (the main loop) the ad hoc group joined from the joining dialog: what was
+to follow, opened over it (the dialog keeps no history: B goes back past it,
+to the lobby) - the profile screen for START GAME (the map list after it)
+or BROWSE GAMES (the LAN browser after it), or co-op hosted and the game's
+lobby; the dialog says so when co-op was not hosted */
+static void h3_adhoc_go_on(void)
+{
+	struct widget_instance *active = NULL;
+	short then = h3_adhoc.then;
+	long index;
+
+	h3_adhoc.open_then = FALSE;
+	h3_adhoc.then = _h3_adhoc_then_none;
+	for (index = 0; index < 4 && !active; index++)
+		active = ui_widget_port_active_screen((short)index);
+	if (!active || then == _h3_adhoc_then_none)
+		return;
+	platform_log("menus: h3 adhoc: in the ad hoc group: %s", then == _h3_adhoc_then_host ? "host a game" :
+		then == _h3_adhoc_then_browse ? "browse the games" : "host co-op");
+	if (then == _h3_adhoc_then_coop)
+	{
+		if (!h3_campaign_host(active, NULL) || !ui_widget_load_by_name_or_tag(pregame_screen, NONE, NULL,
+			active->local_player_index, active->definition_tag_index, NONE, NONE))
+		{
+			h3_adhoc.coop_failed = TRUE;
+		}
+		return;
+	}
+	if (!transport_network_available())
+	{
+		platform_log("menus: h3 adhoc: no network after all");
+		return;
+	}
+	if (!h3_adhoc_ready(then))
+		return;
+	if (!ui_widget_load_by_name_or_tag(profiles_screen, NONE, NULL, active->local_player_index,
+		active->definition_tag_index, NONE, NONE))
+	{
+		menu_functions.create_pending = FALSE;
+		menu_functions.browse_lan_pending = FALSE;
+		platform_log("menus: h3 adhoc: the profile screen did not open");
+	}
 }
 
 /* (each frame, the main loop) the screens the functions asked for, opened
@@ -2783,6 +3374,9 @@ void pc_menu_functions_update(
 		menu_functions.open_system_link = FALSE;
 		menu_functions.open_password = FALSE;
 		menu_functions.create_pending = FALSE;
+		menu_functions.browse_lan_pending = FALSE;
+		h3_adhoc.open_then = FALSE;
+		h3_adhoc.then = _h3_adhoc_then_none;
 		/* (ui.map's scripts start again with it: ring_loop awake) */
 		h3_scenes.ring_asleep = FALSE;
 		return;
@@ -2806,6 +3400,8 @@ while it closes: browser dispose) */
 	}
 	/* (a join's watch goes on from here as the screens change) */
 	join_watch();
+	if (h3_adhoc.open_then)
+		h3_adhoc_go_on();
 	if (menu_functions.open_system_link)
 	{
 		menu_functions.open_system_link = FALSE;

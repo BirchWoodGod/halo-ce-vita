@@ -43,6 +43,51 @@ void const *network_game_client_listed_game_of(
 #endif
 short network_game_client_listed_game_count(
 	void);
+#ifdef HALO_LINUX
+/* port: a game the System Link list shows, as the Halo 3 menus' LAN browser
+lists it (port/linux/game/menu_functions.c): every field read from a
+datagram any machine on the network can send, so each is checked here -
+the name and map printable, cut to their sizes, the counts and the game
+type in range */
+enum
+{
+	NETWORK_LISTED_GAME_ID_SIZE = 17,
+	NETWORK_LISTED_GAME_NAME_SIZE = 33,
+	NETWORK_LISTED_GAME_MAP_SIZE = 33,
+};
+struct network_listed_game
+{
+	/* the advertisement's nonce, as hex: the game's own while the list
+	changes (network_game_client_listed_game_by_id) */
+	char id[NETWORK_LISTED_GAME_ID_SIZE];
+	/* the host's game name (printable ASCII and Latin-1, as UTF-8; "???"
+	when none of it is) and the map's scenario name (its path's last part,
+	printable ASCII) */
+	char name[NETWORK_LISTED_GAME_NAME_SIZE];
+	char map[NETWORK_LISTED_GAME_MAP_SIZE];
+	/* the game engine (game_engine.h; game_engine_none when out of range),
+	the players in it and the most it takes (1 to the session limit) */
+	short engine_type;
+	short players;
+	short maximum;
+	/* co-op on a campaign level, and its difficulty (0 to 3) */
+	short difficulty;
+	boolean open;
+	boolean has_teams;
+	boolean cooperative;
+	byte pad;
+};
+/* the games the System Link list shows now (valid, of this platform: the
+open ones first, as it orders them), up to maximum: how many; 0 without a
+client searching */
+short network_game_client_listed_games(
+	struct network_listed_game *games,
+	short maximum);
+/* the advertised game of a listed game's id while it is still listed, or
+NULL (for ui_widget_port_join_advertised_game) */
+void const *network_game_client_listed_game_by_id(
+	char const *id);
+#endif
 boolean network_game_client_set_team(
 	char team_index);
 /* whether the advertised game's host has this machine's network version

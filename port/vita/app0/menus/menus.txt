@@ -7,4 +7,5 @@ halo3/main.xml
 halo3/campaign.xml
 halo3/forge_lobby.xml
 halo3/multiplayer.xml
+halo3/network.xml
 halo3/password.xml

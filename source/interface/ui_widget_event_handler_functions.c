@@ -1347,6 +1347,49 @@ int ui_widget_port_join_listed_game(
 	list->data3C.selected_index = row;
 	return network_game_join_game_from_server_list(list, NULL, &deleted) ? 1 : 0;
 }
+
+/* port: the advertised game (network_game_client_listed_game_by_id) joined
+from the Halo 3 menus' LAN browser (port/linux/game/menu_functions.c) as A
+on its row in the System Link list joins it: network_game_join_game_from_
+server_list itself, with the browser's list standing for the System Link
+list's for the call (its one game this one) - the same checks (the host's
+network version, a closed game, the platform, the address) and the pregame
+screen next, which goes back to the browser. TRUE joined, the browser then
+deleted (*widget_deleted); FALSE not, the player told why. The list's own
+"deleted" handler is the System Link list's dispose, so that the game
+pointed at is let go with it. */
+boolean ui_widget_port_join_advertised_game(
+	struct widget_instance *list,
+	void const *server,
+	boolean *widget_deleted)
+{
+	static void const *servers[1];
+	void *generated_list;
+	short generated_count;
+	short selected_index;
+	boolean deleted = FALSE;
+	boolean joined;
+
+	if (!list || !server || !list->focused_child)
+		return FALSE;
+	generated_list = list->generated_list;
+	generated_count = list->generated_count;
+	selected_index = list->data3C.selected_index;
+	servers[0] = server;
+	list->generated_list = (void *)servers;
+	list->generated_count = 1;
+	list->data3C.selected_index = 0;
+	joined = network_game_join_game_from_server_list(list, NULL, &deleted);
+	if (!deleted)
+	{
+		list->generated_list = generated_list;
+		list->generated_count = generated_count;
+		list->data3C.selected_index = selected_index;
+	}
+	if (widget_deleted)
+		*widget_deleted = deleted;
+	return joined;
+}
 #endif
 
 static boolean network_server_list_dispose(

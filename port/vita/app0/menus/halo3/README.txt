@@ -9,28 +9,37 @@ these screens stand for the Xbox's own, over the same animated Halo ring:
 - campaign.xml: the campaign lobby (it stands for the level select the
   campaign's profile screen opens) with its Select Network, Select Mission
   and Select Difficulty pickers. NETWORK: LOCAL plays the level here;
-  ONLINE CO-OP (internet play: Connection Online) or SYSTEM LINK CO-OP (AD
-  HOC CO-OP with the connection Ad hoc) makes START GAME host it as co-op,
-  as the Xbox's difficulty list's Y did, and open the game's lobby, the
-  waiting screen; the others join from MULTIPLAYER (BROWSE GAMES, JOIN WITH
-  CODE).
+  ONLINE CO-OP (internet play: Connection Online), SYSTEM LINK CO-OP or AD
+  HOC CO-OP (the connection Ad hoc: the ad hoc group joined first,
+  network.xml) makes START GAME host it as co-op, as the Xbox's difficulty
+  list's Y did, and open the game's lobby, the waiting screen; the others
+  join from MULTIPLAYER (BROWSE GAMES, JOIN WITH CODE).
 - forge_lobby.xml: the Forge lobby FORGE opens, with its Select Map picker
   (the multiplayer maps of the maps folder) and START FORGE, which starts a
   local game of the map in Forge mode (port/linux/game/forge.c).
 - multiplayer.xml: the multiplayer lobby (it stands for the Xbox's Multiplayer
   screen, as OpenCE's multiplayer.xml does with Menu style Halo CE):
-  MULTIPLAYER LOBBY with NETWORK (ONLINE: internet play; SYSTEM LINK, or AD HOC
-  with the connection Ad hoc; OFFLINE: split screen), GAME and MAP (pickers:
-  the game type and map the Xbox's lists open on after START GAME), START GAME
-  (ONLINE: Create Game; SYSTEM LINK: the profile, then the new game's map list;
-  OFFLINE: split screen's), EDIT GAME TYPES (the Xbox's), BROWSE GAMES (ONLINE:
-  the server browser, CUSTOM GAMES; SYSTEM LINK: the System Link list) and JOIN
-  WITH CODE; the map's picture, "<game> on <map>", "1 Player (N max)" and the
+  MULTIPLAYER LOBBY with NETWORK (ONLINE: internet play; SYSTEM LINK: the Vitas
+  on the same Wi-Fi; AD HOC: the Vitas near, the connection Ad hoc; OFFLINE:
+  split screen), GAME and MAP (pickers: the game type and map the Xbox's lists
+  open on after START GAME), START GAME (ONLINE: Create Game; SYSTEM LINK and
+  AD HOC: the profile, then the new game's map list; OFFLINE: split screen's),
+  EDIT GAME TYPES (the Xbox's), BROWSE GAMES (ONLINE: the server browser,
+  CUSTOM GAMES; SYSTEM LINK and AD HOC: the profile, then the LAN browser,
+  network.xml) and JOIN WITH CODE; the map's picture, "<game> on <map>", "1 Player (N max)" and the
   nameplate. The browser, Create Game and JOIN WITH CODE run OpenCE's screens'
   functions (menu_functions.c "port browser/setup/code ...") under the same
   widget names; the browser's rows show a VITA or PC badge with a lock for a
   password. When internet play is off, ONLINE's rows open a dialog saying how to
   turn it on.
+- network.xml: the lobby's local networks' screens - the LAN browser (SYSTEM
+  LINK GAMES or AD HOC GAMES: the server browser's screen over the games the
+  Xbox's System Link list would show, the game's own search and join; no
+  padlocks, System Link has no passwords), the joining dialog (AD HOC out of
+  the ad hoc group: the system's dialog joins it, then what was asked goes
+  on) and the restart dialog (AD HOC with another connection, or SYSTEM LINK
+  with Ad hoc: the settings panel's Connection set and the game restarted,
+  the connection being set up as the game starts).
 - password.xml: the password screen of a game with one (it stands for OpenCE's,
   pc\join\password\screen, which the browser opens).
 In each level's map (ingame.txt):
@@ -79,5 +88,6 @@ the game's keys (a_butn, b_butn, start_butn) for that.
 
 Tests: port/vita/tests/run_menus_test.sh h3probe h3classic h3xbox h3broken
 h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create
-h3mptouch h3coop h3coopguide h3scenes; Forge's: port/vita/tests/run_forge_test.sh;
-co-op between two machines: port/vita/tests/run_netns_online_test.sh h3coopmenu.
+h3mptouch h3coop h3coopguide h3scenes h3lan h3adhoc h3adhoccoop; Forge's:
+port/vita/tests/run_forge_test.sh; between two machines:
+port/vita/tests/run_netns_online_test.sh h3coopmenu h3lan h3adhoc.

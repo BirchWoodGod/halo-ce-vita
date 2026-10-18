@@ -117,4 +117,41 @@ extern volatile int halo_system_link_request;
 extern volatile int halo_system_link_answer;
 extern volatile int halo_multiplayer_status[SYSTEM_LINK_STATUS_COUNT];
 
+/* ad hoc play from the Halo 3 menus (menu_functions.c: the lobbies' AD HOC
+and AD HOC CO-OP). halo_adhoc_request: the game sets it, the Vita's host
+takes it and sets it back to HALO_ADHOC_REQUEST_NONE -
+- JOIN: the ad hoc room's group joined through the system's dialog, in the
+  settings panel's room and dialog way, as the panel's Host and Join do
+  before System Link (with the connection Ad hoc, outside a group);
+- RESTART_ADHOC, RESTART_WIFI: the panel's Connection set to Ad hoc, or to
+  Same Wi-Fi, and the game restarted at once (at the main menu: the player
+  was asked in the game's menus first), since the connection takes effect
+  only at start-up.
+halo_adhoc_group: the host's word on the group, every frame. Elsewhere (no
+Vita host) the game answers itself (system_link_shortcut.c: an emulated
+group, HALO_NET_ADHOC_EMULATE, is in it from the start; HALO_ADHOC_TEST,
+test builds, answers a request) */
+enum
+{
+	HALO_ADHOC_REQUEST_NONE,
+	HALO_ADHOC_REQUEST_JOIN,
+	HALO_ADHOC_REQUEST_RESTART_ADHOC,
+	HALO_ADHOC_REQUEST_RESTART_WIFI,
+};
+
+enum
+{
+	/* the connection is not Ad hoc */
+	HALO_ADHOC_GROUP_OFF = -2,
+	/* the system's dialog did not join one (cancelled, or failed) */
+	HALO_ADHOC_GROUP_FAILED = -1,
+	HALO_ADHOC_GROUP_NONE = 0,
+	/* the system's dialog is up */
+	HALO_ADHOC_GROUP_JOINING = 1,
+	HALO_ADHOC_GROUP_IN = 2,
+};
+
+extern volatile int halo_adhoc_request;
+extern volatile int halo_adhoc_group;
+
 #endif

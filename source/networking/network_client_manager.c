@@ -3944,6 +3944,139 @@ short network_game_client_listed_game_count(
 	return count;
 }
 
+#ifdef HALO_LINUX
+static void network_game_client_listed_game_id(
+	struct network_advertised_game const *game,
+	char *id)
+{
+	static char const digits[] = "0123456789abcdef";
+	long index;
+
+	for (index = 0; index < TRANSPORT_NONCE_LENGTH && index * 2 + 2 < NETWORK_LISTED_GAME_ID_SIZE; index++)
+	{
+		id[index * 2] = digits[game->nonce[index] >> 4];
+		id[index * 2 + 1] = digits[game->nonce[index] & 15];
+	}
+	id[index * 2] = 0;
+}
+
+/* the advertised game's name as the LAN browser shows it: its characters
+up to the field's end, printable ASCII and Latin-1 kept (as UTF-8), the
+rest left out, no spaces at either end; "???" when nothing is left */
+static void network_game_client_listed_game_name(
+	wchar_t const *name,
+	char *out,
+	long size)
+{
+	long length = 0;
+	long index;
+
+	for (index = 0; index < NETWORK_GAME_NAME_LENGTH && name[index]; index++)
+	{
+		unsigned long code = (unsigned short)name[index];
+
+		if (code == ' ' && !length)
+			continue;
+		if (code >= 0x20 && code < 0x7F && length + 1 < size)
+			out[length++] = (char)code;
+		else if (code >= 0xA1 && code <= 0xFF && length + 2 < size)
+		{
+			out[length++] = (char)(0xC0 | (code >> 6));
+			out[length++] = (char)(0x80 | (code & 0x3F));
+		}
+	}
+	while (length > 0 && out[length - 1] == ' ')
+		length--;
+	out[length] = 0;
+	if (!length)
+		csstrncpy(out, "???", size - 1);
+	out[size - 1] = 0;
+}
+
+/* port: the games the System Link list shows, checked for the Halo 3 LAN
+browser (network_client_manager.h) */
+short network_game_client_listed_games(
+	struct network_listed_game *games,
+	short maximum)
+{
+	struct network_game_client *client = global_network_game_client_get();
+	short count = 0;
+	long pass, game_index;
+
+	if (!client || !games || maximum <= 0 || client->state != _network_game_client_state_searching)
+		return 0;
+	/* (the open games, then the closed ones: the System Link list's order) */
+	for (pass = 0; pass < 2; pass++)
+	{
+		for (game_index = 0; game_index < MAXIMUM_NETWORK_ADVERTISED_GAMES && count < maximum; game_index++)
+		{
+			struct network_advertised_game *game = &client->available_games[game_index];
+			struct network_listed_game *listed = &games[count];
+			char const *leaf;
+			long length;
+			short difficulty = 0;
+
+			if (!network_game_client_advertised_game_is_valid(game) ||
+				game->platform != network_game_get_local_platform() || (game->open ? pass != 0 : pass != 1))
+			{
+				continue;
+			}
+			csmemset(listed, 0, sizeof(*listed));
+			network_game_client_listed_game_id(game, listed->id);
+			network_game_client_listed_game_name(game->game_name, listed->name, (long)sizeof(listed->name));
+			/* (the map: a name the joining would take, else "?"; its path's
+			last part, printable ASCII, cut to the field) */
+			if (network_game_client_map_name_is_valid(game->map.name, (long)sizeof(game->map.name)))
+			{
+				leaf = strrchr(game->map.name, '\\');
+				leaf = leaf ? leaf + 1 : game->map.name;
+				for (length = 0; *leaf && length < NETWORK_LISTED_GAME_MAP_SIZE - 1; leaf++)
+				{
+					if ((unsigned char)*leaf >= 0x20 && (unsigned char)*leaf < 0x7F)
+						listed->map[length++] = *leaf;
+				}
+				listed->map[length] = 0;
+			}
+			if (!listed->map[0])
+				csstrncpy(listed->map, "?", sizeof(listed->map) - 1);
+			listed->engine_type = game->engine_type >= first_usable_game_engine_index &&
+				game->engine_type <= last_usable_game_engine_index ? game->engine_type : game_engine_none;
+			listed->maximum = (short)PIN(game->maximum_player_count, 1, HALO_PORT_MAXIMUM_NETWORK_PLAYERS);
+			listed->players = (short)PIN((long)game->player_count, 0, HALO_PORT_MAXIMUM_NETWORK_PLAYERS);
+			listed->open = game->open != 0;
+			listed->has_teams = game->has_teams != 0;
+			listed->cooperative = network_game_client_advertised_game_cooperative(game, &difficulty);
+			listed->difficulty = (short)PIN(difficulty, 0, 3);
+			count++;
+		}
+	}
+	return count;
+}
+
+/* port: the advertised game of a listed game's id, while it is listed */
+void const *network_game_client_listed_game_by_id(
+	char const *id)
+{
+	struct network_game_client *client = global_network_game_client_get();
+	long game_index;
+
+	if (!client || !id || client->state != _network_game_client_state_searching || client->join_in_progress)
+		return NULL;
+	for (game_index = 0; game_index < MAXIMUM_NETWORK_ADVERTISED_GAMES; game_index++)
+	{
+		struct network_advertised_game *game = &client->available_games[game_index];
+		char game_id[NETWORK_LISTED_GAME_ID_SIZE];
+
+		if (!network_game_client_advertised_game_is_valid(game) || game->platform != network_game_get_local_platform())
+			continue;
+		network_game_client_listed_game_id(game, game_id);
+		if (!strcmp(game_id, id))
+			return game;
+	}
+	return NULL;
+}
+#endif
+
 /* port: whether the advertised game is co-op on a campaign level (its host
 says so: HALO_PORT_ADVERTISED_COOP_FLAG), and its difficulty */
 boolean network_game_client_advertised_game_cooperative(
