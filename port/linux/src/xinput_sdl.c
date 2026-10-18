@@ -736,6 +736,61 @@ static void sdl_gamepad_state(SDL_Gamepad *gamepad, XINPUT_GAMEPAD *pad)
 	if (abs(value) > abs(pad->sThumbRY)) pad->sThumbRY = value;
 }
 
+/* ---------- Forge's monitor and Spartan combo */
+
+/* (port/linux/game/forge.c) set while a Forge game is played, and set here
+while its combo is held */
+extern int forge_game_playing;
+extern int forge_combo_held;
+
+/* how long Back alone is kept from the game in a Forge game, in case the
+combo's other button follows (the scoreboard opens that much later) */
+#define FORGE_COMBO_BACK_GRACE_MS 200
+
+/* In a Forge game the monitor and the Spartan are flipped by Back and the
+right stick's click pressed together (the Vita's Select + D-pad up in the
+default layout, mirroring Select + D-pad down for the settings panel; the
+keyboard's F1 + Z). The game never sees the combo: while it is held, and
+until both buttons are let go, neither reaches it, so it neither zooms nor
+shows the scoreboard; forge.c reads forge_combo_held instead. Back alone
+reaches the game once held FORGE_COMBO_BACK_GRACE_MS without the click (the
+scoreboard, held, as in any game); the click alone is the Spartan's zoom. */
+static void forge_combo_filter(XINPUT_GAMEPAD *pad)
+{
+	static Uint64 back_since;
+	static int held;
+	BOOL back = (pad->wButtons & XINPUT_GAMEPAD_BACK) != 0;
+	BOOL click = (pad->wButtons & XINPUT_GAMEPAD_RIGHT_THUMB) != 0;
+
+	if (!forge_game_playing)
+	{
+		back_since = 0;
+		held = 0;
+		forge_combo_held = 0;
+		return;
+	}
+	if (held || (back && click))
+	{
+		if (!held)
+			platform_log("forge: the monitor and Spartan combo (Back + the right stick's click), kept from the game");
+		held = back || click;
+		forge_combo_held = held && back && click;
+		pad->wButtons &= (WORD)~(XINPUT_GAMEPAD_BACK | XINPUT_GAMEPAD_RIGHT_THUMB);
+		back_since = 0;
+		return;
+	}
+	forge_combo_held = 0;
+	if (!back)
+	{
+		back_since = 0;
+		return;
+	}
+	if (!back_since)
+		back_since = SDL_GetTicks();
+	if (SDL_GetTicks() - back_since < FORGE_COMBO_BACK_GRACE_MS)
+		pad->wButtons &= (WORD)~XINPUT_GAMEPAD_BACK;
+}
+
 /* ---------- XAPI */
 
 VOID WINAPI XInitDevices(DWORD preallocation_type_count, PXDEVICE_PREALLOC_TYPE preallocation_types)
@@ -860,6 +915,8 @@ DWORD WINAPI XInputGetState(HANDLE device, PXINPUT_STATE state)
 	{
 		sdl_gamepad_state(gamepads[port], &state->Gamepad);
 	}
+	if (port == 0)
+		forge_combo_filter(&state->Gamepad);
 
 	if (memcmp(&state->Gamepad, &controllers[port].previous, sizeof(state->Gamepad)))
 	{

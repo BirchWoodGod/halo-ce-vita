@@ -12,8 +12,9 @@
 #               drops it, places a weapon from the next category (R) - a
 #               flamethrower, not the game type's rocket launcher - and a
 #               boulder from SCENERY, grabs it under the crosshair, carries
-#               it, drops it, deletes it, becomes the Spartan (D-pad up) and the monitor
-#               again, opens the Forge menu (Start) and leaves Forge, asked
+#               it, drops it, deletes it, becomes the Spartan (Select + D-pad
+#               up; D-pad up alone does nothing for the monitor) and the
+#               monitor again (Select alone and D-pad up alone flip nothing), opens the Forge menu (Start) and leaves Forge, asked
 #               first, back at the Halo 3 main menu
 #   budget      the budget (256 objects): the console's monitor in Blood
 #               Gulch fills 260 boulders; 256 placed, the rest refused with
@@ -123,7 +124,9 @@ b30='map_name levels\\b30\\b30'
 # (SCENERY), A: a boulder, R (dropped: scenery stays where it is let go), R
 # (grabbed again, under the crosshair), left (carried), R (dropped);
 # Triangle (deleted);
-# D-pad up (rs: the Spartan), forward, D-pad up (the monitor); Start, down
+# D-pad up alone (rs: nothing for the monitor), Select + D-pad up (back+rs:
+# the Spartan), forward, Select alone then D-pad up alone (the scoreboard,
+# then zoom: neither flips), Select + D-pad up (the monitor); Start, down
 # twice, A (LEAVE FORGE), A (leave))
 v1pad="wait:150:3000 @00-main-menu:0:300 down:150:600 down:150:600 a:150:2500 @01-lobby:0:300"
 v1pad="$v1pad a:150:2000 @02-map-picker:0:300 down:150:700 a:150:2000 a:150:2000 up:150:700 a:150:2000"
@@ -134,7 +137,8 @@ v1pad="$v1pad lt+rright:900:300 lt+rup:500:600 @09-turned-pushed:0:300 rt:150:25
 v1pad="$v1pad x:150:1200 rt:150:1200 @11-browser-weapons:0:300 down:150:600 a:150:1500 rt:150:1500"
 v1pad="$v1pad x:150:1200 rt:150:800 rt:150:1200 @12-browser-scenery:0:300 a:150:1500 rt:150:1000"
 v1pad="$v1pad @13-boulder-dropped:0:300 rt:150:1000 lleft:700:600 @14-boulder-carried:0:300 rt:150:1500"
-v1pad="$v1pad y:150:1500 @15-deleted:0:300 rs:150:2500 @16-spartan:0:300 lup:800:1500 rs:150:2500"
+v1pad="$v1pad y:150:1500 @15-deleted:0:300 rs:150:1500 back+rs:150:2500 @16-spartan:0:300 lup:800:1500"
+v1pad="$v1pad back:150:600 rs:150:1200 back+rs:150:2500"
 v1pad="$v1pad @17-monitor-again:0:300 start:150:2000 @18-forge-menu:0:300 down:150:600 down:150:600 a:150:1500"
 v1pad="$v1pad @19-leave-forge:0:300 a:150:9000 @20-main-menu-again:0:300"
 
@@ -185,8 +189,15 @@ for c in $cases; do
 		expect "$c" "the object under the crosshair grabbed" "forge: grabbed Boulder"
 		count "$c" "objects dropped" "forge: dropped " 4
 		expect "$c" "deleted" "forge: deleted Boulder"
-		expect "$c" "D-pad up: the Spartan, where the monitor was" "forge: player mode at .* can be hurt"
-		count "$c" "D-pad up: the monitor (at the start and again)" "forge: monitor mode at " 2
+		expect "$c" "Select + D-pad up: the Spartan, where the monitor was" "forge: player mode at .* can be hurt"
+		count "$c" "Select + D-pad up: the monitor (at the start and again)" "forge: monitor mode at " 2
+		count "$c" "the combo kept from the game, twice" "forge: the monitor and Spartan combo" 2
+		# (D-pad up alone, and Select alone, flip nothing: one Spartan, two monitors)
+		found=$(grep -ac "forge: player mode at" "$log")
+		[ "$found" = 1 ] && echo "  ok: $c: D-pad up alone and Select alone flipped nothing" ||
+			fail "$c: $found flips to the Spartan, not 1"
+		found=$(grep -ac "forge: monitor mode at" "$log")
+		[ "$found" = 2 ] || fail "$c: $found flips to the monitor, not 2"
 		expect "$c" "Start opened the Forge menu" "ui: screen pc.h3.forge.pause.screen"
 		expect "$c" "LEAVE FORGE asked first" "ui: screen pc.h3.forge.leave.screen"
 		expect "$c" "left without saving" "menus: forge: leaving to the main menu"

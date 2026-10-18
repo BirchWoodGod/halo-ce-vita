@@ -1407,11 +1407,11 @@ static void h3_forge_controls_update(struct widget_instance *widget)
 #ifdef HALO_VITA
 	text_show(widget, T("Fly: left stick. Up: Cross. Down: D-pad down.\nFaster: hold L. Look: right stick.\n"
 		"Grab, drop: R. Turn, push: L + right stick.\nObjects: Square. Delete: Triangle.\n"
-		"Copy: Circle. Upright: D-pad left.\nSpeed: D-pad right. Spartan: D-pad up."));
+		"Copy: Circle. Upright: D-pad left.\nSpeed: D-pad right. Spartan: Select + D-pad up."));
 #else
 	text_show(widget, T("Fly: W A S D. Up: Space. Down: C.\nFaster: Shift. Look: mouse.\n"
 		"Grab, drop: left button. Turn: right button.\nPush, pull: wheel. Objects: E. Delete: Del.\n"
-		"Copy: F. Upright: X. Speed: Q.\nSpartan: Tab or Z."));
+		"Copy: F. Upright: X. Speed: Q.\nSpartan: Tab, or F1 + Z."));
 #endif
 }
 

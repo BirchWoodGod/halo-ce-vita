@@ -14,7 +14,8 @@ map's tags load (forge_map_loaded) the session is that map's, and as soon
 as the player has spawned it is the monitor. Another map, or the main menu,
 ends it.
 
-The monitor and the Spartan, flipped by D-pad up (Halo 3's): as the monitor
+The monitor and the Spartan, flipped by a combo (Select + D-pad up on the
+Vita, below; D-pad up alone stays the Spartan's zoom): as the monitor
 the player's unit stays where it stood, hidden and unhurt, its controls not
 read, and the director flies the flying camera (the beta's debug camera,
 flying_camera.c) from where the player's eyes were, by the monitor's
@@ -46,7 +47,12 @@ the keys of its own the layout has no room for: forge_keys):
 - White [D-pad right] {Q}: the movement speed (slow, normal, fast);
 - Black [D-pad left] {X}: the object held (or under the crosshair) set
   upright, facing as it faces;
-- right stick click [D-pad up] {Z, middle mouse button, Tab}: the Spartan;
+- Back and the right stick click together [Select + D-pad up, mirroring
+  Select + D-pad down for the settings panel] {F1 + Z, or Tab}: the
+  Spartan, and back to the monitor. xinput_sdl.c (forge_combo_filter)
+  keeps the combo from the game while it is held, so it neither zooms nor
+  shows the scoreboard; the click alone is the Spartan's zoom, as in any
+  game, and nothing for the monitor;
 - Start: the Forge menu (resume, monitor or Spartan, the controls, leave).
 
 The palette is every tag of the loaded map that the browser offers, with a
@@ -93,8 +99,9 @@ HALO_TEST_COMMANDS):
   forge delete             the held (or aimed at) object deleted
   forge camera x y z yaw pitch   the monitor's camera put there (degrees)
   forge press <buttons> [frames]  the monitor's buttons pressed as a
-                           controller would (a b x y black white lt rt ls rs
-                           up, joined by +), for frames frames (2 by default)
+                           controller would (a b x y black white lt rt ls rs,
+                           and combo: the monitor and the Spartan's, joined
+                           by +), for frames frames (2 by default)
   forge stick lx ly rx ry [frames]  the sticks held (-1 to 1)
   forge where              the monitor's state in the log
   forge budget             the budget in the log
@@ -235,7 +242,6 @@ enum
 	_forge_button_alternate = _gamepad_analog_button_left_trigger,
 	_forge_button_grab = _gamepad_analog_button_right_trigger,
 	_forge_button_fly_down = _gamepad_binary_button_left_thumb,
-	_forge_button_toggle = _gamepad_binary_button_right_thumb,
 };
 
 /* the browser's categories' names (forge.h's order) */
@@ -375,6 +381,9 @@ struct forge_pad
 	/* the keyboard's own keys (FORGE_KEY_*), the wheel's notches */
 	unsigned long keys;
 	real wheel;
+	/* the monitor and the Spartan's combo held (Back + the right stick's
+	click, xinput_sdl.c forge_combo_filter), or Tab */
+	boolean toggle;
 };
 
 /* a tag the browser offers */
@@ -404,6 +413,12 @@ int forge_monitor_flying = 0;
 type's weapon, vehicle and equipment sets do not put another in its place
 (a multiplayer game makes a flamethrower a rocket launcher) */
 int forge_placing_exact = 0;
+/* (xinput_sdl.c forge_combo_filter) set while a Forge game is played or the
+monitor flies: Back + the right stick's click together are then the
+monitor and the Spartan's combo, kept from the game; set there while it is
+held */
+int forge_game_playing = 0;
+int forge_combo_held = 0;
 
 static struct
 {
@@ -438,9 +453,11 @@ static struct
 	short ai_count;
 	/* the buttons down last frame */
 	boolean was_down[NUMBER_OF_GAMEPAD_BUTTONS];
+	boolean toggle_was_down;
 	unsigned long keys_were_down;
 	/* (forge press, forge stick) the buttons and sticks the tests hold */
 	boolean test_down[NUMBER_OF_GAMEPAD_BUTTONS];
+	boolean test_toggle;
 	short test_buttons_frames;
 	real test_sticks[NUMBER_OF_GAMEPAD_STICKS][2];
 	short test_sticks_frames;
@@ -891,13 +908,13 @@ static void forge_pad_get(
 		pad->down[_forge_button_delete] = FALSE;
 	if (pad->keys & FORGE_KEY_DELETE)
 		pad->down[_forge_button_delete] = TRUE;
-	if (pad->keys & FORGE_KEY_TAB)
-		pad->down[_forge_button_toggle] = TRUE;
+	pad->toggle = forge_combo_held || (pad->keys & FORGE_KEY_TAB) != 0;
 	/* (forge press, forge stick) */
 	if (forge_globals.test_buttons_frames > 0)
 	{
 		for (button = 0; button < NUMBER_OF_GAMEPAD_BUTTONS; button++)
 			pad->down[button] |= forge_globals.test_down[button];
+		pad->toggle |= forge_globals.test_toggle;
 	}
 	if (forge_globals.test_sticks_frames > 0)
 	{
@@ -1964,6 +1981,7 @@ void forge_map_loaded(
 	}
 	forge_globals.game_active = forge_globals.game_requested && scenario_name &&
 		!_stricmp(scenario_name, forge_globals.game_map);
+	forge_game_playing = forge_globals.game_active;
 	if (!forge_globals.game_active)
 		forge_globals.game_requested = FALSE;
 	else
@@ -2091,6 +2109,7 @@ void forge_update(
 {
 	struct forge_pad pad;
 	boolean pressed[NUMBER_OF_GAMEPAD_BUTTONS];
+	boolean toggle_pressed;
 	short button;
 	real seconds = 1.f / 30.f;
 	boolean menu_open;
@@ -2101,7 +2120,8 @@ void forge_update(
 	if (forge_globals.test_sticks_frames > 0)
 		forge_globals.test_sticks_frames--;
 	forge_session_update();
-	if (!forge_globals.active && !forge_globals.game_active)
+	forge_game_playing = forge_globals.active || forge_globals.game_active;
+	if (!forge_game_playing)
 		return;
 	player_index = local_player_get_player_index(forge_globals.local_player_index);
 	if (player_index == NONE || game_connection() != _game_connection_local)
@@ -2127,6 +2147,8 @@ void forge_update(
 		pressed[button] = pad.down[button] && !forge_globals.was_down[button];
 		forge_globals.was_down[button] = pad.down[button];
 	}
+	toggle_pressed = pad.toggle && !forge_globals.toggle_was_down;
+	forge_globals.toggle_was_down = pad.toggle;
 	menu_open = forge_menu_open();
 	/* (Leave asked: once its A is let go, the main menu - a button still
 	held would press the main menu's first item as it opens) */
@@ -2162,7 +2184,7 @@ void forge_update(
 	if (!forge_globals.active)
 	{
 		forge_globals.browser_chosen = FALSE;
-		if ((pressed[_forge_button_toggle] && !menu_open) || forge_globals.toggle_requested)
+		if ((toggle_pressed && !menu_open) || forge_globals.toggle_requested)
 		{
 			forge_globals.toggle_requested = FALSE;
 			forge_begin();
@@ -2183,7 +2205,7 @@ void forge_update(
 		forge_unit_hide(player_get(player_index)->unit_index);
 	}
 
-	if (forge_globals.toggle_requested || (pressed[_forge_button_toggle] && !menu_open))
+	if (forge_globals.toggle_requested || (toggle_pressed && !menu_open))
 	{
 		forge_globals.toggle_requested = FALSE;
 		forge_end();
@@ -2527,12 +2549,16 @@ boolean forge_command(
 			names[0] = 0;
 			sscanf(rest, "%63s %d", names, &frames);
 			csmemset(forge_globals.test_down, 0, sizeof(forge_globals.test_down));
+			forge_globals.test_toggle = FALSE;
 			for (name = strtok_r(names, "+", &end); name; name = strtok_r(NULL, "+", &end))
 			{
 				short button = forge_button_from_name(name);
 
 				if (button != NONE)
 					forge_globals.test_down[button] = TRUE;
+				/* ("combo": the monitor and the Spartan's) */
+				if (!strcmp(name, "combo"))
+					forge_globals.test_toggle = TRUE;
 			}
 			forge_globals.test_buttons_frames = (short)PIN(frames, 1, 3000);
 		}

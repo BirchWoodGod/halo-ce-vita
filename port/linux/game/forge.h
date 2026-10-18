@@ -5,9 +5,10 @@ Forge (forge.c): a sandbox in a multiplayer map, Halo 3's way. The Forge
 lobby (menu_functions.c, halo3/forge_lobby.xml) starts a local game in
 Forge mode; in it the player is the monitor, flying, and spawns, grabs,
 turns and deletes the map's objects through the object browser
-(halo3/forge.xml), within a budget, or plays the map as a Spartan, D-pad up
-flipping between them. Nothing changes until it is started (or the
-console's "forge" command asks for the monitor).
+(halo3/forge.xml), within a budget, or plays the map as a Spartan,
+Select + D-pad up (Back + the right stick's click) flipping between them.
+Nothing changes until it is started (or the console's "forge" command asks
+for the monitor).
 */
 
 #ifndef __FORGE_H
@@ -121,8 +122,8 @@ boolean forge_game_active(
 boolean forge_monitor_active(
 	void);
 
-/* (the Forge menu) monitor and Spartan flipped, as D-pad up does: asked
-here, done at the next forge_update */
+/* (the Forge menu) monitor and Spartan flipped, as Select + D-pad up does:
+asked here, done at the next forge_update */
 void forge_toggle_request(
 	void);
 
