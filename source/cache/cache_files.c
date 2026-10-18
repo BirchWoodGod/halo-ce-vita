@@ -1576,6 +1576,13 @@ long scenario_tags_load(
 
 				menu_tags_loaded(stripped_scenario_name);
 			}
+			/* port: Forge (port/linux/game/forge.c): a Forge game asked
+			for on this map starts; anything of the last map's is gone */
+			{
+				extern void forge_map_loaded(char const *scenario_name);
+
+				forge_map_loaded(tag_get_name(result));
+			}
 #endif
 		}
 		/* port: a map refused is closed for the next to open */

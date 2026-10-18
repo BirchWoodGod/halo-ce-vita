@@ -74,6 +74,10 @@ static pthread_mutex_t mouse_lock = PTHREAD_MUTEX_INITIALIZER;
 static float mouse_pending_x, mouse_pending_y;
 static unsigned long mouse_polls_unconsumed = 0;
 static float mouse_wheel_accumulated = 0.0f;
+/* (Forge's monitor: halo_linux_forge_keys) the wheel's notches it has not
+taken, and its keys held at the last poll */
+static float forge_wheel_pending = 0.0f;
+static unsigned long forge_keys_held = 0;
 /* the wheel's switch (wheel_update): when the wheel last moved, until when
 Y is held, and whether a scroll is under way */
 static Uint64 wheel_moved_ms = 0;
@@ -167,6 +171,7 @@ static void mouse_poll(const struct platform_input_state *input)
 		mouse_pending_x += input->mouse_dx;
 		mouse_pending_y += input->mouse_dy;
 		mouse_wheel_accumulated += input->mouse_wheel;
+		forge_wheel_pending += input->mouse_wheel;
 		if (input->mouse_wheel != 0.0f)
 			wheel_moved_ms = SDL_GetTicks();
 	}
@@ -223,6 +228,33 @@ static void keyboard_gamepad(const struct platform_input_state *input, XINPUT_GA
 	pad->bAnalogButtons[XINPUT_GAMEPAD_BLACK] |= analog(k[SDL_SCANCODE_X]);
 	pad->bAnalogButtons[XINPUT_GAMEPAD_LEFT_TRIGGER] |= analog(k[SDL_SCANCODE_G] || (mouse && m[SDL_BUTTON_RIGHT]));
 	pad->bAnalogButtons[XINPUT_GAMEPAD_RIGHT_TRIGGER] |= analog(mouse && m[SDL_BUTTON_LEFT]);
+	/* (Forge's monitor's own: halo_linux_forge_keys) */
+	forge_keys_held = (k[SDL_SCANCODE_LSHIFT] || k[SDL_SCANCODE_RSHIFT] ? 1UL << 0 : 0) |
+		(k[SDL_SCANCODE_DELETE] ? 1UL << 1 : 0) | (k[SDL_SCANCODE_TAB] ? 1UL << 2 : 0) |
+		(wheel_scrolling || SDL_GetTicks() < wheel_press_until_ms ? 1UL << 3 : 0);
+}
+
+/* (port/linux/game/forge.c, Forge's monitor) the keyboard's keys the
+controller's layout above has no room for, held at the last poll: Shift
+(thrust: bit 0), Delete (delete: bit 1), Tab (the monitor and the Spartan:
+bit 2, as well as Y), and whether the wheel is scrolling (bit 3: its Y is
+not a delete there); and the wheel's notches since the last call (push and
+pull). None on the Vita, whose port 0 is its own controls */
+unsigned long halo_linux_forge_keys(float *wheel_notches)
+{
+	unsigned long keys;
+
+	pthread_mutex_lock(&mouse_lock);
+	*wheel_notches = forge_wheel_pending;
+	forge_wheel_pending = 0.0f;
+	pthread_mutex_unlock(&mouse_lock);
+#ifdef HALO_VITA
+	*wheel_notches = 0.0f;
+	keys = 0;
+#else
+	keys = console_is_active() ? 0 : forge_keys_held;
+#endif
+	return keys;
 }
 
 /* A scroll of the wheel switches weapons once: it holds Y for WHEEL_PRESS_MS
@@ -286,8 +318,13 @@ void test_input_hold_b(int hold)
 spaces (hold 150 and pause 1500 by default), pressed one after another
 from when the main menu has been up for a second (test_input_main_menu,
 main.c). Names in the Xbox's terms: a b x y black white lt rt up down left
-right start back ls rs, several at once joined by "+"; "wait" presses
-none. halo.log says each step as it is pressed. */
+right start back ls rs, the sticks pushed all the way lup ldown lleft
+lright rup rdown rleft rright, several at once joined by "+"; "wait" presses
+none, "level" none until a level (not the main menu) has run three
+seconds' frames, its hold and pause counted from then (a map's load takes
+as long as it takes), and "@name" none, the next frame saved as name.bmp
+(HALO_SCREENSHOT_DIR, as HALO_TEST_COMMANDS' @shot). halo.log says each
+step as it is pressed. */
 static struct
 {
 	int parsed;
@@ -299,13 +336,22 @@ static struct
 		char name[24];
 		int buttons;
 		WORD digital;
+		/* (the sticks pushed all the way: TEST_PAD_STICK_*) */
+		int sticks;
 		unsigned int hold_ms;
 		unsigned int pause_ms;
 	} steps[96];
 } test_pad;
+enum
+{
+	TEST_PAD_LEFT_UP = 1 << 0, TEST_PAD_LEFT_DOWN = 1 << 1, TEST_PAD_LEFT_LEFT = 1 << 2, TEST_PAD_LEFT_RIGHT = 1 << 3,
+	TEST_PAD_RIGHT_UP = 1 << 4, TEST_PAD_RIGHT_DOWN = 1 << 5, TEST_PAD_RIGHT_LEFT = 1 << 6, TEST_PAD_RIGHT_RIGHT = 1 << 7,
+};
 static volatile int test_pad_menu_ready;
 /* (the main menu is up: the scripted player leaves the menus to the steps) */
 static volatile int test_pad_at_menu;
+/* (the "level" step) the frames a level has run since the main menu */
+static volatile int test_pad_level_frames;
 
 /* main.c, every frame: whether the main menu is up */
 void test_input_main_menu(int loaded)
@@ -316,8 +362,11 @@ void test_input_main_menu(int loaded)
 	if (!loaded)
 	{
 		since = 0;
+		if (test_pad_level_frames < 1000000)
+			test_pad_level_frames++;
 		return;
 	}
+	test_pad_level_frames = 0;
 	if (!since)
 		since = SDL_GetTicks();
 	if (SDL_GetTicks() - since >= 1000)
@@ -331,6 +380,7 @@ static void test_pad_parse(void)
 		const char *name;
 		int analog;
 		WORD digital;
+		int sticks;
 	} names[] =
 	{
 		{ "a", XINPUT_GAMEPAD_A, 0 }, { "b", XINPUT_GAMEPAD_B, 0 }, { "x", XINPUT_GAMEPAD_X, 0 },
@@ -340,7 +390,11 @@ static void test_pad_parse(void)
 		{ "left", -1, XINPUT_GAMEPAD_DPAD_LEFT }, { "right", -1, XINPUT_GAMEPAD_DPAD_RIGHT },
 		{ "start", -1, XINPUT_GAMEPAD_START }, { "back", -1, XINPUT_GAMEPAD_BACK },
 		{ "ls", -1, XINPUT_GAMEPAD_LEFT_THUMB }, { "rs", -1, XINPUT_GAMEPAD_RIGHT_THUMB },
-		{ "wait", -1, 0 },
+		{ "wait", -1, 0 }, { "level", -1, 0 },
+		{ "lup", -1, 0, TEST_PAD_LEFT_UP }, { "ldown", -1, 0, TEST_PAD_LEFT_DOWN },
+		{ "lleft", -1, 0, TEST_PAD_LEFT_LEFT }, { "lright", -1, 0, TEST_PAD_LEFT_RIGHT },
+		{ "rup", -1, 0, TEST_PAD_RIGHT_UP }, { "rdown", -1, 0, TEST_PAD_RIGHT_DOWN },
+		{ "rleft", -1, 0, TEST_PAD_RIGHT_LEFT }, { "rright", -1, 0, TEST_PAD_RIGHT_RIGHT },
 	};
 #ifndef HALO_RELEASE
 	const char *setting = getenv("HALO_TEST_PAD");
@@ -387,10 +441,27 @@ static void test_pad_parse(void)
 					if (names[index].analog >= 0)
 						test_pad.steps[step].buttons |= 1 << names[index].analog;
 					test_pad.steps[step].digital |= names[index].digital;
+					test_pad.steps[step].sticks |= names[index].sticks;
 				}
 			}
 		}
 	}
+}
+
+/* a step begun: said in the log; "@name" has the next frame saved as
+name.bmp in HALO_SCREENSHOT_DIR (main.c's @shot) */
+static void test_pad_step_begin(void)
+{
+#ifndef HALO_VITA
+	extern char halo_screenshot_name[64];
+#endif
+	const char *name = test_pad.steps[test_pad.index].name;
+
+	platform_log("test pad: %s", name);
+#ifndef HALO_VITA
+	if (name[0] == '@' && name[1])
+		snprintf(halo_screenshot_name, 64, "%s", name + 1);
+#endif
 }
 
 static void test_pad_gamepad(XINPUT_GAMEPAD *pad)
@@ -405,12 +476,24 @@ static void test_pad_gamepad(XINPUT_GAMEPAD *pad)
 	if (!test_pad.started)
 	{
 		test_pad.started = now;
-		platform_log("test pad: %s", test_pad.steps[test_pad.index].name);
+		test_pad_step_begin();
 	}
 	while (test_pad.index < test_pad.count)
 	{
-		Uint64 elapsed = now - test_pad.started;
+		Uint64 elapsed;
 		int analog;
+
+		/* ("level": until a level has run 90 frames) */
+		if (!strcmp(test_pad.steps[test_pad.index].name, "level") ||
+			!strncmp(test_pad.steps[test_pad.index].name, "level:", 6))
+		{
+			if (test_pad_level_frames < 90)
+			{
+				test_pad.started = now;
+				return;
+			}
+		}
+		elapsed = now - test_pad.started;
 
 		if (elapsed < test_pad.steps[test_pad.index].hold_ms)
 		{
@@ -420,6 +503,18 @@ static void test_pad_gamepad(XINPUT_GAMEPAD *pad)
 					pad->bAnalogButtons[analog] = 255;
 			}
 			pad->wButtons |= test_pad.steps[test_pad.index].digital;
+			{
+				int sticks = test_pad.steps[test_pad.index].sticks;
+
+				if (sticks & (TEST_PAD_LEFT_UP | TEST_PAD_LEFT_DOWN))
+					pad->sThumbLY = (sticks & TEST_PAD_LEFT_UP) ? 32767 : -32767;
+				if (sticks & (TEST_PAD_LEFT_LEFT | TEST_PAD_LEFT_RIGHT))
+					pad->sThumbLX = (sticks & TEST_PAD_LEFT_RIGHT) ? 32767 : -32767;
+				if (sticks & (TEST_PAD_RIGHT_UP | TEST_PAD_RIGHT_DOWN))
+					pad->sThumbRY = (sticks & TEST_PAD_RIGHT_UP) ? 32767 : -32767;
+				if (sticks & (TEST_PAD_RIGHT_LEFT | TEST_PAD_RIGHT_RIGHT))
+					pad->sThumbRX = (sticks & TEST_PAD_RIGHT_RIGHT) ? 32767 : -32767;
+			}
 			return;
 		}
 		if (elapsed < test_pad.steps[test_pad.index].hold_ms + test_pad.steps[test_pad.index].pause_ms)
@@ -427,7 +522,7 @@ static void test_pad_gamepad(XINPUT_GAMEPAD *pad)
 		test_pad.started += test_pad.steps[test_pad.index].hold_ms + test_pad.steps[test_pad.index].pause_ms;
 		test_pad.index++;
 		if (test_pad.index < test_pad.count)
-			platform_log("test pad: %s", test_pad.steps[test_pad.index].name);
+			test_pad_step_begin();
 		else
 			platform_log("test pad: done");
 	}

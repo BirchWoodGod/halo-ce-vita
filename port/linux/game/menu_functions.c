@@ -57,6 +57,7 @@ halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
 #include "network_wire.h"
 #include "browser_list.h"
 #include "../src/system_link_shortcut.h"
+#include "forge.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -133,6 +134,17 @@ enum
 	_function_h3_campaign_start,
 	_function_h3_mission_focus,
 	_function_h3_difficulty_focus,
+	_function_forge_lobby_init,
+	_function_forge_map_set,
+	_function_forge_map_focus,
+	_function_forge_start,
+	_function_forge_browser_init,
+	_function_forge_browser_choose,
+	_function_forge_browser_back,
+	_function_forge_browser_previous,
+	_function_forge_browser_next,
+	_function_forge_toggle,
+	_function_forge_quit,
 };
 
 /* in port_game_data_input_names' order */
@@ -150,6 +162,11 @@ enum
 	_input_h3_missions,
 	_input_h3_difficulties,
 	_input_h3_mission_title,
+	_input_forge_lobby,
+	_input_forge_maps,
+	_input_forge_browser,
+	_input_forge_title,
+	_input_forge_controls,
 };
 
 /* what a line of typing is for */
@@ -315,10 +332,11 @@ static struct widget_instance *screen_of(struct widget_instance *widget)
 
 /* a text box's own text (one with no string list shows it): UTF-8, as the
 port's text is (a translation's, lang.h, and the game list's), made the
-game's UTF-16 (halo_menus_utf16); at most 120 characters */
+game's UTF-16 (halo_menus_utf16); at most 480 characters (Forge's controls
+are the longest) */
 static void text_show(struct widget_instance *widget, char const *text)
 {
-	unsigned short characters[121];
+	unsigned short characters[481];
 	long length;
 
 	if (!widget || widget->type != _ui_widget_type_text_box)
@@ -661,6 +679,331 @@ static void h3_pick_update(struct widget_instance *list, long count, char const 
 	if ((found = named(screen, picture)) != NULL)
 		found->animation.current_frame_index = (short)focused;
 	string_show(named(screen, description), (short)focused);
+}
+
+/* ---- Forge (forge.c): its lobby (halo3/forge_lobby.xml: the map, its
+picture, START FORGE), and over the game the object browser and the Forge
+menu (halo3/forge.xml) */
+
+#define FORGE_BROWSER_ROWS 12
+
+static struct
+{
+	boolean initialized;
+	/* the lobby's map (forge.c's list) */
+	short map;
+	/* the browser: the categories, or one category's items (category);
+	the rows' view and the one chosen (browser_list.h), a trigger's page */
+	boolean in_category;
+	short category;
+	struct browser_view view;
+	int chosen;
+	int page;
+	/* what was last said in the log */
+	char said[160];
+} h3_forge;
+
+/* the lobby opened: Blood Gulch the first time (Halo 3's first Forge map
+is its open one), a map of the maps folder; what was chosen since, after */
+static void h3_forge_lobby_initialize(void)
+{
+	short index;
+
+	if (!h3_forge.initialized)
+	{
+		h3_forge.initialized = TRUE;
+		h3_forge.map = 9;
+	}
+	for (index = 0; index < forge_map_count() && !forge_map_available(h3_forge.map); index++)
+		h3_forge.map = (short)((h3_forge.map + 1) % forge_map_count());
+	platform_log("menus: forge lobby: %s", forge_map_name(h3_forge.map));
+}
+
+/* the lobby's map row, picture (map_picture: its frame of ui.map's
+pictures of the multiplayer maps) and caption, Halo 3's "Edit Objects on
+<map>"; the status's second line when there is no map to play */
+static void h3_forge_lobby_update(struct widget_instance *widget)
+{
+	struct widget_instance *screen = screen_of(widget);
+	struct widget_instance *found;
+	boolean available = forge_map_available(h3_forge.map);
+	char text[160];
+
+	if (!h3_forge.initialized)
+		h3_forge_lobby_initialize();
+	snprintf(text, sizeof(text), "%s: %s", T("MAP"), T(forge_map_name(h3_forge.map)));
+	h3_capitals(text);
+	text_show(named(screen, "map_row"), text);
+	snprintf(text, sizeof(text), T("Edit Objects on %s"), T(forge_map_name(h3_forge.map)));
+	text_show(named(screen, "caption"), available ? text : T("No multiplayer map is in the maps folder."));
+	if (strcmp(text, h3_forge.said))
+	{
+		snprintf(h3_forge.said, sizeof(h3_forge.said), "%s", text);
+		platform_log("menus: forge lobby caption: %s", text);
+	}
+	if ((found = named(screen, "map_picture")) != NULL)
+		found->animation.current_frame_index = h3_forge.map;
+}
+
+/* the map picker: the maps of the maps folder shown, each its name, the
+picture and the description following the focused one */
+static void h3_forge_maps_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *child, *found;
+	short index = 0, focused = 0;
+
+	for (child = list->child; child; child = child->next, index++)
+	{
+		boolean shown = forge_map_available(index);
+		char text[96];
+
+		widget_instance_set_visibility_recursive(child, shown);
+		child->disabled = !shown;
+		snprintf(text, sizeof(text), "%s", T(forge_map_name(index)));
+		h3_capitals(text);
+		text_show(child, text);
+		if (child == list->focused_child)
+			focused = index;
+	}
+	if ((found = named(screen, "maps_picture")) != NULL)
+		found->animation.current_frame_index = focused;
+	string_show(named(screen, "maps_text"), focused);
+}
+
+/* the categories the loaded map has objects of, in the browser's order */
+static short h3_forge_categories(short categories[NUMBER_OF_FORGE_CATEGORIES])
+{
+	short category, count = 0;
+
+	for (category = 0; category < NUMBER_OF_FORGE_CATEGORIES; category++)
+	{
+		if (forge_category_item_count(category) > 0)
+			categories[count++] = category;
+	}
+	return count;
+}
+
+/* the browser's rows (row_0 to row_11: row_name, row_count) on the
+categories or a category's items, scrolling past twelve; its crumb, its
+budget and its pane (info_name, info_text) on the one chosen */
+static void h3_forge_browser_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *child, *focus = NULL;
+	short categories[NUMBER_OF_FORGE_CATEGORIES];
+	short category_count = h3_forge_categories(categories);
+	short objects, ai;
+	long count, index, focused_row = NONE;
+	int target;
+	char text[192], line[160];
+
+	if (h3_forge.in_category && forge_category_item_count(h3_forge.category) <= 0)
+	{
+		h3_forge.in_category = FALSE;
+		browser_view_reset(&h3_forge.view);
+		h3_forge.chosen = 0;
+	}
+	count = h3_forge.in_category ? forge_category_item_count(h3_forge.category) : category_count;
+	for (index = 0, child = list->child; child; child = child->next)
+	{
+		if (strncmp(child->name, "row_", 4))
+			continue;
+		if (child == list->focused_child)
+			focused_row = index;
+		index++;
+	}
+	target = browser_view_follow(&h3_forge.view, FORGE_BROWSER_ROWS, (int)count, (int)focused_row, h3_forge.chosen,
+		h3_forge.page);
+	h3_forge.page = 0;
+	h3_forge.chosen = target;
+	for (index = 0, child = list->child; child; child = child->next)
+	{
+		long shown = h3_forge.view.offset + index;
+
+		if (strncmp(child->name, "row_", 4))
+			continue;
+		if (index >= h3_forge.view.visible)
+		{
+			widget_instance_set_visibility_recursive(child, FALSE);
+			child->disabled = TRUE;
+			index++;
+			continue;
+		}
+		widget_instance_set_visibility_recursive(child, TRUE);
+		child->disabled = FALSE;
+		line[0] = text[0] = 0;
+		if (h3_forge.in_category)
+		{
+			struct forge_item item;
+
+			if (forge_category_item(h3_forge.category, (short)shown, &item))
+			{
+				snprintf(text, sizeof(text), "%s", item.name);
+				if (item.placed > 0)
+					snprintf(line, sizeof(line), T("%d placed"), item.placed);
+			}
+		}
+		else
+		{
+			snprintf(text, sizeof(text), "%s", forge_category_name(categories[shown]));
+			snprintf(line, sizeof(line), "%d", forge_category_item_count(categories[shown]));
+		}
+		h3_capitals(text);
+		text_show(named(child, "row_name"), text);
+		text_show(named(child, "row_count"), line);
+		if (index == h3_forge.view.row)
+			focus = child;
+		index++;
+	}
+	if (focus && focus != list->focused_child)
+		ui_widget_port_give_focus(list, focus);
+	for (child = list->child; child; child = child->next)
+	{
+		if (!strncmp(child->name, "row_", 4))
+			child->animation.current_frame_index = child == focus ? 1 : 0;
+	}
+	/* (the crumb, the budget, the pane) */
+	forge_budget_get(&objects, &ai);
+	snprintf(text, sizeof(text), "%d / %d", objects, FORGE_MAXIMUM_OBJECTS);
+	text_show(named(screen, "budget"), text);
+	if (h3_forge.in_category)
+		snprintf(text, sizeof(text), "%s \xc2\xbb %s", T("OBJECTS"), forge_category_name(h3_forge.category));
+	else
+		snprintf(text, sizeof(text), "%s", T("OBJECTS"));
+	h3_capitals(text);
+	text_show(named(screen, "crumb"), text);
+	text[0] = line[0] = 0;
+	if (target >= 0 && h3_forge.in_category)
+	{
+		struct forge_item item;
+
+		if (forge_category_item(h3_forge.category, (short)target, &item))
+		{
+			snprintf(text, sizeof(text), "%s", item.name);
+			snprintf(line, sizeof(line), T("Placed: %d\nBudget: %d/%d objects, %d/%d AI"), item.placed, objects,
+				FORGE_MAXIMUM_OBJECTS, ai, FORGE_MAXIMUM_AI);
+		}
+	}
+	else if (target >= 0 && target < category_count)
+	{
+		snprintf(text, sizeof(text), "%s", forge_category_name(categories[target]));
+		snprintf(line, sizeof(line), T("%d objects of this map.\nBudget: %d/%d objects, %d/%d AI"),
+			forge_category_item_count(categories[target]), objects, FORGE_MAXIMUM_OBJECTS, ai, FORGE_MAXIMUM_AI);
+	}
+	text_show(named(screen, "info_name"), text);
+	text_show(named(screen, "info_text"), line);
+	/* (said as it changes: the tests read it) */
+	{
+		char said[160];
+
+		snprintf(said, sizeof(said), "%s%s%s (%d of %ld)", h3_forge.in_category ?
+			forge_category_name(h3_forge.category) : T("OBJECTS"), text[0] ? ": " : "", text, target + 1, count);
+		if (strcmp(said, h3_forge.said))
+		{
+			snprintf(h3_forge.said, sizeof(h3_forge.said), "%s", said);
+			platform_log("menus: forge browser: %s", said);
+		}
+	}
+}
+
+/* the category view of the browser's next (step 1) or previous (-1)
+category of the map, from its first item */
+static void h3_forge_browser_step(int step)
+{
+	short categories[NUMBER_OF_FORGE_CATEGORIES];
+	short count = h3_forge_categories(categories);
+	short index, at = 0;
+
+	if (!h3_forge.in_category || count <= 0)
+		return;
+	for (index = 0; index < count; index++)
+	{
+		if (categories[index] == h3_forge.category)
+			at = index;
+	}
+	h3_forge.category = categories[(at + step + count) % count];
+	browser_view_reset(&h3_forge.view);
+	h3_forge.chosen = 0;
+}
+
+/* A on a row: a category opened, or its item chosen (forge.c spawns it in
+the monitor's hand and closes the browser) */
+static void h3_forge_browser_choose(void)
+{
+	short categories[NUMBER_OF_FORGE_CATEGORIES];
+	short count = h3_forge_categories(categories);
+
+	if (h3_forge.chosen < 0)
+		return;
+	if (!h3_forge.in_category)
+	{
+		if (h3_forge.chosen >= count)
+			return;
+		h3_forge.in_category = TRUE;
+		h3_forge.category = categories[h3_forge.chosen];
+		browser_view_reset(&h3_forge.view);
+		h3_forge.chosen = 0;
+		return;
+	}
+	forge_browser_choose(h3_forge.category, (short)h3_forge.chosen);
+}
+
+/* B: from a category, back to the categories (on it); from them, closed */
+static void h3_forge_browser_back(void)
+{
+	short categories[NUMBER_OF_FORGE_CATEGORIES];
+	short count = h3_forge_categories(categories);
+	short index;
+
+	if (!h3_forge.in_category)
+	{
+		forge_menus_close_request();
+		return;
+	}
+	h3_forge.in_category = FALSE;
+	browser_view_reset(&h3_forge.view);
+	h3_forge.chosen = 0;
+	for (index = 0; index < count; index++)
+	{
+		if (categories[index] == h3_forge.category)
+			h3_forge.chosen = index;
+	}
+}
+
+/* the Forge menu's title (FORGE · <map>) and its monitor row's words */
+static void h3_forge_title_update(struct widget_instance *widget)
+{
+	struct widget_instance *screen = screen_of(widget);
+	char const *scenario = main_get_map_name();
+	char text[128];
+	short index;
+	char const *name = "";
+
+	for (index = 0; scenario && index < forge_map_count(); index++)
+	{
+		if (!_stricmp(scenario, forge_map_path(index)))
+			name = T(forge_map_name(index));
+	}
+	snprintf(text, sizeof(text), "%s \xc2\xb7 %s", T("FORGE"), name);
+	h3_capitals(text);
+	text_show(widget, text);
+	snprintf(text, sizeof(text), "%s", forge_monitor_active() ? T("PLAY AS SPARTAN") : T("MONITOR"));
+	text_show(named(screen, "toggle"), text);
+}
+
+/* the Forge menu's controls: the Vita's buttons, or the keyboard's */
+static void h3_forge_controls_update(struct widget_instance *widget)
+{
+#ifdef HALO_VITA
+	text_show(widget, T("Fly: left stick. Up: Cross. Down: D-pad down.\nFaster: hold L. Look: right stick.\n"
+		"Grab, drop: R. Turn, push: L + right stick.\nObjects: Square. Delete: Triangle.\n"
+		"Copy: Circle. Upright: D-pad left.\nSpeed: D-pad right. Spartan: D-pad up."));
+#else
+	text_show(widget, T("Fly: W A S D. Up: Space. Down: C.\nFaster: Shift. Look: mouse.\n"
+		"Grab, drop: left button. Turn: right button.\nPush, pull: wheel. Objects: E. Delete: Del.\n"
+		"Copy: F. Upright: X. Speed: Q.\nSpartan: Tab or Z."));
+#endif
 }
 
 /* a text box's string of its string list */
@@ -1429,6 +1772,50 @@ boolean pc_menu_event_function_invoke(
 		platform_log("menus: h3 campaign: start %s on %s", h3_level_paths[h3_campaign.level],
 			h3_difficulty_names[h3_campaign.difficulty]);
 		return TRUE;
+	case _function_forge_lobby_init:
+		h3_forge_lobby_initialize();
+		return TRUE;
+	case _function_forge_map_set:
+		if (forge_map_available((short)h3_child_index(widget)))
+			h3_forge.map = (short)h3_child_index(widget);
+		platform_log("menus: forge lobby: %s", forge_map_name(h3_forge.map));
+		return TRUE;
+	case _function_forge_map_focus:
+		h3_focus_child(widget, h3_forge.map);
+		return TRUE;
+	case _function_forge_start:
+		/* (START FORGE: the local game of the map, in Forge mode; nothing
+		with no map to play) */
+		if (!forge_map_available(h3_forge.map))
+			return FALSE;
+		platform_log("menus: forge lobby: start %s", forge_map_path(h3_forge.map));
+		forge_game_start(h3_forge.map);
+		return TRUE;
+	case _function_forge_browser_init:
+		h3_forge.page = 0;
+		h3_forge.said[0] = 0;
+		return TRUE;
+	case _function_forge_browser_choose:
+		h3_forge_browser_choose();
+		return TRUE;
+	case _function_forge_browser_back:
+		h3_forge_browser_back();
+		return TRUE;
+	case _function_forge_browser_previous:
+		h3_forge_browser_step(-1);
+		return TRUE;
+	case _function_forge_browser_next:
+		h3_forge_browser_step(1);
+		return TRUE;
+	case _function_forge_toggle:
+		forge_toggle_request();
+		return TRUE;
+	case _function_forge_quit:
+		/* (as the pause screen's quit, with no game saved: a Forge game
+		is not the campaign's; forge.c goes once A is let go) */
+		platform_log("menus: forge: leaving to the main menu");
+		forge_quit_request();
+		return TRUE;
 	case _function_coop_campaign:
 	case _function_unwired:
 	default:
@@ -1475,6 +1862,22 @@ void pc_menu_game_data_function_invoke(
 		break;
 	case _input_h3_mission_title:
 		h3_mission_title_update(widget);
+		break;
+	case _input_forge_lobby:
+		h3_forge_lobby_update(widget);
+		break;
+	case _input_forge_maps:
+		h3_forge_maps_update(widget);
+		break;
+	case _input_forge_browser:
+		if (widget->type == _ui_widget_type_column_list)
+			h3_forge_browser_update(widget);
+		break;
+	case _input_forge_title:
+		h3_forge_title_update(widget);
+		break;
+	case _input_forge_controls:
+		h3_forge_controls_update(widget);
 		break;
 	default:
 		break;

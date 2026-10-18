@@ -79,11 +79,18 @@ extern volatile int halo_pc_menus_state;
 /* menu_functions.c's: a screen of the game's that the menus' flows open
 another in place of (ours or the game's), or the tag itself */
 long pc_menu_functions_screen(long tag_index);
+/* forge.c's: whether a Forge game is played (its Start opens the Forge menu) */
+boolean forge_game_active(void);
+long menu_tags_ingame_screen(char const *name);
 
 /* ---------- constants */
 
 #define PC_MENU_TAG_PREFIX "pc\\"
 #define XBOX_MULTIPLAYER_SCREEN "ui\\shell\\main_menu\\multiplayer_type_select\\multiplayer_type_select_screen"
+/* a level's pause screen, and the Forge menu that stands for it in a Forge
+game (halo3/forge.xml, whatever the Menu style) */
+#define XBOX_PAUSE_SCREEN "ui\\shell\\solo_game\\pause_game\\pause_game"
+#define FORGE_PAUSE_SCREEN "h3/forge/pause/screen"
 #define UI_WIDGET_DEFINITION_TAG 'DeLa'
 #define UNICODE_STRING_LIST_TAG 'ustr'
 #define FONT_TAG 'font'
@@ -344,6 +351,9 @@ static char const *const port_function_names[] =
 	"port h3 servers on", "port h3 servers off",
 	"port h3 campaign init", "port h3 mission set", "port h3 difficulty set", "port h3 campaign start",
 	"port h3 mission focus", "port h3 difficulty focus",
+	"port forge lobby init", "port forge map set", "port forge map focus", "port forge start",
+	"port forge browser init", "port forge browser choose", "port forge browser back",
+	"port forge browser previous", "port forge browser next", "port forge toggle", "port forge quit",
 };
 
 /* the port's game data functions (menu_functions.c), from
@@ -354,6 +364,7 @@ static char const *const port_game_data_input_names[] =
 	"port mp update desc", "port browser update", "port password update", "port setup update", "port code update",
 	"port h3 nameplate", "port h3 servers", "port h3 campaign", "port h3 missions", "port h3 difficulties",
 	"port h3 mission title",
+	"port forge lobby", "port forge maps", "port forge browser", "port forge title", "port forge controls",
 };
 
 static struct
@@ -404,6 +415,8 @@ static struct
 	long *text_tags;
 	long *spinner_tags;
 	boolean failed;
+	/* a level's map (the in-game set) */
+	boolean ingame;
 } build;
 
 /* ---------- private code */
@@ -822,6 +835,13 @@ static void *bitmap_build(struct halo_menu_bitmap const *source, long tag_index)
 			problem(source->file, source->line, "a frame is 1 to 2048 wide and high:", data->png);
 			return group;
 		}
+		/* (its texture is made as a power of two's, below: another size
+		would be read with the wrong rows, and spoil the textures after it) */
+		if ((data->width & (data->width - 1)) || (data->height & (data->height - 1)))
+		{
+			problem(source->file, source->line, "a PNG frame's width and height are powers of two:", data->png);
+			return group;
+		}
 		/* (its texture is made when the screens first open, from the PNG) */
 		bitmap->signature = BITMAP_GROUP_TAG;
 		bitmap->width = (short)data->width;
@@ -947,8 +967,27 @@ static void handler_build(struct ui_widget_event_handler_reference *handler, str
 	}
 	if (target_count)
 	{
-		reference_set(&handler->widget_tag, UI_WIDGET_DEFINITION_TAG,
-			tag_named(UI_WIDGET_DEFINITION_TAG, targets[0], source->file, source->line));
+		/* (the in-game set is built into every level's map, the campaign's
+		and the multiplayer maps', which carry different screens of the
+		game's: one a map lacks is opened by nothing there, not a reason to
+		leave the set out - a multiplayer map has no campaign pause screen,
+		so nothing there opens the Halo 3 one that names the campaign's
+		questions) */
+		if (build.ingame && strchr(targets[0], '\\') && tag_loaded(UI_WIDGET_DEFINITION_TAG, targets[0]) == NONE)
+		{
+			platform_log("menus: %s:%ld: this map has no %s: the handler opens nothing here", source->file,
+				source->line, targets[0]);
+			SET_FLAG(handler->flags, _event_handler_open_widget_bit, FALSE);
+			SET_FLAG(handler->flags, _event_handler_replace_self_with_widget_bit, FALSE);
+			SET_FLAG(handler->flags, _event_handler_give_focus_to_widget_bit, FALSE);
+			SET_FLAG(handler->flags, _event_handler_close_other_widget_bit, FALSE);
+			SET_FLAG(handler->flags, _event_handler_reload_other_widget_bit, FALSE);
+		}
+		else
+		{
+			reference_set(&handler->widget_tag, UI_WIDGET_DEFINITION_TAG,
+				tag_named(UI_WIDGET_DEFINITION_TAG, targets[0], source->file, source->line));
+		}
 	}
 	if (source->sound)
 		reference_set(&handler->sound_effect, SOUND_TAG, map_tag(SOUND_TAG, source->sound, source->file, source->line));
@@ -2028,6 +2067,7 @@ void menu_tags_loaded(
 	read = vita_host_time_us();
 	memset(&build, 0, sizeof(build));
 	build.menus = menus;
+	build.ingame = ingame;
 	widget_count = menus->widget_count;
 	build.widget_tags = malloc((widget_count + 1) * sizeof(long));
 	build.text_tags = malloc((widget_count + 1) * sizeof(long));
@@ -2139,8 +2179,13 @@ void menu_tags_loaded(
 
 		if (from == NONE || widget == NONE)
 		{
-			problem(screen->file, screen->line, from == NONE ? "the map has no screen" : "no widget is named",
-				from == NONE ? screen->replaces : screen->root);
+			/* (a level's map without the screen: a multiplayer map has no
+			campaign pause screen to stand for) */
+			if (ingame && from == NONE && widget != NONE)
+				platform_log("menus: this map has no %s: %s stands for nothing here", screen->replaces, screen->root);
+			else
+				problem(screen->file, screen->line, from == NONE ? "the map has no screen" : "no widget is named",
+					from == NONE ? screen->replaces : screen->root);
 			continue;
 		}
 		menu_tags.h3_from[menu_tags.h3_count] = from;
@@ -2253,6 +2298,18 @@ long menu_tags_screen(
 		menu_tags_dump(tag_index, 0);
 	if (!menu_tags.loaded || tag_index == NONE)
 		return tag_index;
+	/* (a Forge game: its menu for the level's pause screen, which would
+	save the game and offer the campaign's checkpoints) */
+	if (forge_game_active() && tag_index == tag_loaded(UI_WIDGET_DEFINITION_TAG, XBOX_PAUSE_SCREEN))
+	{
+		long forge_menu = menu_tags_ingame_screen(FORGE_PAUSE_SCREEN);
+
+		if (forge_menu != NONE)
+		{
+			platform_log("menus: the Forge menu for %s", XBOX_PAUSE_SCREEN);
+			return forge_menu;
+		}
+	}
 	/* (Menu style Halo 3: the Halo 3 set's screen for the Xbox's, its
 	pictures read the first time, as the Multiplayer screen's; read again
 	each time, a change in the settings panel takes at the next screen) */
@@ -2298,6 +2355,34 @@ long menu_tags_screen(
 	if (menu_tags.art > 0)
 		return pc_menu_functions_screen(tag_index);
 	return tag_index;
+}
+
+/* (forge.c) a screen of the set built into the loaded map, by its widget's
+name, its pictures read the first time (as menu_tags_screen reads them for
+the screens that stand for the game's); NONE if the set or the screen is not
+there, or its pictures could not be read */
+long menu_tags_ingame_screen(
+	char const *name)
+{
+	long tag_index;
+	char path[128];
+	char *character;
+
+	if (!menu_tags.loaded || !name)
+		return NONE;
+	/* (named as instance_set names ours) */
+	snprintf(path, sizeof(path), "%s%s", PC_MENU_TAG_PREFIX, name);
+	for (character = path; *character; character++)
+	{
+		if (*character == '/')
+			*character = '\\';
+	}
+	tag_index = tag_loaded(UI_WIDGET_DEFINITION_TAG, path);
+	if (tag_index == NONE || !pc_menu_tag(tag_index))
+		return NONE;
+	if (!menu_tags.art)
+		menu_tags.art = menu_tags_art_load() ? 1 : -1;
+	return menu_tags.art > 0 ? tag_index : NONE;
 }
 
 boolean pc_menu_tag(
