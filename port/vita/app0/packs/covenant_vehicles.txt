@@ -1,0 +1,9 @@
+# The Covenant's campaign vehicles for Forge on the multiplayer maps (which
+# have none of them): the Banshee, the Wraith and the Shade turret, with their
+# guns, projectiles, effects and sounds, from the player's own campaign maps
+# (Assault on the Control Room has all three, Two Betrayals too).
+pack covenant_vehicles
+map b40 c40
+tag vehi vehicles\banshee\banshee
+tag vehi vehicles\wraith\wraith
+tag vehi vehicles\c gun turret\c gun turret

@@ -319,6 +319,25 @@ boolean tag_validate_custom_edition_tags(
 	short file_range_count,
 	char const *map_name);
 
+/* (port) a scene pack's tags (port/linux/game/scene_pack.c): size bytes at
+tag_header laid out as a map's tag data, moved to where they are, their
+pixels and samples at file_offset..file_offset + file_size of the pack's
+file range: FALSE if they cannot be used (a pack has no scenario, structure
+bsp or globals, and every tag's group has a schema). The map's own check is
+kept as it was; corrections (if not NULL) says how many were made */
+boolean tag_validate_pack_tags(
+	void *tag_header,
+	long size,
+	unsigned long file_offset,
+	unsigned long file_size,
+	char const *name,
+	long *corrections);
+
+/* (port) the tag cache's bytes after the map's tags held by the scene packs
+(scene_packs.c), not taken for a structure bsp's check's scratch */
+void tag_validate_reserve_after_tags(
+	unsigned long bytes);
+
 /* a structure bsp just read (size bytes at base, its header there) as tag
 tag_index: FALSE if it cannot be used */
 boolean tag_validate_structure_bsp(

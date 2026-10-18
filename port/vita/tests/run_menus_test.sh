@@ -60,6 +60,16 @@
 #            FORGE, back: each lobby's camera written into its point of
 #            ui.map and glided to, ring_loop asleep meanwhile, the main menu
 #            waking it; then the same with HALO_MENU_SCENES=0: none
+#   h3characters  the lobbies' characters (scene_object= in menus/halo3; the
+#            menu_spartan scene pack, built from the maps folder's Blood Gulch
+#            the first time: port/linux/game/scene_packs.c,
+#            menu_scene_objects.c): the campaign lobby's two Spartans, the
+#            multiplayer and Forge lobbies' one, each made as its lobby opens
+#            and deleted as the main menu comes back (HALO_TEST_PROFILE's
+#            profile); the Customization screen's preview (the console's "pack
+#            preview": shown in a colour, recoloured, hidden); then with
+#            HALO_SCENE_PACKS=0, and with no multiplayer map in the maps
+#            folder: no character, nothing else changed
 #   h3coopguide  the settings panel's Host co-op campaign
 #            (HALO_SYSTEM_LINK_TEST=campaign): the Campaign screen opens, the
 #            Halo 3 campaign lobby behind it set to SYSTEM LINK CO-OP
@@ -96,7 +106,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3characters}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
 
@@ -424,6 +434,56 @@ for case in $cases; do
 			fail h3scenes "HALO_MENU_SCENES=0 still moved the camera"
 		[ "$(grep -ac 'ui: screen pc.h3.campaign.screen\|ui: screen pc.h3.mp.screen\|ui: screen pc.h3.forge.lobby' "$out/h3scenes_off/run.log")" -ge 3 ] ||
 			fail h3scenes "HALO_MENU_SCENES=0: the three lobbies did not open" ;;
+	h3characters)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "--- h3characters"; echo "SKIP: no HALO_TEST_PROFILE"; continue
+		fi
+		# (as h3scenes: CAMPAIGN, the profile: the campaign lobby; B, B; down, A: MULTIPLAYER; B;
+		# down, A: FORGE; B)
+		characters_pad="wait:150:3000 down:150:700 a wait:150:3000 a wait:150:5000 b wait:150:2500 b wait:150:3000 down:150:700 a wait:150:5000 b wait:150:3000 down:150:700 a wait:150:5000 b wait:150:3000"
+		profile_from=$HALO_TEST_PROFILE run h3characters "$menus_data" 50 "$characters_pad" HALO_MENU_STYLE=halo3
+		# (the multiplayer lobby, then the preview: in colour 5, recoloured 9, hidden)
+		run h3characters_preview "$menus_data" 26 "wait:150:3000 down:150:700 down:150:700 a wait:150:15000" HALO_MENU_STYLE=halo3 \
+			"HALO_TEST_COMMANDS=330:pack preview 5;420:pack preview 9;510:pack preview off"
+		profile_from=$HALO_TEST_PROFILE run h3characters_off "$menus_data" 50 "$characters_pad" HALO_MENU_STYLE=halo3 HALO_SCENE_PACKS=0
+		# (a maps folder of ui.map and the Halo PC files alone: no multiplayer map to build from)
+		rm -rf "$out/nomap_data"
+		mkdir -p "$out/nomap_data/maps"
+		for map in ui bitmaps loc; do ln -s "$(readlink -f "$menus_data/maps/$map.map")" "$out/nomap_data/maps/$map.map"; done
+		run h3characters_nomap "$out/nomap_data" 22 "wait:150:3000 down:150:700 down:150:700 a wait:150:8000" HALO_MENU_STYLE=halo3
+		check_h3 h3characters halo3
+		log=$out/h3characters/run.log
+		grep -aE "scene packs:|h3 scene object" "$log"
+		grep -aq "scene packs: menu_spartan: built from bloodgulch" "$log" || fail h3characters "the pack was not built"
+		grep -aq "scene packs: menu_spartan: loaded from bloodgulch" "$log" || fail h3characters "the pack was not loaded"
+		[ "$(grep -ac 'h3 scene object 0: characters.cyborg_mp.cyborg_mp (menu_spartan) at .* made' "$log")" -ge 3 ] ||
+			fail h3characters "the three lobbies did not each have their Spartan"
+		grep -aq 'h3 scene object 1: characters.cyborg_mp.cyborg_mp (menu_spartan) at .* made' "$log" ||
+			fail h3characters "the campaign lobby did not have its second Spartan"
+		[ "$(grep -ac 'h3 scene object 0: deleted' "$log")" -ge 3 ] ||
+			fail h3characters "the main menu did not let the lobbies' Spartans go"
+		[ "$(grep -ac 'ui: screen pc.h3.campaign.screen\|ui: screen pc.h3.mp.screen\|ui: screen pc.h3.forge.lobby' "$log")" -ge 3 ] ||
+			fail h3characters "the three lobbies did not open"
+		check_h3 h3characters_preview halo3
+		log=$out/h3characters_preview/run.log
+		grep -aE "h3 scene object|preview" "$log"
+		grep -aq "h3 scene object 4: characters.cyborg_mp.cyborg_mp (menu_spartan) at .* colour 5: made" "$log" ||
+			fail h3characters "the preview did not show a Spartan in colour 5"
+		grep -aq "h3 scene object: recoloured 9" "$log" || fail h3characters "the preview was not recoloured"
+		grep -aq "h3 scene object 4: deleted" "$log" || fail h3characters "the preview was not hidden"
+		check_h3 h3characters_off halo3
+		grep -aqE "scene packs: |h3 scene object .* made" "$out/h3characters_off/run.log" &&
+			fail h3characters "HALO_SCENE_PACKS=0: a pack or a character all the same"
+		[ "$(grep -ac 'ui: screen pc.h3.campaign.screen\|ui: screen pc.h3.mp.screen\|ui: screen pc.h3.forge.lobby' "$out/h3characters_off/run.log")" -ge 3 ] ||
+			fail h3characters "HALO_SCENE_PACKS=0: the three lobbies did not open"
+		check_h3 h3characters_nomap halo3
+		log=$out/h3characters_nomap/run.log
+		grep -aE "scene packs:|h3 scene object" "$log"
+		grep -aq "scene packs: menu_spartan: not built: none of its maps" "$log" ||
+			fail h3characters "no multiplayer map: the build did not say why it failed"
+		grep -aq "h3 scene object 0: the pack menu_spartan is failed: no character" "$log" ||
+			fail h3characters "no multiplayer map: the lobby did not go without its character"
+		grep -aq "ui: screen pc.h3.mp.screen" "$log" || fail h3characters "no multiplayer map: the lobby did not open" ;;
 	h3coopguide)
 		# (3 s into the main menu the request opens the Campaign screen's profiles; the lobby
 		# behind them is set to co-op. The Xbox's profiles screen opens on a new profile, whose
@@ -436,7 +496,7 @@ for case in $cases; do
 		grep -aq "menus: h3 campaign: network SYSTEM LINK CO-OP (host co-op campaign)" "$log" ||
 			fail h3coopguide "the lobby was not set to co-op" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"

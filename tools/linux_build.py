@@ -607,6 +607,30 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
                 variables={"ldflags": " ".join(["--target=i686-linux-gnu", "-m32", "-no-pie", "-g", *extra_ldflags])},
             )
 
+            # (port) the scene packs alone (port/linux/game/scene_pack.c): the
+            # builder, the checks and the fuzzing of tools/scene_pack_test.c,
+            # with the validator and the tag walk as above
+            pack_tool = Path("tools/scene_pack_test.c")
+            pack_tool_object = obj_dir / pack_tool.with_suffix(".o")
+            n.build(
+                outputs=pack_tool_object,
+                rule="linux_cc",
+                inputs=pack_tool,
+                variables={"cflags": " ".join([posix_cflags, "-malign-double", "-freg-struct-return",
+                                               f"-I{ZLIB_DIR}", *ZLIB_DEFINES, posix_extra])},
+            )
+            pack_tool_objects = [pack_tool_object, obj_dir / (game_dir / "scene_pack.o"),
+                                 obj_dir / (game_dir / "tag_validate.o"),
+                                 obj_dir / "port/linux/src/tag_relocate.o",
+                                 *(obj_dir / source.with_suffix(".o") for source in sorted(game_dir.glob("tag_schema*.c"))),
+                                 *(obj_dir / (ZLIB_DIR / name).with_suffix(".o") for name in ZLIB_SOURCES)]
+            n.build(
+                outputs=validator.parent / "scene_pack_test",
+                rule="linux_tool_link",
+                inputs=pack_tool_objects,
+                variables={"ldflags": " ".join(["--target=i686-linux-gnu", "-m32", "-no-pie", "-g", *extra_ldflags])},
+            )
+
     # Profile-guided optimisation: with the committed profile, or with
     # --pgo=train one that an instrumented build records while playing
     # (tools/pgo_train.py). A profile is trained once: code changed since
@@ -628,7 +652,7 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
     cflags += profile_use_flags(profile)
     validator = build_dir / "map_validate"
     emit(obj_dir, output, cflags, ldflags, [profile] if profile else [], validator)
-    n.build(outputs="linux", rule="phony", inputs=[output, validator])
+    n.build(outputs="linux", rule="phony", inputs=[output, validator, build_dir / "scene_pack_test"])
 
     # The dedicated server (ninja linux-server: port/linux/DEDICATED_SERVER.md):
     # the same game compiled once more as a headless host on the Vitas' side

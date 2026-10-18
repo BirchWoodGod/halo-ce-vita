@@ -16199,6 +16199,18 @@ spike, port/linux/game/forge.c), which are no script's */
 			return forge_command(text);
 		}
 	}
+	/* port: the scene packs' commands ("pack load <name>"...:
+	port/linux/game/scene_packs.c), which are no script's */
+	{
+		char const *text = hs_host_player_command(expression, "pack");
+
+		if (text)
+		{
+			boolean scene_packs_command(char const *arguments);
+
+			return scene_packs_command(text);
+		}
+	}
 	/* port: the host's ban and kick commands ("ban <player name>", "kick
 	<player name>", or the name's start: Tab completes it), which are no
 	script's */
