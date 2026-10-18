@@ -13,6 +13,8 @@ run_forge_files_test.sh; any crash, leak or undefined behaviour fails it.
   forge_files_test --write <folder> the harness tests' files (run_forge_test.sh):
                                     good.hmv, missing.hmv, wrongmap.hmv and
                                     damaged.hmv, of Blood Gulch
+  forge_files_test --dump <file>    a map variant read through the validator
+                                    and its records printed, a line each
 */
 
 #include "forge_files.h"
@@ -697,12 +699,48 @@ static int write_samples(char const *folder)
 	return status;
 }
 
+/* a file read through the validator, its header and records printed */
+static int dump(char const *path)
+{
+	FILE *file = fopen(path, "rb");
+	int size;
+	int index;
+	char why[96];
+
+	if (!file)
+	{
+		printf("could not read %s\n", path);
+		return 1;
+	}
+	size = (int)fread(work, 1, sizeof(work), file);
+	fclose(file);
+	if (forge_file_decode(work, size, NULL, &decoded, why, sizeof(why)) != _forge_file_ok)
+	{
+		printf("refused: %s\n", why);
+		return 1;
+	}
+	printf("map %s title \"%s\" author \"%s\" date \"%s\" paths %d records %d\n", decoded.map_name, decoded.title,
+		decoded.author, decoded.date, decoded.path_count, decoded.record_count);
+	for (index = 0; index < decoded.record_count; index++)
+	{
+		struct forge_file_record const *record = &decoded.records[index];
+
+		printf("record %d: %s kind %d team %d respawn %d flags %d at %.2f %.2f %.2f angles %.3f %.3f %.3f\n", index,
+			decoded.paths[record->path_index].path, record->kind, record->team, record->respawn_seconds, record->flags,
+			record->position[0], record->position[1], record->position[2], record->angles[0], record->angles[1],
+			record->angles[2]);
+	}
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
 	long iterations = 200000;
 
 	if (argc == 3 && !strcmp(argv[1], "--write"))
 		return write_samples(argv[2]);
+	if (argc == 3 && !strcmp(argv[1], "--dump"))
+		return dump(argv[2]);
 	if (argc == 2)
 		iterations = atol(argv[1]);
 	test_round_trip();

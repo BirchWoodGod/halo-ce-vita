@@ -195,6 +195,12 @@ enum
 	_function_fileshare_delete,
 	_function_fileshare_open,
 	_function_fileshare_enter,
+	_function_forge_undo,
+	_function_forge_redo,
+	_function_forge_snap,
+	_function_forge_property_next,
+	_function_forge_property_previous,
+	_function_forge_close,
 };
 
 /* in port_game_data_input_names' order */
@@ -225,6 +231,7 @@ enum
 	_input_forge_variants,
 	_input_fileshare,
 	_input_fileshare_question,
+	_input_forge_properties,
 };
 
 /* what a line of typing is for */
@@ -1422,8 +1429,17 @@ static void h3_forge_title_update(struct widget_instance *widget)
 	}
 	{
 		char status[FORGE_STORE_WHY_SIZE];
+		short undo, redo;
 
-		forge_save_result(status, sizeof(status));
+		/* (UNDO and REDO with how many steps each has, SNAP's state) */
+		forge_undo_available(&undo, &redo);
+		snprintf(text, sizeof(text), undo ? "%s (%d)" : "%s", T("UNDO"), undo);
+		text_show(named(screen, "undo"), text);
+		snprintf(text, sizeof(text), redo ? "%s (%d)" : "%s", T("REDO"), redo);
+		text_show(named(screen, "redo"), text);
+		snprintf(text, sizeof(text), "%s: %s", T("SNAP"), forge_snap_enabled() ? T("ON") : T("OFF"));
+		text_show(named(screen, "snap"), text);
+		forge_menu_status(status, sizeof(status));
 		if (status[0])
 			snprintf(text, sizeof(text), "%s", status);
 		else if (forge_variant_title()[0])
@@ -1450,12 +1466,12 @@ static void h3_forge_controls_update(struct widget_instance *widget)
 {
 #ifdef HALO_VITA
 	text_show(widget, T("Fly: left stick. Up: Cross. Down: D-pad down.\nFaster: hold L. Look: right stick.\n"
-		"Grab, drop: R. Turn, push: L + right stick.\nObjects: Square. Delete: Triangle.\n"
-		"Copy: Circle. Upright: D-pad left.\nSpeed: D-pad right. Spartan: Select + D-pad up."));
+		"Grab, drop: R. Turn, push: L + right stick.\nObjects: Square. Holding one: its properties.\n"
+		"Delete: Triangle. Copy: Circle.\nUpright: D-pad left. Speed: D-pad right.\nSpartan: Select + D-pad up."));
 #else
 	text_show(widget, T("Fly: W A S D. Up: Space. Down: C.\nFaster: Shift. Look: mouse.\n"
 		"Grab, drop: left button. Turn: right button.\nPush, pull: wheel. Objects: E. Delete: Del.\n"
-		"Copy: F. Upright: X. Speed: Q.\nSpartan: Tab, or F1 + Z."));
+		"Holding one, E: its properties.\nCopy: F. Upright: X. Speed: Q.\nSpartan: Tab, or F1 + Z."));
 #endif
 }
 
@@ -2767,6 +2783,54 @@ static void h3_forge_save(void)
 	forge_save_request(name, author);
 }
 
+/* (port forge properties) the properties window's rows (row_0 team, row_1
+respawn, row_2 placed at the start) and the object's name; closed when no
+object of the player's is held any more */
+static void h3_forge_properties_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *child;
+	struct forge_properties properties;
+	char text[96];
+	short row;
+	static char said[160];
+
+	if (!forge_properties_get(&properties))
+	{
+		forge_menus_close_request();
+		return;
+	}
+	text_show(named(screen, "name"), properties.name);
+	for (row = 0, child = list->child; child; child = child->next, row++)
+	{
+		switch (row)
+		{
+		case _forge_property_team:
+			snprintf(text, sizeof(text), "%s: %s", T("TEAM"), properties.team == 0 ? T("RED") : properties.team == 1 ?
+				T("BLUE") : T("NEUTRAL"));
+			break;
+		case _forge_property_respawn:
+			if (properties.respawn_seconds)
+				snprintf(text, sizeof(text), T("RESPAWN: %d S"), properties.respawn_seconds);
+			else
+				snprintf(text, sizeof(text), "%s: %s", T("RESPAWN"), T("NEVER"));
+			break;
+		default:
+			snprintf(text, sizeof(text), "%s: %s", T("PLACE AT START"), properties.place_at_start ? T("YES") : T("NO"));
+			break;
+		}
+		text_show(child, text);
+		child->animation.current_frame_index = child == list->focused_child ? 1 : 0;
+	}
+	snprintf(text, sizeof(text), "%s: team %d, respawn %d, %s", properties.name, properties.team, properties.respawn_seconds,
+		properties.place_at_start ? "at start" : "not at start");
+	if (strcmp(text, said))
+	{
+		snprintf(said, sizeof(said), "%s", text);
+		platform_log("menus: forge properties: %s", said);
+	}
+}
+
 /* ---- File Share */
 
 static short h3_fileshare_count(void)
@@ -3316,6 +3380,20 @@ boolean pc_menu_event_function_invoke(
 	case _function_forge_save:
 		h3_forge_save();
 		return TRUE;
+	case _function_forge_undo:
+	case _function_forge_redo:
+		forge_undo_request(function_index == _function_forge_redo);
+		return TRUE;
+	case _function_forge_snap:
+		forge_snap_toggle_request();
+		return TRUE;
+	case _function_forge_property_next:
+	case _function_forge_property_previous:
+		forge_property_request((short)h3_child_index(widget), function_index == _function_forge_property_next ? 1 : -1);
+		return TRUE;
+	case _function_forge_close:
+		forge_menus_close_request();
+		return TRUE;
 	case _function_fileshare_enter:
 		/* (the main menu's FILE SHARE: map variants, nothing said yet; back
 		from a question or the lobby what was said stays) */
@@ -3442,6 +3520,10 @@ void pc_menu_game_data_function_invoke(
 	case _input_fileshare:
 		if (widget->type == _ui_widget_type_column_list)
 			h3_fileshare_update(widget);
+		break;
+	case _input_forge_properties:
+		if (widget->type == _ui_widget_type_column_list)
+			h3_forge_properties_update(widget);
 		break;
 	case _input_fileshare_question:
 	{

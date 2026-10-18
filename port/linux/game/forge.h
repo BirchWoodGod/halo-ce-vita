@@ -40,7 +40,27 @@ enum
 	NUMBER_OF_FORGE_CATEGORIES
 };
 
+/* an object's properties (the properties window's rows, in its order) */
+enum
+{
+	_forge_property_team = 0,
+	_forge_property_respawn,
+	_forge_property_place_at_start,
+	NUMBER_OF_FORGE_PROPERTIES
+};
+
 /* ---------- structures */
+
+/* the properties of the object held */
+struct forge_properties
+{
+	char name[FORGE_NAME_SIZE];
+	/* NONE neutral, 0 red, 1 blue */
+	short team;
+	/* 0: never */
+	short respawn_seconds;
+	boolean place_at_start;
+};
 
 /* what the monitor's controls ask of the flying camera this frame */
 struct forge_camera_input
@@ -131,18 +151,44 @@ short forge_map_of_short(
 /* (the Forge menu's SAVE MAP VARIANT, its name typed) the session's
 objects saved as a map variant titled title, at the next forge_update; the
 session's own variant's file replaced when the title is its. What came of
-it (its words, said in the Forge menu) and a count that moves on each time
-one is done */
+it is said in the Forge menu (forge_menu_status) */
 void forge_save_request(
 	char const *title,
 	char const *author);
-long forge_save_result(
-	char *status,
-	int size);
 
 /* the map variant the session plays (loaded or last saved), "" for none */
 char const *forge_variant_title(
 	void);
+
+/* (the Forge menu's UNDO and REDO) the last step undone or the next redone,
+at the next forge_update; how many there are of each */
+void forge_undo_request(
+	boolean redo);
+void forge_undo_available(
+	short *undo,
+	short *redo);
+
+/* (the Forge menu's SNAP) snapping flipped at the next forge_update, and
+whether it is on: the object held on a grid and turned in steps */
+void forge_snap_toggle_request(
+	void);
+boolean forge_snap_enabled(
+	void);
+
+/* (the properties window, Square while holding an object) a property of
+the object held stepped (step 1 or -1) at the next forge_update; its
+properties (FALSE: none held, or one of the map's own) */
+void forge_property_request(
+	short property,
+	short step);
+boolean forge_properties_get(
+	struct forge_properties *properties);
+
+/* what the last thing asked from the Forge menu came to (a save, an undo,
+snapping), "" for nothing yet */
+void forge_menu_status(
+	char *status,
+	int size);
 
 /* whether a Forge game is played (the session), and whether its player is
 the monitor now */

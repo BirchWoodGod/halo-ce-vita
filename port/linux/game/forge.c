@@ -201,6 +201,8 @@ enum
 	FORGE_KEY_WHEEL = 1 << 3,
 	/* a notice's time on the screen */
 	FORGE_NOTICE_MILLISECONDS = 3000,
+	/* the undo history's steps */
+	FORGE_UNDO_DEPTH = 32,
 	/* the HUD's lines (UTF-8) */
 	FORGE_LINE_SIZE = 128,
 };
@@ -227,10 +229,15 @@ default) */
 /* how far outside the structure's world bounds a map variant's object may
 be (a vehicle parked at the edge) */
 #define FORGE_WORLD_BOUNDS_MARGIN 10.f
+/* snapping: the grid along the ground (world units, about 75 cm) and the
+turn's step (15 degrees) */
+#define FORGE_SNAP_GRID 0.25f
+#define FORGE_SNAP_ANGLE 0.2617994f
 
 /* the in-game set's screens (halo3/forge.xml) */
 #define FORGE_BROWSER_SCREEN "h3/forge/browser/screen"
 #define FORGE_MENU_SCREEN "h3/forge/pause/screen"
+#define FORGE_PROPERTIES_SCREEN "h3/forge/properties/screen"
 
 static real const forge_speeds[NUMBER_OF_FORGE_SPEEDS] = { 0.6f, 2.f, 5.f };
 static char const *const forge_speed_names[NUMBER_OF_FORGE_SPEEDS] =
@@ -416,6 +423,42 @@ struct forge_placed
 	signed char team;
 	unsigned char flags;
 	unsigned short respawn_seconds;
+	/* its own number this session (the undo history names it by this) */
+	long id;
+};
+
+/* an object's place and facing */
+struct forge_transform
+{
+	real_point3d position;
+	real_vector3d forward;
+	real_vector3d up;
+};
+
+/* a step of the undo history */
+enum
+{
+	_forge_undo_place,
+	_forge_undo_delete,
+	_forge_undo_move,
+	NUMBER_OF_FORGE_UNDO_KINDS
+};
+
+struct forge_undo
+{
+	short kind;
+	/* the object: a placed one's id, else (NONE) a map object's index */
+	long id;
+	long object_index;
+	/* what brings it back: its tag (an actor variant for a character),
+	its properties */
+	long tag_index;
+	signed char team;
+	unsigned char flags;
+	unsigned short respawn_seconds;
+	/* where it was before the step, and after */
+	struct forge_transform from;
+	struct forge_transform to;
 };
 
 typedef char verify_forge_file_records[FORGE_FILE_MAXIMUM_RECORDS == FORGE_MAXIMUM_OBJECTS ? 1 : -1];
@@ -470,6 +513,8 @@ static struct
 	/* the buttons down last frame */
 	boolean was_down[NUMBER_OF_GAMEPAD_BUTTONS];
 	boolean toggle_was_down;
+	/* a menu was over the game at the last forge_update */
+	boolean menu_was_open;
 	unsigned long keys_were_down;
 	/* (forge press, forge stick) the buttons and sticks the tests hold */
 	boolean test_down[NUMBER_OF_GAMEPAD_BUTTONS];
@@ -518,7 +563,29 @@ static struct
 	char save_title[FORGE_FILE_TITLE_SIZE];
 	char save_author[FORGE_FILE_AUTHOR_SIZE];
 	char save_status[FORGE_STORE_WHY_SIZE];
-	volatile long save_generation;
+	/* the undo history: undo_count steps, the first undo_cursor of them
+	done (undo takes the one before the cursor, redo the one at it); the
+	next placed id; where the object held was when it was grabbed, and
+	whether it was placed by this hold (its drop is a placing, not a
+	move) */
+	struct forge_undo undo[FORGE_UNDO_DEPTH];
+	short undo_count;
+	short undo_cursor;
+	long next_id;
+	struct forge_transform held_from;
+	boolean held_spawned;
+	/* snapping on */
+	boolean snap;
+	/* asked from the menus (done at the next forge_update): undo (-1) or
+	redo (1), snapping flipped, a property stepped */
+	volatile short undo_requested;
+	volatile boolean snap_requested;
+	volatile boolean property_requested;
+	short property_request;
+	short property_step;
+	/* what the last thing asked from the Forge menu came to (said under
+	it) */
+	char menu_status[FORGE_STORE_WHY_SIZE];
 } forge_globals = { FALSE, "", FALSE, FALSE, 0, NONE, FALSE, NONE, 0.f, { 0.f }, { 0.f }, _forge_speed_normal };
 
 /* ---------- private code */
@@ -835,7 +902,30 @@ static void forge_notice(
 	platform_log("forge: %s", forge_globals.notice);
 }
 
+/* a notice that is also the Forge menu's status line */
+static void forge_menu_notice(
+	char const *format,
+	...)
+{
+	va_list arguments;
+
+	va_start(arguments, format);
+	vsnprintf(forge_globals.menu_status, sizeof(forge_globals.menu_status), format, arguments);
+	va_end(arguments);
+	forge_notice("%s", forge_globals.menu_status);
+}
+
 /* ---- the budget */
+
+/* whether an object is there and not being deleted (object_delete only
+marks it: it goes at the next update of the objects, which a paused game -
+the Forge menu over it - does not run) */
+static boolean forge_object_alive(
+	long object_index)
+{
+	return object_try_and_get(object_index) &&
+		!TEST_FLAG(object_header_get(object_index)->flags, _object_header_being_deleted_bit);
+}
 
 /* the objects placed that are gone (deleted, destroyed, a new map) let go,
 the characters alive counted */
@@ -849,7 +939,7 @@ static void forge_placed_update(
 	for (index = 0; index < forge_globals.placed_count && index < FORGE_MAXIMUM_OBJECTS; index++)
 	{
 		struct forge_placed placed = forge_globals.placed[index];
-		struct object_datum *object = object_try_and_get(placed.object_index);
+		struct object_datum *object = forge_object_alive(placed.object_index) ? object_get(placed.object_index) : NULL;
 
 		if (!object)
 			continue;
@@ -873,6 +963,7 @@ static void forge_placed_add(
 	forge_globals.placed[forge_globals.placed_count].team = NONE;
 	forge_globals.placed[forge_globals.placed_count].flags = FORGE_RECORD_PLACE_AT_START;
 	forge_globals.placed[forge_globals.placed_count].respawn_seconds = FORGE_DEFAULT_RESPAWN_SECONDS;
+	forge_globals.placed[forge_globals.placed_count].id = ++forge_globals.next_id;
 	forge_globals.placed_count++;
 	if (ai)
 		forge_globals.ai_count++;
@@ -886,7 +977,7 @@ static short forge_placed_of_tag(
 
 	for (index = 0; index < forge_globals.placed_count; index++)
 	{
-		if (forge_globals.placed[index].tag_index == tag_index && object_try_and_get(forge_globals.placed[index].object_index))
+		if (forge_globals.placed[index].tag_index == tag_index && forge_object_alive(forge_globals.placed[index].object_index))
 			count++;
 	}
 	return count;
@@ -1100,6 +1191,10 @@ static long forge_object_under_crosshair(
 	return nearest_index;
 }
 
+static void forge_transform_get(long object_index, struct forge_transform *transform);
+static void forge_undo_record(short kind, long object_index, struct forge_transform const *from);
+static void forge_snapped(real_point3d *position, real_vector3d *forward, real_vector3d *up);
+
 /* the held object where the camera holds it */
 static void forge_held_object_place(
 	void)
@@ -1118,11 +1213,13 @@ static void forge_held_object_place(
 	position.x += forward.i * forge_globals.held_distance;
 	position.y += forward.j * forge_globals.held_distance;
 	position.z += forward.k * forge_globals.held_distance;
-	object_set_position(
-		forge_globals.held_object_index,
-		&position,
-		&forge_globals.held_forward,
-		&forge_globals.held_up);
+	{
+		real_vector3d facing = forge_globals.held_forward;
+		real_vector3d up = forge_globals.held_up;
+
+		forge_snapped(&position, &facing, &up);
+		object_set_position(forge_globals.held_object_index, &position, &facing, &up);
+	}
 	/* (it hangs where it is held: what the physics gave it this tick
 	goes) */
 	object->object.translational_velocity = *global_zero_vector3d;
@@ -1155,6 +1252,8 @@ static void forge_grab(
 			FORGE_MINIMUM_HOLD_DISTANCE,
 			FORGE_MAXIMUM_HOLD_DISTANCE);
 	}
+	forge_transform_get(object_index, &forge_globals.held_from);
+	forge_globals.held_spawned = FALSE;
 	forge_object_name(object_index, name, sizeof(name));
 	platform_log("forge: grabbed %s (%s)", name, forge_tag_leaf(object->definition_index));
 
@@ -1170,6 +1269,18 @@ static void forge_drop(
 	{
 		char name[FORGE_NAME_SIZE];
 
+		/* (snapped, its facing is the one shown) */
+		if (forge_globals.snap)
+		{
+			real_point3d position = object->object.position;
+
+			forge_snapped(&position, &forge_globals.held_forward, &forge_globals.held_up);
+		}
+		/* (a placing, or a move, in the undo history) */
+		if (forge_globals.held_spawned)
+			forge_undo_record(_forge_undo_place, forge_globals.held_object_index, NULL);
+		else
+			forge_undo_record(_forge_undo_move, forge_globals.held_object_index, &forge_globals.held_from);
 		/* (it falls from where it was let go) */
 		SET_FLAG(object->object.flags, _object_at_rest_bit, FALSE);
 		forge_object_name(forge_globals.held_object_index, name, sizeof(name));
@@ -1178,6 +1289,7 @@ static void forge_drop(
 			object->object.position.z, object->object.forward.i, object->object.forward.j, object->object.forward.k);
 	}
 	forge_globals.held_object_index = NONE;
+	forge_globals.held_spawned = FALSE;
 
 	return;
 }
@@ -1208,8 +1320,12 @@ static void forge_set_facing(
 	}
 	else
 	{
+		struct forge_transform from;
+
+		forge_transform_get(object_index, &from);
 		object_set_position(object_index, &object->object.position, forward, up);
 		SET_FLAG(object->object.flags, _object_at_rest_bit, FALSE);
+		forge_undo_record(_forge_undo_move, object_index, &from);
 	}
 }
 
@@ -1265,6 +1381,7 @@ static void forge_delete(
 	forge_object_name(object_index, name, sizeof(name));
 	platform_log("forge: deleted %s (%s)", name, forge_tag_leaf(object->definition_index));
 	forge_notice(T("Deleted %s"), name);
+	forge_undo_record(_forge_undo_delete, object_index, NULL);
 	if (object_index == forge_globals.held_object_index)
 		forge_globals.held_object_index = NONE;
 	object_delete(object_index);
@@ -1404,6 +1521,7 @@ static long forge_spawn(
 	forge_globals.held_distance = distance;
 	forge_globals.held_forward = facing;
 	forge_globals.held_up = *global_up3d;
+	forge_globals.held_spawned = TRUE;
 
 	return object_index;
 }
@@ -1655,6 +1773,348 @@ static void forge_menu_open_pause(
 	platform_log("forge: the Forge menu opened");
 }
 
+/* ---- undo and redo: a bounded history of what the monitor did (placed,
+deleted, moved or turned an object), FORGE_UNDO_DEPTH steps. An object is
+named by its placed id (forge_placed: the same id again when an undo
+brings it back) or, for one of the map's own, by its object index. What
+cannot be undone any more (the object destroyed, the budget full) is said
+and skipped, never guessed at */
+
+static void forge_transform_get(
+	long object_index,
+	struct forge_transform *transform)
+{
+	struct object_datum *object = object_get(object_index);
+
+	transform->position = object->object.position;
+	if (object_index == forge_globals.held_object_index)
+	{
+		transform->forward = forge_globals.held_forward;
+		transform->up = forge_globals.held_up;
+	}
+	else
+	{
+		transform->forward = object->object.forward;
+		transform->up = object->object.up;
+	}
+}
+
+static boolean forge_transforms_equal(
+	struct forge_transform const *a,
+	struct forge_transform const *b)
+{
+	return distance_squared3d(&a->position, &b->position) < 0.0001f &&
+		dot_product3d(&a->forward, &b->forward) > 0.99999f && dot_product3d(&a->up, &b->up) > 0.99999f;
+}
+
+static struct forge_placed *forge_placed_of_object(
+	long object_index)
+{
+	short index;
+
+	for (index = 0; index < forge_globals.placed_count && index < FORGE_MAXIMUM_OBJECTS; index++)
+	{
+		if (forge_globals.placed[index].object_index == object_index)
+			return &forge_globals.placed[index];
+	}
+	return NULL;
+}
+
+/* the object a history step names, NONE if it is gone */
+static long forge_undo_object(
+	struct forge_undo const *entry)
+{
+	short index;
+
+	if (entry->id == NONE)
+		return forge_object_alive(entry->object_index) ? entry->object_index : NONE;
+	for (index = 0; index < forge_globals.placed_count && index < FORGE_MAXIMUM_OBJECTS; index++)
+	{
+		if (forge_globals.placed[index].id == entry->id)
+			return forge_object_alive(forge_globals.placed[index].object_index) ? forge_globals.placed[index].object_index : NONE;
+	}
+	return NONE;
+}
+
+/* a step of an object filled: what names it, its tag, its properties */
+static boolean forge_undo_fill(
+	struct forge_undo *entry,
+	short kind,
+	long object_index)
+{
+	struct object_datum *object = object_try_and_get(object_index);
+	struct forge_placed *placed = forge_placed_of_object(object_index);
+
+	if (!object)
+		return FALSE;
+	csmemset(entry, 0, sizeof(*entry));
+	entry->kind = kind;
+	entry->id = placed ? placed->id : NONE;
+	entry->object_index = object_index;
+	entry->tag_index = placed ? placed->tag_index : object->definition_index;
+	entry->team = placed ? placed->team : NONE;
+	entry->flags = placed ? placed->flags : FORGE_RECORD_PLACE_AT_START;
+	entry->respawn_seconds = placed ? placed->respawn_seconds : FORGE_DEFAULT_RESPAWN_SECONDS;
+	forge_transform_get(object_index, &entry->from);
+	entry->to = entry->from;
+	return TRUE;
+}
+
+static void forge_undo_push(
+	struct forge_undo const *entry)
+{
+	/* (a new step: what could be redone is gone; the oldest goes when full) */
+	forge_globals.undo_count = forge_globals.undo_cursor;
+	if (forge_globals.undo_count >= FORGE_UNDO_DEPTH)
+	{
+		csmemmove(&forge_globals.undo[0], &forge_globals.undo[1], sizeof(forge_globals.undo[0]) * (FORGE_UNDO_DEPTH - 1));
+		forge_globals.undo_count = FORGE_UNDO_DEPTH - 1;
+	}
+	forge_globals.undo[forge_globals.undo_count++] = *entry;
+	forge_globals.undo_cursor = forge_globals.undo_count;
+}
+
+static void forge_undo_record(
+	short kind,
+	long object_index,
+	struct forge_transform const *from)
+{
+	struct forge_undo entry;
+
+	if (!forge_undo_fill(&entry, kind, object_index))
+		return;
+	if (from)
+		entry.from = *from;
+	if (kind == _forge_undo_move && forge_transforms_equal(&entry.from, &entry.to))
+		return;
+	forge_undo_push(&entry);
+}
+
+/* a step's words: "Place Warthog" */
+static void forge_undo_describe(
+	struct forge_undo const *entry,
+	char *text,
+	size_t size)
+{
+	static char const *const kinds[NUMBER_OF_FORGE_UNDO_KINDS] = { N_("Place %s"), N_("Delete %s"), N_("Move %s") };
+	char name[FORGE_NAME_SIZE];
+	short palette = forge_palette_of_tag(entry->tag_index);
+
+	if (palette != NONE)
+		snprintf(name, sizeof(name), "%s", forge_globals.palette[palette].name);
+	else
+		forge_tag_readable_name(entry->tag_index, name, sizeof(name));
+	snprintf(text, size, T(kinds[PIN(entry->kind, 0, NUMBER_OF_FORGE_UNDO_KINDS - 1)]), name);
+}
+
+/* a step's object brought back at a place: under its id again (a map
+object's steps given the new one's id); FALSE when it cannot be */
+static boolean forge_undo_bring_back(
+	struct forge_undo *entry,
+	struct forge_transform const *transform)
+{
+	long object_index;
+	short refusal;
+	struct forge_placed *placed;
+
+	object_index = forge_place(entry->tag_index, &transform->position, &transform->forward, &transform->up, TRUE, &refusal);
+	if (object_index == NONE)
+		return FALSE;
+	placed = forge_placed_of_object(object_index);
+	if (placed)
+	{
+		placed->team = entry->team;
+		placed->flags = entry->flags;
+		placed->respawn_seconds = entry->respawn_seconds;
+		if (entry->id != NONE)
+		{
+			placed->id = entry->id;
+		}
+		else
+		{
+			short index;
+			long old_object_index = entry->object_index;
+
+			/* (a map object back as a placed one: every step of it named
+			by its new id) */
+			for (index = 0; index < forge_globals.undo_count; index++)
+			{
+				if (forge_globals.undo[index].id == NONE && forge_globals.undo[index].object_index == old_object_index)
+					forge_globals.undo[index].id = placed->id;
+			}
+		}
+	}
+	return TRUE;
+}
+
+static void forge_undo_set_transform(
+	long object_index,
+	struct forge_transform const *transform)
+{
+	struct object_datum *object = object_get(object_index);
+
+	object_set_position(object_index, &transform->position, &transform->forward, &transform->up);
+	object->object.translational_velocity = *global_zero_vector3d;
+	object->object.angular_velocity = *global_zero_vector3d;
+	SET_FLAG(object->object.flags, _object_at_rest_bit, FALSE);
+}
+
+/* the last step undone (redo FALSE), or the next one redone */
+static void forge_undo_step(
+	boolean redo)
+{
+	struct forge_undo *entry;
+	long object_index;
+	char words[FORGE_LINE_SIZE];
+	boolean done = TRUE;
+
+	if (redo ? forge_globals.undo_cursor >= forge_globals.undo_count : forge_globals.undo_cursor <= 0)
+	{
+		forge_menu_notice("%s", redo ? T("Nothing to redo") : T("Nothing to undo"));
+		return;
+	}
+	if (object_try_and_get(forge_globals.held_object_index))
+		forge_drop();
+	entry = &forge_globals.undo[redo ? forge_globals.undo_cursor : forge_globals.undo_cursor - 1];
+	forge_undo_describe(entry, words, sizeof(words));
+	object_index = forge_undo_object(entry);
+	switch (entry->kind)
+	{
+	case _forge_undo_place:
+	case _forge_undo_delete:
+		/* (placing redone or deleting undone: the object back; placing
+		undone or deleting redone: the object gone) */
+		if ((entry->kind == _forge_undo_place) == redo)
+		{
+			if (object_index != NONE)
+				break;
+			if (!forge_undo_bring_back(entry, entry->kind == _forge_undo_place ? &entry->to : &entry->from))
+			{
+				forge_menu_notice(redo ? T("Can't redo %s: the budget is full") : T("Can't undo %s: the budget is full"), words);
+				return;
+			}
+		}
+		else if (object_index != NONE)
+		{
+			if (object_index == forge_globals.held_object_index)
+				forge_globals.held_object_index = NONE;
+			object_delete(object_index);
+			forge_placed_update();
+		}
+		break;
+	case _forge_undo_move:
+		if (object_index == NONE)
+			done = FALSE;
+		else
+			forge_undo_set_transform(object_index, redo ? &entry->to : &entry->from);
+		break;
+	}
+	forge_globals.undo_cursor += redo ? 1 : -1;
+	if (!done)
+		forge_menu_notice(redo ? T("Can't redo %s: it is gone") : T("Can't undo %s: it is gone"), words);
+	else
+		forge_menu_notice(redo ? T("Redone: %s") : T("Undone: %s"), words);
+	platform_log("forge: %s %s (%d of %d steps)", redo ? "redid" : "undid", words, forge_globals.undo_cursor,
+		forge_globals.undo_count);
+}
+
+/* ---- snapping (the Forge menu's SNAP): the object held on a grid of
+FORGE_SNAP_GRID along the ground, and turned in steps of FORGE_SNAP_ANGLE */
+
+/* the nearest whole number (within the world's +-5000 over the grid) */
+static real forge_round(
+	real value)
+{
+	return value >= 0.f ? (real)(long)(value + 0.5f) : -(real)(long)(-value + 0.5f);
+}
+
+/* the place and facing an object held is shown at */
+static void forge_snapped(
+	real_point3d *position,
+	real_vector3d *forward,
+	real_vector3d *up)
+{
+	real yaw;
+	real snapped;
+	real turn;
+	real_vector3d axis = *global_up3d;
+
+	if (!forge_globals.snap)
+		return;
+	position->x = forge_round(position->x / FORGE_SNAP_GRID) * FORGE_SNAP_GRID;
+	position->y = forge_round(position->y / FORGE_SNAP_GRID) * FORGE_SNAP_GRID;
+	yaw = arctangent(forward->j, forward->i);
+	snapped = forge_round(yaw / FORGE_SNAP_ANGLE) * FORGE_SNAP_ANGLE;
+	turn = snapped - yaw;
+	rotate_vector_about_axis(forward, &axis, sine(turn), cosine(turn));
+	rotate_vector_about_axis(up, &axis, sine(turn), cosine(turn));
+}
+
+/* ---- object properties (Square while holding an object: halo3/forge.xml's
+properties window): its team, respawn time and whether it is placed at
+the start, kept in its placed entry and saved in the map variant */
+
+static short const forge_respawn_choices[] = { 0, 10, 20, 30, 45, 60, 90, 120, 180 };
+
+/* the placed entry of the object held, NULL for none or one of the map's */
+static struct forge_placed *forge_properties_target(
+	void)
+{
+	return object_try_and_get(forge_globals.held_object_index) ? forge_placed_of_object(forge_globals.held_object_index) :
+		NULL;
+}
+
+static void forge_property_apply(
+	short property,
+	short step)
+{
+	struct forge_placed *placed = forge_properties_target();
+	short index;
+
+	if (!placed)
+		return;
+	switch (property)
+	{
+	case _forge_property_team:
+		/* (neutral, red, blue) */
+		placed->team = (signed char)(((placed->team + 1 + step + 3) % 3) - 1);
+		break;
+	case _forge_property_respawn:
+		for (index = 0; index < (short)NUMBEROF(forge_respawn_choices) - 1; index++)
+		{
+			if (forge_respawn_choices[index] >= placed->respawn_seconds)
+				break;
+		}
+		index = (short)((index + step + (short)NUMBEROF(forge_respawn_choices)) % (short)NUMBEROF(forge_respawn_choices));
+		placed->respawn_seconds = (unsigned short)forge_respawn_choices[index];
+		break;
+	case _forge_property_place_at_start:
+		placed->flags ^= FORGE_RECORD_PLACE_AT_START;
+		break;
+	}
+	platform_log("forge: properties: team %d, respawn %d s, %splaced at start", placed->team, placed->respawn_seconds,
+		(placed->flags & FORGE_RECORD_PLACE_AT_START) ? "" : "not ");
+}
+
+static void forge_properties_open(
+	void)
+{
+	long screen;
+
+	if (!forge_properties_target())
+	{
+		forge_notice("%s", T("Only objects you placed have properties"));
+		return;
+	}
+	screen = menu_tags_ingame_screen(FORGE_PROPERTIES_SCREEN);
+	if (screen == NONE ||
+		!ui_widget_load_by_name_or_tag(NULL, screen, NULL, forge_globals.local_player_index, NONE, NONE, NONE))
+	{
+		return;
+	}
+	platform_log("forge: the object's properties opened");
+}
+
 /* ---- map variants (forge_files.h: the file; forge_store.h: the memory
 card) */
 
@@ -1874,8 +2334,7 @@ static void forge_variant_save(
 	}
 	if (!done)
 		platform_log("forge: the map variant was not saved: %s", forge_globals.save_status);
-	forge_notice("%s", forge_globals.save_status);
-	__atomic_add_fetch(&forge_globals.save_generation, 1, __ATOMIC_RELEASE);
+	forge_menu_notice("%s", forge_globals.save_status);
 }
 
 /* (the session's start) the map variant read for it placed: each record's
@@ -2423,21 +2882,69 @@ void forge_save_request(
 	forge_globals.save_requested = TRUE;
 }
 
-long forge_save_result(
-	char *status,
-	int size)
-{
-	long generation = __atomic_load_n(&forge_globals.save_generation, __ATOMIC_ACQUIRE);
-
-	if (status && size > 0)
-		snprintf(status, (size_t)size, "%s", forge_globals.save_status);
-	return generation;
-}
-
 char const *forge_variant_title(
 	void)
 {
 	return forge_globals.variant_title;
+}
+
+void forge_undo_request(
+	boolean redo)
+{
+	forge_globals.undo_requested = redo ? 1 : -1;
+}
+
+void forge_undo_available(
+	short *undo,
+	short *redo)
+{
+	*undo = forge_globals.undo_cursor;
+	*redo = (short)(forge_globals.undo_count - forge_globals.undo_cursor);
+}
+
+void forge_snap_toggle_request(
+	void)
+{
+	forge_globals.snap_requested = TRUE;
+}
+
+boolean forge_snap_enabled(
+	void)
+{
+	return forge_globals.snap;
+}
+
+void forge_property_request(
+	short property,
+	short step)
+{
+	if (property < 0 || property >= NUMBER_OF_FORGE_PROPERTIES)
+		return;
+	forge_globals.property_request = property;
+	forge_globals.property_step = step < 0 ? -1 : 1;
+	forge_globals.property_requested = TRUE;
+}
+
+boolean forge_properties_get(
+	struct forge_properties *properties)
+{
+	struct forge_placed *placed = forge_properties_target();
+
+	csmemset(properties, 0, sizeof(*properties));
+	if (!placed)
+		return FALSE;
+	forge_object_name(placed->object_index, properties->name, sizeof(properties->name));
+	properties->team = placed->team;
+	properties->respawn_seconds = placed->respawn_seconds;
+	properties->place_at_start = (placed->flags & FORGE_RECORD_PLACE_AT_START) != 0;
+	return TRUE;
+}
+
+void forge_menu_status(
+	char *status,
+	int size)
+{
+	snprintf(status, (size_t)size, "%s", forge_globals.menu_status);
 }
 
 void forge_map_loaded(
@@ -2447,6 +2954,14 @@ void forge_map_loaded(
 	forge_globals.placed_count = 0;
 	forge_globals.ai_count = 0;
 	forge_globals.held_object_index = NONE;
+	forge_globals.held_spawned = FALSE;
+	forge_globals.undo_count = 0;
+	forge_globals.undo_cursor = 0;
+	forge_globals.undo_requested = 0;
+	forge_globals.snap_requested = FALSE;
+	forge_globals.property_requested = FALSE;
+	forge_globals.menu_status[0] = 0;
+	forge_globals.save_status[0] = 0;
 	forge_globals.palette_built = FALSE;
 	forge_globals.hud_font_looked_up = FALSE;
 	forge_globals.hud_font_index = NONE;
@@ -2615,6 +3130,26 @@ void forge_update(
 		else
 			forge_globals.save_requested = FALSE;
 	}
+	/* (the Forge menu's and the properties window's) */
+	if (forge_globals.undo_requested)
+	{
+		short step = forge_globals.undo_requested;
+
+		forge_globals.undo_requested = 0;
+		if (forge_globals.active)
+			forge_undo_step(step > 0);
+	}
+	if (forge_globals.snap_requested)
+	{
+		forge_globals.snap_requested = FALSE;
+		forge_globals.snap = !forge_globals.snap;
+		forge_menu_notice("%s", forge_globals.snap ? T("Snap: On") : T("Snap: Off"));
+	}
+	if (forge_globals.property_requested)
+	{
+		forge_globals.property_requested = FALSE;
+		forge_property_apply(forge_globals.property_request, forge_globals.property_step);
+	}
 	if (!forge_game_playing)
 		return;
 	player_index = local_player_get_player_index(forge_globals.local_player_index);
@@ -2656,7 +3191,8 @@ void forge_update(
 		}
 		return;
 	}
-	/* (the browser closed: its choice made, or B or Square) */
+	/* (the browser or the properties closed: the choice made, or B or
+	Square) */
 	if (forge_globals.close_requested || (forge_globals.browser_chosen && menu_open))
 	{
 		forge_globals.close_requested = FALSE;
@@ -2666,6 +3202,16 @@ void forge_update(
 			menu_open = FALSE;
 		}
 	}
+	/* (a menu over the game closed since the last frame, by whatever way:
+	the press that closed it is not the monitor's too - B would copy the
+	object held) */
+	if (forge_globals.menu_was_open && !menu_open)
+	{
+		for (button = 0; button < NUMBER_OF_GAMEPAD_BUTTONS; button++)
+			pressed[button] = FALSE;
+		toggle_pressed = FALSE;
+	}
+	forge_globals.menu_was_open = menu_open;
 	forge_placed_update();
 	if (forge_globals.game_active && pressed[_gamepad_binary_button_start] && !menu_open && !forge_globals.game_requested)
 	{
@@ -2720,8 +3266,14 @@ void forge_update(
 	}
 	if (!menu_open)
 	{
+		/* (Square: holding an object, its properties; else the browser) */
 		if (pressed[_forge_button_browser])
-			forge_browser_open();
+		{
+			if (object_try_and_get(forge_globals.held_object_index))
+				forge_properties_open();
+			else
+				forge_browser_open();
+		}
 		if (pressed[_forge_button_speed])
 		{
 			forge_globals.speed = (short)((forge_globals.speed + 1) % NUMBER_OF_FORGE_SPEEDS);
@@ -3094,6 +3646,28 @@ boolean forge_command(
 		if (object_try_and_get(forge_globals.held_object_index))
 			forge_drop();
 		return forge_spawn(forge_globals.palette[index].tag_index) != NONE;
+	}
+	if (!strcmp(word, "undo") || !strcmp(word, "redo"))
+	{
+		forge_undo_step(!strcmp(word, "redo"));
+		return TRUE;
+	}
+	if (!strcmp(word, "snap"))
+	{
+		forge_globals.snap = strcmp(rest, "off") != 0;
+		platform_log("forge: snapping %s", forge_globals.snap ? "on" : "off");
+		return TRUE;
+	}
+	if (!strcmp(word, "property"))
+	{
+		/* ("property team|respawn|start": the held object's stepped) */
+		short property = !strcmp(rest, "team") ? _forge_property_team : !strcmp(rest, "respawn") ? _forge_property_respawn :
+			!strcmp(rest, "start") ? _forge_property_place_at_start : NONE;
+
+		if (property == NONE || !forge_properties_target())
+			return FALSE;
+		forge_property_apply(property, 1);
+		return TRUE;
 	}
 	if (!strcmp(word, "save"))
 	{

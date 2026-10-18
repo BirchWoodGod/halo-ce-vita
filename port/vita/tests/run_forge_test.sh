@@ -41,6 +41,12 @@
 #               that fails half way (HALO_TEST_FORGE_WRITE_FAIL, as a full
 #               card), over the session's own file and as a new one: said,
 #               the old file as it was, nothing else left
+#   edit        the Forge menu's UNDO, REDO and SNAP, and an object's
+#               properties (Square while holding it): a Warthog placed with
+#               team red, respawn 45 s, not placed at the start; placing it
+#               undone and redone (its properties back), snapping on, moved
+#               (dropped on the grid), the move undone; saved, and the file
+#               read back (forge_files_test --dump) with its properties
 #   fileshare   the main menu's FILE SHARE over the test's files: listed by
 #               map, a map variant renamed (typed), deleted (asked first), a
 #               damaged one refused for Forge and deleted, GAME VARIANTS
@@ -53,7 +59,7 @@
 # HALO_TEST_KEEP=1, or copied to HALO_TEST_SHOTS when it is set.
 #
 #   run_forge_test.sh [CASE...]      (default: v1 budget b30 off files variants
-#                                     fileshare fstouch)
+#                                     edit fileshare fstouch)
 #   HALO_TEST_VITA        the harness (default build/linux/halo of this tree)
 #   HALO_TEST_DATA_MENUS  a folder with the game's maps folder (the Xbox maps)
 #                         and the Halo PC bitmaps.map and loc.map (never in the
@@ -70,7 +76,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_forge_test.$$}
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-v1 budget b30 off files variants fileshare fstouch}
+cases=${*:-v1 budget b30 off files variants edit fileshare fstouch}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
 
@@ -109,10 +115,6 @@ run() {
 samples() {
 	local store=$1
 	mkdir -p "$store/forge/bloodgulch"
-	if [ ! -x "$out/forge_files_test" ]; then
-		${CC:-cc} -O1 -D_GNU_SOURCE -I"$root/port/linux/game" -o "$out/forge_files_test" "$here/forge_files_test.c" \
-			"$root/port/linux/game/forge_files.c" || return 1
-	fi
 	"$out/forge_files_test" --write "$store/forge/bloodgulch" > /dev/null
 }
 
@@ -164,7 +166,8 @@ b30='map_name levels\\b30\\b30'
 # D-pad up alone (rs: nothing for the monitor), Select + D-pad up (back+rs:
 # the Spartan), forward, Select alone then D-pad up alone (the scoreboard,
 # then zoom: neither flips), Select + D-pad up (the monitor); Start, down
-# three times (past SAVE MAP VARIANT), A (LEAVE FORGE), A (leave))
+# six times (past SAVE MAP VARIANT, UNDO, REDO, SNAP), A (LEAVE FORGE), A
+# (leave))
 v1pad="wait:150:3000 @00-main-menu:0:300 down:150:600 down:150:600 down:150:600 a:150:2500 @01-lobby:0:300"
 v1pad="$v1pad a:150:2000 @02-map-picker:0:300 down:150:700 a:150:2000 a:150:2000 up:150:700 a:150:2000"
 v1pad="$v1pad @03-lobby-blood-gulch:0:300 down:150:600 down:150:600 a:150:1500 level:150:2500 @04-monitor:0:300"
@@ -177,18 +180,19 @@ v1pad="$v1pad @13-boulder-dropped:0:300 rt:150:1000 lleft:700:600 @14-boulder-ca
 v1pad="$v1pad y:150:1500 @15-deleted:0:300 rs:150:1500 back+rs:150:2500 @16-spartan:0:300 lup:800:1500"
 v1pad="$v1pad back:150:600 rs:150:1200 back+rs:150:2500"
 v1pad="$v1pad @17-monitor-again:0:300 start:150:2000 @18-forge-menu:0:300 down:150:600 down:150:600 down:150:600"
-v1pad="$v1pad a:150:1500"
+v1pad="$v1pad down:150:600 down:150:600 down:150:600 a:150:1500"
 v1pad="$v1pad @19-leave-forge:0:300 a:150:9000 @20-main-menu-again:0:300"
 
 # (variants: the main menu's FORGE, the lobby; START FORGE (the map, no
 # variant); a Warthog from VEHICLES, dropped; Start, SAVE MAP VARIANT (its
 # name typed), B; a boulder from SCENERY, dropped; Start, SAVE MAP VARIANT
-# (the same name: the file replaced), down, LEAVE FORGE, leave)
+# (the same name: the file replaced), down to LEAVE FORGE, leave)
 lobby="wait:150:3000 down:150:600 down:150:600 down:150:600 a:150:2500"
 savepad="$lobby down:150:600 down:150:600 a:150:1500 level:150:2500 x:150:1500 a:150:1200 down:150:600 down:150:600"
 savepad="$savepad a:150:1500 rt:150:2000 start:150:2000 down:150:600 down:150:600 a:150:2500 @00-saved:0:300 b:150:1500"
 savepad="$savepad x:150:1500 rt:150:800 rt:150:800 rt:150:1200 a:150:1500 rt:150:2000 start:150:2000 down:150:600"
-savepad="$savepad down:150:600 a:150:2500 @01-saved-again:0:300 down:150:600 a:150:1500 a:150:9000"
+savepad="$savepad down:150:600 a:150:2500 @01-saved-again:0:300 down:150:600 down:150:600 down:150:600 down:150:600"
+savepad="$savepad a:150:1500 a:150:9000"
 # (the lobby's MAP VARIANT picker, down N times, A; START FORGE)
 pick() {
 	local p="$lobby down:150:600 a:150:2000 @00-picker:0:300" i
@@ -206,6 +210,30 @@ fspad="$fspad down:150:700 x:150:2000 @01-renamed:0:300 y:150:1500 @02-delete-as
 fspad="$fspad down:150:700 a:150:1500 @04-damaged-refused:0:300 y:150:1500 a:150:2000 right:150:1200"
 fspad="$fspad @05-game-variants:0:300 left:150:1200 a:150:2500 @06-forge-lobby:0:300 b:150:2000 b:150:2000"
 fspad="$fspad @07-main-menu:0:300"
+
+# (edit: START FORGE; a Warthog from VEHICLES, held; Square (its
+# properties): A (team red), down, A (respawn 45 s), down, A (not placed at
+# start), B; R (dropped: placed); Start, down to UNDO, A (undone: gone),
+# down, A (redone: back with its properties), down, A (SNAP on), B; a
+# boulder from SCENERY, R (dropped on the grid), R (grabbed), left
+# (carried), R (dropped: moved, on the grid); Start, down to UNDO, A (the
+# move undone), B; Start, SAVE MAP VARIANT (typed), B)
+editpad="$lobby down:150:600 down:150:600 a:150:1500 level:150:2500 x:150:1500 a:150:1200 down:150:600 down:150:600"
+editpad="$editpad a:150:1500 x:150:1500 @00-properties:0:300 a:150:800 down:150:600 a:150:800 down:150:600 a:150:800"
+editpad="$editpad @01-properties-set:0:300 b:150:1200 rt:150:2000 start:150:2000 down:150:600 down:150:600 down:150:600"
+editpad="$editpad a:150:1500 @02-undone:0:300 down:150:600 a:150:1500 @03-redone:0:300 down:150:600 a:150:1200"
+editpad="$editpad @04-snap:0:300 b:150:1500 x:150:1500 rt:150:800 rt:150:800 rt:150:1200 a:150:1500 rt:150:1500"
+editpad="$editpad rt:150:1500 lleft:600:600 rt:150:2000 @05-moved:0:300 start:150:2000"
+editpad="$editpad down:150:600 down:150:600 down:150:600 a:150:1500 @06-move-undone:0:300 b:150:1500 start:150:2000"
+editpad="$editpad down:150:600 down:150:600 a:150:2500 @07-saved:0:300 b:150:1500"
+
+edit_runs() {
+	local store="$out/edit-store"
+	rm -rf "$store"
+	mkdir -p "$store"
+	run edit 90 "" "" "$editpad" HALO_MENU_STYLE=halo3 HALO_SAVE_ROOT="$store" "HALO_TEST_TEXT_INPUT=Edit Test"
+	"$out/forge_files_test" --dump "$store/forge/bloodgulch/edit_test.hmv" > "$out/edit/dump.txt" 2>&1
+}
 
 variants_runs() {
 	local store="$out/variants-store"
@@ -245,6 +273,15 @@ fstouch_runs() {
 	find "$store" -type f | sort > "$out/fstouch-files.txt"
 }
 
+# (the test's own files' writer and reader: forge_files_test, built once
+# before the cases run side by side)
+mkdir -p "$out"
+if ! ${CC:-cc} -O1 -D_GNU_SOURCE -I"$root/port/linux/game" -o "$out/forge_files_test" "$here/forge_files_test.c" \
+	"$root/port/linux/game/forge_files.c"; then
+	echo "FAIL: forge_files_test does not build"
+	exit 1
+fi
+
 # (at most HALO_TEST_JOBS harnesses at once, 2 by default: other tests share the machine)
 jobs=${HALO_TEST_JOBS:-2}
 for c in $cases; do
@@ -279,6 +316,12 @@ for c in $cases; do
 			continue
 		fi
 		fileshare_runs & ;;
+	edit)
+		if [ "$menus_files" = 0 ]; then
+			echo "SKIP: edit: no Halo PC bitmaps.map and loc.map in $data/maps"
+			continue
+		fi
+		edit_runs & ;;
 	fstouch)
 		if [ "$menus_files" = 0 ]; then
 			echo "SKIP: fstouch: no Halo PC bitmaps.map and loc.map in $data/maps"
@@ -424,6 +467,27 @@ for c in $cases; do
 			echo "  ok: $c: back at the main menu" || fail "$c: not back at the main menu"
 		[ "$(grep -c "\.hmv$" "$out/fileshare-files.txt")" = 2 ] && echo "  ok: $c: two files left (missing, wrongmap)" ||
 			fail "$c: $(cat "$out/fileshare-files.txt")" ;;
+	edit)
+		expect "$c" "Square while holding opened the properties" "ui: screen pc.h3.forge.properties.screen"
+		expect "$c" "team red, respawn 45 s, not placed at start" "forge: properties: team 0, respawn 45 s, not placed at start"
+		expect "$c" "placing the Warthog undone" "forge: undid Place Warthog \\(0 of 1 steps\\)"
+		expect "$c" "and redone" "forge: redid Place Warthog \\(1 of 1 steps\\)"
+		expect "$c" "snapping turned on" "forge: Snap: On"
+		expect "$c" "the boulder grabbed" "forge: grabbed Boulder"
+		expect "$c" "the move undone" "forge: undid Move Boulder \\(2 of 3 steps\\)"
+		# (dropped snapped, both times: on the 0.25 grid along the ground)
+		grep -a "forge: dropped Boulder" "$log" | sed 's/.* at \([^ ]*\) \([^ ]*\) .*/\1 \2/' > "$out/edit/drops.txt"
+		if [ "$(wc -l < "$out/edit/drops.txt")" = 2 ] && awk '{ for (i = 1; i <= 2; i++) { v = ($i < 0 ? -$i : $i) * 4; f = v - int(v); if (f > 0.02 && f < 0.98) exit 1 } }' "$out/edit/drops.txt"; then
+			echo "  ok: $c: dropped on the grid ($(tr '\n' ' ' < "$out/edit/drops.txt"))"
+		else
+			fail "$c: not dropped on the grid ($(tr '\n' ' ' < "$out/edit/drops.txt"))"
+		fi
+		expect "$c" "saved" "forge: map variant \"Edit Test\" saved as bloodgulch/edit_test.hmv, 2 objects"
+		if grep -aq "record 0: vehicles.warthog.warthog kind 0 team 0 respawn 45 flags 0 " "$out/edit/dump.txt"; then
+			echo "  ok: $c: the file keeps the Warthog's properties"
+		else
+			fail "$c: the file lacks the properties: $(cat "$out/edit/dump.txt")"
+		fi ;;
 	fstouch)
 		expect "$c" "a tap on FILE SHARE opened it" "ui: screen pc.h3.fileshare.screen"
 		expect "$c" "a tap on Rename renamed the first" "forge store: bloodgulch/missing.hmv written: \"Touched\""
