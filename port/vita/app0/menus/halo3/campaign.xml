@@ -126,7 +126,7 @@ rest this folder's art. -->
 	<widget name="h3/campaign/back" type="text" left="130" top="446" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/main_items" string_index="10"/>
 	<!-- (scene: its own camera, written into ui.map's unused load_campaign point - "x y z yaw
 	pitch", world units and degrees -: the planet, the galaxy and a band of the ring) -->
-	<widget name="h3/campaign/screen" flags="pass_unhandled_to_focused_child" scene="load_campaign -15 5 0 -10 30">
+	<widget name="h3/campaign/screen" flags="pass_unhandled_to_focused_child" scene="load_campaign -15 5 0 -10 30" scene_object="menu_spartan 1.7 0.5 -0.45 20; menu_spartan 2.5 0.1 -0.5 -20">
 		<on event="created" run="port h3 campaign init"/>
 		<on event="created" run="port h3 scene"/>
 		<on event="b back" back="true"/>

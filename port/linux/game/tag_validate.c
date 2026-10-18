@@ -1481,6 +1481,19 @@ static boolean validate_structure_bsp_in(
 	return !validation.refused;
 }
 
+/* (port) the tag cache's bytes after the map's tags that are not free (the
+scene packs': scene_packs.c), which a structure bsp's check does not take for
+its scratch */
+static unsigned long tag_validate_reserved_after_tags;
+
+void tag_validate_reserve_after_tags(
+	unsigned long bytes)
+{
+	tag_validate_reserved_after_tags = bytes;
+
+	return;
+}
+
 /* (port) the platform's clock (port/linux/src/posix_profile.c, the Vita's
 host), for the check's time in the log */
 unsigned long long vita_host_time_us(void);
@@ -1595,10 +1608,11 @@ boolean tag_validate_structure_bsp(
 	tag_validate_globals.out_of_memory = FALSE;
 
 	/* (a bsp loads to the top of the tag cache, after the tags: the free
-	part is between them, or after the bsp) */
+	part is between them, or after the bsp; (port) past the scene packs'
+	bytes after the tags: scene_packs.c) */
 	if (in_tag_cache)
 	{
-		byte *tags_end = tags + tag_validate_globals.tag_data_size;
+		byte *tags_end = tags + tag_validate_globals.tag_data_size + tag_validate_reserved_after_tags;
 		byte *cache_end = tags + tag_validate_globals.tag_cache_size;
 
 		if (bsp >= tags_end && bsp - tags_end >= cache_end - (bsp + size))

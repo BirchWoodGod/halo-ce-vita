@@ -62,7 +62,7 @@ ui.map's own, the rest this folder's art. -->
 	<widget name="h3/forge/leave" type="text" left="130" top="446" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/forge_text" string_index="7"/>
 	<!-- (scene: its own camera in ui.map's unused new_campaign point: the ring's arc across the
 	planet) -->
-	<widget name="h3/forge/lobby" flags="pass_unhandled_to_focused_child" scene="new_campaign -10 -20 5 40 20">
+	<widget name="h3/forge/lobby" flags="pass_unhandled_to_focused_child" scene="new_campaign -10 -20 5 40 20" scene_object="menu_spartan 1.7 0.4 -0.5 25">
 		<on event="created" run="port forge lobby init"/>
 		<on event="created" run="port h3 scene"/>
 		<on event="b back" back="true"/>

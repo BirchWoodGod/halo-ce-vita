@@ -333,6 +333,11 @@ boolean tag_validate_pack_tags(
 	char const *name,
 	long *corrections);
 
+/* (port) the tag cache's bytes after the map's tags held by the scene packs
+(scene_packs.c), not taken for a structure bsp's check's scratch */
+void tag_validate_reserve_after_tags(
+	unsigned long bytes);
+
 /* a structure bsp just read (size bytes at base, its header there) as tag
 tag_index: FALSE if it cannot be used */
 boolean tag_validate_structure_bsp(

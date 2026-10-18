@@ -111,7 +111,7 @@ unsigned char scene_pack_build(struct scene_pack_recipe const *recipe, char cons
 unsigned char scene_pack_open(char const *path, struct scene_pack_info *info, char *why, long why_size);
 unsigned char scene_pack_load(char const *path, struct scene_pack_info const *info, void *destination, char *why,
 	long why_size);
-void scene_pack_rebase(void *tags, long first_index, long first_salt);
+void scene_pack_rebase(void *tags, long first_index, long first_salt, long file_delta);
 void *scene_pack_instances(void *tags, long *count);
 long scene_pack_find(void *tags, unsigned long group_tag, char const *path);
 
@@ -351,7 +351,7 @@ static void *pack_load(char const *path, struct scene_pack_info *info, long firs
 		return NULL;
 	}
 	if (first_index >= 0)
-		scene_pack_rebase(tags, first_index, 0x3000);
+		scene_pack_rebase(tags, first_index, 0x3000, 0x04000000);
 	return tags;
 }
 

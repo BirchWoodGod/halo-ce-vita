@@ -467,6 +467,17 @@ static boolean cache_file_structure_bsp_reference_verify(
 	}
 
 	read_size = (reference->file_size + CACHE_FILE_SECTOR_SIZE - 1) & ~(CACHE_FILE_SECTOR_SIZE - 1);
+#ifdef HALO_LINUX
+	/* port: and past the scene packs' bytes after the tags
+	(port/linux/game/scene_packs.c) */
+	{
+		unsigned long scene_packs_reserved_bytes(void);
+
+		tag_data_size += (long)scene_packs_reserved_bytes();
+		if (tag_data_size > TAG_CACHE_SIZE)
+			tag_data_size = TAG_CACHE_SIZE;
+	}
+#endif
 	if (!cache_file_region_contains(
 		tag_cache_base_address + tag_data_size,
 		TAG_CACHE_SIZE - tag_data_size,
@@ -578,6 +589,13 @@ void scenario_tags_unload(
 	sound_cache_close();
 	texture_cache_close();
 #ifdef HALO_LINUX
+	/* port: the scene packs loaded beside the map go, their table before
+	them back (port/linux/game/scene_packs.c), before the menus' */
+	{
+		extern void scene_packs_unloaded(void);
+
+		scene_packs_unloaded();
+	}
 	/* port: the menus' tags go, and the map's own table comes back
 	(port/linux/game/menu_tags.c): after the texture cache, which writes to
 	the bitmaps it has loaded as it closes */
@@ -1660,10 +1678,18 @@ boolean scenario_structure_bsp_load(
 	}
 	if (!custom_edition_cache_tags_loaded())
 	{
+		/* (port: but the scene packs' bytes after the tags,
+		port/linux/game/scene_packs.c, where the bsp never loads:
+		cache_file_structure_bsp_reference_verify) */
+		unsigned long scene_packs_reserved_bytes(void);
+		long kept = cache_file_globals.header.tag_data_size + (long)scene_packs_reserved_bytes();
+
+		if (kept > 0x01600000)
+			kept = 0x01600000;
 		csmemset(
-			tag_cache_base_address + cache_file_globals.header.tag_data_size,
+			tag_cache_base_address + kept,
 			0xCD,
-			0x01600000 - cache_file_globals.header.tag_data_size);
+			0x01600000 - kept);
 	}
 #else
 	csmemset(

@@ -1662,7 +1662,7 @@ static unsigned long bitmap_read_size(struct bitmap_data const *bitmap)
 }
 
 /* a bitmap tag's pixels the pack's (the group's offset none, each
-bitmap's its own) */
+bitmap's its own, as in the map) */
 static void bitmap_fixups(struct build_state *state, struct build_tag const *tag, unsigned long file_length)
 {
 	unsigned char *source = source_at(state, tag->source_base, sizeof(struct bitmap_group));
@@ -1690,8 +1690,11 @@ static void bitmap_fixups(struct build_state *state, struct build_tag const *tag
 		size = bitmap_read_size(&bitmap);
 		if ((unsigned long)bitmap.pixels_size > size)
 			size = (unsigned long)bitmap.pixels_size;
+		/* (a cache's bitmap's offset is the file's own: the group's is what
+		the tools left, which the texture cache adds only to a tag file's
+		bitmaps, texture_cache_bitmap_new, never a cache's) */
 		range_fixup(state, (unsigned long)out + offsetof(struct bitmap_data, pixels_offset),
-			range_add(state, (unsigned long)(group.pixel_data.file_offset + bitmap.pixels_offset), size, file_length), 0);
+			range_add(state, (unsigned long)bitmap.pixels_offset, size, file_length), 0);
 	}
 }
 
@@ -2355,6 +2358,7 @@ struct rebase_walk
 	long count;
 	long first_index;
 	long first_salt;
+	long file_delta;
 };
 
 static unsigned long rebased(struct rebase_walk const *rebase, unsigned long tag_index)
@@ -2371,6 +2375,15 @@ static void rebase_visit(void *context, struct tag_schema_field const *field, un
 	struct rebase_walk const *rebase = context;
 	unsigned char *value;
 
+	/* (a file's data, a sound's samples, at the pack's own file offsets) */
+	if (field->type == _tag_schema_file_data)
+	{
+		struct tag_data *data = (struct tag_data *)address;
+
+		if (data->size > 0)
+			data->file_offset += rebase->file_delta;
+		return;
+	}
 	/* (references are the layouts' walk's, below: each once) */
 	if (field->type != _tag_schema_tag_index)
 		return;
@@ -2423,7 +2436,8 @@ static void layout_rebase(struct rebase_walk const *rebase, unsigned short layou
 void scene_pack_rebase(
 	void *tags,
 	long first_index,
-	long first_salt)
+	long first_salt,
+	long file_delta)
 {
 	long count;
 	unsigned char *instances = scene_pack_instances(tags, &count);
@@ -2433,6 +2447,7 @@ void scene_pack_rebase(
 	rebase.count = count;
 	rebase.first_index = first_index;
 	rebase.first_salt = first_salt;
+	rebase.file_delta = file_delta;
 	for (index = 0; index < count; index++)
 	{
 		unsigned char *instance = instances + index * TAG_INSTANCE_SIZE;
@@ -2449,6 +2464,15 @@ void scene_pack_rebase(
 			schema_walk_element(&walk, group->definition, base, 0);
 		if (base && halo_tag_layout_root(group_tag) < HALO_TAG_LAYOUT_UNKNOWN)
 			layout_rebase(&rebase, halo_tag_layout_root(group_tag), (unsigned char *)base, 0);
+		/* (a bitmap's pixels at the pack's own file offsets) */
+		if (group_tag == BITMAP_GROUP_TAG && base)
+		{
+			struct bitmap_group *bitmaps = (struct bitmap_group *)base;
+			long bitmap_index;
+
+			for (bitmap_index = 0; bitmap_index < bitmaps->bitmaps.count; bitmap_index++)
+				((struct bitmap_data *)bitmaps->bitmaps.address + bitmap_index)->pixels_offset += file_delta;
+		}
 		/* (a sound's permutations name the sound: sound_check) */
 		if (group_tag == 'snd!' && base)
 		{

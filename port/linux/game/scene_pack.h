@@ -53,7 +53,7 @@ enum
 {
 	SCENE_PACK_VERSION = 1,
 	/* (the builder's own: a pack of another builder's is made again) */
-	SCENE_PACK_BUILDER_VERSION = 1,
+	SCENE_PACK_BUILDER_VERSION = 2,
 	SCENE_PACK_HEADER_SIZE = 128,
 
 	/* a recipe's most lines' worth */
@@ -210,11 +210,14 @@ boolean scene_pack_load(
 
 /* a pack loaded at tags (scene_pack_load) given its tag indices in the
 game's table: its tag i is (first_salt + i) << 16 | (first_index + i), as
-are its references, tag indices and sounds' own indices */
+are its references, tag indices and sounds' own indices; and its pixels'
+and samples' file offsets moved by file_delta (several packs loaded at once
+read from files of their own: scene_packs.c) */
 void scene_pack_rebase(
 	void *tags,
 	long first_index,
-	long first_salt);
+	long first_salt,
+	long file_delta);
 
 /* a loaded pack's tag table (32 bytes a tag, cache_files.c's instances)
 and count, and its vertex and index buffers' header (cache_files.c's struct
