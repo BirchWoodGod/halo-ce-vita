@@ -1501,6 +1501,7 @@ static void test_graphics_layout(void)
 		{ TAB_GRAPHICS, "Screen", NULL, NULL, 0, NULL },
 		{ PAGE_GRAPHICS_SCREEN, "Aspect ratio", "HALO_DISPLAY_WIDTH", "848|640", 0, "848" },
 		{ PAGE_GRAPHICS_SCREEN, "Upscale filter", "HALO_UPSCALE_FILTER", "0|1", 0, "0" },
+		{ PAGE_GRAPHICS_SCREEN, "Menu style", "HALO_MENU_STYLE", "classic|halo3", 0, "classic" },
 		{ TAB_GRAPHICS, "First person", NULL, NULL, 0, NULL },
 		{ PAGE_GRAPHICS_FIRST_PERSON, "First-person legs", "HALO_FIRST_PERSON_LEGS", "0|1", 0, "1" },
 		{ PAGE_GRAPHICS_FIRST_PERSON, "Smooth weapon motion", "HALO_INTERPOLATE_FIRST_PERSON", "1|0", 0, "1" },
@@ -1573,7 +1574,7 @@ static void test_graphics_layout(void)
 	}
 	check(all && row == count && pages_opened == 4,
 		"Graphics: Profile, Render resolution, Dynamic minimum, Frame limit, Frame interpolation, FPS counter; "
-		"Screen (Aspect ratio, Upscale filter), First person (First-person legs, Smooth weapon motion), Detail "
+		"Screen (Aspect ratio, Upscale filter, Menu style), First person (First-person legs, Smooth weapon motion), Detail "
 		"(Model detail ... Particles, Particle density, Ragdolls), Performance (Scenery updates, Object lighting, AI think "
 		"rate, Fourth core helpers*): each row's variable, values, default and restart as before");
 	check(settings[0].variable && !strcmp(settings[0].variable, "HALO_PROFILE") && !strcmp(settings[1].variable, "HALO_RENDER_SCALE") &&
@@ -1598,7 +1599,7 @@ static void test_variables_kept(void)
 		"HALO_XBOX_A", "HALO_XBOX_B", "HALO_XBOX_X", "HALO_XBOX_Y", "HALO_XBOX_BLACK", "HALO_XBOX_WHITE",
 		"HALO_XBOX_LEFT_TRIGGER", "HALO_XBOX_RIGHT_TRIGGER", "HALO_XBOX_LEFT_STICK", "HALO_XBOX_RIGHT_STICK",
 		"HALO_XBOX_BACK", "HALO_DEV_SETTINGS", "HALO_GYRO", "HALO_GYRO_BUTTON", "HALO_GYRO_SENS",
-		"HALO_GYRO_INVERT_Y", "HALO_GYRO_TURN", "HALO_GYRO_ASSIST", "HALO_VITA_NETWORK", "HALO_CROSSPLAY",
+		"HALO_GYRO_INVERT_Y", "HALO_GYRO_TURN", "HALO_GYRO_ASSIST", "HALO_MENU_STYLE", "HALO_VITA_NETWORK", "HALO_CROSSPLAY",
 		"HALO_ADHOC_ROOM", "HALO_CUSTOM_EDITION", PERFORMANCE_LOG, "HALO_HANG_CRASH",
 		"XV_FPS", "HALO_DEBUG_CAMERA", "HALO_GXM_WCLAMP", "HALO_TARGET_CHAIN_MIN_SIZE", "HALO_FRAME_PHASE_LOCK",
 		"HALO_GXM_RTT_SYNC", "HALO_ADHOC_DIALOG_MODE", "HALO_SUN_RAYS",
@@ -2466,6 +2467,32 @@ static void test_updates(void)
 /* ---------- the restart offer: a change that applies after a restart,
 the panel closed at the main menu (close_panel) */
 
+/* the Menu style row (Graphics > Screen): the menus as Halo CE's or Halo 3's
+(port/linux/game/menu_tags.c reads HALO_MENU_STYLE each time a screen
+opens): live, no restart */
+static void test_menu_style_row(void)
+{
+	unsigned long generation;
+
+	open_panel();
+	to_tab("Graphics");
+	check(open_page("Screen") && to_line("Menu style") &&
+		strstr(menu, "\n\x05" "Halo 3: the new menus over the Halo ring. Halo CE: the original menus.\n") && menu_fits(),
+		"Menu style: its row on Graphics > Screen and its help");
+	generation = halo_settings_generation;
+	restart_pending = 0;
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_MENU_STYLE"), "halo3") && halo_settings_generation != generation &&
+		strstr(file_text(SETTINGS_FILE), "HALO_MENU_STYLE=halo3\n") && strstr(menu, "\nMenu style\x02< Halo 3  "),
+		"Menu style Halo 3: in the environment and settings.txt at once");
+	check(!strstr(menu, "Menu style*") && !restart_pending, "Menu style: live, no restart");
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_MENU_STYLE"), "classic") && strstr(menu, "\nMenu style\x02  Halo CE >"),
+		"Menu style back to Halo CE");
+	press(VITA_BUTTON_CIRCLE);
+	press(VITA_BUTTON_CIRCLE);
+}
+
 static void test_restart_offer(void)
 {
 	const char *crossplay = getenv("HALO_CROSSPLAY");
@@ -2626,11 +2653,12 @@ int main(void)
 		first-person legs and the weapon's motion (live, no *) */
 		unsigned long generation;
 
-		check(to_line("Screen") && strstr(menu, "\n\x05" "Aspect ratio, upscale filter\n") &&
+		check(to_line("Screen") && strstr(menu, "\n\x05" "Aspect ratio, upscale filter, menu style\n") &&
 			menu_fits(), "Screen: its help says what is there");
 		check(open_page("Screen") && strstr(menu, "\n\x03Graphics > Screen\n") &&
 			!strcmp(menu_line(2, line, sizeof(line)), "Aspect ratio\x02  16:9 >") &&
-			!strcmp(menu_line(3, line, sizeof(line)), "Upscale filter\x02  Smooth >") && menu_rows() == 2 &&
+			!strcmp(menu_line(3, line, sizeof(line)), "Upscale filter\x02  Smooth >") &&
+			!strcmp(menu_line(4, line, sizeof(line)), "Menu style\x02  Halo CE >") && menu_rows() == 3 &&
 			menu_fits() && menu_height_fits() && !strstr(menu, "Aspect ratio*") && !strstr(menu, "Upscale filter*"),
 			"Graphics, Screen: Aspect ratio (16:9), Upscale filter (Smooth), live");
 		press(VITA_BUTTON_RIGHT);
@@ -3455,6 +3483,7 @@ int main(void)
 	update_status_value = UPDATE_STATUS_AVAILABLE;
 	snprintf(update_version_value, sizeof(update_version_value), "1.1.0-beta.4");
 	test_languages();
+	test_menu_style_row();
 	test_restart_offer();
 	printf("-- %d of %d checks failed\n", failures, checks);
 	return failures ? 1 : 0;

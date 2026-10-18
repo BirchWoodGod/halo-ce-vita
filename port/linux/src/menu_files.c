@@ -967,6 +967,13 @@ void halo_menus_preload(void)
 	pthread_mutex_unlock(&preload_lock);
 }
 
+int halo_menu_style_halo3(void)
+{
+	char const *style = getenv("HALO_MENU_STYLE");
+
+	return style && !strcmp(style, "halo3");
+}
+
 struct halo_menus const *halo_menus_load(void)
 {
 	struct halo_menus const *result;

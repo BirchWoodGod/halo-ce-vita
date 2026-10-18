@@ -315,6 +315,11 @@ static const struct config_setting config_settings[] =
 		"maximum; 0 for the build's maximum). A co-op game takes\n"
 		"network.coop_players. The Vita's settings panel (Multiplayer, Play,\n"
 		"Max players) sets it." },
+	{ "menus.style", _config_string, "\"classic\"", "HALO_MENU_STYLE", _environment_value, _platform_all,
+		"The menus: \"classic\" (Halo CE's own) or \"halo3\" (Halo 3-style screens\n"
+		"over the same animated Halo ring: port/vita/app0/menus/halo3). Read each\n"
+		"time a screen opens. The Vita's settings panel (Graphics, Screen, Menu\n"
+		"style) sets it." },
 	{ "bots.count", _config_integer, "0", "HALO_BOTS", _environment_value, _platform_all,
 		"Computer players (bots) in a local (split screen) multiplayer game:\n"
 		"0 to 15 join its lobby with the players, as far as the game has room.\n"

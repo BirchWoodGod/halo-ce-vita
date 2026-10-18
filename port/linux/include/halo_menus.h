@@ -152,6 +152,10 @@ struct halo_menus
 /* the menus, read from the files (once; the same each call after); NULL if
 there are none, or a file has an error (logged) */
 struct halo_menus const *halo_menus_load(void);
+/* the Menu style (HALO_MENU_STYLE, menus.style): 1 for the Halo 3-style
+screens (menus/halo3), 0 for Halo CE's own; read again each call, so a
+change in the settings panel takes at the next screen */
+int halo_menu_style_halo3(void);
 /* the same begun on a thread of its own (once), which halo_menus_load waits
 for */
 void halo_menus_preload(void);

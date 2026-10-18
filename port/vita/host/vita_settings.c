@@ -359,11 +359,16 @@ static struct setting settings[] = {
 	/* (then four pages, which keep the tab to ten rows with Dynamic minimum
 	shown: the picture's framing and scaling, set once - the row says both,
 	page_summary -; first person; the detail rows; the update rates) */
-	PAGE_ROW("Screen", "Aspect ratio, upscale filter", TAB_GRAPHICS, PAGE_GRAPHICS_SCREEN),
+	PAGE_ROW("Screen", "Aspect ratio, upscale filter, menu style", TAB_GRAPHICS, PAGE_GRAPHICS_SCREEN),
 	{ "Aspect ratio", "HALO_DISPLAY_WIDTH", 0, 2, { "848", "640" }, { "16:9", "4:3" },
 		"4:3: the Xbox's framing, black bars", 0, PAGE_GRAPHICS_SCREEN },
 	{ "Upscale filter", "HALO_UPSCALE_FILTER", 0, 2, { "0", "1" }, { "Smooth", "Sharp" },
 		"Scaling to the screen: Sharp = crisp pixels", 0, PAGE_GRAPHICS_SCREEN },
+	/* (the menus: Halo CE's own, or the Halo 3-style ones over the same
+	animated Halo ring - port/vita/app0/menus/halo3, menu_tags.c, which
+	reads it each time a screen opens: live) */
+	{ "Menu style", "HALO_MENU_STYLE", 0, 2, { "classic", "halo3" }, { "Halo CE", "Halo 3" },
+		"Halo 3: the new menus over the Halo ring. Halo CE: the original menus.", 0, PAGE_GRAPHICS_SCREEN },
 	PAGE_ROW("First person", "First-person legs, smooth weapon motion", TAB_GRAPHICS, PAGE_GRAPHICS_FIRST_PERSON),
 	/* (port/linux/game/first_person_legs.c, from OpenCE: your own body
 	drawn from the waist down in first person, one more model a frame on
