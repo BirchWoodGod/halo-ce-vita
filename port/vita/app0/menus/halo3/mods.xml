@@ -1,0 +1,240 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The Halo 3-style MOD MANAGER (the main menu's, beside FILE SHARE): the player's custom content -
+the maps folder's maps that are not the Xbox's own and the mods folder's MCC mods - laid out as
+Halo 3's file lists: the title strip, the list (name, type, size, ON / OFF / FAILED) in the panel,
+the chosen one's facts under it (the modes it plays in, the game's check, what it needs, where it
+came from), the buttons in the strip at the foot. Cross turns it off or on (an off one stays in its
+folder but leaves the map lists, the bots' playlist and map sharing), Triangle shows its details,
+Square deletes it after Halo 3's question. The settings panel's Multiplayer > Modded maps > Mod
+manager does the same (port/vita/host/vita_settings.c); both are port/linux/game/mod_manager.c's.
+The art is this folder's own (tools/halo3_menu_art.py). -->
+<menus>
+	<strings name="h3/mods_text">
+		<string text="MOD MANAGER"/>
+		<string text="NAME"/>
+		<string text="TYPE"/>
+		<string text="SIZE"/>
+		<string text="STATUS"/>
+		<string text="Works in"/>
+		<string text="Check"/>
+		<string text="Needs"/>
+		<string text="From"/>
+		<string text="Details"/>
+		<string text="Delete"/>
+		<string text="DELETE"/>
+		<string text="YES, DELETE IT"/>
+		<string text="NO, KEEP IT"/>
+		<string text="Select"/>
+		<string text="Off: kept on the memory card, but in no map list. Map variants are in FILE SHARE."/>
+	</strings>
+
+	<!-- the list -->
+	<widget name="h3/mods/strip" left="0" top="20" width="640" height="36" bitmap="h3/strip"/>
+	<widget name="h3/mods/rule" left="0" top="56" width="640" height="2" bitmap="h3/rule"/>
+	<widget name="h3/mods/title" type="text" left="28" top="26" width="260" height="26" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/mods_text" string_index="0"/>
+	<widget name="h3/mods/mods_status" type="text" left="280" top="31" width="336" height="18" align="right" font="h3/font_small" color="#FF9FB6CC" text_y="1"/>
+	<widget name="h3/mods/panel" left="16" top="66" width="608" height="262" bitmap="h3/panel"/>
+	<widget name="h3/mods/header_name" type="text" left="40" top="70" width="290" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/mods_text" string_index="1"/>
+	<widget name="h3/mods/header_kind" type="text" left="336" top="70" width="110" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/mods_text" string_index="2"/>
+	<widget name="h3/mods/header_size" type="text" left="440" top="70" width="80" height="16" align="right" font="h3/font_small" color="#FF9FB6CC" string_list="h3/mods_text" string_index="3"/>
+	<widget name="h3/mods/header_state" type="text" left="532" top="70" width="80" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/mods_text" string_index="4"/>
+	<widget name="h3/mods/row_name" type="text" left="12" top="0" width="300" height="20" font="h3/font_item" color="#FFE6ECF2" text_y="2"/>
+	<widget name="h3/mods/row_kind" type="text" left="316" top="0" width="104" height="20" font="h3/font_small" color="#FFC5D0DD" text_y="3"/>
+	<widget name="h3/mods/row_size" type="text" left="420" top="0" width="80" height="20" align="right" font="h3/font_small" color="#FFC5D0DD" text_y="3"/>
+	<widget name="h3/mods/row_state" type="text" left="512" top="0" width="84" height="20" font="h3/font_item" color="#FFAABED6" text_y="2"/>
+	<widget name="h3/mods/row_1" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 mods toggle"/>
+		<child widget="h3/mods/row_name"/>
+		<child widget="h3/mods/row_kind"/>
+		<child widget="h3/mods/row_size"/>
+		<child widget="h3/mods/row_state"/>
+	</widget>
+	<widget name="h3/mods/row_2" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 mods toggle"/>
+		<child widget="h3/mods/row_name"/>
+		<child widget="h3/mods/row_kind"/>
+		<child widget="h3/mods/row_size"/>
+		<child widget="h3/mods/row_state"/>
+	</widget>
+	<widget name="h3/mods/row_3" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 mods toggle"/>
+		<child widget="h3/mods/row_name"/>
+		<child widget="h3/mods/row_kind"/>
+		<child widget="h3/mods/row_size"/>
+		<child widget="h3/mods/row_state"/>
+	</widget>
+	<widget name="h3/mods/row_4" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 mods toggle"/>
+		<child widget="h3/mods/row_name"/>
+		<child widget="h3/mods/row_kind"/>
+		<child widget="h3/mods/row_size"/>
+		<child widget="h3/mods/row_state"/>
+	</widget>
+	<widget name="h3/mods/row_5" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 mods toggle"/>
+		<child widget="h3/mods/row_name"/>
+		<child widget="h3/mods/row_kind"/>
+		<child widget="h3/mods/row_size"/>
+		<child widget="h3/mods/row_state"/>
+	</widget>
+	<widget name="h3/mods/row_6" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 mods toggle"/>
+		<child widget="h3/mods/row_name"/>
+		<child widget="h3/mods/row_kind"/>
+		<child widget="h3/mods/row_size"/>
+		<child widget="h3/mods/row_state"/>
+	</widget>
+	<widget name="h3/mods/row_7" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 mods toggle"/>
+		<child widget="h3/mods/row_name"/>
+		<child widget="h3/mods/row_kind"/>
+		<child widget="h3/mods/row_size"/>
+		<child widget="h3/mods/row_state"/>
+	</widget>
+	<widget name="h3/mods/row_8" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 mods toggle"/>
+		<child widget="h3/mods/row_name"/>
+		<child widget="h3/mods/row_kind"/>
+		<child widget="h3/mods/row_size"/>
+		<child widget="h3/mods/row_state"/>
+	</widget>
+	<widget name="h3/mods/row_9" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 mods toggle"/>
+		<child widget="h3/mods/row_name"/>
+		<child widget="h3/mods/row_kind"/>
+		<child widget="h3/mods/row_size"/>
+		<child widget="h3/mods/row_state"/>
+	</widget>
+	<widget name="h3/mods/row_10" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 mods toggle"/>
+		<child widget="h3/mods/row_name"/>
+		<child widget="h3/mods/row_kind"/>
+		<child widget="h3/mods/row_size"/>
+		<child widget="h3/mods/row_state"/>
+	</widget>
+	<widget name="h3/mods/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port h3 mods"/>
+		<on event="y" run="port h3 mods details" open="h3/mods/details"/>
+		<on event="x" run="port h3 mods delete ask" open="h3/mods/confirm"/>
+		<on event="left_trigger" run="port h3 mods page up"/>
+		<on event="right_trigger" run="port h3 mods page down"/>
+		<child widget="h3/mods/row_1" x="20" y="92"/>
+		<child widget="h3/mods/row_2" x="20" y="112"/>
+		<child widget="h3/mods/row_3" x="20" y="132"/>
+		<child widget="h3/mods/row_4" x="20" y="152"/>
+		<child widget="h3/mods/row_5" x="20" y="172"/>
+		<child widget="h3/mods/row_6" x="20" y="192"/>
+		<child widget="h3/mods/row_7" x="20" y="212"/>
+		<child widget="h3/mods/row_8" x="20" y="232"/>
+		<child widget="h3/mods/row_9" x="20" y="252"/>
+		<child widget="h3/mods/row_10" x="20" y="272"/>
+	</widget>
+	<widget name="h3/mods/mods_message" type="text" left="16" top="180" width="608" height="40" align="center" font="h3/font_small" color="#FFCFD9E3" text_y="2"/>
+	<widget name="h3/mods/label_modes" type="text" left="28" top="334" width="80" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/mods_text" string_index="5"/>
+	<widget name="h3/mods/label_check" type="text" left="28" top="352" width="80" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/mods_text" string_index="6"/>
+	<widget name="h3/mods/label_needs" type="text" left="28" top="370" width="80" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/mods_text" string_index="7"/>
+	<widget name="h3/mods/label_source" type="text" left="28" top="388" width="80" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/mods_text" string_index="8"/>
+	<widget name="h3/mods/detail_modes" type="text" left="110" top="334" width="502" height="16" font="h3/font_small" color="#FFDDE6F0"/>
+	<widget name="h3/mods/detail_check" type="text" left="110" top="352" width="502" height="16" font="h3/font_small" color="#FFDDE6F0"/>
+	<widget name="h3/mods/detail_needs" type="text" left="110" top="370" width="502" height="16" font="h3/font_small" color="#FFDDE6F0"/>
+	<widget name="h3/mods/detail_source" type="text" left="110" top="388" width="502" height="16" font="h3/font_small" color="#FFDDE6F0"/>
+	<widget name="h3/mods/note" type="text" left="28" top="408" width="590" height="30" font="h3/font_small" color="#FF9FB6CC" string_list="h3/mods_text" string_index="15"/>
+	<widget name="h3/mods/buttons" left="0" top="440" width="640" height="24" bitmap="h3/strip"/>
+	<widget name="h3/mods/a_butn" left="24" top="444" width="16" height="16" bitmap="h3/glyph_cross"/>
+	<widget name="h3/mods/toggle" type="text" left="44" top="443" width="90" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1"/>
+	<widget name="h3/mods/y_butn" left="140" top="444" width="16" height="16" bitmap="h3/glyph_triangle"/>
+	<widget name="h3/mods/details_label" type="text" left="160" top="443" width="80" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/mods_text" string_index="9"/>
+	<widget name="h3/mods/x_butn" left="246" top="444" width="16" height="16" bitmap="h3/glyph_square"/>
+	<widget name="h3/mods/delete_label" type="text" left="266" top="443" width="80" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/mods_text" string_index="10"/>
+	<widget name="h3/mods/b_butn" left="532" top="444" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/mods/back" type="text" left="552" top="443" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/main_items" string_index="10"/>
+	<!-- (the folders are looked through as MOD MANAGER opens it, port h3 mods init on the main
+	menu's row, and again after a delete: not each time the details or the question go back to it) -->
+	<widget name="h3/mods/screen" flags="pass_unhandled_to_focused_child">
+		<on event="b back" back="true"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/mods/strip"/>
+		<child widget="h3/mods/rule"/>
+		<child widget="h3/mods/title"/>
+		<child widget="h3/mods/mods_status"/>
+		<child widget="h3/mods/panel"/>
+		<child widget="h3/mods/header_name"/>
+		<child widget="h3/mods/header_kind"/>
+		<child widget="h3/mods/header_size"/>
+		<child widget="h3/mods/header_state"/>
+		<child widget="h3/mods/list"/>
+		<child widget="h3/mods/mods_message"/>
+		<child widget="h3/mods/label_modes"/>
+		<child widget="h3/mods/label_check"/>
+		<child widget="h3/mods/label_needs"/>
+		<child widget="h3/mods/label_source"/>
+		<child widget="h3/mods/detail_modes"/>
+		<child widget="h3/mods/detail_check"/>
+		<child widget="h3/mods/detail_needs"/>
+		<child widget="h3/mods/detail_source"/>
+		<child widget="h3/mods/note"/>
+		<child widget="h3/mods/buttons"/>
+		<child widget="h3/mods/a_butn"/>
+		<child widget="h3/mods/toggle"/>
+		<child widget="h3/mods/y_butn"/>
+		<child widget="h3/mods/details_label"/>
+		<child widget="h3/mods/x_butn"/>
+		<child widget="h3/mods/delete_label"/>
+		<child widget="h3/mods/b_butn"/>
+		<child widget="h3/mods/back"/>
+	</widget>
+
+	<!-- the details (Triangle): Halo 3's dialog, every fact of the chosen one -->
+	<widget name="h3/mods/details_title" type="text" left="52" top="46" width="536" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1"/>
+	<widget name="h3/mods/details_text" type="text" left="52" top="84" width="536" height="330" font="h3/font_small" color="#FFCFD9E3"/>
+	<widget name="h3/mods/details_b_butn" left="52" top="422" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/mods/details_back" type="text" left="72" top="421" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/main_items" string_index="10"/>
+	<widget name="h3/mods/details" flags="pass_unhandled_to_focused_child">
+		<on event="b back a" back="true"/>
+		<data input="port h3 mods details"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/pick/panel"/>
+		<child widget="h3/mods/details_title"/>
+		<child widget="h3/pick/rule"/>
+		<child widget="h3/mods/details_text"/>
+		<child widget="h3/pick/strip"/>
+		<child widget="h3/mods/details_b_butn"/>
+		<child widget="h3/mods/details_back"/>
+	</widget>
+
+	<!-- the question before a delete (Square): Halo 3's, its two answers in rows -->
+	<widget name="h3/mods/confirm_panel" left="120" top="120" width="400" height="230" bitmap="h3/panel"/>
+	<widget name="h3/mods/confirm_title" type="text" left="132" top="126" width="376" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/mods_text" string_index="11"/>
+	<widget name="h3/mods/confirm_rule" left="120" top="154" width="400" height="2" bitmap="h3/rule"/>
+	<widget name="h3/mods/confirm_text" type="text" left="132" top="162" width="376" height="76" font="h3/font_small" color="#FFCFD9E3"/>
+	<widget name="h3/mods/confirm_yes" type="text" width="376" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/mods_text" string_index="12">
+		<on event="a" run="port h3 mods delete" back="true"/>
+	</widget>
+	<widget name="h3/mods/confirm_no" type="text" width="376" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/mods_text" string_index="13">
+		<on event="a" back="true"/>
+	</widget>
+	<widget name="h3/mods/confirm_list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<child widget="h3/mods/confirm_no" y="0"/>
+		<child widget="h3/mods/confirm_yes" y="20"/>
+	</widget>
+	<widget name="h3/mods/confirm_strip" left="120" top="330" width="400" height="20" bitmap="h3/strip"/>
+	<widget name="h3/mods/confirm_a_butn" left="132" top="332" width="16" height="16" bitmap="h3/glyph_cross"/>
+	<widget name="h3/mods/confirm_select" type="text" left="152" top="331" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/mods_text" string_index="14"/>
+	<widget name="h3/mods/confirm_b_butn" left="226" top="332" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/mods/confirm_back" type="text" left="246" top="331" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/main_items" string_index="10"/>
+	<widget name="h3/mods/confirm" flags="pass_unhandled_to_focused_child">
+		<on event="b back" back="true"/>
+		<data input="port h3 mods confirm"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/mods/confirm_panel"/>
+		<child widget="h3/mods/confirm_title"/>
+		<child widget="h3/mods/confirm_rule"/>
+		<child widget="h3/mods/confirm_text"/>
+		<child widget="h3/mods/confirm_strip"/>
+		<child widget="h3/mods/confirm_a_butn"/>
+		<child widget="h3/mods/confirm_select"/>
+		<child widget="h3/mods/confirm_b_butn"/>
+		<child widget="h3/mods/confirm_back"/>
+		<child widget="h3/mods/confirm_list" x="132" y="250"/>
+	</widget>
+</menus>

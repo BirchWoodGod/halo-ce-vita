@@ -103,6 +103,23 @@
 #   h3coopguide  the settings panel's Host co-op campaign
 #            (HALO_SYSTEM_LINK_TEST=campaign): the Campaign screen opens, the
 #            Halo 3 campaign lobby behind it set to SYSTEM LINK CO-OP
+#   h3mods   the Halo 3 MOD MANAGER (menus/halo3/mods.xml, the main menu's) over
+#            content made at test time (mods_data: a modded Xbox map made from
+#            Blood Gulch, a corrupt file, a Custom Edition header with nothing
+#            after it, an MCC mod whose map is corrupt, with links out of its
+#            folder): each listed with its kind, size and the game's check
+#            (the corrupt ones failed, said why, no crash); mygulch turned off
+#            (out of the map lists, the bots' playlist and map sharing) and on
+#            again; its details; Square on broken.map, Circle keeps it, Square
+#            and YES deletes it (only it: the maps folder's other files, the
+#            links' targets kept); the mod's folder deleted, the links in it
+#            gone, what they pointed at kept
+#   h3modspicker  MOD MANAGER, mygulch off, then MULTIPLAYER, START GAME: the
+#            Xbox's map list (the one custom maps are offered in) leaves it out;
+#            again with it off (HALO_MAPS_DISABLED) and turned on in MOD
+#            MANAGER: the list offers it
+#   h3modstouch  taps: MOD MANAGER on the main menu, mygulch's row (off), the
+#            screen's Back
 #   pause   Campaign from the main menu (a new profile, Normal), the level's
 #           pause menu, Quit to Main Menu: a game map's widget runs its
 #           function and is back at the main menu, and asked about deleting
@@ -136,7 +153,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3damaged}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3damaged h3mods h3modspicker h3modstouch}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
 
@@ -169,6 +186,8 @@ run() { # NAME DATA SECONDS PAD [VAR=value...]
 	# (or a whole save folder of the tests', as another case's run left it)
 	[ -n "${save_from:-}" ] && cp -r "$save_from"/. "$out/$name/save/"
 	ln -sfn "$(cd "$folder" && pwd)/maps" "$out/$name/data/maps"
+	# (a mods folder of the case's: mods_data's, copied with its links as links)
+	[ -n "${mods_from:-}" ] && cp -a "$mods_from" "$out/$name/data/mods"
 	[ -n "${init_line:-}" ] && printf '%s\n' "$init_line" > "$out/$name/data/init.txt"
 	local shots=()
 	if [ -n "${HALO_TEST_SHOTS:-}" ]; then
@@ -269,6 +288,38 @@ h3net="HALO_NET_ONLINE=true HALO_NET_BROKERS=198.51.100.1:1883 HALO_NET_STUN=198
 h3net="$h3net HALO_NET_RELAYS=198.51.100.1:47320 HALO_NET_ALLOW_UPNP=false"
 # (the main menu: down to MULTIPLAYER, A: the lobby, its NETWORK row focused)
 h3mppad="wait:150:3000 down:150:700 a wait:150:3000"
+
+# the mod manager's content, made at test time in FOLDER (never in the
+# repository): FOLDER/maps, links to the menus data's maps folder's files, a
+# modded Xbox map (Blood Gulch's copy, its header named mygulch, as
+# run_netns_online_test.sh makes one), a corrupt file (broken.map) and a
+# Custom Edition header with nothing after it (cefake.map); FOLDER/mods, a mod
+# (TestMod: its CampaignInfo.json, a corrupt maps/a10.map, links out of it to
+# FOLDER/outside); FOLDER/outside, what those links point at
+mods_data() { # FOLDER
+	local folder=$1 file
+	rm -rf "$folder"
+	mkdir -p "$folder/maps" "$folder/mods/TestMod/maps" "$folder/mods/TestMod/assets" "$folder/outside"
+	for file in "$menus_data"/maps/*; do
+		ln -s "$(readlink -f "$file")" "$folder/maps/$(basename "$file")"
+	done
+	cp --reflink=auto "$(readlink -f "$menus_data/maps/bloodgulch.map")" "$folder/maps/mygulch.map"
+	printf 'mygulch' | dd of="$folder/maps/mygulch.map" bs=1 seek=32 conv=notrunc status=none
+	dd if=/dev/zero of="$folder/maps/mygulch.map" bs=1 seek=39 count=25 conv=notrunc status=none
+	head -c 70000 /dev/urandom > "$folder/maps/broken.map"
+	python3 -c 'import sys; h = bytearray(2048); h[0:4] = b"daeh"; h[4:8] = (609).to_bytes(4, "little"); h[0x60] = 1; open(sys.argv[1], "wb").write(h)' \
+		"$folder/maps/cefake.map"
+	head -c 5000 /dev/urandom > "$folder/mods/TestMod/maps/a10.map"
+	printf '{"Title": "Test Mod"}' > "$folder/mods/TestMod/CampaignInfo.json"
+	echo kept > "$folder/outside/sentinel.txt"
+	ln -s "$folder/outside" "$folder/mods/TestMod/assets/outside"
+	ln -s "$folder/outside/sentinel.txt" "$folder/mods/TestMod/assets/linked.txt"
+}
+# (the main menu: down four to MOD MANAGER, A: its list, broken.map first)
+h3modspad="wait:150:3000 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:4000"
+# (MOD MANAGER, mygulch's row - two down -, A; B: the main menu, on MOD MANAGER; up three to MULTIPLAYER, A;
+# down three to START GAME, A: the profile, A to join, ...: the Xbox's map list)
+h3pickerpad="$h3modspad down:150:500 down:150:500 a wait:150:2000 b wait:150:3000 up:150:500 up:150:500 up:150:500 a wait:150:3000 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:5000"
 
 for case in $cases; do
 	case $case in
@@ -608,7 +659,7 @@ for case in $cases; do
 		# (CUSTOMIZATION: the profile, Cross; PLAYER NAME, Cross: typed; COLOR, right three times: RED;
 		# STICK LAYOUT, right: SOUTHPAW; down two to LOOK SENSITIVITY, right twice; INVERT LOOK, Cross:
 		# YES; Circle: saved; Circle)
-		custom_pad="$h3pad down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000 a wait:150:2000"
+		custom_pad="$h3pad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000 a wait:150:2000"
 		custom_pad="$custom_pad down:150:600 right:150:500 right:150:500 right:150:500 down:150:600 right:150:600"
 		custom_pad="$custom_pad down:150:600 down:150:600 right:150:500 right:150:500 down:150:600 a wait:150:1500 b wait:150:3000 b wait:150:3000"
 		profile_from=$HALO_TEST_PROFILE run h3customize "$menus_data" 45 "$custom_pad" HALO_MENU_STYLE=halo3 \
@@ -654,7 +705,7 @@ for case in $cases; do
 		rm -rf "$out/h3customize_saved"
 		cp -r "$out/h3customize/save" "$out/h3customize_saved"
 		save_from=$out/h3customize_saved run h3customize_again "$menus_data" 25 \
-			"$h3pad down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000 b wait:150:3000" HALO_MENU_STYLE=halo3 \
+			"$h3pad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000 b wait:150:3000" HALO_MENU_STYLE=halo3 \
 			HALO_SCENE_PACKS=0
 		check_h3 h3customize_again halo3
 		grep -aqE "menus: h3 customize: the preview shows the Spartan|h3 scene object 4: .* made" "$out/h3customize_again/run.log" &&
@@ -674,7 +725,7 @@ for case in $cases; do
 		# (CAMPAIGN: Cross on each, refused; CREATE NEW PROFILE, Cross: Rookie, the lobby; Circle twice:
 		# the main menu, where no profile is in use; CUSTOMIZATION, on the first listed - a damaged
 		# one: Rookie, made last, is listed last -: Cross, refused)
-		save_from=$out/h3damaged_save run h3damaged "$menus_data" 45 "$h3pad a wait:150:3000 a wait:150:2000 down:150:700 a wait:150:2000 down:150:700 a wait:150:4000 b wait:150:3000 b wait:150:3000 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:2500 b wait:150:2000" \
+		save_from=$out/h3damaged_save run h3damaged "$menus_data" 45 "$h3pad a wait:150:3000 a wait:150:2000 down:150:700 a wait:150:2000 down:150:700 a wait:150:4000 b wait:150:3000 b wait:150:3000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:2500 b wait:150:2000" \
 			HALO_MENU_STYLE=halo3 HALO_TEST_TEXT_INPUT=Rookie
 		check_h3 h3damaged halo3
 		log=$out/h3damaged/run.log
@@ -714,8 +765,73 @@ for case in $cases; do
 			fail h3coopguide "the request did not open the Campaign screen"
 		grep -aq "menus: h3 campaign: network SYSTEM LINK CO-OP (host co-op campaign)" "$log" ||
 			fail h3coopguide "the lobby was not set to co-op" ;;
+	h3mods)
+		# (the list; mygulch off and on; its details; broken.map: Square, Circle keeps it, Square,
+		# down to YES, A; cefake.map focused then: down two to TestMod, Square, down, A; B)
+		mods_data "$out/h3mods-data"
+		mods_from="$out/h3mods-data/mods" run h3mods "$out/h3mods-data" 75 "$h3modspad down:150:500 down:150:500 a wait:150:1500 a wait:150:1500 y wait:150:2500 b wait:150:2000 up:150:500 up:150:500 x wait:150:2000 b wait:150:1500 x wait:150:2000 down:150:500 a wait:150:3000 down:150:500 down:150:500 x wait:150:2000 down:150:500 a wait:150:3000 b wait:150:2000" \
+			HALO_MENU_STYLE=halo3
+		check_h3 h3mods halo3
+		log=$out/h3mods/run.log
+		grep -aq "ui: screen pc.h3.mods.screen" "$log" || fail h3mods "MOD MANAGER did not open its screen"
+		grep -aq "menus: h3 mods: 4 entries" "$log" || fail h3mods "the four made-up entries were not listed"
+		grep -aq "menus: h3 mods: mygulch.map: Xbox map, on, [0-9]* KB, passed, works in Multiplayer" "$log" ||
+			fail h3mods "the modded Xbox map was not listed as one that plays in Multiplayer"
+		grep -aq "menus: h3 mods: broken.map: Unknown file, on, 69 KB, failed: Not a Halo map" "$log" ||
+			fail h3mods "the corrupt file was not shown as failing the check"
+		grep -aq "menus: h3 mods: cefake.map: .*, failed: " "$log" ||
+			fail h3mods "the empty Custom Edition header was not shown as failing the check"
+		grep -aq "menus: h3 mods: TestMod: MCC mod, on, [0-9]* KB, failed: a10.map: " "$log" ||
+			fail h3mods "the mod with a corrupt map was not shown as failing the check"
+		grep -aq "mod manager: mygulch turned off: map lists no, bots playlist no, map sharing no" "$log" ||
+			fail h3mods "mygulch off was still in a map list, the bots' playlist or map sharing"
+		grep -aq "mod manager: mygulch turned on: map lists yes, bots playlist yes, map sharing yes" "$log" ||
+			fail h3mods "mygulch on again was not back in the map lists, the bots' playlist and map sharing"
+		grep -aq "ui: screen pc.h3.mods.details" "$log" || fail h3mods "Triangle did not open the details"
+		[ "$(grep -ac 'ui: screen pc.h3.mods.confirm' "$log")" -ge 3 ] || fail h3mods "Square did not ask before deleting"
+		grep -aq "mod manager: the map broken.map deleted" "$log" || fail h3mods "YES did not delete broken.map"
+		[ "$(grep -ac 'menus: h3 mods: delete broken.map?' "$log")" = 2 ] ||
+			fail h3mods "broken.map was not asked about twice (Circle, then YES)"
+		[ -e "$out/h3mods-data/maps/broken.map" ] && fail h3mods "broken.map is still there"
+		[ -e "$out/h3mods-data/maps/mygulch.map" ] && [ -e "$out/h3mods-data/maps/cefake.map" ] &&
+			[ -L "$out/h3mods-data/maps/bitmaps.map" ] && [ -e "$out/h3mods-data/maps/bitmaps.map" ] ||
+			fail h3mods "a file of the maps folder other than broken.map went"
+		grep -aq "mod manager: the mod folder TestMod deleted" "$log" || fail h3mods "the mod's folder was not deleted"
+		[ -e "$out/h3mods/data/mods/TestMod" ] && fail h3mods "the mod's folder is still there"
+		[ -d "$out/h3mods/data/mods" ] || fail h3mods "the mods folder itself went"
+		[ "$(cat "$out/h3mods-data/outside/sentinel.txt" 2>/dev/null)" = kept ] ||
+			fail h3mods "a file a link in the mod pointed at was deleted (the link was followed)"
+		grep -aq "menus: h3 mods: Deleted TestMod" "$log" || fail h3mods "the screen did not say the mod was deleted" ;;
+	h3modspicker)
+		mods_data "$out/h3mods-data"
+		run h3modspicker "$out/h3mods-data" 50 "$h3pickerpad" HALO_MENU_STYLE=halo3
+		run h3modspicker_on "$out/h3mods-data" 50 "$h3pickerpad" HALO_MENU_STYLE=halo3 HALO_MAPS_DISABLED=mygulch
+		for name in h3modspicker h3modspicker_on; do
+			check_h3 $name halo3
+			grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected.connected_map_select_wrapper" \
+				"$out/$name/run.log" || fail $name "START GAME did not lead to the Xbox's map list"
+		done
+		grep -aq "mod manager: mygulch turned off" "$out/h3modspicker/run.log" || fail h3modspicker "mygulch was not turned off"
+		grep -aq "custom edition: the multiplayer level list: 13 Xbox levels, then no custom map" "$out/h3modspicker/data/debug.txt" ||
+			fail h3modspicker "the Xbox's map list offered mygulch, turned off"
+		grep -aq "custom edition: the map 'mygulch' is turned off" "$out/h3modspicker/data/debug.txt" ||
+			fail h3modspicker "the map list did not say mygulch is off"
+		grep -aq "mod manager: mygulch turned on" "$out/h3modspicker_on/run.log" || fail h3modspicker "mygulch was not turned on"
+		grep -aq "custom edition: the multiplayer level list: 13 Xbox levels, then mygulch" "$out/h3modspicker_on/data/debug.txt" ||
+			fail h3modspicker "the Xbox's map list did not offer mygulch, turned on again" ;;
+	h3modstouch)
+		# (MOD MANAGER's row on the main menu; mygulch's row, the third; the screen's Back: icon and label)
+		mods_data "$out/h3mods-data"
+		run h3modstouch "$out/h3mods-data" 25 "wait:150:16000" HALO_MENU_STYLE=halo3 \
+			"HALO_TEST_TAPS=4000:60,358 8000:200,142 12000:560,452"
+		check_h3 h3modstouch halo3
+		log=$out/h3modstouch/run.log
+		grep -aq "ui: screen pc.h3.mods.screen" "$log" || fail h3modstouch "a tap on MOD MANAGER did not open it"
+		grep -aq "menus: h3 mods: mygulch.map turned off" "$log" || fail h3modstouch "a tap on mygulch's row did not turn it off"
+		grep -a "ui: screen" "$log" | tail -1 | grep -q 'pc.h3.main.screen' ||
+			fail h3modstouch "a tap on Back did not go back to the main menu" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3damaged]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3damaged|h3mods|h3modspicker|h3modstouch]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"

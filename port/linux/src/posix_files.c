@@ -69,6 +69,18 @@ int posix_stat(const char *path, struct posix_file_information *information)
 	return 0;
 }
 
+int posix_is_link(const char *path)
+{
+#ifdef __vita__
+	(void)path;
+	return 0;
+#else
+	struct stat st;
+
+	return lstat(path, &st) == 0 && S_ISLNK(st.st_mode);
+#endif
+}
+
 int posix_fstat(int descriptor, struct posix_file_information *information)
 {
 	struct stat st;

@@ -370,6 +370,8 @@ static char const *const port_function_names[] =
 	"port fileshare open", "port fileshare enter",
 	"port forge undo", "port forge redo", "port forge snap", "port forge property next", "port forge property previous",
 	"port forge close", "port forge pack toggle",
+	"port h3 mods init", "port h3 mods toggle", "port h3 mods details", "port h3 mods delete ask",
+	"port h3 mods delete", "port h3 mods page up", "port h3 mods page down",
 };
 
 /* the port's game data functions (menu_functions.c), from
@@ -386,6 +388,7 @@ static char const *const port_game_data_input_names[] =
 	"port h3 profiles", "port h3 profile delete text", "port h3 custom",
 	"port fileshare", "port fileshare question",
 	"port forge properties", "port forge packs",
+	"port h3 mods", "port h3 mods details", "port h3 mods confirm",
 };
 
 static struct

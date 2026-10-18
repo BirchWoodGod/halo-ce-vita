@@ -4,7 +4,8 @@ With Menu style Halo 3 (settings panel: Graphics > Screen; HALO_MENU_STYLE=halo3
 these screens stand for the Xbox's own, over the same animated Halo ring:
 - main.xml: the main menu (ui\shell\main_menu\main_menu) -
   CAMPAIGN, MULTIPLAYER, FORGE (its lobby, below), FILE SHARE ("in a later
-  update" for now), CUSTOMIZATION, Settings on Start, the HALO title, the
+  update" for now), MOD MANAGER (mods.xml, below), CUSTOMIZATION, Settings on
+  Start, the HALO title, the
   player's nameplate and the live servers (ONLINE NOW).
 - campaign.xml: the campaign lobby (it stands for the level select the
   campaign's profile screen opens) with its Select Network, Select Mission
@@ -56,6 +57,17 @@ these screens stand for the Xbox's own, over the same animated Halo ring:
   widget names; the browser's rows show a VITA or PC badge with a lock for a
   password. When internet play is off, ONLINE's rows open a dialog saying how to
   turn it on.
+- mods.xml: the MOD MANAGER the main menu opens, beside FILE SHARE (where
+  Halo 3 keeps the player's content; it covers campaign and multiplayer
+  content alike, so no lobby holds it): Halo 3's file list of the player's
+  custom maps (the maps folder's, not the Xbox's own) and MCC mods (the mods
+  folder's), each its name, type, size and ON / OFF / FAILED (the game's own
+  checks: port/linux/game/mod_manager.c), the chosen one's modes, check,
+  needs and source under the list, the space used and free at the top right.
+  Cross turns one off or on (out of every map list, the bots' playlist and
+  map sharing; kept on the memory card), Triangle opens its details, Square
+  asks before deleting it (NO, KEEP IT first). The settings panel's
+  Multiplayer > Modded maps > Mod manager does the same.
 - password.xml: the password screen of a game with one (it stands for OpenCE's,
   pc\join\password\screen, which the browser opens).
 In each level's map (ingame.txt):
@@ -133,5 +145,6 @@ the game's keys (a_butn, b_butn, start_butn) for that.
 Tests: port/vita/tests/run_menus_test.sh h3probe h3classic h3xbox h3broken
 h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create
 h3mptouch h3coop h3coopguide h3scenes (h3characters: parked) h3profiles h3proftouch h3customize
-h3damaged; the packs': port/vita/tests/run_scene_pack_test.sh; Forge's: port/vita/tests/run_forge_test.sh;
+h3damaged h3mods h3modspicker h3modstouch; the packs': port/vita/tests/run_scene_pack_test.sh; Forge's:
+port/vita/tests/run_forge_test.sh, port/vita/tests/run_forge_files_test.sh;
 co-op between two machines: port/vita/tests/run_netns_online_test.sh h3coopmenu.

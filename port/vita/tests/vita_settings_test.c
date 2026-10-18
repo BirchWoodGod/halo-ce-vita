@@ -18,7 +18,12 @@ joined, Games on this network, an ad hoc group joined first, the game
 seeing no buttons while a system dialog is up; 1.0.3's co-op choice loading
 as Off), its Modded
 maps page (a folder of fake maps: listed, turned off and on, deleted after
-a confirmation, the map in play kept; Map downloads' three choices), the
+a confirmation, the map in play kept; Map downloads' three choices), its Mod
+manager page (the game's look answered by the test: each entry with On or
+Error, its size and kind, why it failed or what it needs on the help line,
+maps and mods turned off and on and kept in settings.txt, the details, a
+delete asked of the game after a question, in use, a name the game does not
+take never deleted; the game's lists set through vita_settings_set), the
 Dev tab behind its switch (switches saved only while on, the timing
 variables, Save report's folder),
 Controls' pages (Button layout and Touch zones in Xbox terms, Gyro
@@ -58,6 +63,12 @@ int halo_text_input_maximum;
 int halo_text_input_password;
 int (*halo_test_setting_hook)(const char *variable, const char *value);
 int halo_screen_restart_needed(void) { return 0; }
+/* (the game's side of the Mod manager page: mod_manager.c; the test answers) */
+volatile int halo_mods_request;
+volatile int halo_mods_answer;
+volatile int halo_mods_target_kind;
+char halo_mods_target[HALO_MODS_NAME_BYTES];
+struct halo_mods_inventory halo_mods_inventory;
 /* (the restart offer, close_panel) the game at its main menu, idle: off but
 in test_restart_offer; the restarts asked for (none of them returns here) */
 static int main_menu_idle_now, restarts_asked;
@@ -1155,6 +1166,181 @@ static int rows_of(char *labels, int size, int *info)
 	return rows;
 }
 
+/* ---------- the Mod manager page */
+
+/* the game's look as the test makes it (port/linux/game/mod_manager.c's,
+made up): a modded Xbox map, a corrupt file, a Custom Edition map that
+needs PC maps, an MCC mod with a map that fails, a file of a name the game
+does not take */
+static struct halo_mods_inventory test_inventory;
+
+static void test_entry(const char *name, const char *file, const char *title, int kind, int valid, int kilobytes,
+	int modes, const char *why, const char *needs, int deletable)
+{
+	struct halo_mod_entry *entry = &test_inventory.entries[test_inventory.count++];
+
+	memset(entry, 0, sizeof(*entry));
+	snprintf(entry->name, sizeof(entry->name), "%s", name);
+	snprintf(entry->file, sizeof(entry->file), "%s", file);
+	snprintf(entry->title, sizeof(entry->title), "%s", title);
+	entry->kind = kind;
+	entry->valid = valid;
+	entry->enabled = 1;
+	entry->kilobytes = kilobytes;
+	entry->modes = modes;
+	entry->deletable = deletable;
+	snprintf(entry->why, sizeof(entry->why), "%s", why);
+	snprintf(entry->needs, sizeof(entry->needs), "%s", needs);
+	test_inventory.used_kilobytes += kilobytes;
+}
+
+static void test_inventory_make(void)
+{
+	memset(&test_inventory, 0, sizeof(test_inventory));
+	test_entry("bad name", "bad%name.map", "bad%name", HALO_MOD_KIND_UNKNOWN, 0, 1, 0,
+		"Its file name has characters this game doesn't take", "", 0);
+	test_entry("broken", "broken.map", "broken", HALO_MOD_KIND_UNKNOWN, 0, 69, 0, "Not a Halo map", "", 1);
+	test_entry("cemap", "cemap.map", "cemap", HALO_MOD_KIND_CE_MAP, 1, 3072, HALO_MOD_MODE_MULTIPLAYER, "",
+		"PC maps On (Settings > Multiplayer > Modded maps)", 1);
+	test_entry("mygulch", "mygulch.map", "mygulch", HALO_MOD_KIND_XBOX_MAP, 1, 22042, HALO_MOD_MODE_MULTIPLAYER, "", "", 1);
+	test_inventory.entries[test_inventory.count - 1].source = HALO_MOD_SOURCE_MAP_SHARE;
+	test_entry("testmod", "TestMod", "Test Mod", HALO_MOD_KIND_MCC_MOD, 1, 6, HALO_MOD_MODE_CAMPAIGN,
+		"a30.map: not a campaign map", "", 1);
+	test_inventory.entries[test_inventory.count - 1].maps = 2;
+	test_inventory.entries[test_inventory.count - 1].maps_valid = 1;
+	test_inventory.free_kilobytes = 3 * 1024 * 1024;
+}
+
+/* the game's main loop answering the panel's request (mod_manager_update):
+the request taken, `answer` given, the look's inventory handed over */
+static int game_answers_mods(int answer)
+{
+	int request = halo_mods_request;
+
+	if (request == HALO_MODS_REQUEST_NONE)
+		return 0;
+	memcpy(&halo_mods_inventory, &test_inventory, sizeof(halo_mods_inventory));
+	halo_mods_answer = answer;
+	halo_mods_request = HALO_MODS_REQUEST_NONE;
+	frame(0);
+	return request;
+}
+
+static void test_mod_manager_page(void)
+{
+	char line[256];
+	int index;
+
+	test_inventory_make();
+	/* (none off: as the game's MOD MANAGER would set the lists) */
+	vita_settings_set("HALO_MAPS_DISABLED", "");
+	vita_settings_set("HALO_MODS_DISABLED", "");
+	open_page("Modded maps");
+	check(!strcmp(menu_line(2, line, sizeof(line)), "Mod manager\x02  >"), "Modded maps: Mod manager, its first row");
+	to_line("Mod manager");
+	check(strstr(menu, "\n\x05" "Custom maps and MCC mods: check, on, off, delete\n") != NULL, "Mod manager's help");
+	press(VITA_BUTTON_CROSS);
+	check(strstr(menu, "\n\x03Multiplayer > Mod manager\n") && strstr(menu, "\n\x04" "Checking the maps and mods...\n") &&
+		halo_mods_request == HALO_MODS_REQUEST_SCAN && strstr(log_text, "settings: mod manager: asked the game to look"),
+		"cross: the Mod manager page, the game asked to look, the page says so meanwhile");
+	check(game_answers_mods(HALO_MODS_ANSWER_SCANNED) == HALO_MODS_REQUEST_SCAN, "the game answers");
+	printf("%s\n--\n", menu);
+	check(strstr(menu, "\n\x04" "5 items: 24.5 MB used, 3.0 GB free\n\n") != NULL, "the totals: 5 items, used and free");
+	check(strstr(menu, "\nbad%name.map\x02  Error     1 KB  ?\n") && strstr(menu, "\nbroken.map\x02  Error    69 KB  ?\n") &&
+		strstr(menu, "\ncemap.map\x02  On      3.0 MB  CE\n") && strstr(menu, "\nmygulch.map\x02  On     21.5 MB  Xbox\n") &&
+		strstr(menu, "\nTest Mod\x02  On        6 KB  MCC\n"), "each entry: its name, On or Error, its size and kind");
+	check(menu_fits() && menu_height_fits(), "the Mod manager page fits");
+	to_line("broken.map");
+	check(strstr(menu, "\n\x05" "Failed: Not a Halo map\n") &&
+		strstr(menu, "\n\x06L/R: tabs   Cross: details   Square: delete   Circle: back"),
+		"a corrupt file: why it failed; the buttons");
+	to_line("cemap.map");
+	check(strstr(menu, "\n\x05Needs: PC maps On (Settings > Multiplayer > Modded maps)\n") != NULL, "what a map needs");
+	to_line("mygulch.map");
+	check(strstr(menu, "\n\x05Xbox map: on or off, or delete it\n") != NULL, "a map that plays: its kind");
+	/* off and on: HALO_MAPS_DISABLED, kept in settings.txt */
+	press(VITA_BUTTON_LEFT);
+	check(strstr(menu, "\nmygulch.map\x02  Off    21.5 MB  Xbox\n") && getenv("HALO_MAPS_DISABLED") &&
+		!strcmp(getenv("HALO_MAPS_DISABLED"), "mygulch") && strstr(file_text(SETTINGS_FILE), "HALO_MAPS_DISABLED=mygulch\n"),
+		"left: mygulch off, in the environment and settings.txt");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nmygulch.map\x02  On ") && (!getenv("HALO_MAPS_DISABLED") || !getenv("HALO_MAPS_DISABLED")[0]) &&
+		!strstr(file_text(SETTINGS_FILE), "HALO_MAPS_DISABLED"), "right: on again, the line gone");
+	/* a mod: HALO_MODS_DISABLED, by its key */
+	to_line("Test Mod");
+	check(strstr(menu, "\n\x05" "Needs") == NULL && strstr(menu, "\n\x05MCC mod: on or off, or delete it\n"),
+		"the mod: its kind");
+	press(VITA_BUTTON_LEFT);
+	check(strstr(menu, "\nTest Mod\x02  Off ") && getenv("HALO_MODS_DISABLED") && !strcmp(getenv("HALO_MODS_DISABLED"), "testmod") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_MODS_DISABLED=testmod\n") && strstr(log_text, "settings: mod testmod turned off"),
+		"left: the mod off by its key, saved");
+	/* its details: cross; left and right there too; circle back */
+	press(VITA_BUTTON_CROSS);
+	printf("%s\n--\n", menu);
+	check(!strncmp(menu, "Test Mod", 8) && strstr(menu, "Type: MCC mod") && strstr(menu, "File: mods/TestMod") &&
+		strstr(menu, "Maps: 2, 1 of them play") && strstr(menu, "Check: Passed - a30.map: not a campaign map") &&
+		strstr(menu, "Status: Off: kept, but in no map list"), "cross: the details");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "Status: On: in the map lists") && (!getenv("HALO_MODS_DISABLED") || !getenv("HALO_MODS_DISABLED")[0]),
+		"right in the details: on again");
+	press(VITA_BUTTON_CIRCLE);
+	check(strstr(menu, "\n\x03Multiplayer > Mod manager\n") != NULL, "circle: back to the list");
+	to_line("mygulch.map");
+	press(VITA_BUTTON_CROSS);
+	check(strstr(menu, "From: Received through map sharing") && strstr(menu, "Works in: Multiplayer"),
+		"the details say where it came from");
+	press(VITA_BUTTON_CIRCLE);
+	/* delete: a question first; circle keeps it; cross asks the game */
+	to_line("broken.map");
+	press(VITA_BUTTON_SQUARE);
+	check(!strncmp(menu, "DELETE MAP", 10) && strstr(menu, "broken.map"), "square asks before deleting");
+	press(VITA_BUTTON_CIRCLE);
+	check(halo_mods_request == HALO_MODS_REQUEST_NONE && strstr(menu, "> Mod manager\n"), "circle keeps it");
+	press(VITA_BUTTON_SQUARE);
+	press(VITA_BUTTON_CROSS);
+	check(halo_mods_request == HALO_MODS_REQUEST_DELETE && !strcmp(halo_mods_target, "broken.map") &&
+		halo_mods_target_kind == HALO_MOD_KIND_UNKNOWN, "cross asks the game to delete broken.map");
+	/* (the game deleted it and looked again) */
+	memmove(&test_inventory.entries[1], &test_inventory.entries[2], sizeof(test_inventory.entries[0]) * 3);
+	test_inventory.count--;
+	game_answers_mods(HALO_MODS_ANSWER_DELETED);
+	check(strstr(menu, "Deleted broken.map") && !strstr(menu, "\nbroken.map\x02") && strstr(menu, "\n\x04" "4 items: "),
+		"deleted: said, gone from the list");
+	/* a mod's delete asks about its folder; the game says it is in use */
+	to_line("Test Mod");
+	press(VITA_BUTTON_SQUARE);
+	check(!strncmp(menu, "DELETE MOD", 10) && strstr(menu, "TestMod") && strstr(menu, "everything in its folder"),
+		"a mod's question names its folder");
+	press(VITA_BUTTON_CROSS);
+	check(halo_mods_request == HALO_MODS_REQUEST_DELETE && !strcmp(halo_mods_target, "TestMod") &&
+		halo_mods_target_kind == HALO_MOD_KIND_MCC_MOD, "cross asks the game to delete the mod's folder");
+	game_answers_mods(HALO_MODS_ANSWER_IN_USE);
+	check(strstr(menu, "TestMod is in play: leave it first") && strstr(menu, "\nTest Mod\x02"), "in use: kept, and said");
+	/* a name the game does not take: never asked about */
+	for (index = 0; index < 10 && strncmp(menu_line(menu_selected, line, sizeof(line)), "bad%name.map", 12); index++)
+		press(VITA_BUTTON_UP);
+	press(VITA_BUTTON_SQUARE);
+	press(VITA_BUTTON_CROSS);
+	check(halo_mods_request == HALO_MODS_REQUEST_NONE && strstr(menu, "Its name isn't one this game takes: use VitaShell"),
+		"a name the game does not take: not deleted, why");
+	press(VITA_BUTTON_LEFT);
+	check(!getenv("HALO_MAPS_DISABLED") || !getenv("HALO_MAPS_DISABLED")[0], "... nor turned off");
+	/* the game's MOD MANAGER sets the lists through the panel
+	(vita_settings_set): kept, a '%' and a line's end left out */
+	check(vita_settings_set("HALO_MAPS_DISABLED", "mygulch,wiz%ard\n") && !strcmp(getenv("HALO_MAPS_DISABLED"), "mygulch,wizard") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_MAPS_DISABLED=mygulch,wizard\n"), "the game's list of maps off, kept");
+	check(vita_settings_set("HALO_MODS_DISABLED", "testmod") && !strcmp(getenv("HALO_MODS_DISABLED"), "testmod") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_MODS_DISABLED=testmod\n"), "the game's list of mods off, kept");
+	check(vita_settings_set("HALO_MAPS_DISABLED", "") && vita_settings_set("HALO_MODS_DISABLED", "") &&
+		!getenv("HALO_MAPS_DISABLED") && !getenv("HALO_MODS_DISABLED") && !strstr(file_text(SETTINGS_FILE), "_DISABLED"),
+		"empty lists: unset, no lines");
+	/* circle: back to Modded maps, on the Mod manager row */
+	press(VITA_BUTTON_CIRCLE);
+	check(strstr(menu, "\n\x03Multiplayer > Modded maps\n") && strstr(menu, "\nMod manager\x02  4 items  >\n"),
+		"circle: back to Modded maps, the row says how many");
+	press(VITA_BUTTON_CIRCLE);
+}
+
 static void test_multiplayer_tab(void)
 {
 	char line[128], labels[512];
@@ -1924,14 +2110,14 @@ static void test_tab_layouts(void)
 			old |= !strcmp(pages[index].name, "Screen") || !strcmp(pages[index].name, "First person") ||
 				!strcmp(pages[index].name, "Advanced") || !strcmp(pages[index].name, "General") ||
 				!strcmp(pages[index].name, "Graphics") || !strcmp(pages[index].name, "Audio");
-		check(!old && PAGE_GRAPHICS_DETAIL == TAB_COUNT && PAGE_COUNT == TAB_COUNT + 9 &&
+		check(!old && PAGE_GRAPHICS_DETAIL == TAB_COUNT && PAGE_COUNT == TAB_COUNT + 10 &&
 			!strcmp(pages[PAGE_GRAPHICS_DETAIL].name, "Detail") && !strcmp(pages[PAGE_GRAPHICS_PERFORMANCE].name, "Performance") &&
 			!strcmp(pages[PAGE_BUTTONS].name, "Button layout") && !strcmp(pages[PAGE_TOUCH].name, "Touch zones") &&
 			!strcmp(pages[PAGE_GYRO].name, "Gyro settings") && !strcmp(pages[PAGE_PLAY].name, "Play") &&
 			!strcmp(pages[PAGE_MAPS].name, "Modded maps") && !strcmp(pages[PAGE_DEV_AB].name, "A/B switches") &&
-			!strcmp(pages[PAGE_FORGE].name, "Forge and File Share"),
+			!strcmp(pages[PAGE_FORGE].name, "Forge and File Share") && !strcmp(pages[PAGE_MODS].name, "Mod manager"),
 			"the pages rows open: Detail, Performance, Button layout, Touch zones, Gyro settings, Play, Modded maps, A/B "
-			"switches (no Screen, First person or Advanced page; no General, Graphics or Audio tab)");
+			"switches, Forge and File Share, Mod manager (no Screen, First person or Advanced page; no General, Graphics or Audio tab)");
 	}
 	check(settings[0].variable && !strcmp(settings[0].variable, "HALO_PROFILE") && !strcmp(settings[1].variable, "HALO_RENDER_SCALE") &&
 		!strcmp(settings[2].variable, "HALO_DYNAMIC_RES_MIN"), "Profile still settings[0], Render resolution and its minimum after it");
@@ -3475,16 +3661,17 @@ int main(void)
 	check(to_tab("Multiplayer") && strstr(menu, "\nModded maps\x02  4 maps  >"), "Multiplayer: Modded maps says how many");
 	check(open_page("Modded maps") && strstr(menu, "\n\x03Multiplayer > Modded maps\n"), "the Modded maps page");
 	printf("%s\n--\n", menu);
-	check(!strncmp(menu_line(2, line, sizeof(line)), "PC maps\x02", 8) &&
-		!strcmp(menu_line(3, line, sizeof(line)), "Map downloads\x02  Ask >") && !menu_line(4, line, sizeof(line))[0] &&
-		!strcmp(menu_line(5, line, sizeof(line)), "!Missing: sounds.map loc.map") &&
-		!strcmp(menu_line(6, line, sizeof(line)), "!Copy them in, or the Halo CE installer") &&
-		!strcmp(menu_line(7, line, sizeof(line)), "!(halocesetup*.exe) to ux0:data/haloce-vita"),
-		"PC maps switch, Map downloads (Ask), a gap; a CE map without sounds.map/loc.map: the warning, and that "
-		"the installer does");
-	check(!strncmp(menu_line(8, line, sizeof(line)), "cemap\x02", 6) && !strncmp(menu_line(9, line, sizeof(line)), "cesolo\x02", 7) &&
-		!strncmp(menu_line(10, line, sizeof(line)), "inplay\x02", 7) &&
-		!strncmp(menu_line(11, line, sizeof(line)), "mygulch\x02", 8) && menu_line(12, line, sizeof(line))[0] == '\x05',
+	check(!strcmp(menu_line(2, line, sizeof(line)), "Mod manager\x02  >") &&
+		!strncmp(menu_line(3, line, sizeof(line)), "PC maps\x02", 8) &&
+		!strcmp(menu_line(4, line, sizeof(line)), "Map downloads\x02  Ask >") && !menu_line(5, line, sizeof(line))[0] &&
+		!strcmp(menu_line(6, line, sizeof(line)), "!Missing: sounds.map loc.map") &&
+		!strcmp(menu_line(7, line, sizeof(line)), "!Copy them in, or the Halo CE installer") &&
+		!strcmp(menu_line(8, line, sizeof(line)), "!(halocesetup*.exe) to ux0:data/haloce-vita"),
+		"Mod manager, PC maps switch, Map downloads (Ask), a gap; a CE map without sounds.map/loc.map: the warning, "
+		"and that the installer does");
+	check(!strncmp(menu_line(9, line, sizeof(line)), "cemap\x02", 6) && !strncmp(menu_line(10, line, sizeof(line)), "cesolo\x02", 7) &&
+		!strncmp(menu_line(11, line, sizeof(line)), "inplay\x02", 7) &&
+		!strncmp(menu_line(12, line, sizeof(line)), "mygulch\x02", 8) && menu_line(13, line, sizeof(line))[0] == '\x05',
 		"the custom maps listed in order, not the Xbox's or CE resource maps");
 	/* Map downloads: Ask (the default: public games warn), Not public games,
 	Never; each with its own help, saved and in the environment the game
@@ -3616,6 +3803,9 @@ int main(void)
 	check(!strcmp(getenv("HALO_CUSTOM_EDITION"), "0") && !strstr(menu, "\nPC map vehicles\x02"),
 		"PC maps off again: the row goes");
 	press(VITA_BUTTON_CIRCLE);
+
+	/* ---------- Modded maps' Mod manager page */
+	test_mod_manager_page();
 
 	/* ---------- Dev, behind its switch */
 	press(VITA_BUTTON_R);

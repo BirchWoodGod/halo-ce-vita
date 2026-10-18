@@ -116,6 +116,13 @@ int posix_stat(const char *path, struct posix_file_information *information)
 	return 0;
 }
 
+int posix_is_link(const char *path)
+{
+	DWORD attributes = GetFileAttributesA(path);
+
+	return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+}
+
 int posix_fstat(int descriptor, struct posix_file_information *information)
 {
 	HANDLE handle = (HANDLE)_get_osfhandle(descriptor);

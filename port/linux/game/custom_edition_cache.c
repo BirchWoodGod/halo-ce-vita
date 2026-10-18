@@ -1655,6 +1655,41 @@ boolean custom_edition_cache_mod_map_identify(
 	return TRUE;
 }
 
+short custom_edition_cache_file_check(
+	char const *path,
+	short *format,
+	short *scenario_type,
+	char *inside_name,
+	long inside_name_size)
+{
+	struct custom_edition_file file;
+	struct cache_file_identity identity;
+	enum cache_file_status status;
+
+	*format = _cache_file_format_unrecognized;
+	*scenario_type = NONE;
+	if (inside_name_size > 0)
+	{
+		inside_name[0] = 0;
+	}
+	if (!custom_edition_file_open(&file, path))
+	{
+		return _cache_file_status_read_failed;
+	}
+	csmemset(&identity, 0, sizeof(identity));
+	status = cache_file_identify(&file.source, &identity);
+	custom_edition_file_close(&file);
+	*format = (short)identity.format;
+	*scenario_type = identity.scenario_type;
+	if (inside_name_size > 0)
+	{
+		csstrncpy(inside_name, identity.name, (size_t)(inside_name_size - 1));
+		inside_name[inside_name_size - 1] = 0;
+	}
+
+	return (short)status;
+}
+
 boolean custom_edition_cache_is_custom_edition(
 	char const *map_name)
 {

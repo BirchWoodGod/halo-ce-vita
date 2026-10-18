@@ -150,6 +150,16 @@ from it, vita_ce_installer.c), and "Map downloads": whether a
 host's map is offered for download in a game joined without it (Ask, the
 default, warns in a game joined from the public lobby; Not public games
 asks only in the others; Never: port/linux/game/map_share.c).
+The page's first row, "Mod manager", opens the mod manager's page (the
+Halo 3 menus' MOD MANAGER's: port/linux/game/mod_manager.c, through
+mod_manager_share.h): the maps folder's custom maps and the mods folder's
+MCC mods, each with On, Off or Error (it failed the game's own checks), its
+size and kind; the help line says why it failed or what it needs. Left and
+right turn one off or on (a mod by its key: HALO_MODS_DISABLED, kept here as
+HALO_MAPS_DISABLED is), cross shows its details, square deletes it after a
+question; the game's main loop looks through the folders when the page
+opens, and deletes (only inside our folders, never through a link). Circle
+goes back to Modded maps.
 "MCC mods" (HALO_MCC_MODS, experimental, Off by default; shown while the
 mods folder has a folder in it) lets the Campaign's level list offer a
 Halo: The Master Chief Collection mod's Halo: CE Anniversary maps from
@@ -199,6 +209,7 @@ Multiplayer tab's way.
 
 #include "lang.h"
 #include "forge_store.h"
+#include "mod_manager_share.h"
 #include "p2p.h"
 #include "crossplay_guard.h"
 #include "system_link_shortcut.h"
@@ -254,6 +265,8 @@ enum
 	PAGE_MAPS,
 	PAGE_DEV_AB,
 	PAGE_FORGE,
+	/* (Modded maps' Mod manager: circle goes back to Modded maps) */
+	PAGE_MODS,
 	PAGE_COUNT
 };
 
@@ -278,6 +291,7 @@ static const struct
 	{ "Modded maps", TAB_MULTIPLAYER },
 	{ "A/B switches", TAB_DEV },
 	{ "Forge and File Share", TAB_GAME },
+	{ "Mod manager", TAB_MULTIPLAYER },
 };
 /* the headings over a tab's rows, as Halo Online's settings have them
 (HUD, Interface...): each above the row it names, when that row is shown */
@@ -671,6 +685,10 @@ static struct setting settings[] = {
 	/* (custom maps: the Custom Edition maps join the multiplayer level
 	list; off by default while their colours are wrong on the Vita; the
 	maps themselves follow on the page, page_lines) */
+	/* (the mod manager: the maps folder's custom maps and the mods folder's
+	MCC mods with the game's own checks, turned off and on, deleted;
+	port/linux/game/mod_manager.c answers, mod_manager_share.h) */
+	PAGE_ROW("Mod manager", "Custom maps and MCC mods: check, on, off, delete", PAGE_MAPS, PAGE_MODS),
 	{ "PC maps", "HALO_CUSTOM_EDITION", 0, 2, { "0", "1" }, { "Off", "On" },
 		"Experimental: Custom Edition maps in the map list", 0, PAGE_MAPS },
 	/* (a mod's Halo: CE Anniversary maps in ux0:data/haloce-vita/mods,
@@ -841,6 +859,10 @@ enum
 	SCREEN_LARGE,
 	/* a map variant to delete (the Forge page's File Share) */
 	SCREEN_FORGE_DELETE,
+	/* the Mod manager page's chosen entry: its facts; its delete's
+	question */
+	SCREEN_MOD_DETAILS,
+	SCREEN_MOD_DELETE,
 };
 static int screen;
 /* the code being typed (eight characters of P2P_CODE_ALPHABET) and the
@@ -942,6 +964,23 @@ static int maps_mods_present;
 static char maps_installer[64];
 /* the maps turned off: their names, commas between (HALO_MAPS_DISABLED) */
 static char maps_disabled[1024];
+
+/* ---------- the mod manager */
+
+/* The Mod manager page (Multiplayer > Modded maps > Mod manager): what the
+game's look found (mod_manager_share.h: the game's main loop answers the
+panel's requests, mod_manager.c), each entry a line - its name, on or off
+(or Error when it failed the game's checks), its size and kind - the chosen
+one's check or needs on the help line. Left and right turn it off or on
+(HALO_MAPS_DISABLED for a map, HALO_MODS_DISABLED for a mod: kept here, in
+settings.txt), cross shows its details, square deletes it after a question
+(the game deletes it: only inside our maps and mods folders). */
+static struct halo_mods_inventory mods_view;
+/* 0 not looked yet, 1 asked (the game's answer awaited), 2 shown */
+static int mods_state;
+static int mods_scroll;
+/* the mods turned off: their keys, commas between (HALO_MODS_DISABLED) */
+static char mods_disabled[1024];
 
 /* the Xbox's own maps, and the Custom Edition resource maps: never listed */
 static const char *const stock_maps[] = {
@@ -1407,6 +1446,8 @@ static void save(void)
 			fprintf(file, "%s=%s\n", play_texts[index].variable, play_texts[index].value);
 	if (maps_disabled[0])
 		fprintf(file, "HALO_MAPS_DISABLED=%s\n", maps_disabled);
+	if (mods_disabled[0])
+		fprintf(file, "HALO_MODS_DISABLED=%s\n", mods_disabled);
 	ok = fclose(file) == 0;
 	if (ok)
 	{
@@ -1586,6 +1627,8 @@ void vita_settings_load(void)
 		const char *disabled = getenv("HALO_MAPS_DISABLED");
 
 		snprintf(maps_disabled, sizeof(maps_disabled), "%s", disabled ? disabled : "");
+		disabled = getenv("HALO_MODS_DISABLED");
+		snprintf(mods_disabled, sizeof(mods_disabled), "%s", disabled ? disabled : "");
 	}
 	memset(texts_named, 0, sizeof(texts_named));
 	for (index = 0; index < PLAY_TEXT_COUNT; index++)
@@ -1618,6 +1661,11 @@ void vita_settings_load(void)
 			if (strcmp(line, "HALO_MAPS_DISABLED") == 0)
 			{
 				snprintf(maps_disabled, sizeof(maps_disabled), "%s", equals + 1);
+				continue;
+			}
+			if (strcmp(line, "HALO_MODS_DISABLED") == 0)
+			{
+				snprintf(mods_disabled, sizeof(mods_disabled), "%s", equals + 1);
 				continue;
 			}
 			if (play_text_named(line))
@@ -1744,6 +1792,10 @@ void vita_settings_load(void)
 		setenv("HALO_MAPS_DISABLED", maps_disabled, 1);
 	else
 		unsetenv("HALO_MAPS_DISABLED");
+	if (mods_disabled[0])
+		setenv("HALO_MODS_DISABLED", mods_disabled, 1);
+	else
+		unsetenv("HALO_MODS_DISABLED");
 	for (index = 0; index < (int)(sizeof(fixed_defaults) / sizeof(fixed_defaults[0])); index++)
 		setenv(fixed_defaults[index][0], fixed_defaults[index][1], 0);
 	halo_test_setting_hook = vita_settings_set;
@@ -1774,6 +1826,13 @@ void vita_settings_load(void)
 		char message[1100];
 
 		snprintf(message, sizeof(message), "settings: maps turned off: %s", maps_disabled);
+		vita_host_log(message);
+	}
+	if (mods_disabled[0])
+	{
+		char message[1100];
+
+		snprintf(message, sizeof(message), "settings: mods turned off: %s", mods_disabled);
 		vita_host_log(message);
 	}
 	apply_network();
@@ -1960,7 +2019,10 @@ static void maps_scan(void)
 
 static void size_text(char *text, int size, unsigned long long bytes)
 {
-	if (bytes >= 1024ULL * 1024ULL)
+	/* (the memory card's free space: GB) */
+	if (bytes >= 1024ULL * 1024ULL * 1024ULL)
+		snprintf(text, (size_t)size, "%llu.%llu GB", bytes >> 30, ((bytes & 0x3FFFFFFFULL) * 10) >> 30);
+	else if (bytes >= 1024ULL * 1024ULL)
 		snprintf(text, (size_t)size, "%llu.%llu MB", bytes >> 20, ((bytes & 0xFFFFFULL) * 10) >> 20);
 	else
 		snprintf(text, (size_t)size, "%llu KB", (bytes + 1023) >> 10);
@@ -2010,6 +2072,210 @@ static void map_delete(const struct map_entry *map)
 		snprintf(line, sizeof(line), "settings: map %s.%s deleted", map->name, map->extension);
 		vita_host_log(line);
 	}
+}
+
+/* ---------- the mod manager */
+
+/* the name of the entry being deleted, for its notice */
+static char mods_deleting[HALO_MODS_NAME_BYTES];
+
+/* whether the comma list `list` names `name` (either case) */
+static int name_listed(const char *list, const char *name)
+{
+	size_t length = strlen(name);
+
+	while (length && *list)
+	{
+		size_t entry = strcspn(list, ",");
+
+		if (entry == length && strncasecmp(list, name, length) == 0)
+			return 1;
+		list += entry;
+		if (*list == ',')
+			list++;
+	}
+	return 0;
+}
+
+/* a list as the game set it (its MOD MANAGER, vita_settings_set), kept as
+settings.txt can keep it: printable ASCII but '%' */
+static void list_sanitize(char *list, size_t size, const char *value)
+{
+	size_t length = 0;
+
+	for (; value && *value && length + 1 < size; value++)
+		if (*value >= ' ' && *value <= '~' && *value != '%')
+			list[length++] = *value;
+	list[length] = 0;
+}
+
+/* turns the mod of the key `key` off or on: in the list, the environment
+and settings.txt (as map_set_disabled does a map) */
+static void mod_set_disabled(const char *key, int disabled)
+{
+	char list[sizeof(mods_disabled)];
+	const char *entry = mods_disabled;
+	int length = 0;
+
+	if (!key[0] || name_listed(mods_disabled, key) == disabled)
+		return;
+	list[0] = 0;
+	while (*entry)
+	{
+		size_t size = strcspn(entry, ",");
+
+		if (size && !(size == strlen(key) && strncasecmp(entry, key, size) == 0) &&
+			length + (int)size + 2 < (int)sizeof(list))
+			length += snprintf(list + length, sizeof(list) - length, "%s%.*s", length ? "," : "", (int)size, entry);
+		entry += size;
+		if (*entry == ',')
+			entry++;
+	}
+	if (disabled && length + (int)strlen(key) + 2 < (int)sizeof(list))
+		snprintf(list + length, sizeof(list) - length, "%s%s", length ? "," : "", key);
+	memcpy(mods_disabled, list, sizeof(mods_disabled));
+	if (mods_disabled[0])
+		setenv("HALO_MODS_DISABLED", mods_disabled, 1);
+	else
+		unsetenv("HALO_MODS_DISABLED");
+	__atomic_add_fetch(&halo_settings_generation, 1, __ATOMIC_RELEASE);
+	save();
+	{
+		char line[128];
+
+		snprintf(line, sizeof(line), "settings: mod %s turned %s", key, disabled ? "off" : "on");
+		vita_host_log(line);
+	}
+}
+
+/* asks the game to look through the maps and mods folders (its answer:
+mods_poll) */
+static void mods_request_scan(void)
+{
+	/* (one being answered already: its answer is a look too) */
+	if (__atomic_load_n(&halo_mods_request, __ATOMIC_ACQUIRE) == HALO_MODS_REQUEST_NONE)
+	{
+		halo_mods_answer = HALO_MODS_ANSWER_NONE;
+		__atomic_store_n(&halo_mods_request, HALO_MODS_REQUEST_SCAN, __ATOMIC_RELEASE);
+	}
+	mods_state = 1;
+	vita_host_log("settings: mod manager: asked the game to look");
+}
+
+/* asks the game to delete `entry`, then to look again */
+static void mods_request_delete(const struct halo_mod_entry *entry)
+{
+	if (__atomic_load_n(&halo_mods_request, __ATOMIC_ACQUIRE) != HALO_MODS_REQUEST_NONE)
+		return;
+	snprintf(mods_deleting, sizeof(mods_deleting), "%s", entry->file);
+	snprintf(halo_mods_target, sizeof(halo_mods_target), "%s", entry->file);
+	halo_mods_target_kind = entry->kind;
+	halo_mods_answer = HALO_MODS_ANSWER_NONE;
+	__atomic_store_n(&halo_mods_request, HALO_MODS_REQUEST_DELETE, __ATOMIC_RELEASE);
+	mods_state = 1;
+	{
+		char line[128];
+
+		snprintf(line, sizeof(line), "settings: mod manager: asked the game to delete %s", entry->file);
+		vita_host_log(line);
+	}
+}
+
+/* the game's answer, once it came: 1 when it did (the page is shown again) */
+static int mods_poll(void)
+{
+	int answer, index;
+
+	if (mods_state != 1 || __atomic_load_n(&halo_mods_request, __ATOMIC_ACQUIRE) != HALO_MODS_REQUEST_NONE)
+		return 0;
+	answer = halo_mods_answer;
+	memcpy(&mods_view, &halo_mods_inventory, sizeof(mods_view));
+	/* (the game's, another unit's: taken as no more than there is room for,
+	each text ended) */
+	if (mods_view.count < 0 || mods_view.count > HALO_MODS_MAXIMUM)
+		mods_view.count = 0;
+	for (index = 0; index < mods_view.count; index++)
+	{
+		struct halo_mod_entry *entry = &mods_view.entries[index];
+
+		entry->name[sizeof(entry->name) - 1] = entry->file[sizeof(entry->file) - 1] = 0;
+		entry->title[sizeof(entry->title) - 1] = 0;
+		entry->why[sizeof(entry->why) - 1] = entry->needs[sizeof(entry->needs) - 1] = 0;
+		/* (on or off as this panel's lists say now) */
+		entry->enabled = !name_listed(entry->kind == HALO_MOD_KIND_MCC_MOD ? mods_disabled : maps_disabled, entry->name);
+	}
+	mods_state = 2;
+	if (mods_scroll >= mods_view.count)
+		mods_scroll = 0;
+	if (answer == HALO_MODS_ANSWER_DELETED)
+		set_notice(T("Deleted %.40s"), mods_deleting);
+	else if (answer == HALO_MODS_ANSWER_IN_USE)
+		set_notice(T("%.30s is in play: leave it first"), mods_deleting);
+	else if (answer == HALO_MODS_ANSWER_FAILED)
+		set_notice(T("Could not delete %.40s"), mods_deleting);
+	{
+		char line[96];
+
+		snprintf(line, sizeof(line), "settings: mod manager: %d entries", mods_view.count);
+		vita_host_log(line);
+	}
+	return 1;
+}
+
+/* an entry's kind, short (the line's column) and in words */
+static const char *mod_kind_short(int kind)
+{
+	return kind == HALO_MOD_KIND_XBOX_MAP ? "Xbox" : kind == HALO_MOD_KIND_CE_MAP ? "CE" :
+		kind == HALO_MOD_KIND_CE_CAMPAIGN ? "CE SP" : kind == HALO_MOD_KIND_OPENSAUCE ? "CE+OS" :
+		kind == HALO_MOD_KIND_MCC_MOD ? "MCC" : "?";
+}
+
+static const char *mod_kind_name(int kind)
+{
+	return kind == HALO_MOD_KIND_XBOX_MAP ? T("Xbox map") : kind == HALO_MOD_KIND_CE_MAP ? T("PC map") :
+		kind == HALO_MOD_KIND_CE_CAMPAIGN ? T("PC campaign map") : kind == HALO_MOD_KIND_OPENSAUCE ? T("OpenSauce map") :
+		kind == HALO_MOD_KIND_MCC_MOD ? T("MCC mod") : T("Unknown file");
+}
+
+static void mod_modes_text(char *text, int size, int modes)
+{
+	int length = 0;
+
+	text[0] = 0;
+	if (modes & HALO_MOD_MODE_MULTIPLAYER)
+		length += snprintf(text + length, (size_t)(size - length), "%s", T("Multiplayer"));
+	if ((modes & HALO_MOD_MODE_CAMPAIGN) && length < size)
+		length += snprintf(text + length, (size_t)(size - length), "%s%s", length ? ", " : "", T("Campaign"));
+	if ((modes & HALO_MOD_MODE_COOP) && length < size)
+		length += snprintf(text + length, (size_t)(size - length), "%s%s", length ? ", " : "", T("Co-op"));
+	if ((modes & HALO_MOD_MODE_FORGE) && length < size)
+		length += snprintf(text + length, (size_t)(size - length), "%s%s", length ? ", " : "", T("Forge"));
+	if (!length)
+		snprintf(text, (size_t)size, "%s", T("None"));
+}
+
+/* the entry's state on its line: On, Off, or Error (it failed the game's
+checks) */
+static const char *mod_state_name(const struct halo_mod_entry *entry)
+{
+	return !entry->valid ? T("Error") : entry->enabled ? T("On") : T("Off");
+}
+
+/* turns `entry` off or on (`disabled` -1: the other way) */
+static void mod_entry_toggle(struct halo_mod_entry *entry, int disabled)
+{
+	if (!entry->deletable)
+	{
+		set_notice("%s", T("Its name isn't one this game takes: use VitaShell"));
+		return;
+	}
+	if (disabled < 0)
+		disabled = entry->enabled;
+	if (entry->kind == HALO_MOD_KIND_MCC_MOD)
+		mod_set_disabled(entry->name, disabled);
+	else
+		map_set_disabled(entry->name, disabled);
+	entry->enabled = !name_listed(entry->kind == HALO_MOD_KIND_MCC_MOD ? mods_disabled : maps_disabled, entry->name);
 }
 
 /* ---------- the report */
@@ -2123,6 +2389,8 @@ enum
 	variant of File Share's (index into forge_entries)) */
 	LINE_FORGE,
 	LINE_VARIANT,
+	/* (the Mod manager page's entries: mods_view) */
+	LINE_MOD,
 	/* (a line that is not chosen: a warning, a note) */
 	LINE_INFO,
 	/* (a heading over rows: headings; not chosen either) */
@@ -2136,7 +2404,9 @@ struct line
 	char text[128];
 };
 
-#define MAXIMUM_LINES (SETTING_COUNT + MAXIMUM_MAPS + FORGE_PANEL_MAXIMUM + FORGE_LINE_COUNT + 6 + \
+/* (a page shows the maps, or the mod manager's entries: never both) */
+#define MAXIMUM_LIST_LINES (MAXIMUM_MAPS > HALO_MODS_MAXIMUM ? MAXIMUM_MAPS : HALO_MODS_MAXIMUM)
+#define MAXIMUM_LINES (SETTING_COUNT + MAXIMUM_LIST_LINES + FORGE_PANEL_MAXIMUM + FORGE_LINE_COUNT + 6 + \
 	(int)(sizeof(headings) / sizeof(headings[0])))
 
 /* a line that is not chosen (moving up and down passes it) */
@@ -2412,6 +2682,32 @@ static int page_lines(struct line *lines)
 		for (index = 0; index < forge_entry_count; index++)
 		{
 			lines[count].type = LINE_VARIANT;
+			lines[count++].index = index;
+		}
+	}
+	if (page == PAGE_MODS)
+	{
+		/* (the space used and free, or the look awaited) */
+		lines[count].type = LINE_INFO;
+		if (mods_state != 2)
+			snprintf(lines[count++].text, sizeof(lines[0].text), "%s", T("Checking the maps and mods..."));
+		else
+		{
+			char used[24], free_space[24];
+
+			size_text(used, sizeof(used), (unsigned long long)mods_view.used_kilobytes << 10);
+			size_text(free_space, sizeof(free_space), (unsigned long long)mods_view.free_kilobytes << 10);
+			snprintf(lines[count++].text, sizeof(lines[0].text), T("%d items: %s used, %s free"), mods_view.count, used,
+				free_space);
+		}
+		if (mods_state == 2 && !mods_view.count)
+		{
+			lines[count].type = LINE_INFO;
+			snprintf(lines[count++].text, sizeof(lines[0].text), "%s", T("No custom maps or mods"));
+		}
+		for (index = 0; mods_state == 2 && index < mods_view.count; index++)
+		{
+			lines[count].type = LINE_MOD;
 			lines[count++].index = index;
 		}
 	}
@@ -2713,6 +3009,17 @@ static void help_line(char *text, int size, const struct line *line)
 		else
 			snprintf(text, (size_t)size, T("%d objects, saved %.16s"), entry->objects, entry->date[0] ? entry->date : "-");
 	}
+	else if (line && line->type == LINE_MOD)
+	{
+		const struct halo_mod_entry *entry = &mods_view.entries[line->index];
+
+		if (!entry->valid)
+			snprintf(text, (size_t)size, T("Failed: %.60s"), entry->why);
+		else if (entry->needs[0])
+			snprintf(text, (size_t)size, T("Needs: %.60s"), entry->needs);
+		else
+			snprintf(text, (size_t)size, T("%s: on or off, or delete it"), mod_kind_name(entry->kind));
+	}
 	else if (!setting)
 		text[0] = 0;
 	else if (!strcmp(running_network, "online") && (setting->action == ACTION_JOIN_CODE ||
@@ -2793,6 +3100,8 @@ static void footer_line(char *text, int size, const struct line *line)
 		middle = T("Square: delete   ");
 	else if (line && line->type == LINE_FORGE)
 		middle = line->index == FORGE_LINE_START ? T("Cross: select   ") : T("Left/right: change   ");
+	else if (line && line->type == LINE_MOD)
+		middle = T("Cross: details   Square: delete   ");
 	else if (setting && setting->kind == KIND_ACTION)
 		middle = T("Cross: select   ");
 	else if (setting && setting->kind == KIND_TEXT)
@@ -2825,6 +3134,11 @@ static void page_summary(char *text, int size, const struct setting *setting)
 			snprintf(text, (size_t)size, T("%d on"), set);
 		else
 			snprintf(text, (size_t)size, "%s", T("Off"));
+		break;
+	case PAGE_MODS:
+		/* (once looked: how many) */
+		if (mods_state == 2)
+			snprintf(text, (size_t)size, T("%d items"), mods_view.count);
 		break;
 	case PAGE_MAPS:
 		if (map_count == 1)
@@ -2911,12 +3225,17 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 			continue;
 		if (line->type == LINE_VARIANT && (line->index < forge_scroll || line->index >= forge_scroll + FORGE_PANEL_LINES))
 			continue;
+		if (line->type == LINE_MOD && (line->index < mods_scroll || line->index >= mods_scroll + MAP_LINES))
+			continue;
 		/* (the classic panel short of room: the first headings left out) */
 		if (line->type == LINE_HEADING && (*headings)++ < skip)
 			continue;
-		/* (Modded maps: a gap between its switch and the maps) */
+		/* (Modded maps: a gap between its switch and the maps; the Forge page:
+		before its File Share heading; the Mod manager: between its totals and
+		the entries) */
 		if (index && ((page == PAGE_MAPS && line->type != LINE_SETTING && lines[index - 1].type == LINE_SETTING) ||
-			(page == PAGE_FORGE && line->type == LINE_HEADING)))
+			(page == PAGE_FORGE && line->type == LINE_HEADING) ||
+			(page == PAGE_MODS && line->type == LINE_MOD && lines[index - 1].type == LINE_INFO)))
 		{
 			length += snprintf(text + length, (size_t)(size - length), "\n");
 			number++;
@@ -2965,6 +3284,19 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 
 			length += snprintf(text + length, (size_t)(size - length), "\n%s\x02  %s%*s %8s  %s", name, state,
 				pad > 0 ? pad : 0, "", size_name, map_format_name(map->format));
+		}
+		else if (line->type == LINE_MOD)
+		{
+			const struct halo_mod_entry *entry = &mods_view.entries[line->index];
+			char size_name[24], name[24];
+			const char *state = mod_state_name(entry);
+			/* (the state five characters wide, by its characters) */
+			int pad = 5 - lang_utf8_length(state);
+
+			size_text(size_name, sizeof(size_name), (unsigned long long)entry->kilobytes << 10);
+			snprintf(name, sizeof(name), "%.20s", entry->kind == HALO_MOD_KIND_MCC_MOD ? entry->title : entry->file);
+			length += snprintf(text + length, (size_t)(size - length), "\n%s\x02  %s%*s %8s  %s", name, state,
+				pad > 0 ? pad : 0, "", size_name, mod_kind_short(entry->kind));
 		}
 		else
 		{
@@ -3016,6 +3348,12 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 		length += snprintf(text + length, (size_t)(size - length), T("(variants %d-%d of %d)"), forge_scroll + 1,
 			forge_scroll + FORGE_PANEL_LINES < forge_entry_count ? forge_scroll + FORGE_PANEL_LINES : forge_entry_count,
 			forge_entry_count);
+	}
+	if (page == PAGE_MODS && mods_state == 2 && mods_view.count > MAP_LINES && length + 2 < size)
+	{
+		length += snprintf(text + length, (size_t)(size - length), "\n\x04");
+		length += snprintf(text + length, (size_t)(size - length), T("(%d-%d of %d)"), mods_scroll + 1,
+			mods_scroll + MAP_LINES < mods_view.count ? mods_scroll + MAP_LINES : mods_view.count, mods_view.count);
 	}
 	if (page == PAGE_MAPS && map_count > MAP_LINES && length + 2 < size)
 	{
@@ -3096,6 +3434,15 @@ static void show_list(void)
 			forge_scroll = variant;
 		if (variant >= forge_scroll + FORGE_PANEL_LINES)
 			forge_scroll = variant - FORGE_PANEL_LINES + 1;
+	}
+	if (page == PAGE_MODS && count && lines[*selected].type == LINE_MOD)
+	{
+		int entry = lines[*selected].index;
+
+		if (entry < mods_scroll)
+			mods_scroll = entry;
+		if (entry >= mods_scroll + MAP_LINES)
+			mods_scroll = entry - MAP_LINES + 1;
 	}
 	for (skip = 0; ; skip++)
 	{
@@ -3294,6 +3641,78 @@ static void forge_delete_input(unsigned long pressed)
 	}
 }
 
+/* the entry chosen on the Mod manager page, or NULL */
+static struct halo_mod_entry *selected_mod(void)
+{
+	struct line lines[MAXIMUM_LINES];
+	int count;
+
+	if (page != PAGE_MODS || mods_state != 2)
+		return NULL;
+	count = page_lines(lines);
+	if (page_selected[PAGE_MODS] < count && lines[page_selected[PAGE_MODS]].type == LINE_MOD)
+		return &mods_view.entries[lines[page_selected[PAGE_MODS]].index];
+	return NULL;
+}
+
+/* the chosen entry's facts (cross on its line) */
+static void show_mod_details(void)
+{
+	char body[768], text[1280], size_name[24], modes[64];
+	const struct halo_mod_entry *entry = selected_mod();
+	int length = 0;
+
+	if (!entry)
+	{
+		screen = SCREEN_LIST;
+		show_list();
+		return;
+	}
+	size_text(size_name, sizeof(size_name), (unsigned long long)entry->kilobytes << 10);
+	mod_modes_text(modes, sizeof(modes), entry->modes);
+	length += snprintf(body + length, sizeof(body) - length, "%s: %s\n", T("Type"), mod_kind_name(entry->kind));
+	length += snprintf(body + length, sizeof(body) - length, "%s: %s%.47s\n", T("File"),
+		entry->kind == HALO_MOD_KIND_MCC_MOD ? "mods/" : "maps/", entry->file);
+	length += snprintf(body + length, sizeof(body) - length, "%s: %s\n", T("Size"), size_name);
+	length += snprintf(body + length, sizeof(body) - length, "%s: %s\n", T("From"),
+		entry->source == HALO_MOD_SOURCE_MAP_SHARE ? T("Received through map sharing") : T("Copied in by hand"));
+	length += snprintf(body + length, sizeof(body) - length, "%s: %s\n", T("Works in"), modes);
+	if (entry->kind == HALO_MOD_KIND_MCC_MOD)
+		length += snprintf(body + length, sizeof(body) - length, T("Maps: %d, %d of them play\n"), entry->maps,
+			entry->maps_valid);
+	length += snprintf(body + length, sizeof(body) - length, "%s: %s%s%s\n", T("Check"),
+		entry->valid ? T("Passed") : T("Failed"), entry->why[0] ? " - " : "", entry->why);
+	length += snprintf(body + length, sizeof(body) - length, "%s: %s\n", T("Needs"),
+		entry->needs[0] ? entry->needs : T("Nothing more"));
+	snprintf(body + length, sizeof(body) - length, "%s: %s", T("Status"),
+		entry->enabled ? T("On: in the map lists") : T("Off: kept, but in no map list"));
+	format_box(text, sizeof(text), entry->kind == HALO_MOD_KIND_MCC_MOD ? entry->title : entry->file, body,
+		T("\n\nLeft/right: on/off   Circle: back"));
+	vgxm_menu_set(text, -1);
+}
+
+/* the delete's question (square on its line) */
+static void show_mod_delete(void)
+{
+	char text[1024], size_name[24];
+	const struct halo_mod_entry *entry = selected_mod();
+
+	if (!entry)
+	{
+		screen = SCREEN_LIST;
+		show_list();
+		return;
+	}
+	size_text(size_name, sizeof(size_name), (unsigned long long)entry->kilobytes << 10);
+	if (entry->kind == HALO_MOD_KIND_MCC_MOD)
+		snprintf(text, sizeof(text), T("DELETE MOD\n\n%.40s  (%s)\nand everything in its folder.\n\n"
+			"It cannot be undone.\nCross: delete   O: keep"), entry->file, size_name);
+	else
+		snprintf(text, sizeof(text), T("DELETE MAP\n\n%.40s  (%s)\nand its picture and description, if any.\n\n"
+			"It cannot be undone.\nCross: delete   O: keep"), entry->file, size_name);
+	vgxm_menu_set(text, -1);
+}
+
 /* why Host or Join cannot open System Link now (NULL: it can) */
 
 static const char *guide_blocker(void)
@@ -3449,6 +3868,10 @@ static void show(void)
 		show_large();
 	else if (screen == SCREEN_FORGE_DELETE)
 		show_forge_delete();
+	else if (screen == SCREEN_MOD_DETAILS)
+		show_mod_details();
+	else if (screen == SCREEN_MOD_DELETE)
+		show_mod_delete();
 	else
 		show_list();
 }
@@ -3525,6 +3948,26 @@ HALO_TEST_COMMANDS "@set VARIABLE value" (main.c) */
 int vita_settings_set(const char *variable, const char *value)
 {
 	struct setting *setting = setting_named(variable);
+
+	/* (the game's MOD MANAGER turned a map or a mod off or on, or deleted
+	one: the lists, kept as this panel keeps them) */
+	if (!strcmp(variable, "HALO_MAPS_DISABLED") || !strcmp(variable, "HALO_MODS_DISABLED"))
+	{
+		int maps_list = !strcmp(variable, "HALO_MAPS_DISABLED");
+		char *list = maps_list ? maps_disabled : mods_disabled;
+		char line[1200];
+
+		list_sanitize(list, sizeof(maps_disabled), value);
+		if (list[0])
+			setenv(variable, list, 1);
+		else
+			unsetenv(variable);
+		__atomic_add_fetch(&halo_settings_generation, 1, __ATOMIC_RELEASE);
+		save();
+		snprintf(line, sizeof(line), "settings: %s=%s (the game)", variable, list);
+		vita_host_log(line);
+		return 1;
+	}
 
 	/* (a Play page text: as typed) */
 	if (setting && setting->kind == KIND_TEXT)
@@ -3902,6 +4345,9 @@ static void act(const struct setting *setting)
 			maps_scan();
 		if (page == PAGE_FORGE)
 			forge_scan();
+		/* (the game looks: the page says so until it answers) */
+		if (page == PAGE_MODS)
+			mods_request_scan();
 		break;
 	/* (its progress line then takes the screen) */
 	case ACTION_CE_EXTRACT:
@@ -4147,6 +4593,35 @@ static void delete_input(unsigned long pressed)
 			map_delete(map);
 			maps_scan();
 		}
+		screen = SCREEN_LIST;
+	}
+}
+
+/* the Mod manager's details: left and right turn it off or on, circle
+(or cross) goes back */
+static void mod_details_input(unsigned long pressed)
+{
+	struct halo_mod_entry *entry = selected_mod();
+
+	if (!entry || (pressed & (VITA_BUTTON_CIRCLE | VITA_BUTTON_CROSS)))
+		screen = SCREEN_LIST;
+	else if (pressed & (VITA_BUTTON_LEFT | VITA_BUTTON_RIGHT))
+		mod_entry_toggle(entry, (pressed & VITA_BUTTON_LEFT) ? 1 : 0);
+}
+
+/* the Mod manager's delete question: cross asks the game to delete it */
+static void mod_delete_input(unsigned long pressed)
+{
+	struct halo_mod_entry *entry = selected_mod();
+
+	if (pressed & VITA_BUTTON_CIRCLE)
+		screen = SCREEN_LIST;
+	else if ((pressed & VITA_BUTTON_CROSS) && entry)
+	{
+		if (!entry->deletable)
+			set_notice("%s", T("Its name isn't one this game takes: use VitaShell"));
+		else
+			mods_request_delete(entry);
 		screen = SCREEN_LIST;
 	}
 }
@@ -4455,6 +4930,19 @@ int vita_settings_input(const struct vita_host_pad *pad)
 			show();
 		return 1;
 	}
+	/* (the game's answer to the Mod manager page: shown once it came) */
+	if (mods_poll() && page == PAGE_MODS && !pressed)
+		show();
+	if (screen == SCREEN_MOD_DETAILS || screen == SCREEN_MOD_DELETE)
+	{
+		if (screen == SCREEN_MOD_DETAILS)
+			mod_details_input(pressed);
+		else
+			mod_delete_input(pressed);
+		if (pressed)
+			show();
+		return 1;
+	}
 	if (screen == SCREEN_FORGE_DELETE)
 	{
 		forge_delete_input(pressed);
@@ -4482,8 +4970,16 @@ int vita_settings_input(const struct vita_host_pad *pad)
 	}
 	if (pressed & VITA_BUTTON_CIRCLE)
 	{
-		/* (a page a row opened: back to its tab, on that row) */
-		if (page != tab)
+		/* (a page a row opened: back to its tab, on that row; the Mod
+		manager back to Modded maps) */
+		if (page == PAGE_MODS)
+		{
+			page = PAGE_MAPS;
+			notice[0] = 0;
+			maps_scan();
+			show();
+		}
+		else if (page != tab)
 		{
 			page = tab;
 			notice[0] = 0;
@@ -4531,7 +5027,18 @@ int vita_settings_input(const struct vita_host_pad *pad)
 		{
 			struct line *line = &lines[*selected];
 
-			if (line->type == LINE_VARIANT)
+			if (line->type == LINE_MOD)
+			{
+				struct halo_mod_entry *entry = &mods_view.entries[line->index];
+
+				if (pressed & VITA_BUTTON_SQUARE)
+					screen = SCREEN_MOD_DELETE;
+				else if (pressed & VITA_BUTTON_CROSS)
+					screen = SCREEN_MOD_DETAILS;
+				else
+					mod_entry_toggle(entry, (pressed & VITA_BUTTON_LEFT) ? 1 : 0);
+			}
+			else if (line->type == LINE_VARIANT)
 			{
 				if (pressed & VITA_BUTTON_SQUARE)
 				{

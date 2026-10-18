@@ -77,6 +77,8 @@ halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
 #include "browser_list.h"
 #include "../src/system_link_shortcut.h"
 #include "forge.h"
+#include "mod_manager.h"
+#include "custom_edition_maps.h"
 #include "../src/port_config.h"
 #include "camera/observer.h"
 #include "../src/forge_store.h"
@@ -225,6 +227,13 @@ enum
 	_function_forge_property_previous,
 	_function_forge_close,
 	_function_forge_pack_toggle,
+	_function_h3_mods_init,
+	_function_h3_mods_toggle,
+	_function_h3_mods_details,
+	_function_h3_mods_delete_ask,
+	_function_h3_mods_delete,
+	_function_h3_mods_page_up,
+	_function_h3_mods_page_down,
 };
 
 /* in port_game_data_input_names' order */
@@ -259,6 +268,9 @@ enum
 	_input_fileshare_question,
 	_input_forge_properties,
 	_input_forge_packs,
+	_input_h3_mods,
+	_input_h3_mods_details,
+	_input_h3_mods_confirm,
 };
 
 /* what a line of typing is for */
@@ -1832,6 +1844,13 @@ static void h3_mp_map_read(void)
 			h3_mp.map_index = index;
 			return;
 		}
+	}
+	/* (a custom map turned off in the mod manager, or deleted, is in no
+map list: the Xbox's list opens on its first map, and so does the lobby) */
+	if (custom_edition_maps_display_index(map) == NONE)
+	{
+		platform_log("menus: h3 mp: the last map used, %s, is not in the map list (off or gone)", map);
+		return;
 	}
 	h3_mp.map_index = NONE;
 	snprintf(h3_mp.map_other, sizeof(h3_mp.map_other), "%s", map);
@@ -4264,6 +4283,330 @@ static boolean h3_fileshare_open(void)
 	return TRUE;
 }
 
+/* ---- the Halo 3 MOD MANAGER (halo3/mods.xml, the main menu's): the
+player's custom maps and mods (mod_manager.c), Halo 3's file list - a row
+each (name, type, size, ON / OFF / FAILED), scrolling past the screen's
+ten as the server browser's do (browser_list.h), the chosen one's facts
+under the list (the modes it plays in, the game's check, what it needs,
+where it came from), the space used and free at the top right. Cross turns
+the row's off or on, Triangle opens its details, Square asks before
+deleting it (the answers' rows, NO first). The settings panel's Mod manager
+page does the same (vita_settings.c). */
+
+#define H3_MODS_ROWS 10
+/* how long a delete's outcome stays at the top right */
+#define H3_MODS_MESSAGE_MILLISECONDS 5000
+
+static struct
+{
+	struct browser_view view;
+	short page;
+	/* the entry chosen, by its file and kind: it stays chosen as the list
+	changes under it */
+	char chosen_file[HALO_MODS_NAME_BYTES];
+	int chosen_kind;
+	boolean chosen_valid;
+	char message[160];
+	unsigned long message_time;
+	/* the list last shown (a new one, the screen made again after the
+	details or the question: its rows follow the entry chosen, not the
+	focus it was made with) */
+	struct widget_instance *list;
+	long list_creation_time;
+} h3_mods;
+
+/* "12.3 MB" ("512 KB", "3.1 GB") */
+static void h3_mods_size_text(char *text, int size, int kilobytes)
+{
+	if (kilobytes >= 1024 * 1024)
+		snprintf(text, (size_t)size, "%d.%d GB", kilobytes / (1024 * 1024), (kilobytes % (1024 * 1024)) * 10 / (1024 * 1024));
+	else if (kilobytes >= 1024)
+		snprintf(text, (size_t)size, "%d.%d MB", kilobytes / 1024, (kilobytes % 1024) * 10 / 1024);
+	else
+		snprintf(text, (size_t)size, "%d KB", kilobytes);
+}
+
+static char const *h3_mods_state_name(struct halo_mod_entry const *entry)
+{
+	return !entry->valid ? T("FAILED") : entry->enabled ? T("ON") : T("OFF");
+}
+
+/* the entry chosen, or NULL */
+static struct halo_mod_entry const *h3_mods_chosen(void)
+{
+	short index = h3_mods.chosen_valid ? mod_manager_find(h3_mods.chosen_file, h3_mods.chosen_kind) : NONE;
+
+	return mod_manager_entry(index);
+}
+
+static void h3_mods_choose(struct halo_mod_entry const *entry)
+{
+	h3_mods.chosen_valid = entry != NULL;
+	if (entry)
+	{
+		snprintf(h3_mods.chosen_file, sizeof(h3_mods.chosen_file), "%s", entry->file);
+		h3_mods.chosen_kind = entry->kind;
+	}
+}
+
+static void h3_mods_message(char const *text)
+{
+	snprintf(h3_mods.message, sizeof(h3_mods.message), "%s", text);
+	h3_mods.message_time = system_milliseconds();
+	platform_log("menus: h3 mods: %s", text);
+}
+
+/* each entry as the list shows it, said in the log (the tests read it) */
+static void h3_mods_said(void)
+{
+	short index;
+
+	platform_log("menus: h3 mods: %d entries", mod_manager_count());
+	for (index = 0; index < mod_manager_count(); index++)
+	{
+		struct halo_mod_entry const *entry = mod_manager_entry(index);
+		char modes[64];
+
+		mod_manager_modes_text(entry->modes, modes, sizeof(modes));
+		platform_log("menus: h3 mods: %s: %s, %s, %d KB, %s%s%s, works in %s%s%s", entry->file,
+			mod_manager_kind_name(entry->kind), entry->enabled ? "on" : "off", entry->kilobytes,
+			entry->valid ? "passed" : "failed", entry->why[0] ? ": " : "", entry->why, modes,
+			entry->needs[0] ? ", needs " : "", entry->needs);
+	}
+}
+
+static void h3_mods_initialize(void)
+{
+	mod_manager_scan();
+	browser_view_reset(&h3_mods.view);
+	h3_mods.page = 0;
+	h3_mods.message[0] = 0;
+	if (!h3_mods_chosen())
+		h3_mods_choose(mod_manager_entry(0));
+	h3_mods_said();
+}
+
+/* (port h3 mods) the rows, the chosen one's facts, the totals */
+static void h3_mods_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *child, *focused = list->focused_child, *focus = NULL;
+	struct halo_mod_entry const *chosen;
+	long index, focused_row = NONE, chosen_index, target;
+	int used, free_space;
+	char text[192], used_text[24], free_text[24];
+
+	if (list != h3_mods.list || list->creation_time != h3_mods.list_creation_time)
+	{
+		h3_mods.list = list;
+		h3_mods.list_creation_time = list->creation_time;
+		browser_view_reset(&h3_mods.view);
+		focused = NULL;
+	}
+	for (index = 0, child = list->child; child; child = child->next)
+	{
+		if (strncmp(child->name, "row_", 4))
+			continue;
+		if (child == focused)
+			focused_row = index;
+		index++;
+	}
+	chosen_index = h3_mods.chosen_valid ? mod_manager_find(h3_mods.chosen_file, h3_mods.chosen_kind) : NONE;
+	target = browser_view_follow(&h3_mods.view, H3_MODS_ROWS, mod_manager_count(), (int)focused_row, (int)chosen_index,
+		h3_mods.page);
+	h3_mods.page = 0;
+	for (index = 0, child = list->child; child; child = child->next)
+	{
+		struct halo_mod_entry const *entry;
+
+		if (strncmp(child->name, "row_", 4))
+			continue;
+		if (index >= h3_mods.view.visible)
+		{
+			widget_instance_set_visibility_recursive(child, FALSE);
+			child->disabled = TRUE;
+			index++;
+			continue;
+		}
+		entry = mod_manager_entry((short)(h3_mods.view.offset + index));
+		widget_instance_set_visibility_recursive(child, TRUE);
+		child->disabled = FALSE;
+		row_column(child, "row_name", entry->kind == HALO_MOD_KIND_MCC_MOD ? entry->title : entry->file);
+		row_column(child, "row_kind", mod_manager_kind_name(entry->kind));
+		h3_mods_size_text(text, sizeof(text), entry->kilobytes);
+		row_column(child, "row_size", text);
+		row_column(child, "row_state", h3_mods_state_name(entry));
+		if (index == h3_mods.view.row)
+			focus = child;
+		index++;
+	}
+	if (focus && focus != list->focused_child)
+		ui_widget_port_give_focus(list, focus);
+	for (child = list->child; child; child = child->next)
+	{
+		if (!strncmp(child->name, "row_", 4))
+			child->animation.current_frame_index = child == focus ? 1 : 0;
+	}
+	h3_mods_choose(target != NONE ? mod_manager_entry((short)target) : NULL);
+	chosen = h3_mods_chosen();
+	/* the chosen one's facts */
+	if (chosen)
+	{
+		mod_manager_modes_text(chosen->modes, text, sizeof(text));
+		text_show(named(screen, "detail_modes"), text);
+		if (chosen->valid && chosen->why[0])
+			snprintf(text, sizeof(text), "%s (%s)", T("Passed"), chosen->why);
+		else if (chosen->valid)
+			snprintf(text, sizeof(text), "%s", T("Passed"));
+		else
+			snprintf(text, sizeof(text), "%s: %s", T("Failed"), chosen->why);
+		text_show(named(screen, "detail_check"), text);
+		text_show(named(screen, "detail_needs"), chosen->needs[0] ? chosen->needs : T("Nothing more"));
+		text_show(named(screen, "detail_source"), mod_manager_source_name(chosen->source));
+		text_show(named(screen, "toggle"), chosen->enabled ? T("Turn off") : T("Turn on"));
+	}
+	else
+	{
+		text_show(named(screen, "detail_modes"), "");
+		text_show(named(screen, "detail_check"), "");
+		text_show(named(screen, "detail_needs"), "");
+		text_show(named(screen, "detail_source"), "");
+	}
+	text_show(named(screen, "mods_message"), mod_manager_count() ? "" :
+		T("No custom maps or mods yet. Copy maps to ux0:data/haloce-vita/maps,\nmods to ux0:data/haloce-vita/mods."));
+	/* the totals, or a delete's outcome for a few seconds */
+	if (h3_mods.message[0] && system_milliseconds() - h3_mods.message_time < H3_MODS_MESSAGE_MILLISECONDS)
+		snprintf(text, sizeof(text), "%s", h3_mods.message);
+	else
+	{
+		mod_manager_totals(&used, &free_space);
+		h3_mods_size_text(used_text, sizeof(used_text), used);
+		h3_mods_size_text(free_text, sizeof(free_text), free_space);
+		if (mod_manager_count() == 1)
+			snprintf(text, sizeof(text), T("1 item, %s used, %s free"), used_text, free_text);
+		else
+			snprintf(text, sizeof(text), T("%d items, %s used, %s free"), mod_manager_count(), used_text, free_text);
+	}
+	text_show(named(screen, "mods_status"), text);
+}
+
+/* the entry of a row (row_<n>), or the chosen one */
+static struct halo_mod_entry const *h3_mods_row_entry(struct widget_instance *widget)
+{
+	if (widget && !strncmp(widget->name, "row_", 4) && widget->name[4] >= '0' && widget->name[4] <= '9')
+	{
+		long row = atol(widget->name + 4) - 1;
+
+		if (row >= 0 && row < h3_mods.view.visible)
+			return mod_manager_entry((short)(h3_mods.view.offset + row));
+	}
+	return h3_mods_chosen();
+}
+
+/* (port h3 mods toggle: a row's Cross) off or on */
+static void h3_mods_toggle(struct widget_instance *widget)
+{
+	struct halo_mod_entry const *entry = h3_mods_row_entry(widget);
+	short index;
+
+	if (!entry)
+		return;
+	h3_mods_choose(entry);
+	index = mod_manager_find(entry->file, entry->kind);
+	if (!mod_manager_set_enabled(index, !entry->enabled))
+	{
+		h3_mods_message(T("This one can't be turned off here"));
+		return;
+	}
+	entry = mod_manager_entry(index);
+	platform_log("menus: h3 mods: %s turned %s", entry->file, entry->enabled ? "on" : "off");
+}
+
+/* (port h3 mods details: the details' facts) */
+static void h3_mods_details_update(struct widget_instance *widget)
+{
+	struct widget_instance *screen = screen_of(widget);
+	struct halo_mod_entry const *entry = h3_mods_chosen();
+	char text[480], modes[64], size_text[24];
+	int length = 0;
+
+	if (!entry)
+		return;
+	text_show(named(screen, "details_title"), entry->kind == HALO_MOD_KIND_MCC_MOD ? entry->title : entry->file);
+	mod_manager_modes_text(entry->modes, modes, sizeof(modes));
+	h3_mods_size_text(size_text, sizeof(size_text), entry->kilobytes);
+	length += snprintf(text + length, sizeof(text) - (size_t)length, "%s: %s\n", T("Type"), mod_manager_kind_name(entry->kind));
+	length += snprintf(text + length, sizeof(text) - (size_t)length, "%s: %s%s\n", T("File"),
+		entry->kind == HALO_MOD_KIND_MCC_MOD ? "mods/" : "maps/", entry->file);
+	length += snprintf(text + length, sizeof(text) - (size_t)length, "%s: %s\n", T("Size"), size_text);
+	length += snprintf(text + length, sizeof(text) - (size_t)length, "%s: %s\n", T("From"), mod_manager_source_name(entry->source));
+	length += snprintf(text + length, sizeof(text) - (size_t)length, "%s: %s\n", T("Works in"), modes);
+	if (entry->kind == HALO_MOD_KIND_MCC_MOD)
+		length += snprintf(text + length, sizeof(text) - (size_t)length, T("Maps: %d, %d of them play\n"), entry->maps,
+			entry->maps_valid);
+	length += snprintf(text + length, sizeof(text) - (size_t)length, "%s: %s%s%s\n", T("Check"),
+		entry->valid ? T("Passed") : T("Failed"), entry->why[0] ? "\n  " : "", entry->why);
+	length += snprintf(text + length, sizeof(text) - (size_t)length, "%s: %s\n", T("Needs"),
+		entry->needs[0] ? entry->needs : T("Nothing more"));
+	snprintf(text + length, sizeof(text) - (size_t)length, "%s: %s", T("Status"),
+		entry->enabled ? T("On: in the map lists") : T("Off: kept, but in no map list"));
+	text_show(named(screen, "details_text"), text);
+}
+
+/* (port h3 mods confirm: the question's words) */
+static void h3_mods_confirm_update(struct widget_instance *widget)
+{
+	struct halo_mod_entry const *entry = h3_mods_chosen();
+	char text[256];
+
+	if (!entry)
+		return;
+	if (entry->kind == HALO_MOD_KIND_MCC_MOD)
+		snprintf(text, sizeof(text), T("Delete the mod %.40s and everything in its folder?\nIt can't be undone."), entry->file);
+	else
+		snprintf(text, sizeof(text), T("Delete %.40s, with its picture and description?\nIt can't be undone."), entry->file);
+	text_show(named(screen_of(widget), "confirm_text"), text);
+}
+
+/* (port h3 mods delete ask: Square) the question opens for one this game
+deletes; for another, why not */
+static boolean h3_mods_delete_ask(void)
+{
+	struct halo_mod_entry const *entry = h3_mods_chosen();
+
+	if (!entry)
+		return FALSE;
+	if (!entry->deletable)
+	{
+		h3_mods_message(T("This file's name isn't one this game deletes: use VitaShell"));
+		return FALSE;
+	}
+	platform_log("menus: h3 mods: delete %s?", entry->file);
+	return TRUE;
+}
+
+/* (port h3 mods delete: YES, DELETE IT) */
+static void h3_mods_delete(void)
+{
+	struct halo_mod_entry const *entry = h3_mods_chosen();
+	char file[HALO_MODS_NAME_BYTES], text[160];
+	int kind, answer;
+
+	if (!entry)
+		return;
+	snprintf(file, sizeof(file), "%s", entry->file);
+	kind = entry->kind;
+	answer = mod_manager_delete(file, kind);
+	if (answer == HALO_MODS_ANSWER_DELETED)
+		snprintf(text, sizeof(text), T("Deleted %.48s"), file);
+	else if (answer == HALO_MODS_ANSWER_IN_USE)
+		snprintf(text, sizeof(text), T("%.40s is in use: leave it first"), file);
+	else
+		snprintf(text, sizeof(text), T("%.48s could not be deleted"), file);
+	h3_mods_message(text);
+	h3_mods_said();
+}
+
 /* ---------- public code */
 
 boolean pc_menu_event_function_invoke(
@@ -4668,6 +5011,27 @@ boolean pc_menu_event_function_invoke(
 		return TRUE;
 	case _function_fileshare_open:
 		return h3_fileshare_open();
+	/* (the Halo 3 MOD MANAGER) */
+	case _function_h3_mods_init:
+		h3_mods_initialize();
+		return TRUE;
+	case _function_h3_mods_toggle:
+		h3_mods_toggle(widget);
+		return TRUE;
+	case _function_h3_mods_details:
+		/* (the details open for an entry; with none, nothing) */
+		return h3_mods_chosen() != NULL;
+	case _function_h3_mods_delete_ask:
+		return h3_mods_delete_ask();
+	case _function_h3_mods_delete:
+		h3_mods_delete();
+		return TRUE;
+	case _function_h3_mods_page_up:
+		h3_mods.page = -1;
+		return TRUE;
+	case _function_h3_mods_page_down:
+		h3_mods.page = 1;
+		return TRUE;
 	case _function_coop_campaign:
 	case _function_unwired:
 	default:
@@ -4779,6 +5143,16 @@ void pc_menu_game_data_function_invoke(
 		text_show(widget, text);
 		break;
 	}
+	case _input_h3_mods:
+		if (widget->type == _ui_widget_type_column_list)
+			h3_mods_update(widget);
+		break;
+	case _input_h3_mods_details:
+		h3_mods_details_update(widget);
+		break;
+	case _input_h3_mods_confirm:
+		h3_mods_confirm_update(widget);
+		break;
 	default:
 		break;
 	}
