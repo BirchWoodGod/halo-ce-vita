@@ -4,13 +4,14 @@ VITA_SETTINGS.C
 The settings panel: press SELECT and D-pad down together (or hold SELECT
 and START together for a moment, as before 1.1.0-beta.4), in play
 or in the menus, and a panel over the game shows the Vita's settings in
-four tabs that L and R switch between: Graphics, General, Audio and
-Multiplayer, and Dev once "Show dev settings" (General, Advanced) is on.
-No tab is longer than a screen: the rows few players change open from a
-row marked > as a page of their own (Graphics' Screen, First person,
-Detail and Performance; General's Button layout, Touch zones, Gyro
-settings and Advanced; Multiplayer's Play and Modded maps; Dev's A/B
-switches), and circle goes back.
+tabs that L and R switch between, laid out as Halo Online's settings (Oct
+2026): Game, Controls, Video, Sound and Multiplayer, and Dev once "Show
+dev settings" (Game) is on; a tab's rows under headings (Interface, First
+person, Updates...). No tab is longer than a screen: the rows few players
+change open from a row marked > as a page of their own (Video's Detail and
+Performance; Controls' Button layout, Touch zones and Gyro settings;
+Multiplayer's Play and Modded maps; Dev's A/B switches), and circle goes
+back.
 Up and down choose a line, left and right change it, cross does what an
 action line says, circle (or SELECT + down again) closes the panel; the
 game sees no buttons while it is open. Each row's value is drawn in a
@@ -51,7 +52,7 @@ are Dynamic resolution, from 50%, 63% and 75%; Quality is otherwise the
 Xbox game's every one but the AI's think rate (Adaptive). Rows marked *
 apply after a restart (the sound voices, the network, most dev switches).
 
-General (TAB_CONTROLS) starts with the update check (update_check.h):
+Game's Updates heading has the update check (update_check.h):
 Check for updates, its first row, asks GitHub in the background and shows
 its answer beside the build's version on the lines under it ("Version
 1.1.0-beta.3 - Up to date"; a newer version in amber with where to get it),
@@ -225,21 +226,19 @@ int halo_cache_map_in_use(const char *name);
 opens (circle goes back to the tab) */
 enum
 {
-	TAB_GRAPHICS,
+	TAB_GAME,
 	TAB_CONTROLS,
+	TAB_GRAPHICS,
 	TAB_AUDIO,
 	TAB_MULTIPLAYER,
 	TAB_DEV,
 	TAB_COUNT,
 
-	PAGE_GRAPHICS_SCREEN = TAB_COUNT,
-	PAGE_GRAPHICS_FIRST_PERSON,
-	PAGE_GRAPHICS_DETAIL,
+	PAGE_GRAPHICS_DETAIL = TAB_COUNT,
 	PAGE_GRAPHICS_PERFORMANCE,
 	PAGE_BUTTONS,
 	PAGE_TOUCH,
 	PAGE_GYRO,
-	PAGE_CONTROLS_ADVANCED,
 	PAGE_PLAY,
 	PAGE_MAPS,
 	PAGE_DEV_AB,
@@ -252,22 +251,42 @@ static const struct
 	const char *name;
 	int tab;
 } pages[PAGE_COUNT] = {
-	{ "Graphics", TAB_GRAPHICS },
-	{ "General", TAB_CONTROLS },
-	{ "Audio", TAB_AUDIO },
+	{ "Game", TAB_GAME },
+	{ "Controls", TAB_CONTROLS },
+	{ "Video", TAB_GRAPHICS },
+	{ "Sound", TAB_AUDIO },
 	{ "Multiplayer", TAB_MULTIPLAYER },
 	{ "Dev", TAB_DEV },
-	{ "Screen", TAB_GRAPHICS },
-	{ "First person", TAB_GRAPHICS },
 	{ "Detail", TAB_GRAPHICS },
 	{ "Performance", TAB_GRAPHICS },
 	{ "Button layout", TAB_CONTROLS },
 	{ "Touch zones", TAB_CONTROLS },
 	{ "Gyro settings", TAB_CONTROLS },
-	{ "Advanced", TAB_CONTROLS },
 	{ "Play", TAB_MULTIPLAYER },
 	{ "Modded maps", TAB_MULTIPLAYER },
 	{ "A/B switches", TAB_DEV },
+};
+/* the headings over a tab's rows, as Halo Online's settings have them
+(HUD, Interface...): each above the row it names, when that row is shown */
+static const struct
+{
+	int page;
+	const char *row;
+	const char *name;
+} headings[] = {
+	{ TAB_GAME, "Menu style", N_("Interface") },
+	{ TAB_GAME, "First-person legs", N_("First person") },
+	{ TAB_GAME, "Check for updates", N_("Updates") },
+	{ TAB_CONTROLS, "Look sensitivity", N_("Look") },
+	{ TAB_CONTROLS, "Crouch", N_("Buttons") },
+	{ TAB_CONTROLS, "Gyro aiming", N_("Gyro") },
+	{ TAB_CONTROLS, "Rear touch guard", N_("Touch") },
+	{ TAB_GRAPHICS, "Profile", N_("Quality") },
+	{ TAB_GRAPHICS, "Aspect ratio", N_("Screen") },
+	{ TAB_GRAPHICS, "Detail", N_("More") },
+	{ TAB_MULTIPLAYER, "Connection", N_("Network") },
+	{ TAB_MULTIPLAYER, "Bots", N_("Bots") },
+	{ TAB_MULTIPLAYER, "Co-op players", N_("Games") },
 };
 
 enum
@@ -354,25 +373,13 @@ static struct setting settings[] = {
 	limit, and the weapon's blend is part of it. Live) */
 	{ "Frame interpolation", "HALO_INTERPOLATION", 0, 2, { "false", "true" }, { "Off", "On" },
 		"Up to 60 FPS: frames between the 30 Hz ticks", 0, TAB_GRAPHICS },
-	{ "FPS counter", "HALO_FRAMERATE_COUNTER", 0, 2, { "0", "1" }, { "Off", "On" },
-		"The game's frame counter, bottom right", 0, TAB_GRAPHICS },
-	/* (then four pages, which keep the tab to ten rows with Dynamic minimum
-	shown: the picture's framing and scaling, set once - the row says both,
-	page_summary -; first person; the detail rows; the update rates) */
-	PAGE_ROW("Screen", "Aspect ratio, upscale filter", TAB_GRAPHICS, PAGE_GRAPHICS_SCREEN),
 	{ "Aspect ratio", "HALO_DISPLAY_WIDTH", 0, 2, { "848", "640" }, { "16:9", "4:3" },
-		"4:3: the Xbox's framing, black bars", 0, PAGE_GRAPHICS_SCREEN },
+		"4:3: the Xbox's framing, black bars", 0, TAB_GRAPHICS },
 	{ "Upscale filter", "HALO_UPSCALE_FILTER", 0, 2, { "0", "1" }, { "Smooth", "Sharp" },
-		"Scaling to the screen: Sharp = crisp pixels", 0, PAGE_GRAPHICS_SCREEN },
-	PAGE_ROW("First person", "First-person legs, smooth weapon motion", TAB_GRAPHICS, PAGE_GRAPHICS_FIRST_PERSON),
-	/* (port/linux/game/first_person_legs.c, from OpenCE: your own body
-	drawn from the waist down in first person, one more model a frame on
-	foot. On by default and in every profile. Live) */
-	{ "First-person legs", "HALO_FIRST_PERSON_LEGS", 0, 2, { "0", "1" }, { "Off", "On" },
-		"Your legs when you look down, as others see them", 1, PAGE_GRAPHICS_FIRST_PERSON },
-	{ "Smooth weapon motion", "HALO_INTERPOLATE_FIRST_PERSON", 0, 2, { "1", "0" }, { "On", "Off" },
-		"The weapon's animation blended between game ticks", 0, PAGE_GRAPHICS_FIRST_PERSON },
+		"Scaling to the screen: Sharp = crisp pixels", 0, TAB_GRAPHICS },
 	PAGE_ROW("Detail", "Models, shadows, lights, effects, particles", TAB_GRAPHICS, PAGE_GRAPHICS_DETAIL),
+	PAGE_ROW("Performance", "Update rates, AI think rate, fourth core helpers", TAB_GRAPHICS,
+		PAGE_GRAPHICS_PERFORMANCE),
 	{ "Model detail", "HALO_MODEL_LOD_SCALE", 0, 4, { "1", "0.75", "0.5", "0.35" },
 		{ "High", "Medium", "Low", "Lowest" }, "Level of detail of characters and vehicles", 1,
 		PAGE_GRAPHICS_DETAIL },
@@ -412,8 +419,6 @@ static struct setting settings[] = {
 	default and in every profile. Live) */
 	{ "Ragdolls", "HALO_RAGDOLLS", 0, 2, { "0", "1" }, { "Off", "On" },
 		"Dead bodies fall limp where they land", 1, PAGE_GRAPHICS_DETAIL },
-	PAGE_ROW("Performance", "Update rates, AI think rate, fourth core helpers", TAB_GRAPHICS,
-		PAGE_GRAPHICS_PERFORMANCE),
 	{ "Scenery updates", "HALO_SCENERY_UPDATE_DIVISOR", 0, 3, { "1", "2", "4" },
 		{ "Every tick", "Half", "Quarter" }, "How often static props are updated", 2, PAGE_GRAPHICS_PERFORMANCE },
 	{ "Object lighting", "HALO_LIGHTING_REFRESH_DIVISOR", 0, 3, { "1", "2", "3" },
@@ -436,6 +441,16 @@ static struct setting settings[] = {
 	profile) */
 	{ "Fourth core helpers", "HALO_CPU3_AUX", 1, 3, { "0", "1", "2" }, { "Off", "Audio", "All async" },
 		"Needs CapUnlocker: audio, or all background work", 2, PAGE_GRAPHICS_PERFORMANCE },
+	/* (the menus: Halo CE's own, or the Halo 3-style ones over the same
+	animated Halo ring - port/vita/app0/menus/halo3, menu_tags.c, which
+	reads it each time a screen opens: live) */
+	{ "Menu style", "HALO_MENU_STYLE", 0, 2, { "classic", "halo3" }, { "Halo CE", "Halo 3" },
+		"Halo 3: the new menus over the Halo ring. Halo CE: the original menus.", 1, TAB_GAME },
+	/* (the game's button icons: the Xbox's, or the Vita button each is on,
+	in the menus and in play: vita_controls.h; not part of the layout,
+	which Reset controls and the page's summary leave out) */
+	{ "Button icons", "HALO_BUTTON_ICONS", 0, 2, { VITA_BUTTON_ICONS_VALUES }, { VITA_BUTTON_ICONS_NAMES },
+		"Halo's prompts: Xbox icons, or the Vita's", 0, TAB_GAME },
 
 	/* (the port's own text: this panel, its messages over the game, the
 	PC menus' and co-op's lines; lang.c, port/vita/app0/lang. Its choices
@@ -443,7 +458,34 @@ static struct setting settings[] = {
 	The game's own language too (xbox_xapi.c XGetLanguage, at start): the
 	Xbox's maps_es folder of a PAL disc's maps, read when there is one) */
 	{ "Language", "HALO_LANGUAGE", 0, 2, { "auto", "en" }, { "Automatic", "English" },
-		"This panel, the port's messages. Automatic: the Vita's", 0, TAB_AUDIO },
+		"This panel, the port's messages. Automatic: the Vita's", 0, TAB_GAME },
+	{ "FPS counter", "HALO_FRAMERATE_COUNTER", 0, 2, { "0", "1" }, { "Off", "On" },
+		"The game's frame counter, bottom right", 0, TAB_GAME },
+	/* (port/linux/game/first_person_legs.c, from OpenCE: your own body
+	drawn from the waist down in first person, one more model a frame on
+	foot. On by default and in every profile. Live) */
+	{ "First-person legs", "HALO_FIRST_PERSON_LEGS", 0, 2, { "0", "1" }, { "Off", "On" },
+		"Your legs when you look down, as others see them", 1, TAB_GAME },
+	{ "Smooth weapon motion", "HALO_INTERPOLATE_FIRST_PERSON", 0, 2, { "1", "0" }, { "On", "Off" },
+		"The weapon's animation blended between game ticks", 0, TAB_GAME },
+
+	/* (Game, Updates: the update check, update_check.h - nothing asked of
+	the network until Check for updates is pressed, nothing downloaded
+	until it is pressed again with an update found, vita_update.h, and
+	nothing installed: VitaShell does that; the
+	build's version and the answer on the lines under it, page_lines - then
+	the rows players change, then the pages laid out as the Xbox controller) */
+	{ "Check for updates", NULL, 0, 0, { NULL }, { NULL }, "Asks GitHub for the newest version; again to download it",
+		0, TAB_GAME, KIND_ACTION, ACTION_UPDATE_CHECK },
+	/* (the channel Check for updates, on the tab, looks at: Experimental at
+	pre-releases and releases, Stable at releases only; a pre-release build
+	is on Experimental, its Stable greyed out (choice_disabled) and a saved
+	Stable ignored (vita_settings_load); a release build starts on Stable.
+	Rarely changed, so here rather than beside Check for updates) */
+	{ "Update channel", "HALO_UPDATE_CHANNEL", 0, 2, { "experimental", "stable" }, { "Experimental", "Stable" },
+		"Experimental: betas too. Stable: releases only", 1, TAB_GAME },
+	{ "Show dev settings", "HALO_DEV_SETTINGS", 0, 2, { "0", "1" }, { "Off", "On" },
+		"The Dev tab: switches for testers, Save report", 0, TAB_GAME },
 	{ "Sound voices", "HALO_SOUND_CHANNELS", 1, 4, { "16", "24", "32", "0" },
 		{ "16", "24", "32", "Original" }, "Fewer is faster; the AI then differs (after a restart)", 3, TAB_AUDIO },
 	{ "Sound occlusion", "HALO_SOUND_OBSTRUCTION_TICKS", 0, 3, { "1", "3", "6" },
@@ -453,39 +495,27 @@ static struct setting settings[] = {
 	the mixer plays on) */
 	{ "Sound updates", "HALO_SOUND_MANAGER_DIVISOR", 0, 3, { "1", "2", "3" },
 		{ "Every frame", "Every 2nd", "Every 3rd" }, "Sounds placed and started; lower is faster", 1, TAB_AUDIO },
-
-	/* (General: first the update check, update_check.h - nothing asked of
-	the network until Check for updates is pressed, nothing downloaded
-	until it is pressed again with an update found, vita_update.h, and
-	nothing installed: VitaShell does that; the
-	build's version and the answer on the lines under it, page_lines - then
-	the rows players change, then the pages laid out as the Xbox controller) */
-	{ "Check for updates", NULL, 0, 0, { NULL }, { NULL }, "Asks GitHub for the newest version; again to download it",
-		0, TAB_CONTROLS, KIND_ACTION, ACTION_UPDATE_CHECK },
 	{ "Look sensitivity", "XV_LOOK_SENS", 0, 6, { "50", "75", "100", "125", "150", "200" },
 		{ "50%", "75%", "100%", "125%", "150%", "200%" }, "Right stick turning speed", 2, TAB_CONTROLS },
 	{ "Invert look", "XV_INVERT_Y", 0, 2, { "0", "1" }, { "No", "Yes" }, "Reverse the right stick's up and down", 0,
 		TAB_CONTROLS },
+	{ "Stick deadzone", "XV_DEADZONE", 0, 4, { "0", "5", "10", "15" }, { "Off", "5%", "10%", "15%" },
+		"Raise if the sticks drift", 0, TAB_CONTROLS },
 	{ "Crouch", "HALO_CROUCH_TOGGLE", 0, 2, { "1", "0" }, { "Toggle", "Hold" },
 		"Left stick click: a press crouches, the next stands (Toggle)", 0, TAB_CONTROLS },
+	PAGE_ROW("Button layout", "Which Vita button each Xbox button is on, in play", TAB_CONTROLS, PAGE_BUTTONS),
+	{ "Reset controls", NULL, 0, 0, { NULL }, { NULL }, "Look, crouch, buttons, touch as shipped (gyro kept)", 0,
+		TAB_CONTROLS, KIND_ACTION, ACTION_RESET_CONTROLS },
 	/* (gyro aiming: vita_controls.h; its details on Gyro settings) */
 	{ "Gyro aiming", "HALO_GYRO", 0, VITA_GYRO_MODES, { "off", "on", "zoomed", "hold" },
 		{ "Off", "On", "While zoomed", "While holding" }, "Turn the Vita to aim, with the right stick", 0, TAB_CONTROLS },
+	PAGE_ROW("Gyro settings", "Gyro button, sensitivity, direction", TAB_CONTROLS, PAGE_GYRO),
 	/* (the rear zones' guard against the hands holding the Vita:
 	vita_controls.c - the pad's border never counts, and a hold time) */
 	{ "Rear touch guard", "HALO_TOUCH_REAR_GUARD", 0, VITA_REAR_GUARD_COUNT, { VITA_REAR_GUARD_VALUES },
 		{ VITA_REAR_GUARD_NAMES }, "Rear pad: its edges (the grip) ignored, a hold time",
 		VITA_REAR_GUARD_DEFAULT, TAB_CONTROLS },
-	PAGE_ROW("Button layout", "Which Vita button each Xbox button is on, in play", TAB_CONTROLS, PAGE_BUTTONS),
 	PAGE_ROW("Touch zones", "Front and rear touch zones as Xbox buttons", TAB_CONTROLS, PAGE_TOUCH),
-	PAGE_ROW("Gyro settings", "Gyro button, sensitivity, direction", TAB_CONTROLS, PAGE_GYRO),
-	PAGE_ROW("Advanced", "Stick deadzone, Reset controls, dev settings, Update channel", TAB_CONTROLS,
-		PAGE_CONTROLS_ADVANCED),
-	/* (the game's button icons: the Xbox's, or the Vita button each is on,
-	in the menus and in play: vita_controls.h; not part of the layout,
-	which Reset controls and the page's summary leave out) */
-	{ "Button icons", "HALO_BUTTON_ICONS", 0, 2, { VITA_BUTTON_ICONS_VALUES }, { VITA_BUTTON_ICONS_NAMES },
-		"Halo's prompts: Xbox icons, or the Vita's", 0, PAGE_BUTTONS },
 	/* (the Vita button of each Xbox button, in play: vita_controls.c) */
 	{ "A", "HALO_XBOX_A", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
 		"A: jump (in the menus Cross stays A)", 0, PAGE_BUTTONS },
@@ -537,19 +567,6 @@ static struct setting settings[] = {
 	turns too: halo_linux_look_assist, source/game/player_control.c) */
 	{ "Gyro aim assist", "HALO_GYRO_ASSIST", 0, 2, { "0", "1" }, { "Off", "On" },
 		"On: slows and sticks on targets like the sticks", 1, PAGE_GYRO },
-	{ "Stick deadzone", "XV_DEADZONE", 0, 4, { "0", "5", "10", "15" }, { "Off", "5%", "10%", "15%" },
-		"Raise if the sticks drift", 0, PAGE_CONTROLS_ADVANCED },
-	{ "Reset controls", NULL, 0, 0, { NULL }, { NULL }, "Look, crouch, buttons, touch as shipped (gyro kept)", 0,
-		PAGE_CONTROLS_ADVANCED, KIND_ACTION, ACTION_RESET_CONTROLS },
-	{ "Show dev settings", "HALO_DEV_SETTINGS", 0, 2, { "0", "1" }, { "Off", "On" },
-		"The Dev tab: switches for testers, Save report", 0, PAGE_CONTROLS_ADVANCED },
-	/* (the channel Check for updates, on the tab, looks at: Experimental at
-	pre-releases and releases, Stable at releases only; a pre-release build
-	is on Experimental, its Stable greyed out (choice_disabled) and a saved
-	Stable ignored (vita_settings_load); a release build starts on Stable.
-	Rarely changed, so here rather than beside Check for updates) */
-	{ "Update channel", "HALO_UPDATE_CHANNEL", 0, 2, { "experimental", "stable" }, { "Experimental", "Stable" },
-		"Experimental: betas too. Stable: releases only", 1, PAGE_CONTROLS_ADVANCED },
 
 	/* (Multiplayer: the connection, the ad hoc room (Ad hoc), a code typed
 	in (Online, for a Vita without the in-game PC menus: setting_shown), the
@@ -2046,6 +2063,8 @@ enum
 	LINE_MAP,
 	/* (a line that is not chosen: a warning, a note) */
 	LINE_INFO,
+	/* (a heading over rows: headings; not chosen either) */
+	LINE_HEADING,
 };
 
 struct line
@@ -2055,7 +2074,13 @@ struct line
 	char text[128];
 };
 
-#define MAXIMUM_LINES (SETTING_COUNT + MAXIMUM_MAPS + 4)
+#define MAXIMUM_LINES (SETTING_COUNT + MAXIMUM_MAPS + 4 + (int)(sizeof(headings) / sizeof(headings[0])))
+
+/* a line that is not chosen (moving up and down passes it) */
+static int line_passive(const struct line *line)
+{
+	return line->type == LINE_INFO || line->type == LINE_HEADING;
+}
 
 /* the tabs shown: Dev once its switch is on */
 static int tab_shown(int index)
@@ -2085,7 +2110,7 @@ static int update_ready_lines(struct line *lines, int *count)
 	return 1;
 }
 
-/* the info lines under Check for updates (General): the build's version
+/* the info lines under Check for updates (Game): the build's version
 (for a report too: halo.log's first line has it) and the update check's
 answer - on one line while both fit ("Version 1.1.0-beta.3 - Up to date"),
 else the answer on a line of its own; a newer version in amber, on two lines
@@ -2158,9 +2183,10 @@ static int update_lines(struct line *lines)
 	return count;
 }
 
-/* the lines of the page shown: its rows (General's first, Check for updates,
-with the version and the answer under it), then the gyroscope's line (Gyro
-settings) or the maps (Modded maps) */
+/* the lines of the page shown: its rows, each heading (headings) above the
+row it names (Game's Check for updates with the version and the answer
+under it), then the gyroscope's line (Gyro settings) or the maps (Modded
+maps) */
 static int page_lines(struct line *lines)
 {
 	int count = 0, index;
@@ -2168,10 +2194,18 @@ static int page_lines(struct line *lines)
 	for (index = 0; index < SETTING_COUNT; index++)
 		if (settings[index].page == page && setting_shown(&settings[index]))
 		{
+			size_t heading;
+
+			for (heading = 0; heading < sizeof(headings) / sizeof(headings[0]); heading++)
+				if (headings[heading].page == page && !strcmp(headings[heading].row, settings[index].label))
+				{
+					lines[count].type = LINE_HEADING;
+					snprintf(lines[count++].text, sizeof(lines[0].text), "%s", T(headings[heading].name));
+				}
 			lines[count].type = LINE_SETTING;
 			lines[count++].index = index;
-			/* (General: the version and the update check's answer right
-			under Check for updates, its first row) */
+			/* (Game: the version and the update check's answer right
+			under Check for updates) */
 			if (settings[index].action == ACTION_UPDATE_CHECK)
 				count += update_lines(lines + count);
 		}
@@ -2611,10 +2645,6 @@ static void page_summary(char *text, int size, const struct setting *setting)
 		else
 			snprintf(text, (size_t)size, "%s", T("Off"));
 		break;
-	case PAGE_GRAPHICS_SCREEN:
-		snprintf(text, (size_t)size, "%s, %s", T(setting_named("HALO_DISPLAY_WIDTH")->names[choice_of("HALO_DISPLAY_WIDTH")]),
-			T(setting_named("HALO_UPSCALE_FILTER")->names[choice_of("HALO_UPSCALE_FILTER")]));
-		break;
 	case PAGE_MAPS:
 		if (map_count == 1)
 			snprintf(text, (size_t)size, "%s", T("1 map"));
@@ -2624,67 +2654,91 @@ static void page_summary(char *text, int size, const struct setting *setting)
 	}
 }
 
-/* the page shown, as vita_gxm.c menu_build draws it: the tab bar ('\t'),
+/* the classic panel's lines fit its height (vita_gxm.c menu_build, at
+960x544, which does not fit its rows to its height as the Halo 3 menus'
+panel, h3_panel, does): the lines from 76 pixels down, 28 a row, 22 a
+heading ('\x08'), 36 a page's title, 14 a gap; the chosen row's bar 22
+pixels under its line's top, above the rule at 468 over the help and the
+buttons */
+static int classic_panel_fits(const char *text)
+{
+	const char *at = strchr(text, '\n');
+	int y = 76, last = 0;
+
+	while (at)
+	{
+		const char *line = at + 1;
+		int bytes = (int)strcspn(line, "\n");
+
+		if (line[0] == '\x01' || line[0] == '\x05' || line[0] == '\x06')
+			;
+		else if (line[0] == '\x03')
+			y += 36;
+		else if (line[0] == '\x08')
+			y += 22;
+		else if (!bytes)
+			y += 14;
+		else
+		{
+			last = y;
+			y += 28;
+		}
+		at = line[bytes] ? line + bytes : NULL;
+	}
+	return last + 22 <= 468;
+}
+
+/* the Halo CE menus chosen (Menu style): the classic panel draws the
+settings (vita_gxm.c, halo_menu_style_halo3) */
+static int classic_panel(void)
+{
+	const struct setting *style = setting_named("HALO_MENU_STYLE");
+
+	return style && !strcmp(style->values[style->choice], "classic");
+}
+
+/* the page's text, as vita_gxm.c menu_build draws it: the tab bar ('\t'),
 a page's title ('\x03') under it, a row per line (its label, '\x02', its
 value: the values make a column), the lines that are not rows ('\x04': the
-game's state, the gyroscope's), an empty line for a gap, then the chosen
-row's help ('\x05') and the panel's buttons ('\x06') at the bottom */
-static void show_list(void)
+game's state, the gyroscope's), the headings over rows ('\x08') but the
+first `skip`, an empty line for a gap, then the chosen
+row's help ('\x05') and the panel's buttons ('\x06') at the bottom. The
+chosen line's number on the panel, and in *headings the headings there are */
+static int list_text(char *text, int size, const struct line *lines, int count, int selected, int skip, int *headings)
 {
-	char text[3072];
-	struct line lines[MAXIMUM_LINES];
-	int count = page_lines(lines), length, index, number = 0, highlighted = 0;
-	int *selected = &page_selected[page];
+	int length, index, number = 0, highlighted = 0;
 	char status[128], help[192];
 
-	if (*selected >= count)
-		*selected = count - 1;
-	if (*selected < 0)
-		*selected = 0;
-	/* (a line that is not a row is not chosen) */
-	if (count && lines[*selected].type == LINE_INFO)
-		for (index = 0; index < count; index++)
-			if (lines[index].type != LINE_INFO)
-			{
-				*selected = index;
-				break;
-			}
-	length = tab_bar(text, sizeof(text));
-	if (page >= TAB_COUNT && length < (int)sizeof(text))
+	*headings = 0;
+	length = tab_bar(text, size);
+	if (page >= TAB_COUNT && length < size)
 	{
-		length += snprintf(text + length, sizeof(text) - length, "\n\x03%s > %s", T(pages[tab].name), T(pages[page].name));
+		length += snprintf(text + length, (size_t)(size - length), "\n\x03%s > %s", T(pages[tab].name), T(pages[page].name));
 		number++;
 	}
-	/* (the map lines scroll: MAP_LINES at once, the chosen one among them) */
-	if (page == PAGE_MAPS && count && lines[*selected].type == LINE_MAP)
-	{
-		int map = lines[*selected].index;
-
-		if (map < map_scroll)
-			map_scroll = map;
-		if (map >= map_scroll + MAP_LINES)
-			map_scroll = map - MAP_LINES + 1;
-	}
-	for (index = 0; index < count && length < (int)sizeof(text); index++)
+	for (index = 0; index < count && length < size; index++)
 	{
 		const struct line *line = &lines[index];
 
 		if (line->type == LINE_MAP && (line->index < map_scroll || line->index >= map_scroll + MAP_LINES))
 			continue;
-		/* (Modded maps: a gap between its switch and the maps; General:
-		between the update check's lines and the controls' rows) */
-		if (index && ((page == PAGE_MAPS && line->type != LINE_SETTING && lines[index - 1].type == LINE_SETTING) ||
-			(page == TAB_CONTROLS && line->type == LINE_SETTING && lines[index - 1].type == LINE_INFO)))
+		/* (the classic panel short of room: the first headings left out) */
+		if (line->type == LINE_HEADING && (*headings)++ < skip)
+			continue;
+		/* (Modded maps: a gap between its switch and the maps) */
+		if (index && page == PAGE_MAPS && line->type != LINE_SETTING && lines[index - 1].type == LINE_SETTING)
 		{
-			length += snprintf(text + length, sizeof(text) - length, "\n");
+			length += snprintf(text + length, (size_t)(size - length), "\n");
 			number++;
 		}
 		number++;
-		if (index == *selected)
+		if (index == selected)
 			highlighted = number;
 		if (line->type == LINE_INFO)
-			length += snprintf(text + length, sizeof(text) - length, "\n%s%s", line->text[0] == '!' ? "" : "\x04",
+			length += snprintf(text + length, (size_t)(size - length), "\n%s%s", line->text[0] == '!' ? "" : "\x04",
 				line->text);
+		else if (line->type == LINE_HEADING)
+			length += snprintf(text + length, (size_t)(size - length), "\n\x08%s", line->text);
 		else if (line->type == LINE_MAP)
 		{
 			const struct map_entry *map = &maps[line->index];
@@ -2698,7 +2752,7 @@ static void show_list(void)
 			characters, not its UTF-8 bytes) */
 			int pad = 3 - lang_utf8_length(state);
 
-			length += snprintf(text + length, sizeof(text) - length, "\n%s\x02  %s%*s %8s  %s", name, state,
+			length += snprintf(text + length, (size_t)(size - length), "\n%s\x02  %s%*s %8s  %s", name, state,
 				pad > 0 ? pad : 0, "", size_name, map_format_name(map->format));
 		}
 		else
@@ -2710,7 +2764,7 @@ static void show_list(void)
 				const struct play_text *value = play_text_named(setting->variable);
 
 				/* (the password hidden) */
-				length += snprintf(text + length, sizeof(text) - length, "\n%s\x02  %s", setting_label(setting),
+				length += snprintf(text + length, (size_t)(size - length), "\n%s\x02  %s", setting_label(setting),
 					!value->value[0] ? T("none") : !strcmp(setting->variable, "HALO_NET_LOBBY_PASSWORD") ? T("set") : value->value);
 			}
 			else if (setting->kind == KIND_ACTION)
@@ -2720,7 +2774,7 @@ static void show_list(void)
 				page_summary(summary, sizeof(summary), setting);
 				/* (two spaces first: the summary, or the >, where the other
 				rows' values start, after their "< ") */
-				length += snprintf(text + length, sizeof(text) - length, "\n%s\x02  %s%s>", setting_label(setting), summary,
+				length += snprintf(text + length, (size_t)(size - length), "\n%s\x02  %s%s>", setting_label(setting), summary,
 					summary[0] ? "  " : "");
 			}
 			else
@@ -2735,52 +2789,93 @@ static void show_list(void)
 						after |= choice > setting->choice;
 					}
 				/* (a row that applies after a restart: marked *) */
-				length += snprintf(text + length, sizeof(text) - length, "\n%s%s\x02%c %s %c", setting_label(setting),
+				length += snprintf(text + length, (size_t)(size - length), "\n%s%s\x02%c %s %c", setting_label(setting),
 					setting->restart ? "*" : "", before ? '<' : ' ', setting_value_name(setting), after ? '>' : ' ');
 				/* (the choices this build does not offer, greyed out after a
 				'\x07', after the arrow's place: vita_gxm.c menu_row) */
-				for (choice = 0; choice <= last && length < (int)sizeof(text); choice++)
+				for (choice = 0; choice <= last && length < size; choice++)
 					if (choice_disabled(setting, choice))
-						length += snprintf(text + length, sizeof(text) - length, "\x07%s", T(setting->names[choice]));
+						length += snprintf(text + length, (size_t)(size - length), "\x07%s", T(setting->names[choice]));
 			}
 		}
 	}
-	if (page == PAGE_MAPS && map_count > MAP_LINES && length + 2 < (int)sizeof(text))
+	if (page == PAGE_MAPS && map_count > MAP_LINES && length + 2 < size)
 	{
-		length += snprintf(text + length, sizeof(text) - length, "\n\x04");
-		length += snprintf(text + length, sizeof(text) - length, T("(maps %d-%d of %d)"), map_scroll + 1,
+		length += snprintf(text + length, (size_t)(size - length), "\n\x04");
+		length += snprintf(text + length, (size_t)(size - length), T("(maps %d-%d of %d)"), map_scroll + 1,
 			map_scroll + MAP_LINES < map_count ? map_scroll + MAP_LINES : map_count, map_count);
 	}
 	/* (Multiplayer, after a gap: this Vita, the network game, internet or
 	ad hoc play; the Play page: the last two) */
-	if ((page == TAB_MULTIPLAYER || page == PAGE_PLAY) && length < (int)sizeof(text))
+	if ((page == TAB_MULTIPLAYER || page == PAGE_PLAY) && length < size)
 	{
-		length += snprintf(text + length, sizeof(text) - length, "\n");
+		length += snprintf(text + length, (size_t)(size - length), "\n");
 		if (page == TAB_MULTIPLAYER)
 		{
 			vita_line(status, sizeof(status));
-			length += snprintf(text + length, sizeof(text) - length, "\n\x04%s", status);
+			length += snprintf(text + length, (size_t)(size - length), "\n\x04%s", status);
 			/* (the game's Multiplayer menu without OpenCE's screens) */
-			if (halo_pc_menus_state < 0 && length < (int)sizeof(text))
-				length += snprintf(text + length, sizeof(text) - length, "\n\x04%s",
+			if (halo_pc_menus_state < 0 && length < size)
+				length += snprintf(text + length, (size_t)(size - length), "\n\x04%s",
 					T("Online menus need bitmaps.map, loc.map: README"));
 		}
 		game_line(status, sizeof(status));
-		if (length < (int)sizeof(text))
-			length += snprintf(text + length, sizeof(text) - length, "\n\x04%s", status);
+		if (length < size)
+			length += snprintf(text + length, (size_t)(size - length), "\n\x04%s", status);
 		status_line(status, sizeof(status));
-		if (status[0] && length < (int)sizeof(text))
-			length += snprintf(text + length, sizeof(text) - length, "\n\x04%s", status);
+		if (status[0] && length < size)
+			length += snprintf(text + length, (size_t)(size - length), "\n\x04%s", status);
 	}
-	help_line(help, sizeof(help), count ? &lines[*selected] : NULL);
-	if (length < (int)sizeof(text))
-		length += snprintf(text + length, sizeof(text) - length, "\n\x05%s", help);
-	footer_line(help, sizeof(help), count ? &lines[*selected] : NULL);
-	if (length < (int)sizeof(text))
-		length += snprintf(text + length, sizeof(text) - length, "\n\x06%s", help);
+	help_line(help, sizeof(help), count ? &lines[selected] : NULL);
+	if (length < size)
+		length += snprintf(text + length, (size_t)(size - length), "\n\x05%s", help);
+	footer_line(help, sizeof(help), count ? &lines[selected] : NULL);
+	if (length < size)
+		length += snprintf(text + length, (size_t)(size - length), "\n\x06%s", help);
 	/* the Touch zones page: the zones drawn beside the rows */
-	if (count && lines[*selected].type == LINE_SETTING && length < (int)sizeof(text))
-		touch_diagram(text + length, (int)sizeof(text) - length, &settings[lines[*selected].index]);
+	if (count && lines[selected].type == LINE_SETTING && length < size)
+		touch_diagram(text + length, size - length, &settings[lines[selected].index]);
+	return highlighted;
+}
+
+/* the page shown (list_text). The classic panel, the Halo CE menus', does
+not fit its rows to its height: while the lines would run past it, the
+headings give way, the first first (the tab bar over its first rows) */
+static void show_list(void)
+{
+	char text[3072];
+	struct line lines[MAXIMUM_LINES];
+	int count = page_lines(lines), index, highlighted, headings, skip;
+	int *selected = &page_selected[page];
+
+	if (*selected >= count)
+		*selected = count - 1;
+	if (*selected < 0)
+		*selected = 0;
+	/* (a line that is not a row is not chosen) */
+	if (count && line_passive(&lines[*selected]))
+		for (index = 0; index < count; index++)
+			if (!line_passive(&lines[index]))
+			{
+				*selected = index;
+				break;
+			}
+	/* (the map lines scroll: MAP_LINES at once, the chosen one among them) */
+	if (page == PAGE_MAPS && count && lines[*selected].type == LINE_MAP)
+	{
+		int map = lines[*selected].index;
+
+		if (map < map_scroll)
+			map_scroll = map;
+		if (map >= map_scroll + MAP_LINES)
+			map_scroll = map - MAP_LINES + 1;
+	}
+	for (skip = 0; ; skip++)
+	{
+		highlighted = list_text(text, (int)sizeof(text), lines, count, *selected, skip, &headings);
+		if (skip >= headings || !classic_panel() || classic_panel_fits(text))
+			break;
+	}
 	vgxm_menu_set(text, highlighted);
 }
 
@@ -3456,7 +3551,7 @@ static int question_progress_input(unsigned long pressed)
     return 0;
 }
 
-/* the General tab's control rows as shipped, its pages' too (but the gyro's
+/* the Controls tab's rows as shipped, its pages' too (but the gyro's
 rows, Show dev settings and the Update channel, which are no controls): the
 touch zones Off, the buttons in Xita's layout, look and crouch as they were */
 static void reset_controls(void)
@@ -3933,6 +4028,11 @@ static void tab_step(int step)
 		maps_scan();
 }
 
+int vita_settings_panel_open(void)
+{
+	return panel_open;
+}
+
 int vita_settings_input(const struct vita_host_pad *pad)
 {
 	unsigned long buttons = pad->buttons;
@@ -4031,8 +4131,9 @@ int vita_settings_input(const struct vita_host_pad *pad)
 			else
 			{
 				panel_open = 1;
+				/* (Dev hidden since: the first tab) */
 				if (!tab_shown(tab))
-					tab = page = TAB_GRAPHICS;
+					tab = page = TAB_GAME;
 				if (tab == TAB_MULTIPLAYER)
 					maps_scan();
 				show();
@@ -4131,7 +4232,7 @@ int vita_settings_input(const struct vita_host_pad *pad)
 			for (tries = 0; tries < count; tries++)
 			{
 				*selected = (*selected + step + count) % count;
-				if (lines[*selected].type != LINE_INFO)
+				if (!line_passive(&lines[*selected]))
 					break;
 			}
 			last_move = now;

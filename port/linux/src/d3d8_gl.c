@@ -1176,10 +1176,69 @@ static void ui_point_from_window(float window_x, float window_y, short *x, short
 	*y = (short)floorf(screen_y);
 }
 
+#ifndef HALO_RELEASE
+/* (automated tests only, never in release builds) HALO_TEST_TAPS="ms:x,y
+...": a tap (the pointer there and a left click, as a touch screen's) at
+x,y of the menus' 640x480 that many milliseconds after the menus first
+asked, each said in the log ("test tap: x,y"); the Vita's touch screen
+reaches the menus the same way (vita_controls.c vita_touch_pointer) */
+static int test_taps(int menus_active, struct halo_ui_pointer *pointer)
+{
+	static int parsed, count, next;
+	static long times[32];
+	static short xs[32], ys[32];
+	static struct timespec start;
+	struct timespec now;
+	long elapsed;
+
+	if (!parsed)
+	{
+		char const *text = getenv("HALO_TEST_TAPS");
+
+		parsed = 1;
+		while (text && *text && count < 32)
+		{
+			long ms;
+			int x, y, used = 0;
+
+			if (sscanf(text, " %ld:%d,%d%n", &ms, &x, &y, &used) != 3 || !used)
+				break;
+			times[count] = ms;
+			xs[count] = (short)x;
+			ys[count] = (short)y;
+			count++;
+			text += used;
+		}
+		clock_gettime(CLOCK_MONOTONIC, &start);
+	}
+	if (!count || !menus_active)
+		return 0;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	elapsed = (long)(now.tv_sec - start.tv_sec) * 1000 + (now.tv_nsec - start.tv_nsec) / 1000000;
+	memset(pointer, 0, sizeof(*pointer));
+	pointer->x = pointer->click_x = next ? xs[next - 1] : -1;
+	pointer->y = pointer->click_y = next ? ys[next - 1] : -1;
+	if (next < count && elapsed >= times[next])
+	{
+		pointer->x = pointer->click_x = xs[next];
+		pointer->y = pointer->click_y = ys[next];
+		pointer->moved = 1;
+		pointer->left_clicks = 1;
+		platform_log("test tap: %d,%d", (int)xs[next], (int)ys[next]);
+		next++;
+	}
+	return 1;
+}
+#endif
+
 int halo_ui_pointer_update(int menus_active, struct halo_ui_pointer *pointer)
 {
 	struct platform_ui_pointer state;
 
+#ifndef HALO_RELEASE
+	if (test_taps(menus_active, pointer))
+		return 1;
+#endif
 	platform_ui_pointer_set_active(menus_active != 0);
 	if (!menus_active || !device.gl_ready || !platform_ui_pointer_read(&state))
 		return 0;

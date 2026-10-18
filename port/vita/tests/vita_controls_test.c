@@ -883,6 +883,54 @@ static void test_score_hint(void)
 		"score hint: no buffer");
 }
 
+/* the menus' pointer from the front screen (vita_touch_pointer): the
+screen's 960x544 made the menus' 640x480 - the game's width drawn as high
+as the screen, centred (4:3 with bars at the sides), the menus' 640 in the
+middle of it -; a finger highlights where it is, lifted where it came down
+a tap (a click) */
+static void test_touch_pointer(void)
+{
+	struct vita_touch_pointer pointer;
+	struct vita_touch_contact finger;
+	struct vita_touch_contact rear = contact(VITA_TOUCH_REAR, 1, 480, 272);
+	unsigned long long t = 1000000;
+	short x, y;
+	int tap, moved;
+
+	memset(&pointer, 0, sizeof(pointer));
+	/* (no finger: nothing) */
+	check(!vita_touch_pointer(&pointer, NULL, 0, t, 640, &x, &y, &tap, &moved) && !tap && !moved,
+		"no finger: no pointer");
+	/* (4:3, the game 640 wide: drawn 725 wide from 117) */
+	finger = contact(VITA_TOUCH_FRONT, 7, 160, 513);
+	check(vita_touch_pointer(&pointer, &finger, 1, t, 640, &x, &y, &tap, &moved) && x == 37 && y == 452 && moved &&
+		!tap, "4:3, a finger down: the pointer there (160,513 on the screen is 37,452 of the menus), no tap yet");
+	check(vita_touch_pointer(&pointer, NULL, 0, t + 150000, 640, &x, &y, &tap, &moved) && tap && x == 37 && y == 452,
+		"lifted where it came down, soon: a tap there");
+	finger = contact(VITA_TOUCH_FRONT, 10, 480, 272);
+	vita_touch_pointer(&pointer, &finger, 1, t + 500000, 640, &x, &y, &tap, &moved);
+	check(x == 320 && y == 240, "4:3: the screen's middle is the menus' middle");
+	vita_touch_pointer(&pointer, NULL, 0, t + 550000, 640, &x, &y, &tap, &moved);
+	/* (16:9, the game 848 wide: the menus' 640 centred) */
+	finger = contact(VITA_TOUCH_FRONT, 8, 480, 272);
+	vita_touch_pointer(&pointer, &finger, 1, t + 1000000, 848, &x, &y, &tap, &moved);
+	check(x == 320 && y == 240, "16:9: the screen's middle is the menus' middle (320,240)");
+	finger = contact(VITA_TOUCH_FRONT, 8, 10, 272);
+	vita_touch_pointer(&pointer, &finger, 1, t + 1050000, 848, &x, &y, &tap, &moved);
+	check(x == -96 && moved && !tap, "16:9: the screen's left edge is left of the menus' 640 (the margin)");
+	/* (moved away before lifting: a drag, no tap) */
+	check(vita_touch_pointer(&pointer, NULL, 0, t + 1100000, 848, &x, &y, &tap, &moved) && !tap,
+		"lifted far from where it came down: no tap");
+	/* (held long: no tap) */
+	finger = contact(VITA_TOUCH_FRONT, 9, 300, 300);
+	vita_touch_pointer(&pointer, &finger, 1, t + 2000000, 640, &x, &y, &tap, &moved);
+	check(vita_touch_pointer(&pointer, NULL, 0, t + 3500000, 640, &x, &y, &tap, &moved) && !tap,
+		"held 1.5 seconds before lifting: no tap");
+	/* (the rear pad never points) */
+	check(!vita_touch_pointer(&pointer, &rear, 1, t + 4000000, 640, &x, &y, &tap, &moved) && !tap,
+		"the rear pad: no pointer");
+}
+
 int main(void)
 {
 	test_names();
@@ -894,6 +942,7 @@ int main(void)
 	test_gyro_aim();
 	test_button_glyphs();
 	test_score_hint();
+	test_touch_pointer();
 	printf("-- %d of %d checks failed\n", failures, checks);
 	return failures ? 1 : 0;
 }

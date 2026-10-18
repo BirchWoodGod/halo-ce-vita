@@ -125,6 +125,34 @@ given) is how many fingers came down this frame */
 unsigned long vita_touch_update(struct vita_touch_tracker *tracker, const struct vita_touch_contact *contacts,
 	int count, unsigned long long now_us, int *started);
 
+/* ---------- the menus' pointer (the front screen, while the menus are up)
+
+The game's menus take a pointer as the desktop's mouse (halo_ui_pointer.h,
+ui_widget.c): the item under it takes the focus, a click presses A on it, a
+screen's button key presses that button. On the Vita the front screen is it
+(d3d8_gxm.c halo_ui_pointer_update): a finger highlights what it is on, and
+lifted where it came down (within VITA_TAP_SLOP pixels, before
+VITA_TAP_MICROSECONDS) is a tap, the click. */
+#define VITA_TAP_SLOP 24
+#define VITA_TAP_MICROSECONDS 600000ULL
+
+struct vita_touch_pointer
+{
+	int down, id;
+	int start_x, start_y;
+	short x, y;
+	unsigned long long since;
+};
+
+/* this frame's front fingers (the first one counts; the rear pad's never)
+in the screen's pixels: nonzero while there is a pointer (a finger down,
+or the frame it lifted), *x and *y where it is in the menus' 640x480 (the
+game screen_width wide, drawn as high as the screen and centred, the menus'
+640 in its middle: negative or past 640 in its margins), *moved when it
+moved or came down, *tap on the frame a tap ended */
+int vita_touch_pointer(struct vita_touch_pointer *pointer, const struct vita_touch_contact *contacts, int count,
+	unsigned long long now_us, int screen_width, short *x, short *y, int *tap, int *moved);
+
 /* ---------- the Xbox controller's buttons */
 
 /* what a touch zone presses, and what each remappable row is: the Xbox

@@ -122,6 +122,24 @@ struct halo_menu_widget
 	long line;
 };
 
+/* a font of the menus' own (<font name=... file=...>): a file of the menus
+folder that tools/halo3_menu_art.py writes (its characters' sizes and
+places, and their 8-bit pixels), made a font tag of the game's
+(menu_tags.c) that a widget's font= names */
+struct halo_menu_font
+{
+	char const *name, *path;
+	char const *file;
+	long line;
+};
+/* a screen of the Halo 3 set (menus/halo3): its root widget, and the Xbox
+screen it stands for while Menu style is Halo 3 (<menus root=... replaces=...>) */
+struct halo_menu_screen
+{
+	char const *root, *replaces;
+	char const *file;
+	long line;
+};
 struct halo_menus
 {
 	struct halo_menu_bitmap *bitmaps;
@@ -145,16 +163,29 @@ struct halo_menus
 	struct halo_menu_replace *replaces;
 	long replace_count;
 	/* the screen that stands for the Xbox's Multiplayer screen:
-	<menus root="..."> (the last given) */
+	<menus root="..."> (the last given without replaces=) */
 	char const *root;
+	/* the Halo 3 set's screens (<menus root= replaces=>) */
+	struct halo_menu_screen *screens;
+	long screen_count;
+	/* the menus' own fonts (<font>) */
+	struct halo_menu_font *fonts;
+	long font_count;
 };
 
 /* the menus, read from the files (once; the same each call after); NULL if
 there are none, or a file has an error (logged) */
 struct halo_menus const *halo_menus_load(void);
+/* the Menu style (HALO_MENU_STYLE, menus.style): 1 for the Halo 3-style
+screens (menus/halo3), 0 for Halo CE's own; read again each call, so a
+change in the settings panel takes at the next screen */
+int halo_menu_style_halo3(void);
 /* the same begun on a thread of its own (once), which halo_menus_load waits
 for */
 void halo_menus_preload(void);
+/* the menus a level's map gets (ingame.txt: the Halo 3 pause screen), read
+the first time one loads; NULL when there are none or they have a problem */
+struct halo_menus const *halo_menus_load_ingame(void);
 /* a file of the menus folder (a frame's PNG), read whole, NULL if it cannot
 be read; halo_menus_file_free lets it go (the platform layer's heap, not
 the game's) */

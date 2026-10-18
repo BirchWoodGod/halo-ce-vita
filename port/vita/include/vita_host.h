@@ -137,6 +137,13 @@ struct vita_host_pad
 };
 
 void vita_host_pad_read(struct vita_host_pad *pad);
+/* the front screen's fingers of the last vita_host_pad_read (the screen's
+pixels), for the menus' pointer; how many */
+struct vita_touch_contact;
+int vita_host_front_touches(struct vita_touch_contact *out, int maximum);
+/* (vita_settings.c) whether the settings panel is open: the menus' pointer
+then rests */
+int vita_settings_panel_open(void);
 /* the gyroscope's line on the settings panel's Gyro settings page: the rates now
 (degrees a second), whether the bias was learnt */
 void vita_gyro_status(char *text, int size);
