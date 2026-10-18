@@ -189,6 +189,48 @@ def glyph(kind):
     return image.resize((16, 16), Image.Resampling.LANCZOS)
 
 
+def shoulder(letter):
+    # the Vita's L or R: a dark rounded tab with its letter (as the round
+    # buttons' glyphs, its colour the START glyph's)
+    scale = 4
+    size = 64 * scale
+    image = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    box = [6 * scale, 14 * scale, 58 * scale, 50 * scale]
+    draw.rounded_rectangle(box, radius=14 * scale, fill=(44, 48, 55, 255),
+                           outline=(255, 255, 255, alpha(.3)), width=2 * scale)
+    font = ImageFont.truetype(os.path.join(FONTS, 'SairaSemiCondensed-Medium.ttf'), 34 * scale)
+    width = draw.textlength(letter, font=font)
+    draw.text(((size - width) / 2, 6 * scale), letter, font=font, fill=GLYPH_COLOURS['start'] + (255,))
+    return image.resize((16, 16), Image.Resampling.LANCZOS)
+
+
+def forge_emblem():
+    # Forge's emblem over the lobby's map picture (where Halo 3 puts its
+    # hammer): a monitor's eye of our own - a pale blue ring round a glowing
+    # core, on a dark disc, 44x48 as the difficulty emblems
+    scale = 4
+    width, height = 44 * scale, 48 * scale
+    image = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+    glow = Image.new('RGBA', image.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(glow)
+    cx, cy = width / 2, height / 2
+    draw.ellipse([cx - 19 * scale, cy - 19 * scale, cx + 19 * scale, cy + 19 * scale], fill=(10, 20, 38, alpha(.82)))
+    draw.ellipse([cx - 15 * scale, cy - 15 * scale, cx + 15 * scale, cy + 15 * scale],
+                 outline=(150, 205, 255, 255), width=3 * scale)
+    draw.ellipse([cx - 7 * scale, cy - 7 * scale, cx + 7 * scale, cy + 7 * scale], fill=(120, 200, 255, 255))
+    blurred = glow.filter(ImageFilter.GaussianBlur(2.5 * scale))
+    image = Image.alpha_composite(image, blurred)
+    image = Image.alpha_composite(image, glow)
+    core = ImageDraw.Draw(image)
+    core.ellipse([cx - 3 * scale, cy - 3 * scale, cx + 3 * scale, cy + 3 * scale], fill=(235, 248, 255, 255))
+    # (in a 64x64 picture, at its top left: the menus' pictures are powers
+    # of two, menu_tags.c bitmap_build)
+    square = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
+    square.paste(image.resize((44, 48), Image.Resampling.LANCZOS), (0, 0))
+    return square
+
+
 def title_halo():
     # HALO in a soft blue glow, COMBAT EVOLVED under it (Halo 3's title look)
     # (drawn at four times and scaled down: the menus draw a picture 1:1,
@@ -321,6 +363,9 @@ ART = {
     'glyph_triangle.png': lambda: glyph('triangle'),
     'glyph_square.png': lambda: glyph('square'),
     'glyph_start.png': lambda: glyph('start'),
+    'glyph_l.png': lambda: shoulder('L'),
+    'glyph_r.png': lambda: shoulder('R'),
+    'forge_emblem.png': forge_emblem,
     'title_halo.png': title_halo,
 }
 

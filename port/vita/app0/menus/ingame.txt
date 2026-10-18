@@ -1,3 +1,5 @@
 # The menus a level's map gets (port/linux/src/menu_files.c halo_menus_load_ingame, built
-# into each level's tags by port/linux/game/menu_tags.c): the Halo 3 pause screen
+# into each level's tags by port/linux/game/menu_tags.c): the Halo 3 pause screen, and Forge's
+# screens over the game (its object browser and menu: port/linux/game/forge.c)
 halo3/pause.xml
+halo3/forge.xml

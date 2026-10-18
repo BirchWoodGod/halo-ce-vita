@@ -126,6 +126,9 @@ symbols in this file:
 #include "camera_scripting.h"
 #include "dead_camera.h"
 #include "coop_spectate.h" /* port: port/linux/game/coop_spectate.c */
+#ifdef HALO_LINUX
+#include "forge.h" /* port: port/linux/game/forge.c */
+#endif
 #include "editor_flying_camera.h"
 #include "first_person_camera.h"
 #include "flying_camera.h"
@@ -817,6 +820,24 @@ static boolean director_update_controls(
 	csmemset(controls, 0, sizeof(*controls));
 	controls->local_player_index = local_player_index;
 	controls->seconds_elapsed = director_globals.dtime;
+#ifdef HALO_LINUX
+	/* port: Forge's monitor (port/linux/game/forge.c, a spike) flies the
+	flying camera by its own controls; the player's are not read */
+	{
+		struct forge_camera_input forge_input;
+
+		if (forge_camera_input(local_player_index, director_globals.dtime, &forge_input))
+		{
+			controls->facing_delta.yaw = forge_input.facing_delta.yaw;
+			controls->facing_delta.pitch = forge_input.facing_delta.pitch;
+			controls->position_delta = forge_input.translation;
+			controls->active = TRUE;
+			director_inhibit_input(local_player_index);
+			director_inhibit_facing(local_player_index);
+			return FALSE;
+		}
+	}
+#endif
 	player_index = player_get(
 		local_player_get_player_index(local_player_index))->local_player_index;
 	if (player_index != NONE && input_has_gamepad((short)player_index))
@@ -1085,6 +1106,39 @@ void director_update(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* port: Forge's monitor (port/linux/game/forge.c, a spike): the flying
+camera at position looking along forward, as debug_camera_load puts it
+(fly), or the player's own camera again */
+void director_forge_camera(
+	short local_player_index,
+	boolean fly,
+	real_point3d const *position,
+	real_vector3d const *forward)
+{
+	struct director *director = director_get(local_player_index);
+
+	if (fly)
+	{
+		flying_camera_new_from_point_and_vector(
+			(struct flying_camera *)director->camera_data,
+			position,
+			forward);
+		director_set_camera(
+			local_player_index,
+			(director_camera_update_proc)flying_camera_update,
+			FALSE);
+		director->camera_mode_index = _camera_flying;
+	}
+	else
+	{
+		director_choose_game_perspective(local_player_index, TRUE);
+	}
+
+	return;
+}
+
+#endif
 void director_initialize_for_saved_game(
 	void)
 {

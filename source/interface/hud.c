@@ -1291,6 +1291,13 @@ void hud_draw_screen(
 		/* port: the network co-op vote to skip a cinematic */
 		if (cinematic_in_progress())
 			coop_skip_vote_draw(render.local_player_index);
+		/* port: Forge's monitor's HUD (port/linux/game/forge.c) */
+		if (!cinematic_in_progress())
+		{
+			extern void forge_draw(short local_player_index);
+
+			forge_draw(render.local_player_index);
+		}
 
 		if (!game_time_get_paused() &&
 			render.local_player_index == local_player_get_next(NONE))

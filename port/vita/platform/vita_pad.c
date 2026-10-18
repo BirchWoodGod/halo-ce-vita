@@ -36,6 +36,9 @@ is on now, the menus' or play's, with the settings read here.
 /* set while the game's menus are up (halo_ui_pointer_update, d3d8_gxm.c) */
 int vita_menus_active;
 
+/* set while Forge's monitor flies (port/linux/game/forge.c) */
+extern int forge_monitor_flying;
+
 /* bumped by the settings panel (port_config.c) */
 extern volatile unsigned long halo_settings_generation;
 
@@ -206,7 +209,19 @@ void vita_pad_state(XINPUT_GAMEPAD *gamepad)
 	(vita_controls.c): crouch is the left stick's click, which the Vita
 	does not have; HALO_CROUCH_TOGGLE (the panel's Crouch, on by default)
 	makes a press crouch and the next one stand */
-	vita_controls_map(&controls, &controls_state, pad.buttons, pad.touch, vita_menus_active, &output);
+	/* (Forge's monitor, port/linux/game/forge.c: D-pad down flies down
+	while it is held, never latched by the crouch toggle; the touch zones,
+	whose buttons (a weapon switch, a grenade) would be the monitor's
+	delete or copy, are off, as the design has them in Forge) */
+	if (forge_monitor_flying)
+	{
+		struct vita_controls_config flying = controls;
+
+		flying.crouch_toggle = 0;
+		vita_controls_map(&flying, &controls_state, pad.buttons, 0, vita_menus_active, &output);
+	}
+	else
+		vita_controls_map(&controls, &controls_state, pad.buttons, pad.touch, vita_menus_active, &output);
 	gamepad->wButtons |= (WORD)output.digital;
 	for (index = 0; index < 8; index++)
 		gamepad->bAnalogButtons[index] = output.analog[index];

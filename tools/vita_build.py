@@ -158,8 +158,11 @@ def vita_update_test_defines(sln: Any) -> List[str]:
         defines.append(f'-DHALO_UPDATE_PUBLIC_KEY=\\"{key.lower()}\\"')
     version = getattr(sln, "vita_version", None)
     if version:
-        if not re.fullmatch(r"\d{1,3}\.\d{1,3}\.\d{1,3}(-(beta|rc)\.\d{1,3})?", version):
-            raise RuntimeError("--vita-version: x.y.z, x.y.z-beta.n or x.y.z-rc.n")
+        # (a release's x.y.z, its betas' and candidates' -beta.n and -rc.n, or a
+        # test build's own word, 1.1.1-forge: a pre-release the updater orders
+        # as SemVer does, update_check.c, below its x.y.z)
+        if not re.fullmatch(r"\d{1,3}\.\d{1,3}\.\d{1,3}(-((beta|rc)\.\d{1,3}|[a-z]{1,16}))?", version):
+            raise RuntimeError("--vita-version: x.y.z, x.y.z-beta.n, x.y.z-rc.n or x.y.z-<word> (1.1.1-forge)")
         defines.append(f'-DHALO_VITA_VERSION=\\"{version}\\"')
     return defines
 

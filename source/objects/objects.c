@@ -169,6 +169,9 @@ makes the host's objects at the host's datum indices, and deletes them only
 on the host's word */
 long network_objects_new_object_index(void);
 boolean network_objects_creating_host_object(void);
+/* (port: Forge's placement, port/linux/game/forge.c: the object chosen, as
+it is, not the game type's in its place) */
+extern int forge_placing_exact;
 boolean network_objects_may_delete(long object_index);
 /* port/linux/game/network_coop.c's: the co-op host's object census looks at each object made */
 void network_coop_note_object_new(long object_index);
@@ -3718,6 +3721,9 @@ long object_new(
 #ifdef HALO_LINUX
 		/* (the host's object, which the host made as the game type has it) */
 		&& !network_objects_creating_host_object()
+		/* (what Forge's monitor chose: a flamethrower, a Scorpion where the
+		vehicle set has Warthogs) */
+		&& !forge_placing_exact
 #endif
 		)
 	{
