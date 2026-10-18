@@ -53,13 +53,18 @@
 #               listed, A opens the Forge lobby on the map with the variant
 #   fstouch     FILE SHARE by taps (HALO_TEST_TAPS): the main menu's row,
 #               Rename, a row (the Forge lobby), the lobby's Leave, Back
+#   panel       Forge from the settings panel's Forge and File Share page, for
+#               Menu style Halo CE (its request, HALO_SYSTEM_LINK_TEST=forge:):
+#               Blood Gulch with the test's good map variant starts and places
+#               it; with the damaged one, nothing starts and the message says
+#               why (the panel's page itself: run_vita_settings_test.sh)
 #
 # Each must exit by itself, with no assertion or exception. The screenshots
 # (HALO_SCREENSHOT_DIR, each run's shots folder) are kept with
 # HALO_TEST_KEEP=1, or copied to HALO_TEST_SHOTS when it is set.
 #
 #   run_forge_test.sh [CASE...]      (default: v1 budget b30 off files variants
-#                                     edit fileshare fstouch)
+#                                     edit fileshare fstouch panel)
 #   HALO_TEST_VITA        the harness (default build/linux/halo of this tree)
 #   HALO_TEST_DATA_MENUS  a folder with the game's maps folder (the Xbox maps)
 #                         and the Halo PC bitmaps.map and loc.map (never in the
@@ -76,7 +81,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_forge_test.$$}
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-v1 budget b30 off files variants edit fileshare fstouch}
+cases=${*:-v1 budget b30 off files variants edit fileshare fstouch panel}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
 
@@ -262,6 +267,18 @@ fileshare_runs() {
 	find "$store" -type f | sort > "$out/fileshare-files.txt"
 }
 
+panel_runs() {
+	local store="$out/panel-store"
+	rm -rf "$store"
+	samples "$store"
+	run panel 55 "" "" "wait:150:1000 level:150:3000 @00-panel-forge:0:300" HALO_MENU_STYLE=classic HALO_SAVE_ROOT="$store" \
+		HALO_SYSTEM_LINK_TEST=forge:9:good.hmv
+	run panel-damaged 30 "" "" "wait:150:15000" HALO_MENU_STYLE=classic HALO_SAVE_ROOT="$store" \
+		HALO_SYSTEM_LINK_TEST=forge:9:damaged.hmv
+	mkdir -p "$out/panel"
+	echo 0 > "$out/panel/exit"
+}
+
 fstouch_runs() {
 	local store="$out/fstouch-store"
 	rm -rf "$store"
@@ -328,6 +345,8 @@ for c in $cases; do
 			continue
 		fi
 		fstouch_runs & ;;
+	panel)
+		panel_runs & ;;
 	*) echo "unknown case $c"; exit 2 ;;
 	esac
 done
@@ -341,6 +360,20 @@ for c in $cases; do
 		else
 			fail "files: the map variant files' test failed ($out/files/run.log)"
 			tail -20 "$out/files/run.log"
+		fi
+		continue
+	fi
+	if [ "$c" = panel ]; then
+		checked panel
+		checked panel-damaged
+		expect panel "the panel's request started Forge on Blood Gulch (the Halo CE menus)" \
+			"system link: the settings panel's Forge: started"
+		expect panel "with the map variant, placed" "forge: map variant \"Sample Gulch\" applied: 5 placed, 0 skipped"
+		expect panel "the monitor" "forge: the Forge game of levels.test.bloodgulch.bloodgulch starts"
+		expect panel-damaged "a damaged variant: nothing started, said" \
+			"system link: the settings panel's Forge: not started: The map variant is damaged and can't be used."
+		if grep -aq "forge: a Forge game of" "$out/panel-damaged/run.log"; then
+			fail "panel-damaged: a Forge game was asked for"
 		fi
 		continue
 	fi
@@ -507,7 +540,7 @@ done
 
 if [ -n "${HALO_TEST_SHOTS:-}" ]; then
 	mkdir -p "$HALO_TEST_SHOTS"
-	for c in $cases variants-save variants-load variants-missing variants-damaged variants-full; do
+	for c in $cases variants-save variants-load variants-missing variants-damaged variants-full panel-damaged; do
 		for shot in "$out/$c"/shots/*.bmp; do
 			[ -f "$shot" ] && cp "$shot" "$HALO_TEST_SHOTS/$c-$(basename "$shot")"
 		done

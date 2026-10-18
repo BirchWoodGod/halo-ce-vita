@@ -736,6 +736,18 @@ Halo 3 named them.
   chosen, Square renames it (the keyboard; the file name stays), Triangle
   deletes it, asked first. Touch as the other Halo 3 screens (a row, the
   button strip's labels).
+- **The original menus** (the owner: "keep everything in the overlay menu
+  in case people want the og menu"): with Menu style Halo CE the settings
+  panel's Game tab ends with **Forge and File Share**, a page of its own:
+  Map (the multiplayer maps in the maps folder), Map variant (None or one
+  of that map's), Start Forge (asks the game, at its main menu, as the
+  lobby's START FORGE: `SYSTEM_LINK_REQUEST_FORGE`, then closes the
+  panel; in a level or a lobby it says to leave first), and under File
+  Share every map variant (the first 32, six at a time), Square deleting
+  one after a question. With Menu style Halo 3 the row is hidden (the
+  Halo 3 main menu has FORGE and FILE SHARE); on the classic panel the
+  Game tab's first headings give way to fit it, as they already do for the
+  update check's lines (the Multiplayer tab has no room left).
 - **Not built:** the blue ghost (the held object is the object itself:
   tinting or a translucent pass needs a render path of its own, and the
   debug-geometry lines the engine has are untested on the Vita's GXM);

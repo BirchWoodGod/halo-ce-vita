@@ -27,11 +27,18 @@ what the two share), called from the main loop every frame (main.c):
   maps of a build that plays with others (as the menus' own check,
   ui_widget.c ui_widget_launch_widget, which shows the player why).
 
+- The panel's Forge page (Forge for the Halo CE menus too) asks for a
+  Forge game: started at the main menu as the Forge lobby's START FORGE
+  starts it (forge.c forge_game_start), with the map variant chosen; not
+  in a level or a lobby. What stops it (a damaged variant) is said in a
+  message over the game.
+
 halo.log says each request and its answer, and each change of the state.
 (Debug) HALO_SYSTEM_LINK_TEST=host, join or campaign makes the request
 itself, as the panel would, 3 seconds after the main menu first loads: the automated
 runs (no panel there; triage/g110/run/run.sh with MAP=-) open the screen
-so.
+so; forge:<map index>[:<map variant file>] asks for Forge as the panel's
+Forge page does (run_forge_test.sh panel).
 */
 
 #include "cseries.h"
@@ -47,11 +54,16 @@ so.
 #include "interface/ui_widget_definitions.h"
 
 #include "../src/system_link_shortcut.h"
+#include "forge.h"
+#include "../src/lang.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 void platform_log(char const *format, ...);
+void platform_show_message(char const *title, char const *message);
+struct widget_instance *ui_widget_port_active_screen(short local_player_index);
 
 volatile int halo_system_link_request;
 volatile int halo_system_link_answer;
@@ -64,6 +76,10 @@ char halo_text_input_title[HALO_TEXT_INPUT_SIZE];
 char halo_text_input_text[HALO_TEXT_INPUT_SIZE];
 int halo_text_input_maximum;
 int halo_text_input_password;
+/* (SYSTEM_LINK_REQUEST_FORGE) the map (forge.c's index) and map variant's
+file ("" none) of the Forge game the panel asks for */
+volatile int halo_forge_request_map = NONE;
+char halo_forge_request_variant[HALO_FORGE_VARIANT_SIZE];
 
 /* (network_client_manager.c's client states, in its order) */
 enum
@@ -208,6 +224,15 @@ static void system_link_shortcut_test(
 		return;
 	done = TRUE;
 	platform_log("system link: HALO_SYSTEM_LINK_TEST=%s", test);
+	if (!strncmp(test, "forge:", 6))
+	{
+		char const *file = strchr(test + 6, ':');
+
+		halo_forge_request_map = atoi(test + 6);
+		snprintf(halo_forge_request_variant, sizeof(halo_forge_request_variant), "%s", file ? file + 1 : "");
+		__atomic_store_n(&halo_system_link_request, SYSTEM_LINK_REQUEST_FORGE, __ATOMIC_RELEASE);
+		return;
+	}
 	__atomic_store_n(&halo_system_link_request, !strcmp(test, "join") ? SYSTEM_LINK_REQUEST_JOIN :
 		!strcmp(test, "campaign") ? SYSTEM_LINK_REQUEST_CAMPAIGN : SYSTEM_LINK_REQUEST_HOST, __ATOMIC_RELEASE);
 }
@@ -256,6 +281,48 @@ void system_link_shortcut_update(
 		return;
 	}
 	state = halo_multiplayer_status[SYSTEM_LINK_STATUS_STATE];
+	/* (the panel's Forge page: the Forge game, at the main menu) */
+	if (request == SYSTEM_LINK_REQUEST_FORGE)
+	{
+		char why[160];
+		char variant[HALO_FORGE_VARIANT_SIZE];
+
+		why[0] = 0;
+		csstrncpy(variant, halo_forge_request_variant, sizeof(variant) - 1);
+		variant[sizeof(variant) - 1] = 0;
+		/* (at the main menu: once its screen is up, its players with it - a
+		game started before has none) */
+		if (main_menu_loaded && !ui_widget_port_active_screen(0))
+			return;
+		if (!main_menu_loaded)
+		{
+			answer = SYSTEM_LINK_ANSWER_IN_PLAY;
+			snprintf(why, sizeof(why), "%s", T("Leave the level first: Start, then Quit"));
+		}
+		else if (state == SYSTEM_LINK_STATE_JOINING || state == SYSTEM_LINK_STATE_HOSTING ||
+			state == SYSTEM_LINK_STATE_LOBBY)
+		{
+			answer = SYSTEM_LINK_ANSWER_IN_LOBBY;
+			snprintf(why, sizeof(why), "%s", T("Leave the network game's lobby first"));
+		}
+		else if (halo_forge_request_map < 0 || halo_forge_request_map >= forge_map_count() ||
+			!forge_map_available((short)halo_forge_request_map))
+		{
+			answer = SYSTEM_LINK_ANSWER_UNAVAILABLE;
+			snprintf(why, sizeof(why), "%s", T("No multiplayer map is in the maps folder."));
+		}
+		else if (forge_game_start((short)halo_forge_request_map, variant, why, sizeof(why)))
+			answer = SYSTEM_LINK_ANSWER_OPENED;
+		else
+			answer = SYSTEM_LINK_ANSWER_UNAVAILABLE;
+		platform_log("system link: the settings panel's Forge: %s%s%s", answer == SYSTEM_LINK_ANSWER_OPENED ? "started" :
+			"not started", why[0] ? ": " : "", why);
+		if (answer != SYSTEM_LINK_ANSWER_OPENED)
+			platform_show_message(T("FORGE"), why);
+		halo_system_link_answer = answer;
+		__atomic_store_n(&halo_system_link_request, SYSTEM_LINK_REQUEST_NONE, __ATOMIC_RELEASE);
+		return;
+	}
 	if (!main_menu_loaded)
 		answer = SYSTEM_LINK_ANSWER_IN_PLAY;
 	else if (state == SYSTEM_LINK_STATE_JOINING || state == SYSTEM_LINK_STATE_HOSTING ||

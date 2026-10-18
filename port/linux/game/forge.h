@@ -156,6 +156,18 @@ void forge_save_request(
 	char const *title,
 	char const *author);
 
+/* (the settings panel's Forge and File Share page, vita_settings.c, of
+another ABI: plain types only) the lobby's maps: how many, each one's name
+(English), short name and whether its file is in the maps folder */
+int forge_panel_map_count(
+	void);
+char const *forge_panel_map_name(
+	int map_index);
+char const *forge_panel_map_short(
+	int map_index);
+int forge_panel_map_available(
+	int map_index);
+
 /* the map variant the session plays (loaded or last saved), "" for none */
 char const *forge_variant_title(
 	void);

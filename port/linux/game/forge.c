@@ -2847,6 +2847,32 @@ boolean forge_game_start(
 	return TRUE;
 }
 
+/* (the settings panel's Forge page, vita_settings.c: another ABI, plain
+types only) the lobby's maps */
+int forge_panel_map_count(
+	void)
+{
+	return forge_map_count();
+}
+
+char const *forge_panel_map_name(
+	int map_index)
+{
+	return forge_map_name((short)map_index);
+}
+
+char const *forge_panel_map_short(
+	int map_index)
+{
+	return forge_map_short((short)map_index);
+}
+
+int forge_panel_map_available(
+	int map_index)
+{
+	return map_index >= 0 && map_index < forge_map_count() && forge_map_available((short)map_index) ? 1 : 0;
+}
+
 char const *forge_map_short(
 	short map_index)
 {
