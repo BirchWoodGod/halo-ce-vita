@@ -156,6 +156,10 @@ static struct
 	unsigned int target_count;
 	unsigned long draws, clears, presents, scene_draws;
 	unsigned long color_target, depth_target;
+	/* the interface drawn on the display (vgxm_interface_begin): the
+	target whose draws go there until the present */
+	int interface_active;
+	unsigned long interface_source;
 } null;
 
 #define ALIGN(value, alignment) (((value) + (alignment) - 1) & ~((alignment) - 1))
@@ -900,7 +904,13 @@ static struct
 	int texture_scene_since_wait;
 	unsigned int written_serial[MAXIMUM_TARGETS + 1];
 	unsigned long scenes, waits, splits, frames;
+	/* (Sharp interface) the frames that drew their interface on the
+	display, and the display scenes it began again */
+	unsigned long interface_frames, interface_again;
 } scenes;
+
+/* the display as the interface's target (vita_gxm.c DISPLAY_TARGET) */
+#define DISPLAY_TARGET (MAXIMUM_TARGETS + 1)
 
 static unsigned long scene_target(unsigned long color)
 {
@@ -919,8 +929,31 @@ static int scene_dependency_needed(unsigned int open_serial)
 
 static void scene_ensure(void)
 {
-	unsigned long wanted = scene_target(null.color_target);
+	/* (the interface's draws into the back buffer: on the display, with
+	no depth buffer - vita_gxm.c vgxm_set_targets) */
+	int to_display = null.interface_active && null.color_target && null.color_target == null.interface_source;
+	unsigned long wanted = to_display ? DISPLAY_TARGET : scene_target(null.color_target);
 
+	if (to_display)
+	{
+		/* (the display scene, as vita_gxm.c display_scene_begin: no
+		dependency set, a wait only for what its draw samples) */
+		if (scenes.in_scene && scenes.scene_color == DISPLAY_TARGET && scenes.scene_draws < 300)
+			goto done;
+		scenes.interface_again++;
+		scenes.scene_serial++;
+		if (scene_dependency_needed(0))
+		{
+			scenes.wait_serial = scenes.scene_serial;
+			scenes.texture_scene_since_wait = 0;
+		}
+		scenes.in_scene = 1;
+		scenes.scene_draws = 0;
+		scenes.scene_cell = 0;
+		scenes.scene_color = DISPLAY_TARGET;
+		scenes.scene_depth = 0;
+		goto done;
+	}
 	if (scenes.in_scene && scenes.scene_color == wanted && scenes.scene_depth == null.depth_target)
 	{
 		if (scene_dependency_needed(scenes.scene_serial))
@@ -967,6 +1000,9 @@ static void scenes_present(unsigned long color_target)
 {
 	scenes.in_scene = 0;
 	scenes.presented_target = color_target;
+	if (null.interface_active)
+		scenes.interface_frames++;
+	null.interface_active = 0;
 	if (++scenes.frames == 300)
 	{
 		static int enabled = -1;
@@ -974,10 +1010,36 @@ static void scenes_present(unsigned long color_target)
 		if (enabled < 0)
 			enabled = getenv("HALO_GPU_STATS") && atoi(getenv("HALO_GPU_STATS"));
 		if (enabled)
-			platform_log("gxm-null scenes: %.1f scenes/frame (%.1f splits), %.1f scene waits/frame, %.2f scenes begun again to wait/frame",
-				scenes.scenes / 300.0, 0.0, scenes.waits / 300.0, scenes.splits / 300.0);
+			platform_log("gxm-null scenes: %.1f scenes/frame (%.1f splits), %.1f scene waits/frame, %.2f scenes begun again to wait/frame; "
+				"Sharp interface on the display in %lu of 300 frames, %.2f display scenes begun again/frame",
+				scenes.scenes / 300.0, 0.0, scenes.waits / 300.0, scenes.splits / 300.0, scenes.interface_frames,
+				scenes.interface_frames ? (scenes.interface_again - scenes.interface_frames) / 300.0 : 0.0);
 		scenes.scenes = scenes.waits = scenes.splits = scenes.frames = 0;
+		scenes.interface_frames = scenes.interface_again = 0;
 	}
+}
+
+/* (as vita_gxm.c's: the back buffer's draws from here to the present go
+to the display - counted in the scene census, the draw hash unchanged) */
+void vgxm_interface_begin(unsigned long color_target)
+{
+	if (!null.ready || null.interface_active || !color_target || color_target > MAXIMUM_TARGETS)
+		return;
+	null.interface_active = 1;
+	null.interface_source = color_target;
+	/* (the display scene, the picture scaled into it: the present's, begun
+	here) */
+	scenes.in_scene = 0;
+	scenes.presented_target = color_target;
+	scenes.scene_serial++;
+	scenes.wait_serial = scenes.scene_serial;
+	scenes.texture_scene_since_wait = 0;
+	scenes.interface_again++;
+	scenes.in_scene = 1;
+	scenes.scene_draws = 0;
+	scenes.scene_cell = 0;
+	scenes.scene_color = DISPLAY_TARGET;
+	scenes.scene_depth = 0;
 }
 
 /* (debug) a name for a target, for HALO_DRAW_HASH=4: the surface and the

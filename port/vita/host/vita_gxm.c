@@ -295,10 +295,17 @@ struct target
 	(its memory, surface and render target object), and where in it the
 	cell lies; 0 for a target of its own */
 	unsigned int atlas, cell_x, cell_y;
+	/* where the target's picture starts, in its pixels: 0 but for the
+	display while the interface draws there (vgxm_interface_begin: the
+	picture's place on the display), its viewports and clips moved by it */
+	float offset_x, offset_y;
 };
 
 #define MAXIMUM_SHADERS 8192
 #define MAXIMUM_TARGETS 256
+/* the display buffer drawn this frame as a target (the slot after the
+targets'), while the interface is drawn there: vgxm_interface_begin */
+#define DISPLAY_TARGET (MAXIMUM_TARGETS + 1)
 
 static unsigned int gxm_scene_count, gxm_scene_splits;
 static unsigned int scene_histogram[128];
@@ -355,8 +362,15 @@ static struct
 
 	struct shader shaders[MAXIMUM_SHADERS];
 	unsigned int shader_count;
-	struct target targets[MAXIMUM_TARGETS];
+	struct target targets[MAXIMUM_TARGETS + 1];
 	unsigned int target_count;
+	/* the interface drawn on the display (vgxm_interface_begin): the
+	target whose draws go there instead until the present, and the display
+	scenes the interface began again (another target drawn between, or a
+	scene's draw limit), for the report */
+	int interface_active;
+	unsigned long interface_source;
+	unsigned int interface_scenes_again;
 
 	/* the scene being recorded (an atlas's when the colour target is a
 	cell of it: scene_cell is that cell) */
@@ -3015,6 +3029,13 @@ int vgxm_target_create_chain(unsigned long width, unsigned long height, unsigned
 
 void vgxm_set_targets(unsigned long color, unsigned long depth)
 {
+	/* (the interface's draws into the back buffer go to the display, which
+	has no depth buffer: vgxm_interface_begin) */
+	if (gxm.interface_active && color && color == gxm.interface_source)
+	{
+		color = DISPLAY_TARGET;
+		depth = 0;
+	}
 	gxm.wanted_color = color;
 	gxm.wanted_depth = depth;
 }
@@ -3093,6 +3114,42 @@ static int scene_dependency_needed(unsigned int open_serial)
 	return !open_serial && gxm.texture_scene_since_wait && gxm.wanted_color && gxm.wanted_color == gxm.presented_target;
 }
 
+/* begins a scene on the display buffer this frame is drawn into, for the
+interface (vgxm_interface_begin, and scene_ensure when its draws come back
+to it after another target's): no depth buffer, and no dependency set -
+no later scene waits for the display's, whose fragments wait for its
+buffer to be off the screen. wait: after the scenes before it */
+static int display_scene_begin(int wait)
+{
+	int result = sceGxmBeginScene(gxm.context, wait ? SCE_GXM_SCENE_VERTEX_WAIT_FOR_DEPENDENCY : 0,
+		gxm.display_render_target, NULL, NULL, gxm.display_sync[gxm.back_buffer],
+		&gxm.display_surface[gxm.back_buffer], NULL);
+
+	if (result < 0)
+	{
+		static unsigned int reported;
+
+		if (reported++ < 16)
+			log_line("gxm: cannot begin the interface's display scene: 0x%08x", (unsigned)result);
+		return 0;
+	}
+	gxm.in_scene = 1;
+	gxm.scene_draws = 0;
+	gxm.scene_serial++;
+	if (wait)
+	{
+		gxm.wait_serial = gxm.scene_serial;
+		gxm.texture_scene_since_wait = 0;
+	}
+	gxm.targets[DISPLAY_TARGET - 1].written_serial = gxm.scene_serial;
+	shadow_invalidate();
+	gxm.scene_color = DISPLAY_TARGET;
+	gxm.scene_cell = 0;
+	gxm.scene_depth = 0;
+	sceGxmSetViewportEnable(gxm.context, SCE_GXM_VIEWPORT_ENABLED);
+	return 1;
+}
+
 static int scene_ensure(void)
 {
 	struct target *color, *depth;
@@ -3146,6 +3203,13 @@ static int scene_ensure(void)
 		sceGxmEndScene(gxm.context, NULL, NULL);
 		scene_switch_us[gxm.scene_color == 1 ? 0 : 1] += sceKernelGetProcessTimeWide() - before;
 		gxm.in_scene = 0;
+	}
+	if (wanted_scene_color == DISPLAY_TARGET)
+	{
+		/* (the interface's draws back on the display: its scene again,
+		waiting if a draw samples what a scene since drew) */
+		gxm.interface_scenes_again++;
+		return display_scene_begin(scene_dependency_needed(0));
 	}
 	color = wanted_scene_color ? &gxm.targets[wanted_scene_color - 1] : NULL;
 	depth = gxm.wanted_depth ? &gxm.targets[gxm.wanted_depth - 1] : NULL;
@@ -3360,21 +3424,32 @@ static void scene_scales(float *scale_x, float *scale_y)
 static void set_clip(const long unscaled[4])
 {
 	const struct target *target = scene_drawn_target();
-	float scale_x, scale_y;
+	float scale_x, scale_y, offset_x = 0.0f, offset_y = 0.0f;
 	long clip[4];
 	long x0, y0, x1, y1;
 
 	scene_scales(&scale_x, &scale_y);
-	if (scale_x != 1.0f || scale_y != 1.0f)
+	if (target && !gxm.scene_cell)
 	{
-		clip[0] = (long)(unscaled[0] * scale_x);
-		clip[1] = (long)(unscaled[1] * scale_y);
-		clip[2] = (long)(unscaled[2] * scale_x + 0.999f);
-		clip[3] = (long)(unscaled[3] * scale_y + 0.999f);
+		offset_x = target->offset_x;
+		offset_y = target->offset_y;
+	}
+	if (scale_x != 1.0f || scale_y != 1.0f || offset_x != 0.0f || offset_y != 0.0f)
+	{
+		clip[0] = (long)(offset_x + unscaled[0] * scale_x);
+		clip[1] = (long)(offset_y + unscaled[1] * scale_y);
+		clip[2] = (long)(offset_x + unscaled[2] * scale_x + 0.999f);
+		clip[3] = (long)(offset_y + unscaled[3] * scale_y + 0.999f);
 		/* (nothing outside the drawn rectangle: a target of the dynamic
-		resolution keeps its memory's size) */
+		resolution keeps its memory's size; the interface on the display,
+		nothing outside the picture - from its offset to rect_width x
+		rect_height there) */
 		if (target && !gxm.scene_cell)
 		{
+			if (clip[0] < (long)offset_x)
+				clip[0] = (long)offset_x;
+			if (clip[1] < (long)offset_y)
+				clip[1] = (long)offset_y;
 			if (clip[2] > (long)target->rect_width)
 				clip[2] = (long)target->rect_width;
 			if (clip[3] > (long)target->rect_height)
@@ -3567,9 +3642,12 @@ void vgxm_draw(const struct vgxm_draw *draw)
 	}
 
 	{
-		SceGxmDepthFunc depth_function = draw->depth_test ? (SceGxmDepthFunc)comparison(draw->depth_function, 22) :
-			SCE_GXM_DEPTH_FUNC_ALWAYS;
-		int depth_write = draw->depth_write ? 1 : 0;
+		/* (the interface on the display has no depth buffer: no depth or
+		stencil test there, vgxm_interface_begin) */
+		int depthless = gxm.scene_color == DISPLAY_TARGET;
+		SceGxmDepthFunc depth_function = draw->depth_test && !depthless ?
+			(SceGxmDepthFunc)comparison(draw->depth_function, 22) : SCE_GXM_DEPTH_FUNC_ALWAYS;
+		int depth_write = draw->depth_write && !depthless ? 1 : 0;
 		unsigned long stencil[7];
 		int cull = draw->cull == D3DCULL_CW ? SCE_GXM_CULL_CW : draw->cull == D3DCULL_CCW ? SCE_GXM_CULL_CCW : SCE_GXM_CULL_NONE;
 		int bias[2];
@@ -3584,7 +3662,7 @@ void vgxm_draw(const struct vgxm_draw *draw)
 			shadow.depth_write = depth_write;
 			sceGxmSetFrontDepthWriteEnable(gxm.context, depth_write ? SCE_GXM_DEPTH_WRITE_ENABLED : SCE_GXM_DEPTH_WRITE_DISABLED);
 		}
-		if (draw->stencil_test)
+		if (draw->stencil_test && !depthless)
 		{
 			stencil[0] = comparison(draw->stencil_function, 25);
 			stencil[1] = stencil_operation(draw->stencil_fail);
@@ -3641,14 +3719,16 @@ void vgxm_draw(const struct vgxm_draw *draw)
 			sceGxmSetFrontDepthBias(gxm.context, bias[0], bias[1]);
 		}
 		{
-			/* (the viewport in the target's pixels: scaled with it) */
+			/* (the viewport in the target's pixels: scaled with it, and moved
+			to the picture on the display for the interface) */
 			float scale_x, scale_y;
 			float viewport[6];
 			long clip[4];
+			const struct target *drawn = gxm.scene_cell ? NULL : scene_drawn_target();
 
 			scene_scales(&scale_x, &scale_y);
-			viewport[0] = draw->viewport_offset[0] * scale_x;
-			viewport[1] = draw->viewport_offset[1] * scale_y;
+			viewport[0] = draw->viewport_offset[0] * scale_x + (drawn ? drawn->offset_x : 0.0f);
+			viewport[1] = draw->viewport_offset[1] * scale_y + (drawn ? drawn->offset_y : 0.0f);
 			viewport[2] = draw->viewport_offset[2];
 			viewport[3] = draw->viewport_scale[0] * scale_x;
 			viewport[4] = draw->viewport_scale[1] * scale_y;
@@ -3722,6 +3802,9 @@ void vgxm_clear(unsigned long flags, unsigned long color, float depth, unsigned 
 		gxm.scene_color ? &gxm.targets[gxm.scene_color - 1] : &gxm.targets[gxm.scene_depth - 1];
 	width = target->width;
 	height = target->height;
+	/* (the interface on the display: no depth buffer) */
+	if (gxm.scene_color == DISPLAY_TARGET)
+		flags &= ~(unsigned long)(D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL);
 	if (flags & D3DCLEAR_TARGET_R) mask |= SCE_GXM_COLOR_MASK_R;
 	if (flags & D3DCLEAR_TARGET_G) mask |= SCE_GXM_COLOR_MASK_G;
 	if (flags & D3DCLEAR_TARGET_B) mask |= SCE_GXM_COLOR_MASK_B;
@@ -3739,14 +3822,18 @@ void vgxm_clear(unsigned long flags, unsigned long color, float depth, unsigned 
 		/* (the clip is in the game's pixels: in a scaled target's, as
 		set_clip has it - a part of a scaled target was cleared at the
 		unscaled place before, and only where that overlapped the clip) */
-		float scale_x = 1.0f, scale_y = 1.0f, x0, x1, y0, y1;
+		float scale_x = 1.0f, scale_y = 1.0f, offset_x = 0.0f, offset_y = 0.0f, x0, x1, y0, y1;
 
 		if (!gxm.scene_cell)
+		{
 			scene_scales(&scale_x, &scale_y);
-		x0 = 2.0f * (float)clip[0] * scale_x / (float)width - 1.0f;
-		x1 = 2.0f * (float)clip[2] * scale_x / (float)width - 1.0f;
-		y0 = 1.0f - 2.0f * (float)clip[1] * scale_y / (float)height;
-		y1 = 1.0f - 2.0f * (float)clip[3] * scale_y / (float)height;
+			offset_x = target->offset_x;
+			offset_y = target->offset_y;
+		}
+		x0 = 2.0f * ((float)clip[0] * scale_x + offset_x) / (float)width - 1.0f;
+		x1 = 2.0f * ((float)clip[2] * scale_x + offset_x) / (float)width - 1.0f;
+		y0 = 1.0f - 2.0f * ((float)clip[1] * scale_y + offset_y) / (float)height;
+		y1 = 1.0f - 2.0f * ((float)clip[3] * scale_y + offset_y) / (float)height;
 		{
 			float corners[4][3] = { { x0, y0, depth }, { x1, y0, depth }, { x0, y1, depth }, { x1, y1, depth } };
 
@@ -5325,6 +5412,12 @@ static void overlay_draw(void)
 	sceGxmSetFrontStencilFunc(gxm.context, SCE_GXM_STENCIL_FUNC_ALWAYS, SCE_GXM_STENCIL_OP_KEEP,
 		SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP, 0, 0);
 	sceGxmSetCullMode(gxm.context, SCE_GXM_CULL_NONE);
+	/* (the display's own viewport: the interface's draws, Sharp interface,
+	may have left theirs, and a depth bias) */
+	sceGxmSetFrontDepthBias(gxm.context, 0, 0);
+	sceGxmSetViewportEnable(gxm.context, SCE_GXM_VIEWPORT_ENABLED);
+	sceGxmSetViewport(gxm.context, DISPLAY_WIDTH * 0.5f, DISPLAY_WIDTH * 0.5f, DISPLAY_HEIGHT * 0.5f,
+		-DISPLAY_HEIGHT * 0.5f, 0.0f, 1.0f);
 	sceGxmSetRegionClip(gxm.context, SCE_GXM_REGION_CLIP_OUTSIDE, 0, 0, DISPLAY_WIDTH - 1, DISPLAY_HEIGHT - 1);
 	sceGxmDraw(gxm.context, SCE_GXM_PRIMITIVE_TRIANGLES, SCE_GXM_INDEX_FORMAT_U16, indices, count * 6);
 	gxm.scene_draws++;
@@ -5499,6 +5592,65 @@ static void display_buffering_apply(void)
 	}
 }
 
+/* The interface at the display's resolution (Sharp interface, d3d8_gxm.c
+halo_d3d_interface_begin). The frame's 3D picture is in the back buffer, at
+the render scale; where the game's interface begins, the picture is scaled
+up to the display as the present would (blit), in the display scene the
+present then ends, and the game's draws and clears into the back buffer
+from then on go to the display instead (vgxm_set_targets): the display as
+a target of its own (DISPLAY_TARGET) whose size asked for is the back
+buffer's, so the viewports and clips the game gives in its 640 or 848 by
+480 are scaled to the picture on the display and moved to where it starts
+(4:3's bars), as a render-scaled target's are scaled down to its pixels.
+The display has no depth buffer (the interface draws without the depth
+and stencil tests: vgxm_draw, vgxm_clear). A draw into another target in
+between (a copy the loading screen blurs) ends the display scene, and the
+next one into the back buffer begins it again (scene_ensure). The settings
+panel and the overlay are drawn after it all, at the present, as before.
+No memory: the display buffers are there anyway. */
+void vgxm_interface_begin(unsigned long color_target)
+{
+	struct target *source, *display = &gxm.targets[DISPLAY_TARGET - 1];
+	unsigned int asked_width, asked_height;
+
+	if (!gxm.ready || gxm.interface_active || !color_target || color_target > gxm.target_count)
+		return;
+	source = &gxm.targets[color_target - 1];
+	if (source->depth || !source->memory.base || source->atlas)
+		return;
+	if (gxm.in_scene)
+	{
+		sceGxmEndScene(gxm.context, NULL, NULL);
+		gxm.in_scene = 0;
+	}
+	/* (the display buffer this frame is drawn into, as the present has it) */
+	if (gxm.display_wanted != (int)gxm.display_count)
+		display_buffering_apply();
+	gxm.presented_target = color_target;
+	if (!display_scene_begin(rtt_sync_enabled() && gxm.scene_serial))
+		return;
+	blit(source);
+	asked_width = source->asked_width ? source->asked_width : source->width;
+	asked_height = source->asked_height ? source->asked_height : source->height;
+	memset(display, 0, sizeof(*display));
+	display->width = DISPLAY_WIDTH;
+	display->height = DISPLAY_HEIGHT;
+	display->stride = DISPLAY_STRIDE;
+	display->asked_width = asked_width;
+	display->asked_height = asked_height;
+	display->scale_x = gxm.picture_width / (float)asked_width;
+	display->scale_y = gxm.picture_height / (float)asked_height;
+	display->offset_x = gxm.picture_left;
+	display->offset_y = gxm.picture_top;
+	display->rect_width = (unsigned int)(gxm.picture_left + gxm.picture_width);
+	display->rect_height = (unsigned int)(gxm.picture_top + gxm.picture_height);
+	display->written_serial = gxm.scene_serial;
+	display->color = gxm.display_surface[gxm.back_buffer];
+	display->render_target = gxm.display_render_target;
+	gxm.interface_source = color_target;
+	gxm.interface_active = 1;
+}
+
 void vgxm_present(unsigned long color_target, unsigned long width, unsigned long height)
 {
 	struct display_data data;
@@ -5510,30 +5662,46 @@ void vgxm_present(unsigned long color_target, unsigned long width, unsigned long
 	if (!gxm.ready)
 		return;
 	present_mark = sceKernelGetProcessTimeWide();
-	if (gxm.in_scene)
+	if (gxm.interface_active && gxm.in_scene && gxm.scene_color == DISPLAY_TARGET)
 	{
-		sceGxmEndScene(gxm.context, NULL, NULL);
-		gxm.in_scene = 0;
+		/* (the interface's display scene, the picture and the interface in
+		it: the overlay goes on) */
+		present_step(0);
+		present_step(1);
 	}
-	present_step(0);
-	if (gxm.display_wanted != (int)gxm.display_count)
-		display_buffering_apply();
-	/* the frame on the display, in a scene of its own (it samples the
-	target the scene before drew: HALO_GXM_RTT_SYNC) */
-	gxm.presented_target = color_target;
-	sceGxmBeginScene(gxm.context, rtt_sync_enabled() && gxm.scene_serial ? SCE_GXM_SCENE_VERTEX_WAIT_FOR_DEPENDENCY : 0,
-		gxm.display_render_target, NULL, NULL, gxm.display_sync[gxm.back_buffer],
-		&gxm.display_surface[gxm.back_buffer], NULL);
-	present_step(1);
-	/* (the letterbox stays as the buffers were cleared at start-up) */
-	if (color_target && color_target <= gxm.target_count && !gxm.targets[color_target - 1].depth)
-		blit(&gxm.targets[color_target - 1]);
+	else
+	{
+		if (gxm.in_scene)
+		{
+			sceGxmEndScene(gxm.context, NULL, NULL);
+			gxm.in_scene = 0;
+		}
+		present_step(0);
+		/* (not while the interface is drawn: its display buffer is this
+		frame's) */
+		if (gxm.display_wanted != (int)gxm.display_count && !gxm.interface_active)
+			display_buffering_apply();
+		/* the frame on the display, in a scene of its own (it samples the
+		target the scene before drew: HALO_GXM_RTT_SYNC) */
+		gxm.presented_target = color_target;
+		sceGxmBeginScene(gxm.context, rtt_sync_enabled() && gxm.scene_serial ? SCE_GXM_SCENE_VERTEX_WAIT_FOR_DEPENDENCY : 0,
+			gxm.display_render_target, NULL, NULL, gxm.display_sync[gxm.back_buffer],
+			&gxm.display_surface[gxm.back_buffer], NULL);
+		present_step(1);
+		/* (the letterbox stays as the buffers were cleared at start-up; the
+		interface's display has the picture already) */
+		if (!gxm.interface_active && color_target && color_target <= gxm.target_count &&
+			!gxm.targets[color_target - 1].depth)
+			blit(&gxm.targets[color_target - 1]);
+	}
 	overlay_draw();
 	notification.address = gxm.notification;
 	notification.value = ++gxm.frame;
 	if (gxm.frame >= SHADER_SWEEP_FRAME && !shader_sweep.started)
 		shader_sweep_start();
 	sceGxmEndScene(gxm.context, NULL, &notification);
+	gxm.in_scene = 0;
+	gxm.interface_active = 0;
 	{
 		/* (the frame is all the GPU's now: frame_timing) */
 		unsigned int now = (unsigned int)sceKernelGetProcessTimeWide(), slot = gxm.frame % FRAME_TIMING_SLOTS;
@@ -5595,6 +5763,10 @@ void vgxm_present(unsigned long color_target, unsigned long width, unsigned long
 				log_line("gxm: render to texture: %.1f scene waits/frame, %.2f scenes begun again to wait/frame",
 					(double)gxm.dependency_waits / frames, (double)gxm.dependency_splits / frames);
 			gxm.dependency_waits = gxm.dependency_splits = 0;
+			if (gxm.interface_scenes_again)
+				log_line("gxm: Sharp interface: %.2f display scenes begun again/frame",
+					(double)gxm.interface_scenes_again / frames);
+			gxm.interface_scenes_again = 0;
 			memset(present_step_us, 0, sizeof(present_step_us));
 			gxm_scene_splits = 0;
 			{

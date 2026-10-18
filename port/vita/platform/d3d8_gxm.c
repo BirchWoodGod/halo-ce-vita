@@ -2436,6 +2436,9 @@ enum
 	_command_draw,
 	_command_clear,
 	_command_present,
+	/* the frame's interface begins (halo_d3d_interface_begin): the back
+	buffer's draws after it go to the display */
+	_command_interface,
 };
 
 /* HALO_RECORD_SPLIT (default on): the device state a draw is made from,
@@ -2727,7 +2730,7 @@ static volatile unsigned long command_head, command_tail;
 static volatile unsigned long frames_requested, frames_presented;
 void vita_host_sleep_us(unsigned long microseconds);
 static int worker_enabled = -1;
-static unsigned long long worker_time, worker_kind_time[3];
+static unsigned long long worker_time, worker_kind_time[4];
 static unsigned long blend_histogram[16][16];
 /* the host's hang watchdog (vita_main.c) watches this */
 volatile unsigned long halo_present_counter;
@@ -3912,6 +3915,18 @@ static void execute_command(struct render_record *command)
 				worker_color_entry->drawn = TRUE;
 		}
 		break;
+	case _command_interface:
+	{
+		/* (the 3D picture to the display, at its scale: the back buffer's
+		draws from here on are drawn there, at the display's resolution -
+		vita_gxm.c vgxm_interface_begin) */
+		struct render_target_entry *back_buffer = command->targets && command->targets->color_valid ?
+			render_target_get(&command->targets->color_surface) : NULL;
+
+		if (back_buffer && !back_buffer->target.depth)
+			vgxm_interface_begin(back_buffer->id);
+		break;
+	}
 	case _command_present:
 	{
 		struct render_target_entry *back_buffer = command->targets->color_valid ? render_target_get(&command->targets->color_surface) : NULL;
@@ -8176,6 +8191,61 @@ void WINAPI D3DDevice_SetVertexDataColor(INT reg, D3DCOLOR color)
 
 	color_to_vec4(color, value);
 	set_attribute(reg, value[0], value[1], value[2], value[3]);
+}
+
+/* ---------- Sharp interface
+
+HALO_SHARP_UI (the settings panel's Video row Sharp interface; on unless
+"0"): the frame's interface - the HUD, the menus, the text, the screen
+flashes, the letterbox - is drawn at the display's resolution, 960x544,
+whatever the render scale. The game marks where a window's 3D picture ends
+(rasterizer_xbox.c rasterizer_interface_begin); a record here tells the
+worker, which scales the 3D picture up to the display there instead of at
+the present, and draws the back buffer's draws that follow on the display
+(vita_gxm.c vgxm_interface_begin). What samples the back buffer after the
+split (the loading screen's blur of the last frame) reads the 3D picture.
+Read again when the panel changes a setting (halo_settings_generation). */
+extern volatile unsigned long halo_settings_generation;
+
+static int sharp_interface_enabled(void)
+{
+	static int enabled = -1;
+	static unsigned long settings_seen;
+
+	if (enabled < 0 || settings_seen != halo_settings_generation)
+	{
+		const char *setting = getenv("HALO_SHARP_UI");
+		int was = enabled;
+
+		settings_seen = halo_settings_generation;
+		enabled = !setting || !*setting || strcmp(setting, "0") != 0;
+		if (enabled != was)
+			platform_log("Direct3D: Sharp interface %s (HALO_SHARP_UI)", enabled ? "on: the interface at the display's resolution" :
+				"off: the interface at the render scale");
+	}
+	return enabled;
+}
+
+/* (the frame the interface began in: once a frame) */
+static unsigned long interface_frame = (unsigned long)-1;
+
+void halo_d3d_interface_begin(void)
+{
+	struct render_record *command;
+
+	if (!device.gpu_ready || interface_frame == device.frame || !sharp_interface_enabled())
+		return;
+	/* (only while the game draws into the back buffer: the record names it) */
+	if (!device.render_target || device.render_target->Data != device.back_buffer.Data)
+		return;
+	interface_frame = device.frame;
+	command = command_begin(_command_interface);
+	if (!command)
+		return;
+	command->targets = record_targets_current(&device.back_buffer, NULL);
+	if (!command->targets)
+		return;
+	command_commit(command);
 }
 
 /* ---------- clearing */

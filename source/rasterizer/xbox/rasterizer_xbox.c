@@ -1974,6 +1974,34 @@ void _rasterizer_window_end(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) The split between a frame's 3D picture and its interface. The
+Vita draws the screen-sized targets at the render scale (HALO_RENDER_SCALE,
+or the dynamic resolution's part of them) and scales the picture up to the
+display; whatever the game draws into the back buffer after this goes
+straight to the display at its own resolution instead (d3d8_gxm.c
+halo_d3d_interface_begin), so the HUD, the menus and their text stay sharp
+at any render scale. Called where the window's interface begins - after
+the HUD's screen effect, which reads the 3D picture back (the scope's
+zoom, the night vision), and before the HUD, the screen flashes and the
+menus (render.c, interface.c); a second call in the frame does nothing.
+Only in a single window drawn into the back buffer: a split screen, or a
+window into another target (a mirror), keeps everything at the render
+scale. */
+void halo_d3d_interface_begin(void);
+
+void rasterizer_interface_begin(
+	void)
+{
+	if (global_window_parameters.rasterizer_target == _rasterizer_target_render_primary &&
+		main_get_window_count() <= 1)
+	{
+		halo_d3d_interface_begin();
+	}
+	return;
+}
+#endif
+
 boolean rasterizer_preinitialize__fill_you_up_with_the_devils_cock(
 	void)
 {

@@ -227,6 +227,12 @@ static void render_nonplayer_frame(
 	parameters.suppress_clear = window_type == 0;
 	parameters.window_index = NONE;
 	rasterizer_window_begin(&parameters);
+#ifdef HALO_LINUX
+	/* (port) the letterbox, the cinematic's titles, the timer and the
+	console are interface, as is a window without a player (the
+	postgame's): at the display's resolution (rasterizer_interface_begin) */
+	rasterizer_interface_begin();
+#endif
 
 	switch (window_type)
 	{
@@ -283,6 +289,18 @@ void render_frame_pregame(
 	rasterizer_window_begin(&rasterizer_parameters);
 
 #ifdef HALO_LINUX
+	{
+		/* (port) no 3D before a map: the menus and the movie at the
+		display's resolution (rasterizer_interface_begin) - but not the
+		loading screen, whose glow trails by copying each finished frame
+		out of the back buffer and blurring it under the next
+		(progress_bar.c progress_bar_present_to_front_buffer): drawn on
+		the display, its frames would leave the back buffer black */
+		real loading_progress;
+
+		if (!game_map_loading_in_progress(&loading_progress))
+			rasterizer_interface_begin();
+	}
 	halo_screen_ui_offset(TRUE);
 	render_ui_widgets(0, &window->rasterizer_camera.viewport_bounds);
 	halo_screen_ui_offset(FALSE);
@@ -682,8 +700,15 @@ static void render_window(
 			rasterizer_lens_flares_draw();
 		RENDER_PHASE_END(30, "flares");
 		RENDER_PHASE_BEGIN_ID(20, "interface");
+		/* (the HUD at the display's resolution from its screen effect on:
+		interface.c calls rasterizer_interface_begin) */
 		interface_draw_screen();
 		RENDER_PHASE_END(20, "interface");
+#ifdef HALO_LINUX
+		/* (port) and from here when it did not (no player: no HUD): the
+		screen flash covers the HUD, as before, and the menus over both */
+		rasterizer_interface_begin();
+#endif
 		RENDER_PHASE_BEGIN_ID(31, "screen_flash");
 		rasterizer_screen_flash();
 		RENDER_PHASE_END(31, "screen_flash");
@@ -698,6 +723,11 @@ static void render_window(
 #endif
 	}
 
+#ifdef HALO_LINUX
+	/* (port) a movie in place of the 3D (above): at the display's
+	resolution too */
+	rasterizer_interface_begin();
+#endif
 	bink_playback_render();
 	render_camera_debug_frustum(&render.camera, &render.frustum);
 	render_debug();
