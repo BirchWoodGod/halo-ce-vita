@@ -262,7 +262,7 @@ for case in $cases; do
 		fi
 		# (the lobby: Start Game on The Pillar of Autumn, Normal; in the level, saved and quit to the
 		# main menu; CAMPAIGN again, the profile, the lobby: its caption; Difficulty, down, A: Heroic)
-		profile_from=$HALO_TEST_PROFILE run h3resume "$menus_data" 170 "wait:150:3000 a wait:150:3000 a wait:150:3000 down:150:600 down:150:600 a wait:150:70000 down:150:700 a wait:150:3000 a wait:150:4000 wait:150:2000 down:150:700 a wait:150:2500 down:150:700 a wait:150:6000 wait:150:4000" \
+		profile_from=$HALO_TEST_PROFILE run h3resume "$menus_data" 170 "wait:150:3000 a wait:150:3000 a wait:150:3000 down:150:600 down:150:600 a wait:150:70000 a wait:150:3000 a wait:150:4000 wait:150:2000 down:150:700 a wait:150:2500 down:150:700 a wait:150:6000 wait:150:4000" \
 			HALO_MENU_STYLE=halo3 "HALO_TEST_COMMANDS=L240:@skip;L420:game_save_totally_unsafe;L600:@quit"
 		check_h3 h3resume halo3
 		log=$out/h3resume/run.log
@@ -403,13 +403,13 @@ for case in $cases; do
 		check_h3 h3scenes halo3
 		log=$out/h3scenes/run.log
 		grep -aE "menus: h3 scene|host command \(menu scene\)" "$log"
-		for scene in "h3/campaign/screen: camera point load_campaign at -15.00 5.00 0.00, yaw -10.0 pitch 30.0, over 45 ticks" \
-			"h3/mp/screen: camera point multiplayer at -40.00 -1.80 15.50, yaw 0.0 pitch 0.0, over 45 ticks" \
-			"h3/forge/lobby: camera point new_campaign at -10.00 -20.00 5.00, yaw 40.0 pitch 20.0, over 45 ticks"; do
+		for scene in "h3/campaign/screen: camera point load_campaign at -15.00 5.00 0.00, yaw -10.0 pitch 30.0, over 0 ticks" \
+			"h3/mp/screen: camera point multiplayer at -40.00 -1.80 15.50, yaw 0.0 pitch 0.0, over 0 ticks" \
+			"h3/forge/lobby: camera point new_campaign at -10.00 -20.00 5.00, yaw 40.0 pitch 20.0, over 0 ticks"; do
 			grep -aqF "menus: h3 scene: $scene" "$log" || fail h3scenes "no scene: $scene"
 		done
-		for command in "(sleep -1 ring_loop)" "(camera_set load_campaign 45)" "(camera_set multiplayer 45)" \
-			"(camera_set new_campaign 45)" "(wake ring_loop)"; do
+		for command in "(sleep -1 ring_loop)" "(camera_set load_campaign 0)" "(camera_set multiplayer 0)" \
+			"(camera_set new_campaign 0)" "(camera_set settings 0)" "(wake ring_loop)"; do
 			grep -aqF "host command (menu scene): $command" "$log" || fail h3scenes "no host command $command"
 		done
 		[ "$(grep -ac 'menus: h3 scene: h3/main/screen: the ring' "$log")" -ge 4 ] ||

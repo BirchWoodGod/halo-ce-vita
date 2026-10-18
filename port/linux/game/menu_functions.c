@@ -72,7 +72,9 @@ halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
 #include "../src/system_link_shortcut.h"
 #include "forge.h"
 #include "../src/port_config.h"
+#include "camera/observer.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -852,9 +854,12 @@ multiplayer, new_campaign), are used by nothing. A screen with a scene=
 (menus/halo3: the campaign, multiplayer and Forge lobbies) runs "port h3
 scene" as it opens: its camera ("x y z yaw pitch": world units and
 degrees, yaw 0 along +x, pitch up positive, as @camera) is written into
-the point it names, ring_loop put to sleep and the camera glided there
-(camera_set, 45 ticks unless the scene says); the main menu's scene="ring"
-wakes ring_loop, which flies on from there. The screens opened from a lobby
+the point it names, ring_loop put to sleep and the camera cut there
+(camera_set over 0 ticks unless the scene says: gliding there swung the
+camera across the whole scene, the owner's "pans around like crazy"); the
+main menu's scene="ring" cuts back to where the ring's flight was left (kept
+in the settings point, which no screen uses) and wakes ring_loop, which
+flies on from there. The screens opened from a lobby
 (its pickers) have none: the camera stays. The point is written and the
 script commands run at the top of the main loop, between frames
 (menu_functions_scenes_update, main.c; the commands as the settings
@@ -866,7 +871,7 @@ on spike/menu-scenes, Oct 18 2026.) */
 boolean main_request_host_command_from(char const *command, char const *source);
 int halo_main_menu_idle(void);
 
-#define H3_SCENE_TICKS 45
+#define H3_SCENE_TICKS 0
 
 static struct
 {
@@ -881,7 +886,11 @@ static struct
 	char screen[64];
 	/* ring_loop put to sleep by a scene (ui.map's scripts start awake) */
 	boolean ring_asleep;
+	/* where the ring's flight was left, in the settings point */
+	boolean ring_kept;
 } h3_scenes;
+
+static void h3_scene_keep_ring(void);
 
 static boolean h3_scenes_enabled(void)
 {
@@ -1024,7 +1033,11 @@ void menu_functions_scenes_update(void)
 	if (h3_scenes.ring)
 	{
 		if (h3_scenes.ring_asleep)
+		{
+			if (h3_scenes.ring_kept)
+				main_request_host_command_from("(camera_set settings 0)", "menu scene");
 			main_request_host_command_from("(wake ring_loop)", "menu scene");
+		}
 		h3_scenes.ring_asleep = FALSE;
 		platform_log("menus: h3 scene: %s: the ring's own flight", h3_scenes.screen);
 		return;
@@ -1045,6 +1058,9 @@ void menu_functions_scenes_update(void)
 		point->orientation.pitch = h3_scenes.camera[4] * (real)(3.14159265358979 / 180.0);
 		point->orientation.roll = 0.f;
 	}
+	/* (leaving the ring's flight: where it was kept, to come back to) */
+	if (!h3_scenes.ring_asleep)
+		h3_scene_keep_ring();
 	main_request_host_command_from("(sleep -1 ring_loop)", "menu scene");
 	snprintf(command, sizeof(command), "(camera_set %s %ld)", h3_scenes.point, h3_scenes.ticks);
 	main_request_host_command_from(command, "menu scene");
@@ -1053,6 +1069,25 @@ void menu_functions_scenes_update(void)
 		h3_scenes.screen, h3_scenes.point, point->position.x, point->position.y, point->position.z,
 		point->orientation.yaw * (real)(180.0 / 3.14159265358979),
 		point->orientation.pitch * (real)(180.0 / 3.14159265358979), h3_scenes.ticks);
+}
+
+/* the camera as the ring's flight left it, in ui.map's settings point (no
+screen's scene names it) */
+static void h3_scene_keep_ring(void)
+{
+	struct scenario_cutscene_camera_point *point = h3_scene_point("settings");
+	struct observer_result const *camera = observer_get_camera(0);
+	real horizontal;
+
+	h3_scenes.ring_kept = FALSE;
+	if (!point || !camera)
+		return;
+	horizontal = (real)sqrt(camera->forward.i * camera->forward.i + camera->forward.j * camera->forward.j);
+	point->position = camera->position;
+	point->orientation.yaw = (real)atan2(camera->forward.j, camera->forward.i);
+	point->orientation.pitch = (real)atan2(camera->forward.k, horizontal);
+	point->orientation.roll = 0.f;
+	h3_scenes.ring_kept = TRUE;
 }
 
 /* ---- Forge (forge.c): its lobby (halo3/forge_lobby.xml: the map, its
