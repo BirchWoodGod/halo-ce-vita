@@ -44,6 +44,10 @@ each frame's presentation.
 #include "vita_controls.h"
 #include "vita_gxm.h"
 #include "vita_host.h"
+#include "vita_overlay_font.h"
+
+/* Menu style (port/linux/src/menu_files.c, halo_menus.h) */
+int halo_menu_style_halo3(void);
 #include "vita_shader_cache.h"
 #include "vita_shader_generator_id.h"
 #include "lang.h"
@@ -378,13 +382,15 @@ static struct
 
 	/* built-in programs */
 	unsigned long clear_vertex, clear_fragment, blit_vertex, blit_fragment;
-	unsigned long overlay_vertex, overlay_fragment;
+	unsigned long overlay_vertex, overlay_fragment, text_vertex, text_fragment;
 	int overlay_enabled, overlay_programs;
 	float overlay_fps, overlay_tick_ms, overlay_render_ms;
 	/* the settings panel's text, written by the game's thread and drawn by
 	the worker: two copies, the index flips when one is complete */
 	char menu_text[2][3072];
 	volatile int menu_index, menu_visible, menu_selected;
+	/* (Menu style Halo 3, read on the game's thread as the text is set) */
+	volatile int menu_halo3;
 	/* the frame's scale to the display (HALO_UPSCALE_FILTER): 0 smooth
 	(bilinear), 1 sharp (nearest), both at the display's height; and the
 	picture's rectangle on the display, the rest black (vgxm_present) */
@@ -518,6 +524,23 @@ static const char overlay_fragment_source[] =
 	"float4 main(float4 color : COLOR0) : COLOR\n"
 	"{\n"
 	"	return color;\n"
+	"}\n";
+
+/* the settings panel's Halo 3 text: a character's coverage from the
+fonts' atlas (vita_overlay_font.c), in the vertex's colour */
+static const char text_vertex_source[] =
+	"void main(float2 position, float2 texcoord, float4 color, out float4 out_position : POSITION,\n"
+	"	out float2 out_texcoord : TEXCOORD0, out float4 out_color : COLOR0)\n"
+	"{\n"
+	"	out_position = float4(position, 0.5, 1.0);\n"
+	"	out_texcoord = texcoord;\n"
+	"	out_color = color;\n"
+	"}\n";
+
+static const char text_fragment_source[] =
+	"float4 main(float2 texcoord : TEXCOORD0, float4 color : COLOR0, uniform sampler2D atlas) : COLOR\n"
+	"{\n"
+	"	return float4(color.rgb, color.a * tex2D(atlas, texcoord).a);\n"
 	"}\n";
 
 static const char blit_vertex_source[] =
@@ -698,6 +721,8 @@ int vgxm_initialize(void *arena, unsigned long arena_size)
 	gxm.blit_fragment = vgxm_shader_get(blit_fragment_source, 1);
 	gxm.overlay_vertex = vgxm_shader_get(overlay_vertex_source, 0);
 	gxm.overlay_fragment = vgxm_shader_get(overlay_fragment_source, 1);
+	gxm.text_vertex = vgxm_shader_get(text_vertex_source, 0);
+	gxm.text_fragment = vgxm_shader_get(text_fragment_source, 1);
 	{
 		const char *setting = getenv("XV_FPS");
 
@@ -4116,6 +4141,7 @@ void vgxm_menu_set(const char *text, int selected)
 		strncpy(gxm.menu_text[next], text, sizeof(gxm.menu_text[next]) - 1);
 		gxm.menu_text[next][sizeof(gxm.menu_text[next]) - 1] = 0;
 		gxm.menu_selected = selected;
+		gxm.menu_halo3 = halo_menu_style_halo3();
 		__atomic_store_n(&gxm.menu_index, next, __ATOMIC_RELEASE);
 		gxm.menu_visible = 1;
 	}
@@ -4291,6 +4317,689 @@ static unsigned int menu_row(struct overlay_vertex *vertices, unsigned int count
 	return count;
 }
 
+/* ---------- the settings panel in the Halo 3 style (Menu style Halo 3:
+docs/superpowers/specs/2026-10-18-halo3-menus-design.md, after Halo 3's and
+Halo Online's settings screens): a black title strip, a navy band with the
+tabs and the rows, an orange bar on the chosen row and its value as
+"< value >", a side panel with the chosen row's name, its value large and
+its help, and a strip of the panel's buttons with their PlayStation
+symbols. Its rectangles go with the overlay's; its text, in the fonts of
+vita_overlay_font.c (app0:menus/halo3/overlay_*.bin), is drawn over them in
+a pass of its own (h3_draw). Without the fonts: the panel as before */
+
+#define H3_ATLAS_WIDTH 512
+#define H3_ATLAS_HEIGHT 512
+#define H3_GLYPHS 4096
+
+/* (0xAABBGGRR, the design's colours) */
+#define H3_DIM 0x60000000u
+#define H3_STRIP 0xE00A0502u
+#define H3_RULE 0x8CCDB4A0u
+#define H3_BAND_TOP 0xED46291Bu
+#define H3_BAND_MIDDLE 0xE0452718u
+#define H3_BAND_BOTTOM 0xE6251006u
+#define H3_BAR 0x8C2878C8u
+#define H3_BAR_FADED 0x1F2878C8u
+#define H3_TAB_LINE 0xF23C8CDCu
+#define H3_TITLE 0xFFF4F4F4u
+#define H3_LABEL 0xFFA8A8A8u
+#define H3_LABEL_CHOSEN 0xFFEBEBEBu
+#define H3_VALUE 0xFF9A8777u
+#define H3_VALUE_CHOSEN 0xFFE0D1C2u
+#define H3_ARROW 0xFF68A8E7u
+#define H3_TAB 0xFF8A7C6Fu
+#define H3_TAB_SHOWN 0xFFF2F2F2u
+#define H3_HELP 0xFFD3CBC3u
+#define H3_BUTTON_TEXT 0xFFECECECu
+#define H3_KEY 0xFF4A423Au
+#define H3_DISC 0xFF3A332Du
+
+/* the layout, on the 960x544 display */
+#define H3_LEFT 82.0f
+#define H3_RIGHT (DISPLAY_WIDTH - 82.0f)
+#define H3_ROWS_RIGHT 610.0f
+#define H3_SIDE_LEFT 648.0f
+#define H3_STRIP_TOP 34.0f
+#define H3_STRIP_HEIGHT 58.0f
+#define H3_BAND_END 480.0f
+#define H3_FOOT_TOP 488.0f
+#define H3_FOOT_HEIGHT 40.0f
+
+struct text_vertex
+{
+	float x, y, u, v;
+	unsigned char color[4];
+};
+
+static struct
+{
+	int state; /* 0 not read yet, 1 ready, -1 not there */
+	struct overlay_atlas atlas;
+	struct overlay_face title, item, small;
+	struct block memory;
+	SceGxmTexture texture;
+	/* the frame's characters, 6 vertices each */
+	struct text_vertex *built;
+	unsigned int count;
+	uint32_t color;
+} h3;
+
+static int h3_face_read(struct overlay_face *face, const char *name)
+{
+	char path[128];
+	SceIoStat stat;
+	SceUID file;
+	unsigned char *data;
+	int result = -1;
+
+	snprintf(path, sizeof(path), "app0:menus/halo3/%s", name);
+	if (sceIoGetstat(path, &stat) < 0 || stat.st_size <= 0 || stat.st_size > 1024 * 1024)
+		return -1;
+	data = malloc((size_t)stat.st_size);
+	file = sceIoOpen(path, SCE_O_RDONLY, 0);
+	if (data && file >= 0 && sceIoRead(file, data, (SceSize)stat.st_size) == (int)stat.st_size)
+		result = overlay_face_read(face, &h3.atlas, data, (unsigned long)stat.st_size);
+	if (file >= 0)
+		sceIoClose(file);
+	free(data);
+	return result;
+}
+
+/* the fonts read and their atlas a texture, the first time the panel shows
+in this style (1), or not there (0: once, the panel as before) */
+static int h3_ready(void)
+{
+	unsigned int rows;
+
+	if (h3.state)
+		return h3.state > 0;
+	h3.state = -1;
+	if (!gxm.text_vertex || !gxm.text_fragment || overlay_atlas_init(&h3.atlas, H3_ATLAS_WIDTH, H3_ATLAS_HEIGHT) < 0)
+		return 0;
+	if (h3_face_read(&h3.title, "overlay_title.bin") < 0 || h3_face_read(&h3.item, "overlay_item.bin") < 0 ||
+		h3_face_read(&h3.small, "overlay_small.bin") < 0 ||
+		!(h3.built = malloc(H3_GLYPHS * 6 * sizeof(*h3.built))))
+	{
+		log_line("gxm: the Halo 3 settings fonts (app0:menus/halo3/overlay_*.bin) not read: the panel as before");
+		overlay_atlas_free(&h3.atlas);
+		return 0;
+	}
+	/* (the texture only the rows the characters use; the quads' texture
+	coordinates are by the atlas's height, made that) */
+	rows = ((unsigned int)h3.atlas.used_height + 7u) & ~7u;
+	if (!block_allocate(&h3.memory, SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE, H3_ATLAS_WIDTH * rows, 1,
+		"settings fonts"))
+	{
+		log_line("gxm: no memory for the Halo 3 settings fonts: the panel as before");
+		overlay_atlas_free(&h3.atlas);
+		free(h3.built);
+		h3.built = NULL;
+		return 0;
+	}
+	memcpy(h3.memory.base, h3.atlas.pixels, H3_ATLAS_WIDTH * rows);
+	h3.atlas.height = (int)rows;
+	sceGxmTextureInitLinear(&h3.texture, h3.memory.base, SCE_GXM_TEXTURE_FORMAT_U8_RRRR, H3_ATLAS_WIDTH, rows, 0);
+	sceGxmTextureSetMinFilter(&h3.texture, SCE_GXM_TEXTURE_FILTER_POINT);
+	sceGxmTextureSetMagFilter(&h3.texture, SCE_GXM_TEXTURE_FILTER_POINT);
+	log_line("gxm: the Halo 3 settings fonts: %ux%u atlas", H3_ATLAS_WIDTH, rows);
+	h3.state = 1;
+	return 1;
+}
+
+static void h3_quad(void *user, float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1)
+{
+	struct text_vertex *v;
+	const float cx0 = 2.0f * x0 / DISPLAY_WIDTH - 1.0f, cx1 = 2.0f * x1 / DISPLAY_WIDTH - 1.0f;
+	const float cy0 = 1.0f - 2.0f * y0 / DISPLAY_HEIGHT, cy1 = 1.0f - 2.0f * y1 / DISPLAY_HEIGHT;
+	int index;
+
+	(void)user;
+	if (h3.count >= H3_GLYPHS)
+		return;
+	v = h3.built + h3.count++ * 6;
+	v[0].x = cx0; v[0].y = cy0; v[0].u = u0; v[0].v = v0;
+	v[1].x = cx1; v[1].y = cy0; v[1].u = u1; v[1].v = v0;
+	v[2].x = cx0; v[2].y = cy1; v[2].u = u0; v[2].v = v1;
+	v[3] = v[1];
+	v[4].x = cx1; v[4].y = cy1; v[4].u = u1; v[4].v = v1;
+	v[5] = v[2];
+	for (index = 0; index < 6; index++)
+		memcpy(v[index].color, &h3.color, 4);
+}
+
+/* text from the pen at x on the baseline (whole pixels: the atlas is
+sampled 1:1); upper: in capitals. Returns its width */
+static float h3_text(const struct overlay_face *face, float x, float baseline, uint32_t color, const char *text,
+	int upper)
+{
+	h3.color = color;
+	return overlay_face_draw(face, &h3.atlas, (float)(int)x, (float)(int)baseline, text, upper, h3_quad, NULL);
+}
+
+/* a capital's height (the baseline of text centred in a box: its top plus
+half of the box's height and half of this) */
+static float h3_capital(const struct overlay_face *face)
+{
+	return face->glyphs['H'].origin_y;
+}
+
+/* a rectangle with a colour at each corner */
+static unsigned int h3_rect(struct overlay_vertex *vertices, unsigned int count, float x, float y, float width,
+	float height, uint32_t top_left, uint32_t top_right, uint32_t bottom_left, uint32_t bottom_right)
+{
+	struct overlay_vertex *v = vertices + count * 6;
+
+	count = overlay_rect(vertices, count, x, y, width, height, top_left);
+	memcpy(v[1].color, &top_right, 4);
+	memcpy(v[3].color, &top_right, 4);
+	memcpy(v[2].color, &bottom_left, 4);
+	memcpy(v[5].color, &bottom_left, 4);
+	memcpy(v[4].color, &bottom_right, 4);
+	return count;
+}
+
+/* a 1-pixel rule across the display, fading out at both ends */
+static unsigned int h3_rule(struct overlay_vertex *vertices, unsigned int count, float y)
+{
+	const uint32_t clear = H3_RULE & 0x00FFFFFFu;
+
+	count = h3_rect(vertices, count, 0.0f, y, DISPLAY_WIDTH * 0.2f, 1.0f, clear, H3_RULE, clear, H3_RULE);
+	count = overlay_rect(vertices, count, DISPLAY_WIDTH * 0.2f, y, DISPLAY_WIDTH * 0.6f, 1.0f, H3_RULE);
+	return h3_rect(vertices, count, DISPLAY_WIDTH * 0.8f, y, DISPLAY_WIDTH * 0.2f, 1.0f, H3_RULE, clear, H3_RULE,
+		clear);
+}
+
+/* the chosen row's bar: orange, fading to the right */
+static unsigned int h3_bar(struct overlay_vertex *vertices, unsigned int count, float x, float y, float width,
+	float height)
+{
+	const float solid = width * 0.85f;
+
+	count = h3_rect(vertices, count, x, y, solid, height, H3_BAR, H3_BAR_FADED, H3_BAR, H3_BAR_FADED);
+	return h3_rect(vertices, count, x + solid, y, width - solid, height, H3_BAR_FADED, H3_BAR_FADED & 0x00FFFFFFu,
+		H3_BAR_FADED, H3_BAR_FADED & 0x00FFFFFFu);
+}
+
+/* a key's name in a small box (L, R, Left/right); returns its width */
+static float h3_key(struct overlay_vertex *vertices, unsigned int *count, float x, float baseline, const char *name)
+{
+	const float cap = h3_capital(&h3.small), width = overlay_face_width(&h3.small, name, 0) + 12.0f;
+
+	*count = overlay_rect(vertices, *count, x, baseline - cap - 5.0f, width, cap + 10.0f, H3_KEY);
+	h3_text(&h3.small, x + 6.0f, baseline, H3_BUTTON_TEXT, name, 0);
+	return width;
+}
+
+/* the PlayStation button a footer's key names (1 cross, 2 circle, 3
+triangle, 4 square: the item font's symbols; 0 none), in English or a
+translation's words */
+static int h3_symbol(const char *key, uint32_t *color)
+{
+	static const struct { const char *name; int symbol; uint32_t color; } keys[] = {
+		{ "Cross", 1, 0xFFFFC29Cu }, { "Cruz", 1, 0xFFFFC29Cu },
+		{ "Circle", 2, 0xFF7A7AFFu }, { "C\xc3\xadrculo", 2, 0xFF7A7AFFu }, { "O", 2, 0xFF7A7AFFu },
+		{ "Triangle", 3, 0xFFA8E04Fu }, { "Tri\xc3\xa1ngulo", 3, 0xFFA8E04Fu },
+		{ "Square", 4, 0xFFE49BFFu }, { "Cuadrado", 4, 0xFFE49BFFu },
+	};
+	size_t index;
+
+	for (index = 0; index < sizeof(keys) / sizeof(keys[0]); index++)
+		if (!strcmp(key, keys[index].name))
+		{
+			*color = keys[index].color;
+			return keys[index].symbol;
+		}
+	return 0;
+}
+
+/* the panel's buttons ("Cross: select   Circle: back", parts two or more
+spaces apart) in the strip: each its button's symbol on a dark disc, or its
+key in a box, then what it does */
+static unsigned int h3_buttons(struct overlay_vertex *vertices, unsigned int count, float x, float top,
+	float height, const char *text)
+{
+	const float baseline = top + (height + h3_capital(&h3.item)) / 2.0f;
+
+	while (*text)
+	{
+		char part[96];
+		size_t length = 0;
+		char *colon;
+
+		while (*text == ' ')
+			text++;
+		while (text[length] && !(text[length] == ' ' && text[length + 1] == ' '))
+			length++;
+		if (!length)
+			break;
+		if (length > sizeof(part) - 1)
+			length = sizeof(part) - 1;
+		memcpy(part, text, length);
+		part[length] = 0;
+		text += length;
+		colon = strstr(part, ": ");
+		if (colon)
+		{
+			uint32_t color = 0;
+			int symbol;
+
+			*colon = 0;
+			symbol = h3_symbol(part, &color);
+			if (symbol)
+			{
+				char mark[2] = { (char)symbol, 0 };
+
+				h3_text(&h3.item, x, baseline, H3_DISC, "\x05", 0);
+				x += h3_text(&h3.item, x, baseline, color, mark, 0);
+			}
+			else
+				x += h3_key(vertices, &count, x, baseline, part) + 8.0f;
+		}
+		{
+			/* (what it does with a capital, as Halo 3's "Select", "Back") */
+			char *label = colon ? colon + 2 : part;
+
+			if (label[0] >= 'a' && label[0] <= 'z')
+				label[0] = (char)(label[0] - 'a' + 'A');
+			x += h3_text(&h3.item, x, baseline, H3_BUTTON_TEXT, label, 0) + 30.0f;
+		}
+	}
+	return count;
+}
+
+/* text wrapped at width, its lines line_height apart from the baseline y;
+returns the baseline after the last */
+static float h3_wrapped(const struct overlay_face *face, float x, float y, float width, float line_height,
+	uint32_t color, const char *text)
+{
+	char line[256];
+	size_t length = 0;
+
+	while (text && *text)
+	{
+		const char *end = text;
+		size_t word;
+
+		while (*end == ' ')
+			end++;
+		while (*end && *end != ' ' && *end != '\n')
+			end++;
+		word = (size_t)(end - text);
+		if (length + word >= sizeof(line))
+			break;
+		memcpy(line + length, text, word);
+		line[length + word] = 0;
+		if (length && overlay_face_width(face, line, 0) > width)
+		{
+			/* (the line so far, then the word without its spaces starts the next) */
+			line[length] = 0;
+			h3_text(face, x, y, color, line, 0);
+			y += line_height;
+			while (*text == ' ')
+				text++;
+			word = (size_t)(end - text);
+			memcpy(line, text, word);
+			length = word;
+			line[length] = 0;
+		}
+		else
+			length += word;
+		text = end;
+		if (*text == '\n')
+		{
+			line[length] = 0;
+			h3_text(face, x, y, color, line, 0);
+			y += line_height;
+			length = 0;
+			text++;
+		}
+	}
+	if (length)
+	{
+		line[length] = 0;
+		h3_text(face, x, y, color, line, 0);
+		y += line_height;
+	}
+	return y;
+}
+
+/* a row's value without the classic panel's marks: the arrows ("< 544p >"),
+the spaces around it, the choices this build lacks ('\x07' on) */
+static void h3_value(char *out, size_t size, const char *value, int *left, int *right)
+{
+	const char *end = strchr(value, '\x07');
+	size_t length;
+
+	if (!end)
+		end = value + strlen(value);
+	while (value < end && *value == ' ')
+		value++;
+	*left = value < end && *value == '<';
+	if (*left)
+		value++;
+	while (end > value && end[-1] == ' ')
+		end--;
+	*right = end > value && end[-1] == '>';
+	if (*right)
+		end--;
+	while (value < end && *value == ' ')
+		value++;
+	while (end > value && end[-1] == ' ')
+		end--;
+	length = (size_t)(end - value);
+	if (length > size - 1)
+		length = size - 1;
+	memcpy(out, value, length);
+	out[length] = 0;
+}
+
+/* the tab bar: L, the tabs (the shown one bright and underlined in
+orange), R */
+static unsigned int h3_tabs(struct overlay_vertex *vertices, unsigned int count, float y, const char *tabs)
+{
+	const struct overlay_face *face = &h3.item;
+	const float cap = h3_capital(&h3.item), baseline = y + cap;
+	float x = H3_LEFT, needed = 0.0f, gap = 26.0f;
+	const char *at;
+	char name[64];
+
+	for (at = tabs; *at; )
+	{
+		size_t length = strcspn(at, "|"), shown = *at == '*';
+
+		if (length - shown < sizeof(name))
+		{
+			memcpy(name, at + shown, length - shown);
+			name[length - shown] = 0;
+			needed += overlay_face_width(face, name, 1) + gap;
+		}
+		at += length + (at[length] == '|');
+	}
+	/* (a translation's longer names: the smaller font) */
+	if (needed > H3_RIGHT - H3_LEFT - 80.0f)
+		face = &h3.small;
+	x += h3_key(vertices, &count, x, baseline, "L") + 18.0f;
+	while (*tabs)
+	{
+		size_t length = strcspn(tabs, "|"), shown = *tabs == '*', name_length = length - shown;
+		float width;
+
+		if (name_length > sizeof(name) - 1)
+			name_length = sizeof(name) - 1;
+		memcpy(name, tabs + shown, name_length);
+		name[name_length] = 0;
+		width = h3_text(face, x, baseline, shown ? H3_TAB_SHOWN : H3_TAB, name, 1);
+		if (shown)
+			count = h3_rect(vertices, count, x, baseline + 6.0f, width, 2.0f, H3_TAB_LINE, H3_TAB_LINE & 0x00FFFFFFu,
+				H3_TAB_LINE, H3_TAB_LINE & 0x00FFFFFFu);
+		x += width + gap;
+		tabs += length;
+		if (*tabs == '|')
+			tabs++;
+	}
+	h3_key(vertices, &count, x - gap + 18.0f, baseline, "R");
+	return count;
+}
+
+/* the panel with a tab bar (menu_build's lines; diagram: the touch zones') */
+static unsigned int h3_panel(struct overlay_vertex *vertices, unsigned int count, unsigned int limit,
+	const char **lines, int line_count, const char *diagram)
+{
+	const float row_width = H3_ROWS_RIGHT - H3_LEFT, side_width = H3_RIGHT - H3_SIDE_LEFT;
+	const float item_cap = h3_capital(&h3.item), small_cap = h3_capital(&h3.small);
+	const char *help = NULL, *footer = NULL;
+	char chosen_label[64] = "", chosen_value[96] = "";
+	float y, rows_top = 0.0f, row_height, units = 0.0f;
+	int index;
+
+	count = overlay_rect(vertices, count, 0.0f, 0.0f, DISPLAY_WIDTH, DISPLAY_HEIGHT, H3_DIM);
+	count = overlay_rect(vertices, count, 0.0f, H3_STRIP_TOP, DISPLAY_WIDTH, H3_STRIP_HEIGHT, H3_STRIP);
+	h3_text(&h3.title, H3_LEFT, H3_STRIP_TOP + (H3_STRIP_HEIGHT + h3_capital(&h3.title)) / 2.0f, H3_TITLE,
+		T("Settings"), 1);
+	y = H3_STRIP_TOP + H3_STRIP_HEIGHT;
+	count = h3_rect(vertices, count, 0.0f, y, DISPLAY_WIDTH, 78.0f, H3_BAND_TOP, H3_BAND_TOP, H3_BAND_MIDDLE,
+		H3_BAND_MIDDLE);
+	count = h3_rect(vertices, count, 0.0f, y + 78.0f, DISPLAY_WIDTH, H3_BAND_END - y - 78.0f, H3_BAND_MIDDLE,
+		H3_BAND_MIDDLE, H3_BAND_BOTTOM, H3_BAND_BOTTOM);
+	count = h3_rule(vertices, count, y);
+	count = h3_rule(vertices, count, H3_BAND_END);
+	count = h3_tabs(vertices, count, y + 16.0f, lines[0] + 1);
+	y += 54.0f;
+	/* (the rows' height: as many as there are in the band, 22 to 34
+	pixels; a gap half a row) */
+	for (index = 1; index < line_count; index++)
+	{
+		char mark = lines[index][0];
+
+		if (mark == '\x03')
+			y += 26.0f;
+		else if (!mark)
+			units += 0.5f;
+		else if (mark != '\x05' && mark != '\x06')
+			units += 1.0f;
+	}
+	row_height = units > 0.0f ? (H3_BAND_END - 10.0f - y) / units : 34.0f;
+	if (row_height > 34.0f)
+		row_height = 34.0f;
+	if (row_height < 22.0f)
+		row_height = 22.0f;
+	y = H3_STRIP_TOP + H3_STRIP_HEIGHT + 54.0f;
+	for (index = 1; index < line_count && y < H3_BAND_END; index++)
+	{
+		const char *line = lines[index];
+		int chosen = index == gxm.menu_selected;
+
+		if (line[0] == '\x05')
+		{
+			help = line + 1;
+			continue;
+		}
+		if (line[0] == '\x06')
+		{
+			footer = line + 1;
+			continue;
+		}
+		if (line[0] == '\x03')
+		{
+			h3_text(&h3.small, H3_LEFT, y + small_cap, H3_VALUE, line + 1, 1);
+			y += 26.0f;
+			continue;
+		}
+		if (!line[0])
+		{
+			y += row_height / 2.0f;
+			continue;
+		}
+		if (!rows_top)
+			rows_top = y;
+		if (chosen)
+			count = h3_bar(vertices, count, H3_LEFT, y, diagram ? row_width : row_width, row_height - 2.0f);
+		{
+			const float baseline = y + (row_height - 2.0f + item_cap) / 2.0f;
+
+			if (line[0] == '\x04')
+				h3_text(&h3.small, H3_LEFT + 12.0f, y + (row_height - 2.0f + small_cap) / 2.0f, H3_VALUE, line + 1, 0);
+			else if (line[0] == '!')
+				h3_text(&h3.item, H3_LEFT + 12.0f, baseline, MENU_WARNING, line + 1, 0);
+			else
+			{
+				const char *split = strchr(line, '\x02');
+				char label[64], value[96];
+				size_t length = split ? (size_t)(split - line) : strlen(line);
+				int left = 0, right = 0;
+				float x = H3_ROWS_RIGHT - 12.0f;
+
+				if (length > sizeof(label) - 1)
+					length = sizeof(label) - 1;
+				memcpy(label, line, length);
+				label[length] = 0;
+				value[0] = 0;
+				if (split)
+					h3_value(value, sizeof(value), split + 1, &left, &right);
+				h3_text(&h3.item, H3_LEFT + 12.0f, baseline, chosen ? H3_LABEL_CHOSEN : H3_LABEL, label, 1);
+				/* (the value right-aligned; the chosen row's arrows where it
+				can change) */
+				if (chosen && right)
+				{
+					x -= overlay_face_width(&h3.item, ">", 0);
+					h3_text(&h3.item, x, baseline, H3_ARROW, ">", 0);
+					x -= 10.0f;
+				}
+				x -= overlay_face_width(&h3.item, value, 1);
+				h3_text(&h3.item, x, baseline, chosen ? H3_VALUE_CHOSEN : H3_VALUE, value, 1);
+				if (chosen && left)
+					h3_text(&h3.item, x - 10.0f - overlay_face_width(&h3.item, "<", 0), baseline, H3_ARROW, "<", 0);
+				if (chosen)
+				{
+					snprintf(chosen_label, sizeof(chosen_label), "%s", label);
+					snprintf(chosen_value, sizeof(chosen_value), "%s", value);
+				}
+			}
+		}
+		y += row_height;
+	}
+	if (!rows_top)
+		rows_top = H3_STRIP_TOP + H3_STRIP_HEIGHT + 54.0f;
+	/* the side panel: the chosen row, its value large, its help; the touch
+	zones' diagram above the help on that page */
+	y = rows_top;
+	if (diagram)
+	{
+		count = menu_touch_diagram(vertices, count, limit, H3_SIDE_LEFT + 40.0f, y - 8.0f, diagram);
+		y += 250.0f;
+	}
+	else if (chosen_label[0])
+	{
+		const struct overlay_face *big = overlay_face_width(&h3.title, chosen_value, 1) <= side_width ? &h3.title :
+			&h3.item;
+
+		h3_text(&h3.small, H3_SIDE_LEFT, y + small_cap, H3_VALUE, chosen_label, 1);
+		y += small_cap + 10.0f;
+		if (chosen_value[0])
+		{
+			h3_text(big, H3_SIDE_LEFT, y + h3_capital(big), H3_TITLE, chosen_value, 1);
+			y += h3_capital(big) + 14.0f;
+		}
+		count = overlay_rect(vertices, count, H3_SIDE_LEFT, y, side_width, 1.0f, 0x5A9A8777u);
+		y += 10.0f;
+	}
+	if (help && help[0])
+		h3_wrapped(&h3.small, H3_SIDE_LEFT, y + small_cap, side_width, small_cap + 9.0f, H3_HELP, help);
+	/* the buttons' strip */
+	count = overlay_rect(vertices, count, 0.0f, H3_FOOT_TOP, DISPLAY_WIDTH, H3_FOOT_HEIGHT, H3_STRIP);
+	if (footer)
+		count = h3_buttons(vertices, count, H3_LEFT, H3_FOOT_TOP, H3_FOOT_HEIGHT, footer);
+	return count;
+}
+
+/* the panel without a tab bar (a message, a question, the guide, a screen an
+action opens): Halo 3's dialog, a band across the screen, its title in a
+strip above, its lines (the chosen one on the orange bar) and its buttons
+in a strip below */
+static unsigned int h3_dialog(struct overlay_vertex *vertices, unsigned int count, const char **lines, int line_count)
+{
+	const float item_cap = h3_capital(&h3.item), text_width = H3_RIGHT - H3_LEFT;
+	const int body = line_count - 2;
+	float row_height = 30.0f, height, top, y;
+	int index;
+
+	if (body > 0 && 56.0f + body * row_height + 20.0f + 48.0f > DISPLAY_HEIGHT - 16.0f)
+		row_height = (DISPLAY_HEIGHT - 16.0f - 56.0f - 20.0f - 48.0f) / (float)body;
+	height = 56.0f + (body > 0 ? body : 0) * row_height + 20.0f;
+	top = (float)(int)((DISPLAY_HEIGHT - height - 48.0f) / 2.0f);
+	count = overlay_rect(vertices, count, 0.0f, 0.0f, DISPLAY_WIDTH, DISPLAY_HEIGHT, H3_DIM);
+	count = overlay_rect(vertices, count, 0.0f, top, DISPLAY_WIDTH, 56.0f, H3_STRIP);
+	{
+		const struct overlay_face *face = overlay_face_width(&h3.title, lines[0], 1) <= text_width ? &h3.title :
+			&h3.item;
+
+		h3_text(face, H3_LEFT, top + (56.0f + h3_capital(face)) / 2.0f, H3_TITLE, lines[0], 1);
+	}
+	count = h3_rect(vertices, count, 0.0f, top + 56.0f, DISPLAY_WIDTH, height - 56.0f, H3_BAND_TOP, H3_BAND_TOP,
+		H3_BAND_BOTTOM, H3_BAND_BOTTOM);
+	count = h3_rule(vertices, count, top + 56.0f);
+	count = h3_rule(vertices, count, top + height);
+	for (index = 1, y = top + 66.0f; index < line_count - 1; index++, y += row_height)
+	{
+		const char *line = lines[index];
+		uint32_t color = H3_LABEL_CHOSEN;
+		const struct overlay_face *face = &h3.item;
+
+		if (index == gxm.menu_selected)
+			count = h3_bar(vertices, count, H3_LEFT, y, text_width, row_height - 2.0f);
+		if (line[0] == '!')
+		{
+			color = MENU_WARNING;
+			line++;
+		}
+		if (overlay_face_width(face, line, 0) > text_width - 24.0f)
+			face = &h3.small;
+		h3_text(face, H3_LEFT + 12.0f, y + (row_height - 2.0f + (face == &h3.item ? item_cap :
+			h3_capital(&h3.small))) / 2.0f, color, line, 0);
+	}
+	count = overlay_rect(vertices, count, 0.0f, top + height + 8.0f, DISPLAY_WIDTH, H3_FOOT_HEIGHT, H3_STRIP);
+	return h3_buttons(vertices, count, H3_LEFT, top + height + 8.0f, H3_FOOT_HEIGHT, lines[line_count - 1]);
+}
+
+/* the frame's characters over the overlay's rectangles */
+static void h3_draw(void)
+{
+	static SceGxmVertexProgram *vertex_program;
+	SceGxmFragmentProgram *fragment_program;
+	SceGxmBlendInfo blend;
+	struct text_vertex *vertices;
+	unsigned short *indices;
+	unsigned int index, total = h3.count * 6;
+
+	if (!total)
+		return;
+	if (!vertex_program)
+	{
+		const struct shader *shader = &gxm.shaders[gxm.text_vertex - 1];
+		static const struct { const char *name; unsigned int offset; SceGxmAttributeFormat format; } inputs[3] = {
+			{ "position", 0, SCE_GXM_ATTRIBUTE_FORMAT_F32 },
+			{ "texcoord", 2 * sizeof(float), SCE_GXM_ATTRIBUTE_FORMAT_F32 },
+			{ "color", 4 * sizeof(float), SCE_GXM_ATTRIBUTE_FORMAT_U8N },
+		};
+		SceGxmVertexAttribute attributes[3];
+		SceGxmVertexStream stream;
+
+		for (index = 0; index < 3; index++)
+		{
+			attributes[index].streamIndex = 0;
+			attributes[index].offset = (uint16_t)inputs[index].offset;
+			attributes[index].format = inputs[index].format;
+			attributes[index].componentCount = index == 2 ? 4 : 2;
+			attributes[index].regIndex = (uint16_t)sceGxmProgramParameterGetResourceIndex(
+				sceGxmProgramFindParameterByName(shader->program, inputs[index].name));
+		}
+		stream.stride = sizeof(struct text_vertex);
+		stream.indexSource = SCE_GXM_INDEX_SOURCE_INDEX_16BIT;
+		if (sceGxmShaderPatcherCreateVertexProgram(gxm.patcher, shader->id, attributes, 3, &stream, 1, &vertex_program) < 0)
+			return;
+	}
+	memset(&blend, 0, sizeof(blend));
+	blend.colorMask = SCE_GXM_COLOR_MASK_ALL;
+	blend.colorFunc = blend.alphaFunc = SCE_GXM_BLEND_FUNC_ADD;
+	blend.colorSrc = blend.alphaSrc = SCE_GXM_BLEND_FACTOR_SRC_ALPHA;
+	blend.colorDst = blend.alphaDst = SCE_GXM_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+	fragment_program = fragment_program_get(gxm.text_fragment, gxm.text_vertex, &blend);
+	vertices = vgxm_worker_alloc(total * sizeof(*vertices), 16);
+	indices = vgxm_worker_alloc(total * sizeof(*indices), 16);
+	if (!fragment_program || !vertices || !indices)
+		return;
+	memcpy(vertices, h3.built, total * sizeof(*vertices));
+	for (index = 0; index < total; index++)
+		indices[index] = (unsigned short)index;
+	shadow.valid = 0;
+	sceGxmSetVertexProgram(gxm.context, vertex_program);
+	sceGxmSetFragmentProgram(gxm.context, fragment_program);
+	sceGxmSetVertexStream(gxm.context, 0, vertices);
+	sceGxmSetFragmentTexture(gxm.context, 0, &h3.texture);
+	sceGxmDraw(gxm.context, SCE_GXM_PRIMITIVE_TRIANGLES, SCE_GXM_INDEX_FORMAT_U16, indices, total);
+	gxm.scene_draws++;
+}
+
 /* the settings panel. With a tab bar (a first line that starts with a
 tab, vita_settings.c show_list): the panel the height of the screen, the
 tab bar at its top, a page's title ('\x03'), the rows (label '\x02' value)
@@ -4327,6 +5036,9 @@ static unsigned int menu_build(struct overlay_vertex *vertices, unsigned int cou
 	}
 	if (line_count < 2)
 		return count;
+	if (gxm.menu_halo3 && h3_ready())
+		return lines[0][0] == '\t' ? h3_panel(vertices, count, limit, lines, line_count, diagram) :
+			h3_dialog(vertices, count, lines, line_count);
 	if (lines[0][0] == '\t')
 	{
 		const float top = 12.0f, height = DISPLAY_HEIGHT - 24.0f, bottom = top + height;
@@ -4565,6 +5277,7 @@ static void overlay_draw(void)
 				pool_in_user ? 0xFF40E0FFu : 0xFFE0E0E0u, text);
 		}
 	}
+	h3.count = 0;
 	if (gxm.menu_visible)
 		count = menu_build(vertices, count, limit);
 	if (!count)
@@ -4588,6 +5301,7 @@ static void overlay_draw(void)
 	sceGxmSetRegionClip(gxm.context, SCE_GXM_REGION_CLIP_OUTSIDE, 0, 0, DISPLAY_WIDTH - 1, DISPLAY_HEIGHT - 1);
 	sceGxmDraw(gxm.context, SCE_GXM_PRIMITIVE_TRIANGLES, SCE_GXM_INDEX_FORMAT_U16, indices, count * 6);
 	gxm.scene_draws++;
+	h3_draw();
 }
 
 /* ---------- system dialogs (the ad hoc group's network check dialog,
