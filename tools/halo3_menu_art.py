@@ -77,6 +77,24 @@ def panel():
     ])
 
 
+def custom_panel():
+    # CUSTOMIZATION's editor: the panel (as panel(), over the editor's 560x400
+    # at 40,40, stretched) with a window at the right where the scene packs'
+    # Spartan stands (the preview, 396,98 to 592,304 on the screen), rimmed
+    width, height = 256, 256
+    image = vertical_gradient((width, height), [
+        (0.0, (27, 41, 70, alpha(.95))),
+        (0.2, (24, 39, 69, alpha(.90))),
+        (1.0, (6, 16, 37, alpha(.90))),
+    ])
+    x0, x1 = round(356 / 560 * width), round(552 / 560 * width)
+    y0, y1 = round(58 / 400 * height), round(264 / 400 * height)
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([x0, y0, x1, y1], fill=(0, 0, 0, 0))
+    draw.rectangle([x0, y0, x1, y1], outline=(150, 176, 206, alpha(.45)))
+    return image
+
+
 def item_on():
     # the main menu's selection: Halo 3's solid orange bar, a light edge on top
     image = horizontal_gradient((128, 16), [
@@ -431,6 +449,7 @@ ART = {
     'column.png': column,
     'haze.png': haze,
     'panel.png': panel,
+    'custom_panel.png': custom_panel,
     'item_on.png': item_on,
     'item_off.png': item_off,
     'row_on.png': row_on,

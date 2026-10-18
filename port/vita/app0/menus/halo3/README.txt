@@ -29,9 +29,11 @@ these screens stand for the Xbox's own, over the same animated Halo ring:
   profiles as above, then the chosen one's editor - PLAYER NAME, COLOR
   (the game's eighteen, or RANDOM: the host picks), STICK LAYOUT, BUTTON
   LAYOUT, LOOK SENSITIVITY, INVERT LOOK, INVERT FLIGHT, AUTO-CENTER,
-  VIBRATION, the Xbox profile's fields - with the profile's colour at the
-  right where the Spartan will stand (menu_functions.c
-  h3_custom_spartan_preview). Circle saves the changes to the profile, as
+  VIBRATION, the Xbox profile's fields - with the scene packs' Spartan at
+  the right, in the profile's colour and recoloured live as COLOR changes,
+  in front of the editor's own camera (menu_functions.c
+  h3_custom_spartan_preview; the colour's swatch instead when there is no
+  pack or the scenes are off). Circle saves the changes to the profile, as
   the Xbox's SAVE CHANGES did. The settings panel's Controls tab keeps the
   PS Vita's own (look speed, invert, which Vita button is each Xbox button):
   they act on top of the profile's, and the help says so.

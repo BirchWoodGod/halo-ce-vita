@@ -50,6 +50,9 @@ EXPECTED = {
     # (the profile screens: a profile's colour, one for each of the game's
     # eighteen and one for none, which the host picks)
     'swatch_random.png': (16, 16),
+    # (CUSTOMIZATION's editor: its panel, a window at the right for the
+    # scene packs' Spartan)
+    'custom_panel.png': (256, 256),
 }
 EXPECTED.update({'swatch_%02d.png' % index: (16, 16) for index in range(18)})
 

@@ -85,7 +85,11 @@
 #            layout, the look sensitivity and invert look changed, Circle saves
 #            them; blam.sav and SaveMeta.xbx read back (the other fields kept),
 #            then the harness started again on that save: the editor shows
-#            them, and leaving it saves nothing
+#            them, and leaving it saves nothing; the preview (the
+#            menu_spartan pack's Spartan in the editor's window, in front of
+#            its own camera): shown in the profile's colour, made again in
+#            RED as COLOR changes, never the swatch meanwhile, let go with the
+#            editor; with HALO_SCENE_PACKS=0 the swatch alone
 #   h3damaged  a profile of a 0-byte blam.sav and one of garbage: SELECT
 #            PROFILE says each is damaged and plays neither, CUSTOMIZATION
 #            edits neither, CREATE NEW PROFILE still makes one; with
@@ -608,6 +612,23 @@ for case in $cases; do
 		grep -aq "menus: h3 customize: saved Vita Chief: color 2, stick 1, buttons 0, look 5, invert 1" "$log" ||
 			fail h3customize "Circle did not save the changes"
 		h3_no_xbox_profiles h3customize
+		# (the preview: the scene packs' Spartan in the editor's window, in the profile's colour - its
+		# RANDOM shown white -, made again in RED as COLOR changes, let go with the editor)
+		grep -aE "h3 customize: .*preview|h3 scene object 4|h3 scene: h3/custom" "$log"
+		grep -aq "menus: h3 scene: h3/custom/screen: camera point multiplayer" "$log" ||
+			fail h3customize "the editor's own camera was not set"
+		grep -aq "menus: h3 customize: preview Spartan asked for in colour 0" "$log" ||
+			fail h3customize "the preview's Spartan was not asked for"
+		grep -aq "menus: h3 scene object 4: characters.cyborg_mp.cyborg_mp (menu_spartan) at .* colour 0: made" "$log" &&
+			grep -aq "menus: h3 customize: the preview shows the Spartan" "$log" ||
+			fail h3customize "the preview did not show the Spartan"
+		grep -aq "menus: h3 customize: preview Spartan recoloured 2" "$log" &&
+			grep -aq "menus: h3 scene object 4: characters.cyborg_mp.cyborg_mp (menu_spartan) at .* colour 2: made" "$log" ||
+			fail h3customize "the preview was not recoloured RED"
+		grep -aq "menus: h3 customize: the preview shows the swatch" "$log" &&
+			fail h3customize "the preview fell back to the swatch while it was recoloured"
+		grep -aq "menus: h3 customize: preview Spartan hidden" "$log" && grep -aq "menus: h3 scene object 4: deleted" "$log" ||
+			fail h3customize "the preview's Spartan was not let go with the editor"
 		# (the profile's file: the fields changed, the others as they were; renamed, its folder too)
 		file=$(ls "$out"/h3customize/save/u/UDATA/*/blam.sav 2>/dev/null | head -1)
 		before=$(profile_fields "$HALO_TEST_PROFILE")
@@ -619,12 +640,16 @@ for case in $cases; do
 			fail h3customize "blam.sav's other fields changed"
 		[ -n "$file" ] && [ "$(tr -d '\0' < "$(dirname "$file")/SaveMeta.xbx")" = "Vita Chief" ] ||
 			fail h3customize "SaveMeta.xbx does not name the profile Vita Chief"
-		# (started again on that save: the editor shows the changes; Circle saves nothing)
+		# (started again on that save: the editor shows the changes; Circle saves nothing; and with
+		# HALO_SCENE_PACKS=0 no Spartan: the window keeps the colour's swatch)
 		rm -rf "$out/h3customize_saved"
 		cp -r "$out/h3customize/save" "$out/h3customize_saved"
 		save_from=$out/h3customize_saved run h3customize_again "$menus_data" 25 \
-			"$h3pad down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000 b wait:150:3000" HALO_MENU_STYLE=halo3
+			"$h3pad down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000 b wait:150:3000" HALO_MENU_STYLE=halo3 \
+			HALO_SCENE_PACKS=0
 		check_h3 h3customize_again halo3
+		grep -aqE "menus: h3 customize: the preview shows the Spartan|h3 scene object 4: .* made" "$out/h3customize_again/run.log" &&
+			fail h3customize "HALO_SCENE_PACKS=0: the preview showed a Spartan all the same"
 		grep -aq "menus: h3 customize: editing Vita Chief: color 2, stick 1, buttons 0, look 5, invert 1" "$out/h3customize_again/run.log" ||
 			fail h3customize "the changes were not there after a restart"
 		grep -aq "menus: h3 customize: Vita Chief: no changes" "$out/h3customize_again/run.log" ||

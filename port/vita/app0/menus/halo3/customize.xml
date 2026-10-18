@@ -5,12 +5,16 @@ main menu's CUSTOMIZATION opens, and the edit screens it leads to: name, control
 advanced controls, color). First the profiles, as SELECT PROFILE (halo3/profiles.xml's widgets:
 the list, the card, Square to delete, Triangle to make one), then the chosen one's editor, laid
 out as Halo 3's settings: rows with their values in ice blue, the focused one's < > and help, the
-profile's colour at the right where the Spartan will stand. Its rows change the profile's own
+profile's Spartan at the right, in its colour. Its rows change the profile's own
 fields as the Xbox's screens do (menu_functions.c "port h3 custom ..."), and Circle saves them
 to the profile, when anything changed, as the Xbox's SAVE CHANGES did. The settings panel's
 Controls tab keeps the PS Vita's own settings; the help says where the two meet. The art is this
 folder's own (tools/halo3_menu_art.py). -->
 <menus root="h3/custprof/screen" replaces="ui\shell\main_menu\settings_select\player_setup\player_profile_select_screen">
+	<!-- (the editor's panel: a window at the right for the Spartan, tools/halo3_menu_art.py) -->
+	<bitmap name="h3/custom_panel">
+		<frame png="halo3/custom_panel.png" width="256" height="256"/>
+	</bitmap>
 	<strings name="h3/custom_labels">
 		<string text="PLAYER NAME"/>
 		<string text="COLOR"/>
@@ -36,11 +40,13 @@ folder's own (tools/halo3_menu_art.py). -->
 	</strings>
 
 	<!-- the profiles first: SELECT PROFILE's screen, titled CUSTOMIZATION; a profile's Cross opens
-	its editor ("port h3 profile edit": the rows' second handler) -->
+	its editor ("port h3 profile edit": the rows' second handler); behind it the ring's own flight,
+	as behind the main menu (scene="ring": back from the editor's camera) -->
 	<widget name="h3/custprof/title" type="text" left="52" top="46" width="400" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/profile_text" string_index="2"/>
 	<widget name="h3/custprof/subtitle" type="text" left="52" top="72" width="536" height="16" font="h3/font_small" color="#FFCFD9E3" string_list="h3/profile_text" string_index="3"/>
-	<widget name="h3/custprof/screen" flags="pass_unhandled_to_focused_child">
+	<widget name="h3/custprof/screen" flags="pass_unhandled_to_focused_child" scene="ring">
 		<on event="created" run="port h3 profiles customize"/>
+		<on event="created" run="port h3 scene"/>
 		<on event="b back" back="true"/>
 		<on event="x" run="port h3 profile delete ask" open="h3/profdel/screen"/>
 		<on event="y" run="port h3 profile create"/>
@@ -170,14 +176,17 @@ folder's own (tools/halo3_menu_art.py). -->
 		<child widget="h3/custom/op_vibration" x="52" y="278"/>
 	</widget>
 
-	<!-- THE SPARTAN PREVIEW: here, at the right, the live Spartan in the profile's colour will
-	stand, once scene packs (feat/scene-packs) can place the pack's Spartan in the menu's scene in a
-	given colour: menu_functions.c h3_custom_spartan_preview is handed the colour each frame. Until
-	then this panel shows the colour's swatch and name in its place (preview_swatch, preview_name);
-	with the Spartan there, the swatch goes and the panel stays as its frame -->
+	<!-- THE SPARTAN PREVIEW: at the right, in the editor panel's window (h3/custom/panel), the
+	scene packs' Spartan (menu_spartan) stands in the profile's colour, recoloured as COLOR changes
+	(menu_functions.c h3_custom_spartan_preview: menu_scene_spartan_show, _color, _hide), in front of
+	the editor's own camera (its scene=, in ui.map's multiplayer point, which no screen open with it
+	uses). Until it stands there - no pack, no multiplayer map to build it from, scenes off - the
+	window shows the colour's swatch in a panel instead (preview_frame, preview_swatch); the colour's
+	name is under it either way -->
+	<widget name="h3/custom/panel" left="40" top="40" width="560" height="400" bitmap="h3/custom_panel"/>
 	<widget name="h3/custom/preview_frame" left="400" top="102" width="188" height="198" bitmap="h3/panel"/>
 	<widget name="h3/custom/preview_swatch" left="416" top="114" width="156" height="148" bitmap="h3/swatch"/>
-	<widget name="h3/custom/preview_name" type="text" left="400" top="270" width="188" height="20" align="center" font="h3/font_item" color="#FFE6ECF2" text_y="2"/>
+	<widget name="h3/custom/preview_name" type="text" left="396" top="308" width="196" height="20" align="center" font="h3/font_item" color="#FFE6ECF2" text_y="2"/>
 
 	<widget name="h3/custom/title" type="text" left="52" top="46" width="400" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/profile_text" string_index="2"/>
 	<widget name="h3/custom/profile_name" type="text" left="52" top="72" width="536" height="16" font="h3/font_small" color="#FFCFD9E3"/>
@@ -185,11 +194,11 @@ folder's own (tools/halo3_menu_art.py). -->
 	<widget name="h3/custom/status" type="text" left="52" top="358" width="536" height="34" font="h3/font_small" color="#FFF0B070" text_y="1"/>
 	<widget name="h3/custom/saved_note" type="text" left="52" top="396" width="536" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/profile_text" string_index="11"/>
 	<widget name="h3/custom/change" type="text" left="72" top="421" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/profile_text" string_index="12"/>
-	<widget name="h3/custom/screen" flags="pass_unhandled_to_focused_child">
+	<widget name="h3/custom/screen" flags="pass_unhandled_to_focused_child" scene="multiplayer -40 -1.8 15.5 25 0">
+		<on event="created" run="port h3 scene"/>
 		<on event="b back" run="port h3 custom save" back="true"/>
 		<on event="deleted" run="port h3 custom close"/>
-		<child widget="h3/main/haze"/>
-		<child widget="h3/pick/panel"/>
+		<child widget="h3/custom/panel"/>
 		<child widget="h3/custom/title"/>
 		<child widget="h3/custom/profile_name"/>
 		<child widget="h3/pick/rule"/>

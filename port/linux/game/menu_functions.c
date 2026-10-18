@@ -2067,6 +2067,12 @@ static struct
 	long index;
 	char status[160];
 	char said[256];
+	/* the preview's Spartan asked for (menu_scene_spartan_show), in this
+	colour (the game's index, NONE for none) */
+	boolean preview_asked;
+	short preview_color;
+	/* the window shows the Spartan, not the swatch (what was last logged) */
+	boolean preview_shown;
 } h3_custom;
 
 /* two profile indices of the same file (their flags aside: a profile just
@@ -2279,6 +2285,8 @@ static boolean h3_profile_edit(short item)
 	h3_custom.index = h3_profiles.indices[item];
 	h3_custom.status[0] = 0;
 	h3_custom.said[0] = 0;
+	h3_custom.preview_asked = FALSE;
+	h3_custom.preview_shown = FALSE;
 	platform_log("menus: h3 customize: editing %s: color %d, stick %d, buttons %d, look %d, invert %d, flight %d, "
 		"autocenter %d, vibration %s", name, profile->primary_color_index, profile->controller_settings.joystick_preset,
 		profile->controller_settings.button_preset, profile->controller_settings.look_sensitivity,
@@ -2645,15 +2653,62 @@ static boolean h3_custom_change(struct widget_instance *widget, int step)
 	return TRUE;
 }
 
-/* the live Spartan in the profile's colour, behind the editor. Scene packs
-(feat/scene-packs, port/linux/game/scene_pack.c) will place a pack's
-Spartan in the menu's scene: this is where the editor hands it the colour
-(color: the game's index, NONE for none). Until it can, the screen's
-preview panel (halo3/customize.xml h3/custom/preview_*) shows the colour's
-swatch in its place. */
-static void h3_custom_spartan_preview(short color)
+/* the live Spartan in the profile's colour, in the editor panel's window:
+the scene packs' menu_spartan (menu_scene_objects.c) in front of the
+editor's own camera (its screen's scene=), placed where the window is, made
+again in the new colour as COLOR changes (color: the game's index; NONE, a
+profile the host gives a colour, shows Halo's default, white). Nothing with
+the scenes off (no camera of the editor's: the ring's flight would be
+behind) or before the scene is known; the window keeps the colour's swatch
+until the Spartan stands there (menu_scene_spartan_shown: its pack loaded,
+built from the player's multiplayer map the first time). */
+#define H3_CUSTOM_SPARTAN_PLACEMENT "1.53 0.59 -0.25 20"
+
+static void h3_custom_spartan_preview(struct widget_instance *screen, short color)
 {
-	(void)color;
+	char name[64];
+	char const *scene;
+	short shown_color = color >= 0 ? color : 0;
+	boolean shown;
+	struct widget_instance *found;
+
+	if (!h3_custom.preview_asked)
+	{
+		if (h3_scenes_enabled() && (scene = h3_scene_of(screen, name, sizeof(name), NULL)) != NULL &&
+			menu_scene_spartan_show(scene, H3_CUSTOM_SPARTAN_PLACEMENT, shown_color))
+		{
+			h3_custom.preview_asked = TRUE;
+			h3_custom.preview_color = shown_color;
+			platform_log("menus: h3 customize: preview Spartan asked for in colour %d", shown_color);
+		}
+	}
+	else if (shown_color != h3_custom.preview_color)
+	{
+		h3_custom.preview_color = shown_color;
+		menu_scene_spartan_color(shown_color);
+		platform_log("menus: h3 customize: preview Spartan recoloured %d", shown_color);
+	}
+	/* (the swatch in its panel until the Spartan stands in the window) */
+	shown = h3_custom.preview_asked && menu_scene_spartan_shown();
+	if ((found = named(screen, "preview_frame")) != NULL)
+		widget_instance_set_visibility_recursive(found, !shown);
+	if ((found = named(screen, "preview_swatch")) != NULL)
+		widget_instance_set_visibility_recursive(found, !shown);
+	if (shown != h3_custom.preview_shown)
+	{
+		h3_custom.preview_shown = shown;
+		platform_log("menus: h3 customize: the preview shows %s", shown ? "the Spartan" : "the swatch");
+	}
+}
+
+/* the preview's Spartan let go (the editor gone) */
+static void h3_custom_spartan_hide(void)
+{
+	if (h3_custom.preview_asked)
+		platform_log("menus: h3 customize: preview Spartan hidden");
+	menu_scene_spartan_hide();
+	h3_custom.preview_asked = FALSE;
+	h3_custom.preview_shown = FALSE;
 }
 
 /* (port h3 custom: the editor's list) the rows' values, the focused row's
@@ -2709,7 +2764,7 @@ static void h3_custom_update(struct widget_instance *list)
 	if ((found = named(screen, "preview_swatch")) != NULL)
 		found->animation.current_frame_index = h3_swatch_frame(profile->primary_color_index);
 	text_show(named(screen, "preview_name"), T(h3_color_names[h3_swatch_frame(profile->primary_color_index)]));
-	h3_custom_spartan_preview(profile->primary_color_index);
+	h3_custom_spartan_preview(screen, profile->primary_color_index);
 	string_show(named(screen, "custom_help"), focused);
 	/* (the settings panel's Invert look flips the stick again, on this
 	Vita: with both on, said) */
@@ -3641,6 +3696,7 @@ boolean pc_menu_event_function_invoke(
 	/* (the editor gone without its Circle: nothing saved, as the Xbox's
 	edit screen left without SAVE CHANGES) */
 	case _function_h3_custom_close:
+		h3_custom_spartan_hide();
 		if (player_ui_get_edit_player_profile())
 			player_ui_end_editing_profile();
 		return TRUE;
