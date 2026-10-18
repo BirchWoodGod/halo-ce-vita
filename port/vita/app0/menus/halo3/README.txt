@@ -7,8 +7,13 @@ these screens stand for the Xbox's own, over the same animated Halo ring:
   update" for now), CUSTOMIZATION, Settings on Start, the HALO title, the
   player's nameplate and the live servers (ONLINE NOW).
 - campaign.xml: the campaign lobby (it stands for the level select the
-  campaign's profile screen opens) with its Select Mission and Select
-  Difficulty pickers.
+  campaign's profile screen opens) with its Select Network, Select Mission
+  and Select Difficulty pickers. NETWORK: LOCAL plays the level here;
+  ONLINE CO-OP (internet play: Connection Online) or SYSTEM LINK CO-OP (AD
+  HOC CO-OP with the connection Ad hoc) makes START GAME host it as co-op,
+  as the Xbox's difficulty list's Y did, and open the game's lobby, the
+  waiting screen; the others join from MULTIPLAYER (BROWSE GAMES, JOIN WITH
+  CODE).
 - forge_lobby.xml: the Forge lobby FORGE opens, with its Select Map picker
   (the multiplayer maps of the maps folder) and START FORGE, which starts a
   local game of the map in Forge mode (port/linux/game/forge.c).
@@ -65,4 +70,5 @@ the game's keys (a_butn, b_butn, start_butn) for that.
 
 Tests: port/vita/tests/run_menus_test.sh h3probe h3classic h3xbox h3broken
 h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create
-h3mptouch; Forge's: port/vita/tests/run_forge_test.sh.
+h3mptouch h3coop h3coopguide; Forge's: port/vita/tests/run_forge_test.sh;
+co-op between two machines: port/vita/tests/run_netns_online_test.sh h3coopmenu.

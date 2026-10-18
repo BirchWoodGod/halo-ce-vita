@@ -6458,17 +6458,33 @@ machine's player joined to it under the campaign's profile, as picking a
 profile for System Link does. The caller then opens the lobby. FALSE (the
 player told why, where the game's own checks tell) without a network, on
 maps that do not play with others, or without a campaign level. */
+boolean ui_widget_port_cooperative_campaign_host_level(struct widget_instance *widget, struct event_record *event,
+	char const *level, short difficulty);
+
 boolean ui_widget_port_cooperative_campaign_host(
 	struct widget_instance *list,
 	struct event_record *event)
 {
+	return ui_widget_port_cooperative_campaign_host_level(list, event, main_get_map_name(),
+		list->data3C.selected_index);
+}
+
+/* port: the same of a level and difficulty given (the Halo 3 campaign
+lobby's START GAME with its NETWORK on co-op, port/linux/game/menu_functions.c;
+the widget the one pressed, as the difficulty list is above) */
+boolean ui_widget_port_cooperative_campaign_host_level(
+	struct widget_instance *widget,
+	struct event_record *event,
+	char const *level,
+	short difficulty)
+{
+	struct widget_instance *list = widget;
 	char map_name[128];
 	char build[0x20];
-	short difficulty = list->data3C.selected_index;
-	short controller_index = (short)PIN(event->controller_index, 0, MAXIMUM_LOCAL_PLAYERS - 1);
+	short controller_index = (short)PIN(event ? event->controller_index : 0, 0, MAXIMUM_LOCAL_PLAYERS - 1);
 	boolean deleted = FALSE;
 
-	csstrncpy(map_name, main_get_map_name(), sizeof(map_name) - 1);
+	csstrncpy(map_name, level ? level : "", sizeof(map_name) - 1);
 	map_name[sizeof(map_name) - 1] = 0;
 	/* (a mod's Halo: CE Anniversary map plays offline only: it is no
 	campaign level a network game takes, custom_edition_mods.h) */
@@ -6481,7 +6497,7 @@ boolean ui_widget_port_cooperative_campaign_host(
 		return FALSE;
 	if (!transport_network_available())
 	{
-		display_error(5, event->controller_index, TRUE, TRUE);
+		display_error(5, controller_index, TRUE, TRUE);
 		return FALSE;
 	}
 	if (!cache_files_multiplayer_region(build))

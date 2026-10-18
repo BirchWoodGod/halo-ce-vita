@@ -1195,3 +1195,16 @@
 "INTERNET PLAY IS OFF" = "JUEGO EN INTERNET DESACTIVADO"
 "ENTER PASSWORD" = "ESCRIBE LA CONTRASEÑA"
 "This game has a password. Choose PASSWORD\nto type it, then choose JOIN GAME." = "Esta partida tiene contraseña. Elige\nCONTRASEÑA para escribirla; luego, UNIRSE."
+
+# ---------- the Halo 3 campaign lobby's NETWORK: co-op (halo3/campaign.xml, menu_functions.c)
+"LOCAL" = "LOCAL"
+"ONLINE CO-OP" = "COOPERATIVO EN LÍNEA"
+"SYSTEM LINK CO-OP" = "COOPERATIVO SYSTEM LINK"
+"AD HOC CO-OP" = "COOPERATIVO AD HOC"
+"Co-op online: joined by your code." = "Cooperativo en línea: con tu código."
+"Co-op with the PS Vitas on your Wi-Fi." = "Cooperativo con las PS Vita de tu Wi-Fi."
+"Co-op with the PS Vitas near you." = "Cooperativo con las PS Vita cercanas."
+"Co-op at Mission Start" = "Cooperativo desde el inicio de la misión"
+"Play the campaign alone on this PS Vita." = "Juega la campaña solo en esta PS Vita."
+"Host co-op on the Internet: others join\nwith your game's code, or from the\nserver browser if you make it public (X\nin the waiting screen). It needs the\nsettings panel's Multiplayer tab,\nConnection: Online." = "Crea un cooperativo en Internet: los demás\nse unen con el código de tu partida, o desde\nel buscador de partidas si la haces pública\n(X en la pantalla de espera). Necesita, en la\npestaña Multijugador del panel de ajustes,\nConexión: En línea."
+"Host co-op for the PS Vitas on your\nWi-Fi network (Connection: Same Wi-Fi),\nor near you (Connection: Ad hoc). They\njoin from MULTIPLAYER, BROWSE GAMES." = "Crea un cooperativo para las PS Vita de tu\nred Wi-Fi (Conexión: Misma Wi-Fi) o\ncercanas (Conexión: Ad hoc). Se unen desde\nMULTIJUGADOR, BUSCAR PARTIDAS."

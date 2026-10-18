@@ -13,6 +13,9 @@ what the two share), called from the main loop every frame (main.c):
 - The Play page's Host co-op campaign opens the Campaign screen the same
   way (main menu, Campaign: its profiles, then the levels and the
   difficulty, where Y hosts co-op, coop_menu.c), with the same checks.
+  With Menu style Halo 3 the profiles lead to the Halo 3 campaign lobby,
+  which opens with its NETWORK on co-op (menu_functions.c), START GAME
+  hosting it.
 - A request from the panel opens the game's System Link screen as the main
   menu's Multiplayer, then System Link, open it - with that history behind
   it, so B goes back the same way - at its first step: press A to join
@@ -158,8 +161,11 @@ boolean system_link_shortcut_open(
 		ui_widget_load_by_name_or_tag(NULL, profiles, NULL, NONE, type_select, NONE, NONE);
 }
 
+void menu_functions_h3_campaign_coop(void);
+
 /* the Campaign screen (main menu, Campaign: the profiles, then the levels
-and the difficulty, where Y hosts co-op), the main menu behind it */
+and the difficulty, where Y hosts co-op; or the Halo 3 campaign lobby,
+its NETWORK on co-op), the main menu behind it */
 static boolean system_link_shortcut_open_campaign(
 	void)
 {
@@ -168,6 +174,7 @@ static boolean system_link_shortcut_open_campaign(
 
 	if (main_menu == NONE || campaign == NONE)
 		return FALSE;
+	menu_functions_h3_campaign_coop();
 	ui_widgets_close_all();
 	return ui_widget_load_by_name_or_tag(NULL, main_menu, NULL, NONE, NONE, NONE, NONE) &&
 		ui_widget_load_by_name_or_tag(NULL, campaign, NULL, NONE, main_menu, NONE, NONE);

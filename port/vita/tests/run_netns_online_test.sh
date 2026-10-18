@@ -209,6 +209,13 @@
 #            and no copy may log an assertion of the camera's observer
 #            (soft or fatal) or crash; a build with assertions compiled out
 #            proves nothing here
+#   h3coopmenu co-op from the Halo 3 menus (Menu style Halo 3, both copies
+#            with the Halo PC files, HALO_TEST_DATA_MENUS, the host with
+#            HALO_TEST_PROFILE's profile; skipped without), over system link
+#            on one LAN (online off): the host's campaign lobby, NETWORK:
+#            SYSTEM LINK CO-OP, START GAME; the joiner's MULTIPLAYER, the Halo
+#            3 lobby (SYSTEM LINK), BROWSE GAMES, the System Link list, the
+#            game joined. Both must play the level together
 #   coopmenu co-op from the campaign's menus, over system link on one LAN
 #            (online off), every press scripted (HALO_TEST_PAD): the host
 #            goes Campaign, a new profile, The Pillar of Autumn, Heroic and Y
@@ -627,6 +634,8 @@ run_copy() { # run_copy NAME NETNS_PID BINARY CPUS [ENV...]
 	joiner2) folder=${HALO_TEST_DATA_JOINER2:-$data} ;;
 	esac
 	# (a copy's own data folder, copy_data_NAME: mapmid's maps folders)
+	# (Menu style Halo CE, the pads' menus, unless the mode says HALO_MENU_STYLE=halo3: Halo 3
+	# has been the default since 1.1.1)
 	local override
 	eval "override=\${copy_data_$name:-}"
 	[ -n "$override" ] && folder=$override
@@ -635,7 +644,7 @@ run_copy() { # run_copy NAME NETNS_PID BINARY CPUS [ENV...]
 	(cd "$out/$name" && exec nsenter -t "$ns" -n env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=offscreen \
 		HALO_DATA_ROOT="$out/$name/data" HALO_SAVE_ROOT="$out/$name/save" HALO_NO_VSYNC=1 HALO_FRAME_CAP=30 \
 		HALO_EXIT_AFTER="$seconds" HALO_FULLSCREEN=0 HALO_HIDDEN_WINDOW=1 HALO_NO_AUDIO=1 HALO_TICK_THREAD=1 \
-		HALO_UPDATE_AUTO=false HALO_DISCORD_APPLICATION= HALO_NET_ALLOW_UPNP=false \
+		HALO_UPDATE_AUTO=false HALO_DISCORD_APPLICATION= HALO_NET_ALLOW_UPNP=false HALO_MENU_STYLE=classic \
 		HALO_NET_BROKERS=198.51.100.1:1883 HALO_NET_STUN=198.51.100.1:3478 HALO_NET_RELAYS=198.51.100.1:47320 \
 		"$@" ${HALO_TEST_ENV:-} \
 		$([ "$name" = joiner ] || [ "$name" = joiner2 ] && echo "${HALO_TEST_JOIN_ENV:-}") \
@@ -1750,6 +1759,55 @@ coopmenuonline)
 		fail "the public co-op game was never listed"
 	grep -aq 'network test: the public games list "' "$jl" || fail "the joiner never listed the co-op game"
 	both=$(grep -a "network test: tick" "$jl" | grep -aEc "player [0-9]+: \(.* player [0-9]+: \(")
+	echo "joiner's seconds with both players alive: $both"
+	[ "$both" -ge 15 ] || fail "both players were alive for $both s (15 wanted)"
+	;;
+h3coopmenu)
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS) or no HALO_TEST_PROFILE"; exit 0
+	fi
+	# (the host's profile, as the Vita keeps it: run_menus_test.sh's)
+	mkdir -p "$out/host/save/u/UDATA/869079979327"
+	cp "$HALO_TEST_PROFILE" "$out/host/save/u/UDATA/869079979327/blam.sav"
+	[ -r "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" ] &&
+		cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$out/host/save/u/UDATA/869079979327/"
+	# (CAMPAIGN, the profile: the lobby on The Pillar of Autumn, MISSION focused; up to
+	# NETWORK, A, down two: SYSTEM LINK CO-OP, A; down two to DIFFICULTY, A, down: Heroic
+	# - on Easy and Normal a10's cryo bay waits for the host's look test -, A; down to START
+	# GAME, A)
+	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
+		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 \
+		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 a wait:150:3000 up:150:600 a wait:150:2500 down:150:600 down:150:600 a wait:150:2500 down:150:600 down:150:600 a wait:150:2500 down:150:600 a wait:150:2500 down:150:600 a" \
+		"HALO_TEST_COMMANDS=L60:@vote"; host_pid=$last_pid
+	sleep 5
+	holder; lan=$held
+	in_ns "$host_router" ip link add l2_host type veth peer name m2_host
+	in_ns "$host_router" ip link set m2_host netns "$lan"
+	in_ns "$host_router" ip link set l2_host master b_host
+	in_ns "$host_router" ip link set l2_host up
+	in_ns "$lan" ip link set lo up
+	in_ns "$lan" ip addr add 192.168.1.3/24 broadcast 192.168.1.255 dev m2_host
+	in_ns "$lan" ip link set m2_host up
+	in_ns "$lan" ip route add default via 192.168.1.1
+	# (MULTIPLAYER: the Halo 3 lobby on SYSTEM LINK; down five to BROWSE GAMES, A: the System
+	# Link screen; A joins, A the profile, A; the list, a while for the host's game, A)
+	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false \
+		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 \
+		"HALO_TEST_PAD=wait:150:3000 down:150:700 down:150:700 a wait:150:3000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a a a wait:150:${HALO_TEST_COOP_LIST_WAIT:-15000} a" \
+		"HALO_TEST_COMMANDS=L60:@vote"; join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log hd=$out/host/data/debug.txt
+	echo "--- host"; grep -aE "ui: screen|co-op:|menus: h3 campaign" "$hl" | head -24
+	echo "--- joiner"; grep -aE "ui: screen|menus: h3 mp|system link: (joining|in another)" "$jl" | head -16
+	grep -aq "menus: h3 campaign: network SYSTEM LINK CO-OP" "$hl" || fail "the host's lobby was not set to SYSTEM LINK CO-OP"
+	grep -aq "co-op: hosting levels.a10.a10 on difficulty 2 from the campaign's menus" "$hl" ||
+		fail "the host did not host The Pillar of Autumn on Heroic as co-op from the Halo 3 lobby"
+	grep -aq "ui: screen .*connected_pregame_screen" "$hl" || fail "the host's lobby (the waiting screen) did not open"
+	grep -aq "menus: Halo 3 screen h3/mp/screen for" "$jl" || fail "the joiner's MULTIPLAYER did not open the Halo 3 lobby"
+	grep -aq "system link: in another's lobby" "$jl" || fail "the joiner did not join the host's game"
+	grep -aq "co-op: the partner is in: the countdown starts" "$hd" || fail "the partner's joining did not start the countdown"
+	both=$(grep -a "network test: tick" "$jl" | grep -aEc "player [0-9]+: \(.*player [0-9]+: \(")
 	echo "joiner's seconds with both players alive: $both"
 	[ "$both" -ge 15 ] || fail "both players were alive for $both s (15 wanted)"
 	;;
@@ -3293,7 +3351,7 @@ CHECK
 	fi
 	;;
 *)
-	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed" >&2
+	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed" >&2
 	exit 2
 	;;
 esac

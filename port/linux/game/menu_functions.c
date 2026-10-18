@@ -85,6 +85,8 @@ int platform_question_answer(void);
 
 /* the game's (port) */
 boolean ui_widget_port_start_network_game_server(void);
+boolean ui_widget_port_cooperative_campaign_host_level(struct widget_instance *widget, struct event_record *event,
+	char const *level, short difficulty);
 void ui_widget_port_give_focus(struct widget_instance *list, struct widget_instance *child);
 boolean system_link_shortcut_open(void);
 struct widget_instance *ui_widget_port_active_screen(short local_player_index);
@@ -169,6 +171,10 @@ enum
 	_function_h3_gametype_page_up,
 	_function_h3_gametype_page_down,
 	_function_h3_setup_hold,
+	_function_h3_campaign_network_set,
+	_function_h3_campaign_network_focus,
+	_function_h3_campaign_host,
+	_function_h3_campaign_focus,
 };
 
 /* in port_game_data_input_names' order */
@@ -195,6 +201,7 @@ enum
 	_input_h3_networks,
 	_input_h3_maps,
 	_input_h3_gametypes,
+	_input_h3_campaign_networks,
 };
 
 /* what a line of typing is for */
@@ -495,6 +502,7 @@ difficulty chosen there, then the game's own start (main menu switch to solo
 game), as its level and difficulty lists do */
 
 void main_set_map_name(char *map_name);
+void main_defer_map_map_change(void);
 void main_set_difficulty(word difficulty);
 boolean game_state_test_persistent_storage(char *map_name, short *difficulty, boolean *corrupted);
 char *main_get_map_name(void);
@@ -513,11 +521,30 @@ static char const *const h3_level_names[NUMBER_OF_SINGLE_PLAYER_LEVELS] =
 };
 static char const *const h3_difficulty_names[4] = { "Easy", "Normal", "Heroic", "Legendary" };
 
+/* the lobby's NETWORK: LOCAL (this Vita alone: the level started as the
+Xbox's difficulty list's A starts it), or co-op hosted as the old Campaign
+screen's Y on the difficulty hosts it (coop_menu.c): ONLINE CO-OP over
+internet play (the settings panel's Connection: Online; its code shown in
+the waiting screen), SYSTEM LINK CO-OP (or AD HOC CO-OP, the connection Ad
+hoc) for the Vitas on the same Wi-Fi or near. The port hosts a network game
+one way, over the connection the Vita runs: the two co-op choices differ in
+what they ask of it, ONLINE needing internet play. */
+enum
+{
+	_h3_campaign_local,
+	_h3_campaign_online,
+	_h3_campaign_system_link,
+	NUMBER_OF_H3_CAMPAIGN_NETWORKS
+};
+
+static boolean internet_play(void);
+
 static struct
 {
 	boolean initialized;
 	short level;
 	short difficulty;
+	short network;
 	/* the profile's saved game (its checkpoint): there, its level and
 	difficulty, read as the lobby opens (as the Xbox's level list does) */
 	boolean saved;
@@ -549,6 +576,29 @@ static void h3_campaign_said(void)
 {
 	platform_log("menus: h3 campaign: %s on %s", h3_level_names[h3_campaign.level],
 		h3_difficulty_names[h3_campaign.difficulty]);
+}
+
+static char const *h3_campaign_network_name(short network)
+{
+	if (network == _h3_campaign_online)
+		return T("ONLINE CO-OP");
+	if (network == _h3_campaign_system_link)
+		return config_boolean("network.adhoc") ? T("AD HOC CO-OP") : T("SYSTEM LINK CO-OP");
+	return T("LOCAL");
+}
+
+/* (port h3 campaign network set) the network picker's choice; ONLINE CO-OP
+only with internet play (else FALSE: the screen saying how to turn it on
+opens, as the multiplayer lobby's ONLINE does) */
+static boolean h3_campaign_network_set(struct widget_instance *widget);
+
+/* (the settings panel's Host co-op campaign, system_link_shortcut.c: the
+Campaign screen opened for co-op) the lobby opens on co-op, online with
+internet play */
+void menu_functions_h3_campaign_coop(void)
+{
+	h3_campaign.network = internet_play() ? _h3_campaign_online : _h3_campaign_system_link;
+	platform_log("menus: h3 campaign: network %s (host co-op campaign)", h3_campaign_network_name(h3_campaign.network));
 }
 
 static void h3_capitals(char *text)
@@ -599,6 +649,10 @@ static void h3_campaign_initialize(void)
 			h3_campaign.level = profile.last_single_player_map_played;
 	}
 	h3_campaign.level = (short)PIN(h3_campaign.level, 0, unlocked - 1);
+	/* (internet play turned off since ONLINE CO-OP was chosen: co-op over
+	the connection the Vita has now) */
+	if (h3_campaign.network == _h3_campaign_online && !internet_play())
+		h3_campaign.network = _h3_campaign_system_link;
 	{
 		boolean corrupted = FALSE;
 
@@ -649,6 +703,29 @@ static void h3_campaign_update(struct widget_instance *widget)
 		h3_campaign_initialize();
 	/* (Halo 3's rows are capitals: the letters a to z made capitals, the
 	others as they are) */
+	snprintf(text, sizeof(text), "%s: %s", T("NETWORK"), h3_campaign_network_name(h3_campaign.network));
+	h3_capitals(text);
+	text_show(named(screen, "network_row"), text);
+	/* (START GAME: the level here, or co-op hosted: the row of the network
+	shown, the other hidden, as the multiplayer lobby's) */
+	if ((found = named(screen, "start_row")) != NULL)
+	{
+		widget_instance_set_visibility_recursive(found, h3_campaign.network == _h3_campaign_local);
+		found->disabled = h3_campaign.network != _h3_campaign_local;
+	}
+	if ((found = named(screen, "start_coop")) != NULL)
+	{
+		widget_instance_set_visibility_recursive(found, h3_campaign.network != _h3_campaign_local);
+		found->disabled = h3_campaign.network == _h3_campaign_local;
+	}
+	if (h3_campaign.network == _h3_campaign_online)
+		snprintf(text, sizeof(text), "%s", T("Co-op online: joined by your code."));
+	else if (h3_campaign.network == _h3_campaign_system_link)
+		snprintf(text, sizeof(text), "%s", config_boolean("network.adhoc") ?
+			T("Co-op with the PS Vitas near you.") : T("Co-op with the PS Vitas on your Wi-Fi."));
+	else
+		snprintf(text, sizeof(text), "%s", T("This party is local to this PS Vita."));
+	text_show(named(screen, "ready_sub"), text);
 	snprintf(text, sizeof(text), "%s: %s", T("MISSION"), T(h3_level_names[h3_campaign.level]));
 	h3_capitals(text);
 	text_show(named(screen, "mission_row"), text);
@@ -659,12 +736,16 @@ static void h3_campaign_update(struct widget_instance *widget)
 	its checkpoint; on another difficulty, starting replaces it - the
 	warning; another level starts at its start) */
 	{
-		boolean same_level = h3_campaign.saved && !_stricmp(h3_campaign.saved_map, h3_level_paths[h3_campaign.level]);
+		/* (co-op starts the level at its start, the saved game left as it is) */
+		boolean coop = h3_campaign.network != _h3_campaign_local;
+		boolean same_level = !coop && h3_campaign.saved &&
+			!_stricmp(h3_campaign.saved_map, h3_level_paths[h3_campaign.level]);
 		boolean resumes = same_level && h3_campaign.saved_difficulty == h3_campaign.difficulty;
 		struct widget_instance *warning = named(screen, "warning");
 
 		snprintf(text, sizeof(text), "%s %s %s\n%s", T(h3_level_names[h3_campaign.level]), T("on"),
-			T(h3_difficulty_names[h3_campaign.difficulty]), resumes ? T("at Last Checkpoint") : T("at Mission Start"));
+			T(h3_difficulty_names[h3_campaign.difficulty]), coop ? T("Co-op at Mission Start") :
+			resumes ? T("at Last Checkpoint") : T("at Mission Start"));
 		text_show(named(screen, "caption"), text);
 		/* (said when it changes: the tests read it) */
 		{
@@ -715,6 +796,47 @@ static void h3_pick_update(struct widget_instance *list, long count, char const 
 	if ((found = named(screen, picture)) != NULL)
 		found->animation.current_frame_index = (short)focused;
 	string_show(named(screen, description), (short)focused);
+}
+
+static boolean h3_campaign_network_set(struct widget_instance *widget)
+{
+	short network = (short)PIN(h3_child_index(widget), 0, NUMBER_OF_H3_CAMPAIGN_NETWORKS - 1);
+
+	if (network == _h3_campaign_online && !internet_play())
+	{
+		platform_log("menus: h3 campaign: ONLINE CO-OP chosen, internet play is off");
+		return FALSE;
+	}
+	h3_campaign.network = network;
+	platform_log("menus: h3 campaign: network %s", h3_campaign_network_name(network));
+	return TRUE;
+}
+
+/* (port h3 campaign host: START GAME on a co-op network) the mission hosted
+on the difficulty as co-op, as the Xbox's difficulty list's Y hosts it
+(ui_widget_port_cooperative_campaign_host_level: the network game, this
+player in it under the profile); the row then opens the game's lobby, the
+waiting screen, with this lobby behind it. FALSE when it was not hosted
+(the player told why by the game's own checks) */
+static boolean h3_campaign_host(struct widget_instance *widget, struct event_record *event)
+{
+	char const *level = h3_level_paths[h3_campaign.level];
+
+	if (h3_campaign.network == _h3_campaign_local)
+		return FALSE;
+	platform_log("menus: h3 campaign: host co-op %s on %s (%s)", level, h3_difficulty_names[h3_campaign.difficulty],
+		h3_campaign.network == _h3_campaign_online ? "online" : "system link");
+	/* (the level chosen as the Xbox's level list chooses it, before its
+	difficulty list: its map change not deferred, which would load it - and
+	end the network game - at the next frame) */
+	main_set_map_name((char *)level);
+	main_defer_map_map_change();
+	if (!ui_widget_port_cooperative_campaign_host_level(widget, event, level, h3_campaign.difficulty))
+	{
+		platform_log("menus: h3 campaign: co-op was not hosted");
+		return FALSE;
+	}
+	return TRUE;
 }
 
 /* ---- Forge (forge.c): its lobby (halo3/forge_lobby.xml: the map, its
@@ -2086,7 +2208,6 @@ boolean pc_menu_event_function_invoke(
 	long function_index,
 	boolean *widget_deleted)
 {
-	(void)event;
 	(void)widget_deleted;
 	switch (function_index)
 	{
@@ -2204,6 +2325,18 @@ boolean pc_menu_event_function_invoke(
 		return TRUE;
 	case _function_h3_difficulty_focus:
 		h3_focus_child(widget, h3_campaign.difficulty);
+		return TRUE;
+	case _function_h3_campaign_network_set:
+		return h3_campaign_network_set(widget);
+	case _function_h3_campaign_network_focus:
+		h3_focus_child(widget, h3_campaign.network);
+		return TRUE;
+	case _function_h3_campaign_host:
+		return h3_campaign_host(widget, event);
+	/* (the lobby's list made: MISSION focused, NETWORK above it; back from a
+	picker the game gives the focus back to the row that opened it) */
+	case _function_h3_campaign_focus:
+		h3_focus_child(widget, 1);
 		return TRUE;
 	case _function_h3_campaign_start:
 		/* (then the game's own "main menu switch to solo game", the next
@@ -2376,6 +2509,9 @@ void pc_menu_game_data_function_invoke(
 	case _input_h3_gametypes:
 		if (widget->type == _ui_widget_type_column_list)
 			h3_mp_gametypes_update(widget);
+		break;
+	case _input_h3_campaign_networks:
+		h3_pick_update(widget, NUMBER_OF_H3_CAMPAIGN_NETWORKS, "campnet_picture", "campnet_text");
 		break;
 	default:
 		break;

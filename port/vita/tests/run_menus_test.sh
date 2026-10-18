@@ -49,6 +49,14 @@
 #            name typed (HALO_TEST_TEXT_INPUT), START GAME as Server Setup's
 #   h3mptouch  taps: MULTIPLAYER, the lobby's MAP, BLOOD GULCH in its picker,
 #            the lobby's Back
+#   h3coop   co-op from the Halo 3 campaign lobby (HALO_TEST_PROFILE; skipped
+#            without): NETWORK, ONLINE CO-OP with internet play off (the
+#            screen saying how to turn it on), SYSTEM LINK CO-OP, START GAME:
+#            the level hosted as co-op (as the Xbox's difficulty list's Y
+#            hosted it) and the game's lobby, the waiting screen, open
+#   h3coopguide  the settings panel's Host co-op campaign
+#            (HALO_SYSTEM_LINK_TEST=campaign): the Campaign screen opens, the
+#            Halo 3 campaign lobby behind it set to SYSTEM LINK CO-OP
 #   pause   Campaign from the main menu (a new profile, Normal), the level's
 #           pause menu, Quit to Main Menu: a game map's widget runs its
 #           function and is back at the main menu, and asked about deleting
@@ -82,7 +90,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
 
@@ -350,8 +358,46 @@ for case in $cases; do
 		grep -aq "menus: h3 mp: map Blood Gulch" "$log" || fail h3mptouch "a tap on BLOOD GULCH did not choose it"
 		grep -a "ui: screen" "$log" | tail -1 | grep -q 'pc.h3.main.screen' ||
 			fail h3mptouch "a tap on the lobby's Back did not go back to the main menu" ;;
+	h3coop)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "--- h3coop"; echo "SKIP: no HALO_TEST_PROFILE"; continue
+		fi
+		# (CAMPAIGN, the profile: the lobby, MISSION focused; up to NETWORK, A: the picker on LOCAL;
+		# down, A: ONLINE CO-OP, internet play off: the screen saying so; B: the picker; down, A:
+		# SYSTEM LINK CO-OP; down three to START GAME, A: hosted, the game's lobby)
+		profile_from=$HALO_TEST_PROFILE run h3coop "$menus_data" 50 "wait:150:3000 down:150:700 a wait:150:3000 a wait:150:3000 up:150:600 a wait:150:2500 down:150:600 a wait:150:2500 b wait:150:2500 down:150:600 a wait:150:2500 down:150:600 down:150:600 down:150:600 a wait:150:8000" \
+			HALO_MENU_STYLE=halo3
+		check_h3 h3coop halo3
+		log=$out/h3coop/run.log
+		grep -aq "ui: screen pc.h3.campnet.screen" "$log" || fail h3coop "NETWORK did not open its picker"
+		grep -aq "menus: h3 campaign: ONLINE CO-OP chosen, internet play is off" "$log" &&
+			grep -aq "ui: screen pc.h3.mp.offline" "$log" ||
+			fail h3coop "ONLINE CO-OP did not say internet play is off"
+		grep -aq "menus: h3 campaign: network SYSTEM LINK CO-OP" "$log" || fail h3coop "SYSTEM LINK CO-OP was not chosen"
+		grep -aq "menus: h3 campaign caption: .* on Normal Co-op at Mission Start" "$log" ||
+			fail h3coop "the caption did not say co-op"
+		grep -aq "menus: h3 campaign: host co-op levels.*on Normal (system link)" "$log" ||
+			fail h3coop "START GAME did not host co-op"
+		grep -aq "co-op: hosting levels.* on difficulty 1 from the campaign's menus" "$log" ||
+			fail h3coop "the level was not hosted as co-op"
+		grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected.pregame.connected_pregame_screen" "$log" ||
+			fail h3coop "the game's lobby (the waiting screen) did not open"
+		grep -aq "menus: h3 campaign: co-op was not hosted" "$log" && fail h3coop "co-op was not hosted"
+		grep -a "ui: screen" "$log" | tail -1 | grep -q 'connected_pregame_screen' ||
+			fail h3coop "the game's lobby did not stay open (the co-op game ended)" ;;
+	h3coopguide)
+		# (3 s into the main menu the request opens the Campaign screen's profiles; the lobby
+		# behind them is set to co-op. The Xbox's profiles screen opens on a new profile, whose
+		# campaign starts at once, as ever: the lobby itself is h3coop's)
+		run h3coopguide "$menus_data" 20 "wait:150:10000" HALO_MENU_STYLE=halo3 HALO_SYSTEM_LINK_TEST=campaign
+		check_h3 h3coopguide halo3
+		log=$out/h3coopguide/run.log
+		grep -aq "system link: the settings panel's host co-op campaign: the Campaign screen opened" "$log" ||
+			fail h3coopguide "the request did not open the Campaign screen"
+		grep -aq "menus: h3 campaign: network SYSTEM LINK CO-OP (host co-op campaign)" "$log" ||
+			fail h3coopguide "the lobby was not set to co-op" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"
