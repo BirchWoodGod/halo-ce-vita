@@ -149,7 +149,7 @@ the owner's diagram has them, **to be checked against it** (open question
 | Item menu (object browser) | X | Square (nothing aimed at) | Q |
 | Edit the object under the crosshair (team, respawn, properties) | X on an object | Square (aiming at one) | Q on an object |
 | Duplicate the object under the crosshair | (Reach) | Circle | middle mouse button |
-| Monitor / player | D-pad up | D-pad up (in a Forge game; zoom moves, below) | Tab |
+| Monitor / player | D-pad up | Select + D-pad up (the owner, Oct 18: D-pad up stays zoom) | Tab, or F1 + Z |
 | Speed (slow, normal, fast), magnets / grid snap | (Halo Online) | D-pad right / D-pad left | 1 / 2 |
 | Pause, Forge settings, save layout | Start | Start | Esc |
 | Scoreboard / budget | Back | Select | F1 |
@@ -536,7 +536,7 @@ networked, anything cross-map. It was not built or run for the Vita.
 
 Branch `feat/forge` (the spike merged into `docs/halo3-menus`). The owner's
 decisions: multiplayer maps first, the map's own objects only, a
-monitor/Spartan toggle on D-pad up, a budget of 256 objects and 32 AI,
+monitor/Spartan toggle (D-pad up, then Select + D-pad up), a budget of 256 objects and 32 AI,
 our own building blocks later, Halo 3's look; save and share later.
 
 - **Entry.** The main menu's FORGE opens the Forge lobby
@@ -556,7 +556,9 @@ our own building blocks later, Halo 3's look; save and share later.
   so 999 is never reached, and it places nothing of its own (no flags,
   balls or hills). The session is the requested map's (`forge_map_loaded`);
   the main menu or another map ends it.
-- **Monitor and Spartan.** As the spike, plus: D-pad up flips both ways
+- **Monitor and Spartan.** As the spike, plus: Select + D-pad up (Back +
+  the right stick's click; first D-pad up alone, changed by the owner the
+  same day so that D-pad up stays zoom) flips both ways
   (Spartan at the monitor's place; the monitor from the Spartan's eyes);
   a respawned unit is hidden as the last; zoom is undone for the monitor.
   The Vita's crouch toggle does not latch D-pad down, and the touch zones
@@ -604,9 +606,17 @@ our own building blocks later, Halo 3's look; save and share later.
 | Copy (held or under the crosshair) | Circle | F |
 | Set upright | D-pad left | X |
 | Movement speed (slow, normal, fast) | D-pad right | Q |
-| Monitor / Spartan | D-pad up | Tab, Z or middle mouse button |
+| Monitor / Spartan | Select + D-pad up, together | Tab, or F1 + Z |
 | Forge menu | Start | Esc |
 | In the browser | D-pad / ✕ / ○ / L R | arrows or the mouse / Enter / F / G, left mouse |
+
+The combo is Back + the right stick's click in the Xbox's terms (the Vita's
+Select + D-pad up by default, mirroring Select + D-pad down for the settings
+panel). In a Forge game `xinput_sdl.c` (`forge_combo_filter`) keeps it from
+the game while it is held and until both buttons are let go, so it neither
+zooms nor shows the scoreboard; Back alone reaches the game after 200 ms
+(the scoreboard, held), the click alone is the Spartan's zoom, and nothing
+for the monitor.
 
 The Vita column is the default Button layout's; a remapped Xbox button
 moves with it (Forge reads the Xbox buttons). The PC column is the
