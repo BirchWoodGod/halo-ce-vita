@@ -341,6 +341,8 @@ static char const *const port_function_names[] =
 	"port coop campaign",
 	"port browser sort", "port browser page up", "port browser page down",
 	"port h3 servers on", "port h3 servers off",
+	"port h3 campaign init", "port h3 mission set", "port h3 difficulty set", "port h3 campaign start",
+	"port h3 mission focus", "port h3 difficulty focus",
 };
 
 /* the port's game data functions (menu_functions.c), from
@@ -349,7 +351,7 @@ static char const *const port_game_data_input_names[] =
 {
 	"unwired",
 	"port mp update desc", "port browser update", "port password update", "port setup update", "port code update",
-	"port h3 nameplate", "port h3 servers",
+	"port h3 nameplate", "port h3 servers", "port h3 campaign", "port h3 missions", "port h3 difficulties",
 };
 
 static struct

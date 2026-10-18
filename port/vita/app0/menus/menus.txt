@@ -4,3 +4,4 @@ multiplayer.xml
 browser.xml
 setup.xml
 halo3/main.xml
+halo3/campaign.xml

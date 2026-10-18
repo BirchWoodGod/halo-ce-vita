@@ -127,6 +127,12 @@ enum
 	_function_browser_page_down,
 	_function_h3_servers_on,
 	_function_h3_servers_off,
+	_function_h3_campaign_init,
+	_function_h3_mission_set,
+	_function_h3_difficulty_set,
+	_function_h3_campaign_start,
+	_function_h3_mission_focus,
+	_function_h3_difficulty_focus,
 };
 
 /* in port_game_data_input_names' order */
@@ -140,6 +146,9 @@ enum
 	_input_code_update,
 	_input_h3_nameplate,
 	_input_h3_servers,
+	_input_h3_campaign,
+	_input_h3_missions,
+	_input_h3_difficulties,
 };
 
 /* what a line of typing is for */
@@ -424,6 +433,162 @@ static void h3_servers_update(struct widget_instance *widget)
 			platform_log("menus: h3 servers: %ld shown of %ld%s%s", shown, count, shown ? ": " : "", line);
 		}
 	}
+}
+
+/* ---- the Halo 3 campaign lobby (halo3/campaign.xml): the mission and the
+difficulty chosen there, then the game's own start (main menu switch to solo
+game), as its level and difficulty lists do */
+
+void main_set_map_name(char *map_name);
+void main_set_difficulty(word difficulty);
+static void string_show(struct widget_instance *widget, short index);
+
+static char const *const h3_level_paths[NUMBER_OF_SINGLE_PLAYER_LEVELS] =
+{
+	"levels\\a10\\a10", "levels\\a30\\a30", "levels\\a50\\a50", "levels\\b30\\b30", "levels\\b40\\b40",
+	"levels\\c10\\c10", "levels\\c20\\c20", "levels\\c40\\c40", "levels\\d20\\d20", "levels\\d40\\d40",
+};
+static char const *const h3_level_names[NUMBER_OF_SINGLE_PLAYER_LEVELS] =
+{
+	"The Pillar of Autumn", "Halo", "The Truth and Reconciliation", "The Silent Cartographer",
+	"Assault on the Control Room", "343 Guilty Spark", "The Library", "Two Betrayals", "Keyes", "The Maw",
+};
+static char const *const h3_difficulty_names[4] = { "Easy", "Normal", "Heroic", "Legendary" };
+
+static struct
+{
+	boolean initialized;
+	short level;
+	short difficulty;
+} h3_campaign;
+
+/* the first local player's active profile, FALSE with none */
+static boolean h3_profile(struct player_profile *profile)
+{
+	long profile_index = player_ui_get_active_player_profile_index(0);
+
+	return profile_index != NONE && player_profile_get(profile_index, profile);
+}
+
+/* how many levels the lobby offers: those the profile finished on any
+difficulty, and the one after (all ten once the last is), at least the first */
+static short h3_campaign_unlocked(void)
+{
+	struct player_profile profile;
+	short level = NONE, difficulty;
+
+	if (h3_profile(&profile))
+		player_profile_get_highest_completed_solo_level(&profile, &level, &difficulty);
+	return (short)PIN(level + 2, 1, NUMBER_OF_SINGLE_PLAYER_LEVELS);
+}
+
+static void h3_campaign_said(void)
+{
+	platform_log("menus: h3 campaign: %s on %s", h3_level_names[h3_campaign.level],
+		h3_difficulty_names[h3_campaign.difficulty]);
+}
+
+static void h3_capitals(char *text)
+{
+	for (; *text; text++)
+	{
+		if (*text >= 'a' && *text <= 'z')
+			*text = (char)(*text - 'a' + 'A');
+	}
+}
+
+/* (the lobby opened) the level last played, on Normal the first time; what
+was chosen since, after */
+static void h3_campaign_initialize(void)
+{
+	struct player_profile profile;
+	short unlocked = h3_campaign_unlocked();
+
+	if (!h3_campaign.initialized)
+	{
+		h3_campaign.initialized = TRUE;
+		h3_campaign.difficulty = 1;
+		h3_campaign.level = 0;
+		if (h3_profile(&profile))
+			h3_campaign.level = profile.last_single_player_map_played;
+	}
+	h3_campaign.level = (short)PIN(h3_campaign.level, 0, unlocked - 1);
+	h3_campaign_said();
+}
+
+/* a widget's place among its parent's children (a list item's), 0 for none */
+static long h3_child_index(struct widget_instance *widget)
+{
+	struct widget_instance *child;
+	long index = 0;
+
+	if (!widget || !widget->parent)
+		return 0;
+	for (child = widget->parent->child; child && child != widget; child = child->next)
+		index++;
+	return child ? index : 0;
+}
+
+/* a list's child of that place given the focus (a picker's item) */
+static void h3_focus_child(struct widget_instance *list, long index)
+{
+	struct widget_instance *child = list ? list->child : NULL;
+
+	while (child && index-- > 0)
+		child = child->next;
+	if (child)
+		ui_widget_port_give_focus(list, child);
+}
+
+/* the lobby's rows (mission_row, difficulty_row), its picture (picture: the
+level's frame of the game's own level pictures), the difficulty emblem
+(emblem) and the caption */
+static void h3_campaign_update(struct widget_instance *widget)
+{
+	struct widget_instance *screen = screen_of(widget);
+	struct widget_instance *found;
+	char text[160];
+
+	if (!h3_campaign.initialized)
+		h3_campaign_initialize();
+	/* (Halo 3's rows are capitals: the letters a to z made capitals, the
+	others as they are) */
+	snprintf(text, sizeof(text), "%s: %s", T("MISSION"), T(h3_level_names[h3_campaign.level]));
+	h3_capitals(text);
+	text_show(named(screen, "mission_row"), text);
+	snprintf(text, sizeof(text), "%s: %s", T("DIFFICULTY"), T(h3_difficulty_names[h3_campaign.difficulty]));
+	h3_capitals(text);
+	text_show(named(screen, "difficulty_row"), text);
+	snprintf(text, sizeof(text), "%s %s %s\n%s", T(h3_level_names[h3_campaign.level]), T("on"),
+		T(h3_difficulty_names[h3_campaign.difficulty]), T("at Mission Start"));
+	text_show(named(screen, "caption"), text);
+	if ((found = named(screen, "picture")) != NULL)
+		found->animation.current_frame_index = h3_campaign.level;
+	if ((found = named(screen, "emblem")) != NULL)
+		found->animation.current_frame_index = h3_campaign.difficulty;
+}
+
+/* a picker's list (the missions, the difficulties): the first count items
+shown (the levels not open yet hidden), the picture's frame and the
+description's string following the focused one */
+static void h3_pick_update(struct widget_instance *list, long count, char const *picture, char const *description)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *child, *found;
+	long index = 0, focused = 0;
+
+	for (child = list->child; child; child = child->next, index++)
+	{
+		boolean shown = index < count;
+
+		widget_instance_set_visibility_recursive(child, shown);
+		child->disabled = !shown;
+		if (child == list->focused_child)
+			focused = index;
+	}
+	if ((found = named(screen, picture)) != NULL)
+		found->animation.current_frame_index = (short)focused;
+	string_show(named(screen, description), (short)focused);
 }
 
 /* a text box's string of its string list */
@@ -1166,6 +1331,32 @@ boolean pc_menu_event_function_invoke(
 	case _function_h3_servers_off:
 		p2p_lobby_browse(0);
 		return TRUE;
+	case _function_h3_campaign_init:
+		h3_campaign_initialize();
+		return TRUE;
+	case _function_h3_mission_set:
+		h3_campaign.level = (short)PIN(h3_child_index(widget), 0, h3_campaign_unlocked() - 1);
+		h3_campaign_said();
+		return TRUE;
+	case _function_h3_difficulty_set:
+		h3_campaign.difficulty = (short)PIN(h3_child_index(widget), 0, 3);
+		h3_campaign_said();
+		return TRUE;
+	/* (a picker opened: the focus on the lobby's choice, as Halo 3's) */
+	case _function_h3_mission_focus:
+		h3_focus_child(widget, h3_campaign.level);
+		return TRUE;
+	case _function_h3_difficulty_focus:
+		h3_focus_child(widget, h3_campaign.difficulty);
+		return TRUE;
+	case _function_h3_campaign_start:
+		/* (then the game's own "main menu switch to solo game", the next
+		handler, as the Xbox's difficulty list does after "set difficulty") */
+		main_set_map_name((char *)h3_level_paths[h3_campaign.level]);
+		main_set_difficulty((word)h3_campaign.difficulty);
+		platform_log("menus: h3 campaign: start %s on %s", h3_level_paths[h3_campaign.level],
+			h3_difficulty_names[h3_campaign.difficulty]);
+		return TRUE;
 	case _function_coop_campaign:
 	case _function_unwired:
 	default:
@@ -1200,6 +1391,15 @@ void pc_menu_game_data_function_invoke(
 		break;
 	case _input_h3_servers:
 		h3_servers_update(widget);
+		break;
+	case _input_h3_campaign:
+		h3_campaign_update(widget);
+		break;
+	case _input_h3_missions:
+		h3_pick_update(widget, h3_campaign_unlocked(), "mission_picture", "mission_text");
+		break;
+	case _input_h3_difficulties:
+		h3_pick_update(widget, 4, "difficulty_emblem", "difficulty_text");
 		break;
 	default:
 		break;

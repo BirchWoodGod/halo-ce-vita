@@ -24,6 +24,10 @@
 #            the main menu, the Halo 3 screen
 #   h3online the main menu's live servers: five made-up games
 #            (HALO_TEST_BROWSER_GAMES), the three with the most players shown
+#   h3campaign  a profile with every level (HALO_TEST_PROFILE, never in the
+#            repository; skipped without): CAMPAIGN, the profile, the Halo 3
+#            campaign lobby; Mission: The Silent Cartographer, Difficulty:
+#            Heroic, Start Game: b30 loads on Heroic
 #   pause   Campaign from the main menu (a new profile, Normal), the level's
 #           pause menu, Quit to Main Menu: a game map's widget runs its
 #           function and is back at the main menu, and asked about deleting
@@ -55,7 +59,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3campaign}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
 
@@ -75,6 +79,14 @@ run() { # NAME DATA SECONDS PAD [VAR=value...]
 	shift 4
 	rm -rf "$out/$name"
 	mkdir -p "$out/$name/data" "$out/$name/save"
+	# (a player profile of the tests', as the Vita keeps it: HALO_TEST_PROFILE's blam.sav)
+	if [ -n "${profile_from:-}" ]; then
+		mkdir -p "$out/$name/save/u/UDATA/869079979327"
+		cp "$profile_from" "$out/$name/save/u/UDATA/869079979327/blam.sav"
+		# (and its save folder's SaveMeta.xbx, beside it: without it the game finds no profile)
+		[ -r "$(dirname "$profile_from")/SaveMeta.xbx" ] &&
+			cp "$(dirname "$profile_from")/SaveMeta.xbx" "$out/$name/save/u/UDATA/869079979327/"
+	fi
 	ln -sfn "$(cd "$folder" && pwd)/maps" "$out/$name/data/maps"
 	[ -n "${init_line:-}" ] && printf '%s\n' "$init_line" > "$out/$name/data/init.txt"
 	(cd "$out/$name" && exec env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=offscreen HALO_DATA_ROOT="$out/$name/data" \
@@ -187,8 +199,24 @@ for case in $cases; do
 		check_h3 h3online halo3
 		grep -aq "menus: h3 servers: 3 shown of 5: Test game 02 (14/16), Test game 04 (12/16), Test game 01 (7/16)" \
 			"$out/h3online/run.log" || fail h3online "the three fullest games were not shown" ;;
+	h3campaign)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "--- h3campaign"; echo "SKIP: no HALO_TEST_PROFILE (a blam.sav with every level)"; continue
+		fi
+		# (the main menu: down to CAMPAIGN, A; the profile, A; the lobby: Mission, down three, A;
+		# Difficulty - the picker opens on Normal -, down one, A; Start Game)
+		profile_from=$HALO_TEST_PROFILE run h3campaign "$menus_data" 75 "wait:150:3000 down:150:700 a wait:150:3000 a wait:150:3000 a wait:150:2500 down:150:600 down:150:600 down:150:600 a wait:150:2500 down:150:700 a wait:150:2500 down:150:600 a wait:150:2500 down:150:700 a wait:150:15000" \
+			HALO_MENU_STYLE=halo3
+		check_h3 h3campaign halo3
+		log=$out/h3campaign/run.log
+		grep -aq "menus: Halo 3 screen h3/campaign/screen for ui.shell.main_menu.solo_level_select.solo_level_select_screen" "$log" ||
+			fail h3campaign "the Halo 3 campaign lobby did not stand for the level select"
+		grep -aq "menus: h3 campaign: The Silent Cartographer on Normal" "$log" || fail h3campaign "the mission was not set"
+		grep -aq "menus: h3 campaign: The Silent Cartographer on Heroic" "$log" || fail h3campaign "the difficulty was not set"
+		grep -aq "menus: h3 campaign: start levels.b30.b30 on Heroic" "$log" || fail h3campaign "Start Game did not start b30 on Heroic"
+		grep -aq "memory: loaded levels.b30.b30" "$log" || fail h3campaign "b30 did not load" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3campaign]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"
