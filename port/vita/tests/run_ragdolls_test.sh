@@ -8,7 +8,8 @@
 # settings and the tick on its own thread, characters killed by the test
 # commands "@ragdoll boom N R" (a frag grenade's explosion at the feet of
 # each of the N living characters nearest the player within R world units)
-# and "@ragdoll kill N R" (killed outright); "@ragdoll stats" logs what was
+# "@ragdoll punch N R" (a melee blow from the player kills each) and
+# "@ragdoll kill N R" (killed outright); "@ragdoll stats" logs what was
 # made, slept, let go and what it cost, "@ragdoll check" whether any
 # particle is in solid structure or not a number, and how far a ragdoll is
 # from its body; HALO_RAGDOLLS_LOG=1 a line for each start, sleep and
@@ -18,6 +19,9 @@
 #               marines' and grunts' models, an explosion's thrown; four
 #               awake at most, twelve kept at most; every one asleep (at
 #               rest) 25 s later, none in solid structure, none not a number
+#   b30-punch   melee blows kill four characters: each ragdoll thrown at once
+#               along the blow (no death animation followed), none in solid
+#               structure, none not a number, no joint bent the wrong way
 #   b30-cap     one awake at most (HALO_RAGDOLLS_ACTIVE=1): never two
 #   b30-revert  a checkpoint saved, bodies made ragdolls, the checkpoint
 #               reverted: every ragdoll let go at once ("game state
@@ -47,7 +51,7 @@ data=${HALO_TEST_DATA:-$root/../data2276}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_ragdolls_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-b30 b30-cap b30-revert b30-map b30-off b30-live a10 bloodgulch}
+cases=${*:-b30 b30-punch b30-cap b30-revert b30-map b30-off b30-live a10 bloodgulch}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
 
@@ -183,6 +187,7 @@ started=()
 for c in $cases; do
 	case $c in
 	b30) run "$c" 95 "$b30" "$b30_setup;$b30_fight" & ;;
+	b30-punch) run "$c" 75 "$b30" "$b30_setup;L1500:@ragdoll punch 4 40;L1505:@ragdoll stats;L1700:@ragdoll check;L2000:@ragdoll stats;L2000:@ragdoll check" & ;;
 	b30-cap) run "$c" 75 "$b30" "$b30_setup;L1500:@ragdoll boom 6 40;L1560:@ragdoll kill 6 40;L1900:@ragdoll stats;L1900:@ragdoll check" \
 		HALO_RAGDOLLS_ACTIVE=1 & ;;
 	b30-revert)
@@ -244,6 +249,15 @@ for c in "${started[@]}"; do
 		expect "$c" "made on b30: $(stats "$c" 1600 kept) kept" gt "$(stats "$c" 1600 kept)" 0
 		expect "$c" "a10 loaded: none kept ($(stats "$c" 200 kept)), the old ones let go" \
 			sh -c "grep -aq 'test command at tick 200: @ragdoll stats' '$log' && [ '$(stats "$c" 200 kept)' = 0 ]" ;;
+	b30-punch)
+		s1=$(stats "$c" 1505 started)
+		expect "$c" "ragdolls made by melee blows: $s1 by tick 1505" gt "${s1:-0}" 0
+		expect "$c" "a melee blow throws the body at once (no death animation followed)" \
+			sh -c "grep -aq 'started in slot .*a melee blow .* follows its death 0 ticks' '$log' && ! grep -aq 'a melee blow .* follows its death [1-9]' '$log'"
+		for t in 1700 2000; do
+			expect "$c" "tick $t: none in solid structure ($(check "$c" $t solid) of $(check "$c" $t particles) particles), none not a number ($(check "$c" $t nan)), no knee or elbow bent the wrong way ($(check "$c" $t wrong))" \
+				sh -c "[ '$(check "$c" $t solid)' = 0 ] && [ '$(check "$c" $t nan)' = 0 ] && [ '$(check "$c" $t wrong)' = 0 ]"
+		done ;;
 	b30-off)
 		expect "$c" "off: none made ($(stats "$c" 1800 started)), no line" \
 			sh -c "[ '$(stats "$c" 1800 started)' = 0 ] && ! grep -aq 'ragdolls: .* started' '$log'" ;;
