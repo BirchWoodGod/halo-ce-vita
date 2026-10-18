@@ -180,8 +180,8 @@ enum
 	_function_h3_campaign_host,
 	_function_h3_campaign_focus,
 	_function_h3_scene,
-	_function_forge_variant_set,
-	_function_forge_variant_focus,
+	_function_forge_map_pick,
+	_function_forge_maps_back,
 	_function_forge_variant_page_up,
 	_function_forge_variant_page_down,
 	_function_forge_save,
@@ -228,7 +228,6 @@ enum
 	_input_h3_maps,
 	_input_h3_gametypes,
 	_input_h3_campaign_networks,
-	_input_forge_variants,
 	_input_fileshare,
 	_input_fileshare_question,
 	_input_forge_properties,
@@ -1116,6 +1115,11 @@ static struct
 	struct browser_view variant_view;
 	int variant_chosen;
 	int variant_page;
+	/* (the map picker) the variants of pick_map shown in its list, the
+	focus to be given to the variant chosen at the next update */
+	boolean picking_variant;
+	short pick_map;
+	boolean pick_refocus;
 	/* why START FORGE did not start (the lobby's note), until another
 	choice */
 	char note[FORGE_STORE_WHY_SIZE];
@@ -1154,12 +1158,13 @@ static void h3_forge_lobby_update(struct widget_instance *widget)
 
 	if (!h3_forge.initialized)
 		h3_forge_lobby_initialize();
-	snprintf(text, sizeof(text), "%s: %s", T("MAP"), T(forge_map_name(h3_forge.map)));
+	/* ("MAP: BLOOD GULCH - MY FORT", Halo 3's: the map and its variant) */
+	if (h3_forge.variant_file[0])
+		snprintf(text, sizeof(text), "%s: %s - %s", T("MAP"), T(forge_map_name(h3_forge.map)), h3_forge.variant_title);
+	else
+		snprintf(text, sizeof(text), "%s: %s", T("MAP"), T(forge_map_name(h3_forge.map)));
 	h3_capitals(text);
 	text_show(named(screen, "map_row"), text);
-	snprintf(text, sizeof(text), "%s: %s", T("MAP VARIANT"), h3_forge.variant_file[0] ? h3_forge.variant_title : T("NONE"));
-	h3_capitals(text);
-	text_show(named(screen, "variant_row"), text);
 	/* (the note: why START FORGE did not start, else the game's rules) */
 	text_show(named(screen, "note"), h3_forge.note[0] ? h3_forge.note : T("No score or time limit."));
 	if (h3_forge.variant_file[0])
@@ -1178,12 +1183,29 @@ static void h3_forge_lobby_update(struct widget_instance *widget)
 
 /* the map picker: the maps of the maps folder shown, each its name, the
 picture and the description following the focused one */
+static void h3_forge_variants_update(struct widget_instance *list);
+
 static void h3_forge_maps_update(struct widget_instance *list)
 {
 	struct widget_instance *screen = screen_of(list);
 	struct widget_instance *child, *found;
 	short index = 0, focused = 0;
+	char title[96];
 
+	/* (a map chosen: its variants in the list, Halo 3's way) */
+	if (h3_forge.picking_variant)
+	{
+		h3_forge_variants_update(list);
+		return;
+	}
+	snprintf(title, sizeof(title), "%s", T("SELECT MAP"));
+	text_show(named(screen, "title"), title);
+	if ((found = named(screen, "maps_text")) != NULL)
+		widget_instance_set_visibility_recursive(found, TRUE);
+	if ((found = named(screen, "variant_name")) != NULL)
+		widget_instance_set_visibility_recursive(found, FALSE);
+	if ((found = named(screen, "variant_text")) != NULL)
+		widget_instance_set_visibility_recursive(found, FALSE);
 	for (child = list->child; child; child = child->next, index++)
 	{
 		boolean shown = forge_map_available(index);
@@ -2633,25 +2655,53 @@ static void h3_forge_variant_check(void)
 	}
 }
 
-/* (port forge variants) the picker's rows (item_0 to item_11): NONE, then
-the map's map variants, scrolling; the focused one's picture and details */
+/* the map picker's variants of pick_map: how many rows (the map itself,
+then each of its map variants that is not damaged), and the entry of row
+`row` (NULL for the map itself, or past them) */
+static int h3_forge_pick_rows(int row, struct forge_store_entry const **entry)
+{
+	int index, rows = 1;
+
+	*entry = NULL;
+	for (index = 0; index < h3_variants.count; index++)
+	{
+		if (h3_variants.entries[index].damaged)
+			continue;
+		if (rows == row)
+			*entry = &h3_variants.entries[index];
+		rows++;
+	}
+	return rows;
+}
+
+/* (the map picker, a map chosen) its rows (item_0 to item_12): the map
+itself, then its map variants, scrolling; the picture, the variant's
+details in the description's place, the map's name as the title */
 static void h3_forge_variants_update(struct widget_instance *list)
 {
 	struct widget_instance *screen = screen_of(list);
 	struct widget_instance *child, *focus = NULL, *found;
-	long index, focused_row = NONE;
+	struct forge_store_entry const *entry;
+	long index, focused_row = NONE, rows = 0;
 	int target;
 	int count;
 	char text[256];
 
-	h3_variants_list(_variants_lobby, forge_map_short(h3_forge.map), FALSE);
-	count = h3_variants.count + 1;
+	h3_variants_list(_variants_lobby, forge_map_short(h3_forge.pick_map), FALSE);
+	count = h3_forge_pick_rows(-1, &entry);
 	for (index = 0, child = list->child; child; child = child->next, index++)
 	{
 		if (child == list->focused_child)
 			focused_row = index;
+		rows++;
 	}
-	target = browser_view_follow(&h3_forge.variant_view, VARIANT_ROWS, count, (int)focused_row, h3_forge.variant_chosen,
+	/* (just opened: the focus is the map's row, not a variant's) */
+	if (h3_forge.pick_refocus)
+	{
+		focused_row = NONE;
+		h3_forge.pick_refocus = FALSE;
+	}
+	target = browser_view_follow(&h3_forge.variant_view, (int)rows, count, (int)focused_row, h3_forge.variant_chosen,
 		h3_forge.variant_page);
 	h3_forge.variant_page = 0;
 	h3_forge.variant_chosen = target;
@@ -2664,12 +2714,8 @@ static void h3_forge_variants_update(struct widget_instance *list)
 		child->disabled = !shown;
 		if (!shown)
 			continue;
-		if (shown_index == 0)
-			snprintf(text, sizeof(text), "%s", T("NONE"));
-		else if (h3_variants.entries[shown_index - 1].damaged)
-			snprintf(text, sizeof(text), "%s", T("DAMAGED FILE"));
-		else
-			snprintf(text, sizeof(text), "%s", h3_variants.entries[shown_index - 1].title);
+		h3_forge_pick_rows((int)shown_index, &entry);
+		snprintf(text, sizeof(text), "%s", entry ? entry->title : T(forge_map_name(h3_forge.pick_map)));
 		h3_capitals(text);
 		text_show(child, text);
 		if (index == h3_forge.variant_view.row)
@@ -2677,26 +2723,34 @@ static void h3_forge_variants_update(struct widget_instance *list)
 	}
 	if (focus && focus != list->focused_child)
 		ui_widget_port_give_focus(list, focus);
-	if ((found = named(screen, "picture")) != NULL)
-		found->animation.current_frame_index = h3_forge.map;
-	if (target <= 0)
+	snprintf(text, sizeof(text), "%s", T(forge_map_name(h3_forge.pick_map)));
+	h3_capitals(text);
+	text_show(named(screen, "title"), text);
+	if ((found = named(screen, "maps_picture")) != NULL)
+		found->animation.current_frame_index = h3_forge.pick_map;
+	if ((found = named(screen, "maps_text")) != NULL)
+		widget_instance_set_visibility_recursive(found, FALSE);
+	if ((found = named(screen, "variant_name")) != NULL)
+		widget_instance_set_visibility_recursive(found, TRUE);
+	if ((found = named(screen, "variant_text")) != NULL)
+		widget_instance_set_visibility_recursive(found, TRUE);
+	h3_forge_pick_rows(target, &entry);
+	if (!entry)
 	{
-		text_show(named(screen, "info_name"), T("NONE"));
-		text_show(named(screen, "info_text"), T("The map as it is: nothing placed yet."));
+		text_show(named(screen, "variant_name"), T(forge_map_name(h3_forge.pick_map)));
+		text_show(named(screen, "variant_text"), T("The original map: nothing placed yet."));
 	}
 	else
 	{
-		struct forge_store_entry const *entry = &h3_variants.entries[target - 1];
-
-		text_show(named(screen, "info_name"), entry->title);
+		text_show(named(screen, "variant_name"), entry->title);
 		h3_variant_details(entry, FALSE, text, sizeof(text));
-		text_show(named(screen, "info_text"), text);
+		text_show(named(screen, "variant_text"), text);
 	}
 	{
 		char said[192];
 
-		snprintf(said, sizeof(said), "%s (%d of %d)", target <= 0 ? "NONE" : h3_variants.entries[target - 1].title,
-			target + 1, count);
+		snprintf(said, sizeof(said), "%s: %s (%d of %d)", forge_map_name(h3_forge.pick_map), entry ? entry->title :
+			"the original", target + 1, count);
 		if (strcmp(said, h3_forge.said))
 		{
 			snprintf(h3_forge.said, sizeof(h3_forge.said), "%s", said);
@@ -2705,51 +2759,79 @@ static void h3_forge_variants_update(struct widget_instance *list)
 	}
 }
 
-/* (port forge variant set) the picker's choice: NONE or a map variant (not
-a damaged one: FALSE, the picker stays) */
-static boolean h3_forge_variant_set(struct widget_instance *widget)
+/* (port forge map pick, A in the map picker) a map: its variants shown in
+the list (FALSE: the picker stays); a variant of it, or the map itself:
+the lobby's, and back to the lobby (TRUE) */
+static boolean h3_forge_map_pick(struct widget_instance *widget)
 {
-	long index = h3_forge.variant_view.offset + h3_child_index(widget);
+	struct forge_store_entry const *entry;
+	long index;
 
-	if (index <= 0 || index > h3_variants.count || h3_variants.owner != _variants_lobby)
+	if (!h3_forge.picking_variant)
 	{
-		h3_forge.variant_file[0] = 0;
-		h3_forge.variant_title[0] = 0;
-		platform_log("menus: forge lobby: map variant none");
+		short map = (short)h3_child_index(widget);
+
+		if (!forge_map_available(map))
+			return FALSE;
+		h3_forge.pick_map = map;
+		h3_forge.picking_variant = TRUE;
+		h3_forge.pick_refocus = TRUE;
+		h3_forge.said[0] = 0;
+		h3_variants_list(_variants_lobby, forge_map_short(map), TRUE);
+		browser_view_reset(&h3_forge.variant_view);
+		h3_forge.variant_page = 0;
+		h3_forge.variant_chosen = 0;
+		/* (the lobby's variant of that map chosen again) */
+		if (map == h3_forge.map && h3_forge.variant_file[0])
+		{
+			int row, count = h3_forge_pick_rows(-1, &entry);
+
+			for (row = 1; row < count; row++)
+			{
+				h3_forge_pick_rows(row, &entry);
+				if (entry && !strcmp(entry->file_name, h3_forge.variant_file))
+					h3_forge.variant_chosen = row;
+			}
+		}
+		platform_log("menus: forge lobby: %s's variants", forge_map_name(map));
+		return FALSE;
+	}
+	index = h3_forge.variant_view.offset + h3_child_index(widget);
+	h3_forge_pick_rows((int)index, &entry);
+	h3_forge.map = h3_forge.pick_map;
+	h3_forge.picking_variant = FALSE;
+	h3_forge.note[0] = 0;
+	if (entry)
+	{
+		snprintf(h3_forge.variant_file, sizeof(h3_forge.variant_file), "%s", entry->file_name);
+		snprintf(h3_forge.variant_title, sizeof(h3_forge.variant_title), "%s", entry->title);
+		platform_log("menus: forge lobby: %s, map variant %s (%s)", forge_map_name(h3_forge.map), entry->title,
+			entry->file_name);
 	}
 	else
 	{
-		struct forge_store_entry const *entry = &h3_variants.entries[index - 1];
-
-		if (entry->damaged)
-		{
-			platform_log("menus: forge lobby: the map variant %s is damaged", entry->file_name);
-			return FALSE;
-		}
-		snprintf(h3_forge.variant_file, sizeof(h3_forge.variant_file), "%s", entry->file_name);
-		snprintf(h3_forge.variant_title, sizeof(h3_forge.variant_title), "%s", entry->title);
-		platform_log("menus: forge lobby: map variant %s (%s)", entry->title, entry->file_name);
+		h3_forge.variant_file[0] = 0;
+		h3_forge.variant_title[0] = 0;
+		platform_log("menus: forge lobby: %s", forge_map_name(h3_forge.map));
 	}
-	h3_forge.note[0] = 0;
 	return TRUE;
 }
 
-/* (port forge variant focus) the picker opened: the map's files read, the
-focus on the lobby's choice */
-static void h3_forge_variant_focus(void)
+/* (port forge maps back, B in the map picker) from a map's variants, back
+to the maps on that map (FALSE: the picker stays); from the maps, back to
+the lobby (TRUE) */
+static boolean h3_forge_maps_back(struct widget_instance *widget)
 {
-	short index;
+	struct widget_instance *list;
 
-	h3_variants_list(_variants_lobby, forge_map_short(h3_forge.map), TRUE);
-	browser_view_reset(&h3_forge.variant_view);
-	h3_forge.variant_page = 0;
-	h3_forge.variant_chosen = 0;
+	if (!h3_forge.picking_variant)
+		return TRUE;
+	h3_forge.picking_variant = FALSE;
 	h3_forge.said[0] = 0;
-	for (index = 0; index < h3_variants.count && h3_forge.variant_file[0]; index++)
-	{
-		if (!strcmp(h3_variants.entries[index].file_name, h3_forge.variant_file))
-			h3_forge.variant_chosen = index + 1;
-	}
+	list = named(screen_of(widget), "list");
+	if (list)
+		h3_focus_child(list, h3_forge.pick_map);
+	return FALSE;
 }
 
 /* (the Forge menu's SAVE MAP VARIANT) the name asked for on the system's
@@ -3282,6 +3364,7 @@ boolean pc_menu_event_function_invoke(
 		platform_log("menus: forge lobby: %s", forge_map_name(h3_forge.map));
 		return TRUE;
 	case _function_forge_map_focus:
+		h3_forge.picking_variant = FALSE;
 		h3_focus_child(widget, h3_forge.map);
 		return TRUE;
 	case _function_forge_start:
@@ -3366,11 +3449,10 @@ boolean pc_menu_event_function_invoke(
 	case _function_h3_setup_hold:
 		setup_hold(widget);
 		return TRUE;
-	case _function_forge_variant_set:
-		return h3_forge_variant_set(widget);
-	case _function_forge_variant_focus:
-		h3_forge_variant_focus();
-		return TRUE;
+	case _function_forge_map_pick:
+		return h3_forge_map_pick(widget);
+	case _function_forge_maps_back:
+		return h3_forge_maps_back(widget);
 	case _function_forge_variant_page_up:
 		h3_forge.variant_page = -1;
 		return TRUE;
@@ -3512,10 +3594,6 @@ void pc_menu_game_data_function_invoke(
 		break;
 	case _input_h3_campaign_networks:
 		h3_pick_update(widget, NUMBER_OF_H3_CAMPAIGN_NETWORKS, "campnet_picture", "campnet_text");
-		break;
-	case _input_forge_variants:
-		if (widget->type == _ui_widget_type_column_list)
-			h3_forge_variants_update(widget);
 		break;
 	case _input_fileshare:
 		if (widget->type == _ui_widget_type_column_list)

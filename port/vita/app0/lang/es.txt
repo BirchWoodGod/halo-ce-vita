@@ -1209,7 +1209,6 @@
 
 # ---------- Forge's map variants and File Share (forge.c, forge_store.c, menu_functions.c, halo3/forge*.xml, halo3/fileshare.xml)
 "SAVE MAP VARIANT" = "GUARDAR VARIANTE"
-"SELECT MAP VARIANT" = "ELEGIR VARIANTE DE MAPA"
 "MAP VARIANT" = "VARIANTE DE MAPA"
 "Anything not saved is lost when you leave.\nSAVE MAP VARIANT keeps what you placed." = "Lo que no guardes se pierde al salir.\nGUARDAR VARIANTE conserva lo colocado."
 "No score or time limit." = "Sin límite de puntos ni de tiempo."
@@ -1228,7 +1227,7 @@
 "Created by: %s\n" = "Creada por: %s\n"
 "Saved: %s\n" = "Guardada: %s\n"
 "DAMAGED FILE" = "ARCHIVO DAÑADO"
-"The map as it is: nothing placed yet." = "El mapa tal como es: nada colocado aún."
+"The original map: nothing placed yet." = "El mapa original: nada colocado aún."
 "%s Variant" = "Variante de %s"
 "Forge" = "Forja"
 "Map variant name" = "Nombre de la variante"

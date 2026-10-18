@@ -359,7 +359,7 @@ static char const *const port_function_names[] =
 	"port h3 gametype focus", "port h3 gametype page up", "port h3 gametype page down", "port h3 setup hold",
 	"port h3 campaign network set", "port h3 campaign network focus", "port h3 campaign host",
 	"port h3 campaign focus", "port h3 scene",
-	"port forge variant set", "port forge variant focus", "port forge variant page up", "port forge variant page down",
+	"port forge map pick", "port forge maps back", "port forge variant page up", "port forge variant page down",
 	"port forge save",
 	"port fileshare init", "port fileshare focus", "port fileshare page up", "port fileshare page down",
 	"port fileshare kind", "port fileshare rename", "port fileshare ask delete", "port fileshare delete",
@@ -379,7 +379,7 @@ static char const *const port_game_data_input_names[] =
 	"port forge lobby", "port forge maps", "port forge browser", "port forge title", "port forge controls",
 	"port h3 mp lobby", "port h3 networks", "port h3 maps", "port h3 gametypes",
 	"port h3 campaign networks",
-	"port forge variants", "port fileshare", "port fileshare question",
+	"port fileshare", "port fileshare question",
 	"port forge properties",
 };
 

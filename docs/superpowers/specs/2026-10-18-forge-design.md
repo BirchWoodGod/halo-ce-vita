@@ -705,11 +705,16 @@ Halo 3 named them.
   Nothing was saved.", "Couldn't write it (is the card full?). Nothing was
   saved."). The map's own objects are not saved (as the budget does not
   count them): deleting one of the map's is not kept.
-- **Loading** (the Forge lobby's MAP VARIANT row, between MAP and START
-  FORGE): a picker of NONE and the map's variants (twelve rows that
-  scroll, the triggers a page), each with its objects, author, date and
-  description; a damaged one is listed ("DAMAGED FILE") but cannot be
-  chosen. START FORGE reads and checks the variant again first (one that
+- **Loading**, Halo 3's way (the owner, Oct 18): the lobby's MAP row
+  opens SELECT MAP, and choosing a map shows that map's variants in the
+  same picker: the map itself first (the original), then the player's
+  saved map variants of it (rows that scroll, the triggers a page), each
+  with its objects, author, date and description; B goes back to the
+  maps. The row then reads "MAP: BLOOD GULCH - MY FORT". Damaged files
+  are not offered (File Share lists and deletes them). The Halo 3
+  multiplayer lobby's MAP picker still lists the maps only: map variants
+  are not playable in custom games until phase (c), so it offers only
+  what can be played. START FORGE reads and checks the variant again first (one that
   cannot be read starts nothing: the lobby says why), and the session
   places it as it starts: each path found among the palette's tags (the
   browser's allow-list: nothing else is ever placed), the group checked,

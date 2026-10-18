@@ -35,9 +35,10 @@
 #               one, one with a tag Blood Gulch lacks, one of another map, a
 #               damaged one: forge_files_test --write); load - the lobby's MAP
 #               VARIANT picker lists them (the last two damaged), the saved one
-#               chosen, START FORGE places its 2 objects; missing - the one
-#               with the missing tag: 5 placed, 1 skipped; damaged - a damaged
-#               one cannot be chosen, START FORGE plays none; full - a save
+#               chosen (MAP, the map, then its variants: Halo 3's way),
+#               START FORGE places its 2 objects; missing - the one with the
+#               missing tag: 5 placed, 1 skipped; damaged - the damaged ones
+#               are not offered, B back, START FORGE plays none; full - a save
 #               that fails half way (HALO_TEST_FORGE_WRITE_FAIL, as a full
 #               card), over the session's own file and as a new one: said,
 #               the old file as it was, nothing else left
@@ -160,8 +161,9 @@ count() {
 bloodgulch='game_variant slayer\nmap_name levels\\test\\bloodgulch\\bloodgulch'
 b30='map_name levels\\b30\\b30'
 
-# (v1: the main menu: down to FORGE; the lobby: Map, down, A: Wizard; Map, up,
-# A: Blood Gulch; down past MAP VARIANT, START FORGE. In the level: forward and up, Square, A
+# (v1: the main menu: down to FORGE; the lobby: Map, down, A: Wizard, its
+# variants (Halo 3's), A: Wizard itself; Map, up, A: Blood Gulch, A: the map
+# itself; down, START FORGE. In the level: forward and up, Square, A
 # on VEHICLES, down twice, A: a Warthog in the monitor's hand; L + right stick
 # right (turned), L + up (pushed away), R (dropped); Square, R (the next
 # category), down, A: a weapon, R (dropped: it falls); Square, R twice
@@ -174,8 +176,9 @@ b30='map_name levels\\b30\\b30'
 # six times (past SAVE MAP VARIANT, UNDO, REDO, SNAP), A (LEAVE FORGE), A
 # (leave))
 v1pad="wait:150:3000 @00-main-menu:0:300 down:150:600 down:150:600 down:150:600 a:150:2500 @01-lobby:0:300"
-v1pad="$v1pad a:150:2000 @02-map-picker:0:300 down:150:700 a:150:2000 a:150:2000 up:150:700 a:150:2000"
-v1pad="$v1pad @03-lobby-blood-gulch:0:300 down:150:600 down:150:600 a:150:1500 level:150:2500 @04-monitor:0:300"
+v1pad="$v1pad a:150:2000 @02-map-picker:0:300 down:150:700 a:150:1500 @02b-wizard-variants:0:300 a:150:2000"
+v1pad="$v1pad a:150:2000 up:150:700 a:150:1500 a:150:2000"
+v1pad="$v1pad @03-lobby-blood-gulch:0:300 down:150:600 a:150:1500 level:150:2500 @04-monitor:0:300"
 v1pad="$v1pad lup:1200:300 a:600:600 @05-flown:0:300 x:150:1500 @06-browser:0:300 a:150:1200"
 v1pad="$v1pad @07-browser-vehicles:0:300 down:150:600 down:150:600 a:150:1500 @08-warthog-held:0:300"
 v1pad="$v1pad lt+rright:900:300 lt+rup:500:600 @09-turned-pushed:0:300 rt:150:2500 @10-dropped:0:300"
@@ -193,14 +196,15 @@ v1pad="$v1pad @19-leave-forge:0:300 a:150:9000 @20-main-menu-again:0:300"
 # name typed), B; a boulder from SCENERY, dropped; Start, SAVE MAP VARIANT
 # (the same name: the file replaced), down to LEAVE FORGE, leave)
 lobby="wait:150:3000 down:150:600 down:150:600 down:150:600 a:150:2500"
-savepad="$lobby down:150:600 down:150:600 a:150:1500 level:150:2500 x:150:1500 a:150:1200 down:150:600 down:150:600"
+savepad="$lobby down:150:600 a:150:1500 level:150:2500 x:150:1500 a:150:1200 down:150:600 down:150:600"
 savepad="$savepad a:150:1500 rt:150:2000 start:150:2000 down:150:600 down:150:600 a:150:2500 @00-saved:0:300 b:150:1500"
 savepad="$savepad x:150:1500 rt:150:800 rt:150:800 rt:150:1200 a:150:1500 rt:150:2000 start:150:2000 down:150:600"
 savepad="$savepad down:150:600 a:150:2500 @01-saved-again:0:300 down:150:600 down:150:600 down:150:600 down:150:600"
 savepad="$savepad a:150:1500 a:150:9000"
-# (the lobby's MAP VARIANT picker, down N times, A; START FORGE)
+# (the lobby's MAP: the maps (Blood Gulch chosen), A: its variants (the map
+# itself first), down N times, A; START FORGE)
 pick() {
-	local p="$lobby down:150:600 a:150:2000 @00-picker:0:300" i
+	local p="$lobby a:150:2000 a:150:1500 @00-picker:0:300" i
 	for i in $(seq 1 "$1"); do p="$p down:150:700"; done
 	echo "$p @01-picked:0:300 a:150:2000 @02-lobby:0:300 down:150:600 a:150:1500 level:150:3000 @03-placed:0:300"
 }
@@ -223,7 +227,7 @@ fspad="$fspad @07-main-menu:0:300"
 # boulder from SCENERY, R (dropped on the grid), R (grabbed), left
 # (carried), R (dropped: moved, on the grid); Start, down to UNDO, A (the
 # move undone), B; Start, SAVE MAP VARIANT (typed), B)
-editpad="$lobby down:150:600 down:150:600 a:150:1500 level:150:2500 x:150:1500 a:150:1200 down:150:600 down:150:600"
+editpad="$lobby down:150:600 a:150:1500 level:150:2500 x:150:1500 a:150:1200 down:150:600 down:150:600"
 editpad="$editpad a:150:1500 x:150:1500 @00-properties:0:300 a:150:800 down:150:600 a:150:800 down:150:600 a:150:800"
 editpad="$editpad @01-properties-set:0:300 b:150:1200 rt:150:2000 start:150:2000 down:150:600 down:150:600 down:150:600"
 editpad="$editpad a:150:1500 @02-undone:0:300 down:150:600 a:150:1500 @03-redone:0:300 down:150:600 a:150:1200"
@@ -250,7 +254,7 @@ variants_runs() {
 	md5sum "$store/forge/bloodgulch/good.hmv" > "$out/variants-good.md5"
 	run variants-load 50 "" "" "$(pick 1)" HALO_MENU_STYLE=halo3 HALO_SAVE_ROOT="$store"
 	run variants-missing 50 "" "" "$(pick 2)" HALO_MENU_STYLE=halo3 HALO_SAVE_ROOT="$store"
-	run variants-damaged 50 "" "" "$lobby down:150:600 a:150:2000 down:150:700 down:150:700 down:150:700 down:150:700 a:150:2000 @00-damaged:0:300 b:150:2000 down:150:600 a:150:1500 level:150:2500 @01-none:0:300" \
+	run variants-damaged 50 "" "" "$lobby a:150:2000 a:150:1500 down:150:700 down:150:700 down:150:700 @00-damaged:0:300 b:150:1500 b:150:1500 down:150:600 a:150:1500 level:150:2500 @01-none:0:300" \
 		HALO_MENU_STYLE=halo3 HALO_SAVE_ROOT="$store"
 	run variants-full 60 "" "" "$fullpad" HALO_MENU_STYLE=halo3 HALO_SAVE_ROOT="$store" HALO_TEST_FORGE_WRITE_FAIL=1 \
 		"HALO_TEST_TEXT_INPUT=Sample Gulch|Brand New"
@@ -390,16 +394,20 @@ for c in $cases; do
 		[ -f "$store/gulch_test.hmv" ] && echo "  ok: variants-save: gulch_test.hmv in the store" ||
 			fail "variants-save: no gulch_test.hmv in $store"
 		expect variants-load "the picker read the Blood Gulch folder" "menus: 5 map variants of bloodgulch"
+		expect variants-load "MAP, then the map's variants (Halo 3's), the map itself first" \
+			"menus: forge variants: Blood Gulch: the original \\(1 of 4\\)"
 		expect variants-load "a damaged file refused by the validator" "forge store: bloodgulch/damaged.hmv refused: its checksum is wrong"
 		expect variants-load "another map's file refused" "forge store: bloodgulch/wrongmap.hmv refused: of another map"
-		expect variants-load "Gulch Test chosen" "menus: forge lobby: map variant Gulch Test \(gulch_test.hmv\)"
+		expect variants-load "Gulch Test chosen" "menus: forge lobby: Blood Gulch, map variant Gulch Test \(gulch_test.hmv\)"
 		expect variants-load "the lobby says it" "menus: forge lobby caption: Gulch Test on Blood Gulch"
 		expect variants-load "its two objects placed as the game starts" \
 			"forge: map variant \"Gulch Test\" applied: 2 placed, 0 skipped"
 		expect variants-missing "the missing tag said" "forge: the map variant's vehicles.banshee.banshee_mp is not on this map"
 		expect variants-missing "skipped and counted, not fatal" \
 			"forge: map variant \"Missing Tag\" applied: 5 placed, 1 skipped \(1 missing tags"
-		expect variants-damaged "a damaged one cannot be chosen" "menus: forge lobby: the map variant damaged.hmv is damaged"
+		expect variants-damaged "the damaged ones not offered (the map and its three good variants)" \
+			"menus: forge variants: Blood Gulch: Sample Gulch \\(4 of 4\\)"
+		expect variants-damaged "B: back to the maps" "menus: forge lobby: Blood Gulch's variants"
 		expect variants-damaged "START FORGE then plays none" "menus: forge lobby: start levels.test.bloodgulch.bloodgulch$"
 		if grep -aq "forge: map variant .* applied" "$out/variants-damaged/run.log"; then
 			fail "variants-damaged: a variant was applied"
