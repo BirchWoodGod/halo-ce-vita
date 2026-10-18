@@ -204,7 +204,7 @@ h3pad="wait:150:3000"
 h3net="HALO_NET_ONLINE=true HALO_NET_BROKERS=198.51.100.1:1883 HALO_NET_STUN=198.51.100.1:3478"
 h3net="$h3net HALO_NET_RELAYS=198.51.100.1:47320 HALO_NET_ALLOW_UPNP=false"
 # (the main menu: down to MULTIPLAYER, A: the lobby, its NETWORK row focused)
-h3mppad="wait:150:3000 down:150:700 down:150:700 a wait:150:3000"
+h3mppad="wait:150:3000 down:150:700 a wait:150:3000"
 
 for case in $cases; do
 	case $case in
@@ -251,7 +251,7 @@ for case in $cases; do
 			"$out/h3online/run.log" || fail h3online "the three fullest games were not shown" ;;
 	h3touch)
 		# (FORGE's row on the main menu, then the Forge lobby's Leave: icon and label)
-		run h3touch "$menus_data" 20 "wait:150:12000" HALO_MENU_STYLE=halo3 "HALO_TEST_TAPS=4000:60,342 8000:140,455"
+		run h3touch "$menus_data" 20 "wait:150:12000" HALO_MENU_STYLE=halo3 "HALO_TEST_TAPS=4000:60,318 8000:140,455"
 		check_h3 h3touch halo3
 		grep -aq "ui: screen pc.h3.forge.lobby" "$out/h3touch/run.log" || fail h3touch "a tap on FORGE did not open the Forge lobby"
 		[ "$(grep -ac 'ui: screen pc.h3.main.screen' "$out/h3touch/run.log")" -ge 2 ] ||
@@ -262,7 +262,7 @@ for case in $cases; do
 		fi
 		# (the lobby: Start Game on The Pillar of Autumn, Normal; in the level, saved and quit to the
 		# main menu; CAMPAIGN again, the profile, the lobby: its caption; Difficulty, down, A: Heroic)
-		profile_from=$HALO_TEST_PROFILE run h3resume "$menus_data" 170 "wait:150:3000 down:150:700 a wait:150:3000 a wait:150:3000 down:150:600 down:150:600 a wait:150:70000 down:150:700 a wait:150:3000 a wait:150:4000 wait:150:2000 down:150:700 a wait:150:2500 down:150:700 a wait:150:6000 wait:150:4000" \
+		profile_from=$HALO_TEST_PROFILE run h3resume "$menus_data" 170 "wait:150:3000 a wait:150:3000 a wait:150:3000 down:150:600 down:150:600 a wait:150:70000 down:150:700 a wait:150:3000 a wait:150:4000 wait:150:2000 down:150:700 a wait:150:2500 down:150:700 a wait:150:6000 wait:150:4000" \
 			HALO_MENU_STYLE=halo3 "HALO_TEST_COMMANDS=L240:@skip;L420:game_save_totally_unsafe;L600:@quit"
 		check_h3 h3resume halo3
 		log=$out/h3resume/run.log
@@ -276,7 +276,7 @@ for case in $cases; do
 		fi
 		# (the lobby: Mission, The Silent Cartographer, Start Game; in the level - a10's start
 		# is the cryo tube, no pausing - Start: the Halo 3 pause screen; down to SAVE AND QUIT, A)
-		profile_from=$HALO_TEST_PROFILE run h3pause "$menus_data" 170 "wait:150:3000 down:150:700 a wait:150:3000 a wait:150:3000 a wait:150:2500 down:150:600 down:150:600 down:150:600 a wait:150:2500 down:150:600 down:150:600 a wait:150:60000 start:150:4000 wait:150:4000 down:150:1500 wait:150:4000 down:150:800 down:150:800 a:150:4000 wait:150:20000" \
+		profile_from=$HALO_TEST_PROFILE run h3pause "$menus_data" 170 "wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:2500 down:150:600 down:150:600 down:150:600 a wait:150:2500 down:150:600 down:150:600 a wait:150:60000 start:150:4000 wait:150:4000 down:150:1500 wait:150:4000 down:150:800 down:150:800 a:150:4000 wait:150:20000" \
 			HALO_MENU_STYLE=halo3 HALO_TEST_COMMANDS=L150:@skip
 		log=$out/h3pause/run.log
 		echo "--- h3pause"
@@ -294,7 +294,7 @@ for case in $cases; do
 		fi
 		# (the main menu: down to CAMPAIGN, A; the profile, A; the lobby: Mission, down three, A;
 		# Difficulty - the picker opens on Normal -, down one, A; Start Game)
-		profile_from=$HALO_TEST_PROFILE run h3campaign "$menus_data" 75 "wait:150:3000 down:150:700 a wait:150:3000 a wait:150:3000 a wait:150:2500 down:150:600 down:150:600 down:150:600 a wait:150:2500 down:150:700 a wait:150:2500 down:150:600 a wait:150:2500 down:150:700 a wait:150:15000" \
+		profile_from=$HALO_TEST_PROFILE run h3campaign "$menus_data" 75 "wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:2500 down:150:600 down:150:600 down:150:600 a wait:150:2500 down:150:700 a wait:150:2500 down:150:600 a wait:150:2500 down:150:700 a wait:150:15000" \
 			HALO_MENU_STYLE=halo3
 		check_h3 h3campaign halo3
 		log=$out/h3campaign/run.log
@@ -357,7 +357,7 @@ for case in $cases; do
 	h3mptouch)
 		# (MULTIPLAYER on the main menu; the lobby's MAP; BLOOD GULCH in the picker; the lobby's Back)
 		run h3mptouch "$menus_data" 30 "wait:150:20000" HALO_MENU_STYLE=halo3 \
-			"HALO_TEST_TAPS=4000:60,322 8000:60,105 12000:100,263 16000:140,455"
+			"HALO_TEST_TAPS=4000:60,298 8000:60,105 12000:100,263 16000:140,455"
 		check_h3 h3mptouch halo3
 		log=$out/h3mptouch/run.log
 		grep -aq "ui: screen pc.h3.map.screen" "$log" || fail h3mptouch "a tap on MAP did not open its picker"
@@ -371,7 +371,7 @@ for case in $cases; do
 		# (CAMPAIGN, the profile: the lobby, MISSION focused; up to NETWORK, A: the picker on LOCAL;
 		# down, A: ONLINE CO-OP, internet play off: the screen saying so; B: the picker; down, A:
 		# SYSTEM LINK CO-OP; down three to START GAME, A: hosted, the game's lobby)
-		profile_from=$HALO_TEST_PROFILE run h3coop "$menus_data" 50 "wait:150:3000 down:150:700 a wait:150:3000 a wait:150:3000 up:150:600 a wait:150:2500 down:150:600 a wait:150:2500 b wait:150:2500 down:150:600 a wait:150:2500 down:150:600 down:150:600 down:150:600 a wait:150:8000" \
+		profile_from=$HALO_TEST_PROFILE run h3coop "$menus_data" 50 "wait:150:3000 a wait:150:3000 a wait:150:3000 up:150:600 a wait:150:2500 down:150:600 a wait:150:2500 b wait:150:2500 down:150:600 a wait:150:2500 down:150:600 down:150:600 down:150:600 a wait:150:8000" \
 			HALO_MENU_STYLE=halo3
 		check_h3 h3coop halo3
 		log=$out/h3coop/run.log
@@ -397,7 +397,7 @@ for case in $cases; do
 		fi
 		# (CAMPAIGN, the profile: the campaign lobby; B, B: the main menu; down, A: MULTIPLAYER;
 		# B; down, A: FORGE; B)
-		scenes_pad="wait:150:3000 down:150:700 a wait:150:3000 a wait:150:4000 b wait:150:2500 b wait:150:3000 down:150:700 a wait:150:4000 b wait:150:3000 down:150:700 a wait:150:4000 b wait:150:3000"
+		scenes_pad="wait:150:3000 a wait:150:3000 a wait:150:4000 b wait:150:2500 b wait:150:3000 down:150:700 a wait:150:4000 b wait:150:3000 down:150:700 a wait:150:4000 b wait:150:3000"
 		profile_from=$HALO_TEST_PROFILE run h3scenes "$menus_data" 45 "$scenes_pad" HALO_MENU_STYLE=halo3
 		profile_from=$HALO_TEST_PROFILE run h3scenes_off "$menus_data" 45 "$scenes_pad" HALO_MENU_STYLE=halo3 HALO_MENU_SCENES=0
 		check_h3 h3scenes halo3

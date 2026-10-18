@@ -2,7 +2,7 @@ The Halo 3-style menus (app0:menus/halo3/)
 
 With Menu style Halo 3 (settings panel: Graphics > Screen; HALO_MENU_STYLE=halo3)
 these screens stand for the Xbox's own, over the same animated Halo ring:
-- main.xml: the main menu (ui\shell\main_menu\main_menu) - START SOLO GAME,
+- main.xml: the main menu (ui\shell\main_menu\main_menu) -
   CAMPAIGN, MULTIPLAYER, FORGE (its lobby, below), FILE SHARE ("in a later
   update" for now), CUSTOMIZATION, Settings on Start, the HALO title, the
   player's nameplate and the live servers (ONLINE NOW).

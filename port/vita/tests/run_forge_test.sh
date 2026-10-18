@@ -125,7 +125,7 @@ b30='map_name levels\\b30\\b30'
 # Triangle (deleted);
 # D-pad up (rs: the Spartan), forward, D-pad up (the monitor); Start, down
 # twice, A (LEAVE FORGE), A (leave))
-v1pad="wait:150:3000 @00-main-menu:0:300 down:150:600 down:150:600 down:150:600 a:150:2500 @01-lobby:0:300"
+v1pad="wait:150:3000 @00-main-menu:0:300 down:150:600 down:150:600 a:150:2500 @01-lobby:0:300"
 v1pad="$v1pad a:150:2000 @02-map-picker:0:300 down:150:700 a:150:2000 a:150:2000 up:150:700 a:150:2000"
 v1pad="$v1pad @03-lobby-blood-gulch:0:300 down:150:600 a:150:1500 level:150:2500 @04-monitor:0:300"
 v1pad="$v1pad lup:1200:300 a:600:600 @05-flown:0:300 x:150:1500 @06-browser:0:300 a:150:1200"
