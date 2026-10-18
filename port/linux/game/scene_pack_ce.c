@@ -210,8 +210,10 @@ struct scene_pack_ce
 	char *names;
 	unsigned long names_size;
 	unsigned long names_capacity;
-	/* the Ogg Vorbis decoder's working memory (made when first wanted) */
+	/* the Ogg Vorbis decoder's working memory (made when first wanted), and
+	where in it the decoder's 8-byte-aligned part starts */
 	void *working;
+	void *working_aligned;
 	/* what was made (logged) */
 	long bitmaps_reordered;
 	long bitmaps_reduced;
@@ -695,8 +697,14 @@ void scene_pack_ce_close(
 		free(ce->parts);
 	if (ce->channels)
 		free(ce->channels);
-	if (ce->names)
-		free(ce->names);
+	/* (the names' blocks, each naming the one before it) */
+	while (ce->names)
+	{
+		char *block = ce->names;
+
+		ce->names = *(char **)block;
+		free(block);
+	}
 	if (ce->working)
 		free(ce->working);
 	free(ce);
@@ -1920,7 +1928,11 @@ boolean scene_pack_ce_permutation_write(
 			struct ogg_sound_result result;
 
 			if (!ce->working)
-				ce->working = malloc(OGG_SOUND_WORKING_BYTES);
+			{
+				ce->working = malloc(OGG_SOUND_WORKING_BYTES + 8);
+				ce->working_aligned = ce->working ?
+					(void *)(((unsigned long)ce->working + 7) & ~7UL) : NULL;
+			}
 			memset(&request, 0, sizeof(request));
 			request.read = ogg_read;
 			request.read_context = &reader;
@@ -1929,7 +1941,7 @@ boolean scene_pack_ce_permutation_write(
 			request.output_bytes = (uint32_t)output_bytes;
 			request.channels = channels;
 			request.rate = rate;
-			request.working = ce->working;
+			request.working = ce->working_aligned;
 			request.working_bytes = OGG_SOUND_WORKING_BYTES;
 			memset(&result, 0, sizeof(result));
 			if (!ce->working || ogg_sound_transcode(&request, &result) != _ogg_sound_ok)

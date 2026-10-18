@@ -48,7 +48,7 @@ enum
 	MAXIMUM_LOADED_SCENE_PACKS = 6,
 	/* the packs a map may want (built, or loaded: at most
 	MAXIMUM_LOADED_SCENE_PACKS of them) */
-	MAXIMUM_SCENE_PACK_SLOTS = 10,
+	MAXIMUM_SCENE_PACK_SLOTS = 32,
 };
 
 /* ---------- prototypes/SCENE_PACKS.C */

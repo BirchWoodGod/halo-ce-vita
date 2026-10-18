@@ -830,9 +830,13 @@ static long source_roots(char const *map_path, void *tags, unsigned long *roots,
 		for (pack = 0; pack < pack_count; pack++)
 		{
 			char const *pack_name = (char const *)read_u32(pack_instances + pack * 32 + 16);
+			char const *space = strrchr(pack_name, ' ');
+			/* (a protected map's tag is named by its index in the pack:
+			protected\<map>\<group> <index>, scene_pack_ce.c) */
+			int same = !strncmp(pack_name, "protected\\", 10) && space ? atol(space + 1) == index :
+				!strcmp(pack_name, (char const *)names + name_offset);
 
-			if (read_u32(pack_instances + pack * 32) == read_u32(instances + index * 32) &&
-				!strcmp(pack_name, (char const *)names + name_offset))
+			if (read_u32(pack_instances + pack * 32) == read_u32(instances + index * 32) && same)
 			{
 				roots[found++] = identity->tag_data_offset + (root - CUSTOM_EDITION_TAG_CACHE_ADDRESS);
 				break;
