@@ -802,6 +802,19 @@ packs a session brings (`forge.c forge_packs`, in load order):
   MB, twice: tens of seconds), the AI pack's 35 MB on the memory card and
   4.9 MB of tag cache, and the frame cost of several AI (on the x86 harness
   a dozen fighting Covenant took the tick from 0.14 to 0.18 ms).
+- GPU programs (the owner's Vita compiles none: they must be in
+  shaders.pak): no new program written. Collected on the gxm-null harness
+  (HALO_SHADER_COLLECT) through run_forge_test.sh's v1, packs, smallmap and
+  panel cases and checked (tools/vita_shader_pack.py --check): every program
+  the packs' Banshee, Pelican and Elite draw with is in the pack. One is
+  not, in every Forge game and in none without Forge (a plain Blood Gulch
+  slayer game: 64 of 64): 75acc2fa621a81e3.fp, one projected texture stage,
+  most likely phase (a)'s HUD text (forge_draw, unchanged here). To add on
+  Vita3K with the next pack (HALO_SHADER_PRECOMPILE).
+- The gxm-null harness does not link on this tree's base (the menus' touch,
+  891c2f77: vita_touch_pointer, vita_host_front_touches and
+  vita_settings_panel_open have no Linux side); the collection above linked
+  a throwaway stub of the three.
 
 ### Phase (b) tests
 
