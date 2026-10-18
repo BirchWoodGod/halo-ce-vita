@@ -35,6 +35,20 @@
 #            repository; skipped without): CAMPAIGN, the profile, the Halo 3
 #            campaign lobby; Mission: The Silent Cartographer, Difficulty:
 #            Heroic, Start Game: b30 loads on Heroic
+#   h3mp     the Halo 3 multiplayer lobby (menus/halo3/multiplayer.xml) stands
+#            for the Xbox's Multiplayer screen; internet play off: NETWORK is
+#            SYSTEM LINK, choosing ONLINE opens the screen saying how to turn it
+#            on; START GAME hosts a system link game (the profile, then the
+#            Xbox's map list)
+#   h3browser  internet play on (its brokers unreachable: TEST-NET addresses)
+#            with 16 made-up games of both platforms (HALO_TEST_BROWSER_GAMES,
+#            HALO_TEST_BROWSER_PC): BROWSE GAMES opens the Halo 3 browser, a
+#            locked game the Halo 3 password screen, whose JOIN GAME says the
+#            game is no longer listed
+#   h3create  START GAME on ONLINE: Create Game; its GAME TYPE picker, the
+#            name typed (HALO_TEST_TEXT_INPUT), START GAME as Server Setup's
+#   h3mptouch  taps: MULTIPLAYER, the lobby's MAP, BLOOD GULCH in its picker,
+#            the lobby's Back
 #   pause   Campaign from the main menu (a new profile, Normal), the level's
 #           pause menu, Quit to Main Menu: a game map's widget runs its
 #           function and is back at the main menu, and asked about deleting
@@ -56,6 +70,8 @@
 #                         binary, <tree>/build/linux, and a copy of the
 #                         harness elsewhere found none and kept the Xbox's
 #                         Multiplayer screen)
+#   HALO_TEST_SHOTS       a folder for each case's frames (HALO_SCREENSHOT_DIR, every
+#                         60 frames, in <folder>/<case>); none by default
 #   HALO_TEST_OUT         where the logs go (deleted after a pass when the test made it; HALO_TEST_KEEP=1 keeps them)
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
@@ -66,7 +82,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
 
@@ -98,10 +114,16 @@ run() { # NAME DATA SECONDS PAD [VAR=value...]
 	fi
 	ln -sfn "$(cd "$folder" && pwd)/maps" "$out/$name/data/maps"
 	[ -n "${init_line:-}" ] && printf '%s\n' "$init_line" > "$out/$name/data/init.txt"
+	local shots=()
+	if [ -n "${HALO_TEST_SHOTS:-}" ]; then
+		rm -rf "$HALO_TEST_SHOTS/$name"
+		mkdir -p "$HALO_TEST_SHOTS/$name"
+		shots=("HALO_SCREENSHOT_DIR=$HALO_TEST_SHOTS/$name" HALO_SCREENSHOT_EVERY=60)
+	fi
 	(cd "$out/$name" && exec env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=offscreen HALO_DATA_ROOT="$out/$name/data" \
 		HALO_SAVE_ROOT="$out/$name/save" HALO_NO_VSYNC=1 HALO_FRAME_CAP=30 HALO_EXIT_AFTER="$seconds" HALO_FULLSCREEN=0 \
 		HALO_HIDDEN_WINDOW=1 HALO_NO_AUDIO=1 HALO_TICK_THREAD=1 HALO_UPDATE_AUTO=false HALO_NET_ONLINE=false \
-		HALO_UI_LOG=1 HALO_MENU_STYLE=classic "HALO_TEST_PAD=$pad" "$@" timeout -k 5 $((seconds + 90)) "$binary" > "$out/$name/run.log" 2>&1)
+		HALO_UI_LOG=1 HALO_MENU_STYLE=classic "HALO_TEST_PAD=$pad" "${shots[@]}" "$@" timeout -k 5 $((seconds + 90)) "$binary" > "$out/$name/run.log" 2>&1)
 	echo $? > "$out/$name/exit"
 }
 
@@ -164,6 +186,11 @@ check_h3() { # NAME halo3|classic
 	fi
 }
 h3pad="wait:150:3000"
+# (internet play on, nothing reached: its brokers, STUN and relays TEST-NET addresses)
+h3net="HALO_NET_ONLINE=true HALO_NET_BROKERS=198.51.100.1:1883 HALO_NET_STUN=198.51.100.1:3478"
+h3net="$h3net HALO_NET_RELAYS=198.51.100.1:47320 HALO_NET_ALLOW_UPNP=false"
+# (the main menu: down to MULTIPLAYER, A: the lobby, its NETWORK row focused)
+h3mppad="wait:150:3000 down:150:700 down:150:700 a wait:150:3000"
 
 for case in $cases; do
 	case $case in
@@ -263,8 +290,66 @@ for case in $cases; do
 		grep -aq "menus: h3 campaign: The Silent Cartographer on Heroic" "$log" || fail h3campaign "the difficulty was not set"
 		grep -aq "menus: h3 campaign: start levels.b30.b30 on Heroic" "$log" || fail h3campaign "Start Game did not start b30 on Heroic"
 		grep -aq "memory: loaded levels.b30.b30" "$log" || fail h3campaign "b30 did not load" ;;
+	h3mp)
+		# (NETWORK: the picker on SYSTEM LINK, up to ONLINE, A: the screen saying internet play is
+		# off; B, B: the lobby; down three to START GAME, A: the profile screen, A to join, the
+		# profile chosen: the map list)
+		run h3mp "$menus_data" 55 "$h3mppad a wait:150:3000 up:150:600 a wait:150:3000 b wait:150:3000 b wait:150:3000 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:5000" \
+			HALO_MENU_STYLE=halo3
+		check_h3 h3mp halo3
+		log=$out/h3mp/run.log
+		grep -aq "menus: Halo 3 screen h3/mp/screen for ui.shell.main_menu.multiplayer_type_select.multiplayer_type_select_screen" "$log" ||
+			fail h3mp "the Halo 3 lobby did not stand for the Multiplayer screen"
+		grep -aq "menus: h3 mp lobby: NETWORK: SYSTEM LINK, GAME: SLAYER, MAP: BATTLE CREEK" "$log" ||
+			fail h3mp "the lobby's rows were not SYSTEM LINK, SLAYER, BATTLE CREEK"
+		grep -aq "ui: screen pc.h3.network.screen" "$log" || fail h3mp "NETWORK did not open its picker"
+		grep -aq "ui: screen pc.h3.mp.offline" "$log" || fail h3mp "ONLINE did not say internet play is off"
+		grep -aq "menus: h3 mp: host a system link game" "$log" || fail h3mp "START GAME did not host a system link game"
+		grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected.connected_map_select_wrapper" "$log" ||
+			fail h3mp "the profile did not lead to the map list"
+		grep -aq "ui: screen pc.mp.screen" "$log" && fail h3mp "OpenCE's Multiplayer screen opened with Menu style Halo 3" ;;
+	h3browser)
+		# (down five to BROWSE GAMES, A; down to the second game - locked -, A: its password;
+		# A: typed, down, A: JOIN GAME)
+		run h3browser "$menus_data" 45 "$h3mppad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:4000 down:150:600 a wait:150:4000 a wait:150:2000 down:150:600 a wait:150:4000" \
+			HALO_MENU_STYLE=halo3 $h3net HALO_TEST_BROWSER_GAMES=16 HALO_TEST_BROWSER_PC=1 HALO_TEST_TEXT_INPUT=secret
+		check_h3 h3browser halo3
+		log=$out/h3browser/run.log
+		grep -aq "menus: h3 mp lobby: NETWORK: ONLINE" "$log" || fail h3browser "NETWORK was not ONLINE with internet play on"
+		grep -aq "ui: screen pc.h3.browser.screen" "$log" || fail h3browser "BROWSE GAMES did not open the Halo 3 browser"
+		grep -aq "menus: the server browser's game 2 of 16 chosen: Test game 02" "$log" ||
+			fail h3browser "the browser did not list the 16 games, the fullest first"
+		grep -aq "menus: Halo 3 screen h3/password/screen for pc.join.password.screen" "$log" ||
+			fail h3browser "the locked game did not open the Halo 3 password screen"
+		grep -aq "menus: the public game Test game 02 is no longer listed" "$log" ||
+			fail h3browser "JOIN GAME did not try the game with its password"
+		grep -aq "ui: screen pc.browser.screen\|ui: screen pc.join.password" "$log" &&
+			fail h3browser "OpenCE's browser or password screen opened with Menu style Halo 3" ;;
+	h3create)
+		# (down three to START GAME, A: Create Game; GAME TYPE, A: the picker, down, A: SLAYER PRO;
+		# down two to NAME, A: typed; down four to START GAME, A)
+		run h3create "$menus_data" 50 "$h3mppad down:150:500 down:150:500 down:150:500 a wait:150:4000 a wait:150:3000 down:150:600 a wait:150:4000 down:150:500 down:150:500 a wait:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:5000" \
+			HALO_MENU_STYLE=halo3 $h3net "HALO_TEST_TEXT_INPUT=Vita Night"
+		check_h3 h3create halo3
+		log=$out/h3create/run.log
+		grep -aq "ui: screen pc.h3.setup.screen" "$log" || fail h3create "START GAME did not open Create Game"
+		grep -aq "menus: h3 mp: game type Slayer Pro" "$log" || fail h3create "the GAME TYPE picker did not set the game type"
+		grep -aq "menus: Server Setup: Vita Night, 16 players, public; the profile, then the map list" "$log" ||
+			fail h3create "START GAME did not set up the game as Server Setup does"
+		grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected.4way_profile_select.4way_start2join_screen" "$log" ||
+			fail h3create "START GAME did not open the profile" ;;
+	h3mptouch)
+		# (MULTIPLAYER on the main menu; the lobby's MAP; BLOOD GULCH in the picker; the lobby's Back)
+		run h3mptouch "$menus_data" 30 "wait:150:20000" HALO_MENU_STYLE=halo3 \
+			"HALO_TEST_TAPS=4000:60,322 8000:60,105 12000:100,263 16000:140,455"
+		check_h3 h3mptouch halo3
+		log=$out/h3mptouch/run.log
+		grep -aq "ui: screen pc.h3.map.screen" "$log" || fail h3mptouch "a tap on MAP did not open its picker"
+		grep -aq "menus: h3 mp: map Blood Gulch" "$log" || fail h3mptouch "a tap on BLOOD GULCH did not choose it"
+		grep -a "ui: screen" "$log" | tail -1 | grep -q 'pc.h3.main.screen' ||
+			fail h3mptouch "a tap on the lobby's Back did not go back to the main menu" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"

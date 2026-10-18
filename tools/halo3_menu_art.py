@@ -347,6 +347,53 @@ def font_file(face, size, tracking, symbols):
     return header + b''.join(records) + bytes(pixels)
 
 
+def lock_glyph(scale):
+    # a game with a password: a small padlock, light on the dark rows (16x16
+    # at scale 1)
+    image = Image.new('RGBA', (16 * scale, 16 * scale), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    colour = (222, 228, 236, 255)
+    width = round(1.6 * scale)
+    draw.arc([4.5 * scale, 1.5 * scale, 11.5 * scale, 10 * scale], 180, 360, fill=colour, width=width)
+    draw.line([(4.5 * scale + width / 2, 5.5 * scale), (4.5 * scale + width / 2, 8 * scale)], fill=colour, width=width)
+    draw.line([(11.5 * scale - width / 2, 5.5 * scale), (11.5 * scale - width / 2, 8 * scale)], fill=colour, width=width)
+    draw.rounded_rectangle([3 * scale, 7.5 * scale, 13 * scale, 14.5 * scale], radius=scale, fill=colour)
+    draw.ellipse([7.2 * scale, 9.6 * scale, 8.8 * scale, 11.2 * scale], fill=(40, 50, 64, 255))
+    return image
+
+
+def badge(text, fill, locked):
+    # the server browser's row badge (multiplayer.xml row_badge): the game's
+    # platform, a small rounded plate with the word in the menus' font (our
+    # own drawing, no maker's logo), and the padlock beside it when the game
+    # has a password; 64x16, the size of its widget (one widget for both,
+    # which the menus' widget memory has room for)
+    scale = 4
+    image = Image.new('RGBA', (64 * scale, 16 * scale), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle([1 * scale, 2 * scale, 31 * scale - 1, 14 * scale - 1], radius=3 * scale,
+                           fill=fill + (235,), outline=(255, 255, 255, alpha(.45)), width=scale)
+    font = ImageFont.truetype(os.path.join(FONTS, 'SairaSemiCondensed-Medium.ttf'), 10 * scale)
+    width = draw.textlength(text, font=font)
+    draw.text(((32 * scale - width) / 2, 8 * scale), text, font=font, fill=(246, 248, 250, 255), anchor='lm')
+    if locked:
+        image.alpha_composite(lock_glyph(scale), (35 * scale, 0))
+    return image.resize((64, 16), Image.Resampling.LANCZOS)
+
+
+def arrow(pointing):
+    # a value's ‹ and › on Create Game's rows (the spinners' header and
+    # footer), ice blue as the values: 8x16
+    scale = 4
+    image = Image.new('RGBA', (8 * scale, 16 * scale), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    points = [(5.5 * scale, 4 * scale), (2.5 * scale, 8 * scale), (5.5 * scale, 12 * scale)]
+    if pointing == 'right':
+        points = [(8 * scale - x, y) for x, y in points]
+    draw.line(points, fill=(170, 190, 214, 255), width=round(1.6 * scale), joint='curve')
+    return image.resize((8, 16), Image.Resampling.LANCZOS)
+
+
 ART = {
     'column.png': column,
     'haze.png': haze,
@@ -367,6 +414,12 @@ ART = {
     'glyph_r.png': lambda: shoulder('R'),
     'forge_emblem.png': forge_emblem,
     'title_halo.png': title_halo,
+    'badge_vita.png': lambda: badge('VITA', (38, 104, 178), False),
+    'badge_pc.png': lambda: badge('PC', (92, 102, 116), False),
+    'badge_vita_locked.png': lambda: badge('VITA', (38, 104, 178), True),
+    'badge_pc_locked.png': lambda: badge('PC', (92, 102, 116), True),
+    'arrow_left.png': lambda: arrow('left'),
+    'arrow_right.png': lambda: arrow('right'),
 }
 
 

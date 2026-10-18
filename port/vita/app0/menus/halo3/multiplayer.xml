@@ -1,0 +1,718 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The Halo 3-style multiplayer screens (Menu style Halo 3): the lobby stands for the Xbox's
+Multiplayer screen (ui\shell\main_menu\multiplayer_type_select\multiplayer_type_select_screen), as
+OpenCE's multiplayer.xml does with Menu style Halo CE, and opens the same flows with the same
+functions (menu_functions.c "port mp/browser/setup/code ..."): laid out as Halo 3's custom games
+lobby - MULTIPLAYER LOBBY's column at the left (NETWORK, GAME, MAP, START GAME, EDIT GAME TYPES,
+BROWSE GAMES, JOIN WITH CODE, Ready, the map's picture and "<game> on <map>"), the players at the
+right, the buttons in the column's foot. NETWORK, GAME and MAP open pickers as Halo 3's Select Map;
+BROWSE GAMES the server browser in Halo 3's style (VITA and PC badges, the orange bar), START GAME
+on ONLINE Create Game. The map pictures and descriptions are ui.map's own; the rest this folder's
+art (tools/halo3_menu_art.py). -->
+<menus root="h3/mp/screen" replaces="ui\shell\main_menu\multiplayer_type_select\multiplayer_type_select_screen">
+	<bitmap name="h3/mp_maps">
+		<frame map="ui\shell\bitmaps\mp_map_grafix" index="0"/>
+		<frame map="ui\shell\bitmaps\mp_map_grafix" index="1"/>
+		<frame map="ui\shell\bitmaps\mp_map_grafix" index="2"/>
+		<frame map="ui\shell\bitmaps\mp_map_grafix" index="3"/>
+		<frame map="ui\shell\bitmaps\mp_map_grafix" index="4"/>
+		<frame map="ui\shell\bitmaps\mp_map_grafix" index="5"/>
+		<frame map="ui\shell\bitmaps\mp_map_grafix" index="6"/>
+		<frame map="ui\shell\bitmaps\mp_map_grafix" index="7"/>
+		<frame map="ui\shell\bitmaps\mp_map_grafix" index="8"/>
+		<frame map="ui\shell\bitmaps\mp_map_grafix" index="9"/>
+		<frame map="ui\shell\bitmaps\mp_map_grafix" index="10"/>
+		<frame map="ui\shell\bitmaps\mp_map_grafix" index="11"/>
+		<frame map="ui\shell\bitmaps\mp_map_grafix" index="12"/>
+		<frame map="ui\shell\bitmaps\mp_map_grafix" index="13"/>
+	</bitmap>
+	<!-- (the server browser's row badge: the platform, VITA or PC, and a padlock for a password -
+	frames 0 VITA, 1 PC, 2 and 3 the same locked: menu_functions.c browser_update) -->
+	<bitmap name="h3/badge">
+		<frame png="halo3/badge_vita.png" width="64" height="16"/>
+		<frame png="halo3/badge_pc.png" width="64" height="16"/>
+		<frame png="halo3/badge_vita_locked.png" width="64" height="16"/>
+		<frame png="halo3/badge_pc_locked.png" width="64" height="16"/>
+	</bitmap>
+	<bitmap name="h3/arrow_left">
+		<frame png="halo3/arrow_left.png" width="8" height="16"/>
+	</bitmap>
+	<bitmap name="h3/arrow_right">
+		<frame png="halo3/arrow_right.png" width="8" height="16"/>
+	</bitmap>
+	<bitmap name="h3/glyph_square">
+		<frame png="halo3/glyph_square.png" width="16" height="16"/>
+	</bitmap>
+	<bitmap name="h3/glyph_triangle">
+		<frame png="halo3/glyph_triangle.png" width="16" height="16"/>
+	</bitmap>
+	<strings name="h3/mp_text">
+		<string text="MULTIPLAYER LOBBY"/>
+		<string text="START GAME"/>
+		<string text="BROWSE GAMES"/>
+		<string text="JOIN WITH CODE"/>
+		<string text="EDIT GAME TYPES"/>
+		<string text="SELECT NETWORK"/>
+		<string text="SELECT MAP"/>
+		<string text="SELECT GAME TYPE"/>
+		<string text="CUSTOM GAMES"/>
+		<string text="Join"/>
+		<string text="Refresh"/>
+		<string text="Sort"/>
+		<string text="L/R Page"/>
+		<string text="GAME NAME"/>
+		<string text="GAME TYPE"/>
+		<string text="MAP"/>
+		<string text="PLAYERS"/>
+		<string text="RULES"/>
+		<string text="CREATE GAME"/>
+		<string text="NAME"/>
+		<string text="MAX PLAYERS"/>
+		<string text="VISIBILITY"/>
+		<string text="PASSWORD"/>
+		<string text="Name your game and choose who may join, then START GAME."/>
+		<string text="CODE"/>
+		<string text="JOIN GAME"/>
+		<string text="INTERNET PLAY IS OFF"/>
+		<string text="The game type your game starts with. Your\nown are made in EDIT GAME TYPES, on the lobby."/>
+	</strings>
+	<strings name="h3/networks">
+		<string text="ONLINE"/>
+		<string text="SYSTEM LINK"/>
+		<string text="OFFLINE"/>
+	</strings>
+	<strings name="h3/network_text">
+		<string text="Play on the Internet: browse the public\ngames, join one with its code, or host\nyour own. It needs the settings panel's\nMultiplayer tab, Connection: Online."/>
+		<string text="Play with the PS Vitas on your Wi-Fi\nnetwork (Connection: Same Wi-Fi), or near\nyou (Connection: Ad hoc), as the Xbox's\nSystem Link."/>
+		<string text="Play on this PS Vita alone: split screen,\nwith several controllers."/>
+	</strings>
+	<strings name="h3/maps">
+		<string text="BATTLE CREEK"/>
+		<string text="SIDEWINDER"/>
+		<string text="DAMNATION"/>
+		<string text="RAT RACE"/>
+		<string text="PRISONER"/>
+		<string text="HANG 'EM HIGH"/>
+		<string text="CHILL OUT"/>
+		<string text="DERELICT"/>
+		<string text="BOARDING ACTION"/>
+		<string text="BLOOD GULCH"/>
+		<string text="WIZARD"/>
+		<string text="CHIRON TL-34"/>
+		<string text="LONGEST"/>
+	</strings>
+	<strings name="h3/setup_help">
+		<string text="The game type your game starts with."/>
+		<string text="The map your game starts on."/>
+		<string text="The name your game is listed under\n(15 characters at most)."/>
+		<string text="The most players your game takes,\nyou included (2 to 16)."/>
+		<string text="PUBLIC: listed in every Vita's server browser.\nPRIVATE: joined only with its code."/>
+		<string text="A public game asks joiners for it.\nNONE: anyone may join."/>
+		<string text="Next: your profile, then the map and the\ngametype. The lobby shows your game's code."/>
+	</strings>
+	<strings name="h3/code_help">
+		<string text=""/>
+		<string text="Choose CODE and type the host's code\n(ABCD-EFGH), then choose JOIN GAME."/>
+		<string text=""/>
+		<string text=""/>
+		<string text="Looking up the code..."/>
+		<string text="That is not a code: 8 letters and digits,\nlike ABCD-EFGH."/>
+	</strings>
+
+	<!-- the lobby: NETWORK, GAME and MAP open their pickers; START GAME hosts as the network says
+	(ONLINE: Create Game; SYSTEM LINK: the System Link screen's profile, then the new game's map
+	list, as its Y; OFFLINE: split screen's), as do BROWSE GAMES (ONLINE: the server browser;
+	SYSTEM LINK: the System Link list) - the rows of the other networks hidden (port h3 mp lobby);
+	EDIT GAME TYPES the Xbox's own; ONLINE's rows need internet play, else the screen saying how
+	to turn it on -->
+	<widget name="h3/mp/network_row" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3">
+		<on event="a" open="h3/network/screen"/>
+	</widget>
+	<widget name="h3/mp/game_row" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3">
+		<on event="a" open="h3/gametype/screen"/>
+	</widget>
+	<widget name="h3/mp/map_row" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3">
+		<on event="a" open="h3/map/screen"/>
+	</widget>
+	<widget name="h3/mp/start_online" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFE6ECF2" text_x="8" text_y="3" string_list="h3/mp_text" string_index="1">
+		<on event="a start" run="port mp require online" open="h3/setup/screen" otherwise="h3/mp/offline"/>
+	</widget>
+	<widget name="h3/mp/start_link" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFE6ECF2" text_x="8" text_y="3" string_list="h3/mp_text" string_index="1">
+		<on event="a start" run="port h3 host system link"/>
+		<on event="a start" run="error if no network connection" open="ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen"/>
+	</widget>
+	<widget name="h3/mp/start_offline" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFE6ECF2" text_x="8" text_y="3" string_list="h3/mp_text" string_index="1">
+		<on event="a start" open="ui\shell\main_menu\multiplayer_type_select\split_screen\4way_profile_select\4way_start2join_screen"/>
+	</widget>
+	<widget name="h3/mp/edit_row" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/mp_text" string_index="4">
+		<on event="a start" open="ui\shell\main_menu\settings_select\multiplayer_setup\playlist_select\gametype_select_screen"/>
+	</widget>
+	<widget name="h3/mp/browse_online" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/mp_text" string_index="2">
+		<on event="a start" run="port mp require online" open="h3/browser/screen" otherwise="h3/mp/offline"/>
+	</widget>
+	<widget name="h3/mp/browse_link" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/mp_text" string_index="2">
+		<on event="a start" run="port h3 browse system link"/>
+		<on event="a start" run="error if no network connection" open="ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen"/>
+	</widget>
+	<widget name="h3/mp/code_row" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/mp_text" string_index="3">
+		<on event="a start" run="port mp require online" open="h3/code/screen" otherwise="h3/mp/offline"/>
+	</widget>
+	<widget name="h3/mp/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<child widget="h3/mp/network_row" x="0" y="0"/>
+		<child widget="h3/mp/game_row" x="0" y="26"/>
+		<child widget="h3/mp/map_row" x="0" y="46"/>
+		<child widget="h3/mp/start_online" x="0" y="72"/>
+		<child widget="h3/mp/start_link" x="0" y="72"/>
+		<child widget="h3/mp/start_offline" x="0" y="72"/>
+		<child widget="h3/mp/edit_row" x="0" y="92"/>
+		<child widget="h3/mp/browse_online" x="0" y="112"/>
+		<child widget="h3/mp/browse_link" x="0" y="112"/>
+		<child widget="h3/mp/code_row" x="0" y="132"/>
+	</widget>
+	<widget name="h3/mp/column" left="8" top="12" width="250" height="456" bitmap="h3/column"/>
+	<widget name="h3/mp/title" type="text" left="16" top="18" width="240" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/mp_text" string_index="0"/>
+	<widget name="h3/mp/rule1" left="8" top="44" width="250" height="2" bitmap="h3/rule"/>
+	<widget name="h3/mp/rule2" left="8" top="210" width="250" height="2" bitmap="h3/rule"/>
+	<widget name="h3/mp/ready" type="text" left="16" top="215" width="240" height="18" font="h3/font_item" color="#FFE6ECF2" text_y="1"/>
+	<widget name="h3/mp/ready_sub" type="text" left="16" top="233" width="240" height="34" font="h3/font_small" color="#FF9FB6CC" text_y="1"/>
+	<widget name="h3/mp/map_picture" left="16" top="272" width="140" height="114" bitmap="h3/mp_maps"/>
+	<widget name="h3/mp/caption" type="text" left="16" top="392" width="240" height="40" font="h3/font_item" color="#FFEEF2F6" text_y="1"/>
+	<widget name="h3/mp/rule3" left="8" top="440" width="250" height="2" bitmap="h3/rule"/>
+	<widget name="h3/mp/a_butn" left="16" top="447" width="16" height="16" bitmap="h3/glyph_cross"/>
+	<widget name="h3/mp/select" type="text" left="36" top="446" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/campaign_text" string_index="5"/>
+	<widget name="h3/mp/b_butn" left="110" top="447" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/mp/back" type="text" left="130" top="446" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/main_items" string_index="10"/>
+	<widget name="h3/mp/players" type="text" left="380" top="20" width="250" height="16" font="h3/font_small" color="#FFEEF2F6"/>
+	<widget name="h3/mp/screen" flags="pass_unhandled_to_focused_child">
+		<on event="created" run="mp type menu initialize"/>
+		<on event="created" run="port mp screen init"/>
+		<on event="created" run="port h3 mp init"/>
+		<on event="b back" back="true"/>
+		<data input="port h3 mp lobby"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/mp/column"/>
+		<child widget="h3/mp/title"/>
+		<child widget="h3/mp/rule1"/>
+		<child widget="h3/mp/rule2"/>
+		<child widget="h3/mp/ready"/>
+		<child widget="h3/mp/ready_sub"/>
+		<child widget="h3/mp/map_picture"/>
+		<child widget="h3/mp/caption"/>
+		<child widget="h3/mp/rule3"/>
+		<child widget="h3/mp/a_butn"/>
+		<child widget="h3/mp/select"/>
+		<child widget="h3/mp/b_butn"/>
+		<child widget="h3/mp/back"/>
+		<child widget="h3/mp/players"/>
+		<child widget="h3/main/nameplate"/>
+		<child widget="h3/mp/list" x="8" y="50"/>
+	</widget>
+
+	<!-- internet play off: Halo 3's dialog saying how to turn it on (OpenCE's words) -->
+	<widget name="h3/mp/offline_panel" left="120" top="130" width="400" height="210" bitmap="h3/panel"/>
+	<widget name="h3/mp/offline_title" type="text" left="132" top="136" width="376" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/mp_text" string_index="26"/>
+	<widget name="h3/mp/offline_rule" left="120" top="164" width="400" height="2" bitmap="h3/rule"/>
+	<widget name="h3/mp/offline_text" type="text" left="132" top="174" width="376" height="130" font="h3/font_small" color="#FFCFD9E3" string_list="offline"/>
+	<widget name="h3/mp/offline_strip" left="120" top="320" width="400" height="20" bitmap="h3/strip"/>
+	<widget name="h3/mp/offline_b_butn" left="132" top="322" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/mp/offline_back" type="text" left="152" top="321" width="120" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/main_items" string_index="10"/>
+	<widget name="h3/mp/offline" flags="pass_unhandled_to_focused_child">
+		<on event="b back" back="true"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/mp/offline_panel"/>
+		<child widget="h3/mp/offline_title"/>
+		<child widget="h3/mp/offline_rule"/>
+		<child widget="h3/mp/offline_text"/>
+		<child widget="h3/mp/offline_strip"/>
+		<child widget="h3/mp/offline_b_butn"/>
+		<child widget="h3/mp/offline_back"/>
+	</widget>
+
+	<!-- the pickers: Halo 3's Select Map (campaign.xml's panel and strip) -->
+	<widget name="h3/network/title" type="text" left="52" top="46" width="400" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/mp_text" string_index="5"/>
+	<widget name="h3/network/item_0" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/networks" string_index="0">
+		<on event="a" run="port h3 network set" back="true" otherwise="h3/mp/offline"/>
+	</widget>
+	<widget name="h3/network/item_1" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/networks" string_index="1">
+		<on event="a" run="port h3 network set" back="true" otherwise="h3/mp/offline"/>
+	</widget>
+	<widget name="h3/network/item_2" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/networks" string_index="2">
+		<on event="a" run="port h3 network set" back="true" otherwise="h3/mp/offline"/>
+	</widget>
+	<widget name="h3/network/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<on event="created" run="port h3 network focus"/>
+		<data input="port h3 networks"/>
+		<child widget="h3/network/item_0" y="0"/>
+		<child widget="h3/network/item_1" y="19"/>
+		<child widget="h3/network/item_2" y="38"/>
+	</widget>
+	<widget name="h3/network/network_text" type="text" left="320" top="84" width="266" height="120" font="h3/font_small" color="#FFCFD9E3" string_list="h3/network_text"/>
+	<widget name="h3/network/screen" flags="pass_unhandled_to_focused_child">
+		<on event="b back" back="true"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/pick/panel"/>
+		<child widget="h3/network/title"/>
+		<child widget="h3/pick/rule"/>
+		<child widget="h3/network/network_text"/>
+		<child widget="h3/pick/strip"/>
+		<child widget="h3/pick/a_butn"/>
+		<child widget="h3/pick/select"/>
+		<child widget="h3/pick/b_butn"/>
+		<child widget="h3/pick/back"/>
+		<child widget="h3/network/list" x="52" y="84"/>
+	</widget>
+
+	<widget name="h3/map/title" type="text" left="52" top="46" width="400" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/mp_text" string_index="6"/>
+	<widget name="h3/map/item_0" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/maps" string_index="0">
+		<on event="a" run="port h3 map set" back="true"/>
+	</widget>
+	<widget name="h3/map/item_1" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/maps" string_index="1">
+		<on event="a" run="port h3 map set" back="true"/>
+	</widget>
+	<widget name="h3/map/item_2" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/maps" string_index="2">
+		<on event="a" run="port h3 map set" back="true"/>
+	</widget>
+	<widget name="h3/map/item_3" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/maps" string_index="3">
+		<on event="a" run="port h3 map set" back="true"/>
+	</widget>
+	<widget name="h3/map/item_4" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/maps" string_index="4">
+		<on event="a" run="port h3 map set" back="true"/>
+	</widget>
+	<widget name="h3/map/item_5" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/maps" string_index="5">
+		<on event="a" run="port h3 map set" back="true"/>
+	</widget>
+	<widget name="h3/map/item_6" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/maps" string_index="6">
+		<on event="a" run="port h3 map set" back="true"/>
+	</widget>
+	<widget name="h3/map/item_7" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/maps" string_index="7">
+		<on event="a" run="port h3 map set" back="true"/>
+	</widget>
+	<widget name="h3/map/item_8" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/maps" string_index="8">
+		<on event="a" run="port h3 map set" back="true"/>
+	</widget>
+	<widget name="h3/map/item_9" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/maps" string_index="9">
+		<on event="a" run="port h3 map set" back="true"/>
+	</widget>
+	<widget name="h3/map/item_10" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/maps" string_index="10">
+		<on event="a" run="port h3 map set" back="true"/>
+	</widget>
+	<widget name="h3/map/item_11" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/maps" string_index="11">
+		<on event="a" run="port h3 map set" back="true"/>
+	</widget>
+	<widget name="h3/map/item_12" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/maps" string_index="12">
+		<on event="a" run="port h3 map set" back="true"/>
+	</widget>
+	<widget name="h3/map/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<on event="created" run="port h3 map focus"/>
+		<data input="port h3 maps"/>
+		<child widget="h3/map/item_0" y="0"/>
+		<child widget="h3/map/item_1" y="19"/>
+		<child widget="h3/map/item_2" y="38"/>
+		<child widget="h3/map/item_3" y="57"/>
+		<child widget="h3/map/item_4" y="76"/>
+		<child widget="h3/map/item_5" y="95"/>
+		<child widget="h3/map/item_6" y="114"/>
+		<child widget="h3/map/item_7" y="133"/>
+		<child widget="h3/map/item_8" y="152"/>
+		<child widget="h3/map/item_9" y="171"/>
+		<child widget="h3/map/item_10" y="190"/>
+		<child widget="h3/map/item_11" y="209"/>
+		<child widget="h3/map/item_12" y="228"/>
+	</widget>
+	<widget name="h3/map/map_picture" left="320" top="84" width="140" height="114" bitmap="h3/mp_maps"/>
+	<widget name="h3/map/map_text" type="text" left="320" top="206" width="266" height="150" font="h3/font_small" color="#FFCFD9E3" string_list="ui\shell\main_menu\multiplayer_type_select\mp_map_select\map_data"/>
+	<widget name="h3/map/screen" flags="pass_unhandled_to_focused_child">
+		<on event="b back" back="true"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/pick/panel"/>
+		<child widget="h3/map/title"/>
+		<child widget="h3/pick/rule"/>
+		<child widget="h3/map/map_picture"/>
+		<child widget="h3/map/map_text"/>
+		<child widget="h3/pick/strip"/>
+		<child widget="h3/pick/a_butn"/>
+		<child widget="h3/pick/select"/>
+		<child widget="h3/pick/b_butn"/>
+		<child widget="h3/pick/back"/>
+		<child widget="h3/map/list" x="52" y="84"/>
+	</widget>
+
+	<!-- (the game types: the Xbox's list's, named by port h3 gametypes, twelve rows that scroll) -->
+	<widget name="h3/gametype/title" type="text" left="52" top="46" width="400" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/mp_text" string_index="7"/>
+	<widget name="h3/gametype/item_1" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a" run="port h3 gametype set" back="true"/>
+	</widget>
+	<widget name="h3/gametype/item_2" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a" run="port h3 gametype set" back="true"/>
+	</widget>
+	<widget name="h3/gametype/item_3" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a" run="port h3 gametype set" back="true"/>
+	</widget>
+	<widget name="h3/gametype/item_4" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a" run="port h3 gametype set" back="true"/>
+	</widget>
+	<widget name="h3/gametype/item_5" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a" run="port h3 gametype set" back="true"/>
+	</widget>
+	<widget name="h3/gametype/item_6" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a" run="port h3 gametype set" back="true"/>
+	</widget>
+	<widget name="h3/gametype/item_7" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a" run="port h3 gametype set" back="true"/>
+	</widget>
+	<widget name="h3/gametype/item_8" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a" run="port h3 gametype set" back="true"/>
+	</widget>
+	<widget name="h3/gametype/item_9" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a" run="port h3 gametype set" back="true"/>
+	</widget>
+	<widget name="h3/gametype/item_10" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a" run="port h3 gametype set" back="true"/>
+	</widget>
+	<widget name="h3/gametype/item_11" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a" run="port h3 gametype set" back="true"/>
+	</widget>
+	<widget name="h3/gametype/item_12" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a" run="port h3 gametype set" back="true"/>
+	</widget>
+	<widget name="h3/gametype/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<on event="created" run="port h3 gametype focus"/>
+		<on event="left_trigger" run="port h3 gametype page up"/>
+		<on event="right_trigger" run="port h3 gametype page down"/>
+		<data input="port h3 gametypes"/>
+		<child widget="h3/gametype/item_1" y="0"/>
+		<child widget="h3/gametype/item_2" y="19"/>
+		<child widget="h3/gametype/item_3" y="38"/>
+		<child widget="h3/gametype/item_4" y="57"/>
+		<child widget="h3/gametype/item_5" y="76"/>
+		<child widget="h3/gametype/item_6" y="95"/>
+		<child widget="h3/gametype/item_7" y="114"/>
+		<child widget="h3/gametype/item_8" y="133"/>
+		<child widget="h3/gametype/item_9" y="152"/>
+		<child widget="h3/gametype/item_10" y="171"/>
+		<child widget="h3/gametype/item_11" y="190"/>
+		<child widget="h3/gametype/item_12" y="209"/>
+	</widget>
+	<widget name="h3/gametype/gametype_text" type="text" left="320" top="84" width="266" height="60" font="h3/font_small" color="#FFCFD9E3" string_list="h3/mp_text" string_index="27"/>
+	<widget name="h3/gametype/screen" flags="pass_unhandled_to_focused_child">
+		<on event="b back" back="true"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/pick/panel"/>
+		<child widget="h3/gametype/title"/>
+		<child widget="h3/pick/rule"/>
+		<child widget="h3/gametype/gametype_text"/>
+		<child widget="h3/pick/strip"/>
+		<child widget="h3/pick/a_butn"/>
+		<child widget="h3/pick/select"/>
+		<child widget="h3/pick/b_butn"/>
+		<child widget="h3/pick/back"/>
+		<child widget="h3/gametype/list" x="52" y="84"/>
+	</widget>
+
+	<!-- the server browser (OpenCE's, its functions and rows' names: menu_functions.c browser_update)
+	as Halo 3's custom games: every public game in one list, each row its platform's badge (VITA,
+	PC) with a lock for a password, the name, game type, map and players; the orange bar on the
+	chosen one; the chosen game's players and rules under the list; A joins (a locked game's
+	password asked first: password.xml), Square refreshes, Triangle sorts, the triggers page. (No
+	more widgets than OpenCE's browser: the menus' widget memory, 16 KB, holds the screen's) -->
+	<widget name="h3/browser/strip" left="0" top="20" width="640" height="36" bitmap="h3/strip"/>
+	<widget name="h3/browser/rule" left="0" top="56" width="640" height="2" bitmap="h3/rule"/>
+	<widget name="h3/browser/title" type="text" left="28" top="26" width="300" height="26" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/mp_text" string_index="8"/>
+	<widget name="h3/browser/browser_status" type="text" left="300" top="31" width="316" height="18" align="right" font="h3/font_small" color="#FF9FB6CC" text_y="1"/>
+	<widget name="h3/browser/panel" left="16" top="66" width="608" height="320" bitmap="h3/panel"/>
+	<widget name="h3/browser/header_name" type="text" left="80" top="70" width="210" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/mp_text" string_index="13"/>
+	<widget name="h3/browser/header_game" type="text" left="314" top="70" width="110" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/mp_text" string_index="14"/>
+	<widget name="h3/browser/header_map" type="text" left="428" top="70" width="116" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/mp_text" string_index="15"/>
+	<widget name="h3/browser/header_players" type="text" left="540" top="70" width="72" height="16" align="right" font="h3/font_small" color="#FF9FB6CC" string_list="h3/mp_text" string_index="16"/>
+	<widget name="h3/browser/row_badge" left="4" top="2" width="64" height="16" bitmap="h3/badge"/>
+	<widget name="h3/browser/row_name" type="text" left="60" top="0" width="230" height="20" font="h3/font_item" color="#FFE6ECF2" text_y="2"/>
+	<widget name="h3/browser/row_game" type="text" left="294" top="0" width="110" height="20" font="h3/font_item" color="#FFC5D0DD" text_y="2"/>
+	<widget name="h3/browser/row_map" type="text" left="408" top="0" width="116" height="20" font="h3/font_item" color="#FFC5D0DD" text_y="2"/>
+	<widget name="h3/browser/row_players" type="text" left="524" top="0" width="68" height="20" align="right" font="h3/font_item" color="#FFC5D0DD" text_y="2"/>
+	<widget name="h3/browser/row_1" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port browser join"/>
+		<child widget="h3/browser/row_badge"/>
+		<child widget="h3/browser/row_name"/>
+		<child widget="h3/browser/row_game"/>
+		<child widget="h3/browser/row_map"/>
+		<child widget="h3/browser/row_players"/>
+	</widget>
+	<widget name="h3/browser/row_2" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port browser join"/>
+		<child widget="h3/browser/row_badge"/>
+		<child widget="h3/browser/row_name"/>
+		<child widget="h3/browser/row_game"/>
+		<child widget="h3/browser/row_map"/>
+		<child widget="h3/browser/row_players"/>
+	</widget>
+	<widget name="h3/browser/row_3" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port browser join"/>
+		<child widget="h3/browser/row_badge"/>
+		<child widget="h3/browser/row_name"/>
+		<child widget="h3/browser/row_game"/>
+		<child widget="h3/browser/row_map"/>
+		<child widget="h3/browser/row_players"/>
+	</widget>
+	<widget name="h3/browser/row_4" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port browser join"/>
+		<child widget="h3/browser/row_badge"/>
+		<child widget="h3/browser/row_name"/>
+		<child widget="h3/browser/row_game"/>
+		<child widget="h3/browser/row_map"/>
+		<child widget="h3/browser/row_players"/>
+	</widget>
+	<widget name="h3/browser/row_5" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port browser join"/>
+		<child widget="h3/browser/row_badge"/>
+		<child widget="h3/browser/row_name"/>
+		<child widget="h3/browser/row_game"/>
+		<child widget="h3/browser/row_map"/>
+		<child widget="h3/browser/row_players"/>
+	</widget>
+	<widget name="h3/browser/row_6" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port browser join"/>
+		<child widget="h3/browser/row_badge"/>
+		<child widget="h3/browser/row_name"/>
+		<child widget="h3/browser/row_game"/>
+		<child widget="h3/browser/row_map"/>
+		<child widget="h3/browser/row_players"/>
+	</widget>
+	<widget name="h3/browser/row_7" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port browser join"/>
+		<child widget="h3/browser/row_badge"/>
+		<child widget="h3/browser/row_name"/>
+		<child widget="h3/browser/row_game"/>
+		<child widget="h3/browser/row_map"/>
+		<child widget="h3/browser/row_players"/>
+	</widget>
+	<widget name="h3/browser/row_8" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port browser join"/>
+		<child widget="h3/browser/row_badge"/>
+		<child widget="h3/browser/row_name"/>
+		<child widget="h3/browser/row_game"/>
+		<child widget="h3/browser/row_map"/>
+		<child widget="h3/browser/row_players"/>
+	</widget>
+	<widget name="h3/browser/row_9" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port browser join"/>
+		<child widget="h3/browser/row_badge"/>
+		<child widget="h3/browser/row_name"/>
+		<child widget="h3/browser/row_game"/>
+		<child widget="h3/browser/row_map"/>
+		<child widget="h3/browser/row_players"/>
+	</widget>
+	<widget name="h3/browser/row_10" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port browser join"/>
+		<child widget="h3/browser/row_badge"/>
+		<child widget="h3/browser/row_name"/>
+		<child widget="h3/browser/row_game"/>
+		<child widget="h3/browser/row_map"/>
+		<child widget="h3/browser/row_players"/>
+	</widget>
+	<widget name="h3/browser/row_11" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port browser join"/>
+		<child widget="h3/browser/row_badge"/>
+		<child widget="h3/browser/row_name"/>
+		<child widget="h3/browser/row_game"/>
+		<child widget="h3/browser/row_map"/>
+		<child widget="h3/browser/row_players"/>
+	</widget>
+	<widget name="h3/browser/row_12" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port browser join"/>
+		<child widget="h3/browser/row_badge"/>
+		<child widget="h3/browser/row_name"/>
+		<child widget="h3/browser/row_game"/>
+		<child widget="h3/browser/row_map"/>
+		<child widget="h3/browser/row_players"/>
+	</widget>
+	<widget name="h3/browser/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port browser update"/>
+		<on event="x" run="port browser refresh"/>
+		<on event="y" run="port browser sort"/>
+		<on event="left_trigger" run="port browser page up"/>
+		<on event="right_trigger" run="port browser page down"/>
+		<child widget="h3/browser/row_1" x="20" y="92"/>
+		<child widget="h3/browser/row_2" x="20" y="112"/>
+		<child widget="h3/browser/row_3" x="20" y="132"/>
+		<child widget="h3/browser/row_4" x="20" y="152"/>
+		<child widget="h3/browser/row_5" x="20" y="172"/>
+		<child widget="h3/browser/row_6" x="20" y="192"/>
+		<child widget="h3/browser/row_7" x="20" y="212"/>
+		<child widget="h3/browser/row_8" x="20" y="232"/>
+		<child widget="h3/browser/row_9" x="20" y="252"/>
+		<child widget="h3/browser/row_10" x="20" y="272"/>
+		<child widget="h3/browser/row_11" x="20" y="292"/>
+		<child widget="h3/browser/row_12" x="20" y="312"/>
+	</widget>
+	<widget name="h3/browser/browser_message" type="text" left="16" top="190" width="608" height="20" align="center" font="h3/font_item" color="#FFF0B070" text_y="2"/>
+	<widget name="h3/browser/ticker_players_label" type="text" left="28" top="342" width="80" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/mp_text" string_index="16"/>
+	<widget name="h3/browser/ticker_rules_label" type="text" left="28" top="360" width="80" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/mp_text" string_index="17"/>
+	<widget name="h3/browser/ticker_players_value" type="text" left="110" top="342" width="500" height="16" font="h3/font_small" color="#FFDDE6F0"/>
+	<widget name="h3/browser/ticker_rules_value" type="text" left="110" top="360" width="500" height="16" font="h3/font_small" color="#FFDDE6F0"/>
+	<widget name="h3/browser/buttons" left="0" top="440" width="640" height="24" bitmap="h3/strip"/>
+	<widget name="h3/browser/a_butn" left="24" top="444" width="16" height="16" bitmap="h3/glyph_cross"/>
+	<widget name="h3/browser/join" type="text" left="44" top="443" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/mp_text" string_index="9"/>
+	<widget name="h3/browser/x_butn" left="118" top="444" width="16" height="16" bitmap="h3/glyph_square"/>
+	<widget name="h3/browser/refresh" type="text" left="138" top="443" width="80" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/mp_text" string_index="10"/>
+	<widget name="h3/browser/y_butn" left="226" top="444" width="16" height="16" bitmap="h3/glyph_triangle"/>
+	<widget name="h3/browser/sort" type="text" left="246" top="443" width="80" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/mp_text" string_index="11"/>
+	<widget name="h3/browser/page" type="text" left="334" top="443" width="110" height="18" font="h3/font_item" color="#FFC5D0DD" text_y="1" string_list="h3/mp_text" string_index="12"/>
+	<widget name="h3/browser/b_butn" left="532" top="444" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/browser/back" type="text" left="552" top="443" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/main_items" string_index="10"/>
+	<widget name="h3/browser/screen" flags="pass_unhandled_to_focused_child">
+		<on event="created" run="port browser init"/>
+		<on event="deleted" run="port browser dispose"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/browser/strip"/>
+		<child widget="h3/browser/rule"/>
+		<child widget="h3/browser/title"/>
+		<child widget="h3/browser/browser_status"/>
+		<child widget="h3/browser/panel"/>
+		<child widget="h3/browser/header_name"/>
+		<child widget="h3/browser/header_game"/>
+		<child widget="h3/browser/header_map"/>
+		<child widget="h3/browser/header_players"/>
+		<child widget="h3/browser/list"/>
+		<child widget="h3/browser/browser_message"/>
+		<child widget="h3/browser/ticker_players_label"/>
+		<child widget="h3/browser/ticker_rules_label"/>
+		<child widget="h3/browser/ticker_players_value"/>
+		<child widget="h3/browser/ticker_rules_value"/>
+		<child widget="h3/browser/buttons"/>
+		<child widget="h3/browser/a_butn"/>
+		<child widget="h3/browser/join"/>
+		<child widget="h3/browser/x_butn"/>
+		<child widget="h3/browser/refresh"/>
+		<child widget="h3/browser/y_butn"/>
+		<child widget="h3/browser/sort"/>
+		<child widget="h3/browser/page"/>
+		<child widget="h3/browser/b_butn"/>
+		<child widget="h3/browser/back"/>
+	</widget>
+
+	<!-- Create Game (ONLINE's START GAME): OpenCE's Server Setup (setup.xml: its functions, rows'
+	and values' names) as Halo 3's game options - rows with their values at the right in ice blue,
+	the chosen one's help below; GAME TYPE and MAP open the lobby's pickers (port h3 setup hold
+	keeps what the rows show meanwhile); START GAME as Server Setup's -->
+	<widget name="h3/setup/panel" left="40" top="40" width="560" height="400" bitmap="h3/panel"/>
+	<widget name="h3/setup/title" type="text" left="52" top="46" width="400" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/mp_text" string_index="18"/>
+	<widget name="h3/setup/subtitle" type="text" left="52" top="72" width="536" height="16" font="h3/font_small" color="#FFCFD9E3" string_list="h3/mp_text" string_index="23"/>
+	<widget name="h3/setup/rule" left="40" top="92" width="560" height="2" bitmap="h3/rule"/>
+	<widget name="h3/setup/game_label" type="text" left="0" top="0" width="250" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/mp_text" string_index="14"/>
+	<widget name="h3/setup/game_value" type="text" left="280" top="0" width="250" height="20" font="h3/font_item" color="#FFAABED6" text_y="2" text_flags="no_focus_test"/>
+	<widget name="h3/setup/op_game" width="536" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a" run="port h3 setup hold" open="h3/gametype/screen"/>
+		<child widget="h3/setup/game_label"/>
+		<child widget="h3/setup/game_value"/>
+	</widget>
+	<widget name="h3/setup/map_label" type="text" left="0" top="0" width="250" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/mp_text" string_index="15"/>
+	<widget name="h3/setup/map_value" type="text" left="280" top="0" width="250" height="20" font="h3/font_item" color="#FFAABED6" text_y="2" text_flags="no_focus_test"/>
+	<widget name="h3/setup/op_map" width="536" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a" run="port h3 setup hold" open="h3/map/screen"/>
+		<child widget="h3/setup/map_label"/>
+		<child widget="h3/setup/map_value"/>
+	</widget>
+	<widget name="h3/setup/name_label" type="text" left="0" top="0" width="250" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/mp_text" string_index="19"/>
+	<widget name="h3/setup/name_value" type="text" left="280" top="0" width="250" height="20" font="h3/font_item" color="#FFAABED6" text_y="2" text_flags="no_focus_test"/>
+	<widget name="h3/setup/op_name" width="536" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a start" run="port setup edit name"/>
+		<child widget="h3/setup/name_label"/>
+		<child widget="h3/setup/name_value"/>
+	</widget>
+	<widget name="h3/setup/max_label" type="text" left="0" top="0" width="250" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/mp_text" string_index="20"/>
+	<widget name="h3/setup/max_spinner" strings="2|3|4|5|6|7|8|9|10|11|12|13|14|15|16" type="spinner" left="0" top="0" width="100" height="20" flags="pass_unhandled_to_focused_child left_right_tabs_items" font="h3/font_item" color="#FFAABED6" align="center" text_y="2" header_bitmap="h3/arrow_left" footer_bitmap="h3/arrow_right" header_bounds="2 -12 18 -4" footer_bounds="2 104 18 112"/>
+	<widget name="h3/setup/op_max_players" width="536" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<child widget="h3/setup/max_label"/>
+		<child widget="h3/setup/max_spinner" x="280"/>
+	</widget>
+	<widget name="h3/setup/visibility_label" type="text" left="0" top="0" width="250" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/mp_text" string_index="21"/>
+	<widget name="h3/setup/visibility_spinner" strings="PUBLIC|PRIVATE" type="spinner" left="0" top="0" width="100" height="20" flags="pass_unhandled_to_focused_child left_right_tabs_items" font="h3/font_item" color="#FFAABED6" align="center" text_y="2" header_bitmap="h3/arrow_left" footer_bitmap="h3/arrow_right" header_bounds="2 -12 18 -4" footer_bounds="2 104 18 112"/>
+	<widget name="h3/setup/op_visibility" width="536" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<child widget="h3/setup/visibility_label"/>
+		<child widget="h3/setup/visibility_spinner" x="280"/>
+	</widget>
+	<widget name="h3/setup/password_label" type="text" left="0" top="0" width="250" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/mp_text" string_index="22"/>
+	<widget name="h3/setup/password_value" type="text" left="280" top="0" width="250" height="20" font="h3/font_item" color="#FFAABED6" text_y="2" text_flags="no_focus_test"/>
+	<widget name="h3/setup/op_password" width="536" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a start" run="port setup edit password"/>
+		<child widget="h3/setup/password_label"/>
+		<child widget="h3/setup/password_value"/>
+	</widget>
+	<widget name="h3/setup/op_start" type="text" width="536" height="20" bitmap="h3/item" font="h3/font_item" color="#FFF2F6FA" text_x="10" text_y="3" string_list="h3/mp_text" string_index="1">
+		<on event="a start" run="port setup start" open="ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen"/>
+	</widget>
+	<widget name="h3/setup/setup_status" type="text" left="52" top="276" width="536" height="18" font="h3/font_small" color="#FF9FB6CC" text_y="1"/>
+	<widget name="h3/setup/help_rule" left="40" top="298" width="560" height="2" bitmap="h3/rule"/>
+	<widget name="h3/setup/setup_help" type="text" left="52" top="306" width="536" height="60" font="h3/font_small" color="#FFCFD9E3" string_list="h3/setup_help"/>
+	<widget name="h3/setup/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port setup update"/>
+		<child widget="h3/setup/op_game" x="52" y="102"/>
+		<child widget="h3/setup/op_map" x="52" y="124"/>
+		<child widget="h3/setup/op_name" x="52" y="146"/>
+		<child widget="h3/setup/op_max_players" x="52" y="168"/>
+		<child widget="h3/setup/op_visibility" x="52" y="190"/>
+		<child widget="h3/setup/op_password" x="52" y="212"/>
+		<child widget="h3/setup/op_start" x="52" y="244"/>
+	</widget>
+	<widget name="h3/setup/screen" flags="pass_unhandled_to_focused_child">
+		<on event="created" run="port setup init"/>
+		<on event="b back" back="true"/>
+		<data input="port h3 mp lobby"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/setup/panel"/>
+		<child widget="h3/setup/title"/>
+		<child widget="h3/setup/subtitle"/>
+		<child widget="h3/setup/rule"/>
+		<child widget="h3/setup/setup_status"/>
+		<child widget="h3/setup/help_rule"/>
+		<child widget="h3/setup/setup_help"/>
+		<child widget="h3/pick/strip"/>
+		<child widget="h3/pick/a_butn"/>
+		<child widget="h3/pick/select"/>
+		<child widget="h3/pick/b_butn"/>
+		<child widget="h3/pick/back"/>
+		<child widget="h3/setup/list"/>
+	</widget>
+
+	<!-- JOIN WITH CODE: OpenCE's Direct Link (setup.xml's code screen: its functions and names) as a
+	Halo 3 dialog -->
+	<widget name="h3/code/panel" left="120" top="130" width="400" height="200" bitmap="h3/panel"/>
+	<widget name="h3/code/title" type="text" left="132" top="136" width="376" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/mp_text" string_index="3"/>
+	<widget name="h3/code/rule" left="120" top="164" width="400" height="2" bitmap="h3/rule"/>
+	<widget name="h3/code/code_label" type="text" left="0" top="0" width="150" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/mp_text" string_index="24"/>
+	<widget name="h3/code/code_value" type="text" left="160" top="0" width="210" height="20" font="h3/font_item" color="#FFAABED6" text_y="2" text_flags="no_focus_test"/>
+	<widget name="h3/code/op_code" width="376" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a start" run="port code edit"/>
+		<child widget="h3/code/code_label"/>
+		<child widget="h3/code/code_value"/>
+	</widget>
+	<widget name="h3/code/op_join" type="text" width="376" height="20" bitmap="h3/item" font="h3/font_item" color="#FFF2F6FA" text_x="10" text_y="3" string_list="h3/mp_text" string_index="25">
+		<on event="a start" run="port code join"/>
+	</widget>
+	<widget name="h3/code/code_help" type="text" left="132" top="230" width="376" height="70" font="h3/font_small" color="#FFCFD9E3" string_list="h3/code_help"/>
+	<widget name="h3/code/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port code update"/>
+		<child widget="h3/code/op_code" x="132" y="174"/>
+		<child widget="h3/code/op_join" x="132" y="200"/>
+	</widget>
+	<widget name="h3/code/strip" left="120" top="310" width="400" height="20" bitmap="h3/strip"/>
+	<widget name="h3/code/a_butn" left="132" top="312" width="16" height="16" bitmap="h3/glyph_cross"/>
+	<widget name="h3/code/select" type="text" left="152" top="311" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/campaign_text" string_index="5"/>
+	<widget name="h3/code/b_butn" left="226" top="312" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/code/back" type="text" left="246" top="311" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/main_items" string_index="10"/>
+	<widget name="h3/code/screen" flags="pass_unhandled_to_focused_child">
+		<on event="created" run="port code init"/>
+		<on event="b back" back="true"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/code/panel"/>
+		<child widget="h3/code/title"/>
+		<child widget="h3/code/rule"/>
+		<child widget="h3/code/code_help"/>
+		<child widget="h3/code/strip"/>
+		<child widget="h3/code/a_butn"/>
+		<child widget="h3/code/select"/>
+		<child widget="h3/code/b_butn"/>
+		<child widget="h3/code/back"/>
+		<child widget="h3/code/list"/>
+	</widget>
+</menus>
