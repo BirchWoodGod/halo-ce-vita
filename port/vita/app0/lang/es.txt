@@ -47,6 +47,8 @@
 "4:3: the Xbox's framing, black bars" = "4:3: el encuadre de la Xbox, con barras negras"
 "Upscale filter" = "Filtro de escalado"
 "Scaling to the screen: Sharp = crisp pixels" = "Escalado a la pantalla: Nítido = píxeles definidos"
+"Sharp interface" = "Interfaz nítida"
+"HUD, menus and text at full resolution" = "HUD, menús y texto a resolución completa"
 "First-person legs" = "Piernas visibles"
 "Your legs when you look down, as others see them" = "Tus piernas al mirar abajo, como las ven los demás"
 "Smooth" = "Suave"

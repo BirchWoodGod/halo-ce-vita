@@ -850,6 +850,13 @@ void interface_draw_screen(
 		rasterizer_screen_effect(NULL);
 	}
 
+#ifdef HALO_LINUX
+	/* (port) the 3D picture is done, its screen effect too (the scope's
+	zoom and mask, the night vision, a cinematic's filter: they read the
+	picture back): the HUD and what follows at the display's resolution
+	(rasterizer_xbox.c rasterizer_interface_begin) */
+	rasterizer_interface_begin();
+#endif
 	hud_draw_screen();
 	game_engine_post_rasterize();
 

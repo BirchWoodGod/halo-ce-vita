@@ -377,6 +377,11 @@ static struct setting settings[] = {
 		"4:3: the Xbox's framing, black bars", 0, TAB_GRAPHICS },
 	{ "Upscale filter", "HALO_UPSCALE_FILTER", 0, 2, { "0", "1" }, { "Smooth", "Sharp" },
 		"Scaling to the screen: Sharp = crisp pixels", 0, TAB_GRAPHICS },
+	/* (d3d8_gxm.c, Sharp interface: the HUD, the menus, their text, the
+	screen flashes and the letterbox drawn at the display's 960x544, the 3D
+	at the render resolution. On by default, in no profile. Live) */
+	{ "Sharp interface", "HALO_SHARP_UI", 0, 2, { "1", "0" }, { "On", "Off" },
+		"HUD, menus and text at full resolution", 0, TAB_GRAPHICS },
 	PAGE_ROW("Detail", "Models, shadows, lights, effects, particles", TAB_GRAPHICS, PAGE_GRAPHICS_DETAIL),
 	PAGE_ROW("Performance", "Update rates, AI think rate, fourth core helpers", TAB_GRAPHICS,
 		PAGE_GRAPHICS_PERFORMANCE),

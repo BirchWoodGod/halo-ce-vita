@@ -299,6 +299,14 @@ unsigned long vgxm_visibility_count(int buffer, unsigned long slot);
 /* ends the frame's scenes, shows the colour target (the game's back
 buffer, width x height of it) on the display and starts the next frame */
 void vgxm_present(unsigned long color_target, unsigned long width, unsigned long height);
+/* the frame's interface begins (d3d8_gxm.c, Sharp interface): the colour
+target (the back buffer) is scaled up to the display now, as vgxm_present
+would, and until the present the draws and clears into it go to the
+display instead, at the display's resolution - their viewports and clips
+mapped from the target's size asked for to the picture's place on the
+display, with no depth or stencil buffer (their tests off). Once a frame;
+vgxm_present then only adds the overlay */
+void vgxm_interface_begin(unsigned long color_target);
 /* waits until the GPU has finished every frame presented so far (any
 thread; the frames' scenes all end with the present's notification) */
 void vgxm_wait_gpu_idle(void);

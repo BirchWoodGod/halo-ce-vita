@@ -1717,6 +1717,7 @@ static void test_tab_layouts(void)
 		{ TAB_GRAPHICS, "Frame interpolation", "HALO_INTERPOLATION", "false|true", 0, "false" },
 		{ TAB_GRAPHICS, "Aspect ratio", "HALO_DISPLAY_WIDTH", "848|640", 0, "848" },
 		{ TAB_GRAPHICS, "Upscale filter", "HALO_UPSCALE_FILTER", "0|1", 0, "0" },
+		{ TAB_GRAPHICS, "Sharp interface", "HALO_SHARP_UI", "1|0", 0, "1" },
 		{ TAB_GRAPHICS, "Detail", NULL, NULL, 0, NULL, ACTION_PAGE, PAGE_GRAPHICS_DETAIL },
 		{ TAB_GRAPHICS, "Performance", NULL, NULL, 0, NULL, ACTION_PAGE, PAGE_GRAPHICS_PERFORMANCE },
 		{ PAGE_GRAPHICS_DETAIL, "Model detail", "HALO_MODEL_LOD_SCALE", "1|0.75|0.5|0.35", 0, "0.75" },
@@ -1759,7 +1760,7 @@ static void test_tab_layouts(void)
 		"Gyro settings; Rear touch guard, Touch zones: each row's variable, values, default and restart as before");
 	check(layout_is(TAB_GRAPHICS, 1, video, (int)(sizeof(video) / sizeof(video[0]))),
 		"Video: Profile, Render resolution, Dynamic minimum, Frame limit, Frame interpolation, Aspect ratio, Upscale "
-		"filter, Detail, Performance; Detail (Model detail ... Particles, Particle density, Ragdolls), Performance "
+		"filter, Sharp interface (on), Detail, Performance; Detail (Model detail ... Particles, Particle density, Ragdolls), Performance "
 		"(Scenery updates, Object lighting, AI think rate, Fourth core helpers*): each row's variable, values, default "
 		"and restart as before");
 	check(layout_is(TAB_AUDIO, 1, sound, (int)(sizeof(sound) / sizeof(sound[0]))),
@@ -1816,7 +1817,7 @@ static void test_headings(void)
 		{ "Controls", "=Look|Look sensitivity|Invert look|Stick deadzone|=Buttons|Crouch|Button layout|Reset controls|"
 			"=Gyro|Gyro aiming|Gyro settings|=Touch|Rear touch guard|Touch zones" },
 		{ "Video", "=Quality|Profile|Render resolution|Dynamic minimum|Frame limit|Frame interpolation|=Screen|"
-			"Aspect ratio|Upscale filter|=More|Detail|Performance" },
+			"Aspect ratio|Upscale filter|Sharp interface|=More|Detail|Performance" },
 		{ "Sound", "Sound voices*|Sound occlusion|Sound updates" },
 		{ "Multiplayer", "=Network|Connection*|Crossplay*|Join with a code|=Bots|Bots|=Games|Co-op players|"
 			"Unseen players|Modded maps|Latency meter" },
@@ -1915,7 +1916,8 @@ with the values it saved, but the co-op pair (gone: co-op is hosted from
 the Campaign screen) and Online games (now Visibility, by OpenCE's name);
 and the rows added since (Sun rays, Button icons, Map downloads, Max
 players, Visibility, Fourth core helpers, Latency meter, Particles,
-First-person legs, MCC mods, PC map vehicles; the Play page's two texts) */
+First-person legs, MCC mods, PC map vehicles, Sharp interface; the Play
+page's two texts) */
 static void test_variables_kept(void)
 {
 	static const char *const variables[] = {
@@ -1938,7 +1940,7 @@ static void test_variables_kept(void)
 		"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR", "HALO_INTERPOLATION", "HALO_LATENCY_METER", "HALO_BOTS", "HALO_BOT_SKILL", "HALO_BOT_TEAMS",
 		"HALO_BOT_VEHICLES", "HALO_BOT_ROUTES", "HALO_BOT_PLAYLIST", "HALO_NET_COOP_PLAYERS", "HALO_NET_REMOTE_LOD",
 		"HALO_LANGUAGE", "HALO_UPDATE_CHANNEL", "HALO_PARTICLE_BUDGET", "HALO_FIRST_PERSON_LEGS", "HALO_RAGDOLLS",
-		"HALO_MCC_MODS", "HALO_PC_MAP_VEHICLES",
+		"HALO_MCC_MODS", "HALO_PC_MAP_VEHICLES", "HALO_SHARP_UI",
 	};
 	int index, all = 1, choices = 0;
 
@@ -3061,14 +3063,16 @@ int main(void)
 		!strcmp(menu_line(7, line, sizeof(line)), "\x08Screen") &&
 		!strcmp(menu_line(8, line, sizeof(line)), "Aspect ratio\x02  16:9 >") &&
 		!strcmp(menu_line(9, line, sizeof(line)), "Upscale filter\x02  Smooth >") &&
-		!strcmp(menu_line(10, line, sizeof(line)), "\x08More") &&
-		!strcmp(menu_line(11, line, sizeof(line)), "Detail\x02  >") &&
-		!strcmp(menu_line(12, line, sizeof(line)), "Performance\x02  >") &&
-		!strncmp(menu_line(13, line, sizeof(line)), "\x05Sets resolution", 16) &&
-		!strncmp(menu_line(14, line, sizeof(line)), "\x06L/R: tabs", 10) && menu_height_fits() && menu_selected == 2,
+		!strcmp(menu_line(10, line, sizeof(line)), "Sharp interface\x02  On >") &&
+		!strcmp(menu_line(11, line, sizeof(line)), "\x08More") &&
+		!strcmp(menu_line(12, line, sizeof(line)), "Detail\x02  >") &&
+		!strcmp(menu_line(13, line, sizeof(line)), "Performance\x02  >") &&
+		!strncmp(menu_line(14, line, sizeof(line)), "\x05Sets resolution", 16) &&
+		!strncmp(menu_line(15, line, sizeof(line)), "\x06L/R: tabs", 10) && menu_height_fits() && menu_selected == 2,
 		"Video: Quality (Profile, Render resolution, Dynamic minimum, Frame limit, Frame interpolation), Screen (Aspect "
-		"ratio 16:9, Upscale filter Smooth), More (Detail, Performance); help, buttons; Profile chosen first");
-	check(menu_fits() && menu_rows() == 9, "Video: nine rows with Dynamic minimum shown, each fits");
+		"ratio 16:9, Upscale filter Smooth, Sharp interface On), More (Detail, Performance); help, buttons; Profile "
+		"chosen first");
+	check(menu_fits() && menu_rows() == 10, "Video: ten rows with Dynamic minimum shown, each fits");
 	check(!strstr(menu, "FPS counter") && !strstr(menu, "First-person legs") && !strstr(menu, "Smooth weapon motion") &&
 		!strstr(menu, "Menu style") && !strstr(menu, "Model detail") && !strstr(menu, "\nParticles") &&
 		!strstr(menu, "Particle density") && !strstr(menu, "Scenery updates") && !strstr(menu, "AI think rate") &&
@@ -3099,7 +3103,7 @@ int main(void)
 		press(VITA_BUTTON_DOWN);
 		press(VITA_BUTTON_UP);
 		check(!strstr(menu, "Dynamic minimum") && !strncmp(menu_line(4, line, sizeof(line)), "Frame limit\x02", 12) &&
-			menu_rows() == 8, "not Dynamic: the Dynamic minimum row hidden");
+			menu_rows() == 9, "not Dynamic: the Dynamic minimum row hidden");
 		vita_settings_set("HALO_RENDER_SCALE", "0.3");
 		check(!strcmp(getenv("HALO_RENDER_SCALE"), "0.5"), "a scale off the list goes to the nearest number, not Dynamic");
 		vita_settings_set("HALO_RENDER_SCALE", "dynamic");
@@ -3107,7 +3111,7 @@ int main(void)
 			!strcmp(settings[0].names[settings[0].choice], "Balanced"), "Dynamic again (from 63%): Balanced again");
 		press(VITA_BUTTON_DOWN);
 		press(VITA_BUTTON_UP);
-		check(!strncmp(menu_line(4, line, sizeof(line)), "Dynamic minimum\x02", 16) && menu_rows() == 9 && menu_fits(),
+		check(!strncmp(menu_line(4, line, sizeof(line)), "Dynamic minimum\x02", 16) && menu_rows() == 10 && menu_fits(),
 			"Dynamic: the Dynamic minimum row shows, under it");
 		vita_settings_set("HALO_DYNAMIC_RES_MIN", "0.75");
 		check(!strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.75") &&
@@ -3133,9 +3137,30 @@ int main(void)
 		check(!strcmp(getenv("HALO_UPSCALE_FILTER"), "1") && strstr(file_text(SETTINGS_FILE), "HALO_UPSCALE_FILTER=1\n") &&
 			!strcmp(menu_line(9, line, sizeof(line)), "Upscale filter\x02< Sharp  ") &&
 			!strcmp(settings[0].names[settings[0].choice], "Balanced"), "Upscale filter Sharp: saved, the profile kept");
+		/* (Sharp interface, under it: the interface at the display's
+		resolution, on as shipped; live, no *, the profile kept) */
 		press(VITA_BUTTON_DOWN);
-		check(menu_selected == 11 && !strcmp(menu_line(menu_selected, line, sizeof(line)), "Detail\x02  >"),
-			"down from Upscale filter: Detail (the More heading stepped over)");
+		check(menu_selected == 10 && !strcmp(menu_line(10, line, sizeof(line)), "Sharp interface\x02  On >") &&
+			strstr(menu, "\n\x05HUD, menus and text at full resolution\n") && menu_fits() &&
+			!strstr(menu, "Sharp interface*") && !strcmp(getenv("HALO_SHARP_UI"), "1"),
+			"down from Upscale filter: Sharp interface (On, in the environment), its help line fits; live");
+		{
+			unsigned long generation = halo_settings_generation;
+
+			press(VITA_BUTTON_RIGHT);
+			check(!strcmp(getenv("HALO_SHARP_UI"), "0") && strstr(file_text(SETTINGS_FILE), "HALO_SHARP_UI=0\n") &&
+				halo_settings_generation != generation &&
+				!strcmp(menu_line(10, line, sizeof(line)), "Sharp interface\x02< Off  ") &&
+				!strcmp(settings[0].names[settings[0].choice], "Balanced"),
+				"Sharp interface Off: saved, the readers told (the settings generation), the profile kept");
+			press(VITA_BUTTON_LEFT);
+			check(!strcmp(getenv("HALO_SHARP_UI"), "1") && strstr(file_text(SETTINGS_FILE), "HALO_SHARP_UI=1\n") &&
+				!strcmp(menu_line(10, line, sizeof(line)), "Sharp interface\x02  On >"), "Sharp interface On again: saved");
+		}
+		press(VITA_BUTTON_DOWN);
+		check(menu_selected == 12 && !strcmp(menu_line(menu_selected, line, sizeof(line)), "Detail\x02  >"),
+			"down from Sharp interface: Detail (the More heading stepped over)");
+		press(VITA_BUTTON_UP);
 		press(VITA_BUTTON_UP);
 		press(VITA_BUTTON_UP);
 		press(VITA_BUTTON_UP);

@@ -312,6 +312,14 @@ void rasterizer_window_end(
 	void);
 void rasterizer_windows_end(void);
 void rasterizer_frame_end(void);
+#ifdef HALO_LINUX
+/* (port) the window's 3D picture is done and its interface begins: the
+HUD, the menus, the text, the screen flashes and the letterbox that follow
+are drawn at the display's resolution where the device can (the Vita's
+Sharp interface, HALO_SHARP_UI), the 3D at the render scale */
+void rasterizer_interface_begin(
+	void);
+#endif
 
 void rasterizer_present(struct bitmap_data *screenshot_bitmap, const point2d *screenshot_index);
 void rasterizer_dispose(void);
