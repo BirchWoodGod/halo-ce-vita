@@ -135,6 +135,8 @@ enum
 };
 
 #define MENU_SCENE_PREVIEW_PACK "menu_spartan"
+/* (a model chosen rests this long before its pack is wanted) */
+#define MENU_SCENE_MODEL_REST_US 300000ull
 #define MENU_SCENE_DEGREES ((real)(3.14159265358979 / 180.0))
 /* the weapon held this far below the body's forward, and the head turned
 to the camera (a calm stance rather than the idle's aim straight ahead) */
@@ -242,6 +244,11 @@ static struct
 	/* the preview's pack: menu_spartan, or a player model's
 	(menu_scene_spartan_model) */
 	char preview_pack[32];
+	/* the pack asked for since (menu_scene_spartan_model), taken once it
+	has rested MENU_SCENE_MODEL_REST_US: stepping through models loads none
+	of those passed */
+	char pending_pack[32];
+	unsigned long long pending_since;
 } menu_scene_objects;
 
 static boolean menu_scene_objects_initialized = FALSE;
@@ -1218,10 +1225,61 @@ static boolean camera_parse(char const *text, struct menu_scene_camera *camera)
 	return FALSE;
 }
 
+/* a pack the preview let go (a player model's): released, unless it is the
+menu Spartan's or a scene's (scene_packs_release: once its object is gone,
+its tag cache room given back - the next model's has room) */
+static void preview_pack_release(char const *pack)
+{
+	short index;
+
+	if (!pack || !*pack || !strcmp(pack, MENU_SCENE_PREVIEW_PACK))
+		return;
+	for (index = 0; index < MAXIMUM_MENU_SCENE_OBJECTS; index++)
+	{
+		struct menu_scene_object const *object = &menu_scene_objects.slots[index];
+
+		if (object->wanted && (!strcmp(object->pack, pack) || !strcmp(object->weapon_pack, pack)))
+			return;
+	}
+	scene_packs_release(pack);
+	platform_log("menus: h3 scene object %d: the pack %s let go", MENU_SCENE_PREVIEW, pack);
+}
+
+/* the model asked for taken, once it has rested: the character standing
+there let go (and its pack), the other made once its pack is loaded */
+static void preview_model_take(boolean at_once)
+{
+	struct menu_scene_object *object = &menu_scene_objects.slots[MENU_SCENE_PREVIEW];
+	char const *wanted = menu_scene_objects.pending_pack[0] ? menu_scene_objects.pending_pack : MENU_SCENE_PREVIEW_PACK;
+
+	if (!strcmp(menu_scene_objects.preview_pack, wanted) && !strcmp(object->pack, wanted))
+		return;
+	if (!at_once && vita_host_time_us() - menu_scene_objects.pending_since < MENU_SCENE_MODEL_REST_US)
+		return;
+	snprintf(menu_scene_objects.preview_pack, sizeof(menu_scene_objects.preview_pack), "%s", wanted);
+	if (strcmp(object->pack, wanted))
+	{
+		char previous[32];
+
+		snprintf(previous, sizeof(previous), "%s", object->pack);
+		snprintf(object->pack, sizeof(object->pack), "%s", wanted);
+		object->refused = FALSE;
+		if (object->object_index != NONE)
+		{
+			platform_log("menus: h3 scene object %d: deleted (the model changed)", MENU_SCENE_PREVIEW);
+			object_forget(object, TRUE);
+		}
+		preview_pack_release(previous);
+	}
+}
+
 /* the preview's character: made (once its pack is), held, recoloured */
 static void preview_update(void)
 {
 	struct menu_scene_object *object = &menu_scene_objects.slots[MENU_SCENE_PREVIEW];
+
+	/* (the model asked for, once it has rested; hidden, at once) */
+	preview_model_take(!object->wanted);
 
 	if (!object->wanted || !halo_main_menu_idle() || !halo_menu_style_halo3())
 	{
@@ -1499,18 +1557,17 @@ void menu_scene_spartan_model(
 
 	initialize();
 	object = &menu_scene_objects.slots[MENU_SCENE_PREVIEW];
-	snprintf(menu_scene_objects.preview_pack, sizeof(menu_scene_objects.preview_pack), "%s", wanted);
-	if (strcmp(object->pack, wanted))
+	/* (taken by the update once it has rested: preview_model_take; the
+	first, nothing standing yet and none asked for before, at once) */
+	if (strcmp(menu_scene_objects.pending_pack, wanted))
 	{
-		/* (the character standing there let go: the other made, once its
-		pack is loaded, in its place) */
+		snprintf(menu_scene_objects.pending_pack, sizeof(menu_scene_objects.pending_pack), "%s", wanted);
+		menu_scene_objects.pending_since = vita_host_time_us();
+	}
+	if (!menu_scene_objects.preview_pack[0] && !object->pack[0])
+	{
+		snprintf(menu_scene_objects.preview_pack, sizeof(menu_scene_objects.preview_pack), "%s", wanted);
 		snprintf(object->pack, sizeof(object->pack), "%s", wanted);
-		object->refused = FALSE;
-		if (object->object_index != NONE)
-		{
-			platform_log("menus: h3 scene object %d: deleted (the model changed)", MENU_SCENE_PREVIEW);
-			object_forget(object, TRUE);
-		}
 	}
 }
 
@@ -1523,7 +1580,9 @@ short menu_scene_spartan_state(
 
 	initialize();
 	object = &menu_scene_objects.slots[MENU_SCENE_PREVIEW];
-	return scene_packs_status(object->pack[0] ? object->pack : MENU_SCENE_PREVIEW_PACK, progress, why, why_size);
+	/* (the model asked for: not wanted yet while it rests) */
+	return scene_packs_status(menu_scene_objects.pending_pack[0] ? menu_scene_objects.pending_pack :
+		object->pack[0] ? object->pack : MENU_SCENE_PREVIEW_PACK, progress, why, why_size);
 }
 
 void menu_scene_spartan_color(

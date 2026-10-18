@@ -64,6 +64,9 @@ HALO_SCENE_PACKS=0 turns them off (nothing is wanted, built or loaded).
 #include "units/unit_definitions.h"
 #include "game/game_globals.h"
 #include "objects/object_types.h"
+#include "bitmaps/bitmap_group.h"
+#include "cache/texture_cache.h"
+#include "sound/sound_definitions.h"
 
 #include "custom_edition_cache.h"
 #include "halo_menus.h"
@@ -84,6 +87,8 @@ long cache_file_tag_data_size(void);
 void *cache_files_tag_instances(long *count);
 void cache_files_set_tag_instances(void *instances, long count);
 void tag_validate_reserve_after_tags(unsigned long bytes);
+boolean sound_cache_sound_in_use(struct sound_permutation *sound);
+void sound_cache_sound_delete(struct sound_permutation *sound);
 
 /* ---------- constants */
 
@@ -130,6 +135,10 @@ struct scene_pack_slot
 	char why[SCENE_PACK_WHY_SIZE];
 	/* (Forge's lobby: scene_packs_prebuild) built, not loaded */
 	boolean build_only;
+	/* (scene_packs_release) to be let go, loaded, once it is the last
+	loaded and nothing uses it; a load that waits for room (said once) */
+	boolean release_wanted;
+	boolean waiting_said;
 };
 
 /* ---------- globals */
@@ -157,6 +166,9 @@ static struct
 	unsigned long scratch_size;
 	int volatile cancel;
 	int volatile read_lock;
+	/* the salt the next pack's tags are given at least (a pack let go: the
+	next one's indices are its, never its tag indices) */
+	long next_salt;
 } scene_packs = { { { 0 } }, 0, 0, 0, NULL, 0, { NULL }, 0, 0, FALSE, NONE };
 
 /* (each map's tags loaded counts one: a character made on another map
@@ -460,8 +472,9 @@ static void build_thread_start(void)
 }
 
 /* the pack's tags put in the game (the thread is not building: its scratch
-is free): TRUE if it is loaded */
-static boolean pack_load(struct scene_pack_slot *slot)
+is free): TRUE if it is loaded; *full TRUE when it was not for want of room
+(packs loaded, the tag cache, the file range: it may be when one goes) */
+static boolean pack_load(struct scene_pack_slot *slot, boolean *full)
 {
 	unsigned char *room, *room_end;
 	unsigned long long started = vita_host_time_us();
@@ -472,6 +485,7 @@ static boolean pack_load(struct scene_pack_slot *slot)
 	long existing_count, count, index, salt = 0;
 	unsigned long file_base = scene_packs.file_used;
 
+	*full = FALSE;
 	platform_heap_usage(&heap_before, &capacity);
 	room = tag_cache_room(&room_end);
 	if (scene_packs.thread_running && scene_packs.scratch && room_end > scene_packs.scratch)
@@ -480,6 +494,7 @@ static boolean pack_load(struct scene_pack_slot *slot)
 	{
 		snprintf(slot->why, sizeof(slot->why), "the tag cache has %lu KB free for its %lu KB",
 			(unsigned long)(room_end - room) / 1024, slot->info.tags_size / 1024);
+		*full = TRUE;
 		return FALSE;
 	}
 	existing = cache_files_tag_instances(&existing_count);
@@ -487,11 +502,13 @@ static boolean pack_load(struct scene_pack_slot *slot)
 	{
 		snprintf(slot->why, sizeof(slot->why), scene_packs.table_count >= MAXIMUM_LOADED_SCENE_PACKS ?
 			"as many packs as a map takes are loaded" : "no map's tags to load it beside");
+		*full = existing != NULL;
 		return FALSE;
 	}
 	if (slot->info.data_size > SCENE_PACK_FILE_RANGE_BYTES - file_base)
 	{
 		snprintf(slot->why, sizeof(slot->why), "the packs loaded hold as many pixels and samples as the game reads");
+		*full = TRUE;
 		return FALSE;
 	}
 	if (!scene_pack_load(slot->path, &slot->info, room, slot->why, sizeof(slot->why)))
@@ -528,7 +545,11 @@ static boolean pack_load(struct scene_pack_slot *slot)
 		if (instance_salt > salt)
 			salt = instance_salt;
 	}
-	scene_pack_rebase(room, existing_count, (salt + 1) & 0x7FFF, (long)file_base);
+	salt = MAX((salt + 1) & 0x7FFF, scene_packs.next_salt);
+	if (salt <= 0 || salt > 0x7FFF)
+		salt = 1;
+	scene_pack_rebase(room, existing_count, salt, (long)file_base);
+	scene_packs.next_salt = (salt + 1) & 0x7FFF;
 	memcpy(table, existing, (unsigned long)existing_count * TAG_INSTANCE_BYTES);
 	memcpy(table + existing_count * TAG_INSTANCE_BYTES, instances, (unsigned long)count * TAG_INSTANCE_BYTES);
 	tags_header_register_vertex_and_index_buffers((struct cache_file_tag_header *)room);
@@ -593,11 +614,21 @@ static struct scene_pack_slot *slot_new(char const *name)
 }
 
 /* the slot's pack loaded, now that it is ready (its thread done): built
-once more if its load fails */
-static void slot_load(struct scene_pack_slot *slot)
+once more if its load fails; left ready when there is no room for it yet
+(another may be let go: scene_packs_release), its file kept. FALSE then */
+static boolean slot_load(struct scene_pack_slot *slot)
 {
-	if (pack_load(slot))
-		return;
+	boolean full = FALSE;
+
+	if (pack_load(slot, &full))
+		return TRUE;
+	if (full)
+	{
+		if (!slot->waiting_said)
+			platform_log("scene packs: %s: waits: %s", slot->name, slot->why);
+		slot->waiting_said = TRUE;
+		return FALSE;
+	}
 	platform_log("scene packs: %s: refused: %s", slot->name, slot->why);
 	remove(slot->path);
 	if (!slot->rebuilt)
@@ -608,6 +639,150 @@ static void slot_load(struct scene_pack_slot *slot)
 	else
 	{
 		state_set(slot, _scene_pack_state_failed);
+	}
+	return TRUE;
+}
+
+/* whether a loaded pack may go now: no object made of its tags (an object
+deleted goes at the objects' next update), none of its sounds playing */
+static boolean pack_unused(struct scene_pack_slot const *slot)
+{
+	struct object_iterator iterator;
+	struct object_datum *object;
+	unsigned char *instances;
+	long count, index;
+
+	object_iterator_new(&iterator, _object_mask_all, 0);
+	while ((object = object_iterator_next(&iterator)) != NULL)
+	{
+		long absolute = object->definition_index & 0xFFFF;
+
+		if (object->definition_index != NONE && absolute >= slot->first_index && absolute < slot->first_index + slot->count)
+			return FALSE;
+	}
+	instances = scene_pack_instances(slot->tags, &count);
+	for (index = 0; index < count; index++)
+	{
+		unsigned char const *instance = instances + index * TAG_INSTANCE_BYTES;
+
+		if (*(unsigned long const *)instance == SOUND_DEFINITION_TAG)
+		{
+			struct sound_definition *sound = sound_definition_get((long)*(unsigned long const *)(instance + 12));
+			long range, permutation;
+
+			for (range = 0; range < sound->pitch_ranges.count; range++)
+			{
+				struct sound_pitch_range *pitch_range = TAG_BLOCK_GET_ELEMENT(&sound->pitch_ranges, range,
+					struct sound_pitch_range);
+
+				for (permutation = 0; permutation < pitch_range->permutations.count; permutation++)
+				{
+					if (sound_cache_sound_in_use(TAG_BLOCK_GET_ELEMENT(&pitch_range->permutations, permutation,
+						struct sound_permutation)))
+					{
+						return FALSE;
+					}
+				}
+			}
+		}
+	}
+	return TRUE;
+}
+
+/* the last loaded pack let go (unused: pack_unused), at the top of a frame:
+its pixels and samples out of the caches, its buffers deregistered, the
+table before it put back, its tag cache room and file range given back,
+its slot freed (wanted again, it is loaded again from its file) */
+static void pack_unload(short slot_index)
+{
+	struct scene_pack_slot *slot = &scene_packs.packs[slot_index];
+	unsigned char *instances;
+	long count, index;
+
+	instances = scene_pack_instances(slot->tags, &count);
+	for (index = 0; index < count; index++)
+	{
+		unsigned char const *instance = instances + index * TAG_INSTANCE_BYTES;
+		unsigned long group_tag = *(unsigned long const *)instance;
+		long tag_index = (long)*(unsigned long const *)(instance + 12);
+
+		if (group_tag == BITMAP_GROUP_TAG)
+		{
+			struct bitmap_group *group = bitmap_group_get(tag_index);
+			long bitmap;
+
+			for (bitmap = 0; bitmap < group->bitmaps.count; bitmap++)
+				texture_cache_bitmap_delete(TAG_BLOCK_GET_ELEMENT(&group->bitmaps, bitmap, struct bitmap_data));
+		}
+		else if (group_tag == SOUND_DEFINITION_TAG)
+		{
+			struct sound_definition *sound = sound_definition_get(tag_index);
+			long range, permutation;
+
+			for (range = 0; range < sound->pitch_ranges.count; range++)
+			{
+				struct sound_pitch_range *pitch_range = TAG_BLOCK_GET_ELEMENT(&sound->pitch_ranges, range,
+					struct sound_pitch_range);
+
+				for (permutation = 0; permutation < pitch_range->permutations.count; permutation++)
+					sound_cache_sound_delete(TAG_BLOCK_GET_ELEMENT(&pitch_range->permutations, permutation,
+						struct sound_permutation));
+			}
+		}
+	}
+	tags_header_deregister_vertex_and_index_buffers((struct cache_file_tag_header *)slot->tags);
+	/* (the table before it: the one made for the pack loaded before, or the
+	map's own) */
+	scene_packs.table_count--;
+	cache_files_set_tag_instances(scene_packs.table_count ? scene_packs.tables[scene_packs.table_count - 1] :
+		scene_packs.original_instances, slot->first_index);
+	free(scene_packs.tables[scene_packs.table_count]);
+	scene_packs.tables[scene_packs.table_count] = NULL;
+	if (!scene_packs.table_count)
+	{
+		scene_packs.original_instances = NULL;
+		scene_packs.original_count = 0;
+	}
+	while (__atomic_exchange_n(&scene_packs.read_lock, 1, __ATOMIC_ACQUIRE))
+		SwitchToThread();
+	if (slot->file)
+		fclose(slot->file);
+	slot->file = NULL;
+	__atomic_store_n(&scene_packs.read_lock, 0, __ATOMIC_RELEASE);
+	scene_packs.reserved -= slot->bytes;
+	scene_packs.file_used = slot->file_base;
+	tag_validate_reserve_after_tags(scene_packs.reserved);
+	csmemset(slot->tags, 0xCD, slot->bytes);
+	platform_log("scene packs: %s: let go (%lu KB of the tag cache given back, %lu KB held by packs)", slot->name,
+		slot->bytes / 1024, scene_packs.reserved / 1024);
+	if (slot->recipe)
+		free(slot->recipe);
+	memmove(slot, slot + 1, (size_t)(scene_packs.pack_count - slot_index - 1) * sizeof(*slot));
+	scene_packs.pack_count--;
+	memset(&scene_packs.packs[scene_packs.pack_count], 0, sizeof(*slot));
+}
+
+/* the packs asked to go let go, the last loaded first, while the last one
+loaded is one of them and unused */
+static void packs_release(void)
+{
+	for (;;)
+	{
+		short index, last = NONE;
+
+		for (index = 0; index < scene_packs.pack_count; index++)
+		{
+			struct scene_pack_slot const *slot = &scene_packs.packs[index];
+
+			if (state_get(slot) == _scene_pack_state_loaded &&
+				(last == NONE || slot->first_index > scene_packs.packs[last].first_index))
+			{
+				last = index;
+			}
+		}
+		if (last == NONE || !scene_packs.packs[last].release_wanted || !pack_unused(&scene_packs.packs[last]))
+			return;
+		pack_unload(last);
 	}
 }
 
@@ -632,9 +807,24 @@ short scene_packs_want(
 			return _scene_pack_state_failed;
 		build_thread_start();
 	}
-	/* (one built only, wanted now: loaded as any) */
+	/* (one built only, wanted now: loaded as any; one asked to go kept) */
 	slot->build_only = FALSE;
+	slot->release_wanted = FALSE;
 	return state_get(slot);
+}
+
+void scene_packs_release(
+	char const *name)
+{
+	struct scene_pack_slot *slot = name ? slot_find(name) : NULL;
+
+	if (slot && !slot->release_wanted)
+	{
+		slot->release_wanted = TRUE;
+		/* (one not loaded yet goes at once: never loaded) */
+		if (state_get(slot) == _scene_pack_state_ready)
+			slot->build_only = TRUE;
+	}
 }
 
 short scene_packs_prebuild(
@@ -810,8 +1000,8 @@ boolean scene_packs_load_now(
 			state_set(slot, pack_prepare(slot, room, (unsigned long)(room_end - room)) ? _scene_pack_state_ready :
 				_scene_pack_state_failed);
 		}
-		if (state_get(slot) == _scene_pack_state_ready)
-			slot_load(slot);
+		if (state_get(slot) == _scene_pack_state_ready && !slot_load(slot))
+			break;
 		state = state_get(slot);
 	}
 	build_thread_start();
@@ -865,6 +1055,7 @@ void scene_packs_update(
 	/* (a build takes the whole free room for its scratch: loads wait) */
 	if (scene_packs.thread_running)
 		return;
+	packs_release();
 	for (index = 0; index < scene_packs.pack_count; index++)
 	{
 		struct scene_pack_slot *slot = &scene_packs.packs[index];
@@ -911,6 +1102,7 @@ void scene_packs_unloaded(
 	scene_packs.original_instances = NULL;
 	scene_packs.original_count = 0;
 	scene_packs.table_count = 0;
+	scene_packs.next_salt = 0;
 	tag_validate_reserve_after_tags(0);
 }
 
