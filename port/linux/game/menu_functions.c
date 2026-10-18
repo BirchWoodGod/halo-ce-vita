@@ -48,6 +48,8 @@ halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
 #include "tag_files/tag_groups.h"
 #include "text/text_group.h"
 
+#include "interface/player_ui.h"
+#include "saved games/player_profile.h"
 #include "halo_menus.h"
 #include "../src/lang.h"
 #include "../src/p2p.h"
@@ -134,6 +136,7 @@ enum
 	_input_password_update,
 	_input_setup_update,
 	_input_code_update,
+	_input_h3_nameplate,
 };
 
 /* what a line of typing is for */
@@ -313,6 +316,47 @@ static void text_show(struct widget_instance *widget, char const *text)
 	if (!widget->parameters.text_box.text)
 		return;
 	memcpy(widget->parameters.text_box.text, characters, length * sizeof(wchar_t));
+}
+
+/* (the Halo 3 menus' nameplate, port h3 nameplate) the first local player's
+active profile's name; with none yet (a first start), the player's name
+(network.player_name: on the Vita its user name), else "Player". Not the
+game's "get active plyr profile name", which asserts without a profile */
+static void h3_nameplate_update(struct widget_instance *widget)
+{
+	long profile_index = player_ui_get_active_player_profile_index(0);
+	struct player_profile profile;
+	char name[64];
+	int length = 0, index;
+
+	name[0] = 0;
+	if (profile_index != NONE && player_profile_get(profile_index, &profile))
+	{
+		for (index = 0; index < MAXIMUM_PLAYER_PROFILE_NAME_LENGTH && profile.player_name[index] &&
+			length < (int)sizeof(name) - 4; index++)
+		{
+			unsigned long code = (unsigned short)profile.player_name[index];
+
+			if (code < 0x80)
+				name[length++] = (char)code;
+			else if (code < 0x800)
+			{
+				name[length++] = (char)(0xC0 | (code >> 6));
+				name[length++] = (char)(0x80 | (code & 0x3F));
+			}
+			else
+			{
+				name[length++] = (char)(0xE0 | (code >> 12));
+				name[length++] = (char)(0x80 | ((code >> 6) & 0x3F));
+				name[length++] = (char)(0x80 | (code & 0x3F));
+			}
+		}
+		name[length] = 0;
+	}
+	if (!name[0])
+		snprintf(name, sizeof(name), "%s", getenv("HALO_NET_PLAYER_NAME") && getenv("HALO_NET_PLAYER_NAME")[0] ?
+			getenv("HALO_NET_PLAYER_NAME") : "Player");
+	text_show(widget, name);
 }
 
 /* a text box's string of its string list */
@@ -1074,6 +1118,9 @@ void pc_menu_game_data_function_invoke(
 		break;
 	case _input_code_update:
 		code_update(widget);
+		break;
+	case _input_h3_nameplate:
+		h3_nameplate_update(widget);
 		break;
 	default:
 		break;

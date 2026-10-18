@@ -171,13 +171,13 @@ for case in $cases; do
 	h3broken)
 		rm -rf "$out/h3menus"
 		cp -r "$HALO_MENUS_FOLDER" "$out/h3menus"
-		sed -i 's/probe\.png/no_such_picture.png/' "$out/h3menus/halo3/probe.xml"
+		sed -i "s/column\.png/no_such_picture.png/" "$out/h3menus/halo3/main.xml"
 		HALO_MENUS_FOLDER="$out/h3menus/" run h3broken "$menus_data" 20 "$h3pad" HALO_MENU_STYLE=halo3
 		check_h3 h3broken classic
 		grep -aq "menus: Halo 3 set left out" "$out/h3broken/run.log" || fail h3broken "no line said the Halo 3 set was left out" ;;
 	h3style)
 		run h3style "$menus_data" 30 "wait:150:2000 down:150:800 a wait:150:5000 b wait:150:4000" \
-			HALO_MENU_STYLE=classic "HALO_TEST_COMMANDS=L150:@set HALO_MENU_STYLE halo3"
+			HALO_MENU_STYLE=classic "HALO_TEST_COMMANDS=150:@set HALO_MENU_STYLE halo3"
 		grep -aq "ui: screen ui.shell.main_menu.main_menu" "$out/h3style/run.log" || fail h3style "the Xbox's main menu was not first"
 		check_h3 h3style halo3 ;;
 	*)

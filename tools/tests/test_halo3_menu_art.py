@@ -15,16 +15,25 @@ from PIL import Image
 HERE = os.path.dirname(os.path.abspath(__file__))
 GENERATOR = os.path.join(HERE, '..', 'halo3_menu_art.py')
 
+# (the menus draw a picture 1:1 and crop it to its widget, or stretch it when
+# the widget is larger: ui_widget.c draw_bitmap_in_rect; so each is at most its
+# widget's size, in the 640x480 screen, and a power of two)
 EXPECTED = {
-    'column.png': (256, 256),
-    'panel.png': (256, 256),
-    'item_on.png': (512, 32),
-    'row_on.png': (512, 32),
-    'strip.png': (512, 32),
-    'rule.png': (512, 2),
-    'nameplate.png': (512, 48),
-    'glyphs.png': (320, 64),
-    'title_halo.png': (512, 128),
+    'column.png': (64, 64),
+    'haze.png': (64, 64),
+    'panel.png': (64, 64),
+    'item_on.png': (128, 16),
+    'item_off.png': (128, 16),
+    'row_on.png': (128, 16),
+    'strip.png': (64, 16),
+    'rule.png': (128, 2),
+    'nameplate.png': (256, 16),
+    'glyph_cross.png': (16, 16),
+    'glyph_circle.png': (16, 16),
+    'glyph_triangle.png': (16, 16),
+    'glyph_square.png': (16, 16),
+    'glyph_start.png': (16, 16),
+    'title_halo.png': (256, 64),
 }
 
 
@@ -57,15 +66,15 @@ class ArtTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             generate(folder)
             with Image.open(os.path.join(folder, 'item_on.png')) as image:
-                r, g, b, a = image.getpixel((10, 16))
+                r, g, b, a = image.getpixel((5, 8))
             for got, want in zip((r, g, b, a), (184, 116, 58, 255)):
                 self.assertLessEqual(abs(got - want), 3)
             with Image.open(os.path.join(folder, 'panel.png')) as image:
-                r, g, b, a = image.getpixel((128, 0))
+                r, g, b, a = image.getpixel((32, 0))
             for got, want in zip((r, g, b, a), (27, 41, 70, 242)):
                 self.assertLessEqual(abs(got - want), 3)
             with Image.open(os.path.join(folder, 'row_on.png')) as image:
-                self.assertEqual(image.getpixel((511, 16))[3], 0)
+                self.assertEqual(image.getpixel((127, 8))[3], 0)
 
 
 if __name__ == '__main__':

@@ -348,6 +348,7 @@ static char const *const port_game_data_input_names[] =
 {
 	"unwired",
 	"port mp update desc", "port browser update", "port password update", "port setup update", "port code update",
+	"port h3 nameplate",
 };
 
 static struct
@@ -2053,12 +2054,70 @@ void menu_tags_unloaded(
 		menu_tags_release();
 }
 
+/* (debug: HALO_MENUS_DUMP=<a screen's tag path>) that screen's widget tree as
+ui.map has it, logged as it opens: each widget's type, bounds, picture,
+text, data inputs, event handlers (what they run and open) and children -
+what a Halo 3 screen that stands for it must do the same */
+static char const *dump_name(struct tag_reference const *reference)
+{
+	return reference->index != NONE ? tag_get_name(reference->index) : "-";
+}
+
+static void menu_tags_dump(long tag_index, int depth)
+{
+	struct menu_widget_definition *definition = tag_get(UI_WIDGET_DEFINITION_TAG, tag_index);
+	long index;
+
+	if (!definition || depth > 6)
+		return;
+	platform_log("menus dump: %*s%s type %d at %d,%d-%d,%d flags %08lx bitmap %s text %s[%d] font %s",
+		depth * 2, "", tag_get_name(tag_index), (int)definition->type, (int)definition->bounds.x0,
+		(int)definition->bounds.y0, (int)definition->bounds.x1, (int)definition->bounds.y1,
+		(unsigned long)definition->flags, dump_name(&definition->background_bitmap),
+		dump_name(&definition->text_label_string_list), (int)definition->string_list_index,
+		dump_name(&definition->text_font));
+	for (index = 0; index < definition->game_data_inputs.count; index++)
+	{
+		struct ui_widget_game_data_input_reference *input = TAG_BLOCK_GET_ELEMENT(&definition->game_data_inputs, index,
+			struct ui_widget_game_data_input_reference);
+		long function = input->function;
+
+		platform_log("menus dump: %*s  data input %ld (%s)", depth * 2, "", function,
+			function >= PC_MENU_FUNCTION_BASE ? pc_menu_game_data_input_name(function - PC_MENU_FUNCTION_BASE) :
+			function >= 0 && function < (long)NUMBEROF(game_data_input_names) ? game_data_input_names[function] : "?");
+	}
+	for (index = 0; index < definition->event_handlers.count; index++)
+	{
+		struct ui_widget_event_handler_reference *handler = TAG_BLOCK_GET_ELEMENT(&definition->event_handlers, index,
+			struct ui_widget_event_handler_reference);
+		char const *function = handler->function >= PC_MENU_FUNCTION_BASE ?
+			pc_menu_function_name(handler->function - PC_MENU_FUNCTION_BASE) :
+			ui_widget_event_handler_function_name(handler->function);
+
+		platform_log("menus dump: %*s  on event %d flags %08lx run %d (%s) widget %s script \"%.32s\"", depth * 2, "",
+			(int)handler->event_type, (unsigned long)handler->flags, (int)handler->function, function ? function : "-",
+			dump_name(&handler->widget_tag), handler->script);
+	}
+	for (index = 0; index < definition->child_widgets.count; index++)
+	{
+		struct ui_widget_child_reference *child = TAG_BLOCK_GET_ELEMENT(&definition->child_widgets, index,
+			struct ui_widget_child_reference);
+
+		platform_log("menus dump: %*s  child at %d,%d flags %08lx:", depth * 2, "", (int)child->horizontal_offset,
+			(int)child->vertical_offset, (unsigned long)child->flags);
+		if (child->widget_tag.index != NONE)
+			menu_tags_dump(child->widget_tag.index, depth + 1);
+	}
+}
+
 /* (ui_widget_load_by_name_or_tag) a screen the game opens: ours in place of
 the Xbox's Multiplayer screen (the Halo PC pictures and text read the first
 time), and those menu_functions.c's flows replace; else the tag itself */
 long menu_tags_screen(
 	long tag_index)
 {
+	if (tag_index != NONE && getenv("HALO_MENUS_DUMP") && !strcmp(getenv("HALO_MENUS_DUMP"), tag_get_name(tag_index)))
+		menu_tags_dump(tag_index, 0);
 	if (!menu_tags.loaded || tag_index == NONE)
 		return tag_index;
 	/* (Menu style Halo 3: the Halo 3 set's screen for the Xbox's, its

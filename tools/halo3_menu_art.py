@@ -50,16 +50,26 @@ def alpha(value):
 
 def column():
     # Halo 3's main-menu column: navy, a little lighter at the top
-    return vertical_gradient((256, 256), [
+    return vertical_gradient((64, 64), [
         (0.0, (20, 40, 78, alpha(.78))),
         (0.6, (14, 28, 58, alpha(.84))),
         (1.0, (8, 16, 36, alpha(.90))),
     ])
 
 
+def haze():
+    # Halo 3's blue cast over the menu's 3D scene: full screen (a widget as
+    # wide as the 640 columns stretches over the wide screen too), deeper at
+    # the bottom
+    return vertical_gradient((64, 64), [
+        (0.0, (16, 34, 84, alpha(.50))),
+        (1.0, (8, 18, 52, alpha(.64))),
+    ])
+
+
 def panel():
     # the lobby and settings panel (Halo Online's window gradient)
-    return vertical_gradient((256, 256), [
+    return vertical_gradient((64, 64), [
         (0.0, (27, 41, 70, alpha(.95))),
         (0.2, (24, 39, 69, alpha(.90))),
         (1.0, (6, 16, 37, alpha(.90))),
@@ -68,20 +78,26 @@ def panel():
 
 def item_on():
     # the main menu's selection: Halo 3's solid orange bar, a light edge on top
-    image = horizontal_gradient((512, 32), [
+    image = horizontal_gradient((128, 16), [
         (0.0, (184, 116, 58, 255)),
         (0.6, (168, 104, 58, 255)),
         (1.0, (138, 90, 58, 255)),
     ])
     draw = ImageDraw.Draw(image)
-    draw.line([(0, 0), (511, 0)], fill=(255, 220, 180, alpha(.35)))
-    draw.line([(0, 31), (511, 31)], fill=(0, 0, 0, alpha(.35)))
+    draw.line([(0, 0), (127, 0)], fill=(255, 220, 180, alpha(.35)))
+    draw.line([(0, 15), (127, 15)], fill=(0, 0, 0, alpha(.35)))
     return image
+
+
+def item_off():
+    # a list item's first frame (not focused): clear; the game shows the
+    # second, item_on, on the focused one
+    return Image.new('RGBA', (128, 16), (0, 0, 0, 0))
 
 
 def row_on():
     # a lobby or settings row's selection: orange fading out by two thirds
-    return horizontal_gradient((512, 32), [
+    return horizontal_gradient((128, 16), [
         (0.0, (200, 120, 40, alpha(.55))),
         (0.66, (200, 120, 40, 0)),
         (1.0, (200, 120, 40, 0)),
@@ -89,11 +105,11 @@ def row_on():
 
 
 def strip():
-    return Image.new('RGBA', (512, 32), (2, 5, 10, alpha(.88)))
+    return Image.new('RGBA', (64, 16), (2, 5, 10, alpha(.88)))
 
 
 def rule():
-    image = horizontal_gradient((512, 2), [
+    image = horizontal_gradient((128, 2), [
         (0.0, (160, 180, 205, 0)),
         (0.2, (160, 180, 205, alpha(.55))),
         (0.8, (160, 180, 205, alpha(.55))),
@@ -103,17 +119,17 @@ def rule():
 
 
 def nameplate():
-    # white, for the widget to tint with the profile's colour: the bar, the
-    # emblem square at the left and the rank square at the right darker
-    image = horizontal_gradient((512, 48), [
-        (0.0, (238, 238, 238, 255)),
-        (0.8, (255, 255, 255, 255)),
-        (1.0, (205, 205, 205, 255)),
+    # Halo 3's lobby nameplate: a green bar (the default player colour), the
+    # emblem square at the left lighter and the rank square at the right darker
+    image = horizontal_gradient((256, 16), [
+        (0.0, (169, 197, 58, 255)),
+        (0.8, (185, 210, 74, 255)),
+        (1.0, (143, 168, 58, 255)),
     ])
     draw = ImageDraw.Draw(image)
-    draw.rectangle([0, 0, 47, 47], fill=(190, 190, 190, 255))
-    draw.rectangle([464, 0, 511, 47], fill=(160, 160, 160, 255))
-    draw.rectangle([0, 0, 511, 47], outline=(255, 255, 255, alpha(.6)))
+    draw.rectangle([0, 0, 15, 15], fill=(205, 222, 140, 255))
+    draw.rectangle([240, 0, 255, 15], fill=(120, 140, 48, 255))
+    draw.rectangle([0, 0, 255, 15], outline=(255, 255, 255, alpha(.35)))
     return image
 
 
@@ -157,55 +173,58 @@ def glyph(kind):
     else:  # start: the Vita's START, a small play triangle
         draw.polygon([(centre - s * .55, centre - s * .8), (centre + s * .85, centre), (centre - s * .55, centre + s * .8)],
                      fill=colour)
-    return image.resize((64, 64), Image.Resampling.LANCZOS)
-
-
-def glyphs():
-    sheet = Image.new('RGBA', (320, 64), (0, 0, 0, 0))
-    for index, kind in enumerate(('cross', 'circle', 'triangle', 'square', 'start')):
-        sheet.paste(glyph(kind), (index * 64, 0))
-    return sheet
+    return image.resize((16, 16), Image.Resampling.LANCZOS)
 
 
 def title_halo():
     # HALO in a soft blue glow, COMBAT EVOLVED under it (Halo 3's title look)
-    image = Image.new('RGBA', (512, 128), (0, 0, 0, 0))
-    big = ImageFont.truetype(os.path.join(FONTS, 'SairaSemiCondensed-Medium.ttf'), 84)
-    small = ImageFont.truetype(os.path.join(FONTS, 'SairaSemiCondensed-Regular.ttf'), 17)
+    # (drawn at four times and scaled down: the menus draw a picture 1:1,
+    # 256x64 in the 640x480 screen)
+    scale = 4
+    image = Image.new('RGBA', (256 * scale, 64 * scale), (0, 0, 0, 0))
+    big = ImageFont.truetype(os.path.join(FONTS, 'SairaSemiCondensed-Medium.ttf'), 42 * scale)
+    small = ImageFont.truetype(os.path.join(FONTS, 'SairaSemiCondensed-Regular.ttf'), 9 * scale)
     text = Image.new('RGBA', image.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(text)
-    spacing = 22
-    x = 512
+    spacing = 11 * scale
+    width = 256 * scale
     widths = [draw.textlength(c, font=big) for c in 'HALO']
     total = sum(widths) + spacing * 3
-    x = (512 - total) / 2
+    x = (width - total) / 2
     for c, w in zip('HALO', widths):
-        draw.text((x, -6), c, font=big, fill=(207, 227, 245, 255))
+        draw.text((x, -4 * scale), c, font=big, fill=(207, 227, 245, 255))
         x += w + spacing
     sub = 'COMBAT EVOLVED'
-    sub_spacing = 9
+    sub_spacing = 4.5 * scale
     sub_widths = [draw.textlength(c, font=small) for c in sub]
     sub_total = sum(sub_widths) + sub_spacing * (len(sub) - 1)
-    x = (512 - sub_total) / 2
+    x = (width - sub_total) / 2
     for c, w in zip(sub, sub_widths):
-        draw.text((x, 98), c, font=small, fill=(159, 182, 204, 255))
+        draw.text((x, 49 * scale), c, font=small, fill=(159, 182, 204, 255))
         x += w + sub_spacing
-    glow = text.split()[3].filter(ImageFilter.GaussianBlur(7))
+    glow = text.split()[3].filter(ImageFilter.GaussianBlur(3.5 * scale))
     halo = Image.new('RGBA', image.size, (140, 200, 255, 0))
     halo.putalpha(glow.point(lambda value: round(value * .55)))
     image = Image.alpha_composite(image, halo)
-    return Image.alpha_composite(image, text)
+    image = Image.alpha_composite(image, text)
+    return image.resize((256, 64), Image.Resampling.LANCZOS)
 
 
 ART = {
     'column.png': column,
+    'haze.png': haze,
     'panel.png': panel,
     'item_on.png': item_on,
+    'item_off.png': item_off,
     'row_on.png': row_on,
     'strip.png': strip,
     'rule.png': rule,
     'nameplate.png': nameplate,
-    'glyphs.png': glyphs,
+    'glyph_cross.png': lambda: glyph('cross'),
+    'glyph_circle.png': lambda: glyph('circle'),
+    'glyph_triangle.png': lambda: glyph('triangle'),
+    'glyph_square.png': lambda: glyph('square'),
+    'glyph_start.png': lambda: glyph('start'),
     'title_halo.png': title_halo,
 }
 
