@@ -35,15 +35,19 @@ art is this folder's own (tools/halo3_menu_art.py). -->
 		<string text="START SOLO GAME"/>
 		<string text="CAMPAIGN"/>
 		<string text="MULTIPLAYER"/>
-		<string text="ONLINE"/>
+		<string text="FORGE"/>
 		<string text="Settings"/>
 		<string text="1 Player"/>
 		<string text="ONLINE NOW"/>
+		<string text="FILE SHARE"/>
+		<string text="Build your own maps with anything from\nany map. It comes in a later update."/>
+		<string text="Save your maps and games and share them\nwith friends. It comes in a later update."/>
+		<string text="Back"/>
 	</strings>
 
 	<!-- the items: START SOLO GAME and CAMPAIGN do what the Xbox's "load campaign" does (a new
 	profile first if there is none); MULTIPLAYER the Xbox's multiplayer screen (OpenCE's stands for
-	it); ONLINE the server browser, as OpenCE's Multiplayer screen's Internet -->
+	it, with the server browser); FORGE and FILE SHARE say they come later, until they do -->
 	<widget name="h3/main/solo" type="text" width="190" height="20" bitmap="h3/item" font="ui\small_ui" color="#FFE6ECF2" text_x="8" text_y="3" string_list="h3/main_items" string_index="0">
 		<on event="a start" run="new game if no plyr profiles" open="ui\shell\main_menu\load_campaign_player_profile" branch="true" label="load_campaign"/>
 	</widget>
@@ -53,14 +57,18 @@ art is this folder's own (tools/halo3_menu_art.py). -->
 	<widget name="h3/main/multiplayer" type="text" width="190" height="20" bitmap="h3/item" font="ui\small_ui" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/main_items" string_index="2">
 		<on event="a start" open="ui\shell\main_menu\multiplayer_type_select\multiplayer_type_select_screen" label="multiplayer"/>
 	</widget>
-	<widget name="h3/main/online" type="text" width="190" height="20" bitmap="h3/item" font="ui\small_ui" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/main_items" string_index="3">
-		<on event="a start" run="port mp require online" open="browser/screen" otherwise="mp/offline"/>
+	<widget name="h3/main/forge" type="text" width="190" height="20" bitmap="h3/item" font="ui\small_ui" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/main_items" string_index="3">
+		<on event="a start" open="h3/soon/forge"/>
+	</widget>
+	<widget name="h3/main/fileshare" type="text" width="190" height="20" bitmap="h3/item" font="ui\small_ui" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/main_items" string_index="7">
+		<on event="a start" open="h3/soon/fileshare"/>
 	</widget>
 	<widget name="h3/main/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<child widget="h3/main/solo" x="0" y="0"/>
 		<child widget="h3/main/campaign" x="0" y="25"/>
 		<child widget="h3/main/multiplayer" x="0" y="45"/>
-		<child widget="h3/main/online" x="0" y="65"/>
+		<child widget="h3/main/forge" x="0" y="65"/>
+		<child widget="h3/main/fileshare" x="0" y="85"/>
 	</widget>
 
 	<widget name="h3/main/haze" left="0" top="0" width="640" height="480" bitmap="h3/haze"/>
@@ -101,6 +109,48 @@ art is this folder's own (tools/halo3_menu_art.py). -->
 		<child widget="h3/main/server_1"/>
 		<child widget="h3/main/server_2"/>
 		<child widget="h3/main/server_3"/>
+	</widget>
+
+	<!-- "coming later" panels for FORGE and FILE SHARE: Halo 3's dialog, over the haze -->
+	<bitmap name="h3/panel">
+		<frame png="halo3/panel.png" width="64" height="64"/>
+	</bitmap>
+	<bitmap name="h3/strip">
+		<frame png="halo3/strip.png" width="64" height="16"/>
+	</bitmap>
+	<bitmap name="h3/glyph_circle">
+		<frame png="halo3/glyph_circle.png" width="16" height="16"/>
+	</bitmap>
+	<widget name="h3/soon/panel" left="120" top="150" width="400" height="160" bitmap="h3/panel"/>
+	<widget name="h3/soon/strip" left="120" top="290" width="400" height="20" bitmap="h3/strip"/>
+	<widget name="h3/soon/rule" left="120" top="180" width="400" height="2" bitmap="h3/rule"/>
+	<widget name="h3/soon/back_glyph" left="132" top="292" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/soon/back" type="text" left="152" top="291" width="120" height="18" font="ui\small_ui" color="#FFEEF2F6" text_y="1" string_list="h3/main_items" string_index="10"/>
+	<widget name="h3/soon/forge_title" type="text" left="132" top="156" width="376" height="22" font="ui\large_ui" color="#FFF2F6FA" string_list="h3/main_items" string_index="3"/>
+	<widget name="h3/soon/forge_text" type="text" left="132" top="194" width="376" height="80" font="ui\small_ui" color="#FFCFD9E3" string_list="h3/main_items" string_index="8"/>
+	<widget name="h3/soon/fileshare_title" type="text" left="132" top="156" width="376" height="22" font="ui\large_ui" color="#FFF2F6FA" string_list="h3/main_items" string_index="7"/>
+	<widget name="h3/soon/fileshare_text" type="text" left="132" top="194" width="376" height="80" font="ui\small_ui" color="#FFCFD9E3" string_list="h3/main_items" string_index="9"/>
+	<widget name="h3/soon/forge" flags="pass_unhandled_to_focused_child">
+		<on event="b back" back="true"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/soon/panel"/>
+		<child widget="h3/soon/rule"/>
+		<child widget="h3/soon/strip"/>
+		<child widget="h3/soon/forge_title"/>
+		<child widget="h3/soon/forge_text"/>
+		<child widget="h3/soon/back_glyph"/>
+		<child widget="h3/soon/back"/>
+	</widget>
+	<widget name="h3/soon/fileshare" flags="pass_unhandled_to_focused_child">
+		<on event="b back" back="true"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/soon/panel"/>
+		<child widget="h3/soon/rule"/>
+		<child widget="h3/soon/strip"/>
+		<child widget="h3/soon/fileshare_title"/>
+		<child widget="h3/soon/fileshare_text"/>
+		<child widget="h3/soon/back_glyph"/>
+		<child widget="h3/soon/back"/>
 	</widget>
 
 	<widget name="h3/main/screen" flags="pass_unhandled_to_focused_child">
