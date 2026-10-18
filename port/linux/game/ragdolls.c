@@ -89,12 +89,13 @@ m; a local player's own, which the camera follows, as the game threw it -,
 and the blow that killed it
 (object_damage_aftermath) adds to that: an explosion throws each particle
 away from its centre, the nearest the most; a shot or a blow pushes the
-particle nearest its line (at least 1.7 m/s, the mod's); a melee blow (the
-damage category melee: a punch, a rifle butt, a plasma sword) throws the
-whole body along it at 6 m/s or more, a little upward, the part nearest the
-line hardest. A body killed by a shot or a blow first follows its death
-animation for a quarter of a second, let go of a little more each tick, so
-the game's death reactions still start the fall; one killed by an explosion
+particle nearest its line (at least 3.5 m/s) and the one that kills knocks
+the whole body back (3.5 to 6 m/s); a melee blow (the damage category
+melee: a punch, a rifle butt, a plasma sword) throws the whole body along it
+at 12 m/s or more, a little upward, the part nearest the line hardest. A
+body killed by a shot or a blow first follows its death animation, lightly,
+for an eighth of a second, let go of a little more each tick, so the game's
+death reactions still start the fall; one killed by an explosion
 or a melee blow is thrown at once. Where the game
 has the body (thrown further) does not bound the ragdoll: the render finds a
 ragdoll in the cluster it lies in (render_ragdolls_find), not only in the
@@ -125,7 +126,8 @@ ragdoll's rig too; =3 every tenth tick of each awake one, its particle that
 moved most. main.c's "@ragdoll ..." test commands
 (port/vita/tests/run_ragdolls_test.sh): "boom [count] [range]" a grenade's
 explosion beside the nearest living characters, "punch [count] [range]" a
-melee blow from the player that kills each, "kill [count] [range]"
+melee blow from the player that kills each, "shoot [count] [range]" an
+assault rifle bullet from the player that kills each, "kill [count] [range]"
 kills them outright, "stats" and "check" log what the ragdolls are and cost,
 "where" where each is.
 */
@@ -220,8 +222,9 @@ enum
 	this long */
 	RAGDOLL_ROOM_TICKS = 30,
 	RAGDOLL_ROOM_STILL_TICKS = 3,
-	/* following the death animation (a shot's or a blow's death) */
-	RAGDOLL_FOLLOW_TICKS = 8,
+	/* following the death animation (a shot's or a blow's death; short, so
+	the shot's knock back shows) */
+	RAGDOLL_FOLLOW_TICKS = 4,
 	/* a remembered plane, kept this many ticks without touching it */
 	RAGDOLL_PLANE_TICKS = 20,
 	/* kept, not drawn for this many frames: let go first */
@@ -293,17 +296,26 @@ up to about 40 degrees) */
 #define RAGDOLL_TOUCHING 0.002f
 /* a plane is forgotten once the particle is this far from where it met it */
 #define RAGDOLL_PLANE_REACH 0.12f
-/* how hard a body killed by a shot follows its death animation at first */
-#define RAGDOLL_FOLLOW_STRENGTH 0.35f
-/* a shot's least push (1.7 m/s, the mod's), world units a tick */
-#define RAGDOLL_SHOT_SPEED (1.7f / 3.048f / TICKS_PER_SECOND)
-/* a melee blow's least push (6 m/s), world units a tick: the whole body
-thrown along it (the damage category melee, ai.c's _damage_category_melee) */
-#define RAGDOLL_MELEE_SPEED (6.0f / 3.048f / TICKS_PER_SECOND)
+/* how hard a body killed by a shot follows its death animation at first
+(lightly: the shot's knock back shows) */
+#define RAGDOLL_FOLLOW_STRENGTH 0.2f
+/* a shot's least push (3.5 m/s; the mod's 1.7 barely moved a limb), world
+units a tick */
+#define RAGDOLL_SHOT_SPEED (3.5f / 3.048f / TICKS_PER_SECOND)
+/* the shot that kills knocks the whole body back along it, a little
+upward: at least 3.5 m/s, at most 6 (a shotgun's or a sniper's own push) */
+#define RAGDOLL_SHOT_KNOCKBACK (3.5f / 3.048f / TICKS_PER_SECOND)
+#define RAGDOLL_SHOT_KNOCKBACK_SCALE 0.5f
+/* a melee blow's least push (12 m/s: a Spartan's punch throws a grunt
+some way), world units a tick: the whole body thrown along it (the damage
+category melee, ai.c's _damage_category_melee) */
+#define RAGDOLL_MELEE_SPEED (12.0f / 3.048f / TICKS_PER_SECOND)
 #define RAGDOLL_DAMAGE_CATEGORY_MELEE 6
 /* the most an impulse adds to a particle (8 m/s; the mod's 12 throws the
-whole body, which the game has already thrown here) */
+whole body, which the game has already thrown here); a melee blow's whole
+body throw, 14 */
 #define RAGDOLL_MAXIMUM_IMPULSE (8.0f / 3.048f / TICKS_PER_SECOND)
+#define RAGDOLL_MELEE_MAXIMUM (14.0f / 3.048f / TICKS_PER_SECOND)
 /* a ragdoll this far from its body's root node is let go (world units:
 150 m; a blast throws the game's body 40 m and more, its ragdoll a few:
 only a body put elsewhere) */
@@ -1434,7 +1446,7 @@ static void ragdoll_push(
 	real speed)
 {
 	/* (the step's motion is the tick's split in substeps) */
-	real per_step = MIN(speed, RAGDOLL_MAXIMUM_IMPULSE) / RAGDOLL_SUBSTEPS;
+	real per_step = MIN(speed, RAGDOLL_MELEE_MAXIMUM) / RAGDOLL_SUBSTEPS;
 
 	particle->previous.x -= direction->i * per_step;
 	particle->previous.y -= direction->j * per_step;
@@ -1442,11 +1454,13 @@ static void ragdoll_push(
 }
 
 /* a blow: an explosion throws each particle from its centre, the nearest
-the most, a little upward; a shot or a blow the particle nearest its line,
-and its neighbours half as much */
+the most, a little upward; a melee blow the whole body along it; a shot the
+particle nearest its line, and its neighbours half as much, and the shot
+that kills (killing) the whole body back too */
 static void ragdoll_apply_note(
 	struct ragdoll *ragdoll,
-	struct ragdoll_damage_note const *note)
+	struct ragdoll_damage_note const *note,
+	boolean killing)
 {
 	short index;
 
@@ -1501,7 +1515,8 @@ static void ragdoll_apply_note(
 	{
 		short nearest = NONE;
 		real nearest_distance = REAL_MAX;
-		real speed = MAX(note->speed, note->melee ? RAGDOLL_MELEE_SPEED : RAGDOLL_SHOT_SPEED);
+		real speed = note->melee ? MAX(note->speed, RAGDOLL_MELEE_SPEED) :
+			MIN(MAX(note->speed, RAGDOLL_SHOT_SPEED), RAGDOLL_MAXIMUM_IMPULSE);
 
 		for (index = 0; index < ragdoll->particle_count; index++)
 		{
@@ -1529,7 +1544,7 @@ static void ragdoll_apply_note(
 			throw_direction.k += 0.3f;
 			ragdoll_normalize(&throw_direction);
 			for (index = 0; index < ragdoll->particle_count; index++)
-				ragdoll_push(&ragdoll->particles[index], &throw_direction, speed * 0.8f);
+				ragdoll_push(&ragdoll->particles[index], &throw_direction, speed * 0.85f);
 			ragdoll_push(&ragdoll->particles[nearest], &throw_direction, speed * 0.25f);
 			return;
 		}
@@ -1538,6 +1553,17 @@ static void ragdoll_apply_note(
 		{
 			if (ragdoll->particles[index].parent == nearest || ragdoll->particles[nearest].parent == index)
 				ragdoll_push(&ragdoll->particles[index], &note->direction, speed * 0.5f);
+		}
+		if (killing)
+		{
+			real_vector3d back = note->direction;
+			real knockback = PIN(note->speed * RAGDOLL_SHOT_KNOCKBACK_SCALE, RAGDOLL_SHOT_KNOCKBACK,
+				RAGDOLL_LAUNCH_SPEED);
+
+			back.k += 0.25f;
+			ragdoll_normalize(&back);
+			for (index = 0; index < ragdoll->particle_count; index++)
+				ragdoll_push(&ragdoll->particles[index], &back, knockback);
 		}
 	}
 }
@@ -1769,7 +1795,7 @@ static boolean ragdoll_start(
 		particle->previous.z = particle->position.z - velocity.k / RAGDOLL_SUBSTEPS;
 	}
 	if (note)
-		ragdoll_apply_note(ragdoll, note);
+		ragdoll_apply_note(ragdoll, note, TRUE);
 	ragdoll->follow_ticks = note && (note->explosion || note->melee) ? 0 : RAGDOLL_FOLLOW_TICKS;
 	ragdoll->center = object->object.bounding_sphere_center;
 	ragdoll->radius = object->object.bounding_sphere_radius;
@@ -2543,7 +2569,7 @@ void ragdolls_note_damage(
 				platform_log("ragdolls: %08lx (%s) woken by a blow", (unsigned long)object_index,
 					ragdoll_object_name(object_index));
 		}
-		ragdoll_apply_note(ragdoll, note);
+		ragdoll_apply_note(ragdoll, note, FALSE);
 		/* (the whole body thrown as object_damage_aftermath throws it -
 		a little upward -, no faster than a body's launch) */
 		{
@@ -3036,7 +3062,7 @@ void ragdolls_test_command(
 				object && TEST_FLAG(object->object.flags, _object_invisible_bit) ? "invisible" : "visible");
 		}
 	}
-	else if (!strcmp(word, "boom") || !strcmp(word, "kill") || !strcmp(word, "punch"))
+	else if (!strcmp(word, "boom") || !strcmp(word, "kill") || !strcmp(word, "punch") || !strcmp(word, "shoot"))
 	{
 		long targets[RAGDOLL_SLOTS * 2];
 		long player_index;
@@ -3057,6 +3083,32 @@ void ragdolls_test_command(
 				if (damage_effect_definition_get(tag_index)->damage.category != RAGDOLL_DAMAGE_CATEGORY_MELEE)
 					continue;
 				if (strstr(tag_get_name(tag_index), "melee"))
+				{
+					effect = tag_index;
+					break;
+				}
+				if (effect == NONE)
+					effect = tag_index;
+			}
+		}
+		else if (!strcmp(word, "shoot"))
+		{
+			struct tag_iterator tags;
+			long tag_index;
+
+			/* (an assault rifle bullet, else any bullet) */
+			tag_iterator_new(&tags, DAMAGE_EFFECT_DEFINITION_TAG);
+			while ((tag_index = tag_iterator_next(&tags)) != NONE)
+			{
+				char const *name = tag_get_name(tag_index);
+				struct damage_effect_definition const *definition = damage_effect_definition_get(tag_index);
+
+				if (definition->damage.category == RAGDOLL_DAMAGE_CATEGORY_MELEE || definition->cutoff_radius > 0.f ||
+					!strstr(name, "bullet"))
+				{
+					continue;
+				}
+				if (strstr(name, "assault rifle"))
 				{
 					effect = tag_index;
 					break;
@@ -3094,7 +3146,7 @@ void ragdolls_test_command(
 
 			if (!target)
 				continue;
-			if (effect != NONE && !strcmp(word, "punch"))
+			if (effect != NONE && (!strcmp(word, "punch") || !strcmp(word, "shoot")))
 			{
 				struct damage_data damage;
 				struct player_datum *player = player_index != NONE ? player_get(player_index) : NULL;
@@ -3123,8 +3175,9 @@ void ragdolls_test_command(
 				scenario_location_from_point(&damage.location, &damage.origin);
 				damage.scale = 1.f;
 				damage.multiplier = 100.f;
-				platform_log("ragdolls test: %s punches %08lx (%s)", tag_get_name(effect),
-					(unsigned long)targets[index], ragdoll_object_name(targets[index]));
+				platform_log("ragdolls test: %s %s %08lx (%s)", tag_get_name(effect),
+					!strcmp(word, "punch") ? "punches" : "shoots", (unsigned long)targets[index],
+					ragdoll_object_name(targets[index]));
 				object_cause_damage(&damage, targets[index], NONE, NONE, NONE, NULL);
 			}
 			else if (effect != NONE)

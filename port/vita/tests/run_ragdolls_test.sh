@@ -51,7 +51,7 @@ data=${HALO_TEST_DATA:-$root/../data2276}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_ragdolls_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-b30 b30-punch b30-cap b30-revert b30-map b30-off b30-live a10 bloodgulch}
+cases=${*:-b30 b30-punch b30-shoot b30-cap b30-revert b30-map b30-off b30-live a10 bloodgulch}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
 
@@ -187,7 +187,8 @@ started=()
 for c in $cases; do
 	case $c in
 	b30) run "$c" 95 "$b30" "$b30_setup;$b30_fight" & ;;
-	b30-punch) run "$c" 75 "$b30" "$b30_setup;L1500:@ragdoll punch 4 40;L1505:@ragdoll stats;L1700:@ragdoll check;L2000:@ragdoll stats;L2000:@ragdoll check" & ;;
+	b30-punch) run "$c" 75 "$b30" "$b30_setup;L1499:@ragdoll where;L1500:@ragdoll punch 4 40;L1505:@ragdoll stats;L1505:@ragdoll where;L1700:@ragdoll where;L1700:@ragdoll check;L2000:@ragdoll stats;L2000:@ragdoll check" & ;;
+	b30-shoot) run "$c" 75 "$b30" "$b30_setup;L1500:@ragdoll shoot 4 40;L1505:@ragdoll stats;L1505:@ragdoll where;L1700:@ragdoll where;L1700:@ragdoll check;L2000:@ragdoll stats;L2000:@ragdoll check" & ;;
 	b30-cap) run "$c" 75 "$b30" "$b30_setup;L1500:@ragdoll boom 6 40;L1560:@ragdoll kill 6 40;L1900:@ragdoll stats;L1900:@ragdoll check" \
 		HALO_RAGDOLLS_ACTIVE=1 & ;;
 	b30-revert)
