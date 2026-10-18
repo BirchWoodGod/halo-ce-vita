@@ -128,6 +128,8 @@ static struct
 	char roles_line[600];
 	/* each team's bots */
 	long team_bots[BOTS_TACTICS_TEAMS];
+	/* its attackers or roamers (bots_roles_assign) */
+	long team_attackers[BOTS_TACTICS_TEAMS];
 } bots_tactics;
 
 /* ---------- small helpers */
@@ -336,6 +338,29 @@ static void bots_roles_assign(void)
 		state->team = teams ? PIN(player->team_index, 0, BOTS_TACTICS_TEAMS - 1) : 0;
 		bots_tactics.team_bots[state->team]++;
 	}
+	/* (how many attackers or roamers each team has: an odd one out joins
+	the squad before it, bots_squads_squad_for) */
+	{
+		long counted_defenders[BOTS_TACTICS_TEAMS], counted_snipers[BOTS_TACTICS_TEAMS], counted_ranks[BOTS_TACTICS_TEAMS];
+
+		csmemset(counted_defenders, 0, sizeof(counted_defenders));
+		csmemset(counted_snipers, 0, sizeof(counted_snipers));
+		csmemset(counted_ranks, 0, sizeof(counted_ranks));
+		csmemset(bots_tactics.team_attackers, 0, sizeof(bots_tactics.team_attackers));
+		for (index = 0; index < BOTS_MAXIMUM; index++)
+		{
+			struct bots_tactics_bot const *state = &bots_tactics_bots[index];
+			short role;
+
+			if (state->team == NONE)
+				continue;
+			role = bots_tactics_enabled() ? bots_roles_for(bots_tactics.game, (short)counted_ranks[state->team]++,
+				bots_tactics.team_bots[state->team], &counted_defenders[state->team], &counted_snipers[state->team]) :
+				(bots_tactics.game == game_engine_slayer ? _bots_role_roamer : _bots_role_attacker);
+			if (role == _bots_role_attacker || role == _bots_role_roamer)
+				bots_tactics.team_attackers[state->team]++;
+		}
+	}
 	for (index = 0; index < BOTS_MAXIMUM; index++)
 	{
 		struct bots_tactics_bot *state = &bots_tactics_bots[index];
@@ -349,7 +374,16 @@ static void bots_roles_assign(void)
 		if (role == _bots_role_attacker || role == _bots_role_roamer)
 		{
 			state->rank = (short)attackers[state->team]++;
-			lane = bots_routes_lane_for_rank(state->rank);
+			/* (a squad's two bots on one lane: bots_squads.c; without
+			squads each bot by its own rank, as before) */
+			if (teams && bots_squads_on())
+			{
+				short squad = bots_squads_squad_for(state->rank, bots_tactics.team_attackers[state->team]);
+
+				lane = bots_routes_lane_for_squad(squad, (short)state->team);
+			}
+			else
+				lane = bots_routes_lane_for_rank(state->rank);
 		}
 		if (role != state->role)
 		{
@@ -372,6 +406,7 @@ static void bots_roles_assign(void)
 				length += snprintf(line + length, sizeof(line) - (size_t)length, " (%s)", bots_routes_lane_name(lane));
 		}
 	}
+	bots_squads_assign();
 	line[length] = 0;
 	if (length && strcmp(line, bots_tactics.roles_line))
 	{
@@ -389,6 +424,7 @@ void bots_tactics_initialize_for_new_map(void)
 
 	bots_routes_reset();
 	bots_vantage_dispose();
+	bots_squads_reset();
 	csmemset(&bots_tactics_counts, 0, sizeof(bots_tactics_counts));
 	bots_tactics.prepared = FALSE;
 	bots_tactics.prepare_ticks = 0;
@@ -404,6 +440,9 @@ void bots_tactics_initialize_for_new_map(void)
 		bots_tactics_bots[index].vantage = NONE;
 		bots_tactics_bots[index].last_vantage = NONE;
 		bots_tactics_bots[index].waypoint = NONE;
+		bots_tactics_bots[index].squad = NONE;
+		bots_tactics_bots[index].partner = NONE;
+		bots_tactics_bots[index].follow_surface = NONE;
 	}
 }
 
@@ -470,6 +509,9 @@ void bots_tactics_bot_reset(long bot_index, long player_index)
 	state->waypoint = NONE;
 	state->post = (short)(bot_index % 3);
 	state->role = NONE;
+	state->squad = NONE;
+	state->partner = NONE;
+	state->follow_surface = NONE;
 	/* (its role and lane at once) */
 	bots_tactics.roles_tick = 0;
 }
@@ -488,6 +530,7 @@ void bots_tactics_bot_dead(long bot_index)
 	csmemset(state->passed, 0, sizeof(state->passed));
 	state->lane_given_up = FALSE;
 	state->post_until_tick = 0;
+	bots_squads_bot_dead(bot_index);
 }
 
 /* off its vantage point, for why: the game's goals a while before another */
@@ -893,4 +936,5 @@ void bots_tactics_report(long now)
 		bots_tactics_counts.vantage_leaves[_bots_vantage_left_weapon], bots_tactics_counts.vantage_leaves[_bots_vantage_left_objective],
 		bots_tactics_counts.vantage_leaves[_bots_vantage_left_other], bots_tactics_counts.vantage_failures,
 		bots_tactics_counts.posts_taken, bots_tactics_enabled() ? "" : " (no roles nor vantage points: HALO_BOT_ROLES=0)");
+	bots_squads_report(now);
 }

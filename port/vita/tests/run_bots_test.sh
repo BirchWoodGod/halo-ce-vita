@@ -224,7 +224,7 @@ case_bots() { # NAME
 	lanes) echo 12 ;;
 	precision*) echo 4 ;;
 	vantage) echo 6 ;;
-	roles) echo 8 ;;
+	roles | squads) echo 8 ;;
 	teleporters* | lastway) echo 8 ;;
 	*) echo "$bots" ;;
 	esac
@@ -400,6 +400,7 @@ for name in $cases; do
 		run "$name" slayer MAP="$precision_map" HALO_BOT_SKILL=heroic HALO_BOT_PEACEFUL=1 HALO_BOT_VEHICLES=0 \
 			HALO_BOT_ROUTES=$routes "HALO_TEST_COMMANDS=$commands" & ;;
 	roles) run roles ctf HALO_BOT_SKILL=heroic HALO_BOT_TEAMS=even & ;;
+	squads) run squads ctf HALO_BOT_SKILL=normal HALO_BOT_TEAMS=even HALO_BOT_ROUTES=mixed HALO_BOT_VEHICLES=0 & ;;
 	teleporters | teleporters2)
 		# (every bot killed every 40 s from the 40th (HALO_TEST_COMMANDS'
 		# @kill): each respawns at its own base, and leaves it again for the

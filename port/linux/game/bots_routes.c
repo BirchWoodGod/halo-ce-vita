@@ -9,9 +9,14 @@ and the map's lanes it spreads the attackers over.
   down the middle of Blood Gulch into one war zone): nothing here changes a
   bot's way.
 - Lanes: the attackers of each team (bots_roles.c's attackers and roamers,
-  by their order in the team) take the direct route, the first side lane and
-  the second in turn; Mixed: every third of them a side lane, the rest
-  direct. A bot on a side lane goes on foot to a goal a long way off (25
+  by their order in the team, two to a squad: bots_squads.c) take the first
+  side lane, the second and the direct route in turn, a squad a lane; Mixed:
+  the first squad the first side lane, then the direct, the second side lane,
+  the direct - the second team's turn one on (its first squad down the
+  middle: the two teams' first squads did not take a flag meeting head on in
+  the one side lane). Without squads (HALO_BOT_SQUADS=0, a game without
+  teams) each bot by its own rank: Lanes the direct, the first, the second;
+  Mixed every third a side lane. A bot on a side lane goes on foot to a goal a long way off (25
   units) by the lane's waypoints: its path searches (the engine's, as ever)
   go to the next waypoint between it and its goal instead of the goal, and
   on from there as it comes to it. A waypoint it finds no way to, or does not
@@ -1192,8 +1197,9 @@ static boolean bots_routes_lane_valid(short lane)
 }
 
 /* the lane of the bot of this rank among its team's attackers (0 the direct
-route): Lanes the direct, the first and the second in turn; Mixed every
-third a side lane, the first and the second in turn */
+route), without squads (a game without teams, or HALO_BOT_SQUADS=0): Lanes
+the direct, the first and the second in turn; Mixed every third a side lane,
+the first and the second in turn */
 short bots_routes_lane_for_rank(short rank)
 {
 	short lane = 0;
@@ -1202,6 +1208,28 @@ short bots_routes_lane_for_rank(short rank)
 		lane = (short)(rank % 3);
 	else if (bots_routes.mode == _bots_routes_mixed)
 		lane = rank % 3 == 1 ? (short)((rank / 3) % 2 + 1) : 0;
+	if (lane && !bots_routes_lane_valid(lane))
+		lane = bots_routes_lane_valid(1) ? 1 : 0;
+	return lane;
+}
+
+/* the lane of the squad of this rank among its team's squads (bots_squads.c:
+two bots a squad): Lanes the first side lane, the second and the direct in
+turn; Mixed the first side lane, the direct, the second, the direct, the
+second team (`team` 1) one on in turn */
+short bots_routes_lane_for_squad(short squad, short team)
+{
+	short lane = 0;
+
+	if (bots_routes.mode == _bots_routes_lanes)
+		lane = (short)((squad % 3 + 1) % 3);
+	else if (bots_routes.mode == _bots_routes_mixed)
+	{
+		/* (the second team a squad on: its first squad down the middle) */
+		short turn = (short)((squad + (team > 0 ? 1 : 0)) % 4);
+
+		lane = turn == 0 ? 1 : turn == 2 ? 2 : 0;
+	}
 	if (lane && !bots_routes_lane_valid(lane))
 		lane = bots_routes_lane_valid(1) ? 1 : 0;
 	return lane;
