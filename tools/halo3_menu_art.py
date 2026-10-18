@@ -394,6 +394,39 @@ def arrow(pointing):
     return image.resize((8, 16), Image.Resampling.LANCZOS)
 
 
+# the player colours a profile may have, in the game's order
+# (source/saved games/player_profile.c profile_color_table): white, black,
+# red, blue, gray, yellow, green, pink, purple, cyan, cobalt, orange, teal,
+# sage, brown, tan, maroon, salmon
+PLAYER_COLOURS = [
+    0xFFFFFF, 0x000000, 0xFE0000, 0x0201E3, 0x707E71, 0xFFFF01, 0x00FF01, 0xFF56B9, 0xAB10F4,
+    0x01FFFF, 0x6493ED, 0xFF7F00, 0x1ECC91, 0x006401, 0x603814, 0xC69C6C, 0x9D0B0E, 0xF5999E,
+]
+
+
+def swatch(colour):
+    # a profile's colour on the profile screens (the list's rows, the
+    # chosen one's and CUSTOMIZATION's larger swatch, stretched): the colour,
+    # a little lighter at the top, with a thin rim; colour None is a profile
+    # with none, which the host gives a colour (four quarters of colours)
+    size = 16
+    if colour is None:
+        image = Image.new('RGBA', (size, size))
+        draw = ImageDraw.Draw(image)
+        quarters = [(0xFE, 0x00, 0x00), (0x02, 0x01, 0xE3), (0xFF, 0xFF, 0x01), (0x00, 0xFF, 0x01)]
+        for index, fill in enumerate(quarters):
+            x, y = (index % 2) * 8, (index // 2) * 8
+            draw.rectangle([x, y, x + 7, y + 7], fill=fill + (255,))
+    else:
+        rgb = ((colour >> 16) & 0xFF, (colour >> 8) & 0xFF, colour & 0xFF)
+        top = tuple(min(255, round(c + (255 - c) * .18)) for c in rgb)
+        bottom = tuple(round(c * .82) for c in rgb)
+        image = vertical_gradient((size, size), [(0.0, top + (255,)), (1.0, bottom + (255,))])
+        draw = ImageDraw.Draw(image)
+    draw.rectangle([0, 0, size - 1, size - 1], outline=(200, 214, 230, alpha(.65)))
+    return image
+
+
 ART = {
     'column.png': column,
     'haze.png': haze,
@@ -420,7 +453,10 @@ ART = {
     'badge_pc_locked.png': lambda: badge('PC', (92, 102, 116), True),
     'arrow_left.png': lambda: arrow('left'),
     'arrow_right.png': lambda: arrow('right'),
+    'swatch_random.png': lambda: swatch(None),
 }
+for _index, _colour in enumerate(PLAYER_COLOURS):
+    ART['swatch_%02d.png' % _index] = (lambda colour: lambda: swatch(colour))(_colour)
 
 
 def main(folder):
