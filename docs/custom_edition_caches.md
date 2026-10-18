@@ -61,6 +61,18 @@ commits before it, cherry-picked). On the Vita:
 - **System link** compares the host's copy of a custom map with the
   player's (the network game's map version): see `custom_edition_maps.c`.
 
+### Scene packs from Custom Edition maps
+
+A Custom Edition map's objects can also be brought into an Xbox map as a
+scene pack (`port/linux/game/scene_pack_ce.c`; the Forge design doc's "Packs
+from Halo Custom Edition maps"): Forge's flyable Pelican from Extinction, and
+the player models found in the maps folder's multiplayer maps. The pack is
+built on the player's machine from the player's own map and resource maps,
+through every check above (the tags alone: `custom_edition_cache_load_tags`),
+and what Custom Edition holds otherwise is made the Xbox's at build time
+(models compressed, bitmaps laid out and swizzled, Ogg Vorbis and PCM sounds
+encoded as Xbox ADPCM), so the pack is an Xbox pack to the game.
+
 ## Running a map
 
 Custom Edition maps run only when the `game.custom_edition` setting is on:

@@ -30,7 +30,11 @@ these screens stand for the Xbox's own, over the same animated Halo ring:
   profiles as above, then the chosen one's editor - PLAYER NAME, COLOR
   (the game's eighteen, or RANDOM: the host picks), STICK LAYOUT, BUTTON
   LAYOUT, LOOK SENSITIVITY, INVERT LOOK, INVERT FLIGHT, AUTO-CENTER,
-  VIBRATION, the Xbox profile's fields - with the scene packs' Spartan at
+  VIBRATION, the Xbox profile's fields, and MODEL (after COLOR: the Spartan,
+  or a player model found in the player's Halo Custom Edition maps,
+  port/linux/game/player_models.c, built the first time it is shown, played
+  in offline multiplayer games and Forge; kept in the port's own
+  t:\player_models.txt, not the profile) - with the scene packs' Spartan at
   the right, in the profile's colour and recoloured live as COLOR changes,
   in front of the editor's own camera (menu_functions.c
   h3_custom_spartan_preview; the colour's swatch instead when there is no
@@ -144,7 +148,7 @@ the game's keys (a_butn, b_butn, start_butn) for that.
 
 Tests: port/vita/tests/run_menus_test.sh h3probe h3classic h3xbox h3broken
 h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create
-h3mptouch h3coop h3coopguide h3scenes (h3characters: parked) h3profiles h3proftouch h3customize
+h3mptouch h3coop h3coopguide h3scenes (h3characters: parked) h3profiles h3proftouch h3customize h3models
 h3damaged h3mods h3modspicker h3modstouch; the packs': port/vita/tests/run_scene_pack_test.sh; Forge's:
 port/vita/tests/run_forge_test.sh, port/vita/tests/run_forge_files_test.sh;
 co-op between two machines: port/vita/tests/run_netns_online_test.sh h3coopmenu.

@@ -33,10 +33,18 @@ a build stopped and waited for, every pack's buffers deregistered and file
 closed, the table before the packs put back, the tables made freed.
 
 Reads (scene_packs_read, cache_files_windows.c): a file offset from
-SCENE_PACK_FILE_BASE is a pack's (MAXIMUM_LOADED_SCENE_PACKS ranges of
-SCENE_PACK_RANGE_BYTES), served from its file at once, under a lock (the
-render's and the tick's threads both read), zeros when the file cannot be
-read.
+SCENE_PACK_FILE_BASE is a pack's (each loaded pack's pixels and samples have
+the offsets after the one loaded before it, all within
+SCENE_PACK_FILE_RANGE_BYTES, up to MAXIMUM_LOADED_SCENE_PACKS packs), served
+from its file at once, under a lock (the render's and the tick's threads
+both read), zeros when the file cannot be read.
+
+A recipe is app0:packs/<name>.txt, or one the game made and registered
+(scene_packs_recipe_register: the player models from Custom Edition maps,
+player_models.c). A pack of a Custom Edition map (its recipe's cemap lines:
+scene_pack_ce.c) is built and loaded as any; one whose map is not in the
+maps folder, or is another version of it, fails at once with the reason
+(scene_packs_recipe_available says so before it is wanted).
 
 HALO_SCENE_PACKS=0 turns them off (nothing is wanted, built or loaded).
 */

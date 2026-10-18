@@ -331,8 +331,8 @@ packs_runs() {
 # waited for; back, START FORGE; in the game the console places and boards
 # it, the pad flies it: up, along, down)
 cepelicanpad="$lobby down:150:500 a:150:1500 down:150:400 down:150:400 down:150:400 wait:150:9000 @00-extra-objects:0:300"
-cepelicanpad="$cepelicanpad b:150:300 down:150:300 a:150:1500 level:150:12000 lup+rup:900:0 lup:900:0 rdown:1800:0"
-cepelicanpad="$cepelicanpad lup:1200:0 rdown:1200:0 lup:2000:0 rup:1400:0 wait:12000:0"
+cepelicanpad="$cepelicanpad b:150:300 down:150:300 a:150:1500 level:150:12000 lup+rup:1500:0 lup:2000:0 rdown:2500:0"
+cepelicanpad="$cepelicanpad lup:3000:0 rup:1000:0 wait:12000:0"
 
 cepelican_runs() {
 	local folder="$out/cepelican-data" file cmds t
@@ -342,8 +342,9 @@ cepelican_runs() {
 		ln -sfn "$file" "$folder/maps/"
 	done
 	ln -sfn "$(cd "$ce_maps" && pwd)/extinction.map" "$folder/maps/extinction.map"
+	# (turned to face down the valley, away from the canyon's wall)
 	cmds="L100:forge camera 60 -100 3 130 -5;L102:forge list vehicles;L105:forge spawn epelican;L107:forge distance 16"
-	cmds="$cmds;L109:forge drop;L120:forge off;L150:pack ride;L155:pack board 3;L160:@shot 01-aboard"
+	cmds="$cmds;L108:forge turn 180;L109:forge drop;L120:forge off;L150:pack ride;L155:pack board 3;L160:@shot 01-aboard"
 	for t in $(seq 200 30 1200); do cmds="$cmds;L$t:pack where"; done
 	cmds="$cmds;L330:@shot 02-flying;L1150:pack riders;L1160:@shot 03-down"
 	data_saved=$data
