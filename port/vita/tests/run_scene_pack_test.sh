@@ -295,12 +295,12 @@ EOF
 		cmds="$bloodgulch;L100:pack load ce_pelican;L110:forge on;L112:forge camera 60 -100 3 130 -5;L115:forge list vehicles"
 		cmds="$cmds;L118:forge spawn epelican;L120:forge distance 16;L122:forge drop;L140:forge off;L170:pack ride"
 		cmds="$cmds;L175:pack board 4;L178:pack riders;L195:@shot 01-aboard"
-		for t in $(seq 200 30 1300); do cmds="$cmds;L$t:pack where"; done
-		cmds="$cmds;L265:@shot 02-takeoff;L330:@shot 03-climb;L400:@shot 04-cruise;L480:@shot 05-descend;L1180:@shot 06-landed"
-		cmds="$cmds;L1190:pack riders;L1200:forge on;L1205:forge camera 28 -78 16 -45 -20;L1240:@shot 07-outside"
+		for t in $(seq 200 30 1900); do cmds="$cmds;L$t:pack where"; done
+		cmds="$cmds;L265:@shot 02-takeoff;L330:@shot 03-climb;L400:@shot 04-cruise;L480:@shot 05-descend;L1780:@shot 06-landed"
+		cmds="$cmds;L1790:pack riders;L1800:forge on;L1805:forge camera 28 -78 16 -45 -20;L1840:@shot 07-outside"
 		data_saved=$data
 		data=$out/cedata
-		run cepelican 54 "$cmds" "wait:150:500 level:150:5000 lup+rup:900:0 lup:900:0 rdown:1800:0 lup:1200:0 rdown:1200:0 lup:2000:0 rup:1400:0 wait:14000:0"
+		run cepelican 76 "$cmds" "wait:150:500 level:150:5000 lup+rup:900:0 lup:900:0 rdown:1800:0 lup:1200:0 rdown:1200:0 lup:2000:0 rup:1400:0 wait:36000:0"
 		data=$data_saved
 		if checked cepelican; then
 			log=$out/cepelican/run.log
