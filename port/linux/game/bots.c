@@ -157,6 +157,12 @@ Skill (bots.skill): easy, normal, heroic, legendary - how soon it reacts,
 how far and how wide it sees, how large its aim error is and how fast that
 settles, how fast it turns, how tight its shots must be before it fires.
 
+Squads (port, team games: bots_squads.c): two attackers or roamers to a
+squad, on one lane; in CTF they gather at a staging point on their lane and
+go in together; elsewhere the second follows its leader; the enemies a bot
+sees are called out to its team, drawing teammates near and their fire; and
+only the flag carrier's partner and the two bots nearest it escort it.
+
 The simulation: a bot decides from the game state at the tick and its own
 random numbers (seeded per bot and game), so the bots do the same in two
 runs of the same input (HALO_TICK_HASH's fixed ticks). Nothing of a bot is in
@@ -452,12 +458,16 @@ struct bots_skill_definition
 	real powerup_reach;
 };
 
+/* (port: toned down Oct 17 2026, the owner finding them too strong: each
+reacts later, its aim further off and slower to settle, leads less, fires
+looser, shorter bursts; easy, normal, heroic, legendary were 0.75/0.45/
+0.30/0.18 s, 12/7/4/2.2 degrees settling in 1.4/0.9/0.6/0.35 s) */
 static struct bots_skill_definition const bots_skills[NUMBER_OF_BOTS_SKILLS] =
 {
-	{ "easy", 0.75f, 22.0f, 100.0f, 12.0f, 1.4f, 8.0f, 2.2f, 0.3f, 0.04f, 0.00f, 6, 14, 0.35f, 0.00f, 15.0f },
-	{ "normal", 0.45f, 32.0f, 120.0f, 7.0f, 0.9f, 13.0f, 1.8f, 0.7f, 0.10f, 0.05f, 9, 9, 0.50f, 0.25f, 25.0f },
-	{ "heroic", 0.30f, 42.0f, 140.0f, 4.0f, 0.6f, 20.0f, 1.5f, 0.8f, 0.16f, 0.15f, 12, 6, 0.65f, 0.35f, 30.0f },
-	{ "legendary", 0.18f, 55.0f, 160.0f, 2.2f, 0.35f, 30.0f, 1.25f, 1.0f, 0.22f, 0.25f, 16, 4, 0.80f, 0.45f, 40.0f },
+	{ "easy", 0.90f, 20.0f, 100.0f, 14.0f, 1.8f, 7.0f, 2.4f, 0.2f, 0.03f, 0.00f, 5, 16, 0.35f, 0.00f, 15.0f },
+	{ "normal", 0.60f, 30.0f, 110.0f, 9.5f, 1.3f, 11.0f, 2.0f, 0.5f, 0.08f, 0.05f, 7, 12, 0.50f, 0.25f, 25.0f },
+	{ "heroic", 0.42f, 38.0f, 130.0f, 6.0f, 0.9f, 16.0f, 1.7f, 0.65f, 0.12f, 0.12f, 9, 9, 0.65f, 0.35f, 30.0f },
+	{ "legendary", 0.28f, 48.0f, 150.0f, 3.5f, 0.6f, 24.0f, 1.4f, 0.85f, 0.18f, 0.20f, 12, 6, 0.80f, 0.45f, 40.0f },
 };
 
 /* the vehicle tag's fields a bot drives by (vehicle_definitions.h keeps the
@@ -3928,6 +3938,10 @@ static boolean bots_target_score(struct bots_bot *bot, struct player_datum *play
 	candidate->player_index = player_index;
 	candidate->unit_index = other->unit_index;
 	candidate->score = distance + bearing * 4.0f - (player_index == bot->target_player_index ? 6.0f : 0.0f);
+	/* port: (the enemy a teammate called out just now: the squad fights
+	the same one, bots_squads.c) */
+	if (bots_squads_focus((long)(bot - bots_globals.bots), player_index))
+		candidate->score -= 3.0f;
 	return TRUE;
 }
 
@@ -4154,6 +4168,45 @@ static long bots_ctf_next_flag(struct object_iterator *iterator, long *position)
 	return *position < bots_globals.flag_count ? bots_globals.flag_indices[(*position)++] : NONE;
 }
 
+/* port: whether the bot goes along with its team's carrier of the enemy
+flag (its unit): its squad partner, or one of the two bots of its team on
+foot nearest it (bots_squads.c; all of them without squads) */
+static boolean bots_ctf_escorts(struct bots_bot *bot, long carrier_unit_index, real_point3d const *position)
+{
+	struct object_datum *carrier = object_get(carrier_unit_index);
+	struct player_datum *player = player_get(bot->player_index);
+	real distance = bots_distance3d(&carrier->object.position, position);
+	long index, nearer = 0;
+
+	if (!game_engine_has_teams() || (getenv("HALO_BOT_SQUADS") && !atoi(getenv("HALO_BOT_SQUADS"))) ||
+		bots_squads_partner_of((long)(bot - bots_globals.bots), unit_get(carrier_unit_index)->unit.player_index))
+	{
+		return TRUE;
+	}
+	for (index = 0; index < BOTS_MAXIMUM; index++)
+	{
+		struct bots_bot const *other = &bots_globals.bots[index];
+		struct player_datum *other_player;
+		struct object_datum *object;
+
+		if (other == bot || other->player_index == NONE)
+			continue;
+		other_player = player_try_and_get(other->player_index);
+		if (!other_player || other_player->unit_index == NONE || other_player->unit_index == carrier_unit_index ||
+			other_player->team_index != player->team_index)
+		{
+			continue;
+		}
+		object = object_get(other_player->unit_index);
+		if (object->object.parent_object_index == NONE && !TEST_FLAG(object->object.damage_flags, _object_dead_bit) &&
+			bots_distance3d(&carrier->object.position, &object->object.position) < distance)
+		{
+			nearer++;
+		}
+	}
+	return nearer < 2;
+}
+
 /* CTF's own goals: carrying the enemy flag, its team's stand (bots_ctf_stand:
 the HUD's nav point is beside it, and a capture needs the carrier on it),
 or, where a capture needs its own flag home (the variant's flag at home to
@@ -4245,6 +4298,17 @@ static boolean bots_ctf_goal(struct bots_bot *bot, struct player_datum *player, 
 			continue;
 		bots_set_goal(bot, _bots_goal_objective, &flag->object.position, surface_index);
 		bot->goal_exact = TRUE;
+		return TRUE;
+	}
+	/* port: the enemy flag carried by a teammate: its squad partner and the
+	two bots nearest it go along; the others to their own stand, where the
+	capture is made (bots_squads.c) */
+	if (chase_index == NONE && escort_index != NONE && !bots_ctf_escorts(bot, escort_index, position))
+	{
+		surface_index = bots_surface_below(&stand, &ground);
+		if (surface_index == NONE)
+			return FALSE;
+		bots_set_goal(bot, _bots_goal_objective, &ground, surface_index);
 		return TRUE;
 	}
 	if (chase_index == NONE)
@@ -4589,6 +4653,15 @@ static void bots_choose_goal(struct bots_bot *bot, long player_index, real_point
 			bots_tactics_objective((long)(bot - bots_globals.bots));
 			return;
 		}
+		/* port: a teammate's call near, or the squad's leader away (bots_
+		squads.c): there, as to an enemy last seen */
+		if (!bot->held_objective &&
+			(bots_squads_help_goal((long)(bot - bots_globals.bots), position, &post, &post_surface_index) ||
+			bots_squads_follow_goal((long)(bot - bots_globals.bots), position, &post, &post_surface_index)))
+		{
+			bots_set_goal(bot, _bots_goal_enemy, &post, post_surface_index);
+			return;
+		}
 		/* port: a vantage point to hold, a defender's post (bots_tactics.h:
 		the bot's role, its weapon); the ball carried, off it */
 		if (bot->held_objective)
@@ -4616,6 +4689,13 @@ static void bots_choose_goal(struct bots_bot *bot, long player_index, real_point
 				nearest_distance = distance;
 				nearest = index;
 			}
+		}
+		/* port: CTF, the enemy flag at home: the squad's staging point on
+		its lane first, the partner waited for there (bots_squads.c) */
+		if (bots_squads_stage_goal((long)(bot - bots_globals.bots), position, &goals[nearest], &ground, &surface_index))
+		{
+			bots_set_goal(bot, _bots_goal_objective, &ground, surface_index);
+			return;
 		}
 		/* (a nav point floats above its place) */
 		surface_index = bots_surface_below(&goals[nearest], &ground);
@@ -6536,6 +6616,18 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 	bots_profile_part(_bots_part_rest, &started);
 	bots_bot_look(bot, &tick);
 	bots_profile_part(_bots_part_look, &started);
+	/* port: the enemy it sees called out to its team, or, hurt with none
+	seen, where it is (bots_squads.c) */
+	if (bot->target_player_index != NONE && tick.now - bot->target_seen_tick <= 1)
+		bots_squads_callout(bot_index, bot->target_player_index, &bot->target_last_position, bot->target_last_surface_index);
+	else if (tick.now - bot->hurt_tick <= 1 && vehicle_index == NONE)
+	{
+		real_point3d ground;
+		long surface_index = bots_surface_below(&tick.position, &ground);
+
+		if (surface_index != NONE)
+			bots_squads_callout(bot_index, NONE, &ground, surface_index);
+	}
 	tick.weapon_index = bots_current_weapon(tick.unit);
 	/* (the flag or the ball taken: halo.log's count) */
 	{

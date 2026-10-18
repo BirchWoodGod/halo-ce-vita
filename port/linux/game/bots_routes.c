@@ -9,9 +9,10 @@ and the map's lanes it spreads the attackers over.
   down the middle of Blood Gulch into one war zone): nothing here changes a
   bot's way.
 - Lanes: the attackers of each team (bots_roles.c's attackers and roamers,
-  by their order in the team) take the direct route, the first side lane and
-  the second in turn; Mixed: every third of them a side lane, the rest
-  direct. A bot on a side lane goes on foot to a goal a long way off (25
+  by their order in the team, two to a squad: bots_squads.c) take the first
+  side lane, the second and the direct route in turn, a squad a lane; Mixed:
+  the first squad the first side lane, then the direct, the second side lane,
+  the direct. A bot on a side lane goes on foot to a goal a long way off (25
   units) by the lane's waypoints: its path searches (the engine's, as ever)
   go to the next waypoint between it and its goal instead of the goal, and
   on from there as it comes to it. A waypoint it finds no way to, or does not
@@ -1191,17 +1192,19 @@ static boolean bots_routes_lane_valid(short lane)
 	return lane >= 1 && lane <= BOTS_SIDE_LANES && bots_routes.lanes[lane - 1].valid;
 }
 
-/* the lane of the bot of this rank among its team's attackers (0 the direct
-route): Lanes the direct, the first and the second in turn; Mixed every
-third a side lane, the first and the second in turn */
-short bots_routes_lane_for_rank(short rank)
+/* the lane of the squad of this rank among its team's attackers (a bot's
+own rank in a game without teams; 0 the direct route): Lanes the first side
+lane, the second and the direct in turn; Mixed the first side lane, the
+direct, the second, the direct (the first squad round the side: a team of
+four has a squad of two attackers, which went down the middle before) */
+short bots_routes_lane_for_rank(short squad)
 {
 	short lane = 0;
 
 	if (bots_routes.mode == _bots_routes_lanes)
-		lane = (short)(rank % 3);
+		lane = (short)((squad % 3 + 1) % 3);
 	else if (bots_routes.mode == _bots_routes_mixed)
-		lane = rank % 3 == 1 ? (short)((rank / 3) % 2 + 1) : 0;
+		lane = squad % 4 == 0 ? 1 : squad % 4 == 2 ? 2 : 0;
 	if (lane && !bots_routes_lane_valid(lane))
 		lane = bots_routes_lane_valid(1) ? 1 : 0;
 	return lane;
