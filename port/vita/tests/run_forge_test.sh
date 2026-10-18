@@ -95,7 +95,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_forge_test.$$}
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-v1 budget b30 off files variants edit fileshare fstouch panel packs smallmap}
+cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs smallmap}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
 
@@ -387,6 +387,8 @@ for c in $cases; do
 		run "$c" 110 "" "" "$v1pad" HALO_MENU_STYLE=halo3 HALO_TEST_FORGE_PACKS=none & ;;
 	budget)
 		run "$c" 50 "$bloodgulch" "L200:forge on;L210:forge fill 260 boulder;L230:forge budget;L240:@shot 00-budget-full;L260:forge delete;L270:forge budget;L280:forge spawn boulder;L285:forge drop;L290:forge budget;L300:@shot 01-budget-after" "" & ;;
+	fly)
+		run "$c" 40 "$bloodgulch" "L200:forge on;L230:forge camera 60 -120 5 0 45;L240:forge where;L250:forge stick 0 1 0 0 60;L320:forge where;L330:forge camera 60 -120 5 0 -45;L340:forge where;L350:forge stick 0 1 0 0 60;L420:forge where" "" & ;;
 	b30)
 		run "$c" 90 "$b30" "L60:@skip;L205:(set cheat_deathless_player true);L1200:@shot 00-b30-player;L1210:forge on;L1220:forge camera -63 39 3.2 -50 -22;L1225:forge list characters;L1240:@shot 01-b30-monitor;L1250:forge spawn hunter;L1252:forge distance 4;L1258:@shot 02-b30-hunter-held;L1260:forge drop;L1280:forge spawn marine_armored assault rifle major;L1282:forge distance 3.5;L1285:forge drop;L1300:forge spawn ghost;L1302:forge distance 4;L1303:forge turn 90;L1305:forge drop;L1320:forge spawn elite commander;L1322:forge distance 5;L1325:forge drop;L1340:@shot 03-b30-spawned;L1420:@shot 04-b30-ai;L1430:forge camera -40 60 6 -50 -22;L1440:forge fill 34 marine_armored assault rifle major;L1450:forge budget;L1470:@shot 05-b30-ai-budget;L1520:forge where;L1600:forge off;L1605:@shot 06-b30-player" "" & ;;
 	off)
@@ -614,6 +616,17 @@ for c in $cases; do
 		expect "$c" "the budget full" "forge: budget 256/256 objects"
 		expect "$c" "one deleted" "forge: deleted Boulder"
 		expect "$c" "another placed" "forge: spawned Boulder .*budget 256/256 objects" ;;
+	fly)
+		# (the monitor flies where it looks: forward looking up climbs, looking
+		# down dives; the four "where" lines' heights)
+		heights=$(grep -a "forge: camera at" "$out/$c/run.log" | awk '{print $7}' | tr '\n' ' ')
+		set -- $heights
+		if [ $# -ge 4 ] && awk -v a="$1" -v b="$2" -v c="$3" -v d="$4" 'BEGIN { exit !(b > a + 0.5 && d < c - 0.5) }'; then
+			echo "  ok: $c: looking up climbed ($1 -> $2), looking down dived ($3 -> $4)"
+		else
+			fail "$c: the monitor did not follow its pitch (heights: $heights)"
+		fi
+		set -- ;;
 	b30)
 		expect "$c" "the beach has characters" "forge: palette characters: [1-9]"
 		expect "$c" "a Hunter given a free actor" "forge: hunter given a free actor \\([0-9a-f]{8}\\)"

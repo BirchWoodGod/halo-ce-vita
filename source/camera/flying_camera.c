@@ -31,6 +31,11 @@ struct rasterizer_debug_options
 	byte trailing[8];
 };
 
+#ifdef HALO_LINUX
+/* port: forge.c, set while Forge's monitor flies */
+extern int forge_monitor_flying;
+#endif
+
 /* ---------- prototypes */
 
 /* ---------- globals */
@@ -110,6 +115,22 @@ void flying_camera_update(
 			cosine_yaw*controls->translation.i - sine_yaw*controls->translation.j,
 			cosine_yaw*controls->translation.j + sine_yaw*controls->translation.i,
 			controls->translation.k);
+#ifdef HALO_LINUX
+		/* port: Forge's monitor flies where it looks, as Halo 3's does: the
+		stick's forward along the camera's pitch too (the owner: looking up or
+		down and moving did not go up or down); the debug camera as before */
+		if (forge_monitor_flying)
+		{
+			real cosine_pitch = cosine(camera->facing.pitch);
+			real sine_pitch = sine(camera->facing.pitch);
+
+			set_real_vector3d(
+				&translation,
+				cosine_pitch*cosine_yaw*controls->translation.i - sine_yaw*controls->translation.j,
+				cosine_pitch*sine_yaw*controls->translation.i + cosine_yaw*controls->translation.j,
+				sine_pitch*controls->translation.i + controls->translation.k);
+		}
+#endif
 		position.x = camera->position.x + translation.i;
 		position.y = camera->position.y + translation.j;
 		position.z = camera->position.z + translation.k;
