@@ -536,9 +536,9 @@ for case in $cases; do
 		check_h3 h3scenes halo3
 		log=$out/h3scenes/run.log
 		grep -aE "menus: h3 scene|host command \(menu scene\)" "$log"
-		for scene in "h3/campaign/screen: camera point load_campaign at -15.00 5.00 0.00, yaw -10.0 pitch 30.0, over 0 ticks" \
-			"h3/mp/screen: camera point multiplayer at -40.00 -1.80 15.50, yaw 0.0 pitch 0.0, over 0 ticks" \
-			"h3/forge/lobby: camera point new_campaign at -10.00 -20.00 5.00, yaw 40.0 pitch 20.0, over 0 ticks"; do
+		for scene in "h3/campaign/screen: camera point load_campaign at -15.00 5.00 0.00, yaw -20.0 pitch 25.0, over 0 ticks, field of view 50" \
+			"h3/mp/screen: camera point multiplayer at -40.00 -1.80 15.50, yaw 0.0 pitch 0.0, over 0 ticks, field of view 55" \
+			"h3/forge/lobby: camera point new_campaign at -10.00 -20.00 5.00, yaw 40.0 pitch 20.0, over 0 ticks, field of view 40"; do
 			grep -aqF "menus: h3 scene: $scene" "$log" || fail h3scenes "no scene: $scene"
 		done
 		for command in "(sleep -1 ring_loop)" "(camera_set load_campaign 0)" "(camera_set multiplayer 0)" \
