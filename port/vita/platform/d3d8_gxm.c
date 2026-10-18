@@ -33,6 +33,7 @@ the game gave their surface, as in the OpenGL device.
 #endif
 #include "vita_compat.h"
 #include "vita_host.h"
+#include "vita_controls.h"
 #include "frame_timing.h"
 
 void d3d8_surface_initialize(D3DSurface *surface, D3DFORMAT format, unsigned long width, unsigned long height);
@@ -126,13 +127,35 @@ long halo_screen_commit(void)
 
 extern int vita_menus_active;
 
-/* (no pointer on the Vita; the menus' state picks the D-pad's meaning,
-port/vita/platform/vita_pad.c) */
+/* the menus' pointer: the front screen (vita_controls.h vita_touch_pointer):
+a finger highlights the item it is on, a tap presses A on it (or the button
+of a screen's key it is on); not while the settings panel is open. The
+menus' state also picks the D-pad's meaning (port/vita/platform/vita_pad.c) */
 int halo_ui_pointer_update(int menus_active, struct halo_ui_pointer *pointer)
 {
-	(void)pointer;
+	static struct vita_touch_pointer touch;
+	struct vita_touch_contact contacts[8];
+	int count, tap, moved;
+	short x, y;
+
 	vita_menus_active = menus_active != 0;
-	return 0;
+	if (!menus_active || vita_settings_panel_open())
+	{
+		memset(&touch, 0, sizeof(touch));
+		return 0;
+	}
+	count = vita_host_front_touches(contacts, 8);
+	if (!vita_touch_pointer(&touch, contacts, count, vita_host_time_us(), (int)halo_screen_width(), &x, &y, &tap,
+		&moved))
+	{
+		return 0;
+	}
+	memset(pointer, 0, sizeof(*pointer));
+	pointer->x = pointer->click_x = x;
+	pointer->y = pointer->click_y = y;
+	pointer->moved = (unsigned char)moved;
+	pointer->left_clicks = (unsigned char)tap;
+	return 1;
 }
 
 /* ---------- state the XDK header's inline functions read and write */

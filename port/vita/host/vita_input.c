@@ -252,6 +252,19 @@ static void touch_start(void)
 
 /* the fingers on both panels (and the script's), in screen pixels: the
 zones they hold this frame; *started is how many came down */
+/* this frame's front fingers, for the menus' pointer (vita_host_front_touches) */
+static struct vita_touch_contact front_touches[SCE_TOUCH_MAX_REPORT];
+static int front_touch_count;
+
+int vita_host_front_touches(struct vita_touch_contact *out, int maximum)
+{
+	int index;
+
+	for (index = 0; index < front_touch_count && index < maximum; index++)
+		out[index] = front_touches[index];
+	return index;
+}
+
 static unsigned int touch_read(unsigned long long now, int *started)
 {
 	struct vita_touch_contact contacts[2 * SCE_TOUCH_MAX_REPORT + VITA_ZONE_COUNT];
@@ -285,6 +298,11 @@ static unsigned int touch_read(unsigned long long now, int *started)
 			contact->y = (data.report[index].y - touch_top[panel]) * VITA_TOUCH_HEIGHT / touch_height[panel];
 		}
 	}
+	/* (the front fingers kept for the menus' pointer) */
+	front_touch_count = 0;
+	for (index = 0; index < count && front_touch_count < SCE_TOUCH_MAX_REPORT; index++)
+		if (contacts[index].panel == VITA_TOUCH_FRONT)
+			front_touches[front_touch_count++] = contacts[index];
 	for (index = 0; index < VITA_ZONE_COUNT; index++)
 		if (pad_script_touch & (1u << index))
 		{

@@ -3938,6 +3938,11 @@ static void tab_step(int step)
 		maps_scan();
 }
 
+int vita_settings_panel_open(void)
+{
+	return panel_open;
+}
+
 int vita_settings_input(const struct vita_host_pad *pad)
 {
 	unsigned long buttons = pad->buttons;

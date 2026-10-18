@@ -96,9 +96,9 @@ emblems are ui.map's own, the rest this folder's art. -->
 	<widget name="h3/campaign/emblem" left="22" top="182" width="44" height="48" bitmap="h3/difficulty"/>
 	<widget name="h3/campaign/caption" type="text" left="16" top="296" width="240" height="40" font="h3/font_item" color="#FFEEF2F6" text_y="1"/>
 	<widget name="h3/campaign/rule3" left="8" top="440" width="250" height="2" bitmap="h3/rule"/>
-	<widget name="h3/campaign/select_glyph" left="16" top="447" width="16" height="16" bitmap="h3/glyph_cross"/>
+	<widget name="h3/campaign/a_butn" left="16" top="447" width="16" height="16" bitmap="h3/glyph_cross"/>
 	<widget name="h3/campaign/select" type="text" left="36" top="446" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/campaign_text" string_index="5"/>
-	<widget name="h3/campaign/back_glyph" left="110" top="447" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/campaign/b_butn" left="110" top="447" width="16" height="16" bitmap="h3/glyph_circle"/>
 	<widget name="h3/campaign/back" type="text" left="130" top="446" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/main_items" string_index="10"/>
 	<widget name="h3/campaign/screen" flags="pass_unhandled_to_focused_child">
 		<on event="created" run="port h3 campaign init"/>
@@ -116,9 +116,9 @@ emblems are ui.map's own, the rest this folder's art. -->
 		<child widget="h3/campaign/emblem"/>
 		<child widget="h3/campaign/caption"/>
 		<child widget="h3/campaign/rule3"/>
-		<child widget="h3/campaign/select_glyph"/>
+		<child widget="h3/campaign/a_butn"/>
 		<child widget="h3/campaign/select"/>
-		<child widget="h3/campaign/back_glyph"/>
+		<child widget="h3/campaign/b_butn"/>
 		<child widget="h3/campaign/back"/>
 		<child widget="h3/main/players"/>
 		<child widget="h3/main/nameplate"/>
@@ -130,9 +130,9 @@ emblems are ui.map's own, the rest this folder's art. -->
 	<widget name="h3/pick/panel" left="40" top="40" width="560" height="400" bitmap="h3/panel"/>
 	<widget name="h3/pick/rule" left="40" top="72" width="560" height="2" bitmap="h3/rule"/>
 	<widget name="h3/pick/strip" left="40" top="420" width="560" height="20" bitmap="h3/strip"/>
-	<widget name="h3/pick/select_glyph" left="52" top="422" width="16" height="16" bitmap="h3/glyph_cross"/>
+	<widget name="h3/pick/a_butn" left="52" top="422" width="16" height="16" bitmap="h3/glyph_cross"/>
 	<widget name="h3/pick/select" type="text" left="72" top="421" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/campaign_text" string_index="5"/>
-	<widget name="h3/pick/back_glyph" left="146" top="422" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/pick/b_butn" left="146" top="422" width="16" height="16" bitmap="h3/glyph_circle"/>
 	<widget name="h3/pick/back" type="text" left="166" top="421" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/main_items" string_index="10"/>
 
 	<widget name="h3/mission/title" type="text" left="52" top="46" width="400" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/campaign_text" string_index="6"/>
@@ -191,9 +191,9 @@ emblems are ui.map's own, the rest this folder's art. -->
 		<child widget="h3/mission/mission_picture"/>
 		<child widget="h3/mission/mission_text"/>
 		<child widget="h3/pick/strip"/>
-		<child widget="h3/pick/select_glyph"/>
+		<child widget="h3/pick/a_butn"/>
 		<child widget="h3/pick/select"/>
-		<child widget="h3/pick/back_glyph"/>
+		<child widget="h3/pick/b_butn"/>
 		<child widget="h3/pick/back"/>
 		<child widget="h3/mission/list" x="52" y="84"/>
 	</widget>
@@ -230,9 +230,9 @@ emblems are ui.map's own, the rest this folder's art. -->
 		<child widget="h3/difficulty/difficulty_emblem"/>
 		<child widget="h3/difficulty/difficulty_text"/>
 		<child widget="h3/pick/strip"/>
-		<child widget="h3/pick/select_glyph"/>
+		<child widget="h3/pick/a_butn"/>
 		<child widget="h3/pick/select"/>
-		<child widget="h3/pick/back_glyph"/>
+		<child widget="h3/pick/b_butn"/>
 		<child widget="h3/pick/back"/>
 		<child widget="h3/difficulty/list" x="52" y="84"/>
 	</widget>
