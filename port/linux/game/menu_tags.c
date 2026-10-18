@@ -358,7 +358,7 @@ static char const *const port_function_names[] =
 	"port h3 browse system link", "port h3 map set", "port h3 map focus", "port h3 gametype set",
 	"port h3 gametype focus", "port h3 gametype page up", "port h3 gametype page down", "port h3 setup hold",
 	"port h3 campaign network set", "port h3 campaign network focus", "port h3 campaign host",
-	"port h3 campaign focus",
+	"port h3 campaign focus", "port h3 scene",
 };
 
 /* the port's game data functions (menu_functions.c), from

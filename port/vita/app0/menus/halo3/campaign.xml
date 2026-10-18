@@ -124,8 +124,11 @@ rest this folder's art. -->
 	<widget name="h3/campaign/select" type="text" left="36" top="446" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/campaign_text" string_index="5"/>
 	<widget name="h3/campaign/b_butn" left="110" top="447" width="16" height="16" bitmap="h3/glyph_circle"/>
 	<widget name="h3/campaign/back" type="text" left="130" top="446" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/main_items" string_index="10"/>
-	<widget name="h3/campaign/screen" flags="pass_unhandled_to_focused_child">
+	<!-- (scene: its own camera, written into ui.map's unused load_campaign point - "x y z yaw
+	pitch", world units and degrees -: the planet, the galaxy and a band of the ring) -->
+	<widget name="h3/campaign/screen" flags="pass_unhandled_to_focused_child" scene="load_campaign -15 5 0 -10 30">
 		<on event="created" run="port h3 campaign init"/>
+		<on event="created" run="port h3 scene"/>
 		<on event="b back" back="true"/>
 		<data input="port h3 campaign"/>
 		<child widget="h3/main/haze"/>

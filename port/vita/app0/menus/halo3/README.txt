@@ -64,11 +64,20 @@ What is here
   font's line fits its height. A PNG's width and height are powers of two
   (menu_tags.c refuses another: its texture would be read wrong).
 
+Scenes: a screen's scene= puts a camera of its own behind it (Halo 3's
+lobbies have one): scene="ring" (the main menu) is ui.map's own flight
+(ring_loop), scene="<point> x y z yaw pitch [ticks]" writes that camera
+(world units and degrees) into one of ui.map's cutscene camera points that
+its script never flies (load_campaign, settings, multiplayer, new_campaign)
+and glides there, ring_loop asleep (menu_functions.c h3 scenes; menus.scenes,
+HALO_MENU_SCENES=0 turns them off). The campaign lobby, the multiplayer
+lobby and the Forge lobby have theirs; the screens opened from them keep it.
+
 Touch: the Vita's front screen points in the menus (a finger highlights, a tap
 presses A on the item or the button of a key); the button icons are named as
 the game's keys (a_butn, b_butn, start_butn) for that.
 
 Tests: port/vita/tests/run_menus_test.sh h3probe h3classic h3xbox h3broken
 h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create
-h3mptouch h3coop h3coopguide; Forge's: port/vita/tests/run_forge_test.sh;
+h3mptouch h3coop h3coopguide h3scenes; Forge's: port/vita/tests/run_forge_test.sh;
 co-op between two machines: port/vita/tests/run_netns_online_test.sh h3coopmenu.

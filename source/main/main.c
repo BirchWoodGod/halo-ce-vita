@@ -4398,10 +4398,14 @@ enum
 };
 static pthread_mutex_t main_host_commands_lock = PTHREAD_MUTEX_INITIALIZER;
 static char main_host_commands[MAXIMUM_REQUESTED_HOST_COMMANDS][96];
+/* (who asked, for the log: the settings panel's Play page, a test's @host,
+the Halo 3 menus' scenes) */
+static char const *main_host_command_sources[MAXIMUM_REQUESTED_HOST_COMMANDS];
 static short main_host_command_count;
 
-boolean main_request_host_command(
-	char const *command)
+boolean main_request_host_command_from(
+	char const *command,
+	char const *source)
 {
 	boolean queued = FALSE;
 
@@ -4410,6 +4414,7 @@ boolean main_request_host_command(
 	pthread_mutex_lock(&main_host_commands_lock);
 	if (main_host_command_count < MAXIMUM_REQUESTED_HOST_COMMANDS)
 	{
+		main_host_command_sources[main_host_command_count] = source ? source : "host";
 		strcpy(main_host_commands[main_host_command_count++], command);
 		queued = TRUE;
 	}
@@ -4417,21 +4422,29 @@ boolean main_request_host_command(
 	return queued;
 }
 
+boolean main_request_host_command(
+	char const *command)
+{
+	return main_request_host_command_from(command, "settings panel");
+}
+
 static void main_host_commands_update(
 	void)
 {
 	char commands[MAXIMUM_REQUESTED_HOST_COMMANDS][96];
+	char const *sources[MAXIMUM_REQUESTED_HOST_COMMANDS];
 	short count;
 	short index;
 
 	pthread_mutex_lock(&main_host_commands_lock);
 	count = main_host_command_count;
 	memcpy(commands, main_host_commands, sizeof(commands[0]) * count);
+	memcpy(sources, main_host_command_sources, sizeof(sources[0]) * count);
 	main_host_command_count = 0;
 	pthread_mutex_unlock(&main_host_commands_lock);
 	for (index = 0; index < count; index++)
 	{
-		platform_log("host command (settings panel): %s", commands[index]);
+		platform_log("host command (%s): %s", sources[index], commands[index]);
 		hs_compile_and_evaluate(commands[index]);
 	}
 }
@@ -4742,7 +4755,7 @@ static void main_test_commands_update(
 		/* (@host <command>: asked for as the settings panel asks,
 		main_request_host_command: run at the next frame's top) */
 		else if (!strncmp(commands[index].command, "@host ", 6))
-			main_request_host_command(commands[index].command + 6);
+			main_request_host_command_from(commands[index].command + 6, "test command");
 		/* (@sound <tag> [n]: the sound of that name (the nth of them:
 		protected maps name every tag alike) played as a script's
 		sound_impulse_start with no object plays it, any sound the map
@@ -5116,6 +5129,13 @@ void main_loop(
 	{
 #ifdef HALO_LINUX
 		main_test_commands_update();
+		{
+			/* (the Halo 3 menus' camera behind the screen opened, its
+			point written here, between frames: menu_functions.c) */
+			void menu_functions_scenes_update(void);
+
+			menu_functions_scenes_update();
+		}
 		main_host_commands_update();
 		{
 			void halo_shader_tour_update(void);

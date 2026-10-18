@@ -183,10 +183,13 @@ art (tools/halo3_menu_art.py). -->
 	<widget name="h3/mp/b_butn" left="110" top="447" width="16" height="16" bitmap="h3/glyph_circle"/>
 	<widget name="h3/mp/back" type="text" left="130" top="446" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/main_items" string_index="10"/>
 	<widget name="h3/mp/players" type="text" left="380" top="20" width="250" height="16" font="h3/font_small" color="#FFEEF2F6"/>
-	<widget name="h3/mp/screen" flags="pass_unhandled_to_focused_child">
+	<!-- (scene: its own camera in ui.map's unused multiplayer point: the whole ring before the
+	planet) -->
+	<widget name="h3/mp/screen" flags="pass_unhandled_to_focused_child" scene="multiplayer -40 -1.8 15.5 0 0">
 		<on event="created" run="mp type menu initialize"/>
 		<on event="created" run="port mp screen init"/>
 		<on event="created" run="port h3 mp init"/>
+		<on event="created" run="port h3 scene"/>
 		<on event="b back" back="true"/>
 		<data input="port h3 mp lobby"/>
 		<child widget="h3/main/haze"/>

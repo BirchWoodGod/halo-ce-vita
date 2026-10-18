@@ -153,9 +153,12 @@ art is this folder's own (tools/halo3_menu_art.py). -->
 		<child widget="h3/soon/back"/>
 	</widget>
 
-	<widget name="h3/main/screen" flags="pass_unhandled_to_focused_child">
+	<!-- (scene="ring": behind the main menu the ring's own flight, ui.map's ring_loop, woken
+	again after a lobby's camera: menu_functions.c h3 scenes) -->
+	<widget name="h3/main/screen" flags="pass_unhandled_to_focused_child" scene="ring">
 		<on event="created" run="main menu intialize" label="ring_loop"/>
 		<on event="created" run="port h3 servers on"/>
+		<on event="created" run="port h3 scene"/>
 		<on event="deleted" run="port h3 servers off"/>
 		<on event="b back" run="NULL"/>
 		<on event="start" open="ui\shell\main_menu\settings_select\player_setup\player_profile_select_screen" label="settings"/>

@@ -559,7 +559,7 @@ static void read_widget(struct reader *reader, const XML_Char **attributes, long
 		{ "list_flags", &widget.list_flags }, { "text_flags", &widget.text_flags },
 		{ "header_bitmap", &widget.header_bitmap }, { "footer_bitmap", &widget.footer_bitmap },
 		{ "header_bounds", &widget.header_bounds }, { "footer_bounds", &widget.footer_bounds },
-		{ "child_controller", &child_controller },
+		{ "scene", &widget.scene }, { "child_controller", &child_controller },
 		{ "x", NULL, &widget.x }, { "y", NULL, &widget.y }, { "left", NULL, &widget.left },
 		{ "top", NULL, &widget.top }, { "width", NULL, &widget.width, &widget.has_width },
 		{ "height", NULL, &widget.height, &widget.has_height }, { "text_x", NULL, &widget.text_x },

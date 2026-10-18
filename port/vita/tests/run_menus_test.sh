@@ -54,6 +54,12 @@
 #            screen saying how to turn it on), SYSTEM LINK CO-OP, START GAME:
 #            the level hosted as co-op (as the Xbox's difficulty list's Y
 #            hosted it) and the game's lobby, the waiting screen, open
+#   h3scenes the lobbies' cameras (scene= in menus/halo3; menus.scenes,
+#            HALO_MENU_SCENES): CAMPAIGN (HALO_TEST_PROFILE's profile; a new
+#            one's campaign starts at once without), back, MULTIPLAYER, back,
+#            FORGE, back: each lobby's camera written into its point of
+#            ui.map and glided to, ring_loop asleep meanwhile, the main menu
+#            waking it; then the same with HALO_MENU_SCENES=0: none
 #   h3coopguide  the settings panel's Host co-op campaign
 #            (HALO_SYSTEM_LINK_TEST=campaign): the Campaign screen opens, the
 #            Halo 3 campaign lobby behind it set to SYSTEM LINK CO-OP
@@ -90,7 +96,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
 
@@ -385,6 +391,39 @@ for case in $cases; do
 		grep -aq "menus: h3 campaign: co-op was not hosted" "$log" && fail h3coop "co-op was not hosted"
 		grep -a "ui: screen" "$log" | tail -1 | grep -q 'connected_pregame_screen' ||
 			fail h3coop "the game's lobby did not stay open (the co-op game ended)" ;;
+	h3scenes)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "--- h3scenes"; echo "SKIP: no HALO_TEST_PROFILE"; continue
+		fi
+		# (CAMPAIGN, the profile: the campaign lobby; B, B: the main menu; down, A: MULTIPLAYER;
+		# B; down, A: FORGE; B)
+		scenes_pad="wait:150:3000 down:150:700 a wait:150:3000 a wait:150:4000 b wait:150:2500 b wait:150:3000 down:150:700 a wait:150:4000 b wait:150:3000 down:150:700 a wait:150:4000 b wait:150:3000"
+		profile_from=$HALO_TEST_PROFILE run h3scenes "$menus_data" 45 "$scenes_pad" HALO_MENU_STYLE=halo3
+		profile_from=$HALO_TEST_PROFILE run h3scenes_off "$menus_data" 45 "$scenes_pad" HALO_MENU_STYLE=halo3 HALO_MENU_SCENES=0
+		check_h3 h3scenes halo3
+		log=$out/h3scenes/run.log
+		grep -aE "menus: h3 scene|host command \(menu scene\)" "$log"
+		for scene in "h3/campaign/screen: camera point load_campaign at -15.00 5.00 0.00, yaw -10.0 pitch 30.0, over 45 ticks" \
+			"h3/mp/screen: camera point multiplayer at -40.00 -1.80 15.50, yaw 0.0 pitch 0.0, over 45 ticks" \
+			"h3/forge/lobby: camera point new_campaign at -10.00 -20.00 5.00, yaw 40.0 pitch 20.0, over 45 ticks"; do
+			grep -aqF "menus: h3 scene: $scene" "$log" || fail h3scenes "no scene: $scene"
+		done
+		for command in "(sleep -1 ring_loop)" "(camera_set load_campaign 45)" "(camera_set multiplayer 45)" \
+			"(camera_set new_campaign 45)" "(wake ring_loop)"; do
+			grep -aqF "host command (menu scene): $command" "$log" || fail h3scenes "no host command $command"
+		done
+		[ "$(grep -ac 'menus: h3 scene: h3/main/screen: the ring' "$log")" -ge 4 ] ||
+			fail h3scenes "the main menu did not have the ring's flight each time"
+		[ "$(grep -acF 'host command (menu scene): (wake ring_loop)' "$log")" -ge 3 ] ||
+			fail h3scenes "the main menu did not wake ring_loop after each lobby"
+		grep -aqiE "hs_compile|script error|unknown function|not a valid" "$log" && fail h3scenes "a script command was refused"
+		[ "$(grep -ac 'ui: screen pc.h3.campaign.screen\|ui: screen pc.h3.mp.screen\|ui: screen pc.h3.forge.lobby' "$log")" -ge 3 ] ||
+			fail h3scenes "the three lobbies did not open"
+		check_h3 h3scenes_off halo3
+		grep -aq "menus: h3 scene\|host command (menu scene)" "$out/h3scenes_off/run.log" &&
+			fail h3scenes "HALO_MENU_SCENES=0 still moved the camera"
+		[ "$(grep -ac 'ui: screen pc.h3.campaign.screen\|ui: screen pc.h3.mp.screen\|ui: screen pc.h3.forge.lobby' "$out/h3scenes_off/run.log")" -ge 3 ] ||
+			fail h3scenes "HALO_MENU_SCENES=0: the three lobbies did not open" ;;
 	h3coopguide)
 		# (3 s into the main menu the request opens the Campaign screen's profiles; the lobby
 		# behind them is set to co-op. The Xbox's profiles screen opens on a new profile, whose
@@ -397,7 +436,7 @@ for case in $cases; do
 		grep -aq "menus: h3 campaign: network SYSTEM LINK CO-OP (host co-op campaign)" "$log" ||
 			fail h3coopguide "the lobby was not set to co-op" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"

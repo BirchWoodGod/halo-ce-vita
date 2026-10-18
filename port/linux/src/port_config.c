@@ -320,6 +320,11 @@ static const struct config_setting config_settings[] =
 		"over the same animated Halo ring: port/vita/app0/menus/halo3). Read each\n"
 		"time a screen opens. The Vita's settings panel (Graphics, Screen, Menu\n"
 		"style) sets it." },
+	{ "menus.scenes", _config_boolean, "true", "HALO_MENU_SCENES", _environment_value, _platform_all,
+		"With the Halo 3 menus, a camera of its own behind each lobby (the\n"
+		"campaign, multiplayer and Forge lobbies: their scene= in\n"
+		"port/vita/app0/menus/halo3), the main menu the ring's own flight;\n"
+		"false keeps the ring's flight behind every screen." },
 	{ "bots.count", _config_integer, "0", "HALO_BOTS", _environment_value, _platform_all,
 		"Computer players (bots) in a local (split screen) multiplayer game:\n"
 		"0 to 15 join its lobby with the players, as far as the game has room.\n"

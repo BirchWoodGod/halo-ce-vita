@@ -58,6 +58,8 @@ halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
 
 #include "interface/player_ui.h"
 #include "saved games/player_profile.h"
+#include "scenario/scenario.h"
+#include "scenario/scenario_definitions.h"
 #include "saved games/playlist_profile.h"
 #include "saved games/saved_game_files.h"
 #include "tag_files/files.h"
@@ -175,6 +177,7 @@ enum
 	_function_h3_campaign_network_focus,
 	_function_h3_campaign_host,
 	_function_h3_campaign_focus,
+	_function_h3_scene,
 };
 
 /* in port_game_data_input_names' order */
@@ -837,6 +840,218 @@ static boolean h3_campaign_host(struct widget_instance *widget, struct event_rec
 		return FALSE;
 	}
 	return TRUE;
+}
+
+/* ---- the Halo 3 menus' scenes: a camera of its own behind a lobby, as
+Halo 3's menus have. ui.map's scenario (levels\ui\ui) has fifteen cutscene
+camera points; its one script, the continuous ring_loop, flies eleven of
+them (uicam, point_2 to point_11: camera_set each over 400 ticks, sleep
+200), and four more, named for the Xbox's screens (load_campaign, settings,
+multiplayer, new_campaign), are used by nothing. A screen with a scene=
+(menus/halo3: the campaign, multiplayer and Forge lobbies) runs "port h3
+scene" as it opens: its camera ("x y z yaw pitch": world units and
+degrees, yaw 0 along +x, pitch up positive, as @camera) is written into
+the point it names, ring_loop put to sleep and the camera glided there
+(camera_set, 45 ticks unless the scene says); the main menu's scene="ring"
+wakes ring_loop, which flies on from there. The screens opened from a lobby
+(its pickers) have none: the camera stays. The point is written and the
+script commands run at the top of the main loop, between frames
+(menu_functions_scenes_update, main.c; the commands as the settings
+panel's host commands, main_request_host_command_from), never inside the
+widgets' update. Only with Menu style Halo 3, at the main menu of a local
+game, unless menus.scenes (HALO_MENU_SCENES=0) is false. (After the spike
+on spike/menu-scenes, Oct 18 2026.) */
+
+boolean main_request_host_command_from(char const *command, char const *source);
+int halo_main_menu_idle(void);
+
+#define H3_SCENE_TICKS 45
+
+static struct
+{
+	/* the scene of the screen opened (port h3 scene), for the top of the
+	main loop: pending set last (release), taken there (acquire) */
+	int pending;
+	boolean ring;
+	char point[32];
+	boolean has_camera;
+	real camera[5];
+	long ticks;
+	char screen[64];
+	/* ring_loop put to sleep by a scene (ui.map's scripts start awake) */
+	boolean ring_asleep;
+} h3_scenes;
+
+static boolean h3_scenes_enabled(void)
+{
+	char const *setting = getenv("HALO_MENU_SCENES");
+
+	if (setting && *setting)
+		return strcmp(setting, "0") && _stricmp(setting, "false");
+	return config_boolean("menus.scenes");
+}
+
+/* the scene= of the menus' widget this screen was built from (its tag is
+"pc\<name>", the name's '/' made '\'), NULL for none */
+static char const *h3_scene_of(struct widget_instance *screen, char *name, int size)
+{
+	struct halo_menus const *menus = halo_menus_load();
+	char const *tag_name = screen ? tag_get_name(screen->definition_tag_index) : NULL;
+	long index;
+
+	if (!menus || !tag_name || strncmp(tag_name, "pc\\", 3))
+		return NULL;
+	tag_name += 3;
+	for (index = 0; index < menus->widget_count; index++)
+	{
+		struct halo_menu_widget const *widget = &menus->widgets[index];
+		char const *a = widget->name, *b = tag_name;
+
+		if (!widget->scene || !a)
+			continue;
+		while (*a && *b && (*a == *b || (*a == '/' && *b == '\\')))
+			a++, b++;
+		if (!*a && !*b)
+		{
+			snprintf(name, size, "%s", widget->name);
+			return widget->scene;
+		}
+	}
+	return NULL;
+}
+
+/* scene="<point> [x y z yaw pitch [ticks]]": the point's name (letters,
+digits, '_'), and the camera written into it, in range (finite, the
+world's +-5000), if given */
+static boolean h3_scene_parse(char const *scene)
+{
+	char word[32];
+	float values[6];
+	int used = 0, count;
+	short index;
+
+	h3_scenes.has_camera = FALSE;
+	h3_scenes.ticks = H3_SCENE_TICKS;
+	if (sscanf(scene, "%31s%n", word, &used) != 1 ||
+		strspn(word, "abcdefghijklmnopqrstuvwxyz0123456789_") != strlen(word))
+	{
+		return FALSE;
+	}
+	snprintf(h3_scenes.point, sizeof(h3_scenes.point), "%s", word);
+	h3_scenes.ring = !strcmp(word, "ring");
+	count = sscanf(scene + used, "%f %f %f %f %f %f", &values[0], &values[1], &values[2], &values[3], &values[4],
+		&values[5]);
+	if (count <= 0)
+		return TRUE;
+	if (count < 5 || h3_scenes.ring)
+		return FALSE;
+	for (index = 0; index < 5; index++)
+	{
+		if (!(values[index] > -5000.f && values[index] < 5000.f))
+			return FALSE;
+		h3_scenes.camera[index] = values[index];
+	}
+	h3_scenes.has_camera = TRUE;
+	if (count == 6)
+		h3_scenes.ticks = PIN((long)values[5], 0, 600);
+	return TRUE;
+}
+
+/* (port h3 scene, a screen's "created") the screen's scene asked for */
+static void h3_scene_request(struct widget_instance *widget)
+{
+	struct widget_instance *screen = screen_of(widget);
+	char name[64];
+	char const *scene;
+
+	if (!h3_scenes_enabled() || !halo_menu_style_halo3() || !halo_main_menu_idle())
+		return;
+	scene = h3_scene_of(screen, name, sizeof(name));
+	if (!scene)
+		return;
+	/* (one asked for and not yet taken is replaced: the latest screen's) */
+	__atomic_store_n(&h3_scenes.pending, 0, __ATOMIC_RELAXED);
+	if (!h3_scene_parse(scene))
+	{
+		platform_log("menus: h3 scene: %s: scene=\"%s\" is not \"ring\" or \"<camera point> [x y z yaw pitch [ticks]]\"",
+			name, scene);
+		return;
+	}
+	snprintf(h3_scenes.screen, sizeof(h3_scenes.screen), "%s", name);
+	__atomic_store_n(&h3_scenes.pending, 1, __ATOMIC_RELEASE);
+}
+
+static struct scenario_cutscene_camera_point *h3_scene_point(char const *name)
+{
+	struct scenario *scenario = global_scenario_get();
+	short index;
+
+	if (!scenario || !name)
+		return NULL;
+	for (index = 0; index < scenario->cutscene_camera_points.count; index++)
+	{
+		struct scenario_cutscene_camera_point *point = TAG_BLOCK_GET_ELEMENT(
+			&scenario->cutscene_camera_points, index, struct scenario_cutscene_camera_point);
+
+		if (!strncmp(point->name, name, sizeof(point->name)))
+			return point;
+	}
+	return NULL;
+}
+
+/* (main.c, the top of the main loop, between frames) the scene asked for:
+its camera written into its point, the script commands queued for the host
+commands' turn, which comes next */
+void menu_functions_scenes_update(void)
+{
+	struct scenario_cutscene_camera_point *point;
+	char command[96];
+
+	/* (Menu style Halo CE chosen, or the scenes turned off, while a lobby's
+	camera holds: the ring's flight back, as no Halo 3 main menu will ask) */
+	if (h3_scenes.ring_asleep && (!halo_menu_style_halo3() || !h3_scenes_enabled()) && halo_main_menu_idle())
+	{
+		main_request_host_command_from("(wake ring_loop)", "menu scene");
+		h3_scenes.ring_asleep = FALSE;
+		platform_log("menus: h3 scene: the scenes are off now: the ring's own flight");
+	}
+	if (!__atomic_exchange_n(&h3_scenes.pending, 0, __ATOMIC_ACQUIRE))
+		return;
+	/* (the main menu gone meanwhile: a level loading, a network game) */
+	if (!halo_main_menu_idle())
+		return;
+	if (h3_scenes.ring)
+	{
+		if (h3_scenes.ring_asleep)
+			main_request_host_command_from("(wake ring_loop)", "menu scene");
+		h3_scenes.ring_asleep = FALSE;
+		platform_log("menus: h3 scene: %s: the ring's own flight", h3_scenes.screen);
+		return;
+	}
+	if ((point = h3_scene_point(h3_scenes.point)) == NULL)
+	{
+		platform_log("menus: h3 scene: %s: ui.map has no camera point %s", h3_scenes.screen, h3_scenes.point);
+		return;
+	}
+	if (h3_scenes.has_camera)
+	{
+		/* (the screen's own camera in its point: the director reads the
+		point as it glides there; no other screen's scene names it) */
+		point->position.x = h3_scenes.camera[0];
+		point->position.y = h3_scenes.camera[1];
+		point->position.z = h3_scenes.camera[2];
+		point->orientation.yaw = h3_scenes.camera[3] * (real)(3.14159265358979 / 180.0);
+		point->orientation.pitch = h3_scenes.camera[4] * (real)(3.14159265358979 / 180.0);
+		point->orientation.roll = 0.f;
+	}
+	main_request_host_command_from("(sleep -1 ring_loop)", "menu scene");
+	snprintf(command, sizeof(command), "(camera_set %s %ld)", h3_scenes.point, h3_scenes.ticks);
+	main_request_host_command_from(command, "menu scene");
+	h3_scenes.ring_asleep = TRUE;
+	platform_log("menus: h3 scene: %s: camera point %s at %.2f %.2f %.2f, yaw %.1f pitch %.1f, over %ld ticks",
+		h3_scenes.screen, h3_scenes.point, point->position.x, point->position.y, point->position.z,
+		point->orientation.yaw * (real)(180.0 / 3.14159265358979),
+		point->orientation.pitch * (real)(180.0 / 3.14159265358979), h3_scenes.ticks);
 }
 
 /* ---- Forge (forge.c): its lobby (halo3/forge_lobby.xml: the map, its
@@ -2338,6 +2553,9 @@ boolean pc_menu_event_function_invoke(
 	case _function_h3_campaign_focus:
 		h3_focus_child(widget, 1);
 		return TRUE;
+	case _function_h3_scene:
+		h3_scene_request(widget);
+		return TRUE;
 	case _function_h3_campaign_start:
 		/* (then the game's own "main menu switch to solo game", the next
 		handler, as the Xbox's difficulty list does after "set difficulty") */
@@ -2553,6 +2771,8 @@ void pc_menu_functions_update(
 		menu_functions.open_system_link = FALSE;
 		menu_functions.open_password = FALSE;
 		menu_functions.create_pending = FALSE;
+		/* (ui.map's scripts start again with it: ring_loop awake) */
+		h3_scenes.ring_asleep = FALSE;
 		return;
 	}
 	if (menu_functions.open_password)

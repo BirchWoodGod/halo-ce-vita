@@ -193,7 +193,11 @@ panel's Play page. "kick <player name>" (dropped, may join again), "ban
 <player name>" (dropped, kept out: bans.txt) or "bringto" (co-op: every
 player comes to the host), run as the console runs it
 (hs_compile_and_evaluate) at the top of the next frame, while no tick runs.
-FALSE if the command is too long or too many wait already. Thread-safe. */
+FALSE if the command is too long or too many wait already. Thread-safe.
+_from names who asked, for the log (the Halo 3 menus' scenes ask too). */
+boolean main_request_host_command_from(
+	char const *command,
+	char const *source);
 boolean main_request_host_command(
 	char const *command);
 #endif
