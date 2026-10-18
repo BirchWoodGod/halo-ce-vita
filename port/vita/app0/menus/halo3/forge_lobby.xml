@@ -68,9 +68,12 @@ vehicles, the dropships, the Covenant AI), built in the background while the lob
 	<widget name="h3/forge/select" type="text" left="36" top="446" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/forge_text" string_index="5"/>
 	<widget name="h3/forge/b_butn" left="110" top="447" width="16" height="16" bitmap="h3/glyph_circle"/>
 	<widget name="h3/forge/leave" type="text" left="130" top="446" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/forge_text" string_index="7"/>
-	<!-- (scene: its own camera in ui.map's unused new_campaign point: the ring's arc across the
-	planet) -->
-	<widget name="h3/forge/lobby" flags="pass_unhandled_to_focused_child" scene="new_campaign -10 -20 5 40 20">
+	<!-- (scene: its own camera in ui.map's unused new_campaign point, a narrower lens: the ring's
+	arc across the planet; in front of it (scene_object=, the menu_monitor and menu_campaign packs)
+	343 Guilty Spark looking at a Warthog) -->
+	<widget name="h3/forge/lobby" flags="pass_unhandled_to_focused_child" scene="new_campaign -10 -20 5 40 20 0 40"
+		scene_object="menu_campaign:warthog 6.5 1.42 -0.47 210 suspension=0.5;
+			menu_monitor:monitor 2.2 0.08 0.07 0 look=1">
 		<on event="created" run="port forge lobby init"/>
 		<on event="created" run="port h3 scene"/>
 		<on event="b back" back="true"/>

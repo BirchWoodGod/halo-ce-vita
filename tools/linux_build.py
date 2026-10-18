@@ -635,7 +635,9 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
                 outputs=validator.parent / "scene_pack_test",
                 rule="linux_tool_link",
                 inputs=pack_tool_objects,
-                variables={"ldflags": " ".join(["--target=i686-linux-gnu", "-m32", "-no-pie", "-g", *extra_ldflags])},
+                # (-lm: the Custom Edition source's vertex compression calls floor)
+                variables={"ldflags": " ".join(["--target=i686-linux-gnu", "-m32", "-no-pie", "-g", *extra_ldflags,
+                                                "-lm"])},
             )
 
     # Profile-guided optimisation: with the committed profile, or with

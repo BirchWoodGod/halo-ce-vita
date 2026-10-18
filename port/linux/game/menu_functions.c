@@ -235,6 +235,7 @@ enum
 	_function_h3_mods_delete,
 	_function_h3_mods_page_up,
 	_function_h3_mods_page_down,
+	_function_h3_profiles_close,
 };
 
 /* in port_game_data_input_names' order */
@@ -971,9 +972,11 @@ static struct
 	boolean has_camera;
 	real camera[5];
 	long ticks;
+	/* its field of view (degrees; 0: the game's own, 70) */
+	real field_of_view;
 	char screen[64];
 	/* the characters standing in it (scene_object=: menu_scene_objects.c) */
-	char objects[160];
+	char objects[1024];
 	boolean has_objects;
 	/* ring_loop put to sleep by a scene (ui.map's scripts start awake) */
 	boolean ring_asleep;
@@ -1023,18 +1026,20 @@ static char const *h3_scene_of(struct widget_instance *screen, char *name, int s
 	return NULL;
 }
 
-/* scene="<point> [x y z yaw pitch [ticks]]": the point's name (letters,
-digits, '_'), and the camera written into it, in range (finite, the
-world's +-5000), if given */
+/* scene="<point> [x y z yaw pitch [ticks [fov]]]": the point's name
+(letters, digits, '_'), and the camera written into it, in range (finite,
+the world's +-5000), if given, with its field of view (degrees, 10 to 120;
+none or 0: the game's own) */
 static boolean h3_scene_parse(char const *scene)
 {
 	char word[32];
-	float values[6];
+	float values[7];
 	int used = 0, count;
 	short index;
 
 	h3_scenes.has_camera = FALSE;
 	h3_scenes.ticks = H3_SCENE_TICKS;
+	h3_scenes.field_of_view = 0.f;
 	if (sscanf(scene, "%31s%n", word, &used) != 1 ||
 		strspn(word, "abcdefghijklmnopqrstuvwxyz0123456789_") != strlen(word))
 	{
@@ -1042,8 +1047,8 @@ static boolean h3_scene_parse(char const *scene)
 	}
 	snprintf(h3_scenes.point, sizeof(h3_scenes.point), "%s", word);
 	h3_scenes.ring = !strcmp(word, "ring");
-	count = sscanf(scene + used, "%f %f %f %f %f %f", &values[0], &values[1], &values[2], &values[3], &values[4],
-		&values[5]);
+	count = sscanf(scene + used, "%f %f %f %f %f %f %f", &values[0], &values[1], &values[2], &values[3], &values[4],
+		&values[5], &values[6]);
 	if (count <= 0)
 		return TRUE;
 	if (count < 5 || h3_scenes.ring)
@@ -1055,8 +1060,14 @@ static boolean h3_scene_parse(char const *scene)
 		h3_scenes.camera[index] = values[index];
 	}
 	h3_scenes.has_camera = TRUE;
-	if (count == 6)
+	if (count >= 6)
 		h3_scenes.ticks = PIN((long)values[5], 0, 600);
+	if (count == 7)
+	{
+		if (values[6] != 0.f && !(values[6] >= 10.f && values[6] <= 120.f))
+			return FALSE;
+		h3_scenes.field_of_view = values[6];
+	}
 	return TRUE;
 }
 
@@ -1155,6 +1166,8 @@ void menu_functions_scenes_update(void)
 		point->orientation.yaw = h3_scenes.camera[3] * (real)(3.14159265358979 / 180.0);
 		point->orientation.pitch = h3_scenes.camera[4] * (real)(3.14159265358979 / 180.0);
 		point->orientation.roll = 0.f;
+		/* (camera_set reads it: 0 for the game's own) */
+		point->field_of_view = h3_scenes.field_of_view * (real)(3.14159265358979 / 180.0);
 	}
 	/* (leaving the ring's flight: where it was kept, to come back to) */
 	if (!h3_scenes.ring_asleep)
@@ -1167,10 +1180,16 @@ void menu_functions_scenes_update(void)
 	snprintf(command, sizeof(command), "(camera_set %s %ld)", h3_scenes.point, h3_scenes.ticks);
 	main_request_host_command_from(command, "menu scene");
 	h3_scenes.ring_asleep = TRUE;
-	platform_log("menus: h3 scene: %s: camera point %s at %.2f %.2f %.2f, yaw %.1f pitch %.1f, over %ld ticks",
-		h3_scenes.screen, h3_scenes.point, point->position.x, point->position.y, point->position.z,
-		point->orientation.yaw * (real)(180.0 / 3.14159265358979),
-		point->orientation.pitch * (real)(180.0 / 3.14159265358979), h3_scenes.ticks);
+	{
+		char field_of_view[40] = "";
+
+		if (h3_scenes.has_camera && h3_scenes.field_of_view != 0.f)
+			snprintf(field_of_view, sizeof(field_of_view), ", field of view %.0f", h3_scenes.field_of_view);
+		platform_log("menus: h3 scene: %s: camera point %s at %.2f %.2f %.2f, yaw %.1f pitch %.1f, over %ld ticks%s",
+			h3_scenes.screen, h3_scenes.point, point->position.x, point->position.y, point->position.z,
+			point->orientation.yaw * (real)(180.0 / 3.14159265358979),
+			point->orientation.pitch * (real)(180.0 / 3.14159265358979), h3_scenes.ticks, field_of_view);
+	}
 }
 
 /* the camera as the ring's flight left it, in ui.map's settings point (no
@@ -2231,6 +2250,13 @@ static struct
 	long delete_index;
 	char delete_name[48];
 	char said[192];
+	/* (port) the card's Spartan asked for (menu_scene_spartan_show), in
+	this colour and model's pack (NONE, "": none asked), and whether it
+	stands there (what was last logged) */
+	boolean spartan_asked;
+	short spartan_color;
+	char spartan_pack[48];
+	boolean spartan_shown;
 } h3_profiles;
 
 /* the profile the editor edits, and what it last said */
@@ -2252,6 +2278,12 @@ static struct
 	short model_saved;
 	char model_said[160];
 } h3_custom;
+
+static void h3_profiles_spartan(struct widget_instance *screen, struct player_profile const *profile,
+	long profile_index);
+static void h3_wrap(char *text, int line_length);
+/* (the card's column's line, in characters) */
+#define H3_PROFILES_CARD_LINE 15
 
 /* two profile indices of the same file (their flags aside: a profile just
 made, and the list's) */
@@ -2353,6 +2385,11 @@ static void h3_profiles_initialize(short mode)
 	if (mode == _h3_profiles_campaign)
 		player_ui_reset_single_player_local_player_controllers();
 	h3_profiles_read();
+	/* (the card's Spartan: the profiles' player models, the maps folder
+	looked through once a session) */
+	player_models_scan(FALSE);
+	h3_profiles.spartan_asked = FALSE;
+	h3_profiles.spartan_shown = FALSE;
 }
 
 /* the item of a row (row_<n>), else the one chosen */
@@ -2663,6 +2700,7 @@ static void h3_profiles_update(struct widget_instance *list)
 			level = (short)MIN(level + 1, NUMBER_OF_SINGLE_PLAYER_LEVELS - 1);
 			snprintf(text, sizeof(text), "%s", T(h3_level_names[PIN(level, 0, NUMBER_OF_SINGLE_PLAYER_LEVELS - 1)]));
 			h3_capitals(text);
+			h3_wrap(text, H3_PROFILES_CARD_LINE);
 			text_show(named(screen, "info_level"), text);
 			snprintf(text, sizeof(text), "%s", T(h3_difficulty_names[PIN(difficulty, 0, 3)]));
 			h3_capitals(text);
@@ -2671,10 +2709,12 @@ static void h3_profiles_update(struct widget_instance *list)
 				T(h3_stick_names[PIN(profile->controller_settings.joystick_preset, 0, NUMBER_OF_JOYSTICK_PRESETS - 1)]),
 				profile->controller_settings.invert_look ? ", " : "",
 				profile->controller_settings.invert_look ? T("INVERTED") : "");
+			h3_wrap(text, H3_PROFILES_CARD_LINE);
 			text_show(named(screen, "info_controls"), text);
 			if (h3_profiles.damaged[target])
 				snprintf(note, sizeof(note), "%s", T("This profile's file is damaged:\nit can't be loaded or played.\n"
 					"Choose another profile, make a\nnew one, or delete this one."));
+			h3_profiles_spartan(card ? screen : NULL, card ? profile : NULL, h3_profiles.indices[target]);
 		}
 		else
 		{
@@ -2683,6 +2723,7 @@ static void h3_profiles_update(struct widget_instance *list)
 				widget_instance_set_visibility_recursive(found, FALSE);
 			snprintf(note, sizeof(note), "%s", h3_profiles.count ? T("Make a profile of your own:\ntype its name.") :
 				T("There are no profiles yet.\nMake one to play: type its name."));
+			h3_profiles_spartan(screen, NULL, NONE);
 		}
 		text_show(named(screen, "info_text"), note);
 	}
@@ -2708,6 +2749,93 @@ static void h3_profiles_update(struct widget_instance *list)
 			snprintf(h3_profiles.said, sizeof(h3_profiles.said), "%s", said);
 			platform_log("menus: h3 profiles: %s", said);
 		}
+	}
+}
+
+/* text broken into lines of at most that many characters at its spaces
+(the card's narrow column, beside its Spartan) */
+static void h3_wrap(char *text, int line_length)
+{
+	char *line = text;
+
+	while ((int)strlen(line) > line_length)
+	{
+		char *space = NULL, *cursor;
+
+		for (cursor = line; *cursor && cursor - line <= line_length; cursor++)
+		{
+			if (*cursor == ' ')
+				space = cursor;
+		}
+		if (!space)
+			break;
+		*space = '\n';
+		line = space + 1;
+	}
+}
+
+/* SELECT PROFILE's card (and CUSTOMIZATION's list, which shares it): the
+focused profile's Spartan in the card's window, as the editor's preview
+(h3_custom_spartan_preview: the same scene packs' Spartan,
+menu_scene_spartan_show), in the profile's colour and its player model when
+one is chosen for it (player_models.c), in front of the screen's own camera
+(its scene=: the editor's, so that the editor opened from the list keeps
+it). It follows the focus; none for CREATE NEW PROFILE, a damaged profile,
+the scenes off or no pack (the card's colour swatch stays, as ever).
+screen NULL lets it go (the screen gone), unless the editor's preview has
+taken its place. */
+#define H3_PROFILES_SPARTAN_PLACEMENT "2.4 1.15 -0.36 20"
+
+static void h3_profiles_spartan(struct widget_instance *screen, struct player_profile const *profile,
+	long profile_index)
+{
+	char name[64];
+	char const *scene;
+	char const *pack;
+	short color;
+	boolean shown;
+
+	if (!screen || !profile)
+	{
+		if (h3_profiles.spartan_asked && !(screen == NULL && h3_custom.preview_asked))
+		{
+			menu_scene_spartan_hide();
+			menu_scene_spartan_model(NULL);
+			platform_log("menus: h3 profiles: the card's Spartan hidden");
+		}
+		h3_profiles.spartan_asked = FALSE;
+		h3_profiles.spartan_shown = FALSE;
+		return;
+	}
+	color = profile->primary_color_index >= 0 ? profile->primary_color_index : 0;
+	pack = player_models_pack(player_models_profile_choice(profile_index));
+	if (!h3_profiles.spartan_asked || strcmp(h3_profiles.spartan_pack, pack ? pack : ""))
+	{
+		menu_scene_spartan_model(pack);
+		snprintf(h3_profiles.spartan_pack, sizeof(h3_profiles.spartan_pack), "%s", pack ? pack : "");
+	}
+	if (!h3_profiles.spartan_asked)
+	{
+		if (h3_scenes_enabled() && (scene = h3_scene_of(screen, name, sizeof(name), NULL)) != NULL &&
+			menu_scene_spartan_show(scene, H3_PROFILES_SPARTAN_PLACEMENT, color))
+		{
+			h3_profiles.spartan_asked = TRUE;
+			h3_profiles.spartan_color = color;
+			platform_log("menus: h3 profiles: the card's Spartan asked for in colour %d (%s)", color,
+				pack ? pack : "the Spartan");
+		}
+	}
+	else if (color != h3_profiles.spartan_color)
+	{
+		h3_profiles.spartan_color = color;
+		menu_scene_spartan_color(color);
+		platform_log("menus: h3 profiles: the card's Spartan recoloured %d", color);
+	}
+	shown = h3_profiles.spartan_asked && menu_scene_spartan_shown();
+	if (shown != h3_profiles.spartan_shown)
+	{
+		h3_profiles.spartan_shown = shown;
+		platform_log("menus: h3 profiles: the card shows %s", shown ? "the Spartan" : "the swatch");
 	}
 }
 
@@ -5101,6 +5229,11 @@ boolean pc_menu_event_function_invoke(
 		return TRUE;
 	case _function_h3_mods_page_down:
 		h3_mods.page = 1;
+		return TRUE;
+	/* (SELECT PROFILE gone: its card's Spartan let go, unless the editor
+	opened from it shows its own already) */
+	case _function_h3_profiles_close:
+		h3_profiles_spartan(NULL, NULL, NONE);
 		return TRUE;
 	case _function_coop_campaign:
 	case _function_unwired:

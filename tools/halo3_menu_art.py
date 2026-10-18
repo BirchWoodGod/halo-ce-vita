@@ -95,6 +95,24 @@ def custom_panel():
     return image
 
 
+def profiles_panel():
+    # SELECT PROFILE's (and CUSTOMIZATION's list's) panel: as custom_panel(),
+    # its window at the card's lower right, where the focused profile's
+    # Spartan stands (486,146 to 592,334 on the screen), rimmed
+    width, height = 256, 256
+    image = vertical_gradient((width, height), [
+        (0.0, (27, 41, 70, alpha(.95))),
+        (0.2, (24, 39, 69, alpha(.90))),
+        (1.0, (6, 16, 37, alpha(.90))),
+    ])
+    x0, x1 = round(446 / 560 * width), round(552 / 560 * width)
+    y0, y1 = round(106 / 400 * height), round(294 / 400 * height)
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([x0, y0, x1, y1], fill=(0, 0, 0, 0))
+    draw.rectangle([x0, y0, x1, y1], outline=(150, 176, 206, alpha(.45)))
+    return image
+
+
 def item_on():
     # the main menu's selection: Halo 3's solid orange bar, a light edge on top
     image = horizontal_gradient((128, 16), [
@@ -450,6 +468,7 @@ ART = {
     'haze.png': haze,
     'panel.png': panel,
     'custom_panel.png': custom_panel,
+    'profiles_panel.png': profiles_panel,
     'item_on.png': item_on,
     'item_off.png': item_off,
     'row_on.png': row_on,
