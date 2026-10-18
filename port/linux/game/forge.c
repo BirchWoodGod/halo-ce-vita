@@ -803,7 +803,12 @@ static void forge_palette_step(
 static struct
 {
 	long tags[MAXIMUM_FORGE_DEPENDENCY_TAGS];
+	/* each tag's own bytes in the tag cache and in the map's file */
+	unsigned long tag_sizes[MAXIMUM_FORGE_DEPENDENCY_TAGS];
+	unsigned long file_sizes[MAXIMUM_FORGE_DEPENDENCY_TAGS];
 	long count;
+	/* the tag being walked (its slot) */
+	long current;
 	/* bytes in the tag cache (roots, blocks' elements, data) and in the
 	map's file (bitmaps' pixels, sounds' samples) */
 	unsigned long tag_bytes;
@@ -855,6 +860,20 @@ static short forge_dependency_group(
 static void forge_dependency_add(
 	long tag_index);
 
+/* bytes of the tag being walked, of its group (group) */
+static void forge_dependency_count(
+	short group,
+	unsigned long tag_bytes,
+	unsigned long file_bytes)
+{
+	forge_dependencies.group_tag_bytes[group] += tag_bytes;
+	forge_dependencies.group_file_bytes[group] += file_bytes;
+	forge_dependencies.tag_sizes[forge_dependencies.current] += tag_bytes;
+	forge_dependencies.file_sizes[forge_dependencies.current] += file_bytes;
+
+	return;
+}
+
 static void forge_dependency_walk(
 	byte *base,
 	struct tag_schema_definition const *definition,
@@ -887,7 +906,7 @@ static void forge_dependency_walk(
 
 				if (block->count <= 0 || !block->address)
 					break;
-				forge_dependencies.group_tag_bytes[group] += (unsigned long)block->count * element->size;
+				forge_dependency_count(group, (unsigned long)block->count * element->size, 0);
 				for (element_index = 0; element_index < block->count; element_index++)
 					forge_dependency_walk((byte *)block->address + element_index * element->size, element, group, depth + 1);
 				break;
@@ -895,12 +914,12 @@ static void forge_dependency_walk(
 
 			case _tag_schema_data:
 				if (((struct tag_data *)address)->size > 0)
-					forge_dependencies.group_tag_bytes[group] += (unsigned long)((struct tag_data *)address)->size;
+					forge_dependency_count(group, (unsigned long)((struct tag_data *)address)->size, 0);
 				break;
 
 			case _tag_schema_file_data:
 				if (((struct tag_data *)address)->size > 0)
-					forge_dependencies.group_file_bytes[group] += (unsigned long)((struct tag_data *)address)->size;
+					forge_dependency_count(group, 0, (unsigned long)((struct tag_data *)address)->size);
 				break;
 
 			case _tag_schema_reference:
@@ -924,6 +943,7 @@ static void forge_dependency_add(
 	unsigned long group_tag;
 	struct tag_schema_group const *schema;
 	short group;
+	long previous;
 
 	if (tag_index == NONE)
 		return;
@@ -937,14 +957,18 @@ static void forge_dependency_add(
 	group_tag = tag_get_group_tag(tag_index);
 	if (!group_tag || group_tag == NONE)
 		return;
-	forge_dependencies.tags[forge_dependencies.count++] = tag_index;
 	group = forge_dependency_group(group_tag);
 	forge_dependencies.group_counts[group]++;
 	schema = forge_schema_group_get(group_tag);
-	if (!schema)
-		return;
-	forge_dependencies.group_tag_bytes[group] += (unsigned long)schema->definition->size;
-	forge_dependency_walk(tag_get(group_tag, tag_index), schema->definition, group, 0);
+	previous = forge_dependencies.current;
+	forge_dependencies.current = forge_dependencies.count;
+	forge_dependencies.tags[forge_dependencies.count++] = tag_index;
+	if (schema)
+	{
+		forge_dependency_count(group, (unsigned long)schema->definition->size, 0);
+		forge_dependency_walk(tag_get(group_tag, tag_index), schema->definition, group, 0);
+	}
+	forge_dependencies.current = previous;
 
 	return;
 }
@@ -988,8 +1012,9 @@ static void forge_dependencies_log(
 	{
 		for (index = 0; index < forge_dependencies.count; index++)
 		{
-			fprintf(file, "%s %s\n", forge_group_text(tag_get_group_tag(forge_dependencies.tags[index]), text),
-				tag_get_name(forge_dependencies.tags[index]));
+			fprintf(file, "%s %s\t%lu %lu\n", forge_group_text(tag_get_group_tag(forge_dependencies.tags[index]), text),
+				tag_get_name(forge_dependencies.tags[index]), forge_dependencies.tag_sizes[index],
+				forge_dependencies.file_sizes[index]);
 		}
 		fclose(file);
 		platform_log("forge: deps' names written to %s", file_name);

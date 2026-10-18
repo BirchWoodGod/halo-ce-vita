@@ -286,6 +286,51 @@ The same walk, compared by tag path with each map's tag list:
 - The Hunter on Blood Gulch lacks 115 of its 200 (57 sounds, 16 bitmaps, 11
   effects, its models and animations).
 
+### The probe: the Warthog from bloodgulch into another map
+
+The Warthog is already in nearly every map, so the probe asks what it
+would take where it is missing (c20, the Library), and does the same for
+a Hunter on Blood Gulch:
+
+- **c20 lacks 120 of the Warthog's 285 tags: 198 KB of tag data and 1.1
+  MB of pixels and samples.** c20 has 4.8 MB of tag cache free, so it fits
+  without a larger cache.
+- **Blood Gulch lacks 115 of the Hunter's 200: 618 KB of tag data and 3.1
+  MB of pixels and samples.** 13.7 MB free: fits many times over.
+- The Warthog's 285 tags have the same sizes, tag for tag, in bloodgulch,
+  a10 and b30. That supports deduplicating by path for the retail maps
+  (sizes, not contents, compared: a pack build should compare a hash of
+  each tag's bytes, pointers masked).
+
+What the import itself needs, from the code:
+
+1. **Read the source map's tags.** The port already decompresses every
+   Xbox map into the cache partition and reads its tag data at load
+   (`cache_files.c`); a second, read-only reader of another map's header
+   and tag data is new but small.
+2. **Find each tag's bytes.** The schema walker (the spike's
+   `forge deps`) already visits every root, block and data of a tag; it
+   would collect their extents instead of summing them.
+3. **Copy and relocate.** Copy the missing tags into free tag cache,
+   rewrite every block and data address and every reference's name
+   pointer by the move, and every tag index (`tag_reference.index`, the
+   schema's tag index fields) to the target's new or existing tag. The
+   tag instance table (`global_tag_instances`, inside the target's tag
+   data) has no room for more tags: it needs a larger table of our own.
+   `tag_relocate.c` does the address part for a whole map at load.
+4. **Reset runtime fields.** The schema's reset fields (texture cache
+   handles, sound cache slots, predicted resources) as a map load leaves
+   them, then the validator over the new tags (`tag_validate.c`).
+5. **Read their pixels and samples from the source file.** A bitmap's or
+   sound's file offset points into its own map: the texture and sound
+   caches must know which file, as a Custom Edition map's offsets already
+   count in one space of several files (`custom_edition_cache.c`).
+6. **Before the map's objects are placed**, never mid-game (option C's
+   problems), and identically on every machine of a network game.
+
+It is not cheap: 3 and 5 touch the loader and the caches, and it is the
+pack loader (option B) under another name. The probe stops at findings.
+
 ### The memory budget
 
 The tag cache is 22 MB (`TAG_CACHE_SIZE`): the map's tag data, then the
