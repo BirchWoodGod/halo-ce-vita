@@ -122,6 +122,16 @@ struct halo_menu_widget
 	long line;
 };
 
+/* a font of the menus' own (<font name=... file=...>): a file of the menus
+folder that tools/halo3_menu_art.py writes (its characters' sizes and
+places, and their 8-bit pixels), made a font tag of the game's
+(menu_tags.c) that a widget's font= names */
+struct halo_menu_font
+{
+	char const *name, *path;
+	char const *file;
+	long line;
+};
 /* a screen of the Halo 3 set (menus/halo3): its root widget, and the Xbox
 screen it stands for while Menu style is Halo 3 (<menus root=... replaces=...>) */
 struct halo_menu_screen
@@ -158,6 +168,9 @@ struct halo_menus
 	/* the Halo 3 set's screens (<menus root= replaces=>) */
 	struct halo_menu_screen *screens;
 	long screen_count;
+	/* the menus' own fonts (<font>) */
+	struct halo_menu_font *fonts;
+	long font_count;
 };
 
 /* the menus, read from the files (once; the same each call after); NULL if

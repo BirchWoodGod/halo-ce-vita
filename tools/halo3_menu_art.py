@@ -10,6 +10,7 @@ OFL, tools/fonts/OFL.txt). The same bytes each run.
 """
 import math
 import os
+import struct
 import sys
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -222,6 +223,47 @@ def title_halo():
     return image.resize((256, 64), Image.Resampling.LANCZOS)
 
 
+# the menus' fonts (menu_tags.c makes each a font tag of the game's): the
+# characters of English and Spanish (32 to 126, 160 to 255), each its advance,
+# its pixels' box and where that box sits from the pen on the baseline, and its
+# pixels, 8 bits each, anti-aliased. The file: "H3FN", version 1, ascending,
+# descending, leading height and width, the count; then per character its code,
+# advance, box width and height, origin x and y (the pen minus the box's left,
+# the baseline minus its top); then the pixels, character after character
+FONT_FILES = {
+    'font_title.bin': ('SairaSemiCondensed-Medium.ttf', 22, 1),
+    'font_item.bin': ('SairaSemiCondensed-Regular.ttf', 15, 0),
+    'font_small.bin': ('SairaSemiCondensed-Regular.ttf', 12, 0),
+}
+
+
+def font_file(face, size, tracking):
+    font = ImageFont.truetype(os.path.join(FONTS, face), size)
+    ascent, descent = font.getmetrics()
+    codes = list(range(32, 127)) + list(range(160, 256))
+    records = []
+    pixels = bytearray()
+    for code in codes:
+        char = chr(code)
+        advance = round(font.getlength(char)) + tracking
+        x0, y0, x1, y1 = font.getbbox(char, anchor='ls')
+        width, height = max(x1 - x0, 0), max(y1 - y0, 0)
+        if width and height:
+            image = Image.new('L', (width, height), 0)
+            ImageDraw.Draw(image).text((-x0, -y0), char, font=font, fill=255, anchor='ls')
+            pixels += image.tobytes()
+        records.append(struct.pack('<Hhhhhh', code, advance, width, height, -x0, -y0))
+    # (the font's own ascent and descent leave room for accents above the
+    # capitals and more: a widget draws a line only when its height fits,
+    # so the heights are the characters' own, the highest above the baseline
+    # and the lowest below it)
+    tops = [struct.unpack('<Hhhhhh', r)[5] for r in records]
+    bottoms = [struct.unpack('<Hhhhhh', r)[3] - struct.unpack('<Hhhhhh', r)[5] for r in records]
+    ascent, descent = max(tops), max(max(bottoms), 0)
+    header = b'H3FN' + struct.pack('<Hhhhhh', 1, ascent, descent, 0, 0, len(codes))
+    return header + b''.join(records) + bytes(pixels)
+
+
 ART = {
     'column.png': column,
     'haze.png': haze,
@@ -247,6 +289,9 @@ def main(folder):
     for name, make in ART.items():
         # (no time or software stamp: the same bytes each run)
         make().save(os.path.join(folder, name), format='PNG', optimize=True)
+    for name, (face, size, tracking) in FONT_FILES.items():
+        with open(os.path.join(folder, name), 'wb') as out:
+            out.write(font_file(face, size, tracking))
 
 
 if __name__ == '__main__':

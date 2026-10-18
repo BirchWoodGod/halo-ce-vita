@@ -45,6 +45,7 @@ is let go in scenario_tags_unload, before the next map's tags load.
 #include "cache/cache_files.h"
 #include "tag_files/tag_groups.h"
 #include "text/text_group.h"
+#include "text/font_group.h"
 #include "rasterizer/xbox/rasterizer_xbox_hardware_bitmaps.h"
 #include "memory/zlib/zlib.h"
 #include "cache_file_formats.h"
@@ -397,6 +398,7 @@ static struct
 	widget's own text's and strings' (NONE: none) */
 	long *widget_tags;
 	long *bitmap_tags;
+	long *font_tags;
 	long *strings_tags;
 	long *text_tags;
 	long *spinner_tags;
@@ -961,11 +963,126 @@ static void handler_build(struct ui_widget_event_handler_reference *handler, str
 /* a font: large, small, terminal, or the map's by its path */
 static long font_tag(char const *font, char const *file, long line)
 {
-	char const *path = !strcmp(font, "large") ? "ui\\large_ui" :
+	long index;
+	char const *path;
+
+	/* (the menus' own fonts first: <font>) */
+	for (index = 0; index < build.menus->font_count; index++)
+	{
+		if (!strcmp(font, build.menus->fonts[index].name))
+			return build.font_tags[index];
+	}
+	path = !strcmp(font, "large") ? "ui\\large_ui" :
 		!strcmp(font, "small") ? "ui\\small_ui" :
 		!strcmp(font, "terminal") ? "ui\\interstate" : font;
-
 	return map_tag(FONT_TAG, path, file, line);
+}
+
+/* a font of the menus' own (<font>, tools/halo3_menu_art.py): its file read
+and made a font tag as the game's are (text/font_group.h): one table of the
+256 first characters, each character its advance, box and origin, and the
+pixels, 8 bits each, that rasterizer_text.c copies to its glyph cache. NULL
+(the widgets' text not drawn) if the file is not one */
+struct menu_font_character
+{
+	word character;
+	short character_width;
+	short bitmap_width;
+	short bitmap_height;
+	short bitmap_origin_x;
+	short bitmap_origin_y;
+	short hardware_character_index;
+	word pad;
+	long pixels_offset;
+};
+
+typedef char verify_menu_font_character_size[sizeof(struct menu_font_character) == FONT_CHARACTER_SIZE ? 1 : -1];
+
+static short read_short(byte const *data)
+{
+	return (short)(data[0] | (data[1] << 8));
+}
+
+static void *font_build(struct halo_menu_font const *source)
+{
+	unsigned long size = 0;
+	byte *data = halo_menus_file_read(source->path, &size);
+	struct font_header *font = NULL;
+	struct font_character_table *table;
+	short *indices;
+	struct menu_font_character *characters;
+	byte *pixels;
+	long count = 0, index, pixel_bytes = 0;
+
+	if (!data || size < 16 || memcmp(data, "H3FN", 4) || read_short(data + 4) != 1 ||
+		(count = read_short(data + 14)) <= 0 || size < 16 + (unsigned long)count * 12)
+	{
+		problem(source->file, source->line, "a font file of the menus folder cannot be read:", source->path);
+		halo_menus_file_free(data);
+		return NULL;
+	}
+	for (index = 0; index < count; index++)
+	{
+		byte const *record = data + 16 + index * 12;
+
+		pixel_bytes += (long)read_short(record + 4) * read_short(record + 6);
+	}
+	if (size != 16 + (unsigned long)count * 12 + (unsigned long)pixel_bytes)
+	{
+		problem(source->file, source->line, "a font file of the menus folder is not whole:", source->path);
+		halo_menus_file_free(data);
+		return NULL;
+	}
+	font = allocate(sizeof(*font));
+	table = allocate(sizeof(*table));
+	indices = allocate(256 * sizeof(short));
+	characters = allocate(count * sizeof(*characters));
+	pixels = allocate(pixel_bytes ? pixel_bytes : 1);
+	if (!font || !table || !indices || !characters || !pixels)
+	{
+		halo_menus_file_free(data);
+		return font;
+	}
+	memset(font, 0, sizeof(*font));
+	font->ascending_height = read_short(data + 6);
+	font->descending_height = read_short(data + 8);
+	font->leading_height = read_short(data + 10);
+	font->leading_width = read_short(data + 12);
+	for (index = 0; index < 256; index++)
+		indices[index] = NONE;
+	table->character_indices.count = 256;
+	table->character_indices.address = indices;
+	font->character_tables.count = 1;
+	font->character_tables.address = table;
+	for (index = 0; index < NUMBER_OF_TEXT_STYLES; index++)
+		reference_clear(&font->style_fonts[index], FONT_TAG);
+	pixel_bytes = 0;
+	for (index = 0; index < count; index++)
+	{
+		byte const *record = data + 16 + index * 12;
+		struct menu_font_character *character = &characters[index];
+		word code = (word)read_short(record);
+
+		character->character = code;
+		character->character_width = read_short(record + 2);
+		character->bitmap_width = read_short(record + 4);
+		character->bitmap_height = read_short(record + 6);
+		character->bitmap_origin_x = read_short(record + 8);
+		character->bitmap_origin_y = read_short(record + 10);
+		character->hardware_character_index = NONE;
+		character->pad = 0;
+		character->pixels_offset = pixel_bytes;
+		pixel_bytes += (long)character->bitmap_width * character->bitmap_height;
+		if (code < 256)
+			indices[code] = (short)index;
+	}
+	memcpy(pixels, data + 16 + count * 12, pixel_bytes);
+	font->characters.count = count;
+	font->characters.address = characters;
+	font->pixels.size = pixel_bytes;
+	font->pixels.address = pixels;
+	halo_menus_file_free(data);
+	return font;
 }
 
 static long event_words_count(char const *text)
@@ -1913,6 +2030,7 @@ void menu_tags_loaded(
 	build.text_tags = malloc((widget_count + 1) * sizeof(long));
 	build.spinner_tags = malloc((widget_count + 1) * sizeof(long));
 	build.bitmap_tags = malloc((menus->bitmap_count + 1) * sizeof(long));
+	build.font_tags = malloc((menus->font_count + 1) * sizeof(long));
 	build.strings_tags = malloc((menus->string_list_count + 1) * sizeof(long));
 	if (!build.widget_tags || !build.text_tags || !build.spinner_tags || !build.bitmap_tags || !build.strings_tags)
 		goto failed;
@@ -1930,7 +2048,7 @@ void menu_tags_loaded(
 		platform_log("menus: there is no screen %s (the Xbox's, or ours: %s)", XBOX_MULTIPLAYER_SCREEN, menus->root);
 		goto failed;
 	}
-	total = widget_count + own_lists + menus->string_list_count + menus->bitmap_count;
+	total = widget_count + own_lists + menus->string_list_count + menus->bitmap_count + menus->font_count;
 	instances = build.failed ? NULL : instances_grow(total, &build.first_index, &build.first_salt);
 	if (!instances)
 		goto failed;
@@ -1945,12 +2063,19 @@ void menu_tags_loaded(
 		build.strings_tags[index] = next_tag();
 	for (index = 0; index < menus->bitmap_count; index++)
 		build.bitmap_tags[index] = next_tag();
+	for (index = 0; index < menus->font_count; index++)
+		build.font_tags[index] = next_tag();
 	/* the tags: the bitmaps and strings first, which the widgets name; the
 	widgets' names in the table before any is built, which they find there */
 	for (index = 0; index < menus->bitmap_count && !build.failed; index++)
 	{
 		instance_set(instances, BITMAP_GROUP_TAG, build.bitmap_tags[index], menus->bitmaps[index].name, "",
 			bitmap_build(&menus->bitmaps[index], build.bitmap_tags[index]));
+	}
+	for (index = 0; index < menus->font_count && !build.failed; index++)
+	{
+		instance_set(instances, FONT_TAG, build.font_tags[index], menus->fonts[index].name, "",
+			font_build(&menus->fonts[index]));
 	}
 	for (index = 0; index < menus->string_list_count && !build.failed; index++)
 	{
@@ -2045,6 +2170,7 @@ done:
 	free(build.spinner_tags);
 	free(build.strings_tags);
 	free(build.bitmap_tags);
+	free(build.font_tags);
 	memset(&build, 0, sizeof(build));
 }
 

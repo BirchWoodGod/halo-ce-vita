@@ -177,6 +177,7 @@ enum element
 	_element_frame,
 	_element_strings,
 	_element_string,
+	_element_font,
 	_element_widget,
 	_element_child,
 	_element_on,
@@ -372,6 +373,25 @@ function returns (out of memory: the reading has failed) */
 			(reader)->menus.items[(reader)->last[owner]].next = (index); \
 		(reader)->last[owner] = (index); \
 	} while (0)
+
+static void read_font(struct reader *reader, const XML_Char **attributes)
+{
+	struct halo_menus *menus = &reader->menus;
+	struct halo_menu_font font;
+	struct attribute table[] = { { "name", &font.name }, { "file", &font.path } };
+
+	memset(&font, 0, sizeof(font));
+	font.file = reader->file;
+	font.line = current_line(reader);
+	read_attributes(reader, "font", attributes, table, sizeof(table) / sizeof(*table));
+	if (!reader->failed && (!font.name || !font.path))
+	{
+		reader_error(reader, "a <font> needs a name and a file");
+		return;
+	}
+	GROW(reader, menus->fonts, menus->font_count);
+	menus->fonts[menus->font_count++] = font;
+}
 
 static void read_bitmap(struct reader *reader, const XML_Char **attributes)
 {
@@ -746,6 +766,11 @@ static void XMLCALL element_start(void *data, const XML_Char *name, const XML_Ch
 	{
 		element = _element_frame;
 		read_frame(reader, attributes, owner);
+	}
+	else if (!strcmp(name, "font") && parent == _element_menus)
+	{
+		element = _element_font;
+		read_font(reader, attributes);
 	}
 	else if (!strcmp(name, "strings") && parent == _element_menus)
 	{

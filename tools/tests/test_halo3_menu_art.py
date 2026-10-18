@@ -5,6 +5,7 @@ and format, the same bytes each run, and the colours the design pins
     python3 -m unittest tools/tests/test_halo3_menu_art.py -v
 """
 import os
+import struct
 import subprocess
 import sys
 import tempfile
@@ -42,11 +43,36 @@ def generate(folder):
     subprocess.run([sys.executable, GENERATOR, folder], check=True)
 
 
+FONTS = ('font_title.bin', 'font_item.bin', 'font_small.bin')
+
+
 class ArtTest(unittest.TestCase):
+    def test_fonts(self):
+        with tempfile.TemporaryDirectory() as folder:
+            generate(folder)
+            for name in FONTS:
+                with open(os.path.join(folder, name), 'rb') as f:
+                    data = f.read()
+                self.assertEqual(data[:4], b'H3FN', name)
+                version, ascent, descent, leading_h, leading_w, count = struct.unpack('<Hhhhhh', data[4:16])
+                self.assertEqual(version, 1)
+                self.assertGreater(ascent, 0)
+                self.assertGreaterEqual(count, 190)
+                records = [struct.unpack('<Hhhhhh', data[16 + i * 12:28 + i * 12]) for i in range(count)]
+                codes = [r[0] for r in records]
+                self.assertIn(ord('A'), codes)
+                self.assertIn(0xD1, codes)  # N with a tilde
+                pixel_bytes = sum(r[2] * r[3] for r in records)
+                self.assertEqual(len(data), 16 + count * 12 + pixel_bytes, name)
+                a = records[codes.index(ord('A'))]
+                self.assertGreater(a[1], 0)
+                self.assertGreater(a[4 + 1], 0)  # origin y: the top above the baseline
+
     def test_files_sizes_format(self):
         with tempfile.TemporaryDirectory() as folder:
             generate(folder)
             self.assertEqual(sorted(f for f in os.listdir(folder) if f.endswith('.png')), sorted(EXPECTED))
+            self.assertEqual(sorted(f for f in os.listdir(folder) if f.endswith('.bin')), sorted(FONTS))
             for name, size in EXPECTED.items():
                 path = os.path.join(folder, name)
                 with Image.open(path) as image:
@@ -59,7 +85,7 @@ class ArtTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as first, tempfile.TemporaryDirectory() as second:
             generate(first)
             generate(second)
-            for name in EXPECTED:
+            for name in list(EXPECTED) + list(FONTS):
                 with open(os.path.join(first, name), 'rb') as a, open(os.path.join(second, name), 'rb') as b:
                     self.assertEqual(a.read(), b.read(), name)
 
