@@ -467,40 +467,124 @@ static void text_show(struct widget_instance *widget, char const *text)
 	memcpy(widget->parameters.text_box.text, characters, length * sizeof(wchar_t));
 }
 
-/* (the Halo 3 menus' nameplate, port h3 nameplate) the first local player's
-active profile's name; with none yet (a first start), the player's name
-(network.player_name: on the Vita its user name), else "Player". Not the
-game's "get active plyr profile name", which asserts without a profile */
-static void h3_player_name(char *name, int size)
+/* (the Halo 3 menus' nameplate, port h3 nameplate: the main menu's, the
+lobbies', the pause screen's) the profile it shows: the first local
+player's active one; with none active yet (the main menu after a start),
+the one Customize saved or Select Profile chose this session, else the one
+last used (the game's z:\lastprof.txt), else the first there is. Its name
+and primary colour are read once and kept (reading a profile is a file's
+read), read again when the profile shown changes, when Customize saves
+(h3_nameplate_changed) and every few seconds */
+#define H3_NAMEPLATE_READ_MILLISECONDS 4000
+/* (the profiles looked through for the first: the profile screens' most) */
+#define H3_NAMEPLATE_PROFILES 100
+
+static struct
 {
-	long profile_index = player_ui_get_active_player_profile_index(0);
-	struct player_profile profile;
+	/* the profile Customize saved or Select Profile chose (NONE) */
+	long chosen;
+	/* what was read: of which profile (NONE: none could be), with the
+	active one then, when; its name (UTF-8) and colour (NONE: none) */
+	boolean read;
+	boolean changed;
+	long shown;
+	long active;
+	unsigned long read_at;
+	char name[64];
+	short color;
+	char said[96];
+} h3_plate = { NONE, FALSE, FALSE, NONE, NONE, 0, "", NONE, "" };
+
+/* a profile's name as UTF-8 */
+static void h3_profile_utf8(char *name, int size, struct player_profile const *profile)
+{
 	int length = 0, index;
 
-	name[0] = 0;
-	if (profile_index != NONE && player_profile_get(profile_index, &profile))
+	for (index = 0; index < MAXIMUM_PLAYER_PROFILE_NAME_LENGTH && profile->player_name[index] && length < size - 4; index++)
 	{
-		for (index = 0; index < MAXIMUM_PLAYER_PROFILE_NAME_LENGTH && profile.player_name[index] &&
-			length < size - 4; index++)
-		{
-			unsigned long code = (unsigned short)profile.player_name[index];
+		unsigned long code = (unsigned short)profile->player_name[index];
 
-			if (code < 0x80)
-				name[length++] = (char)code;
-			else if (code < 0x800)
-			{
-				name[length++] = (char)(0xC0 | (code >> 6));
-				name[length++] = (char)(0x80 | (code & 0x3F));
-			}
-			else
-			{
-				name[length++] = (char)(0xE0 | (code >> 12));
-				name[length++] = (char)(0x80 | ((code >> 6) & 0x3F));
-				name[length++] = (char)(0x80 | (code & 0x3F));
-			}
+		if (code < 0x80)
+			name[length++] = (char)code;
+		else if (code < 0x800)
+		{
+			name[length++] = (char)(0xC0 | (code >> 6));
+			name[length++] = (char)(0x80 | (code & 0x3F));
 		}
-		name[length] = 0;
+		else
+		{
+			name[length++] = (char)(0xE0 | (code >> 12));
+			name[length++] = (char)(0x80 | ((code >> 6) & 0x3F));
+			name[length++] = (char)(0x80 | (code & 0x3F));
+		}
 	}
+	name[length] = 0;
+}
+
+/* (Customize saved a profile, Select Profile chose one) the nameplate shows
+it, read again at once */
+static void h3_nameplate_changed(long profile_index)
+{
+	if (profile_index != NONE)
+		h3_plate.chosen = profile_index;
+	h3_plate.changed = TRUE;
+}
+
+static void h3_nameplate_read(void)
+{
+	long active = player_ui_get_active_player_profile_index(0);
+	unsigned long now = system_milliseconds();
+	long candidates[4];
+	short index;
+
+	if (h3_plate.read && !h3_plate.changed && active == h3_plate.active &&
+		now - h3_plate.read_at < H3_NAMEPLATE_READ_MILLISECONDS)
+	{
+		return;
+	}
+	h3_plate.read = TRUE;
+	h3_plate.changed = FALSE;
+	h3_plate.active = active;
+	h3_plate.read_at = now;
+	h3_plate.shown = NONE;
+	h3_plate.name[0] = 0;
+	h3_plate.color = NONE;
+	candidates[0] = active;
+	candidates[1] = h3_plate.chosen;
+	candidates[2] = active == NONE && h3_plate.chosen == NONE ? player_ui_get_player1_last_used_profile_index() : NONE;
+	candidates[3] = NONE;
+	if (candidates[0] == NONE && candidates[1] == NONE && candidates[2] == NONE)
+	{
+		long first[H3_NAMEPLATE_PROFILES];
+		word count = H3_NAMEPLATE_PROFILES;
+
+		player_profiles_enumerate_available_to_local_player_index(0, &count, first, FALSE);
+		if (count > 0)
+			candidates[3] = first[0];
+	}
+	for (index = 0; index < (short)NUMBEROF(candidates); index++)
+	{
+		struct player_profile profile;
+
+		if (candidates[index] == NONE || !player_profile_get(candidates[index], &profile))
+			continue;
+		h3_profile_utf8(h3_plate.name, (int)sizeof(h3_plate.name), &profile);
+		if (!h3_plate.name[0])
+			continue;
+		h3_plate.shown = candidates[index];
+		h3_plate.color = profile.primary_color_index;
+		break;
+	}
+}
+
+/* the name the nameplate shows: its profile's; with none (a first start),
+the player's name (network.player_name: on the Vita its user name), else
+"Player". Not the game's "get active plyr profile name", which asserts
+without a profile */
+static void h3_player_name(char *name, int size)
+{
+	h3_nameplate_read();
+	snprintf(name, (size_t)size, "%s", h3_plate.name);
 	if (!name[0])
 		snprintf(name, (size_t)size, "%s", getenv("HALO_NET_PLAYER_NAME") && getenv("HALO_NET_PLAYER_NAME")[0] ?
 			getenv("HALO_NET_PLAYER_NAME") : "Player");
@@ -509,9 +593,23 @@ static void h3_player_name(char *name, int size)
 static void h3_nameplate_update(struct widget_instance *widget)
 {
 	char name[64];
+	char said[96];
+	short frame;
 
 	h3_player_name(name, sizeof(name));
+	/* (the bar's frame: 0 Halo 3's green for none, then the game's colours
+	in its order, as the swatches) */
+	frame = (short)(h3_plate.color < 0 || h3_plate.color >= 18 ? 0 : h3_plate.color + 1);
 	text_show(widget, name);
+	if (widget)
+		widget->animation.current_frame_index = frame;
+	snprintf(said, sizeof(said), "%s, colour %d (frame %d)%s", name, h3_plate.color, frame,
+		h3_plate.shown == NONE ? ", no profile" : h3_plate.shown == h3_plate.active ? ", the active profile" : "");
+	if (strcmp(said, h3_plate.said))
+	{
+		snprintf(h3_plate.said, sizeof(h3_plate.said), "%s", said);
+		platform_log("menus: nameplate: %s", said);
+	}
 }
 
 /* (the Halo 3 main menu's live servers, port h3 servers) up to three rows
@@ -2424,6 +2522,7 @@ static boolean h3_profile_play(short item, short controller_index)
 	}
 	player_ui_set_single_player_local_player_controller(0, (short)(controller_index != NONE ? controller_index : 0));
 	player_ui_set_active_player_profile(0, profile_index, &profile);
+	h3_nameplate_changed(profile_index);
 	platform_log("menus: h3 profiles: chose %s (campaign)", name);
 	return TRUE;
 }
@@ -2992,6 +3091,8 @@ static void h3_custom_save(void)
 	if (h3_profile_same(player_ui_get_active_player_profile_index(0), h3_custom.index))
 		player_ui_set_active_player_profile(0, player_ui_get_active_player_profile_index(0), &saved);
 	h3_profiles.focus_index = h3_custom.index;
+	/* (the nameplate shows it, its new name and colour, at once) */
+	h3_nameplate_changed(h3_custom.index);
 	platform_log("menus: h3 customize: saved %s: color %d, stick %d, buttons %d, look %d, invert %d, flight %d, "
 		"autocenter %d, vibration %s", name, saved.primary_color_index, saved.controller_settings.joystick_preset,
 		saved.controller_settings.button_preset, saved.controller_settings.look_sensitivity,

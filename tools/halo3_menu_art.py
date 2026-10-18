@@ -152,6 +152,28 @@ def nameplate():
     return image
 
 
+def nameplate_colour(colour):
+    # the nameplate in a profile's primary colour (the main menu's, the
+    # lobbies' and the pause screen's: menu_functions.c h3_nameplate_update
+    # picks the frame): the bar the colour made light enough that the dark
+    # name on it reads on every colour, the emblem square at the left the
+    # colour itself, the rank square at the right darker, as the green one
+    rgb = ((colour >> 16) & 0xFF, (colour >> 8) & 0xFF, colour & 0xFF)
+    luminance = (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255
+    t = 0.62 if luminance < 0.2 else 0.5 if luminance < 0.6 else 0.25
+    bar = tuple(round(c + (255 - c) * t) for c in rgb)
+    image = horizontal_gradient((256, 16), [
+        (0.0, tuple(round(c * .94) for c in bar) + (255,)),
+        (0.8, bar + (255,)),
+        (1.0, tuple(round(c * .82) for c in bar) + (255,)),
+    ])
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([0, 0, 15, 15], fill=rgb + (255,))
+    draw.rectangle([240, 0, 255, 15], fill=tuple(round(c * .62) for c in bar) + (255,))
+    draw.rectangle([0, 0, 255, 15], outline=(255, 255, 255, alpha(.35)))
+    return image
+
+
 def server_plate():
     # a live server's row: Halo 3's blue nameplate, fading out to the right
     image = horizontal_gradient((256, 16), [
@@ -476,6 +498,7 @@ ART = {
 }
 for _index, _colour in enumerate(PLAYER_COLOURS):
     ART['swatch_%02d.png' % _index] = (lambda colour: lambda: swatch(colour))(_colour)
+    ART['nameplate_%02d.png' % _index] = (lambda colour: lambda: nameplate_colour(colour))(_colour)
 
 
 def main(folder):

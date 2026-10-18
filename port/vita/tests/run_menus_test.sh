@@ -95,6 +95,12 @@
 #            its own camera): shown in the profile's colour, made again in
 #            RED as COLOR changes, never the swatch meanwhile, let go with the
 #            editor; with HALO_SCENE_PACKS=0 the swatch alone
+#   h3nameplate  the Halo 3 nameplate (the main menu's, the lobbies' and the
+#            pause screen's, port h3 nameplate) with HALO_TEST_PROFILE's profile
+#            and no profile chosen yet (a start): the profile's name and its
+#            colour's bar, not the system's user name in green; CUSTOMIZATION
+#            renames it and makes it RED, Circle saves: back at the main menu
+#            the nameplate says the new name on the red bar at once
 #   h3damaged  a profile of a 0-byte blam.sav and one of garbage: SELECT
 #            PROFILE says each is damaged and plays neither, CUSTOMIZATION
 #            edits neither, CREATE NEW PROFILE still makes one; with
@@ -159,7 +165,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3damaged h3mods h3modspicker h3modstouch h3oddrows}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3nameplate h3damaged h3mods h3modspicker h3modstouch h3oddrows}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
 
@@ -720,6 +726,38 @@ for case in $cases; do
 			fail h3customize "the changes were not there after a restart"
 		grep -aq "menus: h3 customize: Vita Chief: no changes" "$out/h3customize_again/run.log" ||
 			fail h3customize "leaving the editor unchanged saved anyway" ;;
+	h3nameplate)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "--- h3nameplate"; echo "SKIP: no HALO_TEST_PROFILE"; continue
+		fi
+		# (the main menu at a start: the nameplate; then CUSTOMIZATION as h3customize - the name typed,
+		# COLOR right three times: RED -, Circle: saved, Circle: the main menu again, its nameplate)
+		plate_name=$(profile_fields "$HALO_TEST_PROFILE" | cut -d'|' -f1)
+		plate_color=$(profile_fields "$HALO_TEST_PROFILE" | cut -d'|' -f2)
+		plate_pad="$h3pad @00-plate-at-start:0:300 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000"
+		plate_pad="$plate_pad a wait:150:3000 a wait:150:2000 down:150:600 right:150:500 right:150:500 right:150:500"
+		plate_pad="$plate_pad b wait:150:3000 b wait:150:3000 up:150:500 up:150:500 up:150:500 up:150:500 up:150:500 wait:150:1000"
+		plate_pad="$plate_pad @01-plate-customized:0:300"
+		rm -rf "$out/h3nameplate_shots"
+		mkdir -p "$out/h3nameplate_shots"
+		profile_from=$HALO_TEST_PROFILE run h3nameplate "$menus_data" 40 "$plate_pad" HALO_MENU_STYLE=halo3 \
+			"HALO_TEST_TEXT_INPUT=Vita Chief" HALO_NET_PLAYER_NAME=user549 HALO_SCREENSHOT_DIR="$out/h3nameplate_shots"
+		check_h3 h3nameplate halo3
+		log=$out/h3nameplate/run.log
+		grep -a "menus: nameplate" "$log"
+		# (a start, no profile chosen: the profile's name and colour, its frame the colour's - 0, the
+		# green, for a profile of no colour -; never the user name)
+		frame=$((plate_color < 0 || plate_color >= 18 ? 0 : plate_color + 1))
+		grep -a "menus: nameplate:" "$log" | head -1 | grep -q "menus: nameplate: $plate_name, colour $plate_color (frame $frame)$" ||
+			fail h3nameplate "at the start the nameplate did not show $plate_name's name and colour"
+		grep -aq "menus: nameplate: user549" "$log" && fail h3nameplate "the nameplate showed the user name"
+		grep -aq "menus: h3 customize: saved Vita Chief: color 2" "$log" || fail h3nameplate "CUSTOMIZATION did not save"
+		# (after the save, at once: the new name on the red bar, frame 3)
+		grep -aq "menus: nameplate: Vita Chief, colour 2 (frame 3)$" "$log" ||
+			fail h3nameplate "the nameplate did not change to the saved name and colour"
+		grep -a "ui: screen" "$log" | tail -1 | grep -q 'pc.h3.main.screen' || fail h3nameplate "not back at the main menu"
+		[ -n "${HALO_TEST_SHOTS:-}" ] && mkdir -p "$HALO_TEST_SHOTS/h3nameplate" &&
+			cp "$out"/h3nameplate_shots/*.bmp "$HALO_TEST_SHOTS/h3nameplate/" 2>/dev/null ;;
 	h3damaged)
 		# (two damaged profiles: Broken, a 0-byte blam.sav; Garbage, 512 bytes of garbage)
 		rm -rf "$out/h3damaged_save"
@@ -858,7 +896,7 @@ for case in $cases; do
 		grep -a "ui: screen" "$log" | tail -1 | grep -q 'pc.h3.main.screen' ||
 			fail h3modstouch "a tap on Back did not go back to the main menu" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3damaged|h3mods|h3modspicker|h3modstouch|h3oddrows]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3oddrows]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"
