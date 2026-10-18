@@ -305,7 +305,7 @@ ui.map has no player, so it would stand still, its weapon never readied) */
 		object->facing, object->made_color_index, (double)(vita_host_time_us() - started) / 1000.0);
 }
 
-/* the object held where it stands (no ground under it), recoloured if
+/* the object held where it stands (no ground under it), made again if
 its colour changed */
 static void object_hold(struct menu_scene_object *object)
 {
@@ -323,14 +323,11 @@ static void object_hold(struct menu_scene_object *object)
 	object_set_position(object->unit_index, &position, &forward, &up);
 	datum->object.translational_velocity.i = datum->object.translational_velocity.j =
 		datum->object.translational_velocity.k = 0.f;
+	/* (another colour: made again in it, at the next update; an object's
+	colours are worked out as it is made) */
 	if (color_index != object->made_color_index)
 	{
-		real_rgb_color color = player_profile_get_rgb_color(color_index);
-		short index;
-
-		for (index = 0; index < NUMBER_OF_OBJECT_CHANGE_COLORS; index++)
-			datum->object.base_change_colors[index] = color;
-		object->made_color_index = color_index;
+		object_forget(object, TRUE);
 		platform_log("menus: h3 scene object: recoloured %d", color_index);
 	}
 }
