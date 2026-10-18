@@ -90,6 +90,7 @@ halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
 #include "halo_menus.h"
 #include "../src/lang.h"
 #include "../src/p2p.h"
+#include "../src/p2p_friends.h"
 #include "../src/crossplay_guard.h"
 #include "network_wire.h"
 #include "browser_list.h"
@@ -276,6 +277,13 @@ enum
 	_function_h3_adhoc_coop,
 	_function_h3_adhoc_join,
 	_function_h3_adhoc_cancel,
+	_function_h3_friends_init,
+	_function_h3_friends_act,
+	_function_h3_friends_second,
+	_function_h3_friends_options_ask,
+	_function_h3_friends_option,
+	_function_h3_friends_page_up,
+	_function_h3_friends_page_down,
 };
 
 /* in port_game_data_input_names' order */
@@ -315,6 +323,9 @@ enum
 	_input_h3_mods_confirm,
 	_input_h3_adhoc_joining,
 	_input_h3_network_status,
+	_input_h3_friends,
+	_input_h3_friends_options,
+	_input_h3_friends_panel,
 };
 
 /* what a line of typing is for */
@@ -329,6 +340,7 @@ enum
 	_typing_profile_name,
 	_typing_forge_name,
 	_typing_fileshare_rename,
+	_typing_friend_code,
 };
 
 /* the password and code screens' help lines (their strings' order) */
@@ -1881,6 +1893,17 @@ static boolean internet_play(void)
 	char text[96];
 
 	return !config_boolean("network.adhoc") && p2p_status(text, sizeof(text)) != 0;
+}
+
+/* a setting the settings panel and these screens change live: its
+environment variable as they set it, else config.toml's */
+static boolean config_boolean_live(char const *name, char const *variable)
+{
+	char const *value = getenv(variable);
+
+	if (value && value[0])
+		return !strcmp(value, "true") || !strcmp(value, "1");
+	return config_boolean(name) != 0;
 }
 
 /* a Play page setting, set as the settings panel sets it (on the Vita:
@@ -5209,6 +5232,625 @@ static void h3_mods_delete(void)
 	h3_mods_said();
 }
 
+
+/* ---- the Halo 3 FRIENDS screen and the lobbies' FRIENDS panel
+(halo3/friends.xml; port/linux/src/p2p_friends.h): the list's rows are
+three of its own (ADD FRIEND, APPEAR OFFLINE, FRIENDS CAN JOIN) and then the
+entries p2p_friends_list gives, in its order (requests, invites, friends
+online, offline, requests sent, blocked), scrolling as the mod manager's.
+The entry chosen stays chosen by its id and kind as the list changes */
+
+#define H3_FRIENDS_ROWS 10
+#define H3_FRIENDS_OWN_ROWS 3
+#define H3_FRIENDS_MESSAGE_MILLISECONDS 6000
+#define H3_FRIENDS_REFRESH_MILLISECONDS 500
+#define H3_FRIENDS_PANEL_ROWS 5
+
+/* the three rows of the screen's own */
+enum
+{
+	_h3_friends_row_add,
+	_h3_friends_row_offline,
+	_h3_friends_row_join,
+};
+
+static struct
+{
+	struct browser_view view;
+	short page;
+	struct p2p_friend_entry entries[P2P_FRIEND_ENTRIES_MAXIMUM];
+	int count;
+	unsigned long refreshed_time;
+	/* the item chosen (an own row's index, or an entry's id and kind) */
+	int chosen_item;
+	char chosen_id[P2P_FRIEND_ID_SIZE];
+	int chosen_kind;
+	char message[160];
+	unsigned long message_time;
+	struct widget_instance *list;
+	long list_creation_time;
+	/* the options' question: its entry, and what each of its rows does */
+	struct p2p_friend_entry options_entry;
+	int options[3];
+	int option_count;
+	/* the lobbies' panel: its own copy, refreshed each second */
+	struct p2p_friend_entry panel_entries[P2P_FRIEND_ENTRIES_MAXIMUM];
+	int panel_count;
+	unsigned long panel_time;
+} h3_friends;
+
+static void h3_friends_message(char const *text)
+{
+	snprintf(h3_friends.message, sizeof(h3_friends.message), "%s", text);
+	h3_friends.message_time = system_milliseconds();
+	platform_log("menus: h3 friends: %s", text);
+}
+
+static void h3_friends_refresh(boolean now)
+{
+	unsigned long time = system_milliseconds();
+
+	if (!now && h3_friends.refreshed_time && time - h3_friends.refreshed_time < H3_FRIENDS_REFRESH_MILLISECONDS)
+		return;
+	h3_friends.refreshed_time = time ? time : 1;
+	h3_friends.count = p2p_friends_list(h3_friends.entries, P2P_FRIEND_ENTRIES_MAXIMUM);
+}
+
+static char const *h3_friends_kind_name(int kind)
+{
+	static char const *const names[] = { "request", "invite", "friend", "request sent", "blocked" };
+
+	return kind >= 0 && kind < (int)NUMBEROF(names) ? names[kind] : "?";
+}
+
+/* the list as shown, said in the log (the tests read it) */
+static void h3_friends_said(void)
+{
+	char code[P2P_FRIEND_CODE_SIZE], status[96];
+	int index;
+
+	p2p_friends_code(code, sizeof(code));
+	p2p_friends_status(status, sizeof(status));
+	platform_log("menus: h3 friends: code %s; %s; %d entries", code, status, h3_friends.count);
+	for (index = 0; index < h3_friends.count; index++)
+	{
+		struct p2p_friend_entry const *entry = &h3_friends.entries[index];
+
+		platform_log("menus: h3 friends: %s %s (%s): %s%s", h3_friends_kind_name(entry->kind), entry->name, entry->code,
+			entry->activity, entry->joinable ? " [JOIN]" : "");
+	}
+}
+
+static void h3_friends_initialize(void)
+{
+	browser_view_reset(&h3_friends.view);
+	h3_friends.page = 0;
+	h3_friends.message[0] = 0;
+	h3_friends.chosen_item = 0;
+	h3_friends.chosen_id[0] = 0;
+	h3_friends_refresh(TRUE);
+	h3_friends_said();
+}
+
+/* the item an entry's index is, and the entry of an item (NULL: an own row) */
+static struct p2p_friend_entry const *h3_friends_item_entry(int item)
+{
+	return item >= H3_FRIENDS_OWN_ROWS && item - H3_FRIENDS_OWN_ROWS < h3_friends.count ?
+		&h3_friends.entries[item - H3_FRIENDS_OWN_ROWS] : NULL;
+}
+
+static int h3_friends_chosen_index(void)
+{
+	int index;
+
+	if (!h3_friends.chosen_id[0])
+		return h3_friends.chosen_item < H3_FRIENDS_OWN_ROWS ? h3_friends.chosen_item : 0;
+	for (index = 0; index < h3_friends.count; index++)
+		if (h3_friends.entries[index].kind == h3_friends.chosen_kind &&
+			!strcmp(h3_friends.entries[index].id, h3_friends.chosen_id))
+			return H3_FRIENDS_OWN_ROWS + index;
+	return -1;
+}
+
+static void h3_friends_choose(int item)
+{
+	struct p2p_friend_entry const *entry = h3_friends_item_entry(item);
+
+	h3_friends.chosen_item = item;
+	h3_friends.chosen_id[0] = 0;
+	if (entry)
+	{
+		snprintf(h3_friends.chosen_id, sizeof(h3_friends.chosen_id), "%s", entry->id);
+		h3_friends.chosen_kind = entry->kind;
+	}
+}
+
+/* what Cross and Square do to an entry, as the strip says it */
+static char const *h3_friends_first_name(struct p2p_friend_entry const *entry)
+{
+	if (!entry)
+		return T("Select");
+	switch (entry->kind)
+	{
+	case P2P_FRIEND_KIND_REQUEST:
+	case P2P_FRIEND_KIND_INVITE:
+		return T("Accept");
+	case P2P_FRIEND_KIND_FRIEND:
+		return entry->joinable ? T("Join") : "";
+	}
+	return "";
+}
+
+static char const *h3_friends_second_name(struct p2p_friend_entry const *entry)
+{
+	if (!entry)
+		return "";
+	switch (entry->kind)
+	{
+	case P2P_FRIEND_KIND_REQUEST:
+		return T("Decline");
+	case P2P_FRIEND_KIND_INVITE:
+		return T("Ignore");
+	case P2P_FRIEND_KIND_FRIEND:
+		return entry->invitable ? T("Invite") : "";
+	case P2P_FRIEND_KIND_OUTGOING:
+		return T("Cancel");
+	}
+	return "";
+}
+
+/* the tag at a row's right */
+static char const *h3_friends_tag(struct p2p_friend_entry const *entry)
+{
+	switch (entry->kind)
+	{
+	case P2P_FRIEND_KIND_REQUEST:
+		return T("REQUEST");
+	case P2P_FRIEND_KIND_INVITE:
+		return T("INVITE");
+	case P2P_FRIEND_KIND_FRIEND:
+		return entry->joinable ? T("JOIN") : entry->online ? T("ONLINE") : "";
+	case P2P_FRIEND_KIND_OUTGOING:
+		return T("SENT");
+	case P2P_FRIEND_KIND_BLOCKED:
+		return T("BLOCKED");
+	}
+	return "";
+}
+
+/* (port h3 friends) the rows, the chosen one's facts, the code and status */
+static void h3_friends_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *child, *focused = list->focused_child, *focus = NULL;
+	struct p2p_friend_entry const *chosen;
+	long index, focused_row = NONE, target;
+	char text[192], typed[HALO_TEXT_INPUT_SIZE];
+
+	if (typing_done(_typing_friend_code, typed, sizeof(typed)))
+	{
+		int result = p2p_friends_add(typed);
+
+		h3_friends_message(p2p_friends_add_text(result));
+		h3_friends_refresh(TRUE);
+	}
+	h3_friends_refresh(FALSE);
+	if (list != h3_friends.list || list->creation_time != h3_friends.list_creation_time)
+	{
+		h3_friends.list = list;
+		h3_friends.list_creation_time = list->creation_time;
+		browser_view_reset(&h3_friends.view);
+		focused = NULL;
+	}
+	for (index = 0, child = list->child; child; child = child->next)
+	{
+		if (strncmp(child->name, "row_", 4))
+			continue;
+		if (child == focused)
+			focused_row = index;
+		index++;
+	}
+	target = browser_view_follow(&h3_friends.view, H3_FRIENDS_ROWS, H3_FRIENDS_OWN_ROWS + h3_friends.count,
+		(int)focused_row, h3_friends_chosen_index(), h3_friends.page);
+	h3_friends.page = 0;
+	for (index = 0, child = list->child; child; child = child->next)
+	{
+		long item = h3_friends.view.offset + index;
+		struct p2p_friend_entry const *entry;
+
+		if (strncmp(child->name, "row_", 4))
+			continue;
+		if (index >= h3_friends.view.visible)
+		{
+			widget_instance_set_visibility_recursive(child, FALSE);
+			child->disabled = TRUE;
+			index++;
+			continue;
+		}
+		widget_instance_set_visibility_recursive(child, TRUE);
+		child->disabled = FALSE;
+		entry = h3_friends_item_entry((int)item);
+		if (!entry)
+		{
+			switch (item)
+			{
+			case _h3_friends_row_add:
+				row_column(child, "row_name", T("ADD FRIEND"));
+				row_column(child, "row_state", T("Type a friend's code"));
+				row_column(child, "row_tag", " ");
+				break;
+			case _h3_friends_row_offline:
+				row_column(child, "row_name", T("APPEAR OFFLINE"));
+				row_column(child, "row_state", T("Friends see you offline"));
+				row_column(child, "row_tag", config_boolean_live("friends.appear_offline", "HALO_FRIENDS_APPEAR_OFFLINE") ?
+					T("ON") : T("OFF"));
+				break;
+			default:
+				row_column(child, "row_name", T("FRIENDS CAN JOIN"));
+				row_column(child, "row_state", T("Your public games, in one press"));
+				row_column(child, "row_tag", config_boolean_live("friends.join", "HALO_FRIENDS_JOIN") ? T("YES") : T("NO"));
+				break;
+			}
+		}
+		else
+		{
+			row_column(child, "row_name", entry->name);
+			row_column(child, "row_state", entry->activity);
+			row_column(child, "row_tag", h3_friends_tag(entry)[0] ? h3_friends_tag(entry) : " ");
+		}
+		if (index == h3_friends.view.row)
+			focus = child;
+		index++;
+	}
+	if (focus && focus != list->focused_child)
+		ui_widget_port_give_focus(list, focus);
+	for (child = list->child; child; child = child->next)
+	{
+		if (!strncmp(child->name, "row_", 4))
+			child->animation.current_frame_index = child == focus ? 1 : 0;
+	}
+	if (target != NONE)
+		h3_friends_choose((int)target);
+	chosen = h3_friends_item_entry(h3_friends_chosen_index());
+	p2p_friends_code(text, sizeof(text));
+	text_show(named(screen, "code_value"), text);
+	if (h3_friends.message[0] && system_milliseconds() - h3_friends.message_time < H3_FRIENDS_MESSAGE_MILLISECONDS)
+		text_show(named(screen, "friends_message"), h3_friends.message);
+	else
+		text_show(named(screen, "friends_message"), "");
+	p2p_friends_status(text, sizeof(text));
+	text_show(named(screen, "friends_status"), text);
+	if (chosen)
+	{
+		snprintf(text, sizeof(text), "%s   %s", chosen->name, chosen->kind == P2P_FRIEND_KIND_OUTGOING ? "" : chosen->code);
+		text_show(named(screen, "detail_name"), text);
+		if (chosen->kind == P2P_FRIEND_KIND_FRIEND && chosen->online && chosen->maximum)
+			snprintf(text, sizeof(text), T("%s - %d of %d players"), chosen->activity, chosen->players, chosen->maximum);
+		else
+			snprintf(text, sizeof(text), "%s", chosen->activity);
+		text_show(named(screen, "detail_state"), text);
+		switch (chosen->kind)
+		{
+		case P2P_FRIEND_KIND_REQUEST:
+			text_show(named(screen, "detail_help"), T("Accept to be friends: you see each other online and join."));
+			break;
+		case P2P_FRIEND_KIND_INVITE:
+			text_show(named(screen, "detail_help"), T("Accept joins their game now."));
+			break;
+		case P2P_FRIEND_KIND_FRIEND:
+			text_show(named(screen, "detail_help"), chosen->joinable ? T("Their game is open: join it in one press.") :
+				chosen->online ? T("Their game can't be joined now. Host one and invite them.") :
+				T("They're offline, or appearing offline."));
+			break;
+		case P2P_FRIEND_KIND_OUTGOING:
+			text_show(named(screen, "detail_help"), T("Waiting for them to accept."));
+			break;
+		default:
+			text_show(named(screen, "detail_help"), T("Blocked: their requests and invites never reach you."));
+			break;
+		}
+	}
+	else
+	{
+		static char const *const helps[] = {
+			N_("Give your code to a friend, or type theirs: both must agree."),
+			N_("Your friends see you offline; you still see them."),
+			N_("Friends join your public games without a password in one press."),
+		};
+		int item = h3_friends_chosen_index();
+
+		text_show(named(screen, "detail_name"), "");
+		text_show(named(screen, "detail_state"), "");
+		text_show(named(screen, "detail_help"), T(helps[item >= 0 && item < H3_FRIENDS_OWN_ROWS ? item : 0]));
+	}
+	text_show(named(screen, "a_label"), h3_friends_first_name(chosen));
+	text_show(named(screen, "x_label"), h3_friends_second_name(chosen));
+}
+
+/* the item of a row (row_<n>), or the chosen one */
+static int h3_friends_row_item(struct widget_instance *widget)
+{
+	if (widget && !strncmp(widget->name, "row_", 4) && widget->name[4] >= '0' && widget->name[4] <= '9')
+	{
+		long row = atol(widget->name + 4) - 1;
+
+		if (row >= 0 && row < h3_friends.view.visible)
+			return (int)(h3_friends.view.offset + row);
+	}
+	return h3_friends_chosen_index();
+}
+
+/* an action on an entry, its outcome said (a join: the System Link screen
+next, as JOIN WITH CODE) */
+static void h3_friends_do(struct p2p_friend_entry const *entry, int action)
+{
+	struct p2p_friend_entry copy = *entry;
+	int outcome = p2p_friends_act(copy.id, copy.kind, action);
+	char text[160];
+
+	if (outcome == P2P_FRIENDS_DONE && (action == P2P_FRIENDS_JOIN || action == P2P_FRIENDS_INVITE_ACCEPT))
+	{
+		snprintf(text, sizeof(text), T("Joining %s's game..."), copy.name);
+		h3_friends_message(text);
+		menu_functions.open_system_link = TRUE;
+	}
+	else if (outcome == P2P_FRIENDS_DONE && action == P2P_FRIENDS_INVITE)
+	{
+		snprintf(text, sizeof(text), T("Invited %s"), copy.name);
+		h3_friends_message(text);
+	}
+	else
+		h3_friends_message(p2p_friends_outcome_text(outcome));
+	h3_friends_refresh(TRUE);
+}
+
+/* (port h3 friends act: a row's Cross) */
+static void h3_friends_act(struct widget_instance *widget)
+{
+	int item = h3_friends_row_item(widget);
+	struct p2p_friend_entry const *entry = h3_friends_item_entry(item);
+
+	h3_friends_choose(item);
+	if (!entry)
+	{
+		boolean on;
+
+		switch (item)
+		{
+		case _h3_friends_row_add:
+			typing_begin(_typing_friend_code, T("Friend code"), "", P2P_FRIEND_CODE_SIZE - 1, FALSE);
+			break;
+		case _h3_friends_row_offline:
+			on = !config_boolean_live("friends.appear_offline", "HALO_FRIENDS_APPEAR_OFFLINE");
+			setting_set("HALO_FRIENDS_APPEAR_OFFLINE", on ? "true" : "false");
+			h3_friends_message(on ? T("Appearing offline") : T("Appearing online"));
+			break;
+		case _h3_friends_row_join:
+			on = !config_boolean_live("friends.join", "HALO_FRIENDS_JOIN");
+			setting_set("HALO_FRIENDS_JOIN", on ? "true" : "false");
+			h3_friends_message(on ? T("Friends can join your public games") : T("Friends join only by your invites"));
+			break;
+		}
+		return;
+	}
+	switch (entry->kind)
+	{
+	case P2P_FRIEND_KIND_REQUEST:
+		h3_friends_do(entry, P2P_FRIENDS_ACCEPT);
+		break;
+	case P2P_FRIEND_KIND_INVITE:
+		h3_friends_do(entry, P2P_FRIENDS_INVITE_ACCEPT);
+		break;
+	case P2P_FRIEND_KIND_FRIEND:
+		h3_friends_do(entry, P2P_FRIENDS_JOIN);
+		break;
+	case P2P_FRIEND_KIND_OUTGOING:
+		h3_friends_message(T("Waiting for them to accept."));
+		break;
+	default:
+		h3_friends_message(T("Triangle: unblock"));
+		break;
+	}
+}
+
+/* (port h3 friends second: Square) */
+static void h3_friends_second(void)
+{
+	struct p2p_friend_entry const *entry = h3_friends_item_entry(h3_friends_chosen_index());
+
+	if (!entry)
+		return;
+	switch (entry->kind)
+	{
+	case P2P_FRIEND_KIND_REQUEST:
+		h3_friends_do(entry, P2P_FRIENDS_DECLINE);
+		break;
+	case P2P_FRIEND_KIND_INVITE:
+		h3_friends_do(entry, P2P_FRIENDS_INVITE_IGNORE);
+		break;
+	case P2P_FRIEND_KIND_FRIEND:
+		h3_friends_do(entry, P2P_FRIENDS_INVITE);
+		break;
+	case P2P_FRIEND_KIND_OUTGOING:
+		h3_friends_do(entry, P2P_FRIENDS_CANCEL);
+		break;
+	}
+}
+
+/* (port h3 friends options ask: Triangle) the options' question opens for
+an entry that has some */
+static boolean h3_friends_options_ask(void)
+{
+	struct p2p_friend_entry const *entry = h3_friends_item_entry(h3_friends_chosen_index());
+
+	h3_friends.option_count = 0;
+	if (!entry)
+		return FALSE;
+	h3_friends.options_entry = *entry;
+	switch (entry->kind)
+	{
+	case P2P_FRIEND_KIND_FRIEND:
+		h3_friends.options[h3_friends.option_count++] = P2P_FRIENDS_REMOVE;
+		h3_friends.options[h3_friends.option_count++] = P2P_FRIENDS_BLOCK;
+		break;
+	case P2P_FRIEND_KIND_REQUEST:
+		h3_friends.options[h3_friends.option_count++] = P2P_FRIENDS_ACCEPT;
+		h3_friends.options[h3_friends.option_count++] = P2P_FRIENDS_DECLINE;
+		h3_friends.options[h3_friends.option_count++] = P2P_FRIENDS_BLOCK;
+		break;
+	case P2P_FRIEND_KIND_INVITE:
+		h3_friends.options[h3_friends.option_count++] = P2P_FRIENDS_INVITE_ACCEPT;
+		h3_friends.options[h3_friends.option_count++] = P2P_FRIENDS_INVITE_IGNORE;
+		break;
+	case P2P_FRIEND_KIND_OUTGOING:
+		h3_friends.options[h3_friends.option_count++] = P2P_FRIENDS_CANCEL;
+		break;
+	case P2P_FRIEND_KIND_BLOCKED:
+		h3_friends.options[h3_friends.option_count++] = P2P_FRIENDS_UNBLOCK;
+		break;
+	}
+	platform_log("menus: h3 friends: options for %s %s", h3_friends_kind_name(entry->kind), entry->name);
+	return h3_friends.option_count > 0;
+}
+
+static char const *h3_friends_option_name(int action)
+{
+	switch (action)
+	{
+	case P2P_FRIENDS_REMOVE:
+		return T("REMOVE FRIEND");
+	case P2P_FRIENDS_BLOCK:
+		return T("BLOCK");
+	case P2P_FRIENDS_UNBLOCK:
+		return T("UNBLOCK");
+	case P2P_FRIENDS_ACCEPT:
+	case P2P_FRIENDS_INVITE_ACCEPT:
+		return T("ACCEPT");
+	case P2P_FRIENDS_DECLINE:
+		return T("DECLINE");
+	case P2P_FRIENDS_INVITE_IGNORE:
+		return T("IGNORE");
+	case P2P_FRIENDS_CANCEL:
+		return T("CANCEL REQUEST");
+	}
+	return "";
+}
+
+/* (port h3 friends options: the question's words and rows) */
+static void h3_friends_options_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *child;
+	char text[192];
+
+	text_show(named(screen, "options_title"), h3_friends.options_entry.name);
+	snprintf(text, sizeof(text), "%s\n%s", h3_friends.options_entry.code, h3_friends.options_entry.activity);
+	text_show(named(screen, "options_text"), text);
+	for (child = list->child; child; child = child->next)
+	{
+		long option;
+
+		if (strncmp(child->name, "option_", 7) || !(child->name[7] >= '1' && child->name[7] <= '3'))
+			continue;
+		option = child->name[7] - '1';
+		if (option < h3_friends.option_count)
+		{
+			widget_instance_set_visibility_recursive(child, TRUE);
+			child->disabled = FALSE;
+			text_show(child, h3_friends_option_name(h3_friends.options[option]));
+		}
+		else
+		{
+			widget_instance_set_visibility_recursive(child, FALSE);
+			child->disabled = TRUE;
+		}
+	}
+}
+
+/* (port h3 friends option: a row of the question) */
+static void h3_friends_option(struct widget_instance *widget)
+{
+	long option = widget && !strncmp(widget->name, "option_", 7) ? widget->name[7] - '1' : -1;
+
+	if (option < 0 || option >= h3_friends.option_count)
+		return;
+	h3_friends_do(&h3_friends.options_entry, h3_friends.options[option]);
+}
+
+/* (port h3 friends panel: the lobbies') who is online and what they do */
+static void h3_friends_panel_update(struct widget_instance *panel)
+{
+	unsigned long time = system_milliseconds();
+	char text[96];
+	int shown = 0, online = 0, requests = 0, index, row;
+
+	if (!h3_friends.panel_time || time - h3_friends.panel_time >= 1000)
+	{
+		h3_friends.panel_time = time ? time : 1;
+		h3_friends.panel_count = p2p_friends_list(h3_friends.panel_entries, P2P_FRIEND_ENTRIES_MAXIMUM);
+	}
+	for (index = 0; index < h3_friends.panel_count; index++)
+	{
+		online += h3_friends.panel_entries[index].kind == P2P_FRIEND_KIND_FRIEND && h3_friends.panel_entries[index].online;
+		requests += h3_friends.panel_entries[index].kind == P2P_FRIEND_KIND_REQUEST ||
+			h3_friends.panel_entries[index].kind == P2P_FRIEND_KIND_INVITE;
+	}
+	if (requests)
+		snprintf(text, sizeof(text), T("%d ONLINE, %d NEW"), online, requests);
+	else
+		snprintf(text, sizeof(text), T("%d ONLINE"), online);
+	text_show(named(panel, "lobby_count"), text);
+	for (row = 1, index = 0; row <= H3_FRIENDS_PANEL_ROWS; row++)
+	{
+		char name[24], state[24];
+		char const *name_text = "", *state_text = "";
+
+		/* (requests and invites first, then the friends online) */
+		for (; index < h3_friends.panel_count; index++)
+		{
+			struct p2p_friend_entry const *entry = &h3_friends.panel_entries[index];
+
+			if (entry->kind == P2P_FRIEND_KIND_REQUEST || entry->kind == P2P_FRIEND_KIND_INVITE ||
+				(entry->kind == P2P_FRIEND_KIND_FRIEND && entry->online))
+			{
+				name_text = entry->name;
+				state_text = entry->activity;
+				index++;
+				shown++;
+				break;
+			}
+		}
+		if (!name_text[0] && row == 1)
+		{
+			p2p_friends_status(text, sizeof(text));
+			state_text = text;
+		}
+		snprintf(name, sizeof(name), "lobby_name_%d", row);
+		snprintf(state, sizeof(state), "lobby_state_%d", row);
+		text_show(named(panel, name), name_text);
+		if (row == 1 && !name_text[0])
+		{
+			/* (the status across the panel: there is room for it) */
+			text_show(named(panel, name), state_text);
+			text_show(named(panel, state), "");
+		}
+		else
+			text_show(named(panel, state), state_text);
+	}
+	/* (said once each time it changes: the tests read it) */
+	{
+		static char said[160];
+		char line[160];
+
+		snprintf(line, sizeof(line), "%s, %d shown", text, shown);
+		if (strcmp(line, said))
+		{
+			snprintf(said, sizeof(said), "%s", line);
+			platform_log("menus: h3 friends panel: %s", line);
+		}
+	}
+}
+
 /* ---------- public code */
 
 /* (friends_game.c: a friend's game joined, its invite handed on) the System
@@ -5717,6 +6359,26 @@ boolean pc_menu_event_function_invoke(
 			h3_adhoc.then = _h3_adhoc_then_none;
 		h3_adhoc.said[0] = 0;
 		return TRUE;
+	case _function_h3_friends_init:
+		h3_friends_initialize();
+		return TRUE;
+	case _function_h3_friends_act:
+		h3_friends_act(widget);
+		return TRUE;
+	case _function_h3_friends_second:
+		h3_friends_second();
+		return TRUE;
+	case _function_h3_friends_options_ask:
+		return h3_friends_options_ask();
+	case _function_h3_friends_option:
+		h3_friends_option(widget);
+		return TRUE;
+	case _function_h3_friends_page_up:
+		h3_friends.page = -1;
+		return TRUE;
+	case _function_h3_friends_page_down:
+		h3_friends.page = 1;
+		return TRUE;
 	case _function_coop_campaign:
 	case _function_unwired:
 	default:
@@ -5843,6 +6505,17 @@ void pc_menu_game_data_function_invoke(
 		break;
 	case _input_h3_network_status:
 		h3_network_status_update(widget);
+		break;
+	case _input_h3_friends:
+		if (widget->type == _ui_widget_type_column_list)
+			h3_friends_update(widget);
+		break;
+	case _input_h3_friends_options:
+		if (widget->type == _ui_widget_type_column_list)
+			h3_friends_options_update(widget);
+		break;
+	case _input_h3_friends_panel:
+		h3_friends_panel_update(widget);
 		break;
 	default:
 		break;

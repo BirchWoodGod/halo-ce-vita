@@ -545,6 +545,17 @@ static int key_zero(const unsigned char *key)
 	return p2p_equal(key, zero, P2P_KEY_SIZE);
 }
 
+/* a setting the settings panel and the menus change live (their
+environment variable, set as they set it), else as config.toml has it */
+static int setting_on(const char *name, const char *variable)
+{
+	const char *value = getenv(variable);
+
+	if (value && value[0])
+		return !strcmp(value, "true") || !strcmp(value, "1");
+	return config_boolean(name);
+}
+
 /* ---------- the code */
 
 /* a key's code: the first 60 bits of a hash of it, 12 characters */
@@ -1722,7 +1733,7 @@ static int own_joinable(void)
 	const struct p2p_friends_host *host = &friends->host;
 
 	return friends->online && host->hosting && host->listed && !host->locked && host->open &&
-		host->players < host->maximum && config_boolean("friends.join") && !friends->appear_offline &&
+		host->players < host->maximum && setting_on("friends.join", "HALO_FRIENDS_JOIN") && !friends->appear_offline &&
 		!host->crossplay;
 }
 
@@ -2625,7 +2636,7 @@ static int appear_offline_now(void)
 	if (friends->test_appeared_offline)
 		return 1;
 #endif
-	return config_boolean("friends.appear_offline");
+	return setting_on("friends.appear_offline", "HALO_FRIENDS_APPEAR_OFFLINE");
 }
 
 /* ---------- internet play's side (p2p_internal.h) */
@@ -2633,7 +2644,7 @@ static int appear_offline_now(void)
 /* whether friends want the brokers: internet play runs and friends are on */
 static int friends_on(void)
 {
-	return friends->online && friends->has_identity && config_boolean("friends.enabled");
+	return friends->online && friends->has_identity && setting_on("friends.enabled", "HALO_FRIENDS");
 }
 
 int p2p_friends_wanted(void)
@@ -3029,6 +3040,44 @@ static int friend_order(const void *first, const void *second)
 	return strcasecmp(a->name, b->name);
 }
 
+#ifndef HALO_RELEASE
+/* (the menus' tests' pictures, HALO_TEST_FRIENDS_SHOW=online: the friends
+shown online, the first in a public game, the second in co-op, as the lists
+would show them; nothing is sent or heard) */
+static void test_show(struct p2p_friend_entry *entries, int count)
+{
+	const char *setting = getenv("HALO_TEST_FRIENDS_SHOW");
+	int index, friend_index = 0;
+
+	if (!setting || strcmp(setting, "online"))
+		return;
+	for (index = 0; index < count; index++)
+	{
+		struct p2p_friend_entry *entry = &entries[index];
+
+		if (entry->kind != P2P_FRIEND_KIND_FRIEND)
+			continue;
+		entry->online = 1;
+		if (friend_index == 0)
+		{
+			entry->state = P2P_FRIEND_STATE_MULTIPLAYER;
+			entry->joinable = 1;
+			entry->players = 5;
+			entry->maximum = 16;
+			p2p_friends_activity_text(entry->activity, sizeof(entry->activity), entry->state, "bloodgulch", "Slayer", 2, -1, 0);
+		}
+		else
+		{
+			entry->state = P2P_FRIEND_STATE_COOP;
+			entry->players = 2;
+			entry->maximum = 4;
+			p2p_friends_activity_text(entry->activity, sizeof(entry->activity), entry->state, "a10", "", 0, 3, 0);
+		}
+		friend_index++;
+	}
+}
+#endif
+
 int p2p_friends_list(struct p2p_friend_entry *entries, int maximum_count)
 {
 	int count = 0, index, first_friend;
@@ -3099,6 +3148,9 @@ int p2p_friends_list(struct p2p_friend_entry *entries, int maximum_count)
 		snprintf(entry->activity, sizeof(entry->activity), "%s", T("Blocked"));
 	}
 	pthread_mutex_unlock(&friends_lock);
+#ifndef HALO_RELEASE
+	test_show(entries, count);
+#endif
 	return count;
 }
 
@@ -3514,6 +3566,8 @@ int p2p_friends_act(const char *id, int kind, int action)
 		result = P2P_FRIENDS_NOT_ALLOWED;
 		break;
 	}
+	if (changed)
+		friends->dirty = 1;
 	pthread_mutex_unlock(&friends_lock);
 	if (changed)
 		save(1);
@@ -3612,7 +3666,7 @@ int p2p_friends_status(char *text, int size)
 	count = friends->friend_count;
 	for (index = 0; index < count; index++)
 		online += on && friends->friends[index].heard_time && friends->friends[index].presence.online;
-	if (!config_boolean("friends.enabled"))
+	if (!setting_on("friends.enabled", "HALO_FRIENDS"))
 		snprintf(text, (size_t)size, "%s", T("Friends are off"));
 	else if (!on)
 		snprintf(text, (size_t)size, "%s", T("Go online to see your friends"));

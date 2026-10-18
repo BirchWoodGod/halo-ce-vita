@@ -281,6 +281,67 @@ int p2p_join_code(const char *code)
 	return 1;
 }
 
+/* (friends, p2p_friends.h: the test's list, and what the panel asked) */
+static struct p2p_friend_entry test_friends[8];
+static int test_friend_count;
+static char friend_added[64], friend_acted_id[P2P_FRIEND_ID_SIZE];
+static int friend_acted_kind = -1, friend_acted_action = -1, friend_act_outcome;
+
+static void test_friend(const char *id, int kind, const char *name, const char *code, int online, int joinable,
+	const char *activity)
+{
+	struct p2p_friend_entry *entry = &test_friends[test_friend_count++];
+
+	memset(entry, 0, sizeof(*entry));
+	snprintf(entry->id, sizeof(entry->id), "%s", id);
+	entry->kind = kind;
+	snprintf(entry->name, sizeof(entry->name), "%s", name);
+	snprintf(entry->code, sizeof(entry->code), "%s", code);
+	entry->online = online;
+	entry->joinable = joinable;
+	entry->invitable = online;
+	entry->players = joinable ? 5 : 0;
+	entry->maximum = joinable ? 16 : 0;
+	snprintf(entry->activity, sizeof(entry->activity), "%s", activity);
+}
+int p2p_friends_code(char *code, int size)
+{
+	snprintf(code, (size_t)size, "KQ7M-3XPA-T9WE");
+	return 1;
+}
+int p2p_friends_list(struct p2p_friend_entry *entries, int maximum_count)
+{
+	int count = test_friend_count < maximum_count ? test_friend_count : maximum_count;
+
+	memcpy(entries, test_friends, sizeof(entries[0]) * (size_t)count);
+	return count;
+}
+int p2p_friends_status(char *text, int size)
+{
+	snprintf(text, (size_t)size, "1 of 2 friends online");
+	return 1;
+}
+int p2p_friends_add(const char *code)
+{
+	snprintf(friend_added, sizeof(friend_added), "%s", code);
+	return P2P_FRIENDS_ADD_SENT;
+}
+int p2p_friends_act(const char *id, int kind, int action)
+{
+	snprintf(friend_acted_id, sizeof(friend_acted_id), "%s", id);
+	friend_acted_kind = kind;
+	friend_acted_action = action;
+	return friend_act_outcome;
+}
+const char *p2p_friends_outcome_text(int outcome)
+{
+	return outcome == P2P_FRIENDS_DONE ? "Done" : outcome == P2P_FRIENDS_OFFLINE ? "Go online first" : "Not for this one";
+}
+const char *p2p_friends_add_text(int result)
+{
+	return result == P2P_FRIENDS_ADD_SENT ? "Friend request sent" : "That's not a friend code";
+}
+
 int p2p_hosting_code(char *code, int size)
 {
 	if (!hosting)
@@ -1346,6 +1407,133 @@ static void test_mod_manager_page(void)
 	press(VITA_BUTTON_CIRCLE);
 }
 
+
+/* Multiplayer > Friends (p2p_friends.h, the test's list): the code and the
+status, Add a friend (typed with the D-pad), Appear offline and Friends can
+join (saved), each entry with a word of its state, its doing on the help
+line and its buttons in the footer; cross, square and triangle do what the
+footer says, a join going on to Join's steps, a removal asked first */
+static void test_friends_page(void)
+{
+	char line[256], network_before[16];
+
+	test_friend_count = 0;
+	test_friend("d1", P2P_FRIEND_KIND_REQUEST, "Delta", "TBJV-CX9K-Y47D", 0, 0, "Wants to be your friend");
+	test_friend("b1", P2P_FRIEND_KIND_FRIEND, "Bravo", "RYQS-BU47-4JPF", 1, 1, "Slayer on Blood Gulch");
+	test_friend("c1", P2P_FRIEND_KIND_FRIEND, "Charlie", "AAZQ-L3GC-JLTL", 0, 0, "Offline");
+	test_friend("o1", P2P_FRIEND_KIND_OUTGOING, "A7ES-DA9D-2NMR", "A7ES-DA9D-2NMR", 0, 0, "Request sent");
+	test_friend("e1", P2P_FRIEND_KIND_BLOCKED, "Echo", "9YHX-JQPH-CWC9", 0, 0, "Blocked");
+	friend_act_outcome = P2P_FRIENDS_DONE;
+	/* (the row in the code row's place: a game with the PC menus, a session
+	started Online) */
+	snprintf(network_before, sizeof(network_before), "%s", getenv("HALO_VITA_NETWORK") ? getenv("HALO_VITA_NETWORK") :
+		"wifi");
+	vita_settings_set("HALO_VITA_NETWORK", "online");
+	restart_pending = 0;
+	vita_settings_load();
+	halo_pc_menus_state = 1;
+	check(to_tab("Multiplayer"), "Multiplayer tab");
+	if (!to_line("Friends"))
+	{
+		check(0, "Multiplayer: the Friends row (Online, the PC menus)");
+		printf("%s\n--\n", menu);
+		return;
+	}
+	check(strstr(menu, "\nFriends\x02  1 online, 1 new  >\n") != NULL,
+		"Multiplayer: the Friends row says who is online and what is new");
+	press(VITA_BUTTON_CROSS);
+	printf("%s\n--\n", menu);
+	check(strstr(menu, "\n\x03Multiplayer > Friends\n") != NULL, "cross: the Friends page");
+	check(strstr(menu, "\nAdd a friend\x02  >\n") && strstr(menu, "\nAppear offline\x02  Off >\n") &&
+		strstr(menu, "\nFriends can join\x02  On >\n"), "its rows: Add a friend, Appear offline, Friends can join");
+	check(strstr(menu, "\n\x04Your friend code: KQ7M-3XPA-T9WE\n") && strstr(menu, "\n\x04" "1 of 2 friends online\n"),
+		"the code and the status");
+	check(strstr(menu, "\nDelta\x02  Request\n") && strstr(menu, "\nBravo\x02  Join\n") &&
+		strstr(menu, "\nCharlie\x02  Offline\n") && strstr(menu, "\nA7ES-DA9D-2NMR\x02  Sent\n") &&
+		strstr(menu, "\nEcho\x02  Blocked\n"), "each entry: its name and a word of its state");
+	check(menu_fits() && menu_height_fits(), "the Friends page fits");
+	/* Appear offline, Friends can join: saved */
+	to_line("Appear offline");
+	press(VITA_BUTTON_RIGHT);
+	check(getenv("HALO_FRIENDS_APPEAR_OFFLINE") && !strcmp(getenv("HALO_FRIENDS_APPEAR_OFFLINE"), "true") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_FRIENDS_APPEAR_OFFLINE=true\n"), "Appear offline on: saved");
+	press(VITA_BUTTON_LEFT);
+	to_line("Friends can join");
+	press(VITA_BUTTON_RIGHT);
+	check(getenv("HALO_FRIENDS_JOIN") && !strcmp(getenv("HALO_FRIENDS_JOIN"), "false"), "Friends can join off");
+	press(VITA_BUTTON_LEFT);
+	/* Add a friend: the code typed */
+	to_line("Add a friend");
+	press(VITA_BUTTON_CROSS);
+	check(strstr(menu, "ADD A FRIEND") && strstr(menu, "A A A A - A A A A - A A A A"), "Add a friend: the code screen");
+	press(VITA_BUTTON_UP);
+	press(VITA_BUTTON_RIGHT);
+	press(VITA_BUTTON_UP);
+	press(VITA_BUTTON_UP);
+	press(VITA_BUTTON_CROSS);
+	check(!strcmp(friend_added, "BCAAAAAAAAAA") && strstr(menu, "Friend request sent"), "cross: the request sent, said");
+	/* the request: accept, decline, block (the notice gone first) */
+	clock_us += 6000000;
+	to_line("Delta");
+	check(strstr(menu, "\n\x05" "Delta: Wants to be your friend\n") &&
+		strstr(menu, "\n\x06L/R: tabs   Cross: accept  Square: decline  Circle: back"),
+		"a request: its help and buttons");
+	press(VITA_BUTTON_CROSS);
+	check(!strcmp(friend_acted_id, "d1") && friend_acted_kind == P2P_FRIEND_KIND_REQUEST &&
+		friend_acted_action == P2P_FRIENDS_ACCEPT, "cross: accepted");
+	press(VITA_BUTTON_SQUARE);
+	check(friend_acted_action == P2P_FRIENDS_DECLINE, "square: declined");
+	press(VITA_BUTTON_TRIANGLE);
+	check(!strncmp(menu, "BLOCK", 5) && strstr(menu, "Delta"), "triangle: the question before blocking");
+	press(VITA_BUTTON_CROSS);
+	check(friend_acted_action == P2P_FRIENDS_BLOCK && strstr(menu, "> Friends\n"), "cross: blocked, back to the page");
+	/* a friend: join (Join's steps next), invite, remove after a question */
+	clock_us += 6000000;
+	to_line("Bravo");
+	check(strstr(menu, "\n\x05" "Bravo: Slayer on Blood Gulch, 5 of 16\n") &&
+		strstr(menu, "Cross: join  Square: invite  Circle: back") && strstr(menu, "\n\x04Triangle: remove a friend, block a request\n"),
+		"a friend: what they do, their game's players; the buttons");
+	press(VITA_BUTTON_SQUARE);
+	check(friend_acted_action == P2P_FRIENDS_INVITE && strstr(menu, "Invited Bravo"), "square: invited");
+	press(VITA_BUTTON_TRIANGLE);
+	check(!strncmp(menu, "REMOVE FRIEND", 13) && strstr(menu, "RYQS-BU47-4JPF"), "triangle: the question before removing");
+	friend_acted_action = -1;
+	press(VITA_BUTTON_CIRCLE);
+	check(friend_acted_action == -1 && strstr(menu, "> Friends\n"), "circle keeps the friend");
+	press(VITA_BUTTON_TRIANGLE);
+	press(VITA_BUTTON_CROSS);
+	check(friend_acted_action == P2P_FRIENDS_REMOVE && !strcmp(friend_acted_id, "b1"), "cross: removed");
+	to_line("Bravo");
+	press(VITA_BUTTON_CROSS);
+	check(friend_acted_action == P2P_FRIENDS_JOIN && !strncmp(menu, "JOIN A GAME\n", 12),
+		"cross: joining the friend's game, Join's steps next (as a code's)");
+	press(VITA_BUTTON_CIRCLE);
+	friend_act_outcome = P2P_FRIENDS_OFFLINE;
+	to_line("Bravo");
+	press(VITA_BUTTON_CROSS);
+	check(strstr(menu, "Go online first") != NULL, "a join refused: why");
+	friend_act_outcome = P2P_FRIENDS_DONE;
+	/* the request sent: cancel; the blocked: unblock */
+	to_line("A7ES-DA9D-2NMR");
+	check(strstr(menu, "Square: cancel") != NULL, "a request sent: square cancels");
+	press(VITA_BUTTON_SQUARE);
+	check(friend_acted_action == P2P_FRIENDS_CANCEL && !strcmp(friend_acted_id, "o1"), "square: cancelled");
+	to_line("Echo");
+	press(VITA_BUTTON_CROSS);
+	check(friend_acted_action == P2P_FRIENDS_UNBLOCK && !strcmp(friend_acted_id, "e1"), "cross: unblocked");
+	(void)line;
+	press(VITA_BUTTON_CIRCLE);
+	halo_pc_menus_state = -1;
+	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
+	check(to_tab("Multiplayer") && !strstr(menu, "\nFriends\x02") && strstr(menu, "\nJoin with a code\x02"),
+		"the Xbox's menus: the code row, no Friends row");
+	/* (the session as it was) */
+	vita_settings_set("HALO_VITA_NETWORK", network_before);
+	restart_pending = 0;
+	vita_settings_load();
+	to_tab("Multiplayer");
+}
+
 static void test_multiplayer_tab(void)
 {
 	char line[128], labels[512];
@@ -1426,8 +1614,9 @@ static void test_multiplayer_tab(void)
 	halo_pc_menus_state = 1;
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection|Crossplay*|Bots|Co-op players|Unseen players|Modded maps|Latency meter") && !strstr(menu, "Online menus"),
-		"the PC menus in the game: Connection and Modded maps only");
+	check(!strcmp(labels, "Connection|Crossplay*|Friends|Bots|Co-op players|Unseen players|Modded maps|Latency meter") &&
+		!strstr(menu, "Online menus") && menu_height_fits(),
+		"the PC menus in the game: Connection, Friends (in the code row's place) and Modded maps; it fits");
 	halo_pc_menus_state = -1;
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	printf("%s\n--\n", menu);
@@ -1951,7 +2140,7 @@ static void test_online_rows(void)
 	to_tab("Multiplayer");
 	rows_of(labels, sizeof(labels), &info);
 	check(!strcmp(labels, "Connection|Crossplay*|Bots|Co-op players|Unseen players|Modded maps|Latency meter"),
-		"Crossplay on: no Join with a code row (codes join Vita games)");
+		"Crossplay on: no Join with a code row (codes join Vita games), no Friends row (friends' games are Vitas')");
 	test_crossplay_browser();
 	test_crossplay_wire = 0;
 	to_tab("Dev");
@@ -2146,14 +2335,16 @@ static void test_tab_layouts(void)
 			old |= !strcmp(pages[index].name, "Screen") || !strcmp(pages[index].name, "First person") ||
 				!strcmp(pages[index].name, "Advanced") || !strcmp(pages[index].name, "General") ||
 				!strcmp(pages[index].name, "Graphics") || !strcmp(pages[index].name, "Audio");
-		check(!old && PAGE_GRAPHICS_DETAIL == TAB_COUNT && PAGE_COUNT == TAB_COUNT + 10 &&
+		check(!old && PAGE_GRAPHICS_DETAIL == TAB_COUNT && PAGE_COUNT == TAB_COUNT + 11 &&
 			!strcmp(pages[PAGE_GRAPHICS_DETAIL].name, "Detail") && !strcmp(pages[PAGE_GRAPHICS_PERFORMANCE].name, "Performance") &&
 			!strcmp(pages[PAGE_BUTTONS].name, "Button layout") && !strcmp(pages[PAGE_TOUCH].name, "Touch zones") &&
 			!strcmp(pages[PAGE_GYRO].name, "Gyro settings") && !strcmp(pages[PAGE_PLAY].name, "Play") &&
 			!strcmp(pages[PAGE_MAPS].name, "Modded maps") && !strcmp(pages[PAGE_DEV_AB].name, "A/B switches") &&
-			!strcmp(pages[PAGE_FORGE].name, "Forge and File Share") && !strcmp(pages[PAGE_MODS].name, "Mod manager"),
+			!strcmp(pages[PAGE_FORGE].name, "Forge and File Share") && !strcmp(pages[PAGE_MODS].name, "Mod manager") &&
+			!strcmp(pages[PAGE_FRIENDS].name, "Friends"),
 			"the pages rows open: Detail, Performance, Button layout, Touch zones, Gyro settings, Play, Modded maps, A/B "
-			"switches, Forge and File Share, Mod manager (no Screen, First person or Advanced page; no General, Graphics or Audio tab)");
+			"switches, Forge and File Share, Mod manager, Friends (no Screen, First person or Advanced page; no General, "
+			"Graphics or Audio tab)");
 	}
 	check(settings[0].variable && !strcmp(settings[0].variable, "HALO_PROFILE") && !strcmp(settings[1].variable, "HALO_RENDER_SCALE") &&
 		!strcmp(settings[2].variable, "HALO_DYNAMIC_RES_MIN"), "Profile still settings[0], Render resolution and its minimum after it");
@@ -2297,7 +2488,7 @@ static void test_variables_kept(void)
 		"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR", "HALO_INTERPOLATION", "HALO_LATENCY_METER", "HALO_BOTS", "HALO_BOT_SKILL", "HALO_BOT_TEAMS",
 		"HALO_BOT_VEHICLES", "HALO_BOT_ROUTES", "HALO_BOT_PLAYLIST", "HALO_NET_COOP_PLAYERS", "HALO_NET_REMOTE_LOD",
 		"HALO_LANGUAGE", "HALO_UPDATE_CHANNEL", "HALO_PARTICLE_BUDGET", "HALO_FIRST_PERSON_LEGS", "HALO_RAGDOLLS",
-		"HALO_MCC_MODS", "HALO_PC_MAP_VEHICLES", "HALO_SHARP_UI",
+		"HALO_MCC_MODS", "HALO_PC_MAP_VEHICLES", "HALO_SHARP_UI", "HALO_FRIENDS_APPEAR_OFFLINE", "HALO_FRIENDS_JOIN",
 	};
 	int index, all = 1, choices = 0;
 
@@ -3872,6 +4063,7 @@ int main(void)
 
 	/* ---------- Modded maps' Mod manager page */
 	test_mod_manager_page();
+	test_friends_page();
 
 	/* ---------- Dev, behind its switch */
 	press(VITA_BUTTON_R);

@@ -3549,12 +3549,16 @@ friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged)
 	join_steps="code-file=$jc"
 	host_extra="HALO_NET_HOST_PUBLIC=true"
 	join_test=watch
+	# (the scripted player leaves the menus alone while a pad script runs: at the
+	# menus the joiner waits for its invite, as a player would)
+	join_pad="wait:150:1000"
 	case $mode in
 	friends) join_steps="$join_steps,accept"; join_test=join-friend ;;
 	friendsdecline) join_steps="$join_steps,decline" ;;
 	friendsblock) join_steps="$join_steps,block" ;;
 	friendsinvite)
 		join_steps="$join_steps,accept"; join_test=join-invite; host_extra="HALO_NET_HOST_PUBLIC=false"
+		join_pad="wait:150:$((seconds * 1000))"
 		host_steps="$host_steps,invite-after=${HALO_TEST_INVITE_AFTER:-50}" ;;
 	friendsoffline) join_steps="$join_steps,accept,appear-offline-at=${HALO_TEST_OFFLINE_AT:-70}" ;;
 	friendsforged) join_steps="$join_steps,accept"; host_steps="$host_steps,replay-at=70,forge-at=85" ;;
@@ -3563,7 +3567,7 @@ friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged)
 		"HALO_TEST_FRIENDS=$host_steps" ${HALO_TEST_HOST_ENV:-}; host_pid=$last_pid
 	run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
 		HALO_NETWORK_TEST=$join_test HALO_TEST_INPUT=bot:2 HALO_NET_LOBBY_NAME=Bravo "HALO_TEST_FRIENDS=$join_steps" \
-		HALO_TEST_FRIENDS_ANSWER=accept; join_pid=$last_pid
+		HALO_TEST_FRIENDS_ANSWER=accept "HALO_TEST_PAD=$join_pad"; join_pid=$last_pid
 	wait $join_pid $host_pid 2>/dev/null
 	hl=$out/host/run.log jl=$out/joiner/run.log
 	echo "host's code: $(cat "$hc" 2>/dev/null)  joiner's code: $(cat "$jc" 2>/dev/null)"

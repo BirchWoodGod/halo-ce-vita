@@ -871,10 +871,55 @@ static void test_limits(void)
 }
 
 #ifndef P2P_FRIENDS_FUZZ
+/* (run_menus_test.sh's FRIENDS cases) a save folder's friends: SEED_DIR
+gets an identity and a list of two friends, a request, a request sent and a
+blocked player, as a Vita's would be */
+static int seed(const char *folder)
+{
+	static const char *const names[] = { "Bravo", "Charlie", "Delta", "Echo" };
+	unsigned char keys[4][P2P_KEY_SIZE], seeds[4][P2P_SEED_SIZE], friendship[FRIENDSHIP_LENGTH];
+	char code[P2P_FRIEND_CODE_LENGTH + 1];
+	int index;
+
+	snprintf(roots[0], sizeof(roots[0]), "%s", folder);
+	use(0);
+	quiet = 1;
+	p2p_friends_code(code, sizeof(code));
+	for (index = 0; index < 4; index++)
+	{
+		memset(seeds[index], 0x40 + index, P2P_SEED_SIZE);
+		p2p_ed25519_public(seeds[index], keys[index], NULL);
+	}
+	memset(friendship, 9, sizeof(friendship));
+	friend_add(keys[0], names[0], friendship, 0, 0);
+	friend_add(keys[1], names[1], friendship, 0, 0);
+	memcpy(machines[0].requests[0].key, keys[2], P2P_KEY_SIZE);
+	snprintf(machines[0].requests[0].name, sizeof(machines[0].requests[0].name), "%s", names[2]);
+	machines[0].requests[0].time = unix_now();
+	machines[0].request_count = 1;
+	memcpy(machines[0].blocked[0].key, keys[3], P2P_KEY_SIZE);
+	snprintf(machines[0].blocked[0].name, sizeof(machines[0].blocked[0].name), "%s", names[3]);
+	machines[0].blocked_count = 1;
+	memset(seeds[0], 0x50, P2P_SEED_SIZE);
+	p2p_ed25519_public(seeds[0], keys[0], NULL);
+	code_of_key(keys[0], machines[0].outgoing[0].code);
+	memset(machines[0].outgoing[0].nonce, 0x11, NONCE_LENGTH);
+	machines[0].outgoing[0].time = unix_now();
+	machines[0].outgoing_count = 1;
+	machines[0].dirty = 1;
+	save(1);
+	printf("seeded %s/friends: %d friends, %d request, %d sent, %d blocked\n", folder, machines[0].friend_count,
+		machines[0].request_count, machines[0].outgoing_count, machines[0].blocked_count);
+	return 0;
+}
+
 int main(void)
 {
 	char root[512];
 	int index;
+
+	if (getenv("FRIENDS_TEST_SEED_DIR"))
+		return seed(getenv("FRIENDS_TEST_SEED_DIR"));
 
 	snprintf(root, sizeof(root), "%s", getenv("FRIENDS_TEST_ROOT") ? getenv("FRIENDS_TEST_ROOT") : ".");
 	for (index = 0; index < MACHINES; index++)

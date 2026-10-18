@@ -375,6 +375,8 @@ static char const *const port_function_names[] =
 	"port h3 mods delete", "port h3 mods page up", "port h3 mods page down",
 	"port h3 lan init", "port h3 lan dispose", "port h3 lan refresh",
 	"port h3 adhoc host", "port h3 adhoc browse", "port h3 adhoc coop", "port h3 adhoc join", "port h3 adhoc cancel",
+	"port h3 friends init", "port h3 friends act", "port h3 friends second", "port h3 friends options ask",
+	"port h3 friends option", "port h3 friends page up", "port h3 friends page down",
 };
 
 /* the port's game data functions (menu_functions.c), from
@@ -393,6 +395,7 @@ static char const *const port_game_data_input_names[] =
 	"port forge properties", "port forge packs",
 	"port h3 mods", "port h3 mods details", "port h3 mods confirm",
 	"port h3 adhoc joining", "port h3 network status",
+	"port h3 friends", "port h3 friends options", "port h3 friends panel",
 };
 
 static struct

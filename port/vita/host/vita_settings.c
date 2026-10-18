@@ -219,6 +219,7 @@ Multiplayer tab's way.
 #include "forge_store.h"
 #include "mod_manager_share.h"
 #include "p2p.h"
+#include "p2p_friends.h"
 #include "crossplay_guard.h"
 #include "system_link_shortcut.h"
 #include "update_check.h"
@@ -275,6 +276,8 @@ enum
 	PAGE_FORGE,
 	/* (Modded maps' Mod manager: circle goes back to Modded maps) */
 	PAGE_MODS,
+	/* (Multiplayer's Friends: p2p_friends.h) */
+	PAGE_FRIENDS,
 	PAGE_COUNT
 };
 
@@ -300,6 +303,7 @@ static const struct
 	{ "A/B switches", TAB_DEV },
 	{ "Forge and File Share", TAB_GAME },
 	{ "Mod manager", TAB_MULTIPLAYER },
+	{ "Friends", TAB_MULTIPLAYER },
 };
 /* the headings over a tab's rows, as Halo Online's settings have them
 (HUD, Interface...): each above the row it names, when that row is shown */
@@ -355,6 +359,8 @@ enum
 	ACTION_CE_EXTRACT,
 	/* a look for a newer version (update_notify.c), in the background */
 	ACTION_UPDATE_CHECK,
+	/* (the Friends page) a friend's code typed with the D-pad */
+	ACTION_FRIEND_ADD,
 };
 
 struct setting
@@ -635,6 +641,17 @@ static struct setting settings[] = {
 		TAB_MULTIPLAYER, KIND_ACTION, ACTION_ADHOC_JOIN },
 	{ "Join with a code", NULL, 0, 0, { NULL }, { NULL }, "Type the code another player's game shows", 0,
 		TAB_MULTIPLAYER, KIND_ACTION, ACTION_JOIN_CODE },
+	/* (friends, port/linux/src/p2p_friends.c: the code, requests, who is
+	online, Join, Invite; the Halo 3 menus' FRIENDS screen does the same) */
+	PAGE_ROW("Friends", "Your friend code, requests, who is online, join, invite", TAB_MULTIPLAYER, PAGE_FRIENDS),
+	{ "Add a friend", NULL, 0, 0, { NULL }, { NULL }, "Type a friend's code: they accept, then you're friends", 0,
+		PAGE_FRIENDS, KIND_ACTION, ACTION_FRIEND_ADD },
+	/* (friends.appear_offline: nothing sent to friends; live) */
+	{ "Appear offline", "HALO_FRIENDS_APPEAR_OFFLINE", 0, 2, { "false", "true" }, { "Off", "On" },
+		"On: friends see you offline; you still see them", 0, PAGE_FRIENDS },
+	/* (friends.join: a public game without a password joined from presence) */
+	{ "Friends can join", "HALO_FRIENDS_JOIN", 0, 2, { "true", "false" }, { "On", "Off" },
+		"Your public games, no password, joined in one press", 0, PAGE_FRIENDS },
 	/* (the offline bots: port/linux/game/bots.c; the skill and teams rows
 	shown while there are any, setting_shown) */
 	{ "Bots", "HALO_BOTS", 0, 11, { "0", "1", "2", "3", "4", "5", "6", "7", "9", "11", "15" },
@@ -878,6 +895,10 @@ enum
 	question */
 	SCREEN_MOD_DETAILS,
 	SCREEN_MOD_DELETE,
+	/* the Friends page: a friend's code typed; the question before removing
+	or blocking one */
+	SCREEN_FRIEND_CODE,
+	SCREEN_FRIEND_CONFIRM,
 };
 static int screen;
 /* the code being typed (eight characters of P2P_CODE_ALPHABET) and the
@@ -979,6 +1000,31 @@ static int maps_mods_present;
 static char maps_installer[64];
 /* the maps turned off: their names, commas between (HALO_MAPS_DISABLED) */
 static char maps_disabled[1024];
+
+/* ---------- friends
+
+The Friends page (Multiplayer > Friends; port/linux/src/p2p_friends.h): the
+code, Add a friend (the code typed with the D-pad, as Join with a code),
+Appear offline and Friends can join, then the entries (requests, invites,
+friends online first, requests sent, blocked), each its name and a word of
+its state, the chosen one's doing on the help line. Cross does an entry's
+first thing (accept, join, unblock), square its second (decline, invite,
+ignore, cancel), triangle removes a friend or blocks a request after a
+question. A join (a friend's game, an invite) goes on as Join with a code's,
+to the guide's steps. */
+/* (the page's three rows, its three lines and these, with the line saying
+which are shown, are a screen's height) */
+#define FRIEND_LINES 5
+static struct p2p_friend_entry friends_view[P2P_FRIEND_ENTRIES_MAXIMUM];
+static int friends_count;
+static int friends_scroll;
+/* the code being typed (P2P_FRIEND_CODE_LENGTH characters) and its cursor */
+static char friend_code_typed[P2P_FRIEND_CODE_LENGTH + 1] = "AAAAAAAAAAAA";
+static int friend_code_cursor;
+/* the question's entry and what Cross does there (P2P_FRIENDS_REMOVE or
+P2P_FRIENDS_BLOCK) */
+static struct p2p_friend_entry friend_confirm_entry;
+static int friend_confirm_action;
 
 /* ---------- the mod manager */
 
@@ -1316,6 +1362,14 @@ static int setting_shown(const struct setting *setting)
 	machine does not, network_wire.h) */
 	if (setting->action == ACTION_JOIN_CODE)
 		return network_is("online") && halo_pc_menus_state != 1 && !network_wire_crossplay();
+	/* (friends: their presence, joins and invites go through internet play;
+	in the code row's place, which the PC menus' Direct Link leaves out: the
+	tab is a screen's height, and a game with the PC menus is one whose
+	menus join friends' games. Online chosen and running; not on the
+	crossplay wire, whose Vita joins PCs' games, never a friend's) */
+	if (setting->action == ACTION_PAGE && setting->opens == PAGE_FRIENDS)
+		return !strcmp(running_network, "online") && !strcmp(chosen_network(), "online") && halo_pc_menus_state == 1 &&
+			!network_wire_crossplay();
 	if (setting->action == ACTION_BROWSE ||
 		(setting->variable && !strcmp(setting->variable, "HALO_NET_HOST_PUBLIC")))
 		return network_is("online");
@@ -2407,6 +2461,8 @@ enum
 	LINE_VARIANT,
 	/* (the Mod manager page's entries: mods_view) */
 	LINE_MOD,
+	/* (the Friends page's entries: friends_view) */
+	LINE_FRIEND,
 	/* (a line that is not chosen: a warning, a note) */
 	LINE_INFO,
 	/* (a heading over rows: headings; not chosen either) */
@@ -2423,6 +2479,7 @@ struct line
 /* (a page shows the maps, or the mod manager's entries: never both) */
 #define MAXIMUM_LIST_LINES (MAXIMUM_MAPS > HALO_MODS_MAXIMUM ? MAXIMUM_MAPS : HALO_MODS_MAXIMUM)
 #define MAXIMUM_LINES (SETTING_COUNT + MAXIMUM_LIST_LINES + FORGE_PANEL_MAXIMUM + FORGE_LINE_COUNT + 6 + \
+	P2P_FRIEND_ENTRIES_MAXIMUM + \
 	(int)(sizeof(headings) / sizeof(headings[0])))
 
 /* a line that is not chosen (moving up and down passes it) */
@@ -2613,6 +2670,40 @@ static void forge_start(void)
 	close_panel();
 }
 
+/* the Friends page's entries again (at most twice a second, unless asked
+now: an action's outcome shows at once) */
+static void friends_refresh(int now)
+{
+	static unsigned long long refreshed;
+	unsigned long long time = now_us();
+
+	if (!now && refreshed && time - refreshed < 500000ULL)
+		return;
+	refreshed = time;
+	friends_count = p2p_friends_list(friends_view, P2P_FRIEND_ENTRIES_MAXIMUM);
+	if (friends_count < 0 || friends_count > P2P_FRIEND_ENTRIES_MAXIMUM)
+		friends_count = 0;
+	if (friends_scroll >= friends_count)
+		friends_scroll = 0;
+}
+
+/* an entry's state in a word, as its line's value */
+static const char *friend_state_word(const struct p2p_friend_entry *entry)
+{
+	switch (entry->kind)
+	{
+	case P2P_FRIEND_KIND_REQUEST:
+		return T("Request");
+	case P2P_FRIEND_KIND_INVITE:
+		return T("Invitation");
+	case P2P_FRIEND_KIND_FRIEND:
+		return entry->joinable ? T("Join") : entry->online ? T("Online") : T("Offline");
+	case P2P_FRIEND_KIND_OUTGOING:
+		return T("Sent");
+	}
+	return T("Blocked");
+}
+
 /* the lines of the page shown: its rows, each heading (headings) above the
 row it names (Game's Check for updates with the version and the answer
 under it), then the gyroscope's line (Gyro settings) or the maps (Modded
@@ -2620,6 +2711,9 @@ maps) */
 static int page_lines(struct line *lines)
 {
 	int count = 0, index;
+
+	if (page == PAGE_FRIENDS)
+		friends_refresh(0);
 
 	for (index = 0; index < SETTING_COUNT; index++)
 		if (settings[index].page == page && setting_shown(&settings[index]))
@@ -2698,6 +2792,28 @@ static int page_lines(struct line *lines)
 		for (index = 0; index < forge_entry_count; index++)
 		{
 			lines[count].type = LINE_VARIANT;
+			lines[count++].index = index;
+		}
+	}
+	if (page == PAGE_FRIENDS)
+	{
+		char code[P2P_FRIEND_CODE_SIZE];
+
+		p2p_friends_code(code, sizeof(code));
+		lines[count].type = LINE_INFO;
+		snprintf(lines[count++].text, sizeof(lines[0].text), T("Your friend code: %s"), code);
+		lines[count].type = LINE_INFO;
+		p2p_friends_status(lines[count++].text, sizeof(lines[0].text));
+		lines[count].type = LINE_INFO;
+		snprintf(lines[count++].text, sizeof(lines[0].text), "%s", T("Triangle: remove a friend, block a request"));
+		if (!friends_count)
+		{
+			lines[count].type = LINE_INFO;
+			snprintf(lines[count++].text, sizeof(lines[0].text), "%s", T("Give your code to friends, or type theirs"));
+		}
+		for (index = 0; index < friends_count; index++)
+		{
+			lines[count].type = LINE_FRIEND;
 			lines[count++].index = index;
 		}
 	}
@@ -3036,6 +3152,17 @@ static void help_line(char *text, int size, const struct line *line)
 		else
 			snprintf(text, (size_t)size, T("%s: on or off, or delete it"), mod_kind_name(entry->kind));
 	}
+	else if (line && line->type == LINE_FRIEND)
+	{
+		const struct p2p_friend_entry *entry = &friends_view[line->index];
+
+		if (entry->kind == P2P_FRIEND_KIND_FRIEND && entry->online && entry->maximum)
+			snprintf(text, (size_t)size, T("%s: %.40s, %d of %d"), entry->name, entry->activity, entry->players,
+				entry->maximum);
+		else
+			snprintf(text, (size_t)size, "%s: %.50s", entry->kind == P2P_FRIEND_KIND_OUTGOING ? entry->code : entry->name,
+				entry->activity);
+	}
 	else if (!setting)
 		text[0] = 0;
 	else if (!strcmp(running_network, "online") && (setting->action == ACTION_JOIN_CODE ||
@@ -3118,6 +3245,15 @@ static void footer_line(char *text, int size, const struct line *line)
 		middle = line->index == FORGE_LINE_START ? T("Cross: select   ") : T("Left/right: change   ");
 	else if (line && line->type == LINE_MOD)
 		middle = T("Cross: details   Square: delete   ");
+	else if (line && line->type == LINE_FRIEND)
+	{
+		const struct p2p_friend_entry *entry = &friends_view[line->index];
+
+		middle = entry->kind == P2P_FRIEND_KIND_REQUEST ? T("Cross: accept  Square: decline  ") :
+			entry->kind == P2P_FRIEND_KIND_INVITE ? T("Cross: accept  Square: ignore  ") :
+			entry->kind == P2P_FRIEND_KIND_FRIEND ? T("Cross: join  Square: invite  ") :
+			entry->kind == P2P_FRIEND_KIND_OUTGOING ? T("Square: cancel   ") : T("Cross: unblock   ");
+	}
 	else if (setting && setting->kind == KIND_ACTION)
 		middle = T("Cross: select   ");
 	else if (setting && setting->kind == KIND_TEXT)
@@ -3151,6 +3287,23 @@ static void page_summary(char *text, int size, const struct setting *setting)
 		else
 			snprintf(text, (size_t)size, "%s", T("Off"));
 		break;
+	case PAGE_FRIENDS:
+	{
+		int online = 0, requests = 0, index;
+
+		friends_refresh(0);
+		for (index = 0; index < friends_count; index++)
+		{
+			online += friends_view[index].kind == P2P_FRIEND_KIND_FRIEND && friends_view[index].online;
+			requests += friends_view[index].kind == P2P_FRIEND_KIND_REQUEST ||
+				friends_view[index].kind == P2P_FRIEND_KIND_INVITE;
+		}
+		if (requests)
+			snprintf(text, (size_t)size, T("%d online, %d new"), online, requests);
+		else
+			snprintf(text, (size_t)size, T("%d online"), online);
+		break;
+	}
 	case PAGE_MODS:
 		/* (once looked: how many) */
 		if (mods_state == 2)
@@ -3243,6 +3396,8 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 			continue;
 		if (line->type == LINE_MOD && (line->index < mods_scroll || line->index >= mods_scroll + MAP_LINES))
 			continue;
+		if (line->type == LINE_FRIEND && (line->index < friends_scroll || line->index >= friends_scroll + FRIEND_LINES))
+			continue;
 		/* (the classic panel short of room: the first headings left out) */
 		if (line->type == LINE_HEADING && (*headings)++ < skip)
 			continue;
@@ -3251,7 +3406,8 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 		the entries) */
 		if (index && ((page == PAGE_MAPS && line->type != LINE_SETTING && lines[index - 1].type == LINE_SETTING) ||
 			(page == PAGE_FORGE && line->type == LINE_HEADING) ||
-			(page == PAGE_MODS && line->type == LINE_MOD && lines[index - 1].type == LINE_INFO)))
+			(page == PAGE_MODS && line->type == LINE_MOD && lines[index - 1].type == LINE_INFO) ||
+			(page == PAGE_FRIENDS && line->type == LINE_INFO && lines[index - 1].type == LINE_SETTING)))
 		{
 			length += snprintf(text + length, (size_t)(size - length), "\n");
 			number++;
@@ -3300,6 +3456,15 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 
 			length += snprintf(text + length, (size_t)(size - length), "\n%s\x02  %s%*s %8s  %s", name, state,
 				pad > 0 ? pad : 0, "", size_name, map_format_name(map->format));
+		}
+		else if (line->type == LINE_FRIEND)
+		{
+			const struct p2p_friend_entry *entry = &friends_view[line->index];
+
+			/* (the name in the label's column, a word of its state in the
+			value's: the help line has the rest) */
+			length += snprintf(text + length, (size_t)(size - length), "\n%.20s\x02  %s",
+				entry->kind == P2P_FRIEND_KIND_OUTGOING ? entry->code : entry->name, friend_state_word(entry));
 		}
 		else if (line->type == LINE_MOD)
 		{
@@ -3364,6 +3529,12 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 		length += snprintf(text + length, (size_t)(size - length), T("(variants %d-%d of %d)"), forge_scroll + 1,
 			forge_scroll + FORGE_PANEL_LINES < forge_entry_count ? forge_scroll + FORGE_PANEL_LINES : forge_entry_count,
 			forge_entry_count);
+	}
+	if (page == PAGE_FRIENDS && friends_count > FRIEND_LINES && length + 2 < size)
+	{
+		length += snprintf(text + length, (size_t)(size - length), "\n\x04");
+		length += snprintf(text + length, (size_t)(size - length), T("(%d-%d of %d)"), friends_scroll + 1,
+			friends_scroll + FRIEND_LINES < friends_count ? friends_scroll + FRIEND_LINES : friends_count, friends_count);
 	}
 	if (page == PAGE_MODS && mods_state == 2 && mods_view.count > MAP_LINES && length + 2 < size)
 	{
@@ -3460,6 +3631,15 @@ static void show_list(void)
 		if (entry >= mods_scroll + MAP_LINES)
 			mods_scroll = entry - MAP_LINES + 1;
 	}
+	if (page == PAGE_FRIENDS && count && lines[*selected].type == LINE_FRIEND)
+	{
+		int entry = lines[*selected].index;
+
+		if (entry < friends_scroll)
+			friends_scroll = entry;
+		if (entry >= friends_scroll + FRIEND_LINES)
+			friends_scroll = entry - FRIEND_LINES + 1;
+	}
 	for (skip = 0; ; skip++)
 	{
 		highlighted = list_text(text, (int)sizeof(text), lines, count, *selected, skip, &headings);
@@ -3495,6 +3675,49 @@ static void show_code(void)
 		cursor, strcmp(running_network, "online") ? T("Connection must be Online") : "",
 		T("Up/down: letter  Left/right: move"), T("Cross: join  Circle: back"));
 	vgxm_menu_set(text, 2);
+}
+
+/* a friend's code being typed: "A B C D - E F G H - J K L M", a caret under
+the cursor's */
+static void show_friend_code(void)
+{
+	char text[1024], letters[48], cursor[48];
+	int index, column = 0;
+
+	for (index = 0; index < P2P_FRIEND_CODE_LENGTH; index++)
+	{
+		if (index == 4 || index == 8)
+		{
+			letters[column] = '-';
+			cursor[column++] = ' ';
+			letters[column] = ' ';
+			cursor[column++] = ' ';
+		}
+		letters[column] = friend_code_typed[index];
+		cursor[column++] = index == friend_code_cursor ? '^' : ' ';
+		letters[column] = ' ';
+		cursor[column++] = ' ';
+	}
+	letters[column] = cursor[column] = 0;
+	snprintf(text, sizeof(text), "%s\n\n    %s\n    %s\n%s\n%s\n%s", T("ADD A FRIEND\n(their Friends page shows their code)"),
+		letters, cursor, strcmp(running_network, "online") ? T("Sent once the Connection is Online") : "",
+		T("Up/down: letter  Left/right: move"), T("Cross: send  Circle: back"));
+	vgxm_menu_set(text, 2);
+}
+
+/* the question before removing a friend or blocking a player (triangle) */
+static void show_friend_confirm(void)
+{
+	char text[1024];
+	const struct p2p_friend_entry *entry = &friend_confirm_entry;
+
+	if (friend_confirm_action == P2P_FRIENDS_REMOVE)
+		snprintf(text, sizeof(text), T("REMOVE FRIEND\n\n%.16s  %s\n\nThey are told, and see you no more.\n"
+			"Cross: remove   Square: block   O: keep"), entry->name, entry->code);
+	else
+		snprintf(text, sizeof(text), T("BLOCK\n\n%.16s  %s\n\nTheir requests and invites never reach you.\n"
+			"Cross: block   O: back"), entry->name, entry->code);
+	vgxm_menu_set(text, -1);
 }
 
 /* the public games as the server browser lists them (one line each: the
@@ -3889,6 +4112,10 @@ static void show(void)
 		show_mod_details();
 	else if (screen == SCREEN_MOD_DELETE)
 		show_mod_delete();
+	else if (screen == SCREEN_FRIEND_CODE)
+		show_friend_code();
+	else if (screen == SCREEN_FRIEND_CONFIRM)
+		show_friend_confirm();
 	else
 		show_list();
 }
@@ -4322,6 +4549,10 @@ static void act(const struct setting *setting)
 		code_for_join = 1;
 		screen = guide_blocker() ? SCREEN_GUIDE : SCREEN_CODE;
 		break;
+	/* (friends: their code typed, sent once online) */
+	case ACTION_FRIEND_ADD:
+		screen = SCREEN_FRIEND_CODE;
+		break;
 	case ACTION_BROWSE:
 		guide_action = ACTION_JOIN;
 		guide_problem[0] = 0;
@@ -4520,6 +4751,153 @@ static void code_input(unsigned long pressed, unsigned long buttons, unsigned lo
 
 		code_typed[code_cursor] = alphabet[(position + step + size) % size];
 		last_move = now;
+	}
+}
+
+/* the friend's code screen's buttons (code_input's, for 12 characters) */
+static void friend_code_input(unsigned long pressed, unsigned long buttons, unsigned long long now)
+{
+	static const char alphabet[] = P2P_CODE_ALPHABET;
+	int step = 0;
+
+	if (pressed & VITA_BUTTON_CIRCLE)
+	{
+		screen = SCREEN_LIST;
+		return;
+	}
+	if (pressed & VITA_BUTTON_CROSS)
+	{
+		int result = p2p_friends_add(friend_code_typed);
+
+		set_notice("%s", p2p_friends_add_text(result));
+		{
+			char line[160];
+
+			snprintf(line, sizeof(line), "settings: friends: a code typed: %s", p2p_friends_add_text(result));
+			vita_host_log(line);
+		}
+		friends_refresh(1);
+		screen = SCREEN_LIST;
+		return;
+	}
+	if (pressed & VITA_BUTTON_LEFT)
+		friend_code_cursor = (friend_code_cursor + P2P_FRIEND_CODE_LENGTH - 1) % P2P_FRIEND_CODE_LENGTH;
+	if (pressed & VITA_BUTTON_RIGHT)
+		friend_code_cursor = (friend_code_cursor + 1) % P2P_FRIEND_CODE_LENGTH;
+	if (pressed & VITA_BUTTON_UP)
+		step = 1;
+	else if (pressed & VITA_BUTTON_DOWN)
+		step = -1;
+	else if ((buttons & (VITA_BUTTON_UP | VITA_BUTTON_DOWN)) && now - last_move > 150000)
+		step = (buttons & VITA_BUTTON_UP) ? 1 : -1;
+	if (step)
+	{
+		const char *at = strchr(alphabet, friend_code_typed[friend_code_cursor]);
+		int position = at ? (int)(at - alphabet) : 0;
+		int size = (int)sizeof(alphabet) - 1;
+
+		friend_code_typed[friend_code_cursor] = alphabet[(position + step + size) % size];
+		last_move = now;
+	}
+}
+
+/* an action on an entry, its outcome said; a join goes on to Join's steps,
+as Join with a code's */
+static void friend_do(const struct p2p_friend_entry *entry, int action)
+{
+	struct p2p_friend_entry copy = *entry;
+	int outcome = p2p_friends_act(copy.id, copy.kind, action);
+
+	{
+		char line[160];
+
+		snprintf(line, sizeof(line), "settings: friends: %s, action %d: %s", copy.name, action,
+			p2p_friends_outcome_text(outcome));
+		vita_host_log(line);
+	}
+	if (outcome == P2P_FRIENDS_DONE && (action == P2P_FRIENDS_JOIN || action == P2P_FRIENDS_INVITE_ACCEPT))
+	{
+		set_notice(T("Joining %.16s's game..."), copy.name);
+		guide_action = ACTION_JOIN;
+		guide_problem[0] = 0;
+		code_for_join = 1;
+		screen = SCREEN_GUIDE;
+	}
+	else if (outcome == P2P_FRIENDS_DONE && action == P2P_FRIENDS_INVITE)
+		set_notice(T("Invited %.16s"), copy.name);
+	else
+		set_notice("%s", p2p_friends_outcome_text(outcome));
+	friends_refresh(1);
+}
+
+/* an entry's buttons: cross its first thing, square its second, triangle
+the question before removing a friend or blocking a request */
+static void friend_input(const struct p2p_friend_entry *entry, unsigned long pressed)
+{
+	if (pressed & VITA_BUTTON_TRIANGLE)
+	{
+		if (entry->kind == P2P_FRIEND_KIND_FRIEND || entry->kind == P2P_FRIEND_KIND_REQUEST ||
+			entry->kind == P2P_FRIEND_KIND_INVITE)
+		{
+			friend_confirm_entry = *entry;
+			friend_confirm_action = entry->kind == P2P_FRIEND_KIND_FRIEND ? P2P_FRIENDS_REMOVE : P2P_FRIENDS_BLOCK;
+			screen = SCREEN_FRIEND_CONFIRM;
+		}
+		return;
+	}
+	if (pressed & VITA_BUTTON_CROSS)
+	{
+		switch (entry->kind)
+		{
+		case P2P_FRIEND_KIND_REQUEST:
+			friend_do(entry, P2P_FRIENDS_ACCEPT);
+			break;
+		case P2P_FRIEND_KIND_INVITE:
+			friend_do(entry, P2P_FRIENDS_INVITE_ACCEPT);
+			break;
+		case P2P_FRIEND_KIND_FRIEND:
+			friend_do(entry, P2P_FRIENDS_JOIN);
+			break;
+		case P2P_FRIEND_KIND_BLOCKED:
+			friend_do(entry, P2P_FRIENDS_UNBLOCK);
+			break;
+		}
+		return;
+	}
+	if (pressed & VITA_BUTTON_SQUARE)
+	{
+		switch (entry->kind)
+		{
+		case P2P_FRIEND_KIND_REQUEST:
+			friend_do(entry, P2P_FRIENDS_DECLINE);
+			break;
+		case P2P_FRIEND_KIND_INVITE:
+			friend_do(entry, P2P_FRIENDS_INVITE_IGNORE);
+			break;
+		case P2P_FRIEND_KIND_FRIEND:
+			friend_do(entry, P2P_FRIENDS_INVITE);
+			break;
+		case P2P_FRIEND_KIND_OUTGOING:
+			friend_do(entry, P2P_FRIENDS_CANCEL);
+			break;
+		}
+	}
+}
+
+/* the question's buttons */
+static void friend_confirm_input(unsigned long pressed)
+{
+	if (pressed & VITA_BUTTON_CIRCLE)
+		screen = SCREEN_LIST;
+	else if (pressed & VITA_BUTTON_CROSS)
+	{
+		screen = SCREEN_LIST;
+		friend_do(&friend_confirm_entry, friend_confirm_action);
+	}
+	else if ((pressed & VITA_BUTTON_SQUARE) && friend_confirm_action == P2P_FRIENDS_REMOVE)
+	{
+		screen = SCREEN_LIST;
+		friend_do(&friend_confirm_entry, P2P_FRIENDS_BLOCK);
 	}
 }
 
@@ -4977,6 +5355,19 @@ int vita_settings_input(const struct vita_host_pad *pad)
 		show();
 		return 1;
 	}
+	if (screen == SCREEN_FRIEND_CODE)
+	{
+		friend_code_input(pressed, buttons, now);
+		show();
+		return 1;
+	}
+	if (screen == SCREEN_FRIEND_CONFIRM)
+	{
+		friend_confirm_input(pressed);
+		if (pressed)
+			show();
+		return 1;
+	}
 	if (screen == SCREEN_BROWSE)
 	{
 		browse_input(pressed);
@@ -5090,11 +5481,22 @@ int vita_settings_input(const struct vita_host_pad *pad)
 			}
 			last_move = now;
 		}
-		if (count && (pressed & (VITA_BUTTON_LEFT | VITA_BUTTON_RIGHT | VITA_BUTTON_CROSS | VITA_BUTTON_SQUARE)))
+		if (count && (pressed & (VITA_BUTTON_LEFT | VITA_BUTTON_RIGHT | VITA_BUTTON_CROSS | VITA_BUTTON_SQUARE |
+			VITA_BUTTON_TRIANGLE)))
 		{
 			struct line *line = &lines[*selected];
 
-			if (line->type == LINE_MOD)
+			if (line->type == LINE_FRIEND)
+			{
+				struct p2p_friend_entry entry = friends_view[line->index];
+
+				friend_input(&entry, pressed);
+				if (!panel_open)
+					return 1;
+			}
+			else if (pressed == VITA_BUTTON_TRIANGLE)
+				;
+			else if (line->type == LINE_MOD)
 			{
 				struct halo_mod_entry *entry = &mods_view.entries[line->index];
 

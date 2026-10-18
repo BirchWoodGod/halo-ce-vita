@@ -177,6 +177,7 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 		<on event="a start" run="port mp require online" open="h3/code/screen" otherwise="h3/mp/offline"/>
 	</widget>
 	<widget name="h3/mp/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<on event="y" open="h3/friends/screen"/>
 		<child widget="h3/mp/network_row" x="0" y="0"/>
 		<child widget="h3/mp/game_row" x="0" y="38"/>
 		<child widget="h3/mp/map_row" x="0" y="58"/>
@@ -233,6 +234,7 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 		<child widget="h3/mp/b_butn"/>
 		<child widget="h3/mp/back"/>
 		<child widget="h3/mp/players"/>
+		<child widget="h3/friends/lobby_panel"/>
 		<child widget="h3/mp/network_status"/>
 		<child widget="h3/main/nameplate"/>
 		<child widget="h3/mp/list" x="8" y="50"/>

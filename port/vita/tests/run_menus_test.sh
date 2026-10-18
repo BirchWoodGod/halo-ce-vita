@@ -102,6 +102,16 @@
 #            edits neither, CREATE NEW PROFILE still makes one; with
 #            HALO_TEST_PROFILE's profile and a damaged savegame.bin, the lobby
 #            says the saved game is damaged and starts at Mission Start
+#   h3friends the Halo 3 FRIENDS screen (menus/halo3/friends.xml; port/linux/src/p2p_friends.c)
+#            over a save's friends made at test time (run_p2p_friends_test.sh seed: two
+#            friends, a request, a request sent, a blocked player; shown online,
+#            HALO_TEST_FRIENDS_SHOW=online), internet play off: FRIENDS on the main menu, the
+#            code and every entry listed; ADD FRIEND types a code (queued until online); APPEAR
+#            OFFLINE and FRIENDS CAN JOIN switched; Square declines the request (nothing sent);
+#            Cross on the joinable friend says go online first; Triangle's REMOVE FRIEND
+#            removes them; the list written and read back by a second start
+#   h3friendspanel the lobbies' FRIENDS panel: the multiplayer lobby shows who is online
+#            and the requests, Triangle opens the FRIENDS screen, B back; the Forge lobby too
 #   h3oddrows the public lists' odd listings (HALO_TEST_BROWSER_ODD: the owner's
 #            photo of beta.7's browser, Oct 18 2026) in the Halo 3 games browser
 #            and OpenCE's (Menu style Halo CE): a name that names nothing shows
@@ -183,7 +193,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3damaged h3mods h3modspicker h3modstouch h3lan h3adhoc h3adhoccoop h3oddrows}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3damaged h3mods h3modspicker h3modstouch h3lan h3adhoc h3adhoccoop h3oddrows h3friends h3friendspanel}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
 
@@ -316,6 +326,14 @@ h3_no_xbox_profiles() { # NAME
 # (internet play on, nothing reached: its brokers, STUN and relays TEST-NET addresses)
 h3net="HALO_NET_ONLINE=true HALO_NET_BROKERS=198.51.100.1:1883 HALO_NET_STUN=198.51.100.1:3478"
 h3net="$h3net HALO_NET_RELAYS=198.51.100.1:47320 HALO_NET_ALLOW_UPNP=false HALO_DISCORD_APPLICATION="
+# (FRIENDS on the main menu: down six, A)
+h3friendspad="wait:150:3000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000"
+# a save folder's friends (run_p2p_friends_test.sh seed: made at test time, never in the repository)
+friends_seed() { # FOLDER
+	rm -rf "$1"
+	TMPDIR="$out" sh "$here/run_p2p_friends_test.sh" seed "$1" > "$out/friends_seed.log" 2>&1 ||
+		{ fail friends "the friends could not be made (friends_seed.log)"; cat "$out/friends_seed.log"; }
+}
 # (the main menu: down to MULTIPLAYER, A: the lobby, its NETWORK row focused)
 h3mppad="wait:150:3000 down:150:700 a wait:150:3000"
 
@@ -988,8 +1006,58 @@ for case in $cases; do
 		grep -aq "menus: h3 mods: mygulch.map turned off" "$log" || fail h3modstouch "a tap on mygulch's row did not turn it off"
 		grep -a "ui: screen" "$log" | tail -1 | grep -q 'pc.h3.main.screen' ||
 			fail h3modstouch "a tap on Back did not go back to the main menu" ;;
+	h3friends)
+		# (FRIENDS, the seventh item; ADD FRIEND: a code typed; APPEAR OFFLINE; FRIENDS CAN JOIN;
+		# Delta's request: Square declines; Bravo (focused then): Cross joins (offline: go online
+		# first), Triangle, down to REMOVE FRIEND, A; B)
+		friends_seed "$out/h3friends-save"
+		save_from="$out/h3friends-save" run h3friends "$menus_data" 45 "$h3friendspad a wait:150:2500 down:150:500 a wait:150:1500 down:150:500 a wait:150:1500 down:150:500 x wait:150:2500 a wait:150:2000 y wait:150:2500 down:150:500 a wait:150:2500 b wait:150:2000" \
+			HALO_MENU_STYLE=halo3 HALO_TEST_FRIENDS_SHOW=online "HALO_TEST_TEXT_INPUT=abcd efgh-jklm"
+		check_h3 h3friends halo3
+		log=$out/h3friends/run.log
+		grep -aq "ui: screen pc.h3.friends.screen" "$log" || fail h3friends "FRIENDS did not open its screen"
+		grep -aq "menus: h3 friends: code [A-Z0-9]\{4\}-[A-Z0-9]\{4\}-[A-Z0-9]\{4\}; Go online to see your friends; 5 entries" "$log" ||
+			fail h3friends "the code, the status and the five entries were not listed"
+		grep -aq "menus: h3 friends: request Delta (.*): Wants to be your friend" "$log" || fail h3friends "the request was not listed"
+		grep -aq "menus: h3 friends: friend Bravo (.*): Slayer on Blood Gulch \[JOIN\]" "$log" ||
+			fail h3friends "the joinable friend was not listed with its game"
+		grep -aq "menus: h3 friends: friend Charlie (.*): Co-op: The Pillar of Autumn, Legendary" "$log" ||
+			fail h3friends "the co-op friend was not listed with its level and difficulty"
+		grep -aq "menus: h3 friends: request sent .*: Request sent" "$log" || fail h3friends "the request sent was not listed"
+		grep -aq "menus: h3 friends: blocked Echo" "$log" || fail h3friends "the blocked player was not listed"
+		grep -aq "friends: a friend request to ABCD-EFGH-JKLM (sent once online)" "$log" ||
+			fail h3friends "ADD FRIEND did not queue the typed code's request"
+		grep -aq "menus: h3 friends: Friend request sent" "$log" || fail h3friends "ADD FRIEND did not say it was sent"
+		grep -aq "menus: h3 friends: Appearing offline" "$log" || fail h3friends "APPEAR OFFLINE did not switch on"
+		grep -aq "menus: h3 friends: Friends join only by your invites" "$log" || fail h3friends "FRIENDS CAN JOIN did not switch off"
+		grep -aq "friends: declined Delta's friend request (nothing sent)" "$log" || fail h3friends "Square did not decline"
+		grep -aq "menus: h3 friends: Go online first" "$log" || fail h3friends "Join offline did not say go online first"
+		grep -aq "ui: screen pc.h3.friends.options" "$log" || fail h3friends "Triangle did not open the options"
+		grep -aq "friends: removed Bravo" "$log" || fail h3friends "REMOVE FRIEND did not remove Bravo"
+		# (a second start: the list as left)
+		save_from="$out/h3friends/save" run h3friends_again "$menus_data" 25 "$h3friendspad wait:150:2000 b wait:150:2000" HALO_MENU_STYLE=halo3
+		check_h3 h3friends_again halo3
+		grep -aq "friends: this machine's friend code is .* (1 friends, 0 requests, 2 sent, 1 blocked)" "$out/h3friends_again/run.log" ||
+			fail h3friends "the list was not written and read back as left"
+		[ "$(grep -a "this machine's friend code is" "$log" | sed 's/.*code is \([^ ]*\).*/\1/')" = \
+			"$(grep -a "this machine's friend code is" "$out/h3friends_again/run.log" | sed 's/.*code is \([^ ]*\).*/\1/')" ] ||
+			fail h3friends "the code changed between starts" ;;
+	h3friendspanel)
+		# (MULTIPLAYER: the lobby's panel; Triangle: FRIENDS; B, B: the main menu, MULTIPLAYER focused; down
+		# to FORGE: its lobby's panel; Triangle; B)
+		friends_seed "$out/h3friends-save"
+		save_from="$out/h3friends-save" run h3friendspanel "$menus_data" 40 "$h3mppad wait:150:2500 y wait:150:2500 b wait:150:2000 b wait:150:2500 down:150:500 a wait:150:4000 y wait:150:2500 b wait:150:2000" \
+			HALO_MENU_STYLE=halo3 HALO_TEST_FRIENDS_SHOW=online
+		check_h3 h3friendspanel halo3
+		log=$out/h3friendspanel/run.log
+		grep -aq "ui: screen pc.h3.mp.screen" "$log" || fail h3friendspanel "MULTIPLAYER did not open the lobby"
+		grep -aq "menus: h3 friends panel: 2 ONLINE, 1 NEW, 3 shown" "$log" ||
+			fail h3friendspanel "the lobby's panel did not show the two friends online and the request"
+		[ "$(grep -ac "ui: screen pc.h3.friends.screen" "$log")" -ge 2 ] ||
+			fail h3friendspanel "Triangle did not open FRIENDS from both lobbies"
+		grep -aq "ui: screen pc.h3.forge.lobby" "$log" || fail h3friendspanel "the Forge lobby did not open" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3damaged|h3mods|h3modspicker|h3modstouch|h3lan|h3adhoc|h3adhoccoop|h3oddrows]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3damaged|h3mods|h3modspicker|h3modstouch|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3friends|h3friendspanel]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"

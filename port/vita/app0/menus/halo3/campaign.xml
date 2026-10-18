@@ -115,6 +115,7 @@ ui.map's own, the rest this folder's art. -->
 	</widget>
 	<widget name="h3/campaign/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<on event="created" run="port h3 campaign focus"/>
+		<on event="y" open="h3/friends/screen"/>
 		<child widget="h3/campaign/network_row" x="0" y="0"/>
 		<child widget="h3/campaign/mission_row" x="0" y="34"/>
 		<child widget="h3/campaign/difficulty_row" x="0" y="54"/>
@@ -164,6 +165,7 @@ ui.map's own, the rest this folder's art. -->
 		<child widget="h3/campaign/back"/>
 		<child widget="h3/main/players"/>
 		<child widget="h3/main/nameplate"/>
+		<child widget="h3/friends/lobby_panel"/>
 		<child widget="h3/campaign/list" x="8" y="50"/>
 	</widget>
 

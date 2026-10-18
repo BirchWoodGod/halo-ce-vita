@@ -4,6 +4,9 @@
 #   run_p2p_friends_test.sh          the checks (p2p_friends_test.c: three
 #                                    machines and a broker in one process),
 #                                    then again with ASan and UBSan
+#   run_p2p_friends_test.sh seed DIR   DIR/friends made as a Vita's with two
+#                                    friends, a request, a request sent and a
+#                                    blocked player (run_menus_test.sh's cases)
 #   run_p2p_friends_test.sh fuzz [RUNS]   every message the brokers can carry
 #                                    to the inbox and the mailbox, and both
 #                                    files, fuzzed with ASan and UBSan
@@ -31,6 +34,14 @@ game_flags="-ffunction-sections -fdata-sections -fms-extensions -fshort-wchar -f
 crypto="port/linux/src/p2p_crypto.c port/third_party/monocypher/monocypher.c port/third_party/monocypher/monocypher-ed25519.c
 	port/linux/src/lang.c"
 mode=${1:-test}
+if [ "$mode" = seed ]; then
+	# (run_menus_test.sh's FRIENDS cases: a save folder's friends, made in $2)
+	$clang --target=i686-linux-gnu -m32 -malign-double -freg-struct-return -O2 $game_flags -Wl,--gc-sections \
+		-Wl,--unresolved-symbols=ignore-in-object-files -o "$out/p2p_friends_seed" "$here/p2p_friends_test.c" $crypto -lpthread
+	mkdir -p "$2"
+	FRIENDS_TEST_SEED_DIR="$2" "$out/p2p_friends_seed"
+	exit $?
+fi
 if [ "$mode" = fuzz ]; then
 	runs=${2:-300000}
 	${FUZZ_CLANG:-clang} -m32 -O1 -fsanitize=address,undefined -fno-sanitize-recover=undefined $game_flags \

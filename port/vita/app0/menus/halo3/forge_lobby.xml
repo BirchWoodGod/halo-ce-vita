@@ -52,6 +52,7 @@ vehicles, the dropships, the Covenant AI), built in the background while the lob
 		<on event="a start" run="port forge start"/>
 	</widget>
 	<widget name="h3/forge/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<on event="y" open="h3/friends/screen"/>
 		<child widget="h3/forge/map_row" x="0" y="0"/>
 		<child widget="h3/forge/packs_row" x="0" y="20"/>
 		<child widget="h3/forge/start_row" x="0" y="40"/>
@@ -94,6 +95,7 @@ vehicles, the dropships, the Covenant AI), built in the background while the lob
 		<child widget="h3/forge/leave"/>
 		<child widget="h3/main/players"/>
 		<child widget="h3/main/nameplate"/>
+		<child widget="h3/friends/lobby_panel"/>
 		<child widget="h3/forge/list" x="8" y="70"/>
 	</widget>
 
