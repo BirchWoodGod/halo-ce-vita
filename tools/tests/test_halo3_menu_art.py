@@ -55,6 +55,9 @@ EXPECTED = {
     'custom_panel.png': (256, 256),
 }
 EXPECTED.update({'swatch_%02d.png' % index: (16, 16) for index in range(18)})
+# (the nameplate in each of those colours: the main menu's, the lobbies' and
+# the pause screen's, the profile's own)
+EXPECTED.update({'nameplate_%02d.png' % index: (256, 16) for index in range(18)})
 
 
 def generate(folder):
