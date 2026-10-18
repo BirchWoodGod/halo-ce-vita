@@ -1,0 +1,186 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The Halo 3-style File Share (the main menu's FILE SHARE): the files this PS Vita keeps, laid
+out as Halo 3's - the panel with FILE SHARE, the kind (MAP VARIANTS, GAME VARIANTS: L and R), the
+list at the left (each file's name and its map; twelve rows that scroll, the triggers a page) and
+the one chosen's details at the right (its map's picture, name, map, objects, author, date). On a
+map variant (port/linux/src/forge_store.c): A opens the Forge lobby on its map with it chosen,
+Square renames it (the system's keyboard), Triangle deletes it (asked first). Game variants (the
+Xbox's game types, as MULTIPLAYER's GAME lists them) are listed only. Sharing with friends comes
+with the lobbies (docs/superpowers/specs/2026-10-18-forge-design.md). The maps' pictures are
+ui.map's own, the rest this folder's art. -->
+<menus>
+	<bitmap name="h3/glyph_l">
+		<frame png="halo3/glyph_l.png" width="16" height="16"/>
+	</bitmap>
+	<bitmap name="h3/glyph_r">
+		<frame png="halo3/glyph_r.png" width="16" height="16"/>
+	</bitmap>
+	<strings name="h3/fileshare_text">
+		<string text="FILE SHARE"/>
+		<string text="Open in Forge"/>
+		<string text="Rename"/>
+		<string text="Delete"/>
+		<string text="Kind"/>
+		<string text="DELETE MAP VARIANT?"/>
+		<string text="Delete"/>
+	</strings>
+
+	<!-- the list: its rows (a name, a map), written by port fileshare -->
+	<widget name="h3/fileshare/row_name" type="text" left="8" top="1" width="160" height="17" font="h3/font_item" color="#FFC5D0DD"/>
+	<widget name="h3/fileshare/row_map" type="text" left="150" top="2" width="94" height="15" align="right" font="h3/font_small" color="#FF77879A"/>
+	<widget name="h3/fileshare/row_0" width="250" height="18" bitmap="h3/row">
+		<on event="a" run="port fileshare open" open="h3/forge/lobby"/>
+		<child widget="h3/fileshare/row_name"/>
+		<child widget="h3/fileshare/row_map"/>
+	</widget>
+	<widget name="h3/fileshare/row_1" width="250" height="18" bitmap="h3/row">
+		<on event="a" run="port fileshare open" open="h3/forge/lobby"/>
+		<child widget="h3/fileshare/row_name"/>
+		<child widget="h3/fileshare/row_map"/>
+	</widget>
+	<widget name="h3/fileshare/row_2" width="250" height="18" bitmap="h3/row">
+		<on event="a" run="port fileshare open" open="h3/forge/lobby"/>
+		<child widget="h3/fileshare/row_name"/>
+		<child widget="h3/fileshare/row_map"/>
+	</widget>
+	<widget name="h3/fileshare/row_3" width="250" height="18" bitmap="h3/row">
+		<on event="a" run="port fileshare open" open="h3/forge/lobby"/>
+		<child widget="h3/fileshare/row_name"/>
+		<child widget="h3/fileshare/row_map"/>
+	</widget>
+	<widget name="h3/fileshare/row_4" width="250" height="18" bitmap="h3/row">
+		<on event="a" run="port fileshare open" open="h3/forge/lobby"/>
+		<child widget="h3/fileshare/row_name"/>
+		<child widget="h3/fileshare/row_map"/>
+	</widget>
+	<widget name="h3/fileshare/row_5" width="250" height="18" bitmap="h3/row">
+		<on event="a" run="port fileshare open" open="h3/forge/lobby"/>
+		<child widget="h3/fileshare/row_name"/>
+		<child widget="h3/fileshare/row_map"/>
+	</widget>
+	<widget name="h3/fileshare/row_6" width="250" height="18" bitmap="h3/row">
+		<on event="a" run="port fileshare open" open="h3/forge/lobby"/>
+		<child widget="h3/fileshare/row_name"/>
+		<child widget="h3/fileshare/row_map"/>
+	</widget>
+	<widget name="h3/fileshare/row_7" width="250" height="18" bitmap="h3/row">
+		<on event="a" run="port fileshare open" open="h3/forge/lobby"/>
+		<child widget="h3/fileshare/row_name"/>
+		<child widget="h3/fileshare/row_map"/>
+	</widget>
+	<widget name="h3/fileshare/row_8" width="250" height="18" bitmap="h3/row">
+		<on event="a" run="port fileshare open" open="h3/forge/lobby"/>
+		<child widget="h3/fileshare/row_name"/>
+		<child widget="h3/fileshare/row_map"/>
+	</widget>
+	<widget name="h3/fileshare/row_9" width="250" height="18" bitmap="h3/row">
+		<on event="a" run="port fileshare open" open="h3/forge/lobby"/>
+		<child widget="h3/fileshare/row_name"/>
+		<child widget="h3/fileshare/row_map"/>
+	</widget>
+	<widget name="h3/fileshare/row_10" width="250" height="18" bitmap="h3/row">
+		<on event="a" run="port fileshare open" open="h3/forge/lobby"/>
+		<child widget="h3/fileshare/row_name"/>
+		<child widget="h3/fileshare/row_map"/>
+	</widget>
+	<widget name="h3/fileshare/row_11" width="250" height="18" bitmap="h3/row">
+		<on event="a" run="port fileshare open" open="h3/forge/lobby"/>
+		<child widget="h3/fileshare/row_name"/>
+		<child widget="h3/fileshare/row_map"/>
+	</widget>
+	<widget name="h3/fileshare/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<on event="created" run="port fileshare focus"/>
+		<on event="left_trigger" run="port fileshare page up"/>
+		<on event="right_trigger" run="port fileshare page down"/>
+		<on event="left" run="port fileshare kind"/>
+		<on event="right" run="port fileshare kind"/>
+		<on event="x" run="port fileshare rename"/>
+		<on event="y" open="h3/fileshare/delete/screen" run="port fileshare ask delete"/>
+		<data input="port fileshare"/>
+		<child widget="h3/fileshare/row_0" x="0" y="0"/>
+		<child widget="h3/fileshare/row_1" x="0" y="19"/>
+		<child widget="h3/fileshare/row_2" x="0" y="38"/>
+		<child widget="h3/fileshare/row_3" x="0" y="57"/>
+		<child widget="h3/fileshare/row_4" x="0" y="76"/>
+		<child widget="h3/fileshare/row_5" x="0" y="95"/>
+		<child widget="h3/fileshare/row_6" x="0" y="114"/>
+		<child widget="h3/fileshare/row_7" x="0" y="133"/>
+		<child widget="h3/fileshare/row_8" x="0" y="152"/>
+		<child widget="h3/fileshare/row_9" x="0" y="171"/>
+		<child widget="h3/fileshare/row_10" x="0" y="190"/>
+		<child widget="h3/fileshare/row_11" x="0" y="209"/>
+	</widget>
+	<widget name="h3/fileshare/title" type="text" left="52" top="46" width="300" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/fileshare_text" string_index="0"/>
+	<widget name="h3/fileshare/kind" type="text" left="52" top="78" width="250" height="18" font="h3/font_small" color="#FF9FB6CC" text_y="1"/>
+	<widget name="h3/fileshare/count" type="text" left="440" top="50" width="148" height="16" align="right" font="h3/font_small" color="#FF9FB6CC"/>
+	<widget name="h3/fileshare/picture" left="320" top="100" width="140" height="114" bitmap="h3/mp_maps"/>
+	<widget name="h3/fileshare/info_name" type="text" left="320" top="220" width="266" height="20" font="h3/font_item" color="#FFF2F6FA" text_y="1"/>
+	<widget name="h3/fileshare/info_text" type="text" left="320" top="242" width="266" height="110" font="h3/font_small" color="#FFCFD9E3"/>
+	<widget name="h3/fileshare/status" type="text" left="52" top="358" width="536" height="56" font="h3/font_small" color="#FF9FD8FF"/>
+	<widget name="h3/fileshare/a_butn" left="52" top="422" width="16" height="16" bitmap="h3/glyph_cross"/>
+	<widget name="h3/fileshare/open" type="text" left="72" top="421" width="104" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/fileshare_text" string_index="1"/>
+	<widget name="h3/fileshare/x_butn" left="180" top="422" width="16" height="16" bitmap="h3/glyph_square"/>
+	<widget name="h3/fileshare/rename" type="text" left="200" top="421" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/fileshare_text" string_index="2"/>
+	<widget name="h3/fileshare/y_butn" left="274" top="422" width="16" height="16" bitmap="h3/glyph_triangle"/>
+	<widget name="h3/fileshare/delete" type="text" left="294" top="421" width="62" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/fileshare_text" string_index="3"/>
+	<widget name="h3/fileshare/b_butn" left="360" top="422" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/fileshare/back" type="text" left="380" top="421" width="62" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/main_items" string_index="10"/>
+	<widget name="h3/fileshare/l_butn" left="500" top="422" width="16" height="16" bitmap="h3/glyph_l"/>
+	<widget name="h3/fileshare/r_butn" left="517" top="422" width="16" height="16" bitmap="h3/glyph_r"/>
+	<widget name="h3/fileshare/kind_label" type="text" left="536" top="421" width="56" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/fileshare_text" string_index="4"/>
+	<widget name="h3/fileshare/screen" flags="pass_unhandled_to_focused_child">
+		<on event="created" run="port fileshare init"/>
+		<on event="b back" back="true"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/pick/panel"/>
+		<child widget="h3/fileshare/title"/>
+		<child widget="h3/fileshare/count"/>
+		<child widget="h3/pick/rule"/>
+		<child widget="h3/fileshare/kind"/>
+		<child widget="h3/fileshare/picture"/>
+		<child widget="h3/fileshare/info_name"/>
+		<child widget="h3/fileshare/info_text"/>
+		<child widget="h3/fileshare/status"/>
+		<child widget="h3/pick/strip"/>
+		<child widget="h3/fileshare/a_butn"/>
+		<child widget="h3/fileshare/open"/>
+		<child widget="h3/fileshare/x_butn"/>
+		<child widget="h3/fileshare/rename"/>
+		<child widget="h3/fileshare/y_butn"/>
+		<child widget="h3/fileshare/delete"/>
+		<child widget="h3/fileshare/b_butn"/>
+		<child widget="h3/fileshare/back"/>
+		<child widget="h3/fileshare/l_butn"/>
+		<child widget="h3/fileshare/r_butn"/>
+		<child widget="h3/fileshare/kind_label"/>
+		<child widget="h3/fileshare/list" x="52" y="100"/>
+	</widget>
+
+	<!-- deleting, asked first (Halo 3's dialog over the haze): its words written by port fileshare
+	question -->
+	<widget name="h3/fileshare/delete/panel" left="120" top="150" width="400" height="160" bitmap="h3/panel"/>
+	<widget name="h3/fileshare/delete/rule" left="120" top="180" width="400" height="2" bitmap="h3/rule"/>
+	<widget name="h3/fileshare/delete/strip" left="120" top="290" width="400" height="20" bitmap="h3/strip"/>
+	<widget name="h3/fileshare/delete/title" type="text" left="132" top="156" width="376" height="22" font="h3/font_title" color="#FFF2F6FA" string_list="h3/fileshare_text" string_index="5"/>
+	<widget name="h3/fileshare/delete/text" type="text" left="132" top="194" width="376" height="80" font="h3/font_small" color="#FFCFD9E3">
+		<data input="port fileshare question"/>
+	</widget>
+	<widget name="h3/fileshare/delete/a_butn" left="132" top="292" width="16" height="16" bitmap="h3/glyph_cross"/>
+	<widget name="h3/fileshare/delete/delete" type="text" left="152" top="291" width="80" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/fileshare_text" string_index="6"/>
+	<widget name="h3/fileshare/delete/b_butn" left="236" top="292" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/fileshare/delete/back" type="text" left="256" top="291" width="80" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/main_items" string_index="10"/>
+	<widget name="h3/fileshare/delete/screen" flags="pass_unhandled_to_focused_child">
+		<on event="a" run="port fileshare delete" back="true"/>
+		<on event="b back" back="true"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/fileshare/delete/panel"/>
+		<child widget="h3/fileshare/delete/rule"/>
+		<child widget="h3/fileshare/delete/strip"/>
+		<child widget="h3/fileshare/delete/title"/>
+		<child widget="h3/fileshare/delete/text"/>
+		<child widget="h3/fileshare/delete/a_butn"/>
+		<child widget="h3/fileshare/delete/delete"/>
+		<child widget="h3/fileshare/delete/b_butn"/>
+		<child widget="h3/fileshare/delete/back"/>
+	</widget>
+</menus>

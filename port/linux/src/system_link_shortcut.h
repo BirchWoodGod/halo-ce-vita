@@ -23,7 +23,15 @@ enum
 	difficulty, where Y hosts co-op: coop_menu.c), with the main menu
 	behind it: the Play page's Host co-op campaign */
 	SYSTEM_LINK_REQUEST_CAMPAIGN,
+	/* a Forge game (the panel's Forge page, for the Halo CE menus too):
+	halo_forge_request_map's map, halo_forge_request_variant's map variant
+	("" none), started as the Forge lobby's START FORGE starts it, at the
+	main menu (forge.c forge_game_start) */
+	SYSTEM_LINK_REQUEST_FORGE,
 };
+
+/* (SYSTEM_LINK_REQUEST_FORGE) a map variant's file name's room */
+#define HALO_FORGE_VARIANT_SIZE 40
 
 enum
 {

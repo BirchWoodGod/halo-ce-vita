@@ -68,6 +68,58 @@ static int test_crossplay_wire;
 int network_wire_crossplay(void) { return test_crossplay_wire; }
 /* (the map in play: never deleted) */
 int halo_cache_map_in_use(const char *name) { return !strcmp(name, "inplay"); }
+
+/* (the Forge page's: forge.c's maps - three, the last two in the maps
+folder - the Forge game asked for, and forge_store.c's map variants, a
+test's) */
+volatile int halo_forge_request_map = -1;
+char halo_forge_request_variant[HALO_FORGE_VARIANT_SIZE];
+static const char *const test_forge_maps[3][2] = {
+	{ "Battle Creek", "beavercreek" }, { "Blood Gulch", "bloodgulch" }, { "Chill Out", "chillout" },
+};
+int forge_panel_map_count(void) { return 3; }
+const char *forge_panel_map_name(int map_index) { return map_index >= 0 && map_index < 3 ? test_forge_maps[map_index][0] : ""; }
+const char *forge_panel_map_short(int map_index) { return map_index >= 0 && map_index < 3 ? test_forge_maps[map_index][1] : ""; }
+int forge_panel_map_available(int map_index) { return map_index == 1 || map_index == 2; }
+static struct forge_store_entry test_forge_entries[4];
+static int test_forge_count, test_forge_deleted;
+int forge_store_list(const char *map_name, struct forge_store_entry *entries, int capacity)
+{
+	int index, count = 0;
+
+	(void)map_name;
+	for (index = 0; index < test_forge_count && count < capacity; index++)
+		entries[count++] = test_forge_entries[index];
+	return count;
+}
+int forge_store_delete(const char *map_name, const char *file_name)
+{
+	int index;
+
+	for (index = 0; index < test_forge_count; index++)
+		if (!strcmp(test_forge_entries[index].map_name, map_name) && !strcmp(test_forge_entries[index].file_name, file_name))
+		{
+			memmove(&test_forge_entries[index], &test_forge_entries[index + 1],
+				sizeof(test_forge_entries[0]) * (size_t)(test_forge_count - index - 1));
+			test_forge_count--;
+			test_forge_deleted++;
+			return 1;
+		}
+	return 0;
+}
+
+static void test_forge_entry(const char *map_name, const char *file_name, const char *title, int objects, int damaged)
+{
+	struct forge_store_entry *entry = &test_forge_entries[test_forge_count++];
+
+	memset(entry, 0, sizeof(*entry));
+	snprintf(entry->map_name, sizeof(entry->map_name), "%s", map_name);
+	snprintf(entry->file_name, sizeof(entry->file_name), "%s", file_name);
+	snprintf(entry->title, sizeof(entry->title), "%s", damaged ? file_name : title);
+	snprintf(entry->date, sizeof(entry->date), "2026-10-18 12:00");
+	entry->objects = (short)objects;
+	entry->damaged = damaged;
+}
 static char log_text[16384];
 static int overlay_level = -1;
 
@@ -1453,6 +1505,87 @@ static int menu_lines_fit(void);
 
 /* the public games with Crossplay on (crossplay_guard.h, docs/crossplay.md
 6): badges; a large or co-op PC game asked about once */
+/* Multiplayer's Forge page (Forge and File Share for the Halo CE menus too):
+the map (those in the maps folder), its map variants, Start Forge asking the
+game; File Share's list, square deleting one after a question */
+static void test_forge_page(void)
+{
+	char line[128];
+
+	test_forge_count = 0;
+	test_forge_entry("bloodgulch", "gulch_a.hmv", "Gulch A", 3, 0);
+	test_forge_entry("bloodgulch", "gulch_b.hmv", "Gulch B", 12, 0);
+	test_forge_entry("bloodgulch", "bad.hmv", NULL, 0, 1);
+	test_forge_entry("chillout", "cold.hmv", "Cold", 5, 0);
+	open_panel();
+	check(to_tab("Game") && !strstr(menu, "\nForge"), "Menu style Halo 3: no Forge row (the Halo 3 main menu has FORGE)");
+	vita_settings_set("HALO_MENU_STYLE", "classic");
+	press(VITA_BUTTON_R);
+	press(VITA_BUTTON_L);
+	check(to_tab("Game") && strstr(menu, "\nShow dev settings\x02  Off >\nForge and File Share\x02  4 variants  >") &&
+		menu_height_fits(), "Menu style Halo CE: Game's last row Forge and File Share, how many map variants; the tab fits");
+	check(open_page("Forge") && strstr(menu, "\n\x03Game > Forge and File Share\n"), "the Forge page");
+	printf("%s\n--\n", menu);
+	check(!strcmp(menu_line(2, line, sizeof(line)), "Map\x02  Blood Gulch") &&
+		!strcmp(menu_line(3, line, sizeof(line)), "Map variant\x02  None >") &&
+		!strcmp(menu_line(4, line, sizeof(line)), "Start Forge\x02  >") && !menu_line(5, line, sizeof(line))[0] &&
+		!strcmp(menu_line(6, line, sizeof(line)), "\x08" "File Share") &&
+		strstr(menu, "\nGulch A\x02  Blood Gulch\n") && strstr(menu, "\nDamaged file\x02  Blood Gulch\n") &&
+		strstr(menu, "\nCold\x02  Chill Out\n") && menu_fits() && menu_height_fits(),
+		"Forge: Map (Blood Gulch first), Map variant (None), Start Forge; File Share's map variants, each fits");
+	check(menu_selected == 2 && strstr(menu, "\n\x05The multiplayer map to edit\n") &&
+		strstr(menu, "Left/right: change"), "Map chosen first, its help");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nMap\x02  Chill Out\n") != NULL, "right: Chill Out (Battle Creek is not in the maps folder)");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nMap\x02  Blood Gulch\n") != NULL, "right again: Blood Gulch, past Battle Creek");
+	to_line("Map variant");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nMap variant\x02< Gulch A >\n") != NULL, "Map variant right: Gulch A");
+	press(VITA_BUTTON_RIGHT);
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nMap variant\x02< Gulch B  \n") != NULL, "right: Gulch B, the last (the damaged one is not offered)");
+	press(VITA_BUTTON_LEFT);
+	/* in a level: not started */
+	halo_multiplayer_status[SYSTEM_LINK_STATUS_STATE] = SYSTEM_LINK_STATE_PLAYING;
+	to_line("Start Forge");
+	check(strstr(menu, "\n\x05" "A local game: you fly as the monitor and place objects\n") && strstr(menu, "Cross: select"),
+		"Start Forge's help");
+	press(VITA_BUTTON_CROSS);
+	check(menu_visible && halo_system_link_request == SYSTEM_LINK_REQUEST_NONE &&
+		strstr(menu, "Leave the level first: Start, then Quit"), "in a level: Start Forge says to leave it first");
+	halo_multiplayer_status[SYSTEM_LINK_STATUS_STATE] = SYSTEM_LINK_STATE_MENUS;
+	press(VITA_BUTTON_CROSS);
+	check(!menu_visible && halo_system_link_request == SYSTEM_LINK_REQUEST_FORGE && halo_forge_request_map == 1 &&
+		!strcmp(halo_forge_request_variant, "gulch_a.hmv"), "at the menus: the game asked for Forge on Blood Gulch, Gulch A; closed");
+	halo_system_link_request = SYSTEM_LINK_REQUEST_NONE;
+	frame(0);
+	/* File Share: delete, asked first */
+	open_panel();
+	check(to_tab("Game") && strstr(menu, "\nForge and File Share\x02  4 variants  >") && open_page("Forge"), "the Forge page again");
+	to_line("Cold");
+	check(strstr(menu, "\n\x05" "5 objects, saved 2026-10-18 12:00\n") && strstr(menu, "Square: delete"),
+		"a map variant's help and buttons");
+	press(VITA_BUTTON_SQUARE);
+	check(!strncmp(menu, "DELETE MAP VARIANT", 18) && strstr(menu, "Cold  (Chill Out)"), "square asks before deleting");
+	press(VITA_BUTTON_CIRCLE);
+	check(test_forge_count == 4 && strstr(menu, "\nCold\x02"), "circle keeps it");
+	press(VITA_BUTTON_SQUARE);
+	press(VITA_BUTTON_CROSS);
+	check(test_forge_deleted == 1 && test_forge_count == 3 && !strstr(menu, "\nCold\x02") && strstr(menu, "Deleted \"Cold\"."),
+		"cross deletes it");
+	to_line("Damaged file");
+	clock_us += 20000000;
+	frame(0);
+	check(strstr(menu, "Damaged: it can't be used. Square deletes it") != NULL, "a damaged one: its help");
+	press(VITA_BUTTON_CIRCLE);
+	check(strstr(menu, "\nForge and File Share\x02  3 variants  >") != NULL, "back on Game: three now");
+	vita_settings_set("HALO_MENU_STYLE", "halo3");
+	press(VITA_BUTTON_CIRCLE);
+	frame(0);
+	check(!menu_visible, "closed");
+}
+
 static void test_crossplay_browser(void)
 {
 	int saved_screen = screen;
@@ -1696,6 +1829,8 @@ static void test_tab_layouts(void)
 		{ TAB_GAME, "Check for updates", NULL, NULL, 0, NULL, ACTION_UPDATE_CHECK },
 		{ TAB_GAME, "Update channel", "HALO_UPDATE_CHANNEL", "experimental|stable", 0, channel },
 		{ TAB_GAME, "Show dev settings", "HALO_DEV_SETTINGS", "0|1", 0, "0" },
+		/* (Forge and File Share, shown with Menu style Halo CE) */
+		{ TAB_GAME, "Forge and File Share", NULL, NULL, 0, NULL, ACTION_PAGE, PAGE_FORGE },
 	};
 	static const struct layout_row controls[] = {
 		{ TAB_CONTROLS, "Look sensitivity", "XV_LOOK_SENS", "50|75|100|125|150|200", 0, "100" },
@@ -1789,11 +1924,12 @@ static void test_tab_layouts(void)
 			old |= !strcmp(pages[index].name, "Screen") || !strcmp(pages[index].name, "First person") ||
 				!strcmp(pages[index].name, "Advanced") || !strcmp(pages[index].name, "General") ||
 				!strcmp(pages[index].name, "Graphics") || !strcmp(pages[index].name, "Audio");
-		check(!old && PAGE_GRAPHICS_DETAIL == TAB_COUNT && PAGE_COUNT == TAB_COUNT + 8 &&
+		check(!old && PAGE_GRAPHICS_DETAIL == TAB_COUNT && PAGE_COUNT == TAB_COUNT + 9 &&
 			!strcmp(pages[PAGE_GRAPHICS_DETAIL].name, "Detail") && !strcmp(pages[PAGE_GRAPHICS_PERFORMANCE].name, "Performance") &&
 			!strcmp(pages[PAGE_BUTTONS].name, "Button layout") && !strcmp(pages[PAGE_TOUCH].name, "Touch zones") &&
 			!strcmp(pages[PAGE_GYRO].name, "Gyro settings") && !strcmp(pages[PAGE_PLAY].name, "Play") &&
-			!strcmp(pages[PAGE_MAPS].name, "Modded maps") && !strcmp(pages[PAGE_DEV_AB].name, "A/B switches"),
+			!strcmp(pages[PAGE_MAPS].name, "Modded maps") && !strcmp(pages[PAGE_DEV_AB].name, "A/B switches") &&
+			!strcmp(pages[PAGE_FORGE].name, "Forge and File Share"),
 			"the pages rows open: Detail, Performance, Button layout, Touch zones, Gyro settings, Play, Modded maps, A/B "
 			"switches (no Screen, First person or Advanced page; no General, Graphics or Audio tab)");
 	}
@@ -2550,7 +2686,7 @@ static void test_languages(void)
 			show();
 			/* (on the classic panel: Interfaz giving way when the lines run
 			to three) */
-			if (!menu_fits() || !menu_height_fits() || menu_rows() != 9 ||
+			if (!menu_fits() || !menu_height_fits() || menu_rows() != 10 ||
 				!strstr(menu, "\n\x08" "Actualizaciones\nBuscar actualizaciones\x02  >\n\x04Versión "))
 			{
 				printf("(update status %d)\n%s\n--\n", statuses[index], menu);
@@ -2793,12 +2929,13 @@ static void test_updates(void)
 	printf("%s\n--\n", menu);
 	check(strstr(menu, "\n\x08Updates\nCheck for updates\x02  >\n\x04" "Version " HALO_VITA_VERSION "\n"
 		"!Update available: 1.1.0-beta.4\n!github.com/BirchWoodGod/halo-ce-vita/releases\nUpdate channel\x02") &&
-		menu_fits() && menu_height_fits() && menu_rows() == 9,
-		"an update: under the version, in amber, the new version and where to get it; all of the tab still fits");
+		menu_fits() && menu_height_fits() && menu_rows() == 10,
+		"an update: under the version, in amber, the new version and where to get it; all of the tab still fits (ten "
+		"rows on the classic panel: Forge and File Share's too)");
 	check(!strstr(menu, "Interface") && !strncmp(menu_line(1, line, sizeof(line)), "Menu style\x02", 11) &&
-		strstr(menu, "\n\x08" "First person\n") && menu_selected == 9,
-		"the classic panel, short of room: the first heading, Interface, gives way (the tab bar over Menu style); First "
-		"person and Updates stay, Check for updates still chosen");
+		!strstr(menu, "\n\x08" "First person\n") && strstr(menu, "\n\x08Updates\n") && menu_selected == 8,
+		"the classic panel, short of room: the first headings, Interface and First person, give way (the tab bar over "
+		"Menu style); Updates stays, Check for updates still chosen");
 	vita_settings_set("HALO_MENU_STYLE", "halo3");
 	redraw();
 	check(strstr(menu, "\n\x08Interface\nMenu style\x02") && strstr(menu, "\n\x08Updates\nCheck for updates\x02") &&
@@ -2818,7 +2955,7 @@ static void test_updates(void)
 	redraw();
 	printf("%s\n--\n", menu);
 	check(strstr(menu, "\n!VitaShell: ux0:data/haloce-vita/update/\n!halo-1.1.0-beta.4.vpk (verified, to install)\n"
-		"Update channel\x02") && menu_fits() && menu_height_fits() && menu_rows() == 9,
+		"Update channel\x02") && menu_fits() && menu_height_fits() && menu_rows() == 10,
 		"downloaded: where the VPK is, for VitaShell; all of the tab still fits");
 	update_status_value = UPDATE_STATUS_NONE;
 	redraw();
@@ -3322,6 +3459,8 @@ int main(void)
 	printf("%s\n--\n", menu);
 
 	test_multiplayer_tab();
+
+	test_forge_page();
 
 	/* ---------- Multiplayer's Modded maps page */
 	write_map("ux0:data/haloce-vita/maps/mygulch.map", 5, 250000);

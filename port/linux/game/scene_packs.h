@@ -46,6 +46,9 @@ enum
 	NUMBER_OF_SCENE_PACK_STATES,
 
 	MAXIMUM_LOADED_SCENE_PACKS = 4,
+	/* the packs a map may want (built, or loaded: at most
+	MAXIMUM_LOADED_SCENE_PACKS of them) */
+	MAXIMUM_SCENE_PACK_SLOTS = 8,
 };
 
 /* ---------- prototypes/SCENE_PACKS.C */
@@ -53,6 +56,35 @@ enum
 /* the pack of that recipe wanted with the loaded map (an Xbox map: none
 with a Custom Edition one): its state now */
 short scene_packs_want(
+	char const *name);
+
+/* (Forge's lobby) the pack of that recipe built, on the thread, if it is
+not built already, but not loaded with the map loaded now (the menus'):
+its state (ready once built). Wanted afterwards (scene_packs_want), it is
+loaded as any */
+short scene_packs_prebuild(
+	char const *name);
+
+/* a pack's state with this map, how far its build is (0 to 100), and why it
+failed (why may be NULL): _scene_pack_state_none if it was not wanted */
+short scene_packs_status(
+	char const *name,
+	long *progress,
+	char *why,
+	long why_size);
+
+/* the loaded pack whose tag a tag index is (its recipe's name), NULL for
+one of the map's */
+char const *scene_packs_owner(
+	long tag_index);
+
+/* a recipe's hash (app0:packs/<name>.txt, as parsed), 0 if it has none */
+unsigned long long scene_packs_recipe_hash(
+	char const *name);
+
+/* whether every tag of a recipe's own (its "tag" lines) is a tag of the
+loaded map already (its pack would bring none of its objects) */
+boolean scene_packs_recipe_covered(
 	char const *name);
 
 /* the same, loaded before this returns if it can be at all (built now if

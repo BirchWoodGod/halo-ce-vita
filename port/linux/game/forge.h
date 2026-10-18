@@ -27,6 +27,8 @@ enum
 	FORGE_MAXIMUM_AI = 32,
 	/* a readable name's bytes (UTF-8) */
 	FORGE_NAME_SIZE = 64,
+	/* the scene packs Forge offers (forge.c forge_packs) */
+	FORGE_PACK_COUNT = 3,
 };
 
 /* the object browser's categories, in its order */
@@ -40,7 +42,27 @@ enum
 	NUMBER_OF_FORGE_CATEGORIES
 };
 
+/* an object's properties (the properties window's rows, in its order) */
+enum
+{
+	_forge_property_team = 0,
+	_forge_property_respawn,
+	_forge_property_place_at_start,
+	NUMBER_OF_FORGE_PROPERTIES
+};
+
 /* ---------- structures */
+
+/* the properties of the object held */
+struct forge_properties
+{
+	char name[FORGE_NAME_SIZE];
+	/* NONE neutral, 0 red, 1 blue */
+	short team;
+	/* 0: never */
+	short respawn_seconds;
+	boolean place_at_start;
+};
 
 /* what the monitor's controls ask of the flying camera this frame */
 struct forge_camera_input
@@ -111,9 +133,110 @@ boolean forge_map_available(
 
 /* (the lobby's START FORGE) a local game of the map, in Forge mode: the
 game variant (free for all, no score or time limit) and the map set, and
-the game started as "main menu switch to solo game" starts it */
-void forge_game_start(
+the game started as "main menu switch to solo game" starts it; with a map
+variant's file of the map (variant_file, else NULL), that read and checked
+first, and placed as the session starts. FALSE, with why, if the variant
+could not be read: nothing is started */
+boolean forge_game_start(
+	short map_index,
+	char const *variant_file,
+	char *why,
+	int why_size);
+
+/* a lobby map's short name (bloodgulch: its map variants' folder), and the
+map of a short name (NONE if none) */
+char const *forge_map_short(
 	short map_index);
+short forge_map_of_short(
+	char const *map_name);
+
+/* (the Forge menu's SAVE MAP VARIANT, its name typed) the session's
+objects saved as a map variant titled title, at the next forge_update; the
+session's own variant's file replaced when the title is its. What came of
+it is said in the Forge menu (forge_menu_status) */
+void forge_save_request(
+	char const *title,
+	char const *author);
+
+/* (the settings panel's Forge and File Share page, vita_settings.c, of
+another ABI: plain types only) the lobby's maps: how many, each one's name
+(English), short name and whether its file is in the maps folder */
+int forge_panel_map_count(
+	void);
+char const *forge_panel_map_name(
+	int map_index);
+char const *forge_panel_map_short(
+	int map_index);
+int forge_panel_map_available(
+	int map_index);
+
+/* the scene packs Forge offers (other maps' objects, built on the machine:
+scene_packs.h), in their order: how many, each one's name (translated) and
+description, whether the lobby brings it (the vehicles' are on by default),
+and its state now (scene_packs.h's _scene_pack_state_*: building, with how
+far; failed, with why), as built for the lobby */
+short forge_pack_count(
+	void);
+char const *forge_pack_label(
+	short pack);
+char const *forge_pack_description(
+	short pack);
+boolean forge_pack_enabled(
+	short pack);
+void forge_pack_set(
+	short pack,
+	boolean enabled);
+short forge_pack_status(
+	short pack,
+	long *progress,
+	char *why,
+	int why_size);
+
+/* (the lobby, as it opens and each frame) the packs it brings built in the
+background, if they are not (once each) */
+void forge_packs_prebuild(
+	void);
+
+/* the first pack the lobby brings that is still being built (its label and
+how far), FALSE if none is */
+boolean forge_packs_building(
+	char *label,
+	int size,
+	long *progress);
+
+/* the map variant the session plays (loaded or last saved), "" for none */
+char const *forge_variant_title(
+	void);
+
+/* (the Forge menu's UNDO and REDO) the last step undone or the next redone,
+at the next forge_update; how many there are of each */
+void forge_undo_request(
+	boolean redo);
+void forge_undo_available(
+	short *undo,
+	short *redo);
+
+/* (the Forge menu's SNAP) snapping flipped at the next forge_update, and
+whether it is on: the object held on a grid and turned in steps */
+void forge_snap_toggle_request(
+	void);
+boolean forge_snap_enabled(
+	void);
+
+/* (the properties window, Square while holding an object) a property of
+the object held stepped (step 1 or -1) at the next forge_update; its
+properties (FALSE: none held, or one of the map's own) */
+void forge_property_request(
+	short property,
+	short step);
+boolean forge_properties_get(
+	struct forge_properties *properties);
+
+/* what the last thing asked from the Forge menu came to (a save, an undo,
+snapping), "" for nothing yet */
+void forge_menu_status(
+	char *status,
+	int size);
 
 /* whether a Forge game is played (the session), and whether its player is
 the monitor now */

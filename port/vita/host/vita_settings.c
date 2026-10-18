@@ -162,6 +162,16 @@ its Warthogs, Ghosts and Scorpions; PC, every vehicle it places, as Halo PC
 (Banshees, Rocket Warthogs, gun turrets); Allowed, every one it allows in
 the game type too (port/linux/game/custom_edition_objects.c).
 
+Game's Forge and File Share page (its last row, shown with Menu style Halo
+CE: the Halo 3 main menu has FORGE and FILE SHARE) reaches Forge and File
+Share with the original menus (the owner: everything in the overlay, for the original menus too):
+Map (the multiplayer maps in the maps folder: port/linux/game/forge.c),
+Map variant (None, or one of that map's: port/linux/src/forge_store.c) and
+Start Forge, which asks the game for the Forge game at its main menu
+(SYSTEM_LINK_REQUEST_FORGE, system_link_shortcut.c) and closes the panel;
+under File Share the map variants of every map (the first
+FORGE_PANEL_MAXIMUM), square deleting one after a confirmation.
+
 Dev holds a few switches for testers (each a debug environment variable;
 most are read once, at start-up, and say so; the renderer's A/B ones on a
 page of their own) and "Save report", which
@@ -188,6 +198,7 @@ Multiplayer tab's way.
 #include <sys/stat.h>
 
 #include "lang.h"
+#include "forge_store.h"
 #include "p2p.h"
 #include "crossplay_guard.h"
 #include "system_link_shortcut.h"
@@ -242,6 +253,7 @@ enum
 	PAGE_PLAY,
 	PAGE_MAPS,
 	PAGE_DEV_AB,
+	PAGE_FORGE,
 	PAGE_COUNT
 };
 
@@ -265,6 +277,7 @@ static const struct
 	{ "Play", TAB_MULTIPLAYER },
 	{ "Modded maps", TAB_MULTIPLAYER },
 	{ "A/B switches", TAB_DEV },
+	{ "Forge and File Share", TAB_GAME },
 };
 /* the headings over a tab's rows, as Halo Online's settings have them
 (HUD, Interface...): each above the row it names, when that row is shown */
@@ -486,6 +499,10 @@ static struct setting settings[] = {
 		"Experimental: betas too. Stable: releases only", 1, TAB_GAME },
 	{ "Show dev settings", "HALO_DEV_SETTINGS", 0, 2, { "0", "1" }, { "Off", "On" },
 		"The Dev tab: switches for testers, Save report", 0, TAB_GAME },
+	/* (Forge and File Share for the original menus - the owner: everything
+	in the overlay -: the Forge page, Game's last row, shown with Menu style
+	Halo CE; the Halo 3 main menu has FORGE and FILE SHARE: setting_shown) */
+	PAGE_ROW("Forge and File Share", "Forge a map; your map variants (File Share)", TAB_GAME, PAGE_FORGE),
 	{ "Sound voices", "HALO_SOUND_CHANNELS", 1, 4, { "16", "24", "32", "0" },
 		{ "16", "24", "32", "Original" }, "Fewer is faster; the AI then differs (after a restart)", 3, TAB_AUDIO },
 	{ "Sound occlusion", "HALO_SOUND_OBSTRUCTION_TICKS", 0, 3, { "1", "3", "6" },
@@ -822,6 +839,8 @@ enum
 	/* a large PC game chosen in the public games (crossplay_guard.h): join
 	anyway? */
 	SCREEN_LARGE,
+	/* a map variant to delete (the Forge page's File Share) */
+	SCREEN_FORGE_DELETE,
 };
 static int screen;
 /* the code being typed (eight characters of P2P_CODE_ALPHABET) and the
@@ -931,6 +950,39 @@ static const char *const stock_maps[] = {
 	"a10", "a30", "a50", "b30", "b40", "c10", "c20", "c40", "d20", "d40",
 	"ui", "bitmaps", "sounds", "loc",
 };
+
+/* ---------- Forge and File Share (the Forge page) */
+
+/* forge.c's maps (the lobby's: the Xbox's multiplayer maps), by index: how
+many, each one's name (English), short name (bloodgulch) and whether its
+file is in the maps folder */
+int forge_panel_map_count(void);
+const char *forge_panel_map_name(int map_index);
+const char *forge_panel_map_short(int map_index);
+int forge_panel_map_available(int map_index);
+/* (system_link_shortcut.c) the Forge game asked for: its map's index and
+its map variant's file name ("" none), with SYSTEM_LINK_REQUEST_FORGE */
+extern volatile int halo_forge_request_map;
+extern char halo_forge_request_variant[HALO_FORGE_VARIANT_SIZE];
+
+/* the map variants listed (File Share's), the ones shown at once */
+#define FORGE_PANEL_MAXIMUM 32
+#define FORGE_PANEL_LINES 6
+
+enum
+{
+	FORGE_LINE_MAP,
+	FORGE_LINE_VARIANT,
+	FORGE_LINE_START,
+	FORGE_LINE_COUNT
+};
+
+static struct forge_store_entry forge_entries[FORGE_PANEL_MAXIMUM];
+static int forge_entry_count, forge_scroll;
+/* the map chosen (forge.c's index; -1: none in the maps folder), its
+variant (0 none, else the nth of the map's that is not damaged), and the
+variant asked about (SCREEN_FORGE_DELETE) */
+static int forge_map = -1, forge_variant, forge_delete_index = -1;
 
 /* ---------- the report */
 
@@ -1182,8 +1234,14 @@ static int network_is(const char *network)
 Online (network_is), its password while the game is public too; Dynamic
 minimum while Render resolution is Dynamic (each keeps its value
 meanwhile) */
+static int classic_panel(void);
+
 static int setting_shown(const struct setting *setting)
 {
+	/* (Forge and File Share: the Halo 3 main menu has them; for the
+	original menus, the Halo CE Menu style, the panel does) */
+	if (setting->action == ACTION_PAGE && setting->opens == PAGE_FORGE)
+		return classic_panel();
 	if ((setting->variable && !strcmp(setting->variable, "HALO_ADHOC_ROOM")) || setting->action == ACTION_ADHOC_JOIN)
 		return network_is("adhoc");
 	if (setting->variable && !strcmp(setting->variable, "HALO_CROSSPLAY"))
@@ -2061,6 +2119,10 @@ enum
 {
 	LINE_SETTING,
 	LINE_MAP,
+	/* (the Forge page: its Map, Map variant, Start Forge (index), and a map
+	variant of File Share's (index into forge_entries)) */
+	LINE_FORGE,
+	LINE_VARIANT,
 	/* (a line that is not chosen: a warning, a note) */
 	LINE_INFO,
 	/* (a heading over rows: headings; not chosen either) */
@@ -2074,7 +2136,8 @@ struct line
 	char text[128];
 };
 
-#define MAXIMUM_LINES (SETTING_COUNT + MAXIMUM_MAPS + 4 + (int)(sizeof(headings) / sizeof(headings[0])))
+#define MAXIMUM_LINES (SETTING_COUNT + MAXIMUM_MAPS + FORGE_PANEL_MAXIMUM + FORGE_LINE_COUNT + 6 + \
+	(int)(sizeof(headings) / sizeof(headings[0])))
 
 /* a line that is not chosen (moving up and down passes it) */
 static int line_passive(const struct line *line)
@@ -2183,6 +2246,87 @@ static int update_lines(struct line *lines)
 	return count;
 }
 
+/* the map variants read again (the Forge page opened, one deleted), the
+map chosen kept if it is still in the maps folder, else Blood Gulch or
+the first that is */
+static void forge_scan(void)
+{
+	int index, count = forge_panel_map_count();
+
+	forge_entry_count = forge_store_list(NULL, forge_entries, FORGE_PANEL_MAXIMUM);
+	if (forge_entry_count < 0)
+		forge_entry_count = 0;
+	if (forge_scroll >= forge_entry_count)
+		forge_scroll = 0;
+	if (forge_map < 0 || forge_map >= count || !forge_panel_map_available(forge_map))
+	{
+		forge_map = -1;
+		for (index = 0; index < count; index++)
+			if (forge_panel_map_available(index) && (forge_map < 0 || !strcmp(forge_panel_map_short(index), "bloodgulch")))
+				forge_map = index;
+		forge_variant = 0;
+	}
+}
+
+/* the map chosen's map variants that can be played: how many, and the
+entry of the nth (1 the first), NULL past them */
+static const struct forge_store_entry *forge_map_variant(int number, int *count)
+{
+	const struct forge_store_entry *found = NULL;
+	int index, seen = 0;
+
+	for (index = 0; index < forge_entry_count; index++)
+		if (forge_map >= 0 && !forge_entries[index].damaged &&
+			!strcmp(forge_entries[index].map_name, forge_panel_map_short(forge_map)) && ++seen == number)
+			found = &forge_entries[index];
+	if (count)
+		*count = seen;
+	return found;
+}
+
+/* a map's name by its short name (bloodgulch: Blood Gulch) */
+static const char *forge_map_title(const char *short_name)
+{
+	int index;
+
+	for (index = 0; index < forge_panel_map_count(); index++)
+		if (!strcmp(forge_panel_map_short(index), short_name))
+			return T(forge_panel_map_name(index));
+	return short_name;
+}
+
+static int multiplayer_state(void);
+static void close_panel(void);
+
+/* (Start Forge) the game asked for the Forge game, the panel closed; not
+in a level or a network game's lobby */
+static void forge_start(void)
+{
+	const struct forge_store_entry *variant = forge_variant ? forge_map_variant(forge_variant, NULL) : NULL;
+	int state = multiplayer_state();
+
+	if (forge_map < 0)
+	{
+		set_notice("%s", T("No multiplayer map is in the maps folder."));
+		return;
+	}
+	if (state == SYSTEM_LINK_STATE_PLAYING)
+	{
+		set_notice("%s", T("Leave the level first: Start, then Quit"));
+		return;
+	}
+	if (state == SYSTEM_LINK_STATE_JOINING || state == SYSTEM_LINK_STATE_HOSTING || state == SYSTEM_LINK_STATE_LOBBY)
+	{
+		set_notice("%s", T("Leave the network game's lobby first"));
+		return;
+	}
+	halo_forge_request_map = forge_map;
+	snprintf(halo_forge_request_variant, sizeof(halo_forge_request_variant), "%s", variant ? variant->file_name : "");
+	__atomic_store_n(&halo_system_link_request, SYSTEM_LINK_REQUEST_FORGE, __ATOMIC_RELEASE);
+	vita_host_log("settings: Forge asked for (settings panel)");
+	close_panel();
+}
+
 /* the lines of the page shown: its rows, each heading (headings) above the
 row it names (Game's Check for updates with the version and the answer
 under it), then the gyroscope's line (Gyro settings) or the maps (Modded
@@ -2248,6 +2392,26 @@ static int page_lines(struct line *lines)
 		for (index = 0; index < map_count; index++)
 		{
 			lines[count].type = LINE_MAP;
+			lines[count++].index = index;
+		}
+	}
+	if (page == PAGE_FORGE)
+	{
+		for (index = 0; index < FORGE_LINE_COUNT; index++)
+		{
+			lines[count].type = LINE_FORGE;
+			lines[count++].index = index;
+		}
+		lines[count].type = LINE_HEADING;
+		snprintf(lines[count++].text, sizeof(lines[0].text), "%s", T("File Share"));
+		if (!forge_entry_count)
+		{
+			lines[count].type = LINE_INFO;
+			snprintf(lines[count++].text, sizeof(lines[0].text), "%s", T("No map variants yet: save one in Forge"));
+		}
+		for (index = 0; index < forge_entry_count; index++)
+		{
+			lines[count].type = LINE_VARIANT;
 			lines[count++].index = index;
 		}
 	}
@@ -2536,6 +2700,19 @@ static void help_line(char *text, int size, const struct line *line)
 			maps[line->index].format == MAP_XBOX ? T("Xbox map") : maps[line->index].format == MAP_OTHER ?
 			T("Not a known map") : maps[line->index].format == MAP_CUSTOM_EDITION_CAMPAIGN ?
 			T("PC campaign map, in Campaign's levels (needs PC maps On)") : T("PC map (needs PC maps On)"));
+	else if (line && line->type == LINE_FORGE)
+		snprintf(text, (size_t)size, "%s", line->index == FORGE_LINE_MAP ? T("The multiplayer map to edit") :
+			line->index == FORGE_LINE_VARIANT ? T("Its objects placed as Forge starts") :
+			T("A local game: you fly as the monitor and place objects"));
+	else if (line && line->type == LINE_VARIANT)
+	{
+		const struct forge_store_entry *entry = &forge_entries[line->index];
+
+		if (entry->damaged)
+			snprintf(text, (size_t)size, "%s", T("Damaged: it can't be used. Square deletes it"));
+		else
+			snprintf(text, (size_t)size, T("%d objects, saved %.16s"), entry->objects, entry->date[0] ? entry->date : "-");
+	}
 	else if (!setting)
 		text[0] = 0;
 	else if (!strcmp(running_network, "online") && (setting->action == ACTION_JOIN_CODE ||
@@ -2612,6 +2789,10 @@ static void footer_line(char *text, int size, const struct line *line)
 
 	if (line && line->type == LINE_MAP)
 		middle = T("Left/right: on/off   Square: delete   ");
+	else if (line && line->type == LINE_VARIANT)
+		middle = T("Square: delete   ");
+	else if (line && line->type == LINE_FORGE)
+		middle = line->index == FORGE_LINE_START ? T("Cross: select   ") : T("Left/right: change   ");
 	else if (setting && setting->kind == KIND_ACTION)
 		middle = T("Cross: select   ");
 	else if (setting && setting->kind == KIND_TEXT)
@@ -2650,6 +2831,12 @@ static void page_summary(char *text, int size, const struct setting *setting)
 			snprintf(text, (size_t)size, "%s", T("1 map"));
 		else
 			snprintf(text, (size_t)size, T("%d maps"), map_count);
+		break;
+	case PAGE_FORGE:
+		if (forge_entry_count == 1)
+			snprintf(text, (size_t)size, "%s", T("1 variant"));
+		else
+			snprintf(text, (size_t)size, T("%d variants"), forge_entry_count);
 		break;
 	}
 }
@@ -2722,11 +2909,14 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 
 		if (line->type == LINE_MAP && (line->index < map_scroll || line->index >= map_scroll + MAP_LINES))
 			continue;
+		if (line->type == LINE_VARIANT && (line->index < forge_scroll || line->index >= forge_scroll + FORGE_PANEL_LINES))
+			continue;
 		/* (the classic panel short of room: the first headings left out) */
 		if (line->type == LINE_HEADING && (*headings)++ < skip)
 			continue;
 		/* (Modded maps: a gap between its switch and the maps) */
-		if (index && page == PAGE_MAPS && line->type != LINE_SETTING && lines[index - 1].type == LINE_SETTING)
+		if (index && ((page == PAGE_MAPS && line->type != LINE_SETTING && lines[index - 1].type == LINE_SETTING) ||
+			(page == PAGE_FORGE && line->type == LINE_HEADING)))
 		{
 			length += snprintf(text + length, (size_t)(size - length), "\n");
 			number++;
@@ -2739,6 +2929,27 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 				line->text);
 		else if (line->type == LINE_HEADING)
 			length += snprintf(text + length, (size_t)(size - length), "\n\x08%s", line->text);
+		else if (line->type == LINE_FORGE)
+		{
+			int variants = 0;
+			const struct forge_store_entry *variant = forge_map_variant(forge_variant, &variants);
+
+			if (line->index == FORGE_LINE_MAP)
+				length += snprintf(text + length, (size_t)(size - length), "\n%s\x02  %s", T("Map"),
+					forge_map >= 0 ? T(forge_panel_map_name(forge_map)) : T("none"));
+			else if (line->index == FORGE_LINE_VARIANT)
+				length += snprintf(text + length, (size_t)(size - length), "\n%s\x02%c %.24s %c", T("Map variant"),
+					forge_variant > 0 ? '<' : ' ', variant ? variant->title : T("None"), forge_variant < variants ? '>' : ' ');
+			else
+				length += snprintf(text + length, (size_t)(size - length), "\n%s\x02  >", T("Start Forge"));
+		}
+		else if (line->type == LINE_VARIANT)
+		{
+			const struct forge_store_entry *entry = &forge_entries[line->index];
+
+			length += snprintf(text + length, (size_t)(size - length), "\n%.22s\x02  %.16s", entry->damaged ?
+				T("Damaged file") : entry->title, forge_map_title(entry->map_name));
+		}
 		else if (line->type == LINE_MAP)
 		{
 			const struct map_entry *map = &maps[line->index];
@@ -2798,6 +3009,13 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 						length += snprintf(text + length, (size_t)(size - length), "\x07%s", T(setting->names[choice]));
 			}
 		}
+	}
+	if (page == PAGE_FORGE && forge_entry_count > FORGE_PANEL_LINES && length + 2 < size)
+	{
+		length += snprintf(text + length, (size_t)(size - length), "\n\x04");
+		length += snprintf(text + length, (size_t)(size - length), T("(variants %d-%d of %d)"), forge_scroll + 1,
+			forge_scroll + FORGE_PANEL_LINES < forge_entry_count ? forge_scroll + FORGE_PANEL_LINES : forge_entry_count,
+			forge_entry_count);
 	}
 	if (page == PAGE_MAPS && map_count > MAP_LINES && length + 2 < size)
 	{
@@ -2869,6 +3087,15 @@ static void show_list(void)
 			map_scroll = map;
 		if (map >= map_scroll + MAP_LINES)
 			map_scroll = map - MAP_LINES + 1;
+	}
+	if (page == PAGE_FORGE && count && lines[*selected].type == LINE_VARIANT)
+	{
+		int variant = lines[*selected].index;
+
+		if (variant < forge_scroll)
+			forge_scroll = variant;
+		if (variant >= forge_scroll + FORGE_PANEL_LINES)
+			forge_scroll = variant - FORGE_PANEL_LINES + 1;
 	}
 	for (skip = 0; ; skip++)
 	{
@@ -3030,6 +3257,43 @@ static void show_delete(void)
 	vgxm_menu_set(text, -1);
 }
 
+/* (the Forge page's File Share) a map variant deleted, asked first */
+static void show_forge_delete(void)
+{
+	char text[1024];
+	const struct forge_store_entry *entry = forge_delete_index >= 0 && forge_delete_index < forge_entry_count ?
+		&forge_entries[forge_delete_index] : NULL;
+
+	if (!entry)
+	{
+		screen = SCREEN_LIST;
+		show_list();
+		return;
+	}
+	snprintf(text, sizeof(text), T("DELETE MAP VARIANT\n\n%.31s  (%.20s)\n\nIt cannot be undone.\nCross: delete   O: keep"),
+		entry->damaged ? entry->file_name : entry->title, forge_map_title(entry->map_name));
+	vgxm_menu_set(text, -1);
+}
+
+static void forge_delete_input(unsigned long pressed)
+{
+	if (pressed & VITA_BUTTON_CIRCLE)
+		screen = SCREEN_LIST;
+	else if ((pressed & VITA_BUTTON_CROSS) && forge_delete_index >= 0 && forge_delete_index < forge_entry_count)
+	{
+		const struct forge_store_entry *entry = &forge_entries[forge_delete_index];
+
+		if (forge_store_delete(entry->map_name, entry->file_name))
+			set_notice(T("Deleted \"%s\"."), entry->damaged ? entry->file_name : entry->title);
+		else
+			set_notice(T("\"%s\" couldn't be deleted."), entry->damaged ? entry->file_name : entry->title);
+		forge_delete_index = -1;
+		forge_variant = 0;
+		forge_scan();
+		screen = SCREEN_LIST;
+	}
+}
+
 /* why Host or Join cannot open System Link now (NULL: it can) */
 
 static const char *guide_blocker(void)
@@ -3183,6 +3447,8 @@ static void show(void)
 		show_guide();
 	else if (screen == SCREEN_LARGE)
 		show_large();
+	else if (screen == SCREEN_FORGE_DELETE)
+		show_forge_delete();
 	else
 		show_list();
 }
@@ -3634,6 +3900,8 @@ static void act(const struct setting *setting)
 		page = setting->opens;
 		if (page == PAGE_MAPS)
 			maps_scan();
+		if (page == PAGE_FORGE)
+			forge_scan();
 		break;
 	/* (its progress line then takes the screen) */
 	case ACTION_CE_EXTRACT:
@@ -4023,9 +4291,12 @@ static void tab_step(int step)
 	while (!tab_shown(next));
 	tab = page = next;
 	notice[0] = 0;
-	/* (Multiplayer's Modded maps row says how many) */
+	/* (Multiplayer's Modded maps row says how many, Game's Forge row the
+	map variants) */
 	if (tab == TAB_MULTIPLAYER)
 		maps_scan();
+	if (tab == TAB_GAME)
+		forge_scan();
 }
 
 static void panel_begin(void)
@@ -4036,6 +4307,8 @@ static void panel_begin(void)
 		tab = page = TAB_GAME;
 	if (tab == TAB_MULTIPLAYER)
 		maps_scan();
+	if (tab == TAB_GAME)
+		forge_scan();
 	show();
 }
 
@@ -4182,6 +4455,13 @@ int vita_settings_input(const struct vita_host_pad *pad)
 			show();
 		return 1;
 	}
+	if (screen == SCREEN_FORGE_DELETE)
+	{
+		forge_delete_input(pressed);
+		if (pressed)
+			show();
+		return 1;
+	}
 	if (screen == SCREEN_LARGE)
 	{
 		large_input(pressed);
@@ -4251,7 +4531,53 @@ int vita_settings_input(const struct vita_host_pad *pad)
 		{
 			struct line *line = &lines[*selected];
 
-			if (line->type == LINE_MAP)
+			if (line->type == LINE_VARIANT)
+			{
+				if (pressed & VITA_BUTTON_SQUARE)
+				{
+					forge_delete_index = line->index;
+					screen = SCREEN_FORGE_DELETE;
+				}
+			}
+			else if (line->type == LINE_FORGE)
+			{
+				int step = (pressed & VITA_BUTTON_LEFT) ? -1 : 1, variants = 0, tries;
+
+				if (line->index == FORGE_LINE_START)
+				{
+					if (pressed & (VITA_BUTTON_CROSS | VITA_BUTTON_RIGHT))
+					{
+						notice[0] = 0;
+						forge_start();
+						if (!panel_open)
+							return 1;
+					}
+				}
+				else if (line->index == FORGE_LINE_MAP && forge_map >= 0 && (pressed & (VITA_BUTTON_LEFT | VITA_BUTTON_RIGHT)))
+				{
+					/* (the next map in the maps folder, either way) */
+					int count = forge_panel_map_count(), map = forge_map;
+
+					for (tries = 0; tries < count; tries++)
+					{
+						map = (map + step + count) % count;
+						if (forge_panel_map_available(map))
+							break;
+					}
+					if (map != forge_map)
+					{
+						forge_map = map;
+						forge_variant = 0;
+					}
+				}
+				else if (line->index == FORGE_LINE_VARIANT && (pressed & (VITA_BUTTON_LEFT | VITA_BUTTON_RIGHT)))
+				{
+					forge_map_variant(0, &variants);
+					if (forge_variant + step >= 0 && forge_variant + step <= variants)
+						forge_variant += step;
+				}
+			}
+			else if (line->type == LINE_MAP)
 			{
 				struct map_entry *map = &maps[line->index];
 

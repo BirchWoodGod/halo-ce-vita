@@ -1,7 +1,9 @@
 # Forge for Halo CE Vita (design)
 
 Date: 2026-10-18. Status: phase (a) built as version 1 (below, "Version 1
-as built"), on the owner's decisions of Oct 18; the rest a draft.
+as built"), on the owner's decisions of Oct 18; phase (b) built (below,
+"Phase (b) as built": map variants saved and loaded, File Share, undo,
+snapping, object properties); the rest a draft.
 Part 2 of 3: (1) Halo 3-style menus (`docs/halo3-menus`,
 `2026-10-18-halo3-menus-design.md`), (2) Forge, (3) File Share.
 
@@ -97,7 +99,8 @@ characters with free actors. The object browser. No saving. Budget limits
 on. This is the spike made real, with the browser and the controls below.
 
 **(b) Save and load layouts per map.** A layout file (format below) per
-map, kept on the memory card (`ux0:data/halo/forge/<map>/`). A Forge lobby
+map, kept on the memory card (`ux0:data/haloce-vita/forge/<map>/` as
+built). A Forge lobby
 (map picker, layout picker) from the Halo 3 menu kit. "Load layout" starts
 the map with it applied. Undo/redo. Grid and angle snapping. Object
 properties (team, respawn time, spawn at start). Objects from other maps
@@ -444,6 +447,37 @@ records      record_count x 48 bytes {
 meta         meta_size bytes
 ```
 
+As built (phase b, `port/linux/game/forge_files.c`), with these
+adjustments, each for a reason:
+
+- **The name and extension.** Halo 3's "map variants" in the UI; the file
+  is `<name>.hmv` ("Halo map variant"), the magic stays `HFRG`.
+- **The meta** is four UTF-8 texts, each ended by a zero byte and filling
+  `meta_size` exactly: title (at most 31 bytes, not empty), author (31),
+  description (127) and the date saved (`YYYY-MM-DD HH:MM` or empty). The
+  design named three; File Share shows the date, which a file's own time
+  would lose when the file is sent to a friend.
+- **Kinds.** Teleporter in and out are two kinds (ten in all: object,
+  squad, player spawn, weapon spawn, vehicle spawn, flag, hill, teleporter
+  in, teleporter out, kill zone), so a record is one end of a pair. A kind
+  that names an object (object, squad, weapon spawn, vehicle spawn) needs
+  a path of a group it takes (a squad an `actv`, a weapon spawn `weap` or
+  `eqip`, a vehicle spawn `vehi`); the others name none: path index
+  `0xFFFF`.
+- **Flags.** Header bit 0 must say exactly whether any record is a
+  netgame's (not an object); a record's flags have bit 0, placed at the
+  start; every other bit of both is zero.
+- **Ranges.** Team -1 (neutral) to 7, respawn at most 600 s, count at most
+  16 (an object's 0 or 1), game types within the five (mask `0x1F`),
+  variant at most 15; positions within +-5000 (the BSP's world bounds,
+  with a 10 world unit margin, are checked when the variant is applied:
+  the validator has no map), angles within +-pi.
+- **A pack** is `{ recipe hash u32[2], name char[24] }` as designed, the
+  name 1 to 24 of `[a-z0-9_ -]` with zeros after it. Version 1 writes none
+  (packs are another branch's), and reads them as the format says.
+- **A path** may not appear twice (same group and path), nor have an empty
+  part (`\\`) or end with `\`.
+
 ### Validation (every layout, ours too)
 
 Checked, in this order, before the game sees a byte, in a pure C module
@@ -632,19 +666,226 @@ the AI budget; off) and the menus test's `h3touch` (FORGE opens the
 lobby). `HALO_TEST_PAD` gained `level` (wait for a level), `@name`
 (a screenshot) and stick steps for it.
 
-### Left for phase (b), save and share
+## Phase (b) as built (Oct 18 2026)
 
-- The layout file and its validator (above): the session's objects are a
-  bounded table already (`forge_placed`, 256 entries: object, palette tag,
-  whether a character) - a layout is that table's tag paths, places and
-  facings; nothing reads a file yet.
-- A layout picker in the lobby, load on START FORGE, save from the Forge
-  menu (`ux0:data/halo/forge/<map>/`), names typed on the Vita's keyboard.
-- Object properties (team, respawn, place at start), undo, grid and angle
-  snapping, touch controls, the blue ghost.
-- File Share (part 3) and sending layouts in the lobby; packs for other
-  maps' objects; campaign levels in the lobby (the console's monitor works
-  there already); our own building blocks.
+Branch `feat/forge-files` (from `integration/1.1.1-beta.4`). The owner's
+calls on the open questions: multiplayer maps first, sharing with friends
+and lobbies only (no public list, no server upload), "map variants" as
+Halo 3 named them.
+
+- **The file and its validator** (`port/linux/game/forge_files.c`, pure
+  C, no game dependency): the format above, version 1, `.hmv`. Every file,
+  ours too, passes `forge_file_decode` whole before anything reads it:
+  the checks of "Validation" in their order, each count bounded before it
+  is used, each float's bits looked at before it is a float, the layout
+  handed back only when every check passed (a refused file leaves an empty
+  layout). The writer runs the same checks (a layout that would not be
+  read back is not written).
+- **The store** (`port/linux/src/forge_store.c`, the platform layer: this
+  machine's paths): `ux0:data/haloce-vita/forge/<map>/<name>.hmv` on the
+  Vita, `<save root>/forge/<map>/` on Linux and PC. Only a folder whose
+  name is a map's (`[a-z0-9_]`) and a file whose name is a map variant's
+  (`[a-z0-9_-]{1,28}.hmv`) are ever opened; each is read through the
+  validator with its folder's map expected (another map's is refused). A
+  save writes `<name>.hmv.tmp`, checks every write and the close, reads it
+  back through the validator, and renames it in (the old file renamed
+  `.old` first, deleted after: the Vita does not rename over a file);
+  whatever fails, the temporary file is deleted and the old one stays.
+  The card must have the file and 256 KB free first. A save's name is made
+  from its title (letters and digits, `_` for the rest, numbered past the
+  names there); the session's own variant's file is replaced when saved
+  under its title.
+- **Saving** (the Forge menu's SAVE MAP VARIANT): the name typed on the
+  Vita's keyboard (the variant's own title, else "<Map> Variant"); where
+  no keyboard is (a PC release build) it saves under that name at once.
+  The session's placed objects are saved (`forge_placed`: tag path and
+  group, place, facing as yaw, pitch and roll, team, respawn, flags), the
+  author the profile's name, the date. What came of it is said under the
+  menu ("Saved "Gulch Test": 2 objects.", "The memory card is full.
+  Nothing was saved.", "Couldn't write it (is the card full?). Nothing was
+  saved."). The map's own objects are not saved (as the budget does not
+  count them): deleting one of the map's is not kept.
+- **Loading**, Halo 3's way (the owner, Oct 18): the lobby's MAP row
+  opens SELECT MAP, and choosing a map shows that map's variants in the
+  same picker: the map itself first (the original), then the player's
+  saved map variants of it (rows that scroll, the triggers a page), each
+  with its objects, author, date and description; B goes back to the
+  maps. The row then reads "MAP: BLOOD GULCH - MY FORT". Damaged files
+  are not offered (File Share lists and deletes them). The Halo 3
+  multiplayer lobby's MAP picker still lists the maps only: map variants
+  are not playable in custom games until phase (c), so it offers only
+  what can be played. START FORGE reads and checks the variant again first (one that
+  cannot be read starts nothing: the lobby says why), and the session
+  places it as it starts: each path found among the palette's tags (the
+  browser's allow-list: nothing else is ever placed), the group checked,
+  each place inside the structure's world bounds, within the budget. A
+  record whose tag the map does not have, outside the world, or past the
+  budget is skipped and counted ("Map variant X: 5 placed, 1 skipped"),
+  never fatal; another map copy (the hash) is logged.
+- **Undo and redo** (the Forge menu, with how many steps each has): 32
+  steps, an object placed (its drop), deleted, moved or turned. Objects
+  are named by a placed id that an undo gives back; a step that cannot be
+  done any more is said and skipped. `object_delete` only marks an object
+  (a paused game deletes it later), so such objects count as gone.
+- **Snapping** (the Forge menu's SNAP): the object held shown and let go
+  on a 0.25 world unit grid along the ground, turned in 15 degree steps.
+- **Object properties** (Square while holding an object you placed): a
+  window at the right, team (neutral, red, blue), respawn (never to 180
+  s), placed at the start; saved in the record. They change nothing in a
+  Forge game yet: they are for phase (c)'s netgame variants.
+- **File Share** (the main menu's FILE SHARE, `halo3/fileshare.xml`):
+  MAP VARIANTS (every map's, by map, the chosen one's picture, map,
+  objects, author, date) and GAME VARIANTS (the Xbox's game types,
+  listed only: they are made in MULTIPLAYER, GAME), L and R or left and
+  right between them. A opens the Forge lobby on the variant's map with it
+  chosen, Square renames it (the keyboard; the file name stays), Triangle
+  deletes it, asked first. Touch as the other Halo 3 screens (a row, the
+  button strip's labels).
+- **The original menus** (the owner: "keep everything in the overlay menu
+  in case people want the og menu"): with Menu style Halo CE the settings
+  panel's Game tab ends with **Forge and File Share**, a page of its own:
+  Map (the multiplayer maps in the maps folder), Map variant (None or one
+  of that map's), Start Forge (asks the game, at its main menu, as the
+  lobby's START FORGE: `SYSTEM_LINK_REQUEST_FORGE`, then closes the
+  panel; in a level or a lobby it says to leave first), and under File
+  Share every map variant (the first 32, six at a time), Square deleting
+  one after a question. With Menu style Halo 3 the row is hidden (the
+  Halo 3 main menu has FORGE and FILE SHARE); on the classic panel the
+  Game tab's first headings give way to fit it, as they already do for the
+  update check's lines (the Multiplayer tab has no room left).
+- **Not built:** the blue ghost (the held object is the object itself:
+  tinting or a translucent pass needs a render path of its own, and the
+  debug-geometry lines the engine has are untested on the Vita's GXM);
+  touch gestures in the monitor; netgame spawns; sharing (below).
+
+### Scene packs in Forge as built
+
+The lobby's EXTRA OBJECTS row (between MAP and START FORGE) chooses the
+packs a session brings (`forge.c forge_packs`, in load order):
+
+| Pack | Objects | Built from | Default | Tags | Tag cache | Pixels + samples (file) | Build (x86) |
+|---|---|---|---|---|---|---|---|
+| covenant_vehicles | Banshee, Wraith, Shade | b40, c40 | on | 430 | 857 KB | 6.3 MB (7.2 MB) | 1.3 s |
+| dropships | Pelican, Covenant dropship | b30, a50 | on | 158 | 656 KB | 3.6 MB (4.2 MB) | 1.0 s |
+| covenant_ai | 6 Covenant actor variants (10 offered with their kin) | b40 | asked for | 939 | 4964 KB | 30 MB (35 MB) | 1.4 s |
+
+- Built in the background while the lobby is open (`scene_packs_prebuild`:
+  built, not loaded with ui.map), its progress on the row's page and in the
+  lobby's note; START FORGE refuses while a pack it brings is building (on
+  the Vita a b40 build is tens of seconds: inflating b40 twice). Built once:
+  the file stays in `t:\packs` until the recipe, the builder or the source
+  map changes.
+- Loaded as the Forge map loads, before its objects, in that order while
+  the tag cache has room; one that does not fit is left out with the
+  loader's reason, in the log and on the HUD. A pack whose objects the map
+  has already is not loaded. The browser offers each object once (a pack's
+  copy of a map's tag is the map's), the actor variants in an AI category.
+- Map variants name the packs their records' tags come from (recipe name
+  and hash); loading one brings them with the lobby's.
+- Every Xbox multiplayer map carries the Warthog, Ghost and Scorpion tags
+  (any game type may turn them on), so Forge offers them on every map from
+  the map itself; none has the Rocket Warthog (Halo PC's), and packs are
+  built from Xbox maps only: no multiplayer vehicles pack.
+- The Pelican (and the Covenant dropship) place and stay as large props: a
+  player put in its driver's seat (`P-driver`, 12 seats: driver, eleven
+  riders and cargo) does not fly it, holding forward moves it nothing.
+- The settings panel's Forge route brings the packs on by default; choosing
+  them there is left for later.
+- Every multiplayer map with all three packs (run_forge_test.sh packmaps,
+  Oct 18): each loads all three, 6478 KB of the tag cache held by packs,
+  8837 KB free after them at the tightest (Blood Gulch; Sidewinder 8857 KB),
+  9180 KB at the roomiest (Chiron TL-34); the browser offers 8 vehicles and
+  10 AI on every map. So the Covenant AI would fit on by default; it stays
+  asked for (its 35 MB file, its b40 build time on the Vita, and the AI's
+  frame cost there).
+- On the Vita, still to measure: a b40 pack's build (it inflates b40, 225
+  MB, twice: tens of seconds), the AI pack's 35 MB on the memory card and
+  4.9 MB of tag cache, and the frame cost of several AI (on the x86 harness
+  a dozen fighting Covenant took the tick from 0.14 to 0.18 ms).
+- GPU programs (the owner's Vita compiles none: they must be in
+  shaders.pak): no new program written. Collected on the gxm-null harness
+  (HALO_SHADER_COLLECT) through run_forge_test.sh's v1, packs, smallmap and
+  panel cases and checked (tools/vita_shader_pack.py --check): every program
+  the packs' Banshee, Pelican and Elite draw with is in the pack. One is
+  not, in every Forge game and in none without Forge (a plain Blood Gulch
+  slayer game: 64 of 64): 75acc2fa621a81e3.fp, one projected texture stage,
+  most likely phase (a)'s HUD text (forge_draw, unchanged here). To add on
+  Vita3K with the next pack (HALO_SHADER_PRECOMPILE).
+- The gxm-null harness does not link on this tree's base (the menus' touch,
+  891c2f77: vita_touch_pointer, vita_host_front_touches and
+  vita_settings_panel_open have no Linux side); the collection above linked
+  a throwaway stub of the three.
+
+### Phase (b) tests
+
+`port/vita/tests/run_forge_files_test.sh` (ASan and UBSan): the writer's
+refusals, a round trip, a layout at every limit (within 64 KB), every
+truncation, every bit flipped (refused but for the map hash's four bytes,
+which only warn), huge counts, counts past the bytes, a payload size past
+the file, bad paths (`..`, a leading `\`, capitals, `%`, a zero inside,
+255 long, empty), scenario and script groups, the wrong map, every
+record field out of range, bad meta, and 200000 random cases (half with
+the checksum made right again so the checks after it are reached): no
+crash, and every file taken writes back as itself. `run_forge_test.sh`:
+`files`, `variants` (save, replace, load, a missing tag, damaged files,
+a full card over the session's own file and as a new one), `edit` (undo,
+redo, snapping, properties, the file read back with
+`forge_files_test --dump`), `fileshare` and `fstouch`; v1, budget, b30
+and off as before.
+
+### Sharing in the lobby (phase c's transport): designed, not built
+
+Not built in this branch, for two reasons: there is no network Forge game
+yet (the lobby's NETWORK is LOCAL; a variant sent to a joiner could only be
+saved, not played together), and any new lobby message is a network
+protocol change (a network version bump that splits players from every
+build before it, crossplay with PC included), which is the owner's call to
+make with a release, not a branch's. The design, for when it is:
+
+- **Who and when.** A host in a custom game lobby (and a Forge lobby
+  once it has NETWORK) whose game uses a map variant offers it to each
+  joiner in the pregame lobby; nothing is offered in a public game unless
+  the joiner's Map downloads setting allows it (`HALO_MAP_SHARE_FROM`,
+  as for maps). No public list, no server.
+- **The channel.** `map_share.c`'s, on the connection to the host (its
+  reliable stream), as a second kind of file: the query names a map
+  variant by its map, its SHA-256 and its size; the host offers it or
+  refuses; the joiner's player is asked ("<host> shares the map variant
+  <title> (Blood Gulch, 12 objects). Save it?", the title shown through
+  the font's glyph check, never in a path); then start, data, ack, done
+  (SHA-256) as for a map. A variant is at most 64 KB, so one window holds
+  it: no resume, no deflate, the in-game limits always.
+- **The wire.** One new capability bit (`map variant`, after
+  `in_progress`) in the query's and start's reason, so a host or joiner
+  without it is refused as an older build is today; the query's name field
+  carries `<map>/<hash>` instead of a map name only when the bit is set.
+  That keeps the three messages of network version 18; if the reviewer
+  wants a message of its own instead, the network version goes up by one
+  and `network_wire.c`'s table and the wire contract test say which.
+- **What the joiner keeps.** The bytes go to memory (at most 64 KB, the
+  size offered checked first), never straight to the card. Only when all
+  of them are there, the SHA-256 is the host's and `forge_file_decode`
+  passes with the joiner's own map expected, is the file written, through
+  `forge_store_save`'s temporary file and rename, under a name made by us
+  (`forge_file_name_received`: `r<hash>.hmv`, never the sender's), in the
+  joiner's own map folder; a file of that name already there is the same
+  variant (the same hash) and is kept, never overwritten; one of another
+  hash with the same title is saved beside it. A host that sends more than
+  it offered, a bad hash or a refused file ends the transfer and is said.
+- **Tests.** The protocol's new fields in `map_share_test.c` and
+  `net_fuzz_map_share.c`; `run_netns_online_test.sh` gains a case: a host
+  with a variant, a joiner that saves it, the file byte for byte the
+  host's, and a joiner whose copy is damaged in flight refusing it.
+
+### Left for later
+
+- Netgame spawns (phase c): the layout's player, weapon and vehicle
+  spawns, flags and hills read by the game engine; the properties (team,
+  respawn, place at start) then act.
+- Sharing in the lobby (above), and a network Forge game.
+- The blue ghost, touch gestures in the monitor, packs for other maps'
+  objects (another branch), campaign levels in the lobby, our own
+  building blocks.
 
 ## Scene packs as built (Oct 18 2026)
 
@@ -690,7 +931,9 @@ Gulch.
   checks and fuzzes packs alone (cut short, grown, bytes changed with and
   without their CRCs made right, pointers made to point past the pack, counts
   made huge, header fields changed): every copy is refused or, if still a
-  pack, loads clean twice; none crashes.
+  pack, loads clean twice; none crashes, also with the pack code, the walk and
+the validator built with AddressSanitizer (which found one: a crafted root at
+a pack's very end read past it, fixed in tag_relocate.c for maps too).
 - **Loading** (between frames): the tags read right after the map's tags (the
   structure bsp loads at the top of the tag cache; the room between is the
   packs'), given tag indices after the table's, their file offsets moved to a
@@ -762,9 +1005,12 @@ What Forge should call (nothing of Forge's was changed):
 7. **Sharing.** Friends only (a code, the Discord, a file on the memory
    card), or a public list on our server? Phase (c) assumes friends and
    lobbies; a public list needs moderation and is part 3's question.
+   *Decided (Oct 18): friends and lobbies only, no public list or server
+   upload.*
 8. **Custom Edition maps** in Forge: same rules, later?
 9. **Name and file extension** for layouts (`.forge`? Halo 3 called them
-   "map variants").
+   "map variants"). *Decided (Oct 18): "map variants" in the UI, files
+   `.hmv`.*
 
 ## Risks
 

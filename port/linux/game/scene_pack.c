@@ -213,6 +213,9 @@ struct source_reader
 	unsigned long file_length;
 	unsigned long long read_bytes;
 	int volatile const *cancel;
+	/* (the build's progress: the read's half, 0 or 50, and where it goes) */
+	long progress_base;
+	long volatile *progress;
 };
 
 struct build_state
@@ -833,6 +836,9 @@ static boolean source_read(struct source_reader *reader, unsigned long offset, u
 			return FALSE;
 		reader->position += want - reader->stream.avail_out;
 		reader->read_bytes += want - reader->stream.avail_out;
+		if (reader->progress && reader->file_length)
+			*reader->progress = reader->progress_base +
+				(long)((unsigned long long)reader->position * 49 / reader->file_length);
 		if (result == Z_BUF_ERROR && reader->stream.avail_out == want && reader->stream.avail_in)
 			return FALSE;
 	}
@@ -2088,6 +2094,8 @@ boolean scene_pack_build(
 		return FALSE;
 	}
 	file_length = reader.file_length;
+	reader.progress = &result->progress;
+	reader.progress_base = 0;
 
 	/* the source's tag data (read to the end of it: it is the file's last) */
 	state.tags_size = read_u32(header + 20);
@@ -2134,6 +2142,7 @@ boolean scene_pack_build(
 		}
 	}
 	/* the pixels and samples, in the source's order (the second read) */
+	reader.progress_base = 50;
 	if (!state.failed && piece_count && !source_rewind(&reader))
 		build_fail(&state, "the map cannot be read again%s", NULL);
 	for (index = 0; index < piece_count && !state.failed; index++)
@@ -2183,6 +2192,7 @@ boolean scene_pack_build(
 	result->file_bytes = SCENE_PACK_HEADER_SIZE + state.blob_size + data_size;
 	result->source_bytes = reader.read_bytes;
 	result->microseconds = vita_host_time_us() - started;
+	result->progress = state.failed ? 0 : 100;
 	if (pieces)
 		free(pieces);
 	source_close(&reader);

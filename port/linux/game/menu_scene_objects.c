@@ -436,10 +436,17 @@ static void object_hold(struct menu_scene_object *object)
 		return;
 	}
 	object_place(object, &position, &forward, &up);
-	object_set_position(object->unit_index, &position, &forward, &up);
+	/* (put back only when it has moved: a flying biped stays where it is,
+	and placing an object finds its clusters again, each time) */
+	if (distance_squared3d(&datum->object.position, &position) > 0.0001f ||
+		dot_product3d(&datum->object.forward, &forward) < 0.9999f ||
+		dot_product3d(&datum->object.up, &up) < 0.9999f)
+	{
+		object_set_position(object->unit_index, &position, &forward, &up);
+		datum->object.translational_velocity.i = datum->object.translational_velocity.j =
+			datum->object.translational_velocity.k = 0.f;
+	}
 	object_pose(object, unit, &forward, &up);
-	datum->object.translational_velocity.i = datum->object.translational_velocity.j =
-		datum->object.translational_velocity.k = 0.f;
 	/* (another colour: made again in it, by the update right after this;
 	an object's colours are worked out as it is made) */
 	if (color_index != object->made_color_index)
