@@ -38,6 +38,14 @@ internet play with:
   created at once (the System Link list's Y): the map list, the gametype,
   then the game's own lobby, which shows the code.
 
+- With Menu style Halo 3, the Halo 3 multiplayer lobby ("port h3 mp ...",
+  halo3/multiplayer.xml) stands for the Multiplayer screen and opens these
+  same screens in Halo 3's look, under the same widget names: its NETWORK,
+  GAME and MAP pickers, START GAME (ONLINE: Server Setup; SYSTEM LINK: the
+  System Link screen's profile, then the new game's map list, as Server
+  Setup's START), BROWSE GAMES and JOIN WITH CODE. GAME and MAP are what the
+  Xbox's game type and map lists open on (kept as they keep them).
+
 Text is typed on the Vita's system keyboard (system_link_shortcut.h
 halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
 "|" between the answers ("!" cancels one), for the automated tests.
