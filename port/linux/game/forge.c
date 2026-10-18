@@ -660,14 +660,30 @@ static void forge_palette_build(
 		category = forge_globals.palette[index].category;
 		forge_globals.palette_first[category] = index;
 		forge_globals.palette_counts[category]++;
-		/* (two of one name: the second numbered) */
-		if (index > 0 && forge_globals.palette[index - 1].category == category &&
-			!strcmp(forge_globals.palette[index - 1].name, forge_globals.palette[index].name))
-		{
-			size_t length = strlen(forge_globals.palette[index].name);
+	}
+	/* (one name several times in a category: the second "<name> 2", the
+	third "<name> 3"...) */
+	{
+		short first = 0;
+		short repeat = 1;
 
-			if (length + 3 < sizeof(forge_globals.palette[index].name))
-				snprintf(forge_globals.palette[index].name + length, 3, " %d", 2);
+		for (index = 1; index < forge_globals.palette_count; index++)
+		{
+			struct forge_palette_entry *entry = &forge_globals.palette[index];
+			size_t length = strlen(forge_globals.palette[first].name);
+
+			if (entry->category == forge_globals.palette[first].category &&
+				!strncmp(entry->name, forge_globals.palette[first].name, length) && !entry->name[length])
+			{
+				repeat++;
+				if (length + 6 < sizeof(entry->name))
+					snprintf(entry->name + length, sizeof(entry->name) - length, " %d", repeat);
+			}
+			else
+			{
+				first = index;
+				repeat = 1;
+			}
 		}
 	}
 	if (forge_globals.palette_index >= forge_globals.palette_count)
