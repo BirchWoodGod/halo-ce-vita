@@ -44,13 +44,22 @@ def generate(folder):
 
 
 FONTS = ('font_title.bin', 'font_item.bin', 'font_small.bin')
+# (the settings panel's, drawn by the Vita overlay at the screen's 960x544:
+# larger, and the PlayStation buttons' symbols as characters 1 to 5)
+OVERLAY_FONTS = ('overlay_title.bin', 'overlay_item.bin', 'overlay_small.bin')
+SYMBOLS = (1, 2, 3, 4, 5)  # cross, circle, triangle, square, the button's disc
+
+
+def font_records(data):
+    count = struct.unpack('<h', data[14:16])[0]
+    return [struct.unpack('<Hhhhhh', data[16 + i * 12:28 + i * 12]) for i in range(count)]
 
 
 class ArtTest(unittest.TestCase):
     def test_fonts(self):
         with tempfile.TemporaryDirectory() as folder:
             generate(folder)
-            for name in FONTS:
+            for name in FONTS + OVERLAY_FONTS:
                 with open(os.path.join(folder, name), 'rb') as f:
                     data = f.read()
                 self.assertEqual(data[:4], b'H3FN', name)
@@ -68,11 +77,34 @@ class ArtTest(unittest.TestCase):
                 self.assertGreater(a[1], 0)
                 self.assertGreater(a[4 + 1], 0)  # origin y: the top above the baseline
 
+    def test_overlay_fonts(self):
+        with tempfile.TemporaryDirectory() as folder:
+            generate(folder)
+            heights = []
+            for name in OVERLAY_FONTS:
+                with open(os.path.join(folder, name), 'rb') as f:
+                    data = f.read()
+                records = font_records(data)
+                codes = [r[0] for r in records]
+                self.assertEqual(codes, sorted(codes), name)
+                heights.append(records[codes.index(ord('H'))][3])
+                if name == 'overlay_item.bin':
+                    for code in SYMBOLS:
+                        record = records[codes.index(code)]
+                        # (square, and as tall as a capital or more)
+                        self.assertEqual(record[2], record[3])
+                        self.assertGreaterEqual(record[3], heights[-1])
+                        self.assertGreater(record[1], record[2])  # room after it
+            # (title, item, small: largest to smallest, readable on the Vita)
+            self.assertGreater(heights[0], heights[1])
+            self.assertGreater(heights[1], heights[2])
+            self.assertGreaterEqual(heights[2], 10)
+
     def test_files_sizes_format(self):
         with tempfile.TemporaryDirectory() as folder:
             generate(folder)
             self.assertEqual(sorted(f for f in os.listdir(folder) if f.endswith('.png')), sorted(EXPECTED))
-            self.assertEqual(sorted(f for f in os.listdir(folder) if f.endswith('.bin')), sorted(FONTS))
+            self.assertEqual(sorted(f for f in os.listdir(folder) if f.endswith('.bin')), sorted(FONTS + OVERLAY_FONTS))
             for name, size in EXPECTED.items():
                 path = os.path.join(folder, name)
                 with Image.open(path) as image:

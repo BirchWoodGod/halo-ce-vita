@@ -230,19 +230,60 @@ def title_halo():
 # descending, leading height and width, the count; then per character its code,
 # advance, box width and height, origin x and y (the pen minus the box's left,
 # the baseline minus its top); then the pixels, character after character
+# (the overlay's are the Vita settings panel's, drawn at the screen's 960x544
+# rather than the menus' 640x480: vita_overlay_font.c; its item font carries
+# the PlayStation buttons' symbols as characters 1 to 5)
 FONT_FILES = {
-    'font_title.bin': ('SairaSemiCondensed-Medium.ttf', 22, 1),
-    'font_item.bin': ('SairaSemiCondensed-Regular.ttf', 15, 0),
-    'font_small.bin': ('SairaSemiCondensed-Regular.ttf', 12, 0),
+    'font_title.bin': ('SairaSemiCondensed-Medium.ttf', 22, 1, False),
+    'font_item.bin': ('SairaSemiCondensed-Regular.ttf', 15, 0, False),
+    'font_small.bin': ('SairaSemiCondensed-Regular.ttf', 12, 0, False),
+    'overlay_title.bin': ('SairaSemiCondensed-Medium.ttf', 34, 1, False),
+    'overlay_item.bin': ('SairaSemiCondensed-Regular.ttf', 19, 0, True),
+    'overlay_small.bin': ('SairaSemiCondensed-Regular.ttf', 15, 0, False),
 }
+SYMBOLS = {1: 'cross', 2: 'circle', 3: 'triangle', 4: 'square', 5: 'disc'}
 
 
-def font_file(face, size, tracking):
+def symbol(kind, diameter):
+    # a button's symbol, coverage only (the overlay colours it), or the
+    # button's round disc behind it; drawn large, then made small
+    scale = 4
+    size = diameter * scale
+    image = Image.new('L', (size, size), 0)
+    draw = ImageDraw.Draw(image)
+    centre = size / 2
+    width = max(round(diameter * .1), 2) * scale
+    s = size * .22
+    if kind == 'disc':
+        draw.ellipse([0, 0, size - 1, size - 1], fill=255)
+    elif kind == 'cross':
+        draw.line([(centre - s, centre - s), (centre + s, centre + s)], fill=255, width=width)
+        draw.line([(centre - s, centre + s), (centre + s, centre - s)], fill=255, width=width)
+    elif kind == 'circle':
+        draw.ellipse([centre - s, centre - s, centre + s, centre + s], outline=255, width=width)
+    elif kind == 'triangle':
+        h = s * math.sqrt(3) / 2
+        points = [(centre, centre - s), (centre + s, centre + h * .9), (centre - s, centre + h * .9)]
+        draw.line(points + [points[0]], fill=255, width=width, joint='curve')
+    else:
+        draw.rectangle([centre - s * .85, centre - s * .85, centre + s * .85, centre + s * .85], outline=255, width=width)
+    return image.resize((diameter, diameter), Image.Resampling.LANCZOS)
+
+
+def font_file(face, size, tracking, symbols):
     font = ImageFont.truetype(os.path.join(FONTS, face), size)
     ascent, descent = font.getmetrics()
     codes = list(range(32, 127)) + list(range(160, 256))
     records = []
     pixels = bytearray()
+    if symbols:
+        # (a little taller than a capital, centred on the capitals' middle)
+        capital = -font.getbbox('H', anchor='ls')[1]
+        diameter = round(capital * 1.6)
+        for code, kind in SYMBOLS.items():
+            pixels += symbol(kind, diameter).tobytes()
+            records.append(struct.pack('<Hhhhhh', code, diameter + round(size * .3), diameter, diameter, 0,
+                                       round(capital / 2 + diameter / 2)))
     for code in codes:
         char = chr(code)
         advance = round(font.getlength(char)) + tracking
@@ -260,7 +301,7 @@ def font_file(face, size, tracking):
     tops = [struct.unpack('<Hhhhhh', r)[5] for r in records]
     bottoms = [struct.unpack('<Hhhhhh', r)[3] - struct.unpack('<Hhhhhh', r)[5] for r in records]
     ascent, descent = max(tops), max(max(bottoms), 0)
-    header = b'H3FN' + struct.pack('<Hhhhhh', 1, ascent, descent, 0, 0, len(codes))
+    header = b'H3FN' + struct.pack('<Hhhhhh', 1, ascent, descent, 0, 0, len(records))
     return header + b''.join(records) + bytes(pixels)
 
 
@@ -289,9 +330,9 @@ def main(folder):
     for name, make in ART.items():
         # (no time or software stamp: the same bytes each run)
         make().save(os.path.join(folder, name), format='PNG', optimize=True)
-    for name, (face, size, tracking) in FONT_FILES.items():
+    for name, (face, size, tracking, symbols) in FONT_FILES.items():
         with open(os.path.join(folder, name), 'wb') as out:
-            out.write(font_file(face, size, tracking))
+            out.write(font_file(face, size, tracking, symbols))
 
 
 if __name__ == '__main__':
