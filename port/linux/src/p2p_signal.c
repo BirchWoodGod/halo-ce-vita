@@ -2988,3 +2988,38 @@ void p2p_signal_lobby_quit(void)
 		broker_flush(broker);
 	}
 }
+
+/* internet play stopping (p2p_shutdown, under p2p_lock, from the p2p
+thread): a listed game's tombstone and the slot cleared, DISCONNECT sent and
+every broker's connection closed, then nothing hosted, joined, looked up or
+browsed. What lasts the run is kept, as when hosting stops and starts: the
+requests sessions were made from (a request seen is never answered with a
+second session), the key of the host's nonces and the work budgets */
+void p2p_signal_stop(void)
+{
+	int index;
+
+	if (!signalling.started)
+		return;
+	p2p_signal_lobby_quit();
+	for (index = 0; index < signalling.broker_count; index++)
+		broker_close(&signalling.brokers[index], 0);
+	memset(signalling.brokers, 0, sizeof(signalling.brokers));
+	signalling.broker_count = 0;
+	signalling.started = 0;
+	signalling.own_slot[0] = 0;
+	signalling.lobby_listed = 0;
+	signalling.lobby_browsing = 0;
+	signalling.lobby_listing_size = 0;
+	signalling.lobby_closing = 0;
+	signalling.started_time = signalling.lobby_time = signalling.browsing_time = signalling.kick_time = 0;
+	signalling.hosting = 0;
+	memset(signalling.joiners, 0, sizeof(signalling.joiners));
+	memset(signalling.askers, 0, sizeof(signalling.askers));
+	signalling.has_code = 0;
+	signalling.joining = 0;
+	signalling.join_has_base = 0;
+	signalling.join_answered = 0;
+	signalling.looking_up = 0;
+	platform_log("Internet play: signalling stopped");
+}

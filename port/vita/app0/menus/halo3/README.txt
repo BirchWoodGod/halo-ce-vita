@@ -10,11 +10,12 @@ these screens stand for the Xbox's own, over the same animated Halo ring:
 - campaign.xml: the campaign lobby (it stands for the level select the
   campaign's profile screen opens) with its Select Network, Select Mission
   and Select Difficulty pickers. NETWORK: LOCAL plays the level here;
-  ONLINE CO-OP (internet play: Connection Online) or SYSTEM LINK CO-OP (AD
-  HOC CO-OP with the connection Ad hoc) makes START GAME host it as co-op,
-  as the Xbox's difficulty list's Y did, and open the game's lobby, the
-  waiting screen; the others join from MULTIPLAYER (BROWSE GAMES, JOIN WITH
-  CODE).
+  ONLINE CO-OP (internet play: Connection Online), SYSTEM LINK CO-OP or AD
+  HOC CO-OP (the ad hoc group joined first, network.xml) - the settings
+  panel's Connection, switched live, its status under NETWORK - makes START
+  GAME host it as co-op, as the Xbox's difficulty
+  list's Y did, and open the game's lobby, the waiting screen; the others
+  join from MULTIPLAYER (BROWSE GAMES, JOIN WITH CODE).
 - profiles.xml: SELECT PROFILE, standing for the Xbox's campaign profile
   screen (ui\shell\main_menu\load_campaign_player_profile, which CAMPAIGN
   opens; profiles_coop.xml for the screen inside it, which the settings
@@ -45,13 +46,17 @@ these screens stand for the Xbox's own, over the same animated Halo ring:
   local game of the map in Forge mode (port/linux/game/forge.c).
 - multiplayer.xml: the multiplayer lobby (it stands for the Xbox's Multiplayer
   screen, as OpenCE's multiplayer.xml does with Menu style Halo CE):
-  MULTIPLAYER LOBBY with NETWORK (ONLINE: internet play; SYSTEM LINK, or AD HOC
-  with the connection Ad hoc; OFFLINE: split screen), GAME and MAP (pickers:
-  the game type and map the Xbox's lists open on after START GAME), START GAME
-  (ONLINE: Create Game; SYSTEM LINK: the profile, then the new game's map list;
-  OFFLINE: split screen's), EDIT GAME TYPES (the Xbox's), BROWSE GAMES (ONLINE:
-  the server browser, CUSTOM GAMES; SYSTEM LINK: the System Link list) and JOIN
-  WITH CODE; the map's picture, "<game> on <map>", "1 Player (N max)" and the
+  MULTIPLAYER LOBBY with NETWORK (ONLINE: internet play; SYSTEM LINK: the Vitas
+  on the same Wi-Fi; AD HOC: the Vitas near, the connection Ad hoc; OFFLINE:
+  split screen), GAME and MAP (pickers: the game type and map the Xbox's lists
+  open on after START GAME), START GAME (ONLINE: Create Game; SYSTEM LINK and
+  AD HOC: the profile, then the new game's map list; OFFLINE: split screen's),
+  EDIT GAME TYPES (the Xbox's), BROWSE GAMES (the profile, then the games
+  browser, network.xml: ONLINE the System Link and the online games in one
+  list) and JOIN WITH CODE; ONLINE, SYSTEM LINK and AD HOC are the
+  settings panel's Connection (port/linux/game/network_connection.c),
+  switched live when chosen, its status in a line under NETWORK (Online,
+  Connecting..., Same Wi-Fi, Ad hoc, No Wi-Fi); the map's picture, "<game> on <map>", "1 Player (N max)" and the
   nameplate. The browser, Create Game and JOIN WITH CODE run OpenCE's screens'
   functions (menu_functions.c "port browser/setup/code ...") under the same
   widget names; the browser's rows show a VITA or PC badge with a lock for a
@@ -68,6 +73,14 @@ these screens stand for the Xbox's own, over the same animated Halo ring:
   map sharing; kept on the memory card), Triangle opens its details, Square
   asks before deleting it (NO, KEEP IT first). The settings panel's
   Multiplayer > Modded maps > Mod manager does the same.
+- network.xml: the games browser (BROWSE GAMES, after the profile: the
+  server browser's screen over the games the Xbox's System Link list would
+  show, the game's own search and join - SYSTEM LINK GAMES, AD HOC GAMES -
+  and, with the connection Online, the online list's public games too, in
+  one list, CUSTOM GAMES, the System Link ones marked [LAN]; padlocks for
+  the online games' passwords, System Link has none) and the joining dialog
+  (AD HOC out of the ad hoc group: the system's dialog joins it, then what
+  was asked goes on).
 - password.xml: the password screen of a game with one (it stands for OpenCE's,
   pc\join\password\screen, which the browser opens).
 In each level's map (ingame.txt):
@@ -145,6 +158,7 @@ the game's keys (a_butn, b_butn, start_butn) for that.
 Tests: port/vita/tests/run_menus_test.sh h3probe h3classic h3xbox h3broken
 h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create
 h3mptouch h3coop h3coopguide h3scenes (h3characters: parked) h3profiles h3proftouch h3customize
-h3damaged h3mods h3modspicker h3modstouch; the packs': port/vita/tests/run_scene_pack_test.sh; Forge's:
-port/vita/tests/run_forge_test.sh, port/vita/tests/run_forge_files_test.sh;
-co-op between two machines: port/vita/tests/run_netns_online_test.sh h3coopmenu.
+h3damaged h3mods h3modspicker h3modstouch h3lan h3adhoc h3adhoccoop h3oddrows; the packs':
+port/vita/tests/run_scene_pack_test.sh; Forge's: port/vita/tests/run_forge_test.sh,
+port/vita/tests/run_forge_files_test.sh; between two machines:
+port/vita/tests/run_netns_online_test.sh h3coopmenu h3lan h3adhoc h3online netswitch.

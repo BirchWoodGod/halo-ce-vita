@@ -125,4 +125,66 @@ extern volatile int halo_system_link_request;
 extern volatile int halo_system_link_answer;
 extern volatile int halo_multiplayer_status[SYSTEM_LINK_STATUS_COUNT];
 
+/* the connection the game plays over (port/linux/game/network_connection.c):
+the settings panel's Connection (HALO_VITA_NETWORK), which the Halo 3
+lobbies' NETWORK sets too, switched live at the menus. The game publishes
+what it runs (halo_network_connection: HALO_NETWORK_*, -1 before its first
+frame) and how it goes (halo_network_phase), which the panel shows as its
+own (running_network) */
+enum
+{
+	HALO_NETWORK_WIFI,
+	HALO_NETWORK_ADHOC,
+	HALO_NETWORK_ONLINE,
+};
+
+enum
+{
+	/* set up (Online: a broker reached) */
+	HALO_NETWORK_PHASE_READY,
+	/* Online: internet play started, no broker reached yet */
+	HALO_NETWORK_PHASE_CONNECTING,
+	/* the setting changed; the switch waits for the menus with no network
+	game */
+	HALO_NETWORK_PHASE_WAITING,
+	/* Online: no broker reached (the setting went back to Same Wi-Fi) */
+	HALO_NETWORK_PHASE_FAILED,
+};
+
+extern volatile int halo_network_connection;
+extern volatile int halo_network_phase;
+
+/* ad hoc play's group (network_connection.c, menu_functions.c: the lobbies'
+AD HOC and AD HOC CO-OP). halo_adhoc_request: the game sets it, the Vita's
+host takes it and sets it back to HALO_ADHOC_REQUEST_NONE -
+- JOIN: the ad hoc room's group joined through the system's dialog, in the
+  settings panel's room and dialog way, as the panel's Host and Join do
+  before System Link (with the connection Ad hoc, outside a group);
+- LEAVE: the group left (the connection left Ad hoc: the Vita's Wi-Fi back).
+halo_adhoc_group: the host's word on the group, every frame. Elsewhere (no
+Vita host) the game answers itself (system_link_shortcut.c: an emulated
+group, HALO_NET_ADHOC_EMULATE, is in it from the start; HALO_ADHOC_TEST,
+test builds, answers a join) */
+enum
+{
+	HALO_ADHOC_REQUEST_NONE,
+	HALO_ADHOC_REQUEST_JOIN,
+	HALO_ADHOC_REQUEST_LEAVE,
+};
+
+enum
+{
+	/* the connection is not Ad hoc */
+	HALO_ADHOC_GROUP_OFF = -2,
+	/* the system's dialog did not join one (cancelled, or failed) */
+	HALO_ADHOC_GROUP_FAILED = -1,
+	HALO_ADHOC_GROUP_NONE = 0,
+	/* the system's dialog is up */
+	HALO_ADHOC_GROUP_JOINING = 1,
+	HALO_ADHOC_GROUP_IN = 2,
+};
+
+extern volatile int halo_adhoc_request;
+extern volatile int halo_adhoc_group;
+
 #endif

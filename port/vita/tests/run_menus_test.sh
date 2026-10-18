@@ -37,12 +37,13 @@
 #            Heroic, Start Game: b30 loads on Heroic
 #   h3mp     the Halo 3 multiplayer lobby (menus/halo3/multiplayer.xml) stands
 #            for the Xbox's Multiplayer screen; internet play off: NETWORK is
-#            SYSTEM LINK, choosing ONLINE opens the screen saying how to turn it
-#            on; START GAME hosts a system link game (the profile, then the
-#            Xbox's map list)
+#            SYSTEM LINK; choosing ONLINE starts internet play live (its status
+#            Connecting...: TEST-NET brokers), SYSTEM LINK stops it; START GAME
+#            hosts a system link game (the profile, then the Xbox's map list)
 #   h3browser  internet play on (its brokers unreachable: TEST-NET addresses)
 #            with 16 made-up games of both platforms (HALO_TEST_BROWSER_GAMES,
-#            HALO_TEST_BROWSER_PC): BROWSE GAMES opens the Halo 3 browser, a
+#            HALO_TEST_BROWSER_PC): BROWSE GAMES, the profile, the Halo 3
+#            games browser with the online list's games (CUSTOM GAMES), a
 #            locked game the Halo 3 password screen, whose JOIN GAME says the
 #            game is no longer listed
 #   h3create  START GAME on ONLINE: Create Game; its GAME TYPE picker, the
@@ -50,8 +51,9 @@
 #   h3mptouch  taps: MULTIPLAYER, the lobby's MAP, BLOOD GULCH in its picker,
 #            the lobby's Back
 #   h3coop   co-op from the Halo 3 campaign lobby (HALO_TEST_PROFILE; skipped
-#            without): NETWORK, ONLINE CO-OP with internet play off (the
-#            screen saying how to turn it on), SYSTEM LINK CO-OP, START GAME:
+#            without): NETWORK, ONLINE CO-OP with internet play off (it
+#            goes online live), SYSTEM LINK CO-OP (back to Same Wi-Fi), START
+#            GAME:
 #            the level hosted as co-op (as the Xbox's difficulty list's Y
 #            hosted it) and the game's lobby, the waiting screen, open
 #   h3scenes the lobbies' cameras (scene= in menus/halo3; menus.scenes,
@@ -101,11 +103,33 @@
 #            HALO_TEST_PROFILE's profile and a damaged savegame.bin, the lobby
 #            says the saved game is damaged and starts at Mission Start
 #   h3oddrows the public lists' odd listings (HALO_TEST_BROWSER_ODD: the owner's
-#            photo of beta.7's browser, Oct 18 2026) in the Halo 3 browser and
-#            OpenCE's (Menu style Halo CE): a name that names nothing shows its
-#            host's player's, one of other alphabets "?" for what the font
+#            photo of beta.7's browser, Oct 18 2026) in the Halo 3 games browser
+#            and OpenCE's (Menu style Halo CE): a name that names nothing shows
+#            its host's player's, one of other alphabets "?" for what the font
 #            lacks, co-op its difficulty and level (or "-"), every missing field
 #            "-", and a name or map wider than its column cut with "..."
+#   h3lan    the Halo 3 LAN browser (halo3/network.xml) with 14 made-up games of both
+#            platforms (HALO_TEST_BROWSER_GAMES, HALO_TEST_BROWSER_PC): BROWSE
+#            GAMES on SYSTEM LINK, the profile, then the LAN browser in place of
+#            the Xbox's System Link list, no game locked; down to the third
+#            game, A: it is not listed by the game (a made-up one), and says
+#            so; Y sorts by name, Square looks again, a tap on the first row
+#            presses A on it, a tap on Back goes back to the profile; then with no games: "No games found on your network"
+#   h3adhoc  ad hoc play from the Halo 3 lobby: with the connection Ad hoc
+#            (HALO_NET_ADHOC) the lobby opens on AD HOC; BROWSE GAMES out of the
+#            ad hoc group opens the joining dialog, the system's dialog asked
+#            for, joined (HALO_ADHOC_TEST=join), then the profile and the LAN
+#            browser (AD HOC GAMES, "No games found near you"); START GAME with
+#            the join failing (HALO_ADHOC_TEST=fail) says so, A asks again, B
+#            goes back to the lobby; with the connection Same Wi-Fi, NETWORK:
+#            AD HOC switches to ad hoc play live (the system's dialog asked
+#            for), BROWSE GAMES opens the ad hoc LAN browser, and SYSTEM LINK
+#            leaves ad hoc play again
+#   h3adhoccoop  AD HOC CO-OP from the Halo 3 campaign lobby (HALO_TEST_PROFILE;
+#            skipped without), the connection Ad hoc and the join answered
+#            (HALO_ADHOC_TEST=join): START GAME, the joining dialog, then the
+#            level hosted as co-op and the game's lobby open by themselves; with
+#            the connection Same Wi-Fi AD HOC CO-OP switches to ad hoc play live
 #   h3coopguide  the settings panel's Host co-op campaign
 #            (HALO_SYSTEM_LINK_TEST=campaign): the Campaign screen opens, the
 #            Halo 3 campaign lobby behind it set to SYSTEM LINK CO-OP
@@ -159,7 +183,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3damaged h3mods h3modspicker h3modstouch h3oddrows}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3damaged h3mods h3modspicker h3modstouch h3lan h3adhoc h3adhoccoop h3oddrows}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
 
@@ -291,7 +315,7 @@ h3_no_xbox_profiles() { # NAME
 }
 # (internet play on, nothing reached: its brokers, STUN and relays TEST-NET addresses)
 h3net="HALO_NET_ONLINE=true HALO_NET_BROKERS=198.51.100.1:1883 HALO_NET_STUN=198.51.100.1:3478"
-h3net="$h3net HALO_NET_RELAYS=198.51.100.1:47320 HALO_NET_ALLOW_UPNP=false"
+h3net="$h3net HALO_NET_RELAYS=198.51.100.1:47320 HALO_NET_ALLOW_UPNP=false HALO_DISCORD_APPLICATION="
 # (the main menu: down to MULTIPLAYER, A: the lobby, its NETWORK row focused)
 h3mppad="wait:150:3000 down:150:700 a wait:150:3000"
 
@@ -427,11 +451,12 @@ for case in $cases; do
 		grep -aq "menus: h3 campaign: start levels.b30.b30 on Heroic" "$log" || fail h3campaign "Start Game did not start b30 on Heroic"
 		grep -aq "memory: loaded levels.b30.b30" "$log" || fail h3campaign "b30 did not load" ;;
 	h3mp)
-		# (NETWORK: the picker on SYSTEM LINK, up to ONLINE, A: the screen saying internet play is
-		# off; B, B: the lobby; down three to START GAME, A: the profile screen, A to join, the
-		# profile chosen: the map list)
-		run h3mp "$menus_data" 55 "$h3mppad a wait:150:3000 up:150:600 a wait:150:3000 b wait:150:3000 b wait:150:3000 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:5000" \
-			HALO_MENU_STYLE=halo3
+		# (NETWORK: the picker on SYSTEM LINK, up to ONLINE, A: online, live (its brokers TEST-NET
+		# addresses: connecting); NETWORK again, down to SYSTEM LINK, A: internet play stopped;
+		# down three to START GAME, A: the profile screen, A to join, the profile chosen: the map
+		# list)
+		run h3mp "$menus_data" 60 "$h3mppad a wait:150:3000 up:150:600 a wait:150:5000 a wait:150:3000 down:150:600 a wait:150:3000 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:5000" \
+			HALO_MENU_STYLE=halo3 $h3net HALO_NET_ONLINE=false
 		check_h3 h3mp halo3
 		log=$out/h3mp/run.log
 		grep -aq "menus: Halo 3 screen h3/mp/screen for ui.shell.main_menu.multiplayer_type_select.multiplayer_type_select_screen" "$log" ||
@@ -439,7 +464,14 @@ for case in $cases; do
 		grep -aq "menus: h3 mp lobby: NETWORK: SYSTEM LINK, GAME: SLAYER, MAP: BATTLE CREEK" "$log" ||
 			fail h3mp "the lobby's rows were not SYSTEM LINK, SLAYER, BATTLE CREEK"
 		grep -aq "ui: screen pc.h3.network.screen" "$log" || fail h3mp "NETWORK did not open its picker"
-		grep -aq "ui: screen pc.h3.mp.offline" "$log" || fail h3mp "ONLINE did not say internet play is off"
+		grep -aq "network: switching from Same Wi-Fi to Online" "$log" && grep -aq "Internet play: network thread started" "$log" ||
+			fail h3mp "ONLINE did not start internet play, live"
+		grep -aq 'network: status "Connecting..."' "$log" || fail h3mp "the status under NETWORK did not say Connecting..."
+		grep -aq "menus: h3 mp lobby: NETWORK: ONLINE" "$log" || fail h3mp "the lobby did not show ONLINE"
+		grep -aq "network: switching from Online to Same Wi-Fi" "$log" &&
+			grep -aq "Internet play: stopped (its thread, sockets and peers gone)" "$log" ||
+			fail h3mp "SYSTEM LINK did not stop internet play"
+		grep -aq "ui: screen pc.h3.mp.offline" "$log" && fail h3mp "ONLINE said internet play is off"
 		grep -aq "menus: h3 mp: host a system link game" "$log" || fail h3mp "START GAME did not host a system link game"
 		grep -aq "menus: Multiplayer > System Link: the game's server started; the map list" "$log" ||
 			fail h3mp "the server did not start (or the log named another screen)"
@@ -447,14 +479,16 @@ for case in $cases; do
 			fail h3mp "the profile did not lead to the map list"
 		grep -aq "ui: screen pc.mp.screen" "$log" && fail h3mp "OpenCE's Multiplayer screen opened with Menu style Halo 3" ;;
 	h3browser)
-		# (down five to BROWSE GAMES, A; down to the second game - locked -, A: its password;
-		# A: typed, down, A: JOIN GAME)
-		run h3browser "$menus_data" 45 "$h3mppad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:4000 down:150:600 a wait:150:4000 a wait:150:2000 down:150:600 a wait:150:4000" \
+		# (down five to BROWSE GAMES, A: the profile (A joins, A the profile, A): the games
+		# browser; down to the second game - locked -, A: its password; A: typed, down, A: JOIN
+		# GAME)
+		run h3browser "$menus_data" 60 "$h3mppad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:5000 down:150:600 a wait:150:4000 a wait:150:2000 down:150:600 a wait:150:4000" \
 			HALO_MENU_STYLE=halo3 $h3net HALO_TEST_BROWSER_GAMES=16 HALO_TEST_BROWSER_PC=1 HALO_TEST_TEXT_INPUT=secret
 		check_h3 h3browser halo3
 		log=$out/h3browser/run.log
 		grep -aq "menus: h3 mp lobby: NETWORK: ONLINE" "$log" || fail h3browser "NETWORK was not ONLINE with internet play on"
-		grep -aq "ui: screen pc.h3.browser.screen" "$log" || fail h3browser "BROWSE GAMES did not open the Halo 3 browser"
+		grep -aq "ui: screen pc.h3.lan.screen" "$log" && grep -aq "menus: the LAN browser (system link and online)" "$log" ||
+			fail h3browser "BROWSE GAMES did not open the Halo 3 games browser with the online games"
 		grep -aq "menus: the server browser's game 2 of 16 chosen: Test game 02" "$log" ||
 			fail h3browser "the browser did not list the 16 games, the fullest first"
 		grep -aq "menus: Halo 3 screen h3/password/screen for pc.join.password.screen" "$log" ||
@@ -479,7 +513,7 @@ for case in $cases; do
 	h3mptouch)
 		# (MULTIPLAYER on the main menu; the lobby's MAP; BLOOD GULCH in the picker; the lobby's Back)
 		run h3mptouch "$menus_data" 30 "wait:150:20000" HALO_MENU_STYLE=halo3 \
-			"HALO_TEST_TAPS=4000:60,298 8000:60,105 12000:100,263 16000:140,455"
+			"HALO_TEST_TAPS=4000:60,298 8000:60,118 12000:100,263 16000:140,455"
 		check_h3 h3mptouch halo3
 		log=$out/h3mptouch/run.log
 		grep -aq "ui: screen pc.h3.map.screen" "$log" || fail h3mptouch "a tap on MAP did not open its picker"
@@ -491,16 +525,18 @@ for case in $cases; do
 			echo "--- h3coop"; echo "SKIP: no HALO_TEST_PROFILE"; continue
 		fi
 		# (CAMPAIGN, the profile: the lobby, MISSION focused; up to NETWORK, A: the picker on LOCAL;
-		# down, A: ONLINE CO-OP, internet play off: the screen saying so; B: the picker; down, A:
-		# SYSTEM LINK CO-OP; down three to START GAME, A: hosted, the game's lobby)
-		profile_from=$HALO_TEST_PROFILE run h3coop "$menus_data" 50 "wait:150:3000 a wait:150:3000 a wait:150:3000 up:150:600 a wait:150:2500 down:150:600 a wait:150:2500 b wait:150:2500 down:150:600 a wait:150:2500 down:150:600 down:150:600 down:150:600 a wait:150:8000" \
-			HALO_MENU_STYLE=halo3
+		# down, A: ONLINE CO-OP, online live (its brokers TEST-NET addresses: connecting); NETWORK
+		# again, down, A: SYSTEM LINK CO-OP, internet play stopped; down three to START GAME, A:
+		# hosted, the game's lobby)
+		profile_from=$HALO_TEST_PROFILE run h3coop "$menus_data" 55 "wait:150:3000 a wait:150:3000 a wait:150:3000 up:150:600 a wait:150:2500 down:150:600 a wait:150:4000 a wait:150:2500 down:150:600 a wait:150:2500 down:150:600 down:150:600 down:150:600 a wait:150:8000" \
+			HALO_MENU_STYLE=halo3 $h3net HALO_NET_ONLINE=false
 		check_h3 h3coop halo3
 		log=$out/h3coop/run.log
 		grep -aq "ui: screen pc.h3.campnet.screen" "$log" || fail h3coop "NETWORK did not open its picker"
-		grep -aq "menus: h3 campaign: ONLINE CO-OP chosen, internet play is off" "$log" &&
-			grep -aq "ui: screen pc.h3.mp.offline" "$log" ||
-			fail h3coop "ONLINE CO-OP did not say internet play is off"
+		grep -aq "menus: h3 campaign: network ONLINE CO-OP" "$log" &&
+			grep -aq "network: switching from Same Wi-Fi to Online" "$log" ||
+			fail h3coop "ONLINE CO-OP did not go online, live"
+		grep -aq "network: switching from Online to Same Wi-Fi" "$log" || fail h3coop "SYSTEM LINK CO-OP did not leave online"
 		grep -aq "menus: h3 campaign: network SYSTEM LINK CO-OP" "$log" || fail h3coop "SYSTEM LINK CO-OP was not chosen"
 		grep -aq "menus: h3 campaign caption: .* on Normal Co-op at Mission Start" "$log" ||
 			fail h3coop "the caption did not say co-op"
@@ -761,9 +797,9 @@ for case in $cases; do
 		cmp -s "$HALO_TEST_PROFILE" "$out/h3damaged_game/save/u/UDATA/869079979327/blam.sav" ||
 			fail h3damaged "the test profile's blam.sav changed" ;;
 	h3oddrows)
-		# (the Halo 3 lobby on ONLINE: down five to BROWSE GAMES, A: the Halo 3 browser; OpenCE's:
-		# Multiplayer, SERVER BROWSER)
-		run h3oddrows "$menus_data" 35 "$h3mppad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:8000" \
+		# (the Halo 3 lobby: down five to BROWSE GAMES, A: the profile (A joins, A the profile, A):
+		# the games browser; OpenCE's: Multiplayer, SERVER BROWSER)
+		run h3oddrows "$menus_data" 40 "$h3mppad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:8000" \
 			HALO_MENU_STYLE=halo3 $h3net HALO_TEST_BROWSER_ODD=1
 		run h3oddrows_classic "$menus_data" 35 "wait:150:2000 down:150:800 a wait:150:4000 a wait:150:8000" \
 			HALO_MENU_STYLE=classic $h3net HALO_TEST_BROWSER_ODD=1
@@ -781,6 +817,101 @@ for case in $cases; do
 		done
 		grep -aqF "xXxNoScopeLegendsxXxForeverMore (cut)" "$out/h3oddrows/run.log" ||
 			fail h3oddrows "the long single-word name was not cut to its column" ;;
+	h3lan)
+		# (down five to BROWSE GAMES, A: the profile (A joins, A the profile, A); the LAN browser:
+		# down two, A; Y; Square; a tap on Back)
+		run h3lan "$menus_data" 60 "$h3mppad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:5000 down:150:600 down:150:600 a wait:150:2000 y wait:150:2000 x wait:150:20000" \
+			HALO_MENU_STYLE=halo3 HALO_TEST_BROWSER_GAMES=14 HALO_TEST_BROWSER_PC=1 "HALO_TEST_TAPS=46000:150,102 50000:552,452"
+		run h3lan_empty "$menus_data" 30 "$h3mppad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:12000" \
+			HALO_MENU_STYLE=halo3
+		check_h3 h3lan halo3
+		log=$out/h3lan/run.log
+		grep -aq "menus: h3 mp: browse the system link games; the profile, then the LAN browser" "$log" ||
+			fail h3lan "BROWSE GAMES on SYSTEM LINK did not ask for the LAN browser"
+		grep -aq "menus: the Halo 3 LAN browser for the System Link list" "$log" && grep -aq "ui: screen pc.h3.lan.screen" "$log" ||
+			fail h3lan "the profile did not lead to the Halo 3 LAN browser"
+		grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected.server_list" "$log" &&
+			fail h3lan "the Xbox's System Link list opened with Menu style Halo 3"
+		grep -aq "menus: the LAN browser (system link)" "$log" || fail h3lan "the LAN browser was not the system link one"
+		grep -aq "menus: the LAN browser lists 14: Test game 09 (Chill Out, CTF, 15/16, PC), Test game 02 (" "$log" ||
+			fail h3lan "the LAN browser did not list the 14 games, the fullest first"
+		grep -aq "menus: the server browser's game 3 of 14 chosen" "$log" || fail h3lan "down two did not choose the third game"
+		grep -aq "menus: the LAN browser's game Test game .* is no longer listed" "$log" ||
+			fail h3lan "A on a game the System Link list does not show did not say it is not listed"
+		grep -aq "menus: the server browser sorts by name" "$log" || fail h3lan "Y did not sort the games by name"
+		grep -aq "menus: the LAN browser looks again" "$log" || fail h3lan "Square did not look again"
+		grep -aq "menus: the LAN browser's game Test game 00 is no longer listed" "$log" ||
+			fail h3lan "a tap on the first row (sorted by name) did not press A on it"
+		grep -a "ui: screen" "$log" | tail -1 | grep -q '4way_start2join_screen' ||
+			fail h3lan "a tap on Back did not go back to the profile"
+		check_h3 h3lan_empty halo3
+		grep -aq 'menus: the server browser says "No games found on your network"' "$out/h3lan_empty/run.log" ||
+			fail h3lan "with no games the LAN browser did not say none were found" ;;
+	h3adhoc)
+		# (the connection Ad hoc: BROWSE GAMES, the joining dialog, joined: the profile (A joins,
+		# A the profile, A), the LAN browser)
+		run h3adhoc "$menus_data" 40 "$h3mppad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:6000 a wait:150:2000 a wait:150:2000 a wait:150:8000" \
+			HALO_MENU_STYLE=halo3 HALO_NET_ADHOC=true HALO_ADHOC_TEST=join
+		# (the join failing: START GAME, the joining dialog; A again; B)
+		run h3adhoc_fail "$menus_data" 30 "$h3mppad down:150:500 down:150:500 down:150:500 a wait:150:5000 a wait:150:5000 b wait:150:3000" \
+			HALO_MENU_STYLE=halo3 HALO_NET_ADHOC=true HALO_ADHOC_TEST=fail
+		# (the connection Same Wi-Fi: NETWORK, down to AD HOC, A: ad hoc, live, the system's dialog
+		# asked for (joined); down five to BROWSE GAMES, A: the profile (A joins, A the profile, A):
+		# the ad hoc LAN browser; B, B: the lobby; NETWORK, up to SYSTEM LINK, A: Same Wi-Fi again)
+		run h3adhoc_live "$menus_data" 65 "$h3mppad a wait:150:3000 down:150:600 a wait:150:5000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:5000 b wait:150:3000 b wait:150:3000 up:150:500 up:150:500 up:150:500 up:150:500 up:150:500 a wait:150:3000 up:150:600 a wait:150:4000" \
+			HALO_MENU_STYLE=halo3 HALO_ADHOC_TEST=join
+		check_h3 h3adhoc halo3
+		log=$out/h3adhoc/run.log
+		grep -aq "menus: h3 mp lobby: NETWORK: AD HOC" "$log" || fail h3adhoc "the lobby did not open on AD HOC with the connection Ad hoc"
+		grep -aq "ui: screen pc.h3.adhoc.joining" "$log" || fail h3adhoc "BROWSE GAMES out of the group did not open the joining dialog"
+		grep -aq "ad hoc: the system's dialog would join the room's group here (HALO_ADHOC_TEST=join)" "$log" ||
+			fail h3adhoc "the joining dialog did not ask for the system's dialog"
+		grep -aq "menus: h3 adhoc: in the ad hoc group: browse the games" "$log" ||
+			fail h3adhoc "joined, BROWSE GAMES did not go on by itself"
+		grep -aq "menus: the LAN browser (ad hoc)" "$log" || fail h3adhoc "the ad hoc LAN browser did not open"
+		grep -aq 'menus: the server browser says "No games found near you"' "$log" ||
+			fail h3adhoc "the ad hoc LAN browser did not say no games were found near"
+		check_h3 h3adhoc_fail halo3
+		log=$out/h3adhoc_fail/run.log
+		grep -aq 'menus: h3 adhoc: the joining dialog says "The PS Vita did not join the ad hoc group.' "$log" ||
+			fail h3adhoc "a failed join was not said"
+		[ "$(grep -ac 'menus: h3 adhoc: the system.s dialog asked for' "$log")" -ge 2 ] ||
+			fail h3adhoc "A after a failed join did not ask again"
+		grep -aq "menus: h3 mp: host an ad hoc game" "$log" && fail h3adhoc "START GAME went on without the group"
+		grep -a "ui: screen" "$log" | tail -1 | grep -q 'pc.h3.mp.screen' || fail h3adhoc "B did not go back to the lobby"
+		check_h3 h3adhoc_live halo3
+		log=$out/h3adhoc_live/run.log
+		grep -aq "network: switching from Same Wi-Fi to Ad hoc" "$log" && grep -aq "ad hoc: on" "$log" ||
+			fail h3adhoc "AD HOC did not switch to ad hoc play, live"
+		grep -aq "ad hoc: the system's dialog would join the room's group here" "$log" ||
+			fail h3adhoc "AD HOC did not ask for the system's dialog"
+		grep -aq "menus: the LAN browser (ad hoc)" "$log" || fail h3adhoc "BROWSE GAMES did not open the ad hoc LAN browser"
+		grep -aq "network: switching from Ad hoc to Same Wi-Fi" "$log" && grep -aq "ad hoc: off" "$log" &&
+			grep -aq "ad hoc: the group left" "$log" || fail h3adhoc "SYSTEM LINK did not leave ad hoc play"
+		grep -aq "ui: screen pc.h3.adhoc.restart" "$log" && fail h3adhoc "a restart dialog opened" ;;
+	h3adhoccoop)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "--- h3adhoccoop"; echo "SKIP: no HALO_TEST_PROFILE"; continue
+		fi
+		# (CAMPAIGN, the profile: the lobby on LOCAL, MISSION focused; up to NETWORK, A: the
+		# picker; down three, A: AD HOC CO-OP; down three to START GAME, A: the joining dialog,
+		# then co-op hosted by itself)
+		profile_from=$HALO_TEST_PROFILE run h3adhoccoop "$menus_data" 45 "wait:150:3000 a wait:150:3000 a wait:150:3000 up:150:600 a wait:150:2500 down:150:600 down:150:600 down:150:600 a wait:150:2500 down:150:600 down:150:600 down:150:600 a wait:150:10000" \
+			HALO_MENU_STYLE=halo3 HALO_NET_ADHOC=true HALO_ADHOC_TEST=join
+		profile_from=$HALO_TEST_PROFILE run h3adhoccoop_live "$menus_data" 30 "wait:150:3000 a wait:150:3000 a wait:150:3000 up:150:600 a wait:150:2500 down:150:600 down:150:600 down:150:600 a wait:150:4000" \
+			HALO_MENU_STYLE=halo3 HALO_ADHOC_TEST=join
+		check_h3 h3adhoccoop halo3
+		log=$out/h3adhoccoop/run.log
+		grep -aq "menus: h3 campaign: network AD HOC CO-OP" "$log" || fail h3adhoccoop "AD HOC CO-OP was not chosen"
+		grep -aq "ui: screen pc.h3.adhoc.joining" "$log" || fail h3adhoccoop "START GAME out of the group did not open the joining dialog"
+		grep -aq "menus: h3 adhoc: in the ad hoc group: host co-op" "$log" || fail h3adhoccoop "joined, co-op was not hosted by itself"
+		grep -aq "menus: h3 campaign: host co-op levels.*(ad hoc)" "$log" && grep -aq "co-op: hosting levels.* from the campaign's menus" "$log" ||
+			fail h3adhoccoop "the level was not hosted as co-op"
+		grep -a "ui: screen" "$log" | tail -1 | grep -q 'connected_pregame_screen' ||
+			fail h3adhoccoop "the game's lobby (the waiting screen) did not open"
+		check_h3 h3adhoccoop_live halo3
+		grep -aq "network: switching from Same Wi-Fi to Ad hoc" "$out/h3adhoccoop_live/run.log" ||
+			fail h3adhoccoop "AD HOC CO-OP with Same Wi-Fi did not switch to ad hoc play, live" ;;
 	h3coopguide)
 		# (3 s into the main menu the request opens the Campaign screen's profiles; the lobby
 		# behind them is set to co-op. The Xbox's profiles screen opens on a new profile, whose
@@ -858,7 +989,7 @@ for case in $cases; do
 		grep -a "ui: screen" "$log" | tail -1 | grep -q 'pc.h3.main.screen' ||
 			fail h3modstouch "a tap on Back did not go back to the main menu" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3damaged|h3mods|h3modspicker|h3modstouch|h3oddrows]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3damaged|h3mods|h3modspicker|h3modstouch|h3lan|h3adhoc|h3adhoccoop|h3oddrows]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"

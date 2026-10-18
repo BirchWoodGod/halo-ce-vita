@@ -474,6 +474,16 @@ int WSAAPI WSAStartup(WORD version_requested, LPWSADATA data)
 	return 0;
 }
 
+/* internet play (or ad hoc play) started later than the game's networking,
+the connection switched live (port/linux/game/network_connection.c): as
+WSAStartup starts it, at the game's own address */
+void xnet_internet_play_start(void)
+{
+	unsigned long local;
+
+	p2p_initialize(local_address_setting(&local) ? local : loopback_address());
+}
+
 int WSAAPI WSACleanup(void)
 {
 	return 0;

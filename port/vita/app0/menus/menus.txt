@@ -11,5 +11,6 @@ halo3/customize.xml
 halo3/forge_lobby.xml
 halo3/fileshare.xml
 halo3/multiplayer.xml
+halo3/network.xml
 halo3/password.xml
 halo3/mods.xml

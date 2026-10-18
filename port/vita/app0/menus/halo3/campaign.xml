@@ -7,10 +7,12 @@ level and the difficulty set, then "main menu switch to solo game"). Laid out as
 column at the left (CAMPAIGN LOBBY, Network, Mission, Difficulty, Start Game, Ready, the mission's
 picture with the difficulty emblem, "<mission> on <difficulty> at Mission Start"), the nameplate
 at the right; Network, Mission and Difficulty open pickers as Halo 3's Select Map. Network is
-LOCAL (Start Game plays the level here) or co-op, ONLINE CO-OP or SYSTEM LINK CO-OP: Start Game
-then hosts the level as the Xbox's difficulty list's Y did (port h3 campaign host), and the
-game's lobby, the waiting screen, opens. The level pictures and emblems are ui.map's own, the
-rest this folder's art. -->
+LOCAL (Start Game plays the level here) or co-op, ONLINE CO-OP, SYSTEM LINK CO-OP or AD HOC
+CO-OP: Start Game then hosts the level as the Xbox's difficulty list's Y did (port h3 campaign
+host; AD HOC CO-OP's after the ad hoc group is joined, halo3/network.xml), and the game's lobby,
+the waiting screen, opens. The co-op choices are the settings panel's Connection, switched live
+when chosen (network_connection.c), its status under NETWORK. The level pictures and emblems are
+ui.map's own, the rest this folder's art. -->
 <menus root="h3/campaign/screen" replaces="ui\shell\main_menu\solo_level_select\solo_level_select_screen">
 	<bitmap name="h3/sp_levels">
 		<frame map="ui\shell\bitmaps\sp_levels" index="0"/>
@@ -52,11 +54,13 @@ rest this folder's art. -->
 		<string text="LOCAL"/>
 		<string text="ONLINE CO-OP"/>
 		<string text="SYSTEM LINK CO-OP"/>
+		<string text="AD HOC CO-OP"/>
 	</strings>
 	<strings name="h3/campaign_network_text">
 		<string text="Play the campaign alone on this PS Vita."/>
-		<string text="Host co-op on the Internet: others join\nwith your game's code, or from the\nserver browser if you make it public (X\nin the waiting screen). It needs the\nsettings panel's Multiplayer tab,\nConnection: Online."/>
-		<string text="Host co-op for the PS Vitas on your\nWi-Fi network (Connection: Same Wi-Fi),\nor near you (Connection: Ad hoc). They\njoin from MULTIPLAYER, BROWSE GAMES."/>
+		<string text="Host co-op on the Internet: others join\nwith your game's code, or from the\nserver browser if you make it public (X\nin the waiting screen). Choosing it goes\nonline (the settings panel's Connection:\nOnline)."/>
+		<string text="Host co-op for the PS Vitas on your\nWi-Fi network (the settings panel's\nConnection: Same Wi-Fi). They join from\nMULTIPLAYER, BROWSE GAMES."/>
+		<string text="Host co-op for the PS Vitas near you,\nwith no router: choosing it opens the\nsystem's ad hoc dialog (Connection: Ad\nhoc). They join from MULTIPLAYER, AD\nHOC, BROWSE GAMES."/>
 	</strings>
 	<strings name="h3/missions">
 		<string text="THE PILLAR OF AUTUMN"/>
@@ -104,21 +108,31 @@ rest this folder's art. -->
 	<widget name="h3/campaign/start_coop" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/campaign_text" string_index="2">
 		<on event="a start" run="port h3 campaign host" open="ui\shell\main_menu\multiplayer_type_select\connected\pregame\connected_pregame_screen"/>
 	</widget>
+	<!-- (AD HOC CO-OP's: out of the ad hoc group, the joining dialog, which hosts it once in) -->
+	<widget name="h3/campaign/start_adhoc" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/campaign_text" string_index="2">
+		<on event="a start" run="port h3 adhoc coop" otherwise="h3/adhoc/joining"/>
+		<on event="a start" run="port h3 campaign host" open="ui\shell\main_menu\multiplayer_type_select\connected\pregame\connected_pregame_screen"/>
+	</widget>
 	<widget name="h3/campaign/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<on event="created" run="port h3 campaign focus"/>
 		<child widget="h3/campaign/network_row" x="0" y="0"/>
-		<child widget="h3/campaign/mission_row" x="0" y="20"/>
-		<child widget="h3/campaign/difficulty_row" x="0" y="40"/>
-		<child widget="h3/campaign/start_row" x="0" y="60"/>
-		<child widget="h3/campaign/start_coop" x="0" y="60"/>
+		<child widget="h3/campaign/mission_row" x="0" y="34"/>
+		<child widget="h3/campaign/difficulty_row" x="0" y="54"/>
+		<child widget="h3/campaign/start_row" x="0" y="74"/>
+		<child widget="h3/campaign/start_coop" x="0" y="74"/>
+		<child widget="h3/campaign/start_adhoc" x="0" y="74"/>
 	</widget>
-	<widget name="h3/campaign/rule2" left="8" top="132" width="250" height="2" bitmap="h3/rule"/>
-	<widget name="h3/campaign/ready" type="text" left="16" top="137" width="240" height="18" font="h3/font_item" color="#FFE6ECF2" text_y="1" string_list="h3/campaign_text" string_index="3"/>
-	<widget name="h3/campaign/ready_sub" type="text" left="16" top="153" width="240" height="16" font="h3/font_small" color="#FF9FB6CC" text_y="1"/>
-	<widget name="h3/campaign/picture" left="16" top="176" width="140" height="114" bitmap="h3/sp_levels"/>
-	<widget name="h3/campaign/emblem" left="22" top="182" width="44" height="48" bitmap="h3/difficulty"/>
-	<widget name="h3/campaign/caption" type="text" left="16" top="296" width="240" height="40" font="h3/font_item" color="#FFEEF2F6" text_y="1"/>
-	<widget name="h3/campaign/warning" type="text" left="16" top="340" width="240" height="36" font="h3/font_small" color="#FFF0B070" text_y="1"/>
+	<!-- (the connection's status under NETWORK, for co-op: port h3 network status) -->
+	<widget name="h3/campaign/network_status" type="text" left="24" top="71" width="226" height="14" font="h3/font_small" color="#FF9FB6CC">
+		<data input="port h3 network status"/>
+	</widget>
+	<widget name="h3/campaign/rule2" left="8" top="146" width="250" height="2" bitmap="h3/rule"/>
+	<widget name="h3/campaign/ready" type="text" left="16" top="151" width="240" height="18" font="h3/font_item" color="#FFE6ECF2" text_y="1" string_list="h3/campaign_text" string_index="3"/>
+	<widget name="h3/campaign/ready_sub" type="text" left="16" top="167" width="240" height="16" font="h3/font_small" color="#FF9FB6CC" text_y="1"/>
+	<widget name="h3/campaign/picture" left="16" top="190" width="140" height="114" bitmap="h3/sp_levels"/>
+	<widget name="h3/campaign/emblem" left="22" top="196" width="44" height="48" bitmap="h3/difficulty"/>
+	<widget name="h3/campaign/caption" type="text" left="16" top="310" width="240" height="40" font="h3/font_item" color="#FFEEF2F6" text_y="1"/>
+	<widget name="h3/campaign/warning" type="text" left="16" top="354" width="240" height="36" font="h3/font_small" color="#FFF0B070" text_y="1"/>
 	<widget name="h3/campaign/rule3" left="8" top="440" width="250" height="2" bitmap="h3/rule"/>
 	<widget name="h3/campaign/a_butn" left="16" top="447" width="16" height="16" bitmap="h3/glyph_cross"/>
 	<widget name="h3/campaign/select" type="text" left="36" top="446" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/campaign_text" string_index="5"/>
@@ -136,6 +150,7 @@ rest this folder's art. -->
 		<child widget="h3/campaign/title"/>
 		<child widget="h3/campaign/rule1"/>
 		<child widget="h3/campaign/rule2"/>
+		<child widget="h3/campaign/network_status"/>
 		<child widget="h3/campaign/ready"/>
 		<child widget="h3/campaign/ready_sub"/>
 		<child widget="h3/campaign/picture"/>
@@ -164,13 +179,17 @@ rest this folder's art. -->
 
 	<widget name="h3/campnet/title" type="text" left="52" top="46" width="400" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/campaign_text" string_index="8"/>
 	<widget name="h3/campnet/item_0" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/campaign_networks" string_index="0">
-		<on event="a" run="port h3 campaign network set" back="true" otherwise="h3/mp/offline"/>
+		<on event="a" run="port h3 campaign network set" back="true"/>
 	</widget>
 	<widget name="h3/campnet/item_1" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/campaign_networks" string_index="1">
-		<on event="a" run="port h3 campaign network set" back="true" otherwise="h3/mp/offline"/>
+		<on event="a" run="port h3 campaign network set" back="true"/>
 	</widget>
+	<!-- (ONLINE CO-OP, SYSTEM LINK CO-OP and AD HOC CO-OP: the connection too, switched live) -->
 	<widget name="h3/campnet/item_2" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/campaign_networks" string_index="2">
-		<on event="a" run="port h3 campaign network set" back="true" otherwise="h3/mp/offline"/>
+		<on event="a" run="port h3 campaign network set" back="true"/>
+	</widget>
+	<widget name="h3/campnet/item_3" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/campaign_networks" string_index="3">
+		<on event="a" run="port h3 campaign network set" back="true"/>
 	</widget>
 	<widget name="h3/campnet/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<on event="created" run="port h3 campaign network focus"/>
@@ -178,6 +197,7 @@ rest this folder's art. -->
 		<child widget="h3/campnet/item_0" y="0"/>
 		<child widget="h3/campnet/item_1" y="19"/>
 		<child widget="h3/campnet/item_2" y="38"/>
+		<child widget="h3/campnet/item_3" y="57"/>
 	</widget>
 	<widget name="h3/campnet/campnet_text" type="text" left="320" top="84" width="266" height="140" font="h3/font_small" color="#FFCFD9E3" string_list="h3/campaign_network_text"/>
 	<widget name="h3/campnet/screen" flags="pass_unhandled_to_focused_child">

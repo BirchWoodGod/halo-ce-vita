@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The Halo 3-style multiplayer lobby's local networks (Menu style Halo 3; menu_functions.c "port
+h3 lan ...", "port h3 adhoc ..."):
+- the games browser (the LAN browser): BROWSE GAMES, after the profile, opens it in place of the
+  Xbox's System Link list, with the same search (the game's own "initialize net game server
+  list"): the server browser's screen (multiplayer.xml: its rows, headers and buttons, under the
+  same names) over the games the System Link list would show (SYSTEM LINK GAMES; AD HOC GAMES in
+  ad hoc play) and, with the connection Online, the online list's public games after them, in one
+  list (CUSTOM GAMES: the System Link list's marked [LAN]) - each row its badge (VITA, or PC for a
+  PC build's or a crossplay host's game; a padlock for an online game's password), the name, game
+  type, map and players; the orange bar on the chosen one, its players and rules under the list.
+  A joins it: a System Link row as A on its row in the System Link list joins it (the game's lobby
+  next), an online row as the server browser joins it (a password asked first), its host's game
+  then joined from this list once it shows. Square looks again, Triangle sorts, the triggers
+  page. (No more widgets than the server browser's: the menus' widget memory holds the screen's);
+- the joining dialog: AD HOC's START GAME or BROWSE GAMES, or AD HOC CO-OP's START GAME, out of
+  the ad hoc group: the system's dialog joins it (the Vita's host, as the settings panel's Host
+  and Join), then what was asked goes on by itself; A tries again after a failure. It keeps no
+  history: B on what opens next goes back to the lobby. -->
+<menus>
+	<strings name="h3/adhoc_text">
+		<string text="AD HOC GROUP"/>
+		<string text="Try again"/>
+	</strings>
+
+	<!-- the LAN browser -->
+	<widget name="h3/lan/lan_title" type="text" left="28" top="26" width="300" height="26" font="h3/font_title" color="#FFF2F6FA" text_y="1"/>
+	<widget name="h3/lan/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port browser update"/>
+		<on event="x" run="port h3 lan refresh"/>
+		<on event="x" run="initialize net game server list"/>
+		<on event="y" run="port browser sort"/>
+		<on event="left_trigger" run="port browser page up"/>
+		<on event="right_trigger" run="port browser page down"/>
+		<on event="deleted" run="dispose net game server list"/>
+		<child widget="h3/browser/row_1" x="20" y="92"/>
+		<child widget="h3/browser/row_2" x="20" y="112"/>
+		<child widget="h3/browser/row_3" x="20" y="132"/>
+		<child widget="h3/browser/row_4" x="20" y="152"/>
+		<child widget="h3/browser/row_5" x="20" y="172"/>
+		<child widget="h3/browser/row_6" x="20" y="192"/>
+		<child widget="h3/browser/row_7" x="20" y="212"/>
+		<child widget="h3/browser/row_8" x="20" y="232"/>
+		<child widget="h3/browser/row_9" x="20" y="252"/>
+		<child widget="h3/browser/row_10" x="20" y="272"/>
+		<child widget="h3/browser/row_11" x="20" y="292"/>
+		<child widget="h3/browser/row_12" x="20" y="312"/>
+	</widget>
+	<widget name="h3/lan/screen" flags="pass_unhandled_to_focused_child">
+		<on event="created" run="port h3 lan init"/>
+		<on event="created" run="initialize net game server list"/>
+		<on event="deleted" run="port h3 lan dispose"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/browser/strip"/>
+		<child widget="h3/browser/rule"/>
+		<child widget="h3/lan/lan_title"/>
+		<child widget="h3/browser/browser_status"/>
+		<child widget="h3/browser/panel"/>
+		<child widget="h3/browser/header_name"/>
+		<child widget="h3/browser/header_game"/>
+		<child widget="h3/browser/header_map"/>
+		<child widget="h3/browser/header_players"/>
+		<child widget="h3/lan/list"/>
+		<child widget="h3/browser/browser_message"/>
+		<child widget="h3/browser/ticker_players_label"/>
+		<child widget="h3/browser/ticker_rules_label"/>
+		<child widget="h3/browser/ticker_players_value"/>
+		<child widget="h3/browser/ticker_rules_value"/>
+		<child widget="h3/browser/buttons"/>
+		<child widget="h3/browser/a_butn"/>
+		<child widget="h3/browser/join"/>
+		<child widget="h3/browser/x_butn"/>
+		<child widget="h3/browser/refresh"/>
+		<child widget="h3/browser/y_butn"/>
+		<child widget="h3/browser/sort"/>
+		<child widget="h3/browser/page"/>
+		<child widget="h3/browser/b_butn"/>
+		<child widget="h3/browser/back"/>
+	</widget>
+
+	<!-- the joining dialog (multiplayer.xml's internet play dialog's look) -->
+	<widget name="h3/adhoc/joining_panel" left="120" top="160" width="400" height="150" bitmap="h3/panel"/>
+	<widget name="h3/adhoc/joining_title" type="text" left="132" top="166" width="376" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/adhoc_text" string_index="0"/>
+	<widget name="h3/adhoc/joining_rule" left="120" top="194" width="400" height="2" bitmap="h3/rule"/>
+	<widget name="h3/adhoc/adhoc_text" type="text" left="132" top="204" width="376" height="80" font="h3/font_small" color="#FFCFD9E3"/>
+	<widget name="h3/adhoc/joining_strip" left="120" top="290" width="400" height="20" bitmap="h3/strip"/>
+	<widget name="h3/adhoc/a_butn" left="132" top="292" width="16" height="16" bitmap="h3/glyph_cross"/>
+	<widget name="h3/adhoc/again" type="text" left="152" top="291" width="90" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/adhoc_text" string_index="1"/>
+	<widget name="h3/adhoc/b_butn" left="250" top="292" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/adhoc/back" type="text" left="270" top="291" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/main_items" string_index="10"/>
+	<widget name="h3/adhoc/joining" flags="pass_unhandled_to_focused_child no_history">
+		<on event="created" run="port h3 adhoc join"/>
+		<on event="deleted" run="port h3 adhoc cancel"/>
+		<on event="a" run="port h3 adhoc join"/>
+		<data input="port h3 adhoc joining"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/adhoc/joining_panel"/>
+		<child widget="h3/adhoc/joining_title"/>
+		<child widget="h3/adhoc/joining_rule"/>
+		<child widget="h3/adhoc/adhoc_text"/>
+		<child widget="h3/adhoc/joining_strip"/>
+		<child widget="h3/adhoc/a_butn"/>
+		<child widget="h3/adhoc/again"/>
+		<child widget="h3/adhoc/b_butn"/>
+		<child widget="h3/adhoc/back"/>
+	</widget>
+
+</menus>

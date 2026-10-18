@@ -1493,6 +1493,25 @@ void p2p_lobby_quit(void)
 	p2p_signal_lobby_quit();
 }
 
+/* internet play stopping (p2p_shutdown, under p2p_lock): a listed game's
+tombstone written, the browsing and a join from the browser ended. The
+lobby's settings (its name, password, visibility) and the games that
+failed this run are kept */
+void p2p_lobby_stop(void)
+{
+	p2p_lobby_quit();
+	lobby.hosting = 0;
+	lobby.browsing = 0;
+	lobby.query_wanted = 0;
+	memset(lobby.games, 0, sizeof(lobby.games));
+	lobby.queue_count = 0;
+	lobby.watching = 0;
+	lobby.join_state = P2P_LOBBY_JOIN_IDLE;
+	lobby.join_pending = 0;
+	memset(lobby.join_password, 0, sizeof(lobby.join_password));
+	lobby.brokers_wanted = 0;
+}
+
 int p2p_lobby_browsing(void)
 {
 	return lobby.browsing;

@@ -200,6 +200,10 @@ void p2p_signal_lobby_query(void);
 and the slot cleared on every ready broker now, whatever their buckets, and
 the connections closed cleanly */
 void p2p_signal_lobby_quit(void);
+/* internet play stopping: the lobby quit as above, every broker's
+connection closed and nothing hosted, joined, looked up or browsed (what
+lasts the run kept); under p2p_lock */
+void p2p_signal_stop(void);
 /* the player just asked for the brokers (opened the server browser,
 refreshed it, hosted, looked up a code): a broker waiting to try again after
 failing tries now (at most once each P2P_SIGNAL_KICK_INTERVAL ms) */
@@ -241,6 +245,9 @@ void p2p_adhoc_start(unsigned short tunnel_port);
 /* offers the group's machines to p2p.c as peers; the p2p thread's, each
 pass, under p2p_lock */
 void p2p_adhoc_update(void);
+/* stops the bridge: its threads ended, its relays and the group's port
+closed (p2p_shutdown; not under p2p_lock) */
+void p2p_adhoc_stop(void);
 
 /* ---------- p2p_crypto.c */
 
@@ -399,6 +406,10 @@ void p2p_lobby_query_heard(void);
 /* the game is quitting: a listed game's tombstone, and its slot cleared,
 written to the brokers at once; under p2p_lock */
 void p2p_lobby_quit(void);
+/* internet play stopping: the lobby quit as above, the browsing and a join
+from the browser ended (the settings and the games that failed this run
+kept); under p2p_lock */
+void p2p_lobby_stop(void);
 /* a key hash's slot */
 void p2p_lobby_slot_topic(const unsigned char *key_hash, char *topic, int size);
 
