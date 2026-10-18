@@ -495,6 +495,27 @@ static void test_replays_and_forgeries(void)
 	use(0);
 	check(machines[0].dropped_replays >= replayed - 1, "every replayed message dropped");
 	check(machines[0].invite_count == before, "a replayed invite shows nothing");
+	/* an eavesdropper (the third machine) given Bravo's messages to Alpha:
+	nothing opens, nothing is shown */
+	reset_drops(2);
+	{
+		int given = 0;
+
+		for (index = 0; index < carried_count; index++)
+			if (carried[index].from == 1 && !strcmp(carried[index].topic, machines[0].mailbox_topic))
+			{
+				use(2);
+				p2p_friends_heard(P2P_FRIENDS_MAILBOX, carried[index].payload, carried[index].size);
+				given++;
+				if (given >= 8)
+					break;
+			}
+		use(2);
+		p2p_friends_update(&hosts[2]);
+		check(given > 0 && machines[2].dropped_forged + machines[2].dropped_rate >= given &&
+			count_of(2, P2P_FRIEND_KIND_FRIEND) == 0 && count_of(2, P2P_FRIEND_KIND_INVITE) == 0,
+			"an eavesdropper given a pair's messages opens none of them");
+	}
 	/* a flipped byte */
 	for (index = carried_count - 1; index >= 0; index--)
 		if (carried[index].from == 1 && !strcmp(carried[index].topic, machines[0].mailbox_topic))

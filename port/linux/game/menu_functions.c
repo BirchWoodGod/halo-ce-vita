@@ -5565,6 +5565,11 @@ static void h3_friends_update(struct widget_instance *list)
 	}
 	text_show(named(screen, "a_label"), h3_friends_first_name(chosen));
 	text_show(named(screen, "x_label"), h3_friends_second_name(chosen));
+	/* (a button with nothing to do: its icon hidden too) */
+	if (named(screen, "a_butn"))
+		widget_instance_set_visibility_recursive(named(screen, "a_butn"), h3_friends_first_name(chosen)[0] != 0);
+	if (named(screen, "x_butn"))
+		widget_instance_set_visibility_recursive(named(screen, "x_butn"), h3_friends_second_name(chosen)[0] != 0);
 }
 
 /* the item of a row (row_<n>), or the chosen one */
@@ -5834,8 +5839,11 @@ static void h3_friends_panel_update(struct widget_instance *panel)
 			text_show(named(panel, name), state_text);
 			text_show(named(panel, state), "");
 		}
+		/* (a doing wider than its column cut with "...", as the lists' rows) */
+		else if (state_text[0])
+			row_column(panel, state, state_text);
 		else
-			text_show(named(panel, state), state_text);
+			text_show(named(panel, state), "");
 	}
 	/* (said once each time it changes: the tests read it) */
 	{
