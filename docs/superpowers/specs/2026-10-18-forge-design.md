@@ -1,7 +1,7 @@
 # Forge for Halo CE Vita (design)
 
-Date: 2026-10-18. Status: draft for the owner's review, with a sandbox
-spike behind it (below, "The spike").
+Date: 2026-10-18. Status: phase (a) built as version 1 (below, "Version 1
+as built"), on the owner's decisions of Oct 18; the rest a draft.
 Part 2 of 3: (1) Halo 3-style menus (`docs/halo3-menus`,
 `2026-10-18-halo3-menus-design.md`), (2) Forge, (3) File Share.
 
@@ -531,6 +531,110 @@ characters fought. With no command, no Forge line at all.
 Not in the spike: the browser, touch, PC mouse look in the monitor, the
 unit taken out of the world, snapping, undo, budget, saving, anything
 networked, anything cross-map. It was not built or run for the Vita.
+
+## Version 1 as built (Oct 18 2026)
+
+Branch `feat/forge` (the spike merged into `docs/halo3-menus`). The owner's
+decisions: multiplayer maps first, the map's own objects only, a
+monitor/Spartan toggle on D-pad up, a budget of 256 objects and 32 AI,
+our own building blocks later, Halo 3's look; save and share later.
+
+- **Entry.** The main menu's FORGE opens the Forge lobby
+  (`halo3/forge_lobby.xml`): FORGE LOBBY, Network: Local, Map (Select Map:
+  the Xbox's 13 multiplayer maps whose files are in the maps folder, each
+  with ui.map's own picture and description), START FORGE; the map's
+  picture with our Forge emblem, "Edit Objects on <map>". FILE SHARE keeps
+  its "coming later" dialog.
+- **The game.** START FORGE starts a local game (`forge_game_start`):
+  free for all **Slayer**, score to win 999, respawn at once, no suicide
+  penalty, no time limit (the variant options' default), the map's own
+  weapons and vehicles; `main_disallow_persistent_storage`, so no saved
+  game is read or written. Why Slayer: a game engine has to run on a
+  multiplayer map for the player to respawn (no game engine means the
+  campaign's death and revert), Slayer's only score is a player's kill of
+  a player (alone, only a suicide's -1; an AI's kills are not a player's),
+  so 999 is never reached, and it places nothing of its own (no flags,
+  balls or hills). The session is the requested map's (`forge_map_loaded`);
+  the main menu or another map ends it.
+- **Monitor and Spartan.** As the spike, plus: D-pad up flips both ways
+  (Spartan at the monitor's place; the monitor from the Spartan's eyes);
+  a respawned unit is hidden as the last; zoom is undone for the monitor.
+  The Vita's crouch toggle does not latch D-pad down, and the touch zones
+  are off, while the monitor flies (`vita_pad.c`).
+- **The object browser** (`halo3/forge.xml`, in every level's map):
+  Halo Online's window at the right over the running game (not paused):
+  OBJECT BROWSER and the budget in the title strip, a crumb (OBJECTS »
+  VEHICLES), the categories (Vehicles, Weapons with the grenades,
+  Equipment, Scenery with machines and controls, Characters where the map
+  has actor variants that name a unit: none on a multiplayer map), then
+  each category's objects by readable name (our own names for the
+  multiplayer maps' objects, translated; else the tag's name as words) and
+  the count placed, a pane, ✕ Place ○ Back L R Category. A on an object
+  closes it and puts the object in the monitor's hand. Not offered: a
+  vehicle's gun, the flag and the ball, anything of a cinematic's. A
+  placed object is what was chosen: the game type's remap (a multiplayer
+  game's flamethrower made a rocket launcher, a vehicle set) is skipped
+  for Forge's placements (`objects.c`, `forge_placing_exact`).
+- **The Forge menu** (Start in a Forge game; a multiplayer map has no
+  pause screen of its own for a game alone): RESUME, PLAY AS SPARTAN /
+  MONITOR, LEAVE FORGE (asked first: nothing is saved yet), the controls.
+- **The HUD** (monitor only): "FORGE · <map>", the budget, notices
+  ("Movement Speed: Fast", "Placed Warthog", refusals) at the left, the
+  crosshair "( + )", "[ + ]" with the name of the object under it (ice
+  blue) or held (orange). The object under the crosshair is the first the
+  camera's line meets by collision model, or for a weapon or equipment by
+  its bounding sphere.
+- **Budget.** Objects this session placed that still exist (256), and the
+  characters among them still alive (32); past either, the choice is
+  refused with a notice. The map's own objects do not count.
+
+### Controls as built
+
+| Action | Vita | PC (keyboard and mouse) |
+|---|---|---|
+| Fly | left stick | W A S D |
+| Look | right stick (and the gyro if on) | mouse |
+| Fly up / down (held) | Cross / D-pad down | Space / C or left Ctrl |
+| Faster (4x) | L held, nothing held | Shift, or right mouse button / G |
+| Grab / drop | R | left mouse button |
+| Turn the held object | L + right stick across | right mouse button / G + mouse |
+| Push / pull it | L + right stick up/down | mouse wheel (or G + ...) |
+| Delete (held, or under the crosshair) | Triangle | Delete |
+| Object browser | Square | E or R |
+| Copy (held or under the crosshair) | Circle | F |
+| Set upright | D-pad left | X |
+| Movement speed (slow, normal, fast) | D-pad right | Q |
+| Monitor / Spartan | D-pad up | Tab, Z or middle mouse button |
+| Forge menu | Start | Esc |
+| In the browser | D-pad / ✕ / ○ / L R | arrows or the mouse / Enter / F / G, left mouse |
+
+The Vita column is the default Button layout's; a remapped Xbox button
+moves with it (Forge reads the Xbox buttons). The PC column is the
+keyboard's controller (`xinput_sdl.c`) plus Shift, Delete, Tab and the
+wheel, which the monitor reads itself (`halo_linux_forge_keys`): the wheel
+and Tab press Y in play, never a delete here.
+
+### Tests
+
+`port/vita/tests/run_forge_test.sh` (v1: the whole loop by the
+controller, from the main menu to leaving; budget; b30's characters and
+the AI budget; off) and the menus test's `h3touch` (FORGE opens the
+lobby). `HALO_TEST_PAD` gained `level` (wait for a level), `@name`
+(a screenshot) and stick steps for it.
+
+### Left for phase (b), save and share
+
+- The layout file and its validator (above): the session's objects are a
+  bounded table already (`forge_placed`, 256 entries: object, palette tag,
+  whether a character) - a layout is that table's tag paths, places and
+  facings; nothing reads a file yet.
+- A layout picker in the lobby, load on START FORGE, save from the Forge
+  menu (`ux0:data/halo/forge/<map>/`), names typed on the Vita's keyboard.
+- Object properties (team, respawn, place at start), undo, grid and angle
+  snapping, touch controls, the blue ghost.
+- File Share (part 3) and sending layouts in the lobby; packs for other
+  maps' objects; campaign levels in the lobby (the console's monitor works
+  there already); our own building blocks.
 
 ## Open questions for the owner
 
