@@ -1955,6 +1955,16 @@ char *tag_get_name(
 	return cache_get_tag_instance(tag_index)->name;
 }
 
+#ifdef HALO_LINUX
+/* (port) the loaded map's tag data's bytes, at the tag cache's start (the
+structure bsp loaded after them: Forge's probe, port/linux/game/forge.c) */
+long cache_file_tag_data_size(
+	void)
+{
+	return cache_file_globals.header.tag_data_size;
+}
+
+#endif
 unsigned long tag_get_group_tag(
 	long tag_index)
 {

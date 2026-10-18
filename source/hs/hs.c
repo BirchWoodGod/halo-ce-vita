@@ -16187,6 +16187,18 @@ static boolean hs_compile_and_evaluate_command(
 		console_warning("not while playing in another's game: the host decides the game");
 		return FALSE;
 	}
+	/* port: Forge's commands ("forge on", "forge spawn <name>" ...: a
+spike, port/linux/game/forge.c), which are no script's */
+	{
+		char const *text = hs_host_player_command(expression, "forge");
+
+		if (text)
+		{
+			boolean forge_command(char const *arguments);
+
+			return forge_command(text);
+		}
+	}
 	/* port: the host's ban and kick commands ("ban <player name>", "kick
 	<player name>", or the name's start: Tab completes it), which are no
 	script's */

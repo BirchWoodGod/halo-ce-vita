@@ -5377,6 +5377,16 @@ void main_loop(
 					collision_log_continue_period(1);
 					director_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
 					observer_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
+#ifdef HALO_LINUX
+					/* (port: Forge's monitor, a spike: what it holds goes
+					where the camera just went, before the tick starts;
+					port/linux/game/forge.c) */
+					{
+						void forge_update(void);
+
+						forge_update();
+					}
+#endif
 					collision_log_end_period();
 					game_engine_update_non_deterministic((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
 #ifdef HALO_LINUX
