@@ -201,7 +201,7 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 	<widget name="h3/mp/rule2" left="8" top="218" width="250" height="2" bitmap="h3/rule"/>
 	<widget name="h3/mp/ready" type="text" left="16" top="223" width="240" height="18" font="h3/font_item" color="#FFE6ECF2" text_y="1"/>
 	<widget name="h3/mp/ready_sub" type="text" left="16" top="241" width="240" height="34" font="h3/font_small" color="#FF9FB6CC" text_y="1"/>
-	<widget name="h3/mp/map_picture" left="16" top="280" width="140" height="114" bitmap="h3/mp_maps"/>
+	<widget name="h3/mp/map_picture" left="16" top="280" width="140" height="114" bitmap="ui\shell\bitmaps\mp_map_grafix"/>
 	<widget name="h3/mp/caption" type="text" left="16" top="398" width="240" height="40" font="h3/font_item" color="#FFEEF2F6" text_y="1"/>
 	<widget name="h3/mp/rule3" left="8" top="440" width="250" height="2" bitmap="h3/rule"/>
 	<widget name="h3/mp/a_butn" left="16" top="447" width="16" height="16" bitmap="h3/glyph_cross"/>
@@ -298,47 +298,49 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 	</widget>
 
 	<widget name="h3/map/title" type="text" left="52" top="46" width="400" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/mp_text" string_index="6"/>
-	<widget name="h3/map/item_0" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/maps" string_index="0">
+	<widget name="h3/map/item_0" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
 		<on event="a" run="port h3 map set" back="true"/>
 	</widget>
-	<widget name="h3/map/item_1" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/maps" string_index="1">
+	<widget name="h3/map/item_1" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
 		<on event="a" run="port h3 map set" back="true"/>
 	</widget>
-	<widget name="h3/map/item_2" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/maps" string_index="2">
+	<widget name="h3/map/item_2" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
 		<on event="a" run="port h3 map set" back="true"/>
 	</widget>
-	<widget name="h3/map/item_3" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/maps" string_index="3">
+	<widget name="h3/map/item_3" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
 		<on event="a" run="port h3 map set" back="true"/>
 	</widget>
-	<widget name="h3/map/item_4" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/maps" string_index="4">
+	<widget name="h3/map/item_4" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
 		<on event="a" run="port h3 map set" back="true"/>
 	</widget>
-	<widget name="h3/map/item_5" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/maps" string_index="5">
+	<widget name="h3/map/item_5" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
 		<on event="a" run="port h3 map set" back="true"/>
 	</widget>
-	<widget name="h3/map/item_6" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/maps" string_index="6">
+	<widget name="h3/map/item_6" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
 		<on event="a" run="port h3 map set" back="true"/>
 	</widget>
-	<widget name="h3/map/item_7" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/maps" string_index="7">
+	<widget name="h3/map/item_7" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
 		<on event="a" run="port h3 map set" back="true"/>
 	</widget>
-	<widget name="h3/map/item_8" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/maps" string_index="8">
+	<widget name="h3/map/item_8" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
 		<on event="a" run="port h3 map set" back="true"/>
 	</widget>
-	<widget name="h3/map/item_9" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/maps" string_index="9">
+	<widget name="h3/map/item_9" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
 		<on event="a" run="port h3 map set" back="true"/>
 	</widget>
-	<widget name="h3/map/item_10" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/maps" string_index="10">
+	<widget name="h3/map/item_10" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
 		<on event="a" run="port h3 map set" back="true"/>
 	</widget>
-	<widget name="h3/map/item_11" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/maps" string_index="11">
+	<widget name="h3/map/item_11" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
 		<on event="a" run="port h3 map set" back="true"/>
 	</widget>
-	<widget name="h3/map/item_12" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/maps" string_index="12">
+	<widget name="h3/map/item_12" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
 		<on event="a" run="port h3 map set" back="true"/>
 	</widget>
 	<widget name="h3/map/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<on event="created" run="port h3 map focus"/>
+		<on event="left_trigger" run="port h3 map page up"/>
+		<on event="right_trigger" run="port h3 map page down"/>
 		<data input="port h3 maps"/>
 		<child widget="h3/map/item_0" y="0"/>
 		<child widget="h3/map/item_1" y="19"/>
@@ -354,7 +356,7 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 		<child widget="h3/map/item_11" y="209"/>
 		<child widget="h3/map/item_12" y="228"/>
 	</widget>
-	<widget name="h3/map/map_picture" left="320" top="84" width="140" height="114" bitmap="h3/mp_maps"/>
+	<widget name="h3/map/map_picture" left="320" top="84" width="140" height="114" bitmap="ui\shell\bitmaps\mp_map_grafix"/>
 	<widget name="h3/map/map_text" type="text" left="320" top="206" width="266" height="150" font="h3/font_small" color="#FFCFD9E3" string_list="ui\shell\main_menu\multiplayer_type_select\mp_map_select\map_data"/>
 	<widget name="h3/map/screen" flags="pass_unhandled_to_focused_child">
 		<on event="b back" back="true"/>

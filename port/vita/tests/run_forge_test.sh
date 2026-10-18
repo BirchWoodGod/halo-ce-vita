@@ -64,6 +64,23 @@
 #               variant brings it, its objects placed; the Pelican's seats
 #   smallmap    Chill Out: the Warthog (the map's own tags) and the Banshee (a
 #               pack's) in the browser, both placed
+#   aiteam      the AI's team (the properties' AI TEAM, here the console's
+#               "forge aiteam"): an Elite of the Covenant AI pack placed by the
+#               monitor in Blood Gulch, the player then the Spartan beside it -
+#               on the player's team it never hurts the player; on the
+#               Covenant's it shoots the player's shield and body down
+#   aioff       the AI's brain off (AI: OFF): an Elite of the Covenant's stands
+#               where it was put and hurts nobody; the Forge menu's ALL AI (the
+#               console's "forge allai") turns it on again and it fights
+#   round       NEW ROUND: a Warthog, an Elite and an overshield placed; the
+#               Warthog shoved away and wrecked, the Elite killed, the
+#               overshield gone; a new round (the engine's map reset): all three
+#               back whole at their placed spots, the player respawned, the
+#               monitor where it flew
+#   aisave      a map variant with the AI's settings (a Flood Elite with its AI
+#               off, an Elite of the player's team, a Warthog) saved as version
+#               2 (forge_files_test --dump), then started again from the
+#               settings panel's route: its characters' teams and AI as saved
 #   packmaps    (not by default) every multiplayer map with every pack on
 #               (HALO_TEST_FORGE_PACKS): what each loads or leaves out, the
 #               tag cache they hold and leave; a table in its log
@@ -77,8 +94,9 @@
 # (HALO_SCREENSHOT_DIR, each run's shots folder) are kept with
 # HALO_TEST_KEEP=1, or copied to HALO_TEST_SHOTS when it is set.
 #
-#   run_forge_test.sh [CASE...]      (default: v1 budget b30 off files variants
-#                                     edit fileshare fstouch panel packs smallmap)
+#   run_forge_test.sh [CASE...]      (default: v1 budget fly b30 off files variants
+#                                     edit fileshare fstouch panel packs smallmap
+#                                     aiteam aioff round aisave)
 #   HALO_TEST_VITA        the harness (default build/linux/halo of this tree)
 #   HALO_TEST_DATA_MENUS  a folder with the game's maps folder (the Xbox maps)
 #                         and the Halo PC bitmaps.map and loc.map (never in the
@@ -95,7 +113,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_forge_test.$$}
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-v1 budget b30 off files variants edit fileshare fstouch panel packs smallmap}
+cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs smallmap aiteam aioff round aisave}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
 
@@ -186,8 +204,8 @@ b30='map_name levels\\b30\\b30'
 # D-pad up alone (rs: nothing for the monitor), Select + D-pad up (back+rs:
 # the Spartan), forward, Select alone then D-pad up alone (the scoreboard,
 # then zoom: neither flips), Select + D-pad up (the monitor); Start, down
-# six times (past SAVE MAP VARIANT, UNDO, REDO, SNAP), A (LEAVE FORGE), A
-# (leave))
+# eight times (past SAVE MAP VARIANT, UNDO, REDO, SNAP, ALL AI, NEW ROUND), A
+# (LEAVE FORGE), A (leave))
 v1pad="wait:150:3000 @00-main-menu:0:300 down:150:600 down:150:600 a:150:2500 @01-lobby:0:300"
 v1pad="$v1pad a:150:2000 @02-map-picker:0:300 down:150:700 a:150:1500 @02b-wizard-variants:0:300 a:150:2000"
 v1pad="$v1pad a:150:2000 up:150:700 a:150:1500 a:150:2000"
@@ -201,7 +219,7 @@ v1pad="$v1pad @13-boulder-dropped:0:300 rt:150:1000 lleft:700:600 @14-boulder-ca
 v1pad="$v1pad y:150:1500 @15-deleted:0:300 rs:150:1500 back+rs:150:2500 @16-spartan:0:300 lup:800:1500"
 v1pad="$v1pad back:150:600 rs:150:1200 back+rs:150:2500"
 v1pad="$v1pad @17-monitor-again:0:300 start:150:2000 @18-forge-menu:0:300 down:150:600 down:150:600 down:150:600"
-v1pad="$v1pad down:150:600 down:150:600 down:150:600 a:150:1500"
+v1pad="$v1pad down:150:600 down:150:600 down:150:600 down:150:600 down:150:600 a:150:1500"
 v1pad="$v1pad @19-leave-forge:0:300 a:150:9000 @20-main-menu-again:0:300"
 
 # (variants: the main menu's FORGE, the lobby; START FORGE (the map, no
@@ -362,6 +380,63 @@ fstouch_runs() {
 	find "$store" -type f | sort > "$out/fstouch-files.txt"
 }
 
+# (the AI cases: Forge started from the settings panel's route on Blood Gulch
+# with the Covenant AI pack; the monitor at a clear spot looking down the
+# valley, an Elite placed 7 world units ahead; then the Spartan where the
+# monitor was, and where the player is and how hurt, once a second)
+ai_setup="L300:forge camera 60 -100 1.6 130 0;L305:forge spawn elite major plasma rifle;L306:forge distance 7"
+ai_spartan="L320:forge camera 60 -100 0.8 130 -5;L322:forge ai;L325:forge off"
+ai_watch() { # FIRST LAST STEP: "forge where" from tick FIRST to LAST
+	local t w=""
+	for t in $(seq "$1" "$3" "$2"); do w="$w;L$t:forge where"; done
+	echo "$w"
+}
+ai_run() { # NAME SECONDS COMMANDS [VAR=value...]
+	local name=$1 seconds=$2 commands=$3
+	shift 3
+	run "$name" "$seconds" "" "$commands" "" HALO_MENU_STYLE=classic HALO_SYSTEM_LINK_TEST=forge:9 \
+		HALO_TEST_FORGE_PACKS=covenant_ai "$@"
+}
+
+aiteam_runs() {
+	ai_run aiteam-player 40 "$ai_setup;L307:forge aiteam player;L308:forge drop;$ai_spartan$(ai_watch 360 600 30);L605:forge ai;L606:@shot 00-player-team"
+	ai_run aiteam-covenant 40 "$ai_setup;L307:forge aiteam covenant;L308:forge drop;$ai_spartan$(ai_watch 360 600 30);L605:forge ai;L606:@shot 00-covenant-team"
+	mkdir -p "$out/aiteam"
+	echo 0 > "$out/aiteam/exit"
+}
+
+aioff_runs() {
+	# (AI off: watched 9 s; then the monitor again, ALL AI (on), the Spartan
+	# again, watched)
+	ai_run aioff 55 "$ai_setup;L307:forge aiteam covenant;L308:forge brain off;L309:forge drop;$ai_spartan$(ai_watch 360 600 30);L604:@shot 00-ai-off;L605:forge ai;L620:forge on;L622:forge allai;L624:forge ai;L626:forge off$(ai_watch 700 1000 30);L1005:forge ai"
+}
+
+round_runs() {
+	# (a Warthog 8 ahead, the Elite 5, an overshield 3; their placed spots
+	# listed; the Warthog shoved, then wrecked, the Elite killed, the
+	# overshield taken out of the world; listed; NEW ROUND (the console's,
+	# as the Forge menu's); the map's time starts again at 0: listed again)
+	local c="L300:forge camera 60 -100 1.6 130 0;L302:forge spawn warthog;L303:forge distance 8;L304:forge drop"
+	c="$c;L306:forge spawn elite major plasma rifle;L307:forge distance 5;L309:forge drop;L311:forge spawn overshield"
+	c="$c;L312:forge distance 3;L313:forge drop;L400:forge objects;L401:forge where;L405:forge shove #1 0.6 0 0.4"
+	c="$c;L440:forge kill #1;L442:forge kill #2;L444:forge destroy #3;L480:forge objects;L481:@shot 00-before-round"
+	c="$c;L485:forge round;L500:forge objects;L502:forge ai;L505:forge where;L510:@shot 01-after-round"
+	ai_run round 45 "$c"
+}
+
+aisave_runs() {
+	local store="$out/aisave-store"
+	rm -rf "$store"
+	mkdir -p "$store"
+	local c="$ai_setup;L307:forge aiteam flood;L308:forge brain off;L309:forge drop;L311:forge spawn elite minor plasma rifle"
+	c="$c;L312:forge distance 4;L313:forge aiteam player;L314:forge drop;L316:forge spawn warthog;L317:forge distance 9"
+	c="$c;L318:forge drop;L400:forge ai;L405:forge save AI Test"
+	ai_run aisave 30 "$c" HALO_SAVE_ROOT="$store"
+	"$out/forge_files_test" --dump "$store/forge/bloodgulch/ai_test.hmv" > "$out/aisave/dump.txt" 2>&1
+	run aisave-load 30 "" "L400:forge ai" "" HALO_MENU_STYLE=classic HALO_SYSTEM_LINK_TEST=forge:9:ai_test.hmv \
+		HALO_TEST_FORGE_PACKS=covenant_ai HALO_SAVE_ROOT="$store"
+}
+
 # (the test's own files' writer and reader: forge_files_test, built once
 # before the cases run side by side)
 mkdir -p "$out"
@@ -387,6 +462,8 @@ for c in $cases; do
 		run "$c" 110 "" "" "$v1pad" HALO_MENU_STYLE=halo3 HALO_TEST_FORGE_PACKS=none & ;;
 	budget)
 		run "$c" 50 "$bloodgulch" "L200:forge on;L210:forge fill 260 boulder;L230:forge budget;L240:@shot 00-budget-full;L260:forge delete;L270:forge budget;L280:forge spawn boulder;L285:forge drop;L290:forge budget;L300:@shot 01-budget-after" "" & ;;
+	fly)
+		run "$c" 40 "$bloodgulch" "L200:forge on;L230:forge camera 60 -120 5 0 45;L240:forge where;L250:forge stick 0 1 0 0 60;L320:forge where;L330:forge camera 60 -120 5 0 -45;L340:forge where;L350:forge stick 0 1 0 0 60;L420:forge where" "" & ;;
 	b30)
 		run "$c" 90 "$b30" "L60:@skip;L205:(set cheat_deathless_player true);L1200:@shot 00-b30-player;L1210:forge on;L1220:forge camera -63 39 3.2 -50 -22;L1225:forge list characters;L1240:@shot 01-b30-monitor;L1250:forge spawn hunter;L1252:forge distance 4;L1258:@shot 02-b30-hunter-held;L1260:forge drop;L1280:forge spawn marine_armored assault rifle major;L1282:forge distance 3.5;L1285:forge drop;L1300:forge spawn ghost;L1302:forge distance 4;L1303:forge turn 90;L1305:forge drop;L1320:forge spawn elite commander;L1322:forge distance 5;L1325:forge drop;L1340:@shot 03-b30-spawned;L1420:@shot 04-b30-ai;L1430:forge camera -40 60 6 -50 -22;L1440:forge fill 34 marine_armored assault rifle major;L1450:forge budget;L1470:@shot 05-b30-ai-budget;L1520:forge where;L1600:forge off;L1605:@shot 06-b30-player" "" & ;;
 	off)
@@ -428,6 +505,14 @@ for c in $cases; do
 		packs_runs & ;;
 	smallmap)
 		smallmap_runs & ;;
+	aiteam)
+		aiteam_runs & ;;
+	aioff)
+		aioff_runs & ;;
+	round)
+		round_runs & ;;
+	aisave)
+		aisave_runs & ;;
 	packmaps)
 		# (the maps two at a time: the cases' slots all its own)
 		wait
@@ -489,6 +574,42 @@ for c in $cases; do
 		expect packs-load "Covenant AI off in the lobby: the variant brings it" \
 			"forge: packs: loaded: Covenant vehicles, Dropships, Covenant AI; left out: none"
 		expect packs-load "the variant's three objects placed" "forge: map variant \"Pack Test\" applied: 3 placed, 0 skipped"
+		continue
+	fi
+	if [ "$c" = aiteam ]; then
+		checked aiteam-player
+		checked aiteam-covenant
+		expect aiteam-player "an Elite of the player's team (the free for all player's own)" \
+			"forge: elite major plasma rifle: AI team player \(engine team 0\), AI on"
+		expect aiteam-player "the Spartan beside it" "forge: player mode at 60.00 -100.00"
+		if grep -a "forge: the player's unit at" "$out/aiteam-player/run.log" | grep -qv "body 1.00, shield 1.00"; then
+			fail "aiteam-player: the player was hurt by an Elite of his own team"
+		else
+			echo "  ok: aiteam-player: never hurt ($(grep -ac "forge: the player's unit at" "$out/aiteam-player/run.log") looks, 8 s)"
+		fi
+		expect aiteam-player "the Elite alive, its brain on" "forge: ai 0: Elite Major Plasma Rifle \(id 1\) alive .* AI team player, engine team 0, AI on, actor yes"
+		expect aiteam-covenant "an Elite of the Covenant's" "forge: elite major plasma rifle: AI team covenant \(engine team 3\), AI on"
+		expect aiteam-covenant "it shoots: the player's shield goes down" "forge: the player's unit at .* shield 0\.[0-8]"
+		expect aiteam-covenant "and then his body" "forge: the player's unit at .* body 0\.[0-9]"
+		continue
+	fi
+	if [ "$c" = aisave ]; then
+		checked aisave
+		checked aisave-load
+		expect aisave "saved" "forge: map variant \"AI Test\" saved as bloodgulch/ai_test.hmv, 3 objects"
+		if grep -q "^version 2 " "$out/aisave/dump.txt" &&
+			grep -q "^record 0: characters.elite.elite major.elite major plasma rifle kind 0 team -1 ai team 4 respawn 30 flags 3 " "$out/aisave/dump.txt" &&
+			grep -q "^record 1: characters.elite.elite minor.elite minor plasma rifle kind 0 team -1 ai team 1 respawn 30 flags 1 " "$out/aisave/dump.txt" &&
+			grep -q "^record 2: vehicles.warthog.warthog kind 0 team -1 ai team 0 respawn 30 flags 1 " "$out/aisave/dump.txt"; then
+			echo "  ok: aisave: written as version 2 with the AI teams (Flood, the player's) and the Flood Elite's AI off"
+		else
+			fail "aisave: the file's AI settings: $(cat "$out/aisave/dump.txt")"
+		fi
+		expect aisave-load "the variant started from the panel's route" "forge: map variant \"AI Test\" applied: 3 placed, 0 skipped"
+		expect aisave-load "the Flood Elite as saved: the Flood's, its AI off" \
+			"forge: ai 0: Elite Major Plasma Rifle .* alive .* AI team flood, engine team 4, AI off, actor yes"
+		expect aisave-load "the other of the player's team, its AI on" \
+			"forge: ai 1: Elite Minor Plasma Rifle .* alive .* AI team player, engine team 0, AI on, actor yes"
 		continue
 	fi
 	if [ "$c" = smallmap ]; then
@@ -614,6 +735,17 @@ for c in $cases; do
 		expect "$c" "the budget full" "forge: budget 256/256 objects"
 		expect "$c" "one deleted" "forge: deleted Boulder"
 		expect "$c" "another placed" "forge: spawned Boulder .*budget 256/256 objects" ;;
+	fly)
+		# (the monitor flies where it looks: forward looking up climbs, looking
+		# down dives; the four "where" lines' heights)
+		heights=$(grep -a "forge: camera at" "$out/$c/run.log" | awk '{print $7}' | tr '\n' ' ')
+		set -- $heights
+		if [ $# -ge 4 ] && awk -v a="$1" -v b="$2" -v c="$3" -v d="$4" 'BEGIN { exit !(b > a + 0.5 && d < c - 0.5) }'; then
+			echo "  ok: $c: looking up climbed ($1 -> $2), looking down dived ($3 -> $4)"
+		else
+			fail "$c: the monitor did not follow its pitch (heights: $heights)"
+		fi
+		set -- ;;
 	b30)
 		expect "$c" "the beach has characters" "forge: palette characters: [1-9]"
 		expect "$c" "a Hunter given a free actor" "forge: hunter given a free actor \\([0-9a-f]{8}\\)"
@@ -656,7 +788,7 @@ for c in $cases; do
 			fail "$c: not dropped on the grid ($(tr '\n' ' ' < "$out/edit/drops.txt"))"
 		fi
 		expect "$c" "saved" "forge: map variant \"Edit Test\" saved as bloodgulch/edit_test.hmv, 2 objects"
-		if grep -aq "record 0: vehicles.warthog.warthog kind 0 team 0 respawn 45 flags 0 " "$out/edit/dump.txt"; then
+		if grep -aq "record 0: vehicles.warthog.warthog kind 0 team 0 ai team 0 respawn 45 flags 0 " "$out/edit/dump.txt"; then
 			echo "  ok: $c: the file keeps the Warthog's properties"
 		else
 			fail "$c: the file lacks the properties: $(cat "$out/edit/dump.txt")"
@@ -669,6 +801,57 @@ for c in $cases; do
 			echo "  ok: $c: the lobby's Leave went back to File Share" || fail "$c: not back at File Share"
 		grep -a "ui: screen" "$log" | tail -1 | grep -q 'pc.h3.main.screen' &&
 			echo "  ok: $c: Back went to the main menu" || fail "$c: not back at the main menu" ;;
+	aioff)
+		expect "$c" "an Elite of the Covenant's with its AI off" "forge: elite major plasma rifle: AI team covenant \(engine team 3\), AI off"
+		# (not hurt while its AI is off: the looks before ALL AI)
+		awk '/forge: player mode at/ { on = 1 } /forge: all AI on/ { exit } on' "$log" > "$out/$c/ai-off.log"
+		hurt=$(grep -a "forge: the player's unit at" "$out/$c/ai-off.log" | grep -vc "body 1.00, shield 1.00")
+		looks=$(grep -ac "forge: the player's unit at" "$out/$c/ai-off.log")
+		[ "$looks" -ge 8 ] && [ "$hurt" = 0 ] && echo "  ok: $c: never hurt while its AI is off ($looks looks)" ||
+			fail "$c: hurt $hurt times of $looks looks with its AI off"
+		# (it stood where it was put: its place the same, to a centimetre or so, before and after)
+		first=$(grep -a "forge: ai 0: " "$log" | head -1 | sed 's/.* at \([^ ]*\) \([^ ]*\) .*/\1 \2/')
+		later=$(grep -a "forge: ai 0: " "$log" | sed -n 2p | sed 's/.* at \([^ ]*\) \([^ ]*\) .*/\1 \2/')
+		if [ -n "$first" ] && [ -n "$later" ] && awk -v a="$first" -v b="$later" 'BEGIN { split(a, p); split(b, q);
+			exit !((p[1] - q[1]) ^ 2 + (p[2] - q[2]) ^ 2 < 0.01) }'; then
+			echo "  ok: $c: it stood still ($first, 9 s later $later)"
+		else
+			fail "$c: it moved with its AI off ($first, then $later)"
+		fi
+		expect "$c" "the Forge menu's ALL AI turned it on" "forge: all AI on \(1 characters\)"
+		after=$(sed -n '/forge: all AI on/,$p' "$log" | grep -a "forge: the player's unit at" | grep -c "shield 0\.[0-8]")
+		[ "$after" -ge 1 ] && echo "  ok: $c: its AI on again, it fights: the player's shield goes down" ||
+			fail "$c: its AI on again, the player was not shot" ;;
+	round)
+		expect "$c" "the three placed" "forge: objects listed: 3 objects, 1 characters in the layout"
+		expect "$c" "the Warthog wrecked (where the shove took it)" "forge: object 0: Warthog \(id 1\) destroyed at"
+		expect "$c" "the Elite dead" "forge: object 1: Elite Major Plasma Rifle \(id 2\) dead at"
+		expect "$c" "the overshield gone, still the layout's" "forge: object 2: Overshield \(id 3\) gone at"
+		expect "$c" "NEW ROUND: the engine resets the map" "map reset: the level started over"
+		expect "$c" "the layout taken as it resets" "forge: new round 1: the layout taken: 3 objects \(1 characters\)"
+		expect "$c" "and placed again" "forge: new round 1: 3 placed again, 0 skipped"
+		expect "$c" "the Warthog back whole" "forge: object 0: Warthog \(id [0-9]+\) alive"
+		expect "$c" "the Elite alive again, with its actor" "forge: ai 1: Elite Major Plasma Rifle \(id [0-9]+\) alive .* actor yes"
+		expect "$c" "the overshield back" "forge: object 2: Overshield \(id [0-9]+\) alive"
+		# (each back at its placed spot: where it is after the round within a
+		# world unit of where it was placed before)
+		before=$(grep -a "forge: object 0: Warthog" "$log" | head -1 | sed 's/.*placed at \([^ ]*\) \([^ ]*\) .*/\1 \2/')
+		after=$(grep -a "forge: object 0: Warthog" "$log" | tail -1 | sed 's/.* alive at \([^ ]*\) \([^ ]*\) .*/\1 \2/')
+		wrecked=$(grep -a "forge: object 0: Warthog .* destroyed at" "$log" | head -1 | sed 's/.* destroyed at \([^ ]*\) \([^ ]*\) .*/\1 \2/')
+		if awk -v b="$before" -v a="$after" -v w="$wrecked" 'BEGIN { split(b, p); split(a, q); split(w, r);
+			d = (p[1] - q[1]) ^ 2 + (p[2] - q[2]) ^ 2; m = (p[1] - r[1]) ^ 2 + (p[2] - r[2]) ^ 2; exit !(d < 1 && m > 4) }'; then
+			echo "  ok: $c: the Warthog wrecked at $wrecked, back at its spot $before ($after)"
+		else
+			fail "$c: the Warthog not back at its spot (placed $before, wrecked $wrecked, after $after)"
+		fi
+		if sed -n '/forge: New round/,$p' "$log" | grep -aq "forge: the player's unit at .* alive, team 0, body 1.00, shield 1.00"; then
+			echo "  ok: $c: the player respawned with the round"
+		else
+			fail "$c: no player after the round"
+		fi
+		[ "$(grep -ac "forge: monitor mode at" "$log")" -ge 2 ] && echo "  ok: $c: the monitor again after the round" ||
+			fail "$c: not the monitor after the round"
+		expect "$c" "where it flew" "forge: camera at 60.00 -100.00 1.60" ;;
 	off)
 		if grep -aq "forge:" "$log"; then
 			fail "$c: a forge line with no Forge"
@@ -680,7 +863,8 @@ done
 
 if [ -n "${HALO_TEST_SHOTS:-}" ]; then
 	mkdir -p "$HALO_TEST_SHOTS"
-	for c in $cases variants-save variants-load variants-missing variants-damaged variants-full panel-damaged packs-load; do
+	for c in $cases variants-save variants-load variants-missing variants-damaged variants-full panel-damaged packs-load \
+		aiteam-player aiteam-covenant aisave-load; do
 		for shot in "$out/$c"/shots/*.bmp; do
 			[ -f "$shot" ] && cp "$shot" "$HALO_TEST_SHOTS/$c-$(basename "$shot")"
 		done

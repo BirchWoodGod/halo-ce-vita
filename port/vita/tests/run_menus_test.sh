@@ -97,6 +97,21 @@
 #            its own camera): shown in the profile's colour, made again in
 #            RED as COLOR changes, never the swatch meanwhile, let go with the
 #            editor; with HALO_SCENE_PACKS=0 the swatch alone
+#   h3nameplate  the Halo 3 nameplate (the main menu's, the lobbies' and the
+#            pause screen's, port h3 nameplate) with HALO_TEST_PROFILE's profile
+#            and no profile chosen yet (a start): the profile's name and its
+#            colour's bar, not the system's user name in green; CUSTOMIZATION
+#            renames it and makes it RED, Circle saves: back at the main menu
+#            the nameplate says the new name on the red bar at once
+#   h3mpcustom  the Halo 3 multiplayer lobby's MAP picker with a custom map (the
+#            mod manager's test content: mygulch.map, Blood Gulch's copy under
+#            another name): after the Xbox's thirteen, MYGULCH, the rows
+#            scrolling to it, its "?" picture and description as the Xbox's list
+#            shows them; chosen, the lobby says MYGULCH and START GAME (system
+#            link) hosts the game on it (its pregame: one machine cannot start
+#            a game of one player on the Linux harness); then started again on
+#            that save with mygulch turned off: the picker lists the thirteen
+#            only and the lobby is back on Battle Creek
 #   h3damaged  a profile of a 0-byte blam.sav and one of garbage: SELECT
 #            PROFILE says each is damaged and plays neither, CUSTOMIZATION
 #            edits neither, CREATE NEW PROFILE still makes one; with
@@ -183,7 +198,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3damaged h3mods h3modspicker h3modstouch h3lan h3adhoc h3adhoccoop h3oddrows}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
 
@@ -756,6 +771,38 @@ for case in $cases; do
 			fail h3customize "the changes were not there after a restart"
 		grep -aq "menus: h3 customize: Vita Chief: no changes" "$out/h3customize_again/run.log" ||
 			fail h3customize "leaving the editor unchanged saved anyway" ;;
+	h3nameplate)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "--- h3nameplate"; echo "SKIP: no HALO_TEST_PROFILE"; continue
+		fi
+		# (the main menu at a start: the nameplate; then CUSTOMIZATION as h3customize - the name typed,
+		# COLOR right three times: RED -, Circle: saved, Circle: the main menu again, its nameplate)
+		plate_name=$(profile_fields "$HALO_TEST_PROFILE" | cut -d'|' -f1)
+		plate_color=$(profile_fields "$HALO_TEST_PROFILE" | cut -d'|' -f2)
+		plate_pad="$h3pad @00-plate-at-start:0:300 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000"
+		plate_pad="$plate_pad a wait:150:3000 a wait:150:2000 down:150:600 right:150:500 right:150:500 right:150:500"
+		plate_pad="$plate_pad b wait:150:3000 b wait:150:3000 up:150:500 up:150:500 up:150:500 up:150:500 up:150:500 wait:150:1000"
+		plate_pad="$plate_pad @01-plate-customized:0:300"
+		rm -rf "$out/h3nameplate_shots"
+		mkdir -p "$out/h3nameplate_shots"
+		profile_from=$HALO_TEST_PROFILE run h3nameplate "$menus_data" 40 "$plate_pad" HALO_MENU_STYLE=halo3 \
+			"HALO_TEST_TEXT_INPUT=Vita Chief" HALO_NET_PLAYER_NAME=user549 HALO_SCREENSHOT_DIR="$out/h3nameplate_shots"
+		check_h3 h3nameplate halo3
+		log=$out/h3nameplate/run.log
+		grep -a "menus: nameplate" "$log"
+		# (a start, no profile chosen: the profile's name and colour, its frame the colour's - 0, the
+		# green, for a profile of no colour -; never the user name)
+		frame=$((plate_color < 0 || plate_color >= 18 ? 0 : plate_color + 1))
+		grep -a "menus: nameplate:" "$log" | head -1 | grep -q "menus: nameplate: $plate_name, colour $plate_color (frame $frame)$" ||
+			fail h3nameplate "at the start the nameplate did not show $plate_name's name and colour"
+		grep -aq "menus: nameplate: user549" "$log" && fail h3nameplate "the nameplate showed the user name"
+		grep -aq "menus: h3 customize: saved Vita Chief: color 2" "$log" || fail h3nameplate "CUSTOMIZATION did not save"
+		# (after the save, at once: the new name on the red bar, frame 3)
+		grep -aq "menus: nameplate: Vita Chief, colour 2 (frame 3)$" "$log" ||
+			fail h3nameplate "the nameplate did not change to the saved name and colour"
+		grep -a "ui: screen" "$log" | tail -1 | grep -q 'pc.h3.main.screen' || fail h3nameplate "not back at the main menu"
+		[ -n "${HALO_TEST_SHOTS:-}" ] && mkdir -p "$HALO_TEST_SHOTS/h3nameplate" &&
+			cp "$out"/h3nameplate_shots/*.bmp "$HALO_TEST_SHOTS/h3nameplate/" 2>/dev/null ;;
 	h3damaged)
 		# (two damaged profiles: Broken, a 0-byte blam.sav; Garbage, 512 bytes of garbage)
 		rm -rf "$out/h3damaged_save"
@@ -977,6 +1024,47 @@ for case in $cases; do
 		grep -aq "mod manager: mygulch turned on" "$out/h3modspicker_on/run.log" || fail h3modspicker "mygulch was not turned on"
 		grep -aq "custom edition: the multiplayer level list: 13 Xbox levels, then mygulch" "$out/h3modspicker_on/data/debug.txt" ||
 			fail h3modspicker "the Xbox's map list did not offer mygulch, turned on again" ;;
+	h3mpcustom)
+		# (MULTIPLAYER: the lobby on SYSTEM LINK; down two to MAP, A: the picker; down thirteen: past the
+		# last row it scrolls to MYGULCH; A: chosen; down to START GAME, A: the profile, A to join, ...:
+		# the Xbox's map list on mygulch, A; the game type, Start: the hosted game's lobby)
+		mods_data "$out/h3mods-data"
+		mpcustom_pad="$h3mppad down:150:500 down:150:500 a wait:150:2000 @00-picker:0:300"
+		for row in $(seq 1 13); do mpcustom_pad="$mpcustom_pad down:150:400"; done
+		mpcustom_pad="$mpcustom_pad @01-picker-custom:0:300 a wait:150:2000 @02-lobby-custom:0:300 down:150:500 a wait:150:3000"
+		mpcustom_pad="$mpcustom_pad a wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:3000 start wait:150:4000 @03-pregame:0:300"
+		rm -rf "$out/h3mpcustom_shots"
+		mkdir -p "$out/h3mpcustom_shots"
+		run h3mpcustom "$out/h3mods-data" 55 "$mpcustom_pad" HALO_MENU_STYLE=halo3 HALO_SCREENSHOT_DIR="$out/h3mpcustom_shots"
+		# (again on that save, mygulch off: MULTIPLAYER, MAP's picker, B)
+		rm -rf "$out/h3mpcustom_saved"
+		cp -r "$out/h3mpcustom/save" "$out/h3mpcustom_saved"
+		save_from=$out/h3mpcustom_saved run h3mpcustom_off "$out/h3mods-data" 30 \
+			"$h3mppad down:150:500 down:150:500 a wait:150:2000 b wait:150:2000" HALO_MENU_STYLE=halo3 HALO_MAPS_DISABLED=mygulch
+		check_h3 h3mpcustom halo3
+		check_h3 h3mpcustom_off halo3
+		log=$out/h3mpcustom/run.log
+		grep -aE "menus: h3 mp|menus: h3 maps|join: the host's map" "$log" | tail -8
+		grep -aq "menus: h3 mp: the map picker: 14 maps (1 custom)" "$log" ||
+			fail h3mpcustom "the picker did not list the custom map after the thirteen"
+		grep -aq "menus: h3 maps: Mygulch (14 of 14)" "$log" || fail h3mpcustom "the rows did not scroll to MYGULCH"
+		grep -aq "menus: h3 mp: map Mygulch (a custom map: levels.test.mygulch.mygulch)" "$log" ||
+			fail h3mpcustom "choosing MYGULCH did not set the lobby's map to it"
+		grep -aq "menus: h3 mp lobby: NETWORK: SYSTEM LINK, GAME: SLAYER, MAP: MYGULCH" "$log" ||
+			fail h3mpcustom "the lobby did not say MYGULCH"
+		grep -aq "join: the host's map is levels.test.mygulch.mygulch" "$log" ||
+			fail h3mpcustom "START GAME did not host the game on mygulch"
+		grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected.pregame.connected_pregame_screen" "$log" ||
+			fail h3mpcustom "the hosted game's lobby did not open"
+		log=$out/h3mpcustom_off/run.log
+		grep -aq "menus: h3 mp: the last map used, levels.test.mygulch.mygulch, is not in the map list (off or gone)" "$log" ||
+			fail h3mpcustom "mygulch off: the lobby did not leave it"
+		grep -aq "menus: h3 mp lobby: NETWORK: SYSTEM LINK, GAME: SLAYER, MAP: BATTLE CREEK" "$log" ||
+			fail h3mpcustom "mygulch off: the lobby is not on Battle Creek"
+		grep -aq "menus: h3 mp: the map picker: 13 maps (0 custom)" "$log" ||
+			fail h3mpcustom "mygulch off: the picker still listed it"
+		[ -n "${HALO_TEST_SHOTS:-}" ] && mkdir -p "$HALO_TEST_SHOTS/h3mpcustom" &&
+			cp "$out"/h3mpcustom_shots/*.bmp "$HALO_TEST_SHOTS/h3mpcustom/" 2>/dev/null ;;
 	h3modstouch)
 		# (MOD MANAGER's row on the main menu; mygulch's row, the third; the screen's Back: icon and label)
 		mods_data "$out/h3mods-data"
@@ -989,7 +1077,7 @@ for case in $cases; do
 		grep -a "ui: screen" "$log" | tail -1 | grep -q 'pc.h3.main.screen' ||
 			fail h3modstouch "a tap on Back did not go back to the main menu" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3damaged|h3mods|h3modspicker|h3modstouch|h3lan|h3adhoc|h3adhoccoop|h3oddrows]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"

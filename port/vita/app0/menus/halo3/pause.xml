@@ -30,8 +30,28 @@ the bottom, over the game, paused. The art is this folder's own
 	<bitmap name="h3/rule">
 		<frame png="halo3/rule.png" width="128" height="2"/>
 	</bitmap>
+	<!-- (the nameplate in the profile's primary colour: frame 0 none - Halo 3's green -, then the
+	game's eighteen colours in its order, as the swatches: menu_functions.c h3_nameplate_update) -->
 	<bitmap name="h3/nameplate">
 		<frame png="halo3/nameplate.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_00.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_01.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_02.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_03.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_04.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_05.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_06.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_07.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_08.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_09.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_10.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_11.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_12.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_13.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_14.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_15.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_16.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_17.png" width="256" height="16"/>
 	</bitmap>
 	<bitmap name="h3/glyph_cross">
 		<frame png="halo3/glyph_cross.png" width="16" height="16"/>

@@ -42,12 +42,15 @@ enum
 	NUMBER_OF_FORGE_CATEGORIES
 };
 
-/* an object's properties (the properties window's rows, in its order) */
+/* an object's properties (the properties window's rows, in its order; a
+character's AI team and brain only for a character) */
 enum
 {
 	_forge_property_team = 0,
 	_forge_property_respawn,
 	_forge_property_place_at_start,
+	_forge_property_ai_team,
+	_forge_property_ai_brain,
 	NUMBER_OF_FORGE_PROPERTIES
 };
 
@@ -62,6 +65,12 @@ struct forge_properties
 	/* 0: never */
 	short respawn_seconds;
 	boolean place_at_start;
+	/* a character's: its AI team (forge_files.h FORGE_AI_TEAM_*: whom it
+	fights) and its words, and whether its brain is on */
+	boolean ai;
+	short ai_team;
+	char ai_team_name[32];
+	boolean ai_on;
 };
 
 /* what the monitor's controls ask of the flying camera this frame */
@@ -231,6 +240,31 @@ void forge_property_request(
 	short step);
 boolean forge_properties_get(
 	struct forge_properties *properties);
+
+/* (the Forge menu's NEW ROUND, Halo 3's Restart Round) the round started
+over, at the next forge_update with no menu over the game: the map's own
+objects, the players and the scores as the engine resets a map
+(main_reset_map), and the layout placed again where the editor put it (the
+session's, saved or not: nothing is written), its destroyed vehicles and
+dead characters whole again */
+void forge_new_round_request(
+	void);
+
+/* (the Forge menu's AI row) every placed character's brain flipped (all
+off if any is on, else all on), at the next forge_update; whether any is on
+(TRUE when none is placed) */
+void forge_ai_all_request(
+	void);
+boolean forge_ai_all_on(
+	void);
+
+/* (main.c, a map reset: main_reset_map) before the game's state goes, the
+layout of a Forge game taken; after it has started again, placed again
+once the player has spawned */
+void forge_map_resetting(
+	void);
+void forge_map_reset(
+	void);
 
 /* what the last thing asked from the Forge menu came to (a save, an undo,
 snapping), "" for nothing yet */

@@ -20,9 +20,10 @@ taken whole or not at all). The checks, in order:
   no empty part, no \ at either end; no path twice;
 - each record: its kind; its path (an index below the path count, of a
   group its kind takes, or none for a kind that names no object); team,
-  respawn, count, game types, variant and flags in range; every float
-  finite, positions within the world, angles within +-pi; reserved bytes
-  zero;
+  respawn, count, game types, variant and flags in range (version 2's AI
+  team and brain flag only on a character's record, the team one of
+  FORGE_AI_TEAM_*; both zero in version 1); every float finite, positions
+  within the world, angles within +-pi; reserved bytes zero;
 - the meta: four texts, each valid UTF-8 within its room with no control
   character, the title not empty, the date "YYYY-MM-DD HH:MM" or empty,
   and nothing after them.
@@ -483,9 +484,11 @@ static int forge_file_finite(
 
 static int forge_file_record_check(
 	struct forge_file_layout const *layout,
+	int version,
 	struct forge_file_record const *record)
 {
 	int index;
+	int character;
 
 	if (record->kind >= NUMBER_OF_FORGE_RECORD_KINDS)
 		return 0;
@@ -509,7 +512,16 @@ static int forge_file_record_check(
 		return 0;
 	}
 	if ((record->game_types & ~FORGE_FILE_GAME_TYPES_MASK) || record->variant > FORGE_FILE_MAXIMUM_VARIANT ||
-		(record->flags & ~FORGE_RECORD_FLAGS_KNOWN))
+		(record->flags & ~(version >= 2 ? FORGE_RECORD_FLAGS_KNOWN : FORGE_RECORD_FLAGS_VERSION_1)))
+	{
+		return 0;
+	}
+	/* (version 2's AI settings: a character's only, its team one of the
+	known; none in version 1) */
+	character = forge_file_kind_has_object(record->kind) &&
+		layout->paths[record->path_index].group_tag == FORGE_GROUP_ACTOR_VARIANT;
+	if (version < 2 ? record->ai_team != 0 :
+		record->ai_team >= NUMBER_OF_FORGE_AI_TEAMS || (!character && (record->ai_team || (record->flags & FORGE_RECORD_AI_OFF))))
 	{
 		return 0;
 	}
@@ -536,6 +548,21 @@ static int forge_file_meta_terminated(
 		memchr(layout->map_name, 0, sizeof(layout->map_name));
 }
 
+int forge_file_layout_version(
+	struct forge_file_layout const *layout)
+{
+	int index;
+
+	if (layout->version)
+		return layout->version;
+	for (index = 0; index < layout->record_count && index < FORGE_FILE_MAXIMUM_RECORDS; index++)
+	{
+		if (layout->records[index].ai_team || (layout->records[index].flags & FORGE_RECORD_AI_OFF))
+			return 2;
+	}
+	return FORGE_FILE_FIRST_VERSION;
+}
+
 int forge_file_layout_check(
 	struct forge_file_layout const *layout,
 	char const *expected_map)
@@ -543,9 +570,12 @@ int forge_file_layout_check(
 	int index;
 	int other;
 	int netgame = 0;
+	int version;
 
 	if (!layout || !forge_file_meta_terminated(layout))
 		return _forge_file_bad_meta;
+	if (layout->version && (layout->version < FORGE_FILE_FIRST_VERSION || layout->version > FORGE_FILE_VERSION))
+		return _forge_file_bad_version;
 	if (layout->flags & ~FORGE_FILE_FLAGS_KNOWN)
 		return _forge_file_bad_flags;
 	if (!forge_file_map_name_valid(layout->map_name))
@@ -581,9 +611,10 @@ int forge_file_layout_check(
 				return _forge_file_duplicate_path;
 		}
 	}
+	version = forge_file_layout_version(layout);
 	for (index = 0; index < layout->record_count; index++)
 	{
-		if (!forge_file_record_check(layout, &layout->records[index]))
+		if (!forge_file_record_check(layout, version, &layout->records[index]))
 			return _forge_file_bad_record;
 		if (layout->records[index].kind != _forge_record_object)
 			netgame = 1;
@@ -647,8 +678,9 @@ static int forge_file_decode_checked(
 	reader.offset = 4;
 	version = read_u16(&reader);
 	header_size = read_u16(&reader);
-	if (version != FORGE_FILE_VERSION)
+	if (version < FORGE_FILE_FIRST_VERSION || version > FORGE_FILE_VERSION)
 		return forge_file_refused(_forge_file_bad_version, why, why_size, NULL);
+	layout->version = (unsigned short)version;
 	if (header_size != FORGE_FILE_HEADER_SIZE)
 		return forge_file_refused(_forge_file_bad_header_size, why, why_size, NULL);
 	layout->flags = read_u32(&reader);
@@ -768,6 +800,8 @@ static int forge_file_decode_checked(
 		record->game_types = (unsigned short)read_u16(&reader);
 		record->variant = (unsigned char)read_u8(&reader);
 		record->flags = (unsigned char)read_u8(&reader);
+		/* (version 1's first reserved byte: checked with the record) */
+		record->ai_team = (unsigned char)read_u8(&reader);
 		for (reserved = 0; reserved < FORGE_FILE_RECORD_RESERVED_SIZE; reserved++)
 		{
 			if (read_u8(&reader))
@@ -869,7 +903,7 @@ int forge_file_encode(
 	writer.failed = 0;
 	/* the header, its payload size and checksum written last */
 	write_bytes(&writer, 'H' | ('F' << 8) | ('R' << 16) | ((unsigned int)'G' << 24), 4);
-	write_bytes(&writer, FORGE_FILE_VERSION, 2);
+	write_bytes(&writer, (unsigned int)forge_file_layout_version(layout), 2);
 	write_bytes(&writer, FORGE_FILE_HEADER_SIZE, 2);
 	write_bytes(&writer, layout->flags, 4);
 	for (index = 0; index < FORGE_FILE_MAP_NAME_SIZE; index++)
@@ -919,6 +953,7 @@ int forge_file_encode(
 		write_bytes(&writer, record->game_types, 2);
 		write_bytes(&writer, record->variant, 1);
 		write_bytes(&writer, record->flags, 1);
+		write_bytes(&writer, record->ai_team, 1);
 		for (axis = 0; axis < FORGE_FILE_RECORD_RESERVED_SIZE; axis++)
 			write_bytes(&writer, 0, 1);
 	}

@@ -276,6 +276,10 @@ enum
 	_function_h3_adhoc_coop,
 	_function_h3_adhoc_join,
 	_function_h3_adhoc_cancel,
+	_function_forge_new_round,
+	_function_forge_all_ai,
+	_function_h3_map_page_up,
+	_function_h3_map_page_down,
 };
 
 /* in port_game_data_input_names' order */
@@ -519,40 +523,124 @@ static void text_show(struct widget_instance *widget, char const *text)
 	memcpy(widget->parameters.text_box.text, characters, length * sizeof(wchar_t));
 }
 
-/* (the Halo 3 menus' nameplate, port h3 nameplate) the first local player's
-active profile's name; with none yet (a first start), the player's name
-(network.player_name: on the Vita its user name), else "Player". Not the
-game's "get active plyr profile name", which asserts without a profile */
-static void h3_player_name(char *name, int size)
+/* (the Halo 3 menus' nameplate, port h3 nameplate: the main menu's, the
+lobbies', the pause screen's) the profile it shows: the first local
+player's active one; with none active yet (the main menu after a start),
+the one Customize saved or Select Profile chose this session, else the one
+last used (the game's z:\lastprof.txt), else the first there is. Its name
+and primary colour are read once and kept (reading a profile is a file's
+read), read again when the profile shown changes, when Customize saves
+(h3_nameplate_changed) and every few seconds */
+#define H3_NAMEPLATE_READ_MILLISECONDS 4000
+/* (the profiles looked through for the first: the profile screens' most) */
+#define H3_NAMEPLATE_PROFILES 100
+
+static struct
 {
-	long profile_index = player_ui_get_active_player_profile_index(0);
-	struct player_profile profile;
+	/* the profile Customize saved or Select Profile chose (NONE) */
+	long chosen;
+	/* what was read: of which profile (NONE: none could be), with the
+	active one then, when; its name (UTF-8) and colour (NONE: none) */
+	boolean read;
+	boolean changed;
+	long shown;
+	long active;
+	unsigned long read_at;
+	char name[64];
+	short color;
+	char said[96];
+} h3_plate = { NONE, FALSE, FALSE, NONE, NONE, 0, "", NONE, "" };
+
+/* a profile's name as UTF-8 */
+static void h3_profile_utf8(char *name, int size, struct player_profile const *profile)
+{
 	int length = 0, index;
 
-	name[0] = 0;
-	if (profile_index != NONE && player_profile_get(profile_index, &profile))
+	for (index = 0; index < MAXIMUM_PLAYER_PROFILE_NAME_LENGTH && profile->player_name[index] && length < size - 4; index++)
 	{
-		for (index = 0; index < MAXIMUM_PLAYER_PROFILE_NAME_LENGTH && profile.player_name[index] &&
-			length < size - 4; index++)
-		{
-			unsigned long code = (unsigned short)profile.player_name[index];
+		unsigned long code = (unsigned short)profile->player_name[index];
 
-			if (code < 0x80)
-				name[length++] = (char)code;
-			else if (code < 0x800)
-			{
-				name[length++] = (char)(0xC0 | (code >> 6));
-				name[length++] = (char)(0x80 | (code & 0x3F));
-			}
-			else
-			{
-				name[length++] = (char)(0xE0 | (code >> 12));
-				name[length++] = (char)(0x80 | ((code >> 6) & 0x3F));
-				name[length++] = (char)(0x80 | (code & 0x3F));
-			}
+		if (code < 0x80)
+			name[length++] = (char)code;
+		else if (code < 0x800)
+		{
+			name[length++] = (char)(0xC0 | (code >> 6));
+			name[length++] = (char)(0x80 | (code & 0x3F));
 		}
-		name[length] = 0;
+		else
+		{
+			name[length++] = (char)(0xE0 | (code >> 12));
+			name[length++] = (char)(0x80 | ((code >> 6) & 0x3F));
+			name[length++] = (char)(0x80 | (code & 0x3F));
+		}
 	}
+	name[length] = 0;
+}
+
+/* (Customize saved a profile, Select Profile chose one) the nameplate shows
+it, read again at once */
+static void h3_nameplate_changed(long profile_index)
+{
+	if (profile_index != NONE)
+		h3_plate.chosen = profile_index;
+	h3_plate.changed = TRUE;
+}
+
+static void h3_nameplate_read(void)
+{
+	long active = player_ui_get_active_player_profile_index(0);
+	unsigned long now = system_milliseconds();
+	long candidates[4];
+	short index;
+
+	if (h3_plate.read && !h3_plate.changed && active == h3_plate.active &&
+		now - h3_plate.read_at < H3_NAMEPLATE_READ_MILLISECONDS)
+	{
+		return;
+	}
+	h3_plate.read = TRUE;
+	h3_plate.changed = FALSE;
+	h3_plate.active = active;
+	h3_plate.read_at = now;
+	h3_plate.shown = NONE;
+	h3_plate.name[0] = 0;
+	h3_plate.color = NONE;
+	candidates[0] = active;
+	candidates[1] = h3_plate.chosen;
+	candidates[2] = active == NONE && h3_plate.chosen == NONE ? player_ui_get_player1_last_used_profile_index() : NONE;
+	candidates[3] = NONE;
+	if (candidates[0] == NONE && candidates[1] == NONE && candidates[2] == NONE)
+	{
+		long first[H3_NAMEPLATE_PROFILES];
+		word count = H3_NAMEPLATE_PROFILES;
+
+		player_profiles_enumerate_available_to_local_player_index(0, &count, first, FALSE);
+		if (count > 0)
+			candidates[3] = first[0];
+	}
+	for (index = 0; index < (short)NUMBEROF(candidates); index++)
+	{
+		struct player_profile profile;
+
+		if (candidates[index] == NONE || !player_profile_get(candidates[index], &profile))
+			continue;
+		h3_profile_utf8(h3_plate.name, (int)sizeof(h3_plate.name), &profile);
+		if (!h3_plate.name[0])
+			continue;
+		h3_plate.shown = candidates[index];
+		h3_plate.color = profile.primary_color_index;
+		break;
+	}
+}
+
+/* the name the nameplate shows: its profile's; with none (a first start),
+the player's name (network.player_name: on the Vita its user name), else
+"Player". Not the game's "get active plyr profile name", which asserts
+without a profile */
+static void h3_player_name(char *name, int size)
+{
+	h3_nameplate_read();
+	snprintf(name, (size_t)size, "%s", h3_plate.name);
 	if (!name[0])
 		snprintf(name, (size_t)size, "%s", getenv("HALO_NET_PLAYER_NAME") && getenv("HALO_NET_PLAYER_NAME")[0] ?
 			getenv("HALO_NET_PLAYER_NAME") : "Player");
@@ -561,9 +649,23 @@ static void h3_player_name(char *name, int size)
 static void h3_nameplate_update(struct widget_instance *widget)
 {
 	char name[64];
+	char said[96];
+	short frame;
 
 	h3_player_name(name, sizeof(name));
+	/* (the bar's frame: 0 Halo 3's green for none, then the game's colours
+	in its order, as the swatches) */
+	frame = (short)(h3_plate.color < 0 || h3_plate.color >= 18 ? 0 : h3_plate.color + 1);
 	text_show(widget, name);
+	if (widget)
+		widget->animation.current_frame_index = frame;
+	snprintf(said, sizeof(said), "%s, colour %d (frame %d)%s", name, h3_plate.color, frame,
+		h3_plate.shown == NONE ? ", no profile" : h3_plate.shown == h3_plate.active ? ", the active profile" : "");
+	if (strcmp(said, h3_plate.said))
+	{
+		snprintf(h3_plate.said, sizeof(h3_plate.said), "%s", said);
+		platform_log("menus: nameplate: %s", said);
+	}
 }
 
 /* (the Halo 3 main menu's live servers, port h3 servers) up to three rows
@@ -1807,6 +1909,8 @@ static void h3_forge_title_update(struct widget_instance *widget)
 		text_show(named(screen, "redo"), text);
 		snprintf(text, sizeof(text), "%s: %s", T("SNAP"), forge_snap_enabled() ? T("ON") : T("OFF"));
 		text_show(named(screen, "snap"), text);
+		snprintf(text, sizeof(text), "%s: %s", T("ALL AI"), forge_ai_all_on() ? T("ON") : T("OFF"));
+		text_show(named(screen, "allai"), text);
 		forge_menu_status(status, sizeof(status));
 		if (status[0])
 			snprintf(text, sizeof(text), "%s", status);
@@ -1932,6 +2036,12 @@ enum
 #define H3_MAP_COUNT 13
 /* (the mp_map_grafix frame of a map that is not the Xbox's: its "?") */
 #define H3_MAP_OTHER_PICTURE 13
+/* the map picker: thirteen rows that scroll over the Xbox's maps and then
+the custom ones the mod manager has on (custom_edition_maps.h), each
+level's path kept */
+#define H3_MAP_ROWS 13
+#define H3_MAXIMUM_MAPS (H3_MAP_COUNT + CUSTOM_EDITION_MAPS_MAXIMUM)
+#define H3_MAP_PATH_SIZE 160
 #define H3_GAMETYPE_ROWS 12
 #define H3_MAXIMUM_GAMETYPES 100
 
@@ -1969,7 +2079,19 @@ static struct
 	struct browser_view gametype_view;
 	short gametype_cursor;
 	short gametype_page;
+	/* the map picker's maps (the Xbox list's levels: the Xbox's, then the
+	custom ones turned on), each one's path, display index (its picture's
+	frame and description's string, custom_edition_maps.h) and name; its
+	rows (they scroll) */
+	short map_count;
+	char map_paths[H3_MAXIMUM_MAPS][H3_MAP_PATH_SIZE];
+	short map_displays[H3_MAXIMUM_MAPS];
+	char map_names[H3_MAXIMUM_MAPS][48];
+	struct browser_view map_view;
+	short map_cursor;
+	short map_page;
 	char said[192];
+	char map_said[96];
 } h3_mp;
 
 static char const *h3_network_name(short network)
@@ -2101,10 +2223,21 @@ static void h3_mp_initialize(void)
 
 static char const *h3_mp_map_name(void)
 {
+	static char name[48];
 	char const *slash;
+	short display;
+	wchar_t const *custom;
 
 	if (h3_mp.map_index != NONE)
 		return h3_map_names[h3_mp.map_index];
+	/* (a custom map: its own name, as the Xbox's list names it) */
+	display = custom_edition_maps_display_index(h3_mp.map_other);
+	if (display != NONE && (custom = custom_edition_maps_name(display)) != NULL)
+	{
+		h3_utf8(name, sizeof(name), custom);
+		if (name[0])
+			return name;
+	}
 	slash = strrchr(h3_mp.map_other, '\\');
 	return slash ? slash + 1 : h3_mp.map_other;
 }
@@ -2168,7 +2301,14 @@ static void h3_mp_lobby_update(struct widget_instance *widget)
 		}
 	}
 	if ((found = named(screen, "map_picture")) != NULL)
-		found->animation.current_frame_index = h3_mp.map_index != NONE ? h3_mp.map_index : H3_MAP_OTHER_PICTURE;
+	{
+		/* (the game's own level pictures: a custom map's display index
+		draws its own picture, else the "?") */
+		short display = h3_mp.map_index == NONE ? custom_edition_maps_display_index(h3_mp.map_other) : NONE;
+
+		found->animation.current_frame_index = h3_mp.map_index != NONE ? h3_mp.map_index :
+			display != NONE ? display : H3_MAP_OTHER_PICTURE;
+	}
 	/* (Halo 3's: "Slayer on Valhalla") */
 	snprintf(text, sizeof(text), T("%s on %s"), h3_mp_gametype_name(), h3_mp_map_name());
 	text_show(named(screen, "caption"), text);
@@ -2247,14 +2387,135 @@ static void h3_mp_gametype_set(struct widget_instance *widget)
 	platform_log("menus: h3 mp: game type %s", h3_mp.gametype_names[index]);
 }
 
+/* (port h3 map focus: the map picker opened) its maps read as the Xbox's
+level list reads them: its thirteen, then the custom multiplayer maps in
+the maps folder that the mod manager has on (custom_edition_maps.c looks
+again), each with its name, picture and description; the rows on the map
+chosen */
+static void h3_mp_maps_read(void)
+{
+	char *stock[H3_MAP_COUNT];
+	char **levels;
+	short count = 0;
+	short index;
+
+	for (index = 0; index < H3_MAP_COUNT; index++)
+		stock[index] = (char *)h3_map_paths[index];
+	levels = custom_edition_maps_level_list(stock, H3_MAP_COUNT, &count);
+	h3_mp.map_count = 0;
+	for (index = 0; levels && index < count && index < H3_MAXIMUM_MAPS; index++)
+	{
+		short slot = h3_mp.map_count;
+		wchar_t const *name;
+
+		if (!levels[index] || strlen(levels[index]) >= H3_MAP_PATH_SIZE)
+			continue;
+		snprintf(h3_mp.map_paths[slot], sizeof(h3_mp.map_paths[slot]), "%s", levels[index]);
+		h3_mp.map_displays[slot] = custom_edition_maps_level_display_index(index);
+		h3_mp.map_names[slot][0] = 0;
+		if (index < H3_MAP_COUNT)
+			snprintf(h3_mp.map_names[slot], sizeof(h3_mp.map_names[slot]), "%s", T(h3_map_names[index]));
+		else if ((name = custom_edition_maps_name(h3_mp.map_displays[slot])) != NULL)
+			h3_utf8(h3_mp.map_names[slot], sizeof(h3_mp.map_names[slot]), name);
+		if (!h3_mp.map_names[slot][0])
+		{
+			char const *slash = strrchr(levels[index], '\\');
+
+			snprintf(h3_mp.map_names[slot], sizeof(h3_mp.map_names[slot]), "%s", slash ? slash + 1 : levels[index]);
+		}
+		h3_mp.map_count++;
+	}
+	/* (the rows on the map chosen: the Xbox's, else a custom one by path) */
+	h3_mp.map_cursor = 0;
+	for (index = 0; index < h3_mp.map_count; index++)
+	{
+		if ((h3_mp.map_index != NONE && index == h3_mp.map_index) ||
+			(h3_mp.map_index == NONE && h3_mp.map_other[0] && !_stricmp(h3_mp.map_paths[index], h3_mp.map_other)))
+		{
+			h3_mp.map_cursor = index;
+		}
+	}
+	browser_view_reset(&h3_mp.map_view);
+	h3_mp.map_page = 0;
+	h3_mp.map_said[0] = 0;
+	platform_log("menus: h3 mp: the map picker: %d maps (%d custom)", h3_mp.map_count,
+		MAX(h3_mp.map_count - H3_MAP_COUNT, 0));
+}
+
+/* (port h3 maps) the map picker's rows (item_0 to item_12): the maps,
+scrolling past the thirteen as the game types do (a step past the first or
+last row, the triggers a page); the focused one's picture (the game's own
+level pictures, which draw a custom map's own, else its "?") and
+description */
+static void h3_mp_maps_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *child, *focus = NULL, *found;
+	long index, focused_row = NONE, target;
+
+	for (index = 0, child = list->child; child; child = child->next, index++)
+	{
+		if (child == list->focused_child)
+			focused_row = index;
+	}
+	target = browser_view_follow(&h3_mp.map_view, H3_MAP_ROWS, h3_mp.map_count, (int)focused_row, h3_mp.map_cursor,
+		h3_mp.map_page);
+	h3_mp.map_page = 0;
+	h3_mp.map_cursor = (short)target;
+	for (index = 0, child = list->child; child; child = child->next, index++)
+	{
+		boolean shown = index < h3_mp.map_view.visible;
+		char text[64];
+
+		widget_instance_set_visibility_recursive(child, shown);
+		child->disabled = !shown;
+		if (!shown)
+			continue;
+		snprintf(text, sizeof(text), "%s", h3_mp.map_names[h3_mp.map_view.offset + index]);
+		h3_capitals(text);
+		text_show(child, text);
+		if (index == h3_mp.map_view.row)
+			focus = child;
+	}
+	if (focus && focus != list->focused_child)
+		ui_widget_port_give_focus(list, focus);
+	if (target >= 0 && target < h3_mp.map_count)
+	{
+		char said[96];
+
+		if ((found = named(screen, "map_picture")) != NULL)
+			found->animation.current_frame_index = h3_mp.map_displays[target];
+		string_show(named(screen, "map_text"), h3_mp.map_displays[target]);
+		snprintf(said, sizeof(said), "%s (%ld of %d)", h3_mp.map_names[target], target + 1, h3_mp.map_count);
+		if (strcmp(said, h3_mp.map_said))
+		{
+			snprintf(h3_mp.map_said, sizeof(h3_mp.map_said), "%s", said);
+			platform_log("menus: h3 maps: %s", said);
+		}
+	}
+}
+
+/* (port h3 map set) the picker's choice: the map the Xbox's level list
+opens on, as its own choice keeps it (a custom map by its level's path:
+START GAME, Create Game and the map's sharing take it from there) */
 static void h3_mp_map_set(struct widget_instance *widget)
 {
-	short index = (short)PIN(h3_child_index(widget), 0, H3_MAP_COUNT - 1);
+	long index = h3_mp.map_view.offset + h3_child_index(widget);
 
-	h3_mp.map_index = index;
-	h3_mp.map_other[0] = 0;
-	saved_game_file_remember_last_used_multiplayer_map(h3_map_paths[index]);
-	platform_log("menus: h3 mp: map %s", h3_map_names[index]);
+	if (index < 0 || index >= h3_mp.map_count)
+		return;
+	if (index < H3_MAP_COUNT)
+	{
+		h3_mp.map_index = (short)index;
+		h3_mp.map_other[0] = 0;
+		saved_game_file_remember_last_used_multiplayer_map(h3_map_paths[index]);
+		platform_log("menus: h3 mp: map %s", h3_map_names[index]);
+		return;
+	}
+	h3_mp.map_index = NONE;
+	snprintf(h3_mp.map_other, sizeof(h3_mp.map_other), "%s", h3_mp.map_paths[index]);
+	saved_game_file_remember_last_used_multiplayer_map(h3_mp.map_paths[index]);
+	platform_log("menus: h3 mp: map %s (a custom map: %s)", h3_mp.map_names[index], h3_mp.map_paths[index]);
 }
 
 /* (port h3 network status: the lobbies' line under NETWORK) the connection's
@@ -2670,6 +2931,7 @@ static boolean h3_profile_play(short item, short controller_index)
 	}
 	player_ui_set_single_player_local_player_controller(0, (short)(controller_index != NONE ? controller_index : 0));
 	player_ui_set_active_player_profile(0, profile_index, &profile);
+	h3_nameplate_changed(profile_index);
 	platform_log("menus: h3 profiles: chose %s (campaign)", name);
 	return TRUE;
 }
@@ -3238,6 +3500,8 @@ static void h3_custom_save(void)
 	if (h3_profile_same(player_ui_get_active_player_profile_index(0), h3_custom.index))
 		player_ui_set_active_player_profile(0, player_ui_get_active_player_profile_index(0), &saved);
 	h3_profiles.focus_index = h3_custom.index;
+	/* (the nameplate shows it, its new name and colour, at once) */
+	h3_nameplate_changed(h3_custom.index);
 	platform_log("menus: h3 customize: saved %s: color %d, stick %d, buttons %d, look %d, invert %d, flight %d, "
 		"autocenter %d, vibration %s", name, saved.primary_color_index, saved.controller_settings.joystick_preset,
 		saved.controller_settings.button_preset, saved.controller_settings.look_sensitivity,
@@ -4508,7 +4772,7 @@ static void h3_forge_properties_update(struct widget_instance *list)
 	struct widget_instance *screen = screen_of(list);
 	struct widget_instance *child;
 	struct forge_properties properties;
-	char text[96];
+	char text[160];
 	short row;
 	static char said[160];
 
@@ -4532,15 +4796,32 @@ static void h3_forge_properties_update(struct widget_instance *list)
 			else
 				snprintf(text, sizeof(text), "%s: %s", T("RESPAWN"), T("NEVER"));
 			break;
-		default:
+		case _forge_property_place_at_start:
 			snprintf(text, sizeof(text), "%s: %s", T("PLACE AT START"), properties.place_at_start ? T("YES") : T("NO"));
 			break;
+		case _forge_property_ai_team:
+			snprintf(text, sizeof(text), "%s: %s", T("AI TEAM"), properties.ai_team_name);
+			break;
+		default:
+			snprintf(text, sizeof(text), "%s: %s", T("AI"), properties.ai_on ? T("ON") : T("OFF"));
+			break;
+		}
+		/* (a character's own rows: hidden for any other object) */
+		if (row >= _forge_property_ai_team)
+		{
+			widget_instance_set_visibility_recursive(child, properties.ai);
+			child->disabled = !properties.ai;
 		}
 		text_show(child, text);
 		child->animation.current_frame_index = child == list->focused_child ? 1 : 0;
 	}
-	snprintf(text, sizeof(text), "%s: team %d, respawn %d, %s", properties.name, properties.team, properties.respawn_seconds,
-		properties.place_at_start ? "at start" : "not at start");
+	if (properties.ai)
+		snprintf(text, sizeof(text), "%s: team %d, respawn %d, %s, AI team %d, AI %s", properties.name, properties.team,
+			properties.respawn_seconds, properties.place_at_start ? "at start" : "not at start", properties.ai_team,
+			properties.ai_on ? "on" : "off");
+	else
+		snprintf(text, sizeof(text), "%s: team %d, respawn %d, %s", properties.name, properties.team,
+			properties.respawn_seconds, properties.place_at_start ? "at start" : "not at start");
 	if (strcmp(text, said))
 	{
 		snprintf(said, sizeof(said), "%s", text);
@@ -5490,7 +5771,11 @@ boolean pc_menu_event_function_invoke(
 		h3_mp_map_set(widget);
 		return TRUE;
 	case _function_h3_map_focus:
-		h3_focus_child(widget, h3_mp.map_index != NONE ? h3_mp.map_index : 0);
+		h3_mp_maps_read();
+		return TRUE;
+	case _function_h3_map_page_up:
+	case _function_h3_map_page_down:
+		h3_mp.map_page = function_index == _function_h3_map_page_up ? -1 : 1;
 		return TRUE;
 	case _function_h3_gametype_set:
 		h3_mp_gametype_set(widget);
@@ -5590,6 +5875,15 @@ boolean pc_menu_event_function_invoke(
 		return TRUE;
 	case _function_forge_close:
 		forge_menus_close_request();
+		return TRUE;
+	case _function_forge_new_round:
+		/* (done once the menu has closed: the engine resets a map only in
+		a running game) */
+		platform_log("menus: forge: new round");
+		forge_new_round_request();
+		return TRUE;
+	case _function_forge_all_ai:
+		forge_ai_all_request();
 		return TRUE;
 	case _function_forge_pack_toggle:
 	{
@@ -5779,7 +6073,8 @@ void pc_menu_game_data_function_invoke(
 		h3_pick_update(widget, NUMBER_OF_H3_NETWORKS, "network_picture", "network_text");
 		break;
 	case _input_h3_maps:
-		h3_pick_update(widget, H3_MAP_COUNT, "map_picture", "map_text");
+		if (widget->type == _ui_widget_type_column_list)
+			h3_mp_maps_update(widget);
 		break;
 	case _input_h3_gametypes:
 		if (widget->type == _ui_widget_type_column_list)

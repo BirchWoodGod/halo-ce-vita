@@ -375,6 +375,7 @@ static char const *const port_function_names[] =
 	"port h3 mods delete", "port h3 mods page up", "port h3 mods page down",
 	"port h3 lan init", "port h3 lan dispose", "port h3 lan refresh",
 	"port h3 adhoc host", "port h3 adhoc browse", "port h3 adhoc coop", "port h3 adhoc join", "port h3 adhoc cancel",
+	"port forge new round", "port forge all ai", "port h3 map page up", "port h3 map page down",
 };
 
 /* the port's game data functions (menu_functions.c), from
