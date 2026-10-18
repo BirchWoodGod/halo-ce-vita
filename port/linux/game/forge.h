@@ -28,7 +28,7 @@ enum
 	/* a readable name's bytes (UTF-8) */
 	FORGE_NAME_SIZE = 64,
 	/* the scene packs Forge offers (forge.c forge_packs) */
-	FORGE_PACK_COUNT = 3,
+	FORGE_PACK_COUNT = 4,
 };
 
 /* the object browser's categories, in its order */

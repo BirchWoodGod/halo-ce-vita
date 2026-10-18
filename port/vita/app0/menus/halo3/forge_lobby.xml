@@ -185,8 +185,10 @@ vehicles, the dropships, the Covenant AI), built in the background while the lob
 	</widget>
 
 	<!-- EXTRA OBJECTS: the scene packs Forge brings (port forge packs: each on or off, A to change;
-	built in the background from the player's own campaign maps while the lobby is open, its
-	progress and what stops one at the right) -->
+	built in the background from the player's own campaign maps - the flyable Pelican from the
+	player's Halo Custom Edition map Extinction - while the lobby is open, its progress and what
+	stops one at the right: "Unavailable: extinction.map (Halo Custom Edition) is not in the maps
+	folder") -->
 	<widget name="h3/forge/packs/title" type="text" left="52" top="46" width="400" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/forge_text" string_index="8"/>
 	<widget name="h3/forge/packs/item_0" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
 		<on event="a" run="port forge pack toggle"/>
@@ -197,11 +199,15 @@ vehicles, the dropships, the Covenant AI), built in the background while the lob
 	<widget name="h3/forge/packs/item_2" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
 		<on event="a" run="port forge pack toggle"/>
 	</widget>
+	<widget name="h3/forge/packs/item_3" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a" run="port forge pack toggle"/>
+	</widget>
 	<widget name="h3/forge/packs/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<data input="port forge packs"/>
 		<child widget="h3/forge/packs/item_0" y="0"/>
 		<child widget="h3/forge/packs/item_1" y="19"/>
 		<child widget="h3/forge/packs/item_2" y="38"/>
+		<child widget="h3/forge/packs/item_3" y="57"/>
 	</widget>
 	<widget name="h3/forge/packs/info_name" type="text" left="320" top="84" width="266" height="20" font="h3/font_item" color="#FFF2F6FA" text_y="1"/>
 	<widget name="h3/forge/packs/info_text" type="text" left="320" top="106" width="266" height="90" font="h3/font_small" color="#FFCFD9E3"/>

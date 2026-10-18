@@ -18,6 +18,14 @@ usage:
   scene_pack_test check <pack> [<first tag index>]
       loaded, given tag indices (from 5000 by default); its tags listed
       with -v
+  scene_pack_test cefuzz <recipe> <maps folder> <iterations> [<seed>]
+      a recipe of a Custom Edition map (scene_pack_ce.c) built from a
+      damaged map, again and again: the map's bytes changed as the builder
+      reads them (words of the roots of the pack's tags, of its tag index,
+      bytes of the model data, pixels and samples a clean build read, of the
+      tag data and of the header), never on disk; each build refused or, when
+      it makes a pack, the pack refused or loaded clean twice; never a crash
+      or a hang. Exits 1 on any failure.
   scene_pack_test fuzz <pack> <iterations> [<seed>]
       damaged copies (cut short, grown, bytes changed with and without their
       CRCs made right, pointers and counts made wrong, the header's fields),
@@ -99,12 +107,15 @@ struct scene_pack_build_result
 	unsigned long data_bytes;
 	unsigned long file_bytes;
 	unsigned long long source_bytes;
+	long volatile progress;
 	unsigned long long microseconds;
 	char why[SCENE_PACK_WHY_SIZE];
 };
 
 unsigned char scene_pack_recipe_parse(char const *text, long length, struct scene_pack_recipe *recipe, char *why,
 	long why_size);
+unsigned long scene_pack_recipe_size(void);
+char const *scene_pack_recipe_custom_edition_map(struct scene_pack_recipe const *recipe, short index);
 unsigned char scene_pack_build(struct scene_pack_recipe const *recipe, char const *maps_directory,
 	char const *pack_path, void *scratch, unsigned long scratch_size, int volatile const *cancel,
 	struct scene_pack_build_result *result);
@@ -401,7 +412,8 @@ static int command_build(char const *recipe_path, char const *maps, char const *
 {
 	long size;
 	unsigned char *text = file_read(recipe_path, &size);
-	struct scene_pack_recipe *recipe = calloc(1, sizeof(*recipe));
+	/* (the game's recipe, of which this knows the fields before the hash) */
+	struct scene_pack_recipe *recipe = calloc(1, scene_pack_recipe_size());
 	struct scene_pack_build_result result;
 	struct scene_pack_info info;
 	char why[256];
@@ -706,6 +718,296 @@ static int command_fuzz(char const *path, long iterations, unsigned long seed)
 	return failures ? 1 : 0;
 }
 
+/* ---------- damaged Custom Edition sources */
+
+#include "../port/linux/game/cache_file_formats.h"
+
+extern void (*scene_pack_ce_read_hook)(unsigned long offset, void *buffer, unsigned long size);
+
+enum
+{
+	MAXIMUM_SOURCE_MUTATIONS = 4,
+	MAXIMUM_SOURCE_READS = 4096,
+};
+
+/* the source map's bytes changed as the builder reads them (each at a file
+offset), and what a clean build read of it */
+static struct
+{
+	int count;
+	unsigned long offsets[MAXIMUM_SOURCE_MUTATIONS];
+	unsigned long values[MAXIMUM_SOURCE_MUTATIONS];
+	int widths[MAXIMUM_SOURCE_MUTATIONS];
+	/* (the clean build's reads: recording) */
+	int recording;
+	long read_count;
+	unsigned long read_offsets[MAXIMUM_SOURCE_READS];
+	unsigned long read_sizes[MAXIMUM_SOURCE_READS];
+} source_damage;
+
+static void source_damage_hook(unsigned long offset, void *buffer, unsigned long size)
+{
+	int index;
+
+	if (source_damage.recording && source_damage.read_count < MAXIMUM_SOURCE_READS)
+	{
+		source_damage.read_offsets[source_damage.read_count] = offset;
+		source_damage.read_sizes[source_damage.read_count] = size;
+		source_damage.read_count++;
+	}
+	for (index = 0; index < source_damage.count; index++)
+	{
+		unsigned long at = source_damage.offsets[index];
+		int byte;
+
+		for (byte = 0; byte < source_damage.widths[index]; byte++)
+		{
+			if (at + byte >= offset && at + byte - offset < size)
+				((unsigned char *)buffer)[at + byte - offset] = (unsigned char)(source_damage.values[index] >> (8 * byte));
+		}
+	}
+}
+
+struct source_file
+{
+	FILE *file;
+	uint32_t size;
+};
+
+static int source_file_read(void *context, uint32_t offset, uint32_t size, void *buffer)
+{
+	struct source_file *source = context;
+
+	return offset <= source->size && size <= source->size - offset && !fseek(source->file, (long)offset, SEEK_SET) &&
+		fread(buffer, 1, size, source->file) == size;
+}
+
+/* the file offsets of the roots of the tags of a pack's (by name) in the
+source map's tag data: how many */
+static long source_roots(char const *map_path, void *tags, unsigned long *roots, long most,
+	struct cache_file_identity *identity)
+{
+	struct source_file source;
+	struct cache_file_source file_source;
+	unsigned char header[0x28];
+	unsigned char *instances, *names;
+	long count, index, found = 0, pack_count;
+	unsigned char *pack_instances = scene_pack_instances(tags, &pack_count);
+
+	source.file = fopen(map_path, "rb");
+	if (!source.file)
+		return 0;
+	fseek(source.file, 0, SEEK_END);
+	source.size = (uint32_t)ftell(source.file);
+	file_source.context = &source;
+	file_source.read = source_file_read;
+	file_source.size = source.size;
+	if (cache_file_identify(&file_source, identity) != _cache_file_status_ok ||
+		!source_file_read(&source, identity->tag_data_offset, sizeof(header), header) ||
+		(count = (long)read_u32(header + 12)) <= 0 || count > 0x8000)
+	{
+		fclose(source.file);
+		return 0;
+	}
+	instances = malloc((unsigned long)count * 32);
+	names = malloc(identity->tag_data_size);
+	if (!instances || !names || !source_file_read(&source, identity->tag_data_offset, identity->tag_data_size, names))
+	{
+		fclose(source.file);
+		free(instances);
+		free(names);
+		return 0;
+	}
+	memcpy(instances, names + (read_u32(header) - CUSTOM_EDITION_TAG_CACHE_ADDRESS), (unsigned long)count * 32);
+	for (index = 0; index < count && found < most; index++)
+	{
+		unsigned long name_offset = read_u32(instances + index * 32 + 16) - CUSTOM_EDITION_TAG_CACHE_ADDRESS;
+		unsigned long root = read_u32(instances + index * 32 + 20);
+		long pack;
+
+		if (name_offset >= identity->tag_data_size || !root || read_u32(instances + index * 32 + 24))
+			continue;
+		for (pack = 0; pack < pack_count; pack++)
+		{
+			char const *pack_name = (char const *)read_u32(pack_instances + pack * 32 + 16);
+
+			if (read_u32(pack_instances + pack * 32) == read_u32(instances + index * 32) &&
+				!strcmp(pack_name, (char const *)names + name_offset))
+			{
+				roots[found++] = identity->tag_data_offset + (root - CUSTOM_EDITION_TAG_CACHE_ADDRESS);
+				break;
+			}
+		}
+	}
+	fclose(source.file);
+	free(instances);
+	free(names);
+	return found;
+}
+
+static int command_cefuzz(char const *recipe_path, char const *maps, long iterations, unsigned long seed)
+{
+	long size;
+	unsigned char *text = file_read(recipe_path, &size);
+	struct scene_pack_recipe *recipe = calloc(1, scene_pack_recipe_size());
+	struct scene_pack_build_result *result = calloc(1, sizeof(*result) + 64);
+	struct scene_pack_info info;
+	struct cache_file_identity identity;
+	char why[256], pack_path[512], map_path[512];
+	char const *map_name;
+	unsigned long *roots;
+	long root_count, iteration, failures = 0;
+	long built = 0, refused_build = 0, loaded = 0, refused_load = 0;
+	long kinds[5] = { 0 };
+	void *tags;
+	struct sigaction action;
+
+	if (!text || !recipe || !result || !scene_pack_recipe_parse((char const *)text, size, recipe, why, sizeof(why)))
+	{
+		printf("scene_pack_test: the recipe cannot be read\n");
+		return 1;
+	}
+	map_name = scene_pack_recipe_custom_edition_map(recipe, 0);
+	if (!map_name)
+	{
+		printf("scene_pack_test: the recipe names no Custom Edition map\n");
+		return 1;
+	}
+	snprintf(map_path, sizeof(map_path), "%s/%s.map", maps, map_name);
+	snprintf(pack_path, sizeof(pack_path), "%s/scene_pack_cefuzz.%d.pack", getenv("TMPDIR") ? getenv("TMPDIR") : "/tmp",
+		(int)getpid());
+	/* a clean build first: what it reads, the pack's tags' roots in the map */
+	scene_pack_ce_read_hook = source_damage_hook;
+	source_damage.recording = 1;
+	if (!scene_pack_build(recipe, maps, pack_path, NULL, 0, NULL, result))
+	{
+		printf("scene_pack_test: the clean build failed: %s\n", result->why);
+		return 1;
+	}
+	source_damage.recording = 0;
+	tags = pack_load(pack_path, &info, -1, why, sizeof(why));
+	if (!tags)
+	{
+		printf("scene_pack_test: the clean pack is refused: %s\n", why);
+		return 1;
+	}
+	roots = malloc(sizeof(unsigned long) * 4096);
+	root_count = roots ? source_roots(map_path, tags, roots, 4096, &identity) : 0;
+	free(tags);
+	printf("cefuzz %s from %s: %ld of the pack's tags found in the map, %ld reads of the map (model data, pixels, samples)\n",
+		recipe->name, map_name, root_count, source_damage.read_count);
+	if (!root_count)
+		return 1;
+	memset(&action, 0, sizeof(action));
+	action.sa_handler = fuzz_signal;
+	sigaction(SIGSEGV, &action, NULL);
+	sigaction(SIGBUS, &action, NULL);
+	sigaction(SIGFPE, &action, NULL);
+	sigaction(SIGALRM, &action, NULL);
+	sigaction(SIGABRT, &action, NULL);
+	quiet = 1;
+	for (iteration = 0; iteration < iterations; iteration++)
+	{
+		int change;
+
+		fuzz_state = (unsigned long long)seed * 1000003ULL + (unsigned long long)iteration;
+		fuzz_random();
+		source_damage.count = 1 + (int)(fuzz_random() % MAXIMUM_SOURCE_MUTATIONS);
+		for (change = 0; change < source_damage.count; change++)
+		{
+			unsigned long pick = fuzz_random() % 100;
+			int kind;
+
+			/* (a word of one of the pack's tags' roots; of the tag index and
+			instances; of what a clean build read past the tag data: model
+			data, pixels, samples; a byte of the tag data; of the header) */
+			if (pick < 50)
+			{
+				kind = 0;
+				source_damage.offsets[change] = roots[fuzz_random() % (unsigned long)root_count] + (fuzz_random() % 0x200) / 4 * 4;
+			}
+			else if (pick < 62)
+			{
+				kind = 1;
+				source_damage.offsets[change] = identity.tag_data_offset + (fuzz_random() % (0x28 + 3620 * 32)) / 4 * 4;
+			}
+			else if (pick < 82 && source_damage.read_count)
+			{
+				long read = (long)(fuzz_random() % (unsigned long)source_damage.read_count);
+
+				kind = 2;
+				source_damage.offsets[change] = source_damage.read_offsets[read] +
+					(source_damage.read_sizes[read] ? fuzz_random() % source_damage.read_sizes[read] : 0);
+			}
+			else if (pick < 96)
+			{
+				kind = 3;
+				source_damage.offsets[change] = identity.tag_data_offset + fuzz_random() % identity.tag_data_size;
+			}
+			else
+			{
+				kind = 4;
+				source_damage.offsets[change] = fuzz_random() % 0x800;
+			}
+			kinds[kind]++;
+			source_damage.widths[change] = kind == 2 || kind == 3 || kind == 4 ? 1 + (int)(fuzz_random() % 2) * 3 : 4;
+			source_damage.values[change] = fuzz_random() % 3 ? fuzz_odd_value(0x100000) : fuzz_random();
+		}
+		fuzz_signal_number = 0;
+		if (sigsetjmp(fuzz_jump, 1))
+		{
+			alarm(0);
+			printf("FAIL: iteration %ld (seed %lu): signal %d\n", iteration, seed, fuzz_signal_number);
+			failures++;
+			sigaction(SIGSEGV, &action, NULL);
+			continue;
+		}
+		alarm(60);
+		if (scene_pack_build(recipe, maps, pack_path, NULL, 0, NULL, result))
+		{
+			built++;
+			tags = pack_load(pack_path, &info, 5000, why, sizeof(why));
+			if (tags)
+			{
+				void *again;
+
+				loaded++;
+				free(tags);
+				again = pack_load(pack_path, &info, 5000, why, sizeof(why));
+				if (!again)
+				{
+					printf("FAIL: iteration %ld (seed %lu): accepted, then refused: %s\n", iteration, seed, why);
+					failures++;
+				}
+				else
+				{
+					free(again);
+				}
+			}
+			else
+			{
+				refused_load++;
+			}
+		}
+		else
+		{
+			refused_build++;
+		}
+		alarm(0);
+	}
+	quiet = 0;
+	source_damage.count = 0;
+	scene_pack_ce_read_hook = NULL;
+	remove(pack_path);
+	printf("cefuzz %s: %ld iterations from seed %lu (changes: %ld in its tags' roots, %ld in the tag index, %ld in its model "
+		"data, pixels and samples, %ld elsewhere in the tag data, %ld in the header)\n", recipe->name, iterations, seed,
+		kinds[0], kinds[1], kinds[2], kinds[3], kinds[4]);
+	printf("  the build refused %ld; built %ld: %ld loaded clean twice, %ld refused when loaded\n", refused_build, built,
+		loaded, refused_load);
+	printf("%s: %ld failures\n", failures ? "FAIL" : "PASS", failures);
+	return failures ? 1 : 0;
+}
+
 int main(int argc, char **argv)
 {
 	setvbuf(stdout, NULL, _IOLBF, 0);
@@ -716,7 +1018,9 @@ int main(int argc, char **argv)
 			argc >= 4 && !strcmp(argv[argc - 1], "-v"));
 	if ((argc == 4 || argc == 5) && !strcmp(argv[1], "fuzz"))
 		return command_fuzz(argv[2], atol(argv[3]), argc == 5 ? strtoul(argv[4], NULL, 10) : 1);
+	if ((argc == 5 || argc == 6) && !strcmp(argv[1], "cefuzz"))
+		return command_cefuzz(argv[2], argv[3], atol(argv[4]), argc == 6 ? strtoul(argv[5], NULL, 10) : 1);
 	fprintf(stderr, "usage: scene_pack_test build <recipe> <maps folder> <out.pack> | check <pack> [first] [-v] | "
-		"fuzz <pack> <iterations> [seed]\n");
+		"fuzz <pack> <iterations> [seed] | cefuzz <recipe> <maps folder> <iterations> [seed]\n");
 	return 2;
 }

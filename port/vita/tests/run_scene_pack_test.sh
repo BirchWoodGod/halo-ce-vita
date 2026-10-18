@@ -21,15 +21,45 @@
 #   ai        Covenant characters from b40 in Blood Gulch: Forge places an
 #             elite from the pack, which shoots the player (shield and body
 #             go down)
+#   cetool    packs from Halo Custom Edition maps (scene_pack_ce.c), the tool
+#             alone: ce_pelican (Extinction's Pelican) built from
+#             extinction.map and the Halo PC resource maps and loaded with no
+#             correction, then fuzzed as any pack (a quarter of
+#             HALO_TEST_FUZZ); damaged sources (HALO_TEST_CEFUZZ builds, 200 by
+#             default: the map's bytes changed as the builder reads them -
+#             words of the roots of the pack's tags, of its tag index, bytes of
+#             its model data, pixels and samples, of the tag data and header):
+#             each build refused or its pack refused or loaded clean twice,
+#             never a crash; the recipe's map of another version, and missing:
+#             refused with the reason; a player model's recipe (unit
+#             multiplayer) built from Covenant_V_Marines_Beta_5.map, a
+#             protected map, when it is there
+#   cepelican the flyable Pelican in Blood Gulch: Forge places it from the
+#             pack, the player rides it, four passengers board its seats, it
+#             takes off, climbs, flies, comes down and lands, the passengers
+#             aboard throughout; a screenshot strip
+#   cemodels  player models from Custom Edition maps (player_models.c): the
+#             maps folder's looked through (the Extinction Spartan found, the
+#             stock cyborg's maps not), a profile's choice kept in
+#             t:\player_models.txt, a Forge game (the settings panel's
+#             shortcut) with the model loaded and the player spawning as it;
+#             with no choice, the Spartan
 #
 # Each harness run must exit by itself, with no assertion or exception.
 #
-#   run_scene_pack_test.sh [CASE...]   (default: tool damaged stale banshee ai)
+#   run_scene_pack_test.sh [CASE...]   (default: tool damaged stale banshee ai cetool cepelican cemodels)
 #   HALO_TEST_VITA         the harness (default build/linux/halo of this tree)
 #   HALO_TEST_PACK_TOOL    the tool (default build/linux/scene_pack_test)
 #   HALO_TEST_DATA_MENUS   a folder with the game's maps folder (the Xbox maps,
 #                          never in the repository: skipped without bloodgulch
 #                          and b40)
+#   HALO_TEST_CE_MAPS      Custom Edition maps (default ../custom-maps-dl beside
+#                          the tree: extinction.map, Covenant_V_Marines_Beta_5.map;
+#                          the ce cases are skipped without extinction)
+#   HALO_TEST_CE_RESOURCES Halo PC's bitmaps.map, sounds.map and loc.map
+#                          (default the data's maps folder)
+#   HALO_TEST_SHOTS        a folder the cepelican and cemodels screenshots are
+#                          copied to
 #   HALO_TEST_OUT          where the logs go (deleted after a pass when the test
 #                          made it; HALO_TEST_KEEP=1 keeps them)
 set -u
@@ -43,7 +73,9 @@ recipes=$root/port/vita/app0/packs
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-tool damaged stale banshee ai}
+cases=${*:-tool damaged stale banshee ai cetool cepelican cemodels}
+ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
+ce_resources=${HALO_TEST_CE_RESOURCES:-$data/maps}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
 
@@ -97,6 +129,33 @@ expect() { # NAME TEXT PATTERN [LOG]
 }
 
 bloodgulch='90:game_variant slayer;95:map_name levels\test\bloodgulch\bloodgulch'
+
+# a maps folder of the data's maps, the Custom Edition maps and Halo PC's
+# resource maps (links), for the ce cases: FALSE without extinction.map
+ce_folder() {
+	local folder="$out/cedata" file
+	[ -r "$ce_maps/extinction.map" ] && [ -r "$ce_resources/bitmaps.map" ] && [ -r "$ce_resources/sounds.map" ] &&
+		[ -r "$ce_resources/loc.map" ] || return 1
+	rm -rf "$folder"
+	mkdir -p "$folder/maps"
+	for file in "$(cd "$data" && pwd)"/maps/*.map; do
+		ln -sfn "$file" "$folder/maps/"
+	done
+	for file in extinction Covenant_V_Marines_Beta_5; do
+		[ -r "$ce_maps/$file.map" ] && ln -sfn "$(cd "$ce_maps" && pwd)/$file.map" "$folder/maps/$file.map"
+	done
+	for file in bitmaps sounds loc; do
+		ln -sfn "$(cd "$ce_resources" && pwd)/$file.map" "$folder/maps/$file.map"
+	done
+	return 0
+}
+
+shots_keep() { # NAME
+	if [ -n "${HALO_TEST_SHOTS:-}" ] && [ -d "$out/$1/shots" ]; then
+		mkdir -p "$HALO_TEST_SHOTS/$1"
+		cp "$out/$1/shots/"* "$HALO_TEST_SHOTS/$1/" 2>/dev/null
+	fi
+}
 
 for c in $cases; do
 	echo "--- $c"
@@ -191,8 +250,116 @@ EOF
 			expect ai "it shoots: the player's shield goes down" "where: the player at .* shield 0\.[0-8]"
 			expect ai "and then the player's body" "where: the player at .* body 0\.[0-8]"
 		fi ;;
+	cetool)
+		if ! ce_folder; then
+			echo "SKIP: cetool: no extinction.map in $ce_maps (HALO_TEST_CE_MAPS) or Halo PC resource maps in $ce_resources"
+			continue
+		fi
+		mkdir -p "$out/cetool"
+		"$tool" build "$recipes/ce_pelican.txt" "$out/cedata/maps" "$out/cetool/ce_pelican.pack" > "$out/cetool/build.log" 2>&1 ||
+			fail "cetool: ce_pelican was not built ($out/cetool/build.log)"
+		grep -aE "^built|^loaded|groups|scene packs: extinction" "$out/cetool/build.log"
+		expect cetool "Extinction's tags checked as the game's Custom Edition loader checks them" \
+			"tag check: the map 'extinction' tags \(3620 tags" "$out/cetool/build.log"
+		expect cetool "ce_pelican loads with no correction" "pack tags .*passed.* 0 corrections" "$out/cetool/build.log"
+		expect cetool "its first tag the Pelican, its models made this game's" "groups: vehi 1 mode" "$out/cetool/build.log"
+		TMPDIR="$out/cetool" "$tool" fuzz "$out/cetool/ce_pelican.pack" $(( ${HALO_TEST_FUZZ:-2000} / 4 )) 3 > "$out/cetool/fuzz.log" 2>&1 ||
+			fail "cetool: ce_pelican's fuzzing failed ($out/cetool/fuzz.log)"
+		tail -1 "$out/cetool/fuzz.log"
+		TMPDIR="$out/cetool" "$tool" cefuzz "$recipes/ce_pelican.txt" "$out/cedata/maps" "${HALO_TEST_CEFUZZ:-200}" 5 \
+			> "$out/cetool/cefuzz.log" 2>&1 || fail "cetool: damaged sources ($out/cetool/cefuzz.log)"
+		grep -aE "^cefuzz|the build refused|failures" "$out/cetool/cefuzz.log" | sed 's/^/  /'
+		# (the recipe's map of another version; not in the folder)
+		sed 's/^cemap extinction 97888771 c5372723/cemap extinction 97888771 c5372724/' "$recipes/ce_pelican.txt" > "$out/cetool/other.txt"
+		"$tool" build "$out/cetool/other.txt" "$out/cedata/maps" "$out/cetool/other.pack" > "$out/cetool/other.log" 2>&1 &&
+			fail "cetool: a pack built from another version of the map"
+		expect cetool "another version of the map: refused, said" "your extinction.map is another version" "$out/cetool/other.log"
+		sed 's/^cemap extinction /cemap nosuchmap /' "$recipes/ce_pelican.txt" > "$out/cetool/missing.txt"
+		"$tool" build "$out/cetool/missing.txt" "$out/cedata/maps" "$out/cetool/missing.pack" > "$out/cetool/missing.log" 2>&1 &&
+			fail "cetool: a pack built from a map that is not there"
+		expect cetool "no such map: refused, said" "nosuchmap.map \(Halo Custom Edition\) is not in the maps folder" "$out/cetool/missing.log"
+		if [ -r "$out/cedata/maps/Covenant_V_Marines_Beta_5.map" ]; then
+			printf 'pack pm_test\ncemap Covenant_V_Marines_Beta_5 111421130 fada2fca\nunit multiplayer\n' > "$out/cetool/model.txt"
+			"$tool" build "$out/cetool/model.txt" "$out/cedata/maps" "$out/cetool/model.pack" > "$out/cetool/model.log" 2>&1 ||
+				fail "cetool: the protected map's player model was not built ($out/cetool/model.log)"
+			expect cetool "a protected map's multiplayer biped (unit multiplayer) built, loaded with no correction" \
+				"pack tags .*passed.* 0 corrections" "$out/cetool/model.log"
+			expect cetool "its first tag the biped" "groups: bipd 1 mode" "$out/cetool/model.log"
+		fi
+		rm -f "$out/cetool/"*.pack ;;
+	cepelican)
+		if ! ce_folder; then
+			echo "SKIP: cepelican: no extinction.map in $ce_maps (HALO_TEST_CE_MAPS) or Halo PC resource maps"
+			continue
+		fi
+		cmds="$bloodgulch;L100:pack load ce_pelican;L110:forge on;L112:forge camera 60 -100 3 130 -5;L115:forge list vehicles"
+		cmds="$cmds;L118:forge spawn epelican;L120:forge distance 16;L122:forge drop;L140:forge off;L170:pack ride"
+		cmds="$cmds;L175:pack board 4;L178:pack riders;L195:@shot 01-aboard"
+		for t in $(seq 200 30 1300); do cmds="$cmds;L$t:pack where"; done
+		cmds="$cmds;L265:@shot 02-takeoff;L330:@shot 03-climb;L400:@shot 04-cruise;L480:@shot 05-descend;L1180:@shot 06-landed"
+		cmds="$cmds;L1190:pack riders;L1200:forge on;L1205:forge camera 28 -78 16 -45 -20;L1240:@shot 07-outside"
+		data_saved=$data
+		data=$out/cedata
+		run cepelican 54 "$cmds" "wait:150:500 level:150:5000 lup+rup:900:0 lup:900:0 rdown:1800:0 lup:1200:0 rdown:1200:0 lup:2000:0 rup:1400:0 wait:14000:0"
+		data=$data_saved
+		if checked cepelican; then
+			log=$out/cepelican/run.log
+			expect cepelican "the pack built from Extinction and loaded beside Blood Gulch" "scene packs: ce_pelican: loaded from extinction"
+			expect cepelican "Forge's palette lists it as the Flyable Pelican" "forge: vehicles [0-9]+: Flyable Pelican"
+			expect cepelican "placed" "forge: dropped Flyable Pelican"
+			expect cepelican "the player at its controls" "scene packs: ride: vehicles.epelican.epelican entered"
+			expect cepelican "four passengers in its seats" "scene packs: board: 4 passengers aboard"
+			heights=$(grep -a "where: the vehicle at" "$log" | sed 's/.* at [^ ]* [^ ]* \([-0-9.]*\),.*/\1/')
+			first=$(echo "$heights" | head -1)
+			high=$(echo "$heights" | sort -n | tail -1)
+			last=$(echo "$heights" | tail -1)
+			echo "  heights: from $first up to $high, down to $last"
+			awk -v f="$first" -v h="$high" 'BEGIN { exit !(h - f >= 20) }' && echo "  ok: cepelican: took off and climbed" ||
+				fail "cepelican: it did not climb (from $first to $high)"
+			awk -v h="$high" -v l="$last" 'BEGIN { exit !(h - l >= 10) }' && echo "  ok: cepelican: came down" ||
+				fail "cepelican: it did not come down (from $high to $last)"
+			grep -a "where: the vehicle at" "$log" | tail -3 | grep -aqE "velocity -?0\.0[0-2] -?0\.0[0-2] -?0\.0[0-2]" &&
+				echo "  ok: cepelican: landed (at rest)" || fail "cepelican: it did not come to rest"
+			[ "$(grep -ac "scene packs: riders: 5 in vehicles.epelican.epelican" "$log")" -ge 2 ] &&
+				echo "  ok: cepelican: the pilot and four passengers aboard, before and after" ||
+				fail "cepelican: not everyone stayed aboard"
+			shots_keep cepelican
+		fi ;;
+	cemodels)
+		if ! ce_folder; then
+			echo "SKIP: cemodels: no extinction.map in $ce_maps (HALO_TEST_CE_MAPS) or Halo PC resource maps"
+			continue
+		fi
+		profile=${HALO_TEST_PROFILE:-$root/../vita-save-backups/20261017-halo-profile/blam-unlocked.sav}
+		if [ ! -r "$profile" ]; then
+			echo "SKIP: cemodels: no profile (HALO_TEST_PROFILE)"
+			continue
+		fi
+		data_saved=$data
+		data=$out/cedata
+		# (the scan; a choice made by the console: the Extinction Spartan, kept)
+		rm -rf "$out/cemodels-save"
+		mkdir -p "$out/cemodels-save/u/UDATA/869079979327"
+		cp "$profile" "$out/cemodels-save/u/UDATA/869079979327/blam.sav"
+		[ -r "$(dirname "$profile")/SaveMeta.xbx" ] && cp "$(dirname "$profile")/SaveMeta.xbx" "$out/cemodels-save/u/UDATA/869079979327/"
+		run cemodels-choose 10 "60:models list;70:models choose 0;80:models list" "" HALO_SAVE_ROOT="$out/cemodels-save"
+		# (pm_b494505f: the Extinction Spartan's pack, by its map's name and identity: player_models.c)
+		FRESH=1 run cemodels 40 "L300:forge off;L330:pack spawn pm_b494505f 0;L345:forge on;L347:forge camera 104.5 -163 1.5 140 -8;L400:@shot 00-model" "" \
+			HALO_SAVE_ROOT="$out/cemodels-save" HALO_MENU_STYLE=classic HALO_SYSTEM_LINK_TEST=forge:9
+		data=$data_saved
+		if checked cemodels-choose && checked cemodels; then
+			expect cemodels-choose "the Extinction Spartan found" "player models: [0-9]+: Spartan \(Extinction\) - characters.spartan.spartan_mp of extinction.map"
+			grep -aq "player models: .*bloodgulch.map" "$out/cemodels-choose/run.log" &&
+				fail "cemodels: an Xbox map's cyborg listed as a model"
+			expect cemodels-choose "chosen for the profile" "player models: 869079979327 chose Spartan \(Extinction\)"
+			grep -q "^869079979327 extinction 97888771 c5372723$" "$out/cemodels-save/t/player_models.txt" &&
+				echo "  ok: cemodels: kept in t:\\player_models.txt" || fail "cemodels: the choice was not kept"
+			expect cemodels "the Forge game: the model loaded" "scene packs: pm_[0-9a-f]+: loaded from extinction"
+			expect cemodels "the player spawns as it" "player models: the first local player plays as Spartan \(Extinction\) \(characters.spartan.spartan_mp\)"
+			shots_keep cemodels
+		fi ;;
 	*)
-		echo "usage: $0 [tool|damaged|stale|banshee|ai]..." >&2; exit 2 ;;
+		echo "usage: $0 [tool|damaged|stale|banshee|ai|cetool|cepelican|cemodels]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"

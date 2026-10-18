@@ -619,7 +619,14 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
                 variables={"cflags": " ".join([posix_cflags, "-malign-double", "-freg-struct-return",
                                                f"-I{ZLIB_DIR}", *ZLIB_DEFINES, posix_extra])},
             )
+            # (and the Custom Edition source's: scene_pack_ce.c, the loader's
+            # format code, the Ogg Vorbis decoder and the Xbox ADPCM encoder)
             pack_tool_objects = [pack_tool_object, obj_dir / (game_dir / "scene_pack.o"),
+                                 obj_dir / (game_dir / "scene_pack_ce.o"),
+                                 obj_dir / (game_dir / "cache_file_formats.o"),
+                                 obj_dir / "port/linux/src/ogg_sound.o",
+                                 obj_dir / "port/linux/src/xbox_adpcm_encoder.o",
+                                 *(obj_dir / source.with_suffix(".o") for source in ogg_sound_sources()),
                                  obj_dir / (game_dir / "tag_validate.o"),
                                  obj_dir / "port/linux/src/tag_relocate.o",
                                  *(obj_dir / source.with_suffix(".o") for source in sorted(game_dir.glob("tag_schema*.c"))),

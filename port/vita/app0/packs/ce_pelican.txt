@@ -1,0 +1,10 @@
+# A Pelican the player flies, for Forge on the multiplayer maps: the Pelican
+# of Extinction, a Halo Custom Edition map by (DA)Ender and the Halo 2 Scarab
+# Conversion Team (2006, released unprotected for others to learn from and
+# reuse), with its seats for a pilot, a co-pilot, eleven riders and a sniper,
+# its guns and what they need, from the player's own copy of the map (built
+# on the machine from extinction.map and the maps folder's bitmaps.map,
+# sounds.map and loc.map). Without that map the pack is not offered.
+pack ce_pelican
+cemap extinction 97888771 c5372723
+tag vehi vehicles\epelican\epelican

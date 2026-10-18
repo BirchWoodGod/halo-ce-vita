@@ -45,10 +45,10 @@ enum
 	_scene_pack_state_failed,
 	NUMBER_OF_SCENE_PACK_STATES,
 
-	MAXIMUM_LOADED_SCENE_PACKS = 4,
+	MAXIMUM_LOADED_SCENE_PACKS = 6,
 	/* the packs a map may want (built, or loaded: at most
 	MAXIMUM_LOADED_SCENE_PACKS of them) */
-	MAXIMUM_SCENE_PACK_SLOTS = 8,
+	MAXIMUM_SCENE_PACK_SLOTS = 10,
 };
 
 /* ---------- prototypes/SCENE_PACKS.C */
@@ -104,6 +104,21 @@ short scene_packs_roots(
 	char const *name,
 	long *tag_indices,
 	short most);
+
+/* a recipe the game made (player_models.c: a Custom Edition map's player
+biped), wanted by its name as one of app0:packs (which it takes the place
+of while it is registered): FALSE if it cannot be kept */
+boolean scene_packs_recipe_register(
+	char const *name,
+	char const *text);
+
+/* whether a recipe's source map is in the maps folder (of the identity it
+gives): FALSE, and why (if not NULL), if it is not, or there is no such
+recipe */
+boolean scene_packs_recipe_available(
+	char const *name,
+	char *why,
+	long why_size);
 
 /* (main.c, the top of a frame) packs built meanwhile loaded */
 void scene_packs_update(

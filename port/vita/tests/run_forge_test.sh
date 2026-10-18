@@ -67,6 +67,16 @@
 #   packmaps    (not by default) every multiplayer map with every pack on
 #               (HALO_TEST_FORGE_PACKS): what each loads or leaves out, the
 #               tag cache they hold and leave; a table in its log
+#   cepelican   the flyable Pelican (app0:packs/ce_pelican.txt: built from the
+#               player's Halo Custom Edition map Extinction, scene_pack_ce.c),
+#               with HALO_TEST_CE_MAPS' extinction.map and the Halo PC resource
+#               maps: the lobby's EXTRA OBJECTS lists Flyable Pelican, on, and
+#               ready once built; START FORGE loads it with the others; placed
+#               (the browser's Flyable Pelican), ridden, flown up and back down
+#               with passengers; skipped without extinction.map
+#   cepelicanoff the same lobby without extinction.map: Flyable Pelican
+#               unavailable, the page says why; Forge starts without it, saying
+#               nothing in the game
 #   panel       Forge from the settings panel's Forge and File Share page, for
 #               Menu style Halo CE (its request, HALO_SYSTEM_LINK_TEST=forge:):
 #               Blood Gulch with the test's good map variant starts and places
@@ -78,7 +88,10 @@
 # HALO_TEST_KEEP=1, or copied to HALO_TEST_SHOTS when it is set.
 #
 #   run_forge_test.sh [CASE...]      (default: v1 budget b30 off files variants
-#                                     edit fileshare fstouch panel packs smallmap)
+#                                     edit fileshare fstouch panel packs smallmap
+#                                     cepelican cepelicanoff)
+#   HALO_TEST_CE_MAPS     Custom Edition maps (default ../custom-maps-dl beside
+#                         the tree: extinction.map for cepelican)
 #   HALO_TEST_VITA        the harness (default build/linux/halo of this tree)
 #   HALO_TEST_DATA_MENUS  a folder with the game's maps folder (the Xbox maps)
 #                         and the Halo PC bitmaps.map and loc.map (never in the
@@ -95,7 +108,8 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_forge_test.$$}
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-v1 budget b30 off files variants edit fileshare fstouch panel packs smallmap}
+cases=${*:-v1 budget b30 off files variants edit fileshare fstouch panel packs smallmap cepelican cepelicanoff}
+ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
 
@@ -313,6 +327,31 @@ packs_runs() {
 	mkdir -p "$out/packs"
 }
 
+# (cepelican: EXTRA OBJECTS, down three to Flyable Pelican, the builds
+# waited for; back, START FORGE; in the game the console places and boards
+# it, the pad flies it: up, along, down)
+cepelicanpad="$lobby down:150:500 a:150:1500 down:150:400 down:150:400 down:150:400 wait:150:9000 @00-extra-objects:0:300"
+cepelicanpad="$cepelicanpad b:150:300 down:150:300 a:150:1500 level:150:12000 lup+rup:900:0 lup:900:0 rdown:1800:0"
+cepelicanpad="$cepelicanpad lup:1200:0 rdown:1200:0 lup:2000:0 rup:1400:0 wait:12000:0"
+
+cepelican_runs() {
+	local folder="$out/cepelican-data" file cmds t
+	rm -rf "$folder"
+	mkdir -p "$folder/maps"
+	for file in "$(cd "$data" && pwd)"/maps/*.map; do
+		ln -sfn "$file" "$folder/maps/"
+	done
+	ln -sfn "$(cd "$ce_maps" && pwd)/extinction.map" "$folder/maps/extinction.map"
+	cmds="L100:forge camera 60 -100 3 130 -5;L102:forge list vehicles;L105:forge spawn epelican;L107:forge distance 16"
+	cmds="$cmds;L109:forge drop;L120:forge off;L150:pack ride;L155:pack board 3;L160:@shot 01-aboard"
+	for t in $(seq 200 30 1200); do cmds="$cmds;L$t:pack where"; done
+	cmds="$cmds;L330:@shot 02-flying;L1150:pack riders;L1160:@shot 03-down"
+	data_saved=$data
+	data=$folder
+	run cepelican 90 "" "$cmds" "$cepelicanpad" HALO_MENU_STYLE=halo3
+	data=$data_saved
+}
+
 smallmap_runs() {
 	local store="$out/smallmap-store"
 	rm -rf "$store"
@@ -428,6 +467,22 @@ for c in $cases; do
 		packs_runs & ;;
 	smallmap)
 		smallmap_runs & ;;
+	cepelican)
+		if [ "$menus_files" = 0 ] || [ ! -r "$ce_maps/extinction.map" ] || [ ! -r "$data/maps/sounds.map" ]; then
+			echo "SKIP: cepelican: no extinction.map in $ce_maps (HALO_TEST_CE_MAPS), or no Halo PC resource maps in $data/maps"
+			continue
+		fi
+		cepelican_runs & ;;
+	cepelicanoff)
+		if [ "$menus_files" = 0 ]; then
+			echo "SKIP: cepelicanoff: no Halo PC bitmaps.map and loc.map in $data/maps"
+			continue
+		fi
+		if [ -r "$data/maps/extinction.map" ]; then
+			echo "SKIP: cepelicanoff: $data/maps has extinction.map"
+			continue
+		fi
+		run cepelicanoff 45 "" "" "$lobby down:150:500 a:150:1500 down:150:400 down:150:400 down:150:400 wait:150:4000 @00-unavailable:0:300 b:150:300 down:150:300 a:150:1500 level:150:3000" HALO_MENU_STYLE=halo3 & ;;
 	packmaps)
 		# (the maps two at a time: the cases' slots all its own)
 		wait
@@ -462,6 +517,38 @@ for c in $cases; do
 			printf '%-16s %-62s vehicles %s, AI %s\n' "$map" "$packs ($free)" "$veh" "$ai"
 			grep -aq "forge: the Forge game of .* starts" "$l" || fail "$r: the Forge game did not start"
 		done
+		continue
+	fi
+	if [ "$c" = cepelican ]; then
+		if checked cepelican; then
+			log=$out/cepelican/run.log
+			expect cepelican "EXTRA OBJECTS lists Flyable Pelican, built and ready" \
+				"menus: forge packs: Flyable Pelican: Ready: its objects are in the object browser"
+			expect cepelican "built from Extinction" "scene packs: ce_pelican: built from extinction"
+			expect cepelican "loaded with the others" "forge: packs: loaded: Covenant vehicles, Dropships, Flyable Pelican; left out: none"
+			expect cepelican "the browser offers it" "forge: vehicles [0-9]+: Flyable Pelican"
+			expect cepelican "placed" "forge: dropped Flyable Pelican"
+			expect cepelican "ridden" "scene packs: ride: vehicles.epelican.epelican entered"
+			expect cepelican "three passengers" "scene packs: board: 3 passengers aboard"
+			heights=$(grep -a "where: the vehicle at" "$log" | sed 's/.* at [^ ]* [^ ]* \([-0-9.]*\),.*/\1/')
+			first=$(echo "$heights" | head -1)
+			high=$(echo "$heights" | sort -n | tail -1)
+			last=$(echo "$heights" | tail -1)
+			echo "  cepelican: heights from $first up to $high, down to $last"
+			awk -v f="$first" -v h="$high" -v l="$last" 'BEGIN { exit !(h - f >= 15 && h - l >= 8) }' &&
+				echo "  ok: cepelican: flown up and back down" || fail "cepelican: not flown up and down ($first, $high, $last)"
+			expect cepelican "the pilot and passengers aboard" "scene packs: riders: 4 in vehicles.epelican.epelican"
+		fi
+		continue
+	fi
+	if [ "$c" = cepelicanoff ]; then
+		if checked cepelicanoff; then
+			expect cepelicanoff "the page says why it is unavailable" \
+				"menus: forge packs: Flyable Pelican: Unavailable: extinction.map \(Halo Custom Edition\) is not in the maps folder"
+			expect cepelicanoff "Forge starts without it" "forge: packs: ce_pelican: unavailable: extinction.map"
+			expect cepelicanoff "the others loaded, nothing said of it in the game" \
+				"forge: packs: loaded: Covenant vehicles, Dropships; left out: none"
+		fi
 		continue
 	fi
 	if [ "$c" = packs ]; then

@@ -89,20 +89,43 @@ struct scene_pack_recipe_tag
 	char path[SCENE_PACK_TAG_PATH_SIZE];
 };
 
+/* a Custom Edition map a recipe may be made from (cemap): its file's name
+in the maps folder, without ".map", and its identity - the file's size and
+its header's checksum field - which must be the file's */
+struct scene_pack_recipe_custom_edition_map
+{
+	char name[SCENE_PACK_NAME_SIZE];
+	unsigned long file_size;
+	unsigned long checksum;
+};
+
 /* a recipe (scene_pack_recipe_parse): its text is
 
 	# a comment
 	pack <name>                  the pack's file name (letters, digits, _ -)
 	map <name> [<name>...]       the maps it may be made from, the first one
 	                             of them in the maps folder used
+	cemap <name> <size> <checksum>
+	                             (instead of map lines) a Halo Custom Edition
+	                             map it may be made from, <name>.map in the
+	                             maps folder, of that size in bytes (decimal)
+	                             and header checksum (8 hex digits): the
+	                             first of them there, of its identity, is
+	                             used, with the maps folder's bitmaps.map,
+	                             sounds.map and loc.map
 	tag <group> <path>           a tag it holds, with all it needs (in order:
 	                             the pack's first tags)
+	unit multiplayer             a tag it holds: the source map's
+	                             multiplayer unit (its globals' player
+	                             biped), whatever its name (a protected
+	                             map's have none)
 	strip <group>                a group left out: references to its tags
 	                             name none
 	strip <group> <path>         a tag left out, the same way
 
 groups as four characters ("bipd", "snd!"), paths as the tags' own names
-("characters\cyborg_mp\cyborg_mp"). */
+("characters\cyborg_mp\cyborg_mp"). A root of the multiplayer unit has the
+group 'unit' and an empty path. */
 struct scene_pack_recipe
 {
 	char name[SCENE_PACK_NAME_SIZE];
@@ -118,6 +141,11 @@ struct scene_pack_recipe
 	and the builder's version: two machines with the same recipe have the
 	same hash */
 	unsigned long long hash;
+	/* (after the hash: tools/scene_pack_test.c knows the fields before it)
+	the Custom Edition maps it may be made from (cemap lines, which a
+	recipe has instead of map lines) */
+	short custom_edition_map_count;
+	struct scene_pack_recipe_custom_edition_map custom_edition_maps[SCENE_PACK_MAXIMUM_MAPS];
 };
 
 /* what a pack file's header says, once checked (scene_pack_open) */
@@ -168,9 +196,35 @@ boolean scene_pack_recipe_parse(
 	char *why,
 	long why_size);
 
+/* (the tools) the size of a recipe, as the game's objects have it */
+unsigned long scene_pack_recipe_size(
+	void);
+
+/* (the tools) a recipe's Custom Edition map's name, by index, or NULL */
+char const *scene_pack_recipe_custom_edition_map(
+	struct scene_pack_recipe const *recipe,
+	short index);
+
+/* whether a recipe's root is the source map's multiplayer unit (unit
+multiplayer) rather than a tag of a path */
+boolean scene_pack_recipe_root_is_multiplayer_unit(
+	struct scene_pack_recipe_tag const *tag);
+
 /* the source map's identity (its header, its file's size) as packs record
 it, and its name in maps_directory (the first of the recipe's maps there,
-which an Xbox map must be): FALSE if none of them is there */
+which an Xbox map must be; or of its Custom Edition maps, of the identity
+the recipe gives): FALSE if none of them is there, and why (why may be
+NULL: "extinction.map is not in the maps folder") */
+boolean scene_pack_source_check(
+	struct scene_pack_recipe const *recipe,
+	char const *maps_directory,
+	char *map_name,
+	long map_name_size,
+	unsigned long long *source_hash,
+	char *why,
+	long why_size);
+
+/* the same, without why */
 boolean scene_pack_source_find(
 	struct scene_pack_recipe const *recipe,
 	char const *maps_directory,
