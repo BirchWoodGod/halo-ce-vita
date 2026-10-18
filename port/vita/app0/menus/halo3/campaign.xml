@@ -95,6 +95,7 @@ emblems are ui.map's own, the rest this folder's art. -->
 	<widget name="h3/campaign/picture" left="16" top="176" width="140" height="114" bitmap="h3/sp_levels"/>
 	<widget name="h3/campaign/emblem" left="22" top="182" width="44" height="48" bitmap="h3/difficulty"/>
 	<widget name="h3/campaign/caption" type="text" left="16" top="296" width="240" height="40" font="h3/font_item" color="#FFEEF2F6" text_y="1"/>
+	<widget name="h3/campaign/warning" type="text" left="16" top="340" width="240" height="36" font="h3/font_small" color="#FFF0B070" text_y="1"/>
 	<widget name="h3/campaign/rule3" left="8" top="440" width="250" height="2" bitmap="h3/rule"/>
 	<widget name="h3/campaign/a_butn" left="16" top="447" width="16" height="16" bitmap="h3/glyph_cross"/>
 	<widget name="h3/campaign/select" type="text" left="36" top="446" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/campaign_text" string_index="5"/>
@@ -115,6 +116,7 @@ emblems are ui.map's own, the rest this folder's art. -->
 		<child widget="h3/campaign/picture"/>
 		<child widget="h3/campaign/emblem"/>
 		<child widget="h3/campaign/caption"/>
+		<child widget="h3/campaign/warning"/>
 		<child widget="h3/campaign/rule3"/>
 		<child widget="h3/campaign/a_butn"/>
 		<child widget="h3/campaign/select"/>

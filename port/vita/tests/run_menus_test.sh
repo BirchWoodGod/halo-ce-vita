@@ -26,6 +26,8 @@
 #            (HALO_TEST_BROWSER_GAMES), the three with the most players shown
 #   h3touch  taps (HALO_TEST_TAPS, as the Vita's touch screen's): FORGE on the
 #            main menu opens its dialog, the dialog's Back icon closes it
+#   h3resume a profile's saved game (a10 on Normal, saved and quit): the lobby
+#            says at Last Checkpoint, and on Heroic that it replaces it
 #   h3campaign  a profile with every level (HALO_TEST_PROFILE, never in the
 #            repository; skipped without): CAMPAIGN, the profile, the Halo 3
 #            campaign lobby; Mission: The Silent Cartographer, Difficulty:
@@ -61,7 +63,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
 
@@ -208,6 +210,20 @@ for case in $cases; do
 		grep -aq "ui: screen pc.h3.soon.forge" "$out/h3touch/run.log" || fail h3touch "a tap on FORGE did not open its dialog"
 		[ "$(grep -ac 'ui: screen pc.h3.main.screen' "$out/h3touch/run.log")" -ge 2 ] ||
 			fail h3touch "a tap on the dialog's Back did not go back to the main menu" ;;
+	h3resume)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "--- h3resume"; echo "SKIP: no HALO_TEST_PROFILE"; continue
+		fi
+		# (the lobby: Start Game on The Pillar of Autumn, Normal; in the level, saved and quit to the
+		# main menu; CAMPAIGN again, the profile, the lobby: its caption; Difficulty, down, A: Heroic)
+		profile_from=$HALO_TEST_PROFILE run h3resume "$menus_data" 170 "wait:150:3000 down:150:700 a wait:150:3000 a wait:150:3000 down:150:600 down:150:600 a wait:150:70000 down:150:700 a wait:150:3000 a wait:150:4000 wait:150:2000 down:150:700 a wait:150:2500 down:150:700 a wait:150:6000 wait:150:4000" \
+			HALO_MENU_STYLE=halo3 "HALO_TEST_COMMANDS=L240:@skip;L420:game_save_totally_unsafe;L600:@quit"
+		check_h3 h3resume halo3
+		log=$out/h3resume/run.log
+		grep -aq "menus: h3 campaign caption: The Pillar of Autumn on Normal.at Last Checkpoint" "$log" ||
+			fail h3resume "the lobby did not say the saved game goes on from its checkpoint"
+		grep -aq "menus: h3 campaign caption: The Pillar of Autumn on Heroic.at Mission Start (replaces the saved game)" "$log" ||
+			fail h3resume "another difficulty did not warn that it replaces the saved game" ;;
 	h3campaign)
 		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
 			echo "--- h3campaign"; echo "SKIP: no HALO_TEST_PROFILE (a blam.sav with every level)"; continue
@@ -225,7 +241,7 @@ for case in $cases; do
 		grep -aq "menus: h3 campaign: start levels.b30.b30 on Heroic" "$log" || fail h3campaign "Start Game did not start b30 on Heroic"
 		grep -aq "memory: loaded levels.b30.b30" "$log" || fail h3campaign "b30 did not load" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"

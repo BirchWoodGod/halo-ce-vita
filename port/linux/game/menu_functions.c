@@ -441,6 +441,7 @@ game), as its level and difficulty lists do */
 
 void main_set_map_name(char *map_name);
 void main_set_difficulty(word difficulty);
+boolean game_state_test_persistent_storage(char *map_name, short *difficulty, boolean *corrupted);
 static void string_show(struct widget_instance *widget, short index);
 
 static char const *const h3_level_paths[NUMBER_OF_SINGLE_PLAYER_LEVELS] =
@@ -460,6 +461,11 @@ static struct
 	boolean initialized;
 	short level;
 	short difficulty;
+	/* the profile's saved game (its checkpoint): there, its level and
+	difficulty, read as the lobby opens (as the Xbox's level list does) */
+	boolean saved;
+	char saved_map[256];
+	short saved_difficulty;
 } h3_campaign;
 
 /* the first local player's active profile, FALSE with none */
@@ -513,6 +519,16 @@ static void h3_campaign_initialize(void)
 			h3_campaign.level = profile.last_single_player_map_played;
 	}
 	h3_campaign.level = (short)PIN(h3_campaign.level, 0, unlocked - 1);
+	{
+		boolean corrupted = FALSE;
+
+		h3_campaign.saved_map[0] = 0;
+		h3_campaign.saved = game_state_test_persistent_storage(h3_campaign.saved_map, &h3_campaign.saved_difficulty,
+			&corrupted) && !corrupted;
+		if (h3_campaign.saved)
+			platform_log("menus: h3 campaign: the saved game is %s on %s", h3_campaign.saved_map,
+				h3_difficulty_names[PIN(h3_campaign.saved_difficulty, 0, 3)]);
+	}
 	h3_campaign_said();
 }
 
@@ -559,9 +575,39 @@ static void h3_campaign_update(struct widget_instance *widget)
 	snprintf(text, sizeof(text), "%s: %s", T("DIFFICULTY"), T(h3_difficulty_names[h3_campaign.difficulty]));
 	h3_capitals(text);
 	text_show(named(screen, "difficulty_row"), text);
-	snprintf(text, sizeof(text), "%s %s %s\n%s", T(h3_level_names[h3_campaign.level]), T("on"),
-		T(h3_difficulty_names[h3_campaign.difficulty]), T("at Mission Start"));
-	text_show(named(screen, "caption"), text);
+	/* (as the Xbox's: the saved game's level on its difficulty goes on from
+	its checkpoint; on another difficulty, starting replaces it - the
+	warning; another level starts at its start) */
+	{
+		boolean same_level = h3_campaign.saved && !_stricmp(h3_campaign.saved_map, h3_level_paths[h3_campaign.level]);
+		boolean resumes = same_level && h3_campaign.saved_difficulty == h3_campaign.difficulty;
+		struct widget_instance *warning = named(screen, "warning");
+
+		snprintf(text, sizeof(text), "%s %s %s\n%s", T(h3_level_names[h3_campaign.level]), T("on"),
+			T(h3_difficulty_names[h3_campaign.difficulty]), resumes ? T("at Last Checkpoint") : T("at Mission Start"));
+		text_show(named(screen, "caption"), text);
+		/* (said when it changes: the tests read it) */
+		{
+			static char said[192];
+			char line[192];
+
+			char *newline;
+
+			snprintf(line, sizeof(line), "%s%s", text, same_level && !resumes ? " (replaces the saved game)" : "");
+			while ((newline = strchr(line, '\n')) != NULL)
+				*newline = ' ';
+			if (strcmp(line, said))
+			{
+				snprintf(said, sizeof(said), "%s", line);
+				platform_log("menus: h3 campaign caption: %s", line);
+			}
+		}
+		if (warning)
+		{
+			widget_instance_set_visibility_recursive(warning, same_level && !resumes);
+			text_show(warning, T("This difficulty starts the mission over\nand replaces your saved game."));
+		}
+	}
 	if ((found = named(screen, "picture")) != NULL)
 		found->animation.current_frame_index = h3_campaign.level;
 	if ((found = named(screen, "emblem")) != NULL)
