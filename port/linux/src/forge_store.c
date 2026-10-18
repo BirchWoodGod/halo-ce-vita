@@ -30,7 +30,6 @@ write stops half way, as on a full card (run_forge_test.sh).
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
 #include <time.h>
 
 /* ---------- constants */
@@ -231,6 +230,25 @@ static int forge_store_list_map(
 	return count;
 }
 
+/* two texts compared with ASCII's letters' case ignored */
+static int forge_store_compare_text(
+	char const *left,
+	char const *right)
+{
+	for (;; left++, right++)
+	{
+		int a = (unsigned char)*left;
+		int b = (unsigned char)*right;
+
+		if (a >= 'A' && a <= 'Z')
+			a += 'a' - 'A';
+		if (b >= 'A' && b <= 'Z')
+			b += 'a' - 'A';
+		if (a != b || !a)
+			return a - b;
+	}
+}
+
 static int forge_store_entry_compare(
 	void const *a,
 	void const *b)
@@ -243,7 +261,7 @@ static int forge_store_entry_compare(
 		return order;
 	if (left->damaged != right->damaged)
 		return left->damaged - right->damaged;
-	order = strcasecmp(left->title, right->title);
+	order = forge_store_compare_text(left->title, right->title);
 	return order ? order : strcmp(left->file_name, right->file_name);
 }
 
