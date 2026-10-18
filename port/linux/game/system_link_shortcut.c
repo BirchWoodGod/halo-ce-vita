@@ -27,9 +27,11 @@ what the two share), called from the main loop every frame (main.c):
   maps of a build that plays with others (as the menus' own check,
   ui_widget.c ui_widget_launch_widget, which shows the player why).
 
-- Ad hoc play from the Halo 3 menus (halo_adhoc_request, halo_adhoc_group:
-  system_link_shortcut.h): the Vita's host answers them; elsewhere this
-  file does (an emulated group is joined from the start, and a request is
+- The connection (network_connection.c: Same Wi-Fi, Ad hoc or Online)
+  switched live when it is chosen, at the menus with no network game.
+- Ad hoc play's group (halo_adhoc_request, halo_adhoc_group:
+  system_link_shortcut.h): the Vita's host answers its requests; elsewhere
+  this file does (an emulated group is joined from the start, and a join is
   logged and answered as the system's dialog would answer it in the tests).
 
 halo.log says each request and its answer, and each change of the state.
@@ -53,6 +55,7 @@ so.
 
 #include "../src/system_link_shortcut.h"
 #include "../src/port_config.h"
+#include "network_connection.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -226,7 +229,8 @@ emulated group (HALO_NET_ADHOC_EMULATE, posix_net.c) is in it from the
 start, as a Vita is once its system's dialog has joined one - and the Halo 3
 menus' requests: (test builds) HALO_ADHOC_TEST=join or fail says what the
 system's dialog would have done, a second and a half later; without it
-there is no dialog to open, and the join fails. A restart is only logged */
+there is no dialog to open, and the join fails. Leaving the group forgets
+the test's answer */
 static void system_link_shortcut_adhoc(
 	void)
 {
@@ -281,13 +285,11 @@ static void system_link_shortcut_adhoc(
 			__atomic_store_n(&halo_adhoc_request, HALO_ADHOC_REQUEST_NONE, __ATOMIC_RELEASE);
 		}
 	}
-	else if (request == HALO_ADHOC_REQUEST_RESTART_ADHOC || request == HALO_ADHOC_REQUEST_RESTART_WIFI)
+	else if (request == HALO_ADHOC_REQUEST_LEAVE)
 	{
-		extern int halo_main_menu_idle(void);
-
-		platform_log("ad hoc: Connection %s and a restart asked, %s (no Vita host here: nothing set or restarted)",
-			request == HALO_ADHOC_REQUEST_RESTART_ADHOC ? "Ad hoc" : "Same Wi-Fi",
-			halo_main_menu_idle() ? "at the main menu" : "not at the main menu");
+		/* (an emulated group is the setting's: nothing to leave) */
+		answered = HALO_ADHOC_GROUP_NONE;
+		platform_log("ad hoc: the group left");
 		__atomic_store_n(&halo_adhoc_request, HALO_ADHOC_REQUEST_NONE, __ATOMIC_RELEASE);
 	}
 	__atomic_store_n(&halo_adhoc_group, group, __ATOMIC_RELEASE);
@@ -302,6 +304,7 @@ void system_link_shortcut_update(
 	char build[0x20];
 
 	system_link_shortcut_status(main_menu_loaded);
+	network_connection_update(main_menu_loaded);
 	system_link_shortcut_adhoc();
 	/* (the host an invite, a code or the server browser joined, once
 	reached: its game joined as soon as the System Link list shows it, as A

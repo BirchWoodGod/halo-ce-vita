@@ -502,10 +502,15 @@ static struct
 	group's machines, through local relays; nothing goes to the internet
 	(no signalling, STUN or UPnP) */
 	int adhoc;
+	/* p2p_shutdown asked the thread to stop (it tears everything down, and
+	internet play is off again) */
+	int stopping;
 
 	/* UPnP (posix_upnp.c): a thread asking the router; the port it forwards
 	here, and when it was last asked */
 	int upnp_working;
+	/* (network.allow_upnp, not in ad hoc play: the session's) */
+	int upnp_allowed;
 	int upnp_asked;
 	int upnp_forwarded;
 	int upnp_release_registered;
@@ -533,6 +538,9 @@ static struct
 /* the proxy (its index + 1) with each local port (all of theirs are on
 p2p.local_address) */
 static unsigned short proxy_by_port[65536];
+
+/* the network thread (joined when internet play stops: p2p_shutdown) */
+static pthread_t p2p_thread_handle;
 
 static unsigned char identifier[P2P_IDENTIFIER_SIZE];
 /* this run's X25519 keys, which the identifier comes from: from an Ed25519
@@ -4158,13 +4166,10 @@ static int upnp_needed(void)
 
 static void update_upnp(void)
 {
-	static int allowed = -1;
 	int ask;
 	pthread_t thread;
 
-	if (allowed < 0)
-		allowed = config_boolean("network.allow_upnp") && !p2p.adhoc ? 1 : 0;
-	if (!allowed || p2p.upnp_working || p2p.upnp_released)
+	if (!p2p.upnp_allowed || p2p.upnp_working || p2p.upnp_released)
 		return;
 	if (p2p.upnp_forwarded)
 		ask = elapsed(p2p.upnp_time, UPNP_RENEW_INTERVAL);
@@ -4433,6 +4438,84 @@ static void poll_invite_file(void)
 
 /* ---------- the thread */
 
+/* (the p2p thread, under p2p_lock, stopping) everything internet play
+holds let go, as before it started: a listed game's tombstone written and
+the brokers' connections closed (p2p_lobby_stop, p2p_signal_stop), every
+peer told goodbye and dropped (its session retired: it never comes back),
+the stand-ins, connections, tunnel and invite handoff sockets closed, and
+the session's state cleared. What lasts the run is kept: this machine's
+keys and identifier, the sessions that ended (their packets would pass
+again), the invite's token and code, the hosts joined from the public
+lobby (their maps' downloads are warned about) and the exit hooks */
+static void teardown(void)
+{
+	int index;
+
+	p2p_lobby_stop();
+	p2p_signal_stop();
+	/* (nothing asked again: a joining host dropped would be) */
+	p2p.joining = 0;
+	p2p.join_requested = 0;
+	for (index = 0; index < P2P_MAXIMUM_PEERS; index++)
+	{
+		if (p2p.peers[index].used)
+			drop_peer(&p2p.peers[index], "internet play stopped");
+	}
+	memset(p2p.peers, 0, sizeof(p2p.peers));
+	for (index = 0; index < MAXIMUM_STREAMS; index++)
+	{
+		if (p2p.streams[index].used)
+			stream_free(&p2p.streams[index]);
+	}
+	for (index = 0; index < MAXIMUM_PROXIES; index++)
+	{
+		close_socket(&p2p.proxies[index].socket);
+		memset(&p2p.proxies[index], 0, sizeof(p2p.proxies[index]));
+		p2p.proxies[index].socket = -1;
+	}
+	for (index = 0; index < MAXIMUM_LISTENERS; index++)
+	{
+		close_socket(&p2p.listeners[index].socket);
+		memset(&p2p.listeners[index], 0, sizeof(p2p.listeners[index]));
+		p2p.listeners[index].socket = -1;
+	}
+	memset(proxy_by_port, 0, sizeof(proxy_by_port));
+	close_socket(&p2p.tunnel_socket);
+	close_socket(&p2p.handoff_socket);
+	p2p.tunnel_port = 0;
+	memset(p2p.closed, 0, sizeof(p2p.closed));
+	memset(p2p.game_ports, 0, sizeof(p2p.game_ports));
+	memset(p2p.sent_ports, 0, sizeof(p2p.sent_ports));
+	p2p.sent_port_next = 0;
+	memset(p2p.stun, 0, sizeof(p2p.stun));
+	p2p.stun_count = 0;
+	p2p.stun_started = 0;
+	p2p.reported_symmetric = 0;
+	/* (the game's own sockets: not internet play's to close) */
+	p2p.hosting_socket = -1;
+	p2p.game_accepts_remote = 0;
+	p2p.hosting = 0;
+	p2p.invite_copied = 0;
+	p2p.game_player_count = p2p.game_player_maximum = 0;
+	p2p.reported_player_count = p2p.reported_player_maximum = 0;
+	p2p.join_reached = 0;
+	p2p.has_clipboard = 0;
+	p2p.lookup_requested = 0;
+	p2p.looking_up = 0;
+	p2p.status[0] = 0;
+	p2p.status_shown[0] = 0;
+	p2p.upnp_asked = 0;
+	p2p.relay_allowed = 0;
+	p2p.relay_host_count = 0;
+	p2p.relays_resolved = 0;
+	p2p.relay_count = 0;
+	memset(p2p.relay_host_found, 0, sizeof(p2p.relay_host_found));
+	memset(p2p.relay_lookup_failures, 0, sizeof(p2p.relay_lookup_failures));
+	p2p.adhoc = 0;
+	p2p.stopping = 0;
+	p2p.running = 0;
+}
+
 static void *p2p_thread(void *unused)
 {
 	enum
@@ -4465,8 +4548,16 @@ static void *p2p_thread(void *unused)
 	(void)unused;
 	pthread_mutex_lock(&p2p_lock);
 #ifndef HALO_ANDROID
-	/* (here: it may wait for a program) */
-	p2p_register_url_scheme("halo", "Halo: Combat Evolved invite");
+	{
+		/* (here: it may wait for a program; once a run) */
+		static int registered;
+
+		if (!registered)
+		{
+			registered = 1;
+			p2p_register_url_scheme("halo", "Halo: Combat Evolved invite");
+		}
+	}
 #endif
 	for (;;)
 	{
@@ -4477,6 +4568,14 @@ static void *p2p_thread(void *unused)
 		int wait = LOOP_INTERVAL * 5;
 		int index, asked;
 
+		/* (internet play stopping: everything torn down here, under the
+		lock, and the thread ends: p2p_shutdown joins it) */
+		if (p2p.stopping)
+		{
+			teardown();
+			pthread_mutex_unlock(&p2p_lock);
+			return NULL;
+		}
 		/* what to wait for: the tunnel, then the brokers (whose sockets are
 		few), then the stand-ins, as many as a select takes */
 		read_owners[read_count] = _owner_tunnel;
@@ -4654,8 +4753,9 @@ static void *p2p_thread(void *unused)
 
 void p2p_initialize(unsigned long local_address)
 {
+	/* (the command line's invite: taken at the first start only) */
+	static int command_line_taken;
 	char invite[256];
-	pthread_t thread;
 	long tunnel_port = config_integer("network.tunnel_port");
 	int index;
 
@@ -4665,7 +4765,7 @@ void p2p_initialize(unsigned long local_address)
 	/* (ad hoc play is internet play's tunnel without the internet) */
 	if (!config_boolean("network.online") && !config_boolean("network.adhoc"))
 	{
-		platform_log("Internet play: disabled; enable Online and restart to use invites");
+		platform_log("Internet play: off (the connection Online, or Ad hoc, starts it)");
 		return;
 	}
 	if (tunnel_port < 0 || tunnel_port > 65535)
@@ -4682,6 +4782,7 @@ void p2p_initialize(unsigned long local_address)
 		p2p.streams[index].socket = -1;
 	p2p.local_address = local_address;
 	p2p.adhoc = config_boolean("network.adhoc");
+	p2p.upnp_allowed = config_boolean("network.allow_upnp") && !p2p.adhoc;
 	p2p.tunnel_socket = open_socket(SOCK_DGRAM, 0, network_short((unsigned short)tunnel_port), &p2p.tunnel_port);
 	if (p2p.tunnel_socket < 0)
 	{
@@ -4708,20 +4809,70 @@ void p2p_initialize(unsigned long local_address)
 	stun_setup();
 	relay_setup();
 	{
-		int error = pthread_create(&thread, NULL, p2p_thread, NULL);
+		int error;
+
+		/* (running before the thread is: it may stop at once) */
+		p2p.running = 1;
+		error = pthread_create(&p2p_thread_handle, NULL, p2p_thread, NULL);
 		if (error != 0)
 		{
+			p2p.running = 0;
 			platform_log("Internet play: cannot start network thread: %d", error);
 			close_socket(&p2p.tunnel_socket);
 			close_socket(&p2p.handoff_socket);
+			p2p.stun_count = 0;
+			p2p.relay_host_count = 0;
 			return;
 		}
 	}
-	pthread_detach(thread);
-	p2p.running = 1;
-	platform_log("Internet play: network thread started");
+	platform_log("Internet play: network thread started%s", p2p.adhoc ? " (ad hoc play)" : "");
 	if (p2p.adhoc)
 		p2p_adhoc_start(p2p.tunnel_port);
-	if (command_line_invite(invite, sizeof(invite)))
-		p2p_join_invite(invite);
+	if (!command_line_taken)
+	{
+		command_line_taken = 1;
+		if (command_line_invite(invite, sizeof(invite)))
+			p2p_join_invite(invite);
+	}
+}
+
+/* (the game's thread, at the menus with no network game:
+port/linux/game/network_connection.c) internet play, or ad hoc play's
+bridge, stopped: the thread tears everything down and ends (teardown), the
+bridge's threads end, and a port the router forwards is no longer; no
+thread, socket or peer of internet play is left, and p2p_initialize can
+start it again, with the same keys. Nothing is done when it is off */
+void p2p_shutdown(void)
+{
+	unsigned short external_port = 0;
+	unsigned long start;
+
+	pthread_mutex_lock(&p2p_lock);
+	if (!p2p.running || p2p.stopping)
+	{
+		pthread_mutex_unlock(&p2p_lock);
+		return;
+	}
+	p2p.stopping = 1;
+	pthread_mutex_unlock(&p2p_lock);
+	pthread_join(p2p_thread_handle, NULL);
+	p2p_adhoc_stop();
+	/* (a UPnP request under way ends first, as at exit: upnp_release) */
+	start = p2p_now();
+	pthread_mutex_lock(&p2p_lock);
+	while (p2p.upnp_working && !elapsed(start, UPNP_RELEASE_WAIT))
+	{
+		pthread_mutex_unlock(&p2p_lock);
+		Sleep(50);
+		pthread_mutex_lock(&p2p_lock);
+	}
+	if (p2p.upnp_forwarded && !p2p.upnp_working)
+	{
+		external_port = p2p.upnp_candidate.port;
+		p2p.upnp_forwarded = 0;
+	}
+	pthread_mutex_unlock(&p2p_lock);
+	if (external_port)
+		posix_upnp_stop_forwarding_udp(external_port);
+	platform_log("Internet play: stopped (its thread, sockets and peers gone)");
 }

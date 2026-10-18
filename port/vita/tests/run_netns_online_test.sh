@@ -228,6 +228,21 @@
 #            HALO_NET_ADHOC_EMULATE): both lobbies open on AD HOC, in the group
 #            from the start (no system's dialog to join it), the LAN browser's
 #            title AD HOC GAMES; nothing may reach the broker
+#   h3online the connection switched live from the Halo 3 lobby (both copies
+#            start with online off and the Halo PC files, HALO_TEST_DATA_MENUS;
+#            skipped without): each lobby's NETWORK: ONLINE starts internet
+#            play there (Connecting..., then Online: the broker reached); the
+#            host's START GAME, Create Game (its name typed, public), the
+#            profile, the map and the game type; the joiner's BROWSE GAMES,
+#            the Halo 3 server browser, A on the host's game: the System Link
+#            screen, joined. The host starts it, and both must play it
+#   netswitch one copy switches its connection over and over at the main
+#            menu (HALO_NETWORK_TEST_SWITCH: Online, Same Wi-Fi, Ad hoc on an
+#            emulated group, HALO_NETWORK_TEST_SWITCH_ROUNDS times, 5 by
+#            default): every Online must reach the broker, every Same Wi-Fi
+#            must have as many threads and open files as the first (nothing of
+#            internet play's left behind), and the copy must run on and exit
+#            by itself
 #   coopmenu co-op from the campaign's menus, over system link on one LAN
 #            (online off), every press scripted (HALO_TEST_PAD): the host
 #            goes Campaign, a new profile, The Pillar of Autumn, Heroic and Y
@@ -1894,6 +1909,72 @@ h3lan|h3adhoc)
 	[ "$two" -ge 15 ] || fail "the joiner played the host's game for $two s with two players (15 wanted)"
 	[ "$mode" = h3adhoc ] && grep -q CONNECT "$out/broker.log" && fail "ad hoc play reached the signalling broker"
 	;;
+h3online)
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	if [ ! -r "$menus_data/maps/bitmaps.map" ]; then
+		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS)"; exit 0
+	fi
+	# (MULTIPLAYER: the lobby on SYSTEM LINK; NETWORK, up to ONLINE, A: online, live; a while for
+	# the broker; down three to START GAME, A: Create Game; down two to NAME, A: typed; down four
+	# to START GAME, A: the profile (A joins, A the profile, A), the map list (A), the game type
+	# (A): the game's lobby; a while for the joiner, then A starts the game, a few times)
+	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
+		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:1 HALO_NET_HOST_PUBLIC=true \
+		HALO_TEST_TEXT_INPUT=NetHost \
+		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:10000 down:150:500 down:150:500 down:150:500 a wait:150:4000 down:150:500 down:150:500 a wait:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:4000 a wait:150:2000 a wait:150:2000 a wait:150:5000 a wait:150:4000 a wait:150:${HALO_TEST_H3ONLINE_WAIT:-45000} a wait:150:5000 a wait:150:5000 a" \
+		; host_pid=$last_pid
+	sleep 25
+	# (MULTIPLAYER: the lobby on SYSTEM LINK; NETWORK, up to ONLINE, A; a while for the broker;
+	# down five to BROWSE GAMES, A: the Halo 3 server browser; a while, A on the host's game:
+	# the System Link screen (A joins, A the profile, A), the game joined by itself)
+	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=false \
+		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:2 \
+		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:10000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:8000 a wait:150:8000 a wait:150:2000 a wait:150:2000 a" \
+		; join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log
+	echo "--- host"; grep -aE "network:|ui: screen|menus: (h3 mp|Server Setup|Create Game)|system link: (hosting|in a)" "$hl" | head -24
+	echo "--- joiner"; grep -aE "network:|ui: screen|menus: (h3 mp|joining|the server)|system link: (joining|in a)" "$jl" | head -24
+	for side in host joiner; do
+		log=$out/$side/run.log
+		grep -aq "network: switching from Same Wi-Fi to Online" "$log" || fail "the $side's NETWORK: ONLINE did not switch live"
+		grep -aq 'network: status "Connecting..."' "$log" || fail "the $side's status did not say Connecting..."
+		grep -aq "network: Online (a broker reached)" "$log" || fail "the $side did not reach the broker"
+		grep -aq 'network: status "Online"' "$log" || fail "the $side's status did not say Online"
+	done
+	grep -aq "menus: Server Setup: NetHost, 16 players, public" "$hl" || fail "the host's Create Game did not set the game up"
+	grep -aq "menus: Create Game > Internet: the game's server started" "$hl" || fail "the host's game was not created"
+	grep -aq "ui: screen pc.h3.browser.screen" "$jl" || fail "the joiner's BROWSE GAMES did not open the Halo 3 browser"
+	grep -aq "menus: joining the public game NetHost" "$jl" || fail "the joiner did not join the host's game from the browser"
+	grep -aq "system link: in another's lobby" "$jl" || fail "the joiner did not reach the host's lobby"
+	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+	echo "joiner's seconds with two players playing: $two"
+	[ "$two" -ge 15 ] || fail "the joiner played the host's game for $two s with two players (15 wanted)"
+	;;
+netswitch)
+	rounds=${HALO_TEST_SWITCH_ROUNDS:-5}
+	list=
+	for i in $(seq 1 "$rounds"); do list="$list${list:+,}online,wifi,adhoc,wifi,online,adhoc,online,wifi"; done
+	seconds=$((rounds * 8 * 7 + 30))
+	run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false HALO_UI_LOG=1 \
+		HALO_NET_ADHOC_EMULATE=192.168.1.2 "HALO_NETWORK_TEST_SWITCH=$list" HALO_NETWORK_TEST_SWITCH_SECONDS=7 \
+		; host_pid=$last_pid
+	wait $host_pid 2>/dev/null
+	hl=$out/host/run.log
+	grep -a "network test:\|network: Online (a\|network: Online failed" "$hl" | head -80
+	grep -aqiE "assert|exception|segmentation|halt" "$hl" && fail "an assertion, exception or crash"
+	grep -aq "network test: the switches are done" "$hl" || fail "the copy did not switch through the whole list"
+	onlines=$(grep -ac "network test: switch [0-9]*: online" "$hl")
+	reached=$(grep -ac "network: Online (a broker reached)" "$hl")
+	echo "Online chosen $onlines times, the broker reached $reached times"
+	[ "$reached" -ge "$onlines" ] || fail "Online did not reach the broker each time ($reached of $onlines)"
+	# (the program's own threads, not the graphics driver's, which come and go with the shaders)
+	wifi=$(grep -a "network test: Same Wi-Fi:" "$hl" | sed 's/.*Same Wi-Fi: \([0-9]*\) of its own threads ([0-9]* in all), \([0-9]*\) open files.*/\1 threads, \2 files/' | sort -u)
+	echo "Same Wi-Fi's own threads and open files: $(echo "$wifi" | tr '\n' ';')"
+	[ "$(echo "$wifi" | wc -l)" = 1 ] || fail "Same Wi-Fi's threads or open files changed: something was left behind"
+	[ "$(grep -ac "Internet play: stopped (its thread, sockets and peers gone)" "$hl")" -ge $((rounds * 5)) ] ||
+		fail "internet play did not stop each time"
+	;;
 coopmenu)
 	joiners=${HALO_TEST_COOP_JOINERS:-1}
 	players=$((joiners + 1))
@@ -3434,7 +3515,7 @@ CHECK
 	fi
 	;;
 *)
-	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed" >&2
+	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3online|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed" >&2
 	exit 2
 	;;
 esac

@@ -16,6 +16,12 @@ Addresses and ports are in network byte order.
 its networking; local_address is the address the game's sockets are
 reached at (network.address, else 127.0.0.1) */
 void p2p_initialize(unsigned long local_address);
+/* stops internet play (or ad hoc play's bridge) as if it had never
+started: its thread, sockets, peers and broker connections gone, a public
+listing taken down; p2p_initialize may start it again (the connection
+switched live: port/linux/game/network_connection.c). Only at the menus,
+with no network game: the game's own sockets are not internet play's */
+void p2p_shutdown(void);
 
 /* on the desktop, before anything else: if this process was started with
 an invite link (halo://join/...) and another copy of the game is running,

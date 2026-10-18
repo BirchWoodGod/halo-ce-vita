@@ -13,15 +13,11 @@ h3 lan ...", "port h3 adhoc ..."):
 - the joining dialog: AD HOC's START GAME or BROWSE GAMES, or AD HOC CO-OP's START GAME, out of
   the ad hoc group: the system's dialog joins it (the Vita's host, as the settings panel's Host
   and Join), then what was asked goes on by itself; A tries again after a failure. It keeps no
-  history: B on what opens next goes back to the lobby;
-- the restart dialog: AD HOC with a connection other than Ad hoc, or SYSTEM LINK with Ad hoc (the
-  connection is set up as the game starts): A sets the settings panel's Connection and restarts
-  the game. -->
+  history: B on what opens next goes back to the lobby. -->
 <menus>
 	<strings name="h3/adhoc_text">
 		<string text="AD HOC GROUP"/>
 		<string text="Try again"/>
-		<string text="Restart"/>
 	</strings>
 
 	<!-- the LAN browser -->
@@ -106,29 +102,4 @@ h3 lan ...", "port h3 adhoc ..."):
 		<child widget="h3/adhoc/back"/>
 	</widget>
 
-	<!-- the restart dialog -->
-	<widget name="h3/restart/panel" left="100" top="120" width="440" height="210" bitmap="h3/panel"/>
-	<widget name="h3/restart/restart_title" type="text" left="112" top="126" width="416" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1"/>
-	<widget name="h3/restart/rule" left="100" top="154" width="440" height="2" bitmap="h3/rule"/>
-	<widget name="h3/restart/restart_text" type="text" left="112" top="164" width="416" height="130" font="h3/font_small" color="#FFCFD9E3"/>
-	<widget name="h3/restart/strip" left="100" top="310" width="440" height="20" bitmap="h3/strip"/>
-	<widget name="h3/restart/a_butn" left="112" top="312" width="16" height="16" bitmap="h3/glyph_cross"/>
-	<widget name="h3/restart/go" type="text" left="132" top="311" width="90" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/adhoc_text" string_index="2"/>
-	<widget name="h3/restart/b_butn" left="230" top="312" width="16" height="16" bitmap="h3/glyph_circle"/>
-	<widget name="h3/restart/back" type="text" left="250" top="311" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/main_items" string_index="10"/>
-	<widget name="h3/adhoc/restart" flags="pass_unhandled_to_focused_child">
-		<on event="a" run="port h3 adhoc restart"/>
-		<on event="b back" back="true"/>
-		<data input="port h3 adhoc restart text"/>
-		<child widget="h3/main/haze"/>
-		<child widget="h3/restart/panel"/>
-		<child widget="h3/restart/restart_title"/>
-		<child widget="h3/restart/rule"/>
-		<child widget="h3/restart/restart_text"/>
-		<child widget="h3/restart/strip"/>
-		<child widget="h3/restart/a_butn"/>
-		<child widget="h3/restart/go"/>
-		<child widget="h3/restart/b_butn"/>
-		<child widget="h3/restart/back"/>
-	</widget>
 </menus>

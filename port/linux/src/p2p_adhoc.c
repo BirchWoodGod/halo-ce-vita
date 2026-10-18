@@ -38,9 +38,12 @@ system link lists, and joining is as on a LAN. Signalling, STUN and UPnP,
 which need the internet, are off in ad hoc play (p2p.c).
 
 Two threads: one waits for the group's datagrams (and sends the beacons),
-one for the relays'. The relays are never closed while the game runs (a
+one for the relays'. The relays are never closed while the bridge runs (a
 group has a handful of machines), so neither thread can find a socket gone
-under it.
+under it. p2p_adhoc_stop (internet play stopped: the lobby's NETWORK left
+AD HOC, network_connection.c) ends both threads, then closes the relays and
+the group's port; a new start begins from nothing but this machine's
+identifier, with a new nonce (the sessions that ended stay retired, p2p.c).
 */
 
 #include "platform.h"
@@ -115,6 +118,10 @@ static struct
 	struct adhoc_peer peers[ADHOC_MAXIMUM_PEERS];
 	unsigned long beacon_time;
 	unsigned long sent, received, dropped;
+	/* the two threads, and the stop asked of them (p2p_adhoc_stop) */
+	pthread_t receive, relay;
+	int receive_started, relay_started;
+	volatile int stopping;
 } adhoc = { 0, PTHREAD_MUTEX_INITIALIZER };
 
 static int elapsed(unsigned long since, unsigned long time)
@@ -250,7 +257,7 @@ static void *receive_thread(void *unused)
 	unsigned char packet[PACKET_BUFFER_SIZE];
 
 	(void)unused;
-	for (;;)
+	while (!__atomic_load_n(&adhoc.stopping, __ATOMIC_ACQUIRE))
 	{
 		unsigned char address[6];
 		unsigned short port = 0;
@@ -328,7 +335,7 @@ static void *relay_thread(void *unused)
 	unsigned char packet[PACKET_BUFFER_SIZE];
 
 	(void)unused;
-	for (;;)
+	while (!__atomic_load_n(&adhoc.stopping, __ATOMIC_ACQUIRE))
 	{
 		int read[ADHOC_MAXIMUM_PEERS];
 		int read_count = 0, write_count = 0, error_count = 0;
@@ -391,8 +398,6 @@ static void *relay_thread(void *unused)
 
 void p2p_adhoc_start(unsigned short tunnel_port)
 {
-	pthread_t thread;
-
 	if (adhoc.started)
 		return;
 	adhoc.started = 1;
@@ -400,11 +405,41 @@ void p2p_adhoc_start(unsigned short tunnel_port)
 	memcpy(adhoc.identifier, p2p_identifier(), P2P_IDENTIFIER_SIZE);
 	posix_random_bytes(adhoc.nonce, NONCE_SIZE);
 	adhoc.beacon_time = p2p_now() - BEACON_INTERVAL;
-	if (pthread_create(&thread, NULL, receive_thread, NULL) == 0)
-		pthread_detach(thread);
-	if (pthread_create(&thread, NULL, relay_thread, NULL) == 0)
-		pthread_detach(thread);
+	__atomic_store_n(&adhoc.stopping, 0, __ATOMIC_RELEASE);
+	adhoc.receive_started = pthread_create(&adhoc.receive, NULL, receive_thread, NULL) == 0;
+	adhoc.relay_started = pthread_create(&adhoc.relay, NULL, relay_thread, NULL) == 0;
 	platform_log("ad hoc: on; waiting for this machine to be in an ad hoc group");
+}
+
+/* the bridge stopped: both threads ended (each within its wait, RECEIVE_WAIT
+or RELAY_WAIT, or a NOT_READY_WAIT), the relays and the group's port closed,
+the machines forgotten */
+void p2p_adhoc_stop(void)
+{
+	int index;
+
+	if (!adhoc.started)
+		return;
+	__atomic_store_n(&adhoc.stopping, 1, __ATOMIC_RELEASE);
+	if (adhoc.receive_started)
+		pthread_join(adhoc.receive, NULL);
+	if (adhoc.relay_started)
+		pthread_join(adhoc.relay, NULL);
+	pthread_mutex_lock(&adhoc.lock);
+	for (index = 0; index < ADHOC_MAXIMUM_PEERS; index++)
+	{
+		if (adhoc.peers[index].used && adhoc.peers[index].relay >= 0)
+			posix_socket_close(adhoc.peers[index].relay);
+	}
+	memset(adhoc.peers, 0, sizeof(adhoc.peers));
+	if (adhoc.opened)
+		posix_adhoc_close();
+	adhoc.opened = 0;
+	adhoc.receive_started = adhoc.relay_started = 0;
+	adhoc.started = 0;
+	pthread_mutex_unlock(&adhoc.lock);
+	platform_log("ad hoc: off (sent %lu, received %lu, dropped %lu)", adhoc.sent, adhoc.received, adhoc.dropped);
+	adhoc.sent = adhoc.received = adhoc.dropped = 0;
 }
 
 /* the session secret two machines' tunnel uses: from their identifiers

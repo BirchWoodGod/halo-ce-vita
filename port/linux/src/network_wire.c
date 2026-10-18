@@ -21,16 +21,22 @@ map and its version otherwise (network_wire.h); DamnationCE (7be58b2b) is
 still 26, and refused (docs/crossplay.md 5.1) */
 static const unsigned short crossplay_accepted_versions[] = { HALO_PORT_CROSSPLAY_NETWORK_VERSION };
 
+/* (-1: not read yet. Read at the network's start, when signalling or the
+game first asks, and kept: a change of network.crossplay takes a restart;
+the connection switched live reads it again, network_wire_reset) */
+static volatile int wire = -1;
+
+void network_wire_reset(void)
+{
+	wire = -1;
+}
+
 int network_wire_crossplay(void)
 {
 #ifdef HALO_DEDICATED_SERVER
 	/* (the servers stay off the crossplay wire) */
 	return 0;
 #else
-	/* (-1: not read yet. Read at the network's start, when signalling or the
-	game first asks, and kept: a change takes a restart) */
-	static volatile int wire = -1;
-
 	if (wire < 0)
 		wire = config_boolean("network.crossplay") && !config_boolean("network.adhoc");
 	return wire;

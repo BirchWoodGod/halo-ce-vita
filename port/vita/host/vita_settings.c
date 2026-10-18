@@ -98,16 +98,19 @@ browser, Server Setup, Direct Link: port/linux/game/menu_functions.c), else
 the Xbox's (System Link, where Y creates a game); then a line says "Online
 menus need bitmaps.map, loc.map: README" (halo_pc_menus_state).
 
-- "Connection" (after a restart) chooses how the Vitas reach each other:
+- "Connection" chooses how the Vitas reach each other (live: the game
+  switches at its menus with no network game, network_connection.c; the
+  Halo 3 lobbies' NETWORK is the same setting, and either shows the
+  other's choice):
   Same Wi-Fi, the default, the system link that works on hardware; Ad hoc
   (p2p_adhoc.c, vita_net.c; not yet verified on hardware): Vitas side by
   side without a router, in the room chosen on the tab (the group joined
   through the system's ad hoc dialog when the game's System Link screen
   needs it); or Online (internet play, port/linux/src/p2p.c; experimental).
-  The game's Halo 3 lobbies ask for the same (their AD HOC: the dialog
-  joins the room's group, or the Connection is set and the game restarted
-  at once after they asked the player: game_adhoc_requests,
-  system_link_shortcut.h).
+  The game asks for the same (Ad hoc chosen, or AD HOC's rows in the Halo 3
+  lobbies: the dialog joins the room's group; leaving Ad hoc leaves it, the
+  Wi-Fi back: game_adhoc_requests, system_link_shortcut.h). What the game
+  runs is the panel's running_network (halo_network_connection).
 - "Join with a code" (Online, on a Vita without the PC menus, whose Direct
   Link does it in the game) types the host's code in with the D-pad, then
   shows Join's steps with how the lookup goes, and Cross opens the game's
@@ -576,8 +579,10 @@ static struct setting settings[] = {
 	in (Online, for a Vita without the in-game PC menus: setting_shown), the
 	modded maps. Hosting, joining and co-op are the game's own Multiplayer
 	menu's: OpenCE's screens, menu_functions.c) */
-	/* (Online: internet play, experimental) */
-	{ "Connection", "HALO_VITA_NETWORK", 1, 3, { "wifi", "adhoc", "online" }, { "Same Wi-Fi", "Ad hoc", "Online" },
+	/* (Online: internet play, experimental. Live: the game switches to it
+	at its menus, port/linux/game/network_connection.c; the Halo 3 lobbies'
+	NETWORK sets the same row) */
+	{ "Connection", "HALO_VITA_NETWORK", 0, 3, { "wifi", "adhoc", "online" }, { "Same Wi-Fi", "Ad hoc", "Online" },
 		"Vitas on one Wi-Fi network play together", 0, TAB_MULTIPLAYER },
 	/* (Crossplay, a switch between two worlds: Off, Vita to Vita, as betas
 	1-4; On, OpenCE's games (OpenCE, ChupathingyCE, DamnationCE hosts and
@@ -1369,10 +1374,11 @@ static void apply_network(void)
 	const char *network = getenv("HALO_VITA_NETWORK");
 
 	snprintf(running_network, sizeof(running_network), "%s", network ? network : "wifi");
+	/* (UPnP whatever the connection: it may go Online later, live) */
+	setenv("HALO_NET_ALLOW_UPNP", "false", 0);
 	if (!strcmp(running_network, "online"))
 	{
 		setenv("HALO_NET_ONLINE", "true", 1);
-		setenv("HALO_NET_ALLOW_UPNP", "false", 0);
 	}
 	else if (!strcmp(running_network, "adhoc"))
 	{
@@ -2906,7 +2912,7 @@ static void show_code(void)
 	letters[column] = cursor[column] = 0;
 	snprintf(text, sizeof(text), "%s\n\n    %s\n    %s\n%s\n%s\n%s",
 		code_for_join ? T("JOIN WITH A CODE\n(the host's Multiplayer tab shows it)") : T("JOIN WITH A CODE"), letters,
-		cursor, strcmp(running_network, "online") ? T("Connection must be Online (restart)") : "",
+		cursor, strcmp(running_network, "online") ? T("Connection must be Online") : "",
 		T("Up/down: letter  Left/right: move"), T("Cross: join  Circle: back"));
 	vgxm_menu_set(text, 2);
 }
@@ -2923,7 +2929,7 @@ static void show_browse(void)
 
 	length = snprintf(text, sizeof(text), "%s", T("PUBLIC GAMES"));
 	if (strcmp(running_network, "online"))
-		length += snprintf(text + length, sizeof(text) - length, "\n%s", T("Connection must be Online (restart)"));
+		length += snprintf(text + length, sizeof(text) - length, "\n%s", T("Connection must be Online"));
 	else if (!browse_count)
 	{
 		/* (why there is none: the brokers out of reach, or no public game:
@@ -3618,7 +3624,7 @@ static void act(const struct setting *setting)
 	others) */
 	case ACTION_ADHOC_JOIN:
 		if (strcmp(running_network, "adhoc"))
-			set_notice("%s", T("Restart the game for Ad hoc first"));
+			set_notice("%s", T("First the game switches to Ad hoc, at its menus"));
 		else if (vita_adhoc_state(NULL, 0) == 2)
 			set_notice(T("In room %d's group already"), choice_of("HALO_ADHOC_ROOM") + 1);
 		else
@@ -3766,7 +3772,7 @@ static void code_input(unsigned long pressed, unsigned long buttons, unsigned lo
 
 		snprintf(code, sizeof(code), "%.4s-%.4s", code_typed, code_typed + 4);
 		if (strcmp(running_network, "online"))
-			set_notice("%s", T("Connection must be Online (restart)"));
+			set_notice("%s", T("Connection must be Online"));
 		else
 		{
 			p2p_join_code(code);
@@ -4048,18 +4054,32 @@ int vita_settings_panel_open(void)
 	return panel_open;
 }
 
-/* (each frame) ad hoc play from the game's Halo 3 menus (system_link_shortcut.h,
-port/linux/game/menu_functions.c): the group's state for them, and their
-requests - the room's group joined through the system's dialog, as the
-guide's Host and Join join it (the room and the dialog way the tab's), or
-the Connection set and the game restarted at once, which the player said
-yes to in the game's menus (at the main menu only, where a restart loses
-nothing: else the panel's own offer, as for a change made on it) */
+/* (each frame) the connection the game runs (network_connection.c, switched
+live: the panel's running_network follows it, halo_network_connection), and
+ad hoc play's group for it (system_link_shortcut.h): its state, and the
+game's requests - the room's group joined through the system's dialog, as
+the guide's Host and Join join it (the room and the dialog way the tab's),
+or left (the connection left Ad hoc: the Wi-Fi back) */
 static void game_adhoc_requests(void)
 {
 	int request = __atomic_load_n(&halo_adhoc_request, __ATOMIC_ACQUIRE);
-	int adhoc = !strcmp(running_network, "adhoc");
+	int running = __atomic_load_n(&halo_network_connection, __ATOMIC_ACQUIRE);
+	int adhoc;
 
+	if (running >= HALO_NETWORK_WIFI && running <= HALO_NETWORK_ONLINE)
+	{
+		static const char *const names[] = { "wifi", "adhoc", "online" };
+
+		if (strcmp(running_network, names[running]))
+		{
+			char line[96];
+
+			snprintf(running_network, sizeof(running_network), "%s", names[running]);
+			snprintf(line, sizeof(line), "settings: the game runs the connection %s now", running_network);
+			vita_host_log(line);
+		}
+	}
+	adhoc = !strcmp(running_network, "adhoc");
 	if (request == HALO_ADHOC_REQUEST_JOIN)
 	{
 		/* (not over the panel, whose own buttons the dialog would take) */
@@ -4068,34 +4088,19 @@ static void game_adhoc_requests(void)
 			if (panel_open)
 				close_panel();
 			vita_adhoc_connect(choice_of("HALO_ADHOC_DIALOG_MODE"), choice_of("HALO_ADHOC_ROOM") + 1);
-			vita_host_log("settings: ad hoc: joining the room's group (the game's menus)");
+			vita_host_log("settings: ad hoc: joining the room's group (the game)");
 		}
+	}
+	else if (request == HALO_ADHOC_REQUEST_LEAVE)
+	{
+		vita_adhoc_leave();
+		vita_host_log("settings: ad hoc: the group left (the game left Ad hoc)");
 	}
 	/* (the group's state set before the request is taken: the game, seeing
 	it taken, reads the join's own state, never the one before) */
 	__atomic_store_n(&halo_adhoc_group, adhoc ? vita_adhoc_state(NULL, 0) : HALO_ADHOC_GROUP_OFF, __ATOMIC_RELEASE);
-	if (request == HALO_ADHOC_REQUEST_NONE)
-		return;
-	__atomic_store_n(&halo_adhoc_request, HALO_ADHOC_REQUEST_NONE, __ATOMIC_RELEASE);
-	if (request == HALO_ADHOC_REQUEST_RESTART_ADHOC || request == HALO_ADHOC_REQUEST_RESTART_WIFI)
-	{
-		char line[96];
-
-		vita_settings_set("HALO_VITA_NETWORK", request == HALO_ADHOC_REQUEST_RESTART_ADHOC ? "adhoc" : "wifi");
-		if (!halo_main_menu_idle())
-		{
-			vita_host_log("settings: Connection set from the game's menus; the restart waits for the main menu");
-			return;
-		}
-		/* (asked already in the game's menus: no second question) */
-		restart_offered = 1;
-		vita_host_log("settings: restarting the game for the Connection the game's menus chose");
-		/* (it does not come back unless it failed) */
-		snprintf(line, sizeof(line), "settings: the restart failed (0x%08X)", (unsigned int)vita_host_restart_game());
-		vita_host_log(line);
-		vita_settings_message(T("Halo CE"),
-			T("The game could not restart itself: close it and start it again for the change."));
-	}
+	if (request != HALO_ADHOC_REQUEST_NONE)
+		__atomic_store_n(&halo_adhoc_request, HALO_ADHOC_REQUEST_NONE, __ATOMIC_RELEASE);
 }
 
 int vita_settings_input(const struct vita_host_pad *pad)

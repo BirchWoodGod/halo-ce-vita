@@ -53,11 +53,12 @@ internet play with:
   A joining one as A on its row there joins it
   (ui_widget_port_join_advertised_game: the same checks, the game's lobby
   next). System Link has no passwords: no row is locked.
-- AD HOC (and the campaign lobby's AD HOC CO-OP) is ad hoc play: with the
-  connection Ad hoc, the ad hoc room's group is joined first through the
-  system's dialog when the Vita is not in it ("port h3 adhoc ..."); with
-  another connection, or SYSTEM LINK with Ad hoc, a dialog offers to set the
-  connection and restart, the connection being set up only at start-up.
+- The lobbies' NETWORK is the settings panel's Connection: ONLINE, SYSTEM
+  LINK and AD HOC (ONLINE CO-OP, SYSTEM LINK CO-OP and AD HOC CO-OP) choose
+  it, and it switches live (network_connection.c: internet play started or
+  stopped, ad hoc play's group joined or left); a short status line under
+  NETWORK says how it goes. AD HOC's rows join the ad hoc room's group first
+  when the Vita is not in it ("port h3 adhoc ...").
 
 Text is typed on the Vita's system keyboard (system_link_shortcut.h
 halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
@@ -86,6 +87,7 @@ halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
 #include "forge.h"
 #include "../src/port_config.h"
 #include "networking/network_client_manager.h"
+#include "network_connection.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -213,7 +215,6 @@ enum
 	_function_h3_adhoc_coop,
 	_function_h3_adhoc_join,
 	_function_h3_adhoc_cancel,
-	_function_h3_adhoc_restart,
 };
 
 /* in port_game_data_input_names' order */
@@ -242,7 +243,7 @@ enum
 	_input_h3_gametypes,
 	_input_h3_campaign_networks,
 	_input_h3_adhoc_joining,
-	_input_h3_adhoc_restart,
+	_input_h3_network_status,
 };
 
 /* what a line of typing is for */
@@ -571,15 +572,10 @@ static char const *const h3_level_names[NUMBER_OF_SINGLE_PLAYER_LEVELS] =
 static char const *const h3_difficulty_names[4] = { "Easy", "Normal", "Heroic", "Legendary" };
 
 /* ---- ad hoc play in the Halo 3 lobbies (the multiplayer lobby's AD HOC,
-the campaign lobby's AD HOC CO-OP). The connection the Vita plays over is
-the settings panel's (Same Wi-Fi, Ad hoc or Online), set up once as the game
-starts (the network, ad hoc play's bridge, p2p_adhoc.c, and this machine's
-address with it): so AD HOC with another connection, or SYSTEM LINK with Ad
-hoc (no Wi-Fi address then), opens a dialog that offers to set the
-connection and restart the game (h3/adhoc/restart: the Vita's host does
-both, system_link_shortcut.h). With the connection Ad hoc, AD HOC's START
-GAME and BROWSE GAMES, and AD HOC CO-OP's START GAME, first join the ad hoc
-room's group through the system's dialog when the Vita is not in it, as the
+the campaign lobby's AD HOC CO-OP). Choosing it switches the connection to
+Ad hoc (network_connection.c), which asks the system's dialog to join the
+ad hoc room's group. AD HOC's START GAME and BROWSE GAMES, and AD HOC
+CO-OP's START GAME, first join the group when the Vita is not in it, as the
 panel's Host and Join do (h3/adhoc/joining), then go on as they would have:
 the profile and the map list, the profile and the LAN browser, or co-op
 hosted and the game's lobby. */
@@ -596,10 +592,6 @@ enum
 
 static struct
 {
-	/* the restart dialog's connection (HALO_ADHOC_REQUEST_RESTART_ADHOC or
-	_WIFI), and whether the restart was asked */
-	int restart_to;
-	boolean restart_asked;
 	/* the joining dialog: what follows the group joined, whether the join
 	was asked, and that next step, to be opened from the main loop
 	(open_then); co-op not hosted then (coop_failed) */
@@ -609,20 +601,6 @@ static struct
 	boolean coop_failed;
 	char said[160];
 } h3_adhoc;
-
-/* whether the connection serves a lobby's network: ad hoc play the
-connection Ad hoc, system link another; else FALSE, the restart dialog's
-connection set */
-static boolean h3_adhoc_connection_serves(boolean adhoc, char const *what)
-{
-	if (adhoc == (config_boolean("network.adhoc") != 0))
-		return TRUE;
-	h3_adhoc.restart_to = adhoc ? HALO_ADHOC_REQUEST_RESTART_ADHOC : HALO_ADHOC_REQUEST_RESTART_WIFI;
-	h3_adhoc.restart_asked = FALSE;
-	platform_log("menus: h3 adhoc: %s chosen, the connection %s: the restart dialog", what,
-		adhoc ? "not Ad hoc" : "Ad hoc");
-	return FALSE;
-}
 
 /* (port h3 adhoc host, browse, coop: the first handler of AD HOC's START
 GAME and BROWSE GAMES, of AD HOC CO-OP's START GAME) in the group, TRUE:
@@ -686,7 +664,8 @@ static void h3_adhoc_joining_update(struct widget_instance *widget)
 	if (h3_adhoc.coop_failed)
 		snprintf(text, sizeof(text), "%s", T("In the ad hoc group, but co-op was not\n"
 			"hosted. Go back and try START GAME again."));
-	else if (asking || group == HALO_ADHOC_GROUP_JOINING || (group == HALO_ADHOC_GROUP_NONE && h3_adhoc.join_asked))
+	else if (asking || group == HALO_ADHOC_GROUP_JOINING || (group == HALO_ADHOC_GROUP_NONE && h3_adhoc.join_asked) ||
+		(group == HALO_ADHOC_GROUP_OFF && network_connection_wanted() == NETWORK_CONNECTION_ADHOC))
 	{
 		snprintf(text, sizeof(text), T("The system's dialog joins the PS Vitas\nnear you, in ad hoc room %s."),
 			setting_get("HALO_ADHOC_ROOM", "1"));
@@ -728,58 +707,14 @@ static void h3_adhoc_joining_update(struct widget_instance *widget)
 	}
 }
 
-/* (port h3 adhoc restart text: the restart dialog's title and text) */
-static void h3_adhoc_restart_update(struct widget_instance *widget)
-{
-	struct widget_instance *screen = screen_of(widget);
-	boolean adhoc = h3_adhoc.restart_to == HALO_ADHOC_REQUEST_RESTART_ADHOC;
-	char text[320];
-
-	text_show(named(screen, "restart_title"), adhoc ? T("AD HOC NEEDS A RESTART") : T("SYSTEM LINK NEEDS A RESTART"));
-	if (h3_adhoc.restart_asked)
-	{
-#ifdef HALO_VITA
-		snprintf(text, sizeof(text), "%s", T("Restarting..."));
-#else
-		/* (no Vita host: nothing set, nothing restarted - system_link_shortcut.c) */
-		snprintf(text, sizeof(text), "%s", T("This build has no ad hoc play: nothing\nwas changed."));
-#endif
-	}
-	else if (adhoc)
-	{
-		snprintf(text, sizeof(text), "%s", T("Ad hoc play is for the PS Vitas near you,\nwith no router. It needs the "
-			"settings\npanel's Connection: Ad hoc, which takes\neffect when the game starts.\n\n"
-			"Set it and restart the game now?"));
-	}
-	else
-	{
-		snprintf(text, sizeof(text), "%s", T("System Link plays with the PS Vitas on\nyour Wi-Fi network. It needs the "
-			"settings\npanel's Connection: Same Wi-Fi, which\ntakes effect when the game starts.\n\n"
-			"Set it and restart the game now?"));
-	}
-	text_show(named(screen, "restart_text"), text);
-}
-
-/* (port h3 adhoc restart: the restart dialog's A) the Vita's host sets the
-connection and restarts the game (system_link_shortcut.h) */
-static void h3_adhoc_restart(void)
-{
-	if (h3_adhoc.restart_to != HALO_ADHOC_REQUEST_RESTART_ADHOC && h3_adhoc.restart_to != HALO_ADHOC_REQUEST_RESTART_WIFI)
-		return;
-	h3_adhoc.restart_asked = TRUE;
-	__atomic_store_n(&halo_adhoc_request, h3_adhoc.restart_to, __ATOMIC_RELEASE);
-	platform_log("menus: h3 adhoc: Connection %s and a restart asked for",
-		h3_adhoc.restart_to == HALO_ADHOC_REQUEST_RESTART_ADHOC ? "Ad hoc" : "Same Wi-Fi");
-}
-
 /* the lobby's NETWORK: LOCAL (this Vita alone: the level started as the
 Xbox's difficulty list's A starts it), or co-op hosted as the old Campaign
 screen's Y on the difficulty hosts it (coop_menu.c): ONLINE CO-OP over
-internet play (the settings panel's Connection: Online; its code shown in
-the waiting screen), SYSTEM LINK CO-OP for the Vitas on the same Wi-Fi, AD
-HOC CO-OP for the Vitas near (the connection Ad hoc: its group joined
-first). The port hosts a network game one way, over the connection the Vita
-runs: the co-op choices differ in what they ask of it. */
+internet play (its code shown in the waiting screen), SYSTEM LINK CO-OP for
+the Vitas on the same Wi-Fi, AD HOC CO-OP for the Vitas near (its group
+joined first). The co-op choices are the connection (the settings panel's
+Connection, network_connection.c): choosing one switches it, and the lobby
+shows the panel's choice as its own. */
 enum
 {
 	_h3_campaign_local,
@@ -841,18 +776,25 @@ static char const *h3_campaign_network_name(short network)
 	return T("LOCAL");
 }
 
-/* (port h3 campaign network set) the network picker's choice; ONLINE CO-OP
-only with internet play (else FALSE: the screen saying how to turn it on
-opens, as the multiplayer lobby's ONLINE does) */
+/* (port h3 campaign network set) the network picker's choice: a co-op one
+the connection too */
 static boolean h3_campaign_network_set(struct widget_instance *widget);
 
+/* the co-op network of the connection chosen */
+static short h3_campaign_network_of_connection(void)
+{
+	short connection = network_connection_wanted();
+
+	return connection == NETWORK_CONNECTION_ONLINE ? _h3_campaign_online : connection == NETWORK_CONNECTION_ADHOC ?
+		_h3_campaign_adhoc : _h3_campaign_system_link;
+}
+
 /* (the settings panel's Host co-op campaign, system_link_shortcut.c: the
-Campaign screen opened for co-op) the lobby opens on co-op, online with
-internet play, ad hoc with the connection Ad hoc */
+Campaign screen opened for co-op) the lobby opens on co-op, over the
+connection */
 void menu_functions_h3_campaign_coop(void)
 {
-	h3_campaign.network = internet_play() ? _h3_campaign_online : config_boolean("network.adhoc") ?
-		_h3_campaign_adhoc : _h3_campaign_system_link;
+	h3_campaign.network = h3_campaign_network_of_connection();
 	platform_log("menus: h3 campaign: network %s (host co-op campaign)", h3_campaign_network_name(h3_campaign.network));
 }
 
@@ -904,10 +846,10 @@ static void h3_campaign_initialize(void)
 			h3_campaign.level = profile.last_single_player_map_played;
 	}
 	h3_campaign.level = (short)PIN(h3_campaign.level, 0, unlocked - 1);
-	/* (internet play turned off since ONLINE CO-OP was chosen: co-op over
-	the connection the Vita has now) */
-	if (h3_campaign.network == _h3_campaign_online && !internet_play())
-		h3_campaign.network = config_boolean("network.adhoc") ? _h3_campaign_adhoc : _h3_campaign_system_link;
+	/* (co-op: over the connection, which the settings panel may have
+	changed since) */
+	if (h3_campaign.network != _h3_campaign_local)
+		h3_campaign.network = h3_campaign_network_of_connection();
 	{
 		boolean corrupted = FALSE;
 
@@ -956,6 +898,9 @@ static void h3_campaign_update(struct widget_instance *widget)
 
 	if (!h3_campaign.initialized)
 		h3_campaign_initialize();
+	/* (co-op follows the connection: the settings panel's change shows) */
+	if (h3_campaign.network != _h3_campaign_local)
+		h3_campaign.network = h3_campaign_network_of_connection();
 	/* (Halo 3's rows are capitals: the letters a to z made capitals, the
 	others as they are) */
 	snprintf(text, sizeof(text), "%s: %s", T("NETWORK"), h3_campaign_network_name(h3_campaign.network));
@@ -1066,17 +1011,11 @@ static boolean h3_campaign_network_set(struct widget_instance *widget)
 {
 	short network = (short)PIN(h3_child_index(widget), 0, NUMBER_OF_H3_CAMPAIGN_NETWORKS - 1);
 
-	if (network == _h3_campaign_online && !internet_play())
+	/* (a co-op network is the connection: switched live) */
+	if (network != _h3_campaign_local)
 	{
-		platform_log("menus: h3 campaign: ONLINE CO-OP chosen, internet play is off");
-		return FALSE;
-	}
-	/* (SYSTEM LINK CO-OP with the connection Ad hoc, AD HOC CO-OP with
-	another: the restart dialog) */
-	if ((network == _h3_campaign_system_link || network == _h3_campaign_adhoc) &&
-		!h3_adhoc_connection_serves(network == _h3_campaign_adhoc, h3_campaign_network_name(network)))
-	{
-		return FALSE;
+		network_connection_choose(network == _h3_campaign_online ? NETWORK_CONNECTION_ONLINE :
+			network == _h3_campaign_adhoc ? NETWORK_CONNECTION_ADHOC : NETWORK_CONNECTION_WIFI);
 	}
 	h3_campaign.network = network;
 	platform_log("menus: h3 campaign: network %s", h3_campaign_network_name(network));
@@ -1717,8 +1656,10 @@ opens the same flows (the server browser, Create Game, the code, the System
 Link and split screen screens), laid out as Halo 3's custom games lobby. Its
 NETWORK is the lobby's own choice, ONLINE (internet play: the settings
 panel's Connection Online), SYSTEM LINK (the Vitas on the same Wi-Fi), AD
-HOC (the Vitas near, the connection Ad hoc: ad hoc play above) or OFFLINE
-(split screen), and picks what START GAME and BROWSE GAMES open. GAME and
+HOC (the Vitas near: ad hoc play above) or OFFLINE (split screen), and
+picks what START GAME and BROWSE GAMES open; the first three are the
+connection (the settings panel's Connection, network_connection.c),
+switched live when chosen, its status said under NETWORK. GAME and
 MAP are the game type and the map the Xbox's lists, after START GAME, open
 on (the ones last used: kept as the Xbox's lists keep them,
 saved_game_files.c), chosen in pickers as Halo 3's. */
@@ -1872,17 +1813,24 @@ static void h3_mp_map_read(void)
 	snprintf(h3_mp.map_other, sizeof(h3_mp.map_other), "%s", map);
 }
 
-/* (the lobby opened) the network the first time (ONLINE with internet play,
-AD HOC with the connection Ad hoc, else SYSTEM LINK), then the player's;
-the map and game type the Xbox's lists would open on */
+/* the lobby's network of the connection chosen */
+static short h3_mp_network_of_connection(void)
+{
+	short connection = network_connection_wanted();
+
+	return connection == NETWORK_CONNECTION_ONLINE ? _h3_network_online : connection == NETWORK_CONNECTION_ADHOC ?
+		_h3_network_adhoc : _h3_network_system_link;
+}
+
+/* (the lobby opened) the network: the connection's (the one used last: the
+settings panel keeps it), or OFFLINE when it was chosen this run; the map
+and game type the Xbox's lists would open on */
 static void h3_mp_initialize(void)
 {
 	if (!h3_mp.initialized)
-	{
 		h3_mp.initialized = TRUE;
-		h3_mp.network = internet_play() ? _h3_network_online : config_boolean("network.adhoc") ? _h3_network_adhoc :
-			_h3_network_system_link;
-	}
+	if (h3_mp.network != _h3_network_offline)
+		h3_mp.network = h3_mp_network_of_connection();
 	menu_functions.browse_lan_pending = FALSE;
 	h3_mp_map_read();
 	h3_mp_gametypes_read();
@@ -1924,6 +1872,10 @@ static void h3_mp_lobby_update(struct widget_instance *widget)
 
 	if (!h3_mp.initialized)
 		h3_mp_initialize();
+	/* (the connection's networks follow it: the settings panel's change
+	shows) */
+	if (h3_mp.network != _h3_network_offline)
+		h3_mp.network = h3_mp_network_of_connection();
 	snprintf(text, sizeof(text), "%s: %s", T("NETWORK"), h3_network_name(h3_mp.network));
 	h3_capitals(text);
 	text_show(named(screen, "network_row"), text);
@@ -2042,23 +1994,32 @@ static void h3_mp_map_set(struct widget_instance *widget)
 	platform_log("menus: h3 mp: map %s", h3_map_names[index]);
 }
 
-/* (port h3 network set) the network picker's choice; ONLINE only with
-internet play (else FALSE: the screen saying how to turn it on opens), AD
-HOC only with the connection Ad hoc and SYSTEM LINK with another (else
-FALSE: the restart dialog opens) */
+/* (port h3 network status: the lobbies' line under NETWORK) the connection's
+status - Online, Connecting..., Same Wi-Fi, Ad hoc, No Wi-Fi, or why Online
+failed (network_connection_status) - as Halo 3's Xbox LIVE indicator; none
+for OFFLINE and LOCAL, which use no connection */
+static void h3_network_status_update(struct widget_instance *widget)
+{
+	struct widget_instance *screen = screen_of(widget);
+	boolean campaign = named(screen, "mission_row") != NULL;
+	char text[128];
+
+	text[0] = 0;
+	if (campaign ? h3_campaign.network != _h3_campaign_local : h3_mp.network != _h3_network_offline)
+		network_connection_status(text, (int)sizeof(text));
+	text_show(widget, text);
+}
+
+/* (port h3 network set) the network picker's choice: ONLINE, SYSTEM LINK
+and AD HOC the connection too, switched live (network_connection.c) */
 static boolean h3_mp_network_set(struct widget_instance *widget)
 {
 	short network = (short)PIN(h3_child_index(widget), 0, NUMBER_OF_H3_NETWORKS - 1);
 
-	if (network == _h3_network_online && !internet_play())
+	if (network != _h3_network_offline)
 	{
-		platform_log("menus: h3 mp: ONLINE chosen, internet play is off");
-		return FALSE;
-	}
-	if ((network == _h3_network_system_link || network == _h3_network_adhoc) &&
-		!h3_adhoc_connection_serves(network == _h3_network_adhoc, h3_network_name(network)))
-	{
-		return FALSE;
+		network_connection_choose(network == _h3_network_online ? NETWORK_CONNECTION_ONLINE :
+			network == _h3_network_adhoc ? NETWORK_CONNECTION_ADHOC : NETWORK_CONNECTION_WIFI);
 	}
 	h3_mp.network = network;
 	platform_log("menus: h3 mp: network %s", h3_network_name(network));
@@ -2911,7 +2872,9 @@ boolean pc_menu_event_function_invoke(
 		menu_functions.status[0] = 0;
 		return TRUE;
 	case _function_mp_require_online:
-		return internet_play();
+		/* (ONLINE chosen: internet play starts at the next frame, before
+		anything is hosted or joined) */
+		return internet_play() || network_connection_wanted() == NETWORK_CONNECTION_ONLINE;
 	case _function_mp_require_lan:
 		return TRUE;
 	case _function_browser_init:
@@ -3169,8 +3132,7 @@ boolean pc_menu_event_function_invoke(
 		menu_functions.lan_since = system_milliseconds();
 		platform_log("menus: the LAN browser looks again");
 		return TRUE;
-	/* (ad hoc play: AD HOC's and AD HOC CO-OP's rows, the joining and the
-	restart dialogs) */
+	/* (ad hoc play: AD HOC's and AD HOC CO-OP's rows, the joining dialog) */
 	case _function_h3_adhoc_host:
 		return h3_adhoc_ready(_h3_adhoc_then_host);
 	case _function_h3_adhoc_browse:
@@ -3186,9 +3148,6 @@ boolean pc_menu_event_function_invoke(
 		if (!h3_adhoc.open_then)
 			h3_adhoc.then = _h3_adhoc_then_none;
 		h3_adhoc.said[0] = 0;
-		return TRUE;
-	case _function_h3_adhoc_restart:
-		h3_adhoc_restart();
 		return TRUE;
 	case _function_coop_campaign:
 	case _function_unwired:
@@ -3272,8 +3231,8 @@ void pc_menu_game_data_function_invoke(
 	case _input_h3_adhoc_joining:
 		h3_adhoc_joining_update(widget);
 		break;
-	case _input_h3_adhoc_restart:
-		h3_adhoc_restart_update(widget);
+	case _input_h3_network_status:
+		h3_network_status_update(widget);
 		break;
 	default:
 		break;

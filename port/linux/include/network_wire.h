@@ -47,6 +47,9 @@ and after), ChupathingyCE's since a501871f (0.7.5a) */
 
 /* nonzero on the crossplay wire */
 int network_wire_crossplay(void);
+/* the choice read again at the next ask (the connection switched live, at
+the menus with no network game: network_connection.c) */
+void network_wire_reset(void);
 /* the network version this machine's wire speaks: HALO_PORT_NETWORK_VERSION
 (18), or HALO_PORT_CROSSPLAY_NETWORK_VERSION */
 unsigned int network_wire_version(void);

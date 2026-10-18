@@ -361,7 +361,6 @@ static char const *const port_function_names[] =
 	"port h3 campaign focus", "port h3 scene", "port settings panel",
 	"port h3 lan init", "port h3 lan dispose", "port h3 lan refresh",
 	"port h3 adhoc host", "port h3 adhoc browse", "port h3 adhoc coop", "port h3 adhoc join", "port h3 adhoc cancel",
-	"port h3 adhoc restart",
 };
 
 /* the port's game data functions (menu_functions.c), from
@@ -375,7 +374,7 @@ static char const *const port_game_data_input_names[] =
 	"port forge lobby", "port forge maps", "port forge browser", "port forge title", "port forge controls",
 	"port h3 mp lobby", "port h3 networks", "port h3 maps", "port h3 gametypes",
 	"port h3 campaign networks",
-	"port h3 adhoc joining", "port h3 adhoc restart text",
+	"port h3 adhoc joining", "port h3 network status",
 };
 
 static struct

@@ -25,6 +25,8 @@ with the host ABI.
 #include <sys/stat.h>
 #include <time.h>
 #include <sys/un.h>
+#include <dirent.h>
+#include <unistd.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -990,4 +992,54 @@ int posix_adhoc_receive(unsigned char *address, unsigned short *port, void *data
 	adhoc_emulated_address(from.sin_addr.s_addr, address);
 	*port = ntohs(from.sin_port);
 	return (int)received;
+}
+
+/* ---------- (tests) this process's threads, by name, and open files
+
+For the connection switched over and over (network_connection.c's census,
+run_netns_online_test.sh netswitch): nothing of internet play's may be left
+behind. Linux's /proc; the thread count (its names comma-separated into
+names), its own threads (those the graphics driver names "<program>:<its
+name>" left out: they come and go with the shaders) through own, and the
+open files' count through files */
+int posix_process_census(char *names, int size, int *own, int *files)
+{
+	DIR *folder;
+	struct dirent *entry;
+	int threads = 0, length = 0;
+
+	if (size > 0)
+		names[0] = 0;
+	*files = 0;
+	*own = 0;
+	folder = opendir("/proc/self/task");
+	while (folder && (entry = readdir(folder)) != NULL)
+	{
+		char path[64], name[32];
+		int handle;
+		ssize_t read_size = 0;
+
+		if (entry->d_name[0] == '.')
+			continue;
+		threads++;
+		snprintf(path, sizeof(path), "/proc/self/task/%.20s/comm", entry->d_name);
+		if ((handle = open(path, O_RDONLY)) >= 0)
+		{
+			read_size = read(handle, name, sizeof(name) - 1);
+			close(handle);
+		}
+		name[read_size > 0 ? read_size : 0] = 0;
+		name[strcspn(name, "\n")] = 0;
+		*own += !strchr(name, ':');
+		if (length < size - 40)
+			length += snprintf(names + length, (size_t)(size - length), "%s%s", length ? "," : "", name);
+	}
+	if (folder)
+		closedir(folder);
+	folder = opendir("/proc/self/fd");
+	while (folder && (entry = readdir(folder)) != NULL)
+		*files += entry->d_name[0] != '.';
+	if (folder)
+		closedir(folder);
+	return threads;
 }
