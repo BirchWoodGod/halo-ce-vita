@@ -25,7 +25,7 @@
 #   h3online the main menu's live servers: five made-up games
 #            (HALO_TEST_BROWSER_GAMES), the three with the most players shown
 #   h3touch  taps (HALO_TEST_TAPS, as the Vita's touch screen's): FORGE on the
-#            main menu opens its dialog, the dialog's Back icon closes it
+#            main menu opens the Forge lobby, the lobby's Leave closes it
 #   h3resume a profile's saved game (a10 on Normal, saved and quit): the lobby
 #            says at Last Checkpoint, and on Heroic that it replaces it
 #   h3pause  a level's map gets the in-game set (ingame.txt): in The Silent
@@ -209,12 +209,12 @@ for case in $cases; do
 		grep -aq "menus: h3 servers: 3 shown of 5: Test game 02 (14/16), Test game 04 (12/16), Test game 01 (7/16)" \
 			"$out/h3online/run.log" || fail h3online "the three fullest games were not shown" ;;
 	h3touch)
-		# (FORGE's row on the main menu, then the dialog's Back: icon and label)
-		run h3touch "$menus_data" 20 "wait:150:12000" HALO_MENU_STYLE=halo3 "HALO_TEST_TAPS=4000:60,342 8000:150,300"
+		# (FORGE's row on the main menu, then the Forge lobby's Leave: icon and label)
+		run h3touch "$menus_data" 20 "wait:150:12000" HALO_MENU_STYLE=halo3 "HALO_TEST_TAPS=4000:60,342 8000:140,455"
 		check_h3 h3touch halo3
-		grep -aq "ui: screen pc.h3.soon.forge" "$out/h3touch/run.log" || fail h3touch "a tap on FORGE did not open its dialog"
+		grep -aq "ui: screen pc.h3.forge.lobby" "$out/h3touch/run.log" || fail h3touch "a tap on FORGE did not open the Forge lobby"
 		[ "$(grep -ac 'ui: screen pc.h3.main.screen' "$out/h3touch/run.log")" -ge 2 ] ||
-			fail h3touch "a tap on the dialog's Back did not go back to the main menu" ;;
+			fail h3touch "a tap on the lobby's Leave did not go back to the main menu" ;;
 	h3resume)
 		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
 			echo "--- h3resume"; echo "SKIP: no HALO_TEST_PROFILE"; continue

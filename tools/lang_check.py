@@ -5,8 +5,9 @@ port/linux/src/lang.c) against the English strings the code marks.
 Every string literal given to T(), N_() or TW(L...) in port/ and source/
 is a key (adjacent literals joined, C escapes undone, as the compiler
 does), and so is the text of each <string text="..."> and each piece of a
-strings="A|B" attribute of the PC menus' XML (port/vita/app0/menus, which
-port/linux/src/menu_files.c translates as it reads them). The settings
+strings="A|B" attribute of the PC menus' XML (port/vita/app0/menus and its
+folders - the Halo 3 set's, halo3/ - which port/linux/src/menu_files.c
+translates as it reads them). The settings
 panel's rows (vita_settings.c's settings[] table: labels, values' names,
 help lines) are checked by vita_settings_test.c, which asks the panel
 itself.
@@ -101,7 +102,7 @@ def xml_keys(root: Path):
     """the PC menus' texts (menu_files.c translates each as it reads it: the
     attribute's text, its \\n made a new line)"""
     keys = {}
-    for path in sorted((root / MENUS_DIR).glob("*.xml")):
+    for path in sorted((root / MENUS_DIR).rglob("*.xml")):
         text = path.read_text(encoding="utf-8")
         for match in re.finditer(r'<string\s+text="([^"]*)"', text):
             key = xml_text(match.group(1))

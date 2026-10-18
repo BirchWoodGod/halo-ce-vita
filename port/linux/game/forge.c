@@ -1495,7 +1495,7 @@ static void forge_hud_update(
 {
 	long object_index;
 
-	snprintf(forge_globals.hud_budget, sizeof(forge_globals.hud_budget), T("Objects %d/%d  \xc2\xb7  AI %d/%d"),
+	snprintf(forge_globals.hud_budget, sizeof(forge_globals.hud_budget), T("Objects %d/%d, AI %d/%d"),
 		forge_globals.placed_count, FORGE_MAXIMUM_OBJECTS, forge_globals.ai_count, FORGE_MAXIMUM_AI);
 	forge_globals.hud_label[0] = 0;
 	forge_globals.hud_label_held = object_try_and_get(forge_globals.held_object_index) != NULL;
