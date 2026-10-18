@@ -120,19 +120,20 @@ void bots_tactics_report(long now);
 sees (or, hurt, where it is: enemy_player_index NONE) called out to its
 team; bots_target_score, whether a teammate called this enemy out just now
 (the bots fight the same one); bots_choose_goal, a place a teammate called
-to help at (attackers and roamers, near enough), the squad's leader to
-follow (not in CTF), and in CTF the squad's staging point on its lane on
-the way to the enemy flag, `objective` (gone to and waited at for the
-partner) - each TRUE with the goal and its surface */
+to help at and the squad's leader to follow (Slayer's roamers), and in CTF,
+on the way to the enemy flag at home (`objective`), where an attacker holds
+for its partner coming up behind - each TRUE with the goal and its surface */
 void bots_squads_callout(long bot_index, long enemy_player_index, real_point3d const *point, long surface_index);
 boolean bots_squads_focus(long bot_index, long enemy_player_index);
 boolean bots_squads_help_goal(long bot_index, real_point3d const *position, real_point3d *goal, long *surface_index);
 boolean bots_squads_follow_goal(long bot_index, real_point3d const *position, real_point3d *goal,
 	long *surface_index);
-boolean bots_squads_stage_goal(long bot_index, real_point3d const *position, real_point3d const *objective,
+boolean bots_squads_pace_goal(long bot_index, real_point3d const *position, real_point3d const *objective,
 	real_point3d *goal, long *surface_index);
-/* bots_ctf_goal: whether the bot is its team's flag carrier's partner (it
-escorts it before others) */
+/* bots_ctf_goal: whether only the flag carrier's partner and the two bots
+nearest it escort it (squads on), and whether the bot is the carrier's
+partner (it escorts it before others) */
+boolean bots_squads_escorts_limited(void);
 boolean bots_squads_partner_of(long bot_index, long player_index);
 
 /* ---------- between the three files */
@@ -179,22 +180,25 @@ struct bots_tactics_bot
 	short post;
 	long post_until_tick;
 	/* squads (bots_squads.c; team games): its squad among its team's
-	attackers or roamers (NONE for none), its partner there (a bot's index,
-	NONE alone), whether it leads; CTF: its squad's staging point passed
-	this life, since when it waits there (0 before); the teammate it follows
-	(where it last went to); the place a teammate called that it goes to,
-	until when; when it last called out */
+	attackers or roamers (NONE for none), its partner there (a bot's index:
+	the leader's its second, the others' the leader; NONE alone), whether
+	it leads; the teammate it follows (where it last went to); the place a
+	teammate called that it goes to, until when; when it last called out */
 	short squad;
 	long partner;
 	boolean leader;
-	boolean staged;
-	long stage_tick;
 	real_point3d follow_point;
 	long follow_surface;
 	real_point3d help_point;
 	long help_surface;
 	long help_until_tick;
 	long callout_tick;
+	/* CTF: held for its partner (bots_squads_pace_goal): where, since when
+	(0 not), the ticks held this life */
+	real_point3d pace_point;
+	long pace_surface;
+	long pace_tick;
+	long pace_ticks;
 };
 
 extern struct bots_tactics_bot bots_tactics_bots[];
@@ -263,10 +267,12 @@ boolean bots_routes_step(void);
 boolean bots_routes_graph_made(void);
 void bots_routes_release_graph(void);
 void bots_routes_reset(void);
-/* the lane (0 the direct route) of the squad of this rank among its team's
-attackers (bots_squads.c: two bots a squad), by the setting; a lane's name; a side lane's waypoint (FALSE past
-its last) */
-short bots_routes_lane_for_rank(short squad);
+/* the lane (0 the direct route) of the bot of this rank among its team's
+attackers without squads, and of the squad of this rank with them
+(bots_squads.c: two bots a squad), by the setting; a lane's name; a side
+lane's waypoint (FALSE past its last) */
+short bots_routes_lane_for_rank(short rank);
+short bots_routes_lane_for_squad(short squad, short team);
 char const *bots_routes_lane_name(short lane);
 boolean bots_routes_lane_waypoint(long lane_index, long waypoint, real_point3d *point);
 /* a search to the bot's waypoint found no way: the lane given up (TRUE when
@@ -292,6 +298,11 @@ unsigned long bots_tactics_random(struct bots_tactics_bot *state);
 assign, once a second); a bot dead (its staging and help forgotten); all
 forgotten (a new map); halo.log's squads line (bots_tactics_report) */
 void bots_squads_assign(void);
+/* the squad of the attacker or roamer of this rank among its team's
+`attackers`: two to a squad, an odd one out in the squad before it */
+short bots_squads_squad_for(short rank, long attackers);
+/* whether squads are on at all (HALO_BOT_SQUADS, not 0) */
+boolean bots_squads_on(void);
 void bots_squads_bot_dead(long bot_index);
 void bots_squads_reset(void);
 void bots_squads_report(long now);

@@ -158,10 +158,11 @@ how far and how wide it sees, how large its aim error is and how fast that
 settles, how fast it turns, how tight its shots must be before it fires.
 
 Squads (port, team games: bots_squads.c): two attackers or roamers to a
-squad, on one lane; in CTF they gather at a staging point on their lane and
-go in together; elsewhere the second follows its leader; the enemies a bot
-sees are called out to its team, drawing teammates near and their fire; and
-only the flag carrier's partner and the two bots nearest it escort it.
+squad, on one lane; in CTF an attacker ahead of its partner holds for it
+before the enemy base, so the two go in together; in Slayer the second
+follows its leader; the enemies a bot sees are called out to its team,
+drawing their fire (and Slayer's roamers near); and only the flag carrier's
+partner and the two bots nearest it escort it.
 
 The simulation: a bot decides from the game state at the tick and its own
 random numbers (seeded per bot and game), so the bots do the same in two
@@ -4178,7 +4179,7 @@ static boolean bots_ctf_escorts(struct bots_bot *bot, long carrier_unit_index, r
 	real distance = bots_distance3d(&carrier->object.position, position);
 	long index, nearer = 0;
 
-	if (!game_engine_has_teams() || (getenv("HALO_BOT_SQUADS") && !atoi(getenv("HALO_BOT_SQUADS"))) ||
+	if (!game_engine_has_teams() || !bots_squads_escorts_limited() ||
 		bots_squads_partner_of((long)(bot - bots_globals.bots), unit_get(carrier_unit_index)->unit.player_index))
 	{
 		return TRUE;
@@ -4653,8 +4654,8 @@ static void bots_choose_goal(struct bots_bot *bot, long player_index, real_point
 			bots_tactics_objective((long)(bot - bots_globals.bots));
 			return;
 		}
-		/* port: a teammate's call near, or the squad's leader away (bots_
-		squads.c): there, as to an enemy last seen */
+		/* port: a roamer: a teammate's call near, or the squad's leader
+		away (bots_squads.c): there, as to an enemy last seen */
 		if (!bot->held_objective &&
 			(bots_squads_help_goal((long)(bot - bots_globals.bots), position, &post, &post_surface_index) ||
 			bots_squads_follow_goal((long)(bot - bots_globals.bots), position, &post, &post_surface_index)))
@@ -4690,9 +4691,9 @@ static void bots_choose_goal(struct bots_bot *bot, long player_index, real_point
 				nearest = index;
 			}
 		}
-		/* port: CTF, the enemy flag at home: the squad's staging point on
-		its lane first, the partner waited for there (bots_squads.c) */
-		if (bots_squads_stage_goal((long)(bot - bots_globals.bots), position, &goals[nearest], &ground, &surface_index))
+		/* port: CTF, the enemy flag at home: held for its squad partner
+		coming up behind (bots_squads.c) */
+		if (bots_squads_pace_goal((long)(bot - bots_globals.bots), position, &goals[nearest], &ground, &surface_index))
 		{
 			bots_set_goal(bot, _bots_goal_objective, &ground, surface_index);
 			return;

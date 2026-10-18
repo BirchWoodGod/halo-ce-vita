@@ -128,6 +128,8 @@ static struct
 	char roles_line[600];
 	/* each team's bots */
 	long team_bots[BOTS_TACTICS_TEAMS];
+	/* its attackers or roamers (bots_roles_assign) */
+	long team_attackers[BOTS_TACTICS_TEAMS];
 } bots_tactics;
 
 /* ---------- small helpers */
@@ -336,6 +338,29 @@ static void bots_roles_assign(void)
 		state->team = teams ? PIN(player->team_index, 0, BOTS_TACTICS_TEAMS - 1) : 0;
 		bots_tactics.team_bots[state->team]++;
 	}
+	/* (how many attackers or roamers each team has: an odd one out joins
+	the squad before it, bots_squads_squad_for) */
+	{
+		long counted_defenders[BOTS_TACTICS_TEAMS], counted_snipers[BOTS_TACTICS_TEAMS], counted_ranks[BOTS_TACTICS_TEAMS];
+
+		csmemset(counted_defenders, 0, sizeof(counted_defenders));
+		csmemset(counted_snipers, 0, sizeof(counted_snipers));
+		csmemset(counted_ranks, 0, sizeof(counted_ranks));
+		csmemset(bots_tactics.team_attackers, 0, sizeof(bots_tactics.team_attackers));
+		for (index = 0; index < BOTS_MAXIMUM; index++)
+		{
+			struct bots_tactics_bot const *state = &bots_tactics_bots[index];
+			short role;
+
+			if (state->team == NONE)
+				continue;
+			role = bots_tactics_enabled() ? bots_roles_for(bots_tactics.game, (short)counted_ranks[state->team]++,
+				bots_tactics.team_bots[state->team], &counted_defenders[state->team], &counted_snipers[state->team]) :
+				(bots_tactics.game == game_engine_slayer ? _bots_role_roamer : _bots_role_attacker);
+			if (role == _bots_role_attacker || role == _bots_role_roamer)
+				bots_tactics.team_attackers[state->team]++;
+		}
+	}
 	for (index = 0; index < BOTS_MAXIMUM; index++)
 	{
 		struct bots_tactics_bot *state = &bots_tactics_bots[index];
@@ -349,8 +374,16 @@ static void bots_roles_assign(void)
 		if (role == _bots_role_attacker || role == _bots_role_roamer)
 		{
 			state->rank = (short)attackers[state->team]++;
-			/* (a squad's two bots on one lane: bots_squads.c) */
-			lane = bots_routes_lane_for_rank(teams ? (short)(state->rank / 2) : state->rank);
+			/* (a squad's two bots on one lane: bots_squads.c; without
+			squads each bot by its own rank, as before) */
+			if (teams && bots_squads_on())
+			{
+				short squad = bots_squads_squad_for(state->rank, bots_tactics.team_attackers[state->team]);
+
+				lane = bots_routes_lane_for_squad(squad, (short)state->team);
+			}
+			else
+				lane = bots_routes_lane_for_rank(state->rank);
 		}
 		if (role != state->role)
 		{
