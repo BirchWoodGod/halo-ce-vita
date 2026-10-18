@@ -60,7 +60,12 @@
 #            FORGE, back: each lobby's camera written into its point of
 #            ui.map and glided to, ring_loop asleep meanwhile, the main menu
 #            waking it; then the same with HALO_MENU_SCENES=0: none
-#   h3characters  the lobbies' characters (scene_object= in menus/halo3; the
+#   h3characters  (PARKED: not in the default cases. The lobbies' Spartans are
+#            out of the lobby screens for now, the owner's call: their
+#            scene_object= attributes are removed, the code and the packs
+#            kept - menus/halo3/README.txt says how to bring them back; run
+#            this case again then. The preview's Spartan is h3customize's.)
+#            the lobbies' characters (scene_object= in menus/halo3; the
 #            menu_spartan scene pack, built from the maps folder's Blood Gulch
 #            the first time: port/linux/game/scene_packs.c,
 #            menu_scene_objects.c): the campaign lobby's two Spartans, the
@@ -131,7 +136,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3characters h3profiles h3proftouch h3customize h3damaged}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3damaged}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
 
@@ -485,6 +490,10 @@ for case in $cases; do
 		[ "$(grep -ac 'ui: screen pc.h3.campaign.screen\|ui: screen pc.h3.mp.screen\|ui: screen pc.h3.forge.lobby' "$out/h3scenes_off/run.log")" -ge 3 ] ||
 			fail h3scenes "HALO_MENU_SCENES=0: the three lobbies did not open" ;;
 	h3characters)
+		# (parked with the lobbies' Spartans: it needs their scene_object= back in the XML)
+		if ! grep -q 'scene_object=' "$HALO_MENUS_FOLDER"/halo3/campaign.xml; then
+			echo "--- h3characters"; echo "SKIP: parked (the lobbies have no scene_object=; menus/halo3/README.txt)"; continue
+		fi
 		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
 			echo "--- h3characters"; echo "SKIP: no HALO_TEST_PROFILE"; continue
 		fi

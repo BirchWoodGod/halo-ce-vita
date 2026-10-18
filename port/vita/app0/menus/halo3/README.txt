@@ -99,7 +99,16 @@ and glides there, ring_loop asleep (menu_functions.c h3 scenes; menus.scenes,
 HALO_MENU_SCENES=0 turns them off). The campaign lobby, the multiplayer
 lobby and the Forge lobby have theirs; the screens opened from them keep it.
 
-Characters: a screen with a scene= may stand characters in front of its camera,
+Characters - PARKED for now (the owner, beta.7: "the Spartans look off, later"):
+the lobbies stand no Spartans; the code, the scene packs and the recipes stay,
+and CUSTOMIZATION's editor still shows its preview Spartan. To bring them back,
+put these attributes back on the lobby screens (as last tuned), and run
+run_menus_test.sh h3characters again (it skips itself while they are out):
+  campaign.xml     h3/campaign/screen  scene_object="menu_spartan 1.15 0.38 -0.6 -15; menu_spartan 0.95 0.43 -0.6 20"
+  multiplayer.xml  h3/mp/screen        scene_object="menu_spartan 0.9 0.30 -0.6 20"
+  forge_lobby.xml  h3/forge/lobby      scene_object="menu_spartan 0.9 0.30 -0.6 20"
+
+A screen with a scene= may stand characters in front of its camera,
 scene_object="<scene pack> <distance> <right> <up> <facing> [; ...]" (world units
 in the camera's frame, degrees turned from facing it): the pack's first tag (a
 biped) holding its weapon, in the player's multiplayer colour
@@ -107,7 +116,7 @@ biped) holding its weapon, in the player's multiplayer colour
 (app0:packs/menu_spartan.txt: the multiplayer cyborg and its assault rifle), is
 built on the machine from the player's own multiplayer map the first time a
 lobby wants it (port/linux/game/scene_packs.c), into the save folder's t/packs.
-The campaign lobby has two, the multiplayer and Forge lobbies one. No pack, no
+The campaign lobby had two, the multiplayer and Forge lobbies one. No pack, no
 multiplayer map, HALO_SCENE_PACKS=0 or the scenes off: no character, nothing
 else changes. menu_scene_spartan_show/_color/_hide (halo_menus.h) put the same
 Spartan in a scene, in a colour: CUSTOMIZATION's editor shows it. The
@@ -123,6 +132,6 @@ the game's keys (a_butn, b_butn, start_butn) for that.
 
 Tests: port/vita/tests/run_menus_test.sh h3probe h3classic h3xbox h3broken
 h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create
-h3mptouch h3coop h3coopguide h3scenes h3characters h3profiles h3proftouch h3customize
+h3mptouch h3coop h3coopguide h3scenes (h3characters: parked) h3profiles h3proftouch h3customize
 h3damaged; the packs': port/vita/tests/run_scene_pack_test.sh; Forge's: port/vita/tests/run_forge_test.sh;
 co-op between two machines: port/vita/tests/run_netns_online_test.sh h3coopmenu.
