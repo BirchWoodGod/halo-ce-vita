@@ -160,7 +160,10 @@ the player model chosen for it, following the focus; CUSTOMIZATION's editor
 shows the same Spartan, recoloured live as COLOR changes
 (menu_scene_spartan_show/_color/_hide, halo_menus.h; menu_functions.c
 h3_profiles_spartan, h3_custom_spartan_preview). Without a pack, or with the
-scenes off, the colour's swatch stays.
+scenes off, the colour's swatch stays. A model is taken once the choice has
+rested on it 300 ms (stepping through MODEL loads none of the models passed),
+and the pack of the one left is let go (scene_packs_release), so any number
+of models can be looked at in one visit.
 
 Touch: the Vita's front screen points in the menus (a finger highlights, a tap
 presses A on the item or the button of a key); the button icons are named as
