@@ -968,3 +968,4 @@
 "This party is local to this PS Vita." = "Este grupo es local en esta PS Vita."
 "Build your own maps with anything from\nany map. It comes in a later update." = "Crea tus propios mapas con cualquier cosa\nde cualquier mapa. Llega en una próxima versión."
 "Save your maps and games and share them\nwith friends. It comes in a later update." = "Guarda tus mapas y partidas y compártelos\ncon amigos. Llega en una próxima versión."
+"CUSTOMIZATION" = "PERSONALIZACIÓN"
