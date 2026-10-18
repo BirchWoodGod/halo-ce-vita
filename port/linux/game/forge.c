@@ -91,7 +91,9 @@ Each logs what it did ("forge: ...").
 #include "objects/objects.h"
 #include "objects/object_types.h"
 #include "physics/collisions.h"
+#include "cache/physical_memory_map.h"
 #include "scenario/scenario.h"
+#include "scenario/scenario_definitions.h"
 #include "structures/structure_bsp_definitions.h"
 #include "tag_files/tag_files.h"
 #include "tag_files/tag_groups.h"
@@ -1018,6 +1020,25 @@ static void forge_tags_write(
 	}
 	fclose(file);
 	platform_log("forge: %ld tags written to %s", count, file_name);
+	/* (the tag cache's room: the tags, then the largest structure bsp
+	loaded after them) */
+	{
+		long cache_file_tag_data_size(void);
+		struct tag_block const *references = &global_scenario_get()->structure_bsp_references;
+		long largest_bsp_size = 0;
+		long reference_index;
+
+		for (reference_index = 0; reference_index < references->count; reference_index++)
+		{
+			struct scenario_structure_bsp_reference const *reference =
+				TAG_BLOCK_GET_ELEMENT(references, reference_index, struct scenario_structure_bsp_reference);
+
+			largest_bsp_size = MAX(largest_bsp_size, reference->file_size);
+		}
+		platform_log("forge: the tag cache: %ld KB of tags, %ld KB the largest of %ld structure bsps, %ld KB free of %ld KB",
+			cache_file_tag_data_size() / 1024, largest_bsp_size / 1024, (long)references->count,
+			((long)TAG_CACHE_SIZE - cache_file_tag_data_size() - largest_bsp_size) / 1024, (long)TAG_CACHE_SIZE / 1024);
+	}
 
 	return;
 }
