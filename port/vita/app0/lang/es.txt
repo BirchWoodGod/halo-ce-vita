@@ -1225,6 +1225,8 @@
 "No games found near you" = "No hay partidas cercanas"
 "AD HOC GROUP" = "GRUPO AD HOC"
 "Try again" = "Reintentar"
+"%ld on your network, %ld online" = "%ld en tu red, %ld en línea"
+"LAN" = "LAN"
 "Connecting..." = "Conectando..."
 "Switching..." = "Cambiando..."
 "No Wi-Fi" = "Sin Wi-Fi"

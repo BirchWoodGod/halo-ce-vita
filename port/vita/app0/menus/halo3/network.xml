@@ -1,15 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- The Halo 3-style multiplayer lobby's local networks (Menu style Halo 3; menu_functions.c "port
 h3 lan ...", "port h3 adhoc ..."):
-- the LAN browser: BROWSE GAMES on SYSTEM LINK or AD HOC, after the profile, opens it in place of
-  the Xbox's System Link list (SYSTEM LINK GAMES), with the same search (the game's own "initialize
-  net game server list"): the server browser's screen (multiplayer.xml: its rows, headers and
-  buttons, under the same names) over the games the System Link list would show - each row its
-  badge (VITA, or PC for a PC build's or a crossplay host's game), the name, game type, map and
-  players; the orange bar on the chosen one, its players and rules under the list; A joins it as A
-  on its row in the System Link list joins it (the game's lobby next), Square looks again, Triangle
-  sorts, the triggers page. System Link has no passwords: no padlock. (No more widgets than the
-  server browser's: the menus' widget memory holds the screen's);
+- the games browser (the LAN browser): BROWSE GAMES, after the profile, opens it in place of the
+  Xbox's System Link list, with the same search (the game's own "initialize net game server
+  list"): the server browser's screen (multiplayer.xml: its rows, headers and buttons, under the
+  same names) over the games the System Link list would show (SYSTEM LINK GAMES; AD HOC GAMES in
+  ad hoc play) and, with the connection Online, the online list's public games after them, in one
+  list (CUSTOM GAMES: the System Link list's marked [LAN]) - each row its badge (VITA, or PC for a
+  PC build's or a crossplay host's game; a padlock for an online game's password), the name, game
+  type, map and players; the orange bar on the chosen one, its players and rules under the list.
+  A joins it: a System Link row as A on its row in the System Link list joins it (the game's lobby
+  next), an online row as the server browser joins it (a password asked first), its host's game
+  then joined from this list once it shows. Square looks again, Triangle sorts, the triggers
+  page. (No more widgets than the server browser's: the menus' widget memory holds the screen's);
 - the joining dialog: AD HOC's START GAME or BROWSE GAMES, or AD HOC CO-OP's START GAME, out of
   the ad hoc group: the system's dialog joins it (the Vita's host, as the settings panel's Host
   and Join), then what was asked goes on by itself; A tries again after a failure. It keeps no

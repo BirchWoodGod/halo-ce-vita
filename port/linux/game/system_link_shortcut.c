@@ -319,7 +319,12 @@ void system_link_shortcut_update(
 
 		if (p2p_joined_host(host, FALSE) && (game = network_game_client_listed_game_of(host)) != NULL)
 		{
+			extern int menu_functions_lan_join_listed(void const *game);
 			int joined = ui_widget_port_join_listed_game(game);
+
+			/* (or the Halo 3 games browser's list, when it is the screen open) */
+			if (joined < 0)
+				joined = menu_functions_lan_join_listed(game);
 
 			if (joined >= 0)
 			{

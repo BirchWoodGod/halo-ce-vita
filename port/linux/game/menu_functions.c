@@ -45,14 +45,18 @@ internet play with:
   System Link screen's profile, then the new game's map list, as Server
   Setup's START), BROWSE GAMES and JOIN WITH CODE. GAME and MAP are what the
   Xbox's game type and map lists open on (kept as they keep them).
-- Its BROWSE GAMES on SYSTEM LINK or AD HOC opens the Halo 3 LAN browser
-  ("port h3 lan ...", halo3/network.xml) in place of the Xbox's System Link
-  list, after the same profile screen: the server browser's rows, sorts and
-  pages over the games the System Link list would show (the game's own
-  discovery, network_game_client_listed_games: each field checked there),
-  A joining one as A on its row there joins it
-  (ui_widget_port_join_advertised_game: the same checks, the game's lobby
-  next). System Link has no passwords: no row is locked.
+- Its BROWSE GAMES opens the Halo 3 games browser (the LAN browser, "port
+  h3 lan ...", halo3/network.xml) in place of the Xbox's System Link list,
+  after the same profile screen: the server browser's rows, sorts and pages
+  over the games the System Link list would show (the game's own discovery,
+  network_game_client_listed_games: each field checked there), A joining
+  one as A on its row there joins it (ui_widget_port_join_advertised_game:
+  the same checks, the game's lobby next). With the connection Online the
+  online list's public games come after them in the same list (the System
+  Link ones marked [LAN]): A joins one as the server browser does (its
+  password first), and its host's game, once reached and listed, is joined
+  from this list (menu_functions_lan_join_listed), with no System Link
+  screen. System Link has no passwords: no System Link row is locked.
 - The lobbies' NETWORK is the settings panel's Connection: ONLINE, SYSTEM
   LINK and AD HOC (ONLINE CO-OP, SYSTEM LINK CO-OP and AD HOC CO-OP) choose
   it, and it switches live (network_connection.c: internet play started or
@@ -140,6 +144,8 @@ static char const pregame_screen[] =
 /* the Halo 3 LAN browser (halo3/network.xml), and how long it says it is
 looking before it says it found none */
 static char const lan_screen[] = "h3/lan/screen";
+/* (a games browser row of the System Link list's: its id's start) */
+#define LAN_ID_PREFIX "lan:"
 #define LAN_LOOKING_MILLISECONDS 4000
 
 /* in port_function_names' order (menu_tags.c) */
@@ -392,6 +398,8 @@ static struct
 	LAN browser), since when it looks (lan_since), its list as last logged */
 	boolean browse_lan_pending;
 	boolean lan;
+	/* (Online: the public games listed after the System Link list's) */
+	long lan_online_count;
 	unsigned long lan_since;
 	char lan_said[192];
 } menu_functions;
@@ -2133,6 +2141,13 @@ static void join_watch(void)
 	else if (state == P2P_LOBBY_JOIN_JOINING)
 	{
 		menu_functions.join_watched = FALSE;
+		/* (the Halo 3 games browser searches already: the host's game is
+		joined there once its list shows it, menu_functions_lan_join_listed) */
+		if (menu_functions.lan)
+		{
+			platform_log("menus: the public game's invite handed on; joined from the games browser once listed");
+			return;
+		}
 		menu_functions.open_system_link = TRUE;
 		platform_log("menus: the public game's invite handed on; the System Link screen next");
 	}
@@ -2166,6 +2181,7 @@ static void multiplayer_update(struct widget_instance *list)
 /* ---- the server browser */
 
 static void browser_large_watch(void);
+static boolean lan_with_online(void);
 
 static void row_column(struct widget_instance *row, char const *name, char const *text)
 {
@@ -2177,8 +2193,8 @@ N made-up games after those listed, for the browser's scrolling and sorts
 (run_netns_online_test.sh browserscroll); not joinable. With
 HALO_TEST_BROWSER_PC=1 too, both platforms (run_menus_test.sh h3browser):
 every second one a PC game (its badge PC, as the crossplay wire's), every
-third from the third one with a password (not in the LAN browser: System
-Link has none; run_menus_test.sh h3lan) */
+third from the third one with a password (not in the games browser without
+the online list: System Link has none; run_menus_test.sh h3lan) */
 static void browser_test_games(void)
 {
 #ifndef HALO_RELEASE
@@ -2193,7 +2209,9 @@ static void browser_test_games(void)
 		struct p2p_lobby_entry *entry = &menu_functions.games[menu_functions.game_count++];
 
 		memset(entry, 0, sizeof(*entry));
-		snprintf(entry->id, sizeof(entry->id), "test%02ld", index);
+		/* (the games browser without the online list: as its own rows) */
+		snprintf(entry->id, sizeof(entry->id), "%stest%02ld", menu_functions.lan && !lan_with_online() ? LAN_ID_PREFIX :
+			"", index);
 		snprintf(entry->name, sizeof(entry->name), "Test game %02ld", index);
 		snprintf(entry->map, sizeof(entry->map), "%s", maps[index % 5]);
 		snprintf(entry->gametype, sizeof(entry->gametype), "%s", gametypes[index % 4]);
@@ -2204,7 +2222,7 @@ static void browser_test_games(void)
 		{
 			if (index % 2)
 				snprintf(entry->badge, sizeof(entry->badge), "%s", T("PC"));
-			entry->locked = index % 3 == 2 && !menu_functions.lan;
+			entry->locked = index % 3 == 2 && (!menu_functions.lan || lan_with_online());
 		}
 	}
 #endif
@@ -2215,6 +2233,20 @@ screen and rules over the games the System Link list shows - the game's own
 discovery (network_client_manager.c: its advertisements, every field
 checked there, network_game_client_listed_games) - with BROWSE GAMES on
 SYSTEM LINK or AD HOC */
+
+/* whether a browser row is the System Link list's (its id "lan:" and the
+advertisement's) or the online list's */
+static boolean lan_entry(struct p2p_lobby_entry const *entry)
+{
+	return !strncmp(entry->id, LAN_ID_PREFIX, sizeof(LAN_ID_PREFIX) - 1);
+}
+
+/* whether the games browser lists the online games too: internet play runs
+(the connection Online) */
+static boolean lan_with_online(void)
+{
+	return menu_functions.lan && internet_play();
+}
 
 /* a scenario's name as the game lists show it: an Xbox map's or campaign
 level's title, else the name itself */
@@ -2241,9 +2273,11 @@ static char const *lan_map_title(char const *map)
 
 /* the browser's games: the System Link list's, as the online browser's
 entries (p2p_lobby_entry: the same rows, sorts and lines) - each one's id
-its advertisement's, the name and map as checked, the gametype the game
-engine's name, the players; the badge VITA, or PC for a PC build's game (a
-crossplay host's, with its badges) */
+"lan:" and its advertisement's, the name and map as checked, the gametype
+the game engine's name, the players; the badge VITA, or PC for a PC
+build's game (a crossplay host's, with its badges) - then, with the
+connection Online, every public game the online list has (p2p_lobby.c's,
+checked there) */
 static void lan_entries(void)
 {
 	static char const *const engines[] = { "", "CTF", "Slayer", "Oddball", "King of the Hill", "Race" };
@@ -2261,7 +2295,7 @@ static void lan_entries(void)
 		int length;
 
 		memset(entry, 0, sizeof(*entry));
-		snprintf(entry->id, sizeof(entry->id), "%s", game->id);
+		snprintf(entry->id, sizeof(entry->id), "%s%s", LAN_ID_PREFIX, game->id);
 		snprintf(entry->name, sizeof(entry->name), "%s", game->name);
 		snprintf(entry->map, sizeof(entry->map), "%s", lan_map_title(game->map));
 		entry->coop = game->cooperative;
@@ -2303,6 +2337,18 @@ static void lan_entries(void)
 			snprintf(entry->rules + length, sizeof(entry->rules) - (size_t)length, "%s", T(": full or starting"));
 		snprintf(entry->players_line, sizeof(entry->players_line), T("%d of %d"), entry->players, entry->maximum);
 	}
+	/* (Online: the public games after them; their joins watched as the
+	server browser's) */
+	if (lan_with_online())
+	{
+		join_watch();
+		browser_large_watch();
+		menu_functions.lan_online_count = p2p_lobby_entries(menu_functions.games + menu_functions.game_count,
+			P2P_LOBBY_MAXIMUM_ENTRIES - (int)menu_functions.game_count);
+		menu_functions.game_count += menu_functions.lan_online_count;
+	}
+	else
+		menu_functions.lan_online_count = 0;
 }
 
 /* (each frame) the browser's title and status: SYSTEM LINK GAMES or AD HOC
@@ -2315,12 +2361,22 @@ static void lan_status(struct widget_instance *screen, char *line, int line_size
 	char said[192];
 	long index;
 
-	text_show(named(screen, "lan_title"), adhoc ? T("AD HOC GAMES") : T("SYSTEM LINK GAMES"));
+	boolean online = lan_with_online();
+
+	text_show(named(screen, "lan_title"), adhoc ? T("AD HOC GAMES") : online ? T("CUSTOM GAMES") : T("SYSTEM LINK GAMES"));
 	message[0] = 0;
 	if (menu_functions.status[0])
 		snprintf(line, line_size, "%s", menu_functions.status);
 	else if (!menu_functions.game_count)
 		snprintf(line, line_size, "%s", looking ? T("Looking for games...") : T("No games found"));
+	else if (online)
+	{
+		long lan_count = 0;
+
+		for (index = 0; index < menu_functions.game_count; index++)
+			lan_count += lan_entry(&menu_functions.games[index]);
+		snprintf(line, line_size, T("%ld on your network, %ld online"), lan_count, menu_functions.game_count - lan_count);
+	}
 	else if (menu_functions.game_count == 1)
 		snprintf(line, line_size, "%s", adhoc ? T("1 game near you") : T("1 game on your network"));
 	else
@@ -2343,7 +2399,16 @@ static void lan_status(struct widget_instance *screen, char *line, int line_size
 		snprintf(line + length, line_size - length, ", %s", T(sorts[menu_functions.sort]));
 	}
 	if (!menu_functions.game_count && !looking)
-		snprintf(message, message_size, "%s", adhoc ? T("No games found near you") : T("No games found on your network"));
+	{
+		char why[96];
+
+		/* (Online: why there is no public game either - the brokers out of
+		reach - else none on the network) */
+		if (online && p2p_lobby_browse_status(why, (int)sizeof(why)) == P2P_LOBBY_BROWSE_UNREACHABLE)
+			snprintf(message, message_size, "%s", why);
+		else
+			snprintf(message, message_size, "%s", adhoc ? T("No games found near you") : T("No games found on your network"));
+	}
 	/* (the list as it changes: the tests read it) */
 	snprintf(said, sizeof(said), "%ld", menu_functions.game_count);
 	for (index = 0; index < menu_functions.game_count && index < 4; index++)
@@ -2351,8 +2416,9 @@ static void lan_status(struct widget_instance *screen, char *line, int line_size
 		struct p2p_lobby_entry const *entry = &menu_functions.games[index];
 		size_t length = strlen(said);
 
-		snprintf(said + length, sizeof(said) - length, "%s%s (%s, %s, %d/%d%s)", index ? ", " : ": ", entry->name,
-			entry->map, entry->gametype, entry->players, entry->maximum, entry->badge[0] ? ", PC" : "");
+		snprintf(said + length, sizeof(said) - length, "%s%s%s (%s, %s, %d/%d%s)", index ? ", " : ": ",
+			online && lan_entry(entry) ? "[LAN] " : "", entry->name, entry->map, entry->gametype, entry->players,
+			entry->maximum, entry->badge[0] ? ", PC" : "");
 	}
 	if (strcmp(said, menu_functions.lan_said))
 	{
@@ -2449,6 +2515,14 @@ static void browser_update(struct widget_instance *list)
 				char badged[P2P_LOBBY_NAME_SIZE + sizeof(entry->badge) + 4];
 
 				snprintf(badged, sizeof(badged), "[%s] %s", rest, entry->name);
+				row_column(child, "row_name", badged);
+			}
+			/* (the System Link list's among the online ones: "[LAN]") */
+			else if (lan_with_online() && lan_entry(entry))
+			{
+				char badged[P2P_LOBBY_NAME_SIZE + 8];
+
+				snprintf(badged, sizeof(badged), "[%s] %s", T("LAN"), entry->name);
 				row_column(child, "row_name", badged);
 			}
 			else
@@ -2629,7 +2703,9 @@ static boolean browser_join(struct widget_instance *widget, boolean *widget_dele
 {
 	struct p2p_lobby_entry const *entry = browser_entry(widget);
 
-	if (menu_functions.lan)
+	/* (the games browser: its System Link rows joined as the System Link
+	list joins them; its online rows as the server browser's, below) */
+	if (menu_functions.lan && (!entry || lan_entry(entry)))
 		return lan_join(widget, widget_deleted);
 	/* (a question unanswered stays no lock: a game chosen again asks anew) */
 	if (!entry)
@@ -2680,7 +2756,7 @@ static boolean lan_join(struct widget_instance *widget, boolean *widget_deleted)
 	menu_functions.chosen_valid = TRUE;
 	menu_functions.status[0] = 0;
 	snprintf(name, sizeof(name), "%s", entry->name);
-	server = network_game_client_listed_game_by_id(entry->id);
+	server = lan_entry(entry) ? network_game_client_listed_game_by_id(entry->id + sizeof(LAN_ID_PREFIX) - 1) : NULL;
 	if (!server)
 	{
 		snprintf(menu_functions.status, sizeof(menu_functions.status), "%s", T("That game is gone"));
@@ -2858,6 +2934,25 @@ static boolean code_join(void)
 }
 
 /* ---------- public code */
+
+/* (system_link_shortcut.c: the host an invite, a code or the online list
+joined, once its game is listed) the game joined from the Halo 3 games
+browser when it is the screen open, as A on its row joins it: 1 joined, 0
+listed but not joined (the player told why), -1 the browser is not open */
+int menu_functions_lan_join_listed(void const *game)
+{
+	struct widget_instance *screen = ui_widget_port_active_screen(0);
+	struct widget_instance *list;
+	boolean deleted = FALSE;
+
+	if (!menu_functions.lan || !screen || !game || !(list = named(screen, "list")) ||
+		list->type != _ui_widget_type_column_list || !list->focused_child)
+	{
+		return -1;
+	}
+	platform_log("menus: the games browser joins the joined host's game");
+	return ui_widget_port_join_advertised_game(list, game, &deleted) ? 1 : 0;
+}
 
 boolean pc_menu_event_function_invoke(
 	struct widget_instance *widget,
@@ -3085,7 +3180,8 @@ boolean pc_menu_event_function_invoke(
 		pc_menu_functions_screen) */
 		menu_functions.create_pending = FALSE;
 		menu_functions.browse_lan_pending = TRUE;
-		platform_log("menus: h3 mp: browse the system link games; the profile, then the LAN browser");
+		platform_log("menus: h3 mp: browse the %s games; the profile, then the LAN browser", h3_mp.network ==
+			_h3_network_online ? "online and system link" : "system link");
 		return TRUE;
 	case _function_h3_map_set:
 		h3_mp_map_set(widget);
@@ -3121,15 +3217,26 @@ boolean pc_menu_event_function_invoke(
 		menu_functions.page = 0;
 		menu_functions.lan_since = system_milliseconds();
 		menu_functions.lan_said[0] = 0;
+		menu_functions.join_watched = FALSE;
 		browser_view_reset(&menu_functions.view);
-		platform_log("menus: the LAN browser (%s)", config_boolean("network.adhoc") ? "ad hoc" : "system link");
+		/* (Online: the public games too, as the server browser lists them) */
+		if (internet_play())
+			p2p_lobby_browse(1);
+		platform_log("menus: the LAN browser (%s)", config_boolean("network.adhoc") ? "ad hoc" : internet_play() ?
+			"system link and online" : "system link");
 		return TRUE;
 	case _function_h3_lan_dispose:
 		menu_functions.lan = FALSE;
+		/* (a locked online game's password screen next: its listing kept,
+		which the join needs; the server browser's rule) */
+		if (!menu_functions.open_password)
+			p2p_lobby_browse(0);
 		return TRUE;
 	case _function_h3_lan_refresh:
 		menu_functions.status[0] = 0;
 		menu_functions.lan_since = system_milliseconds();
+		if (internet_play())
+			p2p_lobby_refresh();
 		platform_log("menus: the LAN browser looks again");
 		return TRUE;
 	/* (ad hoc play: AD HOC's and AD HOC CO-OP's rows, the joining dialog) */

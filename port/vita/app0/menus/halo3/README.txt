@@ -25,9 +25,9 @@ these screens stand for the Xbox's own, over the same animated Halo ring:
   split screen), GAME and MAP (pickers: the game type and map the Xbox's lists
   open on after START GAME), START GAME (ONLINE: Create Game; SYSTEM LINK and
   AD HOC: the profile, then the new game's map list; OFFLINE: split screen's),
-  EDIT GAME TYPES (the Xbox's), BROWSE GAMES (ONLINE: the server browser,
-  CUSTOM GAMES; SYSTEM LINK and AD HOC: the profile, then the LAN browser,
-  network.xml) and JOIN WITH CODE; ONLINE, SYSTEM LINK and AD HOC are the
+  EDIT GAME TYPES (the Xbox's), BROWSE GAMES (the profile, then the games
+  browser, network.xml: ONLINE the System Link and the online games in one
+  list) and JOIN WITH CODE; ONLINE, SYSTEM LINK and AD HOC are the
   settings panel's Connection (port/linux/game/network_connection.c),
   switched live when chosen, its status in a line under NETWORK (Online,
   Connecting..., Same Wi-Fi, Ad hoc, No Wi-Fi); the map's picture, "<game> on <map>", "1 Player (N max)" and the
@@ -36,12 +36,14 @@ these screens stand for the Xbox's own, over the same animated Halo ring:
   widget names; the browser's rows show a VITA or PC badge with a lock for a
   password. When internet play is off, ONLINE's rows open a dialog saying how to
   turn it on.
-- network.xml: the lobby's local networks' screens - the LAN browser (SYSTEM
-  LINK GAMES or AD HOC GAMES: the server browser's screen over the games the
-  Xbox's System Link list would show, the game's own search and join; no
-  padlocks, System Link has no passwords) and the joining dialog (AD HOC out
-  of the ad hoc group: the system's dialog joins it, then what was asked
-  goes on).
+- network.xml: the games browser (BROWSE GAMES, after the profile: the
+  server browser's screen over the games the Xbox's System Link list would
+  show, the game's own search and join - SYSTEM LINK GAMES, AD HOC GAMES -
+  and, with the connection Online, the online list's public games too, in
+  one list, CUSTOM GAMES, the System Link ones marked [LAN]; padlocks for
+  the online games' passwords, System Link has none) and the joining dialog
+  (AD HOC out of the ad hoc group: the system's dialog joins it, then what
+  was asked goes on).
 - password.xml: the password screen of a game with one (it stands for OpenCE's,
   pc\join\password\screen, which the browser opens).
 In each level's map (ingame.txt):

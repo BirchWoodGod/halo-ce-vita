@@ -124,8 +124,9 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 
 	<!-- the lobby: NETWORK, GAME and MAP open their pickers; START GAME hosts as the network says
 	(ONLINE: Create Game; SYSTEM LINK and AD HOC: the System Link screen's profile, then the new
-	game's map list, as its Y; OFFLINE: split screen's), as do BROWSE GAMES (ONLINE: the server
-	browser; SYSTEM LINK and AD HOC: the profile, then the LAN browser, halo3/network.xml) - AD
+	game's map list, as its Y; OFFLINE: split screen's), as do BROWSE GAMES (the profile, then the
+	games browser, halo3/network.xml: ONLINE the System Link list's games and the online list's in
+	one list, SYSTEM LINK the System Link list's, AD HOC the ad hoc group's) - AD
 	HOC's rows first join the ad hoc group when the Vita is out of it (the joining dialog, which
 	goes on itself) - the rows of the other networks hidden (port h3 mp lobby); ONLINE, SYSTEM
 	LINK and AD HOC are the settings panel's Connection, switched live when chosen, its status
@@ -158,8 +159,11 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 	<widget name="h3/mp/edit_row" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/mp_text" string_index="4">
 		<on event="a start" open="ui\shell\main_menu\settings_select\multiplayer_setup\playlist_select\gametype_select_screen"/>
 	</widget>
+	<!-- (ONLINE's BROWSE GAMES: the profile, then the games browser - the System Link list's games
+	and the online list's, in one list, halo3/network.xml) -->
 	<widget name="h3/mp/browse_online" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/mp_text" string_index="2">
-		<on event="a start" run="port mp require online" open="h3/browser/screen" otherwise="h3/mp/offline"/>
+		<on event="a start" run="port h3 browse system link"/>
+		<on event="a start" run="error if no network connection" open="ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen"/>
 	</widget>
 	<widget name="h3/mp/browse_link" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/mp_text" string_index="2">
 		<on event="a start" run="port h3 browse system link"/>

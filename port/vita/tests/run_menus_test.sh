@@ -42,7 +42,8 @@
 #            hosts a system link game (the profile, then the Xbox's map list)
 #   h3browser  internet play on (its brokers unreachable: TEST-NET addresses)
 #            with 16 made-up games of both platforms (HALO_TEST_BROWSER_GAMES,
-#            HALO_TEST_BROWSER_PC): BROWSE GAMES opens the Halo 3 browser, a
+#            HALO_TEST_BROWSER_PC): BROWSE GAMES, the profile, the Halo 3
+#            games browser with the online list's games (CUSTOM GAMES), a
 #            locked game the Halo 3 password screen, whose JOIN GAME says the
 #            game is no longer listed
 #   h3create  START GAME on ONLINE: Create Game; its GAME TYPE picker, the
@@ -357,14 +358,16 @@ for case in $cases; do
 			fail h3mp "the profile did not lead to the map list"
 		grep -aq "ui: screen pc.mp.screen" "$log" && fail h3mp "OpenCE's Multiplayer screen opened with Menu style Halo 3" ;;
 	h3browser)
-		# (down five to BROWSE GAMES, A; down to the second game - locked -, A: its password;
-		# A: typed, down, A: JOIN GAME)
-		run h3browser "$menus_data" 45 "$h3mppad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:4000 down:150:600 a wait:150:4000 a wait:150:2000 down:150:600 a wait:150:4000" \
+		# (down five to BROWSE GAMES, A: the profile (A joins, A the profile, A): the games
+		# browser; down to the second game - locked -, A: its password; A: typed, down, A: JOIN
+		# GAME)
+		run h3browser "$menus_data" 60 "$h3mppad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:5000 down:150:600 a wait:150:4000 a wait:150:2000 down:150:600 a wait:150:4000" \
 			HALO_MENU_STYLE=halo3 $h3net HALO_TEST_BROWSER_GAMES=16 HALO_TEST_BROWSER_PC=1 HALO_TEST_TEXT_INPUT=secret
 		check_h3 h3browser halo3
 		log=$out/h3browser/run.log
 		grep -aq "menus: h3 mp lobby: NETWORK: ONLINE" "$log" || fail h3browser "NETWORK was not ONLINE with internet play on"
-		grep -aq "ui: screen pc.h3.browser.screen" "$log" || fail h3browser "BROWSE GAMES did not open the Halo 3 browser"
+		grep -aq "ui: screen pc.h3.lan.screen" "$log" && grep -aq "menus: the LAN browser (system link and online)" "$log" ||
+			fail h3browser "BROWSE GAMES did not open the Halo 3 games browser with the online games"
 		grep -aq "menus: the server browser's game 2 of 16 chosen: Test game 02" "$log" ||
 			fail h3browser "the browser did not list the 16 games, the fullest first"
 		grep -aq "menus: Halo 3 screen h3/password/screen for pc.join.password.screen" "$log" ||

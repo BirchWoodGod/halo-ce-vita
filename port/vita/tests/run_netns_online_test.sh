@@ -234,8 +234,10 @@
 #            play there (Connecting..., then Online: the broker reached); the
 #            host's START GAME, Create Game (its name typed, public), the
 #            profile, the map and the game type; the joiner's BROWSE GAMES,
-#            the Halo 3 server browser, A on the host's game: the System Link
-#            screen, joined. The host starts it, and both must play it
+#            the profile, the Halo 3 games browser (the online games with the
+#            System Link ones), A on the host's game: joined from that list
+#            once the host is reached, no System Link screen. The host starts
+#            it, and both must play it
 #   netswitch one copy switches its connection over and over at the main
 #            menu (HALO_NETWORK_TEST_SWITCH: Online, Same Wi-Fi, Ad hoc on an
 #            emulated group, HALO_NETWORK_TEST_SWITCH_ROUNDS times, 5 by
@@ -1925,11 +1927,11 @@ h3online)
 		; host_pid=$last_pid
 	sleep 25
 	# (MULTIPLAYER: the lobby on SYSTEM LINK; NETWORK, up to ONLINE, A; a while for the broker;
-	# down five to BROWSE GAMES, A: the Halo 3 server browser; a while, A on the host's game:
-	# the System Link screen (A joins, A the profile, A), the game joined by itself)
+	# down five to BROWSE GAMES, A: the profile (A joins, A the profile, A): the games browser;
+	# a while, A on the host's game: joined from there once the host is reached)
 	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=false \
 		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:2 \
-		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:10000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:8000 a wait:150:8000 a wait:150:2000 a wait:150:2000 a" \
+		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:10000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:10000 a" \
 		; join_pid=$last_pid
 	wait $join_pid $host_pid 2>/dev/null
 	hl=$out/host/run.log jl=$out/joiner/run.log
@@ -1944,8 +1946,12 @@ h3online)
 	done
 	grep -aq "menus: Server Setup: NetHost, 16 players, public" "$hl" || fail "the host's Create Game did not set the game up"
 	grep -aq "menus: Create Game > Internet: the game's server started" "$hl" || fail "the host's game was not created"
-	grep -aq "ui: screen pc.h3.browser.screen" "$jl" || fail "the joiner's BROWSE GAMES did not open the Halo 3 browser"
+	grep -aq "ui: screen pc.h3.lan.screen" "$jl" || fail "the joiner's BROWSE GAMES did not open the Halo 3 games browser"
 	grep -aq "menus: joining the public game NetHost" "$jl" || fail "the joiner did not join the host's game from the browser"
+	grep -aq "menus: the games browser joins the joined host's game" "$jl" ||
+		fail "the host's game was not joined from the games browser"
+	grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected.server_list" "$jl" &&
+		fail "the Xbox's System Link list opened"
 	grep -aq "system link: in another's lobby" "$jl" || fail "the joiner did not reach the host's lobby"
 	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
 	echo "joiner's seconds with two players playing: $two"
