@@ -680,7 +680,9 @@ Gulch.
   checks and fuzzes packs alone (cut short, grown, bytes changed with and
   without their CRCs made right, pointers made to point past the pack, counts
   made huge, header fields changed): every copy is refused or, if still a
-  pack, loads clean twice; none crashes.
+  pack, loads clean twice; none crashes, also with the pack code, the walk and
+the validator built with AddressSanitizer (which found one: a crafted root at
+a pack's very end read past it, fixed in tag_relocate.c for maps too).
 - **Loading** (between frames): the tags read right after the map's tags (the
   structure bsp loads at the top of the tag cache; the room between is the
   packs'), given tag indices after the table's, their file offsets moved to a
