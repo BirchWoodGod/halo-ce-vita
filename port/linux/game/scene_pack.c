@@ -42,6 +42,7 @@ correct.
 #include "sound/sound_definitions.h"
 
 #include "scene_pack.h"
+#include "scene_pack_ce.h"
 #include "tag_schema.h"
 #include "tag_relocate.h"
 #include "../../third_party/zlib/zlib_prefixed.h"
@@ -169,6 +170,22 @@ struct build_buffer
 	boolean index;
 	unsigned long header_offset;
 	unsigned long data_offset;
+	/* (a Custom Edition model's: its bytes made by the builder,
+	scene_pack_ce_part_buffers, not the source's) */
+	unsigned char *made;
+};
+
+/* (a Custom Edition source's) a bitmap's pixels or a sound permutation's
+samples, made this build's as they are written (scene_pack_ce.c): the
+bitmap's or the permutation's place in the pack's tags, and its tag (the
+source's index: a bitmap's channel order) */
+struct build_item
+{
+	unsigned long location;
+	boolean bitmap;
+	long source_index;
+	/* (a permutation's) its sound's place in the pack's tags */
+	unsigned long sound_location;
 };
 
 /* a pointer of the pack to a buffer's header or bytes, made once they have
@@ -224,9 +241,15 @@ struct build_state
 	struct scene_pack_build_result *result;
 
 	/* the source's tag data (as the Xbox has it, at its tag cache's
-	address) and its table */
+	address; a Custom Edition map's moved to where it is) and its table */
 	unsigned char *tags;
 	unsigned long tags_size;
+	unsigned long source_address;
+	/* (a Custom Edition map's: scene_pack_ce.c) */
+	struct scene_pack_ce *custom_edition;
+	struct build_item *items;
+	long item_count;
+	long item_capacity;
 	unsigned long instances;
 	long source_count;
 	unsigned long vertex_buffers;
@@ -265,6 +288,7 @@ struct build_state
 	unsigned short model_part_layout;
 	long walked;
 	boolean failed;
+	int volatile const *cancel;
 };
 
 /* ---------- globals */
@@ -566,6 +590,43 @@ boolean scene_pack_recipe_parse(
 				return FALSE;
 			}
 		}
+		else if (!strcmp(word, "cemap") && *rest)
+		{
+			struct scene_pack_recipe_custom_edition_map *map;
+			char name[SCENE_PACK_NAME_SIZE + 1];
+			char size_text[16];
+			char checksum_text[16];
+			char extra[2];
+			char *end;
+			unsigned long long size;
+
+			if (recipe->custom_edition_map_count >= SCENE_PACK_MAXIMUM_MAPS ||
+				sscanf(rest, "%32s %15s %15s %1s", name, size_text, checksum_text, extra) != 3 ||
+				strlen(name) >= SCENE_PACK_NAME_SIZE || !name_valid(name) ||
+				strspn(size_text, "0123456789") != strlen(size_text) || strlen(size_text) > 10 ||
+				strlen(checksum_text) != 8 || strspn(checksum_text, "0123456789abcdefABCDEF") != 8)
+			{
+				snprintf(why, why_size, "the recipe's line %ld names a Custom Edition map that cannot be one", line_number);
+				return FALSE;
+			}
+			for (size = 0, end = size_text; *end; end++)
+				size = size * 10 + (unsigned long long)(*end - '0');
+			if (!size || size > 0x7FFFFFFFULL)
+			{
+				snprintf(why, why_size, "the recipe's line %ld names a Custom Edition map that cannot be one", line_number);
+				return FALSE;
+			}
+			map = &recipe->custom_edition_maps[recipe->custom_edition_map_count++];
+			memcpy(map->name, name, strlen(name) + 1);
+			map->file_size = (unsigned long)size;
+			map->checksum = (unsigned long)strtoul(checksum_text, &end, 16);
+		}
+		else if (!strcmp(word, "unit") && !strcmp(rest, "multiplayer") && recipe->root_count < SCENE_PACK_MAXIMUM_ROOTS)
+		{
+			recipe->roots[recipe->root_count].group_tag = 'unit';
+			recipe->roots[recipe->root_count].path[0] = 0;
+			recipe->root_count++;
+		}
 		else if (!strcmp(word, "tag") && recipe->root_count < SCENE_PACK_MAXIMUM_ROOTS &&
 			recipe_tag(rest, &recipe->roots[recipe->root_count], TRUE))
 		{
@@ -588,9 +649,14 @@ boolean scene_pack_recipe_parse(
 			return FALSE;
 		}
 	}
-	if (!recipe->name[0] || !recipe->map_count || !recipe->root_count)
+	if (!recipe->name[0] || !(recipe->map_count || recipe->custom_edition_map_count) || !recipe->root_count)
 	{
 		why_set(why, why_size, "the recipe has no pack name, map or tag%s", NULL);
+		return FALSE;
+	}
+	if (recipe->map_count && recipe->custom_edition_map_count)
+	{
+		why_set(why, why_size, "the recipe names both Xbox and Custom Edition maps%s", NULL);
 		return FALSE;
 	}
 
@@ -635,9 +701,46 @@ boolean scene_pack_recipe_parse(
 		hash = fnv_bytes(hash, "g", 1);
 		hash = fnv_bytes(hash, group, 4);
 	}
-	snprintf(version, sizeof(version), "v%d.%d", SCENE_PACK_VERSION, SCENE_PACK_BUILDER_VERSION);
+	for (index = 0; index < recipe->custom_edition_map_count; index++)
+	{
+		struct scene_pack_recipe_custom_edition_map const *map = &recipe->custom_edition_maps[index];
+		char const *name = map->name;
+		unsigned char identity[8];
+
+		hash = fnv_bytes(hash, "c", 1);
+		for (; *name; name++)
+		{
+			unsigned char character = (unsigned char)lower((unsigned char)*name);
+
+			hash = fnv_bytes(hash, &character, 1);
+		}
+		write_u32(identity, map->file_size);
+		write_u32(identity + 4, map->checksum);
+		hash = fnv_bytes(hash, identity, sizeof(identity));
+	}
+	snprintf(version, sizeof(version), "v%d.%d%s", SCENE_PACK_VERSION, SCENE_PACK_BUILDER_VERSION,
+		recipe->custom_edition_map_count ? scene_pack_custom_edition_builder_version() : "");
 	recipe->hash = fnv_bytes(hash, version, strlen(version));
 	return TRUE;
+}
+
+unsigned long scene_pack_recipe_size(
+	void)
+{
+	return sizeof(struct scene_pack_recipe);
+}
+
+char const *scene_pack_recipe_custom_edition_map(
+	struct scene_pack_recipe const *recipe,
+	short index)
+{
+	return index >= 0 && index < recipe->custom_edition_map_count ? recipe->custom_edition_maps[index].name : NULL;
+}
+
+boolean scene_pack_recipe_root_is_multiplayer_unit(
+	struct scene_pack_recipe_tag const *tag)
+{
+	return tag->group_tag == 'unit' && !tag->path[0];
 }
 
 /* ---------- the source map */
@@ -678,6 +781,24 @@ static long file_size_get(FILE *file)
 	return size;
 }
 
+boolean scene_pack_source_check(
+	struct scene_pack_recipe const *recipe,
+	char const *maps_directory,
+	char *map_name,
+	long map_name_size,
+	unsigned long long *source_hash,
+	char *why,
+	long why_size)
+{
+	if (recipe->custom_edition_map_count)
+		return scene_pack_ce_source_check(recipe, maps_directory, map_name, map_name_size, source_hash, why, why_size);
+	if (scene_pack_source_find(recipe, maps_directory, map_name, map_name_size, source_hash))
+		return TRUE;
+	if (why && why_size > 0)
+		snprintf(why, (size_t)why_size, "none of its maps (%s...) is in the maps folder", recipe->maps[0]);
+	return FALSE;
+}
+
 boolean scene_pack_source_find(
 	struct scene_pack_recipe const *recipe,
 	char const *maps_directory,
@@ -686,6 +807,9 @@ boolean scene_pack_source_find(
 	unsigned long long *source_hash)
 {
 	short index;
+
+	if (recipe->custom_edition_map_count)
+		return scene_pack_ce_source_check(recipe, maps_directory, map_name, map_name_size, source_hash, NULL, 0);
 
 	for (index = 0; index < recipe->map_count; index++)
 	{
@@ -914,9 +1038,9 @@ static unsigned long blob_alloc(struct build_state *state, unsigned long size)
 data: NULL otherwise */
 static unsigned char *source_at(struct build_state const *state, unsigned long address, unsigned long size)
 {
-	unsigned long offset = address - 0x803A6000UL;
+	unsigned long offset = address - state->source_address;
 
-	if (address < 0x803A6000UL || offset > state->tags_size || size > state->tags_size - offset)
+	if (address < state->source_address || offset > state->tags_size || size > state->tags_size - offset)
 		return NULL;
 	return state->tags + offset;
 }
@@ -990,6 +1114,23 @@ static long pack_tag_add(struct build_state *state, long index)
 	instance = source_instance(state, index);
 	name = source_tag_name(state, index);
 	group_tag = instance ? read_u32(instance) : 0;
+	/* (a Custom Edition map's gbxmodel made this build's model as it joins
+	the pack: scene_pack_ce.c) */
+	if (instance && name && state->custom_edition && group_tag == 'mod2' && !stripped(state, group_tag, name) &&
+		!stripped(state, 'mode', name))
+	{
+		char why[SCENE_PACK_WHY_SIZE];
+
+		if (!scene_pack_ce_model_convert(state->custom_edition, read_u32(instance + 20), index, why, sizeof(why)))
+		{
+			build_fail(state, "%s", why);
+			return NONE;
+		}
+		write_u32(instance, 'mode');
+		write_u32(instance + 4, (unsigned long)NONE);
+		write_u32(instance + 8, (unsigned long)NONE);
+		group_tag = 'mode';
+	}
 	if (!instance || !name || stripped(state, group_tag, name))
 	{
 		/* (-2: left out) */
@@ -1019,7 +1160,7 @@ static long pack_tag_add(struct build_state *state, long index)
 	tag->parent_group_tags[1] = group->parent_group_tags[1];
 	tag->source_base = read_u32(instance + 20);
 	tag->root_size = (unsigned long)group->definition->size;
-	tag->name = name;
+	tag->name = state->custom_edition ? scene_pack_ce_tag_name(state->custom_edition, index, name) : name;
 	if (!source_at(state, tag->source_base, tag->root_size))
 	{
 		char text[5];
@@ -1363,9 +1504,50 @@ static void buffer_fixup(struct build_state *state, unsigned long location, long
 
 /* a model part's buffers (the part's at source, copied to offset): copied
 with it, its pointers to them made the pack's once they have places */
+/* a buffer the builder made (a Custom Edition model part's): its place */
+static long buffer_made(struct build_state *state, unsigned char *bytes, unsigned long size, boolean index)
+{
+	if (!bytes || !size || !grow((void **)&state->buffers, &state->buffer_capacity, state->buffer_count,
+		sizeof(struct build_buffer), SCENE_PACK_MAXIMUM_BUFFERS))
+	{
+		free(bytes);
+		build_fail(state, "the pack would have more buffers than a pack may%s", NULL);
+		return NONE;
+	}
+	memset(&state->buffers[state->buffer_count], 0, sizeof(struct build_buffer));
+	state->buffers[state->buffer_count].size = size;
+	state->buffers[state->buffer_count].index = index;
+	state->buffers[state->buffer_count].made = bytes;
+	return state->buffer_count++;
+}
+
 static void model_part_buffers(struct build_state *state, unsigned long source, unsigned long offset)
 {
 	unsigned char *part = source_at(state, source, MODEL_PART_SIZE);
+
+	/* (a Custom Edition model's part: its vertices compressed and strip
+	copied from the map's model data, scene_pack_ce.c) */
+	if (state->custom_edition && part)
+	{
+		unsigned char *vertices = NULL, *indices = NULL;
+		unsigned long vertex_bytes = 0, index_bytes = 0;
+		char why[SCENE_PACK_WHY_SIZE];
+		long index_buffer, vertex_buffer;
+
+		if (!scene_pack_ce_part_buffers(state->custom_edition, source, &vertices, &vertex_bytes, &indices, &index_bytes,
+			why, sizeof(why)))
+		{
+			build_fail(state, "%s", why);
+			return;
+		}
+		index_buffer = buffer_made(state, indices, index_bytes, TRUE);
+		vertex_buffer = buffer_made(state, vertices, vertex_bytes, FALSE);
+		buffer_fixup(state, offset + MODEL_PART_TRIANGLE_BASE, index_buffer, TRUE);
+		buffer_fixup(state, offset + MODEL_PART_TRIANGLE_HARDWARE, index_buffer, FALSE);
+		buffer_fixup(state, offset + MODEL_PART_VERTEX_BASE, vertex_buffer, TRUE);
+		buffer_fixup(state, offset + MODEL_PART_VERTEX_HARDWARE, vertex_buffer, FALSE);
+		return;
+	}
 	unsigned long triangles, vertices;
 	short triangle_type, vertex_type;
 	long triangle_count, vertex_count, index_count;
@@ -1519,6 +1701,10 @@ static boolean layout_copy(struct build_state *state, unsigned short layout, uns
 			{
 				struct build_tag const *tag = &state->pack_tags[(short)tag_index];
 
+				/* (the group the reference says is its tag's: a Custom Edition
+				map's gbxmodels and transparent chicago extended shaders are this
+				build's models and transparent chicago shaders) */
+				write_u32(state->blob + out, tag->group_tag);
 				write_u32(state->blob + out + 4, link_address(tag->name_offset));
 				write_u32(state->blob + out + 8, (unsigned long)strlen(tag->name));
 			}
@@ -1545,6 +1731,23 @@ static boolean layout_copy(struct build_state *state, unsigned short layout, uns
 }
 
 /* ---------- the pixels and samples */
+
+/* (a Custom Edition source's) a bitmap's or permutation's data, made as it
+is written */
+static void item_add(struct build_state *state, unsigned long location, boolean bitmap, long source_index,
+	unsigned long sound_location)
+{
+	if (!grow((void **)&state->items, &state->item_capacity, state->item_count, sizeof(struct build_item), 256 * 1024))
+	{
+		build_fail(state, "there is no memory for the pack's pixels and samples%s", NULL);
+		return;
+	}
+	state->items[state->item_count].location = location;
+	state->items[state->item_count].bitmap = bitmap;
+	state->items[state->item_count].source_index = source_index;
+	state->items[state->item_count].sound_location = sound_location;
+	state->item_count++;
+}
 
 static long range_add(struct build_state *state, unsigned long source, unsigned long size, unsigned long file_length)
 {
@@ -1592,6 +1795,8 @@ struct fixup_walk
 {
 	struct build_state *state;
 	unsigned long file_length;
+	/* (a sound tag's) its root's place in the pack */
+	unsigned long sound_location;
 };
 
 static unsigned char *fixup_resolve(void *context, unsigned long address, unsigned long size)
@@ -1625,6 +1830,18 @@ static void fixup_visit(void *context, struct tag_schema_field const *field, uns
 		long size = (long)read_u32(data);
 
 		write_u32(state->blob + out + 12, 0);
+		/* (a Custom Edition map's: the permutation's samples made Xbox
+		ADPCM as they are written, scene_pack_ce.c; the only file data the
+		schemas know is a sound permutation's samples, at 0x40) */
+		if (state->custom_edition)
+		{
+			if (size > 0 && (unsigned long)out >= offsetof(struct sound_permutation, samples))
+				item_add(state, (unsigned long)out - offsetof(struct sound_permutation, samples), FALSE, NONE,
+					walk->sound_location);
+			else
+				write_u32(state->blob + out + 8, 0);
+			return;
+		}
 		if (size > 0)
 			range_fixup(state, (unsigned long)out + 8, range_add(state, read_u32(data + 8), (unsigned long)size,
 				walk->file_length), 0);
@@ -1691,6 +1908,13 @@ static void bitmap_fixups(struct build_state *state, struct build_tag const *tag
 		{
 			build_fail(state, "the source map has a bitmap the copy missed%s", NULL);
 			return;
+		}
+		/* (a Custom Edition map's: the pixels laid out as the Xbox's as they
+		are written, scene_pack_ce.c) */
+		if (state->custom_edition)
+		{
+			item_add(state, (unsigned long)out, TRUE, tag->source_index, 0);
+			continue;
 		}
 		memcpy(&bitmap, bytes, sizeof(bitmap));
 		size = bitmap_read_size(&bitmap);
@@ -1823,6 +2047,18 @@ static boolean source_table_read(struct build_state *state)
 {
 	unsigned char *header = state->tags;
 
+	/* (a Custom Edition map's tag index: no buffers, its signature at 0x24;
+	its loader checked it, scene_pack_ce.c) */
+	if (state->custom_edition)
+	{
+		state->instances = read_u32(header);
+		state->source_count = (long)read_u32(header + 12);
+		state->vertex_buffer_count = state->index_buffer_count = 0;
+		state->vertex_buffers = state->index_buffers = 0;
+		return state->tags_size >= 0x28 && read_u32(header + 0x24) == CACHE_FILE_TAG_HEADER_SIGNATURE &&
+			state->source_count > 0 && state->source_count <= 0x7FFF &&
+			source_at(state, state->instances, (unsigned long)state->source_count * TAG_INSTANCE_SIZE);
+	}
 	state->instances = read_u32(header);
 	state->source_count = (long)read_u32(header + 12);
 	state->vertex_buffer_count = (long)read_u32(header + 16);
@@ -1840,9 +2076,44 @@ static boolean source_table_read(struct build_state *state)
 			source_at(state, state->index_buffers, (unsigned long)state->index_buffer_count * BUFFER_HEADER_SIZE));
 }
 
+/* the source's globals' multiplayer unit (unit multiplayer), or NONE */
+static long source_multiplayer_unit(struct build_state const *state)
+{
+	long index;
+
+	for (index = 0; index < state->source_count; index++)
+	{
+		unsigned char *instance = source_instance(state, index);
+
+		if (instance && read_u32(instance) == 'matg')
+		{
+			/* (game_globals.h: the multiplayer information block at 0x164, its
+			first element's unit reference at 0x10, the reference's tag index at
+			0x0C of it) */
+			unsigned char *globals = source_at(state, read_u32(instance + 20), 0x170);
+			unsigned char *information = globals && (long)read_u32(globals + 0x164) > 0 ?
+				source_at(state, read_u32(globals + 0x168), 0xA0) : NULL;
+			long unit = information ? source_tag(state, (long)read_u32(information + 0x10 + 12)) : NONE;
+			unsigned char *unit_instance = unit != NONE ? source_instance(state, unit) : NULL;
+
+			/* (a unit: a biped, or a vehicle, which the game spawns as one) */
+			if (unit_instance && (read_u32(unit_instance) == 'bipd' || read_u32(unit_instance + 4) == 'unit' ||
+				read_u32(unit_instance + 8) == 'unit'))
+			{
+				return unit;
+			}
+			return NONE;
+		}
+	}
+	return NONE;
+}
+
 static long source_find(struct build_state const *state, struct scene_pack_recipe_tag const *tag)
 {
 	long index;
+
+	if (scene_pack_recipe_root_is_multiplayer_unit(tag))
+		return source_multiplayer_unit(state);
 
 	for (index = 0; index < state->source_count; index++)
 	{
@@ -1868,7 +2139,18 @@ static void build_state_free(struct build_state *state, void *scratch)
 	if (state->extents)
 		free(state->extents);
 	if (state->buffers)
+	{
+		long index;
+
+		for (index = 0; index < state->buffer_count; index++)
+		{
+			if (state->buffers[index].made)
+				free(state->buffers[index].made);
+		}
 		free(state->buffers);
+	}
+	if (state->items)
+		free(state->items);
 	if (state->buffer_fixups)
 		free(state->buffer_fixups);
 	if (state->ranges)
@@ -1895,8 +2177,13 @@ static void build_tags(struct build_state *state, unsigned long file_length)
 
 		if (source == NONE || pack_tag_add(state, source) != index)
 		{
-			snprintf(state->result->why, sizeof(state->result->why), "the map has no %s %s it can take",
-				scene_pack_group_text(recipe->roots[index].group_tag, text), recipe->roots[index].path);
+			if (state->failed)
+				break;
+			if (scene_pack_recipe_root_is_multiplayer_unit(&recipe->roots[index]))
+				snprintf(state->result->why, sizeof(state->result->why), "the map has no multiplayer unit it can take");
+			else
+				snprintf(state->result->why, sizeof(state->result->why), "the map has no %s %s it can take",
+					scene_pack_group_text(recipe->roots[index].group_tag, text), recipe->roots[index].path);
 			state->failed = TRUE;
 		}
 	}
@@ -1955,6 +2242,7 @@ static void build_tags(struct build_state *state, unsigned long file_length)
 
 		context.state = state;
 		context.file_length = file_length;
+		context.sound_location = tag->group_tag == 'snd!' ? tag->base_offset : 0;
 		memset(&walk, 0, sizeof(walk));
 		walk.context = &context;
 		walk.resolve = fixup_resolve;
@@ -1990,7 +2278,8 @@ static void build_tags(struct build_state *state, unsigned long file_length)
 		buffer->data_offset = blob_alloc(state, buffer->size);
 		if (state->failed)
 			break;
-		memcpy(state->blob + buffer->data_offset, source_at(state, buffer->source_data, buffer->size), buffer->size);
+		memcpy(state->blob + buffer->data_offset, buffer->made ? buffer->made :
+			source_at(state, buffer->source_data, buffer->size), buffer->size);
 		write_u32(state->blob + buffer->header_offset + 4, link_address(buffer->data_offset));
 	}
 	for (index = 0; index < state->buffer_fixup_count && !state->failed; index++)
@@ -2053,6 +2342,238 @@ static void header_write(unsigned char *header, struct build_state const *state,
 	write_u32(header + HEADER_HEADER_CRC, crc_bytes(0, header, SCENE_PACK_HEADER_SIZE));
 }
 
+/* (a Custom Edition source's) the pack's tags of the groups that say which
+bitmaps Halo PC keeps in other channels, given to scene_pack_ce.c */
+static boolean build_channels(struct build_state *state)
+{
+	unsigned long *groups = malloc(sizeof(unsigned long) * (unsigned long)(state->pack_tag_count + 1));
+	unsigned long *roots = malloc(sizeof(unsigned long) * (unsigned long)(state->pack_tag_count + 1));
+	long count = 0;
+	long index;
+
+	if (!groups || !roots)
+	{
+		if (groups)
+			free(groups);
+		if (roots)
+			free(roots);
+		build_fail(state, "there is no memory to build the pack%s", NULL);
+		return FALSE;
+	}
+	for (index = 0; index < state->pack_tag_count; index++)
+	{
+		unsigned long group_tag = state->pack_tags[index].group_tag;
+
+		if (group_tag == 'soso' || group_tag == 'unhi' || group_tag == 'wphi')
+		{
+			groups[count] = group_tag;
+			roots[count] = state->pack_tags[index].source_base;
+			count++;
+		}
+	}
+	scene_pack_ce_channels(state->custom_edition, groups, roots, count);
+	free(groups);
+	free(roots);
+	return TRUE;
+}
+
+/* (a Custom Edition source's) its bitmaps' pixels and permutations' samples
+made this build's and written to data, their fields in the pack's tags made
+what was written: the data's size and CRC */
+static void build_items(struct build_state *state, FILE *data, unsigned long *data_size, unsigned long *data_crc)
+{
+	long index;
+
+	for (index = 0; index < state->item_count && !state->failed; index++)
+	{
+		struct build_item const *item = &state->items[index];
+		char why[SCENE_PACK_WHY_SIZE];
+		boolean written;
+
+		if (state->cancel && *state->cancel)
+		{
+			build_fail(state, "it was stopped%s", NULL);
+			break;
+		}
+		if (item->bitmap)
+		{
+			struct build_tag const *tag = NULL;
+			long pack = item->source_index >= 0 && item->source_index < 0x8000 ? state->pack_index[item->source_index] : NONE;
+
+			if (pack >= 0)
+				tag = &state->pack_tags[pack];
+			written = tag && scene_pack_ce_bitmap_write(state->custom_edition, state->blob + item->location,
+				item->source_index, state->blob + tag->base_offset, data, data_size, data_crc, why, sizeof(why));
+			if (!tag)
+				snprintf(why, sizeof(why), "a bitmap of the pack is not its own");
+		}
+		else
+		{
+			written = scene_pack_ce_permutation_write(state->custom_edition, state->blob + item->location,
+				state->blob + item->sound_location, data, data_size, data_crc, why, sizeof(why));
+		}
+		if (!written)
+		{
+			build_fail(state, "%s", why);
+			break;
+		}
+		if (*data_size > SCENE_PACK_MAXIMUM_DATA_BYTES)
+		{
+			build_fail(state, "the pack would hold more pixels and samples than a pack may%s", NULL);
+			break;
+		}
+		state->result->progress = 50 + (long)((unsigned long long)(index + 1) * 45 / (unsigned long long)state->item_count);
+	}
+}
+
+/* the offsets of the pack's bitmaps' pixels and permutations' samples, from
+the data's start, made the pack's file offsets */
+static void build_items_place(struct build_state *state)
+{
+	long index;
+
+	for (index = 0; index < state->item_count; index++)
+	{
+		struct build_item const *item = &state->items[index];
+		unsigned long at = item->location + (item->bitmap ? offsetof(struct bitmap_data, pixels_offset) :
+			offsetof(struct sound_permutation, samples) + offsetof(struct tag_data, file_offset));
+		unsigned long size_at = item->location + (item->bitmap ? offsetof(struct bitmap_data, pixels_size) :
+			offsetof(struct sound_permutation, samples));
+
+		if (read_u32(state->blob + size_at))
+			write_u32(state->blob + at, SCENE_PACK_FILE_BASE + read_u32(state->blob + at));
+		else
+			write_u32(state->blob + at, 0);
+	}
+}
+
+static boolean scene_pack_build_custom_edition(
+	struct scene_pack_recipe const *recipe,
+	char const *maps_directory,
+	char const *pack_path,
+	void *scratch,
+	unsigned long scratch_size,
+	int volatile const *cancel,
+	struct scene_pack_build_result *result)
+{
+	struct build_state state;
+	unsigned char pack_header[SCENE_PACK_HEADER_SIZE];
+	unsigned long long started = vita_host_time_us();
+	unsigned long long source_hash = 0;
+	char temporary[512];
+	char data_path[512];
+	unsigned long data_size = 0, data_crc = 0, tags_crc;
+	FILE *data = NULL;
+	FILE *file = NULL;
+	long index;
+
+	memset(result, 0, sizeof(*result));
+	memset(&state, 0, sizeof(state));
+	state.recipe = recipe;
+	state.result = result;
+	state.cancel = cancel;
+	if (!scene_pack_source_check(recipe, maps_directory, result->map, sizeof(result->map), &source_hash, result->why,
+		sizeof(result->why)))
+	{
+		return FALSE;
+	}
+	state.custom_edition = scene_pack_ce_open(maps_directory, result->map, scratch, scratch_size, cancel, &result->progress,
+		result->why, sizeof(result->why));
+	if (!state.custom_edition)
+		return FALSE;
+	state.tags = scene_pack_ce_tags(state.custom_edition, &state.tags_size);
+	state.source_address = (unsigned long)state.tags;
+	state.pack_index = malloc(sizeof(long) * 0x8000);
+	state.pack_tags = malloc(sizeof(struct build_tag) * SCENE_PACK_MAXIMUM_TAGS);
+	if (!state.pack_index || !state.pack_tags)
+		build_fail(&state, "there is no memory to build the pack%s", NULL);
+	else if (!source_table_read(&state))
+		build_fail(&state, "the map's tag header is damaged%s", NULL);
+	if (!state.failed)
+	{
+		for (index = 0; index < 0x8000; index++)
+			state.pack_index[index] = NONE;
+		build_tags(&state, 0);
+	}
+	if (!state.failed)
+		build_channels(&state);
+	result->progress = 50;
+
+	/* the pixels and samples, made as they are written to a file of their
+	own, then the pack: its header, its tags, that file */
+	snprintf(temporary, sizeof(temporary), "%s.tmp", pack_path);
+	snprintf(data_path, sizeof(data_path), "%s.data", pack_path);
+	if (!state.failed)
+	{
+		data = fopen(data_path, "w+b");
+		if (!data)
+			build_fail(&state, "the pack cannot be written%s", NULL);
+	}
+	if (!state.failed)
+		build_items(&state, data, &data_size, &data_crc);
+	if (!state.failed)
+	{
+		build_items_place(&state);
+		tags_crc = crc_bytes(0, state.blob, state.blob_size);
+		file = fopen(temporary, "wb");
+		header_write(pack_header, &state, tags_crc, data_size, data_crc, source_hash, result->map);
+		if (!file || fwrite(pack_header, 1, sizeof(pack_header), file) != sizeof(pack_header) ||
+			fwrite(state.blob, 1, state.blob_size, file) != state.blob_size || fflush(data) || fseek(data, 0, SEEK_SET))
+		{
+			build_fail(&state, "the pack cannot be written%s", NULL);
+		}
+		else
+		{
+			unsigned char *bounce = malloc(BOUNCE_SIZE);
+			unsigned long done = 0;
+
+			while (bounce && done < data_size && !state.failed)
+			{
+				unsigned long chunk = data_size - done > BOUNCE_SIZE ? BOUNCE_SIZE : data_size - done;
+
+				if (fread(bounce, 1, chunk, data) != chunk || fwrite(bounce, 1, chunk, file) != chunk)
+					build_fail(&state, "the pack cannot be written%s", NULL);
+				done += chunk;
+			}
+			if (!bounce)
+				build_fail(&state, "there is no memory to build the pack%s", NULL);
+			else
+				free(bounce);
+		}
+	}
+	if (data)
+	{
+		fclose(data);
+		remove(data_path);
+	}
+	if (file && fclose(file))
+		build_fail(&state, "the pack cannot be written%s", NULL);
+	if (!state.failed)
+	{
+		remove(pack_path);
+		if (rename(temporary, pack_path))
+			build_fail(&state, "the pack cannot be put in its place%s", NULL);
+	}
+	else if (file)
+	{
+		remove(temporary);
+	}
+	result->tag_count = state.pack_tag_count;
+	result->tag_bytes = state.blob_size;
+	result->data_bytes = data_size;
+	result->file_bytes = SCENE_PACK_HEADER_SIZE + state.blob_size + data_size;
+	result->buffer_count = state.buffer_count;
+	result->source_bytes = 0;
+	result->microseconds = vita_host_time_us() - started;
+	result->progress = state.failed ? 0 : 100;
+	scene_pack_ce_close(state.custom_edition);
+	state.custom_edition = NULL;
+	/* (its tags were the source's buffer, which closing it let go) */
+	state.tags = NULL;
+	build_state_free(&state, scratch);
+	return !state.failed;
+}
+
 boolean scene_pack_build(
 	struct scene_pack_recipe const *recipe,
 	char const *maps_directory,
@@ -2077,11 +2598,14 @@ boolean scene_pack_build(
 	FILE *file = NULL;
 	long index;
 
+	if (recipe->custom_edition_map_count)
+		return scene_pack_build_custom_edition(recipe, maps_directory, pack_path, scratch, scratch_size, cancel, result);
 	memset(result, 0, sizeof(*result));
 	memset(&state, 0, sizeof(state));
 	memset(&reader, 0, sizeof(reader));
 	state.recipe = recipe;
 	state.result = result;
+	state.source_address = 0x803A6000UL;
 	if (!scene_pack_source_find(recipe, maps_directory, result->map, sizeof(result->map), &source_hash))
 	{
 		snprintf(result->why, sizeof(result->why), "none of its maps (%s...) is in the maps folder", recipe->maps[0]);

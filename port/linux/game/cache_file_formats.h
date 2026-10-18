@@ -644,6 +644,22 @@ enum cache_file_status custom_edition_cache_load(
 	int mcc_cea_allowed,
 	struct custom_edition_load_report *report);
 
+/* (port) The same for a Custom Edition cache's tags alone (a scene pack's
+source: port/linux/game/scene_pack_ce.c), into `buffer` of `buffer_bytes`,
+which stands for the start of the tag cache at
+CUSTOM_EDITION_TAG_CACHE_ADDRESS and needs room for the tag data and the
+tags kept in resource maps (placed after it, below the lowest structure BSP
+and within the buffer): every check above but the structure BSPs' own (each
+reference's tag, file range and place in the tag cache are checked; the BSP
+is not read) and the header checksum (not taken). A Halo: CE Anniversary
+cache is refused. */
+enum cache_file_status custom_edition_cache_load_tags(
+	struct cache_file_source *map,
+	struct resource_map *const resource_maps[NUMBER_OF_RESOURCE_MAP_TYPES],
+	uint8_t *buffer,
+	uint32_t buffer_bytes,
+	struct custom_edition_load_report *report);
+
 /* (port) Makes the tags of a Halo: CE Anniversary cache that
 custom_edition_cache_load filled (`loaded_bytes` of `tag_cache` in use)
 what this build takes where MCC has more room or other values, as

@@ -563,6 +563,12 @@ struct load_state
 	/* (port) a Halo: CE Anniversary cache's: its pixels and samples in a
 	resource map must each be one of its items (resource_map_item_at) */
 	int mcc_cea;
+	/* (port) a load of the tags alone (custom_edition_cache_load_tags: a
+	scene pack's source, port/linux/game/scene_pack_ce.c): the structure
+	BSPs' references checked but the BSPs not read, no checksum taken, and
+	the tag cache only `buffer_bytes` long */
+	int tags_only;
+	uint32_t buffer_bytes;
 };
 
 /* ---------- prototypes */
@@ -2280,6 +2286,11 @@ static enum cache_file_status structure_bsps_verify(
 	int32_t bsp_index;
 
 	state->usable_bytes = tag_cache_bytes;
+	/* (port: the tags alone, in a buffer shorter than the tag cache) */
+	if (state->tags_only && state->buffer_bytes < state->usable_bytes)
+	{
+		state->usable_bytes = state->buffer_bytes;
+	}
 	if (count < 0 ||
 		count > MAXIMUM_STRUCTURE_BSPS_PER_SCENARIO ||
 		(count && !tag_cache_offset(state, address, (uint32_t)count * STRUCTURE_BSP_REFERENCE_BYTES, &block_offset)))
@@ -2318,6 +2329,25 @@ static enum cache_file_status structure_bsps_verify(
 			!range_fits(bsp_address - tag_cache_address, (uint32_t)size, tag_cache_bytes))
 		{
 			return load_fail(state, _cache_file_status_bad_structure_bsp_range, (uint32_t)file_offset);
+		}
+		/* (port: the tags alone - a scene pack's source - never load a
+		structure BSP: its place keeps the resource maps' tags below it, as
+		for the game, and nothing of it is read) */
+		if (state->tags_only)
+		{
+			if ((uint32_t)size > state->report->largest_structure_bsp_bytes)
+			{
+				state->report->largest_structure_bsp_bytes = (uint32_t)size;
+			}
+			if (bsp_address - tag_cache_address < state->usable_bytes)
+			{
+				state->usable_bytes = bsp_address - tag_cache_address;
+			}
+			if (!state->report->lowest_structure_bsp_address || bsp_address < state->report->lowest_structure_bsp_address)
+			{
+				state->report->lowest_structure_bsp_address = bsp_address;
+			}
+			continue;
 		}
 		/* read to be checked where the game reads it when it switches to it:
 		that part of the tag cache holds nothing yet (the tags from resource
@@ -3091,6 +3121,7 @@ static enum cache_file_status custom_edition_cache_load_linked(
 	uint8_t *tag_cache,
 	uint32_t tag_cache_bytes,
 	int mcc_cea_allowed,
+	int tags_only,
 	struct custom_edition_load_report *report);
 
 enum cache_file_status custom_edition_cache_load(
@@ -3106,7 +3137,20 @@ enum cache_file_status custom_edition_cache_load(
 	tag_cache_address = CUSTOM_EDITION_TAG_CACHE_ADDRESS;
 	linked_address = CUSTOM_EDITION_TAG_CACHE_ADDRESS;
 
-	return custom_edition_cache_load_linked(map, resource_maps, tag_cache, tag_cache_bytes, mcc_cea_allowed, report);
+	return custom_edition_cache_load_linked(map, resource_maps, tag_cache, tag_cache_bytes, mcc_cea_allowed, 0, report);
+}
+
+enum cache_file_status custom_edition_cache_load_tags(
+	struct cache_file_source *map,
+	struct resource_map *const resource_maps[NUMBER_OF_RESOURCE_MAP_TYPES],
+	uint8_t *buffer,
+	uint32_t buffer_bytes,
+	struct custom_edition_load_report *report)
+{
+	tag_cache_address = CUSTOM_EDITION_TAG_CACHE_ADDRESS;
+	linked_address = CUSTOM_EDITION_TAG_CACHE_ADDRESS;
+
+	return custom_edition_cache_load_linked(map, resource_maps, buffer, buffer_bytes, 0, 1, report);
 }
 
 void custom_edition_cache_checksum_finish(
@@ -3182,6 +3226,7 @@ static enum cache_file_status custom_edition_cache_load_linked(
 	uint8_t *tag_cache,
 	uint32_t tag_cache_bytes,
 	int mcc_cea_allowed,
+	int tags_only,
 	struct custom_edition_load_report *report)
 {
 	/* (port: a Halo: CE Anniversary cache takes no tags from resource maps,
@@ -3210,6 +3255,8 @@ static enum cache_file_status custom_edition_cache_load_linked(
 	state.report = report;
 	state.tag_cache = tag_cache;
 	state.tag_index = NO_TAG_INDEX;
+	state.tags_only = tags_only;
+	state.buffer_bytes = tag_cache_bytes;
 	report->problem_tag_index = NO_TAG_INDEX;
 
 	status = cache_file_identify(map, identity);
@@ -3235,7 +3282,9 @@ static enum cache_file_status custom_edition_cache_load_linked(
 		state.mcc_cea = 1;
 	}
 	report->tag_cache_bytes = custom_edition_tag_cache_bytes(identity);
-	if (tag_cache_bytes < report->tag_cache_bytes)
+	/* (port: the tags alone need room for the tag data, and the resource
+	maps' tags after it: the latter checked as they are placed) */
+	if (tags_only ? tag_cache_bytes < identity->tag_data_size : tag_cache_bytes < report->tag_cache_bytes)
 	{
 		return load_fail(&state, _cache_file_status_out_of_memory, tag_cache_bytes);
 	}
@@ -3374,7 +3423,7 @@ static enum cache_file_status custom_edition_cache_load_linked(
 	tag data as the map holds it, before anything below changes it (port:
 	not a Halo: CE Anniversary cache's, whose checksum MCC takes of other
 	bytes: nothing here depends on it) */
-	if (!mcc_cea)
+	if (!mcc_cea && !state.tags_only)
 	{
 		status = custom_edition_cache_checksum_take(&state, checksum, tag_data_crc, tag_data_crc_taken);
 		if (status != _cache_file_status_ok)

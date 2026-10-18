@@ -20,6 +20,7 @@ them, which leaves them in this build's layouts (halo_tag_relocate_linked_*).
 HALO_TAG_RELOCATION_REPORT=1 prints what was relocated; HALO_TAG_DUMP=<dir>
 keeps a copy of what was read, before relocation. */
 
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -106,6 +107,23 @@ static struct
 	unsigned long stale;
 	int report;
 } relocation;
+
+/* (port) one walk at a time: the scene packs' builder moves a Custom
+Edition map's tags on a thread of its own (halo_tag_relocate_linked_tags_
+isolated) while the game may move a structure bsp's; each public walk holds
+this, and the builder's leaves the game's state as it was. tag_validate.c
+holds the same lock (halo_tag_walk_lock) */
+static pthread_mutex_t tag_walk_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+void halo_tag_walk_lock(void)
+{
+	pthread_mutex_lock(&tag_walk_mutex);
+}
+
+void halo_tag_walk_unlock(void)
+{
+	pthread_mutex_unlock(&tag_walk_mutex);
+}
 
 static int loaded(unsigned long xbox_address)
 {
@@ -438,7 +456,7 @@ static void relocate_instances(unsigned char *instances, long count)
 	}
 }
 
-void halo_tag_relocate_tags(void *tag_cache, unsigned long size)
+static void halo_tag_relocate_tags_unlocked(void *tag_cache, unsigned long size)
 {
 	unsigned char *header = tag_cache;
 	unsigned char *instances;
@@ -473,7 +491,7 @@ structure BSPs */
 static unsigned char *linked_relocated;
 static unsigned long linked_base, linked_size, linked_tags_end;
 
-int halo_tag_relocate_linked_tags(void *tag_cache, unsigned long size, unsigned long link_base,
+static int halo_tag_relocate_linked_tags_unlocked(void *tag_cache, unsigned long size, unsigned long link_base,
 	unsigned long window_bytes)
 {
 	unsigned char *header = tag_cache;
@@ -510,7 +528,7 @@ int halo_tag_relocate_linked_tags(void *tag_cache, unsigned long size, unsigned 
 	return 1;
 }
 
-void halo_tag_relocate_linked_structure_bsp(void *tag_cache, void *bsp, unsigned long size)
+static void halo_tag_relocate_linked_structure_bsp_unlocked(void *tag_cache, void *bsp, unsigned long size)
 {
 	unsigned char *header = bsp;
 	unsigned char *structure;
@@ -546,7 +564,7 @@ is read into its tag cache at to_link, as the tags are linked, but its own
 pointers are linked to from_link, where MCC loads it: they are moved to
 to_link (with a walk of their own: the BSP's layout, its pointers into
 itself alone), and then as any other structure BSP's (above). */
-void halo_tag_relocate_linked_structure_bsp_rebase(void *bsp, unsigned long size, unsigned long from_link,
+static void halo_tag_relocate_linked_structure_bsp_rebase_unlocked(void *bsp, unsigned long size, unsigned long from_link,
 	unsigned long to_link)
 {
 	unsigned char *header = bsp;
@@ -593,7 +611,7 @@ void halo_tag_relocate_linked_release(void)
 	linked_relocated = NULL;
 }
 
-void halo_tag_relocate_structure_bsp(void *tag_cache, void *bsp, unsigned long size)
+static void halo_tag_relocate_structure_bsp_unlocked(void *tag_cache, void *bsp, unsigned long size)
 {
 	unsigned char *header = bsp;
 	unsigned char *structure;
@@ -673,7 +691,7 @@ int halo_tag_layout_field(unsigned short layout, long index, struct halo_tag_lay
 	return 1;
 }
 
-unsigned long halo_tag_relocate_pack(void *blob, unsigned long size, unsigned long link_base)
+static unsigned long halo_tag_relocate_pack_unlocked(void *blob, unsigned long size, unsigned long link_base)
 {
 	unsigned char *header = blob;
 	long index;
@@ -780,6 +798,123 @@ unsigned long halo_tag_relocate_pack(void *blob, unsigned long size, unsigned lo
 	finish("scene pack tags", size);
 	anomalies = relocation.invalid;
 	memcpy(&relocation, saved, sizeof(relocation));
+	free(bits);
+	return anomalies;
+}
+
+void halo_tag_relocate_tags(void *tag_cache, unsigned long size)
+{
+	halo_tag_walk_lock();
+	halo_tag_relocate_tags_unlocked(tag_cache, size);
+	halo_tag_walk_unlock();
+}
+
+int halo_tag_relocate_linked_tags(void *tag_cache, unsigned long size, unsigned long link_base,
+	unsigned long window_bytes)
+{
+	int result;
+
+	halo_tag_walk_lock();
+	result = halo_tag_relocate_linked_tags_unlocked(tag_cache, size, link_base, window_bytes);
+	halo_tag_walk_unlock();
+	return result;
+}
+
+void halo_tag_relocate_linked_structure_bsp(void *tag_cache, void *bsp, unsigned long size)
+{
+	halo_tag_walk_lock();
+	halo_tag_relocate_linked_structure_bsp_unlocked(tag_cache, bsp, size);
+	halo_tag_walk_unlock();
+}
+
+void halo_tag_relocate_linked_structure_bsp_rebase(void *bsp, unsigned long size, unsigned long from_link,
+	unsigned long to_link)
+{
+	halo_tag_walk_lock();
+	halo_tag_relocate_linked_structure_bsp_rebase_unlocked(bsp, size, from_link, to_link);
+	halo_tag_walk_unlock();
+}
+
+void halo_tag_relocate_structure_bsp(void *tag_cache, void *bsp, unsigned long size)
+{
+	halo_tag_walk_lock();
+	halo_tag_relocate_structure_bsp_unlocked(tag_cache, bsp, size);
+	halo_tag_walk_unlock();
+}
+
+unsigned long halo_tag_relocate_pack(void *blob, unsigned long size, unsigned long link_base)
+{
+	unsigned long result;
+
+	halo_tag_walk_lock();
+	result = halo_tag_relocate_pack_unlocked(blob, size, link_base);
+	halo_tag_walk_unlock();
+	return result;
+}
+
+/* (port) a Custom Edition map's tags moved as halo_tag_relocate_linked_tags
+moves them, for the scene packs' builder (port/linux/game/scene_pack_ce.c)
+on its own thread: under the walks' lock, with bits of its own, every
+reference checked against the map's own table, and the game's walk state
+(its window, its Custom Edition window's bits and table, the progress
+callback) put back as it was. Returns the walk's anomalies (0: moved and
+consistent), (unsigned long)-1 without memory */
+unsigned long halo_tag_relocate_linked_tags_isolated(void *tag_cache, unsigned long size, unsigned long link_base,
+	unsigned long window_bytes)
+{
+	unsigned char *header = tag_cache;
+	unsigned char saved[sizeof(relocation)];
+	unsigned char *saved_linked_relocated;
+	unsigned long saved_linked_base, saved_linked_size, saved_linked_tags_end;
+	void (*saved_progress)(void);
+	unsigned char *bits;
+	unsigned char *instances;
+	unsigned long anomalies;
+	long count;
+
+	if (!tag_cache || size < 0x28 || size > window_bytes || window_bytes > 0x04000000UL || link_base + window_bytes < link_base)
+		return 1;
+	bits = malloc(window_bytes / 32 + 1);
+	if (!bits)
+		return (unsigned long)-1;
+	memset(bits, 0, window_bytes / 32 + 1);
+	halo_tag_walk_lock();
+	memcpy(saved, &relocation, sizeof(relocation));
+	saved_linked_relocated = linked_relocated;
+	saved_linked_base = linked_base;
+	saved_linked_size = linked_size;
+	saved_linked_tags_end = linked_tags_end;
+	saved_progress = halo_tag_relocate_progress;
+	halo_tag_relocate_progress = NULL;
+	relocation.link_base = link_base;
+	relocation.link_size = window_bytes;
+	relocation.words = window_bytes / 4;
+	relocation.relocated = bits;
+	begin(tag_cache);
+	relocation.tags_end = link_base + size;
+	relocation.bsp_start = relocation.bsp_end = 0;
+	relocation.instances = NULL;
+	relocation.instance_count = 0;
+	instances = relocate_word(header);
+	memcpy(&count, header + 12, 4);
+	if (!instances || count <= 0 || count > 0x8000 ||
+		!region_fits((unsigned long)(instances - relocation.bias), (unsigned long)count * 32))
+	{
+		walk_invalid("custom edition instances", (unsigned long)count, (unsigned long)instances, size);
+	}
+	else
+	{
+		relocate_instances(instances, count);
+	}
+	finish("custom edition tags (a scene pack's source)", size);
+	anomalies = relocation.invalid;
+	memcpy(&relocation, saved, sizeof(relocation));
+	linked_relocated = saved_linked_relocated;
+	linked_base = saved_linked_base;
+	linked_size = saved_linked_size;
+	linked_tags_end = saved_linked_tags_end;
+	halo_tag_relocate_progress = saved_progress;
+	halo_tag_walk_unlock();
 	free(bits);
 	return anomalies;
 }

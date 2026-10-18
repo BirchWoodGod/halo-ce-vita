@@ -523,6 +523,13 @@ static struct setting settings[] = {
 	foot. On by default and in every profile. Live) */
 	{ "First-person legs", "HALO_FIRST_PERSON_LEGS", 0, 2, { "0", "1" }, { "Off", "On" },
 		"Your legs when you look down, as others see them", 1, TAB_GAME },
+	/* (port/linux/game/player_models.c: the first local player's profile's
+	player model, from the player's Halo Custom Edition maps, as
+	CUSTOMIZATION's MODEL chooses it - kept by the game for the profile, never
+	in settings.txt; the choices filled when the panel opens: player_models_
+	choices. Shown while the maps folder has one) */
+	{ "Player model", "HALO_PLAYER_MODEL", 0, 1, { "0" }, { "Spartan" },
+		"Offline: you, or a Custom Edition map's player", 0, TAB_GAME },
 	{ "Smooth weapon motion", "HALO_INTERPOLATE_FIRST_PERSON", 0, 2, { "1", "0" }, { "On", "Off" },
 		"The weapon's animation blended between game ticks", 0, TAB_GAME },
 
@@ -1062,6 +1069,19 @@ static const char *const stock_maps[] = {
 	"ui", "bitmaps", "sounds", "loc",
 };
 
+/* ---------- the Player model row (port/linux/game/player_models.c) */
+
+/* the game's player models, the Spartan first (0): how many, each one's
+name, the first local player's profile's choice; and the choice made (the
+game takes it at the top of a frame, for that profile) */
+int player_models_panel_count(void);
+const char *player_models_panel_name(int index);
+int player_models_panel_chosen(void);
+void player_models_panel_choose(int index);
+
+static char player_model_values[MAXIMUM_CHOICES][4];
+static char player_model_names[MAXIMUM_CHOICES][48];
+
 /* ---------- Forge and File Share (the Forge page) */
 
 /* forge.c's maps (the lobby's: the Xbox's multiplayer maps), by index: how
@@ -1363,6 +1383,8 @@ static int setting_shown(const struct setting *setting)
 		return maps_mods_present || choice_of("HALO_MCC_MODS");
 	if (setting->variable && !strcmp(setting->variable, "HALO_PC_MAP_VEHICLES"))
 		return choice_of("HALO_CUSTOM_EDITION") || choice_of("HALO_PC_MAP_VEHICLES");
+	if (setting->variable && !strcmp(setting->variable, "HALO_PLAYER_MODEL"))
+		return setting->count > 1;
 	if (setting->variable && (!strcmp(setting->variable, "HALO_BOT_SKILL") || !strcmp(setting->variable, "HALO_BOT_TEAMS") ||
 		!strcmp(setting->variable, "HALO_BOT_VEHICLES") || !strcmp(setting->variable, "HALO_BOT_ROUTES") ||
 		!strcmp(setting->variable, "HALO_BOT_PLAYLIST")))
@@ -1418,6 +1440,10 @@ static void apply_value(const struct setting *setting)
 {
 	const char *value = setting->values[setting->choice];
 
+	/* (the profile's, which the game keeps: player_models.c; changed only
+by a press, change) */
+	if (strcmp(setting->variable, "HALO_PLAYER_MODEL") == 0)
+		return;
 	if (strcmp(setting->variable, PERFORMANCE_LOG) == 0)
 	{
 		int index;
@@ -1519,8 +1545,11 @@ static void save(void)
 		return;
 	fprintf(file, "HALO_SETTINGS_BUILD=%s\n", HALO_VITA_VERSION);
 	for (index = 0; index < SETTING_COUNT; index++)
-		if (settings[index].kind == KIND_CHOICE && !(settings[index].dev && settings[index].choice == 0))
+		if (settings[index].kind == KIND_CHOICE && !(settings[index].dev && settings[index].choice == 0) &&
+			strcmp(settings[index].variable, "HALO_PLAYER_MODEL"))
+		{
 			fprintf(file, "%s=%s\n", settings[index].variable, settings[index].values[settings[index].choice]);
+		}
 	for (index = 0; index < PLAY_TEXT_COUNT; index++)
 		if (play_texts[index].named && play_texts[index].value[0])
 			fprintf(file, "%s=%s\n", play_texts[index].variable, play_texts[index].value);
@@ -3099,6 +3128,9 @@ static const char *setting_value_name(const struct setting *setting)
 		return T(xbox_actions[setting->choice]);
 	if (setting->variable && !strcmp(setting->variable, "HALO_LANGUAGE") && setting->choice > 0)
 		return setting->names[setting->choice];
+	/* (a player model's name is its map's own) */
+	if (setting->variable && !strcmp(setting->variable, "HALO_PLAYER_MODEL") && setting->choice > 0)
+		return setting->names[setting->choice];
 	return T(setting->names[setting->choice]);
 }
 
@@ -4146,6 +4178,8 @@ static void change(struct setting *setting, int step)
 		return;
 	setting->choice = choice;
 	apply_value(setting);
+	if (strcmp(setting->variable, "HALO_PLAYER_MODEL") == 0)
+		player_models_panel_choose(choice);
 	/* (a row that applies after a restart says so on its help line from
 	now on, and every line does for a few seconds) */
 	if (setting->restart)
@@ -5180,9 +5214,36 @@ static void tab_step(int step)
 		forge_scan();
 }
 
+/* the Player model row's choices, the game's (the Spartan, then each model
+found in the maps folder), and the profile's choice among them */
+static void player_models_choices(void)
+{
+	struct setting *setting = setting_named("HALO_PLAYER_MODEL");
+	int index, count = player_models_panel_count();
+
+	if (!setting)
+		return;
+	if (count > MAXIMUM_CHOICES)
+		count = MAXIMUM_CHOICES;
+	if (count < 1)
+		count = 1;
+	for (index = 0; index < count; index++)
+	{
+		snprintf(player_model_values[index], sizeof(player_model_values[index]), "%d", index);
+		snprintf(player_model_names[index], sizeof(player_model_names[index]), "%s", player_models_panel_name(index));
+		setting->values[index] = player_model_values[index];
+		setting->names[index] = player_model_names[index];
+	}
+	setting->count = count;
+	setting->choice = player_models_panel_chosen();
+	if (setting->choice < 0 || setting->choice >= count)
+		setting->choice = 0;
+}
+
 static void panel_begin(void)
 {
 	panel_open = 1;
+	player_models_choices();
 	/* (Dev hidden since: the first tab) */
 	if (!tab_shown(tab))
 		tab = page = TAB_GAME;
