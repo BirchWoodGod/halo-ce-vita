@@ -58,11 +58,11 @@ processor, and its Direct3D rendering is translated to the Vita's GPU.
 
 <div align="center">
 
-### Install tutorial
+### Watch it
 
-[![Halo CE Vita Install Tutorial | v1.1.0 beta.3, on YouTube](https://img.youtube.com/vi/x46zLnwlRUU/hqdefault.jpg)](https://youtu.be/x46zLnwlRUU)
+[![Halo CE Vita v1.1.0 Release | Multiplayer and Crossplay, on YouTube](https://img.youtube.com/vi/rMou5dtYy3k/hqdefault.jpg)](https://youtu.be/rMou5dtYy3k)
 
-<sub><i><a href="https://youtu.be/x46zLnwlRUU">Halo CE Vita Install Tutorial | v1.1.0 beta.3</a></i></sub>
+<sub><i><a href="https://youtu.be/rMou5dtYy3k">Halo CE Vita v1.1.0 Release | Multiplayer and Crossplay</a></i></sub>
 
 </div>
 
