@@ -236,6 +236,8 @@ enum
 	_function_h3_mods_page_down,
 	_function_forge_new_round,
 	_function_forge_all_ai,
+	_function_h3_map_page_up,
+	_function_h3_map_page_down,
 };
 
 /* in port_game_data_input_names' order */
@@ -1814,6 +1816,12 @@ enum
 #define H3_MAP_COUNT 13
 /* (the mp_map_grafix frame of a map that is not the Xbox's: its "?") */
 #define H3_MAP_OTHER_PICTURE 13
+/* the map picker: thirteen rows that scroll over the Xbox's maps and then
+the custom ones the mod manager has on (custom_edition_maps.h), each
+level's path kept */
+#define H3_MAP_ROWS 13
+#define H3_MAXIMUM_MAPS (H3_MAP_COUNT + CUSTOM_EDITION_MAPS_MAXIMUM)
+#define H3_MAP_PATH_SIZE 160
 #define H3_GAMETYPE_ROWS 12
 #define H3_MAXIMUM_GAMETYPES 100
 
@@ -1851,7 +1859,19 @@ static struct
 	struct browser_view gametype_view;
 	short gametype_cursor;
 	short gametype_page;
+	/* the map picker's maps (the Xbox list's levels: the Xbox's, then the
+	custom ones turned on), each one's path, display index (its picture's
+	frame and description's string, custom_edition_maps.h) and name; its
+	rows (they scroll) */
+	short map_count;
+	char map_paths[H3_MAXIMUM_MAPS][H3_MAP_PATH_SIZE];
+	short map_displays[H3_MAXIMUM_MAPS];
+	char map_names[H3_MAXIMUM_MAPS][48];
+	struct browser_view map_view;
+	short map_cursor;
+	short map_page;
 	char said[192];
+	char map_said[96];
 } h3_mp;
 
 static char const *h3_network_name(short network)
@@ -1974,10 +1994,21 @@ static void h3_mp_initialize(void)
 
 static char const *h3_mp_map_name(void)
 {
+	static char name[48];
 	char const *slash;
+	short display;
+	wchar_t const *custom;
 
 	if (h3_mp.map_index != NONE)
 		return h3_map_names[h3_mp.map_index];
+	/* (a custom map: its own name, as the Xbox's list names it) */
+	display = custom_edition_maps_display_index(h3_mp.map_other);
+	if (display != NONE && (custom = custom_edition_maps_name(display)) != NULL)
+	{
+		h3_utf8(name, sizeof(name), custom);
+		if (name[0])
+			return name;
+	}
 	slash = strrchr(h3_mp.map_other, '\\');
 	return slash ? slash + 1 : h3_mp.map_other;
 }
@@ -2037,7 +2068,14 @@ static void h3_mp_lobby_update(struct widget_instance *widget)
 		}
 	}
 	if ((found = named(screen, "map_picture")) != NULL)
-		found->animation.current_frame_index = h3_mp.map_index != NONE ? h3_mp.map_index : H3_MAP_OTHER_PICTURE;
+	{
+		/* (the game's own level pictures: a custom map's display index
+		draws its own picture, else the "?") */
+		short display = h3_mp.map_index == NONE ? custom_edition_maps_display_index(h3_mp.map_other) : NONE;
+
+		found->animation.current_frame_index = h3_mp.map_index != NONE ? h3_mp.map_index :
+			display != NONE ? display : H3_MAP_OTHER_PICTURE;
+	}
 	/* (Halo 3's: "Slayer on Valhalla") */
 	snprintf(text, sizeof(text), T("%s on %s"), h3_mp_gametype_name(), h3_mp_map_name());
 	text_show(named(screen, "caption"), text);
@@ -2115,14 +2153,135 @@ static void h3_mp_gametype_set(struct widget_instance *widget)
 	platform_log("menus: h3 mp: game type %s", h3_mp.gametype_names[index]);
 }
 
+/* (port h3 map focus: the map picker opened) its maps read as the Xbox's
+level list reads them: its thirteen, then the custom multiplayer maps in
+the maps folder that the mod manager has on (custom_edition_maps.c looks
+again), each with its name, picture and description; the rows on the map
+chosen */
+static void h3_mp_maps_read(void)
+{
+	char *stock[H3_MAP_COUNT];
+	char **levels;
+	short count = 0;
+	short index;
+
+	for (index = 0; index < H3_MAP_COUNT; index++)
+		stock[index] = (char *)h3_map_paths[index];
+	levels = custom_edition_maps_level_list(stock, H3_MAP_COUNT, &count);
+	h3_mp.map_count = 0;
+	for (index = 0; levels && index < count && index < H3_MAXIMUM_MAPS; index++)
+	{
+		short slot = h3_mp.map_count;
+		wchar_t const *name;
+
+		if (!levels[index] || strlen(levels[index]) >= H3_MAP_PATH_SIZE)
+			continue;
+		snprintf(h3_mp.map_paths[slot], sizeof(h3_mp.map_paths[slot]), "%s", levels[index]);
+		h3_mp.map_displays[slot] = custom_edition_maps_level_display_index(index);
+		h3_mp.map_names[slot][0] = 0;
+		if (index < H3_MAP_COUNT)
+			snprintf(h3_mp.map_names[slot], sizeof(h3_mp.map_names[slot]), "%s", T(h3_map_names[index]));
+		else if ((name = custom_edition_maps_name(h3_mp.map_displays[slot])) != NULL)
+			h3_utf8(h3_mp.map_names[slot], sizeof(h3_mp.map_names[slot]), name);
+		if (!h3_mp.map_names[slot][0])
+		{
+			char const *slash = strrchr(levels[index], '\\');
+
+			snprintf(h3_mp.map_names[slot], sizeof(h3_mp.map_names[slot]), "%s", slash ? slash + 1 : levels[index]);
+		}
+		h3_mp.map_count++;
+	}
+	/* (the rows on the map chosen: the Xbox's, else a custom one by path) */
+	h3_mp.map_cursor = 0;
+	for (index = 0; index < h3_mp.map_count; index++)
+	{
+		if ((h3_mp.map_index != NONE && index == h3_mp.map_index) ||
+			(h3_mp.map_index == NONE && h3_mp.map_other[0] && !_stricmp(h3_mp.map_paths[index], h3_mp.map_other)))
+		{
+			h3_mp.map_cursor = index;
+		}
+	}
+	browser_view_reset(&h3_mp.map_view);
+	h3_mp.map_page = 0;
+	h3_mp.map_said[0] = 0;
+	platform_log("menus: h3 mp: the map picker: %d maps (%d custom)", h3_mp.map_count,
+		MAX(h3_mp.map_count - H3_MAP_COUNT, 0));
+}
+
+/* (port h3 maps) the map picker's rows (item_0 to item_12): the maps,
+scrolling past the thirteen as the game types do (a step past the first or
+last row, the triggers a page); the focused one's picture (the game's own
+level pictures, which draw a custom map's own, else its "?") and
+description */
+static void h3_mp_maps_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *child, *focus = NULL, *found;
+	long index, focused_row = NONE, target;
+
+	for (index = 0, child = list->child; child; child = child->next, index++)
+	{
+		if (child == list->focused_child)
+			focused_row = index;
+	}
+	target = browser_view_follow(&h3_mp.map_view, H3_MAP_ROWS, h3_mp.map_count, (int)focused_row, h3_mp.map_cursor,
+		h3_mp.map_page);
+	h3_mp.map_page = 0;
+	h3_mp.map_cursor = (short)target;
+	for (index = 0, child = list->child; child; child = child->next, index++)
+	{
+		boolean shown = index < h3_mp.map_view.visible;
+		char text[64];
+
+		widget_instance_set_visibility_recursive(child, shown);
+		child->disabled = !shown;
+		if (!shown)
+			continue;
+		snprintf(text, sizeof(text), "%s", h3_mp.map_names[h3_mp.map_view.offset + index]);
+		h3_capitals(text);
+		text_show(child, text);
+		if (index == h3_mp.map_view.row)
+			focus = child;
+	}
+	if (focus && focus != list->focused_child)
+		ui_widget_port_give_focus(list, focus);
+	if (target >= 0 && target < h3_mp.map_count)
+	{
+		char said[96];
+
+		if ((found = named(screen, "map_picture")) != NULL)
+			found->animation.current_frame_index = h3_mp.map_displays[target];
+		string_show(named(screen, "map_text"), h3_mp.map_displays[target]);
+		snprintf(said, sizeof(said), "%s (%ld of %d)", h3_mp.map_names[target], target + 1, h3_mp.map_count);
+		if (strcmp(said, h3_mp.map_said))
+		{
+			snprintf(h3_mp.map_said, sizeof(h3_mp.map_said), "%s", said);
+			platform_log("menus: h3 maps: %s", said);
+		}
+	}
+}
+
+/* (port h3 map set) the picker's choice: the map the Xbox's level list
+opens on, as its own choice keeps it (a custom map by its level's path:
+START GAME, Create Game and the map's sharing take it from there) */
 static void h3_mp_map_set(struct widget_instance *widget)
 {
-	short index = (short)PIN(h3_child_index(widget), 0, H3_MAP_COUNT - 1);
+	long index = h3_mp.map_view.offset + h3_child_index(widget);
 
-	h3_mp.map_index = index;
-	h3_mp.map_other[0] = 0;
-	saved_game_file_remember_last_used_multiplayer_map(h3_map_paths[index]);
-	platform_log("menus: h3 mp: map %s", h3_map_names[index]);
+	if (index < 0 || index >= h3_mp.map_count)
+		return;
+	if (index < H3_MAP_COUNT)
+	{
+		h3_mp.map_index = (short)index;
+		h3_mp.map_other[0] = 0;
+		saved_game_file_remember_last_used_multiplayer_map(h3_map_paths[index]);
+		platform_log("menus: h3 mp: map %s", h3_map_names[index]);
+		return;
+	}
+	h3_mp.map_index = NONE;
+	snprintf(h3_mp.map_other, sizeof(h3_mp.map_other), "%s", h3_mp.map_paths[index]);
+	saved_game_file_remember_last_used_multiplayer_map(h3_mp.map_paths[index]);
+	platform_log("menus: h3 mp: map %s (a custom map: %s)", h3_mp.map_names[index], h3_mp.map_paths[index]);
 }
 
 /* (port h3 network set) the network picker's choice; ONLINE only with
@@ -5068,7 +5227,11 @@ boolean pc_menu_event_function_invoke(
 		h3_mp_map_set(widget);
 		return TRUE;
 	case _function_h3_map_focus:
-		h3_focus_child(widget, h3_mp.map_index != NONE ? h3_mp.map_index : 0);
+		h3_mp_maps_read();
+		return TRUE;
+	case _function_h3_map_page_up:
+	case _function_h3_map_page_down:
+		h3_mp.map_page = function_index == _function_h3_map_page_up ? -1 : 1;
 		return TRUE;
 	case _function_h3_gametype_set:
 		h3_mp_gametype_set(widget);
@@ -5317,7 +5480,8 @@ void pc_menu_game_data_function_invoke(
 		h3_pick_update(widget, NUMBER_OF_H3_NETWORKS, "network_picture", "network_text");
 		break;
 	case _input_h3_maps:
-		h3_pick_update(widget, H3_MAP_COUNT, "map_picture", "map_text");
+		if (widget->type == _ui_widget_type_column_list)
+			h3_mp_maps_update(widget);
 		break;
 	case _input_h3_gametypes:
 		if (widget->type == _ui_widget_type_column_list)

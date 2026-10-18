@@ -372,7 +372,7 @@ static char const *const port_function_names[] =
 	"port forge close", "port forge pack toggle",
 	"port h3 mods init", "port h3 mods toggle", "port h3 mods details", "port h3 mods delete ask",
 	"port h3 mods delete", "port h3 mods page up", "port h3 mods page down",
-	"port forge new round", "port forge all ai",
+	"port forge new round", "port forge all ai", "port h3 map page up", "port h3 map page down",
 };
 
 /* the port's game data functions (menu_functions.c), from
