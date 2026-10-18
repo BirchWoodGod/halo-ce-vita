@@ -4415,7 +4415,16 @@ static int h3_ready(void)
 	if (h3.state)
 		return h3.state > 0;
 	h3.state = -1;
-	if (!gxm.text_vertex || !gxm.text_fragment || overlay_atlas_init(&h3.atlas, H3_ATLAS_WIDTH, H3_ATLAS_HEIGHT) < 0)
+	/* (the programs are in the shipped pack: a Vita without SceShaccCg's
+	module compiles nothing, and on the owner's, set up again, the panel was
+	as before) */
+	if (!gxm.text_vertex || !gxm.text_fragment)
+	{
+		log_line("gxm: the Halo 3 settings text programs did not load (not in shaders.pak, not compiled): the panel as "
+			"before");
+		return 0;
+	}
+	if (overlay_atlas_init(&h3.atlas, H3_ATLAS_WIDTH, H3_ATLAS_HEIGHT) < 0)
 		return 0;
 	if (h3_face_read(&h3.title, "overlay_title.bin") < 0 || h3_face_read(&h3.item, "overlay_item.bin") < 0 ||
 		h3_face_read(&h3.small, "overlay_small.bin") < 0 ||
