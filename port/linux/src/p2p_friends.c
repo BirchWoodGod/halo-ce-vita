@@ -105,7 +105,8 @@ enum
 	PRESENCE_INTERVAL = 60000,
 	PRESENCE_CHANGE_INTERVAL = 3000,
 	PRESENCE_TIMEOUT = 150000,
-	PRESENCE_RATE = 1000,
+	PRESENCE_BUDGET = 6,
+	PRESENCE_BUDGET_INTERVAL = 2000,
 	REQUEST_FAST_INTERVAL = 30000,
 	REQUEST_FAST_TIME = 600000,
 	REQUEST_SLOW_INTERVAL = 300000,
@@ -191,6 +192,10 @@ struct friend_record
 	struct presence presence;
 	unsigned long heard_time;
 	unsigned long presence_time;
+	/* their presences taken: a few at once, one more each
+	PRESENCE_BUDGET_INTERVAL (their own sends are paced: this is a flood's
+	cap, not theirs) */
+	struct budget presence_budget;
 	/* this machine's presence due to them; the counter of the last sent
 	them; they asked for a reply */
 	int presence_due;
@@ -351,9 +356,11 @@ struct friends_state
 	int outbound_count;
 	unsigned long outbound_serial;
 
-	/* internet play's side, as of the last pass */
+	/* internet play's side, as of the last pass; the game exiting (nothing
+	more sent) */
 	struct p2p_friends_host host;
 	int online;
+	int quitting;
 	/* this machine's presence: what the game says, what was last sent
 	(signed once, sealed per friend), when, and whether it was online */
 	struct activity activity;
@@ -2124,9 +2131,8 @@ static void presence_heard(struct friend_record *record, const struct message *m
 	char activity[P2P_FRIEND_ACTIVITY_SIZE];
 	int was_online = record->heard_time && record->presence.online;
 
-	/* (one a second a friend: more is dropped, the newest next time) */
-	if (record->presence_time && !elapsed(record->presence_time, PRESENCE_RATE) &&
-		!(message->flags & PRESENCE_WANT_REPLY) && message->game.online == record->presence.online)
+	/* (a friend's flood capped: their honest sends are paced far below it) */
+	if (!budget_left(&record->presence_budget, PRESENCE_BUDGET, PRESENCE_BUDGET_INTERVAL, 1))
 	{
 		friends->dropped_rate++;
 		return;
@@ -2145,7 +2151,7 @@ static void presence_heard(struct friend_record *record, const struct message *m
 		record->reply_asked = 1;
 	}
 	p2p_friends_activity_text(activity, sizeof(activity), message->game.online ? message->game.state :
-		P2P_FRIEND_STATE_OFFLINE, message->game.map, message->game.gametype, message->game.difficulty,
+		P2P_FRIEND_STATE_OFFLINE, message->game.map, message->game.gametype, message->game.engine, message->game.difficulty,
 		message->game.pc_map);
 	if (message->game.online)
 		platform_log("friends: %s is online: %s%s", record->name, activity, message->game.joinable ? " (joinable)" : "");
@@ -2188,7 +2194,7 @@ static void invite_heard(struct friend_record *record, const struct message *mes
 	invite->game = message->game;
 	invite->time = now_stamp();
 	p2p_friends_activity_text(activity, sizeof(activity), message->game.state, message->game.map,
-		message->game.gametype, message->game.difficulty, message->game.pc_map);
+		message->game.gametype, message->game.engine, message->game.difficulty, message->game.pc_map);
 	platform_log("friends: %s invited this machine: %s", record->name, activity);
 }
 
@@ -2728,12 +2734,15 @@ void p2p_friends_outgoing_settle(int ready_mask)
 }
 
 /* (internet play stopping) an offline presence to every friend, queued for
-the brokers' last publishes, then nothing more until it runs again */
-void p2p_friends_stopping(void)
+the brokers' last publishes, then nothing more until it runs again (the
+game exiting: nothing more at all) */
+void p2p_friends_stopping(int quitting)
 {
 	int index;
 
 	pthread_mutex_lock(&friends_lock);
+	if (quitting)
+		friends->quitting = 1;
 	if (friends_on() && friends->presence_online && friends->friend_count)
 	{
 		presence_sign(0, 0);
@@ -2759,7 +2768,7 @@ void p2p_friends_update(const struct p2p_friends_host *host)
 	was_online = friends->online;
 	was_on = friends_on();
 	friends->host = *host;
-	friends->online = host->online;
+	friends->online = host->online && !friends->quitting;
 #ifndef HALO_RELEASE
 	test_steps();
 #endif
@@ -2948,11 +2957,16 @@ int p2p_friends_code(char *code, int size)
 
 static const char *const difficulty_names[] = { N_("Easy"), N_("Normal"), N_("Heroic"), N_("Legendary") };
 
-void p2p_friends_activity_text(char *text, int size, int state, const char *map, const char *gametype,
+void p2p_friends_activity_text(char *text, int size, int state, const char *map, const char *gametype, int engine,
 	int difficulty, int pc_map)
 {
+	/* (a variant with no name: its game's, as the server browser shows it) */
+	static const char *const engines[] = { "", "CTF", "Slayer", "Oddball", "King of the Hill", "Race" };
 	const char *title = map && map[0] ? p2p_lobby_map_title(map, pc_map) : "";
 	const char *level = difficulty >= 0 && difficulty < 4 ? T(difficulty_names[difficulty]) : "";
+
+	if ((!gametype || !gametype[0]) && engine > 0 && engine < (int)(sizeof(engines) / sizeof(engines[0])))
+		gametype = engines[engine];
 
 	switch (state)
 	{
@@ -3003,7 +3017,7 @@ static void friend_entry(const struct friend_record *record, struct p2p_friend_e
 	entry->players = online ? record->presence.players : 0;
 	entry->maximum = online ? record->presence.maximum : 0;
 	p2p_friends_activity_text(entry->activity, sizeof(entry->activity), entry->state, record->presence.map,
-		record->presence.gametype, record->presence.difficulty, record->presence.pc_map);
+		record->presence.gametype, record->presence.engine, record->presence.difficulty, record->presence.pc_map);
 }
 
 static int friend_order(const void *first, const void *second)
@@ -3052,7 +3066,7 @@ int p2p_friends_list(struct p2p_friend_entry *entries, int maximum_count)
 		entry->state = invite->game.state;
 		entry->joinable = invite->game.version == HALO_PORT_NETWORK_VERSION && invite->game.wire == friends->host.crossplay;
 		p2p_friends_activity_text(game, sizeof(game), invite->game.state, invite->game.map, invite->game.gametype,
-			invite->game.difficulty, invite->game.pc_map);
+			invite->game.engine, invite->game.difficulty, invite->game.pc_map);
 		snprintf(entry->activity, sizeof(entry->activity), T("Invited you: %s"), game);
 	}
 	first_friend = count;
@@ -3581,7 +3595,7 @@ int p2p_friends_take_invite(struct p2p_friend_entry *entry)
 		entry->online = 1;
 		entry->state = invite->game.state;
 		p2p_friends_activity_text(game, sizeof(game), invite->game.state, invite->game.map, invite->game.gametype,
-			invite->game.difficulty, invite->game.pc_map);
+			invite->game.engine, invite->game.difficulty, invite->game.pc_map);
 		snprintf(entry->activity, sizeof(entry->activity), "%s", game);
 	}
 	pthread_mutex_unlock(&friends_lock);

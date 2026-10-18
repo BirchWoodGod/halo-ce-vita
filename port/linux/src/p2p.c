@@ -4121,7 +4121,7 @@ static void friends_quit(void)
 	pthread_mutex_lock(&p2p_lock);
 	if (p2p.running && !p2p.stopping)
 	{
-		p2p_friends_stopping();
+		p2p_friends_stopping(1);
 		p2p_signal_friends_flush();
 	}
 	pthread_mutex_unlock(&p2p_lock);
@@ -4489,7 +4489,7 @@ static void teardown(void)
 
 	p2p_lobby_stop();
 	/* (friends told this machine went offline, before the brokers close) */
-	p2p_friends_stopping();
+	p2p_friends_stopping(0);
 	p2p_signal_friends_flush();
 	p2p_signal_stop();
 	/* (nothing asked again: a joining host dropped would be) */

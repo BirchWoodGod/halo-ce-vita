@@ -184,8 +184,8 @@ void p2p_friends_set_activity(int state, const char *map, const char *gametype, 
 	int pc_map, int players, int maximum);
 
 /* the activity line of a state and its game, as the lists show a friend's
-(the panel's and the menus' own use; text holds P2P_FRIEND_ACTIVITY_SIZE) */
-void p2p_friends_activity_text(char *text, int size, int state, const char *map, const char *gametype,
+(a game type with no name: its engine's; text holds P2P_FRIEND_ACTIVITY_SIZE) */
+void p2p_friends_activity_text(char *text, int size, int state, const char *map, const char *gametype, int engine,
 	int difficulty, int pc_map);
 
 #endif

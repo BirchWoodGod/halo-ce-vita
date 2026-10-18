@@ -328,6 +328,16 @@ static void test_codes(void)
 	check(!code_normalize("ABCD-EFGH-JKLMN", normalized), "13 characters are no code");
 	check(p2p_friends_add(code) == P2P_FRIENDS_ADD_OWN_CODE, "the own code refused");
 	check(p2p_friends_add("hello") == P2P_FRIENDS_ADD_NOT_A_CODE, "garbage refused");
+	{
+		char text[P2P_FRIEND_ACTIVITY_SIZE];
+
+		p2p_friends_activity_text(text, sizeof(text), P2P_FRIEND_STATE_MULTIPLAYER, "bloodgulch", "", 2, -1, 0);
+		check(!strcmp(text, "Slayer on Blood Gulch"), "a game type with no name: its engine's");
+		p2p_friends_activity_text(text, sizeof(text), P2P_FRIEND_STATE_CAMPAIGN, "a10", "", 0, 2, 0);
+		check(!strcmp(text, "Campaign: The Pillar of Autumn, Heroic"), "the campaign's activity");
+		p2p_friends_activity_text(text, sizeof(text), P2P_FRIEND_STATE_MENUS, "", "", 0, -1, 0);
+		check(!strcmp(text, "In the menus"), "In the menus");
+	}
 }
 
 static void test_request_accept(void)

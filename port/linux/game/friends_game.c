@@ -75,7 +75,10 @@ static void friends_ascii(char *text, int size, wchar_t const *wide, int length)
 static void friends_game_activity(boolean main_menu_loaded)
 {
 	struct network_game_client *client = global_network_game_client_get();
-	boolean network_game = client && !network_game_is_splitscreen_local();
+	int status = __atomic_load_n(&halo_multiplayer_status[SYSTEM_LINK_STATUS_STATE], __ATOMIC_ACQUIRE);
+	/* (looking for games at the menus: still the menus) */
+	boolean network_game = client && !network_game_is_splitscreen_local() &&
+		!(main_menu_loaded && status == SYSTEM_LINK_STATE_SEARCHING);
 	int state = P2P_FRIEND_STATE_MENUS, engine = 0, difficulty = -1, pc_map = 0, players = 0, maximum = 0;
 	char map[64], gametype[32], name[24];
 	long profile_index;

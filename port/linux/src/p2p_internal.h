@@ -461,8 +461,9 @@ int p2p_friends_outgoing(int index, unsigned long *serial, char *topic, int topi
 	int *sent_mask);
 void p2p_friends_outgoing_sent(unsigned long serial, int broker);
 void p2p_friends_outgoing_settle(int ready_mask);
-/* internet play stopping: an offline presence queued for the last publishes */
-void p2p_friends_stopping(void);
+/* internet play stopping (quitting: the game exiting, nothing more sent
+after): an offline presence queued for the last publishes */
+void p2p_friends_stopping(int quitting);
 /* (p2p_lobby.c) the hosted game as the server browser has it, into host's
 listed, locked, open, players and maximum; under p2p_lock */
 void p2p_lobby_friends_view(struct p2p_friends_host *host);
