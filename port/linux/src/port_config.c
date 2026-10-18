@@ -301,6 +301,19 @@ static const struct config_setting config_settings[] =
 		"its code or invite link): its own, which network.host_public (the\n"
 		"other games') never changes. X on the waiting screen of co-op hosted\n"
 		"from the campaign's menus writes its choice here (OpenCE's setting)." },
+	{ "friends.enabled", _config_boolean, "true", "HALO_FRIENDS", _environment_value, _platform_all,
+		"Friends (port/linux/src/p2p_friends.c): this machine's friend code, friend\n"
+		"requests, friends' presence, joining and inviting them, through the\n"
+		"signalling brokers while internet play runs. False: none of it." },
+	{ "friends.appear_offline", _config_boolean, "false", "HALO_FRIENDS_APPEAR_OFFLINE", _environment_value,
+		_platform_all,
+		"Appear offline to friends: nothing about this machine is sent to them\n"
+		"(they see it offline); their presence, requests and invites still\n"
+		"arrive. The settings panel's Friends page and the FRIENDS screen set it." },
+	{ "friends.join", _config_boolean, "true", "HALO_FRIENDS_JOIN", _environment_value, _platform_all,
+		"Whether friends can join this machine's game in one press: only a\n"
+		"public game without a password, with room (a private game is joined\n"
+		"by the invites its host sends)." },
 	{ "network.public_lobby", _config_boolean, "true", "HALO_NET_PUBLIC_LOBBY", _environment_value, _platform_all,
 		"The server browser: public games are listed through the signalling\n"
 		"brokers, and the settings panel's Browse public games shows them.\n"

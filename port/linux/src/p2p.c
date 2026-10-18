@@ -445,6 +445,8 @@ static struct
 	unsigned char token[P2P_TOKEN_SIZE];
 	/* whether the server browser's exit hook is set (lobby_quit) */
 	int lobby_quit_registered;
+	/* friends went online once this run: their offline presence at exit */
+	int friends_quit_registered;
 	/* whether the server browser listed this token (p2p_lobby.c): going
 	private makes a new one */
 	int token_listed;
@@ -4112,6 +4114,40 @@ static void lobby_quit(void)
 	pthread_mutex_unlock(&p2p_lock);
 }
 
+/* the game exits: friends told this machine went offline (p2p_friends.c),
+through the brokers ready now */
+static void friends_quit(void)
+{
+	pthread_mutex_lock(&p2p_lock);
+	if (p2p.running && !p2p.stopping)
+	{
+		p2p_friends_stopping();
+		p2p_signal_friends_flush();
+	}
+	pthread_mutex_unlock(&p2p_lock);
+}
+
+/* what friends need of internet play (p2p_friends.c), under p2p_lock: it
+runs, its wire, and the game hosted for the internet (its invite, and as
+the server browser lists it) */
+static void friends_host_view(struct p2p_friends_host *host)
+{
+	int count, maximum;
+
+	memset(host, 0, sizeof(*host));
+	host->online = p2p.running && !p2p.adhoc && !p2p.stopping && config_boolean("network.online");
+	host->crossplay = network_wire_crossplay();
+	host->hosting = p2p.hosting && p2p.has_token && p2p.game_player_maximum > 0 && !host->crossplay;
+	if (!host->hosting)
+		return;
+	p2p_key_hash(public_key, host->key_hash);
+	memcpy(host->token, p2p.token, P2P_TOKEN_SIZE);
+	p2p_lobby_friends_view(host);
+	hosted_player_counts(&count, &maximum);
+	host->players = count;
+	host->maximum = maximum;
+}
+
 /* the game exits: the router forwards the port no longer (after a request
 under way, which may forward one, if it ends soon) */
 static void upnp_release(void)
@@ -4452,6 +4488,9 @@ static void teardown(void)
 	int index;
 
 	p2p_lobby_stop();
+	/* (friends told this machine went offline, before the brokers close) */
+	p2p_friends_stopping();
+	p2p_signal_friends_flush();
 	p2p_signal_stop();
 	/* (nothing asked again: a joining host dropped would be) */
 	p2p.joining = 0;
@@ -4737,6 +4776,26 @@ static void *p2p_thread(void *unused)
 				{
 					p2p.lobby_quit_registered = 1;
 					atexit(lobby_quit);
+				}
+			}
+		}
+		/* friends (p2p_friends.c): their work (crypto) without the lock, the
+		brokers while they are on (not in ad hoc play) */
+		if (!p2p.adhoc)
+		{
+			struct p2p_friends_host host;
+
+			friends_host_view(&host);
+			pthread_mutex_unlock(&p2p_lock);
+			p2p_friends_update(&host);
+			pthread_mutex_lock(&p2p_lock);
+			if (p2p_friends_wanted() && !p2p.stopping)
+			{
+				p2p_signal_start();
+				if (!p2p.friends_quit_registered)
+				{
+					p2p.friends_quit_registered = 1;
+					atexit(friends_quit);
 				}
 			}
 		}

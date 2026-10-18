@@ -5211,6 +5211,14 @@ static void h3_mods_delete(void)
 
 /* ---------- public code */
 
+/* (friends_game.c: a friend's game joined, its invite handed on) the System
+Link screen at the next frame, as JOIN WITH CODE opens it, where the host's
+game is joined once listed */
+void menu_functions_open_system_link(void)
+{
+	menu_functions.open_system_link = TRUE;
+}
+
 /* (system_link_shortcut.c: the host an invite, a code or the online list
 joined, once its game is listed) the game joined from the Halo 3 games
 browser when it is the screen open, as A on its row joins it: 1 joined, 0

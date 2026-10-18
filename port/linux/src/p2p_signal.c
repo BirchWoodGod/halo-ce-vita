@@ -246,6 +246,9 @@ enum
 	_topic_own_slot,
 	_topic_query,
 	_topic_slots,
+	/* friends' (p2p_friends.c): the friend code's inbox, the key's mailbox */
+	_topic_friend_inbox,
+	_topic_friend_mailbox,
 	NUMBER_OF_TOPICS,
 };
 
@@ -514,6 +517,10 @@ static struct
 	char code_topic[TOPIC_SIZE];
 	unsigned char code_key[P2P_SHA256_SIZE];
 	unsigned long code_sent_time;
+
+	/* friends' topics (p2p_friends_topics; "" none) */
+	char friend_inbox[TOPIC_SIZE];
+	char friend_mailbox[TOPIC_SIZE];
 
 	/* looking up a code (with a host: only its record) */
 	int looking_up;
@@ -1063,6 +1070,8 @@ static void broker_sync_topics(struct broker *broker)
 	wanted[_topic_own_slot] = lobby && signalling.lobby_listed ? signalling.own_slot : "";
 	wanted[_topic_query] = lobby && signalling.lobby_listed ? P2P_LOBBY_QUERY_TOPIC : "";
 	wanted[_topic_slots] = lobby && signalling.lobby_browsing ? slots : "";
+	wanted[_topic_friend_inbox] = signalling.friend_inbox;
+	wanted[_topic_friend_mailbox] = signalling.friend_mailbox;
 	for (index = 0; index < NUMBER_OF_TOPICS; index++)
 	{
 		char *had = broker->topics[index];
@@ -2044,6 +2053,20 @@ static void publish_received(struct broker *broker, const char *topic, const uns
 		p2p_lobby_query_heard();
 		return;
 	}
+	/* friends' (p2p_friends.c reads them on its own time; a retained one is
+	no friend's: nothing of theirs is retained) */
+	if (signalling.friend_inbox[0] && !strcmp(topic, signalling.friend_inbox))
+	{
+		if (!retained)
+			p2p_friends_heard(P2P_FRIENDS_INBOX, payload, size);
+		return;
+	}
+	if (signalling.friend_mailbox[0] && !strcmp(topic, signalling.friend_mailbox))
+	{
+		if (!retained)
+			p2p_friends_heard(P2P_FRIENDS_MAILBOX, payload, size);
+		return;
+	}
 	if (signalling.hosting && !strcmp(topic, signalling.host_topic))
 	{
 		message_size = p2p_open(signalling.host_key, payload, size, message);
@@ -2628,9 +2651,66 @@ static int list_holds(const int *list, int count, int socket)
 	return 0;
 }
 
+/* friends' messages (p2p_friends.c's queue) published on a ready broker as
+its bucket allows, past what is kept back for answers to joiners and the
+listing (or, flushing, whatever the bucket: internet play stopping) */
+static void broker_update_friends(struct broker *broker, int broker_index, int flushing)
+{
+	unsigned char payload[MAXIMUM_MESSAGE_SIZE + P2P_SEAL_OVERHEAD];
+	char topic[TOPIC_SIZE];
+	unsigned long serial;
+	int index, size, sent_mask;
+
+	if (broker->state != _broker_ready)
+		return;
+	for (index = 0; (size = p2p_friends_outgoing(index, &serial, topic, sizeof(topic), payload, &sent_mask)) >= 0;
+		index++)
+	{
+		if (sent_mask & (1 << broker_index))
+			continue;
+		if (size > (int)sizeof(payload) || (!flushing && !broker_may_publish(broker, UNPROVEN_RESERVE)))
+			break;
+		broker_publish(broker, topic, payload, size, 0);
+		p2p_friends_outgoing_sent(serial, broker_index);
+	}
+}
+
+/* friends' topics as p2p_friends.c wants them: subscribed where they
+changed */
+static void friends_topics_update(void)
+{
+	char inbox[TOPIC_SIZE], mailbox[TOPIC_SIZE];
+
+	p2p_friends_topics(inbox, mailbox, TOPIC_SIZE);
+	if (!strcmp(inbox, signalling.friend_inbox) && !strcmp(mailbox, signalling.friend_mailbox))
+		return;
+	memcpy(signalling.friend_inbox, inbox, TOPIC_SIZE);
+	memcpy(signalling.friend_mailbox, mailbox, TOPIC_SIZE);
+	sync_all_topics();
+}
+
+void p2p_signal_friends_flush(void)
+{
+	int index, ready_mask = 0;
+
+	for (index = 0; index < signalling.broker_count; index++)
+	{
+		broker_update_friends(&signalling.brokers[index], index, 1);
+		if (signalling.brokers[index].state == _broker_ready)
+		{
+			ready_mask |= 1 << index;
+			broker_flush(&signalling.brokers[index]);
+		}
+	}
+	p2p_friends_outgoing_settle(ready_mask);
+}
+
 void p2p_signal_update(const int *read, int read_count, const int *write, int write_count)
 {
-	int index;
+	int index, ready_mask = 0;
+
+	if (signalling.started)
+		friends_topics_update();
 
 	for (index = 0; index < signalling.broker_count; index++)
 	{
@@ -2729,7 +2809,11 @@ void p2p_signal_update(const int *read, int read_count, const int *write, int wr
 				broker->lobby_version = 0;
 		}
 		broker_update_lobby(broker);
+		broker_update_friends(broker, index, 0);
+		ready_mask |= 1 << index;
 	}
+	if (signalling.started)
+		p2p_friends_outgoing_settle(ready_mask);
 	if (signalling.joining && !signalling.join_answered && elapsed(signalling.join_nonce_time, UNANSWERED_TIME))
 	{
 		posix_random_bytes(signalling.join_nonce, NONCE_SIZE);
@@ -3021,5 +3105,7 @@ void p2p_signal_stop(void)
 	signalling.join_has_base = 0;
 	signalling.join_answered = 0;
 	signalling.looking_up = 0;
+	signalling.friend_inbox[0] = 0;
+	signalling.friend_mailbox[0] = 0;
 	platform_log("Internet play: signalling stopped");
 }

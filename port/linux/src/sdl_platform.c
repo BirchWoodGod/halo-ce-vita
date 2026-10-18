@@ -774,6 +774,9 @@ static char platform_question_text[600];
 1 yes */
 static BOOL platform_question_pending;
 static int platform_question_result = -1;
+/* a question asked and neither answered nor withdrawn
+(platform_question_asking: one more waits its turn) */
+static BOOL platform_question_open;
 
 /* asks the player a yes or no question (NULL withdraws one); the answer
 comes later, platform_question_answer. A run nobody watches answers no. */
@@ -788,6 +791,7 @@ void platform_ask_question(const char *title, const char *text)
 		pthread_mutex_lock(&platform_message_lock);
 		platform_question_pending = FALSE;
 		platform_question_result = -1;
+		platform_question_open = FALSE;
 		pthread_mutex_unlock(&platform_message_lock);
 		return;
 	}
@@ -798,6 +802,7 @@ void platform_ask_question(const char *title, const char *text)
 
 		pthread_mutex_lock(&platform_message_lock);
 		platform_question_result = -1;
+		platform_question_open = TRUE;
 		pthread_mutex_unlock(&platform_message_lock);
 		vita_settings_question(title, text);
 	}
@@ -814,6 +819,7 @@ void platform_ask_question(const char *title, const char *text)
 		snprintf(platform_question_text, sizeof(platform_question_text), "%s", text);
 		platform_question_pending = TRUE;
 		platform_question_result = -1;
+		platform_question_open = TRUE;
 	}
 	pthread_mutex_unlock(&platform_message_lock);
 #endif
@@ -821,18 +827,30 @@ void platform_ask_question(const char *title, const char *text)
 
 int platform_question_answer(void)
 {
+	int result;
 #ifdef HALO_VITA
 	extern int vita_settings_question_answer(void);
 
-	return vita_settings_question_answer();
+	result = vita_settings_question_answer();
+	pthread_mutex_lock(&platform_message_lock);
 #else
-	int result;
-
 	pthread_mutex_lock(&platform_message_lock);
 	result = platform_question_result;
+#endif
+	if (result >= 0)
+		platform_question_open = FALSE;
 	pthread_mutex_unlock(&platform_message_lock);
 	return result;
-#endif
+}
+
+int platform_question_asking(void)
+{
+	BOOL open;
+
+	pthread_mutex_lock(&platform_message_lock);
+	open = platform_question_open;
+	pthread_mutex_unlock(&platform_message_lock);
+	return open;
 }
 
 #ifndef HALO_VITA

@@ -196,6 +196,9 @@ slot is cleared and nothing is published again */
 void p2p_signal_lobby_publish(const unsigned char *listing, int size, int closing);
 /* asks the hosts to publish again */
 void p2p_signal_lobby_query(void);
+/* friends' queue published on every ready broker now, whatever their
+buckets (internet play stopping, the game exiting) */
+void p2p_signal_friends_flush(void);
 /* the game is quitting: the tombstone published (p2p_signal_lobby_publish)
 and the slot cleared on every ready broker now, whatever their buckets, and
 the connections closed cleanly */
@@ -412,6 +415,60 @@ kept); under p2p_lock */
 void p2p_lobby_stop(void);
 /* a key hash's slot */
 void p2p_lobby_slot_topic(const unsigned char *key_hash, char *topic, int size);
+
+/* ---------- p2p_friends.c: friends (p2p_friends.h)
+
+The p2p thread calls p2p_friends_update each pass without p2p_lock (its
+work is crypto); p2p_signal.c calls the rest with p2p_lock held. Friends'
+own lock is taken after p2p_lock, never before it. */
+
+/* the topics heard: a friend code's inbox (requests) and a key's mailbox */
+enum
+{
+	P2P_FRIENDS_INBOX,
+	P2P_FRIENDS_MAILBOX,
+};
+
+/* internet play's side as friends need it, gathered under p2p_lock each
+pass (p2p.c, p2p_lobby_friends_view) */
+struct p2p_friends_host
+{
+	/* internet play runs (network.online; not ad hoc play) */
+	int online;
+	/* the crossplay wire (network_wire.h): a game of the other wire is not
+	joined */
+	int crossplay;
+	/* hosting for the internet: its invite (the host's key hash and the
+	token), and as the server browser has it - listed (public), a password
+	(set, or its key being worked out), open, its players and most */
+	int hosting;
+	unsigned char key_hash[P2P_KEY_HASH_SIZE];
+	unsigned char token[P2P_TOKEN_SIZE];
+	int listed, locked, open, players, maximum;
+};
+void p2p_friends_update(const struct p2p_friends_host *host);
+/* whether friends want the brokers (internet play runs, friends are on) */
+int p2p_friends_wanted(void);
+/* the topics to subscribe ("" for none) */
+void p2p_friends_topics(char *inbox, char *mailbox, int size);
+/* a message heard on one (queued: p2p_friends_update reads it) */
+void p2p_friends_heard(int which, const unsigned char *payload, int size);
+/* the outgoing queue: the index-th message (its serial, topic, payload and
+the brokers it went through, bit n broker n): its size, or -1 past the end;
+sent through a broker; the messages that went through every ready broker
+(or are old) let go */
+int p2p_friends_outgoing(int index, unsigned long *serial, char *topic, int topic_size, unsigned char *payload,
+	int *sent_mask);
+void p2p_friends_outgoing_sent(unsigned long serial, int broker);
+void p2p_friends_outgoing_settle(int ready_mask);
+/* internet play stopping: an offline presence queued for the last publishes */
+void p2p_friends_stopping(void);
+/* (p2p_lobby.c) the hosted game as the server browser has it, into host's
+listed, locked, open, players and maximum; under p2p_lock */
+void p2p_lobby_friends_view(struct p2p_friends_host *host);
+/* (p2p_lobby.c) a map's title as the lists show it ("Blood Gulch"; a Halo
+PC map or one not the Xbox's: its own name) */
+const char *p2p_lobby_map_title(const char *map, int pc_map);
 
 /* ---------- p2p_resolver_cache.c: the last good address of each name
 internet play looks up (no locks: p2p.c calls these under p2p_lock) */
