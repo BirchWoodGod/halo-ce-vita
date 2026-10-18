@@ -28,6 +28,7 @@ EXPECTED = {
     'strip.png': (64, 16),
     'rule.png': (128, 2),
     'nameplate.png': (256, 16),
+    'server_plate.png': (256, 16),
     'glyph_cross.png': (16, 16),
     'glyph_circle.png': (16, 16),
     'glyph_triangle.png': (16, 16),

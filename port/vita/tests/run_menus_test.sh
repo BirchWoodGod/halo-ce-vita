@@ -22,6 +22,8 @@
 #   h3broken a Halo 3 PNG missing: the set left out, the Xbox's main menu
 #   h3style  Halo CE at first, Halo 3 chosen while Multiplayer is open: back on
 #            the main menu, the Halo 3 screen
+#   h3online the main menu's live servers: five made-up games
+#            (HALO_TEST_BROWSER_GAMES), the three with the most players shown
 #   pause   Campaign from the main menu (a new profile, Normal), the level's
 #           pause menu, Quit to Main Menu: a game map's widget runs its
 #           function and is back at the main menu, and asked about deleting
@@ -53,7 +55,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
 
@@ -180,8 +182,13 @@ for case in $cases; do
 			HALO_MENU_STYLE=classic "HALO_TEST_COMMANDS=150:@set HALO_MENU_STYLE halo3"
 		grep -aq "ui: screen ui.shell.main_menu.main_menu" "$out/h3style/run.log" || fail h3style "the Xbox's main menu was not first"
 		check_h3 h3style halo3 ;;
+	h3online)
+		run h3online "$menus_data" 15 "$h3pad" HALO_MENU_STYLE=halo3 HALO_TEST_BROWSER_GAMES=5
+		check_h3 h3online halo3
+		grep -aq "menus: h3 servers: 3 shown of 5: Test game 02 (14/16), Test game 04 (12/16), Test game 01 (7/16)" \
+			"$out/h3online/run.log" || fail h3online "the three fullest games were not shown" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"

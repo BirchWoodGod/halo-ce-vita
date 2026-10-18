@@ -133,6 +133,18 @@ def nameplate():
     return image
 
 
+def server_plate():
+    # a live server's row: Halo 3's blue nameplate, fading out to the right
+    image = horizontal_gradient((256, 16), [
+        (0.0, (60, 110, 170, alpha(.85))),
+        (1.0, (40, 80, 130, alpha(.45))),
+    ])
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([0, 0, 15, 15], fill=(25, 45, 75, alpha(.9)))
+    draw.rectangle([0, 0, 255, 15], outline=(255, 255, 255, alpha(.25)))
+    return image
+
+
 GLYPH_COLOURS = {
     'cross': (156, 194, 255),
     'circle': (255, 122, 122),
@@ -220,6 +232,7 @@ ART = {
     'strip.png': strip,
     'rule.png': rule,
     'nameplate.png': nameplate,
+    'server_plate.png': server_plate,
     'glyph_cross.png': lambda: glyph('cross'),
     'glyph_circle.png': lambda: glyph('circle'),
     'glyph_triangle.png': lambda: glyph('triangle'),

@@ -125,6 +125,8 @@ enum
 	_function_browser_sort,
 	_function_browser_page_up,
 	_function_browser_page_down,
+	_function_h3_servers_on,
+	_function_h3_servers_off,
 };
 
 /* in port_game_data_input_names' order */
@@ -137,6 +139,7 @@ enum
 	_input_setup_update,
 	_input_code_update,
 	_input_h3_nameplate,
+	_input_h3_servers,
 };
 
 /* what a line of typing is for */
@@ -357,6 +360,70 @@ static void h3_nameplate_update(struct widget_instance *widget)
 		snprintf(name, sizeof(name), "%s", getenv("HALO_NET_PLAYER_NAME") && getenv("HALO_NET_PLAYER_NAME")[0] ?
 			getenv("HALO_NET_PLAYER_NAME") : "Player");
 	text_show(widget, name);
+}
+
+/* (the Halo 3 main menu's live servers, port h3 servers) up to three rows
+(server_1 to server_3) of the listed games with the most players, "name -
+map" and "players/max" (server_N_name, server_N_count); the rows and the ONLINE NOW label (servers_label) hidden
+when there are none (internet play off, no games). Display only: ONLINE
+opens the browser to join */
+static void browser_test_games(void);
+
+static void h3_servers_update(struct widget_instance *widget)
+{
+	static char said[256];
+	struct widget_instance *screen = screen_of(widget);
+	char line[256];
+	long count, index, shown;
+	int length = 0;
+
+	count = p2p_lobby_entries(menu_functions.games, P2P_LOBBY_MAXIMUM_ENTRIES);
+	menu_functions.game_count = count;
+	browser_test_games();
+	count = menu_functions.game_count;
+	browser_list_sort(menu_functions.games, (int)count, _browser_sort_players);
+	shown = 0;
+	for (index = 0; index < 3; index++)
+	{
+		char name[24], text[P2P_LOBBY_NAME_SIZE + P2P_LOBBY_MAP_SIZE + 32];
+		struct widget_instance *row;
+
+		snprintf(name, sizeof(name), "server_%ld", index + 1);
+		row = named(screen, name);
+		if (index < count)
+		{
+			struct p2p_lobby_entry const *entry = &menu_functions.games[index];
+
+			/* (Halo 3's nameplate: the name and map at the left, the players at the right) */
+			snprintf(text, sizeof(text), "%s - %s", entry->name, entry->map);
+			snprintf(name, sizeof(name), "server_%ld_name", index + 1);
+			text_show(named(screen, name), text);
+			snprintf(text, sizeof(text), "%d/%d", entry->players, entry->maximum);
+			snprintf(name, sizeof(name), "server_%ld_count", index + 1);
+			text_show(named(screen, name), text);
+			if (row)
+				widget_instance_set_visibility_recursive(row, TRUE);
+			if (length < (int)sizeof(line) - 1)
+				length += snprintf(line + length, sizeof(line) - (size_t)length, "%s%s (%d/%d)", shown ? ", " : "",
+					entry->name, entry->players, entry->maximum);
+			shown++;
+		}
+		else if (row)
+			widget_instance_set_visibility_recursive(row, FALSE);
+	}
+	if (named(screen, "servers_label"))
+		widget_instance_set_visibility_recursive(named(screen, "servers_label"), shown > 0);
+	line[length] = 0;
+	{
+		char summary[256];
+
+		snprintf(summary, sizeof(summary), "%ld of %ld: %s", shown, count, line);
+		if (strcmp(summary, said))
+		{
+			snprintf(said, sizeof(said), "%s", summary);
+			platform_log("menus: h3 servers: %ld shown of %ld%s%s", shown, count, shown ? ": " : "", line);
+		}
+	}
 }
 
 /* a text box's string of its string list */
@@ -1090,6 +1157,15 @@ boolean pc_menu_event_function_invoke(
 		menu_functions.create_pending = FALSE;
 		/* fall through */
 	case _function_code_back:
+	/* (the Halo 3 main menu's live servers: the online list looked at while
+	it is open, as the server browser does) */
+	case _function_h3_servers_on:
+		if (internet_play())
+			p2p_lobby_browse(1);
+		return TRUE;
+	case _function_h3_servers_off:
+		p2p_lobby_browse(0);
+		return TRUE;
 	case _function_coop_campaign:
 	case _function_unwired:
 	default:
@@ -1121,6 +1197,9 @@ void pc_menu_game_data_function_invoke(
 		break;
 	case _input_h3_nameplate:
 		h3_nameplate_update(widget);
+		break;
+	case _input_h3_servers:
+		h3_servers_update(widget);
 		break;
 	default:
 		break;
