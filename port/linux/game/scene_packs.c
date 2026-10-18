@@ -53,6 +53,7 @@ HALO_SCENE_PACKS=0 turns them off (nothing is wanted, built or loaded).
 #include "game/players.h"
 #include "objects/objects.h"
 #include "units/units.h"
+#include "objects/object_types.h"
 
 #include "custom_edition_cache.h"
 #include "halo_menus.h"
@@ -762,6 +763,98 @@ boolean scene_packs_command(
 
 			platform_log("scene packs: spawn %s: the player %s its seat 0", name, entered ? "is in" : "could not enter");
 		}
+		return TRUE;
+	}
+	/* (tests) "pack where": the first local player's unit, the vehicle it
+	is in, where, and its vitality */
+	if (!strcmp(word, "where"))
+	{
+		long player_index = local_player_get_player_index(0);
+		struct player_datum *player = player_index != NONE ? player_get(player_index) : NULL;
+		struct object_datum *unit = player && player->unit_index != NONE ? object_try_and_get(player->unit_index) : NULL;
+		struct object_datum *vehicle = unit && unit->object.parent_object_index != NONE ?
+			object_try_and_get(unit->object.parent_object_index) : NULL;
+
+		if (!unit)
+		{
+			platform_log("scene packs: where: no player");
+			return TRUE;
+		}
+		platform_log("scene packs: where: the player at %.2f %.2f %.2f, body %.2f shield %.2f, in %s%s%s", unit->object.position.x,
+			unit->object.position.y, unit->object.position.z, unit->object.body_vitality, unit->object.shield_vitality,
+			vehicle ? tag_get_name(vehicle->definition_index) : "no vehicle", vehicle ? " at " : "", "");
+		if (vehicle)
+			platform_log("scene packs: where: the vehicle at %.2f %.2f %.2f, velocity %.2f %.2f %.2f", vehicle->object.position.x,
+				vehicle->object.position.y, vehicle->object.position.z, vehicle->object.translational_velocity.i,
+				vehicle->object.translational_velocity.j, vehicle->object.translational_velocity.k);
+		return TRUE;
+	}
+	/* (tests) "pack ride": the first local player into seat 0 of the nearest
+	vehicle */
+	if (!strcmp(word, "ride"))
+	{
+		long player_index = local_player_get_player_index(0);
+		struct player_datum *player = player_index != NONE ? player_get(player_index) : NULL;
+		struct object_datum *unit = player && player->unit_index != NONE ? object_try_and_get(player->unit_index) : NULL;
+		struct object_iterator iterator;
+		struct object_datum *object;
+		long nearest = NONE;
+		real nearest_distance = 1e9f;
+
+		if (!unit)
+			return TRUE;
+		object_iterator_new(&iterator, _object_mask_vehicle, 0);
+		while ((object = object_iterator_next(&iterator)) != NULL)
+		{
+			real distance = distance_squared3d(&object->object.position, &unit->object.position);
+
+			if (distance < nearest_distance)
+			{
+				nearest_distance = distance;
+				nearest = iterator.index;
+			}
+		}
+		platform_log("scene packs: ride: %s %s", nearest != NONE ? tag_get_name(object_get(nearest)->definition_index) : "no vehicle",
+			nearest != NONE && unit_enter_seat(player->unit_index, nearest, 0) ? "entered" : "not entered");
+		return TRUE;
+	}
+	/* (tests) "pack census": projectiles, units alive and dead, vehicles */
+	if (!strcmp(word, "census"))
+	{
+		struct object_iterator iterator;
+		struct object_datum *object;
+		long projectiles = 0, alive = 0, dead = 0, vehicles = 0;
+
+		object_iterator_new(&iterator, _object_mask_projectile, 0);
+		while (object_iterator_next(&iterator))
+			projectiles++;
+		object_iterator_new(&iterator, _object_mask_unit, 0);
+		while ((object = object_iterator_next(&iterator)) != NULL)
+		{
+			if (object->object.type == _object_type_vehicle)
+				vehicles++;
+			else if (TEST_FLAG(object->object.damage_flags, _object_dead_bit))
+				dead++;
+			else
+				alive++;
+		}
+		platform_log("scene packs: census: %ld projectiles, %ld characters alive, %ld dead, %ld vehicles", projectiles, alive,
+			dead, vehicles);
+		return TRUE;
+	}
+	/* (tests) "pack preview [colour|off]": the Customization screen's preview
+	(menu_scene_objects.c) */
+	if (!strcmp(word, "preview"))
+	{
+		if (!strcmp(name, "off"))
+			menu_scene_spartan_hide();
+		else if (name[0] && !strcmp(name, "camera"))
+			platform_log("scene packs: preview: %s", menu_scene_spartan_show("multiplayer -40 -1.8 15.5 0 0", "1.6 -0.3 -0.4 -10",
+				NONE) ? "shown" : "no scene");
+		else if (name[0] && menu_scene_spartan_show(NULL, NULL, (short)atoi(name)) == FALSE)
+			menu_scene_spartan_color((short)atoi(name));
+		else if (!name[0])
+			platform_log("scene packs: preview: %s", menu_scene_spartan_show(NULL, NULL, NONE) ? "shown" : "no scene");
 		return TRUE;
 	}
 	if (!strcmp(word, "list"))
