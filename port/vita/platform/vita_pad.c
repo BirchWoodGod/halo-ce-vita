@@ -86,6 +86,14 @@ int vita_pad_gyro_look(short gamepad_index, float *yaw, float *pitch)
 	return result;
 }
 
+/* (the game's look code, with vita_pad_gyro_look's turns) whether the
+stick's aim assist, its friction and adhesion, also acts on them: the Gyro
+aim assist setting (HALO_GYRO_ASSIST, on by default) */
+int vita_pad_gyro_assist(short gamepad_index)
+{
+	return gamepad_index == 0 && gyro_config.assist;
+}
+
 /* (the game's button icons, source/interface/hud_draw.c) the glyph of
 the Vita button an Xbox button (the game's numbering, 0 to 15) is on now,
 in the menus or in play: VITA_GLYPH_NONE while the icons are the Xbox's or

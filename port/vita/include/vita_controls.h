@@ -327,7 +327,8 @@ enum
 /* the settings (the panel's Controls tab and Gyro settings page): HALO_GYRO off/on/zoomed/hold,
 HALO_GYRO_BUTTON (a VITA_BUTTON_VALUES name; default l), HALO_GYRO_SENS
 (percent, 1:1 at 100; default 150), HALO_GYRO_INVERT_Y 0/1, HALO_GYRO_TURN
-yaw/roll */
+yaw/roll, HALO_GYRO_ASSIST 0/1 (default 1: the stick's aim assist, its friction
+and adhesion, also on the gyro's turns: source/game/player_control.c) */
 #define VITA_GYRO_DEFAULT_SENS 150
 
 struct vita_gyro_config
@@ -338,6 +339,8 @@ struct vita_gyro_config
 	float sensitivity;
 	int invert_y;
 	int turn;
+	/* the stick's aim assist on the gyro's turns too (HALO_GYRO_ASSIST) */
+	int assist;
 };
 
 void vita_gyro_config_load(struct vita_gyro_config *config);

@@ -533,6 +533,10 @@ static struct setting settings[] = {
 		"Normal: tilt the top edge towards you to look up", 0, PAGE_GYRO },
 	{ "Gyro turning", "HALO_GYRO_TURN", 0, 2, { "yaw", "roll" }, { "Turn (yaw)", "Tilt (roll)" },
 		"Turn the Vita left/right, or tilt it like a wheel", 0, PAGE_GYRO },
+	/* (the stick's aim assist, its friction and adhesion, on the gyro's
+	turns too: halo_linux_look_assist, source/game/player_control.c) */
+	{ "Gyro aim assist", "HALO_GYRO_ASSIST", 0, 2, { "0", "1" }, { "Off", "On" },
+		"On: slows and sticks on targets like the sticks", 1, PAGE_GYRO },
 	{ "Stick deadzone", "XV_DEADZONE", 0, 4, { "0", "5", "10", "15" }, { "Off", "5%", "10%", "15%" },
 		"Raise if the sticks drift", 0, PAGE_CONTROLS_ADVANCED },
 	{ "Reset controls", NULL, 0, 0, { NULL }, { NULL }, "Look, crouch, buttons, touch as shipped (gyro kept)", 0,
@@ -773,6 +777,15 @@ static unsigned long previous_buttons;
 they are let go (the cross that opened System Link is not the game's A) */
 static unsigned long held_after_close;
 static int restart_pending;
+/* port: the offer to restart at once (close_panel): 0 none made since the
+last change that needs one, 2 asked and waiting, 1 answered (not asked
+again until another such change). The game's main menu, idle, is where a
+restart loses nothing (halo_main_menu_idle, source/main/main.c); the
+restart itself is vita_host_restart_game's (vita_ce_installer.c) */
+static int restart_offered;
+int halo_main_menu_idle(void);
+int vita_host_restart_game(void);
+void vita_settings_question(const char *title, const char *text);
 /* the code screen (or the public games) came from Join a game with the
 connection Online: a code taken goes on to Join a game's steps */
 static int code_for_join;
@@ -3099,6 +3112,7 @@ static void change(struct setting *setting, int step)
 	if (setting->restart)
 	{
 		restart_pending = 1;
+		restart_offered = 0;
 		set_notice("%s", T("Restart the game for this change"));
 	}
 	if (strcmp(setting->variable, "HALO_PROFILE") == 0)
@@ -3107,6 +3121,7 @@ static void change(struct setting *setting, int step)
 		if (apply_profile(choice))
 		{
 			restart_pending = 1;
+			restart_offered = 0;
 			set_notice("%s", T("Restart the game for this change"));
 		}
 	}
@@ -3217,6 +3232,16 @@ static void close_panel(void)
 	page = tab;
 	held_after_close = previous_buttons;
 	vgxm_menu_set(NULL, 0);
+	/* a change that applies after a restart (Connection, Crossplay, the
+	sound voices...), the panel closed at the game's main menu: offer the
+	restart now, Cross restarting the game at once, Circle leaving it for
+	later (not asked again until another such change); in a game, the help
+	line's "Restart the game for this change" as before */
+	if (restart_pending && !restart_offered && halo_main_menu_idle())
+	{
+		restart_offered = 2;
+		vita_settings_question(T("Halo CE"), T("Your change applies after a restart. Restart the game now?"));
+	}
 }
 
 /* Publish from the game/event thread; only the input thread writes the menu. */
@@ -3403,6 +3428,22 @@ static int question_progress_input(unsigned long pressed)
             question_result = (pressed & VITA_BUTTON_CROSS) ? 1 : 0;
             question_visible = 0;
             vgxm_menu_set(NULL, 0);
+            if (restart_offered == 2)
+            {
+                restart_offered = 1;
+                if (question_result == 1)
+                {
+                    char line[96];
+
+                    vita_host_log("settings: restarting the game for the changes that need it");
+                    /* (it does not come back unless it failed) */
+                    snprintf(line, sizeof(line), "settings: the restart failed (0x%08X)",
+                        (unsigned int)vita_host_restart_game());
+                    vita_host_log(line);
+                    vita_settings_message(T("Halo CE"),
+                        T("The game could not restart itself: close it and start it again for the change."));
+                }
+            }
         }
         return 1;
     }

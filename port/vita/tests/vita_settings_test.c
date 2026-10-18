@@ -55,6 +55,11 @@ int halo_text_input_maximum;
 int halo_text_input_password;
 int (*halo_test_setting_hook)(const char *variable, const char *value);
 int halo_screen_restart_needed(void) { return 0; }
+/* (the restart offer, close_panel) the game at its main menu, idle: off but
+in test_restart_offer; the restarts asked for (none of them returns here) */
+static int main_menu_idle_now, restarts_asked;
+int halo_main_menu_idle(void) { return main_menu_idle_now; }
+int vita_host_restart_game(void) { restarts_asked++; return 0x80010013; }
 /* (port/linux/src/network_wire.c's: the wire the game runs, a test's) */
 static int test_crossplay_wire;
 int network_wire_crossplay(void) { return test_crossplay_wire; }
@@ -853,7 +858,8 @@ static void test_gyro_page(void)
 	/* (a 1.0 settings.txt was loaded: no gyro lines in it) */
 	check(!strcmp(getenv("HALO_GYRO"), "off") && !strcmp(getenv("HALO_GYRO_BUTTON"), "l") &&
 		!strcmp(getenv("HALO_GYRO_SENS"), "150") && !strcmp(getenv("HALO_GYRO_INVERT_Y"), "0") &&
-		!strcmp(getenv("HALO_GYRO_TURN"), "yaw"), "a 1.0 settings.txt: gyro Off, button L, 1.5x, normal, yaw");
+		!strcmp(getenv("HALO_GYRO_TURN"), "yaw") && !strcmp(getenv("HALO_GYRO_ASSIST"), "1"),
+		"a 1.0 settings.txt: gyro Off, button L, 1.5x, normal, yaw, aim assist on");
 	open_panel();
 	to_tab("General");
 	to_line("Gyro aiming");
@@ -872,14 +878,15 @@ static void test_gyro_page(void)
 		strstr(menu_line(3, line, sizeof(line)), "Gyro sensitivity\x02") && strstr(line, "< 1.5x >") &&
 		strstr(menu_line(4, line, sizeof(line)), "Gyro vertical\x02") && strstr(line, "Normal") &&
 		strstr(menu_line(5, line, sizeof(line)), "Gyro turning\x02") && strstr(line, "Turn (yaw)") &&
-		!strncmp(menu_line(6, line, sizeof(line)), "\x04Gyro: yaw -999 pitch -999 roll -999", 36),
-		"Gyro settings: button, sensitivity, vertical, turning, the gyroscope's line");
-	check(count == 9 && menu_fits() && !diagram[0],
-		"Gyro settings: 9 lines (tab bar, title, 4 rows, the line, help, buttons), each fits");
-	for (index = 0; index < 4; index++)
+		strstr(menu_line(6, line, sizeof(line)), "Gyro aim assist\x02") && strstr(line, "On") &&
+		!strncmp(menu_line(7, line, sizeof(line)), "\x04Gyro: yaw -999 pitch -999 roll -999", 36),
+		"Gyro settings: button, sensitivity, vertical, turning, aim assist, the gyroscope's line");
+	check(count == 10 && menu_fits() && !diagram[0],
+		"Gyro settings: 10 lines (tab bar, title, 5 rows, the line, help, buttons), each fits");
+	for (index = 0; index < 5; index++)
 		press(VITA_BUTTON_DOWN);
 	check(!strncmp(menu_line(menu_selected, line, sizeof(line)), "Gyro button", 11),
-		"down skips the gyroscope's line (four downs: back to the first row)");
+		"down skips the gyroscope's line (five downs: back to the first row)");
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(getenv("HALO_GYRO_BUTTON"), "r") && strstr(menu, "nothing else in play"), "Gyro button: R");
 	press(VITA_BUTTON_DOWN);
@@ -893,8 +900,14 @@ static void test_gyro_page(void)
 	check(!strcmp(getenv("HALO_GYRO_INVERT_Y"), "1") && !strcmp(getenv("HALO_GYRO_TURN"), "roll"),
 		"Gyro vertical Inverted, turning Tilt (roll)");
 	vita_gyro_config_load(&config);
+	check(config.assist, "the pad reads Gyro aim assist On by default");
+	press(VITA_BUTTON_DOWN);
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_GYRO_ASSIST"), "0") && strstr(menu, " Off >") &&
+		strstr(menu, "On: slows and sticks on targets like the sticks"), "Gyro aim assist: Off, its help line");
+	vita_gyro_config_load(&config);
 	check(config.mode == VITA_GYRO_HOLD && config.button == VITA_BUTTON_R && config.sensitivity > 2.49f &&
-		config.sensitivity < 2.51f && config.invert_y && config.turn == VITA_GYRO_TURN_ROLL,
+		config.sensitivity < 2.51f && config.invert_y && config.turn == VITA_GYRO_TURN_ROLL && !config.assist,
 		"the pad reads the gyro's choices");
 	press(VITA_BUTTON_CIRCLE);
 	press(VITA_BUTTON_CIRCLE);
@@ -909,7 +922,8 @@ static void test_gyro_page(void)
 	vita_settings_load();
 	check(!strcmp(getenv("HALO_GYRO"), "hold") && !strcmp(getenv("HALO_GYRO_BUTTON"), "r") &&
 		!strcmp(getenv("HALO_GYRO_SENS"), "250") && !strcmp(getenv("HALO_GYRO_INVERT_Y"), "1") &&
-		!strcmp(getenv("HALO_GYRO_TURN"), "roll"), "settings.txt round trip: the gyro's rows back at start-up");
+		!strcmp(getenv("HALO_GYRO_TURN"), "roll") && !strcmp(getenv("HALO_GYRO_ASSIST"), "0"),
+		"settings.txt round trip: the gyro's rows back at start-up");
 	check(strstr(file_text(SETTINGS_FILE), "HALO_XBOX_A=") && strstr(file_text(SETTINGS_FILE), "XV_LOOK_SENS="),
 		"the other rows are still saved beside them");
 
@@ -1584,7 +1598,7 @@ static void test_variables_kept(void)
 		"HALO_XBOX_A", "HALO_XBOX_B", "HALO_XBOX_X", "HALO_XBOX_Y", "HALO_XBOX_BLACK", "HALO_XBOX_WHITE",
 		"HALO_XBOX_LEFT_TRIGGER", "HALO_XBOX_RIGHT_TRIGGER", "HALO_XBOX_LEFT_STICK", "HALO_XBOX_RIGHT_STICK",
 		"HALO_XBOX_BACK", "HALO_DEV_SETTINGS", "HALO_GYRO", "HALO_GYRO_BUTTON", "HALO_GYRO_SENS",
-		"HALO_GYRO_INVERT_Y", "HALO_GYRO_TURN", "HALO_VITA_NETWORK", "HALO_CROSSPLAY",
+		"HALO_GYRO_INVERT_Y", "HALO_GYRO_TURN", "HALO_GYRO_ASSIST", "HALO_VITA_NETWORK", "HALO_CROSSPLAY",
 		"HALO_ADHOC_ROOM", "HALO_CUSTOM_EDITION", PERFORMANCE_LOG, "HALO_HANG_CRASH",
 		"XV_FPS", "HALO_DEBUG_CAMERA", "HALO_GXM_WCLAMP", "HALO_TARGET_CHAIN_MIN_SIZE", "HALO_FRAME_PHASE_LOCK",
 		"HALO_GXM_RTT_SYNC", "HALO_ADHOC_DIALOG_MODE", "HALO_SUN_RAYS",
@@ -2447,6 +2461,63 @@ static void test_updates(void)
 	open_panel();
 	check(menu_visible && strstr(menu, "*General") != NULL, "the panel opens again as before");
 	press(VITA_BUTTON_CIRCLE);
+}
+
+/* ---------- the restart offer: a change that applies after a restart,
+the panel closed at the main menu (close_panel) */
+
+static void test_restart_offer(void)
+{
+	const char *crossplay = getenv("HALO_CROSSPLAY");
+	char before[8];
+
+	snprintf(before, sizeof(before), "%s", crossplay ? crossplay : "0");
+	main_menu_idle_now = 1;
+	open_panel();
+	press(VITA_BUTTON_CIRCLE);
+	frame(0);
+	check(!menu_visible, "no change that needs a restart: closing asks nothing");
+
+	open_panel();
+	to_tab("Multiplayer");
+	to_line("Crossplay");
+	press(strcmp(before, "1") ? VITA_BUTTON_RIGHT : VITA_BUTTON_LEFT);
+	press(VITA_BUTTON_CIRCLE);
+	frame(0);
+	check(menu_visible && strstr(menu, "applies after a restart") && strstr(menu, "Cross: yes"),
+		"Crossplay changed, closed at the main menu: the restart is offered");
+	press(VITA_BUTTON_CROSS);
+	frame(0);
+	check(restarts_asked == 1 && strstr(log_text, "settings: restarting the game") &&
+		strstr(menu, "could not restart itself"), "Cross: the game restarts (here it says it could not)");
+	press(VITA_BUTTON_CROSS);
+	frame(0);
+
+	open_panel();
+	to_tab("Multiplayer");
+	to_line("Crossplay");
+	press(strcmp(before, "1") ? VITA_BUTTON_LEFT : VITA_BUTTON_RIGHT);
+	press(VITA_BUTTON_CIRCLE);
+	frame(0);
+	check(menu_visible && strstr(menu, "applies after a restart"), "changed back: offered again");
+	press(VITA_BUTTON_CIRCLE);
+	frame(0);
+	check(!menu_visible && restarts_asked == 1, "Circle: later, no restart");
+	open_panel();
+	press(VITA_BUTTON_CIRCLE);
+	frame(0);
+	check(!menu_visible, "not asked again until another such change");
+
+	main_menu_idle_now = 0;
+	open_panel();
+	to_tab("Multiplayer");
+	to_line("Crossplay");
+	press(VITA_BUTTON_RIGHT);
+	press(VITA_BUTTON_LEFT);
+	press(VITA_BUTTON_CIRCLE);
+	frame(0);
+	check(!menu_visible && restarts_asked == 1, "in a game: not offered (the help line says it)");
+	check(!strcmp(getenv("HALO_CROSSPLAY"), before), "Crossplay as it was");
 }
 
 int main(void)
@@ -3384,6 +3455,7 @@ int main(void)
 	update_status_value = UPDATE_STATUS_AVAILABLE;
 	snprintf(update_version_value, sizeof(update_version_value), "1.1.0-beta.4");
 	test_languages();
+	test_restart_offer();
 	printf("-- %d of %d checks failed\n", failures, checks);
 	return failures ? 1 : 0;
 }

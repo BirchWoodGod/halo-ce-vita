@@ -43,6 +43,13 @@ int vita_settings_question_answer(void);
 /* (main.c) the main menu is up, no network game: a restart loses nothing */
 int halo_main_menu_idle(void);
 
+/* (the settings panel, vita_settings.c) restarts the game: does not return
+unless it failed, with the system's error */
+int vita_host_restart_game(void)
+{
+	return sceAppMgrLoadExec("app0:eboot.bin", NULL, NULL);
+}
+
 static volatile int running;
 static char installer[512];
 static unsigned long long installer_size;
