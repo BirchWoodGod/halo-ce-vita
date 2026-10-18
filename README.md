@@ -12,7 +12,6 @@
 [![License: GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-orange)](LICENSE)
 [![Platform: PS Vita](https://img.shields.io/badge/platform-PS%20Vita%20%2F%20PS%20TV-003791)](#requirements)
 [![Discord](https://img.shields.io/badge/Discord-join%20the%20server-5865F2?logo=discord&logoColor=white)](https://discord.gg/Ed7sbCgAF5)
-[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/birchwoodgod)
 
 [**Download**](https://github.com/BirchWoodGod/halo-ce-vita/releases) ·
 [Install](#install) ·
@@ -21,8 +20,7 @@
 [Performance](#performance) ·
 [Roadmap](ROADMAP.md) ·
 [Report a problem](#reporting-a-crash-or-a-problem) ·
-[Discord](https://discord.gg/Ed7sbCgAF5) ·
-[Support](#support-the-project)
+[Discord](https://discord.gg/Ed7sbCgAF5)
 
 <img src="docs/screenshots/warthog-beach.png" alt="A Warthog on The Silent Cartographer's beach, on a PS Vita" width="90%">
 
@@ -54,11 +52,9 @@ processor, and its Direct3D rendering is translated to the Vita's GPU.
 > [!WARNING]
 > **Official sources.** The only official downloads are the
 > [releases on this GitHub repository](https://github.com/BirchWoodGod/halo-ce-vita/releases),
-> published by **BirchWoodGod**, and the only donation page is
-> [buymeacoffee.com/birchwoodgod](https://buymeacoffee.com/birchwoodgod). VPKs,
-> "updates", mods or donation requests offered anywhere else under this
-> project's or the developer's name are not from me. If in doubt, check that a
-> build is listed on the releases page.
+> published by **BirchWoodGod**. VPKs, "updates", mods or donation requests
+> offered anywhere else under this project's or the developer's name are not
+> from me. If in doubt, check that a build is listed on the releases page.
 
 <div align="center">
 
@@ -77,7 +73,7 @@ processor, and its Direct3D rendering is translated to the Vita's GPU.
 - [Multiplayer](#multiplayer): [the menus](#the-multiplayer-menus), [co-op campaign](#co-op-campaign), [custom maps](#custom-maps-and-map-sharing), [dedicated servers](#dedicated-servers)
 - [Controls](#controls) · [Settings panel](#settings-panel) · [Performance](#performance) · [Saving](#saving)
 - [Building](#building) · [Contributing](#contributing) · [Reporting a problem](#reporting-a-crash-or-a-problem)
-- [Support the project](#support-the-project) · [Credits](#credits) · [License](#license)
+- [Credits](#credits) · [License](#license)
 
 ## What's new in 1.1
 
@@ -614,12 +610,6 @@ Linux PC or VPS (x86) and a Raspberry Pi (armhf): see
 Checkpoints are written to the memory card as you play. To continue,
 choose the campaign again with the same profile and difficulty. **Save and
 Quit** from the pause menu is the safest way to stop.
-
-## Support the project
-
-Halo CE Vita is free and always will be. If you want to help keep it going,
-you can [buy me a coffee](https://buymeacoffee.com/birchwoodgod). Totally
-optional, thanks either way!
 
 ## Reporting problems
 
