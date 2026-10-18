@@ -1,0 +1,209 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The Halo 3-style CUSTOMIZATION (Menu style Halo 3): it stands for the Xbox's player profile
+settings (ui\shell\main_menu\settings_select\player_setup\player_profile_select_screen, which the
+main menu's CUSTOMIZATION opens, and the edit screens it leads to: name, controller settings,
+advanced controls, color). First the profiles, as SELECT PROFILE (halo3/profiles.xml's widgets:
+the list, the card, Square to delete, Triangle to make one), then the chosen one's editor, laid
+out as Halo 3's settings: rows with their values in ice blue, the focused one's < > and help, the
+profile's colour at the right where the Spartan will stand. Its rows change the profile's own
+fields as the Xbox's screens do (menu_functions.c "port h3 custom ..."), and Circle saves them
+to the profile, when anything changed, as the Xbox's SAVE CHANGES did. The settings panel's
+Controls tab keeps the PS Vita's own settings; the help says where the two meet. The art is this
+folder's own (tools/halo3_menu_art.py). -->
+<menus root="h3/custprof/screen" replaces="ui\shell\main_menu\settings_select\player_setup\player_profile_select_screen">
+	<strings name="h3/custom_labels">
+		<string text="PLAYER NAME"/>
+		<string text="COLOR"/>
+		<string text="STICK LAYOUT"/>
+		<string text="BUTTON LAYOUT"/>
+		<string text="LOOK SENSITIVITY"/>
+		<string text="INVERT LOOK"/>
+		<string text="INVERT FLIGHT"/>
+		<string text="AUTO-CENTER"/>
+		<string text="VIBRATION"/>
+	</strings>
+	<!-- (the rows' help, in their order: menu_functions.c h3_custom_update) -->
+	<strings name="h3/custom_help">
+		<string text="The name your profile goes by, in the campaign\nand in multiplayer games. Cross types it."/>
+		<string text="Your armor's color in multiplayer games. RANDOM:\nthe host gives you one nobody else has."/>
+		<string text="STANDARD: move with the left stick, look with\nthe right. SOUTHPAW swaps them. LEGACY: move\nand turn with the left, strafe and look with the right."/>
+		<string text="What the game's buttons do. The settings panel's\nButton layout picks which PS Vita button each\nof them is on: the two add up."/>
+		<string text="How fast the right stick turns you, 1 to 10. The\nsettings panel's Look sensitivity speeds it up or\nslows it down on this PS Vita."/>
+		<string text="Push up to look down. The settings panel's Invert\nlook does the same on this PS Vita: use one of\nthe two, not both."/>
+		<string text="Push up to dive in the Banshee and the other\naircraft, as with a flight stick."/>
+		<string text="The view levels itself as you move."/>
+		<string text="For a controller that vibrates (on a PC). The\nPS Vita has no vibration motor."/>
+	</strings>
+
+	<!-- the profiles first: SELECT PROFILE's screen, titled CUSTOMIZATION; a profile's Cross opens
+	its editor ("port h3 profile edit": the rows' second handler) -->
+	<widget name="h3/custprof/title" type="text" left="52" top="46" width="400" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/profile_text" string_index="2"/>
+	<widget name="h3/custprof/subtitle" type="text" left="52" top="72" width="536" height="16" font="h3/font_small" color="#FFCFD9E3" string_list="h3/profile_text" string_index="3"/>
+	<widget name="h3/custprof/screen" flags="pass_unhandled_to_focused_child">
+		<on event="created" run="port h3 profiles customize"/>
+		<on event="b back" back="true"/>
+		<on event="x" run="port h3 profile delete ask" open="h3/profdel/screen"/>
+		<on event="y" run="port h3 profile create"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/pick/panel"/>
+		<child widget="h3/custprof/title"/>
+		<child widget="h3/custprof/subtitle"/>
+		<child widget="h3/pick/rule"/>
+		<child widget="h3/profiles/info_swatch"/>
+		<child widget="h3/profiles/info_name"/>
+		<child widget="h3/profiles/info_level_label"/>
+		<child widget="h3/profiles/info_level"/>
+		<child widget="h3/profiles/info_skill_label"/>
+		<child widget="h3/profiles/info_skill"/>
+		<child widget="h3/profiles/info_controls_label"/>
+		<child widget="h3/profiles/info_controls"/>
+		<child widget="h3/profiles/info_text"/>
+		<child widget="h3/profiles/status"/>
+		<child widget="h3/pick/strip"/>
+		<child widget="h3/pick/a_butn"/>
+		<child widget="h3/pick/select"/>
+		<child widget="h3/pick/b_butn"/>
+		<child widget="h3/pick/back"/>
+		<child widget="h3/profiles/x_butn"/>
+		<child widget="h3/profiles/delete"/>
+		<child widget="h3/profiles/y_butn"/>
+		<child widget="h3/profiles/new"/>
+		<child widget="h3/profiles/list"/>
+	</widget>
+
+	<!-- the editor: a row each for the profile's name, colour, stick layout, button layout, look
+	sensitivity, invert look, invert flight, auto-center and vibration (the Xbox profile's fields);
+	Cross and right step a value on, left back (the name: Cross types it) -->
+	<widget name="h3/custom/value" type="text" left="152" top="0" width="170" height="20" align="center" font="h3/font_item" color="#FFAABED6" text_y="2" text_flags="no_focus_test"/>
+	<widget name="h3/custom/arrow_left" left="144" top="2" width="8" height="16" bitmap="h3/arrow_left"/>
+	<widget name="h3/custom/arrow_right" left="326" top="2" width="8" height="16" bitmap="h3/arrow_right"/>
+	<widget name="h3/custom/swatch" left="110" top="2" width="16" height="16" bitmap="h3/swatch"/>
+	<widget name="h3/custom/name_label" type="text" left="0" top="0" width="160" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/custom_labels" string_index="0"/>
+	<widget name="h3/custom/op_name" width="336" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a start" run="port h3 custom next"/>
+		<child widget="h3/custom/name_label"/>
+		<child widget="h3/custom/value"/>
+	</widget>
+	<widget name="h3/custom/color_label" type="text" left="0" top="0" width="104" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/custom_labels" string_index="1"/>
+	<widget name="h3/custom/op_color" width="336" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="h3/custom/color_label"/>
+		<child widget="h3/custom/swatch"/>
+		<child widget="h3/custom/value"/>
+		<child widget="h3/custom/arrow_left"/>
+		<child widget="h3/custom/arrow_right"/>
+	</widget>
+	<widget name="h3/custom/stick_label" type="text" left="0" top="0" width="160" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/custom_labels" string_index="2"/>
+	<widget name="h3/custom/op_stick" width="336" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="h3/custom/stick_label"/>
+		<child widget="h3/custom/value"/>
+		<child widget="h3/custom/arrow_left"/>
+		<child widget="h3/custom/arrow_right"/>
+	</widget>
+	<widget name="h3/custom/buttons_label" type="text" left="0" top="0" width="160" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/custom_labels" string_index="3"/>
+	<widget name="h3/custom/op_buttons" width="336" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="h3/custom/buttons_label"/>
+		<child widget="h3/custom/value"/>
+		<child widget="h3/custom/arrow_left"/>
+		<child widget="h3/custom/arrow_right"/>
+	</widget>
+	<widget name="h3/custom/look_label" type="text" left="0" top="0" width="160" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/custom_labels" string_index="4"/>
+	<widget name="h3/custom/op_look" width="336" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="h3/custom/look_label"/>
+		<child widget="h3/custom/value"/>
+		<child widget="h3/custom/arrow_left"/>
+		<child widget="h3/custom/arrow_right"/>
+	</widget>
+	<widget name="h3/custom/invert_label" type="text" left="0" top="0" width="160" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/custom_labels" string_index="5"/>
+	<widget name="h3/custom/op_invert" width="336" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="h3/custom/invert_label"/>
+		<child widget="h3/custom/value"/>
+		<child widget="h3/custom/arrow_left"/>
+		<child widget="h3/custom/arrow_right"/>
+	</widget>
+	<widget name="h3/custom/flight_label" type="text" left="0" top="0" width="160" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/custom_labels" string_index="6"/>
+	<widget name="h3/custom/op_flight" width="336" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="h3/custom/flight_label"/>
+		<child widget="h3/custom/value"/>
+		<child widget="h3/custom/arrow_left"/>
+		<child widget="h3/custom/arrow_right"/>
+	</widget>
+	<widget name="h3/custom/autocenter_label" type="text" left="0" top="0" width="160" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/custom_labels" string_index="7"/>
+	<widget name="h3/custom/op_autocenter" width="336" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="h3/custom/autocenter_label"/>
+		<child widget="h3/custom/value"/>
+		<child widget="h3/custom/arrow_left"/>
+		<child widget="h3/custom/arrow_right"/>
+	</widget>
+	<widget name="h3/custom/vibration_label" type="text" left="0" top="0" width="160" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/custom_labels" string_index="8"/>
+	<widget name="h3/custom/op_vibration" width="336" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="h3/custom/vibration_label"/>
+		<child widget="h3/custom/value"/>
+		<child widget="h3/custom/arrow_left"/>
+		<child widget="h3/custom/arrow_right"/>
+	</widget>
+	<widget name="h3/custom/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port h3 custom"/>
+		<child widget="h3/custom/op_name" x="52" y="102"/>
+		<child widget="h3/custom/op_color" x="52" y="124"/>
+		<child widget="h3/custom/op_stick" x="52" y="146"/>
+		<child widget="h3/custom/op_buttons" x="52" y="168"/>
+		<child widget="h3/custom/op_look" x="52" y="190"/>
+		<child widget="h3/custom/op_invert" x="52" y="212"/>
+		<child widget="h3/custom/op_flight" x="52" y="234"/>
+		<child widget="h3/custom/op_autocenter" x="52" y="256"/>
+		<child widget="h3/custom/op_vibration" x="52" y="278"/>
+	</widget>
+
+	<!-- THE SPARTAN PREVIEW: here, at the right, the live Spartan in the profile's colour will
+	stand, once scene packs (feat/scene-packs) can place the pack's Spartan in the menu's scene in a
+	given colour: menu_functions.c h3_custom_spartan_preview is handed the colour each frame. Until
+	then this panel shows the colour's swatch and name in its place (preview_swatch, preview_name);
+	with the Spartan there, the swatch goes and the panel stays as its frame -->
+	<widget name="h3/custom/preview_frame" left="400" top="102" width="188" height="198" bitmap="h3/panel"/>
+	<widget name="h3/custom/preview_swatch" left="416" top="114" width="156" height="148" bitmap="h3/swatch"/>
+	<widget name="h3/custom/preview_name" type="text" left="400" top="270" width="188" height="20" align="center" font="h3/font_item" color="#FFE6ECF2" text_y="2"/>
+
+	<widget name="h3/custom/title" type="text" left="52" top="46" width="400" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/profile_text" string_index="2"/>
+	<widget name="h3/custom/profile_name" type="text" left="52" top="72" width="536" height="16" font="h3/font_small" color="#FFCFD9E3"/>
+	<widget name="h3/custom/custom_help" type="text" left="52" top="306" width="340" height="50" font="h3/font_small" color="#FFCFD9E3" string_list="h3/custom_help"/>
+	<widget name="h3/custom/status" type="text" left="52" top="358" width="536" height="34" font="h3/font_small" color="#FFF0B070" text_y="1"/>
+	<widget name="h3/custom/saved_note" type="text" left="52" top="396" width="536" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/profile_text" string_index="11"/>
+	<widget name="h3/custom/change" type="text" left="72" top="421" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/profile_text" string_index="12"/>
+	<widget name="h3/custom/screen" flags="pass_unhandled_to_focused_child">
+		<on event="b back" run="port h3 custom save" back="true"/>
+		<on event="deleted" run="port h3 custom close"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/pick/panel"/>
+		<child widget="h3/custom/title"/>
+		<child widget="h3/custom/profile_name"/>
+		<child widget="h3/pick/rule"/>
+		<child widget="h3/custom/preview_frame"/>
+		<child widget="h3/custom/preview_swatch"/>
+		<child widget="h3/custom/preview_name"/>
+		<child widget="h3/custom/custom_help"/>
+		<child widget="h3/custom/status"/>
+		<child widget="h3/custom/saved_note"/>
+		<child widget="h3/pick/strip"/>
+		<child widget="h3/pick/a_butn"/>
+		<child widget="h3/custom/change"/>
+		<child widget="h3/pick/b_butn"/>
+		<child widget="h3/pick/back"/>
+		<child widget="h3/custom/list"/>
+	</widget>
+</menus>

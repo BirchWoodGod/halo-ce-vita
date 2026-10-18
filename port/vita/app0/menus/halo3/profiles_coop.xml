@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The Halo 3-style SELECT PROFILE (halo3/profiles.xml) for the screen inside the Xbox's campaign
+profile screen too (ui\shell\main_menu\player_profiles_select\solo_game_player_profile_select_screen),
+which the settings panel's Host co-op campaign opens (system_link_shortcut.c): the same screen, its
+widgets profiles.xml's. -->
+<menus root="h3/profiles/screen" replaces="ui\shell\main_menu\player_profiles_select\solo_game_player_profile_select_screen">
+</menus>

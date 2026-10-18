@@ -14,6 +14,29 @@ these screens stand for the Xbox's own, over the same animated Halo ring:
   as the Xbox's difficulty list's Y did, and open the game's lobby, the
   waiting screen; the others join from MULTIPLAYER (BROWSE GAMES, JOIN WITH
   CODE).
+- profiles.xml: SELECT PROFILE, standing for the Xbox's campaign profile
+  screen (ui\shell\main_menu\load_campaign_player_profile, which CAMPAIGN
+  opens; profiles_coop.xml for the screen inside it, which the settings
+  panel's Host co-op campaign opens): the profiles, each with its colour,
+  then CREATE NEW PROFILE (its name typed on the Vita's keyboard); the
+  chosen one's card (colour, name, current level, difficulty, controls, as
+  the Xbox's card). Cross plays it (the campaign lobby), Square deletes it
+  after a question, Triangle makes a new one. A profile whose file is
+  damaged (a 0-byte blam.sav) is said to be so and is not played, as the
+  Xbox refuses it; a damaged saved game is said in the lobby.
+- customize.xml: CUSTOMIZATION, standing for the Xbox's player profile
+  settings (player_profile_select_screen and its edit screens): the
+  profiles as above, then the chosen one's editor - PLAYER NAME, COLOR
+  (the game's eighteen, or RANDOM: the host picks), STICK LAYOUT, BUTTON
+  LAYOUT, LOOK SENSITIVITY, INVERT LOOK, INVERT FLIGHT, AUTO-CENTER,
+  VIBRATION, the Xbox profile's fields - with the profile's colour at the
+  right where the Spartan will stand (menu_functions.c
+  h3_custom_spartan_preview). Circle saves the changes to the profile, as
+  the Xbox's SAVE CHANGES did. The settings panel's Controls tab keeps the
+  PS Vita's own (look speed, invert, which Vita button is each Xbox button):
+  they act on top of the profile's, and the help says so.
+  Both read and write the profiles with the Xbox screens' own functions
+  (blam.sav, SaveMeta.xbx): menu_functions.c "port h3 profile/custom ...".
 - forge_lobby.xml: the Forge lobby FORGE opens, with its Select Map picker
   (the multiplayer maps of the maps folder) and START FORGE, which starts a
   local game of the map in Forge mode (port/linux/game/forge.c).
@@ -53,7 +76,8 @@ What is here
   from Saira Semi Condensed (SIL Open Font License, tools/fonts/OFL.txt).
   The server browser's badges (badge_*.png: the words VITA and PC on a plate,
   a padlock beside them) and the value arrows (arrow_*.png) are drawn there
-  too, no maker's logo. The look follows Halo 3's screens; nothing of Bungie's, Microsoft's or
+  too, no maker's logo. The profiles' colour swatches (swatch_*.png: the
+  game's eighteen player colours, and swatch_random.png for none) too. The look follows Halo 3's screens; nothing of Bungie's, Microsoft's or
   Halo Online's is in this folder.
 - The level pictures, the difficulty emblems, the multiplayer maps' pictures
   (mp_map_grafix) and descriptions are ui.map's own (<frame map=...>,
@@ -79,5 +103,5 @@ the game's keys (a_butn, b_butn, start_butn) for that.
 
 Tests: port/vita/tests/run_menus_test.sh h3probe h3classic h3xbox h3broken
 h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create
-h3mptouch h3coop h3coopguide h3scenes; Forge's: port/vita/tests/run_forge_test.sh;
+h3mptouch h3coop h3coopguide h3scenes h3profiles h3customize h3damaged; Forge's: port/vita/tests/run_forge_test.sh;
 co-op between two machines: port/vita/tests/run_netns_online_test.sh h3coopmenu.
