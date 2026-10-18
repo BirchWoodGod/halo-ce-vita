@@ -5201,6 +5201,16 @@ boolean ui_widget_port_text_too_wide(
 	return text_bounds.x1 - text_bounds.x0 > width;
 }
 
+/* port: the width of a text box (its definition's bounds), which a line
+of its text fits in */
+short ui_widget_port_text_box_width(
+	struct widget_instance *widget)
+{
+	struct ui_widget_definition *definition = ui_widget_definition_get(widget->definition_tag_index);
+
+	return (short)(definition->bounds.x1 - definition->bounds.x0);
+}
+
 /* port: the font and text colour of a widget definition (its tag's name),
 for the port's own text drawn as the menus draw theirs; FALSE if it has
 none */

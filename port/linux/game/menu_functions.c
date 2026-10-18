@@ -2907,9 +2907,51 @@ static void multiplayer_update(struct widget_instance *list)
 
 static void browser_large_watch(void);
 
-static void row_column(struct widget_instance *row, char const *name, char const *text)
+/* a browser row's column (row_name, row_game, row_map, row_players): its
+text cut to the column's width with "..." when wider - a line wider than its
+box draws nothing at all (a long single word: a PC server's name, a custom
+map's), and runs into the next column else -, "-" when there is none, and a
+character the menus' fonts do not draw (beyond Latin-1) as "?". TRUE when
+it was cut */
+static boolean row_column(struct widget_instance *row, char const *name, char const *text)
 {
-	text_show(named(row, name), text);
+	struct widget_instance *widget = named(row, name);
+	unsigned short characters[128];
+	long length, index;
+	short width;
+	boolean cut = FALSE;
+
+	if (!widget || widget->type != _ui_widget_type_text_box)
+		return FALSE;
+	length = halo_menus_utf16(text && *text ? text : "-", characters, (long)NUMBEROF(characters));
+	for (index = 0; index < length - 1; index++)
+	{
+		if (characters[index] > 0xFF)
+			characters[index] = '?';
+	}
+	width = ui_widget_port_text_box_width(widget);
+	if (width > 0 && length > 1 && ui_widget_port_text_too_wide(widget, (wchar_t const *)characters, width))
+	{
+		/* (the start, and "...", as much as fits) */
+		long kept;
+
+		for (kept = MIN(length - 1, (long)NUMBEROF(characters) - 4); kept > 1; kept--)
+		{
+			characters[kept] = '.';
+			characters[kept + 1] = '.';
+			characters[kept + 2] = '.';
+			characters[kept + 3] = 0;
+			if (!ui_widget_port_text_too_wide(widget, (wchar_t const *)characters, width))
+				break;
+		}
+		length = kept + 4;
+		cut = TRUE;
+	}
+	widget->parameters.text_box.text = ui_widget_realloc(widget->parameters.text_box.text,
+		(word)(length * sizeof(wchar_t)), __FILE__, __LINE__);
+	if (widget->parameters.text_box.text)
+		memcpy(widget->parameters.text_box.text, characters, length * sizeof(wchar_t));
+	return cut;
 }
 
 /* (automated tests only, never in release builds) HALO_TEST_BROWSER_GAMES=N:
@@ -2926,6 +2968,11 @@ static void browser_test_games(void)
 	char const *value = getenv("HALO_TEST_BROWSER_GAMES");
 	char const *both = getenv("HALO_TEST_BROWSER_PC");
 	long count = value ? atol(value) : 0, index;
+
+	/* (HALO_TEST_BROWSER_ODD=1: the odd listings, made into entries as the
+	real ones are, p2p_lobby.c) */
+	menu_functions.game_count += p2p_lobby_test_entries(menu_functions.games + menu_functions.game_count,
+		P2P_LOBBY_MAXIMUM_ENTRIES - (int)menu_functions.game_count);
 
 	for (index = 0; index < count && menu_functions.game_count < P2P_LOBBY_MAXIMUM_ENTRIES; index++)
 	{
@@ -2989,7 +3036,8 @@ static void browser_update(struct widget_instance *list)
 	for (index = 0, child = list->child; child; child = child->next)
 	{
 		struct p2p_lobby_entry const *entry;
-		char text[48];
+		char text[48], game[64];
+		boolean name_cut = FALSE, map_cut;
 
 		if (strncmp(child->name, "row_", 4))
 			continue;
@@ -3027,10 +3075,10 @@ static void browser_update(struct widget_instance *list)
 				char badged[P2P_LOBBY_NAME_SIZE + sizeof(entry->badge) + 4];
 
 				snprintf(badged, sizeof(badged), "[%s] %s", rest, entry->name);
-				row_column(child, "row_name", badged);
+				name_cut = row_column(child, "row_name", badged);
 			}
 			else
-				row_column(child, "row_name", entry->name);
+				name_cut = row_column(child, "row_name", entry->name);
 		}
 		/* (a PC game's badges first: crossplay_guard.h) */
 		else if (entry->badge[0])
@@ -3038,14 +3086,50 @@ static void browser_update(struct widget_instance *list)
 			char badged[P2P_LOBBY_NAME_SIZE + sizeof(entry->badge) + 4];
 
 			snprintf(badged, sizeof(badged), "[%s] %s", entry->badge, entry->name);
-			row_column(child, "row_name", badged);
+			name_cut = row_column(child, "row_name", badged);
 		}
 		else
-			row_column(child, "row_name", entry->name);
-		row_column(child, "row_map", entry->map);
-		row_column(child, "row_game", entry->gametype);
-		snprintf(text, sizeof(text), "%d/%d", entry->players, entry->maximum);
+			name_cut = row_column(child, "row_name", entry->name);
+		map_cut = row_column(child, "row_map", entry->map);
+		/* (co-op: its difficulty beside it - "Co-op · Legendary" in the Halo
+		3 rows, whose font has the dot -, when the listing says it) */
+		{
+			static char const *const difficulties[] = { "Easy", "Normal", "Heroic", "Legendary" };
+
+			if (entry->coop && entry->difficulty >= 0 && entry->difficulty < 4)
+			{
+				snprintf(game, sizeof(game), named(child, "row_badge") ? "%s \xc2\xb7 %s" : "%s (%s)",
+					entry->gametype[0] ? entry->gametype : T("Co-op"), T(difficulties[entry->difficulty]));
+			}
+			else
+				snprintf(game, sizeof(game), "%s", entry->coop && !entry->gametype[0] ? T("Co-op") : entry->gametype);
+			row_column(child, "row_game", game);
+		}
+		/* (the players: "-" for a count not said) */
+		if (entry->maximum > 0)
+			snprintf(text, sizeof(text), "%d/%d", entry->players, entry->maximum);
+		else if (entry->players > 0)
+			snprintf(text, sizeof(text), "%d", entry->players);
+		else
+			snprintf(text, sizeof(text), "-");
 		row_column(child, "row_players", text);
+#ifndef HALO_RELEASE
+		/* (the tests': each row as shown, said as it changes) */
+		if (getenv("HALO_TEST_BROWSER_ODD"))
+		{
+			static char said[BROWSER_ROWS][160];
+			char line[160];
+			long row = index < BROWSER_ROWS ? index : BROWSER_ROWS - 1;
+
+			snprintf(line, sizeof(line), "%s%s | %s | %s%s | %s", entry->name, name_cut ? " (cut)" : "", game[0] ? game : "-",
+				entry->map[0] ? entry->map : "-", map_cut ? " (cut)" : "", text);
+			if (strcmp(line, said[row]))
+			{
+				snprintf(said[row], sizeof(said[row]), "%s", line);
+				platform_log("menus: browser row %ld: %s", row + 1, line);
+			}
+		}
+#endif
 		if (index == menu_functions.view.row)
 			focus = child;
 		index++;

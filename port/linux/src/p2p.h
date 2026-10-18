@@ -256,6 +256,9 @@ struct p2p_lobby_entry
 	it or a maximum above 16 (the crossplay wire only: joined after asking
 	once) */
 	int coop, experimental;
+	/* a co-op game's difficulty (0 to 3), -1 when not said (the crossplay
+	wire's listings do not say it) */
+	int difficulty;
 	/* the badges a row shows (the crossplay wire's, else empty): "PC" or "PC
 	SERVER", then " EXPERIMENTAL" or " CO-OP EXPERIMENTAL" (translated) */
 	char badge[48];
@@ -322,6 +325,9 @@ enum
 	P2P_LOBBY_MAXIMUM_ENTRIES = 64,
 };
 int p2p_lobby_entries(struct p2p_lobby_entry *entries, int maximum_count);
+/* (automated tests, HALO_TEST_BROWSER_ODD=1; none in release builds) odd
+listings made into entries as the real ones are: how many */
+int p2p_lobby_test_entries(struct p2p_lobby_entry *entries, int maximum_count);
 /* joins a listed game (id: its entry's), with its password if it is locked
 (the password's key is worked out on a thread of its own); nonzero if the
 game is listed. How it goes: p2p_lobby_join_state */

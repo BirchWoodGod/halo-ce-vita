@@ -1289,3 +1289,7 @@
 "Push up to dive in the Banshee and the other\naircraft, as with a flight stick." = "Empuja hacia arriba para bajar en la Banshee y\nlas demás naves, como con una palanca de vuelo."
 "The view levels itself as you move." = "La vista se nivela sola al moverte."
 "For a controller that vibrates (on a PC). The\nPS Vita has no vibration motor." = "Para un mando que vibra (en PC). La PS Vita\nno tiene motor de vibración."
+
+# ---------- the game browsers' rows (menu_functions.c, p2p_lobby.c)
+"Co-op" = "Cooperativo"
+"Unnamed game" = "Partida sin nombre"

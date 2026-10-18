@@ -173,6 +173,9 @@ boolean ui_widget_port_text_too_wide(
 	struct widget_instance *widget,
 	wchar_t const *text,
 	short width);
+/* port: the width of a text box (its bounds) */
+short ui_widget_port_text_box_width(
+	struct widget_instance *widget);
 /* port: the font and text colour of a widget definition (its tag's name),
 for the port's own text drawn as the menus draw theirs */
 boolean ui_widget_port_text_style(

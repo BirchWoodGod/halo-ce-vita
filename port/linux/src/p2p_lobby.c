@@ -97,6 +97,7 @@ Nothing changes on the wire.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 
 enum
@@ -2042,14 +2043,19 @@ static const char *const map_titles[][2] = {
 	{ "c20", "The Library" }, { "c40", "Two Betrayals" }, { "d20", "Keyes" }, { "d40", "The Maw" },
 };
 
+/* a listing's map as the lists show it: the Xbox map's or campaign level's
+title (its scenario's name, or a path ending in it, any case: OpenCE's hosts
+send either), else the name itself */
 static const char *map_title(const char *map, int pc_map)
 {
+	const char *leaf = strrchr(map, '\\');
 	size_t index;
 
+	leaf = leaf ? leaf + 1 : map;
 	/* (a Halo PC map of an Xbox map's name is not that map) */
 	for (index = 0; !pc_map && index < sizeof(map_titles) / sizeof(map_titles[0]); index++)
 	{
-		if (!strcmp(map, map_titles[index][0]))
+		if (!strcasecmp(leaf, map_titles[index][0]))
 			return map_titles[index][1];
 	}
 	return map;
@@ -2066,8 +2072,21 @@ static void entry_from_listing(const struct p2p_listing *listing, struct p2p_lob
 	memset(entry, 0, sizeof(*entry));
 	p2p_hex(listing->key_hash, P2P_KEY_HASH_SIZE, entry->id);
 	snprintf(entry->name, sizeof(entry->name), "%s", listing->name);
+	/* (never a blank row: a closed game's name may name nothing - its
+	host's player's then, else "Unnamed game") */
+	if (!p2p_lobby_clean_name(entry->name))
+	{
+		snprintf(entry->name, sizeof(entry->name), "%s", listing->listed_player_count > 0 && listing->players[0][0] ?
+			listing->players[0] : T("Unnamed game"));
+	}
 	snprintf(entry->map, sizeof(entry->map), "%s", map_title(listing->map, listing->pc_map));
-	/* (a variant with no name: its game's) */
+	/* (a co-op game: "Co-op", its difficulty beside it where the lists have
+	room; a variant with no name: its game's; nothing said: empty, which the
+	lists show as "-") */
+	entry->difficulty = listing->coop && listing->difficulty >= 0 && listing->difficulty < 4 ? listing->difficulty : -1;
+	if (listing->coop)
+		snprintf(entry->gametype, sizeof(entry->gametype), "%s", T("Co-op"));
+	else
 	{
 		static const char *const engines[] = { "", "CTF", "Slayer", "Oddball", "King of the Hill", "Race" };
 
@@ -2103,18 +2122,18 @@ static void entry_from_listing(const struct p2p_listing *listing, struct p2p_lob
 	/* the Rules line: "Slayer to 50 on Wizard", "Co-op: Halo, Heroic" */
 	if (listing->coop)
 	{
-		length = snprintf(entry->rules, sizeof(entry->rules), T("Co-op: %s%s%s"), entry->map,
-			listing->difficulty < 4 ? ", " : "", listing->difficulty < 4 ? T(difficulties[listing->difficulty]) : "");
+		length = snprintf(entry->rules, sizeof(entry->rules), T("Co-op: %s%s%s"), entry->map[0] ? entry->map : "-",
+			entry->difficulty >= 0 ? ", " : "", entry->difficulty >= 0 ? T(difficulties[entry->difficulty]) : "");
 	}
 	else if (listing->score_limit > 0)
 	{
 		length = snprintf(entry->rules, sizeof(entry->rules), T("%s to %d on %s"), entry->gametype[0] ?
-			entry->gametype : T("A game"), listing->score_limit, entry->map);
+			entry->gametype : T("A game"), listing->score_limit, entry->map[0] ? entry->map : "-");
 	}
 	else
 	{
 		length = snprintf(entry->rules, sizeof(entry->rules), T("%s on %s"), entry->gametype[0] ? entry->gametype :
-			T("A game"), entry->map);
+			T("A game"), entry->map[0] ? entry->map : "-");
 	}
 	length = length < (int)sizeof(entry->rules) ? length : (int)sizeof(entry->rules) - 1;
 	if (listing->in_progress)
@@ -2146,6 +2165,77 @@ fit, with room left for the end) */
 		snprintf(entry->players_line + length, sizeof(entry->players_line) - (size_t)length, T("... +%d more"),
 			entry->players - index);
 	}
+}
+
+/* (automated tests only, never in release builds) HALO_TEST_BROWSER_ODD=1:
+listings as odd as the public lists hold (the owner's photo of beta.7's
+browser, Oct 18 2026), made into entries as the real ones are - their text
+through the wire's own sanitize and name rules, then entry_from_listing: a
+name that names nothing (its host's player's then), one of other
+alphabets, a long single word, co-op with its level and difficulty and
+without a map, a PC server's long name (its badges too), every field
+missing, a long custom map (run_menus_test.sh h3oddrows) */
+int p2p_lobby_test_entries(struct p2p_lobby_entry *entries, int maximum_count)
+{
+#ifndef HALO_RELEASE
+	static const struct
+	{
+		const char *name, *map, *gametype;
+		int players, maximum, engine, coop, difficulty, closed, badge;
+		const char *player;
+	} odd[] = {
+		{ "   ", "bloodgulch", "Slayer", 8, 128, 2, 0, 255, 1, 1, "Spartan" },
+		{ "Jos\xc3\xa9 \xe2\x98\x85 Ma\xc3\xb1" "ana", "chillout", "CTF", 3, 16, 1, 0, 255, 0, 0, NULL },
+		{ "xXxNoScopeLegendsxXxForeverMore", "wizard", "", 2, 32, 4, 0, 255, 0, 0, NULL },
+		{ "true legendary run", "levels\\a10\\a10", "", 3, 4, 0, 1, 3, 0, 1, NULL },
+		{ "teto", "", "", 1, 4, 0, 1, 255, 0, 1, NULL },
+		{ "HALO UNIVERSAL CUSTOM SERVER 24/7", "bigassv2,104", "Team Slayer", 24, 32, 2, 0, 255, 0, 2, NULL },
+		{ "BIG TEAM 24*7", "", "", 0, 0, 255, 0, 255, 0, 2, NULL },
+		{ "Halo", "a30", "", 2, 2, 0, 1, 1, 0, 0, NULL },
+	};
+	const char *setting = getenv("HALO_TEST_BROWSER_ODD");
+	int count = 0, index;
+
+	if (!setting || strcmp(setting, "1"))
+		return 0;
+	for (index = 0; index < (int)(sizeof(odd) / sizeof(odd[0])) && count < maximum_count; index++)
+	{
+		struct p2p_listing listing;
+
+		memset(&listing, 0, sizeof(listing));
+		listing.key_hash[0] = (unsigned char)(0xA0 + index);
+		/* (as the wire's text is read, get_text, and its name checked) */
+		sanitize(listing.name, P2P_LISTING_NAME_SIZE, odd[index].name, (int)strlen(odd[index].name));
+		sanitize(listing.map, P2P_LISTING_MAP_SIZE, odd[index].map, (int)strlen(odd[index].map));
+		sanitize(listing.gametype, P2P_LISTING_GAMETYPE_SIZE, odd[index].gametype, (int)strlen(odd[index].gametype));
+		if (!odd[index].closed && !p2p_lobby_clean_name(listing.name))
+			continue;
+		listing.player_count = (unsigned char)odd[index].players;
+		listing.maximum_player_count = (unsigned char)odd[index].maximum;
+		listing.engine_type = (unsigned char)odd[index].engine;
+		listing.coop = (unsigned char)odd[index].coop;
+		listing.difficulty = odd[index].difficulty;
+		listing.open = !odd[index].closed;
+		if (odd[index].player)
+		{
+			snprintf(listing.players[0], sizeof(listing.players[0]), "%s", odd[index].player);
+			listing.listed_player_count = 1;
+		}
+		entry_from_listing(&listing, &entries[count]);
+		/* (a PC game's badges, as the crossplay wire's) */
+		if (odd[index].badge)
+		{
+			snprintf(entries[count].badge, sizeof(entries[count].badge), "%s%s", T("PC"), odd[index].badge == 2 ?
+				" SERVER EXPERIMENTAL" : odd[index].coop ? " CO-OP EXPERIMENTAL" : " EXPERIMENTAL");
+		}
+		count++;
+	}
+	return count;
+#else
+	(void)entries;
+	(void)maximum_count;
+	return 0;
+#endif
 }
 
 int p2p_lobby_entry(int index, struct p2p_lobby_entry *entry)

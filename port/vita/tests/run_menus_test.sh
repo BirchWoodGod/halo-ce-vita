@@ -100,6 +100,12 @@
 #            edits neither, CREATE NEW PROFILE still makes one; with
 #            HALO_TEST_PROFILE's profile and a damaged savegame.bin, the lobby
 #            says the saved game is damaged and starts at Mission Start
+#   h3oddrows the public lists' odd listings (HALO_TEST_BROWSER_ODD: the owner's
+#            photo of beta.7's browser, Oct 18 2026) in the Halo 3 browser and
+#            OpenCE's (Menu style Halo CE): a name that names nothing shows its
+#            host's player's, one of other alphabets "?" for what the font
+#            lacks, co-op its difficulty and level (or "-"), every missing field
+#            "-", and a name or map wider than its column cut with "..."
 #   h3coopguide  the settings panel's Host co-op campaign
 #            (HALO_SYSTEM_LINK_TEST=campaign): the Campaign screen opens, the
 #            Halo 3 campaign lobby behind it set to SYSTEM LINK CO-OP
@@ -136,7 +142,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3damaged}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3damaged h3oddrows}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
 
@@ -703,6 +709,27 @@ for case in $cases; do
 		grep -aq "menus: h3 campaign caption: .* at Mission Start" "$log" || fail h3damaged "the lobby did not start at Mission Start"
 		cmp -s "$HALO_TEST_PROFILE" "$out/h3damaged_game/save/u/UDATA/869079979327/blam.sav" ||
 			fail h3damaged "the test profile's blam.sav changed" ;;
+	h3oddrows)
+		# (the Halo 3 lobby on ONLINE: down five to BROWSE GAMES, A: the Halo 3 browser; OpenCE's:
+		# Multiplayer, SERVER BROWSER)
+		run h3oddrows "$menus_data" 35 "$h3mppad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:8000" \
+			HALO_MENU_STYLE=halo3 $h3net HALO_TEST_BROWSER_ODD=1
+		run h3oddrows_classic "$menus_data" 35 "wait:150:2000 down:150:800 a wait:150:4000 a wait:150:8000" \
+			HALO_MENU_STYLE=classic $h3net HALO_TEST_BROWSER_ODD=1
+		check_h3 h3oddrows halo3
+		for name in h3oddrows h3oddrows_classic; do
+			log=$out/$name/run.log
+			coop="Co-op · Legendary"
+			[ $name = h3oddrows_classic ] && coop="Co-op (Legendary)"
+			for row in "Spartan | Slayer | Blood Gulch | 8/128" "Jos?? ??? Ma??ana | CTF | Chill Out | 3/16" \
+				"true legendary run (cut) | $coop | The Pillar of Autumn (cut) | 3/4" "teto | Co-op | - | 1/4" \
+				"BIG TEAM 24*7 (cut) | - | - | -" "HALO UNIVERSAL CUSTOM SERVER 24/ (cut) | Team Slayer | bigassv2,104 | 24/32"; do
+				grep -aqF "$row" "$log" || fail h3oddrows "$name: no row \"$row\""
+			done
+			grep -aE "menus: browser row [0-9]+: " "$log" | grep -aqE "row [0-9]+:  ?\|" && fail h3oddrows "$name: a row without a name"
+		done
+		grep -aqF "xXxNoScopeLegendsxXxForeverMore (cut)" "$out/h3oddrows/run.log" ||
+			fail h3oddrows "the long single-word name was not cut to its column" ;;
 	h3coopguide)
 		# (3 s into the main menu the request opens the Campaign screen's profiles; the lobby
 		# behind them is set to co-op. The Xbox's profiles screen opens on a new profile, whose
@@ -715,7 +742,7 @@ for case in $cases; do
 		grep -aq "menus: h3 campaign: network SYSTEM LINK CO-OP (host co-op campaign)" "$log" ||
 			fail h3coopguide "the lobby was not set to co-op" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3damaged]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3damaged|h3oddrows]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"
