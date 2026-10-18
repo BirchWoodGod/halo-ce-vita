@@ -1,0 +1,49 @@
+# The multiplayer Spartan the Halo 3 menus' lobbies stand in their scenes
+# (port/linux/game/scene_packs.c, menu_functions.c's scene_object=): the
+# multiplayer cyborg with an assault rifle, from the player's own multiplayer
+# maps. What a figure standing in a menu does not need is left out: sounds,
+# effects, damage, the HUD, the rifle's first-person view and its rounds.
+pack menu_spartan
+map bloodgulch chillout boardingaction sidewinder damnation hangemhigh ratrace prisoner putput longest carousel wizard beavercreek
+tag bipd characters\cyborg_mp\cyborg_mp
+tag weap weapons\assault rifle\assault rifle
+strip snd!
+strip lsnd
+strip effe
+strip part
+strip pctl
+strip cont
+strip deca
+strip jpt!
+strip ligh
+strip lens
+strip glw!
+strip udlg
+strip foot
+strip wphi
+strip unhi
+strip hud#
+strip trak
+strip mgs2
+strip spla
+strip proj
+strip eqip
+strip mode weapons\assault rifle\fp\fp
+strip antr weapons\assault rifle\fp\fp
+strip weap weapons\pistol\pistol
+strip soso weapons\assault rifle\fp\shaders\grip
+strip soso weapons\assault rifle\fp\shaders\gun
+strip soso weapons\assault rifle\fp\shaders\display
+strip schi weapons\assault rifle\fp\shaders\compass
+strip schi weapons\assault rifle\fp\shaders\numbers
+strip schi weapons\assault rifle\fp\shaders\ar data
+strip bitm effects\particles\flash\bitmaps\flash h ar fp
+strip bitm effects\particles\air\bitmaps\smoke warthog gun
+strip bitm effects\particles\air\bitmaps\bubbles
+strip bitm effects\particles\solid\bitmaps\casings h ar
+strip bitm effects\particles\air\bitmaps\smoke tank cannon
+strip bitm weapons\assault rifle\fp\bitmaps\assault rifle_fp
+strip bitm weapons\assault rifle\fp\bitmaps\assault rifle multipurpose
+strip bitm weapons\assault rifle\fp\bitmaps\diffuse gunmetal
+strip bitm weapons\assault rifle\fp\bitmaps\display_fp
+strip bitm weapons\assault rifle\fp\bitmaps\display multipurpose

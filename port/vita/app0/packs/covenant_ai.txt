@@ -1,0 +1,11 @@
+# Covenant characters for Forge on the multiplayer maps: grunts, jackals,
+# elites and hunters (their actor variants, so they fight as the campaign's
+# do), with their weapons, from the player's own campaign maps.
+pack covenant_ai
+map b40 b30 a50
+tag actv characters\grunt\grunt minor plasma pistol
+tag actv characters\grunt\grunt major needler
+tag actv characters\jackal\jackal minor plasma pistol
+tag actv characters\elite\elite minor\elite minor plasma rifle
+tag actv characters\elite\elite major\elite major needler
+tag actv characters\hunter\hunter

@@ -586,3 +586,146 @@ void halo_tag_relocate_structure_bsp(void *tag_cache, void *bsp, unsigned long s
 		walk(TAG_LAYOUT_STRUCTURE_BSP, structure);
 	finish("structure bsp", size);
 }
+
+/* ---------- (port) scene packs (port/linux/game/scene_pack.c)
+
+A scene pack's tags are laid out as a map's tag data (a tag header, its
+table, names, vertex and index buffers, the tags), linked to a link base of
+their own, and read into the tag cache wherever there is room. The builder
+walks the tags it copies by these layouts, so that it moves every pointer
+the walk below follows; the loader moves them with the walk itself, with
+every pointer followed only into the pack and every reference checked
+against the pack's own table, and refuses the pack if any is wrong. The
+map's own walk state (its window's bits, its table for the structure bsps'
+references) is kept as it was. */
+
+unsigned short halo_tag_layout_root(unsigned long group_tag)
+{
+	unsigned short group;
+
+	for (group = 0; group < sizeof(tag_layout_groups) / sizeof(tag_layout_groups[0]); group++)
+	{
+		if (tag_layout_groups[group].group_tag == group_tag)
+			return tag_layout_groups[group].root;
+	}
+	return HALO_TAG_LAYOUT_UNKNOWN;
+}
+
+long halo_tag_layout_field_count(unsigned short layout)
+{
+	if (layout >= sizeof(tag_layout_structs) / sizeof(tag_layout_structs[0]))
+		return 0;
+	return tag_layout_structs[layout].field_count;
+}
+
+int halo_tag_layout_field(unsigned short layout, long index, struct halo_tag_layout_field *field)
+{
+	const struct tag_layout_field *source;
+
+	if (layout >= sizeof(tag_layout_structs) / sizeof(tag_layout_structs[0]) || index < 0 ||
+		index >= tag_layout_structs[layout].field_count)
+	{
+		return 0;
+	}
+	source = &tag_layout_fields[tag_layout_structs[layout].first_field + index];
+	field->offset = source->offset;
+	field->kind = source->kind;
+	field->child = source->child;
+	field->child_size = source->child_size;
+	return 1;
+}
+
+unsigned long halo_tag_relocate_pack(void *blob, unsigned long size, unsigned long link_base)
+{
+	unsigned char *header = blob;
+	unsigned char *instances;
+	unsigned char *bits;
+	long count, vertex_buffer_count, index_buffer_count;
+	unsigned long anomalies;
+	/* (the map's walk, as it was: the structure bsps' loads go on from it) */
+	int saved_report = relocation.report;
+	unsigned char saved[sizeof(relocation)];
+
+	if (!blob || size < 0x24 || (size & 3) || size > 0x01000000UL || link_base + size < link_base)
+		return 1;
+	bits = malloc(size / 32 + 1);
+	if (!bits)
+		return (unsigned long)-1;
+	memset(bits, 0, size / 32 + 1);
+	memcpy(saved, &relocation, sizeof(relocation));
+	relocation.link_base = link_base;
+	relocation.link_size = size;
+	relocation.words = size / 4;
+	relocation.relocated = bits;
+	begin(blob);
+	relocation.report = saved_report || relocation.report;
+	relocation.tags_end = link_base + size;
+	relocation.bsp_start = relocation.bsp_end = 0;
+	relocation.instances = NULL;
+	relocation.instance_count = 0;
+	/* (a pack read where it is linked: nothing to move, but every pointer
+	is still checked by the walk's bounds, below) */
+	if (!relocation.bias)
+		relocation.store_bias = 0;
+	instances = relocate_word(header);
+	memcpy(&count, header + 12, 4);
+	memcpy(&vertex_buffer_count, header + 16, 4);
+	memcpy(&index_buffer_count, header + 24, 4);
+	/* (the header's arrays must fit the pack: relocate_buffers and
+	relocate_instances pass over ones that do not, which is a refusal here) */
+	if (!instances || count <= 0 || (unsigned long)count > size / 32 ||
+		!region_fits((unsigned long)(instances - relocation.bias), (unsigned long)count * 32))
+	{
+		walk_invalid("pack instances", (unsigned long)count, (unsigned long)instances, size);
+	}
+	if (vertex_buffer_count < 0 || index_buffer_count < 0 ||
+		(unsigned long)vertex_buffer_count > size / 12 || (unsigned long)index_buffer_count > size / 12)
+	{
+		walk_invalid("pack buffers", (unsigned long)vertex_buffer_count, (unsigned long)index_buffer_count, size);
+	}
+	else
+	{
+		unsigned char *vertex_buffers = relocate_word(header + 20);
+		unsigned char *index_buffers = relocate_word(header + 28);
+
+		if ((vertex_buffer_count && (!vertex_buffers ||
+				!region_fits((unsigned long)(vertex_buffers - relocation.bias), (unsigned long)vertex_buffer_count * 12))) ||
+			(index_buffer_count && (!index_buffers ||
+				!region_fits((unsigned long)(index_buffers - relocation.bias), (unsigned long)index_buffer_count * 12))))
+		{
+			walk_invalid("pack buffer arrays", (unsigned long)vertex_buffers, (unsigned long)index_buffers, size);
+		}
+		else
+		{
+			relocate_buffers(vertex_buffers, vertex_buffer_count);
+			relocate_buffers(index_buffers, index_buffer_count);
+		}
+	}
+	if (!relocation.invalid)
+	{
+		long index;
+
+		relocate_instances(instances, count);
+		/* (every tag's root and name in the pack, of a group with a layout:
+		relocate_instances passes over the others) */
+		for (index = 0; index < count && !relocation.invalid; index++)
+		{
+			unsigned char *instance = instances + index * 32;
+			unsigned long group_tag, name, base;
+
+			memcpy(&group_tag, instance, 4);
+			memcpy(&name, instance + 16, 4);
+			memcpy(&base, instance + 20, 4);
+			if (halo_tag_layout_root(group_tag) == HALO_TAG_LAYOUT_UNKNOWN ||
+				!region_fits(name - relocation.bias, 1) || !region_fits(base - relocation.bias, 4))
+			{
+				walk_invalid("pack tag", group_tag, name, base);
+			}
+		}
+	}
+	finish("scene pack tags", size);
+	anomalies = relocation.invalid;
+	memcpy(&relocation, saved, sizeof(relocation));
+	free(bits);
+	return anomalies;
+}
