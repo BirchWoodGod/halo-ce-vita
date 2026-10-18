@@ -1989,12 +1989,17 @@ Only in a single window drawn into the back buffer: a split screen, or a
 window into another target (a mirror), keeps everything at the render
 scale. */
 void halo_d3d_interface_begin(void);
+/* (bink_playback.h: whether a movie plays) */
+boolean bink_playback_active(void);
 
 void rasterizer_interface_begin(
 	void)
 {
+	/* (not while a movie plays: the owner's Vita showed the movies black,
+	sound only, with the movie drawn on the display; a movie fills the
+	screen, so it gains nothing from the display's resolution) */
 	if (global_window_parameters.rasterizer_target == _rasterizer_target_render_primary &&
-		main_get_window_count() <= 1)
+		main_get_window_count() <= 1 && !bink_playback_active())
 	{
 		halo_d3d_interface_begin();
 	}
