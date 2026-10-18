@@ -6,7 +6,7 @@
 # the Spartan's helmet and gun), and
 # pic0 the Spartan and the scene, the icon the Spartan's helmet; the owner's
 # HALO CE VITA logo (port/vita/art/logo.png) along the background's bottom,
-# under the gate, and across pic0's top. The Vita
+# under the gate, and along pic0's bottom too. The Vita
 # wants 8-bit palette PNGs. Needs ImageMagick 7 (magick).
 #
 #     sh tools/livearea_art.sh
@@ -18,6 +18,6 @@ out=$root/port/vita/sce_sys
 magick "$art" -crop 1080x643+0+330 +repage -resize 840x500 \( "$logo" -resize 560x \) -gravity south -geometry +0+14 \
 	-composite -strip -colors 256 PNG8:"$out/livearea/contents/bg.png"
 magick "$art" -crop 360x203+360+410 +repage -resize '280x158!' -strip -colors 256 PNG8:"$out/livearea/contents/startup.png"
-magick "$art" -crop 1080x613+0+330 +repage -resize '960x544!' \( "$logo" -resize 620x \) -gravity north -geometry +0+14 \
+magick "$art" -crop 1080x613+0+330 +repage -resize '960x544!' \( "$logo" -resize 640x \) -gravity south -geometry +0+16 \
 	-composite -strip -colors 256 PNG8:"$out/pic0.png"
 magick "$art" -crop 210x210+380+395 +repage -resize 128x128 -strip -colors 256 PNG8:"$out/icon0.png"
