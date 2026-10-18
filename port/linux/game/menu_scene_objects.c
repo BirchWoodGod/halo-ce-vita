@@ -32,6 +32,15 @@ before the tick starts) makes, holds and deletes the objects. Objects are
 made with object_new as the cheats' and Forge's are, never deleted on their
 own (_new_object_never_automatically_delete_bit), and held where they stand
 each frame (ui.map has no ground under the cameras: they would fall).
+
+How they look, as Halo 3's lobby Spartans stand: upright in the picture
+(placed and stood in the camera's own frame, its pitch with it: a camera
+pitched up no longer looks at them from their feet), their weapon held low
+in front and their head turned to the camera (the idle's aim and look held
+each frame: no player or AI aims it), and lit by a light of their own
+(menu_scene_objects_lighting, asked by object_lights.c: ui.map's space has
+no lightmap under them, so they took its structure's dim default) - a key
+light from the camera's upper left, a cool rim from behind, a soft ambient.
 */
 
 /* ---------- headers */
@@ -47,6 +56,7 @@ each frame (ui.map has no ground under the cameras: they would fall).
 #include "scenario/scenario.h"
 #include "scenario/scenario_definitions.h"
 #include "tag_files/tag_groups.h"
+#include "render/render.h"
 
 #include "halo_menus.h"
 #include "scene_packs.h"
@@ -76,6 +86,9 @@ enum
 
 #define MENU_SCENE_PREVIEW_PACK "menu_spartan"
 #define MENU_SCENE_DEGREES ((real)(3.14159265358979 / 180.0))
+/* the weapon held this far below the body's forward, and the head turned
+to the camera (a calm stance rather than the idle's aim straight ahead) */
+#define MENU_SCENE_AIM_DOWN (30.f * MENU_SCENE_DEGREES)
 
 /* ---------- structures */
 
@@ -103,6 +116,17 @@ struct menu_scene_object
 	unsigned long epoch;
 	short made_color_index;
 	boolean refused;
+	/* (the update's) its light, from its camera (object_lights.c reads it) */
+	struct render_lighting lighting;
+};
+
+/* a camera's frame: its view, its right (level) and its up (pitched with
+the view) */
+struct menu_scene_frame
+{
+	real_vector3d view;
+	real_vector3d right;
+	real_vector3d up;
 };
 
 /* ---------- globals */
@@ -115,6 +139,8 @@ static struct
 	boolean has_camera;
 	struct menu_scene_camera camera;
 	char screen[64];
+	/* objects made now (object_lights.c's quick way out) */
+	short made_count;
 } menu_scene_objects;
 
 static boolean menu_scene_objects_initialized = FALSE;
@@ -173,27 +199,112 @@ static short color_index_of(struct menu_scene_object const *object)
 	return 0;
 }
 
-/* where the object stands, and its facing, from its camera */
-static void object_place(struct menu_scene_object const *object, real_point3d *position, real_vector3d *forward)
+static void camera_frame(struct menu_scene_camera const *camera, struct menu_scene_frame *frame)
 {
-	real yaw = object->camera.yaw, pitch = object->camera.pitch;
-	real_vector3d view, right;
-	real facing;
+	real yaw = camera->yaw, pitch = camera->pitch;
 
-	view.i = (real)(cos(pitch) * cos(yaw));
-	view.j = (real)(cos(pitch) * sin(yaw));
-	view.k = (real)sin(pitch);
-	right.i = (real)sin(yaw);
-	right.j = (real)-cos(yaw);
-	right.k = 0.f;
-	position->x = object->camera.position.x + view.i * object->distance + right.i * object->right;
-	position->y = object->camera.position.y + view.j * object->distance + right.j * object->right;
-	position->z = object->camera.position.z + view.k * object->distance + object->up;
-	/* (facing the camera, turned by facing) */
-	facing = yaw + (real)3.14159265358979 + object->facing * MENU_SCENE_DEGREES;
-	forward->i = (real)cos(facing);
-	forward->j = (real)sin(facing);
-	forward->k = 0.f;
+	frame->view.i = (real)(cos(pitch) * cos(yaw));
+	frame->view.j = (real)(cos(pitch) * sin(yaw));
+	frame->view.k = (real)sin(pitch);
+	frame->right.i = (real)sin(yaw);
+	frame->right.j = (real)-cos(yaw);
+	frame->right.k = 0.f;
+	/* (right x view: up in the picture) */
+	frame->up.i = (real)(-sin(pitch) * cos(yaw));
+	frame->up.j = (real)(-sin(pitch) * sin(yaw));
+	frame->up.k = (real)cos(pitch);
+}
+
+/* where the object stands, in its camera's frame - distance along the
+view, right of it, up in the picture -, and its facing: toward the camera,
+turned by facing about the picture's up, so that it stands upright in the
+picture whatever the camera's pitch (a flying biped keeps its forward's
+pitch; its up follows it: biped_snap_facing) */
+static void object_place(struct menu_scene_object const *object, real_point3d *position, real_vector3d *forward,
+	real_vector3d *up)
+{
+	struct menu_scene_frame frame;
+	real facing = object->facing * MENU_SCENE_DEGREES;
+	real cosine = (real)cos(facing), sine = (real)sin(facing);
+
+	camera_frame(&object->camera, &frame);
+	position->x = object->camera.position.x + frame.view.i * object->distance + frame.right.i * object->right +
+		frame.up.i * object->up;
+	position->y = object->camera.position.y + frame.view.j * object->distance + frame.right.j * object->right +
+		frame.up.j * object->up;
+	position->z = object->camera.position.z + frame.view.k * object->distance + frame.right.k * object->right +
+		frame.up.k * object->up;
+	/* (back toward the camera, turned: positive facing turns its front to
+	the picture's left, as before) */
+	forward->i = -frame.view.i * cosine + frame.right.i * sine;
+	forward->j = -frame.view.j * cosine + frame.right.j * sine;
+	forward->k = -frame.view.k * cosine + frame.right.k * sine;
+	*up = frame.up;
+}
+
+/* the unit's aim and look held: the weapon low in front of it, the head
+to the camera */
+static void object_pose(struct menu_scene_object const *object, struct unit_datum *unit, real_vector3d const *forward,
+	real_vector3d const *up)
+{
+	real_vector3d aim, look;
+	real cosine = (real)cos(MENU_SCENE_AIM_DOWN), sine = (real)sin(MENU_SCENE_AIM_DOWN);
+	struct menu_scene_frame frame;
+
+	aim.i = forward->i * cosine - up->i * sine;
+	aim.j = forward->j * cosine - up->j * sine;
+	aim.k = forward->k * cosine - up->k * sine;
+	camera_frame(&object->camera, &frame);
+	look.i = -frame.view.i;
+	look.j = -frame.view.j;
+	look.k = -frame.view.k;
+	unit->unit.desired_facing_vector = *forward;
+	unit->unit.desired_aiming_vector = aim;
+	unit->unit.aiming_vector = aim;
+	unit->unit.desired_looking_vector = look;
+	unit->unit.looking_vector = look;
+	unit->unit.aiming_velocity.i = unit->unit.aiming_velocity.j = unit->unit.aiming_velocity.k = 0.f;
+	unit->unit.looking_velocity.i = unit->unit.looking_velocity.j = unit->unit.looking_velocity.k = 0.f;
+}
+
+static void light_set(struct render_distant_light *light, real red, real green, real blue,
+	struct menu_scene_frame const *frame, real view, real right, real up)
+{
+	light->color.red = red;
+	light->color.green = green;
+	light->color.blue = blue;
+	/* (the way the light goes, in the camera's frame) */
+	light->direction.i = frame->view.i * view + frame->right.i * right + frame->up.i * up;
+	light->direction.j = frame->view.j * view + frame->right.j * right + frame->up.j * up;
+	light->direction.k = frame->view.k * view + frame->right.k * right + frame->up.k * up;
+	normalize3d(&light->direction);
+}
+
+/* the object's own light: a warm key from the camera's upper left, a cool
+rim from behind on the right, a soft ambient, no shadow (there is nothing
+under it to fall on) */
+static void object_light(struct menu_scene_object *object)
+{
+	struct render_lighting *lighting = &object->lighting;
+	struct menu_scene_frame frame;
+
+	camera_frame(&object->camera, &frame);
+	memset(lighting, 0, sizeof(*lighting));
+	lighting->ambient_color.red = 0.36f;
+	lighting->ambient_color.green = 0.38f;
+	lighting->ambient_color.blue = 0.44f;
+	lighting->distant_light_count = 2;
+	light_set(&lighting->distant_lights[0], 1.25f, 1.20f, 1.12f, &frame, 0.55f, 0.45f, -0.70f);
+	light_set(&lighting->distant_lights[1], 0.50f, 0.62f, 0.90f, &frame, -0.70f, -0.45f, -0.25f);
+	lighting->point_light_count = 0;
+	lighting->reflection_tint_color.alpha = 0.5f;
+	lighting->reflection_tint_color.red = 1.f;
+	lighting->reflection_tint_color.green = 1.f;
+	lighting->reflection_tint_color.blue = 1.f;
+	lighting->shadow_vector.i = -frame.up.i;
+	lighting->shadow_vector.j = -frame.up.j;
+	lighting->shadow_vector.k = -frame.up.k;
+	lighting->shadow_color.red = lighting->shadow_color.green = lighting->shadow_color.blue = 1.f;
 }
 
 static void object_forget(struct menu_scene_object *object, boolean delete_it)
@@ -230,7 +341,7 @@ static void object_make(struct menu_scene_object *object, short slot)
 	short root_count;
 	struct object_placement_data placement;
 	real_rgb_color color;
-	real_vector3d up = { 0.f, 0.f, 1.f };
+	real_vector3d up;
 	unsigned long long started;
 	struct unit_datum *unit;
 
@@ -255,7 +366,9 @@ static void object_make(struct menu_scene_object *object, short slot)
 	started = vita_host_time_us();
 	/* (ui.map has no ground under its cameras: the pack's copy of the biped,
 	which this map alone has, made one that flies, which stands where it is
-	with its idle as a flying biped does, rather than falling) */
+	in its idle - state idle, seat stand: no airborne pose - rather than
+	falling, and keeps the pitch it is given, so it stands upright in a
+	pitched camera's picture) */
 	{
 		struct biped_definition *definition = biped_definition_get(roots[0]);
 
@@ -263,7 +376,7 @@ static void object_make(struct menu_scene_object *object, short slot)
 	}
 	object_placement_data_new(&placement, roots[0], NONE);
 	SET_FLAG(placement.flags, _new_object_never_automatically_delete_bit, TRUE);
-	object_place(object, &placement.position, &placement.forward);
+	object_place(object, &placement.position, &placement.forward, &up);
 	placement.up = up;
 	object->made_color_index = color_index_of(object);
 	color = player_profile_get_rgb_color(object->made_color_index);
@@ -281,6 +394,8 @@ static void object_make(struct menu_scene_object *object, short slot)
 ui.map has no player, so it would stand still, its weapon never readied) */
 	object_set_automatic_deactivation(object->unit_index, FALSE);
 	object_activate(object->unit_index);
+	object_light(object);
+	object_pose(object, unit, &placement.forward, &up);
 	/* (the pack's weapon in its hands, if its own initial weapons gave it
 	none) */
 	if (root_count > 1 && roots[1] != NONE && tag_get_group_tag(roots[1]) == 'weap' &&
@@ -310,21 +425,23 @@ its colour changed */
 static void object_hold(struct menu_scene_object *object)
 {
 	struct object_datum *datum = object_try_and_get(object->unit_index);
+	struct unit_datum *unit = unit_try_and_get(object->unit_index);
 	real_point3d position;
-	real_vector3d forward, up = { 0.f, 0.f, 1.f };
+	real_vector3d forward, up;
 	short color_index = color_index_of(object);
 
-	if (!datum)
+	if (!datum || !unit)
 	{
 		object->unit_index = NONE;
 		return;
 	}
-	object_place(object, &position, &forward);
+	object_place(object, &position, &forward, &up);
 	object_set_position(object->unit_index, &position, &forward, &up);
+	object_pose(object, unit, &forward, &up);
 	datum->object.translational_velocity.i = datum->object.translational_velocity.j =
 		datum->object.translational_velocity.k = 0.f;
-	/* (another colour: made again in it, at the next update; an object's
-	colours are worked out as it is made) */
+	/* (another colour: made again in it, by the update right after this;
+	an object's colours are worked out as it is made) */
 	if (color_index != object->made_color_index)
 	{
 		object_forget(object, TRUE);
@@ -461,15 +578,19 @@ void menu_scene_objects_update(
 				object->wanted = FALSE;
 			continue;
 		}
-		if (object->unit_index == NONE)
-		{
-			if (!object->refused)
-				object_make(object, index);
-		}
-		else
-		{
+		/* (held; or made, or made again at once in a new colour: no frame
+		without it) */
+		if (object->unit_index != NONE)
 			object_hold(object);
-		}
+		if (object->unit_index == NONE && !object->refused)
+			object_make(object, index);
+	}
+	/* (object_lights.c's quick way out: none made, none asked about) */
+	menu_scene_objects.made_count = 0;
+	for (index = 0; index < NUMBER_OF_MENU_SCENE_SLOTS; index++)
+	{
+		if (menu_scene_objects.slots[index].unit_index != NONE)
+			menu_scene_objects.made_count++;
 	}
 }
 
@@ -507,4 +628,56 @@ void menu_scene_spartan_hide(
 {
 	initialize();
 	menu_scene_objects.slots[MENU_SCENE_PREVIEW].wanted = FALSE;
+}
+
+int menu_scene_spartan_shown(
+	void)
+{
+	struct menu_scene_object const *object = &menu_scene_objects.slots[MENU_SCENE_PREVIEW];
+
+	return menu_scene_objects_initialized && object->wanted && object->unit_index != NONE;
+}
+
+boolean menu_scene_objects_posed(
+	long unit_index)
+{
+	short index;
+
+	if (!menu_scene_objects_initialized || menu_scene_objects.made_count <= 0 || unit_index == NONE)
+		return FALSE;
+	for (index = 0; index < NUMBER_OF_MENU_SCENE_SLOTS; index++)
+	{
+		struct menu_scene_object const *object = &menu_scene_objects.slots[index];
+
+		if (object->unit_index == unit_index && object->epoch == scene_packs_map_epoch())
+			return TRUE;
+	}
+	return FALSE;
+}
+
+boolean menu_scene_objects_lighting(
+	long object_index,
+	struct render_lighting *lighting)
+{
+	struct object_datum *datum;
+	long parent_index;
+	short index;
+
+	if (!menu_scene_objects_initialized || menu_scene_objects.made_count <= 0 || object_index == NONE)
+		return FALSE;
+	datum = object_try_and_get(object_index);
+	parent_index = datum ? datum->object.parent_object_index : NONE;
+	for (index = 0; index < NUMBER_OF_MENU_SCENE_SLOTS; index++)
+	{
+		struct menu_scene_object const *object = &menu_scene_objects.slots[index];
+
+		/* (the character, or what it holds) */
+		if (object->unit_index != NONE && object->epoch == scene_packs_map_epoch() &&
+			(object->unit_index == object_index || object->unit_index == parent_index))
+		{
+			*lighting = object->lighting;
+			return TRUE;
+		}
+	}
+	return FALSE;
 }

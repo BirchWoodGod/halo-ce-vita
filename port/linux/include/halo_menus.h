@@ -218,6 +218,9 @@ from a widget's event */
 int menu_scene_spartan_show(char const *camera, char const *placement, short color_index);
 void menu_scene_spartan_color(short color_index);
 void menu_scene_spartan_hide(void);
+/* (port) whether the preview's Spartan stands there now (made: its pack
+loaded), so that a screen keeps its fallback until it does */
+int menu_scene_spartan_shown(void);
 /* (port) a file of the scene packs' recipes folder (app0:packs/ on the
 Vita; elsewhere HALO_PACKS_FOLDER, else the packs folder beside the menus
 folder), as halo_menus_file_read reads the menus': scene_packs.c */

@@ -484,19 +484,19 @@ for case in $cases; do
 		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
 			echo "--- h3characters"; echo "SKIP: no HALO_TEST_PROFILE"; continue
 		fi
-		# (as h3scenes: CAMPAIGN, the profile: the campaign lobby; B, B; down, A: MULTIPLAYER; B;
-		# down, A: FORGE; B)
-		characters_pad="wait:150:3000 down:150:700 a wait:150:3000 a wait:150:5000 b wait:150:2500 b wait:150:3000 down:150:700 a wait:150:5000 b wait:150:3000 down:150:700 a wait:150:5000 b wait:150:3000"
+		# (as h3scenes: CAMPAIGN (first since the main menu lost START SOLO GAME), the profile: the
+		# campaign lobby; B, B; down, A: MULTIPLAYER; B; down, A: FORGE; B)
+		characters_pad="wait:150:3000 a wait:150:3000 a wait:150:5000 b wait:150:2500 b wait:150:3000 down:150:700 a wait:150:5000 b wait:150:3000 down:150:700 a wait:150:5000 b wait:150:3000"
 		profile_from=$HALO_TEST_PROFILE run h3characters "$menus_data" 50 "$characters_pad" HALO_MENU_STYLE=halo3
 		# (the multiplayer lobby, then the preview: in colour 5, recoloured 9, hidden)
-		run h3characters_preview "$menus_data" 26 "wait:150:3000 down:150:700 down:150:700 a wait:150:15000" HALO_MENU_STYLE=halo3 \
+		run h3characters_preview "$menus_data" 26 "wait:150:3000 down:150:700 a wait:150:15000" HALO_MENU_STYLE=halo3 \
 			"HALO_TEST_COMMANDS=330:pack preview 5;420:pack preview 9;510:pack preview off"
 		profile_from=$HALO_TEST_PROFILE run h3characters_off "$menus_data" 50 "$characters_pad" HALO_MENU_STYLE=halo3 HALO_SCENE_PACKS=0
 		# (a maps folder of ui.map and the Halo PC files alone: no multiplayer map to build from)
 		rm -rf "$out/nomap_data"
 		mkdir -p "$out/nomap_data/maps"
 		for map in ui bitmaps loc; do ln -s "$(readlink -f "$menus_data/maps/$map.map")" "$out/nomap_data/maps/$map.map"; done
-		run h3characters_nomap "$out/nomap_data" 22 "wait:150:3000 down:150:700 down:150:700 a wait:150:8000" HALO_MENU_STYLE=halo3
+		run h3characters_nomap "$out/nomap_data" 22 "wait:150:3000 down:150:700 a wait:150:8000" HALO_MENU_STYLE=halo3
 		check_h3 h3characters halo3
 		log=$out/h3characters/run.log
 		grep -aE "scene packs:|h3 scene object" "$log"

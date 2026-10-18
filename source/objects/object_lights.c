@@ -3026,6 +3026,8 @@ boolean lights_distant_lighting_at_point(
 	return result;
 }
 
+boolean menu_scene_objects_lighting(long object_index, struct render_lighting *lighting);
+
 void lights_prepare_for_object_static(
 	long object_index,
 	struct render_lighting *lighting)
@@ -3041,6 +3043,10 @@ void lights_prepare_for_object_static(
 		"c:\\halo\\SOURCE\\objects\\object_lights.c",
 		970,
 		lighting);
+	/* (port) the Halo 3 menus' characters light themselves: ui.map's space
+	has no lightmap under them (menu_scene_objects.c) */
+	if (menu_scene_objects_lighting(object_index, lighting))
+		return;
 	if (TEST_FLAG(object->object.flags, _object_static_lighting_raycast_sideways_bit))
 	{
 		SET_FLAG(flags, _distant_lighting_raycast_sideways_bit, TRUE);

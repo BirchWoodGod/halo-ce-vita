@@ -185,7 +185,7 @@ art (tools/halo3_menu_art.py). -->
 	<widget name="h3/mp/players" type="text" left="380" top="20" width="250" height="16" font="h3/font_small" color="#FFEEF2F6"/>
 	<!-- (scene: its own camera in ui.map's unused multiplayer point: the whole ring before the
 	planet) -->
-	<widget name="h3/mp/screen" flags="pass_unhandled_to_focused_child" scene="multiplayer -40 -1.8 15.5 0 0" scene_object="menu_spartan 1.6 0.35 -0.4 20">
+	<widget name="h3/mp/screen" flags="pass_unhandled_to_focused_child" scene="multiplayer -40 -1.8 15.5 0 0" scene_object="menu_spartan 0.9 0.30 -0.6 20">
 		<on event="created" run="mp type menu initialize"/>
 		<on event="created" run="port mp screen init"/>
 		<on event="created" run="port h3 mp init"/>

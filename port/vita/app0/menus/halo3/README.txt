@@ -108,7 +108,12 @@ lobby wants it (port/linux/game/scene_packs.c), into the save folder's t/packs.
 The campaign lobby has two, the multiplayer and Forge lobbies one. No pack, no
 multiplayer map, HALO_SCENE_PACKS=0 or the scenes off: no character, nothing
 else changes. menu_scene_spartan_show/_color/_hide (halo_menus.h) put the same
-Spartan in the scene open now, in a colour, for a Customization screen.
+Spartan in a scene, in a colour: CUSTOMIZATION's editor shows it. The
+characters stand upright in the picture whatever the camera's pitch (placed
+in the camera's frame: "up" is up in the picture), in a calm stance (weapon
+low, head to the camera) and lit by a light of their own (a key from the
+upper left, a cool rim, an ambient: ui.map's space has no lightmap under
+them). There is no floor: the lobbies' framing cuts them at the shins.
 
 Touch: the Vita's front screen points in the menus (a finger highlights, a tap
 presses A on the item or the button of a key); the button icons are named as

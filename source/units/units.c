@@ -862,6 +862,9 @@ typedef char game_globals_falling_damage_size_check[
 typedef char game_globals_flaming_death_offset_check[
 	offsetof(struct game_globals_falling_damage, flaming_death_damage_effect) == 0x6C ? 1 : -1];
 
+/* (port) port/linux/game/menu_scene_objects.c */
+boolean menu_scene_objects_posed(long unit_index);
+
 /* ---------- prototypes */
 
 void player_died(
@@ -5501,9 +5504,14 @@ boolean unit_update(
 	}
 	else if (!TEST_FLAG(unit->unit.flags, _unit_actively_controlled_bit))
 	{
+		/* (port) a Halo 3 menu's character keeps the aim and look its scene
+		gives it (menu_scene_objects.c): no player or AI controls it */
+		if (!menu_scene_objects_posed(unit_index))
+		{
 		unit->unit.desired_looking_vector = unit->object.forward;
 		unit->unit.desired_aiming_vector = unit->object.forward;
 		unit->unit.desired_facing_vector = unit->object.forward;
+		}
 		unit->unit.throttle = *global_zero_vector3d;
 		unit->unit.control_flags = 0;
 	}
