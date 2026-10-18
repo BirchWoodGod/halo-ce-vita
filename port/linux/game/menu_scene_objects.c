@@ -118,6 +118,10 @@ struct menu_scene_object
 	boolean refused;
 	/* (the update's) its light, from its camera (object_lights.c reads it) */
 	struct render_lighting lighting;
+	/* (the preview's) how much further away it stands than placed: a
+	taller character than the menu Spartan (a player model's) as far as
+	keeps it whole in the window */
+	real scale;
 };
 
 /* a camera's frame: its view, its right (level) and its up (pitched with
@@ -141,6 +145,9 @@ static struct
 	char screen[64];
 	/* objects made now (object_lights.c's quick way out) */
 	short made_count;
+	/* the preview's pack: menu_spartan, or a player model's
+	(menu_scene_spartan_model) */
+	char preview_pack[32];
 } menu_scene_objects;
 
 static boolean menu_scene_objects_initialized = FALSE;
@@ -227,13 +234,15 @@ static void object_place(struct menu_scene_object const *object, real_point3d *p
 	real facing = object->facing * MENU_SCENE_DEGREES;
 	real cosine = (real)cos(facing), sine = (real)sin(facing);
 
+	real scale = object->scale > 1.f ? object->scale : 1.f;
+
 	camera_frame(&object->camera, &frame);
-	position->x = object->camera.position.x + frame.view.i * object->distance + frame.right.i * object->right +
-		frame.up.i * object->up;
-	position->y = object->camera.position.y + frame.view.j * object->distance + frame.right.j * object->right +
-		frame.up.j * object->up;
-	position->z = object->camera.position.z + frame.view.k * object->distance + frame.right.k * object->right +
-		frame.up.k * object->up;
+	position->x = object->camera.position.x + frame.view.i * object->distance * scale + frame.right.i * object->right * scale +
+		frame.up.i * object->up * scale;
+	position->y = object->camera.position.y + frame.view.j * object->distance * scale + frame.right.j * object->right * scale +
+		frame.up.j * object->up * scale;
+	position->z = object->camera.position.z + frame.view.k * object->distance * scale + frame.right.k * object->right * scale +
+		frame.up.k * object->up * scale;
 	/* (back toward the camera, turned: positive facing turns its front to
 	the picture's left, as before) */
 	forward->i = -frame.view.i * cosine + frame.right.i * sine;
@@ -373,6 +382,10 @@ static void object_make(struct menu_scene_object *object, short slot)
 		struct biped_definition *definition = biped_definition_get(roots[0]);
 
 		SET_FLAG(definition->biped.flags, _biped_flying_bit, TRUE);
+		/* (a character taller than the Spartan, whose eyes are 0.62 up,
+		further away: its head in the picture too) */
+		object->scale = definition->biped.standing_camera_height > 0.62f && definition->biped.standing_camera_height < 3.f ?
+			definition->biped.standing_camera_height / 0.62f : 1.f;
 	}
 	object_placement_data_new(&placement, roots[0], NONE);
 	SET_FLAG(placement.flags, _new_object_never_automatically_delete_bit, TRUE);
@@ -396,6 +409,19 @@ ui.map has no player, so it would stand still, its weapon never readied) */
 	object_activate(object->unit_index);
 	object_light(object);
 	object_pose(object, unit, &placement.forward, &up);
+	/* (a player model's pack holds its biped alone: the menu Spartan's
+	rifle in its hands, when that pack is loaded too) */
+	if ((root_count < 2 || roots[1] == NONE) && strcmp(object->pack, MENU_SCENE_PREVIEW_PACK) &&
+		scene_packs_want(MENU_SCENE_PREVIEW_PACK) == _scene_pack_state_loaded)
+	{
+		long spartan_roots[2] = { NONE, NONE };
+
+		if (scene_packs_roots(MENU_SCENE_PREVIEW_PACK, spartan_roots, 2) == 2)
+		{
+			roots[1] = spartan_roots[1];
+			root_count = 2;
+		}
+	}
 	/* (the pack's weapon in its hands, if its own initial weapons gave it
 	none) */
 	if (root_count > 1 && roots[1] != NONE && tag_get_group_tag(roots[1]) == 'weap' &&
@@ -616,11 +642,47 @@ int menu_scene_spartan_show(
 		object->camera = menu_scene_objects.camera;
 	if (!placement_parse(placement ? placement : "1.6 0.45 -0.35 15", object))
 		return FALSE;
-	snprintf(object->pack, sizeof(object->pack), "%s", MENU_SCENE_PREVIEW_PACK);
+	snprintf(object->pack, sizeof(object->pack), "%s", menu_scene_objects.preview_pack[0] ?
+		menu_scene_objects.preview_pack : MENU_SCENE_PREVIEW_PACK);
 	object->color_index = color_index;
 	object->refused = FALSE;
 	object->wanted = TRUE;
 	return TRUE;
+}
+
+void menu_scene_spartan_model(
+	char const *pack)
+{
+	struct menu_scene_object *object;
+	char const *wanted = pack && *pack ? pack : MENU_SCENE_PREVIEW_PACK;
+
+	initialize();
+	object = &menu_scene_objects.slots[MENU_SCENE_PREVIEW];
+	snprintf(menu_scene_objects.preview_pack, sizeof(menu_scene_objects.preview_pack), "%s", wanted);
+	if (strcmp(object->pack, wanted))
+	{
+		/* (the character standing there let go: the other made, once its
+		pack is loaded, in its place) */
+		snprintf(object->pack, sizeof(object->pack), "%s", wanted);
+		object->refused = FALSE;
+		if (object->unit_index != NONE)
+		{
+			platform_log("menus: h3 scene object %d: deleted (the model changed)", MENU_SCENE_PREVIEW);
+			object_forget(object, TRUE);
+		}
+	}
+}
+
+short menu_scene_spartan_state(
+	long *progress,
+	char *why,
+	long why_size)
+{
+	struct menu_scene_object const *object;
+
+	initialize();
+	object = &menu_scene_objects.slots[MENU_SCENE_PREVIEW];
+	return scene_packs_status(object->pack[0] ? object->pack : MENU_SCENE_PREVIEW_PACK, progress, why, why_size);
 }
 
 void menu_scene_spartan_color(

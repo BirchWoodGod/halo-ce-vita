@@ -61,6 +61,19 @@ pack's own table. The map's walk is left as it was. Returns how many were
 wrong (0: the pack may be checked further), (unsigned long)-1 without memory */
 unsigned long halo_tag_relocate_pack(void *blob, unsigned long size, unsigned long link_base);
 
+/* port: a Custom Edition map's tags (a scene pack's source,
+port/linux/game/scene_pack_ce.c, on the builder's thread) moved as
+halo_tag_relocate_linked_tags moves them, the game's walk state left as it
+was: the walk's anomalies (0: moved, every block and reference consistent),
+(unsigned long)-1 without memory */
+unsigned long halo_tag_relocate_linked_tags_isolated(void *tag_cache, unsigned long size, unsigned long link_base,
+	unsigned long window_bytes);
+
+/* port: the walks' lock (tag_relocate.c's and tag_validate.c's public
+walks hold it: one walk at a time, whichever thread) */
+void halo_tag_walk_lock(void);
+void halo_tag_walk_unlock(void);
+
 /* called now and then as tags are walked (the loading screen's frames:
 custom_edition_cache.c), or NULL */
 extern void (*halo_tag_relocate_progress)(void);

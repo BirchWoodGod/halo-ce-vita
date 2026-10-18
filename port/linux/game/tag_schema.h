@@ -319,6 +319,19 @@ boolean tag_validate_custom_edition_tags(
 	short file_range_count,
 	char const *map_name);
 
+/* (port) the same, on the scene packs' builder's thread
+(port/linux/game/scene_pack_ce.c: a pack's Custom Edition source), the
+map's own check kept as it was; corrections (if not NULL) says how many were
+made */
+boolean tag_validate_custom_edition_tags_isolated(
+	void *tag_header,
+	long loaded_size,
+	unsigned long tag_cache_size,
+	struct tag_validate_file_range const *file_ranges,
+	short file_range_count,
+	char const *map_name,
+	long *corrections);
+
 /* (port) a scene pack's tags (port/linux/game/scene_pack.c): size bytes at
 tag_header laid out as a map's tag data, moved to where they are, their
 pixels and samples at file_offset..file_offset + file_size of the pack's

@@ -92,6 +92,14 @@ char halo_forge_request_variant[HALO_FORGE_VARIANT_SIZE];
 static const char *const test_forge_maps[3][2] = {
 	{ "Battle Creek", "beavercreek" }, { "Blood Gulch", "bloodgulch" }, { "Chill Out", "chillout" },
 };
+/* (the Player model row's: player_models.c's models - none found unless a
+test says so - and the profile's choice, as the game keeps it) */
+static int test_model_count = 1, test_model_chosen, test_model_choice = -2;
+static const char *const test_model_names[3] = { "Spartan", "Spartan (Extinction)", "Covenant V Marines Beta 5" };
+int player_models_panel_count(void) { return test_model_count; }
+const char *player_models_panel_name(int index) { return index >= 0 && index < 3 ? test_model_names[index] : "Spartan"; }
+int player_models_panel_chosen(void) { return test_model_chosen; }
+void player_models_panel_choose(int index) { test_model_choice = test_model_chosen = index; }
 int forge_panel_map_count(void) { return 3; }
 const char *forge_panel_map_name(int map_index) { return map_index >= 0 && map_index < 3 ? test_forge_maps[map_index][0] : ""; }
 const char *forge_panel_map_short(int map_index) { return map_index >= 0 && map_index < 3 ? test_forge_maps[map_index][1] : ""; }
@@ -1806,6 +1814,43 @@ static void test_forge_page(void)
 	check(!menu_visible, "closed");
 }
 
+/* Game's Player model (port/linux/game/player_models.c): shown while the
+maps folder's Custom Edition maps have a player model, the Spartan first,
+the profile's choice; changed with left and right, for the game to keep for
+the profile, never in settings.txt; the tab still fits, the Forge row too */
+static void test_player_model_row(void)
+{
+	char line[128];
+
+	if (menu_visible)
+		open_panel();
+	test_model_count = 1;
+	open_panel();
+	check(to_tab("Game") && !strstr(menu, "\nPlayer model"), "no player model found: no Player model row");
+	open_panel();
+	test_model_count = 3;
+	test_model_chosen = 2;
+	test_model_choice = -2;
+	open_panel();
+	check(to_tab("Game") && strstr(menu, "\nPlayer model\x02< Covenant V Marines Beta 5  \n") && menu_height_fits(),
+		"two found: Player model, the profile's choice (the last), its map's own name; the tab fits");
+	check(to_line("Player model"), "the row is chosen");
+	press(VITA_BUTTON_LEFT);
+	check(test_model_choice == 1 && strstr(menu, "\nPlayer model\x02< Spartan (Extinction) >\n"),
+		"left: Spartan (Extinction), given to the game for the profile");
+	press(VITA_BUTTON_LEFT);
+	check(test_model_choice == 0 && strstr(menu, "\nPlayer model\x02  Spartan >\n"), "left again: the Spartan");
+	press(VITA_BUTTON_LEFT);
+	check(test_model_choice == 0 && strstr(menu, "\nPlayer model\x02  Spartan >\n"), "no further left than the Spartan");
+	press(VITA_BUTTON_RIGHT);
+	check(test_model_choice == 1, "right: Spartan (Extinction) again");
+	open_panel();
+	check(!strstr(file_text(SETTINGS_FILE), "HALO_PLAYER_MODEL"), "the choice is the profile's: never in settings.txt");
+	(void)line;
+	test_model_count = 1;
+	test_model_chosen = 0;
+}
+
 static void test_crossplay_browser(void)
 {
 	int saved_screen = screen;
@@ -2046,6 +2091,8 @@ static void test_tab_layouts(void)
 		{ TAB_GAME, "Language", "HALO_LANGUAGE", languages, 0, "auto" },
 		{ TAB_GAME, "FPS counter", "HALO_FRAMERATE_COUNTER", "0|1", 0, "0" },
 		{ TAB_GAME, "First-person legs", "HALO_FIRST_PERSON_LEGS", "0|1", 0, "1" },
+		/* (shown while the maps folder has a Custom Edition player model) */
+		{ TAB_GAME, "Player model", "HALO_PLAYER_MODEL", "0", 0, "0" },
 		{ TAB_GAME, "Smooth weapon motion", "HALO_INTERPOLATE_FIRST_PERSON", "1|0", 0, "1" },
 		{ TAB_GAME, "Check for updates", NULL, NULL, 0, NULL, ACTION_UPDATE_CHECK },
 		{ TAB_GAME, "Update channel", "HALO_UPDATE_CHANNEL", "experimental|stable", 0, channel },
@@ -2273,7 +2320,7 @@ with the values it saved, but the co-op pair (gone: co-op is hosted from
 the Campaign screen) and Online games (now Visibility, by OpenCE's name);
 and the rows added since (Sun rays, Button icons, Map downloads, Max
 players, Visibility, Fourth core helpers, Latency meter, Particles,
-First-person legs, MCC mods, PC map vehicles, Sharp interface; the Play
+First-person legs, MCC mods, PC map vehicles, Sharp interface, Player model; the Play
 page's two texts) */
 static void test_variables_kept(void)
 {
@@ -2297,7 +2344,7 @@ static void test_variables_kept(void)
 		"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR", "HALO_INTERPOLATION", "HALO_LATENCY_METER", "HALO_BOTS", "HALO_BOT_SKILL", "HALO_BOT_TEAMS",
 		"HALO_BOT_VEHICLES", "HALO_BOT_ROUTES", "HALO_BOT_PLAYLIST", "HALO_NET_COOP_PLAYERS", "HALO_NET_REMOTE_LOD",
 		"HALO_LANGUAGE", "HALO_UPDATE_CHANNEL", "HALO_PARTICLE_BUDGET", "HALO_FIRST_PERSON_LEGS", "HALO_RAGDOLLS",
-		"HALO_MCC_MODS", "HALO_PC_MAP_VEHICLES", "HALO_SHARP_UI",
+		"HALO_MCC_MODS", "HALO_PC_MAP_VEHICLES", "HALO_SHARP_UI", "HALO_PLAYER_MODEL",
 	};
 	int index, all = 1, choices = 0;
 
@@ -3713,6 +3760,7 @@ int main(void)
 	test_multiplayer_tab();
 
 	test_forge_page();
+	test_player_model_row();
 
 	/* ---------- Multiplayer's Modded maps page */
 	write_map("ux0:data/haloce-vita/maps/mygulch.map", 5, 250000);

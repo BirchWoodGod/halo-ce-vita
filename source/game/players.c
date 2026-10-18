@@ -1499,6 +1499,15 @@ static void player_spawn(
 						0,
 						struct game_globals_multiplayer_information);
 					unit_definition_index = multiplayer_information->unit.index;
+#ifdef HALO_LINUX
+					/* port: the first local player's model from a Custom
+					Edition map, in a local game (player_models.c) */
+					{
+						extern long player_models_unit(long player_index, long unit_definition_index);
+
+						unit_definition_index = player_models_unit(player_index, unit_definition_index);
+					}
+#endif
 				}
 				else
 				{

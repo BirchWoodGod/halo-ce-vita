@@ -352,6 +352,7 @@ static struct
 	{ "covenant_vehicles", N_("Covenant vehicles"), N_("The Banshee, the Wraith and the Shade.\nBuilt from your Assault on the Control\nRoom or Two Betrayals map."), TRUE },
 	{ "dropships", N_("Dropships"), N_("The Pelican and the Covenant dropship.\nBuilt from your The Silent Cartographer\nor Halo map."), TRUE },
 	{ "covenant_ai", N_("Covenant AI"), N_("Grunts, jackals, elites and a hunter, who\nfight as in the campaign. Built from your\nAssault on the Control Room map."), FALSE },
+	{ "ce_pelican", N_("Flyable Pelican"), N_("A Pelican you fly, with room for eleven\nriders. Built from your Extinction map\n(Halo Custom Edition, by (DA)Ender)."), TRUE },
 };
 
 /* our own names for the multiplayer maps' objects (and the campaign's
@@ -372,6 +373,7 @@ static struct
 	{ "c gun turret", N_("Shade") },
 	{ "wraith", N_("Wraith") },
 	{ "pelican", N_("Pelican") },
+	{ "epelican", N_("Flyable Pelican") },
 	{ "c_dropship", N_("Covenant Dropship") },
 	/* weapons */
 	{ "assault rifle", N_("Assault Rifle") },
@@ -2562,6 +2564,14 @@ static void forge_packs_load(
 		if (scene_packs_recipe_covered(forge_packs[pack].name))
 		{
 			platform_log("forge: packs: %s: the map has its objects already", forge_packs[pack].name);
+			continue;
+		}
+		/* (a pack whose source map the player has not - the Custom Edition
+		map of the flyable Pelican - is not offered: the lobby says why, the
+		game says nothing) */
+		if (!scene_packs_recipe_available(forge_packs[pack].name, why, sizeof(why)))
+		{
+			platform_log("forge: packs: %s: unavailable: %s", forge_packs[pack].name, why);
 			continue;
 		}
 		if (scene_packs_load_now(forge_packs[pack].name))

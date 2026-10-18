@@ -33,10 +33,18 @@ a build stopped and waited for, every pack's buffers deregistered and file
 closed, the table before the packs put back, the tables made freed.
 
 Reads (scene_packs_read, cache_files_windows.c): a file offset from
-SCENE_PACK_FILE_BASE is a pack's (MAXIMUM_LOADED_SCENE_PACKS ranges of
-SCENE_PACK_RANGE_BYTES), served from its file at once, under a lock (the
-render's and the tick's threads both read), zeros when the file cannot be
-read.
+SCENE_PACK_FILE_BASE is a pack's (each loaded pack's pixels and samples have
+the offsets after the one loaded before it, all within
+SCENE_PACK_FILE_RANGE_BYTES, up to MAXIMUM_LOADED_SCENE_PACKS packs), served
+from its file at once, under a lock (the render's and the tick's threads
+both read), zeros when the file cannot be read.
+
+A recipe is app0:packs/<name>.txt, or one the game made and registered
+(scene_packs_recipe_register: the player models from Custom Edition maps,
+player_models.c). A pack of a Custom Edition map (its recipe's cemap lines:
+scene_pack_ce.c) is built and loaded as any; one whose map is not in the
+maps folder, or is another version of it, fails at once with the reason
+(scene_packs_recipe_available says so before it is wanted).
 
 HALO_SCENE_PACKS=0 turns them off (nothing is wanted, built or loaded).
 */
@@ -53,6 +61,8 @@ HALO_SCENE_PACKS=0 turns them off (nothing is wanted, built or loaded).
 #include "game/players.h"
 #include "objects/objects.h"
 #include "units/units.h"
+#include "units/unit_definitions.h"
+#include "game/game_globals.h"
 #include "objects/object_types.h"
 
 #include "custom_edition_cache.h"
@@ -79,8 +89,12 @@ void tag_validate_reserve_after_tags(unsigned long bytes);
 
 enum
 {
-	/* each loaded pack's file offsets (SCENE_PACK_FILE_BASE + its slot's) */
-	SCENE_PACK_RANGE_BYTES = 0x04000000,
+	/* the loaded packs' file offsets, from SCENE_PACK_FILE_BASE: each pack's
+	from where the one loaded before it ends, at this alignment, all of them
+	within SCENE_PACK_FILE_RANGE_BYTES (past 0x7FFFFFFF a file offset is
+	negative to the game) */
+	SCENE_PACK_RANGE_ALIGNMENT = 0x10000,
+	SCENE_PACK_FILE_RANGE_BYTES = 0x10000000,
 	/* the tag cache room left between the packs and the structure bsp */
 	SCENE_PACK_ALIGNMENT = 16,
 	BUILD_THREAD_STACK_BYTES = 256 * 1024,
@@ -110,7 +124,8 @@ struct scene_pack_slot
 	unsigned long bytes;
 	long first_index;
 	long count;
-	short range;
+	/* its pixels' and samples' file offsets, from SCENE_PACK_FILE_BASE */
+	unsigned long file_base;
 	FILE *file;
 	char why[SCENE_PACK_WHY_SIZE];
 	/* (Forge's lobby: scene_packs_prebuild) built, not loaded */
@@ -123,8 +138,10 @@ static struct
 {
 	struct scene_pack_slot packs[MAXIMUM_SCENE_PACK_SLOTS];
 	short pack_count;
-	/* the tag cache's bytes after the map's tags the loaded packs hold */
+	/* the tag cache's bytes after the map's tags the loaded packs hold, and
+	the file offsets they hold (from SCENE_PACK_FILE_BASE) */
 	unsigned long reserved;
+	unsigned long file_used;
 	/* the table before the packs (the map's and the menus' tags), and the
 	ones made since */
 	void *original_instances;
@@ -140,11 +157,117 @@ static struct
 	unsigned long scratch_size;
 	int volatile cancel;
 	int volatile read_lock;
-} scene_packs = { { { 0 } }, 0, 0, NULL, 0, { NULL }, 0, 0, FALSE, NONE };
+} scene_packs = { { { 0 } }, 0, 0, 0, NULL, 0, { NULL }, 0, 0, FALSE, NONE };
 
 /* (each map's tags loaded counts one: a character made on another map
 is gone with it, menu_scene_objects.c) */
 static unsigned long scene_packs_epoch = 1;
+
+/* recipes made by the game rather than read from app0:packs (the player
+models found in Custom Edition maps: player_models.c), by name */
+enum
+{
+	MAXIMUM_MADE_RECIPES = 32,
+};
+
+static struct
+{
+	char name[SCENE_PACK_NAME_SIZE];
+	char *text;
+	unsigned long size;
+} scene_packs_made_recipes[MAXIMUM_MADE_RECIPES];
+static int volatile scene_packs_made_recipes_lock;
+
+static void made_recipes_take(void)
+{
+	while (__atomic_exchange_n(&scene_packs_made_recipes_lock, 1, __ATOMIC_ACQUIRE))
+		SwitchToThread();
+}
+
+static void made_recipes_give(void)
+{
+	__atomic_store_n(&scene_packs_made_recipes_lock, 0, __ATOMIC_RELEASE);
+}
+
+/* a recipe's text: a made one's, else app0:packs/<name>.txt's (the caller
+lets it go with halo_menus_file_free... or free: *made says which) */
+static unsigned char *recipe_text(char const *name, unsigned long *size, boolean *made)
+{
+	char file_name[SCENE_PACK_NAME_SIZE + 8];
+	short index;
+
+	*made = FALSE;
+	made_recipes_take();
+	for (index = 0; index < MAXIMUM_MADE_RECIPES; index++)
+	{
+		if (scene_packs_made_recipes[index].text && !strcmp(scene_packs_made_recipes[index].name, name))
+		{
+			unsigned char *copy = malloc(scene_packs_made_recipes[index].size + 1);
+
+			if (copy)
+			{
+				memcpy(copy, scene_packs_made_recipes[index].text, scene_packs_made_recipes[index].size);
+				copy[scene_packs_made_recipes[index].size] = 0;
+				*size = scene_packs_made_recipes[index].size;
+				*made = TRUE;
+			}
+			made_recipes_give();
+			return copy;
+		}
+	}
+	made_recipes_give();
+	snprintf(file_name, sizeof(file_name), "%s.txt", name);
+	return halo_packs_file_read(file_name, size);
+}
+
+static void recipe_text_free(unsigned char *text, boolean made)
+{
+	if (!text)
+		return;
+	if (made)
+		free(text);
+	else
+		halo_menus_file_free(text);
+}
+
+boolean scene_packs_recipe_register(
+	char const *name,
+	char const *text)
+{
+	unsigned long size = text ? (unsigned long)strlen(text) : 0;
+	short index, free_index = NONE;
+	char *copy;
+
+	if (!name || !*name || strlen(name) >= SCENE_PACK_NAME_SIZE || !size || size > SCENE_PACK_MAXIMUM_RECIPE_BYTES)
+		return FALSE;
+	copy = malloc(size + 1);
+	if (!copy)
+		return FALSE;
+	memcpy(copy, text, size + 1);
+	made_recipes_take();
+	for (index = 0; index < MAXIMUM_MADE_RECIPES; index++)
+	{
+		if (scene_packs_made_recipes[index].text && !strcmp(scene_packs_made_recipes[index].name, name))
+		{
+			free(scene_packs_made_recipes[index].text);
+			free_index = index;
+			break;
+		}
+		if (!scene_packs_made_recipes[index].text && free_index == NONE)
+			free_index = index;
+	}
+	if (free_index == NONE)
+	{
+		made_recipes_give();
+		free(copy);
+		return FALSE;
+	}
+	snprintf(scene_packs_made_recipes[free_index].name, SCENE_PACK_NAME_SIZE, "%s", name);
+	scene_packs_made_recipes[free_index].text = copy;
+	scene_packs_made_recipes[free_index].size = size;
+	made_recipes_give();
+	return TRUE;
+}
 
 /* ---------- private code */
 
@@ -228,7 +351,7 @@ static boolean pack_current(struct scene_pack_slot *slot)
 		snprintf(slot->why, sizeof(slot->why), "its recipe or builder changed");
 		return FALSE;
 	}
-	if (!scene_pack_source_find(slot->recipe, cache_files_map_directory(), map, sizeof(map), &source_hash) ||
+	if (!scene_pack_source_check(slot->recipe, cache_files_map_directory(), map, sizeof(map), &source_hash, NULL, 0) ||
 		strcmp(map, slot->info.source_map) || source_hash != slot->info.source_hash)
 	{
 		snprintf(slot->why, sizeof(slot->why), "its source map changed");
@@ -347,7 +470,7 @@ static boolean pack_load(struct scene_pack_slot *slot)
 	unsigned char *table;
 	unsigned char *instances;
 	long existing_count, count, index, salt = 0;
-	short range;
+	unsigned long file_base = scene_packs.file_used;
 
 	platform_heap_usage(&heap_before, &capacity);
 	room = tag_cache_room(&room_end);
@@ -359,20 +482,16 @@ static boolean pack_load(struct scene_pack_slot *slot)
 			(unsigned long)(room_end - room) / 1024, slot->info.tags_size / 1024);
 		return FALSE;
 	}
-	for (range = 0; range < MAXIMUM_LOADED_SCENE_PACKS; range++)
-	{
-		for (index = 0; index < scene_packs.pack_count; index++)
-		{
-			if (state_get(&scene_packs.packs[index]) == _scene_pack_state_loaded && scene_packs.packs[index].range == range)
-				break;
-		}
-		if (index == scene_packs.pack_count)
-			break;
-	}
 	existing = cache_files_tag_instances(&existing_count);
-	if (!existing || range == MAXIMUM_LOADED_SCENE_PACKS || scene_packs.table_count >= MAXIMUM_LOADED_SCENE_PACKS)
+	if (!existing || scene_packs.table_count >= MAXIMUM_LOADED_SCENE_PACKS)
 	{
-		snprintf(slot->why, sizeof(slot->why), "no map's tags to load it beside");
+		snprintf(slot->why, sizeof(slot->why), scene_packs.table_count >= MAXIMUM_LOADED_SCENE_PACKS ?
+			"as many packs as a map takes are loaded" : "no map's tags to load it beside");
+		return FALSE;
+	}
+	if (slot->info.data_size > SCENE_PACK_FILE_RANGE_BYTES - file_base)
+	{
+		snprintf(slot->why, sizeof(slot->why), "the packs loaded hold as many pixels and samples as the game reads");
 		return FALSE;
 	}
 	if (!scene_pack_load(slot->path, &slot->info, room, slot->why, sizeof(slot->why)))
@@ -409,7 +528,7 @@ static boolean pack_load(struct scene_pack_slot *slot)
 		if (instance_salt > salt)
 			salt = instance_salt;
 	}
-	scene_pack_rebase(room, existing_count, (salt + 1) & 0x7FFF, (long)range * SCENE_PACK_RANGE_BYTES);
+	scene_pack_rebase(room, existing_count, (salt + 1) & 0x7FFF, (long)file_base);
 	memcpy(table, existing, (unsigned long)existing_count * TAG_INSTANCE_BYTES);
 	memcpy(table + existing_count * TAG_INSTANCE_BYTES, instances, (unsigned long)count * TAG_INSTANCE_BYTES);
 	tags_header_register_vertex_and_index_buffers((struct cache_file_tag_header *)room);
@@ -417,7 +536,9 @@ static boolean pack_load(struct scene_pack_slot *slot)
 	slot->bytes = (slot->info.tags_size + SCENE_PACK_ALIGNMENT - 1) & ~(SCENE_PACK_ALIGNMENT - 1);
 	slot->first_index = existing_count;
 	slot->count = count;
-	slot->range = range;
+	slot->file_base = file_base;
+	scene_packs.file_used = (file_base + slot->info.data_size + SCENE_PACK_RANGE_ALIGNMENT - 1) &
+		~(unsigned long)(SCENE_PACK_RANGE_ALIGNMENT - 1);
 	if (!scene_packs.original_instances)
 	{
 		scene_packs.original_instances = existing;
@@ -444,17 +565,15 @@ static struct scene_pack_slot *slot_new(char const *name)
 	struct scene_pack_slot *slot;
 	unsigned char *text;
 	unsigned long size = 0;
-	char file_name[SCENE_PACK_NAME_SIZE + 8];
 	char why[SCENE_PACK_WHY_SIZE];
+	boolean made;
 
 	if (scene_packs.pack_count >= MAXIMUM_SCENE_PACK_SLOTS || !name || strlen(name) >= SCENE_PACK_NAME_SIZE)
 		return NULL;
 	slot = &scene_packs.packs[scene_packs.pack_count++];
 	memset(slot, 0, sizeof(*slot));
-	slot->range = NONE;
 	snprintf(slot->name, sizeof(slot->name), "%s", name);
-	snprintf(file_name, sizeof(file_name), "%s.txt", name);
-	text = halo_packs_file_read(file_name, &size);
+	text = recipe_text(name, &size, &made);
 	slot->recipe = malloc(sizeof(struct scene_pack_recipe));
 	if (!text || !slot->recipe || !scene_pack_recipe_parse((char const *)text, (long)size, slot->recipe, why, sizeof(why)) ||
 		strcmp(slot->recipe->name, name))
@@ -469,8 +588,7 @@ static struct scene_pack_slot *slot_new(char const *name)
 		snprintf(slot->path, sizeof(slot->path), "%s\\%s.pack", SCENE_PACKS_FOLDER, name);
 		state_set(slot, _scene_pack_state_building);
 	}
-	if (text)
-		halo_menus_file_free(text);
+	recipe_text_free(text, made);
 	return slot;
 }
 
@@ -593,18 +711,17 @@ static boolean recipe_read(char const *name, struct scene_pack_recipe *recipe)
 {
 	unsigned char *text;
 	unsigned long size = 0;
-	char file_name[SCENE_PACK_NAME_SIZE + 8];
 	char why[SCENE_PACK_WHY_SIZE];
 	boolean parsed;
+	boolean made;
 
 	if (!name || strlen(name) >= SCENE_PACK_NAME_SIZE)
 		return FALSE;
-	snprintf(file_name, sizeof(file_name), "%s.txt", name);
-	text = halo_packs_file_read(file_name, &size);
+	text = recipe_text(name, &size, &made);
 	if (!text)
 		return FALSE;
 	parsed = scene_pack_recipe_parse((char const *)text, (long)size, recipe, why, sizeof(why)) && !strcmp(recipe->name, name);
-	halo_menus_file_free(text);
+	recipe_text_free(text, made);
 	return parsed;
 }
 
@@ -625,6 +742,25 @@ unsigned long long scene_packs_recipe_hash(
 	return hash;
 }
 
+boolean scene_packs_recipe_available(
+	char const *name,
+	char *why,
+	long why_size)
+{
+	struct scene_pack_recipe *recipe = malloc(sizeof(*recipe));
+	boolean available = FALSE;
+
+	if (why && why_size > 0)
+		why[0] = 0;
+	if (recipe && recipe_read(name, recipe))
+		available = scene_pack_source_check(recipe, cache_files_map_directory(), NULL, 0, NULL, why, why_size);
+	else if (why && why_size > 0)
+		snprintf(why, (size_t)why_size, "its recipe cannot be read");
+	if (recipe)
+		free(recipe);
+	return available;
+}
+
 boolean scene_packs_recipe_covered(
 	char const *name)
 {
@@ -637,8 +773,11 @@ boolean scene_packs_recipe_covered(
 		covered = TRUE;
 		for (index = 0; index < recipe->root_count; index++)
 		{
-			if (tag_loaded((long)recipe->roots[index].group_tag, recipe->roots[index].path) == NONE)
+			if (scene_pack_recipe_root_is_multiplayer_unit(&recipe->roots[index]) ||
+				tag_loaded((long)recipe->roots[index].group_tag, recipe->roots[index].path) == NONE)
+			{
 				covered = FALSE;
+			}
 		}
 	}
 	if (recipe)
@@ -768,6 +907,7 @@ void scene_packs_unloaded(
 	memset(&scene_packs.packs, 0, sizeof(scene_packs.packs));
 	scene_packs.pack_count = 0;
 	scene_packs.reserved = 0;
+	scene_packs.file_used = 0;
 	scene_packs.original_instances = NULL;
 	scene_packs.original_count = 0;
 	scene_packs.table_count = 0;
@@ -792,12 +932,10 @@ boolean scene_packs_read(
 	void *buffer)
 {
 	unsigned long relative = (unsigned long)offset - SCENE_PACK_FILE_BASE;
-	short range = (short)(relative / SCENE_PACK_RANGE_BYTES);
-	unsigned long local = relative % SCENE_PACK_RANGE_BYTES;
 	boolean read = FALSE;
 	short index;
 
-	if ((unsigned long)offset < SCENE_PACK_FILE_BASE || range >= MAXIMUM_LOADED_SCENE_PACKS)
+	if ((unsigned long)offset < SCENE_PACK_FILE_BASE || relative >= SCENE_PACK_FILE_RANGE_BYTES)
 		return FALSE;
 	if (size > 0)
 		memory_watch_prepare_write(buffer, (unsigned long)size);
@@ -807,7 +945,9 @@ boolean scene_packs_read(
 	{
 		struct scene_pack_slot *slot = &scene_packs.packs[index];
 
-		if (state_get(slot) == _scene_pack_state_loaded && slot->range == range && slot->file && size >= 0 &&
+		unsigned long local = relative - slot->file_base;
+
+		if (state_get(slot) == _scene_pack_state_loaded && slot->file && size >= 0 && relative >= slot->file_base &&
 			local <= slot->info.data_size && (unsigned long)size <= slot->info.data_size - local)
 		{
 			read = !fseek(slot->file, (long)(slot->info.data_offset + local), SEEK_SET) &&
@@ -947,6 +1087,81 @@ boolean scene_packs_command(
 		}
 		platform_log("scene packs: ride: %s %s", nearest != NONE ? tag_get_name(object_get(nearest)->definition_index) : "no vehicle",
 			nearest != NONE && unit_enter_seat(player->unit_index, nearest, 0) ? "entered" : "not entered");
+		return TRUE;
+	}
+	/* (tests) "pack board <count>": that many bipeds of the map's own
+	multiplayer unit made beside the first local player's vehicle and put in
+	its seats after the driver's (passengers); "pack riders": the units in
+	the player's vehicle, by seat, and where */
+	if (!strcmp(word, "board") || !strcmp(word, "riders"))
+	{
+		long player_index = local_player_get_player_index(0);
+		struct player_datum *player = player_index != NONE ? player_get(player_index) : NULL;
+		struct object_datum *unit = player && player->unit_index != NONE ? object_try_and_get(player->unit_index) : NULL;
+		long vehicle_index = unit ? unit->object.parent_object_index : NONE;
+		struct object_datum *vehicle = vehicle_index != NONE ? object_try_and_get(vehicle_index) : NULL;
+
+		if (!vehicle)
+		{
+			platform_log("scene packs: %s: the player is in no vehicle", word);
+			return TRUE;
+		}
+		if (!strcmp(word, "board"))
+		{
+			struct game_globals *globals = scenario_get_game_globals();
+			struct game_globals_multiplayer_information *information = globals && globals->multiplayer_information.count ?
+				TAG_BLOCK_GET_ELEMENT(&globals->multiplayer_information, 0, struct game_globals_multiplayer_information) : NULL;
+			long biped_tag = information ? information->unit.index : NONE;
+			int wanted = atoi(name), made = 0;
+			short seat;
+			struct unit_definition *definition = (struct unit_definition *)tag_get('unit', vehicle->definition_index);
+
+			for (seat = 1; biped_tag != NONE && definition && seat < definition->unit.seats.count && made < wanted; seat++)
+			{
+				struct object_placement_data placement;
+				long biped_index;
+
+				object_placement_data_new(&placement, biped_tag, NONE);
+				placement.position = vehicle->object.position;
+				placement.position.z += 2.f + (real)made;
+				biped_index = object_new(&placement);
+				if (biped_index == NONE)
+					break;
+				if (unit_enter_seat(biped_index, vehicle_index, seat))
+				{
+					made++;
+					platform_log("scene packs: board: a passenger in seat %d", seat);
+				}
+				else
+				{
+					object_delete(biped_index);
+				}
+			}
+			platform_log("scene packs: board: %d passengers aboard %s", made, tag_get_name(vehicle->definition_index));
+		}
+		else
+		{
+			struct object_iterator iterator;
+			struct object_datum *object;
+			long riders = 0;
+
+			object_iterator_new(&iterator, _object_mask_unit, 0);
+			while ((object = object_iterator_next(&iterator)) != NULL)
+			{
+				struct unit_datum *rider = (struct unit_datum *)object;
+
+				if (object->object.parent_object_index == vehicle_index && iterator.index != vehicle_index)
+				{
+					riders++;
+					/* (a rider's place is its vehicle's frame's) */
+					platform_log("scene packs: riders: seat %d: %s%s at %.2f %.2f %.2f in it", rider->unit.parent_seat_index,
+						iterator.index == player->unit_index ? "the player, " : "", tag_get_name(object->definition_index),
+						object->object.position.x, object->object.position.y, object->object.position.z);
+				}
+			}
+			platform_log("scene packs: riders: %ld in %s at %.2f %.2f %.2f", riders, tag_get_name(vehicle->definition_index),
+				vehicle->object.position.x, vehicle->object.position.y, vehicle->object.position.z);
+		}
 		return TRUE;
 	}
 	/* (tests) "pack census": projectiles, units alive and dead, vehicles */

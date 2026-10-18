@@ -25,11 +25,13 @@ folder's own (tools/halo3_menu_art.py). -->
 		<string text="INVERT FLIGHT"/>
 		<string text="AUTO-CENTER"/>
 		<string text="VIBRATION"/>
+		<string text="MODEL"/>
 	</strings>
 	<!-- (the rows' help, in their order: menu_functions.c h3_custom_update) -->
 	<strings name="h3/custom_help">
 		<string text="The name your profile goes by, in the campaign\nand in multiplayer games. Cross types it."/>
 		<string text="Your armor's color in multiplayer games. RANDOM:\nthe host gives you one nobody else has."/>
+		<string text="Who you play as offline (multiplayer, bots, Forge):\nthe Spartan, or a player model from one of your\nHalo Custom Edition maps. Online: the Spartan."/>
 		<string text="STANDARD: move with the left stick, look with\nthe right. SOUTHPAW swaps them. LEGACY: move\nand turn with the left, strafe and look with the right."/>
 		<string text="What the game's buttons do. The settings panel's\nButton layout picks which PS Vita button each\nof them is on: the two add up."/>
 		<string text="How fast the right stick turns you, 1 to 10. The\nsettings panel's Look sensitivity speeds it up or\nslows it down on this PS Vita."/>
@@ -77,8 +79,10 @@ folder's own (tools/halo3_menu_art.py). -->
 		<child widget="h3/profiles/list"/>
 	</widget>
 
-	<!-- the editor: a row each for the profile's name, colour, stick layout, button layout, look
-	sensitivity, invert look, invert flight, auto-center and vibration (the Xbox profile's fields);
+	<!-- the editor: a row each for the profile's name, colour, model (the port's: the Spartan or a
+	player model from the player's Halo Custom Edition maps, player_models.c, kept in the port's own
+	t:\player_models.txt, not the profile), stick layout, button layout, look sensitivity, invert
+	look, invert flight, auto-center and vibration (the Xbox profile's fields);
 	Cross and right step a value on, left back (the name: Cross types it) -->
 	<widget name="h3/custom/value" type="text" left="152" top="0" width="170" height="20" align="center" font="h3/font_item" color="#FFAABED6" text_y="2" text_flags="no_focus_test"/>
 	<widget name="h3/custom/arrow_left" left="144" top="2" width="8" height="16" bitmap="h3/arrow_left"/>
@@ -96,6 +100,15 @@ folder's own (tools/halo3_menu_art.py). -->
 		<on event="left stick_left" run="port h3 custom previous"/>
 		<child widget="h3/custom/color_label"/>
 		<child widget="h3/custom/swatch"/>
+		<child widget="h3/custom/value"/>
+		<child widget="h3/custom/arrow_left"/>
+		<child widget="h3/custom/arrow_right"/>
+	</widget>
+	<widget name="h3/custom/model_label" type="text" left="0" top="0" width="160" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/custom_labels" string_index="9"/>
+	<widget name="h3/custom/op_model" width="336" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="h3/custom/model_label"/>
 		<child widget="h3/custom/value"/>
 		<child widget="h3/custom/arrow_left"/>
 		<child widget="h3/custom/arrow_right"/>
@@ -166,14 +179,15 @@ folder's own (tools/halo3_menu_art.py). -->
 	<widget name="h3/custom/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<data input="port h3 custom"/>
 		<child widget="h3/custom/op_name" x="52" y="102"/>
-		<child widget="h3/custom/op_color" x="52" y="124"/>
-		<child widget="h3/custom/op_stick" x="52" y="146"/>
-		<child widget="h3/custom/op_buttons" x="52" y="168"/>
-		<child widget="h3/custom/op_look" x="52" y="190"/>
-		<child widget="h3/custom/op_invert" x="52" y="212"/>
-		<child widget="h3/custom/op_flight" x="52" y="234"/>
-		<child widget="h3/custom/op_autocenter" x="52" y="256"/>
-		<child widget="h3/custom/op_vibration" x="52" y="278"/>
+		<child widget="h3/custom/op_color" x="52" y="122"/>
+		<child widget="h3/custom/op_model" x="52" y="142"/>
+		<child widget="h3/custom/op_stick" x="52" y="162"/>
+		<child widget="h3/custom/op_buttons" x="52" y="182"/>
+		<child widget="h3/custom/op_look" x="52" y="202"/>
+		<child widget="h3/custom/op_invert" x="52" y="222"/>
+		<child widget="h3/custom/op_flight" x="52" y="242"/>
+		<child widget="h3/custom/op_autocenter" x="52" y="262"/>
+		<child widget="h3/custom/op_vibration" x="52" y="282"/>
 	</widget>
 
 	<!-- THE SPARTAN PREVIEW: at the right, in the editor panel's window (h3/custom/panel), the

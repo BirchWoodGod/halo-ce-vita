@@ -1065,6 +1065,227 @@ round trip, refusals and fuzzing. The console's `forge aiteam`, `brain`,
 `allai`, `ai`, `objects`, `round`, and the tests' `kill`, `destroy`,
 `shove`.
 
+## Packs from Halo Custom Edition maps (as built, Oct 18 2026)
+
+Branch `feat/ce-packs` (from `integration/1.1.1-beta.8`). The owner's asks:
+"Make the Pelican flyable. You can pull it from Extinction" and "custom player
+models from Halo Custom Edition maps". Both are scene packs built from Custom
+Edition maps, which every player has downloaded from the internet: untrusted.
+
+### The builder (`port/linux/game/scene_pack_ce.c`)
+
+- **Recipes** name a Custom Edition map instead of Xbox maps: `cemap <file>
+  <size> <checksum>` (the file in the maps folder, without `.map`, its size in
+  bytes and its header's checksum field, which together say which version of
+  it). The first named map there of that identity is used, with the maps
+  folder's `bitmaps.map`, `sounds.map` and `loc.map` (the ones the map takes
+  tags from must be there). `unit multiplayer` is a root of its own: the map's
+  globals' multiplayer biped, whatever its name (a protected map's tags are all
+  named `<protected>`; the pack names them `protected\<map>\<group> <index>`).
+  A recipe has map or cemap lines, not both; the hash takes the cemap lines and
+  the Custom Edition builder's version (`ce1`).
+- **Missing or another version**: the pack is unavailable and says why, never an
+  error: "extinction.map (Halo Custom Edition) is not in the maps folder", "your
+  extinction.map is another version of it than the one it is built from", "the
+  maps folder has no bitmaps.map (Halo Custom Edition's), which X.map needs".
+  Forge's EXTRA OBJECTS shows it ("Unavailable: ..."), a Forge game leaves the
+  pack out without a word on the HUD.
+- **The checks, in the game's Custom Edition loader's order**
+  (`custom_edition_cache.c`), on the builder's thread:
+  1. `cache_file_identify`: every header field against the file, and the
+     recipe's identity;
+  2. `custom_edition_cache_load_tags` (new, `cache_file_formats.c`): the load of
+     a map's tags with every check of `custom_edition_cache_load` (tag index,
+     every instance, name and address, every resource map's tag, every
+     bitmap's pixels and sound's samples in their file, every model part's
+     geometry in the model data) but the structure BSPs' own (each reference's
+     tag, file range and place in the tag cache checked; the BSP is not read)
+     and the header checksum (not taken), into a buffer of the tag data and
+     resource tags only (the tag cache's free room when it has 4 MB more than
+     the tag data, else the heap);
+  3. `custom_edition_cache_combine_resource_offsets`,
+     `custom_edition_cache_convert`;
+  4. the tags moved where they are (`halo_tag_relocate_linked_tags_isolated`)
+     and checked against their groups' schemas
+     (`tag_validate_custom_edition_tags_isolated`), as the loader does: both
+     leave the game's walk and check states as they were (the map loaded
+     meanwhile keeps its structure bsps' walk), and both hold a lock that every
+     public walk of `tag_relocate.c` and `tag_validate.c` now holds (one walk
+     at a time, whichever thread); the source's messages go to the log only;
+  5. as the builder takes each tag (the closure, as for an Xbox map), what
+     Custom Edition holds otherwise is made the Xbox's, with the game's own
+     checks: a **gbxmodel**'s parts (0x84 bytes) repacked as this build's (0x68)
+     where they are, each part's indices checked (shader, nodes, parts, local
+     node table), its vertices read from the model data, checked (nodes, the
+     vectors the compressor takes, no NaN), their nodes made the model's,
+     compressed as `rasterizer_geometry_compress_vertices` does (here without
+     the game: the tool links none of it) into the pack's buffers, its strip
+     checked and copied; a model of 44 nodes or more is refused (the game's
+     Custom Edition maps draw such a model a part's nodes at a time, which a
+     pack's are not). A **bitmap** is checked as `custom_edition_bitmaps.c`
+     checks one drawable, written from its second level when it is a large 2D
+     texture (as the game draws a Custom Edition map's, 128 KB), and laid out
+     as `rasterizer_xbox_bitmap_rebuild_hardware_format` lays it out (every
+     level swizzled, cube maps face by face, linear rows padded to 64 bytes,
+     each face to 128); a model shader's multipurpose map and a HUD meter that
+     Halo PC keeps in other channels than this build reads them from have their
+     channels moved (decompressed from DXT to 32-bit colour first: the channels
+     move between DXT's colour and alpha); the cached flag a cache file's tool
+     sets is kept (the texture cache loads no bitmap without it). A sound
+     **permutation** of Ogg Vorbis, 16-bit PCM or a halved 44 kHz mono sound is
+     encoded as Xbox ADPCM (`ogg_sound.c`, `xbox_adpcm_encoder.c`), at most
+     1 MB of it; a stream that cannot be decoded is silence. The pixels and
+     samples are written to `<pack>.data`, then the pack is put together
+     (header, tags, data);
+  6. the pack is checked as any pack when it is loaded (`scene_pack_load`: its
+     tags moved by the walk with every reference checked against its own table,
+     then the tag validator with **no correction allowed**). A reference's group
+     is made its tag's (a gbxmodel's `mod2` is a `mode`, a `scex` a `schi`).
+- **Thread safety.** `cache_file_formats.c`'s address globals are read only
+  while a Custom Edition map is loaded, which never overlaps a pack's build
+  (packs are not wanted beside a Custom Edition map, and a map's unload stops
+  and joins the build before the next loads).
+- **Fuzzing.** `scene_pack_test cefuzz <recipe> <maps> <n> [seed]`: the source
+  map's bytes changed as the builder reads them (never on disk: a read hook of
+  the tool's) - words of the roots of the pack's tags, of the tag index and
+  instances, bytes of the model data, pixels and samples a clean build read, of
+  the tag data and of the header -, each build refused or its pack refused or
+  loaded clean twice; never a crash or hang. 600 builds (seed 7): the build
+  refused 205; 395 built, all 395 loaded clean twice; 0 failures. The packs
+  built are fuzzed as any (`scene_pack_test fuzz`, 3000 copies of ce_pelican:
+  0 failures).
+
+Measured (x86 harness, the files cached):
+
+| Pack | Source | Tags | Tag cache | Pixels + samples | File | Build |
+|---|---|---|---|---|---|---|
+| ce_pelican | extinction (3620 tags, 12.2 MB loaded) | 316 | 1032 KB | 7.9 MB | 8.9 MB | 40-135 ms |
+| player model: Spartan (Extinction) | extinction | 391 | 1824 KB | 13.4 MB | 15.2 MB | 85 ms |
+| player model: Covenant V Marines Beta 5 (protected) | Covenant_V_Marines_Beta_5 | 374 | 1812 KB | 12.4 MB | 14.2 MB | 250 ms |
+
+On the Vita, still to measure: the build (the map's 12 MB of tag data read
+from the memory card, Ogg Vorbis decoding of the pack's sounds); its scratch
+(16 MB of the tag cache's free room: there in ui.map, in a Forge map only
+when few packs are loaded, else the heap, which may refuse it: the pack is
+then unavailable with the reason, built again in the lobby).
+
+### The flyable Pelican
+
+- **Source:** Extinction (`extinction.map`, 97 888 771 bytes, checksum
+  c5372723), a Halo Custom Edition map by (DA)Ender and the Halo 2 Scarab
+  Conversion Team (2006; its readme: "This map is unprotected. Feel free to
+  ... reuse"). Its `vehicles\epelican\epelican` is a player vehicle: type
+  human plane, seat 0 `W-driver` (driver, gunner, third-person camera), seat 1
+  a co-pilot's, eleven rider seats, a sniper's. So no fallback was needed (the
+  b30 Pelican made flyable at build time stays a design: not built).
+- **Recipe** `app0:packs/ce_pelican.txt`, the Forge lobby's fourth EXTRA OBJECTS
+  row "Flyable Pelican", on by default, beside the b30 one (still "Pelican",
+  a prop); the browser names it "Flyable Pelican" (`forge_names`).
+- **How it flies** (the map's own physics: Halo's human plane,
+  `update_human_plane_physics`): left stick forward is thrust along where it
+  faces, the view's pitch lifts it or brings it down; let go, it hovers and
+  sinks slowly (its hover lift is 0.975 g at no throttle). In Blood Gulch it
+  climbs to the map's vehicle ceiling (about 66 world units) and comes down on
+  any ground: shown on the harness (run_scene_pack_test.sh cepelican: from 2
+  up to 37, down to 9.6 on a ledge of the canyon, at rest), passengers boarded
+  (`pack board 4`: seats 1 to 4) and aboard before and after. Its textures,
+  the H2-style hull, its engines' glow draw as on Extinction. Collisions: it
+  rests on terrain and ledges with its hull, nothing seen through it; a
+  climb into the canyon wall kills its riders (a vehicle collision, as any).
+- **Not checked:** its guns (the driver seat is the gunner), the HUD (the
+  vehicle's unit HUD and the gun's weapon HUD come with it, their meters'
+  channels moved), sounds on hardware.
+
+### Player models from Custom Edition maps (`port/linux/game/player_models.c`)
+
+- **The scan:** every Custom Edition multiplayer map of the maps folder (not
+  one the mod manager turned off), read without being loaded
+  (`scene_pack_ce_multiplayer_unit`: a few reads of its tag index, each within
+  its tag data): its globals' multiplayer unit, when it is a biped held by the
+  map whose tag or model is not the stock cyborg's (`characters\cyborg_mp\cyborg_mp`,
+  `characters\cyborg\cyborg`; a protected map's names say nothing, so its
+  biped is listed), and of 43 nodes or fewer. Each is a pack of its own
+  (`pm_<hash of its map's name and identity>`, its recipe made by the game:
+  `scene_packs_recipe_register`), built the first time it is shown or played.
+  Found on this machine: **Spartan (Extinction)** (`characters\spartan\spartan_mp`,
+  model `characters\scyborg\scyborg`, 19 nodes) and **Covenant V Marines Beta
+  5** (protected; an Elite, 26 nodes). The folder is listed first, then each
+  map read (the game's `find_files` is one listing for the whole game).
+- **CUSTOMIZATION's MODEL** (after COLOR): SPARTAN, then each model; the
+  preview builds the pack the first time ("Building the model... n%" under it),
+  then stands the model in the profile's colour holding the menu Spartan's
+  rifle, a taller one further away (by its eyes' height over the Spartan's 0.62).
+  Circle keeps the choice. The settings panel's Game tab has **Player model**
+  (shown while one is found), the same choice for the first player's profile:
+  the original menus' players have it too.
+- **Kept** in `t:\player_models.txt` (the save folder's t, beside the packs):
+  a line a profile, its folder's name and the model's map, size and checksum
+  (a choice keeps to its map; a map gone or of another version chooses the
+  Spartan), written by way of a temporary file. Not in the profile: `blam.sav`
+  is the Xbox's profile, whose layout has no room for it (and a PC or an older
+  build reads the same files).
+- **Played:** as a map's tags load (`cache_files.c`), in a local game (the
+  connection local) of a multiplayer scenario, the first local player's
+  profile (the one in use, else player 1's last, else the only one) has its
+  model's pack loaded (after Forge's) and spawns as its biped
+  (`players.c player_spawn`, a game engine's game) in the profile's colour:
+  Forge (the Spartan when the monitor is let go), split screen, games with
+  bots. Bots, the other local players and the map's own scripts keep the map's
+  unit. Shown on the harness (run_scene_pack_test.sh cemodels: a Forge game,
+  "the first local player plays as Spartan (Extinction)"), and the protected
+  map's Elite in Blood Gulch (its initial weapon, a plasma rifle, given as a
+  unit's are).
+- **Left out:** the campaign (its maps have no tag cache to spare for a pack,
+  "The memory budget", and its scripts and cutscenes name the cyborg); a
+  Custom Edition multiplayer map (packs are not loaded beside one); network
+  games (below).
+- **First-person:** the arms are the globals' (unchanged); the camera is the
+  model's own eye height; first-person legs draw the model's legs (seen on the
+  harness). A biped's own initial weapons come with it, as with any unit (the
+  Extinction Spartan's plasma pistol, the Elite's plasma rifle), beside the
+  game type's starting weapons.
+
+### What a network game would need (not built)
+
+The model a player plays as is an object every machine must create the same
+way (the host creates units, `players.c`; clients get its tag index in the
+object's creation message): today a network game always uses the map's own
+unit. For a player's model online:
+1. **every machine has the pack**: the same recipe (its hash, which names the
+   map file and its identity) built locally from its own copy of that Custom
+   Edition map - nothing of the map is sent; a machine without the map cannot
+   show that player as the model;
+2. **a per-player capability check**: each joiner says which model packs it can
+   load (recipe hashes) in the join exchange, the host says which it loads for
+   the game, and only a player whose model every machine has gets it (the
+   others the stock biped); a new capability bit, as the map share's, or a
+   network version bump (the owner's call with a release: it splits players
+   from every older build, crossplay with PC included);
+3. **loaded before the map's objects on every machine, in the same order**,
+   so the packs' tag indices match (the game's table grows by load order:
+   `scene_packs.c`), or tag paths sent instead of indices for pack tags;
+4. **validation as map share's**: a joiner never trusts a host's pack or
+   recipe - it builds from its own map, checks the pack as any, and refuses
+   (stock model) on any mismatch; a host never accepts a client's claim of a
+   model without the same.
+This is the "same packs loaded on every machine of a network game" still to
+come for Forge, and should be built once for both.
+
+### GPU programs
+
+New models may draw with programs `shaders.pak` lacks (the owner's Vita has
+no shader compiler; no GPU program was written here). Collected on the
+gxm-null harness (HALO_SHADER_COLLECT) through the Pelican's flight (76
+programs: all in the pack), a Forge game with each player model played or
+stood in the world (82), the CUSTOMIZATION preview of both (23), and a Forge
+game with neither (86: all in the pack), then checked
+(`tools/vita_shader_pack.py --check`): one program is not in the pack,
+**9d464b6e348ed572.fp** (two texture stages), drawn by the Extinction
+Spartan's model in play and in the preview, in no run without it. To compile
+and add with the next pack (HALO_SHADER_PRECOMPILE on Vita3K); until then a
+Vita without the compiler skips the draws that need it (d3d8_gxm.c's
+skipped_no_program): those parts of that model are missing.
+
 ## Open questions for the owner
 
 1. **The controls.** Is the button table right against your Halo 3

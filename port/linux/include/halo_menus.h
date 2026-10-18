@@ -216,6 +216,13 @@ pack is loaded (built from the player's multiplayer maps the first time),
 and never if it cannot be. _color recolours it live; _hide removes it. Safe
 from a widget's event */
 int menu_scene_spartan_show(char const *camera, char const *placement, short color_index);
+/* (port) the preview's character: the scene pack of a player model from a
+Custom Edition map (player_models.c's pm_<hash>), NULL for the menu
+Spartan's (menu_spartan); held in the menu Spartan's rifle. The one
+standing there is made again as the new pack loads. Its pack's state, how far
+its build is and why it failed (scene_packs_status) */
+void menu_scene_spartan_model(char const *pack);
+short menu_scene_spartan_state(long *progress, char *why, long why_size);
 void menu_scene_spartan_color(short color_index);
 void menu_scene_spartan_hide(void);
 /* (port) whether the preview's Spartan stands there now (made: its pack

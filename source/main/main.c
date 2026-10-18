@@ -5159,8 +5159,13 @@ void main_loop(
 			/* (the scene packs built meanwhile loaded beside the map, its
 			tag table grown, between frames: scene_packs.c) */
 			void scene_packs_update(void);
+			void player_models_update(void);
 
 			scene_packs_update();
+			/* (the player models from Custom Edition maps: the maps folder
+			looked through once, the settings panel's choice taken:
+			player_models.c) */
+			player_models_update();
 		}
 		main_host_commands_update();
 		{
