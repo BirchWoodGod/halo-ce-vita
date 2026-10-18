@@ -3528,13 +3528,14 @@ static void show_browse(void)
 		char row[64];
 		int end;
 
+		/* (a map not said: "-", as the game's browsers show it) */
 		if (entry->badge[0])
 			end = snprintf(row, sizeof(row), "%-15.15s %2d/%-2d %-12.12s%s %s%s", entry->name, entry->players,
-				entry->maximum, entry->map, entry->locked ? " [pw]" : "", entry->dedicated ? "SRV" : "PC",
+				entry->maximum, entry->map[0] ? entry->map : "-", entry->locked ? " [pw]" : "", entry->dedicated ? "SRV" : "PC",
 				entry->coop ? " COOP EXP" : entry->experimental ? " EXP" : "");
 		else
 			end = snprintf(row, sizeof(row), "%-15.15s %2d/%-2d %-14.14s%s%s%s", entry->name, entry->players,
-				entry->maximum, entry->map, entry->locked ? " [pw]" : "", entry->pc_map ? " PC" : "",
+				entry->maximum, entry->map[0] ? entry->map : "-", entry->locked ? " [pw]" : "", entry->pc_map ? " PC" : "",
 				entry->dedicated ? " DED" : "");
 
 		while (end > 0 && row[end - 1] == ' ')

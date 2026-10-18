@@ -1507,3 +1507,6 @@
 "\n\nLeft/right: on/off   Circle: back" = "\n\nIzq./der.: sí/no   Círculo: volver"
 "DELETE MOD\n\n%.40s  (%s)\nand everything in its folder.\n\nIt cannot be undone.\nCross: delete   O: keep" = "BORRAR MOD\n\n%.40s  (%s)\ny todo lo que hay en su carpeta.\n\nNo se puede deshacer.\nCruz: borrar   O: conservar"
 "DELETE MAP\n\n%.40s  (%s)\nand its picture and description, if any.\n\nIt cannot be undone.\nCross: delete   O: keep" = "BORRAR MAPA\n\n%.40s  (%s)\ny su imagen y descripción, si las tiene.\n\nNo se puede deshacer.\nCruz: borrar   O: conservar"
+
+# ---------- the game browsers' rows (menu_functions.c, p2p_lobby.c)
+"Unnamed game" = "Partida sin nombre"
