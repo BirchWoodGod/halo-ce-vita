@@ -168,6 +168,17 @@ HALO_MAPS_DISABLED is), cross shows its details, square deletes it after a
 question; the game's main loop looks through the folders when the page
 opens, and deletes (only inside our folders, never through a link). Circle
 goes back to Modded maps.
+Multiplayer's Friends page (port/linux/src/p2p_friends.h; its row in Join
+with a code's place, which the PC menus' Direct Link leaves out, Online and
+not on the crossplay wire: the tab is a screen's height) is the Halo 3
+FRIENDS screen's for the original menus: this Vita's friend code, Add a
+friend (the code typed with the D-pad, as Join with a code), Appear offline
+(HALO_FRIENDS_APPEAR_OFFLINE) and Friends can join (HALO_FRIENDS_JOIN), then
+the requests, invites, friends, requests sent and blocked players, each with
+a word of its state, the chosen one's doing on the help line. Cross accepts,
+joins or unblocks, square declines, invites, ignores or cancels, triangle
+removes a friend or blocks a request after a question; a join goes on to
+Join's steps.
 "MCC mods" (HALO_MCC_MODS, experimental, Off by default; shown while the
 mods folder has a folder in it) lets the Campaign's level list offer a
 Halo: The Master Chief Collection mod's Halo: CE Anniversary maps from

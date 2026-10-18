@@ -298,6 +298,39 @@ void p2p_lobby_slot_heard(const char *hash_text, const unsigned char *payload, i
 		memcpy(copy, payload, (size_t)size);
 	fuzz_slots_heard++;
 }
+#define FRIENDS_STUB_TRAP() abort()
+/* friends' (p2p_friends.c): their two topics subscribed, what is heard on
+them handed on within bounds, and one message queued to publish */
+static int friends_heard_count;
+void p2p_friends_topics(char *inbox, char *mailbox, int size)
+{
+	snprintf(inbox, (size_t)size, "%s/f1/i/0123456789abcdef0123456789abcdef", P2P_SIGNAL_PREFIX);
+	snprintf(mailbox, (size_t)size, "%s/f1/m/fedcba9876543210fedcba9876543210", P2P_SIGNAL_PREFIX);
+}
+void p2p_friends_heard(int which, const unsigned char *payload, int size)
+{
+	static unsigned char copy[MAXIMUM_MESSAGE_SIZE + P2P_SEAL_OVERHEAD];
+
+	if ((which != P2P_FRIENDS_INBOX && which != P2P_FRIENDS_MAILBOX) || size < 0 || size > (int)sizeof(copy))
+		FRIENDS_STUB_TRAP();
+	if (size)
+		memcpy(copy, payload, (size_t)size);
+	friends_heard_count++;
+}
+int p2p_friends_outgoing(int index, unsigned long *serial, char *topic, int topic_size, unsigned char *payload,
+	int *sent_mask)
+{
+	if (index != 0)
+		return -1;
+	*serial = 1;
+	snprintf(topic, (size_t)topic_size, "%s/f1/m/00112233445566778899aabbccddeeff", P2P_SIGNAL_PREFIX);
+	memset(payload, 0x46, 300);
+	*sent_mask = 0;
+	return 300;
+}
+void p2p_friends_outgoing_sent(unsigned long serial, int broker) { (void)serial; (void)broker; }
+void p2p_friends_outgoing_settle(int ready_mask) { (void)ready_mask; }
+
 void p2p_lobby_query_heard(void) {}
 void p2p_lobby_slot_topic(const unsigned char *key_hash, char *topic, int size)
 {

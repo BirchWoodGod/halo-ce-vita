@@ -310,7 +310,15 @@ any other.
   at the right of each lobby shows who is online and what they are doing.
 - Settings panel: Multiplayer > Friends: the code, Add a friend (the
   D-pad's code entry, as Join with a code), Appear offline, Friends can join,
-  then the same lists; Cross, Square and Triangle as above.
+  then the same lists; Cross, Square and Triangle as above. The Multiplayer
+  tab is already a screen tall, so the Friends row takes Join with a code's
+  place, which the PC menus' Direct Link leaves out (Online, the PC menus,
+  not the crossplay wire, whose Vita joins only PCs' games); the Halo 3
+  panel's headings give way when its rows would not fit, as the classic
+  panel's do.
+- Activity lines use ", " before a difficulty ("Co-op: The Pillar of Autumn,
+  Legendary"), as the server browser's rules do: the panel's font has no
+  middle dot.
 - The invite pop-up: the game's question (the Vita overlay's), at the
   menus, Accept or Ignore.
 - No new GPU programs; no new art beyond what tools/halo3_menu_art.py

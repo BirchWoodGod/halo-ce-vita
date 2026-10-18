@@ -608,6 +608,19 @@ Unity's Netcode for Entities, lightyear, netfox and the Ares source):
   stale and its pings shown as "-". A LAN's system link has no tunnel: there
   a client shows the others as "-".
 
+- **Friends** (`port/linux/src/p2p_friends.c`, docs/superpowers/specs/2026-10-18-friends-design.md):
+  friend requests, presence, invites and removals go through the signalling
+  brokers on topics of their own (`hcev/f1/i/<hash>`, a friend code's inbox;
+  `hcev/f1/m/<hash>`, a key's mailbox), each message an envelope of its own
+  ("F", version 1) sealed for its recipient and signed by the sender's friend
+  identity, nothing retained. Nothing the game machines send each other
+  changes (the game's messages, the tunnel, JOIN/ACCEPT, codes, listings):
+  builds before it never subscribe to those topics, so, as the host's ping
+  table, it is no network change and network version 18 stands. A friend's
+  game is joined by its invite, through the host's JOIN/ACCEPT as any; a
+  presence carries the sender's network version and wire, and Join is
+  offered only for a game of this build's.
+
 ## Testing
 
 `debug.network_test` (`port/linux/game/network_test.c`) hosts or joins a
