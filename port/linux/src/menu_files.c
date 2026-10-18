@@ -108,6 +108,48 @@ void halo_menus_file_free(unsigned char *data)
 	free(data);
 }
 
+unsigned char *halo_packs_file_read(char const *path, unsigned long *size)
+{
+	const char *setting = getenv("HALO_PACKS_FOLDER");
+	char packs[1100];
+	char full[1200];
+	size_t length = 0;
+	char *data;
+
+	if (!path || !*path || strstr(path, "..") || strchr(path, ':') || path[0] == '/' || path[0] == '\\')
+		return NULL;
+	if (setting && *setting)
+	{
+		snprintf(packs, sizeof(packs), "%s%s", setting, setting[strlen(setting) - 1] == '/' ? "" : "/");
+	}
+	else
+	{
+		/* (the menus folder's neighbour: <...>/menus/ -> <...>/packs/) */
+		size_t end;
+
+		folder_find();
+		snprintf(packs, sizeof(packs), "%s", folder);
+		end = strlen(packs);
+		while (end && packs[end - 1] == '/')
+			packs[--end] = 0;
+		if (end >= 5 && !strcmp(packs + end - 5, "menus"))
+			snprintf(packs + end - 5, sizeof(packs) - (end - 5), "packs/");
+		else
+			snprintf(packs + end, sizeof(packs) - end, "/../packs/");
+	}
+	snprintf(full, sizeof(full), "%s%s", packs, path);
+	data = config_file_read(full, &length);
+	if (!data)
+		return NULL;
+	if (length > MAXIMUM_FILE_BYTES)
+	{
+		free(data);
+		return NULL;
+	}
+	*size = (unsigned long)length;
+	return (unsigned char *)data;
+}
+
 /* the files menus.txt lists */
 /* the files a list names (menus.txt, ingame.txt), added to files */
 static void files_gather(char const *list_name)
@@ -559,7 +601,8 @@ static void read_widget(struct reader *reader, const XML_Char **attributes, long
 		{ "list_flags", &widget.list_flags }, { "text_flags", &widget.text_flags },
 		{ "header_bitmap", &widget.header_bitmap }, { "footer_bitmap", &widget.footer_bitmap },
 		{ "header_bounds", &widget.header_bounds }, { "footer_bounds", &widget.footer_bounds },
-		{ "scene", &widget.scene }, { "child_controller", &child_controller },
+		{ "scene", &widget.scene }, { "scene_object", &widget.scene_object },
+		{ "child_controller", &child_controller },
 		{ "x", NULL, &widget.x }, { "y", NULL, &widget.y }, { "left", NULL, &widget.left },
 		{ "top", NULL, &widget.top }, { "width", NULL, &widget.width, &widget.has_width },
 		{ "height", NULL, &widget.height, &widget.has_height }, { "text_x", NULL, &widget.text_x },

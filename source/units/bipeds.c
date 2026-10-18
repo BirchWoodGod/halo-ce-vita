@@ -839,14 +839,24 @@ static void biped_falling_damage(
 {
 	struct biped_datum *biped = biped_get(biped_index);
 	struct biped_definition *definition = biped_definition_get(biped->definition_index);
-	struct game_globals_falling_damage *falling_damage = TAG_BLOCK_GET_ELEMENT(
+	struct game_globals_falling_damage *falling_damage;
+	boolean immune;
+	real falling_velocity;
+
+#ifdef HALO_LINUX
+	/* port: a map whose globals have no falling damage takes none (ui.map:
+	the Halo 3 menus' characters stand in its scenes, menu_scene_objects.c) */
+	if (scenario_get_game_globals()->falling_damage.count < 1)
+		return;
+#endif
+	falling_damage = TAG_BLOCK_GET_ELEMENT(
 		&scenario_get_game_globals()->falling_damage,
 		0,
 		struct game_globals_falling_damage);
-	boolean immune =
+	immune =
 		TEST_FLAG(biped->unit.flags, _unit_no_falling_damage_bit) ||
 		TEST_FLAG(definition->biped.flags, _biped_immune_to_falling_damage_bit);
-	real falling_velocity = biped->object.translational_velocity.k;
+	falling_velocity = biped->object.translational_velocity.k;
 
 	if (!cheat.jetpack || biped->unit.player_index == NONE)
 	{

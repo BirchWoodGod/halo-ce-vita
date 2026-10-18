@@ -829,6 +829,99 @@ make with a release, not a branch's. The design, for when it is:
   objects (another branch), campaign levels in the lobby, our own
   building blocks.
 
+## Scene packs as built (Oct 18 2026)
+
+Branch `feat/scene-packs`: option B's builder and loader, as infrastructure
+of their own (`port/linux/game/scene_pack.c`: the pack, its builder, its
+checks, no game state; `scene_packs.c`: a pack in the running game), first
+used by the Halo 3 lobbies' Spartans (`menu_scene_objects.c`), and proven on
+Forge's two cases: the Covenant's campaign vehicles and characters in Blood
+Gulch.
+
+- **Recipes** are our own text (`port/vita/app0/packs/*.txt`): `pack <name>`,
+  `map <name>...` (the first of them in the maps folder is used), `tag
+  <group> <path>` (the pack's first tags, in order: its objects), `strip
+  <group>` and `strip <group> <path>` (left out: their references name
+  none). menu_spartan (the multiplayer cyborg and its assault rifle, sounds
+  and effects stripped), covenant_vehicles (Banshee, Wraith, Shade: b40 or
+  c40), covenant_ai (grunts, jackals, elites, a hunter: b40, b30 or a50).
+- **The file** (`t:\packs\<name>.pack`, the save root's t folder): a 128-byte
+  header (sizes, the CRCs of the header and both sections, the recipe's hash,
+  the builder's version, the source map's identity: its header and size),
+  the tags laid out as a map's tag data (a tag header with no scenario, the
+  table, names, the models' vertex and index buffers' headers, the tags, the
+  buffers' bytes; linked at 0x5C000000), then the bitmaps' pixels and the
+  sounds' samples (file offsets from 0x70000000).
+- **The builder** inflates the source map to the end of its tag data
+  (into the tag cache's free room, not the C heap), walks the recipe's tags
+  and everything they need (every reference the tag layouts know, every tag
+  index the schemas know), copies each tag and the models' buffers with every
+  pointer the layouts know made the pack's (or none), then inflates the map
+  again for the pixels and samples, in the file's order. Built lazily on a
+  thread of its own the first time a pack is wanted, again whenever the
+  recipe, the builder or the source map changes.
+- **The checks** before anything reads a pack: the header bounded (counts,
+  sizes, every section where it says, nothing past the file's end, its CRC),
+  both sections' CRCs, then the tags moved by tag_relocate.c's walk with every
+  pointer followed only into the pack and every reference checked against its
+  own table (`halo_tag_relocate_pack`), then the tag validator over them with
+  the pack as the only region and its data as the only file range, no
+  scenario, structure bsp or globals allowed, and **no correction allowed**
+  (`tag_validate_pack_tags`). A pack that fails is deleted and built once more,
+  then given up for the map. The map's own walk and check state are kept, so
+  its structure bsps load as before. `build/linux/scene_pack_test` builds,
+  checks and fuzzes packs alone (cut short, grown, bytes changed with and
+  without their CRCs made right, pointers made to point past the pack, counts
+  made huge, header fields changed): every copy is refused or, if still a
+  pack, loads clean twice; none crashes, also with the pack code, the walk and
+the validator built with AddressSanitizer (which found one: a crafted root at
+a pack's very end read past it, fixed in tag_relocate.c for maps too).
+- **Loading** (between frames): the tags read right after the map's tags (the
+  structure bsp loads at the top of the tag cache; the room between is the
+  packs'), given tag indices after the table's, their file offsets moved to a
+  range of the pack's own (four packs at once), their buffers registered, the
+  table grown as menu_tags.c grows it; the bytes are reserved (a bsp's load
+  does not clear them, its check does not take them for scratch, and a bsp that
+  would overlap them is refused). Reads of a pack's pixels and samples are
+  served from its file. Everything goes with the map.
+
+Measured on the Linux harness (x86; the Vita's CPU is some 15-25 times
+slower at this kind of work):
+
+| Pack | Tags | Tag cache | Pixels + samples | File | Build | Load (checks included) | C heap |
+|---|---|---|---|---|---|---|---|
+| menu_spartan (bloodgulch) | 35 | 1137 KB | 868 KB | 2.0 MB | 130 ms, 49 MB inflated | 1.3 ms | +46 KB |
+| covenant_vehicles (b40) | 430 | 857 KB | 6.3 MB | 7.2 MB | 1.35 s, 449 MB inflated | 4.3 ms | +72 KB |
+| covenant_ai (b40) | 939 | 4964 KB | 30 MB | 35 MB | 1.36 s, 450 MB inflated | 18 ms | +88 KB |
+
+In Blood Gulch (13.7 MB of tag cache free) covenant_ai leaves 9 MB free; at
+ui.map menu_spartan leaves 19.8 MB. The C heap pays only the grown tag table
+(32 bytes a tag) and the build's working memory; the texture and sound caches
+read the pixels and samples as for any map. A campaign map's pack read from
+b40 inflates b40 twice (~225 MB each): on the Vita that is tens of seconds,
+the build's cost to bring down next (an index of inflate restart points, or
+the cache partition's inflated copy of the map when there is one).
+
+Shown in the harness (`port/vita/tests/run_scene_pack_test.sh`): Forge's
+palette lists the pack's Banshee, Wraith and Shade and its ten Covenant actor
+variants in Blood Gulch as soon as the pack loads (its palette is the loaded
+tags'); a Banshee placed by Forge is ridden, flown up (60 world units) and
+fired; an elite placed by Forge shoots the player down.
+
+What Forge should call (nothing of Forge's was changed):
+- `scene_packs_want(name)` from the lobby (builds on a thread; its state:
+  building, ready, loaded, failed) and `scene_packs_load_now(name)` once the
+  map has loaded, before its objects are placed (map load: forge_map_loaded);
+  then rebuild the palette (`forge_palette_build`), which picks up the pack's
+  objects by group as the map's;
+- `scene_packs_roots(name, ...)` for a pack's own objects (the recipe's tags)
+  and `scene_packs_tag(name, group, path)` for one by name; their categories
+  are their groups' (vehi, weap, eqip, scen, actv...), as the browser's;
+- still to come: a layout naming the packs it needs (by recipe name and hash),
+  the same packs loaded on every machine of a network game, duplicates by path
+  resolved to the map's own copy, and campaign maps (which need the larger tag
+  cache).
+
 ## Open questions for the owner
 
 1. **The controls.** Is the button table right against your Halo 3

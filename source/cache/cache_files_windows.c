@@ -1399,6 +1399,18 @@ short cache_file_read(
 	release (port/linux/game/custom_edition_cache.c) */
 	boolean custom_edition = custom_edition_cache_tags_loaded();
 
+	/* (a scene pack's pixels or samples, at its file offsets: served from
+	its file at once, port/linux/game/scene_packs.c) */
+	{
+		boolean scene_packs_read(long offset, long size, void *buffer);
+
+		if (!custom_edition && scene_packs_read(offset, size, buffer))
+		{
+			*completion_flag_reference = TRUE;
+
+			return cache_request_next_free_index();
+		}
+	}
 	if (custom_edition && (!bitmap || !custom_edition_reads_on_thread()))
 	{
 		custom_edition_cache_read(tag_index, offset, size, buffer);

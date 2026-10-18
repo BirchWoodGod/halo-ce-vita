@@ -912,6 +912,9 @@ static struct
 	real camera[5];
 	long ticks;
 	char screen[64];
+	/* the characters standing in it (scene_object=: menu_scene_objects.c) */
+	char objects[160];
+	boolean has_objects;
 	/* ring_loop put to sleep by a scene (ui.map's scripts start awake) */
 	boolean ring_asleep;
 } h3_scenes;
@@ -927,7 +930,7 @@ static boolean h3_scenes_enabled(void)
 
 /* the scene= of the menus' widget this screen was built from (its tag is
 "pc\<name>", the name's '/' made '\'), NULL for none */
-static char const *h3_scene_of(struct widget_instance *screen, char *name, int size)
+static char const *h3_scene_of(struct widget_instance *screen, char *name, int size, char const **objects)
 {
 	struct halo_menus const *menus = halo_menus_load();
 	char const *tag_name = screen ? tag_get_name(screen->definition_tag_index) : NULL;
@@ -948,6 +951,8 @@ static char const *h3_scene_of(struct widget_instance *screen, char *name, int s
 		if (!*a && !*b)
 		{
 			snprintf(name, size, "%s", widget->name);
+			if (objects)
+				*objects = widget->scene_object;
 			return widget->scene;
 		}
 	}
@@ -1000,7 +1005,9 @@ static void h3_scene_request(struct widget_instance *widget)
 
 	if (!h3_scenes_enabled() || !halo_menu_style_halo3() || !halo_main_menu_idle())
 		return;
-	scene = h3_scene_of(screen, name, sizeof(name));
+	char const *objects = NULL;
+
+	scene = h3_scene_of(screen, name, sizeof(name), &objects);
 	if (!scene)
 		return;
 	/* (one asked for and not yet taken is replaced: the latest screen's) */
@@ -1012,6 +1019,8 @@ static void h3_scene_request(struct widget_instance *widget)
 		return;
 	}
 	snprintf(h3_scenes.screen, sizeof(h3_scenes.screen), "%s", name);
+	h3_scenes.has_objects = objects && *objects;
+	snprintf(h3_scenes.objects, sizeof(h3_scenes.objects), "%s", h3_scenes.has_objects ? objects : "");
 	__atomic_store_n(&h3_scenes.pending, 1, __ATOMIC_RELEASE);
 }
 
@@ -1059,6 +1068,7 @@ void menu_functions_scenes_update(void)
 		if (h3_scenes.ring_asleep)
 			main_request_host_command_from("(wake ring_loop)", "menu scene");
 		h3_scenes.ring_asleep = FALSE;
+		menu_scene_objects_want(h3_scenes.screen, NULL, FALSE, 0.f, 0.f, 0.f, 0.f, 0.f);
 		platform_log("menus: h3 scene: %s: the ring's own flight", h3_scenes.screen);
 		return;
 	}
@@ -1078,6 +1088,10 @@ void menu_functions_scenes_update(void)
 		point->orientation.pitch = h3_scenes.camera[4] * (real)(3.14159265358979 / 180.0);
 		point->orientation.roll = 0.f;
 	}
+	/* (who stands there: menu_scene_objects.c, which makes them before the
+	tick) */
+	menu_scene_objects_want(h3_scenes.screen, h3_scenes.has_objects ? h3_scenes.objects : NULL, TRUE,
+		point->position.x, point->position.y, point->position.z, point->orientation.yaw, point->orientation.pitch);
 	main_request_host_command_from("(sleep -1 ring_loop)", "menu scene");
 	snprintf(command, sizeof(command), "(camera_set %s %ld)", h3_scenes.point, h3_scenes.ticks);
 	main_request_host_command_from(command, "menu scene");

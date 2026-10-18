@@ -5136,6 +5136,13 @@ void main_loop(
 
 			menu_functions_scenes_update();
 		}
+		{
+			/* (the scene packs built meanwhile loaded beside the map, its
+			tag table grown, between frames: scene_packs.c) */
+			void scene_packs_update(void);
+
+			scene_packs_update();
+		}
 		main_host_commands_update();
 		{
 			void halo_shader_tour_update(void);
@@ -5403,8 +5410,12 @@ void main_loop(
 					port/linux/game/forge.c) */
 					{
 						void forge_update(void);
+						void menu_scene_objects_update(void);
 
 						forge_update();
+						/* (and the characters in the Halo 3 menus'
+						scenes: port/linux/game/menu_scene_objects.c) */
+						menu_scene_objects_update();
 					}
 #endif
 					collision_log_end_period();

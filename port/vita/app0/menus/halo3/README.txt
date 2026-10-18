@@ -73,11 +73,24 @@ and glides there, ring_loop asleep (menu_functions.c h3 scenes; menus.scenes,
 HALO_MENU_SCENES=0 turns them off). The campaign lobby, the multiplayer
 lobby and the Forge lobby have theirs; the screens opened from them keep it.
 
+Characters: a screen with a scene= may stand characters in front of its camera,
+scene_object="<scene pack> <distance> <right> <up> <facing> [; ...]" (world units
+in the camera's frame, degrees turned from facing it): the pack's first tag (a
+biped) holding its weapon, in the player's multiplayer colour
+(port/linux/game/menu_scene_objects.c). The pack, menu_spartan
+(app0:packs/menu_spartan.txt: the multiplayer cyborg and its assault rifle), is
+built on the machine from the player's own multiplayer map the first time a
+lobby wants it (port/linux/game/scene_packs.c), into the save folder's t/packs.
+The campaign lobby has two, the multiplayer and Forge lobbies one. No pack, no
+multiplayer map, HALO_SCENE_PACKS=0 or the scenes off: no character, nothing
+else changes. menu_scene_spartan_show/_color/_hide (halo_menus.h) put the same
+Spartan in the scene open now, in a colour, for a Customization screen.
+
 Touch: the Vita's front screen points in the menus (a finger highlights, a tap
 presses A on the item or the button of a key); the button icons are named as
 the game's keys (a_butn, b_butn, start_butn) for that.
 
 Tests: port/vita/tests/run_menus_test.sh h3probe h3classic h3xbox h3broken
 h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create
-h3mptouch h3coop h3coopguide h3scenes; Forge's: port/vita/tests/run_forge_test.sh;
+h3mptouch h3coop h3coopguide h3scenes h3characters; the packs': port/vita/tests/run_scene_pack_test.sh; Forge's: port/vita/tests/run_forge_test.sh;
 co-op between two machines: port/vita/tests/run_netns_online_test.sh h3coopmenu.

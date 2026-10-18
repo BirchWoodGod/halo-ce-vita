@@ -118,6 +118,10 @@ struct halo_menu_widget
 	loop, ring_loop) or scene="<ui.map's camera point> [x y z yaw pitch
 	[ticks]]" (menu_functions.c h3 scenes) */
 	char const *scene;
+	/* (a Halo 3 screen with a scene) the characters standing in it:
+	scene_object="<scene pack> <distance> <right> <up> <facing> [; ...]"
+	(menu_functions.c h3 scene objects; the packs: scene_packs.c) */
+	char const *scene_object;
 	long x, y, left, top, width, height, text_x, text_y, auto_close, auto_close_fade, string_index;
 	long has_width, has_height;
 	/* indices in their arrays, or HALO_MENU_NONE */
@@ -195,6 +199,29 @@ be read; halo_menus_file_free lets it go (the platform layer's heap, not
 the game's) */
 unsigned char *halo_menus_file_read(char const *path, unsigned long *size);
 void halo_menus_file_free(unsigned char *data);
+/* (port) the characters in the Halo 3 menus' scenes
+(port/linux/game/menu_scene_objects.c): the screen's scene_object= (NULL:
+none) in front of its camera (menu_functions.c, at a frame's top), and the
+update that makes, holds and deletes them (main.c, before the tick) */
+void menu_scene_objects_want(char const *screen, char const *objects, int has_camera, float x, float y, float z,
+	float yaw, float pitch);
+void menu_scene_objects_update(void);
+/* (port) the Customization screen's live preview: the menu_spartan pack's
+Spartan in the menu scene open now (camera NULL) or in front of the camera
+"<ui.map camera point> [x y z yaw pitch]" (degrees, as scene=), placed
+"<distance> <right> <up> <facing>" (NULL: 1.6 0.45 -0.35 15), in Halo CE's
+multiplayer colour color_index (0 to 17; NONE: the active profile's).
+FALSE if there is no scene or the arguments are not ones. It appears once its
+pack is loaded (built from the player's multiplayer maps the first time),
+and never if it cannot be. _color recolours it live; _hide removes it. Safe
+from a widget's event */
+int menu_scene_spartan_show(char const *camera, char const *placement, short color_index);
+void menu_scene_spartan_color(short color_index);
+void menu_scene_spartan_hide(void);
+/* (port) a file of the scene packs' recipes folder (app0:packs/ on the
+Vita; elsewhere HALO_PACKS_FOLDER, else the packs folder beside the menus
+folder), as halo_menus_file_read reads the menus': scene_packs.c */
+unsigned char *halo_packs_file_read(char const *path, unsigned long *size);
 /* text as UTF-16, its terminator included, "\n" written as the game's line
 breaks ("\r\n"): the number of characters written (at most capacity) */
 long halo_menus_utf16(char const *utf8, unsigned short *out, long capacity);
