@@ -467,6 +467,9 @@ adjustments, each for a reason:
 - **Flags.** Header bit 0 must say exactly whether any record is a
   netgame's (not an object); a record's flags have bit 0, placed at the
   start; every other bit of both is zero.
+- **Version 2** (Oct 18 2026): a character's AI team and AI off (the
+  first reserved byte, flag bit 1; "AI teams, AI on/off and NEW ROUND as
+  built" below). Version 1 is read as ever.
 - **Ranges.** Team -1 (neutral) to 7, respawn at most 600 s, count at most
   16 (an object's 0 or 1), game types within the five (mask `0x1F`),
   variant at most 15; positions within +-5000 (the BSP's world bounds,
@@ -979,6 +982,88 @@ What Forge should call (nothing of Forge's was changed):
   the same packs loaded on every machine of a network game, duplicates by path
   resolved to the map's own copy, and campaign maps (which need the larger tag
   cache).
+
+## AI teams, AI on/off and NEW ROUND as built (Oct 18 2026)
+
+Branch `feat/forge-ai-round` (from `fix/forge-fly-pitch`, insider.8 and the
+monitor's fly fix). The owner, on insider.8: "a team function for the AI",
+"enable or disable AI brain too", "start a new round in Forge mode".
+
+- **The AI team** (the properties window's AI TEAM row, a character's only;
+  `forge_files.h` `FORGE_AI_TEAM_*`), by the engine's own switches: the
+  unit's `owner_team_index` and its actor's `meta.team_index`, as the
+  scripts' `ai_set_team` gives them, then `ai_update_team_status` so every
+  actor sees friend and foe again. The teams are the engine's
+  (`game.h _game_team_*`); the friendly table is the diagonal only (no
+  allegiance is made), so each team fights every other:
+  - DEFAULT: the character's own (its unit's default team: the Covenant's
+    for the Covenant AI pack's, the humans' for a marine; a unit of no AI
+    team gets the engine's unused team 6: it fights everyone but its own
+    kind). Shown as "DEFAULT (COVENANT)". Applied as it is placed (in a
+    multiplayer game the engine gives a unit no team at all, which made
+    two placed elites fight each other before);
+  - PLAYER: the local player's own team (in a free for all game every
+    player has one: team 0 in a Forge game): it fights for the player,
+    never against, and fights every AI team;
+  - HUMAN, COVENANT, FLOOD, SENTINEL: the AI teams, each the enemy of the
+    others and of the player (a campaign map's own script may ally the
+    humans with the player, as b30's does).
+- **AI on/off** (the AI row, a character's only): off is the engine's
+  `ai_braindead` (`actor_braindead`): the character stands frozen as placed
+  (thinks, moves, fights not, as a cinematic's do; it can still be hurt);
+  on again, it fights. The Forge menu's ALL AI flips every placed
+  character (all off if any is on, else all on); kept per character.
+- **NEW ROUND** (the Forge menu, Halo 3's Restart Round): asked, the menu
+  closes; with the game running again `main_reset_map` resets the map as
+  the engine's own map_reset does (the map's own objects as the scenario
+  has them, its destroyed vehicles whole, the players created and spawned
+  again, the scores and game time from zero). As the game state goes
+  (`forge_map_resetting`, main.c) the layout is taken; after it, once the
+  player has spawned, it is placed again (`forge_variant_apply`), each
+  object at its placed spot, the characters alive with their AI settings,
+  and the player is the monitor again where it flew (or the Spartan at a
+  spawn point, if he was the Spartan). The console's `map_reset` keeps the
+  layout the same way. The undo history is cleared (its steps named
+  objects of the old round).
+  - **The layout** is the editor's, not play's: each placed object keeps its
+    placed spot (`forge_placed.home`), followed while it is held and for
+    3 s after the editor lets it go, moves, turns or undoes it (it falls,
+    settles; a character with its AI on only its fall), never by play (a
+    Warthog driven or blown away, an elite walking). An object gone in
+    play (equipment picked up, a grenade thrown, an object destroyed)
+    keeps its entry with no object and comes back with the next round;
+    only the editor's delete or undo takes an entry out. So the budget
+    counts the layout: its objects, and its characters dead or alive.
+  - **An unsaved layout** is kept: NEW ROUND places the session's layout
+    as it is now (saved or not; nothing is written or read). The map's own
+    objects come back as the map has them, as a save does not keep them
+    either. A save is made from the placed spots too (a vehicle driven
+    elsewhere is saved where it was placed).
+- **Map variants, version 2** (`forge_files.c`): a record's first reserved
+  byte is a character's AI team and flag bit 1 its AI off, both allowed
+  only on an `actv` record (a character), the team below
+  `NUMBER_OF_FORGE_AI_TEAMS`, and both zero in version 1, which is still
+  read. A layout is written as the lowest version that holds it (version
+  1 unless a character has an AI setting), so variants without AI settings
+  stay readable by insider.8; a file read writes back as its own version.
+  The fuzzer runs from both versions' samples; every bit of the version 2
+  sample flipped is refused but for the map hash and the characters' AI
+  fields (which have other good values, each checked in range).
+
+### Tests
+
+`run_forge_test.sh`: `aiteam` (an Elite on the player's team never hurts
+the Spartan beside it; on the Covenant's it shoots his shield and body
+down), `aioff` (AI off: never hurts him, stands still; ALL AI turns it on,
+it fights), `round` (a Warthog shoved and wrecked, an Elite killed, an
+overshield taken out of the world: after NEW ROUND all three whole at their
+placed spots, the player respawned, the monitor where it flew), `aisave`
+(saved as version 2 with a Flood Elite AI off and an Elite of the player's
+team, the dump checked, started again from the panel's route: as saved);
+v1's pad walks the two new rows. `run_forge_files_test.sh`: version 2's
+round trip, refusals and fuzzing. The console's `forge aiteam`, `brain`,
+`allai`, `ai`, `objects`, `round`, and the tests' `kill`, `destroy`,
+`shove`.
 
 ## Open questions for the owner
 

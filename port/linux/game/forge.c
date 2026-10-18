@@ -70,11 +70,20 @@ object_new, as the cheats' object_new spawns a weapon or vehicle
 moved with object_set_position, deleted with object_delete. The object
 under the crosshair is the nearest whose bounding sphere the camera's line
 meets in front of the structure (a weapon on the ground has no collision
-model a collision vector would meet). The budget (forge_placed) counts the
-objects this session placed that are still there, at most
-FORGE_MAXIMUM_OBJECTS, and the characters among them still alive, at most
-FORGE_MAXIMUM_AI: past either the browser's choice is refused, said on the
-screen. Its table is a fixed array, each index checked.
+model a collision vector would meet). The budget (forge_placed, the layout)
+counts the objects this session placed and has not deleted - one gone in
+play (picked up, destroyed) is still the layout's, back with the next round
+- at most FORGE_MAXIMUM_OBJECTS, and the characters among them, dead or
+alive, at most FORGE_MAXIMUM_AI: past either the browser's choice is
+refused, said on the screen. Its table is a fixed array, each index checked.
+
+A placed character has an AI team and its AI on or off (the properties
+window; forge_ai_apply: the engine's unit and actor teams, actor_braindead),
+and the Forge menu's ALL AI sets every one. NEW ROUND (the Forge menu,
+forge_new_round_start) resets the map as the engine's map_reset does; the
+layout, each object at its placed spot (forge_placed's home: where the
+editor put it, not where play took it), is taken as the game's state goes
+(forge_map_resetting) and placed again once the player has spawned.
 
 Threads: forge_update runs on the main thread after the cameras update and
 before the tick thread starts (main.c), so no object is touched while the
