@@ -126,6 +126,7 @@ Choices:
 #include "custom_edition_maps.h"
 #include "map_share_protocol.h"
 #include "map_share.h"
+#include "mod_manager.h"
 #include "dedicated_server.h"
 #include "../src/p2p.h"
 #include "../src/lang.h"
@@ -1626,6 +1627,8 @@ static boolean map_share_client_install(
 		remove(replaced_path);
 	}
 	network_event("map share: '%s' downloaded to '%s'", download->name, final_path);
+	/* (the mod manager says where it came from: mod_manager.c) */
+	mod_manager_map_received(download->name, extension);
 
 	return TRUE;
 }

@@ -1024,6 +1024,21 @@ char **custom_edition_maps_level_list(
 		globals->levels[globals->xbox_level_count + map_index] = globals->maps[map_index].level_name;
 	}
 	*level_count = globals->xbox_level_count + globals->multiplayer_count;
+	{
+		/* (port: the custom maps it offers, said - those turned off in the
+		mod manager are not among them) */
+		char names[256];
+		long length = 0;
+
+		names[0] = 0;
+		for (map_index = 0; map_index < globals->multiplayer_count && length < (long)sizeof(names) - 1; map_index++)
+		{
+			length += snprintf(names + length, sizeof(names) - (size_t)length, "%s%s", map_index ? ", " : "",
+				globals->maps[map_index].name);
+		}
+		error(_error_silent, "custom edition: the multiplayer level list: %d Xbox levels, then %s", globals->xbox_level_count,
+			globals->multiplayer_count ? names : "no custom map");
+	}
 
 	return globals->levels;
 }

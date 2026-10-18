@@ -246,6 +246,18 @@ a Halo: CE Anniversary cache of a solo scenario this build loads (its
 header and tag index alone are read); logs why not. */
 boolean custom_edition_cache_mod_map_identify(
 	char const *path);
+/* (port) What the file at `path` is, by the cache file loader's own check of
+its header and tag index (cache_file_identify): its status (enum
+cache_file_status; _cache_file_status_read_failed for a file that cannot be
+opened), its format (enum cache_file_format), its scenario type (NONE when
+unknown) and the name its header gives it (`inside_name`, `inside_name_size`
+characters). Nothing is loaded: the mod manager's check (mod_manager.c). */
+short custom_edition_cache_file_check(
+	char const *path,
+	short *format,
+	short *scenario_type,
+	char *inside_name,
+	long inside_name_size);
 void custom_edition_cache_tags_unload(
 	void);
 

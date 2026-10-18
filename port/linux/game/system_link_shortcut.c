@@ -251,6 +251,13 @@ void system_link_shortcut_update(
 
 		pc_menu_functions_update(main_menu_loaded);
 	}
+	/* (the settings panel's Mod manager page: its look and deletes,
+	answered here, on the game's thread: mod_manager.c) */
+	{
+		extern void mod_manager_update(boolean main_menu_loaded);
+
+		mod_manager_update(main_menu_loaded);
+	}
 	if (request == SYSTEM_LINK_REQUEST_NONE)
 	{
 		system_link_shortcut_test(main_menu_loaded);

@@ -321,6 +321,21 @@ has lain still for a second.
 
 **Multiplayer**: see [Multiplayer](#multiplayer).
 
+Modded maps' first row, **Mod manager**, opens the mod manager (the same as
+the Halo 3 menus' **MOD MANAGER**, on the main menu beside FILE SHARE):
+every custom map of the maps folder and every MCC mod of the mods folder,
+each with its kind, size, On or Off, and whether it passed the game's own
+checks (the cache loader's, the mods folder's: Error when not, the help line
+says why, or what it needs: PC maps on, Halo PC's resource maps, MCC mods
+on). Left and right turn one off or on (a mod: `HALO_MODS_DISABLED` in
+`settings.txt`); an Off one stays on the memory card but is left out of
+every map list, the offline bots' playlist and map sharing, and an Off mod
+out of the Campaign's levels. Cross shows its details (where it came from:
+copied in, or received through map sharing), Square deletes it after asking
+(a mod's whole folder; only inside the maps and mods folders, never through
+a link; never the map being played). The game looks through the folders
+when the page opens and answers it (`port/linux/game/mod_manager.c`).
+
 Multiplayer's **Modded maps** page lists the maps in the maps folder that
 are not the Xbox's own: name, size, kind (**Xbox** for a modded or newly built Xbox map, **CE**
 for a Halo Custom Edition one, **CE+OS** for an OpenSauce `.yelo`, marked

@@ -23,7 +23,12 @@ list comes after those it does, in the stock levels' order and then the
 order of their names.
 
 None of it is looked at unless the player turned it on (game.mcc_mods,
-HALO_MCC_MODS: halo_mcc_mods_enabled, which needs PC maps on too).
+HALO_MCC_MODS: halo_mcc_mods_enabled, which needs PC maps on too). A mod
+the player turned off in the mod manager (HALO_MODS_DISABLED: mod keys,
+commas between) is left out of the list, as if its folder were not there;
+it stays in the folder. The mod manager's survey
+(custom_edition_mods_survey) looks at every folder, on or off, with the
+setting on or off, with the same checks, and says what each one failed.
 
 Everything read here is the mod's, untrusted: names are taken only of the
 characters above, a campaign file only of the mod's own campaign folder
@@ -42,6 +47,7 @@ MOD_CAMPAIGN_FILE_MAXIMUM_BYTES. Nothing in a mod is run.
 #include "custom_edition_cache.h"
 #include "custom_edition_mods.h"
 #include "mod_campaign_files.h"
+#include "../src/lang.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -58,6 +64,8 @@ MOD_CAMPAIGN_FILE_MAXIMUM_BYTES. Nothing in a mod is run.
 #define MAXIMUM_LOOSE_LEVEL_FILES 32
 /* a map its campaign does not list: after those it does */
 #define UNLISTED_ORDER 0x4000
+/* the survey's words on a mod's first problem */
+#define MOD_PROBLEM_BYTES 96
 
 /* ---------- structures */
 
@@ -67,6 +75,13 @@ struct custom_edition_mod
 	char key[MOD_KEY_LENGTH + 1];
 	char title[CUSTOM_EDITION_MODS_TITLE_BYTES];
 	boolean has_campaign_info;
+	/* (the survey's) its folder's name is one this unit takes, its maps
+	folder's .map files and those of them taken, and the first problem
+	found (empty for none) */
+	boolean folder_valid;
+	short map_files;
+	short maps_valid;
+	char problem[MOD_PROBLEM_BYTES];
 };
 
 struct custom_edition_mod_map
@@ -87,6 +102,9 @@ struct custom_edition_mod_map
 struct custom_edition_mods_globals
 {
 	boolean looked_for;
+	/* (the mod manager's survey: every folder, on or off, the setting
+	aside; what it finds is not the campaign's list) */
+	boolean survey;
 	short mod_count;
 	struct custom_edition_mod mods[CUSTOM_EDITION_MODS_MAXIMUM];
 	short map_count;
@@ -157,6 +175,20 @@ static boolean map_stem_valid(
 	}
 
 	return length > 0;
+}
+
+/* (the survey's) the first problem of `mod` said */
+static void mod_problem(
+	struct custom_edition_mod *mod,
+	char const *problem)
+{
+	if (custom_edition_mods_globals.survey && !mod->problem[0])
+	{
+		csstrncpy(mod->problem, problem, sizeof(mod->problem) - 1);
+		mod->problem[sizeof(mod->problem) - 1] = 0;
+	}
+
+	return;
 }
 
 static short stock_level_index(
@@ -399,9 +431,12 @@ static void mod_campaign_read(
 	return;
 }
 
-/* Adds the mod of the mods folder's folder `folder`, and its maps. */
+/* Adds the mod of the mods folder's folder `folder`, and its maps; the
+survey's alone also a folder of a name this unit does not take (`valid`
+FALSE: listed, its name made printable, nothing in it looked at). */
 static void mod_add(
-	char const *folder)
+	char const *folder,
+	boolean valid)
 {
 	struct custom_edition_mods_globals *globals = &custom_edition_mods_globals;
 	struct custom_edition_mod *mod;
@@ -420,6 +455,21 @@ static void mod_add(
 	mod_index = globals->mod_count;
 	mod = &globals->mods[mod_index];
 	csmemset(mod, 0, sizeof(*mod));
+	mod->folder_valid = valid && mod_file_name_valid(folder, MOD_FOLDER_BYTES);
+	if (!mod->folder_valid)
+	{
+		/* (the survey's alone: its name, printable, for the player; never
+		a path) */
+		for (index = 0; folder[index] && index < MOD_FOLDER_BYTES - 1; index++)
+		{
+			mod->folder[index] = folder[index] > ' ' && folder[index] <= '~' && !strchr("/\\:*?\"<>|%,", folder[index]) ?
+				folder[index] : '_';
+		}
+		mod->folder[index] = 0;
+		mod_problem(mod, T("Its folder's name has characters this game doesn't take"));
+		globals->mod_count++;
+		return;
+	}
 	csstrcpy(mod->folder, folder);
 	for (index = 0; folder[index] && length < MOD_KEY_LENGTH; index++)
 	{
@@ -434,16 +484,36 @@ static void mod_add(
 	if (!length)
 	{
 		error(_error_silent, "mods: '%s' is not looked at: its name has no letter or digit", folder);
+		if (globals->survey)
+		{
+			mod_problem(mod, T("Its folder's name has no letter or digit"));
+			globals->mod_count++;
+		}
 		return;
 	}
 	for (index = 0; index < mod_index; index++)
 	{
-		if (!csstrcmp(globals->mods[index].key, mod->key))
+		if (globals->mods[index].key[0] && !csstrcmp(globals->mods[index].key, mod->key))
 		{
 			error(_error_silent, "mods: '%s' is not looked at: '%s' is named alike (%s)", folder, globals->mods[index].folder,
 				mod->key);
+			if (globals->survey)
+			{
+				char problem[MOD_PROBLEM_BYTES];
+
+				snprintf(problem, sizeof(problem), T("Named too much like %.40s"), globals->mods[index].folder);
+				mod_problem(mod, problem);
+				mod->key[0] = 0;
+				globals->mod_count++;
+			}
 			return;
 		}
+	}
+	/* (turned off in the mod manager: not in the list, but in the survey) */
+	if (!globals->survey && custom_edition_mods_key_disabled(mod->key))
+	{
+		error(_error_silent, "mods: '%s' is turned off (HALO_MODS_DISABLED)", folder);
+		return;
 	}
 	globals->mod_count++;
 
@@ -452,6 +522,7 @@ static void mod_add(
 	if (find == INVALID_HANDLE_VALUE)
 	{
 		error(_error_silent, "mods: '%s' has no maps folder of maps", folder);
+		mod_problem(mod, T("It has no maps folder with .map files in it"));
 		return;
 	}
 	do
@@ -480,17 +551,20 @@ static void mod_add(
 		{
 			continue;
 		}
+		mod->map_files++;
 		if (!map_stem_valid(stem) ||
 			(long)strlen(mod->key) + 1 + stem_length > CUSTOM_EDITION_MODS_MAXIMUM_NAME_LENGTH)
 		{
 			error(_error_silent, "mods: %s\\maps\\%s is left out: its name is not letters, digits, '_' and '-', or %s_%s is "
 				"longer than %d characters", folder, data.cFileName, mod->key, stem, CUSTOM_EDITION_MODS_MAXIMUM_NAME_LENGTH);
+			mod_problem(mod, T("A map's file name is too long or not letters, digits, _ and -"));
 			continue;
 		}
 		if (globals->map_count >= CUSTOM_EDITION_MODS_MAXIMUM_MAPS)
 		{
 			error(_error_silent, "mods: %s\\maps\\%s is left out: the first %d maps are listed", folder, data.cFileName,
 				CUSTOM_EDITION_MODS_MAXIMUM_MAPS);
+			mod_problem(mod, T("Too many mod maps: the first 64 are listed"));
 			break;
 		}
 		map = &globals->maps[globals->map_count];
@@ -506,13 +580,29 @@ static void mod_add(
 		if (file_exists(file_reference_create_from_path(&reference, maps_folder_path, FALSE)))
 		{
 			error(_error_silent, "mods: %s\\maps\\%s is left out: the maps folder has a %s.map", folder, data.cFileName, map->name);
+			mod_problem(mod, T("A map has the name of a file in the maps folder"));
 			continue;
 		}
 		snprintf(map_path, sizeof(map_path), "%s%s\\maps\\%s", CUSTOM_EDITION_MODS_DIRECTORY, folder, data.cFileName);
 		if (!custom_edition_cache_mod_map_identify(map_path))
 		{
+			/* (the survey: why, by the same check) */
+			if (globals->survey && !mod->problem[0])
+			{
+				char problem[MOD_PROBLEM_BYTES];
+				short format;
+				short scenario_type;
+				short status = custom_edition_cache_file_check(map_path, &format, &scenario_type, NULL, 0);
+
+				snprintf(problem, sizeof(problem), "%.20s: %.60s", data.cFileName,
+					status != _cache_file_status_ok ? T(cache_file_status_describe((enum cache_file_status)status)) :
+					format != _cache_file_format_mcc_cea_cache ? T("not a Halo: CE Anniversary map") :
+					T("not a campaign map"));
+				mod_problem(mod, problem);
+			}
 			continue;
 		}
+		mod->maps_valid++;
 		snprintf(map->picture_path, sizeof(map->picture_path), "%s%s\\maps\\%.*s.bmp", CUSTOM_EDITION_MODS_DIRECTORY, folder,
 			(int)stem_length, data.cFileName);
 		map->has_picture = file_exists(file_reference_create_from_path(&reference, map->picture_path, FALSE));
@@ -583,17 +673,26 @@ static struct custom_edition_mod_map const *mod_map_named(
 
 /* ---------- public code */
 
-short custom_edition_mods_look_for(
-	void)
+/* the mods and their maps, looked for anew: the campaign's list's, or with
+`survey` every folder's (custom_edition_mods_survey) */
+static short custom_edition_mods_find(
+	boolean survey)
 {
 	struct custom_edition_mods_globals *globals = &custom_edition_mods_globals;
-	char folders[CUSTOM_EDITION_MODS_MAXIMUM][MOD_FOLDER_BYTES];
+	struct
+	{
+		char name[MOD_FOLDER_BYTES];
+		boolean valid;
+	} folders[CUSTOM_EDITION_MODS_MAXIMUM];
 	short folder_count = 0;
 	short folder_index;
 	WIN32_FIND_DATAA data;
 	HANDLE find;
 
-	globals->looked_for = TRUE;
+	/* (a survey's findings are not the list's: the next question looks
+	again) */
+	globals->looked_for = !survey;
+	globals->survey = survey;
 	globals->mod_count = 0;
 	globals->map_count = 0;
 #ifdef HALO_DEDICATED_SERVER
@@ -602,8 +701,8 @@ short custom_edition_mods_look_for(
 	return 0;
 #else
 	/* (experimental and off unless chosen: game.mcc_mods, with PC maps on;
-	off, the mods folder is not looked at) */
-	if (!halo_mcc_mods_enabled())
+	off, the mods folder is not looked at, but by the survey) */
+	if (!survey && !halo_mcc_mods_enabled())
 	{
 		return 0;
 	}
@@ -623,7 +722,11 @@ short custom_edition_mods_look_for(
 		if (!mod_file_name_valid(data.cFileName, MOD_FOLDER_BYTES))
 		{
 			error(_error_silent, "mods: a folder of the mods folder is not looked at: its name is not one this build takes");
-			continue;
+			/* (the survey lists it, to be told of: mod_add) */
+			if (!survey || folder_count >= CUSTOM_EDITION_MODS_MAXIMUM)
+			{
+				continue;
+			}
 		}
 		if (folder_count >= CUSTOM_EDITION_MODS_MAXIMUM)
 		{
@@ -631,19 +734,144 @@ short custom_edition_mods_look_for(
 				CUSTOM_EDITION_MODS_MAXIMUM);
 			continue;
 		}
-		csstrcpy(folders[folder_count++], data.cFileName);
+		/* (a name this unit does not take, the survey's, kept only to be
+		shown: marked so, never taken for another folder's once cut short) */
+		folders[folder_count].valid = mod_file_name_valid(data.cFileName, MOD_FOLDER_BYTES);
+		csstrncpy(folders[folder_count].name, data.cFileName, MOD_FOLDER_BYTES - 1);
+		folders[folder_count].name[MOD_FOLDER_BYTES - 1] = 0;
+		folder_count++;
 	} while (FindNextFileA(find, &data));
 	CloseHandle(find);
 
 	qsort(folders, (size_t)folder_count, sizeof(folders[0]), mod_folder_compare);
 	for (folder_index = 0; folder_index < folder_count; folder_index++)
 	{
-		mod_add(folders[folder_index]);
+		mod_add(folders[folder_index].name, folders[folder_index].valid);
 	}
 	qsort(globals->maps, (size_t)globals->map_count, sizeof(globals->maps[0]), mod_map_compare);
-	error(_error_silent, "mods: %d maps of %d mods for the campaign's level list", globals->map_count, globals->mod_count);
+	error(_error_silent, "mods: %d maps of %d mods %s", globals->map_count, globals->mod_count,
+		survey ? "found by the mod manager's survey" : "for the campaign's level list");
 
 	return globals->map_count;
+}
+
+short custom_edition_mods_look_for(
+	void)
+{
+	return custom_edition_mods_find(FALSE);
+}
+
+short custom_edition_mods_survey(
+	void)
+{
+	custom_edition_mods_find(TRUE);
+	custom_edition_mods_globals.survey = FALSE;
+
+	return custom_edition_mods_globals.mod_count;
+}
+
+char const *custom_edition_mods_mod_folder(
+	short mod_index)
+{
+	struct custom_edition_mods_globals *globals = &custom_edition_mods_globals;
+
+	return mod_index >= 0 && mod_index < globals->mod_count ? globals->mods[mod_index].folder : NULL;
+}
+
+boolean custom_edition_mods_mod_folder_valid(
+	short mod_index)
+{
+	struct custom_edition_mods_globals *globals = &custom_edition_mods_globals;
+
+	return mod_index >= 0 && mod_index < globals->mod_count && globals->mods[mod_index].folder_valid;
+}
+
+char const *custom_edition_mods_mod_key(
+	short mod_index)
+{
+	struct custom_edition_mods_globals *globals = &custom_edition_mods_globals;
+
+	return mod_index >= 0 && mod_index < globals->mod_count ? globals->mods[mod_index].key : NULL;
+}
+
+char const *custom_edition_mods_mod_title(
+	short mod_index)
+{
+	struct custom_edition_mods_globals *globals = &custom_edition_mods_globals;
+
+	return mod_index >= 0 && mod_index < globals->mod_count ? globals->mods[mod_index].title : NULL;
+}
+
+char const *custom_edition_mods_mod_problem(
+	short mod_index)
+{
+	struct custom_edition_mods_globals *globals = &custom_edition_mods_globals;
+
+	return mod_index >= 0 && mod_index < globals->mod_count ? globals->mods[mod_index].problem : NULL;
+}
+
+short custom_edition_mods_mod_maps(
+	short mod_index,
+	short *valid)
+{
+	struct custom_edition_mods_globals *globals = &custom_edition_mods_globals;
+
+	*valid = 0;
+	if (mod_index < 0 || mod_index >= globals->mod_count)
+	{
+		return 0;
+	}
+	*valid = globals->mods[mod_index].maps_valid;
+
+	return globals->mods[mod_index].map_files;
+}
+
+char const *custom_edition_mods_mod_map_name(
+	short mod_index,
+	short which)
+{
+	struct custom_edition_mods_globals *globals = &custom_edition_mods_globals;
+	short map_index;
+
+	for (map_index = 0; map_index < globals->map_count; map_index++)
+	{
+		if (globals->maps[map_index].mod_index == mod_index && which-- == 0)
+		{
+			return globals->maps[map_index].name;
+		}
+	}
+
+	return NULL;
+}
+
+boolean custom_edition_mods_folder_name_valid(
+	char const *name)
+{
+	return name && mod_file_name_valid(name, MOD_FOLDER_BYTES);
+}
+
+boolean custom_edition_mods_key_disabled(
+	char const *key)
+{
+	char const *list = getenv("HALO_MODS_DISABLED");
+	long length = key ? (long)strlen(key) : 0;
+
+	while (length && list && *list)
+	{
+		long entry = (long)strcspn(list, ",");
+
+		if (entry == length && !_strnicmp(list, key, (size_t)length))
+		{
+			return TRUE;
+		}
+		list += entry;
+		if (*list == ',')
+		{
+			list++;
+		}
+	}
+
+	return FALSE;
 }
 
 void custom_edition_mods_look_again(

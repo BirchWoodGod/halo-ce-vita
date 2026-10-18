@@ -44,7 +44,11 @@ Turn PC maps on, then MCC mods (Settings > Multiplayer > Modded maps; the
 MCC mods row shows once the mods folder has a folder in it; on a PC,
 `game.mcc_mods = true` with `game.custom_edition`). MCC mods is
 experimental and off by default: off, the mods folder is not looked at
-and no mod map loads. The campaign's
+and no mod map loads. The mod manager (the Halo 3 menus' MOD MANAGER, the
+panel's Modded maps > Mod manager: `port/linux/game/mod_manager.c`) lists
+each mod, on or off, with the same checks, whether or not MCC mods is on,
+and turns one off (`HALO_MODS_DISABLED`, the mods' keys: left out of the
+level list, kept in its folder) or deletes its folder. The campaign's
 level list then shows the mod's maps after the ten levels (and any Custom
 Edition campaign maps), in the order its `CampaignInfo.json` plays them,
 by their titles ("The Pillar of Autumn"), described by the mod's title and

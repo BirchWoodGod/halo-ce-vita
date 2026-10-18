@@ -88,4 +88,47 @@ for its last and any other level. */
 char const *custom_edition_mods_next_level(
 	char const *level_name);
 
+/* (port) The mod manager's survey (mod_manager.c): every folder of the mods
+folder looked at with this unit's checks, whether the mods are turned on
+(HALO_MCC_MODS) or each one is (HALO_MODS_DISABLED); returns how many there
+are. What it finds is not the campaign's list, which looks again at its next
+question. Then, for the mod at `mod_index`: its folder (made printable when
+its name is not one this unit takes: custom_edition_mods_mod_folder_valid
+FALSE, never a path to open), its key (HALO_MODS_DISABLED's name for it;
+empty when it has none), its CampaignInfo.json's title (empty without one),
+the first problem found with it (empty for none), its maps folder's maps
+and how many of them this build takes (`*valid`), and the name of each map
+taken (`which` from 0; NULL past them). NULL and 0 past the mods. */
+short custom_edition_mods_survey(
+	void);
+char const *custom_edition_mods_mod_folder(
+	short mod_index);
+boolean custom_edition_mods_mod_folder_valid(
+	short mod_index);
+char const *custom_edition_mods_mod_key(
+	short mod_index);
+char const *custom_edition_mods_mod_title(
+	short mod_index);
+char const *custom_edition_mods_mod_problem(
+	short mod_index);
+short custom_edition_mods_mod_maps(
+	short mod_index,
+	short *valid);
+char const *custom_edition_mods_mod_map_name(
+	short mod_index,
+	short which);
+
+/* (port) Whether `name` is a name of the mods folder's this unit takes for a
+mod's folder: printable ASCII, none of what a path or a file system takes
+for something else, no "..", not starting with a dot, at most 47
+characters. */
+boolean custom_edition_mods_folder_name_valid(
+	char const *name);
+
+/* (port) Whether the player turned the mod of the key `key` off in the mod
+manager (HALO_MODS_DISABLED: keys, commas between): it is then left out of
+the campaign's list. */
+boolean custom_edition_mods_key_disabled(
+	char const *key);
+
 #endif
