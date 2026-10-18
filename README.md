@@ -280,6 +280,13 @@ settings panel (**SELECT + D-pad down**), **Multiplayer**, **Connection**
 | **Online** (experimental) | Internet play: the server browser, Join by code, and your own public or private games. |
 | **Ad hoc** (experimental) | Vitas side by side, no router: pick the same **Ad hoc room** on each, then **Join the room** (the system's dialog joins the room's group). Nothing goes to the internet. |
 
+> [!TIP]
+> **Playing on PC?** This port is made for the PS Vita and only Vita builds
+> are released here. On PC, use
+> [OpenCE](https://github.com/OpenCommunityEdition/OpenCE), the community
+> version this port builds on: with **Crossplay** on, the Vita joins OpenCE
+> hosts and servers.
+
 ### The multiplayer menus
 
 With the [Halo PC files](#halo-pc-files), the main menu's **Multiplayer**
