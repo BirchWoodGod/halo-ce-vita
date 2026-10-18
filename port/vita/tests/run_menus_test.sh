@@ -95,6 +95,14 @@
 #            its own camera): shown in the profile's colour, made again in
 #            RED as COLOR changes, never the swatch meanwhile, let go with the
 #            editor; with HALO_SCENE_PACKS=0 the swatch alone
+#   h3models  CUSTOMIZATION's MODEL (port/linux/game/player_models.c) with the
+#            Custom Edition maps of HALO_TEST_CE_MAPS (extinction.map,
+#            Covenant_V_Marines_Beta_5.map) and HALO_TEST_PROFILE's profile:
+#            the maps folder looked through (two models), MODEL stepped to the
+#            Extinction Spartan (its pack built the first time, the preview
+#            making it in the profile's colour), to the protected map's, back;
+#            Circle keeps the choice in t:\player_models.txt (blam.sav as it
+#            was); started again, the editor shows it; skipped without them
 #   h3damaged  a profile of a 0-byte blam.sav and one of garbage: SELECT
 #            PROFILE says each is damaged and plays neither, CUSTOMIZATION
 #            edits neither, CREATE NEW PROFILE still makes one; with
@@ -153,7 +161,8 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3damaged h3mods h3modspicker h3modstouch}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3damaged h3mods h3modspicker h3modstouch}
+ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
 
@@ -657,10 +666,10 @@ for case in $cases; do
 			echo "--- h3customize"; echo "SKIP: no HALO_TEST_PROFILE"; continue
 		fi
 		# (CUSTOMIZATION: the profile, Cross; PLAYER NAME, Cross: typed; COLOR, right three times: RED;
-		# STICK LAYOUT, right: SOUTHPAW; down two to LOOK SENSITIVITY, right twice; INVERT LOOK, Cross:
+		# past MODEL; STICK LAYOUT, right: SOUTHPAW; down two to LOOK SENSITIVITY, right twice; INVERT LOOK, Cross:
 		# YES; Circle: saved; Circle)
 		custom_pad="$h3pad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000 a wait:150:2000"
-		custom_pad="$custom_pad down:150:600 right:150:500 right:150:500 right:150:500 down:150:600 right:150:600"
+		custom_pad="$custom_pad down:150:600 right:150:500 right:150:500 right:150:500 down:150:600 down:150:600 right:150:600"
 		custom_pad="$custom_pad down:150:600 down:150:600 right:150:500 right:150:500 down:150:600 a wait:150:1500 b wait:150:3000 b wait:150:3000"
 		profile_from=$HALO_TEST_PROFILE run h3customize "$menus_data" 45 "$custom_pad" HALO_MENU_STYLE=halo3 \
 			"HALO_TEST_TEXT_INPUT=Vita Chief"
@@ -714,6 +723,48 @@ for case in $cases; do
 			fail h3customize "the changes were not there after a restart"
 		grep -aq "menus: h3 customize: Vita Chief: no changes" "$out/h3customize_again/run.log" ||
 			fail h3customize "leaving the editor unchanged saved anyway" ;;
+	h3models)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ] || [ ! -r "$ce_maps/extinction.map" ] || [ ! -r "$menus_data/maps/sounds.map" ]; then
+			echo "--- h3models"; echo "SKIP: no HALO_TEST_PROFILE, extinction.map (HALO_TEST_CE_MAPS) or sounds.map"; continue
+		fi
+		# (a maps folder of the data's and the Custom Edition maps, links)
+		rm -rf "$out/models_data"
+		mkdir -p "$out/models_data/maps"
+		for file in "$(cd "$menus_data" && pwd)"/maps/*.map; do ln -sfn "$file" "$out/models_data/maps/"; done
+		for file in extinction Covenant_V_Marines_Beta_5; do
+			[ -r "$ce_maps/$file.map" ] && ln -sfn "$(cd "$ce_maps" && pwd)/$file.map" "$out/models_data/maps/$file.map"
+		done
+		# (CUSTOMIZATION: the profile, Cross; down two to MODEL; right: the Extinction Spartan, built and
+		# shown; right: the protected map's; left: the Spartan (Extinction) again; Circle; Circle)
+		models_pad="$h3pad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000"
+		models_pad="$models_pad down:150:600 down:150:600 right:150:500 wait:150:8000 right:150:500 wait:150:8000"
+		models_pad="$models_pad left:150:500 wait:150:4000 b wait:150:3000 b wait:150:3000"
+		profile_from=$HALO_TEST_PROFILE run h3models "$out/models_data" 55 "$models_pad" HALO_MENU_STYLE=halo3
+		check_h3 h3models halo3
+		log=$out/h3models/run.log
+		grep -aq "menus: h3 customize: 2 player models in the maps folder's Custom Edition maps; this profile's: -1" "$log" ||
+			fail h3models "the editor did not find the two models"
+		grep -aq "menus: h3 customize: model SPARTAN (EXTINCTION)" "$log" || fail h3models "MODEL did not step to the Extinction Spartan"
+		grep -aq "scene packs: pm_[0-9a-f]*: built from extinction" "$log" || fail h3models "its pack was not built"
+		grep -aq "menus: h3 scene object 4: characters.spartan.spartan_mp (pm_[0-9a-f]*) at .* made" "$log" &&
+			grep -aq "menus: h3 customize: model Spartan (Extinction): loaded" "$log" ||
+			fail h3models "the preview did not show the Extinction Spartan"
+		grep -aq "menus: h3 scene object 4: protected.Covenant_V_Marines_Beta_5.bipd [0-9]* (pm_[0-9a-f]*) at .* made" "$log" ||
+			fail h3models "the protected map's model was not shown"
+		grep -aq "player models: 869079979327 chose Spartan (Extinction)" "$log" &&
+			grep -aq "menus: h3 customize: birch: model 0 saved" "$log" || fail h3models "Circle did not keep the choice"
+		grep -q "^869079979327 extinction 97888771 c5372723$" "$out/h3models/save/t/player_models.txt" ||
+			fail h3models "t:\\player_models.txt does not hold the choice"
+		cmp -s "$HALO_TEST_PROFILE" "$out/h3models/save/u/UDATA/869079979327/blam.sav" ||
+			fail h3models "blam.sav changed (the model is kept apart from it)"
+		rm -rf "$out/h3models_saved"
+		cp -r "$out/h3models/save" "$out/h3models_saved"
+		save_from=$out/h3models_saved run h3models_again "$out/models_data" 25 \
+			"$h3pad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:5000 b wait:150:3000" \
+			HALO_MENU_STYLE=halo3
+		grep -aq "menus: h3 customize: 2 player models in the maps folder's Custom Edition maps; this profile's: 0" \
+			"$out/h3models_again/run.log" || fail h3models "started again, the editor did not show the choice"
+		;;
 	h3damaged)
 		# (two damaged profiles: Broken, a 0-byte blam.sav; Garbage, 512 bytes of garbage)
 		rm -rf "$out/h3damaged_save"

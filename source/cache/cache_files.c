@@ -1601,6 +1601,13 @@ long scenario_tags_load(
 
 				forge_map_loaded(tag_get_name(result));
 			}
+			/* port: the first local player's model from a Custom Edition
+			map, in a local multiplayer game (port/linux/game/player_models.c) */
+			{
+				extern void player_models_map_loaded(long scenario_index);
+
+				player_models_map_loaded(result);
+			}
 #endif
 		}
 		/* port: a map refused is closed for the next to open */

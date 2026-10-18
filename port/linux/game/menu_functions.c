@@ -83,6 +83,7 @@ halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
 #include "camera/observer.h"
 #include "../src/forge_store.h"
 #include "scene_packs.h"
+#include "player_models.h"
 
 #include <math.h>
 #include <stdarg.h>
@@ -2162,6 +2163,8 @@ enum
 {
 	_h3_custom_name,
 	_h3_custom_color,
+	/* (port: a player model from a Custom Edition map, player_models.c) */
+	_h3_custom_model,
 	_h3_custom_stick,
 	_h3_custom_buttons,
 	_h3_custom_look,
@@ -2174,7 +2177,8 @@ enum
 
 static char const *const h3_custom_rows[NUMBER_OF_H3_CUSTOM_ROWS] =
 {
-	"op_name", "op_color", "op_stick", "op_buttons", "op_look", "op_invert", "op_flight", "op_autocenter", "op_vibration",
+	"op_name", "op_color", "op_model", "op_stick", "op_buttons", "op_look", "op_invert", "op_flight", "op_autocenter",
+	"op_vibration",
 };
 /* (the game's colours, in its order: player_profile.c profile_color_table) */
 static char const *const h3_color_names[H3_SWATCH_FRAMES] =
@@ -2241,6 +2245,12 @@ static struct
 	short preview_color;
 	/* the window shows the Spartan, not the swatch (what was last logged) */
 	boolean preview_shown;
+	/* (port) the player model chosen in the editor (player_models.c's
+	index, NONE the Spartan), the profile's when it opened (saved with
+	Circle when they differ), and what the preview last said of its pack */
+	short model;
+	short model_saved;
+	char model_said[160];
 } h3_custom;
 
 /* two profile indices of the same file (their flags aside: a profile just
@@ -2455,6 +2465,12 @@ static boolean h3_profile_edit(short item)
 	h3_custom.said[0] = 0;
 	h3_custom.preview_asked = FALSE;
 	h3_custom.preview_shown = FALSE;
+	/* (the maps folder looked through again: a map added since) */
+	player_models_scan(TRUE);
+	h3_custom.model = h3_custom.model_saved = player_models_profile_choice(h3_custom.index);
+	h3_custom.model_said[0] = 0;
+	platform_log("menus: h3 customize: %d player models in the maps folder's Custom Edition maps; this profile's: %d",
+		player_models_count(), h3_custom.model);
 	platform_log("menus: h3 customize: editing %s: color %d, stick %d, buttons %d, look %d, invert %d, flight %d, "
 		"autocenter %d, vibration %s", name, profile->primary_color_index, profile->controller_settings.joystick_preset,
 		profile->controller_settings.button_preset, profile->controller_settings.look_sensitivity,
@@ -2719,6 +2735,17 @@ static void h3_custom_value(short row, struct player_profile const *profile, cha
 	case _h3_custom_color:
 		snprintf(text, size, "%s", T(h3_color_names[h3_swatch_frame(profile->primary_color_index)]));
 		break;
+	case _h3_custom_model:
+	{
+		struct player_model model;
+
+		if (player_models_get(h3_custom.model, &model))
+			snprintf(text, size, "%s", model.name);
+		else
+			snprintf(text, size, "%s", T("SPARTAN"));
+		h3_capitals(text);
+		break;
+	}
 	case _h3_custom_stick:
 		snprintf(text, size, "%s", T(h3_stick_names[PIN(settings->joystick_preset, 0, NUMBER_OF_JOYSTICK_PRESETS - 1)]));
 		break;
@@ -2790,6 +2817,11 @@ static boolean h3_custom_change(struct widget_instance *widget, int step)
 		if (profile->primary_color_index < 0)
 			profile->primary_color_index = NONE;
 		break;
+	case _h3_custom_model:
+		/* (the Spartan, then each model found: index + 1) */
+		h3_custom.model = (short)(h3_custom_step(h3_custom.model + 1, player_models_count() + 1, step) - 1);
+		h3_custom.model_said[0] = 0;
+		break;
 	case _h3_custom_stick:
 		settings->joystick_preset = (byte)h3_custom_step(PIN(settings->joystick_preset, 0, NUMBER_OF_JOYSTICK_PRESETS - 1),
 			NUMBER_OF_JOYSTICK_PRESETS, step);
@@ -2840,6 +2872,8 @@ static void h3_custom_spartan_preview(struct widget_instance *screen, short colo
 	boolean shown;
 	struct widget_instance *found;
 
+	/* (the model chosen: its pack, built the first time it is shown) */
+	menu_scene_spartan_model(player_models_pack(h3_custom.model));
 	if (!h3_custom.preview_asked)
 	{
 		if (h3_scenes_enabled() && (scene = h3_scene_of(screen, name, sizeof(name), NULL)) != NULL &&
@@ -2875,6 +2909,7 @@ static void h3_custom_spartan_hide(void)
 	if (h3_custom.preview_asked)
 		platform_log("menus: h3 customize: preview Spartan hidden");
 	menu_scene_spartan_hide();
+	menu_scene_spartan_model(NULL);
 	h3_custom.preview_asked = FALSE;
 	h3_custom.preview_shown = FALSE;
 }
@@ -2931,8 +2966,33 @@ static void h3_custom_update(struct widget_instance *list)
 		found->animation.current_frame_index = h3_swatch_frame(profile->primary_color_index);
 	if ((found = named(screen, "preview_swatch")) != NULL)
 		found->animation.current_frame_index = h3_swatch_frame(profile->primary_color_index);
-	text_show(named(screen, "preview_name"), T(h3_color_names[h3_swatch_frame(profile->primary_color_index)]));
 	h3_custom_spartan_preview(screen, profile->primary_color_index);
+	/* (under the preview: the colour's name, or how the model's pack is
+	coming: built the first time, or why it cannot be) */
+	{
+		struct player_model model;
+		char line[192], why[160];
+		long progress = 0;
+		short state = menu_scene_spartan_state(&progress, why, sizeof(why));
+
+		snprintf(line, sizeof(line), "%s", T(h3_color_names[h3_swatch_frame(profile->primary_color_index)]));
+		if (player_models_get(h3_custom.model, &model))
+		{
+			if (state == _scene_pack_state_building)
+				snprintf(line, sizeof(line), T("Building the model... %ld%%"), progress);
+			else if (state == _scene_pack_state_failed)
+				snprintf(line, sizeof(line), "%s", T("This model can't be built"));
+			if (state == _scene_pack_state_failed && !h3_custom.status[0])
+				snprintf(h3_custom.status, sizeof(h3_custom.status), T("%s can't be used: %s"), model.name, why);
+			snprintf(why, sizeof(why), "%s: %s", model.name, scene_packs_state_name(state));
+			if (strcmp(why, h3_custom.model_said) && state != _scene_pack_state_building)
+			{
+				snprintf(h3_custom.model_said, sizeof(h3_custom.model_said), "%s", why);
+				platform_log("menus: h3 customize: model %s", why);
+			}
+		}
+		text_show(named(screen, "preview_name"), line);
+	}
 	string_show(named(screen, "custom_help"), focused);
 	/* (the settings panel's Invert look flips the stick again, on this
 	Vita: with both on, said) */
@@ -2974,6 +3034,16 @@ static void h3_custom_save(void)
 		return;
 	memcpy(&saved, edit, sizeof(saved));
 	h3_profile_name(name, sizeof(name), &saved);
+	/* (port: the player model, kept in the port's own file, not the
+	profile's: player_models.c) */
+	if (h3_custom.model != h3_custom.model_saved)
+	{
+		boolean kept = player_models_profile_choose(h3_custom.index, h3_custom.model);
+
+		platform_log("menus: h3 customize: %s: model %d %s", name, h3_custom.model, kept ? "saved" : "could not be saved");
+		if (kept)
+			h3_custom.model_saved = h3_custom.model;
+	}
 	if (!player_ui_edit_profile_is_dirty())
 	{
 		player_ui_end_editing_profile();
