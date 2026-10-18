@@ -758,6 +758,51 @@ Halo 3 named them.
   debug-geometry lines the engine has are untested on the Vita's GXM);
   touch gestures in the monitor; netgame spawns; sharing (below).
 
+### Scene packs in Forge as built
+
+The lobby's EXTRA OBJECTS row (between MAP and START FORGE) chooses the
+packs a session brings (`forge.c forge_packs`, in load order):
+
+| Pack | Objects | Built from | Default | Tags | Tag cache | Pixels + samples (file) | Build (x86) |
+|---|---|---|---|---|---|---|---|
+| covenant_vehicles | Banshee, Wraith, Shade | b40, c40 | on | 430 | 857 KB | 6.3 MB (7.2 MB) | 1.3 s |
+| dropships | Pelican, Covenant dropship | b30, a50 | on | 158 | 656 KB | 3.6 MB (4.2 MB) | 1.0 s |
+| covenant_ai | 6 Covenant actor variants (10 offered with their kin) | b40 | asked for | 939 | 4964 KB | 30 MB (35 MB) | 1.4 s |
+
+- Built in the background while the lobby is open (`scene_packs_prebuild`:
+  built, not loaded with ui.map), its progress on the row's page and in the
+  lobby's note; START FORGE refuses while a pack it brings is building (on
+  the Vita a b40 build is tens of seconds: inflating b40 twice). Built once:
+  the file stays in `t:\packs` until the recipe, the builder or the source
+  map changes.
+- Loaded as the Forge map loads, before its objects, in that order while
+  the tag cache has room; one that does not fit is left out with the
+  loader's reason, in the log and on the HUD. A pack whose objects the map
+  has already is not loaded. The browser offers each object once (a pack's
+  copy of a map's tag is the map's), the actor variants in an AI category.
+- Map variants name the packs their records' tags come from (recipe name
+  and hash); loading one brings them with the lobby's.
+- Every Xbox multiplayer map carries the Warthog, Ghost and Scorpion tags
+  (any game type may turn them on), so Forge offers them on every map from
+  the map itself; none has the Rocket Warthog (Halo PC's), and packs are
+  built from Xbox maps only: no multiplayer vehicles pack.
+- The Pelican (and the Covenant dropship) place and stay as large props: a
+  player put in its driver's seat (`P-driver`, 12 seats: driver, eleven
+  riders and cargo) does not fly it, holding forward moves it nothing.
+- The settings panel's Forge route brings the packs on by default; choosing
+  them there is left for later.
+- Every multiplayer map with all three packs (run_forge_test.sh packmaps,
+  Oct 18): each loads all three, 6478 KB of the tag cache held by packs,
+  8837 KB free after them at the tightest (Blood Gulch; Sidewinder 8857 KB),
+  9180 KB at the roomiest (Chiron TL-34); the browser offers 8 vehicles and
+  10 AI on every map. So the Covenant AI would fit on by default; it stays
+  asked for (its 35 MB file, its b40 build time on the Vita, and the AI's
+  frame cost there).
+- On the Vita, still to measure: a b40 pack's build (it inflates b40, 225
+  MB, twice: tens of seconds), the AI pack's 35 MB on the memory card and
+  4.9 MB of tag cache, and the frame cost of several AI (on the x86 harness
+  a dozen fighting Covenant took the tick from 0.14 to 0.18 ms).
+
 ### Phase (b) tests
 
 `port/vita/tests/run_forge_files_test.sh` (ASan and UBSan): the writer's
