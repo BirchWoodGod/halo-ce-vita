@@ -13,6 +13,15 @@
 #           are added again
 #   xbox    without the Halo PC files: the Xbox's Multiplayer screen, nothing
 #           added
+#   h3probe  Menu style Halo 3 (HALO_MENU_STYLE=halo3): the Halo 3 set's screen
+#            stands for the Xbox's main menu (menus/halo3)
+#   h3classic  Menu style Halo CE: the Xbox's main menu, no Halo 3 screen
+#   h3xbox   Halo 3 without the Halo PC files: the Xbox's main menu (the
+#            Halo PC files are required, as for OpenCE's screens: the owner,
+#            Oct 18 2026)
+#   h3broken a Halo 3 PNG missing: the set left out, the Xbox's main menu
+#   h3style  Halo CE at first, Halo 3 chosen while Multiplayer is open: back on
+#            the main menu, the Halo 3 screen
 #   pause   Campaign from the main menu (a new profile, Normal), the level's
 #           pause menu, Quit to Main Menu: a game map's widget runs its
 #           function and is back at the main menu, and asked about deleting
@@ -44,7 +53,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
 
@@ -114,6 +123,25 @@ check_pause() {
 		fail pause "the pause menu's Quit to Main Menu did not go back to the main menu"
 }
 
+# the Halo 3 set (menus/halo3): the screen the main menu became, or the Xbox's
+check_h3() { # NAME halo3|classic
+	local name=$1 log=$out/$1/run.log debug=$out/$1/data/debug.txt
+	echo "--- $name"
+	grep -aE "menus:|ui: screen" "$log" | head -16
+	[ "$(cat "$out/$name/exit")" = 0 ] || fail "$name" "exit $(cat "$out/$name/exit")"
+	grep -aqi "is not a tag index" "$log" "$debug" 2>/dev/null && fail "$name" "a tag was read as the empty one"
+	grep -aqiE "assert|exception|halt" "$log" && fail "$name" "an assertion, exception or halt"
+	if [ "$2" = halo3 ]; then
+		grep -aq "menus: Halo 3 screen .*h3/.*/screen for ui.shell.main_menu.main_menu" "$log" ||
+			fail "$name" "the Halo 3 screen did not stand for the main menu"
+		grep -aq "ui: screen pc.h3.*screen" "$log" || fail "$name" "the Halo 3 screen did not open"
+	else
+		grep -aq "ui: screen pc.h3" "$log" && fail "$name" "a Halo 3 screen opened with Menu style Halo CE"
+		grep -aq "ui: screen ui.shell.main_menu.main_menu" "$log" || fail "$name" "the Xbox's main menu did not open"
+	fi
+}
+h3pad="wait:150:3000"
+
 for case in $cases; do
 	case $case in
 	fresh)
@@ -130,8 +158,30 @@ for case in $cases; do
 	xbox)
 		run xbox "$data" 40 "$pad"
 		check xbox xbox ;;
+	h3probe)
+		run h3probe "$menus_data" 20 "$h3pad" HALO_MENU_STYLE=halo3
+		check_h3 h3probe halo3 ;;
+	h3classic)
+		run h3classic "$menus_data" 20 "$h3pad" HALO_MENU_STYLE=classic
+		check_h3 h3classic classic ;;
+	h3xbox)
+		run h3xbox "$data" 20 "$h3pad" HALO_MENU_STYLE=halo3
+		check_h3 h3xbox classic
+		grep -aq "menus: OpenCE" "$out/h3xbox/run.log" && fail h3xbox "OpenCE's screens were added without the Halo PC files" ;;
+	h3broken)
+		rm -rf "$out/h3menus"
+		cp -r "$HALO_MENUS_FOLDER" "$out/h3menus"
+		sed -i 's/probe\.png/no_such_picture.png/' "$out/h3menus/halo3/probe.xml"
+		HALO_MENUS_FOLDER="$out/h3menus/" run h3broken "$menus_data" 20 "$h3pad" HALO_MENU_STYLE=halo3
+		check_h3 h3broken classic
+		grep -aq "menus: Halo 3 set left out" "$out/h3broken/run.log" || fail h3broken "no line said the Halo 3 set was left out" ;;
+	h3style)
+		run h3style "$menus_data" 30 "wait:150:2000 down:150:800 a wait:150:5000 b wait:150:4000" \
+			HALO_MENU_STYLE=classic "HALO_TEST_COMMANDS=L150:@set HALO_MENU_STYLE halo3"
+		grep -aq "ui: screen ui.shell.main_menu.main_menu" "$out/h3style/run.log" || fail h3style "the Xbox's main menu was not first"
+		check_h3 h3style halo3 ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"

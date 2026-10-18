@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- (tests: run_menus_test.sh h3*) a one-item screen standing for the Xbox's main menu while Menu style is Halo 3; the main menu replaces it -->
+<menus root="h3/probe/screen" replaces="ui\shell\main_menu\main_menu">
+	<bitmap name="h3/probe_bg">
+		<frame png="halo3/probe.png" width="64" height="64"/>
+	</bitmap>
+	<strings name="h3/probe_items">
+		<string text="START SOLO GAME"/>
+	</strings>
+	<widget name="h3/probe/item" type="text" left="43" top="264" width="170" height="21" font="ui\large_ui" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/probe_items" string_index="0"/>
+	<widget name="h3/probe/screen" flags="pass_unhandled_to_focused_child" left="43" top="250" width="170" height="230" bitmap="h3/probe_bg">
+		<child widget="h3/probe/item"/>
+	</widget>
+</menus>

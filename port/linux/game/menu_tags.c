@@ -93,6 +93,9 @@ version's own menus have) */
 #define MAXIMUM_RESOURCE_FRAMES 64
 #define MAXIMUM_RESOURCE_BYTES (4 * 1024 * 1024)
 #define MAXIMUM_PNG_BYTES (512 * 1024)
+/* the Halo 3 set's screens that stand for an Xbox one (main menu, campaign,
+their pickers...) */
+#define MAXIMUM_H3_SCREENS 16
 
 /* the layout of a bitmap tag and a string list tag held by a Custom Edition
 resource map (the item is the whole tag, its addresses counting from the
@@ -368,6 +371,15 @@ static struct
 	int art;
 	long root_tag;
 	long xbox_root_tag;
+	/* the Halo 3 set's screens (menus/halo3): the Xbox screen each stands
+	for while Menu style is Halo 3, and its own root; whether the set was
+	said to be left out (its pictures could not be read) */
+	long h3_count;
+	long h3_from[MAXIMUM_H3_SCREENS];
+	long h3_to[MAXIMUM_H3_SCREENS];
+	char const *h3_root[MAXIMUM_H3_SCREENS];
+	char const *h3_replaces[MAXIMUM_H3_SCREENS];
+	boolean h3_left_out_said;
 } menu_tags;
 
 /* the build under way */
@@ -1983,6 +1995,31 @@ void menu_tags_loaded(
 	if (build.failed)
 		goto failed;
 	menu_tags.root_tag = build.widget_tags[widget_named(menus->root)];
+	/* (the Halo 3 set: each screen and the Xbox screen it stands for, both
+	there) */
+	menu_tags.h3_count = 0;
+	menu_tags.h3_left_out_said = FALSE;
+	for (index = 0; index < menus->screen_count && menu_tags.h3_count < MAXIMUM_H3_SCREENS; index++)
+	{
+		struct halo_menu_screen const *screen = &menus->screens[index];
+		long from = tag_loaded(UI_WIDGET_DEFINITION_TAG, screen->replaces);
+		long widget = widget_named(screen->root);
+
+		if (from == NONE || widget == NONE)
+		{
+			problem(screen->file, screen->line, from == NONE ? "ui.map has no screen" : "no widget is named",
+				from == NONE ? screen->replaces : screen->root);
+			continue;
+		}
+		menu_tags.h3_from[menu_tags.h3_count] = from;
+		menu_tags.h3_to[menu_tags.h3_count] = build.widget_tags[widget];
+		menu_tags.h3_root[menu_tags.h3_count] = screen->root;
+		menu_tags.h3_replaces[menu_tags.h3_count] = screen->replaces;
+		menu_tags.h3_count++;
+	}
+	if (menus->screen_count)
+		platform_log("menus: Halo 3 set: %ld of %ld screens (Menu style %s)", menu_tags.h3_count, menus->screen_count,
+			halo_menu_style_halo3() ? "Halo 3" : "Halo CE");
 	menu_tags.loaded = TRUE;
 	halo_pc_menus_state = 1;
 	menu_tags_art_preread();
@@ -2024,6 +2061,31 @@ long menu_tags_screen(
 {
 	if (!menu_tags.loaded || tag_index == NONE)
 		return tag_index;
+	/* (Menu style Halo 3: the Halo 3 set's screen for the Xbox's, its
+	pictures read the first time, as the Multiplayer screen's; read again
+	each time, a change in the settings panel takes at the next screen) */
+	if (halo_menu_style_halo3())
+	{
+		long index;
+
+		for (index = 0; index < menu_tags.h3_count; index++)
+		{
+			if (tag_index != menu_tags.h3_from[index])
+				continue;
+			if (!menu_tags.art)
+				menu_tags.art = menu_tags_art_load() ? 1 : -1;
+			if (menu_tags.art < 0)
+			{
+				if (!menu_tags.h3_left_out_said)
+					platform_log("menus: Halo 3 set left out: its pictures could not be read; the game's own screens");
+				menu_tags.h3_left_out_said = TRUE;
+				halo_pc_menus_state = -1;
+				return tag_index;
+			}
+			platform_log("menus: Halo 3 screen %s for %s", menu_tags.h3_root[index], menu_tags.h3_replaces[index]);
+			return menu_tags.h3_to[index];
+		}
+	}
 	if (tag_index == menu_tags.xbox_root_tag && menu_tags.art >= 0)
 	{
 		if (!menu_tags.art)

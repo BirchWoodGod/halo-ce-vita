@@ -3,3 +3,4 @@ art.xml
 multiplayer.xml
 browser.xml
 setup.xml
+halo3/probe.xml

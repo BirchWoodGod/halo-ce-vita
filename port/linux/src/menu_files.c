@@ -686,11 +686,29 @@ static void read_replace(struct reader *reader, const XML_Char **attributes, lon
 
 static void read_menus(struct reader *reader, const XML_Char **attributes)
 {
-	const char *root = NULL;
-	struct attribute table[] = { { "root", &root } };
+	const char *root = NULL, *replaces = NULL;
+	struct attribute table[] = { { "root", &root }, { "replaces", &replaces } };
 
 	read_attributes(reader, "menus", attributes, table, sizeof(table) / sizeof(*table));
-	if (root)
+	/* (a Halo 3 screen: the Xbox screen it stands for while Menu style is
+	Halo 3, menu_tags.c; else the Multiplayer screen's root) */
+	if (replaces)
+	{
+		struct halo_menus *menus = &reader->menus;
+
+		if (!root)
+		{
+			reader_error(reader, "a <menus replaces=...> needs its root");
+			return;
+		}
+		GROW(reader, menus->screens, menus->screen_count);
+		menus->screens[menus->screen_count].root = root;
+		menus->screens[menus->screen_count].replaces = replaces;
+		menus->screens[menus->screen_count].file = reader->file;
+		menus->screens[menus->screen_count].line = current_line(reader);
+		menus->screen_count++;
+	}
+	else if (root)
 		reader->menus.root = root;
 }
 

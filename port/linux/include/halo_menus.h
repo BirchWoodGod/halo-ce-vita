@@ -122,6 +122,14 @@ struct halo_menu_widget
 	long line;
 };
 
+/* a screen of the Halo 3 set (menus/halo3): its root widget, and the Xbox
+screen it stands for while Menu style is Halo 3 (<menus root=... replaces=...>) */
+struct halo_menu_screen
+{
+	char const *root, *replaces;
+	char const *file;
+	long line;
+};
 struct halo_menus
 {
 	struct halo_menu_bitmap *bitmaps;
@@ -145,8 +153,11 @@ struct halo_menus
 	struct halo_menu_replace *replaces;
 	long replace_count;
 	/* the screen that stands for the Xbox's Multiplayer screen:
-	<menus root="..."> (the last given) */
+	<menus root="..."> (the last given without replaces=) */
 	char const *root;
+	/* the Halo 3 set's screens (<menus root= replaces=>) */
+	struct halo_menu_screen *screens;
+	long screen_count;
 };
 
 /* the menus, read from the files (once; the same each call after); NULL if
