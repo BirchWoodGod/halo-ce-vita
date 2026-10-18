@@ -70,6 +70,27 @@
 #            preview": shown in a colour, recoloured, hidden); then with
 #            HALO_SCENE_PACKS=0, and with no multiplayer map in the maps
 #            folder: no character, nothing else changed
+#   h3profiles  the Halo 3 SELECT PROFILE (menus/halo3/profiles.xml) stands for
+#            the Xbox's campaign profile screen: a first start (no profile)
+#            shows CREATE NEW PROFILE alone, a name of spaces refused, then
+#            Rookie made (blam.sav, its name) and the lobby opened; with
+#            HALO_TEST_PROFILE's profile too: Triangle with that profile's name
+#            refused (taken), Rookie made, played, then Square and its
+#            question's DELETE PROFILE delete it, the other profile's file left
+#            byte for byte; with Menu style Halo CE, the Xbox's screen
+#   h3proftouch  taps: CAMPAIGN, SELECT PROFILE's New Profile (its icon and
+#            label): Rookie made, the lobby; the lobby's Back: SELECT PROFILE
+#   h3customize  CUSTOMIZATION (menus/halo3/customize.xml), with
+#            HALO_TEST_PROFILE's profile: the name typed, the colour, the stick
+#            layout, the look sensitivity and invert look changed, Circle saves
+#            them; blam.sav and SaveMeta.xbx read back (the other fields kept),
+#            then the harness started again on that save: the editor shows
+#            them, and leaving it saves nothing
+#   h3damaged  a profile of a 0-byte blam.sav and one of garbage: SELECT
+#            PROFILE says each is damaged and plays neither, CUSTOMIZATION
+#            edits neither, CREATE NEW PROFILE still makes one; with
+#            HALO_TEST_PROFILE's profile and a damaged savegame.bin, the lobby
+#            says the saved game is damaged and starts at Mission Start
 #   h3coopguide  the settings panel's Host co-op campaign
 #            (HALO_SYSTEM_LINK_TEST=campaign): the Campaign screen opens, the
 #            Halo 3 campaign lobby behind it set to SYSTEM LINK CO-OP
@@ -106,7 +127,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3characters}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3characters h3profiles h3proftouch h3customize h3damaged}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
 
@@ -136,6 +157,8 @@ run() { # NAME DATA SECONDS PAD [VAR=value...]
 		[ -r "$(dirname "$profile_from")/SaveMeta.xbx" ] &&
 			cp "$(dirname "$profile_from")/SaveMeta.xbx" "$out/$name/save/u/UDATA/869079979327/"
 	fi
+	# (or a whole save folder of the tests', as another case's run left it)
+	[ -n "${save_from:-}" ] && cp -r "$save_from"/. "$out/$name/save/"
 	ln -sfn "$(cd "$folder" && pwd)/maps" "$out/$name/data/maps"
 	[ -n "${init_line:-}" ] && printf '%s\n' "$init_line" > "$out/$name/data/init.txt"
 	local shots=()
@@ -210,6 +233,28 @@ check_h3() { # NAME halo3|classic
 	fi
 }
 h3pad="wait:150:3000"
+# (a profile's file, blam.sav: name, colour, flags, the levels' flags, the last level, the
+# controller settings - source/saved games/player_profile.h - as "name color stick buttons look
+# invert flight autocenter vibration_off levels")
+profile_fields() {
+	python3 - "$1" <<'PY'
+import struct, sys
+data = open(sys.argv[1], 'rb').read()
+name = data[0:24].decode('utf-16-le').split('\0')[0]
+color, flags = struct.unpack('<hH', data[24:28])
+levels = data[28:38].hex()
+last, = struct.unpack('<h', data[38:40])
+buttons, stick, look, invert, vibration, flight, autocenter, help_off = data[40:48]
+print('%s|%d|%d|%d|%d|%d|%d|%d|%d|%s|%d' % (name, color, stick, buttons, look, invert, flight, autocenter, vibration,
+	levels, last))
+PY
+}
+# (no Xbox profile screen opened: the campaign's, the settings' and their edit screens, the
+# Xbox's keyboard's new profile)
+h3_no_xbox_profiles() { # NAME
+	grep -aE "ui: screen ui.shell.main_menu.(load_campaign_player_profile|player_profiles_select|settings_select|new_campaign)" \
+		"$out/$1/run.log" && fail "$1" "an Xbox profile screen opened with Menu style Halo 3"
+}
 # (internet play on, nothing reached: its brokers, STUN and relays TEST-NET addresses)
 h3net="HALO_NET_ONLINE=true HALO_NET_BROKERS=198.51.100.1:1883 HALO_NET_STUN=198.51.100.1:3478"
 h3net="$h3net HALO_NET_RELAYS=198.51.100.1:47320 HALO_NET_ALLOW_UPNP=false"
@@ -271,7 +316,8 @@ for case in $cases; do
 			echo "--- h3resume"; echo "SKIP: no HALO_TEST_PROFILE"; continue
 		fi
 		# (the lobby: Start Game on The Pillar of Autumn, Normal; in the level, saved and quit to the
-		# main menu; CAMPAIGN again, the profile, the lobby: its caption; Difficulty, down, A: Heroic)
+		# main menu, CAMPAIGN focused; CAMPAIGN again, the profile, the lobby: its caption; Difficulty,
+		# down, A: Heroic)
 		profile_from=$HALO_TEST_PROFILE run h3resume "$menus_data" 170 "wait:150:3000 a wait:150:3000 a wait:150:3000 down:150:600 down:150:600 a wait:150:70000 a wait:150:3000 a wait:150:4000 wait:150:2000 down:150:700 a wait:150:2500 down:150:700 a wait:150:6000 wait:150:4000" \
 			HALO_MENU_STYLE=halo3 "HALO_TEST_COMMANDS=L240:@skip;L420:game_save_totally_unsafe;L600:@quit"
 		check_h3 h3resume halo3
@@ -484,6 +530,145 @@ for case in $cases; do
 		grep -aq "h3 scene object 0: the pack menu_spartan is failed: no character" "$log" ||
 			fail h3characters "no multiplayer map: the lobby did not go without its character"
 		grep -aq "ui: screen pc.h3.mp.screen" "$log" || fail h3characters "no multiplayer map: the lobby did not open" ;;
+	h3profiles)
+		# (a first start: CAMPAIGN; Cross on CREATE NEW PROFILE: spaces, refused; Cross again: Rookie,
+		# made and played, the lobby; Circle: SELECT PROFILE again, Rookie there)
+		run h3profiles "$menus_data" 30 "$h3pad a wait:150:3000 a wait:150:2500 a wait:150:4000 b wait:150:3000" \
+			HALO_MENU_STYLE=halo3 "HALO_TEST_TEXT_INPUT=  |Rookie"
+		check_h3 h3profiles halo3
+		log=$out/h3profiles/run.log
+		grep -aq "menus: Halo 3 screen h3/profiles/screen for ui.shell.main_menu.load_campaign_player_profile" "$log" ||
+			fail h3profiles "SELECT PROFILE did not stand for the Xbox's campaign profile screen"
+		grep -aq "menus: h3 profiles: 0 profiles (campaign)" "$log" &&
+			grep -aq "menus: h3 profiles: CREATE NEW PROFILE (1 of 1)" "$log" ||
+			fail h3profiles "a first start did not show CREATE NEW PROFILE alone"
+		grep -aq 'menus: h3 profiles: the name "" was refused: A profile.s name needs a letter or a number.' "$log" ||
+			fail h3profiles "a name of spaces was not refused"
+		grep -aq "menus: h3 profiles: created Rookie" "$log" && grep -aq "menus: h3 profiles: chose Rookie (campaign)" "$log" ||
+			fail h3profiles "CREATE NEW PROFILE did not make and choose Rookie"
+		grep -aq "ui: screen pc.h3.campaign.screen" "$log" || fail h3profiles "the new profile did not go on to the lobby"
+		grep -aq "menus: h3 profiles: 1 profile (campaign): Rookie" "$log" || fail h3profiles "Rookie was not listed after"
+		file=$(ls "$out"/h3profiles/save/u/UDATA/*/blam.sav 2>/dev/null | head -1)
+		[ -n "$file" ] && [ "$(profile_fields "$file" | cut -d'|' -f1)" = Rookie ] ||
+			fail h3profiles "Rookie's blam.sav was not written"
+		h3_no_xbox_profiles h3profiles
+		# (Menu style Halo CE: the Xbox's campaign profile screen, as ever)
+		profile_from=${HALO_TEST_PROFILE:-} run h3profiles_classic "$menus_data" 20 "wait:150:3000 a wait:150:4000" HALO_MENU_STYLE=classic
+		grep -aq "ui: screen ui.shell.main_menu.load_campaign_player_profile" "$out/h3profiles_classic/run.log" ||
+			fail h3profiles "Menu style Halo CE did not open the Xbox's campaign profile screen"
+		grep -aq "ui: screen pc.h3" "$out/h3profiles_classic/run.log" && fail h3profiles "a Halo 3 screen opened with Menu style Halo CE"
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "SKIP (h3profiles): no HALO_TEST_PROFILE: its name taken, the delete"; continue
+		fi
+		# (the test profile's: CAMPAIGN; Triangle: its own name, taken; Triangle: Rookie, made and played;
+		# Circle: SELECT PROFILE on Rookie; Square: the question on CANCEL, down, DELETE PROFILE)
+		taken=$(profile_fields "$HALO_TEST_PROFILE" | cut -d'|' -f1)
+		profile_from=$HALO_TEST_PROFILE run h3profiles_delete "$menus_data" 40 "$h3pad a wait:150:3000 y wait:150:2500 y wait:150:4000 b wait:150:3000 x wait:150:2500 down:150:700 a wait:150:4000" \
+			HALO_MENU_STYLE=halo3 "HALO_TEST_TEXT_INPUT=$taken|Rookie"
+		check_h3 h3profiles_delete halo3
+		log=$out/h3profiles_delete/run.log
+		grep -aq "menus: h3 profiles: the name \"$taken\" was refused: Another profile has that name." "$log" ||
+			fail h3profiles "the test profile's name was not refused as taken"
+		grep -aq "menus: h3 profiles: 2 profiles (campaign): .*Rookie" "$log" || fail h3profiles "Rookie was not listed beside the test profile"
+		grep -aq "ui: screen pc.h3.profdel.screen" "$log" || fail h3profiles "Square did not ask before deleting"
+		grep -aq "menus: h3 profiles: deleted Rookie" "$log" || fail h3profiles "DELETE PROFILE did not delete Rookie"
+		grep -a "menus: h3 profiles: [0-9]* profiles\? (campaign)" "$log" | tail -1 | grep -q "1 profile (campaign): $taken" ||
+			fail h3profiles "the list after the delete was not the test profile alone"
+		cmp -s "$HALO_TEST_PROFILE" "$out/h3profiles_delete/save/u/UDATA/869079979327/blam.sav" ||
+			fail h3profiles "the test profile's blam.sav changed"
+		h3_no_xbox_profiles h3profiles_delete ;;
+	h3proftouch)
+		# (CAMPAIGN's row on the main menu; SELECT PROFILE's New Profile; the lobby's Back)
+		run h3proftouch "$menus_data" 22 "wait:150:14000" HALO_MENU_STYLE=halo3 HALO_TEST_TEXT_INPUT=Rookie \
+			"HALO_TEST_TAPS=4000:60,278 8000:400,430 12000:140,455"
+		check_h3 h3proftouch halo3
+		log=$out/h3proftouch/run.log
+		grep -aq "ui: screen pc.h3.profiles.screen" "$log" || fail h3proftouch "a tap on CAMPAIGN did not open SELECT PROFILE"
+		grep -aq "menus: h3 profiles: created Rookie" "$log" && grep -aq "ui: screen pc.h3.campaign.screen" "$log" ||
+			fail h3proftouch "a tap on New Profile did not make one and go on to the lobby"
+		grep -a "ui: screen" "$log" | tail -1 | grep -q 'pc.h3.profiles.screen' ||
+			fail h3proftouch "a tap on the lobby's Back did not go back to SELECT PROFILE" ;;
+	h3customize)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "--- h3customize"; echo "SKIP: no HALO_TEST_PROFILE"; continue
+		fi
+		# (CUSTOMIZATION: the profile, Cross; PLAYER NAME, Cross: typed; COLOR, right three times: RED;
+		# STICK LAYOUT, right: SOUTHPAW; down two to LOOK SENSITIVITY, right twice; INVERT LOOK, Cross:
+		# YES; Circle: saved; Circle)
+		custom_pad="$h3pad down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000 a wait:150:2000"
+		custom_pad="$custom_pad down:150:600 right:150:500 right:150:500 right:150:500 down:150:600 right:150:600"
+		custom_pad="$custom_pad down:150:600 down:150:600 right:150:500 right:150:500 down:150:600 a wait:150:1500 b wait:150:3000 b wait:150:3000"
+		profile_from=$HALO_TEST_PROFILE run h3customize "$menus_data" 45 "$custom_pad" HALO_MENU_STYLE=halo3 \
+			"HALO_TEST_TEXT_INPUT=Vita Chief"
+		check_h3 h3customize halo3
+		log=$out/h3customize/run.log
+		grep -aq "menus: Halo 3 screen h3/custprof/screen for ui.shell.main_menu.settings_select.player_setup.player_profile_select_screen" "$log" ||
+			fail h3customize "CUSTOMIZATION did not stand for the Xbox's profile settings"
+		grep -aq "ui: screen pc.h3.custom.screen" "$log" || fail h3customize "the editor did not open"
+		grep -aq "menus: h3 customize: saved Vita Chief: color 2, stick 1, buttons 0, look 5, invert 1" "$log" ||
+			fail h3customize "Circle did not save the changes"
+		h3_no_xbox_profiles h3customize
+		# (the profile's file: the fields changed, the others as they were; renamed, its folder too)
+		file=$(ls "$out"/h3customize/save/u/UDATA/*/blam.sav 2>/dev/null | head -1)
+		before=$(profile_fields "$HALO_TEST_PROFILE")
+		after=$([ -n "$file" ] && profile_fields "$file")
+		echo "profile before: $before"
+		echo "profile after:  $after"
+		[ "$(echo "$after" | cut -d'|' -f1-6)" = "Vita Chief|2|1|0|5|1" ] || fail h3customize "blam.sav does not hold the changes"
+		[ "$(echo "$after" | cut -d'|' -f7-11)" = "$(echo "$before" | cut -d'|' -f7-11)" ] ||
+			fail h3customize "blam.sav's other fields changed"
+		[ -n "$file" ] && [ "$(tr -d '\0' < "$(dirname "$file")/SaveMeta.xbx")" = "Vita Chief" ] ||
+			fail h3customize "SaveMeta.xbx does not name the profile Vita Chief"
+		# (started again on that save: the editor shows the changes; Circle saves nothing)
+		rm -rf "$out/h3customize_saved"
+		cp -r "$out/h3customize/save" "$out/h3customize_saved"
+		save_from=$out/h3customize_saved run h3customize_again "$menus_data" 25 \
+			"$h3pad down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000 b wait:150:3000" HALO_MENU_STYLE=halo3
+		check_h3 h3customize_again halo3
+		grep -aq "menus: h3 customize: editing Vita Chief: color 2, stick 1, buttons 0, look 5, invert 1" "$out/h3customize_again/run.log" ||
+			fail h3customize "the changes were not there after a restart"
+		grep -aq "menus: h3 customize: Vita Chief: no changes" "$out/h3customize_again/run.log" ||
+			fail h3customize "leaving the editor unchanged saved anyway" ;;
+	h3damaged)
+		# (two damaged profiles: Broken, a 0-byte blam.sav; Garbage, 512 bytes of garbage)
+		rm -rf "$out/h3damaged_save"
+		mkdir -p "$out/h3damaged_save/u/UDATA/000000000001" "$out/h3damaged_save/u/UDATA/000000000002"
+		: > "$out/h3damaged_save/u/UDATA/000000000001/blam.sav"
+		printf 'B\0r\0o\0k\0e\0n\0' > "$out/h3damaged_save/u/UDATA/000000000001/SaveMeta.xbx"
+		head -c 512 /dev/urandom > "$out/h3damaged_save/u/UDATA/000000000002/blam.sav"
+		printf 'G\0a\0r\0b\0a\0g\0e\0' > "$out/h3damaged_save/u/UDATA/000000000002/SaveMeta.xbx"
+		# (CAMPAIGN: Cross on each, refused; CREATE NEW PROFILE, Cross: Rookie, the lobby; Circle twice:
+		# the main menu, where no profile is in use; CUSTOMIZATION, on the first listed - a damaged
+		# one: Rookie, made last, is listed last -: Cross, refused)
+		save_from=$out/h3damaged_save run h3damaged "$menus_data" 45 "$h3pad a wait:150:3000 a wait:150:2000 down:150:700 a wait:150:2000 down:150:700 a wait:150:4000 b wait:150:3000 b wait:150:3000 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:2500 b wait:150:2000" \
+			HALO_MENU_STYLE=halo3 HALO_TEST_TEXT_INPUT=Rookie
+		check_h3 h3damaged halo3
+		log=$out/h3damaged/run.log
+		for damaged in Broken Garbage; do
+			grep -aq "menus: h3 profiles: $damaged is damaged: not chosen" "$log" ||
+				fail h3damaged "$damaged (a damaged profile) was not refused"
+		done
+		grep -aq "menus: h3 profiles: .* is damaged: not edited" "$log" || fail h3damaged "CUSTOMIZATION edited a damaged profile"
+		grep -aq "menus: h3 profiles: created Rookie" "$log" && grep -aq "ui: screen pc.h3.campaign.screen" "$log" ||
+			fail h3damaged "CREATE NEW PROFILE did not make one and go on to the lobby"
+		grep -aq "menus: h3 profiles: chose \(Broken\|Garbage\)" "$log" && fail h3damaged "a damaged profile was played"
+		h3_no_xbox_profiles h3damaged
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "SKIP (h3damaged): no HALO_TEST_PROFILE: the damaged saved game"; continue
+		fi
+		# (the test profile with a saved game of garbage, as large as one: CAMPAIGN, the profile, the lobby)
+		rm -rf "$out/h3damaged_game_save"
+		mkdir -p "$out/h3damaged_game_save/u/UDATA/869079979327"
+		head -c 16777216 /dev/urandom > "$out/h3damaged_game_save/u/UDATA/869079979327/savegame.bin"
+		profile_from=$HALO_TEST_PROFILE save_from=$out/h3damaged_game_save run h3damaged_game "$menus_data" 25 "$h3pad a wait:150:3000 a wait:150:5000" \
+			HALO_MENU_STYLE=halo3
+		check_h3 h3damaged_game halo3
+		log=$out/h3damaged_game/run.log
+		grep -aq "menus: h3 campaign: the saved game is damaged: it can't be loaded" "$log" ||
+			fail h3damaged "the lobby did not say the saved game is damaged"
+		grep -aq "menus: h3 campaign caption: .* at Mission Start" "$log" || fail h3damaged "the lobby did not start at Mission Start"
+		cmp -s "$HALO_TEST_PROFILE" "$out/h3damaged_game/save/u/UDATA/869079979327/blam.sav" ||
+			fail h3damaged "the test profile's blam.sav changed" ;;
 	h3coopguide)
 		# (3 s into the main menu the request opens the Campaign screen's profiles; the lobby
 		# behind them is set to co-op. The Xbox's profiles screen opens on a new profile, whose
@@ -496,7 +681,7 @@ for case in $cases; do
 		grep -aq "menus: h3 campaign: network SYSTEM LINK CO-OP (host co-op campaign)" "$log" ||
 			fail h3coopguide "the lobby was not set to co-op" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3damaged]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"

@@ -45,6 +45,11 @@ internet play with:
   System Link screen's profile, then the new game's map list, as Server
   Setup's START), BROWSE GAMES and JOIN WITH CODE. GAME and MAP are what the
   Xbox's game type and map lists open on (kept as they keep them).
+- With Menu style Halo 3, the Halo 3 SELECT PROFILE and CUSTOMIZATION
+  ("port h3 profile ...", "port h3 custom ...": halo3/profiles.xml,
+  customize.xml) stand for the Xbox's profile screens and its profile
+  settings, and read and write the profiles with the Xbox screens' own
+  functions ("the Halo 3 profile screens" below).
 
 Text is typed on the Vita's system keyboard (system_link_shortcut.h
 halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
@@ -56,6 +61,7 @@ halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
 #include "tag_files/tag_groups.h"
 #include "text/text_group.h"
 
+#include "interface/event_manager.h"
 #include "interface/player_ui.h"
 #include "saved games/player_profile.h"
 #include "scenario/scenario.h"
@@ -181,6 +187,19 @@ enum
 	_function_h3_campaign_focus,
 	_function_h3_scene,
 	_function_settings_panel,
+	_function_h3_profiles_campaign,
+	_function_h3_profiles_customize,
+	_function_h3_profile_play,
+	_function_h3_profile_edit,
+	_function_h3_profile_create,
+	_function_h3_profile_delete_ask,
+	_function_h3_profile_delete,
+	_function_h3_profile_page_up,
+	_function_h3_profile_page_down,
+	_function_h3_custom_next,
+	_function_h3_custom_previous,
+	_function_h3_custom_save,
+	_function_h3_custom_close,
 };
 
 /* in port_game_data_input_names' order */
@@ -208,6 +227,9 @@ enum
 	_input_h3_maps,
 	_input_h3_gametypes,
 	_input_h3_campaign_networks,
+	_input_h3_profiles,
+	_input_h3_profile_delete_text,
+	_input_h3_custom,
 };
 
 /* what a line of typing is for */
@@ -218,6 +240,8 @@ enum
 	_typing_lobby_name,
 	_typing_lobby_password,
 	_typing_code,
+	_typing_profile_new,
+	_typing_profile_name,
 };
 
 /* the password and code screens' help lines (their strings' order) */
@@ -552,10 +576,16 @@ static struct
 	short difficulty;
 	short network;
 	/* the profile's saved game (its checkpoint): there, its level and
-	difficulty, read as the lobby opens (as the Xbox's level list does) */
+	difficulty, read as the lobby opens (as the Xbox's level list does);
+	damaged: there and not readable (the Xbox's level list says "Unable to
+	load saved game file") */
 	boolean saved;
+	boolean damaged;
 	char saved_map[256];
 	short saved_difficulty;
+	/* the profile the lobby was opened for: another one's starts again on
+	its last level */
+	long profile_index;
 } h3_campaign;
 
 /* the first local player's active profile, FALSE with none */
@@ -646,9 +676,10 @@ static void h3_campaign_initialize(void)
 	struct player_profile profile;
 	short unlocked = h3_campaign_unlocked();
 
-	if (!h3_campaign.initialized)
+	if (!h3_campaign.initialized || h3_campaign.profile_index != player_ui_get_active_player_profile_index(0))
 	{
 		h3_campaign.initialized = TRUE;
+		h3_campaign.profile_index = player_ui_get_active_player_profile_index(0);
 		h3_campaign.difficulty = 1;
 		h3_campaign.level = 0;
 		if (h3_profile(&profile))
@@ -665,6 +696,9 @@ static void h3_campaign_initialize(void)
 		h3_campaign.saved_map[0] = 0;
 		h3_campaign.saved = game_state_test_persistent_storage(h3_campaign.saved_map, &h3_campaign.saved_difficulty,
 			&corrupted) && !corrupted;
+		h3_campaign.damaged = corrupted;
+		if (corrupted)
+			platform_log("menus: h3 campaign: the saved game is damaged: it can't be loaded");
 		if (h3_campaign.saved)
 			platform_log("menus: h3 campaign: the saved game is %s on %s", h3_campaign.saved_map,
 				h3_difficulty_names[PIN(h3_campaign.saved_difficulty, 0, 3)]);
@@ -771,8 +805,12 @@ static void h3_campaign_update(struct widget_instance *widget)
 		}
 		if (warning)
 		{
-			widget_instance_set_visibility_recursive(warning, same_level && !resumes);
-			text_show(warning, T("This difficulty starts the mission over\nand replaces your saved game."));
+			/* (a damaged saved game said, as the Xbox's level list says it:
+			the missions then start at their start) */
+			widget_instance_set_visibility_recursive(warning, (same_level && !resumes) || (h3_campaign.damaged && !coop));
+			text_show(warning, h3_campaign.damaged ?
+				T("Your saved game is damaged and can't be\nloaded: missions start at their start.") :
+				T("This difficulty starts the mission over\nand replaces your saved game."));
 		}
 	}
 	if ((found = named(screen, "picture")) != NULL)
@@ -1894,6 +1932,846 @@ static boolean typing_done(short typing, char *text, int size)
 	return TRUE;
 }
 
+/* ---- the Halo 3 profile screens (halo3/profiles.xml, customize.xml):
+SELECT PROFILE stands for the Xbox's profile screens, the campaign's
+(ui\shell\main_menu\load_campaign_player_profile) and the settings'
+(player_profile_select_screen, which the main menu's CUSTOMIZATION opens),
+and CUSTOMIZATION's editor for the Xbox's profile settings (the name, the
+colour, the controller and advanced controller settings). They read and
+write the profiles as the Xbox's screens do, with the same functions on the
+same fields of the same files (blam.sav, beside it SaveMeta.xbx):
+
+- the list is the 3-wide list's (player_profile_list_initialize): the
+  profiles player_profiles_enumerate_available_to_local_player_index gives,
+  not the default ones; each card shows what the Xbox's card does (the name,
+  the colour, the level after the highest finished and its difficulty, the
+  controls);
+- a profile chosen for the campaign is set as "sp set p1 controller choice"
+  and "3wide plyr prof set for game" set it (player_ui_set_active_player
+  _profile), and the level select opens (the Halo 3 campaign lobby stands
+  for it); one chosen to customize is edited as "player profile begin
+  editing" edits it (player_ui_begin_editing_profile);
+- a profile whose file failed its checksum (not valid: a 0-byte blam.sav)
+  is neither played nor edited, as the Xbox refuses it ("Unable to load
+  saved game file"): the screen says so, and the player picks another,
+  makes one or deletes it;
+- CREATE NEW PROFILE makes one as "create&edit player profile" does
+  (player_profile_new, the name typed on the Vita's keyboard and checked as
+  the Xbox's keyboard checks it: player_name_clean, not empty, no other
+  profile's), then goes on as choosing it would;
+- Square deletes one, after a question, as "final del player profile" does
+  (player_profile_delete, never a default profile);
+- the editor changes the edit profile's fields as "plyr prf save cntl
+  settings", "plyr prf save adv cntl set" and "color picker select color"
+  set them (the colour may also be none again: the host picks one), and
+  going back saves them as "player profile save changes" does
+  (player_ui_save_profile: player_profile_save, its file and its
+  SaveMeta.xbx name), only when something changed. The profile in use is
+  then the saved one (its controls applied: player_ui_set_active_player
+  _profile).
+
+The settings panel's Controls tab keeps the Vita's own settings (look
+speed, invert, the sticks' deadzone, which Vita button is each Xbox button,
+gyro aiming): they act on top of the profile's, which travel with the
+profile. Where they meet (look sensitivity, invert look, the button
+layout) the editor's help says how; with both inverts on it says they
+cancel out. */
+
+#define H3_PROFILE_ROWS 10
+#define H3_MAXIMUM_PROFILES 100
+/* (the swatches' frames: none, then the game's colours) */
+#define H3_SWATCH_FRAMES 19
+#define PROFILE_INDEX_FLAGS 0xC0000000UL
+
+enum
+{
+	_h3_profiles_campaign,
+	_h3_profiles_customize,
+};
+
+/* the editor's rows, in halo3/customize.xml's order */
+enum
+{
+	_h3_custom_name,
+	_h3_custom_color,
+	_h3_custom_stick,
+	_h3_custom_buttons,
+	_h3_custom_look,
+	_h3_custom_invert,
+	_h3_custom_flight,
+	_h3_custom_autocenter,
+	_h3_custom_vibration,
+	NUMBER_OF_H3_CUSTOM_ROWS
+};
+
+static char const *const h3_custom_rows[NUMBER_OF_H3_CUSTOM_ROWS] =
+{
+	"op_name", "op_color", "op_stick", "op_buttons", "op_look", "op_invert", "op_flight", "op_autocenter", "op_vibration",
+};
+/* (the game's colours, in its order: player_profile.c profile_color_table) */
+static char const *const h3_color_names[H3_SWATCH_FRAMES] =
+{
+	N_("RANDOM"), N_("WHITE"), N_("BLACK"), N_("RED"), N_("BLUE"), N_("GRAY"), N_("YELLOW"), N_("GREEN"), N_("PINK"),
+	N_("PURPLE"), N_("CYAN"), N_("COBALT"), N_("ORANGE"), N_("TEAL"), N_("SAGE"), N_("BROWN"), N_("TAN"),
+	N_("MAROON"), N_("SALMON"),
+};
+static char const *const h3_stick_names[NUMBER_OF_JOYSTICK_PRESETS] =
+{
+	N_("STANDARD"), N_("SOUTHPAW"), N_("LEGACY"), N_("LEGACY SOUTHPAW"),
+};
+/* (player_ui.c set_local_player_controls_from_player_profile: what each
+preset moves) */
+static char const *const h3_button_names[NUMBER_OF_BUTTON_PRESETS] =
+{
+	N_("STANDARD"), N_("SWAP FIRE/GRENADE"), N_("SWAP JUMP/GRENADE"), N_("SWAP MELEE/GRENADE"), N_("SWAP MELEE/ZOOM"),
+};
+
+boolean player_name_clean(wchar_t *name, long count);
+
+static struct
+{
+	short mode;
+	/* the profiles listed, as read when the screen opened or changed: each
+	one's index, profile and whether its file could be read */
+	long indices[H3_MAXIMUM_PROFILES];
+	struct player_profile profiles[H3_MAXIMUM_PROFILES];
+	boolean damaged[H3_MAXIMUM_PROFILES];
+	short count;
+	boolean read;
+	/* the rows (they scroll: browser_list.h) on the items, the profiles then
+	CREATE NEW PROFILE; the item chosen; a trigger's page */
+	struct browser_view view;
+	short cursor;
+	short page;
+	/* the profile to choose when the list is next read (NONE: the one in
+	use, else the one last used) */
+	long focus_index;
+	char status[160];
+	boolean status_kept;
+	/* the item the status is said of (-2: the one chosen next frame): it
+	goes when another is chosen */
+	short status_item;
+	/* a profile just made: its controller, and the screen to go on to,
+	opened from the main loop */
+	short controller_index;
+	boolean open_pending;
+	/* the profile Square asked to delete */
+	long delete_index;
+	char delete_name[48];
+	char said[192];
+} h3_profiles;
+
+/* the profile the editor edits, and what it last said */
+static struct
+{
+	long index;
+	char status[160];
+	char said[256];
+} h3_custom;
+
+/* two profile indices of the same file (their flags aside: a profile just
+made, and the list's) */
+static boolean h3_profile_same(long a, long b)
+{
+	return a != NONE && b != NONE &&
+		((unsigned long)a & ~PROFILE_INDEX_FLAGS) == ((unsigned long)b & ~PROFILE_INDEX_FLAGS);
+}
+
+static void h3_profile_name(char *out, int size, struct player_profile const *profile)
+{
+	wchar_t name[MAXIMUM_PLAYER_PROFILE_NAME_LENGTH + 1];
+
+	memcpy(name, profile->player_name, sizeof(profile->player_name));
+	name[MAXIMUM_PLAYER_PROFILE_NAME_LENGTH] = 0;
+	h3_utf8(out, size, name);
+}
+
+/* the swatch frame of a profile's colour (0: none) */
+static short h3_swatch_frame(short color)
+{
+	return (short)(color < 0 || color >= H3_SWATCH_FRAMES - 1 ? 0 : color + 1);
+}
+
+/* the profiles, read again (the Xbox's list initialize), the item chosen on
+the profile asked for, the one in use or the one last used */
+static void h3_profiles_read(void)
+{
+	word count = H3_MAXIMUM_PROFILES;
+	long focus = h3_profiles.focus_index;
+	short index;
+
+	if (focus == NONE)
+		focus = player_ui_get_active_player_profile_index(0);
+	if (focus == NONE)
+		focus = player_ui_get_player1_last_used_profile_index();
+	player_profiles_enumerate_available_to_local_player_index(0, &count, h3_profiles.indices, FALSE);
+	h3_profiles.count = (short)MIN(count, H3_MAXIMUM_PROFILES);
+	h3_profiles.cursor = 0;
+	for (index = 0; index < h3_profiles.count; index++)
+	{
+		long profile_index = h3_profiles.indices[index];
+
+		memset(&h3_profiles.profiles[index], 0, sizeof(h3_profiles.profiles[index]));
+		/* (a file that failed its checksum reads as defaults with its name,
+		player_profile_read; one that cannot be read at all, its name) */
+		h3_profiles.damaged[index] = !TEST_FLAG(profile_index, _saved_game_file_index_valid_bit);
+		if (!player_profile_get(profile_index, &h3_profiles.profiles[index]))
+		{
+			wchar_t const *name = saved_game_file_get_display_name(profile_index);
+			short character;
+
+			h3_profiles.damaged[index] = TRUE;
+			h3_profiles.profiles[index].primary_color_index = NONE;
+			for (character = 0; name && character < MAXIMUM_PLAYER_PROFILE_NAME_LENGTH - 1 && name[character]; character++)
+				h3_profiles.profiles[index].player_name[character] = name[character];
+		}
+		if (h3_profile_same(profile_index, focus))
+			h3_profiles.cursor = index;
+	}
+	browser_view_reset(&h3_profiles.view);
+	h3_profiles.page = 0;
+	h3_profiles.focus_index = NONE;
+	h3_profiles.read = TRUE;
+	h3_profiles.said[0] = 0;
+	{
+		char line[192];
+		int length = 0;
+
+		line[0] = 0;
+		for (index = 0; index < h3_profiles.count && length < (int)sizeof(line) - 40; index++)
+		{
+			char name[48];
+
+			h3_profile_name(name, sizeof(name), &h3_profiles.profiles[index]);
+			length += snprintf(line + length, sizeof(line) - (size_t)length, "%s%s%s", index ? ", " : "", name,
+				h3_profiles.damaged[index] ? " (damaged)" : "");
+		}
+		platform_log("menus: h3 profiles: %d profile%s (%s)%s%s", h3_profiles.count, h3_profiles.count == 1 ? "" : "s",
+			h3_profiles.mode == _h3_profiles_customize ? "customization" : "campaign", h3_profiles.count ? ": " : "",
+			line);
+	}
+}
+
+/* (a screen's "created": port h3 profiles campaign, port h3 profiles
+customize) the list read as it opens, as the Xbox's list initialize does;
+the campaign's controllers forgotten, as its screen's "sp reset controller
+choices" does */
+static void h3_profiles_initialize(short mode)
+{
+	h3_profiles.mode = mode;
+	h3_profiles.delete_index = NONE;
+	/* (what the question's DELETE PROFILE said stays, over the list read
+	again) */
+	if (!h3_profiles.status_kept)
+		h3_profiles.status[0] = 0;
+	h3_profiles.status_kept = FALSE;
+	h3_profiles.open_pending = FALSE;
+	if (mode == _h3_profiles_campaign)
+		player_ui_reset_single_player_local_player_controllers();
+	h3_profiles_read();
+}
+
+/* the item of a row (row_<n>), else the one chosen */
+static short h3_profiles_item(struct widget_instance *widget)
+{
+	if (widget && widget->name && !strncmp(widget->name, "row_", 4) && widget->name[4] >= '0' && widget->name[4] <= '9')
+	{
+		long row = atol(widget->name + 4) - 1;
+
+		if (row >= 0 && row < h3_profiles.view.visible)
+			return (short)(h3_profiles.view.offset + row);
+	}
+	return h3_profiles.cursor;
+}
+
+/* a typed name made a profile's (UTF-16), checked as the Xbox's keyboard
+checks one (virtual_keyboard.c's Done): its spaces at the ends dropped, a
+character the ban command can name (player_name_clean), not empty, and no
+other profile's (saved_game_file_name_unique) unless it is the profile's
+own (original); FALSE with the reason in status */
+static boolean h3_profile_name_check(char const *typed, wchar_t *name, wchar_t const *original, char *status, int size)
+{
+	short index;
+	boolean same = original != NULL;
+
+	memset(name, 0, MAXIMUM_PLAYER_PROFILE_NAME_LENGTH * sizeof(wchar_t));
+	for (index = 0; index < MAXIMUM_PLAYER_PROFILE_NAME_LENGTH - 1 && typed[index]; index++)
+		name[index] = (wchar_t)(unsigned char)typed[index];
+	if (!player_name_clean(name, MAXIMUM_PLAYER_PROFILE_NAME_LENGTH) || !name[0])
+	{
+		snprintf(status, size, "%s", T("A profile's name needs a letter or a number."));
+		return FALSE;
+	}
+	for (index = 0; same && index < MAXIMUM_PLAYER_PROFILE_NAME_LENGTH; index++)
+	{
+		if (name[index] != original[index])
+			same = FALSE;
+		if (!name[index] || !original[index])
+			break;
+	}
+	if (!same && !saved_game_file_name_unique(name))
+	{
+		snprintf(status, size, "%s", T("Another profile has that name."));
+		return FALSE;
+	}
+	return TRUE;
+}
+
+/* the profile of an item chosen: the campaign's, as the Xbox's profile
+screen chooses it ("sp set p1 controller choice", "3wide plyr prof set for
+game"); TRUE when it is set, and the level select (the Halo 3 lobby) opens */
+static boolean h3_profile_play(short item, short controller_index)
+{
+	struct player_profile profile;
+	long profile_index;
+	char name[48];
+
+	if (item < 0 || item >= h3_profiles.count)
+		return FALSE;
+	profile_index = h3_profiles.indices[item];
+	h3_profile_name(name, sizeof(name), &h3_profiles.profiles[item]);
+	if (h3_profiles.damaged[item])
+	{
+		snprintf(h3_profiles.status, sizeof(h3_profiles.status), "%s",
+			T("This profile's file is damaged and can't be loaded.\nChoose another profile, or create a new one."));
+		h3_profiles.status_item = -2;
+		platform_log("menus: h3 profiles: %s is damaged: not chosen", name);
+		return FALSE;
+	}
+	if (!player_profile_get(profile_index, &profile))
+	{
+		snprintf(h3_profiles.status, sizeof(h3_profiles.status), "%s", T("This profile can't be read now."));
+		h3_profiles.status_item = -2;
+		return FALSE;
+	}
+	player_ui_set_single_player_local_player_controller(0, (short)(controller_index != NONE ? controller_index : 0));
+	player_ui_set_active_player_profile(0, profile_index, &profile);
+	platform_log("menus: h3 profiles: chose %s (campaign)", name);
+	return TRUE;
+}
+
+/* the profile of an item chosen to customize, edited as the Xbox's "player
+profile begin editing" edits it; TRUE when it is, and the editor opens */
+static boolean h3_profile_edit(short item)
+{
+	struct player_profile *profile;
+	char name[48];
+
+	if (item < 0 || item >= h3_profiles.count)
+		return FALSE;
+	h3_profile_name(name, sizeof(name), &h3_profiles.profiles[item]);
+	if (h3_profiles.damaged[item])
+	{
+		snprintf(h3_profiles.status, sizeof(h3_profiles.status), "%s",
+			T("This profile's file is damaged and can't be loaded.\nDelete it, or create a new profile."));
+		h3_profiles.status_item = -2;
+		platform_log("menus: h3 profiles: %s is damaged: not edited", name);
+		return FALSE;
+	}
+	player_ui_begin_editing_profile(h3_profiles.indices[item]);
+	profile = player_ui_get_edit_player_profile();
+	if (!profile)
+	{
+		snprintf(h3_profiles.status, sizeof(h3_profiles.status), "%s", T("This profile can't be read now."));
+		h3_profiles.status_item = -2;
+		return FALSE;
+	}
+	h3_custom.index = h3_profiles.indices[item];
+	h3_custom.status[0] = 0;
+	h3_custom.said[0] = 0;
+	platform_log("menus: h3 customize: editing %s: color %d, stick %d, buttons %d, look %d, invert %d, flight %d, "
+		"autocenter %d, vibration %s", name, profile->primary_color_index, profile->controller_settings.joystick_preset,
+		profile->controller_settings.button_preset, profile->controller_settings.look_sensitivity,
+		profile->controller_settings.invert_look, profile->controller_settings.flight_stick_aircraft_controls,
+		profile->controller_settings.autocenter, profile->controller_settings.vibration_disabled ? "off" : "on");
+	return TRUE;
+}
+
+/* (CREATE NEW PROFILE, Triangle) its name asked for */
+static void h3_profile_create_begin(short controller_index)
+{
+	h3_profiles.controller_index = controller_index;
+	h3_profiles.status[0] = 0;
+	typing_begin(_typing_profile_new, T("New profile's name"), "", MAXIMUM_PLAYER_PROFILE_NAME_LENGTH - 1, FALSE);
+}
+
+/* the name typed: the profile made as "create&edit player profile" makes it
+(player_profile_new), chosen in the list; then the campaign goes on with it
+(the lobby) or the editor opens, from the main loop */
+static void h3_profile_create(char const *typed)
+{
+	wchar_t name[MAXIMUM_PLAYER_PROFILE_NAME_LENGTH];
+	long profile_index;
+	short index;
+
+	if (!h3_profile_name_check(typed, name, NULL, h3_profiles.status, sizeof(h3_profiles.status)))
+	{
+		h3_profiles.status_item = -2;
+		platform_log("menus: h3 profiles: the name \"%s\" was refused: %s", typed, h3_profiles.status);
+		return;
+	}
+	profile_index = player_profile_new(h3_profiles.controller_index != NONE ? h3_profiles.controller_index : 0, name);
+	if (profile_index == NONE)
+	{
+		snprintf(h3_profiles.status, sizeof(h3_profiles.status), "%s", T("The profile could not be created."));
+		h3_profiles.status_item = -2;
+		platform_log("menus: h3 profiles: \"%s\" could not be created", typed);
+		return;
+	}
+	h3_profiles.focus_index = profile_index;
+	h3_profiles_read();
+	platform_log("menus: h3 profiles: created %s", typed);
+	for (index = 0; index < h3_profiles.count; index++)
+	{
+		if (!h3_profile_same(h3_profiles.indices[index], profile_index))
+			continue;
+		if (h3_profiles.mode == _h3_profiles_customize ? h3_profile_edit(index) :
+			h3_profile_play(index, h3_profiles.controller_index))
+		{
+			h3_profiles.open_pending = TRUE;
+		}
+		return;
+	}
+}
+
+/* (Square) the profile of the item chosen, to be deleted after the
+question; FALSE (no question) for CREATE NEW PROFILE */
+static boolean h3_profile_delete_ask(void)
+{
+	short item = h3_profiles.cursor;
+
+	if (item < 0 || item >= h3_profiles.count)
+		return FALSE;
+	h3_profiles.delete_index = h3_profiles.indices[item];
+	h3_profile_name(h3_profiles.delete_name, sizeof(h3_profiles.delete_name), &h3_profiles.profiles[item]);
+	return TRUE;
+}
+
+/* the question's DELETE PROFILE: deleted as "final del player profile"
+deletes it (never a default profile, only a player profile's index) */
+static void h3_profile_delete(void)
+{
+	long profile_index = h3_profiles.delete_index;
+
+	h3_profiles.delete_index = NONE;
+	if (profile_index == NONE || TEST_FLAG(profile_index, _saved_game_file_index_read_only_bit) ||
+		saved_game_file_get_type(profile_index) != _saved_game_file_type_player_profile)
+	{
+		return;
+	}
+	player_profile_delete(profile_index);
+	snprintf(h3_profiles.status, sizeof(h3_profiles.status), T("%s was deleted."), h3_profiles.delete_name);
+	h3_profiles.status_item = -2;
+	platform_log("menus: h3 profiles: deleted %s", h3_profiles.delete_name);
+	h3_profiles.status_kept = TRUE;
+	h3_profiles.read = FALSE;
+}
+
+/* (port h3 profiles: the list's rows, row_1 to row_10: row_swatch, row_name,
+row_note) the profiles, then CREATE NEW PROFILE, scrolling past ten; the
+chosen one's card (info_*: the Xbox card's), the status, the help */
+static void h3_profiles_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *child, *focus = NULL, *found;
+	long index, focused_row = NONE, items;
+	short target;
+	char text[192];
+
+	if (typing_done(_typing_profile_new, text, sizeof(text)))
+		h3_profile_create(text);
+	if (!h3_profiles.read)
+		h3_profiles_read();
+	items = h3_profiles.count + 1;
+	for (index = 0, child = list->child; child; child = child->next)
+	{
+		if (strncmp(child->name, "row_", 4))
+			continue;
+		if (child == list->focused_child)
+			focused_row = index;
+		index++;
+	}
+	target = (short)browser_view_follow(&h3_profiles.view, H3_PROFILE_ROWS, (int)items, (int)focused_row,
+		h3_profiles.cursor, h3_profiles.page);
+	h3_profiles.page = 0;
+	h3_profiles.cursor = target;
+	if (h3_profiles.status_item == -2)
+		h3_profiles.status_item = target;
+	else if (target != h3_profiles.status_item)
+		h3_profiles.status[0] = 0;
+	for (index = 0, child = list->child; child; child = child->next)
+	{
+		long item = h3_profiles.view.offset + index;
+		boolean profile = item < h3_profiles.count;
+
+		if (strncmp(child->name, "row_", 4))
+			continue;
+		if (index >= h3_profiles.view.visible)
+		{
+			widget_instance_set_visibility_recursive(child, FALSE);
+			child->disabled = TRUE;
+			index++;
+			continue;
+		}
+		widget_instance_set_visibility_recursive(child, TRUE);
+		child->disabled = FALSE;
+		if (profile)
+		{
+			h3_profile_name(text, sizeof(text), &h3_profiles.profiles[item]);
+			h3_capitals(text);
+		}
+		else
+			snprintf(text, sizeof(text), "%s", T("CREATE NEW PROFILE"));
+		text_show(named(child, "row_name"), text);
+		text_show(named(child, "row_note"), profile && h3_profiles.damaged[item] ? T("DAMAGED") : "");
+		if ((found = named(child, "row_swatch")) != NULL)
+		{
+			widget_instance_set_visibility_recursive(found, profile);
+			if (profile)
+				found->animation.current_frame_index = h3_swatch_frame(h3_profiles.profiles[item].primary_color_index);
+		}
+		if (index == h3_profiles.view.row)
+			focus = child;
+		index++;
+	}
+	if (focus && focus != list->focused_child)
+		ui_widget_port_give_focus(list, focus);
+	for (child = list->child; child; child = child->next)
+	{
+		if (!strncmp(child->name, "row_", 4))
+			child->animation.current_frame_index = child == focus ? 1 : 0;
+	}
+	/* the card: the Xbox's (the name, the colour, the level after the
+	highest finished, its difficulty, the controls) */
+	{
+		static char const *const labels[] = { "info_level_label", "info_level", "info_skill_label", "info_skill",
+			"info_controls_label", "info_controls" };
+		boolean card = target >= 0 && target < h3_profiles.count && !h3_profiles.damaged[target];
+		char note[256];
+
+		for (index = 0; index < (long)NUMBEROF(labels); index++)
+		{
+			if ((found = named(screen, labels[index])) != NULL)
+				widget_instance_set_visibility_recursive(found, card);
+		}
+		note[0] = 0;
+		if (target >= 0 && target < h3_profiles.count)
+		{
+			struct player_profile const *profile = &h3_profiles.profiles[target];
+			short level, difficulty;
+
+			h3_profile_name(text, sizeof(text), profile);
+			text_show(named(screen, "info_name"), text);
+			if ((found = named(screen, "info_swatch")) != NULL)
+			{
+				widget_instance_set_visibility_recursive(found, TRUE);
+				found->animation.current_frame_index = h3_swatch_frame(profile->primary_color_index);
+			}
+			player_profile_get_highest_completed_solo_level((struct player_profile *)profile, &level, &difficulty);
+			level = (short)MIN(level + 1, NUMBER_OF_SINGLE_PLAYER_LEVELS - 1);
+			snprintf(text, sizeof(text), "%s", T(h3_level_names[PIN(level, 0, NUMBER_OF_SINGLE_PLAYER_LEVELS - 1)]));
+			h3_capitals(text);
+			text_show(named(screen, "info_level"), text);
+			snprintf(text, sizeof(text), "%s", T(h3_difficulty_names[PIN(difficulty, 0, 3)]));
+			h3_capitals(text);
+			text_show(named(screen, "info_skill"), text);
+			snprintf(text, sizeof(text), "%s%s%s",
+				T(h3_stick_names[PIN(profile->controller_settings.joystick_preset, 0, NUMBER_OF_JOYSTICK_PRESETS - 1)]),
+				profile->controller_settings.invert_look ? ", " : "",
+				profile->controller_settings.invert_look ? T("INVERTED") : "");
+			text_show(named(screen, "info_controls"), text);
+			if (h3_profiles.damaged[target])
+				snprintf(note, sizeof(note), "%s", T("This profile's file is damaged:\nit can't be loaded or played.\n"
+					"Choose another profile, make a\nnew one, or delete this one."));
+		}
+		else
+		{
+			text_show(named(screen, "info_name"), T("NEW PROFILE"));
+			if ((found = named(screen, "info_swatch")) != NULL)
+				widget_instance_set_visibility_recursive(found, FALSE);
+			snprintf(note, sizeof(note), "%s", h3_profiles.count ? T("Make a profile of your own:\ntype its name.") :
+				T("There are no profiles yet.\nMake one to play: type its name."));
+		}
+		text_show(named(screen, "info_text"), note);
+	}
+	text_show(named(screen, "status"), h3_profiles.status);
+	/* (said as it changes: the tests read it) */
+	{
+		char said[192];
+
+		if (target >= 0 && target < h3_profiles.count)
+			h3_profile_name(text, sizeof(text), &h3_profiles.profiles[target]);
+		else
+			snprintf(text, sizeof(text), "%s", "CREATE NEW PROFILE");
+		snprintf(said, sizeof(said), "%s (%d of %ld)%s%s", text, target + 1, items, h3_profiles.status[0] ? ": " : "",
+			h3_profiles.status);
+		{
+			char *newline;
+
+			while ((newline = strchr(said, '\n')) != NULL)
+				*newline = ' ';
+		}
+		if (strcmp(said, h3_profiles.said))
+		{
+			snprintf(h3_profiles.said, sizeof(h3_profiles.said), "%s", said);
+			platform_log("menus: h3 profiles: %s", said);
+		}
+	}
+}
+
+/* (port h3 profile delete text: the question) its words */
+static void h3_profile_delete_text_update(struct widget_instance *widget)
+{
+	char text[192];
+
+	snprintf(text, sizeof(text), T("Delete the profile %s?\nIts campaign progress and saved game go with it."),
+		h3_profiles.delete_name);
+	text_show(widget, text);
+}
+
+/* the editor's value of a row, as the edit profile has it */
+static void h3_custom_value(short row, struct player_profile const *profile, char *text, int size)
+{
+	struct player_profile_controller_settings const *settings = &profile->controller_settings;
+
+	text[0] = 0;
+	switch (row)
+	{
+	case _h3_custom_name:
+		h3_profile_name(text, size, profile);
+		break;
+	case _h3_custom_color:
+		snprintf(text, size, "%s", T(h3_color_names[h3_swatch_frame(profile->primary_color_index)]));
+		break;
+	case _h3_custom_stick:
+		snprintf(text, size, "%s", T(h3_stick_names[PIN(settings->joystick_preset, 0, NUMBER_OF_JOYSTICK_PRESETS - 1)]));
+		break;
+	case _h3_custom_buttons:
+		snprintf(text, size, "%s", T(h3_button_names[PIN(settings->button_preset, 0, NUMBER_OF_BUTTON_PRESETS - 1)]));
+		break;
+	case _h3_custom_look:
+		snprintf(text, size, "%d", PIN(settings->look_sensitivity, 1, NUMBER_OF_LOOK_SENSITIVITY_SETTINGS));
+		break;
+	case _h3_custom_invert:
+		snprintf(text, size, "%s", settings->invert_look ? T("YES") : T("NO"));
+		break;
+	case _h3_custom_flight:
+		snprintf(text, size, "%s", settings->flight_stick_aircraft_controls ? T("YES") : T("NO"));
+		break;
+	case _h3_custom_autocenter:
+		snprintf(text, size, "%s", settings->autocenter ? T("ON") : T("OFF"));
+		break;
+	case _h3_custom_vibration:
+		snprintf(text, size, "%s", settings->vibration_disabled ? T("OFF") : T("ON"));
+		break;
+	}
+}
+
+static short h3_custom_row(struct widget_instance *widget)
+{
+	short row;
+
+	for (row = 0; widget && widget->name && row < NUMBER_OF_H3_CUSTOM_ROWS; row++)
+	{
+		if (!strcmp(widget->name, h3_custom_rows[row]))
+			return row;
+	}
+	return NONE;
+}
+
+/* a value stepped through (step 1 or -1, wrapping) */
+static long h3_custom_step(long value, long count, int step)
+{
+	return ((value + step) % count + count) % count;
+}
+
+/* (port h3 custom next and previous: A, the d-pad's or the stick's right
+and left on a row) the row's field of the edit profile changed as the
+Xbox's settings change it (its spinners' choices: player_profile_change
+_controller_settings, player_profile_change_advanced_controller_settings,
+player_profile_color_picker_select_color); A on the name types it */
+static boolean h3_custom_change(struct widget_instance *widget, int step)
+{
+	struct player_profile *profile = player_ui_get_edit_player_profile();
+	struct player_profile_controller_settings *settings;
+	short row = h3_custom_row(widget);
+	char text[64];
+
+	if (!profile || row == NONE)
+		return FALSE;
+	settings = &profile->controller_settings;
+	h3_custom.status[0] = 0;
+	switch (row)
+	{
+	case _h3_custom_name:
+		h3_profile_name(text, sizeof(text), profile);
+		typing_begin(_typing_profile_name, T("Player name"), text, MAXIMUM_PLAYER_PROFILE_NAME_LENGTH - 1, FALSE);
+		return TRUE;
+	case _h3_custom_color:
+		/* (none, then the game's colours: frame - 1) */
+		profile->primary_color_index = (short)(h3_custom_step(h3_swatch_frame(profile->primary_color_index),
+			H3_SWATCH_FRAMES, step) - 1);
+		if (profile->primary_color_index < 0)
+			profile->primary_color_index = NONE;
+		break;
+	case _h3_custom_stick:
+		settings->joystick_preset = (byte)h3_custom_step(PIN(settings->joystick_preset, 0, NUMBER_OF_JOYSTICK_PRESETS - 1),
+			NUMBER_OF_JOYSTICK_PRESETS, step);
+		break;
+	case _h3_custom_buttons:
+		settings->button_preset = (byte)h3_custom_step(PIN(settings->button_preset, 0, NUMBER_OF_BUTTON_PRESETS - 1),
+			NUMBER_OF_BUTTON_PRESETS, step);
+		break;
+	case _h3_custom_look:
+		/* (1 to 10, as the Xbox's spinner: its choice + 1) */
+		settings->look_sensitivity = (byte)(h3_custom_step(PIN(settings->look_sensitivity, 1,
+			NUMBER_OF_LOOK_SENSITIVITY_SETTINGS) - 1, NUMBER_OF_LOOK_SENSITIVITY_SETTINGS, step) + 1);
+		break;
+	case _h3_custom_invert:
+		settings->invert_look = !settings->invert_look;
+		break;
+	case _h3_custom_flight:
+		settings->flight_stick_aircraft_controls = !settings->flight_stick_aircraft_controls;
+		break;
+	case _h3_custom_autocenter:
+		settings->autocenter = !settings->autocenter;
+		break;
+	case _h3_custom_vibration:
+		settings->vibration_disabled = !settings->vibration_disabled;
+		break;
+	}
+	h3_custom_value(row, profile, text, sizeof(text));
+	platform_log("menus: h3 customize: %s %s", h3_custom_rows[row] + 3, text);
+	return TRUE;
+}
+
+/* the live Spartan in the profile's colour, behind the editor. Scene packs
+(feat/scene-packs, port/linux/game/scene_pack.c) will place a pack's
+Spartan in the menu's scene: this is where the editor hands it the colour
+(color: the game's index, NONE for none). Until it can, the screen's
+preview panel (halo3/customize.xml h3/custom/preview_*) shows the colour's
+swatch in its place. */
+static void h3_custom_spartan_preview(short color)
+{
+	(void)color;
+}
+
+/* (port h3 custom: the editor's list) the rows' values, the focused row's
+arrows and help, the colour's swatches and the preview, the profile's name,
+what the panel's settings mean for it */
+static void h3_custom_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct player_profile *profile = player_ui_get_edit_player_profile();
+	struct widget_instance *found;
+	short row, focused = 0;
+	char text[192];
+
+	if (!profile)
+		return;
+	if (typing_done(_typing_profile_name, text, sizeof(text)))
+	{
+		struct player_profile original;
+		wchar_t name[MAXIMUM_PLAYER_PROFILE_NAME_LENGTH];
+
+		if (!player_profile_get(h3_custom.index, &original))
+			memcpy(&original, profile, sizeof(original));
+		if (h3_profile_name_check(text, name, original.player_name, h3_custom.status, sizeof(h3_custom.status)))
+		{
+			memcpy(profile->player_name, name, sizeof(profile->player_name));
+			platform_log("menus: h3 customize: name %s", text);
+		}
+		else
+			platform_log("menus: h3 customize: the name \"%s\" was refused: %s", text, h3_custom.status);
+	}
+	for (row = 0; row < NUMBER_OF_H3_CUSTOM_ROWS; row++)
+	{
+		struct widget_instance *item = named(list, h3_custom_rows[row]);
+		boolean has_focus = item && item == list->focused_child;
+
+		if (!item)
+			continue;
+		if (has_focus)
+			focused = row;
+		h3_custom_value(row, profile, text, sizeof(text));
+		text_show(named(item, "value"), text);
+		item->animation.current_frame_index = has_focus ? 1 : 0;
+		if ((found = named(item, "arrow_left")) != NULL)
+			widget_instance_set_visibility_recursive(found, has_focus);
+		if ((found = named(item, "arrow_right")) != NULL)
+			widget_instance_set_visibility_recursive(found, has_focus);
+	}
+	h3_profile_name(text, sizeof(text), profile);
+	h3_capitals(text);
+	text_show(named(screen, "profile_name"), text);
+	if ((found = named(screen, "swatch")) != NULL)
+		found->animation.current_frame_index = h3_swatch_frame(profile->primary_color_index);
+	if ((found = named(screen, "preview_swatch")) != NULL)
+		found->animation.current_frame_index = h3_swatch_frame(profile->primary_color_index);
+	text_show(named(screen, "preview_name"), T(h3_color_names[h3_swatch_frame(profile->primary_color_index)]));
+	h3_custom_spartan_preview(profile->primary_color_index);
+	string_show(named(screen, "custom_help"), focused);
+	/* (the settings panel's Invert look flips the stick again, on this
+	Vita: with both on, said) */
+	if (!h3_custom.status[0] && profile->controller_settings.invert_look && atoi(setting_get("XV_INVERT_Y", "0")))
+	{
+		text_show(named(screen, "status"),
+			T("The settings panel's Invert look is on too: on this PS Vita the two cancel out."));
+	}
+	else
+		text_show(named(screen, "status"), h3_custom.status);
+	{
+		struct player_profile_controller_settings const *settings = &profile->controller_settings;
+		char said[256];
+
+		h3_profile_name(text, sizeof(text), profile);
+		snprintf(said, sizeof(said), "%s: color %d, stick %d, buttons %d, look %d, invert %d, flight %d, autocenter %d, "
+			"vibration %s", text, profile->primary_color_index, settings->joystick_preset, settings->button_preset,
+			settings->look_sensitivity, settings->invert_look, settings->flight_stick_aircraft_controls,
+			settings->autocenter, settings->vibration_disabled ? "off" : "on");
+		if (strcmp(said, h3_custom.said))
+		{
+			snprintf(h3_custom.said, sizeof(h3_custom.said), "%s", said);
+			platform_log("menus: h3 customize: now %s", said);
+		}
+	}
+}
+
+/* (port h3 custom save: Circle, back) the changes saved as the Xbox's
+"player profile save changes" saves them (player_ui_save_profile: the
+profile's file and its SaveMeta.xbx name), when there are any; the profile
+in use then the saved one, its controls applied */
+static void h3_custom_save(void)
+{
+	struct player_profile *edit = player_ui_get_edit_player_profile();
+	struct player_profile saved;
+	char name[48];
+
+	if (!edit)
+		return;
+	memcpy(&saved, edit, sizeof(saved));
+	h3_profile_name(name, sizeof(name), &saved);
+	if (!player_ui_edit_profile_is_dirty())
+	{
+		player_ui_end_editing_profile();
+		platform_log("menus: h3 customize: %s: no changes", name);
+		return;
+	}
+	if (!player_ui_save_profile())
+	{
+		platform_log("menus: h3 customize: %s could not be saved", name);
+		return;
+	}
+	if (h3_profile_same(player_ui_get_active_player_profile_index(0), h3_custom.index))
+		player_ui_set_active_player_profile(0, player_ui_get_active_player_profile_index(0), &saved);
+	h3_profiles.focus_index = h3_custom.index;
+	platform_log("menus: h3 customize: saved %s: color %d, stick %d, buttons %d, look %d, invert %d, flight %d, "
+		"autocenter %d, vibration %s", name, saved.primary_color_index, saved.controller_settings.joystick_preset,
+		saved.controller_settings.button_preset, saved.controller_settings.look_sensitivity,
+		saved.controller_settings.invert_look, saved.controller_settings.flight_stick_aircraft_controls,
+		saved.controller_settings.autocenter, saved.controller_settings.vibration_disabled ? "off" : "on");
+}
+
 /* ---- joining */
 
 static void join_begin(struct p2p_lobby_entry const *entry, char const *password)
@@ -2713,6 +3591,59 @@ boolean pc_menu_event_function_invoke(
 	case _function_h3_setup_hold:
 		setup_hold(widget);
 		return TRUE;
+	/* (the Halo 3 profile screens: halo3/profiles.xml, customize.xml) */
+	case _function_h3_profiles_campaign:
+		h3_profiles_initialize(_h3_profiles_campaign);
+		return TRUE;
+	case _function_h3_profiles_customize:
+		h3_profiles_initialize(_h3_profiles_customize);
+		return TRUE;
+	/* (A on a row: the profile played, or edited, as the screen's mode is -
+	the other's handler fails, so that its screen does not open - or on
+	CREATE NEW PROFILE its name asked for) */
+	case _function_h3_profile_play:
+	case _function_h3_profile_edit:
+	{
+		short mode = function_index == _function_h3_profile_play ? _h3_profiles_campaign : _h3_profiles_customize;
+		short item = h3_profiles_item(widget);
+
+		if (h3_profiles.mode != mode)
+			return FALSE;
+		if (item >= h3_profiles.count)
+		{
+			h3_profile_create_begin(event ? event->controller_index : NONE);
+			return FALSE;
+		}
+		return mode == _h3_profiles_campaign ? h3_profile_play(item, event ? event->controller_index : NONE) :
+			h3_profile_edit(item);
+	}
+	case _function_h3_profile_create:
+		h3_profile_create_begin(event ? event->controller_index : NONE);
+		return TRUE;
+	case _function_h3_profile_delete_ask:
+		return h3_profile_delete_ask();
+	case _function_h3_profile_delete:
+		h3_profile_delete();
+		return TRUE;
+	case _function_h3_profile_page_up:
+		h3_profiles.page = -1;
+		return TRUE;
+	case _function_h3_profile_page_down:
+		h3_profiles.page = 1;
+		return TRUE;
+	case _function_h3_custom_next:
+		return h3_custom_change(widget, 1);
+	case _function_h3_custom_previous:
+		return h3_custom_change(widget, -1);
+	case _function_h3_custom_save:
+		h3_custom_save();
+		return TRUE;
+	/* (the editor gone without its Circle: nothing saved, as the Xbox's
+	edit screen left without SAVE CHANGES) */
+	case _function_h3_custom_close:
+		if (player_ui_get_edit_player_profile())
+			player_ui_end_editing_profile();
+		return TRUE;
 	case _function_coop_campaign:
 	case _function_unwired:
 	default:
@@ -2792,6 +3723,17 @@ void pc_menu_game_data_function_invoke(
 	case _input_h3_campaign_networks:
 		h3_pick_update(widget, NUMBER_OF_H3_CAMPAIGN_NETWORKS, "campnet_picture", "campnet_text");
 		break;
+	case _input_h3_profiles:
+		if (widget->type == _ui_widget_type_column_list)
+			h3_profiles_update(widget);
+		break;
+	case _input_h3_profile_delete_text:
+		h3_profile_delete_text_update(widget);
+		break;
+	case _input_h3_custom:
+		if (widget->type == _ui_widget_type_column_list)
+			h3_custom_update(widget);
+		break;
 	default:
 		break;
 	}
@@ -2832,6 +3774,7 @@ void pc_menu_functions_update(
 		menu_functions.open_system_link = FALSE;
 		menu_functions.open_password = FALSE;
 		menu_functions.create_pending = FALSE;
+		h3_profiles.open_pending = FALSE;
 		/* (ui.map's scripts start again with it: ring_loop awake) */
 		h3_scenes.ring_asleep = FALSE;
 		return;
@@ -2852,6 +3795,25 @@ while it closes: browser dispose) */
 				active->definition_tag_index, NONE, NONE);
 		}
 		menu_functions.open_password = FALSE;
+	}
+	/* (a profile made on the Halo 3 profile screen: the screen choosing it
+	opens, the campaign's level select - the Halo 3 lobby - or the editor,
+	with the profile screen behind it) */
+	if (h3_profiles.open_pending)
+	{
+		long next = tag_loaded(UI_WIDGET_DEFINITION_TAG, h3_profiles.mode == _h3_profiles_customize ?
+			"pc\\h3\\custom\\screen" : "ui\\shell\\main_menu\\solo_level_select\\solo_level_select_screen");
+		struct widget_instance *active = NULL;
+		long index;
+
+		h3_profiles.open_pending = FALSE;
+		for (index = 0; index < 4 && !active; index++)
+			active = ui_widget_port_active_screen((short)index);
+		if (next != NONE && active)
+		{
+			ui_widget_load_by_name_or_tag(NULL, next, NULL, active->local_player_index, active->definition_tag_index,
+				NONE, NONE);
+		}
 	}
 	/* (a join's watch goes on from here as the screens change) */
 	join_watch();

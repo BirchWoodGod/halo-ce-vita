@@ -1113,6 +1113,16 @@ boolean synchronize_metadata_display_name_with_profile_name(
 									old_persistent_storage_path[MAXIMUM_FILENAME_LENGTH] = 0;
 									_snprintf(new_persistent_storage_path, MAXIMUM_FILENAME_LENGTH, "%s%s",
 										save_game_directory, game_state_get_persistent_storage_filename());
+#ifdef HALO_LINUX
+									/* port: a profile with no campaign save yet
+									(savegame.bin is made the first time its level
+									list opens) has none to copy: renamed all the same.
+									Its copy failing kept the old folder, under the old
+									name, the profile's file saying the new one */
+									if (GetFileAttributesA(old_persistent_storage_path) == (unsigned long)-1)
+										success = TRUE;
+									else
+#endif
 									success = (boolean)CopyFileA(
 										old_persistent_storage_path, new_persistent_storage_path, TRUE);
 								}
