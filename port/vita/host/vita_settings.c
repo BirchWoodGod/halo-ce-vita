@@ -4028,6 +4028,17 @@ static void tab_step(int step)
 		maps_scan();
 }
 
+static void panel_begin(void)
+{
+	panel_open = 1;
+	/* (Dev hidden since: the first tab) */
+	if (!tab_shown(tab))
+		tab = page = TAB_GAME;
+	if (tab == TAB_MULTIPLAYER)
+		maps_scan();
+	show();
+}
+
 int vita_settings_panel_open(void)
 {
 	return panel_open;
@@ -4118,6 +4129,13 @@ int vita_settings_input(const struct vita_host_pad *pad)
         both_since = 0;
         return 1;
     }
+	/* (the game's menus asked for the panel: the Halo 3 main menu's Start,
+	which the panel never sees pressed, being held already) */
+	if (__atomic_exchange_n(&halo_settings_panel_request, 0, __ATOMIC_ACQ_REL) && !panel_open)
+	{
+		panel_begin();
+		return 1;
+	}
 	if (both)
 	{
 		if (!both_since)
@@ -4129,15 +4147,7 @@ int vita_settings_input(const struct vita_host_pad *pad)
 			if (panel_open)
 				close_panel();
 			else
-			{
-				panel_open = 1;
-				/* (Dev hidden since: the first tab) */
-				if (!tab_shown(tab))
-					tab = page = TAB_GAME;
-				if (tab == TAB_MULTIPLAYER)
-					maps_scan();
-				show();
-			}
+				panel_begin();
 			both_since = 1;
 		}
 		/* (the pair never reaches the game while held: no pause menu) */

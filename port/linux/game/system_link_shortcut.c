@@ -60,6 +60,7 @@ volatile int halo_multiplayer_status[SYSTEM_LINK_STATUS_COUNT];
 host) */
 volatile int halo_pc_menus_state;
 volatile int halo_text_input_state;
+volatile int halo_settings_panel_request;
 char halo_text_input_title[HALO_TEXT_INPUT_SIZE];
 char halo_text_input_text[HALO_TEXT_INPUT_SIZE];
 int halo_text_input_maximum;

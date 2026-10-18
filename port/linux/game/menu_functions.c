@@ -178,6 +178,7 @@ enum
 	_function_h3_campaign_host,
 	_function_h3_campaign_focus,
 	_function_h3_scene,
+	_function_settings_panel,
 };
 
 /* in port_game_data_input_names' order */
@@ -2523,6 +2524,17 @@ boolean pc_menu_event_function_invoke(
 	case _function_h3_servers_off:
 		p2p_lobby_browse(0);
 		return TRUE;
+	/* (the Halo 3 main menu's Start: on the Vita the settings panel opens, and
+	the handler fails so that the Xbox's profile settings do not open under
+	it; elsewhere those open, as before) */
+	case _function_settings_panel:
+#ifdef HALO_VITA
+		__atomic_store_n(&halo_settings_panel_request, 1, __ATOMIC_RELEASE);
+		platform_log("menus: the settings panel asked for");
+		return FALSE;
+#else
+		return TRUE;
+#endif
 	case _function_h3_campaign_init:
 		h3_campaign_initialize();
 		return TRUE;

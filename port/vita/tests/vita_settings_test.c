@@ -51,6 +51,7 @@ volatile int halo_system_link_answer;
 volatile int halo_multiplayer_status[SYSTEM_LINK_STATUS_COUNT];
 volatile int halo_pc_menus_state;
 volatile int halo_text_input_state;
+volatile int halo_settings_panel_request;
 char halo_text_input_title[HALO_TEXT_INPUT_SIZE];
 char halo_text_input_text[HALO_TEXT_INPUT_SIZE];
 int halo_text_input_maximum;
@@ -2263,6 +2264,15 @@ static void test_game_text_input(void)
 		"typing: a password's keyboard, cancelled");
 	halo_text_input_state = HALO_TEXT_INPUT_IDLE;
 	check(frame(0) == 0, "typing: then the game has the pad again");
+	/* the Halo 3 main menu's Start asks for the panel ("port settings panel") */
+	halo_settings_panel_request = 1;
+	check(frame(VITA_BUTTON_START) == 1 && panel_open && menu_visible && !halo_settings_panel_request,
+		"settings request: the game's menus open the panel, the request taken");
+	check(frame(VITA_BUTTON_START) == 1 && panel_open, "settings request: the Start still held does not close it");
+	frame(0);
+	check(frame(VITA_BUTTON_CIRCLE) == 1 && !panel_open, "settings request: circle closes it as ever");
+	frame(0);
+	check(frame(0) == 0, "settings request: then the game has the pad again");
 }
 
 static void test_button_icons(void)

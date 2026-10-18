@@ -161,7 +161,7 @@ art is this folder's own (tools/halo3_menu_art.py). -->
 		<on event="created" run="port h3 scene"/>
 		<on event="deleted" run="port h3 servers off"/>
 		<on event="b back" run="NULL"/>
-		<on event="start" open="ui\shell\main_menu\settings_select\player_setup\player_profile_select_screen" label="settings"/>
+		<on event="start" run="port settings panel" open="ui\shell\main_menu\settings_select\player_setup\player_profile_select_screen" label="settings"/>
 		<child widget="h3/main/haze"/>
 		<child widget="h3/main/column"/>
 		<child widget="h3/main/rule1"/>
