@@ -12,7 +12,7 @@ A map variant is <name>.hmv ("Halo map variant") in the Forge folder's
 folder of its map (forge_store.h). Binary, little-endian:
 
 	header (64 bytes)
-	  magic "HFRG", version u16 (1), header size u16 (64), flags u32
+	  magic "HFRG", version u16 (1 or 2), header size u16 (64), flags u32
 	  (bit 0: it has netgame spawns), map name char[32] (the scenario's
 	  short name, bloodgulch), map hash u32 (the cache file's checksum: a
 	  mismatch warns), pack count u16, path count u16, record count u16,
@@ -22,12 +22,21 @@ folder of its map (forge_store.h). Binary, little-endian:
 	records record count x 48: { path index u16, kind u8, team i8,
 	        position f32[3], yaw pitch roll f32[3], respawn s u16,
 	        count u8, game types u16, variant u8, flags u8,
-	        reserved u8[13] }
+	        AI team u8 (version 2; 0 in version 1), reserved u8[12] }
 	meta    meta size bytes: title, author, description and date, each
 	        UTF-8 and ended by a zero byte, in that order
 
 Tag paths, never tag indices: a record whose tag the map does not have is
 skipped when the variant is applied (forge.c), not refused here.
+
+Version 2 (Oct 18 2026) adds an AI character's settings to its record (a
+record of an actor variant, `actv`, only): its AI team (the byte that was
+version 1's first reserved one: FORGE_AI_TEAM_*) and its brain (flag bit 1,
+FORGE_RECORD_AI_OFF: a frozen, posed character). Version 1 files are read
+as ever (that byte and bit must be zero in them); a layout is written as the
+lowest version that holds it (version 1 unless a character has an AI
+setting), so a variant without them stays readable by older builds, and a
+file read writes back as its own version.
 */
 
 #ifndef __FORGE_FILES_H
@@ -36,7 +45,9 @@ skipped when the variant is applied (forge.c), not refused here.
 /* ---------- constants */
 
 #define FORGE_FILE_EXTENSION ".hmv"
-#define FORGE_FILE_VERSION 1
+/* the version written when a layout needs it, and the oldest read */
+#define FORGE_FILE_VERSION 2
+#define FORGE_FILE_FIRST_VERSION 1
 #define FORGE_FILE_HEADER_SIZE 64
 #define FORGE_FILE_MAXIMUM_SIZE 65536
 #define FORGE_FILE_MAXIMUM_PATHS 256
@@ -48,7 +59,8 @@ skipped when the variant is applied (forge.c), not refused here.
 #define FORGE_FILE_PACK_SIZE 32
 #define FORGE_FILE_PACK_NAME_SIZE 24
 #define FORGE_FILE_RECORD_SIZE 48
-#define FORGE_FILE_RECORD_RESERVED_SIZE 13
+/* (version 1's 13 reserved bytes: version 2's AI team, then 12) */
+#define FORGE_FILE_RECORD_RESERVED_SIZE 12
 /* the texts' room, each one's terminator included */
 #define FORGE_FILE_MAP_NAME_SIZE 32
 #define FORGE_FILE_TITLE_SIZE 32
@@ -82,7 +94,29 @@ enum
 {
 	/* placed when the variant starts (else only a netgame's spawn places it) */
 	FORGE_RECORD_PLACE_AT_START = 1 << 0,
-	FORGE_RECORD_FLAGS_KNOWN = FORGE_RECORD_PLACE_AT_START,
+	/* (version 2, a character's only) its AI's brain off: it stands as
+	placed, thinks, moves and fights not (the engine's ai_braindead) */
+	FORGE_RECORD_AI_OFF = 1 << 1,
+	FORGE_RECORD_FLAGS_VERSION_1 = FORGE_RECORD_PLACE_AT_START,
+	FORGE_RECORD_FLAGS_KNOWN = FORGE_RECORD_PLACE_AT_START | FORGE_RECORD_AI_OFF,
+};
+
+/* (version 2) a character's AI team: whom it fights. The engine's teams
+(game.h _game_team_*), and the player's own */
+enum
+{
+	/* the character's own (its unit's default team: the Covenant's for an
+	elite, the humans' for a marine) */
+	FORGE_AI_TEAM_DEFAULT = 0,
+	/* the player's own team: fights for the player, never against */
+	FORGE_AI_TEAM_PLAYER,
+	/* the engine's AI teams: each the enemy of the others and of the
+	player (a campaign map's script may ally the humans with the player) */
+	FORGE_AI_TEAM_HUMAN,
+	FORGE_AI_TEAM_COVENANT,
+	FORGE_AI_TEAM_FLOOD,
+	FORGE_AI_TEAM_SENTINEL,
+	NUMBER_OF_FORGE_AI_TEAMS
 };
 
 /* a record's kind */
@@ -154,11 +188,16 @@ struct forge_file_record
 	unsigned short game_types;
 	unsigned char variant;
 	unsigned char flags;
+	/* (version 2, a character's only: FORGE_AI_TEAM_*; else 0) */
+	unsigned char ai_team;
 };
 
 /* a map variant, as read or to be written */
 struct forge_file_layout
 {
+	/* the file's version: as read; to write, 0 for the lowest that holds
+	the layout (forge_file_layout_version) */
+	unsigned short version;
 	unsigned int flags;
 	char map_name[FORGE_FILE_MAP_NAME_SIZE];
 	unsigned int map_hash;
@@ -208,6 +247,11 @@ _forge_file_ok or why not */
 int forge_file_layout_check(
 	struct forge_file_layout const *layout,
 	char const *expected_map);
+
+/* the version a layout is written as: its own when set (1 or 2), else the
+lowest that holds it (2 when a record has an AI setting) */
+int forge_file_layout_version(
+	struct forge_file_layout const *layout);
 
 /* a result's words (English, for the log) */
 char const *forge_file_result_name(

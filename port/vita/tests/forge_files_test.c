@@ -101,7 +101,7 @@ static int layouts_equal(struct forge_file_layout const *a, struct forge_file_la
 {
 	int index;
 
-	if (a->flags != b->flags || strcmp(a->map_name, b->map_name) || a->map_hash != b->map_hash ||
+	if (forge_file_layout_version(a) != forge_file_layout_version(b) || a->flags != b->flags || strcmp(a->map_name, b->map_name) || a->map_hash != b->map_hash ||
 		a->pack_count != b->pack_count || a->path_count != b->path_count || a->record_count != b->record_count ||
 		strcmp(a->title, b->title) || strcmp(a->author, b->author) || strcmp(a->description, b->description) ||
 		strcmp(a->date, b->date))
@@ -129,7 +129,7 @@ static int layouts_equal(struct forge_file_layout const *a, struct forge_file_la
 		if (x->path_index != y->path_index || x->kind != y->kind || x->team != y->team ||
 			memcmp(x->position, y->position, sizeof(x->position)) || memcmp(x->angles, y->angles, sizeof(x->angles)) ||
 			x->respawn_seconds != y->respawn_seconds || x->count != y->count || x->game_types != y->game_types ||
-			x->variant != y->variant || x->flags != y->flags)
+			x->variant != y->variant || x->flags != y->flags || x->ai_team != y->ai_team)
 		{
 			return 0;
 		}
@@ -168,6 +168,9 @@ static struct forge_file_layout sample;
 static struct forge_file_layout decoded;
 static struct forge_file_layout other;
 static unsigned char good[FORGE_FILE_MAXIMUM_SIZE];
+/* (version 2: the sample with an Elite of the player's team, its brain off) */
+static unsigned char good2[FORGE_FILE_MAXIMUM_SIZE];
+static int good2_size;
 static unsigned char work[FORGE_FILE_MAXIMUM_SIZE + 16];
 static int good_size;
 
@@ -488,8 +491,10 @@ static void test_reader_refuses(void)
 			{ 30, 1, 2, "an object counted twice" },
 			{ 31, 2, 0x20, "an unknown game type" },
 			{ 33, 1, 16, "variant 16" },
-			{ 34, 1, 0x02, "an unknown flag" },
-			{ 35, 1, 1, "a reserved byte" },
+			{ 34, 1, 0x02, "the AI's brain flag in version 1" },
+			{ 34, 1, 0x04, "an unknown flag" },
+			{ 35, 1, 1, "an AI team in version 1 (its first reserved byte)" },
+			{ 36, 1, 1, "a reserved byte" },
 			{ 47, 1, 0x80, "the last reserved byte" },
 		};
 		int index;
@@ -534,6 +539,150 @@ static void test_reader_refuses(void)
 		fix_checksum(work, good_size);
 		CHECK(decode(work, good_size, "bloodgulch") == _forge_file_bad_meta, "an empty title: refused");
 	}
+}
+
+/* a version 2 variant: the sample and two characters, one of the player's
+team with its brain off, one of the Flood's */
+static void sample_layout_2(struct forge_file_layout *layout)
+{
+	sample_layout(layout);
+	add_path(layout, GROUP('a', 'c', 't', 'v'), "characters\\elite\\elite major");
+	add_record(layout, layout->path_count - 1, 96.f, -159.f, 1.f, 1.f);
+	layout->records[layout->record_count - 1].ai_team = FORGE_AI_TEAM_PLAYER;
+	layout->records[layout->record_count - 1].flags |= FORGE_RECORD_AI_OFF;
+	add_record(layout, layout->path_count - 1, 95.f, -159.f, 1.f, 1.f);
+	layout->records[layout->record_count - 1].ai_team = FORGE_AI_TEAM_FLOOD;
+}
+
+static void test_version_2(void)
+{
+	struct forge_file_layout layout;
+	int result = -1;
+	int size;
+	int records;
+	int offset;
+
+	/* (a layout with no AI setting is written as version 1, readable by
+	older builds) */
+	CHECK(good[4] == 1 && good[5] == 0, "the sample (no AI settings) is written as version 1");
+	CHECK(decode(good, good_size, "bloodgulch") == _forge_file_ok && decoded.version == 1, "and read as version 1");
+	/* (with them: version 2, read back the same) */
+	sample_layout_2(&layout);
+	CHECK(forge_file_layout_version(&layout) == 2, "AI settings need version 2");
+	good2_size = forge_file_encode(&layout, good2, sizeof(good2), &result);
+	CHECK(good2_size > 0 && result == _forge_file_ok && good2[4] == 2 && good2[5] == 0, "written as version 2");
+	CHECK(decode(good2, good2_size, "bloodgulch") == _forge_file_ok && decoded.version == 2, "read back as version 2");
+	layout.version = 2;
+	CHECK(layouts_equal(&layout, &decoded), "its AI team and brain read back");
+	CHECK(decoded.records[5].ai_team == FORGE_AI_TEAM_PLAYER && (decoded.records[5].flags & FORGE_RECORD_AI_OFF) &&
+		decoded.records[6].ai_team == FORGE_AI_TEAM_FLOOD && !(decoded.records[6].flags & FORGE_RECORD_AI_OFF),
+		"the player's team, brain off; the Flood's, brain on");
+	/* (a version 1 file read writes back as version 1; a version 2 one as 2) */
+	CHECK(decode(good, good_size, NULL) == _forge_file_ok && forge_file_encode(&decoded, work, sizeof(work), &result) ==
+		good_size && !memcmp(work, good, (size_t)good_size), "a version 1 file writes back as itself");
+	CHECK(decode(good2, good2_size, NULL) == _forge_file_ok && forge_file_encode(&decoded, work, sizeof(work), &result) ==
+		good2_size && !memcmp(work, good2, (size_t)good2_size), "a version 2 file writes back as itself");
+	/* (the writer's refusals) */
+	sample_layout_2(&layout);
+	layout.version = 1;
+	CHECK(encode_refused(&layout), "AI settings in a version 1 layout are not written");
+	sample_layout_2(&layout);
+	layout.version = 3;
+	CHECK(encode_refused(&layout), "version 3 is not written");
+	sample_layout_2(&layout);
+	layout.records[5].ai_team = NUMBER_OF_FORGE_AI_TEAMS;
+	CHECK(encode_refused(&layout), "an unknown AI team is not written");
+	sample_layout_2(&layout);
+	layout.records[0].ai_team = FORGE_AI_TEAM_COVENANT;
+	CHECK(encode_refused(&layout), "a Warthog's AI team is not written");
+	sample_layout_2(&layout);
+	layout.records[1].flags |= FORGE_RECORD_AI_OFF;
+	CHECK(encode_refused(&layout), "a boulder's brain is not written");
+	sample_layout_2(&layout);
+	layout.records[5].flags |= 0x04;
+	CHECK(encode_refused(&layout), "an unknown flag in version 2 is not written");
+	/* (the reader's: version 0 and 3; each field of the characters'
+	records, checksum right) */
+	memcpy(work, good2, (size_t)good2_size);
+	put_u16(work, 4, 3);
+	CHECK(decode(work, good2_size, "bloodgulch") == _forge_file_bad_version, "version 3: refused");
+	put_u16(work, 4, 0);
+	CHECK(decode(work, good2_size, "bloodgulch") == _forge_file_bad_version, "version 0: refused");
+	memcpy(work, good2, (size_t)good2_size);
+	put_u16(work, 4, 1);
+	CHECK(decode(work, good2_size, "bloodgulch") == _forge_file_bad_record, "AI settings in a file called version 1: refused");
+	records = good2_size - (FORGE_FILE_RECORD_SIZE * layout.record_count) -
+		(int)(strlen(layout.title) + strlen(layout.author) + strlen(layout.description) + strlen(layout.date) + 4);
+	{
+		static struct
+		{
+			int record;
+			int offset;
+			unsigned char value;
+			char const *what;
+		} const cases[] =
+		{
+			{ 5, 35, NUMBER_OF_FORGE_AI_TEAMS, "AI team 6" },
+			{ 5, 35, 0xFF, "AI team 255" },
+			{ 5, 34, 0x05, "an unknown flag of a character" },
+			{ 5, 36, 1, "the first reserved byte after the AI team" },
+			{ 6, 47, 0x80, "the last reserved byte" },
+			{ 0, 35, FORGE_AI_TEAM_COVENANT, "a Warthog's AI team" },
+			{ 3, 34, FORGE_RECORD_PLACE_AT_START | FORGE_RECORD_AI_OFF, "a weapon's brain" },
+		};
+		int index;
+
+		for (index = 0; index < (int)(sizeof(cases) / sizeof(cases[0])); index++)
+		{
+			char what[96];
+
+			memcpy(work, good2, (size_t)good2_size);
+			work[records + FORGE_FILE_RECORD_SIZE * cases[index].record + cases[index].offset] = cases[index].value;
+			fix_checksum(work, good2_size);
+			snprintf(what, sizeof(what), "version 2: %s: refused", cases[index].what);
+			CHECK(decode(work, good2_size, "bloodgulch") == _forge_file_bad_record, what);
+		}
+	}
+	/* (every AI team each character may have, taken) */
+	for (offset = 0; offset < NUMBER_OF_FORGE_AI_TEAMS; offset++)
+	{
+		memcpy(work, good2, (size_t)good2_size);
+		work[records + FORGE_FILE_RECORD_SIZE * 6 + 35] = (unsigned char)offset;
+		fix_checksum(work, good2_size);
+		if (decode(work, good2_size, "bloodgulch") != _forge_file_ok || decoded.records[6].ai_team != offset)
+			CHECK(0, "an AI team in range was refused");
+	}
+	/* (every bit of the version 2 file flipped: refused, but for the map
+	hash and the AI fields of the characters, which have other good values) */
+	for (offset = 0; offset < good2_size; offset++)
+	{
+		int bit;
+		int ai_field = 0;
+		int character;
+
+		for (character = 5; character <= 6; character++)
+		{
+			int at = records + FORGE_FILE_RECORD_SIZE * character;
+
+			if (offset == at + 34 || offset == at + 35)
+				ai_field = 1;
+		}
+		for (bit = 0; bit < 8; bit++)
+		{
+			int taken;
+
+			memcpy(work, good2, (size_t)good2_size);
+			work[offset] ^= (unsigned char)(1 << bit);
+			taken = decode(work, good2_size, "bloodgulch") == _forge_file_ok;
+			if (taken && !(offset >= 44 && offset < 48) && !ai_field)
+			{
+				printf("  (version 2: byte %d bit %d)\n", offset, bit);
+				CHECK(0, "a flipped bit of a version 2 file was taken");
+			}
+		}
+	}
+	size = good2_size;
+	CHECK(size > good_size, "version 2's file is the sample and two records more");
 }
 
 static void test_names(void)
@@ -603,8 +752,17 @@ static void fuzz(long iterations)
 		}
 		else
 		{
-			size = good_size;
-			memcpy(work, good, (size_t)size);
+			/* (the version 1 sample, or the version 2 one) */
+			if (next_random() % 2)
+			{
+				size = good_size;
+				memcpy(work, good, (size_t)size);
+			}
+			else
+			{
+				size = good2_size;
+				memcpy(work, good2, (size_t)size);
+			}
 			changes = 1 + (int)(next_random() % 6);
 			for (index = 0; index < changes; index++)
 			{
@@ -719,8 +877,8 @@ static int dump(char const *path)
 		printf("refused: %s\n", why);
 		return 1;
 	}
-	printf("map %s title \"%s\" author \"%s\" date \"%s\" paths %d records %d\n", decoded.map_name, decoded.title,
-		decoded.author, decoded.date, decoded.path_count, decoded.record_count);
+	printf("version %d map %s title \"%s\" author \"%s\" date \"%s\" paths %d records %d\n", decoded.version, decoded.map_name,
+		decoded.title, decoded.author, decoded.date, decoded.path_count, decoded.record_count);
 	for (index = 0; index < decoded.pack_count; index++)
 		printf("pack %d: %s %08x%08x\n", index, decoded.packs[index].name, decoded.packs[index].recipe[1],
 			decoded.packs[index].recipe[0]);
@@ -728,8 +886,9 @@ static int dump(char const *path)
 	{
 		struct forge_file_record const *record = &decoded.records[index];
 
-		printf("record %d: %s kind %d team %d respawn %d flags %d at %.2f %.2f %.2f angles %.3f %.3f %.3f\n", index,
-			decoded.paths[record->path_index].path, record->kind, record->team, record->respawn_seconds, record->flags,
+		printf("record %d: %s kind %d team %d ai team %d respawn %d flags %d at %.2f %.2f %.2f angles %.3f %.3f %.3f\n", index,
+			decoded.paths[record->path_index].path, record->kind, record->team, record->ai_team, record->respawn_seconds,
+			record->flags,
 			record->position[0], record->position[1], record->position[2], record->angles[0], record->angles[1],
 			record->angles[2]);
 	}
@@ -749,6 +908,7 @@ int main(int argc, char **argv)
 	test_round_trip();
 	test_writer_refuses();
 	test_reader_refuses();
+	test_version_2();
 	test_names();
 	fuzz(iterations);
 	printf("%d checks, %d failed\n", checks, failures);

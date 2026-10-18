@@ -112,13 +112,35 @@ HALO_TEST_COMMANDS):
                            it); with a file, their names written there too
   forge tags <file>        every tag of the loaded map, group and name,
                            written to file
+  forge aiteam <team>      the held (or aimed at) character's AI team
+                           (default player human covenant flood sentinel)
+  forge brain on|off       the held (or aimed at) character's AI on or off
+  forge allai [on|off]     every placed character's AI (flipped as the
+                           Forge menu's AI row, or set)
+  forge ai                 each placed character in the log: where, its
+                           team, its brain, alive or dead
+  forge objects            each object of the layout in the log: where it
+                           is, its placed spot, alive, destroyed or gone
+  forge round              a new round, as the Forge menu's NEW ROUND
+  forge destroy [#id]      (tests) the held or aimed at object (or the
+                           layout's of that id) destroyed
+                           by the engine's damage (a vehicle's wreck, a
+                           character's death), as play would
+  forge kill [#id]         (tests) the held or aimed at unit (or the
+                           layout's of that id) killed as in play: a
+                           vehicle's wreck, a character's body stay
+  forge shove [#id] i j k  (tests) the held or aimed at object (or the
+                           layout's of that id) given that velocity, as a
+                           blast would
 Each logs what it did ("forge: ...").
 */
 
 #include "cseries.h"
 #include "real_math.h"
+#include "ai/ai.h"
 #include "ai/ai_script.h"
 #include "ai/actor_definitions.h"
+#include "ai/actors.h"
 #include "cache/cache_files.h"
 #include "camera/observer.h"
 #include "devices/device_controls.h"
@@ -132,6 +154,7 @@ Each logs what it did ("forge: ...").
 #include "items/equipment_definitions.h"
 #include "items/weapon_definitions.h"
 #include "main/main.h"
+#include "objects/damage.h"
 #include "objects/objects.h"
 #include "objects/object_types.h"
 #include "physics/collisions.h"
@@ -208,6 +231,11 @@ enum
 	FORGE_UNDO_DEPTH = 32,
 	/* the HUD's lines (UTF-8) */
 	FORGE_LINE_SIZE = 128,
+	/* how long an object let go, moved or placed is followed to where it
+	comes to rest (its placed spot, forge_placed's home): it falls, it
+	settles (a character with its brain on: only its fall, not where it
+	walks off to) */
+	FORGE_SETTLE_MILLISECONDS = 3000,
 };
 
 /* (the scenery group's tag: no header of the game's names it) */
@@ -433,8 +461,19 @@ struct forge_palette_entry
 	char name[FORGE_NAME_SIZE];
 };
 
-/* an object this session placed (the budget's, and what a map variant
-saves) */
+/* an object's place and facing */
+struct forge_transform
+{
+	real_point3d position;
+	real_vector3d forward;
+	real_vector3d up;
+};
+
+/* an object this session placed: the layout (the budget's, what a map
+variant saves and what a new round places again). An object gone in play
+(equipment picked up, a grenade thrown) keeps its entry, its object NONE:
+it is still the layout's and comes back with the next round; only the
+editor's delete (or undo) takes an entry out */
 struct forge_placed
 {
 	long object_index;
@@ -443,20 +482,21 @@ struct forge_placed
 	long tag_index;
 	boolean ai;
 	/* its properties (a map variant's record's): team (NONE neutral),
-	respawn time, FORGE_RECORD_* flags */
+	respawn time, FORGE_RECORD_* flags (FORGE_RECORD_AI_OFF: a
+	character's brain off), a character's AI team (FORGE_AI_TEAM_*) */
 	signed char team;
 	unsigned char flags;
 	unsigned short respawn_seconds;
+	unsigned char ai_team;
 	/* its own number this session (the undo history names it by this) */
 	long id;
-};
-
-/* an object's place and facing */
-struct forge_transform
-{
-	real_point3d position;
-	real_vector3d forward;
-	real_vector3d up;
+	/* where the editor put it (its placed spot: saved, and where a new
+	round puts it), followed while it is held and for a moment after it
+	is let go or moved (it falls, it settles: settle_until), never by play
+	(a Warthog driven, an elite walking) */
+	struct forge_transform home;
+	boolean has_home;
+	unsigned long settle_until;
 };
 
 /* a step of the undo history */
@@ -480,6 +520,7 @@ struct forge_undo
 	signed char team;
 	unsigned char flags;
 	unsigned short respawn_seconds;
+	unsigned char ai_team;
 	/* where it was before the step, and after */
 	struct forge_transform from;
 	struct forge_transform to;
@@ -617,6 +658,22 @@ static struct
 	unsigned long packs_enabled;
 	unsigned long packs_session;
 	char packs_report[FORGE_LINE_SIZE];
+	/* a new round (the Forge menu's NEW ROUND, Halo 3's Restart Round):
+	asked (round_requested, done at the next forge_update with no menu
+	over the game), the map reset by the engine (main_reset_map: the map's
+	own objects, the players, the scores start over); the layout taken as
+	the map resets (forge_map_resetting: round_layout) and placed again
+	once the player has spawned (round_pending), the monitor again where it
+	was if it flew (round_monitor, round_camera) */
+	volatile boolean round_requested;
+	boolean round_resetting;
+	boolean round_pending;
+	boolean round_monitor;
+	struct forge_transform round_camera;
+	long round_count;
+	/* (the Forge menu's AI row) every placed character's brain flipped:
+	all off if any is on, else all on */
+	volatile boolean ai_all_requested;
 } forge_globals = { FALSE, "", FALSE, FALSE, 0, NONE, FALSE, NONE, 0.f, { 0.f }, { 0.f }, _forge_speed_normal };
 
 /* ---------- private code */
@@ -966,27 +1023,135 @@ static boolean forge_object_alive(
 		!TEST_FLAG(object_header_get(object_index)->flags, _object_header_being_deleted_bit);
 }
 
-/* the objects placed that are gone (deleted, destroyed, a new map) let go,
-the characters alive counted */
+static void forge_transform_get(long object_index, struct forge_transform *transform);
+
+/* the layout's objects gone in play (equipment picked up, a grenade thrown)
+kept, their object NONE (they come back with the next round); the
+characters counted (the dead among them: they come back too) */
 static void forge_placed_update(
 	void)
 {
 	short index;
-	short kept = 0;
 
 	forge_globals.ai_count = 0;
+	forge_globals.placed_count = (short)PIN(forge_globals.placed_count, 0, FORGE_MAXIMUM_OBJECTS);
+	for (index = 0; index < forge_globals.placed_count; index++)
+	{
+		struct forge_placed *placed = &forge_globals.placed[index];
+
+		if (placed->object_index != NONE && !forge_object_alive(placed->object_index))
+			placed->object_index = NONE;
+		if (placed->ai)
+			forge_globals.ai_count++;
+	}
+}
+
+/* an entry of the layout taken out (the editor's delete, an undone
+placing): the rest kept in their order */
+static void forge_placed_remove(
+	short index)
+{
+	if (index < 0 || index >= forge_globals.placed_count || index >= FORGE_MAXIMUM_OBJECTS)
+		return;
+	csmemmove(&forge_globals.placed[index], &forge_globals.placed[index + 1],
+		sizeof(forge_globals.placed[0]) * (size_t)(forge_globals.placed_count - index - 1));
+	forge_globals.placed_count--;
+	forge_placed_update();
+}
+
+/* the entry of an object (NULL for NONE, or one not placed) */
+static struct forge_placed *forge_placed_of_object(
+	long object_index)
+{
+	short index;
+
+	if (object_index == NONE)
+		return NULL;
 	for (index = 0; index < forge_globals.placed_count && index < FORGE_MAXIMUM_OBJECTS; index++)
 	{
-		struct forge_placed placed = forge_globals.placed[index];
-		struct object_datum *object = forge_object_alive(placed.object_index) ? object_get(placed.object_index) : NULL;
-
-		if (!object)
-			continue;
-		if (placed.ai && !TEST_FLAG(object->object.damage_flags, _object_dead_bit))
-			forge_globals.ai_count++;
-		forge_globals.placed[kept++] = placed;
+		if (forge_globals.placed[index].object_index == object_index)
+			return &forge_globals.placed[index];
 	}
-	forge_globals.placed_count = kept;
+	return NULL;
+}
+
+/* the editor took an object out of the layout: its entry goes (not kept
+as gone in play) */
+static void forge_placed_forget_object(
+	long object_index)
+{
+	struct forge_placed *placed = forge_placed_of_object(object_index);
+
+	if (placed)
+		forge_placed_remove((short)(placed - forge_globals.placed));
+}
+
+static void forge_placed_forget_id(
+	long id)
+{
+	short index;
+
+	for (index = 0; id != NONE && index < forge_globals.placed_count && index < FORGE_MAXIMUM_OBJECTS; index++)
+	{
+		if (forge_globals.placed[index].id == id)
+		{
+			forge_placed_remove(index);
+			return;
+		}
+	}
+}
+
+/* an object placed, let go or moved by the editor: its placed spot follows
+it while it comes to rest */
+static void forge_settle(
+	long object_index)
+{
+	struct forge_placed *placed = forge_placed_of_object(object_index);
+
+	if (!placed)
+		return;
+	if (forge_object_alive(object_index))
+	{
+		forge_transform_get(object_index, &placed->home);
+		placed->has_home = TRUE;
+	}
+	placed->settle_until = system_milliseconds() + FORGE_SETTLE_MILLISECONDS;
+}
+
+/* (each frame) the placed spots of the objects held or settling followed:
+not while something else carries them (a weapon in a hand, a rider in a
+seat), not once dead or destroyed */
+static void forge_homes_update(
+	void)
+{
+	unsigned long now = system_milliseconds();
+	short index;
+
+	for (index = 0; index < forge_globals.placed_count && index < FORGE_MAXIMUM_OBJECTS; index++)
+	{
+		struct forge_placed *placed = &forge_globals.placed[index];
+		struct object_datum *object;
+
+		if (!forge_object_alive(placed->object_index))
+			continue;
+		object = object_get(placed->object_index);
+		if (placed->object_index != forge_globals.held_object_index &&
+			((long)(placed->settle_until - now) <= 0 || object->object.parent_object_index != NONE ||
+				TEST_FLAG(object->object.damage_flags, _object_dead_bit)))
+		{
+			continue;
+		}
+		/* (a character with its brain on, let go: only its fall followed,
+		not where it walks off to) */
+		if (placed->ai && placed->has_home && placed->object_index != forge_globals.held_object_index &&
+			!(placed->flags & FORGE_RECORD_AI_OFF))
+		{
+			placed->home.position.z = object->object.position.z;
+			continue;
+		}
+		forge_transform_get(placed->object_index, &placed->home);
+		placed->has_home = TRUE;
+	}
 }
 
 static void forge_placed_add(
@@ -994,18 +1159,149 @@ static void forge_placed_add(
 	long tag_index,
 	boolean ai)
 {
+	struct forge_placed *placed;
+
 	if (forge_globals.placed_count < 0 || forge_globals.placed_count >= FORGE_MAXIMUM_OBJECTS)
 		return;
-	forge_globals.placed[forge_globals.placed_count].object_index = object_index;
-	forge_globals.placed[forge_globals.placed_count].tag_index = tag_index;
-	forge_globals.placed[forge_globals.placed_count].ai = ai;
-	forge_globals.placed[forge_globals.placed_count].team = NONE;
-	forge_globals.placed[forge_globals.placed_count].flags = FORGE_RECORD_PLACE_AT_START;
-	forge_globals.placed[forge_globals.placed_count].respawn_seconds = FORGE_DEFAULT_RESPAWN_SECONDS;
-	forge_globals.placed[forge_globals.placed_count].id = ++forge_globals.next_id;
+	placed = &forge_globals.placed[forge_globals.placed_count];
+	csmemset(placed, 0, sizeof(*placed));
+	placed->object_index = object_index;
+	placed->tag_index = tag_index;
+	placed->ai = ai;
+	placed->team = NONE;
+	placed->flags = FORGE_RECORD_PLACE_AT_START;
+	placed->respawn_seconds = FORGE_DEFAULT_RESPAWN_SECONDS;
+	placed->ai_team = FORGE_AI_TEAM_DEFAULT;
+	placed->id = ++forge_globals.next_id;
 	forge_globals.placed_count++;
 	if (ai)
 		forge_globals.ai_count++;
+	forge_settle(object_index);
+}
+
+/* ---- a character's AI (forge_placed's ai_team, FORGE_RECORD_AI_OFF), by
+the engine's own switches: its unit's and its actor's team, as the scripts'
+ai_set_team gives them (ai_update_team_status then has every actor see
+friend and foe again), and ai_braindead's actor_braindead (a braindead
+actor stands frozen as placed: it thinks, moves and fights not, as a
+cinematic's characters do) */
+
+/* the properties window's words for the AI teams, and the log's */
+static char const *const forge_ai_team_names[NUMBER_OF_FORGE_AI_TEAMS] =
+{
+	N_("DEFAULT"), N_("PLAYER"), N_("HUMAN"), N_("COVENANT"), N_("FLOOD"), N_("SENTINEL"),
+};
+static char const *const forge_ai_team_log_names[NUMBER_OF_FORGE_AI_TEAMS] =
+{
+	"default", "player", "human", "covenant", "flood", "sentinel",
+};
+
+/* the engine's team (game.h _game_team_*) an AI team is for a unit: the
+player's own (in a free for all game every player has a team of his own:
+the local player's), an AI team, or the unit's own default */
+static short forge_ai_team_index(
+	short ai_team,
+	long unit_index)
+{
+	struct object_datum *object;
+
+	switch (ai_team)
+	{
+	case FORGE_AI_TEAM_PLAYER:
+	{
+		long player_index = local_player_get_player_index(0);
+
+		return player_index != NONE ? (short)player_get(player_index)->team_index : (short)_game_team_player;
+	}
+	case FORGE_AI_TEAM_HUMAN:
+		return _game_team_human;
+	case FORGE_AI_TEAM_COVENANT:
+		return _game_team_covenant;
+	case FORGE_AI_TEAM_FLOOD:
+		return _game_team_flood;
+	case FORGE_AI_TEAM_SENTINEL:
+		return _game_team_sentinel;
+	}
+	/* (its unit's own; one of no AI team - none, or the default team, a
+	free for all player's - fights everyone but its own kind: an unused
+	team of the engine's) */
+	object = object_try_and_get(unit_index);
+	if (object)
+	{
+		short team = unit_definition_get(object->definition_index)->unit.default_team;
+
+		if (team > _game_team_default && team < NUMBER_OF_SOLO_CAMPAIGN_TEAMS)
+			return team;
+	}
+	return _game_team_unused6;
+}
+
+/* a placed character's AI settings given to its unit and actor (a dead
+one has none to give) */
+static void forge_ai_apply(
+	struct forge_placed const *placed)
+{
+	struct unit_datum *unit;
+	long actor_index;
+	short team;
+
+	if (!placed || !placed->ai || !forge_object_alive(placed->object_index))
+		return;
+	unit = unit_get(placed->object_index);
+	if (TEST_FLAG(unit->object.damage_flags, _object_dead_bit))
+		return;
+	team = forge_ai_team_index(placed->ai_team, placed->object_index);
+	unit->object.owner_team_index = team;
+	actor_index = unit->unit.actor_index;
+	if (actor_index != NONE)
+	{
+		actor_get(actor_index)->meta.team_index = team;
+		actor_braindead(actor_index, (placed->flags & FORGE_RECORD_AI_OFF) != 0);
+	}
+	ai_update_team_status();
+}
+
+/* (the Forge menu's AI row) whether any placed character's brain is on
+(TRUE when none is placed) */
+static boolean forge_ai_any_on(
+	void)
+{
+	short index;
+	boolean any = FALSE;
+
+	for (index = 0; index < forge_globals.placed_count && index < FORGE_MAXIMUM_OBJECTS; index++)
+	{
+		if (!forge_globals.placed[index].ai)
+			continue;
+		if (!(forge_globals.placed[index].flags & FORGE_RECORD_AI_OFF))
+			return TRUE;
+		any = TRUE;
+	}
+	return !any;
+}
+
+/* every placed character's brain set (on or off), said */
+static void forge_ai_all_set(
+	boolean on)
+{
+	short index;
+	short count = 0;
+
+	for (index = 0; index < forge_globals.placed_count && index < FORGE_MAXIMUM_OBJECTS; index++)
+	{
+		struct forge_placed *placed = &forge_globals.placed[index];
+
+		if (!placed->ai)
+			continue;
+		if (on)
+			placed->flags &= (unsigned char)~FORGE_RECORD_AI_OFF;
+		else
+			placed->flags |= FORGE_RECORD_AI_OFF;
+		forge_ai_apply(placed);
+		count++;
+	}
+	platform_log("forge: all AI %s (%d characters)", on ? "on" : "off", count);
+	forge_menu_notice("%s", on ? T("AI: On") : T("AI: Off"));
 }
 
 static short forge_placed_of_tag(
@@ -1230,7 +1526,6 @@ static long forge_object_under_crosshair(
 	return nearest_index;
 }
 
-static void forge_transform_get(long object_index, struct forge_transform *transform);
 static void forge_undo_record(short kind, long object_index, struct forge_transform const *from);
 static void forge_snapped(real_point3d *position, real_vector3d *forward, real_vector3d *up);
 
@@ -1320,8 +1615,10 @@ static void forge_drop(
 			forge_undo_record(_forge_undo_place, forge_globals.held_object_index, NULL);
 		else
 			forge_undo_record(_forge_undo_move, forge_globals.held_object_index, &forge_globals.held_from);
-		/* (it falls from where it was let go) */
+		/* (it falls from where it was let go: its placed spot where it
+		comes to rest) */
 		SET_FLAG(object->object.flags, _object_at_rest_bit, FALSE);
+		forge_settle(forge_globals.held_object_index);
 		forge_object_name(forge_globals.held_object_index, name, sizeof(name));
 		platform_log("forge: dropped %s (%s) at %.2f %.2f %.2f facing %.2f %.2f %.2f", name,
 			forge_tag_leaf(object->definition_index), object->object.position.x, object->object.position.y,
@@ -1365,6 +1662,7 @@ static void forge_set_facing(
 		object_set_position(object_index, &object->object.position, forward, up);
 		SET_FLAG(object->object.flags, _object_at_rest_bit, FALSE);
 		forge_undo_record(_forge_undo_move, object_index, &from);
+		forge_settle(object_index);
 	}
 }
 
@@ -1423,6 +1721,8 @@ static void forge_delete(
 	forge_undo_record(_forge_undo_delete, object_index, NULL);
 	if (object_index == forge_globals.held_object_index)
 		forge_globals.held_object_index = NONE;
+	/* (out of the layout: not kept as gone in play) */
+	forge_placed_forget_object(object_index);
 	object_delete(object_index);
 	forge_globals.deleted_count++;
 	forge_placed_update();
@@ -1514,6 +1814,10 @@ static long forge_place(
 			(unsigned long)unit_get(object_index)->unit.actor_index);
 	}
 	forge_placed_add(object_index, tag_index, actor_variant_index != NONE);
+	/* (a character's team, its default, at once: a multiplayer game's
+	units are given none by the engine) */
+	if (actor_variant_index != NONE)
+		forge_ai_apply(forge_placed_of_object(object_index));
 	forge_globals.spawned_count++;
 	if (!quiet)
 	{
@@ -1846,19 +2150,6 @@ static boolean forge_transforms_equal(
 		dot_product3d(&a->forward, &b->forward) > 0.99999f && dot_product3d(&a->up, &b->up) > 0.99999f;
 }
 
-static struct forge_placed *forge_placed_of_object(
-	long object_index)
-{
-	short index;
-
-	for (index = 0; index < forge_globals.placed_count && index < FORGE_MAXIMUM_OBJECTS; index++)
-	{
-		if (forge_globals.placed[index].object_index == object_index)
-			return &forge_globals.placed[index];
-	}
-	return NULL;
-}
-
 /* the object a history step names, NONE if it is gone */
 static long forge_undo_object(
 	struct forge_undo const *entry)
@@ -1894,6 +2185,7 @@ static boolean forge_undo_fill(
 	entry->team = placed ? placed->team : NONE;
 	entry->flags = placed ? placed->flags : FORGE_RECORD_PLACE_AT_START;
 	entry->respawn_seconds = placed ? placed->respawn_seconds : FORGE_DEFAULT_RESPAWN_SECONDS;
+	entry->ai_team = placed ? placed->ai_team : FORGE_AI_TEAM_DEFAULT;
 	forge_transform_get(object_index, &entry->from);
 	entry->to = entry->from;
 	return TRUE;
@@ -1956,6 +2248,9 @@ static boolean forge_undo_bring_back(
 	short refusal;
 	struct forge_placed *placed;
 
+	/* (an entry of its id gone in play is this object: it comes back as
+	itself, not twice) */
+	forge_placed_forget_id(entry->id);
 	object_index = forge_place(entry->tag_index, &transform->position, &transform->forward, &transform->up, TRUE, &refusal);
 	if (object_index == NONE)
 		return FALSE;
@@ -1965,6 +2260,8 @@ static boolean forge_undo_bring_back(
 		placed->team = entry->team;
 		placed->flags = entry->flags;
 		placed->respawn_seconds = entry->respawn_seconds;
+		placed->ai_team = entry->ai_team;
+		forge_ai_apply(placed);
 		if (entry->id != NONE)
 		{
 			placed->id = entry->id;
@@ -1996,6 +2293,7 @@ static void forge_undo_set_transform(
 	object->object.translational_velocity = *global_zero_vector3d;
 	object->object.angular_velocity = *global_zero_vector3d;
 	SET_FLAG(object->object.flags, _object_at_rest_bit, FALSE);
+	forge_settle(object_index);
 }
 
 /* the last step undone (redo FALSE), or the next one redone */
@@ -2033,11 +2331,17 @@ static void forge_undo_step(
 				return;
 			}
 		}
-		else if (object_index != NONE)
+		else
 		{
-			if (object_index == forge_globals.held_object_index)
-				forge_globals.held_object_index = NONE;
-			object_delete(object_index);
+			/* (out of the layout, gone in play or not) */
+			if (object_index != NONE)
+			{
+				if (object_index == forge_globals.held_object_index)
+					forge_globals.held_object_index = NONE;
+				forge_placed_forget_object(object_index);
+				object_delete(object_index);
+			}
+			forge_placed_forget_id(entry->id);
 			forge_placed_update();
 		}
 		break;
@@ -2130,9 +2434,31 @@ static void forge_property_apply(
 	case _forge_property_place_at_start:
 		placed->flags ^= FORGE_RECORD_PLACE_AT_START;
 		break;
+	case _forge_property_ai_team:
+		if (!placed->ai)
+			return;
+		placed->ai_team = (unsigned char)((placed->ai_team + step + NUMBER_OF_FORGE_AI_TEAMS) % NUMBER_OF_FORGE_AI_TEAMS);
+		forge_ai_apply(placed);
+		break;
+	case _forge_property_ai_brain:
+		if (!placed->ai)
+			return;
+		placed->flags ^= FORGE_RECORD_AI_OFF;
+		forge_ai_apply(placed);
+		break;
 	}
-	platform_log("forge: properties: team %d, respawn %d s, %splaced at start", placed->team, placed->respawn_seconds,
-		(placed->flags & FORGE_RECORD_PLACE_AT_START) ? "" : "not ");
+	if (placed->ai)
+	{
+		platform_log("forge: properties: team %d, respawn %d s, %splaced at start, AI team %s (%d), AI %s", placed->team,
+			placed->respawn_seconds, (placed->flags & FORGE_RECORD_PLACE_AT_START) ? "" : "not ",
+			forge_ai_team_log_names[placed->ai_team % NUMBER_OF_FORGE_AI_TEAMS],
+			forge_ai_team_index(placed->ai_team, placed->object_index), (placed->flags & FORGE_RECORD_AI_OFF) ? "off" : "on");
+	}
+	else
+	{
+		platform_log("forge: properties: team %d, respawn %d s, %splaced at start", placed->team, placed->respawn_seconds,
+			(placed->flags & FORGE_RECORD_PLACE_AT_START) ? "" : "not ");
+	}
 }
 
 static void forge_properties_open(
@@ -2255,6 +2581,9 @@ card) */
 /* the map variant read for the session to apply as it starts, or the one
 being saved (one at a time: the start's is applied before any save) */
 static struct forge_file_layout forge_variant_layout;
+/* a new round's layout: the session's, taken as the map resets
+(forge_map_resetting), placed again once the player has spawned */
+static struct forge_file_layout forge_round_layout;
 
 /* a scenario's short name (levels\test\bloodgulch\bloodgulch: bloodgulch),
 FALSE if it is not one a map variant may name */
@@ -2348,16 +2677,20 @@ static boolean forge_variant_capture(
 	for (index = 0; index < forge_globals.placed_count && index < FORGE_MAXIMUM_OBJECTS; index++)
 	{
 		struct forge_placed const *placed = &forge_globals.placed[index];
-		struct object_datum *object = object_try_and_get(placed->object_index);
+		struct forge_transform home;
 		struct forge_file_record *record;
 		unsigned long group_tag = tag_get_group_tag(placed->tag_index);
 		char const *name = tag_get_name(placed->tag_index);
-		real_vector3d forward;
-		real_vector3d up;
 		short path;
 		short axis;
 
-		if (!object)
+		/* (where the editor put it: its placed spot, not where play took
+		it; one gone in play is still the layout's) */
+		if (placed->has_home)
+			home = placed->home;
+		else if (forge_object_alive(placed->object_index))
+			forge_transform_get(placed->object_index, &home);
+		else
 			continue;
 		if (!name || !forge_file_group_allowed((unsigned int)group_tag) || !forge_file_path_valid(name, (int)strlen(name)) ||
 			layout->record_count >= FORGE_FILE_MAXIMUM_RECORDS)
@@ -2389,12 +2722,15 @@ static boolean forge_variant_capture(
 		record->respawn_seconds = (unsigned short)MIN(placed->respawn_seconds, FORGE_FILE_MAXIMUM_RESPAWN_SECONDS);
 		record->count = 1;
 		record->flags = (unsigned char)(placed->flags & FORGE_RECORD_FLAGS_KNOWN);
-		record->position[0] = object->object.position.x;
-		record->position[1] = object->object.position.y;
-		record->position[2] = object->object.position.z;
-		forward = placed->object_index == forge_globals.held_object_index ? forge_globals.held_forward : object->object.forward;
-		up = placed->object_index == forge_globals.held_object_index ? forge_globals.held_up : object->object.up;
-		forge_angles_from_facing(&forward, &up, record->angles);
+		/* (a character's AI settings: version 2 when any is set) */
+		if (placed->ai && group_tag == ACTOR_VARIANT_DEFINITION_TAG)
+			record->ai_team = (unsigned char)(placed->ai_team % NUMBER_OF_FORGE_AI_TEAMS);
+		else
+			record->flags &= (unsigned char)~FORGE_RECORD_AI_OFF;
+		record->position[0] = home.position.x;
+		record->position[1] = home.position.y;
+		record->position[2] = home.position.z;
+		forge_angles_from_facing(&home.forward, &home.up, record->angles);
 		for (axis = 0; axis < 3; axis++)
 		{
 			if (!(record->position[axis] > -FORGE_FILE_MAXIMUM_COORDINATE + 1.f &&
@@ -2502,9 +2838,11 @@ tag found by its path among the palette's (the browser's tags: nothing
 else is ever placed), its place inside the structure's world, within the
 budget. A record whose tag the map does not have, or that cannot be
 placed, is skipped and counted, never the variant refused (it passed the
-validator whole before it was read) */
+validator whole before it was read). (A new round's layout, round, is
+placed the same way, said as a new round) */
 static void forge_variant_apply(
-	struct forge_file_layout const *layout)
+	struct forge_file_layout const *layout,
+	boolean round)
 {
 	long tags[FORGE_FILE_MAXIMUM_PATHS];
 	short placed = 0;
@@ -2587,13 +2925,27 @@ static void forge_variant_apply(
 			entry->team = record->team;
 			entry->flags = record->flags;
 			entry->respawn_seconds = record->respawn_seconds;
+			entry->ai_team = record->ai_team;
+			if (!entry->ai)
+			{
+				entry->ai_team = FORGE_AI_TEAM_DEFAULT;
+				entry->flags &= (unsigned char)~FORGE_RECORD_AI_OFF;
+			}
+			forge_ai_apply(entry);
 		}
 		placed++;
+	}
+	skipped = (short)(missing + outside + over_budget + refused + other_kinds);
+	if (round)
+	{
+		platform_log("forge: new round %ld: %d placed again, %d skipped (%d missing tags, %d outside the map, %d past the "
+			"budget, %d refused)", forge_globals.round_count, placed, skipped, missing, outside, over_budget, refused);
+		forge_notice(T("New round: %d objects placed"), placed);
+		return;
 	}
 	if (layout->map_hash != (unsigned int)cache_files_get_checksum())
 		platform_log("forge: the map variant was made with another copy of this map (%08x, this one %08lx)", layout->map_hash,
 			(unsigned long)cache_files_get_checksum());
-	skipped = (short)(missing + outside + over_budget + refused + other_kinds);
 	platform_log("forge: map variant \"%s\" applied: %d placed, %d skipped (%d missing tags, %d outside the map, %d past the "
 		"budget, %d refused, %d not objects)", layout->title, placed, skipped, missing, outside, over_budget, refused,
 		other_kinds);
@@ -2640,10 +2992,54 @@ static void forge_session_update(
 			if (forge_globals.variant_pending)
 			{
 				forge_globals.variant_pending = FALSE;
-				forge_variant_apply(&forge_variant_layout);
+				forge_variant_apply(&forge_variant_layout, FALSE);
 			}
 		}
 	}
+	/* (a new round: once the player has spawned again, the monitor where
+	it flew, if it did, and the layout placed again) */
+	if (forge_globals.round_pending && !forge_globals.game_requested)
+	{
+		player_index = local_player_get_player_index(0);
+		if (player_index != NONE && player_get(player_index)->unit_index != NONE)
+		{
+			forge_globals.round_pending = FALSE;
+			if (forge_globals.round_monitor && forge_begin())
+			{
+				director_forge_camera(forge_globals.local_player_index, TRUE, &forge_globals.round_camera.position,
+					&forge_globals.round_camera.forward);
+			}
+			forge_variant_apply(&forge_round_layout, TRUE);
+		}
+	}
+}
+
+/* (forge_update, the Forge menu's NEW ROUND, no menu over the game) the
+map reset by the engine, as its own map_reset does it: forge_map_resetting
+takes the layout as the game's state goes, forge_map_reset and the session
+place it again */
+static void forge_new_round_start(
+	void)
+{
+	real_point3d position;
+	real_vector3d forward;
+
+	if (object_try_and_get(forge_globals.held_object_index))
+		forge_drop();
+	forge_globals.round_monitor = forge_globals.active;
+	if (forge_globals.active && forge_camera_get(&position, &forward))
+	{
+		forge_globals.round_camera.position = position;
+		forge_globals.round_camera.forward = forward;
+	}
+	else
+	{
+		forge_globals.round_monitor = FALSE;
+	}
+	forge_globals.round_resetting = TRUE;
+	platform_log("forge: new round asked: the map resets, the layout's %d objects placed again (as the %s)",
+		forge_globals.placed_count, forge_globals.round_monitor ? "monitor" : "Spartan");
+	main_reset_map();
 }
 
 /* ---------- the cross-map probe (forge deps) */
@@ -3244,6 +3640,28 @@ boolean forge_properties_get(
 	properties->team = placed->team;
 	properties->respawn_seconds = placed->respawn_seconds;
 	properties->place_at_start = (placed->flags & FORGE_RECORD_PLACE_AT_START) != 0;
+	properties->ai = placed->ai;
+	properties->ai_team = placed->ai_team;
+	properties->ai_on = !(placed->flags & FORGE_RECORD_AI_OFF);
+	if (placed->ai_team == FORGE_AI_TEAM_DEFAULT && forge_object_alive(placed->object_index))
+	{
+		/* ("DEFAULT (COVENANT)": the character's own team, named) */
+		short team = forge_ai_team_index(FORGE_AI_TEAM_DEFAULT, placed->object_index);
+		short named = team == _game_team_human ? FORGE_AI_TEAM_HUMAN : team == _game_team_covenant ? FORGE_AI_TEAM_COVENANT :
+			team == _game_team_flood ? FORGE_AI_TEAM_FLOOD : team == _game_team_sentinel ? FORGE_AI_TEAM_SENTINEL :
+			team == _game_team_player ? FORGE_AI_TEAM_PLAYER : NONE;
+
+		if (named != NONE)
+			snprintf(properties->ai_team_name, sizeof(properties->ai_team_name), "%s (%s)", T(forge_ai_team_names[0]),
+				T(forge_ai_team_names[named]));
+		else
+			snprintf(properties->ai_team_name, sizeof(properties->ai_team_name), "%s", T(forge_ai_team_names[0]));
+	}
+	else
+	{
+		snprintf(properties->ai_team_name, sizeof(properties->ai_team_name), "%s",
+			T(forge_ai_team_names[placed->ai_team % NUMBER_OF_FORGE_AI_TEAMS]));
+	}
 	return TRUE;
 }
 
@@ -3252,6 +3670,95 @@ void forge_menu_status(
 	int size)
 {
 	snprintf(status, (size_t)size, "%s", forge_globals.menu_status);
+}
+
+void forge_new_round_request(
+	void)
+{
+	forge_globals.round_requested = TRUE;
+}
+
+void forge_ai_all_request(
+	void)
+{
+	forge_globals.ai_all_requested = TRUE;
+}
+
+boolean forge_ai_all_on(
+	void)
+{
+	return forge_ai_any_on();
+}
+
+void forge_map_resetting(
+	void)
+{
+	char why[FORGE_STORE_WHY_SIZE];
+	short characters = 0;
+	short index;
+
+	if (!forge_globals.game_active || forge_globals.game_requested)
+	{
+		forge_globals.round_resetting = FALSE;
+		return;
+	}
+	/* (a reset not asked by NEW ROUND - the console's map_reset - keeps the
+	layout too, the monitor where it was) */
+	if (!forge_globals.round_resetting)
+	{
+		real_point3d position;
+		real_vector3d forward;
+
+		forge_globals.round_monitor = forge_globals.active && forge_camera_get(&position, &forward);
+		if (forge_globals.round_monitor)
+		{
+			forge_globals.round_camera.position = position;
+			forge_globals.round_camera.forward = forward;
+		}
+	}
+	forge_placed_update();
+	forge_homes_update();
+	for (index = 0; index < forge_globals.placed_count && index < FORGE_MAXIMUM_OBJECTS; index++)
+		characters += forge_globals.placed[index].ai ? 1 : 0;
+	if (!forge_variant_capture(&forge_round_layout, "New Round", NULL, why, sizeof(why)))
+	{
+		platform_log("forge: new round: the layout was not taken: %s", why);
+		csmemset(&forge_round_layout, 0, sizeof(forge_round_layout));
+	}
+	forge_globals.round_count++;
+	forge_globals.round_pending = TRUE;
+	platform_log("forge: new round %ld: the layout taken: %d objects (%d characters)", forge_globals.round_count,
+		forge_round_layout.record_count, characters);
+}
+
+void forge_map_reset(
+	void)
+{
+	/* (every object is gone, its indices with it: the layout waits in
+	forge_round_layout; the undo history's steps name objects no more) */
+	forge_globals.placed_count = 0;
+	forge_globals.ai_count = 0;
+	forge_globals.held_object_index = NONE;
+	forge_globals.held_spawned = FALSE;
+	forge_globals.undo_count = 0;
+	forge_globals.undo_cursor = 0;
+	forge_globals.undo_requested = 0;
+	forge_globals.property_requested = FALSE;
+	forge_globals.browser_chosen = FALSE;
+	forge_globals.toggle_requested = FALSE;
+	forge_globals.close_requested = FALSE;
+	forge_globals.ai_all_requested = FALSE;
+	forge_globals.round_requested = FALSE;
+	forge_globals.round_resetting = FALSE;
+	if (forge_globals.active)
+	{
+		/* (the director starts over with the map) */
+		forge_globals.active = FALSE;
+		forge_monitor_flying = 0;
+	}
+	forge_globals.unit_index = NONE;
+	if (forge_globals.game_active)
+		platform_log("forge: the map was reset: the layout is placed again once the player has spawned");
 }
 
 void forge_map_loaded(
@@ -3281,6 +3788,10 @@ void forge_map_loaded(
 	forge_globals.spawned_count = 0;
 	forge_globals.deleted_count = 0;
 	forge_globals.notice[0] = 0;
+	forge_globals.round_requested = FALSE;
+	forge_globals.round_resetting = FALSE;
+	forge_globals.round_pending = FALSE;
+	forge_globals.ai_all_requested = FALSE;
 	if (forge_globals.active)
 	{
 		/* (the director starts over with the map) */
@@ -3460,6 +3971,26 @@ void forge_update(
 		forge_globals.property_requested = FALSE;
 		forge_property_apply(forge_globals.property_request, forge_globals.property_step);
 	}
+	if (forge_globals.ai_all_requested)
+	{
+		forge_globals.ai_all_requested = FALSE;
+		forge_ai_all_set(!forge_ai_any_on());
+	}
+	/* (NEW ROUND: once the Forge menu has gone and the game runs again -
+	the engine resets a map only then) */
+	if (forge_globals.round_requested)
+	{
+		if (!forge_globals.game_active || forge_globals.game_requested || forge_globals.round_pending ||
+			forge_globals.round_resetting)
+		{
+			forge_globals.round_requested = FALSE;
+		}
+		else if (!forge_menu_open() && !game_time_get_paused())
+		{
+			forge_globals.round_requested = FALSE;
+			forge_new_round_start();
+		}
+	}
 	if (!forge_game_playing)
 		return;
 	player_index = local_player_get_player_index(forge_globals.local_player_index);
@@ -3523,6 +4054,7 @@ void forge_update(
 	}
 	forge_globals.menu_was_open = menu_open;
 	forge_placed_update();
+	forge_homes_update();
 	if (forge_globals.game_active && pressed[_gamepad_binary_button_start] && !menu_open && !forge_globals.game_requested)
 	{
 		forge_menu_open_pause();
@@ -3934,10 +4466,145 @@ boolean forge_command(
 		return TRUE;
 	}
 
-	if (!forge_globals.active)
+	/* (the layout's state: with or without the monitor) */
+	if (!strcmp(word, "ai") || !strcmp(word, "objects"))
+	{
+		short index;
+		boolean characters = !strcmp(word, "ai");
+
+		forge_placed_update();
+		for (index = 0; index < forge_globals.placed_count && index < FORGE_MAXIMUM_OBJECTS; index++)
+		{
+			struct forge_placed const *placed = &forge_globals.placed[index];
+			struct object_datum *object = forge_object_alive(placed->object_index) ? object_get(placed->object_index) : NULL;
+			short entry = forge_palette_of_tag(placed->tag_index);
+			char const *name = entry != NONE ? forge_globals.palette[entry].name : forge_tag_leaf(placed->tag_index);
+			char const *state = !object ? "gone" : TEST_FLAG(object->object.damage_flags, _object_dead_bit) ?
+				(placed->ai ? "dead" : "destroyed") : "alive";
+
+			if (characters && !placed->ai)
+				continue;
+			if (characters)
+			{
+				platform_log("forge: ai %d: %s (id %ld) %s at %.2f %.2f %.2f, AI team %s, engine team %d, AI %s, actor %s",
+					index, name, placed->id, state, object ? object->object.position.x : 0.f,
+					object ? object->object.position.y : 0.f, object ? object->object.position.z : 0.f,
+					forge_ai_team_log_names[placed->ai_team % NUMBER_OF_FORGE_AI_TEAMS],
+					object ? object->object.owner_team_index : NONE, (placed->flags & FORGE_RECORD_AI_OFF) ? "off" : "on",
+					object && unit_get(placed->object_index)->unit.actor_index != NONE ? "yes" : "none");
+			}
+			else
+			{
+				platform_log("forge: object %d: %s (id %ld) %s at %.2f %.2f %.2f, placed at %.2f %.2f %.2f", index, name,
+					placed->id, state, object ? object->object.position.x : 0.f, object ? object->object.position.y : 0.f,
+					object ? object->object.position.z : 0.f, placed->home.position.x, placed->home.position.y,
+					placed->home.position.z);
+			}
+		}
+		platform_log("forge: %s listed: %d objects, %d characters in the layout", word, forge_globals.placed_count,
+			forge_globals.ai_count);
+		return TRUE;
+	}
+	if (!strcmp(word, "round"))
+	{
+		forge_new_round_request();
+		return TRUE;
+	}
+	if (!strcmp(word, "allai"))
+	{
+		forge_ai_all_set(!strcmp(rest, "on") ? TRUE : !strcmp(rest, "off") ? FALSE : !forge_ai_any_on());
+		return TRUE;
+	}
+	if (!forge_globals.active && strcmp(word, "where"))
 	{
 		platform_log("forge: %s: not in monitor mode (\"forge on\")", word);
 		return FALSE;
+	}
+	if (!strcmp(word, "aiteam") || !strcmp(word, "brain"))
+	{
+		struct forge_placed *placed = forge_placed_of_object(forge_target_object());
+		short team;
+
+		if (!placed || !placed->ai)
+		{
+			platform_log("forge: %s: no character of the layout held or aimed at", word);
+			return FALSE;
+		}
+		if (!strcmp(word, "brain"))
+		{
+			if (!strcmp(rest, "off"))
+				placed->flags |= FORGE_RECORD_AI_OFF;
+			else
+				placed->flags &= (unsigned char)~FORGE_RECORD_AI_OFF;
+		}
+		else
+		{
+			for (team = 0; team < NUMBER_OF_FORGE_AI_TEAMS && strcmp(rest, forge_ai_team_log_names[team]); team++)
+				;
+			if (team >= NUMBER_OF_FORGE_AI_TEAMS)
+				return FALSE;
+			placed->ai_team = (unsigned char)team;
+		}
+		forge_ai_apply(placed);
+		platform_log("forge: %s: AI team %s (engine team %d), AI %s", forge_tag_leaf(placed->tag_index),
+			forge_ai_team_log_names[placed->ai_team % NUMBER_OF_FORGE_AI_TEAMS],
+			forge_ai_team_index(placed->ai_team, placed->object_index), (placed->flags & FORGE_RECORD_AI_OFF) ? "off" : "on");
+		return TRUE;
+	}
+	if (!strcmp(word, "destroy") || !strcmp(word, "shove") || !strcmp(word, "kill"))
+	{
+		long object_index = forge_target_object();
+		struct object_datum *object;
+
+		/* ("#<id>": the layout's object of that id instead) */
+		if (rest[0] == '#')
+		{
+			long id = atol(rest + 1);
+			short index;
+			char *space = strchr(rest, ' ');
+
+			object_index = NONE;
+			for (index = 0; index < forge_globals.placed_count && index < FORGE_MAXIMUM_OBJECTS; index++)
+			{
+				if (forge_globals.placed[index].id == id)
+					object_index = forge_globals.placed[index].object_index;
+			}
+			memmove(rest, space ? space + 1 : rest + strlen(rest), strlen(space ? space + 1 : rest + strlen(rest)) + 1);
+		}
+		object = object_try_and_get(object_index);
+
+		if (!object)
+			return FALSE;
+		if (object_index == forge_globals.held_object_index)
+			forge_drop();
+		if (!strcmp(word, "destroy"))
+		{
+			platform_log("forge: destroyed %s", forge_tag_leaf(object->definition_index));
+			object_destroy(object_index);
+		}
+		else if (!strcmp(word, "kill"))
+		{
+			/* (a unit dies as in play: a vehicle's wreck, a character's
+			body stay) */
+			if (!(FLAG(object->object.type) & _object_mask_unit))
+				return FALSE;
+			platform_log("forge: killed %s", forge_tag_leaf(object->definition_index));
+			unit_kill(object_index);
+		}
+		else
+		{
+			float i = 0.f, j = 0.f, k = 0.f;
+
+			if (sscanf(rest, "%f %f %f", &i, &j, &k) != 3)
+				return FALSE;
+			object_activate(object_index);
+			object->object.translational_velocity.i = i;
+			object->object.translational_velocity.j = j;
+			object->object.translational_velocity.k = k;
+			SET_FLAG(object->object.flags, _object_at_rest_bit, FALSE);
+			platform_log("forge: shoved %s", forge_tag_leaf(object->definition_index));
+		}
+		return TRUE;
 	}
 	if (!strcmp(word, "spawn") || !strcmp(word, "pick"))
 	{
@@ -4005,6 +4672,10 @@ boolean forge_command(
 		short property = !strcmp(rest, "team") ? _forge_property_team : !strcmp(rest, "respawn") ? _forge_property_respawn :
 			!strcmp(rest, "start") ? _forge_property_place_at_start : NONE;
 
+		if (!strcmp(rest, "aiteam"))
+			property = _forge_property_ai_team;
+		else if (!strcmp(rest, "brain"))
+			property = _forge_property_ai_brain;
 		if (property == NONE || !forge_properties_target())
 			return FALSE;
 		forge_property_apply(property, 1);
@@ -4143,10 +4814,11 @@ boolean forge_command(
 		{
 			struct object_datum *unit = object_get(unit_index);
 
-			platform_log("forge: the player's unit at %.2f %.2f %.2f, %s, %s", unit->object.position.x,
-				unit->object.position.y, unit->object.position.z,
+			platform_log("forge: the player's unit at %.2f %.2f %.2f, %s, %s, team %d, body %.2f, shield %.2f",
+				unit->object.position.x, unit->object.position.y, unit->object.position.z,
 				TEST_FLAG(unit->object.damage_flags, _object_cannot_take_damage_bit) ? "unhurt" : "can be hurt",
-				TEST_FLAG(unit->object.damage_flags, _object_dead_bit) ? "dead" : "alive");
+				TEST_FLAG(unit->object.damage_flags, _object_dead_bit) ? "dead" : "alive", unit->object.owner_team_index,
+				unit->object.body_vitality, unit->object.shield_vitality);
 		}
 		/* (an AI character finds its way on the structure's pathfinding
 		data, which a multiplayer map may lack) */

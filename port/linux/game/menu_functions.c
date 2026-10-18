@@ -234,6 +234,8 @@ enum
 	_function_h3_mods_delete,
 	_function_h3_mods_page_up,
 	_function_h3_mods_page_down,
+	_function_forge_new_round,
+	_function_forge_all_ai,
 };
 
 /* in port_game_data_input_names' order */
@@ -1592,6 +1594,8 @@ static void h3_forge_title_update(struct widget_instance *widget)
 		text_show(named(screen, "redo"), text);
 		snprintf(text, sizeof(text), "%s: %s", T("SNAP"), forge_snap_enabled() ? T("ON") : T("OFF"));
 		text_show(named(screen, "snap"), text);
+		snprintf(text, sizeof(text), "%s: %s", T("ALL AI"), forge_ai_all_on() ? T("ON") : T("OFF"));
+		text_show(named(screen, "allai"), text);
 		forge_menu_status(status, sizeof(status));
 		if (status[0])
 			snprintf(text, sizeof(text), "%s", status);
@@ -3990,7 +3994,7 @@ static void h3_forge_properties_update(struct widget_instance *list)
 	struct widget_instance *screen = screen_of(list);
 	struct widget_instance *child;
 	struct forge_properties properties;
-	char text[96];
+	char text[160];
 	short row;
 	static char said[160];
 
@@ -4014,15 +4018,32 @@ static void h3_forge_properties_update(struct widget_instance *list)
 			else
 				snprintf(text, sizeof(text), "%s: %s", T("RESPAWN"), T("NEVER"));
 			break;
-		default:
+		case _forge_property_place_at_start:
 			snprintf(text, sizeof(text), "%s: %s", T("PLACE AT START"), properties.place_at_start ? T("YES") : T("NO"));
 			break;
+		case _forge_property_ai_team:
+			snprintf(text, sizeof(text), "%s: %s", T("AI TEAM"), properties.ai_team_name);
+			break;
+		default:
+			snprintf(text, sizeof(text), "%s: %s", T("AI"), properties.ai_on ? T("ON") : T("OFF"));
+			break;
+		}
+		/* (a character's own rows: hidden for any other object) */
+		if (row >= _forge_property_ai_team)
+		{
+			widget_instance_set_visibility_recursive(child, properties.ai);
+			child->disabled = !properties.ai;
 		}
 		text_show(child, text);
 		child->animation.current_frame_index = child == list->focused_child ? 1 : 0;
 	}
-	snprintf(text, sizeof(text), "%s: team %d, respawn %d, %s", properties.name, properties.team, properties.respawn_seconds,
-		properties.place_at_start ? "at start" : "not at start");
+	if (properties.ai)
+		snprintf(text, sizeof(text), "%s: team %d, respawn %d, %s, AI team %d, AI %s", properties.name, properties.team,
+			properties.respawn_seconds, properties.place_at_start ? "at start" : "not at start", properties.ai_team,
+			properties.ai_on ? "on" : "off");
+	else
+		snprintf(text, sizeof(text), "%s: team %d, respawn %d, %s", properties.name, properties.team,
+			properties.respawn_seconds, properties.place_at_start ? "at start" : "not at start");
 	if (strcmp(text, said))
 	{
 		snprintf(said, sizeof(said), "%s", text);
@@ -5046,6 +5067,15 @@ boolean pc_menu_event_function_invoke(
 		return TRUE;
 	case _function_forge_close:
 		forge_menus_close_request();
+		return TRUE;
+	case _function_forge_new_round:
+		/* (done once the menu has closed: the engine resets a map only in
+		a running game) */
+		platform_log("menus: forge: new round");
+		forge_new_round_request();
+		return TRUE;
+	case _function_forge_all_ai:
+		forge_ai_all_request();
 		return TRUE;
 	case _function_forge_pack_toggle:
 	{
