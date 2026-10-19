@@ -62,6 +62,7 @@ enum
 	SCENE_PACK_MAXIMUM_ROOTS = 16,
 	SCENE_PACK_MAXIMUM_STRIP_GROUPS = 32,
 	SCENE_PACK_MAXIMUM_STRIP_TAGS = 32,
+	SCENE_PACK_MAXIMUM_TUNES = 4,
 	/* a pack's (and its name's, a map's name's, a tag path's) most */
 	SCENE_PACK_NAME_SIZE = 32,
 	SCENE_PACK_TAG_PATH_SIZE = 256,
@@ -99,6 +100,14 @@ struct scene_pack_recipe_custom_edition_map
 	unsigned long checksum;
 };
 
+/* (a recipe's tune line) a tuning of the builder's and the recipe's tag it
+changes */
+struct scene_pack_recipe_tune
+{
+	char tuning[SCENE_PACK_NAME_SIZE];
+	struct scene_pack_recipe_tag tag;
+};
+
 /* a recipe (scene_pack_recipe_parse): its text is
 
 	# a comment
@@ -122,6 +131,13 @@ struct scene_pack_recipe_custom_edition_map
 	strip <group>                a group left out: references to its tags
 	                             name none
 	strip <group> <path>         a tag left out, the same way
+	tune <tuning> <group> <path> one of the recipe's tags (a tag line's)
+	                             changed by one of the builder's own
+	                             tunings (scene_pack.c: "flyable_pelican",
+	                             the campaign's Pelican made one players
+	                             fly) once the pack is built; a tag that is
+	                             not what the tuning expects is left as it
+	                             is (said in the log)
 
 groups as four characters ("bipd", "snd!"), paths as the tags' own names
 ("characters\cyborg_mp\cyborg_mp"). A root of the multiplayer unit has the
@@ -146,6 +162,9 @@ struct scene_pack_recipe
 	recipe has instead of map lines) */
 	short custom_edition_map_count;
 	struct scene_pack_recipe_custom_edition_map custom_edition_maps[SCENE_PACK_MAXIMUM_MAPS];
+	/* (tune lines) the tunings of its tags */
+	short tune_count;
+	struct scene_pack_recipe_tune tunes[SCENE_PACK_MAXIMUM_TUNES];
 };
 
 /* what a pack file's header says, once checked (scene_pack_open) */

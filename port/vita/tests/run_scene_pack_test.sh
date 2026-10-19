@@ -179,6 +179,30 @@ for c in $cases; do
 		TMPDIR="$out/tool" "$tool" fuzz "$out/tool/covenant_vehicles.pack" $(( ${HALO_TEST_FUZZ:-2000} / 4 )) 2 > "$out/tool/fuzz2.log" 2>&1 ||
 			fail "tool: covenant_vehicles' fuzzing failed ($out/tool/fuzz2.log)"
 		tail -1 "$out/tool/fuzz2.log"
+		# (the dropships: the campaign's Pelican tuned to be flown, flyable_pelican,
+		# and loaded with no correction; a tune line of no tuning, or of a tag
+		# the recipe does not hold, refused)
+		if [ -r "$data/maps/b30.map" ] || [ -r "$data/maps/a50.map" ]; then
+			"$tool" build "$recipes/dropships.txt" "$data/maps" "$out/tool/dropships.pack" > "$out/tool/dropships.log" 2>&1 ||
+				fail "tool: dropships was not built ($out/tool/dropships.log)"
+			expect tool "the dropships' Pelican tuned" \
+				"tune flyable_pelican: vehicles.pelican.pelican: its driver's seat the player's, 10 riders' seats" "$out/tool/dropships.log"
+			expect tool "dropships loads with no correction" "pack tags .*passed.* 0 corrections" "$out/tool/dropships.log"
+		fi
+		printf 'pack t\nmap b30\ntag vehi vehicles\\pelican\\pelican\ntune fly vehi vehicles\\pelican\\pelican\n' > "$out/tool/tune1.txt"
+		printf 'pack t\nmap b30\ntag vehi vehicles\\pelican\\pelican\ntune flyable_pelican vehi vehicles\\banshee\\banshee\n' > "$out/tool/tune2.txt"
+		"$tool" build "$out/tool/tune1.txt" "$data/maps" "$out/tool/tune1.pack" > "$out/tool/tune1.log" 2>&1
+		expect tool "a tune line of no tuning refused" "recipe refused: the recipe's line 4 names a tuning that is not one" "$out/tool/tune1.log"
+		"$tool" build "$out/tool/tune2.txt" "$data/maps" "$out/tool/tune2.pack" > "$out/tool/tune2.log" 2>&1
+		expect tool "a tune of a tag the recipe does not hold refused" "recipe refused: the recipe tunes a tag it does not hold" "$out/tool/tune2.log"
+		if [ -r "$data/maps/b40.map" ]; then
+			printf 'pack t\nmap b40\ntag vehi vehicles\\banshee\\banshee\ntune flyable_pelican vehi vehicles\\banshee\\banshee\n' > "$out/tool/tune3.txt"
+			"$tool" build "$out/tool/tune3.txt" "$data/maps" "$out/tool/tune3.pack" > "$out/tool/tune3.log" 2>&1 ||
+				fail "tool: the tuned Banshee's pack was not built ($out/tool/tune3.log)"
+			expect tool "a vehicle not the campaign's Pelican left as it is" \
+				"tune flyable_pelican: vehicles.banshee.banshee left as it is: it is not the campaign's Pelican" "$out/tool/tune3.log"
+			expect tool "and its pack loads with no correction" "pack tags .*passed.* 0 corrections" "$out/tool/tune3.log"
+		fi
 		# (the Halo 3 lobbies' scenes' packs: built from a30, bloodgulch and c20, each loaded with no
 		# correction and fuzzed, an eighth as many)
 		seed=3
@@ -338,8 +362,8 @@ EOF
 		if checked cepelican; then
 			log=$out/cepelican/run.log
 			expect cepelican "the pack built from Extinction and loaded beside Blood Gulch" "scene packs: ce_pelican: loaded from extinction"
-			expect cepelican "Forge's palette lists it as the Flyable Pelican" "forge: vehicles [0-9]+: Flyable Pelican"
-			expect cepelican "placed" "forge: dropped Flyable Pelican"
+			expect cepelican "Forge's palette lists it as the Extinction Pelican" "forge: vehicles [0-9]+: Extinction Pelican"
+			expect cepelican "placed" "forge: dropped Extinction Pelican"
 			expect cepelican "the player at its controls" "scene packs: ride: vehicles.epelican.epelican entered"
 			expect cepelican "four passengers in its seats" "scene packs: board: 4 passengers aboard"
 			heights=$(grep -a "where: the vehicle at" "$log" | sed 's/.* at [^ ]* [^ ]* \([-0-9.]*\),.*/\1/')

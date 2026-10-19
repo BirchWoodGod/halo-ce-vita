@@ -789,9 +789,21 @@ packs a session brings (`forge.c forge_packs`, in load order):
   (any game type may turn them on), so Forge offers them on every map from
   the map itself; none has the Rocket Warthog (Halo PC's), and packs are
   built from Xbox maps only: no multiplayer vehicles pack.
-- The Pelican (and the Covenant dropship) place and stay as large props: a
-  player put in its driver's seat (`P-driver`, 12 seats: driver, eleven
-  riders and cargo) does not fly it, holding forward moves it nothing.
+- The Covenant dropship places and stays as a large prop. The Pelican was
+  one too (no player animation enters its `P-driver` seat, and of its
+  riders' seats only `P-riderLF` and `P-riderRF`); since Oct 19 the
+  recipe's `tune flyable_pelican` line (scene_pack.c, the builder's own
+  tunings) makes it one players fly when the pack is built: the driver's
+  seat takes the player's `W-driver` animations at the Pelican's own
+  `driver enter` marker (before its nose, on the ground: walk up and press
+  the action button; the seat stays invisible, as the campaign has it),
+  the riders' seats the player had no animations for take their side's
+  front ones (ten riders; the cargo seat left as it is), and our own speed
+  (0.9 a tick at most, 0.045 more a tick; the campaign's 0.5 and 0.03,
+  Extinction's 0.95 and 0.05). Nothing of Extinction is needed or used.
+  With Extinction there too, both are offered: "Pelican" (the campaign's)
+  and "Extinction Pelican" (its guns, co-pilot and eleven riders).
+  `run_forge_test.sh pelican`.
 - The settings panel's Forge route brings the packs on by default; choosing
   them there is left for later.
 - Every multiplayer map with all three packs (run_forge_test.sh packmaps,

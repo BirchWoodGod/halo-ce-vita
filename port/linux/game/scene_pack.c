@@ -40,6 +40,8 @@ correct.
 #include "tag_files/tag_groups.h"
 #include "bitmaps/bitmap_group.h"
 #include "sound/sound_definitions.h"
+#include "units/unit_definitions.h"
+#include "models/model_definitions.h"
 
 #include "scene_pack.h"
 #include "scene_pack_ce.h"
@@ -297,6 +299,23 @@ struct build_state
 
 static boolean layout_copy(struct build_state *state, unsigned short layout, unsigned long source,
 	unsigned long offset, short depth);
+static short tuning_find(char const *name);
+static boolean tune_flyable_pelican(struct build_state *state, long pack_index, char *why, long why_size);
+
+/* the tunings a recipe may name (tune lines): what each changes in one of
+the pack's tags once it is built (our own values, never another map's
+data), and its version, which is in the recipe's hash (a tuning changed is
+a pack made again) */
+static struct
+{
+	char const *name;
+	unsigned long group_tag;
+	char const *version;
+	boolean (*apply)(struct build_state *state, long pack_index, char *why, long why_size);
+} const scene_pack_tunings[] =
+{
+	{ "flyable_pelican", 'vehi', "1", tune_flyable_pelican },
+};
 
 /* ---------- private code */
 
@@ -389,6 +408,13 @@ static boolean names_match(char const *a, char const *b)
 	while (*a && *b && lower((unsigned char)*a) == lower((unsigned char)*b))
 		a++, b++;
 	return !*a && !*b;
+}
+
+static boolean names_match_prefix(char const *name, char const *prefix)
+{
+	while (*prefix && lower((unsigned char)*name) == lower((unsigned char)*prefix))
+		name++, prefix++;
+	return !*prefix;
 }
 
 /* a pack's, a map's name: letters, digits, '_' and '-' */
@@ -643,6 +669,31 @@ boolean scene_pack_recipe_parse(
 		{
 			recipe->strip_tag_count++;
 		}
+		else if (!strcmp(word, "tune") && recipe->tune_count < SCENE_PACK_MAXIMUM_TUNES)
+		{
+			struct scene_pack_recipe_tune *tune = &recipe->tunes[recipe->tune_count];
+			long tuning_length = (long)strcspn(rest, " \t");
+			char const *tag_text = rest + tuning_length;
+			short tuning;
+
+			while (*tag_text == ' ' || *tag_text == '\t')
+				tag_text++;
+			if (tuning_length <= 0 || tuning_length >= SCENE_PACK_NAME_SIZE)
+				tuning = NONE;
+			else
+			{
+				memcpy(tune->tuning, rest, tuning_length);
+				tune->tuning[tuning_length] = 0;
+				tuning = tuning_find(tune->tuning);
+			}
+			if (tuning == NONE || !recipe_tag(tag_text, &tune->tag, TRUE) ||
+				tune->tag.group_tag != scene_pack_tunings[tuning].group_tag)
+			{
+				snprintf(why, why_size, "the recipe's line %ld names a tuning that is not one", line_number);
+				return FALSE;
+			}
+			recipe->tune_count++;
+		}
 		else
 		{
 			snprintf(why, why_size, "the recipe's line %ld is not one a recipe has", line_number);
@@ -658,6 +709,25 @@ boolean scene_pack_recipe_parse(
 	{
 		why_set(why, why_size, "the recipe names both Xbox and Custom Edition maps%s", NULL);
 		return FALSE;
+	}
+	/* (a tuning changes one of the recipe's own tags) */
+	for (index = 0; index < recipe->tune_count; index++)
+	{
+		short root;
+
+		for (root = 0; root < recipe->root_count; root++)
+		{
+			if (recipe->roots[root].group_tag == recipe->tunes[index].tag.group_tag &&
+				names_match(recipe->roots[root].path, recipe->tunes[index].tag.path))
+			{
+				break;
+			}
+		}
+		if (root == recipe->root_count)
+		{
+			why_set(why, why_size, "the recipe tunes a tag it does not hold%s", NULL);
+			return FALSE;
+		}
 	}
 
 	/* (what it says, in a form of its own: its case where the game's names
@@ -717,6 +787,27 @@ boolean scene_pack_recipe_parse(
 		write_u32(identity, map->file_size);
 		write_u32(identity + 4, map->checksum);
 		hash = fnv_bytes(hash, identity, sizeof(identity));
+	}
+	for (index = 0; index < recipe->tune_count; index++)
+	{
+		struct scene_pack_recipe_tune const *tune = &recipe->tunes[index];
+		char const *path = tune->tag.path;
+		char const *tuning_version = scene_pack_tunings[tuning_find(tune->tuning)].version;
+		unsigned char group[4];
+
+		hash = fnv_bytes(hash, "u", 1);
+		hash = fnv_bytes(hash, tune->tuning, strlen(tune->tuning) + 1);
+		write_u32(group, tune->tag.group_tag);
+		hash = fnv_bytes(hash, group, 4);
+		for (; *path; path++)
+		{
+			unsigned char character = (unsigned char)lower((unsigned char)*path);
+
+			hash = fnv_bytes(hash, &character, 1);
+		}
+		hash = fnv_bytes(hash, "", 1);
+		/* (the tuning's own version: a tuning changed is a pack made again) */
+		hash = fnv_bytes(hash, tuning_version, strlen(tuning_version) + 1);
 	}
 	snprintf(version, sizeof(version), "v%d.%d%s", SCENE_PACK_VERSION, SCENE_PACK_BUILDER_VERSION,
 		recipe->custom_edition_map_count ? scene_pack_custom_edition_builder_version() : "");
@@ -2319,6 +2410,193 @@ static void build_tags(struct build_state *state, unsigned long file_length)
 	state->result->buffer_count = state->buffer_count;
 }
 
+/* ---------- tunings */
+
+static short tuning_find(
+	char const *name)
+{
+	short index;
+
+	for (index = 0; index < (short)NUMBEROF(scene_pack_tunings); index++)
+	{
+		if (!strcmp(scene_pack_tunings[index].name, name))
+			return index;
+	}
+	return NONE;
+}
+
+/* the pack's bytes a pointer of its tags (a link address) names, or NULL
+when they are not all in the pack */
+static unsigned char *blob_at(struct build_state const *state, unsigned long address, unsigned long size)
+{
+	unsigned long offset = address - SCENE_PACK_LINK_BASE;
+
+	if (address < SCENE_PACK_LINK_BASE || offset > state->blob_size || size > state->blob_size - offset)
+		return NULL;
+	return state->blob + offset;
+}
+
+/* a tag block of the pack's tags: its elements, or NULL (none, or not in
+the pack); its count */
+static unsigned char *blob_block(struct build_state const *state, unsigned char const *block, unsigned long element_size,
+	long *count)
+{
+	long elements = (long)read_u32(block);
+
+	*count = 0;
+	if (elements <= 0 || (unsigned long)elements > SCENE_PACK_MAXIMUM_TAG_BYTES / element_size)
+		return NULL;
+	*count = elements;
+	return blob_at(state, read_u32(block + 4), (unsigned long)elements * element_size);
+}
+
+static boolean seat_string_is(char const *field, char const *text)
+{
+	char copy[TAG_STRING_LENGTH + 1];
+
+	memcpy(copy, field, TAG_STRING_LENGTH);
+	copy[TAG_STRING_LENGTH] = 0;
+	return names_match(copy, text);
+}
+
+static void seat_string_set(char *field, char const *text)
+{
+	memset(field, 0, TAG_STRING_LENGTH + 1);
+	memcpy(field, text, strlen(text));
+}
+
+/* "flyable_pelican": the campaign's Pelican (vehicles\pelican\pelican, a
+human plane) made one players fly, as Halo Custom Edition's Extinction
+made its own Pelican - here with our own seats and numbers, nothing of
+that map's:
+- its driver's seat (P-driver, which no player's animations can enter:
+  the multiplayer cyborg has no animation to get into it) takes the
+  player's Warthog driver's animations (W-driver, which every player
+  unit has), at the Pelican's own "driver enter" marker, on the ground
+  before its nose, where a player walks up to it and gets out again (the
+  seat stays as the campaign has it otherwise: invisible, its pilot not
+  drawn);
+- its riders' seats the player has no animations for (the middle and back
+  ones, P-riderLM, P-riderRB01...) take those of the front ones of their
+  side (P-riderLF, P-riderRF), at their own markers: ten riders, the cargo
+  seat (a Warthog's) left as it is;
+- it flies faster and picks up speed sooner than the campaign's (which
+  its pilots fly slowly on their scripted ways): 0.9 of a world unit a
+  tick at most (the campaign's 0.5, Extinction's 0.95), 0.045 more a tick
+  (0.03, 0.05).
+The tag must be the campaign's: a driver's seat labelled P-driver and a
+model with a "driver enter" marker; otherwise it is left as it is */
+enum
+{
+	FLYABLE_PELICAN_MAXIMUM_SEATS = 32,
+	/* a vehicle's fields after its unit's (Invader's vehicle definition) */
+	VEHICLE_MAXIMUM_FORWARD_SPEED = 0x08,
+	VEHICLE_SPEED_ACCELERATION = 0x10,
+	VEHICLE_FIELDS_SIZE = 0xFC,
+};
+
+static boolean tune_flyable_pelican(
+	struct build_state *state,
+	long pack_index,
+	char *why,
+	long why_size)
+{
+	struct build_tag const *tag = &state->pack_tags[pack_index];
+	unsigned char *root = state->blob + tag->base_offset;
+	unsigned char *seats;
+	unsigned char *markers = NULL;
+	long seat_count, marker_count = 0, index, model_index;
+	short driver = NONE, riders = 0;
+	boolean driver_enter = FALSE;
+	real speed = 0.9f, acceleration = 0.045f;
+
+	if (tag->root_size < sizeof(struct unit_definition) + VEHICLE_FIELDS_SIZE)
+	{
+		why_set(why, why_size, "it is not a vehicle%s", NULL);
+		return FALSE;
+	}
+	seats = blob_block(state, root + offsetof(struct unit_definition, unit.seats), sizeof(struct unit_seat), &seat_count);
+	model_index = (long)(read_u32(root + offsetof(struct unit_definition, object.model) + offsetof(struct tag_reference, index)) & 0xFFFF);
+	if (read_u32(root + offsetof(struct unit_definition, object.model) + offsetof(struct tag_reference, index)) != (unsigned long)NONE &&
+		model_index < state->pack_tag_count && state->pack_tags[model_index].group_tag == 'mode')
+	{
+		markers = blob_block(state, state->blob + state->pack_tags[model_index].base_offset + offsetof(struct model, markers),
+			sizeof(struct model_marker), &marker_count);
+	}
+	for (index = 0; markers && index < marker_count && !driver_enter; index++)
+		driver_enter = seat_string_is((char const *)markers + index * sizeof(struct model_marker), "driver enter");
+	for (index = 0; seats && index < seat_count && index < FLYABLE_PELICAN_MAXIMUM_SEATS; index++)
+	{
+		struct unit_seat *seat = (struct unit_seat *)(seats + index * sizeof(struct unit_seat));
+
+		if (driver == NONE && TEST_FLAG(seat->flags, _unit_seat_driver_bit) && seat_string_is(seat->label, "P-driver"))
+			driver = (short)index;
+	}
+	if (!seats || driver == NONE || !driver_enter)
+	{
+		why_set(why, why_size, "it is not the campaign's Pelican (no P-driver seat, or no driver enter marker)%s", NULL);
+		return FALSE;
+	}
+
+	{
+		struct unit_seat *seat = (struct unit_seat *)(seats + driver * sizeof(struct unit_seat));
+
+		seat_string_set(seat->label, "W-driver");
+		seat_string_set(seat->marker_name, "driver enter");
+	}
+	for (index = 0; index < seat_count && index < FLYABLE_PELICAN_MAXIMUM_SEATS; index++)
+	{
+		struct unit_seat *seat = (struct unit_seat *)(seats + index * sizeof(struct unit_seat));
+		char label[TAG_STRING_LENGTH + 1];
+
+		memcpy(label, seat->label, TAG_STRING_LENGTH);
+		label[TAG_STRING_LENGTH] = 0;
+		if (!names_match_prefix(label, "P-rider") || (lower((unsigned char)label[7]) != 'l' && lower((unsigned char)label[7]) != 'r'))
+		{
+			continue;
+		}
+		riders++;
+		if (names_match(label + 8, "F"))
+			continue;
+		seat_string_set(seat->label, lower((unsigned char)label[7]) == 'l' ? "P-riderLF" : "P-riderRF");
+	}
+	memcpy(root + sizeof(struct unit_definition) + VEHICLE_MAXIMUM_FORWARD_SPEED, &speed, sizeof(speed));
+	memcpy(root + sizeof(struct unit_definition) + VEHICLE_SPEED_ACCELERATION, &acceleration, sizeof(acceleration));
+	platform_log("scene packs: tune flyable_pelican: %s: its driver's seat the player's, %d riders' seats, %.2f a tick at most",
+		tag->name, riders, speed);
+	return TRUE;
+}
+
+/* (after build_tags) the recipe's tunings, each on its tag (the recipe's
+tags are the pack's first, in order) */
+static void build_tunes(struct build_state *state)
+{
+	struct scene_pack_recipe const *recipe = state->recipe;
+	short index;
+
+	for (index = 0; index < recipe->tune_count; index++)
+	{
+		struct scene_pack_recipe_tune const *tune = &recipe->tunes[index];
+		short tuning = tuning_find(tune->tuning);
+		short root;
+		char why[SCENE_PACK_WHY_SIZE];
+
+		for (root = 0; root < recipe->root_count; root++)
+		{
+			if (recipe->roots[root].group_tag == tune->tag.group_tag && names_match(recipe->roots[root].path, tune->tag.path))
+				break;
+		}
+		why[0] = 0;
+		if (tuning == NONE || root == recipe->root_count || root >= state->pack_tag_count ||
+			state->pack_tags[root].group_tag != tune->tag.group_tag)
+		{
+			continue;
+		}
+		if (!scene_pack_tunings[tuning].apply(state, root, why, sizeof(why)))
+			platform_log("scene packs: tune %s: %s left as it is: %s", tune->tuning, tune->tag.path, why);
+	}
+}
+
 static void header_write(unsigned char *header, struct build_state const *state, unsigned long tags_crc,
 	unsigned long data_size, unsigned long data_crc, unsigned long long source_hash, char const *map)
 {
@@ -2496,6 +2774,8 @@ static boolean scene_pack_build_custom_edition(
 		build_tags(&state, 0);
 	}
 	if (!state.failed)
+		build_tunes(&state);
+	if (!state.failed)
 		build_channels(&state);
 	result->progress = 50;
 
@@ -2644,6 +2924,8 @@ boolean scene_pack_build(
 			state.pack_index[index] = NONE;
 		build_tags(&state, file_length);
 	}
+	if (!state.failed)
+		build_tunes(&state);
 	if (!state.failed)
 		pieces = ranges_place(&state, &piece_count, &data_size);
 	if (!state.failed)
