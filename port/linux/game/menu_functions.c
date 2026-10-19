@@ -592,6 +592,7 @@ static void h3_live_close(char const *why);
 static boolean h3_live_start(void);
 static boolean h3_live_follow_wire(boolean reopen);
 static void h3_live_retry(void);
+static void h3_live_public_chosen(void);
 
 static struct widget_instance *named(struct widget_instance *widget, char const *name)
 {
@@ -5412,6 +5413,11 @@ static boolean setup_start(struct widget_instance *widget)
 	joiners told, and START GAME hosts on the one chosen as before - the
 	game's lobby, then back on the lobby it is the live game again) */
 	h3_live_follow_wire(FALSE);
+	/* (GAME OPTIONS' START GAME on ONLINE, Menu style Halo 3: public or
+	private chosen for the lobby - its live game's now, or the one hosted
+	next and kept by the lobby - the panel's Visibility its default) */
+	if (halo_menu_style_halo3() && h3_mp.network == _h3_network_online)
+		h3_live_public_chosen();
 	/* (a live lobby, Menu style Halo 3: its game takes them now - its name
 	and most players from the settings each frame, public or private and a
 	password changed its listing - and START GAME goes on to its lobby) */
@@ -9054,7 +9060,53 @@ static struct
 	unsigned long lobby_up_since;
 	/* the players said last (the tests read them) */
 	char said[256];
-} h3_live = { FALSE, NONE, FALSE, FALSE, FALSE, 0, 0, "" };
+	/* ONLINE: the host chose public or private for this lobby (GAME
+	OPTIONS' START GAME, the settings panel's Visibility while it is live);
+	until then the lobby is private (h3_live_private_by_default). Kept
+	while the lobby's game goes on - its game played, the lobby again, its
+	wire changed - and forgotten when the lobby closes */
+	boolean public_chosen;
+	/* the settings panel's Visibility (HALO_NET_HOST_PUBLIC) as it was when
+	the lobby opened or was last looked at: a change while live is the
+	host's choice for this lobby */
+	char public_setting[8];
+} h3_live = { FALSE, NONE, FALSE, FALSE, FALSE, 0, 0, "", FALSE, "" };
+
+/* the setting's value now ("true", "false") */
+static void h3_live_public_setting(char *value, int size)
+{
+	snprintf(value, (size_t)size, "%s", setting_get("HALO_NET_HOST_PUBLIC", "true"));
+}
+
+/* (ONLINE, the lobby's game about to be hosted or kept) private by default:
+the lobby is not listed by itself - friends (their one-press join, sealed
+for each), the party, invites and its code reach it - until the host
+chooses Public for it (GAME OPTIONS, the settings panel's Visibility); the
+panel's Visibility otherwise only GAME OPTIONS' default */
+static void h3_live_private_by_default(void)
+{
+	h3_live_public_setting(h3_live.public_setting, (int)sizeof(h3_live.public_setting));
+	if (h3_mp.network != _h3_network_online || h3_live.public_chosen)
+		return;
+	p2p_lobby_set_public(0);
+	platform_log("menus: h3 live lobby: private until the host chooses Public (GAME OPTIONS, the settings panel)");
+}
+
+/* (GAME OPTIONS' START GAME on ONLINE) the host chose for this lobby */
+static void h3_live_public_chosen(void)
+{
+	h3_live.public_chosen = TRUE;
+	h3_live_public_setting(h3_live.public_setting, (int)sizeof(h3_live.public_setting));
+}
+
+/* the lobby gone: a game hosted otherwise listed as the settings say again,
+the choice forgotten */
+static void h3_live_forget_public(void)
+{
+	if (!h3_live.public_chosen)
+		p2p_lobby_set_public(config_boolean("network.host_public"));
+	h3_live.public_chosen = FALSE;
+}
 
 /* the lobby closed: its game disposed (its joiners told the host left) */
 static void h3_live_close(char const *why)
@@ -9069,6 +9121,7 @@ static void h3_live_close(char const *why)
 	dispose_global_network_game_server();
 	network_game_accept_remote_connections(FALSE);
 	player_ui_clear_multiplayer_variant();
+	h3_live_forget_public();
 	platform_log("menus: h3 live lobby: closed (%s): its joiners are told the host left", why);
 }
 
@@ -9105,8 +9158,17 @@ static boolean h3_live_follow_wire(boolean reopen)
 
 	if (!h3_live.live || !global_network_game_server_get() || (network_wire_crossplay() != 0) == with_pc)
 		return FALSE;
-	h3_live_close(with_pc ? "WHO CAN JOIN is Vitas and PC now: hosted again on the crossplay wire" :
-		"WHO CAN JOIN is Vitas now: hosted again on the Vitas' wire");
+	{
+		/* (the same lobby, hosted again: public or private as chosen) */
+		boolean chosen = h3_live.public_chosen;
+
+		h3_live.public_chosen = TRUE;
+		h3_live_close(with_pc ? "WHO CAN JOIN is Vitas and PC now: hosted again on the crossplay wire" :
+			"WHO CAN JOIN is Vitas now: hosted again on the Vitas' wire");
+		h3_live.public_chosen = chosen;
+		if (!chosen)
+			p2p_lobby_set_public(0);
+	}
 	if (reopen)
 		h3_live_retry();
 	return TRUE;
@@ -9115,6 +9177,7 @@ static boolean h3_live_follow_wire(boolean reopen)
 static void h3_live_refuse(char const *why)
 {
 	h3_live.refused = TRUE;
+	h3_live_forget_public();
 	platform_log("menus: h3 live lobby: not opened: %s (START GAME hosts as before)", why);
 }
 
@@ -9142,6 +9205,8 @@ static void h3_live_open(void)
 		h3_live_refuse("no profile to play with");
 		return;
 	}
+	/* (before its server: never listed a moment by itself) */
+	h3_live_private_by_default();
 	if (!ui_widget_port_start_network_game_server())
 	{
 		h3_live_refuse("the game's server did not start");
@@ -9343,6 +9408,9 @@ static void h3_live_update(boolean main_menu_loaded)
 			h3_live.live = FALSE;
 			h3_live.start_pending = FALSE;
 			h3_live.in_pregame = FALSE;
+			/* (its game under way keeps its listing as the lobby left it) */
+			if (!server)
+				h3_live_forget_public();
 			platform_log("menus: h3 live lobby: its game is no longer this lobby's");
 			return;
 		}
@@ -9359,6 +9427,22 @@ static void h3_live_update(boolean main_menu_loaded)
 		{
 			h3_live_close("the lobby's network changed");
 			return;
+		}
+		/* (the settings panel's Visibility changed while live: the host's
+		choice for this lobby - the panel listed or unlisted it at once) */
+		{
+			char now[8];
+
+			h3_live_public_setting(now, (int)sizeof(now));
+			if (strcmp(now, h3_live.public_setting))
+			{
+				snprintf(h3_live.public_setting, sizeof(h3_live.public_setting), "%s", now);
+				if (h3_live.network == _h3_network_online)
+				{
+					h3_live.public_chosen = TRUE;
+					platform_log("menus: h3 live lobby: %s, as the settings panel chose", strcmp(now, "false") ? "public" : "private");
+				}
+			}
 		}
 		/* (WHO CAN JOIN changed on the settings panel, the lobby up: hosted
 		again on that wire; the game's lobby's game plays on as it began) */
@@ -9392,6 +9476,10 @@ static void h3_live_update(boolean main_menu_loaded)
 	if (!lobby_up)
 	{
 		h3_live.lobby_up_since = 0;
+		/* (back at the main menu with no live game: the next lobby is a new
+		one, private by default again) */
+		if (h3_live.public_chosen && active && main_tag != NONE && active->definition_tag_index == main_tag && !server)
+			h3_live_forget_public();
 		return;
 	}
 	if (!h3_live.lobby_up_since)
@@ -9406,6 +9494,7 @@ static void h3_live_update(boolean main_menu_loaded)
 	{
 		if (h3_live_network_ready() && h3_mp_host_choices())
 		{
+			h3_live_private_by_default();
 			h3_live.live = TRUE;
 			h3_live.network = h3_mp.network;
 			h3_live.start_pending = FALSE;

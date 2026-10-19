@@ -145,8 +145,12 @@
 #   h3liveleave  the same, the host leaving its lobby (B) once the joiner is in: the joiner told
 #            the host left, back at the menus
 #   h3liveinvite  the host's live lobby on ONLINE, private: L (INVITE FRIENDS) invites its friend
-#            (the codes through files), who accepts at the menus and lands in the lobby; the
-#            lobby never listed, never joinable from presence
+#            (the codes through files), who accepts at the menus and lands in the lobby; START
+#            GAME: the two play; the lobby and its game never listed
+#   h3liveprivate  the live lobby private by default: the host's lobby on ONLINE with the
+#            settings panel's Visibility Public (the shipped default) is not listed; its
+#            friend joins it from presence in one press, no code; GAME OPTIONS (Square) and its
+#            START GAME with VISIBILITY PUBLIC lists it, and the two play
 #   h3pickjoin the same from the Halo 3 menus (h3online's copies), where there
 #            is no map list after the server starts: its map is the lobby's,
 #            set as it starts, so no join is ever held (0 held) and the joiner
@@ -2064,6 +2068,8 @@ h3liveinvite)
 	invite_pad="wait:150:3000 down:150:700 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:${HALO_TEST_INVITE_WAIT:-35000}"
 	invite_pad="$invite_pad @invite-01-lobby:0:300 lt wait:150:4000 @invite-02-picker:0:300 a wait:150:3000"
 	invite_pad="$invite_pad @invite-03-invited:0:300 b wait:150:30000 @invite-04-lobby-joined:0:300"
+	# (then START GAME (down three, A): the private lobby's game played, never listed meanwhile)
+	invite_pad="$invite_pad down:150:500 down:150:500 down:150:500 a wait:150:5000 @invite-05-countdown:0:300"
 	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
 		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:1 HALO_NET_HOST_PUBLIC=false \
 		HALO_NET_LOBBY_NAME=Alpha "HALO_TEST_FRIENDS=code-file=$hc,add-file=$jc" $shot_env \
@@ -2092,9 +2098,64 @@ h3liveinvite)
 	grep -aq "system link: in another's lobby" "$jl" || fail "the joiner did not land in the host's lobby"
 	grep -aqE "menus: h3 live lobby: Slayer on Battle Creek; players: [^;]+, [^;]+; 2/" "$hl" ||
 		fail "the joiner was not in the host's live lobby"
-	grep -aq "(joinable)" "$jl" && fail "the private live lobby was joinable from presence"
 	grep -aqE "publish .* hcev/3/lobby/s/[0-9a-f]{32} [1-9][0-9]* B retained" "$out/broker.log" &&
 		fail "the private live lobby was listed"
+	grep -aq "menus: h3 live lobby: private until the host chooses Public" "$hl" || fail "the lobby was not private by default"
+	grep -aq "menus: h3 live lobby: the game's lobby: the countdown begun" "$hl" || fail "START GAME did not begin the countdown"
+	grep -aqE "Internet play: the game is (public|listed in everyone)" "$hl" && fail "the private lobby's game was listed"
+	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+	echo "joiner's seconds with two players playing: $two"
+	[ "$two" -ge 15 ] || fail "the friend played the private lobby's game for $two s with two players (15 wanted)"
+	;;
+h3liveprivate)
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS) or no HALO_TEST_PROFILE"; exit 0
+	fi
+	# (the live lobby private by default, insider.15: the host - its profile, Menu style Halo 3,
+	# Visibility Public as shipped - and the joiner friends (codes through files); the host's
+	# lobby on ONLINE: live, not listed; the friend joins it from presence (no code); Square: GAME
+	# OPTIONS, down seven to START GAME (VISIBILITY PUBLIC, the setting's), A: the lobby listed,
+	# the game's lobby and its countdown, the game)
+	hc=$out/host.code jc=$out/joiner.code
+	mkdir -p "$out/host/save/u/UDATA/869079979327"
+	cp "$HALO_TEST_PROFILE" "$out/host/save/u/UDATA/869079979327/blam.sav"
+	[ -r "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" ] &&
+		cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$out/host/save/u/UDATA/869079979327/"
+	private_pad="wait:150:3000 down:150:700 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:${HALO_TEST_PRIVATE_WAIT:-60000}"
+	private_pad="$private_pad x wait:150:4000"
+	for row in $(seq 1 7); do private_pad="$private_pad down:150:400"; done
+	private_pad="$private_pad a wait:150:5000"
+	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
+		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:1 HALO_NET_HOST_PUBLIC=true \
+		HALO_NET_LOBBY_NAME=Alpha "HALO_TEST_FRIENDS=code-file=$hc,add-file=$jc" \
+		"HALO_TEST_PAD=$private_pad" ; host_pid=$last_pid
+	run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=join-friend HALO_TEST_INPUT=bot:2 HALO_NET_LOBBY_NAME=Bravo "HALO_TEST_FRIENDS=code-file=$jc,accept" \
+		HALO_TEST_FRIENDS_ANSWER=accept "HALO_TEST_PAD=wait:150:1000"; join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log
+	echo "--- host"; grep -aE "menus: (h3 live lobby|Server Setup)|Internet play: the game (is|is listed|is no longer)" "$hl" | head -20
+	echo "--- joiner"; grep -aE "friends: .* is online: |network test: (joining friend|the friend)|system link: in a" "$jl" | head -8
+	for side in host joiner; do
+		grep -aqiE "assert|exception|halt_and_catch_fire|segmentation" "$out/$side/run.log" && fail "the $side: an assertion, exception or crash"
+	done
+	grep -aq "menus: h3 live lobby: open on ONLINE (Slayer on Battle Creek): others join it now" "$hl" ||
+		fail "the host's lobby did not open live on ONLINE"
+	grep -aq "menus: h3 live lobby: private until the host chooses Public" "$hl" || fail "the lobby was not private by default"
+	sed -n '1,/menus: Server Setup: /p' "$hl" | grep -aqE "Internet play: the game is (public|listed in everyone)" &&
+		fail "the lobby was listed before the host chose Public"
+	grep -aq "friends: .* is online: .*(joinable)" "$jl" || fail "the friend did not see the private lobby joinable"
+	grep -aq "network test: joining friend .*: Done" "$jl" || fail "the friend did not join the private lobby in one press"
+	grep -aqE "menus: h3 live lobby: Slayer on Battle Creek; players: [^;]+, [^;]+; 2/" "$hl" ||
+		fail "the friend was not in the host's live lobby before START GAME"
+	grep -aq "menus: Server Setup: Alpha, 16 players, public, Vitas; the live lobby's game takes them, its lobby next" "$hl" ||
+		fail "GAME OPTIONS' START GAME did not take VISIBILITY PUBLIC for the live game"
+	sed -n '/menus: Server Setup: /,$p' "$hl" | grep -aq "Internet play: the game is listed in everyone's public games" ||
+		fail "the lobby was not listed once the host chose Public"
+	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+	echo "joiner's seconds with two players playing: $two"
+	[ "$two" -ge 15 ] || fail "the friend played the host's game for $two s with two players (15 wanted)"
 	;;
 h3live|h3liveleave)
 	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
@@ -4163,7 +4224,7 @@ friendsplayers|friendsplayersoff|friendsplayersnone)
 	[ "$two" -ge 20 ] || fail "the joiner played the host's game for $two s with two players (20 wanted)"
 	;;
 *)
-	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|h3live|h3liveleave|h3liveinvite|h3online|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|party|friendsprivate|friendsprivatepw" >&2
+	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|h3live|h3liveleave|h3liveinvite|h3liveprivate|h3online|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|party|friendsprivate|friendsprivatepw" >&2
 	exit 2
 	;;
 esac

@@ -67,7 +67,7 @@
 	<strings name="setup_help">
 		<string text="The name your game is listed under\n(15 characters at most)."/>
 		<string text="The most players your game takes,\nyou included (2 to 16)."/>
-		<string text="PUBLIC: listed in every Vita's server browser.\nPRIVATE: joined only with its code."/>
+		<string text="PUBLIC: listed in the games browser.\nPRIVATE: friends, invites and its code join it."/>
 		<string text="A public game asks joiners for it.\nNONE: anyone may join."/>
 		<string text="VITAS: Vitas join it. VITAS AND PC: PC players\n(OpenCE) can join too; old Vita versions can't."/>
 		<string text="Next: your profile, then the map and the\ngametype. The lobby shows your game's code."/>

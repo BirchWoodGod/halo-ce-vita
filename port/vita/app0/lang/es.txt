@@ -883,7 +883,7 @@
 "VISIBILITY" = "VISIBILIDAD"
 "The name your game is listed under\n(15 characters at most)." = "El nombre con el que aparece tu partida\n(15 caracteres como máximo)."
 "The most players your game takes,\nyou included (2 to 16)." = "El máximo de jugadores de tu partida,\ncontándote (de 2 a 16)."
-"PUBLIC: listed in every Vita's server browser.\nPRIVATE: joined only with its code." = "PÚBLICA: aparece en el buscador de cada Vita.\nPRIVADA: se entra solo con su código."
+"PUBLIC: listed in the games browser.\nPRIVATE: friends, invites and its code join it." = "PÚBLICA: aparece en el buscador de partidas.\nPRIVADA: entran amigos, invitaciones y su código."
 "A public game asks joiners for it.\nNONE: anyone may join." = "Una partida pública la pide al entrar.\nNINGUNA: cualquiera puede entrar."
 "Next: your profile, then the map and the\ngametype. The lobby shows your game's code." = "Después: tu perfil, luego el mapa y el tipo\nde juego. La sala muestra tu código."
 "Hosts at once with this game type and map (your\nprofile first, the first time): the game's lobby,\nwhich shows your game's code." = "Crea la partida con este tipo de juego y mapa\n(tu perfil antes, la primera vez): la sala de la\npartida, que muestra su código."
