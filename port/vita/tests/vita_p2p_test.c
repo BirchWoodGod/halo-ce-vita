@@ -160,6 +160,8 @@ __attribute__((stdcall)) void Sleep(unsigned long milliseconds)
 /* the desktop's and Discord's, which the Vita has not (vita_stubs.c) */
 int posix_command_line_argument(int index, char *buffer, posix_ulong size) { (void)index; (void)buffer; (void)size; return 0; }
 int posix_register_url_scheme(const char *scheme, const char *description) { (void)scheme; (void)description; return 0; }
+/* (friends, p2p_friends.c: off here, friends.enabled; its folder never made) */
+int posix_make_directory(const char *path) { (void)path; return -1; }
 void p2p_discord_update(void) {}
 void p2p_discord_set_hosting(const char *secret, int player_count, int maximum_player_count)
 {

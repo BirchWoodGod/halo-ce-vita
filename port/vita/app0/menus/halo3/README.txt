@@ -77,6 +77,30 @@ these screens stand for the Xbox's own, over the same animated Halo ring:
   map sharing; kept on the memory card), Triangle opens its details, Square
   asks before deleting it (NO, KEEP IT first). The settings panel's
   Multiplayer > Modded maps > Mod manager does the same.
+- friends.xml: FRIENDS (the main menu's last item; Triangle in the
+  multiplayer, campaign and Forge lobbies), Halo 3's friends list over
+  port/linux/src/p2p_friends.h: this Vita's friend code at the top, ADD
+  FRIEND (a code typed on the Vita's keyboard), APPEAR OFFLINE and FRIENDS
+  CAN JOIN (the settings panel's rows), then the requests, the invites, the
+  friends (online first, what each is doing - "Slayer on Blood Gulch",
+  "Co-op: The Pillar of Autumn, Legendary", "In Forge" - and JOIN when their
+  game can be joined), the requests sent and the blocked players. Cross does
+  a row's first thing (Accept, Join, type a code), Square its second
+  (Decline, Invite, Ignore, Cancel), Triangle its options (Remove, Block,
+  Unblock) after Halo 3's question; a join goes on as JOIN WITH CODE's.
+  Each lobby shows a FRIENDS panel at the right, under the players: who is
+  online and what they are doing, and the requests and invites waiting. A
+  friend's invite asks at the menus with the game's question (Accept the
+  invite and join now?). The settings panel's Multiplayer > Friends does the
+  same for the original menus.
+- players.xml: PLAYERS, Halo 3's roster of the network game this Vita plays
+  (Triangle in the game's lobby, the waiting screen; on the carnage report;
+  with the scoreboard up, Back held): each player's name, team and what
+  friends knows of them. Cross on another machine's player: its options,
+  ADD FRIEND (a friend request, no code typed: the two machines exchange
+  friend cards over internet play first, only when the other player has
+  friends on and does not appear offline) and BLOCK. Listed in menus.txt and
+  ingame.txt, so it uses only what both sets have.
 - network.xml: the games browser (BROWSE GAMES, after the profile: the
   server browser's screen over the games the Xbox's System Link list would
   show, the game's own search and join - SYSTEM LINK GAMES, AD HOC GAMES -
@@ -190,7 +214,8 @@ the game's keys (a_butn, b_butn, start_butn) for that.
 Tests: port/vita/tests/run_menus_test.sh h3probe h3classic h3xbox h3broken
 h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create
 h3mptouch h3coop h3coopguide h3scenes h3lobbyscenes h3modelsmany h3profiles h3proftouch h3customize h3models
-h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows; the packs':
+h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3friends h3friendspanel; the packs':
 port/vita/tests/run_scene_pack_test.sh; Forge's: port/vita/tests/run_forge_test.sh,
 port/vita/tests/run_forge_files_test.sh; between two machines:
-port/vita/tests/run_netns_online_test.sh h3coopmenu h3lan h3adhoc h3online netswitch.
+port/vita/tests/run_netns_online_test.sh h3coopmenu h3lan h3adhoc h3online netswitch, and friends'
+friends friendsdecline friendsblock friendsinvite friendsoffline friendsforged.

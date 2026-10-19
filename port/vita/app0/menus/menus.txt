@@ -14,3 +14,5 @@ halo3/multiplayer.xml
 halo3/network.xml
 halo3/password.xml
 halo3/mods.xml
+halo3/friends.xml
+halo3/players.xml
