@@ -43,6 +43,10 @@ void cache_copy_begin(
 	char const *source_path);
 void cache_copy_queue_end(
 	void);
+#ifdef HALO_LINUX
+boolean cache_copy_stop_queued(
+	void);
+#endif
 short cache_copy_get_status(
 	real *progress);
 void cache_copy_end(

@@ -1767,6 +1767,12 @@ coop)
 	grep -a "co-op" "$out/joiner/data/debug.txt" | head -40 > "$out/joiner.summary"
 	echo "--- host"; cat "$out/host.summary"
 	echo "--- joiner"; cat "$out/joiner.summary"
+	# (the host's start: its level's copy, stopped by another map's ask
+	# while it ran, was taken for the level's and waited for forever, and
+	# the host never sent the start; feat/party, Oct 2026:
+	# cache_files_precache_is_copying_map)
+	grep -aq "signalling client machines to begin loading" "$out/host/data/debug.txt" ||
+		fail "the host never started the co-op game (its level never precached: $(grep -ac "starting precaching of map" "$out/host/data/debug.txt") copies begun)"
 	two=$(grep -a "network test: tick" "$out/joiner/run.log" | grep -aEc "player [0-9]+: \(.* player [0-9]+: \(")
 	echo "joiner's seconds with both players alive: $two"
 	# (every joiner played, one alone too: the seconds all of them were alive

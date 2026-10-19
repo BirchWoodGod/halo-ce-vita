@@ -852,6 +852,20 @@ boolean cache_files_precache_in_progress(
 boolean cache_files_precache_is_copying_map(
 	const char *map_name)
 {
+#ifdef HALO_LINUX
+	/* port: a copy asked to stop copies no map, though the map it was is
+	asked for again: it never finishes (its slot's header is never written),
+	so it is ended and the map's copy begun anew. Another map's ask stops the
+	copy and waits for its end (cache_files_give_time_to_precache) since
+	the lobby freeze fix; the co-op host's level, asked again after the
+	network test's or the menus' other map, was taken for this copy and
+	waited for forever (a copy stopped before its header was read is never
+	over: cache_copy_get_status), and its game never started (Oct 2026) */
+	if (cache_copy_stop_queued())
+	{
+		return FALSE;
+	}
+#endif
 	if (cache_file_globals.copying_to_map_file_index != NONE &&
 		strcmp(
 			cache_file_globals.copying_to_map_file_name,
