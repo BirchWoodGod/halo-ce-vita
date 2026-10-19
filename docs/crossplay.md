@@ -15,6 +15,11 @@ Target: 1.1.0-beta.5 for the first phase.
 26 to 28 (DamnationCE 7be58b2b among them) are refused with a message
 saying the host runs an older version. (Oct 13 it became 28: section 10.5.)
 
+**Update, Oct 19 2026 (evening): network versions 29 and 32, chosen per
+game** (section 10.9). The crossplay wire joins hosts of 29 (ChupathingyCE,
+OpenCE build-206) and of 32 (OpenCE 6ec42856 and later), each game played by
+its host's version's rules; a Vita hosting for Vitas and PC announces 32.
+
 **Update, Oct 19 2026: no switch; each game speaks its own wire; PC players
 join Vita hosts** (section 10.7, the owner's decisions). The browsers list
 the Vitas' games and OpenCE's together, every row tagged (VITA, VITA+PC,
@@ -345,7 +350,7 @@ commit and in NETCODE.md.
 | Wire | Spoken with | Announced as |
 |---|---|---|
 | **Legacy Vita wire, "v18"** | betas 1–4 | Exactly today's: hcev topics, listing format 2, 13,092-byte record, Vita token XOR, flags 0x02/0x04 |
-| **Crossplay wire** | everyone else | OpenCE's: hceu, format 1, 13,120-byte record, constant token, the version the table says to announce (29 since Oct 14: section 10.6) |
+| **Crossplay wire** | everyone else | OpenCE's: hceu, format 1, 13,120-byte record, constant token, the version the table says to announce (32 for a Vita's host since Oct 19, 29 and 32 joined, each by its rules: 10.9; 29 since Oct 14: section 10.6) |
 
 **Hosts** speak one wire per game, chosen by the host's "Who can join"
 (network.host_crossplay, Oct 19 2026: 10.7):
@@ -380,7 +385,9 @@ crossplay wire (section 8), and the "19" number is never released.
 
 ### 5.2 The signed crossplay table (phase 2, used by servers from phase 1)
 
-**Floor.** The table is built in as the floor: announce 29, accept 29..29 for
+**Floor.** The table is built in as the floor: announce 32, accept exactly 29
+and 32 (not 30 or 31), each game by its host's version's rules (since Oct 19
+2026: 10.9; 29 and 29..29 before that) for
 the crossplay wire (26..26 until Oct 13, 28..28 until Oct 14: sections 10.5,
 10.6).
 
@@ -752,7 +759,9 @@ them:
 | Game | add/remove player, settings and player settings requests, start, exit, precached, loaded, switch to pregame | the field tables bound every size; a message of a bad size drops its machine; unknown types logged and dropped; each machine 10 ms of messages a frame, all 50 ms | none needed |
 | Game | map download (35, ours) | | ignored on the crossplay wire: a type 35 from a PC client is not ours to answer, and our clients drop a host's 36/37 there |
 | Distributed, client to host | only player prediction, player inputs, vehicle prediction, hit reports, client identity, client ready, co-op skip vote | readiness, identity and hits only over the client's stream; the sender must own the player (`distributed_machine_has_player`); object indices checked (8192 on both sides); a tick near the sender's latest; stale and fast-clock messages dropped; identity sanitized; hit reports through `distributed_report_valid` | none needed |
-| Distributed | votekick 78/79, voice 80-82, OpenCE's map share 83-86, aim assist policy 90 (OpenCE 32) | beyond NUMBER_OF_DISTRIBUTED_MESSAGES: dropped | none needed |
+| Distributed | votekick 78/79, voice 80-82, OpenCE's map share 83-86, text chat 87-89 | beyond NUMBER_OF_DISTRIBUTED_MESSAGES: dropped | none needed |
+| Distributed | aim assist policy 90 (OpenCE 32) | a host never takes one (from a client: ignored, logged once a second); a client takes it only from the host, over its stream, in a game of 32 under way, 12 bytes, count 1, value 0 or 1, reserved 0, before every other check (10.9) | new, with the twin's kind-90 mutation |
+| Distributed, client to host | player inputs (32's friendly-fire byte 2) | the byte is not read (co-op for PC players is experimental: 10.9); the buttons are now held to the unit's 15 control flags (a twin's bit 15 halted a debug host: 10.9) | the mask |
 
 **G14 on the host's side.** A client sends player and machine indices (128
 on both sides) and object indices (8192 on both); it runs no AI, so no
@@ -762,12 +771,13 @@ vote carries a machine index alone, bounded. No gap.
 
 **Versions.** A join carries no network version (G15, true in all four
 projects): the host cannot check a client's. Our host announces exactly the
-built-in list's version (29) in its advertisement and listing; OpenCE and
-DamnationCE clients join exactly their own (checked: OpenCE of 28 and of 32
-refuse our 29 host, `pcversion`). ChupathingyCE clients accept 11..30, so an
-older ChupathingyCE (26-28) can join and play some things otherwise: no
-memory risk (every input is checked as above), a residual simulation risk,
-named here. T10's signed table is not built: the built-in list is the floor,
+built-in host version (32 since Oct 19 2026: 10.9) in its advertisement and
+listing; OpenCE and DamnationCE clients join exactly their own (checked:
+OpenCE of 28 and of 29 refuse our 32 host, `pcversion`). ChupathingyCE
+clients accept 11..30, so they do not join a 32 host at all; an older
+ChupathingyCE (26-28) could join a host of 29 (only a test build hosts one)
+and play some things otherwise: no memory risk (every input is checked as
+above), a residual simulation risk, named here. T10's signed table is not built: the built-in list is the floor,
 so an unknown or unsigned version is refused, never accepted.
 
 **Passwords.** Found by this review: our listings sealed the token with
@@ -1365,7 +1375,7 @@ b1ef7f7e of 28 and 6ec42856 of 32 for the versions; the harness build
 | `crosscoophost` | NOT VALIDATED: the host never leaves the lobby because its campaign map's precache (a10, b30) never finishes. The same happens with the legacy control (`XPPC_COOPHOST_WIRE=legacy`), the online suite's `coop` mode, and the base build 02dbe9382, so it is not this work, but co-op hosted for Vitas and PC has not been played end to end. It stays experimental and is on the hardware test list |
 | unit: network_wire_test (four builds), p2p_lobby_test, signal and lobby fuzz targets, p2p_friends_test, vita_settings_test, lang | PASS |
 
-### 10.8 Upstream OpenCE at network version 32 (6ec42856, Oct 19 2026): not accepted
+### 10.8 Upstream OpenCE at network version 32 (6ec42856, Oct 19 2026): supported since 10.9
 
 OpenCE's origin/main announces 32 (329 commits past 8102e711). Per 5.2 the
 crossplay wire does not widen until the suite passes against that build and
@@ -1378,11 +1388,101 @@ the player of a 32 host that it is newer (`pcversion`). The raises:
 | 31 | 167d67ec, e595f89c | the keep-alive's field table (a long; its two stray bytes zero), the datagram tick window recorded (`DISTRIBUTED_TIME_WINDOW_TICKS`), hits, identity and readiness only over a client's stream, a datagram's source port kept | wire table; checks (ours has the stream-only rule and a tick window already) |
 | 32 | 31ba6b37 | the host's aim assist policy, a distributed message (90) a client must not ignore | wire: a new kind |
 
-Next step (a task of its own): port 30's elevator carry and 32's policy
-message (honoured by our client, sent by our host), build 6ec42856 in netns,
-run the suite against it, then move the built-in version (and the table,
-when T10 exists).
+Done the same day, clean-room from docs/opence-net32-spec.md: section 10.9.
 
+
+### 10.9 Network versions 29 and 32, per game (Oct 19 2026)
+
+Branch feat/opence-net32. OpenCE relicensed to AGPL-3.0-or-later at 4b09168e,
+and everything that raised its version past 29 came after that point, so
+this was built **clean-room**: from `docs/opence-net32-spec.md` (facts and
+rules written down by another agent, no code) and our own code. No OpenCE
+source at or after 4b09168e was opened, read, grepped or diffed; OpenCE
+6ec42856 ran only as a black box (its binary, built by build_pc_crossplay.sh
+with no patch). The harness takes its version from the spec, by its commit,
+never from its tree (`pc_version`).
+
+**Versions, per game** (`network_wire.h`). The crossplay wire joins exactly
+29 and 32 (`HALO_PORT_CROSSPLAY_OLDER_NETWORK_VERSION`,
+`HALO_PORT_CROSSPLAY_NETWORK_VERSION`); a client plays the version its
+host's advertisement announces (`network_wire_choose_version`), a Vita
+hosting for Vitas and PC announces and plays 32 (`network_wire_host_version`;
+test builds alone take `HALO_TEST_CROSSPLAY_HOST_VERSION=29`). Not 30 or 31
+(never released; each plays part of 32's rules alone), nothing newer. The
+rules are switched by `network_wire_v30_rules`, `_v31_rules`, `_v32_rules`:
+off on the legacy wire and in a game of 29, which play as before. Refusals:
+an older host is told the version to look for (29 for 26-28, 32 for 30-31),
+a newer one is told to update; the log names both joined versions
+(`crossplay: this machine joins 29 and 32`).
+
+**A choice for the owner.** A Vita hosting for Vitas and PC announces 32, so
+current OpenCE (and DamnationCE once it follows) joins it, and ChupathingyCE
+(29; its clients accept 11..30) and OpenCE build-206 do not. Hosting 29
+instead would trade one for the other. A "PC version" choice in Who can join
+would serve both; it is not built (the lobby menus are feat/live-lobby's).
+
+**What each version brings** (the spec's sections in brackets):
+
+| | What | Here |
+|---|---|---|
+| 30 (2) | an elevator's riders carried by the movement of the same tick, after its nodes are recomputed, on every machine | `machine_elevator_carry_begin/end` around a machine's update in `object_update` (objects.c, device_machines.c); the Xbox carry in `machine_update` skipped in a game of 32 |
+| 30 (3.2) | the host takes a riding client player's prediction across, not up (riding: a machine elevator that moves, or under the unit at rest) | `distributed_take_prediction`, `distributed_riding_elevator` |
+| 30 (3.3) | a client's own player on the same elevator as at the echoed tick: a height error within ±4 units (and within 3 across) left | `distributed_correct_own_unit`, the elevator recorded with each own position |
+| 30 (4) | input byte 2: the player declines co-op friendly fire | **not implemented**: the byte is never read and ours always sends 0 (valid). On a Vita's co-op host for PC (experimental) a PC player who turned friendly fire off can still be hurt by others |
+| 31 (6.1) | datagrams 15 s (450 ticks) from the sender's latest dropped | `DISTRIBUTED_TIME_WINDOW_TICKS_V31`; 600 elsewhere |
+| 31 (6.3, 6.4) | the host answers a client's datagrams at their source port; a LAN search from another port answered there | the datagram queue keeps the port (network_connection.c); `network_game_server_note_datagram_source` / `_datagram_destination`; the search answer at the searcher's port (at most 8 an interval) |
+| 31 (5, 6.2) | keep-alive's zero bytes; ready, identity and hits only over the stream | already so |
+| 32 (7) | kind 90, the host's mouse aim assist policy | client: taken and logged (no mouse with aim assist here: the desktop mouse never gets it, the Vita's gyro is no mouse), blocked until it comes; host: sent at each ready, as the game starts and on change, network.block_mouse_aim_assist (default false: allowed; config and environment only, no panel row yet) |
+| (9.1) | OpenCE browsers' ping sessions | a Vita's crossplay host whose 24 tunnels are full lets one that has carried no game packet for 15 s make way for a proven new player (never on an unproven request) |
+| (9.2) | listings within an hour of the browser's clock | the host stamps `time(NULL)` (UTC on Linux; the Vita's not checked: hardware) |
+| (9.4) | a host deleting a flag or ball | our client deleted one without halting only in objects.c; weapons.c's own check halted a debug client at every OpenCE 32 CTF join (it removes its own flags then). Now skipped on a distributed client, the flag's goal markers cleared, logged |
+
+**Found by the tests:** the weapons.c flag assert above; a fuzzed input's
+control flag bit 15 reaching `unit_control` (a debug host's halt; release
+builds tested nothing): every peer's buttons are now held to the unit's 15
+flags (player_queues_new.c); OpenCE 6ec42856 itself faults (segfault, eip 0)
+once a network test's game is over, its own host and clients alike, its own
+control games too: crossplay_check notes that for the PC copies the harness
+names (`XPPC_POSTGAME_FAULT_KINDS`, set for that commit) instead of failing
+stability, never for ours; its host logs only the start of its invite link,
+so `opencehost`'s invite join is not tested against it; OpenCE-to-OpenCE over
+the internet stalled once in three runs after its browser's ping session
+("reached already", then nothing: `pcself`), not ours.
+
+**Tests** (OpenCE 6ec42856 of 32, ChupathingyCE 7d6d8f24 and OpenCE 8102e711
+of 29, OpenCE b1ef7f7e and ChupathingyCE 35fc7e8b of 28; our harness build
+`--linux-net-vita --linux-d3d gxm-null`, the fuzz one with ASan + UBSan and
+`HALO_NET_FUZZ_TWIN`):
+
+| Test | Result |
+|---|---|
+| `net32` pol-opence-block / -allow | PASS: our client took blocked (3 copies) and allowed from OpenCE hosts, played every step |
+| `net32` pol-ours-opence | PASS: our host sent the policy at 3 readies, to every client as the game started (allowed) and at the change (blocked, `HALO_TEST_AIM_ASSIST_TOGGLE`); on the wire (a sniffer on the host's LAN port) 12-byte kind 90, count 1, reserved 0: block 0 four times, block 1 twice; the OpenCE clients played every step |
+| `net32` pol-ours-ours | PASS: allowed then blocked taken; the forged copies (in a datagram, 13 bytes, count 2, value 2, reserved 1: `HALO_TEST_AIM_ASSIST_FORGE`) each refused 5 times, every step played |
+| `net32` port-ours-opence | PASS: OpenCE clients with the client port held (another program on 5151) found our host (the search answered at their port), were answered at the ports their datagrams came from and played every step |
+| `net32` ctfdel-opence-ours | PASS: an OpenCE CTF host's `object_destroy_all`: our copies deleted the flags on the host's word (at joining and at the command) with no assertion, and played on |
+| `run_elevator_test.sh` (T4, our build alone, c10's lift) | PASS: the same tick's carry kept the rider on the platform all 1119 moving ticks (four legs and a reversal), its height over the elevator node constant (spread 0.0000); the Xbox carry for comparison: 0.49 spread, 97 ticks airborne, lost at the reversal |
+| `net29` | PASS: our client on an OpenCE 29 host, our host announcing 29 (test build) with OpenCE 29 clients, both by 29's rules, every step |
+| `pcversion` | PASS: OpenCE of 28 and of 29 do not join our 32 host; a host of 33 (our stand-in, `HALO_TEST_ANNOUNCE_VERSION`) refused as newer on a LAN, its listing dropped online |
+| `opencelan`, `opencehost` (browser), `crossmixed`, `crossrefuse`, `pcjoinsvita`, `browserboth`, `crossold`, `chupahost`, `crosscoop` | PASS (OpenCE of 32; ChupathingyCE's games of 29, with an OpenCE 29 control) |
+| `crossmaps` (pcgulch, Custom Edition resources) | PASS |
+| `crossfuzzhost` | PASS: 2048 and 1024 twins (now also kind 90 and ticks moved to the windows' edges), no sanitizer memory error, no crash; its first runs found the control-flag halt above |
+| `crosscoop` b30 on an OpenCE 32 host | PASS, BSP switch followed (124-146 s on it); the particle assertion seen at a BSP switch with 29 builds did not appear in these three games |
+| `crossctf` | ChupathingyCE PASS; OpenCE 32: played to its end, the scoreboards alike, but the kills step fails: its CTF game lasts seconds and both its deaths fell while no client of ours was in it (before our join, after the scheduled leave). The control passed |
+| `pcself` | PASS in one run; one stall in OpenCE-to-OpenCE internet play (above) |
+| unit: network_wire_test (four builds), p2p_lobby, p2p_friends, lang, crossplay_guard, vita_settings, network fuzz targets' kept cases; wire contract against 8102e711 | PASS |
+| Vita release build (`--lto off --pgo off --portable --release`, `ninja vita`) | compiles (eboot.bin, halo.vpk) |
+
+**Not verified here:** T5/T6 (a lift in a network game against OpenCE, the ±4
+bound injected): no stock multiplayer map has an elevator machine, and a
+campaign lift needs scripted riders on both machines; the carry itself is
+T4's, the netcode rules are by the spec. T8's exact 449/451 boundary (the
+window is a constant; the twins moved ticks around both windows' edges with
+no fault). T7 (friendly fire: not implemented). T13 (ten minutes of browser
+probes) and T14 (listing clock under faketime: not installed). The kind-90
+start-of-game broadcast reaching a client still loading (spec 12.1): the
+copy sent at its ready is what each client got. Hardware: the Vita's clock
+(9.2) and a game against an OpenCE 32 host.
 ---
 
 ## 11. Licensing and credit
