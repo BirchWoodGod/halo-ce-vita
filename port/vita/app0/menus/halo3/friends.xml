@@ -204,6 +204,9 @@ The settings panel's Multiplayer > Friends does the same. The art is this folder
 	<widget name="h3/friends/lobby_title" type="text" left="380" top="300" width="120" height="16" font="h3/font_small" color="#FF9FB6CC" text_y="1" string_list="h3/friends_text" string_index="0"/>
 	<widget name="h3/friends/lobby_count" type="text" left="500" top="300" width="132" height="16" align="right" font="h3/font_small" color="#FF9FB6CC" text_y="1"/>
 	<widget name="h3/friends/lobby_rule" left="380" top="318" width="252" height="2" bitmap="h3/rule"/>
+	<!-- (with no one to show: what the friends list says - "Go online to see your friends" -, across
+	the panel, in two lines when one is too narrow: port h3 friends panel) -->
+	<widget name="h3/friends/lobby_status" type="text" left="380" top="322" width="252" height="34" font="h3/font_small" color="#FFC5D0DD" text_y="1"/>
 	<widget name="h3/friends/lobby_name_1" type="text" left="380" top="322" width="108" height="16" font="h3/font_small" color="#FFEEF2F6" text_y="1"/>
 	<widget name="h3/friends/lobby_state_1" type="text" left="490" top="322" width="142" height="16" font="h3/font_small" color="#FFC5D0DD" text_y="1"/>
 	<widget name="h3/friends/lobby_name_2" type="text" left="380" top="338" width="108" height="16" font="h3/font_small" color="#FFEEF2F6" text_y="1"/>
@@ -221,6 +224,7 @@ The settings panel's Multiplayer > Friends does the same. The art is this folder
 		<child widget="h3/friends/lobby_title"/>
 		<child widget="h3/friends/lobby_count"/>
 		<child widget="h3/friends/lobby_rule"/>
+		<child widget="h3/friends/lobby_status"/>
 		<child widget="h3/friends/lobby_name_1"/>
 		<child widget="h3/friends/lobby_state_1"/>
 		<child widget="h3/friends/lobby_name_2"/>

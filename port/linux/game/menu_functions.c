@@ -6075,6 +6075,9 @@ static struct
 	struct p2p_friend_entry panel_entries[P2P_FRIEND_ENTRIES_MAXIMUM];
 	int panel_count;
 	unsigned long panel_time;
+	/* (its status line, and the lines it took, as last said) */
+	char status_said[96];
+	int status_lines;
 } h3_friends;
 
 static void h3_friends_message(char const *text)
@@ -6640,6 +6643,55 @@ static void h3_friends_option(struct widget_instance *widget)
 }
 
 /* (port h3 friends panel: the lobbies') who is online and what they do */
+/* a line of the port's text in a text box, in at most two lines: as it is
+when it fits the box's width, else broken at the last space that leaves
+both parts fitting (its "\n"), else cut with "..." (row_column); the
+lines it took, 0 when cut */
+static boolean text_too_wide(struct widget_instance *widget, char const *text, short width)
+{
+	unsigned short characters[192];
+	long length = halo_menus_utf16(text, characters, (long)NUMBEROF(characters)), index;
+
+	for (index = 0; index < length - 1; index++)
+	{
+		if (characters[index] > 0xFF)
+			characters[index] = '?';
+	}
+	return ui_widget_port_text_too_wide(widget, (wchar_t const *)characters, width);
+}
+
+static int text_show_two_lines(struct widget_instance *widget, char const *text)
+{
+	char lines[192];
+	short width;
+	int split;
+
+	if (!widget || widget->type != _ui_widget_type_text_box)
+		return 0;
+	width = ui_widget_port_text_box_width(widget);
+	if (width <= 0 || !text_too_wide(widget, text, width))
+	{
+		text_show(widget, text);
+		return 1;
+	}
+	snprintf(lines, sizeof(lines), "%s", text);
+	for (split = (int)strlen(lines) - 1; split > 0; split--)
+	{
+		if (lines[split] != ' ')
+			continue;
+		lines[split] = 0;
+		if (!text_too_wide(widget, lines, width) && !text_too_wide(widget, lines + split + 1, width))
+		{
+			lines[split] = '\n';
+			text_show(widget, lines);
+			return 2;
+		}
+		lines[split] = ' ';
+	}
+	row_column(widget, widget->name, text);
+	return 0;
+}
+
 static void h3_friends_panel_update(struct widget_instance *panel)
 {
 	unsigned long time = system_milliseconds();
@@ -6723,10 +6775,22 @@ static void h3_friends_panel_update(struct widget_instance *panel)
 		text_show(named(panel, name), name_text);
 		if (row == 1 && !name_text[0])
 		{
-			/* (the status across the panel: there is room for it) */
-			text_show(named(panel, name), state_text);
+			/* (the status across the panel, in its own box: two lines when
+			one is too narrow - "Go online to see your friends" was cut
+			short in the name's column, and Spanish is longer) */
+			int lines = text_show_two_lines(named(panel, "lobby_status"), state_text);
+
 			text_show(named(panel, state), "");
+			if (strcmp(state_text, h3_friends.status_said) || lines != h3_friends.status_lines)
+			{
+				snprintf(h3_friends.status_said, sizeof(h3_friends.status_said), "%s", state_text);
+				h3_friends.status_lines = lines;
+				platform_log("menus: h3 friends panel: status \"%s\" %s", state_text, lines == 1 ? "fits one line" :
+					lines == 2 ? "fits two lines" : "cut");
+			}
 		}
+		else if (row == 1)
+			text_show(named(panel, "lobby_status"), "");
 		/* (a doing wider than its column cut with "...", as the lists' rows) */
 		else if (state_text[0])
 			row_column(panel, state, state_text);

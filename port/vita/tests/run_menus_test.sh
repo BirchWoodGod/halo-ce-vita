@@ -162,6 +162,10 @@
 #            INVITE TO PARTY (the party's own steps: run_netns_online_test.sh party)
 #   h3friendspanel the lobbies' FRIENDS panel: the multiplayer lobby shows who is online
 #            and the requests, Triangle opens the FRIENDS screen, B back; the Forge lobby too
+#   h3friendsfit the lobbies' FRIENDS panel's line with no one to show ("Go online to see
+#            your friends", cut short in the name's column on insider.14) in its own
+#            box across the panel, in one or two lines, never cut: the Forge lobby in
+#            English and in Spanish (HALO_TEST_LANG_DIR: the Vita's translations on Linux)
 #   h3oddrows the public lists' odd listings (HALO_TEST_BROWSER_ODD: the owner's
 #            photo of beta.7's browser, Oct 18 2026) in the Halo 3 games browser
 #            and OpenCE's (Menu style Halo CE): a name that names nothing shows
@@ -253,7 +257,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3party browserprofile h3players browserrows profilepaths}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3party browserprofile h3players browserrows profilepaths h3friendsfit}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
@@ -1412,6 +1416,20 @@ for case in $cases; do
 		grep -a "ui: screen" "$log" | grep -A1 "pc.h3.party.screen" | tail -1 | grep -q "pc.h3.friends.screen" ||
 			fail h3party "B did not go back to FRIENDS"
 		grep -aq "ui: screen pc.h3.friends.options" "$log" || fail h3party "Triangle did not open a friend's options" ;;
+	h3friendsfit)
+		# (FORGE: its lobby's FRIENDS panel, internet play off: its line; in English, then Spanish)
+		run h3friendsfit "$menus_data" 22 "wait:150:3000 down:150:700 down:150:700 a wait:150:5000" HALO_MENU_STYLE=halo3
+		run h3friendsfit_es "$menus_data" 22 "wait:150:3000 down:150:700 down:150:700 a wait:150:5000" HALO_MENU_STYLE=halo3 \
+			HALO_LANGUAGE=es "HALO_TEST_LANG_DIR=$root/port/vita/app0/lang"
+		check_h3 h3friendsfit halo3
+		check_h3 h3friendsfit_es halo3
+		grep -aE "friends panel: status" "$out/h3friendsfit/run.log" "$out/h3friendsfit_es/run.log"
+		grep -aqE 'menus: h3 friends panel: status "Go online to see your friends" fits (one|two) lines?' "$out/h3friendsfit/run.log" ||
+			fail h3friendsfit "the panel's line did not fit (English)"
+		grep -aqE 'menus: h3 friends panel: status "Conéctate en línea para ver a tus amigos" fits (one|two) lines?' "$out/h3friendsfit_es/run.log" ||
+			fail h3friendsfit "the panel's line did not fit (Spanish)"
+		grep -aq 'menus: h3 friends panel: status .* cut' "$out/h3friendsfit/run.log" "$out/h3friendsfit_es/run.log" &&
+			fail h3friendsfit "the panel's line was cut" ;;
 	h3friendspanel)
 		# (MULTIPLAYER: the lobby's panel; Triangle: FRIENDS; B, B: the main menu, MULTIPLAYER focused; down
 		# to FORGE: its lobby's panel; Triangle; B)
@@ -1457,7 +1475,7 @@ for case in $cases; do
 		grep -aq "4way_start2join_screen\|menus: Server Browser: the profile" "$log" &&
 			fail browserprofile "internet play off: the profile screen opened anyway" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3lobbyscenes|h3modelsmany|h3friends|h3friendspanel|browserprofile|h3players|browserrows|profilepaths]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3lobbyscenes|h3modelsmany|h3friends|h3friendspanel|browserprofile|h3players|browserrows|profilepaths|h3friendsfit]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"

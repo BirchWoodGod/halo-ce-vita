@@ -89,7 +89,9 @@ these screens stand for the Xbox's own, over the same animated Halo ring:
   (Decline, Invite, Ignore, Cancel), Triangle its options (Remove, Block,
   Unblock) after Halo 3's question; a join goes on as JOIN WITH CODE's.
   Each lobby shows a FRIENDS panel at the right, under the players: who is
-  online and what they are doing, and the requests and invites waiting. A
+  online and what they are doing, and the requests and invites waiting
+  (with no one to show, the friends list's line across the panel, in two
+  lines when one is too narrow). A
   friend's invite asks at the menus with the game's question (Accept the
   invite and join now?). The settings panel's Multiplayer > Friends does the
   same for the original menus.
