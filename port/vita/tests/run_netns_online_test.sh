@@ -1061,12 +1061,12 @@ browserscroll)
 menushost|pickjoin)
 	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 	# (Multiplayer, CREATE GAME INTERNET: Server Setup; A on SERVER NAME types
-	# it; down to START GAME; the System Link screen's profile (A A A), the map
+	# it; down to START GAME (past WHO CAN JOIN); the System Link screen's profile (A A A), the map
 	# list (A), the gametype (A): the lobby; START starts the game. pickjoin:
 	# the host stays on the map list a minute, the joiner joining meanwhile)
 	pick=5000
 	[ $mode = pickjoin ] && pick=${HALO_TEST_PICK_WAIT:-60000}
-	pad="wait:150:3000 down a wait:150:2000 down down down a wait:150:2000 a wait:150:1500 down down left down down a"
+	pad="wait:150:3000 down a wait:150:2000 down down down a wait:150:2000 a wait:150:1500 down down left down down down a"
 	pad="$pad wait:150:5000 a a a wait:150:$pick a wait:150:4000 a"
 	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=true \
 		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_TEST_INPUT=bot:1 HALO_NET_HOST_PUBLIC=false "HALO_TEST_PAD=$pad" \
@@ -2009,13 +2009,13 @@ h3online|h3pickjoin)
 		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS)"; exit 0
 	fi
 	# (MULTIPLAYER: the lobby on SYSTEM LINK; NETWORK, up to ONLINE, A: online, live; a while for
-	# the broker; down three to START GAME, A: Create Game; down two to NAME, A: typed; down four
-	# to START GAME, A: the profile (A joins, A the profile, A), the map list (A), the game type
+	# the broker; down three to START GAME, A: Create Game; down two to NAME, A: typed; down five
+	# to START GAME (past WHO CAN JOIN), A: the profile (A joins, A the profile, A), the map list (A), the game type
 	# (A): the game's lobby; a while for the joiner, then A starts the game, a few times)
 	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
 		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:1 HALO_NET_HOST_PUBLIC=true \
 		HALO_TEST_TEXT_INPUT=NetHost \
-		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:10000 down:150:500 down:150:500 down:150:500 a wait:150:4000 down:150:500 down:150:500 a wait:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:4000 a wait:150:2000 a wait:150:2000 a wait:150:$pick a wait:150:4000 a wait:150:${HALO_TEST_H3ONLINE_WAIT:-45000} a wait:150:5000 a wait:150:5000 a" \
+		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:10000 down:150:500 down:150:500 down:150:500 a wait:150:4000 down:150:500 down:150:500 a wait:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:4000 a wait:150:2000 a wait:150:2000 a wait:150:$pick a wait:150:4000 a wait:150:${HALO_TEST_H3ONLINE_WAIT:-45000} a wait:150:5000 a wait:150:5000 a" \
 		; host_pid=$last_pid
 	sleep 25
 	# (MULTIPLAYER: the lobby on SYSTEM LINK; NETWORK, up to ONLINE, A; a while for the broker;

@@ -1,8 +1,9 @@
 #!/bin/bash
 # Crossplay against real PC builds (docs/crossplay.md, task T8 and section
 # 10): OpenCE, ChupathingyCE and DamnationCE Linux builds of pinned commits
-# (build_pc_crossplay.sh), and our Vita-path client (configure.py
-# --linux-net-vita, crossplay on: HALO_CROSSPLAY=1), headless, on one Linux
+# (build_pc_crossplay.sh), and our Vita-path client and host (configure.py
+# --linux-net-vita; no switch since Oct 19 2026: each game on its own wire,
+# a host's chosen by HALO_NET_HOST_CROSSPLAY), headless, on one Linux
 # machine with no internet, in network namespaces as run_netns_online_test.sh
 # makes them: each machine behind a NAT router of its own (Linux masquerade),
 # or two on one LAN bridge; a namespace standing for the internet holds the
@@ -75,14 +76,10 @@
 #   damnserver  DamnationCE's dedicated server (its game binary with
 #               HALO_DEDICATED), an OpenCE client and ours, on a LAN and over
 #               the internet (by its invite: it lists only on its game list)
-#   crossmixed  the switch's two worlds kept apart (our builds only, and one
-#               OpenCE host): our Vita host on the legacy wire (Crossplay
-#               off) and our client with Crossplay on, on a LAN (it does not
-#               join, and says the game is on the Vita-to-Vita network) and
-#               over the internet (it never sees the game: hcev against
-#               hceu); our copy told to host with Crossplay on refuses to
-#               (never on the crossplay wire); and our client with Crossplay
-#               off does not join an OpenCE host on its LAN
+#   crossmixed  one build, both wires, no setting changed: our Vita host for
+#               Vitas (the legacy wire) and for Vitas and PC (the crossplay
+#               wire, on a LAN and from the browser, tagged VITA+PC), and an
+#               OpenCE host on a LAN, each joined by our client and played
 #   crossrefuse what our client refuses in a PC game (section 6, T11), on
 #               OpenCE hosts on LANs of their own: a second local player
 #               (split screen, HALO_NETWORK_TEST_SECOND_PLAYER: not added,
@@ -170,12 +167,35 @@
 #               over the internet (OpenCE's, from the server browser) it never
 #               lists the game (its listing's version). SKIP without
 #               XPPC_OLD_BUILDS
+#   pcjoinsvita PC joins Vita (T15, T16): our host for Vitas and PC at a Vita's
+#               pace (HALO_TICK_SLOWDOWN, XPPC_SLOWDOWN 19); OpenCE clients
+#               on its LAN, from OpenCE's browser, and by our host's join link
+#               (halo://join/..., its invite file) through both NATs; each
+#               game played to its end (crossplay_check's steps)
+#   pccap       the Vitas' 16 on that host: 8 OpenCE clients and 7 of ours on
+#               one LAN, then a 17th (OpenCE), which joins nothing (not in all)
+#   browserboth one server browser, both kinds, tagged: an OpenCE host, our
+#               Vita host for Vitas and ours for Vitas and PC, all public; our
+#               clients see [PC ...], [VITA], [VITA+PC] and each joins one
+#               from the same list on its wire; Browser shows Vita games
+#               lists the Vitas' alone; on one LAN the System Link list's tags
+#   crosspassword  a password on our host for Vitas and PC: a wrong one
+#               refused, the right one plays; OpenCE's browser leaves it alone
+#   pcversion   OpenCE of 28 (XPPC_OLD_BUILDS) and of 32 (XPPC_NEW_OPENCE) do
+#               not join our 29 host; our client refuses an OpenCE host of 32
+#               on a LAN (a newer version) and drops its listing online
+#   crossfuzzhost  the host side fuzzed (not in all; HALO_TEST_VITA an ASan
+#               HALO_NET_FUZZ_TWIN build): our host for Vitas and PC twins one
+#               in XPPC_FUZZ_RATE (2) of its OpenCE clients' messages and
+#               datagrams; no sanitizer memory error, no crash
+#   crosscoophost  co-op hosted by our Vita for Vitas and PC (experimental):
+#               an OpenCE client and one of ours beside the host's player
 #   all         every mode above, one after the other (expected failures as
 #               XFAIL), and a summary
 #
 # Not here: crossversion (wants T10's signed table): reports SKIP.
-# dedicatedopence and pcjoinsvita were dropped (Oct 11 2026: our server and
-# Vita hosts stay off the crossplay wire).
+# dedicatedopence was dropped (our dedicated servers stay off the crossplay
+# wire).
 #
 # With XPPC_PROBE=1 the expected-fail modes also run our client with
 # HALO_NETWORK_TEST_CROSS_LINE=1 (debug builds: it lists and joins a host on
@@ -240,7 +260,7 @@ mode=${1:-}
 
 case $mode in
 pcself|chupaopence|opencelan|opencehost|crosstls|chupahost|chupaserver|damnserver|crossrefuse|crossbig|crossmixed|crosscoop|crossctf) ;;
-pcjoinsvita|pccap|browserboth|crosspassword) ;;
+pcjoinsvita|pccap|browserboth|crosspassword|crosscoophost) ;;
 pcversion)
 	[ -n "${XPPC_OLD_BUILDS:-}" ] && [ -x "$XPPC_OLD_BUILDS/opence/src/build/linux/halo" ] && [ -n "${XPPC_NEW_OPENCE:-}" ] &&
 		[ -x "$XPPC_NEW_OPENCE" ] ||
@@ -1054,7 +1074,7 @@ crossmixed)
 		wire_said=$(cat "$clientlog" "$clientdebug" 2>/dev/null | grep -ac "network: $want (joining a game from the list")
 		# (the legacy wire is the one with no game: no change to log, its join's line)
 		[ "$name" = mixed-lan-vita ] && wire_said=$(cat "$clientlog" "$clientdebug" 2>/dev/null |
-			grep -ac "joining a host of network version 18$")
+			grep -ac "joining a host of network version 18[[:space:]]*$")
 		host_said=1
 		case $name in *vitapc) host_said=$(cat "$hostlog" "$hostdebug" 2>/dev/null |
 			grep -ac "network: the crossplay wire (hosting for Vitas and PC, a Vita's game)") ;; esac
@@ -1103,14 +1123,14 @@ pccap)
 	# the Vitas' 16 on our host for Vitas and PC (T15): 8 OpenCE clients and
 	# 7 of ours join it on one LAN (16 players with its own), at a Vita's
 	# pace (HALO_TICK_SLOWDOWN 19); a 17th (OpenCE) finds it full and joins
-	# nothing; the host's frame times logged
+	# nothing
 	subnet=$((subnet + 1)); n=$subnet
 	side "$n"; host_ns=$side_machine
 	mkdir -p "$out/cap"
 	run_seconds=$seconds
 	run_copy cap/host "$host_ns" ours "192.168.$n.2" 198.51.100.1 HALO_NET_ONLINE=false HALO_NETWORK_TEST=host:bloodgulch:slayer \
 		HALO_NETWORK_TEST_START=60 HALO_NETWORK_TEST_KILL=$kill_every HALO_NETWORK_TEST_SCORE=50 HALO_NET_LOBBY_NAME=XpCap \
-		HALO_NET_HOST_CROSSPLAY=true HALO_TICK_SLOWDOWN=${XPPC_SLOWDOWN:-19} HALO_FRAME_TIMES=1
+		HALO_NET_HOST_CROSSPLAY=true HALO_TICK_SLOWDOWN=${XPPC_SLOWDOWN:-19}
 	cap_pids=$last_pid
 	sleep 8
 	for i in $(seq 1 16); do
@@ -1131,7 +1151,8 @@ pccap)
 	full=$(grep -ac "network test: tick" "$out/cap/c16/run.log" 2>/dev/null)
 	joined16=$(grep -aEc "network test: (joining|tick)" "$out/cap/c16/run.log" 2>/dev/null)
 	echo "--- pccap: the host's last player index ${most:-none} (15: 16 players); the 17th's ticks played ${full:-0}"
-	grep -ah "frame times\|tick took\|slowdown" "$hostlog" "$out/cap/host/data/debug.txt" 2>/dev/null | tail -3 | sed 's/^/  /'
+	echo "  the host's game: $(grep -ac "network test: tick" "$hostlog") s of play logged; each client's:" \
+		$(for i in $(seq 1 15); do grep -ac "network test: tick" "$out/cap/c$i/run.log" 2>/dev/null; done | sort -n | head -1) "s at least"
 	if [ "${most:-0}" != 15 ]; then
 		our_results="$our_results pccap:players-${most:-none}"
 	elif [ "${full:-0}" != 0 ]; then
@@ -1162,7 +1183,7 @@ browserboth)
 		both_pids="$both_pids $last_pid"
 	done
 	sleep 15
-	for spec in "join-pc XpPcHost" "join-vita XpVitaHost" "join-vitapc XpVitaPc" "filter-vita -"; do
+	for spec in "join-pc tag:PC" "join-vita XpVitaHost" "join-vitapc XpVitaPc" "filter-vita -"; do
 		set -- $spec
 		subnet=$((subnet + 1)); side "$subnet"
 		extra="HALO_NETWORK_TEST_PUBLIC_NAME=$2"
@@ -1194,21 +1215,21 @@ browserboth)
 	result=pass
 	rows=$(grep -ah "network test: browser row" "$out/both/join-pc/run.log" 2>/dev/null | sed 's/^.*browser row //' | sort -u)
 	echo "--- browserboth: the server browser's rows (one of our clients)"; echo "$rows" | sed 's/^/  /'
-	echo "$rows" | grep -q '^\[PC[A-Z ]*\] "XpPcHost"' || result=pc-row
+	echo "$rows" | grep -q '^\[PC[A-Z ]*\] "' || result=pc-row
 	echo "$rows" | grep -q '^\[VITA\] "XpVitaHost"' || result=vita-row
 	echo "$rows" | grep -q '^\[VITA+PC\] "XpVitaPc"' || result=vitapc-row
-	for spec in "join-pc XpPcHost crossplay" "join-vita XpVitaHost legacy" "join-vitapc XpVitaPc crossplay"; do
+	for spec in "join-pc tag:PC crossplay" "join-vita XpVitaHost legacy" "join-vitapc XpVitaPc crossplay"; do
 		set -- $spec
 		log=$out/both/$1/run.log debug=$out/both/$1/data/debug.txt
 		ticks=$(grep -a "network test: tick" "$log" 2>/dev/null | grep -aEc "player [0-9]+: \(.* player [0-9]+: \(")
 		wire=$(cat "$log" "$debug" 2>/dev/null | grep -ac "network: the $3")
-		[ "$3" = legacy ] && wire=$(cat "$log" "$debug" 2>/dev/null | grep -ac "joining a host of network version 18")
+		[ "$3" = legacy ] && wire=$(cat "$log" "$debug" 2>/dev/null | grep -ac "joining a host of network version 18[[:space:]]*$")
 		echo "  $1: joined $2, ${ticks:-0} s with two players alive, on its wire: ${wire:-0}"
 		{ [ "${ticks:-0}" -ge 20 ] && [ "${wire:-0}" -ge 1 ]; } || result="$1-ticks-$ticks-wire-$wire"
 	done
 	frows=$(grep -ah "network test: browser row" "$out/both/filter-vita/run.log" 2>/dev/null | sed 's/^.*browser row //' | sort -u)
 	echo "  Browser shows Vita games:"; echo "$frows" | sed 's/^/    /'
-	{ echo "$frows" | grep -q 'XpVitaHost' && echo "$frows" | grep -q 'XpVitaPc' && ! echo "$frows" | grep -q 'XpPcHost'; } ||
+	{ echo "$frows" | grep -q 'XpVitaHost' && echo "$frows" | grep -q 'XpVitaPc' && ! echo "$frows" | grep -q '^\[PC'; } ||
 		result=filter
 	lan=$(grep -ah "network test: the System Link list:" "$out/both/lan-client/run.log" 2>/dev/null | tail -1 |
 		sed 's/^.*System Link list: //')
@@ -1289,7 +1310,7 @@ crossfuzzhost)
 	wait_pairs
 	for name in fuzz-lan fuzz-net; do
 		dir=$out/$name/host
-		twins=$(grep -aoE "net fuzz twin: [0-9]+ twins" "$dir/run.log" "$dir/data/debug.txt" 2>/dev/null | tail -1)
+		twins=$(grep -ahoE "net fuzz twin: [0-9]+ twins" "$dir/run.log" "$dir/data/debug.txt" 2>/dev/null | tail -1)
 		asan=$(cat "$dir"/data/asan* 2>/dev/null | grep -ac "ERROR: AddressSanitizer")
 		crash=$(grep -aEc "egmentation fault|SIGSEGV|SIGABRT|EXCEPTION halt|stack trace" "$dir/run.log" 2>/dev/null)
 		ticks=$(grep -ac "network test: tick" "$dir/run.log" 2>/dev/null)
@@ -1302,6 +1323,33 @@ crossfuzzhost)
 			our_results="$our_results $name:asan-$asan-crash-$crash-ticks-$ticks"
 		fi
 	done
+	;;
+crosscoophost)
+	# co-op hosted by our Vita for Vitas and PC (T15: PC clients in a Vita's
+	# co-op, experimental): our host's network co-op on XPPC_COOP_LEVEL (b30)
+	# on the crossplay wire, an OpenCE client and one of ours; each must play
+	# beside the host's player, the host its AI, nobody crash
+	# (XPPC_COOPHOST_WIRE=legacy: the same game for Vitas alone, ours only - the
+	# harness's own control)
+	coophost_kinds="opence ours"
+	coophost_wire=HALO_NET_HOST_CROSSPLAY=true
+	[ "${XPPC_COOPHOST_WIRE:-}" = legacy ] && coophost_kinds="ours ours" coophost_wire=HALO_NET_HOST_CROSSPLAY=false
+	coop_host_extra="$coophost_wire HALO_NET_COOP_PLAYERS=3 HALO_NET_COOP_LEVEL=$coop_level HALO_NETWORK_TEST=host:$coop_level HALO_NETWORK_TEST_START=20 HALO_TEST_INPUT=bot:1:look" coop_game coophost-ours ours "$coophost_kinds"
+	wait_pairs
+	hostlog=$out/coophost-ours/host/run.log hostdebug=$out/coophost-ours/host/data/debug.txt
+	wire=$(cat "$hostlog" "$hostdebug" 2>/dev/null | grep -ac "network: the crossplay wire (hosting for Vitas and PC")
+	result=pass
+	for c in client client2; do
+		log=$out/coophost-ours/$c/run.log
+		played=$(grep -a "network test: tick" "$log" 2>/dev/null | grep -aEc "player [0-9]+: \(.* player [0-9]+: \(")
+		echo "--- coophost-ours $c ($( [ $c = client ] && echo OpenCE || echo ours)): ${played:-0} s with two players alive"
+		[ "${played:-0}" -ge 30 ] || result="$c-played-${played:-0}"
+	done
+	cat "$out"/coophost-ours/*/run.log "$out"/coophost-ours/*/data/debug.txt 2>/dev/null |
+		grep -aqE "ERROR: AddressSanitizer|egmentation fault|SIGSEGV|SIGABRT|EXCEPTION halt" && result=crash
+	[ "${wire:-0}" -ge 1 ] || [ "${XPPC_COOPHOST_WIRE:-}" = legacy ] || result="host-wire"
+	echo "  our host on the crossplay wire: ${wire:-0}"
+	our_results="$our_results coophost-ours:$result"
 	;;
 crossrefuse)
 	# OpenCE hosts on LANs of their own, each with our client (section 6,
@@ -1587,7 +1635,7 @@ crosscoopfuzz)
 	wait_pairs
 	for name in fuzz-opence-ours fuzz-chupa-ours fuzz-damnation-ours fuzz4-opence-ours fuzzall-opence-ours; do
 		log=$out/$name/client/run.log debug=$out/$name/client/data/debug.txt
-		twins=$(grep -aoE "net fuzz twin: [0-9]+ twins" "$log" 2>/dev/null | tail -1 | grep -oE "[0-9]+")
+		twins=$(grep -ahoE "net fuzz twin: [0-9]+ twins" "$log" 2>/dev/null | tail -1 | grep -oE "[0-9]+")
 		asan=$(grep -ac "ERROR: AddressSanitizer" "$log" 2>/dev/null)
 		ubsan=$(grep -aE "runtime error" "$log" 2>/dev/null | sed 's/^.*\/\(source\|port\)/\1/; s/: runtime error.*//' | sort | uniq -c |
 			tr '\n' ';')

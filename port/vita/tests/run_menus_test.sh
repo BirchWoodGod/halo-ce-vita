@@ -578,14 +578,14 @@ for case in $cases; do
 			fail h3browser "OpenCE's browser or password screen opened with Menu style Halo 3" ;;
 	h3create)
 		# (down three to START GAME, A: Create Game; GAME TYPE, A: the picker, down, A: SLAYER PRO;
-		# down two to NAME, A: typed; down four to START GAME, A)
-		run h3create "$menus_data" 50 "$h3mppad down:150:500 down:150:500 down:150:500 a wait:150:4000 a wait:150:3000 down:150:600 a wait:150:4000 down:150:500 down:150:500 a wait:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:5000" \
+		# down two to NAME, A: typed; down five to START GAME (past WHO CAN JOIN), A)
+		run h3create "$menus_data" 50 "$h3mppad down:150:500 down:150:500 down:150:500 a wait:150:4000 a wait:150:3000 down:150:600 a wait:150:4000 down:150:500 down:150:500 a wait:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:5000" \
 			HALO_MENU_STYLE=halo3 $h3net "HALO_TEST_TEXT_INPUT=Vita Night"
 		check_h3 h3create halo3
 		log=$out/h3create/run.log
 		grep -aq "ui: screen pc.h3.setup.screen" "$log" || fail h3create "START GAME did not open Create Game"
 		grep -aq "menus: h3 mp: game type Slayer Pro" "$log" || fail h3create "the GAME TYPE picker did not set the game type"
-		grep -aq "menus: Server Setup: Vita Night, 16 players, public; the profile, then the map list" "$log" ||
+		grep -aq "menus: Server Setup: Vita Night, 16 players, public, Vitas; the profile, then the map list" "$log" ||
 			fail h3create "START GAME did not set up the game as Server Setup does"
 		grep -aqE "ui: screen (ui.shell.main_menu.multiplayer_type_select.connected.4way_profile_select.4way_start2join_screen|pc.h3.join.screen)" "$log" ||
 			fail h3create "START GAME did not open the profile" ;;
@@ -1077,7 +1077,7 @@ for case in $cases; do
 			[ $name = h3oddrows_classic ] && coop="Co-op (Legendary)"
 			for row in "Spartan | Slayer | Blood Gulch | 8/128" "Jos?? ??? Ma??ana | CTF | Chill Out | 3/16" \
 				"true legendary run (cut) | $coop | The Pillar of Autumn (cut) | 3/4" "teto | Co-op | - | 1/4" \
-				"BIG TEAM 24*7 (cut) | - | - | -" "HALO UNIVERSAL CUSTOM SERVER 24/ (cut) | Team Slayer | bigassv2,104 | 24/32"; do
+				"BIG TEAM 24*7 | - | - | -" "HALO UNIVERSAL CUSTOM SERVER 24/ (cut) | Team Slayer | bigassv2,104 | 24/32"; do
 				grep -aqF "$row" "$log" || fail h3oddrows "$name: no row \"$row\""
 			done
 			grep -aE "menus: browser row [0-9]+: " "$log" | grep -aqE "row [0-9]+:  ?\|" && fail h3oddrows "$name: a row without a name"
@@ -1096,7 +1096,7 @@ for case in $cases; do
 		run pp_c_create_lan "$menus_data" 22 "$cmp $d $d $d $d a wait:150:4000" HALO_MENU_STYLE=classic HALO_NET_ONLINE=false
 		run pp_h_start_link "$menus_data" 22 "$h3mppad $d $d $d a wait:150:4000" HALO_MENU_STYLE=halo3 HALO_NET_ONLINE=false
 		run pp_h_browse_link "$menus_data" 22 "$h3mppad $d $d $d $d $d a wait:150:4000" HALO_MENU_STYLE=halo3 HALO_NET_ONLINE=false
-		run pp_h_start_online "$menus_data" 30 "$h3mppad $d $d $d a wait:150:4000 $d $d $d $d $d $d a wait:150:5000" \
+		run pp_h_start_online "$menus_data" 30 "$h3mppad $d $d $d a wait:150:4000 $d $d $d $d $d $d $d a wait:150:5000" \
 			HALO_MENU_STYLE=halo3 $h3net "HALO_TEST_TEXT_INPUT=Vita Night"
 		run pp_h_browse_online "$menus_data" 22 "$h3mppad $d $d $d $d $d a wait:150:4000" HALO_MENU_STYLE=halo3 $h3net
 		run pp_h_code_online "$menus_data" 28 "$h3mppad $d $d $d $d $d $d a wait:150:3000 a wait:150:2000 $d a wait:150:5000" \
@@ -1156,7 +1156,7 @@ for case in $cases; do
 		grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected.server_list" "$log" &&
 			fail h3lan "the Xbox's System Link list opened with Menu style Halo 3"
 		grep -aq "menus: the LAN browser (system link)" "$log" || fail h3lan "the LAN browser was not the system link one"
-		grep -aq "menus: the LAN browser lists 14: Test game 09 (Chill Out, CTF, 15/16, PC), Test game 02 (" "$log" ||
+		grep -aq "menus: the LAN browser lists 14: Test game 09 (Chill Out, CTF, 15/16, OPENCE), Test game 02 (" "$log" ||
 			fail h3lan "the LAN browser did not list the 14 games, the fullest first"
 		grep -aq "menus: the server browser's game 3 of 14 chosen" "$log" || fail h3lan "down two did not choose the third game"
 		grep -aq "menus: the LAN browser's game Test game .* is no longer listed" "$log" ||

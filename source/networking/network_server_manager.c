@@ -478,6 +478,7 @@ symbols in this file:
 #include "dedicated_server.h"
 #include "bots.h"
 #include "network_wire.h"
+#include "net_fuzz_twin.h"
 #endif
 
 #include "cache/cache_files.h"

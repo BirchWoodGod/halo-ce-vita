@@ -1910,7 +1910,10 @@ void network_test_update(
 				for (index = 0; !network_test.lobby_id[0] && p2p_lobby_entry(index, &entry); index++)
 				{
 					if (entry.compatible && !entry.own &&
-						(!network_test.lobby_name[0] || !strcmp(entry.name, network_test.lobby_name)))
+						(!network_test.lobby_name[0] || !strcmp(entry.name, network_test.lobby_name) ||
+						/* ("tag:<tag>": the first game of that tag, crossplay_guard.h's -
+						a PC host's name is its own: run_netns_crossplay_test.sh) */
+						(!strncmp(network_test.lobby_name, "tag:", 4) && !strcmp(entry.tag, network_test.lobby_name + 4))))
 					{
 						platform_log("network test: the public games list \"%s\"%s%s%s%s: %s; %s", entry.name,
 							entry.locked ? " [pw]" : "", entry.dedicated ? " [dedicated]" : "",
