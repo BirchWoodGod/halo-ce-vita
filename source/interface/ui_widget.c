@@ -4486,6 +4486,16 @@ void display_error(
 			port_text = ui_widget_port_error_pending_text;
 			ui_widget_port_error_pending_text = NULL;
 		}
+#ifdef HALO_LINUX
+		/* (the host's game closed: said for the network it was on, online,
+		System Link or ad hoc, not always System Link: menu_functions.c) */
+		else if (error_code == _error_network_server_shut_down)
+		{
+			wchar_t const *pc_menu_functions_host_left_text(void);
+
+			port_text = pc_menu_functions_host_left_text();
+		}
+#endif
 		if (local_player_index != NONE)
 		{
 			short index;

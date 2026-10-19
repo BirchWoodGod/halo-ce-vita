@@ -1963,3 +1963,8 @@
 "Joinable" = "Se puede unir"
 "Your games, public or private: friends join in one press" = "Tus partidas, públicas o privadas: tus amigos entran con un botón"
 "opening a friend's game with its password" = "abriendo la partida de un amigo con su contraseña"
+
+# ---------- the host's game closed, said for its network (insider.15)
+"The online game has\r\nclosed down." = "La partida en línea\r\nse ha cerrado."
+"The ad hoc game has\r\nclosed down." = "La partida ad hoc\r\nse ha cerrado."
+"The System Link game\r\nhas closed down." = "La partida System Link\r\nse ha cerrado."

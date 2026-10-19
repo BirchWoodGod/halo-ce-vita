@@ -9620,6 +9620,27 @@ boolean pc_menu_functions_live_lobby_after_game(void)
 	return TRUE;
 }
 
+/* (display_error, the host's game closed: _error_network_server_shut_down)
+the text naming the network the game was played on - the Xbox's says
+System Link whatever it was: online (internet play, a friend's or a code's
+game too), System Link (the same Wi-Fi), ad hoc */
+wchar_t const *pc_menu_functions_host_left_text(void)
+{
+	short running = network_connection_running();
+
+	platform_log("menus: the host's game closed: said for %s", running == NETWORK_CONNECTION_ONLINE ? "online play" :
+		running == NETWORK_CONNECTION_ADHOC ? "ad hoc" : "System Link");
+	switch (running)
+	{
+	case NETWORK_CONNECTION_ONLINE:
+		return TW(L"The online game has\r\nclosed down.");
+	case NETWORK_CONNECTION_ADHOC:
+		return TW(L"The ad hoc game has\r\nclosed down.");
+	default:
+		return TW(L"The System Link game\r\nhas closed down.");
+	}
+}
+
 /* (netgame_unjoin_player: B on the game's lobby) the host of a live lobby
 goes back to it with its game kept, the countdown stopped: TRUE (nothing
 else done); FALSE for any other lobby */

@@ -148,7 +148,8 @@
 #            Xbox's map choice, the joiner still in its game; START GAME again: a second game
 #   h3liveinvite  the host's live lobby on ONLINE, private: L (INVITE FRIENDS) invites its friend
 #            (the codes through files), who accepts at the menus and lands in the lobby; START
-#            GAME: the two play; the lobby and its game never listed
+#            GAME: the two play; the lobby and its game never listed; END GAME: the joiner told
+#            "The online game has closed down."
 #   h3liveprivate  the live lobby private by default: the host's lobby on ONLINE with the
 #            settings panel's Visibility Public (the shipped default) is not listed; its
 #            friend joins it from presence in one press, no code; GAME OPTIONS (Square) and its
@@ -627,7 +628,9 @@ seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = h3mppause ] && seconds=${HALO_TEST_SECONDS:-150}
 [ "$mode" = h3live ] && seconds=${HALO_TEST_SECONDS:-150}
 [ "$mode" = h3liveleave ] && seconds=${HALO_TEST_SECONDS:-100}
-[ "$mode" = h3liveinvite ] && seconds=${HALO_TEST_SECONDS:-130}
+# (h3liveinvite: a game and its END GAME after the invite; h3liveagain: two games)
+[ "$mode" = h3liveinvite ] && seconds=${HALO_TEST_SECONDS:-240}
+[ "$mode" = h3liveagain ] && seconds=${HALO_TEST_SECONDS:-280}
 rejoin=${HALO_TEST_REJOIN:-0}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_netns_test.$$}
 . "$here/test_out.sh"
@@ -2076,8 +2079,12 @@ h3liveinvite)
 	invite_pad="wait:150:3000 down:150:700 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:${HALO_TEST_INVITE_WAIT:-35000}"
 	invite_pad="$invite_pad @invite-01-lobby:0:300 lt wait:150:4000 @invite-02-picker:0:300 a wait:150:3000"
 	invite_pad="$invite_pad @invite-03-invited:0:300 b wait:150:30000 @invite-04-lobby-joined:0:300"
-	# (then START GAME (down three, A): the private lobby's game played, never listed meanwhile)
+	# (then START GAME (down three, A): the private lobby's game played, never listed meanwhile;
+	# a while in it, Start, down three to END GAME, Cross, Cross: the game over for everyone, the
+	# joiner told the online game closed)
 	invite_pad="$invite_pad down:150:500 down:150:500 down:150:500 a wait:150:5000 @invite-05-countdown:0:300"
+	invite_pad="$invite_pad wait:150:45000 start:150:4000 wait:150:4000 down:150:800 down:150:800 down:150:800 a:150:3000"
+	invite_pad="$invite_pad wait:150:3000 a:150:3000 wait:150:20000 @invite-06-menus:0:300"
 	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
 		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:1 HALO_NET_HOST_PUBLIC=false \
 		HALO_NET_LOBBY_NAME=Alpha "HALO_TEST_FRIENDS=code-file=$hc,add-file=$jc" $shot_env \
@@ -2114,6 +2121,9 @@ h3liveinvite)
 	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
 	echo "joiner's seconds with two players playing: $two"
 	[ "$two" -ge 15 ] || fail "the friend played the private lobby's game for $two s with two players (15 wanted)"
+	grep -aq "ui: screen pc.h3.mppause.end_screen" "$hl" || fail "the host's END GAME did not ask"
+	grep -aq "menus: the host's game closed: said for online play" "$jl" ||
+		fail "the joiner was not told the online game closed (its network named)"
 	;;
 h3liveprivate)
 	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
@@ -2170,10 +2180,7 @@ h3live|h3liveleave|h3liveagain)
 	# (h3liveagain: a short game - 5 kills, the host's kills every 2 s -, then the lobby again and
 	# a second game: a longer run)
 	again_env=
-	if [ $mode = h3liveagain ]; then
-		seconds=${HALO_TEST_SECONDS:-280}
-		again_env="HALO_NETWORK_TEST_SCORE=5 HALO_NETWORK_TEST_KILL=2"
-	fi
+	[ $mode = h3liveagain ] && again_env="HALO_NETWORK_TEST_SCORE=5 HALO_NETWORK_TEST_KILL=2"
 	if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
 		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS) or no HALO_TEST_PROFILE"; exit 0
 	fi
@@ -2300,6 +2307,8 @@ h3live|h3liveleave|h3liveagain)
 			fail "B did not close the host's live lobby"
 		grep -aq "the game host is shutting down" "$out/joiner/data/debug.txt" ||
 			fail "the joiner was not told the host left"
+		grep -aq "menus: the host's game closed: said for System Link" "$jl" ||
+			fail "the joiner was not told the System Link game closed"
 		grep -a "ui: screen\|error" "$jl" | sed -n '/the game host/,$p' | head -5
 		sed -n '/system link: in another.s lobby/,$p' "$jl" | grep -aqE "ui: screen (pc.h3.(main|mp).screen|ui.shell.main_menu)" ||
 			fail "the joiner was not back at the menus"
