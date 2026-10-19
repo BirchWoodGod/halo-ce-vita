@@ -195,6 +195,16 @@
 #   friendsplayersoff  as friendsplayers, the host appearing offline: no card, no
 #            request, the joiner told none came
 #   friendsplayersnone  as friendsplayers, the host's friends off: the same
+#   party    the party (p2p_party.h): the host (Alpha, its game private) is friends
+#            with the joiner (Bravo) and a second joiner (Charlie, behind a third
+#            NAT); it invites both to a party (HALO_TEST_PARTY), each accepts at
+#            the invite's question (HALO_TEST_PARTY_ANSWER), and the leader's
+#            FOLLOW takes both into its game through its invite's own join: both
+#            must play it. Alpha's chat (cleaned of its markup) and Charlie's
+#            quick chat reach the others, Charlie shown to Bravo with his code
+#            (not Bravo's friend); the broker sees no name or chat; then Alpha
+#            leaves the party and the longest-standing member (the first to
+#            join) leads on both
 #   adhoc    online off, ad hoc on: the two machines' only link to each other
 #            is an emulated ad hoc group (HALO_NET_ADHOC_EMULATE)
 #   many     online off, the host and HALO_TEST_JOINERS joiners (3) on one
@@ -568,6 +578,7 @@ seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = swat ] && seconds=${HALO_TEST_SECONDS:-500}
 [ "$mode" = swatmixed ] && seconds=${HALO_TEST_SECONDS:-500}
 [ "$mode" = coopstarts ] && seconds=${HALO_TEST_SECONDS:-75}
+[ "$mode" = party ] && seconds=${HALO_TEST_SECONDS:-210}
 rejoin=${HALO_TEST_REJOIN:-0}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_netns_test.$$}
 . "$here/test_out.sh"
@@ -655,7 +666,8 @@ side() { # side NAME WAN_SUBNET LAN_SUBNET -> sets ${NAME}_router ${NAME}_machin
 }
 side host 10.10.1 192.168.1
 side join 10.10.2 192.168.2
-{ [ "${HALO_TEST_SECOND_JOINER:-0}" = 1 ] || [ "$mode" = badmap ] || [ "$mode" = splitscreen ]; } && side join2 10.10.3 192.168.3
+{ [ "${HALO_TEST_SECOND_JOINER:-0}" = 1 ] || [ "$mode" = badmap ] || [ "$mode" = splitscreen ] || [ "$mode" = party ]; } &&
+	side join2 10.10.3 192.168.3
 [ "$mode" = splitscreen ] && side join3 10.10.4 192.168.4
 # (lobbytls: the broker's TLS port too, with a certificate from an
 # authority made here, in the test's folder; its plain port misbehaving)
@@ -3701,6 +3713,65 @@ friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged)
 		[ "$two" -ge 20 ] || fail "the joiner played the host's game for $two s with two players (20 wanted)"
 	fi
 	;;
+party)
+	# (the party, p2p_party.h: Alpha (the host) friends with Bravo (joiner) and Charlie
+	# (joiner2), its game private (no one joins it from presence or the browser); Alpha invites
+	# both to a party, they accept (the invite's question answered: friends_game.c), and its
+	# FOLLOW takes them into Alpha's game through its invite's own join; Alpha chats, Charlie's
+	# quick chat; then Alpha leaves the party: Bravo, the longest-standing, leads)
+	hc=$out/host.code jc=$out/joiner.code j2c=$out/joiner2.code add=$out/host.add
+	(for i in $(seq 1 60); do [ -s "$jc" ] && [ -s "$j2c" ] && break; sleep 1; done
+		cat "$jc" "$j2c" > "$add.tmp" 2>/dev/null; mv "$add.tmp" "$add") &
+	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env HALO_NET_HOST_PUBLIC=false HALO_NET_LOBBY_NAME=Alpha \
+		"HALO_TEST_FRIENDS=code-file=$hc,add-file=$add" \
+		"HALO_TEST_PARTY=invite-at=${HALO_TEST_PARTY_INVITE_AT:-40},chat-at=${HALO_TEST_PARTY_CHAT_AT:-110}:hello party |%^,leave-at=${HALO_TEST_PARTY_LEAVE_AT:-170}" \
+		${HALO_TEST_HOST_ENV:-}; host_pid=$last_pid
+	run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=join-invite HALO_TEST_INPUT=bot:2 HALO_NET_LOBBY_NAME=Bravo "HALO_TEST_FRIENDS=code-file=$jc,accept" \
+		HALO_TEST_PARTY_ANSWER=accept "HALO_TEST_PAD=wait:150:$((seconds * 1000))"; join_pid=$last_pid
+	run_copy joiner2 "$join2_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_c" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=join-invite HALO_TEST_INPUT=bot:3 HALO_NET_LOBBY_NAME=Charlie "HALO_TEST_FRIENDS=code-file=$j2c,accept" \
+		"HALO_TEST_PARTY=chat-at=${HALO_TEST_PARTY_CHAT2_AT:-125}:gg" \
+		HALO_TEST_PARTY_ANSWER=accept "HALO_TEST_PAD=wait:150:$((seconds * 1000))"; join2_pid=$last_pid
+	wait $join_pid $join2_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log j2l=$out/joiner2/run.log
+	for side in host joiner joiner2; do
+		echo "--- $side"; grep -a "party:" "$out/$side/run.log" | head -24
+	done
+	grep -aq "party: invited Bravo to the party" "$hl" && grep -aq "party: invited Charlie to the party" "$hl" ||
+		fail "Alpha did not invite both friends"
+	grep -aq "party: Bravo joined the party" "$hl" && grep -aq "party: Charlie joined the party" "$hl" ||
+		fail "the friends did not join Alpha's party"
+	# (the longest-standing member: the first to join, who leads once Alpha leaves)
+	first=$(grep -a "party: \(Bravo\|Charlie\) joined the party" "$hl" | head -1 | sed 's/.*party: \([A-Za-z]*\) joined.*/\1/')
+	echo "the longest-standing member: ${first:-none}"
+	for side in joiner joiner2; do
+		log=$out/$side/run.log
+		grep -aq "party: Alpha's party invite accepted: Done" "$log" || fail "the $side did not accept the party invite"
+		grep -aq "party: You joined Alpha's party" "$log" || fail "the $side did not join the party"
+		grep -aq "party: the leader, Alpha, hosts a game: .*; following" "$log" || fail "the $side was not told to follow"
+		grep -aq "party: following Alpha: joining" "$log" || fail "the $side did not follow Alpha"
+		grep -aq "network test: the friend's invite accepted and its host reached" "$log" ||
+			fail "the $side did not reach Alpha's game"
+		grep -aq "system link: in another's lobby\|system link: in a network game" "$log" ||
+			fail "the $side did not get into Alpha's game"
+		grep -aq "party: chat from Alpha: hello party" "$log" || fail "the $side did not read Alpha's chat (cleaned)"
+		grep -aqE "party: $first( #[A-Z0-9]{4})? leads the party now" "$log" ||
+			fail "the $side did not see $first, the longest-standing, lead once Alpha left"
+	done
+	grep -aq "party: chat from Charlie[^:]*: gg" "$hl" || fail "Alpha did not read Charlie's chat"
+	grep -aq "party: chat from Charlie #[A-Z0-9]\{4\}: Ready!" "$jl" ||
+		fail "Bravo did not read Charlie's quick chat under Charlie's name and code (not a friend of Bravo's)"
+	grep -aq "joinable" "$jl" && fail "Alpha's private game showed joinable from presence"
+	# (the broker: the party's traffic sealed - no names, no chat - on the friends' hashed topics)
+	grep -aqE "hello party|Alpha|Bravo|Charlie|Ready!" "$out/broker.log" && fail "the broker's log shows a name or a chat"
+	grep -a "retained" "$out/broker.log" | grep -aq "/f1/" && fail "the broker kept a friends' message"
+	for side in joiner joiner2; do
+		two=$(grep -a "network test: tick" "$out/$side/run.log" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+		echo "$side's seconds with two or more players playing: $two"
+		[ "$two" -ge 20 ] || fail "the $side played Alpha's game for $two s with another player (20 wanted)"
+	done
+	;;
 friendsplayers|friendsplayersoff|friendsplayersnone)
 	# (no codes typed: the joiner adds the host from the game's players, the two
 	# machines' friend cards exchanged over internet play first)
@@ -3756,7 +3827,7 @@ friendsplayers|friendsplayersoff|friendsplayersnone)
 	[ "$two" -ge 20 ] || fail "the joiner played the host's game for $two s with two players (20 wanted)"
 	;;
 *)
-	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3online|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone" >&2
+	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3online|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|party" >&2
 	exit 2
 	;;
 esac

@@ -445,6 +445,14 @@ struct p2p_friends_host
 	unsigned char key_hash[P2P_KEY_HASH_SIZE];
 	unsigned char token[P2P_TOKEN_SIZE];
 	int listed, locked, open, players, maximum;
+	/* (not hosting) joined another's game through internet play - its host
+	reached as the invite, a code or the server browser led - with that
+	invite, and whether the game is a locked one (listed with a password:
+	its invite is never passed on, the party's follow included) */
+	int joined;
+	unsigned char joined_hash[P2P_KEY_HASH_SIZE];
+	unsigned char joined_token[P2P_TOKEN_SIZE];
+	int joined_locked;
 };
 void p2p_friends_update(const struct p2p_friends_host *host);
 /* whether friends want the brokers (internet play runs, friends are on) */
@@ -474,6 +482,9 @@ void p2p_friends_stopping(int quitting);
 /* (p2p_lobby.c) the hosted game as the server browser has it, into host's
 listed, locked, open, players and maximum; under p2p_lock */
 void p2p_lobby_friends_view(struct p2p_friends_host *host);
+/* (p2p_lobby.c) whether a host's game is locked: listed with a password, or
+joined from the browser with one; under p2p_lock */
+int p2p_lobby_host_locked(const unsigned char *key_hash);
 /* (p2p_lobby.c) a map's title as the lists show it ("Blood Gulch"; a Halo
 PC map or one not the Xbox's: its own name) */
 const char *p2p_lobby_map_title(const char *map, int pc_map);

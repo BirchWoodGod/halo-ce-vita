@@ -156,6 +156,10 @@
 #            OFFLINE and FRIENDS CAN JOIN switched; Square declines the request (nothing sent);
 #            Cross on the joinable friend says go online first; Triangle's REMOVE FRIEND
 #            removes them; the list written and read back by a second start
+#   h3party  the Halo 3 PARTY screen (menus/halo3/party.xml; port/linux/src/p2p_party.h):
+#            FRIENDS' PARTY row opens it (internet play off: no party, go online
+#            first), B goes back to FRIENDS; a friend's options offline have no
+#            INVITE TO PARTY (the party's own steps: run_netns_online_test.sh party)
 #   h3friendspanel the lobbies' FRIENDS panel: the multiplayer lobby shows who is online
 #            and the requests, Triangle opens the FRIENDS screen, B back; the Forge lobby too
 #   h3oddrows the public lists' odd listings (HALO_TEST_BROWSER_ODD: the owner's
@@ -249,7 +253,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel browserprofile h3players browserrows profilepaths}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3party browserprofile h3players browserrows profilepaths}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
@@ -1354,10 +1358,10 @@ for case in $cases; do
 			fail h3modstouch "a tap on Back did not go back to the main menu" ;;
 	h3friends)
 		# (FRIENDS, the seventh item; ADD FRIEND: a code typed; APPEAR OFFLINE; FRIENDS CAN JOIN;
-		# Delta's request: Square declines; Bravo (focused then): Cross joins (offline: go online
-		# first), Triangle, down to REMOVE FRIEND, A; B)
+		# PARTY passed; Delta's request: Square declines; Bravo (focused then): Cross joins
+		# (offline: go online first), Triangle, down to REMOVE FRIEND, A; B)
 		friends_seed "$out/h3friends-save"
-		save_from="$out/h3friends-save" run h3friends "$menus_data" 45 "$h3friendspad a wait:150:2500 down:150:500 a wait:150:1500 down:150:500 a wait:150:1500 down:150:500 x wait:150:2500 a wait:150:2000 y wait:150:2500 down:150:500 a wait:150:2500 b wait:150:2000" \
+		save_from="$out/h3friends-save" run h3friends "$menus_data" 45 "$h3friendspad a wait:150:2500 down:150:500 a wait:150:1500 down:150:500 a wait:150:1500 down:150:500 down:150:500 x wait:150:2500 a wait:150:2000 y wait:150:2500 down:150:500 a wait:150:2500 b wait:150:2000" \
 			HALO_MENU_STYLE=halo3 HALO_TEST_FRIENDS_SHOW=online "HALO_TEST_TEXT_INPUT=abcd efgh-jklm"
 		check_h3 h3friends halo3
 		log=$out/h3friends/run.log
@@ -1388,6 +1392,23 @@ for case in $cases; do
 		[ "$(grep -a "this machine's friend code is" "$log" | sed 's/.*code is \([^ ]*\).*/\1/')" = \
 			"$(grep -a "this machine's friend code is" "$out/h3friends_again/run.log" | sed 's/.*code is \([^ ]*\).*/\1/')" ] ||
 			fail h3friends "the code changed between starts" ;;
+	h3party)
+		# (FRIENDS; down three to PARTY, Cross: the PARTY screen (internet play off: no party, how to
+		# make one); B: FRIENDS again (on ADD FRIEND); down five to Bravo, Triangle: the options,
+		# offline no INVITE TO PARTY; B, B)
+		friends_seed "$out/h3friends-save"
+		save_from="$out/h3friends-save" run h3party "$menus_data" 40 "$h3friendspad down:150:500 down:150:500 down:150:500 a wait:150:3000 b wait:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 y wait:150:2500 b wait:150:2000 b wait:150:2000" \
+			HALO_MENU_STYLE=halo3 HALO_TEST_FRIENDS_SHOW=online
+		check_h3 h3party halo3
+		log=$out/h3party/run.log
+		grep -a "menus: h3 party\|PARTY screen" "$log" | head -6
+		grep -aq "menus: h3 friends: the PARTY screen next" "$log" || fail h3party "Cross on PARTY did not ask for the PARTY screen"
+		grep -aq "menus: the PARTY screen opened" "$log" && grep -aq "ui: screen pc.h3.party.screen" "$log" ||
+			fail h3party "the PARTY screen did not open"
+		grep -aq "menus: h3 party: Go online to make a party" "$log" || fail h3party "the PARTY screen did not say go online"
+		grep -a "ui: screen" "$log" | grep -A1 "pc.h3.party.screen" | tail -1 | grep -q "pc.h3.friends.screen" ||
+			fail h3party "B did not go back to FRIENDS"
+		grep -aq "ui: screen pc.h3.friends.options" "$log" || fail h3party "Triangle did not open a friend's options" ;;
 	h3friendspanel)
 		# (MULTIPLAYER: the lobby's panel; Triangle: FRIENDS; B, B: the main menu, MULTIPLAYER focused; down
 		# to FORGE: its lobby's panel; Triangle; B)

@@ -26,10 +26,17 @@ pending, so that every handler is reached. The input's first byte says how:
 	   from the host; 16: T hosts the game, relaying)
 	8  the rest as a card's answer from S to an ask T made, signed by S (its
 	   name and key as the input has them)
+	9  the rest as a party message's body from F (T is in F's party, with S,
+	   who is not T's friend): an invite, answer, roster, leave, status,
+	   follow, chat or party presence, signed by F and sealed with the
+	   pair's key
+	10 the rest as a party message's body from S, the member not a friend
+	   (roster, leave, status, follow, chat), sealed with S's and T's pair key
 
 and its second byte its flags: the clock stepped, the header's type and
 recipient kept from the input, the list read after. After each input the
-lists are read and every text checked bounded and printable.
+lists are read and every text checked bounded and printable (the party's
+members and chat lines too, and its roster's bounds).
 */
 
 #define P2P_FRIENDS_FUZZ
@@ -43,9 +50,14 @@ enum
 	F = 1,
 	S = 2,
 	MAXIMUM_INPUT = 2 + MAXIMUM_LIST_SIZE + 64,
+	MODES = 11,
 };
 
-static unsigned long inputs, lists_taken, requests_taken, friends_seen;
+/* T's party as setup made it: F leads, T and S members (put back when an
+input ended it) */
+static struct party_state party_saved;
+
+static unsigned long inputs, lists_taken, requests_taken, friends_seen, party_lines, party_follows;
 static char fuzz_root[512];
 
 /* the three machines as the fuzz wants them: T and F friends, T's request
@@ -90,6 +102,75 @@ static void setup(void)
 	use(F);
 	friend_add(machines[T].key, "Tango", friendship, 0, 0);
 	use(T);
+	/* (T in F's party, with S) */
+	memset(&machines[T].party, 0, sizeof(machines[T].party));
+	memset(machines[T].party.id, 0x5A, PARTY_ID_LENGTH);
+	memcpy(machines[T].party.members[0].key, machines[F].key, P2P_KEY_SIZE);
+	memcpy(machines[T].party.members[1].key, machines[T].key, P2P_KEY_SIZE);
+	memcpy(machines[T].party.members[2].key, machines[S].key, P2P_KEY_SIZE);
+	for (index = 0; index < 3; index++)
+		machines[T].party.members[index].heard_time = clock_now;
+	machines[T].party.count = 3;
+	machines[T].party.leader = 0;
+	machines[T].party.serial = 1;
+	machines[T].party.active = 1;
+	party_saved = machines[T].party;
+	machines[T].party_invite_count = 0;
+	machines[T].chat_count = 0;
+}
+
+static void check_party(void)
+{
+	struct p2p_party_member members[P2P_PARTY_MAXIMUM];
+	struct p2p_party_chat_line lines[P2P_PARTY_CHAT_LINES];
+	struct p2p_party_invite invites[P2P_FRIEND_INVITES_MAXIMUM];
+	char text[160];
+	int count, index, at;
+
+	use(T);
+	if (machines[T].party.count < 0 || machines[T].party.count > P2P_PARTY_MAXIMUM ||
+		(machines[T].party.active && machines[T].party.leader >= machines[T].party.count) ||
+		machines[T].party_invite_count > P2P_FRIEND_INVITES_MAXIMUM || machines[T].chat_count > P2P_PARTY_CHAT_LINES ||
+		machines[T].party.sent_count > P2P_PARTY_MAXIMUM)
+	{
+		__builtin_trap();
+	}
+	count = p2p_party_members(members, P2P_PARTY_MAXIMUM);
+	for (index = 0; index < count; index++)
+	{
+		const char *texts[4] = { members[index].id, members[index].name, members[index].code, members[index].note };
+		int which;
+
+		for (which = 0; which < 4; which++)
+			for (at = 0; texts[which][at]; at++)
+				if (texts[which][at] < 0x20 || texts[which][at] > 0x7E)
+					__builtin_trap();
+	}
+	count = p2p_party_chat_lines(lines, P2P_PARTY_CHAT_LINES, 0);
+	party_lines += count > 0;
+	party_follows += machines[T].party.follow_heard != 0;
+	for (index = 0; index < count; index++)
+	{
+		if (memchr(lines[index].text, 0, sizeof(lines[index].text)) == NULL || strlen(lines[index].text) >
+			P2P_PARTY_CHAT_LENGTH + 40)
+		{
+			__builtin_trap();
+		}
+		for (at = 0; lines[index].text[at]; at++)
+			if (lines[index].text[at] < 0x20 || lines[index].text[at] > 0x7E ||
+				(!lines[index].notice && strchr("|%^<>\\`", lines[index].text[at])))
+				__builtin_trap();
+		for (at = 0; lines[index].name[at]; at++)
+			if (lines[index].name[at] < 0x20 || lines[index].name[at] > 0x7E)
+				__builtin_trap();
+	}
+	count = p2p_party_invites(invites, P2P_FRIEND_INVITES_MAXIMUM);
+	for (index = 0; index < count; index++)
+		for (at = 0; invites[index].name[at]; at++)
+			if (invites[index].name[at] < 0x20 || invites[index].name[at] > 0x7E)
+				__builtin_trap();
+	p2p_party_status(text, sizeof(text));
+	p2p_party_follow_pending(NULL);
 }
 
 static void check_entries(void)
@@ -173,7 +254,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 		setup();
 	if (size < 2)
 		return 0;
-	mode = data[0] % 9;
+	mode = data[0] % MODES;
 	flags = data[1];
 	data += 2;
 	size -= 2;
@@ -210,6 +291,44 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 			MAXIMUM_PLAIN_SIZE : plain_size, payload);
 		use(T);
 		break;
+	}
+	case 9:
+	case 10:
+	{
+		static const unsigned char none[P2P_KEY_SIZE];
+		static const int from_friend[8] = { TYPE_PARTY_INVITE, TYPE_PARTY_ANSWER, TYPE_PARTY_ROSTER, TYPE_PARTY_LEAVE,
+			TYPE_PARTY_STATUS, TYPE_PARTY_FOLLOW, TYPE_PARTY_CHAT, TYPE_PARTY_PRESENCE };
+		static const int from_member[5] = { TYPE_PARTY_ROSTER, TYPE_PARTY_LEAVE, TYPE_PARTY_STATUS, TYPE_PARTY_FOLLOW,
+			TYPE_PARTY_CHAT };
+		int type = mode == 9 ? from_friend[(flags >> 4) % 8] : from_member[(flags >> 4) % 5];
+		int directed = type == TYPE_PARTY_INVITE || type == TYPE_PARTY_ANSWER;
+		int sender = mode == 9 ? F : S;
+		int plain_size;
+		unsigned char send_key[P2P_SHA256_SIZE], receive_key[P2P_SHA256_SIZE];
+
+		/* (the party back as setup made it, if an input ended it) */
+		if (!machines[T].party.active)
+		{
+			machines[T].party = party_saved;
+			for (plain_size = 0; plain_size < 3; plain_size++)
+				machines[T].party.members[plain_size].heard_time = clock_now;
+		}
+		plain_size = plain_from(sender, type, directed ? machines[T].key : none, data, size, flags & 2, plain);
+		use(sender);
+		if (!pair_keys(machines[T].key, send_key, receive_key))
+			return 0;
+		payload_size = envelope_seal(KIND_PAIR, send_key, plain, plain_size > MAXIMUM_PLAIN_SIZE ? MAXIMUM_PLAIN_SIZE :
+			plain_size, payload);
+		use(T);
+		if (payload_size > 0)
+			p2p_friends_heard(P2P_FRIENDS_MAILBOX, payload, payload_size);
+		clock_now += flags & 1 ? 4000 : 50;
+		p2p_friends_update(&hosts[T]);
+		machines[T].outbound_count = 0;
+		check_party();
+		if (flags & 4)
+			check_entries();
+		return 0;
 	}
 	case 4:
 	{
@@ -330,7 +449,7 @@ static unsigned int next_random(void)
 
 enum
 {
-	SEEDS = 32,
+	SEEDS = 44,
 };
 
 static unsigned char seeds[SEEDS][MAXIMUM_INPUT];
@@ -347,7 +466,7 @@ static void make_seeds(void)
 	setup();
 	for (index = 0; index < SEEDS; index++)
 	{
-		int mode = index % 9;
+		int mode = index % MODES;
 
 		seeds[index][0] = (unsigned char)mode;
 		seeds[index][1] = (unsigned char)(index * 37);
@@ -374,6 +493,30 @@ static void make_seeds(void)
 			message.type = TYPE_ACCEPT;
 			memset(message.nonce, 0x33, NONCE_LENGTH);
 			break;
+		case 9:
+		case 10:
+		{
+			/* (each party message's body, as F or S would send it) */
+			static const int types[8] = { TYPE_PARTY_INVITE, TYPE_PARTY_ANSWER, TYPE_PARTY_ROSTER, TYPE_PARTY_LEAVE,
+				TYPE_PARTY_STATUS, TYPE_PARTY_FOLLOW, TYPE_PARTY_CHAT, TYPE_PARTY_PRESENCE };
+			int nth = (index / MODES) % (mode == 9 ? 8 : 5);
+
+			message.type = mode == 9 ? types[nth] : types[2 + nth];
+			memset(message.party_id, 0x5A, PARTY_ID_LENGTH);
+			message.party_serial = 7;
+			message.party_count = 3;
+			message.party_leader = mode == 9 ? 0 : 2;
+			memcpy(message.party_keys[0], machines[F].key, P2P_KEY_SIZE);
+			memcpy(message.party_keys[1], machines[T].key, P2P_KEY_SIZE);
+			memcpy(message.party_keys[2], machines[S].key, P2P_KEY_SIZE);
+			message.party_value = message.type == TYPE_PARTY_FOLLOW ? 2 : message.type == TYPE_PARTY_ANSWER ? 1 : 0;
+			message.game.state = P2P_FRIEND_STATE_MULTIPLAYER;
+			message.game.maximum = 16;
+			message.game.version = HALO_PORT_NETWORK_VERSION;
+			snprintf(message.chat, sizeof(message.chat), index & 1 ? "gg |%%^<b>" : "hello party");
+			seeds[index][1] = (unsigned char)(nth << 4);
+			break;
+		}
 		default:
 			message.type = TYPE_PRESENCE;
 			break;
@@ -472,7 +615,7 @@ int main(int count, char **arguments)
 				break;
 			default:
 				if (size > 2)
-					input[0] = (unsigned char)(next_random() % 7);
+					input[0] = (unsigned char)(next_random() % MODES);
 				break;
 			}
 		}
@@ -482,7 +625,8 @@ int main(int count, char **arguments)
 		if (run % 100000 == 99999)
 			fprintf(stderr, "%lu inputs\n", run + 1);
 	}
-	printf("PASS (%lu inputs; lists read whole %lu times, %lu entries checked)\n", runs, lists_taken, friends_seen);
+	printf("PASS (%lu inputs; lists read whole %lu times, %lu entries checked; party chat shown after %lu inputs, a follow "
+		"taken after %lu)\n", runs, lists_taken, friends_seen, party_lines, party_follows);
 	return 0;
 }
 #endif

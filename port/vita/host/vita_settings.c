@@ -232,6 +232,7 @@ Multiplayer tab's way.
 #include "mod_manager_share.h"
 #include "p2p.h"
 #include "p2p_friends.h"
+#include "p2p_party.h"
 #include "crossplay_guard.h"
 #include "system_link_shortcut.h"
 #include "update_check.h"
@@ -290,6 +291,8 @@ enum
 	PAGE_MODS,
 	/* (Multiplayer's Friends: p2p_friends.h) */
 	PAGE_FRIENDS,
+	/* (Multiplayer's Party: p2p_party.h) */
+	PAGE_PARTY,
 	PAGE_COUNT
 };
 
@@ -316,6 +319,7 @@ static const struct
 	{ "Forge and File Share", TAB_GAME },
 	{ "Mod manager", TAB_MULTIPLAYER },
 	{ "Friends", TAB_MULTIPLAYER },
+	{ "Party", TAB_MULTIPLAYER },
 };
 /* the headings over a tab's rows, as Halo Online's settings have them
 (HUD, Interface...): each above the row it names, when that row is shown */
@@ -373,6 +377,8 @@ enum
 	ACTION_UPDATE_CHECK,
 	/* (the Friends page) a friend's code typed with the D-pad */
 	ACTION_FRIEND_ADD,
+	/* (the Party page) this Vita out of its party */
+	ACTION_PARTY_LEAVE,
 };
 
 struct setting
@@ -663,6 +669,13 @@ static struct setting settings[] = {
 	/* (friends, port/linux/src/p2p_friends.c: the code, requests, who is
 	online, Join, Invite; the Halo 3 menus' FRIENDS screen does the same) */
 	PAGE_ROW("Friends", "Your friend code, requests, who is online, join, invite", TAB_MULTIPLAYER, PAGE_FRIENDS),
+	/* (the party, port/linux/src/p2p_party.h: friends who play together, the
+	leader's games followed; the Halo 3 menus' PARTY screen does the same.
+	The Friends page's first row: the Multiplayer tab is a screen's height;
+	SELECT + D-pad up opens it at once) */
+	PAGE_ROW("Party", "Invite friends, follow the leader, leave", PAGE_FRIENDS, PAGE_PARTY),
+	{ "Leave the party", NULL, 0, 0, { NULL }, { NULL }, "You stay where you are; the others go on together", 0,
+		PAGE_PARTY, KIND_ACTION, ACTION_PARTY_LEAVE },
 	{ "Add a friend", NULL, 0, 0, { NULL }, { NULL }, "Type a friend's code: they accept, then you're friends", 0,
 		PAGE_FRIENDS, KIND_ACTION, ACTION_FRIEND_ADD },
 	/* (friends.appear_offline: nothing sent to friends; live) */
@@ -918,6 +931,8 @@ enum
 	or blocking one */
 	SCREEN_FRIEND_CODE,
 	SCREEN_FRIEND_CONFIRM,
+	/* the Party page: the question before the leader removes a member */
+	SCREEN_PARTY_CONFIRM,
 };
 static int screen;
 /* the code being typed (eight characters of P2P_CODE_ALPHABET) and the
@@ -1033,7 +1048,7 @@ question. A join (a friend's game, an invite) goes on as Join with a code's,
 to the guide's steps. */
 /* (the page's three rows, its three lines and these, with the line saying
 which are shown, are a screen's height) */
-#define FRIEND_LINES 5
+#define FRIEND_LINES 4
 static struct p2p_friend_entry friends_view[P2P_FRIEND_ENTRIES_MAXIMUM];
 static int friends_count;
 static int friends_scroll;
@@ -1044,6 +1059,29 @@ static int friend_code_cursor;
 P2P_FRIENDS_BLOCK) */
 static struct p2p_friend_entry friend_confirm_entry;
 static int friend_confirm_action;
+
+/* ---------- the party
+
+The Party page (Multiplayer > Party; port/linux/src/p2p_party.h): Leave the
+party, the party's word (its size and leader), then the party invites
+waiting (cross joins the party, square says no), the members (each with a
+word: leader, you, muted, why they could not follow), and the friends online
+who can be invited (cross invites). Cross on a member mutes or unmutes them
+(here only), triangle (the leader's) removes them after a question. */
+#define PARTY_FRIEND_LINES 4
+static struct p2p_party_member party_members_view[P2P_PARTY_MAXIMUM];
+static int party_members_count;
+static struct p2p_party_invite party_invites_view[P2P_FRIEND_INVITES_MAXIMUM];
+static int party_invites_count;
+/* the friends who can be invited (indices into friends_view) */
+static int party_friends_view[P2P_FRIEND_ENTRIES_MAXIMUM];
+static int party_friends_count;
+static int party_friends_scroll;
+static struct p2p_party_member party_confirm_member;
+/* (the party's leader) a friend's game warned of: fewer open slots than the
+party; a second press joins it */
+static char party_warned_id[P2P_FRIEND_ID_SIZE];
+static unsigned long long party_warned_time;
 
 /* ---------- the mod manager */
 
@@ -2503,6 +2541,11 @@ enum
 	LINE_MOD,
 	/* (the Friends page's entries: friends_view) */
 	LINE_FRIEND,
+	/* (the Party page's: party_members_view, party_invites_view, and the
+	friends to invite, party_friends_view) */
+	LINE_PARTY_MEMBER,
+	LINE_PARTY_INVITE,
+	LINE_PARTY_FRIEND,
 	/* (a line that is not chosen: a warning, a note) */
 	LINE_INFO,
 	/* (a heading over rows: headings; not chosen either) */
@@ -2727,6 +2770,39 @@ static void friends_refresh(int now)
 		friends_scroll = 0;
 }
 
+/* the Party page's lines again (with the friends', at most twice a second) */
+static void party_refresh(int now)
+{
+	int index;
+
+	friends_refresh(now);
+	party_members_count = p2p_party_members(party_members_view, P2P_PARTY_MAXIMUM);
+	party_invites_count = p2p_party_invites(party_invites_view, P2P_FRIEND_INVITES_MAXIMUM);
+	party_friends_count = 0;
+	for (index = 0; index < friends_count; index++)
+		if (friends_view[index].kind == P2P_FRIEND_KIND_FRIEND && friends_view[index].online &&
+			p2p_party_friend_state(friends_view[index].id) != 1)
+		{
+			party_friends_view[party_friends_count++] = index;
+		}
+	if (party_friends_scroll >= party_friends_count)
+		party_friends_scroll = 0;
+}
+
+/* a member's word, as its line's value */
+static const char *party_member_word(const struct p2p_party_member *member)
+{
+	if (member->blocked)
+		return T("Blocked");
+	if (member->leader)
+		return member->self ? T("You, leader") : T("Leader");
+	if (member->self)
+		return T("You");
+	if (member->muted)
+		return T("Muted");
+	return member->online ? T("In party") : T("Not heard");
+}
+
 /* an entry's state in a word, as its line's value */
 static const char *friend_state_word(const struct p2p_friend_entry *entry)
 {
@@ -2754,6 +2830,8 @@ static int page_lines(struct line *lines)
 
 	if (page == PAGE_FRIENDS)
 		friends_refresh(0);
+	if (page == PAGE_PARTY)
+		party_refresh(0);
 
 	for (index = 0; index < SETTING_COUNT; index++)
 		if (settings[index].page == page && setting_shown(&settings[index]))
@@ -2854,6 +2932,33 @@ static int page_lines(struct line *lines)
 		for (index = 0; index < friends_count; index++)
 		{
 			lines[count].type = LINE_FRIEND;
+			lines[count++].index = index;
+		}
+	}
+	if (page == PAGE_PARTY)
+	{
+		lines[count].type = LINE_INFO;
+		p2p_party_status(lines[count++].text, sizeof(lines[0].text));
+		for (index = 0; index < party_invites_count; index++)
+		{
+			lines[count].type = LINE_PARTY_INVITE;
+			lines[count++].index = index;
+		}
+		for (index = 0; index < party_members_count; index++)
+		{
+			lines[count].type = LINE_PARTY_MEMBER;
+			lines[count++].index = index;
+		}
+		lines[count].type = LINE_HEADING;
+		snprintf(lines[count++].text, sizeof(lines[0].text), "%s", T("Invite a friend"));
+		if (!party_friends_count)
+		{
+			lines[count].type = LINE_INFO;
+			snprintf(lines[count++].text, sizeof(lines[0].text), "%s", T("No friend online to invite"));
+		}
+		for (index = 0; index < party_friends_count; index++)
+		{
+			lines[count].type = LINE_PARTY_FRIEND;
 			lines[count++].index = index;
 		}
 	}
@@ -3195,6 +3300,22 @@ static void help_line(char *text, int size, const struct line *line)
 		else
 			snprintf(text, (size_t)size, T("%s: on or off, or delete it"), mod_kind_name(entry->kind));
 	}
+	else if (line && line->type == LINE_PARTY_MEMBER)
+	{
+		const struct p2p_party_member *member = &party_members_view[line->index];
+
+		snprintf(text, (size_t)size, "%s: %.50s", member->code, member->note[0] ? member->note : member->is_friend ||
+			member->self ? T("in your party") : T("not on your friends list"));
+	}
+	else if (line && line->type == LINE_PARTY_INVITE)
+		snprintf(text, (size_t)size, T("%.16s's party, %d of %d: join to follow their games"),
+			party_invites_view[line->index].name, party_invites_view[line->index].size, P2P_PARTY_MAXIMUM);
+	else if (line && line->type == LINE_PARTY_FRIEND)
+	{
+		const struct p2p_friend_entry *entry = &friends_view[party_friends_view[line->index]];
+
+		snprintf(text, (size_t)size, "%s: %.50s", entry->name, entry->party[0] ? entry->party : entry->activity);
+	}
 	else if (line && line->type == LINE_FRIEND)
 	{
 		const struct p2p_friend_entry *entry = &friends_view[line->index];
@@ -3288,6 +3409,13 @@ static void footer_line(char *text, int size, const struct line *line)
 		middle = line->index == FORGE_LINE_START ? T("Cross: select   ") : T("Left/right: change   ");
 	else if (line && line->type == LINE_MOD)
 		middle = T("Cross: details   Square: delete   ");
+	else if (line && line->type == LINE_PARTY_MEMBER)
+		middle = party_members_view[line->index].self ? "" : p2p_party_leading() ?
+			T("Cross: mute  Triangle: remove  ") : T("Cross: mute   ");
+	else if (line && line->type == LINE_PARTY_INVITE)
+		middle = T("Cross: join party  Square: no  ");
+	else if (line && line->type == LINE_PARTY_FRIEND)
+		middle = T("Cross: invite to party   ");
 	else if (line && line->type == LINE_FRIEND)
 	{
 		const struct p2p_friend_entry *entry = &friends_view[line->index];
@@ -3345,6 +3473,17 @@ static void page_summary(char *text, int size, const struct setting *setting)
 			snprintf(text, (size_t)size, T("%d online, %d new"), online, requests);
 		else
 			snprintf(text, (size_t)size, T("%d online"), online);
+		break;
+	}
+	case PAGE_PARTY:
+	{
+		char status[96];
+		int size_now = p2p_party_status(status, sizeof(status));
+
+		if (size_now)
+			snprintf(text, (size_t)size, T("%d of %d"), size_now, P2P_PARTY_MAXIMUM);
+		else
+			snprintf(text, (size_t)size, "%s", T("None"));
 		break;
 	}
 	case PAGE_MODS:
@@ -3441,6 +3580,11 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 			continue;
 		if (line->type == LINE_FRIEND && (line->index < friends_scroll || line->index >= friends_scroll + FRIEND_LINES))
 			continue;
+		if (line->type == LINE_PARTY_FRIEND && (line->index < party_friends_scroll ||
+			line->index >= party_friends_scroll + PARTY_FRIEND_LINES))
+		{
+			continue;
+		}
 		/* (the classic panel short of room: the first headings left out) */
 		if (line->type == LINE_HEADING && (*headings)++ < skip)
 			continue;
@@ -3500,6 +3644,15 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 			length += snprintf(text + length, (size_t)(size - length), "\n%s\x02  %s%*s %8s  %s", name, state,
 				pad > 0 ? pad : 0, "", size_name, map_format_name(map->format));
 		}
+		else if (line->type == LINE_PARTY_MEMBER)
+			length += snprintf(text + length, (size_t)(size - length), "\n%.20s\x02  %s",
+				party_members_view[line->index].name, party_member_word(&party_members_view[line->index]));
+		else if (line->type == LINE_PARTY_INVITE)
+			length += snprintf(text + length, (size_t)(size - length), "\n%.20s\x02  %s",
+				party_invites_view[line->index].name, T("Party invite"));
+		else if (line->type == LINE_PARTY_FRIEND)
+			length += snprintf(text + length, (size_t)(size - length), "\n%.20s\x02  %s",
+				friends_view[party_friends_view[line->index]].name, T("Invite"));
 		else if (line->type == LINE_FRIEND)
 		{
 			const struct p2p_friend_entry *entry = &friends_view[line->index];
@@ -3684,6 +3837,15 @@ static void show_list(void)
 		if (entry >= friends_scroll + FRIEND_LINES)
 			friends_scroll = entry - FRIEND_LINES + 1;
 	}
+	if (page == PAGE_PARTY && count && lines[*selected].type == LINE_PARTY_FRIEND)
+	{
+		int entry = lines[*selected].index;
+
+		if (entry < party_friends_scroll)
+			party_friends_scroll = entry;
+		if (entry >= party_friends_scroll + PARTY_FRIEND_LINES)
+			party_friends_scroll = entry - PARTY_FRIEND_LINES + 1;
+	}
 	for (skip = 0; ; skip++)
 	{
 		highlighted = list_text(text, (int)sizeof(text), lines, count, *selected, skip, &headings);
@@ -3747,6 +3909,16 @@ static void show_friend_code(void)
 		letters, cursor, strcmp(running_network, "online") ? T("Sent once the Connection is Online") : "",
 		T("Up/down: letter  Left/right: move"), T("Cross: send  Circle: back"));
 	vgxm_menu_set(text, 2);
+}
+
+/* the question before the leader removes a member (triangle) */
+static void show_party_confirm(void)
+{
+	char text[512];
+
+	snprintf(text, sizeof(text), T("REMOVE FROM PARTY\n\n%.20s  %s\n\nThey are told, and stay where they are.\n"
+		"Cross: remove   O: back"), party_confirm_member.name, party_confirm_member.code);
+	vgxm_menu_set(text, -1);
 }
 
 /* the question before removing a friend or blocking a player (triangle) */
@@ -4164,6 +4336,8 @@ static void show(void)
 		show_friend_code();
 	else if (screen == SCREEN_FRIEND_CONFIRM)
 		show_friend_confirm();
+	else if (screen == SCREEN_PARTY_CONFIRM)
+		show_party_confirm();
 	else
 		show_list();
 }
@@ -4603,6 +4777,16 @@ static void act(const struct setting *setting)
 	case ACTION_FRIEND_ADD:
 		screen = SCREEN_FRIEND_CODE;
 		break;
+	case ACTION_PARTY_LEAVE:
+	{
+		int outcome = p2p_party_leave();
+
+		set_notice("%s", outcome == P2P_PARTY_DONE ? T("You left the party") : p2p_party_outcome_text(outcome));
+		vita_host_log(outcome == P2P_PARTY_DONE ? "settings: party: left (settings panel)" :
+			"settings: party: leave refused (not in a party)");
+		party_refresh(1);
+		break;
+	}
 	case ACTION_BROWSE:
 		guide_action = ACTION_JOIN;
 		guide_problem[0] = 0;
@@ -4906,8 +5090,23 @@ static void friend_input(const struct p2p_friend_entry *entry, unsigned long pre
 			friend_do(entry, P2P_FRIENDS_INVITE_ACCEPT);
 			break;
 		case P2P_FRIEND_KIND_FRIEND:
+		{
+			char warning[160];
+
+			/* (the party's leader: told first of a game with fewer open slots
+			than the party; cross again joins) */
+			if (entry->joinable && p2p_party_join_warning(entry->players, entry->maximum, warning, sizeof(warning)) &&
+				!(!strcmp(party_warned_id, entry->id) && now_us() - party_warned_time < 8000000ULL))
+			{
+				snprintf(party_warned_id, sizeof(party_warned_id), "%s", entry->id);
+				party_warned_time = now_us();
+				set_notice("%.110s %s", warning, T("Cross again: join"));
+				break;
+			}
+			party_warned_id[0] = 0;
 			friend_do(entry, P2P_FRIENDS_JOIN);
 			break;
+		}
 		case P2P_FRIEND_KIND_BLOCKED:
 			friend_do(entry, P2P_FRIENDS_UNBLOCK);
 			break;
@@ -4931,6 +5130,78 @@ static void friend_input(const struct p2p_friend_entry *entry, unsigned long pre
 			friend_do(entry, P2P_FRIENDS_CANCEL);
 			break;
 		}
+	}
+}
+
+/* a party line's buttons (a member, an invite, a friend to invite) */
+static void party_input(const struct line *line, unsigned long pressed)
+{
+	char log[160];
+	int outcome;
+
+	if (line->type == LINE_PARTY_MEMBER)
+	{
+		struct p2p_party_member member = party_members_view[line->index];
+
+		if (member.self)
+			return;
+		if ((pressed & VITA_BUTTON_TRIANGLE) && p2p_party_leading())
+		{
+			party_confirm_member = member;
+			screen = SCREEN_PARTY_CONFIRM;
+			return;
+		}
+		if (pressed & VITA_BUTTON_CROSS)
+		{
+			outcome = p2p_party_mute(member.id, !member.muted);
+			if (outcome == P2P_PARTY_DONE)
+				set_notice(member.muted ? T("%.20s unmuted") : T("%.20s muted"), member.name);
+			else
+				set_notice("%s", p2p_party_outcome_text(outcome));
+		}
+	}
+	else if (line->type == LINE_PARTY_INVITE && (pressed & (VITA_BUTTON_CROSS | VITA_BUTTON_SQUARE)))
+	{
+		struct p2p_party_invite invite = party_invites_view[line->index];
+		int accept = (pressed & VITA_BUTTON_CROSS) != 0;
+
+		outcome = p2p_party_answer(invite.id, accept);
+		set_notice("%s", outcome != P2P_PARTY_DONE ? p2p_party_outcome_text(outcome) : accept ? T("Joining the party...") :
+			T("Party invite declined"));
+		snprintf(log, sizeof(log), "settings: party: %s's invite %s: %s", invite.name, accept ? "accepted" : "declined",
+			p2p_party_outcome_text(outcome));
+		vita_host_log(log);
+	}
+	else if (line->type == LINE_PARTY_FRIEND && (pressed & VITA_BUTTON_CROSS))
+	{
+		struct p2p_friend_entry entry = friends_view[party_friends_view[line->index]];
+
+		outcome = p2p_party_invite(entry.id);
+		if (outcome == P2P_PARTY_DONE)
+			set_notice(T("Invited %.16s to your party"), entry.name);
+		else
+			set_notice("%s", p2p_party_outcome_text(outcome));
+		snprintf(log, sizeof(log), "settings: party: invite %s: %s", entry.name, p2p_party_outcome_text(outcome));
+		vita_host_log(log);
+	}
+	party_refresh(1);
+}
+
+/* the leader's question's buttons */
+static void party_confirm_input(unsigned long pressed)
+{
+	if (pressed & VITA_BUTTON_CIRCLE)
+		screen = SCREEN_LIST;
+	else if (pressed & VITA_BUTTON_CROSS)
+	{
+		int outcome = p2p_party_kick(party_confirm_member.id);
+
+		screen = SCREEN_LIST;
+		if (outcome == P2P_PARTY_DONE)
+			set_notice(T("Removed %.20s from the party"), party_confirm_member.name);
+		else
+			set_notice("%s", p2p_party_outcome_text(outcome));
+		party_refresh(1);
 	}
 }
 
@@ -5445,6 +5716,13 @@ int vita_settings_input(const struct vita_host_pad *pad)
 			show();
 		return 1;
 	}
+	if (screen == SCREEN_PARTY_CONFIRM)
+	{
+		party_confirm_input(pressed);
+		if (pressed)
+			show();
+		return 1;
+	}
 	if (screen == SCREEN_BROWSE)
 	{
 		browse_input(pressed);
@@ -5570,6 +5848,11 @@ int vita_settings_input(const struct vita_host_pad *pad)
 				friend_input(&entry, pressed);
 				if (!panel_open)
 					return 1;
+			}
+			else if (line->type == LINE_PARTY_MEMBER || line->type == LINE_PARTY_INVITE ||
+				line->type == LINE_PARTY_FRIEND)
+			{
+				party_input(line, pressed);
 			}
 			else if (pressed == VITA_BUTTON_TRIANGLE)
 				;

@@ -38,9 +38,11 @@ steps, comma-separated (test_steps below); everything is logged as
 #include "port_config.h"
 #include "p2p_internal.h"
 #include "p2p_friends.h"
+#include "p2p_party.h"
 #include "lang.h"
 #include "halo_port_limits.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -61,6 +63,16 @@ enum
 	TYPE_PRESENCE = 3,
 	TYPE_INVITE = 4,
 	TYPE_REMOVE = 5,
+	/* the party's (p2p_party.inc) */
+	TYPE_PARTY_INVITE = 6,
+	TYPE_PARTY_ANSWER = 7,
+	TYPE_PARTY_ROSTER = 8,
+	TYPE_PARTY_LEAVE = 9,
+	TYPE_PARTY_STATUS = 10,
+	TYPE_PARTY_FOLLOW = 11,
+	TYPE_PARTY_CHAT = 12,
+	TYPE_PARTY_PRESENCE = 13,
+	PARTY_ID_LENGTH = 16,
 
 	NAME_LENGTH = P2P_FRIEND_NAME_SIZE - 1,
 	MAP_LENGTH = 32,
@@ -71,9 +83,9 @@ enum
 
 	/* type, sender, recipient, epoch, counter */
 	PLAIN_HEADER_SIZE = 1 + P2P_KEY_SIZE + P2P_KEY_SIZE + 8 + 4,
-	/* the longest body: presence's */
-	MAXIMUM_BODY_SIZE = 1 + 1 + 1 + 1 + 1 + 1 + 2 + 1 + (1 + NAME_LENGTH) + (1 + MAP_LENGTH) + (1 + GAMETYPE_LENGTH) +
-		P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE,
+	/* the longest body: a party's roster (its id, serial, count, leader and
+	eight keys; presence's is 116 bytes) */
+	MAXIMUM_BODY_SIZE = PARTY_ID_LENGTH + 4 + 1 + 1 + P2P_PARTY_MAXIMUM * P2P_KEY_SIZE,
 	MAXIMUM_PLAIN_SIZE = PLAIN_HEADER_SIZE + MAXIMUM_BODY_SIZE + P2P_SIGNATURE_SIZE,
 	/* a box's: the header, the ephemeral key, the nonce, the tag */
 	MAXIMUM_PAYLOAD_SIZE = ENVELOPE_HEADER_SIZE + P2P_KEY_SIZE + P2P_NONCE_SIZE + MAXIMUM_PLAIN_SIZE + P2P_TAG_SIZE,
@@ -258,6 +270,14 @@ struct friend_record
 	int reply_asked;
 	unsigned long invite_sent_time;
 	unsigned long invite_heard_time;
+	/* their party, as their party presence said (p2p_party.inc): its
+	leader's key and size (0: none), when heard; party invites to and from
+	them (rate) */
+	unsigned char party_leader[P2P_KEY_SIZE];
+	int party_size;
+	unsigned long party_heard_time;
+	unsigned long party_invite_sent_time;
+	unsigned long party_invite_heard_time;
 };
 
 struct request_record
@@ -353,6 +373,17 @@ struct message
 	unsigned char invite_id[INVITE_ID_LENGTH];
 	int flags;
 	struct presence game;
+	/* (the party's, p2p_party.inc: its id; a roster's serial, members and
+	leader, a follow's serial; a value - an answer, a reason, flags - and a
+	code - a follow's result, a chat's kind; a status's follow serial; a
+	chat's text) */
+	unsigned char party_id[PARTY_ID_LENGTH];
+	unsigned long party_serial;
+	int party_count, party_leader;
+	unsigned char party_keys[P2P_PARTY_MAXIMUM][P2P_KEY_SIZE];
+	int party_value, party_code;
+	unsigned long party_follow;
+	char chat[P2P_PARTY_CHAT_SIZE];
 };
 
 /* this machine's activity, as the game says (p2p_friends_set_activity) */
@@ -361,6 +392,101 @@ struct activity
 	int state, engine, difficulty, pc_map, players, maximum;
 	char map[MAP_LENGTH + 1];
 	char gametype[GAMETYPE_LENGTH + 1];
+};
+
+/* ---------- the party's (p2p_party.inc) */
+
+/* a member: their key (the roster's), their own name (their status's), the
+pair's keys (a member not a friend's, worked out once), when last heard,
+what their status said, local mute, and their messages' budgets */
+struct party_member
+{
+	unsigned char key[P2P_KEY_SIZE];
+	char name[P2P_FRIEND_NAME_SIZE];
+	int keys_state;
+	unsigned char send_key[P2P_SHA256_SIZE];
+	unsigned char receive_key[P2P_SHA256_SIZE];
+	unsigned long heard_time;
+	int status_flags, follow_code;
+	unsigned long follow_serial;
+	int muted;
+	struct budget chat_budget;
+	struct budget status_budget;
+};
+
+/* the party's messages' replays, by sender (whatever their membership:
+each counter of a sender taken once) */
+struct party_seen
+{
+	unsigned char key[P2P_KEY_SIZE];
+	unsigned long long epoch;
+	unsigned long counter;
+	unsigned long long window;
+	unsigned long time;
+};
+
+/* a party invite heard (from a friend) */
+struct party_invite_record
+{
+	unsigned char key[P2P_KEY_SIZE];
+	unsigned char party_id[PARTY_ID_LENGTH];
+	int size;
+	unsigned long time;
+	int asked;
+	/* accepted: waiting for the leader's roster */
+	int accepted;
+};
+
+/* an invite this machine sent (its leader's), not answered yet */
+struct party_sent_invite
+{
+	unsigned char key[P2P_KEY_SIZE];
+	unsigned long time;
+};
+
+struct party_chat_record
+{
+	unsigned long number;
+	unsigned char key[P2P_KEY_SIZE];
+	char text[P2P_PARTY_CHAT_SIZE];
+	int self, notice;
+};
+
+struct party_state
+{
+	int active;
+	unsigned char id[PARTY_ID_LENGTH];
+	unsigned long serial;
+	/* the roster: the longest-standing first; this machine one of them */
+	struct party_member members[P2P_PARTY_MAXIMUM];
+	int count;
+	int leader;
+	struct party_sent_invite sent[P2P_PARTY_MAXIMUM];
+	int sent_count;
+	unsigned long roster_time;
+	/* this machine's status: due, when sent, what it said */
+	int status_due;
+	unsigned long status_time;
+	int status_flags;
+	/* (the leader) the follow: its serial, what it leads to, when sent */
+	unsigned long follow_serial;
+	int follow_active;
+	unsigned char follow_hash[P2P_KEY_HASH_SIZE];
+	unsigned char follow_token[P2P_TOKEN_SIZE];
+	int follow_flags;
+	unsigned long follow_time;
+	/* (a member) the leader's follow heard: to join, and what came of it */
+	unsigned long follow_heard;
+	int follow_pending;
+	struct message follow_message;
+	unsigned long follow_heard_time;
+	unsigned long follow_done;
+	int follow_result;
+	/* the party presence sent to friends: its size and leader, when */
+	int presence_size;
+	unsigned char presence_leader[P2P_KEY_SIZE];
+	unsigned long presence_time;
+	int presence_due;
 };
 
 struct friends_state
@@ -398,6 +524,16 @@ struct friends_state
 	int invite_count;
 	struct seen_request seen[MAXIMUM_SEEN_REQUESTS];
 	int seen_next;
+
+	/* the party (p2p_party.inc), its invites heard, its replays, its chat */
+	struct party_state party;
+	struct party_invite_record party_invites[P2P_FRIEND_INVITES_MAXIMUM];
+	int party_invite_count;
+	struct party_seen party_seen[32];
+	struct party_chat_record chat[P2P_PARTY_CHAT_LINES];
+	int chat_count;
+	unsigned long chat_number;
+	struct budget chat_send_budget;
 
 	/* the list's file: to write (dirty: soon; counters: lazily) */
 	int dirty;
@@ -468,6 +604,12 @@ struct friends_state
 	long test_invite_after, test_appear_offline_at, test_remove_at, test_replay_at, test_forge_at, test_cancel_at;
 	int test_invited, test_appeared_offline, test_removed, test_replayed, test_forged, test_cancelled;
 	int test_added;
+	/* (the party's steps, HALO_TEST_PARTY: p2p_party.inc) */
+	int test_party_parsed;
+	long test_party_invite_at, test_party_leave_at, test_party_kick_at, test_party_chat_at, test_party_forge_at;
+	int test_party_accept, test_party_decline;
+	int test_party_invited, test_party_left, test_party_kicked, test_party_chatted, test_party_forged;
+	char test_party_chat[P2P_PARTY_CHAT_SIZE];
 	unsigned char test_last_sent[MAXIMUM_PAYLOAD_SIZE];
 	int test_last_sent_size;
 	char test_last_topic[TOPIC_LENGTH];
@@ -1282,6 +1424,19 @@ static void save(int force)
 	}
 }
 
+/* ---------- the party's hooks (p2p_party.inc, at the end of this file) */
+
+static int party_body_encode(const struct message *message, unsigned char *bytes);
+static int party_body_decode(struct message *message, const unsigned char *bytes, int offset, int body_end);
+static struct party_member *party_member_by_key(const unsigned char *key);
+static int party_member_keys(struct party_member *member);
+static void party_pair_heard(struct friend_record *record, struct party_member *member, const struct message *message,
+	const unsigned char *plain, int size);
+static void party_update(void);
+static void party_leave_now(int tell, const char *why);
+static void party_key_blocked(const unsigned char *key);
+static void party_friend_entry(const struct friend_record *record, struct p2p_friend_entry *entry);
+
 /* ---------- messages */
 
 /* the pair's keys with a friend: 0 if their key gives a known secret */
@@ -1401,6 +1556,9 @@ static int body_encode(const struct message *message, unsigned char *bytes)
 	case TYPE_REMOVE:
 		memcpy(bytes + size, message->friendship, FRIENDSHIP_LENGTH);
 		size += FRIENDSHIP_LENGTH;
+		break;
+	default:
+		size = party_body_encode(message, bytes);
 		break;
 	}
 	return size;
@@ -1548,6 +1706,15 @@ static int plain_decode(const unsigned char *bytes, int size, struct message *me
 			return 0;
 		memcpy(message->friendship, bytes + offset, FRIENDSHIP_LENGTH);
 		break;
+	case TYPE_PARTY_INVITE:
+	case TYPE_PARTY_ANSWER:
+	case TYPE_PARTY_ROSTER:
+	case TYPE_PARTY_LEAVE:
+	case TYPE_PARTY_STATUS:
+	case TYPE_PARTY_FOLLOW:
+	case TYPE_PARTY_CHAT:
+	case TYPE_PARTY_PRESENCE:
+		return party_body_decode(message, bytes, offset, body_end);
 	default:
 		return 0;
 	}
@@ -2304,6 +2471,7 @@ static void pair_heard(const unsigned char *payload, int size)
 	struct message message;
 	int index, opened = -1, tombstone = -1;
 	struct friend_record *record = NULL;
+	struct party_member *member = NULL;
 
 	/* (each tried with every key: a flood of messages none opens waits) */
 	if (!budget_left(&friends->unopened_budget, UNOPENED_BUDGET, UNOPENED_BUDGET_INTERVAL, 0))
@@ -2318,6 +2486,17 @@ static void pair_heard(const unsigned char *payload, int size)
 		opened = envelope_open(KIND_PAIR, friends->friends[index].receive_key, payload, size, plain);
 		if (opened >= 0)
 			record = &friends->friends[index];
+	}
+	/* (then the party's members who are not friends: p2p_party.inc) */
+	for (index = 0; friends->party.active && index < friends->party.count && opened < 0; index++)
+	{
+		struct party_member *each = &friends->party.members[index];
+
+		if (p2p_equal(each->key, friends->key, P2P_KEY_SIZE) || find_friend(each->key) || !party_member_keys(each))
+			continue;
+		opened = envelope_open(KIND_PAIR, each->receive_key, payload, size, plain);
+		if (opened >= 0)
+			member = each;
 	}
 	for (index = 0; index < friends->tombstone_count && opened < 0; index++)
 	{
@@ -2340,6 +2519,19 @@ static void pair_heard(const unsigned char *payload, int size)
 	if (!plain_decode(plain, opened, &message))
 	{
 		friends->dropped_malformed++;
+		return;
+	}
+	/* the party's messages (p2p_party.inc checks their sender, signature,
+	replays and everything else) */
+	if (message.type >= TYPE_PARTY_INVITE && message.type <= TYPE_PARTY_PRESENCE && tombstone < 0)
+	{
+		party_pair_heard(record, member, &message, plain, opened);
+		return;
+	}
+	if (member)
+	{
+		/* (a member not a friend sends nothing of friends') */
+		friends->dropped_forged++;
 		return;
 	}
 	if (tombstone >= 0)
@@ -3097,7 +3289,8 @@ int p2p_friends_player_ask(int machine, int intent)
 			memcpy(packet + 4, record->nonce, NONCE_LENGTH);
 			card_queue(address, packet, CARD_HEADER_SIZE);
 			platform_log("friends: asked machine %d for its friend card (to %s)", machine,
-				intent == P2P_FRIENDS_PLAYER_BLOCK ? "block it" : "add it");
+				intent == P2P_FRIENDS_PLAYER_BLOCK ? "block it" : intent == P2P_FRIENDS_PLAYER_PARTY ?
+				"invite it to the party" : "add it");
 		}
 	}
 	pthread_mutex_unlock(&friends_lock);
@@ -3144,11 +3337,39 @@ int p2p_friends_player_state(int machine)
 	return state;
 }
 
+int p2p_friends_player_friend_id(int machine, char *id)
+{
+	int found = 0;
+
+	pthread_mutex_lock(&friends_lock);
+	if (friends->in_game && machine >= 0 && machine < CARD_MACHINES && machine != friends->game_machine &&
+		friends->machines[machine].has_card && find_friend(friends->machines[machine].key))
+	{
+		key_id(friends->machines[machine].key, id);
+		found = 1;
+	}
+	pthread_mutex_unlock(&friends_lock);
+	return found;
+}
+
 /* (p2p_friends_update, the lock let go) what an answered card asked */
 static void card_action_do(int action, const unsigned char *key, const char *name)
 {
 	char code[P2P_FRIEND_CODE_LENGTH + 1], shown[P2P_FRIEND_CODE_SIZE];
 
+	if (action == P2P_FRIENDS_PLAYER_PARTY)
+	{
+		char id[P2P_FRIEND_ID_SIZE];
+		int is_friend;
+
+		pthread_mutex_lock(&friends_lock);
+		is_friend = find_friend(key) != NULL;
+		key_id(key, id);
+		pthread_mutex_unlock(&friends_lock);
+		platform_log("party: inviting %s (a player in this game): %s", name, is_friend ?
+			p2p_party_outcome_text(p2p_party_invite(id)) : p2p_party_outcome_text(P2P_PARTY_NOT_FRIEND));
+		return;
+	}
 	if (action == P2P_FRIENDS_PLAYER_BLOCK)
 	{
 		pthread_mutex_lock(&friends_lock);
@@ -3197,7 +3418,7 @@ void p2p_friends_topics(char *inbox, char *mailbox, int size)
 		snprintf(inbox, (size_t)size, "%s", friends->inbox_topic);
 		/* (no friend, no request sent: nobody writes there) */
 		snprintf(mailbox, (size_t)size, "%s", friends->friend_count || friends->outgoing_count ||
-			friends->tombstone_count ? friends->mailbox_topic : "");
+			friends->tombstone_count || friends->party.active ? friends->mailbox_topic : "");
 	}
 	else
 	{
@@ -3286,6 +3507,9 @@ void p2p_friends_stopping(int quitting)
 	pthread_mutex_lock(&friends_lock);
 	if (quitting)
 		friends->quitting = 1;
+	/* (a party left: its members told, as the friends are told below) */
+	if (friends->party.active)
+		party_leave_now(friends_on(), quitting ? "quitting" : "internet play stopped");
 	if (friends_on() && friends->presence_online && friends->friend_count)
 	{
 		presence_sign(0, 0);
@@ -3335,6 +3559,8 @@ void p2p_friends_update(const struct p2p_friends_host *host)
 		friends->presence_online = 0;
 		friends->presence_size = 0;
 		friends->inbound_count = 0;
+		if (friends->party.active)
+			party_leave_now(was_on && friends->online, "friends turned off");
 		pthread_mutex_unlock(&friends_lock);
 		save(0);
 		return;
@@ -3439,6 +3665,9 @@ void p2p_friends_update(const struct p2p_friends_host *host)
 	{
 		friends->appear_offline = appear_offline;
 		platform_log("friends: %s", appear_offline ? "appearing offline" : "appearing online");
+		/* (appearing offline: no party; its members told now, nothing after) */
+		if (appear_offline && friends->party.active)
+			party_leave_now(1, "appearing offline");
 		if (appear_offline && friends->presence_online && signatures < SIGNATURES_PER_PASS)
 		{
 			presence_sign(0, 0);
@@ -3490,6 +3719,8 @@ void p2p_friends_update(const struct p2p_friends_host *host)
 			if (friends->friends[index].presence_due && !presence_send(&friends->friends[index]))
 				break;
 	}
+	/* the party: its timeouts, hand-off, roster, status, follow, presence */
+	party_update();
 	/* drops, now and then */
 	if ((friends->dropped_replays || friends->dropped_forged || friends->dropped_blocked || friends->dropped_rate ||
 		friends->dropped_malformed) && (!friends->drops_logged_time || elapsed(friends->drops_logged_time, 10000)))
@@ -3584,6 +3815,8 @@ static void friend_entry(const struct friend_record *record, struct p2p_friend_e
 	entry->maximum = online ? record->presence.maximum : 0;
 	p2p_friends_activity_text(entry->activity, sizeof(entry->activity), entry->state, record->presence.map,
 		record->presence.gametype, record->presence.engine, record->presence.difficulty, record->presence.pc_map);
+	if (online)
+		party_friend_entry(record, entry);
 }
 
 static int friend_order(const void *first, const void *second)
@@ -3885,6 +4118,7 @@ static int block_key(const unsigned char *key, const char *name)
 		friends->muted_count--;
 	}
 	invites_of_remove(key);
+	party_key_blocked(key);
 	memcpy(friends->blocked[friends->blocked_count].key, key, P2P_KEY_SIZE);
 	snprintf(friends->blocked[friends->blocked_count].name, sizeof(friends->blocked[0].name), "%s", name);
 	friends->blocked_count++;
@@ -4275,3 +4509,7 @@ void p2p_friends_set_activity(int state, const char *map, const char *gametype, 
 	}
 	pthread_mutex_unlock(&friends_lock);
 }
+
+/* ---------- the party (p2p_party.h) */
+
+#include "p2p_party.inc"

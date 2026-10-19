@@ -23,6 +23,13 @@ loop (system_link_shortcut.c) every frame:
   p2p_friends_set_game), whose cards the players' Add friend and Block ask
   for.
 
+- The party (port/linux/src/p2p_party.h): a party invite asked as a
+  friend's invite is (at the menus, Accept or Decline: JOIN PARTY or NO);
+  the leader's follow joined by itself at the menus (as an invite accepted
+  joins: the System Link screen next), after a look at the map (missing with
+  map downloads "never": not joined, the party told); in another game it
+  waits for the menus.
+
 (debug, not in release builds) HALO_TEST_FRIENDS_ANSWER=accept or ignore
 answers the invite's question at once, for the automated tests (a run
 nobody watches answers every question no); HALO_TEST_FRIENDS_PLAYERS=add@S
@@ -47,10 +54,13 @@ other machine's player, as its options' ADD FRIEND does.
 #include "halo_port_limits.h"
 
 #include "../src/p2p_friends.h"
+#include "../src/p2p_party.h"
 #include "../src/system_link_shortcut.h"
 #include "../src/lang.h"
 #include "custom_edition_maps.h"
+#include "custom_edition_cache.h"
 #include "forge.h"
+#include "../src/port_config.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -83,6 +93,12 @@ static struct
 	the player was added */
 	unsigned long in_game_since;
 	boolean test_added;
+	/* the party invite asked about, by its id ("" none) */
+	char party_asking[P2P_FRIEND_ID_SIZE];
+	char party_asking_name[P2P_FRIEND_NAME_SIZE];
+	/* the follow last looked at (its serial) and what it came to */
+	unsigned long follow_serial;
+	int follow_result;
 } friends_game;
 
 /* wide text as ASCII, a Latin letter with a mark its plain letter ('?' for
@@ -279,6 +295,116 @@ static void friends_game_players_test(boolean main_menu_loaded)
 #endif
 }
 
+/* the answer the tests give a party invite's question: 1 accept, 0 no, -1
+ask the player */
+static int friends_game_party_test_answer(void)
+{
+#ifndef HALO_RELEASE
+	char const *setting = getenv("HALO_TEST_PARTY_ANSWER");
+
+	if (setting && !strcmp(setting, "accept"))
+		return 1;
+	if (setting && !strcmp(setting, "decline"))
+		return 0;
+#endif
+	return -1;
+}
+
+static void friends_game_party_answer(int accept)
+{
+	int outcome = p2p_party_answer(friends_game.party_asking, accept);
+
+	platform_log("party: %s's party invite %s: %s", friends_game.party_asking_name, accept ? "accepted" : "declined",
+		p2p_party_outcome_text(outcome));
+	friends_game.party_asking[0] = 0;
+}
+
+/* a party invite: the question at the menus, as a friend's invite's */
+static void friends_game_party_invites(boolean main_menu_loaded)
+{
+	int state = __atomic_load_n(&halo_multiplayer_status[SYSTEM_LINK_STATUS_STATE], __ATOMIC_ACQUIRE);
+	struct p2p_party_invite invite;
+
+	if (friends_game.party_asking[0])
+	{
+		int answer = platform_question_answer();
+
+		if (!main_menu_loaded || state != SYSTEM_LINK_STATE_MENUS)
+		{
+			platform_ask_question(NULL, NULL);
+			friends_game.party_asking[0] = 0;
+			return;
+		}
+		if (answer >= 0)
+		{
+			platform_ask_question(NULL, NULL);
+			friends_game_party_answer(answer == 1);
+		}
+		return;
+	}
+	if (friends_game.asking[0] || !main_menu_loaded || state != SYSTEM_LINK_STATE_MENUS || platform_question_asking())
+		return;
+	if (!p2p_party_take_invite(&invite))
+		return;
+	snprintf(friends_game.party_asking, sizeof(friends_game.party_asking), "%s", invite.id);
+	snprintf(friends_game.party_asking_name, sizeof(friends_game.party_asking_name), "%s", invite.name);
+	if (friends_game_party_test_answer() >= 0)
+	{
+		platform_log("party: %s invited you to their party (the test answers)", invite.name);
+		friends_game_party_answer(friends_game_party_test_answer());
+		return;
+	}
+	{
+		char text[256];
+
+		snprintf(text, sizeof(text), T("%s invited you to their party (%d of %d).\n\nJoin the party? You'll follow "
+			"them from game to game."), invite.name, invite.size, P2P_PARTY_MAXIMUM);
+		platform_ask_question(T("PARTY INVITE"), text);
+	}
+}
+
+/* the leader's follow: joined at the menus (out of any game), the map looked
+at first; in a game, it waits */
+static void friends_game_party_follow(boolean main_menu_loaded)
+{
+	struct network_game_client *client = global_network_game_client_get();
+	int state = __atomic_load_n(&halo_multiplayer_status[SYSTEM_LINK_STATUS_STATE], __ATOMIC_ACQUIRE);
+	struct p2p_party_follow follow;
+	int result;
+
+	if (!p2p_party_follow_pending(&follow))
+		return;
+	if (!main_menu_loaded || state != SYSTEM_LINK_STATE_MENUS || (client && !network_game_is_splitscreen_local()) ||
+		friends_game.asking[0] || friends_game.party_asking[0])
+	{
+		/* (in a game, or its lobby: followed once back at the menus) */
+		if (friends_game.follow_serial != follow.serial || friends_game.follow_result != P2P_PARTY_FOLLOW_WAITING)
+		{
+			friends_game.follow_serial = follow.serial;
+			friends_game.follow_result = P2P_PARTY_FOLLOW_WAITING;
+			platform_log("party: %s went to a game (%s); following once this machine is back at the menus",
+				follow.leader, follow.activity);
+			p2p_party_follow_result(follow.serial, P2P_PARTY_FOLLOW_WAITING);
+		}
+		return;
+	}
+	friends_game.follow_serial = follow.serial;
+	/* (a map missing here, with map downloads never: not joined) */
+	if (follow.map[0] && !custom_edition_cache_map_identity(follow.map) &&
+		!strcmp(config_string("network.map_downloads"), "never"))
+	{
+		friends_game.follow_result = P2P_PARTY_FOLLOW_NO_MAP;
+		platform_log("party: not following %s: the map %s is missing and map downloads are off", follow.leader, follow.map);
+		p2p_party_follow_result(follow.serial, P2P_PARTY_FOLLOW_NO_MAP);
+		return;
+	}
+	result = p2p_party_follow_join(follow.serial);
+	friends_game.follow_result = result;
+	platform_log("party: following %s: %s", follow.leader, p2p_party_follow_text(result));
+	if (result == P2P_PARTY_FOLLOW_JOINING)
+		menu_functions_open_system_link();
+}
+
 void friends_game_update(boolean main_menu_loaded)
 {
 	unsigned long now = system_milliseconds();
@@ -290,6 +416,8 @@ void friends_game_update(boolean main_menu_loaded)
 		friends_game_network();
 	}
 	friends_game_invites(main_menu_loaded);
+	friends_game_party_invites(main_menu_loaded);
+	friends_game_party_follow(main_menu_loaded);
 	menu_functions_players_button(main_menu_loaded);
 	friends_game_players_test(main_menu_loaded);
 }

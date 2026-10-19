@@ -154,7 +154,7 @@ int p2p_join_invite(const char *text)
 
 enum
 {
-	MACHINES = 3,
+	MACHINES = 4,
 	LOGGED = 256,
 };
 
@@ -1093,6 +1093,535 @@ static void test_cards(void)
 }
 
 #ifndef P2P_FRIENDS_FUZZ
+/* ---------- the party (p2p_party.inc) */
+
+/* a machine left out of the passes and the broker (gone offline at once,
+as a Vita switched off) */
+static int party_offline = -1;
+
+static void party_pass(int count)
+{
+	int index, machine;
+
+	for (index = 0; index < count; index++)
+	{
+		clock_now += 500;
+		for (machine = 0; machine < MACHINES; machine++)
+		{
+			if (machine == party_offline)
+				continue;
+			use(machine);
+			p2p_friends_update(&hosts[machine]);
+		}
+		if (party_offline >= 0)
+		{
+			/* (what the machine off queued never leaves it) */
+			use(party_offline);
+			friends->outbound_count = 0;
+		}
+		broker();
+		if (party_offline >= 0)
+		{
+			use(party_offline);
+			friends->inbound_count = 0;
+		}
+	}
+}
+
+/* every machine with no friends, party or chat, then the friendships given */
+static void party_reset(void)
+{
+	int index;
+
+	for (index = 0; index < MACHINES; index++)
+	{
+		use(index);
+		friends->friend_count = friends->request_count = friends->outgoing_count = 0;
+		friends->blocked_count = friends->tombstone_count = friends->muted_count = friends->invite_count = 0;
+		memset(&friends->party, 0, sizeof(friends->party));
+		friends->party_invite_count = 0;
+		friends->chat_count = 0;
+		friends->test_appeared_offline = 0;
+		memset(&hosts[index], 0, sizeof(hosts[index]));
+		hosts[index].online = 1;
+		p2p_friends_set_game(-1, 0, NULL, 0);
+		reset_drops(index);
+	}
+	party_offline = -1;
+}
+
+static void party_make_friends(int a, int b)
+{
+	unsigned char friendship[FRIENDSHIP_LENGTH];
+	char name[P2P_FRIEND_NAME_SIZE];
+
+	posix_random_bytes(friendship, sizeof(friendship));
+	use(b);
+	own_name(name);
+	use(a);
+	friend_add(machines[b].key, name, friendship, 0, 0);
+	use(a);
+	own_name(name);
+	use(b);
+	friend_add(machines[a].key, name, friendship, 0, 0);
+}
+
+static int party_count_of(int machine, struct p2p_party_member *members)
+{
+	struct p2p_party_member local[P2P_PARTY_MAXIMUM];
+
+	use(machine);
+	return p2p_party_members(members ? members : local, P2P_PARTY_MAXIMUM);
+}
+
+/* the id of a machine's friend entry for another machine */
+static int party_friend_id(int machine, int other, char *id)
+{
+	use(machine);
+	if (find_friend_index(machines[other].key) < 0)
+		return 0;
+	key_id(machines[other].key, id);
+	return 1;
+}
+
+static int party_member_id(int machine, int other, char *id)
+{
+	struct p2p_party_member members[P2P_PARTY_MAXIMUM];
+	char want[P2P_FRIEND_ID_SIZE];
+	int count = party_count_of(machine, members), index;
+
+	key_id(machines[other].key, want);
+	for (index = 0; index < count; index++)
+		if (!strcmp(members[index].id, want))
+		{
+			snprintf(id, P2P_FRIEND_ID_SIZE, "%s", members[index].id);
+			return 1;
+		}
+	return 0;
+}
+
+/* a machine's leader as its list says (-1: none) */
+static int party_leader_of(int machine)
+{
+	struct p2p_party_member members[P2P_PARTY_MAXIMUM];
+	int count = party_count_of(machine, members), index, other;
+
+	for (index = 0; index < count; index++)
+		if (members[index].leader)
+			for (other = 0; other < MACHINES; other++)
+			{
+				char id[P2P_FRIEND_ID_SIZE];
+
+				key_id(machines[other].key, id);
+				if (!strcmp(id, members[index].id))
+					return other;
+			}
+	return -1;
+}
+
+/* the machine's invites answered (accept: yes) */
+static int party_answer_all(int machine, int accept)
+{
+	struct p2p_party_invite invite;
+	int answered = 0;
+
+	use(machine);
+	while (p2p_party_take_invite(&invite))
+	{
+		use(machine);
+		answered += p2p_party_answer(invite.id, accept) == P2P_PARTY_DONE;
+	}
+	return answered;
+}
+
+/* the newest chat line of a machine ("" none) */
+static void party_last_line(int machine, struct p2p_party_chat_line *line)
+{
+	struct p2p_party_chat_line lines[P2P_PARTY_CHAT_LINES];
+	int count;
+
+	use(machine);
+	count = p2p_party_chat_lines(lines, P2P_PARTY_CHAT_LINES, 0);
+	memset(line, 0, sizeof(*line));
+	while (count > 0 && lines[count - 1].notice)
+		count--;
+	if (count > 0)
+		*line = lines[count - 1];
+}
+
+static int party_lines_from(int machine, const char *text)
+{
+	struct p2p_party_chat_line lines[P2P_PARTY_CHAT_LINES];
+	int count, index, found = 0;
+
+	use(machine);
+	count = p2p_party_chat_lines(lines, P2P_PARTY_CHAT_LINES, 0);
+	for (index = 0; index < count; index++)
+		found += !lines[index].notice && strstr(lines[index].text, text) != NULL;
+	return found;
+}
+
+static void test_party(void)
+{
+	char id[P2P_FRIEND_ID_SIZE], text[256], expected[P2P_LINK_SIZE];
+	struct p2p_party_member members[P2P_PARTY_MAXIMUM];
+	struct p2p_party_chat_line line;
+	struct p2p_party_follow follow;
+	int index, before, count;
+
+	/* Alpha is friends with Bravo and Charlie, Bravo with Delta; Charlie and
+	Delta are no one else's */
+	party_reset();
+	use(0);
+	p2p_friends_set_name("Alpha");
+	use(1);
+	p2p_friends_set_name("Bravo");
+	use(2);
+	p2p_friends_set_name("Charlie");
+	use(3);
+	p2p_friends_set_name("Delta");
+	party_make_friends(0, 1);
+	party_make_friends(0, 2);
+	party_make_friends(1, 3);
+	party_pass(10);
+	use(0);
+	check(p2p_party_status(text, sizeof(text)) == 0 && strstr(text, "Not in a party"), "no party at first");
+
+	/* invites: only friends, only the leader */
+	check(!party_friend_id(0, 3, id), "Delta is not Alpha's friend");
+	key_id(machines[3].key, id);
+	use(0);
+	check(p2p_party_invite(id) == P2P_PARTY_NOT_FRIEND, "a stranger cannot be invited");
+	check(party_friend_id(0, 1, id) && p2p_party_invite(id) == P2P_PARTY_DONE, "Alpha invites Bravo");
+	use(0);
+	check(p2p_party_invite(id) == P2P_PARTY_TOO_SOON, "an invite again at once refused");
+	check(party_friend_id(0, 2, id) && p2p_party_invite(id) == P2P_PARTY_DONE, "Alpha invites Charlie");
+	party_pass(2);
+	check(party_count_of(3, NULL) == 0, "Delta hears nothing of the invites");
+	check(party_answer_all(1, 1) == 1 && party_answer_all(2, 1) == 1, "Bravo and Charlie accept");
+	party_pass(4);
+	check(party_count_of(0, members) == 3 && party_count_of(1, NULL) == 3 && party_count_of(2, NULL) == 3,
+		"a party of three on each machine");
+	check(party_leader_of(0) == 0 && party_leader_of(1) == 0 && party_leader_of(2) == 0, "Alpha leads on each");
+	use(1);
+	p2p_party_status(text, sizeof(text));
+	check(strstr(text, "3 of 8") && strstr(text, "Alpha leads"), "the status: 3 of 8, Alpha leads");
+	/* (Bravo knows Charlie by the roster only: Charlie's own name with his
+	code's first characters, never as a friend) */
+	party_pass(2);
+	count = party_count_of(1, members);
+	for (index = 0; index < count; index++)
+		if (strstr(members[index].name, "Charlie"))
+			break;
+	check(index < count && strstr(members[index].name, " #") && !members[index].is_friend,
+		"a member not a friend shown with their code's characters");
+	check(party_friend_id(1, 3, id), "Delta is Bravo's friend");
+	use(1);
+	check(p2p_party_invite(id) == P2P_PARTY_NOT_LEADER, "a member who does not lead cannot invite");
+	/* the friends' lists show the party */
+	party_pass(4);
+	{
+		struct p2p_friend_entry entry;
+		int found = 0, nth;
+
+		for (nth = 0; entry_of(3, P2P_FRIEND_KIND_FRIEND, nth, &entry); nth++)
+			found |= !strcmp(entry.name, "Bravo") && strstr(entry.party, "party (3 of 8)") != NULL;
+		check(found, "Bravo's friend Delta sees Bravo in a party of 3");
+	}
+	use(0);
+	check(p2p_party_join_warning(14, 16, text, sizeof(text)) && strstr(text, "3 players") &&
+		!p2p_party_join_warning(10, 16, NULL, 0), "the leader is warned of a game with fewer open slots than the party");
+
+	/* chat: cleaned, shown with the friends list's names, the presets */
+	use(1);
+	check(p2p_party_chat_send("  hi |%^ <b>\x01\x7f team  ") == P2P_PARTY_DONE, "Bravo chats");
+	party_pass(2);
+	party_last_line(2, &line);
+	check(!strcmp(line.text, "hi b team") && strstr(line.name, "Bravo #"), "Charlie reads it cleaned, Bravo's name tagged");
+	party_last_line(0, &line);
+	check(!strcmp(line.text, "hi b team") && !strcmp(line.name, "Bravo"), "Alpha reads it under the friend's name");
+	check(party_lines_from(3, "hi b team") == 0, "Delta, not in the party, reads nothing");
+	use(2);
+	check(p2p_party_chat_preset(0) == P2P_PARTY_DONE, "Charlie's quick chat");
+	party_pass(2);
+	party_last_line(0, &line);
+	check(!strcmp(line.text, "Ready!"), "a preset shown");
+	{
+		char longer[300];
+
+		memset(longer, 'x', sizeof(longer) - 1);
+		longer[sizeof(longer) - 1] = 0;
+		clock_now += 10000;
+		use(1);
+		check(p2p_party_chat_send(longer) == P2P_PARTY_DONE, "a long message sent");
+		party_pass(2);
+		party_last_line(0, &line);
+		check(strlen(line.text) == P2P_PARTY_CHAT_LENGTH, "cut to 120 characters");
+		use(1);
+		check(p2p_party_chat_send("\x01\x02 |%") == P2P_PARTY_EMPTY, "nothing left once cleaned: not sent");
+	}
+	clock_now += 10000;
+	use(1);
+	for (index = 0, before = 0; index < 10; index++)
+		before += p2p_party_chat_send("flood") == P2P_PARTY_DONE;
+	check(before == 3, "a sender's flood stopped at 3");
+	party_pass(2);
+	/* (a flood sent past the sender's limit: the receiver takes 5) */
+	clock_now += 10000;
+	reset_drops(2);
+	for (index = 0; index < 9; index++)
+	{
+		use(1);
+		machines[1].chat_send_budget.left = 3;
+		machines[1].chat_send_budget.time = clock_now;
+		snprintf(text, sizeof(text), "burst %d", index);
+		p2p_party_chat_send(text);
+	}
+	party_pass(2);
+	check(party_lines_from(2, "burst") == 5 && machines[2].dropped_rate + machines[2].total_rate >= 4,
+		"a member's flood capped at the receiver");
+	/* mute: here only */
+	check(party_member_id(0, 1, id), "Bravo's member id");
+	use(0);
+	check(p2p_party_mute(id, 1) == P2P_PARTY_DONE, "Alpha mutes Bravo");
+	clock_now += 12000;
+	use(1);
+	p2p_party_chat_send("muted words");
+	party_pass(2);
+	check(party_lines_from(0, "muted words") == 0 && party_lines_from(2, "muted words") == 1,
+		"a muted member's chat hidden here, shown to the others");
+	use(0);
+	p2p_party_mute(id, 0);
+
+	/* replays and forgeries */
+	reset_drops(2);
+	before = party_lines_from(2, "muted words");
+	for (index = 0; index < carried_count; index++)
+		if (carried[index].from == 1 && !strcmp(carried[index].topic, machines[2].mailbox_topic))
+			hand(2, carried[index].topic, carried[index].payload, carried[index].size);
+	party_pass(2);
+	check(party_lines_from(2, "muted words") == before && machines[2].dropped_replays + machines[2].total_replays >= 3,
+		"Bravo's party messages replayed to Charlie: dropped");
+	reset_drops(0);
+	reset_drops(2);
+	use(1);
+	party_test_forge();
+	party_pass(2);
+	check(party_lines_from(0, "forged chat") == 0 && party_lines_from(2, "forged chat") == 0,
+		"a chat signed by another key dropped");
+	check(party_leader_of(0) == 0 && party_leader_of(2) == 0, "a roster from a member not the leader dropped");
+	check(machines[0].dropped_forged + machines[0].total_forged + machines[0].dropped_replays + machines[0].total_replays
+		>= 2, "the forgeries counted");
+	/* a roster with a key twice (from the leader itself): malformed */
+	{
+		struct message message;
+
+		reset_drops(2);
+		use(0);
+		party_start_message(&message, TYPE_PARTY_ROSTER, NULL);
+		message.party_serial = machines[0].party.serial + 5;
+		message.party_count = 3;
+		message.party_leader = 0;
+		memcpy(message.party_keys[0], machines[0].key, P2P_KEY_SIZE);
+		memcpy(message.party_keys[1], machines[1].key, P2P_KEY_SIZE);
+		memcpy(message.party_keys[2], machines[1].key, P2P_KEY_SIZE);
+		party_broadcast(&message);
+		party_pass(2);
+		check(machines[2].dropped_malformed + machines[2].total_malformed >= 1 && party_count_of(2, NULL) == 3,
+			"a roster naming one member twice dropped");
+	}
+	/* an eavesdropper (Delta) handed the party's messages to Charlie opens none */
+	reset_drops(3);
+	for (index = 0, before = 0; index < carried_count && before < 6; index++)
+		if (carried[index].from == 1 && !strcmp(carried[index].topic, machines[2].mailbox_topic))
+		{
+			use(3);
+			p2p_friends_heard(P2P_FRIENDS_MAILBOX, carried[index].payload, carried[index].size);
+			before++;
+		}
+	use(3);
+	p2p_friends_update(&hosts[3]);
+	check(before > 0 && party_count_of(3, NULL) == 0 && machines[3].dropped_forged + machines[3].dropped_rate >= before,
+		"an eavesdropper opens none of the party's messages");
+
+	/* the follow: Alpha hosts */
+	hosts[0].hosting = 1;
+	for (index = 0; index < P2P_KEY_HASH_SIZE; index++)
+		hosts[0].key_hash[index] = (unsigned char)(0x30 + index);
+	for (index = 0; index < P2P_TOKEN_SIZE; index++)
+		hosts[0].token[index] = (unsigned char)(0x50 + index);
+	hosts[0].open = 1;
+	hosts[0].players = 1;
+	hosts[0].maximum = 16;
+	use(0);
+	p2p_friends_set_activity(P2P_FRIEND_STATE_MULTIPLAYER, "bloodgulch", "Slayer", 2, -1, 0, 1, 16);
+	party_pass(4);
+	use(1);
+	check(p2p_party_follow_pending(&follow) && follow.hosting && !strcmp(follow.leader, "Alpha") &&
+		!strcmp(follow.activity, "Slayer on Blood Gulch"), "Bravo is told to follow Alpha's game");
+	invite_link(hosts[0].key_hash, hosts[0].token, expected);
+	join_count = 0;
+	use(1);
+	check(p2p_party_follow_join(follow.serial) == P2P_PARTY_FOLLOW_JOINING && join_count == 1 &&
+		!strcmp(joined_link, expected), "the follow joins Alpha's invite, as an invite accepted");
+	use(1);
+	check(!p2p_party_follow_pending(NULL), "a follow joined once");
+	use(2);
+	check(p2p_party_follow_pending(&follow), "Charlie told too");
+	/* a password: never passed on */
+	hosts[0].locked = 1;
+	party_pass(4);
+	use(2);
+	check(!p2p_party_follow_pending(NULL) && machines[2].party.follow_result == P2P_PARTY_FOLLOW_PASSWORD,
+		"a game with a password: not followed, Charlie told why");
+	party_pass(42);
+	count = party_count_of(0, members);
+	for (index = 0; index < count; index++)
+		if (strstr(members[index].name, "Charlie"))
+			break;
+	check(index < count && strstr(members[index].note, "password"), "the leader sees why Charlie did not follow");
+	{
+		int token_seen = 0, at;
+
+		for (at = 0; at < carried_count; at++)
+			token_seen |= carried[at].from == 0 && memmem(carried[at].payload, (size_t)carried[at].size, hosts[0].token,
+				P2P_TOKEN_SIZE) != NULL;
+		check(!token_seen, "the invite never travels in clear");
+	}
+	/* Alpha joins another's game: that game's invite, unless it is locked */
+	hosts[0].hosting = 0;
+	hosts[0].locked = 0;
+	hosts[0].joined = 1;
+	for (index = 0; index < P2P_KEY_HASH_SIZE; index++)
+		hosts[0].joined_hash[index] = (unsigned char)(0x70 + index);
+	for (index = 0; index < P2P_TOKEN_SIZE; index++)
+		hosts[0].joined_token[index] = (unsigned char)(0x90 + index);
+	use(0);
+	p2p_friends_set_game(3, 0, NULL, 0);
+	party_pass(4);
+	use(2);
+	check(p2p_party_follow_pending(&follow) && !follow.hosting, "Charlie told to follow Alpha into another's game");
+	/* (Bravo is there already) */
+	hosts[1].joined = 1;
+	memcpy(hosts[1].joined_hash, hosts[0].joined_hash, P2P_KEY_HASH_SIZE);
+	hosts[0].joined_locked = 1;
+	party_pass(4);
+	use(2);
+	check(!p2p_party_follow_pending(NULL) && machines[2].party.follow_result == P2P_PARTY_FOLLOW_PASSWORD,
+		"another's locked game: not followed");
+	hosts[0].joined_locked = 0;
+	hosts[0].joined_hash[0] ^= 1;
+	hosts[1].joined_hash[0] = hosts[0].joined_hash[0];
+	party_pass(4);
+	use(1);
+	check(!p2p_party_follow_pending(NULL) && machines[1].party.follow_result == P2P_PARTY_FOLLOW_THERE,
+		"a member in that game already: nothing to join");
+	use(2);
+	check(p2p_party_follow_pending(&follow), "Charlie told again");
+	p2p_party_follow_result(follow.serial, P2P_PARTY_FOLLOW_WAITING);
+	check(p2p_party_follow_pending(NULL), "in another game: the follow waits");
+	p2p_party_follow_result(follow.serial, P2P_PARTY_FOLLOW_NO_MAP);
+	check(!p2p_party_follow_pending(NULL), "a map missing: the follow given up, the party told");
+	hosts[0].joined = 0;
+	hosts[1].joined = 0;
+	use(0);
+	p2p_friends_set_game(-1, 0, NULL, 0);
+
+	/* leave, hand-off, kick */
+	use(2);
+	check(p2p_party_leave() == P2P_PARTY_DONE, "Charlie leaves");
+	party_pass(2);
+	check(party_count_of(0, NULL) == 2 && party_count_of(1, NULL) == 2 && party_count_of(2, NULL) == 0,
+		"Charlie gone on every side");
+	use(0);
+	check(p2p_party_leave() == P2P_PARTY_DONE, "Alpha, the leader, leaves");
+	party_pass(4);
+	check(party_count_of(1, NULL) == 0, "Bravo alone: no party");
+	/* a party of Alpha, Bravo, Charlie again; Bravo invites Delta once he leads */
+	clock_now += 20000;
+	check(party_friend_id(0, 1, id) && (use(0), p2p_party_invite(id)) == P2P_PARTY_DONE, "Alpha invites Bravo again");
+	check(party_friend_id(0, 2, id) && (use(0), p2p_party_invite(id)) == P2P_PARTY_DONE, "and Charlie");
+	party_pass(2);
+	party_answer_all(1, 1);
+	party_answer_all(2, 1);
+	party_pass(4);
+	check(party_count_of(2, NULL) == 3, "the party of three again");
+	party_pass(50);
+	{
+		int b = party_count_of(1, members), at, online = 0;
+
+		for (at = 0; at < b; at++)
+			online += members[at].online;
+		check(online == 3, "every member heard from, friends or not");
+	}
+	/* Alpha goes offline at once (no word): after the timeout Bravo, the
+	longest-standing, leads */
+	party_offline = 0;
+	party_pass(PARTY_TIMEOUT / 500 + 8);
+	check(party_leader_of(1) == 1 && party_leader_of(2) == 1 && party_count_of(1, NULL) == 2,
+		"the leader gone silent: Bravo leads on both machines");
+	party_offline = -1;
+	check(party_friend_id(1, 3, id) && (use(1), p2p_party_invite(id)) == P2P_PARTY_DONE, "Bravo, leading, invites Delta");
+	party_pass(2);
+	party_answer_all(3, 1);
+	party_pass(4);
+	check(party_count_of(3, NULL) == 3 && party_count_of(2, NULL) == 3, "Delta joins Bravo's party");
+	check(party_member_id(1, 3, id) && (use(1), p2p_party_kick(id)) == P2P_PARTY_DONE, "Bravo removes Delta");
+	use(2);
+	check(party_member_id(2, 1, id) && p2p_party_kick(id) == P2P_PARTY_NOT_LEADER, "a member who does not lead cannot");
+	party_pass(4);
+	check(party_count_of(3, NULL) == 0 && party_count_of(2, NULL) == 2, "Delta out of the party on every side");
+	/* appearing offline: the party left, nothing taken */
+	machines[2].test_appeared_offline = 1;
+	party_pass(4);
+	check(party_count_of(2, NULL) == 0 && party_count_of(1, NULL) == 0, "appearing offline leaves the party");
+	clock_now += 20000;
+	check(party_friend_id(0, 2, id) && (use(0), p2p_party_invite(id)) != P2P_PARTY_DONE,
+		"a friend appearing offline (offline to Alpha) not invited");
+	{
+		struct message message;
+
+		use(0);
+		message_start(&message, TYPE_PARTY_INVITE, machines[2].key);
+		posix_random_bytes(message.party_id, PARTY_ID_LENGTH);
+		message.party_count = 1;
+		party_send_to(machines[2].key, &message);
+		party_pass(2);
+		use(2);
+		check(machines[2].party_invite_count == 0, "an invite to a machine appearing offline taken nowhere");
+	}
+	machines[2].test_appeared_offline = 0;
+	/* a blocked member: the leader removes them */
+	party_pass(10);
+	clock_now += 20000;
+	check(party_friend_id(0, 1, id) && (use(0), p2p_party_invite(id)) == P2P_PARTY_DONE &&
+		party_friend_id(0, 2, id) && (use(0), p2p_party_invite(id)) == P2P_PARTY_DONE, "a party of three once more");
+	party_pass(2);
+	party_answer_all(1, 1);
+	party_answer_all(2, 1);
+	party_pass(4);
+	check(party_friend_id(0, 2, id) && (use(0), p2p_friends_act(id, P2P_FRIEND_KIND_FRIEND, P2P_FRIENDS_BLOCK)) ==
+		P2P_FRIENDS_DONE, "Alpha blocks Charlie");
+	party_pass(4);
+	check(party_count_of(0, NULL) == 2 && party_count_of(2, NULL) == 0, "the blocked member removed from the party");
+	/* the decline */
+	use(0);
+	p2p_friends_act(id, P2P_FRIEND_KIND_BLOCKED, P2P_FRIENDS_UNBLOCK);
+	party_reset();
+	party_make_friends(0, 1);
+	party_pass(10);
+	check(party_friend_id(0, 1, id) && (use(0), p2p_party_invite(id)) == P2P_PARTY_DONE, "an invite to decline");
+	party_pass(2);
+	check(party_answer_all(1, 0) == 1, "Bravo says no");
+	party_pass(2);
+	check(party_count_of(1, NULL) == 0 && party_lines_from(0, "") == 0, "no party for Bravo");
+	party_pass(PARTY_INVITE_LIFETIME / 500 + 4);
+	check(party_count_of(0, NULL) == 0, "Alpha alone once its invites are over: no party");
+	/* chat cleaning, alone */
+	check(p2p_party_chat_clean(text, sizeof(text), "a\tb\nc\x80\xff%n|x^1<i>`") == 7 && !strcmp(text, "abcnx1i"),
+		"chat cleaning keeps printable ASCII without markup");
+}
+
 /* (run_menus_test.sh's FRIENDS cases) a save folder's friends: SEED_DIR
 gets an identity and a list of two friends, a request, a request sent and a
 blocked player, as a Vita's would be */
@@ -1161,6 +1690,7 @@ int main(void)
 	test_files();
 	test_limits();
 	test_cards();
+	test_party();
 	if (failures)
 	{
 		printf("%d failures\n", failures);

@@ -92,6 +92,7 @@ halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
 #include "../src/lang.h"
 #include "../src/p2p.h"
 #include "../src/p2p_friends.h"
+#include "../src/p2p_party.h"
 #include "../src/crossplay_guard.h"
 #include "network_wire.h"
 #include "browser_list.h"
@@ -314,6 +315,12 @@ enum
 	_function_h3_join_next,
 	_function_h3_join_leave,
 	_function_h3_pregame_init,
+	_function_h3_party_init,
+	_function_h3_party_act,
+	_function_h3_party_second,
+	_function_h3_party_option,
+	_function_h3_party_page_up,
+	_function_h3_party_page_down,
 };
 
 /* in port_game_data_input_names' order */
@@ -360,6 +367,8 @@ enum
 	_input_h3_players_options,
 	_input_h3_join,
 	_input_h3_pregame,
+	_input_h3_party,
+	_input_h3_party_options,
 };
 
 /* what a line of typing is for */
@@ -502,6 +511,12 @@ static struct
 	/* to be opened from the main loop: the System Link screen, the password
 	screen */
 	boolean open_system_link;
+	/* (FRIENDS' PARTY row) the PARTY screen opened at the next frame */
+	boolean open_party;
+	/* (the party's leader) the game whose open slots were said too few:
+	pressed again soon, joined */
+	char party_warned_id[P2P_LOBBY_ID_SIZE];
+	unsigned long party_warned_time;
 	boolean open_password;
 	/* (crossplay_guard.h) a large PC game chosen: the player asked whether
 	to join it anyway, the answer awaited */
@@ -3935,6 +3950,11 @@ static void h3_custom_save(void)
 		saved.controller_settings.autocenter, saved.controller_settings.vibration_disabled ? "off" : "on");
 }
 
+/* the party's leader warned of a game with fewer open slots than the party
+(by its id): nonzero if the same game was warned of a moment ago (a second
+press joins it); else remembered now */
+static boolean party_warning_confirmed(char const *id);
+
 /* ---- joining */
 
 static void join_begin(struct p2p_lobby_entry const *entry, char const *password)
@@ -4675,6 +4695,18 @@ static boolean browser_join(struct widget_instance *widget, boolean *widget_dele
 	{
 		snprintf(menu_functions.status, sizeof(menu_functions.status), "%s", T("That is your own game"));
 		return TRUE;
+	}
+	/* (the party's leader: told first of a game with fewer open slots than
+	the party; A again joins) */
+	{
+		char warning[192];
+
+		if (p2p_party_join_warning(entry->players, entry->maximum, warning, sizeof(warning)) &&
+			!party_warning_confirmed(entry->id))
+		{
+			snprintf(menu_functions.status, sizeof(menu_functions.status), "%s %s", warning, T("Cross again: join anyway."));
+			return TRUE;
+		}
 	}
 	/* (crossplay_guard.h: a large or co-op PC game, Experimental, asked
 	about once) */
@@ -5957,10 +5989,14 @@ online, offline, requests sent, blocked), scrolling as the mod manager's.
 The entry chosen stays chosen by its id and kind as the list changes */
 
 #define H3_FRIENDS_ROWS 10
-#define H3_FRIENDS_OWN_ROWS 3
+#define H3_FRIENDS_OWN_ROWS 4
 #define H3_FRIENDS_MESSAGE_MILLISECONDS 6000
 #define H3_FRIENDS_REFRESH_MILLISECONDS 500
 #define H3_FRIENDS_PANEL_ROWS 5
+/* (the options' party rows: not p2p_friends_act's) */
+#define H3_FRIENDS_PARTY_INVITE 1000
+#define H3_FRIENDS_PARTY_KICK 1001
+
 
 /* the three rows of the screen's own */
 enum
@@ -5968,6 +6004,8 @@ enum
 	_h3_friends_row_add,
 	_h3_friends_row_offline,
 	_h3_friends_row_join,
+	/* (the party: its screen, halo3/party.xml) */
+	_h3_friends_row_party,
 };
 
 static struct
@@ -6201,11 +6239,22 @@ static void h3_friends_update(struct widget_instance *list)
 				row_column(child, "row_tag", config_boolean_live("friends.appear_offline", "HALO_FRIENDS_APPEAR_OFFLINE") ?
 					T("ON") : T("OFF"));
 				break;
-			default:
+			case _h3_friends_row_join:
 				row_column(child, "row_name", T("FRIENDS CAN JOIN"));
 				row_column(child, "row_state", T("Your public games, in one press"));
 				row_column(child, "row_tag", config_boolean_live("friends.join", "HALO_FRIENDS_JOIN") ? T("YES") : T("NO"));
 				break;
+			default:
+			{
+				char party[96], tag[16];
+				int size = p2p_party_status(party, sizeof(party));
+
+				snprintf(tag, sizeof(tag), "%d/%d", size, P2P_PARTY_MAXIMUM);
+				row_column(child, "row_name", T("PARTY"));
+				row_column(child, "row_state", party);
+				row_column(child, "row_tag", size ? tag : " ");
+				break;
+			}
 			}
 		}
 		else
@@ -6254,9 +6303,12 @@ static void h3_friends_update(struct widget_instance *list)
 			text_show(named(screen, "detail_help"), T("Accept joins their game now."));
 			break;
 		case P2P_FRIEND_KIND_FRIEND:
-			text_show(named(screen, "detail_help"), chosen->joinable ? T("Their game is open: join it in one press.") :
-				chosen->online ? T("Their game can't be joined now. Host one and invite them.") :
-				T("They're offline, or appearing offline."));
+			if (chosen->party[0])
+				text_show(named(screen, "detail_help"), chosen->party);
+			else
+				text_show(named(screen, "detail_help"), chosen->joinable ? T("Their game is open: join it in one press.") :
+					chosen->online ? T("Their game can't be joined now. Host one and invite them.") :
+					T("They're offline, or appearing offline."));
 			break;
 		case P2P_FRIEND_KIND_OUTGOING:
 			text_show(named(screen, "detail_help"), T("Waiting for them to accept."));
@@ -6272,6 +6324,7 @@ static void h3_friends_update(struct widget_instance *list)
 			N_("Give your code to a friend, or type theirs: both must agree."),
 			N_("Your friends see you offline; you still see them."),
 			N_("Friends join your public games without a password in one press."),
+			N_("Your party: who's in it, and leave. Triangle on a friend invites them."),
 		};
 		int item = h3_friends_chosen_index();
 
@@ -6351,6 +6404,10 @@ static void h3_friends_act(struct widget_instance *widget)
 			setting_set("HALO_FRIENDS_JOIN", on ? "true" : "false");
 			h3_friends_message(on ? T("Friends can join your public games") : T("Friends join only by your invites"));
 			break;
+		case _h3_friends_row_party:
+			menu_functions.open_party = TRUE;
+			platform_log("menus: h3 friends: the PARTY screen next");
+			break;
 		}
 		return;
 	}
@@ -6363,8 +6420,21 @@ static void h3_friends_act(struct widget_instance *widget)
 		h3_friends_do(entry, P2P_FRIENDS_INVITE_ACCEPT);
 		break;
 	case P2P_FRIEND_KIND_FRIEND:
+	{
+		char warning[192];
+
+		/* (the party's leader: told first of a game with fewer open slots than
+		the party; Cross again joins) */
+		if (entry->joinable && p2p_party_join_warning(entry->players, entry->maximum, warning, sizeof(warning)) &&
+			!party_warning_confirmed(entry->id))
+		{
+			snprintf(warning + strlen(warning), sizeof(warning) - strlen(warning), " %s", T("Cross again: join anyway."));
+			h3_friends_message(warning);
+			break;
+		}
 		h3_friends_do(entry, P2P_FRIENDS_JOIN);
 		break;
+	}
 	case P2P_FRIEND_KIND_OUTGOING:
 		h3_friends_message(T("Waiting for them to accept."));
 		break;
@@ -6411,6 +6481,14 @@ static boolean h3_friends_options_ask(void)
 	switch (entry->kind)
 	{
 	case P2P_FRIEND_KIND_FRIEND:
+		/* (the party's: invite them, or the leader removes them) */
+		if (p2p_party_friend_state(entry->id) == 1)
+		{
+			if (p2p_party_leading())
+				h3_friends.options[h3_friends.option_count++] = H3_FRIENDS_PARTY_KICK;
+		}
+		else if (p2p_party_invitable(entry->id))
+			h3_friends.options[h3_friends.option_count++] = H3_FRIENDS_PARTY_INVITE;
 		h3_friends.options[h3_friends.option_count++] = P2P_FRIENDS_REMOVE;
 		h3_friends.options[h3_friends.option_count++] = P2P_FRIENDS_BLOCK;
 		break;
@@ -6438,6 +6516,10 @@ static char const *h3_friends_option_name(int action)
 {
 	switch (action)
 	{
+	case H3_FRIENDS_PARTY_INVITE:
+		return T("INVITE TO PARTY");
+	case H3_FRIENDS_PARTY_KICK:
+		return T("REMOVE FROM PARTY");
 	case P2P_FRIENDS_REMOVE:
 		return T("REMOVE FRIEND");
 	case P2P_FRIENDS_BLOCK:
@@ -6495,6 +6577,21 @@ static void h3_friends_option(struct widget_instance *widget)
 
 	if (option < 0 || option >= h3_friends.option_count)
 		return;
+	if (h3_friends.options[option] == H3_FRIENDS_PARTY_INVITE || h3_friends.options[option] == H3_FRIENDS_PARTY_KICK)
+	{
+		int invite = h3_friends.options[option] == H3_FRIENDS_PARTY_INVITE;
+		int outcome = invite ? p2p_party_invite(h3_friends.options_entry.id) : p2p_party_kick(h3_friends.options_entry.id);
+		char text[160];
+
+		if (outcome == P2P_PARTY_DONE)
+			snprintf(text, sizeof(text), invite ? T("Invited %s to your party") : T("Removed %s from the party"),
+				h3_friends.options_entry.name);
+		else
+			snprintf(text, sizeof(text), "%s", p2p_party_outcome_text(outcome));
+		h3_friends_message(text);
+		h3_friends_refresh(TRUE);
+		return;
+	}
 	h3_friends_do(&h3_friends.options_entry, h3_friends.options[option]);
 }
 
@@ -6516,12 +6613,43 @@ static void h3_friends_panel_update(struct widget_instance *panel)
 		requests += h3_friends.panel_entries[index].kind == P2P_FRIEND_KIND_REQUEST ||
 			h3_friends.panel_entries[index].kind == P2P_FRIEND_KIND_INVITE;
 	}
-	if (requests)
-		snprintf(text, sizeof(text), T("%d ONLINE, %d NEW"), online, requests);
-	else
-		snprintf(text, sizeof(text), T("%d ONLINE"), online);
-	text_show(named(panel, "lobby_count"), text);
-	for (row = 1, index = 0; row <= H3_FRIENDS_PANEL_ROWS; row++)
+	{
+		static struct p2p_party_member party[P2P_PARTY_MAXIMUM];
+		static unsigned long party_time;
+		static int party_count;
+		int member;
+
+		/* (the party first, its members but this machine: Halo 3's lobby
+		roster; refreshed with the friends) */
+		if (!party_time || time - party_time >= 1000)
+		{
+			party_time = time ? time : 1;
+			party_count = p2p_party_members(party, P2P_PARTY_MAXIMUM);
+		}
+		if (party_count > 1)
+			snprintf(text, sizeof(text), T("PARTY %d/%d, %d ONLINE"), party_count, P2P_PARTY_MAXIMUM, online);
+		else if (requests)
+			snprintf(text, sizeof(text), T("%d ONLINE, %d NEW"), online, requests);
+		else
+			snprintf(text, sizeof(text), T("%d ONLINE"), online);
+		text_show(named(panel, "lobby_count"), text);
+		row = 1;
+		for (member = 0; party_count > 1 && member < party_count && row <= H3_FRIENDS_PANEL_ROWS; member++)
+		{
+			char name[24], state[24];
+
+			if (party[member].self)
+				continue;
+			snprintf(name, sizeof(name), "lobby_name_%d", row);
+			snprintf(state, sizeof(state), "lobby_state_%d", row);
+			text_show(named(panel, name), party[member].name);
+			row_column(panel, state, party[member].note[0] ? party[member].note : party[member].leader ?
+				T("Party leader") : T("In your party"));
+			shown++;
+			row++;
+		}
+	}
+	for (index = 0; row <= H3_FRIENDS_PANEL_ROWS; row++)
 	{
 		char name[24], state[24];
 		char const *name_text = "", *state_text = "";
@@ -6573,6 +6701,417 @@ static void h3_friends_panel_update(struct widget_instance *panel)
 			platform_log("menus: h3 friends panel: %s", line);
 		}
 	}
+}
+
+static boolean party_warning_confirmed(char const *id)
+{
+	unsigned long now = system_milliseconds();
+
+	if (!strcmp(menu_functions.party_warned_id, id) && menu_functions.party_warned_time &&
+		now - menu_functions.party_warned_time < 8000)
+	{
+		menu_functions.party_warned_id[0] = 0;
+		platform_log("menus: party: joined anyway (fewer open slots than the party)");
+		return TRUE;
+	}
+	snprintf(menu_functions.party_warned_id, sizeof(menu_functions.party_warned_id), "%s", id);
+	menu_functions.party_warned_time = now ? now : 1;
+	platform_log("menus: party: the game has fewer open slots than the party: the leader warned");
+	return FALSE;
+}
+
+/* ---- the Halo 3 PARTY screen (halo3/party.xml; port/linux/src/p2p_party.h):
+LEAVE PARTY, the party invites waiting (Cross joins the party, Square says
+no), then the members (the longest-standing first, the leader marked, what
+each does or why they could not follow); Cross on a member: its options
+(MUTE or UNMUTE; REMOVE FROM PARTY, the leader's; LEAVE PARTY on this
+machine's own row) */
+
+#define H3_PARTY_ROWS 10
+#define H3_PARTY_MESSAGE_MILLISECONDS 6000
+
+/* the options' rows */
+enum
+{
+	_h3_party_option_mute = 1,
+	_h3_party_option_unmute,
+	_h3_party_option_kick,
+	_h3_party_option_leave,
+};
+
+static struct
+{
+	struct browser_view view;
+	short page;
+	struct p2p_party_member members[P2P_PARTY_MAXIMUM];
+	int member_count;
+	struct p2p_party_invite invites[P2P_FRIEND_INVITES_MAXIMUM];
+	int invite_count;
+	unsigned long refreshed_time;
+	/* the item chosen: LEAVE PARTY (-1), or an invite's or a member's id */
+	char chosen_id[P2P_FRIEND_ID_SIZE];
+	char message[160];
+	unsigned long message_time;
+	struct widget_instance *list;
+	long list_creation_time;
+	struct p2p_party_member options_member;
+	int options[2];
+	int option_count;
+	char said[400];
+} h3_party;
+
+static void h3_party_message(char const *text)
+{
+	snprintf(h3_party.message, sizeof(h3_party.message), "%s", text);
+	h3_party.message_time = system_milliseconds();
+	platform_log("menus: h3 party: %s", text);
+}
+
+/* the rows' items: LEAVE PARTY (in a party), the invites, the members */
+static int h3_party_leave_rows(void)
+{
+	return h3_party.member_count > 1 ? 1 : 0;
+}
+
+static int h3_party_items(void)
+{
+	return h3_party_leave_rows() + h3_party.invite_count + h3_party.member_count;
+}
+
+static struct p2p_party_invite const *h3_party_item_invite(int item)
+{
+	item -= h3_party_leave_rows();
+	return item >= 0 && item < h3_party.invite_count ? &h3_party.invites[item] : NULL;
+}
+
+static struct p2p_party_member const *h3_party_item_member(int item)
+{
+	item -= h3_party_leave_rows() + h3_party.invite_count;
+	return item >= 0 && item < h3_party.member_count ? &h3_party.members[item] : NULL;
+}
+
+static char const *h3_party_item_id(int item)
+{
+	struct p2p_party_invite const *invite = h3_party_item_invite(item);
+	struct p2p_party_member const *member = h3_party_item_member(item);
+
+	return invite ? invite->id : member ? member->id : "";
+}
+
+static int h3_party_chosen_index(void)
+{
+	int item;
+
+	for (item = 0; item < h3_party_items(); item++)
+		if (!strcmp(h3_party_item_id(item), h3_party.chosen_id))
+			return item;
+	return 0;
+}
+
+/* the party read again (twice a second, or now), and said as it changes */
+static void h3_party_refresh(boolean now)
+{
+	unsigned long time = system_milliseconds();
+	char line[400], status[96];
+	int index;
+
+	if (!now && h3_party.refreshed_time && time - h3_party.refreshed_time < 500)
+		return;
+	h3_party.refreshed_time = time ? time : 1;
+	h3_party.member_count = p2p_party_members(h3_party.members, P2P_PARTY_MAXIMUM);
+	h3_party.invite_count = p2p_party_invites(h3_party.invites, P2P_FRIEND_INVITES_MAXIMUM);
+	p2p_party_status(status, sizeof(status));
+	snprintf(line, sizeof(line), "%s", status);
+	for (index = 0; index < h3_party.member_count; index++)
+		snprintf(line + strlen(line), sizeof(line) - strlen(line), "%s%s%s%s%s%s", index ? ", " : "; members: ",
+			h3_party.members[index].name, h3_party.members[index].leader ? " (leader)" : "",
+			h3_party.members[index].self ? " (you)" : "", h3_party.members[index].note[0] ? " - " : "",
+			h3_party.members[index].note);
+	for (index = 0; index < h3_party.invite_count; index++)
+		snprintf(line + strlen(line), sizeof(line) - strlen(line), "%s%s", index ? ", " : "; invites: ",
+			h3_party.invites[index].name);
+	if (strcmp(line, h3_party.said))
+	{
+		snprintf(h3_party.said, sizeof(h3_party.said), "%s", line);
+		platform_log("menus: h3 party: %s", line);
+	}
+}
+
+static void h3_party_initialize(void)
+{
+	browser_view_reset(&h3_party.view);
+	h3_party.page = 0;
+	h3_party.message[0] = 0;
+	h3_party.chosen_id[0] = 0;
+	h3_party.said[0] = 0;
+	h3_party_refresh(TRUE);
+}
+
+/* (port h3 party) the rows, the chosen one's facts */
+static void h3_party_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *child, *focused = list->focused_child, *focus = NULL;
+	struct p2p_party_member const *member;
+	struct p2p_party_invite const *invite;
+	long index, focused_row = NONE, target;
+	char text[256];
+	int chosen;
+
+	h3_party_refresh(FALSE);
+	if (list != h3_party.list || list->creation_time != h3_party.list_creation_time)
+	{
+		h3_party.list = list;
+		h3_party.list_creation_time = list->creation_time;
+		browser_view_reset(&h3_party.view);
+		focused = NULL;
+	}
+	for (index = 0, child = list->child; child; child = child->next)
+	{
+		if (strncmp(child->name, "row_", 4))
+			continue;
+		if (child == focused)
+			focused_row = index;
+		index++;
+	}
+	target = browser_view_follow(&h3_party.view, H3_PARTY_ROWS, h3_party_items(), (int)focused_row,
+		h3_party_chosen_index(), h3_party.page);
+	h3_party.page = 0;
+	for (index = 0, child = list->child; child; child = child->next)
+	{
+		long item = h3_party.view.offset + index;
+
+		if (strncmp(child->name, "row_", 4))
+			continue;
+		if (index >= h3_party.view.visible)
+		{
+			widget_instance_set_visibility_recursive(child, FALSE);
+			child->disabled = TRUE;
+			index++;
+			continue;
+		}
+		widget_instance_set_visibility_recursive(child, TRUE);
+		child->disabled = FALSE;
+		invite = h3_party_item_invite((int)item);
+		member = h3_party_item_member((int)item);
+		if (invite)
+		{
+			snprintf(text, sizeof(text), T("Invited you: %d of %d in their party"), invite->size, P2P_PARTY_MAXIMUM);
+			row_column(child, "row_name", invite->name);
+			row_column(child, "row_state", text);
+			row_column(child, "row_tag", T("INVITE"));
+		}
+		else if (member)
+		{
+			row_column(child, "row_name", member->name);
+			row_column(child, "row_state", member->note[0] ? member->note : member->self ? T("You") :
+				member->online ? T("Online") : T("Not heard from"));
+			row_column(child, "row_tag", member->leader ? T("LEADER") : member->muted ? T("MUTED") : " ");
+		}
+		else
+		{
+			row_column(child, "row_name", T("LEAVE PARTY"));
+			row_column(child, "row_state", T("You stay where you are; the party goes on"));
+			row_column(child, "row_tag", " ");
+		}
+		if (index == h3_party.view.row)
+			focus = child;
+		index++;
+	}
+	if (focus && focus != list->focused_child)
+		ui_widget_port_give_focus(list, focus);
+	for (child = list->child; child; child = child->next)
+	{
+		if (!strncmp(child->name, "row_", 4))
+			child->animation.current_frame_index = child == focus ? 1 : 0;
+	}
+	if (target != NONE)
+		snprintf(h3_party.chosen_id, sizeof(h3_party.chosen_id), "%s", h3_party_item_id((int)target));
+	chosen = h3_party_chosen_index();
+	invite = h3_party_item_invite(chosen);
+	member = h3_party_item_member(chosen);
+	p2p_party_status(text, sizeof(text));
+	text_show(named(screen, "party_status"), text);
+	if (invite)
+		snprintf(text, sizeof(text), "%s\n%s", invite->name, T("Cross joins their party: you'll follow them from game to game."));
+	else if (member)
+		snprintf(text, sizeof(text), "%s   %s\n%s", member->name, member->code, member->self ? T("You") :
+			member->is_friend ? T("Your friend") : T("Not on your friends list: shown with their code"));
+	else if (h3_party_items())
+		snprintf(text, sizeof(text), "%s", T("Leave the party: the others stay together."));
+	else
+		snprintf(text, sizeof(text), "%s", T("No party yet: on FRIENDS, Triangle on a friend, INVITE TO PARTY."));
+	text_show(named(screen, "detail"), text);
+	text_show(named(screen, "party_message"), h3_party.message[0] &&
+		system_milliseconds() - h3_party.message_time < H3_PARTY_MESSAGE_MILLISECONDS ? h3_party.message : "");
+	text_show(named(screen, "a_label"), invite ? T("Join party") : member ? T("Options") : h3_party_items() ? T("Leave") : "");
+	text_show(named(screen, "x_label"), invite ? T("No") : "");
+	if (named(screen, "a_butn"))
+		widget_instance_set_visibility_recursive(named(screen, "a_butn"), h3_party_items() != 0);
+	if (named(screen, "x_butn"))
+		widget_instance_set_visibility_recursive(named(screen, "x_butn"), invite != NULL);
+}
+
+/* (port h3 party act: a row's Cross) TRUE: the member's options open */
+static boolean h3_party_act(struct widget_instance *widget)
+{
+	struct p2p_party_member const *member;
+	struct p2p_party_invite const *invite;
+	int item = h3_party_chosen_index(), outcome;
+
+	if (widget && !strncmp(widget->name, "row_", 4) && widget->name[4] >= '0' && widget->name[4] <= '9')
+	{
+		long row = atol(widget->name + 4) - 1;
+
+		if (row >= 0 && row < h3_party.view.visible)
+			item = (int)(h3_party.view.offset + row);
+	}
+	snprintf(h3_party.chosen_id, sizeof(h3_party.chosen_id), "%s", h3_party_item_id(item));
+	invite = h3_party_item_invite(item);
+	member = h3_party_item_member(item);
+	if (invite)
+	{
+		struct p2p_party_invite copy = *invite;
+
+		outcome = p2p_party_answer(copy.id, 1);
+		h3_party_message(outcome == P2P_PARTY_DONE ? T("Joining the party...") : p2p_party_outcome_text(outcome));
+		h3_party_refresh(TRUE);
+		return FALSE;
+	}
+	if (!member)
+	{
+		if (!h3_party_items())
+			return FALSE;
+		outcome = p2p_party_leave();
+		h3_party_message(outcome == P2P_PARTY_DONE ? T("You left the party") : p2p_party_outcome_text(outcome));
+		h3_party_refresh(TRUE);
+		return FALSE;
+	}
+	h3_party.options_member = *member;
+	h3_party.option_count = 0;
+	if (member->self)
+		h3_party.options[h3_party.option_count++] = _h3_party_option_leave;
+	else
+	{
+		h3_party.options[h3_party.option_count++] = member->muted ? _h3_party_option_unmute : _h3_party_option_mute;
+		if (p2p_party_leading())
+			h3_party.options[h3_party.option_count++] = _h3_party_option_kick;
+	}
+	platform_log("menus: h3 party: options for %s", member->name);
+	return TRUE;
+}
+
+/* (port h3 party second: Square) an invite said no to */
+static void h3_party_second(void)
+{
+	struct p2p_party_invite const *invite = h3_party_item_invite(h3_party_chosen_index());
+
+	if (invite)
+	{
+		struct p2p_party_invite copy = *invite;
+		int outcome = p2p_party_answer(copy.id, 0);
+
+		h3_party_message(outcome == P2P_PARTY_DONE ? T("Party invite declined") : p2p_party_outcome_text(outcome));
+		h3_party_refresh(TRUE);
+	}
+}
+
+static char const *h3_party_option_name(int option)
+{
+	switch (option)
+	{
+	case _h3_party_option_mute:
+		return T("MUTE");
+	case _h3_party_option_unmute:
+		return T("UNMUTE");
+	case _h3_party_option_kick:
+		return T("REMOVE FROM PARTY");
+	case _h3_party_option_leave:
+		return T("LEAVE PARTY");
+	}
+	return "";
+}
+
+/* (port h3 party options) the question's words and rows */
+static void h3_party_options_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *child;
+	char text[192];
+
+	text_show(named(screen, "options_title"), h3_party.options_member.name);
+	snprintf(text, sizeof(text), "%s\n%s", h3_party.options_member.code, h3_party.options_member.self ?
+		T("Leave the party: the others stay together.") : T("Mute hides their chat here; they're never told."));
+	text_show(named(screen, "options_text"), text);
+	for (child = list->child; child; child = child->next)
+	{
+		long option;
+
+		if (strncmp(child->name, "option_", 7) || !(child->name[7] >= '1' && child->name[7] <= '2'))
+			continue;
+		option = child->name[7] - '1';
+		if (option < h3_party.option_count)
+		{
+			widget_instance_set_visibility_recursive(child, TRUE);
+			child->disabled = FALSE;
+			text_show(child, h3_party_option_name(h3_party.options[option]));
+		}
+		else
+		{
+			widget_instance_set_visibility_recursive(child, FALSE);
+			child->disabled = TRUE;
+		}
+	}
+}
+
+/* (port h3 party option: a row of the question) */
+static void h3_party_option(struct widget_instance *widget)
+{
+	long option = widget && !strncmp(widget->name, "option_", 7) ? widget->name[7] - '1' : -1;
+	int outcome = P2P_PARTY_GONE;
+	char text[160];
+
+	if (option < 0 || option >= h3_party.option_count)
+		return;
+	switch (h3_party.options[option])
+	{
+	case _h3_party_option_mute:
+	case _h3_party_option_unmute:
+		outcome = p2p_party_mute(h3_party.options_member.id, h3_party.options[option] == _h3_party_option_mute);
+		snprintf(text, sizeof(text), outcome != P2P_PARTY_DONE ? "%s" : h3_party.options[option] == _h3_party_option_mute ?
+			T("%s muted") : T("%s unmuted"), outcome != P2P_PARTY_DONE ? p2p_party_outcome_text(outcome) :
+			h3_party.options_member.name);
+		break;
+	case _h3_party_option_kick:
+		outcome = p2p_party_kick(h3_party.options_member.id);
+		snprintf(text, sizeof(text), outcome == P2P_PARTY_DONE ? T("Removed %s from the party") : "%s",
+			outcome == P2P_PARTY_DONE ? h3_party.options_member.name : p2p_party_outcome_text(outcome));
+		break;
+	default:
+		outcome = p2p_party_leave();
+		snprintf(text, sizeof(text), "%s", outcome == P2P_PARTY_DONE ? T("You left the party") :
+			p2p_party_outcome_text(outcome));
+		break;
+	}
+	h3_party_message(text);
+	h3_party_refresh(TRUE);
+}
+
+#define H3_PARTY_SCREEN "h3/party/screen"
+
+/* the PARTY screen opened over the screen open (FRIENDS: B goes back to it) */
+static void h3_party_open(void)
+{
+	long screen = menu_tags_ingame_screen(H3_PARTY_SCREEN);
+	struct widget_instance *active = ui_widget_port_active_screen(0);
+
+	if (screen == NONE || !active || !ui_widget_load_by_name_or_tag(NULL, screen, NULL, active->local_player_index,
+		active->definition_tag_index, NONE, NONE))
+	{
+		platform_log("menus: the PARTY screen did not open");
+		return;
+	}
+	platform_log("menus: the PARTY screen opened");
 }
 
 
@@ -6859,6 +7398,21 @@ static void h3_players_options_update(struct widget_instance *list)
 	text_show(named(screen, "options_title"), h3_players.players[index].name);
 	snprintf(text, sizeof(text), "%s", h3_players_state_text(h3_players_state(&h3_players.players[index])));
 	text_show(named(screen, "options_text"), text[0] ? text : T("Add friend sends a friend request: they accept or decline."));
+	/* (INVITE TO PARTY: another machine's player not blocked; their card
+	asked first if not had, the invite only to a friend's) */
+	{
+		struct widget_instance *child;
+		int state = h3_players_state(&h3_players.players[index]);
+		boolean party = state != P2P_FRIENDS_PLAYER_THIS_VITA && state != P2P_FRIENDS_PLAYER_BLOCKED &&
+			state != P2P_FRIENDS_PLAYER_NOT_TAKING;
+
+		for (child = list->child; child; child = child->next)
+			if (strstr(child->name, "option_party"))
+			{
+				widget_instance_set_visibility_recursive(child, party);
+				child->disabled = !party;
+			}
+	}
 }
 
 /* an option for the chosen player (the tests' steps call it too) */
@@ -6887,6 +7441,28 @@ static void h3_players_option(struct widget_instance *widget)
 		h3_players_do(P2P_FRIENDS_PLAYER_ADD);
 	else if (strstr(widget->name, "option_block"))
 		h3_players_do(P2P_FRIENDS_PLAYER_BLOCK);
+	else if (strstr(widget->name, "option_party"))
+	{
+		int index = h3_players_chosen_index(), outcome;
+		char id[P2P_FRIEND_ID_SIZE], text[160];
+
+		if (index < 0)
+			return;
+		/* (their card had, a friend's: invited now; else asked for first) */
+		if (p2p_friends_player_friend_id(h3_players.players[index].machine, id))
+		{
+			outcome = p2p_party_invite(id);
+			snprintf(text, sizeof(text), outcome == P2P_PARTY_DONE ? T("Invited %s to your party") : "%s",
+				outcome == P2P_PARTY_DONE ? h3_players.players[index].name : p2p_party_outcome_text(outcome));
+		}
+		else
+		{
+			outcome = p2p_friends_player_ask(h3_players.players[index].machine, P2P_FRIENDS_PLAYER_PARTY);
+			snprintf(text, sizeof(text), outcome == P2P_FRIENDS_DONE ? T("Inviting %s to your party...") : "%s",
+				outcome == P2P_FRIENDS_DONE ? h3_players.players[index].name : p2p_friends_outcome_text(outcome));
+		}
+		h3_players_message(text);
+	}
 }
 
 #define H3_PLAYERS_SCREEN "h3/players/screen"
@@ -7806,6 +8382,23 @@ boolean pc_menu_event_function_invoke(
 		h3_pregame.said[0] = 0;
 		platform_log("menus: h3 pregame: the Halo 3 lobby for the game's ENLISTED PLAYERS");
 		return TRUE;
+	case _function_h3_party_init:
+		h3_party_initialize();
+		return TRUE;
+	case _function_h3_party_act:
+		return h3_party_act(widget);
+	case _function_h3_party_second:
+		h3_party_second();
+		return TRUE;
+	case _function_h3_party_option:
+		h3_party_option(widget);
+		return TRUE;
+	case _function_h3_party_page_up:
+		h3_party.page = -1;
+		return TRUE;
+	case _function_h3_party_page_down:
+		h3_party.page = 1;
+		return TRUE;
 	case _function_h3_gametype_set:
 		h3_mp_gametype_set(widget);
 		return TRUE;
@@ -8223,6 +8816,15 @@ void pc_menu_game_data_function_invoke(
 		h3_join_update(widget);
 	case _input_h3_pregame:
 		h3_pregame_update(widget);
+		break;
+	case _input_h3_party:
+		if (widget->type == _ui_widget_type_column_list)
+			h3_party_update(widget);
+		break;
+	case _input_h3_party_options:
+		if (widget->type == _ui_widget_type_column_list)
+			h3_party_options_update(widget);
+		break;
 	default:
 		break;
 	}
@@ -8333,8 +8935,14 @@ outside the widgets' own events */
 void pc_menu_functions_update(
 	boolean main_menu_loaded)
 {
+	if (main_menu_loaded && menu_functions.open_party)
+	{
+		menu_functions.open_party = FALSE;
+		h3_party_open();
+	}
 	if (!main_menu_loaded)
 	{
+		menu_functions.open_party = FALSE;
 		menu_functions.open_system_link = FALSE;
 		menu_functions.open_system_link_list = FALSE;
 		menu_functions.browser_profile_pending = FALSE;

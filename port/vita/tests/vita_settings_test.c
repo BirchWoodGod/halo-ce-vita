@@ -350,6 +350,83 @@ const char *p2p_friends_add_text(int result)
 	return result == P2P_FRIENDS_ADD_SENT ? "Friend request sent" : "That's not a friend code";
 }
 
+/* (the party, p2p_party.h: the test's) */
+static struct p2p_party_member test_party[P2P_PARTY_MAXIMUM];
+static int test_party_count, test_party_leading;
+static struct p2p_party_invite test_party_invites[2];
+static int test_party_invite_count;
+static char party_acted[64];
+int p2p_party_members(struct p2p_party_member *members, int maximum_count)
+{
+	int count = test_party_count < maximum_count ? test_party_count : maximum_count;
+
+	memcpy(members, test_party, sizeof(members[0]) * (size_t)count);
+	return count;
+}
+int p2p_party_invites(struct p2p_party_invite *invites, int maximum_count)
+{
+	int count = test_party_invite_count < maximum_count ? test_party_invite_count : maximum_count;
+
+	memcpy(invites, test_party_invites, sizeof(invites[0]) * (size_t)count);
+	return count;
+}
+int p2p_party_status(char *text, int size)
+{
+	snprintf(text, (size_t)size, test_party_count > 1 ? "Party: %d of 8 (Alpha leads)" : "Not in a party: invite a friend",
+		test_party_count);
+	return test_party_count > 1 ? test_party_count : 0;
+}
+int p2p_party_leading(void)
+{
+	return test_party_leading;
+}
+int p2p_party_friend_state(const char *friend_id)
+{
+	int index;
+
+	for (index = 0; index < test_party_count; index++)
+		if (!strcmp(test_party[index].id, friend_id))
+			return 1;
+	return 0;
+}
+int p2p_party_invite(const char *friend_id)
+{
+	snprintf(party_acted, sizeof(party_acted), "invite %s", friend_id);
+	return P2P_PARTY_DONE;
+}
+int p2p_party_kick(const char *member_id)
+{
+	snprintf(party_acted, sizeof(party_acted), "kick %s", member_id);
+	return P2P_PARTY_DONE;
+}
+int p2p_party_mute(const char *member_id, int muted)
+{
+	snprintf(party_acted, sizeof(party_acted), "%s %s", muted ? "mute" : "unmute", member_id);
+	return P2P_PARTY_DONE;
+}
+int p2p_party_leave(void)
+{
+	snprintf(party_acted, sizeof(party_acted), "leave");
+	return P2P_PARTY_DONE;
+}
+int p2p_party_answer(const char *invite_id, int accept)
+{
+	snprintf(party_acted, sizeof(party_acted), "%s %s", accept ? "accept" : "decline", invite_id);
+	return P2P_PARTY_DONE;
+}
+int p2p_party_join_warning(int players, int maximum, char *text, int size)
+{
+	if (test_party_count < 2 || !test_party_leading || maximum - players >= test_party_count)
+		return 0;
+	snprintf(text, (size_t)size, "Your party has %d players but this game has %d open slots", test_party_count,
+		maximum - players);
+	return 1;
+}
+const char *p2p_party_outcome_text(int outcome)
+{
+	return outcome == P2P_PARTY_DONE ? "Done" : "Not for this one";
+}
+
 int p2p_hosting_code(char *code, int size)
 {
 	if (!hosting)
@@ -1456,9 +1533,10 @@ static void test_friends_page(void)
 		strstr(menu, "\nFriends can join\x02  On >\n"), "its rows: Add a friend, Appear offline, Friends can join");
 	check(strstr(menu, "\n\x04Your friend code: KQ7M-3XPA-T9WE\n") && strstr(menu, "\n\x04" "1 of 2 friends online\n"),
 		"the code and the status");
+	/* (four entries shown at once, with the Party row: the fifth scrolled to) */
 	check(strstr(menu, "\nDelta\x02  Request\n") && strstr(menu, "\nBravo\x02  Join\n") &&
-		strstr(menu, "\nCharlie\x02  Offline\n") && strstr(menu, "\nA7ES-DA9D-2NMR\x02  Sent\n") &&
-		strstr(menu, "\nEcho\x02  Blocked\n"), "each entry: its name and a word of its state");
+		strstr(menu, "\nCharlie\x02  Offline\n") && strstr(menu, "\nA7ES-DA9D-2NMR\x02  Sent\n"),
+		"each entry: its name and a word of its state");
 	check(menu_fits() && menu_height_fits(), "the Friends page fits");
 	/* Appear offline, Friends can join: saved */
 	to_line("Appear offline");
@@ -1536,6 +1614,121 @@ static void test_friends_page(void)
 	check(to_tab("Multiplayer") && !strstr(menu, "\nFriends\x02") && strstr(menu, "\nJoin with a code\x02"),
 		"the Xbox's menus: the code row, no Friends row");
 	/* (the session as it was) */
+	vita_settings_set("HALO_VITA_NETWORK", network_before);
+	restart_pending = 0;
+	vita_settings_load();
+	to_tab("Multiplayer");
+}
+
+/* Multiplayer > Friends > Party (p2p_party.h, the test's party): its row on
+the Friends page, the page's status, invites, members (a word each), the
+friends online to invite; cross on a friend invites, on an invite joins,
+square declines, cross on a member mutes, triangle (the leader's) removes
+after a question; Leave the party; the leader warned before joining a
+friend's game with too few open slots */
+static void add_party_member(const char *id, const char *name, int leader, int self)
+{
+	struct p2p_party_member *member = &test_party[test_party_count++];
+
+	memset(member, 0, sizeof(*member));
+	snprintf(member->id, sizeof(member->id), "%s", id);
+	snprintf(member->name, sizeof(member->name), "%s", name);
+	snprintf(member->code, sizeof(member->code), "AAAA-BBBB-CCCC");
+	member->leader = leader;
+	member->self = self;
+	member->online = 1;
+	member->is_friend = !self;
+}
+
+static void test_party_page(void)
+{
+	char network_before[16];
+
+	test_friend_count = 0;
+	test_friend("b1", P2P_FRIEND_KIND_FRIEND, "Bravo", "RYQS-BU47-4JPF", 1, 1, "Slayer on Blood Gulch");
+	test_friend("c1", P2P_FRIEND_KIND_FRIEND, "Charlie", "AAZQ-L3GC-JLTL", 1, 0, "In the menus");
+	test_party_count = 0;
+	add_party_member("a0", "Alpha", 1, 1);
+	add_party_member("d1", "Delta #K7QX", 0, 0);
+	test_party_leading = 1;
+	test_party_invite_count = 1;
+	snprintf(test_party_invites[0].id, sizeof(test_party_invites[0].id), "inv1");
+	snprintf(test_party_invites[0].name, sizeof(test_party_invites[0].name), "Echo");
+	test_party_invites[0].size = 3;
+	snprintf(network_before, sizeof(network_before), "%s", getenv("HALO_VITA_NETWORK") ? getenv("HALO_VITA_NETWORK") :
+		"wifi");
+	vita_settings_set("HALO_VITA_NETWORK", "online");
+	restart_pending = 0;
+	vita_settings_load();
+	halo_pc_menus_state = 1;
+	check(to_tab("Multiplayer") && to_line("Friends"), "the Friends row");
+	press(VITA_BUTTON_CROSS);
+	check(to_line("Party") && strstr(menu, "\nParty\x02  2 of 8  >\n") != NULL, "the Friends page's Party row: its size");
+	check(menu_fits() && menu_height_fits(), "the Friends page fits with its Party row");
+	press(VITA_BUTTON_CROSS);
+	printf("%s\n--\n", menu);
+	check(strstr(menu, "\n\x03Multiplayer > Party\n") != NULL, "cross: the Party page");
+	check(strstr(menu, "\nLeave the party\x02  >\n") && strstr(menu, "\n\x04Party: 2 of 8 (Alpha leads)\n"),
+		"Leave the party, the party's status");
+	check(strstr(menu, "\nEcho\x02  Party invite\n") && strstr(menu, "\nAlpha\x02  You, leader\n") &&
+		strstr(menu, "\nDelta #K7QX\x02  In party\n"), "the invite, the members, a word each");
+	check(strstr(menu, "\nBravo\x02  Invite\n") && strstr(menu, "\nCharlie\x02  Invite\n"), "the friends online to invite");
+	check(menu_fits() && menu_height_fits(), "the Party page fits");
+	to_line("Bravo");
+	check(strstr(menu, "Cross: invite to party") != NULL, "a friend: cross invites");
+	press(VITA_BUTTON_CROSS);
+	check(!strcmp(party_acted, "invite b1") && strstr(menu, "Invited Bravo to your party"), "cross: invited");
+	clock_us += 6000000;
+	to_line("Echo");
+	press(VITA_BUTTON_SQUARE);
+	check(!strcmp(party_acted, "decline inv1"), "square: the invite declined");
+	press(VITA_BUTTON_CROSS);
+	check(!strcmp(party_acted, "accept inv1"), "cross: the invite accepted");
+	clock_us += 6000000;
+	to_line("Delta #K7QX");
+	check(strstr(menu, "Cross: mute  Triangle: remove") != NULL, "a member, for the leader: mute, remove");
+	press(VITA_BUTTON_CROSS);
+	check(!strcmp(party_acted, "mute d1"), "cross: muted");
+	press(VITA_BUTTON_TRIANGLE);
+	check(!strncmp(menu, "REMOVE FROM PARTY", 17) && strstr(menu, "Delta #K7QX"), "triangle: the question before removing");
+	party_acted[0] = 0;
+	press(VITA_BUTTON_CIRCLE);
+	check(!party_acted[0] && strstr(menu, "> Party\n"), "circle keeps the member");
+	press(VITA_BUTTON_TRIANGLE);
+	press(VITA_BUTTON_CROSS);
+	check(!strcmp(party_acted, "kick d1"), "cross: removed");
+	to_line("Leave the party");
+	press(VITA_BUTTON_CROSS);
+	check(!strcmp(party_acted, "leave"), "Leave the party");
+	/* the leader warned before a friend's game with too few open slots: a
+	second press joins */
+	press(VITA_BUTTON_CIRCLE);
+	to_line("Friends");
+	press(VITA_BUTTON_CROSS);
+	test_party_count = 0;
+	add_party_member("a0", "Alpha", 1, 1);
+	add_party_member("d1", "Delta", 0, 0);
+	add_party_member("e1", "Echo", 0, 0);
+	add_party_member("f1", "Foxtrot", 0, 0);
+	add_party_member("g1", "Golf", 0, 0);
+	add_party_member("h1", "Hotel", 0, 0);
+	add_party_member("i1", "India", 0, 0);
+	add_party_member("j1", "Juliet", 0, 0);
+	add_party_member("k1", "Kilo", 0, 0);
+	add_party_member("l1", "Lima", 0, 0);
+	add_party_member("m1", "Mike", 0, 0);
+	add_party_member("n1", "November", 0, 0);
+	test_party_count = 12;
+	friend_acted_action = -1;
+	to_line("Bravo");
+	press(VITA_BUTTON_CROSS);
+	check(friend_acted_action == -1 && strstr(menu, "open slots"), "a friend's game with too few slots: the leader warned");
+	press(VITA_BUTTON_CROSS);
+	check(friend_acted_action == P2P_FRIENDS_JOIN, "cross again: joined anyway");
+	press(VITA_BUTTON_CIRCLE);
+	test_party_count = 0;
+	test_party_invite_count = 0;
+	halo_pc_menus_state = -1;
 	vita_settings_set("HALO_VITA_NETWORK", network_before);
 	restart_pending = 0;
 	vita_settings_load();
@@ -2382,16 +2575,16 @@ static void test_tab_layouts(void)
 			old |= !strcmp(pages[index].name, "Screen") || !strcmp(pages[index].name, "First person") ||
 				!strcmp(pages[index].name, "Advanced") || !strcmp(pages[index].name, "General") ||
 				!strcmp(pages[index].name, "Graphics") || !strcmp(pages[index].name, "Audio");
-		check(!old && PAGE_GRAPHICS_DETAIL == TAB_COUNT && PAGE_COUNT == TAB_COUNT + 11 &&
+		check(!old && PAGE_GRAPHICS_DETAIL == TAB_COUNT && PAGE_COUNT == TAB_COUNT + 12 &&
 			!strcmp(pages[PAGE_GRAPHICS_DETAIL].name, "Detail") && !strcmp(pages[PAGE_GRAPHICS_PERFORMANCE].name, "Performance") &&
 			!strcmp(pages[PAGE_BUTTONS].name, "Button layout") && !strcmp(pages[PAGE_TOUCH].name, "Touch zones") &&
 			!strcmp(pages[PAGE_GYRO].name, "Gyro settings") && !strcmp(pages[PAGE_PLAY].name, "Play") &&
 			!strcmp(pages[PAGE_MAPS].name, "Modded maps") && !strcmp(pages[PAGE_DEV_AB].name, "A/B switches") &&
 			!strcmp(pages[PAGE_FORGE].name, "Forge and File Share") && !strcmp(pages[PAGE_MODS].name, "Mod manager") &&
-			!strcmp(pages[PAGE_FRIENDS].name, "Friends"),
+			!strcmp(pages[PAGE_FRIENDS].name, "Friends") && !strcmp(pages[PAGE_PARTY].name, "Party"),
 			"the pages rows open: Detail, Performance, Button layout, Touch zones, Gyro settings, Play, Modded maps, A/B "
-			"switches, Forge and File Share, Mod manager, Friends (no Screen, First person or Advanced page; no General, "
-			"Graphics or Audio tab)");
+			"switches, Forge and File Share, Mod manager, Friends, Party (no Screen, First person or Advanced page; no "
+			"General, Graphics or Audio tab)");
 	}
 	check(settings[0].variable && !strcmp(settings[0].variable, "HALO_PROFILE") && !strcmp(settings[1].variable, "HALO_RENDER_SCALE") &&
 		!strcmp(settings[2].variable, "HALO_DYNAMIC_RES_MIN"), "Profile still settings[0], Render resolution and its minimum after it");
@@ -4113,6 +4306,7 @@ int main(void)
 	/* ---------- Modded maps' Mod manager page */
 	test_mod_manager_page();
 	test_friends_page();
+	test_party_page();
 
 	/* ---------- Dev, behind its switch */
 	press(VITA_BUTTON_R);

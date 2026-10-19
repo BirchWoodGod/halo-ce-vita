@@ -88,6 +88,10 @@ struct p2p_friend_entry
 	online), an invite's game, "Wants to be your friend", "Request sent",
 	"Blocked" (in the language chosen) */
 	char activity[P2P_FRIEND_ACTIVITY_SIZE];
+	/* (a friend online in a party: p2p_party.h) its size, and "In Bob's
+	party (3/8)" ("" none) */
+	int party_size;
+	char party[P2P_FRIEND_ACTIVITY_SIZE];
 };
 
 /* this machine's code (with its dashes): 0 if the identity could not be
@@ -177,6 +181,9 @@ enum
 {
 	P2P_FRIENDS_PLAYER_ADD = 1,
 	P2P_FRIENDS_PLAYER_BLOCK,
+	/* (a friend's player invited to the party once their card says who
+	they are: p2p_party.h) */
+	P2P_FRIENDS_PLAYER_PARTY,
 };
 enum
 {
@@ -205,6 +212,9 @@ _TOO_SOON */
 int p2p_friends_player_ask(int machine, int intent);
 /* a machine's player's state (P2P_FRIENDS_PLAYER_*) */
 int p2p_friends_player_state(int machine);
+/* a machine's player, if their card is a friend's: nonzero and the
+friend's entry id (the party invites them: p2p_party.h) */
+int p2p_friends_player_friend_id(int machine, char *id);
 
 /* one line for the lists' top: "2 of 5 friends online", "Go online to see
 your friends", "Appearing offline" (in the language chosen); returns

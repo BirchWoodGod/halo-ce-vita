@@ -84,7 +84,7 @@ def source_keys(root: Path):
     keys = {}
     for top in SCAN_DIRS:
         for path in sorted((root / top).rglob("*")):
-            if path.suffix not in (".c", ".h") or SKIP_PARTS & set(path.relative_to(root).parts):
+            if path.suffix not in (".c", ".h", ".inc") or SKIP_PARTS & set(path.relative_to(root).parts):
                 continue
             text = strip_comments(path.read_text(encoding="utf-8", errors="replace"))
             if "T(" not in text and "N_(" not in text and "TW(" not in text:

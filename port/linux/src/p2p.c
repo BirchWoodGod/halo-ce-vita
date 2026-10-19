@@ -4180,7 +4180,26 @@ static void friends_host_view(struct p2p_friends_host *host)
 	host->crossplay = network_wire_crossplay();
 	host->hosting = p2p.hosting && p2p.has_token && p2p.game_player_maximum > 0 && !host->crossplay;
 	if (!host->hosting)
+	{
+		int index;
+
+		/* (joined: the invite's host reached, its peer connected) */
+		for (index = 0; index < P2P_MAXIMUM_PEERS && !host->crossplay && !p2p.adhoc; index++)
+		{
+			const struct peer *peer = &p2p.peers[index];
+
+			if (peer->used && peer->is_host && peer->connected &&
+				!memcmp(peer->identifier, p2p.join_host, P2P_IDENTIFIER_SIZE))
+			{
+				host->joined = 1;
+				memcpy(host->joined_hash, p2p.join_host_hash, P2P_KEY_HASH_SIZE);
+				memcpy(host->joined_token, p2p.join_token, P2P_TOKEN_SIZE);
+				host->joined_locked = p2p_lobby_host_locked(p2p.join_host_hash);
+				break;
+			}
+		}
 		return;
+	}
 	p2p_key_hash(public_key, host->key_hash);
 	memcpy(host->token, p2p.token, P2P_TOKEN_SIZE);
 	p2p_lobby_friends_view(host);

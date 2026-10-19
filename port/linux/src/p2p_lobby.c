@@ -361,6 +361,10 @@ static struct
 	unsigned char join_sealed_token[P2P_SEALED_TOKEN_SIZE];
 	/* key_thread runs */
 	int key_thread_running;
+	/* the last game joined from the browser with a password (its host's
+	key hash): its invite is never passed on (p2p_lobby_host_locked) */
+	int joined_locked;
+	unsigned char joined_locked_hash[P2P_KEY_HASH_SIZE];
 
 	/* diagnostics: hosting (whether the game was hosted for the internet
 	in the last pass; when it was listed, whether a broker's acknowledgement
@@ -2101,6 +2105,15 @@ const char *p2p_lobby_map_title(const char *map, int pc_map)
 /* (p2p_friends.c, through p2p.c) the hosted game as listed: public (its
 listing up), a password (set, being worked out, or its key failed: never
 joined from a friend's presence), open, its players */
+int p2p_lobby_host_locked(const unsigned char *key_hash)
+{
+	struct game *game = find_game(key_hash);
+
+	if (lobby.joined_locked && !memcmp(lobby.joined_locked_hash, key_hash, P2P_KEY_HASH_SIZE))
+		return 1;
+	return game && game->listing.locked;
+}
+
 void p2p_lobby_friends_view(struct p2p_friends_host *host)
 {
 	host->listed = lobby.listed && !(lobby.flags & _listing_closed);
@@ -2342,6 +2355,8 @@ int p2p_lobby_join(const char *id, const char *password)
 		memcpy(lobby.watch_name, game->listing.name, sizeof(lobby.watch_name));
 		lobby.watch_sent = 0;
 		lobby.watch_sent_time = 0;
+		lobby.joined_locked = game->listing.locked != 0;
+		memcpy(lobby.joined_locked_hash, key_hash, P2P_KEY_HASH_SIZE);
 		if (game->listing.locked)
 		{
 			snprintf(lobby.join_password, sizeof(lobby.join_password), "%s", password ? password : "");
