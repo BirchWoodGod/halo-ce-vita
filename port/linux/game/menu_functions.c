@@ -6792,7 +6792,11 @@ void menu_functions_players_button(boolean main_menu_loaded)
 	{
 		long pregame = tag_loaded('DeLa', H3_PLAYERS_PREGAME_SCREEN);
 
-		if (active && pregame != NONE && active->definition_tag_index == pregame)
+		/* (or the Halo 3 lobby that stands for it, halo3/pregame.xml) */
+		long h3_pregame_tag = menu_tags_ingame_screen("h3/pregame/screen");
+
+		if (active && ((pregame != NONE && active->definition_tag_index == pregame) ||
+			(h3_pregame_tag != NONE && active->definition_tag_index == h3_pregame_tag)))
 			menu_functions_players_open(TRUE);
 	}
 	else if (!active && (game_engine_showing_postgame() || pad->buttons[_gamepad_binary_button_back]))

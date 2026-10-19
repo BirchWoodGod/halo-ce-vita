@@ -1748,3 +1748,4 @@
 "%smap %d%%" = "%smapa %d%%"
 "PLAYERS %ld/%d" = "JUGADORES %ld/%d"
 "Start Game" = "Empezar partida"
+"Players" = "Jugadores"
