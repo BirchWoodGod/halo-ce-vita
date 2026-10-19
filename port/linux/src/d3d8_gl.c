@@ -3501,6 +3501,14 @@ void halo_d3d_buffer_in_place(const void *buffer, int in_place)
 	(void)in_place;
 }
 
+/* (port) indices the game never rewrites, which the Vita's device reads in
+place (port/vita/platform/d3d8_gxm.c); OpenGL takes them as it does any */
+void halo_d3d_static_indices(const void *base, unsigned long bytes)
+{
+	(void)base;
+	(void)bytes;
+}
+
 /* (port) the dynamic triangles' index buffer, and its parts the game locks
 to write: the Vita's device reuses its copies of them within a frame
 (port/vita/platform/d3d8_gxm.c); OpenGL uploads every draw's indices anyway */

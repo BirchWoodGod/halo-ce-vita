@@ -111,6 +111,11 @@ void *halo_d3d_contiguous_alloc(unsigned long size)
 	return allocate_resource_memory(size);
 }
 
+void halo_d3d_contiguous_free(void *address)
+{
+	platform_contiguous_free(address);
+}
+
 /* the CPU's pointer to a registered resource's data (Data holds the
 physical address) */
 void *halo_d3d_resource_pointer(const void *resource)
@@ -134,7 +139,12 @@ ULONG WINAPI D3DResource_Release(D3DResource *resource)
 	if (!count && (fields[0] & D3DCOMMON_D3DCREATED))
 	{
 		if ((fields[0] & D3DCOMMON_TYPE_MASK) == D3DCOMMON_TYPE_INDEXBUFFER)
-			free((void *)fields[1]);
+		{
+			/* (indices placed in the window are their placer's to free:
+			halo_d3d_index_buffer_place) */
+			if (!platform_is_contiguous((void *)fields[1]))
+				free((void *)fields[1]);
+		}
 		else if (fields[1])
 			platform_contiguous_free(PLATFORM_PHYSICAL_TO_VIRTUAL(fields[1]));
 		free(resource);
@@ -423,6 +433,21 @@ HRESULT WINAPI D3DDevice_CreateIndexBuffer(UINT length, DWORD usage, D3DFORMAT f
 	buffer->Data = (DWORD)memory;
 	*result = buffer;
 	return S_OK;
+}
+
+/* (port) the index buffer's indices placed at `indices`, memory of the
+window its caller holds and frees after releasing the buffer (a Custom
+Edition map's model strips, read in place by the Vita's device:
+halo_d3d_static_indices); the memory it was made with is freed */
+void halo_d3d_index_buffer_place(void *buffer, void *indices)
+{
+	D3DIndexBuffer *index_buffer = buffer;
+
+	if (!index_buffer || !indices || !platform_is_contiguous(indices))
+		return;
+	if (index_buffer->Data && !platform_is_contiguous((void *)index_buffer->Data))
+		free((void *)index_buffer->Data);
+	index_buffer->Data = (DWORD)indices;
 }
 
 /* ---------- palettes */

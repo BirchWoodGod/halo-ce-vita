@@ -109,6 +109,13 @@ device reuses a frame's copy of its indices until that part is locked again
 (port/vita/platform/d3d8_gxm.c) */
 void halo_d3d_indices_tracked(const void *base, unsigned long bytes);
 void halo_d3d_indices_written(const void *data, unsigned long bytes);
+/* indices the game made once in the window (halo_d3d_contiguous_alloc) and
+will not rewrite until it says otherwise (NULL): the Vita's device reads
+them in place (port/vita/platform/d3d8_gxm.c); and an index buffer's
+indices placed there instead of the memory it was made with
+(port/linux/src/d3d8_resources.c) */
+void halo_d3d_static_indices(const void *base, unsigned long bytes);
+void halo_d3d_index_buffer_place(void *buffer, void *indices);
 /* whether a Halo Custom Edition map's multiplayer vehicles are chosen by
 their placements' spawn flags, as in retail Halo, and whether a vehicle
 placement is placed in the running game

@@ -69,6 +69,10 @@ component this far past 1 stays within that after the packing's rounding
 16-bit index reaches (cache_file_formats.c's MAXIMUM_STRUCTURE_MATERIAL_VERTICES) */
 #define MAXIMUM_STRUCTURE_MATERIAL_VERTICES 0xFFFF
 
+/* (port) the most bytes of model strips kept in the window's block of them
+(Extinction's take 996 KB, Halo PC's own maps about 330 KB) */
+#define MAXIMUM_STRIPS_BYTES 0x400000UL
+
 /* ---------- structures */
 
 /* this build's model geometry and part, as models.c and rasterizer.c each
@@ -261,11 +265,23 @@ struct custom_edition_geometry_globals
 	vertices those were made from */
 	struct structure_bsp *structure_bsp;
 	byte *structure_bsp_vertices;
+
+	/* (port) the model parts' strips, in one block of the window, read
+	where they are by the Vita's device (halo_d3d_static_indices) rather
+	than copied into its ring every draw (NULL: without room for them, each
+	strip in its index buffer's own memory, copied every draw as before) */
+	byte *strips;
+	unsigned long strips_bytes;
+	unsigned long strips_used;
 };
 
 /* ---------- globals */
 
 static struct custom_edition_geometry_globals custom_edition_geometry_globals;
+
+/* (port/linux/src/d3d8_resources.c) */
+void *halo_d3d_contiguous_alloc(unsigned long size);
+void halo_d3d_contiguous_free(void *address);
 
 /* ---------- private code */
 
@@ -788,11 +804,32 @@ static boolean custom_edition_model_part_convert(
 	/* (made once: read in place, as an Xbox cache's model vertices are) */
 	halo_d3d_buffer_in_place(part->vertex_buffer.hardware_format, TRUE);
 
-	return rasterizer_triangle_buffer_new(
+	if (!rasterizer_triangle_buffer_new(
 			&part->triangle_buffer,
 			_triangle_buffer_type_precompiled_strip,
 			source->strip_triangle_count,
-			strip);
+			strip))
+	{
+		return FALSE;
+	}
+	{
+		/* (port) the strip's indices in the window's block of strips, read
+		in place as an Xbox cache's strips are: the buffer's own copy, made
+		as the buffer was, is freed (each strip 16-byte aligned; a strip
+		that would not fit stays where it is, copied every draw) */
+		struct custom_edition_geometry_globals *globals = &custom_edition_geometry_globals;
+		unsigned long strip_bytes = (unsigned long)strip_index_count * sizeof(*strip);
+		unsigned long start = (globals->strips_used + 15) & ~15UL;
+
+		if (globals->strips && strip_bytes <= globals->strips_bytes && start <= globals->strips_bytes - strip_bytes)
+		{
+			csmemcpy(globals->strips + start, strip, strip_bytes);
+			halo_d3d_index_buffer_place(part->triangle_buffer.hardware_format, globals->strips + start);
+			globals->strips_used = start + strip_bytes;
+		}
+	}
+
+	return TRUE;
 }
 
 /* Converts every part of `model` (named `name`), repacking each geometry's
@@ -1221,7 +1258,8 @@ boolean custom_edition_models_convert(
 	/* A part at a time: its vertices and strip read from the model data,
 	checked, compressed and given buffers, which hold copies of their own
 	(rasterizer_vertex_buffer_new and rasterizer_triangle_buffer_new: in the
-	window and the C heap) - so the map's model data (21 MB of Extinction's)
+	window and the C heap, the strips then moved to the window's block of
+	them) - so the map's model data (21 MB of Extinction's)
 	and its compressed geometry (10 MB) are never held whole. The working
 	memory, in a memory block of its own, for as long as this takes. */
 	scratch_bytes = (totals.largest_part_vertex_count * sizeof(*scratch) + 15) & ~15UL;
@@ -1253,6 +1291,22 @@ boolean custom_edition_models_convert(
 		halo_custom_edition_memory_free(working);
 		custom_edition_cache_load_failure_note(T("there is not enough memory for its models"));
 		return FALSE;
+	}
+	{
+		/* (port) the window's block of strips (the counts are checked, a
+		part's strip 16-byte aligned; a map whose strips take more than
+		MAXIMUM_STRIPS_BYTES, or a window without room, keeps them in their
+		index buffers, as before) */
+		unsigned long strips_bytes = (unsigned long)totals.strip_index_count * sizeof(word) +
+			(unsigned long)totals.part_count * 16;
+
+		assert(!globals->strips);
+		if (totals.strip_index_count > 0 && totals.part_count > 0 && strips_bytes <= MAXIMUM_STRIPS_BYTES)
+		{
+			globals->strips = halo_d3d_contiguous_alloc(strips_bytes);
+		}
+		globals->strips_bytes = globals->strips ? strips_bytes : 0;
+		globals->strips_used = 0;
 	}
 	scratch = (struct model_vertex_uncompressed *)working;
 	strip_scratch = (word *)(working + scratch_bytes);
@@ -1290,19 +1344,24 @@ boolean custom_edition_models_convert(
 	}
 	model_data_prefetch_drain(&reader);
 	halo_custom_edition_memory_free(working);
+	if (globals->strips)
+	{
+		halo_d3d_static_indices(globals->strips, globals->strips_used);
+	}
 	if (success)
 	{
 		qsort(globals->palettes, (size_t)globals->palette_count, sizeof(*globals->palettes), part_palette_compare);
 		custom_edition_cache_tags_regroup(tag_cache, loaded_bytes, GBXMODEL_GROUP_TAG, MODELS_GROUP_TAG);
 		error(
 			_error_silent,
-			"custom edition: %ld model parts converted (%ld drawn with their own nodes, %ld vertices, %ld naming a node past them; %ld vertices compressed, %lu KB in their buffers; model data read in %lu buffers, %lu KB, %lu read ahead)",
+			"custom edition: %ld model parts converted (%ld drawn with their own nodes, %ld vertices, %ld naming a node past them; %ld vertices compressed, %lu KB in their buffers, %lu KB of strips read in place; model data read in %lu buffers, %lu KB, %lu read ahead)",
 			totals.part_count,
 			globals->palette_count,
 			globals->palette_vertex_count,
 			globals->palette_vertices_out_of_range,
 			totals.vertex_count,
 			(totals.vertex_count * vertex_size + totals.strip_index_count * sizeof(word)) / 1024,
+			globals->strips_used / 1024,
 			reader.vertices.reads + reader.strips.reads,
 			(reader.vertices.read_bytes + reader.strips.read_bytes) / 1024,
 			reader.prefetch.taken);
@@ -1323,6 +1382,16 @@ void custom_edition_models_dispose(
 		halo_d3d_buffer_in_place(globals->model_parts[part_index]->vertex_buffer.hardware_format, FALSE);
 		rasterizer_vertex_buffer_delete(&globals->model_parts[part_index]->vertex_buffer);
 	}
+	/* (the strips' index buffers released above leave their block, the
+	window's, to be freed here) */
+	if (globals->strips)
+	{
+		halo_d3d_static_indices(NULL, 0);
+		halo_d3d_contiguous_free(globals->strips);
+	}
+	globals->strips = NULL;
+	globals->strips_bytes = 0;
+	globals->strips_used = 0;
 	/* the game's free stops on NULL (cseries.h), and a map can fail before
 	its models are converted */
 	if (globals->model_parts)

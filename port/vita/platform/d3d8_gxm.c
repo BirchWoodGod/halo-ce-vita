@@ -677,13 +677,29 @@ static BOOL trace_frame(void)
 
 /* ---------- memory the GPU reads where it is: the loaded map */
 
+/* (port) indices the game made once and never rewrites, outside the tag
+cache, in the window the GPU maps: a Custom Edition map's model strips
+(port/linux/game/custom_edition_geometry.c). An Xbox map's strips are in
+its tag cache and drawn where they are; these were copied into the ring
+every draw (Extinction: 240 KB a frame, the Xbox Blood Gulch 15 KB) */
+static unsigned long static_indices_base, static_indices_bytes;
+
+void halo_d3d_static_indices(const void *base, unsigned long bytes)
+{
+	static_indices_base = base ? (unsigned long)base : 0;
+	static_indices_bytes = base ? bytes : 0;
+}
+
 static BOOL memory_is_static(const void *address, unsigned long size)
 {
 	static unsigned long base;
 
 	if (!base)
 		base = (unsigned long)physical_memory_get_tag_cache_base_address();
-	return base && (unsigned long)address >= base && (unsigned long)address + size <= base + TAG_CACHE_SIZE;
+	if (base && (unsigned long)address >= base && (unsigned long)address + size <= base + TAG_CACHE_SIZE)
+		return TRUE;
+	return static_indices_bytes && (unsigned long)address >= static_indices_base &&
+		(unsigned long)address + size <= static_indices_base + static_indices_bytes;
 }
 
 /* bytes in this frame's ring; a full ring drops the draw */
