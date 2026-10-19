@@ -26,6 +26,12 @@ usage:
       tag data and of the header), never on disk; each build refused or, when
       it makes a pack, the pack refused or loaded clean twice; never a crash
       or a hang. Exits 1 on any failure.
+  scene_pack_test buildmany <maps folder> <map> <out folder> <recipe.txt>...
+      the recipes' packs made in one read of that map (each recipe must
+      name it: scene_pack_build_many), each then loaded as the game loads
+      it. SCENE_PACK_COPY_DIR=<folder>: the decompressed copies a build may
+      read instead of inflating (<folder>/<map>.map, as the game's cache
+      partition holds them: scene_pack_copy_source)
   scene_pack_test fuzz <pack> <iterations> [<seed>]
       damaged copies (cut short, grown, bytes changed with and without their
       CRCs made right, pointers and counts made wrong, the header's fields),
@@ -119,6 +125,15 @@ char const *scene_pack_recipe_custom_edition_map(struct scene_pack_recipe const 
 unsigned char scene_pack_build(struct scene_pack_recipe const *recipe, char const *maps_directory,
 	char const *pack_path, void *scratch, unsigned long scratch_size, int volatile const *cancel,
 	struct scene_pack_build_result *result);
+unsigned char scene_pack_build_many(struct scene_pack_recipe const *const *recipes, short count, char const *map,
+	char const *maps_directory, char const *const *pack_paths, void *scratch, unsigned long scratch_size,
+	int volatile const *cancel, struct scene_pack_build_result *results);
+struct scene_pack_copy_source
+{
+	FILE *(*open)(char const *map, unsigned long *token);
+	unsigned char (*unchanged)(unsigned long token);
+};
+extern struct scene_pack_copy_source const *scene_pack_copy_source;
 unsigned char scene_pack_open(char const *path, struct scene_pack_info *info, char *why, long why_size);
 unsigned char scene_pack_load(char const *path, struct scene_pack_info const *info, void *destination, char *why,
 	long why_size);
@@ -1012,11 +1027,89 @@ static int command_cefuzz(char const *recipe_path, char const *maps, long iterat
 	return failures ? 1 : 0;
 }
 
+/* (SCENE_PACK_COPY_DIR) the maps' decompressed copies */
+static FILE *copy_dir_open(char const *map, unsigned long *token)
+{
+	char path[1024];
+
+	snprintf(path, sizeof(path), "%s/%s.map", getenv("SCENE_PACK_COPY_DIR"), map);
+	*token = 1;
+	return fopen(path, "rb");
+}
+
+static struct scene_pack_copy_source const copy_dir_source = { copy_dir_open, NULL };
+
+static int command_build_many(char const *maps, char const *map, char const *out_folder, int recipe_count,
+	char **recipe_paths)
+{
+	struct scene_pack_recipe *recipes[16];
+	struct scene_pack_build_result results[16];
+	char paths[16][512];
+	char const *path_pointers[16];
+	int index, failures = 0;
+	unsigned char built;
+
+	if (recipe_count < 1 || recipe_count > 16)
+		return 2;
+	for (index = 0; index < recipe_count; index++)
+	{
+		long size;
+		unsigned char *text = file_read(recipe_paths[index], &size);
+		char why[256];
+
+		recipes[index] = calloc(1, scene_pack_recipe_size());
+		if (!text || !recipes[index] || !scene_pack_recipe_parse((char const *)text, size, recipes[index], why, sizeof(why)))
+		{
+			printf("scene_pack_test: %s refused\n", recipe_paths[index]);
+			return 1;
+		}
+		free(text);
+		snprintf(paths[index], sizeof(paths[index]), "%s/%s.pack", out_folder, recipes[index]->name);
+		path_pointers[index] = paths[index];
+	}
+	if (getenv("SCENE_PACK_COPY_DIR"))
+		scene_pack_copy_source = &copy_dir_source;
+	built = scene_pack_build_many((struct scene_pack_recipe const *const *)recipes, (short)recipe_count, map, maps,
+		path_pointers, NULL, 0, NULL, results);
+	for (index = 0; index < recipe_count; index++)
+	{
+		struct scene_pack_info info;
+		char why[256];
+		void *tags;
+
+		if (results[index].why[0])
+		{
+			printf("scene_pack_test: %s not built: %s\n", recipes[index]->name, results[index].why);
+			failures++;
+			continue;
+		}
+		printf("built %s from %s: %ld tags, %lu KB of tags, %lu KB of pixels and samples, %lu KB file; %.1f MB of the map "
+			"read, %.1f ms (all %d)\n", paths[index], results[index].map, results[index].tag_count,
+			results[index].tag_bytes / 1024, results[index].data_bytes / 1024, results[index].file_bytes / 1024,
+			(double)results[index].source_bytes / (1024.0 * 1024.0), (double)results[index].microseconds / 1000.0,
+			recipe_count);
+		tags = pack_load(paths[index], &info, 5000, why, sizeof(why));
+		if (!tags)
+		{
+			printf("scene_pack_test: %s refused: %s\n", paths[index], why);
+			failures++;
+			continue;
+		}
+		printf("loaded %s: %ld tags\n", recipes[index]->name, info.tag_count);
+		free(tags);
+	}
+	return built && !failures ? 0 : 1;
+}
+
 int main(int argc, char **argv)
 {
 	setvbuf(stdout, NULL, _IOLBF, 0);
 	if (argc == 5 && !strcmp(argv[1], "build"))
 		return command_build(argv[2], argv[3], argv[4]);
+	if (argc >= 6 && !strcmp(argv[1], "buildmany"))
+		return command_build_many(argv[2], argv[3], argv[4], argc - 5, argv + 5);
+	if (getenv("SCENE_PACK_COPY_DIR"))
+		scene_pack_copy_source = &copy_dir_source;
 	if (argc >= 3 && !strcmp(argv[1], "check"))
 		return command_check(argv[2], argc >= 4 && strcmp(argv[3], "-v") ? atol(argv[3]) : 5000,
 			argc >= 4 && !strcmp(argv[argc - 1], "-v"));
