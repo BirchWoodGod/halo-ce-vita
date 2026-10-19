@@ -445,6 +445,11 @@ static const struct config_setting config_settings[] =
 		_platform_all,
 		"A file (in the data folder) an automated test host writes its internet\n"
 		"play invite link to once it hosts; empty none." },
+	{ "debug.network_test_leave_lobby", _config_real, "0.0", "HALO_NETWORK_TEST_LEAVE_LOBBY", _environment_value,
+		_platform_all,
+		"Seconds after an automated test's joining machine joins its host's\n"
+		"lobby that it leaves it (as Back does), precaches another map, and\n"
+		"joins again, once; 0 never." },
 	{ "debug.network_test_join_file", _config_string, "\"\"", "HALO_NETWORK_TEST_JOIN_FILE", _environment_value,
 		_platform_all,
 		"A file (in the data folder) an automated test's joining machine waits for\n"

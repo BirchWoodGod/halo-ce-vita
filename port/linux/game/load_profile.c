@@ -27,6 +27,10 @@ place then costs a load of the switch); on, each costs two clock reads. */
 #include <string.h>
 
 #include "load_profile.h"
+#if !defined(HALO_VITA) && !defined(__ANDROID__) && !defined(_WIN32)
+#include <execinfo.h>
+#define LOAD_PROFILE_BACKTRACE 1
+#endif
 
 void platform_log(const char *format, ...);
 unsigned long long vita_host_time_us(void);
@@ -129,6 +133,27 @@ void halo_load_profile_file_call(unsigned long long started_us, const char *call
 		return;
 	took = vita_host_time_us() - started_us;
 	game = game_index >= 0 && halo_thread_index() == game_index;
+#ifdef LOAD_PROFILE_BACKTRACE
+	/* (debug, the harness) HALO_IO_TRACE_GAME=1: each of the game thread's
+	file calls logged with its callers' addresses (addr2line -f -e halo), to
+	find which of the frame's steps touch the disk */
+	{
+		static int trace = -1;
+
+		if (trace < 0)
+			trace = getenv("HALO_IO_TRACE_GAME") && atoi(getenv("HALO_IO_TRACE_GAME")) != 0;
+		if (trace && game)
+		{
+			void *callers[10];
+			char addresses[160];
+			int count = backtrace(callers, 10), index, length = 0;
+
+			for (index = 2; index < count && length < (int)sizeof(addresses) - 12; index++)
+				length += snprintf(addresses + length, sizeof(addresses) - (size_t)length, " %p", callers[index]);
+			platform_log("io-trace: %s %.1f ms %s:%s", call, took / 1000.0, path ? path : "", addresses);
+		}
+	}
+#endif
 	__atomic_fetch_add(&kind_us[game ? _halo_load_file_game_thread : _halo_load_file_other], took, __ATOMIC_RELAXED);
 	__atomic_fetch_add(&kind_bytes[game ? _halo_load_file_game_thread : _halo_load_file_other], bytes, __ATOMIC_RELAXED);
 	__atomic_fetch_add(&kind_count[game ? _halo_load_file_game_thread : _halo_load_file_other], 1, __ATOMIC_RELAXED);

@@ -100,6 +100,13 @@ Called from the main loop every frame (main.c).
 #include "tag_files/tag_files.h"
 #include "camera/observer.h"
 #include "cutscene/cinematics.h"
+#include "cache/cache_files.h"
+
+/* debug.network_test_leave_lobby: the map precached once the lobby is left,
+and the client's state in a lobby (network_client_message_handler.c's
+_network_game_client_state_pregame) */
+#define NETWORK_TEST_CLIENT_STATE_PREGAME 2
+#define LEAVE_LOBBY_OTHER_MAP "levels\\test\\bloodgulch\\bloodgulch"
 
 #include <math.h>
 #include <stdarg.h>
@@ -227,6 +234,13 @@ static struct
 	real ingame_seconds;
 	boolean left;
 	boolean rejoined;
+	/* debug.network_test_leave_lobby: a joining machine leaves the host's
+	lobby that many seconds after joining it, as Back does, and precaches
+	another map (as the next lobby's would), then joins again (once): a map
+	copy under way is let go of (cache_copy_end) */
+	real leave_lobby_time;
+	real lobby_seconds;
+	boolean lobby_left;
 	/* debug.network_test_retry: the joins left to try after one that ended
 	before its game began, and the seconds since it ended */
 	long retries;
@@ -386,6 +400,7 @@ static void network_test_read_settings(
 		config_string("debug.network_test_pickup_weapon"));
 	network_test.score_to_win = (long)config_integer("debug.network_test_score");
 	network_test.rejoin_time = (real)config_real("debug.network_test_rejoin");
+	network_test.leave_lobby_time = (real)config_real("debug.network_test_leave_lobby");
 	network_test.retries = (long)config_integer("debug.network_test_retry");
 	network_test.second_player_time = (real)config_real("debug.network_test_second_player");
 	snprintf(network_test.lobby_name, sizeof(network_test.lobby_name), "%s",
@@ -1458,6 +1473,32 @@ void network_test_update(
 				platform_log("network test: scoreboard pings so far: %ld rows with another machine's player's ping, %ld with \"-\"",
 					other_pings, unknown_pings);
 			}
+		}
+	}
+	/* debug.network_test_leave_lobby: leave the lobby before the game, as
+	Back does, precache another map, and join again */
+	if (network_test.mode == _network_test_join && network_test.leave_lobby_time > 0.0f && !network_test.lobby_left &&
+		network_test.joined && global_network_game_client_get() &&
+		network_game_client_get_state(global_network_game_client_get(), NULL) == NETWORK_TEST_CLIENT_STATE_PREGAME)
+	{
+		network_test.lobby_seconds += seconds;
+		if (network_test.lobby_seconds >= network_test.leave_lobby_time)
+		{
+			network_test.lobby_left = TRUE;
+			platform_log("network test: leaving the lobby%s", cache_files_precache_in_progress() ? " in a map copy" : "");
+			ui_widgets_close_all();
+			dispose_global_network_game_server();
+			dispose_global_network_game_client();
+			main_set_multiplayer_map_name(LEAVE_LOBBY_OTHER_MAP);
+			platform_log("network test: left the lobby; precaching %s", LEAVE_LOBBY_OTHER_MAP);
+			network_test.set_up = FALSE;
+			network_test.joined = FALSE;
+			network_test.player_added = FALSE;
+			network_test.team_set = FALSE;
+			network_test.code_joined = FALSE;
+			network_test.lobby_join_asked = FALSE;
+			network_test.lobby_id[0] = 0;
+			network_test.joined_seconds = 0.0f;
 		}
 	}
 	/* debug.network_test_rejoin: leave the game, as quitting from the pause

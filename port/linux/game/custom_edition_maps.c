@@ -154,6 +154,8 @@ struct custom_edition_map
 struct custom_edition_maps_globals
 {
 	boolean looked_for;
+	/* (port) the PC maps setting when they were looked for */
+	boolean looked_for_custom_edition;
 	/* the maps: the multiplayer ones, then the campaign ones */
 	short map_count;
 	short multiplayer_count;
@@ -790,6 +792,7 @@ static void custom_edition_maps_look_for(
 
 	custom_edition_maps_forget();
 	globals->looked_for = TRUE;
+	globals->looked_for_custom_edition = halo_custom_edition_enabled();
 
 	file_reference_create_from_path(&directory, cache_files_map_directory(), TRUE);
 	find_files_start(0, &directory);
@@ -1018,7 +1021,17 @@ char **custom_edition_maps_level_list(
 	{
 		globals->levels[level_index] = xbox_levels[level_index];
 	}
-	custom_edition_maps_look_for();
+	/* (looked for again each time the list opens, but not while a map copy
+	is under way, when every file call of the look waits on the Vita for
+	the memory card behind the copy: a host's lobby precaches the map it
+	chose, and its map picker opened again then. The maps found last stand,
+	unless the setting has changed or the maps were said to have: a map share
+	download, the mod manager, custom_edition_maps_look_again) */
+	if (!globals->looked_for || !cache_files_precache_in_progress() ||
+		globals->looked_for_custom_edition != halo_custom_edition_enabled())
+	{
+		custom_edition_maps_look_for();
+	}
 	for (map_index = 0; map_index < globals->multiplayer_count; map_index++)
 	{
 		globals->levels[globals->xbox_level_count + map_index] = globals->maps[map_index].level_name;
@@ -1059,6 +1072,15 @@ short custom_edition_maps_display_index(
 	char const *name = tag_name_strip_path(level_name);
 	short map_index;
 
+	/* (an Xbox level's name is never a custom map's, custom_edition_map_add:
+	answered without looking at the maps folder. A join's check asks of the
+	host's map (cache_files_map_plays_multiplayer), and the first ask looked
+	at every file of the folder on the game thread, an insider.10 tester's
+	126 file calls and 0.4 s as it joined a Damnation game) */
+	if (!name[0] || xbox_level_named(name))
+	{
+		return NONE;
+	}
 	if (!globals->looked_for)
 	{
 		custom_edition_maps_look_for();
@@ -1080,7 +1102,7 @@ boolean custom_edition_maps_multiplayer_listed(
 	struct custom_edition_maps_globals *globals = &custom_edition_maps_globals;
 	short map_index;
 
-	if (!name || !name[0] || custom_edition_map_disabled(name))
+	if (!name || !name[0] || custom_edition_map_disabled(name) || xbox_level_named(name))
 	{
 		return FALSE;
 	}

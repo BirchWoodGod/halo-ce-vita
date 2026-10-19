@@ -34,6 +34,9 @@ void texture_cache_idle(
 	void);
 void texture_cache_return_memory(
 	void);
+#ifdef HALO_LINUX
+boolean texture_cache_loads_pending(void);
+#endif
 void *texture_cache_steal_memory(
 	long size);
 void texture_cache_debug_render(

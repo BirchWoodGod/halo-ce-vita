@@ -236,6 +236,12 @@ int vita_host_fourth_core_join(const char *role, int level);
 
 #include <xtl.h>
 
+#ifdef HALO_LINUX
+/* (port/linux/src/xbox_files.c) */
+void platform_file_background_begin(int (*stop)(void));
+static int cache_copy_stop_requested_for_files(void);
+#endif
+
 /* ---------- constants */
 
 enum
@@ -535,6 +541,14 @@ static boolean cache_copy_stop_requested(
 {
 	return WaitForSingleObject(global_self->copy_stop_event, 0) == 0;
 }
+
+#ifdef HALO_LINUX
+static int cache_copy_stop_requested_for_files(
+	void)
+{
+	return cache_copy_stop_requested();
+}
+#endif
 
 long cache_copy_buffer_size(
 	boolean blocking)
@@ -1128,6 +1142,20 @@ static void CALLBACK cache_copy_FileIOCompletionRoutine(
 	long *completed_flags = global_self->overlapped_completed_flags;
 	long overlapped_index = overlapped - global_self->overlapped;
 
+#ifdef HALO_LINUX
+	/* (port) a read or write ended between its pieces because the copy is
+	being stopped (platform_file_background_begin): no failure, the copy
+	being let go of; its slot's header, written last, is never written */
+	if (error_code == ERROR_OPERATION_ABORTED && cache_copy_stop_requested())
+	{
+		if (overlapped_index >= 0 && overlapped_index < NUMBER_OF_OVERLAPPED_STRUCTURES)
+		{
+			BIT_VECTOR_SET_FLAG(in_use_flags, overlapped_index, FALSE);
+		}
+		(void)completed_flags;
+		return;
+	}
+#endif
 	if (!error_code)
 	{
 		if (overlapped_index >= 0 && overlapped_index < NUMBER_OF_OVERLAPPED_STRUCTURES)
@@ -1721,6 +1749,12 @@ static unsigned long __stdcall simple_cache_copy_thread(
 	the Vita's fourth core where the system allows it (as in Bruno
 	Santana's modified build) */
 	vita_host_fourth_core_join("map decompression", 2);
+#endif
+#ifdef HALO_LINUX
+	/* (port) the copy's reads and writes give way on the memory card to
+	every other thread's, piece by piece, and a stop ends them between
+	pieces (port/linux/src/xbox_files.c) */
+	platform_file_background_begin(cache_copy_stop_requested_for_files);
 #endif
 	for (;;)
 	{
