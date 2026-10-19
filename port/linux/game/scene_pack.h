@@ -64,6 +64,8 @@ enum
 	SCENE_PACK_MAXIMUM_ROOTS = 16,
 	SCENE_PACK_MAXIMUM_STRIP_GROUPS = 32,
 	SCENE_PACK_MAXIMUM_STRIP_TAGS = 32,
+	SCENE_PACK_MAXIMUM_KEEPS = 96,
+	SCENE_PACK_ANIMATION_NAME_SIZE = 32,
 	/* a pack's (and its name's, a map's name's, a tag path's) most */
 	SCENE_PACK_NAME_SIZE = 32,
 	SCENE_PACK_TAG_PATH_SIZE = 256,
@@ -124,6 +126,12 @@ struct scene_pack_recipe_custom_edition_map
 	strip <group>                a group left out: references to its tags
 	                             name none
 	strip <group> <path>         a tag left out, the same way
+	keep <graph>|<animation>     (an animation graph's, antr) an animation
+	                             it keeps: a graph with keep lines keeps
+	                             those whole, and each other animation of it
+	                             takes a kept one's frames (the first kept of
+	                             its type: no bytes of its own), so a scene
+	                             that holds a few poses carries those alone
 
 groups as four characters ("bipd", "snd!"), paths as the tags' own names
 ("characters\cyborg_mp\cyborg_mp"). A root of the multiplayer unit has the
@@ -148,6 +156,13 @@ struct scene_pack_recipe
 	recipe has instead of map lines) */
 	short custom_edition_map_count;
 	struct scene_pack_recipe_custom_edition_map custom_edition_maps[SCENE_PACK_MAXIMUM_MAPS];
+	/* (keep lines) the animations kept, each its graph's path and its name */
+	short keep_count;
+	struct scene_pack_recipe_keep
+	{
+		char graph[SCENE_PACK_TAG_PATH_SIZE];
+		char animation[SCENE_PACK_ANIMATION_NAME_SIZE];
+	} keeps[SCENE_PACK_MAXIMUM_KEEPS];
 };
 
 /* what a pack file's header says, once checked (scene_pack_open) */

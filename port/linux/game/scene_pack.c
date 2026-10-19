@@ -40,6 +40,7 @@ correct.
 #include "tag_files/tag_groups.h"
 #include "bitmaps/bitmap_group.h"
 #include "sound/sound_definitions.h"
+#include "models/model_animation_definitions.h"
 
 #include "scene_pack.h"
 #include "scene_pack_ce.h"
@@ -297,6 +298,17 @@ struct build_state
 	long walked;
 	boolean failed;
 	int volatile const *cancel;
+
+	/* (keep lines) the animations a pack keeps no frames of: each one's
+	element, in the source; their data fields not copied
+	(build_animations_plan, build_animations_patch) */
+	struct build_reduced_animation
+	{
+		unsigned long animation;
+	} *reduced;
+	long reduced_count;
+	long reduced_capacity;
+	long reduced_bytes;
 };
 
 /* ---------- globals */
@@ -669,6 +681,17 @@ boolean scene_pack_recipe_parse(
 		{
 			recipe->strip_tag_count++;
 		}
+		else if (!strcmp(word, "keep") && recipe->keep_count < SCENE_PACK_MAXIMUM_KEEPS && strchr(rest, '|') &&
+			strchr(rest, '|') > rest && strlen(strchr(rest, '|') + 1) > 0 &&
+			strchr(rest, '|') - rest < SCENE_PACK_TAG_PATH_SIZE && strlen(strchr(rest, '|') + 1) < SCENE_PACK_ANIMATION_NAME_SIZE)
+		{
+			struct scene_pack_recipe_keep *keep = &recipe->keeps[recipe->keep_count++];
+			char const *bar = strchr(rest, '|');
+
+			memcpy(keep->graph, rest, (size_t)(bar - rest));
+			keep->graph[bar - rest] = 0;
+			snprintf(keep->animation, sizeof(keep->animation), "%s", bar + 1);
+		}
 		else
 		{
 			snprintf(why, why_size, "the recipe's line %ld is not one a recipe has", line_number);
@@ -743,6 +766,20 @@ boolean scene_pack_recipe_parse(
 		write_u32(identity, map->file_size);
 		write_u32(identity + 4, map->checksum);
 		hash = fnv_bytes(hash, identity, sizeof(identity));
+	}
+	for (index = 0; index < recipe->keep_count; index++)
+	{
+		char const *text;
+
+		hash = fnv_bytes(hash, "k", 1);
+		for (text = recipe->keeps[index].graph; *text; text++)
+		{
+			unsigned char character = (unsigned char)lower((unsigned char)*text);
+
+			hash = fnv_bytes(hash, &character, 1);
+		}
+		hash = fnv_bytes(hash, "|", 1);
+		hash = fnv_bytes(hash, recipe->keeps[index].animation, strlen(recipe->keeps[index].animation) + 1);
 	}
 	snprintf(version, sizeof(version), "v%d.%d%s", SCENE_PACK_VERSION, SCENE_PACK_BUILDER_VERSION,
 		recipe->custom_edition_map_count ? scene_pack_custom_edition_builder_version() : "");
@@ -1743,6 +1780,33 @@ static unsigned long pack_tag_index(struct build_state const *state, unsigned lo
 	return pack >= 0 ? (unsigned long)(((PACK_FIRST_SALT + pack) << 16) | pack) : (unsigned long)NONE;
 }
 
+/* whether a data field (at, in the source) is one of an animation kept
+without its frames */
+static boolean reduced_data_field(struct build_state const *state, unsigned long at)
+{
+	static unsigned long const fields[3] =
+	{
+		offsetof(struct animation, frame_info), offsetof(struct animation, default_data), offsetof(struct animation, data)
+	};
+	long index;
+	short field;
+
+	for (index = 0; index < state->reduced_count; index++)
+	{
+		struct build_reduced_animation const *reduced = &state->reduced[index];
+
+		if (at < reduced->animation || at >= reduced->animation + sizeof(struct animation))
+			continue;
+		for (field = 0; field < 3; field++)
+		{
+			if (at == reduced->animation + fields[field])
+				return TRUE;
+		}
+		return FALSE;
+	}
+	return FALSE;
+}
+
 /* the struct of layout at source, copied already to offset: its blocks and
 data copied, its pointers made the pack's */
 static boolean layout_copy(struct build_state *state, unsigned short layout, unsigned long source,
@@ -1817,6 +1881,10 @@ static boolean layout_copy(struct build_state *state, unsigned short layout, uns
 		case HALO_TAG_LAYOUT_FIELD_DATA:
 		{
 			unsigned char *data = source_at(state, at, 20);
+
+			/* (an animation kept without its frames: none of its bytes) */
+			if (state->reduced_count && reduced_data_field(state, at))
+				data = NULL;
 			long size = data ? (long)read_u32(data) : 0;
 			unsigned long address = data ? read_u32(data + 12) : 0;
 			long existing;
@@ -2308,6 +2376,97 @@ static void build_state_free(struct build_state *state, void *scratch)
 		free(state->ranges);
 	if (state->range_fixups)
 		free(state->range_fixups);
+	if (state->reduced)
+		free(state->reduced);
+}
+
+/* (keep lines) each animation graph of the pack's that the recipe keeps
+animations of: every animation it does not keep is kept without its frames
+(build_animations_patch), so that its bytes are not in the pack */
+static void build_animations_plan(struct build_state *state)
+{
+	struct scene_pack_recipe const *recipe = state->recipe;
+	long index;
+
+	for (index = 0; index < state->pack_tag_count && !state->failed; index++)
+	{
+		struct build_tag const *tag = &state->pack_tags[index];
+		unsigned char *source = tag->group_tag == 'antr' ? source_at(state, tag->source_base, sizeof(struct animation_graph)) :
+			NULL;
+		struct animation_graph graph;
+		long animation, keep;
+		boolean any = FALSE;
+
+		if (!source)
+			continue;
+		for (keep = 0; keep < recipe->keep_count && !any; keep++)
+			any = names_match(recipe->keeps[keep].graph, tag->name);
+		if (!any)
+			continue;
+		memcpy(&graph, source, sizeof(graph));
+		if (graph.animations.count <= 0 || graph.animations.count > 0x7FFF ||
+			!source_at(state, (unsigned long)graph.animations.address,
+				(unsigned long)graph.animations.count * sizeof(struct animation)))
+		{
+			continue;
+		}
+		for (animation = 0; animation < graph.animations.count && !state->failed; animation++)
+		{
+			unsigned long address = (unsigned long)graph.animations.address + (unsigned long)animation * sizeof(struct animation);
+			struct animation const *element = (struct animation const *)source_at(state, address, sizeof(struct animation));
+			char name[sizeof(element->name) + 1];
+			boolean kept = FALSE;
+
+			memcpy(name, element->name, sizeof(element->name));
+			name[sizeof(element->name)] = 0;
+			for (keep = 0; keep < recipe->keep_count && !kept; keep++)
+				kept = names_match(recipe->keeps[keep].graph, tag->name) && names_match(name, recipe->keeps[keep].animation);
+			if (kept)
+				continue;
+			if (!grow((void **)&state->reduced, &state->reduced_capacity, state->reduced_count,
+				sizeof(struct build_reduced_animation), 64 * 1024))
+			{
+				build_fail(state, "there is no memory to build the pack%s", NULL);
+				break;
+			}
+			state->reduced[state->reduced_count++].animation = address;
+			state->reduced_bytes += element->frame_info.size + element->default_data.size + element->data.size;
+		}
+	}
+}
+
+/* (keep lines) the copies of the animations kept without their frames
+made ones that move no node, as the tag check makes an animation whose
+frames it refuses: no nodes, no frame data, defaults or frame info, not
+compressed - its frame count, frame indices, name, type and next animation
+its own (a scene never plays it; played, it would hold the rest pose) */
+static void build_animations_patch(struct build_state *state)
+{
+	long index;
+
+	for (index = 0; index < state->reduced_count && !state->failed; index++)
+	{
+		long out = extent_map(state, state->reduced[index].animation, sizeof(struct animation));
+		struct animation *copy;
+
+		if (out == NONE)
+		{
+			build_fail(state, "the source map has an animation the copy missed%s", NULL);
+			return;
+		}
+		copy = (struct animation *)(state->blob + out);
+		copy->node_count = 0;
+		copy->frame_size = 0;
+		copy->frame_info_type = 0;
+		copy->flags &= ~FLAG(_animation_compressed_bit);
+		memset(copy->nodes_with_translation_flags, 0, sizeof(copy->nodes_with_translation_flags));
+		memset(copy->nodes_with_rotation_flags, 0, sizeof(copy->nodes_with_rotation_flags));
+		memset(copy->nodes_with_scale_flags, 0, sizeof(copy->nodes_with_scale_flags));
+		copy->compressed_data_offset = 0;
+		memset(&copy->frame_info, 0, sizeof(copy->frame_info));
+		memset(&copy->default_data, 0, sizeof(copy->default_data));
+		memset(&copy->data, 0, sizeof(copy->data));
+	}
 }
 
 /* the pack's tag data put together from the source's (state->tags): its
@@ -2370,6 +2529,9 @@ static void build_tags(struct build_state *state, unsigned long file_length)
 		if (!state->failed)
 			memcpy(state->blob + tag->name_offset, tag->name, length);
 	}
+	/* (keep lines) the animations to take kept ones' frames */
+	if (recipe->keep_count)
+		build_animations_plan(state);
 	/* the tags */
 	for (index = 0; index < state->pack_tag_count && !state->failed; index++)
 	{
@@ -2384,6 +2546,8 @@ static void build_tags(struct build_state *state, unsigned long file_length)
 		if (layout != HALO_TAG_LAYOUT_NONE)
 			layout_copy(state, layout, tag->source_base, tag->base_offset, 0);
 	}
+	if (state->reduced_count && !state->failed)
+		build_animations_patch(state);
 	/* their tag indices, pixels and samples */
 	for (index = 0; index < state->pack_tag_count && !state->failed; index++)
 	{
@@ -2758,6 +2922,7 @@ static void build_state_release(struct build_state *state)
 	state->buffer_fixups = NULL;
 	state->ranges = NULL;
 	state->range_fixups = NULL;
+	state->reduced = NULL;
 	state->tags = tags;
 }
 

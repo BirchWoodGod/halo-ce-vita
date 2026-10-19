@@ -583,9 +583,11 @@ static boolean build_map_choose(struct scene_pack_slot *const *slots, short coun
 checked, and those not current built - those that can share one read of a
 map in one (scene_pack_build_many), the first's group first; each slot
 ready, or failed (its why). only_first: the first slot's group alone, the
-others left needing it (*left: how many) */
+others left needing it (*left: how many). shared: a map the most others
+also name chosen first (a prebuild's: one read for them all), else the
+first slot's own choice (a pack wanted now: no larger read for it) */
 static void packs_prepare(struct scene_pack_slot **slots, short count, unsigned char *scratch, unsigned long scratch_size,
-	boolean only_first, short *left)
+	boolean only_first, boolean shared, short *left)
 {
 	struct scene_pack_slot *need[MAXIMUM_SCENE_PACK_SLOTS];
 	short index;
@@ -634,7 +636,7 @@ static void packs_prepare(struct scene_pack_slot **slots, short count, unsigned 
 				break;
 			continue;
 		}
-		if (!build_map_choose(need, count, lead, !only_first, map, sizeof(map)))
+		if (!build_map_choose(need, count, lead, shared, map, sizeof(map)))
 		{
 			struct scene_pack_slot *slot = need[lead];
 
@@ -658,8 +660,8 @@ static void packs_prepare(struct scene_pack_slot **slots, short count, unsigned 
 				paths[group_count] = need[index]->path;
 				need[index]->progress = &scene_packs_build_results[group_count].progress;
 				scene_packs_build_results[group_count].progress = 0;
-				platform_log("scene packs: %s: building it from %s%s (%s)", need[index]->name, map,
-					scene_pack_source_seekable(cache_files_map_directory(), map) ? ", read in place" : "", need[index]->why);
+				platform_log("scene packs: %s: building it (%s) from %s%s", need[index]->name, need[index]->why, map,
+					scene_pack_source_seekable(cache_files_map_directory(), map) ? ", read in place" : "");
 				group_count++;
 				need[index] = NULL;
 			}
@@ -798,13 +800,17 @@ static void *worker_thread(void *context)
 	if (load)
 	{
 		if (state_get(load) == _scene_pack_state_building && scene_packs.job.slot_count && slots[0] == load)
-			packs_prepare(slots, scene_packs.job.slot_count, scene_packs.scratch, scene_packs.scratch_size, TRUE, &left);
+			packs_prepare(slots, scene_packs.job.slot_count, scene_packs.scratch, scene_packs.scratch_size, TRUE, FALSE, &left);
 		if (!scene_packs.cancel && state_get(load) == _scene_pack_state_ready)
 			pack_stage(load, scene_packs.scratch, scene_packs.scratch_size);
 	}
 	else if (scene_packs.job.slot_count)
 	{
-		packs_prepare(slots, scene_packs.job.slot_count, scene_packs.scratch, scene_packs.scratch_size, FALSE, NULL);
+		/* (a prebuild's job: its first slot's read alone, those sharing it
+		with it; the next read the next job's - a pack built meanwhile is
+		loaded between them) */
+		packs_prepare(slots, scene_packs.job.slot_count, scene_packs.scratch, scene_packs.scratch_size, scene_packs.job.low,
+			TRUE, NULL);
 	}
 	__atomic_store_n(&scene_packs.job.done, TRUE, __ATOMIC_RELEASE);
 	return NULL;
@@ -1549,7 +1555,7 @@ boolean scene_packs_load_now(
 			struct scene_pack_slot *slots[1];
 
 			slots[0] = slot;
-			packs_prepare(slots, 1, room, (unsigned long)(room_end - room), TRUE, NULL);
+			packs_prepare(slots, 1, room, (unsigned long)(room_end - room), TRUE, FALSE, NULL);
 		}
 		if (state_get(slot) != _scene_pack_state_ready)
 			break;

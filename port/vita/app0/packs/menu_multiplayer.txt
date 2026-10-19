@@ -39,3 +39,17 @@ strip mode weapons\flag\fp\fp
 strip antr weapons\flag\fp\fp
 strip weap weapons\pistol\pistol
 strip weap weapons\assault rifle\assault rifle
+# The poses the three Spartans hold (the rocket launcher's airborne frame, the
+# flag's stance, the sniper's crouch: their other animations take these
+# frames, none of their bytes in the pack)
+keep characters\cyborg\cyborg|stand missile idle
+keep characters\cyborg\cyborg|stand missile aim-still
+keep characters\cyborg\cyborg|stand missile aim-move
+keep characters\cyborg\cyborg|stand missile airborne
+keep characters\cyborg\cyborg|stand rifle idle
+keep characters\cyborg\cyborg|stand rifle aim-still
+keep characters\cyborg\cyborg|stand rifle aim-move
+keep characters\cyborg\cyborg|crouch rifle idle
+keep characters\cyborg\cyborg|crouch rifle aim-still
+keep characters\cyborg\cyborg|crouch rifle aim-move
+keep characters\cyborg\cyborg|stand look
