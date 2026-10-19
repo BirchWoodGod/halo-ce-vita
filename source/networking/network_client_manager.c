@@ -2094,9 +2094,12 @@ boolean network_game_client_add_player(
 	return success;
 }
 
-/* port: how far behind the host's time this machine's clock may be before
-it takes the host's (network_game_client_handle_game_update) */
+/* port: how far behind the host's time this machine's clock may stay, a
+second on, before it takes the host's (network_game_client_handle_game_update) */
 #define NETWORK_GAME_CLIENT_CLOCK_SLACK_TICKS (TICKS_PER_SECOND / 6)
+/* (the host's time at the first update that found this machine's clock past
+the slack behind, NONE while it is not) */
+static long network_game_client_clock_behind_since = NONE;
 
 boolean network_game_client_handle_game_update(
 	struct network_game_client *client,
@@ -2124,6 +2127,7 @@ boolean network_game_client_handle_game_update(
 	else if (network_game_client_late_join_clock_pending)
 	{
 		network_game_client_late_join_clock_pending = FALSE;
+		network_game_client_clock_behind_since = NONE;
 		if (message_packet->game_time > game_time_get())
 		{
 			game_time_set_distributed(message_packet->game_time);
@@ -2137,21 +2141,38 @@ boolean network_game_client_handle_game_update(
 	sent the update, before this machine's by the way there, so a clock in
 	step is never moved; one behind is, at the next update (once a second at
 	least) */
-	/* port: and more than a few ticks ahead, not a whole second: a stall a
-	little over a second (a stock map's first frame in the game, its copy
-	to the cache drive, 1.4-1.7 s) left the clock 0.4-1 s behind the host's
-	for the whole game, under a second's slack, never moved (a PC host's
-	joiner respawning a second "early" on the host's clock, Oct 2026). The
-	host's time is never ahead of the host, so taking it never puts this
-	machine ahead; the slack keeps a clock behind only by its frame's phase
-	where it is */
-	else if (message_packet->game_time > game_time_get() + NETWORK_GAME_CLIENT_CLOCK_SLACK_TICKS)
+	/* port: and more than a few ticks ahead for a second, not a whole
+	second ahead at once: a stall a little over a second (a stock map's
+	first frame in the game, its copy to the cache drive, 1.4-1.7 s) left
+	the clock 0.4-1 s behind the host's for the whole game, under a second,
+	never moved (a PC host's joiner respawning a second "early" on the
+	host's clock, Oct 2026). A shorter stall's ticks are caught up by this
+	frame's game_time_update, after this, never skipped: the clock is only
+	moved once it is still behind a second of the host's time on (the
+	updates once a second, every tick a machine's first second), what its
+	catching up lost, once, not at every hitch. The host's time is never
+	ahead of the host, so taking it never puts this machine ahead */
+	else if (message_packet->game_time > game_time_get() + TICKS_PER_SECOND ||
+		(message_packet->game_time > game_time_get() + NETWORK_GAME_CLIENT_CLOCK_SLACK_TICKS &&
+		network_game_client_clock_behind_since != NONE &&
+		message_packet->game_time - network_game_client_clock_behind_since >= TICKS_PER_SECOND))
 	{
 		network_event(
 			"the host's clock is %ld ticks ahead of this machine's; taking its game tick #%ld",
 			message_packet->game_time - game_time_get(),
 			message_packet->game_time);
 		game_time_set_distributed(message_packet->game_time);
+		network_game_client_clock_behind_since = NONE;
+	}
+	else if (message_packet->game_time > game_time_get() + NETWORK_GAME_CLIENT_CLOCK_SLACK_TICKS)
+	{
+		if (network_game_client_clock_behind_since == NONE ||
+			message_packet->game_time < network_game_client_clock_behind_since)
+			network_game_client_clock_behind_since = message_packet->game_time;
+	}
+	else
+	{
+		network_game_client_clock_behind_since = NONE;
 	}
 
 	return TRUE;
