@@ -942,7 +942,11 @@ code|lobby|lobbytls|lobbypw|relay|latency)
 		grep -aq 'network test: the public games list "' "$out/joiner/run.log" || fail "the joiner never listed the host's game"
 		grep -q 'publish .* hcev/3/lobby/s/[0-9a-f]\{32\} 0 B retained' "$out/broker.log" ||
 			fail "the host's slot was never cleared (its tombstone and clearing when it quit, or its will)"
-		grep -q 'publish .* hceu/' "$out/broker.log" && fail "a Vita build published on the PCs' topics"
+		# (a host for Vitas publishes nothing on the PCs' topics; the browser,
+		# which lists PC games too since Oct 19 2026, asks their hosts to
+		# republish - hceu/3/lobby/q, as OpenCE's browser does - and that alone)
+		grep 'publish .* hceu/' "$out/broker.log" | grep -vq 'publish .* hceu/3/lobby/q [0-9]* B' &&
+			fail "a Vita build published on the PCs' topics (more than the browser's query)"
 		if [ "$mode" = lobbypw ]; then
 			grep -aq 'network test: the public games list ".*\[pw\]' "$out/joiner/run.log" ||
 				fail "the game with a password was not listed locked"
@@ -3793,7 +3797,10 @@ party)
 	grep -aq "party: chat from Charlie[^:]*: gg" "$hl" || fail "Alpha did not read Charlie's chat"
 	grep -aq "party: chat from Charlie #[A-Z0-9]\{4\}: Ready!" "$jl" ||
 		fail "Bravo did not read Charlie's quick chat under Charlie's name and code (not a friend of Bravo's)"
-	grep -aq "joinable" "$jl" && fail "Alpha's private game showed joinable from presence"
+	# (since Oct 19 2026 a friend joins a private game from presence, the join
+	# sealed to each friend: Bravo, Alpha's friend, sees it joinable)
+	grep -aq "friends: Alpha is online: .* (joinable)" "$jl" ||
+		fail "Alpha's private game did not show joinable to Bravo, a friend"
 	# (the broker: the party's traffic sealed - no names, no chat - on the friends' hashed topics)
 	grep -aqE "hello party|Alpha|Bravo|Charlie|Ready!" "$out/broker.log" && fail "the broker's log shows a name or a chat"
 	grep -a "retained" "$out/broker.log" | grep -aq "/f1/" && fail "the broker kept a friends' message"
