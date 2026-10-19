@@ -395,7 +395,7 @@ static char const *const port_function_names[] =
 	"port forge clear dead ai", "port forge clear all ai",
 	"port h3 mp pause party", "port h3 mp settings init", "port h3 mp settings save", "port h3 mp settings close",
 	"port h3 host online", "port h3 game options",
-	"port h3 live leave",
+	"port h3 live leave", "port h3 invite ask", "port h3 invite init", "port h3 invite act",
 };
 
 /* the port's game data functions (menu_functions.c), from
@@ -419,6 +419,7 @@ static char const *const port_game_data_input_names[] =
 	"port h3 join", "port h3 pregame",
 	"port h3 party", "port h3 party options", "port h3 party chat", "port h3 party quick",
 	"port h3 mp pause", "port h3 mp settings",
+	"port h3 invite",
 };
 
 static struct

@@ -76,8 +76,8 @@ these screens stand for the Xbox's own, over the same animated Halo ring:
   game's lobby's rows) instead of the nameplate; GAME and MAP changed go to
   every joiner's lobby as the Xbox sent a game's settings between two
   games (every build's client, 1.1.0's too); GAME OPTIONS' name and most
-  players at once, public or private and the password its listing. START
-  GAME opens the game's lobby
+  players at once, public or private and the password its listing. L opens
+  INVITE FRIENDS online (friends.xml). START GAME opens the game's lobby
   on that game at once (no profile asked, no other server), its countdown
   begun once the game can start (it waits for every machine's map, map
   sharing included); B there goes back to the lobby, the game kept, the
@@ -153,7 +153,12 @@ these screens stand for the Xbox's own, over the same animated Halo ring:
   and difficulty, or the map's and "<game type> on <map>"; the status and
   countdown; the code, large, online; public or private and Square's hint;
   the players in their colours with their teams. Its buttons are the Xbox
-  screen's own functions.
+  screen's own functions; L, the host's online, INVITE FRIENDS.
+- friends.xml's INVITE FRIENDS (L in the live lobby and the game's lobby,
+  the host's online): the friends online, Cross sends the chosen one the
+  friends' invite into this Vita's game (sealed for them alone, one a
+  friend a while; a game with a password or full takes none, said); the
+  settings panel's Friends page does the same with Square on a friend.
 - password.xml: the password screen of a game with one (it stands for OpenCE's,
   pc\join\password\screen, which the browser opens).
 In each level's map (ingame.txt):

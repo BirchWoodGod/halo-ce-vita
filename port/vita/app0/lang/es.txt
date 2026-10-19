@@ -1921,10 +1921,15 @@
 "LEAVE GAME: the others play on." = "SALIR DE LA PARTIDA: los demás siguen."
 "No profile: these are a profile's settings" = "Sin perfil: estos son los ajustes de un perfil"
 
-# ---------- the Halo 3 live lobby
+# ---------- the Halo 3 live lobby and INVITE FRIENDS
 "Lobby open" = "Sala abierta"
 "Lobby open: %ld players" = "Sala abierta: %ld jugadores"
 "Public: friends join, and anyone from\nthe games browser." = "Pública: entran tus amigos y cualquiera\ndesde el buscador de partidas."
 "Private: joined by your invites\nand your code alone." = "Privada: solo se entra con tus\ninvitaciones o con tu código."
 "The PS Vitas on your Wi-Fi can join.\nSTART GAME plays with everyone here." = "Pueden unirse las PS Vita de tu Wi-Fi.\nEMPEZAR PARTIDA juega con todos."
 "The PS Vitas near you can join.\nSTART GAME plays with everyone here." = "Pueden unirse las PS Vita cercanas.\nEMPEZAR PARTIDA juega con todos."
+"INVITE FRIENDS" = "INVITAR AMIGOS"
+"Invite Friends" = "Invitar amigos"
+"INVITABLE" = "INVITABLE"
+"None of your friends is online." = "Ninguno de tus amigos está en línea."
+"Cross invites a friend into your game." = "Cruz invita a un amigo a tu partida."

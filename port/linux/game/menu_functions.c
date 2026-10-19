@@ -332,6 +332,9 @@ enum
 	_function_h3_host_online,
 	_function_h3_game_options,
 	_function_h3_live_leave,
+	_function_h3_invite_ask,
+	_function_h3_invite_init,
+	_function_h3_invite_act,
 };
 
 /* in port_game_data_input_names' order */
@@ -384,6 +387,7 @@ enum
 	_input_h3_party_quick,
 	_input_h3_mp_pause,
 	_input_h3_mp_settings,
+	_input_h3_invite,
 };
 
 /* what a line of typing is for */
@@ -8545,6 +8549,205 @@ static boolean h3_mp_host_choices(void)
 	return TRUE;
 }
 
+/* ---- INVITE FRIENDS (halo3/friends.xml h3/invite/screen): L in the live
+multiplayer lobby and in the game's lobby (multiplayer and co-op),
+the host's: the friends online, Cross sends the chosen one the friends'
+invite into this machine's game (p2p_friends_act P2P_FRIENDS_INVITE: sealed
+for that friend alone, its own limit of one a friend a while; a game with a
+password, or full, takes none: said). The settings panel's Friends page
+does the same with Square on a friend. */
+
+#define H3_INVITE_ROWS 10
+
+static struct
+{
+	struct browser_view view;
+	/* the friends online, of p2p_friends_list's (read into the FRIENDS
+	screen's list, which is not open meanwhile: no second copy of it) */
+	struct p2p_friend_entry entries[P2P_FRIENDS_MAXIMUM];
+	int count;
+	unsigned long refreshed_time;
+	/* the friend chosen, by id */
+	char chosen_id[P2P_FRIEND_ID_SIZE];
+	char message[160];
+	unsigned long message_time;
+	struct widget_instance *list;
+	long list_creation_time;
+	char said[256];
+} h3_invite;
+
+/* (port h3 invite ask: the lobbies' INVITE FRIENDS) whether this machine
+hosts a game friends can be invited into now: online, its own server */
+static boolean h3_invite_ask(void)
+{
+	boolean can = network_game_server_port_in_lobby(global_network_game_server_get()) && internet_play() &&
+		!network_game_is_splitscreen_local();
+
+	platform_log("menus: h3 invite: INVITE FRIENDS %s", can ? "opens" : "not now (no game of this machine's online)");
+	return can;
+}
+
+static void h3_invite_refresh(boolean now)
+{
+	unsigned long time = system_milliseconds();
+	int index;
+
+	if (!now && h3_invite.refreshed_time && time - h3_invite.refreshed_time < H3_FRIENDS_REFRESH_MILLISECONDS)
+		return;
+	h3_invite.refreshed_time = time ? time : 1;
+	h3_friends_refresh(TRUE);
+	h3_invite.count = 0;
+	for (index = 0; index < h3_friends.count && h3_invite.count < P2P_FRIENDS_MAXIMUM; index++)
+	{
+		if (h3_friends.entries[index].kind == P2P_FRIEND_KIND_FRIEND && h3_friends.entries[index].online)
+			h3_invite.entries[h3_invite.count++] = h3_friends.entries[index];
+	}
+}
+
+static void h3_invite_initialize(void)
+{
+	int index;
+
+	browser_view_reset(&h3_invite.view);
+	h3_invite.chosen_id[0] = 0;
+	h3_invite.message[0] = 0;
+	h3_invite.said[0] = 0;
+	h3_invite_refresh(TRUE);
+	platform_log("menus: h3 invite: %d friends online", h3_invite.count);
+	for (index = 0; index < h3_invite.count; index++)
+	{
+		platform_log("menus: h3 invite: %s: %s%s", h3_invite.entries[index].name, h3_invite.entries[index].activity,
+			h3_invite.entries[index].invitable ? "" : " (not invitable now)");
+	}
+}
+
+static int h3_invite_chosen_index(void)
+{
+	int index;
+
+	for (index = 0; index < h3_invite.count; index++)
+	{
+		if (!strcmp(h3_invite.entries[index].id, h3_invite.chosen_id))
+			return index;
+	}
+	return 0;
+}
+
+/* (port h3 invite act: a row's Cross) the invite sent, its outcome said */
+static void h3_invite_act(struct widget_instance *widget)
+{
+	int item = h3_invite_chosen_index();
+	struct p2p_friend_entry entry;
+	int outcome;
+
+	if (widget && !strncmp(widget->name, "row_", 4) && widget->name[4] >= '0' && widget->name[4] <= '9')
+	{
+		long row = atol(widget->name + 4) - 1;
+
+		if (row >= 0 && row < h3_invite.view.visible)
+			item = (int)(h3_invite.view.offset + row);
+	}
+	if (item < 0 || item >= h3_invite.count)
+		return;
+	entry = h3_invite.entries[item];
+	outcome = p2p_friends_act(entry.id, entry.kind, P2P_FRIENDS_INVITE);
+	if (outcome == P2P_FRIENDS_DONE)
+		snprintf(h3_invite.message, sizeof(h3_invite.message), T("Invited %s"), entry.name);
+	else
+		snprintf(h3_invite.message, sizeof(h3_invite.message), "%s", p2p_friends_outcome_text(outcome));
+	h3_invite.message_time = system_milliseconds();
+	platform_log("menus: h3 invite: %s: %s", entry.name, h3_invite.message);
+	h3_invite_refresh(TRUE);
+}
+
+/* (port h3 invite) the rows: each friend online, what they are doing,
+INVITE when they can be; the outcome; how many online */
+static void h3_invite_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *child, *focused = list->focused_child, *focus = NULL;
+	long index, focused_row = NONE, target;
+	char text[192];
+
+	h3_invite_refresh(FALSE);
+	if (list != h3_invite.list || list->creation_time != h3_invite.list_creation_time)
+	{
+		h3_invite.list = list;
+		h3_invite.list_creation_time = list->creation_time;
+		browser_view_reset(&h3_invite.view);
+		focused = NULL;
+	}
+	for (index = 0, child = list->child; child; child = child->next)
+	{
+		if (strncmp(child->name, "row_", 4))
+			continue;
+		if (child == focused)
+			focused_row = index;
+		index++;
+	}
+	target = browser_view_follow(&h3_invite.view, H3_INVITE_ROWS, h3_invite.count, (int)focused_row,
+		h3_invite_chosen_index(), 0);
+	for (index = 0, child = list->child; child; child = child->next)
+	{
+		struct p2p_friend_entry const *entry;
+
+		if (strncmp(child->name, "row_", 4))
+			continue;
+		if (index >= h3_invite.view.visible)
+		{
+			widget_instance_set_visibility_recursive(child, FALSE);
+			child->disabled = TRUE;
+			index++;
+			continue;
+		}
+		widget_instance_set_visibility_recursive(child, TRUE);
+		child->disabled = FALSE;
+		entry = &h3_invite.entries[h3_invite.view.offset + index];
+		row_column(child, "row_name", entry->name);
+		row_column(child, "row_state", entry->activity);
+		row_column(child, "row_tag", entry->invitable ? T("INVITABLE") : " ");
+		if (index == h3_invite.view.row)
+			focus = child;
+		index++;
+	}
+	if (focus && focus != list->focused_child)
+		ui_widget_port_give_focus(list, focus);
+	for (child = list->child; child; child = child->next)
+	{
+		if (!strncmp(child->name, "row_", 4))
+			child->animation.current_frame_index = child == focus ? 1 : 0;
+	}
+	if (target != NONE && target >= 0 && target < h3_invite.count)
+		snprintf(h3_invite.chosen_id, sizeof(h3_invite.chosen_id), "%s", h3_invite.entries[target].id);
+	snprintf(text, sizeof(text), T("%d ONLINE"), h3_invite.count);
+	text_show(named(screen, "invite_status"), text);
+	if (!h3_invite.count)
+	{
+		p2p_friends_status(text, sizeof(text));
+		text_show(named(screen, "invite_help"), text[0] ? text : T("None of your friends is online."));
+	}
+	else
+		text_show(named(screen, "invite_help"), h3_invite.entries[0].invitable ?
+			T("Cross invites a friend into your game.") : p2p_friends_outcome_text(P2P_FRIENDS_NOT_JOINABLE));
+	text_show(named(screen, "invite_message"), h3_invite.message[0] &&
+		system_milliseconds() - h3_invite.message_time < H3_FRIENDS_MESSAGE_MILLISECONDS ? h3_invite.message : "");
+	if ((child = named(screen, "a_butn")) != NULL)
+		widget_instance_set_visibility_recursive(child, h3_invite.count > 0);
+	if ((child = named(screen, "a_label")) != NULL)
+		widget_instance_set_visibility_recursive(child, h3_invite.count > 0);
+	snprintf(text, sizeof(text), "%d online", h3_invite.count);
+	for (index = 0; index < h3_invite.count; index++)
+	{
+		snprintf(text + strlen(text), sizeof(text) - strlen(text), "%s%s%s", index ? ", " : ": ",
+			h3_invite.entries[index].name, h3_invite.entries[index].invitable ? "" : " (not invitable)");
+	}
+	if (strcmp(text, h3_invite.said))
+	{
+		snprintf(h3_invite.said, sizeof(h3_invite.said), "%s", text);
+		platform_log("menus: h3 invite: %s", text);
+	}
+}
+
 /* ---- port h3 pregame: the Halo 3 pre-game lobby (halo3/pregame.xml),
 standing for the Xbox's ENLISTED PLAYERS screen: what is played, how the
 game is reached (its code, public or private), the players; the buttons
@@ -8822,6 +9025,11 @@ static void h3_live_lobby_show(struct widget_instance *screen)
 
 	if ((found = named(screen, "nameplate")) != NULL)
 		widget_instance_set_visibility_recursive(found, game == NULL);
+	/* (L: INVITE FRIENDS, online) */
+	if ((found = named(screen, "l_butn")) != NULL)
+		widget_instance_set_visibility_recursive(found, game != NULL && h3_live.network == _h3_network_online);
+	if ((found = named(screen, "invite")) != NULL)
+		widget_instance_set_visibility_recursive(found, game != NULL && h3_live.network == _h3_network_online);
 	line[0] = 0;
 	count = h3_roster_show(screen, game, TRUE, client ? network_game_client_get_local_machine_index() : NONE,
 		game ? H3_LIVE_ROWS : 0, line, (int)sizeof(line));
@@ -9181,6 +9389,11 @@ static void h3_pregame_update(struct widget_instance *widget)
 			widget_instance_set_visibility_recursive(found, toggles || seconds > 0);
 	}
 	text_show(named(screen, "b_text"), host ? T("Cancel") : T("Leave"));
+	/* (L: INVITE FRIENDS, the host's online) */
+	if ((found = named(screen, "l_butn")) != NULL)
+		widget_instance_set_visibility_recursive(found, host && online);
+	if ((found = named(screen, "l_text")) != NULL)
+		widget_instance_set_visibility_recursive(found, host && online);
 	/* (alone in the host's lobby, Cross starts nothing yet: not shown, as
 	the Xbox's lobby hid it) */
 	if ((found = named(screen, "a_butn")) != NULL)
@@ -9487,6 +9700,14 @@ boolean pc_menu_event_function_invoke(
 			menu_functions.open_game_options = TRUE;
 			platform_log("menus: h3 mp: GAME OPTIONS");
 		}
+		return TRUE;
+	case _function_h3_invite_ask:
+		return h3_invite_ask();
+	case _function_h3_invite_init:
+		h3_invite_initialize();
+		return TRUE;
+	case _function_h3_invite_act:
+		h3_invite_act(widget);
 		return TRUE;
 	case _function_h3_live_leave:
 		/* (B on the lobby) */
@@ -10027,6 +10248,10 @@ void pc_menu_game_data_function_invoke(
 	case _input_h3_mp_settings:
 		if (widget->type == _ui_widget_type_column_list)
 			h3_mp_settings_update(widget);
+		break;
+	case _input_h3_invite:
+		if (widget->type == _ui_widget_type_column_list)
+			h3_invite_update(widget);
 		break;
 	default:
 		break;
