@@ -8,7 +8,7 @@
 #               lobby, its map picker (Wizard, then Blood Gulch), START FORGE;
 #               in Blood Gulch the player is the monitor: flies, opens the
 #               object browser (Square), opens VEHICLES, places a Warthog in
-#               its hand, turns it and pushes it away (L + the right stick),
+#               its hand, turns and tilts it (rotate mode: L + the right stick),
 #               drops it, places a weapon from the next category (R) - a
 #               flamethrower, not the game type's rocket launcher - and a
 #               boulder from SCENERY, grabs it under the crosshair, carries
@@ -108,6 +108,17 @@
 #               the Warthog (forge_files_test --dump)
 #   clearaimenu the Forge menu's rows by the pad: CLEAR DEAD AI (1), CLEAR ALL
 #               AI asked first (B keeps them, A clears them), screenshots
+#   rotate      rotate mode (L held while holding an object), by the console's
+#               pad (forge press, forge stick, forge look as the mouse): a
+#               boulder held facing the camera, the snapping stepped to 45
+#               (L + D-pad right, twice), one flick of the right stick across
+#               (yaw), one up (pitch: its top away), one across with R held too
+#               (roll): its forward and up checked at each; R in rotate mode
+#               never drops it; the exact angles (its properties' YAW, PITCH,
+#               ROLL, RESET ROTATION: the console's "forge property"); the
+#               mouse's look as the keyboard gives it (a yaw of two steps, a
+#               roll); dropped, saved, a new round (the same facing again), and
+#               the map variant loaded in another run (the same facing)
 #   floodcov    the Flood and the Covenant fight each other (the monitor
 #               watching): both sides hurt or killed
 #   sentinels   the Sentinel AI pack: sentinels (the Sentinels' team) fight
@@ -153,7 +164,7 @@
 #   run_forge_test.sh [CASE...]      (default: v1 budget fly b30 off files variants
 #                                     edit fileshare fstouch panel packs smallmap
 #                                     aiteam aioff round aisave allai allaimenu flood
-#                                     clearai clearaimenu floodcov sentinels marines
+#                                     clearai clearaimenu rotate floodcov sentinels marines
 #                                     aivariant cepelican cepelicanoff pelican)
 #   aipacks     (not by default) the AI packs' tag cache on Blood Gulch, the
 #               tightest map: each AI pack with the packs on by default, and
@@ -177,7 +188,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_forge_test.$$}
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs smallmap aiteam aioff round aisave allai allaimenu aicopy flood clearai clearaimenu floodcov sentinels marines aivariant cepelican cepelicanoff pelican}
+cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs smallmap aiteam aioff round aisave allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant cepelican cepelicanoff pelican}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
@@ -261,7 +272,7 @@ b30='map_name levels\\b30\\b30'
 # variants (Halo 3's), A: Wizard itself; Map, up, A: Blood Gulch, A: the map
 # itself; down past EXTRA OBJECTS, START FORGE. In the level: forward and up, Square, A
 # on VEHICLES, down twice, A: a Warthog in the monitor's hand; L + right stick
-# right (turned), L + up (pushed away), R (dropped); Square, R (the next
+# right (turned), L + up (tilted away), R (dropped); Square, R (the next
 # category), down, A: a weapon, R (dropped: it falls); Square, R twice
 # (SCENERY), A: a boulder, R (dropped: scenery stays where it is let go), R
 # (grabbed again, under the crosshair), left (carried), R (dropped);
@@ -641,6 +652,27 @@ clearaimenu_runs() {
 	ai_run clearaimenu 45 "$c" "HALO_TEST_PAD=$pad"
 }
 
+rotate_runs() {
+	# (looking along +x, level: a boulder held 5 ahead facing the camera;
+	# where it faces after each step - forge where's "held facing ... up ...")
+	local store="$out/rotate-store"
+	rm -rf "$store"
+	mkdir -p "$store"
+	local c="L300:forge camera 60 -100 1.6 0 0;L302:forge spawn boulder;L304:forge distance 5;L306:forge where"
+	c="$c;L310:forge press lt+white 4;L320:forge press lt+white 4;L330:forge press lt 40;L332:forge stick 0 0 1 0 6"
+	c="$c;L345:forge where;L350:forge press lt 40;L352:forge stick 0 0 0 1 6;L365:forge where;L370:forge press lt+rt 40"
+	c="$c;L372:forge stick 0 0 1 0 6;L385:forge where;L388:@shot 00-rotated;L392:forge property resetrot"
+	c="$c;L393:forge property yaw;L394:forge property pitch;L395:forge property roll;L396:forge property yaw -"
+	c="$c;L397:forge property yaw;L400:forge where;L402:@shot 01-exact-angles"
+	c="$c;L404:forge property resetrot;L410:forge press lt 30;L412:forge look -0.25 0;L425:forge where"
+	c="$c;L430:forge press lt+rt 30;L432:forge look -0.1 0;L445:forge where;L450:forge property resetrot"
+	c="$c;L451:forge property yaw;L452:forge property pitch;L453:forge property roll;L455:forge drop;L460:forge objects"
+	c="$c;L462:forge save Rotate Test;L470:forge round;L520:forge objects;L525:@shot 02-after-round"
+	ai_run rotate 50 "$c" HALO_SAVE_ROOT="$store" HALO_TEST_FORGE_PACKS=none
+	run rotate-load 30 "" "L400:forge objects" "" HALO_MENU_STYLE=classic HALO_SYSTEM_LINK_TEST=forge:9:rotate_test.hmv \
+		HALO_TEST_FORGE_PACKS=none HALO_SAVE_ROOT="$store"
+}
+
 floodcov_runs() {
 	# (two of the Flood and two of the Covenant 12 world units apart, the
 	# monitor over them)
@@ -812,6 +844,8 @@ for c in $cases; do
 		clearai_runs & ;;
 	clearaimenu)
 		clearaimenu_runs & ;;
+	rotate)
+		rotate_runs & ;;
 	floodcov)
 		floodcov_runs & ;;
 	sentinels)
@@ -1143,6 +1177,51 @@ for c in $cases; do
 		expect clearaimenu "none left" "forge: cleared 1 placed AI; budget 0/256 objects, 0/32 AI \(0 dead\)"
 		[ -f "$out/clearaimenu/shots/04-all-cleared.bmp" ] && echo "  ok: clearaimenu: the screenshots" ||
 			fail "clearaimenu: no screenshots"
+		continue
+	fi
+	if [ "$c" = rotate ]; then
+		checked rotate || continue
+		checked rotate-load || continue
+		log="$out/rotate/run.log"
+		# (NAME N WANT: the Nth "forge where" held facing and up within 0.02 of WANT)
+		facing() {
+			local got
+			got=$(grep -a "forge: held boulder" "$log" | sed -n "$2p" | sed 's/.*held facing \(.*\) up \(.*\) (yaw.*/\1 \2/')
+			if [ -n "$got" ] && awk -v g="$got" -v w="$3" 'BEGIN { n = split(g, a, " "); split(w, b, " "); if (n != 6) exit 1;
+				for (i = 1; i <= 6; i++) { d = a[i] - b[i]; if (d < -0.02 || d > 0.02) exit 1 } }'; then
+				echo "  ok: rotate: $1 (facing and up $got)"
+			else
+				fail "rotate: $1: facing and up $got, not $3"
+			fi
+		}
+		facing "held facing the camera, upright" 1 "-1 0 0 0 0 1"
+		expect rotate "L + D-pad right: snapping 15" "forge: Rotation snap: 15"
+		expect rotate "again: 45" "forge: Rotation snap: 45"
+		facing "a flick across: yawed 45 to the right" 2 "-0.707 0.707 0 0 0 1"
+		facing "a flick up: pitched 45, its top away from the camera" 3 "-0.5 0.707 0.5 0.707 0 0.707"
+		facing "a flick across with R: rolled 45, its top to the right" 4 "-0.5 0.146 0.854 0.707 -0.5 0.5"
+		expect rotate "R in rotate mode dropped nothing" "forge: held boulder .*rotation snap 45, rotating"
+		expect rotate "exact angles: yaw, pitch and roll stepped by 45" \
+			"forge: properties: .*yaw 45.0, pitch 45.0, roll 45.0, facing 0.500 0.500 0.707 up 0.146 -0.854 0.500"
+		facing "the exact angles held" 5 "0.5 0.5 0.707 0.146 -0.854 0.5"
+		facing "the mouse's look: two steps of yaw to the right" 6 "0 -1 0 0 0 1"
+		facing "the mouse with R: rolled about the camera's view, its top to the right" 7 "0 -0.707 -0.707 0 -0.707 0.707"
+		expect rotate "dropped, saved" "forge: map variant \"Rotate Test\" saved as bloodgulch/rotate_test.hmv, 1 objects"
+		# (its placed facing: before the round, after it, and loaded)
+		want="0.500 0.500 0.707 up 0.146 -0.854 0.500"
+		before=$(grep -a "forge: object 0: Boulder" "$log" | head -1 | sed 's/.*placed at [^ ]* [^ ]* [^ ]* facing //')
+		after=$(grep -a "forge: object 0: Boulder" "$log" | tail -1 | sed 's/.*placed at [^ ]* [^ ]* [^ ]* facing //')
+		loaded=$(grep -a "forge: object 0: Boulder" "$out/rotate-load/run.log" | tail -1 | sed 's/.*placed at [^ ]* [^ ]* [^ ]* facing //')
+		expect rotate "a new round" "forge: new round 1: 1 placed again, 0 skipped"
+		for pair in "dropped:$before" "after the new round:$after" "loaded from the map variant:$loaded"; do
+			got=${pair#*:}
+			if [ -n "$got" ] && awk -v g="$got" -v w="$want" 'BEGIN { gsub("up ", "", g); gsub("up ", "", w); n = split(g, a, " ");
+				split(w, b, " "); if (n != 6) exit 1; for (i = 1; i <= 6; i++) { d = a[i] - b[i]; if (d < -0.02 || d > 0.02) exit 1 } }'; then
+				echo "  ok: rotate: ${pair%%:*}: facing $got"
+			else
+				fail "rotate: ${pair%%:*}: facing $got, not $want"
+			fi
+		done
 		continue
 	fi
 	if [ "$c" = floodcov ]; then

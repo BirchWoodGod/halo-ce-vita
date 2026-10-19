@@ -43,12 +43,18 @@ enum
 };
 
 /* an object's properties (the properties window's rows, in its order; a
-character's AI team and brain only for a character) */
+character's AI team and brain only for a character): its exact angles
+(yaw, pitch, roll: stepped by rotate mode's snapping, 15 degrees with
+none) and their reset to none */
 enum
 {
 	_forge_property_team = 0,
 	_forge_property_respawn,
 	_forge_property_place_at_start,
+	_forge_property_yaw,
+	_forge_property_pitch,
+	_forge_property_roll,
+	_forge_property_reset_rotation,
 	_forge_property_ai_team,
 	_forge_property_ai_brain,
 	NUMBER_OF_FORGE_PROPERTIES
@@ -65,6 +71,11 @@ struct forge_properties
 	/* 0: never */
 	short respawn_seconds;
 	boolean place_at_start;
+	/* its facing as yaw (from +x, about up), pitch (up from the ground)
+	and roll (about forward), whole degrees */
+	short yaw;
+	short pitch;
+	short roll;
 	/* a character's: its AI team (forge_files.h FORGE_AI_TEAM_*: whom it
 	fights) and its words, and whether its brain is on */
 	boolean ai;

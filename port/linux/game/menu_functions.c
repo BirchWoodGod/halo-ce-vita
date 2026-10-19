@@ -2218,12 +2218,14 @@ static void h3_forge_controls_update(struct widget_instance *widget)
 {
 #ifdef HALO_VITA
 	text_show(widget, T("Fly: left stick. Up: Cross. Down: D-pad down.\nFaster: hold L. Look: right stick.\n"
-		"Grab, drop: R. Turn, push: L + right stick.\nObjects: Square. Holding one: its properties.\n"
-		"Delete: Triangle. Copy: Circle.\nUpright: D-pad left. Speed: D-pad right.\nSpartan: Select + D-pad up."));
+		"Grab, drop: R. Copy: Circle. Delete: Triangle.\nObjects: Square. Holding one: its properties.\n"
+		"Rotate: hold L + right stick; with R: roll.\nL + left stick: distance. L + D-pad right: snap.\n"
+		"Upright: D-pad left. Speed: D-pad right.\nSpartan: Select + D-pad up."));
 #else
 	text_show(widget, T("Fly: W A S D. Up: Space. Down: C.\nFaster: Shift. Look: mouse.\n"
-		"Grab, drop: left button. Turn: right button.\nPush, pull: wheel. Objects: E. Delete: Del.\n"
-		"Holding one, E: its properties.\nCopy: F. Upright: X. Speed: Q.\nSpartan: Tab, or F1 + Z."));
+		"Grab, drop: left button. Copy: F. Delete: Del.\nObjects: E. Holding one, E: its properties.\n"
+		"Rotate: hold right button + mouse; + left: roll.\nDistance: wheel, or W S. Snap: right button + Q.\n"
+		"Upright: X. Speed: Q.\nSpartan: Tab, or F1 + Z."));
 #endif
 }
 
@@ -5283,16 +5285,17 @@ static void h3_forge_save(void)
 }
 
 /* (port forge properties) the properties window's rows (row_0 team, row_1
-respawn, row_2 placed at the start) and the object's name; closed when no
-object of the player's is held any more */
+respawn, row_2 placed at the start, row_3 to row_5 yaw, pitch and roll,
+row_6 their reset, row_7 and row_8 a character's AI team and AI) and the
+object's name; closed when no object of the player's is held any more */
 static void h3_forge_properties_update(struct widget_instance *list)
 {
 	struct widget_instance *screen = screen_of(list);
 	struct widget_instance *child;
 	struct forge_properties properties;
-	char text[160];
+	char text[224];
 	short row;
-	static char said[160];
+	static char said[224];
 
 	if (!forge_properties_get(&properties))
 	{
@@ -5317,6 +5320,18 @@ static void h3_forge_properties_update(struct widget_instance *list)
 		case _forge_property_place_at_start:
 			snprintf(text, sizeof(text), "%s: %s", T("PLACE AT START"), properties.place_at_start ? T("YES") : T("NO"));
 			break;
+		case _forge_property_yaw:
+			snprintf(text, sizeof(text), "%s: %d\xc2\xb0", T("YAW"), properties.yaw);
+			break;
+		case _forge_property_pitch:
+			snprintf(text, sizeof(text), "%s: %d\xc2\xb0", T("PITCH"), properties.pitch);
+			break;
+		case _forge_property_roll:
+			snprintf(text, sizeof(text), "%s: %d\xc2\xb0", T("ROLL"), properties.roll);
+			break;
+		case _forge_property_reset_rotation:
+			snprintf(text, sizeof(text), "%s", T("RESET ROTATION"));
+			break;
 		case _forge_property_ai_team:
 			snprintf(text, sizeof(text), "%s: %s", T("AI TEAM"), properties.ai_team_name);
 			break;
@@ -5334,12 +5349,13 @@ static void h3_forge_properties_update(struct widget_instance *list)
 		child->animation.current_frame_index = child == list->focused_child ? 1 : 0;
 	}
 	if (properties.ai)
-		snprintf(text, sizeof(text), "%s: team %d, respawn %d, %s, AI team %d, AI %s", properties.name, properties.team,
-			properties.respawn_seconds, properties.place_at_start ? "at start" : "not at start", properties.ai_team,
-			properties.ai_on ? "on" : "off");
+		snprintf(text, sizeof(text), "%s: team %d, respawn %d, %s, yaw %d pitch %d roll %d, AI team %d, AI %s", properties.name,
+			properties.team, properties.respawn_seconds, properties.place_at_start ? "at start" : "not at start", properties.yaw,
+			properties.pitch, properties.roll, properties.ai_team, properties.ai_on ? "on" : "off");
 	else
-		snprintf(text, sizeof(text), "%s: team %d, respawn %d, %s", properties.name, properties.team,
-			properties.respawn_seconds, properties.place_at_start ? "at start" : "not at start");
+		snprintf(text, sizeof(text), "%s: team %d, respawn %d, %s, yaw %d pitch %d roll %d", properties.name, properties.team,
+			properties.respawn_seconds, properties.place_at_start ? "at start" : "not at start", properties.yaw,
+			properties.pitch, properties.roll);
 	if (strcmp(text, said))
 	{
 		snprintf(said, sizeof(said), "%s", text);

@@ -14,9 +14,10 @@ pause screen (ingame.txt; its fonts and pictures are halo3/pause.xml's, the same
   budget until then), every character cleared (asked first), a new round (Halo 3's Restart Round: the map reset, the layout placed again), leave
   (asked first), the controls at the right; what the last of them came to said under the menu;
 - the object's properties (Square while holding an object you placed): its team, respawn time and
-  whether it is placed at the start, and a character's AI team and AI on or off (those two rows
-  hidden for any other object), A or left and right to change one, B to close; kept in the map
-  variant;
+  whether it is placed at the start, its exact angles (yaw, pitch, roll: left and right step them,
+  by rotate mode's snapping or 15 degrees) and their reset, and a character's AI team and AI on or
+  off (those two rows hidden for any other object), A or left and right to change one, B to close;
+  kept in the map variant;
 - the question before leaving.
 The art is this folder's own (tools/halo3_menu_art.py). -->
 <menus>
@@ -228,10 +229,10 @@ The art is this folder's own (tools/halo3_menu_art.py). -->
 	<widget name="h3/forge/pause/column" left="48" top="112" width="236" height="256" bitmap="h3/column"/>
 	<!-- (what the last thing asked came to, and the map variant played: port forge title writes it) -->
 	<widget name="h3/forge/pause/status" type="text" left="56" top="372" width="236" height="64" font="h3/font_small" color="#FF9FD8FF"/>
-	<widget name="h3/forge/pause/controls_panel" left="300" top="150" width="320" height="150" bitmap="h3/panel"/>
-	<widget name="h3/forge/pause/controls_caption" type="text" left="312" top="156" width="296" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/forge_menu" string_index="6"/>
-	<widget name="h3/forge/pause/controls_rule" left="312" top="174" width="296" height="2" bitmap="h3/rule"/>
-	<widget name="h3/forge/pause/controls" type="text" left="312" top="180" width="304" height="116" font="h3/font_small" color="#FFD3CBC3">
+	<widget name="h3/forge/pause/controls_panel" left="300" top="140" width="320" height="176" bitmap="h3/panel"/>
+	<widget name="h3/forge/pause/controls_caption" type="text" left="312" top="146" width="296" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/forge_menu" string_index="6"/>
+	<widget name="h3/forge/pause/controls_rule" left="312" top="164" width="296" height="2" bitmap="h3/rule"/>
+	<widget name="h3/forge/pause/controls" type="text" left="312" top="170" width="304" height="142" font="h3/font_small" color="#FFD3CBC3">
 		<data input="port forge controls"/>
 	</widget>
 	<widget name="h3/forge/pause/screen" flags="pass_unhandled_to_focused_child pause_game">
@@ -322,6 +323,22 @@ The art is this folder's own (tools/halo3_menu_art.py). -->
 		<on event="a right" run="port forge property next"/>
 		<on event="left" run="port forge property previous"/>
 	</widget>
+	<widget name="h3/forge/properties/row_5" type="text" width="252" height="18" bitmap="h3/browser_row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="1">
+		<on event="a right" run="port forge property next"/>
+		<on event="left" run="port forge property previous"/>
+	</widget>
+	<widget name="h3/forge/properties/row_6" type="text" width="252" height="18" bitmap="h3/browser_row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="1">
+		<on event="a right" run="port forge property next"/>
+		<on event="left" run="port forge property previous"/>
+	</widget>
+	<widget name="h3/forge/properties/row_7" type="text" width="252" height="18" bitmap="h3/browser_row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="1">
+		<on event="a right" run="port forge property next"/>
+		<on event="left" run="port forge property previous"/>
+	</widget>
+	<widget name="h3/forge/properties/row_8" type="text" width="252" height="18" bitmap="h3/browser_row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="1">
+		<on event="a right" run="port forge property next"/>
+		<on event="left" run="port forge property previous"/>
+	</widget>
 	<widget name="h3/forge/properties/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<data input="port forge properties"/>
 		<on event="b x" run="port forge close"/>
@@ -330,17 +347,21 @@ The art is this folder's own (tools/halo3_menu_art.py). -->
 		<child widget="h3/forge/properties/row_2" x="0" y="38"/>
 		<child widget="h3/forge/properties/row_3" x="0" y="57"/>
 		<child widget="h3/forge/properties/row_4" x="0" y="76"/>
+		<child widget="h3/forge/properties/row_5" x="0" y="95"/>
+		<child widget="h3/forge/properties/row_6" x="0" y="114"/>
+		<child widget="h3/forge/properties/row_7" x="0" y="133"/>
+		<child widget="h3/forge/properties/row_8" x="0" y="152"/>
 	</widget>
-	<widget name="h3/forge/properties/panel" left="356" top="120" width="268" height="214" bitmap="h3/panel"/>
-	<widget name="h3/forge/properties/strip" left="356" top="120" width="268" height="30" bitmap="h3/strip"/>
-	<widget name="h3/forge/properties/title" type="text" left="366" top="123" width="250" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/forge_menu" string_index="11"/>
-	<widget name="h3/forge/properties/rule" left="356" top="150" width="268" height="2" bitmap="h3/rule"/>
-	<widget name="h3/forge/properties/name" type="text" left="368" top="156" width="244" height="18" font="h3/font_item" color="#FFF2F6FA" text_y="1"/>
-	<widget name="h3/forge/properties/buttons" left="356" top="308" width="268" height="26" bitmap="h3/strip"/>
-	<widget name="h3/forge/properties/a_butn" left="366" top="313" width="16" height="16" bitmap="h3/glyph_cross"/>
-	<widget name="h3/forge/properties/change" type="text" left="385" top="312" width="70" height="18" font="h3/font_item" color="#FFECECEC" text_y="1" string_list="h3/forge_menu" string_index="12"/>
-	<widget name="h3/forge/properties/b_butn" left="458" top="313" width="16" height="16" bitmap="h3/glyph_circle"/>
-	<widget name="h3/forge/properties/done" type="text" left="477" top="312" width="70" height="18" font="h3/font_item" color="#FFECECEC" text_y="1" string_list="h3/forge_menu" string_index="13"/>
+	<widget name="h3/forge/properties/panel" left="356" top="90" width="268" height="290" bitmap="h3/panel"/>
+	<widget name="h3/forge/properties/strip" left="356" top="90" width="268" height="30" bitmap="h3/strip"/>
+	<widget name="h3/forge/properties/title" type="text" left="366" top="93" width="250" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/forge_menu" string_index="11"/>
+	<widget name="h3/forge/properties/rule" left="356" top="120" width="268" height="2" bitmap="h3/rule"/>
+	<widget name="h3/forge/properties/name" type="text" left="368" top="126" width="244" height="18" font="h3/font_item" color="#FFF2F6FA" text_y="1"/>
+	<widget name="h3/forge/properties/buttons" left="356" top="354" width="268" height="26" bitmap="h3/strip"/>
+	<widget name="h3/forge/properties/a_butn" left="366" top="359" width="16" height="16" bitmap="h3/glyph_cross"/>
+	<widget name="h3/forge/properties/change" type="text" left="385" top="358" width="70" height="18" font="h3/font_item" color="#FFECECEC" text_y="1" string_list="h3/forge_menu" string_index="12"/>
+	<widget name="h3/forge/properties/b_butn" left="458" top="359" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/forge/properties/done" type="text" left="477" top="358" width="70" height="18" font="h3/font_item" color="#FFECECEC" text_y="1" string_list="h3/forge_menu" string_index="13"/>
 	<widget name="h3/forge/properties/screen" flags="pass_unhandled_to_focused_child">
 		<child widget="h3/forge/properties/panel"/>
 		<child widget="h3/forge/properties/strip"/>
@@ -352,6 +373,6 @@ The art is this folder's own (tools/halo3_menu_art.py). -->
 		<child widget="h3/forge/properties/change"/>
 		<child widget="h3/forge/properties/b_butn"/>
 		<child widget="h3/forge/properties/done"/>
-		<child widget="h3/forge/properties/list" x="362" y="184"/>
+		<child widget="h3/forge/properties/list" x="362" y="154"/>
 	</widget>
 </menus>

@@ -636,13 +636,14 @@ our own building blocks later, Halo 3's look; save and share later.
 | Fly up / down (held) | Cross / D-pad down | Space / C or left Ctrl |
 | Faster (4x) | L held, nothing held | Shift, or right mouse button / G |
 | Grab / drop | R | left mouse button |
-| Turn the held object | L + right stick across | right mouse button / G + mouse |
-| Push / pull it | L + right stick up/down | mouse wheel (or G + ...) |
+| Rotate the held object (rotate mode) | hold L: right stick across yaws, up/down pitches; with R held too, across rolls | hold right mouse button / G: mouse across yaws, up/down pitches; with the left button too, across rolls |
+| Push / pull it | L + left stick up/down | mouse wheel, or right button + W/S |
+| Rotation snap (Off, 15, 45, 90) | L + D-pad right | right button + Q |
 | Delete (held, or under the crosshair) | Triangle | Delete |
 | Object browser | Square | E or R |
 | Copy (held or under the crosshair) | Circle | F |
 | Set upright | D-pad left | X |
-| Movement speed (slow, normal, fast) | D-pad right | Q |
+| Movement speed (slow, normal, fast) | D-pad right (L not held) | Q |
 | Monitor / Spartan | Select + D-pad up, together | Tab, or F1 + Z |
 | Forge menu | Start | Esc |
 | In the browser | D-pad / ✕ / ○ / L R | arrows or the mouse / Enter / F / G, left mouse |
@@ -1629,6 +1630,58 @@ the HUD's numbers, the refusal, CLEAR DEAD AI, another placed, NEW ROUND
 with only what remains, CLEAR ALL AI, a map variant saved after holding the
 Warthog alone) and `clearaimenu` (the Forge menu's two rows by the pad, the
 question's B and A); `run_vita_settings_test.sh` the panel's rows.
+
+## Rotation, version 2 (as built, Oct 19 2026)
+
+The owner: "we need a better or different way of rotating the objects".
+Before, L held turned the right stick to the held object: across turned it
+about the up axis only, up and down pushed it away and pulled it nearer.
+
+**Rotate mode** (holding an object, L held; the PC's right mouse button or
+G): the camera stays still, and the right stick (the mouse; the Vita's gyro
+when it is on) turns the object relative to the camera's view: across yaws
+it about the world's up, up and down pitch it about the camera's left along
+the ground (pushing up tilts its top away from you whichever way you face),
+and with R held as well (the PC's left mouse button) across rolls it about
+the camera's forward along the ground (its top to the right). R in rotate
+mode never drops the object; hold L first, then R. The left stick's up and
+down (the PC's W and S) push the object away and pull it nearer; the wheel
+still does at any time.
+
+**Snapping**: L + D-pad right (the PC's right button + Q) steps rotate
+mode's snap through Off, 15, 45 and 90 degrees (D-pad right alone stays the
+movement speed). Snapped, each flick of the stick (past 0.6, let back under
+0.3) turns the object one step, and so does every 0.1 radian of the mouse's
+look; the pitch and roll axes are then the world's axis nearest the
+camera's, so the steps keep the object square with the map. The HUD under
+the held object's name says the snapping ("Rotation snap: 45°") and, while
+rotating, its yaw, pitch and roll.
+
+**Exact angles**: the properties window (Square while holding an object you
+placed) has YAW, PITCH and ROLL (left and right step each to the next
+whole step: the snapping's, or 15 degrees with none; yaw and roll round
+the circle, pitch from -90 to 90) and RESET ROTATION (all three none: facing
++x, upright). D-pad left still sets the object upright, facing as it faces.
+(At a pitch of 90 the yaw is not defined: stepping yaw there turns the
+object about its own forward, as gimbal lock has it.)
+
+**Saved**: a map variant's record already kept yaw, pitch and roll
+(`forge_angles_from_facing`, `forge_facing_from_angles`: forward and up
+both); nothing in the file changed, old variants load as before, and a
+pitched or rolled object comes back so after a save and load and after NEW
+ROUND. Scenery stays as turned; a vehicle, a crate with physics or a
+character falls and settles as the game's physics have it (a Warthog lands
+on its wheels, a biped stands up), and its placed spot follows where it
+comes to rest, as before.
+
+Console: `forge property yaw|pitch|roll [-]`, `forge property resetrot`,
+`forge look <yaw> <pitch>` (the mouse's look as the keyboard's port gives
+it, for the tests); `forge where` logs the held object's forward, up and
+angles, the snapping and whether it rotates; `forge objects` each placed
+facing and up. Test: `run_forge_test.sh rotate` (a boulder: snapping to 45,
+a flick of yaw, pitch and roll, R not dropping it, the exact angles, the
+mouse's yaw and roll, then dropped, saved, a new round and the variant
+loaded in another run, the facing checked at each).
 
 ## Open questions for the owner
 

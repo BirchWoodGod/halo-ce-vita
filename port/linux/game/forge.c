@@ -33,18 +33,29 @@ the keys of its own the layout has no room for: forge_keys):
   fly down, while held (the Vita's crouch toggle does not latch it here:
   forge_monitor_flying);
 - left trigger [L] {right mouse button, G} held: thrust (four times as
-  fast) {or Shift}; holding an object, it turns the right stick {the mouse}
-  to the object instead: across, it turns the object about the up axis, up
-  and down, it pulls the object nearer or pushes it away {the wheel};
+  fast) {or Shift}; holding an object, rotate mode (forge_rotate_update):
+  the camera stays, the right stick {the mouse; the Vita's gyro if on}
+  turns the object about the camera's view - across yaws it (about the
+  world's up), up and down pitch it (its top away from the camera as the
+  stick is pushed up, whichever way the camera faces), and with the right
+  trigger [R] {the left mouse button} held too, across rolls it (its top to
+  the right) -, the left stick's up and down {W S, and the wheel at any
+  time} push it away and pull it nearer, and White [D-pad right] {Q} steps
+  its snapping (Off, 15, 45, 90 degrees: snapped, each flick of the stick,
+  or each FORGE_ROTATE_MOUSE_STEP of the mouse, turns it one step, about the
+  world's axis nearest the camera's), said on the HUD with its angles;
 - right trigger [R] {left mouse button}: grab the object under the
   crosshair, and drop the one held (it falls where it is let go, as the
-  game's physics have it);
+  game's physics have it: a vehicle or a character settles back on its
+  wheels or feet, scenery stays as turned); in rotate mode, roll;
 - Y [Triangle] {Delete}: delete the object held, or the one under the
   crosshair;
 - X [Square] {E}: the object browser (halo3/forge.xml): the map's objects
-  by category, the one chosen spawned in the monitor's hand;
+  by category, the one chosen spawned in the monitor's hand; holding one,
+  its properties (its exact yaw, pitch and roll among them);
 - B [Circle] {F}: a copy of the object held or under the crosshair, held;
-- White [D-pad right] {Q}: the movement speed (slow, normal, fast);
+- White [D-pad right] {Q}: the movement speed (slow, normal, fast); in
+  rotate mode, its snapping;
 - Black [D-pad left] {X}: the object held (or under the crosshair) set
   upright, facing as it faces;
 - Back and the right stick click together [Select + D-pad up, mirroring
@@ -121,6 +132,9 @@ HALO_TEST_COMMANDS):
   forge grab [#id] | drop  the object under the crosshair (or the layout's
                            of that id) grabbed, the held one dropped
   forge turn <degrees>     the held (or aimed at) object turned about up
+  forge property yaw|pitch|roll [-]  the held object's exact angle stepped
+                           (back with -), as its properties' rows; "property
+                           resetrot" its angles none
   forge distance <wu>      the held object that far from the camera
   forge delete             the held (or aimed at) object deleted
   forge camera x y z yaw pitch   the monitor's camera put there (degrees)
@@ -129,6 +143,8 @@ HALO_TEST_COMMANDS):
                            and combo: the monitor and the Spartan's, joined
                            by +), for frames frames (2 by default)
   forge stick lx ly rx ry [frames]  the sticks held (-1 to 1)
+  forge look yaw pitch     the mouse's look (radians, positive left and up)
+                           once, as the keyboard's port gives it
   forge where              the monitor's state in the log
   forge budget             the budget in the log (the AI alive and dead,
                            the HUD's line)
@@ -283,7 +299,6 @@ enum
 #define FORGE_CAMERA_THRUST 4.f
 #define FORGE_CAMERA_LOOK_RATE 2.5f
 #define FORGE_PICK_RANGE 60.f
-#define FORGE_TURN_RATE 2.f
 #define FORGE_PUSH_RATE 3.f
 #define FORGE_WHEEL_PUSH 0.5f
 #define FORGE_MOUSE_TURN 1.f
@@ -300,6 +315,15 @@ be (a vehicle parked at the edge) */
 turn's step (15 degrees) */
 #define FORGE_SNAP_GRID 0.25f
 #define FORGE_SNAP_ANGLE 0.2617994f
+/* rotate mode (L held while holding an object): a stick's turn (radians a
+second, full over), a flick's (snapping: past the first, back under the
+second to flick again), the mouse's look that makes a snapped step, the
+exact angles' step with no snapping (degrees) */
+#define FORGE_ROTATE_RATE 2.f
+#define FORGE_ROTATE_FLICK 0.6f
+#define FORGE_ROTATE_REARM 0.3f
+#define FORGE_ROTATE_MOUSE_STEP 0.1f
+#define FORGE_ANGLE_STEP 15
 
 /* the in-game set's screens (halo3/forge.xml) */
 #define FORGE_BROWSER_SCREEN "h3/forge/browser/screen"
@@ -307,6 +331,16 @@ turn's step (15 degrees) */
 #define FORGE_PROPERTIES_SCREEN "h3/forge/properties/screen"
 
 static real const forge_speeds[NUMBER_OF_FORGE_SPEEDS] = { 0.6f, 2.f, 5.f };
+/* rotate mode's snapping (D-pad right in it), degrees: 0 off */
+static short const forge_rotate_snaps[] = { 0, 15, 45, 90 };
+/* rotate mode's axes, the exact angles' order */
+enum
+{
+	_forge_axis_yaw,
+	_forge_axis_pitch,
+	_forge_axis_roll,
+	NUMBER_OF_FORGE_AXES
+};
 static char const *const forge_speed_names[NUMBER_OF_FORGE_SPEEDS] =
 {
 	N_("Movement Speed: Slow"), N_("Movement Speed: Normal"), N_("Movement Speed: Fast"),
@@ -666,6 +700,9 @@ static struct
 	short test_buttons_frames;
 	real test_sticks[NUMBER_OF_GAMEPAD_STICKS][2];
 	short test_sticks_frames;
+	/* (forge look) the mouse's look the tests give, radians, taken once */
+	real test_look_yaw;
+	real test_look_pitch;
 	/* asked from the menus (their events may run beside the tick): a
 	palette entry to spawn (browser_choice, once browser_chosen), monitor
 	and Spartan flipped */
@@ -675,8 +712,17 @@ static struct
 	volatile boolean close_requested;
 	volatile boolean quit_requested;
 	/* the mouse's turn of the object held (forge_camera_input's, for
-	forge_update) */
+	forge_update): across, and up and down */
 	real pending_mouse_turn;
+	real pending_mouse_pitch;
+	/* rotate mode: on this frame (L held while holding an object), its
+	snapping (forge_rotate_snaps' index), and, snapping, each axis's stick
+	flicked (let back to flick again) and the mouse's look not yet a
+	step */
+	boolean rotating;
+	short rotate_snap;
+	boolean rotate_flicked[NUMBER_OF_FORGE_AXES];
+	real rotate_mouse[NUMBER_OF_FORGE_AXES];
 	/* what the monitor did since it started, for the log */
 	long spawned_count;
 	long deleted_count;
@@ -685,6 +731,8 @@ static struct
 	char hud_budget[FORGE_LINE_SIZE];
 	char hud_label[FORGE_LINE_SIZE];
 	boolean hud_label_held;
+	/* (holding an object) its angles and rotate mode's snapping */
+	char hud_rotate[FORGE_LINE_SIZE];
 	char notice[FORGE_LINE_SIZE];
 	unsigned long notice_until;
 	/* (a menu that pauses the game is over it: no HUD) */
@@ -2076,6 +2124,166 @@ static void forge_turn(
 	return;
 }
 
+/* ---- rotate mode (L held while holding an object): the object turned
+about the camera's view - yaw about the world's up, pitch about the
+camera's left along the ground, roll about its forward along the ground -
+smoothly, or in steps of the snapping D-pad right picks (Off, 15, 45, 90
+degrees): one step a flick of the stick */
+
+static void forge_angles_from_facing(real_vector3d const *forward, real_vector3d const *up, float angles[3]);
+static void forge_facing_from_angles(float const angles[3], real_vector3d *forward, real_vector3d *up);
+static real forge_round(real value);
+
+static real forge_absolute(
+	real value)
+{
+	return value < 0.f ? -value : value;
+}
+
+/* the axis an axis's turn is about: the world's up (a positive turn yaws
+the object left, counterclockwise seen from above); the camera's left
+along the ground (it pitches the object's top away from the camera, the
+way the stick is pushed); the camera's forward along the ground (it rolls
+the top to the right). Snapping, the camera's nearest of the world's own
+axes, so that the steps keep the object square with the map */
+static void forge_rotate_axis(
+	short axis,
+	real_vector3d *vector)
+{
+	real_point3d position;
+	real_vector3d forward;
+
+	if (axis == _forge_axis_yaw)
+	{
+		*vector = *global_up3d;
+		return;
+	}
+	if (!forge_camera_get(&position, &forward))
+		forward = *global_forward3d;
+	forward.k = 0.f;
+	if (normalize3d(&forward) < 0.0001f)
+		forward = *global_forward3d;
+	if (forge_rotate_snaps[forge_globals.rotate_snap] > 0)
+	{
+		if (forge_absolute(forward.i) >= forge_absolute(forward.j))
+		{
+			forward.i = forward.i < 0.f ? -1.f : 1.f;
+			forward.j = 0.f;
+		}
+		else
+		{
+			forward.j = forward.j < 0.f ? -1.f : 1.f;
+			forward.i = 0.f;
+		}
+	}
+	if (axis == _forge_axis_pitch)
+	{
+		vector->i = -forward.j;
+		vector->j = forward.i;
+		vector->k = 0.f;
+	}
+	else
+	{
+		*vector = forward;
+	}
+}
+
+/* the object held turned by angle (radians) about one of rotate mode's
+axes, its facing kept square (forward and up at right angles, each of
+length one) */
+static void forge_rotate_held(
+	short axis_kind,
+	real angle)
+{
+	real_vector3d axis;
+	real_vector3d forward = forge_globals.held_forward;
+	real_vector3d up = forge_globals.held_up;
+	real along;
+
+	if (angle == 0.f)
+		return;
+	forge_rotate_axis(axis_kind, &axis);
+	rotate_vector_about_axis(&forward, &axis, sine(angle), cosine(angle));
+	rotate_vector_about_axis(&up, &axis, sine(angle), cosine(angle));
+	if (normalize3d(&forward) < 0.0001f)
+		return;
+	along = dot_product3d(&up, &forward);
+	up.i -= forward.i * along;
+	up.j -= forward.j * along;
+	up.k -= forward.k * along;
+	if (normalize3d(&up) < 0.0001f)
+		return;
+	forge_globals.held_forward = forward;
+	forge_globals.held_up = up;
+}
+
+/* (each frame of rotate mode) the right stick, or the mouse, turns the
+object held: across yaws it, up and down pitch it; with R held too, across
+rolls it. Snapping, a flick (past FORGE_ROTATE_FLICK, let back under
+FORGE_ROTATE_REARM) or FORGE_ROTATE_MOUSE_STEP of the mouse turns it one
+step. The left stick pushes it away (up) and pulls it nearer (down): the
+camera stays while it turns */
+static void forge_rotate_update(
+	struct forge_pad const *pad,
+	real seconds)
+{
+	boolean roll = pad->down[_forge_button_grab];
+	real step = DEGREES_TO_RADIANS((real)forge_rotate_snaps[forge_globals.rotate_snap]);
+	real stick[NUMBER_OF_FORGE_AXES];
+	real mouse[NUMBER_OF_FORGE_AXES];
+	short axis;
+
+	stick[_forge_axis_yaw] = roll ? 0.f : -pad->sticks[_gamepad_stick_right][0];
+	stick[_forge_axis_pitch] = roll ? 0.f : pad->sticks[_gamepad_stick_right][1];
+	stick[_forge_axis_roll] = roll ? pad->sticks[_gamepad_stick_right][0] : 0.f;
+	mouse[_forge_axis_yaw] = roll ? 0.f : forge_globals.pending_mouse_turn;
+	mouse[_forge_axis_pitch] = roll ? 0.f : forge_globals.pending_mouse_pitch;
+	mouse[_forge_axis_roll] = roll ? -forge_globals.pending_mouse_turn : 0.f;
+	for (axis = 0; axis < NUMBER_OF_FORGE_AXES; axis++)
+	{
+		if (step <= 0.f)
+		{
+			forge_rotate_held(axis, stick[axis] * FORGE_ROTATE_RATE * seconds + mouse[axis] * FORGE_MOUSE_TURN);
+			continue;
+		}
+		if (forge_globals.rotate_flicked[axis])
+		{
+			if (forge_absolute(stick[axis]) < FORGE_ROTATE_REARM)
+				forge_globals.rotate_flicked[axis] = FALSE;
+		}
+		else if (forge_absolute(stick[axis]) > FORGE_ROTATE_FLICK)
+		{
+			forge_globals.rotate_flicked[axis] = TRUE;
+			forge_rotate_held(axis, stick[axis] > 0.f ? step : -step);
+		}
+		forge_globals.rotate_mouse[axis] += mouse[axis];
+		while (forge_globals.rotate_mouse[axis] >= FORGE_ROTATE_MOUSE_STEP)
+		{
+			forge_globals.rotate_mouse[axis] -= FORGE_ROTATE_MOUSE_STEP;
+			forge_rotate_held(axis, step);
+		}
+		while (forge_globals.rotate_mouse[axis] <= -FORGE_ROTATE_MOUSE_STEP)
+		{
+			forge_globals.rotate_mouse[axis] += FORGE_ROTATE_MOUSE_STEP;
+			forge_rotate_held(axis, -step);
+		}
+	}
+	forge_globals.held_distance += pad->sticks[_gamepad_stick_left][1] * FORGE_PUSH_RATE * seconds;
+}
+
+/* rotate mode's snapping in words: "Off", "45°" */
+static void forge_rotate_snap_text(
+	char *text,
+	size_t size)
+{
+	short degrees = forge_rotate_snaps[forge_globals.rotate_snap];
+
+	if (degrees > 0)
+		snprintf(text, size, "%d\xc2\xb0", degrees);
+	else
+		snprintf(text, size, "%s", T("Off"));
+}
+
 /* an object upright, facing along the ground as it faces */
 static void forge_straighten(
 	long object_index)
@@ -2523,6 +2731,30 @@ static void forge_hud_update(
 	object_index = forge_globals.hud_label_held ? forge_globals.held_object_index : forge_object_under_crosshair();
 	if (object_index != NONE)
 		forge_object_name(object_index, forge_globals.hud_label, sizeof(forge_globals.hud_label));
+	/* (holding one: rotate mode's snapping; rotating, its angles too) */
+	forge_globals.hud_rotate[0] = 0;
+	if (forge_globals.hud_label_held)
+	{
+		char snap[16];
+		char snapping[64];
+
+		forge_rotate_snap_text(snap, sizeof(snap));
+		snprintf(snapping, sizeof(snapping), T("Rotation snap: %s"), snap);
+		if (forge_globals.rotating)
+		{
+			float angles[3];
+
+			forge_angles_from_facing(&forge_globals.held_forward, &forge_globals.held_up, angles);
+			snprintf(forge_globals.hud_rotate, sizeof(forge_globals.hud_rotate), T("Yaw %d, pitch %d, roll %d. %s"),
+				(int)forge_round(RADIANS_TO_DEGREES(angles[_forge_axis_yaw])),
+				(int)forge_round(RADIANS_TO_DEGREES(angles[_forge_axis_pitch])),
+				(int)forge_round(RADIANS_TO_DEGREES(angles[_forge_axis_roll])), snapping);
+		}
+		else
+		{
+			snprintf(forge_globals.hud_rotate, sizeof(forge_globals.hud_rotate), "%s", snapping);
+		}
+	}
 }
 
 /* whether a screen of the menus is open for the monitor's player (the
@@ -2845,7 +3077,9 @@ static void forge_snapped(
 
 /* ---- object properties (Square while holding an object: halo3/forge.xml's
 properties window): its team, respawn time and whether it is placed at
-the start, kept in its placed entry and saved in the map variant */
+the start, kept in its placed entry and saved in the map variant; its
+exact angles (yaw, pitch, roll, forge_angles_from_facing's: the map
+variant keeps all three) and their reset */
 
 static short const forge_respawn_choices[] = { 0, 10, 20, 30, 45, 60, 90, 120, 180 };
 
@@ -2884,6 +3118,48 @@ static void forge_property_apply(
 	case _forge_property_place_at_start:
 		placed->flags ^= FORGE_RECORD_PLACE_AT_START;
 		break;
+	case _forge_property_yaw:
+	case _forge_property_pitch:
+	case _forge_property_roll:
+	case _forge_property_reset_rotation:
+	{
+		/* (the exact angles: to the next whole step either way - rotate
+		mode's snapping, else FORGE_ANGLE_STEP -, yaw and roll round the
+		circle, pitch from straight down to straight up; or all none) */
+		float angles[3];
+		real stepping = (real)(forge_rotate_snaps[forge_globals.rotate_snap] > 0 ?
+			forge_rotate_snaps[forge_globals.rotate_snap] : FORGE_ANGLE_STEP);
+		real_vector3d forward, up;
+
+		forge_angles_from_facing(&forge_globals.held_forward, &forge_globals.held_up, angles);
+		if (property == _forge_property_reset_rotation)
+		{
+			angles[0] = angles[1] = angles[2] = 0.f;
+		}
+		else
+		{
+			short axis = (short)(property - _forge_property_yaw);
+			real degrees = RADIANS_TO_DEGREES(angles[axis]) / stepping;
+			real whole = forge_round(degrees);
+
+			/* (from between two steps, the next one; from a step, the one
+			after) */
+			if (step > 0)
+				degrees = (degrees - whole < -0.01f ? whole : whole + 1.f) * stepping;
+			else
+				degrees = (degrees - whole > 0.01f ? whole : whole - 1.f) * stepping;
+			if (axis == _forge_axis_pitch)
+				degrees = PIN(degrees, -90.f, 90.f);
+			else if (degrees > 180.f)
+				degrees -= 360.f;
+			else if (degrees <= -180.f)
+				degrees += 360.f;
+			angles[axis] = DEGREES_TO_RADIANS(degrees);
+		}
+		forge_facing_from_angles(angles, &forward, &up);
+		forge_set_facing(forge_globals.held_object_index, &forward, &up);
+		break;
+	}
 	case _forge_property_ai_team:
 		if (!placed->ai)
 			return;
@@ -2897,17 +3173,28 @@ static void forge_property_apply(
 		forge_ai_apply(placed);
 		break;
 	}
-	if (placed->ai)
 	{
-		platform_log("forge: properties: team %d, respawn %d s, %splaced at start, AI team %s (%d), AI %s", placed->team,
-			placed->respawn_seconds, (placed->flags & FORGE_RECORD_PLACE_AT_START) ? "" : "not ",
-			forge_ai_team_log_names[placed->ai_team % NUMBER_OF_FORGE_AI_TEAMS],
-			forge_ai_team_index(placed->ai_team, placed->object_index), (placed->flags & FORGE_RECORD_AI_OFF) ? "off" : "on");
-	}
-	else
-	{
-		platform_log("forge: properties: team %d, respawn %d s, %splaced at start", placed->team, placed->respawn_seconds,
-			(placed->flags & FORGE_RECORD_PLACE_AT_START) ? "" : "not ");
+		float angles[3];
+		char rotation[96];
+
+		forge_angles_from_facing(&forge_globals.held_forward, &forge_globals.held_up, angles);
+		snprintf(rotation, sizeof(rotation), "yaw %.1f, pitch %.1f, roll %.1f, facing %.3f %.3f %.3f up %.3f %.3f %.3f",
+			RADIANS_TO_DEGREES(angles[0]), RADIANS_TO_DEGREES(angles[1]), RADIANS_TO_DEGREES(angles[2]),
+			forge_globals.held_forward.i, forge_globals.held_forward.j, forge_globals.held_forward.k, forge_globals.held_up.i,
+			forge_globals.held_up.j, forge_globals.held_up.k);
+		if (placed->ai)
+		{
+			platform_log("forge: properties: team %d, respawn %d s, %splaced at start, AI team %s (%d), AI %s, %s", placed->team,
+				placed->respawn_seconds, (placed->flags & FORGE_RECORD_PLACE_AT_START) ? "" : "not ",
+				forge_ai_team_log_names[placed->ai_team % NUMBER_OF_FORGE_AI_TEAMS],
+				forge_ai_team_index(placed->ai_team, placed->object_index), (placed->flags & FORGE_RECORD_AI_OFF) ? "off" : "on",
+				rotation);
+		}
+		else
+		{
+			platform_log("forge: properties: team %d, respawn %d s, %splaced at start, %s", placed->team, placed->respawn_seconds,
+				(placed->flags & FORGE_RECORD_PLACE_AT_START) ? "" : "not ", rotation);
+		}
 	}
 }
 
@@ -4103,6 +4390,14 @@ boolean forge_properties_get(
 	properties->team = placed->team;
 	properties->respawn_seconds = placed->respawn_seconds;
 	properties->place_at_start = (placed->flags & FORGE_RECORD_PLACE_AT_START) != 0;
+	{
+		float angles[3];
+
+		forge_angles_from_facing(&forge_globals.held_forward, &forge_globals.held_up, angles);
+		properties->yaw = (short)forge_round(RADIANS_TO_DEGREES(angles[0]));
+		properties->pitch = (short)forge_round(RADIANS_TO_DEGREES(angles[1]));
+		properties->roll = (short)forge_round(RADIANS_TO_DEGREES(angles[2]));
+	}
 	properties->ai = placed->ai;
 	properties->ai_team = placed->ai_team;
 	properties->ai_on = !(placed->flags & FORGE_RECORD_AI_OFF);
@@ -4401,12 +4696,22 @@ boolean forge_camera_input(
 	if (forge_menu_open())
 		return TRUE;
 	forge_pad_get(&pad);
+	/* (forge look: as the mouse's look, once) */
+	pad.look_yaw += forge_globals.test_look_yaw;
+	pad.look_pitch += forge_globals.test_look_pitch;
+	forge_globals.test_look_yaw = 0.f;
+	forge_globals.test_look_pitch = 0.f;
 	turning_object = pad.down[_forge_button_alternate] && object_try_and_get(forge_globals.held_object_index);
 	speed = forge_speeds[PIN(forge_globals.speed, 0, NUMBER_OF_FORGE_SPEEDS - 1)] * seconds;
 	if ((pad.down[_forge_button_alternate] && !turning_object) || (pad.keys & FORGE_KEY_SHIFT))
 		speed *= FORGE_CAMERA_THRUST;
-	input->translation.i = pad.sticks[_gamepad_stick_left][1] * speed;
-	input->translation.j = -pad.sticks[_gamepad_stick_left][0] * speed;
+	/* (rotate mode: the left stick pushes and pulls the object, the right
+	one turns it - forge_rotate_update -; the camera stays) */
+	if (!turning_object)
+	{
+		input->translation.i = pad.sticks[_gamepad_stick_left][1] * speed;
+		input->translation.j = -pad.sticks[_gamepad_stick_left][0] * speed;
+	}
 	input->translation.k = ((pad.down[_forge_button_fly_up] ? 1.f : 0.f) - (pad.down[_forge_button_fly_down] ? 1.f : 0.f)) * speed;
 	if (!turning_object)
 	{
@@ -4416,8 +4721,10 @@ boolean forge_camera_input(
 	}
 	else
 	{
-		/* (the mouse turns the object: its own update takes it) */
+		/* (the mouse, or the gyro, turns the object: its own update takes
+		it) */
 		forge_globals.pending_mouse_turn += pad.look_yaw;
+		forge_globals.pending_mouse_pitch += pad.look_pitch;
 	}
 
 	return TRUE;
@@ -4626,7 +4933,19 @@ void forge_update(
 			else
 				forge_browser_open();
 		}
-		if (pressed[_forge_button_speed])
+		boolean rotating = pad.down[_forge_button_alternate] && object_try_and_get(forge_globals.held_object_index);
+
+		/* (D-pad right: in rotate mode its snapping, else the movement
+		speed) */
+		if (pressed[_forge_button_speed] && rotating)
+		{
+			char snap[16];
+
+			forge_globals.rotate_snap = (short)((forge_globals.rotate_snap + 1) % (short)NUMBEROF(forge_rotate_snaps));
+			forge_rotate_snap_text(snap, sizeof(snap));
+			forge_notice(T("Rotation snap: %s"), snap);
+		}
+		else if (pressed[_forge_button_speed])
 		{
 			forge_globals.speed = (short)((forge_globals.speed + 1) % NUMBER_OF_FORGE_SPEEDS);
 			forge_notice("%s", T(forge_speed_names[forge_globals.speed]));
@@ -4635,7 +4954,8 @@ void forge_update(
 			forge_straighten(forge_target_object());
 		if (pressed[_forge_button_duplicate])
 			forge_duplicate();
-		if (pressed[_forge_button_grab])
+		/* (R in rotate mode: roll, never a drop) */
+		if (pressed[_forge_button_grab] && !rotating)
 		{
 			if (object_try_and_get(forge_globals.held_object_index))
 			{
@@ -4651,22 +4971,34 @@ void forge_update(
 		}
 		if (pressed[_forge_button_delete])
 			forge_delete(forge_target_object());
+		rotating = rotating && object_try_and_get(forge_globals.held_object_index);
+		if (rotating)
+		{
+			forge_rotate_update(&pad, seconds);
+		}
+		else
+		{
+			short axis;
+
+			for (axis = 0; axis < NUMBER_OF_FORGE_AXES; axis++)
+			{
+				forge_globals.rotate_flicked[axis] = FALSE;
+				forge_globals.rotate_mouse[axis] = 0.f;
+			}
+		}
+		forge_globals.rotating = rotating;
 		if (object_try_and_get(forge_globals.held_object_index))
 		{
-			if (pad.down[_forge_button_alternate])
-			{
-				real turn = -pad.sticks[_gamepad_stick_right][0] * FORGE_TURN_RATE * seconds +
-					forge_globals.pending_mouse_turn * FORGE_MOUSE_TURN;
-
-				if (turn != 0.f)
-					forge_turn(forge_globals.held_object_index, turn);
-				forge_globals.held_distance += pad.sticks[_gamepad_stick_right][1] * FORGE_PUSH_RATE * seconds;
-			}
 			forge_globals.held_distance = PIN(forge_globals.held_distance + pad.wheel * FORGE_WHEEL_PUSH,
 				FORGE_MINIMUM_HOLD_DISTANCE, FORGE_MAXIMUM_HOLD_DISTANCE);
 		}
 	}
+	else
+	{
+		forge_globals.rotating = FALSE;
+	}
 	forge_globals.pending_mouse_turn = 0.f;
+	forge_globals.pending_mouse_pitch = 0.f;
 	if (object_try_and_get(forge_globals.held_object_index))
 		forge_held_object_place();
 	forge_hud_update();
@@ -4773,6 +5105,14 @@ void forge_draw(
 			forge_draw_line(label_font_index, &bounds, 2, 0.95f, 0.62f, 0.30f, forge_globals.hud_label);
 		else
 			forge_draw_line(label_font_index, &bounds, 2, 0.47f, 0.84f, 1.f, forge_globals.hud_label);
+	}
+	/* (holding one: its angles while rotating, the snapping) */
+	if (forge_globals.hud_rotate[0])
+	{
+		bounds.y0 = (short)(bounds.y1 + 2);
+		bounds.y1 = (short)(bounds.y0 + height);
+		forge_draw_line(font_index, &bounds, 2, forge_globals.rotating ? 0.95f : 0.62f,
+			forge_globals.rotating ? 0.78f : 0.71f, forge_globals.rotating ? 0.55f : 0.80f, forge_globals.hud_rotate);
 	}
 }
 
@@ -4987,6 +5327,18 @@ boolean forge_command(
 		}
 		return TRUE;
 	}
+	if (!strcmp(word, "look"))
+	{
+		/* ("look <yaw> <pitch>": the mouse's look, radians - positive yaw
+		left, positive pitch up -, as the keyboard's port gives it, once) */
+		float yaw = 0.f, pitch = 0.f;
+
+		if (sscanf(rest, "%f %f", &yaw, &pitch) < 2)
+			return FALSE;
+		forge_globals.test_look_yaw += yaw;
+		forge_globals.test_look_pitch += pitch;
+		return TRUE;
+	}
 
 	/* (the layout's state: with or without the monitor) */
 	if (!strcmp(word, "ai") || !strcmp(word, "objects"))
@@ -5041,10 +5393,11 @@ boolean forge_command(
 			}
 			else
 			{
-				platform_log("forge: object %d: %s (id %ld) %s at %.2f %.2f %.2f, placed at %.2f %.2f %.2f", index, name,
-					placed->id, state, object ? object->object.position.x : 0.f, object ? object->object.position.y : 0.f,
-					object ? object->object.position.z : 0.f, placed->home.position.x, placed->home.position.y,
-					placed->home.position.z);
+				platform_log("forge: object %d: %s (id %ld) %s at %.2f %.2f %.2f, placed at %.2f %.2f %.2f facing %.3f %.3f %.3f "
+					"up %.3f %.3f %.3f", index, name, placed->id, state, object ? object->object.position.x : 0.f,
+					object ? object->object.position.y : 0.f, object ? object->object.position.z : 0.f, placed->home.position.x,
+					placed->home.position.y, placed->home.position.z, placed->home.forward.i, placed->home.forward.j,
+					placed->home.forward.k, placed->home.up.i, placed->home.up.j, placed->home.up.k);
 			}
 		}
 		if (characters)
@@ -5247,13 +5600,27 @@ boolean forge_command(
 		short property = !strcmp(rest, "team") ? _forge_property_team : !strcmp(rest, "respawn") ? _forge_property_respawn :
 			!strcmp(rest, "start") ? _forge_property_place_at_start : NONE;
 
-		if (!strcmp(rest, "aiteam"))
+		short step = 1;
+
+		/* ("property yaw|pitch|roll [-]": an exact angle stepped, back with
+		"-"; "property resetrot") */
+		if (!strncmp(rest, "aiteam", 6))
 			property = _forge_property_ai_team;
-		else if (!strcmp(rest, "brain"))
+		else if (!strncmp(rest, "brain", 5))
 			property = _forge_property_ai_brain;
+		else if (!strncmp(rest, "yaw", 3))
+			property = _forge_property_yaw;
+		else if (!strncmp(rest, "pitch", 5))
+			property = _forge_property_pitch;
+		else if (!strncmp(rest, "roll", 4))
+			property = _forge_property_roll;
+		else if (!strcmp(rest, "resetrot"))
+			property = _forge_property_reset_rotation;
+		if (strchr(rest, '-'))
+			step = -1;
 		if (property == NONE || !forge_properties_target())
 			return FALSE;
-		forge_property_apply(property, 1);
+		forge_property_apply(property, step);
 		return TRUE;
 	}
 	if (!strcmp(word, "save"))
@@ -5417,9 +5784,17 @@ boolean forge_command(
 		}
 		if (held)
 		{
-			platform_log("forge: held %s at %.2f %.2f %.2f facing %.2f %.2f %.2f", forge_tag_leaf(held->definition_index),
-				held->object.position.x, held->object.position.y, held->object.position.z,
-				held->object.forward.i, held->object.forward.j, held->object.forward.k);
+			float angles[3];
+
+			forge_angles_from_facing(&forge_globals.held_forward, &forge_globals.held_up, angles);
+			platform_log("forge: held %s at %.2f %.2f %.2f facing %.2f %.2f %.2f; held facing %.3f %.3f %.3f up %.3f %.3f %.3f "
+				"(yaw %.1f pitch %.1f roll %.1f), rotation snap %d, %s",
+				forge_tag_leaf(held->definition_index), held->object.position.x, held->object.position.y, held->object.position.z,
+				held->object.forward.i, held->object.forward.j, held->object.forward.k, forge_globals.held_forward.i,
+				forge_globals.held_forward.j, forge_globals.held_forward.k, forge_globals.held_up.i, forge_globals.held_up.j,
+				forge_globals.held_up.k, RADIANS_TO_DEGREES(angles[0]), RADIANS_TO_DEGREES(angles[1]),
+				RADIANS_TO_DEGREES(angles[2]), forge_rotate_snaps[forge_globals.rotate_snap],
+				forge_globals.rotating ? "rotating" : "not rotating");
 		}
 		return TRUE;
 	}
