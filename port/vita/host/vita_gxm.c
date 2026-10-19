@@ -4847,7 +4847,7 @@ static unsigned int h3_panel(struct overlay_vertex *vertices, unsigned int count
 	const char *help = NULL, *footer = NULL;
 	char chosen_label[64] = "", chosen_value[96] = "";
 	float y, rows_top = 0.0f, row_height, units = 0.0f;
-	int index;
+	int index, headings = 0, headings_dropped = 0, headings_seen = 0;
 
 	count = overlay_rect(vertices, count, 0.0f, 0.0f, DISPLAY_WIDTH, DISPLAY_HEIGHT, H3_DIM);
 	count = overlay_rect(vertices, count, 0.0f, H3_STRIP_TOP, DISPLAY_WIDTH, H3_STRIP_HEIGHT, H3_STRIP);
@@ -4871,13 +4871,24 @@ static unsigned int h3_panel(struct overlay_vertex *vertices, unsigned int count
 		if (mark == '\x03')
 			y += 26.0f;
 		else if (mark == '\x08')
+		{
 			y += 24.0f;
+			headings++;
+		}
 		else if (!mark)
 			units += 0.5f;
 		else if (mark != '\x05' && mark != '\x06')
 			units += 1.0f;
 	}
 	row_height = units > 0.0f ? (H3_BAND_END - 10.0f - y) / units : 34.0f;
+	/* (rows that would be less than 22 pixels: the first headings give way,
+	as the classic panel's do, vita_settings.c show_list) */
+	while (units > 0.0f && row_height < 22.0f && headings_dropped < headings)
+	{
+		headings_dropped++;
+		y -= 24.0f;
+		row_height = (H3_BAND_END - 10.0f - y) / units;
+	}
 	if (row_height > 34.0f)
 		row_height = 34.0f;
 	if (row_height < 22.0f)
@@ -4904,7 +4915,10 @@ static unsigned int h3_panel(struct overlay_vertex *vertices, unsigned int count
 			y += 26.0f;
 			continue;
 		}
-		/* (a heading, centred over the rows, as Halo Online's) */
+		/* (a heading, centred over the rows, as Halo Online's; the first
+		given way when the rows would not fit) */
+		if (line[0] == '\x08' && headings_seen++ < headings_dropped)
+			continue;
 		if (line[0] == '\x08')
 		{
 			h3_text(&h3.item, H3_LEFT + (row_width - overlay_face_width(&h3.item, line + 1, 1)) / 2.0f,

@@ -28,7 +28,7 @@ enum
 	/* a readable name's bytes (UTF-8) */
 	FORGE_NAME_SIZE = 64,
 	/* the scene packs Forge offers (forge.c forge_packs) */
-	FORGE_PACK_COUNT = 4,
+	FORGE_PACK_COUNT = 7,
 };
 
 /* the object browser's categories, in its order */
@@ -88,6 +88,9 @@ struct forge_item
 	char name[FORGE_NAME_SIZE];
 	/* how many of it this session has placed that are still there */
 	short placed;
+	/* a character's side, the browser's AI category's groups ("Flood"),
+	translated; else empty */
+	char group[24];
 };
 
 /* ---------- prototypes/FORGE.C */
@@ -250,12 +253,23 @@ dead characters whole again */
 void forge_new_round_request(
 	void);
 
-/* (the Forge menu's AI row) every placed character's brain flipped (all
-off if any is on, else all on), at the next forge_update; whether any is on
-(TRUE when none is placed) */
+/* (the Forge menu's AI row) the placed characters' AI as the row shows
+it: all on, all off, or some of each (with none placed, the setting a new
+one gets) */
+enum
+{
+	_forge_ai_all_on,
+	_forge_ai_all_off,
+	_forge_ai_all_mixed,
+};
+
+/* (the Forge menu's AI row) every character's AI set at the next
+forge_update: off when the row shows ON or MIXED, on when it shows OFF;
+the characters placed after it get the same, those the game spawns too
+(a carrier's infection forms) */
 void forge_ai_all_request(
 	void);
-boolean forge_ai_all_on(
+short forge_ai_all_state(
 	void);
 
 /* (main.c, a map reset: main_reset_map) before the game's state goes, the

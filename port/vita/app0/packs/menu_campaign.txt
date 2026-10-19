@@ -1,0 +1,38 @@
+# The campaign lobby's scene in the Halo 3 menus (menus/halo3/campaign.xml's
+# scene_object=, port/linux/game/menu_scene_objects.c): the Master Chief at
+# the wheel of a Warthog caught mid-jump, a Marine on its gun and one beside
+# him, from the player's own campaign maps (Halo, The Silent Cartographer,
+# Assault on the Control Room and The Pillar of Autumn have all three). What
+# a still scene does not need is left out: sounds, effects (no dust, no
+# exhaust), damage, the HUD, the weapons' first-person models and rounds.
+pack menu_campaign
+map a30 b30 b40 a10
+tag vehi vehicles\warthog\warthog
+tag bipd characters\cyborg\cyborg
+tag bipd characters\marine_armored\marine_armored
+tag weap weapons\assault rifle\assault rifle
+strip snd!
+strip lsnd
+strip effe
+strip part
+strip pctl
+strip cont
+strip deca
+strip jpt!
+strip ligh
+strip lens
+strip glw!
+strip udlg
+strip foot
+strip wphi
+strip unhi
+strip hud#
+strip trak
+strip mgs2
+strip spla
+strip proj
+strip eqip
+strip mode weapons\assault rifle\fp\fp
+strip antr weapons\assault rifle\fp\fp
+strip weap weapons\pistol\pistol
+strip actv

@@ -1,0 +1,11 @@
+# The Marines for Forge on the multiplayer maps: marines (assault rifle) and
+# armored marines (assault rifle, sniper rifle), with their majors and their
+# weapons, on the humans' team, the player's allies as in the campaign,
+# from the player's own Halo map. Their dialogue is left out (its 700
+# sounds would make the pack five times the size: 65 MB instead of 12).
+pack marine_ai
+map a30
+strip udlg
+tag actv characters\marine\marine assault rifle
+tag actv characters\marine_armored\marine_armored assault rifle
+tag actv characters\marine_armored\marine_armored sniper rifle

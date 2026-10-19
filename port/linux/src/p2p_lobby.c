@@ -2093,6 +2093,24 @@ static const char *map_title(const char *map, int pc_map)
 	return map;
 }
 
+const char *p2p_lobby_map_title(const char *map, int pc_map)
+{
+	return map_title(map, pc_map);
+}
+
+/* (p2p_friends.c, through p2p.c) the hosted game as listed: public (its
+listing up), a password (set, being worked out, or its key failed: never
+joined from a friend's presence), open, its players */
+void p2p_lobby_friends_view(struct p2p_friends_host *host)
+{
+	host->listed = lobby.listed && !(lobby.flags & _listing_closed);
+	host->locked = lobby.has_password || lobby.password_pending || lobby.password_failed ||
+		(!lobby.password_said && config_string("network.lobby_password")[0]);
+	host->open = (lobby.flags & _listing_open) != 0;
+	host->players = lobby.player_count;
+	host->maximum = lobby.maximum_player_count;
+}
+
 static void entry_from_listing(const struct p2p_listing *listing, struct p2p_lobby_entry *entry)
 {
 	/* (in the language chosen, lang.c; the maps' and gametypes' names are

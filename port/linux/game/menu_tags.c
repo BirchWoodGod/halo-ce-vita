@@ -376,6 +376,12 @@ static char const *const port_function_names[] =
 	"port h3 lan init", "port h3 lan dispose", "port h3 lan refresh",
 	"port h3 adhoc host", "port h3 adhoc browse", "port h3 adhoc coop", "port h3 adhoc join", "port h3 adhoc cancel",
 	"port forge new round", "port forge all ai", "port h3 map page up", "port h3 map page down",
+	"port h3 profiles close",
+	"port h3 friends init", "port h3 friends act", "port h3 friends second", "port h3 friends options ask",
+	"port h3 friends option", "port h3 friends page up", "port h3 friends page down",
+	"port browser profile first",
+	"port h3 players init", "port h3 players act", "port h3 players option", "port h3 players page up",
+	"port h3 players page down",
 	"port h3 join system link", "port h3 join split screen", "port h3 join a", "port h3 join previous",
 	"port h3 join next", "port h3 join leave", "port h3 pregame init",
 };
@@ -395,7 +401,10 @@ static char const *const port_game_data_input_names[] =
 	"port fileshare", "port fileshare question",
 	"port forge properties", "port forge packs",
 	"port h3 mods", "port h3 mods details", "port h3 mods confirm",
-	"port h3 adhoc joining", "port h3 network status", "port h3 join", "port h3 pregame",
+	"port h3 adhoc joining", "port h3 network status",
+	"port h3 friends", "port h3 friends options", "port h3 friends panel",
+	"port h3 players", "port h3 players options",
+	"port h3 join", "port h3 pregame",
 };
 
 static struct

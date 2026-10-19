@@ -116,6 +116,7 @@ _network_game_client_state_pregame) */
 
 /* internet play's codes and lobby (port/linux/src/p2p.c) */
 #include "../src/p2p.h"
+#include "../src/p2p_friends.h"
 /* the crossplay guardrails (docs/crossplay.md 6, T11) */
 #include "../src/crossplay_guard.h"
 #include "network_wire.h"
@@ -220,6 +221,13 @@ static struct
 	game, joined by its listing's id, with the password given) */
 	boolean by_code;
 	boolean code_joined;
+	/* join-friend: a friend's joinable game, joined from their presence
+	(p2p_friends.h); join-invite: a friend's invite, accepted at the menus
+	(friends_game.c, HALO_TEST_FRIENDS_ANSWER), then searched for as a code's
+	host is */
+	boolean by_friend;
+	boolean by_invite;
+	boolean invite_taken;
 	char code[P2P_CODE_SIZE];
 	char lobby_id[P2P_LOBBY_ID_SIZE];
 	char lobby_password[P2P_LOBBY_PASSWORD_SIZE];
@@ -380,6 +388,13 @@ static void network_test_read_settings(
 	else if (!strcmp(setting, "watch"))
 	{
 		network_test.mode = _network_test_watch;
+	}
+	else if (!strcmp(setting, "join-friend") || !strcmp(setting, "join-invite"))
+	{
+		network_test.mode = _network_test_join;
+		network_test.by_code = TRUE;
+		network_test.by_friend = setting[5] == 'f';
+		network_test.by_invite = setting[5] == 'i';
 	}
 	else if (!strncmp(setting, "join-public", 11) || !strncmp(setting, "join-code:", 10))
 	{
@@ -1768,6 +1783,17 @@ void network_test_update(
 		}
 		break;
 	case _network_test_join:
+		/* (join-invite: at the menus until the invite's host is reached) */
+		if (network_test.by_invite && !network_test.invite_taken)
+		{
+			unsigned char host[6];
+
+			if (!main_menu_loaded || !p2p_joined_host(host, FALSE))
+				break;
+			network_test.invite_taken = TRUE;
+			network_test.code_joined = TRUE;
+			platform_log("network test: the friend's invite accepted and its host reached; searching");
+		}
 		if (!network_test.set_up)
 		{
 			network_test.set_up = TRUE;
@@ -1787,7 +1813,30 @@ void network_test_update(
 		{
 			/* the server browser's first game (once a second), or the code given */
 			network_test.browse_seconds += seconds;
-			if (!network_test.code[0] && network_test.browse_seconds >= 1.0f)
+			/* (join-friend: the first friend whose game is joinable, once a second) */
+			if (network_test.by_friend)
+			{
+				if (network_test.browse_seconds >= 1.0f)
+				{
+					struct p2p_friend_entry entries[P2P_FRIEND_ENTRIES_MAXIMUM];
+					int count = p2p_friends_list(entries, P2P_FRIEND_ENTRIES_MAXIMUM), index;
+
+					network_test.browse_seconds = 0.0f;
+					for (index = 0; index < count; index++)
+					{
+						int outcome;
+
+						if (entries[index].kind != P2P_FRIEND_KIND_FRIEND || !entries[index].joinable)
+							continue;
+						outcome = p2p_friends_act(entries[index].id, P2P_FRIEND_KIND_FRIEND, P2P_FRIENDS_JOIN);
+						platform_log("network test: joining friend %s (%s): %s", entries[index].name, entries[index].activity,
+							p2p_friends_outcome_text(outcome));
+						network_test.code_joined = outcome == P2P_FRIENDS_DONE;
+						break;
+					}
+				}
+			}
+			else if (!network_test.code[0] && network_test.browse_seconds >= 1.0f)
 			{
 				struct p2p_lobby_entry entry;
 				int index;

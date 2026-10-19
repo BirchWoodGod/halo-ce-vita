@@ -82,6 +82,29 @@ int p2p_list_setting(const char *override_setting, const char *file_setting, cha
 	return 0;
 }
 void p2p_adhoc_start(unsigned short tunnel_port) { (void)tunnel_port; }
+/* friends (p2p_friends.c): a players' card packet read whole, as its queue
+copies it */
+void p2p_friends_tunnel_heard(unsigned long address, int from_host, const unsigned char *bytes, int size)
+{
+	volatile unsigned char sum = 0;
+	int index;
+
+	(void)address;
+	(void)from_host;
+	for (index = 0; index < size; index++)
+		sum ^= bytes[index];
+}
+int p2p_friends_tunnel_outgoing(int index, unsigned long *address, unsigned char *bytes, int capacity)
+{
+	(void)index; (void)address; (void)bytes; (void)capacity;
+	return 0;
+}
+void p2p_friends_tunnel_sent(void) {}
+void p2p_friends_update(const struct p2p_friends_host *host) { (void)host; }
+int p2p_friends_wanted(void) { return 0; }
+void p2p_friends_stopping(int quitting) { (void)quitting; }
+void p2p_lobby_friends_view(struct p2p_friends_host *host) { (void)host; }
+void p2p_signal_friends_flush(void) {}
 void p2p_adhoc_update(void) {}
 void p2p_discord_update(void) {}
 void p2p_discord_user(char *id, int id_size, char *name, int name_size)

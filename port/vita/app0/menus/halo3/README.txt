@@ -77,6 +77,30 @@ these screens stand for the Xbox's own, over the same animated Halo ring:
   map sharing; kept on the memory card), Triangle opens its details, Square
   asks before deleting it (NO, KEEP IT first). The settings panel's
   Multiplayer > Modded maps > Mod manager does the same.
+- friends.xml: FRIENDS (the main menu's last item; Triangle in the
+  multiplayer, campaign and Forge lobbies), Halo 3's friends list over
+  port/linux/src/p2p_friends.h: this Vita's friend code at the top, ADD
+  FRIEND (a code typed on the Vita's keyboard), APPEAR OFFLINE and FRIENDS
+  CAN JOIN (the settings panel's rows), then the requests, the invites, the
+  friends (online first, what each is doing - "Slayer on Blood Gulch",
+  "Co-op: The Pillar of Autumn, Legendary", "In Forge" - and JOIN when their
+  game can be joined), the requests sent and the blocked players. Cross does
+  a row's first thing (Accept, Join, type a code), Square its second
+  (Decline, Invite, Ignore, Cancel), Triangle its options (Remove, Block,
+  Unblock) after Halo 3's question; a join goes on as JOIN WITH CODE's.
+  Each lobby shows a FRIENDS panel at the right, under the players: who is
+  online and what they are doing, and the requests and invites waiting. A
+  friend's invite asks at the menus with the game's question (Accept the
+  invite and join now?). The settings panel's Multiplayer > Friends does the
+  same for the original menus.
+- players.xml: PLAYERS, Halo 3's roster of the network game this Vita plays
+  (Triangle in the game's lobby, the waiting screen; on the carnage report;
+  with the scoreboard up, Back held): each player's name, team and what
+  friends knows of them. Cross on another machine's player: its options,
+  ADD FRIEND (a friend request, no code typed: the two machines exchange
+  friend cards over internet play first, only when the other player has
+  friends on and does not appear offline) and BLOCK. Listed in menus.txt and
+  ingame.txt, so it uses only what both sets have.
 - network.xml: the games browser (BROWSE GAMES, after the profile: the
   server browser's screen over the games the Xbox's System Link list would
   show, the game's own search and join - SYSTEM LINK GAMES, AD HOC GAMES -
@@ -125,39 +149,63 @@ What is here
 
 Scenes: a screen's scene= puts a camera of its own behind it (Halo 3's
 lobbies have one): scene="ring" (the main menu) is ui.map's own flight
-(ring_loop), scene="<point> x y z yaw pitch [ticks]" writes that camera
-(world units and degrees) into one of ui.map's cutscene camera points that
-its script never flies (load_campaign, settings, multiplayer, new_campaign)
-and glides there, ring_loop asleep (menu_functions.c h3 scenes; menus.scenes,
-HALO_MENU_SCENES=0 turns them off). The campaign lobby, the multiplayer
-lobby and the Forge lobby have theirs; the screens opened from them keep it.
+(ring_loop), scene="<point> x y z yaw pitch [ticks [fov]]" writes that camera
+(world units and degrees; fov its field of view, the game's own 70 when it is
+left out or 0) into one of ui.map's cutscene camera points that its script
+never flies (load_campaign, settings, multiplayer, new_campaign) and cuts
+there, ring_loop asleep (menu_functions.c h3 scenes; menus.scenes,
+HALO_MENU_SCENES=0 turns them off). The campaign lobby, the multiplayer lobby
+and the Forge lobby have theirs; the screens opened from them keep it. SELECT
+PROFILE and CUSTOMIZATION's profile list have the editor's (customize.xml).
 
-Characters - PARKED for now (the owner, beta.7: "the Spartans look off, later"):
-the lobbies stand no Spartans; the code, the scene packs and the recipes stay,
-and CUSTOMIZATION's editor still shows its preview Spartan. To bring them back,
-put these attributes back on the lobby screens (as last tuned), and run
-run_menus_test.sh h3characters again (it skips itself while they are out):
-  campaign.xml     h3/campaign/screen  scene_object="menu_spartan 1.15 0.38 -0.6 -15; menu_spartan 0.95 0.43 -0.6 20"
-  multiplayer.xml  h3/mp/screen        scene_object="menu_spartan 0.9 0.30 -0.6 20"
-  forge_lobby.xml  h3/forge/lobby      scene_object="menu_spartan 0.9 0.30 -0.6 20"
+What stands in a lobby's scene, as Halo 3's lobbies have their scenes, is said
+by the screen's scene_object= (port/linux/game/menu_scene_objects.c, whose
+comment has the whole syntax), one entry after another, ';' between them:
 
-A screen with a scene= may stand characters in front of its camera,
-scene_object="<scene pack> <distance> <right> <up> <facing> [; ...]" (world units
-in the camera's frame, degrees turned from facing it): the pack's first tag (a
-biped) holding its weapon, in the player's multiplayer colour
-(port/linux/game/menu_scene_objects.c). The pack, menu_spartan
-(app0:packs/menu_spartan.txt: the multiplayer cyborg and its assault rifle), is
-built on the machine from the player's own multiplayer map the first time a
-lobby wants it (port/linux/game/scene_packs.c), into the save folder's t/packs.
-The campaign lobby had two, the multiplayer and Forge lobbies one. No pack, no
-multiplayer map, HALO_SCENE_PACKS=0 or the scenes off: no character, nothing
-else changes. menu_scene_spartan_show/_color/_hide (halo_menus.h) put the same
-Spartan in a scene, in a colour: CUSTOMIZATION's editor shows it. The
-characters stand upright in the picture whatever the camera's pitch (placed
-in the camera's frame: "up" is up in the picture), in a calm stance (weapon
-low, head to the camera) and lit by a light of their own (a key from the
-upper left, a cool rim, an ambient: ui.map's space has no lightmap under
-them). There is no floor: the lobbies' framing cuts them at the shins.
+  <pack>[:<tag>] [<distance> <right> <up> <facing>] [<option>=<value> ...]
+
+an object of a scene pack (app0:packs/<pack>.txt: its recipe's tag whose name
+ends in <tag>, '_' for a space) placed in the camera's frame (world units:
+along the view, right of it, up in the picture; facing in degrees from facing
+the camera, or the entry it looks at), and its options: pitch= and roll=
+(degrees: a Warthog's nose up; banked to its left), color= (a multiplayer colour, 0 white, or
+profile), weapon=[<pack>:]<tag> (in its hands), anim= (its own animation named
+after its seat and weapon, "airborne", "idle", or whole with '_' for spaces),
+frame= (that frame held; without it looped), stance=crouch, in=<entry>
+seat=<label> (seated in an earlier entry's vehicle as the scripts'
+unit_enter_vehicle seats one: driver, gunner, passenger), look=<entry> (turned
+to it), suspension= (0, hanging as in the air, to 1). A vehicle in a scene is
+held still, its physics off (vehicles.c): no dust, no skid, no crash. The
+objects stand upright in the picture whatever the camera's pitch and are lit
+by a light of their own (a key from the upper left, a cool rim, an ambient:
+ui.map's space has no lightmap under them).
+- campaign.xml: the Master Chief at the wheel of a Warthog caught mid-jump,
+  its nose up and wheels hanging, banked to its left so that the Chief shows,
+  a Marine on its gun and one beside him
+  (menu_campaign: from the player's a30, b30, b40 or a10).
+- multiplayer.xml: three white Spartans - jumping with a rocket launcher (a
+  held frame of its airborne animation), holding the flag, crouching with a
+  sniper rifle (menu_multiplayer: from the player's multiplayer maps).
+- forge_lobby.xml: 343 Guilty Spark behind a Warthog, looking at it (menu_monitor: from
+  the player's c20, c10, c40 or d40; the Warthog menu_campaign's).
+- main.xml: the ring's own flight, nothing in it.
+The packs are built on the machine from the player's own maps the first time a
+lobby wants them (port/linux/game/scene_packs.c), into the save folder's
+t/packs, checked as any pack. A scene is made whole once all its packs are
+loaded, or not at all: no source map (a scene's pack names the maps it may be
+built from), HALO_SCENE_PACKS=0, the scenes off or Menu style Halo CE, and the
+lobby has no scene; nothing else changes.
+
+SELECT PROFILE's card (and CUSTOMIZATION's list's) shows the focused profile's
+Spartan in the panel's window (profiles_panel.png), in the profile's colour and
+the player model chosen for it, following the focus; CUSTOMIZATION's editor
+shows the same Spartan, recoloured live as COLOR changes
+(menu_scene_spartan_show/_color/_hide, halo_menus.h; menu_functions.c
+h3_profiles_spartan, h3_custom_spartan_preview). Without a pack, or with the
+scenes off, the colour's swatch stays. A model is taken once the choice has
+rested on it 300 ms (stepping through MODEL loads none of the models passed),
+and the pack of the one left is let go (scene_packs_release), so any number
+of models can be looked at in one visit.
 
 Touch: the Vita's front screen points in the menus (a finger highlights, a tap
 presses A on the item or the button of a key); the button icons are named as
@@ -165,8 +213,9 @@ the game's keys (a_butn, b_butn, start_butn) for that.
 
 Tests: port/vita/tests/run_menus_test.sh h3probe h3classic h3xbox h3broken
 h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create
-h3mptouch h3coop h3coopguide h3scenes (h3characters: parked) h3profiles h3proftouch h3customize h3models
-h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows; the packs':
+h3mptouch h3coop h3coopguide h3scenes h3lobbyscenes h3modelsmany h3profiles h3proftouch h3customize h3models
+h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3friends h3friendspanel; the packs':
 port/vita/tests/run_scene_pack_test.sh; Forge's: port/vita/tests/run_forge_test.sh,
 port/vita/tests/run_forge_files_test.sh; between two machines:
-port/vita/tests/run_netns_online_test.sh h3coopmenu h3lan h3adhoc h3online netswitch.
+port/vita/tests/run_netns_online_test.sh h3coopmenu h3lan h3adhoc h3online netswitch, and friends'
+friends friendsdecline friendsblock friendsinvite friendsoffline friendsforged.

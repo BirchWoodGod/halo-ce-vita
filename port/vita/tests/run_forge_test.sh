@@ -81,6 +81,32 @@
 #               off, an Elite of the player's team, a Warthog) saved as version
 #               2 (forge_files_test --dump), then started again from the
 #               settings panel's route: its characters' teams and AI as saved
+#   allai       the Forge menu's ALL AI: an Elite, a grunt, a jackal and a
+#               hunter fight the Spartan; ALL AI (the console's "forge allai",
+#               as the menu's row) turns them all off: for 10 s none moves (a
+#               few centimetres at most), aims elsewhere or fires a shot; the
+#               editor turns the Elite and it keeps the facing it was given; a
+#               character placed then has its AI off too (it follows the
+#               setting); one turned on by hand makes the row MIXED; ALL AI
+#               turns them all off, then on, and they fight again
+#   allaimenu   the Forge menu's row by the pad: ALL AI: MIXED, A (OFF), A
+#               (ON), screenshots of each
+#   flood       the Flood AI pack (built from The Library): an infection form
+#               (a swarm of its own), a carrier and two combat forms placed
+#               by the Spartan; they attack him; the carrier bursts and its
+#               infection forms (the game's, not the layout's) live; ALL AI
+#               turns those off too
+#   floodcov    the Flood and the Covenant fight each other (the monitor
+#               watching): both sides hurt or killed
+#   sentinels   the Sentinel AI pack: sentinels (the Sentinels' team) fight
+#               the Flood: the Flood hurt or killed
+#   marines     the Marine AI pack (built from Halo): marines (the humans'
+#               team, the player's allies as in the campaign) beside the
+#               Spartan never hurt him (marinesally); with the Covenant there,
+#               they shoot the Covenant
+#   aivariant   a map variant with a character of each AI pack (one with its AI
+#               off) saved; it names the four packs; started again with no
+#               pack chosen: it brings them, places all four as saved
 #   packmaps    (not by default) every multiplayer map with every pack on
 #               (HALO_TEST_FORGE_PACKS): what each loads or leaves out, the
 #               tag cache they hold and leave; a table in its log
@@ -106,7 +132,13 @@
 #
 #   run_forge_test.sh [CASE...]      (default: v1 budget fly b30 off files variants
 #                                     edit fileshare fstouch panel packs smallmap
-#                                     aiteam aioff round aisave cepelican cepelicanoff)
+#                                     aiteam aioff round aisave allai allaimenu flood
+#                                     floodcov sentinels marines aivariant cepelican
+#                                     cepelicanoff)
+#   aipacks     (not by default) the AI packs' tag cache on Blood Gulch, the
+#               tightest map: each AI pack with the packs on by default, and
+#               every pack at once (the Flyable Pelican's extinction.map from
+#               HALO_TEST_CE_MAPS when there); a table in its log
 #   HALO_TEST_CE_MAPS     Custom Edition maps (default ../custom-maps-dl beside
 #                         the tree: extinction.map for cepelican)
 #   HALO_TEST_VITA        the harness (default build/linux/halo of this tree)
@@ -125,7 +157,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_forge_test.$$}
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs smallmap aiteam aioff round aisave cepelican cepelicanoff}
+cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs smallmap aiteam aioff round aisave allai allaimenu aicopy flood floodcov sentinels marines aivariant cepelican cepelicanoff}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
@@ -450,6 +482,12 @@ aioff_runs() {
 	ai_run aioff 55 "$ai_setup;L307:forge aiteam covenant;L308:forge brain off;L309:forge drop;$ai_spartan$(ai_watch 360 600 30);L604:@shot 00-ai-off;L605:forge ai;L620:forge on;L622:forge allai;L624:forge ai;L626:forge off$(ai_watch 700 1000 30);L1005:forge ai"
 }
 
+aicopy_runs() {
+	# (the Elite set to the player's team with its AI off, then copied with
+	# B (Circle) while held: the copy keeps both, not the defaults)
+	ai_run aicopy 30 "$ai_setup;L307:forge aiteam player;L308:forge brain off;L310:forge press b;L314:forge distance 5;L316:forge drop;L330:forge ai"
+}
+
 round_runs() {
 	# (a Warthog 8 ahead, the Elite 5, an overshield 3; their placed spots
 	# listed; the Warthog shoved, then wrecked, the Elite killed, the
@@ -474,6 +512,140 @@ aisave_runs() {
 	"$out/forge_files_test" --dump "$store/forge/bloodgulch/ai_test.hmv" > "$out/aisave/dump.txt" 2>&1
 	run aisave-load 30 "" "L400:forge ai" "" HALO_MENU_STYLE=classic HALO_SYSTEM_LINK_TEST=forge:9:ai_test.hmv \
 		HALO_TEST_FORGE_PACKS=covenant_ai HALO_SAVE_ROOT="$store"
+}
+
+# ("forge ai" and "forge where" from tick FIRST to LAST)
+ai_looks() { # FIRST LAST STEP
+	local t w=""
+	for t in $(seq "$1" "$3" "$2"); do w="$w;L$t:forge ai;L$((t + 1)):forge where"; done
+	echo "$w"
+}
+
+allai_runs() {
+	# (four Covenant fight the Spartan; ALL AI (off), watched 10 s; the
+	# editor turns the Elite and places another Elite; watched; the grunt's
+	# AI on by hand (MIXED), ALL AI (off), ALL AI (on); watched)
+	local c="L200:(set cheat_deathless_player true);L300:forge camera 60 -100 1.6 120 0;L302:forge spawn elite major plasma rifle"
+	c="$c;L303:forge distance 7;L304:forge drop;L306:forge camera 60 -100 1.6 130 0;L308:forge spawn grunt minor plasma pistol"
+	c="$c;L309:forge distance 6;L310:forge drop;L312:forge camera 60 -100 1.6 140 0;L314:forge spawn jackal minor;L315:forge distance 6"
+	c="$c;L316:forge drop;L318:forge camera 60 -100 1.6 150 0;L320:forge spawn hunter;L321:forge distance 9;L322:forge drop"
+	c="$c;L330:forge camera 60 -100 0.8 130 -5;L335:forge off$(ai_looks 360 480 60);L470:@shot 00-fighting"
+	c="$c;L490:forge allai$(ai_looks 520 820 30);L700:@shot 01-all-ai-off"
+	c="$c;L830:forge on;L833:forge grab #1;L835:forge turn 90;L837:forge drop;L840:forge camera 60 -100 1.6 105 0"
+	c="$c;L842:forge spawn elite minor plasma rifle;L843:forge distance 6;L844:forge drop;L848:forge camera 60 -100 0.8 130 -5"
+	c="$c;L850:forge off$(ai_looks 880 1000 30);L990:@shot 02-turned-and-placed"
+	c="$c;L1010:forge on;L1013:forge grab #2;L1014:forge brain on;L1015:forge drop;L1018:forge ai;L1020:forge allai;L1022:forge ai"
+	c="$c;L1024:forge allai;L1026:forge ai;L1030:forge camera 60 -100 0.8 130 -5;L1032:forge off$(ai_looks 1060 1360 30)"
+	c="$c;L1250:@shot 03-all-ai-on"
+	ai_run allai 60 "$c"
+}
+
+allaimenu_runs() {
+	# (an Elite and a grunt, ALL AI off, the grunt's on again: MIXED; the
+	# Forge menu by the pad: Start, down six to ALL AI, A, A)
+	local c="L300:forge camera 60 -100 1.6 120 0;L302:forge spawn elite major plasma rifle;L303:forge distance 7;L304:forge drop"
+	c="$c;L306:forge camera 60 -100 1.6 140 0;L308:forge spawn grunt minor plasma pistol;L309:forge distance 6;L310:forge drop"
+	c="$c;L314:forge allai;L320:forge grab #2;L322:forge brain on;L324:forge drop;L326:forge ai"
+	local pad="level:150:12000 start:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 down:150:800"
+	pad="$pad @00-menu-mixed:0:300 a:150:1500 @01-menu-off:0:300 a:150:1500 @02-menu-on:0:300 b:150:1500"
+	ai_run allaimenu 45 "$c" "HALO_TEST_PAD=$pad"
+}
+
+flood_runs() {
+	# (the Spartan with an infection form, a carrier and two combat forms
+	# around him, watched; the carrier destroyed if it has not burst on him: its
+	# infection forms; the monitor, ALL AI off, the game's characters too)
+	local c="L200:(set cheat_deathless_player true);L300:forge camera 60 -100 1.6 120 0;L302:forge spawn floodcombat elite shotgun"
+	c="$c;L303:forge distance 8;L304:forge drop;L306:forge camera 60 -100 1.6 135 0;L308:forge spawn flood_infection;L309:forge distance 6"
+	c="$c;L310:forge drop;L312:forge camera 60 -100 1.6 150 0;L314:forge spawn floodcarrier;L315:forge distance 9;L316:forge drop"
+	c="$c;L318:forge camera 60 -100 1.6 105 0;L320:forge spawn floodcombat_human assault;L321:forge distance 10;L322:forge drop"
+	c="$c;L330:forge camera 60 -100 0.8 130 -5;L335:forge off;L340:@shot 00-flood$(ai_looks 360 840 30);L420:@shot 01-flood-attacks"
+	c="$c;L596:forge on;L600:forge destroy #3;L603:forge ai;L604:forge allai off;L606:forge ai;L640:forge ai"
+	c="$c;L850:forge ai;L900:forge ai;L960:forge ai;L962:@shot 02-flood-ai-off"
+	ai_run flood 45 "$c" HALO_TEST_FORGE_PACKS=flood_ai
+}
+
+floodcov_runs() {
+	# (two of the Flood and two of the Covenant 12 world units apart, the
+	# monitor over them)
+	local c="L300:forge camera 50 -90 1.6 0 0;L302:forge spawn floodcombat elite plasma;L303:forge distance 6;L304:forge drop"
+	c="$c;L306:forge spawn floodcombat_human shotgun;L307:forge distance 7;L308:forge drop;L310:forge camera 50 -90 1.6 180 0"
+	c="$c;L312:forge spawn elite minor plasma rifle;L313:forge distance 6;L314:forge drop;L316:forge spawn grunt major plasma"
+	c="$c;L317:forge distance 7;L318:forge drop;L320:forge camera 50 -82 12 -90 -50;L330:@shot 00-flood-covenant"
+	c="$c$(ai_looks 340 1200 60);L540:@shot 01-flood-covenant-fight;L900:@shot 02-flood-covenant-after"
+	ai_run floodcov 50 "$c" HALO_TEST_FORGE_PACKS=covenant_ai,flood_ai
+}
+
+sentinels_runs() {
+	local c="L300:forge camera 50 -90 1.6 0 0;L302:forge spawn floodcombat elite plasma;L303:forge distance 6;L304:forge drop"
+	c="$c;L306:forge spawn floodcombat_human assault;L307:forge distance 7;L308:forge drop;L310:forge camera 50 -90 2.5 180 0"
+	c="$c;L312:forge spawn sentinel major;L313:forge distance 6;L314:forge drop;L316:forge camera 50 -90 2.5 170 0"
+	c="$c;L318:forge spawn Sentinel;L319:forge distance 8;L320:forge drop;L322:forge camera 50 -82 12 -90 -50"
+	c="$c;L330:forge list characters;L332:@shot 00-sentinels-flood$(ai_looks 340 1200 60);L460:@shot 01-sentinels-flood-fight"
+	ai_run sentinels 50 "$c" HALO_TEST_FORGE_PACKS=flood_ai,sentinel_ai
+}
+
+marines_runs() {
+	# (marinesally: two marines beside the Spartan, nobody else, watched;
+	# marines: with an Elite and a grunt 8 world units off)
+	local m="L200:(set cheat_deathless_player true);L300:forge camera 60 -100 1.6 100 0;L302:forge spawn marine\\marine assault rifle"
+	m="$m;L303:forge distance 3;L304:forge drop;L306:forge camera 60 -100 1.6 160 0;L308:forge spawn marine_armored sniper rifle"
+	m="$m;L309:forge distance 3;L310:forge drop"
+	ai_run marinesally 40 "$m;L330:forge camera 60 -100 0.8 130 -5;L335:forge off;L340:@shot 00-marines$(ai_looks 360 900 60)" \
+		HALO_TEST_FORGE_PACKS=marine_ai
+	local c="$m;L312:forge camera 60 -100 1.6 120 0;L314:forge spawn elite minor plasma rifle;L315:forge distance 9;L316:forge drop"
+	c="$c;L318:forge camera 60 -100 1.6 135 0;L319:forge spawn grunt minor plasma;L320:forge distance 8;L321:forge drop"
+	c="$c;L330:forge camera 60 -100 0.8 130 -5;L335:forge off;L340:@shot 00-marines-covenant$(ai_looks 360 1200 60)"
+	c="$c;L460:@shot 01-marines-fight"
+	ai_run marines 50 "$c" HALO_TEST_FORGE_PACKS=covenant_ai,marine_ai
+	mkdir -p "$out/marines"
+}
+
+aivariant_runs() {
+	# (one of each AI pack's, the Flood's with its AI off, saved; started
+	# again with no pack chosen)
+	local store="$out/aivariant-store"
+	rm -rf "$store"
+	mkdir -p "$store"
+	local c="L300:forge camera 60 -100 1.6 100 0;L302:forge spawn elite commander energy sword;L303:forge distance 6;L304:forge drop"
+	c="$c;L306:forge camera 60 -100 1.6 120 0;L308:forge spawn floodcombat elite shotgun;L309:forge distance 7;L310:forge brain off"
+	c="$c;L311:forge drop;L312:forge camera 60 -100 1.6 140 0;L314:forge spawn sentinel major;L315:forge distance 7;L316:forge drop"
+	c="$c;L318:forge camera 60 -100 1.6 160 0;L320:forge spawn marine\\marine assault rifle;L321:forge distance 6;L322:forge drop"
+	c="$c;L330:forge ai;L335:forge save AI Packs"
+	ai_run aivariant 30 "$c" HALO_SAVE_ROOT="$store" HALO_TEST_FORGE_PACKS=covenant_ai,flood_ai,sentinel_ai,marine_ai
+	"$out/forge_files_test" --dump "$store/forge/bloodgulch/ai_packs.hmv" > "$out/aivariant/dump.txt" 2>&1
+	run aivariant-load 40 "" "L400:forge ai" "" HALO_MENU_STYLE=classic HALO_SYSTEM_LINK_TEST=forge:9:ai_packs.hmv \
+		HALO_TEST_FORGE_PACKS=none HALO_SAVE_ROOT="$store"
+}
+
+# (the AI packs on Blood Gulch: each with the packs on by default, and all;
+# with extinction.map for the Flyable Pelican when there)
+aipacks_runs() {
+	local folder="$out/aipacks-data" file index=0 set
+	rm -rf "$folder"
+	mkdir -p "$folder/maps"
+	for file in "$(cd "$data" && pwd)"/maps/*.map; do
+		ln -sfn "$file" "$folder/maps/"
+	done
+	[ -r "$ce_maps/extinction.map" ] && ln -sfn "$(cd "$ce_maps" && pwd)/extinction.map" "$folder/maps/extinction.map"
+	data_saved=$data
+	data=$folder
+	for set in covenant_vehicles,dropships,ce_pelican covenant_vehicles,dropships,ce_pelican,covenant_ai \
+		covenant_vehicles,dropships,ce_pelican,flood_ai covenant_vehicles,dropships,ce_pelican,sentinel_ai \
+		covenant_vehicles,dropships,ce_pelican,marine_ai covenant_ai,flood_ai,sentinel_ai,marine_ai \
+		covenant_vehicles,dropships,ce_pelican,covenant_ai,flood_ai,sentinel_ai,marine_ai; do
+		while [ "$(jobs -rp | wc -l)" -ge "$jobs" ]; do
+			wait -n
+		done
+		echo "$set" > "$out/aipacks-$index.set"
+		run "aipacks-$index" 70 "" "L400:forge list characters" "" HALO_MENU_STYLE=classic \
+			HALO_SAVE_ROOT="$out/aipacks-store-$index" HALO_SYSTEM_LINK_TEST=forge:9 HALO_TEST_FORGE_PACKS=$set &
+		index=$((index + 1))
+	done
+	wait
+	data=$data_saved
+	mkdir -p "$out/aipacks"
+	echo 0 > "$out/aipacks/exit"
 }
 
 # (the test's own files' writer and reader: forge_files_test, built once
@@ -548,10 +720,30 @@ for c in $cases; do
 		aiteam_runs & ;;
 	aioff)
 		aioff_runs & ;;
+	aicopy)
+		aicopy_runs & ;;
 	round)
 		round_runs & ;;
 	aisave)
 		aisave_runs & ;;
+	allai)
+		allai_runs & ;;
+	allaimenu)
+		allaimenu_runs & ;;
+	flood)
+		flood_runs & ;;
+	floodcov)
+		floodcov_runs & ;;
+	sentinels)
+		sentinels_runs & ;;
+	marines)
+		marines_runs & ;;
+	aivariant)
+		aivariant_runs & ;;
+	aipacks)
+		# (its runs take the cases' slots)
+		wait
+		aipacks_runs ;;
 	cepelican)
 		if [ "$menus_files" = 0 ] || [ ! -r "$ce_maps/extinction.map" ] || [ ! -r "$data/maps/sounds.map" ]; then
 			echo "SKIP: cepelican: no extinction.map in $ce_maps (HALO_TEST_CE_MAPS), or no Halo PC resource maps in $data/maps"
@@ -648,8 +840,8 @@ for c in $cases; do
 		expect packs "the Banshee placed through the browser" "forge: spawned Banshee \\(banshee, vehicles\\)"
 		expect packs "the Pelican placed through the browser" "forge: spawned Pelican \\(pelican, vehicles\\)"
 		expect packs "an Elite placed through the AI category" \
-			"forge: spawned Elite Major Needler \\(elite major needler, characters\\)"
-		expect packs "the Elite has its actor" "forge: elite given a free actor \\([0-9a-f]{8}\\)"
+			"forge: spawned Elite Commander Energy Sword \\(elite commander energy sword, characters\\)"
+		expect packs "the Elite has its actor" "forge: elite special given a free actor \\([0-9a-f]{8}\\)"
 		expect packs "the Pelican's seats said" "forge: seat 0: P-driver, driver"
 		expect packs "saved" "forge: map variant \"Pack Test\" saved as bloodgulch/pack_test.hmv, 3 objects"
 		if grep -q "^pack [0-9]: covenant_vehicles " "$out/packs/dump.txt" && grep -q "^pack [0-9]: dropships " "$out/packs/dump.txt" &&
@@ -697,6 +889,163 @@ for c in $cases; do
 			"forge: ai 0: Elite Major Plasma Rifle .* alive .* AI team flood, engine team 4, AI off, actor yes"
 		expect aisave-load "the other of the player's team, its AI on" \
 			"forge: ai 1: Elite Minor Plasma Rifle .* alive .* AI team player, engine team 0, AI on, actor yes"
+		continue
+	fi
+	if [ "$c" = allai ]; then
+		checked allai || continue
+		log="$out/allai/run.log"
+		expect allai "four Covenant placed" "forge: spawned Hunter \(hunter, characters\).*4/32 AI"
+		n=$(awk '/forge: all AI off/ { exit } /shots by characters so far/ { v = $(NF - 5) } END { print v + 0 }' "$log")
+		[ "$n" -ge 1 ] && echo "  ok: allai: they fought first ($n shots)" || fail "allai: no shot before ALL AI"
+		expect allai "ALL AI turned the four off" "forge: all AI off \(4 characters\)"
+		# (the 10 s after ALL AI, from a second after it: each character's
+		# place within 15 cm, its aim the same, its actor braindead (mode 0),
+		# no shot fired)
+		awk '/test command at tick 520:/ { on = 1 } /test command at tick 830:/ { exit } on' "$log" > "$out/allai/off.log"
+		if awk '/forge: ai [0-3]: / { split($0, a, " at "); split(a[2], p, " "); i = $4;
+				aim = $0; sub(/.*aim /, "", aim); sub(/, facing.*/, "", aim);
+				if (!(i in x0)) { x0[i] = p[1]; y0[i] = p[2]; a0[i] = aim }
+				d = (p[1] - x0[i]) ^ 2 + (p[2] - y0[i]) ^ 2; if (d > dm) dm = d
+				if (aim != a0[i]) moved++; if ($0 !~ /AI off/ || $0 !~ /mode 0 action 0/) awake++; n++ }
+			END { printf "%d readings, %.3f wu at most, %d aims changed, %d awake\n", n, sqrt(dm), moved, awake;
+				exit !(n >= 40 && dm < 0.0225 && !moved && !awake) }' "$out/allai/off.log" > "$out/allai/off.txt"; then
+			echo "  ok: allai: frozen for 10 s: $(cat "$out/allai/off.txt")"
+		else
+			fail "allai: not frozen: $(cat "$out/allai/off.txt")"
+		fi
+		shots=$(grep -a "shots by characters so far" "$out/allai/off.log" | awk '{ print $(NF - 5) }' | sort -u | tr '\n' ' ')
+		[ "$(echo $shots | wc -w)" = 1 ] && echo "  ok: allai: no shot fired while off (the count stays $shots)" ||
+			fail "allai: shots fired while off ($shots)"
+		grep -aq "ALL AI off" "$out/allai/off.log" && echo "  ok: allai: the row says OFF" || fail "allai: the row not OFF"
+		# (the Elite turned by the editor keeps its new facing; the Elite
+		# placed then has its AI off)
+		expect allai "the editor turned the Elite" "forge: turned elite by 90 degrees"
+		awk '/test command at tick 880:/ { on = 1 } /test command at tick 1010:/ { exit } on' "$log" > "$out/allai/turned.log"
+		before=$(grep -a "forge: ai 0: " "$out/allai/off.log" | tail -1 | sed 's/.*facing \([^ ]* [^ ]*\) .*/\1/')
+		facings=$(grep -a "forge: ai 0: " "$out/allai/turned.log" | sed 's/.*facing \([^ ]* [^ ]*\) .*/\1/' | sort -u)
+		if [ "$(echo "$facings" | wc -l)" = 1 ] && [ -n "$facings" ] && [ "$facings" != "$before" ]; then
+			echo "  ok: allai: the turned Elite keeps its facing ($before, turned $facings, 4 s)"
+		else
+			fail "allai: the turned Elite's facing: before $before, after: $(echo $facings)"
+		fi
+		expect allai "the Elite placed then has its AI off (ALL AI's setting)" \
+			"forge: ai 4: Elite Minor Plasma Rifle \(id 5\) alive .* AI off, actor yes"
+		if grep -a "forge: ai [0-4]: " "$out/allai/turned.log" | grep -q "AI on"; then
+			fail "allai: a character's AI on before ALL AI turned them on"
+		fi
+		expect allai "one turned on by hand: MIXED" "ALL AI mixed"
+		expect allai "ALL AI from MIXED: all off" "forge: all AI off \(5 characters\)"
+		expect allai "ALL AI again: all on" "forge: all AI on \(5 characters\)"
+		sed -n '/forge: all AI on (5 characters)/,$p' "$log" > "$out/allai/on.log"
+		later=$(grep -a "shots by characters so far" "$out/allai/on.log" | tail -1 | awk '{ print $(NF - 5) }')
+		first=$(echo $shots | awk '{ print $1 }')
+		[ -n "$later" ] && [ "$later" -gt "${first:-0}" ] && echo "  ok: allai: they fight again ($first shots, then $later)" ||
+			fail "allai: no shot after ALL AI on ($first, $later)"
+		grep -a "forge: the player's unit at" "$out/allai/on.log" | grep -q "shield 0\.[0-8]" &&
+			echo "  ok: allai: the player's shield goes down again" || fail "allai: the player not shot after ALL AI on"
+		continue
+	fi
+	if [ "$c" = allaimenu ]; then
+		checked allaimenu || continue
+		expect allaimenu "the row MIXED" "ALL AI mixed"
+		expect allaimenu "the Forge menu opened by Start" "ui: screen pc.h3.forge.pause.screen"
+		expect allaimenu "A on ALL AI: MIXED turned all off" "forge: all AI off \(2 characters\)"
+		expect allaimenu "A again: all on" "forge: all AI on \(2 characters\)"
+		[ -f "$out/allaimenu/shots/02-menu-on.bmp" ] && echo "  ok: allaimenu: the three screenshots" ||
+			fail "allaimenu: no screenshots"
+		continue
+	fi
+	if [ "$c" = flood ]; then
+		checked flood || continue
+		log="$out/flood/run.log"
+		expect flood "the pack built from The Library" "scene packs: flood_ai: built from c20"
+		expect flood "loaded" "forge: packs: loaded: Flood AI; left out: none"
+		expect flood "the infection form a swarm of its own" "forge: flood_infection given a swarm of its own \([0-9a-f]{8}\)"
+		expect flood "the carrier and the combat forms free actors" "forge: floodcarrier given a free actor \([0-9a-f]{8}\)"
+		expect flood "the combat forms with their variants' weapons" \
+			"forge: ai 0: Flood Elite Shotgun .* alive .* engine team 4, AI on, actor yes.* weapon shotgun"
+		expect flood "on the Flood's team" "forge: ai 3: Flood Human Assault Rifle .* engine team 4, AI on, actor yes.* weapon assault rifle"
+		expect flood "they attack the Spartan: his shield goes down" "forge: the player's unit at .* shield 0\.[0-8]"
+		expect flood "and his body" "forge: the player's unit at .* body 0\.[0-9]"
+		expect flood "the carrier burst: its infection forms live (the game's)" \
+			"forge: ai: [1-9][0-9]* characters not of the layout alive"
+		expect flood "ALL AI off: the game's characters too" \
+			"forge: ai: ([1-9][0-9]*) characters not of the layout alive \(\1 with their AI off\); ALL AI off"
+		continue
+	fi
+	if [ "$c" = floodcov ]; then
+		checked floodcov || continue
+		log="$out/floodcov/run.log"
+		last=$(grep -a "forge: ai [0-3]: " "$log" | tail -4)
+		flood=$(echo "$last" | grep -E "Flood (Elite|Human)" | grep -cE " dead |body 0\.|body -")
+		cov=$(echo "$last" | grep -E "Elite Minor|Grunt Major" | grep -cE " dead |body 0\.|shield 0\.[0-8]|body -")
+		[ "$flood" -ge 1 ] && [ "$cov" -ge 1 ] && echo "  ok: floodcov: the Flood and the Covenant fought ($flood of the Flood, $cov of the Covenant hurt or dead)" ||
+			fail "floodcov: no fight ($flood of the Flood, $cov of the Covenant hurt or dead)"
+		count floodcov "shots fired" "shots by characters so far" 1
+		continue
+	fi
+	if [ "$c" = sentinels ]; then
+		checked sentinels || continue
+		log="$out/sentinels/run.log"
+		expect sentinels "the pack built from The Library" "scene packs: sentinel_ai: built from c20"
+		expect sentinels "the browser's AI groups the Flood, then the Sentinels" "forge: characters [0-9]+: Sentinel \(characters.sentinel.sentinel\), sentinels"
+		expect sentinels "two sentinels on the Sentinels' team" "forge: ai 3: Sentinel \(id 4\) alive .* engine team 5"
+		if grep -a "forge: weapons [0-9]*: Sentinel" "$log" > /dev/null; then
+			fail "sentinels: the sentinel's beam offered as a weapon"
+		fi
+		hurt=$(grep -a "forge: ai [01]: Flood" "$log" | tail -2 | grep -cE " dead |body 0\.|body -")
+		[ "$hurt" -ge 1 ] && echo "  ok: sentinels: the sentinels attack the Flood ($hurt of 2 hurt or dead)" ||
+			fail "sentinels: the Flood unhurt"
+		continue
+	fi
+	if [ "$c" = marines ]; then
+		checked marinesally || continue
+		checked marines || continue
+		expect marinesally "the pack built from Halo" "scene packs: marine_ai: built from a30"
+		expect marinesally "the humans the player's allies" "forge: the humans are the player's allies \(team 0\)"
+		expect marinesally "two marines on the humans' team" "forge: ai 1: Armored Marine Sniper Rifle .* alive .* engine team 2, AI on, actor yes.* weapon sniper rifle"
+		if grep -a "forge: the player's unit at" "$out/marinesally/run.log" | grep -qv "body 1.00, shield 1.00"; then
+			fail "marinesally: the player was hurt by the marines"
+		else
+			echo "  ok: marinesally: the marines never hurt the Spartan ($(grep -ac "forge: the player's unit at" "$out/marinesally/run.log") looks, 18 s)"
+		fi
+		hurt=$(grep -a "forge: ai [23]: " "$out/marines/run.log" | tail -2 | grep -cE " dead |body 0\.|shield 0\.[0-8]|body -")
+		[ "$hurt" -ge 1 ] && echo "  ok: marines: the marines shoot the Covenant ($hurt of 2 hurt or dead)" ||
+			fail "marines: the Covenant unhurt"
+		continue
+	fi
+	if [ "$c" = aivariant ]; then
+		checked aivariant || continue
+		checked aivariant-load || continue
+		expect aivariant "saved" "forge: map variant \"AI Packs\" saved as bloodgulch/ai_packs.hmv, 4 objects"
+		for pack in covenant_ai flood_ai sentinel_ai marine_ai; do
+			grep -q "^pack [0-9]: $pack " "$out/aivariant/dump.txt" && echo "  ok: aivariant: the variant names $pack" ||
+				fail "aivariant: the variant does not name $pack: $(cat "$out/aivariant/dump.txt")"
+		done
+		grep -q "^record 1: characters.floodcombat elite.floodcombat elite shotgun kind 0 team -1 ai team 0 respawn 30 flags 3 " \
+			"$out/aivariant/dump.txt" && echo "  ok: aivariant: the Flood elite's AI off in the file" ||
+			fail "aivariant: the Flood elite's record: $(grep '^record 1' "$out/aivariant/dump.txt")"
+		expect aivariant-load "no pack chosen: the variant brings the four" \
+			"forge: packs: loaded: Covenant AI, Flood AI, Sentinel AI, Marine AI; left out: none"
+		expect aivariant-load "all four placed" "forge: map variant \"AI Packs\" applied: 4 placed, 0 skipped"
+		# (placed as saved; by the time they are listed the others may have
+		# killed the frozen Flood elite, or one another)
+		expect aivariant-load "the Flood elite as saved, its AI off" "forge: ai 1: Flood Elite Shotgun .* engine team 4, AI off"
+		expect aivariant-load "the sentinel" "forge: ai 2: Sentinel Major .* engine team 5, AI on"
+		expect aivariant-load "the marine" "forge: ai 3: Marine Assault Rifle .* engine team 2, AI on"
+		continue
+	fi
+	if [ "$c" = aipacks ]; then
+		printf '%-78s %s\n' "packs asked for" "loaded / left out (the tag cache held, free after them); AI offered"
+		for index in 0 1 2 3 4 5 6; do
+			r="aipacks-$index"
+			checked "$r" || continue
+			l="$out/$r/run.log"
+			packs=$(grep -a "forge: packs: loaded:" "$l" | head -1 | sed 's/.*forge: packs: //')
+			free=$(grep -a "scene packs: .*: loaded from" "$l" | tail -1 | sed 's/.*held by packs, \([0-9]* KB\) free after them.*/\1 free/')
+			ai=$(grep -a "forge: palette characters:" "$l" | tail -1 | sed 's/.*: //')
+			printf '%-78s %s (%s); %s AI\n' "$(cat "$out/aipacks-$index.set")" "$packs" "$free" "$ai"
+		done
 		continue
 	fi
 	if [ "$c" = smallmap ]; then
@@ -888,6 +1237,9 @@ for c in $cases; do
 			echo "  ok: $c: the lobby's Leave went back to File Share" || fail "$c: not back at File Share"
 		grep -a "ui: screen" "$log" | tail -1 | grep -q 'pc.h3.main.screen' &&
 			echo "  ok: $c: Back went to the main menu" || fail "$c: not back at the main menu" ;;
+	aicopy)
+		count "$c" "the original and its copy both on the player's team with their AI off" \
+			"forge: ai [0-9]+: Elite Major Plasma Rifle .*AI team player, engine team 0, AI off" 2 ;;
 	aioff)
 		expect "$c" "an Elite of the Covenant's with its AI off" "forge: elite major plasma rifle: AI team covenant \(engine team 3\), AI off"
 		# (not hurt while its AI is off: the looks before ALL AI)
@@ -951,7 +1303,7 @@ done
 if [ -n "${HALO_TEST_SHOTS:-}" ]; then
 	mkdir -p "$HALO_TEST_SHOTS"
 	for c in $cases variants-save variants-load variants-missing variants-damaged variants-full panel-damaged packs-load \
-		aiteam-player aiteam-covenant aisave-load; do
+		aiteam-player aiteam-covenant aisave-load marinesally aivariant-load; do
 		for shot in "$out/$c"/shots/*.bmp; do
 			[ -f "$shot" ] && cp "$shot" "$HALO_TEST_SHOTS/$c-$(basename "$shot")"
 		done

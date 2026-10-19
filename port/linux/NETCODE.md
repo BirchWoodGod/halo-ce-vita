@@ -608,6 +608,30 @@ Unity's Netcode for Entities, lightyear, netfox and the Ares source):
   stale and its pings shown as "-". A LAN's system link has no tunnel: there
   a client shows the others as "-".
 
+- **Friends** (`port/linux/src/p2p_friends.c`, docs/superpowers/specs/2026-10-18-friends-design.md):
+  friend requests, presence, invites and removals go through the signalling
+  brokers on topics of their own (`hcev/f1/i/<hash>`, a friend code's inbox;
+  `hcev/f1/m/<hash>`, a key's mailbox), each message an envelope of its own
+  ("F", version 1) sealed for its recipient and signed by the sender's friend
+  identity, nothing retained. The game's messages, JOIN/ACCEPT, codes and
+  listings do not change: builds before it never subscribe to those topics.
+  The one thing the game machines send each other is the players' friend
+  cards (the PLAYERS screen's ADD FRIEND and BLOCK): a tunnel packet of
+  internet play's own (type 7: a version, ask or answer, the sender's and
+  the receiver's machine, a 16-byte nonce; an answer adds the friend key, a
+  name of at most 16 bytes and an Ed25519 signature over the nonce, key and
+  name). An ask carries nothing of the asker's; a machine answers only with
+  friends on and not appearing offline, at most once in 3 s per asker. A
+  joiner sends to its host alone, which relays between joiners with the
+  sender's machine as it read it (one a second per machine, 8 at once and 4
+  a second in all); a joiner takes cards only from the peer the game says
+  is its host. Never on the crossplay wire or ad hoc. As the host's ping
+  table, a build before it drops the packet type unread: no network
+  change, and network version 18 stands. A friend's game is joined by its
+  invite, through the host's JOIN/ACCEPT as any; a presence carries the
+  sender's network version and wire, and Join is offered only for a game of
+  this build's.
+
 ## Testing
 
 `debug.network_test` (`port/linux/game/network_test.c`) hosts or joins a

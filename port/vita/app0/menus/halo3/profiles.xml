@@ -35,6 +35,11 @@ swatches are the game's colours). -->
 		<frame png="halo3/swatch_16.png" width="16" height="16"/>
 		<frame png="halo3/swatch_17.png" width="16" height="16"/>
 	</bitmap>
+	<!-- the panel, with a window at the card's lower right where the focused profile's Spartan
+	stands (tools/halo3_menu_art.py) -->
+	<bitmap name="h3/profiles_panel">
+		<frame png="halo3/profiles_panel.png" width="256" height="256"/>
+	</bitmap>
 	<strings name="h3/profile_text">
 		<string text="SELECT PROFILE"/>
 		<string text="Choose the profile to play the campaign with."/>
@@ -146,15 +151,19 @@ swatches are the game's colours). -->
 
 	<!-- the chosen profile's card (the Xbox's: its colour, name, the level after the highest it
 	finished, that one's difficulty, its controls), or what CREATE NEW PROFILE and a damaged file
-	mean (info_text) -->
+	mean (info_text); at its right, in the panel's window (h3/profiles/panel), the profile's Spartan
+	in its colour and player model (menu_functions.c h3_profiles_spartan: the scene packs' Spartan,
+	as CUSTOMIZATION's preview, in front of the screen's camera, the editor's), following the focus;
+	none for CREATE NEW PROFILE, a damaged file, the scenes off or no pack (the swatch stays) -->
+	<widget name="h3/profiles/panel" left="40" top="40" width="560" height="400" bitmap="h3/profiles_panel"/>
 	<widget name="h3/profiles/info_swatch" left="368" top="104" width="40" height="40" bitmap="h3/swatch"/>
 	<widget name="h3/profiles/info_name" type="text" left="418" top="110" width="172" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1"/>
-	<widget name="h3/profiles/info_level_label" type="text" left="368" top="156" width="220" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/profile_text" string_index="6"/>
-	<widget name="h3/profiles/info_level" type="text" left="368" top="172" width="220" height="20" font="h3/font_item" color="#FFAABED6" text_y="2"/>
-	<widget name="h3/profiles/info_skill_label" type="text" left="368" top="198" width="220" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/profile_text" string_index="7"/>
-	<widget name="h3/profiles/info_skill" type="text" left="368" top="214" width="220" height="20" font="h3/font_item" color="#FFAABED6" text_y="2"/>
-	<widget name="h3/profiles/info_controls_label" type="text" left="368" top="240" width="220" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/profile_text" string_index="8"/>
-	<widget name="h3/profiles/info_controls" type="text" left="368" top="256" width="220" height="20" font="h3/font_item" color="#FFAABED6" text_y="2"/>
+	<widget name="h3/profiles/info_level_label" type="text" left="368" top="156" width="116" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/profile_text" string_index="6"/>
+	<widget name="h3/profiles/info_level" type="text" left="368" top="172" width="116" height="38" font="h3/font_item" color="#FFAABED6" text_y="2"/>
+	<widget name="h3/profiles/info_skill_label" type="text" left="368" top="214" width="116" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/profile_text" string_index="7"/>
+	<widget name="h3/profiles/info_skill" type="text" left="368" top="230" width="116" height="20" font="h3/font_item" color="#FFAABED6" text_y="2"/>
+	<widget name="h3/profiles/info_controls_label" type="text" left="368" top="256" width="116" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/profile_text" string_index="8"/>
+	<widget name="h3/profiles/info_controls" type="text" left="368" top="272" width="116" height="38" font="h3/font_item" color="#FFAABED6" text_y="2"/>
 	<widget name="h3/profiles/info_text" type="text" left="368" top="156" width="220" height="140" font="h3/font_small" color="#FFCFD9E3"/>
 	<widget name="h3/profiles/status" type="text" left="52" top="340" width="536" height="34" font="h3/font_small" color="#FFF0B070" text_y="1"/>
 
@@ -167,15 +176,18 @@ swatches are the game's colours). -->
 
 	<widget name="h3/profiles/title" type="text" left="52" top="46" width="400" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/profile_text" string_index="0"/>
 	<widget name="h3/profiles/subtitle" type="text" left="52" top="72" width="536" height="16" font="h3/font_small" color="#FFCFD9E3" string_list="h3/profile_text" string_index="1"/>
-	<!-- (the campaign's: CAMPAIGN, the Xbox's load_campaign_player_profile; the lobby's scene
-	stays behind it, the main menu's ring) -->
-	<widget name="h3/profiles/screen" flags="pass_unhandled_to_focused_child">
+	<!-- (the campaign's: CAMPAIGN, the Xbox's load_campaign_player_profile; behind it the
+	editor's camera, customize.xml's h3/custom/screen, in ui.map's multiplayer point, for the card's
+	Spartan; gone, the Spartan goes with it) -->
+	<widget name="h3/profiles/screen" flags="pass_unhandled_to_focused_child" scene="multiplayer -40 -1.8 15.5 25 0">
 		<on event="created" run="port h3 profiles campaign"/>
+		<on event="created" run="port h3 scene"/>
+		<on event="deleted" run="port h3 profiles close"/>
 		<on event="b back" back="true"/>
 		<on event="x" run="port h3 profile delete ask" open="h3/profdel/screen"/>
 		<on event="y" run="port h3 profile create"/>
 		<child widget="h3/main/haze"/>
-		<child widget="h3/pick/panel"/>
+		<child widget="h3/profiles/panel"/>
 		<child widget="h3/profiles/title"/>
 		<child widget="h3/profiles/subtitle"/>
 		<child widget="h3/pick/rule"/>

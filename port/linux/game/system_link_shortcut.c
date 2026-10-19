@@ -366,6 +366,13 @@ void system_link_shortcut_update(
 
 		pc_menu_functions_update(main_menu_loaded);
 	}
+	/* (friends: this machine's presence, a friend's invite asked about:
+	friends_game.c) */
+	{
+		extern void friends_game_update(boolean main_menu_loaded);
+
+		friends_game_update(main_menu_loaded);
+	}
 	/* (the settings panel's Mod manager page: its look and deletes,
 	answered here, on the game's thread: mod_manager.c) */
 	{

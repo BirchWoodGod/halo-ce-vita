@@ -273,6 +273,22 @@ void sound_cache_sound_new(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* port: whether a sound's cached samples are in use, playing (scene_packs.c
+lets a pack's tags go only when none of its sounds plays) */
+boolean sound_cache_sound_in_use(
+	struct sound_permutation *sound)
+{
+	struct xbox_cache_sound_datum *cache_sound;
+
+	if (!xbox_sound_cache_globals.cache_sounds || sound->cache_block_index == NONE)
+		return FALSE;
+	cache_sound = datum_try_and_get(xbox_sound_cache_globals.cache_sounds, sound->cache_block_index);
+	return cache_sound && cache_sound->sound == sound &&
+		(cache_sound->software_reference_count || cache_sound->hardware_reference_count);
+}
+#endif
+
 void sound_cache_sound_delete(
 	struct sound_permutation *sound)
 {

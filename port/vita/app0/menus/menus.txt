@@ -14,6 +14,8 @@ halo3/multiplayer.xml
 halo3/network.xml
 halo3/password.xml
 halo3/mods.xml
+halo3/friends.xml
+halo3/players.xml
 halo3/join.xml
 halo3/join_split.xml
 halo3/pregame.xml

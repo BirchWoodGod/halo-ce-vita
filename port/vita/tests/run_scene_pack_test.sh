@@ -9,7 +9,11 @@
 #             and counts made wrong, header fields changed): every copy
 #             refused or, still a pack, loaded clean twice, never a crash;
 #             covenant_vehicles (with its sounds) built from b40 and fuzzed
-#             (a quarter as many)
+#             (a quarter as many); the lobbies' scenes' packs, menu_campaign
+#             (a30), menu_multiplayer (bloodgulch) and menu_monitor (c20), each
+#             built, loaded with no correction and fuzzed (an eighth as many); the AI packs (covenant_ai, flood_ai,
+#             sentinel_ai, marine_ai) each built, loaded with no correction
+#             and fuzzed (an eighth as many each)
 #   damaged   a pack built by the game, then damaged three ways between two
 #             runs (a byte of its tags changed, its CRCs made right; cut
 #             short; a byte changed, CRCs left): each refused, deleted, built
@@ -175,6 +179,35 @@ for c in $cases; do
 		TMPDIR="$out/tool" "$tool" fuzz "$out/tool/covenant_vehicles.pack" $(( ${HALO_TEST_FUZZ:-2000} / 4 )) 2 > "$out/tool/fuzz2.log" 2>&1 ||
 			fail "tool: covenant_vehicles' fuzzing failed ($out/tool/fuzz2.log)"
 		tail -1 "$out/tool/fuzz2.log"
+		# (the Halo 3 lobbies' scenes' packs: built from a30, bloodgulch and c20, each loaded with no
+		# correction and fuzzed, an eighth as many)
+		seed=3
+		for pack in menu_campaign menu_multiplayer menu_monitor; do
+			"$tool" build "$recipes/$pack.txt" "$data/maps" "$out/tool/$pack.pack" > "$out/tool/$pack.log" 2>&1 ||
+				fail "tool: $pack was not built ($out/tool/$pack.log)"
+			grep -aE "^built" "$out/tool/$pack.log"
+			expect tool "$pack loads with no correction" "pack tags .*passed.* 0 corrections" "$out/tool/$pack.log"
+			seed=$((seed + 1))
+			TMPDIR="$out/tool" "$tool" fuzz "$out/tool/$pack.pack" $(( ${HALO_TEST_FUZZ:-2000} / 8 )) $seed > "$out/tool/$pack.fuzz.log" 2>&1 ||
+				fail "tool: $pack's fuzzing failed ($out/tool/$pack.fuzz.log)"
+			tail -1 "$out/tool/$pack.fuzz.log"
+		done
+		# (the AI packs: each built, loaded with no correction, fuzzed - an
+		# eighth as many each)
+		seed=10
+		for pack in covenant_ai flood_ai sentinel_ai marine_ai; do
+			if ! "$tool" build "$recipes/$pack.txt" "$data/maps" "$out/tool/$pack.pack" > "$out/tool/build-$pack.log" 2>&1; then
+				fail "tool: $pack was not built ($out/tool/build-$pack.log)"
+				continue
+			fi
+			grep -aE "^built" "$out/tool/build-$pack.log"
+			expect tool "$pack loads with no correction" "pack tags .*passed.* 0 corrections" "$out/tool/build-$pack.log"
+			seed=$((seed + 1))
+			TMPDIR="$out/tool" "$tool" fuzz "$out/tool/$pack.pack" $(( ${HALO_TEST_FUZZ:-2000} / 8 )) $seed \
+				> "$out/tool/fuzz-$pack.log" 2>&1 || fail "tool: $pack's fuzzing failed ($out/tool/fuzz-$pack.log)"
+			tail -1 "$out/tool/fuzz-$pack.log"
+			rm -f "$out/tool/$pack.pack"
+		done
 		rm -f "$out/tool/"*.pack ;;
 	damaged)
 		run damaged 14 "$bloodgulch;L60:pack load menu_spartan" ""
@@ -245,7 +278,7 @@ EOF
 		run ai 30 "$cmds" ""
 		if checked ai; then
 			expect ai "the pack loaded beside Blood Gulch" "scene packs: covenant_ai: loaded"
-			expect ai "its characters in Forge's palette" "forge: palette characters: 10"
+			expect ai "its characters in Forge's palette" "forge: palette characters: 14"
 			expect ai "an elite placed" "forge: spawned Elite Major Plasma Rifle"
 			expect ai "it shoots: the player's shield goes down" "where: the player at .* shield 0\.[0-8]"
 			expect ai "and then the player's body" "where: the player at .* body 0\.[0-8]"

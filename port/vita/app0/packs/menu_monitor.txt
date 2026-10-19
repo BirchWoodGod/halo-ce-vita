@@ -1,0 +1,29 @@
+# The Forge lobby's scene in the Halo 3 menus (menus/halo3/forge_lobby.xml's
+# scene_object=, port/linux/game/menu_scene_objects.c): 343 Guilty Spark, the
+# Monitor, from the player's own campaign maps (343 Guilty Spark, The Library,
+# Two Betrayals, The Maw); the Warthog he looks at is menu_campaign's. What a
+# still scene does not need is left out: sounds, effects, damage, the HUD.
+pack menu_monitor
+map c20 c10 c40 d40
+tag bipd characters\monitor\monitor
+strip snd!
+strip lsnd
+strip effe
+strip part
+strip pctl
+strip cont
+strip deca
+strip jpt!
+strip ligh
+strip lens
+strip glw!
+strip udlg
+strip foot
+strip wphi
+strip unhi
+strip hud#
+strip trak
+strip mgs2
+strip spla
+strip proj
+strip eqip

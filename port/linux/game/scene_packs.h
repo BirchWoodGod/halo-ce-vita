@@ -45,7 +45,7 @@ enum
 	_scene_pack_state_failed,
 	NUMBER_OF_SCENE_PACK_STATES,
 
-	MAXIMUM_LOADED_SCENE_PACKS = 6,
+	MAXIMUM_LOADED_SCENE_PACKS = 8,
 	/* the packs a map may want (built, or loaded: at most
 	MAXIMUM_LOADED_SCENE_PACKS of them) */
 	MAXIMUM_SCENE_PACK_SLOTS = 32,
@@ -56,6 +56,14 @@ enum
 /* the pack of that recipe wanted with the loaded map (an Xbox map: none
 with a Custom Edition one): its state now */
 short scene_packs_want(
+	char const *name);
+
+/* (the menus' preview) the pack of that recipe let go: once it is the last
+loaded and nothing uses it (its objects deleted, its sounds silent), at the
+top of a frame, its tag cache room, file range and slot given back. Wanted
+again meanwhile, it stays; wanted after, it is loaded again from its file.
+Packs go last loaded first: one under another that stays waits for it */
+void scene_packs_release(
 	char const *name);
 
 /* (Forge's lobby) the pack of that recipe built, on the thread, if it is

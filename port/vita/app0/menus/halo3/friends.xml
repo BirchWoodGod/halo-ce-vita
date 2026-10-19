@@ -1,0 +1,237 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The Halo 3-style FRIENDS screen (the main menu's FRIENDS, Triangle in the lobbies) and the
+FRIENDS panel at the right of the lobbies (port/linux/src/p2p_friends.h; menu_functions.c "port h3
+friends ..."), laid out as Halo 3's friends list: the title strip with how many are online, this
+Vita's friend code, ADD FRIEND, APPEAR OFFLINE and FRIENDS CAN JOIN, then the requests, invites,
+friends (online first, what each is doing, JOIN when their game can be joined), the requests sent
+and the blocked players, the chosen one's facts under the list, the buttons in the strip at the
+foot. Cross does the row's first thing (Accept, Join, type a code), Square its second (Decline,
+Invite, Ignore, Cancel), Triangle opens its options (Remove, Block, Unblock) after Halo 3's question.
+The settings panel's Multiplayer > Friends does the same. The art is this folder's own
+(tools/halo3_menu_art.py). -->
+<menus>
+	<strings name="h3/friends_text">
+		<string text="FRIENDS"/>
+		<string text="YOUR FRIEND CODE"/>
+		<string text="NAME"/>
+		<string text="STATUS"/>
+		<string text="Options"/>
+		<string text="Back"/>
+		<string text="Friends"/>
+		<string text="Give your code to a friend, or type theirs: both must agree."/>
+	</strings>
+
+	<!-- the list -->
+	<widget name="h3/friends/strip" left="0" top="20" width="640" height="36" bitmap="h3/strip"/>
+	<widget name="h3/friends/rule" left="0" top="56" width="640" height="2" bitmap="h3/rule"/>
+	<widget name="h3/friends/title" type="text" left="28" top="26" width="260" height="26" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/friends_text" string_index="0"/>
+	<widget name="h3/friends/friends_status" type="text" left="250" top="31" width="366" height="18" align="right" font="h3/font_small" color="#FF9FB6CC" text_y="1"/>
+	<widget name="h3/friends/code_label" type="text" left="28" top="62" width="160" height="16" font="h3/font_small" color="#FF9FB6CC" text_y="1" string_list="h3/friends_text" string_index="1"/>
+	<widget name="h3/friends/code_value" type="text" left="190" top="60" width="240" height="20" font="h3/font_item" color="#FFF2F6FA" text_y="2"/>
+	<widget name="h3/friends/panel" left="16" top="84" width="608" height="244" bitmap="h3/panel"/>
+	<widget name="h3/friends/header_name" type="text" left="40" top="88" width="200" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/friends_text" string_index="2"/>
+	<widget name="h3/friends/header_state" type="text" left="246" top="88" width="260" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/friends_text" string_index="3"/>
+	<widget name="h3/friends/row_name" type="text" left="12" top="0" width="214" height="20" font="h3/font_item" color="#FFE6ECF2" text_y="2"/>
+	<widget name="h3/friends/row_state" type="text" left="226" top="0" width="290" height="20" font="h3/font_small" color="#FFC5D0DD" text_y="3"/>
+	<widget name="h3/friends/row_tag" type="text" left="516" top="0" width="80" height="20" align="right" font="h3/font_item" color="#FFAABED6" text_y="2"/>
+	<widget name="h3/friends/row_1" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 friends act"/>
+		<child widget="h3/friends/row_name"/>
+		<child widget="h3/friends/row_state"/>
+		<child widget="h3/friends/row_tag"/>
+	</widget>
+	<widget name="h3/friends/row_2" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 friends act"/>
+		<child widget="h3/friends/row_name"/>
+		<child widget="h3/friends/row_state"/>
+		<child widget="h3/friends/row_tag"/>
+	</widget>
+	<widget name="h3/friends/row_3" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 friends act"/>
+		<child widget="h3/friends/row_name"/>
+		<child widget="h3/friends/row_state"/>
+		<child widget="h3/friends/row_tag"/>
+	</widget>
+	<widget name="h3/friends/row_4" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 friends act"/>
+		<child widget="h3/friends/row_name"/>
+		<child widget="h3/friends/row_state"/>
+		<child widget="h3/friends/row_tag"/>
+	</widget>
+	<widget name="h3/friends/row_5" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 friends act"/>
+		<child widget="h3/friends/row_name"/>
+		<child widget="h3/friends/row_state"/>
+		<child widget="h3/friends/row_tag"/>
+	</widget>
+	<widget name="h3/friends/row_6" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 friends act"/>
+		<child widget="h3/friends/row_name"/>
+		<child widget="h3/friends/row_state"/>
+		<child widget="h3/friends/row_tag"/>
+	</widget>
+	<widget name="h3/friends/row_7" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 friends act"/>
+		<child widget="h3/friends/row_name"/>
+		<child widget="h3/friends/row_state"/>
+		<child widget="h3/friends/row_tag"/>
+	</widget>
+	<widget name="h3/friends/row_8" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 friends act"/>
+		<child widget="h3/friends/row_name"/>
+		<child widget="h3/friends/row_state"/>
+		<child widget="h3/friends/row_tag"/>
+	</widget>
+	<widget name="h3/friends/row_9" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 friends act"/>
+		<child widget="h3/friends/row_name"/>
+		<child widget="h3/friends/row_state"/>
+		<child widget="h3/friends/row_tag"/>
+	</widget>
+	<widget name="h3/friends/row_10" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 friends act"/>
+		<child widget="h3/friends/row_name"/>
+		<child widget="h3/friends/row_state"/>
+		<child widget="h3/friends/row_tag"/>
+	</widget>
+	<widget name="h3/friends/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port h3 friends"/>
+		<on event="x" run="port h3 friends second"/>
+		<on event="y" run="port h3 friends options ask" open="h3/friends/options"/>
+		<on event="left_trigger" run="port h3 friends page up"/>
+		<on event="right_trigger" run="port h3 friends page down"/>
+		<child widget="h3/friends/row_1" x="20" y="108"/>
+		<child widget="h3/friends/row_2" x="20" y="128"/>
+		<child widget="h3/friends/row_3" x="20" y="148"/>
+		<child widget="h3/friends/row_4" x="20" y="168"/>
+		<child widget="h3/friends/row_5" x="20" y="188"/>
+		<child widget="h3/friends/row_6" x="20" y="208"/>
+		<child widget="h3/friends/row_7" x="20" y="228"/>
+		<child widget="h3/friends/row_8" x="20" y="248"/>
+		<child widget="h3/friends/row_9" x="20" y="268"/>
+		<child widget="h3/friends/row_10" x="20" y="288"/>
+	</widget>
+	<!-- (the chosen one: its name and code, what it is doing, what a press does, an outcome) -->
+	<widget name="h3/friends/detail_name" type="text" left="28" top="334" width="590" height="20" font="h3/font_item" color="#FFF2F6FA" text_y="2"/>
+	<widget name="h3/friends/detail_state" type="text" left="28" top="356" width="590" height="16" font="h3/font_small" color="#FFDDE6F0"/>
+	<widget name="h3/friends/detail_help" type="text" left="28" top="374" width="590" height="16" font="h3/font_small" color="#FF9FB6CC"/>
+	<widget name="h3/friends/friends_message" type="text" left="28" top="396" width="590" height="36" font="h3/font_small" color="#FFF0D090"/>
+	<widget name="h3/friends/buttons" left="0" top="440" width="640" height="24" bitmap="h3/strip"/>
+	<widget name="h3/friends/a_butn" left="24" top="444" width="16" height="16" bitmap="h3/glyph_cross"/>
+	<widget name="h3/friends/a_label" type="text" left="44" top="443" width="96" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1"/>
+	<widget name="h3/friends/x_butn" left="146" top="444" width="16" height="16" bitmap="h3/glyph_square"/>
+	<widget name="h3/friends/x_label" type="text" left="166" top="443" width="96" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1"/>
+	<widget name="h3/friends/y_butn" left="268" top="444" width="16" height="16" bitmap="h3/glyph_triangle"/>
+	<widget name="h3/friends/y_label" type="text" left="288" top="443" width="96" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/friends_text" string_index="4"/>
+	<widget name="h3/friends/b_butn" left="532" top="444" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/friends/back" type="text" left="552" top="443" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/friends_text" string_index="5"/>
+	<widget name="h3/friends/screen" flags="pass_unhandled_to_focused_child">
+		<on event="created" run="port h3 friends init"/>
+		<on event="b back" back="true"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/friends/strip"/>
+		<child widget="h3/friends/rule"/>
+		<child widget="h3/friends/title"/>
+		<child widget="h3/friends/friends_status"/>
+		<child widget="h3/friends/code_label"/>
+		<child widget="h3/friends/code_value"/>
+		<child widget="h3/friends/panel"/>
+		<child widget="h3/friends/header_name"/>
+		<child widget="h3/friends/header_state"/>
+		<child widget="h3/friends/list"/>
+		<child widget="h3/friends/detail_name"/>
+		<child widget="h3/friends/detail_state"/>
+		<child widget="h3/friends/detail_help"/>
+		<child widget="h3/friends/friends_message"/>
+		<child widget="h3/friends/buttons"/>
+		<child widget="h3/friends/a_butn"/>
+		<child widget="h3/friends/a_label"/>
+		<child widget="h3/friends/x_butn"/>
+		<child widget="h3/friends/x_label"/>
+		<child widget="h3/friends/y_butn"/>
+		<child widget="h3/friends/y_label"/>
+		<child widget="h3/friends/b_butn"/>
+		<child widget="h3/friends/back"/>
+	</widget>
+
+	<!-- the options (Triangle): Halo 3's question, the chosen one's choices in rows (REMOVE
+	FRIEND, BLOCK, UNBLOCK, CANCEL REQUEST: those that apply; the others hidden) -->
+	<widget name="h3/friends/options_panel" left="120" top="120" width="400" height="230" bitmap="h3/panel"/>
+	<widget name="h3/friends/options_title" type="text" left="132" top="126" width="376" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1"/>
+	<widget name="h3/friends/options_rule" left="120" top="154" width="400" height="2" bitmap="h3/rule"/>
+	<widget name="h3/friends/options_text" type="text" left="132" top="162" width="376" height="56" font="h3/font_small" color="#FFCFD9E3"/>
+	<widget name="h3/friends/option_1" type="text" width="376" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a" run="port h3 friends option" back="true"/>
+	</widget>
+	<widget name="h3/friends/option_2" type="text" width="376" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a" run="port h3 friends option" back="true"/>
+	</widget>
+	<widget name="h3/friends/option_3" type="text" width="376" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a" run="port h3 friends option" back="true"/>
+	</widget>
+	<widget name="h3/friends/option_back" type="text" width="376" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/friends_text" string_index="5">
+		<on event="a" back="true"/>
+	</widget>
+	<widget name="h3/friends/options_list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port h3 friends options"/>
+		<child widget="h3/friends/option_back" y="0"/>
+		<child widget="h3/friends/option_1" y="20"/>
+		<child widget="h3/friends/option_2" y="40"/>
+		<child widget="h3/friends/option_3" y="60"/>
+	</widget>
+	<widget name="h3/friends/options_strip" left="120" top="330" width="400" height="20" bitmap="h3/strip"/>
+	<widget name="h3/friends/options_a_butn" left="132" top="332" width="16" height="16" bitmap="h3/glyph_cross"/>
+	<widget name="h3/friends/options_select" type="text" left="152" top="331" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/mods_text" string_index="14"/>
+	<widget name="h3/friends/options_b_butn" left="226" top="332" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/friends/options_back" type="text" left="246" top="331" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/friends_text" string_index="5"/>
+	<widget name="h3/friends/options" flags="pass_unhandled_to_focused_child">
+		<on event="b back" back="true"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/friends/options_panel"/>
+		<child widget="h3/friends/options_title"/>
+		<child widget="h3/friends/options_rule"/>
+		<child widget="h3/friends/options_text"/>
+		<child widget="h3/friends/options_strip"/>
+		<child widget="h3/friends/options_a_butn"/>
+		<child widget="h3/friends/options_select"/>
+		<child widget="h3/friends/options_b_butn"/>
+		<child widget="h3/friends/options_back"/>
+		<child widget="h3/friends/options_list" x="132" y="228"/>
+	</widget>
+
+	<!-- the lobbies' FRIENDS panel (the multiplayer, campaign and Forge lobbies, at the right under
+	the players): who is online and what they are doing, Triangle for the FRIENDS screen -->
+	<widget name="h3/friends/lobby_title" type="text" left="380" top="300" width="120" height="16" font="h3/font_small" color="#FF9FB6CC" text_y="1" string_list="h3/friends_text" string_index="0"/>
+	<widget name="h3/friends/lobby_count" type="text" left="500" top="300" width="132" height="16" align="right" font="h3/font_small" color="#FF9FB6CC" text_y="1"/>
+	<widget name="h3/friends/lobby_rule" left="380" top="318" width="252" height="2" bitmap="h3/rule"/>
+	<widget name="h3/friends/lobby_name_1" type="text" left="380" top="322" width="108" height="16" font="h3/font_small" color="#FFEEF2F6" text_y="1"/>
+	<widget name="h3/friends/lobby_state_1" type="text" left="490" top="322" width="142" height="16" font="h3/font_small" color="#FFC5D0DD" text_y="1"/>
+	<widget name="h3/friends/lobby_name_2" type="text" left="380" top="338" width="108" height="16" font="h3/font_small" color="#FFEEF2F6" text_y="1"/>
+	<widget name="h3/friends/lobby_state_2" type="text" left="490" top="338" width="142" height="16" font="h3/font_small" color="#FFC5D0DD" text_y="1"/>
+	<widget name="h3/friends/lobby_name_3" type="text" left="380" top="354" width="108" height="16" font="h3/font_small" color="#FFEEF2F6" text_y="1"/>
+	<widget name="h3/friends/lobby_state_3" type="text" left="490" top="354" width="142" height="16" font="h3/font_small" color="#FFC5D0DD" text_y="1"/>
+	<widget name="h3/friends/lobby_name_4" type="text" left="380" top="370" width="108" height="16" font="h3/font_small" color="#FFEEF2F6" text_y="1"/>
+	<widget name="h3/friends/lobby_state_4" type="text" left="490" top="370" width="142" height="16" font="h3/font_small" color="#FFC5D0DD" text_y="1"/>
+	<widget name="h3/friends/lobby_name_5" type="text" left="380" top="386" width="108" height="16" font="h3/font_small" color="#FFEEF2F6" text_y="1"/>
+	<widget name="h3/friends/lobby_state_5" type="text" left="490" top="386" width="142" height="16" font="h3/font_small" color="#FFC5D0DD" text_y="1"/>
+	<widget name="h3/friends/lobby_y_butn" left="380" top="410" width="16" height="16" bitmap="h3/glyph_triangle"/>
+	<widget name="h3/friends/lobby_hint" type="text" left="400" top="409" width="232" height="18" font="h3/font_small" color="#FFEEF2F6" text_y="2" string_list="h3/friends_text" string_index="6"/>
+	<widget name="h3/friends/lobby_panel">
+		<data input="port h3 friends panel"/>
+		<child widget="h3/friends/lobby_title"/>
+		<child widget="h3/friends/lobby_count"/>
+		<child widget="h3/friends/lobby_rule"/>
+		<child widget="h3/friends/lobby_name_1"/>
+		<child widget="h3/friends/lobby_state_1"/>
+		<child widget="h3/friends/lobby_name_2"/>
+		<child widget="h3/friends/lobby_state_2"/>
+		<child widget="h3/friends/lobby_name_3"/>
+		<child widget="h3/friends/lobby_state_3"/>
+		<child widget="h3/friends/lobby_name_4"/>
+		<child widget="h3/friends/lobby_state_4"/>
+		<child widget="h3/friends/lobby_name_5"/>
+		<child widget="h3/friends/lobby_state_5"/>
+		<child widget="h3/friends/lobby_y_butn"/>
+		<child widget="h3/friends/lobby_hint"/>
+	</widget>
+</menus>

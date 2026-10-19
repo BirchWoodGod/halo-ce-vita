@@ -70,6 +70,7 @@ art is this folder's own (tools/halo3_menu_art.py). -->
 		<string text="Back"/>
 		<string text="CUSTOMIZATION"/>
 		<string text="MOD MANAGER"/>
+		<string text="FRIENDS"/>
 	</strings>
 
 	<!-- the items (no START SOLO GAME: the owner's, CAMPAIGN does it): CAMPAIGN opens the
@@ -99,6 +100,10 @@ art is this folder's own (tools/halo3_menu_art.py). -->
 	<widget name="h3/main/customization" type="text" width="190" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/main_items" string_index="11">
 		<on event="a start" open="ui\shell\main_menu\settings_select\player_setup\player_profile_select_screen" label="settings"/>
 	</widget>
+	<!-- (FRIENDS: the friends list, halo3/friends.xml: codes, requests, presence, Join, Invite) -->
+	<widget name="h3/main/friends" type="text" width="190" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/main_items" string_index="13">
+		<on event="a start" open="h3/friends/screen"/>
+	</widget>
 	<widget name="h3/main/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<child widget="h3/main/campaign" x="0" y="0"/>
 		<child widget="h3/main/multiplayer" x="0" y="20"/>
@@ -106,6 +111,7 @@ art is this folder's own (tools/halo3_menu_art.py). -->
 		<child widget="h3/main/fileshare" x="0" y="60"/>
 		<child widget="h3/main/mods" x="0" y="80"/>
 		<child widget="h3/main/customization" x="0" y="100"/>
+		<child widget="h3/main/friends" x="0" y="120"/>
 	</widget>
 
 	<widget name="h3/main/haze" left="0" top="0" width="640" height="480" bitmap="h3/haze"/>

@@ -119,9 +119,10 @@
 #            chosen); the joiner finds it in the server browser
 #   menus    lobby, joined from OpenCE's multiplayer screens (menu_tags.c):
 #            the joiner (its maps folder HALO_TEST_DATA_MENUS, with the Halo
-#            PC bitmaps.map and loc.map) presses Multiplayer, INTERNET (the
-#            server browser), A on the host's row, then on the System Link
-#            screen the profile and the game (HALO_TEST_PAD)
+#            PC bitmaps.map and loc.map) presses Multiplayer, INTERNET: the
+#            profile first (as SYSTEM LINK and CREATE GAME), then the server
+#            browser, A on the host's row; then the System Link list at once,
+#            the host's game joined by itself (HALO_TEST_PAD)
 #   menuspw  the same with a password (HALO_TEST_LOBBY_PASSWORD), typed on
 #            the password screen (HALO_TEST_TEXT_INPUT)
 #   browserscroll  the server browser's scrolling and sorts, its game joined by itself
@@ -155,6 +156,39 @@
 #            readiness, hits and Discord user (which the host takes only
 #            over its connection). Both must drop them (logged), and the
 #            joiner's player go on moving on the host
+#   friends  friends (port/linux/src/p2p_friends.c): each copy writes its friend
+#            code to a file (HALO_TEST_FRIENDS code-file=), the host types the
+#            joiner's (add-file=), the joiner accepts; both must be friends,
+#            see each other online with what they do (the host's "Slayer on
+#            Blood Gulch", joinable: its game public), and the joiner join the
+#            host's game in one press from its presence (network test
+#            join-friend) and play; the broker must carry only the friends'
+#            hashed topics (hcev/f1/i/, hcev/f1/m/), nothing retained
+#   friendsdecline  the joiner declines: no friendship on either side,
+#            nothing sent back, the host's re-sent requests muted (asked once)
+#   friendsblock  the joiner blocks the host's request: the host's re-sent
+#            requests dropped as a blocked player's
+#   friendsinvite  the host's game is private (not joinable from presence);
+#            the host invites the joiner (invite-after=), whose invite
+#            pop-up is answered Accept (HALO_TEST_FRIENDS_ANSWER: friends_game.c)
+#            at the menus; the joiner joins the private game by it and plays
+#   friendsoffline  friends; the joiner appears offline at
+#            HALO_TEST_OFFLINE_AT seconds (70): the host must see it go offline
+#            at once and never online again, the joiner still see the host
+#   friendsforged  friends; the host sends its last message again as it was
+#            (replay-at=), then three forgeries (forge-at=: a flipped byte,
+#            another key's signature, another sender): the joiner must drop
+#            each, and nothing of them show
+#   friendsplayers  no codes typed (the owner: "Can I move the cursor over the player
+#            like on Halo 3 and add friend?"): the joiner joins the host's public game,
+#            and HALO_TEST_ADD_AT seconds in (25) its PLAYERS screen opens and adds the
+#            host's player (HALO_TEST_FRIENDS_PLAYERS: friends_game.c), as ADD FRIEND
+#            does: the joiner asks for the host's friend card over internet play (a
+#            nonce alone), the host answers with it signed, the joiner sends a friend
+#            request to it, the host accepts (HALO_TEST_FRIENDS accept): both friends
+#   friendsplayersoff  as friendsplayers, the host appearing offline: no card, no
+#            request, the joiner told none came
+#   friendsplayersnone  as friendsplayers, the host's friends off: the same
 #   adhoc    online off, ad hoc on: the two machines' only link to each other
 #            is an emulated ad hoc group (HALO_NET_ADHOC_EMULATE)
 #   many     online off, the host and HALO_TEST_JOINERS joiners (3) on one
@@ -908,13 +942,14 @@ menus|menuspw)
 	code=$(wait_code)
 	[ -n "$code" ] || { fail "the host never showed a code"; tail -20 "$out/host/run.log"; exit 1; }
 	echo "host's code: $code"
-	# (Multiplayer, INTERNET: the server browser; a while for the listing, A on
-	# its row; menuspw: the password screen, A types it, down, JOIN GAME; then
-	# the System Link screen: A joins, A picks the profile, A, a while for the
-	# host's game to be reached, A joins it)
-	pad="wait:150:3000 down a wait:150:2000 a wait:150:${HALO_TEST_MENUS_LIST_WAIT:-12000} a"
+	# (Multiplayer, INTERNET: the profile first (A joins, A picks the profile,
+	# A), then the server browser; a while for the listing, A on its row;
+	# menuspw: the password screen, A types it, down, JOIN GAME; then the
+	# System Link list at once, the profile chosen, where the host's game is
+	# joined by itself once reached)
+	pad="wait:150:3000 down a wait:150:2000 a wait:150:2000 a wait:150:2000 a wait:150:2000 a"
+	pad="$pad wait:150:${HALO_TEST_MENUS_LIST_WAIT:-12000} a"
 	[ "$mode" = menuspw ] && pad="$pad wait:150:3000 a wait:150:1500 down a"
-	pad="$pad wait:150:6000 a a a wait:150:${HALO_TEST_COOP_LIST_WAIT:-15000} a"
 	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" \
 		HALO_NET_ONLINE=true HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_TEST_INPUT=bot:2 "HALO_TEST_PAD=$pad" \
 		"HALO_TEST_TEXT_INPUT=$password"; join_pid=$last_pid
@@ -923,7 +958,12 @@ menus|menuspw)
 	echo "--- joiner"; grep -aE "menus:|ui: screen|system link: (joining|in another)" "$jl" | head -20
 	grep -aq "menus: OpenCE's multiplayer screens: .* added" "$jl" || fail "the joiner did not add OpenCE's screens"
 	grep -aq "ui: screen pc.browser.screen" "$jl" || fail "the server browser did not open"
+	grep -aq "menus: Server Browser: the profile, then the server browser" "$jl" &&
+		grep -aq "menus: Server Browser: the profile chosen; the server browser" "$jl" ||
+		fail "INTERNET did not choose the profile before the server browser"
 	grep -aq "menus: joining the public game VitaHost" "$jl" || fail "the joiner did not join the host's game from the browser"
+	grep -aq "menus: the public game's invite handed on; the System Link list next (the profile chosen)" "$jl" ||
+		fail "the profile was asked again after the browser"
 	if [ "$mode" = menuspw ]; then
 		grep -aq "ui: screen pc.join.password.screen" "$jl" || fail "the password screen did not open"
 		grep -aq "menus: joining the public game VitaHost with its password" "$jl" || fail "the password was not given"
@@ -944,13 +984,13 @@ browserscroll)
 	# down 14 times (the 15th game, the rows from the 4th), a page down (the
 	# last), Y (by name: Test game 00 first), up (wrapped: VitaHost, the last),
 	# A joins it; then the System Link screen as in menus)
-	pad="wait:150:3000 down a wait:150:2000 a wait:150:${HALO_TEST_MENUS_LIST_WAIT:-12000}"
+	pad="wait:150:3000 down a wait:150:2000 a wait:150:2000 a wait:150:2000 a wait:150:2000 a"
+	pad="$pad wait:150:${HALO_TEST_MENUS_LIST_WAIT:-12000}"
 	for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14; do pad="$pad down:150:400"; done
-	pad="$pad rt:150:800 y:150:800 up:150:800 a"
-	# (then the System Link screen's start and profile (A A A), and no pick
-	# in its list: the browser's game is joined by itself once the host is
+	# (the profile chosen before the browser: then the System Link list, and no
+	# pick in it: the browser's game is joined by itself once the host is
 	# reached, network_game_client_listed_game_of / ui_widget_port_join_listed_game)
-	pad="$pad wait:150:6000 a a a"
+	pad="$pad rt:150:800 y:150:800 up:150:800 a"
 	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" \
 		HALO_NET_ONLINE=true HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_TEST_INPUT=bot:2 "HALO_TEST_PAD=$pad" \
 		HALO_TEST_BROWSER_GAMES=20; join_pid=$last_pid
@@ -3520,8 +3560,169 @@ CHECK
 		fail "the server crashed"
 	fi
 	;;
+friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged)
+	hc=$out/host.code jc=$out/joiner.code
+	host_steps="code-file=$hc,add-file=$jc"
+	join_steps="code-file=$jc"
+	host_extra="HALO_NET_HOST_PUBLIC=true"
+	join_test=watch
+	# (the scripted player leaves the menus alone while a pad script runs: at the
+	# menus the joiner waits for its invite, as a player would)
+	join_pad="wait:150:1000"
+	case $mode in
+	friends) join_steps="$join_steps,accept"; join_test=join-friend ;;
+	friendsdecline) join_steps="$join_steps,decline" ;;
+	friendsblock) join_steps="$join_steps,block" ;;
+	friendsinvite)
+		join_steps="$join_steps,accept"; join_test=join-invite; host_extra="HALO_NET_HOST_PUBLIC=false"
+		join_pad="wait:150:$((seconds * 1000))"
+		host_steps="$host_steps,invite-after=${HALO_TEST_INVITE_AFTER:-50}" ;;
+	friendsoffline) join_steps="$join_steps,accept,appear-offline-at=${HALO_TEST_OFFLINE_AT:-70}" ;;
+	friendsforged) join_steps="$join_steps,accept"; host_steps="$host_steps,replay-at=70,forge-at=85" ;;
+	esac
+	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env $host_extra HALO_NET_LOBBY_NAME=Alpha \
+		"HALO_TEST_FRIENDS=$host_steps" ${HALO_TEST_HOST_ENV:-}; host_pid=$last_pid
+	run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=$join_test HALO_TEST_INPUT=bot:2 HALO_NET_LOBBY_NAME=Bravo "HALO_TEST_FRIENDS=$join_steps" \
+		HALO_TEST_FRIENDS_ANSWER=accept "HALO_TEST_PAD=$join_pad"; join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log
+	echo "host's code: $(cat "$hc" 2>/dev/null)  joiner's code: $(cat "$jc" 2>/dev/null)"
+	echo "--- host"; grep -a "friends:" "$hl" | grep -av "is online:" | head -16
+	grep -a "friends: .* is online:" "$hl" | head -3
+	echo "--- joiner"; grep -a "friends:\|network test: \(joining friend\|the friend\)" "$jl" | grep -av "is online:" | head -16
+	grep -a "friends: .* is online:" "$jl" | head -3
+	for side in host joiner; do
+		log=$out/$side/run.log
+		grep -aq "friends: this machine's friend code is [A-Z0-9]\{4\}-[A-Z0-9]\{4\}-[A-Z0-9]\{4\}" "$log" ||
+			fail "the $side said no friend code"
+		grep -aq "friends: online (" "$log" || fail "the $side's friends never went online"
+	done
+	grep -aq "friends: test: adding .*: Friend request sent" "$hl" || fail "the host did not send its request"
+	grep -aq "friends: a friend request from " "$jl" || fail "the joiner did not hear the request"
+	# (the broker: the friends' topics only as hashes, nothing of theirs retained)
+	grep -aq "hcev/f1/i/[0-9a-f]\{32\}" "$out/broker.log" || fail "no request went to a code's inbox topic"
+	grep -a "retained" "$out/broker.log" | grep -aq "/f1/" && fail "the broker kept a friends' message"
+	grep -aqE "Alpha|Bravo" "$out/broker.log" && fail "the broker's log shows a player's name"
+	case $mode in
+	friends|friendsinvite|friendsoffline|friendsforged)
+		grep -aq "friends: .* accepted the friend request; now friends" "$hl" || fail "the host did not become the joiner's friend"
+		grep -aq "friends: accepted .* friend request; now friends" "$jl" || fail "the joiner did not accept"
+		grep -aq "friends: .* is online: " "$hl" || fail "the host never saw the joiner online"
+		grep -aq "friends: .* is online: " "$jl" || fail "the joiner never saw the host online"
+		grep -aq "hcev/f1/m/[0-9a-f]\{32\}" "$out/broker.log" || fail "nothing went to a mailbox topic"
+		;;
+	esac
+	case $mode in
+	friends)
+		grep -aq "friends: .* is online: .* on Blood Gulch (joinable)" "$jl" ||
+			fail "the joiner did not see the host's public game on Blood Gulch, joinable"
+		grep -aq "network test: joining friend .*: Done" "$jl" || fail "the joiner did not join its friend's game"
+		grep -aq "friends: joining .*'s game" "$jl" || fail "the friend's invite link was not joined"
+		;;
+	friendsdecline|friendsblock)
+		grep -aq "now friends" "$hl" "$jl" && fail "a friendship was made"
+		grep -aq "friends: .* is online" "$hl" "$jl" && fail "presence went between machines that are not friends"
+		[ "$(grep -ac "friends: a friend request from " "$jl")" = 1 ] || fail "the request was heard more than once"
+		if [ $mode = friendsdecline ]; then
+			grep -aq "friends: declined .* (nothing sent)" "$jl" || fail "the joiner did not decline"
+		else
+			grep -aq "friends: blocked " "$jl" || fail "the joiner did not block"
+			grep -aq "friends: dropped a friend request from a blocked player" "$jl" ||
+				fail "the blocked player's next request was not dropped"
+		fi
+		;;
+	friendsinvite)
+		grep -aq "(joinable)" "$jl" && fail "a private game was joinable from presence"
+		grep -aq "friends: invited .* into this machine's game" "$hl" || fail "the host did not invite"
+		grep -aq "friends: .* invited this machine: " "$jl" || fail "the joiner did not hear the invite"
+		grep -aq "friends: .* invited you: .* (the test answers)" "$jl" || fail "the invite's pop-up was not asked"
+		grep -aq "friends: .*'s invite accepted: Done" "$jl" || fail "the invite was not accepted"
+		grep -aq "network test: the friend's invite accepted and its host reached" "$jl" ||
+			fail "the invite's host was not reached"
+		;;
+	friendsoffline)
+		grep -aq "friends: appearing offline" "$jl" || fail "the joiner did not appear offline"
+		awk '/friends: test: appearing offline/ { found = 1 } found && /friends: Alpha is online/ { seen = 1 }
+			END { exit !seen }' "$jl" || fail "the joiner stopped seeing the host while appearing offline"
+		awk '/friends: .* went offline$/ { gone = 1; next } gone && /friends: .* is online/ { exit 1 }
+			END { exit !gone }' "$hl" || fail "the host did not see the joiner go offline, or saw it online again"
+		;;
+	friendsforged)
+		grep -aq "friends: test: the last message sent, sent again as it was" "$hl" || fail "the host did not replay"
+		grep -aq "friends: test: three forged messages sent" "$hl" || fail "the host did not forge"
+		grep -aq "friends: dropped a replayed message from " "$jl" || fail "the replayed message was not dropped"
+		grep -aq "friends: dropped a message from .* whose signature is not theirs" "$jl" ||
+			fail "the message signed by another key was not dropped"
+		forged=$(grep -a "friends: dropped: " "$jl" | sed 's/.* replayed, \([0-9]*\) forged.*/\1/' | awk '{ s += $1 } END { print s + 0 }')
+		echo "the joiner dropped $forged forged or misdirected messages"
+		[ "$forged" -ge 3 ] || fail "the joiner dropped $forged forgeries (3 wanted)"
+		grep -aq "friends: Forged\|Forged is online" "$jl" && fail "a forgery showed"
+		;;
+	esac
+	if [ $mode = friends ] || [ $mode = friendsinvite ]; then
+		grep -aq "system link: in another's lobby\|system link: in a network game" "$jl" || fail "the joiner did not get into the host's game"
+		two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+		echo "joiner's seconds with two players playing: $two"
+		[ "$two" -ge 20 ] || fail "the joiner played the host's game for $two s with two players (20 wanted)"
+	fi
+	;;
+friendsplayers|friendsplayersoff|friendsplayersnone)
+	# (no codes typed: the joiner adds the host from the game's players, the two
+	# machines' friend cards exchanged over internet play first)
+	host_steps="accept"
+	host_extra="HALO_NET_HOST_PUBLIC=true"
+	case $mode in
+	friendsplayersoff) host_extra="$host_extra HALO_FRIENDS_APPEAR_OFFLINE=true" ;;
+	friendsplayersnone) host_extra="$host_extra HALO_FRIENDS=false" ;;
+	esac
+	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env $host_extra HALO_NET_LOBBY_NAME=Alpha \
+		"HALO_TEST_FRIENDS=$host_steps" ${HALO_TEST_HOST_ENV:-}; host_pid=$last_pid
+	run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=join-public HALO_TEST_INPUT=bot:2 HALO_NET_LOBBY_NAME=Bravo \
+		"HALO_TEST_FRIENDS_PLAYERS=add@${HALO_TEST_ADD_AT:-25}"; join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log
+	echo "--- host"; grep -a "friends:" "$hl" | grep -av "is online:" | head -16
+	echo "--- joiner"; grep -a "friends:\|PLAYERS screen\|h3 players: options" "$jl" | grep -av "is online:" | head -16
+	grep -aq "system link: in another's lobby\|system link: in a network game" "$jl" || fail "the joiner did not get into the host's game"
+	grep -aq "friends: in a game, machine 0, hosting (cards relayed)" "$hl" || fail "the host was not told its game"
+	grep -aq "friends: in a game, machine [1-9]" "$jl" || fail "the joiner was not told its game"
+	# (the screen itself needs the menus' files, which these copies' data may not
+	# have: run_menus_test.sh h3players opens it; its ADD FRIEND's steps run either way)
+	if grep -aq "menus: Halo 3 set: " "$jl"; then
+		grep -aq "friends: test: the PLAYERS screen opened" "$jl" || fail "the joiner's PLAYERS screen did not open"
+	else
+		grep -aq "friends: test: the PLAYERS screen" "$jl" || fail "the joiner's PLAYERS step did not run"
+	fi
+	grep -aq "menus: h3 players: options for .* (machine 0)" "$jl" || fail "the joiner did not choose the host's player"
+	grep -aq "friends: asked machine 0 for its friend card (to add it)" "$jl" || fail "the joiner did not ask for the host's card"
+	[ $mode = friendsplayersnone ] && grep -aq "friends: online (" "$hl" && fail "the host's friends went online, though off"
+	case $mode in
+	friendsplayers)
+		grep -aq "friends: a player in this game (machine [1-9]) asked for this machine's friend card; answered" "$hl" ||
+			fail "the host did not answer with its card"
+		grep -aq "friends: .* (machine 0) answered with their friend card" "$jl" || fail "the joiner did not hear the host's card"
+		grep -aq "friends: adding .* (a player in this game): Friend request sent" "$jl" || fail "the joiner did not send a request"
+		grep -aq "friends: a friend request from " "$hl" || fail "the host did not hear the request"
+		grep -aq "friends: accepted .* friend request; now friends" "$hl" || fail "the host did not accept"
+		grep -aq "friends: .* accepted the friend request; now friends" "$jl" || fail "the joiner did not become the host's friend"
+		grep -aq "friends: a friend card that is not its key's dropped" "$jl" && fail "the host's card did not verify"
+		;;
+	friendsplayersoff|friendsplayersnone)
+		grep -aq "asked for this machine's friend card; answered" "$hl" && fail "the host answered with its card"
+		grep -aq "answered with their friend card" "$jl" && fail "the joiner got the host's card"
+		grep -aq "friends: machine 0 did not answer for its friend card" "$jl" || fail "the joiner was not told no answer came"
+		grep -aq "friends: a friend request from " "$hl" && fail "a request reached the host"
+		grep -aq "now friends" "$hl" "$jl" && fail "a friendship was made"
+		;;
+	esac
+	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+	echo "joiner's seconds with two players playing: $two"
+	[ "$two" -ge 20 ] || fail "the joiner played the host's game for $two s with two players (20 wanted)"
+	;;
 *)
-	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3online|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed" >&2
+	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3online|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone" >&2
 	exit 2
 	;;
 esac
