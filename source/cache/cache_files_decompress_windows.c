@@ -673,6 +673,17 @@ void cache_copy_queue_end(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* port: whether the copy under way has been asked to stop
+(cache_copy_queue_end): it ends between its pieces and is never finished,
+whatever map asks for it next (cache_files_precache_is_copying_map) */
+boolean cache_copy_stop_queued(
+	void)
+{
+	return global_self && global_self->copy_stop_event && cache_copy_stop_requested();
+}
+#endif
+
 static void cache_copy_initialize_zlib(
 	struct simple_decompressor_definition *self)
 {
