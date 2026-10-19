@@ -34,6 +34,12 @@ symbols in this file:
 #include "units/bipeds.h"
 #include "units/unit_definitions.h"
 #ifdef HALO_LINUX
+#include "game/players.h"
+#include "network_wire.h"
+#include <stdlib.h>
+#include <string.h>
+#endif
+#ifdef HALO_LINUX
 /* port/linux/game/network_coop.c: a group's value changed (the co-op host lists the groups again) */
 void network_coop_note_device_group(short group_index);
 #endif
@@ -187,6 +193,256 @@ void machine_try_to_open_with_damage(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) whether this machine's game carries an elevator's riders by the
+same tick's movement (OpenCE's 30: network_wire_v30_rules); in test builds
+also HALO_TEST_ELEVATOR_CARRY=same (a single player or legacy game played
+so, for the carry's tests), =xbox the other way */
+static boolean machine_elevator_same_tick_carry(
+	void)
+{
+#ifndef HALO_RELEASE
+	static int forced = -1;
+
+	if (forced < 0)
+	{
+		char const *value = getenv("HALO_TEST_ELEVATOR_CARRY");
+
+		forced = value && !strcmp(value, "same") ? 1 : value && !strcmp(value, "xbox") ? 0 : 2;
+	}
+	if (forced != 2)
+		return forced == 1;
+#endif
+	return network_wire_v30_rules() != 0;
+}
+
+/* (port) the elevator node's matrix of an elevator machine whose model has
+that node, else NULL */
+static real_matrix4x3 *machine_elevator_node_matrix(
+	long machine_index)
+{
+	struct machine_datum *machine = machine_get(machine_index);
+	struct machine_definition *definition = machine_definition_get(machine->definition_index);
+	short node_index = definition->machine.elevator_node_index;
+
+	if (!TEST_FLAG(definition->machine.flags, _machine_is_elevator_bit) || node_index == NONE || node_index < 0 ||
+		node_index >= machine->object.node_matrices.size / (short)sizeof(real_matrix4x3))
+	{
+		return NULL;
+	}
+	return object_get_node_matrix(machine_index, node_index);
+}
+
+boolean machine_elevator_carry_begin(
+	long machine_index,
+	real_point3d *before)
+{
+	real_matrix4x3 *node_matrix;
+
+	if (!machine_elevator_same_tick_carry())
+		return FALSE;
+	node_matrix = machine_elevator_node_matrix(machine_index);
+	if (!node_matrix)
+		return FALSE;
+	*before = node_matrix->position;
+	return TRUE;
+}
+
+void machine_elevator_carry_end(
+	long machine_index,
+	real_point3d const *before)
+{
+	/* (as the Xbox's carry's query: every biped in the machine's sphere) */
+	static long rider_indices[2048];
+	struct machine_datum *machine = machine_get(machine_index);
+	real_matrix4x3 *node_matrix = machine_elevator_node_matrix(machine_index);
+	real_vector3d offset;
+	short count;
+	short index;
+
+	if (!node_matrix)
+		return;
+	offset.i = node_matrix->position.x - before->x;
+	offset.j = node_matrix->position.y - before->y;
+	offset.k = node_matrix->position.z - before->z;
+	if (offset.i != 0.0f || offset.j != 0.0f || offset.k != 0.0f)
+	{
+		count = objects_in_sphere(
+			_object_mask_biped,
+			_object_mask_biped,
+			&machine->object.location,
+			&machine->object.bounding_sphere_center,
+			machine->object.bounding_sphere_radius,
+			rider_indices,
+			NUMBEROF(rider_indices));
+		for (index = 0; index < count; index++)
+		{
+			long biped_index = rider_indices[index];
+			struct biped_datum *biped = biped_get(biped_index);
+
+			if (biped->biped.elevator_object_index == machine_index)
+			{
+				real_point3d new_position;
+
+				add_vectors3d(&offset, (real_vector3d const *)&biped->object.position, (real_vector3d *)&new_position);
+				object_translate(biped_index, &new_position, NULL);
+			}
+		}
+	}
+	/* (kept as the Xbox's carry keeps it, though this one does not read it) */
+	machine->machine.elevator_position = node_matrix->position;
+}
+#endif
+
+#if defined(HALO_LINUX) && !defined(HALO_RELEASE)
+#include "cseries/errors.h"
+/* devices.c's, cinematics.c's */
+boolean device_set_desired_position(long device_index, real position);
+void device_set_power(long device_index, real power);
+boolean cinematic_in_progress(void);
+
+/* (automated tests only) HALO_TEST_ELEVATOR_RIDE=n: in a game of one
+machine, 3 s in, the n-th elevator machine of the map (each logged) gets
+the first local player's unit on its platform; 2 s later it goes to its
+other end, back half way, over again (a reversal in its stride), and down
+to its end once more; every tick, where its elevator node and the rider
+are (run_elevator_test.sh compares the two: carried the same tick, the
+rider's height over the node holds while it moves) */
+void machine_elevator_test_tick(
+	void)
+{
+	static int setting = -1;
+	static boolean listed;
+	static long chosen = NONE;
+	static long phase_time;
+	static short phase;
+	static short legs;
+	static real target;
+	long player_index;
+	struct player_datum *player;
+	struct machine_datum *machine;
+	real_matrix4x3 *node_matrix;
+	struct biped_datum *rider;
+
+	if (setting < 0)
+	{
+		char const *value = getenv("HALO_TEST_ELEVATOR_RIDE");
+
+		setting = value ? atoi(value) : 0;
+	}
+	if (setting <= 0 || !game_in_progress() || game_time_get() < 3 * TICKS_PER_SECOND)
+		return;
+	/* (a level's opening cinematic over: the player its own) */
+	if (!listed && cinematic_in_progress())
+		return;
+	player_index = local_player_get_player_index(0);
+	player = player_index != NONE ? player_try_and_get(player_index) : NULL;
+	if (!player || player->unit_index == NONE)
+		return;
+	if (!listed)
+	{
+		struct object_iterator iterator;
+		struct machine_datum *each;
+		int count = 0;
+
+		listed = TRUE;
+		object_iterator_new(&iterator, _object_mask_machine, 0);
+		while ((each = (struct machine_datum *)object_iterator_next(&iterator)) != NULL)
+		{
+			real_matrix4x3 *matrix = machine_elevator_node_matrix(iterator.index);
+
+			if (!matrix)
+				continue;
+			count++;
+			error(_error_silent, "elevator test: elevator %d: machine %08lx at (%.2f %.2f %.2f) position %.3f group %d", count,
+				(unsigned long)iterator.index, matrix->position.x, matrix->position.y, matrix->position.z,
+				each->device.position, (int)each->device.position_group_index);
+			if (count == setting && each->device.position_group_index != NONE)
+				chosen = iterator.index;
+		}
+		error(_error_silent, "elevator test: %d elevators, riding %s (%s carry)", count, chosen != NONE ? "one" : "none",
+			machine_elevator_same_tick_carry() ? "the same tick's" : "the Xbox's");
+		phase_time = game_time_get();
+	}
+	if (chosen == NONE || phase >= 4)
+		return;
+	machine = (struct machine_datum *)object_try_and_get_and_verify_type(chosen, _object_mask_machine);
+	node_matrix = machine ? machine_elevator_node_matrix(chosen) : NULL;
+	rider = (struct biped_datum *)object_try_and_get_and_verify_type(player->unit_index, _object_mask_biped);
+	if (!machine || !node_matrix || !rider)
+		return;
+	switch (phase)
+	{
+	case 0:
+	{
+		real_point3d position = node_matrix->position;
+
+		position.z += 1.0f;
+		object_translate(player->unit_index, &position, NULL);
+		phase = 1;
+		phase_time = game_time_get();
+		break;
+	}
+	case 1:
+		/* (a level's script that puts the player somewhere once its
+		cinematic is over: put back, until it stays) */
+		{
+			real dx = rider->object.position.x - node_matrix->position.x;
+			real dy = rider->object.position.y - node_matrix->position.y;
+			real dz = rider->object.position.z - node_matrix->position.z;
+
+			if (dx * dx + dy * dy + dz * dz > 9.0f)
+			{
+				phase = 0;
+				break;
+			}
+		}
+		if (game_time_get() - phase_time >= 2 * TICKS_PER_SECOND)
+		{
+			target = machine->device.position < 0.5f ? 1.0f : 0.0f;
+			device_set_power(chosen, 1.0f);
+			device_set_desired_position(chosen, target);
+			phase = 2;
+			legs = 1;
+			phase_time = game_time_get();
+		}
+		break;
+	case 2:
+		/* (the second leg turned back half way: a reversal) */
+		if (legs == 2 && game_time_get() - phase_time >= TICKS_PER_SECOND &&
+			machine->device.position - target < 0.5f && target - machine->device.position < 0.5f &&
+			(machine->device.position - target > 0.2f || target - machine->device.position > 0.2f))
+		{
+			target = 1.0f - target;
+			device_set_desired_position(chosen, target);
+			legs++;
+			phase_time = game_time_get();
+			error(_error_silent, "elevator test: tick %ld reversed", game_time_get());
+		}
+		else if (machine->device.position == target && machine->device.position_velocity == 0.0f &&
+			game_time_get() - phase_time >= TICKS_PER_SECOND)
+		{
+			if (legs >= 4)
+			{
+				phase = 4;
+				error(_error_silent, "elevator test: done");
+				break;
+			}
+			target = 1.0f - target;
+			device_set_desired_position(chosen, target);
+			legs++;
+			phase_time = game_time_get();
+		}
+		break;
+	}
+	error(_error_silent, "elevator test: tick %ld leg %d node %.4f rider %.4f over %.4f velocity %.5f on %d ticks %d airborne %d",
+		game_time_get(), (int)legs, node_matrix->position.z, rider->object.position.z,
+		rider->object.position.z - node_matrix->position.z, machine->device.position_velocity,
+		rider->biped.elevator_object_index == chosen, (int)rider->biped.elevator_ticks,
+		TEST_FLAG(rider->biped.flags, _biped_airborne_bit) ? 1 : 0);
+}
+#endif
+
 boolean machine_update(
 	long machine_index)
 {
@@ -312,7 +568,13 @@ boolean machine_update(
 	}
 
 	if (TEST_FLAG(definition->machine.flags, _machine_is_elevator_bit) &&
-		definition->machine.elevator_node_index != NONE)
+		definition->machine.elevator_node_index != NONE
+#ifdef HALO_LINUX
+		/* (port: OpenCE's 30 carries them after the nodes are recomputed,
+		machine_elevator_carry_end, not here a tick late) */
+		&& !machine_elevator_same_tick_carry()
+#endif
+		)
 	{
 		real_matrix4x3 *node_matrix = object_get_node_matrix(
 			machine_index,

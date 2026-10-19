@@ -903,9 +903,10 @@ boolean network_distributed_server_send_to_machine(
 		return FALSE;
 	/* from the game's public datagram endpoint (the one clients send
 	their game updates to) to the client's, at the address its
-	connection comes from (the write swaps the header in place) */
-	network_connection_get_address(connection, &address, NULL);
-	address.port = NETWORK_GAME_CLIENT_PORT;
+	connection comes from (the write swaps the header in place): at the
+	standard client port, or (OpenCE's network version 31) the port its
+	datagrams come from */
+	network_game_server_datagram_destination(server, machine, &address);
 	csmemcpy(buffer, message, size);
 	return network_game_server_write(network_game_server_get_connection(server), buffer, size, &address, 0);
 }
@@ -1631,6 +1632,9 @@ boolean network_game_server_handle_datagram(
 
 						network_game_server_client_machine_heard(server, client_machine);
 						network_game_server_get_client_machine(server, client_machine, &machine_index);
+						/* (port: where its datagrams come from, which a game of
+						OpenCE's 31 answers at) */
+						network_game_server_note_datagram_source(server, client_machine, source_address);
 						network_distributed_handle_message(machine_index, message, datagram_size);
 					}
 				}
@@ -1706,6 +1710,16 @@ static boolean network_game_server_handle_message_client_broadcast_game_search(
 	searches no more */
 	static unsigned long last_advertised_time = 0;
 	unsigned long now = system_milliseconds();
+	/* port: (OpenCE's network version 31) a search from another port than
+	the client port, a second copy's on one computer, is answered at its
+	address and port as well as by the broadcast, which never reaches it;
+	no more than UNICAST_ANSWERS_PER_INTERVAL in an advertisement interval
+	(a search's source can be anyone's: no flood of answers to it) */
+	enum { UNICAST_ANSWERS_PER_INTERVAL = 8 };
+	static unsigned long unicast_window_time = 0;
+	static long unicast_answers = 0;
+	boolean broadcast_due;
+	boolean unicast = FALSE;
 
 	match_assert(
 		"c:\\halo\\SOURCE\\networking\\network_server_message_handler.c",
@@ -1716,7 +1730,22 @@ static boolean network_game_server_handle_message_client_broadcast_game_search(
 		struct network_game *game = network_game_server_get_game(server);
 
 		/* (the time taken only by a search answered) */
-		if (game && last_advertised_time && now - last_advertised_time < GAME_ADVERTISEMENT_INTERVAL)
+		broadcast_due = !(last_advertised_time && now - last_advertised_time < GAME_ADVERTISEMENT_INTERVAL);
+		if (game && network_wire_v31_rules() && source_address->address.long_words[0] && source_address->port &&
+			source_address->port != NETWORK_GAME_CLIENT_PORT)
+		{
+			if (!unicast_window_time || now - unicast_window_time >= GAME_ADVERTISEMENT_INTERVAL)
+			{
+				unicast_window_time = now ? now : 1;
+				unicast_answers = 0;
+			}
+			if (unicast_answers < UNICAST_ANSWERS_PER_INTERVAL)
+			{
+				unicast_answers++;
+				unicast = TRUE;
+			}
+		}
+		if (game && !broadcast_due && !unicast)
 			return TRUE;
 		if (game)
 		{
@@ -1767,8 +1796,10 @@ static boolean network_game_server_handle_message_client_broadcast_game_search(
 			/* the native builds' network version and netcode (a client
 			refuses a host of another version, or of the lockstep netcode
 			older builds had: network_client_manager.c) */
-			advertisement.reserved[HALO_PORT_ADVERTISED_VERSION_OFFSET] = (byte)(network_wire_version() & 0xFF);
-			advertisement.reserved[HALO_PORT_ADVERTISED_VERSION_OFFSET + 1] = (byte)(network_wire_version() >> 8);
+			advertisement.reserved[HALO_PORT_ADVERTISED_VERSION_OFFSET] =
+				(byte)(network_wire_announced_version(network_wire_crossplay()) & 0xFF);
+			advertisement.reserved[HALO_PORT_ADVERTISED_VERSION_OFFSET + 1] =
+				(byte)(network_wire_announced_version(network_wire_crossplay()) >> 8);
 			advertisement.reserved[HALO_PORT_ADVERTISED_FLAGS_OFFSET] =
 				HALO_PORT_ADVERTISED_DISTRIBUTED_FLAG;
 			/* (the crossplay wire's (network_wire.h), as OpenCE's hosts make
@@ -1822,17 +1853,38 @@ static boolean network_game_server_handle_message_client_broadcast_game_search(
 				struct network_connection *connection =
 					network_game_server_get_connection(server);
 
-				last_advertised_time = now ? now : 1;
-				result = network_game_server_write(
-					connection,
-					reply,
-					message_size,
-					&address,
-					0);
-				if (!result)
+				/* (port: the write swaps the header in place, so the answer
+				at a searcher's port goes from a copy of the message as made) */
+				byte copy[NETWORK_MESSAGE_BUFFER_SIZE];
+
+				if (unicast && message_size <= sizeof(copy))
+					csmemcpy(copy, reply, message_size);
+				else
+					unicast = FALSE;
+				if (broadcast_due)
 				{
-					network_event(
-						"network_game_server_write() failed in handle_message_client_broadcast_game_search()");
+					last_advertised_time = now ? now : 1;
+					result = network_game_server_write(
+						connection,
+						reply,
+						message_size,
+						&address,
+						0);
+					if (!result)
+					{
+						network_event(
+							"network_game_server_write() failed in handle_message_client_broadcast_game_search()");
+					}
+				}
+				if (unicast)
+				{
+					struct transport_address searcher = *source_address;
+
+					if (!network_game_server_write(connection, copy, message_size, &searcher, 0))
+					{
+						network_event("the game's advertisement to a search from port %u failed",
+							(unsigned int)searcher.port);
+					}
 				}
 			}
 			else

@@ -249,7 +249,7 @@ int net_fuzz_twin(
 		/* (after the message header, the first 2 bytes) */
 		int at = 2 + net_fuzz_random() % (length > 2 ? length - 2 : 1);
 
-		switch (net_fuzz_random() % 9)
+		switch (net_fuzz_random() % 11)
 		{
 		case 0: case 1:
 			bytes[at] ^= (unsigned char)(1 << (net_fuzz_random() % 8));
@@ -292,6 +292,47 @@ int net_fuzz_twin(
 		case 8:
 			/* another packet type (a game message's last byte) */
 			bytes[length - 1] = (unsigned char)(net_fuzz_random() % 48);
+			break;
+		case 9:
+			/* (a distributed message, its type after the message header)
+			made OpenCE 32's aim assist policy, kind 90: mostly its 12 bytes,
+			its values at and past their edges (docs/opence-net32-spec.md 7) */
+			if (length >= 3 && ((bytes[0] >> 2) & 3) == 2)
+			{
+				static unsigned char const values[] = { 0, 1, 2, 0xFF };
+
+				bytes[2] = 90;
+				if (net_fuzz_random() % 4 && buffer_size >= 12)
+				{
+					int index;
+
+					for (index = length; index < 12; index++)
+						bytes[index] = 0;
+					length = 12;
+					bytes[3] = (unsigned char)(net_fuzz_random() % 3);
+					bytes[8] = values[net_fuzz_random() % sizeof(values)];
+					bytes[9] = net_fuzz_random() % 4 ? 0 : values[net_fuzz_random() % sizeof(values)];
+					bytes[10] = net_fuzz_random() % 4 ? 0 : 1;
+					bytes[11] = 0;
+				}
+			}
+			break;
+		case 10:
+			/* (a distributed message's tick) moved to about the tick window's
+			edges: 15 s for a game of 32, 20 s for the rest */
+			if (length >= 8 && ((bytes[0] >> 2) & 3) == 2)
+			{
+				static unsigned int const moves[] = { 449, 450, 451, 599, 600, 601, 100000, 0x7FFFFFFF };
+				unsigned int tick;
+
+				/* (unsigned: wrapping, never overflowing) */
+				memcpy(&tick, bytes + 4, 4);
+				if (net_fuzz_random() % 2)
+					tick += moves[net_fuzz_random() % (sizeof(moves) / sizeof(moves[0]))];
+				else
+					tick -= moves[net_fuzz_random() % (sizeof(moves) / sizeof(moves[0]))];
+				memcpy(bytes + 4, &tick, 4);
+			}
 			break;
 		}
 	}
