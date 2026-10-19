@@ -1478,8 +1478,10 @@ menu_monitor), the profile card's Spartan (menu_spartan) and the first
 profile's player model's, built in the background once the main menu has
 rested a while (scene_packs_prebuild: a prebuild's job, paced, below the
 game's threads, paused while the game reads, copies a map or plays on the
-network, made way for by any pack wanted now), then the card's loaded
-(SELECT PROFILE shows its Spartan at once). Once a map's load (ui.map's
+network, made way for by any pack wanted now), each loaded once built, the
+card's first (SELECT PROFILE shows its Spartan at once, a lobby its scene
+as soon as its textures are read: 2.6 MB of the tag cache for the four,
+the room a campaign map's build needs left). Once a map's load (ui.map's
 each time). HALO_MENU_PREBUILD=0, the scenes off, Menu style Halo CE:
 none */
 #define H3_PREBUILD_REST_US 2000000ull
@@ -1490,8 +1492,11 @@ static struct
 	unsigned long epoch;
 	unsigned long long rest_since;
 	boolean asked;
-	boolean preloaded;
-	char card[48];
+	/* the packs asked for (the card's first), and which are loaded (or
+	given up) */
+	char names[H3_PREBUILD_MOST][48];
+	short count;
+	boolean preloaded[H3_PREBUILD_MOST];
 } h3_prebuild;
 
 /* a pack's name not yet in names (count of them): added */
@@ -1535,7 +1540,7 @@ static void h3_prebuild_update(void)
 	if (!h3_prebuild.asked)
 	{
 		struct halo_menus const *menus = halo_menus_load();
-		char names[H3_PREBUILD_MOST][48];
+		char (*names)[48] = h3_prebuild.names;
 		char said[256];
 		short count = 0, index;
 		int chosen = player_models_panel_chosen();
@@ -1544,8 +1549,8 @@ static void h3_prebuild_update(void)
 
 		h3_prebuild.asked = TRUE;
 		/* (the card's Spartan first: SELECT PROFILE is the first stop) */
-		snprintf(h3_prebuild.card, sizeof(h3_prebuild.card), "%s", model ? model : "menu_spartan");
-		h3_prebuild_add(names, &count, h3_prebuild.card, (long)strlen(h3_prebuild.card));
+		if (model)
+			h3_prebuild_add(names, &count, model, (long)strlen(model));
 		h3_prebuild_add(names, &count, "menu_spartan", (long)strlen("menu_spartan"));
 		for (widget = 0; menus && widget < menus->widget_count; widget++)
 		{
@@ -1572,6 +1577,7 @@ static void h3_prebuild_update(void)
 				cursor = end ? end + 1 : NULL;
 			}
 		}
+		h3_prebuild.count = count;
 		said[0] = 0;
 		for (index = 0; index < count; index++)
 		{
@@ -1583,19 +1589,27 @@ static void h3_prebuild_update(void)
 		platform_log("menus: h3 prebuild: the main menu at rest: %s", said);
 		return;
 	}
-	/* (the card's pack loaded once built: SELECT PROFILE's Spartan at once) */
-	if (!h3_prebuild.preloaded)
+	/* (each loaded once built, in the order asked: the card's first) */
 	{
-		short state = scene_packs_status(h3_prebuild.card, NULL, NULL, 0);
+		short index;
 
-		if (state == _scene_pack_state_ready || state == _scene_pack_state_loaded)
+		for (index = 0; index < h3_prebuild.count; index++)
 		{
-			h3_prebuild.preloaded = TRUE;
-			platform_log("menus: h3 prebuild: %s %s", h3_prebuild.card, scene_packs_state_name(scene_packs_want(h3_prebuild.card)));
-		}
-		else if (state == _scene_pack_state_failed || state == _scene_pack_state_none)
-		{
-			h3_prebuild.preloaded = TRUE;
+			short state;
+
+			if (h3_prebuild.preloaded[index])
+				continue;
+			state = scene_packs_status(h3_prebuild.names[index], NULL, NULL, 0);
+			if (state == _scene_pack_state_ready || state == _scene_pack_state_loaded)
+			{
+				h3_prebuild.preloaded[index] = TRUE;
+				platform_log("menus: h3 prebuild: %s %s", h3_prebuild.names[index],
+					scene_packs_state_name(scene_packs_want(h3_prebuild.names[index])));
+			}
+			else if (state == _scene_pack_state_failed || state == _scene_pack_state_none)
+			{
+				h3_prebuild.preloaded[index] = TRUE;
+			}
 		}
 	}
 }

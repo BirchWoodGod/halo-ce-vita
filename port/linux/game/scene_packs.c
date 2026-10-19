@@ -1383,7 +1383,9 @@ short scene_packs_prebuild(
 		if (!slot)
 			return _scene_pack_state_failed;
 		slot->build_only = TRUE;
-		build_thread_start();
+		/* (its job begun at the top of the next frame, scene_packs_update,
+		with every prebuild asked for meanwhile: those sharing a map's read
+		share it) */
 	}
 	return state_get(slot);
 }
