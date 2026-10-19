@@ -1514,6 +1514,40 @@ again later). `HALO_MENU_PREBUILD=0` turns it off.
   LODs were not stripped: a few tens of KB a model, for a remapping of every
   region's permutations the tag check would have to pass uncorrected.
 
+### A pack's data checked once (insider.12's Forge start)
+
+A tester's Forge game on Blood Gulch with all seven packs on ended in the
+Vita's watchdog crash (HALO_HANG_CRASH=1): the map's load
+(`scene_packs_load_now`, on the game thread, as Forge needs the packs before
+its objects are placed) read each pack's whole data again just for its CRC -
+covenant_ai 36 MB, flood_ai 13.7, ce_pelican 8.9 - at ~3 MB/s from the card,
+no present for over 8 s. Now a pack's data (pixels and samples) is read whole
+once: at its first load, or in the background by a prebuild's job (the Forge
+lobby prebuilds its packs, the main menu its own), a record of the file then
+checked is kept beside it (`t:\packs\<name>.pack.ok`: its size and time as
+the file system gives them, and its header's CRCs). A later load of the same
+file reads and checks its tags as ever (their CRC, their move, the tag
+check) but not its data again. A file written again (a build, a copy, a
+damage that rewrites it) has another time or size and is checked whole; a
+damaged one is refused, deleted and built again (`run_scene_pack_test.sh
+verified`). What a record cannot see is a file changed in place with its
+time set back: its pixels or samples would be drawn or played wrong, never
+read as structure (the tags are checked at every load). The Vita's watchdog
+also counts progress the game thread waits on (`halo_progress_heartbeat`: a
+pack read at a map's load, a map's copy into the cache partition), so a long
+load that is reading is not taken for a hang. A Custom Edition pack whose map
+is turned off in the settings' Modded maps fails at once, said why (the
+Forge lobby offered Flyable Pelican as Ready with extinction turned off, and
+would have loaded it).
+
+The same tester's Forge lobby drew frames of ~100 ms for seconds at a time
+while its seven packs were prebuilt: on insider.12 a pack's build ran at the
+game threads' priority, its textures were read on the render's thread as
+they were first drawn, and the lobby scene's packs (menu_campaign,
+menu_monitor) were loaded on the game thread; all three are off the game's
+threads now (the worker below them, paced, waiting while the game reads;
+bitmaps by the cache file thread). Not measured on a Vita.
+
 ### The multiplayer scene's flag
 
 Its draw was never missing: on the gxm-null harness the cloth is drawn every
