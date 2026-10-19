@@ -78,12 +78,29 @@ symbols in this file:
 
 /* ---------- constants */
 
+#ifdef HALO_LINUX
+/* port: the glyph cache four times the Xbox's. A screen of many different
+strings in the Halo PC fonts (OpenCE's server browser, Menu style Halo CE:
+the owner's photo of insider.10, Oct 18 2026) has more glyphs than 128 by
+128 texels hold, so the cache went round within each frame, every frame; on
+the Vita the texture is read as it was at its first draw of a frame, and
+the glyphs written after it drew nothing: only the first row's name showed,
+each row below one column fewer. Every glyph a screen draws now stays in
+place, and the texture stops changing once they are all in (128 KB) */
+enum
+{
+	HARDWARE_CHARACTER_CACHE_BITMAP_WIDTH = 256,
+	HARDWARE_CHARACTER_CACHE_BITMAP_HEIGHT = 256,
+	MAXIMUM_HARDWARE_CHARACTERS = 1024,
+};
+#else
 enum
 {
 	HARDWARE_CHARACTER_CACHE_BITMAP_WIDTH = 128,
 	HARDWARE_CHARACTER_CACHE_BITMAP_HEIGHT = 128,
 	MAXIMUM_HARDWARE_CHARACTERS = 256,
 };
+#endif
 
 enum
 {
@@ -675,6 +692,24 @@ cache_hardware_format_character(
 
 		if (cell_height + hardware_character_cache.y0 > HARDWARE_CHARACTER_CACHE_BITMAP_HEIGHT)
 		{
+#ifdef HALO_LINUX
+			/* port: the cache going round twice within 100 ms is a screen
+			with more glyphs than it holds (said in halo.log at most every
+			10 s; run_menus_test.sh's browserrows looks for it) */
+			{
+				static unsigned long last_wrap, last_said;
+				unsigned long now = system_milliseconds();
+				void platform_log(char const *format, ...);
+
+				if (last_wrap && now - last_wrap < 100 && (!last_said || now - last_said > 10000))
+				{
+					last_said = now | 1;
+					platform_log("text: the glyph cache (%dx%d) goes round every frame: a screen's text has more glyphs than it holds",
+						HARDWARE_CHARACTER_CACHE_BITMAP_WIDTH, HARDWARE_CHARACTER_CACHE_BITMAP_HEIGHT);
+				}
+				last_wrap = now | 1;
+			}
+#endif
 			hardware_character_cache.y0 = 0;
 			hardware_character_cache.x0 = 0;
 			hardware_character_cache.maximum_character_height = 0;

@@ -164,6 +164,16 @@
 #            its host's player's, one of other alphabets "?" for what the font
 #            lacks, co-op its difficulty and level (or "-"), every missing field
 #            "-", and a name or map wider than its column cut with "..."
+#   profilepaths every multiplayer entry path asks for the profile first: Halo CE's SERVER
+#            BROWSER, SYSTEM LINK, DIRECT LINK (a code: the System Link screen) and CREATE GAME
+#            SYSTEM LINK open the Xbox's profile screen; Halo 3's START GAME (SYSTEM LINK, ONLINE's
+#            Create Game, AD HOC), BROWSE GAMES (SYSTEM LINK, ONLINE, AD HOC) and JOIN WITH CODE
+#            open SELECT PROFILE (halo3/join.xml)
+#   browserrows OpenCE's server browser (Menu style Halo CE) with 16 made-up games
+#            of varied names (HALO_TEST_BROWSER_NAMES), PC ones among them: every row
+#            named, and the glyph cache never going round each frame (the owner's
+#            photo of insider.10, Oct 18 2026: only the first row's name drawn on
+#            the Vita, each row below one column fewer)
 #   h3lan    the Halo 3 LAN browser (halo3/network.xml) with 14 made-up games of both
 #            platforms (HALO_TEST_BROWSER_GAMES, HALO_TEST_BROWSER_PC): BROWSE
 #            GAMES on SYSTEM LINK, the profile, then the LAN browser in place of
@@ -239,7 +249,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel browserprofile h3players}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel browserprofile h3players browserrows profilepaths}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
@@ -573,7 +583,7 @@ for case in $cases; do
 		grep -aq "menus: h3 mp: game type Slayer Pro" "$log" || fail h3create "the GAME TYPE picker did not set the game type"
 		grep -aq "menus: Server Setup: Vita Night, 16 players, public; the profile, then the map list" "$log" ||
 			fail h3create "START GAME did not set up the game as Server Setup does"
-		grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected.4way_profile_select.4way_start2join_screen" "$log" ||
+		grep -aqE "ui: screen (ui.shell.main_menu.multiplayer_type_select.connected.4way_profile_select.4way_start2join_screen|pc.h3.join.screen)" "$log" ||
 			fail h3create "START GAME did not open the profile" ;;
 	h3mptouch)
 		# (MULTIPLAYER on the main menu; the lobby's MAP; BLOOD GULCH in the picker; the lobby's Back)
@@ -609,10 +619,10 @@ for case in $cases; do
 			fail h3coop "START GAME did not host co-op"
 		grep -aq "co-op: hosting levels.* on difficulty 1 from the campaign's menus" "$log" ||
 			fail h3coop "the level was not hosted as co-op"
-		grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected.pregame.connected_pregame_screen" "$log" ||
+		grep -aqE "ui: screen (ui.shell.main_menu.multiplayer_type_select.connected.pregame.connected_pregame_screen|pc.h3.pregame.screen)" "$log" ||
 			fail h3coop "the game's lobby (the waiting screen) did not open"
 		grep -aq "menus: h3 campaign: co-op was not hosted" "$log" && fail h3coop "co-op was not hosted"
-		grep -a "ui: screen" "$log" | tail -1 | grep -q 'connected_pregame_screen' ||
+		grep -a "ui: screen" "$log" | tail -1 | grep -qE 'connected_pregame_screen|pc.h3.pregame.screen' ||
 			fail h3coop "the game's lobby did not stay open (the co-op game ended)" ;;
 	h3players)
 		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
@@ -632,7 +642,7 @@ for case in $cases; do
 		check_h3 h3players halo3
 		log=$out/h3players/run.log
 		grep -a "menus: h3 players\|PLAYERS screen" "$log" | head -12
-		grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected.pregame.connected_pregame_screen" "$log" ||
+		grep -aqE "ui: screen (ui.shell.main_menu.multiplayer_type_select.connected.pregame.connected_pregame_screen|pc.h3.pregame.screen)" "$log" ||
 			fail h3players "the game's lobby (the waiting screen) did not open"
 		grep -aq "menus: the PLAYERS screen opened (the game's lobby)" "$log" &&
 			grep -aq "ui: screen pc.h3.players.screen" "$log" || fail h3players "Triangle in the game's lobby did not open PLAYERS"
@@ -642,7 +652,7 @@ for case in $cases; do
 		grep -aq "menus: h3 players: Go online first" "$log" || fail h3players "ADD FRIEND offline did not say go online first"
 		grep -aq "menus: h3 players: A player of this PS Vita" "$log" ||
 			fail h3players "this machine's own player was given options"
-		grep -a "ui: screen" "$log" | tail -1 | grep -q 'connected_pregame_screen' ||
+		grep -a "ui: screen" "$log" | tail -1 | grep -qE 'connected_pregame_screen|pc.h3.pregame.screen' ||
 			fail h3players "Circle did not go back to the game's lobby" ;;
 	h3scenes)
 		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
@@ -1067,6 +1077,62 @@ for case in $cases; do
 		done
 		grep -aqF "xXxNoScopeLegendsxXxForeverMore (cut)" "$out/h3oddrows/run.log" ||
 			fail h3oddrows "the long single-word name was not cut to its column" ;;
+	profilepaths)
+		# (every multiplayer entry path asks for the profile before its games, map list or lobby:
+		# Menu style Halo CE's Xbox profile screen, Halo 3's SELECT PROFILE; the owner, insider.12)
+		d="down:150:500"
+		cmp="wait:150:3000 down:150:800 a wait:150:3000"
+		run pp_c_browser "$menus_data" 22 "$cmp a wait:150:4000" HALO_MENU_STYLE=classic $h3net
+		run pp_c_lan "$menus_data" 22 "$cmp $d a wait:150:4000" HALO_MENU_STYLE=classic HALO_NET_ONLINE=false
+		run pp_c_code "$menus_data" 26 "$cmp $d $d a wait:150:3000 a wait:150:2000 $d a wait:150:5000" HALO_MENU_STYLE=classic \
+			$h3net HALO_TEST_TEXT_INPUT=ABCD-EFGH
+		run pp_c_create_lan "$menus_data" 22 "$cmp $d $d $d $d a wait:150:4000" HALO_MENU_STYLE=classic HALO_NET_ONLINE=false
+		run pp_h_start_link "$menus_data" 22 "$h3mppad $d $d $d a wait:150:4000" HALO_MENU_STYLE=halo3 HALO_NET_ONLINE=false
+		run pp_h_browse_link "$menus_data" 22 "$h3mppad $d $d $d $d $d a wait:150:4000" HALO_MENU_STYLE=halo3 HALO_NET_ONLINE=false
+		run pp_h_start_online "$menus_data" 30 "$h3mppad $d $d $d a wait:150:4000 $d $d $d $d $d $d a wait:150:5000" \
+			HALO_MENU_STYLE=halo3 $h3net "HALO_TEST_TEXT_INPUT=Vita Night"
+		run pp_h_browse_online "$menus_data" 22 "$h3mppad $d $d $d $d $d a wait:150:4000" HALO_MENU_STYLE=halo3 $h3net
+		run pp_h_code_online "$menus_data" 28 "$h3mppad $d $d $d $d $d $d a wait:150:3000 a wait:150:2000 $d a wait:150:5000" \
+			HALO_MENU_STYLE=halo3 $h3net HALO_TEST_TEXT_INPUT=ABCD-EFGH
+		run pp_h_start_adhoc "$menus_data" 28 "$h3mppad $d $d $d a wait:150:8000" HALO_MENU_STYLE=halo3 HALO_NET_ADHOC=true \
+			HALO_ADHOC_TEST=join
+		run pp_h_browse_adhoc "$menus_data" 28 "$h3mppad $d $d $d $d $d a wait:150:8000" HALO_MENU_STYLE=halo3 HALO_NET_ADHOC=true \
+			HALO_ADHOC_TEST=join
+		echo "--- profilepaths"
+		for name in pp_c_browser pp_c_lan pp_c_code pp_c_create_lan pp_h_start_link pp_h_browse_link pp_h_start_online \
+			pp_h_browse_online pp_h_code_online pp_h_start_adhoc pp_h_browse_adhoc; do
+			log=$out/$name/run.log
+			case $name in pp_c_*) want='ui: screen ui.shell.main_menu.multiplayer_type_select.connected.4way_profile_select.4way_start2join_screen' ;;
+			*) want='ui: screen pc.h3.join.screen' ;; esac
+			if grep -aq "$want" "$log"; then
+				echo "$name: the profile screen opened ($(grep -a "ui: screen" "$log" | tail -1 | sed 's/.*ui: screen //'))"
+			else
+				fail profilepaths "$name: no profile screen ($(grep -a "ui: screen" "$log" | tail -3 | sed 's/.*ui: screen //' | tr '\n' ' '))"
+			fi
+			grep -aqiE "assert|exception|halt" "$log" && fail profilepaths "$name: an assertion, exception or halt"
+		done ;;
+	browserrows)
+		# (OpenCE's server browser, Menu style Halo CE: Multiplayer, SERVER BROWSER, the profile (A joins, A
+		# the profile, A), with 16
+		# made-up games of names of every sort, PC ones among them)
+		# (the frame counter on, as on the owner's Vita: its digits are the HUD's tall font, whose
+		# rows in the glyph cache leave room for fewer of the browser's glyphs)
+		init_line='display_framerate 1' run browserrows "$menus_data" 36 "wait:150:2000 down:150:800 a wait:150:4000 a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:10000" \
+			HALO_MENU_STYLE=classic $h3net HALO_TEST_BROWSER_GAMES=16 HALO_TEST_BROWSER_NAMES=1 HALO_TEST_BROWSER_PC=1
+		log=$out/browserrows/run.log
+		echo "--- browserrows"
+		grep -aE "menus: browser row [0-9]+: |text: the glyph cache" "$log" | sort -u | head -16
+		[ "$(cat "$out/browserrows/exit")" = 0 ] || fail browserrows "exit $(cat "$out/browserrows/exit")"
+		rows=$(grep -aE "menus: browser row [0-9]+: " "$log" | sed 's/.*browser row \([0-9]*\):.*/\1/' | sort -un | wc -l)
+		[ "$rows" -ge 12 ] || fail browserrows "$rows rows filled (12 wanted)"
+		grep -aE "menus: browser row [0-9]+: " "$log" | grep -aqE "row [0-9]+:  ?\|" && fail browserrows "a row without a name"
+		for name in "DONT SKIP CINE." "Krazy's COOP" "~Yeti_Kraken~" "#1 xQuJoKe [V]" "the quick brown fox jumps over"; do
+			grep -aqF "$name" "$log" || fail browserrows "no row named \"$name\""
+		done
+		# (every glyph of the screen kept: the cache going round each frame drew the later rows'
+		# text as nothing on the Vita)
+		grep -aq "text: the glyph cache .* goes round every frame" "$log" &&
+			fail browserrows "the glyph cache went round every frame: the later rows' text would be missing on the Vita" ;;
 	h3lan)
 		# (down five to BROWSE GAMES, A: the profile (A joins, A the profile, A); the LAN browser:
 		# down two, A; Y; Square; a tap on Back)
@@ -1092,7 +1158,7 @@ for case in $cases; do
 		grep -aq "menus: the LAN browser looks again" "$log" || fail h3lan "Square did not look again"
 		grep -aq "menus: the LAN browser's game Test game 00 is no longer listed" "$log" ||
 			fail h3lan "a tap on the first row (sorted by name) did not press A on it"
-		grep -a "ui: screen" "$log" | tail -1 | grep -q '4way_start2join_screen' ||
+		grep -a "ui: screen" "$log" | tail -1 | grep -qE '4way_start2join_screen|pc.h3.join.screen' ||
 			fail h3lan "a tap on Back did not go back to the profile"
 		check_h3 h3lan_empty halo3
 		grep -aq 'menus: the server browser says "No games found on your network"' "$out/h3lan_empty/run.log" ||
@@ -1157,7 +1223,7 @@ for case in $cases; do
 		grep -aq "menus: h3 adhoc: in the ad hoc group: host co-op" "$log" || fail h3adhoccoop "joined, co-op was not hosted by itself"
 		grep -aq "menus: h3 campaign: host co-op levels.*(ad hoc)" "$log" && grep -aq "co-op: hosting levels.* from the campaign's menus" "$log" ||
 			fail h3adhoccoop "the level was not hosted as co-op"
-		grep -a "ui: screen" "$log" | tail -1 | grep -q 'connected_pregame_screen' ||
+		grep -a "ui: screen" "$log" | tail -1 | grep -qE 'connected_pregame_screen|pc.h3.pregame.screen' ||
 			fail h3adhoccoop "the game's lobby (the waiting screen) did not open"
 		check_h3 h3adhoccoop_live halo3
 		grep -aq "network: switching from Same Wi-Fi to Ad hoc" "$out/h3adhoccoop_live/run.log" ||
@@ -1257,7 +1323,7 @@ for case in $cases; do
 			fail h3mpcustom "the lobby did not say MYGULCH"
 		grep -aq "join: the host's map is levels.test.mygulch.mygulch" "$log" ||
 			fail h3mpcustom "START GAME did not host the game on mygulch"
-		grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected.pregame.connected_pregame_screen" "$log" ||
+		grep -aqE "ui: screen (ui.shell.main_menu.multiplayer_type_select.connected.pregame.connected_pregame_screen|pc.h3.pregame.screen)" "$log" ||
 			fail h3mpcustom "the hosted game's lobby did not open"
 		log=$out/h3mpcustom_off/run.log
 		grep -aq "menus: h3 mp: the last map used, levels.test.mygulch.mygulch, is not in the map list (off or gone)" "$log" ||
@@ -1351,16 +1417,16 @@ for case in $cases; do
 		grep -aq "menus: Server Browser: the profile chosen; the server browser" "$log" ||
 			fail browserprofile "the server browser did not stand for the System Link list after the profile"
 		log=$out/browserprofile_h3/run.log
-		grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected.4way_profile_select.4way_start2join_screen" "$log" &&
+		grep -aqE "ui: screen (ui.shell.main_menu.multiplayer_type_select.connected.4way_profile_select.4way_start2join_screen|pc.h3.join.screen)" "$log" &&
 			grep -aq "ui: screen pc.h3.lan.screen" "$log" || fail browserprofile "BROWSE GAMES on ONLINE did not ask for the profile first"
-		awk '/4way_start2join_screen/ { profile = 1 } /ui: screen pc.h3.lan.screen/ { if (!profile) exit 1; found = 1 }
+		awk '/4way_start2join_screen|pc.h3.join.screen/ { profile = 1 } /ui: screen pc.h3.lan.screen/ { if (!profile) exit 1; found = 1 }
 			END { exit !found }' "$log" || fail browserprofile "the games browser opened before the profile"
 		log=$out/browserprofile_off/run.log
 		grep -aq "ui: screen pc.mp.offline" "$log" || fail browserprofile "internet play off: SERVER BROWSER did not say how to turn it on"
 		grep -aq "4way_start2join_screen\|menus: Server Browser: the profile" "$log" &&
 			fail browserprofile "internet play off: the profile screen opened anyway" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3lobbyscenes|h3modelsmany|h3friends|h3friendspanel|browserprofile|h3players]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3lobbyscenes|h3modelsmany|h3friends|h3friendspanel|browserprofile|h3players|browserrows|profilepaths]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"

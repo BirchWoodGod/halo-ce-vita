@@ -1873,7 +1873,7 @@ h3coopmenu)
 	grep -aq "menus: h3 campaign: network SYSTEM LINK CO-OP" "$hl" || fail "the host's lobby was not set to SYSTEM LINK CO-OP"
 	grep -aq "co-op: hosting levels.a10.a10 on difficulty 2 from the campaign's menus" "$hl" ||
 		fail "the host did not host The Pillar of Autumn on Heroic as co-op from the Halo 3 lobby"
-	grep -aq "ui: screen .*connected_pregame_screen" "$hl" || fail "the host's lobby (the waiting screen) did not open"
+	grep -aqE "ui: screen .*(connected_pregame_screen|pc.h3.pregame.screen)" "$hl" || fail "the host's lobby (the waiting screen) did not open"
 	grep -aq "menus: Halo 3 screen h3/mp/screen for" "$jl" || fail "the joiner's MULTIPLAYER did not open the Halo 3 lobby"
 	grep -aq "system link: in another's lobby" "$jl" || fail "the joiner did not join the host's game"
 	grep -aq "co-op: the partner is in: the countdown starts" "$hd" || fail "the partner's joining did not start the countdown"
@@ -2057,7 +2057,7 @@ coopmenu)
 	echo "--- joiner"; grep -aE "ui: screen|system link: (joining|in another)|test command" "$jl" | head -12
 	grep -aq "co-op: hosting levels.a10.a10 on difficulty 2 from the campaign's menus" "$hl" ||
 		fail "the host did not host The Pillar of Autumn on Heroic from the campaign's menus"
-	grep -aq "ui: screen .*connected_pregame_screen" "$hl" || fail "the host's lobby (the waiting screen) did not open"
+	grep -aqE "ui: screen .*(connected_pregame_screen|pc.h3.pregame.screen)" "$hl" || fail "the host's lobby (the waiting screen) did not open"
 	grep -aq "co-op: the partner is in: the countdown starts" "$hd" || fail "the partner's joining did not start the countdown"
 	# (the countdown from its last start to the loading: 15 s while a game of
 	# more, network.coop_players, has room, 6 s once it is full)
@@ -2217,7 +2217,7 @@ time.sleep(100000)' "$2" > /dev/null 2>&1 & busy_pid=$!; pids="$pids $busy_pid"
 	# choice)
 	grep -aq "co-op: hosting levels.a10.a10 on difficulty [0-3] from the campaign's menus" "$out/host/run.log" ||
 		fail "co-op was not hosted from the campaign's menus once the port was free"
-	sed -n '/network: could not host/,$p' "$out/host/run.log" | grep -aq "ui: screen .*connected_pregame_screen" ||
+	sed -n '/network: could not host/,$p' "$out/host/run.log" | grep -aqE "ui: screen .*(connected_pregame_screen|pc.h3.pregame.screen)" ||
 		fail "the co-op lobby did not open once the port was free"
 	grep -aq "network test: hosting bloodgulch" "$out/joiner/run.log" || fail "the harness did not host once the port was free"
 	two=$(grep -a "network test: tick" "$out/harness_joiner/run.log" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")

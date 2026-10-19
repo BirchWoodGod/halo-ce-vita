@@ -282,6 +282,23 @@ void network_game_generate_local_machine_name(
 			if (network_game_local_player_name(profile.player_name, machine_name, MIN(MAXIMUM_PLAYER_PROFILE_NAME_LENGTH, 32)))
 				return;
 		}
+#ifdef HALO_LINUX
+		/* port: none joined yet (co-op hosted from the campaign's menus: its
+		profile is the first player's, chosen there), or several: the first
+		player's profile's name, before the system's nickname - the game
+		lists and the lobby show the player's name, as the player's own
+		name in the game is (an insider.11 co-op lobby was listed as the
+		Vita's user name, beside its player's "birch") */
+		else if (player_ui_get_active_player_profile_index(0) != NONE)
+		{
+			struct player_profile profile;
+
+			player_ui_get_active_player_profile(0, &profile);
+			if (profile.player_name[0] &&
+				network_game_local_player_name(profile.player_name, machine_name, MIN(MAXIMUM_PLAYER_PROFILE_NAME_LENGTH, 32)))
+				return;
+		}
+#endif
 	}
 	find_handle = XFindFirstNicknameW(FALSE, machine_name, 32);
 

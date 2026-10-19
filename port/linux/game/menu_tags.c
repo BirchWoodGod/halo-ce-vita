@@ -382,6 +382,8 @@ static char const *const port_function_names[] =
 	"port browser profile first",
 	"port h3 players init", "port h3 players act", "port h3 players option", "port h3 players page up",
 	"port h3 players page down",
+	"port h3 join system link", "port h3 join split screen", "port h3 join a", "port h3 join previous",
+	"port h3 join next", "port h3 join leave", "port h3 pregame init",
 };
 
 /* the port's game data functions (menu_functions.c), from
@@ -402,6 +404,7 @@ static char const *const port_game_data_input_names[] =
 	"port h3 adhoc joining", "port h3 network status",
 	"port h3 friends", "port h3 friends options", "port h3 friends panel",
 	"port h3 players", "port h3 players options",
+	"port h3 join", "port h3 pregame",
 };
 
 static struct
@@ -2384,7 +2387,7 @@ static void menu_tags_dump(long tag_index, int depth)
 	struct menu_widget_definition *definition = tag_get(UI_WIDGET_DEFINITION_TAG, tag_index);
 	long index;
 
-	if (!definition || depth > 6)
+	if (!definition || depth > 9)
 		return;
 	platform_log("menus dump: %*s%s type %d at %d,%d-%d,%d flags %08lx bitmap %s text %s[%d] font %s",
 		depth * 2, "", tag_get_name(tag_index), (int)definition->type, (int)definition->bounds.x0,
@@ -2413,6 +2416,22 @@ static void menu_tags_dump(long tag_index, int depth)
 		platform_log("menus dump: %*s  on event %d flags %08lx run %d (%s) widget %s script \"%.32s\"", depth * 2, "",
 			(int)handler->event_type, (unsigned long)handler->flags, (int)handler->function, function ? function : "-",
 			dump_name(&handler->widget_tag), handler->script);
+		/* (and the widget it opens, once: HALO_MENUS_DUMP_OPENED=1) */
+		if (handler->widget_tag.index != NONE && getenv("HALO_MENUS_DUMP_OPENED"))
+		{
+			static long dumped[64];
+			static int dumped_count;
+			int seen;
+
+			for (seen = 0; seen < dumped_count && dumped[seen] != handler->widget_tag.index; seen++)
+				;
+			if (seen == dumped_count && dumped_count < (int)NUMBEROF(dumped))
+			{
+				dumped[dumped_count++] = handler->widget_tag.index;
+				platform_log("menus dump: %*s  (it opens:)", depth * 2, "");
+				menu_tags_dump(handler->widget_tag.index, depth + 1);
+			}
+		}
 	}
 	for (index = 0; index < definition->child_widgets.count; index++)
 	{

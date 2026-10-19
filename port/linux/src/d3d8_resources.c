@@ -272,6 +272,17 @@ void WINAPI D3DTexture_LockRect(D3DTexture *texture, UINT level, D3DLOCKED_RECT 
 	lock_level((const DWORD *)texture, 0, level, locked, rectangle);
 }
 
+/* the texels written between the lock and now (the text's glyph cache,
+written a glyph at a time as text is drawn): marked again, after the
+writes - the lock's mark came before them, and the Vita's renderer, whose
+worker can convert the texture between the two, drew the new glyphs as
+nothing until the frame's end marked it once more */
+void WINAPI D3DTexture_Unlocked(D3DTexture *texture)
+{
+	if (vita_texture_locked && texture)
+		vita_texture_locked((const DWORD *)texture);
+}
+
 void WINAPI D3DCubeTexture_LockRect(D3DCubeTexture *texture, D3DCUBEMAP_FACES face, UINT level,
 	D3DLOCKED_RECT *locked, CONST RECT *rectangle, DWORD flags)
 {

@@ -106,6 +106,7 @@ halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
 #include "networking/network_client_manager.h"
 #include "networking/network_game_globals.h"
 #include "networking/network_game_manager.h"
+#include "networking/network_server_manager.h"
 #include "network_connection.h"
 #include "player_models.h"
 #include "game/players.h"
@@ -113,6 +114,8 @@ halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
 #include "networking/network_server_manager.h"
 #include "halo_port_limits.h"
 #include "input/input.h"
+#include "coop_menu.h"
+#include "map_share.h"
 
 #include <math.h>
 #include <stdarg.h>
@@ -304,6 +307,13 @@ enum
 	_function_h3_players_option,
 	_function_h3_players_page_up,
 	_function_h3_players_page_down,
+	_function_h3_join_system_link,
+	_function_h3_join_split_screen,
+	_function_h3_join_a,
+	_function_h3_join_previous,
+	_function_h3_join_next,
+	_function_h3_join_leave,
+	_function_h3_pregame_init,
 };
 
 /* in port_game_data_input_names' order */
@@ -348,6 +358,8 @@ enum
 	_input_h3_friends_panel,
 	_input_h3_players,
 	_input_h3_players_options,
+	_input_h3_join,
+	_input_h3_pregame,
 };
 
 /* what a line of typing is for */
@@ -3952,7 +3964,28 @@ static void browser_test_games(void)
 		snprintf(entry->id, sizeof(entry->id), "%stest%02ld", menu_functions.lan && !lan_with_online() ? LAN_ID_PREFIX :
 			"", index);
 		snprintf(entry->name, sizeof(entry->name), "Test game %02ld", index);
-		snprintf(entry->map, sizeof(entry->map), "%s", maps[index % 5]);
+		/* (HALO_TEST_BROWSER_NAMES=1: names of every sort of letter, as a
+		public list's are - run_menus_test.sh browserrows: each row's name,
+		map and game drawn, with all the glyphs a screen of them takes) */
+		if (getenv("HALO_TEST_BROWSER_NAMES") && atoi(getenv("HALO_TEST_BROWSER_NAMES")))
+		{
+			static char const *const names[] =
+			{
+				"Stink Fist", "DONT SKIP CINE.", "Krazy's COOP", "JACKDAWS LOVE MY BIG SPHINX OF QUARTZ",
+				"sphinx of black quartz, judge my vow", "Warthog Debug 1", "jesus", "PACK MY BOX WITH FIVE DOZEN JUGS",
+				"GUNGAME++ 24*7 = 168h!", "MLGTS 2v2 US3 @ 60Hz", "the quick brown fox jumps over", "ELMEME",
+				"Quiet Zebra Vaults %&$", "#1 xQuJoKe [V] <3", "Bumpy Wombat (EU) 0-9: 0123456789", "~Yeti_Kraken~ {/\\|}",
+			};
+			static char const *const custom_maps[] =
+			{
+				"airborne_aco", "The Truth and Reconciliation", "hugeass@ce", "Yoyorast_Island@ce", "bigassv2,104", "Extinction",
+			};
+
+			snprintf(entry->name, sizeof(entry->name), "%s", names[index % NUMBEROF(names)]);
+			snprintf(entry->map, sizeof(entry->map), "%s", index % 3 ? maps[index % 5] : custom_maps[index / 3 % NUMBEROF(custom_maps)]);
+		}
+		else
+			snprintf(entry->map, sizeof(entry->map), "%s", maps[index % 5]);
 		snprintf(entry->gametype, sizeof(entry->gametype), "%s", gametypes[index % 4]);
 		entry->players = (int)(index * 7 % 16);
 		entry->maximum = 16;
@@ -4307,7 +4340,7 @@ static void browser_update(struct widget_instance *list)
 		row_column(child, "row_players", text);
 #ifndef HALO_RELEASE
 		/* (the tests': each row as shown, said as it changes) */
-		if (getenv("HALO_TEST_BROWSER_ODD"))
+		if (getenv("HALO_TEST_BROWSER_ODD") || getenv("HALO_TEST_BROWSER_NAMES"))
 		{
 			static char said[BROWSER_ROWS][160];
 			char line[160];
@@ -6759,7 +6792,11 @@ void menu_functions_players_button(boolean main_menu_loaded)
 	{
 		long pregame = tag_loaded('DeLa', H3_PLAYERS_PREGAME_SCREEN);
 
-		if (active && pregame != NONE && active->definition_tag_index == pregame)
+		/* (or the Halo 3 lobby that stands for it, halo3/pregame.xml) */
+		long h3_pregame_tag = menu_tags_ingame_screen("h3/pregame/screen");
+
+		if (active && ((pregame != NONE && active->definition_tag_index == pregame) ||
+			(h3_pregame_tag != NONE && active->definition_tag_index == h3_pregame_tag)))
 			menu_functions_players_open(TRUE);
 	}
 	else if (!active && (game_engine_showing_postgame() || pad->buttons[_gamepad_binary_button_back]))
@@ -6813,6 +6850,520 @@ int menu_functions_lan_join_listed(void const *game)
 	}
 	platform_log("menus: the games browser joins the joined host's game");
 	return ui_widget_port_join_advertised_game(list, game, &deleted) ? 1 : 0;
+}
+
+/* ---- port h3 join: the Halo 3 SELECT PROFILE of a multiplayer game
+(halo3/join.xml, join_split.xml), standing for the Xbox's four-way "press
+START to join" screens and doing what they did. Each plate is a
+controller's (the XML's child controller=): its first Cross (or START)
+joins that controller's player to the game, as the Xbox's quarter's "join
+controller to mp game"; left and right then choose its profile from those
+the Xbox's list offers that controller ("player profile list initialize":
+the player's own and the default ones, a profile another player has
+marked), Cross sets it as the Xbox's "1wide plyr prof set for game" did
+(with its checks), and the plate is ready; Cross on a ready plate, once
+every player in is ready, goes on to the screen the Xbox's went on to (the
+XML's open=: the games list or the new game's map list, which the flows
+replace as before). Circle un-readies a plate, then leaves it; on an empty
+plate it goes back. */
+#define H3_JOIN_PLATES 4
+#define H3_JOIN_PROFILES 100
+
+enum
+{
+	_h3_join_out,
+	_h3_join_choosing,
+	_h3_join_ready,
+};
+
+static struct
+{
+	boolean split;
+	short state[H3_JOIN_PLATES];
+	long profiles[H3_JOIN_PLATES][H3_JOIN_PROFILES];
+	word count[H3_JOIN_PLATES];
+	short cursor[H3_JOIN_PLATES];
+	char said[H3_JOIN_PLATES][128];
+	char next_said[160];
+} h3_join;
+
+/* a plate's controller: its own (controller=), else the event's */
+static short h3_join_plate(struct widget_instance *widget, struct event_record *event)
+{
+	short controller = widget && widget->local_player_index != NONE ? widget->local_player_index :
+		event ? event->controller_index : NONE;
+
+	return controller >= 0 && controller < H3_JOIN_PLATES ? controller : NONE;
+}
+
+/* the controller's profiles, read again (the in-use marks change as the
+other plates choose), the cursor kept on the profile it was on */
+static void h3_join_profiles_read(short plate)
+{
+	long on = h3_join.count[plate] && h3_join.cursor[plate] < (short)h3_join.count[plate] ?
+		h3_join.profiles[plate][h3_join.cursor[plate]] & 0x7FFFFFFF : NONE;
+	word count = H3_JOIN_PROFILES;
+	short index;
+
+	player_profiles_enumerate_available_to_local_player_index(plate, &count, h3_join.profiles[plate], TRUE);
+	h3_join.count[plate] = count > H3_JOIN_PROFILES ? H3_JOIN_PROFILES : count;
+	h3_join.cursor[plate] = 0;
+	if (on == NONE)
+	{
+		/* (first: the profile this controller has, else player 1's last) */
+		long active = player_ui_get_active_player_profile_index(plate);
+
+		on = active != NONE ? active : plate == 0 ? player_ui_get_player1_last_used_profile_index() : NONE;
+	}
+	for (index = 0; on != NONE && index < (short)h3_join.count[plate]; index++)
+	{
+		if ((h3_join.profiles[plate][index] & 0x7FFFFFFF) == (on & 0x7FFFFFFF))
+		{
+			h3_join.cursor[plate] = index;
+			break;
+		}
+	}
+}
+
+/* a profile's name as the Xbox's list shows it: a default profile's, its
+name from ui.map's default_player_profile_names */
+static void h3_join_profile_name(struct player_profile const *profile, char *name, int size)
+{
+	if (TEST_FLAG(profile->flags, _player_profile_default_profile_bit))
+	{
+		long names_tag_index = tag_loaded(UNICODE_STRING_LIST_TAG, "ui\\shell\\strings\\default_player_profile_names");
+		wchar_t const *default_name = names_tag_index != NONE ?
+			unicode_string_list_get_string(names_tag_index, (short)(profile->flags >> 8)) : NULL;
+		wchar_t copy[24];
+		long length;
+
+		for (length = 0; default_name && default_name[length] && length < (long)NUMBEROF(copy) - 1; length++)
+			copy[length] = default_name[length];
+		copy[length] = 0;
+		h3_utf8(name, size, copy);
+		if (!name[0])
+			snprintf(name, (size_t)size, "%s", T("Default profile"));
+		return;
+	}
+	h3_profile_utf8(name, size, profile);
+}
+
+static void h3_join_initialize(boolean split)
+{
+	csmemset(&h3_join, 0, sizeof(h3_join));
+	h3_join.split = split;
+	platform_log("menus: h3 join: SELECT PROFILE for %s", split ? "split screen" : "a network game");
+}
+
+/* (Cross or START on a plate) TRUE when the screen goes on */
+static boolean h3_join_a(struct widget_instance *widget, struct event_record *event)
+{
+	short plate = h3_join_plate(widget, event);
+	short other;
+
+	if (plate == NONE)
+		return FALSE;
+	switch (h3_join.state[plate])
+	{
+	case _h3_join_out:
+		player_ui_local_player_joined_multiplayer_game(plate);
+		h3_join.state[plate] = _h3_join_choosing;
+		h3_join_profiles_read(plate);
+		platform_log("menus: h3 join: player %d joins", plate + 1);
+		return FALSE;
+	case _h3_join_choosing:
+	{
+		long entry;
+		struct player_profile profile;
+
+		h3_join_profiles_read(plate);
+		if (!h3_join.count[plate])
+			return FALSE;
+		entry = h3_join.profiles[plate][h3_join.cursor[plate]];
+		/* (as the Xbox's: one another player has is refused) */
+		if (!(entry & 0x80000000))
+		{
+			display_error_deferred(31, plate, TRUE, FALSE);
+			ui_play_audio_feedback_sound(4);
+			platform_log("menus: h3 join: player %d: that profile is another player's", plate + 1);
+			return FALSE;
+		}
+		if (!player_profile_get(entry, &profile))
+			return FALSE;
+		/* (a name the host's ban command could not name: player_name_valid) */
+		if (profile.player_name[0] && !player_name_valid(profile.player_name, NUMBEROF(profile.player_name)))
+		{
+			display_error_text_deferred(
+				TW(L"Sorry, this profile's\r\nname can't be used in\r\nmultiplayer. Please\r\nrename the profile."), plate);
+			ui_play_audio_feedback_sound(4);
+			return FALSE;
+		}
+		player_ui_set_active_player_profile(plate, entry, &profile);
+		h3_join.state[plate] = _h3_join_ready;
+		{
+			char name[64];
+
+			h3_join_profile_name(&profile, name, (int)sizeof(name));
+			platform_log("menus: h3 join: player %d is ready with the profile %s", plate + 1, name);
+		}
+		return FALSE;
+	}
+	default:
+		for (other = 0; other < H3_JOIN_PLATES; other++)
+		{
+			if (h3_join.state[other] == _h3_join_choosing)
+			{
+				platform_log("menus: h3 join: player %d is still choosing", other + 1);
+				return FALSE;
+			}
+		}
+		platform_log("menus: h3 join: on to %s", h3_join.split ? "split screen's map list" : "the games");
+		return TRUE;
+	}
+}
+
+static void h3_join_step(struct widget_instance *widget, struct event_record *event, short step)
+{
+	short plate = h3_join_plate(widget, event);
+
+	if (plate == NONE || h3_join.state[plate] != _h3_join_choosing)
+		return;
+	h3_join_profiles_read(plate);
+	if (h3_join.count[plate])
+		h3_join.cursor[plate] = (short)((h3_join.cursor[plate] + step + h3_join.count[plate]) % h3_join.count[plate]);
+}
+
+/* (Circle on a plate) TRUE when the screen goes back: a plate no one is in */
+static boolean h3_join_leave(struct widget_instance *widget, struct event_record *event)
+{
+	short plate = h3_join_plate(widget, event);
+
+	if (plate == NONE)
+		return TRUE;
+	switch (h3_join.state[plate])
+	{
+	case _h3_join_ready:
+		h3_join.state[plate] = _h3_join_choosing;
+		return FALSE;
+	case _h3_join_choosing:
+		player_ui_clear_multiplayer_autojoin_for_local_player(plate);
+		h3_join.state[plate] = _h3_join_out;
+		platform_log("menus: h3 join: player %d leaves", plate + 1);
+		return FALSE;
+	default:
+		return TRUE;
+	}
+}
+
+static void h3_join_update(struct widget_instance *widget)
+{
+	struct widget_instance *screen = screen_of(widget);
+	short plate, in = 0, ready = 0;
+	char text[160];
+
+	for (plate = 0; plate < H3_JOIN_PLATES; plate++)
+	{
+		char slot_name[16];
+		struct widget_instance *slot, *found;
+		char name[64] = "";
+		short color = NONE;
+		short state = h3_join.state[plate];
+
+		snprintf(slot_name, sizeof(slot_name), "slot_%d", plate + 1);
+		if ((slot = named(screen, slot_name)) == NULL)
+			continue;
+		in += state != _h3_join_out;
+		ready += state == _h3_join_ready;
+		if (state != _h3_join_out && h3_join.count[plate])
+		{
+			struct player_profile profile;
+
+			if (player_profile_get(h3_join.profiles[plate][h3_join.cursor[plate]], &profile))
+			{
+				h3_join_profile_name(&profile, name, (int)sizeof(name));
+				color = profile.primary_color_index;
+			}
+			if (!name[0])
+				snprintf(name, sizeof(name), "%s", T("Default profile"));
+		}
+		snprintf(text, sizeof(text), T("PLAYER %d"), plate + 1);
+		text_show(named(slot, "slot_title"), text);
+		text_show(named(slot, "slot_name"), state == _h3_join_out ? "" : name);
+		if ((found = named(slot, "slot_swatch")) != NULL)
+		{
+			widget_instance_set_visibility_recursive(found, state != _h3_join_out);
+			found->animation.current_frame_index = h3_swatch_frame(color);
+		}
+		if ((found = named(slot, "slot_left")) != NULL)
+			widget_instance_set_visibility_recursive(found, state == _h3_join_choosing && h3_join.count[plate] > 1);
+		if ((found = named(slot, "slot_right")) != NULL)
+			widget_instance_set_visibility_recursive(found, state == _h3_join_choosing && h3_join.count[plate] > 1);
+		text_show(named(slot, "slot_state"), state == _h3_join_out ? T("Press Cross or START to join.") :
+			state == _h3_join_choosing ? T("Left and right: your profile.\nCross: choose it.") :
+			T("READY. Circle: change the profile."));
+		snprintf(text, sizeof(text), "%s|%s", state == _h3_join_out ? "out" : state == _h3_join_choosing ? "choosing" : "ready",
+			name);
+		if (strcmp(text, h3_join.said[plate]))
+		{
+			snprintf(h3_join.said[plate], sizeof(h3_join.said[plate]), "%s", text);
+			platform_log("menus: h3 join: plate %d: %s%s%s", plate + 1, state == _h3_join_out ? "press to join" :
+				state == _h3_join_choosing ? "choosing" : "ready", name[0] ? ", " : "", name);
+		}
+	}
+	if (!in)
+		snprintf(text, sizeof(text), "%s", T("Press Cross to join with your profile."));
+	else if (ready < in)
+		snprintf(text, sizeof(text), "%s", T("Choose your profile, then Cross."));
+	else
+		snprintf(text, sizeof(text), "%s", h3_join.split ? T("Ready: Cross for the map.") :
+			T("Ready: Cross for the games."));
+	text_show(named(screen, "next"), text);
+}
+
+/* ---- port h3 pregame: the Halo 3 pre-game lobby (halo3/pregame.xml),
+standing for the Xbox's ENLISTED PLAYERS screen: what is played, how the
+game is reached (its code, public or private), the players; the buttons
+are the Xbox screen's own functions, in the XML. Everything here is shown
+from the game's record (network_game_get_game) and the host's listing. */
+#define H3_PREGAME_ROWS 16
+
+static struct
+{
+	char said[384];
+} h3_pregame;
+
+/* the frame of a level of the campaign's ten in ui.map's sp_levels, NONE
+for another (a Custom Edition campaign map) */
+static short h3_pregame_level(char const *map_name)
+{
+	short index;
+
+	for (index = 0; map_name && index < (short)NUMBEROF(h3_level_paths); index++)
+	{
+		if (!_stricmp(map_name, h3_level_paths[index]))
+			return index;
+	}
+	return NONE;
+}
+
+static void h3_pregame_update(struct widget_instance *widget)
+{
+	struct widget_instance *screen = screen_of(widget);
+	struct widget_instance *found;
+	struct network_game *game = network_game_get_game();
+	struct network_game_client *client = global_network_game_client_get();
+	struct network_game_server *server = global_network_game_server_get();
+	boolean cooperative, host = server != NULL, online, waiting, listed = FALSE, password = FALSE;
+	short local_machine = client ? network_game_client_get_local_machine_index() : NONE;
+	short seconds = client ? network_game_client_get_seconds_to_game_start(client) : -1;
+	char text[192], code[32], line[384];
+	wchar_t wide[64];
+	long index, row = 0;
+
+	if (!game)
+		return;
+	cooperative = coop_menu_game_is_cooperative(game);
+	online = config_boolean("network.online") && p2p_running();
+	waiting = host && game->machine_count < 2;
+	code[0] = 0;
+	if (host && online)
+		p2p_hosting_code(code, (int)sizeof(code));
+	if (host && online)
+		listed = p2p_lobby_hosting_listed(&password) != 0;
+	text_show(named(screen, "title"), cooperative ? T("CO-OP LOBBY") : T("MULTIPLAYER LOBBY"));
+	/* (what the lobby waits for, or its countdown) */
+	if (seconds > 0)
+		snprintf(text, sizeof(text), T("Starting in %d:%02d"), seconds / 60, seconds % 60);
+	else if (seconds == 0)
+		snprintf(text, sizeof(text), "%s", T("Starting..."));
+	else if (waiting)
+		snprintf(text, sizeof(text), "%s", cooperative && game->maximum_players <= 2 ? T("Waiting for your partner") :
+			T("Waiting for other players"));
+	else if (host)
+		snprintf(text, sizeof(text), "%s", T("Ready: Cross starts the game"));
+	else
+		snprintf(text, sizeof(text), "%s", T("Waiting for the host to start"));
+	text_show(named(screen, "status"), text);
+	/* (the log's line: the countdown once, not each second) */
+	snprintf(line, sizeof(line), "%s", seconds > 0 ? "Starting (the countdown)" : text);
+	text_show(named(screen, "status_sub"), waiting ? (cooperative ? T("Others join from MULTIPLAYER: BROWSE\nGAMES or JOIN WITH CODE.") :
+		T("Others join from BROWSE GAMES or\nJOIN WITH CODE.")) : seconds > 0 ? T("Square: wait longer.") : "");
+	/* (what is played: the mission and its difficulty, or the game type on
+	the map) */
+	if (cooperative)
+	{
+		short level = h3_pregame_level(game->map.name);
+		char level_name[96], difficulty[32];
+
+		coop_menu_level_name(game->map.name, wide, NUMBEROF(wide));
+		h3_utf8(level_name, (int)sizeof(level_name), wide);
+		coop_menu_difficulty_name(game->difficulty, wide, NUMBEROF(wide));
+		h3_utf8(difficulty, (int)sizeof(difficulty), wide);
+		snprintf(text, sizeof(text), "%s\n%s", level_name, difficulty);
+		if ((found = named(screen, "mission_picture")) != NULL)
+		{
+			widget_instance_set_visibility_recursive(found, level != NONE);
+			found->animation.current_frame_index = level != NONE ? level : 0;
+		}
+		if ((found = named(screen, "emblem")) != NULL)
+		{
+			widget_instance_set_visibility_recursive(found, TRUE);
+			found->animation.current_frame_index = (short)PIN(game->difficulty, 0, 3);
+		}
+		if ((found = named(screen, "map_picture")) != NULL)
+			widget_instance_set_visibility_recursive(found, FALSE);
+	}
+	else
+	{
+		char gametype[48], map[96];
+		short map_index;
+
+		for (index = 0; index < (long)NUMBEROF(game->variant.human_readable_game_description) &&
+			game->variant.human_readable_game_description[index]; index++)
+			wide[index] = game->variant.human_readable_game_description[index];
+		wide[index] = 0;
+		h3_utf8(gametype, (int)sizeof(gametype), wide);
+		snprintf(map, sizeof(map), "%s", custom_edition_maps_level_title(game->map.name));
+		snprintf(text, sizeof(text), T("%s on %s"), gametype[0] ? gametype : T("Slayer"), map);
+		for (map_index = 0; map_index < H3_MAP_COUNT && _stricmp(game->map.name, h3_map_paths[map_index]); map_index++)
+			;
+		if ((found = named(screen, "map_picture")) != NULL)
+		{
+			short display = map_index < H3_MAP_COUNT ? NONE : custom_edition_maps_display_index(game->map.name);
+
+			widget_instance_set_visibility_recursive(found, TRUE);
+			found->animation.current_frame_index = map_index < H3_MAP_COUNT ? map_index :
+				display != NONE ? display : H3_MAP_OTHER_PICTURE;
+		}
+		if ((found = named(screen, "mission_picture")) != NULL)
+			widget_instance_set_visibility_recursive(found, FALSE);
+		if ((found = named(screen, "emblem")) != NULL)
+			widget_instance_set_visibility_recursive(found, FALSE);
+	}
+	text_show(named(screen, "caption"), text);
+	{
+		char flat[192];
+		char *newline;
+
+		snprintf(flat, sizeof(flat), "%s", text);
+		while ((newline = strchr(flat, '\n')) != NULL)
+			*newline = ' ';
+		snprintf(line + strlen(line), sizeof(line) - strlen(line), "; %s", flat);
+	}
+	/* (how it is reached: online its code, large, as the game lists show
+	it; system link; ad hoc) */
+	if (config_boolean("network.adhoc"))
+	{
+		text_show(named(screen, "code_label"), T("NETWORK"));
+		text_show(named(screen, "code"), T("AD HOC"));
+	}
+	else if (online && code[0])
+	{
+		text_show(named(screen, "code_label"), T("CODE: others join with it"));
+		text_show(named(screen, "code"), code);
+	}
+	else if (online)
+	{
+		text_show(named(screen, "code_label"), T("NETWORK"));
+		text_show(named(screen, "code"), T("ONLINE"));
+	}
+	else
+	{
+		text_show(named(screen, "code_label"), T("NETWORK"));
+		text_show(named(screen, "code"), T("SYSTEM LINK"));
+	}
+	h3_utf8(text, (int)sizeof(text), game->name);
+	snprintf(line + strlen(line), sizeof(line) - strlen(line), "; %s%s; %s", code[0] ? "code " : "", code[0] ? code :
+		online ? "online" : config_boolean("network.adhoc") ? "ad hoc" : "system link", text);
+	/* (the host's, online: listed in the server browser or not, and what
+	Square does: co-op's choice while it waits, coop_menu.c) */
+	if (host && online)
+	{
+		snprintf(text, sizeof(text), "%s", listed ? (password ? T("PUBLIC: listed in the server browser,\nwith a password.") :
+			T("PUBLIC: listed in the server browser.")) : T("PRIVATE: joined by its code."));
+		text_show(named(screen, "visibility"), text);
+		snprintf(line + strlen(line), sizeof(line) - strlen(line), "; %s", listed ? "public" : "private");
+	}
+	else
+		text_show(named(screen, "visibility"), host ? "" : T("The host chooses the map and starts."));
+	{
+		char name[48];
+
+		h3_utf8(name, (int)sizeof(name), game->name);
+		snprintf(text, sizeof(text), T("Listed as: %s"), name);
+		text_show(named(screen, "listed"), host ? text : "");
+	}
+	{
+		boolean toggles = cooperative && waiting && online && config_boolean("network.public_lobby") &&
+			network_game_server_port_cooperative_menu(NULL);
+
+		text_show(named(screen, "x_text"), toggles ? (listed ? T("Make it private") : T("Make it public")) :
+			seconds > 0 ? T("Delay the start") : "");
+		if ((found = named(screen, "x_butn")) != NULL)
+			widget_instance_set_visibility_recursive(found, toggles || seconds > 0);
+	}
+	text_show(named(screen, "b_text"), host ? T("Cancel") : T("Leave"));
+	/* (alone in the host's lobby, Cross starts nothing yet: not shown, as
+	the Xbox's lobby hid it) */
+	if ((found = named(screen, "a_butn")) != NULL)
+		widget_instance_set_visibility_recursive(found, !waiting);
+	if ((found = named(screen, "a_text")) != NULL)
+		widget_instance_set_visibility_recursive(found, !waiting);
+	/* (the players: each machine's, this one's first) */
+	for (index = 0; index < (long)NUMBEROF(game->players) && row < H3_PREGAME_ROWS; index++)
+	{
+		struct network_player *player = &game->players[index];
+		char row_name[16], name[48], note[48];
+		struct widget_instance *row_widget;
+
+		if (!network_player_is_valid(player))
+			continue;
+		snprintf(row_name, sizeof(row_name), "row_%ld", row + 1);
+		if ((row_widget = named(screen, row_name)) == NULL)
+			break;
+		widget_instance_set_visibility_recursive(row_widget, TRUE);
+		{
+			wchar_t player_name[13];
+
+			csmemcpy(player_name, player->name, sizeof(player->name));
+			player_name[12] = 0;
+			h3_utf8(name, (int)sizeof(name), player_name);
+		}
+		text_show(named(row_widget, "row_name"), name);
+		if ((found = named(row_widget, "row_swatch")) != NULL)
+			found->animation.current_frame_index = h3_swatch_frame(player->primary_color_index);
+		note[0] = 0;
+		if (game->variant.universal_variant.teams)
+			snprintf(note, sizeof(note), "%s", player->team_index == 0 ? T("RED") : player->team_index == 1 ? T("BLUE") : "");
+		if (player->machine_index == local_machine)
+			snprintf(note + strlen(note), sizeof(note) - strlen(note), "%s%s", note[0] ? " " : "", T("YOU"));
+		else if (host)
+		{
+			short percent = map_share_server_machine_percent(player->machine_index);
+
+			if (percent != NONE)
+				snprintf(note + strlen(note), sizeof(note) - strlen(note), T("%smap %d%%"), note[0] ? " " : "", (int)percent);
+		}
+		text_show(named(row_widget, "row_note"), note);
+		snprintf(line + strlen(line), sizeof(line) - strlen(line), "%s%s", row ? ", " : "; players: ", name);
+		row++;
+	}
+	snprintf(text, sizeof(text), T("PLAYERS %ld/%d"), row, (int)game->maximum_players);
+	text_show(named(screen, "players"), text);
+	for (; row < H3_PREGAME_ROWS; row++)
+	{
+		char row_name[16];
+
+		snprintf(row_name, sizeof(row_name), "row_%ld", row + 1);
+		if ((found = named(screen, row_name)) != NULL)
+			widget_instance_set_visibility_recursive(found, FALSE);
+	}
+	/* (said as it changes: the tests read it) */
+	if (strcmp(line, h3_pregame.said))
+	{
+		snprintf(h3_pregame.said, sizeof(h3_pregame.said), "%s", line);
+		platform_log("menus: h3 pregame: %s", line);
+	}
 }
 
 boolean pc_menu_event_function_invoke(
@@ -7090,6 +7641,22 @@ boolean pc_menu_event_function_invoke(
 	case _function_h3_map_page_up:
 	case _function_h3_map_page_down:
 		h3_mp.map_page = function_index == _function_h3_map_page_up ? -1 : 1;
+		return TRUE;
+	case _function_h3_join_system_link:
+	case _function_h3_join_split_screen:
+		h3_join_initialize(function_index == _function_h3_join_split_screen);
+		return TRUE;
+	case _function_h3_join_a:
+		return h3_join_a(widget, event);
+	case _function_h3_join_previous:
+	case _function_h3_join_next:
+		h3_join_step(widget, event, function_index == _function_h3_join_previous ? -1 : 1);
+		return TRUE;
+	case _function_h3_join_leave:
+		return h3_join_leave(widget, event);
+	case _function_h3_pregame_init:
+		h3_pregame.said[0] = 0;
+		platform_log("menus: h3 pregame: the Halo 3 lobby for the game's ENLISTED PLAYERS");
 		return TRUE;
 	case _function_h3_gametype_set:
 		h3_mp_gametype_set(widget);
@@ -7504,6 +8071,10 @@ void pc_menu_game_data_function_invoke(
 		if (widget->type == _ui_widget_type_column_list)
 			h3_players_options_update(widget);
 		break;
+	case _input_h3_join:
+		h3_join_update(widget);
+	case _input_h3_pregame:
+		h3_pregame_update(widget);
 	default:
 		break;
 	}

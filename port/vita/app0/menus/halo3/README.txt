@@ -109,6 +109,19 @@ these screens stand for the Xbox's own, over the same animated Halo ring:
   the online games' passwords, System Link has none) and the joining dialog
   (AD HOC out of the ad hoc group: the system's dialog joins it, then what
   was asked goes on).
+- join.xml: SELECT PROFILE for a multiplayer game, standing for the Xbox's
+  four-way "press START to join" screen of System Link (START GAME and BROWSE
+  GAMES on every network, Create Game, JOIN WITH CODE, the panel's Join a
+  game; join_split.xml for split screen's): four players' plates, one a
+  controller's - Cross joins, left and right choose the profile, Cross sets
+  it (the Xbox's functions and checks), Cross once all are ready goes on;
+  Circle un-readies, leaves, then goes back.
+- pregame.xml: the pre-game lobby, standing for the Xbox's ENLISTED PLAYERS
+  (co-op's waiting screen and multiplayer's): the mission's picture, name
+  and difficulty, or the map's and "<game type> on <map>"; the status and
+  countdown; the code, large, online; public or private and Square's hint;
+  the players in their colours with their teams. Its buttons are the Xbox
+  screen's own functions.
 - password.xml: the password screen of a game with one (it stands for OpenCE's,
   pc\join\password\screen, which the browser opens).
 In each level's map (ingame.txt):
