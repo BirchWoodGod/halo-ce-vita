@@ -7,7 +7,7 @@ member: its options (MUTE or UNMUTE, here only; REMOVE FROM PARTY for the leader
 JOIN PARTY (Square: no). Party chat under the list: its newest lines (a member's name as the party
 lists show it), Square for QUICK CHAT (presets, no typing), Triangle to type a message (the system's
 keyboard on the Vita). The settings panel's Multiplayer > Party does the same for the original
-menus (SELECT + D-pad up opens it at once, in play too). The art is this folder's own (tools/halo3_menu_art.py): the FRIENDS screen's. -->
+menus (SELECT + D-pad left opens it at once, in play too). The art is this folder's own (tools/halo3_menu_art.py): the FRIENDS screen's. -->
 <menus>
 	<strings name="h3/party_text">
 		<string text="PARTY"/>

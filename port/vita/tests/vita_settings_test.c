@@ -1751,15 +1751,15 @@ static void test_party_page(void)
 	ime_result = 1;
 	press(0);
 	check(!strcmp(party_said, "text see you there") && strstr(menu, "Sent to your party"), "the message typed: sent");
-	/* SELECT + D-pad up: the Party page at once, again: closed */
+	/* SELECT + D-pad left: the Party page at once, again: closed */
 	press(VITA_BUTTON_CIRCLE);
 	press(VITA_BUTTON_CIRCLE);
 	check(!panel_open, "the panel closed");
-	press(VITA_BUTTON_SELECT | VITA_BUTTON_UP);
-	check(panel_open && page == PAGE_PARTY && strstr(menu, "\n\x03Multiplayer > Party\n"), "SELECT + up: the Party page");
+	press(VITA_BUTTON_SELECT | VITA_BUTTON_LEFT);
+	check(panel_open && page == PAGE_PARTY && strstr(menu, "\n\x03Multiplayer > Party\n"), "SELECT + left: the Party page");
 	press(0);
-	press(VITA_BUTTON_SELECT | VITA_BUTTON_UP);
-	check(!panel_open, "SELECT + up again: closed");
+	press(VITA_BUTTON_SELECT | VITA_BUTTON_LEFT);
+	check(!panel_open, "SELECT + left again: closed");
 	press(0);
 	panel_begin();
 	to_tab("Multiplayer");

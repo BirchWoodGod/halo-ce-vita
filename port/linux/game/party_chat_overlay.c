@@ -11,7 +11,7 @@ joined, left, leads) in another colour. Nothing is read from the lines but
 text the party already cleaned (printable ASCII, no markup); nothing here
 interprets it.
 
-Typing and quick chat: the settings panel's Party page (SELECT + D-pad up
+Typing and quick chat: the settings panel's Party page (SELECT + D-pad left
 opens it at once, in play and in the menus), the Halo 3 PARTY screen in the
 menus. The same GPU programs as the latency meter (the game's own text and
 quads): no new shader.

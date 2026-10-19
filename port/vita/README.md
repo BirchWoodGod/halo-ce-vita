@@ -174,7 +174,7 @@ the settings panel's Multiplayer > Friends > Party). When the leader hosts a
 game the party joins its lobby by itself; when the leader joins another's
 game the party follows through that game's own join (a password game is never
 followed; a member who cannot get in is told why and stays in the party).
-**Select + D-pad up** opens the panel's Party page at once, in play or in the
+**Select + D-pad left** opens the panel's Party page at once, in play or in the
 menus, for party chat: Send a message (the system's keyboard) and Quick chat
 (left and right choose a phrase, Cross sends it). Messages show at the left
 of the screen in play and on the Halo 3 PARTY screen (FRIENDS' PARTY row:

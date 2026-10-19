@@ -674,7 +674,7 @@ static struct setting settings[] = {
 	/* (the party, port/linux/src/p2p_party.h: friends who play together, the
 	leader's games followed; the Halo 3 menus' PARTY screen does the same.
 	The Friends page's first row: the Multiplayer tab is a screen's height;
-	SELECT + D-pad up opens it at once) */
+	SELECT + D-pad left opens it at once) */
 	PAGE_ROW("Party", "Invite friends, follow the leader, leave", PAGE_FRIENDS, PAGE_PARTY),
 	/* (party chat: typed on the system's keyboard; quick chat is the page's
 	line under it) */
@@ -5748,10 +5748,11 @@ int vita_settings_input(const struct vita_host_pad *pad)
         both_since = 0;
         return 1;
     }
-	/* port: SELECT + D-pad up: the Party page at once (party chat, in play
+	/* port: SELECT + D-pad left: the Party page at once (party chat, in play
 	and in the menus), or closed if it is the one open; the game sees
-	neither (the panel's SELECT + down's way) */
-	if ((buttons & VITA_BUTTON_SELECT) && (pressed & VITA_BUTTON_UP))
+	neither (the panel's SELECT + down's way; not SELECT + up, Forge's
+	monitor and Spartan) */
+	if ((buttons & VITA_BUTTON_SELECT) && (pressed & VITA_BUTTON_LEFT))
 	{
 		both_since = 0;
 		if (panel_open && page == PAGE_PARTY)
@@ -5766,7 +5767,7 @@ int vita_settings_input(const struct vita_host_pad *pad)
 				panel_begin();
 			else
 				show();
-			vita_host_log("settings: party: the Party page (SELECT + up)");
+			vita_host_log("settings: party: the Party page (SELECT + left)");
 		}
 		return 1;
 	}
