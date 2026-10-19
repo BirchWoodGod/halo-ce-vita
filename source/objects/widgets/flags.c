@@ -599,6 +599,28 @@ void flag_update(
 				local_random_direction3d(&turbulence);
 #endif
 				scale_vector3d(&turbulence, wind_scale, &turbulence);
+#ifdef HALO_LINUX
+				/* (port) a flag held in a Halo 3 menu's scene (menu_scene_objects.c)
+				flies in a breeze of the scene's: held still, with no wind in
+				ui.map's space, its cloth hung limp down the pole, seen edge on
+				- on the Vita not seen at all. The breeze is a steady wind, the
+				force that brings a point to its speed against the air's
+				friction (point_physics_update) */
+				if (!underwater && column > 0)
+				{
+					boolean menu_scene_objects_flag_wind(long object_index, real_vector3d *wind);
+					real_vector3d breeze;
+
+					if (menu_scene_objects_flag_wind(flag->object_index, &breeze))
+					{
+						real friction = point_physics_definition_get(definition->physics.index)->air_friction * 0.0004f;
+
+						turbulence.i += breeze.i * friction;
+						turbulence.j += breeze.j * friction;
+						turbulence.k += breeze.k * friction;
+					}
+				}
+#endif
 
 				new_position = vertex->position;
 				new_location = attachment_location;

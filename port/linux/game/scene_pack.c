@@ -6,10 +6,14 @@ the recipe, the builder, and the checks and moves a pack's tags go through
 before anything reads them. No game state: scene_packs.c puts a pack into
 the running game, tools/scene_pack_test.c tests this alone.
 
-The builder reads its source map (an Xbox map, inflated as it is read, or
-already inflated) twice: once to the end of its tag data, which it walks
-there, then from the start again for the bitmaps' pixels and sounds'
-samples the pack's tags name, in the file's order. From the tag data:
+The builder reads its source map (an Xbox map, inflated as it is read; or
+already inflated, or the game's decompressed copy of it in the cache
+partition, scene_pack_copy_source: then read in place, seeking to what it
+wants) twice: once to the end of its tag data, which it walks there, then
+from the start again for the bitmaps' pixels and sounds' samples the pack's
+tags name, in the file's order - one read for several recipes' packs at
+once (scene_pack_build_many: the tag data once, the union of their pieces
+once). From the tag data:
 - the recipe's tags, then every tag they need (every reference the tag
   layouts know, tag_relocate.c's, and every tag index the tag schemas know,
   tag_schema*.c), but for the groups and tags the recipe strips, whose
@@ -22,7 +26,9 @@ samples the pack's tags name, in the file's order. From the tag data:
 - the models' parts' vertex and index buffers (their headers and bytes,
   which a map keeps beside the tags) copied with them;
 - the tag indices the schemas know, the bitmaps' pixels and the sounds'
-  samples made the pack's.
+  samples made the pack's;
+- (keep lines) an animation graph's animations the recipe does not keep
+  copied without frames (build_animations_plan, build_animations_patch).
 Anything of the source map that does not fit where it says is the map's
 damage: the build stops, nothing is written. What it writes is checked as
 any pack is when it is loaded.
@@ -42,6 +48,7 @@ correct.
 #include "sound/sound_definitions.h"
 #include "units/unit_definitions.h"
 #include "models/model_definitions.h"
+#include "models/model_animation_definitions.h"
 
 #include "scene_pack.h"
 #include "scene_pack_ce.h"
@@ -232,9 +239,17 @@ struct source_reader
 	unsigned long file_length;
 	unsigned long long read_bytes;
 	int volatile const *cancel;
-	/* (the build's progress: the read's half, 0 or 50, and where it goes) */
+	/* (the build's progress: the read's half, 0 or 50, and where it goes;
+	read in place, the bytes the half reads and has read) */
 	long progress_base;
 	long volatile *progress;
+	unsigned long long phase_total;
+	unsigned long long phase_read;
+	/* (read from the map's decompressed copy: scene_pack_copy_source) its
+	token, and the map's header it must still have */
+	boolean using_copy;
+	unsigned long copy_token;
+	unsigned char map_header[CACHE_FILE_HEADER_SIZE];
 };
 
 struct build_state
@@ -291,9 +306,23 @@ struct build_state
 	long walked;
 	boolean failed;
 	int volatile const *cancel;
+
+	/* (keep lines) the animations a pack keeps no frames of: each one's
+	element, in the source; their data fields not copied
+	(build_animations_plan, build_animations_patch) */
+	struct build_reduced_animation
+	{
+		unsigned long animation;
+	} *reduced;
+	long reduced_count;
+	long reduced_capacity;
+	long reduced_bytes;
 };
 
 /* ---------- globals */
+
+void (*scene_pack_io_hook)(unsigned long bytes, boolean source) = NULL;
+struct scene_pack_copy_source const *scene_pack_copy_source = NULL;
 
 /* ---------- prototypes */
 
@@ -375,6 +404,21 @@ static unsigned long long fnv_bytes(unsigned long long hash, void const *data, u
 static unsigned long crc_bytes(unsigned long crc, void const *data, unsigned long size)
 {
 	return (unsigned long)crc32((uLong)crc, (Bytef const *)data, (uInt)size);
+}
+
+/* a read or write of a build's or a load's done (its pauses and pace:
+scene_pack_io_hook) */
+static void io_done(unsigned long bytes)
+{
+	if (scene_pack_io_hook)
+		scene_pack_io_hook(bytes, FALSE);
+}
+
+/* (the same, of the source map) */
+static void io_done_source(unsigned long bytes)
+{
+	if (scene_pack_io_hook)
+		scene_pack_io_hook(bytes, TRUE);
 }
 
 static void why_set(char *why, long why_size, char const *format, char const *detail)
@@ -694,6 +738,17 @@ boolean scene_pack_recipe_parse(
 			}
 			recipe->tune_count++;
 		}
+		else if (!strcmp(word, "keep") && recipe->keep_count < SCENE_PACK_MAXIMUM_KEEPS && strchr(rest, '|') &&
+			strchr(rest, '|') > rest && strlen(strchr(rest, '|') + 1) > 0 &&
+			strchr(rest, '|') - rest < SCENE_PACK_TAG_PATH_SIZE && strlen(strchr(rest, '|') + 1) < SCENE_PACK_ANIMATION_NAME_SIZE)
+		{
+			struct scene_pack_recipe_keep *keep = &recipe->keeps[recipe->keep_count++];
+			char const *bar = strchr(rest, '|');
+
+			memcpy(keep->graph, rest, (size_t)(bar - rest));
+			keep->graph[bar - rest] = 0;
+			snprintf(keep->animation, sizeof(keep->animation), "%s", bar + 1);
+		}
 		else
 		{
 			snprintf(why, why_size, "the recipe's line %ld is not one a recipe has", line_number);
@@ -809,6 +864,20 @@ boolean scene_pack_recipe_parse(
 		/* (the tuning's own version: a tuning changed is a pack made again) */
 		hash = fnv_bytes(hash, tuning_version, strlen(tuning_version) + 1);
 	}
+	for (index = 0; index < recipe->keep_count; index++)
+	{
+		char const *text;
+
+		hash = fnv_bytes(hash, "k", 1);
+		for (text = recipe->keeps[index].graph; *text; text++)
+		{
+			unsigned char character = (unsigned char)lower((unsigned char)*text);
+
+			hash = fnv_bytes(hash, &character, 1);
+		}
+		hash = fnv_bytes(hash, "|", 1);
+		hash = fnv_bytes(hash, recipe->keeps[index].animation, strlen(recipe->keeps[index].animation) + 1);
+	}
 	snprintf(version, sizeof(version), "v%d.%d%s", SCENE_PACK_VERSION, SCENE_PACK_BUILDER_VERSION,
 		recipe->custom_edition_map_count ? scene_pack_custom_edition_builder_version() : "");
 	recipe->hash = fnv_bytes(hash, version, strlen(version));
@@ -872,6 +941,44 @@ static long file_size_get(FILE *file)
 	return size;
 }
 
+/* the map of that name in maps_directory, an Xbox map: its header (if not
+NULL), its file's size, its identity as packs record it (FALSE if it is not
+there or not one) */
+static boolean map_identity(char const *maps_directory, char const *map, unsigned char *header_out, long *size_out,
+	unsigned long long *source_hash)
+{
+	char path[512];
+	unsigned char header[CACHE_FILE_HEADER_SIZE];
+	FILE *file;
+	long size;
+	boolean found;
+
+	map_path(path, sizeof(path), maps_directory, map);
+	file = fopen(path, "rb");
+	if (!file)
+		return FALSE;
+	size = file_size_get(file);
+	found = size >= CACHE_FILE_HEADER_SIZE && fread(header, 1, sizeof(header), file) == sizeof(header) &&
+		source_header_valid(header, (unsigned long)size);
+	fclose(file);
+	if (!found)
+		return FALSE;
+	if (header_out)
+		memcpy(header_out, header, sizeof(header));
+	if (size_out)
+		*size_out = size;
+	if (source_hash)
+	{
+		unsigned char size_bytes[4];
+
+		write_u32(size_bytes, (unsigned long)size);
+		*source_hash = fnv_bytes(fnv_bytes(FNV_BASIS, header, sizeof(header)), size_bytes, 4);
+	}
+	return TRUE;
+}
+
+static FILE *copy_open(char const *map, unsigned char const *header, unsigned long *token);
+
 boolean scene_pack_source_check(
 	struct scene_pack_recipe const *recipe,
 	char const *maps_directory,
@@ -904,34 +1011,76 @@ boolean scene_pack_source_find(
 
 	for (index = 0; index < recipe->map_count; index++)
 	{
-		char path[512];
-		unsigned char header[CACHE_FILE_HEADER_SIZE];
-		FILE *file;
-		long size;
-		boolean found;
-
-		map_path(path, sizeof(path), maps_directory, recipe->maps[index]);
-		file = fopen(path, "rb");
-		if (!file)
-			continue;
-		size = file_size_get(file);
-		found = size >= CACHE_FILE_HEADER_SIZE && fread(header, 1, sizeof(header), file) == sizeof(header) &&
-			source_header_valid(header, (unsigned long)size);
-		fclose(file);
-		if (!found)
+		if (!map_identity(maps_directory, recipe->maps[index], NULL, NULL, source_hash))
 			continue;
 		if (map_name)
 			snprintf(map_name, map_name_size, "%s", recipe->maps[index]);
-		if (source_hash)
-		{
-			unsigned char size_bytes[4];
-
-			write_u32(size_bytes, (unsigned long)size);
-			*source_hash = fnv_bytes(fnv_bytes(FNV_BASIS, header, sizeof(header)), size_bytes, 4);
-		}
 		return TRUE;
 	}
 	return FALSE;
+}
+
+boolean scene_pack_source_identity(
+	struct scene_pack_recipe const *recipe,
+	char const *maps_directory,
+	char const *map,
+	unsigned long long *source_hash)
+{
+	short index;
+
+	if (!map || recipe->custom_edition_map_count)
+		return FALSE;
+	for (index = 0; index < recipe->map_count; index++)
+	{
+		if (names_match(recipe->maps[index], map))
+			return map_identity(maps_directory, recipe->maps[index], NULL, NULL, source_hash);
+	}
+	return FALSE;
+}
+
+/* the map's decompressed copy (scene_pack_copy_source), opened, if it is
+that map's: its header header (the maps folder's map's) byte for byte, a
+checksum in it, and room in it for the map's whole length. NULL if not */
+static FILE *copy_open(char const *map, unsigned char const *header, unsigned long *token)
+{
+	unsigned char copy_header[CACHE_FILE_HEADER_SIZE];
+	unsigned long checksum = read_u32(header + 0x64);
+	FILE *file;
+	long size;
+
+	if (!scene_pack_copy_source || !scene_pack_copy_source->open || checksum == 0 || checksum == 0xFFFFFFFFUL)
+		return NULL;
+	file = scene_pack_copy_source->open(map, token);
+	if (!file)
+		return NULL;
+	size = file_size_get(file);
+	if (size < 0 || (unsigned long)size < read_u32(header + 8) ||
+		fread(copy_header, 1, sizeof(copy_header), file) != sizeof(copy_header) ||
+		memcmp(copy_header, header, sizeof(copy_header)))
+	{
+		fclose(file);
+		return NULL;
+	}
+	return file;
+}
+
+boolean scene_pack_source_seekable(
+	char const *maps_directory,
+	char const *map)
+{
+	unsigned char header[CACHE_FILE_HEADER_SIZE];
+	long size = 0;
+	unsigned long token = 0;
+	FILE *copy;
+
+	if (!map_identity(maps_directory, map, header, &size, NULL))
+		return FALSE;
+	if ((unsigned long)size == read_u32(header + 8))
+		return TRUE;
+	copy = copy_open(map, header, &token);
+	if (copy)
+		fclose(copy);
+	return copy != NULL;
 }
 
 static boolean source_cancelled(struct source_reader *reader)
@@ -972,8 +1121,24 @@ static boolean source_rewind(struct source_reader *reader)
 	return TRUE;
 }
 
-static boolean source_open(struct source_reader *reader, char const *path, unsigned char *header,
-	int volatile const *cancel)
+/* (read from a copy) whether it is still the map's: its header, and its
+token (the game has not begun another copy into it meanwhile) */
+static boolean source_copy_unchanged(struct source_reader *reader)
+{
+	unsigned char header[CACHE_FILE_HEADER_SIZE];
+
+	if (!reader->using_copy)
+		return TRUE;
+	return !fseek(reader->file, 0, SEEK_SET) && fread(header, 1, sizeof(header), reader->file) == sizeof(header) &&
+		!memcmp(header, reader->map_header, sizeof(header)) &&
+		(!scene_pack_copy_source->unchanged || scene_pack_copy_source->unchanged(reader->copy_token));
+}
+
+/* the map at path (named map), its header read to header; with try_copy,
+read from its decompressed copy instead when there is one of it
+(copy_open) */
+static boolean source_open(struct source_reader *reader, char const *path, char const *map, unsigned char *header,
+	int volatile const *cancel, boolean try_copy)
 {
 	long size;
 
@@ -995,6 +1160,21 @@ static boolean source_open(struct source_reader *reader, char const *path, unsig
 	reader->file_length = read_u32(header + 8);
 	/* (a map whose file is its whole length is inflated already) */
 	reader->compressed = (unsigned long)size != reader->file_length;
+	if (reader->compressed && try_copy)
+	{
+		unsigned long token = 0;
+		FILE *copy = copy_open(map, header, &token);
+
+		if (copy)
+		{
+			fclose(reader->file);
+			reader->file = copy;
+			reader->compressed = FALSE;
+			reader->using_copy = TRUE;
+			reader->copy_token = token;
+			memcpy(reader->map_header, header, CACHE_FILE_HEADER_SIZE);
+		}
+	}
 	if (!source_rewind(reader))
 	{
 		source_close(reader);
@@ -1012,10 +1192,23 @@ static boolean source_read(struct source_reader *reader, unsigned long offset, u
 		return FALSE;
 	if (!reader->compressed)
 	{
-		if (fseek(reader->file, (long)offset, SEEK_SET) ||
-			(size && buffer && fread(buffer, 1, size, reader->file) != size))
-		{
+		unsigned long done = 0;
+
+		if (fseek(reader->file, (long)offset, SEEK_SET))
 			return FALSE;
+		/* (in pieces: the pauses between them, scene_pack_io_hook) */
+		while (buffer && done < size)
+		{
+			unsigned long chunk = size - done > 4 * BOUNCE_SIZE ? 4 * BOUNCE_SIZE : size - done;
+
+			if (source_cancelled(reader) || fread(buffer + done, 1, chunk, reader->file) != chunk)
+				return FALSE;
+			done += chunk;
+			reader->phase_read += chunk;
+			io_done_source(chunk);
+			if (reader->progress && reader->phase_total)
+				*reader->progress = reader->progress_base +
+					(long)(MIN(reader->phase_read, reader->phase_total) * 49 / reader->phase_total);
 		}
 		reader->position = offset + size;
 		reader->read_bytes += size;
@@ -1039,6 +1232,7 @@ static boolean source_read(struct source_reader *reader, unsigned long offset, u
 
 			if (!read)
 				return FALSE;
+			io_done_source((unsigned long)read);
 			reader->stream.next_in = reader->input;
 			reader->stream.avail_in = (uInt)read;
 		}
@@ -1683,6 +1877,33 @@ static unsigned long pack_tag_index(struct build_state const *state, unsigned lo
 	return pack >= 0 ? (unsigned long)(((PACK_FIRST_SALT + pack) << 16) | pack) : (unsigned long)NONE;
 }
 
+/* whether a data field (at, in the source) is one of an animation kept
+without its frames */
+static boolean reduced_data_field(struct build_state const *state, unsigned long at)
+{
+	static unsigned long const fields[3] =
+	{
+		offsetof(struct animation, frame_info), offsetof(struct animation, default_data), offsetof(struct animation, data)
+	};
+	long index;
+	short field;
+
+	for (index = 0; index < state->reduced_count; index++)
+	{
+		struct build_reduced_animation const *reduced = &state->reduced[index];
+
+		if (at < reduced->animation || at >= reduced->animation + sizeof(struct animation))
+			continue;
+		for (field = 0; field < 3; field++)
+		{
+			if (at == reduced->animation + fields[field])
+				return TRUE;
+		}
+		return FALSE;
+	}
+	return FALSE;
+}
+
 /* the struct of layout at source, copied already to offset: its blocks and
 data copied, its pointers made the pack's */
 static boolean layout_copy(struct build_state *state, unsigned short layout, unsigned long source,
@@ -1757,6 +1978,10 @@ static boolean layout_copy(struct build_state *state, unsigned short layout, uns
 		case HALO_TAG_LAYOUT_FIELD_DATA:
 		{
 			unsigned char *data = source_at(state, at, 20);
+
+			/* (an animation kept without its frames: none of its bytes) */
+			if (state->reduced_count && reduced_data_field(state, at))
+				data = NULL;
 			long size = data ? (long)read_u32(data) : 0;
 			unsigned long address = data ? read_u32(data + 12) : 0;
 			long existing;
@@ -2248,6 +2473,97 @@ static void build_state_free(struct build_state *state, void *scratch)
 		free(state->ranges);
 	if (state->range_fixups)
 		free(state->range_fixups);
+	if (state->reduced)
+		free(state->reduced);
+}
+
+/* (keep lines) each animation graph of the pack's that the recipe keeps
+animations of: every animation it does not keep is kept without its frames
+(build_animations_patch), so that its bytes are not in the pack */
+static void build_animations_plan(struct build_state *state)
+{
+	struct scene_pack_recipe const *recipe = state->recipe;
+	long index;
+
+	for (index = 0; index < state->pack_tag_count && !state->failed; index++)
+	{
+		struct build_tag const *tag = &state->pack_tags[index];
+		unsigned char *source = tag->group_tag == 'antr' ? source_at(state, tag->source_base, sizeof(struct animation_graph)) :
+			NULL;
+		struct animation_graph graph;
+		long animation, keep;
+		boolean any = FALSE;
+
+		if (!source)
+			continue;
+		for (keep = 0; keep < recipe->keep_count && !any; keep++)
+			any = names_match(recipe->keeps[keep].graph, tag->name);
+		if (!any)
+			continue;
+		memcpy(&graph, source, sizeof(graph));
+		if (graph.animations.count <= 0 || graph.animations.count > 0x7FFF ||
+			!source_at(state, (unsigned long)graph.animations.address,
+				(unsigned long)graph.animations.count * sizeof(struct animation)))
+		{
+			continue;
+		}
+		for (animation = 0; animation < graph.animations.count && !state->failed; animation++)
+		{
+			unsigned long address = (unsigned long)graph.animations.address + (unsigned long)animation * sizeof(struct animation);
+			struct animation const *element = (struct animation const *)source_at(state, address, sizeof(struct animation));
+			char name[sizeof(element->name) + 1];
+			boolean kept = FALSE;
+
+			memcpy(name, element->name, sizeof(element->name));
+			name[sizeof(element->name)] = 0;
+			for (keep = 0; keep < recipe->keep_count && !kept; keep++)
+				kept = names_match(recipe->keeps[keep].graph, tag->name) && names_match(name, recipe->keeps[keep].animation);
+			if (kept)
+				continue;
+			if (!grow((void **)&state->reduced, &state->reduced_capacity, state->reduced_count,
+				sizeof(struct build_reduced_animation), 64 * 1024))
+			{
+				build_fail(state, "there is no memory to build the pack%s", NULL);
+				break;
+			}
+			state->reduced[state->reduced_count++].animation = address;
+			state->reduced_bytes += element->frame_info.size + element->default_data.size + element->data.size;
+		}
+	}
+}
+
+/* (keep lines) the copies of the animations kept without their frames
+made ones that move no node, as the tag check makes an animation whose
+frames it refuses: no nodes, no frame data, defaults or frame info, not
+compressed - its frame count, frame indices, name, type and next animation
+its own (a scene never plays it; played, it would hold the rest pose) */
+static void build_animations_patch(struct build_state *state)
+{
+	long index;
+
+	for (index = 0; index < state->reduced_count && !state->failed; index++)
+	{
+		long out = extent_map(state, state->reduced[index].animation, sizeof(struct animation));
+		struct animation *copy;
+
+		if (out == NONE)
+		{
+			build_fail(state, "the source map has an animation the copy missed%s", NULL);
+			return;
+		}
+		copy = (struct animation *)(state->blob + out);
+		copy->node_count = 0;
+		copy->frame_size = 0;
+		copy->frame_info_type = 0;
+		copy->flags &= ~FLAG(_animation_compressed_bit);
+		memset(copy->nodes_with_translation_flags, 0, sizeof(copy->nodes_with_translation_flags));
+		memset(copy->nodes_with_rotation_flags, 0, sizeof(copy->nodes_with_rotation_flags));
+		memset(copy->nodes_with_scale_flags, 0, sizeof(copy->nodes_with_scale_flags));
+		copy->compressed_data_offset = 0;
+		memset(&copy->frame_info, 0, sizeof(copy->frame_info));
+		memset(&copy->default_data, 0, sizeof(copy->default_data));
+		memset(&copy->data, 0, sizeof(copy->data));
+	}
 }
 
 /* the pack's tag data put together from the source's (state->tags): its
@@ -2310,6 +2626,9 @@ static void build_tags(struct build_state *state, unsigned long file_length)
 		if (!state->failed)
 			memcpy(state->blob + tag->name_offset, tag->name, length);
 	}
+	/* (keep lines) the animations to take kept ones' frames */
+	if (recipe->keep_count)
+		build_animations_plan(state);
 	/* the tags */
 	for (index = 0; index < state->pack_tag_count && !state->failed; index++)
 	{
@@ -2324,6 +2643,8 @@ static void build_tags(struct build_state *state, unsigned long file_length)
 		if (layout != HALO_TAG_LAYOUT_NONE)
 			layout_copy(state, layout, tag->source_base, tag->base_offset, 0);
 	}
+	if (state->reduced_count && !state->failed)
+		build_animations_patch(state);
 	/* their tag indices, pixels and samples */
 	for (index = 0; index < state->pack_tag_count && !state->failed; index++)
 	{
@@ -2854,6 +3175,382 @@ static boolean scene_pack_build_custom_edition(
 	return !state.failed;
 }
 
+/* (a pack of a build of several, scene_pack_build_many) its build, its
+pieces of the source's pixels and samples and how far they are written,
+its file */
+struct build_job
+{
+	struct build_state state;
+	struct build_range *pieces;
+	long piece_count;
+	long piece_cursor;
+	unsigned long piece_done;
+	unsigned long data_size;
+	unsigned long data_crc;
+	unsigned long tags_crc;
+	FILE *file;
+	char temporary[512];
+};
+
+/* a build's memory let go, but for the source's tag data (another's too) */
+static void build_state_release(struct build_state *state)
+{
+	unsigned char *tags = state->tags;
+
+	state->tags = NULL;
+	build_state_free(state, NULL);
+	state->pack_index = NULL;
+	state->pack_tags = NULL;
+	state->blob = NULL;
+	state->extents = NULL;
+	state->buffers = NULL;
+	state->items = NULL;
+	state->buffer_fixups = NULL;
+	state->ranges = NULL;
+	state->range_fixups = NULL;
+	state->reduced = NULL;
+	state->tags = tags;
+}
+
+static int range_source_compare(void const *a, void const *b)
+{
+	struct build_range const *left = a;
+	struct build_range const *right = b;
+
+	return left->source < right->source ? -1 : left->source > right->source ? 1 : 0;
+}
+
+/* (count) packs from the map, once read: FALSE, *copy_changed TRUE, when
+the map's copy read in its place changed meanwhile (built again from the
+map itself) */
+static boolean build_many_once(
+	struct scene_pack_recipe const *const *recipes,
+	short count,
+	char const *map,
+	char const *maps_directory,
+	char const *const *pack_paths,
+	void *scratch,
+	unsigned long scratch_size,
+	int volatile const *cancel,
+	struct scene_pack_build_result *results,
+	boolean try_copy,
+	boolean *copy_changed)
+{
+	/* (malloc's: the game's free is its debug allocator's, which calloc's
+	blocks are not) */
+	struct build_job *jobs = malloc((size_t)count * sizeof(struct build_job));
+	struct source_reader reader;
+	unsigned char header[CACHE_FILE_HEADER_SIZE];
+	unsigned long long started = vita_host_time_us();
+	unsigned long long source_hash = 0;
+	char path[512];
+	unsigned char *tags = NULL;
+	unsigned long tags_size = 0;
+	struct build_range *unions = NULL;
+	long union_count = 0;
+	unsigned long long union_bytes = 0;
+	boolean all = TRUE;
+	char const *failure = NULL;
+	short job_index;
+	long index;
+
+	*copy_changed = FALSE;
+	memset(&reader, 0, sizeof(reader));
+	if (jobs)
+		memset(jobs, 0, (size_t)count * sizeof(struct build_job));
+	for (job_index = 0; job_index < count; job_index++)
+	{
+		memset(&results[job_index], 0, sizeof(results[job_index]));
+		snprintf(results[job_index].map, sizeof(results[job_index].map), "%s", map);
+	}
+	if (!jobs)
+	{
+		for (job_index = 0; job_index < count; job_index++)
+			snprintf(results[job_index].why, sizeof(results[job_index].why), "there is no memory to build the pack");
+		return FALSE;
+	}
+	for (job_index = 0; job_index < count; job_index++)
+	{
+		struct build_state *state = &jobs[job_index].state;
+		unsigned long long hash = 0;
+
+		state->recipe = recipes[job_index];
+		state->result = &results[job_index];
+		state->cancel = cancel;
+		state->source_address = 0x803A6000UL;
+		if (recipes[job_index]->custom_edition_map_count ||
+			!scene_pack_source_identity(recipes[job_index], maps_directory, map, &hash))
+		{
+			build_fail(state, "its recipe does not name %s, or it is not in the maps folder", map);
+		}
+		else
+		{
+			source_hash = hash;
+		}
+	}
+	map_path(path, sizeof(path), maps_directory, map);
+	if (!source_open(&reader, path, map, header, cancel, try_copy))
+		failure = "the map cannot be read";
+	reader.progress = &results[0].progress;
+	reader.progress_base = 0;
+
+	/* the source's tag data (read to the end of it: it is the file's last),
+	once, for all of them */
+	if (!failure)
+	{
+		tags_size = read_u32(header + 20);
+		tags = scratch && scratch_size >= tags_size ? scratch : malloc(tags_size);
+		reader.phase_total = tags_size;
+		if (!tags)
+			failure = "there is no memory to build the pack";
+		else if (!source_read(&reader, read_u32(header + 16), tags_size, tags))
+			failure = cancel && *cancel ? "it was stopped" : "the map's tag data cannot be read";
+		else if (!source_copy_unchanged(&reader))
+			*copy_changed = TRUE, failure = "the map's copy changed as it was read";
+	}
+	for (job_index = 0; job_index < count; job_index++)
+	{
+		struct build_job *job = &jobs[job_index];
+		struct build_state *state = &job->state;
+
+		if (failure)
+			build_fail(state, "%s", failure);
+		state->tags = tags;
+		state->tags_size = tags_size;
+		if (state->failed)
+			continue;
+		/* the pack's tags, then its file begun: a header to come, its tags */
+		state->pack_index = malloc(sizeof(long) * 0x8000);
+		state->pack_tags = malloc(sizeof(struct build_tag) * SCENE_PACK_MAXIMUM_TAGS);
+		if (!state->pack_index || !state->pack_tags)
+			build_fail(state, "there is no memory to build the pack%s", NULL);
+		else if (!source_table_read(state))
+			build_fail(state, "the map's tag header is damaged%s", NULL);
+		if (!state->failed)
+		{
+			for (index = 0; index < 0x8000; index++)
+				state->pack_index[index] = NONE;
+			build_tags(state, reader.file_length);
+		}
+		if (!state->failed)
+			build_tunes(state);
+		if (!state->failed)
+			job->pieces = ranges_place(state, &job->piece_count, &job->data_size);
+		if (!state->failed)
+		{
+			unsigned char placeholder[SCENE_PACK_HEADER_SIZE];
+
+			for (index = 0; index < state->range_fixup_count; index++)
+			{
+				struct build_range_fixup const *fixup = &state->range_fixups[index];
+
+				write_u32(state->blob + fixup->location,
+					SCENE_PACK_FILE_BASE + state->ranges[fixup->range].offset + (unsigned long)fixup->delta);
+			}
+			job->tags_crc = crc_bytes(0, state->blob, state->blob_size);
+			snprintf(job->temporary, sizeof(job->temporary), "%s.tmp", pack_paths[job_index]);
+			job->file = fopen(job->temporary, "wb");
+			memset(placeholder, 0, sizeof(placeholder));
+			if (!job->file || fwrite(placeholder, 1, sizeof(placeholder), job->file) != sizeof(placeholder) ||
+				fwrite(state->blob, 1, state->blob_size, job->file) != state->blob_size)
+			{
+				build_fail(state, "the pack cannot be written%s", NULL);
+			}
+			else
+			{
+				io_done(state->blob_size);
+			}
+		}
+		/* (its working memory let go before the next one's) */
+		build_state_release(state);
+	}
+
+	/* the pixels and samples, every pack's, in the source's order (the
+	second read, once): the union of all their pieces read, each piece's
+	bytes written to its pack as they go by */
+	reader.progress_base = 50;
+	reader.phase_read = 0;
+	for (job_index = 0; job_index < count; job_index++)
+	{
+		if (!jobs[job_index].state.failed)
+			union_count += jobs[job_index].piece_count;
+	}
+	if (union_count)
+	{
+		long piece_total = union_count;
+
+		unions = malloc(sizeof(*unions) * (size_t)piece_total);
+		union_count = 0;
+		if (!unions)
+			failure = "there is no memory for the pack's pixels and samples";
+		for (job_index = 0; unions && job_index < count; job_index++)
+		{
+			if (jobs[job_index].state.failed)
+				continue;
+			memcpy(unions + union_count, jobs[job_index].pieces, sizeof(*unions) * (size_t)jobs[job_index].piece_count);
+			union_count += jobs[job_index].piece_count;
+		}
+		if (unions)
+		{
+			long merged = 0;
+
+			qsort(unions, (size_t)union_count, sizeof(*unions), range_source_compare);
+			for (index = 0; index < union_count; index++)
+			{
+				if (merged && unions[index].source <= unions[merged - 1].source + unions[merged - 1].size)
+				{
+					unsigned long end = unions[index].source + unions[index].size;
+
+					if (end > unions[merged - 1].source + unions[merged - 1].size)
+						unions[merged - 1].size = end - unions[merged - 1].source;
+				}
+				else
+				{
+					unions[merged++] = unions[index];
+				}
+			}
+			union_count = merged;
+			for (index = 0; index < union_count; index++)
+				union_bytes += unions[index].size;
+			reader.phase_total = union_bytes;
+			if (!source_rewind(&reader))
+				failure = "the map cannot be read again";
+		}
+	}
+	for (index = 0; index < union_count && !failure; index++)
+	{
+		unsigned long position = unions[index].source;
+		unsigned long end = unions[index].source + unions[index].size;
+
+		while (position < end && !failure)
+		{
+			unsigned long chunk = end - position > BOUNCE_SIZE ? BOUNCE_SIZE : end - position;
+
+			if (!source_read(&reader, position, chunk, reader.bounce))
+			{
+				failure = cancel && *cancel ? "it was stopped" : "the map's pixels and samples cannot be read";
+				break;
+			}
+			for (job_index = 0; job_index < count; job_index++)
+			{
+				struct build_job *job = &jobs[job_index];
+
+				if (job->state.failed)
+					continue;
+				results[job_index].progress = results[0].progress;
+				while (job->piece_cursor < job->piece_count)
+				{
+					struct build_range const *piece = &job->pieces[job->piece_cursor];
+					unsigned long from = piece->source + job->piece_done;
+					unsigned long to = MIN(piece->source + piece->size, position + chunk);
+
+					if (from >= position + chunk)
+						break;
+					if (from < position || fwrite(reader.bounce + (from - position), 1, to - from, job->file) != to - from)
+					{
+						build_fail(&job->state, "the pack cannot be written%s", NULL);
+						break;
+					}
+					io_done(to - from);
+					job->data_crc = crc_bytes(job->data_crc, reader.bounce + (from - position), to - from);
+					job->piece_done += to - from;
+					if (job->piece_done >= piece->size)
+					{
+						job->piece_cursor++;
+						job->piece_done = 0;
+					}
+				}
+			}
+			position += chunk;
+		}
+	}
+	if (!failure && !source_copy_unchanged(&reader))
+		*copy_changed = TRUE, failure = "the map's copy changed as it was read";
+
+	/* each pack's header, then its file put in its place */
+	for (job_index = 0; job_index < count; job_index++)
+	{
+		struct build_job *job = &jobs[job_index];
+		struct build_state *state = &job->state;
+		struct scene_pack_build_result *result = &results[job_index];
+
+		if (failure)
+			build_fail(state, "%s", failure);
+		if (!state->failed && job->piece_cursor != job->piece_count)
+			build_fail(state, "the map's pixels and samples cannot be read%s", NULL);
+		if (!state->failed)
+		{
+			unsigned char pack_header[SCENE_PACK_HEADER_SIZE];
+
+			header_write(pack_header, state, job->tags_crc, job->data_size, job->data_crc, source_hash, map);
+			if (fseek(job->file, 0, SEEK_SET) || fwrite(pack_header, 1, sizeof(pack_header), job->file) != sizeof(pack_header) ||
+				fflush(job->file))
+			{
+				build_fail(state, "the pack cannot be written%s", NULL);
+			}
+		}
+		if (job->file && fclose(job->file))
+			build_fail(state, "the pack cannot be written%s", NULL);
+		if (!state->failed)
+		{
+			remove(pack_paths[job_index]);
+			if (rename(job->temporary, pack_paths[job_index]))
+				build_fail(state, "the pack cannot be put in its place%s", NULL);
+		}
+		else if (job->file)
+		{
+			remove(job->temporary);
+		}
+		result->tag_count = state->pack_tag_count;
+		result->tag_bytes = state->blob_size;
+		result->data_bytes = job->data_size;
+		result->file_bytes = SCENE_PACK_HEADER_SIZE + state->blob_size + job->data_size;
+		result->source_bytes = reader.read_bytes;
+		result->microseconds = vita_host_time_us() - started;
+		result->progress = state->failed ? 0 : 100;
+		if (state->failed)
+			all = FALSE;
+		if (job->pieces)
+			free(job->pieces);
+	}
+	if (unions)
+		free(unions);
+	if (tags && tags != scratch)
+		free(tags);
+	source_close(&reader);
+	free(jobs);
+	return all;
+}
+
+boolean scene_pack_build_many(
+	struct scene_pack_recipe const *const *recipes,
+	short count,
+	char const *map,
+	char const *maps_directory,
+	char const *const *pack_paths,
+	void *scratch,
+	unsigned long scratch_size,
+	int volatile const *cancel,
+	struct scene_pack_build_result *results)
+{
+	boolean copy_changed = FALSE;
+	boolean built;
+
+	if (count <= 0 || !map)
+		return FALSE;
+	built = build_many_once(recipes, count, map, maps_directory, pack_paths, scratch, scratch_size, cancel, results,
+		TRUE, &copy_changed);
+	/* (the map's copy changed under the build - the game began another into
+	its place: once more, from the map itself) */
+	if (copy_changed && !(cancel && *cancel))
+	{
+		platform_log("scene packs: %s's copy changed as it was read: built from the map itself", map);
+		built = build_many_once(recipes, count, map, maps_directory, pack_paths, scratch, scratch_size, cancel, results,
+			FALSE, &copy_changed);
+	}
+	return built;
+}
+
 boolean scene_pack_build(
 	struct scene_pack_recipe const *recipe,
 	char const *maps_directory,
@@ -2863,147 +3560,17 @@ boolean scene_pack_build(
 	int volatile const *cancel,
 	struct scene_pack_build_result *result)
 {
-	struct build_state state;
-	struct source_reader reader;
-	unsigned char header[CACHE_FILE_HEADER_SIZE];
-	unsigned char pack_header[SCENE_PACK_HEADER_SIZE];
-	unsigned long long started = vita_host_time_us();
-	unsigned long long source_hash = 0;
-	char path[512];
-	char temporary[512];
-	struct build_range *pieces = NULL;
-	long piece_count = 0;
-	unsigned long data_size = 0, data_crc = 0, tags_crc;
-	unsigned long file_length;
-	FILE *file = NULL;
-	long index;
+	char map[SCENE_PACK_NAME_SIZE];
 
 	if (recipe->custom_edition_map_count)
 		return scene_pack_build_custom_edition(recipe, maps_directory, pack_path, scratch, scratch_size, cancel, result);
-	memset(result, 0, sizeof(*result));
-	memset(&state, 0, sizeof(state));
-	memset(&reader, 0, sizeof(reader));
-	state.recipe = recipe;
-	state.result = result;
-	state.source_address = 0x803A6000UL;
-	if (!scene_pack_source_find(recipe, maps_directory, result->map, sizeof(result->map), &source_hash))
+	if (!scene_pack_source_find(recipe, maps_directory, map, sizeof(map), NULL))
 	{
+		memset(result, 0, sizeof(*result));
 		snprintf(result->why, sizeof(result->why), "none of its maps (%s...) is in the maps folder", recipe->maps[0]);
 		return FALSE;
 	}
-	map_path(path, sizeof(path), maps_directory, result->map);
-	if (!source_open(&reader, path, header, cancel))
-	{
-		snprintf(result->why, sizeof(result->why), "%s cannot be read", result->map);
-		return FALSE;
-	}
-	file_length = reader.file_length;
-	reader.progress = &result->progress;
-	reader.progress_base = 0;
-
-	/* the source's tag data (read to the end of it: it is the file's last) */
-	state.tags_size = read_u32(header + 20);
-	state.tags = scratch && scratch_size >= state.tags_size ? scratch : malloc(state.tags_size);
-	state.pack_index = malloc(sizeof(long) * 0x8000);
-	state.pack_tags = malloc(sizeof(struct build_tag) * SCENE_PACK_MAXIMUM_TAGS);
-	if (!state.tags || !state.pack_index || !state.pack_tags)
-	{
-		build_fail(&state, "there is no memory to build the pack%s", NULL);
-	}
-	else if (!source_read(&reader, read_u32(header + 16), state.tags_size, state.tags))
-	{
-		build_fail(&state, cancel && *cancel ? "it was stopped%s" : "the map's tag data cannot be read%s", NULL);
-	}
-	else if (!source_table_read(&state))
-	{
-		build_fail(&state, "the map's tag header is damaged%s", NULL);
-	}
-	if (!state.failed)
-	{
-		for (index = 0; index < 0x8000; index++)
-			state.pack_index[index] = NONE;
-		build_tags(&state, file_length);
-	}
-	if (!state.failed)
-		build_tunes(&state);
-	if (!state.failed)
-		pieces = ranges_place(&state, &piece_count, &data_size);
-	if (!state.failed)
-	{
-		for (index = 0; index < state.range_fixup_count; index++)
-		{
-			struct build_range_fixup const *fixup = &state.range_fixups[index];
-
-			write_u32(state.blob + fixup->location,
-				SCENE_PACK_FILE_BASE + state.ranges[fixup->range].offset + (unsigned long)fixup->delta);
-		}
-		tags_crc = crc_bytes(0, state.blob, state.blob_size);
-		snprintf(temporary, sizeof(temporary), "%s.tmp", pack_path);
-		file = fopen(temporary, "wb");
-		memset(pack_header, 0, sizeof(pack_header));
-		if (!file || fwrite(pack_header, 1, sizeof(pack_header), file) != sizeof(pack_header) ||
-			fwrite(state.blob, 1, state.blob_size, file) != state.blob_size)
-		{
-			build_fail(&state, "the pack cannot be written%s", NULL);
-		}
-	}
-	/* the pixels and samples, in the source's order (the second read) */
-	reader.progress_base = 50;
-	if (!state.failed && piece_count && !source_rewind(&reader))
-		build_fail(&state, "the map cannot be read again%s", NULL);
-	for (index = 0; index < piece_count && !state.failed; index++)
-	{
-		unsigned long done = 0;
-
-		while (done < pieces[index].size && !state.failed)
-		{
-			unsigned long chunk = pieces[index].size - done > BOUNCE_SIZE ? BOUNCE_SIZE : pieces[index].size - done;
-
-			if (!source_read(&reader, pieces[index].source + done, chunk, reader.bounce))
-				build_fail(&state, cancel && *cancel ? "it was stopped%s" : "the map's pixels and samples cannot be read%s", NULL);
-			else if (fwrite(reader.bounce, 1, chunk, file) != chunk)
-				build_fail(&state, "the pack cannot be written%s", NULL);
-			else
-				data_crc = crc_bytes(data_crc, reader.bounce, chunk);
-			done += chunk;
-		}
-	}
-	if (!state.failed)
-	{
-		header_write(pack_header, &state, tags_crc, data_size, data_crc, source_hash, result->map);
-		if (fseek(file, 0, SEEK_SET) || fwrite(pack_header, 1, sizeof(pack_header), file) != sizeof(pack_header) ||
-			fflush(file))
-		{
-			build_fail(&state, "the pack cannot be written%s", NULL);
-		}
-	}
-	if (file)
-	{
-		if (fclose(file))
-			build_fail(&state, "the pack cannot be written%s", NULL);
-	}
-	if (!state.failed)
-	{
-		remove(pack_path);
-		if (rename(temporary, pack_path))
-			build_fail(&state, "the pack cannot be put in its place%s", NULL);
-	}
-	else if (file)
-	{
-		remove(temporary);
-	}
-	result->tag_count = state.pack_tag_count;
-	result->tag_bytes = state.blob_size;
-	result->data_bytes = data_size;
-	result->file_bytes = SCENE_PACK_HEADER_SIZE + state.blob_size + data_size;
-	result->source_bytes = reader.read_bytes;
-	result->microseconds = vita_host_time_us() - started;
-	result->progress = state.failed ? 0 : 100;
-	if (pieces)
-		free(pieces);
-	source_close(&reader);
-	build_state_free(&state, scratch);
-	return !state.failed;
+	return scene_pack_build_many(&recipe, 1, map, maps_directory, &pack_path, scratch, scratch_size, cancel, result);
 }
 
 /* ---------- a pack's checks */
@@ -3014,11 +3581,8 @@ boolean scene_pack_open(
 	char *why,
 	long why_size)
 {
-	unsigned char header[SCENE_PACK_HEADER_SIZE];
-	unsigned char check[SCENE_PACK_HEADER_SIZE];
 	FILE *file;
-	long size;
-	short index;
+	boolean opened;
 
 	memset(info, 0, sizeof(*info));
 	file = fopen(path, "rb");
@@ -3027,14 +3591,30 @@ boolean scene_pack_open(
 		why_set(why, why_size, "there is no pack%s", NULL);
 		return FALSE;
 	}
-	size = file_size_get(file);
+	opened = scene_pack_open_file(file, info, why, why_size);
+	fclose(file);
+	return opened;
+}
+
+boolean scene_pack_open_file(
+	FILE *file,
+	struct scene_pack_info *info,
+	char *why,
+	long why_size)
+{
+	unsigned char header[SCENE_PACK_HEADER_SIZE];
+	unsigned char check[SCENE_PACK_HEADER_SIZE];
+	long size;
+	short index;
+
+	memset(info, 0, sizeof(*info));
+	size = file ? file_size_get(file) : NONE;
 	if (size < SCENE_PACK_HEADER_SIZE || fread(header, 1, sizeof(header), file) != sizeof(header))
 	{
-		fclose(file);
 		why_set(why, why_size, "it is shorter than a pack's header%s", NULL);
 		return FALSE;
 	}
-	fclose(file);
+	io_done(sizeof(header));
 	memcpy(check, header, sizeof(check));
 	write_u32(check + HEADER_HEADER_CRC, 0);
 	if (memcmp(header, scene_pack_signature, sizeof(scene_pack_signature)) ||
@@ -3097,7 +3677,71 @@ boolean scene_pack_load(
 	char *why,
 	long why_size)
 {
-	FILE *file;
+	FILE *file = fopen(path, "rb");
+	boolean loaded;
+
+	if (!file)
+	{
+		why_set(why, why_size, "it cannot be read%s", NULL);
+		return FALSE;
+	}
+	loaded = scene_pack_load_file(file, info, destination, why, why_size);
+	fclose(file);
+	return loaded;
+}
+
+boolean scene_pack_load_file(
+	FILE *file,
+	struct scene_pack_info const *info,
+	void *destination,
+	char *why,
+	long why_size)
+{
+	return scene_pack_load_file_checked(file, info, destination, FALSE, why, why_size);
+}
+
+boolean scene_pack_data_check(
+	FILE *file,
+	struct scene_pack_info const *info,
+	char *why,
+	long why_size)
+{
+	unsigned char *bounce = malloc(BOUNCE_SIZE);
+	unsigned long crc = 0, done = 0;
+	boolean read = file && bounce && !fseek(file, (long)info->data_offset, SEEK_SET);
+
+	while (read && done < info->data_size)
+	{
+		unsigned long chunk = info->data_size - done > BOUNCE_SIZE ? BOUNCE_SIZE : info->data_size - done;
+
+		read = fread(bounce, 1, chunk, file) == chunk;
+		crc = crc_bytes(crc, bounce, chunk);
+		done += chunk;
+		io_done(chunk);
+	}
+	if (bounce)
+		free(bounce);
+	if (!read)
+	{
+		why_set(why, why_size, "it cannot be read%s", NULL);
+		return FALSE;
+	}
+	if (crc != info->data_crc)
+	{
+		why_set(why, why_size, "it is damaged (its CRC)%s", NULL);
+		return FALSE;
+	}
+	return TRUE;
+}
+
+boolean scene_pack_load_file_checked(
+	FILE *file,
+	struct scene_pack_info const *info,
+	void *destination,
+	boolean data_checked,
+	char *why,
+	long why_size)
+{
 	unsigned char *bounce;
 	unsigned long crc = 0, done = 0;
 	unsigned long anomalies;
@@ -3110,20 +3754,32 @@ boolean scene_pack_load(
 		why_set(why, why_size, "there is no room for it%s", NULL);
 		return FALSE;
 	}
-	file = fopen(path, "rb");
 	bounce = malloc(BOUNCE_SIZE);
-	read = file && bounce && !fseek(file, (long)info->tags_offset, SEEK_SET) &&
-		fread(destination, 1, info->tags_size, file) == info->tags_size;
-	while (read && done < info->data_size)
+	read = file && bounce && !fseek(file, (long)info->tags_offset, SEEK_SET);
+	/* (the tags read once, into their place, and checked there: what is
+	checked is what is used) */
+	while (read && done < info->tags_size)
+	{
+		unsigned long chunk = info->tags_size - done > 4 * BOUNCE_SIZE ? 4 * BOUNCE_SIZE : info->tags_size - done;
+
+		read = fread((unsigned char *)destination + done, 1, chunk, file) == chunk;
+		done += chunk;
+		io_done(chunk);
+	}
+	/* (the data's CRC: unless the caller knows it good - the same file,
+	unchanged since its data was checked, scene_packs.c) */
+	done = 0;
+	while (read && !data_checked && done < info->data_size)
 	{
 		unsigned long chunk = info->data_size - done > BOUNCE_SIZE ? BOUNCE_SIZE : info->data_size - done;
 
 		read = fread(bounce, 1, chunk, file) == chunk;
 		crc = crc_bytes(crc, bounce, chunk);
 		done += chunk;
+		io_done(chunk);
 	}
-	if (file)
-		fclose(file);
+	if (data_checked)
+		crc = info->data_crc;
 	if (bounce)
 		free(bounce);
 	if (!read)
@@ -3171,6 +3827,8 @@ static unsigned char *loaded_resolve(void *context, unsigned long address, unsig
 
 struct rebase_walk
 {
+	/* (its tags' first index now: 0 for a pack not given indices yet) */
+	long old_first_index;
 	long count;
 	long first_index;
 	long first_salt;
@@ -3179,7 +3837,7 @@ struct rebase_walk
 
 static unsigned long rebased(struct rebase_walk const *rebase, unsigned long tag_index)
 {
-	short local = (short)tag_index;
+	long local = (long)(short)tag_index - rebase->old_first_index;
 
 	if (tag_index == (unsigned long)NONE || local < 0 || local >= rebase->count)
 		return (unsigned long)NONE;
@@ -3255,11 +3913,22 @@ void scene_pack_rebase(
 	long first_salt,
 	long file_delta)
 {
+	scene_pack_rebase_again(tags, 0, first_index, first_salt, file_delta);
+}
+
+void scene_pack_rebase_again(
+	void *tags,
+	long old_first_index,
+	long first_index,
+	long first_salt,
+	long file_delta)
+{
 	long count;
 	unsigned char *instances = scene_pack_instances(tags, &count);
 	struct rebase_walk rebase;
 	long index;
 
+	rebase.old_first_index = old_first_index;
 	rebase.count = count;
 	rebase.first_index = first_index;
 	rebase.first_salt = first_salt;

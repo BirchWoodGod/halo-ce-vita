@@ -690,21 +690,28 @@ static void tripwire_thread(void *argument)
 	*(volatile int *)48 = 0;
 }
 
+/* (frame_timing.c) progress the game thread waits on: a pack's read at a
+map's load, a map's copy into the cache partition */
+extern volatile unsigned long halo_progress_counter;
+
 static void watchdog_thread(void *unused)
 {
-	unsigned long last = 0, same = 0;
+	unsigned long last = 0, same = 0, last_progress = 0;
 
 	(void)unused;
 	for (;;)
 	{
-		unsigned long now;
+		unsigned long now, progress;
 
 		sceKernelDelayThread(1000000);
 		now = halo_present_counter;
+		progress = halo_progress_counter;
 		if (now < 10)
 			continue;
-		same = now == last ? same + 1 : 0;
+		/* (no present, but reads moving: a long load, not a hang) */
+		same = now == last && progress == last_progress ? same + 1 : 0;
 		last = now;
+		last_progress = progress;
 		if (same >= 8)
 		{
 			/* 8 s without a present: logged, and HALO_HANG_CRASH=1 makes it

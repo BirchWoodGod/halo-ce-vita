@@ -50,6 +50,13 @@ every pack it names is loaded, and none is made when one of them cannot be
 pack does not have). The pickers opened from a lobby keep its scene; the main
 menu (scene="ring") and leaving the main menu let it go.
 
+A scene is shown once its packs are loaded (built and checked on the packs'
+worker: scene_packs.c) and their textures read (scene_packs_textures_ready,
+at most MENU_SCENE_TEXTURES_WAIT_US): it pops in whole, no stand-in texture
+in it. A flag held in a scene flies in a breeze along its camera's right
+(menu_scene_objects_flag_wind, flags.c): still, its cloth hung limp down the
+pole, edge on.
+
 It does nothing at all, and nothing breaks, when it cannot: Menu style Halo
 CE, HALO_MENU_SCENES=0 (no scene is asked for), HALO_SCENE_PACKS=0, a missing
 map: there is simply no scene.
@@ -136,8 +143,15 @@ enum
 };
 
 #define MENU_SCENE_PREVIEW_PACK "menu_spartan"
+/* (a flag held in a scene: the breeze it flies in, world units a second,
+menu_scene_objects_flag_wind) */
+#define MENU_SCENE_FLAG_BREEZE 2.5f
 /* (a model chosen rests this long before its pack is wanted) */
 #define MENU_SCENE_MODEL_REST_US 300000ull
+/* (a scene whose packs are loaded waits for their textures, on the cache
+file thread, at most this long before it is shown: none of them drawn as
+a stand-in, no frame waiting for one) */
+#define MENU_SCENE_TEXTURES_WAIT_US 3000000ull
 #define MENU_SCENE_DEGREES ((real)(3.14159265358979 / 180.0))
 /* the weapon held this far below the body's forward, and the head turned
 to the camera (a calm stance rather than the idle's aim straight ahead) */
@@ -250,6 +264,10 @@ static struct
 	of those passed */
 	char pending_pack[32];
 	unsigned long long pending_since;
+	/* (the scene's, the preview's) since when their packs are loaded and
+	their textures awaited (0: not yet), before they are shown */
+	unsigned long long scene_textures_since;
+	unsigned long long preview_textures_since;
 } menu_scene_objects;
 
 static boolean menu_scene_objects_initialized = FALSE;
@@ -1129,6 +1147,40 @@ static void scene_forget(boolean delete_them)
 	menu_scene_objects.made = FALSE;
 }
 
+/* whether the packs the scene (or the preview: preview TRUE) names have
+their textures in, or have waited long enough (since: when the wait began,
+0 before) */
+static boolean packs_textures_wait(unsigned long long *since, boolean preview)
+{
+	unsigned long long now = vita_host_time_us();
+	boolean ready = TRUE;
+	short index;
+
+	if (!*since)
+		*since = now;
+	for (index = preview ? MENU_SCENE_PREVIEW : 0; index < (preview ? MENU_SCENE_PREVIEW + 1 : MAXIMUM_MENU_SCENE_OBJECTS);
+		index++)
+	{
+		struct menu_scene_object const *object = &menu_scene_objects.slots[index];
+
+		if (!object->wanted || !object->pack[0])
+			continue;
+		if (!scene_packs_textures_ready(object->pack))
+			ready = FALSE;
+		if (object->weapon_pack[0] && !scene_packs_textures_ready(object->weapon_pack))
+			ready = FALSE;
+	}
+	if (ready || now - *since >= MENU_SCENE_TEXTURES_WAIT_US)
+	{
+		platform_log("menus: h3 scene %s: %s textures %s after %.1f ms", preview ? "object 6" : "objects",
+			preview ? menu_scene_objects.slots[MENU_SCENE_PREVIEW].pack : menu_scene_objects.screen,
+			ready ? "in" : "still loading", (double)(now - *since) / 1000.0);
+		*since = 0;
+		return TRUE;
+	}
+	return FALSE;
+}
+
 /* the scene made: every pack it names loaded (FALSE: not yet, or never,
 refused) */
 static void scene_make(void)
@@ -1161,6 +1213,12 @@ static void scene_make(void)
 			state = pack_state != _scene_pack_state_loaded ? pack_state : weapon_state;
 	}
 	if (state != _scene_pack_state_loaded)
+	{
+		menu_scene_objects.scene_textures_since = 0;
+		return;
+	}
+	/* (their textures first: read meanwhile, none waited for) */
+	if (!packs_textures_wait(&menu_scene_objects.scene_textures_since, FALSE))
 		return;
 	/* (all at once, the vehicles before who sits in them: the entries'
 	order) */
@@ -1308,7 +1366,7 @@ static void preview_update(void)
 			platform_log("menus: h3 scene object %d: the pack %s is %s: no character", MENU_SCENE_PREVIEW, object->pack,
 				scene_packs_state_name(state));
 		}
-		else if (state == _scene_pack_state_loaded)
+		else if (state == _scene_pack_state_loaded && packs_textures_wait(&menu_scene_objects.preview_textures_since, TRUE))
 		{
 			if (!scene_packs_roots(object->pack, roots, 1) || roots[0] == NONE || tag_get_group_tag(roots[0]) != 'bipd')
 			{
@@ -1439,9 +1497,26 @@ void menu_scene_objects_want(
 	/* (made again from the start, another description or another camera:
 	the update lets the objects standing go first) */
 	menu_scene_objects.replaced = TRUE;
+	menu_scene_objects.scene_textures_since = 0;
 }
 
+static void menu_scene_objects_update_internal(void);
+
 void menu_scene_objects_update(
+	void)
+{
+	unsigned long long started = vita_host_time_us();
+	unsigned long long spent;
+
+	menu_scene_objects_update_internal();
+	spent = vita_host_time_us() - started;
+	/* (the game thread's time making, holding and letting go the scenes'
+	objects, logged once it is a frame's hitch) */
+	if (spent >= 16000ull)
+		platform_log("scene packs: game thread: the menus' scene objects took %.1f ms", (double)spent / 1000.0);
+}
+
+static void menu_scene_objects_update_internal(
 	void)
 {
 	short index;
@@ -1656,6 +1731,52 @@ boolean menu_scene_objects_frozen(
 	}
 	if (suspension)
 		*suspension = menu_scene_objects.slots[slot].suspension;
+	return TRUE;
+}
+
+/* (flags.c) the breeze a flag held in a scene flies in: along its
+camera's right, level, so that its cloth streams across the picture face
+on (HALO_MENU_FLAG_BREEZE: its speed, 0 none). FALSE for any other flag */
+boolean menu_scene_objects_flag_wind(
+	long object_index,
+	real_vector3d *wind)
+{
+	struct object_datum *datum;
+	short slot;
+	static real speed = -1.f;
+
+	if (!menu_scene_objects_initialized || menu_scene_objects.made_count <= 0 || object_index == NONE)
+		return FALSE;
+	if (speed < 0.f)
+	{
+		char const *setting = getenv("HALO_MENU_FLAG_BREEZE");
+
+		speed = setting && *setting ? (real)atof(setting) : MENU_SCENE_FLAG_BREEZE;
+	}
+	if (speed <= 0.f)
+		return FALSE;
+	/* (the flag, or what holds it: a scene's object) */
+	slot = slot_of(object_index);
+	if (slot == NONE && (datum = object_try_and_get(object_index)) != NULL)
+		slot = slot_of(datum->object.parent_object_index);
+	if (slot == NONE)
+		return FALSE;
+	{
+		struct menu_scene_frame frame;
+
+		static unsigned long long said_at;
+
+		camera_frame(&menu_scene_objects.slots[slot].camera, &frame);
+		wind->i = frame.right.i * speed;
+		wind->j = frame.right.j * speed;
+		wind->k = speed * 0.1f;
+		/* (said once a scene) */
+		if (said_at != menu_scene_objects.made_at)
+		{
+			said_at = menu_scene_objects.made_at;
+			platform_log("menus: h3 scene object %d: its flag flies in a breeze of %.1f", slot, (double)speed);
+		}
+	}
 	return TRUE;
 }
 

@@ -47,6 +47,8 @@ again by the game: scene_packs.c), never trusted in part.
 
 #include "cseries.h"
 
+#include <stdio.h>
+
 /* ---------- constants */
 
 enum
@@ -63,6 +65,8 @@ enum
 	SCENE_PACK_MAXIMUM_STRIP_GROUPS = 32,
 	SCENE_PACK_MAXIMUM_STRIP_TAGS = 32,
 	SCENE_PACK_MAXIMUM_TUNES = 4,
+	SCENE_PACK_MAXIMUM_KEEPS = 96,
+	SCENE_PACK_ANIMATION_NAME_SIZE = 32,
 	/* a pack's (and its name's, a map's name's, a tag path's) most */
 	SCENE_PACK_NAME_SIZE = 32,
 	SCENE_PACK_TAG_PATH_SIZE = 256,
@@ -138,6 +142,12 @@ struct scene_pack_recipe_tune
 	                             fly) once the pack is built; a tag that is
 	                             not what the tuning expects is left as it
 	                             is (said in the log)
+	keep <graph>|<animation>     (an animation graph's, antr) an animation
+	                             it keeps: a graph with keep lines keeps
+	                             those whole, and each other animation of it
+	                             takes a kept one's frames (the first kept of
+	                             its type: no bytes of its own), so a scene
+	                             that holds a few poses carries those alone
 
 groups as four characters ("bipd", "snd!"), paths as the tags' own names
 ("characters\cyborg_mp\cyborg_mp"). A root of the multiplayer unit has the
@@ -165,6 +175,13 @@ struct scene_pack_recipe
 	/* (tune lines) the tunings of its tags */
 	short tune_count;
 	struct scene_pack_recipe_tune tunes[SCENE_PACK_MAXIMUM_TUNES];
+	/* (keep lines) the animations kept, each its graph's path and its name */
+	short keep_count;
+	struct scene_pack_recipe_keep
+	{
+		char graph[SCENE_PACK_TAG_PATH_SIZE];
+		char animation[SCENE_PACK_ANIMATION_NAME_SIZE];
+	} keeps[SCENE_PACK_MAXIMUM_KEEPS];
 };
 
 /* what a pack file's header says, once checked (scene_pack_open) */
@@ -203,6 +220,30 @@ struct scene_pack_build_result
 	unsigned long long microseconds;
 	char why[SCENE_PACK_WHY_SIZE];
 };
+
+/* the decompressed copy of an Xbox map the game keeps (its cache
+partition's, scene_packs.c), which a build reads in place of inflating the
+compressed map again: open gives that copy of the map so named (NULL:
+none), and a token unchanged says is still the same copy. The builder takes
+it only when its header is the maps folder's map's, byte for byte, with a
+checksum (scene_pack_source_seekable), and checks the header and the
+token again after each of its reads: a copy changed meanwhile is a build
+made again from the compressed map */
+struct scene_pack_copy_source
+{
+	FILE *(*open)(char const *map, unsigned long *token);
+	boolean (*unchanged)(unsigned long token);
+};
+
+/* ---------- globals */
+
+/* (scene_packs.c) called by a build and a load after each of their reads
+and writes, with its bytes (source: a read of the source map, else of a
+pack): the build's thread pauses and paces itself there. NULL (the tools):
+nothing */
+extern void (*scene_pack_io_hook)(unsigned long bytes, boolean source);
+/* (scene_packs.c) the maps' copies a build may read, NULL for none */
+extern struct scene_pack_copy_source const *scene_pack_copy_source;
 
 /* ---------- prototypes/SCENE_PACK.C */
 
@@ -243,6 +284,24 @@ boolean scene_pack_source_check(
 	char *why,
 	long why_size);
 
+/* a map of the recipe's (one of its map lines' names) in maps_directory,
+an Xbox map, and its identity (source_hash, as packs record it): FALSE if
+the recipe does not name it or it is not there */
+boolean scene_pack_source_identity(
+	struct scene_pack_recipe const *recipe,
+	char const *maps_directory,
+	char const *map,
+	unsigned long long *source_hash);
+
+/* whether a build reads the map in place, seeking to what it wants, with
+no inflating: the maps folder's map is not compressed, or its decompressed
+copy (scene_pack_copy_source) is there and is that map's - its header the
+maps folder's map's byte for byte, with a checksum (a map without one
+cannot be told from another version of it) */
+boolean scene_pack_source_seekable(
+	char const *maps_directory,
+	char const *map);
+
 /* the same, without why */
 boolean scene_pack_source_find(
 	struct scene_pack_recipe const *recipe,
@@ -265,6 +324,24 @@ boolean scene_pack_build(
 	int volatile const *cancel,
 	struct scene_pack_build_result *result);
 
+/* (count) packs, each of its recipe, made in one read of one source map,
+map (each recipe must name it: scene_pack_source_identity), Xbox maps only:
+the source's tag data read once (into scratch when it fits, otherwise the
+heap) and its pixels and samples once, for all of them, each pack written
+to its pack_paths' (by way of .tmp, renamed when whole), results[i] its
+recipe's. A recipe whose pack fails takes none of the others with it.
+TRUE if every one was made */
+boolean scene_pack_build_many(
+	struct scene_pack_recipe const *const *recipes,
+	short count,
+	char const *map,
+	char const *maps_directory,
+	char const *const *pack_paths,
+	void *scratch,
+	unsigned long scratch_size,
+	int volatile const *cancel,
+	struct scene_pack_build_result *results);
+
 /* the pack file at path: its header checked (bounds, sizes, the file's
 size, the header's CRC) and what it says (info). FALSE, and why, if it is
 not a pack this build reads */
@@ -284,6 +361,43 @@ boolean scene_pack_load(
 	char *why,
 	long why_size);
 
+/* the same checks of the pack open as file, from its start, by the same
+handle: scene_pack_load_file reads the tags it checks once, into
+destination, and the data's CRC through that handle (whose later reads are
+then of the file checked, not of another put at its path meanwhile) */
+boolean scene_pack_open_file(
+	FILE *file,
+	struct scene_pack_info *info,
+	char *why,
+	long why_size);
+
+boolean scene_pack_load_file(
+	FILE *file,
+	struct scene_pack_info const *info,
+	void *destination,
+	char *why,
+	long why_size);
+
+/* the same, its data's CRC not read again when data_checked (the caller
+knows that file's data good: scene_packs.c's record of the file checked,
+its size and time unchanged since) - its tags read, checked by their CRC
+and moved and checked as ever */
+boolean scene_pack_load_file_checked(
+	FILE *file,
+	struct scene_pack_info const *info,
+	void *destination,
+	boolean data_checked,
+	char *why,
+	long why_size);
+
+/* a pack's data (its pixels and samples) checked by its CRC, through file:
+FALSE, and why, if it is not what the header says */
+boolean scene_pack_data_check(
+	FILE *file,
+	struct scene_pack_info const *info,
+	char *why,
+	long why_size);
+
 /* a pack loaded at tags (scene_pack_load) given its tag indices in the
 game's table: its tag i is (first_salt + i) << 16 | (first_index + i), as
 are its references, tag indices and sounds' own indices; and its pixels'
@@ -291,6 +405,16 @@ and samples' file offsets moved by file_delta (several packs loaded at once
 read from files of their own: scene_packs.c) */
 void scene_pack_rebase(
 	void *tags,
+	long first_index,
+	long first_salt,
+	long file_delta);
+
+/* a pack given its tag indices once (scene_pack_rebase, its first tag at
+old_first_index) given others: first_index, first_salt, and its file
+offsets moved by file_delta more */
+void scene_pack_rebase_again(
+	void *tags,
+	long old_first_index,
 	long first_index,
 	long first_salt,
 	long file_delta);

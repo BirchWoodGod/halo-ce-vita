@@ -37,3 +37,12 @@ strip bitm effects\particles\air\bitmaps\smoke warthog gun
 strip bitm effects\particles\air\bitmaps\bubbles
 strip bitm effects\particles\solid\bitmaps\casings h ar
 strip bitm effects\particles\air\bitmaps\smoke tank cannon
+# The poses a figure standing in a menu holds (its other animations take
+# their frames: none of their bytes in the pack)
+keep characters\cyborg\cyborg|stand rifle idle
+keep characters\cyborg\cyborg|stand rifle aim-still
+keep characters\cyborg\cyborg|stand rifle aim-move
+keep characters\cyborg\cyborg|stand rifle turn-left
+keep characters\cyborg\cyborg|stand rifle turn-right
+keep characters\cyborg\cyborg|stand rifle ready
+keep characters\cyborg\cyborg|stand look

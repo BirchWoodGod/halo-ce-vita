@@ -1506,10 +1506,154 @@ static struct scenario_cutscene_camera_point *h3_scene_point(char const *name)
 /* (main.c, the top of the main loop, between frames) the scene asked for:
 its camera written into its point, the script commands queued for the host
 commands' turn, which comes next */
+/* the lobbies' scenes' packs (every scene_object= of the menus: its
+entries' packs and their weapons' - menu_campaign, menu_multiplayer,
+menu_monitor), the profile card's Spartan (menu_spartan) and the first
+profile's player model's, built in the background once the main menu has
+rested a while (scene_packs_prebuild: a prebuild's job, paced, below the
+game's threads, paused while the game reads, copies a map or plays on the
+network, made way for by any pack wanted now), each loaded once built, the
+card's first (SELECT PROFILE shows its Spartan at once, a lobby its scene
+as soon as its textures are read: 2.6 MB of the tag cache for the four,
+the room a campaign map's build needs left). Once a map's load (ui.map's
+each time). HALO_MENU_PREBUILD=0, the scenes off, Menu style Halo CE:
+none */
+#define H3_PREBUILD_REST_US 2000000ull
+#define H3_PREBUILD_MOST 16
+
+static struct
+{
+	unsigned long epoch;
+	unsigned long long rest_since;
+	boolean asked;
+	/* the packs asked for (the card's first), and which are loaded (or
+	given up) */
+	char names[H3_PREBUILD_MOST][48];
+	short count;
+	boolean preloaded[H3_PREBUILD_MOST];
+} h3_prebuild;
+
+/* a pack's name not yet in names (count of them): added */
+static void h3_prebuild_add(char names[][48], short *count, char const *name, long length)
+{
+	short index;
+
+	if (length <= 0 || length >= 48 || *count >= H3_PREBUILD_MOST)
+		return;
+	for (index = 0; index < *count; index++)
+	{
+		if ((long)strlen(names[index]) == length && !strncmp(names[index], name, (size_t)length))
+			return;
+	}
+	memcpy(names[*count], name, (size_t)length);
+	names[*count][length] = 0;
+	(*count)++;
+}
+
+static void h3_prebuild_update(void)
+{
+	unsigned long scene_packs_map_epoch(void);
+	char const *setting = getenv("HALO_MENU_PREBUILD");
+	unsigned long long now = vita_host_time_us();
+
+	if ((setting && *setting && (!strcmp(setting, "0") || !_stricmp(setting, "false"))) || !h3_scenes_enabled() ||
+		!halo_menu_style_halo3() || !halo_main_menu_idle() || game_connection() != _game_connection_local)
+	{
+		h3_prebuild.rest_since = 0;
+		return;
+	}
+	if (h3_prebuild.epoch != scene_packs_map_epoch())
+	{
+		memset(&h3_prebuild, 0, sizeof(h3_prebuild));
+		h3_prebuild.epoch = scene_packs_map_epoch();
+	}
+	if (!h3_prebuild.rest_since)
+		h3_prebuild.rest_since = now;
+	if (now - h3_prebuild.rest_since < H3_PREBUILD_REST_US)
+		return;
+	if (!h3_prebuild.asked)
+	{
+		struct halo_menus const *menus = halo_menus_load();
+		char (*names)[48] = h3_prebuild.names;
+		char said[256];
+		short count = 0, index;
+		int chosen = player_models_panel_chosen();
+		char const *model = chosen > 0 ? player_models_pack((short)(chosen - 1)) : NULL;
+		long widget;
+
+		h3_prebuild.asked = TRUE;
+		/* (the card's Spartan first: SELECT PROFILE is the first stop) */
+		if (model)
+			h3_prebuild_add(names, &count, model, (long)strlen(model));
+		h3_prebuild_add(names, &count, "menu_spartan", (long)strlen("menu_spartan"));
+		for (widget = 0; menus && widget < menus->widget_count; widget++)
+		{
+			char const *cursor = menus->widgets[widget].scene_object;
+
+			while (cursor && *cursor)
+			{
+				char const *end = strchr(cursor, ';');
+				char const *stop = end ? end : cursor + strlen(cursor);
+				char const *word = cursor;
+				char const *weapon;
+
+				while (word < stop && (*word == ' ' || *word == '\t' || *word == '\r' || *word == '\n'))
+					word++;
+				h3_prebuild_add(names, &count, word, (long)strcspn(word, ": \t\r\n;"));
+				/* (a weapon of another pack: weapon=<pack>:<tag>) */
+				for (weapon = word; (weapon = strstr(weapon, "weapon=")) != NULL && weapon < stop; weapon += 7)
+				{
+					long length = (long)strcspn(weapon + 7, ": \t\r\n;");
+
+					if (weapon[7 + length] == ':')
+						h3_prebuild_add(names, &count, weapon + 7, length);
+				}
+				cursor = end ? end + 1 : NULL;
+			}
+		}
+		h3_prebuild.count = count;
+		said[0] = 0;
+		for (index = 0; index < count; index++)
+		{
+			short state = scene_packs_prebuild(names[index]);
+
+			snprintf(said + strlen(said), sizeof(said) - strlen(said), "%s%s %s", index ? ", " : "", names[index],
+				scene_packs_state_name(state));
+		}
+		platform_log("menus: h3 prebuild: the main menu at rest: %s", said);
+		return;
+	}
+	/* (each loaded once built, in the order asked: the card's first) */
+	{
+		short index;
+
+		for (index = 0; index < h3_prebuild.count; index++)
+		{
+			short state;
+
+			if (h3_prebuild.preloaded[index])
+				continue;
+			state = scene_packs_status(h3_prebuild.names[index], NULL, NULL, 0);
+			if (state == _scene_pack_state_ready || state == _scene_pack_state_loaded)
+			{
+				h3_prebuild.preloaded[index] = TRUE;
+				platform_log("menus: h3 prebuild: %s %s", h3_prebuild.names[index],
+					scene_packs_state_name(scene_packs_want(h3_prebuild.names[index])));
+			}
+			else if (state == _scene_pack_state_failed || state == _scene_pack_state_none)
+			{
+				h3_prebuild.preloaded[index] = TRUE;
+			}
+		}
+	}
+}
+
 void menu_functions_scenes_update(void)
 {
 	struct scenario_cutscene_camera_point *point;
 	char command[96];
+
+	h3_prebuild_update();
 
 	/* (Menu style Halo CE chosen, or the scenes turned off, while a lobby's
 	camera holds: the ring's flight back, as no Halo 3 main menu will ask) */
