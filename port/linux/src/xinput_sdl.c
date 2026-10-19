@@ -97,6 +97,54 @@ static float mouse_sensitivity(void)
 	return sensitivity;
 }
 
+#if !defined(HALO_RELEASE) && !defined(HALO_VITA)
+/* (tests) HALO_TEST_GYRO=on|zoomed|hold (off or unset: none): the desktop
+harness's mouse look stands for the Vita's gyro in that mode, with the
+Vita's Gyro aim assist setting (HALO_GYRO_ASSIST, default 1), both read as
+they are now (@set): halo_linux_look_assist, halo_linux_aim_assist_off.
+"@aim gyro <yaw> <pitch>" (main.c) turns it once, in radians (positive
+left and up), as the Vita's gyro hands the game a frame's turn, and
+"@aim pad lx ly rx ry rt frames" holds the sticks (-1 to 1) and the right
+trigger (0 or 1) for that many pad reads (test_input_gamepad) */
+static float test_gyro_pending_yaw, test_gyro_pending_pitch;
+static struct
+{
+	float sticks[4];
+	int trigger;
+	int reads;
+} test_pad_hold;
+
+void test_input_hold_pad(float lx, float ly, float rx, float ry, int trigger, int reads)
+{
+	test_pad_hold.sticks[0] = lx;
+	test_pad_hold.sticks[1] = ly;
+	test_pad_hold.sticks[2] = rx;
+	test_pad_hold.sticks[3] = ry;
+	test_pad_hold.trigger = trigger;
+	test_pad_hold.reads = reads;
+}
+
+void test_input_gyro_turn(float yaw, float pitch)
+{
+	test_gyro_pending_yaw += yaw;
+	test_gyro_pending_pitch += pitch;
+}
+
+static int test_gyro_on(void)
+{
+	const char *mode = getenv("HALO_TEST_GYRO");
+
+	return mode && *mode && strcmp(mode, "off") != 0 && strcmp(mode, "0") != 0;
+}
+
+static int test_gyro_assist(void)
+{
+	const char *assist = getenv("HALO_GYRO_ASSIST");
+
+	return assist ? atoi(assist) != 0 : 1;
+}
+#endif
+
 /* radians of yaw and pitch for the mouse motion since the last call; the
 game adds these to the facing change of the player on gamepad 0 */
 int halo_linux_mouse_look(short gamepad_index, float *yaw, float *pitch)
@@ -132,6 +180,16 @@ int halo_linux_mouse_look(short gamepad_index, float *yaw, float *pitch)
 	mouse_pending_y = 0.0f;
 	mouse_polls_unconsumed = 0;
 	pthread_mutex_unlock(&mouse_lock);
+#if !defined(HALO_RELEASE) && !defined(HALO_VITA)
+	/* (tests, @aim gyro: the harness's stand-in for the Vita's gyro) */
+	if (test_gyro_pending_yaw != 0.0f || test_gyro_pending_pitch != 0.0f)
+	{
+		*yaw = test_gyro_pending_yaw;
+		*pitch = test_gyro_pending_pitch;
+		test_gyro_pending_yaw = test_gyro_pending_pitch = 0.0f;
+		return TRUE;
+	}
+#endif
 	if (x == 0.0f && y == 0.0f)
 		return FALSE;
 	*yaw = -x * scale * mouse_sensitivity();
@@ -142,13 +200,34 @@ int halo_linux_mouse_look(short gamepad_index, float *yaw, float *pitch)
 /* (source/game/player_control.c) whether the stick's aim assist, its
 friction and adhesion, acts on halo_linux_mouse_look's turns too: the
 Vita's gyro when its Gyro aim assist setting is on; never a desktop mouse,
-which aims unassisted as on Halo PC */
+which aims unassisted as on Halo PC (the harness's HALO_TEST_GYRO aside) */
 int halo_linux_look_assist(short gamepad_index)
 {
 #ifdef HALO_VITA
 	extern int vita_pad_gyro_assist(short gamepad_index);
 
 	return vita_pad_gyro_assist(gamepad_index);
+#elif !defined(HALO_RELEASE)
+	return gamepad_index == 0 && test_gyro_on() && test_gyro_assist();
+#else
+	(void)gamepad_index;
+	return FALSE;
+#endif
+}
+
+/* (source/game/player_control.c, source/game/aim_assist.c) whether the
+player on that gamepad has no aim assist at all, neither on the stick's
+look nor on its shots (the autoaim): the Vita's gyro on (any mode but off)
+with its Gyro aim assist setting off. Only this machine's own players ask,
+for their own aim: a desktop never (the harness's HALO_TEST_GYRO aside) */
+int halo_linux_aim_assist_off(short gamepad_index)
+{
+#ifdef HALO_VITA
+	extern int vita_pad_gyro_unassisted(short gamepad_index);
+
+	return vita_pad_gyro_unassisted(gamepad_index);
+#elif !defined(HALO_RELEASE)
+	return gamepad_index == 0 && test_gyro_on() && !test_gyro_assist();
 #else
 	(void)gamepad_index;
 	return FALSE;
@@ -555,6 +634,19 @@ static void test_input_gamepad(XINPUT_GAMEPAD *pad)
 		pad->wButtons |= XINPUT_GAMEPAD_BACK;
 	if (test_input_holding_b)
 		pad->bAnalogButtons[XINPUT_GAMEPAD_B] = 255;
+#if !defined(HALO_RELEASE) && !defined(HALO_VITA)
+	/* (@aim pad) */
+	if (test_pad_hold.reads > 0)
+	{
+		test_pad_hold.reads--;
+		pad->sThumbLX = (SHORT)(test_pad_hold.sticks[0] * 32767.0f);
+		pad->sThumbLY = (SHORT)(test_pad_hold.sticks[1] * 32767.0f);
+		pad->sThumbRX = (SHORT)(test_pad_hold.sticks[2] * 32767.0f);
+		pad->sThumbRY = (SHORT)(test_pad_hold.sticks[3] * 32767.0f);
+		if (test_pad_hold.trigger)
+			pad->bAnalogButtons[XINPUT_GAMEPAD_RIGHT_TRIGGER] = 255;
+	}
+#endif
 	if (seed < 0)
 		return;
 	/* (HALO_TEST_PAD presses the menus: the scripted player plays only in

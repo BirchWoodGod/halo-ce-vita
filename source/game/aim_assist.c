@@ -635,6 +635,28 @@ long player_aim_projectile(
 
 				autoaim_level= target.autoaim_level;
 				target_object_index= target.object_index;
+#ifdef HALO_LINUX
+				/* port: no autoaim for this machine's local player who asked
+				for no aim assist at all (the Vita's gyro on, its Gyro aim
+				assist off: player_control_aim_assist_off): the shot goes
+				where the reticle is, not bent towards the target. The
+				target is kept for what is not the player's aim: a homing
+				projectile's (the Needler's, an overcharged plasma bolt's)
+				and the AI's noticing it is aimed at. A client's player
+				on its host has no local index: in a network game a
+				client aims its own players' shots itself and reports the
+				hits (port/linux/game/network_damage.c), the host's copies
+				dealing nothing, so this is the one place it is decided */
+				if (player_control_aim_assist_off(player->local_player_index))
+				{
+					player_control_aim_assist_note_shot(player->local_player_index, FALSE, autoaim_level>0.f);
+					autoaim_level= 0.f;
+				}
+				else
+				{
+					player_control_aim_assist_note_shot(player->local_player_index, autoaim_level>0.f, FALSE);
+				}
+#endif
 			}
 		}
 

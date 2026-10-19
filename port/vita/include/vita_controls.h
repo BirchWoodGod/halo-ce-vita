@@ -364,7 +364,11 @@ enum
 HALO_GYRO_BUTTON (a VITA_BUTTON_VALUES name; default l), HALO_GYRO_SENS
 (percent, 1:1 at 100; default 150), HALO_GYRO_INVERT_Y 0/1, HALO_GYRO_TURN
 yaw/roll, HALO_GYRO_ASSIST 0/1 (default 1: the stick's aim assist, its friction
-and adhesion, also on the gyro's turns: source/game/player_control.c) */
+and adhesion, also on the gyro's turns; 0: no aim assist at all while the
+gyro is on, in any mode but off (vita_gyro_unassisted): none on the gyro's
+turns, none on the stick's, no autoaim bending the player's shots towards a
+target: source/game/player_control.c, source/game/aim_assist.c. With the
+gyro off the switch is ignored: Halo's own aim assist) */
 #define VITA_GYRO_DEFAULT_SENS 150
 
 struct vita_gyro_config
@@ -375,11 +379,18 @@ struct vita_gyro_config
 	float sensitivity;
 	int invert_y;
 	int turn;
-	/* the stick's aim assist on the gyro's turns too (HALO_GYRO_ASSIST) */
+	/* the stick's aim assist on the gyro's turns too (HALO_GYRO_ASSIST);
+	off, no aim assist at all while the gyro is on */
 	int assist;
 };
 
 void vita_gyro_config_load(struct vita_gyro_config *config);
+
+/* whether the player has no aim assist at all: the gyro on (any mode but
+off: in the zoomed and hold modes too while not zoomed or held, the
+setting's own choice) and its Gyro aim assist off. With the gyro off the
+switch is ignored and the stick keeps Halo's aim assist */
+int vita_gyro_unassisted(const struct vita_gyro_config *config);
 
 /* rates below this (radians a second, after the bias: 0.75 degrees) are
 taken as none, and above it reduced by it */

@@ -643,10 +643,14 @@ static struct setting settings[] = {
 		"Normal: tilt the top edge towards you to look up", 0, PAGE_GYRO },
 	{ "Gyro turning", "HALO_GYRO_TURN", 0, 2, { "yaw", "roll" }, { "Turn (yaw)", "Tilt (roll)" },
 		"Turn the Vita left/right, or tilt it like a wheel", 0, PAGE_GYRO },
-	/* (the stick's aim assist, its friction and adhesion, on the gyro's
-	turns too: halo_linux_look_assist, source/game/player_control.c) */
+	/* (On: the stick's aim assist, its friction and adhesion, on the
+	gyro's turns too: halo_linux_look_assist. Off, with the gyro on in any
+	mode: no aim assist at all, the stick's look and the shots' autoaim
+	included: halo_linux_aim_assist_off, vita_gyro_unassisted,
+	source/game/player_control.c and aim_assist.c. Ignored with the gyro
+	off) */
 	{ "Gyro aim assist", "HALO_GYRO_ASSIST", 0, 2, { "0", "1" }, { "Off", "On" },
-		"On: slows and sticks on targets like the sticks", 1, PAGE_GYRO },
+		"Off: no aim assist at all while the gyro is on", 1, PAGE_GYRO },
 
 	/* (Multiplayer: the connection, the ad hoc room (Ad hoc), a code typed
 	in (Online, for a Vita without the in-game PC menus: setting_shown), the
