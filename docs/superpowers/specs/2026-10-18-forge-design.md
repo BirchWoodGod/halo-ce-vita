@@ -1179,6 +1179,16 @@ The room is 14049 KB in all. Any three AI packs fit with the defaults
 defaults off: with them the last one asked for (Marine AI, in load order)
 is 267 KB short and left out with the notice.
 
+### GPU programs
+
+No program written. Collected on the gxm-null harness (HALO_SHADER_COLLECT)
+through `flood`, `floodcov`, `sentinels`, `marines`, `allai` and `aivariant`
+and checked (`tools/vita_shader_pack.py --check`): 107 of 108 in
+shaders.pak; lacking `ef7ede1093531c6c.fp` (one texture stage, fogged),
+drawn in the Flood and the Sentinel cases (both c20 packs): to compile on
+Vita3K (HALO_SHADER_PRECOMPILE) and add. The Covenant AI cases (`aioff`,
+`aiteam`) lack one already in insider.10: `e990fac489771925.fp`.
+
 ### Tests
 
 `run_forge_test.sh`: `allai` (above), `allaimenu` (the row by the pad:
