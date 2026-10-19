@@ -2660,6 +2660,12 @@ struct render_record
 		{
 			BOOL screenshot;
 			unsigned long frame;
+			/* the movie frame drawn over the picture (halo_d3d_movie_draw):
+			NULL for none */
+			const void *movie_pixels;
+			unsigned short movie_width, movie_height;
+			unsigned long movie_pitch;
+			float movie_rect[4];
 		} present;
 	};
 } __attribute__((aligned(32)));
@@ -3939,6 +3945,9 @@ static void execute_command(struct render_record *command)
 				write_screenshot(back_buffer);
 			/* (the frame's visibility counts: the game's frame they are of) */
 			vgxm_visibility_frame(command->present.frame);
+			if (command->present.movie_pixels)
+				vgxm_movie_present(command->present.movie_pixels, command->present.movie_width,
+					command->present.movie_height, command->present.movie_pitch, command->present.movie_rect);
 			vgxm_present(back_buffer->id, back_buffer->target.width, back_buffer->target.height);
 			halo_fill_stats_present(back_buffer->id, back_buffer->target.width, back_buffer->target.height);
 			if (command->present.screenshot)
@@ -8193,6 +8202,136 @@ void WINAPI D3DDevice_SetVertexDataColor(INT reg, D3DCOLOR color)
 	set_attribute(reg, value[0], value[1], value[2], value[3]);
 }
 
+/* ---------- the movies
+
+bink_vita.c (and the harness's bink_null.c, HALO_TEST_MOVIE) write each
+movie frame into memory of the renderer's own that the GPU reads as it is
+(vita_gxm.c vgxm_movie_memory: user RAM mapped uncached, or CDRAM), a ring
+of up to four frames so that the CPU writes one the GPU is not reading
+(the GPU runs up to two frames behind the worker, a frame behind the
+game). The game's quad over its movie texture is not drawn
+(bink_playback.c): the frame is drawn at the present, over the picture, at
+the display's resolution, by the renderer's built-in blit programs - no
+program of the game's combiners, which a Vita without the shader compiler
+could not make (the movie's fragment program, e038da4e6676a9c4, was not in
+shaders.pak: black with the sound playing, 1.1.0 to 1.1.1-insider.11). */
+#define MOVIE_BUFFERS 4
+
+static struct
+{
+	unsigned char *base;
+	unsigned long width, height, pitch, frame_bytes, count;
+	int cdram_first;
+	/* the frame last written whole (-1: none yet), the one being written */
+	int latest, writing;
+	/* this frame's draw (halo_d3d_movie_draw), for its present */
+	int draw_pending;
+	float rect[4];
+	unsigned long frames, draws;
+} movie = { NULL, 0, 0, 0, 0, 0, 0, -1, -1, 0, { 0 }, 0, 0 };
+
+/* waits for the worker's frames and the GPU (the movie memory let go) */
+static void movie_wait_idle(void)
+{
+	if (worker_enabled > 0)
+	{
+		while (__atomic_load_n(&frames_presented, __ATOMIC_ACQUIRE) < frames_requested)
+			vita_host_sleep_us(100);
+	}
+	vgxm_wait_gpu_idle();
+}
+
+void halo_d3d_movie_release(void)
+{
+	movie.draw_pending = 0;
+	if (!movie.base)
+		return;
+	movie_wait_idle();
+	vgxm_movie_memory_free();
+	platform_log("movie: renderer frames let go (%lu written, %lu drawn)", movie.frames, movie.draws);
+	movie.base = NULL;
+	movie.width = movie.height = movie.count = 0;
+	movie.latest = movie.writing = -1;
+	movie.frames = movie.draws = 0;
+}
+
+void *halo_d3d_movie_buffer(unsigned long width, unsigned long height, long *pitch, int cdram_first)
+{
+	if (!device.gpu_ready || !width || !height || width > 2048 || height > 2048)
+		return NULL;
+	if (!movie.base || movie.width != width || movie.height != height || movie.cdram_first != cdram_first)
+	{
+		unsigned long row = ((width + 7) & ~7ul) * 4, frame_bytes = (row * height + 4095) & ~4095ul, count;
+		const char *kind = "";
+		void *memory = NULL;
+
+		halo_d3d_movie_release();
+		for (count = MOVIE_BUFFERS; count >= 1 && !memory; count--)
+			memory = vgxm_movie_memory(frame_bytes * count, cdram_first, &kind);
+		if (!memory)
+		{
+			static unsigned long logged;
+
+			if (logged++ < 4)
+				platform_log("movie: no memory for the renderer's movie frames (%lux%lu, %lu KB each): the game's texture is drawn",
+					width, height, frame_bytes / 1024);
+			return NULL;
+		}
+		count++;
+		memset(memory, 0, frame_bytes * count);
+		movie.base = memory;
+		movie.width = width;
+		movie.height = height;
+		movie.pitch = row;
+		movie.frame_bytes = frame_bytes;
+		movie.count = count;
+		movie.cdram_first = cdram_first;
+		movie.latest = movie.writing = -1;
+		platform_log("movie: path %s: %lu frames of %lux%lu (rows %lu bytes apart) at %p, in %s mapped for the GPU, drawn at "
+			"the present at the display's resolution by the renderer's blit (HALO_MOVIE_PATH)", cdram_first ? "cdram" : "uncached",
+			count, width, height, row, memory, kind);
+	}
+	movie.writing = (int)((unsigned long)(movie.latest + 1) % movie.count);
+	*pitch = (long)movie.pitch;
+	return movie.base + (unsigned long)movie.writing * movie.frame_bytes;
+}
+
+void halo_d3d_movie_buffer_done(void)
+{
+	if (!movie.base || movie.writing < 0)
+		return;
+	movie.latest = movie.writing;
+	movie.writing = -1;
+	movie.frames++;
+}
+
+int halo_d3d_movie_draw(float left, float top, float right, float bottom)
+{
+	if (!device.gpu_ready || !movie.base || movie.latest < 0)
+		return 0;
+	movie.rect[0] = left;
+	movie.rect[1] = top;
+	movie.rect[2] = right;
+	movie.rect[3] = bottom;
+	movie.draw_pending = 1;
+	return 1;
+}
+
+/* (D3DDevice_Present) the movie frame this frame drew, for the worker */
+static void movie_present_fill(struct render_record *command)
+{
+	command->present.movie_pixels = NULL;
+	if (!movie.draw_pending || !movie.base || movie.latest < 0)
+		return;
+	movie.draw_pending = 0;
+	movie.draws++;
+	command->present.movie_pixels = movie.base + (unsigned long)movie.latest * movie.frame_bytes;
+	command->present.movie_width = (unsigned short)movie.width;
+	command->present.movie_height = (unsigned short)movie.height;
+	command->present.movie_pitch = movie.pitch;
+	memcpy(command->present.movie_rect, movie.rect, sizeof(movie.rect));
+}
+
 /* ---------- Sharp interface
 
 HALO_SHARP_UI (the settings panel's Video row Sharp interface; on unless
@@ -8481,6 +8620,7 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 			targets->color_surface = device.back_buffer;
 			targets->color_valid = TRUE;
 			command->targets = targets;
+			movie_present_fill(command);
 			command->present.screenshot = screenshot_every > 0 && device.frame && device.frame % (unsigned long)screenshot_every == 0;
 			{
 				/* (debug) HALO_SCREENSHOT_FIRST / _LAST=n: only the frames

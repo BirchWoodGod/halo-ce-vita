@@ -3547,6 +3547,29 @@ static int vita_preview_sharp_interface(void)
 	return enabled;
 }
 
+/* (the Vita renderer's movie frames, d3d8_gxm.c halo_d3d_movie_*: this
+renderer has none, so the movies take the game's texture and quad) */
+void *halo_d3d_movie_buffer(unsigned long width, unsigned long height, long *pitch, int cdram_first)
+{
+	(void)width; (void)height; (void)cdram_first;
+	*pitch = 0;
+	return NULL;
+}
+
+void halo_d3d_movie_buffer_done(void)
+{
+}
+
+int halo_d3d_movie_draw(float left, float top, float right, float bottom)
+{
+	(void)left; (void)top; (void)right; (void)bottom;
+	return 0;
+}
+
+void halo_d3d_movie_release(void)
+{
+}
+
 void halo_d3d_interface_begin(void)
 {
 	struct render_target_entry *back_buffer;

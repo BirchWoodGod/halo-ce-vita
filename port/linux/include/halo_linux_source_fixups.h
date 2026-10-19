@@ -135,6 +135,12 @@ start: memory), not for want of the file: the attract mode tries again
 later (source/interface/attract_mode.c; port/vita/platform/bink_vita.c;
 port/linux/src/bink_null.c: HALO_TEST_MOVIE_FAILS_FOR_NOW) */
 int halo_movie_open_failed_for_now(void);
+/* the movie frame drawn by the platform's renderer this frame, over
+left..right, top..bottom (fractions of the screen) instead of the game's
+quad over its movie texture: nonzero when it is (the Vita's renderer:
+port/vita/platform/bink_vita.c, HALO_MOVIE_PATH; 0 on the OpenGL builds,
+port/linux/src/bink_null.c) */
+int halo_movie_draw_native(float left, float top, float right, float bottom);
 /* the mouse in the menus (source/interface/ui_widget.c) */
 #include "halo_ui_pointer.h"
 

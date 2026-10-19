@@ -3978,14 +3978,10 @@ unsigned long vgxm_visibility_count(int buffer, unsigned long slot)
 
 /* ---------- frames */
 
-static void blit(struct target *source)
+/* the built-in blit's vertex program (position, texcoord), made once */
+static SceGxmVertexProgram *blit_vertex_program(void)
 {
 	static SceGxmVertexProgram *vertex_program;
-	SceGxmFragmentProgram *fragment_program;
-	SceGxmTexture texture;
-	float *vertices;
-	unsigned short *indices;
-	float width, height, x0, x1;
 
 	if (!vertex_program)
 	{
@@ -4008,13 +4004,66 @@ static void blit(struct target *source)
 		stream.stride = 4 * sizeof(float);
 		stream.indexSource = SCE_GXM_INDEX_SOURCE_INDEX_16BIT;
 		if (sceGxmShaderPatcherCreateVertexProgram(gxm.patcher, shader->id, attributes, 2, &stream, 1, &vertex_program) < 0)
-			return;
+			return NULL;
 	}
+	return vertex_program;
+}
+
+/* the texture, opaque, over the display's pixels left..left+width,
+top..top+height, with the built-in blit programs (the display scene is
+the current one) */
+static void blit_texture(const SceGxmTexture *texture, float left, float top, float width, float height)
+{
+	SceGxmVertexProgram *vertex_program = blit_vertex_program();
+	SceGxmFragmentProgram *fragment_program;
+	float *vertices;
+	unsigned short *indices;
+	float x0, x1, y0, y1;
+
+	if (!vertex_program)
+		return;
 	fragment_program = fragment_program_get(gxm.blit_fragment, gxm.blit_vertex, NULL);
 	vertices = vgxm_worker_alloc(4 * 4 * sizeof(float), 16);
 	indices = vgxm_worker_alloc(4 * sizeof(unsigned short), 16);
 	if (!fragment_program || !vertices || !indices)
 		return;
+	x0 = 2.0f * left / DISPLAY_WIDTH - 1.0f;
+	x1 = 2.0f * (left + width) / DISPLAY_WIDTH - 1.0f;
+	y0 = 1.0f - 2.0f * top / DISPLAY_HEIGHT;
+	y1 = 1.0f - 2.0f * (top + height) / DISPLAY_HEIGHT;
+	{
+		float quad[4][4] = {
+			{ x0, y0, 0.0f, 0.0f }, { x1, y0, 1.0f, 0.0f },
+			{ x0, y1, 0.0f, 1.0f }, { x1, y1, 1.0f, 1.0f },
+		};
+
+		memcpy(vertices, quad, sizeof(quad));
+	}
+	indices[0] = 0; indices[1] = 1; indices[2] = 2; indices[3] = 3;
+	shadow.valid = 0;
+	sceGxmSetVertexProgram(gxm.context, vertex_program);
+	sceGxmSetFragmentProgram(gxm.context, fragment_program);
+	sceGxmSetVertexStream(gxm.context, 0, vertices);
+	sceGxmSetFragmentTexture(gxm.context, 0, texture);
+	sceGxmSetFrontDepthFunc(gxm.context, SCE_GXM_DEPTH_FUNC_ALWAYS);
+	sceGxmSetFrontDepthWriteEnable(gxm.context, SCE_GXM_DEPTH_WRITE_DISABLED);
+	sceGxmSetFrontStencilFunc(gxm.context, SCE_GXM_STENCIL_FUNC_ALWAYS, SCE_GXM_STENCIL_OP_KEEP,
+		SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP, 0, 0);
+	sceGxmSetCullMode(gxm.context, SCE_GXM_CULL_NONE);
+	sceGxmSetFrontDepthBias(gxm.context, 0, 0);
+	sceGxmSetViewportEnable(gxm.context, SCE_GXM_VIEWPORT_ENABLED);
+	sceGxmSetViewport(gxm.context, DISPLAY_WIDTH * 0.5f, DISPLAY_WIDTH * 0.5f, DISPLAY_HEIGHT * 0.5f,
+		-DISPLAY_HEIGHT * 0.5f, 0.0f, 1.0f);
+	sceGxmSetRegionClip(gxm.context, SCE_GXM_REGION_CLIP_OUTSIDE, 0, 0, DISPLAY_WIDTH - 1, DISPLAY_HEIGHT - 1);
+	sceGxmDraw(gxm.context, SCE_GXM_PRIMITIVE_TRIANGLE_STRIP, SCE_GXM_INDEX_FORMAT_U16, indices, 4);
+	gxm.scene_draws++;
+}
+
+static void blit(struct target *source)
+{
+	SceGxmTexture texture;
+	float width, height;
+
 	/* the picture at the display's height, its shape kept (a 4:3 frame,
 	HALO_DISPLAY_WIDTH=640, between black bars); sharp: the same size,
 	sampled nearest rather than bilinear */
@@ -4041,19 +4090,6 @@ static void blit(struct target *source)
 	gxm.picture_height = (float)(int)(height + 0.5f);
 	gxm.picture_left = (float)(int)((DISPLAY_WIDTH - gxm.picture_width) / 2.0f);
 	gxm.picture_top = (float)(int)((DISPLAY_HEIGHT - gxm.picture_height) / 2.0f);
-	x0 = 2.0f * gxm.picture_left / DISPLAY_WIDTH - 1.0f;
-	x1 = 2.0f * (gxm.picture_left + gxm.picture_width) / DISPLAY_WIDTH - 1.0f;
-	{
-		float y0 = 1.0f - 2.0f * gxm.picture_top / DISPLAY_HEIGHT;
-		float y1 = 1.0f - 2.0f * (gxm.picture_top + gxm.picture_height) / DISPLAY_HEIGHT;
-		float quad[4][4] = {
-			{ x0, y0, 0.0f, 0.0f }, { x1, y0, 1.0f, 0.0f },
-			{ x0, y1, 0.0f, 1.0f }, { x1, y1, 1.0f, 1.0f },
-		};
-
-		memcpy(vertices, quad, sizeof(quad));
-	}
-	indices[0] = 0; indices[1] = 1; indices[2] = 2; indices[3] = 3;
 	/* (its drawn rectangle: all of it but for the dynamic resolution) */
 	sceGxmTextureInitLinearStrided(&texture, source->memory.base, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB, drawn_width,
 		drawn_height, source->stride * 4);
@@ -4063,23 +4099,114 @@ static void blit(struct target *source)
 		sceGxmTextureSetMinFilter(&texture, filter);
 		sceGxmTextureSetMagFilter(&texture, filter);
 	}
-	shadow.valid = 0;
-	sceGxmSetVertexProgram(gxm.context, vertex_program);
-	sceGxmSetFragmentProgram(gxm.context, fragment_program);
-	sceGxmSetVertexStream(gxm.context, 0, vertices);
-	sceGxmSetFragmentTexture(gxm.context, 0, &texture);
-	sceGxmSetFrontDepthFunc(gxm.context, SCE_GXM_DEPTH_FUNC_ALWAYS);
-	sceGxmSetFrontDepthWriteEnable(gxm.context, SCE_GXM_DEPTH_WRITE_DISABLED);
-	sceGxmSetFrontStencilFunc(gxm.context, SCE_GXM_STENCIL_FUNC_ALWAYS, SCE_GXM_STENCIL_OP_KEEP,
-		SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP, 0, 0);
-	sceGxmSetCullMode(gxm.context, SCE_GXM_CULL_NONE);
-	sceGxmSetFrontDepthBias(gxm.context, 0, 0);
-	sceGxmSetViewportEnable(gxm.context, SCE_GXM_VIEWPORT_ENABLED);
-	sceGxmSetViewport(gxm.context, DISPLAY_WIDTH * 0.5f, DISPLAY_WIDTH * 0.5f, DISPLAY_HEIGHT * 0.5f,
-		-DISPLAY_HEIGHT * 0.5f, 0.0f, 1.0f);
-	sceGxmSetRegionClip(gxm.context, SCE_GXM_REGION_CLIP_OUTSIDE, 0, 0, DISPLAY_WIDTH - 1, DISPLAY_HEIGHT - 1);
-	sceGxmDraw(gxm.context, SCE_GXM_PRIMITIVE_TRIANGLE_STRIP, SCE_GXM_INDEX_FORMAT_U16, indices, 4);
-	gxm.scene_draws++;
+	blit_texture(&texture, gxm.picture_left, gxm.picture_top, gxm.picture_width, gxm.picture_height);
+}
+
+/* ---------- the movie (d3d8_gxm.c halo_d3d_movie_*)
+
+The movies' frames (bink_vita.c, vita_movie.c's conversion) are written by
+the CPU into memory of the renderer's own that the GPU reads as it is -
+user RAM mapped uncached (as the rings), or CDRAM - and drawn at the
+present over the frame's picture, at the display's resolution, with the
+built-in blit programs (shipped in every build: no program of the game's
+combiners is needed, which a Vita without the shader compiler could not
+make - the movie's own was missing from shaders.pak, the picture black
+while the sound played). */
+static struct block movie_memory;
+static int movie_memory_cdram;
+static struct
+{
+	const void *pixels;
+	unsigned int width, height, pitch;
+	float rect[4];
+	int pending;
+	unsigned long drawn;
+} movie_frame;
+
+void vgxm_movie_memory_free(void)
+{
+	if (!movie_memory.base)
+		return;
+	if (movie_memory_cdram)
+		memory_bytes[_memory_other] -= movie_memory.size;
+	memory_os_free(&movie_memory);
+	memset(&movie_memory, 0, sizeof(movie_memory));
+	memset(&movie_frame, 0, sizeof(movie_frame));
+}
+
+void *vgxm_movie_memory(unsigned long bytes, int cdram_first, const char **kind)
+{
+	int attempt;
+
+	vgxm_movie_memory_free();
+	for (attempt = 0; attempt < 2; attempt++)
+	{
+		int cdram = (attempt == 0) == (cdram_first != 0);
+
+		if (block_allocate(&movie_memory, cdram ? SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW :
+			SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE, (unsigned int)bytes, 1, "movie frames"))
+		{
+			movie_memory_cdram = cdram;
+			if (cdram)
+				memory_bytes[_memory_other] += movie_memory.size;
+			if (kind)
+				*kind = cdram ? "CDRAM" : "user RAM, uncached (USER_RW_UNCACHE)";
+			return movie_memory.base;
+		}
+		memset(&movie_memory, 0, sizeof(movie_memory));
+	}
+	return NULL;
+}
+
+void vgxm_movie_present(const void *pixels, unsigned long width, unsigned long height, unsigned long pitch,
+	const float rect[4])
+{
+	if (!pixels || !width || !height)
+		return;
+	movie_frame.pixels = pixels;
+	movie_frame.width = (unsigned int)width;
+	movie_frame.height = (unsigned int)height;
+	movie_frame.pitch = (unsigned int)pitch;
+	memcpy(movie_frame.rect, rect, sizeof(movie_frame.rect));
+	movie_frame.pending = 1;
+}
+
+/* (the present, in the display scene) the movie frame given for it */
+static void movie_draw(void)
+{
+	SceGxmTexture texture;
+	float left = gxm.picture_left, top = gxm.picture_top, width = gxm.picture_width, height = gxm.picture_height;
+	int result;
+
+	if (!movie_frame.pending)
+		return;
+	movie_frame.pending = 0;
+	result = sceGxmTextureInitLinearStrided(&texture, movie_frame.pixels, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB,
+		movie_frame.width, movie_frame.height, movie_frame.pitch);
+	if (result < 0)
+	{
+		static unsigned int logged;
+
+		if (logged++ < 4)
+			log_line("gxm: the movie frame %ux%u (rows %u bytes apart) at %p is no texture: 0x%08x", movie_frame.width,
+				movie_frame.height, movie_frame.pitch, movie_frame.pixels, (unsigned)result);
+		return;
+	}
+	sceGxmTextureSetMinFilter(&texture, SCE_GXM_TEXTURE_FILTER_LINEAR);
+	sceGxmTextureSetMagFilter(&texture, SCE_GXM_TEXTURE_FILTER_LINEAR);
+	if (width <= 0.0f || height <= 0.0f)
+	{
+		left = top = 0.0f;
+		width = DISPLAY_WIDTH;
+		height = DISPLAY_HEIGHT;
+	}
+	blit_texture(&texture, left + movie_frame.rect[0] * width, top + movie_frame.rect[1] * height,
+		(movie_frame.rect[2] - movie_frame.rect[0]) * width, (movie_frame.rect[3] - movie_frame.rect[1]) * height);
+	if (movie_frame.drawn++ == 0)
+		log_line("gxm: the movie drawn at the present: %ux%u from %p (%s), over the display's %.0f,%.0f %.0fx%.0f",
+			movie_frame.width, movie_frame.height, movie_frame.pixels, movie_memory_cdram ? "CDRAM" : "uncached user RAM",
+			left + movie_frame.rect[0] * width, top + movie_frame.rect[1] * height,
+			(movie_frame.rect[2] - movie_frame.rect[0]) * width, (movie_frame.rect[3] - movie_frame.rect[1]) * height);
 }
 
 /* ---------- the overlay (Xita's panel: fps, game and render ms, cores) */
@@ -5708,6 +5835,7 @@ void vgxm_present(unsigned long color_target, unsigned long width, unsigned long
 			!gxm.targets[color_target - 1].depth)
 			blit(&gxm.targets[color_target - 1]);
 	}
+	movie_draw();
 	overlay_draw();
 	notification.address = gxm.notification;
 	notification.value = ++gxm.frame;

@@ -1534,8 +1534,74 @@ void vgxm_wait_gpu_idle(void)
 	/* (no GPU: the draws were done when they were made) */
 }
 
+/* (as vita_gxm.c's: the movies' frames in memory of the renderer's own,
+drawn at the present - logged here with a texel of each frame, so the
+tests see what the GPU would read: HALO_TEST_MOVIE) */
+static struct block movie_memory;
+static struct
+{
+	const void *pixels;
+	unsigned long width, height, pitch;
+	float rect[4];
+	int pending;
+	unsigned long drawn;
+} movie_frame;
+
+void vgxm_movie_memory_free(void)
+{
+	if (!movie_memory.base)
+		return;
+	memory_os_free(&movie_memory);
+	memset(&movie_memory, 0, sizeof(movie_memory));
+	memset(&movie_frame, 0, sizeof(movie_frame));
+}
+
+void *vgxm_movie_memory(unsigned long bytes, int cdram_first, const char **kind)
+{
+	vgxm_movie_memory_free();
+	bytes = (bytes + 4095) & ~4095ul;
+	if (!memory_os_allocate(!cdram_first, (unsigned int)bytes, "movie frames", &movie_memory))
+	{
+		memset(&movie_memory, 0, sizeof(movie_memory));
+		return NULL;
+	}
+	if (kind)
+		*kind = cdram_first ? "CDRAM" : "user RAM, uncached (USER_RW_UNCACHE)";
+	return movie_memory.base;
+}
+
+void vgxm_movie_present(const void *pixels, unsigned long width, unsigned long height, unsigned long pitch,
+	const float rect[4])
+{
+	if (!pixels || !width || !height)
+		return;
+	movie_frame.pixels = pixels;
+	movie_frame.width = width;
+	movie_frame.height = height;
+	movie_frame.pitch = pitch;
+	memcpy(movie_frame.rect, rect, sizeof(movie_frame.rect));
+	movie_frame.pending = 1;
+}
+
+static void movie_draw(void)
+{
+	if (!movie_frame.pending)
+		return;
+	movie_frame.pending = 0;
+	if (movie_frame.drawn++ % 60 == 0)
+	{
+		const unsigned char *row = (const unsigned char *)movie_frame.pixels + movie_frame.height / 3 * movie_frame.pitch;
+		unsigned int texel = *(const unsigned int *)(row + movie_frame.width / 16 * 4);
+
+		platform_log("gxm-null: movie drawn at the present (%lu): %lux%lu from %p over %.3f,%.3f-%.3f,%.3f, texel %08x",
+			movie_frame.drawn, movie_frame.width, movie_frame.height, movie_frame.pixels, movie_frame.rect[0],
+			movie_frame.rect[1], movie_frame.rect[2], movie_frame.rect[3], texel);
+	}
+}
+
 void vgxm_present(unsigned long color_target, unsigned long width, unsigned long height)
 {
+	movie_draw();
 	(void)color_target;
 	(void)width;
 	(void)height;

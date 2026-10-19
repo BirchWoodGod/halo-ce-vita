@@ -307,6 +307,19 @@ mapped from the target's size asked for to the picture's place on the
 display, with no depth or stencil buffer (their tests off). Once a frame;
 vgxm_present then only adds the overlay */
 void vgxm_interface_begin(unsigned long color_target);
+/* the movies' frames (d3d8_gxm.c halo_d3d_movie_*): bytes of memory the
+GPU reads as it is - uncached user RAM, or CDRAM (cdram_first: CDRAM
+tried first) - mapped for it, *kind naming which; NULL when there is none.
+One block at a time: a new one frees the last, as vgxm_movie_memory_free
+does (the GPU idle). vgxm_movie_present (the worker, before vgxm_present):
+the frame to draw over the picture at the next present, width x height
+X8R8G8B8 texels (pitch bytes apart, a multiple of 32) at pixels in that
+memory, over rect (left, top, right, bottom as fractions of the picture
+on the display), with the built-in blit programs */
+void *vgxm_movie_memory(unsigned long bytes, int cdram_first, const char **kind);
+void vgxm_movie_memory_free(void);
+void vgxm_movie_present(const void *pixels, unsigned long width, unsigned long height, unsigned long pitch,
+	const float rect[4]);
 /* waits until the GPU has finished every frame presented so far (any
 thread; the frames' scenes all end with the present's notification) */
 void vgxm_wait_gpu_idle(void);

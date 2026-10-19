@@ -740,7 +740,32 @@ static void bink_draw_frame(
 		vertices[vertex_index].color= (pixel32)NONE;
 	}
 
+#ifdef HALO_LINUX
+	{
+		/* port: the platform's renderer draws the movie frame itself when
+		it can (the Vita: from memory of its own, at the display's
+		resolution, with programs every build ships) */
+		/* (the quad's corners are the back buffer's pixels, which span the
+		screen bounds from 0) */
+		const rectangle2d *screen= &rasterizer_globals.reserved04.screen_bounds;
+		real screen_width= (real)screen->x1;
+		real screen_height= (real)screen->y1;
+
+		if (screen_width>0.f && screen_height>0.f &&
+			halo_movie_draw_native(
+				(real)screen_bounds.x0/screen_width,
+				(real)screen_bounds.y0/screen_height,
+				(real)screen_bounds.x1/screen_width,
+				(real)screen_bounds.y1/screen_height))
+		{
+			goto drawn;
+		}
+	}
+#endif
 	rasterizer_psuedo_dynamic_screen_quad_draw(&bink_globals.screen_geometry, vertices);
+#ifdef HALO_LINUX
+drawn:
+#endif
 
 	if (debug_bink)
 	{
