@@ -216,6 +216,10 @@ enum
 	CROSSPLAY_HOST_PEER_PACKETS_PER_SECOND = 1000,
 	CROSSPLAY_HOST_PEERS_PER_ADDRESS = 8,
 	CROSSPLAY_HOST_MAXIMUM_PEERS = 24,
+	/* ... and how long one of those may stay connected with no packet of the
+	game before a new player asking takes its place (an OpenCE browser's ping
+	closes within seconds) */
+	CROSSPLAY_HOST_IDLE_PEER_MILLISECONDS = 15000,
 };
 
 enum
@@ -327,6 +331,10 @@ struct peer
 	int via_relay;
 	unsigned long relayed_time;
 	unsigned long punch_time;
+	/* (a host) whether the game's packets (a datagram, its stream) came from
+	it yet: a peer that sends none is no player (an OpenCE server browser's
+	ping of the game: docs/opence-net32-spec.md 9.1) */
+	int game_heard;
 };
 
 /* a UDP stand-in for one port of a peer */
@@ -1341,7 +1349,42 @@ static int opening_peer_count(void)
 	return count;
 }
 
+/* (a Vita hosting for Vitas and PC, its peers full) the joiner that has
+gone longest with its tunnel up and no packet of the game, if one has for
+CROSSPLAY_HOST_IDLE_PEER_MILLISECONDS: whether there is one, dropped (drop)
+as a proven request makes its session, never sooner (a request that proves
+nothing drops no one) */
+static int crossplay_host_idle_peer(int drop)
+{
+	struct peer *idlest = NULL;
+	int index;
+
+	for (index = 0; index < P2P_MAXIMUM_PEERS; index++)
+	{
+		struct peer *peer = &p2p.peers[index];
+
+		if (peer->used && !peer->is_host && peer->connected && !peer->game_heard &&
+			elapsed(peer->offered_time, CROSSPLAY_HOST_IDLE_PEER_MILLISECONDS) &&
+			(!idlest || (unsigned int)(p2p_now() - peer->offered_time) > (unsigned int)(p2p_now() - idlest->offered_time)))
+		{
+			idlest = peer;
+		}
+	}
+	if (!idlest)
+		return 0;
+	if (drop)
+		drop_peer(idlest, "no game from it (a server browser's ping, or idle): making way");
+	return 1;
+}
+
+static int peer_turned_away(const unsigned char *peer_identifier, int is_host, int making);
+
 int p2p_peer_turned_away(const unsigned char *peer_identifier, int is_host)
+{
+	return peer_turned_away(peer_identifier, is_host, 0);
+}
+
+static int peer_turned_away(const unsigned char *peer_identifier, int is_host, int making)
 {
 	static unsigned long logged_time;
 	const char *reason = NULL;
@@ -1355,9 +1398,12 @@ int p2p_peer_turned_away(const unsigned char *peer_identifier, int is_host)
 	else if (!is_host && opening_peer_count() >= MAXIMUM_OPENING_PEERS)
 		reason = "too many players connecting at once";
 	/* (a Vita hosting for Vitas and PC: the players a game of the Vitas' 16
-	has, and a few more, never a hundred strangers' tunnels) */
+	has, and a few more, never a hundred strangers' tunnels; one that has
+	been there CROSSPLAY_HOST_IDLE_PEER_MILLISECONDS without a packet of the
+	game - an OpenCE server browser's ping, which asks as a player does, or
+	an idle stranger - makes way for the one asking) */
 	else if (!is_host && p2p.hosting && !p2p.adhoc && network_wire_crossplay() &&
-		joiner_peer_count() >= CROSSPLAY_HOST_MAXIMUM_PEERS)
+		joiner_peer_count() >= CROSSPLAY_HOST_MAXIMUM_PEERS && !crossplay_host_idle_peer(making))
 		reason = "as many players as a Vita's game for Vitas and PC takes";
 	if (!reason)
 		return 0;
@@ -1388,7 +1434,7 @@ int p2p_peer_offered(const unsigned char *peer_identifier, const unsigned char *
 	{
 		unsigned char joiner_key[P2P_SHA256_SIZE], host_key[P2P_SHA256_SIZE];
 
-		if (session_retired(secret) || p2p_peer_turned_away(peer_identifier, is_host))
+		if (session_retired(secret) || peer_turned_away(peer_identifier, is_host, 1))
 			return 0;
 		peer = free_peer();
 		memset(peer, 0, sizeof(*peer));
@@ -3527,9 +3573,11 @@ static void tunnel_received(const unsigned char *packet, int size, const struct 
 		}
 		break;
 	case _packet_datagram:
+		peer->game_heard = 1;
 		datagram_received(peer, inner, inner_size);
 		break;
 	case _packet_stream:
+		peer->game_heard = 1;
 		stream_received(peer, inner + 1, inner_size - 1);
 		break;
 	case _packet_bye:
