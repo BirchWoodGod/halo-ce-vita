@@ -590,6 +590,7 @@ static void h3_live_lobby_show(struct widget_instance *screen);
 static boolean h3_live_follow(void);
 static void h3_live_close(char const *why);
 static boolean h3_live_start(void);
+static boolean h3_live_follow_wire(boolean reopen);
 static void h3_live_retry(void);
 
 static struct widget_instance *named(struct widget_instance *widget, char const *name)
@@ -5406,6 +5407,11 @@ static boolean setup_start(struct widget_instance *widget)
 		if (who)
 			setting_set("HALO_NET_HOST_CROSSPLAY", who->parameters.list.selected_index == 1 ? "true" : "false");
 	}
+	/* (a live lobby's game hosted for others than WHO CAN JOIN says now: a
+	game's wire is its own for its life (network_wire.h), so it closes, its
+	joiners told, and START GAME hosts on the one chosen as before - the
+	game's lobby, then back on the lobby it is the live game again) */
+	h3_live_follow_wire(FALSE);
 	/* (a live lobby, Menu style Halo 3: its game takes them now - its name
 	and most players from the settings each frame, public or private and a
 	password changed its listing - and START GAME goes on to its lobby) */
@@ -9003,10 +9009,22 @@ graceful exit, network_game_server_dispose).
 
 Not live: OFFLINE; the network not ready (Online still connecting, no
 Wi-Fi, out of the ad hoc group - AD HOC's START GAME still opens the
-system's dialog); crossplay on (a Vita does not host on that wire); no
+system's dialog); no
 profile at all (START GAME asks for one, as before); a map not played with
 others. The lobby is as it was then, and START GAME hosts as before.
-Menu style Halo CE is unchanged. */
+Menu style Halo CE is unchanged.
+
+Who can join (network.host_crossplay): the lobby's game is hosted as any
+game, on the wire WHO CAN JOIN says as its server is made (network_wire.h):
+Vitas, the Vitas' wire; Vitas and PC (ONLINE and SYSTEM LINK; ad hoc is
+always the Vitas'), OpenCE's crossplay wire, its PC joiners through the
+crossplay host's hardened checks (docs/crossplay.md 7.4). What the lobby
+adds on that wire is nothing new to a PC: the game's settings sent again in
+its lobby (network_game_server_send_game_data_pregame, as every join sends
+them; a Custom Edition map named as OpenCE names it) and the countdown its
+host begins. WHO CAN JOIN changed while live (GAME OPTIONS' START GAME, the
+settings panel with the lobby up) closes the game, its joiners told, and it
+is hosted again on the chosen wire (h3_live_follow_wire). */
 
 #define H3_LIVE_ROWS 8
 /* (START GAME's countdown: Halo 3's) */
@@ -9064,7 +9082,7 @@ static boolean h3_live_network_ready(void)
 	{
 	case _h3_network_online:
 		return internet_play() && network_connection_running() == NETWORK_CONNECTION_ONLINE &&
-			network_connection_status(text, (int)sizeof(text)) == NETWORK_STATUS_READY && !network_wire_crossplay();
+			network_connection_status(text, (int)sizeof(text)) == NETWORK_STATUS_READY;
 	case _h3_network_system_link:
 		return network_connection_running() == NETWORK_CONNECTION_WIFI &&
 			network_connection_status(text, (int)sizeof(text)) == NETWORK_STATUS_READY && transport_network_available();
@@ -9073,6 +9091,25 @@ static boolean h3_live_network_ready(void)
 			__atomic_load_n(&halo_adhoc_group, __ATOMIC_ACQUIRE) == HALO_ADHOC_GROUP_IN;
 	}
 	return FALSE;
+}
+
+/* the live game's wire against WHO CAN JOIN's now (network.host_crossplay:
+the Create Game screens' row, the settings panel's Vita and PC page): a
+game speaks one wire for its life (network_wire.h), Vitas' alone or Vitas'
+and PCs' (OpenCE's), so a live game hosted for others than chosen is closed,
+its joiners told the host left; reopen: the lobby opens again by itself on
+the chosen wire (h3_live_update, the lobby up). TRUE if it was closed */
+static boolean h3_live_follow_wire(boolean reopen)
+{
+	boolean with_pc = network_wire_host_crossplay() != 0;
+
+	if (!h3_live.live || !global_network_game_server_get() || (network_wire_crossplay() != 0) == with_pc)
+		return FALSE;
+	h3_live_close(with_pc ? "WHO CAN JOIN is Vitas and PC now: hosted again on the crossplay wire" :
+		"WHO CAN JOIN is Vitas now: hosted again on the Vitas' wire");
+	if (reopen)
+		h3_live_retry();
+	return TRUE;
 }
 
 static void h3_live_refuse(char const *why)
@@ -9224,6 +9261,7 @@ static void h3_live_lobby_show(struct widget_instance *screen)
 	struct widget_instance *found;
 	char text[192], line[256];
 	long count;
+	boolean with_pc;
 
 	if ((found = named(screen, "nameplate")) != NULL)
 		widget_instance_set_visibility_recursive(found, game == NULL);
@@ -9244,19 +9282,27 @@ static void h3_live_lobby_show(struct widget_instance *screen)
 	else
 		snprintf(text, sizeof(text), "%s", T("Lobby open"));
 	text_show(named(screen, "ready"), text);
+	/* (who can join: the game's wire, WHO CAN JOIN's as it was hosted) */
+	with_pc = network_wire_crossplay() != 0;
 	if (h3_live.network == _h3_network_online)
 	{
 		int password = 0;
 		boolean listed = p2p_lobby_hosting_listed(&password) != 0;
 
-		text_show(named(screen, "ready_sub"), listed ? T("Public: friends join, and anyone from\nthe games browser.") :
-			T("Private: joined by your invites\nand your code alone."));
+		if (with_pc)
+			text_show(named(screen, "ready_sub"), listed ? T("Public, Vitas and PC: friends join,\nand anyone from the games browser.") :
+				T("Private, Vitas and PC: friends, your\ninvites and your code join it."));
+		else
+			text_show(named(screen, "ready_sub"), listed ? T("Public: friends join, and anyone from\nthe games browser.") :
+				T("Private: friends, your invites and\nyour code join it."));
 	}
 	else
 		text_show(named(screen, "ready_sub"), h3_live.network == _h3_network_adhoc ?
-			T("The PS Vitas near you can join.\nSTART GAME plays with everyone here.") :
+			T("The PS Vitas near you can join.\nSTART GAME plays with everyone here.") : with_pc ?
+			T("PS Vitas and PCs on your Wi-Fi can\njoin. START GAME plays with everyone.") :
 			T("The PS Vitas on your Wi-Fi can join.\nSTART GAME plays with everyone here."));
-	snprintf(line + strlen(line), sizeof(line) - strlen(line), "; %ld/%d", count, (int)game->maximum_players);
+	snprintf(line + strlen(line), sizeof(line) - strlen(line), "; %ld/%d%s", count, (int)game->maximum_players,
+		with_pc ? "; Vitas and PC" : "");
 	if (strcmp(line, h3_live.said))
 	{
 		snprintf(h3_live.said, sizeof(h3_live.said), "%s", line);
@@ -9314,6 +9360,10 @@ static void h3_live_update(boolean main_menu_loaded)
 			h3_live_close("the lobby's network changed");
 			return;
 		}
+		/* (WHO CAN JOIN changed on the settings panel, the lobby up: hosted
+		again on that wire; the game's lobby's game plays on as it began) */
+		if (lobby_up && h3_live_follow_wire(TRUE))
+			return;
 		/* (the host's player in its game, as the game's lobby adds it) */
 		if (network_game_client_get_state(client, &state) == 2)
 		{

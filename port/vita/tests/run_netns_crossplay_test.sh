@@ -189,6 +189,13 @@
 #               HALO_NET_FUZZ_TWIN build): our host for Vitas and PC twins one
 #               in XPPC_FUZZ_RATE (2) of its OpenCE clients' messages and
 #               datagrams; no sanitizer memory error, no crash
+#   pclivelobby  the Halo 3 live lobby hosted for Vitas and PC (Menu style
+#               Halo 3, HALO_TEST_PROFILE's profile, the Halo PC files of
+#               HALO_TEST_DATA_MENUS): our host's MULTIPLAYER on SYSTEM LINK
+#               opens its game on the crossplay wire; an OpenCE client on its
+#               LAN joins it in the lobby, before START GAME; the host's MAP
+#               (Blood Gulch) and GAME reach it there; START GAME plays it
+#               on Blood Gulch, the OpenCE client in the game
 #   crosscoophost  co-op hosted by our Vita for Vitas and PC (experimental):
 #               an OpenCE client and one of ours beside the host's player
 #   all         every mode above, one after the other (expected failures as
@@ -262,6 +269,9 @@ mode=${1:-}
 case $mode in
 pcself|chupaopence|opencelan|opencehost|crosstls|chupahost|chupaserver|damnserver|crossrefuse|crossbig|crossmixed|crosscoop|crossctf) ;;
 pcjoinsvita|pccap|browserboth|crosspassword|crosscoophost) ;;
+pclivelobby)
+	[ -r "${HALO_TEST_PROFILE:-}" ] && [ -r "${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}/maps/bitmaps.map" ] ||
+		{ echo "SKIP (pclivelobby): wants HALO_TEST_PROFILE and the Halo PC files (HALO_TEST_DATA_MENUS)"; exit 0; } ;;
 pcversion)
 	[ -n "${XPPC_OLD_BUILDS:-}" ] && [ -x "$XPPC_OLD_BUILDS/opence/src/build/linux/halo" ] && [ -n "${XPPC_NEW_OPENCE:-}" ] &&
 		[ -x "$XPPC_NEW_OPENCE" ] ||
@@ -296,7 +306,7 @@ all)
 	status=0
 	mkdir -p "$HOME/halo-test-out"
 	all_log=$(mktemp "$HOME/halo-test-out/xppc-all.XXXX")
-	for m in pcself chupaopence opencelan opencehost crosstls chupahost chupaserver damnserver crossctf crossmaps crossmixed crossrefuse crossbig crosscoop crossold pcjoinsvita browserboth crosspassword pcversion crossversion; do
+	for m in pcself chupaopence opencelan opencehost crosstls chupahost chupaserver damnserver crossctf crossmaps crossmixed crossrefuse crossbig crosscoop crossold pcjoinsvita pclivelobby browserboth crosspassword pcversion crossversion; do
 		echo "=== $m"
 		HALO_TEST_OUT=${HALO_TEST_OUT:+$HALO_TEST_OUT/$m} "$0" "$m" | tee "$all_log"
 		rc=${PIPESTATUS[0]}
@@ -1326,6 +1336,59 @@ crossfuzzhost)
 			our_results="$our_results $name:asan-$asan-crash-$crash-ticks-$ticks"
 		fi
 	done
+	;;
+pclivelobby)
+	# the Halo 3 live lobby for Vitas and PC (insider.15): our host's menus
+	# (MULTIPLAYER: the lobby on SYSTEM LINK, live once its scene stands, on
+	# the crossplay wire); an OpenCE client on its LAN joins it before START
+	# GAME; MAP to Blood Gulch (down two, A, down nine, A), GAME to the next
+	# game type (up, A, down, A), START GAME (down two, A): the countdown,
+	# the game on Blood Gulch with the OpenCE client in it
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	subnet=$((subnet + 1)); n=$subnet
+	side "$n"; host_ns=$side_machine
+	lan_machine "$n" 3; client_ns=$held
+	mkdir -p "$out/live/host/save/u/UDATA/869079979327"
+	cp "$HALO_TEST_PROFILE" "$out/live/host/save/u/UDATA/869079979327/blam.sav"
+	[ -r "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" ] &&
+		cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$out/live/host/save/u/UDATA/869079979327/"
+	live_pad="wait:150:3000 down:150:700 a wait:150:${XPPC_LIVE_WAIT:-45000} down:150:500 down:150:500 a wait:150:2500"
+	for row in $(seq 1 9); do live_pad="$live_pad down:150:300"; done
+	live_pad="$live_pad a wait:150:8000 up:150:500 a wait:150:2500 down:150:500 a wait:150:8000 down:150:500 down:150:500 a"
+	run_seconds=${XPPC_LIVE_SECONDS:-170}
+	copy_maps=$menus_data/maps run_copy live/host "$host_ns" ours "192.168.$n.2" 198.51.100.1 HALO_NET_ONLINE=false \
+		HALO_NET_HOST_CROSSPLAY=true HALO_MENU_STYLE=halo3 HALO_UI_LOG=1 HALO_NETWORK_TEST=watch HALO_TEST_INPUT=bot:1 \
+		"HALO_TEST_PAD=$live_pad"
+	live_pids=$last_pid
+	sleep 15
+	run_copy live/client "$client_ns" opence "192.168.$n.3" 198.51.100.1 $(client_env opence lan 23)
+	live_pids="$live_pids $last_pid"
+	wait $live_pids 2>/dev/null
+	hostlog=$out/live/host/run.log hostdebug=$out/live/host/data/debug.txt
+	clientlog=$out/live/client/run.log clientdebug=$out/live/client/data/debug.txt
+	echo "--- the host"; grep -aE "menus: h3 (live lobby|mp:)|network: the (crossplay|legacy)" "$hostlog" "$hostdebug" | head -20
+	echo "--- the OpenCE client"; grep -aE "network test: (join|search|player)|precaching of map" "$clientlog" "$clientdebug" | head -12
+	two=$(grep -a "network test: tick" "$clientlog" 2>/dev/null | grep -a "| playing" | grep -aEc "player [0-9]+: \(.* player [0-9]+: \(")
+	echo "  the OpenCE client's seconds with two players alive in the game: ${two:-0}"
+	result=pass
+	if ! cat "$hostlog" "$hostdebug" 2>/dev/null | grep -aq "network: the crossplay wire (hosting for Vitas and PC"; then
+		result=host-wire
+	elif ! grep -aq "menus: h3 live lobby: open on SYSTEM LINK (Slayer on Battle Creek): others join it now" "$hostlog"; then
+		result=not-live
+	elif ! grep -aqE "menus: h3 live lobby: Slayer on Battle Creek; players: [^;]+, [^;]+; 2/16; Vitas and PC" "$hostlog"; then
+		result=pc-not-in-lobby
+	elif ! grep -aq "menus: h3 live lobby: now Slayer on Blood Gulch, sent to its joiners" "$hostlog"; then
+		result=map-not-sent
+	elif ! grep -aq "menus: h3 live lobby: the game's lobby: the countdown begun" "$hostlog"; then
+		result=no-countdown
+	elif ! grep -aq "starting precaching of map 'bloodgulch'" "$clientdebug"; then
+		result=client-not-on-blood-gulch
+	elif [ "${two:-0}" -lt 15 ]; then
+		result=client-played-${two:-0}
+	fi
+	cat "$hostlog" "$hostdebug" "$clientlog" "$clientdebug" 2>/dev/null |
+		grep -aqE "egmentation fault|SIGSEGV|SIGABRT|EXCEPTION halt" && result=crash
+	our_results="$our_results pclivelobby:$result"
 	;;
 crosscoophost)
 	# co-op hosted by our Vita for Vitas and PC (T15: PC clients in a Vita's
