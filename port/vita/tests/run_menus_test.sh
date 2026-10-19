@@ -162,6 +162,16 @@
 #            INVITE TO PARTY (the party's own steps: run_netns_online_test.sh party)
 #   h3friendspanel the lobbies' FRIENDS panel: the multiplayer lobby shows who is online
 #            and the requests, Triangle opens the FRIENDS screen, B back; the Forge lobby too
+#   h3mppause the Halo 3 multiplayer pause (menus/halo3/mppause.xml, standing for the Xbox's
+#            1p_pause_game) in a local Team Slayer game on Blood Gulch with an offline bot
+#            (HALO_NETWORK_TEST local, HALO_TEST_PROFILE's profile played; skipped without):
+#            Start opens it over the game - RESUME, PLAYERS, SETTINGS, END GAME (the host's),
+#            no CHANGE TEAMS -, the game not paused (its ticks go on); SETTINGS edits the
+#            profile's controls (right: the stick layout, Circle saves and plays it); END GAME
+#            asks, Circle back; RESUME closes it; as in a party (HALO_TEST_MP_PAUSE_PARTY) PARTY
+#            shows, five rows, and asks for the settings panel's Party page; Menu style Halo
+#            CE: the Xbox's own pause, nothing of Halo 3's (system link host and joiner:
+#            run_netns_online_test.sh h3mppause)
 #   h3friendsfit the lobbies' FRIENDS panel's line with no one to show ("Go online to see
 #            your friends", cut short in the name's column on insider.14) in its own
 #            box across the panel, in one or two lines, never cut: the Forge lobby in
@@ -257,7 +267,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3party browserprofile h3players browserrows profilepaths h3friendsfit}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
@@ -1416,6 +1426,50 @@ for case in $cases; do
 		grep -a "ui: screen" "$log" | grep -A1 "pc.h3.party.screen" | tail -1 | grep -q "pc.h3.friends.screen" ||
 			fail h3party "B did not go back to FRIENDS"
 		grep -aq "ui: screen pc.h3.friends.options" "$log" || fail h3party "Triangle did not open a friend's options" ;;
+	h3mppause)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "--- h3mppause"; echo "SKIP: no HALO_TEST_PROFILE"; continue
+		fi
+		# (in the game: Start, the pause; down two, SETTINGS, Cross: right (the stick layout),
+		# Circle saves; down, END GAME, Cross: the question, Circle back; up three, RESUME, Cross)
+		mppause_pad="wait:150:32000 start:150:3000 down:150:800 down:150:800 a:150:3000 right:150:1500 b:150:2500 down:150:800 a:150:2500 b:150:2000 up:150:600 up:150:600 up:150:600 a:150:3000"
+		mppause_env="HALO_NETWORK_TEST=local:bloodgulch:team_slayer HALO_NETWORK_TEST_PROFILE=1 HALO_NETWORK_TEST_START=3 HALO_BOTS=1"
+		profile_from=$HALO_TEST_PROFILE run h3mppause "$menus_data" 70 "$mppause_pad" HALO_MENU_STYLE=halo3 $mppause_env
+		# (in a party: down three to PARTY, Cross)
+		profile_from=$HALO_TEST_PROFILE run h3mppause_party "$menus_data" 45 "wait:150:32000 start:150:3000 down:150:800 down:150:800 down:150:800 a:150:2500" \
+			HALO_MENU_STYLE=halo3 HALO_TEST_MP_PAUSE_PARTY=1 $mppause_env
+		profile_from=$HALO_TEST_PROFILE run h3mppause_classic "$menus_data" 45 "wait:150:32000 start:150:3000 b:150:2000" \
+			HALO_MENU_STYLE=classic $mppause_env
+		log=$out/h3mppause/run.log
+		echo "--- h3mppause"
+		grep -aE "ui: screen|menus: h3 mp" "$log" | head -16
+		for name in h3mppause h3mppause_party h3mppause_classic; do
+			[ "$(cat "$out/$name/exit")" = 0 ] || fail h3mppause "$name: exit $(cat "$out/$name/exit")"
+			grep -aqiE "assert|exception|halt_and_catch_fire" "$out/$name/run.log" && fail h3mppause "$name: an assertion, exception or halt"
+		done
+		grep -aq "menus: Halo 3 screen h3/mppause/screen for ui.shell.multiplayer_game.pause_game.1p_pause_game" "$log" ||
+			fail h3mppause "the Halo 3 multiplayer pause did not stand for the Xbox's"
+		grep -aqE "menus: h3 mp pause: .* on Blood Gulch, teams, the host, 2 players; rows: resume, players, settings, end game" "$log" ||
+			fail h3mppause "the team game's pause did not show RESUME, PLAYERS, SETTINGS, END GAME"
+		grep -aqi "change teams" "$log" && fail h3mppause "CHANGE TEAMS was offered in the game"
+		ticks=$(sed -n '/ui: screen pc.h3.mppause.screen/,$p' "$log" | grep -ac "network test: tick")
+		[ "$ticks" -ge 3 ] || fail h3mppause "the game did not go on under the pause ($ticks ticks said)"
+		grep -aq "menus: h3 mp settings: local player 0, profile edited" "$log" || fail h3mppause "SETTINGS did not edit the profile"
+		grep -aq "menus: h3 mp settings: saved and played: stick 1" "$log" ||
+			fail h3mppause "the stick layout changed in SETTINGS was not saved and played"
+		grep -aq "ui: screen pc.h3.mppause.end_screen" "$log" || fail h3mppause "END GAME did not ask"
+		sed -n '/ui: screen pc.h3.mppause.end_screen/,$p' "$log" | grep -aq "ui: screen pc.h3.mppause.screen" ||
+			fail h3mppause "Circle on END GAME's question did not go back to the pause"
+		grep -aq "ui: screen pc.h3.main.screen" <(sed -n '/ui: screen pc.h3.mppause.screen/,$p' "$log") &&
+			fail h3mppause "the game was left (only its question was to be seen)"
+		grep -aqE "menus: h3 mp pause: .*rows: resume, players, settings, party, end game" "$out/h3mppause_party/run.log" ||
+			fail h3mppause "in a party the pause did not show PARTY"
+		grep -aq "menus: h3 mp pause: the Party page asked for" "$out/h3mppause_party/run.log" ||
+			fail h3mppause "PARTY did not ask for the Party page"
+		grep -aq "ui: screen ui.shell.multiplayer_game.pause_game.1p_pause_game" "$out/h3mppause_classic/run.log" ||
+			fail h3mppause "Menu style Halo CE did not open the Xbox's multiplayer pause"
+		grep -aq "h3/mppause\|pc.h3.mppause" "$out/h3mppause_classic/run.log" &&
+			fail h3mppause "Menu style Halo CE opened the Halo 3 multiplayer pause" ;;
 	h3friendsfit)
 		# (FORGE: its lobby's FRIENDS panel, internet play off: its line; in English, then Spanish)
 		run h3friendsfit "$menus_data" 22 "wait:150:3000 down:150:700 down:150:700 a wait:150:5000" HALO_MENU_STYLE=halo3
@@ -1475,7 +1529,7 @@ for case in $cases; do
 		grep -aq "4way_start2join_screen\|menus: Server Browser: the profile" "$log" &&
 			fail browserprofile "internet play off: the profile screen opened anyway" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3lobbyscenes|h3modelsmany|h3friends|h3friendspanel|browserprofile|h3players|browserrows|profilepaths|h3friendsfit]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3lobbyscenes|h3modelsmany|h3friends|h3friendspanel|browserprofile|h3players|browserrows|profilepaths|h3mppause|h3friendsfit]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"

@@ -274,6 +274,21 @@
 #            profile, the Halo 3 LAN browser (no System Link list), the host's
 #            game listed (its name, map, game type and players) and joined with
 #            A; the host starts it, and both must play it
+#   h3mppause the Halo 3 multiplayer pause (halo3/mppause.xml, standing for the
+#            Xbox's 1p_pause_game) in a system link Slayer game on one LAN
+#            (both copies Menu style Halo 3 with the Halo PC files,
+#            HALO_TEST_DATA_MENUS, and HALO_TEST_PROFILE's profile played:
+#            HALO_NETWORK_TEST_PROFILE; skipped without): the joiner's Start
+#            opens it - its rows RESUME, PLAYERS, SETTINGS, LEAVE GAME -,
+#            PLAYERS opens the roster and Circle comes back, SETTINGS its
+#            profile's controls, LEAVE GAME its question (Circle back, then
+#            Cross: the Xbox's quit, the joiner at the menus); the host's has
+#            END GAME, its question, and ends the game for a second joiner
+#            too (there to keep the game going once the first has left: a
+#            game left with one player, or one team, ends). Neither
+#            pauses the game (its ticks go on); a team game's pause (no CHANGE
+#            TEAMS) is run_menus_test.sh h3mppause's. HALO_TEST_SHOTS: the copies' screenshots
+#            at the Vita's 960x544 kept there
 #   h3adhoc  the same over an emulated ad hoc group (adhoc's link, HALO_NET_ADHOC,
 #            HALO_NET_ADHOC_EMULATE): both lobbies open on AD HOC, in the group
 #            from the start (no system's dialog to join it), the LAN browser's
@@ -582,6 +597,7 @@ seconds=${HALO_TEST_SECONDS:-180}
 # (pickjoin, h3pickjoin: a minute more on the map list than their modes' own)
 [ "$mode" = pickjoin ] && seconds=${HALO_TEST_SECONDS:-230}
 [ "$mode" = h3pickjoin ] && seconds=${HALO_TEST_SECONDS:-240}
+[ "$mode" = h3mppause ] && seconds=${HALO_TEST_SECONDS:-150}
 rejoin=${HALO_TEST_REJOIN:-0}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_netns_test.$$}
 . "$here/test_out.sh"
@@ -1993,6 +2009,92 @@ h3lan|h3adhoc)
 	echo "joiner's seconds with two players playing: $two"
 	[ "$two" -ge 15 ] || fail "the joiner played the host's game for $two s with two players (15 wanted)"
 	[ "$mode" = h3adhoc ] && grep -q CONNECT "$out/broker.log" && fail "ad hoc play reached the signalling broker"
+	;;
+h3mppause)
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS) or no HALO_TEST_PROFILE"; exit 0
+	fi
+	# (the joiner on the host's LAN, as h3lan's; each copy with the profile)
+	holder; lan=$held
+	in_ns "$host_router" ip link add l2_host type veth peer name m2_host
+	in_ns "$host_router" ip link set m2_host netns "$lan"
+	in_ns "$host_router" ip link set l2_host master b_host
+	in_ns "$host_router" ip link set l2_host up
+	in_ns "$lan" ip link set lo up
+	in_ns "$lan" ip addr add 192.168.1.3/24 broadcast 192.168.1.255 dev m2_host
+	in_ns "$lan" ip link set m2_host up
+	in_ns "$lan" ip route add default via 192.168.1.1
+	# (a second joiner on the LAN, its own machine)
+	holder; lan2=$held
+	in_ns "$host_router" ip link add l3_host type veth peer name m3_host
+	in_ns "$host_router" ip link set m3_host netns "$lan2"
+	in_ns "$host_router" ip link set l3_host master b_host
+	in_ns "$host_router" ip link set l3_host up
+	in_ns "$lan2" ip link set lo up
+	in_ns "$lan2" ip addr add 192.168.1.4/24 broadcast 192.168.1.255 dev m3_host
+	in_ns "$lan2" ip link set m3_host up
+	in_ns "$lan2" ip route add default via 192.168.1.1
+	for name in host joiner; do
+		mkdir -p "$out/$name/save/u/UDATA/869079979327"
+		cp "$HALO_TEST_PROFILE" "$out/$name/save/u/UDATA/869079979327/blam.sav"
+		[ -r "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" ] &&
+			cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$out/$name/save/u/UDATA/869079979327/"
+	done
+	shots() { # NAME: the copy's screenshots at the Vita's picture, kept in HALO_TEST_SHOTS
+		[ -n "${HALO_TEST_SHOTS:-}" ] || return 0
+		rm -rf "$HALO_TEST_SHOTS/netns-$1"; mkdir -p "$HALO_TEST_SHOTS/netns-$1"
+		echo "HALO_SCREENSHOT_DIR=$HALO_TEST_SHOTS/netns-$1 HALO_SCREENSHOT_EVERY=45 HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1"
+	}
+	pause_env="HALO_NET_ONLINE=false HALO_NETWORK_TEST_PROFILE=1 HALO_UI_LOG=1 HALO_MENU_STYLE=halo3"
+	# (the host: Slayer on Blood Gulch, started at 30 s; a while in the game, then Start,
+	# down three to END GAME, Cross: the question; Cross ends the game)
+	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" $pause_env \
+		HALO_NETWORK_TEST=host:bloodgulch:slayer HALO_NETWORK_TEST_START=30 $(shots host) \
+		"HALO_TEST_PAD=wait:150:${HALO_TEST_PAUSE_HOST_WAIT:-115000} start:150:4000 wait:150:4000 down:150:800 down:150:800 down:150:800 a:150:3000 wait:150:3000 a:150:3000 wait:150:15000" \
+		; host_pid=$last_pid
+	sleep 5
+	# (the joiner: in the game, Start: the pause; down, PLAYERS, Cross, Circle back; down,
+	# SETTINGS, Cross, right (the stick layout), Circle saves; down, LEAVE GAME, Cross: the
+	# question, Circle back, Cross again, Cross: left)
+	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$lan" "$vita" "$cpu_b" $pause_env HALO_NETWORK_TEST=join $(shots joiner) \
+		"HALO_TEST_PAD=wait:150:${HALO_TEST_PAUSE_JOIN_WAIT:-60000} start:150:4000 wait:150:3000 down:150:800 a:150:3000 wait:150:3000 b:150:2500 down:150:800 a:150:3000 right:150:2000 b:150:2500 down:150:800 a:150:2500 b:150:2000 a:150:2500 wait:150:2000 a:150:3000 wait:150:15000" \
+		; join_pid=$last_pid
+	HALO_TEST_DATA_JOINER2=$menus_data run_copy joiner2 "$lan2" "$vita" "$cpu_b" $pause_env HALO_NETWORK_TEST=join \
+		; join2_pid=$last_pid
+	wait $join_pid $join2_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log
+	echo "--- host"; grep -aE "ui: screen|menus: (Halo 3 screen h3/mppause|h3 mp)|network test: (the first|no profile|starting)" "$hl" | head -16
+	echo "--- joiner"; grep -aE "ui: screen|menus: (Halo 3 screen h3/mppause|h3 mp|h3 players:)|network test: (the first|no profile|join)" "$jl" | head -30
+	for side in host joiner; do
+		log=$out/$side/run.log
+		grep -aq "menus: Halo 3 screen h3/mppause/screen for ui.shell.multiplayer_game.pause_game.1p_pause_game" "$log" ||
+			fail "the $side's Start did not open the Halo 3 multiplayer pause"
+		grep -aq "ui: screen ui.shell.multiplayer_game.pause_game" "$log" && fail "the $side opened the Xbox's multiplayer pause"
+		grep -aqiE "assert|exception|halt_and_catch_fire|segmentation" "$log" && fail "the $side: an assertion, exception or crash"
+		# (never paused: the game's ticks go on while it is open)
+		ticks=$(sed -n '/ui: screen pc.h3.mppause.screen/,$p' "$log" | grep -ac "network test: tick")
+		[ "$ticks" -ge 3 ] || fail "the $side's game did not go on under the pause ($ticks ticks said)"
+	done
+	grep -aqE "menus: h3 mp pause: Slayer on Blood Gulch, free for all, joined, 3 players; rows: resume, players, settings, leave game" "$jl" ||
+		fail "the joiner's pause did not show RESUME, PLAYERS, SETTINGS, LEAVE GAME (joined)"
+	grep -aqE "menus: h3 mp pause: Slayer on Blood Gulch, free for all, the host, [0-9]+ players; rows: resume, players, settings, end game" "$hl" ||
+		fail "the host's pause did not show RESUME, PLAYERS, SETTINGS, END GAME"
+	grep -aqi "change teams" "$jl" "$hl" && fail "CHANGE TEAMS was offered in the game"
+	grep -aq "ui: screen pc.h3.players.screen" "$jl" || fail "the joiner's PLAYERS did not open the roster"
+	grep -aq "menus: h3 players: " "$jl" || fail "the roster listed no players"
+	grep -aq "ui: screen pc.h3.mpset.screen" "$jl" || fail "the joiner's SETTINGS did not open"
+	grep -aq "menus: h3 mp settings: local player 0, profile edited" "$jl" || fail "SETTINGS did not edit the joiner's profile"
+	grep -aq "menus: h3 mp settings: saved and played: stick 1" "$jl" || fail "the stick layout changed was not saved and played"
+	[ "$(grep -ac "ui: screen pc.h3.mppause.leave_screen" "$jl")" -ge 2 ] || fail "LEAVE GAME did not ask (twice)"
+	sed -n '/ui: screen pc.h3.mppause.leave_screen/,$p' "$jl" | grep -aq "ui: screen pc.h3.mppause.screen" ||
+		fail "Circle on LEAVE GAME's question did not go back to the pause"
+	sed -n '/ui: screen pc.h3.mppause.leave_screen/,$p' "$jl" | grep -aqE "ui: screen pc.h3.(main|mp).screen" ||
+		fail "the joiner's LEAVE GAME did not take it back to the menus"
+	grep -aq "ui: screen pc.h3.mppause.end_screen" "$hl" || fail "the host's END GAME did not ask"
+	sed -n '/ui: screen pc.h3.mppause.end_screen/,$p' "$hl" | grep -aqE "ui: screen pc.h3.(main|mp).screen" ||
+		fail "the host's END GAME did not end the game (the host back at the menus)"
+	grep -aq "network test: joining" "$out/joiner2/run.log" || fail "the second joiner did not join"
 	;;
 h3online|h3pickjoin)
 	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
@@ -3832,7 +3934,7 @@ friendsplayers|friendsplayersoff|friendsplayersnone)
 	[ "$two" -ge 20 ] || fail "the joiner played the host's game for $two s with two players (20 wanted)"
 	;;
 *)
-	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3online|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|party" >&2
+	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|h3online|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|party" >&2
 	exit 2
 	;;
 esac

@@ -128,6 +128,19 @@ these screens stand for the Xbox's own, over the same animated Halo ring:
   pc\join\password\screen, which the browser opens).
 In each level's map (ingame.txt):
 - pause.xml: the pause screen (ui\shell\solo_game\pause_game\pause_game).
+- mppause.xml: the multiplayer pause screen of a player alone on their
+  machine (ui\shell\multiplayer_game\pause_game\1p_pause_game; split
+  screen's 2p and 4p screens, each player's own, stay the Xbox's), in
+  pause.xml's look: the game type and map in the title strip, the score to
+  win, RESUME, PLAYERS (players.xml), SETTINGS (the profile's controls as
+  CUSTOMIZATION's, saved on Circle and played at once, and ALL SETTINGS:
+  the settings panel), PARTY in a party (the settings panel's Party page),
+  LEAVE GAME for a machine that joined or END GAME for the host's, each
+  asked first, then the Xbox's own quit ("mp game player quit", whatever
+  the network: system link, online, a dedicated server's or a PC's game).
+  It never pauses the game, as the Xbox's does not; no CHANGE TEAMS (the
+  Xbox changes teams in the game's lobby only); a Forge game's Start opens
+  the Forge menu instead (menu_tags.c).
 - forge.xml: Forge's screens over the game: the object browser (Square, as
   the monitor), the Forge menu (Start in a Forge game) and its question
   before leaving.
@@ -235,8 +248,9 @@ Tests: port/vita/tests/run_menu_speed_test.sh (no stall, the prebuild);
 port/vita/tests/run_menus_test.sh h3probe h3classic h3xbox h3broken
 h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create
 h3mptouch h3coop h3coopguide h3scenes h3lobbyscenes h3modelsmany h3profiles h3proftouch h3customize h3models
-h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3friends h3friendspanel; the packs':
+h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3friends h3friendspanel
+h3friendsfit h3mppause; the packs':
 port/vita/tests/run_scene_pack_test.sh; Forge's: port/vita/tests/run_forge_test.sh,
 port/vita/tests/run_forge_files_test.sh; between two machines:
-port/vita/tests/run_netns_online_test.sh h3coopmenu h3lan h3adhoc h3online netswitch, and friends'
+port/vita/tests/run_netns_online_test.sh h3coopmenu h3lan h3adhoc h3online h3mppause netswitch, and friends'
 friends friendsdecline friendsblock friendsinvite friendsoffline friendsforged.

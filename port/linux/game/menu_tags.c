@@ -92,6 +92,9 @@ long menu_tags_ingame_screen(char const *name);
 game (halo3/forge.xml, whatever the Menu style) */
 #define XBOX_PAUSE_SCREEN "ui\\shell\\solo_game\\pause_game\\pause_game"
 #define FORGE_PAUSE_SCREEN "h3/forge/pause/screen"
+/* the Halo 3 multiplayer pause (halo3/mppause.xml): never in a Forge game,
+whose Start opens the Forge menu (forge.c) */
+#define H3_MULTIPLAYER_PAUSE_SCREEN "h3/mppause/screen"
 #define UI_WIDGET_DEFINITION_TAG 'DeLa'
 #define UNICODE_STRING_LIST_TAG 'ustr'
 #define FONT_TAG 'font'
@@ -387,6 +390,7 @@ static char const *const port_function_names[] =
 	"port h3 party init", "port h3 party act", "port h3 party second", "port h3 party option",
 	"port h3 party page up", "port h3 party page down", "port h3 party type", "port h3 party preset",
 	"port forge clear dead ai", "port forge clear all ai",
+	"port h3 mp pause party", "port h3 mp settings init", "port h3 mp settings save", "port h3 mp settings close",
 };
 
 /* the port's game data functions (menu_functions.c), from
@@ -409,6 +413,7 @@ static char const *const port_game_data_input_names[] =
 	"port h3 players", "port h3 players options",
 	"port h3 join", "port h3 pregame",
 	"port h3 party", "port h3 party options", "port h3 party chat", "port h3 party quick",
+	"port h3 mp pause", "port h3 mp settings",
 };
 
 static struct
@@ -2482,6 +2487,8 @@ long menu_tags_screen(
 		{
 			if (tag_index != menu_tags.h3_from[index])
 				continue;
+			if (forge_game_active() && !strcmp(menu_tags.h3_root[index], H3_MULTIPLAYER_PAUSE_SCREEN))
+				return tag_index;
 			if (!menu_tags.art)
 				menu_tags.art = menu_tags_art_load() ? 1 : -1;
 			if (menu_tags.art < 0)

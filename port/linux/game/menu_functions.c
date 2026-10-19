@@ -325,6 +325,10 @@ enum
 	_function_h3_party_preset,
 	_function_forge_clear_dead_ai,
 	_function_forge_clear_all_ai,
+	_function_h3_mp_pause_party,
+	_function_h3_mp_settings_init,
+	_function_h3_mp_settings_save,
+	_function_h3_mp_settings_close,
 };
 
 /* in port_game_data_input_names' order */
@@ -375,6 +379,8 @@ enum
 	_input_h3_party_options,
 	_input_h3_party_chat,
 	_input_h3_party_quick,
+	_input_h3_mp_pause,
+	_input_h3_mp_settings,
 };
 
 /* what a line of typing is for */
@@ -3978,6 +3984,259 @@ static void h3_custom_save(void)
 		saved.controller_settings.button_preset, saved.controller_settings.look_sensitivity,
 		saved.controller_settings.invert_look, saved.controller_settings.flight_stick_aircraft_controls,
 		saved.controller_settings.autocenter, saved.controller_settings.vibration_disabled ? "off" : "on");
+}
+
+/* ---- the Halo 3 multiplayer pause screen (halo3/mppause.xml): it stands
+for the Xbox's 1p_pause_game; its quit is the Xbox's own function */
+
+/* the pause's rows, in the list's order */
+enum
+{
+	_h3_mp_pause_resume,
+	_h3_mp_pause_players,
+	_h3_mp_pause_settings,
+	_h3_mp_pause_party,
+	_h3_mp_pause_leave,
+	_h3_mp_pause_end,
+	NUMBER_OF_H3_MP_PAUSE_ROWS
+};
+#define H3_MP_PAUSE_ROW_SPACING 24
+/* (SETTINGS: ALL SETTINGS, the list's last row, and its place under the
+profile's rows) */
+#define H3_MP_SETTINGS_PANEL_ROW 7
+#define H3_MP_SETTINGS_PANEL_Y 146
+
+static struct
+{
+	char said[256];
+	/* (SETTINGS) the local player whose profile is edited, the profile, and
+	what the screen last said */
+	short local_player_index;
+	long profile_index;
+	char settings_said[256];
+} h3_mp_pause;
+
+/* the game type's name, as the game's lobby says it: the variant's own,
+else the game's */
+static void h3_mp_game_name(struct network_game const *game, char *out, int size)
+{
+	wchar_t wide[NUMBEROF(game->variant.human_readable_game_description) + 1];
+	long index;
+
+	for (index = 0; index < (long)NUMBEROF(game->variant.human_readable_game_description) &&
+		game->variant.human_readable_game_description[index]; index++)
+		wide[index] = game->variant.human_readable_game_description[index];
+	wide[index] = 0;
+	h3_utf8(out, size, wide);
+	if (!out[0])
+		snprintf(out, (size_t)size, "%s", T("Slayer"));
+}
+
+/* the local player a screen is for (its controller's: a multiplayer game's
+local players are their controllers') */
+static short h3_mp_local_player(struct widget_instance *widget)
+{
+	struct widget_instance *screen = screen_of(widget);
+
+	return screen ? (short)PIN(screen->local_player_index, 0, MAXIMUM_LOCAL_PLAYERS - 1) : 0;
+}
+
+/* (port h3 mp pause: the pause's list) the title (game type and map), the
+score to win, the players, the game's panel; the rows shown (PARTY in a
+party only, LEAVE GAME or END GAME as this machine joined or hosts the
+game) one under another, the column behind them as long */
+static void h3_mp_pause_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *child;
+	struct network_game *game = network_game_get_game();
+	struct p2p_party_member party[P2P_PARTY_MAXIMUM];
+	boolean host = global_network_game_server_get() != NULL;
+	/* (HALO_TEST_MP_PAUSE_PARTY: as in a party, its row shown: tests) */
+	boolean in_party = p2p_party_members(party, P2P_PARTY_MAXIMUM) > 1 || getenv("HALO_TEST_MP_PAUSE_PARTY");
+	char name[64], map[96], text[320], line[384];
+	short row, shown = 0, base = list->child ? list->child->vertical_offset : 0;
+
+	name[0] = map[0] = 0;
+	if (game)
+	{
+		h3_mp_game_name(game, name, (int)sizeof(name));
+		snprintf(map, sizeof(map), "%s", custom_edition_maps_level_title(game->map.name));
+	}
+	snprintf(text, sizeof(text), "%s \xc2\xb7 %s", name, map);
+	h3_capitals(text);
+	text_show(named(screen, "title"), text);
+	if (game)
+	{
+		snprintf(text, sizeof(text), T("%s, score to win %ld"), game->variant.universal_variant.teams ?
+			T("Team game") : T("Free for all"), (long)game->variant.universal_variant.score_to_win);
+		text_show(named(screen, "rules"), text);
+		snprintf(text, sizeof(text), game->player_count == 1 ? T("%d Player") : T("%d Players"), game->player_count);
+		text_show(named(screen, "count"), text);
+		snprintf(text, sizeof(text), T("%s on %s"), name, map);
+		snprintf(text + strlen(text), sizeof(text) - strlen(text), "\n%s\n\n%s", host ?
+			T("You host this game.") : T("You joined this game."), host ?
+			T("END GAME ends it for every player.") : T("LEAVE GAME: the others play on."));
+		text_show(named(screen, "game"), text);
+	}
+	for (row = 0, child = list->child; child; child = child->next, row++)
+	{
+		boolean visible = row != _h3_mp_pause_party || in_party;
+
+		if (row == _h3_mp_pause_leave)
+			visible = !host;
+		else if (row == _h3_mp_pause_end)
+			visible = host;
+		widget_instance_set_visibility_recursive(child, visible);
+		child->disabled = !visible;
+		if (visible)
+			child->vertical_offset = (short)(base + shown++ * H3_MP_PAUSE_ROW_SPACING);
+	}
+	if ((child = named(screen, "column_4")) != NULL)
+		widget_instance_set_visibility_recursive(child, shown <= 4);
+	if ((child = named(screen, "column_5")) != NULL)
+		widget_instance_set_visibility_recursive(child, shown > 4);
+	/* (said once each time it changes: the tests read it) */
+	snprintf(line, sizeof(line), "%s on %s, %s, %s, %d players; rows: resume, players, settings%s, %s", name, map,
+		game && game->variant.universal_variant.teams ? "teams" : "free for all", host ? "the host" : "joined",
+		game ? game->player_count : 0, in_party ? ", party" : "", host ? "end game" : "leave game");
+	if (strcmp(line, h3_mp_pause.said))
+	{
+		snprintf(h3_mp_pause.said, sizeof(h3_mp_pause.said), "%s", line);
+		platform_log("menus: h3 mp pause: %s", line);
+	}
+}
+
+/* (port h3 mp settings init: SETTINGS opened) the profile the local player
+plays with, edited as CUSTOMIZATION edits it (h3_custom_change steps its
+rows); none to edit without one */
+static void h3_mp_settings_initialize(struct widget_instance *widget)
+{
+	short local_player_index = h3_mp_local_player(widget);
+	long profile_index = player_ui_get_active_player_profile_index(local_player_index);
+
+	h3_mp_pause.local_player_index = local_player_index;
+	h3_mp_pause.profile_index = NONE;
+	h3_mp_pause.settings_said[0] = 0;
+	h3_custom.status[0] = 0;
+	if (player_ui_get_edit_player_profile())
+		player_ui_end_editing_profile();
+	if (profile_index != NONE)
+	{
+		player_ui_begin_editing_profile(profile_index);
+		if (player_ui_get_edit_player_profile())
+			h3_mp_pause.profile_index = profile_index;
+	}
+	h3_custom.index = h3_mp_pause.profile_index;
+	platform_log("menus: h3 mp settings: local player %d, profile %s", local_player_index,
+		h3_mp_pause.profile_index != NONE ? "edited" : "none (only ALL SETTINGS)");
+}
+
+/* (port h3 mp settings: its list) the rows' values (CUSTOMIZATION's), the
+focused row's arrows and help, the profile's name; without a profile its
+rows hidden, ALL SETTINGS alone */
+static void h3_mp_settings_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct player_profile *profile = player_ui_get_edit_player_profile();
+	struct widget_instance *child, *found;
+	short index, focused = 0, base = list->child ? list->child->vertical_offset : 0;
+	char text[192], said[256];
+
+	if (h3_mp_pause.profile_index == NONE)
+		profile = NULL;
+	/* (no profile: ALL SETTINGS alone, at the top, focused) */
+	if (!profile && list->focused_child && list->focused_child->disabled)
+		h3_focus_child(list, H3_MP_SETTINGS_PANEL_ROW);
+	for (index = 0, child = list->child; child; child = child->next, index++)
+	{
+		short row = h3_custom_row(child);
+		boolean has_focus = child == list->focused_child;
+
+		if (index == H3_MP_SETTINGS_PANEL_ROW)
+			child->vertical_offset = (short)(base + (profile ? H3_MP_SETTINGS_PANEL_Y : 0));
+
+		if (has_focus)
+			focused = index;
+		if (row != NONE)
+		{
+			widget_instance_set_visibility_recursive(child, profile != NULL);
+			child->disabled = profile == NULL;
+			if (!profile)
+				continue;
+			h3_custom_value(row, profile, text, sizeof(text));
+			text_show(named(child, "value"), text);
+			if ((found = named(child, "arrow_left")) != NULL)
+				widget_instance_set_visibility_recursive(found, has_focus);
+			if ((found = named(child, "arrow_right")) != NULL)
+				widget_instance_set_visibility_recursive(found, has_focus);
+		}
+		child->animation.current_frame_index = has_focus ? 1 : 0;
+	}
+	string_show(named(screen, "custom_help"), focused);
+	if (profile)
+	{
+		h3_profile_name(text, sizeof(text), profile);
+		h3_capitals(text);
+	}
+	else
+		snprintf(text, sizeof(text), "%s", T("No profile: these are a profile's settings"));
+	text_show(named(screen, "profile_name"), text);
+	if (profile && !h3_custom.status[0] && profile->controller_settings.invert_look &&
+		atoi(setting_get("XV_INVERT_Y", "0")))
+	{
+		text_show(named(screen, "status"),
+			T("The settings panel's Invert look is on too: on this PS Vita the two cancel out."));
+	}
+	else
+		text_show(named(screen, "status"), h3_custom.status);
+	if (profile)
+	{
+		struct player_profile_controller_settings const *settings = &profile->controller_settings;
+
+		snprintf(said, sizeof(said), "stick %d, buttons %d, look %d, invert %d, flight %d, autocenter %d, vibration %s",
+			settings->joystick_preset, settings->button_preset, settings->look_sensitivity, settings->invert_look,
+			settings->flight_stick_aircraft_controls, settings->autocenter, settings->vibration_disabled ? "off" : "on");
+	}
+	else
+		snprintf(said, sizeof(said), "no profile");
+	if (strcmp(said, h3_mp_pause.settings_said))
+	{
+		snprintf(h3_mp_pause.settings_said, sizeof(h3_mp_pause.settings_said), "%s", said);
+		platform_log("menus: h3 mp settings: now %s", said);
+	}
+}
+
+/* (port h3 mp settings save: Circle) the changes saved to the profile as
+CUSTOMIZATION's Circle saves them (player_ui_save_profile), and the local
+player's controls made the saved profile's at once
+(player_ui_set_active_player_profile: the Xbox's way) */
+static void h3_mp_settings_save(void)
+{
+	struct player_profile *edit = player_ui_get_edit_player_profile();
+	struct player_profile saved;
+
+	if (!edit || h3_mp_pause.profile_index == NONE)
+		return;
+	memcpy(&saved, edit, sizeof(saved));
+	if (!player_ui_edit_profile_is_dirty())
+	{
+		player_ui_end_editing_profile();
+		platform_log("menus: h3 mp settings: no changes");
+		return;
+	}
+	if (!player_ui_save_profile())
+	{
+		platform_log("menus: h3 mp settings: the profile could not be saved");
+		return;
+	}
+	if (player_ui_get_active_player_profile_index(h3_mp_pause.local_player_index) == h3_mp_pause.profile_index)
+		player_ui_set_active_player_profile(h3_mp_pause.local_player_index, h3_mp_pause.profile_index, &saved);
+	platform_log("menus: h3 mp settings: saved and played: stick %d, buttons %d, look %d, invert %d, flight %d, "
+		"autocenter %d, vibration %s", saved.controller_settings.joystick_preset, saved.controller_settings.button_preset,
+		saved.controller_settings.look_sensitivity, saved.controller_settings.invert_look,
+		saved.controller_settings.flight_stick_aircraft_controls, saved.controller_settings.autocenter,
+		saved.controller_settings.vibration_disabled ? "off" : "on");
 }
 
 /* the party's leader warned of a game with fewer open slots than the party
@@ -8421,10 +8680,11 @@ boolean pc_menu_event_function_invoke(
 	it; elsewhere those open, as before) */
 	case _function_settings_panel:
 #ifdef HALO_VITA
-		__atomic_store_n(&halo_settings_panel_request, 1, __ATOMIC_RELEASE);
+		__atomic_store_n(&halo_settings_panel_request, HALO_SETTINGS_PANEL_OPEN, __ATOMIC_RELEASE);
 		platform_log("menus: the settings panel asked for");
 		return FALSE;
 #else
+		platform_log("menus: the settings panel asked for (none on this build)");
 		return TRUE;
 #endif
 	case _function_h3_campaign_init:
@@ -8720,6 +8980,26 @@ boolean pc_menu_event_function_invoke(
 		return TRUE;
 	case _function_forge_all_ai:
 		forge_ai_all_request();
+		return TRUE;
+	/* (the multiplayer pause's PARTY: on the Vita the settings panel's
+	Party page, its chat and quick chat) */
+	case _function_h3_mp_pause_party:
+#ifdef HALO_VITA
+		__atomic_store_n(&halo_settings_panel_request, HALO_SETTINGS_PANEL_PARTY, __ATOMIC_RELEASE);
+#endif
+		platform_log("menus: h3 mp pause: the Party page asked for");
+		return FALSE;
+	case _function_h3_mp_settings_init:
+		h3_mp_settings_initialize(widget);
+		return TRUE;
+	case _function_h3_mp_settings_save:
+		h3_mp_settings_save();
+		return TRUE;
+	/* (SETTINGS gone without its Circle: nothing saved) */
+	case _function_h3_mp_settings_close:
+		if (player_ui_get_edit_player_profile())
+			player_ui_end_editing_profile();
+		h3_mp_pause.profile_index = NONE;
 		return TRUE;
 	case _function_forge_clear_dead_ai:
 	case _function_forge_clear_all_ai:
@@ -9051,6 +9331,14 @@ void pc_menu_game_data_function_invoke(
 	case _input_h3_party_quick:
 		if (widget->type == _ui_widget_type_column_list)
 			h3_party_quick_update(widget);
+		break;
+	case _input_h3_mp_pause:
+		if (widget->type == _ui_widget_type_column_list)
+			h3_mp_pause_update(widget);
+		break;
+	case _input_h3_mp_settings:
+		if (widget->type == _ui_widget_type_column_list)
+			h3_mp_settings_update(widget);
 		break;
 	default:
 		break;

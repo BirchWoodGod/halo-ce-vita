@@ -109,7 +109,13 @@ enum
 
 extern volatile int halo_text_input_state;
 /* nonzero when the game's menus ask for the settings panel (the Halo 3 main
-menu's Start, "port settings panel"): the Vita's host opens it and clears it */
+menu's Start, "port settings panel"; the Halo 3 multiplayer pause's PARTY,
+its Party page): the Vita's host opens it and clears it */
+enum
+{
+	HALO_SETTINGS_PANEL_OPEN = 1,
+	HALO_SETTINGS_PANEL_PARTY = 2,
+};
 extern volatile int halo_settings_panel_request;
 extern char halo_text_input_title[HALO_TEXT_INPUT_SIZE];
 extern char halo_text_input_text[HALO_TEXT_INPUT_SIZE];
