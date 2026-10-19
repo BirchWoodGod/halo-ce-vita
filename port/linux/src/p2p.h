@@ -309,6 +309,10 @@ void p2p_lobby_set_coop_public(int listed);
 network.coop_public; never with the server browser off), and in
 has_password (if not NULL) whether a listing would ask for the password */
 int p2p_lobby_coop_public(int *has_password);
+/* whether the game this machine hosts (co-op's or another) is listed in the
+server browser now, as the listing goes out (the pre-game lobby says it),
+and in has_password whether its listing asks for the password */
+int p2p_lobby_hosting_listed(int *has_password);
 /* the name the browser lists the game under ("": network.lobby_name, else
 the game's own) */
 void p2p_lobby_set_name(const char *name);

@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The Halo 3-style pre-game lobby (Menu style Halo 3): it stands for the Xbox's ENLISTED PLAYERS
+screen (connected\pregame\connected_pregame_screen), the lobby of a network game - co-op hosted
+from the campaign lobby (the waiting screen) and a multiplayer game, hosted or joined - and runs
+what it ran, the game's own functions under its own buttons: as it opens "net server accept conx"
+and "net server allow start", each frame "net splitscreen prejoin players" (the players who joined
+on SELECT PROFILE added to the game); Cross "net game speed start" and "net game join player",
+START the same, Square "net game delay start" (in the waiting screen of co-op hosted online, the
+game made public or private: coop_menu.c), left and right "swap player team", Circle and Back
+"net game unjoin player" (the last of this machine's players leaves the game; the co-op host's
+cancels it). Laid out as Halo 3's lobby: the column at the left with what is played - the
+mission's picture, its name and difficulty (co-op) or the map's picture, the game type on the map
+- how the game is reached, its code large, public or private and what Square does; the players at
+the right, each in their colour with their team, the host's and this machine's marked (menu_functions.c
+"port h3 pregame"). The pictures and emblems are ui.map's own; the rest this folder's art. -->
+<menus root="h3/pregame/screen" replaces="ui\shell\main_menu\multiplayer_type_select\connected\pregame\connected_pregame_screen">
+	<strings name="h3/pregame_text">
+		<string text="CODE"/>
+		<string text="Start Game"/>
+		<string text="Cancel"/>
+	</strings>
+
+	<widget name="h3/pregame/column" left="8" top="12" width="250" height="456" bitmap="h3/column"/>
+	<widget name="h3/pregame/title" type="text" left="16" top="18" width="240" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1"/>
+	<widget name="h3/pregame/rule1" left="8" top="44" width="250" height="2" bitmap="h3/rule"/>
+	<widget name="h3/pregame/status" type="text" left="16" top="50" width="240" height="20" font="h3/font_item" color="#FFF0B070" text_y="2"/>
+	<widget name="h3/pregame/status_sub" type="text" left="16" top="70" width="240" height="34" font="h3/font_small" color="#FFCFD9E3" text_y="1"/>
+	<widget name="h3/pregame/mission_picture" left="16" top="106" width="140" height="114" bitmap="h3/sp_levels"/>
+	<widget name="h3/pregame/map_picture" left="16" top="106" width="140" height="114" bitmap="ui\shell\bitmaps\mp_map_grafix"/>
+	<widget name="h3/pregame/emblem" left="22" top="112" width="44" height="48" bitmap="h3/difficulty"/>
+	<widget name="h3/pregame/caption" type="text" left="16" top="224" width="240" height="40" font="h3/font_item" color="#FFEEF2F6" text_y="1"/>
+	<widget name="h3/pregame/rule2" left="8" top="268" width="250" height="2" bitmap="h3/rule"/>
+	<widget name="h3/pregame/code_label" type="text" left="16" top="274" width="240" height="16" font="h3/font_small" color="#FF9FB6CC" text_y="1"/>
+	<widget name="h3/pregame/code" type="text" left="16" top="290" width="240" height="26" font="h3/font_title" color="#FFF2F6FA" text_y="1"/>
+	<widget name="h3/pregame/visibility" type="text" left="16" top="320" width="240" height="34" font="h3/font_small" color="#FFCFD9E3" text_y="1"/>
+	<widget name="h3/pregame/listed" type="text" left="16" top="356" width="240" height="16" font="h3/font_small" color="#FF9FB6CC" text_y="1"/>
+	<widget name="h3/pregame/x_butn" left="16" top="378" width="16" height="16" bitmap="h3/glyph_square"/>
+	<widget name="h3/pregame/x_text" type="text" left="36" top="377" width="220" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1"/>
+	<widget name="h3/pregame/rule3" left="8" top="440" width="250" height="2" bitmap="h3/rule"/>
+	<widget name="h3/pregame/a_butn" left="16" top="447" width="16" height="16" bitmap="h3/glyph_cross"/>
+	<widget name="h3/pregame/a_text" type="text" left="36" top="446" width="100" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/pregame_text" string_index="1"/>
+	<widget name="h3/pregame/b_butn" left="140" top="447" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/pregame/b_text" type="text" left="160" top="446" width="90" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1"/>
+
+	<!-- the players: a row each, the colour, the name, and the team, HOST and YOU -->
+	<widget name="h3/pregame/players" type="text" left="372" top="20" width="256" height="16" font="h3/font_small" color="#FFEEF2F6" text_y="1"/>
+	<widget name="h3/pregame/row_swatch" left="4" top="0" width="16" height="16" bitmap="h3/swatch"/>
+	<widget name="h3/pregame/row_name" type="text" left="24" top="0" width="150" height="16" font="h3/font_small" color="#FFEEF2F6" text_y="1"/>
+	<widget name="h3/pregame/row_note" type="text" left="174" top="0" width="78" height="16" align="right" font="h3/font_small" color="#FFDDE6F0" text_y="1"/>
+	<widget name="h3/pregame/row_1" width="256" height="16" bitmap="h3/server_plate">
+		<child widget="h3/pregame/row_swatch"/>
+		<child widget="h3/pregame/row_name"/>
+		<child widget="h3/pregame/row_note"/>
+	</widget>
+	<widget name="h3/pregame/row_2" width="256" height="16" bitmap="h3/server_plate">
+		<child widget="h3/pregame/row_swatch"/>
+		<child widget="h3/pregame/row_name"/>
+		<child widget="h3/pregame/row_note"/>
+	</widget>
+	<widget name="h3/pregame/row_3" width="256" height="16" bitmap="h3/server_plate">
+		<child widget="h3/pregame/row_swatch"/>
+		<child widget="h3/pregame/row_name"/>
+		<child widget="h3/pregame/row_note"/>
+	</widget>
+	<widget name="h3/pregame/row_4" width="256" height="16" bitmap="h3/server_plate">
+		<child widget="h3/pregame/row_swatch"/>
+		<child widget="h3/pregame/row_name"/>
+		<child widget="h3/pregame/row_note"/>
+	</widget>
+	<widget name="h3/pregame/row_5" width="256" height="16" bitmap="h3/server_plate">
+		<child widget="h3/pregame/row_swatch"/>
+		<child widget="h3/pregame/row_name"/>
+		<child widget="h3/pregame/row_note"/>
+	</widget>
+	<widget name="h3/pregame/row_6" width="256" height="16" bitmap="h3/server_plate">
+		<child widget="h3/pregame/row_swatch"/>
+		<child widget="h3/pregame/row_name"/>
+		<child widget="h3/pregame/row_note"/>
+	</widget>
+	<widget name="h3/pregame/row_7" width="256" height="16" bitmap="h3/server_plate">
+		<child widget="h3/pregame/row_swatch"/>
+		<child widget="h3/pregame/row_name"/>
+		<child widget="h3/pregame/row_note"/>
+	</widget>
+	<widget name="h3/pregame/row_8" width="256" height="16" bitmap="h3/server_plate">
+		<child widget="h3/pregame/row_swatch"/>
+		<child widget="h3/pregame/row_name"/>
+		<child widget="h3/pregame/row_note"/>
+	</widget>
+	<widget name="h3/pregame/row_9" width="256" height="16" bitmap="h3/server_plate">
+		<child widget="h3/pregame/row_swatch"/>
+		<child widget="h3/pregame/row_name"/>
+		<child widget="h3/pregame/row_note"/>
+	</widget>
+	<widget name="h3/pregame/row_10" width="256" height="16" bitmap="h3/server_plate">
+		<child widget="h3/pregame/row_swatch"/>
+		<child widget="h3/pregame/row_name"/>
+		<child widget="h3/pregame/row_note"/>
+	</widget>
+	<widget name="h3/pregame/row_11" width="256" height="16" bitmap="h3/server_plate">
+		<child widget="h3/pregame/row_swatch"/>
+		<child widget="h3/pregame/row_name"/>
+		<child widget="h3/pregame/row_note"/>
+	</widget>
+	<widget name="h3/pregame/row_12" width="256" height="16" bitmap="h3/server_plate">
+		<child widget="h3/pregame/row_swatch"/>
+		<child widget="h3/pregame/row_name"/>
+		<child widget="h3/pregame/row_note"/>
+	</widget>
+	<widget name="h3/pregame/row_13" width="256" height="16" bitmap="h3/server_plate">
+		<child widget="h3/pregame/row_swatch"/>
+		<child widget="h3/pregame/row_name"/>
+		<child widget="h3/pregame/row_note"/>
+	</widget>
+	<widget name="h3/pregame/row_14" width="256" height="16" bitmap="h3/server_plate">
+		<child widget="h3/pregame/row_swatch"/>
+		<child widget="h3/pregame/row_name"/>
+		<child widget="h3/pregame/row_note"/>
+	</widget>
+	<widget name="h3/pregame/row_15" width="256" height="16" bitmap="h3/server_plate">
+		<child widget="h3/pregame/row_swatch"/>
+		<child widget="h3/pregame/row_name"/>
+		<child widget="h3/pregame/row_note"/>
+	</widget>
+	<widget name="h3/pregame/row_16" width="256" height="16" bitmap="h3/server_plate">
+		<child widget="h3/pregame/row_swatch"/>
+		<child widget="h3/pregame/row_name"/>
+		<child widget="h3/pregame/row_note"/>
+	</widget>
+
+	<widget name="h3/pregame/screen" flags="pass_unhandled_to_focused_child pause_game main_menu_if_no_history">
+		<on event="created" run="net server accept conx"/>
+		<on event="created" run="net server allow start"/>
+		<on event="created" run="port h3 pregame init"/>
+		<on event="left right stick_left stick_right" run="swap player team"/>
+		<on event="a" run="net game speed start"/>
+		<on event="a start" run="net game join player"/>
+		<on event="start" run="net game speed start"/>
+		<on event="x" run="net game delay start"/>
+		<on event="b back" run="net game unjoin player" back="true"/>
+		<data input="net splitscreen prejoin players"/>
+		<data input="port h3 pregame"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/pregame/column"/>
+		<child widget="h3/pregame/title"/>
+		<child widget="h3/pregame/rule1"/>
+		<child widget="h3/pregame/status"/>
+		<child widget="h3/pregame/status_sub"/>
+		<child widget="h3/pregame/mission_picture"/>
+		<child widget="h3/pregame/map_picture"/>
+		<child widget="h3/pregame/emblem"/>
+		<child widget="h3/pregame/caption"/>
+		<child widget="h3/pregame/rule2"/>
+		<child widget="h3/pregame/code_label"/>
+		<child widget="h3/pregame/code"/>
+		<child widget="h3/pregame/visibility"/>
+		<child widget="h3/pregame/listed"/>
+		<child widget="h3/pregame/x_butn"/>
+		<child widget="h3/pregame/x_text"/>
+		<child widget="h3/pregame/rule3"/>
+		<child widget="h3/pregame/a_butn"/>
+		<child widget="h3/pregame/a_text"/>
+		<child widget="h3/pregame/b_butn"/>
+		<child widget="h3/pregame/b_text"/>
+		<child widget="h3/pregame/players"/>
+		<child widget="h3/pregame/row_1" x="372" y="42"/>
+		<child widget="h3/pregame/row_2" x="372" y="60"/>
+		<child widget="h3/pregame/row_3" x="372" y="78"/>
+		<child widget="h3/pregame/row_4" x="372" y="96"/>
+		<child widget="h3/pregame/row_5" x="372" y="114"/>
+		<child widget="h3/pregame/row_6" x="372" y="132"/>
+		<child widget="h3/pregame/row_7" x="372" y="150"/>
+		<child widget="h3/pregame/row_8" x="372" y="168"/>
+		<child widget="h3/pregame/row_9" x="372" y="186"/>
+		<child widget="h3/pregame/row_10" x="372" y="204"/>
+		<child widget="h3/pregame/row_11" x="372" y="222"/>
+		<child widget="h3/pregame/row_12" x="372" y="240"/>
+		<child widget="h3/pregame/row_13" x="372" y="258"/>
+		<child widget="h3/pregame/row_14" x="372" y="276"/>
+		<child widget="h3/pregame/row_15" x="372" y="294"/>
+		<child widget="h3/pregame/row_16" x="372" y="312"/>
+	</widget>
+</menus>

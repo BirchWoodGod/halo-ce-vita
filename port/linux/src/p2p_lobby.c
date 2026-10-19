@@ -1727,6 +1727,19 @@ int p2p_lobby_coop_public(int *has_password)
 	return public;
 }
 
+int p2p_lobby_hosting_listed(int *has_password)
+{
+	int listed;
+
+	pthread_mutex_lock(&p2p_lock);
+	listed = hosting_public();
+	if (has_password)
+		*has_password = lobby.password_said ? lobby.has_password || lobby.password_pending :
+			config_string("network.lobby_password")[0] != 0;
+	pthread_mutex_unlock(&p2p_lock);
+	return listed;
+}
+
 void p2p_lobby_set_name(const char *name)
 {
 	char chosen[P2P_LISTING_NAME_SIZE + 1];
