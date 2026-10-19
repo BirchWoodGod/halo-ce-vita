@@ -247,7 +247,7 @@
 "Turn (yaw)" = "Girar (yaw)"
 "Tilt (roll)" = "Inclinar (roll)"
 "Gyro aim assist" = "Ayuda al apuntar"
-"On: slows and sticks on targets like the sticks" = "Sí: frena y sigue a los objetivos como con los sticks"
+"Off: no aim assist at all while the gyro is on" = "No: ninguna ayuda al apuntar con el giroscopio activado"
 "Gyro: no sensor" = "Giroscopio: sin sensor"
 "Gyro: no samples" = "Giroscopio: sin datos"
 "Gyro: yaw %+d pitch %+d roll %+d %s" = "Giro: yaw %+d pitch %+d roll %+d %s"

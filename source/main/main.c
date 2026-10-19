@@ -4617,6 +4617,11 @@ static void main_test_commands_update(
 
 			ragdolls_test_command(commands[index].command + 8);
 		}
+		/* (@aim log|face|gyro|pad: the aim assist's counts, the player
+		turned to an enemy, the harness's gyro and pad: player_control.c,
+		run_gyro_assist_test.sh) */
+		else if (!strncmp(commands[index].command, "@aim ", 5))
+			player_control_aim_test_command(commands[index].command + 5);
 		else if (!strcmp(commands[index].command, "@seat"))
 		{
 			struct data_iterator iterator;

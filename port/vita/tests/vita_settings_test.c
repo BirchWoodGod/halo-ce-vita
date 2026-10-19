@@ -1286,11 +1286,30 @@ static void test_gyro_page(void)
 	press(VITA_BUTTON_DOWN);
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_GYRO_ASSIST"), "0") && strstr(menu, " Off >") &&
-		strstr(menu, "On: slows and sticks on targets like the sticks"), "Gyro aim assist: Off, its help line");
+		strstr(menu, "Off: no aim assist at all while the gyro is on"), "Gyro aim assist: Off, its help line");
 	vita_gyro_config_load(&config);
 	check(config.mode == VITA_GYRO_HOLD && config.button == VITA_BUTTON_R && config.sensitivity > 2.49f &&
 		config.sensitivity < 2.51f && config.invert_y && config.turn == VITA_GYRO_TURN_ROLL && !config.assist,
 		"the pad reads the gyro's choices");
+	/* (no aim assist at all: the gyro on in any mode, the switch off;
+	with the gyro off the switch is ignored) */
+	check(vita_gyro_unassisted(&config), "Gyro aim assist Off, gyro While holding: no aim assist (held or not)");
+	{
+		struct vita_gyro_config each = config;
+		int mode, assisted_modes = 0, unassisted_modes = 0;
+
+		for (mode = 0; mode < VITA_GYRO_MODES; mode++)
+		{
+			each.mode = mode;
+			each.assist = 0;
+			unassisted_modes += vita_gyro_unassisted(&each) ? 1 << mode : 0;
+			each.assist = 1;
+			assisted_modes += vita_gyro_unassisted(&each) ? 1 << mode : 0;
+		}
+		check(unassisted_modes == ((1 << VITA_GYRO_ON) | (1 << VITA_GYRO_ZOOMED) | (1 << VITA_GYRO_HOLD)) &&
+			assisted_modes == 0,
+			"no aim assist only with the gyro On, While zoomed or While holding and the switch Off; gyro Off ignores it");
+	}
 	press(VITA_BUTTON_CIRCLE);
 	press(VITA_BUTTON_CIRCLE);
 

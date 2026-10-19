@@ -97,6 +97,16 @@ int vita_pad_gyro_assist(short gamepad_index)
 	return gamepad_index == 0 && gyro_config.assist;
 }
 
+/* (the game's look code and the player's shots, source/game/player_control.c
+and aim_assist.c) whether the player has no aim assist at all: the gyro on
+(any mode but off) and the Gyro aim assist setting off
+(vita_gyro_unassisted). The stick then has none either; with the gyro off
+the stick keeps Halo's own whatever the switch says */
+int vita_pad_gyro_unassisted(short gamepad_index)
+{
+	return gamepad_index == 0 && vita_gyro_unassisted(&gyro_config);
+}
+
 /* (the game's button icons, source/interface/hud_draw.c) the glyph of
 the Vita button an Xbox button (the game's numbering, 0 to 15) is on now,
 in the menus or in play: VITA_GLYPH_NONE while the icons are the Xbox's or

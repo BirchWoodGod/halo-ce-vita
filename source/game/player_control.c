@@ -212,6 +212,14 @@ symbols in this file:
 
 #include "real_math.h"
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
+#ifdef HALO_LINUX
+/* port: the tests' "@aim" (player_control_aim_test_command) */
+#include "camera/observer.h"
+#include "game/game_allegiance.h"
+#include <math.h>
+#include <stdio.h>
+#include <string.h>
+#endif
 
 /* ---------- constants */
 
@@ -348,6 +356,28 @@ limits were stepped once per input update, a tick on the Xbox, so they step
 by the ticks the frame lasted; an impulse applied from a tick steps by one. */
 static real player_control_angle_step_ticks = 1.f;
 static real player_control_autolevel_time[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
+/* port: a local player who asked for no aim assist at all (the Vita's gyro
+on with its Gyro aim assist setting off: halo_linux_aim_assist_off,
+port/linux/src/xinput_sdl.c), read with its input every frame: no friction
+or adhesion on its look, the stick's or the gyro's, and no autoaim on its
+shots (player_aim_projectile, aim_assist.c, through
+player_control_aim_assist_off). Only this machine's own players: a host
+never has it for a client's player, whose shots the client's own game
+aims (port/linux/game/network_damage.c) */
+static boolean player_control_unassisted[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
+/* port: (tests, main.c's "@aim log") what the aim assist did for each
+local player: frames with a target under the reticle (the magnetism), the
+stick's look slowed and pulled, the gyro's slowed and pulled, shots bent
+towards a target by the autoaim, shots whose autoaim was left out */
+static struct player_control_aim_assist_counts
+{
+	long targeted;
+	long stick;
+	long gyro_friction;
+	long gyro_adhesion;
+	long autoaimed;
+	long autoaim_skipped;
+} player_control_aim_assist_counts[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
 #endif
 
 /* ---------- public code */
@@ -362,6 +392,139 @@ short unit_get_local_player_index(
 
 	return NONE;
 }
+
+#ifdef HALO_LINUX
+/* port: whether this machine's local player has no aim assist at all now
+(player_control_unassisted); FALSE for NONE (no local player: a client's
+player on its host, a bot) */
+boolean player_control_aim_assist_off(
+	short local_player_index)
+{
+	return local_player_index >= 0 && local_player_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS &&
+		player_control_unassisted[local_player_index];
+}
+
+/* port: (aim_assist.c's player_aim_projectile, for the tests' counts) a
+local player's shot, bent towards a target by the autoaim or its autoaim
+left out */
+void player_control_aim_assist_note_shot(
+	short local_player_index,
+	boolean autoaimed,
+	boolean skipped)
+{
+	if (local_player_index >= 0 && local_player_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
+	{
+		player_control_aim_assist_counts[local_player_index].autoaimed += autoaimed ? 1 : 0;
+		player_control_aim_assist_counts[local_player_index].autoaim_skipped += skipped ? 1 : 0;
+	}
+}
+
+/* port: (main.c's "@aim log") the counts in the log, then cleared */
+void player_control_aim_assist_log(
+	void)
+{
+	short local_player_index;
+
+	for (local_player_index = 0; local_player_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS; local_player_index++)
+	{
+		struct player_control_aim_assist_counts *counts = &player_control_aim_assist_counts[local_player_index];
+
+		if (local_player_get_player_index(local_player_index) == NONE)
+			continue;
+		platform_log("aim assist: player %d off %d targeted %ld stick %ld gyro_friction %ld gyro_adhesion %ld "
+			"autoaimed %ld autoaim_skipped %ld", (int)local_player_index,
+			(int)player_control_unassisted[local_player_index], counts->targeted, counts->stick,
+			counts->gyro_friction, counts->gyro_adhesion, counts->autoaimed, counts->autoaim_skipped);
+		csmemset(counts, 0, sizeof(*counts));
+	}
+}
+
+/* port: (main.c's HALO_TEST_COMMANDS "@aim ...", run_gyro_assist_test.sh)
+"log": the counts (player_control_aim_assist_log); "face": the first local
+player turned to the nearest living enemy biped's centre, from its camera;
+on the desktop harness, "gyro yaw pitch": a turn of its stand-in for the
+Vita's gyro (HALO_TEST_GYRO, port/linux/src/xinput_sdl.c), and "pad lx ly
+rx ry rt reads": the sticks and the right trigger held */
+void player_control_aim_test_command(
+	char const *arguments)
+{
+	char word[16] = "";
+
+	sscanf(arguments, " %15s", word);
+	if (!strcmp(word, "log"))
+	{
+		player_control_aim_assist_log();
+	}
+	else if (!strcmp(word, "face"))
+	{
+		long player_index = local_player_get_player_index(0);
+		struct player_datum *player = player_index != NONE ? player_get(player_index) : NULL;
+		struct observer_result const *camera = observer_get_camera(0);
+		struct object_iterator iterator;
+		struct object_datum *object;
+		long nearest_index = NONE;
+		real nearest_distance = 0.f;
+		real_vector3d nearest_direction = {0.f, 0.f, 0.f};
+
+		if (!player || player->unit_index == NONE)
+		{
+			platform_log("aim test: no player to turn");
+			return;
+		}
+		object_iterator_new(&iterator, _object_mask_biped, 0);
+		while ((object = object_iterator_next(&iterator)) != NULL)
+		{
+			real_vector3d direction;
+			real distance;
+
+			if (iterator.index == player->unit_index || TEST_FLAG(object->object.damage_flags, _object_dead_bit) ||
+				!game_team_is_enemy((short)player->team_index, object->object.owner_team_index))
+			{
+				continue;
+			}
+			vector_from_points3d(&camera->position, &object->object.bounding_sphere_center, &direction);
+			distance = normalize3d(&direction);
+			if (distance > 0.f && (nearest_index == NONE || distance < nearest_distance))
+			{
+				nearest_index = iterator.index;
+				nearest_distance = distance;
+				nearest_direction = direction;
+			}
+		}
+		if (nearest_index == NONE)
+		{
+			platform_log("aim test: no enemy to face");
+			return;
+		}
+		player_control_get(0)->desired_angles.yaw = (real)atan2(nearest_direction.j, nearest_direction.i);
+		player_control_get(0)->desired_angles.pitch = (real)asin(PIN(nearest_direction.k, -1.f, 1.f));
+		platform_log("aim test: facing %lx at %.2f", (unsigned long)nearest_index, (double)nearest_distance);
+	}
+#if !defined(HALO_RELEASE) && !defined(HALO_VITA)
+	else if (!strcmp(word, "gyro"))
+	{
+		extern void test_input_gyro_turn(float yaw, float pitch);
+		float yaw = 0.f, pitch = 0.f;
+
+		sscanf(arguments, " %*s %f %f", &yaw, &pitch);
+		test_input_gyro_turn(yaw, pitch);
+	}
+	else if (!strcmp(word, "pad"))
+	{
+		extern void test_input_hold_pad(float lx, float ly, float rx, float ry, int trigger, int reads);
+		float lx = 0.f, ly = 0.f, rx = 0.f, ry = 0.f;
+		int trigger = 0, reads = 1;
+
+		sscanf(arguments, " %*s %f %f %f %f %d %d", &lx, &ly, &rx, &ry, &trigger, &reads);
+		test_input_hold_pad(lx, ly, rx, ry, trigger, reads);
+	}
+#endif
+	else
+	{
+		platform_log("aim test: unknown \"%s\"", arguments);
+	}
+}
+#endif
 
 
 void player_control_initialize(
@@ -1036,6 +1199,10 @@ static void get_local_player_input_blob(
 	long player_index = local_player_get_player_index(local_player_index);
 
 	player_action_clear(input);
+#ifdef HALO_LINUX
+	/* port: (player_control_unassisted) none unless its pad says so */
+	player_control_unassisted[local_player_index] = FALSE;
+#endif
 	if (player_index != NONE)
 	{
 		struct player_control *control = player_control_get(local_player_index);
@@ -1045,6 +1212,11 @@ static void get_local_player_input_blob(
 
 		if (gamepad_index != NONE && input_has_gamepad(gamepad_index))
 		{
+#ifdef HALO_LINUX
+			extern int halo_linux_aim_assist_off(short gamepad_index);
+
+			player_control_unassisted[local_player_index] = halo_linux_aim_assist_off(gamepad_index) != 0;
+#endif
 			struct game_globals_player_control *constants = TAG_BLOCK_GET_ELEMENT(
 				&scenario_get_game_globals()->player_control,
 				0,
@@ -1221,8 +1393,20 @@ static void get_local_player_input_blob(
 							&target_angular_velocity);
 #ifdef HALO_LINUX
 						look_assist_velocity = target_angular_velocity;
+						if (control->magnetism_level > 0.f)
+						{
+							player_control_aim_assist_counts[local_player_index].targeted++;
+						}
 #endif
 						if (player_magnetism_flag && control->magnetism_level > 0.f &&
+#ifdef HALO_LINUX
+							/* port: no friction or adhesion on the stick's look
+							either for a player who asked for no aim assist
+							(player_control_unassisted: the Vita's gyro on, its
+							Gyro aim assist off). The target is still found: the
+							reticle still shows it, as with player_magnetism off */
+							!player_control_unassisted[local_player_index] &&
+#endif
 							(fabs(clamped_yaw) > _real_epsilon ||
 							fabs(clamped_pitch) > _real_epsilon ||
 							fabs(input->throttle.i) > _real_epsilon ||
@@ -1254,6 +1438,7 @@ static void get_local_player_input_blob(
 								look_delta.pitch * input_scale;
 #ifdef HALO_LINUX
 							look_assist_applied = TRUE;
+							player_control_aim_assist_counts[local_player_index].stick++;
 #endif
 						}
 					}
@@ -1289,14 +1474,18 @@ static void get_local_player_input_blob(
 							slows them as it slows the stick, and the adhesion
 							follows the target when the stick's look did not take
 							it this frame, with the stick's game speed and limits */
-							if (halo_linux_look_assist(gamepad_index) && player_magnetism_flag &&
-								control->magnetism_level > 0.f)
+							if (halo_linux_look_assist(gamepad_index) && !player_control_unassisted[local_player_index] &&
+								player_magnetism_flag && control->magnetism_level > 0.f)
 							{
 								real input_scale = 1.f - control->magnetism_level *
 									PIN(constants->magnetism_friction, 0.f, 1.f);
 
 								mouse_yaw *= input_scale;
 								mouse_pitch *= input_scale;
+								if (fabs(mouse_yaw) > _real_epsilon || fabs(mouse_pitch) > _real_epsilon)
+								{
+									player_control_aim_assist_counts[local_player_index].gyro_friction++;
+								}
 								if (!look_assist_applied &&
 									(fabs(mouse_yaw) > _real_epsilon || fabs(mouse_pitch) > _real_epsilon))
 								{
@@ -1317,6 +1506,7 @@ static void get_local_player_input_blob(
 										look_assist_velocity.pitch * game_speed,
 										-DEGREES_TO_RADIANS(3.f),
 										DEGREES_TO_RADIANS(3.f));
+									player_control_aim_assist_counts[local_player_index].gyro_adhesion++;
 								}
 							}
 							input->facing_delta.yaw += mouse_yaw;

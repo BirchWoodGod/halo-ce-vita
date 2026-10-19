@@ -413,6 +413,11 @@ void vita_gyro_config_load(struct vita_gyro_config *config)
 	config->assist = assist ? atoi(assist) != 0 : 1;
 }
 
+int vita_gyro_unassisted(const struct vita_gyro_config *config)
+{
+	return config->mode != VITA_GYRO_OFF && !config->assist;
+}
+
 static float gyro_absolute(float value)
 {
 	return value < 0.0f ? -value : value;
