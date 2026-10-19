@@ -9395,11 +9395,13 @@ static void h3_pregame_update(struct widget_instance *widget)
 	if ((found = named(screen, "l_text")) != NULL)
 		widget_instance_set_visibility_recursive(found, host && online);
 	/* (alone in the host's lobby, Cross starts nothing yet: not shown, as
-	the Xbox's lobby hid it) */
+	the Xbox's lobby hid it; nor a joiner's before the countdown - the host
+	starts the game, and a live lobby's host holds it in the lobby: its
+	Cross only hurries a countdown under way) */
 	if ((found = named(screen, "a_butn")) != NULL)
-		widget_instance_set_visibility_recursive(found, !waiting);
+		widget_instance_set_visibility_recursive(found, !waiting && (host || seconds >= 0));
 	if ((found = named(screen, "a_text")) != NULL)
-		widget_instance_set_visibility_recursive(found, !waiting);
+		widget_instance_set_visibility_recursive(found, !waiting && (host || seconds >= 0));
 	/* (the players: each machine's, this one's first) */
 	row = h3_roster_show(screen, game, host, local_machine, H3_PREGAME_ROWS, line, (int)sizeof(line));
 	/* (the most the game takes: the host's settings' - network.max_players,
