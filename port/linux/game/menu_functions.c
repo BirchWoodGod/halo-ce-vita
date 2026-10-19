@@ -289,6 +289,7 @@ enum
 	_function_h3_friends_option,
 	_function_h3_friends_page_up,
 	_function_h3_friends_page_down,
+	_function_browser_profile_first,
 };
 
 /* in port_game_data_input_names' order */
@@ -483,6 +484,14 @@ static struct
 	browser; lan: the browser's rows are the System Link list's games (the
 	LAN browser), since when it looks (lan_since), its list as last logged */
 	boolean browse_lan_pending;
+	/* (Menu style Halo CE) SERVER BROWSER: the profile screen first, then
+	the server browser in place of the System Link list it leads to
+	(browser_profile_pending); a game joined from it, the profile chosen,
+	goes on to the System Link list at once (browser_profile_chosen,
+	open_system_link_list), not to the profile again */
+	boolean browser_profile_pending;
+	boolean browser_profile_chosen;
+	boolean open_system_link_list;
 	boolean lan;
 	/* (Online: the public games listed after the System Link list's) */
 	long lan_online_count;
@@ -3655,6 +3664,14 @@ static void join_watch(void)
 			platform_log("menus: the public game's invite handed on; joined from the games browser once listed");
 			return;
 		}
+		/* (the profile chosen before the browser: the System Link list at
+		once, where the host's game is joined once listed) */
+		if (menu_functions.browser_profile_chosen)
+		{
+			menu_functions.open_system_link_list = TRUE;
+			platform_log("menus: the public game's invite handed on; the System Link list next (the profile chosen)");
+			return;
+		}
 		menu_functions.open_system_link = TRUE;
 		platform_log("menus: the public game's invite handed on; the System Link screen next");
 	}
@@ -6249,7 +6266,17 @@ boolean pc_menu_event_function_invoke(
 	{
 	case _function_mp_screen_init:
 		menu_functions.create_pending = FALSE;
+		menu_functions.browser_profile_pending = FALSE;
+		menu_functions.browser_profile_chosen = FALSE;
 		menu_functions.status[0] = 0;
+		return TRUE;
+	case _function_browser_profile_first:
+		/* (SERVER BROWSER: as SYSTEM LINK and CREATE GAME, the profile first;
+		internet play off: "port mp require online" opens why instead) */
+		menu_functions.browser_profile_pending = internet_play() ||
+			network_connection_wanted() == NETWORK_CONNECTION_ONLINE;
+		if (menu_functions.browser_profile_pending)
+			platform_log("menus: Server Browser: the profile, then the server browser");
 		return TRUE;
 	case _function_mp_require_online:
 		/* (ONLINE chosen: internet play starts at the next frame, before
@@ -6917,6 +6944,22 @@ long pc_menu_functions_screen(
 		}
 		platform_log("menus: %s: the server did not start; the System Link list", asked);
 	}
+	/* (Menu style Halo CE's SERVER BROWSER: the profile chosen, OpenCE's
+	server browser in the System Link list's place, the profile screen
+	behind it) */
+	if (menu_functions.browser_profile_pending && tag_index == tag_loaded(UI_WIDGET_DEFINITION_TAG, server_list_screen))
+	{
+		long browser = tag_loaded(UI_WIDGET_DEFINITION_TAG, "pc\\browser\\screen");
+
+		menu_functions.browser_profile_pending = FALSE;
+		if (browser != NONE)
+		{
+			menu_functions.browser_profile_chosen = TRUE;
+			platform_log("menus: Server Browser: the profile chosen; the server browser");
+			return browser;
+		}
+		platform_log("menus: no server browser: the System Link list");
+	}
 	/* (the Halo 3 lobby's BROWSE GAMES on SYSTEM LINK or AD HOC: the Halo 3
 	LAN browser, which starts the same search, with the profile screen
 	behind it as the System Link list has) */
@@ -6987,6 +7030,9 @@ void pc_menu_functions_update(
 	if (!main_menu_loaded)
 	{
 		menu_functions.open_system_link = FALSE;
+		menu_functions.open_system_link_list = FALSE;
+		menu_functions.browser_profile_pending = FALSE;
+		menu_functions.browser_profile_chosen = FALSE;
 		menu_functions.open_password = FALSE;
 		menu_functions.create_pending = FALSE;
 		h3_profiles.open_pending = FALSE;
@@ -7042,5 +7088,24 @@ while it closes: browser dispose) */
 		menu_functions.open_system_link = FALSE;
 		if (!system_link_shortcut_open())
 			platform_log("menus: the System Link screen did not open");
+	}
+	if (menu_functions.open_system_link_list)
+	{
+		long list = tag_loaded(UI_WIDGET_DEFINITION_TAG, server_list_screen);
+		struct widget_instance *active = NULL;
+		long index;
+
+		menu_functions.open_system_link_list = FALSE;
+		menu_functions.browser_profile_chosen = FALSE;
+		for (index = 0; index < 4 && !active; index++)
+			active = ui_widget_port_active_screen((short)index);
+		/* (over the server browser, which B goes back to) */
+		if (list == NONE || !active || !ui_widget_load_by_name_or_tag(NULL, list, NULL, active->local_player_index,
+			active->definition_tag_index, NONE, NONE))
+		{
+			platform_log("menus: the System Link list did not open; the System Link screen");
+			if (!system_link_shortcut_open())
+				platform_log("menus: the System Link screen did not open");
+		}
 	}
 }

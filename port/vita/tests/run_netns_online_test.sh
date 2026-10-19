@@ -119,9 +119,10 @@
 #            chosen); the joiner finds it in the server browser
 #   menus    lobby, joined from OpenCE's multiplayer screens (menu_tags.c):
 #            the joiner (its maps folder HALO_TEST_DATA_MENUS, with the Halo
-#            PC bitmaps.map and loc.map) presses Multiplayer, INTERNET (the
-#            server browser), A on the host's row, then on the System Link
-#            screen the profile and the game (HALO_TEST_PAD)
+#            PC bitmaps.map and loc.map) presses Multiplayer, INTERNET: the
+#            profile first (as SYSTEM LINK and CREATE GAME), then the server
+#            browser, A on the host's row; then the System Link list at once,
+#            the host's game joined by itself (HALO_TEST_PAD)
 #   menuspw  the same with a password (HALO_TEST_LOBBY_PASSWORD), typed on
 #            the password screen (HALO_TEST_TEXT_INPUT)
 #   browserscroll  the server browser's scrolling and sorts, its game joined by itself
@@ -931,13 +932,14 @@ menus|menuspw)
 	code=$(wait_code)
 	[ -n "$code" ] || { fail "the host never showed a code"; tail -20 "$out/host/run.log"; exit 1; }
 	echo "host's code: $code"
-	# (Multiplayer, INTERNET: the server browser; a while for the listing, A on
-	# its row; menuspw: the password screen, A types it, down, JOIN GAME; then
-	# the System Link screen: A joins, A picks the profile, A, a while for the
-	# host's game to be reached, A joins it)
-	pad="wait:150:3000 down a wait:150:2000 a wait:150:${HALO_TEST_MENUS_LIST_WAIT:-12000} a"
+	# (Multiplayer, INTERNET: the profile first (A joins, A picks the profile,
+	# A), then the server browser; a while for the listing, A on its row;
+	# menuspw: the password screen, A types it, down, JOIN GAME; then the
+	# System Link list at once, the profile chosen, where the host's game is
+	# joined by itself once reached)
+	pad="wait:150:3000 down a wait:150:2000 a wait:150:2000 a wait:150:2000 a wait:150:2000 a"
+	pad="$pad wait:150:${HALO_TEST_MENUS_LIST_WAIT:-12000} a"
 	[ "$mode" = menuspw ] && pad="$pad wait:150:3000 a wait:150:1500 down a"
-	pad="$pad wait:150:6000 a a a wait:150:${HALO_TEST_COOP_LIST_WAIT:-15000} a"
 	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" \
 		HALO_NET_ONLINE=true HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_TEST_INPUT=bot:2 "HALO_TEST_PAD=$pad" \
 		"HALO_TEST_TEXT_INPUT=$password"; join_pid=$last_pid
@@ -946,7 +948,12 @@ menus|menuspw)
 	echo "--- joiner"; grep -aE "menus:|ui: screen|system link: (joining|in another)" "$jl" | head -20
 	grep -aq "menus: OpenCE's multiplayer screens: .* added" "$jl" || fail "the joiner did not add OpenCE's screens"
 	grep -aq "ui: screen pc.browser.screen" "$jl" || fail "the server browser did not open"
+	grep -aq "menus: Server Browser: the profile, then the server browser" "$jl" &&
+		grep -aq "menus: Server Browser: the profile chosen; the server browser" "$jl" ||
+		fail "INTERNET did not choose the profile before the server browser"
 	grep -aq "menus: joining the public game VitaHost" "$jl" || fail "the joiner did not join the host's game from the browser"
+	grep -aq "menus: the public game's invite handed on; the System Link list next (the profile chosen)" "$jl" ||
+		fail "the profile was asked again after the browser"
 	if [ "$mode" = menuspw ]; then
 		grep -aq "ui: screen pc.join.password.screen" "$jl" || fail "the password screen did not open"
 		grep -aq "menus: joining the public game VitaHost with its password" "$jl" || fail "the password was not given"
@@ -967,13 +974,13 @@ browserscroll)
 	# down 14 times (the 15th game, the rows from the 4th), a page down (the
 	# last), Y (by name: Test game 00 first), up (wrapped: VitaHost, the last),
 	# A joins it; then the System Link screen as in menus)
-	pad="wait:150:3000 down a wait:150:2000 a wait:150:${HALO_TEST_MENUS_LIST_WAIT:-12000}"
+	pad="wait:150:3000 down a wait:150:2000 a wait:150:2000 a wait:150:2000 a wait:150:2000 a"
+	pad="$pad wait:150:${HALO_TEST_MENUS_LIST_WAIT:-12000}"
 	for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14; do pad="$pad down:150:400"; done
-	pad="$pad rt:150:800 y:150:800 up:150:800 a"
-	# (then the System Link screen's start and profile (A A A), and no pick
-	# in its list: the browser's game is joined by itself once the host is
+	# (the profile chosen before the browser: then the System Link list, and no
+	# pick in it: the browser's game is joined by itself once the host is
 	# reached, network_game_client_listed_game_of / ui_widget_port_join_listed_game)
-	pad="$pad wait:150:6000 a a a"
+	pad="$pad rt:150:800 y:150:800 up:150:800 a"
 	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" \
 		HALO_NET_ONLINE=true HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_TEST_INPUT=bot:2 "HALO_TEST_PAD=$pad" \
 		HALO_TEST_BROWSER_GAMES=20; join_pid=$last_pid

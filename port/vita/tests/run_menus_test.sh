@@ -125,6 +125,12 @@
 #            edits neither, CREATE NEW PROFILE still makes one; with
 #            HALO_TEST_PROFILE's profile and a damaged savegame.bin, the lobby
 #            says the saved game is damaged and starts at Mission Start
+#   browserprofile  the online browsers ask for the profile first, as SYSTEM LINK and CREATE
+#            GAME do (the owner, insider.10: "the profile switch picker didn't show up when
+#            I click server browser"): Menu style Halo CE's Multiplayer, SERVER BROWSER: the
+#            profile screen, then OpenCE's server browser (B: the profile again, B: Multiplayer);
+#            the Halo 3 lobby's BROWSE GAMES on ONLINE: the profile, then the games browser;
+#            internet play off: SERVER BROWSER says how to turn it on, no profile
 #   h3friends the Halo 3 FRIENDS screen (menus/halo3/friends.xml; port/linux/src/p2p_friends.c)
 #            over a save's friends made at test time (run_p2p_friends_test.sh seed: two
 #            friends, a request, a request sent, a blocked player; shown online,
@@ -216,7 +222,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3friends h3friendspanel}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3friends h3friendspanel browserprofile}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
@@ -914,10 +920,10 @@ for case in $cases; do
 			fail h3damaged "the test profile's blam.sav changed" ;;
 	h3oddrows)
 		# (the Halo 3 lobby: down five to BROWSE GAMES, A: the profile (A joins, A the profile, A):
-		# the games browser; OpenCE's: Multiplayer, SERVER BROWSER)
+		# the games browser; OpenCE's: Multiplayer, SERVER BROWSER, the profile first (A A A))
 		run h3oddrows "$menus_data" 40 "$h3mppad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:8000" \
 			HALO_MENU_STYLE=halo3 $h3net HALO_TEST_BROWSER_ODD=1
-		run h3oddrows_classic "$menus_data" 35 "wait:150:2000 down:150:800 a wait:150:4000 a wait:150:8000" \
+		run h3oddrows_classic "$menus_data" 45 "wait:150:2000 down:150:800 a wait:150:4000 a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:8000" \
 			HALO_MENU_STYLE=classic $h3net HALO_TEST_BROWSER_ODD=1
 		check_h3 h3oddrows halo3
 		for name in h3oddrows h3oddrows_classic; do
@@ -1195,8 +1201,38 @@ for case in $cases; do
 		[ "$(grep -ac "ui: screen pc.h3.friends.screen" "$log")" -ge 2 ] ||
 			fail h3friendspanel "Triangle did not open FRIENDS from both lobbies"
 		grep -aq "ui: screen pc.h3.forge.lobby" "$log" || fail h3friendspanel "the Forge lobby did not open" ;;
+	browserprofile)
+		# (Halo CE: Multiplayer, SERVER BROWSER (its first item): the profile (A joins, A the profile,
+		# A), the server browser; B, B)
+		run browserprofile "$menus_data" 40 "wait:150:3000 down:150:800 a wait:150:3000 a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:4000 b wait:150:2500 b wait:150:2500" \
+			HALO_MENU_STYLE=classic $h3net
+		# (Halo 3: MULTIPLAYER, down five to BROWSE GAMES on ONLINE: the profile, then the games browser)
+		run browserprofile_h3 "$menus_data" 40 "$h3mppad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:5000" \
+			HALO_MENU_STYLE=halo3 $h3net
+		# (internet play off: SERVER BROWSER says so; no profile screen)
+		run browserprofile_off "$menus_data" 25 "wait:150:3000 down:150:800 a wait:150:3000 a wait:150:4000" HALO_MENU_STYLE=classic
+		check_h3 browserprofile classic
+		check_h3 browserprofile_h3 halo3
+		log=$out/browserprofile/run.log
+		screens=$(grep -a "ui: screen" "$log" | sed 's/.*ui: screen //' | tr '\n' '|')
+		echo "$screens"
+		case $screens in
+		*'pc\mp\screen|ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen|pc\browser\screen|ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen|pc\mp\screen'*) ;;
+		*) fail browserprofile "SERVER BROWSER did not open the profile screen, then the server browser, B going back through both" ;;
+		esac
+		grep -aq "menus: Server Browser: the profile chosen; the server browser" "$log" ||
+			fail browserprofile "the server browser did not stand for the System Link list after the profile"
+		log=$out/browserprofile_h3/run.log
+		grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected.4way_profile_select.4way_start2join_screen" "$log" &&
+			grep -aq "ui: screen pc.h3.lan.screen" "$log" || fail browserprofile "BROWSE GAMES on ONLINE did not ask for the profile first"
+		awk '/4way_start2join_screen/ { profile = 1 } /ui: screen pc.h3.lan.screen/ { if (!profile) exit 1; found = 1 }
+			END { exit !found }' "$log" || fail browserprofile "the games browser opened before the profile"
+		log=$out/browserprofile_off/run.log
+		grep -aq "ui: screen pc.mp.offline" "$log" || fail browserprofile "internet play off: SERVER BROWSER did not say how to turn it on"
+		grep -aq "4way_start2join_screen\|menus: Server Browser: the profile" "$log" &&
+			fail browserprofile "internet play off: the profile screen opened anyway" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3friends|h3friendspanel]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3friends|h3friendspanel|browserprofile]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"

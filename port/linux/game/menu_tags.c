@@ -378,6 +378,7 @@ static char const *const port_function_names[] =
 	"port forge new round", "port forge all ai", "port h3 map page up", "port h3 map page down",
 	"port h3 friends init", "port h3 friends act", "port h3 friends second", "port h3 friends options ask",
 	"port h3 friends option", "port h3 friends page up", "port h3 friends page down",
+	"port browser profile first",
 };
 
 /* the port's game data functions (menu_functions.c), from
