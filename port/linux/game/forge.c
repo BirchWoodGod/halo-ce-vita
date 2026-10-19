@@ -2188,6 +2188,8 @@ static void forge_duplicate(
 	real_vector3d forward, up;
 	real distance = forge_globals.held_distance;
 	boolean held = object_index == forge_globals.held_object_index;
+	struct forge_placed original;
+	boolean has_original = FALSE;
 	short index;
 
 	if (!object)
@@ -2195,7 +2197,11 @@ static void forge_duplicate(
 	for (index = 0; index < forge_globals.placed_count; index++)
 	{
 		if (forge_globals.placed[index].object_index == object_index)
+		{
 			tag_index = forge_globals.placed[index].tag_index;
+			original = forge_globals.placed[index];
+			has_original = TRUE;
+		}
 	}
 	if (tag_index == NONE && forge_palette_of_tag(object->definition_index) != NONE)
 		tag_index = object->definition_index;
@@ -2213,10 +2219,23 @@ static void forge_duplicate(
 		forge_drop();
 	if (forge_spawn(tag_index) != NONE)
 	{
+		struct forge_placed *copy = forge_placed_of_object(forge_globals.held_object_index);
+
 		forge_globals.held_forward = forward;
 		forge_globals.held_up = up;
 		if (held)
 			forge_globals.held_distance = distance;
+		/* (the copy keeps the original's properties - team, respawn, place at
+		start, a character's AI team and AI on or off - not the defaults: the
+		owner's AI teams were reset by every copy) */
+		if (copy && has_original)
+		{
+			copy->team = original.team;
+			copy->flags = original.flags;
+			copy->respawn_seconds = original.respawn_seconds;
+			copy->ai_team = original.ai_team;
+			forge_ai_apply(copy);
+		}
 	}
 }
 

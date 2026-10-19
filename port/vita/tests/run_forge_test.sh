@@ -157,7 +157,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_forge_test.$$}
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs smallmap aiteam aioff round aisave allai allaimenu flood floodcov sentinels marines aivariant cepelican cepelicanoff}
+cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs smallmap aiteam aioff round aisave allai allaimenu aicopy flood floodcov sentinels marines aivariant cepelican cepelicanoff}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
@@ -482,6 +482,12 @@ aioff_runs() {
 	ai_run aioff 55 "$ai_setup;L307:forge aiteam covenant;L308:forge brain off;L309:forge drop;$ai_spartan$(ai_watch 360 600 30);L604:@shot 00-ai-off;L605:forge ai;L620:forge on;L622:forge allai;L624:forge ai;L626:forge off$(ai_watch 700 1000 30);L1005:forge ai"
 }
 
+aicopy_runs() {
+	# (the Elite set to the player's team with its AI off, then copied with
+	# B (Circle) while held: the copy keeps both, not the defaults)
+	ai_run aicopy 30 "$ai_setup;L307:forge aiteam player;L308:forge brain off;L310:forge press b;L314:forge distance 5;L316:forge drop;L330:forge ai"
+}
+
 round_runs() {
 	# (a Warthog 8 ahead, the Elite 5, an overshield 3; their placed spots
 	# listed; the Warthog shoved, then wrecked, the Elite killed, the
@@ -714,6 +720,8 @@ for c in $cases; do
 		aiteam_runs & ;;
 	aioff)
 		aioff_runs & ;;
+	aicopy)
+		aicopy_runs & ;;
 	round)
 		round_runs & ;;
 	aisave)
@@ -1229,6 +1237,9 @@ for c in $cases; do
 			echo "  ok: $c: the lobby's Leave went back to File Share" || fail "$c: not back at File Share"
 		grep -a "ui: screen" "$log" | tail -1 | grep -q 'pc.h3.main.screen' &&
 			echo "  ok: $c: Back went to the main menu" || fail "$c: not back at the main menu" ;;
+	aicopy)
+		count "$c" "the original and its copy both on the player's team with their AI off" \
+			"forge: ai [0-9]+: Elite Major Plasma Rifle .*AI team player, engine team 0, AI off" 2 ;;
 	aioff)
 		expect "$c" "an Elite of the Covenant's with its AI off" "forge: elite major plasma rifle: AI team covenant \(engine team 3\), AI off"
 		# (not hurt while its AI is off: the looks before ALL AI)
