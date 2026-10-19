@@ -1757,10 +1757,18 @@ boolean menu_scene_objects_flag_wind(
 	{
 		struct menu_scene_frame frame;
 
+		static unsigned long long said_at;
+
 		camera_frame(&menu_scene_objects.slots[slot].camera, &frame);
 		wind->i = frame.right.i * speed;
 		wind->j = frame.right.j * speed;
 		wind->k = speed * 0.1f;
+		/* (said once a scene) */
+		if (said_at != menu_scene_objects.made_at)
+		{
+			said_at = menu_scene_objects.made_at;
+			platform_log("menus: h3 scene object %d: its flag flies in a breeze of %.1f", slot, (double)speed);
+		}
 	}
 	return TRUE;
 }
