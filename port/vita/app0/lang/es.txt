@@ -1790,7 +1790,6 @@
 "In a party (%d of %d)" = "En un grupo (%d de %d)"
 "Blocked player" = "Jugador bloqueado"
 "went offline" = "se desconectó"
-"left" = "saliste"
 "Following the leader when back at the menus" = "Seguirá al líder al volver a los menús"
 "Couldn't follow: %s" = "No pudo seguir: %s"
 "In another game" = "En otra partida"

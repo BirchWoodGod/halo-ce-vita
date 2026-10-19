@@ -683,8 +683,10 @@ static void party_leave_now(int tell, const char *why)
 		memcpy(message.party_keys[0], friends->key, P2P_KEY_SIZE);
 		party_broadcast(&message);
 	}
-	if (friends->party.count > 1)
+	if (friends->party.count > 1 && why && why[0])
 		party_notice(T("You left the party (%s)"), why);
+	else if (friends->party.count > 1)
+		party_notice("%s", T("You left the party"));
 	party_clear();
 	/* (appearing offline or stopping: no presence after, the friends'
 	offline presence says enough) */
@@ -1701,7 +1703,7 @@ int p2p_party_leave(void)
 	if (!friends->party.active)
 		result = P2P_PARTY_NOT_IN_PARTY;
 	else
-		party_leave_now(friends_on() && !friends->appear_offline, T("left"));
+		party_leave_now(friends_on() && !friends->appear_offline, "");
 	pthread_mutex_unlock(&friends_lock);
 	return result;
 }

@@ -579,6 +579,9 @@ seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = swatmixed ] && seconds=${HALO_TEST_SECONDS:-500}
 [ "$mode" = coopstarts ] && seconds=${HALO_TEST_SECONDS:-75}
 [ "$mode" = party ] && seconds=${HALO_TEST_SECONDS:-210}
+# (pickjoin, h3pickjoin: a minute more on the map list than their modes' own)
+[ "$mode" = pickjoin ] && seconds=${HALO_TEST_SECONDS:-230}
+[ "$mode" = h3pickjoin ] && seconds=${HALO_TEST_SECONDS:-240}
 rejoin=${HALO_TEST_REJOIN:-0}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_netns_test.$$}
 . "$here/test_out.sh"
