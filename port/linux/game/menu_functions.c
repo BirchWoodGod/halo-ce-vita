@@ -591,6 +591,7 @@ static boolean h3_live_follow(void);
 static void h3_live_close(char const *why);
 static boolean h3_live_start(void);
 static boolean h3_live_follow_wire(boolean reopen);
+static boolean h3_live_keep(void);
 static void h3_live_retry(void);
 static void h3_live_public_chosen(void);
 
@@ -9070,7 +9071,11 @@ static struct
 	the lobby opened or was last looked at: a change while live is the
 	host's choice for this lobby */
 	char public_setting[8];
-} h3_live = { FALSE, NONE, FALSE, FALSE, FALSE, 0, 0, "", FALSE, "" };
+	/* the lobby's game went on to be played (START GAME): after it the
+	host comes back to the lobby, the game kept (pc_menu_functions_live
+	_lobby_after_game) */
+	boolean game_of_lobby;
+} h3_live = { FALSE, NONE, FALSE, FALSE, FALSE, 0, 0, "", FALSE, "", FALSE };
 
 /* the setting's value now ("true", "false") */
 static void h3_live_public_setting(char *value, int size)
@@ -9392,12 +9397,18 @@ static void h3_live_update(boolean main_menu_loaded)
 	{
 		/* (its game started: the game's now) */
 		if (h3_live.live)
+		{
+			h3_live.game_of_lobby = server != NULL;
 			platform_log("menus: h3 live lobby: its game started");
+		}
 		h3_live.live = FALSE;
 		h3_live.start_pending = FALSE;
 		h3_live.in_pregame = FALSE;
 		return;
 	}
+	/* (the lobby's game gone - quit, closed, lost -: nothing to come back to) */
+	if (!server)
+		h3_live.game_of_lobby = FALSE;
 	if (h3_live.live)
 	{
 		short state = NONE;
@@ -9408,7 +9419,9 @@ static void h3_live_update(boolean main_menu_loaded)
 			h3_live.live = FALSE;
 			h3_live.start_pending = FALSE;
 			h3_live.in_pregame = FALSE;
-			/* (its game under way keeps its listing as the lobby left it) */
+			/* (its game under way keeps its listing as the lobby left it,
+			and the host comes back to the lobby after it) */
+			h3_live.game_of_lobby = server != NULL && !network_game_server_port_in_lobby(server);
 			if (!server)
 				h3_live_forget_public();
 			platform_log("menus: h3 live lobby: its game is no longer this lobby's");
@@ -9492,19 +9505,7 @@ static void h3_live_update(boolean main_menu_loaded)
 	if (server && client && !h3_live.refused && h3_mp.network != _h3_network_offline && halo_menu_style_halo3() &&
 		network_game_server_port_in_lobby(server) && system_milliseconds() - h3_live.lobby_up_since >= H3_LIVE_SETTLE_MILLISECONDS)
 	{
-		if (h3_live_network_ready() && h3_mp_host_choices())
-		{
-			h3_live_private_by_default();
-			h3_live.live = TRUE;
-			h3_live.network = h3_mp.network;
-			h3_live.start_pending = FALSE;
-			h3_live.in_pregame = FALSE;
-			h3_live.opened_time = system_milliseconds();
-			h3_live.said[0] = 0;
-			platform_log("menus: h3 live lobby: its game kept, live on %s (%s on %s)", h3_network_name(h3_mp.network),
-				h3_mp_gametype_name(), h3_mp_map_name());
-		}
-		else
+		if (!h3_live_keep())
 		{
 			h3_live.live = TRUE;
 			h3_live_close("the game it hosted before cannot go on from it");
@@ -9555,6 +9556,68 @@ static void h3_live_pregame(void)
 		platform_log("menus: h3 live lobby: the game's lobby: the countdown begun");
 	else
 		platform_log("menus: h3 live lobby: the game's lobby: waiting for players before the countdown");
+}
+
+/* a game in its lobby behind the lobby (kept by B on the game's lobby, or
+played and over) the lobby's live game, when the network carries it and
+the lobby's GAME and MAP can be played: TRUE */
+static boolean h3_live_keep(void)
+{
+	if (!h3_live_network_ready() || !h3_mp_host_choices())
+		return FALSE;
+	h3_live_private_by_default();
+	h3_live.live = TRUE;
+	h3_live.network = h3_mp.network;
+	h3_live.start_pending = FALSE;
+	h3_live.in_pregame = FALSE;
+	h3_live.opened_time = system_milliseconds();
+	h3_live.said[0] = 0;
+	platform_log("menus: h3 live lobby: its game kept, live on %s (%s on %s)", h3_network_name(h3_mp.network),
+		h3_mp_gametype_name(), h3_mp_map_name());
+	return TRUE;
+}
+
+/* (network_game_reset_to_pregame_ui, the host's: a game over, the main
+menu loaded again) a game the live lobby started comes back to the lobby,
+not to the Xbox's map choice: the Halo 3 multiplayer lobby opened (B on it
+goes to the main menu, closing the game as ever), where its game is the
+lobby's live game again, kept with its joiners - who wait in the game's
+lobby as between any two games - its GAME and MAP the lobby's
+(h3_live_update's kept game). TRUE if the lobby opened */
+boolean pc_menu_functions_live_lobby_after_game(void)
+{
+	long lobby_tag = menu_tags_ingame_screen("h3/mp/screen");
+	long main_tag = menu_tags_ingame_screen("h3/main/screen");
+	struct network_game_server *server = global_network_game_server_get();
+	struct widget_instance *screen;
+
+	if (!h3_live.game_of_lobby)
+		return FALSE;
+	h3_live.game_of_lobby = FALSE;
+	if (!server || !halo_menu_style_halo3() || lobby_tag == NONE || main_tag == NONE)
+		return FALSE;
+	network_game_server_pause_countdown(server, TRUE);
+	h3_live.refused = FALSE;
+	h3_live.lobby_up_since = 0;
+	if ((screen = ui_widget_load_by_name_or_tag(NULL, lobby_tag, NULL, 0, main_tag, NONE, NONE)) == NULL)
+		return FALSE;
+	/* (START GAME focused: the next game is the host's to start) */
+	{
+		static char const *const start_rows[NUMBER_OF_H3_NETWORKS] = { "start_online", "start_link", "start_adhoc",
+			"start_offline" };
+		struct widget_instance *list = named(screen, "list");
+		struct widget_instance *start = h3_mp.network >= 0 && h3_mp.network < NUMBER_OF_H3_NETWORKS ?
+			named(screen, start_rows[h3_mp.network]) : NULL;
+
+		if (list && start)
+			ui_widget_port_give_focus(list, start);
+	}
+	platform_log("menus: h3 live lobby: the game over, back to the lobby with its game and players");
+	/* (live at once: START GAME pressed straight away starts this game
+	again, never a server of its own; else the lobby's update closes it,
+	its joiners told, as any game it cannot go on with) */
+	h3_live_keep();
+	return TRUE;
 }
 
 /* (netgame_unjoin_player: B on the game's lobby) the host of a live lobby

@@ -144,6 +144,8 @@
 #            follow and play the same
 #   h3liveleave  the same, the host leaving its lobby (B) once the joiner is in: the joiner told
 #            the host left, back at the menus
+#   h3liveagain  h3live's game short (5 kills): the host back in its live lobby after it, not the
+#            Xbox's map choice, the joiner still in its game; START GAME again: a second game
 #   h3liveinvite  the host's live lobby on ONLINE, private: L (INVITE FRIENDS) invites its friend
 #            (the codes through files), who accepts at the menus and lands in the lobby; START
 #            GAME: the two play; the lobby and its game never listed
@@ -2163,8 +2165,15 @@ h3liveprivate)
 	echo "joiner's seconds with two players playing: $two"
 	[ "$two" -ge 15 ] || fail "the friend played the host's game for $two s with two players (15 wanted)"
 	;;
-h3live|h3liveleave)
+h3live|h3liveleave|h3liveagain)
 	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	# (h3liveagain: a short game - 5 kills, the host's kills every 2 s -, then the lobby again and
+	# a second game: a longer run)
+	again_env=
+	if [ $mode = h3liveagain ]; then
+		seconds=${HALO_TEST_SECONDS:-280}
+		again_env="HALO_NETWORK_TEST_SCORE=5 HALO_NETWORK_TEST_KILL=2"
+	fi
 	if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
 		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS) or no HALO_TEST_PROFILE"; exit 0
 	fi
@@ -2195,16 +2204,18 @@ h3live|h3liveleave)
 	# nine, A); GAME (up, A), the next game type (down, A); START GAME (down two, A): the game's
 	# lobby, its countdown at once; h3liveleave: B, the lobby left)
 	live_pad="wait:150:3000 down:150:700 a wait:150:${HALO_TEST_LIVE_WAIT:-45000} @live-01-lobby-joined:0:300"
-	if [ $mode = h3live ]; then
+	if [ $mode = h3live ] || [ $mode = h3liveagain ]; then
 		live_pad="$live_pad down:150:500 down:150:500 a wait:150:2500"
 		for row in $(seq 1 9); do live_pad="$live_pad down:150:300"; done
 		live_pad="$live_pad a wait:150:8000 @live-02-map-changed:0:300 up:150:500 a wait:150:2500 down:150:500 a wait:150:8000"
 		live_pad="$live_pad @live-03-game-changed:0:300 down:150:500 down:150:500 a wait:150:3000 @live-04-countdown:0:300"
+		# (h3liveagain: the game over, the host back in the lobby, START GAME focused: A again)
+		[ $mode = h3liveagain ] && live_pad="$live_pad wait:150:${HALO_TEST_AGAIN_WAIT:-110000} @live-05-lobby-again:0:300 a wait:150:4000 @live-06-second-countdown:0:300"
 	else
 		live_pad="$live_pad b wait:150:15000 @live-02-host-left:0:300"
 	fi
 	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
-		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:1 $(shots host) \
+		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:1 $(shots host) $again_env \
 		"HALO_TEST_PAD=$live_pad" ; host_pid=$last_pid
 	sleep 5
 	if [ -n "$old_joiner" ]; then
@@ -2243,7 +2254,7 @@ h3live|h3liveleave)
 		grep -aqE "menus: h3 pregame: Waiting for the host to start; Slayer on Battle Creek" "$jl" ||
 			fail "the joiner's lobby did not show the host's Slayer on Battle Creek, waiting for the host"
 	fi
-	if [ $mode = h3live ]; then
+	if [ $mode = h3live ] || [ $mode = h3liveagain ]; then
 		gametype=$(sed -n 's/.*menus: h3 mp: game type \(.*\)$/\1/p' "$hl" | tail -1)
 		echo "the host's lobby: Blood Gulch, then the game type ${gametype:-none}"
 		grep -aq "menus: h3 live lobby: now Slayer on Blood Gulch, sent to its joiners" "$hl" ||
@@ -2267,6 +2278,23 @@ h3live|h3liveleave)
 		echo "joiner's seconds with two players playing: $two"
 		[ "$two" -ge 15 ] || fail "the joiner played the host's game for $two s with two players (15 wanted)"
 		grep -aq "the game host is shutting down" "$out/joiner/data/debug.txt" && fail "the joiner was told the host left"
+		if [ $mode = h3liveagain ]; then
+			echo "--- after the game"; sed -n '/the game over, back to the lobby/,$p' "$hl" | grep -aE "ui: screen|menus: h3 (live lobby|mp:)" | head -12
+			grep -aq "network test: the menus' game played to 5" "$hl" || fail "the game was not made short"
+			grep -aq "menus: h3 live lobby: the game over, back to the lobby with its game and players" "$hl" ||
+				fail "the host did not come back to the live lobby after the game"
+			sed -n '/the game over, back to the lobby/,$p' "$hl" | grep -aq "menus: h3 live lobby: its game kept, live on SYSTEM LINK" ||
+				fail "the lobby did not take its game back, live"
+			grep -aq "ui: screen .*connected_map_select" "$hl" && fail "the host was shown the Xbox's map choice"
+			sed -n '/the game over, back to the lobby/,$p' "$hl" | grep -aqE "menus: h3 live lobby: [^;]+; players: [^;]+, [^;]+; 2/" ||
+				fail "the joiner was not in the lobby after the game"
+			[ "$(grep -ac "menus: h3 live lobby: the game's lobby: the countdown begun" "$hl")" -ge 2 ] ||
+				fail "the second START GAME did not begin a countdown with the joiner"
+			games=$(awk '/network test: tick / { split($0, a, "network test: tick "); split(a[2], b, " "); t = b[1] + 0;
+				if (last == "" || t < last) g++; last = t } END { print g + 0 }' "$jl")
+			echo "the joiner's games: $games"
+			[ "$games" -ge 2 ] || fail "the joiner did not play a second game with the host ($games)"
+		fi
 	else
 		grep -aq "menus: h3 live lobby: closed (the host left the lobby): its joiners are told the host left" "$hl" ||
 			fail "B did not close the host's live lobby"
@@ -4230,7 +4258,7 @@ friendsplayers|friendsplayersoff|friendsplayersnone)
 	[ "$two" -ge 20 ] || fail "the joiner played the host's game for $two s with two players (20 wanted)"
 	;;
 *)
-	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|h3live|h3liveleave|h3liveinvite|h3liveprivate|h3online|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|party|friendsprivate|friendsprivatepw" >&2
+	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|h3live|h3liveleave|h3liveagain|h3liveinvite|h3liveprivate|h3online|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|party|friendsprivate|friendsprivatepw" >&2
 	exit 2
 	;;
 esac

@@ -4742,6 +4742,10 @@ void display_error_damaged_media(
 	return;
 }
 
+#ifdef HALO_LINUX
+boolean pc_menu_functions_live_lobby_after_game(void);
+#endif
+
 void network_game_reset_to_pregame_ui(
 	void)
 {
@@ -4788,6 +4792,13 @@ void network_game_reset_to_pregame_ui(
 				error(_error_silent, "failed to load networked pregame status screen");
 			}
 		}
+#ifdef HALO_LINUX
+		/* port: a game the Halo 3 live lobby started: the host back in that
+		lobby, its game kept, not the map choice (menu_functions.c) */
+		else if (global_network_game_server_get() && pc_menu_functions_live_lobby_after_game())
+		{
+		}
+#endif
 		else if (global_network_game_server_get())
 		{
 			network_game_server_pause_countdown(global_network_game_server_get(), TRUE);

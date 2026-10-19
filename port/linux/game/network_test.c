@@ -1311,6 +1311,16 @@ static void network_test_use_profile(
 		platform_log("network test: no profile to play");
 }
 
+/* "watch" with debug.network_test_score, this machine hosting the game its
+menus made (the Halo 3 live lobby's tests): a short game as a host's own -
+its kills (debug.network_test_kill), that score winning, and after the
+scores a while the game back in its lobby */
+static boolean network_test_watch_short_game(void)
+{
+	return network_test.mode == _network_test_watch && network_test.score_to_win > 0 &&
+		global_network_game_server_get() != NULL;
+}
+
 void network_test_update(
 	boolean main_menu_loaded,
 	real seconds)
@@ -1327,6 +1337,12 @@ void network_test_update(
 	if (game_in_progress() && !main_menu_loaded && game_time_get() - network_test.logged_time >= TICKS_PER_SECOND)
 	{
 		network_test.logged_time = game_time_get();
+		if (network_test_watch_short_game() && game_engine_running() &&
+			game_engine_get_variant()->universal_variant.score_to_win != network_test.score_to_win)
+		{
+			game_engine_get_variant()->universal_variant.score_to_win = network_test.score_to_win;
+			platform_log("network test: the menus' game played to %ld", network_test.score_to_win);
+		}
 		network_test_log_players();
 		network_test_log_items();
 		if (network_test.shoot_interval > 0.0f &&
@@ -1416,14 +1432,15 @@ void network_test_update(
 		its point back; three of those in a game and the first game of
 		run_netns_online_test.sh code outlasted the run, its map change never
 		reached, about one run in five.) */
-		if (network_test.mode == _network_test_host && network_test.kill_interval > 0.0f && game_time_get() <
-			network_test.kill_seen_time)
+		if ((network_test.mode == _network_test_host || network_test_watch_short_game()) &&
+			network_test.kill_interval > 0.0f && game_time_get() < network_test.kill_seen_time)
 		{
 			network_test.kill_time = 0;
 			network_test.kill_grenades_given = FALSE;
 		}
 		network_test.kill_seen_time = game_time_get();
-		if (network_test.mode == _network_test_host && network_test.kill_interval > 0.0f &&
+		if ((network_test.mode == _network_test_host || network_test_watch_short_game()) &&
+			network_test.kill_interval > 0.0f &&
 			game_time_get() - network_test.kill_time >= MAX(1, (long)(network_test.kill_interval * TICKS_PER_SECOND)))
 		{
 			struct data_iterator iterator;
@@ -1496,6 +1513,18 @@ void network_test_update(
 				network_test.postgame_seconds = 0.0f;
 				network_game_server_reset_to_pregame(global_network_game_server_get());
 			}
+		}
+	}
+	/* (watch, the menus' short game: the scores a while, then its lobby) */
+	if (network_test_watch_short_game() && game_engine_running() && !main_menu_loaded && !game_engine_can_score() &&
+		game_engine_showing_postgame())
+	{
+		network_test.postgame_seconds += seconds;
+		if (network_test.postgame_seconds >= 3.0f)
+		{
+			network_test.postgame_seconds = 0.0f;
+			platform_log("network test: the menus' game over: back to its lobby");
+			network_game_server_reset_to_pregame(global_network_game_server_get());
 		}
 	}
 	/* co-op: a level won ends the round (the server's postgame, with no
