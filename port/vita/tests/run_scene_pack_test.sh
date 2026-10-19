@@ -19,6 +19,12 @@
 #             runs (a byte of its tags changed, its CRCs made right; cut
 #             short; a byte changed, CRCs left): each refused, deleted, built
 #             again and loaded
+#   verified  a pack's data (its pixels and samples) read whole for its CRC
+#             once: its first load checks it whole and keeps a record of the
+#             file checked (t/packs/<name>.pack.ok); the next run's load, the
+#             file unchanged, reads its tags (checked as ever) but not its
+#             data; a byte of its data changed (the file written again): the
+#             next load checks it whole, refuses it, builds it again
 #   stale     the recipe changed between two runs: the pack built again
 #   banshee   the Covenant's vehicles from b40 in Blood Gulch: Forge places a
 #             Banshee from the pack, the player rides it, flies it up and
@@ -52,7 +58,7 @@
 #
 # Each harness run must exit by itself, with no assertion or exception.
 #
-#   run_scene_pack_test.sh [CASE...]   (default: tool damaged stale banshee ai cetool cepelican cemodels)
+#   run_scene_pack_test.sh [CASE...]   (default: tool damaged verified stale banshee ai cetool cepelican cemodels)
 #   HALO_TEST_VITA         the harness (default build/linux/halo of this tree)
 #   HALO_TEST_PACK_TOOL    the tool (default build/linux/scene_pack_test)
 #   HALO_TEST_DATA_MENUS   a folder with the game's maps folder (the Xbox maps,
@@ -78,7 +84,7 @@ recipes=$root/port/vita/app0/packs
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-tool damaged stale banshee ai cetool cepelican cemodels}
+cases=${*:-tool damaged verified stale banshee ai cetool cepelican cemodels}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 ce_resources=${HALO_TEST_CE_RESOURCES:-$data/maps}
 status=0
@@ -242,6 +248,37 @@ EOF
 			}
 			grep -aE "scene packs: menu_spartan: (refused|building|loaded)" "$out/damaged/run-$damage.log" | sed 's/^/    /'
 		done ;;
+	verified)
+		run verified 14 "$bloodgulch;L60:pack load menu_spartan" ""
+		checked verified && expect verified "first load: its data checked whole" \
+			"scene packs: menu_spartan: read and checked .*checked whole"
+		pack="$out/verified/save/t/packs/menu_spartan.pack"
+		[ -r "$pack.ok" ] && echo "  ok: verified: the record of the file checked kept" ||
+			fail "verified: no record of the file checked ($pack.ok)"
+		FRESH=0 run verified 14 "$bloodgulch;L60:pack load menu_spartan" ""
+		cp "$out/verified/run.log" "$out/verified/run-again.log"
+		checked verified && expect verified "the next load: its data not read again" \
+			"scene packs: menu_spartan: read and checked .*checked before: the file unchanged since" "$out/verified/run-again.log"
+		grep -aE "scene packs: menu_spartan: (read and checked|loaded from)" "$out/verified/run-again.log" | cut -c1-200 | sed 's/^/    /'
+		# (a byte of its data changed, its CRC left: the file written again)
+		python3 - "$pack" <<'EOF'
+import sys, struct
+path = sys.argv[1]
+data = bytearray(open(path, 'rb').read())
+data_offset, data_size = struct.unpack_from('<II', data, 28)
+data[data_offset + data_size // 2] ^= 0x5A
+open(path, 'wb').write(data)
+EOF
+		FRESH=0 run verified 14 "$bloodgulch;L60:pack load menu_spartan" ""
+		cp "$out/verified/run.log" "$out/verified/run-damaged.log"
+		checked verified && {
+			expect verified "its data changed: refused" "scene packs: menu_spartan: refused: it is damaged \(its CRC\)" \
+				"$out/verified/run-damaged.log"
+			expect verified "its data changed: built again and checked whole" \
+				"scene packs: menu_spartan: read and checked .*checked whole" "$out/verified/run-damaged.log"
+		}
+		grep -aE "scene packs: menu_spartan: (refused|building|read and checked)" "$out/verified/run-damaged.log" | cut -c1-200 |
+			sed 's/^/    /' ;;
 	stale)
 		mkdir -p "$out/stale_recipes"
 		cp "$recipes/"*.txt "$out/stale_recipes/"

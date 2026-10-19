@@ -326,6 +326,14 @@ static boolean custom_edition_map_disabled(
 	return FALSE;
 }
 
+/* (the scene packs, scene_packs.c) whether the map `name` is turned off
+(custom_edition_map_disabled): a pack built from it is not offered */
+boolean custom_edition_maps_turned_off(
+	char const *name)
+{
+	return name && custom_edition_map_disabled(name);
+}
+
 /* the file name as the menus show it: "beavercreek_halo3" as
 "Beavercreek Halo3" */
 static void display_name_make(

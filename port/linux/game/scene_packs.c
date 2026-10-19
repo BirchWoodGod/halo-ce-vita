@@ -122,6 +122,9 @@ boolean cache_files_cached_copy_unchanged(unsigned long token);
 #ifdef HALO_VITA
 void vita_host_thread_priority_set(int priority);
 #endif
+void halo_progress_heartbeat(void);
+int halo_file_identity(const char *xbox_path, unsigned long *size, unsigned long *seconds, unsigned long *nanoseconds);
+boolean custom_edition_maps_turned_off(char const *name);
 void sound_cache_sound_delete(struct sound_permutation *sound);
 
 /* ---------- constants */
@@ -540,6 +543,8 @@ static boolean pack_current(struct scene_pack_slot *slot)
 	return TRUE;
 }
 
+static void stamp_remove(struct scene_pack_slot const *slot);
+
 /* (the worker; or the caller of scene_packs_load_now) a build's end, for
 a slot: logged, and the pack built checked as any (pack_current) */
 static boolean pack_built(struct scene_pack_slot *slot, struct scene_pack_build_result const *result, boolean built,
@@ -554,6 +559,7 @@ static boolean pack_built(struct scene_pack_slot *slot, struct scene_pack_build_
 		return FALSE;
 	}
 	slot->built = TRUE;
+	stamp_remove(slot);
 	platform_log("scene packs: %s: built from %s in %.1f ms%s: %ld tags (%ld references left out), %lu KB of tags, "
 		"%lu KB of pixels and samples, %lu KB file (%.1f MB of the map read%s)", slot->name, result->map,
 		(double)result->microseconds / 1000.0, others ? " with other packs in the same read" : "", result->tag_count,
@@ -719,6 +725,117 @@ static void packs_prepare(struct scene_pack_slot **slots, short count, unsigned 
 	}
 }
 
+/* ---------- a pack's data checked once
+
+A pack's data (its pixels and samples: up to 36 MB, covenant_ai's) is read
+whole for its CRC once: after it is built, or the first time it is loaded
+(or, for a prebuild, in the background), a record of the file then checked
+is kept beside it (t:\packs\<name>.ok: its size and time, as the file
+system gives them, and its header's CRCs). A later load whose file has that
+size, time and header reads its tags and checks them as ever (their CRC,
+their move, the tag check) but not its data again - the first Forge game
+with every pack on read 60 MB from the memory card at Forge's start, no
+frame for well over 8 s. A file written again (a build, a copy, a damage
+that rewrites it) has another time or size: checked whole again. */
+
+static void stamp_path(struct scene_pack_slot const *slot, char *path, long size)
+{
+	snprintf(path, (size_t)size, "%s.ok", slot->path);
+}
+
+/* the pack file's size and time, as the file system gives them: FALSE if
+it cannot say */
+static boolean pack_file_identity(struct scene_pack_slot const *slot, unsigned long *size, unsigned long *seconds,
+	unsigned long *nanoseconds)
+{
+	return halo_file_identity(slot->path, size, seconds, nanoseconds) == 0;
+}
+
+/* whether the pack file (its header in slot->info) is the one whose data
+was checked: its record there and the same */
+static boolean stamp_valid(struct scene_pack_slot const *slot)
+{
+	char path[128];
+	char text[160];
+	unsigned long size, seconds, nanoseconds;
+	unsigned long stamp_size = 0, stamp_seconds = 0, stamp_nanoseconds = 0, stamp_data_crc = 0, stamp_tags_crc = 0;
+	FILE *file;
+	size_t length;
+
+	if (!pack_file_identity(slot, &size, &seconds, &nanoseconds))
+		return FALSE;
+	stamp_path(slot, path, sizeof(path));
+	file = fopen(path, "rb");
+	if (!file)
+		return FALSE;
+	length = fread(text, 1, sizeof(text) - 1, file);
+	fclose(file);
+	text[length] = 0;
+	return sscanf(text, "HCEVPACKOK %lu %lu %lu %lx %lx", &stamp_size, &stamp_seconds, &stamp_nanoseconds, &stamp_data_crc,
+		&stamp_tags_crc) == 5 && stamp_size == size && stamp_seconds == seconds && stamp_nanoseconds == nanoseconds &&
+		size == slot->info.file_size && stamp_data_crc == slot->info.data_crc && stamp_tags_crc == slot->info.tags_crc;
+}
+
+/* the record of the pack file whose data was just checked (as its header in
+slot->info says) */
+static void stamp_write(struct scene_pack_slot const *slot)
+{
+	char path[128];
+	unsigned long size, seconds, nanoseconds;
+	FILE *file;
+
+	stamp_path(slot, path, sizeof(path));
+	if (!pack_file_identity(slot, &size, &seconds, &nanoseconds) || size != slot->info.file_size)
+	{
+		remove(path);
+		return;
+	}
+	file = fopen(path, "wb");
+	if (!file)
+		return;
+	fprintf(file, "HCEVPACKOK %lu %lu %lu %08lx %08lx\n", size, seconds, nanoseconds, slot->info.data_crc, slot->info.tags_crc);
+	fclose(file);
+}
+
+static void stamp_remove(struct scene_pack_slot const *slot)
+{
+	char path[128];
+
+	stamp_path(slot, path, sizeof(path));
+	remove(path);
+}
+
+/* (the worker, a prebuild's job) the pack's data checked now if it has no
+record yet, in the background, so that its load is quick when it is
+wanted: FALSE if it is damaged (deleted, to be built again) */
+static boolean pack_data_verify(struct scene_pack_slot *slot)
+{
+	FILE *file;
+	boolean good;
+
+	if (stamp_valid(slot))
+		return TRUE;
+	file = fopen(slot->path, "rb");
+	good = file && scene_pack_open_file(file, &slot->info, slot->why, sizeof(slot->why)) &&
+		scene_pack_data_check(file, &slot->info, slot->why, sizeof(slot->why));
+	if (file)
+		fclose(file);
+	if (scene_packs.cancel)
+		return TRUE;
+	if (good)
+	{
+		stamp_write(slot);
+		platform_log("scene packs: %s: its data checked in the background (%lu KB)", slot->name, slot->info.data_size / 1024);
+	}
+	else
+	{
+		platform_log("scene packs: %s: refused: %s", slot->name, slot->why);
+		stamp_remove(slot);
+		remove(slot->path);
+	}
+	return good;
+}
+
 /* (the worker; or the caller of scene_packs_load_now) the slot's pack,
 built and current, read into room (room_size bytes) and checked there (the
 pack opened once, its tags read once and checked as read, its data's CRC by
@@ -730,6 +847,7 @@ static void pack_stage(struct scene_pack_slot *slot, unsigned char *room, unsign
 	unsigned long long started = vita_host_time_us();
 	FILE *file;
 	long count;
+	boolean data_checked;
 
 	slot->full = slot->refused = FALSE;
 	file = fopen(slot->path, "rb");
@@ -759,13 +877,16 @@ static void pack_stage(struct scene_pack_slot *slot, unsigned char *room, unsign
 		slot->full = TRUE;
 		return;
 	}
-	if (!scene_pack_load_file(file, &slot->info, room, slot->why, sizeof(slot->why)))
+	data_checked = stamp_valid(slot);
+	if (!scene_pack_load_file_checked(file, &slot->info, room, data_checked, slot->why, sizeof(slot->why)))
 	{
 		fclose(file);
 		csmemset(room, 0xCD, slot->info.tags_size);
 		slot->refused = TRUE;
 		return;
 	}
+	if (!data_checked)
+		stamp_write(slot);
 	scene_pack_instances(room, &count);
 	if (count <= 0 || scene_packs.job.first_index < 0 || scene_packs.job.first_index > 0x7FFF - count)
 	{
@@ -783,9 +904,10 @@ static void pack_stage(struct scene_pack_slot *slot, unsigned char *room, unsign
 	slot->staged_salt = scene_packs.job.salt;
 	slot->staged_file_base = scene_packs.job.file_base;
 	slot->staged = TRUE;
-	platform_log("scene packs: %s: read and checked on the %s in %.1f ms (%lu KB of tags, %lu KB of pixels and samples)",
+	platform_log("scene packs: %s: read and checked on the %s in %.1f ms (%lu KB of tags, %lu KB of pixels and samples%s)",
 		slot->name, scene_packs_on_worker ? "worker" : "game thread", (double)(vita_host_time_us() - started) / 1000.0,
-		slot->info.tags_size / 1024, slot->info.data_size / 1024);
+		slot->info.tags_size / 1024, slot->info.data_size / 1024,
+		data_checked ? ", checked before: the file unchanged since" : ", checked whole");
 }
 
 /* a staged pack let go (not to be loaded now): its tag cache room the free
@@ -838,6 +960,13 @@ static void *worker_thread(void *context)
 		loaded between them) */
 		packs_prepare(slots, scene_packs.job.slot_count, scene_packs.scratch, scene_packs.scratch_size, scene_packs.job.low,
 			TRUE, NULL);
+		/* (a prebuild's: the data of each pack ready checked now, in the
+		background, if it never was: its load is then quick) */
+		for (index = 0; scene_packs.job.low && index < scene_packs.job.slot_count && !scene_packs.cancel; index++)
+		{
+			if (state_get(slots[index]) == _scene_pack_state_ready && !pack_data_verify(slots[index]))
+				state_set(slots[index], _scene_pack_state_building);
+		}
 	}
 	__atomic_store_n(&scene_packs.job.done, TRUE, __ATOMIC_RELEASE);
 	return NULL;
@@ -853,8 +982,13 @@ static void worker_io(unsigned long bytes, boolean source)
 	int cache_files_reads_pending(void);
 
 	slow_io_pace(bytes, source);
+	/* (a pack read on the game thread - scene_packs_load_now at a map's
+	load - is progress, not a hang: the Vita's watchdog) */
 	if (!scene_packs_on_worker)
+	{
+		halo_progress_heartbeat();
 		return;
+	}
 	/* (a pack wanted now pauses only its source map's reads, the heavy
 	part: its own pack's few megabytes are read meanwhile, its scene not
 	held for a whole map's copy) */
@@ -1057,7 +1191,14 @@ static boolean pack_commit(struct scene_pack_slot *slot)
 	table_next(&first_index, &salt, &file_base, &table_room, &file_room);
 	existing = cache_files_tag_instances(&existing_count);
 	instances = scene_pack_instances(slot->tags, &count);
-	if (!existing || !table_room || slot->info.data_size > file_room || slot->tags != room ||
+	/* (packs let go since it was staged: the room begins lower now - read
+	there again, by the next job) */
+	if (slot->tags != room)
+	{
+		pack_unstage(slot);
+		return FALSE;
+	}
+	if (!existing || !table_room || slot->info.data_size > file_room ||
 		existing_count > 0x7FFF - count || !(table = malloc((unsigned long)(existing_count + count) * TAG_INSTANCE_BYTES)))
 	{
 		snprintf(slot->why, sizeof(slot->why), "the game's table or tag cache changed before it could be loaded");
@@ -1096,10 +1237,10 @@ static boolean pack_commit(struct scene_pack_slot *slot)
 	tag_validate_reserve_after_tags(scene_packs.reserved);
 	state_set(slot, _scene_pack_state_loaded);
 	cache_files_set_tag_instances(table, existing_count + count);
-	platform_log("scene packs: %s: loaded from %s, the game thread's part in %.2f ms%s: %ld tags (%ld to %ld of the "
+	platform_log("scene packs: %s: loaded from %s in %.2f ms (the game thread's part): %ld tags (%ld to %ld of the "
 		"table), %lu KB of the tag cache (%lu KB held by packs, %lu KB free after them), %lu KB of pixels and samples in "
 		"its file", slot->name, slot->info.source_map, (double)(vita_host_time_us() - started) / 1000.0,
-		slot->wanted_us ? "" : "", count, existing_count, existing_count + count - 1, slot->bytes / 1024,
+		count, existing_count, existing_count + count - 1, slot->bytes / 1024,
 		scene_packs.reserved / 1024, (unsigned long)(room_end - room - slot->bytes) / 1024, slot->info.data_size / 1024);
 	if (slot->wanted_us)
 		platform_log("scene packs: %s: loaded %.1f ms after it was wanted", slot->name,
@@ -1113,6 +1254,7 @@ static void slot_refused(struct scene_pack_slot *slot)
 {
 	slot->refused = FALSE;
 	platform_log("scene packs: %s: refused: %s", slot->name, slot->why);
+	stamp_remove(slot);
 	remove(slot->path);
 	if (!slot->rebuilt)
 	{
@@ -1125,6 +1267,8 @@ static void slot_refused(struct scene_pack_slot *slot)
 	}
 }
 
+static void packs_release(void);
+
 /* (the game thread) the worker's job done: its staged pack loaded (or let
 go, not wanted now), its refusals and waits seen to */
 static void job_finish(void)
@@ -1133,6 +1277,9 @@ static void job_finish(void)
 	struct scene_pack_slot *slot = load != NONE ? &scene_packs.packs[load] : NULL;
 
 	build_thread_join(FALSE);
+	/* (the packs let go meanwhile go first: a model passed in the preview
+	is let go before the next is put above it) */
+	packs_release();
 	if (!slot)
 		return;
 	if (slot->staged)
@@ -1156,6 +1303,24 @@ static void job_finish(void)
 	}
 }
 
+/* whether a Custom Edition recipe's map is one the player turned off (the
+settings panel's Modded maps: HALO_MAPS_DISABLED), and why: its pack is
+neither offered nor built nor loaded */
+static boolean recipe_turned_off(struct scene_pack_recipe const *recipe, char *why, long why_size)
+{
+	char map[SCENE_PACK_NAME_SIZE];
+
+	if (!recipe->custom_edition_map_count ||
+		!scene_pack_source_check(recipe, cache_files_map_directory(), map, sizeof(map), NULL, NULL, 0) ||
+		!custom_edition_maps_turned_off(map))
+	{
+		return FALSE;
+	}
+	if (why && why_size > 0)
+		snprintf(why, (size_t)why_size, "%s.map is turned off (the settings' Modded maps)", map);
+	return TRUE;
+}
+
 /* a slot for the pack of that recipe (its recipe read), or NULL */
 static struct scene_pack_slot *slot_new(char const *name)
 {
@@ -1177,6 +1342,11 @@ static struct scene_pack_slot *slot_new(char const *name)
 	{
 		snprintf(slot->why, sizeof(slot->why), "%s", !text ? "its recipe cannot be read" :
 			slot->recipe && slot->recipe->name[0] && strcmp(slot->recipe->name, name) ? "its recipe is another pack's" : why);
+		state_set(slot, _scene_pack_state_failed);
+		platform_log("scene packs: %s: %s", name, slot->why);
+	}
+	else if (recipe_turned_off(slot->recipe, slot->why, sizeof(slot->why)))
+	{
 		state_set(slot, _scene_pack_state_failed);
 		platform_log("scene packs: %s: %s", name, slot->why);
 	}
@@ -1518,7 +1688,8 @@ boolean scene_packs_recipe_available(
 	if (why && why_size > 0)
 		why[0] = 0;
 	if (recipe && recipe_read(name, recipe))
-		available = scene_pack_source_check(recipe, cache_files_map_directory(), NULL, 0, NULL, why, why_size);
+		available = scene_pack_source_check(recipe, cache_files_map_directory(), NULL, 0, NULL, why, why_size) &&
+			!recipe_turned_off(recipe, why, why_size);
 	else if (why && why_size > 0)
 		snprintf(why, (size_t)why_size, "its recipe cannot be read");
 	if (recipe)

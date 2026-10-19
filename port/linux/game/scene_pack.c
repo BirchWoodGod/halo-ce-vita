@@ -3415,6 +3415,51 @@ boolean scene_pack_load_file(
 	char *why,
 	long why_size)
 {
+	return scene_pack_load_file_checked(file, info, destination, FALSE, why, why_size);
+}
+
+boolean scene_pack_data_check(
+	FILE *file,
+	struct scene_pack_info const *info,
+	char *why,
+	long why_size)
+{
+	unsigned char *bounce = malloc(BOUNCE_SIZE);
+	unsigned long crc = 0, done = 0;
+	boolean read = file && bounce && !fseek(file, (long)info->data_offset, SEEK_SET);
+
+	while (read && done < info->data_size)
+	{
+		unsigned long chunk = info->data_size - done > BOUNCE_SIZE ? BOUNCE_SIZE : info->data_size - done;
+
+		read = fread(bounce, 1, chunk, file) == chunk;
+		crc = crc_bytes(crc, bounce, chunk);
+		done += chunk;
+		io_done(chunk);
+	}
+	if (bounce)
+		free(bounce);
+	if (!read)
+	{
+		why_set(why, why_size, "it cannot be read%s", NULL);
+		return FALSE;
+	}
+	if (crc != info->data_crc)
+	{
+		why_set(why, why_size, "it is damaged (its CRC)%s", NULL);
+		return FALSE;
+	}
+	return TRUE;
+}
+
+boolean scene_pack_load_file_checked(
+	FILE *file,
+	struct scene_pack_info const *info,
+	void *destination,
+	boolean data_checked,
+	char *why,
+	long why_size)
+{
 	unsigned char *bounce;
 	unsigned long crc = 0, done = 0;
 	unsigned long anomalies;
@@ -3439,8 +3484,10 @@ boolean scene_pack_load_file(
 		done += chunk;
 		io_done(chunk);
 	}
+	/* (the data's CRC: unless the caller knows it good - the same file,
+	unchanged since its data was checked, scene_packs.c) */
 	done = 0;
-	while (read && done < info->data_size)
+	while (read && !data_checked && done < info->data_size)
 	{
 		unsigned long chunk = info->data_size - done > BOUNCE_SIZE ? BOUNCE_SIZE : info->data_size - done;
 
@@ -3449,6 +3496,8 @@ boolean scene_pack_load_file(
 		done += chunk;
 		io_done(chunk);
 	}
+	if (data_checked)
+		crc = info->data_crc;
 	if (bounce)
 		free(bounce);
 	if (!read)

@@ -359,6 +359,26 @@ boolean scene_pack_load_file(
 	char *why,
 	long why_size);
 
+/* the same, its data's CRC not read again when data_checked (the caller
+knows that file's data good: scene_packs.c's record of the file checked,
+its size and time unchanged since) - its tags read, checked by their CRC
+and moved and checked as ever */
+boolean scene_pack_load_file_checked(
+	FILE *file,
+	struct scene_pack_info const *info,
+	void *destination,
+	boolean data_checked,
+	char *why,
+	long why_size);
+
+/* a pack's data (its pixels and samples) checked by its CRC, through file:
+FALSE, and why, if it is not what the header says */
+boolean scene_pack_data_check(
+	FILE *file,
+	struct scene_pack_info const *info,
+	char *why,
+	long why_size);
+
 /* a pack loaded at tags (scene_pack_load) given its tag indices in the
 game's table: its tag i is (first_salt + i) << 16 | (first_index + i), as
 are its references, tag indices and sounds' own indices; and its pixels'

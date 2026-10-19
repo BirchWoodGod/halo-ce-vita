@@ -1154,6 +1154,15 @@ static void CALLBACK cache_copy_FileIOCompletionRoutine(
 				(real)(global_self->header.size - global_self->async_read_bytes_left) /
 				global_self->header.size;
 			SetEvent(global_self->progress_update_event);
+#ifdef HALO_LINUX
+			{
+				/* (port: a map's copy moving is progress, not a hang: the
+				Vita's watchdog, frame_timing.c) */
+				void halo_progress_heartbeat(void);
+
+				halo_progress_heartbeat();
+			}
+#endif
 		}
 		else if (overlapped_index >= _write_buffer_base &&
 			overlapped_index <= _write_buffer_base + NUMBER_OF_WRITE_BUFFERS - 1)

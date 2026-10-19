@@ -120,10 +120,10 @@ for c in $cases; do
 		run cold 75 "wait:150:3000 $visits" HALO_MENU_PREBUILD=0 HALO_TEST_SLOW_IO=2048
 		checked cold || continue
 		log=$out/cold/run.log
-		grep -aE "scene packs: menu_.*(read and checked|the game thread's part)|scene packs: game thread" "$log" | cut -c1-160
+		grep -aE "scene packs: menu_.*(read and checked|loaded from)|scene packs: game thread" "$log" | cut -c1-160
 		for pack in menu_spartan menu_campaign menu_multiplayer menu_monitor; do
 			expect cold "$pack read and checked on the worker" "scene packs: $pack: read and checked on the worker"
-			part=$(sed -n "s/.*scene packs: $pack: loaded from .*the game thread's part in \([0-9.]*\) ms.*/\1/p" "$log" | head -1)
+			part=$(sed -n "s/.*scene packs: $pack: loaded from [^ ]* in \([0-9.]*\) ms (the game thread's part).*/\1/p" "$log" | head -1)
 			if [ -n "$part" ] && awk "BEGIN { exit !($part < 5) }"; then
 				echo "  ok: cold: $pack's game thread part $part ms"
 			else
