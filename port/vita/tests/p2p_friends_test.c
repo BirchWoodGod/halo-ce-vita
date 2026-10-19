@@ -891,6 +891,207 @@ static void test_limits(void)
 	save(1);
 }
 
+
+/* ---------- the game's players' cards (a player's options) */
+
+/* machine i's virtual address, as p2p.c has it (100.64.0.i, network byte
+order) */
+static unsigned long virtual_of(int machine)
+{
+	return 100UL | 64UL << 8 | (unsigned long)(machine + 2) << 24;
+}
+
+/* each machine's cards carried over the tunnel: to its peer, or (0) to the
+host; the host the machine whose game it hosts */
+static int tunnel_route(int host)
+{
+	int from, index, carried_cards = 0;
+
+	for (from = 0; from < MACHINES; from++)
+	{
+		struct card_packet packets[MAXIMUM_CARD_OUTBOUND];
+		int count;
+
+		use(from);
+		count = machines[from].card_outbound_count;
+		memcpy(packets, machines[from].card_outbound, sizeof(packets[0]) * (size_t)count);
+		machines[from].card_outbound_count = 0;
+		for (index = 0; index < count; index++)
+		{
+			int to = host, machine;
+
+			if (packets[index].address)
+				for (machine = 0, to = -1; machine < MACHINES; machine++)
+					if (virtual_of(machine) == packets[index].address)
+						to = machine;
+			if (to < 0 || to == from)
+				continue;
+			use(to);
+			p2p_friends_tunnel_heard(virtual_of(from), from == host, packets[index].bytes, packets[index].size);
+			carried_cards++;
+		}
+	}
+	return carried_cards;
+}
+
+static void game_pass(int count)
+{
+	int index;
+
+	for (index = 0; index < count; index++)
+	{
+		pass(1);
+		tunnel_route(0);
+	}
+}
+
+static void test_cards(void)
+{
+	unsigned long addresses[MACHINES];
+	int index;
+
+	/* Alpha hosts (machine 0), Bravo and Charlie joined (1, 2); Charlie is
+	no friend of Bravo's, and asked nothing yet */
+	use(2);
+	machines[2].outgoing_count = 0;
+	machines[2].test_appeared_offline = 0;
+	for (index = 0; index < MACHINES; index++)
+		addresses[index] = virtual_of(index);
+	use(0);
+	p2p_friends_set_game(0, 1, addresses, MACHINES);
+	use(1);
+	p2p_friends_set_game(1, 0, NULL, 0);
+	use(2);
+	p2p_friends_set_game(2, 0, NULL, 0);
+	use(1);
+	check(p2p_friends_player_state(2) == P2P_FRIENDS_PLAYER_NONE, "a player not asked: nothing known");
+	check(p2p_friends_player_state(1) == P2P_FRIENDS_PLAYER_THIS_VITA, "the machine's own players");
+	check(p2p_friends_player_ask(1, P2P_FRIENDS_PLAYER_ADD) == P2P_FRIENDS_GONE, "this machine is no one to ask");
+	check(p2p_friends_player_ask(2, P2P_FRIENDS_PLAYER_ADD) == P2P_FRIENDS_DONE, "Bravo asks Charlie's card");
+	check(machines[1].card_outbound_count == 1 && machines[1].card_outbound[0].size == CARD_HEADER_SIZE &&
+		machines[1].card_outbound[0].address == 0, "an ask holds a nonce alone, to the host");
+	check(p2p_friends_player_ask(2, P2P_FRIENDS_PLAYER_ADD) == P2P_FRIENDS_TOO_SOON, "asked once at a time");
+	check(p2p_friends_player_state(2) == P2P_FRIENDS_PLAYER_ASKING, "asking");
+	game_pass(6);
+	check(count_of(2, P2P_FRIEND_KIND_REQUEST) == 1, "the host relayed, Charlie answered, Bravo's request reached Charlie");
+	{
+		struct p2p_friend_entry entry;
+
+		check(entry_of(2, P2P_FRIEND_KIND_REQUEST, 0, &entry) && !strcmp(entry.name, "Bravo"), "the request is Bravo's");
+		use(1);
+		check(p2p_friends_player_state(2) == P2P_FRIENDS_PLAYER_REQUEST_SENT, "Bravo's options: request sent");
+		use(2);
+		check(p2p_friends_act(entry.id, P2P_FRIEND_KIND_REQUEST, P2P_FRIENDS_ACCEPT) == P2P_FRIENDS_DONE, "Charlie accepts");
+	}
+	game_pass(6);
+	use(1);
+	check(p2p_friends_player_state(2) == P2P_FRIENDS_PLAYER_FRIEND, "Bravo and Charlie friends");
+	/* appearing offline (or friends off): no answer, nothing of the player's sent */
+	use(0);
+	machines[0].test_appeared_offline = 1;
+	pass(1);
+	use(1);
+	check(p2p_friends_player_ask(0, P2P_FRIENDS_PLAYER_ADD) == P2P_FRIENDS_DONE, "Bravo asks the host's card");
+	{
+		int answers = 0, step;
+
+		for (step = 0; step < 30; step++)
+		{
+			pass(1);
+			use(0);
+			for (index = 0; index < machines[0].card_outbound_count; index++)
+				answers += machines[0].card_outbound[index].size == CARD_ANSWER_SIZE;
+			tunnel_route(0);
+		}
+		use(1);
+		check(answers == 0 && p2p_friends_player_state(0) == P2P_FRIENDS_PLAYER_NOT_TAKING,
+			"a player appearing offline answers nothing: not taking requests");
+	}
+	machines[0].test_appeared_offline = 0;
+	/* forgeries: an answer to no ask, one signed by another key, a joiner's
+	claim to be another machine */
+	{
+		unsigned char packet[CARD_ANSWER_SIZE];
+		int before;
+
+		use(2);
+		memset(packet, 0, sizeof(packet));
+		packet[0] = CARD_VERSION;
+		packet[1] = CARD_ANSWER;
+		packet[2] = 2;
+		packet[3] = 1;
+		memcpy(packet + CARD_HEADER_SIZE, machines[2].key, P2P_KEY_SIZE);
+		reset_drops(1);
+		use(1);
+		p2p_friends_tunnel_heard(virtual_of(0), 1, packet, CARD_ANSWER_SIZE);
+		pass(1);
+		check(machines[1].dropped_replays + machines[1].total_replays >= 1, "an answer to no ask dropped");
+		/* (an ask made, the answer's signature not the key's) */
+		use(1);
+		machines[1].machines[0].asked_time = 0;
+		machines[1].machines[0].unanswered = 0;
+		check(p2p_friends_player_ask(0, P2P_FRIENDS_PLAYER_ADD) == P2P_FRIENDS_DONE, "asked again");
+		memcpy(packet + 4, machines[1].machines[0].nonce, NONCE_LENGTH);
+		packet[2] = 0;
+		memcpy(packet + CARD_HEADER_SIZE, machines[0].key, P2P_KEY_SIZE);
+		machines[1].card_outbound_count = 0;
+		reset_drops(1);
+		use(1);
+		p2p_friends_tunnel_heard(virtual_of(0), 1, packet, CARD_ANSWER_SIZE);
+		pass(1);
+		check(machines[1].dropped_forged + machines[1].total_forged >= 1 && !machines[1].machines[0].has_card,
+			"an answer not signed by its key dropped");
+		/* (a joiner's packet heard by another joiner straight, not from the host) */
+		reset_drops(2);
+		use(2);
+		before = count_of(2, P2P_FRIEND_KIND_REQUEST);
+		p2p_friends_tunnel_heard(virtual_of(1), 0, packet, CARD_HEADER_SIZE);
+		pass(1);
+		check(machines[2].dropped_forged + machines[2].dropped_malformed + machines[2].total_forged +
+			machines[2].total_malformed >= 1 && count_of(2, P2P_FRIEND_KIND_REQUEST) == before,
+			"a card not from the host dropped by a joiner");
+		/* (sizes: one byte short, one past) */
+		reset_drops(0);
+		use(0);
+		p2p_friends_tunnel_heard(virtual_of(1), 0, packet, CARD_HEADER_SIZE - 1);
+		p2p_friends_tunnel_heard(virtual_of(1), 0, packet, CARD_ANSWER_SIZE + 1);
+		pass(1);
+		check(machines[0].dropped_malformed + machines[0].total_malformed >= 1, "cards of the wrong size dropped");
+		/* (the host's relay: past its budget, dropped) */
+		reset_drops(0);
+		use(0);
+		for (index = 0; index < 40; index++)
+		{
+			packet[0] = CARD_VERSION;
+			packet[1] = CARD_ASK;
+			packet[2] = 1;
+			packet[3] = 2;
+			p2p_friends_tunnel_heard(virtual_of(1), 0, packet, CARD_HEADER_SIZE);
+		}
+		use(0);
+		p2p_friends_update(&hosts[0]);
+		check(machines[0].card_outbound_count <= 1 && machines[0].dropped_rate + machines[0].total_rate >= 10,
+			"a joiner's flood relayed one a second at most");
+		machines[0].card_outbound_count = 0;
+	}
+	/* Block, from a player's options: the card asked, the key blocked */
+	use(1);
+	machines[1].machines[0].asked_time = 0;
+	machines[1].machines[0].asking = 0;
+	check(p2p_friends_player_ask(0, P2P_FRIENDS_PLAYER_BLOCK) == P2P_FRIENDS_DONE, "Bravo blocks the host's player");
+	game_pass(8);
+	use(1);
+	check(p2p_friends_player_state(0) == P2P_FRIENDS_PLAYER_BLOCKED && count_of(1, P2P_FRIEND_KIND_BLOCKED) >= 1,
+		"blocked through its card");
+	/* the game over: the cards forgotten */
+	p2p_friends_set_game(-1, 0, NULL, 0);
+	check(p2p_friends_player_state(0) == P2P_FRIENDS_PLAYER_NONE && !machines[1].in_game, "the game over: forgotten");
+	use(0);
+	p2p_friends_set_game(-1, 0, NULL, 0);
+	use(2);
+	p2p_friends_set_game(-1, 0, NULL, 0);
+}
+
 #ifndef P2P_FRIENDS_FUZZ
 /* (run_menus_test.sh's FRIENDS cases) a save folder's friends: SEED_DIR
 gets an identity and a list of two friends, a request, a request sent and a
@@ -959,6 +1160,7 @@ int main(void)
 	test_remove();
 	test_files();
 	test_limits();
+	test_cards();
 	if (failures)
 	{
 		printf("%d failures\n", failures);

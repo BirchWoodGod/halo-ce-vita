@@ -84,6 +84,29 @@ enum
 	PRESENCE_JOINABLE = 4,
 
 	TOPIC_LENGTH = 64,
+	/* the game's players' friend cards (exchanged over the tunnel: a
+	player's options' Add friend and Block, p2p_friends_player_ask) */
+	CARD_VERSION = 1,
+	CARD_ASK = 1,
+	CARD_ANSWER = 2,
+	/* version, kind, from machine, to machine, nonce, then (an answer) the
+	key, the name and the signature */
+	CARD_HEADER_SIZE = 4 + NONCE_LENGTH,
+	CARD_ANSWER_SIZE = CARD_HEADER_SIZE + P2P_KEY_SIZE + 1 + NAME_LENGTH + P2P_SIGNATURE_SIZE,
+	CARD_MACHINES = HALO_PORT_MAXIMUM_NETWORK_MACHINES,
+	MAXIMUM_CARD_INBOUND = 16,
+	MAXIMUM_CARD_OUTBOUND = 16,
+	/* an ask unanswered in this long: the player takes no friend requests
+	this way (friends off, appearing offline, or an older build) */
+	CARD_ANSWER_TIME = 10000,
+	/* an ask of one player each this often; an answer to one asker each this
+	often; what a host relays: a few at once, one more each this often, per
+	machine and in all */
+	CARD_ASK_INTERVAL = 5000,
+	CARD_ANSWER_INTERVAL = 3000,
+	CARD_RELAY_BUDGET = 8,
+	CARD_RELAY_INTERVAL = 250,
+	CARD_RELAY_MACHINE_INTERVAL = 1000,
 	MAXIMUM_INBOUND = 64,
 	MAXIMUM_OUTBOUND = 64,
 	/* what is kept free of the outgoing queue for what is not presence */
@@ -152,6 +175,38 @@ enum
 static const char signature_label[] = "hcev-friends-1";
 
 /* ---------- structures */
+
+/* a player's machine in the game this machine plays (p2p_friends_set_game):
+its address (the host's table), and its friend card once asked for */
+struct card_machine
+{
+	unsigned long address;
+	int has_card;
+	unsigned char key[P2P_KEY_SIZE];
+	char name[P2P_FRIEND_NAME_SIZE];
+	/* this machine's ask: its nonce, when, what for (P2P_FRIENDS_PLAYER_*);
+	whether it went unanswered */
+	int asking;
+	unsigned char nonce[NONCE_LENGTH];
+	unsigned long asked_time;
+	int intent;
+	int unanswered;
+	/* (answering it) when it was last answered; (a host relaying) its relay
+	budget */
+	unsigned long answered_time;
+	unsigned long relayed_time;
+};
+
+/* a card packet heard on the tunnel (p2p.c), or to send there */
+struct card_packet
+{
+	/* heard: the peer it came from (its virtual address; is_host: the host
+	this machine joined); to send: the peer (0: the host) */
+	unsigned long address;
+	int from_host;
+	int size;
+	unsigned char bytes[CARD_ANSWER_SIZE];
+};
 
 /* work allowed: some at once, and one more each interval (p2p_signal.c's) */
 struct budget
@@ -386,6 +441,24 @@ struct friends_state
 	unsigned long drops_logged_time;
 	/* ... and all of them this run, as logged */
 	int total_replays, total_forged, total_blocked, total_rate, total_malformed;
+
+	/* the game this machine plays: its machine's index (-1 none), whether it
+	hosts (it relays cards between its machines), the machines */
+	int in_game;
+	int game_machine;
+	int game_hosting;
+	/* what a card answered asks of the lists (done with the lock let go):
+	a request to its code, or its key blocked */
+	int card_action;
+	unsigned char card_action_key[P2P_KEY_SIZE];
+	char card_action_name[P2P_FRIEND_NAME_SIZE];
+	struct card_machine machines[CARD_MACHINES];
+	struct card_packet card_inbound[MAXIMUM_CARD_INBOUND];
+	int card_inbound_count;
+	struct card_packet card_outbound[MAXIMUM_CARD_OUTBOUND];
+	int card_outbound_count;
+	struct budget card_relay_budget;
+	int game_said;
 
 	/* (debug) the tests' steps */
 	int test_parsed;
@@ -2639,6 +2712,460 @@ static int appear_offline_now(void)
 	return setting_on("friends.appear_offline", "HALO_FRIENDS_APPEAR_OFFLINE");
 }
 
+static int block_key(const unsigned char *key, const char *name);
+static int friends_on(void);
+
+/* ---------- the game's players (a player's options: Add friend, Block)
+
+Players in a game know nothing of each other's friend identity. A player's
+Add friend (or Block) asks that player's machine for its friend card over
+internet play's tunnel (p2p.c's packet type 7, which builds before it drop
+unread: no network change; never on the crossplay wire): an ASK holds a
+nonce alone, nothing of the asker's; a machine whose player has friends on
+and does not appear offline answers with its card - its friend key and name
+and a signature of the asker's nonce with that key - and a machine with
+friends off, appearing offline or of an older build answers nothing. The
+asker then sends a friend request to the card's code as a typed code would
+(the other player accepts or declines), or blocks the key. The tunnel joins
+each joiner to the host alone: the host relays a card between two of its
+joiners, its machine table (p2p_friends_set_game) naming each machine's
+peer, the "from" machine of what it relays its own reading of the sender,
+never the sender's word; a few a second at most, per machine and in all.
+Every field is checked: the sizes, the machines, the nonce of an ask this
+machine made, the signature, the key. */
+
+static void card_queue(unsigned long address, const unsigned char *bytes, int size)
+{
+	struct card_packet *packet;
+
+	if (friends->card_outbound_count >= MAXIMUM_CARD_OUTBOUND || size > CARD_ANSWER_SIZE)
+	{
+		friends->dropped_rate++;
+		return;
+	}
+	packet = &friends->card_outbound[friends->card_outbound_count++];
+	packet->address = address;
+	packet->from_host = 0;
+	packet->size = size;
+	memcpy(packet->bytes, bytes, (size_t)size);
+}
+
+/* the peer a card to a machine goes to: a host's, the machine's own; a
+joiner's, the host (0) */
+static int card_route(int machine, unsigned long *address)
+{
+	if (machine < 0 || machine >= CARD_MACHINES)
+		return 0;
+	if (!friends->game_hosting)
+	{
+		*address = 0;
+		return 1;
+	}
+	*address = friends->machines[machine].address;
+	return *address != 0;
+}
+
+static void card_signed_data(const unsigned char *packet, unsigned char *data, int *size)
+{
+	static const char label[] = "hcev-friends-1 card";
+	int at = 0;
+
+	memcpy(data, label, sizeof(label) - 1);
+	at += (int)sizeof(label) - 1;
+	/* (the kind, the nonce, the key and the name: the machines are the
+	game's numbers, which the host's relay may correct) */
+	data[at++] = packet[1];
+	memcpy(data + at, packet + 4, NONCE_LENGTH + P2P_KEY_SIZE + 1 + NAME_LENGTH);
+	at += NONCE_LENGTH + P2P_KEY_SIZE + 1 + NAME_LENGTH;
+	*size = at;
+}
+
+/* this machine's answer to an ask of a machine (its nonce) */
+static void card_answer(int machine, const unsigned char *nonce)
+{
+	unsigned char packet[CARD_ANSWER_SIZE], data[64 + CARD_ANSWER_SIZE];
+	char name[P2P_FRIEND_NAME_SIZE];
+	unsigned long address;
+	int size;
+
+	if (!card_route(machine, &address))
+		return;
+	memset(packet, 0, sizeof(packet));
+	packet[0] = CARD_VERSION;
+	packet[1] = CARD_ANSWER;
+	packet[2] = (unsigned char)friends->game_machine;
+	packet[3] = (unsigned char)machine;
+	memcpy(packet + 4, nonce, NONCE_LENGTH);
+	memcpy(packet + CARD_HEADER_SIZE, friends->key, P2P_KEY_SIZE);
+	own_name(name);
+	put_text(packet + CARD_HEADER_SIZE + P2P_KEY_SIZE, name, NAME_LENGTH);
+	card_signed_data(packet, data, &size);
+	p2p_ed25519_sign(friends->seed, friends->key, data, size, packet + CARD_ANSWER_SIZE - P2P_SIGNATURE_SIZE);
+	card_queue(address, packet, CARD_ANSWER_SIZE);
+}
+
+/* a host's machine by its peer's address (-1: none) */
+static int card_machine_of(unsigned long address)
+{
+	int index;
+
+	for (index = 0; index < CARD_MACHINES && address; index++)
+		if (friends->machines[index].address == address)
+			return index;
+	return -1;
+}
+
+static void card_heard(const struct card_packet *packet)
+{
+	const unsigned char *bytes = packet->bytes;
+	int from, to;
+
+	if (packet->size < CARD_HEADER_SIZE || bytes[0] != CARD_VERSION || (bytes[1] != CARD_ASK && bytes[1] != CARD_ANSWER) ||
+		(bytes[1] == CARD_ASK && packet->size != CARD_HEADER_SIZE) ||
+		(bytes[1] == CARD_ANSWER && packet->size != CARD_ANSWER_SIZE) || !friends->in_game)
+	{
+		friends->dropped_malformed++;
+		return;
+	}
+	from = bytes[2];
+	to = bytes[3];
+	if (from >= CARD_MACHINES || to >= CARD_MACHINES || from == to)
+	{
+		friends->dropped_malformed++;
+		return;
+	}
+	if (friends->game_hosting)
+	{
+		/* (the sender's machine as this host has it, whatever it said) */
+		int sender = card_machine_of(packet->address);
+		unsigned char relayed[CARD_ANSWER_SIZE];
+
+		if (sender < 0 || sender == friends->game_machine)
+		{
+			friends->dropped_forged++;
+			return;
+		}
+		from = sender;
+		if (to != friends->game_machine)
+		{
+			struct card_machine *machine = &friends->machines[sender];
+
+			if (!friends->machines[to].address ||
+				(machine->relayed_time && !elapsed(machine->relayed_time, CARD_RELAY_MACHINE_INTERVAL)) ||
+				!budget_left(&friends->card_relay_budget, CARD_RELAY_BUDGET, CARD_RELAY_INTERVAL, 1))
+			{
+				friends->dropped_rate++;
+				return;
+			}
+			machine->relayed_time = now_stamp();
+			memcpy(relayed, bytes, (size_t)packet->size);
+			relayed[2] = (unsigned char)from;
+			card_queue(friends->machines[to].address, relayed, packet->size);
+			return;
+		}
+	}
+	else if (!packet->from_host || to != friends->game_machine)
+	{
+		/* (a joiner hears cards from its host alone, to its own machine) */
+		friends->dropped_forged++;
+		return;
+	}
+	if (bytes[1] == CARD_ASK)
+	{
+		struct card_machine *machine = &friends->machines[from];
+
+		/* (friends off, appearing offline: nothing; never told why) */
+		if (!friends_on() || friends->appear_offline)
+			return;
+		if (machine->answered_time && !elapsed(machine->answered_time, CARD_ANSWER_INTERVAL))
+		{
+			friends->dropped_rate++;
+			return;
+		}
+		machine->answered_time = now_stamp();
+		card_answer(from, bytes + 4);
+		platform_log("friends: a player in this game (machine %d) asked for this machine's friend card; answered", from);
+		return;
+	}
+	/* an answer: to an ask this machine made of that machine, signed by the
+	key it holds */
+	{
+		struct card_machine *machine = &friends->machines[from];
+		unsigned char data[64 + CARD_ANSWER_SIZE];
+		const unsigned char *key = bytes + CARD_HEADER_SIZE;
+		char name[P2P_FRIEND_NAME_SIZE];
+		int size;
+
+		if (!machine->asking || !p2p_equal(machine->nonce, bytes + 4, NONCE_LENGTH) ||
+			bytes[CARD_HEADER_SIZE + P2P_KEY_SIZE] > NAME_LENGTH)
+		{
+			friends->dropped_replays++;
+			return;
+		}
+		card_signed_data(bytes, data, &size);
+		if (!key_usable(key) || !p2p_ed25519_verify(key, data, size, bytes + CARD_ANSWER_SIZE - P2P_SIGNATURE_SIZE))
+		{
+			friends->dropped_forged++;
+			platform_log("friends: a friend card that is not its key's dropped");
+			return;
+		}
+		if (!clean_text(name, NAME_LENGTH, bytes + CARD_HEADER_SIZE + P2P_KEY_SIZE + 1,
+			bytes[CARD_HEADER_SIZE + P2P_KEY_SIZE], 1))
+		{
+			snprintf(name, sizeof(name), "Player");
+		}
+		machine->asking = 0;
+		machine->unanswered = 0;
+		machine->has_card = 1;
+		memcpy(machine->key, key, P2P_KEY_SIZE);
+		snprintf(machine->name, sizeof(machine->name), "%s", name);
+		platform_log("friends: %s (machine %d) answered with their friend card", name, from);
+		friends->card_action = machine->intent;
+		memcpy(friends->card_action_key, key, P2P_KEY_SIZE);
+		snprintf(friends->card_action_name, sizeof(friends->card_action_name), "%s", name);
+	}
+}
+
+/* (p2p.c, under p2p_lock) a card heard from a peer (its virtual address;
+from_host: the host this machine joined): queued */
+void p2p_friends_tunnel_heard(unsigned long address, int from_host, const unsigned char *bytes, int size)
+{
+	struct card_packet *packet;
+
+	if (size <= 0 || size > CARD_ANSWER_SIZE)
+		return;
+	pthread_mutex_lock(&friends_lock);
+	if (friends->card_inbound_count >= MAXIMUM_CARD_INBOUND)
+		friends->dropped_rate++;
+	else
+	{
+		packet = &friends->card_inbound[friends->card_inbound_count++];
+		packet->address = address;
+		packet->from_host = from_host;
+		packet->size = size;
+		memcpy(packet->bytes, bytes, (size_t)size);
+	}
+	pthread_mutex_unlock(&friends_lock);
+}
+
+/* (p2p.c, under p2p_lock) the cards to send: the index-th (its peer, 0
+the host): its size, or -1 past the end; then all let go */
+int p2p_friends_tunnel_outgoing(int index, unsigned long *address, unsigned char *bytes, int capacity)
+{
+	int size = -1;
+
+	pthread_mutex_lock(&friends_lock);
+	if (index >= 0 && index < friends->card_outbound_count && friends->card_outbound[index].size <= capacity)
+	{
+		*address = friends->card_outbound[index].address;
+		size = friends->card_outbound[index].size;
+		memcpy(bytes, friends->card_outbound[index].bytes, (size_t)size);
+	}
+	pthread_mutex_unlock(&friends_lock);
+	return size;
+}
+
+void p2p_friends_tunnel_sent(void)
+{
+	pthread_mutex_lock(&friends_lock);
+	friends->card_outbound_count = 0;
+	pthread_mutex_unlock(&friends_lock);
+}
+
+/* (p2p_friends_update, friends_lock held) the cards heard, the asks
+unanswered */
+static void cards_update(void)
+{
+	int index;
+
+	while (friends->card_inbound_count)
+	{
+		struct card_packet packet = friends->card_inbound[0];
+
+		memmove(&friends->card_inbound[0], &friends->card_inbound[1],
+			sizeof(friends->card_inbound[0]) * (size_t)(friends->card_inbound_count - 1));
+		friends->card_inbound_count--;
+		card_heard(&packet);
+	}
+	for (index = 0; index < CARD_MACHINES && friends->in_game; index++)
+	{
+		struct card_machine *machine = &friends->machines[index];
+
+		if (machine->asking && elapsed(machine->asked_time, CARD_ANSWER_TIME))
+		{
+			machine->asking = 0;
+			machine->unanswered = 1;
+			platform_log("friends: machine %d did not answer for its friend card (friends off, appearing offline, "
+				"or an older build)", index);
+		}
+	}
+}
+
+void p2p_friends_set_game(int machine, int hosting, const unsigned long *addresses, int count)
+{
+	int index;
+
+	pthread_mutex_lock(&friends_lock);
+	if (machine < 0 || machine >= CARD_MACHINES)
+	{
+		if (friends->in_game)
+		{
+			/* (the game over: its players' cards forgotten) */
+			memset(friends->machines, 0, sizeof(friends->machines));
+			friends->card_inbound_count = 0;
+			friends->in_game = 0;
+		}
+		pthread_mutex_unlock(&friends_lock);
+		return;
+	}
+	if (!friends->in_game || friends->game_machine != machine || friends->game_hosting != (hosting != 0))
+	{
+		memset(friends->machines, 0, sizeof(friends->machines));
+		friends->game_said = 0;
+	}
+	friends->in_game = 1;
+	friends->game_machine = machine;
+	friends->game_hosting = hosting != 0;
+	for (index = 0; index < CARD_MACHINES; index++)
+	{
+		unsigned long address = hosting && addresses && index < count && index != machine ? addresses[index] : 0;
+
+		/* (internet play's virtual addresses, 100.64.0.0/10, in network byte
+		order as p2p.c has them; the game's may be in host byte order; any
+		other is no peer's) */
+		if ((address & 0xFF) == 100 && ((address >> 8) & 0xC0) == 0x40)
+			;
+		else if ((address >> 24 & 0xFF) == 100 && ((address >> 16) & 0xC0) == 0x40)
+			address = (address & 0xFF) << 24 | (address & 0xFF00) << 8 | (address >> 8 & 0xFF00) | (address >> 24 & 0xFF);
+		else
+			address = 0;
+
+		/* (a machine gone, or another in its place: what was known of it
+		forgotten) */
+		if (friends->machines[index].address != address && friends->game_hosting)
+			memset(&friends->machines[index], 0, sizeof(friends->machines[index]));
+		friends->machines[index].address = address;
+	}
+	if (!friends->game_said)
+	{
+		friends->game_said = 1;
+		platform_log("friends: in a game, machine %d%s", machine, hosting ? ", hosting (cards relayed)" : "");
+	}
+	pthread_mutex_unlock(&friends_lock);
+}
+
+int p2p_friends_player_ask(int machine, int intent)
+{
+	unsigned char packet[CARD_HEADER_SIZE];
+	struct card_machine *record;
+	unsigned long address;
+	int result = P2P_FRIENDS_DONE;
+
+	pthread_mutex_lock(&friends_lock);
+	load();
+	if (!friends->in_game || machine < 0 || machine >= CARD_MACHINES || machine == friends->game_machine)
+		result = P2P_FRIENDS_GONE;
+	else if (!friends_on() || friends->host.crossplay)
+		result = P2P_FRIENDS_OFFLINE;
+	else if (friends->appear_offline)
+		result = P2P_FRIENDS_APPEARING_OFFLINE;
+	else if (!card_route(machine, &address))
+		result = P2P_FRIENDS_GONE;
+	else
+	{
+		record = &friends->machines[machine];
+		if (record->has_card)
+		{
+			/* (asked before this game: its card kept) */
+			friends->card_action = intent;
+			memcpy(friends->card_action_key, record->key, P2P_KEY_SIZE);
+			snprintf(friends->card_action_name, sizeof(friends->card_action_name), "%s", record->name);
+		}
+		else if (record->asking || (record->asked_time && !elapsed(record->asked_time, CARD_ASK_INTERVAL)))
+			result = P2P_FRIENDS_TOO_SOON;
+		else
+		{
+			record->asking = 1;
+			record->unanswered = 0;
+			record->intent = intent;
+			record->asked_time = now_stamp();
+			posix_random_bytes(record->nonce, NONCE_LENGTH);
+			packet[0] = CARD_VERSION;
+			packet[1] = CARD_ASK;
+			packet[2] = (unsigned char)friends->game_machine;
+			packet[3] = (unsigned char)machine;
+			memcpy(packet + 4, record->nonce, NONCE_LENGTH);
+			card_queue(address, packet, CARD_HEADER_SIZE);
+			platform_log("friends: asked machine %d for its friend card (to %s)", machine,
+				intent == P2P_FRIENDS_PLAYER_BLOCK ? "block it" : "add it");
+		}
+	}
+	pthread_mutex_unlock(&friends_lock);
+	return result;
+}
+
+/* (friends_lock held) the lists' state of a key: a friend, a request sent
+to its code, blocked, or none */
+static int key_list_state(const unsigned char *key)
+{
+	char code[P2P_FRIEND_CODE_LENGTH + 1];
+
+	if (find_friend(key))
+		return P2P_FRIENDS_PLAYER_FRIEND;
+	if (find_blocked(key) >= 0)
+		return P2P_FRIENDS_PLAYER_BLOCKED;
+	code_of_key(key, code);
+	if (find_outgoing(code) >= 0)
+		return P2P_FRIENDS_PLAYER_REQUEST_SENT;
+	if (find_request(key) >= 0)
+		return P2P_FRIENDS_PLAYER_ASKED_YOU;
+	return P2P_FRIENDS_PLAYER_NONE;
+}
+
+int p2p_friends_player_state(int machine)
+{
+	int state = P2P_FRIENDS_PLAYER_NONE;
+
+	pthread_mutex_lock(&friends_lock);
+	if (friends->in_game && machine >= 0 && machine < CARD_MACHINES)
+	{
+		const struct card_machine *record = &friends->machines[machine];
+
+		if (machine == friends->game_machine)
+			state = P2P_FRIENDS_PLAYER_THIS_VITA;
+		else if (record->has_card)
+			state = key_list_state(record->key);
+		else if (record->asking)
+			state = P2P_FRIENDS_PLAYER_ASKING;
+		else if (record->unanswered)
+			state = P2P_FRIENDS_PLAYER_NOT_TAKING;
+	}
+	pthread_mutex_unlock(&friends_lock);
+	return state;
+}
+
+/* (p2p_friends_update, the lock let go) what an answered card asked */
+static void card_action_do(int action, const unsigned char *key, const char *name)
+{
+	char code[P2P_FRIEND_CODE_LENGTH + 1], shown[P2P_FRIEND_CODE_SIZE];
+
+	if (action == P2P_FRIENDS_PLAYER_BLOCK)
+	{
+		pthread_mutex_lock(&friends_lock);
+		if (block_key(key, name) == P2P_FRIENDS_DONE)
+		{
+			friends->dirty = 1;
+			platform_log("friends: blocked %s (a player in this game)", name);
+		}
+		pthread_mutex_unlock(&friends_lock);
+		save(1);
+		return;
+	}
+	code_of_key(key, code);
+	code_shown(code, shown, sizeof(shown));
+	platform_log("friends: adding %s (a player in this game): %s", name, p2p_friends_add_text(p2p_friends_add(shown)));
+}
+
 /* ---------- internet play's side (p2p_internal.h) */
 
 /* whether friends want the brokers: internet play runs and friends are on */
@@ -2793,6 +3320,9 @@ void p2p_friends_update(const struct p2p_friends_host *host)
 #ifndef HALO_RELEASE
 	test_steps();
 #endif
+	/* the game's players' cards: answered only with friends on, relayed by a
+	host whatever its own (card_heard) */
+	cards_update();
 	if (!friends_on())
 	{
 		/* (friends turned off with the brokers still there: said once) */
@@ -2836,6 +3366,21 @@ void p2p_friends_update(const struct p2p_friends_host *host)
 		handle(entry.which, entry.payload, entry.size);
 		handled++;
 		pthread_mutex_unlock(&friends_lock);
+		pthread_mutex_lock(&friends_lock);
+	}
+	/* what an answered card asked, done with the lock let go (the lists' own
+	calls take it) */
+	if (friends->card_action)
+	{
+		int action = friends->card_action;
+		unsigned char key[P2P_KEY_SIZE];
+		char name[P2P_FRIEND_NAME_SIZE];
+
+		friends->card_action = 0;
+		memcpy(key, friends->card_action_key, P2P_KEY_SIZE);
+		memcpy(name, friends->card_action_name, sizeof(name));
+		pthread_mutex_unlock(&friends_lock);
+		card_action_do(action, key, name);
 		pthread_mutex_lock(&friends_lock);
 	}
 	/* the requests sent: often at first, then now and then; old ones go */
@@ -3610,6 +4155,8 @@ const char *p2p_friends_outcome_text(int outcome)
 		return T("Invited a moment ago");
 	case P2P_FRIENDS_FULL:
 		return T("The list is full");
+	case P2P_FRIENDS_APPEARING_OFFLINE:
+		return T("You're appearing offline");
 	}
 	return "";
 }

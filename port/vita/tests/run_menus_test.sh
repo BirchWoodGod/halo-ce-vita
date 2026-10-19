@@ -131,6 +131,14 @@
 #            profile screen, then OpenCE's server browser (B: the profile again, B: Multiplayer);
 #            the Halo 3 lobby's BROWSE GAMES on ONLINE: the profile, then the games browser;
 #            internet play off: SERVER BROWSER says how to turn it on, no profile
+#   h3players  the Halo 3 PLAYERS screen (menus/halo3/players.xml; the owner: "Can I move the
+#            cursor over the player like on Halo 3 and add friend?"), HALO_TEST_PROFILE's
+#            profile: SYSTEM LINK CO-OP hosted from the campaign lobby, the game's lobby;
+#            Triangle: PLAYERS, this machine's player and three made up
+#            (HALO_TEST_PLAYERS_FAKE=3); Cross on one: its options; ADD FRIEND with friends
+#            not online says go online first; this machine's own player has no options;
+#            Circle: the game's lobby again (the friend request itself: run_netns_online_test.sh
+#            friendsplayers)
 #   h3friends the Halo 3 FRIENDS screen (menus/halo3/friends.xml; port/linux/src/p2p_friends.c)
 #            over a save's friends made at test time (run_p2p_friends_test.sh seed: two
 #            friends, a request, a request sent, a blocked player; shown online,
@@ -222,7 +230,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3friends h3friendspanel browserprofile}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3friends h3friendspanel browserprofile h3players}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
@@ -597,6 +605,36 @@ for case in $cases; do
 		grep -aq "menus: h3 campaign: co-op was not hosted" "$log" && fail h3coop "co-op was not hosted"
 		grep -a "ui: screen" "$log" | tail -1 | grep -q 'connected_pregame_screen' ||
 			fail h3coop "the game's lobby did not stay open (the co-op game ended)" ;;
+	h3players)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "--- h3players"; echo "SKIP: no HALO_TEST_PROFILE"; continue
+		fi
+		# (CAMPAIGN, the profile: the lobby; up to NETWORK, A, down twice: SYSTEM LINK CO-OP; down three
+		# to START GAME, A: hosted, the game's lobby; Triangle: PLAYERS, this machine's player and three
+		# made up (HALO_TEST_PLAYERS_FAKE); down to the first other one, Cross: its options, Back
+		# focused; down, Cross: ADD FRIEND, friends not online (online off): go online first; Cross on
+		# this machine's own player: no options; Circle: the game's lobby again)
+		players_pad="wait:150:3000 a wait:150:3000 a wait:150:3000 up:150:600 a wait:150:2500 down:150:600 down:150:600 a wait:150:2500"
+		players_pad="$players_pad down:150:600 down:150:600 down:150:600 a wait:150:8000 y wait:150:2500 @00-players:0:300"
+		players_pad="$players_pad down:150:700 a wait:150:2000 @01-options:0:300 down:150:700 a wait:150:2000 @02-added:0:300"
+		players_pad="$players_pad up:150:700 a wait:150:2000 b wait:150:3000"
+		profile_from=$HALO_TEST_PROFILE run h3players "$menus_data" 60 "$players_pad" \
+			HALO_MENU_STYLE=halo3 HALO_TEST_PLAYERS_FAKE=3
+		check_h3 h3players halo3
+		log=$out/h3players/run.log
+		grep -a "menus: h3 players\|PLAYERS screen" "$log" | head -12
+		grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected.pregame.connected_pregame_screen" "$log" ||
+			fail h3players "the game's lobby (the waiting screen) did not open"
+		grep -aq "menus: the PLAYERS screen opened (the game's lobby)" "$log" &&
+			grep -aq "ui: screen pc.h3.players.screen" "$log" || fail h3players "Triangle in the game's lobby did not open PLAYERS"
+		grep -aq "menus: h3 players: 4 players, this machine 0" "$log" || fail h3players "PLAYERS did not list the four players"
+		grep -aq "menus: h3 players: options for Spartan 1 (machine 10)" "$log" &&
+			grep -aq "ui: screen pc.h3.players.options" "$log" || fail h3players "Cross on a player did not open its options"
+		grep -aq "menus: h3 players: Go online first" "$log" || fail h3players "ADD FRIEND offline did not say go online first"
+		grep -aq "menus: h3 players: A player of this PS Vita" "$log" ||
+			fail h3players "this machine's own player was given options"
+		grep -a "ui: screen" "$log" | tail -1 | grep -q 'connected_pregame_screen' ||
+			fail h3players "Circle did not go back to the game's lobby" ;;
 	h3scenes)
 		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
 			echo "--- h3scenes"; echo "SKIP: no HALO_TEST_PROFILE"; continue
@@ -1232,7 +1270,7 @@ for case in $cases; do
 		grep -aq "4way_start2join_screen\|menus: Server Browser: the profile" "$log" &&
 			fail browserprofile "internet play off: the profile screen opened anyway" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3friends|h3friendspanel|browserprofile]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3friends|h3friendspanel|browserprofile|h3players]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"

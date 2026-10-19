@@ -179,6 +179,16 @@
 #            (replay-at=), then three forgeries (forge-at=: a flipped byte,
 #            another key's signature, another sender): the joiner must drop
 #            each, and nothing of them show
+#   friendsplayers  no codes typed (the owner: "Can I move the cursor over the player
+#            like on Halo 3 and add friend?"): the joiner joins the host's public game,
+#            and HALO_TEST_ADD_AT seconds in (25) its PLAYERS screen opens and adds the
+#            host's player (HALO_TEST_FRIENDS_PLAYERS: friends_game.c), as ADD FRIEND
+#            does: the joiner asks for the host's friend card over internet play (a
+#            nonce alone), the host answers with it signed, the joiner sends a friend
+#            request to it, the host accepts (HALO_TEST_FRIENDS accept): both friends
+#   friendsplayersoff  as friendsplayers, the host appearing offline: no card, no
+#            request, the joiner told none came
+#   friendsplayersnone  as friendsplayers, the host's friends off: the same
 #   adhoc    online off, ad hoc on: the two machines' only link to each other
 #            is an emulated ad hoc group (HALO_NET_ADHOC_EMULATE)
 #   many     online off, the host and HALO_TEST_JOINERS joiners (3) on one
@@ -3657,8 +3667,57 @@ friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged)
 		[ "$two" -ge 20 ] || fail "the joiner played the host's game for $two s with two players (20 wanted)"
 	fi
 	;;
+friendsplayers|friendsplayersoff|friendsplayersnone)
+	# (no codes typed: the joiner adds the host from the game's players, the two
+	# machines' friend cards exchanged over internet play first)
+	host_steps="accept"
+	host_extra="HALO_NET_HOST_PUBLIC=true"
+	case $mode in
+	friendsplayersoff) host_extra="$host_extra HALO_FRIENDS_APPEAR_OFFLINE=true" ;;
+	friendsplayersnone) host_extra="$host_extra HALO_FRIENDS=false" ;;
+	esac
+	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env $host_extra HALO_NET_LOBBY_NAME=Alpha \
+		"HALO_TEST_FRIENDS=$host_steps" ${HALO_TEST_HOST_ENV:-}; host_pid=$last_pid
+	run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=join-public HALO_TEST_INPUT=bot:2 HALO_NET_LOBBY_NAME=Bravo \
+		"HALO_TEST_FRIENDS_PLAYERS=add@${HALO_TEST_ADD_AT:-25}"; join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log
+	echo "--- host"; grep -a "friends:" "$hl" | grep -av "is online:" | head -16
+	echo "--- joiner"; grep -a "friends:\|PLAYERS screen\|h3 players: options" "$jl" | grep -av "is online:" | head -16
+	grep -aq "system link: in another's lobby\|system link: in a network game" "$jl" || fail "the joiner did not get into the host's game"
+	grep -aq "friends: in a game, machine 0, hosting (cards relayed)" "$hl" || fail "the host was not told its game"
+	grep -aq "friends: in a game, machine [1-9]" "$jl" || fail "the joiner was not told its game"
+	grep -aq "friends: test: the PLAYERS screen opened" "$jl" || fail "the joiner's PLAYERS screen did not open"
+	grep -aq "menus: h3 players: options for .* (machine 0)" "$jl" || fail "the joiner did not choose the host's player"
+	grep -aq "friends: asked machine 0 for its friend card (to add it)" "$jl" || fail "the joiner did not ask for the host's card"
+	# (nothing of the asker's goes with the ask: its friend key is never in the host's log)
+	grep -aq "hcev/f1/" "$out/broker.log" && [ $mode = friendsplayersnone ] && fail "friends off, yet the broker carried friends' topics"
+	case $mode in
+	friendsplayers)
+		grep -aq "friends: a player in this game (machine [1-9]) asked for this machine's friend card; answered" "$hl" ||
+			fail "the host did not answer with its card"
+		grep -aq "friends: .* (machine 0) answered with their friend card" "$jl" || fail "the joiner did not hear the host's card"
+		grep -aq "friends: adding .* (a player in this game): Friend request sent" "$jl" || fail "the joiner did not send a request"
+		grep -aq "friends: a friend request from " "$hl" || fail "the host did not hear the request"
+		grep -aq "friends: accepted .* friend request; now friends" "$hl" || fail "the host did not accept"
+		grep -aq "friends: .* accepted the friend request; now friends" "$jl" || fail "the joiner did not become the host's friend"
+		grep -aq "friends: a friend card that is not its key's dropped" "$jl" && fail "the host's card did not verify"
+		;;
+	friendsplayersoff|friendsplayersnone)
+		grep -aq "asked for this machine's friend card; answered" "$hl" && fail "the host answered with its card"
+		grep -aq "answered with their friend card" "$jl" && fail "the joiner got the host's card"
+		grep -aq "friends: machine 0 did not answer for its friend card" "$jl" || fail "the joiner was not told no answer came"
+		grep -aq "friends: a friend request from " "$hl" && fail "a request reached the host"
+		grep -aq "now friends" "$hl" "$jl" && fail "a friendship was made"
+		;;
+	esac
+	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+	echo "joiner's seconds with two players playing: $two"
+	[ "$two" -ge 20 ] || fail "the joiner played the host's game for $two s with two players (20 wanted)"
+	;;
 *)
-	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3online|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged" >&2
+	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3online|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone" >&2
 	exit 2
 	;;
 esac

@@ -22,6 +22,10 @@ pending, so that every handler is reached. The input's first byte says how:
 	5  the rest as T's list file (its hash made right with the second
 	   byte's 1)
 	6  the rest as T's identity file (its hash made right likewise)
+	7  the rest as a friend card heard on the tunnel (the second byte's 8:
+	   from the host; 16: T hosts the game, relaying)
+	8  the rest as a card's answer from S to an ask T made, signed by S (its
+	   name and key as the input has them)
 
 and its second byte its flags: the clock stepped, the header's type and
 recipient kept from the input, the list read after. After each input the
@@ -169,7 +173,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 		setup();
 	if (size < 2)
 		return 0;
-	mode = data[0] % 7;
+	mode = data[0] % 9;
 	flags = data[1];
 	data += 2;
 	size -= 2;
@@ -216,6 +220,57 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 			payload);
 		use(T);
 		break;
+	}
+	case 7:
+	case 8:
+	{
+		unsigned long addresses[CARD_MACHINES];
+		unsigned char card[CARD_ANSWER_SIZE + 8];
+		int length = size > sizeof(card) ? (int)sizeof(card) : (int)size, index;
+
+		for (index = 0; index < CARD_MACHINES; index++)
+			addresses[index] = 100UL | 64UL << 8 | (unsigned long)(index + 2) << 24;
+		use(T);
+		if (flags & 16)
+			p2p_friends_set_game(0, 1, addresses, CARD_MACHINES);
+		else
+			p2p_friends_set_game(1, 0, NULL, 0);
+		memcpy(card, data, (size_t)length);
+		if (mode == 8 && !(flags & 16))
+		{
+			/* (an ask of machine 2, answered by S as a host relays it) */
+			unsigned char signed_data[64 + CARD_ANSWER_SIZE];
+			int signed_size;
+
+			machines[T].machines[2].asked_time = 0;
+			machines[T].machines[2].asking = 0;
+			machines[T].machines[2].has_card = 0;
+			p2p_friends_player_ask(2, flags & 32 ? P2P_FRIENDS_PLAYER_BLOCK : P2P_FRIENDS_PLAYER_ADD);
+			machines[T].card_outbound_count = 0;
+			memset(card, 0, sizeof(card));
+			memcpy(card + CARD_HEADER_SIZE + P2P_KEY_SIZE, data, (size_t)(length > 1 + NAME_LENGTH ? 1 + NAME_LENGTH : length));
+			card[0] = CARD_VERSION;
+			card[1] = CARD_ANSWER;
+			card[2] = 2;
+			card[3] = 1;
+			memcpy(card + 4, machines[T].machines[2].nonce, NONCE_LENGTH);
+			memcpy(card + CARD_HEADER_SIZE, machines[S].key, P2P_KEY_SIZE);
+			use(S);
+			card_signed_data(card, signed_data, &signed_size);
+			p2p_ed25519_sign(machines[S].seed, machines[S].key, signed_data, signed_size,
+				card + CARD_ANSWER_SIZE - P2P_SIGNATURE_SIZE);
+			length = CARD_ANSWER_SIZE;
+			use(T);
+		}
+		p2p_friends_tunnel_heard(addresses[(flags >> 2) % 4], (flags & 8) != 0, card, length);
+		clock_now += 50;
+		p2p_friends_update(&hosts[T]);
+		machines[T].outbound_count = 0;
+		machines[T].card_outbound_count = 0;
+		if (flags & 4)
+			check_entries();
+		p2p_friends_player_state((flags >> 1) % CARD_MACHINES);
+		return 0;
 	}
 	case 5:
 	case 6:
@@ -292,7 +347,7 @@ static void make_seeds(void)
 	setup();
 	for (index = 0; index < SEEDS; index++)
 	{
-		int mode = index % 7;
+		int mode = index % 9;
 
 		seeds[index][0] = (unsigned char)mode;
 		seeds[index][1] = (unsigned char)(index * 37);

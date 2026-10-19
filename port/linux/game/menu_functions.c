@@ -103,8 +103,15 @@ halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
 #include "../src/forge_store.h"
 #include "scene_packs.h"
 #include "networking/network_client_manager.h"
+#include "networking/network_game_globals.h"
+#include "networking/network_game_manager.h"
 #include "network_connection.h"
 #include "player_models.h"
+#include "game/players.h"
+#include "game/game_engine.h"
+#include "networking/network_server_manager.h"
+#include "halo_port_limits.h"
+#include "input/input.h"
 
 #include <math.h>
 #include <stdarg.h>
@@ -290,6 +297,11 @@ enum
 	_function_h3_friends_page_up,
 	_function_h3_friends_page_down,
 	_function_browser_profile_first,
+	_function_h3_players_init,
+	_function_h3_players_act,
+	_function_h3_players_option,
+	_function_h3_players_page_up,
+	_function_h3_players_page_down,
 };
 
 /* in port_game_data_input_names' order */
@@ -332,6 +344,8 @@ enum
 	_input_h3_friends,
 	_input_h3_friends_options,
 	_input_h3_friends_panel,
+	_input_h3_players,
+	_input_h3_players_options,
 };
 
 /* what a line of typing is for */
@@ -6227,6 +6241,394 @@ static void h3_friends_panel_update(struct widget_instance *panel)
 	}
 }
 
+
+/* ---- the Halo 3 PLAYERS screen (halo3/players.xml): the players of the
+network game this machine plays, the cursor on one, Cross for its options
+(ADD FRIEND, BLOCK: p2p_friends_player_ask, the two machines' friend cards
+exchanged over internet play first). The players as the game's record has
+them (network_game_client_get_game): each name, team and machine; this
+machine's own marked, no options */
+
+#define H3_PLAYERS_ROWS 10
+#define H3_PLAYERS_MESSAGE_MILLISECONDS 6000
+
+struct h3_player
+{
+	char name[24];
+	int machine;
+	int team;
+};
+
+static struct
+{
+	struct browser_view view;
+	short page;
+	struct h3_player players[HALO_PORT_MAXIMUM_NETWORK_PLAYERS + 8];
+	int count;
+	int own_machine;
+	boolean teams;
+	/* the player chosen, by its machine and name */
+	int chosen_machine;
+	char chosen_name[24];
+	char message[160];
+	unsigned long message_time;
+	struct widget_instance *list;
+	long list_creation_time;
+} h3_players;
+
+/* the game's players (and, the tests', made-up ones: HALO_TEST_PLAYERS_FAKE) */
+static void h3_players_read(void)
+{
+	struct network_game_client *client = global_network_game_client_get();
+	int index;
+
+	h3_players.count = 0;
+	h3_players.own_machine = -1;
+	h3_players.teams = FALSE;
+	if (client && !network_game_is_splitscreen_local())
+	{
+		struct network_game *game = network_game_client_get_game(client);
+
+		h3_players.own_machine = network_game_client_get_machine_index(client);
+		h3_players.teams = game->variant.universal_variant.teams != 0;
+		for (index = 0; index < game->player_count && index < HALO_PORT_MAXIMUM_NETWORK_PLAYERS; index++)
+		{
+			struct network_player *player = &game->players[index];
+			struct h3_player *entry = &h3_players.players[h3_players.count];
+			int character;
+
+			if (!network_player_is_valid(player))
+				continue;
+			for (character = 0; character < 11 && player->name[character]; character++)
+				entry->name[character] = player_name_character_ascii(player->name[character]);
+			entry->name[character] = 0;
+			entry->machine = player->machine_index;
+			entry->team = player->team_index;
+			h3_players.count++;
+		}
+	}
+#ifndef HALO_RELEASE
+	{
+		char const *fake = getenv("HALO_TEST_PLAYERS_FAKE");
+		int count = fake ? atoi(fake) : 0;
+
+		for (index = 0; index < count && index < 8; index++)
+		{
+			struct h3_player *entry = &h3_players.players[h3_players.count++];
+
+			snprintf(entry->name, sizeof(entry->name), "Spartan %d", index + 1);
+			entry->machine = 10 + index;
+			entry->team = index & 1;
+		}
+		if (count && h3_players.own_machine < 0)
+			h3_players.own_machine = 0;
+	}
+#endif
+}
+
+static void h3_players_message(char const *text)
+{
+	snprintf(h3_players.message, sizeof(h3_players.message), "%s", text);
+	h3_players.message_time = system_milliseconds();
+	platform_log("menus: h3 players: %s", text);
+}
+
+static char const *h3_players_state_text(int state)
+{
+	switch (state)
+	{
+	case P2P_FRIENDS_PLAYER_THIS_VITA:
+		return T("This PS Vita");
+	case P2P_FRIENDS_PLAYER_ASKING:
+		return T("Asking...");
+	case P2P_FRIENDS_PLAYER_NOT_TAKING:
+		return T("Not taking friend requests");
+	case P2P_FRIENDS_PLAYER_FRIEND:
+		return T("Friend");
+	case P2P_FRIENDS_PLAYER_REQUEST_SENT:
+		return T("Request sent");
+	case P2P_FRIENDS_PLAYER_ASKED_YOU:
+		return T("Wants to be your friend");
+	case P2P_FRIENDS_PLAYER_BLOCKED:
+		return T("Blocked");
+	}
+	return "";
+}
+
+static int h3_players_state(struct h3_player const *player)
+{
+	return player->machine == h3_players.own_machine ? P2P_FRIENDS_PLAYER_THIS_VITA :
+		p2p_friends_player_state(player->machine);
+}
+
+static void h3_players_initialize(void)
+{
+	browser_view_reset(&h3_players.view);
+	h3_players.page = 0;
+	/* (the player chosen kept: back from its options, the cursor is on it
+	again; menu_functions_players_open forgets it) */
+	h3_players_read();
+	platform_log("menus: h3 players: %d players, this machine %d", h3_players.count, h3_players.own_machine);
+	{
+		int index;
+
+		for (index = 0; index < h3_players.count; index++)
+			platform_log("menus: h3 players: %s (machine %d)%s", h3_players.players[index].name,
+				h3_players.players[index].machine, h3_players.players[index].machine == h3_players.own_machine ?
+				" [this PS Vita]" : "");
+	}
+}
+
+static int h3_players_chosen_index(void)
+{
+	int index;
+
+	for (index = 0; index < h3_players.count; index++)
+		if (h3_players.players[index].machine == h3_players.chosen_machine &&
+			!strcmp(h3_players.players[index].name, h3_players.chosen_name))
+			return index;
+	return -1;
+}
+
+static char const *h3_players_team_name(int team)
+{
+	static char const *const names[] = { N_("Red"), N_("Blue"), N_("Green"), N_("Yellow"), N_("Purple"),
+		N_("Orange"), N_("Brown"), N_("Pink") };
+
+	return team >= 0 && team < (int)NUMBEROF(names) ? T(names[team]) : "-";
+}
+
+/* (port h3 players) the rows, the chosen one's facts */
+static void h3_players_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *child, *focused = list->focused_child, *focus = NULL;
+	long index, focused_row = NONE, target;
+	char text[192], status[96];
+
+	h3_players_read();
+	if (list != h3_players.list || list->creation_time != h3_players.list_creation_time)
+	{
+		h3_players.list = list;
+		h3_players.list_creation_time = list->creation_time;
+		browser_view_reset(&h3_players.view);
+		focused = NULL;
+	}
+	for (index = 0, child = list->child; child; child = child->next)
+	{
+		if (strncmp(child->name, "row_", 4))
+			continue;
+		if (child == focused)
+			focused_row = index;
+		index++;
+	}
+	target = browser_view_follow(&h3_players.view, H3_PLAYERS_ROWS, h3_players.count, (int)focused_row,
+		h3_players_chosen_index(), h3_players.page);
+	h3_players.page = 0;
+	for (index = 0, child = list->child; child; child = child->next)
+	{
+		struct h3_player const *player;
+
+		if (strncmp(child->name, "row_", 4))
+			continue;
+		if (index >= h3_players.view.visible)
+		{
+			widget_instance_set_visibility_recursive(child, FALSE);
+			child->disabled = TRUE;
+			index++;
+			continue;
+		}
+		player = &h3_players.players[h3_players.view.offset + index];
+		widget_instance_set_visibility_recursive(child, TRUE);
+		child->disabled = FALSE;
+		row_column(child, "row_name", player->name);
+		row_column(child, "row_team", h3_players.teams ? h3_players_team_name(player->team) : "-");
+		row_column(child, "row_state", h3_players_state_text(h3_players_state(player))[0] ?
+			h3_players_state_text(h3_players_state(player)) : " ");
+		if (index == h3_players.view.row)
+			focus = child;
+		index++;
+	}
+	if (focus && focus != list->focused_child)
+		ui_widget_port_give_focus(list, focus);
+	for (child = list->child; child; child = child->next)
+	{
+		if (!strncmp(child->name, "row_", 4))
+			child->animation.current_frame_index = child == focus ? 1 : 0;
+	}
+	if (target != NONE)
+	{
+		h3_players.chosen_machine = h3_players.players[target].machine;
+		snprintf(h3_players.chosen_name, sizeof(h3_players.chosen_name), "%s", h3_players.players[target].name);
+	}
+	index = h3_players_chosen_index();
+	if (index >= 0)
+	{
+		struct h3_player const *player = &h3_players.players[index];
+
+		if (player->machine == h3_players.own_machine)
+			snprintf(text, sizeof(text), "%s\n%s", player->name, T("A player of this PS Vita"));
+		else
+			snprintf(text, sizeof(text), "%s\n%s", player->name, T("Cross: add them as a friend or block them"));
+		text_show(named(screen, "detail"), text);
+	}
+	else
+		text_show(named(screen, "detail"), h3_players.count ? "" : T("No network game: players show here in one"));
+	text_show(named(screen, "players_message"), h3_players.message[0] &&
+		system_milliseconds() - h3_players.message_time < H3_PLAYERS_MESSAGE_MILLISECONDS ? h3_players.message : "");
+	p2p_friends_status(status, sizeof(status));
+	snprintf(text, sizeof(text), "%d %s - %s", h3_players.count, h3_players.count == 1 ? T("player") : T("players"),
+		status);
+	text_show(named(screen, "players_status"), text);
+}
+
+/* (port h3 players act: a row's Cross) the options open for another
+machine's player */
+static boolean h3_players_act(struct widget_instance *widget)
+{
+	int index;
+
+	if (widget && !strncmp(widget->name, "row_", 4) && widget->name[4] >= '0' && widget->name[4] <= '9')
+	{
+		long row = atol(widget->name + 4) - 1;
+
+		if (row >= 0 && row < h3_players.view.visible && h3_players.view.offset + row < h3_players.count)
+		{
+			struct h3_player const *player = &h3_players.players[h3_players.view.offset + row];
+
+			h3_players.chosen_machine = player->machine;
+			snprintf(h3_players.chosen_name, sizeof(h3_players.chosen_name), "%s", player->name);
+		}
+	}
+	index = h3_players_chosen_index();
+	if (index < 0)
+		return FALSE;
+	if (h3_players.players[index].machine == h3_players.own_machine)
+	{
+		h3_players_message(T("A player of this PS Vita"));
+		return FALSE;
+	}
+	platform_log("menus: h3 players: options for %s (machine %d)", h3_players.players[index].name,
+		h3_players.players[index].machine);
+	return TRUE;
+}
+
+/* (port h3 players options) the question's words */
+static void h3_players_options_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	int index = h3_players_chosen_index();
+	char text[160];
+
+	if (index < 0)
+		return;
+	text_show(named(screen, "options_title"), h3_players.players[index].name);
+	snprintf(text, sizeof(text), "%s", h3_players_state_text(h3_players_state(&h3_players.players[index])));
+	text_show(named(screen, "options_text"), text[0] ? text : T("Add friend sends a friend request: they accept or decline."));
+}
+
+/* an option for the chosen player (the tests' steps call it too) */
+static void h3_players_do(int intent)
+{
+	int index = h3_players_chosen_index(), outcome;
+	char text[160];
+
+	if (index < 0)
+		return;
+	outcome = p2p_friends_player_ask(h3_players.players[index].machine, intent);
+	if (outcome == P2P_FRIENDS_DONE)
+		snprintf(text, sizeof(text), intent == P2P_FRIENDS_PLAYER_BLOCK ? T("Blocking %s...") :
+			T("Asking %s to be friends..."), h3_players.players[index].name);
+	else
+		snprintf(text, sizeof(text), "%s", p2p_friends_outcome_text(outcome));
+	h3_players_message(text);
+}
+
+/* (port h3 players option: a row of the question) */
+static void h3_players_option(struct widget_instance *widget)
+{
+	if (!widget)
+		return;
+	if (!strcmp(widget->name, "option_add") || strstr(widget->name, "option_add"))
+		h3_players_do(P2P_FRIENDS_PLAYER_ADD);
+	else if (strstr(widget->name, "option_block"))
+		h3_players_do(P2P_FRIENDS_PLAYER_BLOCK);
+}
+
+#define H3_PLAYERS_SCREEN "h3/players/screen"
+#define H3_PLAYERS_PREGAME_SCREEN "ui\\shell\\main_menu\\multiplayer_type_select\\connected\\pregame\\connected_pregame_screen"
+
+/* the PLAYERS screen opened: over the game's lobby (B goes back to it), or in
+a level (the scoreboard, the carnage report); 1 if it opened */
+int menu_functions_players_open(boolean main_menu_loaded)
+{
+	long screen = menu_tags_ingame_screen(H3_PLAYERS_SCREEN);
+	struct widget_instance *active = ui_widget_port_active_screen(0);
+
+	if (screen == NONE)
+		return 0;
+	h3_players.chosen_machine = -1;
+	h3_players.message[0] = 0;
+	if (main_menu_loaded)
+	{
+		if (!active || !ui_widget_load_by_name_or_tag(NULL, screen, NULL, active->local_player_index,
+			active->definition_tag_index, NONE, NONE))
+		{
+			return 0;
+		}
+	}
+	else if (active || !ui_widget_load_by_name_or_tag(NULL, screen, NULL, 0, NONE, NONE, NONE))
+		return 0;
+	platform_log("menus: the PLAYERS screen opened (%s)", main_menu_loaded ? "the game's lobby" :
+		game_engine_showing_postgame() ? "the carnage report" : "the scoreboard");
+	return 1;
+}
+
+/* Triangle in the game's lobby, on the carnage report, or with the
+scoreboard up (Back held): the PLAYERS screen */
+void menu_functions_players_button(boolean main_menu_loaded)
+{
+	struct network_game_client *client = global_network_game_client_get();
+	const struct gamepad_state *pad;
+	struct widget_instance *active;
+
+	if (!client || network_game_is_splitscreen_local() || !input_has_gamepad(0))
+		return;
+	pad = input_get_gamepad_state(0);
+	if (!pad || pad->buttons[_gamepad_analog_button_y] != 1)
+		return;
+	active = ui_widget_port_active_screen(0);
+	if (main_menu_loaded)
+	{
+		long pregame = tag_loaded('DeLa', H3_PLAYERS_PREGAME_SCREEN);
+
+		if (active && pregame != NONE && active->definition_tag_index == pregame)
+			menu_functions_players_open(TRUE);
+	}
+	else if (!active && (game_engine_showing_postgame() || pad->buttons[_gamepad_binary_button_back]))
+		menu_functions_players_open(FALSE);
+}
+
+/* (friends_game.c: the tests' steps) the first other machine's player
+chosen and added, as its options' ADD FRIEND does: 1 if there was one */
+int menu_functions_players_add_first(void)
+{
+	int index;
+
+	h3_players_read();
+	for (index = 0; index < h3_players.count; index++)
+		if (h3_players.players[index].machine != h3_players.own_machine)
+		{
+			h3_players.chosen_machine = h3_players.players[index].machine;
+			snprintf(h3_players.chosen_name, sizeof(h3_players.chosen_name), "%s", h3_players.players[index].name);
+			platform_log("menus: h3 players: options for %s (machine %d)", h3_players.players[index].name,
+				h3_players.players[index].machine);
+			h3_players_do(P2P_FRIENDS_PLAYER_ADD);
+			return 1;
+		}
+	return 0;
+}
+
 /* ---------- public code */
 
 /* (friends_game.c: a friend's game joined, its invite handed on) the System
@@ -6778,6 +7180,20 @@ boolean pc_menu_event_function_invoke(
 	case _function_h3_friends_page_down:
 		h3_friends.page = 1;
 		return TRUE;
+	case _function_h3_players_init:
+		h3_players_initialize();
+		return TRUE;
+	case _function_h3_players_act:
+		return h3_players_act(widget);
+	case _function_h3_players_option:
+		h3_players_option(widget);
+		return TRUE;
+	case _function_h3_players_page_up:
+		h3_players.page = -1;
+		return TRUE;
+	case _function_h3_players_page_down:
+		h3_players.page = 1;
+		return TRUE;
 	case _function_coop_campaign:
 	case _function_unwired:
 	default:
@@ -6916,6 +7332,14 @@ void pc_menu_game_data_function_invoke(
 		break;
 	case _input_h3_friends_panel:
 		h3_friends_panel_update(widget);
+		break;
+	case _input_h3_players:
+		if (widget->type == _ui_widget_type_column_list)
+			h3_players_update(widget);
+		break;
+	case _input_h3_players_options:
+		if (widget->type == _ui_widget_type_column_list)
+			h3_players_options_update(widget);
 		break;
 	default:
 		break;

@@ -220,6 +220,10 @@ enum
 	do not know unread (tunnel_received's switch has no default), so this
 	is no network change */
 	_packet_ping_table,
+	/* friends' cards, a player's options' Add friend and Block (p2p_friends.c:
+	asks and answers, the host relaying between its joiners). Builds before it
+	drop the type unread: no network change; never on the crossplay wire */
+	_packet_friends,
 };
 
 /* the messages of a stream, inside KCP */
@@ -3501,6 +3505,10 @@ static void tunnel_received(const unsigned char *packet, int size, const struct 
 		if (!network_wire_crossplay())
 			ping_table_received(peer, inner + 1, inner_size - 1);
 		break;
+	case _packet_friends:
+		if (!network_wire_crossplay() && !p2p.adhoc)
+			p2p_friends_tunnel_heard(peer->virtual_address, peer->is_host, inner + 1, inner_size - 1);
+		break;
 	}
 }
 
@@ -4125,6 +4133,39 @@ static void friends_quit(void)
 		p2p_signal_friends_flush();
 	}
 	pthread_mutex_unlock(&p2p_lock);
+}
+
+/* friends' cards to send on the tunnel (p2p_friends.c), each to its peer
+(0: the host this machine joined), under p2p_lock; none on the crossplay
+wire */
+static void friends_tunnel_send(void)
+{
+	unsigned char inner[1 + 256];
+	unsigned long address;
+	int index, size;
+
+	for (index = 0; (size = p2p_friends_tunnel_outgoing(index, &address, inner + 1, (int)sizeof(inner) - 1)) >= 0;
+		index++)
+	{
+		struct peer *peer = NULL;
+		int each;
+
+		if (network_wire_crossplay())
+			continue;
+		if (address)
+			peer = find_peer_by_address(address);
+		else
+		{
+			for (each = 0; each < P2P_MAXIMUM_PEERS && !peer; each++)
+				if (p2p.peers[each].used && p2p.peers[each].is_host)
+					peer = &p2p.peers[each];
+		}
+		if (!peer || !peer->connected)
+			continue;
+		inner[0] = _packet_friends;
+		peer_send(peer, inner, 1 + size);
+	}
+	p2p_friends_tunnel_sent();
 }
 
 /* what friends need of internet play (p2p_friends.c), under p2p_lock: it
@@ -4789,6 +4830,7 @@ static void *p2p_thread(void *unused)
 			pthread_mutex_unlock(&p2p_lock);
 			p2p_friends_update(&host);
 			pthread_mutex_lock(&p2p_lock);
+			friends_tunnel_send();
 			if (p2p_friends_wanted() && !p2p.stopping)
 			{
 				p2p_signal_start();

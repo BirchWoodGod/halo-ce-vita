@@ -461,6 +461,13 @@ int p2p_friends_outgoing(int index, unsigned long *serial, char *topic, int topi
 	int *sent_mask);
 void p2p_friends_outgoing_sent(unsigned long serial, int broker);
 void p2p_friends_outgoing_settle(int ready_mask);
+/* the game's players' friend cards over the tunnel (p2p.c's packet type
+7): one heard from a peer (its virtual address; from_host: the host this
+machine joined), queued; the ones to send (the index-th: its peer, 0 the
+host; its size, -1 past the end), then let go */
+void p2p_friends_tunnel_heard(unsigned long address, int from_host, const unsigned char *bytes, int size);
+int p2p_friends_tunnel_outgoing(int index, unsigned long *address, unsigned char *bytes, int capacity);
+void p2p_friends_tunnel_sent(void);
 /* internet play stopping (quitting: the game exiting, nothing more sent
 after): an offline presence queued for the last publishes */
 void p2p_friends_stopping(int quitting);

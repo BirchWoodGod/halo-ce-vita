@@ -15,9 +15,19 @@ loop (system_link_shortcut.c) every frame:
   once listed). An invite that comes in a level or a lobby waits for the
   menus (they last five minutes); the lists show it meanwhile.
 
+- The game's players' options (the Halo 3 PLAYERS screen,
+  menus/halo3/players.xml): Triangle opens it in the game's lobby (the
+  waiting screen) and on the carnage report, and with the scoreboard up
+  (Back held) in a game; and each second the game this machine plays is
+  told to friends (its machine, whether it hosts, its machines' addresses:
+  p2p_friends_set_game), whose cards the players' Add friend and Block ask
+  for.
+
 (debug, not in release builds) HALO_TEST_FRIENDS_ANSWER=accept or ignore
 answers the invite's question at once, for the automated tests (a run
-nobody watches answers every question no).
+nobody watches answers every question no); HALO_TEST_FRIENDS_PLAYERS=add@S
+opens the PLAYERS screen S seconds into a network game and adds the first
+other machine's player, as its options' ADD FRIEND does.
 */
 
 #include "cseries.h"
@@ -31,6 +41,10 @@ nobody watches answers every question no).
 #include "networking/network_game_manager.h"
 #include "saved games/player_profile.h"
 #include "tag_files/tag_files.h"
+#include "tag_files/tag_groups.h"
+#include "input/input.h"
+#include "networking/network_server_manager.h"
+#include "halo_port_limits.h"
 
 #include "../src/p2p_friends.h"
 #include "../src/system_link_shortcut.h"
@@ -50,6 +64,12 @@ int platform_question_asking(void);
 /* menu_functions.c's: the System Link screen opened at the next frame, as
 JOIN WITH CODE opens it */
 void menu_functions_open_system_link(void);
+/* menu_functions.c's: the first other machine's player added (the tests') */
+int menu_functions_players_add_first(void);
+/* menu_functions.c's: the PLAYERS screen opened (1: it did), and Triangle
+read for it */
+int menu_functions_players_open(boolean main_menu_loaded);
+void menu_functions_players_button(boolean main_menu_loaded);
 
 #define FRIENDS_ACTIVITY_INTERVAL 1000
 
@@ -59,6 +79,10 @@ static struct
 	/* the invite asked about, by its id ("" none) */
 	char asking[P2P_FRIEND_ID_SIZE];
 	char asking_name[P2P_FRIEND_NAME_SIZE];
+	/* (the tests' steps) the seconds since in a network game, and whether
+	the player was added */
+	unsigned long in_game_since;
+	boolean test_added;
 } friends_game;
 
 /* wide text as ASCII, a Latin letter with a mark its plain letter ('?' for
@@ -210,6 +234,51 @@ static void friends_game_invites(boolean main_menu_loaded)
 	}
 }
 
+/* the game this machine plays, told to friends: its machine, whether it
+hosts, and (a host's) each machine's address */
+static void friends_game_network(void)
+{
+	struct network_game_client *client = global_network_game_client_get();
+	struct network_game_server *server = global_network_game_server_get();
+	static unsigned long addresses[HALO_PORT_MAXIMUM_NETWORK_MACHINES];
+	int index;
+
+	if (!client || network_game_is_splitscreen_local())
+	{
+		p2p_friends_set_game(-1, 0, NULL, 0);
+		friends_game.in_game_since = 0;
+		return;
+	}
+	for (index = 0; index < HALO_PORT_MAXIMUM_NETWORK_MACHINES; index++)
+		addresses[index] = server ? network_game_server_machine_address(index) : 0;
+	p2p_friends_set_game(network_game_client_get_machine_index(client), server != NULL, addresses,
+		HALO_PORT_MAXIMUM_NETWORK_MACHINES);
+	if (!friends_game.in_game_since)
+		friends_game.in_game_since = system_milliseconds() ? system_milliseconds() : 1;
+}
+
+/* (debug) HALO_TEST_FRIENDS_PLAYERS=add@S */
+static void friends_game_players_test(boolean main_menu_loaded)
+{
+#ifndef HALO_RELEASE
+	char const *setting = getenv("HALO_TEST_FRIENDS_PLAYERS");
+	unsigned long seconds;
+
+	if (!setting || strncmp(setting, "add@", 4) || friends_game.test_added || !friends_game.in_game_since)
+		return;
+	seconds = (unsigned long)atol(setting + 4);
+	if (system_milliseconds() - friends_game.in_game_since < seconds * 1000UL)
+		return;
+	friends_game.test_added = TRUE;
+	platform_log("friends: test: the PLAYERS screen %s", menu_functions_players_open(main_menu_loaded) ? "opened" :
+		"did not open");
+	if (!menu_functions_players_add_first())
+		platform_log("friends: test: no other machine's player to add");
+#else
+	(void)main_menu_loaded;
+#endif
+}
+
 void friends_game_update(boolean main_menu_loaded)
 {
 	unsigned long now = system_milliseconds();
@@ -218,6 +287,9 @@ void friends_game_update(boolean main_menu_loaded)
 	{
 		friends_game.activity_time = now ? now : 1;
 		friends_game_activity(main_menu_loaded);
+		friends_game_network();
 	}
 	friends_game_invites(main_menu_loaded);
+	menu_functions_players_button(main_menu_loaded);
+	friends_game_players_test(main_menu_loaded);
 }

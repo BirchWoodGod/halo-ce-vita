@@ -155,6 +155,8 @@ enum
 	P2P_FRIENDS_TOO_SOON,
 	/* the list is full */
 	P2P_FRIENDS_FULL,
+	/* (a player's options) this machine appears offline: nothing asked */
+	P2P_FRIENDS_APPEARING_OFFLINE,
 };
 int p2p_friends_act(const char *id, int kind, int action);
 /* the outcome as the player reads it (in the language chosen) */
@@ -164,6 +166,45 @@ const char *p2p_friends_add_text(int result);
 /* the oldest invite not asked about yet, for the pop-up: nonzero if there is
 one (then marked asked: the lists keep it until answered or old) */
 int p2p_friends_take_invite(struct p2p_friend_entry *entry);
+
+/* ---------- the game's players (a player's options in the lobbies, the
+scoreboard and the carnage report): their friend cards are asked for over
+internet play's tunnel, answered only by a machine whose player has friends
+on and does not appear offline */
+
+/* what an ask is for, and a player's state as the options show it */
+enum
+{
+	P2P_FRIENDS_PLAYER_ADD = 1,
+	P2P_FRIENDS_PLAYER_BLOCK,
+};
+enum
+{
+	P2P_FRIENDS_PLAYER_NONE,
+	/* (the machine's own players) */
+	P2P_FRIENDS_PLAYER_THIS_VITA,
+	/* asked for its card, waiting */
+	P2P_FRIENDS_PLAYER_ASKING,
+	/* no answer: friends off, appearing offline, or an older build */
+	P2P_FRIENDS_PLAYER_NOT_TAKING,
+	P2P_FRIENDS_PLAYER_FRIEND,
+	P2P_FRIENDS_PLAYER_REQUEST_SENT,
+	P2P_FRIENDS_PLAYER_ASKED_YOU,
+	P2P_FRIENDS_PLAYER_BLOCKED,
+};
+/* the game this machine plays (the game's main loop, each second): its
+machine's index (-1: in no network game), whether it hosts, and (a host's)
+each machine's address as internet play has it (count of them; network or
+host byte order, a virtual address of internet play's or 0) */
+void p2p_friends_set_game(int machine, int hosting, const unsigned long *addresses, int count);
+/* asks a machine's player for their friend card, to add them (a friend
+request to their code once it comes) or to block them: P2P_FRIENDS_DONE
+(asked, or done at once with the card already had), _GONE (no such
+machine), _OFFLINE (internet play or friends off), _APPEARING_OFFLINE,
+_TOO_SOON */
+int p2p_friends_player_ask(int machine, int intent);
+/* a machine's player's state (P2P_FRIENDS_PLAYER_*) */
+int p2p_friends_player_state(int machine);
 
 /* one line for the lists' top: "2 of 5 friends online", "Go online to see
 your friends", "Appearing offline" (in the language chosen); returns
