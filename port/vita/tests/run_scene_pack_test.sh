@@ -20,7 +20,8 @@
 #             short; a byte changed, CRCs left): each refused, deleted, built
 #             again and loaded
 #   verified  a pack's data (its pixels and samples) read whole for its CRC
-#             once: its first load checks it whole and keeps a record of the
+#             once: its first load (or the main menu's prebuild, in the
+#             background) checks it whole and keeps a record of the
 #             file checked (t/packs/<name>.pack.ok); the next run's load, the
 #             file unchanged, reads its tags (checked as ever) but not its
 #             data; a byte of its data changed (the file written again): the
@@ -250,8 +251,8 @@ EOF
 		done ;;
 	verified)
 		run verified 14 "$bloodgulch;L60:pack load menu_spartan" ""
-		checked verified && expect verified "first load: its data checked whole" \
-			"scene packs: menu_spartan: read and checked .*checked whole"
+		checked verified && expect verified "first load: its data checked whole (or in the background, by the main menu's prebuild)" \
+			"scene packs: menu_spartan: (read and checked .*checked whole|its data checked in the background)"
 		pack="$out/verified/save/t/packs/menu_spartan.pack"
 		[ -r "$pack.ok" ] && echo "  ok: verified: the record of the file checked kept" ||
 			fail "verified: no record of the file checked ($pack.ok)"
@@ -275,7 +276,8 @@ EOF
 			expect verified "its data changed: refused" "scene packs: menu_spartan: refused: it is damaged \(its CRC\)" \
 				"$out/verified/run-damaged.log"
 			expect verified "its data changed: built again and checked whole" \
-				"scene packs: menu_spartan: read and checked .*checked whole" "$out/verified/run-damaged.log"
+				"scene packs: menu_spartan: (read and checked .*checked whole|its data checked in the background)" \
+				"$out/verified/run-damaged.log"
 		}
 		grep -aE "scene packs: menu_spartan: (refused|building|read and checked)" "$out/verified/run-damaged.log" | cut -c1-200 |
 			sed 's/^/    /' ;;
