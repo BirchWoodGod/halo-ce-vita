@@ -8339,9 +8339,11 @@ HALO_SHARP_UI (the settings panel's Video row Sharp interface; on unless
 flashes, the letterbox - is drawn at the display's resolution, 960x544,
 whatever the render scale. The game marks where a window's 3D picture ends
 (rasterizer_xbox.c rasterizer_interface_begin); a record here tells the
-worker, which scales the 3D picture up to the display there instead of at
-the present, and draws the back buffer's draws that follow on the display
-(vita_gxm.c vgxm_interface_begin). What samples the back buffer after the
+worker, which scales the 3D picture up to the display's size there
+instead of at the present, into the interface layer (a 960x544 target of
+its own, copied to the display at the present), and draws the back
+buffer's draws that follow there; at 100% there is no split (vita_gxm.c
+vgxm_interface_begin). What samples the back buffer after the
 split (the loading screen's blur of the last frame) reads the 3D picture.
 Read again when the panel changes a setting (halo_settings_generation). */
 extern volatile unsigned long halo_settings_generation;

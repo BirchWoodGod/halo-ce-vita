@@ -158,7 +158,7 @@ static struct
 	unsigned long color_target, depth_target;
 	/* the interface drawn on the display (vgxm_interface_begin): the
 	target whose draws go there until the present */
-	int interface_active;
+	int interface_active, interface_layer;
 	unsigned long interface_source;
 } null;
 
@@ -907,6 +907,12 @@ static struct
 	/* (Sharp interface) the frames that drew their interface on the
 	display, and the display scenes it began again */
 	unsigned long interface_frames, interface_again;
+	/* (vita_gxm.c's interface layer) the frames whose interface went to
+	the layer, to the display buffer, or was not split (100%), and the
+	scenes begun on the display buffer before the present (each one waits
+	for the display's flip, double buffered) and on the layer */
+	unsigned long interface_layer_frames, interface_display_frames, interface_full_frames;
+	unsigned long display_midframe_scenes, layer_scenes;
 } scenes;
 
 /* the display as the interface's target (vita_gxm.c DISPLAY_TARGET) */
@@ -941,6 +947,10 @@ static void scene_ensure(void)
 		if (scenes.in_scene && scenes.scene_color == DISPLAY_TARGET && scenes.scene_draws < 300)
 			goto done;
 		scenes.interface_again++;
+		if (null.interface_layer)
+			scenes.layer_scenes++;
+		else
+			scenes.display_midframe_scenes++;
 		scenes.scene_serial++;
 		if (scene_dependency_needed(0))
 		{
@@ -1003,6 +1013,7 @@ static void scenes_present(unsigned long color_target)
 	if (null.interface_active)
 		scenes.interface_frames++;
 	null.interface_active = 0;
+	null.interface_layer = 0;
 	if (++scenes.frames == 300)
 	{
 		static int enabled = -1;
@@ -1011,24 +1022,58 @@ static void scenes_present(unsigned long color_target)
 			enabled = getenv("HALO_GPU_STATS") && atoi(getenv("HALO_GPU_STATS"));
 		if (enabled)
 			platform_log("gxm-null scenes: %.1f scenes/frame (%.1f splits), %.1f scene waits/frame, %.2f scenes begun again to wait/frame; "
-				"Sharp interface on the display in %lu of 300 frames, %.2f display scenes begun again/frame",
+				"Sharp interface on the display in %lu of 300 frames, %.2f display scenes begun again/frame; "
+				"interface layer %lu, display buffer %lu, 100%% (no split) %lu frames; display buffer scenes before the present "
+				"%.2f/frame, interface layer scenes %.2f/frame",
 				scenes.scenes / 300.0, 0.0, scenes.waits / 300.0, scenes.splits / 300.0, scenes.interface_frames,
-				scenes.interface_frames ? (scenes.interface_again - scenes.interface_frames) / 300.0 : 0.0);
+				scenes.interface_frames ? (scenes.interface_again - scenes.interface_frames) / 300.0 : 0.0,
+				scenes.interface_layer_frames, scenes.interface_display_frames, scenes.interface_full_frames,
+				scenes.display_midframe_scenes / 300.0, scenes.layer_scenes / 300.0);
 		scenes.scenes = scenes.waits = scenes.splits = scenes.frames = 0;
 		scenes.interface_frames = scenes.interface_again = 0;
+		scenes.interface_layer_frames = scenes.interface_display_frames = scenes.interface_full_frames = 0;
+		scenes.display_midframe_scenes = scenes.layer_scenes = 0;
 	}
 }
 
 /* (as vita_gxm.c's: the back buffer's draws from here to the present go
-to the display - counted in the scene census, the draw hash unchanged) */
+to the interface layer - or the display, HALO_SHARP_UI_LAYER=0 - counted
+in the scene census, the draw hash unchanged; no split at 100%,
+HALO_SHARP_UI_FULL=1 splitting anyway) */
 void vgxm_interface_begin(unsigned long color_target)
 {
+	static int layer_enabled = -1, split_anyway = -1;
+
 	if (!null.ready || null.interface_active || !color_target || color_target > MAXIMUM_TARGETS)
 		return;
+	if (layer_enabled < 0)
+	{
+		const char *setting = getenv("HALO_SHARP_UI_LAYER");
+
+		layer_enabled = !setting || !*setting || atoi(setting) != 0;
+		setting = getenv("HALO_SHARP_UI_FULL");
+		split_anyway = setting && atoi(setting) != 0;
+	}
+	if (!split_anyway && null_targets[color_target].width == null_targets[color_target].asked_width &&
+		vgxm_render_rect() >= 1.0f)
+	{
+		scenes.interface_full_frames++;
+		return;
+	}
 	null.interface_active = 1;
 	null.interface_source = color_target;
-	/* (the display scene, the picture scaled into it: the present's, begun
-	here) */
+	null.interface_layer = layer_enabled;
+	if (layer_enabled)
+	{
+		scenes.interface_layer_frames++;
+		scenes.layer_scenes++;
+	}
+	else
+	{
+		scenes.interface_display_frames++;
+		scenes.display_midframe_scenes++;
+	}
+	/* (the interface's scene, the picture scaled into it, begun here) */
 	scenes.in_scene = 0;
 	scenes.presented_target = color_target;
 	scenes.scene_serial++;

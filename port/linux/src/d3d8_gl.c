@@ -3582,6 +3582,15 @@ void halo_d3d_interface_begin(void)
 	}
 	if (!device.render_target || device.render_target->Data != device.back_buffer.Data)
 		return;
+	{
+		/* (as the Vita: no split at 100%, the interface scaled up with the
+		picture; HALO_SHARP_UI_FULL=1 splits anyway - vita_gxm.c
+		vgxm_interface_begin) */
+		const char *setting = getenv("HALO_SHARP_UI_FULL");
+
+		if (vita_preview_scale >= 1.0f && !(setting && atoi(setting) != 0))
+			return;
+	}
 	back_buffer = render_target_get(&device.back_buffer);
 	if (!back_buffer)
 		return;
