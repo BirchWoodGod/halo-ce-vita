@@ -251,9 +251,8 @@ static struct
 	short most_particles;
 	/* objects made now (object_lights.c's quick way out) */
 	short made_count;
-	/* objects let go, still there until the objects' next update deletes
-	them (object_delete marks them): still frozen meanwhile, the updates
-	left */
+	/* objects let go (deleted at once: object_forget), still said frozen
+	a few updates more, the updates left */
 	long released[NUMBER_OF_MENU_SCENE_SLOTS * 2];
 	short released_updates[NUMBER_OF_MENU_SCENE_SLOTS * 2];
 	/* the preview's pack: menu_spartan, or a player model's
@@ -730,7 +729,11 @@ static void object_forget(struct menu_scene_object *object, boolean delete_it)
 		struct unit_datum *unit = unit_try_and_get(object->object_index);
 		short weapon;
 
-		/* (its weapons with it) */
+		/* (its weapons with it; deleted now, not marked for the objects'
+		next update: a lobby that pauses the game - a network game's,
+		halo3/pregame.xml - runs none, and a marked object's widgets are
+		drawn though the object is hidden, render_objects.c: the flag's
+		cloth stood alone behind the lobby, its pole and holder gone) */
 		if (unit)
 		{
 			for (weapon = 0; weapon < MAXIMUM_WEAPONS_PER_UNIT; weapon++)
@@ -738,13 +741,13 @@ static void object_forget(struct menu_scene_object *object, boolean delete_it)
 				long weapon_index = unit->unit.weapon_object_indices[weapon];
 
 				if (weapon_index != NONE && object_try_and_get(weapon_index))
-					object_delete(weapon_index);
+					object_delete_immediately(weapon_index);
 			}
 		}
-		object_delete(object->object_index);
-		/* (deleted by the objects' next update: until then a frozen
-		vehicle's physics stay off - ui.map's globals have none of what
-		they read) */
+		object_delete_immediately(object->object_index);
+		/* (a frozen vehicle's physics kept off a few updates more, as when
+		its deletion waited for the objects' update - ui.map's globals have
+		none of what they read) */
 		{
 			short index;
 
@@ -1140,9 +1143,14 @@ static void scene_forget(boolean delete_them)
 	}
 	if (menu_scene_objects.made)
 	{
-		platform_log("menus: h3 scene objects: let go after %.1f s (at most %d effects and %d particles meanwhile)",
-			(double)(vita_host_time_us() - menu_scene_objects.made_at) / 1000000.0, menu_scene_objects.most_effects,
-			menu_scene_objects.most_particles);
+		/* (the flags' cloth gone with them: a flag's widget left behind
+		was drawn alone) */
+		extern struct data_array *flag_data;
+
+		platform_log("menus: h3 scene objects: let go after %.1f s (at most %d effects and %d particles meanwhile), "
+			"%d flags left", (double)(vita_host_time_us() - menu_scene_objects.made_at) / 1000000.0,
+			menu_scene_objects.most_effects, menu_scene_objects.most_particles,
+			flag_data && delete_them ? (int)flag_data->actual_count : -1);
 	}
 	menu_scene_objects.made = FALSE;
 }
