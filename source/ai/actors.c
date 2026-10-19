@@ -300,6 +300,7 @@ symbols in this file:
 #include "cseries/errors.h"
 #include "game/game.h"
 #include "game/game_allegiance.h"
+#include "game/game_engine.h"
 #include "game/players.h"
 #include "items/equipment_definitions.h"
 #include "items/projectiles.h"
@@ -2897,6 +2898,14 @@ short actors_spawn_from_unit(
 			source_unit->unit.actor_index;
 		short encounter_index;
 		short squad_index;
+#ifdef HALO_LINUX
+		/* port: an actor of no encounter (ai_attach_free's: a Forge
+		character) in a multiplayer game spawns its actors too (a Flood
+		carrier's infection forms), of no encounter either; a swarm's
+		together, a swarm of their own (none of another's) */
+		boolean encounterless = FALSE;
+		long encounterless_swarm_index = NONE;
+#endif
 
 		if (source_actor_index != NONE)
 		{
@@ -2904,6 +2913,10 @@ short actors_spawn_from_unit(
 			/* BUG: January reads actor_index even when source_actor_index selected swarm_actor_index. */
 			encounter_index = source_actor->meta.encounter_index;
 			squad_index = source_actor->meta.squad_index;
+#ifdef HALO_LINUX
+			encounterless = source_unit->unit.actor_index != NONE && source_actor->meta.encounterless &&
+				encounter_index == NONE && game_engine_running();
+#endif
 		}
 		else
 		{
@@ -2911,7 +2924,11 @@ short actors_spawn_from_unit(
 			squad_index = source_unit->unit.fake_squad_index;
 		}
 
+#ifdef HALO_LINUX
+		if ((encounter_index != NONE && squad_index != NONE) || encounterless)
+#else
 		if (encounter_index != NONE && squad_index != NONE)
+#endif
 		{
 			struct actor_variant_definition *actor_variant_definition =
 				actor_variant_definition_get(actor_variant_definition_index);
@@ -2958,6 +2975,36 @@ short actors_spawn_from_unit(
 					}
 
 					actor_customize_unit(actor_variant_definition_index, spawned_unit_index);
+#ifdef HALO_LINUX
+					actor_index = NONE;
+					if (encounterless && encounterless_swarm_index != NONE &&
+						actor_swarm_attach_unit(encounterless_swarm_index, spawned_unit_index))
+					{
+						actor_index = encounterless_swarm_index;
+						actor_verify_activation(actor_index);
+					}
+					else if (encounterless)
+					{
+						/* (a squad no actor of no encounter has: never one of
+						another's swarms) */
+						actor_index = actor_create_for_unit(
+							TEST_FLAG(actor_definition->flags, _actor_definition_swarm_actor_bit),
+							spawned_unit_index,
+							actor_variant_definition_index,
+							NONE,
+							0,
+							FALSE,
+							NONE,
+							FALSE,
+							actor_default_state_alert,
+							actor_default_state_none,
+							NONE,
+							0);
+						if (actor_index != NONE && actor_get(actor_index)->meta.swarm)
+							encounterless_swarm_index = actor_index;
+					}
+					else
+#endif
 					actor_index = actor_create_for_unit(
 						TEST_FLAG(actor_definition->flags, _actor_definition_swarm_actor_bit),
 						spawned_unit_index,

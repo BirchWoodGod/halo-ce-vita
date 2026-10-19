@@ -207,12 +207,24 @@ vehicles, the dropships, the Covenant AI), built in the background while the lob
 	<widget name="h3/forge/packs/item_3" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
 		<on event="a" run="port forge pack toggle"/>
 	</widget>
+	<widget name="h3/forge/packs/item_4" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a" run="port forge pack toggle"/>
+	</widget>
+	<widget name="h3/forge/packs/item_5" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a" run="port forge pack toggle"/>
+	</widget>
+	<widget name="h3/forge/packs/item_6" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a" run="port forge pack toggle"/>
+	</widget>
 	<widget name="h3/forge/packs/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<data input="port forge packs"/>
 		<child widget="h3/forge/packs/item_0" y="0"/>
 		<child widget="h3/forge/packs/item_1" y="19"/>
 		<child widget="h3/forge/packs/item_2" y="38"/>
 		<child widget="h3/forge/packs/item_3" y="57"/>
+		<child widget="h3/forge/packs/item_4" y="76"/>
+		<child widget="h3/forge/packs/item_5" y="95"/>
+		<child widget="h3/forge/packs/item_6" y="114"/>
 	</widget>
 	<widget name="h3/forge/packs/info_name" type="text" left="320" top="84" width="266" height="20" font="h3/font_item" color="#FFF2F6FA" text_y="1"/>
 	<widget name="h3/forge/packs/info_text" type="text" left="320" top="106" width="266" height="90" font="h3/font_small" color="#FFCFD9E3"/>
