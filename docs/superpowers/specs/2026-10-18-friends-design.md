@@ -324,6 +324,12 @@ identities, so the two machines exchange friend cards first:
 - What is revealed: a player with friends on and online gives its friend
   key and friend name to the players of a game it is in who ask. A player
   with friends off or appearing offline gives nothing.
+- What a host can do: it relays, so it could answer an ask for another
+  player with a card of its own (signed by its own key over the asker's
+  nonce). It cannot make another player's card: the request would go to the
+  host's own code, and the asker's FRIENDS list shows the request sent under
+  the host's friend name. It cannot read or change friend messages, which go
+  through the brokers sealed and signed as any.
 - Mute is left out: the port has no voice or text chat to mute.
 
 ## The broker
