@@ -395,6 +395,7 @@ static char const *const port_function_names[] =
 	"port forge clear dead ai", "port forge clear all ai",
 	"port h3 mp pause party", "port h3 mp settings init", "port h3 mp settings save", "port h3 mp settings close",
 	"port h3 host online", "port h3 game options",
+	"port h3 live leave",
 };
 
 /* the port's game data functions (menu_functions.c), from

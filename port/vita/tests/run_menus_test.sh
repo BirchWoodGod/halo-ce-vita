@@ -237,6 +237,11 @@
 #            and YES deletes it (only it: the maps folder's other files, the
 #            links' targets kept); the mod's folder deleted, the links in it
 #            gone, what they pointed at kept
+#   h3livelobby  the live lobby (HALO_TEST_PROFILE): MULTIPLAYER on SYSTEM LINK opens its game
+#            once its scene stands, START GAME its game's lobby at once (no profile asked, no
+#            other server), B back to the lobby (the game kept), B closes it; ONLINE with its
+#            brokers unreachable never live, START GAME as before; the lobby's scene whole
+#            behind the game's lobby, never a flag's cloth left (screenshots, the Vita's picture)
 #   h3modspicker  MOD MANAGER, mygulch off, then MULTIPLAYER, MAP: the lobby's map
 #            picker (the list START GAME hosts from) leaves it out; again with
 #            it off (HALO_MAPS_DISABLED) and turned on in MOD MANAGER: the
@@ -276,7 +281,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
@@ -559,7 +564,8 @@ for case in $cases; do
 		# addresses: connecting); NETWORK again, down to SYSTEM LINK, A: internet play stopped;
 		# down three to START GAME, A: the profile screen, A to join, the profile chosen, A: the
 		# game hosted with the lobby's GAME and MAP, its lobby (no map list); B: the multiplayer
-		# lobby; START GAME again: the game's lobby at once, the profile not asked again)
+		# lobby, the game kept as its live game (no profile when the lobby opened: not live then);
+		# START GAME again: that game's lobby at once, the profile not asked again)
 		run h3mp "$menus_data" 70 "$h3mppad a wait:150:3000 up:150:600 a wait:150:5000 a wait:150:3000 down:150:600 a wait:150:3000 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:5000 b wait:150:4000 a wait:150:5000" \
 			HALO_MENU_STYLE=halo3 $h3net HALO_NET_ONLINE=false
 		check_h3 h3mp halo3
@@ -580,14 +586,16 @@ for case in $cases; do
 		grep -aq "menus: h3 mp: host a system link game" "$log" || fail h3mp "START GAME did not host a system link game"
 		grep -aq "menus: h3 mp: hosting Slayer on Battle Creek (the lobby's GAME and MAP); the game's lobby" "$log" ||
 			fail h3mp "the game was not hosted with the lobby's GAME and MAP"
-		[ "$(grep -ac "menus: Multiplayer > System Link: the game's server started; the game's lobby" "$log")" = 2 ] ||
-			fail h3mp "the server did not start twice, straight to the game's lobby (or the log named another screen)"
+		[ "$(grep -ac "menus: Multiplayer > System Link: the game's server started; the game's lobby" "$log")" = 1 ] ||
+			fail h3mp "the server did not start once, straight to the game's lobby (or the log named another screen)"
+		grep -aq "menus: h3 live lobby: its game kept, live on SYSTEM LINK (Slayer on Battle Creek)" "$log" ||
+			fail h3mp "back in the lobby, the game was not kept as its live game"
+		grep -aq "menus: h3 live lobby: START GAME: the game's lobby, its countdown begun" "$log" ||
+			fail h3mp "the second START GAME did not go to the live game's lobby"
 		[ "$(grep -ac "ui: screen pc.h3.pregame.screen" "$log")" = 2 ] || fail h3mp "the game's lobby did not open twice"
 		grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected" "$log" &&
 			fail h3mp "an Xbox screen (the map or game type list) opened on the way"
 		[ "$(grep -ac "ui: screen pc.h3.join.screen" "$log")" = 1 ] || fail h3mp "SELECT PROFILE was not asked once only"
-		grep -aq "menus: h3 join: the profile .* chosen before: not asked again" "$log" ||
-			fail h3mp "the second START GAME asked for the profile again"
 		sed -n '/ui: screen pc.h3.pregame.screen/,$p' "$log" | grep -a "ui: screen" | sed -n 2p | grep -q "pc.h3.mp.screen" ||
 			fail h3mp "B on the game's lobby did not go back to the multiplayer lobby"
 		grep -aq "ui: screen pc.mp.screen" "$log" && fail h3mp "OpenCE's Multiplayer screen opened with Menu style Halo 3" ;;
@@ -660,6 +668,68 @@ for case in $cases; do
 			fail h3hostonline "Menu style Halo CE's CREATE GAME INTERNET did not open OpenCE's Server Setup"
 		[ -n "${HALO_TEST_SHOTS:-}" ] && mkdir -p "$HALO_TEST_SHOTS/h3hostonline" &&
 			cp "$out"/h3hostonline_shots/0*.bmp "$HALO_TEST_SHOTS/h3hostonline/" 2>/dev/null ;;
+	h3livelobby)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "--- h3livelobby"; echo "SKIP: no HALO_TEST_PROFILE"; continue
+		fi
+		# (the live lobby, Menu style Halo 3: MULTIPLAYER on SYSTEM LINK with a profile - its
+		# nameplate's -: the lobby's game open once its scene stands, its players in the lobby; down
+		# three to START GAME, A: the game's lobby at once (no SELECT PROFILE, no other server),
+		# alone: no countdown; B: back to the lobby, the game kept; B: the main menu, the game closed.
+		# Then ONLINE, its brokers unreachable: never live (connecting), START GAME as before -
+		# SELECT PROFILE, a server of its own, the game's lobby; B: that game closed (the network
+		# does not carry it: none left behind the lobby). Each lobby's scene whole (its flag
+		# with its pole and holder) behind the game's lobby too, or none: deleted once, its flag's
+		# cloth with it; the screenshots at the Vita's picture)
+		d="down:150:500"
+		live_pad="$h3mppad wait:150:5000 @01-lobby-live:0:300 $d $d $d a wait:150:4000 @02-pregame-live:0:300"
+		live_pad="$live_pad b wait:150:4000 @03-lobby-again:0:300 b wait:150:4000 @04-main-menu:0:300"
+		online_pad="$h3mppad wait:150:5000 @05-lobby-connecting:0:300 $d $d $d a wait:150:3000 a wait:150:2000 a wait:150:2000"
+		online_pad="$online_pad a wait:150:5000 @06-pregame-not-live:0:300 b wait:150:4000 @07-lobby-not-live:0:300"
+		rm -rf "$out/h3livelobby_shots"; mkdir -p "$out/h3livelobby_shots"
+		profile_from=$HALO_TEST_PROFILE run h3livelobby "$menus_data" 50 "$live_pad" HALO_MENU_STYLE=halo3 \
+			HALO_SCREENSHOT_DIR="$out/h3livelobby_shots" HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1
+		profile_from=$HALO_TEST_PROFILE run h3livelobby_online "$menus_data" 50 "$online_pad" HALO_MENU_STYLE=halo3 $h3net \
+			HALO_SCREENSHOT_DIR="$out/h3livelobby_shots" HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1
+		check_h3 h3livelobby halo3
+		log=$out/h3livelobby/run.log
+		grep -aE "ui: screen|menus: h3 live lobby|h3 scene objects?: (h3/mp|let go|.*deleted)|h3 join:" "$log" | head -30
+		grep -aq "menus: h3 live lobby: open on SYSTEM LINK (Slayer on Battle Creek): others join it now" "$log" ||
+			fail h3livelobby "the lobby did not open live on SYSTEM LINK"
+		sed -n '1,/menus: h3 live lobby: open on/p' "$log" | grep -aq "h3 scene objects: h3/mp/screen: made" ||
+			fail h3livelobby "the lobby went live before its scene stood"
+		sed -n '1,/menus: h3 live lobby: open on/p' "$log" | grep -aq "h3 scene object 0: animation stand missile airborne, held" ||
+			fail h3livelobby "the lobby went live before its scene was posed"
+		grep -aqE "menus: h3 live lobby: Slayer on Battle Creek; players: [^;]+; 1/16" "$log" ||
+			fail h3livelobby "the lobby did not show its game's player"
+		grep -aq "ui: screen pc.h3.join.screen" "$log" && fail h3livelobby "SELECT PROFILE was asked (the nameplate's profile plays)"
+		grep -aq "the game's server started" "$log" && fail h3livelobby "START GAME started another server"
+		grep -aq "menus: h3 live lobby: START GAME: the game's lobby, its countdown begun" "$log" &&
+			grep -aq "ui: screen pc.h3.pregame.screen" "$log" || fail h3livelobby "START GAME did not open the live game's lobby"
+		grep -aq "menus: h3 live lobby: the game's lobby: waiting for players before the countdown" "$log" ||
+			fail h3livelobby "alone, the countdown was begun"
+		grep -aq "menus: h3 live lobby: back from the game's lobby: the countdown stopped, the game kept" "$log" ||
+			fail h3livelobby "B on the game's lobby did not go back to the live lobby"
+		grep -aq "menus: h3 live lobby: closed (the host left the lobby)" "$log" || fail h3livelobby "B on the lobby did not close it"
+		sed -n '1,/menus: h3 live lobby: closed/p' "$log" | grep -aq "h3 scene object [0-9]: deleted" &&
+			fail h3livelobby "the scene lost an object in the live lobby or its game's lobby (all of it, or none)"
+		grep -aq "h3 scene objects: let go after .*, 0 flags left" "$log" ||
+			fail h3livelobby "the scene was let go with a flag's cloth left behind"
+		check_h3 h3livelobby_online halo3
+		log=$out/h3livelobby_online/run.log
+		grep -aE "ui: screen|menus: h3 live lobby|h3 scene objects: (h3/mp|let go)|h3 join:|network: status" "$log" | head -20
+		grep -aq "menus: h3 live lobby: open on ONLINE" "$log" && fail h3livelobby "ONLINE went live with its brokers unreachable"
+		grep -aq "menus: h3 live lobby: closed (the game it hosted before cannot go on from it)" "$log" ||
+			fail h3livelobby "back in the lobby, the game hosted (not live) was left behind it"
+		grep -aq "ui: screen pc.h3.join.screen" "$log" || fail h3livelobby "not live, START GAME did not ask for the profile"
+		grep -aq "menus: Create Game > Internet: the game's server started; the game's lobby" "$log" ||
+			fail h3livelobby "not live, START GAME did not host as before"
+		grep -aq "h3 scene object [0-9]: deleted" <(sed -n '/ui: screen pc.h3.pregame.screen/,/ui: screen pc.h3.mp.screen/p' "$log") &&
+			fail h3livelobby "the scene lost an object behind the game's lobby (a stray flag)"
+		grep -aq "h3 scene objects: let go after .*, [1-9][0-9]* flags left" "$log" &&
+			fail h3livelobby "a scene was let go with a flag's cloth left behind"
+		[ -n "${HALO_TEST_SHOTS:-}" ] && mkdir -p "$HALO_TEST_SHOTS/h3livelobby" &&
+			cp "$out"/h3livelobby_shots/0*.bmp "$HALO_TEST_SHOTS/h3livelobby/" 2>/dev/null ;;
 	h3mptouch)
 		# (MULTIPLAYER on the main menu; the lobby's MAP; BLOOD GULCH in the picker; the lobby's Back)
 		run h3mptouch "$menus_data" 30 "wait:150:20000" HALO_MENU_STYLE=halo3 \

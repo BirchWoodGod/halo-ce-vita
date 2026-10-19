@@ -65,7 +65,26 @@ these screens stand for the Xbox's own, over the same animated Halo ring:
   settings panel's Connection (port/linux/game/network_connection.c),
   switched live when chosen, its status in a line under NETWORK (Online,
   Connecting..., Same Wi-Fi, Ad hoc, No Wi-Fi); the map's picture, "<game> on <map>", "1 Player (N max)" and the
-  nameplate. The browser, Create Game and JOIN WITH CODE run OpenCE's screens'
+  nameplate.
+  The lobby is live (menu_functions.c h3_live, Halo 3's model): on ONLINE,
+  SYSTEM LINK or AD HOC, with a profile (the nameplate's, or the one chosen
+  this run) and the network ready (Online's broker reached, the Wi-Fi up,
+  in the ad hoc group), its game is hosted the moment the lobby is up and
+  its scene stands, with its GAME and MAP: friends, the party, a code, the
+  games browser (a public game) join it while the host chooses, through
+  every check a join has. The lobby shows its players (PLAYERS n/max, the
+  game's lobby's rows) instead of the nameplate; GAME and MAP changed go to
+  every joiner's lobby as the Xbox sent a game's settings between two
+  games (every build's client, 1.1.0's too); GAME OPTIONS' name and most
+  players at once, public or private and the password its listing. START
+  GAME opens the game's lobby
+  on that game at once (no profile asked, no other server), its countdown
+  begun once the game can start (it waits for every machine's map, map
+  sharing included); B there goes back to the lobby, the game kept, the
+  countdown stopped. B on the lobby, the main menu, another NETWORK, BROWSE
+  GAMES or JOIN WITH CODE close it: its joiners are told the host left.
+  Not live (START GAME hosts as before): OFFLINE, the network not ready,
+  crossplay on, no profile at all, a map not played with others. The browser, Create Game and JOIN WITH CODE run OpenCE's screens'
   functions (menu_functions.c "port browser/setup/code ...") under the same
   widget names; the browser's rows show a VITA or PC badge with a lock for a
   password. When internet play is off, ONLINE's rows open a dialog saying how to
@@ -194,7 +213,10 @@ left out or 0) into one of ui.map's cutscene camera points that its script
 never flies (load_campaign, settings, multiplayer, new_campaign) and cuts
 there, ring_loop asleep (menu_functions.c h3 scenes; menus.scenes,
 HALO_MENU_SCENES=0 turns them off). The campaign lobby, the multiplayer lobby
-and the Forge lobby have theirs; the screens opened from them keep it. SELECT
+and the Forge lobby have theirs; the screens opened from them keep it, the
+game's lobby (pregame.xml) of a game hosted or joined from one too: a network
+game's lobby stops the main menu's ticks, so the scene stands there as it was,
+whole (a scene not made by then is none until the game is over). SELECT
 PROFILE and CUSTOMIZATION's profile list have the editor's (customize.xml).
 
 What stands in a lobby's scene, as Halo 3's lobbies have their scenes, is said

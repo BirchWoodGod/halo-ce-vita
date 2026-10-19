@@ -3768,6 +3768,43 @@ void network_game_server_port_map_pending(
 	network_game_server_open_game(server);
 	platform_log("network: the game is open while its host chooses the map (joins held until then)");
 }
+
+/* port: whether the game is in its lobby (pregame, not yet starting): the
+Halo 3 live lobby's (menu_functions.c h3_live) */
+boolean network_game_server_port_in_lobby(
+	struct network_game_server *server)
+{
+	return server && server->state == _network_game_server_state_pregame && !server->sent_start_game_message;
+}
+
+/* port: the Halo 3 live lobby's START GAME (menu_functions.c h3_live): the
+countdown let run and begun at once, milliseconds long (Halo 3's few
+seconds; one under way already shortened to that), once the game can start
+(server_ok_to_countdown: a player on every machine, enough players); FALSE
+if it cannot start yet (the countdown then begins as the Xbox's lobby
+begins it, once others are in). The game itself starts once every machine
+has the map, as ever (network_game_server_have_all_machines_have_precached) */
+boolean network_game_server_port_start_soon(
+	struct network_game_server *server,
+	long milliseconds)
+{
+	if (!network_game_server_port_in_lobby(server))
+		return FALSE;
+	server->countdown_state.paused = FALSE;
+	if (!server_ok_to_countdown(server))
+		return FALSE;
+	if (server->countdown_state.active)
+	{
+		if (countdown_timer_get_time_remaining(&server->countdown_state.timer) > milliseconds)
+			countdown_timer_set_time_remaining(&server->countdown_state.timer, milliseconds);
+	}
+	else
+	{
+		server->countdown_state.last_countdown_message_time = 0;
+		network_game_server_begin_game_start_countdown(server, milliseconds);
+	}
+	return server->countdown_state.active;
+}
 #endif
 
 void network_game_server_change_map_name(

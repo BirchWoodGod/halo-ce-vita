@@ -2794,6 +2794,16 @@ static boolean netgame_unjoin_player(
 			(short)PIN(event->controller_index, 0, MAXIMUM_LOCAL_PLAYERS - 1));
 		return TRUE;
 	}
+#ifdef HALO_LINUX
+	/* port: the host of a Halo 3 live lobby goes back to it, its game kept
+	and its players with it, the countdown stopped (menu_functions.c h3_live) */
+	{
+		extern boolean pc_menu_functions_live_lobby_back(void);
+
+		if (client && pc_menu_functions_live_lobby_back())
+			return TRUE;
+	}
+#endif
 	if (client)
 	{
 		short state;

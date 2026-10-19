@@ -11,6 +11,10 @@ LINK and AD HOC the LAN browser, its look (halo3/network.xml) -, START GAME host
 and MAP (the profile first, once a run: menu_functions.c h3_session), the game's lobby next, no map
 or game type list; on ONLINE Square opens GAME OPTIONS (Create Game: name, max players, public or
 private, password), which START GAME hosts with.
+On ONLINE, SYSTEM LINK and AD HOC, with a profile and the network ready, the lobby is live (menu_functions.c
+h3_live): its game is hosted from the moment it is up, others join it there, GAME and MAP changed go to
+them, its players are shown in the game's lobby's rows, START GAME opens the
+game's lobby on that game with its countdown, B closes it (the joiners told).
 The map pictures and descriptions are ui.map's own; the rest this folder's art
 (tools/halo3_menu_art.py). -->
 <menus root="h3/mp/screen" replaces="ui\shell\main_menu\multiplayer_type_select\multiplayer_type_select_screen">
@@ -232,6 +236,7 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 		<on event="created" run="port mp screen init"/>
 		<on event="created" run="port h3 mp init"/>
 		<on event="created" run="port h3 scene"/>
+		<on event="b back" run="port h3 live leave"/>
 		<on event="b back" back="true"/>
 		<data input="port h3 mp lobby"/>
 		<child widget="h3/main/haze"/>
@@ -254,6 +259,15 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 		<child widget="h3/friends/lobby_panel"/>
 		<child widget="h3/mp/network_status"/>
 		<child widget="h3/main/nameplate"/>
+		<!-- (the live lobby's players, the game's lobby's rows: hidden when not live) -->
+		<child widget="h3/pregame/row_1" x="380" y="38"/>
+		<child widget="h3/pregame/row_2" x="380" y="56"/>
+		<child widget="h3/pregame/row_3" x="380" y="74"/>
+		<child widget="h3/pregame/row_4" x="380" y="92"/>
+		<child widget="h3/pregame/row_5" x="380" y="110"/>
+		<child widget="h3/pregame/row_6" x="380" y="128"/>
+		<child widget="h3/pregame/row_7" x="380" y="146"/>
+		<child widget="h3/pregame/row_8" x="380" y="164"/>
 		<child widget="h3/mp/list" x="8" y="50"/>
 	</widget>
 

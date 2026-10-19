@@ -115,6 +115,7 @@ left, a cool rim from behind, a soft ambient.
 void platform_log(char const *format, ...);
 unsigned long long vita_host_time_us(void);
 int halo_main_menu_idle(void);
+int halo_main_menu_loaded(void);
 void placement_data_set_change_color(struct object_placement_data *placement_data, real_rgb_color const *change_color);
 unsigned long scene_packs_map_epoch(void);
 void unit_scripting_enter_vehicle(long unit_index, long vehicle_index, char const *seat_name);
@@ -1555,10 +1556,13 @@ static void menu_scene_objects_update_internal(
 	if (stale || menu_scene_objects.replaced)
 		scene_forget(TRUE);
 	menu_scene_objects.replaced = FALSE;
-	if (!wanted || !halo_main_menu_idle() || !halo_menu_style_halo3())
+	/* (the main menu's map loaded: a network game's lobby there too - the
+	Halo 3 live lobby, the game's lobby - keeps the scene whole; a game's
+	map loading lets it go) */
+	if (!wanted || !halo_main_menu_loaded() || !halo_menu_style_halo3())
 	{
 		scene_forget(TRUE);
-		if (!halo_main_menu_idle())
+		if (!halo_main_menu_loaded())
 		{
 			for (index = 0; index < MAXIMUM_MENU_SCENE_OBJECTS; index++)
 				menu_scene_objects.slots[index].wanted = FALSE;
@@ -1593,7 +1597,10 @@ static void menu_scene_objects_update_internal(
 				menu_scene_objects.most_particles = particle_data->actual_count;
 		}
 	}
-	else if (!menu_scene_objects.refused)
+	/* (made only with the main menu's ticks running: a network game's lobby
+	stops them - no weapon readied, no pose taken - so a scene not made
+	before is none until it is over: menu_scene_objects_settled) */
+	else if (!menu_scene_objects.refused && halo_main_menu_idle())
 		scene_make();
 	preview_update();
 	/* (object_lights.c's quick way out: none made, none asked about) */
@@ -1708,6 +1715,34 @@ static short slot_of(long object_index)
 			return index;
 	}
 	return NONE;
+}
+
+int menu_scene_objects_settled(
+	void)
+{
+	short index;
+	boolean wanted = FALSE;
+
+	if (!menu_scene_objects_initialized || menu_scene_objects.refused || !halo_menu_style_halo3())
+		return TRUE;
+	for (index = 0; index < MAXIMUM_MENU_SCENE_OBJECTS; index++)
+		wanted |= menu_scene_objects.slots[index].wanted;
+	if (!wanted)
+		return TRUE;
+	/* (made a moment ago at least, every pose asked for taken or given up) */
+	if (!menu_scene_objects.made || vita_host_time_us() - menu_scene_objects.made_at < 500000ull)
+		return FALSE;
+	for (index = 0; index < MAXIMUM_MENU_SCENE_OBJECTS; index++)
+	{
+		struct menu_scene_object const *object = &menu_scene_objects.slots[index];
+
+		if (object->wanted && object->animation[0] && !object->animation_started && !object->animation_given_up &&
+			unit_try_and_get(object->object_index))
+		{
+			return FALSE;
+		}
+	}
+	return TRUE;
 }
 
 boolean menu_scene_objects_posed(
