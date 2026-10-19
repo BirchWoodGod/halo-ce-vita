@@ -79,7 +79,16 @@ refused, said on the screen. Its table is a fixed array, each index checked.
 
 A placed character has an AI team and its AI on or off (the properties
 window; forge_ai_apply: the engine's unit and actor teams, actor_braindead),
-and the Forge menu's ALL AI sets every one. NEW ROUND (the Forge menu,
+and the Forge menu's ALL AI sets every one (its row ON, OFF or MIXED: off
+from ON or MIXED, on from OFF); the setting stays for the characters placed
+after it and, in a Forge game, for those the game spawns (a carrier's
+infection forms). A character with its AI off is held as it stands every
+frame (forge_ai_hold): braindead again if anything woke it, facing where
+the editor turned it. A character is given its variant's weapon, grenades,
+vitality and camouflage (actor_customize_unit) and a free actor, or a swarm
+of its own for a swarm's (a Flood infection form). In a Forge game the
+humans are the local player's allies, as every campaign script makes them
+(the Marine AI pack's marines fight for the player). NEW ROUND (the Forge menu,
 forge_new_round_start) resets the map as the engine's map_reset does; the
 layout, each object at its placed spot (forge_placed's home: where the
 editor put it, not where play took it), is taken as the game's state goes
@@ -101,8 +110,8 @@ HALO_TEST_COMMANDS):
                            camera and held (the budget as the browser's)
   forge fill <count> <name>  that many spawned and let go on a grid in front
                            of the camera, while the budget allows
-  forge grab | drop        the object under the crosshair grabbed, the held
-                           one dropped
+  forge grab [#id] | drop  the object under the crosshair (or the layout's
+                           of that id) grabbed, the held one dropped
   forge turn <degrees>     the held (or aimed at) object turned about up
   forge distance <wu>      the held object that far from the camera
   forge delete             the held (or aimed at) object deleted
@@ -127,7 +136,11 @@ HALO_TEST_COMMANDS):
   forge allai [on|off]     every placed character's AI (flipped as the
                            Forge menu's AI row, or set)
   forge ai                 each placed character in the log: where, its
-                           team, its brain, alive or dead
+                           team, its brain, alive or dead, its aim and
+                           facing, its actor's mode, its weapon, body and
+                           shield; the game's own characters counted; the
+                           row's state; the shots characters have fired
+                           since the first "forge ai"
   forge objects            each object of the layout in the log: where it
                            is, its placed spot, alive, destroyed or gone
   forge round              a new round, as the Forge menu's NEW ROUND
@@ -155,6 +168,7 @@ Each logs what it did ("forge: ...").
 #include "devices/device_controls.h"
 #include "devices/device_definitions.h"
 #include "game/game.h"
+#include "game/game_allegiance.h"
 #include "game/game_engine.h"
 #include "game/player_control.h"
 #include "game/players.h"
@@ -178,6 +192,7 @@ Each logs what it did ("forge: ...").
 #include "text/draw_string.h"
 #include "text/font_group.h"
 #include "units/biped_definitions.h"
+#include "units/unit_control_data.h"
 #include "units/units.h"
 #include "units/vehicle_definitions.h"
 #include "units/unit_definitions.h"
@@ -351,8 +366,11 @@ static struct
 {
 	{ "covenant_vehicles", N_("Covenant vehicles"), N_("The Banshee, the Wraith and the Shade.\nBuilt from your Assault on the Control\nRoom or Two Betrayals map."), TRUE },
 	{ "dropships", N_("Dropships"), N_("The Pelican and the Covenant dropship.\nBuilt from your The Silent Cartographer\nor Halo map."), TRUE },
-	{ "covenant_ai", N_("Covenant AI"), N_("Grunts, jackals, elites and a hunter, who\nfight as in the campaign. Built from your\nAssault on the Control Room map."), FALSE },
+	{ "covenant_ai", N_("Covenant AI"), N_("Grunts, jackals, elites (stealth and\nsword too) and hunters, as in the\ncampaign. Built from your Assault on the\nControl Room map."), FALSE },
 	{ "ce_pelican", N_("Flyable Pelican"), N_("A Pelican you fly, with room for eleven\nriders. Built from your Extinction map\n(Halo Custom Edition, by (DA)Ender)."), TRUE },
+	{ "flood_ai", N_("Flood AI"), N_("Infection forms, combat forms and\ncarriers, on the Flood's team. Built from\nyour The Library map."), FALSE },
+	{ "sentinel_ai", N_("Sentinel AI"), N_("Sentinels, on their own team: they hunt\nthe Flood. Built from your The Library\nmap."), FALSE },
+	{ "marine_ai", N_("Marine AI"), N_("Marines with assault and sniper rifles,\non your side as in the campaign. Built\nfrom your Halo map."), FALSE },
 };
 
 /* our own names for the multiplayer maps' objects (and the campaign's
@@ -437,6 +455,17 @@ static struct
 	{ "tree_pine_snow", N_("Snowy Pine") },
 	{ "tree_pine_snowsmall", N_("Small Snowy Pine") },
 	{ "doorblinker", N_("Door Light") },
+	/* characters (the actor variants: the rest are their names' words) */
+	{ "flood_infection", N_("Flood Infection Form") },
+	{ "floodcarrier", N_("Flood Carrier Form") },
+	{ "floodcombat elite plasma rifle", N_("Flood Elite Plasma Rifle") },
+	{ "floodcombat elite shotgun", N_("Flood Elite Shotgun") },
+	{ "floodcombat_human assault rifle", N_("Flood Human Assault Rifle") },
+	{ "floodcombat_human shotgun", N_("Flood Human Shotgun") },
+	{ "marine_armored assault rifle", N_("Armored Marine Assault Rifle") },
+	{ "marine_armored assault rifle major", N_("Armored Marine Assault Rifle Major") },
+	{ "marine_armored sniper rifle", N_("Armored Marine Sniper Rifle") },
+	{ "marine_armored sniper rifle major", N_("Armored Marine Sniper Rifle Major") },
 	{ "metal_small", N_("Small Metal Block") },
 	{ "metal_tall", N_("Tall Metal Block") },
 	{ "metal_wide", N_("Wide Metal Block") },
@@ -469,7 +498,31 @@ struct forge_palette_entry
 {
 	long tag_index;
 	short category;
+	/* a character's side (FORGE_AI_GROUP_*: the browser's AI category
+	lists them side by side), else 0 */
+	short group;
 	char name[FORGE_NAME_SIZE];
+};
+
+/* the sides the browser's AI category groups its characters by, in its
+order: by the unit's default team (the Covenant's, the Flood's, the
+Sentinels', the humans' and the player's), the rest after */
+enum
+{
+	FORGE_AI_GROUP_COVENANT,
+	FORGE_AI_GROUP_FLOOD,
+	FORGE_AI_GROUP_SENTINELS,
+	FORGE_AI_GROUP_HUMANS,
+	FORGE_AI_GROUP_OTHER,
+	NUMBER_OF_FORGE_AI_GROUPS
+};
+static char const *const forge_ai_group_names[NUMBER_OF_FORGE_AI_GROUPS] =
+{
+	N_("Covenant"), N_("Flood"), N_("Sentinels"), N_("Humans"), "",
+};
+static char const *const forge_ai_group_log_names[NUMBER_OF_FORGE_AI_GROUPS] =
+{
+	"covenant", "flood", "sentinels", "humans", "other",
 };
 
 /* an object's place and facing */
@@ -685,6 +738,17 @@ static struct
 	/* (the Forge menu's AI row) every placed character's brain flipped:
 	all off if any is on, else all on */
 	volatile boolean ai_all_requested;
+	/* the ALL AI setting (the last one chosen, or read with a map
+	variant): a character placed gets its AI off while it is set; the
+	characters the game spawns in a Forge game follow it */
+	boolean ai_all_off;
+	/* (tests) the projectiles the characters fired, counted as they are
+	seen (forge_ai_shots_update, once the console's "forge ai" has asked):
+	their objects' last ones, to count each once */
+	boolean ai_shots_counted;
+	long ai_shots;
+	long ai_shot_seen[128];
+	short ai_shot_cursor;
 } forge_globals = { FALSE, "", FALSE, FALSE, 0, NONE, FALSE, NONE, 0.f, { 0.f }, { 0.f }, _forge_speed_normal };
 
 /* ---------- private code */
@@ -797,6 +861,16 @@ static short forge_tag_category(
 		{
 			return NONE;
 		}
+		/* (nor a character's own - a sentinel's beam - nor a pack's with
+		no first-person model, which only its character holds: the elite
+		commander's energy sword, the hunter's fuel rod; a map's own is
+		offered as before) */
+		if (!strncmp(name, "characters\\", 11) ||
+			(weapon_definition_get(tag_index)->weapon.interface_definition.first_person_model.index == NONE &&
+				scene_packs_owner(tag_index)))
+		{
+			return NONE;
+		}
 		return _forge_category_weapons;
 	case EQUIPMENT_DEFINITION_TAG:
 		return strstr(name, "grenade") ? _forge_category_weapons : _forge_category_equipment;
@@ -814,6 +888,30 @@ static short forge_tag_category(
 	return NONE;
 }
 
+/* a character's side in the browser (FORGE_AI_GROUP_*), by its unit's
+default team */
+static short forge_ai_group_of_variant(
+	long tag_index)
+{
+	long unit_definition_index = actor_variant_definition_get(tag_index)->unit_reference.index;
+
+	if (unit_definition_index == NONE)
+		return FORGE_AI_GROUP_OTHER;
+	switch (unit_definition_get(unit_definition_index)->unit.default_team)
+	{
+	case _game_team_covenant:
+		return FORGE_AI_GROUP_COVENANT;
+	case _game_team_flood:
+		return FORGE_AI_GROUP_FLOOD;
+	case _game_team_sentinel:
+		return FORGE_AI_GROUP_SENTINELS;
+	case _game_team_human:
+	case _game_team_player:
+		return FORGE_AI_GROUP_HUMANS;
+	}
+	return FORGE_AI_GROUP_OTHER;
+}
+
 static int forge_palette_compare(
 	void const *a,
 	void const *b)
@@ -823,6 +921,8 @@ static int forge_palette_compare(
 
 	if (left->category != right->category)
 		return left->category - right->category;
+	if (left->group != right->group)
+		return left->group - right->group;
 	return strcmp(left->name, right->name);
 }
 
@@ -864,6 +964,7 @@ static void forge_palette_build(
 			entry = &forge_globals.palette[forge_globals.palette_count++];
 			entry->tag_index = tag_index;
 			entry->category = category;
+			entry->group = category == _forge_category_characters ? forge_ai_group_of_variant(tag_index) : 0;
 			forge_tag_readable_name(tag_index, entry->name, sizeof(entry->name));
 		}
 	}
@@ -1247,6 +1348,27 @@ static short forge_ai_team_index(
 	return _game_team_unused6;
 }
 
+/* (actors.c's _actor_mode_braindead: an actor's state.mode while its AI
+is off, ai_braindead's) */
+#define FORGE_ACTOR_MODE_BRAINDEAD 0
+/* (actors.c's actor_default_state_alert and _none) */
+#define FORGE_ACTOR_DEFAULT_STATE_NONE 0
+#define FORGE_ACTOR_DEFAULT_STATE_ALERT 2
+
+/* a unit's actor: its own, or its swarm's (a Flood infection form's), or
+NONE */
+static long forge_ai_actor(
+	long unit_index)
+{
+	struct object_datum *object = object_try_and_get(unit_index);
+	struct unit_datum *unit;
+
+	if (!object || !(FLAG(object->object.type) & _object_mask_unit))
+		return NONE;
+	unit = (struct unit_datum *)object;
+	return unit->unit.actor_index != NONE ? unit->unit.actor_index : unit->unit.swarm_actor_index;
+}
+
 /* a placed character's AI settings given to its unit and actor (a dead
 one has none to give) */
 static void forge_ai_apply(
@@ -1272,32 +1394,139 @@ static void forge_ai_apply(
 	ai_update_team_status();
 }
 
-/* (the Forge menu's AI row) whether any placed character's brain is on
-(TRUE when none is placed) */
-static boolean forge_ai_any_on(
+/* (the Forge menu's AI row) the layout's characters' AI: all on, all off,
+or mixed (none placed: the ALL AI setting) */
+static short forge_ai_state(
 	void)
 {
 	short index;
-	boolean any = FALSE;
+	short on = 0;
+	short off = 0;
 
 	for (index = 0; index < forge_globals.placed_count && index < FORGE_MAXIMUM_OBJECTS; index++)
 	{
 		if (!forge_globals.placed[index].ai)
 			continue;
-		if (!(forge_globals.placed[index].flags & FORGE_RECORD_AI_OFF))
-			return TRUE;
-		any = TRUE;
+		if (forge_globals.placed[index].flags & FORGE_RECORD_AI_OFF)
+			off++;
+		else
+			on++;
 	}
-	return !any;
+	if (on && off)
+		return _forge_ai_all_mixed;
+	if (on)
+		return _forge_ai_all_on;
+	if (off)
+		return _forge_ai_all_off;
+	return forge_globals.ai_all_off ? _forge_ai_all_off : _forge_ai_all_on;
 }
 
-/* every placed character's brain set (on or off), said */
+/* a character the game has (a unit with an actor, or a swarm's) not of
+the layout, in a Forge game, brought to the ALL AI setting: one a carrier
+spawned, a body the Flood took (on a campaign map with the monitor, the
+map's own characters are the map's: left alone) */
+static void forge_ai_unplaced_update(
+	boolean all_set)
+{
+	struct object_iterator iterator;
+	struct unit_datum *unit;
+
+	if (!forge_globals.game_active || (!all_set && !forge_globals.ai_all_off))
+		return;
+	object_iterator_new(&iterator, _object_mask_unit, 0);
+	while ((unit = (struct unit_datum *)object_iterator_next(&iterator)) != NULL)
+	{
+		long actor_index = unit->unit.actor_index != NONE ? unit->unit.actor_index : unit->unit.swarm_actor_index;
+		struct actor_datum *actor;
+
+		if (actor_index == NONE || TEST_FLAG(unit->object.damage_flags, _object_dead_bit) ||
+			unit->unit.player_index != NONE || forge_placed_of_object(iterator.index))
+		{
+			continue;
+		}
+		actor = actor_get(actor_index);
+		if (forge_globals.ai_all_off && actor->state.mode != FORGE_ACTOR_MODE_BRAINDEAD)
+			actor_braindead(actor_index, TRUE);
+		else if (all_set && !forge_globals.ai_all_off && actor->state.mode == FORGE_ACTOR_MODE_BRAINDEAD)
+			actor_braindead(actor_index, FALSE);
+	}
+}
+
+/* every frame: a placed character with its AI off kept as it stands (its
+actor braindead again if anything woke it), facing where the editor
+turned it - a braindead unit keeps the facing and aim it had when its AI
+went off and would turn back to them - and the game's own characters at
+the ALL AI setting */
+static void forge_ai_hold(
+	void)
+{
+	short index;
+
+	for (index = 0; index < forge_globals.placed_count && index < FORGE_MAXIMUM_OBJECTS; index++)
+	{
+		struct forge_placed const *placed = &forge_globals.placed[index];
+		struct unit_datum *unit;
+		long actor_index;
+		real_vector3d forward;
+
+		if (!placed->ai || !(placed->flags & FORGE_RECORD_AI_OFF) || !forge_object_alive(placed->object_index))
+			continue;
+		unit = unit_get(placed->object_index);
+		actor_index = forge_ai_actor(placed->object_index);
+		if (actor_index == NONE || TEST_FLAG(unit->object.damage_flags, _object_dead_bit))
+			continue;
+		if (actor_get(actor_index)->state.mode != FORGE_ACTOR_MODE_BRAINDEAD)
+			actor_braindead(actor_index, TRUE);
+		forward = unit->object.forward;
+		forward.k = 0.f;
+		if (normalize3d(&forward) < 0.0001f)
+			continue;
+		if (dot_product3d(&forward, &unit->unit.desired_facing_vector) < 0.9999f)
+		{
+			struct unit_control_data control;
+
+			csmemset(&control, 0, sizeof(control));
+			control.animation_state = _unit_animation_state_alert;
+			control.throttle = *global_zero_vector3d;
+			control.aiming_speed = 1;
+			control.weapon_index = NONE;
+			control.grenade_index = NONE;
+			control.zoom_level = NONE;
+			control.facing_vector = forward;
+			control.aiming_vector = forward;
+			control.looking_vector = forward;
+			unit_control(placed->object_index, &control);
+		}
+	}
+	forge_ai_unplaced_update(FALSE);
+	/* (a Forge game: the humans the local player's allies, as every
+	campaign map's script makes them (ai_allegiance player human) - the
+	Marine AI pack's marines fight for the player - again after a new
+	round, which starts the allegiances over) */
+	if (forge_globals.game_active)
+	{
+		long player_index = local_player_get_player_index(0);
+		short team = player_index != NONE ? (short)player_get(player_index)->team_index : NONE;
+
+		if (team >= 0 && team < NUMBER_OF_SOLO_CAMPAIGN_TEAMS && team != _game_team_human &&
+			game_team_is_enemy(team, _game_team_human))
+		{
+			ai_scripting_allegiance(team, _game_team_human);
+			ai_update_team_status();
+			platform_log("forge: the humans are the player's allies (team %d)", team);
+		}
+	}
+}
+
+/* every placed character's AI set (on or off), the setting kept for the
+ones placed after it, said */
 static void forge_ai_all_set(
 	boolean on)
 {
 	short index;
 	short count = 0;
 
+	forge_globals.ai_all_off = !on;
 	for (index = 0; index < forge_globals.placed_count && index < FORGE_MAXIMUM_OBJECTS; index++)
 	{
 		struct forge_placed *placed = &forge_globals.placed[index];
@@ -1311,9 +1540,47 @@ static void forge_ai_all_set(
 		forge_ai_apply(placed);
 		count++;
 	}
+	forge_ai_unplaced_update(TRUE);
 	platform_log("forge: all AI %s (%d characters)", on ? "on" : "off", count);
 	forge_menu_notice("%s", on ? T("AI: On") : T("AI: Off"));
 }
+
+#ifndef HALO_RELEASE
+/* (tests) the projectiles in the world fired by a character (a unit with
+an actor), each counted once as it is first seen */
+static void forge_ai_shots_update(
+	void)
+{
+	struct object_iterator iterator;
+	struct object_datum *object;
+
+	object_iterator_new(&iterator, _object_mask_projectile, 0);
+	while ((object = object_iterator_next(&iterator)) != NULL)
+	{
+		struct unit_datum *owner;
+		short seen;
+
+		if (object->object.owner_object_index == NONE)
+			continue;
+		owner = (struct unit_datum *)object_try_and_get(object->object.owner_object_index);
+		if (!owner || !(FLAG(owner->object.type) & _object_mask_unit) ||
+			(owner->unit.actor_index == NONE && owner->unit.swarm_actor_index == NONE))
+		{
+			continue;
+		}
+		for (seen = 0; seen < (short)NUMBEROF(forge_globals.ai_shot_seen); seen++)
+		{
+			if (forge_globals.ai_shot_seen[seen] == iterator.index)
+				break;
+		}
+		if (seen < (short)NUMBEROF(forge_globals.ai_shot_seen))
+			continue;
+		forge_globals.ai_shot_seen[forge_globals.ai_shot_cursor] = iterator.index;
+		forge_globals.ai_shot_cursor = (short)((forge_globals.ai_shot_cursor + 1) % NUMBEROF(forge_globals.ai_shot_seen));
+		forge_globals.ai_shots++;
+	}
+}
+#endif
 
 static short forge_placed_of_tag(
 	long tag_index)
@@ -1820,15 +2087,45 @@ static long forge_place(
 	}
 	if (actor_variant_index != NONE)
 	{
-		ai_scripting_attach_free(object_index, actor_variant_index);
-		platform_log("forge: %s given a free actor (%lx)", forge_tag_leaf(definition_index),
-			(unsigned long)unit_get(object_index)->unit.actor_index);
+		long actor_definition_index = actor_variant_definition_get(actor_variant_index)->actor_reference.index;
+
+		/* (its variant's weapon, grenades, vitality, colours and
+		camouflage, as a map's own characters are given them as they are
+		placed (actor_place): an elite major needler with its needler, a
+		stealth elite cloaked, a Flood combat form with its shotgun) */
+		if (actor_definition_index != NONE)
+			actor_customize_unit(actor_variant_index, object_index);
+		/* (a swarm's - a Flood infection form - which ai_attach_free will
+		not take: a swarm of its own, of no encounter, as a carrier's
+		infection forms are made a swarm (actors_spawn_from_unit); a squad
+		given so that it never joins another placed swarm, whose AI
+		settings are its own) */
+		if (actor_definition_index != NONE &&
+			TEST_FLAG(actor_definition_get(actor_definition_index)->flags, _actor_definition_swarm_actor_bit))
+		{
+			actor_create_for_unit(TRUE, object_index, actor_variant_index, NONE, 0, FALSE, NONE, FALSE,
+				FORGE_ACTOR_DEFAULT_STATE_ALERT, FORGE_ACTOR_DEFAULT_STATE_NONE, NONE, 0);
+			platform_log("forge: %s given a swarm of its own (%lx)", forge_tag_leaf(definition_index),
+				(unsigned long)unit_get(object_index)->unit.swarm_actor_index);
+		}
+		else
+		{
+			ai_scripting_attach_free(object_index, actor_variant_index);
+			platform_log("forge: %s given a free actor (%lx)", forge_tag_leaf(definition_index),
+				(unsigned long)unit_get(object_index)->unit.actor_index);
+		}
 	}
 	forge_placed_add(object_index, tag_index, actor_variant_index != NONE);
 	/* (a character's team, its default, at once: a multiplayer game's
-	units are given none by the engine) */
+	units are given none by the engine; its AI off while ALL AI is) */
 	if (actor_variant_index != NONE)
-		forge_ai_apply(forge_placed_of_object(object_index));
+	{
+		struct forge_placed *placed = forge_placed_of_object(object_index);
+
+		if (placed && forge_globals.ai_all_off)
+			placed->flags |= FORGE_RECORD_AI_OFF;
+		forge_ai_apply(placed);
+	}
 	forge_globals.spawned_count++;
 	if (!quiet)
 	{
@@ -2955,6 +3252,11 @@ static void forge_variant_apply(
 		placed++;
 	}
 	skipped = (short)(missing + outside + over_budget + refused + other_kinds);
+	/* (a map variant read: ALL AI as its characters have it - off when
+	every one is off - for the ones placed after; a new round keeps the
+	setting) */
+	if (!round)
+		forge_globals.ai_all_off = forge_ai_state() == _forge_ai_all_off;
 	if (round)
 	{
 		platform_log("forge: new round %ld: %d placed again, %d skipped (%d missing tags, %d outside the map, %d past the "
@@ -3703,10 +4005,10 @@ void forge_ai_all_request(
 	forge_globals.ai_all_requested = TRUE;
 }
 
-boolean forge_ai_all_on(
+short forge_ai_all_state(
 	void)
 {
-	return forge_ai_any_on();
+	return forge_ai_state();
 }
 
 void forge_map_resetting(
@@ -3811,6 +4113,7 @@ void forge_map_loaded(
 	forge_globals.round_resetting = FALSE;
 	forge_globals.round_pending = FALSE;
 	forge_globals.ai_all_requested = FALSE;
+	forge_globals.ai_all_off = FALSE;
 	if (forge_globals.active)
 	{
 		/* (the director starts over with the map) */
@@ -3887,6 +4190,8 @@ boolean forge_category_item(
 	entry = &forge_globals.palette[forge_globals.palette_first[category] + item_index];
 	csmemcpy(item->name, entry->name, sizeof(item->name));
 	item->placed = forge_placed_of_tag(entry->tag_index);
+	snprintf(item->group, sizeof(item->group), "%s", entry->category == _forge_category_characters &&
+		entry->group < FORGE_AI_GROUP_OTHER ? T(forge_ai_group_names[entry->group]) : "");
 	return TRUE;
 }
 
@@ -3990,10 +4295,16 @@ void forge_update(
 		forge_globals.property_requested = FALSE;
 		forge_property_apply(forge_globals.property_request, forge_globals.property_step);
 	}
+	if (forge_game_playing)
+		forge_ai_hold();
+#ifndef HALO_RELEASE
+	if (forge_globals.game_active && forge_globals.ai_shots_counted)
+		forge_ai_shots_update();
+#endif
 	if (forge_globals.ai_all_requested)
 	{
 		forge_globals.ai_all_requested = FALSE;
-		forge_ai_all_set(!forge_ai_any_on());
+		forge_ai_all_set(forge_ai_state() == _forge_ai_all_off);
 	}
 	/* (NEW ROUND: once the Forge menu has gone and the game runs again -
 	the engine resets a map only then) */
@@ -4430,7 +4741,9 @@ boolean forge_command(
 				struct forge_palette_entry const *entry =
 					&forge_globals.palette[forge_globals.palette_first[category] + index];
 
-				platform_log("forge: %s %d: %s (%s)", rest, index, entry->name, tag_get_name(entry->tag_index));
+				platform_log("forge: %s %d: %s (%s)%s%s", rest, index, entry->name, tag_get_name(entry->tag_index),
+					entry->category == _forge_category_characters ? ", " : "",
+					entry->category == _forge_category_characters ? forge_ai_group_log_names[entry->group] : "");
 			}
 		}
 		return TRUE;
@@ -4491,6 +4804,8 @@ boolean forge_command(
 		short index;
 		boolean characters = !strcmp(word, "ai");
 
+		forge_globals.ai_shots_counted = TRUE;
+
 		forge_placed_update();
 		for (index = 0; index < forge_globals.placed_count && index < FORGE_MAXIMUM_OBJECTS; index++)
 		{
@@ -4505,12 +4820,34 @@ boolean forge_command(
 				continue;
 			if (characters)
 			{
-				platform_log("forge: ai %d: %s (id %ld) %s at %.2f %.2f %.2f, AI team %s, engine team %d, AI %s, actor %s",
+				real_vector3d aim = { 0.f, 0.f, 0.f };
+				real_vector3d facing = { 0.f, 0.f, 0.f };
+				long actor_index = forge_ai_actor(placed->object_index);
+				struct actor_datum const *actor = actor_index != NONE ? actor_get(actor_index) : NULL;
+
+				char const *weapon = "none";
+
+				if (object)
+				{
+					struct unit_datum *unit = unit_get(placed->object_index);
+					short slot = unit->unit.current_weapon_index;
+					struct object_datum *held = slot >= 0 && slot < MAXIMUM_WEAPONS_PER_UNIT ?
+						object_try_and_get(unit->unit.weapon_object_indices[slot]) : NULL;
+
+					unit_get_aiming_vector(placed->object_index, &aim);
+					unit_get_facing_vector(placed->object_index, &facing);
+					if (held)
+						weapon = forge_tag_leaf(held->definition_index);
+				}
+				platform_log("forge: ai %d: %s (id %ld) %s at %.2f %.2f %.2f, AI team %s, engine team %d, AI %s, actor %s, "
+					"aim %.3f %.3f %.3f, facing %.3f %.3f %.3f, mode %d action %d, weapon %s, body %.2f, shield %.2f",
 					index, name, placed->id, state, object ? object->object.position.x : 0.f,
 					object ? object->object.position.y : 0.f, object ? object->object.position.z : 0.f,
 					forge_ai_team_log_names[placed->ai_team % NUMBER_OF_FORGE_AI_TEAMS],
 					object ? object->object.owner_team_index : NONE, (placed->flags & FORGE_RECORD_AI_OFF) ? "off" : "on",
-					object && unit_get(placed->object_index)->unit.actor_index != NONE ? "yes" : "none");
+					actor ? "yes" : "none", aim.i, aim.j, aim.k, facing.i, facing.j, facing.k, actor ? actor->state.mode : NONE,
+					actor ? actor->state.action : NONE, weapon, object ? object->object.body_vitality : 0.f,
+					object ? object->object.shield_vitality : 0.f);
 			}
 			else
 			{
@@ -4520,8 +4857,32 @@ boolean forge_command(
 					placed->home.position.z);
 			}
 		}
-		platform_log("forge: %s listed: %d objects, %d characters in the layout", word, forge_globals.placed_count,
-			forge_globals.ai_count);
+		if (characters)
+		{
+			struct object_iterator iterator;
+			struct unit_datum *unit;
+			short others = 0;
+			short others_off = 0;
+
+			/* (the game's own: a carrier's infection forms) */
+			object_iterator_new(&iterator, _object_mask_unit, 0);
+			while ((unit = (struct unit_datum *)object_iterator_next(&iterator)) != NULL)
+			{
+				long actor_index = unit->unit.actor_index != NONE ? unit->unit.actor_index : unit->unit.swarm_actor_index;
+
+				if (actor_index == NONE || TEST_FLAG(unit->object.damage_flags, _object_dead_bit) ||
+					forge_placed_of_object(iterator.index))
+				{
+					continue;
+				}
+				others++;
+				others_off += actor_get(actor_index)->state.mode == FORGE_ACTOR_MODE_BRAINDEAD ? 1 : 0;
+			}
+			platform_log("forge: ai: %d characters not of the layout alive (%d with their AI off); ALL AI %s", others,
+				others_off, forge_ai_state() == _forge_ai_all_on ? "on" : forge_ai_state() == _forge_ai_all_off ? "off" : "mixed");
+		}
+		platform_log("forge: %s listed: %d objects, %d characters in the layout; %ld shots by characters so far", word,
+			forge_globals.placed_count, forge_globals.ai_count, forge_globals.ai_shots);
 		return TRUE;
 	}
 	if (!strcmp(word, "round"))
@@ -4531,7 +4892,7 @@ boolean forge_command(
 	}
 	if (!strcmp(word, "allai"))
 	{
-		forge_ai_all_set(!strcmp(rest, "on") ? TRUE : !strcmp(rest, "off") ? FALSE : !forge_ai_any_on());
+		forge_ai_all_set(!strcmp(rest, "on") ? TRUE : !strcmp(rest, "off") ? FALSE : forge_ai_state() == _forge_ai_all_off);
 		return TRUE;
 	}
 	if (!forge_globals.active && strcmp(word, "where"))
@@ -4599,7 +4960,12 @@ boolean forge_command(
 		if (!strcmp(word, "destroy"))
 		{
 			platform_log("forge: destroyed %s", forge_tag_leaf(object->definition_index));
-			object_destroy(object_index);
+			/* (a unit as the engine destroys one: a carrier's infection
+			forms spawned) */
+			if (FLAG(object->object.type) & _object_mask_unit)
+				unit_destroy(object_index);
+			else
+				object_destroy(object_index);
 		}
 		else if (!strcmp(word, "kill"))
 		{
@@ -4756,6 +5122,19 @@ boolean forge_command(
 	{
 		long object_index = forge_object_under_crosshair();
 
+		/* ("#<id>": the layout's object of that id instead) */
+		if (rest[0] == '#')
+		{
+			long id = atol(rest + 1);
+			short index;
+
+			object_index = NONE;
+			for (index = 0; index < forge_globals.placed_count && index < FORGE_MAXIMUM_OBJECTS; index++)
+			{
+				if (forge_globals.placed[index].id == id && forge_object_alive(forge_globals.placed[index].object_index))
+					object_index = forge_globals.placed[index].object_index;
+			}
+		}
 		if (object_index == NONE)
 		{
 			platform_log("forge: nothing under the crosshair");

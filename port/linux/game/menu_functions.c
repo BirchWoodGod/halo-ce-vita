@@ -1796,8 +1796,12 @@ static void h3_forge_browser_update(struct widget_instance *list)
 			if (forge_category_item(h3_forge.category, (short)shown, &item))
 			{
 				snprintf(text, sizeof(text), "%s", item.name);
+				/* (a character's side when none of it is placed: the AI
+				category's groups) */
 				if (item.placed > 0)
 					snprintf(line, sizeof(line), T("%d placed"), item.placed);
+				else if (item.group[0])
+					snprintf(line, sizeof(line), "%s", item.group);
 			}
 		}
 		else
@@ -1964,7 +1968,7 @@ static void h3_forge_title_update(struct widget_instance *widget)
 		text_show(named(screen, "redo"), text);
 		snprintf(text, sizeof(text), "%s: %s", T("SNAP"), forge_snap_enabled() ? T("ON") : T("OFF"));
 		text_show(named(screen, "snap"), text);
-		snprintf(text, sizeof(text), "%s: %s", T("ALL AI"), forge_ai_all_on() ? T("ON") : T("OFF"));
+		snprintf(text, sizeof(text), "%s: %s", T("ALL AI"), forge_ai_all_state() == _forge_ai_all_on ? T("ON") : forge_ai_all_state() == _forge_ai_all_off ? T("OFF") : T("MIXED"));
 		text_show(named(screen, "allai"), text);
 		forge_menu_status(status, sizeof(status));
 		if (status[0])

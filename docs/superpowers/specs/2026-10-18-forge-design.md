@@ -1065,6 +1065,143 @@ round trip, refusals and fuzzing. The console's `forge aiteam`, `brain`,
 `allai`, `ai`, `objects`, `round`, and the tests' `kill`, `destroy`,
 `shove`.
 
+## ALL AI fixed, and the other AI as packs (as built, Oct 18 2026)
+
+Branch `feat/forge-ai-more` (from insider.10, `96dedf28`). The owner, on
+insider.10: "The ALL AI off button doesn't work too well, teams work, we
+should add the other AI."
+
+### What was wrong with ALL AI
+
+Found on the harness (`forge ai` now logs each character's aim, facing, actor
+mode, weapon, body and shield, and the shots characters fire):
+
+- **A frozen character turned back.** `actor_braindead` freezes a unit with
+  the facing and aim it has at that moment (its desired vectors). The editor
+  then turning or carrying it changed only the object: once let go it turned
+  back to the old facing and kept aiming at where its target had been. Now
+  every frame (`forge_ai_hold`) a placed character with its AI off whose
+  facing the editor changed is given that facing (aim and look straight
+  ahead), and its actor is made braindead again if anything woke it.
+- **New characters ignored it.** ALL AI only flipped the characters already
+  placed; one placed after ALL AI OFF fought at once. The choice is now a
+  setting (`forge_globals.ai_all_off`): a character placed while it is off
+  has its AI off; a map variant read sets it (off when every character in
+  it is off); NEW ROUND keeps it.
+- **The row lied.** It showed ON whenever any character was on, so with one
+  turned on by hand it said ON over a mostly frozen layout, and pressing it
+  froze everything. The row now says ON, OFF or MIXED; A (or left/right)
+  turns all off from ON or MIXED, all on from OFF.
+- **Characters the game spawns** (a carrier's infection forms, below) are
+  not the layout's: in a Forge game they follow the setting too.
+- **Characters were not given their variant.** `ai_attach_free` gives a unit
+  an actor but not its variant's weapon, grenades, vitality, colours or
+  camouflage: an Elite Major Needler held a plasma rifle, a stealth elite
+  was not cloaked. `actor_customize_unit` (as `actor_place` does for a map's
+  own characters) is now called as a character is placed.
+
+Measured (`run_forge_test.sh allai`): four Covenant fighting the Spartan,
+ALL AI off: over 10 s (44 readings) none moved more than 5 cm (idle
+animation), none changed its aim, none fired; the Elite turned 90 degrees by
+the editor kept its new facing; an Elite placed then came with its AI off;
+MIXED, then OFF, then ON: they fight again (11 shots, then 84).
+
+### The AI packs
+
+| Pack | Characters (with their majors) | Source map | Tags | Tag cache | Pixels + samples (file) | Build (x86) |
+|---|---|---|---|---|---|---|
+| covenant_ai | + grunt minor needler, stealth elite (and major), elite commander energy sword: 14 | b40 (b30, a50) | 975 | 5187 KB (+223) | 30.3 MB (35.4 MB) | 1.4 s |
+| flood_ai | infection form, carrier form, Flood elite (plasma rifle, shotgun), Flood human (assault rifle, shotgun): 6 | c20 (d20, c40, d40) | 581 | 2997 KB | 10.5 MB (13.4 MB) | 0.58 s |
+| sentinel_ai | sentinel, sentinel major: 2 | c20 (c40) | 97 | 544 KB | 1.4 MB (1.9 MB) | 0.56 s |
+| marine_ai | marine (assault rifle), armored marine (assault rifle, sniper rifle), their majors: 6 | a30 | 528 | 3041 KB | 8.9 MB (11.8 MB) | 0.97 s |
+
+- The Library (c20) is the smallest campaign map (135 MB inflated against
+  b40's 266 MB): the Flood and Sentinel packs read it twice in about a
+  third of a b40 build's time. The Maw has the shielded sentinels, but
+  neither the plain sentinel nor all the Flood's variants. The Enforcer is
+  Halo 2's: Halo CE has none.
+- marine_ai strips the marines' dialogue (`strip udlg`): with it the pack is
+  843 sounds, 60 MB of samples and a 65 MB file (64 MB is a pack's limit);
+  without it 12 MB. They fight silently.
+- Sergeant Johnson is left out: Halo CE has him only as The Maw's cinematic
+  biped (`cinematics\johnson\johnson`), with no actor variant.
+- Each is opt-in in the lobby's EXTRA OBJECTS, after the Flyable Pelican
+  (load order: the packs on by default first). `MAXIMUM_LOADED_SCENE_PACKS`
+  is 8 (seven Forge packs and a player model's).
+- Default teams are the units' own: the Flood's, the Sentinels', the
+  humans'. In a Forge game the humans are the local player's allies, as
+  every campaign script makes them (`ai_allegiance player human`; made
+  again after a new round): marines fight for the player; HUMAN in the AI
+  TEAM row is now an ally of the player too.
+- A Flood infection form is a swarm actor, which `ai_attach_free` refuses:
+  Forge gives it a swarm of its own (`actor_create_for_unit` with no
+  encounter and a squad no encounterless actor has, so it never joins
+  another placed swarm, whose AI settings are its own).
+- A carrier's infection forms: `actors_spawn_from_unit` spawned a unit's
+  actors only for an actor of an encounter. In a multiplayer game an
+  encounterless actor's now spawn too (port change in `actors.c`), of no
+  encounter, one swarm of their own; a campaign game is unchanged.
+- The browser's AI category lists the characters by side (the unit's
+  default team): Covenant, Flood, Sentinels, Humans, each row's side shown
+  in its count column until one is placed. Readable names for the Flood's
+  and the armored marines' (`forge_names`).
+- The weapons category no longer offers a character's own weapon (the
+  sentinel's beam, `characters\...`) nor a pack's weapon with no
+  first-person model (the commander's energy sword, the hunter's fuel rod:
+  a player would hold nothing); a map's own are offered as before. A map
+  variant with a hunter fuel rod placed skips it.
+
+### The tag cache: what fits on Blood Gulch
+
+Blood Gulch is the tightest multiplayer map. The packs' room was measured
+from the end of the map's tags to the end of the tag cache while a map
+loaded: the scenario is not the game's yet when Forge's packs load, so the
+structure bsp's place was not known and its 1266 KB were counted as free.
+With every pack on, the packs took that room and the bsp was then refused:
+"Couldn't load Blood Gulch: this map file is damaged". `tag_cache_room` now
+finds the map's scenario tag itself; the earlier free figures (8837 KB
+after the three first packs) were 1266 KB too high.
+
+`run_forge_test.sh aipacks` (the Flyable Pelican from extinction.map):
+
+| Packs on | Loaded | Held | Free after |
+|---|---|---|---|
+| the defaults (vehicles, dropships, Flyable Pelican) | all | 2547 KB | 11502 KB |
+| defaults + Covenant AI | all | 7734 KB | 6315 KB |
+| defaults + Flood AI | all | 5544 KB | 8505 KB |
+| defaults + Sentinel AI | all | 3091 KB | 10958 KB |
+| defaults + Marine AI | all | 5588 KB | 8461 KB |
+| the four AI packs alone | all | 11770 KB | 2279 KB |
+| every pack | all but Marine AI (left out, said) | 11276 KB | 2773 KB |
+
+The room is 14049 KB in all. Any three AI packs fit with the defaults
+(Covenant, Flood and Marine leave 277 KB); all four do only with the
+defaults off: with them the last one asked for (Marine AI, in load order)
+is 267 KB short and left out with the notice.
+
+### GPU programs
+
+No program written. Collected on the gxm-null harness (HALO_SHADER_COLLECT)
+through `flood`, `floodcov`, `sentinels`, `marines`, `allai` and `aivariant`
+and checked (`tools/vita_shader_pack.py --check`): 107 of 108 in
+shaders.pak; lacking `ef7ede1093531c6c.fp` (one texture stage, fogged),
+drawn in the Flood and the Sentinel cases (both c20 packs): to compile on
+Vita3K (HALO_SHADER_PRECOMPILE) and add. The Covenant AI cases (`aioff`,
+`aiteam`) lack one already in insider.10: `e990fac489771925.fp`.
+
+### Tests
+
+`run_forge_test.sh`: `allai` (above), `allaimenu` (the row by the pad:
+MIXED, OFF, ON, screenshots), `flood` (infection form, carrier and combat
+forms attack the Spartan; the carrier bursts, its infection forms live and
+ALL AI freezes them), `floodcov` (the Flood and the Covenant fight),
+`sentinels` (sentinels attack the Flood), `marines` (marines never hurt the
+Spartan; with the Covenant there they shoot it), `aivariant` (a variant with
+one character of each AI pack saved: it names the four packs; started again
+with none chosen it brings them and places all four as saved), `aipacks`
+(not by default: the table above). `run_scene_pack_test.sh tool`: the four AI
+packs built, loaded with no correction and fuzzed.
+
 ## Packs from Halo Custom Edition maps (as built, Oct 18 2026)
 
 Branch `feat/ce-packs` (from `integration/1.1.1-beta.8`). The owner's asks:
