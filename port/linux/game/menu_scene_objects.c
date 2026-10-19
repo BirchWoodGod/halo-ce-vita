@@ -136,6 +136,9 @@ enum
 };
 
 #define MENU_SCENE_PREVIEW_PACK "menu_spartan"
+/* (a flag held in a scene: the breeze it flies in, world units a second,
+menu_scene_objects_flag_wind) */
+#define MENU_SCENE_FLAG_BREEZE 2.5f
 /* (a model chosen rests this long before its pack is wanted) */
 #define MENU_SCENE_MODEL_REST_US 300000ull
 /* (a scene whose packs are loaded waits for their textures, on the cache
@@ -1721,6 +1724,44 @@ boolean menu_scene_objects_frozen(
 	}
 	if (suspension)
 		*suspension = menu_scene_objects.slots[slot].suspension;
+	return TRUE;
+}
+
+/* (flags.c) the breeze a flag held in a scene flies in: along its
+camera's right, level, so that its cloth streams across the picture face
+on (HALO_MENU_FLAG_BREEZE: its speed, 0 none). FALSE for any other flag */
+boolean menu_scene_objects_flag_wind(
+	long object_index,
+	real_vector3d *wind)
+{
+	struct object_datum *datum;
+	short slot;
+	static real speed = -1.f;
+
+	if (!menu_scene_objects_initialized || menu_scene_objects.made_count <= 0 || object_index == NONE)
+		return FALSE;
+	if (speed < 0.f)
+	{
+		char const *setting = getenv("HALO_MENU_FLAG_BREEZE");
+
+		speed = setting && *setting ? (real)atof(setting) : MENU_SCENE_FLAG_BREEZE;
+	}
+	if (speed <= 0.f)
+		return FALSE;
+	/* (the flag, or what holds it: a scene's object) */
+	slot = slot_of(object_index);
+	if (slot == NONE && (datum = object_try_and_get(object_index)) != NULL)
+		slot = slot_of(datum->object.parent_object_index);
+	if (slot == NONE)
+		return FALSE;
+	{
+		struct menu_scene_frame frame;
+
+		camera_frame(&menu_scene_objects.slots[slot].camera, &frame);
+		wind->i = frame.right.i * speed;
+		wind->j = frame.right.j * speed;
+		wind->k = speed * 0.1f;
+	}
 	return TRUE;
 }
 
