@@ -65,7 +65,7 @@ commits before it, cherry-picked). On the Vita:
 
 A Custom Edition map's objects can also be brought into an Xbox map as a
 scene pack (`port/linux/game/scene_pack_ce.c`; the Forge design doc's "Packs
-from Halo Custom Edition maps"): Forge's flyable Pelican from Extinction, and
+from Halo Custom Edition maps"): Forge's Extinction Pelican, and
 the player models found in the maps folder's multiplayer maps. The pack is
 built on the player's machine from the player's own map and resource maps,
 through every check above (the tags alone: `custom_edition_cache_load_tags`),

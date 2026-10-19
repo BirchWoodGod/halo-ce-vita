@@ -1,7 +1,10 @@
 # The dropships for Forge on the multiplayer maps (which have none): the UNSC
 # Pelican and the Covenant dropship, with what they need, from the player's
-# own campaign maps (The Silent Cartographer has both, Halo too).
+# own campaign maps (The Silent Cartographer has both, Halo too). The Pelican
+# is made one players fly (the builder's flyable_pelican tuning, scene_pack.c:
+# its pilot's seat one a player gets into, ten riders' seats, our own speed).
 pack dropships
 map b30 a50
 tag vehi vehicles\pelican\pelican
 tag vehi vehicles\c_dropship\c_dropship
+tune flyable_pelican vehi vehicles\pelican\pelican

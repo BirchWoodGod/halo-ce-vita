@@ -62,6 +62,9 @@ HALO_SCENE_PACKS=0 turns them off (nothing is wanted, built or loaded).
 #include "objects/objects.h"
 #include "units/units.h"
 #include "units/unit_definitions.h"
+#include "units/vehicle_definitions.h"
+#include "physics/physics_definitions.h"
+#include "models/model_definitions.h"
 #include "game/game_globals.h"
 #include "objects/object_types.h"
 #include "bitmaps/bitmap_group.h"
@@ -74,6 +77,7 @@ HALO_SCENE_PACKS=0 turns them off (nothing is wanted, built or loaded).
 #include "scene_packs.h"
 #include "tag_schema.h"
 
+#include <math.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -89,6 +93,8 @@ void cache_files_set_tag_instances(void *instances, long count);
 void tag_validate_reserve_after_tags(unsigned long bytes);
 boolean sound_cache_sound_in_use(struct sound_permutation *sound);
 void sound_cache_sound_delete(struct sound_permutation *sound);
+boolean unit_get_seat_entrance_point(long unit_index, long target_unit_index, short seat_index, real_point3d *entry_position,
+	real_point3d *exit_position, real_point3d *seat_transform);
 
 /* ---------- constants */
 
@@ -1170,6 +1176,158 @@ boolean scene_packs_read(
 	return TRUE;
 }
 
+/* (tests: "pack vehicle") a vehicle tag's seats, vehicle fields and physics
+(the field names of the tag's definition: Invader's vehicle and physics) */
+static void vehicle_tag_report(
+	char const *name)
+{
+	struct tag_iterator iterator;
+	long tag_index;
+	size_t name_length = strlen(name);
+
+	tag_iterator_new(&iterator, VEHICLE_DEFINITION_TAG);
+	while ((tag_index = tag_iterator_next(&iterator)) != NONE)
+	{
+		char const *tag_name = tag_get_name(tag_index);
+		size_t tag_length = tag_name ? strlen(tag_name) : 0;
+		struct unit_definition *definition;
+		unsigned char const *vehicle;
+		long player_index = local_player_get_player_index(0);
+		struct player_datum *player = player_index != NONE ? player_get(player_index) : NULL;
+		long vehicle_index = NONE;
+		struct object_iterator objects;
+		struct object_datum *object;
+		long seat;
+
+		if (tag_get_group_tag(tag_index) != VEHICLE_DEFINITION_TAG || tag_length <= name_length ||
+			strcmp(tag_name + tag_length - name_length, name) || tag_name[tag_length - name_length - 1] != '\\')
+			continue;
+		definition = tag_get(UNIT_DEFINITION_TAG, tag_index);
+		vehicle = (unsigned char const *)definition + sizeof(struct unit_definition);
+		object_iterator_new(&objects, _object_mask_vehicle, 0);
+		while ((object = object_iterator_next(&objects)) != NULL)
+			if (object->definition_index == tag_index)
+				vehicle_index = objects.index;
+		platform_log("scene packs: vehicle %s (%08lx): model %s, animations %s, collision %s, physics %s", tag_name,
+			(unsigned long)tag_index,
+			definition->object.model.index != NONE ? tag_get_name(definition->object.model.index) : "none",
+			definition->object.animation_graph.index != NONE ? tag_get_name(definition->object.animation_graph.index) : "none",
+			definition->object.collision_model.index != NONE ? tag_get_name(definition->object.collision_model.index) : "none",
+			definition->object.physics.index != NONE ? tag_get_name(definition->object.physics.index) : "none");
+		platform_log("scene packs: vehicle: unit flags %08lx, team %d, seat acceleration %.3f %.3f %.3f, powered seats %ld, weapons %ld",
+			(unsigned long)definition->unit.flags, definition->unit.default_team, definition->unit.acceleration_scale.i,
+			definition->unit.acceleration_scale.j, definition->unit.acceleration_scale.k,
+			(long)definition->unit.powered_seats.count, (long)definition->unit.initial_weapons.count);
+		for (seat = 0; seat < definition->unit.powered_seats.count; seat++)
+		{
+			real const *powered = (real const *)TAG_BLOCK_GET_ELEMENT(&definition->unit.powered_seats, seat,
+				struct powered_seat_definition);
+
+			platform_log("scene packs: vehicle: powered seat %ld: up %.3f s, down %.3f s", seat, powered[1], powered[2]);
+		}
+		for (seat = 0; seat < definition->unit.seats.count; seat++)
+		{
+			struct unit_seat *element = TAG_BLOCK_GET_ELEMENT(&definition->unit.seats, seat, struct unit_seat);
+			real_point3d entry, exit;
+
+			platform_log("scene packs: vehicle: seat %ld: %s, flags %04lx, marker %s, acceleration %.3f %.3f %.3f, yaw %.1f pitch %.1f, "
+				"camera %s, huds %ld, yaw %.2f..%.2f%s%s", seat, element->label, (unsigned long)element->flags, element->marker_name,
+				element->acceleration_scale.i, element->acceleration_scale.j, element->acceleration_scale.k, element->yaw_rate,
+				element->pitch_rate, element->camera.marker_name, (long)element->seat_huds.count, element->yaw_minimum,
+				element->yaw_maximum,
+				vehicle_index == NONE || !player || player->unit_index == NONE ? "" :
+					!unit_has_animation_to_enter_seat(player->unit_index, vehicle_index, (short)seat) ?
+					", the player has no animation for it" :
+					unit_get_seat_entrance_point(player->unit_index, vehicle_index, (short)seat, &entry, &exit, NULL) ?
+					", the player can take it" : ", the player has no way in (no entrance)",
+				element->built_in_actor_reference.index != NONE ? ", built-in actor" : "");
+			if (vehicle_index != NONE && player && player->unit_index != NONE &&
+				unit_get_seat_entrance_point(player->unit_index, vehicle_index, (short)seat, &entry, &exit, NULL))
+			{
+				struct object_datum *placed = object_get(vehicle_index);
+				real dx = entry.x - placed->object.position.x, dy = entry.y - placed->object.position.y;
+
+				platform_log("scene packs: vehicle: seat %ld: its entrance %.2f above the vehicle's origin, %.2f from it; the seat %.2f above",
+					seat, entry.z - placed->object.position.z, sqrtf(dx * dx + dy * dy), exit.z - placed->object.position.z);
+			}
+		}
+		if (vehicle_index != NONE && definition->object.model.index != NONE)
+		{
+			struct model *model = tag_get('mode', definition->object.model.index);
+			struct object_datum *placed = object_get(vehicle_index);
+			long marker;
+
+			for (marker = 0; marker < model->markers.count; marker++)
+			{
+				struct model_marker *element = TAG_BLOCK_GET_ELEMENT(&model->markers, marker, struct model_marker);
+				struct object_marker found;
+				real_vector3d offset;
+
+				if (object_get_marker_by_name(vehicle_index, element->name, &found, 1) < 1)
+					continue;
+				vector_from_points3d(&placed->object.position, &found.matrix.position, &offset);
+				platform_log("scene packs: vehicle: marker %.31s: forward %.2f left %.2f up %.2f", element->name,
+					dot_product3d(&offset, &placed->object.forward), offset.i * -placed->object.forward.j + offset.j * placed->object.forward.i,
+					offset.k);
+			}
+		}
+		{
+			unsigned long flags = *(unsigned long const *)vehicle;
+			short type = *(short const *)(vehicle + 4);
+			real const *speed = (real const *)(vehicle + 8);
+			real const *slide = (real const *)(vehicle + 0x40);
+			real const *ai = (real const *)(vehicle + 0x90);
+			short const *functions = (short const *)(vehicle + 0x2C);
+
+			platform_log("scene packs: vehicle: flags %08lx, type %d, speed forward %.3f reverse %.3f acceleration %.4f deceleration %.4f, "
+				"turn left %.2f right %.2f, wheel %.3f, turn rate %.2f, blur %.2f, functions %d %d %d %d", flags, type, speed[0],
+				speed[1], speed[2], speed[3], speed[4], speed[5], speed[6], speed[7], speed[8], functions[0], functions[1],
+				functions[2], functions[3]);
+			platform_log("scene packs: vehicle: slide left %.3f right %.3f acceleration %.4f deceleration %.4f, flipping %.3f..%.3f, "
+				"fixed gun %.3f %.3f", slide[0], slide[1], slide[2], slide[3], slide[4], slide[5], *(real const *)(vehicle + 0x70),
+				*(real const *)(vehicle + 0x74));
+			platform_log("scene packs: vehicle: ai sideslip %.2f destination %.2f avoidance %.2f pathfinding %.2f charge %.2f "
+				"strafing %.2f oversteering %.2f steering %.3f throttle %.2f move %.2f", ai[0], ai[1], ai[2], ai[3], ai[4], ai[5],
+				ai[6], ai[7], ai[8], ai[9]);
+		}
+		if (definition->object.physics.index != NONE)
+		{
+			struct physics_definition *physics = physics_definition_get(definition->object.physics.index);
+			long point;
+
+			platform_log("scene packs: vehicle: physics radius %.3f moment %.3f mass %.2f center %.3f %.3f %.3f density %.3f "
+				"gravity %.3f, ground friction %.3f depth %.3f damp %.3f k1 %.3f k0 %.3f, water friction %.3f depth %.3f density %.3f, "
+				"air friction %.4f, moments %.1f %.1f %.1f", physics->radius, physics->moment, physics->mass,
+				physics->center_of_mass.x, physics->center_of_mass.y, physics->center_of_mass.z, physics->density,
+				physics->gravity_scale, physics->ground_friction, physics->ground_depth, physics->ground_damp_fraction,
+				physics->ground_normal_k1, physics->ground_normal_k0, physics->water_friction, physics->water_depth,
+				physics->water_density, physics->air_friction, physics->xx_moment, physics->yy_moment, physics->zz_moment);
+			for (point = 0; point < physics->powered_mass_points.count; point++)
+			{
+				unsigned char const *element = (unsigned char const *)physics->powered_mass_points.address + point * 0x80;
+				real const *values = (real const *)(element + 0x24);
+
+				platform_log("scene packs: vehicle: powered mass point %ld: %.31s, flags %02lx, antigrav strength %.3f offset %.3f "
+					"height %.3f damp %.3f k1 %.3f k0 %.3f", point, (char const *)element,
+					(unsigned long)*(unsigned long const *)(element + 0x20), values[0], values[1], values[2], values[3], values[4],
+					values[5]);
+			}
+			for (point = 0; point < physics->mass_points.count; point++)
+			{
+				struct mass_point_definition *element = TAG_BLOCK_GET_ELEMENT(&physics->mass_points, point,
+					struct mass_point_definition);
+
+				platform_log("scene packs: vehicle: mass point %ld: %.31s, powered %d, node %d, mass %.3f (relative %.3f), density %.3f "
+					"(relative %.3f), at %.3f %.3f %.3f, friction %d %.3f %.3f, radius %.3f", point, element->name,
+					element->powered_mass_point_index, element->model_node_index, element->mass, element->relative_mass,
+					element->density, element->relative_density, element->position.x, element->position.y, element->position.z,
+					element->friction_type, element->friction_parallel_scale, element->friction_perpendicular_scale,
+					element->radius);
+			}
+		}
+	}
+}
+
 /* the console's (hs.c, init.txt, HALO_TEST_COMMANDS):
   pack want <name>    wanted with this map (built on a thread, loaded at a
                       frame's top)
@@ -1240,6 +1398,69 @@ boolean scene_packs_command(
 
 			platform_log("scene packs: spawn %s: the player %s its seat 0", name, entered ? "is in" : "could not enter");
 		}
+		return TRUE;
+	}
+	/* (tests) "pack vehicle <name>": the vehicle tags whose name ends in
+	\<name>: their seats, their vehicle fields and their physics, and for
+	the first local player, which seats his animations can take (one of the
+	tag's vehicles must be in the world for that) */
+	if (!strcmp(word, "vehicle") && name[0])
+	{
+		vehicle_tag_report(name);
+		return TRUE;
+	}
+	/* (tests) "pack approach <seat>": the first local player, on foot, put
+	where he gets into that seat of the nearest vehicle (its entrance, as
+	his animations have it), facing the vehicle, and the seat the game's
+	own search finds for him there (unit_find_nearby_seat: what his action
+	button takes) said */
+	if (!strcmp(word, "approach") && name[0])
+	{
+		long player_index = local_player_get_player_index(0);
+		struct player_datum *player = player_index != NONE ? player_get(player_index) : NULL;
+		struct object_datum *unit = player && player->unit_index != NONE ? object_try_and_get(player->unit_index) : NULL;
+		struct object_iterator iterator;
+		struct object_datum *object;
+		long nearest = NONE;
+		real nearest_distance = 1e9f;
+		short seat = (short)atoi(name), found = NONE, state;
+		real_point3d entry, exit;
+
+		if (!unit || unit->object.parent_object_index != NONE)
+		{
+			platform_log("scene packs: approach: no player on foot");
+			return TRUE;
+		}
+		object_iterator_new(&iterator, _object_mask_vehicle, 0);
+		while ((object = object_iterator_next(&iterator)) != NULL)
+		{
+			real distance = distance_squared3d(&object->object.position, &unit->object.position);
+
+			if (distance < nearest_distance)
+			{
+				nearest_distance = distance;
+				nearest = iterator.index;
+			}
+		}
+		if (nearest == NONE || !unit_get_seat_entrance_point(player->unit_index, nearest, seat, &entry, &exit, NULL))
+		{
+			platform_log("scene packs: approach: no entrance to seat %d", seat);
+			return TRUE;
+		}
+		{
+			struct object_datum *vehicle = object_get(nearest);
+			real_vector3d forward;
+
+			vector_from_points3d(&entry, &vehicle->object.position, &forward);
+			forward.k = 0.f;
+			if (normalize3d(&forward) == 0.f)
+				forward = vehicle->object.forward;
+			object_set_position(player->unit_index, &entry, &forward, global_up3d);
+		}
+		state = unit_find_nearby_seat(player->unit_index, nearest, &found);
+		platform_log("scene packs: approach: the player at seat %d's entrance of %s (%.2f %.2f %.2f): the nearby seat is %d (%s)", seat,
+			tag_get_name(object_get(nearest)->definition_index), entry.x, entry.y, entry.z, found,
+			state == _unit_nearby_seat_available ? "free" : state == _unit_nearby_seat_occupied ? "taken" : "none");
 		return TRUE;
 	}
 	/* (tests) "pack where": the first local player's unit, the vehicle it

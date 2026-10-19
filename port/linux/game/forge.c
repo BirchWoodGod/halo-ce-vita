@@ -365,9 +365,9 @@ static struct
 } const forge_packs[FORGE_PACK_COUNT] =
 {
 	{ "covenant_vehicles", N_("Covenant vehicles"), N_("The Banshee, the Wraith and the Shade.\nBuilt from your Assault on the Control\nRoom or Two Betrayals map."), TRUE },
-	{ "dropships", N_("Dropships"), N_("The Pelican and the Covenant dropship.\nBuilt from your The Silent Cartographer\nor Halo map."), TRUE },
+	{ "dropships", N_("Dropships"), N_("The Pelican, which you fly with ten\nriders, and the Covenant dropship. Built\nfrom your The Silent Cartographer or\nHalo map."), TRUE },
 	{ "covenant_ai", N_("Covenant AI"), N_("Grunts, jackals, elites (stealth and\nsword too) and hunters, as in the\ncampaign. Built from your Assault on the\nControl Room map."), FALSE },
-	{ "ce_pelican", N_("Flyable Pelican"), N_("A Pelican you fly, with room for eleven\nriders. Built from your Extinction map\n(Halo Custom Edition, by (DA)Ender)."), TRUE },
+	{ "ce_pelican", N_("Extinction Pelican"), N_("The Pelican of Extinction: its guns, a\nco-pilot and eleven riders. Built from\nyour Extinction map (Halo Custom\nEdition, by (DA)Ender)."), TRUE },
 	{ "flood_ai", N_("Flood AI"), N_("Infection forms, combat forms and\ncarriers, on the Flood's team. Built from\nyour The Library map."), FALSE },
 	{ "sentinel_ai", N_("Sentinel AI"), N_("Sentinels, on their own team: they hunt\nthe Flood. Built from your The Library\nmap."), FALSE },
 	{ "marine_ai", N_("Marine AI"), N_("Marines with assault and sniper rifles,\non your side as in the campaign. Built\nfrom your Halo map."), FALSE },
@@ -391,7 +391,7 @@ static struct
 	{ "c gun turret", N_("Shade") },
 	{ "wraith", N_("Wraith") },
 	{ "pelican", N_("Pelican") },
-	{ "epelican", N_("Flyable Pelican") },
+	{ "epelican", N_("Extinction Pelican") },
 	{ "c_dropship", N_("Covenant Dropship") },
 	/* weapons */
 	{ "assault rifle", N_("Assault Rifle") },
