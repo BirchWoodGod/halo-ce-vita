@@ -39,10 +39,11 @@ boolean network_game_server_game_is_open(
 /* joining a distributed game in progress (network_server_manager.c) */
 boolean network_game_server_accepts_late_joins(
 	struct network_game_server *server);
-#ifdef HALO_DEDICATED_SERVER
-/* (the dedicated server) a join asked while the game goes back to its lobby
-(over, or the scores): held, and answered once the lobby is up; FALSE if not
-held (answered now, as before) */
+#ifdef HALO_LINUX
+/* a join asked while the game goes back to the dedicated server's lobby
+(over, or the scores), or while a host from the menus is still choosing
+its map (network_game_server_port_map_pending): held, and answered once the
+lobby is up or the map chosen; FALSE if not held (answered now, as before) */
 boolean network_game_server_hold_join(
 	struct network_game_server *server,
 	struct network_game_server_client_machine *machine,

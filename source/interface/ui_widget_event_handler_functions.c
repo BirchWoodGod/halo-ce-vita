@@ -1057,6 +1057,10 @@ void network_game_server_open_game(
 void network_game_server_pause_countdown(
 	void *server,
 	boolean pause);
+#ifdef HALO_LINUX
+void network_game_server_port_map_pending(
+	void *server);
+#endif
 void *global_network_game_server_get(
 	void);
 boolean xbox_demos_available(
@@ -3984,6 +3988,12 @@ static boolean network_game_start_new_server(
 			network_game_server_pause_countdown(global_network_game_server_get(), TRUE);
 			game_engine_playlist_begin();
 			game_connection_set(2);
+#ifdef HALO_LINUX
+			/* port: open from now, its map named once the host chooses it
+			(the map list next): friends and a party join its lobby
+			meanwhile, precaching nothing before the choice */
+			network_game_server_port_map_pending(global_network_game_server_get());
+#endif
 		}
 	}
 	if (result && !global_network_game_client_get())

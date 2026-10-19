@@ -68,6 +68,16 @@ struct game_variant_options;
 void network_game_server_port_set_variant_options(
 	struct network_game_server *server,
 	struct game_variant_options const *options);
+/* port: a game hosted from the menus has its map chosen after its server
+starts (the map list next): until network_game_server_change_map_name names
+it, the game is open (friends, a party and the game lists see it joinable)
+and a join that comes is held - its connection kept alive, nothing of the
+game sent - then answered as a lobby's join once the map is chosen, so that
+the joiner precaches the host's choice and never the playlist's first map
+it would otherwise have been told. Nothing new on the wire: every build's
+client waits so (a dedicated server's held joins, network version 18) */
+void network_game_server_port_map_pending(
+	struct network_game_server *server);
 /* port: co-op server settings: the difficulty, sent to clients, and the
 build's maximum players (Server Setup's player count is for PvP) */
 void network_game_server_port_set_cooperative(

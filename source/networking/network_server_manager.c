@@ -764,9 +764,18 @@ static void network_game_server_refuse_late_joiner(
 	struct network_game_server *server,
 	struct network_game_server_client_machine *machine,
 	word reason);
-#ifdef HALO_DEDICATED_SERVER
+#ifdef HALO_LINUX
 static void network_game_server_held_joins_update(
 	struct network_game_server *server);
+static boolean network_game_server_map_is_pending(
+	struct network_game_server *server);
+static long network_game_server_held_join_count(
+	struct network_game_server *server);
+/* (network_game_server_port_map_pending) the server whose host is choosing
+its map: joins to it held until then (let go with it: the next server is
+made in the same memory) */
+static struct network_game_server *network_game_server_map_pending_server;
+static unsigned long network_game_server_map_pending_time;
 #endif
 static boolean network_game_server_drop_client_machine(
 	struct network_game_server *server,
@@ -1382,6 +1391,10 @@ void network_game_server_dispose(
 
 	/* port: its map uploads end with it (port/linux/game/map_share.c) */
 	map_share_server_dispose();
+#ifdef HALO_LINUX
+	/* port: no longer choosing a map (its held joins go with it) */
+	network_game_server_map_pending_server = NULL;
+#endif
 	/* port: a won co-op round's next level belongs to this server alone */
 	network_game_server_cooperative_next_map[0] = 0;
 	csmemset(&network_game_server_cooperative, 0, sizeof(network_game_server_cooperative));
@@ -1679,8 +1692,9 @@ boolean network_game_server_idle(
 			if (success)
 			{
 				HALO_NET_DETAIL("server:client_machines", success = network_game_server_handle_client_machines(server));
-#ifdef HALO_DEDICATED_SERVER
-				/* port: the joins held while the game went back to the lobby */
+#ifdef HALO_LINUX
+				/* port: the joins held while the game went back to the lobby,
+				or while the host chooses its map */
 				if (success)
 					network_game_server_held_joins_update(server);
 #endif
@@ -2775,7 +2789,7 @@ boolean network_game_server_accepts_late_joins(
 		network_game_has_free_player_slot(&server->game);
 }
 
-#ifdef HALO_DEDICATED_SERVER
+#ifdef HALO_LINUX
 /* ---------- joins held while the dedicated server goes back to its lobby
 
 The last player gone, the dedicated server ends its game, shows the scores
@@ -2790,11 +2804,20 @@ for nothing, every build so far, beta.1 and beta.2 too), and answered as a
 lobby's join once the lobby is up (dedicated_server_lobby_ready), so the
 joiner lands in the next game's lobby. Refused as before if the lobby is not
 up in NETWORK_GAME_SERVER_HELD_JOIN_LIMIT. Nothing new on the wire: network
-version 18's messages, and a client needs no change. */
+version 18's messages, and a client needs no change.
+
+A host from the menus holds joins the same way while its host chooses the
+map (the map list comes after its server starts:
+network_game_server_port_map_pending), and answers them once the map is
+chosen, NETWORK_GAME_SERVER_HELD_PICK_LIMIT at most: the joiner lands in the
+lobby of the host's choice, a friend or a party member too. Its own
+machine's join (the host's client, over the loopback) is never held. */
 
 enum
 {
 	NETWORK_GAME_SERVER_HELD_JOIN_LIMIT = 45 * MILLISECONDS_PER_SECOND,
+	/* (a host choosing its map: a few minutes on the map and game type lists) */
+	NETWORK_GAME_SERVER_HELD_PICK_LIMIT = 180 * MILLISECONDS_PER_SECOND,
 	NETWORK_GAME_SERVER_HELD_JOIN_KEEP_ALIVE = 1 * MILLISECONDS_PER_SECOND,
 	/* (a join request is a few dozen bytes; a longer message is not held) */
 	NETWORK_GAME_SERVER_HELD_JOIN_SIZE = 512,
@@ -2817,8 +2840,38 @@ scores (the lobby's map loads in the frame it switches to the pregame) */
 static boolean network_game_server_going_to_lobby(
 	struct network_game_server *server)
 {
+#ifdef HALO_DEDICATED_SERVER
 	return server->state == _network_game_server_state_postgame ||
 		(server->state == _network_game_server_state_ingame && game_engine_running() && !game_engine_can_score());
+#else
+	(void)server;
+	return FALSE;
+#endif
+}
+
+/* whether a machine's connection is another machine's (not this host's own
+client, over the loopback) */
+static boolean network_game_server_machine_is_remote(
+	struct network_game_server_client_machine *machine)
+{
+	struct transport_address address = { 0 };
+
+	network_connection_get_address(machine->connection, &address, NULL);
+	return address.address.ipv4_address != IPV4_LOOPBACK_ADDRESS;
+}
+
+/* the joins held now (the log's) */
+static long network_game_server_held_join_count(
+	struct network_game_server *server)
+{
+	long index, count = 0;
+
+	for (index = 0; index < MAXIMUM_NETWORK_MACHINE_COUNT; index++)
+	{
+		count += network_game_server_held_joins[index].connection &&
+			network_game_server_held_joins[index].connection == server->client_machines[index].connection;
+	}
+	return count;
 }
 
 static struct network_game_server_held_join *network_game_server_held_join_of(
@@ -2848,9 +2901,11 @@ boolean network_game_server_hold_join(
 	struct network_game_server_held_join *held = network_game_server_held_join_of(server, machine);
 	unsigned long now = system_milliseconds();
 
+	boolean picking = network_game_server_map_is_pending(server);
+
 	if (!held || !machine->connection || network_game_server_client_machine_is_joined_to_game(server, machine) ||
-		!network_game_server_going_to_lobby(server) || message_size <= 0 ||
-		message_size > (short)sizeof(held->message))
+		!(network_game_server_going_to_lobby(server) || picking) || message_size <= 0 ||
+		message_size > (short)sizeof(held->message) || (picking && !network_game_server_machine_is_remote(machine)))
 	{
 		return FALSE;
 	}
@@ -2864,8 +2919,17 @@ boolean network_game_server_hold_join(
 	held->connection = machine->connection;
 	held->held_time = now;
 	held->keep_alive_time = 0;
-	network_event("holding machine #%d's join until the lobby is up (the game is going back to it)",
-		machine->machine_index);
+	if (picking)
+	{
+		void platform_log(char const *format, ...);
+
+		platform_log("network: holding machine #%d's join until the host chooses the map", machine->machine_index);
+	}
+	else
+	{
+		network_event("holding machine #%d's join until the lobby is up (the game is going back to it)",
+			machine->machine_index);
+	}
 	return TRUE;
 }
 
@@ -2891,7 +2955,13 @@ static void network_game_server_held_joins_update(
 			held->connection = NULL;
 			continue;
 		}
+#ifdef HALO_DEDICATED_SERVER
 		if (server->state == _network_game_server_state_pregame && dedicated_server_lobby_ready())
+#else
+		/* (a host from the menus: once its map is chosen) */
+		if (server->state == _network_game_server_state_pregame && !network_game_server_map_is_pending(server) &&
+			server->game.map.name[0])
+#endif
 		{
 			word message[NETWORK_GAME_SERVER_HELD_JOIN_SIZE / sizeof(word)];
 			short size = held->size;
@@ -2910,7 +2980,11 @@ static void network_game_server_held_joins_update(
 					network_event("client machine %x removed from game", machine_index);
 			}
 		}
+#ifdef HALO_DEDICATED_SERVER
 		else if (now - held->held_time > NETWORK_GAME_SERVER_HELD_JOIN_LIMIT)
+#else
+		else if (now - held->held_time > NETWORK_GAME_SERVER_HELD_PICK_LIMIT || server->state != _network_game_server_state_pregame)
+#endif
 		{
 			struct message_server_machine_rejected rejection = { _rejection_code_game_is_closed };
 			struct network_message *reply;
@@ -3674,6 +3748,28 @@ void network_game_server_pause_countdown(
 	return;
 }
 
+#ifdef HALO_LINUX
+static boolean network_game_server_map_is_pending(
+	struct network_game_server *server)
+{
+	return server && server == network_game_server_map_pending_server &&
+		server->state == _network_game_server_state_pregame && !server->sent_start_game_message;
+}
+
+void network_game_server_port_map_pending(
+	struct network_game_server *server)
+{
+	void platform_log(char const *format, ...);
+
+	if (!server || server->state != _network_game_server_state_pregame || server->sent_start_game_message)
+		return;
+	network_game_server_map_pending_server = server;
+	network_game_server_map_pending_time = system_milliseconds();
+	network_game_server_open_game(server);
+	platform_log("network: the game is open while its host chooses the map (joins held until then)");
+}
+#endif
+
 void network_game_server_change_map_name(
 	struct network_game_server *server,
 	char const *map_name)
@@ -3704,6 +3800,20 @@ void network_game_server_change_map_name(
 		}
 	}
 
+#ifdef HALO_LINUX
+	/* port: the map chosen (a game hosted from the menus holds its joins
+	until then: network_game_server_port_map_pending); the held joins are
+	answered in the next frame, network_game_server_held_joins_update */
+	if (network_game_server_map_is_pending(server))
+	{
+		void platform_log(char const *format, ...);
+
+		network_game_server_map_pending_server = NULL;
+		platform_log("network: the host chose the map %s (%d joins held meanwhile), %lu ms after its server started",
+			map_name, (int)network_game_server_held_join_count(server),
+			system_milliseconds() - network_game_server_map_pending_time);
+	}
+#endif
 	csstrncpy(
 		server->game.map.name,
 		map_name,
@@ -3894,7 +4004,7 @@ static boolean network_game_server_client_machine_timed_out(
 
 	if (!network_game_server_client_machine_is_joined_to_game(server, machine))
 	{
-#ifdef HALO_DEDICATED_SERVER
+#ifdef HALO_LINUX
 		/* (a held join: until it is answered, or refused) */
 		if (network_game_server_join_is_held(server, machine))
 			return FALSE;

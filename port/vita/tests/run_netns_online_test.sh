@@ -130,6 +130,12 @@
 #            (HALO_TEST_BROWSER_GAMES, test builds only); down past the twelve
 #            rows, a page down (rt), Y sorts by name (the host's VitaHost
 #            last), up on the first game wraps to it, A joins it and plays
+#   pickjoin menushost, the host staying on the map list a minute
+#            (HALO_TEST_PICK_WAIT, ms): its game open from its server's start,
+#            the joiner's join (the server browser) held meanwhile - nothing of
+#            the game sent, no map copied - and answered once the host chooses
+#            the map (network_game_server_port_map_pending); then played
+#   h3pickjoin the same from the Halo 3 menus (h3online's copies)
 #   menushost the host creates its game from the menus: Multiplayer, CREATE
 #            GAME INTERNET, Server Setup (its name typed, Max players,
 #            public), START GAME, the profile, the map and the gametype; the
@@ -746,6 +752,22 @@ wait_code() { # the host's code, once it hosts
 }
 status=0
 fail() { echo "FAIL ($mode): $*"; status=1; }
+# (pickjoin, h3pickjoin: the host's game open from its server's start, the
+# joiner's join held while the host was on the map list - nothing of the game
+# sent, so no map copied before the host's choice - then answered with the
+# map chosen, and the game played)
+check_pick_join() {
+	grep -aE "network: (holding|the host chose)|join: the host's map is" "$hl" "$jl" | head -6
+	grep -aq "network: holding machine #[1-9][0-9]*'s join until the host chooses the map" "$hl" ||
+		fail "the host did not hold the joiner's join while it chose its map"
+	grep -aqE "network: the host chose the map .* \(([1-9][0-9]*) joins held meanwhile\)" "$hl" ||
+		fail "no join was held when the host chose its map"
+	grep -aq "answering machine #[1-9][0-9]*'s join held [0-9]* ms: the lobby is up" "$out/host/data/debug.txt" ||
+		fail "the held join was not answered once the map was chosen"
+	grep -aq "starting precaching of map 'carousel'" "$out/joiner/data/debug.txt" &&
+		fail "the joiner copied a map before the host chose one"
+	grep -aq "join: the host's map is levels" "$jl" || fail "the joiner was not told the host's map once chosen"
+}
 # (the latency meter) the delay a netem setting adds, in milliseconds
 netem_delay() { local d; d=$(sed -n 's/.*delay \([0-9]*\)ms.*/\1/p' <<< "${1:-}"); echo "${d:-0}"; }
 # the round trip the routers' netem delays make (both uploads)
@@ -1015,13 +1037,16 @@ browserscroll)
 	echo "joiner's seconds with two players playing: $two"
 	[ "$two" -ge 30 ] || fail "the joiner played the host's game for $two s with two players (30 wanted)"
 	;;
-menushost)
+menushost|pickjoin)
 	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 	# (Multiplayer, CREATE GAME INTERNET: Server Setup; A on SERVER NAME types
 	# it; down to START GAME; the System Link screen's profile (A A A), the map
-	# list (A), the gametype (A): the lobby; START starts the game)
+	# list (A), the gametype (A): the lobby; START starts the game. pickjoin:
+	# the host stays on the map list a minute, the joiner joining meanwhile)
+	pick=5000
+	[ $mode = pickjoin ] && pick=${HALO_TEST_PICK_WAIT:-60000}
 	pad="wait:150:3000 down a wait:150:2000 down down down a wait:150:2000 a wait:150:1500 down down left down down a"
-	pad="$pad wait:150:5000 a a a wait:150:5000 a wait:150:4000 a"
+	pad="$pad wait:150:5000 a a a wait:150:$pick a wait:150:4000 a"
 	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=true \
 		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_TEST_INPUT=bot:1 HALO_NET_HOST_PUBLIC=false "HALO_TEST_PAD=$pad" \
 		HALO_TEST_TEXT_INPUT=MenuHost; host_pid=$last_pid
@@ -1039,6 +1064,9 @@ menushost)
 	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
 	echo "joiner's seconds with two players playing: $two"
 	[ "$two" -ge 30 ] || fail "the joiner played the host's game for $two s with two players (30 wanted)"
+	grep -aq "network: the game is open while its host chooses the map (joins held until then)" "$hl" ||
+		fail "the host's game was not opened as its server started"
+	[ $mode = pickjoin ] && check_pick_join
 	;;
 lobbyflap)
 	# (a second broker, 198.51.100.2, which the host's router blackholes: its
@@ -1951,8 +1979,11 @@ h3lan|h3adhoc)
 	[ "$two" -ge 15 ] || fail "the joiner played the host's game for $two s with two players (15 wanted)"
 	[ "$mode" = h3adhoc ] && grep -q CONNECT "$out/broker.log" && fail "ad hoc play reached the signalling broker"
 	;;
-h3online)
+h3online|h3pickjoin)
 	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	# (h3pickjoin: the host stays on the map list a minute, the joiner joining its lobby meanwhile)
+	pick=5000
+	[ $mode = h3pickjoin ] && pick=${HALO_TEST_PICK_WAIT:-60000}
 	if [ ! -r "$menus_data/maps/bitmaps.map" ]; then
 		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS)"; exit 0
 	fi
@@ -1963,7 +1994,7 @@ h3online)
 	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
 		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:1 HALO_NET_HOST_PUBLIC=true \
 		HALO_TEST_TEXT_INPUT=NetHost \
-		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:10000 down:150:500 down:150:500 down:150:500 a wait:150:4000 down:150:500 down:150:500 a wait:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:4000 a wait:150:2000 a wait:150:2000 a wait:150:5000 a wait:150:4000 a wait:150:${HALO_TEST_H3ONLINE_WAIT:-45000} a wait:150:5000 a wait:150:5000 a" \
+		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:10000 down:150:500 down:150:500 down:150:500 a wait:150:4000 down:150:500 down:150:500 a wait:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:4000 a wait:150:2000 a wait:150:2000 a wait:150:$pick a wait:150:4000 a wait:150:${HALO_TEST_H3ONLINE_WAIT:-45000} a wait:150:5000 a wait:150:5000 a" \
 		; host_pid=$last_pid
 	sleep 25
 	# (MULTIPLAYER: the lobby on SYSTEM LINK; NETWORK, up to ONLINE, A; a while for the broker;
@@ -1996,6 +2027,9 @@ h3online)
 	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
 	echo "joiner's seconds with two players playing: $two"
 	[ "$two" -ge 15 ] || fail "the joiner played the host's game for $two s with two players (15 wanted)"
+	grep -aq "network: the game is open while its host chooses the map (joins held until then)" "$hl" ||
+		fail "the host's game was not opened as its server started"
+	[ $mode = h3pickjoin ] && check_pick_join
 	;;
 netswitch)
 	rounds=${HALO_TEST_SWITCH_ROUNDS:-5}
@@ -3722,7 +3756,7 @@ friendsplayers|friendsplayersoff|friendsplayersnone)
 	[ "$two" -ge 20 ] || fail "the joiner played the host's game for $two s with two players (20 wanted)"
 	;;
 *)
-	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3online|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone" >&2
+	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3online|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone" >&2
 	exit 2
 	;;
 esac
