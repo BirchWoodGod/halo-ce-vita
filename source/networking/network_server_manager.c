@@ -4625,24 +4625,29 @@ boolean network_game_server_port_cooperative_menu(
 
 /* port: the most players a game this machine hosts takes, of the machine's
 settings (network.max_players, 2 to the build's maximum; under 2, the
-build's maximum). The environment's first: the Vita's settings panel (its
-Play page) sets it in the menus, after the settings were read. A co-op
-game takes network.coop_players instead (network_game_server_port_set_cooperative). */
+Xbox's 16, which every menu offers at most: Server Setup's and the settings
+panel's Max players, the dedicated server's sv_maxplayers). The
+environment's first: the Vita's settings panel (its Play page) sets it in
+the menus, after the settings were read. A co-op game takes
+network.coop_players instead (network_game_server_port_set_cooperative). */
 static long network_game_server_port_maximum_players(
 	void)
 {
 	char const *setting = getenv("HALO_NET_MAX_PLAYERS");
 	long maximum = setting && setting[0] ? atol(setting) : config_integer("network.max_players");
+	/* (a game hosted without a choice - System Link's, the Halo 3 lobby's
+	START GAME - took the 128 the native builds allow, and its lobby said
+	"PLAYERS 1/128") */
+	long unset = MIN(16, MAXIMUM_NETWORK_PLAYER_COUNT);
 #if defined(HALO_VITA) || defined(HALO_NET_AS_VITA)
 	/* (a Vita, and a host Vitas play on, offers the Xbox's 16 at most: every
-	Vita in the game simulates every player, and the 128 the build allows
-	were offered by a game hosted without Server Setup's choice) */
+	Vita in the game simulates every player) */
 	long most = MIN(16, MAXIMUM_NETWORK_PLAYER_COUNT);
 #else
 	long most = MAXIMUM_NETWORK_PLAYER_COUNT;
 #endif
 
-	return maximum >= 2 ? MIN(maximum, most) : most;
+	return maximum >= 2 ? MIN(maximum, most) : unset;
 }
 
 /* port: the name the game lists show for a game this machine hosts, of the

@@ -325,7 +325,7 @@ static const struct config_setting config_settings[] =
 		"Vita's settings panel (Multiplayer, Play, Lobby name) sets it." },
 	{ "network.max_players", _config_integer, "0", "HALO_NET_MAX_PLAYERS", _environment_value, _platform_all,
 		"The most players a game this machine hosts takes (2 to the build's\n"
-		"maximum; 0 for the build's maximum). A co-op game takes\n"
+		"maximum; 0 for the Xbox's 16). A co-op game takes\n"
 		"network.coop_players. The Vita's settings panel (Multiplayer, Play,\n"
 		"Max players) sets it." },
 	{ "menus.style", _config_string, "\"halo3\"", "HALO_MENU_STYLE", _environment_value, _platform_all,

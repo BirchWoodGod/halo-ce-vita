@@ -637,8 +637,9 @@ for case in $cases; do
 		players_pad="$players_pad down:150:600 down:150:600 down:150:600 a wait:150:8000 y wait:150:2500 @00-players:0:300"
 		players_pad="$players_pad down:150:700 a wait:150:2000 @01-options:0:300 down:150:700 a wait:150:2000 @02-added:0:300"
 		players_pad="$players_pad up:150:700 a wait:150:2000 b wait:150:3000"
+		# (co-op's most players its own, network.coop_players: 4 here; the lobby's PLAYERS says it)
 		profile_from=$HALO_TEST_PROFILE run h3players "$menus_data" 60 "$players_pad" \
-			HALO_MENU_STYLE=halo3 HALO_TEST_PLAYERS_FAKE=3
+			HALO_MENU_STYLE=halo3 HALO_TEST_PLAYERS_FAKE=3 HALO_NET_COOP_PLAYERS=4
 		check_h3 h3players halo3
 		log=$out/h3players/run.log
 		grep -a "menus: h3 players\|PLAYERS screen" "$log" | head -12
@@ -647,6 +648,8 @@ for case in $cases; do
 		grep -aq "menus: the PLAYERS screen opened (the game's lobby)" "$log" &&
 			grep -aq "ui: screen pc.h3.players.screen" "$log" || fail h3players "Triangle in the game's lobby did not open PLAYERS"
 		grep -aq "menus: h3 players: 4 players, this machine 0" "$log" || fail h3players "PLAYERS did not list the four players"
+		grep -aqE "menus: h3 pregame: .*; players: [^;]*; 1/4$" "$log" ||
+			fail h3players "the co-op lobby's PLAYERS did not say 1/4 (network.coop_players)"
 		grep -aq "menus: h3 players: options for Spartan 1 (machine 10)" "$log" &&
 			grep -aq "ui: screen pc.h3.players.options" "$log" || fail h3players "Cross on a player did not open its options"
 		grep -aq "menus: h3 players: Go online first" "$log" || fail h3players "ADD FRIEND offline did not say go online first"
@@ -1323,6 +1326,10 @@ for case in $cases; do
 			fail h3mpcustom "the lobby did not say MYGULCH"
 		grep -aq "join: the host's map is levels.test.mygulch.mygulch" "$log" ||
 			fail h3mpcustom "START GAME did not host the game on mygulch"
+		# (a game hosted without Server Setup's Max players: the Xbox's 16, not the build's 128)
+		grep -aqE "menus: h3 pregame: .*; players: [^;]*; 1/16$" "$log" ||
+			fail h3mpcustom "the system link lobby's PLAYERS did not say 1/16"
+		grep -aq "/128" "$log" && fail h3mpcustom "a lobby said the build's 128 players"
 		grep -aqE "ui: screen (ui.shell.main_menu.multiplayer_type_select.connected.pregame.connected_pregame_screen|pc.h3.pregame.screen)" "$log" ||
 			fail h3mpcustom "the hosted game's lobby did not open"
 		log=$out/h3mpcustom_off/run.log

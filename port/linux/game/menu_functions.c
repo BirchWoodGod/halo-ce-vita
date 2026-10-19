@@ -7492,8 +7492,12 @@ static void h3_pregame_update(struct widget_instance *widget)
 		snprintf(line + strlen(line), sizeof(line) - strlen(line), "%s%s", row ? ", " : "; players: ", name);
 		row++;
 	}
+	/* (the most the game takes: the host's settings' - network.max_players,
+	16 unless chosen - or co-op's network.coop_players, as its record has
+	them) */
 	snprintf(text, sizeof(text), T("PLAYERS %ld/%d"), row, (int)game->maximum_players);
 	text_show(named(screen, "players"), text);
+	snprintf(line + strlen(line), sizeof(line) - strlen(line), "; %ld/%d", row, (int)game->maximum_players);
 	for (; row < H3_PREGAME_ROWS; row++)
 	{
 		char row_name[16];
