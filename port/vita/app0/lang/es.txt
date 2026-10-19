@@ -509,6 +509,8 @@
 "%d SYSTEM LINK GAMES: %s creates a game\n%d %s on a map, %s on a game type" = "%d SYSTEM LINK GAMES: %s crea una partida\n%d %s en un mapa, %s en un tipo de juego"
 "  (PC maps: Modded maps, PC maps On)" = "  (Mapas de PC: Mapas modificados, Sí)"
 "  As \"%s\", %s players at most" = "  Como \"%s\", hasta %s jugadores"
+"  As your profile's name, %s players at most" = "  Con el nombre del perfil, hasta %s jug."
+"your profile's name" = "nombre del perfil"
 "%d Wait in the lobby for the others to\n  join; %s there starts the game sooner" = "%d Espera en la sala a que entren los\n  demás; %s ahí empieza antes la partida"
 "%d SYSTEM LINK GAMES: %s on the host's game\n  (the games in the room show there)" = "%d SYSTEM LINK GAMES: %s en la del anfitrión\n  (ahí aparecen las partidas de la sala)"
 "%d SYSTEM LINK GAMES: %s on the host's game\n  (the games you are connected to show there)" = "%d SYSTEM LINK GAMES: %s en la del anfitrión\n  (ahí aparecen las partidas a las que\n  estás conectado)"

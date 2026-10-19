@@ -119,7 +119,8 @@ menus need bitmaps.map, loc.map: README" (halo_pc_menus_state).
   host's game shows once reached. The steps name the buttons as the game's
   menus do, the Xbox's (A is Cross there, B Circle, X Square, Y Triangle).
 - The hosted game's settings (HALO_NET_LOBBY_NAME, its printable ASCII, 15
-  characters at most, the Vita's user name until one is typed;
+  characters at most; none until one is typed: the game's own name, its
+  player's profile's;
   HALO_NET_MAX_PLAYERS, 2 to 16; HALO_NET_HOST_PUBLIC, OpenCE's name;
   HALO_NET_LOBBY_PASSWORD) are the game's Server Setup's, which sets them as
   this panel sets a row (vita_settings_set) and settings.txt keeps them; the
@@ -1406,10 +1407,10 @@ static void play_text_set(struct play_text *text, const char *value, int named)
 	text->named = named;
 	if (!strcmp(text->variable, "HALO_NET_LOBBY_NAME") && !text->value[0])
 	{
-		/* (the default: the Vita's user name, else "Halo") */
-		play_sanitize(text->value, sizeof(text->value), vita_name);
-		if (!text->value[0])
-			snprintf(text->value, sizeof(text->value), "Halo");
+		/* (none: the game's own name, its player's profile's, as the
+		player's name in the game and the pre-game lobby are - network.
+		lobby_name empty; it was the Vita's user name, and an insider.11
+		co-op lobby was "Listed as: user549" for the profile "birch") */
 		text->named = 0;
 	}
 	setenv(text->variable, text->value, 1);
@@ -1520,8 +1521,7 @@ static void apply_network(void)
 	}
 	{
 		/* a player with a default profile (no name) goes by the Vita's user
-		name in network games (network_game_local_player_name), and it is the
-		lobby name's default (play_text_set) */
+		name in network games (network_game_local_player_name) */
 		char name[SCE_SYSTEM_PARAM_USERNAME_MAXSIZE + 1];
 
 		memset(name, 0, sizeof(name));
@@ -1881,7 +1881,7 @@ void vita_settings_load(void)
 		vita_host_log(message);
 	}
 	apply_network();
-	/* (after apply_network: the lobby name's default is the user name) */
+	/* (the Play page's texts, settings.txt's: none is the game's own name) */
 	for (index = 0; index < PLAY_TEXT_COUNT; index++)
 		play_text_set(&play_texts[index], texts[index], texts_named[index]);
 }
@@ -3356,7 +3356,8 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 
 				/* (the password hidden) */
 				length += snprintf(text + length, (size_t)(size - length), "\n%s\x02  %s", setting_label(setting),
-					!value->value[0] ? T("none") : !strcmp(setting->variable, "HALO_NET_LOBBY_PASSWORD") ? T("set") : value->value);
+					!value->value[0] ? (!strcmp(setting->variable, "HALO_NET_LOBBY_NAME") ? T("your profile's name") : T("none")) :
+					!strcmp(setting->variable, "HALO_NET_LOBBY_PASSWORD") ? T("set") : value->value);
 			}
 			else if (setting->kind == KIND_ACTION)
 			{
@@ -3838,9 +3839,13 @@ static void show_guide(void)
 			length += snprintf(text + length, sizeof(text) - length, "\n%s", T("  (PC maps: Modded maps, PC maps On)"));
 		/* (the game as others see it: the Play page's rows) */
 		length += snprintf(text + length, sizeof(text) - length, "\n");
-		length += snprintf(text + length, sizeof(text) - length, T("  As \"%s\", %s players at most"),
-			play_text_named("HALO_NET_LOBBY_NAME")->value, setting_named("HALO_NET_MAX_PLAYERS")->names[choice_of(
-			"HALO_NET_MAX_PLAYERS")]);
+		if (play_text_named("HALO_NET_LOBBY_NAME")->value[0])
+			length += snprintf(text + length, sizeof(text) - length, T("  As \"%s\", %s players at most"),
+				play_text_named("HALO_NET_LOBBY_NAME")->value, setting_named("HALO_NET_MAX_PLAYERS")->names[choice_of(
+				"HALO_NET_MAX_PLAYERS")]);
+		else
+			length += snprintf(text + length, sizeof(text) - length, T("  As your profile's name, %s players at most"),
+				setting_named("HALO_NET_MAX_PLAYERS")->names[choice_of("HALO_NET_MAX_PLAYERS")]);
 		length += snprintf(text + length, sizeof(text) - length, "\n");
 		length += snprintf(text + length, sizeof(text) - length,
 			T("%d Wait in the lobby for the others to\n  join; %s there starts the game sooner"), step, menu_button('A'));
