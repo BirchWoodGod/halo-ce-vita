@@ -321,6 +321,20 @@ static unsigned char *tag_cache_room(unsigned char **room_end)
 	unsigned char *end = base + TAG_CACHE_SIZE;
 	struct scenario *scenario = global_scenario_get();
 
+	/* (as a map loads - Forge's and the player models' packs load as its
+	tags are read, before the scenario is the game's - its own scenario
+	tag: the only one of the map's tags; without it the room would run
+	over the structure bsp's place, and the bsp then refused) */
+	if (!scenario)
+	{
+		struct tag_iterator iterator;
+		long scenario_index;
+
+		tag_iterator_new(&iterator, SCENARIO_TAG);
+		scenario_index = tag_iterator_next(&iterator);
+		if (scenario_index != NONE && tag_get_group_tag(scenario_index) == SCENARIO_TAG)
+			scenario = (struct scenario *)tag_get(SCENARIO_TAG, scenario_index);
+	}
 	if (scenario)
 	{
 		long index;

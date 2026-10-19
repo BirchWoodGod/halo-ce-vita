@@ -45,7 +45,7 @@ enum
 	_scene_pack_state_failed,
 	NUMBER_OF_SCENE_PACK_STATES,
 
-	MAXIMUM_LOADED_SCENE_PACKS = 6,
+	MAXIMUM_LOADED_SCENE_PACKS = 8,
 	/* the packs a map may want (built, or loaded: at most
 	MAXIMUM_LOADED_SCENE_PACKS of them) */
 	MAXIMUM_SCENE_PACK_SLOTS = 32,
