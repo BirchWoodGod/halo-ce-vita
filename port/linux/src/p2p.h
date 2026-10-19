@@ -364,6 +364,13 @@ enum
 	P2P_LOBBY_JOIN_JOINING = 2,
 };
 int p2p_lobby_join_state(void);
+/* joins a friend's private game with a password (p2p_friends.c: its
+presence's host key and sealed token, the game's wire), as p2p_lobby_join
+joins a locked listing: the password's key worked out on its thread; how it
+goes, p2p_lobby_join_state. 0 if the key is not the host's (key_hash) or a
+join is being opened */
+int p2p_lobby_join_sealed(const unsigned char *key_hash, const unsigned char *signing_key, const unsigned char *sealed,
+	const char *password, int crossplay);
 /* a game the browser could not join: hidden for 5 minutes unless its
 listing changes, then shown marked failed (after the others of as many
 players), for this run (p2p_lobby.c marks a game

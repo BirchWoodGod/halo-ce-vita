@@ -342,6 +342,14 @@ int p2p_friends_act(const char *id, int kind, int action)
 	friend_acted_action = action;
 	return friend_act_outcome;
 }
+/* (a friend's game with a password: the password typed) */
+static char friend_password_typed[64];
+int p2p_friends_join_password(const char *id, const char *password)
+{
+	snprintf(friend_acted_id, sizeof(friend_acted_id), "%s", id);
+	snprintf(friend_password_typed, sizeof(friend_password_typed), "%s", password);
+	return P2P_FRIENDS_DONE;
+}
 const char *p2p_friends_outcome_text(int outcome)
 {
 	return outcome == P2P_FRIENDS_DONE ? "Done" : outcome == P2P_FRIENDS_OFFLINE ? "Go online first" : "Not for this one";
@@ -1582,7 +1590,7 @@ static void test_friends_page(void)
 	check(strstr(menu, "\n\x04Your friend code: KQ7M-3XPA-T9WE\n") && strstr(menu, "\n\x04" "1 of 2 friends online\n"),
 		"the code and the status");
 	/* (four entries shown at once, with the Party row: the fifth scrolled to) */
-	check(strstr(menu, "\nDelta\x02  Request\n") && strstr(menu, "\nBravo\x02  Join\n") &&
+	check(strstr(menu, "\nDelta\x02  Request\n") && strstr(menu, "\nBravo\x02  Joinable\n") &&
 		strstr(menu, "\nCharlie\x02  Offline\n") && strstr(menu, "\nA7ES-DA9D-2NMR\x02  Sent\n"),
 		"each entry: its name and a word of its state");
 	check(menu_fits() && menu_height_fits(), "the Friends page fits");

@@ -311,9 +311,10 @@ static const struct config_setting config_settings[] =
 		"(they see it offline); their presence, requests and invites still\n"
 		"arrive. The settings panel's Friends page and the FRIENDS screen set it." },
 	{ "friends.join", _config_boolean, "true", "HALO_FRIENDS_JOIN", _environment_value, _platform_all,
-		"Whether friends can join this machine's game in one press: only a\n"
-		"public game without a password, with room (a private game is joined\n"
-		"by the invites its host sends)." },
+		"Whether friends can join this machine's game in one press, public or\n"
+		"private, with room (the join goes to each friend alone, sealed; never\n"
+		"to a stranger or a blocked player); a game with a password asks them\n"
+		"for it, unless its host invited them." },
 	{ "network.public_lobby", _config_boolean, "true", "HALO_NET_PUBLIC_LOBBY", _environment_value, _platform_all,
 		"The server browser: public games are listed through the signalling\n"
 		"brokers, and the settings panel's Browse public games shows them.\n"

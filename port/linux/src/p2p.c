@@ -4235,6 +4235,9 @@ static void friends_host_view(struct p2p_friends_host *host)
 	host->online = p2p.running && !p2p.adhoc && !p2p.stopping && config_boolean("network.online");
 	host->crossplay = network_wire_crossplay();
 	host->pc_host = !network_wire_host_vita();
+	/* (a game with a password: its token sealed for friends, p2p_friends.c) */
+	if (p2p.hosting && p2p.has_token)
+		host->has_sealed = p2p_lobby_password_seal(p2p.token, host->signing_key, host->sealed_token);
 	host->hosting = p2p.hosting && p2p.has_token && p2p.game_player_maximum > 0;
 	if (!host->hosting)
 	{

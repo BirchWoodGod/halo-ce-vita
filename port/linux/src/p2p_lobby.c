@@ -2478,6 +2478,56 @@ int p2p_lobby_join(const char *id, const char *password)
 	return result;
 }
 
+int p2p_lobby_join_sealed(const unsigned char *key_hash, const unsigned char *signing_key, const unsigned char *sealed,
+	const char *password, int crossplay)
+{
+	unsigned char hash[P2P_KEY_HASH_SIZE];
+	int result = 0;
+
+	/* (the key the token is sealed with is the host's: its X25519 form's
+	hash is the invite's host part, or the seal is no host's) */
+	if (!key_hash || !signing_key || !sealed || !signing_key_hash(signing_key, hash) ||
+		memcmp(hash, key_hash, P2P_KEY_HASH_SIZE))
+	{
+		return 0;
+	}
+	pthread_mutex_lock(&p2p_lock);
+	if (!(lobby.key_thread_running && lobby.join_state == P2P_LOBBY_JOIN_UNLOCKING))
+	{
+		memcpy(lobby.join_key_hash, key_hash, P2P_KEY_HASH_SIZE);
+		lobby.join_crossplay = crossplay != 0;
+		/* (a friend's game: not a stranger's listing, never marked failed
+		from here) */
+		lobby.watching = 0;
+		lobby.joined_locked = 1;
+		memcpy(lobby.joined_locked_hash, key_hash, P2P_KEY_HASH_SIZE);
+		snprintf(lobby.join_password, sizeof(lobby.join_password), "%s", password ? password : "");
+		memcpy(lobby.join_signing_key, signing_key, P2P_KEY_SIZE);
+		memcpy(lobby.join_sealed_token, sealed, P2P_SEALED_TOKEN_SIZE);
+		lobby.join_pending = 1;
+		lobby.join_state = P2P_LOBBY_JOIN_UNLOCKING;
+		p2p_set_status(N_("opening a friend's game with its password"));
+		start_key_thread();
+		result = 1;
+	}
+	pthread_mutex_unlock(&p2p_lock);
+	return result;
+}
+
+int p2p_lobby_password_seal(const unsigned char *token, unsigned char *signing_key, unsigned char *sealed)
+{
+	/* (under p2p_lock, p2p.c's friends_host_view: the hosted game's key, made
+	for its wire, ready) */
+	if (!lobby.has_password || lobby.password_pending || lobby.password_failed ||
+		lobby.password_key_crossplay != network_wire_crossplay())
+	{
+		return 0;
+	}
+	memcpy(signing_key, p2p_signing_key(), P2P_KEY_SIZE);
+	p2p_seal_token(lobby.password_key, p2p_signing_key(), token, sealed);
+	return 1;
+}
+
 int p2p_lobby_join_state(void)
 {
 	int state;

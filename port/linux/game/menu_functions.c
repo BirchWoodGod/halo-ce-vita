@@ -389,6 +389,8 @@ enum
 	_typing_fileshare_rename,
 	_typing_friend_code,
 	_typing_party_chat,
+	/* (a friend's game with a password: typed, then joined) */
+	_typing_friend_password,
 };
 
 /* the password and code screens' help lines (their strings' order) */
@@ -6209,7 +6211,7 @@ static char const *h3_friends_tag(struct p2p_friend_entry const *entry)
 	case P2P_FRIEND_KIND_INVITE:
 		return T("INVITE");
 	case P2P_FRIEND_KIND_FRIEND:
-		return entry->joinable ? T("JOIN") : entry->online ? T("ONLINE") : "";
+		return entry->joinable ? T("JOINABLE") : entry->online ? T("ONLINE") : "";
 	case P2P_FRIEND_KIND_OUTGOING:
 		return T("SENT");
 	case P2P_FRIEND_KIND_BLOCKED:
@@ -6217,6 +6219,15 @@ static char const *h3_friends_tag(struct p2p_friend_entry const *entry)
 	}
 	return "";
 }
+
+/* a friend's game with a password being joined (its password typed, then
+opened on the lobby's thread: h3_friends_update) */
+static struct
+{
+	char id[P2P_FRIEND_ID_SIZE];
+	char name[P2P_FRIEND_NAME_SIZE];
+	boolean typing, watching;
+} h3_friends_password;
 
 /* (port h3 friends) the rows, the chosen one's facts, the code and status */
 static void h3_friends_update(struct widget_instance *list)
@@ -6233,6 +6244,35 @@ static void h3_friends_update(struct widget_instance *list)
 
 		h3_friends_message(p2p_friends_add_text(result));
 		h3_friends_refresh(TRUE);
+	}
+	/* (a friend's game with a password: typed, opened, then joined as any) */
+	if (h3_friends_password.typing && typing_done(_typing_friend_password, typed, sizeof(typed)))
+	{
+		int outcome = p2p_friends_join_password(h3_friends_password.id, typed);
+
+		memset(typed, 0, sizeof(typed));
+		h3_friends_password.typing = FALSE;
+		h3_friends_password.watching = outcome == P2P_FRIENDS_DONE;
+		h3_friends_message(outcome == P2P_FRIENDS_DONE ? T("Opening the game with its password...") :
+			p2p_friends_outcome_text(outcome));
+	}
+	if (h3_friends_password.watching)
+	{
+		int state = p2p_lobby_join_state();
+
+		if (state == P2P_LOBBY_JOIN_JOINING)
+		{
+			h3_friends_password.watching = FALSE;
+			snprintf(text, sizeof(text), T("Joining %s's game..."), h3_friends_password.name);
+			h3_friends_message(text);
+			menu_functions.open_system_link = TRUE;
+		}
+		else if (state == P2P_LOBBY_JOIN_WRONG_PASSWORD || state == P2P_LOBBY_JOIN_GONE)
+		{
+			h3_friends_password.watching = FALSE;
+			h3_friends_message(state == P2P_LOBBY_JOIN_WRONG_PASSWORD ? T("That is not the game's password") :
+				T("Their game can't be joined now"));
+		}
 	}
 	h3_friends_refresh(FALSE);
 	if (list != h3_friends.list || list->creation_time != h3_friends.list_creation_time)
@@ -6287,7 +6327,7 @@ static void h3_friends_update(struct widget_instance *list)
 				break;
 			case _h3_friends_row_join:
 				row_column(child, "row_name", T("FRIENDS CAN JOIN"));
-				row_column(child, "row_state", T("Your public games, in one press"));
+				row_column(child, "row_state", T("Your games, public or private, in one press"));
 				row_column(child, "row_tag", config_boolean_live("friends.join", "HALO_FRIENDS_JOIN") ? T("YES") : T("NO"));
 				break;
 			default:
@@ -6401,13 +6441,22 @@ static int h3_friends_row_item(struct widget_instance *widget)
 }
 
 /* an action on an entry, its outcome said (a join: the System Link screen
-next, as JOIN WITH CODE) */
+next, as JOIN WITH CODE; a game with a password asks for it first) */
 static void h3_friends_do(struct p2p_friend_entry const *entry, int action)
 {
 	struct p2p_friend_entry copy = *entry;
 	int outcome = p2p_friends_act(copy.id, copy.kind, action);
 	char text[160];
 
+	if (outcome == P2P_FRIENDS_PASSWORD)
+	{
+		snprintf(h3_friends_password.id, sizeof(h3_friends_password.id), "%s", copy.id);
+		snprintf(h3_friends_password.name, sizeof(h3_friends_password.name), "%s", copy.name);
+		h3_friends_password.typing = TRUE;
+		typing_begin(_typing_friend_password, T("Password"), "", P2P_LOBBY_PASSWORD_SIZE - 1, TRUE);
+		h3_friends_message(p2p_friends_outcome_text(outcome));
+		return;
+	}
 	if (outcome == P2P_FRIENDS_DONE && (action == P2P_FRIENDS_JOIN || action == P2P_FRIENDS_INVITE_ACCEPT))
 	{
 		snprintf(text, sizeof(text), T("Joining %s's game..."), copy.name);
@@ -6448,7 +6497,8 @@ static void h3_friends_act(struct widget_instance *widget)
 		case _h3_friends_row_join:
 			on = !config_boolean_live("friends.join", "HALO_FRIENDS_JOIN");
 			setting_set("HALO_FRIENDS_JOIN", on ? "true" : "false");
-			h3_friends_message(on ? T("Friends can join your public games") : T("Friends join only by your invites"));
+			h3_friends_message(on ? T("Friends can join your games, public or private") :
+				T("Friends join only by your invites"));
 			break;
 		case _h3_friends_row_party:
 			menu_functions.open_party = TRUE;

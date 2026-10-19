@@ -476,6 +476,12 @@ struct p2p_friends_host
 	unsigned char joined_hash[P2P_KEY_HASH_SIZE];
 	unsigned char joined_token[P2P_TOKEN_SIZE];
 	int joined_locked;
+	/* (hosting a game with a password) its token sealed with the password's
+	key, and the host's Ed25519 key: what a friend's presence carries, so
+	that a friend opens the game with the password (has_sealed: ready) */
+	int has_sealed;
+	unsigned char signing_key[P2P_KEY_SIZE];
+	unsigned char sealed_token[P2P_SEALED_TOKEN_SIZE];
 };
 void p2p_friends_update(const struct p2p_friends_host *host);
 /* whether friends want the brokers (internet play runs, friends are on) */
@@ -505,6 +511,11 @@ void p2p_friends_stopping(int quitting);
 /* (p2p_lobby.c) the hosted game as the server browser has it, into host's
 listed, locked, open, players and maximum; under p2p_lock */
 void p2p_lobby_friends_view(struct p2p_friends_host *host);
+/* (p2p_lobby.c) the hosted game's token sealed with its password's key, for
+friends (their presence: they open it with the password), and the host's
+Ed25519 key: 0 if the game has no password, or its key is not ready (made
+for the game's wire); under p2p_lock */
+int p2p_lobby_password_seal(const unsigned char *token, unsigned char *signing_key, unsigned char *sealed);
 /* (p2p_lobby.c) whether a host's game is locked: listed with a password, or
 joined from the browser with one; under p2p_lock */
 int p2p_lobby_host_locked(const unsigned char *key_hash);

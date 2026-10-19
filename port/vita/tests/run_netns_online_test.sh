@@ -174,7 +174,13 @@
 #            nothing sent back, the host's re-sent requests muted (asked once)
 #   friendsblock  the joiner blocks the host's request: the host's re-sent
 #            requests dropped as a blocked player's
-#   friendsinvite  the host's game is private (not joinable from presence);
+#   friendsprivate  friends, the host's game private (Oct 19 2026: "when I have
+#            a private lobby my friend should be able to join without a join
+#            code"): the joiner sees it joinable and joins it from presence
+#   friendsprivatepw  the same with a password: the joiner is asked for it
+#            (join-friend:<password> types it) and joins by the presence's
+#            sealed token, opened with it
+#   friendsinvite  the host's game is private (joinable from presence too);
 #            the host invites the joiner (invite-after=), whose invite
 #            pop-up is answered Accept (HALO_TEST_FRIENDS_ANSWER: friends_game.c)
 #            at the menus; the joiner joins the private game by it and plays
@@ -3609,7 +3615,7 @@ CHECK
 		fail "the server crashed"
 	fi
 	;;
-friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged)
+friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsprivate|friendsprivatepw)
 	hc=$out/host.code jc=$out/joiner.code
 	host_steps="code-file=$hc,add-file=$jc"
 	join_steps="code-file=$jc"
@@ -3620,6 +3626,12 @@ friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged)
 	join_pad="wait:150:1000"
 	case $mode in
 	friends) join_steps="$join_steps,accept"; join_test=join-friend ;;
+	# (the owner, Oct 19 2026: a friend joins a private game with no code;
+	# one with a password asks the friend for it)
+	friendsprivate) join_steps="$join_steps,accept"; join_test=join-friend; host_extra="HALO_NET_HOST_PUBLIC=false" ;;
+	friendsprivatepw)
+		join_steps="$join_steps,accept"; join_test=join-friend:xpfriendpw
+		host_extra="HALO_NET_HOST_PUBLIC=false HALO_NET_LOBBY_PASSWORD=xpfriendpw" ;;
 	friendsdecline) join_steps="$join_steps,decline" ;;
 	friendsblock) join_steps="$join_steps,block" ;;
 	friendsinvite)
@@ -3654,7 +3666,7 @@ friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged)
 	grep -a "retained" "$out/broker.log" | grep -aq "/f1/" && fail "the broker kept a friends' message"
 	grep -aqE "Alpha|Bravo" "$out/broker.log" && fail "the broker's log shows a player's name"
 	case $mode in
-	friends|friendsinvite|friendsoffline|friendsforged)
+	friends|friendsinvite|friendsoffline|friendsforged|friendsprivate|friendsprivatepw)
 		grep -aq "friends: .* accepted the friend request; now friends" "$hl" || fail "the host did not become the joiner's friend"
 		grep -aq "friends: accepted .* friend request; now friends" "$jl" || fail "the joiner did not accept"
 		grep -aq "friends: .* is online: " "$hl" || fail "the host never saw the joiner online"
@@ -3681,8 +3693,22 @@ friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged)
 				fail "the blocked player's next request was not dropped"
 		fi
 		;;
+	friendsprivate|friendsprivatepw)
+		grep -aq "friends: .* is online: .*(joinable)" "$jl" || fail "the joiner did not see the host's private game joinable"
+		grep -aq "network test: joining friend .*: Done" "$jl" && [ $mode = friendsprivatepw ] &&
+			fail "the game with a password was joined without asking for it"
+		if [ $mode = friendsprivate ]; then
+			grep -aq "network test: joining friend .*: Done" "$jl" || fail "the joiner did not join its friend's private game"
+			grep -aq "friends: joining .*'s game" "$jl" || fail "the friend's invite link was not joined"
+		else
+			grep -aq "network test: joining friend .*: Their game has a password: type it" "$jl" ||
+				fail "the friend was not asked for the password"
+			grep -aq "network test: the friend's game's password typed: Done" "$jl" || fail "the password was not taken"
+			grep -aq "friends: joining .*'s game with its password" "$jl" || fail "the sealed token was not opened"
+		fi
+		grep -aqE "halo://join/[0-9a-f]{64}" "$out/broker.log" && fail "an invite link went through the broker in clear"
+		;;
 	friendsinvite)
-		grep -aq "(joinable)" "$jl" && fail "a private game was joinable from presence"
 		grep -aq "friends: invited .* into this machine's game" "$hl" || fail "the host did not invite"
 		grep -aq "friends: .* invited this machine: " "$jl" || fail "the joiner did not hear the invite"
 		grep -aq "friends: .* invited you: .* (the test answers)" "$jl" || fail "the invite's pop-up was not asked"
@@ -3709,7 +3735,7 @@ friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged)
 		grep -aq "friends: Forged\|Forged is online" "$jl" && fail "a forgery showed"
 		;;
 	esac
-	if [ $mode = friends ] || [ $mode = friendsinvite ]; then
+	if [ $mode = friends ] || [ $mode = friendsinvite ] || [ $mode = friendsprivate ] || [ $mode = friendsprivatepw ]; then
 		grep -aq "system link: in another's lobby\|system link: in a network game" "$jl" || fail "the joiner did not get into the host's game"
 		two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
 		echo "joiner's seconds with two players playing: $two"
@@ -3832,7 +3858,7 @@ friendsplayers|friendsplayersoff|friendsplayersnone)
 	[ "$two" -ge 20 ] || fail "the joiner played the host's game for $two s with two players (20 wanted)"
 	;;
 *)
-	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3online|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|party" >&2
+	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3online|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsprivate|friendsprivatepw|friendsplayers|friendsplayersoff|friendsplayersnone|party" >&2
 	exit 2
 	;;
 esac

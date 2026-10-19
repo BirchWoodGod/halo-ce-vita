@@ -701,7 +701,7 @@ static struct setting settings[] = {
 		"On: friends see you offline; you still see them", 0, PAGE_FRIENDS },
 	/* (friends.join: a public game without a password joined from presence) */
 	{ "Friends can join", "HALO_FRIENDS_JOIN", 0, 2, { "true", "false" }, { "On", "Off" },
-		"Your public games, no password, joined in one press", 0, PAGE_FRIENDS },
+		"Your games, public or private: friends join in one press", 0, PAGE_FRIENDS },
 	/* (the offline bots: port/linux/game/bots.c; the skill and teams rows
 	shown while there are any, setting_shown) */
 	{ "Bots", "HALO_BOTS", 0, 11, { "0", "1", "2", "3", "4", "5", "6", "7", "9", "11", "15" },
@@ -1100,6 +1100,10 @@ static struct p2p_party_member party_confirm_member;
 sends it); a message being typed for the party */
 static int party_preset;
 static int party_message_pending;
+/* a friend's game with a password: the keyboard up for it (its friend's id
+and name), then the join it opens */
+static int friend_password_pending;
+static char friend_password_id[P2P_FRIEND_ID_SIZE], friend_password_name[P2P_FRIEND_NAME_SIZE];
 /* the chat lines the page shows (the newest) */
 #define PARTY_CHAT_PAGE_LINES 3
 /* (the party's leader) a friend's game warned of: fewer open slots than the
@@ -2861,7 +2865,7 @@ static const char *friend_state_word(const struct p2p_friend_entry *entry)
 	case P2P_FRIEND_KIND_INVITE:
 		return T("Invitation");
 	case P2P_FRIEND_KIND_FRIEND:
-		return entry->joinable ? T("Join") : entry->online ? T("Online") : T("Offline");
+		return entry->joinable ? T("Joinable") : entry->online ? T("Online") : T("Offline");
 	case P2P_FRIEND_KIND_OUTGOING:
 		return T("Sent");
 	}
@@ -5145,6 +5149,21 @@ static void friend_do(const struct p2p_friend_entry *entry, int action)
 	struct p2p_friend_entry copy = *entry;
 	int outcome = p2p_friends_act(copy.id, copy.kind, action);
 
+	/* (a friend's game with a password: typed on the system's keyboard,
+	then joined as any: ime_input) */
+	if (outcome == P2P_FRIENDS_PASSWORD)
+	{
+		snprintf(friend_password_id, sizeof(friend_password_id), "%s", copy.id);
+		snprintf(friend_password_name, sizeof(friend_password_name), "%s", copy.name);
+		if (vita_ime_open(T("Password"), "", PLAY_TEXT_LENGTH, 1) == 0)
+		{
+			friend_password_pending = 1;
+			vgxm_menu_set(NULL, 0);
+			return;
+		}
+		set_notice("%s", T("The keyboard did not open"));
+		return;
+	}
 	{
 		char line[160];
 
@@ -5508,12 +5527,32 @@ static int ime_input(void)
 	char typed[P2P_PARTY_CHAT_SIZE + 8];
 	int result;
 
-	if (!ime_setting && !browse_join_pending && !party_message_pending)
+	if (!ime_setting && !browse_join_pending && !party_message_pending && !friend_password_pending)
 		return 0;
 	result = vita_ime_poll(typed, sizeof(typed));
 	if (result == 0)
 		return 1;
-	if (party_message_pending)
+	if (friend_password_pending)
+	{
+		friend_password_pending = 0;
+		if (result > 0)
+		{
+			int outcome = p2p_friends_join_password(friend_password_id, typed);
+
+			if (outcome == P2P_FRIENDS_DONE)
+			{
+				set_notice(T("Joining %.16s's game..."), friend_password_name);
+				guide_action = ACTION_JOIN;
+				guide_problem[0] = 0;
+				code_for_join = 1;
+				screen = SCREEN_GUIDE;
+			}
+			else
+				set_notice("%s", p2p_friends_outcome_text(outcome));
+		}
+		memset(typed, 0, sizeof(typed));
+	}
+	else if (party_message_pending)
 	{
 		party_message_pending = 0;
 		if (result > 0 && typed[0])

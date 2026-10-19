@@ -389,6 +389,14 @@ static void network_test_read_settings(
 	{
 		network_test.mode = _network_test_watch;
 	}
+	else if (!strncmp(setting, "join-friend:", 12))
+	{
+		/* (join-friend:<password>: a friend's game with a password, typed) */
+		network_test.mode = _network_test_join;
+		network_test.by_code = TRUE;
+		network_test.by_friend = TRUE;
+		snprintf(network_test.lobby_password, sizeof(network_test.lobby_password), "%s", setting + 12);
+	}
 	else if (!strcmp(setting, "join-friend") || !strcmp(setting, "join-invite"))
 	{
 		network_test.mode = _network_test_join;
@@ -1861,6 +1869,13 @@ void network_test_update(
 						outcome = p2p_friends_act(entries[index].id, P2P_FRIEND_KIND_FRIEND, P2P_FRIENDS_JOIN);
 						platform_log("network test: joining friend %s (%s): %s", entries[index].name, entries[index].activity,
 							p2p_friends_outcome_text(outcome));
+						/* (a game with a password: asked for it, the test's typed) */
+						if (outcome == P2P_FRIENDS_PASSWORD && network_test.lobby_password[0])
+						{
+							outcome = p2p_friends_join_password(entries[index].id, network_test.lobby_password);
+							platform_log("network test: the friend's game's password typed: %s",
+								p2p_friends_outcome_text(outcome));
+						}
 						network_test.code_joined = outcome == P2P_FRIENDS_DONE;
 						break;
 					}
