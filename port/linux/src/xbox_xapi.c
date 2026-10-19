@@ -16,6 +16,7 @@ reported as inserted, so the game runs with no input devices.
 
 #include "platform.h"
 #include "port_config.h"
+#include "lang.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -76,6 +77,16 @@ DWORD WINAPI XGetLanguage(void)
 			found == XC_LANGUAGE_GERMAN ? "German" : found == XC_LANGUAGE_ITALIAN ? "Italian" : "Japanese",
 			config_string("game.language"));
 		language_at_start = found;
+#ifndef HALO_VITA
+		/* (tests: the port's own text in that language too, from the
+		folder named - port/vita/app0/lang -, as the Vita's host reads
+		app0:lang: its screens' looks checked in Spanish on Linux) */
+		if (getenv("HALO_TEST_LANG_DIR"))
+		{
+			lang_init(getenv("HALO_TEST_LANG_DIR"));
+			platform_log("lang: %s (HALO_TEST_LANG_DIR)", lang_select(language) ? language : "en, none for that code");
+		}
+#endif
 	}
 	return language_at_start;
 }

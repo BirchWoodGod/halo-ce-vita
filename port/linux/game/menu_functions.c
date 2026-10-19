@@ -325,6 +325,16 @@ enum
 	_function_h3_party_preset,
 	_function_forge_clear_dead_ai,
 	_function_forge_clear_all_ai,
+	_function_h3_mp_pause_party,
+	_function_h3_mp_settings_init,
+	_function_h3_mp_settings_save,
+	_function_h3_mp_settings_close,
+	_function_h3_host_online,
+	_function_h3_game_options,
+	_function_h3_live_leave,
+	_function_h3_invite_ask,
+	_function_h3_invite_init,
+	_function_h3_invite_act,
 };
 
 /* in port_game_data_input_names' order */
@@ -375,6 +385,9 @@ enum
 	_input_h3_party_options,
 	_input_h3_party_chat,
 	_input_h3_party_quick,
+	_input_h3_mp_pause,
+	_input_h3_mp_settings,
+	_input_h3_invite,
 };
 
 /* what a line of typing is for */
@@ -520,6 +533,14 @@ static struct
 	boolean open_system_link;
 	/* (FRIENDS' PARTY row) the PARTY screen opened at the next frame */
 	boolean open_party;
+	/* (the Halo 3 lobby's Square on ONLINE) GAME OPTIONS opened at the next
+	frame, over the lobby */
+	boolean open_game_options;
+	/* (a game hosted from the Halo 3 lobby) SELECT PROFILE was shown on
+	the way (profile_shown): the game's lobby takes it out of the history,
+	so that B goes back to the multiplayer lobby (pregame_drop_profile) */
+	boolean profile_shown;
+	boolean pregame_drop_profile;
 	/* (the party's leader) the game whose open slots were said too few:
 	pressed again soon, joined */
 	char party_warned_id[P2P_LOBBY_ID_SIZE];
@@ -552,6 +573,17 @@ static struct
 } menu_functions;
 
 /* ---------- private code */
+
+/* (the Halo 3 multiplayer flows: a profile chosen this run is not asked
+for again) */
+static void h3_session_profile_chosen(short plate, long profile_index);
+static void h3_session_forget(void);
+/* (the live lobby, Menu style Halo 3: h3_live) */
+static void h3_live_lobby_show(struct widget_instance *screen);
+static boolean h3_live_follow(void);
+static void h3_live_close(char const *why);
+static boolean h3_live_start(void);
+static void h3_live_retry(void);
 
 static struct widget_instance *named(struct widget_instance *widget, char const *name)
 {
@@ -889,6 +921,8 @@ static boolean h3_adhoc_ready(short then)
 {
 	if (__atomic_load_n(&halo_adhoc_group, __ATOMIC_ACQUIRE) == HALO_ADHOC_GROUP_IN)
 	{
+		if (then == _h3_adhoc_then_host && h3_live_start())
+			return TRUE;
 		if (then == _h3_adhoc_then_host)
 		{
 			menu_functions.create_pending = TRUE;
@@ -897,6 +931,7 @@ static boolean h3_adhoc_ready(short then)
 		}
 		else if (then == _h3_adhoc_then_browse)
 		{
+			h3_live_close("the host browses the games");
 			menu_functions.create_pending = FALSE;
 			menu_functions.browse_lan_pending = TRUE;
 			platform_log("menus: h3 mp: browse the ad hoc games; the profile, then the LAN browser");
@@ -1361,12 +1396,14 @@ flies on from there. The screens opened from a lobby
 script commands run at the top of the main loop, between frames
 (menu_functions_scenes_update, main.c; the commands as the settings
 panel's host commands, main_request_host_command_from), never inside the
-widgets' update. Only with Menu style Halo 3, at the main menu of a local
-game, unless menus.scenes (HALO_MENU_SCENES=0) is false. (After the spike
+widgets' update. Only with Menu style Halo 3, at the main menu (a network
+game's lobby there too: the live lobby, the game's lobby), unless
+menus.scenes (HALO_MENU_SCENES=0) is false. (After the spike
 on spike/menu-scenes, Oct 18 2026.) */
 
 boolean main_request_host_command_from(char const *command, char const *source);
 int halo_main_menu_idle(void);
+int halo_main_menu_loaded(void);
 
 #define H3_SCENE_TICKS 0
 
@@ -1486,7 +1523,9 @@ static void h3_scene_request(struct widget_instance *widget)
 	char name[64];
 	char const *scene;
 
-	if (!h3_scenes_enabled() || !halo_menu_style_halo3() || !halo_main_menu_idle())
+	/* (a network game's lobby at the main menu too: the live lobby's, the
+	game's lobby) */
+	if (!h3_scenes_enabled() || !halo_menu_style_halo3() || !halo_main_menu_loaded())
 		return;
 	char const *objects = NULL;
 
@@ -1679,7 +1718,7 @@ void menu_functions_scenes_update(void)
 
 	/* (Menu style Halo CE chosen, or the scenes turned off, while a lobby's
 	camera holds: the ring's flight back, as no Halo 3 main menu will ask) */
-	if (h3_scenes.ring_asleep && (!halo_menu_style_halo3() || !h3_scenes_enabled()) && halo_main_menu_idle())
+	if (h3_scenes.ring_asleep && (!halo_menu_style_halo3() || !h3_scenes_enabled()) && halo_main_menu_loaded())
 	{
 		main_request_host_command_from("(wake ring_loop)", "menu scene");
 		h3_scenes.ring_asleep = FALSE;
@@ -1687,8 +1726,9 @@ void menu_functions_scenes_update(void)
 	}
 	if (!__atomic_exchange_n(&h3_scenes.pending, 0, __ATOMIC_ACQUIRE))
 		return;
-	/* (the main menu gone meanwhile: a level loading, a network game) */
-	if (!halo_main_menu_idle())
+	/* (the main menu gone meanwhile: a level loading, a network game's
+	map; a network game's lobby at the main menu keeps its scenes) */
+	if (!halo_main_menu_loaded())
 		return;
 	if (h3_scenes.ring)
 	{
@@ -2593,6 +2633,11 @@ static void h3_mp_lobby_update(struct widget_instance *widget)
 			found->disabled = !shown;
 		}
 	}
+	/* (Square: GAME OPTIONS, ONLINE's) */
+	if ((found = named(screen, "x_butn")) != NULL)
+		widget_instance_set_visibility_recursive(found, h3_mp.network == _h3_network_online);
+	if ((found = named(screen, "options")) != NULL)
+		widget_instance_set_visibility_recursive(found, h3_mp.network == _h3_network_online);
 	if ((found = named(screen, "map_picture")) != NULL)
 	{
 		/* (the game's own level pictures: a custom map's display index
@@ -2621,6 +2666,9 @@ static void h3_mp_lobby_update(struct widget_instance *widget)
 	else
 		snprintf(text, sizeof(text), "%s", T("This party is local to this PS Vita."));
 	text_show(named(screen, "ready_sub"), text);
+	/* (the live lobby's players and status over these: h3_live) */
+	if (named(screen, "network_row"))
+		h3_live_lobby_show(screen);
 	/* (said when it changes: the tests read it) */
 	if (named(screen, "network_row") && strcmp(said, h3_mp.said))
 	{
@@ -2672,12 +2720,23 @@ static void h3_mp_gametype_set(struct widget_instance *widget)
 	char directory[MAXIMUM_FILENAME_LENGTH + 1];
 	long index = h3_mp.gametype_view.offset + h3_child_index(widget);
 
+	short before = h3_mp.gametype;
+
 	if (index < 0 || index >= h3_mp.gametype_count)
 		return;
 	h3_mp.gametype = (short)index;
 	if (saved_game_file_get_path_to_enclosing_directory(h3_mp.gametypes[index], directory))
 		saved_game_file_remember_last_used_multiplayer_variant_directory(directory);
 	platform_log("menus: h3 mp: game type %s", h3_mp.gametype_names[index]);
+	/* (a live lobby's game on it; refused, the lobby's back on the game's) */
+	if (!h3_live_follow() && before != NONE && before < h3_mp.gametype_count)
+	{
+		h3_mp.gametype = before;
+		if (saved_game_file_get_path_to_enclosing_directory(h3_mp.gametypes[before], directory))
+			saved_game_file_remember_last_used_multiplayer_variant_directory(directory);
+		platform_log("menus: h3 live lobby: game type %s refused: still %s", h3_mp.gametype_names[index],
+			h3_mp.gametype_names[before]);
+	}
 }
 
 /* (port h3 map focus: the map picker opened) its maps read as the Xbox's
@@ -2794,21 +2853,36 @@ START GAME, Create Game and the map's sharing take it from there) */
 static void h3_mp_map_set(struct widget_instance *widget)
 {
 	long index = h3_mp.map_view.offset + h3_child_index(widget);
+	short before_index = h3_mp.map_index;
+	char before_other[sizeof(h3_mp.map_other)];
 
 	if (index < 0 || index >= h3_mp.map_count)
 		return;
+	snprintf(before_other, sizeof(before_other), "%s", h3_mp.map_other);
 	if (index < H3_MAP_COUNT)
 	{
 		h3_mp.map_index = (short)index;
 		h3_mp.map_other[0] = 0;
 		saved_game_file_remember_last_used_multiplayer_map(h3_map_paths[index]);
 		platform_log("menus: h3 mp: map %s", h3_map_names[index]);
-		return;
 	}
-	h3_mp.map_index = NONE;
-	snprintf(h3_mp.map_other, sizeof(h3_mp.map_other), "%s", h3_mp.map_paths[index]);
-	saved_game_file_remember_last_used_multiplayer_map(h3_mp.map_paths[index]);
-	platform_log("menus: h3 mp: map %s (a custom map: %s)", h3_mp.map_names[index], h3_mp.map_paths[index]);
+	else
+	{
+		h3_mp.map_index = NONE;
+		snprintf(h3_mp.map_other, sizeof(h3_mp.map_other), "%s", h3_mp.map_paths[index]);
+		saved_game_file_remember_last_used_multiplayer_map(h3_mp.map_paths[index]);
+		platform_log("menus: h3 mp: map %s (a custom map: %s)", h3_mp.map_names[index], h3_mp.map_paths[index]);
+	}
+	/* (a live lobby's game on it; refused - a map this version does not
+	play with others: said - the lobby's back on the game's map) */
+	if (!h3_live_follow())
+	{
+		h3_mp.map_index = before_index;
+		snprintf(h3_mp.map_other, sizeof(h3_mp.map_other), "%s", before_other);
+		saved_game_file_remember_last_used_multiplayer_map((char *)(before_index != NONE ? h3_map_paths[before_index] :
+			before_other));
+		platform_log("menus: h3 live lobby: that map refused: still %s", h3_mp_map_name());
+	}
 }
 
 /* (port h3 network status: the lobbies' line under NETWORK) the connection's
@@ -2833,6 +2907,11 @@ static boolean h3_mp_network_set(struct widget_instance *widget)
 {
 	short network = (short)PIN(h3_child_index(widget), 0, NUMBER_OF_H3_NETWORKS - 1);
 
+	/* (a live lobby's game closed first: the connection switches only
+	with no network game, and the lobby opens again on the new one) */
+	if (network != h3_mp.network)
+		h3_live_close("another network chosen");
+	h3_live_retry();
 	if (network != _h3_network_offline)
 	{
 		network_connection_choose(network == _h3_network_online ? NETWORK_CONNECTION_ONLINE :
@@ -3252,6 +3331,7 @@ static boolean h3_profile_play(short item, short controller_index)
 	player_ui_set_single_player_local_player_controller(0, (short)(controller_index != NONE ? controller_index : 0));
 	player_ui_set_active_player_profile(0, profile_index, &profile);
 	h3_nameplate_changed(profile_index);
+	h3_session_profile_chosen((short)(controller_index != NONE ? controller_index : 0), profile_index);
 	platform_log("menus: h3 profiles: chose %s (campaign)", name);
 	return TRUE;
 }
@@ -3374,6 +3454,7 @@ static void h3_profile_delete(void)
 		return;
 	}
 	player_profile_delete(profile_index);
+	h3_session_forget();
 	snprintf(h3_profiles.status, sizeof(h3_profiles.status), T("%s was deleted."), h3_profiles.delete_name);
 	h3_profiles.status_item = -2;
 	platform_log("menus: h3 profiles: deleted %s", h3_profiles.delete_name);
@@ -3978,6 +4059,259 @@ static void h3_custom_save(void)
 		saved.controller_settings.button_preset, saved.controller_settings.look_sensitivity,
 		saved.controller_settings.invert_look, saved.controller_settings.flight_stick_aircraft_controls,
 		saved.controller_settings.autocenter, saved.controller_settings.vibration_disabled ? "off" : "on");
+}
+
+/* ---- the Halo 3 multiplayer pause screen (halo3/mppause.xml): it stands
+for the Xbox's 1p_pause_game; its quit is the Xbox's own function */
+
+/* the pause's rows, in the list's order */
+enum
+{
+	_h3_mp_pause_resume,
+	_h3_mp_pause_players,
+	_h3_mp_pause_settings,
+	_h3_mp_pause_party,
+	_h3_mp_pause_leave,
+	_h3_mp_pause_end,
+	NUMBER_OF_H3_MP_PAUSE_ROWS
+};
+#define H3_MP_PAUSE_ROW_SPACING 24
+/* (SETTINGS: ALL SETTINGS, the list's last row, and its place under the
+profile's rows) */
+#define H3_MP_SETTINGS_PANEL_ROW 7
+#define H3_MP_SETTINGS_PANEL_Y 146
+
+static struct
+{
+	char said[256];
+	/* (SETTINGS) the local player whose profile is edited, the profile, and
+	what the screen last said */
+	short local_player_index;
+	long profile_index;
+	char settings_said[256];
+} h3_mp_pause;
+
+/* the game type's name, as the game's lobby says it: the variant's own,
+else the game's */
+static void h3_mp_game_name(struct network_game const *game, char *out, int size)
+{
+	wchar_t wide[NUMBEROF(game->variant.human_readable_game_description) + 1];
+	long index;
+
+	for (index = 0; index < (long)NUMBEROF(game->variant.human_readable_game_description) &&
+		game->variant.human_readable_game_description[index]; index++)
+		wide[index] = game->variant.human_readable_game_description[index];
+	wide[index] = 0;
+	h3_utf8(out, size, wide);
+	if (!out[0])
+		snprintf(out, (size_t)size, "%s", T("Slayer"));
+}
+
+/* the local player a screen is for (its controller's: a multiplayer game's
+local players are their controllers') */
+static short h3_mp_local_player(struct widget_instance *widget)
+{
+	struct widget_instance *screen = screen_of(widget);
+
+	return screen ? (short)PIN(screen->local_player_index, 0, MAXIMUM_LOCAL_PLAYERS - 1) : 0;
+}
+
+/* (port h3 mp pause: the pause's list) the title (game type and map), the
+score to win, the players, the game's panel; the rows shown (PARTY in a
+party only, LEAVE GAME or END GAME as this machine joined or hosts the
+game) one under another, the column behind them as long */
+static void h3_mp_pause_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *child;
+	struct network_game *game = network_game_get_game();
+	struct p2p_party_member party[P2P_PARTY_MAXIMUM];
+	boolean host = global_network_game_server_get() != NULL;
+	/* (HALO_TEST_MP_PAUSE_PARTY: as in a party, its row shown: tests) */
+	boolean in_party = p2p_party_members(party, P2P_PARTY_MAXIMUM) > 1 || getenv("HALO_TEST_MP_PAUSE_PARTY");
+	char name[64], map[96], text[320], line[384];
+	short row, shown = 0, base = list->child ? list->child->vertical_offset : 0;
+
+	name[0] = map[0] = 0;
+	if (game)
+	{
+		h3_mp_game_name(game, name, (int)sizeof(name));
+		snprintf(map, sizeof(map), "%s", custom_edition_maps_level_title(game->map.name));
+	}
+	snprintf(text, sizeof(text), "%s \xc2\xb7 %s", name, map);
+	h3_capitals(text);
+	text_show(named(screen, "title"), text);
+	if (game)
+	{
+		snprintf(text, sizeof(text), T("%s, score to win %ld"), game->variant.universal_variant.teams ?
+			T("Team game") : T("Free for all"), (long)game->variant.universal_variant.score_to_win);
+		text_show(named(screen, "rules"), text);
+		snprintf(text, sizeof(text), game->player_count == 1 ? T("%d Player") : T("%d Players"), game->player_count);
+		text_show(named(screen, "count"), text);
+		snprintf(text, sizeof(text), T("%s on %s"), name, map);
+		snprintf(text + strlen(text), sizeof(text) - strlen(text), "\n%s\n\n%s", host ?
+			T("You host this game.") : T("You joined this game."), host ?
+			T("END GAME ends it for every player.") : T("LEAVE GAME: the others play on."));
+		text_show(named(screen, "game"), text);
+	}
+	for (row = 0, child = list->child; child; child = child->next, row++)
+	{
+		boolean visible = row != _h3_mp_pause_party || in_party;
+
+		if (row == _h3_mp_pause_leave)
+			visible = !host;
+		else if (row == _h3_mp_pause_end)
+			visible = host;
+		widget_instance_set_visibility_recursive(child, visible);
+		child->disabled = !visible;
+		if (visible)
+			child->vertical_offset = (short)(base + shown++ * H3_MP_PAUSE_ROW_SPACING);
+	}
+	if ((child = named(screen, "column_4")) != NULL)
+		widget_instance_set_visibility_recursive(child, shown <= 4);
+	if ((child = named(screen, "column_5")) != NULL)
+		widget_instance_set_visibility_recursive(child, shown > 4);
+	/* (said once each time it changes: the tests read it) */
+	snprintf(line, sizeof(line), "%s on %s, %s, %s, %d players; rows: resume, players, settings%s, %s", name, map,
+		game && game->variant.universal_variant.teams ? "teams" : "free for all", host ? "the host" : "joined",
+		game ? game->player_count : 0, in_party ? ", party" : "", host ? "end game" : "leave game");
+	if (strcmp(line, h3_mp_pause.said))
+	{
+		snprintf(h3_mp_pause.said, sizeof(h3_mp_pause.said), "%s", line);
+		platform_log("menus: h3 mp pause: %s", line);
+	}
+}
+
+/* (port h3 mp settings init: SETTINGS opened) the profile the local player
+plays with, edited as CUSTOMIZATION edits it (h3_custom_change steps its
+rows); none to edit without one */
+static void h3_mp_settings_initialize(struct widget_instance *widget)
+{
+	short local_player_index = h3_mp_local_player(widget);
+	long profile_index = player_ui_get_active_player_profile_index(local_player_index);
+
+	h3_mp_pause.local_player_index = local_player_index;
+	h3_mp_pause.profile_index = NONE;
+	h3_mp_pause.settings_said[0] = 0;
+	h3_custom.status[0] = 0;
+	if (player_ui_get_edit_player_profile())
+		player_ui_end_editing_profile();
+	if (profile_index != NONE)
+	{
+		player_ui_begin_editing_profile(profile_index);
+		if (player_ui_get_edit_player_profile())
+			h3_mp_pause.profile_index = profile_index;
+	}
+	h3_custom.index = h3_mp_pause.profile_index;
+	platform_log("menus: h3 mp settings: local player %d, profile %s", local_player_index,
+		h3_mp_pause.profile_index != NONE ? "edited" : "none (only ALL SETTINGS)");
+}
+
+/* (port h3 mp settings: its list) the rows' values (CUSTOMIZATION's), the
+focused row's arrows and help, the profile's name; without a profile its
+rows hidden, ALL SETTINGS alone */
+static void h3_mp_settings_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct player_profile *profile = player_ui_get_edit_player_profile();
+	struct widget_instance *child, *found;
+	short index, focused = 0, base = list->child ? list->child->vertical_offset : 0;
+	char text[192], said[256];
+
+	if (h3_mp_pause.profile_index == NONE)
+		profile = NULL;
+	/* (no profile: ALL SETTINGS alone, at the top, focused) */
+	if (!profile && list->focused_child && list->focused_child->disabled)
+		h3_focus_child(list, H3_MP_SETTINGS_PANEL_ROW);
+	for (index = 0, child = list->child; child; child = child->next, index++)
+	{
+		short row = h3_custom_row(child);
+		boolean has_focus = child == list->focused_child;
+
+		if (index == H3_MP_SETTINGS_PANEL_ROW)
+			child->vertical_offset = (short)(base + (profile ? H3_MP_SETTINGS_PANEL_Y : 0));
+
+		if (has_focus)
+			focused = index;
+		if (row != NONE)
+		{
+			widget_instance_set_visibility_recursive(child, profile != NULL);
+			child->disabled = profile == NULL;
+			if (!profile)
+				continue;
+			h3_custom_value(row, profile, text, sizeof(text));
+			text_show(named(child, "value"), text);
+			if ((found = named(child, "arrow_left")) != NULL)
+				widget_instance_set_visibility_recursive(found, has_focus);
+			if ((found = named(child, "arrow_right")) != NULL)
+				widget_instance_set_visibility_recursive(found, has_focus);
+		}
+		child->animation.current_frame_index = has_focus ? 1 : 0;
+	}
+	string_show(named(screen, "custom_help"), focused);
+	if (profile)
+	{
+		h3_profile_name(text, sizeof(text), profile);
+		h3_capitals(text);
+	}
+	else
+		snprintf(text, sizeof(text), "%s", T("No profile: these are a profile's settings"));
+	text_show(named(screen, "profile_name"), text);
+	if (profile && !h3_custom.status[0] && profile->controller_settings.invert_look &&
+		atoi(setting_get("XV_INVERT_Y", "0")))
+	{
+		text_show(named(screen, "status"),
+			T("The settings panel's Invert look is on too: on this PS Vita the two cancel out."));
+	}
+	else
+		text_show(named(screen, "status"), h3_custom.status);
+	if (profile)
+	{
+		struct player_profile_controller_settings const *settings = &profile->controller_settings;
+
+		snprintf(said, sizeof(said), "stick %d, buttons %d, look %d, invert %d, flight %d, autocenter %d, vibration %s",
+			settings->joystick_preset, settings->button_preset, settings->look_sensitivity, settings->invert_look,
+			settings->flight_stick_aircraft_controls, settings->autocenter, settings->vibration_disabled ? "off" : "on");
+	}
+	else
+		snprintf(said, sizeof(said), "no profile");
+	if (strcmp(said, h3_mp_pause.settings_said))
+	{
+		snprintf(h3_mp_pause.settings_said, sizeof(h3_mp_pause.settings_said), "%s", said);
+		platform_log("menus: h3 mp settings: now %s", said);
+	}
+}
+
+/* (port h3 mp settings save: Circle) the changes saved to the profile as
+CUSTOMIZATION's Circle saves them (player_ui_save_profile), and the local
+player's controls made the saved profile's at once
+(player_ui_set_active_player_profile: the Xbox's way) */
+static void h3_mp_settings_save(void)
+{
+	struct player_profile *edit = player_ui_get_edit_player_profile();
+	struct player_profile saved;
+
+	if (!edit || h3_mp_pause.profile_index == NONE)
+		return;
+	memcpy(&saved, edit, sizeof(saved));
+	if (!player_ui_edit_profile_is_dirty())
+	{
+		player_ui_end_editing_profile();
+		platform_log("menus: h3 mp settings: no changes");
+		return;
+	}
+	if (!player_ui_save_profile())
+	{
+		platform_log("menus: h3 mp settings: the profile could not be saved");
+		return;
+	}
+	if (player_ui_get_active_player_profile_index(h3_mp_pause.local_player_index) == h3_mp_pause.profile_index)
+		player_ui_set_active_player_profile(h3_mp_pause.local_player_index, h3_mp_pause.profile_index, &saved);
+	platform_log("menus: h3 mp settings: saved and played: stick %d, buttons %d, look %d, invert %d, flight %d, "
+		"autocenter %d, vibration %s", saved.controller_settings.joystick_preset, saved.controller_settings.button_preset,
+		saved.controller_settings.look_sensitivity, saved.controller_settings.invert_look,
+		saved.controller_settings.flight_stick_aircraft_controls, saved.controller_settings.autocenter,
+		saved.controller_settings.vibration_disabled ? "off" : "on");
 }
 
 /* the party's leader warned of a game with fewer open slots than the party
@@ -4908,6 +5242,9 @@ static boolean setup_start(struct widget_instance *widget)
 	struct widget_instance *spinner;
 	char value[8];
 
+	char password_before[P2P_LOBBY_PASSWORD_SIZE];
+
+	snprintf(password_before, sizeof(password_before), "%s", setting_get("HALO_NET_LOBBY_PASSWORD", ""));
 	setting_set("HALO_NET_LOBBY_NAME", menu_functions.lobby_name);
 	spinner = spinner_of(screen, "op_max_players");
 	snprintf(value, sizeof(value), "%d", spinner ? PIN(spinner->parameters.list.selected_index + 2, 2, 16) : 16);
@@ -4915,11 +5252,25 @@ static boolean setup_start(struct widget_instance *widget)
 	spinner = spinner_of(screen, "op_visibility");
 	setting_set("HALO_NET_HOST_PUBLIC", spinner && spinner->parameters.list.selected_index == 1 ? "false" : "true");
 	setting_set("HALO_NET_LOBBY_PASSWORD", menu_functions.lobby_password);
+	/* (a live lobby, Menu style Halo 3: its game takes them now - its name
+	and most players from the settings each frame, public or private and a
+	password changed its listing - and START GAME goes on to its lobby) */
+	if (h3_live_start())
+	{
+		p2p_lobby_set_public(spinner && spinner->parameters.list.selected_index == 1 ? 0 : 1);
+		if (strcmp(password_before, menu_functions.lobby_password))
+			p2p_lobby_set_password(menu_functions.lobby_password);
+		platform_log("menus: Server Setup: %s, %s players, %s%s; the live lobby's game takes them, its lobby next",
+			menu_functions.lobby_name, value, spinner && spinner->parameters.list.selected_index == 1 ? "private" : "public",
+			menu_functions.lobby_password[0] ? ", a password" : "");
+		return TRUE;
+	}
 	menu_functions.create_pending = TRUE;
 	menu_functions.create_system_link = FALSE;
-	platform_log("menus: Server Setup: %s, %s players, %s%s; the profile, then the map list", menu_functions.lobby_name,
+	platform_log("menus: Server Setup: %s, %s players, %s%s; the profile, then %s", menu_functions.lobby_name,
 		value, spinner && spinner->parameters.list.selected_index == 1 ? "private" : "public",
-		menu_functions.lobby_password[0] ? ", a password" : "");
+		menu_functions.lobby_password[0] ? ", a password" : "",
+		halo_menu_style_halo3() ? "the game's lobby" : "the map list");
 	return TRUE;
 }
 
@@ -6075,6 +6426,9 @@ static struct
 	struct p2p_friend_entry panel_entries[P2P_FRIEND_ENTRIES_MAXIMUM];
 	int panel_count;
 	unsigned long panel_time;
+	/* (its status line, and the lines it took, as last said) */
+	char status_said[96];
+	int status_lines;
 } h3_friends;
 
 static void h3_friends_message(char const *text)
@@ -6640,6 +6994,55 @@ static void h3_friends_option(struct widget_instance *widget)
 }
 
 /* (port h3 friends panel: the lobbies') who is online and what they do */
+/* a line of the port's text in a text box, in at most two lines: as it is
+when it fits the box's width, else broken at the last space that leaves
+both parts fitting (its "\n"), else cut with "..." (row_column); the
+lines it took, 0 when cut */
+static boolean text_too_wide(struct widget_instance *widget, char const *text, short width)
+{
+	unsigned short characters[192];
+	long length = halo_menus_utf16(text, characters, (long)NUMBEROF(characters)), index;
+
+	for (index = 0; index < length - 1; index++)
+	{
+		if (characters[index] > 0xFF)
+			characters[index] = '?';
+	}
+	return ui_widget_port_text_too_wide(widget, (wchar_t const *)characters, width);
+}
+
+static int text_show_two_lines(struct widget_instance *widget, char const *text)
+{
+	char lines[192];
+	short width;
+	int split;
+
+	if (!widget || widget->type != _ui_widget_type_text_box)
+		return 0;
+	width = ui_widget_port_text_box_width(widget);
+	if (width <= 0 || !text_too_wide(widget, text, width))
+	{
+		text_show(widget, text);
+		return 1;
+	}
+	snprintf(lines, sizeof(lines), "%s", text);
+	for (split = (int)strlen(lines) - 1; split > 0; split--)
+	{
+		if (lines[split] != ' ')
+			continue;
+		lines[split] = 0;
+		if (!text_too_wide(widget, lines, width) && !text_too_wide(widget, lines + split + 1, width))
+		{
+			lines[split] = '\n';
+			text_show(widget, lines);
+			return 2;
+		}
+		lines[split] = ' ';
+	}
+	row_column(widget, widget->name, text);
+	return 0;
+}
+
 static void h3_friends_panel_update(struct widget_instance *panel)
 {
 	unsigned long time = system_milliseconds();
@@ -6723,10 +7126,22 @@ static void h3_friends_panel_update(struct widget_instance *panel)
 		text_show(named(panel, name), name_text);
 		if (row == 1 && !name_text[0])
 		{
-			/* (the status across the panel: there is room for it) */
-			text_show(named(panel, name), state_text);
+			/* (the status across the panel, in its own box: two lines when
+			one is too narrow - "Go online to see your friends" was cut
+			short in the name's column, and Spanish is longer) */
+			int lines = text_show_two_lines(named(panel, "lobby_status"), state_text);
+
 			text_show(named(panel, state), "");
+			if (strcmp(state_text, h3_friends.status_said) || lines != h3_friends.status_lines)
+			{
+				snprintf(h3_friends.status_said, sizeof(h3_friends.status_said), "%s", state_text);
+				h3_friends.status_lines = lines;
+				platform_log("menus: h3 friends panel: status \"%s\" %s", state_text, lines == 1 ? "fits one line" :
+					lines == 2 ? "fits two lines" : "cut");
+			}
 		}
+		else if (row == 1)
+			text_show(named(panel, "lobby_status"), "");
 		/* (a doing wider than its column cut with "...", as the lists' rows) */
 		else if (state_text[0])
 			row_column(panel, state, state_text);
@@ -7883,6 +8298,25 @@ static boolean h3_join_a(struct widget_instance *widget, struct event_record *ev
 			}
 		}
 		platform_log("menus: h3 join: on to %s", h3_join.split ? "split screen's map list" : "the games");
+		/* (one player alone, a network game's: not asked again this run) */
+		if (!h3_join.split)
+		{
+			menu_functions.profile_shown = TRUE;
+			short ready = 0, alone = NONE;
+
+			for (other = 0; other < H3_JOIN_PLATES; other++)
+			{
+				if (h3_join.state[other] == _h3_join_ready)
+				{
+					ready++;
+					alone = other;
+				}
+			}
+			if (ready == 1)
+				h3_session_profile_chosen(alone, player_ui_get_active_player_profile_index(alone));
+			else
+				h3_session_forget();
+		}
 		return TRUE;
 	}
 }
@@ -7985,6 +8419,335 @@ static void h3_join_update(struct widget_instance *widget)
 	text_show(named(screen, "next"), text);
 }
 
+/* ---- the Halo 3 multiplayer flows, nothing asked twice: START GAME hosts
+with the lobby's GAME and MAP (no map or game type list after it), and the
+profile chosen on SELECT PROFILE (or the campaign's) is not asked again in
+this run - the network games' SELECT PROFILE goes straight on to what it
+led to, with that profile, as its plate's Cross did - unless another player
+joined with it (split screen's has its own screen, always asked) */
+
+static struct
+{
+	/* the profile last chosen alone (NONE: none yet, or several players),
+	its name (checked again: a profile deleted moves the others' indices)
+	and its controller */
+	long profile;
+	wchar_t name[MAXIMUM_PLAYER_PROFILE_NAME_LENGTH + 1];
+	short plate;
+} h3_session = { NONE, { 0 }, NONE };
+
+static void h3_session_forget(void)
+{
+	h3_session.profile = NONE;
+}
+
+/* (SELECT PROFILE gone on with one player in, the campaign's profile
+chosen) the profile not to ask for again */
+static void h3_session_profile_chosen(short plate, long profile_index)
+{
+	struct player_profile profile;
+
+	if (profile_index == NONE || plate == NONE || !player_profile_get(profile_index, &profile))
+	{
+		h3_session.profile = NONE;
+		return;
+	}
+	h3_session.profile = profile_index & 0x7FFFFFFF;
+	h3_session.plate = plate;
+	memcpy(h3_session.name, profile.player_name, sizeof(h3_session.name) - sizeof(wchar_t));
+	h3_session.name[MAXIMUM_PLAYER_PROFILE_NAME_LENGTH] = 0;
+}
+
+/* (a network game's SELECT PROFILE about to open, Menu style Halo 3) with
+a profile chosen alone this run, still there and still free: what the
+screen does done at once - the Xbox's "clear multiplayer player joins" as
+it opens, the player joined ("join controller to mp game") with that
+profile ("1wide plyr prof set for game", with its checks) - and TRUE: the
+screen it went on to opens in its place. FALSE: SELECT PROFILE asks */
+static boolean h3_session_profile_join(void)
+{
+	long entries[H3_JOIN_PROFILES];
+	word count = H3_JOIN_PROFILES;
+	struct player_profile profile;
+	short plate = h3_session.plate;
+	long entry = NONE;
+	short index;
+
+	if (h3_session.profile == NONE || plate < 0 || plate >= H3_JOIN_PLATES)
+		return FALSE;
+	player_profiles_enumerate_available_to_local_player_index(plate, &count, entries, TRUE);
+	for (index = 0; index < (short)MIN(count, H3_JOIN_PROFILES); index++)
+	{
+		if ((entries[index] & 0x7FFFFFFF) == h3_session.profile)
+			entry = entries[index];
+	}
+	if (entry == NONE || !(entry & 0x80000000) || !player_profile_get(entry, &profile) ||
+		memcmp(profile.player_name, h3_session.name, sizeof(h3_session.name) - sizeof(wchar_t)) ||
+		(profile.player_name[0] && !player_name_valid(profile.player_name, NUMBEROF(profile.player_name))))
+	{
+		platform_log("menus: h3 join: the profile chosen before is gone or taken: SELECT PROFILE");
+		h3_session.profile = NONE;
+		return FALSE;
+	}
+	dispose_global_network_game_client();
+	dispose_global_network_game_server();
+	player_ui_clear_multiplayer_joins();
+	player_ui_clear_multiplayer_variant();
+	h3_join_initialize(FALSE);
+	player_ui_local_player_joined_multiplayer_game(plate);
+	player_ui_set_active_player_profile(plate, entry, &profile);
+	menu_functions.profile_shown = FALSE;
+	{
+		char name[64];
+
+		h3_join_profile_name(&profile, name, (int)sizeof(name));
+		platform_log("menus: h3 join: the profile %s chosen before: not asked again", name);
+	}
+	return TRUE;
+}
+
+/* (a game hosted from the Halo 3 lobby or Create Game, its server just
+started) the lobby's MAP and GAME set as the Xbox's map list's and game
+type list's choices set them (multiplayer_level_select, its check of a map
+this version does not play with others included;
+multiplayer_profile_set_for_game): TRUE, the game's lobby next; FALSE (the
+map refused, no game type), their lists, as before */
+static boolean h3_mp_host_choices(void)
+{
+	struct game_variant variant;
+	char const *map = h3_mp.map_index != NONE ? h3_map_paths[h3_mp.map_index] : h3_mp.map_other;
+	long variant_index = h3_mp.gametype != NONE ? h3_mp.gametypes[h3_mp.gametype] : NONE;
+	struct network_game_server *server = global_network_game_server_get();
+	char build[0x20], directory[256];
+
+	if (!server || !map || !map[0] || variant_index == NONE || !(variant_index & 0x80000000))
+	{
+		platform_log("menus: h3 mp: no map or game type chosen: the map list");
+		return FALSE;
+	}
+	if (!cache_files_map_plays_multiplayer(map, build))
+	{
+		cache_files_show_multiplayer_unavailable(map, build);
+		platform_log("menus: h3 mp: %s is not played with others: the map list", map);
+		return FALSE;
+	}
+	if (!playlist_profile_get(variant_index, &variant))
+	{
+		platform_log("menus: h3 mp: the game type could not be read: the map list");
+		return FALSE;
+	}
+	main_set_multiplayer_map_name((char *)map);
+	game_engine_override_map_name((char *)map);
+	network_game_server_change_map_name(server, (char *)map);
+	saved_game_file_remember_last_used_multiplayer_map((char *)map);
+	if (saved_game_file_get_path_to_enclosing_directory(variant_index, directory))
+		saved_game_file_remember_last_used_multiplayer_variant_directory(directory);
+	player_ui_set_game_variant(&variant);
+	network_game_server_change_game_variant(server, &variant);
+	platform_log("menus: h3 mp: hosting %s on %s (the lobby's GAME and MAP); the game's lobby", h3_mp_gametype_name(),
+		h3_mp_map_name());
+	return TRUE;
+}
+
+/* ---- INVITE FRIENDS (halo3/friends.xml h3/invite/screen): L in the live
+multiplayer lobby and in the game's lobby (multiplayer and co-op),
+the host's: the friends online, Cross sends the chosen one the friends'
+invite into this machine's game (p2p_friends_act P2P_FRIENDS_INVITE: sealed
+for that friend alone, its own limit of one a friend a while; a game with a
+password, or full, takes none: said). The settings panel's Friends page
+does the same with Square on a friend. */
+
+#define H3_INVITE_ROWS 10
+
+static struct
+{
+	struct browser_view view;
+	/* the friends online, of p2p_friends_list's (read into the FRIENDS
+	screen's list, which is not open meanwhile: no second copy of it) */
+	struct p2p_friend_entry entries[P2P_FRIENDS_MAXIMUM];
+	int count;
+	unsigned long refreshed_time;
+	/* the friend chosen, by id */
+	char chosen_id[P2P_FRIEND_ID_SIZE];
+	char message[160];
+	unsigned long message_time;
+	struct widget_instance *list;
+	long list_creation_time;
+	char said[256];
+} h3_invite;
+
+/* (port h3 invite ask: the lobbies' INVITE FRIENDS) whether this machine
+hosts a game friends can be invited into now: online, its own server */
+static boolean h3_invite_ask(void)
+{
+	boolean can = network_game_server_port_in_lobby(global_network_game_server_get()) && internet_play() &&
+		!network_game_is_splitscreen_local();
+
+	platform_log("menus: h3 invite: INVITE FRIENDS %s", can ? "opens" : "not now (no game of this machine's online)");
+	return can;
+}
+
+static void h3_invite_refresh(boolean now)
+{
+	unsigned long time = system_milliseconds();
+	int index;
+
+	if (!now && h3_invite.refreshed_time && time - h3_invite.refreshed_time < H3_FRIENDS_REFRESH_MILLISECONDS)
+		return;
+	h3_invite.refreshed_time = time ? time : 1;
+	h3_friends_refresh(TRUE);
+	h3_invite.count = 0;
+	for (index = 0; index < h3_friends.count && h3_invite.count < P2P_FRIENDS_MAXIMUM; index++)
+	{
+		if (h3_friends.entries[index].kind == P2P_FRIEND_KIND_FRIEND && h3_friends.entries[index].online)
+			h3_invite.entries[h3_invite.count++] = h3_friends.entries[index];
+	}
+}
+
+static void h3_invite_initialize(void)
+{
+	int index;
+
+	browser_view_reset(&h3_invite.view);
+	h3_invite.chosen_id[0] = 0;
+	h3_invite.message[0] = 0;
+	h3_invite.said[0] = 0;
+	h3_invite_refresh(TRUE);
+	platform_log("menus: h3 invite: %d friends online", h3_invite.count);
+	for (index = 0; index < h3_invite.count; index++)
+	{
+		platform_log("menus: h3 invite: %s: %s%s", h3_invite.entries[index].name, h3_invite.entries[index].activity,
+			h3_invite.entries[index].invitable ? "" : " (not invitable now)");
+	}
+}
+
+static int h3_invite_chosen_index(void)
+{
+	int index;
+
+	for (index = 0; index < h3_invite.count; index++)
+	{
+		if (!strcmp(h3_invite.entries[index].id, h3_invite.chosen_id))
+			return index;
+	}
+	return 0;
+}
+
+/* (port h3 invite act: a row's Cross) the invite sent, its outcome said */
+static void h3_invite_act(struct widget_instance *widget)
+{
+	int item = h3_invite_chosen_index();
+	struct p2p_friend_entry entry;
+	int outcome;
+
+	if (widget && !strncmp(widget->name, "row_", 4) && widget->name[4] >= '0' && widget->name[4] <= '9')
+	{
+		long row = atol(widget->name + 4) - 1;
+
+		if (row >= 0 && row < h3_invite.view.visible)
+			item = (int)(h3_invite.view.offset + row);
+	}
+	if (item < 0 || item >= h3_invite.count)
+		return;
+	entry = h3_invite.entries[item];
+	outcome = p2p_friends_act(entry.id, entry.kind, P2P_FRIENDS_INVITE);
+	if (outcome == P2P_FRIENDS_DONE)
+		snprintf(h3_invite.message, sizeof(h3_invite.message), T("Invited %s"), entry.name);
+	else
+		snprintf(h3_invite.message, sizeof(h3_invite.message), "%s", p2p_friends_outcome_text(outcome));
+	h3_invite.message_time = system_milliseconds();
+	platform_log("menus: h3 invite: %s: %s", entry.name, h3_invite.message);
+	h3_invite_refresh(TRUE);
+}
+
+/* (port h3 invite) the rows: each friend online, what they are doing,
+INVITE when they can be; the outcome; how many online */
+static void h3_invite_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *child, *focused = list->focused_child, *focus = NULL;
+	long index, focused_row = NONE, target;
+	char text[192];
+
+	h3_invite_refresh(FALSE);
+	if (list != h3_invite.list || list->creation_time != h3_invite.list_creation_time)
+	{
+		h3_invite.list = list;
+		h3_invite.list_creation_time = list->creation_time;
+		browser_view_reset(&h3_invite.view);
+		focused = NULL;
+	}
+	for (index = 0, child = list->child; child; child = child->next)
+	{
+		if (strncmp(child->name, "row_", 4))
+			continue;
+		if (child == focused)
+			focused_row = index;
+		index++;
+	}
+	target = browser_view_follow(&h3_invite.view, H3_INVITE_ROWS, h3_invite.count, (int)focused_row,
+		h3_invite_chosen_index(), 0);
+	for (index = 0, child = list->child; child; child = child->next)
+	{
+		struct p2p_friend_entry const *entry;
+
+		if (strncmp(child->name, "row_", 4))
+			continue;
+		if (index >= h3_invite.view.visible)
+		{
+			widget_instance_set_visibility_recursive(child, FALSE);
+			child->disabled = TRUE;
+			index++;
+			continue;
+		}
+		widget_instance_set_visibility_recursive(child, TRUE);
+		child->disabled = FALSE;
+		entry = &h3_invite.entries[h3_invite.view.offset + index];
+		row_column(child, "row_name", entry->name);
+		row_column(child, "row_state", entry->activity);
+		row_column(child, "row_tag", entry->invitable ? T("INVITABLE") : " ");
+		if (index == h3_invite.view.row)
+			focus = child;
+		index++;
+	}
+	if (focus && focus != list->focused_child)
+		ui_widget_port_give_focus(list, focus);
+	for (child = list->child; child; child = child->next)
+	{
+		if (!strncmp(child->name, "row_", 4))
+			child->animation.current_frame_index = child == focus ? 1 : 0;
+	}
+	if (target != NONE && target >= 0 && target < h3_invite.count)
+		snprintf(h3_invite.chosen_id, sizeof(h3_invite.chosen_id), "%s", h3_invite.entries[target].id);
+	snprintf(text, sizeof(text), T("%d ONLINE"), h3_invite.count);
+	text_show(named(screen, "invite_status"), text);
+	if (!h3_invite.count)
+	{
+		p2p_friends_status(text, sizeof(text));
+		text_show(named(screen, "invite_help"), text[0] ? text : T("None of your friends is online."));
+	}
+	else
+		text_show(named(screen, "invite_help"), h3_invite.entries[0].invitable ?
+			T("Cross invites a friend into your game.") : p2p_friends_outcome_text(P2P_FRIENDS_NOT_JOINABLE));
+	text_show(named(screen, "invite_message"), h3_invite.message[0] &&
+		system_milliseconds() - h3_invite.message_time < H3_FRIENDS_MESSAGE_MILLISECONDS ? h3_invite.message : "");
+	if ((child = named(screen, "a_butn")) != NULL)
+		widget_instance_set_visibility_recursive(child, h3_invite.count > 0);
+	if ((child = named(screen, "a_label")) != NULL)
+		widget_instance_set_visibility_recursive(child, h3_invite.count > 0);
+	snprintf(text, sizeof(text), "%d online", h3_invite.count);
+	for (index = 0; index < h3_invite.count; index++)
+	{
+		snprintf(text + strlen(text), sizeof(text) - strlen(text), "%s%s%s", index ? ", " : ": ",
+			h3_invite.entries[index].name, h3_invite.entries[index].invitable ? "" : " (not invitable)");
+	}
+	if (strcmp(text, h3_invite.said))
+	{
+		snprintf(h3_invite.said, sizeof(h3_invite.said), "%s", text);
+		platform_log("menus: h3 invite: %s", text);
+	}
+}
+
 /* ---- port h3 pregame: the Halo 3 pre-game lobby (halo3/pregame.xml),
 standing for the Xbox's ENLISTED PLAYERS screen: what is played, how the
 game is reached (its code, public or private), the players; the buttons
@@ -8009,6 +8772,464 @@ static short h3_pregame_level(char const *map_name)
 			return index;
 	}
 	return NONE;
+}
+
+/* ---- the live lobby (Menu style Halo 3; the owner's model, Halo 3's): the
+multiplayer lobby on ONLINE, SYSTEM LINK or AD HOC is the game's lobby from
+the moment it is up. Its game's server is started then (as START GAME
+started it), with the lobby's GAME and MAP set as the Xbox's lists set them
+(h3_mp_host_choices), and the profile the lobby's nameplate shows (or the
+one chosen this run: h3_session) joined to it; so friends, the party,
+anyone with the code or from the games browser (a public game) join it
+while the host is still choosing - every join through the same checks as
+ever (version, password, identity, the map's). What the host changes there
+goes to every joiner the way a game's settings went between two games of
+the Xbox's (network_game_server_change_map_name, _change_game_variant: every
+build's client takes them in its lobby, 1.1.0's too); GAME OPTIONS' name and
+most players the server takes from the settings each frame, public or
+private and the password the listing (p2p_lobby_set_public, _set_password).
+
+START GAME opens the game's lobby (halo3/pregame.xml, the Xbox's ENLISTED
+PLAYERS) on that game, no other server, its countdown begun at once
+(network_game_server_port_start_soon: Halo 3's few seconds, once the
+game can start; the game itself waits for every machine to have the map, as
+ever); B there stops the countdown and goes back to the lobby, the game
+kept (pc_menu_functions_live_lobby_back). B on the lobby (and the main menu
+reached any other way), another NETWORK, BROWSE GAMES or JOIN WITH CODE
+close the game: its joiners are told the host left (the game's own
+graceful exit, network_game_server_dispose).
+
+Not live: OFFLINE; the network not ready (Online still connecting, no
+Wi-Fi, out of the ad hoc group - AD HOC's START GAME still opens the
+system's dialog); crossplay on (a Vita does not host on that wire); no
+profile at all (START GAME asks for one, as before); a map not played with
+others. The lobby is as it was then, and START GAME hosts as before.
+Menu style Halo CE is unchanged. */
+
+#define H3_LIVE_ROWS 8
+/* (START GAME's countdown: Halo 3's) */
+#define H3_LIVE_COUNTDOWN_MILLISECONDS 5999
+/* (the lobby up this long, its scene settled, before its game starts: the
+camera's move and the poses take the main menu's ticks, which a network
+game's lobby stops; at most the second) */
+#define H3_LIVE_SETTLE_MILLISECONDS 1000
+#define H3_LIVE_SCENE_WAIT_MILLISECONDS 8000
+
+static struct
+{
+	/* the lobby's game runs: its server made for the lobby (h3_live_open) */
+	boolean live;
+	/* the network it runs on */
+	short network;
+	/* not opened, and why said: not tried again until the lobby opens again
+	or its network, map or game type changes */
+	boolean refused;
+	/* START GAME on it: the game's lobby next (pc_menu_functions_profile
+	_skip), its countdown begun there (h3_live_pregame) */
+	boolean start_pending;
+	/* in the game's lobby since START GAME (the lobby screen not up) */
+	boolean in_pregame;
+	unsigned long opened_time;
+	/* the lobby's screen up since (0: not up) */
+	unsigned long lobby_up_since;
+	/* the players said last (the tests read them) */
+	char said[256];
+} h3_live = { FALSE, NONE, FALSE, FALSE, FALSE, 0, 0, "" };
+
+/* the lobby closed: its game disposed (its joiners told the host left) */
+static void h3_live_close(char const *why)
+{
+	if (!h3_live.live)
+		return;
+	h3_live.live = FALSE;
+	h3_live.start_pending = FALSE;
+	h3_live.in_pregame = FALSE;
+	h3_live.said[0] = 0;
+	dispose_global_network_game_client();
+	dispose_global_network_game_server();
+	network_game_accept_remote_connections(FALSE);
+	player_ui_clear_multiplayer_variant();
+	platform_log("menus: h3 live lobby: closed (%s): its joiners are told the host left", why);
+}
+
+/* whether the lobby's network can carry a game now (FALSE: not yet, or not
+at all: nothing said) */
+static boolean h3_live_network_ready(void)
+{
+	char text[128];
+
+	switch (h3_mp.network)
+	{
+	case _h3_network_online:
+		return internet_play() && network_connection_running() == NETWORK_CONNECTION_ONLINE &&
+			network_connection_status(text, (int)sizeof(text)) == NETWORK_STATUS_READY && !network_wire_crossplay();
+	case _h3_network_system_link:
+		return network_connection_running() == NETWORK_CONNECTION_WIFI &&
+			network_connection_status(text, (int)sizeof(text)) == NETWORK_STATUS_READY && transport_network_available();
+	case _h3_network_adhoc:
+		return network_connection_running() == NETWORK_CONNECTION_ADHOC &&
+			__atomic_load_n(&halo_adhoc_group, __ATOMIC_ACQUIRE) == HALO_ADHOC_GROUP_IN;
+	}
+	return FALSE;
+}
+
+static void h3_live_refuse(char const *why)
+{
+	h3_live.refused = TRUE;
+	platform_log("menus: h3 live lobby: not opened: %s (START GAME hosts as before)", why);
+}
+
+/* (the main loop, the lobby up and its network ready) its game started:
+the profile joined (the one chosen this run, else the nameplate's), the
+server started, the lobby's GAME and MAP set */
+static void h3_live_open(void)
+{
+	/* (the nameplate's profile, none chosen this run: for this game alone -
+	SELECT PROFILE still asks the first time a game is browsed or joined) */
+	boolean nameplate = h3_session.profile == NONE;
+	boolean joined;
+
+	if (nameplate)
+	{
+		h3_nameplate_read();
+		if (h3_plate.shown != NONE)
+			h3_session_profile_chosen(0, h3_plate.shown);
+	}
+	joined = h3_session_profile_join();
+	if (nameplate)
+		h3_session_forget();
+	if (!joined)
+	{
+		h3_live_refuse("no profile to play with");
+		return;
+	}
+	if (!ui_widget_port_start_network_game_server())
+	{
+		h3_live_refuse("the game's server did not start");
+		return;
+	}
+	if (!h3_mp_host_choices())
+	{
+		dispose_global_network_game_client();
+		dispose_global_network_game_server();
+		network_game_accept_remote_connections(FALSE);
+		player_ui_clear_multiplayer_variant();
+		h3_live_refuse("its map or game type cannot be played with others");
+		return;
+	}
+	h3_live.live = TRUE;
+	h3_live.network = h3_mp.network;
+	h3_live.start_pending = FALSE;
+	h3_live.in_pregame = FALSE;
+	h3_live.opened_time = system_milliseconds();
+	h3_live.said[0] = 0;
+	platform_log("menus: h3 live lobby: open on %s (%s on %s): others join it now", h3_network_name(h3_mp.network),
+		h3_mp_gametype_name(), h3_mp_map_name());
+}
+
+/* (the lobby opened again, another network) a refused lobby tried again */
+static void h3_live_retry(void)
+{
+	h3_live.refused = FALSE;
+}
+
+/* (the lobby's MAP or GAME chosen) the live game on it, as its settings
+went to the joiners between two games: FALSE if the map or game type was
+refused (the lobby goes back to the game's) */
+static boolean h3_live_follow(void)
+{
+	struct network_game_server *server = global_network_game_server_get();
+
+	h3_live.refused = FALSE;
+	if (!h3_live.live)
+		return TRUE;
+	if (!server || !network_game_server_port_in_lobby(server))
+		return TRUE;
+	if (!h3_mp_host_choices())
+		return FALSE;
+	platform_log("menus: h3 live lobby: now %s on %s, sent to its joiners", h3_mp_gametype_name(), h3_mp_map_name());
+	return TRUE;
+}
+
+/* the players of the game now: in the lobby's rows (row_1 ...), each
+in their colour, their team, YOU (this machine's) and a joiner's map copy
+(the host's); the rest of the rows hidden; how many players there are, the
+names said in line */
+static long h3_roster_show(struct widget_instance *screen, struct network_game const *game, boolean host,
+	short local_machine, long rows, char *line, int line_size)
+{
+	struct widget_instance *found;
+	long index, row = 0, count = 0;
+
+	for (index = 0; game && index < (long)NUMBEROF(game->players); index++)
+	{
+		struct network_player const *player = &game->players[index];
+		char row_name[16], name[48], note[48];
+		struct widget_instance *row_widget;
+
+		if (!network_player_is_valid((struct network_player *)player))
+			continue;
+		count++;
+		{
+			wchar_t player_name[13];
+
+			csmemcpy(player_name, player->name, sizeof(player->name));
+			player_name[12] = 0;
+			h3_utf8(name, (int)sizeof(name), player_name);
+		}
+		if (line)
+			snprintf(line + strlen(line), (size_t)line_size - strlen(line), "%s%s", count > 1 ? ", " : "; players: ", name);
+		snprintf(row_name, sizeof(row_name), "row_%ld", row + 1);
+		if (row >= rows || (row_widget = named(screen, row_name)) == NULL)
+			continue;
+		widget_instance_set_visibility_recursive(row_widget, TRUE);
+		text_show(named(row_widget, "row_name"), name);
+		if ((found = named(row_widget, "row_swatch")) != NULL)
+			found->animation.current_frame_index = h3_swatch_frame(player->primary_color_index);
+		note[0] = 0;
+		if (game->variant.universal_variant.teams)
+			snprintf(note, sizeof(note), "%s", player->team_index == 0 ? T("RED") : player->team_index == 1 ? T("BLUE") : "");
+		if (player->machine_index == local_machine)
+			snprintf(note + strlen(note), sizeof(note) - strlen(note), "%s%s", note[0] ? " " : "", T("YOU"));
+		else if (host)
+		{
+			short percent = map_share_server_machine_percent(player->machine_index);
+
+			if (percent != NONE)
+				snprintf(note + strlen(note), sizeof(note) - strlen(note), T("%smap %d%%"), note[0] ? " " : "", (int)percent);
+		}
+		text_show(named(row_widget, "row_note"), note);
+		row++;
+	}
+	for (; row < H3_PREGAME_ROWS; row++)
+	{
+		char row_name[16];
+
+		snprintf(row_name, sizeof(row_name), "row_%ld", row + 1);
+		if ((found = named(screen, row_name)) != NULL)
+			widget_instance_set_visibility_recursive(found, FALSE);
+	}
+	return count;
+}
+
+/* (port h3 mp lobby) the lobby's live parts: its players in rows (the
+nameplate when not live), how many and the most, what the lobby is now, the
+INVITE FRIENDS row (online) */
+static void h3_live_lobby_show(struct widget_instance *screen)
+{
+	struct network_game *game = h3_live.live ? network_game_get_game() : NULL;
+	struct network_game_client *client = global_network_game_client_get();
+	struct widget_instance *found;
+	char text[192], line[256];
+	long count;
+
+	if ((found = named(screen, "nameplate")) != NULL)
+		widget_instance_set_visibility_recursive(found, game == NULL);
+	/* (L: INVITE FRIENDS, online) */
+	if ((found = named(screen, "l_butn")) != NULL)
+		widget_instance_set_visibility_recursive(found, game != NULL && h3_live.network == _h3_network_online);
+	if ((found = named(screen, "invite")) != NULL)
+		widget_instance_set_visibility_recursive(found, game != NULL && h3_live.network == _h3_network_online);
+	line[0] = 0;
+	count = h3_roster_show(screen, game, TRUE, client ? network_game_client_get_local_machine_index() : NONE,
+		game ? H3_LIVE_ROWS : 0, line, (int)sizeof(line));
+	if (!game)
+		return;
+	snprintf(text, sizeof(text), T("PLAYERS %ld/%d"), count, (int)game->maximum_players);
+	text_show(named(screen, "players"), text);
+	if (count > 1)
+		snprintf(text, sizeof(text), T("Lobby open: %ld players"), count);
+	else
+		snprintf(text, sizeof(text), "%s", T("Lobby open"));
+	text_show(named(screen, "ready"), text);
+	if (h3_live.network == _h3_network_online)
+	{
+		int password = 0;
+		boolean listed = p2p_lobby_hosting_listed(&password) != 0;
+
+		text_show(named(screen, "ready_sub"), listed ? T("Public: friends join, and anyone from\nthe games browser.") :
+			T("Private: joined by your invites\nand your code alone."));
+	}
+	else
+		text_show(named(screen, "ready_sub"), h3_live.network == _h3_network_adhoc ?
+			T("The PS Vitas near you can join.\nSTART GAME plays with everyone here.") :
+			T("The PS Vitas on your Wi-Fi can join.\nSTART GAME plays with everyone here."));
+	snprintf(line + strlen(line), sizeof(line) - strlen(line), "; %ld/%d", count, (int)game->maximum_players);
+	if (strcmp(line, h3_live.said))
+	{
+		snprintf(h3_live.said, sizeof(h3_live.said), "%s", line);
+		platform_log("menus: h3 live lobby: %s on %s%s", h3_mp_gametype_name(), h3_mp_map_name(), line);
+	}
+}
+
+/* (the main loop) the live lobby opened when its screen is up and its
+network ready, kept while its game is in its lobby, closed once the host
+is back at the main menu; the host's player kept in its game (the lobby
+does what the game's lobby's "net splitscreen prejoin players" does) */
+static void h3_live_update(boolean main_menu_loaded)
+{
+	struct widget_instance *active = ui_widget_port_active_screen(0);
+	long lobby_tag = menu_tags_ingame_screen("h3/mp/screen");
+	long main_tag = menu_tags_ingame_screen("h3/main/screen");
+	boolean lobby_up = active && lobby_tag != NONE && active->definition_tag_index == lobby_tag;
+	struct network_game_server *server = global_network_game_server_get();
+	struct network_game_client *client = global_network_game_client_get();
+
+	if (!main_menu_loaded)
+	{
+		/* (its game started: the game's now) */
+		if (h3_live.live)
+			platform_log("menus: h3 live lobby: its game started");
+		h3_live.live = FALSE;
+		h3_live.start_pending = FALSE;
+		h3_live.in_pregame = FALSE;
+		return;
+	}
+	if (h3_live.live)
+	{
+		short state = NONE;
+
+		/* (disposed by another flow: SELECT PROFILE's, a join's) */
+		if (!server || !client || !network_game_server_port_in_lobby(server))
+		{
+			h3_live.live = FALSE;
+			h3_live.start_pending = FALSE;
+			h3_live.in_pregame = FALSE;
+			platform_log("menus: h3 live lobby: its game is no longer this lobby's");
+			return;
+		}
+		if (active && main_tag != NONE && active->definition_tag_index == main_tag)
+		{
+			h3_live_close("the host is back at the main menu");
+			return;
+		}
+		if (lobby_up)
+			h3_live.in_pregame = FALSE;
+		/* (the connection another now - Online's fallback to Same Wi-Fi -:
+		the game was the old one's) */
+		if (h3_mp.network != h3_live.network)
+		{
+			h3_live_close("the lobby's network changed");
+			return;
+		}
+		/* (the host's player in its game, as the game's lobby adds it) */
+		if (network_game_client_get_state(client, &state) == 2)
+		{
+			struct network_game *game = network_game_get_game();
+			short local_player;
+
+			for (local_player = 0; game && local_player < 4; local_player++)
+			{
+				long index;
+				boolean in = FALSE;
+
+				if (!player_ui_local_player_wants_to_play_multiplayer(local_player))
+					continue;
+				for (index = 0; index < (long)NUMBEROF(game->players) && !in; index++)
+				{
+					in = network_player_is_valid(&game->players[index]) &&
+						network_game_player_is_local(&game->players[index]) &&
+						game->players[index].controller_index == local_player;
+				}
+				if (!in && !network_game_client_add_player(client, local_player))
+					platform_log("menus: h3 live lobby: local player %d could not be added to its game", local_player);
+			}
+		}
+		return;
+	}
+	if (!lobby_up)
+	{
+		h3_live.lobby_up_since = 0;
+		return;
+	}
+	if (!h3_live.lobby_up_since)
+		h3_live.lobby_up_since = system_milliseconds() ? system_milliseconds() : 1;
+	/* (a game the lobby's START GAME hosted the way it did before it was
+	live - not ready then, or no profile - its lobby left with B, the game
+	kept as the Xbox's lobby keeps it: the lobby's live game now, its
+	players with it, when the network carries it; else closed, its joiners
+	told: never a game left behind the lobby, holding the connection) */
+	if (server && client && !h3_live.refused && h3_mp.network != _h3_network_offline && halo_menu_style_halo3() &&
+		network_game_server_port_in_lobby(server) && system_milliseconds() - h3_live.lobby_up_since >= H3_LIVE_SETTLE_MILLISECONDS)
+	{
+		if (h3_live_network_ready() && h3_mp_host_choices())
+		{
+			h3_live.live = TRUE;
+			h3_live.network = h3_mp.network;
+			h3_live.start_pending = FALSE;
+			h3_live.in_pregame = FALSE;
+			h3_live.opened_time = system_milliseconds();
+			h3_live.said[0] = 0;
+			platform_log("menus: h3 live lobby: its game kept, live on %s (%s on %s)", h3_network_name(h3_mp.network),
+				h3_mp_gametype_name(), h3_mp_map_name());
+		}
+		else
+		{
+			h3_live.live = TRUE;
+			h3_live_close("the game it hosted before cannot go on from it");
+		}
+		return;
+	}
+	if (h3_live.refused || h3_mp.network == _h3_network_offline || !halo_menu_style_halo3() || server || client ||
+		!h3_live_network_ready())
+	{
+		return;
+	}
+	/* (once its scene stands, posed, its camera in place: a network game's
+	lobby stops the main menu's ticks - menu_scene_objects_settled -; at
+	most H3_LIVE_SCENE_WAIT_MILLISECONDS, its scene then none) */
+	{
+		unsigned long up = system_milliseconds() - h3_live.lobby_up_since;
+
+		if (up < H3_LIVE_SETTLE_MILLISECONDS || (!menu_scene_objects_settled() && up < H3_LIVE_SCENE_WAIT_MILLISECONDS))
+			return;
+	}
+	h3_live_open();
+}
+
+/* (START GAME on the lobby: ONLINE's, SYSTEM LINK's, AD HOC's) the live
+game's lobby next, no other server: TRUE if the lobby is live */
+static boolean h3_live_start(void)
+{
+	if (!h3_live.live || !global_network_game_server_get())
+		return FALSE;
+	menu_functions.create_pending = FALSE;
+	menu_functions.create_system_link = FALSE;
+	h3_live.start_pending = TRUE;
+	platform_log("menus: h3 live lobby: START GAME: the game's lobby, its countdown begun");
+	return TRUE;
+}
+
+/* (the game's lobby opening, port h3 pregame init) after START GAME on a
+live lobby: the countdown begun at once */
+static void h3_live_pregame(void)
+{
+	struct network_game_server *server = global_network_game_server_get();
+
+	if (!h3_live.live || !h3_live.start_pending)
+		return;
+	h3_live.start_pending = FALSE;
+	h3_live.in_pregame = TRUE;
+	if (server && network_game_server_port_start_soon(server, H3_LIVE_COUNTDOWN_MILLISECONDS))
+		platform_log("menus: h3 live lobby: the game's lobby: the countdown begun");
+	else
+		platform_log("menus: h3 live lobby: the game's lobby: waiting for players before the countdown");
+}
+
+/* (netgame_unjoin_player: B on the game's lobby) the host of a live lobby
+goes back to it with its game kept, the countdown stopped: TRUE (nothing
+else done); FALSE for any other lobby */
+boolean pc_menu_functions_live_lobby_back(void)
+{
+	struct network_game_server *server = global_network_game_server_get();
+
+	if (!h3_live.live || !server || !network_game_server_port_in_lobby(server))
+		return FALSE;
+	network_game_server_pause_countdown(server, TRUE);
+	h3_live.start_pending = FALSE;
+	h3_live.in_pregame = FALSE;
+	platform_log("menus: h3 live lobby: back from the game's lobby: the countdown stopped, the game kept");
+	return TRUE;
 }
 
 static void h3_pregame_update(struct widget_instance *widget)
@@ -8168,65 +9389,27 @@ static void h3_pregame_update(struct widget_instance *widget)
 			widget_instance_set_visibility_recursive(found, toggles || seconds > 0);
 	}
 	text_show(named(screen, "b_text"), host ? T("Cancel") : T("Leave"));
+	/* (L: INVITE FRIENDS, the host's online) */
+	if ((found = named(screen, "l_butn")) != NULL)
+		widget_instance_set_visibility_recursive(found, host && online);
+	if ((found = named(screen, "l_text")) != NULL)
+		widget_instance_set_visibility_recursive(found, host && online);
 	/* (alone in the host's lobby, Cross starts nothing yet: not shown, as
-	the Xbox's lobby hid it) */
+	the Xbox's lobby hid it; nor a joiner's before the countdown - the host
+	starts the game, and a live lobby's host holds it in the lobby: its
+	Cross only hurries a countdown under way) */
 	if ((found = named(screen, "a_butn")) != NULL)
-		widget_instance_set_visibility_recursive(found, !waiting);
+		widget_instance_set_visibility_recursive(found, !waiting && (host || seconds >= 0));
 	if ((found = named(screen, "a_text")) != NULL)
-		widget_instance_set_visibility_recursive(found, !waiting);
+		widget_instance_set_visibility_recursive(found, !waiting && (host || seconds >= 0));
 	/* (the players: each machine's, this one's first) */
-	for (index = 0; index < (long)NUMBEROF(game->players) && row < H3_PREGAME_ROWS; index++)
-	{
-		struct network_player *player = &game->players[index];
-		char row_name[16], name[48], note[48];
-		struct widget_instance *row_widget;
-
-		if (!network_player_is_valid(player))
-			continue;
-		snprintf(row_name, sizeof(row_name), "row_%ld", row + 1);
-		if ((row_widget = named(screen, row_name)) == NULL)
-			break;
-		widget_instance_set_visibility_recursive(row_widget, TRUE);
-		{
-			wchar_t player_name[13];
-
-			csmemcpy(player_name, player->name, sizeof(player->name));
-			player_name[12] = 0;
-			h3_utf8(name, (int)sizeof(name), player_name);
-		}
-		text_show(named(row_widget, "row_name"), name);
-		if ((found = named(row_widget, "row_swatch")) != NULL)
-			found->animation.current_frame_index = h3_swatch_frame(player->primary_color_index);
-		note[0] = 0;
-		if (game->variant.universal_variant.teams)
-			snprintf(note, sizeof(note), "%s", player->team_index == 0 ? T("RED") : player->team_index == 1 ? T("BLUE") : "");
-		if (player->machine_index == local_machine)
-			snprintf(note + strlen(note), sizeof(note) - strlen(note), "%s%s", note[0] ? " " : "", T("YOU"));
-		else if (host)
-		{
-			short percent = map_share_server_machine_percent(player->machine_index);
-
-			if (percent != NONE)
-				snprintf(note + strlen(note), sizeof(note) - strlen(note), T("%smap %d%%"), note[0] ? " " : "", (int)percent);
-		}
-		text_show(named(row_widget, "row_note"), note);
-		snprintf(line + strlen(line), sizeof(line) - strlen(line), "%s%s", row ? ", " : "; players: ", name);
-		row++;
-	}
+	row = h3_roster_show(screen, game, host, local_machine, H3_PREGAME_ROWS, line, (int)sizeof(line));
 	/* (the most the game takes: the host's settings' - network.max_players,
 	16 unless chosen - or co-op's network.coop_players, as its record has
 	them) */
 	snprintf(text, sizeof(text), T("PLAYERS %ld/%d"), row, (int)game->maximum_players);
 	text_show(named(screen, "players"), text);
 	snprintf(line + strlen(line), sizeof(line) - strlen(line), "; %ld/%d", row, (int)game->maximum_players);
-	for (; row < H3_PREGAME_ROWS; row++)
-	{
-		char row_name[16];
-
-		snprintf(row_name, sizeof(row_name), "row_%ld", row + 1);
-		if ((found = named(screen, row_name)) != NULL)
-			widget_instance_set_visibility_recursive(found, FALSE);
-	}
 	/* (said as it changes: the tests read it) */
 	if (strcmp(line, h3_pregame.said))
 	{
@@ -8357,10 +9540,11 @@ boolean pc_menu_event_function_invoke(
 	it; elsewhere those open, as before) */
 	case _function_settings_panel:
 #ifdef HALO_VITA
-		__atomic_store_n(&halo_settings_panel_request, 1, __ATOMIC_RELEASE);
+		__atomic_store_n(&halo_settings_panel_request, HALO_SETTINGS_PANEL_OPEN, __ATOMIC_RELEASE);
 		platform_log("menus: the settings panel asked for");
 		return FALSE;
 #else
+		platform_log("menus: the settings panel asked for (none on this build)");
 		return TRUE;
 #endif
 	case _function_h3_campaign_init:
@@ -8478,6 +9662,8 @@ boolean pc_menu_event_function_invoke(
 	/* (the Halo 3 multiplayer lobby, its pickers and Create Game) */
 	case _function_h3_mp_init:
 		h3_mp_initialize();
+		/* (opened again: a live lobby refused tries again) */
+		h3_live_retry();
 		return TRUE;
 	case _function_h3_network_set:
 		return h3_mp_network_set(widget);
@@ -8488,14 +9674,52 @@ boolean pc_menu_event_function_invoke(
 		/* (START GAME on SYSTEM LINK: the System Link list, once the profile
 		is chosen, gives way to a new game's map list, as Server Setup's
 		START does: pc_menu_functions_screen) */
+		if (h3_live_start())
+			return TRUE;
 		menu_functions.create_pending = TRUE;
 		menu_functions.create_system_link = TRUE;
-		platform_log("menus: h3 mp: host a system link game; the profile, then the map list");
+		platform_log("menus: h3 mp: host a system link game; the profile, then the game's lobby");
+		return TRUE;
+	case _function_h3_host_online:
+		/* (START GAME on ONLINE: hosted at once with Create Game's settings -
+		the settings panel's Play page, GAME OPTIONS - the lobby's GAME and
+		MAP, once the profile is chosen: pc_menu_functions_screen) */
+		if (!internet_play() && network_connection_wanted() != NETWORK_CONNECTION_ONLINE)
+			return TRUE;
+		if (h3_live_start())
+			return TRUE;
+		menu_functions.create_pending = TRUE;
+		menu_functions.create_system_link = FALSE;
+		platform_log("menus: h3 mp: host an online game (%s, %s players, %s%s); the profile, then the game's lobby",
+			setting_get("HALO_NET_LOBBY_NAME", "Halo"), setting_get("HALO_NET_MAX_PLAYERS", "16"),
+			!strcmp(setting_get("HALO_NET_HOST_PUBLIC", "true"), "false") ? "private" : "public",
+			setting_get("HALO_NET_LOBBY_PASSWORD", "")[0] ? ", a password" : "");
+		return TRUE;
+	case _function_h3_game_options:
+		/* (Square on the lobby: GAME OPTIONS on ONLINE only) */
+		if (h3_mp.network == _h3_network_online)
+		{
+			menu_functions.open_game_options = TRUE;
+			platform_log("menus: h3 mp: GAME OPTIONS");
+		}
+		return TRUE;
+	case _function_h3_invite_ask:
+		return h3_invite_ask();
+	case _function_h3_invite_init:
+		h3_invite_initialize();
+		return TRUE;
+	case _function_h3_invite_act:
+		h3_invite_act(widget);
+		return TRUE;
+	case _function_h3_live_leave:
+		/* (B on the lobby) */
+		h3_live_close("the host left the lobby");
 		return TRUE;
 	case _function_h3_browse_system_link:
 		/* (BROWSE GAMES on SYSTEM LINK: the System Link list, once the
 		profile is chosen, gives way to the Halo 3 LAN browser:
 		pc_menu_functions_screen) */
+		h3_live_close("the host browses the games");
 		menu_functions.create_pending = FALSE;
 		menu_functions.browse_lan_pending = TRUE;
 		platform_log("menus: h3 mp: browse the %s games; the profile, then the LAN browser", h3_mp.network ==
@@ -8526,6 +9750,17 @@ boolean pc_menu_event_function_invoke(
 	case _function_h3_pregame_init:
 		h3_pregame.said[0] = 0;
 		platform_log("menus: h3 pregame: the Halo 3 lobby for the game's ENLISTED PLAYERS");
+		/* (START GAME on a live lobby: its countdown begun) */
+		h3_live_pregame();
+		/* (hosted from the Halo 3 lobby past SELECT PROFILE: out of the
+		history, B goes back to the multiplayer lobby, whose choices made
+		the game) */
+		if (menu_functions.pregame_drop_profile)
+		{
+			menu_functions.pregame_drop_profile = FALSE;
+			ui_widgets_pop_stack(screen_of(widget)->local_player_index);
+			platform_log("menus: h3 pregame: SELECT PROFILE out of the history (B: the multiplayer lobby)");
+		}
 		return TRUE;
 	case _function_h3_party_init:
 		h3_party_initialize();
@@ -8656,6 +9891,26 @@ boolean pc_menu_event_function_invoke(
 		return TRUE;
 	case _function_forge_all_ai:
 		forge_ai_all_request();
+		return TRUE;
+	/* (the multiplayer pause's PARTY: on the Vita the settings panel's
+	Party page, its chat and quick chat) */
+	case _function_h3_mp_pause_party:
+#ifdef HALO_VITA
+		__atomic_store_n(&halo_settings_panel_request, HALO_SETTINGS_PANEL_PARTY, __ATOMIC_RELEASE);
+#endif
+		platform_log("menus: h3 mp pause: the Party page asked for");
+		return FALSE;
+	case _function_h3_mp_settings_init:
+		h3_mp_settings_initialize(widget);
+		return TRUE;
+	case _function_h3_mp_settings_save:
+		h3_mp_settings_save();
+		return TRUE;
+	/* (SETTINGS gone without its Circle: nothing saved) */
+	case _function_h3_mp_settings_close:
+		if (player_ui_get_edit_player_profile())
+			player_ui_end_editing_profile();
+		h3_mp_pause.profile_index = NONE;
 		return TRUE;
 	case _function_forge_clear_dead_ai:
 	case _function_forge_clear_all_ai:
@@ -8988,6 +10243,18 @@ void pc_menu_game_data_function_invoke(
 		if (widget->type == _ui_widget_type_column_list)
 			h3_party_quick_update(widget);
 		break;
+	case _input_h3_mp_pause:
+		if (widget->type == _ui_widget_type_column_list)
+			h3_mp_pause_update(widget);
+		break;
+	case _input_h3_mp_settings:
+		if (widget->type == _ui_widget_type_column_list)
+			h3_mp_settings_update(widget);
+		break;
+	case _input_h3_invite:
+		if (widget->type == _ui_widget_type_column_list)
+			h3_invite_update(widget);
+		break;
 	default:
 		break;
 	}
@@ -9010,6 +10277,17 @@ long pc_menu_functions_screen(
 		menu_functions.create_system_link = FALSE;
 		if (map_select != NONE && ui_widget_port_start_network_game_server())
 		{
+			/* (Menu style Halo 3: the lobby's GAME and MAP, chosen there,
+			not asked for again: the game's lobby at once) */
+			long pregame = tag_loaded(UI_WIDGET_DEFINITION_TAG, pregame_screen);
+
+			if (halo_menu_style_halo3() && pregame != NONE && h3_mp_host_choices())
+			{
+				menu_functions.pregame_drop_profile = menu_functions.profile_shown;
+				menu_functions.profile_shown = FALSE;
+				platform_log("menus: %s: the game's server started; the game's lobby", asked);
+				return pregame;
+			}
 			platform_log("menus: %s: the game's server started; the map list", asked);
 			return map_select;
 		}
@@ -9047,6 +10325,33 @@ long pc_menu_functions_screen(
 		platform_log("menus: no Halo 3 LAN browser: the System Link list");
 	}
 	return tag_index;
+}
+
+/* (menu_tags_screen, Menu style Halo 3) a network game's SELECT PROFILE
+about to open with the profile chosen before this run: the screen it goes on
+to, the profile set as its Cross sets it (h3_session_profile_join); else the
+tag itself */
+long pc_menu_functions_profile_skip(
+	long tag_index)
+{
+	long list;
+
+	if (tag_index == NONE || tag_index != tag_loaded(UI_WIDGET_DEFINITION_TAG, profiles_screen))
+		return tag_index;
+	/* (START GAME on a live lobby: its game's lobby, the player in it
+	already) */
+	if (h3_live.start_pending && h3_live.live)
+	{
+		long pregame = tag_loaded(UI_WIDGET_DEFINITION_TAG, pregame_screen);
+
+		if (pregame != NONE)
+			return pregame;
+		h3_live.start_pending = FALSE;
+	}
+	list = tag_loaded(UI_WIDGET_DEFINITION_TAG, server_list_screen);
+	if (list == NONE || !h3_session_profile_join())
+		return tag_index;
+	return list;
 }
 
 /* (the main loop) the ad hoc group joined from the joining dialog: what was
@@ -9098,14 +10403,34 @@ outside the widgets' own events */
 void pc_menu_functions_update(
 	boolean main_menu_loaded)
 {
+	h3_live_update(main_menu_loaded);
 	if (main_menu_loaded && menu_functions.open_party)
 	{
 		menu_functions.open_party = FALSE;
 		h3_party_open();
 	}
+	/* (GAME OPTIONS over the lobby, which B goes back to; internet play
+	off, the screen saying how to turn it on) */
+	if (main_menu_loaded && menu_functions.open_game_options)
+	{
+		long options = tag_loaded(UI_WIDGET_DEFINITION_TAG, internet_play() ||
+			network_connection_wanted() == NETWORK_CONNECTION_ONLINE ? "pc\\h3\\setup\\screen" : "pc\\h3\\mp\\offline");
+		struct widget_instance *active = NULL;
+		long index;
+
+		menu_functions.open_game_options = FALSE;
+		for (index = 0; index < 4 && !active; index++)
+			active = ui_widget_port_active_screen((short)index);
+		if (options != NONE && active)
+		{
+			ui_widget_load_by_name_or_tag(NULL, options, NULL, active->local_player_index, active->definition_tag_index,
+				NONE, NONE);
+		}
+	}
 	if (!main_menu_loaded)
 	{
 		menu_functions.open_party = FALSE;
+		menu_functions.open_game_options = FALSE;
 		menu_functions.open_system_link = FALSE;
 		menu_functions.open_system_link_list = FALSE;
 		menu_functions.browser_profile_pending = FALSE;
@@ -9163,6 +10488,14 @@ while it closes: browser dispose) */
 	if (menu_functions.open_system_link)
 	{
 		menu_functions.open_system_link = FALSE;
+		/* (Menu style Halo 3: the Halo 3 games browser in the System Link
+		list's place, where the host's game is joined once listed, as A on
+		its row: menu_functions_lan_join_listed; no Xbox screen) */
+		if (halo_menu_style_halo3())
+		{
+			menu_functions.create_pending = FALSE;
+			menu_functions.browse_lan_pending = TRUE;
+		}
 		if (!system_link_shortcut_open())
 			platform_log("menus: the System Link screen did not open");
 	}

@@ -135,7 +135,22 @@
 #            the joiner's join (the server browser) held meanwhile - nothing of
 #            the game sent, no map copied - and answered once the host chooses
 #            the map (network_game_server_port_map_pending); then played
-#   h3pickjoin the same from the Halo 3 menus (h3online's copies)
+#   h3live  the Halo 3 live lobby (HALO_TEST_PROFILE): the host opens MULTIPLAYER on SYSTEM
+#            LINK, its lobby's game open at once; a joiner on its LAN joins it from BROWSE GAMES
+#            before START GAME; the host changes MAP (Blood Gulch) and GAME (the next game type),
+#            the joiner's lobby following each; START GAME takes both into the game (the joiner
+#            copies Blood Gulch, the countdown at once). HALO_TEST_VITA_JOINER=an older build
+#            (v1.1.0's): it joins by the network test's System Link join in its own menus and must
+#            follow and play the same
+#   h3liveleave  the same, the host leaving its lobby (B) once the joiner is in: the joiner told
+#            the host left, back at the menus
+#   h3liveinvite  the host's live lobby on ONLINE, private: L (INVITE FRIENDS) invites its friend
+#            (the codes through files), who accepts at the menus and lands in the lobby; the
+#            lobby never listed, never joinable from presence
+#   h3pickjoin the same from the Halo 3 menus (h3online's copies), where there
+#            is no map list after the server starts: its map is the lobby's,
+#            set as it starts, so no join is ever held (0 held) and the joiner
+#            joins the host's lobby during its minute there
 #   menushost the host creates its game from the menus: Multiplayer, CREATE
 #            GAME INTERNET, Server Setup (its name typed, Max players,
 #            public), START GAME, the profile, the map and the gametype; the
@@ -269,11 +284,26 @@
 #   h3lan    system link from the Halo 3 menus (Menu style Halo 3, both copies
 #            with the Halo PC files, HALO_TEST_DATA_MENUS; skipped without), on
 #            one LAN (online off): the host's MULTIPLAYER, the Halo 3 lobby on
-#            SYSTEM LINK, START GAME (the profile, the map list, the game type:
-#            the game's lobby); the joiner's MULTIPLAYER, BROWSE GAMES, the
+#            SYSTEM LINK, START GAME (the profile, then the game's lobby: the
+#            lobby's GAME and MAP, no map or game type list); the joiner's MULTIPLAYER, BROWSE GAMES, the
 #            profile, the Halo 3 LAN browser (no System Link list), the host's
 #            game listed (its name, map, game type and players) and joined with
 #            A; the host starts it, and both must play it
+#   h3mppause the Halo 3 multiplayer pause (halo3/mppause.xml, standing for the
+#            Xbox's 1p_pause_game) in a system link Slayer game on one LAN
+#            (both copies Menu style Halo 3 with the Halo PC files,
+#            HALO_TEST_DATA_MENUS, and HALO_TEST_PROFILE's profile played:
+#            HALO_NETWORK_TEST_PROFILE; skipped without): the joiner's Start
+#            opens it - its rows RESUME, PLAYERS, SETTINGS, LEAVE GAME -,
+#            PLAYERS opens the roster and Circle comes back, SETTINGS its
+#            profile's controls, LEAVE GAME its question (Circle back, then
+#            Cross: the Xbox's quit, the joiner at the menus); the host's has
+#            END GAME, its question, and ends the game for a second joiner
+#            too (there to keep the game going once the first has left: a
+#            game left with one player, or one team, ends). Neither
+#            pauses the game (its ticks go on); a team game's pause (no CHANGE
+#            TEAMS) is run_menus_test.sh h3mppause's. HALO_TEST_SHOTS: the copies' screenshots
+#            at the Vita's 960x544 kept there
 #   h3adhoc  the same over an emulated ad hoc group (adhoc's link, HALO_NET_ADHOC,
 #            HALO_NET_ADHOC_EMULATE): both lobbies open on AD HOC, in the group
 #            from the start (no system's dialog to join it), the LAN browser's
@@ -582,6 +612,10 @@ seconds=${HALO_TEST_SECONDS:-180}
 # (pickjoin, h3pickjoin: a minute more on the map list than their modes' own)
 [ "$mode" = pickjoin ] && seconds=${HALO_TEST_SECONDS:-230}
 [ "$mode" = h3pickjoin ] && seconds=${HALO_TEST_SECONDS:-240}
+[ "$mode" = h3mppause ] && seconds=${HALO_TEST_SECONDS:-150}
+[ "$mode" = h3live ] && seconds=${HALO_TEST_SECONDS:-150}
+[ "$mode" = h3liveleave ] && seconds=${HALO_TEST_SECONDS:-100}
+[ "$mode" = h3liveinvite ] && seconds=${HALO_TEST_SECONDS:-130}
 rejoin=${HALO_TEST_REJOIN:-0}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_netns_test.$$}
 . "$here/test_out.sh"
@@ -1955,11 +1989,11 @@ h3lan|h3adhoc)
 		join_net="HALO_NET_ADHOC=true HALO_NET_ADHOC_EMULATE=10.99.0.2,10.99.0.1"
 	fi
 	# (MULTIPLAYER: the Halo 3 lobby; down three to START GAME, A: the profile (A joins, A
-	# the profile, A), the map list (A: Battle Creek), the game type (A: Slayer): the game's
-	# lobby; a while for the joiner, then A starts the game, a few times)
+	# the profile, A): the game hosted with the lobby's GAME and MAP (Slayer, Battle Creek),
+	# its lobby; a while for the joiner, then A starts the game, a few times)
 	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
 		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:1 $host_net \
-		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:5000 a wait:150:4000 a wait:150:${HALO_TEST_H3LAN_WAIT:-40000} a wait:150:5000 a wait:150:5000 a" \
+		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:9000 wait:150:${HALO_TEST_H3LAN_WAIT:-40000} a wait:150:5000 a wait:150:5000 a" \
 		; host_pid=$last_pid
 	sleep 5
 	# (MULTIPLAYER: the Halo 3 lobby; down five to BROWSE GAMES, A: the profile (A joins, A
@@ -1975,8 +2009,10 @@ h3lan|h3adhoc)
 	echo "--- host"; grep -aE "ui: screen|menus: (h3 mp|Multiplayer)|system link: (hosting|in a)" "$hl" | head -16
 	echo "--- joiner"; grep -aE "ui: screen|menus: (h3 mp|the LAN|the Halo 3 LAN)|system link: (joining|in a)" "$jl" | head -20
 	grep -aq "menus: h3 mp lobby: NETWORK: $network" "$hl" || fail "the host's lobby was not on $network"
-	grep -aq "menus: Multiplayer > System Link: the game's server started; the map list" "$hl" ||
-		fail "the host's START GAME did not host a game"
+	grep -aq "menus: Multiplayer > System Link: the game's server started; the game's lobby" "$hl" ||
+		fail "the host's START GAME did not host a game (straight to its lobby)"
+	grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected" "$hl" &&
+		fail "an Xbox screen (the map or game type list) opened on the host's way"
 	grep -aq "system link: hosting" "$hl" || fail "the host did not host"
 	grep -aq "menus: h3 mp lobby: NETWORK: $network" "$jl" || fail "the joiner's lobby was not on $network"
 	grep -aq "menus: the Halo 3 LAN browser for the System Link list" "$jl" ||
@@ -1994,6 +2030,263 @@ h3lan|h3adhoc)
 	[ "$two" -ge 15 ] || fail "the joiner played the host's game for $two s with two players (15 wanted)"
 	[ "$mode" = h3adhoc ] && grep -q CONNECT "$out/broker.log" && fail "ad hoc play reached the signalling broker"
 	;;
+h3liveinvite)
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS) or no HALO_TEST_PROFILE"; exit 0
+	fi
+	# (INVITE FRIENDS from the live lobby: the host - its profile, Menu style Halo 3 - and the
+	# joiner become friends (codes through files, as friends'), the host's lobby on ONLINE, private
+	# (no listing, not joinable from presence): live once the broker is reached; L: INVITE FRIENDS,
+	# the friend online, Cross invites them; the joiner's invite question answered Accept at the
+	# menus (friends_game.c), its join by the invite: it must land in the host's live lobby)
+	hc=$out/host.code jc=$out/joiner.code
+	mkdir -p "$out/host/save/u/UDATA/869079979327"
+	cp "$HALO_TEST_PROFILE" "$out/host/save/u/UDATA/869079979327/blam.sav"
+	[ -r "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" ] &&
+		cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$out/host/save/u/UDATA/869079979327/"
+	shot_env=
+	[ -n "${HALO_TEST_SHOTS:-}" ] && mkdir -p "$HALO_TEST_SHOTS/netns-h3liveinvite-host" &&
+		shot_env="HALO_SCREENSHOT_DIR=$HALO_TEST_SHOTS/netns-h3liveinvite-host HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1"
+	# (MULTIPLAYER: the lobby on SYSTEM LINK; NETWORK, up to ONLINE, A: online; a while for the
+	# broker, the lobby live and the friendship made; L: INVITE FRIENDS; Cross on the friend; Circle
+	# back to the lobby, a while for the joiner)
+	invite_pad="wait:150:3000 down:150:700 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:${HALO_TEST_INVITE_WAIT:-35000}"
+	invite_pad="$invite_pad @invite-01-lobby:0:300 lt wait:150:4000 @invite-02-picker:0:300 a wait:150:3000"
+	invite_pad="$invite_pad @invite-03-invited:0:300 b wait:150:30000 @invite-04-lobby-joined:0:300"
+	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
+		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:1 HALO_NET_HOST_PUBLIC=false \
+		HALO_NET_LOBBY_NAME=Alpha "HALO_TEST_FRIENDS=code-file=$hc,add-file=$jc" $shot_env \
+		"HALO_TEST_PAD=$invite_pad" ; host_pid=$last_pid
+	run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=join-invite HALO_TEST_INPUT=bot:2 HALO_NET_LOBBY_NAME=Bravo "HALO_TEST_FRIENDS=code-file=$jc,accept" \
+		HALO_TEST_FRIENDS_ANSWER=accept "HALO_TEST_PAD=wait:150:$((seconds * 1000))"; join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log
+	echo "--- host"; grep -aE "ui: screen|menus: h3 (live lobby|invite)|friends: (invited|.* accepted)|system link: (hosting|in a)" "$hl" | head -30
+	echo "--- joiner"; grep -aE "friends: .*(invite|invited)|network test: (the friend|join)|system link: (joining|in a)" "$jl" | head -16
+	for side in host joiner; do
+		grep -aqiE "assert|exception|halt_and_catch_fire|segmentation" "$out/$side/run.log" && fail "the $side: an assertion, exception or crash"
+	done
+	grep -aq "friends: .* accepted the friend request; now friends" "$hl" || fail "the host did not become the joiner's friend"
+	grep -aq "menus: h3 live lobby: open on ONLINE (Slayer on Battle Creek): others join it now" "$hl" ||
+		fail "the host's lobby did not open live on ONLINE"
+	grep -aq "menus: h3 invite: INVITE FRIENDS opens" "$hl" || fail "L did not open INVITE FRIENDS"
+	grep -aq "ui: screen pc.h3.invite.screen" "$hl" || fail "INVITE FRIENDS did not open"
+	grep -aqE "menus: h3 invite: 1 online: [^ ]+$" "$hl" || fail "INVITE FRIENDS did not list the friend online, invitable"
+	grep -aqE "menus: h3 invite: [^:]+: Invited " "$hl" || fail "Cross did not invite the friend (the outcome said)"
+	grep -aq "friends: invited .* into this machine's game" "$hl" || fail "the host's invite was not sent"
+	grep -aq "friends: .* invited this machine: " "$jl" || fail "the joiner did not hear the invite"
+	grep -aq "friends: .*'s invite accepted: Done" "$jl" || fail "the joiner did not accept the invite"
+	grep -aq "network test: the friend's invite accepted and its host reached" "$jl" || fail "the invite's host was not reached"
+	grep -aq "system link: in another's lobby" "$jl" || fail "the joiner did not land in the host's lobby"
+	grep -aqE "menus: h3 live lobby: Slayer on Battle Creek; players: [^;]+, [^;]+; 2/" "$hl" ||
+		fail "the joiner was not in the host's live lobby"
+	grep -aq "(joinable)" "$jl" && fail "the private live lobby was joinable from presence"
+	grep -aqE "publish .* hcev/3/lobby/s/[0-9a-f]{32} [1-9][0-9]* B retained" "$out/broker.log" &&
+		fail "the private live lobby was listed"
+	;;
+h3live|h3liveleave)
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS) or no HALO_TEST_PROFILE"; exit 0
+	fi
+	# (the joiner on the host's LAN, as h3lan's; each copy with the profile, its nameplate's)
+	holder; lan=$held
+	in_ns "$host_router" ip link add l2_host type veth peer name m2_host
+	in_ns "$host_router" ip link set m2_host netns "$lan"
+	in_ns "$host_router" ip link set l2_host master b_host
+	in_ns "$host_router" ip link set l2_host up
+	in_ns "$lan" ip link set lo up
+	in_ns "$lan" ip addr add 192.168.1.3/24 broadcast 192.168.1.255 dev m2_host
+	in_ns "$lan" ip link set m2_host up
+	in_ns "$lan" ip route add default via 192.168.1.1
+	for name in host joiner; do
+		mkdir -p "$out/$name/save/u/UDATA/869079979327"
+		cp "$HALO_TEST_PROFILE" "$out/$name/save/u/UDATA/869079979327/blam.sav"
+		[ -r "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" ] &&
+			cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$out/$name/save/u/UDATA/869079979327/"
+	done
+	shots() { # NAME: the copy's screenshots at the Vita's picture, kept in HALO_TEST_SHOTS
+		[ -n "${HALO_TEST_SHOTS:-}" ] || return 0
+		mkdir -p "$HALO_TEST_SHOTS/netns-$mode-$1"
+		echo "HALO_SCREENSHOT_DIR=$HALO_TEST_SHOTS/netns-$mode-$1 HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1"
+	}
+	old_joiner=${HALO_TEST_VITA_JOINER:-}
+	# (the host: MULTIPLAYER, the lobby on SYSTEM LINK, live once up (its game open, Slayer on
+	# Battle Creek); a while for the joiner; then h3live: MAP (down two, A), BLOOD GULCH (down
+	# nine, A); GAME (up, A), the next game type (down, A); START GAME (down two, A): the game's
+	# lobby, its countdown at once; h3liveleave: B, the lobby left)
+	live_pad="wait:150:3000 down:150:700 a wait:150:${HALO_TEST_LIVE_WAIT:-45000} @live-01-lobby-joined:0:300"
+	if [ $mode = h3live ]; then
+		live_pad="$live_pad down:150:500 down:150:500 a wait:150:2500"
+		for row in $(seq 1 9); do live_pad="$live_pad down:150:300"; done
+		live_pad="$live_pad a wait:150:8000 @live-02-map-changed:0:300 up:150:500 a wait:150:2500 down:150:500 a wait:150:8000"
+		live_pad="$live_pad @live-03-game-changed:0:300 down:150:500 down:150:500 a wait:150:3000 @live-04-countdown:0:300"
+	else
+		live_pad="$live_pad b wait:150:15000 @live-02-host-left:0:300"
+	fi
+	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
+		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:1 $(shots host) \
+		"HALO_TEST_PAD=$live_pad" ; host_pid=$last_pid
+	sleep 5
+	if [ -n "$old_joiner" ]; then
+		# (an older build, its own menus - Menu style Halo CE: the Xbox's - joining the first game
+		# its System Link search finds: the network test's join)
+		HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$lan" "$old_joiner" "$cpu_b" HALO_NET_ONLINE=false \
+			HALO_NETWORK_TEST=join HALO_UI_LOG=1 HALO_TEST_INPUT=bot:2 ; join_pid=$last_pid
+	else
+		# (MULTIPLAYER: the joiner's own lobby, live a moment; down five to BROWSE GAMES, A: its
+		# lobby closed, SELECT PROFILE (A joins, A the profile, A); the LAN browser, a while for
+		# the host's game, A on its row: the host's live lobby)
+		HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false \
+			HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:2 $(shots joiner) \
+			"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a a a wait:150:15000 a wait:150:10000 @live-joiner-01-lobby:0:300 wait:150:18000 @live-joiner-02-map:0:300 wait:150:10000 @live-joiner-03-game:0:300" \
+			; join_pid=$last_pid
+	fi
+	wait $join_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log
+	echo "--- host"; grep -aE "ui: screen|menus: h3 (live lobby|mp:|pregame:)|system link: (hosting|in a)" "$hl" | head -30
+	echo "--- joiner"; grep -aE "ui: screen|menus: (h3 pregame:|h3 live|the LAN browser joins)|system link: (joining|in a)|network test: (join|search)|host is shutting|error" "$jl" | head -30
+	# (the threaded render's "assertion skipped (torn read?)", logged and passed over, as the
+	# other tests take it: v1.1.0's says it now and then)
+	for side in host joiner; do
+		grep -av "assertion skipped (torn read?)" "$out/$side/run.log" | grep -aqiE "assert|exception|halt_and_catch_fire|segmentation" &&
+			fail "the $side: an assertion, exception or crash"
+	done
+	grep -aq "menus: h3 live lobby: open on SYSTEM LINK (Slayer on Battle Creek): others join it now" "$hl" ||
+		fail "the host's lobby did not open live on SYSTEM LINK, Slayer on Battle Creek"
+	grep -aq "system link: hosting" "$hl" || fail "the host's lobby game was not hosted"
+	grep -aqE "menus: h3 live lobby: Slayer on Battle Creek; players: [^;]+, [^;]+; 2/" "$hl" ||
+		fail "the host's lobby did not show the joiner among its players before START GAME"
+	grep -aq "system link: in another's lobby" "$jl" || fail "the joiner did not reach the host's lobby"
+	if [ -z "$old_joiner" ]; then
+		grep -aq "menus: h3 live lobby: closed (the host browses the games)" "$jl" ||
+			fail "the joiner's own live lobby was not closed by BROWSE GAMES"
+		grep -aqE "menus: h3 pregame: Waiting for the host to start; Slayer on Battle Creek" "$jl" ||
+			fail "the joiner's lobby did not show the host's Slayer on Battle Creek, waiting for the host"
+	fi
+	if [ $mode = h3live ]; then
+		gametype=$(sed -n 's/.*menus: h3 mp: game type \(.*\)$/\1/p' "$hl" | tail -1)
+		echo "the host's lobby: Blood Gulch, then the game type ${gametype:-none}"
+		grep -aq "menus: h3 live lobby: now Slayer on Blood Gulch, sent to its joiners" "$hl" ||
+			fail "the host's MAP change did not go to its game"
+		[ -n "$gametype" ] && grep -aq "menus: h3 live lobby: now $gametype on Blood Gulch, sent to its joiners" "$hl" ||
+			fail "the host's GAME change did not go to its game"
+		grep -aq "menus: h3 live lobby: START GAME: the game's lobby, its countdown begun" "$hl" ||
+			fail "START GAME did not go to the live game's lobby"
+		grep -aq "menus: h3 live lobby: the game's lobby: the countdown begun" "$hl" ||
+			fail "START GAME did not begin the countdown with the joiner in"
+		grep -aq "the game's server started" "$hl" && fail "START GAME started another server"
+		grep -aq "ui: screen pc.h3.join.screen" "$hl" && fail "the host was asked for a profile (the live lobby has its player)"
+		if [ -z "$old_joiner" ]; then
+			grep -aq "menus: h3 pregame: .*; Slayer on Blood Gulch" "$jl" || fail "the joiner's lobby did not follow the MAP change"
+			[ -n "$gametype" ] && grep -aqF "; $gametype on Blood Gulch" "$jl" ||
+				fail "the joiner's lobby did not follow the GAME change"
+		fi
+		grep -aq "starting precaching of map 'bloodgulch'" "$out/joiner/data/debug.txt" ||
+			fail "the joiner did not take Blood Gulch, the host's new map"
+		two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+		echo "joiner's seconds with two players playing: $two"
+		[ "$two" -ge 15 ] || fail "the joiner played the host's game for $two s with two players (15 wanted)"
+		grep -aq "the game host is shutting down" "$out/joiner/data/debug.txt" && fail "the joiner was told the host left"
+	else
+		grep -aq "menus: h3 live lobby: closed (the host left the lobby): its joiners are told the host left" "$hl" ||
+			fail "B did not close the host's live lobby"
+		grep -aq "the game host is shutting down" "$out/joiner/data/debug.txt" ||
+			fail "the joiner was not told the host left"
+		grep -a "ui: screen\|error" "$jl" | sed -n '/the game host/,$p' | head -5
+		sed -n '/system link: in another.s lobby/,$p' "$jl" | grep -aqE "ui: screen (pc.h3.(main|mp).screen|ui.shell.main_menu)" ||
+			fail "the joiner was not back at the menus"
+		grep -a "network test: tick" "$jl" | grep -aq "| playing" && fail "the joiner played a game"
+	fi
+	;;
+h3mppause)
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS) or no HALO_TEST_PROFILE"; exit 0
+	fi
+	# (the joiner on the host's LAN, as h3lan's; each copy with the profile)
+	holder; lan=$held
+	in_ns "$host_router" ip link add l2_host type veth peer name m2_host
+	in_ns "$host_router" ip link set m2_host netns "$lan"
+	in_ns "$host_router" ip link set l2_host master b_host
+	in_ns "$host_router" ip link set l2_host up
+	in_ns "$lan" ip link set lo up
+	in_ns "$lan" ip addr add 192.168.1.3/24 broadcast 192.168.1.255 dev m2_host
+	in_ns "$lan" ip link set m2_host up
+	in_ns "$lan" ip route add default via 192.168.1.1
+	# (a second joiner on the LAN, its own machine)
+	holder; lan2=$held
+	in_ns "$host_router" ip link add l3_host type veth peer name m3_host
+	in_ns "$host_router" ip link set m3_host netns "$lan2"
+	in_ns "$host_router" ip link set l3_host master b_host
+	in_ns "$host_router" ip link set l3_host up
+	in_ns "$lan2" ip link set lo up
+	in_ns "$lan2" ip addr add 192.168.1.4/24 broadcast 192.168.1.255 dev m3_host
+	in_ns "$lan2" ip link set m3_host up
+	in_ns "$lan2" ip route add default via 192.168.1.1
+	for name in host joiner; do
+		mkdir -p "$out/$name/save/u/UDATA/869079979327"
+		cp "$HALO_TEST_PROFILE" "$out/$name/save/u/UDATA/869079979327/blam.sav"
+		[ -r "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" ] &&
+			cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$out/$name/save/u/UDATA/869079979327/"
+	done
+	shots() { # NAME: the copy's screenshots at the Vita's picture, kept in HALO_TEST_SHOTS
+		[ -n "${HALO_TEST_SHOTS:-}" ] || return 0
+		rm -rf "$HALO_TEST_SHOTS/netns-$1"; mkdir -p "$HALO_TEST_SHOTS/netns-$1"
+		echo "HALO_SCREENSHOT_DIR=$HALO_TEST_SHOTS/netns-$1 HALO_SCREENSHOT_EVERY=45 HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1"
+	}
+	pause_env="HALO_NET_ONLINE=false HALO_NETWORK_TEST_PROFILE=1 HALO_UI_LOG=1 HALO_MENU_STYLE=halo3"
+	# (the host: Slayer on Blood Gulch, started at 30 s; a while in the game, then Start,
+	# down three to END GAME, Cross: the question; Cross ends the game)
+	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" $pause_env \
+		HALO_NETWORK_TEST=host:bloodgulch:slayer HALO_NETWORK_TEST_START=30 $(shots host) \
+		"HALO_TEST_PAD=wait:150:${HALO_TEST_PAUSE_HOST_WAIT:-115000} start:150:4000 wait:150:4000 down:150:800 down:150:800 down:150:800 a:150:3000 wait:150:3000 a:150:3000 wait:150:15000" \
+		; host_pid=$last_pid
+	sleep 5
+	# (the joiner: in the game, Start: the pause; down, PLAYERS, Cross, Circle back; down,
+	# SETTINGS, Cross, right (the stick layout), Circle saves; down, LEAVE GAME, Cross: the
+	# question, Circle back, Cross again, Cross: left)
+	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$lan" "$vita" "$cpu_b" $pause_env HALO_NETWORK_TEST=join $(shots joiner) \
+		"HALO_TEST_PAD=wait:150:${HALO_TEST_PAUSE_JOIN_WAIT:-60000} start:150:4000 wait:150:3000 down:150:800 a:150:3000 wait:150:3000 b:150:2500 down:150:800 a:150:3000 right:150:2000 b:150:2500 down:150:800 a:150:2500 b:150:2000 a:150:2500 wait:150:2000 a:150:3000 wait:150:15000" \
+		; join_pid=$last_pid
+	HALO_TEST_DATA_JOINER2=$menus_data run_copy joiner2 "$lan2" "$vita" "$cpu_b" $pause_env HALO_NETWORK_TEST=join \
+		; join2_pid=$last_pid
+	wait $join_pid $join2_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log
+	echo "--- host"; grep -aE "ui: screen|menus: (Halo 3 screen h3/mppause|h3 mp)|network test: (the first|no profile|starting)" "$hl" | head -16
+	echo "--- joiner"; grep -aE "ui: screen|menus: (Halo 3 screen h3/mppause|h3 mp|h3 players:)|network test: (the first|no profile|join)" "$jl" | head -30
+	for side in host joiner; do
+		log=$out/$side/run.log
+		grep -aq "menus: Halo 3 screen h3/mppause/screen for ui.shell.multiplayer_game.pause_game.1p_pause_game" "$log" ||
+			fail "the $side's Start did not open the Halo 3 multiplayer pause"
+		grep -aq "ui: screen ui.shell.multiplayer_game.pause_game" "$log" && fail "the $side opened the Xbox's multiplayer pause"
+		grep -aqiE "assert|exception|halt_and_catch_fire|segmentation" "$log" && fail "the $side: an assertion, exception or crash"
+		# (never paused: the game's ticks go on while it is open)
+		ticks=$(sed -n '/ui: screen pc.h3.mppause.screen/,$p' "$log" | grep -ac "network test: tick")
+		[ "$ticks" -ge 3 ] || fail "the $side's game did not go on under the pause ($ticks ticks said)"
+	done
+	grep -aqE "menus: h3 mp pause: Slayer on Blood Gulch, free for all, joined, 3 players; rows: resume, players, settings, leave game" "$jl" ||
+		fail "the joiner's pause did not show RESUME, PLAYERS, SETTINGS, LEAVE GAME (joined)"
+	grep -aqE "menus: h3 mp pause: Slayer on Blood Gulch, free for all, the host, [0-9]+ players; rows: resume, players, settings, end game" "$hl" ||
+		fail "the host's pause did not show RESUME, PLAYERS, SETTINGS, END GAME"
+	grep -aqi "change teams" "$jl" "$hl" && fail "CHANGE TEAMS was offered in the game"
+	grep -aq "ui: screen pc.h3.players.screen" "$jl" || fail "the joiner's PLAYERS did not open the roster"
+	grep -aq "menus: h3 players: " "$jl" || fail "the roster listed no players"
+	grep -aq "ui: screen pc.h3.mpset.screen" "$jl" || fail "the joiner's SETTINGS did not open"
+	grep -aq "menus: h3 mp settings: local player 0, profile edited" "$jl" || fail "SETTINGS did not edit the joiner's profile"
+	grep -aq "menus: h3 mp settings: saved and played: stick 1" "$jl" || fail "the stick layout changed was not saved and played"
+	[ "$(grep -ac "ui: screen pc.h3.mppause.leave_screen" "$jl")" -ge 2 ] || fail "LEAVE GAME did not ask (twice)"
+	sed -n '/ui: screen pc.h3.mppause.leave_screen/,$p' "$jl" | grep -aq "ui: screen pc.h3.mppause.screen" ||
+		fail "Circle on LEAVE GAME's question did not go back to the pause"
+	sed -n '/ui: screen pc.h3.mppause.leave_screen/,$p' "$jl" | grep -aqE "ui: screen pc.h3.(main|mp).screen" ||
+		fail "the joiner's LEAVE GAME did not take it back to the menus"
+	grep -aq "ui: screen pc.h3.mppause.end_screen" "$hl" || fail "the host's END GAME did not ask"
+	sed -n '/ui: screen pc.h3.mppause.end_screen/,$p' "$hl" | grep -aqE "ui: screen pc.h3.(main|mp).screen" ||
+		fail "the host's END GAME did not end the game (the host back at the menus)"
+	grep -aq "network test: joining" "$out/joiner2/run.log" || fail "the second joiner did not join"
+	;;
 h3online|h3pickjoin)
 	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 	# (h3pickjoin: the host stays on the map list a minute, the joiner joining its lobby meanwhile)
@@ -2003,13 +2296,13 @@ h3online|h3pickjoin)
 		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS)"; exit 0
 	fi
 	# (MULTIPLAYER: the lobby on SYSTEM LINK; NETWORK, up to ONLINE, A: online, live; a while for
-	# the broker; down three to START GAME, A: Create Game; down two to NAME, A: typed; down four
-	# to START GAME, A: the profile (A joins, A the profile, A), the map list (A), the game type
-	# (A): the game's lobby; a while for the joiner, then A starts the game, a few times)
+	# the broker; Square: GAME OPTIONS (Create Game); down two to NAME, A: typed; down four to
+	# START GAME, A: the profile (A joins, A the profile, A): the game's lobby (h3pickjoin: a
+	# minute there); a while for the joiner, then A starts the game, a few times)
 	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
 		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:1 HALO_NET_HOST_PUBLIC=true \
 		HALO_TEST_TEXT_INPUT=NetHost \
-		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:10000 down:150:500 down:150:500 down:150:500 a wait:150:4000 down:150:500 down:150:500 a wait:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:4000 a wait:150:2000 a wait:150:2000 a wait:150:$pick a wait:150:4000 a wait:150:${HALO_TEST_H3ONLINE_WAIT:-45000} a wait:150:5000 a wait:150:5000 a" \
+		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:10000 x wait:150:4000 down:150:500 down:150:500 a wait:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:4000 a wait:150:2000 a wait:150:2000 a wait:150:$pick wait:150:4000 wait:150:${HALO_TEST_H3ONLINE_WAIT:-45000} a wait:150:5000 a wait:150:5000 a" \
 		; host_pid=$last_pid
 	sleep 25
 	# (MULTIPLAYER: the lobby on SYSTEM LINK; NETWORK, up to ONLINE, A; a while for the broker;
@@ -2042,9 +2335,14 @@ h3online|h3pickjoin)
 	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
 	echo "joiner's seconds with two players playing: $two"
 	[ "$two" -ge 15 ] || fail "the joiner played the host's game for $two s with two players (15 wanted)"
-	grep -aq "network: the game is open while its host chooses the map (joins held until then)" "$hl" ||
-		fail "the host's game was not opened as its server started"
-	[ $mode = h3pickjoin ] && check_pick_join
+	grep -aq "network: the host chose the map levels.test.beavercreek.beavercreek (0 joins held meanwhile)" "$hl" ||
+		fail "the host's game was not hosted on the lobby's map as its server started"
+	grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected" "$hl" &&
+		fail "an Xbox screen (the map or game type list) opened on the host's way"
+	if [ $mode = h3pickjoin ]; then
+		grep -aq "network: holding machine" "$hl" && fail "a join was held (the map is set as the server starts)"
+		grep -aq "join: the host's map is levels" "$jl" || fail "the joiner was not told the host's map"
+	fi
 	;;
 netswitch)
 	rounds=${HALO_TEST_SWITCH_ROUNDS:-5}
@@ -3832,7 +4130,7 @@ friendsplayers|friendsplayersoff|friendsplayersnone)
 	[ "$two" -ge 20 ] || fail "the joiner played the host's game for $two s with two players (20 wanted)"
 	;;
 *)
-	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3online|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|party" >&2
+	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|h3live|h3liveleave|h3liveinvite|h3online|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|party" >&2
 	exit 2
 	;;
 esac

@@ -7,7 +7,14 @@ lobby - MULTIPLAYER LOBBY's column at the left (NETWORK, GAME, MAP, START GAME, 
 BROWSE GAMES, JOIN WITH CODE, Ready, the map's picture and "<game> on <map>"), the players at the
 right, the buttons in the column's foot. NETWORK, GAME and MAP open pickers as Halo 3's Select Map;
 BROWSE GAMES the server browser in Halo 3's style (VITA and PC badges, the orange bar) - on SYSTEM
-LINK and AD HOC the LAN browser, its look (halo3/network.xml) -, START GAME on ONLINE Create Game.
+LINK and AD HOC the LAN browser, its look (halo3/network.xml) -, START GAME hosts at once with GAME
+and MAP (the profile first, once a run: menu_functions.c h3_session), the game's lobby next, no map
+or game type list; on ONLINE Square opens GAME OPTIONS (Create Game: name, max players, public or
+private, password), which START GAME hosts with.
+On ONLINE, SYSTEM LINK and AD HOC, with a profile and the network ready, the lobby is live (menu_functions.c
+h3_live): its game is hosted from the moment it is up, others join it there, GAME and MAP changed go to
+them, its players are shown in the game's lobby's rows, L invites friends (online), START GAME opens the
+game's lobby on that game with its countdown, B closes it (the joiners told).
 The map pictures and descriptions are ui.map's own; the rest this folder's art
 (tools/halo3_menu_art.py). -->
 <menus root="h3/mp/screen" replaces="ui\shell\main_menu\multiplayer_type_select\multiplayer_type_select_screen">
@@ -76,6 +83,8 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 		<string text="JOIN GAME"/>
 		<string text="INTERNET PLAY IS OFF"/>
 		<string text="The game type your game starts with. Your\nown are made in EDIT GAME TYPES, on the lobby."/>
+		<string text="Options"/>
+		<string text="Invite Friends"/>
 	</strings>
 	<strings name="h3/networks">
 		<string text="ONLINE"/>
@@ -111,7 +120,7 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 		<string text="The most players your game takes,\nyou included (2 to 16)."/>
 		<string text="PUBLIC: listed in every Vita's server browser.\nPRIVATE: joined only with its code."/>
 		<string text="A public game asks joiners for it.\nNONE: anyone may join."/>
-		<string text="Next: your profile, then the map and the\ngametype. The lobby shows your game's code."/>
+		<string text="Hosts at once with this game type and map (your\nprofile first, the first time): the game's lobby,\nwhich shows your game's code."/>
 	</strings>
 	<strings name="h3/code_help">
 		<string text=""/>
@@ -123,8 +132,9 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 	</strings>
 
 	<!-- the lobby: NETWORK, GAME and MAP open their pickers; START GAME hosts as the network says
-	(ONLINE: Create Game; SYSTEM LINK and AD HOC: the System Link screen's profile, then the new
-	game's map list, as its Y; OFFLINE: split screen's), as do BROWSE GAMES (the profile, then the
+	(ONLINE, SYSTEM LINK and AD HOC: the System Link screen's profile - not asked again once chosen
+	this run -, then the game hosted with GAME and MAP and its lobby; OFFLINE: split screen's), as
+	do BROWSE GAMES (the profile, then the
 	games browser, halo3/network.xml: ONLINE the System Link list's games and the online list's in
 	one list, SYSTEM LINK the System Link list's, AD HOC the ad hoc group's) - AD
 	HOC's rows first join the ad hoc group when the Vita is out of it (the joining dialog, which
@@ -143,7 +153,8 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 		<on event="a" open="h3/map/screen"/>
 	</widget>
 	<widget name="h3/mp/start_online" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFE6ECF2" text_x="8" text_y="3" string_list="h3/mp_text" string_index="1">
-		<on event="a start" run="port mp require online" open="h3/setup/screen" otherwise="h3/mp/offline"/>
+		<on event="a start" run="port h3 host online"/>
+		<on event="a start" run="port mp require online" open="ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen" otherwise="h3/mp/offline"/>
 	</widget>
 	<widget name="h3/mp/start_link" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFE6ECF2" text_x="8" text_y="3" string_list="h3/mp_text" string_index="1">
 		<on event="a start" run="port h3 host system link"/>
@@ -178,6 +189,8 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 	</widget>
 	<widget name="h3/mp/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<on event="y" open="h3/friends/screen"/>
+		<on event="x" run="port h3 game options"/>
+		<on event="left_trigger" run="port h3 invite ask" open="h3/invite/screen"/>
 		<child widget="h3/mp/network_row" x="0" y="0"/>
 		<child widget="h3/mp/game_row" x="0" y="38"/>
 		<child widget="h3/mp/map_row" x="0" y="58"/>
@@ -209,7 +222,16 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 	<widget name="h3/mp/select" type="text" left="36" top="446" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/campaign_text" string_index="5"/>
 	<widget name="h3/mp/b_butn" left="110" top="447" width="16" height="16" bitmap="h3/glyph_circle"/>
 	<widget name="h3/mp/back" type="text" left="130" top="446" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/main_items" string_index="10"/>
+	<!-- (ONLINE: Square, GAME OPTIONS - Create Game's rows: the game's name, max players, public or
+	private, password - which START GAME hosts with; shown on ONLINE only, port h3 mp lobby) -->
+	<widget name="h3/mp/x_butn" left="184" top="447" width="16" height="16" bitmap="h3/glyph_square"/>
+	<widget name="h3/mp/options" type="text" left="203" top="446" width="55" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/mp_text" string_index="28"/>
 	<widget name="h3/mp/players" type="text" left="380" top="20" width="250" height="16" font="h3/font_small" color="#FFEEF2F6"/>
+	<!-- (the live lobby on ONLINE: L, INVITE FRIENDS - the friends online, Cross invites one into
+	the game, halo3/friends.xml h3/invite/screen - beside the FRIENDS panel's Triangle; shown while
+	the lobby's game runs, port h3 mp lobby) -->
+	<widget name="h3/mp/l_butn" left="500" top="410" width="16" height="16" bitmap="h3/glyph_l"/>
+	<widget name="h3/mp/invite" type="text" left="520" top="409" width="112" height="18" font="h3/font_small" color="#FFEEF2F6" text_y="2" string_list="h3/mp_text" string_index="29"/>
 	<!-- (scene: its own camera in ui.map's unused multiplayer point: the whole ring before the
 	planet; in front of it (scene_object=, the menu_multiplayer pack) three white Spartans: one
 	jumping with a rocket launcher, one holding the flag, one crouching with a sniper rifle) -->
@@ -221,6 +243,7 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 		<on event="created" run="port mp screen init"/>
 		<on event="created" run="port h3 mp init"/>
 		<on event="created" run="port h3 scene"/>
+		<on event="b back" run="port h3 live leave"/>
 		<on event="b back" back="true"/>
 		<data input="port h3 mp lobby"/>
 		<child widget="h3/main/haze"/>
@@ -237,10 +260,23 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 		<child widget="h3/mp/select"/>
 		<child widget="h3/mp/b_butn"/>
 		<child widget="h3/mp/back"/>
+		<child widget="h3/mp/x_butn"/>
+		<child widget="h3/mp/options"/>
 		<child widget="h3/mp/players"/>
 		<child widget="h3/friends/lobby_panel"/>
+		<child widget="h3/mp/l_butn"/>
+		<child widget="h3/mp/invite"/>
 		<child widget="h3/mp/network_status"/>
 		<child widget="h3/main/nameplate"/>
+		<!-- (the live lobby's players, the game's lobby's rows: hidden when not live) -->
+		<child widget="h3/pregame/row_1" x="380" y="38"/>
+		<child widget="h3/pregame/row_2" x="380" y="56"/>
+		<child widget="h3/pregame/row_3" x="380" y="74"/>
+		<child widget="h3/pregame/row_4" x="380" y="92"/>
+		<child widget="h3/pregame/row_5" x="380" y="110"/>
+		<child widget="h3/pregame/row_6" x="380" y="128"/>
+		<child widget="h3/pregame/row_7" x="380" y="146"/>
+		<child widget="h3/pregame/row_8" x="380" y="164"/>
 		<child widget="h3/mp/list" x="8" y="50"/>
 	</widget>
 
@@ -633,7 +669,7 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 		<child widget="h3/browser/back"/>
 	</widget>
 
-	<!-- Create Game (ONLINE's START GAME): OpenCE's Server Setup (setup.xml: its functions, rows'
+	<!-- GAME OPTIONS (Create Game: Square on the lobby on ONLINE): OpenCE's Server Setup (setup.xml: its functions, rows'
 	and values' names) as Halo 3's game options - rows with their values at the right in ice blue,
 	the chosen one's help below; GAME TYPE and MAP open the lobby's pickers (port h3 setup hold
 	keeps what the rows show meanwhile); START GAME as Server Setup's -->

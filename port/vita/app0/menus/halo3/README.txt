@@ -52,16 +52,39 @@ these screens stand for the Xbox's own, over the same animated Halo ring:
   screen, as OpenCE's multiplayer.xml does with Menu style Halo CE):
   MULTIPLAYER LOBBY with NETWORK (ONLINE: internet play; SYSTEM LINK: the Vitas
   on the same Wi-Fi; AD HOC: the Vitas near, the connection Ad hoc; OFFLINE:
-  split screen), GAME and MAP (pickers: the game type and map the Xbox's lists
-  open on after START GAME), START GAME (ONLINE: Create Game; SYSTEM LINK and
-  AD HOC: the profile, then the new game's map list; OFFLINE: split screen's),
+  split screen), GAME and MAP (pickers: the game type and map START GAME
+  hosts with), START GAME (ONLINE, SYSTEM LINK and AD HOC: the profile, then
+  the game hosted on the lobby's GAME and MAP as the Xbox's lists would set
+  them, and its lobby, pregame.xml - no map or game type list; OFFLINE: split
+  screen's), GAME OPTIONS on ONLINE (Square: Create Game's name, max
+  players, public or private and password, the settings panel's Play page's
+  too, which START GAME hosts with),
   EDIT GAME TYPES (the Xbox's), BROWSE GAMES (the profile, then the games
   browser, network.xml: ONLINE the System Link and the online games in one
   list) and JOIN WITH CODE; ONLINE, SYSTEM LINK and AD HOC are the
   settings panel's Connection (port/linux/game/network_connection.c),
   switched live when chosen, its status in a line under NETWORK (Online,
   Connecting..., Same Wi-Fi, Ad hoc, No Wi-Fi); the map's picture, "<game> on <map>", "1 Player (N max)" and the
-  nameplate. The browser, Create Game and JOIN WITH CODE run OpenCE's screens'
+  nameplate.
+  The lobby is live (menu_functions.c h3_live, Halo 3's model): on ONLINE,
+  SYSTEM LINK or AD HOC, with a profile (the nameplate's, or the one chosen
+  this run) and the network ready (Online's broker reached, the Wi-Fi up,
+  in the ad hoc group), its game is hosted the moment the lobby is up and
+  its scene stands, with its GAME and MAP: friends, the party, a code, the
+  games browser (a public game) join it while the host chooses, through
+  every check a join has. The lobby shows its players (PLAYERS n/max, the
+  game's lobby's rows) instead of the nameplate; GAME and MAP changed go to
+  every joiner's lobby as the Xbox sent a game's settings between two
+  games (every build's client, 1.1.0's too); GAME OPTIONS' name and most
+  players at once, public or private and the password its listing. L opens
+  INVITE FRIENDS online (friends.xml). START GAME opens the game's lobby
+  on that game at once (no profile asked, no other server), its countdown
+  begun once the game can start (it waits for every machine's map, map
+  sharing included); B there goes back to the lobby, the game kept, the
+  countdown stopped. B on the lobby, the main menu, another NETWORK, BROWSE
+  GAMES or JOIN WITH CODE close it: its joiners are told the host left.
+  Not live (START GAME hosts as before): OFFLINE, the network not ready,
+  crossplay on, no profile at all, a map not played with others. The browser, Create Game and JOIN WITH CODE run OpenCE's screens'
   functions (menu_functions.c "port browser/setup/code ...") under the same
   widget names; the browser's rows show a VITA or PC badge with a lock for a
   password. When internet play is off, ONLINE's rows open a dialog saying how to
@@ -89,7 +112,9 @@ these screens stand for the Xbox's own, over the same animated Halo ring:
   (Decline, Invite, Ignore, Cancel), Triangle its options (Remove, Block,
   Unblock) after Halo 3's question; a join goes on as JOIN WITH CODE's.
   Each lobby shows a FRIENDS panel at the right, under the players: who is
-  online and what they are doing, and the requests and invites waiting. A
+  online and what they are doing, and the requests and invites waiting
+  (with no one to show, the friends list's line across the panel, in two
+  lines when one is too narrow). A
   friend's invite asks at the menus with the game's question (Accept the
   invite and join now?). The settings panel's Multiplayer > Friends does the
   same for the original menus.
@@ -109,6 +134,13 @@ these screens stand for the Xbox's own, over the same animated Halo ring:
   the online games' passwords, System Link has none) and the joining dialog
   (AD HOC out of the ad hoc group: the system's dialog joins it, then what
   was asked goes on).
+- Nothing is asked twice: once a profile is chosen alone on SELECT PROFILE
+  (or the campaign's), a network game's SELECT PROFILE is not shown again
+  in that run (menu_functions.c h3_session: the profile set at once, as its
+  Cross would, its checks kept; asked again if the profile is gone or taken,
+  and split screen's always asks), and the games a code, a friend, an
+  invite or the party join are joined from the games browser (network.xml),
+  not the Xbox's System Link list.
 - join.xml: SELECT PROFILE for a multiplayer game, standing for the Xbox's
   four-way "press START to join" screen of System Link (START GAME and BROWSE
   GAMES on every network, Create Game, JOIN WITH CODE, the panel's Join a
@@ -121,11 +153,29 @@ these screens stand for the Xbox's own, over the same animated Halo ring:
   and difficulty, or the map's and "<game type> on <map>"; the status and
   countdown; the code, large, online; public or private and Square's hint;
   the players in their colours with their teams. Its buttons are the Xbox
-  screen's own functions.
+  screen's own functions; L, the host's online, INVITE FRIENDS.
+- friends.xml's INVITE FRIENDS (L in the live lobby and the game's lobby,
+  the host's online): the friends online, Cross sends the chosen one the
+  friends' invite into this Vita's game (sealed for them alone, one a
+  friend a while; a game with a password or full takes none, said); the
+  settings panel's Friends page does the same with Square on a friend.
 - password.xml: the password screen of a game with one (it stands for OpenCE's,
   pc\join\password\screen, which the browser opens).
 In each level's map (ingame.txt):
 - pause.xml: the pause screen (ui\shell\solo_game\pause_game\pause_game).
+- mppause.xml: the multiplayer pause screen of a player alone on their
+  machine (ui\shell\multiplayer_game\pause_game\1p_pause_game; split
+  screen's 2p and 4p screens, each player's own, stay the Xbox's), in
+  pause.xml's look: the game type and map in the title strip, the score to
+  win, RESUME, PLAYERS (players.xml), SETTINGS (the profile's controls as
+  CUSTOMIZATION's, saved on Circle and played at once, and ALL SETTINGS:
+  the settings panel), PARTY in a party (the settings panel's Party page),
+  LEAVE GAME for a machine that joined or END GAME for the host's, each
+  asked first, then the Xbox's own quit ("mp game player quit", whatever
+  the network: system link, online, a dedicated server's or a PC's game).
+  It never pauses the game, as the Xbox's does not; no CHANGE TEAMS (the
+  Xbox changes teams in the game's lobby only); a Forge game's Start opens
+  the Forge menu instead (menu_tags.c).
 - forge.xml: Forge's screens over the game: the object browser (Square, as
   the monitor), the Forge menu (Start in a Forge game) and its question
   before leaving.
@@ -168,7 +218,10 @@ left out or 0) into one of ui.map's cutscene camera points that its script
 never flies (load_campaign, settings, multiplayer, new_campaign) and cuts
 there, ring_loop asleep (menu_functions.c h3 scenes; menus.scenes,
 HALO_MENU_SCENES=0 turns them off). The campaign lobby, the multiplayer lobby
-and the Forge lobby have theirs; the screens opened from them keep it. SELECT
+and the Forge lobby have theirs; the screens opened from them keep it, the
+game's lobby (pregame.xml) of a game hosted or joined from one too: a network
+game's lobby stops the main menu's ticks, so the scene stands there as it was,
+whole (a scene not made by then is none until the game is over). SELECT
 PROFILE and CUSTOMIZATION's profile list have the editor's (customize.xml).
 
 What stands in a lobby's scene, as Halo 3's lobbies have their scenes, is said
@@ -233,8 +286,9 @@ Tests: port/vita/tests/run_menu_speed_test.sh (no stall, the prebuild);
 port/vita/tests/run_menus_test.sh h3probe h3classic h3xbox h3broken
 h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create
 h3mptouch h3coop h3coopguide h3scenes h3lobbyscenes h3modelsmany h3profiles h3proftouch h3customize h3models
-h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3friends h3friendspanel; the packs':
+h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3friends h3friendspanel
+h3friendsfit h3mppause; the packs':
 port/vita/tests/run_scene_pack_test.sh; Forge's: port/vita/tests/run_forge_test.sh,
 port/vita/tests/run_forge_files_test.sh; between two machines:
-port/vita/tests/run_netns_online_test.sh h3coopmenu h3lan h3adhoc h3online netswitch, and friends'
+port/vita/tests/run_netns_online_test.sh h3coopmenu h3lan h3adhoc h3online h3mppause netswitch, and friends'
 friends friendsdecline friendsblock friendsinvite friendsoffline friendsforged.

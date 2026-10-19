@@ -19,6 +19,7 @@ the right, each in their colour with their team, the host's and this machine's m
 		<string text="Start Game"/>
 		<string text="Cancel"/>
 		<string text="Players"/>
+		<string text="Invite Friends"/>
 	</strings>
 
 	<widget name="h3/pregame/column" left="8" top="12" width="250" height="456" bitmap="h3/column"/>
@@ -44,7 +45,11 @@ the right, each in their colour with their team, the host's and this machine's m
 	<widget name="h3/pregame/b_text" type="text" left="160" top="446" width="90" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1"/>
 	<!-- (Triangle: the PLAYERS screen over the lobby, menu_functions.c menu_functions_players_button) -->
 	<widget name="h3/pregame/y_butn" left="16" top="418" width="16" height="16" bitmap="h3/glyph_triangle"/>
-	<widget name="h3/pregame/y_text" type="text" left="36" top="417" width="200" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/pregame_text" string_index="3"/>
+	<widget name="h3/pregame/y_text" type="text" left="36" top="417" width="90" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/pregame_text" string_index="3"/>
+	<!-- (L: INVITE FRIENDS, the host's online - the friends online, Cross invites one into the game,
+	halo3/friends.xml h3/invite/screen; shown when it can, port h3 pregame) -->
+	<widget name="h3/pregame/l_butn" left="130" top="418" width="16" height="16" bitmap="h3/glyph_l"/>
+	<widget name="h3/pregame/l_text" type="text" left="150" top="417" width="106" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/pregame_text" string_index="4"/>
 
 	<!-- the players: a row each, the colour, the name, and the team, HOST and YOU -->
 	<widget name="h3/pregame/players" type="text" left="372" top="20" width="256" height="16" font="h3/font_small" color="#FFEEF2F6" text_y="1"/>
@@ -141,6 +146,7 @@ the right, each in their colour with their team, the host's and this machine's m
 		<on event="a start" run="net game join player"/>
 		<on event="start" run="net game speed start"/>
 		<on event="x" run="net game delay start"/>
+		<on event="left_trigger" run="port h3 invite ask" open="h3/invite/screen"/>
 		<on event="b back" run="net game unjoin player" back="true"/>
 		<data input="net splitscreen prejoin players"/>
 		<data input="port h3 pregame"/>
@@ -168,6 +174,8 @@ the right, each in their colour with their team, the host's and this machine's m
 		<child widget="h3/pregame/b_text"/>
 		<child widget="h3/pregame/y_butn"/>
 		<child widget="h3/pregame/y_text"/>
+		<child widget="h3/pregame/l_butn"/>
+		<child widget="h3/pregame/l_text"/>
 		<child widget="h3/pregame/players"/>
 		<child widget="h3/pregame/row_1" x="372" y="42"/>
 		<child widget="h3/pregame/row_2" x="372" y="60"/>

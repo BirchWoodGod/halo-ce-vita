@@ -39,15 +39,24 @@
 #            for the Xbox's Multiplayer screen; internet play off: NETWORK is
 #            SYSTEM LINK; choosing ONLINE starts internet play live (its status
 #            Connecting...: TEST-NET brokers), SYSTEM LINK stops it; START GAME
-#            hosts a system link game (the profile, then the Xbox's map list)
+#            hosts a system link game (the profile, then the game hosted with
+#            the lobby's GAME and MAP: its lobby, no map or game type list); B
+#            goes back to the lobby, and START GAME again hosts at once (the
+#            profile not asked again)
 #   h3browser  internet play on (its brokers unreachable: TEST-NET addresses)
 #            with 16 made-up games of both platforms (HALO_TEST_BROWSER_GAMES,
 #            HALO_TEST_BROWSER_PC): BROWSE GAMES, the profile, the Halo 3
 #            games browser with the online list's games (CUSTOM GAMES), a
 #            locked game the Halo 3 password screen, whose JOIN GAME says the
 #            game is no longer listed
-#   h3create  START GAME on ONLINE: Create Game; its GAME TYPE picker, the
-#            name typed (HALO_TEST_TEXT_INPUT), START GAME as Server Setup's
+#   h3create  Square on ONLINE: GAME OPTIONS (Create Game); its GAME TYPE picker,
+#            the name typed (HALO_TEST_TEXT_INPUT), START GAME as Server Setup's
+#   h3hostonline  START GAME on ONLINE (HALO_TEST_PROFILE's profile; skipped
+#            without), the lobby's MAP Blood Gulch: SELECT PROFILE, then the
+#            game hosted on Blood Gulch and its lobby - no Create Game, map or
+#            game type list, nothing but Halo 3 screens -; B: the multiplayer
+#            lobby; Menu style Halo CE's CREATE GAME INTERNET still
+#            OpenCE's Server Setup (HALO_TEST_SHOTS: the lobby's pictures)
 #   h3mptouch  taps: MULTIPLAYER, the lobby's MAP, BLOOD GULCH in its picker,
 #            the lobby's Back
 #   h3coop   co-op from the Halo 3 campaign lobby (HALO_TEST_PROFILE; skipped
@@ -162,6 +171,20 @@
 #            INVITE TO PARTY (the party's own steps: run_netns_online_test.sh party)
 #   h3friendspanel the lobbies' FRIENDS panel: the multiplayer lobby shows who is online
 #            and the requests, Triangle opens the FRIENDS screen, B back; the Forge lobby too
+#   h3mppause the Halo 3 multiplayer pause (menus/halo3/mppause.xml, standing for the Xbox's
+#            1p_pause_game) in a local Team Slayer game on Blood Gulch with an offline bot
+#            (HALO_NETWORK_TEST local, HALO_TEST_PROFILE's profile played; skipped without):
+#            Start opens it over the game - RESUME, PLAYERS, SETTINGS, END GAME (the host's),
+#            no CHANGE TEAMS -, the game not paused (its ticks go on); SETTINGS edits the
+#            profile's controls (right: the stick layout, Circle saves and plays it); END GAME
+#            asks, Circle back; RESUME closes it; as in a party (HALO_TEST_MP_PAUSE_PARTY) PARTY
+#            shows, five rows, and asks for the settings panel's Party page; Menu style Halo
+#            CE: the Xbox's own pause, nothing of Halo 3's (system link host and joiner:
+#            run_netns_online_test.sh h3mppause)
+#   h3friendsfit the lobbies' FRIENDS panel's line with no one to show ("Go online to see
+#            your friends", cut short in the name's column on insider.14) in its own
+#            box across the panel, in one or two lines, never cut: the Forge lobby in
+#            English and in Spanish (HALO_TEST_LANG_DIR: the Vita's translations on Linux)
 #   h3oddrows the public lists' odd listings (HALO_TEST_BROWSER_ODD: the owner's
 #            photo of beta.7's browser, Oct 18 2026) in the Halo 3 games browser
 #            and OpenCE's (Menu style Halo CE): a name that names nothing shows
@@ -214,10 +237,15 @@
 #            and YES deletes it (only it: the maps folder's other files, the
 #            links' targets kept); the mod's folder deleted, the links in it
 #            gone, what they pointed at kept
-#   h3modspicker  MOD MANAGER, mygulch off, then MULTIPLAYER, START GAME: the
-#            Xbox's map list (the one custom maps are offered in) leaves it out;
-#            again with it off (HALO_MAPS_DISABLED) and turned on in MOD
-#            MANAGER: the list offers it
+#   h3livelobby  the live lobby (HALO_TEST_PROFILE): MULTIPLAYER on SYSTEM LINK opens its game
+#            once its scene stands, START GAME its game's lobby at once (no profile asked, no
+#            other server), B back to the lobby (the game kept), B closes it; ONLINE with its
+#            brokers unreachable never live, START GAME as before; the lobby's scene whole
+#            behind the game's lobby, never a flag's cloth left (screenshots, the Vita's picture)
+#   h3modspicker  MOD MANAGER, mygulch off, then MULTIPLAYER, MAP: the lobby's map
+#            picker (the list START GAME hosts from) leaves it out; again with
+#            it off (HALO_MAPS_DISABLED) and turned on in MOD MANAGER: the
+#            picker offers it
 #   h3modstouch  taps: MOD MANAGER on the main menu, mygulch's row (off), the
 #            screen's Back
 #   pause   Campaign from the main menu (a new profile, Normal), the level's
@@ -253,7 +281,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3party browserprofile h3players browserrows profilepaths}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
@@ -427,8 +455,10 @@ mods_data() { # FOLDER
 # (the main menu: down four to MOD MANAGER, A: its list, broken.map first)
 h3modspad="wait:150:3000 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:4000"
 # (MOD MANAGER, mygulch's row - two down -, A; B: the main menu, on MOD MANAGER; up three to MULTIPLAYER, A;
-# down three to START GAME, A: the profile, A to join, ...: the Xbox's map list)
-h3pickerpad="$h3modspad down:150:500 down:150:500 a wait:150:2000 b wait:150:3000 up:150:500 up:150:500 up:150:500 a wait:150:3000 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:5000"
+# down two to MAP, A: the map picker (the lists custom maps are offered in), B)
+h3pickerpad="$h3modspad down:150:500 down:150:500 a wait:150:2000 b wait:150:3000 up:150:500 up:150:500 up:150:500 a wait:150:3000 down:150:500 down:150:500 a wait:150:3000 b wait:150:3000"
+# (Menu style Halo CE: Multiplayer, down four to CREATE GAME INTERNET, A: OpenCE's Server Setup)
+cmp_create="wait:150:3000 down:150:800 a wait:150:3000 down:150:500 down:150:500 down:150:500 a wait:150:4000"
 
 for case in $cases; do
 	case $case in
@@ -532,9 +562,11 @@ for case in $cases; do
 	h3mp)
 		# (NETWORK: the picker on SYSTEM LINK, up to ONLINE, A: online, live (its brokers TEST-NET
 		# addresses: connecting); NETWORK again, down to SYSTEM LINK, A: internet play stopped;
-		# down three to START GAME, A: the profile screen, A to join, the profile chosen: the map
-		# list)
-		run h3mp "$menus_data" 60 "$h3mppad a wait:150:3000 up:150:600 a wait:150:5000 a wait:150:3000 down:150:600 a wait:150:3000 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:5000" \
+		# down three to START GAME, A: the profile screen, A to join, the profile chosen, A: the
+		# game hosted with the lobby's GAME and MAP, its lobby (no map list); B: the multiplayer
+		# lobby, the game kept as its live game (no profile when the lobby opened: not live then);
+		# START GAME again: that game's lobby at once, the profile not asked again)
+		run h3mp "$menus_data" 70 "$h3mppad a wait:150:3000 up:150:600 a wait:150:5000 a wait:150:3000 down:150:600 a wait:150:3000 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:5000 b wait:150:4000 a wait:150:5000" \
 			HALO_MENU_STYLE=halo3 $h3net HALO_NET_ONLINE=false
 		check_h3 h3mp halo3
 		log=$out/h3mp/run.log
@@ -552,10 +584,20 @@ for case in $cases; do
 			fail h3mp "SYSTEM LINK did not stop internet play"
 		grep -aq "ui: screen pc.h3.mp.offline" "$log" && fail h3mp "ONLINE said internet play is off"
 		grep -aq "menus: h3 mp: host a system link game" "$log" || fail h3mp "START GAME did not host a system link game"
-		grep -aq "menus: Multiplayer > System Link: the game's server started; the map list" "$log" ||
-			fail h3mp "the server did not start (or the log named another screen)"
-		grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected.connected_map_select_wrapper" "$log" ||
-			fail h3mp "the profile did not lead to the map list"
+		grep -aq "menus: h3 mp: hosting Slayer on Battle Creek (the lobby's GAME and MAP); the game's lobby" "$log" ||
+			fail h3mp "the game was not hosted with the lobby's GAME and MAP"
+		[ "$(grep -ac "menus: Multiplayer > System Link: the game's server started; the game's lobby" "$log")" = 1 ] ||
+			fail h3mp "the server did not start once, straight to the game's lobby (or the log named another screen)"
+		grep -aq "menus: h3 live lobby: its game kept, live on SYSTEM LINK (Slayer on Battle Creek)" "$log" ||
+			fail h3mp "back in the lobby, the game was not kept as its live game"
+		grep -aq "menus: h3 live lobby: START GAME: the game's lobby, its countdown begun" "$log" ||
+			fail h3mp "the second START GAME did not go to the live game's lobby"
+		[ "$(grep -ac "ui: screen pc.h3.pregame.screen" "$log")" = 2 ] || fail h3mp "the game's lobby did not open twice"
+		grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected" "$log" &&
+			fail h3mp "an Xbox screen (the map or game type list) opened on the way"
+		[ "$(grep -ac "ui: screen pc.h3.join.screen" "$log")" = 1 ] || fail h3mp "SELECT PROFILE was not asked once only"
+		sed -n '/ui: screen pc.h3.pregame.screen/,$p' "$log" | grep -a "ui: screen" | sed -n 2p | grep -q "pc.h3.mp.screen" ||
+			fail h3mp "B on the game's lobby did not go back to the multiplayer lobby"
 		grep -aq "ui: screen pc.mp.screen" "$log" && fail h3mp "OpenCE's Multiplayer screen opened with Menu style Halo 3" ;;
 	h3browser)
 		# (down five to BROWSE GAMES, A: the profile (A joins, A the profile, A): the games
@@ -577,18 +619,117 @@ for case in $cases; do
 		grep -aq "ui: screen pc.browser.screen\|ui: screen pc.join.password" "$log" &&
 			fail h3browser "OpenCE's browser or password screen opened with Menu style Halo 3" ;;
 	h3create)
-		# (down three to START GAME, A: Create Game; GAME TYPE, A: the picker, down, A: SLAYER PRO;
-		# down two to NAME, A: typed; down four to START GAME, A)
-		run h3create "$menus_data" 50 "$h3mppad down:150:500 down:150:500 down:150:500 a wait:150:4000 a wait:150:3000 down:150:600 a wait:150:4000 down:150:500 down:150:500 a wait:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:5000" \
+		# (Square: GAME OPTIONS (Create Game); GAME TYPE, A: the picker, down, A: SLAYER PRO; down two
+		# to NAME, A: typed; down four to START GAME, A)
+		run h3create "$menus_data" 50 "$h3mppad x wait:150:4000 a wait:150:3000 down:150:600 a wait:150:4000 down:150:500 down:150:500 a wait:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:5000" \
 			HALO_MENU_STYLE=halo3 $h3net "HALO_TEST_TEXT_INPUT=Vita Night"
 		check_h3 h3create halo3
 		log=$out/h3create/run.log
-		grep -aq "ui: screen pc.h3.setup.screen" "$log" || fail h3create "START GAME did not open Create Game"
+		grep -aq "ui: screen pc.h3.setup.screen" "$log" || fail h3create "Square did not open GAME OPTIONS (Create Game)"
 		grep -aq "menus: h3 mp: game type Slayer Pro" "$log" || fail h3create "the GAME TYPE picker did not set the game type"
-		grep -aq "menus: Server Setup: Vita Night, 16 players, public; the profile, then the map list" "$log" ||
+		grep -aq "menus: Server Setup: Vita Night, 16 players, public; the profile, then the game's lobby" "$log" ||
 			fail h3create "START GAME did not set up the game as Server Setup does"
 		grep -aqE "ui: screen (ui.shell.main_menu.multiplayer_type_select.connected.4way_profile_select.4way_start2join_screen|pc.h3.join.screen)" "$log" ||
 			fail h3create "START GAME did not open the profile" ;;
+	h3hostonline)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "--- h3hostonline"; echo "SKIP: no HALO_TEST_PROFILE"; continue
+		fi
+		# (ONLINE, its brokers unreachable: MULTIPLAYER; down two to MAP, A: the picker, down nine to
+		# BLOOD GULCH, A; down to START GAME, A: SELECT PROFILE (A joins, A the profile, A): the game
+		# hosted on Blood Gulch, its lobby; B: the multiplayer lobby (the brokers unreachable, the
+		# connection falls back to Same Wi-Fi after a while: START GAME again is h3mp's); Menu style
+		# Halo CE: CREATE GAME INTERNET is OpenCE's Server Setup as before)
+		hostonline_pad="$h3mppad down:150:500 down:150:500 a wait:150:2500"
+		for row in $(seq 1 9); do hostonline_pad="$hostonline_pad down:150:300"; done
+		hostonline_pad="$hostonline_pad a wait:150:2500 down:150:500 a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:5000"
+		hostonline_pad="$hostonline_pad @01-pregame:0:300 b wait:150:4000 @02-lobby:0:300"
+		rm -rf "$out/h3hostonline_shots"; mkdir -p "$out/h3hostonline_shots"
+		profile_from=$HALO_TEST_PROFILE run h3hostonline "$menus_data" 60 "$hostonline_pad" HALO_MENU_STYLE=halo3 $h3net \
+			HALO_NET_HOST_PUBLIC=true HALO_SCREENSHOT_DIR="$out/h3hostonline_shots" HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1
+		run h3hostonline_classic "$menus_data" 25 "$cmp_create" HALO_MENU_STYLE=classic $h3net
+		check_h3 h3hostonline halo3
+		log=$out/h3hostonline/run.log
+		grep -aE "ui: screen|menus: h3 mp: (host|hosting)|menus: h3 join: (on|the profile)" "$log" | head -20
+		grep -aq "menus: h3 mp lobby: NETWORK: ONLINE, GAME: SLAYER, MAP: BLOOD GULCH" "$log" ||
+			fail h3hostonline "the lobby was not ONLINE on Blood Gulch"
+		grep -aq "menus: h3 mp: host an online game" "$log" || fail h3hostonline "START GAME on ONLINE did not host at once"
+		grep -aq "menus: h3 mp: hosting Slayer on Blood Gulch (the lobby's GAME and MAP); the game's lobby" "$log" ||
+			fail h3hostonline "the game was not hosted on the lobby's map"
+		grep -aq "join: the host's map is levels.test.bloodgulch.bloodgulch" "$log" ||
+			fail h3hostonline "the hosted game is not on Blood Gulch"
+		grep -aq "ui: screen pc.h3.pregame.screen" "$log" || fail h3hostonline "the game's lobby did not open"
+		sed -n '/ui: screen pc.h3.pregame.screen/,$p' "$log" | grep -a "ui: screen" | sed -n 2p | grep -q "pc.h3.mp.screen" ||
+			fail h3hostonline "B on the game's lobby did not go back to the multiplayer lobby"
+		grep -aq "ui: screen pc.h3.setup.screen" "$log" && fail h3hostonline "START GAME opened Create Game on the way"
+		grep -a "ui: screen" "$log" | grep -av "pc.h3" &&
+			fail h3hostonline "a screen not of the Halo 3 set opened (above)"
+		grep -aq "ui: screen pc.setup.screen" "$out/h3hostonline_classic/run.log" ||
+			fail h3hostonline "Menu style Halo CE's CREATE GAME INTERNET did not open OpenCE's Server Setup"
+		[ -n "${HALO_TEST_SHOTS:-}" ] && mkdir -p "$HALO_TEST_SHOTS/h3hostonline" &&
+			cp "$out"/h3hostonline_shots/0*.bmp "$HALO_TEST_SHOTS/h3hostonline/" 2>/dev/null ;;
+	h3livelobby)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "--- h3livelobby"; echo "SKIP: no HALO_TEST_PROFILE"; continue
+		fi
+		# (the live lobby, Menu style Halo 3: MULTIPLAYER on SYSTEM LINK with a profile - its
+		# nameplate's -: the lobby's game open once its scene stands, its players in the lobby; down
+		# three to START GAME, A: the game's lobby at once (no SELECT PROFILE, no other server),
+		# alone: no countdown; B: back to the lobby, the game kept; B: the main menu, the game closed.
+		# Then ONLINE, its brokers unreachable: never live (connecting), START GAME as before -
+		# SELECT PROFILE, a server of its own, the game's lobby; B: that game closed (the network
+		# does not carry it: none left behind the lobby). Each lobby's scene whole (its flag
+		# with its pole and holder) behind the game's lobby too, or none: deleted once, its flag's
+		# cloth with it; the screenshots at the Vita's picture)
+		d="down:150:500"
+		live_pad="$h3mppad wait:150:5000 @01-lobby-live:0:300 $d $d $d a wait:150:4000 @02-pregame-live:0:300"
+		live_pad="$live_pad b wait:150:4000 @03-lobby-again:0:300 b wait:150:4000 @04-main-menu:0:300"
+		online_pad="$h3mppad wait:150:5000 @05-lobby-connecting:0:300 $d $d $d a wait:150:3000 a wait:150:2000 a wait:150:2000"
+		online_pad="$online_pad a wait:150:5000 @06-pregame-not-live:0:300 b wait:150:4000 @07-lobby-not-live:0:300"
+		rm -rf "$out/h3livelobby_shots"; mkdir -p "$out/h3livelobby_shots"
+		profile_from=$HALO_TEST_PROFILE run h3livelobby "$menus_data" 50 "$live_pad" HALO_MENU_STYLE=halo3 \
+			HALO_SCREENSHOT_DIR="$out/h3livelobby_shots" HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1
+		profile_from=$HALO_TEST_PROFILE run h3livelobby_online "$menus_data" 50 "$online_pad" HALO_MENU_STYLE=halo3 $h3net \
+			HALO_SCREENSHOT_DIR="$out/h3livelobby_shots" HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1
+		check_h3 h3livelobby halo3
+		log=$out/h3livelobby/run.log
+		grep -aE "ui: screen|menus: h3 live lobby|h3 scene objects?: (h3/mp|let go|.*deleted)|h3 join:" "$log" | head -30
+		grep -aq "menus: h3 live lobby: open on SYSTEM LINK (Slayer on Battle Creek): others join it now" "$log" ||
+			fail h3livelobby "the lobby did not open live on SYSTEM LINK"
+		sed -n '1,/menus: h3 live lobby: open on/p' "$log" | grep -aq "h3 scene objects: h3/mp/screen: made" ||
+			fail h3livelobby "the lobby went live before its scene stood"
+		sed -n '1,/menus: h3 live lobby: open on/p' "$log" | grep -aq "h3 scene object 0: animation stand missile airborne, held" ||
+			fail h3livelobby "the lobby went live before its scene was posed"
+		grep -aqE "menus: h3 live lobby: Slayer on Battle Creek; players: [^;]+; 1/16" "$log" ||
+			fail h3livelobby "the lobby did not show its game's player"
+		grep -aq "ui: screen pc.h3.join.screen" "$log" && fail h3livelobby "SELECT PROFILE was asked (the nameplate's profile plays)"
+		grep -aq "the game's server started" "$log" && fail h3livelobby "START GAME started another server"
+		grep -aq "menus: h3 live lobby: START GAME: the game's lobby, its countdown begun" "$log" &&
+			grep -aq "ui: screen pc.h3.pregame.screen" "$log" || fail h3livelobby "START GAME did not open the live game's lobby"
+		grep -aq "menus: h3 live lobby: the game's lobby: waiting for players before the countdown" "$log" ||
+			fail h3livelobby "alone, the countdown was begun"
+		grep -aq "menus: h3 live lobby: back from the game's lobby: the countdown stopped, the game kept" "$log" ||
+			fail h3livelobby "B on the game's lobby did not go back to the live lobby"
+		grep -aq "menus: h3 live lobby: closed (the host left the lobby)" "$log" || fail h3livelobby "B on the lobby did not close it"
+		sed -n '1,/menus: h3 live lobby: closed/p' "$log" | grep -aq "h3 scene object [0-9]: deleted" &&
+			fail h3livelobby "the scene lost an object in the live lobby or its game's lobby (all of it, or none)"
+		grep -aq "h3 scene objects: let go after .*, 0 flags left" "$log" ||
+			fail h3livelobby "the scene was let go with a flag's cloth left behind"
+		check_h3 h3livelobby_online halo3
+		log=$out/h3livelobby_online/run.log
+		grep -aE "ui: screen|menus: h3 live lobby|h3 scene objects: (h3/mp|let go)|h3 join:|network: status" "$log" | head -20
+		grep -aq "menus: h3 live lobby: open on ONLINE" "$log" && fail h3livelobby "ONLINE went live with its brokers unreachable"
+		grep -aq "menus: h3 live lobby: closed (the game it hosted before cannot go on from it)" "$log" ||
+			fail h3livelobby "back in the lobby, the game hosted (not live) was left behind it"
+		grep -aq "ui: screen pc.h3.join.screen" "$log" || fail h3livelobby "not live, START GAME did not ask for the profile"
+		grep -aq "menus: Create Game > Internet: the game's server started; the game's lobby" "$log" ||
+			fail h3livelobby "not live, START GAME did not host as before"
+		grep -aq "h3 scene object [0-9]: deleted" <(sed -n '/ui: screen pc.h3.pregame.screen/,/ui: screen pc.h3.mp.screen/p' "$log") &&
+			fail h3livelobby "the scene lost an object behind the game's lobby (a stray flag)"
+		grep -aq "h3 scene objects: let go after .*, [1-9][0-9]* flags left" "$log" &&
+			fail h3livelobby "a scene was let go with a flag's cloth left behind"
+		[ -n "${HALO_TEST_SHOTS:-}" ] && mkdir -p "$HALO_TEST_SHOTS/h3livelobby" &&
+			cp "$out"/h3livelobby_shots/0*.bmp "$HALO_TEST_SHOTS/h3livelobby/" 2>/dev/null ;;
 	h3mptouch)
 		# (MULTIPLAYER on the main menu; the lobby's MAP; BLOOD GULCH in the picker; the lobby's Back)
 		run h3mptouch "$menus_data" 30 "wait:150:20000" HALO_MENU_STYLE=halo3 \
@@ -1096,8 +1237,7 @@ for case in $cases; do
 		run pp_c_create_lan "$menus_data" 22 "$cmp $d $d $d $d a wait:150:4000" HALO_MENU_STYLE=classic HALO_NET_ONLINE=false
 		run pp_h_start_link "$menus_data" 22 "$h3mppad $d $d $d a wait:150:4000" HALO_MENU_STYLE=halo3 HALO_NET_ONLINE=false
 		run pp_h_browse_link "$menus_data" 22 "$h3mppad $d $d $d $d $d a wait:150:4000" HALO_MENU_STYLE=halo3 HALO_NET_ONLINE=false
-		run pp_h_start_online "$menus_data" 30 "$h3mppad $d $d $d a wait:150:4000 $d $d $d $d $d $d a wait:150:5000" \
-			HALO_MENU_STYLE=halo3 $h3net "HALO_TEST_TEXT_INPUT=Vita Night"
+		run pp_h_start_online "$menus_data" 22 "$h3mppad $d $d $d a wait:150:4000" HALO_MENU_STYLE=halo3 $h3net
 		run pp_h_browse_online "$menus_data" 22 "$h3mppad $d $d $d $d $d a wait:150:4000" HALO_MENU_STYLE=halo3 $h3net
 		run pp_h_code_online "$menus_data" 28 "$h3mppad $d $d $d $d $d $d a wait:150:3000 a wait:150:2000 $d a wait:150:5000" \
 			HALO_MENU_STYLE=halo3 $h3net HALO_TEST_TEXT_INPUT=ABCD-EFGH
@@ -1289,26 +1429,23 @@ for case in $cases; do
 		run h3modspicker_on "$out/h3mods-data" 50 "$h3pickerpad" HALO_MENU_STYLE=halo3 HALO_MAPS_DISABLED=mygulch
 		for name in h3modspicker h3modspicker_on; do
 			check_h3 $name halo3
-			grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected.connected_map_select_wrapper" \
-				"$out/$name/run.log" || fail $name "START GAME did not lead to the Xbox's map list"
+			grep -aq "ui: screen pc.h3.map.screen" "$out/$name/run.log" || fail $name "MAP did not open the lobby's map picker"
 		done
 		grep -aq "mod manager: mygulch turned off" "$out/h3modspicker/run.log" || fail h3modspicker "mygulch was not turned off"
-		grep -aq "custom edition: the multiplayer level list: 13 Xbox levels, then no custom map" "$out/h3modspicker/data/debug.txt" ||
-			fail h3modspicker "the Xbox's map list offered mygulch, turned off"
-		grep -aq "custom edition: the map 'mygulch' is turned off" "$out/h3modspicker/data/debug.txt" ||
-			fail h3modspicker "the map list did not say mygulch is off"
+		grep -aq "menus: h3 mp: the map picker: 13 maps (0 custom)" "$out/h3modspicker/run.log" ||
+			fail h3modspicker "the map picker offered mygulch, turned off"
 		grep -aq "mod manager: mygulch turned on" "$out/h3modspicker_on/run.log" || fail h3modspicker "mygulch was not turned on"
-		grep -aq "custom edition: the multiplayer level list: 13 Xbox levels, then mygulch" "$out/h3modspicker_on/data/debug.txt" ||
-			fail h3modspicker "the Xbox's map list did not offer mygulch, turned on again" ;;
+		grep -aq "menus: h3 mp: the map picker: 14 maps (1 custom)" "$out/h3modspicker_on/run.log" ||
+			fail h3modspicker "the map picker did not offer mygulch, turned on again" ;;
 	h3mpcustom)
 		# (MULTIPLAYER: the lobby on SYSTEM LINK; down two to MAP, A: the picker; down thirteen: past the
-		# last row it scrolls to MYGULCH; A: chosen; down to START GAME, A: the profile, A to join, ...:
-		# the Xbox's map list on mygulch, A; the game type, Start: the hosted game's lobby)
+		# last row it scrolls to MYGULCH; A: chosen; down to START GAME, A: the profile, A to join, A
+		# the profile, A: the game hosted on mygulch, its lobby)
 		mods_data "$out/h3mods-data"
 		mpcustom_pad="$h3mppad down:150:500 down:150:500 a wait:150:2000 @00-picker:0:300"
 		for row in $(seq 1 13); do mpcustom_pad="$mpcustom_pad down:150:400"; done
 		mpcustom_pad="$mpcustom_pad @01-picker-custom:0:300 a wait:150:2000 @02-lobby-custom:0:300 down:150:500 a wait:150:3000"
-		mpcustom_pad="$mpcustom_pad a wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:3000 start wait:150:4000 @03-pregame:0:300"
+		mpcustom_pad="$mpcustom_pad a wait:150:3000 a wait:150:3000 a wait:150:3000 wait:150:4000 @03-pregame:0:300"
 		rm -rf "$out/h3mpcustom_shots"
 		mkdir -p "$out/h3mpcustom_shots"
 		run h3mpcustom "$out/h3mods-data" 55 "$mpcustom_pad" HALO_MENU_STYLE=halo3 HALO_SCREENSHOT_DIR="$out/h3mpcustom_shots"
@@ -1412,6 +1549,64 @@ for case in $cases; do
 		grep -a "ui: screen" "$log" | grep -A1 "pc.h3.party.screen" | tail -1 | grep -q "pc.h3.friends.screen" ||
 			fail h3party "B did not go back to FRIENDS"
 		grep -aq "ui: screen pc.h3.friends.options" "$log" || fail h3party "Triangle did not open a friend's options" ;;
+	h3mppause)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "--- h3mppause"; echo "SKIP: no HALO_TEST_PROFILE"; continue
+		fi
+		# (in the game: Start, the pause; down two, SETTINGS, Cross: right (the stick layout),
+		# Circle saves; down, END GAME, Cross: the question, Circle back; up three, RESUME, Cross)
+		mppause_pad="wait:150:32000 start:150:3000 down:150:800 down:150:800 a:150:3000 right:150:1500 b:150:2500 down:150:800 a:150:2500 b:150:2000 up:150:600 up:150:600 up:150:600 a:150:3000"
+		mppause_env="HALO_NETWORK_TEST=local:bloodgulch:team_slayer HALO_NETWORK_TEST_PROFILE=1 HALO_NETWORK_TEST_START=3 HALO_BOTS=1"
+		profile_from=$HALO_TEST_PROFILE run h3mppause "$menus_data" 70 "$mppause_pad" HALO_MENU_STYLE=halo3 $mppause_env
+		# (in a party: down three to PARTY, Cross)
+		profile_from=$HALO_TEST_PROFILE run h3mppause_party "$menus_data" 45 "wait:150:32000 start:150:3000 down:150:800 down:150:800 down:150:800 a:150:2500" \
+			HALO_MENU_STYLE=halo3 HALO_TEST_MP_PAUSE_PARTY=1 $mppause_env
+		profile_from=$HALO_TEST_PROFILE run h3mppause_classic "$menus_data" 45 "wait:150:32000 start:150:3000 b:150:2000" \
+			HALO_MENU_STYLE=classic $mppause_env
+		log=$out/h3mppause/run.log
+		echo "--- h3mppause"
+		grep -aE "ui: screen|menus: h3 mp" "$log" | head -16
+		for name in h3mppause h3mppause_party h3mppause_classic; do
+			[ "$(cat "$out/$name/exit")" = 0 ] || fail h3mppause "$name: exit $(cat "$out/$name/exit")"
+			grep -aqiE "assert|exception|halt_and_catch_fire" "$out/$name/run.log" && fail h3mppause "$name: an assertion, exception or halt"
+		done
+		grep -aq "menus: Halo 3 screen h3/mppause/screen for ui.shell.multiplayer_game.pause_game.1p_pause_game" "$log" ||
+			fail h3mppause "the Halo 3 multiplayer pause did not stand for the Xbox's"
+		grep -aqE "menus: h3 mp pause: .* on Blood Gulch, teams, the host, 2 players; rows: resume, players, settings, end game" "$log" ||
+			fail h3mppause "the team game's pause did not show RESUME, PLAYERS, SETTINGS, END GAME"
+		grep -aqi "change teams" "$log" && fail h3mppause "CHANGE TEAMS was offered in the game"
+		ticks=$(sed -n '/ui: screen pc.h3.mppause.screen/,$p' "$log" | grep -ac "network test: tick")
+		[ "$ticks" -ge 3 ] || fail h3mppause "the game did not go on under the pause ($ticks ticks said)"
+		grep -aq "menus: h3 mp settings: local player 0, profile edited" "$log" || fail h3mppause "SETTINGS did not edit the profile"
+		grep -aq "menus: h3 mp settings: saved and played: stick 1" "$log" ||
+			fail h3mppause "the stick layout changed in SETTINGS was not saved and played"
+		grep -aq "ui: screen pc.h3.mppause.end_screen" "$log" || fail h3mppause "END GAME did not ask"
+		sed -n '/ui: screen pc.h3.mppause.end_screen/,$p' "$log" | grep -aq "ui: screen pc.h3.mppause.screen" ||
+			fail h3mppause "Circle on END GAME's question did not go back to the pause"
+		grep -aq "ui: screen pc.h3.main.screen" <(sed -n '/ui: screen pc.h3.mppause.screen/,$p' "$log") &&
+			fail h3mppause "the game was left (only its question was to be seen)"
+		grep -aqE "menus: h3 mp pause: .*rows: resume, players, settings, party, end game" "$out/h3mppause_party/run.log" ||
+			fail h3mppause "in a party the pause did not show PARTY"
+		grep -aq "menus: h3 mp pause: the Party page asked for" "$out/h3mppause_party/run.log" ||
+			fail h3mppause "PARTY did not ask for the Party page"
+		grep -aq "ui: screen ui.shell.multiplayer_game.pause_game.1p_pause_game" "$out/h3mppause_classic/run.log" ||
+			fail h3mppause "Menu style Halo CE did not open the Xbox's multiplayer pause"
+		grep -aq "h3/mppause\|pc.h3.mppause" "$out/h3mppause_classic/run.log" &&
+			fail h3mppause "Menu style Halo CE opened the Halo 3 multiplayer pause" ;;
+	h3friendsfit)
+		# (FORGE: its lobby's FRIENDS panel, internet play off: its line; in English, then Spanish)
+		run h3friendsfit "$menus_data" 22 "wait:150:3000 down:150:700 down:150:700 a wait:150:5000" HALO_MENU_STYLE=halo3
+		run h3friendsfit_es "$menus_data" 22 "wait:150:3000 down:150:700 down:150:700 a wait:150:5000" HALO_MENU_STYLE=halo3 \
+			HALO_LANGUAGE=es "HALO_TEST_LANG_DIR=$root/port/vita/app0/lang"
+		check_h3 h3friendsfit halo3
+		check_h3 h3friendsfit_es halo3
+		grep -aE "friends panel: status" "$out/h3friendsfit/run.log" "$out/h3friendsfit_es/run.log"
+		grep -aqE 'menus: h3 friends panel: status "Go online to see your friends" fits (one|two) lines?' "$out/h3friendsfit/run.log" ||
+			fail h3friendsfit "the panel's line did not fit (English)"
+		grep -aqE 'menus: h3 friends panel: status "Conéctate en línea para ver a tus amigos" fits (one|two) lines?' "$out/h3friendsfit_es/run.log" ||
+			fail h3friendsfit "the panel's line did not fit (Spanish)"
+		grep -aq 'menus: h3 friends panel: status .* cut' "$out/h3friendsfit/run.log" "$out/h3friendsfit_es/run.log" &&
+			fail h3friendsfit "the panel's line was cut" ;;
 	h3friendspanel)
 		# (MULTIPLAYER: the lobby's panel; Triangle: FRIENDS; B, B: the main menu, MULTIPLAYER focused; down
 		# to FORGE: its lobby's panel; Triangle; B)
@@ -1457,7 +1652,7 @@ for case in $cases; do
 		grep -aq "4way_start2join_screen\|menus: Server Browser: the profile" "$log" &&
 			fail browserprofile "internet play off: the profile screen opened anyway" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3lobbyscenes|h3modelsmany|h3friends|h3friendspanel|browserprofile|h3players|browserrows|profilepaths]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3lobbyscenes|h3modelsmany|h3friends|h3friendspanel|browserprofile|h3players|browserrows|profilepaths|h3mppause|h3friendsfit|h3hostonline]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"

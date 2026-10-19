@@ -79,6 +79,7 @@ Called from the main loop every frame (main.c).
 #include "cseries/cseries_windows.h"
 #include "main/main.h"
 #include "interface/player_ui.h"
+#include "saved games/player_profile.h"
 #include "interface/ui_widget.h"
 #include "networking/network_game_globals.h"
 #include "networking/network_client_manager.h"
@@ -1249,6 +1250,29 @@ static void network_test_pickup(
 	}
 }
 
+/* (debug: HALO_NETWORK_TEST_PROFILE) the first player profile on the
+memory card made the local player's, as SELECT PROFILE's choice makes it:
+the screens that edit the player's profile in a game (the Halo 3
+multiplayer pause's SETTINGS) have one to edit */
+static void network_test_use_profile(
+	void)
+{
+	long indices[8];
+	word count = (word)NUMBEROF(indices);
+	struct player_profile profile;
+
+	if (!getenv("HALO_NETWORK_TEST_PROFILE") || !atoi(getenv("HALO_NETWORK_TEST_PROFILE")))
+		return;
+	player_profiles_enumerate_available_to_local_player_index(0, &count, indices, FALSE);
+	if (count > 0 && player_profile_get(indices[0], &profile))
+	{
+		player_ui_set_active_player_profile(0, indices[0], &profile);
+		platform_log("network test: the first profile played");
+	}
+	else
+		platform_log("network test: no profile to play");
+}
+
 void network_test_update(
 	boolean main_menu_loaded,
 	real seconds)
@@ -1673,6 +1697,7 @@ void network_test_update(
 		if (!network_test.set_up)
 		{
 			network_test.set_up = TRUE;
+			network_test_use_profile();
 			main_set_multiplayer_map_name(network_test.map_name);
 			if (network_test.local)
 			{
@@ -1797,6 +1822,7 @@ void network_test_update(
 		if (!network_test.set_up)
 		{
 			network_test.set_up = TRUE;
+			network_test_use_profile();
 			dispose_global_network_game_client();
 			dispose_global_network_game_server();
 			if (create_global_network_game_client())

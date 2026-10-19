@@ -5832,11 +5832,24 @@ int vita_settings_input(const struct vita_host_pad *pad)
 		return 1;
 	}
 	/* (the game's menus asked for the panel: the Halo 3 main menu's Start,
-	which the panel never sees pressed, being held already) */
-	if (__atomic_exchange_n(&halo_settings_panel_request, 0, __ATOMIC_ACQ_REL) && !panel_open)
+	which the panel never sees pressed, being held already; the Halo 3
+	multiplayer pause's PARTY, its Party page) */
 	{
-		panel_begin();
-		return 1;
+		int request = __atomic_exchange_n(&halo_settings_panel_request, 0, __ATOMIC_ACQ_REL);
+
+		if (request && !panel_open)
+		{
+			if (request == HALO_SETTINGS_PANEL_PARTY)
+			{
+				tab = TAB_MULTIPLAYER;
+				page = PAGE_PARTY;
+				screen = SCREEN_LIST;
+				notice[0] = 0;
+				vita_host_log("settings: party: the Party page (the multiplayer pause's PARTY)");
+			}
+			panel_begin();
+			return 1;
+		}
 	}
 	if (both)
 	{

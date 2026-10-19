@@ -207,6 +207,12 @@ update that makes, holds and deletes its objects (main.c, before the tick) */
 void menu_scene_objects_want(char const *screen, char const *objects, int has_camera, float x, float y, float z,
 	float yaw, float pitch);
 void menu_scene_objects_update(void);
+/* (port) whether the scene asked for stands settled - made, its poses
+taken (or none to make, or it cannot be) - for a network game's lobby,
+which stops the main menu's ticks (the Halo 3 live lobby opens once it is:
+menu_functions.c h3_live). A scene not made by then is none while the
+network game lasts: all of it or none */
+int menu_scene_objects_settled(void);
 /* (port) the Customization screen's live preview: the menu_spartan pack's
 Spartan in the menu scene open now (camera NULL) or in front of the camera
 "<ui.map camera point> [x y z yaw pitch]" (degrees, as scene=), placed

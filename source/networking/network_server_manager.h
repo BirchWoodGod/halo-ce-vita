@@ -78,6 +78,15 @@ it would otherwise have been told. Nothing new on the wire: every build's
 client waits so (a dedicated server's held joins, network version 18) */
 void network_game_server_port_map_pending(
 	struct network_game_server *server);
+/* port: whether the game is in its lobby (pregame, not starting yet) */
+boolean network_game_server_port_in_lobby(
+	struct network_game_server *server);
+/* port: the Halo 3 live lobby's START GAME: the countdown begun now,
+milliseconds long, once the game can start (FALSE: not yet; it begins as the
+lobby's does once others are in). The game waits for every machine's map */
+boolean network_game_server_port_start_soon(
+	struct network_game_server *server,
+	long milliseconds);
 /* port: co-op server settings: the difficulty, sent to clients, and the
 build's maximum players (Server Setup's player count is for PvP) */
 void network_game_server_port_set_cooperative(

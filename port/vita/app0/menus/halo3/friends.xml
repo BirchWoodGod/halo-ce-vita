@@ -204,6 +204,9 @@ The settings panel's Multiplayer > Friends does the same. The art is this folder
 	<widget name="h3/friends/lobby_title" type="text" left="380" top="300" width="120" height="16" font="h3/font_small" color="#FF9FB6CC" text_y="1" string_list="h3/friends_text" string_index="0"/>
 	<widget name="h3/friends/lobby_count" type="text" left="500" top="300" width="132" height="16" align="right" font="h3/font_small" color="#FF9FB6CC" text_y="1"/>
 	<widget name="h3/friends/lobby_rule" left="380" top="318" width="252" height="2" bitmap="h3/rule"/>
+	<!-- (with no one to show: what the friends list says - "Go online to see your friends" -, across
+	the panel, in two lines when one is too narrow: port h3 friends panel) -->
+	<widget name="h3/friends/lobby_status" type="text" left="380" top="322" width="252" height="34" font="h3/font_small" color="#FFC5D0DD" text_y="1"/>
 	<widget name="h3/friends/lobby_name_1" type="text" left="380" top="322" width="108" height="16" font="h3/font_small" color="#FFEEF2F6" text_y="1"/>
 	<widget name="h3/friends/lobby_state_1" type="text" left="490" top="322" width="142" height="16" font="h3/font_small" color="#FFC5D0DD" text_y="1"/>
 	<widget name="h3/friends/lobby_name_2" type="text" left="380" top="338" width="108" height="16" font="h3/font_small" color="#FFEEF2F6" text_y="1"/>
@@ -221,6 +224,7 @@ The settings panel's Multiplayer > Friends does the same. The art is this folder
 		<child widget="h3/friends/lobby_title"/>
 		<child widget="h3/friends/lobby_count"/>
 		<child widget="h3/friends/lobby_rule"/>
+		<child widget="h3/friends/lobby_status"/>
 		<child widget="h3/friends/lobby_name_1"/>
 		<child widget="h3/friends/lobby_state_1"/>
 		<child widget="h3/friends/lobby_name_2"/>
@@ -233,5 +237,112 @@ The settings panel's Multiplayer > Friends does the same. The art is this folder
 		<child widget="h3/friends/lobby_state_5"/>
 		<child widget="h3/friends/lobby_y_butn"/>
 		<child widget="h3/friends/lobby_hint"/>
+	</widget>
+
+	<!-- INVITE FRIENDS (L in the live multiplayer lobby and the game's lobby, the host's online):
+	the friends online, what each is doing, INVITE when the game can take them; Cross sends the
+	chosen one the friends' invite into this Vita's game (sealed for them alone; one a friend a
+	while), the outcome said under the list (menu_functions.c "port h3 invite ...") -->
+	<strings name="h3/invite_text">
+		<string text="INVITE FRIENDS"/>
+		<string text="Invite"/>
+	</strings>
+	<widget name="h3/invite/title" type="text" left="28" top="26" width="260" height="26" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/invite_text" string_index="0"/>
+	<widget name="h3/invite/invite_status" type="text" left="250" top="31" width="366" height="18" align="right" font="h3/font_small" color="#FF9FB6CC" text_y="1"/>
+	<widget name="h3/invite/invite_help" type="text" left="28" top="62" width="590" height="18" font="h3/font_small" color="#FFCFD9E3" text_y="1"/>
+	<widget name="h3/invite/row_1" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 invite act"/>
+		<child widget="h3/friends/row_name"/>
+		<child widget="h3/friends/row_state"/>
+		<child widget="h3/friends/row_tag"/>
+	</widget>
+	<widget name="h3/invite/row_2" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 invite act"/>
+		<child widget="h3/friends/row_name"/>
+		<child widget="h3/friends/row_state"/>
+		<child widget="h3/friends/row_tag"/>
+	</widget>
+	<widget name="h3/invite/row_3" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 invite act"/>
+		<child widget="h3/friends/row_name"/>
+		<child widget="h3/friends/row_state"/>
+		<child widget="h3/friends/row_tag"/>
+	</widget>
+	<widget name="h3/invite/row_4" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 invite act"/>
+		<child widget="h3/friends/row_name"/>
+		<child widget="h3/friends/row_state"/>
+		<child widget="h3/friends/row_tag"/>
+	</widget>
+	<widget name="h3/invite/row_5" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 invite act"/>
+		<child widget="h3/friends/row_name"/>
+		<child widget="h3/friends/row_state"/>
+		<child widget="h3/friends/row_tag"/>
+	</widget>
+	<widget name="h3/invite/row_6" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 invite act"/>
+		<child widget="h3/friends/row_name"/>
+		<child widget="h3/friends/row_state"/>
+		<child widget="h3/friends/row_tag"/>
+	</widget>
+	<widget name="h3/invite/row_7" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 invite act"/>
+		<child widget="h3/friends/row_name"/>
+		<child widget="h3/friends/row_state"/>
+		<child widget="h3/friends/row_tag"/>
+	</widget>
+	<widget name="h3/invite/row_8" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 invite act"/>
+		<child widget="h3/friends/row_name"/>
+		<child widget="h3/friends/row_state"/>
+		<child widget="h3/friends/row_tag"/>
+	</widget>
+	<widget name="h3/invite/row_9" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 invite act"/>
+		<child widget="h3/friends/row_name"/>
+		<child widget="h3/friends/row_state"/>
+		<child widget="h3/friends/row_tag"/>
+	</widget>
+	<widget name="h3/invite/row_10" width="600" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 invite act"/>
+		<child widget="h3/friends/row_name"/>
+		<child widget="h3/friends/row_state"/>
+		<child widget="h3/friends/row_tag"/>
+	</widget>
+	<widget name="h3/invite/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port h3 invite"/>
+		<child widget="h3/invite/row_1" x="20" y="108"/>
+		<child widget="h3/invite/row_2" x="20" y="128"/>
+		<child widget="h3/invite/row_3" x="20" y="148"/>
+		<child widget="h3/invite/row_4" x="20" y="168"/>
+		<child widget="h3/invite/row_5" x="20" y="188"/>
+		<child widget="h3/invite/row_6" x="20" y="208"/>
+		<child widget="h3/invite/row_7" x="20" y="228"/>
+		<child widget="h3/invite/row_8" x="20" y="248"/>
+		<child widget="h3/invite/row_9" x="20" y="268"/>
+		<child widget="h3/invite/row_10" x="20" y="288"/>
+	</widget>
+	<widget name="h3/invite/invite_message" type="text" left="28" top="336" width="590" height="36" font="h3/font_small" color="#FFF0D090"/>
+	<widget name="h3/invite/a_label" type="text" left="44" top="443" width="96" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/invite_text" string_index="1"/>
+	<widget name="h3/invite/screen" flags="pass_unhandled_to_focused_child">
+		<on event="created" run="port h3 invite init"/>
+		<on event="b back" back="true"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/friends/strip"/>
+		<child widget="h3/friends/rule"/>
+		<child widget="h3/invite/title"/>
+		<child widget="h3/invite/invite_status"/>
+		<child widget="h3/invite/invite_help"/>
+		<child widget="h3/friends/panel"/>
+		<child widget="h3/friends/header_name"/>
+		<child widget="h3/friends/header_state"/>
+		<child widget="h3/invite/list"/>
+		<child widget="h3/invite/invite_message"/>
+		<child widget="h3/friends/buttons"/>
+		<child widget="h3/friends/a_butn"/>
+		<child widget="h3/invite/a_label"/>
+		<child widget="h3/friends/b_butn"/>
+		<child widget="h3/friends/back"/>
 	</widget>
 </menus>
