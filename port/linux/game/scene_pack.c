@@ -301,7 +301,7 @@ struct build_state
 
 /* ---------- globals */
 
-void (*scene_pack_io_hook)(unsigned long bytes) = NULL;
+void (*scene_pack_io_hook)(unsigned long bytes, boolean source) = NULL;
 struct scene_pack_copy_source const *scene_pack_copy_source = NULL;
 
 /* ---------- prototypes */
@@ -374,7 +374,14 @@ scene_pack_io_hook) */
 static void io_done(unsigned long bytes)
 {
 	if (scene_pack_io_hook)
-		scene_pack_io_hook(bytes);
+		scene_pack_io_hook(bytes, FALSE);
+}
+
+/* (the same, of the source map) */
+static void io_done_source(unsigned long bytes)
+{
+	if (scene_pack_io_hook)
+		scene_pack_io_hook(bytes, TRUE);
 }
 
 static void why_set(char *why, long why_size, char const *format, char const *detail)
@@ -1064,7 +1071,7 @@ static boolean source_read(struct source_reader *reader, unsigned long offset, u
 				return FALSE;
 			done += chunk;
 			reader->phase_read += chunk;
-			io_done(chunk);
+			io_done_source(chunk);
 			if (reader->progress && reader->phase_total)
 				*reader->progress = reader->progress_base +
 					(long)(MIN(reader->phase_read, reader->phase_total) * 49 / reader->phase_total);
@@ -1091,7 +1098,7 @@ static boolean source_read(struct source_reader *reader, unsigned long offset, u
 
 			if (!read)
 				return FALSE;
-			io_done((unsigned long)read);
+			io_done_source((unsigned long)read);
 			reader->stream.next_in = reader->input;
 			reader->stream.avail_in = (uInt)read;
 		}
@@ -2778,7 +2785,9 @@ static boolean build_many_once(
 	boolean try_copy,
 	boolean *copy_changed)
 {
-	struct build_job *jobs = calloc((size_t)count, sizeof(struct build_job));
+	/* (malloc's: the game's free is its debug allocator's, which calloc's
+	blocks are not) */
+	struct build_job *jobs = malloc((size_t)count * sizeof(struct build_job));
 	struct source_reader reader;
 	unsigned char header[CACHE_FILE_HEADER_SIZE];
 	unsigned long long started = vita_host_time_us();
@@ -2796,6 +2805,8 @@ static boolean build_many_once(
 
 	*copy_changed = FALSE;
 	memset(&reader, 0, sizeof(reader));
+	if (jobs)
+		memset(jobs, 0, (size_t)count * sizeof(struct build_job));
 	for (job_index = 0; job_index < count; job_index++)
 	{
 		memset(&results[job_index], 0, sizeof(results[job_index]));

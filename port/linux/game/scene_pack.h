@@ -204,9 +204,10 @@ struct scene_pack_copy_source
 /* ---------- globals */
 
 /* (scene_packs.c) called by a build and a load after each of their reads
-and writes, with its bytes: the build's thread pauses and paces itself
-there. NULL (the tools): nothing */
-extern void (*scene_pack_io_hook)(unsigned long bytes);
+and writes, with its bytes (source: a read of the source map, else of a
+pack): the build's thread pauses and paces itself there. NULL (the tools):
+nothing */
+extern void (*scene_pack_io_hook)(unsigned long bytes, boolean source);
 /* (scene_packs.c) the maps' copies a build may read, NULL for none */
 extern struct scene_pack_copy_source const *scene_pack_copy_source;
 

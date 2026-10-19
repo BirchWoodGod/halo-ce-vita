@@ -214,12 +214,19 @@ claimed under this, or both took the same slot, one read was lost and its
 texture or sound never finished loading */
 static volatile int cache_request_claim_lock;
 /* (port) a request for a Custom Edition map's bitmap (cache_file_read_bitmap):
-its tag (NONE: an Xbox map's read) and unrounded size, by request slot */
+its tag (NONE: an Xbox map's read; CACHE_REQUEST_SCENE_PACK: a scene pack's
+bitmap, port/linux/game/scene_packs.c) and unrounded size, by request slot */
+#define CACHE_REQUEST_SCENE_PACK (-2)
 static struct
 {
 	long tag_index;
 	long size;
 } cache_request_custom_edition[512];
+
+/* (port) each cache file's copies begun (a new map copied into it, or its
+copy forgotten), for the scene packs' builder: a copy it reads is the same
+copy until this changes */
+static unsigned long cached_map_file_generations[6 /* NUMBER_OF_CACHED_MAP_FILES */];
 
 static boolean custom_edition_reads_on_thread(
 	void)
@@ -894,6 +901,7 @@ boolean cache_files_forget_cached_map(
 	{
 		return FALSE;
 	}
+	__atomic_add_fetch(&cached_map_file_generations[map_file_index], 1, __ATOMIC_ACQ_REL);
 	memset(&cached_map_file_get(map_file_index)->header, 0, sizeof(struct cache_file_header));
 	error(_error_silent, "cache partition: the copy of '%s' (cache file %d) is forgotten", name, map_file_index);
 
@@ -1098,6 +1106,11 @@ boolean cache_files_precache_map_begin(
 #endif
 			map_file = cached_map_file_get(map_file_index);
 
+#ifdef HALO_LINUX
+			/* (another copy into it: the scene packs' builder reading the
+			last one stops) */
+			__atomic_add_fetch(&cached_map_file_generations[map_file_index], 1, __ATOMIC_ACQ_REL);
+#endif
 			memset(
 				&map_file->header,
 				0,
@@ -1258,6 +1271,81 @@ void cache_file_block_until_not_busy(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) whether a read of the game's is waiting or under way (the scene
+packs' prebuild waits for them: port/linux/game/scene_packs.c) */
+int cache_files_reads_pending(
+	void)
+{
+	short request_index;
+
+	if (!cache_file_globals.requests)
+	{
+		return FALSE;
+	}
+	for (request_index = 0;
+		request_index < MAXIMUM_SIMULTANEOUS_CACHE_REQUESTS;
+		request_index++)
+	{
+		if (__atomic_load_n(&cache_file_globals.requests[request_index].pending, __ATOMIC_RELAXED))
+		{
+			return TRUE;
+		}
+	}
+
+	return FALSE;
+}
+
+/* (port) the scene packs' builder (port/linux/game/scene_pack.c, on its own
+thread): the cache file that holds the map's decompressed copy, opened to
+read (NULL if none holds it, or it is being copied to), and a token of that
+copy (the builder checks the copy's header itself) */
+FILE *cache_files_cached_copy_open(
+	char const *map,
+	unsigned long *token)
+{
+	char path[256];
+	short map_file_index;
+	unsigned long generation;
+
+	*token = 0;
+	if (!map || !map[0])
+	{
+		return NULL;
+	}
+	map_file_index = cached_map_files_find_map(map);
+	if (map_file_index == NONE ||
+		(__atomic_load_n(&cache_file_globals.copy_in_progress, __ATOMIC_ACQUIRE) &&
+			cache_file_globals.copying_to_map_file_index == map_file_index))
+	{
+		return NULL;
+	}
+#ifdef HALO_DEDICATED_SERVER
+	if (shared_precache.slot_shared[map_file_index])
+	{
+		return NULL;
+	}
+#endif
+	generation = __atomic_load_n(&cached_map_file_generations[map_file_index], __ATOMIC_ACQUIRE);
+	*token = ((unsigned long)map_file_index << 24) | (generation & 0xFFFFFF);
+	cached_map_file_get_path(map_file_index, path);
+
+	return fopen(path, "rb");
+}
+
+/* (port) whether the copy a token names is still the same copy */
+boolean cache_files_cached_copy_unchanged(
+	unsigned long token)
+{
+	short map_file_index = (short)(token >> 24);
+
+	return map_file_index >= 0 && map_file_index < NUMBER_OF_CACHED_MAP_FILES &&
+		(__atomic_load_n(&cached_map_file_generations[map_file_index], __ATOMIC_ACQUIRE) & 0xFFFFFF) == (token & 0xFFFFFF) &&
+		!(__atomic_load_n(&cache_file_globals.copy_in_progress, __ATOMIC_ACQUIRE) &&
+			cache_file_globals.copying_to_map_file_index == map_file_index);
+}
+#endif
+
 void cache_file_close(
 	void)
 {
@@ -1400,11 +1488,21 @@ short cache_file_read(
 	boolean custom_edition = custom_edition_cache_tags_loaded();
 
 	/* (a scene pack's pixels or samples, at its file offsets: served from
-	its file at once, port/linux/game/scene_packs.c) */
+	its file, port/linux/game/scene_packs.c - a bitmap's not waited for by
+	the cache file thread, as a map's are, the others at once: a pack's
+	textures read on the render's thread held its frame for as long as the
+	memory card took. HALO_PACK_READ_THREAD=0: all at once, as before) */
+	boolean pack_read = FALSE;
 	{
 		boolean scene_packs_read(long offset, long size, void *buffer);
+		boolean scene_packs_offset(long offset);
+		static int pack_reads_on_thread = -1;
 
-		if (!custom_edition && scene_packs_read(offset, size, buffer))
+		if (pack_reads_on_thread < 0)
+			pack_reads_on_thread = !getenv("HALO_PACK_READ_THREAD") || atoi(getenv("HALO_PACK_READ_THREAD")) != 0;
+		pack_read = !custom_edition && scene_packs_offset(offset);
+		if (pack_read && (!bitmap || blocking || !pack_reads_on_thread || size < 0) &&
+			scene_packs_read(offset, size, buffer))
 		{
 			*completion_flag_reference = TRUE;
 
@@ -1480,9 +1578,10 @@ short cache_file_read(
 	request->buffer = buffer;
 #ifdef HALO_LINUX
 	/* (a Custom Edition map's bitmap: read by the cache file thread from
-	the map's own files, at its own size) */
-	cache_request_custom_edition[request_index].tag_index = custom_edition ? tag_index : NONE;
-	cache_request_custom_edition[request_index].size = custom_edition ? request_size : 0;
+	the map's own files, at its own size; a scene pack's, from its file) */
+	cache_request_custom_edition[request_index].tag_index = custom_edition ? tag_index :
+		pack_read ? CACHE_REQUEST_SCENE_PACK : NONE;
+	cache_request_custom_edition[request_index].size = custom_edition || pack_read ? request_size : 0;
 	/* (the request is filled in before the cache file thread can see it
 	pending: on the Vita's cores it could see the flag before the fields
 	and read with the slot's last offset, size and completion flag) */
@@ -1932,12 +2031,18 @@ static void cache_file_windows_thread_proc(
 
 				if (cache_request_custom_edition[index].tag_index != NONE)
 				{
+					boolean scene_packs_read(long offset, long size, void *buffer);
+
 					/* (a Custom Edition map's bitmap: read here, from its
-					files, and done) */
+					files, and done; a scene pack's, from its file) */
 					best_request->running = TRUE;
-					custom_edition_cache_read(cache_request_custom_edition[index].tag_index,
-						(long)best_request->overlapped.Offset, cache_request_custom_edition[index].size,
-						best_request->buffer);
+					if (cache_request_custom_edition[index].tag_index == CACHE_REQUEST_SCENE_PACK)
+						scene_packs_read((long)best_request->overlapped.Offset, cache_request_custom_edition[index].size,
+							best_request->buffer);
+					else
+						custom_edition_cache_read(cache_request_custom_edition[index].tag_index,
+							(long)best_request->overlapped.Offset, cache_request_custom_edition[index].size,
+							best_request->buffer);
 					cache_request_custom_edition[index].tag_index = NONE;
 					__atomic_store_n((volatile boolean *)best_request->overlapped.hEvent, TRUE, __ATOMIC_RELEASE);
 					best_request->running = FALSE;

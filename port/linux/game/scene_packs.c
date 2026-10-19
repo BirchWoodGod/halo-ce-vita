@@ -58,6 +58,7 @@ HALO_SCENE_PACKS=0 turns them off (nothing is wanted, built or loaded).
 #include "scenario/scenario.h"
 #include "scenario/scenario_definitions.h"
 #include "tag_files/tag_groups.h"
+#include "game/game.h"
 #include "game/players.h"
 #include "objects/objects.h"
 #include "units/units.h"
@@ -88,6 +89,12 @@ void *cache_files_tag_instances(long *count);
 void cache_files_set_tag_instances(void *instances, long count);
 void tag_validate_reserve_after_tags(unsigned long bytes);
 boolean sound_cache_sound_in_use(struct sound_permutation *sound);
+int halo_main_menu_idle(void);
+FILE *cache_files_cached_copy_open(char const *map, unsigned long *token);
+boolean cache_files_cached_copy_unchanged(unsigned long token);
+#ifdef HALO_VITA
+void vita_host_thread_priority_set(int priority);
+#endif
 void sound_cache_sound_delete(struct sound_permutation *sound);
 
 /* ---------- constants */
@@ -139,6 +146,27 @@ struct scene_pack_slot
 	loaded and nothing uses it; a load that waits for room (said once) */
 	boolean release_wanted;
 	boolean waiting_said;
+	/* (the worker's) its tags read, checked (as scene_pack_load_file
+	checks a pack) and given the tag indices, salt and file offsets the
+	game's table would give them next (staged_...), at tags, its file open
+	(file): put in the game at the top of the next frame (pack_commit),
+	there and then, or let go (pack_unstage) */
+	boolean staged;
+	long staged_first_index;
+	long staged_salt;
+	unsigned long staged_file_base;
+	/* (the worker's) its load found no room: not tried again until the
+	packs' room or tables change (what they were then) */
+	boolean full;
+	unsigned long full_reserved;
+	short full_tables;
+	/* (the worker's) its load refused it: deleted and built once more by
+	the game thread */
+	boolean refused;
+	/* (the worker's) its build's progress while it builds, NULL otherwise */
+	long volatile const *progress;
+	/* when it was wanted (to be loaded), for the time it took */
+	unsigned long long wanted_us;
 };
 
 /* ---------- globals */
@@ -157,11 +185,10 @@ static struct
 	long original_count;
 	void *tables[MAXIMUM_LOADED_SCENE_PACKS];
 	short table_count;
-	/* the build thread: the slot it builds (NONE), its scratch in the tag
-	cache, whether it should stop */
+	/* the worker (one job at a time): its thread, its scratch in the tag
+	cache (the free room), whether it should stop */
 	pthread_t thread;
 	boolean thread_running;
-	short building;
 	unsigned char *scratch;
 	unsigned long scratch_size;
 	int volatile cancel;
@@ -169,7 +196,37 @@ static struct
 	/* the salt the next pack's tags are given at least (a pack let go: the
 	next one's indices are its, never its tag indices) */
 	long next_salt;
-} scene_packs = { { { 0 } }, 0, 0, 0, NULL, 0, { NULL }, 0, 0, FALSE, NONE };
+	/* the worker's job: the slots it checks and builds (their indices), the
+	slot it then loads (NONE: none), whether it is a prebuild's (low: paced,
+	paused while the game reads or plays), the game's table and file range
+	as the slot loaded will find them (its indices, salt and file offsets,
+	whether the table and range have room), done; stopped to make way for a
+	pack wanted now (preempted: its slots built again later) */
+	struct
+	{
+		short slots[MAXIMUM_SCENE_PACK_SLOTS];
+		short slot_count;
+		short load;
+		int volatile low;
+		long first_index;
+		long salt;
+		unsigned long file_base;
+		boolean table_room;
+		unsigned long file_room;
+		int volatile done;
+		boolean preempted;
+	} job;
+	/* the game thread's word to the worker: its builds pause (a map being
+	copied to the cache partition, a network game joined; a prebuild's
+	also while the game reads) */
+	int volatile pause_builds;
+	int volatile pause_prebuilds;
+} scene_packs = { { { 0 } }, 0, 0, 0, NULL, 0, { NULL }, 0, 0, FALSE };
+
+/* the worker's builds' results (its slots' progress points into them) */
+static struct scene_pack_build_result scene_packs_build_results[MAXIMUM_SCENE_PACK_SLOTS];
+/* (the worker thread's) whether this thread is the worker */
+static __thread boolean scene_packs_on_worker = FALSE;
 
 /* (each map's tags loaded counts one: a character made on another map
 is gone with it, menu_scene_objects.c) */
@@ -283,6 +340,64 @@ boolean scene_packs_recipe_register(
 
 /* ---------- private code */
 
+/* (tests: HALO_TEST_SLOW_IO=<KB/s>[:all], never on the Vita or in a
+release build) the packs' own reads and writes - a pack's load, its
+pixels' reads, a build's writes; with :all, a build's reads of its source
+map too - paced to that rate on the thread that makes them, as a slow
+memory card would: a game thread that waits for one shows it (its frame,
+below) */
+static void slow_io_pace(unsigned long bytes, boolean source)
+{
+#if !defined(HALO_VITA) && !defined(HALO_RELEASE)
+	static long rate = -1;
+	static boolean all = FALSE;
+	static __thread unsigned long long owed_us;
+
+	if (rate < 0)
+	{
+		char const *setting = getenv("HALO_TEST_SLOW_IO");
+
+		rate = setting ? atol(setting) : 0;
+		all = setting && strstr(setting, ":all") != NULL;
+		if (rate > 0)
+			platform_log("scene packs: HALO_TEST_SLOW_IO: the packs' reads and writes%s at %ld KB/s",
+				all ? ", and their source maps'," : "", rate);
+	}
+	if (rate <= 0 || (source && !all))
+		return;
+	owed_us += (unsigned long long)bytes * 1000000ull / ((unsigned long long)rate * 1024ull);
+	if (owed_us >= 1000)
+	{
+		Sleep((DWORD)(owed_us / 1000));
+		owed_us %= 1000;
+	}
+#else
+	(void)bytes;
+	(void)source;
+#endif
+}
+
+/* the game's cache partition's decompressed copies of the maps
+(cache_files_windows.c), which a build reads in place of inflating a map */
+static struct scene_pack_copy_source const scene_packs_copy_source =
+{
+	cache_files_cached_copy_open,
+	cache_files_cached_copy_unchanged
+};
+
+/* the game thread's time in the packs' work, once it is long enough to be
+a frame's hitch: logged ("scene packs: game thread: ...") */
+#define GAME_THREAD_LOG_US 16000ull
+
+static void game_thread_time(char const *what, char const *name, unsigned long long started)
+{
+	unsigned long long spent = vita_host_time_us() - started;
+
+	if (spent >= GAME_THREAD_LOG_US)
+		platform_log("scene packs: game thread: %s%s%s took %.1f ms", what, name ? " " : "", name ? name : "",
+			(double)spent / 1000.0);
+}
+
 static boolean scene_packs_enabled(void)
 {
 	char const *setting = getenv("HALO_SCENE_PACKS");
@@ -365,6 +480,9 @@ static unsigned char *tag_cache_room(unsigned char **room_end)
 	return start;
 }
 
+/* the slot's pack file checked against its recipe and source map now (its
+header, scene_pack_open; its source map, the one it was built from, still
+one of the recipe's and of the same identity): TRUE if it may be loaded */
 static boolean pack_current(struct scene_pack_slot *slot)
 {
 	unsigned long long source_hash;
@@ -377,8 +495,17 @@ static boolean pack_current(struct scene_pack_slot *slot)
 		snprintf(slot->why, sizeof(slot->why), "its recipe or builder changed");
 		return FALSE;
 	}
-	if (!scene_pack_source_check(slot->recipe, cache_files_map_directory(), map, sizeof(map), &source_hash, NULL, 0) ||
-		strcmp(map, slot->info.source_map) || source_hash != slot->info.source_hash)
+	/* (an Xbox map's: any of the recipe's maps it was built from, as it was;
+	a Custom Edition map's: the first there of the identity it gives) */
+	if (slot->recipe->custom_edition_map_count ?
+		(!scene_pack_source_check(slot->recipe, cache_files_map_directory(), map, sizeof(map), &source_hash, NULL, 0) ||
+			strcmp(map, slot->info.source_map)) :
+		!scene_pack_source_identity(slot->recipe, cache_files_map_directory(), slot->info.source_map, &source_hash))
+	{
+		snprintf(slot->why, sizeof(slot->why), "its source map changed");
+		return FALSE;
+	}
+	if (source_hash != slot->info.source_hash)
 	{
 		snprintf(slot->why, sizeof(slot->why), "its source map changed");
 		return FALSE;
@@ -386,27 +513,25 @@ static boolean pack_current(struct scene_pack_slot *slot)
 	return TRUE;
 }
 
-/* (the build thread, or the caller of scene_packs_load_now) the pack
-checked, built if it must be: TRUE if it may be loaded */
-static boolean pack_prepare(struct scene_pack_slot *slot, unsigned char *scratch, unsigned long scratch_size)
+/* (the worker; or the caller of scene_packs_load_now) a build's end, for
+a slot: logged, and the pack built checked as any (pack_current) */
+static boolean pack_built(struct scene_pack_slot *slot, struct scene_pack_build_result const *result, boolean built,
+	short others)
 {
-	if (pack_current(slot))
-		return TRUE;
-	platform_log("scene packs: %s: building it (%s)", slot->name, slot->why);
-	CreateDirectoryA(SCENE_PACKS_FOLDER, NULL);
-	if (!scene_pack_build(slot->recipe, cache_files_map_directory(), slot->path, scratch, scratch_size,
-		&scene_packs.cancel, &slot->build))
+	slot->build = *result;
+	slot->progress = NULL;
+	if (!built)
 	{
-		snprintf(slot->why, sizeof(slot->why), "%s", slot->build.why);
+		snprintf(slot->why, sizeof(slot->why), "%s", result->why[0] ? result->why : "it could not be built");
 		platform_log("scene packs: %s: not built: %s", slot->name, slot->why);
 		return FALSE;
 	}
 	slot->built = TRUE;
-	platform_log("scene packs: %s: built from %s in %.1f ms: %ld tags (%ld references left out), %lu KB of tags, "
-		"%lu KB of pixels and samples, %lu KB file (%.1f MB of the map read)", slot->name, slot->build.map,
-		(double)slot->build.microseconds / 1000.0, slot->build.tag_count, slot->build.stripped_count,
-		slot->build.tag_bytes / 1024, slot->build.data_bytes / 1024, slot->build.file_bytes / 1024,
-		(double)slot->build.source_bytes / (1024.0 * 1024.0));
+	platform_log("scene packs: %s: built from %s in %.1f ms%s: %ld tags (%ld references left out), %lu KB of tags, "
+		"%lu KB of pixels and samples, %lu KB file (%.1f MB of the map read%s)", slot->name, result->map,
+		(double)result->microseconds / 1000.0, others ? " with other packs in the same read" : "", result->tag_count,
+		result->stripped_count, result->tag_bytes / 1024, result->data_bytes / 1024, result->file_bytes / 1024,
+		(double)result->source_bytes / (1024.0 * 1024.0), others ? ", for all of them" : "");
 	if (!pack_current(slot))
 	{
 		platform_log("scene packs: %s: the pack built cannot be opened: %s", slot->name, slot->why);
@@ -415,159 +540,509 @@ static boolean pack_prepare(struct scene_pack_slot *slot, unsigned char *scratch
 	return TRUE;
 }
 
-static void *build_thread(void *context)
+/* the map a build of the lead slot (of slots[], those needing a build)
+reads: of the lead's recipe's maps there, one read in place (its maps
+folder file not compressed, or the game's decompressed copy of it:
+scene_pack_source_seekable) first, then (shared: not for a pack wanted now,
+which a larger map's read would delay) the one most of the others also
+name (one read for them all), then the recipe's order. FALSE if none */
+static boolean build_map_choose(struct scene_pack_slot *const *slots, short count, short lead, boolean shared, char *map,
+	long map_size)
 {
-	struct scene_pack_slot *slot = context;
+	struct scene_pack_recipe const *recipe = slots[lead]->recipe;
+	char const *directory = cache_files_map_directory();
+	long best_score = -1;
+	short index, other;
 
-	state_set(slot, pack_prepare(slot, scene_packs.scratch, scene_packs.scratch_size) ? _scene_pack_state_ready :
-		_scene_pack_state_failed);
-	slot->ready_us = vita_host_time_us();
+	for (index = 0; index < recipe->map_count; index++)
+	{
+		unsigned long long hash;
+		long score;
+
+		if (!scene_pack_source_identity(recipe, directory, recipe->maps[index], &hash))
+			continue;
+		score = scene_pack_source_seekable(directory, recipe->maps[index]) ? 1000 : 0;
+		for (other = 0; shared && other < count; other++)
+		{
+			if (other != lead && slots[other] && !slots[other]->recipe->custom_edition_map_count &&
+				scene_pack_source_identity(slots[other]->recipe, directory, recipe->maps[index], &hash))
+			{
+				score++;
+			}
+		}
+		if (score > best_score)
+		{
+			best_score = score;
+			snprintf(map, (size_t)map_size, "%s", recipe->maps[index]);
+		}
+	}
+	return best_score >= 0;
+}
+
+/* (the worker; or the caller of scene_packs_load_now) the slots' packs
+checked, and those not current built - those that can share one read of a
+map in one (scene_pack_build_many), the first's group first; each slot
+ready, or failed (its why). only_first: the first slot's group alone, the
+others left needing it (*left: how many) */
+static void packs_prepare(struct scene_pack_slot **slots, short count, unsigned char *scratch, unsigned long scratch_size,
+	boolean only_first, short *left)
+{
+	struct scene_pack_slot *need[MAXIMUM_SCENE_PACK_SLOTS];
+	short index;
+
+	if (left)
+		*left = 0;
+	for (index = 0; index < count; index++)
+	{
+		need[index] = NULL;
+		if (!slots[index] || scene_packs.cancel)
+			continue;
+		if (pack_current(slots[index]))
+		{
+			state_set(slots[index], _scene_pack_state_ready);
+			continue;
+		}
+		need[index] = slots[index];
+	}
+	for (;;)
+	{
+		struct scene_pack_recipe const *recipes[MAXIMUM_SCENE_PACK_SLOTS];
+		char const *paths[MAXIMUM_SCENE_PACK_SLOTS];
+		struct scene_pack_slot *group[MAXIMUM_SCENE_PACK_SLOTS];
+		char map[SCENE_PACK_NAME_SIZE];
+		short lead, group_count = 0;
+		boolean built;
+
+		for (lead = 0; lead < count && !need[lead]; lead++)
+			;
+		if (lead == count || scene_packs.cancel)
+			break;
+		CreateDirectoryA(SCENE_PACKS_FOLDER, NULL);
+		/* (a Custom Edition map's: alone) */
+		if (need[lead]->recipe->custom_edition_map_count)
+		{
+			struct scene_pack_slot *slot = need[lead];
+
+			need[lead] = NULL;
+			platform_log("scene packs: %s: building it (%s)", slot->name, slot->why);
+			slot->progress = &scene_packs_build_results[0].progress;
+			built = scene_pack_build(slot->recipe, cache_files_map_directory(), slot->path, scratch, scratch_size,
+				&scene_packs.cancel, &scene_packs_build_results[0]);
+			state_set(slot, pack_built(slot, &scene_packs_build_results[0], built, 0) ? _scene_pack_state_ready :
+				_scene_pack_state_failed);
+			if (only_first)
+				break;
+			continue;
+		}
+		if (!build_map_choose(need, count, lead, !only_first, map, sizeof(map)))
+		{
+			struct scene_pack_slot *slot = need[lead];
+
+			need[lead] = NULL;
+			snprintf(slot->why, sizeof(slot->why), "none of its maps (%s...) is in the maps folder", slot->recipe->maps[0]);
+			platform_log("scene packs: %s: not built: %s", slot->name, slot->why);
+			state_set(slot, _scene_pack_state_failed);
+			if (only_first)
+				break;
+			continue;
+		}
+		for (index = lead; index < count; index++)
+		{
+			unsigned long long hash;
+
+			if (need[index] && !need[index]->recipe->custom_edition_map_count &&
+				scene_pack_source_identity(need[index]->recipe, cache_files_map_directory(), map, &hash))
+			{
+				group[group_count] = need[index];
+				recipes[group_count] = need[index]->recipe;
+				paths[group_count] = need[index]->path;
+				need[index]->progress = &scene_packs_build_results[group_count].progress;
+				scene_packs_build_results[group_count].progress = 0;
+				platform_log("scene packs: %s: building it from %s%s (%s)", need[index]->name, map,
+					scene_pack_source_seekable(cache_files_map_directory(), map) ? ", read in place" : "", need[index]->why);
+				group_count++;
+				need[index] = NULL;
+			}
+		}
+		built = scene_pack_build_many(recipes, group_count, map, cache_files_map_directory(), paths, scratch, scratch_size,
+			&scene_packs.cancel, scene_packs_build_results);
+		(void)built;
+		for (index = 0; index < group_count; index++)
+		{
+			boolean this_built = !scene_packs_build_results[index].why[0];
+
+			/* (stopped to make way for another: built again later) */
+			if (scene_packs.cancel && scene_packs.job.preempted)
+			{
+				group[index]->progress = NULL;
+				continue;
+			}
+			state_set(group[index], pack_built(group[index], &scene_packs_build_results[index], this_built,
+				(short)(group_count - 1)) ? _scene_pack_state_ready : _scene_pack_state_failed);
+		}
+		if (only_first)
+			break;
+	}
+	for (index = 0; left && index < count; index++)
+	{
+		if (need[index])
+			(*left)++;
+	}
+}
+
+/* (the worker; or the caller of scene_packs_load_now) the slot's pack,
+built and current, read into room (room_size bytes) and checked there (the
+pack opened once, its tags read once and checked as read, its data's CRC by
+the same handle, which then serves its reads: scene_pack_load_file), given
+the job's tag indices, salt and file offsets: staged. Otherwise full (no
+room: the tag cache, the table, the file range) or refused (damaged) */
+static void pack_stage(struct scene_pack_slot *slot, unsigned char *room, unsigned long room_size)
+{
+	unsigned long long started = vita_host_time_us();
+	FILE *file;
+	long count;
+
+	slot->full = slot->refused = FALSE;
+	file = fopen(slot->path, "rb");
+	if (!file || !scene_pack_open_file(file, &slot->info, slot->why, sizeof(slot->why)))
+	{
+		if (file)
+			fclose(file);
+		else
+			snprintf(slot->why, sizeof(slot->why), "it cannot be read");
+		slot->refused = TRUE;
+		return;
+	}
+	if (slot->info.recipe_hash != slot->recipe->hash || slot->info.builder_version != SCENE_PACK_BUILDER_VERSION)
+	{
+		fclose(file);
+		snprintf(slot->why, sizeof(slot->why), "it changed after it was checked");
+		slot->refused = TRUE;
+		return;
+	}
+	if (slot->info.tags_size > room_size || !scene_packs.job.table_room || slot->info.data_size > scene_packs.job.file_room)
+	{
+		fclose(file);
+		snprintf(slot->why, sizeof(slot->why), slot->info.tags_size > room_size ? "the tag cache has %lu KB free for its %lu KB" :
+			!scene_packs.job.table_room ? "as many packs as a map takes are loaded (%lu, %lu)" :
+			"the packs loaded hold as many pixels and samples as the game reads (%lu, %lu)", room_size / 1024,
+			slot->info.tags_size / 1024);
+		slot->full = TRUE;
+		return;
+	}
+	if (!scene_pack_load_file(file, &slot->info, room, slot->why, sizeof(slot->why)))
+	{
+		fclose(file);
+		csmemset(room, 0xCD, slot->info.tags_size);
+		slot->refused = TRUE;
+		return;
+	}
+	scene_pack_instances(room, &count);
+	if (count <= 0 || scene_packs.job.first_index < 0 || scene_packs.job.first_index > 0x7FFF - count)
+	{
+		fclose(file);
+		csmemset(room, 0xCD, slot->info.tags_size);
+		snprintf(slot->why, sizeof(slot->why), "the map's %ld tags and its %ld are too many for a tag table",
+			scene_packs.job.first_index, count);
+		slot->refused = TRUE;
+		return;
+	}
+	scene_pack_rebase(room, scene_packs.job.first_index, scene_packs.job.salt, (long)scene_packs.job.file_base);
+	slot->tags = room;
+	slot->file = file;
+	slot->staged_first_index = scene_packs.job.first_index;
+	slot->staged_salt = scene_packs.job.salt;
+	slot->staged_file_base = scene_packs.job.file_base;
+	slot->staged = TRUE;
+	platform_log("scene packs: %s: read and checked on the %s in %.1f ms (%lu KB of tags, %lu KB of pixels and samples)",
+		slot->name, scene_packs_on_worker ? "worker" : "game thread", (double)(vita_host_time_us() - started) / 1000.0,
+		slot->info.tags_size / 1024, slot->info.data_size / 1024);
+}
+
+/* a staged pack let go (not to be loaded now): its tag cache room the free
+room's again, its file closed */
+static void pack_unstage(struct scene_pack_slot *slot)
+{
+	if (!slot->staged)
+		return;
+	csmemset(slot->tags, 0xCD, slot->info.tags_size);
+	if (slot->file)
+		fclose(slot->file);
+	slot->file = NULL;
+	slot->tags = NULL;
+	slot->staged = FALSE;
+}
+
+/* (the worker thread) its job: its slots checked and built (the slot it
+loads, and those sharing a read with it, first), that slot staged, then
+the others built */
+static void *worker_thread(void *context)
+{
+	struct scene_pack_slot *slots[MAXIMUM_SCENE_PACK_SLOTS];
+	struct scene_pack_slot *load = scene_packs.job.load != NONE ? &scene_packs.packs[scene_packs.job.load] : NULL;
+	short index, left = 0;
+
+	(void)context;
+	(void)left;
+	scene_packs_on_worker = TRUE;
+#ifdef HALO_VITA
+	/* (below the game's threads; a prebuild's lower still) */
+	vita_host_thread_priority_set(scene_packs.job.low ? 191 : 175);
+#endif
+	for (index = 0; index < scene_packs.job.slot_count; index++)
+		slots[index] = &scene_packs.packs[scene_packs.job.slots[index]];
+	/* (a slot to load: built, with those that share its read, if it must
+	be - it is the job's first slot then -, and staged, the job done (the
+	others' builds the next job's, once it is loaded); else every slot's
+	builds) */
+	if (load)
+	{
+		if (state_get(load) == _scene_pack_state_building && scene_packs.job.slot_count && slots[0] == load)
+			packs_prepare(slots, scene_packs.job.slot_count, scene_packs.scratch, scene_packs.scratch_size, TRUE, &left);
+		if (!scene_packs.cancel && state_get(load) == _scene_pack_state_ready)
+			pack_stage(load, scene_packs.scratch, scene_packs.scratch_size);
+	}
+	else if (scene_packs.job.slot_count)
+	{
+		packs_prepare(slots, scene_packs.job.slot_count, scene_packs.scratch, scene_packs.scratch_size, FALSE, NULL);
+	}
+	__atomic_store_n(&scene_packs.job.done, TRUE, __ATOMIC_RELEASE);
 	return NULL;
 }
 
-/* the build thread waited for (stopped first if stop) */
+/* (scene_pack_io_hook) a build's or a load's read or write done: paced in
+the tests (slow_io_pace); on the worker, paused while the game wants it to
+(a map copied to the cache partition, a network game; a prebuild also
+while the game's own reads are waiting), and a prebuild's spaced out */
+static void worker_io(unsigned long bytes, boolean source)
+{
+	static __thread unsigned long since_yield;
+	int cache_files_reads_pending(void);
+
+	slow_io_pace(bytes, source);
+	if (!scene_packs_on_worker)
+		return;
+	while (!scene_packs.cancel && (__atomic_load_n(&scene_packs.pause_builds, __ATOMIC_ACQUIRE) ||
+		(scene_packs.job.low && __atomic_load_n(&scene_packs.pause_prebuilds, __ATOMIC_ACQUIRE))))
+	{
+		Sleep(20);
+	}
+	if (scene_packs.job.low)
+	{
+		since_yield += bytes;
+		if (since_yield >= 128 * 1024)
+		{
+			since_yield = 0;
+			/* (the game's reads first: a texture or a sound waiting) */
+			while (!scene_packs.cancel && scene_packs.job.low && cache_files_reads_pending())
+				Sleep(4);
+			Sleep(1);
+		}
+	}
+}
+
+/* the worker waited for (stopped first if stop) */
 static void build_thread_join(boolean stop)
 {
+	short index;
+
 	if (!scene_packs.thread_running)
 		return;
 	if (stop)
 		scene_packs.cancel = TRUE;
 	pthread_join(scene_packs.thread, NULL);
-	/* (its scratch the free room's again) */
+	/* (its scratch the free room's again, but a pack it staged) */
 	if (scene_packs.scratch && scene_packs.scratch_size)
-		csmemset(scene_packs.scratch, 0xCD, scene_packs.scratch_size);
+	{
+		struct scene_pack_slot *load = scene_packs.job.load != NONE ? &scene_packs.packs[scene_packs.job.load] : NULL;
+		unsigned long staged = load && load->staged ?
+			(load->info.tags_size + SCENE_PACK_ALIGNMENT - 1) & ~(unsigned long)(SCENE_PACK_ALIGNMENT - 1) : 0;
+
+		if (stop && load)
+		{
+			pack_unstage(load);
+			staged = 0;
+		}
+		if (scene_packs.scratch_size > staged)
+			csmemset(scene_packs.scratch + staged, 0xCD, scene_packs.scratch_size - staged);
+	}
+	/* (a job stopped to make way: what it had not built, to build again) */
+	for (index = 0; index < scene_packs.job.slot_count; index++)
+	{
+		struct scene_pack_slot *slot = &scene_packs.packs[scene_packs.job.slots[index]];
+
+		slot->progress = NULL;
+		if (scene_packs.job.preempted && state_get(slot) == _scene_pack_state_building)
+			platform_log("scene packs: %s: its build makes way for a pack wanted now", slot->name);
+	}
 	scene_packs.thread_running = FALSE;
-	scene_packs.building = NONE;
 	scene_packs.cancel = FALSE;
 	scene_packs.scratch = NULL;
 	scene_packs.scratch_size = 0;
+	scene_packs.job.slot_count = 0;
+	scene_packs.job.load = NONE;
+	scene_packs.job.done = FALSE;
+	scene_packs.job.preempted = FALSE;
 }
 
-/* a slot waiting to be built given the thread, if it is free */
+/* the game's table and file range as the next pack loaded finds them: its
+first tag index, its salt, its file offsets, whether there is room */
+static void table_next(long *first_index, long *salt, unsigned long *file_base, boolean *table_room, unsigned long *file_room)
+{
+	long existing_count = 0, index, highest = 0;
+	void *existing = cache_files_tag_instances(&existing_count);
+
+	for (index = 0; existing && index < existing_count; index++)
+	{
+		long instance_salt = (long)(*(unsigned long *)((unsigned char *)existing + index * TAG_INSTANCE_BYTES + 12) >> 16);
+
+		if (instance_salt > highest)
+			highest = instance_salt;
+	}
+	highest = MAX((highest + 1) & 0x7FFF, scene_packs.next_salt);
+	if (highest <= 0 || highest > 0x7FFF)
+		highest = 1;
+	*first_index = existing ? existing_count : NONE;
+	*salt = highest;
+	*file_base = scene_packs.file_used;
+	*table_room = existing && scene_packs.table_count < MAXIMUM_LOADED_SCENE_PACKS;
+	*file_room = SCENE_PACK_FILE_RANGE_BYTES - scene_packs.file_used;
+}
+
+/* whether a slot is wanted loaded now (not a prebuild's, not let go) */
+static boolean slot_wanted_loaded(struct scene_pack_slot const *slot)
+{
+	return !slot->build_only && !slot->release_wanted;
+}
+
+/* whether a ready slot's load may be tried (not waiting for room that has
+not changed since) */
+static boolean slot_load_due(struct scene_pack_slot const *slot)
+{
+	return !slot->full || slot->full_reserved != scene_packs.reserved || slot->full_tables != scene_packs.table_count;
+}
+
+/* the worker given its next job, if it is free: the first pack wanted
+loaded (with the builds that can share its read), else every prebuild
+(paced, paused while the game is busy) */
 static void build_thread_start(void)
 {
-	short index;
+	short index, load = NONE;
 	pthread_attr_t attributes;
 	unsigned char *room, *room_end;
+	boolean low = TRUE;
 
 	if (scene_packs.thread_running)
+		return;
+	scene_packs.job.slot_count = 0;
+	for (index = 0; index < scene_packs.pack_count && load == NONE; index++)
 	{
-		struct scene_pack_slot *slot = &scene_packs.packs[scene_packs.building];
+		struct scene_pack_slot *slot = &scene_packs.packs[index];
+		short state = state_get(slot);
 
-		if (state_get(slot) == _scene_pack_state_building)
-			return;
-		build_thread_join(FALSE);
+		if (slot_wanted_loaded(slot) && (state == _scene_pack_state_building ||
+			(state == _scene_pack_state_ready && slot_load_due(slot))))
+		{
+			load = index;
+		}
+	}
+	if (load != NONE)
+	{
+		low = FALSE;
+		if (state_get(&scene_packs.packs[load]) == _scene_pack_state_building)
+			scene_packs.job.slots[scene_packs.job.slot_count++] = load;
 	}
 	for (index = 0; index < scene_packs.pack_count; index++)
 	{
-		if (state_get(&scene_packs.packs[index]) == _scene_pack_state_building)
-			break;
+		if (index != load && state_get(&scene_packs.packs[index]) == _scene_pack_state_building)
+			scene_packs.job.slots[scene_packs.job.slot_count++] = index;
 	}
-	if (index == scene_packs.pack_count)
+	/* (a prebuild alone waits while the game is busy) */
+	if (load == NONE && (!scene_packs.job.slot_count || scene_packs.pause_prebuilds || scene_packs.pause_builds))
+	{
+		scene_packs.job.slot_count = 0;
 		return;
+	}
 	room = tag_cache_room(&room_end);
 	scene_packs.scratch = room;
 	scene_packs.scratch_size = (unsigned long)(room_end - room);
-	scene_packs.building = index;
+	scene_packs.job.load = load;
+	scene_packs.job.low = low;
+	scene_packs.job.done = FALSE;
+	scene_packs.job.preempted = FALSE;
+	table_next(&scene_packs.job.first_index, &scene_packs.job.salt, &scene_packs.job.file_base, &scene_packs.job.table_room,
+		&scene_packs.job.file_room);
 	scene_packs.cancel = FALSE;
 	pthread_attr_init(&attributes);
 	pthread_attr_setstacksize(&attributes, BUILD_THREAD_STACK_BYTES);
-	if (pthread_create(&scene_packs.thread, &attributes, build_thread, &scene_packs.packs[index]) == 0)
+	if (pthread_create(&scene_packs.thread, &attributes, worker_thread, NULL) == 0)
 	{
 		scene_packs.thread_running = TRUE;
 	}
 	else
 	{
-		scene_packs.building = NONE;
-		snprintf(scene_packs.packs[index].why, sizeof(scene_packs.packs[index].why), "no thread to build it");
-		state_set(&scene_packs.packs[index], _scene_pack_state_failed);
+		for (index = 0; index < scene_packs.job.slot_count; index++)
+		{
+			struct scene_pack_slot *slot = &scene_packs.packs[scene_packs.job.slots[index]];
+
+			snprintf(slot->why, sizeof(slot->why), "no thread to build it");
+			state_set(slot, _scene_pack_state_failed);
+		}
+		if (load != NONE)
+		{
+			snprintf(scene_packs.packs[load].why, sizeof(scene_packs.packs[load].why), "no thread to load it");
+			state_set(&scene_packs.packs[load], _scene_pack_state_failed);
+		}
+		scene_packs.job.slot_count = 0;
+		scene_packs.job.load = NONE;
+		scene_packs.scratch = NULL;
+		scene_packs.scratch_size = 0;
 	}
 	pthread_attr_destroy(&attributes);
 }
 
-/* the pack's tags put in the game (the thread is not building: its scratch
-is free): TRUE if it is loaded; *full TRUE when it was not for want of room
-(packs loaded, the tag cache, the file range: it may be when one goes) */
-static boolean pack_load(struct scene_pack_slot *slot, boolean *full)
+/* (the game thread, the top of a frame) a staged pack put in the game: its
+indices made the table's now if the table changed since it was staged, its
+buffers registered, the table grown, its bytes reserved. Cheap: no read,
+no check (the worker made them). TRUE if loaded; FALSE, unstaged, if the
+table has no room for it now */
+static boolean pack_commit(struct scene_pack_slot *slot)
 {
-	unsigned char *room, *room_end;
 	unsigned long long started = vita_host_time_us();
-	unsigned long heap_before = 0, heap_after = 0, capacity = 0;
+	unsigned char *room, *room_end;
+	long first_index, salt, existing_count, count;
+	unsigned long file_base, file_room;
+	boolean table_room;
 	void *existing;
-	unsigned char *table;
-	unsigned char *instances;
-	long existing_count, count, index, salt = 0;
-	unsigned long file_base = scene_packs.file_used;
+	unsigned char *table, *instances;
 
-	*full = FALSE;
-	platform_heap_usage(&heap_before, &capacity);
 	room = tag_cache_room(&room_end);
-	if (scene_packs.thread_running && scene_packs.scratch && room_end > scene_packs.scratch)
-		room_end = scene_packs.scratch;
-	if (slot->info.tags_size > (unsigned long)(room_end - room))
-	{
-		snprintf(slot->why, sizeof(slot->why), "the tag cache has %lu KB free for its %lu KB",
-			(unsigned long)(room_end - room) / 1024, slot->info.tags_size / 1024);
-		*full = TRUE;
-		return FALSE;
-	}
+	table_next(&first_index, &salt, &file_base, &table_room, &file_room);
 	existing = cache_files_tag_instances(&existing_count);
-	if (!existing || scene_packs.table_count >= MAXIMUM_LOADED_SCENE_PACKS)
+	instances = scene_pack_instances(slot->tags, &count);
+	if (!existing || !table_room || slot->info.data_size > file_room || slot->tags != room ||
+		existing_count > 0x7FFF - count || !(table = malloc((unsigned long)(existing_count + count) * TAG_INSTANCE_BYTES)))
 	{
-		snprintf(slot->why, sizeof(slot->why), scene_packs.table_count >= MAXIMUM_LOADED_SCENE_PACKS ?
-			"as many packs as a map takes are loaded" : "no map's tags to load it beside");
-		*full = existing != NULL;
+		snprintf(slot->why, sizeof(slot->why), "the game's table or tag cache changed before it could be loaded");
+		slot->full = TRUE;
+		slot->full_reserved = scene_packs.reserved;
+		slot->full_tables = scene_packs.table_count;
+		pack_unstage(slot);
 		return FALSE;
 	}
-	if (slot->info.data_size > SCENE_PACK_FILE_RANGE_BYTES - file_base)
+	if (first_index != slot->staged_first_index || salt != slot->staged_salt || file_base != slot->staged_file_base)
 	{
-		snprintf(slot->why, sizeof(slot->why), "the packs loaded hold as many pixels and samples as the game reads");
-		*full = TRUE;
-		return FALSE;
+		platform_log("scene packs: %s: given indices %ld (salt %ld) again, not %ld (salt %ld)", slot->name, first_index, salt,
+			slot->staged_first_index, slot->staged_salt);
+		scene_pack_rebase_again(slot->tags, slot->staged_first_index, first_index, salt,
+			(long)file_base - (long)slot->staged_file_base);
 	}
-	if (!scene_pack_load(slot->path, &slot->info, room, slot->why, sizeof(slot->why)))
-	{
-		/* (whatever it left there is the free room's again) */
-		csmemset(room, 0xCD, slot->info.tags_size);
-		return FALSE;
-	}
-	instances = scene_pack_instances(room, &count);
-	if (existing_count < 0 || count <= 0 || existing_count > 0x7FFF - count)
-	{
-		csmemset(room, 0xCD, slot->info.tags_size);
-		snprintf(slot->why, sizeof(slot->why), "the map's %ld tags and its %ld are too many for a tag table",
-			existing_count, count);
-		return FALSE;
-	}
-	table = malloc((unsigned long)(existing_count + count) * TAG_INSTANCE_BYTES);
-	slot->file = fopen(slot->path, "rb");
-	if (!table || !slot->file)
-	{
-		if (table)
-			free(table);
-		if (slot->file)
-			fclose(slot->file);
-		slot->file = NULL;
-		csmemset(room, 0xCD, slot->info.tags_size);
-		snprintf(slot->why, sizeof(slot->why), "there is no memory for its tag table, or its file cannot be opened");
-		return FALSE;
-	}
-	for (index = 0; index < existing_count; index++)
-	{
-		long instance_salt = (long)(*(unsigned long *)((unsigned char *)existing + index * TAG_INSTANCE_BYTES + 12) >> 16);
-
-		if (instance_salt > salt)
-			salt = instance_salt;
-	}
-	salt = MAX((salt + 1) & 0x7FFF, scene_packs.next_salt);
-	if (salt <= 0 || salt > 0x7FFF)
-		salt = 1;
-	scene_pack_rebase(room, existing_count, salt, (long)file_base);
 	scene_packs.next_salt = (salt + 1) & 0x7FFF;
 	memcpy(table, existing, (unsigned long)existing_count * TAG_INSTANCE_BYTES);
 	memcpy(table + existing_count * TAG_INSTANCE_BYTES, instances, (unsigned long)count * TAG_INSTANCE_BYTES);
-	tags_header_register_vertex_and_index_buffers((struct cache_file_tag_header *)room);
-	slot->tags = room;
+	tags_header_register_vertex_and_index_buffers((struct cache_file_tag_header *)slot->tags);
+	slot->staged = FALSE;
+	slot->full = FALSE;
 	slot->bytes = (slot->info.tags_size + SCENE_PACK_ALIGNMENT - 1) & ~(SCENE_PACK_ALIGNMENT - 1);
 	slot->first_index = existing_count;
 	slot->count = count;
@@ -584,14 +1059,64 @@ static boolean pack_load(struct scene_pack_slot *slot, boolean *full)
 	tag_validate_reserve_after_tags(scene_packs.reserved);
 	state_set(slot, _scene_pack_state_loaded);
 	cache_files_set_tag_instances(table, existing_count + count);
-	platform_heap_usage(&heap_after, &capacity);
-	platform_log("scene packs: %s: loaded from %s in %.1f ms: %ld tags (%ld to %ld of the table), %lu KB of the tag cache "
-		"(%lu KB held by packs, %lu KB free after them), %lu KB of pixels and samples in its file, C heap %+ld KB",
-		slot->name, slot->info.source_map, (double)(vita_host_time_us() - started) / 1000.0, count, existing_count,
-		existing_count + count - 1, slot->bytes / 1024, scene_packs.reserved / 1024,
-		(unsigned long)(room_end - room - slot->bytes) / 1024, slot->info.data_size / 1024,
-		((long)heap_after - (long)heap_before) / 1024);
+	platform_log("scene packs: %s: loaded from %s, the game thread's part in %.2f ms%s: %ld tags (%ld to %ld of the "
+		"table), %lu KB of the tag cache (%lu KB held by packs, %lu KB free after them), %lu KB of pixels and samples in "
+		"its file", slot->name, slot->info.source_map, (double)(vita_host_time_us() - started) / 1000.0,
+		slot->wanted_us ? "" : "", count, existing_count, existing_count + count - 1, slot->bytes / 1024,
+		scene_packs.reserved / 1024, (unsigned long)(room_end - room - slot->bytes) / 1024, slot->info.data_size / 1024);
+	if (slot->wanted_us)
+		platform_log("scene packs: %s: loaded %.1f ms after it was wanted", slot->name,
+			(double)(vita_host_time_us() - slot->wanted_us) / 1000.0);
 	return TRUE;
+}
+
+/* (the game thread) a slot whose worker's load refused it: deleted, built
+once more, then given up */
+static void slot_refused(struct scene_pack_slot *slot)
+{
+	slot->refused = FALSE;
+	platform_log("scene packs: %s: refused: %s", slot->name, slot->why);
+	remove(slot->path);
+	if (!slot->rebuilt)
+	{
+		slot->rebuilt = TRUE;
+		state_set(slot, _scene_pack_state_building);
+	}
+	else
+	{
+		state_set(slot, _scene_pack_state_failed);
+	}
+}
+
+/* (the game thread) the worker's job done: its staged pack loaded (or let
+go, not wanted now), its refusals and waits seen to */
+static void job_finish(void)
+{
+	short load = scene_packs.job.load;
+	struct scene_pack_slot *slot = load != NONE ? &scene_packs.packs[load] : NULL;
+
+	build_thread_join(FALSE);
+	if (!slot)
+		return;
+	if (slot->staged)
+	{
+		if (slot_wanted_loaded(slot))
+			pack_commit(slot);
+		else
+			pack_unstage(slot);
+	}
+	else if (slot->refused)
+	{
+		slot_refused(slot);
+	}
+	else if (slot->full)
+	{
+		slot->full_reserved = scene_packs.reserved;
+		slot->full_tables = scene_packs.table_count;
+		if (!slot->waiting_said)
+			platform_log("scene packs: %s: waits: %s", slot->name, slot->why);
+		slot->waiting_said = TRUE;
+	}
 }
 
 /* a slot for the pack of that recipe (its recipe read), or NULL */
@@ -625,36 +1150,6 @@ static struct scene_pack_slot *slot_new(char const *name)
 	}
 	recipe_text_free(text, made);
 	return slot;
-}
-
-/* the slot's pack loaded, now that it is ready (its thread done): built
-once more if its load fails; left ready when there is no room for it yet
-(another may be let go: scene_packs_release), its file kept. FALSE then */
-static boolean slot_load(struct scene_pack_slot *slot)
-{
-	boolean full = FALSE;
-
-	if (pack_load(slot, &full))
-		return TRUE;
-	if (full)
-	{
-		if (!slot->waiting_said)
-			platform_log("scene packs: %s: waits: %s", slot->name, slot->why);
-		slot->waiting_said = TRUE;
-		return FALSE;
-	}
-	platform_log("scene packs: %s: refused: %s", slot->name, slot->why);
-	remove(slot->path);
-	if (!slot->rebuilt)
-	{
-		slot->rebuilt = TRUE;
-		state_set(slot, _scene_pack_state_building);
-	}
-	else
-	{
-		state_set(slot, _scene_pack_state_failed);
-	}
-	return TRUE;
 }
 
 /* whether a loaded pack may go now: no object made of its tags (an object
@@ -822,6 +1317,29 @@ short scene_packs_want(
 		build_thread_start();
 	}
 	/* (one built only, wanted now: loaded as any; one asked to go kept) */
+	if (!slot_wanted_loaded(slot) || !slot->wanted_us)
+	{
+		slot->wanted_us = vita_host_time_us();
+		/* (a prebuild under way that is not building this one stops to make
+		way for it; one that is, goes on at the pace of a pack wanted now) */
+		if (scene_packs.thread_running && scene_packs.job.low && state_get(slot) != _scene_pack_state_loaded)
+		{
+			short index;
+			boolean in_job = FALSE;
+
+			for (index = 0; index < scene_packs.job.slot_count; index++)
+				in_job |= &scene_packs.packs[scene_packs.job.slots[index]] == slot;
+			if (in_job)
+			{
+				scene_packs.job.low = FALSE;
+			}
+			else
+			{
+				scene_packs.job.preempted = TRUE;
+				scene_packs.cancel = TRUE;
+			}
+		}
+	}
 	slot->build_only = FALSE;
 	slot->release_wanted = FALSE;
 	return state_get(slot);
@@ -881,8 +1399,12 @@ short scene_packs_status(
 		return _scene_pack_state_none;
 	state = state_get(slot);
 	if (progress)
-		*progress = state == _scene_pack_state_building ? PIN(slot->build.progress, 0, 99) :
+	{
+		long volatile const *building = slot->progress;
+
+		*progress = state == _scene_pack_state_building ? (building ? PIN(*building, 0, 99) : 0) :
 			state == _scene_pack_state_failed ? 0 : 100;
+	}
 	if (why && why_size > 0 && state == _scene_pack_state_failed)
 		snprintf(why, (size_t)why_size, "%s", slot->why);
 	return state;
@@ -994,32 +1516,91 @@ boolean scene_packs_load_now(
 {
 	struct scene_pack_slot *slot;
 	short state = scene_packs_want(name);
+	short tries;
 
 	if (state == _scene_pack_state_none || !(slot = slot_find(name)))
 		return FALSE;
-	while (state == _scene_pack_state_building || state == _scene_pack_state_ready)
+	/* (here, now: the worker's job finished first - one that is not this
+	slot's stopped -, then this one's build and load on this thread) */
+	for (tries = 0; tries < 3 && (state == _scene_pack_state_building || state == _scene_pack_state_ready); tries++)
 	{
-		if (state == _scene_pack_state_building && scene_packs.thread_running &&
-			&scene_packs.packs[scene_packs.building] == slot)
-		{
-			build_thread_join(FALSE);
-		}
-		else if (state == _scene_pack_state_building)
-		{
-			/* (another's build first: then this one's, here) */
-			unsigned char *room, *room_end;
+		unsigned char *room, *room_end;
+		short index;
+		boolean in_job = scene_packs.job.load != NONE && &scene_packs.packs[scene_packs.job.load] == slot;
 
-			build_thread_join(FALSE);
-			room = tag_cache_room(&room_end);
-			state_set(slot, pack_prepare(slot, room, (unsigned long)(room_end - room)) ? _scene_pack_state_ready :
-				_scene_pack_state_failed);
+		for (index = 0; index < scene_packs.job.slot_count; index++)
+			in_job |= &scene_packs.packs[scene_packs.job.slots[index]] == slot;
+		if (scene_packs.thread_running)
+		{
+			if (!in_job)
+			{
+				scene_packs.job.preempted = TRUE;
+				scene_packs.cancel = TRUE;
+			}
+			scene_packs.job.low = FALSE;
+			job_finish();
 		}
-		if (state_get(slot) == _scene_pack_state_ready && !slot_load(slot))
+		state = state_get(slot);
+		if (state == _scene_pack_state_loaded || state == _scene_pack_state_failed)
+			break;
+		room = tag_cache_room(&room_end);
+		if (state == _scene_pack_state_building)
+		{
+			struct scene_pack_slot *slots[1];
+
+			slots[0] = slot;
+			packs_prepare(slots, 1, room, (unsigned long)(room_end - room), TRUE, NULL);
+		}
+		if (state_get(slot) != _scene_pack_state_ready)
+			break;
+		table_next(&scene_packs.job.first_index, &scene_packs.job.salt, &scene_packs.job.file_base,
+			&scene_packs.job.table_room, &scene_packs.job.file_room);
+		slot->full = FALSE;
+		pack_stage(slot, room, (unsigned long)(room_end - room));
+		if (slot->staged)
+			pack_commit(slot);
+		else if (slot->refused)
+			slot_refused(slot);
+		else
 			break;
 		state = state_get(slot);
 	}
 	build_thread_start();
-	return state == _scene_pack_state_loaded;
+	return state_get(slot) == _scene_pack_state_loaded;
+}
+
+boolean scene_packs_textures_ready(
+	char const *name)
+{
+	void *_texture_cache_bitmap_get_hardware_format(struct bitmap_data *bitmap, boolean block, boolean load);
+	struct scene_pack_slot *slot = name ? slot_find(name) : NULL;
+	unsigned char *instances;
+	long count, index;
+	boolean ready = TRUE;
+
+	if (!slot || state_get(slot) != _scene_pack_state_loaded)
+		return FALSE;
+	instances = scene_pack_instances(slot->tags, &count);
+	for (index = 0; index < count; index++)
+	{
+		unsigned char const *instance = instances + index * TAG_INSTANCE_BYTES;
+
+		if (*(unsigned long const *)instance == BITMAP_GROUP_TAG)
+		{
+			struct bitmap_group *group = bitmap_group_get((long)*(unsigned long const *)(instance + 12));
+			long bitmap;
+
+			/* (each one's read begun, if it was not: none waited for) */
+			for (bitmap = 0; bitmap < group->bitmaps.count; bitmap++)
+			{
+				struct bitmap_data *data = TAG_BLOCK_GET_ELEMENT(&group->bitmaps, bitmap, struct bitmap_data);
+
+				if (data->pixels_size > 0 && !_texture_cache_bitmap_get_hardware_format(data, FALSE, TRUE))
+					ready = FALSE;
+			}
+		}
+	}
+	return ready;
 }
 
 long scene_packs_tag(
@@ -1057,26 +1638,43 @@ short scene_packs_roots(
 	return index;
 }
 
+static void scene_packs_update_internal(void);
+
 void scene_packs_update(
 	void)
 {
-	short index;
+	unsigned long long started = vita_host_time_us();
+
+	if (!scene_pack_io_hook)
+	{
+		scene_pack_io_hook = worker_io;
+		scene_pack_copy_source = &scene_packs_copy_source;
+		scene_packs.job.load = NONE;
+	}
+	scene_packs_update_internal();
+	game_thread_time("the frame's update", NULL, started);
+}
+
+static void scene_packs_update_internal(
+	void)
+{
+	int cache_files_reads_pending(void);
+	boolean copying = cache_files_precache_in_progress();
+	boolean network = game_connection() != _game_connection_local;
 
 	if (!scene_packs.pack_count)
 		return;
-	if (scene_packs.thread_running && state_get(&scene_packs.packs[scene_packs.building]) != _scene_pack_state_building)
-		build_thread_join(FALSE);
-	/* (a build takes the whole free room for its scratch: loads wait) */
+	/* (the worker's pauses: a map copied to the cache partition, a network
+	game; a prebuild's also away from the main menu at rest) */
+	__atomic_store_n(&scene_packs.pause_builds, copying || network, __ATOMIC_RELEASE);
+	__atomic_store_n(&scene_packs.pause_prebuilds, copying || network || !halo_main_menu_idle(), __ATOMIC_RELEASE);
+	if (scene_packs.thread_running && __atomic_load_n(&scene_packs.job.done, __ATOMIC_ACQUIRE))
+		job_finish();
+	/* (a build takes the free room for its scratch: loads and releases
+	wait for it) */
 	if (scene_packs.thread_running)
 		return;
 	packs_release();
-	for (index = 0; index < scene_packs.pack_count; index++)
-	{
-		struct scene_pack_slot *slot = &scene_packs.packs[index];
-
-		if (state_get(slot) == _scene_pack_state_ready && !slot->build_only)
-			slot_load(slot);
-	}
 	build_thread_start();
 }
 
@@ -1091,6 +1689,7 @@ void scene_packs_unloaded(
 	{
 		struct scene_pack_slot *slot = &scene_packs.packs[index];
 
+		pack_unstage(slot);
 		if (state_get(slot) == _scene_pack_state_loaded)
 			tags_header_deregister_vertex_and_index_buffers((struct cache_file_tag_header *)slot->tags);
 		while (__atomic_exchange_n(&scene_packs.read_lock, 1, __ATOMIC_ACQUIRE))
@@ -1117,6 +1716,8 @@ void scene_packs_unloaded(
 	scene_packs.original_count = 0;
 	scene_packs.table_count = 0;
 	scene_packs.next_salt = 0;
+	scene_packs.job.load = NONE;
+	scene_packs.job.slot_count = 0;
 	tag_validate_reserve_after_tags(0);
 }
 
@@ -1132,6 +1733,13 @@ unsigned long scene_packs_reserved_bytes(
 	return scene_packs.reserved;
 }
 
+boolean scene_packs_offset(
+	long offset)
+{
+	return (unsigned long)offset >= SCENE_PACK_FILE_BASE &&
+		(unsigned long)offset - SCENE_PACK_FILE_BASE < SCENE_PACK_FILE_RANGE_BYTES;
+}
+
 boolean scene_packs_read(
 	long offset,
 	long size,
@@ -1145,6 +1753,8 @@ boolean scene_packs_read(
 		return FALSE;
 	if (size > 0)
 		memory_watch_prepare_write(buffer, (unsigned long)size);
+	if (size > 0)
+		slow_io_pace((unsigned long)size, FALSE);
 	while (__atomic_exchange_n(&scene_packs.read_lock, 1, __ATOMIC_ACQUIRE))
 		SwitchToThread();
 	for (index = 0; index < scene_packs.pack_count; index++)

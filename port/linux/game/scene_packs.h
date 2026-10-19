@@ -100,6 +100,13 @@ it must be, which takes a while): TRUE if it is loaded */
 boolean scene_packs_load_now(
 	char const *name);
 
+/* whether a loaded pack's bitmaps are all in the texture cache, their
+reads begun (on the cache file thread, none waited for) for those that are
+not: an object of it shown then has its own textures from its first frame,
+not the stand-ins (FALSE if it is not loaded) */
+boolean scene_packs_textures_ready(
+	char const *name);
+
 /* a loaded pack's tag (group, path), as the game's tag index, or NONE */
 long scene_packs_tag(
 	char const *name,
@@ -149,6 +156,10 @@ boolean scene_packs_read(
 	long offset,
 	long size,
 	void *buffer);
+
+/* whether a file offset is the packs' (a read of it is scene_packs_read's) */
+boolean scene_packs_offset(
+	long offset);
 
 /* a console command that starts with "pack" (hs.c): what follows the word
 ("want <name>", "load <name>", "list"). TRUE if it was understood */
