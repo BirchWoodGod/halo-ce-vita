@@ -80,6 +80,9 @@ extern volatile int halo_pc_menus_state;
 /* menu_functions.c's: a screen of the game's that the menus' flows open
 another in place of (ours or the game's), or the tag itself */
 long pc_menu_functions_screen(long tag_index);
+/* (Menu style Halo 3) a network game's SELECT PROFILE with the profile
+chosen before: the screen after it, the profile set; else the tag */
+long pc_menu_functions_profile_skip(long tag_index);
 /* forge.c's: whether a Forge game is played (its Start opens the Forge menu) */
 boolean forge_game_active(void);
 long menu_tags_ingame_screen(char const *name);
@@ -391,6 +394,7 @@ static char const *const port_function_names[] =
 	"port h3 party page up", "port h3 party page down", "port h3 party type", "port h3 party preset",
 	"port forge clear dead ai", "port forge clear all ai",
 	"port h3 mp pause party", "port h3 mp settings init", "port h3 mp settings save", "port h3 mp settings close",
+	"port h3 host online", "port h3 game options",
 };
 
 /* the port's game data functions (menu_functions.c), from
@@ -2482,7 +2486,12 @@ long menu_tags_screen(
 	if (halo_menu_style_halo3())
 	{
 		long index;
+		/* (a network game's SELECT PROFILE, a profile chosen before this
+		run: not asked again, the screen it goes on to in its place) */
+		long skipped = menu_tags.root_tag != NONE ? pc_menu_functions_profile_skip(tag_index) : tag_index;
 
+		if (skipped != tag_index)
+			return menu_tags_screen(skipped);
 		for (index = 0; index < menu_tags.h3_count; index++)
 		{
 			if (tag_index != menu_tags.h3_from[index])
@@ -2521,7 +2530,15 @@ long menu_tags_screen(
 		return menu_tags.root_tag;
 	}
 	if (menu_tags.art > 0)
-		return pc_menu_functions_screen(tag_index);
+	{
+		/* (a screen the flows open in another's place: the Halo 3 set's
+		for it, when it has one - the game's lobby after a game hosted) */
+		long replaced = pc_menu_functions_screen(tag_index);
+
+		if (replaced != tag_index && replaced != NONE && halo_menu_style_halo3())
+			return menu_tags_screen(replaced);
+		return replaced;
+	}
 	return tag_index;
 }
 

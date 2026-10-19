@@ -329,6 +329,8 @@ enum
 	_function_h3_mp_settings_init,
 	_function_h3_mp_settings_save,
 	_function_h3_mp_settings_close,
+	_function_h3_host_online,
+	_function_h3_game_options,
 };
 
 /* in port_game_data_input_names' order */
@@ -526,6 +528,14 @@ static struct
 	boolean open_system_link;
 	/* (FRIENDS' PARTY row) the PARTY screen opened at the next frame */
 	boolean open_party;
+	/* (the Halo 3 lobby's Square on ONLINE) GAME OPTIONS opened at the next
+	frame, over the lobby */
+	boolean open_game_options;
+	/* (a game hosted from the Halo 3 lobby) SELECT PROFILE was shown on
+	the way (profile_shown): the game's lobby takes it out of the history,
+	so that B goes back to the multiplayer lobby (pregame_drop_profile) */
+	boolean profile_shown;
+	boolean pregame_drop_profile;
 	/* (the party's leader) the game whose open slots were said too few:
 	pressed again soon, joined */
 	char party_warned_id[P2P_LOBBY_ID_SIZE];
@@ -558,6 +568,11 @@ static struct
 } menu_functions;
 
 /* ---------- private code */
+
+/* (the Halo 3 multiplayer flows: a profile chosen this run is not asked
+for again) */
+static void h3_session_profile_chosen(short plate, long profile_index);
+static void h3_session_forget(void);
 
 static struct widget_instance *named(struct widget_instance *widget, char const *name)
 {
@@ -2599,6 +2614,11 @@ static void h3_mp_lobby_update(struct widget_instance *widget)
 			found->disabled = !shown;
 		}
 	}
+	/* (Square: GAME OPTIONS, ONLINE's) */
+	if ((found = named(screen, "x_butn")) != NULL)
+		widget_instance_set_visibility_recursive(found, h3_mp.network == _h3_network_online);
+	if ((found = named(screen, "options")) != NULL)
+		widget_instance_set_visibility_recursive(found, h3_mp.network == _h3_network_online);
 	if ((found = named(screen, "map_picture")) != NULL)
 	{
 		/* (the game's own level pictures: a custom map's display index
@@ -3258,6 +3278,7 @@ static boolean h3_profile_play(short item, short controller_index)
 	player_ui_set_single_player_local_player_controller(0, (short)(controller_index != NONE ? controller_index : 0));
 	player_ui_set_active_player_profile(0, profile_index, &profile);
 	h3_nameplate_changed(profile_index);
+	h3_session_profile_chosen((short)(controller_index != NONE ? controller_index : 0), profile_index);
 	platform_log("menus: h3 profiles: chose %s (campaign)", name);
 	return TRUE;
 }
@@ -3380,6 +3401,7 @@ static void h3_profile_delete(void)
 		return;
 	}
 	player_profile_delete(profile_index);
+	h3_session_forget();
 	snprintf(h3_profiles.status, sizeof(h3_profiles.status), T("%s was deleted."), h3_profiles.delete_name);
 	h3_profiles.status_item = -2;
 	platform_log("menus: h3 profiles: deleted %s", h3_profiles.delete_name);
@@ -5176,9 +5198,10 @@ static boolean setup_start(struct widget_instance *widget)
 	setting_set("HALO_NET_LOBBY_PASSWORD", menu_functions.lobby_password);
 	menu_functions.create_pending = TRUE;
 	menu_functions.create_system_link = FALSE;
-	platform_log("menus: Server Setup: %s, %s players, %s%s; the profile, then the map list", menu_functions.lobby_name,
+	platform_log("menus: Server Setup: %s, %s players, %s%s; the profile, then %s", menu_functions.lobby_name,
 		value, spinner && spinner->parameters.list.selected_index == 1 ? "private" : "public",
-		menu_functions.lobby_password[0] ? ", a password" : "");
+		menu_functions.lobby_password[0] ? ", a password" : "",
+		halo_menu_style_halo3() ? "the game's lobby" : "the map list");
 	return TRUE;
 }
 
@@ -8206,6 +8229,25 @@ static boolean h3_join_a(struct widget_instance *widget, struct event_record *ev
 			}
 		}
 		platform_log("menus: h3 join: on to %s", h3_join.split ? "split screen's map list" : "the games");
+		/* (one player alone, a network game's: not asked again this run) */
+		if (!h3_join.split)
+		{
+			menu_functions.profile_shown = TRUE;
+			short ready = 0, alone = NONE;
+
+			for (other = 0; other < H3_JOIN_PLATES; other++)
+			{
+				if (h3_join.state[other] == _h3_join_ready)
+				{
+					ready++;
+					alone = other;
+				}
+			}
+			if (ready == 1)
+				h3_session_profile_chosen(alone, player_ui_get_active_player_profile_index(alone));
+			else
+				h3_session_forget();
+		}
 		return TRUE;
 	}
 }
@@ -8306,6 +8348,136 @@ static void h3_join_update(struct widget_instance *widget)
 		snprintf(text, sizeof(text), "%s", h3_join.split ? T("Ready: Cross for the map.") :
 			T("Ready: Cross for the games."));
 	text_show(named(screen, "next"), text);
+}
+
+/* ---- the Halo 3 multiplayer flows, nothing asked twice: START GAME hosts
+with the lobby's GAME and MAP (no map or game type list after it), and the
+profile chosen on SELECT PROFILE (or the campaign's) is not asked again in
+this run - the network games' SELECT PROFILE goes straight on to what it
+led to, with that profile, as its plate's Cross did - unless another player
+joined with it (split screen's has its own screen, always asked) */
+
+static struct
+{
+	/* the profile last chosen alone (NONE: none yet, or several players),
+	its name (checked again: a profile deleted moves the others' indices)
+	and its controller */
+	long profile;
+	wchar_t name[MAXIMUM_PLAYER_PROFILE_NAME_LENGTH + 1];
+	short plate;
+} h3_session = { NONE, { 0 }, NONE };
+
+static void h3_session_forget(void)
+{
+	h3_session.profile = NONE;
+}
+
+/* (SELECT PROFILE gone on with one player in, the campaign's profile
+chosen) the profile not to ask for again */
+static void h3_session_profile_chosen(short plate, long profile_index)
+{
+	struct player_profile profile;
+
+	if (profile_index == NONE || plate == NONE || !player_profile_get(profile_index, &profile))
+	{
+		h3_session.profile = NONE;
+		return;
+	}
+	h3_session.profile = profile_index & 0x7FFFFFFF;
+	h3_session.plate = plate;
+	memcpy(h3_session.name, profile.player_name, sizeof(h3_session.name) - sizeof(wchar_t));
+	h3_session.name[MAXIMUM_PLAYER_PROFILE_NAME_LENGTH] = 0;
+}
+
+/* (a network game's SELECT PROFILE about to open, Menu style Halo 3) with
+a profile chosen alone this run, still there and still free: what the
+screen does done at once - the Xbox's "clear multiplayer player joins" as
+it opens, the player joined ("join controller to mp game") with that
+profile ("1wide plyr prof set for game", with its checks) - and TRUE: the
+screen it went on to opens in its place. FALSE: SELECT PROFILE asks */
+static boolean h3_session_profile_join(void)
+{
+	long entries[H3_JOIN_PROFILES];
+	word count = H3_JOIN_PROFILES;
+	struct player_profile profile;
+	short plate = h3_session.plate;
+	long entry = NONE;
+	short index;
+
+	if (h3_session.profile == NONE || plate < 0 || plate >= H3_JOIN_PLATES)
+		return FALSE;
+	player_profiles_enumerate_available_to_local_player_index(plate, &count, entries, TRUE);
+	for (index = 0; index < (short)MIN(count, H3_JOIN_PROFILES); index++)
+	{
+		if ((entries[index] & 0x7FFFFFFF) == h3_session.profile)
+			entry = entries[index];
+	}
+	if (entry == NONE || !(entry & 0x80000000) || !player_profile_get(entry, &profile) ||
+		memcmp(profile.player_name, h3_session.name, sizeof(h3_session.name) - sizeof(wchar_t)) ||
+		(profile.player_name[0] && !player_name_valid(profile.player_name, NUMBEROF(profile.player_name))))
+	{
+		platform_log("menus: h3 join: the profile chosen before is gone or taken: SELECT PROFILE");
+		h3_session.profile = NONE;
+		return FALSE;
+	}
+	dispose_global_network_game_client();
+	dispose_global_network_game_server();
+	player_ui_clear_multiplayer_joins();
+	player_ui_clear_multiplayer_variant();
+	h3_join_initialize(FALSE);
+	player_ui_local_player_joined_multiplayer_game(plate);
+	player_ui_set_active_player_profile(plate, entry, &profile);
+	menu_functions.profile_shown = FALSE;
+	{
+		char name[64];
+
+		h3_join_profile_name(&profile, name, (int)sizeof(name));
+		platform_log("menus: h3 join: the profile %s chosen before: not asked again", name);
+	}
+	return TRUE;
+}
+
+/* (a game hosted from the Halo 3 lobby or Create Game, its server just
+started) the lobby's MAP and GAME set as the Xbox's map list's and game
+type list's choices set them (multiplayer_level_select, its check of a map
+this version does not play with others included;
+multiplayer_profile_set_for_game): TRUE, the game's lobby next; FALSE (the
+map refused, no game type), their lists, as before */
+static boolean h3_mp_host_choices(void)
+{
+	struct game_variant variant;
+	char const *map = h3_mp.map_index != NONE ? h3_map_paths[h3_mp.map_index] : h3_mp.map_other;
+	long variant_index = h3_mp.gametype != NONE ? h3_mp.gametypes[h3_mp.gametype] : NONE;
+	struct network_game_server *server = global_network_game_server_get();
+	char build[0x20], directory[256];
+
+	if (!server || !map || !map[0] || variant_index == NONE || !(variant_index & 0x80000000))
+	{
+		platform_log("menus: h3 mp: no map or game type chosen: the map list");
+		return FALSE;
+	}
+	if (!cache_files_map_plays_multiplayer(map, build))
+	{
+		cache_files_show_multiplayer_unavailable(map, build);
+		platform_log("menus: h3 mp: %s is not played with others: the map list", map);
+		return FALSE;
+	}
+	if (!playlist_profile_get(variant_index, &variant))
+	{
+		platform_log("menus: h3 mp: the game type could not be read: the map list");
+		return FALSE;
+	}
+	main_set_multiplayer_map_name((char *)map);
+	game_engine_override_map_name((char *)map);
+	network_game_server_change_map_name(server, (char *)map);
+	saved_game_file_remember_last_used_multiplayer_map((char *)map);
+	if (saved_game_file_get_path_to_enclosing_directory(variant_index, directory))
+		saved_game_file_remember_last_used_multiplayer_variant_directory(directory);
+	player_ui_set_game_variant(&variant);
+	network_game_server_change_game_variant(server, &variant);
+	platform_log("menus: h3 mp: hosting %s on %s (the lobby's GAME and MAP); the game's lobby", h3_mp_gametype_name(),
+		h3_mp_map_name());
+	return TRUE;
 }
 
 /* ---- port h3 pregame: the Halo 3 pre-game lobby (halo3/pregame.xml),
@@ -8814,7 +8986,28 @@ boolean pc_menu_event_function_invoke(
 		START does: pc_menu_functions_screen) */
 		menu_functions.create_pending = TRUE;
 		menu_functions.create_system_link = TRUE;
-		platform_log("menus: h3 mp: host a system link game; the profile, then the map list");
+		platform_log("menus: h3 mp: host a system link game; the profile, then the game's lobby");
+		return TRUE;
+	case _function_h3_host_online:
+		/* (START GAME on ONLINE: hosted at once with Create Game's settings -
+		the settings panel's Play page, GAME OPTIONS - the lobby's GAME and
+		MAP, once the profile is chosen: pc_menu_functions_screen) */
+		if (!internet_play() && network_connection_wanted() != NETWORK_CONNECTION_ONLINE)
+			return TRUE;
+		menu_functions.create_pending = TRUE;
+		menu_functions.create_system_link = FALSE;
+		platform_log("menus: h3 mp: host an online game (%s, %s players, %s%s); the profile, then the game's lobby",
+			setting_get("HALO_NET_LOBBY_NAME", "Halo"), setting_get("HALO_NET_MAX_PLAYERS", "16"),
+			!strcmp(setting_get("HALO_NET_HOST_PUBLIC", "true"), "false") ? "private" : "public",
+			setting_get("HALO_NET_LOBBY_PASSWORD", "")[0] ? ", a password" : "");
+		return TRUE;
+	case _function_h3_game_options:
+		/* (Square on the lobby: GAME OPTIONS on ONLINE only) */
+		if (h3_mp.network == _h3_network_online)
+		{
+			menu_functions.open_game_options = TRUE;
+			platform_log("menus: h3 mp: GAME OPTIONS");
+		}
 		return TRUE;
 	case _function_h3_browse_system_link:
 		/* (BROWSE GAMES on SYSTEM LINK: the System Link list, once the
@@ -8850,6 +9043,15 @@ boolean pc_menu_event_function_invoke(
 	case _function_h3_pregame_init:
 		h3_pregame.said[0] = 0;
 		platform_log("menus: h3 pregame: the Halo 3 lobby for the game's ENLISTED PLAYERS");
+		/* (hosted from the Halo 3 lobby past SELECT PROFILE: out of the
+		history, B goes back to the multiplayer lobby, whose choices made
+		the game) */
+		if (menu_functions.pregame_drop_profile)
+		{
+			menu_functions.pregame_drop_profile = FALSE;
+			ui_widgets_pop_stack(screen_of(widget)->local_player_index);
+			platform_log("menus: h3 pregame: SELECT PROFILE out of the history (B: the multiplayer lobby)");
+		}
 		return TRUE;
 	case _function_h3_party_init:
 		h3_party_initialize();
@@ -9362,6 +9564,17 @@ long pc_menu_functions_screen(
 		menu_functions.create_system_link = FALSE;
 		if (map_select != NONE && ui_widget_port_start_network_game_server())
 		{
+			/* (Menu style Halo 3: the lobby's GAME and MAP, chosen there,
+			not asked for again: the game's lobby at once) */
+			long pregame = tag_loaded(UI_WIDGET_DEFINITION_TAG, pregame_screen);
+
+			if (halo_menu_style_halo3() && pregame != NONE && h3_mp_host_choices())
+			{
+				menu_functions.pregame_drop_profile = menu_functions.profile_shown;
+				menu_functions.profile_shown = FALSE;
+				platform_log("menus: %s: the game's server started; the game's lobby", asked);
+				return pregame;
+			}
 			platform_log("menus: %s: the game's server started; the map list", asked);
 			return map_select;
 		}
@@ -9399,6 +9612,23 @@ long pc_menu_functions_screen(
 		platform_log("menus: no Halo 3 LAN browser: the System Link list");
 	}
 	return tag_index;
+}
+
+/* (menu_tags_screen, Menu style Halo 3) a network game's SELECT PROFILE
+about to open with the profile chosen before this run: the screen it goes on
+to, the profile set as its Cross sets it (h3_session_profile_join); else the
+tag itself */
+long pc_menu_functions_profile_skip(
+	long tag_index)
+{
+	long list;
+
+	if (tag_index == NONE || tag_index != tag_loaded(UI_WIDGET_DEFINITION_TAG, profiles_screen))
+		return tag_index;
+	list = tag_loaded(UI_WIDGET_DEFINITION_TAG, server_list_screen);
+	if (list == NONE || !h3_session_profile_join())
+		return tag_index;
+	return list;
 }
 
 /* (the main loop) the ad hoc group joined from the joining dialog: what was
@@ -9455,9 +9685,28 @@ void pc_menu_functions_update(
 		menu_functions.open_party = FALSE;
 		h3_party_open();
 	}
+	/* (GAME OPTIONS over the lobby, which B goes back to; internet play
+	off, the screen saying how to turn it on) */
+	if (main_menu_loaded && menu_functions.open_game_options)
+	{
+		long options = tag_loaded(UI_WIDGET_DEFINITION_TAG, internet_play() ||
+			network_connection_wanted() == NETWORK_CONNECTION_ONLINE ? "pc\\h3\\setup\\screen" : "pc\\h3\\mp\\offline");
+		struct widget_instance *active = NULL;
+		long index;
+
+		menu_functions.open_game_options = FALSE;
+		for (index = 0; index < 4 && !active; index++)
+			active = ui_widget_port_active_screen((short)index);
+		if (options != NONE && active)
+		{
+			ui_widget_load_by_name_or_tag(NULL, options, NULL, active->local_player_index, active->definition_tag_index,
+				NONE, NONE);
+		}
+	}
 	if (!main_menu_loaded)
 	{
 		menu_functions.open_party = FALSE;
+		menu_functions.open_game_options = FALSE;
 		menu_functions.open_system_link = FALSE;
 		menu_functions.open_system_link_list = FALSE;
 		menu_functions.browser_profile_pending = FALSE;
@@ -9515,6 +9764,14 @@ while it closes: browser dispose) */
 	if (menu_functions.open_system_link)
 	{
 		menu_functions.open_system_link = FALSE;
+		/* (Menu style Halo 3: the Halo 3 games browser in the System Link
+		list's place, where the host's game is joined once listed, as A on
+		its row: menu_functions_lan_join_listed; no Xbox screen) */
+		if (halo_menu_style_halo3())
+		{
+			menu_functions.create_pending = FALSE;
+			menu_functions.browse_lan_pending = TRUE;
+		}
 		if (!system_link_shortcut_open())
 			platform_log("menus: the System Link screen did not open");
 	}

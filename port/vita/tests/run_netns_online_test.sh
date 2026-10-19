@@ -135,7 +135,10 @@
 #            the joiner's join (the server browser) held meanwhile - nothing of
 #            the game sent, no map copied - and answered once the host chooses
 #            the map (network_game_server_port_map_pending); then played
-#   h3pickjoin the same from the Halo 3 menus (h3online's copies)
+#   h3pickjoin the same from the Halo 3 menus (h3online's copies), where there
+#            is no map list after the server starts: its map is the lobby's,
+#            set as it starts, so no join is ever held (0 held) and the joiner
+#            joins the host's lobby during its minute there
 #   menushost the host creates its game from the menus: Multiplayer, CREATE
 #            GAME INTERNET, Server Setup (its name typed, Max players,
 #            public), START GAME, the profile, the map and the gametype; the
@@ -269,8 +272,8 @@
 #   h3lan    system link from the Halo 3 menus (Menu style Halo 3, both copies
 #            with the Halo PC files, HALO_TEST_DATA_MENUS; skipped without), on
 #            one LAN (online off): the host's MULTIPLAYER, the Halo 3 lobby on
-#            SYSTEM LINK, START GAME (the profile, the map list, the game type:
-#            the game's lobby); the joiner's MULTIPLAYER, BROWSE GAMES, the
+#            SYSTEM LINK, START GAME (the profile, then the game's lobby: the
+#            lobby's GAME and MAP, no map or game type list); the joiner's MULTIPLAYER, BROWSE GAMES, the
 #            profile, the Halo 3 LAN browser (no System Link list), the host's
 #            game listed (its name, map, game type and players) and joined with
 #            A; the host starts it, and both must play it
@@ -1971,11 +1974,11 @@ h3lan|h3adhoc)
 		join_net="HALO_NET_ADHOC=true HALO_NET_ADHOC_EMULATE=10.99.0.2,10.99.0.1"
 	fi
 	# (MULTIPLAYER: the Halo 3 lobby; down three to START GAME, A: the profile (A joins, A
-	# the profile, A), the map list (A: Battle Creek), the game type (A: Slayer): the game's
-	# lobby; a while for the joiner, then A starts the game, a few times)
+	# the profile, A): the game hosted with the lobby's GAME and MAP (Slayer, Battle Creek),
+	# its lobby; a while for the joiner, then A starts the game, a few times)
 	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
 		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:1 $host_net \
-		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:5000 a wait:150:4000 a wait:150:${HALO_TEST_H3LAN_WAIT:-40000} a wait:150:5000 a wait:150:5000 a" \
+		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:9000 wait:150:${HALO_TEST_H3LAN_WAIT:-40000} a wait:150:5000 a wait:150:5000 a" \
 		; host_pid=$last_pid
 	sleep 5
 	# (MULTIPLAYER: the Halo 3 lobby; down five to BROWSE GAMES, A: the profile (A joins, A
@@ -1991,8 +1994,10 @@ h3lan|h3adhoc)
 	echo "--- host"; grep -aE "ui: screen|menus: (h3 mp|Multiplayer)|system link: (hosting|in a)" "$hl" | head -16
 	echo "--- joiner"; grep -aE "ui: screen|menus: (h3 mp|the LAN|the Halo 3 LAN)|system link: (joining|in a)" "$jl" | head -20
 	grep -aq "menus: h3 mp lobby: NETWORK: $network" "$hl" || fail "the host's lobby was not on $network"
-	grep -aq "menus: Multiplayer > System Link: the game's server started; the map list" "$hl" ||
-		fail "the host's START GAME did not host a game"
+	grep -aq "menus: Multiplayer > System Link: the game's server started; the game's lobby" "$hl" ||
+		fail "the host's START GAME did not host a game (straight to its lobby)"
+	grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected" "$hl" &&
+		fail "an Xbox screen (the map or game type list) opened on the host's way"
 	grep -aq "system link: hosting" "$hl" || fail "the host did not host"
 	grep -aq "menus: h3 mp lobby: NETWORK: $network" "$jl" || fail "the joiner's lobby was not on $network"
 	grep -aq "menus: the Halo 3 LAN browser for the System Link list" "$jl" ||
@@ -2105,13 +2110,13 @@ h3online|h3pickjoin)
 		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS)"; exit 0
 	fi
 	# (MULTIPLAYER: the lobby on SYSTEM LINK; NETWORK, up to ONLINE, A: online, live; a while for
-	# the broker; down three to START GAME, A: Create Game; down two to NAME, A: typed; down four
-	# to START GAME, A: the profile (A joins, A the profile, A), the map list (A), the game type
-	# (A): the game's lobby; a while for the joiner, then A starts the game, a few times)
+	# the broker; Square: GAME OPTIONS (Create Game); down two to NAME, A: typed; down four to
+	# START GAME, A: the profile (A joins, A the profile, A): the game's lobby (h3pickjoin: a
+	# minute there); a while for the joiner, then A starts the game, a few times)
 	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
 		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:1 HALO_NET_HOST_PUBLIC=true \
 		HALO_TEST_TEXT_INPUT=NetHost \
-		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:10000 down:150:500 down:150:500 down:150:500 a wait:150:4000 down:150:500 down:150:500 a wait:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:4000 a wait:150:2000 a wait:150:2000 a wait:150:$pick a wait:150:4000 a wait:150:${HALO_TEST_H3ONLINE_WAIT:-45000} a wait:150:5000 a wait:150:5000 a" \
+		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:10000 x wait:150:4000 down:150:500 down:150:500 a wait:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:4000 a wait:150:2000 a wait:150:2000 a wait:150:$pick wait:150:4000 wait:150:${HALO_TEST_H3ONLINE_WAIT:-45000} a wait:150:5000 a wait:150:5000 a" \
 		; host_pid=$last_pid
 	sleep 25
 	# (MULTIPLAYER: the lobby on SYSTEM LINK; NETWORK, up to ONLINE, A; a while for the broker;
@@ -2144,9 +2149,14 @@ h3online|h3pickjoin)
 	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
 	echo "joiner's seconds with two players playing: $two"
 	[ "$two" -ge 15 ] || fail "the joiner played the host's game for $two s with two players (15 wanted)"
-	grep -aq "network: the game is open while its host chooses the map (joins held until then)" "$hl" ||
-		fail "the host's game was not opened as its server started"
-	[ $mode = h3pickjoin ] && check_pick_join
+	grep -aq "network: the host chose the map levels.test.beavercreek.beavercreek (0 joins held meanwhile)" "$hl" ||
+		fail "the host's game was not hosted on the lobby's map as its server started"
+	grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected" "$hl" &&
+		fail "an Xbox screen (the map or game type list) opened on the host's way"
+	if [ $mode = h3pickjoin ]; then
+		grep -aq "network: holding machine" "$hl" && fail "a join was held (the map is set as the server starts)"
+		grep -aq "join: the host's map is levels" "$jl" || fail "the joiner was not told the host's map"
+	fi
 	;;
 netswitch)
 	rounds=${HALO_TEST_SWITCH_ROUNDS:-5}

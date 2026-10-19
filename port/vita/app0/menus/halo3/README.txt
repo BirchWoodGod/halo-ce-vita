@@ -52,9 +52,13 @@ these screens stand for the Xbox's own, over the same animated Halo ring:
   screen, as OpenCE's multiplayer.xml does with Menu style Halo CE):
   MULTIPLAYER LOBBY with NETWORK (ONLINE: internet play; SYSTEM LINK: the Vitas
   on the same Wi-Fi; AD HOC: the Vitas near, the connection Ad hoc; OFFLINE:
-  split screen), GAME and MAP (pickers: the game type and map the Xbox's lists
-  open on after START GAME), START GAME (ONLINE: Create Game; SYSTEM LINK and
-  AD HOC: the profile, then the new game's map list; OFFLINE: split screen's),
+  split screen), GAME and MAP (pickers: the game type and map START GAME
+  hosts with), START GAME (ONLINE, SYSTEM LINK and AD HOC: the profile, then
+  the game hosted on the lobby's GAME and MAP as the Xbox's lists would set
+  them, and its lobby, pregame.xml - no map or game type list; OFFLINE: split
+  screen's), GAME OPTIONS on ONLINE (Square: Create Game's name, max
+  players, public or private and password, the settings panel's Play page's
+  too, which START GAME hosts with),
   EDIT GAME TYPES (the Xbox's), BROWSE GAMES (the profile, then the games
   browser, network.xml: ONLINE the System Link and the online games in one
   list) and JOIN WITH CODE; ONLINE, SYSTEM LINK and AD HOC are the
@@ -111,6 +115,13 @@ these screens stand for the Xbox's own, over the same animated Halo ring:
   the online games' passwords, System Link has none) and the joining dialog
   (AD HOC out of the ad hoc group: the system's dialog joins it, then what
   was asked goes on).
+- Nothing is asked twice: once a profile is chosen alone on SELECT PROFILE
+  (or the campaign's), a network game's SELECT PROFILE is not shown again
+  in that run (menu_functions.c h3_session: the profile set at once, as its
+  Cross would, its checks kept; asked again if the profile is gone or taken,
+  and split screen's always asks), and the games a code, a friend, an
+  invite or the party join are joined from the games browser (network.xml),
+  not the Xbox's System Link list.
 - join.xml: SELECT PROFILE for a multiplayer game, standing for the Xbox's
   four-way "press START to join" screen of System Link (START GAME and BROWSE
   GAMES on every network, Create Game, JOIN WITH CODE, the panel's Join a
