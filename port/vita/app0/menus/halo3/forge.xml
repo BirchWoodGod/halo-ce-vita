@@ -10,7 +10,8 @@ pause screen (ingame.txt; its fonts and pictures are halo3/pause.xml's, the same
 - the Forge menu, Start in a Forge game (menu_tags.c opens it for the level's pause screen): resume,
   the monitor or the Spartan, save the map variant (its name typed on the system's keyboard: port
   forge save), undo and redo (forge.c's history), snapping on or off, every placed character's AI
-  on or off, a new round (Halo 3's Restart Round: the map reset, the layout placed again), leave
+  on or off, the dead characters cleared out of the layout (they hold their places in the AI
+  budget until then), every character cleared (asked first), a new round (Halo 3's Restart Round: the map reset, the layout placed again), leave
   (asked first), the controls at the right; what the last of them came to said under the menu;
 - the object's properties (Square while holding an object you placed): its team, respawn time and
   whether it is placed at the start, and a character's AI team and AI on or off (those two rows
@@ -48,6 +49,9 @@ The art is this folder's own (tools/halo3_menu_art.py). -->
 		<string text="Change"/>
 		<string text="Done"/>
 		<string text="NEW ROUND"/>
+		<string text="CLEAR ALL AI?"/>
+		<string text="Every character you placed is removed, alive or dead.\nThey don't come back next round."/>
+		<string text="Clear"/>
 	</strings>
 
 	<!-- the object browser: its rows (a name, a count), written by port forge browser -->
@@ -193,6 +197,12 @@ The art is this folder's own (tools/halo3_menu_art.py). -->
 	<widget name="h3/forge/pause/allai" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3">
 		<on event="a left right" run="port forge all ai"/>
 	</widget>
+	<widget name="h3/forge/pause/cleardead" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3">
+		<on event="a" run="port forge clear dead ai"/>
+	</widget>
+	<widget name="h3/forge/pause/clearall" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3">
+		<on event="a" open="h3/forge/clearai/screen"/>
+	</widget>
 	<widget name="h3/forge/pause/newround" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/forge_menu" string_index="14">
 		<on event="a" run="port forge new round" close="all"/>
 	</widget>
@@ -201,21 +211,23 @@ The art is this folder's own (tools/halo3_menu_art.py). -->
 	</widget>
 	<widget name="h3/forge/pause/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<child widget="h3/forge/pause/resume" x="0" y="0"/>
-		<child widget="h3/forge/pause/toggle" x="0" y="24"/>
-		<child widget="h3/forge/pause/save" x="0" y="48"/>
-		<child widget="h3/forge/pause/undo" x="0" y="72"/>
-		<child widget="h3/forge/pause/redo" x="0" y="96"/>
-		<child widget="h3/forge/pause/snap" x="0" y="120"/>
-		<child widget="h3/forge/pause/allai" x="0" y="144"/>
-		<child widget="h3/forge/pause/newround" x="0" y="168"/>
-		<child widget="h3/forge/pause/leave" x="0" y="192"/>
+		<child widget="h3/forge/pause/toggle" x="0" y="22"/>
+		<child widget="h3/forge/pause/save" x="0" y="44"/>
+		<child widget="h3/forge/pause/undo" x="0" y="66"/>
+		<child widget="h3/forge/pause/redo" x="0" y="88"/>
+		<child widget="h3/forge/pause/snap" x="0" y="110"/>
+		<child widget="h3/forge/pause/allai" x="0" y="132"/>
+		<child widget="h3/forge/pause/cleardead" x="0" y="154"/>
+		<child widget="h3/forge/pause/clearall" x="0" y="176"/>
+		<child widget="h3/forge/pause/newround" x="0" y="198"/>
+		<child widget="h3/forge/pause/leave" x="0" y="220"/>
 	</widget>
 	<widget name="h3/forge/pause/title" type="text" left="56" top="49" width="540" height="26" font="h3/font_title" color="#FFF4F4F4">
 		<data input="port forge title"/>
 	</widget>
-	<widget name="h3/forge/pause/column" left="48" top="112" width="236" height="232" bitmap="h3/column"/>
+	<widget name="h3/forge/pause/column" left="48" top="112" width="236" height="256" bitmap="h3/column"/>
 	<!-- (what the last thing asked came to, and the map variant played: port forge title writes it) -->
-	<widget name="h3/forge/pause/status" type="text" left="56" top="352" width="236" height="64" font="h3/font_small" color="#FF9FD8FF"/>
+	<widget name="h3/forge/pause/status" type="text" left="56" top="372" width="236" height="64" font="h3/font_small" color="#FF9FD8FF"/>
 	<widget name="h3/forge/pause/controls_panel" left="300" top="150" width="320" height="150" bitmap="h3/panel"/>
 	<widget name="h3/forge/pause/controls_caption" type="text" left="312" top="156" width="296" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/forge_menu" string_index="6"/>
 	<widget name="h3/forge/pause/controls_rule" left="312" top="174" width="296" height="2" bitmap="h3/rule"/>
@@ -265,6 +277,25 @@ The art is this folder's own (tools/halo3_menu_art.py). -->
 		<child widget="h3/forge/leave/text"/>
 		<child widget="h3/forge/leave/a_butn"/>
 		<child widget="h3/forge/leave/leave"/>
+		<child widget="h3/forge/leave/b_butn"/>
+		<child widget="h3/forge/leave/back"/>
+	</widget>
+
+	<!-- CLEAR ALL AI, asked first (the same dialog) -->
+	<widget name="h3/forge/clearai/title" type="text" left="132" top="156" width="376" height="22" font="h3/font_title" color="#FFF2F6FA" string_list="h3/forge_menu" string_index="15"/>
+	<widget name="h3/forge/clearai/text" type="text" left="132" top="194" width="376" height="80" font="h3/font_small" color="#FFCFD9E3" string_list="h3/forge_menu" string_index="16"/>
+	<widget name="h3/forge/clearai/clear" type="text" left="152" top="291" width="80" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/forge_menu" string_index="17"/>
+	<widget name="h3/forge/clearai/screen" flags="pass_unhandled_to_focused_child pause_game">
+		<on event="a start" run="port forge clear all ai" back="true"/>
+		<on event="b back" back="true"/>
+		<child widget="h3/pause/haze"/>
+		<child widget="h3/forge/leave/panel"/>
+		<child widget="h3/forge/leave/rule"/>
+		<child widget="h3/forge/leave/strip"/>
+		<child widget="h3/forge/clearai/title"/>
+		<child widget="h3/forge/clearai/text"/>
+		<child widget="h3/forge/leave/a_butn"/>
+		<child widget="h3/forge/clearai/clear"/>
 		<child widget="h3/forge/leave/b_butn"/>
 		<child widget="h3/forge/leave/back"/>
 	</widget>

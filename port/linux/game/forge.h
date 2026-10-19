@@ -271,6 +271,27 @@ void forge_ai_all_request(
 	void);
 short forge_ai_all_state(
 	void);
+/* (the Forge menu's CLEAR DEAD AI, and CLEAR ALL AI after its question)
+the layout's dead characters (all of them, alive or dead) taken out of the
+layout and the world at the next forge_update: they come back no more with
+a new round, nor in a map variant saved after; what the game spawned (a
+carrier's infection forms) is left */
+enum
+{
+	_forge_clear_ai_none,
+	_forge_clear_ai_dead,
+	_forge_clear_ai_all,
+};
+void forge_clear_ai_request(
+	boolean all);
+/* (the settings panel's Forge and File Share page, vita_settings.c, of
+another ABI: plain types only) the layout's characters alive and dead, and
+whether a Forge game is played (its rows shown); the clearing asked */
+int forge_panel_ai_counts(
+	int *alive,
+	int *dead);
+void forge_panel_clear_ai(
+	int all);
 
 /* (main.c, a map reset: main_reset_map) before the game's state goes, the
 layout of a Forge game taken; after it has started again, placed again
@@ -323,9 +344,12 @@ void forge_browser_choose(
 	short category,
 	short item_index);
 
-/* the budget: objects placed (still there) and AI characters alive */
+/* the budget: objects placed (the layout's, gone in play or not), AI
+characters alive, and dead (they still hold their places: back with the
+next round, until CLEAR DEAD AI; dead_ai may be NULL) */
 void forge_budget_get(
 	short *objects,
-	short *ai);
+	short *ai,
+	short *dead_ai);
 
 #endif

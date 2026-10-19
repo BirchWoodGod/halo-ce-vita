@@ -323,6 +323,8 @@ enum
 	_function_h3_party_page_down,
 	_function_h3_party_type,
 	_function_h3_party_preset,
+	_function_forge_clear_dead_ai,
+	_function_forge_clear_all_ai,
 };
 
 /* in port_game_data_input_names' order */
@@ -1947,10 +1949,10 @@ static void h3_forge_browser_update(struct widget_instance *list)
 	struct widget_instance *child, *focus = NULL;
 	short categories[NUMBER_OF_FORGE_CATEGORIES];
 	short category_count = h3_forge_categories(categories);
-	short objects, ai;
+	short objects, ai, dead_ai;
 	long count, index, focused_row = NONE;
 	int target;
-	char text[192], line[160];
+	char text[192], line[256];
 
 	if (h3_forge.in_category && forge_category_item_count(h3_forge.category) <= 0)
 	{
@@ -2022,7 +2024,7 @@ static void h3_forge_browser_update(struct widget_instance *list)
 			child->animation.current_frame_index = child == focus ? 1 : 0;
 	}
 	/* (the crumb, the budget, the pane) */
-	forge_budget_get(&objects, &ai);
+	forge_budget_get(&objects, &ai, &dead_ai);
 	snprintf(text, sizeof(text), "%d / %d", objects, FORGE_MAXIMUM_OBJECTS);
 	text_show(named(screen, "budget"), text);
 	if (h3_forge.in_category)
@@ -2048,6 +2050,17 @@ static void h3_forge_browser_update(struct widget_instance *list)
 		snprintf(text, sizeof(text), "%s", forge_category_name(categories[target]));
 		snprintf(line, sizeof(line), T("%d objects of this map.\nBudget: %d/%d objects, %d/%d AI"),
 			forge_category_item_count(categories[target]), objects, FORGE_MAXIMUM_OBJECTS, ai, FORGE_MAXIMUM_AI);
+	}
+	/* (the dead characters apart: they hold their places until CLEAR DEAD
+	AI) */
+	if (line[0] && dead_ai > 0)
+	{
+		size_t length = strlen(line);
+
+		snprintf(line + length, sizeof(line) - length, "\n%s", T("Dead AI come back next round."));
+		length = strlen(line);
+		if (ai + dead_ai >= FORGE_MAXIMUM_AI)
+			snprintf(line + length, sizeof(line) - length, "\n%s", T("Clear dead AI to place more."));
 	}
 	text_show(named(screen, "info_name"), text);
 	text_show(named(screen, "info_text"), line);
@@ -2168,6 +2181,16 @@ static void h3_forge_title_update(struct widget_instance *widget)
 		text_show(named(screen, "snap"), text);
 		snprintf(text, sizeof(text), "%s: %s", T("ALL AI"), forge_ai_all_state() == _forge_ai_all_on ? T("ON") : forge_ai_all_state() == _forge_ai_all_off ? T("OFF") : T("MIXED"));
 		text_show(named(screen, "allai"), text);
+		/* (CLEAR DEAD AI and CLEAR ALL AI with how many each takes) */
+		{
+			short objects, ai, dead_ai;
+
+			forge_budget_get(&objects, &ai, &dead_ai);
+			snprintf(text, sizeof(text), dead_ai ? "%s (%d)" : "%s", T("CLEAR DEAD AI"), dead_ai);
+			text_show(named(screen, "cleardead"), text);
+			snprintf(text, sizeof(text), ai + dead_ai ? "%s (%d)" : "%s", T("CLEAR ALL AI"), ai + dead_ai);
+			text_show(named(screen, "clearall"), text);
+		}
 		forge_menu_status(status, sizeof(status));
 		if (status[0])
 			snprintf(text, sizeof(text), "%s", status);
@@ -8617,6 +8640,12 @@ boolean pc_menu_event_function_invoke(
 		return TRUE;
 	case _function_forge_all_ai:
 		forge_ai_all_request();
+		return TRUE;
+	case _function_forge_clear_dead_ai:
+	case _function_forge_clear_all_ai:
+		/* (CLEAR ALL AI from its question) */
+		platform_log("menus: forge: clear %s AI", function_index == _function_forge_clear_all_ai ? "all" : "dead");
+		forge_clear_ai_request(function_index == _function_forge_clear_all_ai);
 		return TRUE;
 	case _function_forge_pack_toggle:
 	{

@@ -1584,6 +1584,52 @@ scene made, the flag flying), `prebuild` (everything built and loaded at the
 main menu, Blood Gulch's two packs in one read, the visits build and read
 nothing), `cached` (a30 played, then menu_campaign read in place).
 
+## The AI counter and CLEAR AI (as built, Oct 19 2026)
+
+Branch `feat/forge-rotate-ai` (from `feat/party`, `02dbe938`). The owner:
+"Spawning in flood breaks the ai counter, it stays stuck after killing them
+so we might need a way to have a clear all for ai".
+
+**Why it stuck.** A placed character keeps its place in the AI budget
+(`FORGE_MAXIMUM_AI`, 32) after it dies, by design: NEW ROUND brings it back,
+and must have room for it. The Flood's bodies vanish (an infection form
+pops, a carrier bursts), so nothing was left to aim at and delete, and the
+HUD counted the dead with the living.
+
+**Now.**
+
+- The HUD counts the living, the dead apart: `Objects 33/256, AI 27/32,
+  5 back next round`. The browser's pane says the same ("Dead AI come back
+  next round.", and "Clear dead AI to place more." once the budget is full).
+- The dead still hold their places (the next round must have room for
+  them): a character past the budget is refused with "AI budget full: 32
+  characters, 5 of them dead. Clear dead AI to place more."
+- The Forge menu (Start, any Menu style) has **CLEAR DEAD AI (n)**, which
+  takes the dead out of the layout at once, and **CLEAR ALL AI (n)**, asked
+  first (`h3/forge/clearai/screen`), which takes every placed character out
+  of the layout and the world, alive or dead. Neither comes back with NEW
+  ROUND nor in a map variant saved after; the undo history's steps that
+  name them go too (nothing brings a cleared character back). The settings
+  panel's Forge and File Share page (the Halo CE Menu style's) has the same
+  two rows while a Forge game is played (`forge_panel_ai_counts`,
+  `forge_panel_clear_ai`), Clear all AI asked first.
+- The Flood: a combat form feigning death (dead bit, `feign_death_timer`
+  running: it gets back up as the same unit, `unit_port_resurrect`) is
+  counted alive, never cleared as dead; what the game spawns (a carrier's
+  infection forms, a body the Flood took) is never the layout's, never
+  counted. A placed carrier that bursts, or an infection form that pops,
+  is dead (its object gone) until cleared or the next round.
+
+Console: `forge clearai dead|all`; `forge budget` logs the living, the dead
+and the HUD's line; `forge ai` says `down` for a combat form feigning death.
+
+Tests (`run_forge_test.sh`): `clearai` (the Flood AI pack fills the AI
+budget; a carrier destroyed, an infection form and two combat forms killed;
+the HUD's numbers, the refusal, CLEAR DEAD AI, another placed, NEW ROUND
+with only what remains, CLEAR ALL AI, a map variant saved after holding the
+Warthog alone) and `clearaimenu` (the Forge menu's two rows by the pad, the
+question's B and A); `run_vita_settings_test.sh` the panel's rows.
+
 ## Open questions for the owner
 
 1. **The controls.** Is the button table right against your Halo 3

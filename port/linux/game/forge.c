@@ -76,6 +76,14 @@ play (picked up, destroyed) is still the layout's, back with the next round
 - at most FORGE_MAXIMUM_OBJECTS, and the characters among them, dead or
 alive, at most FORGE_MAXIMUM_AI: past either the browser's choice is
 refused, said on the screen. Its table is a fixed array, each index checked.
+The HUD counts the characters alive, the dead apart ("AI 5/32, 3 back next
+round"): a dead one keeps its place (the next round brings it back, and
+must have room) until the Forge menu's CLEAR DEAD AI takes the dead out of
+the layout - the refusal says so - or CLEAR ALL AI (asked first) every
+character, alive or dead (forge_ai_clear: a dead Flood body vanishes, so
+nothing is left to aim at and delete). A Flood combat form feigning death
+is not dead (it gets back up as the same unit), and what the game spawns
+(a carrier's infection forms) is never the layout's nor counted.
 
 A placed character has an AI team and its AI on or off (the properties
 window; forge_ai_apply: the engine's unit and actor teams, actor_braindead),
@@ -122,7 +130,8 @@ HALO_TEST_COMMANDS):
                            by +), for frames frames (2 by default)
   forge stick lx ly rx ry [frames]  the sticks held (-1 to 1)
   forge where              the monitor's state in the log
-  forge budget             the budget in the log
+  forge budget             the budget in the log (the AI alive and dead,
+                           the HUD's line)
   forge deps <name> [> file]  the tags the first object tag with name in
                            its name needs, every one it references and
                            theirs, with their sizes (the cross-map probe:
@@ -135,6 +144,9 @@ HALO_TEST_COMMANDS):
   forge brain on|off       the held (or aimed at) character's AI on or off
   forge allai [on|off]     every placed character's AI (flipped as the
                            Forge menu's AI row, or set)
+  forge clearai dead|all   the layout's dead characters, or all of them,
+                           cleared (the Forge menu's CLEAR DEAD AI, CLEAR
+                           ALL AI)
   forge ai                 each placed character in the log: where, its
                            team, its brain, alive or dead, its aim and
                            facing, its actor's mode, its weapon, body and
@@ -638,7 +650,10 @@ static struct
 	/* the budget */
 	struct forge_placed placed[FORGE_MAXIMUM_OBJECTS];
 	short placed_count;
+	/* the characters of the layout, and the dead among them (they hold
+	their places in the budget: they come back with the next round) */
 	short ai_count;
+	short ai_dead_count;
 	/* the buttons down last frame */
 	boolean was_down[NUMBER_OF_GAMEPAD_BUTTONS];
 	boolean toggle_was_down;
@@ -738,6 +753,10 @@ static struct
 	/* (the Forge menu's AI row) every placed character's brain flipped:
 	all off if any is on, else all on */
 	volatile boolean ai_all_requested;
+	/* (the Forge menu's CLEAR DEAD AI and CLEAR ALL AI, the settings
+	panel's) the layout's dead characters, or all of them, taken out:
+	_forge_clear_ai_* */
+	volatile short clear_ai_requested;
 	/* the ALL AI setting (the last one chosen, or read with a map
 	variant): a character placed gets its AI off while it is set; the
 	characters the game spawns in a Forge game follow it */
@@ -1137,15 +1156,38 @@ static boolean forge_object_alive(
 
 static void forge_transform_get(long object_index, struct forge_transform *transform);
 
+/* whether a placed character is dead: its body gone (a Flood infection
+form pops, a carrier bursts, a combat form's body may be taken) or lying
+dead - not a Flood combat form feigning death, which gets back up as the
+same unit (units.c unit_port_resurrect) */
+static boolean forge_placed_dead(
+	struct forge_placed const *placed)
+{
+	struct unit_datum *unit;
+
+	if (!placed->ai)
+		return FALSE;
+	if (!forge_object_alive(placed->object_index))
+		return TRUE;
+	unit = (struct unit_datum *)object_get(placed->object_index);
+	if (!TEST_FLAG(unit->object.damage_flags, _object_dead_bit))
+		return FALSE;
+	return !(FLAG(unit->object.type) & _object_mask_unit) || unit->unit.feign_death_timer <= 0;
+}
+
 /* the layout's objects gone in play (equipment picked up, a grenade thrown)
 kept, their object NONE (they come back with the next round); the
-characters counted (the dead among them: they come back too) */
+characters counted, and the dead among them (they come back too, and keep
+their places in the budget until CLEAR DEAD AI takes them out). Only the
+layout's: what the game spawns (a carrier's infection forms, the Flood's
+own) is never counted */
 static void forge_placed_update(
 	void)
 {
 	short index;
 
 	forge_globals.ai_count = 0;
+	forge_globals.ai_dead_count = 0;
 	forge_globals.placed_count = (short)PIN(forge_globals.placed_count, 0, FORGE_MAXIMUM_OBJECTS);
 	for (index = 0; index < forge_globals.placed_count; index++)
 	{
@@ -1154,7 +1196,11 @@ static void forge_placed_update(
 		if (placed->object_index != NONE && !forge_object_alive(placed->object_index))
 			placed->object_index = NONE;
 		if (placed->ai)
+		{
 			forge_globals.ai_count++;
+			if (forge_placed_dead(placed))
+				forge_globals.ai_dead_count++;
+		}
 	}
 }
 
@@ -1543,6 +1589,72 @@ static void forge_ai_all_set(
 	forge_ai_unplaced_update(TRUE);
 	platform_log("forge: all AI %s (%d characters)", on ? "on" : "off", count);
 	forge_menu_notice("%s", on ? T("AI: On") : T("AI: Off"));
+}
+
+/* (CLEAR DEAD AI, CLEAR ALL AI) the layout's dead characters, or every
+one of them alive or dead, taken out of the layout and the world: they do
+not come back with the next round, a map variant saved after has them not,
+and the steps of the undo history that name them go (nothing brings a
+cleared character back). A Flood combat form feigning death is not dead.
+What the game spawned (a carrier's infection forms) is the game's, left */
+static void forge_ai_clear(
+	boolean all)
+{
+	short index;
+	short cleared = 0;
+	long cleared_ids[FORGE_MAXIMUM_OBJECTS];
+
+	forge_placed_update();
+	for (index = (short)(forge_globals.placed_count - 1); index >= 0; index--)
+	{
+		struct forge_placed *placed = &forge_globals.placed[index];
+
+		if (!placed->ai || (!all && !forge_placed_dead(placed)))
+			continue;
+		if (placed->object_index != NONE && placed->object_index == forge_globals.held_object_index)
+		{
+			forge_globals.held_object_index = NONE;
+			forge_globals.held_spawned = FALSE;
+		}
+		if (forge_object_alive(placed->object_index))
+			object_delete(placed->object_index);
+		cleared_ids[cleared++] = placed->id;
+		forge_placed_remove(index);
+	}
+	/* (the history's steps of the cleared: gone, the cursor kept on the
+	same step) */
+	if (cleared > 0)
+	{
+		short kept = 0;
+		short cursor = forge_globals.undo_cursor;
+
+		for (index = 0; index < forge_globals.undo_count; index++)
+		{
+			short id;
+
+			for (id = 0; id < cleared && forge_globals.undo[index].id != cleared_ids[id]; id++)
+				;
+			if (forge_globals.undo[index].id != NONE && id < cleared)
+			{
+				if (index < forge_globals.undo_cursor)
+					cursor--;
+				continue;
+			}
+			forge_globals.undo[kept++] = forge_globals.undo[index];
+		}
+		forge_globals.undo_count = kept;
+		forge_globals.undo_cursor = (short)PIN(cursor, 0, kept);
+	}
+	forge_placed_update();
+	platform_log("forge: cleared %d %s AI; budget %d/%d objects, %d/%d AI (%d dead)", cleared, all ? "placed" : "dead",
+		forge_globals.placed_count, FORGE_MAXIMUM_OBJECTS, forge_globals.ai_count, FORGE_MAXIMUM_AI,
+		forge_globals.ai_dead_count);
+	if (!cleared)
+		forge_menu_notice("%s", all ? T("No AI to clear") : T("No dead AI to clear"));
+	else if (all)
+		forge_menu_notice(T("Cleared all AI: %d characters"), cleared);
+	else
+		forge_menu_notice(T("Cleared %d dead AI"), cleared);
 }
 
 #ifndef HALO_RELEASE
@@ -2053,10 +2165,15 @@ static long forge_place(
 	variant for it) */
 	if (tag_get_group_tag(tag_index) == ACTOR_VARIANT_DEFINITION_TAG)
 	{
+		/* (the dead keep their places: they come back with the next
+		round, which must have room for them; CLEAR DEAD AI frees them) */
 		if (forge_globals.ai_count >= FORGE_MAXIMUM_AI)
 		{
 			*refusal = _forge_place_ai_budget;
-			if (!quiet)
+			if (!quiet && forge_globals.ai_dead_count > 0)
+				forge_notice(T("AI budget full: %d characters, %d of them dead. Clear dead AI to place more."),
+					FORGE_MAXIMUM_AI, forge_globals.ai_dead_count);
+			else if (!quiet)
 				forge_notice(T("AI budget full: %d characters."), FORGE_MAXIMUM_AI);
 			return NONE;
 		}
@@ -2393,8 +2510,14 @@ static void forge_hud_update(
 {
 	long object_index;
 
-	snprintf(forge_globals.hud_budget, sizeof(forge_globals.hud_budget), T("Objects %d/%d, AI %d/%d"),
-		forge_globals.placed_count, FORGE_MAXIMUM_OBJECTS, forge_globals.ai_count, FORGE_MAXIMUM_AI);
+	/* (the AI alive; the dead apart, back with the next round) */
+	if (forge_globals.ai_dead_count > 0)
+		snprintf(forge_globals.hud_budget, sizeof(forge_globals.hud_budget), T("Objects %d/%d, AI %d/%d, %d back next round"),
+			forge_globals.placed_count, FORGE_MAXIMUM_OBJECTS, forge_globals.ai_count - forge_globals.ai_dead_count,
+			FORGE_MAXIMUM_AI, forge_globals.ai_dead_count);
+	else
+		snprintf(forge_globals.hud_budget, sizeof(forge_globals.hud_budget), T("Objects %d/%d, AI %d/%d"),
+			forge_globals.placed_count, FORGE_MAXIMUM_OBJECTS, forge_globals.ai_count, FORGE_MAXIMUM_AI);
 	forge_globals.hud_label[0] = 0;
 	forge_globals.hud_label_held = object_try_and_get(forge_globals.held_object_index) != NULL;
 	object_index = forge_globals.hud_label_held ? forge_globals.held_object_index : forge_object_under_crosshair();
@@ -4030,6 +4153,29 @@ short forge_ai_all_state(
 	return forge_ai_state();
 }
 
+void forge_clear_ai_request(
+	boolean all)
+{
+	forge_globals.clear_ai_requested = all ? _forge_clear_ai_all : _forge_clear_ai_dead;
+}
+
+int forge_panel_ai_counts(
+	int *alive,
+	int *dead)
+{
+	if (alive)
+		*alive = forge_globals.ai_count - forge_globals.ai_dead_count;
+	if (dead)
+		*dead = forge_globals.ai_dead_count;
+	return forge_globals.game_active && !forge_globals.game_requested;
+}
+
+void forge_panel_clear_ai(
+	int all)
+{
+	forge_clear_ai_request(all != 0);
+}
+
 void forge_map_resetting(
 	void)
 {
@@ -4078,6 +4224,7 @@ void forge_map_reset(
 	forge_round_layout; the undo history's steps name objects no more) */
 	forge_globals.placed_count = 0;
 	forge_globals.ai_count = 0;
+	forge_globals.ai_dead_count = 0;
 	forge_globals.held_object_index = NONE;
 	forge_globals.held_spawned = FALSE;
 	forge_globals.undo_count = 0;
@@ -4088,6 +4235,7 @@ void forge_map_reset(
 	forge_globals.toggle_requested = FALSE;
 	forge_globals.close_requested = FALSE;
 	forge_globals.ai_all_requested = FALSE;
+	forge_globals.clear_ai_requested = _forge_clear_ai_none;
 	forge_globals.round_requested = FALSE;
 	forge_globals.round_resetting = FALSE;
 	if (forge_globals.active)
@@ -4107,6 +4255,7 @@ void forge_map_loaded(
 	/* (every object of the last map is gone, its indices with them) */
 	forge_globals.placed_count = 0;
 	forge_globals.ai_count = 0;
+	forge_globals.ai_dead_count = 0;
 	forge_globals.held_object_index = NONE;
 	forge_globals.held_spawned = FALSE;
 	forge_globals.undo_count = 0;
@@ -4132,6 +4281,7 @@ void forge_map_loaded(
 	forge_globals.round_resetting = FALSE;
 	forge_globals.round_pending = FALSE;
 	forge_globals.ai_all_requested = FALSE;
+	forge_globals.clear_ai_requested = _forge_clear_ai_none;
 	forge_globals.ai_all_off = FALSE;
 	if (forge_globals.active)
 	{
@@ -4226,10 +4376,13 @@ void forge_browser_choose(
 
 void forge_budget_get(
 	short *objects,
-	short *ai)
+	short *ai,
+	short *dead_ai)
 {
 	*objects = forge_globals.placed_count;
-	*ai = forge_globals.ai_count;
+	*ai = (short)(forge_globals.ai_count - forge_globals.ai_dead_count);
+	if (dead_ai)
+		*dead_ai = forge_globals.ai_dead_count;
 }
 
 boolean forge_camera_input(
@@ -4324,6 +4477,14 @@ void forge_update(
 	{
 		forge_globals.ai_all_requested = FALSE;
 		forge_ai_all_set(forge_ai_state() == _forge_ai_all_off);
+	}
+	if (forge_globals.clear_ai_requested)
+	{
+		short clear = forge_globals.clear_ai_requested;
+
+		forge_globals.clear_ai_requested = _forge_clear_ai_none;
+		if (forge_globals.game_active && !forge_globals.game_requested)
+			forge_ai_clear(clear == _forge_clear_ai_all);
 	}
 	/* (NEW ROUND: once the Forge menu has gone and the game runs again -
 	the engine resets a map only then) */
@@ -4770,8 +4931,18 @@ boolean forge_command(
 	if (!strcmp(word, "budget"))
 	{
 		forge_placed_update();
-		platform_log("forge: budget %d/%d objects, %d/%d AI", forge_globals.placed_count, FORGE_MAXIMUM_OBJECTS,
-			forge_globals.ai_count, FORGE_MAXIMUM_AI);
+		platform_log("forge: budget %d/%d objects, %d/%d AI (%d alive, %d dead); HUD: %s", forge_globals.placed_count,
+			FORGE_MAXIMUM_OBJECTS, forge_globals.ai_count, FORGE_MAXIMUM_AI, forge_globals.ai_count - forge_globals.ai_dead_count,
+			forge_globals.ai_dead_count, forge_globals.hud_budget);
+		return TRUE;
+	}
+	if (!strcmp(word, "clearai"))
+	{
+		/* ("clearai dead|all": as the Forge menu's CLEAR DEAD AI and CLEAR
+		ALL AI) */
+		if (strcmp(rest, "dead") && strcmp(rest, "all"))
+			return FALSE;
+		forge_ai_clear(!strcmp(rest, "all"));
 		return TRUE;
 	}
 	if (!strcmp(word, "press") || !strcmp(word, "stick"))
@@ -4833,7 +5004,7 @@ boolean forge_command(
 			short entry = forge_palette_of_tag(placed->tag_index);
 			char const *name = entry != NONE ? forge_globals.palette[entry].name : forge_tag_leaf(placed->tag_index);
 			char const *state = !object ? "gone" : TEST_FLAG(object->object.damage_flags, _object_dead_bit) ?
-				(placed->ai ? "dead" : "destroyed") : "alive";
+				(!placed->ai ? "destroyed" : forge_placed_dead(placed) ? "dead" : "down") : "alive";
 
 			if (characters && !placed->ai)
 				continue;
@@ -4900,8 +5071,8 @@ boolean forge_command(
 			platform_log("forge: ai: %d characters not of the layout alive (%d with their AI off); ALL AI %s", others,
 				others_off, forge_ai_state() == _forge_ai_all_on ? "on" : forge_ai_state() == _forge_ai_all_off ? "off" : "mixed");
 		}
-		platform_log("forge: %s listed: %d objects, %d characters in the layout; %ld shots by characters so far", word,
-			forge_globals.placed_count, forge_globals.ai_count, forge_globals.ai_shots);
+		platform_log("forge: %s listed: %d objects, %d characters in the layout (%d dead); %ld shots by characters so far",
+			word, forge_globals.placed_count, forge_globals.ai_count, forge_globals.ai_dead_count, forge_globals.ai_shots);
 		return TRUE;
 	}
 	if (!strcmp(word, "round"))

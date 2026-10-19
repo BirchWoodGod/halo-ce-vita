@@ -386,6 +386,7 @@ static char const *const port_function_names[] =
 	"port h3 join next", "port h3 join leave", "port h3 pregame init",
 	"port h3 party init", "port h3 party act", "port h3 party second", "port h3 party option",
 	"port h3 party page up", "port h3 party page down", "port h3 party type", "port h3 party preset",
+	"port forge clear dead ai", "port forge clear all ai",
 };
 
 /* the port's game data functions (menu_functions.c), from

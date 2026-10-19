@@ -104,6 +104,18 @@ int forge_panel_map_count(void) { return 3; }
 const char *forge_panel_map_name(int map_index) { return map_index >= 0 && map_index < 3 ? test_forge_maps[map_index][0] : ""; }
 const char *forge_panel_map_short(int map_index) { return map_index >= 0 && map_index < 3 ? test_forge_maps[map_index][1] : ""; }
 int forge_panel_map_available(int map_index) { return map_index == 1 || map_index == 2; }
+/* (a Forge game played, with its placed characters alive and dead; what
+the panel asked cleared: -1 nothing, 0 the dead, 1 all) */
+static int test_forge_playing, test_forge_alive, test_forge_dead, test_forge_cleared = -1;
+int forge_panel_ai_counts(int *alive, int *dead)
+{
+	if (alive)
+		*alive = test_forge_alive;
+	if (dead)
+		*dead = test_forge_dead;
+	return test_forge_playing;
+}
+void forge_panel_clear_ai(int all) { test_forge_cleared = all; }
 static struct forge_store_entry test_forge_entries[4];
 static int test_forge_count, test_forge_deleted;
 int forge_store_list(const char *map_name, struct forge_store_entry *entries, int capacity)
@@ -2261,6 +2273,33 @@ static void test_forge_page(void)
 	check(strstr(menu, "Damaged: it can't be used. Square deletes it") != NULL, "a damaged one: its help");
 	press(VITA_BUTTON_CIRCLE);
 	check(strstr(menu, "\nForge and File Share\x02  3 variants  >") != NULL, "back on Game: three now");
+	/* in a Forge game: Clear dead AI and Clear all AI (asked first) */
+	check(open_page("Forge") && !strstr(menu, "Clear dead AI"), "no Forge game: no Clear AI rows");
+	press(VITA_BUTTON_CIRCLE);
+	test_forge_playing = 1;
+	test_forge_alive = 5;
+	test_forge_dead = 3;
+	check(open_page("Forge") && strstr(menu, "\nStart Forge\x02  >\nClear dead AI\x02  3  >\nClear all AI\x02  8  >\n") &&
+		menu_fits() && menu_height_fits(), "a Forge game: Clear dead AI (3) and Clear all AI (8) under Start Forge; it fits");
+	to_line("Clear dead AI");
+	check(strstr(menu, "\n\x05" "Dead AI you placed, out of the layout: room for more\n") && strstr(menu, "Cross: select"),
+		"Clear dead AI's help");
+	press(VITA_BUTTON_CROSS);
+	check(test_forge_cleared == 0 && strstr(menu, "3 dead AI cleared"), "cross: the dead cleared, said");
+	test_forge_cleared = -1;
+	test_forge_dead = 0;
+	to_line("Clear all AI");
+	press(VITA_BUTTON_CROSS);
+	check(!strncmp(menu, "CLEAR ALL AI", 12) && strstr(menu, "5 alive and 0 dead") && test_forge_cleared == -1,
+		"Clear all AI asks first");
+	press(VITA_BUTTON_CIRCLE);
+	check(test_forge_cleared == -1 && strstr(menu, "\nClear all AI\x02"), "circle keeps them");
+	press(VITA_BUTTON_CROSS);
+	press(VITA_BUTTON_CROSS);
+	check(test_forge_cleared == 1 && strstr(menu, "All AI cleared"), "cross, cross: all cleared, said");
+	test_forge_playing = 0;
+	test_forge_cleared = -1;
+	press(VITA_BUTTON_CIRCLE);
 	vita_settings_set("HALO_MENU_STYLE", "halo3");
 	press(VITA_BUTTON_CIRCLE);
 	frame(0);

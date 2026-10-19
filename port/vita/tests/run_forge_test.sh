@@ -96,6 +96,18 @@
 #               by the Spartan; they attack him; the carrier bursts and its
 #               infection forms (the game's, not the layout's) live; ALL AI
 #               turns those off too
+#   clearai     the AI counter and CLEAR DEAD AI / CLEAR ALL AI (the
+#               console's "forge clearai", as the Forge menu's rows): the Flood
+#               AI pack's characters fill the AI budget (32), a carrier
+#               destroyed (its infection forms the game's, never counted), an
+#               infection form and two combat forms killed: the HUD counts 28
+#               alive and 4 back next round, a 33rd refused with "Clear dead AI
+#               to place more"; CLEAR DEAD AI frees their places, another
+#               placed; NEW ROUND brings back only what the layout still has;
+#               CLEAR ALL AI empties it, and a map variant saved after has only
+#               the Warthog (forge_files_test --dump)
+#   clearaimenu the Forge menu's rows by the pad: CLEAR DEAD AI (1), CLEAR ALL
+#               AI asked first (B keeps them, A clears them), screenshots
 #   floodcov    the Flood and the Covenant fight each other (the monitor
 #               watching): both sides hurt or killed
 #   sentinels   the Sentinel AI pack: sentinels (the Sentinels' team) fight
@@ -141,8 +153,8 @@
 #   run_forge_test.sh [CASE...]      (default: v1 budget fly b30 off files variants
 #                                     edit fileshare fstouch panel packs smallmap
 #                                     aiteam aioff round aisave allai allaimenu flood
-#                                     floodcov sentinels marines aivariant cepelican
-#                                     cepelicanoff pelican)
+#                                     clearai clearaimenu floodcov sentinels marines
+#                                     aivariant cepelican cepelicanoff pelican)
 #   aipacks     (not by default) the AI packs' tag cache on Blood Gulch, the
 #               tightest map: each AI pack with the packs on by default, and
 #               every pack at once (the Extinction Pelican's extinction.map from
@@ -165,7 +177,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_forge_test.$$}
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs smallmap aiteam aioff round aisave allai allaimenu aicopy flood floodcov sentinels marines aivariant cepelican cepelicanoff pelican}
+cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs smallmap aiteam aioff round aisave allai allaimenu aicopy flood clearai clearaimenu floodcov sentinels marines aivariant cepelican cepelicanoff pelican}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
@@ -257,8 +269,8 @@ b30='map_name levels\\b30\\b30'
 # D-pad up alone (rs: nothing for the monitor), Select + D-pad up (back+rs:
 # the Spartan), forward, Select alone then D-pad up alone (the scoreboard,
 # then zoom: neither flips), Select + D-pad up (the monitor); Start, down
-# eight times (past SAVE MAP VARIANT, UNDO, REDO, SNAP, ALL AI, NEW ROUND), A
-# (LEAVE FORGE), A (leave))
+# ten times (past SAVE MAP VARIANT, UNDO, REDO, SNAP, ALL AI, CLEAR DEAD AI,
+# CLEAR ALL AI, NEW ROUND), A (LEAVE FORGE), A (leave))
 v1pad="wait:150:3000 @00-main-menu:0:300 down:150:600 down:150:600 a:150:2500 @01-lobby:0:300"
 v1pad="$v1pad a:150:2000 @02-map-picker:0:300 down:150:700 a:150:1500 @02b-wizard-variants:0:300 a:150:2000"
 v1pad="$v1pad a:150:2000 up:150:700 a:150:1500 a:150:2000"
@@ -272,7 +284,7 @@ v1pad="$v1pad @13-boulder-dropped:0:300 rt:150:1000 lleft:700:600 @14-boulder-ca
 v1pad="$v1pad y:150:1500 @15-deleted:0:300 rs:150:1500 back+rs:150:2500 @16-spartan:0:300 lup:800:1500"
 v1pad="$v1pad back:150:600 rs:150:1200 back+rs:150:2500"
 v1pad="$v1pad @17-monitor-again:0:300 start:150:2000 @18-forge-menu:0:300 down:150:600 down:150:600 down:150:600"
-v1pad="$v1pad down:150:600 down:150:600 down:150:600 down:150:600 down:150:600 a:150:1500"
+v1pad="$v1pad down:150:600 down:150:600 down:150:600 down:150:600 down:150:600 down:150:600 down:150:600 a:150:1500"
 v1pad="$v1pad @19-leave-forge:0:300 a:150:9000 @20-main-menu-again:0:300"
 
 # (variants: the main menu's FORGE, the lobby; START FORGE (the map, no
@@ -594,6 +606,41 @@ flood_runs() {
 	ai_run flood 45 "$c" HALO_TEST_FORGE_PACKS=flood_ai
 }
 
+clearai_runs() {
+	# (a Warthog; ALL AI off so that they stand; 28 Flood combat forms, a
+	# carrier, an infection form and two human combat forms: the AI budget
+	# full; the carrier destroyed, the infection form and two combat forms
+	# killed; a 33rd refused; the dead cleared; another placed; NEW ROUND (the
+	# map's time starts again at 0); everything cleared; saved)
+	local store="$out/clearai-store"
+	rm -rf "$store"
+	mkdir -p "$store"
+	local c="L200:(set cheat_deathless_player true);L300:forge camera 60 -100 1.6 130 0;L302:forge spawn warthog"
+	c="$c;L303:forge distance 8;L304:forge drop;L305:forge allai off;L306:forge fill 28 floodcombat elite shotgun"
+	c="$c;L310:forge spawn floodcarrier;L311:forge distance 6;L312:forge drop;L314:forge spawn flood_infection"
+	c="$c;L315:forge distance 5;L316:forge drop;L318:forge spawn floodcombat_human assault;L319:forge distance 7;L320:forge drop"
+	c="$c;L322:forge spawn floodcombat_human shotgun;L323:forge distance 9;L324:forge drop;L326:forge budget"
+	c="$c;L330:forge destroy #30;L332:forge kill #31;L334:forge kill #2;L336:forge kill #3;L360:forge budget;L361:forge ai"
+	c="$c;L362:@shot 00-dead-apart;L364:forge spawn flood_infection;L370:forge clearai dead;L372:forge spawn flood_infection"
+	c="$c;L373:forge distance 5;L374:forge drop;L376:forge budget;L378:forge objects;L390:forge round"
+	c="$c;L520:forge budget;L522:forge objects;L530:forge clearai all;L532:forge budget;L534:forge ai;L536:forge save Clear Test"
+	c="$c;L540:@shot 01-all-cleared;L560:forge clearai dead"
+	ai_run clearai 60 "$c" HALO_SAVE_ROOT="$store" HALO_TEST_FORGE_PACKS=flood_ai
+	"$out/forge_files_test" --dump "$store/forge/bloodgulch/clear_test.hmv" > "$out/clearai/dump.txt" 2>&1
+}
+
+clearaimenu_runs() {
+	# (two Elites, one killed: the Forge menu by the pad: Start, down seven to
+	# CLEAR DEAD AI, A; down, A (asked), B (kept), A (asked), A (cleared))
+	local c="L300:forge camera 60 -100 1.6 120 0;L302:forge spawn elite major plasma rifle;L303:forge distance 7;L304:forge drop"
+	c="$c;L306:forge camera 60 -100 1.6 140 0;L308:forge spawn grunt minor plasma pistol;L309:forge distance 6;L310:forge drop"
+	c="$c;L312:forge allai off;L314:forge kill #1;L345:forge budget"
+	local pad="level:150:12000 start:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500"
+	pad="$pad down:150:800 @00-menu-clear-dead:0:300 a:150:1500 @01-dead-cleared:0:300 down:150:800 a:150:1500"
+	pad="$pad @02-clear-all-asked:0:300 b:150:1500 @03-kept:0:300 a:150:1500 a:150:1500 @04-all-cleared:0:300 b:150:1500"
+	ai_run clearaimenu 45 "$c" "HALO_TEST_PAD=$pad"
+}
+
 floodcov_runs() {
 	# (two of the Flood and two of the Covenant 12 world units apart, the
 	# monitor over them)
@@ -761,6 +808,10 @@ for c in $cases; do
 		allaimenu_runs & ;;
 	flood)
 		flood_runs & ;;
+	clearai)
+		clearai_runs & ;;
+	clearaimenu)
+		clearaimenu_runs & ;;
 	floodcov)
 		floodcov_runs & ;;
 	sentinels)
@@ -1038,6 +1089,60 @@ for c in $cases; do
 			"forge: ai: [1-9][0-9]* characters not of the layout alive"
 		expect flood "ALL AI off: the game's characters too" \
 			"forge: ai: ([1-9][0-9]*) characters not of the layout alive \(\1 with their AI off\); ALL AI off"
+		continue
+	fi
+	if [ "$c" = clearai ]; then
+		checked clearai || continue
+		log="$out/clearai/run.log"
+		expect clearai "the AI budget full: 32 placed" "forge: budget 33/256 objects, 32/32 AI \\(3[12] alive, [01] dead\\)"
+		# (the dead: the carrier gone, the infection form and two combat forms
+		# killed, and any a fall or the carrier's blast killed: at least four;
+		# the numbers that follow are worked out from them)
+		line=$(grep -a "forge: budget 33/256 objects, 32/32 AI" "$log" | sed -n 2p)
+		alive=$(echo "$line" | sed -n 's/.*(\([0-9]*\) alive, \([0-9]*\) dead).*/\1/p')
+		dead=$(echo "$line" | sed -n 's/.*(\([0-9]*\) alive, \([0-9]*\) dead).*/\2/p')
+		if [ -n "$alive" ] && [ -n "$dead" ] && [ $((alive + dead)) = 32 ] && [ "$dead" -ge 4 ] &&
+			echo "$line" | grep -q "HUD: Objects 33/256, AI $alive/32, $dead back next round$"; then
+			echo "  ok: clearai: $dead dead: the HUD counts the $alive alive, the dead apart ($line)"
+		else
+			fail "clearai: the dead not apart: $line"
+			alive=0 dead=0
+		fi
+		expect clearai "the carrier's infection forms are the game's, not counted" \
+			"forge: ai: [1-9][0-9]* characters not of the layout alive"
+		expect clearai "a 33rd refused: clear the dead to place more" \
+			"forge: AI budget full: 32 characters, $dead of them dead. Clear dead AI to place more."
+		expect clearai "CLEAR DEAD AI took the $dead out" \
+			"forge: cleared $dead dead AI; budget $((33 - dead))/256 objects, $alive/32 AI \\(0 dead\\)"
+		expect clearai "then another placed" \
+			"forge: spawned Flood Infection Form .*budget $((34 - dead))/256 objects, $((alive + 1))/32 AI"
+		expect clearai "NEW ROUND takes the layout as it is" \
+			"forge: new round 1: the layout taken: $((34 - dead)) objects \\($((alive + 1)) characters\\)"
+		expect clearai "and places only that again" "forge: new round 1: $((34 - dead)) placed again, 0 skipped"
+		expect clearai "after the round" \
+			"forge: budget $((34 - dead))/256 objects, $((alive + 1))/32 AI \\($((alive + 1)) alive, 0 dead\\)"
+		expect clearai "CLEAR ALL AI emptied it" "forge: cleared $((alive + 1)) placed AI; budget 1/256 objects, 0/32 AI \\(0 dead\\)"
+		expect clearai "the HUD after" "forge: budget 1/256 objects, 0/32 AI \\(0 alive, 0 dead\\); HUD: Objects 1/256, AI 0/32$"
+		expect clearai "nothing dead left to clear" "forge: No dead AI to clear"
+		expect clearai "saved after: one object" "forge: map variant \"Clear Test\" saved as bloodgulch/clear_test.hmv, 1 objects"
+		if grep -aq "record 0: vehicles.warthog.warthog" "$out/clearai/dump.txt" && ! grep -aq "record 1:" "$out/clearai/dump.txt"; then
+			echo "  ok: clearai: the file has the Warthog alone"
+		else
+			fail "clearai: the file: $(cat "$out/clearai/dump.txt")"
+		fi
+		continue
+	fi
+	if [ "$c" = clearaimenu ]; then
+		checked clearaimenu || continue
+		expect clearaimenu "one dead of two" "forge: budget 2/256 objects, 2/32 AI \(1 alive, 1 dead\)"
+		expect clearaimenu "A on CLEAR DEAD AI" "menus: forge: clear dead AI"
+		expect clearaimenu "the dead Elite cleared" "forge: cleared 1 dead AI"
+		expect clearaimenu "CLEAR ALL AI asked first" "ui: screen pc.h3.forge.clearai.screen"
+		[ "$(grep -ac "forge: cleared 1 placed AI" "$out/clearaimenu/run.log")" = 1 ] &&
+			echo "  ok: clearaimenu: B kept them, A cleared the grunt (once)" || fail "clearaimenu: CLEAR ALL AI not once"
+		expect clearaimenu "none left" "forge: cleared 1 placed AI; budget 0/256 objects, 0/32 AI \(0 dead\)"
+		[ -f "$out/clearaimenu/shots/04-all-cleared.bmp" ] && echo "  ok: clearaimenu: the screenshots" ||
+			fail "clearaimenu: no screenshots"
 		continue
 	fi
 	if [ "$c" = floodcov ]; then

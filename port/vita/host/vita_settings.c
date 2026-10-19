@@ -200,7 +200,10 @@ Map variant (None, or one of that map's: port/linux/src/forge_store.c) and
 Start Forge, which asks the game for the Forge game at its main menu
 (SYSTEM_LINK_REQUEST_FORGE, system_link_shortcut.c) and closes the panel;
 under File Share the map variants of every map (the first
-FORGE_PANEL_MAXIMUM), square deleting one after a confirmation.
+FORGE_PANEL_MAXIMUM), square deleting one after a confirmation. While a
+Forge game is played, Clear dead AI and Clear all AI (asked first) do what
+the Forge menu's CLEAR DEAD AI and CLEAR ALL AI do, each with how many it
+takes (forge.c forge_panel_ai_counts, forge_panel_clear_ai).
 
 Dev holds a few switches for testers (each a debug environment variable;
 most are read once, at start-up, and say so; the renderer's A/B ones on a
@@ -929,6 +932,8 @@ enum
 	SCREEN_LARGE,
 	/* a map variant to delete (the Forge page's File Share) */
 	SCREEN_FORGE_DELETE,
+	/* the Forge game's characters all cleared: asked first */
+	SCREEN_FORGE_CLEAR,
 	/* the Mod manager page's chosen entry: its facts; its delete's
 	question */
 	SCREEN_MOD_DETAILS,
@@ -1142,6 +1147,10 @@ int forge_panel_map_count(void);
 const char *forge_panel_map_name(int map_index);
 const char *forge_panel_map_short(int map_index);
 int forge_panel_map_available(int map_index);
+/* the Forge game's placed characters alive and dead (FALSE: no Forge game
+is played), and its dead or all of them cleared, at its next update */
+int forge_panel_ai_counts(int *alive, int *dead);
+void forge_panel_clear_ai(int all);
 /* (system_link_shortcut.c) the Forge game asked for: its map's index and
 its map variant's file name ("" none), with SYSTEM_LINK_REQUEST_FORGE */
 extern volatile int halo_forge_request_map;
@@ -1156,6 +1165,9 @@ enum
 	FORGE_LINE_MAP,
 	FORGE_LINE_VARIANT,
 	FORGE_LINE_START,
+	/* (while a Forge game is played) */
+	FORGE_LINE_CLEAR_DEAD,
+	FORGE_LINE_CLEAR_ALL,
 	FORGE_LINE_COUNT
 };
 
@@ -2909,8 +2921,12 @@ static int page_lines(struct line *lines)
 	}
 	if (page == PAGE_FORGE)
 	{
+		int playing = forge_panel_ai_counts(NULL, NULL);
+
 		for (index = 0; index < FORGE_LINE_COUNT; index++)
 		{
+			if (!playing && (index == FORGE_LINE_CLEAR_DEAD || index == FORGE_LINE_CLEAR_ALL))
+				continue;
 			lines[count].type = LINE_FORGE;
 			lines[count++].index = index;
 		}
@@ -3313,6 +3329,8 @@ static void help_line(char *text, int size, const struct line *line)
 	else if (line && line->type == LINE_FORGE)
 		snprintf(text, (size_t)size, "%s", line->index == FORGE_LINE_MAP ? T("The multiplayer map to edit") :
 			line->index == FORGE_LINE_VARIANT ? T("Its objects placed as Forge starts") :
+			line->index == FORGE_LINE_CLEAR_DEAD ? T("Dead AI you placed, out of the layout: room for more") :
+			line->index == FORGE_LINE_CLEAR_ALL ? T("Every AI you placed, alive or dead, out of the layout") :
 			T("A local game: you fly as the monitor and place objects"));
 	else if (line && line->type == LINE_VARIANT)
 	{
@@ -3442,7 +3460,8 @@ static void footer_line(char *text, int size, const struct line *line)
 	else if (line && line->type == LINE_VARIANT)
 		middle = T("Square: delete   ");
 	else if (line && line->type == LINE_FORGE)
-		middle = line->index == FORGE_LINE_START ? T("Cross: select   ") : T("Left/right: change   ");
+		middle = line->index == FORGE_LINE_START || line->index == FORGE_LINE_CLEAR_DEAD ||
+			line->index == FORGE_LINE_CLEAR_ALL ? T("Cross: select   ") : T("Left/right: change   ");
 	else if (line && line->type == LINE_MOD)
 		middle = T("Cross: details   Square: delete   ");
 	else if (line && line->type == LINE_PARTY_MEMBER)
@@ -3656,6 +3675,15 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 			else if (line->index == FORGE_LINE_VARIANT)
 				length += snprintf(text + length, (size_t)(size - length), "\n%s\x02%c %.24s %c", T("Map variant"),
 					forge_variant > 0 ? '<' : ' ', variant ? variant->title : T("None"), forge_variant < variants ? '>' : ' ');
+			else if (line->index == FORGE_LINE_CLEAR_DEAD || line->index == FORGE_LINE_CLEAR_ALL)
+			{
+				int alive = 0, dead = 0;
+
+				forge_panel_ai_counts(&alive, &dead);
+				length += snprintf(text + length, (size_t)(size - length), "\n%s\x02  %d  >",
+					line->index == FORGE_LINE_CLEAR_DEAD ? T("Clear dead AI") : T("Clear all AI"),
+					line->index == FORGE_LINE_CLEAR_DEAD ? dead : alive + dead);
+			}
 			else
 				length += snprintf(text + length, (size_t)(size - length), "\n%s\x02  >", T("Start Forge"));
 		}
@@ -4119,6 +4147,36 @@ static void show_forge_delete(void)
 	vgxm_menu_set(text, -1);
 }
 
+/* (the Forge page, in a Forge game) every placed character cleared, asked
+first */
+static void show_forge_clear(void)
+{
+	char text[512];
+	int alive = 0, dead = 0;
+
+	if (!forge_panel_ai_counts(&alive, &dead))
+	{
+		screen = SCREEN_LIST;
+		show_list();
+		return;
+	}
+	snprintf(text, sizeof(text), T("CLEAR ALL AI\n\nEvery AI you placed, %d alive and %d dead,\nout of the layout: they don't come back\n"
+		"next round.\n\nCross: clear   O: keep"), alive, dead);
+	vgxm_menu_set(text, -1);
+}
+
+static void forge_clear_input(unsigned long pressed)
+{
+	if (pressed & VITA_BUTTON_CIRCLE)
+		screen = SCREEN_LIST;
+	else if (pressed & VITA_BUTTON_CROSS)
+	{
+		forge_panel_clear_ai(1);
+		set_notice("%s", T("All AI cleared"));
+		screen = SCREEN_LIST;
+	}
+}
+
 static void forge_delete_input(unsigned long pressed)
 {
 	if (pressed & VITA_BUTTON_CIRCLE)
@@ -4369,6 +4427,8 @@ static void show(void)
 		show_large();
 	else if (screen == SCREEN_FORGE_DELETE)
 		show_forge_delete();
+	else if (screen == SCREEN_FORGE_CLEAR)
+		show_forge_clear();
 	else if (screen == SCREEN_MOD_DETAILS)
 		show_mod_details();
 	else if (screen == SCREEN_MOD_DELETE)
@@ -5864,6 +5924,13 @@ int vita_settings_input(const struct vita_host_pad *pad)
 			show();
 		return 1;
 	}
+	if (screen == SCREEN_FORGE_CLEAR)
+	{
+		forge_clear_input(pressed);
+		if (pressed)
+			show();
+		return 1;
+	}
 	if (screen == SCREEN_LARGE)
 	{
 		large_input(pressed);
@@ -5980,7 +6047,20 @@ int vita_settings_input(const struct vita_host_pad *pad)
 			{
 				int step = (pressed & VITA_BUTTON_LEFT) ? -1 : 1, variants = 0, tries;
 
-				if (line->index == FORGE_LINE_START)
+				if (line->index == FORGE_LINE_CLEAR_DEAD && (pressed & (VITA_BUTTON_CROSS | VITA_BUTTON_RIGHT)))
+				{
+					int dead = 0;
+
+					forge_panel_ai_counts(NULL, &dead);
+					forge_panel_clear_ai(0);
+					if (dead == 1)
+						set_notice("%s", T("1 dead AI cleared"));
+					else
+						set_notice(T("%d dead AI cleared"), dead);
+				}
+				else if (line->index == FORGE_LINE_CLEAR_ALL && (pressed & (VITA_BUTTON_CROSS | VITA_BUTTON_RIGHT)))
+					screen = SCREEN_FORGE_CLEAR;
+				else if (line->index == FORGE_LINE_START)
 				{
 					if (pressed & (VITA_BUTTON_CROSS | VITA_BUTTON_RIGHT))
 					{
