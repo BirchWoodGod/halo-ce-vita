@@ -42,13 +42,14 @@ request at a time.
 
 (debug) HALO_IO_THROTTLE_KBPS=<n>: the harness's disk made like the Vita's
 memory card - each read and write as long as it takes at n KB/s (the card:
-~10000-13000 to read, less to write), and one at a time, every thread's
-behind the one in progress, as the card's are; an open, a look at a file's
+~10000-13000 to read; HALO_IO_THROTTLE_WRITE_KBPS another rate for writes,
+~750 on a tester's card), and one at a time, every thread's behind the one
+in progress, as the card's are; an open, a look at a file's
 attributes or a directory entry 0.5 ms (HALO_IO_THROTTLE_OP_US). So the
 harness shows what waits behind a map's copy or reads - the sound cache's
 loads, the frame's file calls. */
 
-static long io_throttle_kbps = -1, io_throttle_op_us;
+static long io_throttle_kbps = -1, io_throttle_write_kbps, io_throttle_op_us;
 static pthread_mutex_t io_card_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static void io_throttle_setup(void)
@@ -59,12 +60,17 @@ static void io_throttle_setup(void)
 
 		io_throttle_op_us = operation ? atol(operation) : 500;
 		io_throttle_kbps = getenv("HALO_IO_THROTTLE_KBPS") ? atol(getenv("HALO_IO_THROTTLE_KBPS")) : 0;
+		io_throttle_write_kbps = getenv("HALO_IO_THROTTLE_WRITE_KBPS") ? atol(getenv("HALO_IO_THROTTLE_WRITE_KBPS")) : 0;
+		if (io_throttle_write_kbps <= 0)
+			io_throttle_write_kbps = io_throttle_kbps;
 	}
 }
 
 /* the card taken for a request of `bytes` (0: an open, attributes, a
-directory entry), held for as long as the card would take */
-static void io_card_request(unsigned long long bytes)
+directory entry), held for as long as the card would take; a write at
+HALO_IO_THROTTLE_WRITE_KBPS when that is set (the Vita's card writes at
+~750 KB/s and reads at ~10 MB/s: a tester's map copy, Oct 2026) */
+static void io_card_request_write(unsigned long long bytes, int write)
 {
 	unsigned long long us;
 
@@ -72,7 +78,7 @@ static void io_card_request(unsigned long long bytes)
 	if (io_throttle_kbps <= 0)
 		return;
 	if (bytes)
-		us = 1 + bytes * 1000000ull / ((unsigned long long)io_throttle_kbps * 1024ull);
+		us = 1 + bytes * 1000000ull / ((unsigned long long)(write ? io_throttle_write_kbps : io_throttle_kbps) * 1024ull);
 	else
 		us = (unsigned long long)io_throttle_op_us;
 	pthread_mutex_lock(&io_card_lock);
@@ -88,14 +94,131 @@ static void io_card_request(unsigned long long bytes)
 	pthread_mutex_unlock(&io_card_lock);
 }
 
+/* ---------- a map copy's calls give way on the card
+
+The memory card serves one request at a time. A map copy (the lobby's
+precache: cache_files_decompress_windows.c) reads its map and writes the
+cache partition back to back, and on the Vita every other thread's call
+queued behind it: an insider.10 tester's join had the game thread's look at
+damnation.map's attributes wait 1628 ms and its cache file thread's texture
+reads hundreds, frames of 1 to 3.5 s, behind a 4 MB write that took 5.4 s
+(the writer's sched_yield between its pieces let only its own core's threads
+run, and the game thread is on another).
+
+So the copy's thread is a background one (platform_file_background_begin):
+its reads and writes go in pieces of BACKGROUND_PIECE_SIZE, and before each
+it waits, in 1 ms sleeps that let the card go, while another thread's call
+is under way or ended in the last BACKGROUND_GAP_US (the game thread's calls
+come in bursts) - up to BACKGROUND_WAIT_MAX_US a piece, so a stream of
+texture reads only slows the copy - and always BACKGROUND_PAUSE_US: any
+other call waits for one piece at most. A stop the
+copy is asked for (its `stop` function) ends a background call between
+pieces with ERROR_OPERATION_ABORTED: the lobby left mid-copy waited for the
+whole 4 MB write (cache_copy_end). (debug) HALO_IO_BACKGROUND_PIECE_KB:
+another piece size, 0 for none of it (the copy's calls as any other's). */
+#define BACKGROUND_PIECE_SIZE 0x8000UL
+#define BACKGROUND_GAP_US 8000ULL
+#define BACKGROUND_WAIT_MAX_US 40000ULL
+#define BACKGROUND_PAUSE_US 500L
+
+unsigned long long vita_host_time_us(void);
+
+static volatile unsigned long long io_foreground_last_us;
+/* (the other threads' calls under way) */
+static volatile int io_foreground_calls;
+static __thread int io_background;
+static __thread int (*io_background_stop)(void);
+
+static size_t background_piece_size(void)
+{
+	static long piece = -1;
+
+	if (piece < 0)
+	{
+		const char *setting = getenv("HALO_IO_BACKGROUND_PIECE_KB");
+
+		piece = setting ? atol(setting) * 1024L : (long)BACKGROUND_PIECE_SIZE;
+		if (piece < 0)
+			piece = (long)BACKGROUND_PIECE_SIZE;
+	}
+	return (size_t)piece;
+}
+
+void platform_file_background_begin(int (*stop)(void))
+{
+	io_background = background_piece_size() != 0;
+	io_background_stop = stop;
+}
+
+void platform_file_background_end(void)
+{
+	io_background = 0;
+	io_background_stop = NULL;
+}
+
+/* (a call of a thread that is not a background one, at its start and end) */
+static void io_foreground_note(void)
+{
+	if (!io_background)
+		__atomic_store_n(&io_foreground_last_us, vita_host_time_us(), __ATOMIC_RELAXED);
+}
+
+static void io_sleep_us(long us)
+{
+	struct timespec duration;
+
+	duration.tv_sec = 0;
+	duration.tv_nsec = us * 1000L;
+	while (nanosleep(&duration, &duration) != 0 && errno == EINTR)
+		;
+}
+
+/* before a background call's piece: FALSE (ERROR_OPERATION_ABORTED set) if
+its stop was asked for */
+static BOOL io_background_piece(void)
+{
+	unsigned long long waited = 0;
+
+	if (io_background_stop && io_background_stop())
+	{
+		SetLastError(ERROR_OPERATION_ABORTED);
+		return FALSE;
+	}
+	io_sleep_us(BACKGROUND_PAUSE_US);
+	while (waited < BACKGROUND_WAIT_MAX_US &&
+		(__atomic_load_n(&io_foreground_calls, __ATOMIC_RELAXED) > 0 ||
+			vita_host_time_us() - __atomic_load_n(&io_foreground_last_us, __ATOMIC_RELAXED) < BACKGROUND_GAP_US))
+	{
+		io_sleep_us(1000);
+		waited += 1000;
+	}
+	return TRUE;
+}
+
+static void io_card_request(unsigned long long bytes)
+{
+	io_card_request_write(bytes, 0);
+}
+
+/* (every call's start, paired with its file_call_done: never 0, so that
+each call's end is reached; 1 when the load profile is off) */
 static unsigned long long file_call_started(void)
 {
-	return halo_load_profile_now();
+	unsigned long long now;
+
+	if (!io_background)
+		__atomic_add_fetch(&io_foreground_calls, 1, __ATOMIC_RELAXED);
+	io_foreground_note();
+	now = halo_load_profile_now();
+	return now ? now : 1;
 }
 
 static void file_call_done(unsigned long long started, const char *call, const char *path, unsigned long long bytes)
 {
-	if (started)
+	if (!io_background)
+		__atomic_sub_fetch(&io_foreground_calls, 1, __ATOMIC_RELAXED);
+	io_foreground_note();
+	if (started > 1)
 		halo_load_profile_file_call(started, call, path, bytes);
 }
 
@@ -571,6 +694,18 @@ static BOOL read_at_timed(struct platform_file *file, LPVOID buffer, DWORD count
 
 		if (bounce && wanted > READ_BOUNCE_SIZE)
 			wanted = READ_BOUNCE_SIZE;
+		if (io_background)
+		{
+			if (wanted > background_piece_size())
+				wanted = background_piece_size();
+			if (!io_background_piece())
+			{
+				if (bytes_read)
+					*bytes_read = total;
+				free(staging);
+				return FALSE;
+			}
+		}
 		result = read_some(file, bounce ? staging : (char *)buffer + total, wanted, positioned, offset + total);
 		if (result < 0)
 		{
@@ -639,7 +774,22 @@ static BOOL write_at(struct platform_file *file, LPCVOID buffer, DWORD count, LP
 
 		if (wanted > write_piece_size())
 			wanted = write_piece_size();
-		if (total)
+		if (io_background)
+		{
+			if (wanted > background_piece_size())
+				wanted = background_piece_size();
+			if (!io_background_piece())
+			{
+				DWORD error = GetLastError();
+
+				if (bytes_written)
+					*bytes_written = total;
+				file_call_done(started, "write", file->path, total);
+				SetLastError(error);
+				return FALSE;
+			}
+		}
+		else if (total)
 			sched_yield();
 		result = positioned ?
 			pwrite(file->descriptor, (const char *)buffer + total, wanted, (off_t)(offset + total)) :
@@ -655,7 +805,7 @@ static BOOL write_at(struct platform_file *file, LPCVOID buffer, DWORD count, LP
 			file_call_done(started, "write", file->path, total);
 			return FALSE;
 		}
-		io_card_request((unsigned long long)result);
+		io_card_request_write((unsigned long long)result, 1);
 		total += (DWORD)result;
 	}
 	if (bytes_written)

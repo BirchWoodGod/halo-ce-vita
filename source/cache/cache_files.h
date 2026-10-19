@@ -135,6 +135,9 @@ void cache_files_dispose(
 void cache_files_precache_set_priority(
 	boolean blocking);
 
+#ifdef HALO_LINUX
+boolean cache_files_precache_deferred(char const *map_name);
+#endif
 boolean cache_files_precache_in_progress(
 	void);
 

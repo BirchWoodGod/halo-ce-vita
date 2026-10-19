@@ -1361,10 +1361,32 @@ static void texture_cache_wait_for_bitmap_load(
 /* every texture's: the texture datums are read without the lock (a datum
 made meanwhile is waited for too, or missed; its load is short either
 way) */
+/* port: whether a texture's load is under way (texture_cache_wait_for_loads
+would wait for it) */
+boolean texture_cache_loads_pending(
+	void)
+{
+	struct data_array *textures = xbox_texture_cache_globals.textures;
+	short index;
+
+	if (!textures || !textures->data)
+		return FALSE;
+	for (index = 0; index < textures->count; index++)
+	{
+		struct xbox_texture_cache_texture *texture = (struct xbox_texture_cache_texture *)
+			((byte *)textures->data + textures->size * index);
+
+		if (*(volatile short *)&texture->identifier && !*(volatile boolean *)&texture->loaded)
+			return TRUE;
+	}
+	return FALSE;
+}
+
 static void texture_cache_wait_for_loads(
 	void)
 {
 	struct data_array *textures = xbox_texture_cache_globals.textures;
+	unsigned long long wait_started = 0;
 	short index;
 
 	if (!textures || !textures->data)
@@ -1375,8 +1397,16 @@ static void texture_cache_wait_for_loads(
 			((byte *)textures->data + textures->size * index);
 
 		while (*(volatile short *)&texture->identifier && !*(volatile boolean *)&texture->loaded)
+		{
+			/* (the frame-hitch line's texture cache wait: a map copy's start
+			takes the texture cache's memory once its loads are done) */
+			if (!wait_started)
+				wait_started = halo_load_profile_now();
 			SwitchToThread();
+		}
 	}
+	if (wait_started)
+		halo_load_profile_add(_halo_load_texture_cache_wait, wait_started, 0);
 }
 #endif
 

@@ -5255,6 +5255,15 @@ void main_loop(
 			{
 				main_queue_map_private();
 			}
+#ifdef HALO_LINUX
+			/* port: a lobby's precache whose start waited for the textures'
+			loads (cache_files_give_time_to_precache), started once they are
+			done: a host's map choice has no other ask */
+			if (cache_files_precache_deferred(main_globals.multiplayer_map_name))
+			{
+				cache_files_give_time_to_precache(main_globals.multiplayer_map_name);
+			}
+#endif
 		}
 		else if (main_globals.reset_map)
 		{

@@ -1270,7 +1270,13 @@ frame on the game thread, each waiting on the Vita for the memory card,
 which serves one request at a time: behind a map copy's write it took
 hundreds of milliseconds, the lobby's hitches with nothing else happening.
 An answer stands IDENTITY_MEMORY_MS, and a map share download forgets its
-map's (custom_edition_cache_map_identity_forget). */
+map's (custom_edition_cache_map_identity_forget). While a map copy is under
+way it stands until the copy is over: an insider.10 tester's lobby looked
+again 10 s into damnation.map's copy, and its six file calls took 2.6 s of
+the game thread behind the copy's writes. Nothing in the maps folder changes
+under a copy but what this game writes (a map share download, the mod
+manager), which forgets its map's answer; the map's load reads its file
+afresh whatever was remembered. */
 enum
 {
 	REMEMBERED_ANSWERS = 8,
@@ -1351,7 +1357,7 @@ static boolean custom_edition_cache_identify_file(
 		for (index = 0; index < REMEMBERED_ANSWERS; index++)
 		{
 			if (remembered_answers[index].name[0] &&
-				now - remembered_answers[index].when < IDENTITY_MEMORY_MS &&
+				(now - remembered_answers[index].when < IDENTITY_MEMORY_MS || cache_files_precache_in_progress()) &&
 				remembered_answers[index].mod_maps == mod_maps &&
 				!csstrcasecmp(remembered_answers[index].name, name))
 			{

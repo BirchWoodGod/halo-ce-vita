@@ -87,6 +87,7 @@ halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
 #include "saved games/playlist_profile.h"
 #include "saved games/saved_game_files.h"
 #include "tag_files/files.h"
+#include "cache/cache_files.h"
 #include "halo_menus.h"
 #include "../src/lang.h"
 #include "../src/p2p.h"
@@ -512,6 +513,8 @@ static struct
 	long lan_online_count;
 	unsigned long lan_since;
 	char lan_said[192];
+	/* (when it was last logged: browser_log_due) */
+	unsigned long lan_said_at;
 } menu_functions;
 
 /* ---------- private code */
@@ -630,8 +633,12 @@ static void h3_nameplate_read(void)
 	long candidates[4];
 	short index;
 
+	/* (not again on the clock while a map copy is under way: the profiles'
+	reads, ~30 file calls of the saved games' map file on the game thread,
+	each waited on the Vita for the memory card behind the copy; a profile
+	chosen or saved is read again at once) */
 	if (h3_plate.read && !h3_plate.changed && active == h3_plate.active &&
-		now - h3_plate.read_at < H3_NAMEPLATE_READ_MILLISECONDS)
+		(now - h3_plate.read_at < H3_NAMEPLATE_READ_MILLISECONDS || cache_files_precache_in_progress()))
 	{
 		return;
 	}
@@ -712,9 +719,24 @@ when there are none (internet play off, no games). Display only: ONLINE
 opens the browser to join */
 static void browser_test_games(void);
 
+/* whether a list's change may be logged now: the first at once, then at
+most one each BROWSER_LOG_MILLISECONDS (the list as it is then) */
+#define BROWSER_LOG_MILLISECONDS 5000UL
+
+static boolean browser_log_due(unsigned long *logged_at)
+{
+	unsigned long now = system_milliseconds();
+
+	if (*logged_at && now - *logged_at < BROWSER_LOG_MILLISECONDS)
+		return FALSE;
+	*logged_at = now ? now : 1;
+	return TRUE;
+}
+
 static void h3_servers_update(struct widget_instance *widget)
 {
 	static char said[256];
+	static unsigned long said_at;
 	struct widget_instance *screen = screen_of(widget);
 	char line[256];
 	long count, index, shown;
@@ -761,7 +783,7 @@ static void h3_servers_update(struct widget_instance *widget)
 		char summary[256];
 
 		snprintf(summary, sizeof(summary), "%ld of %ld: %s", shown, count, line);
-		if (strcmp(summary, said))
+		if (strcmp(summary, said) && browser_log_due(&said_at))
 		{
 			snprintf(said, sizeof(said), "%s", summary);
 			platform_log("menus: h3 servers: %ld shown of %ld%s%s", shown, count, shown ? ": " : "", line);
@@ -4138,7 +4160,10 @@ static void lan_status(struct widget_instance *screen, char *line, int line_size
 			online && lan_entry(entry) ? "[LAN] " : "", entry->name, entry->map, entry->gametype, entry->players,
 			entry->maximum, entry->badge[0] ? ", PC" : "");
 	}
-	if (strcmp(said, menu_functions.lan_said))
+	/* (on a change, at most once in BROWSER_LOG_MILLISECONDS: the players'
+	counts change all the time online, and an insider.10 tester's log had
+	the list 138 times, 50 games each, as the browser filled) */
+	if (strcmp(said, menu_functions.lan_said) && browser_log_due(&menu_functions.lan_said_at))
 	{
 		snprintf(menu_functions.lan_said, sizeof(menu_functions.lan_said), "%s", said);
 		platform_log("menus: the LAN browser lists %s", said);
@@ -7253,6 +7278,7 @@ boolean pc_menu_event_function_invoke(
 		menu_functions.page = 0;
 		menu_functions.lan_since = system_milliseconds();
 		menu_functions.lan_said[0] = 0;
+		menu_functions.lan_said_at = 0;
 		menu_functions.join_watched = FALSE;
 		browser_view_reset(&menu_functions.view);
 		/* (Online: the public games too, as the server browser lists them) */

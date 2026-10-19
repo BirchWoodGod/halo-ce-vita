@@ -145,6 +145,8 @@ int halo_epoch_on_mutator(void);
 #include "custom_edition_cache.h"
 #include "custom_edition_maps.h"
 #include "tag_schema.h" /* port: tag_validate.c */
+#include "texture_cache.h" /* port: texture_cache_loads_pending */
+#include "cache_files_decompress_windows.h" /* port: cache_copy_compressed_file_complete */
 /* port: the port's text in the player's language (port/linux/src/lang.h,
 through the -iquote port/linux/game path) */
 #include "../src/lang.h"
@@ -511,6 +513,13 @@ static boolean cache_file_structure_bsp_reference_verify(
 	return TRUE;
 }
 
+#ifdef HALO_LINUX
+/* (cache_files_map_directory: the folder found, and the language's folder
+it was found for) */
+static char const *volatile cache_files_map_directory_found;
+static char const *volatile cache_files_map_directory_found_for;
+#endif
+
 /* ---------- public code */
 
 char const *cache_files_map_directory(
@@ -539,6 +548,21 @@ char const *cache_files_map_directory(
 		break;
 	}
 
+#ifdef HALO_LINUX
+	/* port: the folder found, by the language it was found for: every map
+	path the game makes asks (a dozen times a join, every few seconds in a
+	lobby), and each look was a file call on the game thread, which on the
+	Vita waits for the memory card behind a map copy's writes (an insider.10
+	lobby's 485 ms for one). The maps folder is the game's data's: it is not
+	made or taken away while the game runs. */
+	if (cache_files_map_directory_found && cache_files_map_directory_found_for == map_directory)
+	{
+		return cache_files_map_directory_found;
+	}
+	{
+		char const *language_directory = map_directory;
+		boolean found = TRUE;
+#endif
 	if (!file_exists(file_reference_create_from_path(&reference, map_directory, TRUE)))
 	{
 		for (directory_index = 0; data_00316820[directory_index]; directory_index++)
@@ -558,7 +582,20 @@ char const *cache_files_map_directory(
 			60,
 			data_00316820[directory_index],
 			"no valid map directory exists");
+#ifdef HALO_LINUX
+		found = data_00316820[directory_index] != NULL;
+#endif
 	}
+#ifdef HALO_LINUX
+	/* (none found: looked for again next time) */
+	if (found)
+	{
+		cache_files_map_directory_found = NULL;
+		cache_files_map_directory_found_for = language_directory;
+		cache_files_map_directory_found = map_directory;
+	}
+	}
+#endif
 
 	return map_directory;
 }
@@ -1329,6 +1366,42 @@ boolean cache_files_precache_failed(
 }
 #endif
 
+#ifdef HALO_LINUX
+/* (cache_files_give_time_to_precache: since when a precache's start has
+waited for the textures' loads, and for how long it may; the map it is for) */
+static unsigned long cache_files_precache_deferred_since;
+static char cache_files_precache_deferred_map[256];
+#define PRECACHE_TEXTURE_DEFER_MILLISECONDS 30000UL
+
+/* (the precache of `map_name` waits to start) */
+static void cache_files_precache_defer(
+	char const *map_name)
+{
+	if (!cache_files_precache_deferred_since || csstrcmp(cache_files_precache_deferred_map, map_name))
+	{
+		cache_files_precache_deferred_since = system_milliseconds() | 1;
+		csstrncpy(cache_files_precache_deferred_map, map_name, sizeof(cache_files_precache_deferred_map) - 1);
+		cache_files_precache_deferred_map[sizeof(cache_files_precache_deferred_map) - 1] = 0;
+	}
+
+	return;
+}
+
+/* port: whether the precache of `map_name` waits to start - for another
+map's copy to stop, or for the textures' loads - and may now (the copy has
+stopped; the loads are done, or its wait is over): main.c then gives it time
+again */
+boolean cache_files_precache_deferred(
+	char const *map_name)
+{
+	return cache_files_precache_deferred_since && map_name && map_name[0] &&
+		!csstrcmp(cache_files_precache_deferred_map, map_name) &&
+		(!cache_files_precache_in_progress() || cache_copy_compressed_file_complete()) &&
+		(!texture_cache_loads_pending() ||
+			system_milliseconds() - cache_files_precache_deferred_since >= PRECACHE_TEXTURE_DEFER_MILLISECONDS);
+}
+#endif
+
 boolean cache_files_give_time_to_precache(
 	char const *map_name)
 {
@@ -1346,6 +1419,9 @@ boolean cache_files_give_time_to_precache(
 	if (cache_files_precache_map_loaded(map_name))
 	{
 		result = TRUE;
+#ifdef HALO_LINUX
+		cache_files_precache_deferred_since = 0;
+#endif
 	}
 #ifdef HALO_LINUX
 	/* (port: one that failed is not tried again each second) */
@@ -1353,6 +1429,20 @@ boolean cache_files_give_time_to_precache(
 		!csstrcasecmp(cache_files_precache_failed_map, map_name) &&
 		!cache_files_precache_in_progress())
 	{
+		cache_files_precache_deferred_since = 0;
+	}
+#endif
+#if defined(HALO_LINUX) && !defined(HALO_DEDICATED_SERVER)
+	/* port: another map's copy under way is asked to stop, and its end
+	waited for by a later ask (main.c's, the next frame: the precache waits,
+	cache_files_precache_deferred), not here: the copy stops between its
+	pieces of the memory card's (xbox_files.c), and the game thread waited
+	for the piece in progress */
+	else if (cache_files_precache_in_progress() && !cache_files_precache_is_copying_map(map_name) &&
+		!cache_copy_compressed_file_complete())
+	{
+		cache_files_precache_map_queue_end();
+		cache_files_precache_defer(map_name);
 	}
 #endif
 	else
@@ -1387,8 +1477,27 @@ boolean cache_files_give_time_to_precache(
 			else if (status == 1)
 				cache_files_precache_map_end();
 		}
+#ifdef HALO_LINUX
+		/* port: not while a texture's load is under way: a copy's start
+		takes the texture cache's memory once every load is done
+		(texture_cache_steal_memory), and the game thread waited for them -
+		1.7 s of a lobby's frame on the harness's memory card as the menus
+		came back after a game and the host chose the next map. The lobby
+		asks again each second (network_game_client_update_precache_status);
+		after PRECACHE_TEXTURE_DEFER_MILLISECONDS of loads it waits for them,
+		as before (the menus' loads end: a screen's textures are finite). */
+		else if (texture_cache_loads_pending() &&
+			(!cache_files_precache_deferred_since || csstrcmp(cache_files_precache_deferred_map, map_name) ||
+				system_milliseconds() - cache_files_precache_deferred_since < PRECACHE_TEXTURE_DEFER_MILLISECONDS))
+		{
+			cache_files_precache_defer(map_name);
+		}
+#endif
 		else
 		{
+#ifdef HALO_LINUX
+			cache_files_precache_deferred_since = 0;
+#endif
 			cache_files_precache_set_priority(0);
 			if (!cache_files_precache_map_begin(map_name, FALSE))
 #ifdef HALO_LINUX

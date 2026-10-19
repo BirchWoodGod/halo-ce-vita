@@ -501,6 +501,76 @@ static wchar_t saved_game_file_display_name[MAX_GAMENAME];
 
 struct saved_game_files_globals saved_game_files_globals = {0};
 
+#ifdef HALO_LINUX
+/* port: the hard drive's mapfile (z:\saved\hdmu.map) as last read or
+written by this game, which alone writes it: every look at the profiles and
+game types (the Halo 3 nameplate every few seconds, the lobby's game types,
+each profile's name) was an open, a read of each record and a close on the
+game thread, ~110 file calls each time the Halo 3 lobby opened (0.5 s of an
+insider.10 tester's Vita), and on the Vita each waited for the memory card
+behind a map copy. Read whole once, and read again after any write. */
+static struct
+{
+	boolean valid;
+	boolean exists;
+	unsigned long size;
+	unsigned long cursor;
+	struct enumerated_saved_game_file entries[MAXIMUM_ENUMERATED_SAVED_GAME_FILES_ANY_TYPE_PER_MEMORY_UNIT];
+} saved_game_files_mapfile_image;
+
+static void saved_game_files_mapfile_image_forget(
+	void)
+{
+	saved_game_files_mapfile_image.valid = FALSE;
+
+	return;
+}
+
+/* the image, read whole if it is not held (FALSE: it could not be read,
+and the file is looked at as before) */
+static boolean saved_game_files_mapfile_image_read(
+	word memory_unit_index)
+{
+	struct file_reference reference;
+	unsigned long size = 0;
+
+	if (saved_game_files_mapfile_image.valid)
+	{
+		return TRUE;
+	}
+	if (!file_reference_create_from_path(&reference, memory_unit_mapfile_path[memory_unit_index], FALSE))
+	{
+		return FALSE;
+	}
+	if (!file_get_size(&reference, &size))
+	{
+		/* (none: as the file's own calls find it) */
+		saved_game_files_mapfile_image.exists = FALSE;
+		saved_game_files_mapfile_image.size = 0;
+		saved_game_files_mapfile_image.valid = TRUE;
+		return TRUE;
+	}
+	if (size > sizeof(saved_game_files_mapfile_image.entries) ||
+		!file_open(&reference, FLAG(_permission_read_bit)))
+	{
+		return FALSE;
+	}
+	size = file_get_eof(&reference);
+	if (size > sizeof(saved_game_files_mapfile_image.entries) ||
+		(size && !file_read(&reference, size, saved_game_files_mapfile_image.entries)))
+	{
+		file_close(&reference);
+		return FALSE;
+	}
+	file_close(&reference);
+	saved_game_files_mapfile_image.exists = TRUE;
+	saved_game_files_mapfile_image.size = size;
+	saved_game_files_mapfile_image.valid = TRUE;
+
+	return TRUE;
+}
+#endif
+
 /* ---------- public code */
 
 void saved_game_files_initialize(
@@ -1294,6 +1364,10 @@ static boolean set_nth_entry_in_mapfile(
 
 	if (saved_game_files_take_mapfile_mutex())
 	{
+#ifdef HALO_LINUX
+		/* (written: read again next time) */
+		saved_game_files_mapfile_image_forget();
+#endif
 		if (file_reference_create_from_path(&saved_game_files_globals.memory_unit_mapfile,
 				memory_unit_mapfile_path[memory_unit_index], FALSE) &&
 			file_open(&saved_game_files_globals.memory_unit_mapfile, FLAG(_permission_write_bit)))
@@ -2050,6 +2124,10 @@ static boolean enumerate_saved_game_files_start(
 		"c:\\halo\\SOURCE\\saved games\\saved_game_files.c",
 		1647,
 		!saved_game_files_globals.enumeration_in_progress);
+#ifdef HALO_LINUX
+	/* (made again: read again next time) */
+	saved_game_files_mapfile_image_forget();
+#endif
 
 	if (file_reference_create_from_path(&saved_game_files_globals.memory_unit_mapfile,
 			memory_unit_mapfile_path[memory_unit], FALSE) &&
@@ -2085,6 +2163,9 @@ static boolean enumerate_saved_game_files_end(
 	{
 		error(_error_silent, "failed to close memory unit mapfile for memory unit #%d", memory_unit);
 	}
+#ifdef HALO_LINUX
+	saved_game_files_mapfile_image_forget();
+#endif
 
 	saved_game_files_globals.next_enumerated_profile_index = NONE;
 	saved_game_files_globals.enumeration_in_progress = FALSE;
@@ -2131,6 +2212,24 @@ static boolean enumerate_mapfile_start(
 		1887,
 		!saved_game_files_globals.enumeration_in_progress);
 
+#ifdef HALO_LINUX
+	saved_game_files_mapfile_image.cursor = 0;
+	if (saved_game_files_mapfile_image_read(memory_unit_index))
+	{
+		if (!saved_game_files_mapfile_image.exists)
+		{
+			error(_error_silent, "failed to open memory unit mapfile for memory unit #%d", memory_unit_index);
+			return FALSE;
+		}
+		if (saved_game_files_mapfile_image.size%sizeof(struct enumerated_saved_game_file))
+		{
+			error(_error_silent, "memory unit mapfile for memory unit #%d is possibly corrupt", memory_unit_index);
+		}
+		return TRUE;
+	}
+	/* (the image held nothing: the file read as before) */
+	saved_game_files_mapfile_image.cursor = (unsigned long)NONE;
+#endif
 	if (file_reference_create_from_path(&saved_game_files_globals.memory_unit_mapfile,
 			memory_unit_mapfile_path[memory_unit_index], FALSE) &&
 		file_open(&saved_game_files_globals.memory_unit_mapfile, FLAG(_permission_read_bit)))
@@ -2172,6 +2271,12 @@ static boolean enumerate_mapfile_end(
 		1919,
 		memory_unit_index < NUMBER_OF_MEMORY_UNITS);
 
+#ifdef HALO_LINUX
+	if (saved_game_files_mapfile_image.cursor != (unsigned long)NONE)
+	{
+		return TRUE;
+	}
+#endif
 	success = file_close(&saved_game_files_globals.memory_unit_mapfile);
 
 	if (!success)
@@ -2194,6 +2299,21 @@ static boolean enumerate_saved_game_file_from_mapfile(
 		1940,
 		file);
 
+#ifdef HALO_LINUX
+	if (saved_game_files_mapfile_image.cursor != (unsigned long)NONE)
+	{
+		unsigned long offset = saved_game_files_mapfile_image.cursor;
+
+		if (!saved_game_files_mapfile_image.valid ||
+			offset + sizeof(struct enumerated_saved_game_file) > saved_game_files_mapfile_image.size)
+		{
+			return FALSE;
+		}
+		csmemcpy(file, (char const *)saved_game_files_mapfile_image.entries + offset, sizeof(struct enumerated_saved_game_file));
+		saved_game_files_mapfile_image.cursor += sizeof(struct enumerated_saved_game_file);
+		return TRUE;
+	}
+#endif
 	return file_read(&saved_game_files_globals.memory_unit_mapfile, sizeof(struct enumerated_saved_game_file), file);
 }
 
@@ -2217,6 +2337,12 @@ static long count_enumerated_profiles_in_mapfile(
 		2147,
 		memory_unit_index < NUMBER_OF_MEMORY_UNITS);
 
+#ifdef HALO_LINUX
+	if (saved_game_files_mapfile_image_read(memory_unit_index))
+	{
+		return saved_game_files_mapfile_image.size/sizeof(struct enumerated_saved_game_file);
+	}
+#endif
 	if (file_reference_create_from_path(&saved_game_files_globals.memory_unit_mapfile,
 			memory_unit_mapfile_path[memory_unit_index], FALSE) &&
 		file_get_size(&saved_game_files_globals.memory_unit_mapfile, &mapfile_size))
@@ -2431,6 +2557,10 @@ static boolean append_entry_to_mapfile(
 
 	if (saved_game_files_take_mapfile_mutex())
 	{
+#ifdef HALO_LINUX
+		/* (written: read again next time) */
+		saved_game_files_mapfile_image_forget();
+#endif
 		if (file_reference_create_from_path(&saved_game_files_globals.memory_unit_mapfile,
 				memory_unit_mapfile_path[memory_unit_index], FALSE) &&
 			file_open(&saved_game_files_globals.memory_unit_mapfile, FLAG(_permission_write_bit)))
@@ -2510,6 +2640,10 @@ static boolean remove_nth_entry_in_mapfile(
 
 	if (saved_game_files_take_mapfile_mutex())
 	{
+#ifdef HALO_LINUX
+		/* (written: read again next time) */
+		saved_game_files_mapfile_image_forget();
+#endif
 		if (file_reference_create_from_path(&saved_game_files_globals.memory_unit_mapfile,
 				memory_unit_mapfile_path[memory_unit_index], FALSE) &&
 			file_get_size(&saved_game_files_globals.memory_unit_mapfile, &mapfile_size) &&
@@ -2583,6 +2717,36 @@ static boolean get_nth_entry_in_mapfile(
 		1962,
 		(memory_unit_index < NUMBER_OF_MEMORY_UNITS) && (file != NULL));
 
+#ifdef HALO_LINUX
+	if (saved_game_files_take_mapfile_mutex())
+	{
+		boolean held = saved_game_files_mapfile_image_read(memory_unit_index);
+		unsigned long entry_offset = n*sizeof(struct enumerated_saved_game_file);
+
+		if (held)
+		{
+			if (!saved_game_files_mapfile_image.exists)
+			{
+				error(_error_silent, "failed to open memory unit mapfile for memory unit #%d", memory_unit_index);
+			}
+			else if (entry_offset+sizeof(struct enumerated_saved_game_file) <= saved_game_files_mapfile_image.size)
+			{
+				csmemcpy(file, (char const *)saved_game_files_mapfile_image.entries + entry_offset,
+					sizeof(struct enumerated_saved_game_file));
+				success = TRUE;
+			}
+			else
+			{
+				error(_error_silent, "invalid profile index (#%d) into memory unit #%d specified", n, memory_unit_index);
+			}
+		}
+		saved_game_files_release_mapfile_mutex();
+		if (held)
+		{
+			return success;
+		}
+	}
+#endif
 	if (saved_game_files_take_mapfile_mutex())
 	{
 		if (file_reference_create_from_path(&saved_game_files_globals.memory_unit_mapfile,

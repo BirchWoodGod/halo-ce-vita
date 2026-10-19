@@ -1072,7 +1072,7 @@ for case in $cases; do
 		# down two, A; Y; Square; a tap on Back)
 		run h3lan "$menus_data" 60 "$h3mppad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:5000 down:150:600 down:150:600 a wait:150:2000 y wait:150:2000 x wait:150:20000" \
 			HALO_MENU_STYLE=halo3 HALO_TEST_BROWSER_GAMES=14 HALO_TEST_BROWSER_PC=1 "HALO_TEST_TAPS=46000:150,102 50000:552,452"
-		run h3lan_empty "$menus_data" 30 "$h3mppad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:12000" \
+		run h3lan_empty "$menus_data" 36 "$h3mppad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:12000" \
 			HALO_MENU_STYLE=halo3
 		check_h3 h3lan halo3
 		log=$out/h3lan/run.log
