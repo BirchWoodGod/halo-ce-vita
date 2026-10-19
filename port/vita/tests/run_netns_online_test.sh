@@ -3688,11 +3688,16 @@ friendsplayers|friendsplayersoff|friendsplayersnone)
 	grep -aq "system link: in another's lobby\|system link: in a network game" "$jl" || fail "the joiner did not get into the host's game"
 	grep -aq "friends: in a game, machine 0, hosting (cards relayed)" "$hl" || fail "the host was not told its game"
 	grep -aq "friends: in a game, machine [1-9]" "$jl" || fail "the joiner was not told its game"
-	grep -aq "friends: test: the PLAYERS screen opened" "$jl" || fail "the joiner's PLAYERS screen did not open"
+	# (the screen itself needs the menus' files, which these copies' data may not
+	# have: run_menus_test.sh h3players opens it; its ADD FRIEND's steps run either way)
+	if grep -aq "menus: Halo 3 set: " "$jl"; then
+		grep -aq "friends: test: the PLAYERS screen opened" "$jl" || fail "the joiner's PLAYERS screen did not open"
+	else
+		grep -aq "friends: test: the PLAYERS screen" "$jl" || fail "the joiner's PLAYERS step did not run"
+	fi
 	grep -aq "menus: h3 players: options for .* (machine 0)" "$jl" || fail "the joiner did not choose the host's player"
 	grep -aq "friends: asked machine 0 for its friend card (to add it)" "$jl" || fail "the joiner did not ask for the host's card"
-	# (nothing of the asker's goes with the ask: its friend key is never in the host's log)
-	grep -aq "hcev/f1/" "$out/broker.log" && [ $mode = friendsplayersnone ] && fail "friends off, yet the broker carried friends' topics"
+	[ $mode = friendsplayersnone ] && grep -aq "friends: online (" "$hl" && fail "the host's friends went online, though off"
 	case $mode in
 	friendsplayers)
 		grep -aq "friends: a player in this game (machine [1-9]) asked for this machine's friend card; answered" "$hl" ||

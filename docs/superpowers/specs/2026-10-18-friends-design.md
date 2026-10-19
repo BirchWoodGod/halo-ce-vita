@@ -286,14 +286,45 @@ Not protected (stated):
 
 ## Wire changes and the network version
 
-Nothing the game machines send each other changes: not the game's messages,
-not the tunnel, not JOIN/ACCEPT, codes or the server browser's listings. The
-friends messages travel only on the new `hcev/f1/...` topics, which older
-builds never subscribe to, with their own format version byte ("F", 1).
-As with the host's ping table (NETCODE.md: a new packet type old builds
-never act on), this is no network change: `HALO_PORT_NETWORK_VERSION` stays
-18. Presence carries the sender's network version and wire so that Join is
+Not the game's messages, not JOIN/ACCEPT, codes or the server browser's
+listings. The friends messages travel on the new `hcev/f1/...` topics,
+which older builds never subscribe to, with their own format version byte
+("F", 1). The players' friend cards (below) are the one thing the game
+machines send each other: internet play's tunnel packet type 7, which a
+build before it drops unread. As with the host's ping table (NETCODE.md: a
+new packet type old builds never act on), this is no network change:
+`HALO_PORT_NETWORK_VERSION` stays 18. Presence carries the sender's network version and wire so that Join is
 offered only to a game this build can join.
+
+## Players in a game: friend cards (added after the first build)
+
+The owner asked to move the cursor onto a player, as on Halo 3, and add
+them. Players in a game know each other's game names, not their friend
+identities, so the two machines exchange friend cards first:
+
+- The PLAYERS screen's ADD FRIEND or BLOCK on another machine's player sends
+  an ask: version 1, kind ask, the sender's and the receiver's machine, a
+  fresh 16-byte nonce. Nothing of the asker's (no key, no name, no code).
+- The receiver answers only when its friends are on and it is not appearing
+  offline (otherwise nothing: the asker cannot tell friends off from an
+  older build), at most once in 3 s per asker: its friend key, its friend
+  name (at most 16 bytes) and an Ed25519 signature over
+  "hcev-friends-1 card", the kind, the nonce, the key and the name.
+- The asker takes an answer only to a nonce it asked with, of the machine
+  it asked, signed by the key it carries; then ADD FRIEND sends the friend
+  request to that key's code as if typed (the other side accepts or
+  declines as any), BLOCK blocks the key. No answer in 10 s: the player
+  "takes no friend requests". One ask of a player each 5 s.
+- The tunnel: internet play's packet type 7. A joiner sends to its host
+  alone; the host relays between joiners, overwriting the sender's machine
+  with the one it reads the packet from (its game's machine addresses), one
+  relay a second per machine, 8 at once and 4 a second in all; a joiner
+  takes cards only from the peer the game says is its host. Never on the crossplay wire (PCs) or ad
+  hoc (no tunnel). Inbound and outbound queues are 16 packets each.
+- What is revealed: a player with friends on and online gives its friend
+  key and friend name to the players of a game it is in who ask. A player
+  with friends off or appearing offline gives nothing.
+- Mute is left out: the port has no voice or text chat to mute.
 
 ## The broker
 
@@ -324,6 +355,12 @@ any other.
 - Activity lines use ", " before a difficulty ("Co-op: The Pillar of Autumn,
   Legendary"), as the server browser's rules do: the panel's font has no
   middle dot.
+- The PLAYERS screen (`menus/halo3/players.xml`): Triangle in the game's
+  lobby (the waiting screen), on the carnage report, or with the scoreboard
+  up (Back held) in a game; the players with their team and what friends
+  knows of them (This PS Vita, Friend, Request sent, Wants to be your
+  friend, Blocked, Asking..., Not taking friend requests); Cross on another
+  machine's player: Back, ADD FRIEND, BLOCK.
 - The invite pop-up: the game's question (the Vita overlay's), at the
   menus, Accept or Ignore.
 - No new GPU programs; no new art beyond what tools/halo3_menu_art.py

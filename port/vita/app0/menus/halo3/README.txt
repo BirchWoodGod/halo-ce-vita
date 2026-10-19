@@ -93,6 +93,14 @@ these screens stand for the Xbox's own, over the same animated Halo ring:
   friend's invite asks at the menus with the game's question (Accept the
   invite and join now?). The settings panel's Multiplayer > Friends does the
   same for the original menus.
+- players.xml: PLAYERS, Halo 3's roster of the network game this Vita plays
+  (Triangle in the game's lobby, the waiting screen; on the carnage report;
+  with the scoreboard up, Back held): each player's name, team and what
+  friends knows of them. Cross on another machine's player: its options,
+  ADD FRIEND (a friend request, no code typed: the two machines exchange
+  friend cards over internet play first, only when the other player has
+  friends on and does not appear offline) and BLOCK. Listed in menus.txt and
+  ingame.txt, so it uses only what both sets have.
 - network.xml: the games browser (BROWSE GAMES, after the profile: the
   server browser's screen over the games the Xbox's System Link list would
   show, the game's own search and join - SYSTEM LINK GAMES, AD HOC GAMES -
