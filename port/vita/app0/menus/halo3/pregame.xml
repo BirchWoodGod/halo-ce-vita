@@ -35,6 +35,8 @@ the right, each in their colour with their team, the host's and this machine's m
 	<widget name="h3/pregame/code" type="text" left="16" top="290" width="240" height="26" font="h3/font_title" color="#FFF2F6FA" text_y="1"/>
 	<widget name="h3/pregame/visibility" type="text" left="16" top="320" width="240" height="34" font="h3/font_small" color="#FFCFD9E3" text_y="1"/>
 	<widget name="h3/pregame/listed" type="text" left="16" top="356" width="240" height="16" font="h3/font_small" color="#FF9FB6CC" text_y="1"/>
+	<!-- (a game hosted for Vitas and PC, online: its OpenCE join link, for PC friends to open - halo://join/..., as OpenCE's own; the Vitas' code above) -->
+	<widget name="h3/pregame/pc_link" type="text" left="372" top="390" width="256" height="48" font="h3/font_small" color="#FF9FB6CC" text_y="1"/>
 	<widget name="h3/pregame/x_butn" left="16" top="378" width="16" height="16" bitmap="h3/glyph_square"/>
 	<widget name="h3/pregame/x_text" type="text" left="36" top="377" width="220" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1"/>
 	<widget name="h3/pregame/rule3" left="8" top="440" width="250" height="2" bitmap="h3/rule"/>
@@ -159,6 +161,7 @@ the right, each in their colour with their team, the host's and this machine's m
 		<child widget="h3/pregame/code"/>
 		<child widget="h3/pregame/visibility"/>
 		<child widget="h3/pregame/listed"/>
+		<child widget="h3/pregame/pc_link"/>
 		<child widget="h3/pregame/x_butn"/>
 		<child widget="h3/pregame/x_text"/>
 		<child widget="h3/pregame/rule3"/>

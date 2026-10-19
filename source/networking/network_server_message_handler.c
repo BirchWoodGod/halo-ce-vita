@@ -1387,6 +1387,16 @@ boolean network_game_server_handle_client_message(
 						/* port: map sharing (port/linux/game/map_share.c),
 						from a machine joined to the game (checked above) */
 						case _message_client_map_download:
+							/* port: never on the crossplay wire (network_wire.h): map
+							sharing is this build's own, which no PC machine has, and
+							this build's clients drop a host's on that wire; a type 35
+							from a PC client is not ours to answer (docs/crossplay.md
+							7.4) */
+							if (network_wire_crossplay())
+							{
+								network_event("ignoring a map share request on the crossplay wire");
+								break;
+							}
 							map_share_server_handle_request(
 								server,
 								machine,
@@ -1762,14 +1772,19 @@ static boolean network_game_server_handle_message_client_broadcast_game_search(
 			advertisement.reserved[HALO_PORT_ADVERTISED_FLAGS_OFFSET] =
 				HALO_PORT_ADVERTISED_DISTRIBUTED_FLAG;
 			/* (the crossplay wire's (network_wire.h), as OpenCE's hosts make
-			it: a game under way flagged so, nothing of the Vitas'. Only a
-			test's stand-in for a PC host gets here: a Vita hosts no game on
-			that wire, network_wire_hosting_refused) */
+			it: a game under way flagged so; and a Vita's game (one hosted for
+			Vitas and PC) marked as a Vita's, a bit PC builds ignore, so that
+			the Vitas' lists tag it VITA. A test's stand-in for a PC host is
+			not marked) */
 			if (network_wire_crossplay())
 			{
 				if (network_game_server_get_state(server, NULL) != _network_game_server_state_pregame)
 				{
 					advertisement.reserved[HALO_PORT_ADVERTISED_FLAGS_OFFSET] |= HALO_PORT_ADVERTISED_IN_PROGRESS_FLAG;
+				}
+				if (network_wire_host_vita())
+				{
+					advertisement.reserved[HALO_PORT_ADVERTISED_FLAGS_OFFSET] |= NETWORK_WIRE_ADVERTISED_VITA_HOST_FLAG;
 				}
 			}
 			else

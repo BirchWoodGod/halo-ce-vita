@@ -43,6 +43,7 @@ names of the maps' own string lists.
 #include "../src/lang.h"
 
 #include "coop_menu.h"
+#include "network_wire.h"
 
 #include <string.h>
 #include <wchar.h>
@@ -254,6 +255,14 @@ static void coop_menu_connection(
 		usnprintf(text, count, TW(L"Online"));
 	else
 		usnprintf(text, count, TW(L"System link"));
+	/* (the game's tag: a game PC players can join too, network_wire.h) */
+	if (network_wire_crossplay())
+	{
+		long length = ustrlen(text);
+
+		if (length < count - 1)
+			usnprintf(text + length, count - length, L" (VITA+PC)");
+	}
 	text[count - 1] = 0;
 }
 

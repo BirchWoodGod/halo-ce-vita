@@ -687,17 +687,23 @@ int p2p_ed25519_to_x25519(const unsigned char *public_key, unsigned char *x25519
 /* ---------- passwords (a password-protected public game's listing holds
 its invite's token sealed with the password's key: p2p_lobby.c) */
 
-/* Argon2id of 4 MiB (OpenCE's) and four passes (OpenCE's three, and one
-more: the Vita's key is worked out on a thread of its own, so it may take
-longer): about 58 ms on a Raspberry Pi 4 in 32-bit ARM at 1.8 GHz, built as
-the Vita builds it, so about half a second on a Vita's Cortex-A9 at 444 MHz
-(eight times slower); once for the host and once a guess for a joiner */
+/* Argon2id of 4 MiB (OpenCE's) and four passes on the legacy Vita wire
+(OpenCE's three, and one more: the Vita's key is worked out on a thread of
+its own, so it may take longer): about 58 ms on a Raspberry Pi 4 in 32-bit
+ARM at 1.8 GHz, built as the Vita builds it, so about half a second on a
+Vita's Cortex-A9 at 444 MHz (eight times slower); once for the host and
+once a guess for a joiner. On the crossplay wire OpenCE's own three passes
+(its 6112dcfc, p2p_crypto.c of 8102e711 and 6ec42856), so that a PC player
+opens a Vita's game with its password, and a Vita a PC's: with four, the
+same password made another key on each side (docs/crossplay.md 7.4) */
 #define PASSWORD_KEY_BLOCKS 4096
 #define PASSWORD_KEY_PASSES 4
+#define CROSSPLAY_PASSWORD_KEY_PASSES 3
 
-int p2p_password_key(const char *password, const unsigned char *salt, unsigned char *key)
+int p2p_password_key(const char *password, const unsigned char *salt, unsigned char *key, int crossplay)
 {
-	crypto_argon2_config config = { CRYPTO_ARGON2_ID, PASSWORD_KEY_BLOCKS, PASSWORD_KEY_PASSES, 1 };
+	crypto_argon2_config config = { CRYPTO_ARGON2_ID, PASSWORD_KEY_BLOCKS,
+		crossplay ? CROSSPLAY_PASSWORD_KEY_PASSES : PASSWORD_KEY_PASSES, 1 };
 	crypto_argon2_inputs inputs;
 	void *work_area = malloc((size_t)PASSWORD_KEY_BLOCKS * 1024);
 

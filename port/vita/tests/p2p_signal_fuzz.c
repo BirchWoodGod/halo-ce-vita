@@ -48,8 +48,9 @@ void posix_random_bytes(void *buffer, unsigned long size)
 		bytes[index] = (unsigned char)(counter++ * 13 + 1);
 }
 unsigned long p2p_now(void) { return clock_now; }
-/* (port/linux/src/network_wire.c's: the wire, for the whole run, as the
-game reads it once; P2P_SIGNAL_FUZZ_CROSSPLAY=1, the crossplay wire) */
+/* (port/linux/src/network_wire.c's: the wire of the game hosted and the
+one joined, for the whole run; P2P_SIGNAL_FUZZ_CROSSPLAY=1, the crossplay
+wire. Both wires' slots are read either way) */
 int network_wire_crossplay(void)
 {
 	static int wire = -1;
@@ -58,6 +59,7 @@ int network_wire_crossplay(void)
 		wire = getenv("P2P_SIGNAL_FUZZ_CROSSPLAY") && !strcmp(getenv("P2P_SIGNAL_FUZZ_CROSSPLAY"), "1");
 	return wire;
 }
+int network_wire_crossplay_available(void) { return 1; }
 const char *config_string(const char *name) { (void)name; return ""; }
 void config_folder(char *path, size_t size) { snprintf(path, size, "./"); }
 char *config_file_read(const char *path, size_t *size) { (void)path; (void)size; return NULL; }
@@ -181,19 +183,24 @@ int p2p_peer_reoffered(const unsigned char *who, const unsigned char *secret, co
 		__builtin_trap();
 	return 1;
 }
-void p2p_code_found(const char *text)
+void p2p_code_found(const char *text, int crossplay)
 {
-	if (strlen(text) != 12 + 2 * (P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE))
+	if (strlen(text) != 12 + 2 * (P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE) || (crossplay != 0 && crossplay != 1))
 		__builtin_trap();
 	codes_found++;
 }
-void p2p_lobby_slot_heard(const char *hash_text, const unsigned char *payload, int size, int retained)
+void p2p_join_wire_known(int crossplay)
+{
+	if (crossplay != 0 && crossplay != 1)
+		__builtin_trap();
+}
+void p2p_lobby_slot_heard(int crossplay, const char *hash_text, const unsigned char *payload, int size, int retained)
 {
 	static unsigned char copy[MAXIMUM_LISTING_SIZE];
 
 	(void)retained;
 	/* (a slot's name ends, and its payload is within the listing's most) */
-	if (strlen(hash_text) >= TOPIC_SIZE || size < 0 || size > MAXIMUM_LISTING_SIZE)
+	if (strlen(hash_text) >= TOPIC_SIZE || size < 0 || size > MAXIMUM_LISTING_SIZE || (crossplay != 0 && crossplay != 1))
 		__builtin_trap();
 	if (size)
 		memcpy(copy, payload, (size_t)size);
@@ -232,13 +239,13 @@ int p2p_friends_outgoing(int index, unsigned long *serial, char *topic, int topi
 void p2p_friends_outgoing_sent(unsigned long serial, int broker) { (void)serial; (void)broker; }
 void p2p_friends_outgoing_settle(int ready_mask) { (void)ready_mask; }
 
-void p2p_lobby_query_heard(void) { queries++; }
-void p2p_lobby_slot_topic(const unsigned char *key_hash, char *topic, int size)
+void p2p_lobby_query_heard(int crossplay) { (void)crossplay; queries++; }
+void p2p_lobby_slot_topic(int crossplay, const unsigned char *key_hash, char *topic, int size)
 {
 	char text[2 * P2P_KEY_HASH_SIZE + 1];
 
 	p2p_hex(key_hash, P2P_KEY_HASH_SIZE, text);
-	snprintf(topic, (size_t)size, "%s%s", P2P_LOBBY_SLOT_PREFIX, text);
+	snprintf(topic, (size_t)size, "%s%s", P2P_LOBBY_SLOT_PREFIX(crossplay), text);
 }
 
 /* ---------- the harness */
@@ -258,10 +265,10 @@ static void setup(void)
 	signalling.broker_count = 1;
 	memset(&signalling.brokers[0], 0, sizeof(signalling.brokers[0]));
 	snprintf(signalling.brokers[0].host, sizeof(signalling.brokers[0].host), "broker");
-	p2p_signal_host(token, "ABCD-EFGH");
-	p2p_signal_join(host_hash, token);
+	p2p_signal_host(token, "ABCD-EFGH", network_wire_crossplay());
+	p2p_signal_join(host_hash, token, network_wire_crossplay());
 	p2p_signal_lookup_code("ABCDEFGH", NULL);
-	p2p_signal_lobby_topics(1, 1);
+	p2p_signal_lobby_topics(1, network_wire_crossplay(), 1);
 }
 
 /* the broker made anew: connected, in this state and protocol */
@@ -353,7 +360,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 
 		broker = fresh_broker(_broker_ready, 5);
 		length = p2p_seal(mode == 4 ? signalling.host_key : signalling.join_key, data, length, sealed);
-		put_publish(broker, mode == 4 ? signalling.host_topic : signalling.join_topic, sealed, length);
+		put_publish(broker, mode == 4 ? signalling.host_topic : signalling.join_topics[network_wire_crossplay()], sealed,
+			length);
 		break;
 	}
 	default:
@@ -362,10 +370,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 		int length = (int)(size > MAXIMUM_LISTING_SIZE + 8 ? MAXIMUM_LISTING_SIZE + 8 : size);
 
 		broker = fresh_broker(_broker_ready, 5);
-		snprintf(topic, sizeof(topic), "%s%.*s", P2P_LOBBY_SLOT_PREFIX, (int)(length > 40 ? 40 : length),
+		snprintf(topic, sizeof(topic), "%s%.*s", P2P_LOBBY_SLOT_PREFIX(length & 1), (int)(length > 40 ? 40 : length),
 			"0123456789abcdef0123456789abcdef0123456789");
 		put_publish(broker, topic, data, length);
-		put_publish(broker, P2P_LOBBY_QUERY_TOPIC, data, length > 8 ? 8 : length);
+		put_publish(broker, P2P_LOBBY_QUERY_TOPIC(length & 1), data, length > 8 ? 8 : length);
 		/* (friends' topics: what is heard there handed on whole, within
 		bounds; one longer than a message dropped) */
 		if (!signalling.friend_inbox[0])

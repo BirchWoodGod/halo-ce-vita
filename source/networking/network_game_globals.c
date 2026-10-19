@@ -795,28 +795,6 @@ void network_game_client_request_immediate_start(
 	return;
 }
 
-#ifdef HALO_LINUX
-/* port: whether this machine must not host a game others can join (the
-crossplay wire: a Vita joins PC games and never hosts them,
-network_wire.h); if so the player is told why (controller_index, or NONE)
-and to turn Crossplay off to host. The hosting paths ask first (Create
-Game, co-op, the fast setup), and create_global_network_game_server refuses
-regardless */
-boolean network_game_wire_refuses_hosting(
-	short controller_index)
-{
-	char const *why = NULL;
-	void platform_log(const char *format, ...);
-
-	if (!network_wire_hosting_refused(&why))
-		return FALSE;
-	platform_log("network: not hosting a game: %s", why);
-	display_error_text_deferred(
-		TW(L"Crossplay is on:\r\nthe Vita joins PC\r\ngames but does not\r\nhost. Turn Crossplay\r\noff to host a game."),
-		controller_index);
-	return TRUE;
-}
-#endif
 
 boolean create_global_network_game_server(
 	void)
@@ -827,13 +805,20 @@ boolean create_global_network_game_server(
 		global_network_game_server==NULL);
 
 #ifdef HALO_LINUX
-	/* port: a server other machines can join, never on the crossplay wire
-	(a local game's, split screen or bots, is no network game) */
-	if (bss_004566dc.accept_remote_connections && network_wire_hosting_refused(NULL))
+	/* port: the game's wire (network_wire.h): a server other machines can
+	join speaks the one its host chose (network.host_crossplay, "Who can
+	join": Vitas, or Vitas and PC on the crossplay wire); a local game's
+	(split screen, bots) is no network game, on the legacy wire. For the
+	game's whole life: nothing switches under it */
+	if (bss_004566dc.accept_remote_connections)
 	{
-		error(_error_silent, "not hosting a network game on the crossplay wire");
-		return FALSE;
+		/* (a test's stand-in for a PC host is OpenCE's: 2, crossplay_guard.h's
+		CROSSPLAY_PLATFORM_OPENCE) */
+		network_wire_choose(network_wire_host_crossplay(), network_wire_host_pc_stand_in() ? 2 : 0,
+			network_wire_host_crossplay() ? "hosting for Vitas and PC" : "hosting for Vitas");
 	}
+	else
+		network_wire_choose(0, 0, "a local game");
 #endif
 	global_network_game_server = network_game_server_create();
 	if (global_network_game_server)

@@ -82,6 +82,10 @@ struct p2p_friend_entry
 	int state;
 	int joinable;
 	int invitable;
+	/* (a friend online, or an invite) whether their game is on the crossplay
+	wire (network_wire.h: a Vita's game PC players can join too, or a PC
+	host's they joined): the lists tag it VITA+PC, else VITA */
+	int crossplay;
 	/* (a friend online, or an invite) the players in their game and the most */
 	int players, maximum;
 	/* the line the lists show: a friend's doing ("Offline" when not

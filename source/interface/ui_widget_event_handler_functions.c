@@ -1083,10 +1083,6 @@ boolean create_global_network_game_client(
 	void);
 boolean create_global_network_game_server(
 	void);
-#ifdef HALO_LINUX
-boolean network_game_wire_refuses_hosting(
-	short controller_index);
-#endif
 void game_engine_playlist_begin(
 	void);
 void network_game_accept_remote_connections(
@@ -3970,10 +3966,6 @@ static boolean network_game_start_new_server(
 #ifdef HALO_LINUX
 	boolean had_client = global_network_game_client_get() != NULL;
 
-	/* port: never on the crossplay wire: the player stays where they were,
-	told why (network_game_wire_refuses_hosting) */
-	if (network_game_wire_refuses_hosting(event ? event->controller_index : NONE))
-		return FALSE;
 #endif
 
 	dispose_global_network_game_client();

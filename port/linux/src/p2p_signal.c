@@ -117,6 +117,7 @@ games, but codes, invites, system link and ad hoc play are as they were.)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 /* the platform layer's socket options are Winsock's (posix.h): a pending
 connect's error */
@@ -125,7 +126,9 @@ connect's error */
 
 enum
 {
-	MAXIMUM_BROKERS = 4,
+	/* brokers.txt's 4 and OpenCE's (brokers_crossplay.txt), each once: the
+	server browser reads both wires' games through them */
+	MAXIMUM_BROKERS = 6,
 	/* the joiners a host made sessions for, so a repeated request gets the
 	same session: as many as it takes */
 	MAXIMUM_JOINERS = P2P_MAXIMUM_PEERS + 1,
@@ -240,12 +243,16 @@ enum
 enum
 {
 	_topic_host,
+	/* (a game joined: its host's answers on its wire's topic, the crossplay
+	wire's apart: an invite link's host is asked on both until it answers) */
 	_topic_join,
+	_topic_join_crossplay,
 	_topic_code,
 	/* the server browser's (p2p_lobby.c): the own slot, queries, all slots */
 	_topic_own_slot,
 	_topic_query,
 	_topic_slots,
+	_topic_slots_crossplay,
 	/* friends' (p2p_friends.c): the friend code's inbox, the key's mailbox */
 	_topic_friend_inbox,
 	_topic_friend_mailbox,
@@ -262,10 +269,11 @@ enum
 	_property_wildcard_available = 0x28,
 };
 
-/* the prefix of the topics, of the key derivation's label and of the MQTT
-client identifier: Vitas signal on their own (P2P_SIGNAL_PREFIX), but on
-the crossplay wire on OpenCE's (P2P_CROSSPLAY_SIGNAL_PREFIX, network_wire.h) */
-#define SIGNAL_PREFIX P2P_WIRE_SIGNAL_PREFIX
+/* the prefix of the MQTT client identifier: this build's own
+(P2P_SIGNAL_PREFIX). A game's topics and key derivations' labels are its
+wire's (P2P_WIRE_PREFIX, network_wire.h): the Vitas' own, or OpenCE's for a
+game on the crossplay wire */
+#define SIGNAL_PREFIX P2P_SIGNAL_PREFIX
 
 enum
 {
@@ -293,6 +301,9 @@ enum
 	/* 2: the record holds the key hash (1, of the older invites, held the
 	identifier alone) */
 	RECORD_VERSION = 2,
+	/* 3: and then its game's wire (a byte: 1 the crossplay wire; a game on
+	the legacy wire keeps version 2's record, which builds before it read) */
+	RECORD_VERSION_WIRE = 3,
 };
 
 struct broker
@@ -359,6 +370,10 @@ struct broker
 	whether it was acknowledged (browsing on this broker) */
 	unsigned short slots_identifier;
 	int slots_subscribed;
+	/* ... the crossplay wire's slots' (OpenCE's: the PC games, and the
+	Vitas' games for Vitas and PC) */
+	unsigned short slots_crossplay_identifier;
+	int slots_crossplay_subscribed;
 	/* this connection acknowledged this machine's listing (its PUBACK); a
 	republish due when a new connection's first acknowledgement has settled
 	(settle_time; 0: none), and whether one is still to come */
@@ -397,6 +412,8 @@ struct broker
 		int refused;
 		int size;
 		unsigned char payload[MAXIMUM_LISTING_SIZE];
+		/* the slot it goes to (the listing's wire's) */
+		char slot[TOPIC_SIZE];
 	} in_flight[MAXIMUM_IN_FLIGHT];
 	unsigned char input[BUFFER_SIZE];
 	int input_size;
@@ -459,6 +476,11 @@ static struct
 	char own_slot[TOPIC_SIZE];
 	int lobby_listed;
 	int lobby_browsing;
+	/* the listed game's wire, and its slot there (the will clears own_slot,
+	the legacy wire's: a crossplay listing of a host that vanished expires,
+	LISTING_EXPIRY) */
+	int lobby_listed_crossplay;
+	char lobby_slot[TOPIC_SIZE];
 	unsigned char lobby_listing[MAXIMUM_LISTING_SIZE];
 	int lobby_listing_size;
 	int lobby_version;
@@ -471,8 +493,9 @@ static struct
 	unsigned long browsing_time;
 	unsigned long kick_time;
 
-	/* hosting */
+	/* hosting, on the game's wire */
 	int hosting;
+	int host_crossplay;
 	unsigned char host_token[P2P_TOKEN_SIZE];
 	unsigned char host_key[P2P_SHA256_SIZE];
 	char host_topic[TOPIC_SIZE];
@@ -503,8 +526,13 @@ static struct
 	int join_has_base;
 	unsigned char join_host_public[P2P_KEY_SIZE];
 	unsigned char join_base[P2P_SHA256_SIZE];
-	char join_host_topic[TOPIC_SIZE];
-	char join_topic[TOPIC_SIZE];
+	/* the game's wire (-1 not known: an invite link's, asked on both until
+	its host answers on one) and each wire's topics; the wire join_base is
+	of */
+	int join_wire;
+	int join_base_crossplay;
+	char join_host_topics[2][TOPIC_SIZE];
+	char join_topics[2][TOPIC_SIZE];
 	unsigned long join_sent_time;
 	/* when join_nonce was made, and whether the host answered it (with
 	join_host_nonce, which its proof carries) */
@@ -574,10 +602,10 @@ static int budget_left(struct budget *budget, int maximum, int interval, int spe
 	return 1;
 }
 
-/* the JOIN/ACCEPT version of this machine's wire */
-static int message_version(void)
+/* the JOIN/ACCEPT version of a wire */
+static int message_version_of(int crossplay)
 {
-	return network_wire_crossplay() ? CROSSPLAY_MESSAGE_VERSION : MESSAGE_VERSION;
+	return crossplay ? CROSSPLAY_MESSAGE_VERSION : MESSAGE_VERSION;
 }
 
 /* ---------- what is derived from a token */
@@ -597,7 +625,8 @@ static void derive(const unsigned char *token, const char *label, const unsigned
 	p2p_hmac_sha256(token, P2P_TOKEN_SIZE, data, size, digest);
 }
 
-static void make_topic(const unsigned char *token, const char *label, const unsigned char *identifier,
+/* a topic of a wire's (0 the legacy wire, 1 the crossplay wire) */
+static void make_topic(int crossplay, const unsigned char *token, const char *label, const unsigned char *identifier,
 	char *topic)
 {
 	unsigned char digest[P2P_SHA256_SIZE];
@@ -605,10 +634,7 @@ static void make_topic(const unsigned char *token, const char *label, const unsi
 
 	derive(token, label, identifier, digest);
 	p2p_hex(digest, 16, text);
-	if (network_wire_crossplay())
-		snprintf(topic, TOPIC_SIZE, P2P_CROSSPLAY_SIGNAL_PREFIX "/3/%s", text);
-	else
-		snprintf(topic, TOPIC_SIZE, P2P_SIGNAL_PREFIX "/3/%s", text);
+	snprintf(topic, TOPIC_SIZE, "%s/3/%s", P2P_WIRE_PREFIX(crossplay), text);
 }
 
 /* ---------- MQTT */
@@ -670,6 +696,8 @@ static void broker_close(struct broker *broker, int failed)
 	broker->ping_time = 0;
 	broker->slots_identifier = 0;
 	broker->slots_subscribed = 0;
+	broker->slots_crossplay_identifier = 0;
+	broker->slots_crossplay_subscribed = 0;
 	broker->listing_acknowledged = 0;
 	broker->settle_wanted = 0;
 	broker->settle_time = 0;
@@ -945,11 +973,11 @@ static void broker_publish(struct broker *broker, const char *topic, const unsig
 /* a publish at least once to the own slot, retained: a listing (expiring
 at the broker), or an empty one, which clears it; again (duplicate) if the
 first was not acknowledged */
-static void broker_publish_slot(struct broker *broker, unsigned short identifier, const unsigned char *payload,
-	int payload_size, int duplicate)
+static void broker_publish_slot(struct broker *broker, unsigned short identifier, const char *slot,
+	const unsigned char *payload, int payload_size, int duplicate)
 {
 	unsigned char body[2 + TOPIC_SIZE + 2 + 8 + MAXIMUM_LISTING_SIZE];
-	int size = put_string(body, signalling.own_slot);
+	int size = put_string(body, slot);
 
 	body[size++] = (unsigned char)(identifier >> 8);
 	body[size++] = (unsigned char)identifier;
@@ -1008,7 +1036,8 @@ static int broker_publish_listing(struct broker *broker, const unsigned char *pa
 	broker->in_flight[free_index].size = size;
 	if (size)
 		memcpy(broker->in_flight[free_index].payload, payload, (size_t)size);
-	broker_publish_slot(broker, broker->in_flight[free_index].identifier, payload, size, 0);
+	snprintf(broker->in_flight[free_index].slot, sizeof(broker->in_flight[free_index].slot), "%s", signalling.lobby_slot);
+	broker_publish_slot(broker, broker->in_flight[free_index].identifier, signalling.lobby_slot, payload, size, 0);
 	return 1;
 }
 
@@ -1057,19 +1086,24 @@ static int broker_carries_lobby(const struct broker *broker)
 static void broker_sync_topics(struct broker *broker)
 {
 	const char *wanted[NUMBER_OF_TOPICS];
-	char slots[TOPIC_SIZE];
+	char slots[TOPIC_SIZE], slots_crossplay[TOPIC_SIZE];
 	int lobby = broker_carries_lobby(broker);
 	int index;
 
 	if (broker->state != _broker_ready)
 		return;
-	snprintf(slots, sizeof(slots), "%s+", P2P_LOBBY_SLOT_PREFIX);
+	snprintf(slots, sizeof(slots), "%s+", P2P_LOBBY_SLOT_PREFIX(0));
+	snprintf(slots_crossplay, sizeof(slots_crossplay), "%s+", P2P_LOBBY_SLOT_PREFIX(1));
 	wanted[_topic_host] = signalling.hosting ? signalling.host_topic : "";
-	wanted[_topic_join] = signalling.joining ? signalling.join_topic : "";
+	wanted[_topic_join] = signalling.joining && signalling.join_wire != 1 ? signalling.join_topics[0] : "";
+	wanted[_topic_join_crossplay] = signalling.joining && signalling.join_wire != 0 && p2p_wire_count() > 1 ?
+		signalling.join_topics[1] : "";
 	wanted[_topic_code] = signalling.looking_up ? signalling.lookup_topic : "";
-	wanted[_topic_own_slot] = lobby && signalling.lobby_listed ? signalling.own_slot : "";
-	wanted[_topic_query] = lobby && signalling.lobby_listed ? P2P_LOBBY_QUERY_TOPIC : "";
+	wanted[_topic_own_slot] = lobby && signalling.lobby_listed ? signalling.lobby_slot : "";
+	wanted[_topic_query] = lobby && signalling.lobby_listed ? P2P_LOBBY_QUERY_TOPIC(signalling.lobby_listed_crossplay) : "";
 	wanted[_topic_slots] = lobby && signalling.lobby_browsing ? slots : "";
+	/* (the server browser reads both wires' games: network_wire.h) */
+	wanted[_topic_slots_crossplay] = lobby && signalling.lobby_browsing && p2p_wire_count() > 1 ? slots_crossplay : "";
 	wanted[_topic_friend_inbox] = signalling.friend_inbox;
 	wanted[_topic_friend_mailbox] = signalling.friend_mailbox;
 	for (index = 0; index < NUMBER_OF_TOPICS; index++)
@@ -1085,6 +1119,11 @@ static void broker_sync_topics(struct broker *broker)
 			broker->slots_subscribed = 0;
 			broker->slots_identifier = 0;
 		}
+		if (index == _topic_slots_crossplay)
+		{
+			broker->slots_crossplay_subscribed = 0;
+			broker->slots_crossplay_identifier = 0;
+		}
 		/* (the own slot without No Local: an emptying of it is seen and
 		mended, also one by this machine's own old connection's will, whose
 		client identifier is this one's) */
@@ -1094,12 +1133,14 @@ static void broker_sync_topics(struct broker *broker)
 
 			if (index == _topic_slots)
 				broker->slots_identifier = identifier;
+			if (index == _topic_slots_crossplay)
+				broker->slots_crossplay_identifier = identifier;
 			if (!broker->ping_time)
 				broker->ping_time = now_stamp();
 		}
 		/* (once subscribed to the slots, the hosts are asked to publish:
 		retained copies come at once, but may be old) */
-		if (index == _topic_slots && wanted[index][0])
+		if ((index == _topic_slots || index == _topic_slots_crossplay) && wanted[index][0])
 			broker->query_pending = 1;
 		strcpy(had, wanted[index]);
 	}
@@ -1144,8 +1185,8 @@ static void broker_update_lobby(struct broker *broker)
 				broker->in_flight[index].identifier = next_packet_identifier(broker);
 			broker->in_flight[index].refused = 0;
 			broker->in_flight[index].sent_time = p2p_now();
-			broker_publish_slot(broker, broker->in_flight[index].identifier, broker->in_flight[index].payload,
-				broker->in_flight[index].size, duplicate);
+			broker_publish_slot(broker, broker->in_flight[index].identifier, broker->in_flight[index].slot,
+				broker->in_flight[index].payload, broker->in_flight[index].size, duplicate);
 		}
 	}
 	if (broker->lobby_version != signalling.lobby_version && signalling.lobby_listing_size &&
@@ -1160,12 +1201,20 @@ static void broker_update_lobby(struct broker *broker)
 	{
 		broker->lobby_clear_pending = 0;
 	}
-	if (broker->query_pending && broker->topics[_topic_slots][0] && broker_may_publish(broker, UNPROVEN_RESERVE))
+	if (broker->query_pending && (broker->topics[_topic_slots][0] || broker->topics[_topic_slots_crossplay][0]) &&
+		broker_may_publish(broker, UNPROVEN_RESERVE + 1))
 	{
 		unsigned char nonce[NONCE_SIZE];
+		int crossplay;
 
-		posix_random_bytes(nonce, sizeof(nonce));
-		broker_publish(broker, P2P_LOBBY_QUERY_TOPIC, nonce, sizeof(nonce), 0);
+		/* (each wire's hosts asked: they listen on their own wire's) */
+		for (crossplay = 0; crossplay < 2; crossplay++)
+		{
+			if (!broker->topics[crossplay ? _topic_slots_crossplay : _topic_slots][0])
+				continue;
+			posix_random_bytes(nonce, sizeof(nonce));
+			broker_publish(broker, P2P_LOBBY_QUERY_TOPIC(crossplay), nonce, sizeof(nonce), 0);
+		}
 		broker->query_pending = 0;
 	}
 }
@@ -1473,7 +1522,7 @@ static int get_relays(const unsigned char *message, int size, struct p2p_candida
 
 /* HMAC(their X25519 shared secret, "hceu/2" (a Vita's "hcev/2") | the
 joiner's public key | the host's); other is the one that is not this machine's. 0 if it is unusable */
-static int pair_base(const unsigned char *joiner_public, const unsigned char *host_public,
+static int pair_base(int crossplay, const unsigned char *joiner_public, const unsigned char *host_public,
 	const unsigned char *other, unsigned char *base)
 {
 	unsigned char shared[P2P_KEY_SIZE];
@@ -1481,7 +1530,7 @@ static int pair_base(const unsigned char *joiner_public, const unsigned char *ho
 
 	if (!p2p_shared_secret(other, shared))
 		return 0;
-	memcpy(data, network_wire_crossplay() ? P2P_CROSSPLAY_SIGNAL_PREFIX "/2" : P2P_SIGNAL_PREFIX "/2", 6);
+	memcpy(data, crossplay ? P2P_CROSSPLAY_SIGNAL_PREFIX "/2" : P2P_SIGNAL_PREFIX "/2", 6);
 	memcpy(data + 6, joiner_public, P2P_KEY_SIZE);
 	memcpy(data + 6 + P2P_KEY_SIZE, host_public, P2P_KEY_SIZE);
 	p2p_hmac_sha256(shared, P2P_KEY_SIZE, data, sizeof(data), base);
@@ -1559,15 +1608,15 @@ static int host_nonce_current(const unsigned char *public_key, const unsigned ch
 
 /* ---------- the messages */
 
-/* a JOIN, with this machine's relays or without (form 1 or 0) */
-static void send_join_form(int with_relays)
+/* a JOIN on a wire, with this machine's relays or without (form 1 or 0) */
+static void send_join_form(int crossplay, int with_relays)
 {
 	unsigned char message[MAXIMUM_MESSAGE_SIZE];
 	unsigned char sealed[MAXIMUM_MESSAGE_SIZE + P2P_SEAL_OVERHEAD];
 	int size = 0;
 
 	message[size++] = _message_join;
-	message[size++] = (unsigned char)message_version();
+	message[size++] = (unsigned char)message_version_of(crossplay);
 	memcpy(message + size, p2p_public_key(), P2P_KEY_SIZE);
 	size += P2P_KEY_SIZE;
 	memcpy(message + size, signalling.join_nonce, NONCE_SIZE);
@@ -1575,7 +1624,7 @@ static void send_join_form(int with_relays)
 	size += put_candidates(message + size);
 	/* (the crossplay wire: OpenCE's WebRTC block, of kind none, and never
 	this build's relays, which OpenCE's hosts refuse as trailing bytes) */
-	if (network_wire_crossplay())
+	if (crossplay)
 		size += put_webrtc_none(message + size);
 	else if (with_relays)
 		size += put_relays(message + size);
@@ -1589,7 +1638,7 @@ static void send_join_form(int with_relays)
 		size += TAG_SIZE;
 	}
 	size = p2p_seal(signalling.join_key, message, size, sealed);
-	publish_everywhere(signalling.join_host_topic, sealed, size, 0);
+	publish_everywhere(signalling.join_host_topics[crossplay], sealed, size, 0);
 }
 
 /* the JOIN: a request as before relays (a host takes relays only from a
@@ -1601,10 +1650,18 @@ relays from the one that has them) */
 static void send_join(void)
 {
 	struct p2p_candidate relays[P2P_MAXIMUM_RELAYS];
+	int crossplay;
 
-	if (signalling.join_answered && !network_wire_crossplay() && p2p_local_relays(relays, P2P_MAXIMUM_RELAYS))
-		send_join_form(1);
-	send_join_form(0);
+	/* (each wire the game may be on: one known, or both until its host
+	answers on one, signalling.join_wire) */
+	for (crossplay = 0; crossplay < p2p_wire_count(); crossplay++)
+	{
+		if (signalling.join_wire >= 0 && signalling.join_wire != crossplay)
+			continue;
+		if (signalling.join_answered && !crossplay && p2p_local_relays(relays, P2P_MAXIMUM_RELAYS))
+			send_join_form(0, 1);
+		send_join_form(crossplay, 0);
+	}
 	signalling.join_sent_time = p2p_now();
 }
 
@@ -1644,7 +1701,7 @@ static int joiner_base(const unsigned char *public_key, unsigned char *base)
 	/* (none left: the request is not answered, and asked again) */
 	if (!budget_left(&signalling.key_work, MAXIMUM_KEY_WORK, KEY_WORK_INTERVAL, 1))
 		return 0;
-	return pair_base(public_key, p2p_public_key(), public_key, base);
+	return pair_base(signalling.host_crossplay, public_key, p2p_public_key(), public_key, base);
 }
 
 static int request_used(const unsigned char *request)
@@ -1669,7 +1726,7 @@ static void send_accept(struct broker *broker, const unsigned char *identifier, 
 	int size = 0;
 
 	answer[size++] = _message_accept;
-	answer[size++] = MESSAGE_VERSION;
+	answer[size++] = (unsigned char)message_version_of(signalling.host_crossplay);
 	memcpy(answer + size, p2p_public_key(), P2P_KEY_SIZE);
 	size += P2P_KEY_SIZE;
 	memcpy(answer + size, nonce, NONCE_SIZE);
@@ -1677,13 +1734,18 @@ static void send_accept(struct broker *broker, const unsigned char *identifier, 
 	memcpy(answer + size, host_nonce, NONCE_SIZE);
 	size += NONCE_SIZE;
 	size += put_candidates(answer + size);
-	/* (a joiner of before relays reads its addresses and the tag, and
-	nothing between) */
-	size += put_relays(answer + size);
+	/* (the crossplay wire: OpenCE's WebRTC block, of kind none, exactly the
+	rest an OpenCE joiner takes (p2p_signal.c 1181-1186 there); the legacy
+	wire: the relays, which a joiner of before relays reads past - its
+	addresses and the tag, nothing between) */
+	if (signalling.host_crossplay)
+		size += put_webrtc_none(answer + size);
+	else
+		size += put_relays(answer + size);
 	message_tag(base, "accept", answer, size, answer + size);
 	size += TAG_SIZE;
 	size = p2p_seal(signalling.host_key, answer, size, sealed);
-	make_topic(signalling.host_token, "joiner", identifier, topic);
+	make_topic(signalling.host_crossplay, signalling.host_token, "joiner", identifier, topic);
 	/* (a proven joiner's first: its session is made; others ask again) */
 	if (broker->state == _broker_ready && broker_may_publish(broker, proven ? 0 : UNPROVEN_RESERVE))
 		broker_publish(broker, topic, sealed, size, 0);
@@ -1715,11 +1777,26 @@ static void join_received(struct broker *broker, const unsigned char *message, i
 	count = get_candidates(message + fixed, size - fixed, candidates);
 	if (count < 0)
 		return;
+	proven = size - fixed - 1 - count * 6;
+	/* (the crossplay wire, a PC joiner's or a Vita's: OpenCE's WebRTC block
+	next, checked and stepped past - kind none, or a native or browser
+	build's: the tunnel stays plain UDP, its addresses alone are used - then
+	the proof or nothing; no relays. A block that is not one OpenCE makes, or
+	anything after it but a proof, and the request is dropped unanswered) */
+	if (signalling.host_crossplay)
+	{
+		int block = skip_webrtc(message + fixed + 1 + count * 6, proven);
+
+		if (block < 0)
+			return;
+		proven -= block;
+		if (proven != 0 && proven != PROOF_SIZE)
+			return;
+	}
 	/* (then the relays, unless a joiner of before relays sent it, or one
 	without any: 1 + 6n bytes, never 0 or PROOF_SIZE, so the two are told
 	apart) */
-	proven = size - fixed - 1 - count * 6;
-	if (proven != 0 && proven != PROOF_SIZE)
+	else if (proven != 0 && proven != PROOF_SIZE)
 	{
 		relay_count = get_relays(message + fixed + 1 + count * 6, proven, relays);
 		if (relay_count < 0)
@@ -1857,8 +1934,11 @@ static void join_received(struct broker *broker, const unsigned char *message, i
 	send_accept(broker, identifier, nonce, host_nonce, base, 1);
 }
 
-/* the joiner: the host answered */
-static void accept_received(const unsigned char *message, int size)
+static void sync_all_topics(void);
+
+/* the joiner: the host answered, on a wire's topic (the game's: the one
+asked on, or one of both for an invite link's host) */
+static void accept_received(const unsigned char *message, int size, int crossplay)
 {
 	struct p2p_candidate candidates[P2P_MAXIMUM_CANDIDATES];
 	struct p2p_candidate relays[P2P_MAXIMUM_RELAYS];
@@ -1885,12 +1965,18 @@ static void accept_received(const unsigned char *message, int size)
 	p2p_key_hash(host_public, hash);
 	if (memcmp(hash, signalling.join_host_hash, P2P_KEY_HASH_SIZE))
 		return;
-	if (!signalling.join_has_base || memcmp(signalling.join_host_public, host_public, P2P_KEY_SIZE))
+	/* (one wire's answer: the base is the wire's; the other wire's answers
+	are ignored once one holds, signalling.join_wire) */
+	if (signalling.join_wire >= 0 && crossplay != signalling.join_wire)
+		return;
+	if (!signalling.join_has_base || memcmp(signalling.join_host_public, host_public, P2P_KEY_SIZE) ||
+		signalling.join_base_crossplay != crossplay)
 	{
-		if (!pair_base(p2p_public_key(), host_public, host_public, signalling.join_base))
+		if (!pair_base(crossplay, p2p_public_key(), host_public, host_public, signalling.join_base))
 			return;
 		memcpy(signalling.join_host_public, host_public, P2P_KEY_SIZE);
 		signalling.join_has_base = 1;
+		signalling.join_base_crossplay = crossplay;
 	}
 	/* and the answer is its */
 	if (!tag_right(signalling.join_base, "accept", message, size))
@@ -1912,7 +1998,7 @@ static void accept_received(const unsigned char *message, int size)
 	rest = size - TAG_SIZE - fixed - 1 - count * 6;
 	/* (the crossplay wire: the host's WebRTC block, exactly the rest; no
 	relays) */
-	if (network_wire_crossplay())
+	if (crossplay)
 	{
 		if (skip_webrtc(message + fixed + 1 + count * 6, rest) != rest)
 			return;
@@ -1928,6 +2014,15 @@ static void accept_received(const unsigned char *message, int size)
 	session_secret(signalling.join_base, nonce, host_nonce, secret);
 	if (!p2p_peer_offered(signalling.join_host, secret, candidates, count, 1))
 		return;
+	/* (the host answered on this wire: its game's, kept; the other wire's
+	topic let go) */
+	if (signalling.join_wire < 0)
+	{
+		signalling.join_wire = crossplay;
+		platform_log("Internet play: the invite's host answered on the %s wire", crossplay ? "crossplay" : "legacy Vita");
+		p2p_join_wire_known(crossplay);
+		sync_all_topics();
+	}
 	p2p_peer_relays(signalling.join_host, secret, relays, relay_count);
 	if (signalling.join_answered)
 		return;
@@ -1953,20 +2048,26 @@ static void code_token(const char *code, unsigned char *token)
 }
 
 /* the code's record (the host's key hash and the invite's token), sealed
-with the code's key, retained on one broker or all (broker NULL) */
+with the code's key, retained on one broker or all (broker NULL). A game on
+the crossplay wire's is RECORD_VERSION_WIRE's, with its wire after the
+token, so that a Vita joins it on that wire; builds before it read no record
+but RECORD_VERSION's, and are told no game has the code (they could not join
+it: its wire is not theirs) */
 static void publish_code(struct broker *broker)
 {
-	unsigned char message[2 + P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE];
+	unsigned char message[2 + P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE + 1];
 	unsigned char sealed[sizeof(message) + P2P_SEAL_OVERHEAD];
 	int size = 0;
 	int index;
 
 	message[size++] = _message_code;
-	message[size++] = RECORD_VERSION;
+	message[size++] = signalling.host_crossplay ? RECORD_VERSION_WIRE : RECORD_VERSION;
 	p2p_key_hash(p2p_public_key(), message + size);
 	size += P2P_KEY_HASH_SIZE;
 	memcpy(message + size, signalling.host_token, P2P_TOKEN_SIZE);
 	size += P2P_TOKEN_SIZE;
+	if (signalling.host_crossplay)
+		message[size++] = 1;
 	size = p2p_seal(signalling.code_key, message, size, sealed);
 	/* (each broker as its bucket allows: one that has none left now
 	publishes it in a coming pass, broker_update_lobby) */
@@ -2002,8 +2103,20 @@ static void sync_all_topics(void);
 static void code_received(const unsigned char *message, int size)
 {
 	char text[16 + 2 * (P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE) + 1];
+	int crossplay = 0;
 
-	if (size < 2 + P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE)
+	/* (version 2: exactly the hash and token, the legacy wire's game;
+	version 3: and its wire, 0 or 1, nothing more; the crossplay wire's
+	only where this build speaks it) */
+	if (message[1] == RECORD_VERSION_WIRE)
+	{
+		if (size != 2 + P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE + 1 || message[size - 1] > 1)
+			return;
+		crossplay = message[size - 1];
+		if (crossplay && p2p_wire_count() < 2)
+			return;
+	}
+	else if (size < 2 + P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE)
 		return;
 	/* (a lobby entry's code: anyone can publish a record of their own for a
 	code the lobby shows, and only the host the entry is listed under, whose
@@ -2030,7 +2143,7 @@ static void code_received(const unsigned char *message, int size)
 	memcpy(text, "halo://join/", 12);
 	p2p_hex(message + 2, P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE, text + 12);
 	sync_all_topics();
-	p2p_code_found(text);
+	p2p_code_found(text, crossplay);
 }
 
 static void publish_received(struct broker *broker, const char *topic, const unsigned char *payload, int size,
@@ -2041,17 +2154,27 @@ static void publish_received(struct broker *broker, const char *topic, const uns
 
 	if (size > MAXIMUM_MESSAGE_SIZE + P2P_SEAL_OVERHEAD)
 		return;
-	/* the server browser's: a slot (p2p_lobby.c checks the rest), a query */
-	if (!strncmp(topic, P2P_LOBBY_SLOT_PREFIX, strlen(P2P_LOBBY_SLOT_PREFIX)))
+	/* the server browser's, each wire's: a slot (p2p_lobby.c checks the
+	rest), a query */
 	{
-		if (size <= MAXIMUM_LISTING_SIZE)
-			p2p_lobby_slot_heard(topic + strlen(P2P_LOBBY_SLOT_PREFIX), payload, size, retained);
-		return;
-	}
-	if (!strcmp(topic, P2P_LOBBY_QUERY_TOPIC))
-	{
-		p2p_lobby_query_heard();
-		return;
+		int crossplay;
+
+		for (crossplay = 0; crossplay < p2p_wire_count(); crossplay++)
+		{
+			const char *prefix = P2P_LOBBY_SLOT_PREFIX(crossplay);
+
+			if (!strncmp(topic, prefix, strlen(prefix)))
+			{
+				if (size <= MAXIMUM_LISTING_SIZE)
+					p2p_lobby_slot_heard(crossplay, topic + strlen(prefix), payload, size, retained);
+				return;
+			}
+			if (!strcmp(topic, P2P_LOBBY_QUERY_TOPIC(crossplay)))
+			{
+				p2p_lobby_query_heard(crossplay);
+				return;
+			}
+		}
 	}
 	/* friends' (p2p_friends.c reads them on its own time; a retained one is
 	no friend's: nothing of theirs is retained) */
@@ -2070,20 +2193,33 @@ static void publish_received(struct broker *broker, const char *topic, const uns
 	if (signalling.hosting && !strcmp(topic, signalling.host_topic))
 	{
 		message_size = p2p_open(signalling.host_key, payload, size, message);
-		if (message_size >= 2 && message[0] == _message_join && message[1] == message_version())
+		if (message_size >= 2 && message[0] == _message_join &&
+			message[1] == message_version_of(signalling.host_crossplay))
+		{
 			join_received(broker, message, message_size);
+		}
 	}
-	else if (signalling.joining && !strcmp(topic, signalling.join_topic))
+	else if (signalling.joining && signalling.join_wire != 1 && !strcmp(topic, signalling.join_topics[0]))
 	{
 		message_size = p2p_open(signalling.join_key, payload, size, message);
-		if (message_size >= 2 && message[0] == _message_accept && message[1] == message_version())
-			accept_received(message, message_size);
+		if (message_size >= 2 && message[0] == _message_accept && message[1] == message_version_of(0))
+			accept_received(message, message_size, 0);
+	}
+	else if (signalling.joining && signalling.join_wire != 0 && p2p_wire_count() > 1 &&
+		!strcmp(topic, signalling.join_topics[1]))
+	{
+		message_size = p2p_open(signalling.join_key, payload, size, message);
+		if (message_size >= 2 && message[0] == _message_accept && message[1] == message_version_of(1))
+			accept_received(message, message_size, 1);
 	}
 	else if (signalling.looking_up && !strcmp(topic, signalling.lookup_topic))
 	{
 		message_size = size ? p2p_open(signalling.lookup_key, payload, size, message) : -1;
-		if (message_size >= 2 && message[0] == _message_code && message[1] == RECORD_VERSION)
+		if (message_size >= 2 && message[0] == _message_code &&
+			(message[1] == RECORD_VERSION || message[1] == RECORD_VERSION_WIRE))
+		{
 			code_received(message, message_size);
+		}
 	}
 }
 
@@ -2354,18 +2490,21 @@ static void broker_parse(struct broker *broker)
 			}
 			else if (broker->protocol == 5)
 				offset += properties;
-			if (identifier && identifier == broker->slots_identifier && offset < remaining)
+			if (identifier && (identifier == broker->slots_identifier ||
+				identifier == broker->slots_crossplay_identifier) && offset < remaining)
 			{
-				broker->slots_identifier = 0;
+				int crossplay = identifier != broker->slots_identifier;
+
+				*(crossplay ? &broker->slots_crossplay_identifier : &broker->slots_identifier) = 0;
 				if (body[offset] < 0x80)
 				{
-					broker->slots_subscribed = 1;
+					*(crossplay ? &broker->slots_crossplay_subscribed : &broker->slots_subscribed) = 1;
 					signalling.browsing_time = now_stamp();
 				}
 				else
 				{
-					platform_log("Internet play: broker %s refused the subscription to the public games (0x%02x): "
-						"they are not seen through it", broker->host, body[offset]);
+					platform_log("Internet play: broker %s refused the subscription to the %s public games (0x%02x): "
+						"they are not seen through it", broker->host, crossplay ? "PC (OpenCE)" : "Vitas'", body[offset]);
 				}
 			}
 		}
@@ -2450,8 +2589,8 @@ static void broker_readable(struct broker *broker)
 /* the brokers if network.brokers_file cannot be read (the Vita's
 port/vita/app0/brokers.txt's) */
 #define DEFAULT_BROKERS "broker.emqx.io:1883,broker.hivemq.com:1883,test.mosquitto.org:1883"
-/* ... and with Crossplay on, if network.crossplay_brokers_file cannot be
-read: OpenCE's (port/vita/app0/brokers_crossplay.txt's) */
+/* ... and if network.crossplay_brokers_file cannot be read: OpenCE's
+(port/vita/app0/brokers_crossplay.txt's) */
 #define DEFAULT_CROSSPLAY_BROKERS \
 	"opence.milenko.org:1883/0,broker.emqx.io:1883,broker.hivemq.com:1883,test.mosquitto.org:1883"
 
@@ -2501,16 +2640,48 @@ line, "#" starting a comment, into text: host:port entries separated by
 commas (OpenCE's "Brokers in brokers.txt") */
 static void brokers_list(char *text, size_t size)
 {
-	/* (Crossplay on: OpenCE's list, where the PC hosts list their games;
-	off: the Vitas' own, with the project's broker first) */
-	const char *file_setting = network_wire_crossplay() ? "network.crossplay_brokers_file" : "network.brokers_file";
+	char crossplay[1024];
+	size_t length;
 
-	if (!p2p_list_setting("network.signalling_brokers", file_setting, text, size))
+	/* (the Vitas' own, with the project's broker first; then, where this
+	build speaks the crossplay wire, OpenCE's list, where the PC hosts list
+	their games: p2p_signal_start takes each broker once) */
+	if (config_string("network.signalling_brokers")[0])
 	{
-		platform_log("Internet play: the brokers' file %s cannot be read (%s); using the usual ones",
-			config_string(file_setting), file_setting);
-		snprintf(text, size, "%s", network_wire_crossplay() ? DEFAULT_CROSSPLAY_BROKERS : DEFAULT_BROKERS);
+		snprintf(text, size, "%s", config_string("network.signalling_brokers"));
+		return;
 	}
+	if (!p2p_list_setting("network.signalling_brokers", "network.brokers_file", text, size))
+	{
+		platform_log("Internet play: the brokers' file %s cannot be read (network.brokers_file); using the usual ones",
+			config_string("network.brokers_file"));
+		snprintf(text, size, "%s", DEFAULT_BROKERS);
+	}
+	if (p2p_wire_count() < 2)
+		return;
+	if (!p2p_list_setting("network.signalling_brokers", "network.crossplay_brokers_file", crossplay, sizeof(crossplay)))
+	{
+		platform_log("Internet play: the brokers' file %s cannot be read (network.crossplay_brokers_file); using "
+			"OpenCE's usual ones", config_string("network.crossplay_brokers_file"));
+		snprintf(crossplay, sizeof(crossplay), "%s", DEFAULT_CROSSPLAY_BROKERS);
+	}
+	length = strlen(text);
+	if (crossplay[0] && length + 1 < size)
+		snprintf(text + length, size - length, "%s%s", length ? "," : "", crossplay);
+}
+
+/* whether a broker of this host and port is in the list already (the same
+broker in both files, as the public ones are) */
+static int broker_listed(const char *host, unsigned short port)
+{
+	int index;
+
+	for (index = 0; index < signalling.broker_count; index++)
+	{
+		if (signalling.brokers[index].port == port && !strcasecmp(signalling.brokers[index].host, host))
+			return 1;
+	}
+	return 0;
 }
 
 /* a port's digits (1 to 65535, nothing else), or 0 */
@@ -2544,8 +2715,9 @@ void p2p_signal_start(void)
 	{
 		unsigned char hash[P2P_KEY_HASH_SIZE];
 
+		/* (the will's: the legacy wire's slot) */
 		p2p_key_hash(p2p_public_key(), hash);
-		p2p_lobby_slot_topic(hash, signalling.own_slot, sizeof(signalling.own_slot));
+		p2p_lobby_slot_topic(0, hash, signalling.own_slot, sizeof(signalling.own_slot));
 	}
 	brokers_list(list, sizeof(list));
 	/* (the tests' brokers' authorities: beside config.toml unless a full
@@ -2601,8 +2773,9 @@ void p2p_signal_start(void)
 				broker->port = network_short((unsigned short)atoi(colon + 1));
 				*colon = 0;
 			}
-			/* (an entry without a name, ":1883" or "/8883", is none) */
-			if (broker->host[0])
+			/* (an entry without a name, ":1883" or "/8883", is none; one
+			listed already, in the other file, once) */
+			if (broker->host[0] && !broker_listed(broker->host, broker->port))
 			{
 				/* (its address kept for when looking it up fails: one of
 				this machine's own settings) */
@@ -2886,7 +3059,7 @@ void p2p_signal_counts(struct p2p_signal_counts *counts)
 		counts->exhausted += !ready && broker->exhausted;
 		counts->ready += ready;
 		counts->lobby += ready && broker_carries_lobby(broker);
-		counts->browsing += ready && broker->slots_subscribed;
+		counts->browsing += ready && (broker->slots_subscribed || broker->slots_crossplay_subscribed);
 		counts->listing += ready && broker->listing_acknowledged;
 	}
 }
@@ -2907,7 +3080,7 @@ void p2p_signal_brokers_text(char *text, int size, int what)
 		if (broker->state == _broker_ready)
 		{
 			state = !broker_carries_lobby(broker) && what ? "signalling only" :
-				what == 1 ? (broker->slots_subscribed ? "browsing" : "subscribing") :
+				what == 1 ? (broker->slots_subscribed || broker->slots_crossplay_subscribed ? "browsing" : "subscribing") :
 				what == 2 ? (broker->listing_acknowledged ? "has it" : "not acknowledged yet") : "ready";
 		}
 		else if (broker->state != _broker_idle)
@@ -2923,20 +3096,25 @@ void p2p_signal_brokers_text(char *text, int size, int what)
 	}
 }
 
-void p2p_signal_host(const unsigned char *token, const char *code)
+void p2p_signal_host(const unsigned char *token, const char *code, int crossplay)
 {
-	/* (never on the crossplay wire: a Vita joins PC games, it hosts none,
-	network_wire.h; nor are this build's codes for PC machines) */
-	if (network_wire_crossplay())
-		return;
+	crossplay = crossplay && p2p_wire_count() > 1;
 	if (!signalling.has_nonce_key)
 	{
 		posix_random_bytes(signalling.nonce_key, P2P_SHA256_SIZE);
 		signalling.has_nonce_key = 1;
 	}
+	/* (another wire than the last game's: the requests' bases, which are a
+	wire's (pair_base), not kept) */
+	if (crossplay != signalling.host_crossplay)
+	{
+		memset(signalling.joiners, 0, sizeof(signalling.joiners));
+		memset(signalling.askers, 0, sizeof(signalling.askers));
+	}
+	signalling.host_crossplay = crossplay;
 	memcpy(signalling.host_token, token, P2P_TOKEN_SIZE);
 	derive(token, "seal", NULL, signalling.host_key);
-	make_topic(token, "host", p2p_identifier(), signalling.host_topic);
+	make_topic(crossplay, token, "host", p2p_identifier(), signalling.host_topic);
 	signalling.hosting = 1;
 	signalling.has_code = code && strlen(code) == P2P_CODE_SIZE - 1;
 	if (signalling.has_code)
@@ -2947,7 +3125,9 @@ void p2p_signal_host(const unsigned char *token, const char *code)
 		memcpy(characters, code, 4);
 		memcpy(characters + 4, code + 5, 4);
 		code_token(characters, token_of_code);
-		make_topic(token_of_code, "code", NULL, signalling.code_topic);
+		/* (codes are this build's own: the legacy wire's topics, whatever
+		the game's wire, which the record says) */
+		make_topic(0, token_of_code, "code", NULL, signalling.code_topic);
 		derive(token_of_code, "seal", NULL, signalling.code_key);
 		publish_code(NULL);
 	}
@@ -2969,15 +3149,13 @@ void p2p_signal_lookup_code(const char *code, const unsigned char *host)
 {
 	unsigned char token[P2P_TOKEN_SIZE];
 
-	/* (codes are this build's own, never looked up on the crossplay wire:
-	no PC host has one) */
-	if (network_wire_crossplay())
-		return;
+	/* (codes are this build's own: the legacy wire's topics, whatever the
+	game's wire, which its record says: code_received) */
 	signalling.lookup_has_host = host != NULL;
 	if (host)
 		memcpy(signalling.lookup_host, host, P2P_IDENTIFIER_SIZE);
 	code_token(code, token);
-	make_topic(token, "code", NULL, signalling.lookup_topic);
+	make_topic(0, token, "code", NULL, signalling.lookup_topic);
 	derive(token, "seal", NULL, signalling.lookup_key);
 	signalling.looking_up = 1;
 	sync_all_topics();
@@ -2989,13 +3167,20 @@ void p2p_signal_stop_lookup(void)
 	sync_all_topics();
 }
 
-void p2p_signal_join(const unsigned char *host_hash, const unsigned char *token)
+void p2p_signal_join(const unsigned char *host_hash, const unsigned char *token, int crossplay)
 {
+	int wire;
+
 	memcpy(signalling.join_host_hash, host_hash, P2P_KEY_HASH_SIZE);
 	p2p_identifier_from_hash(host_hash, signalling.join_host);
 	derive(token, "seal", NULL, signalling.join_key);
-	make_topic(token, "host", signalling.join_host, signalling.join_host_topic);
-	make_topic(token, "joiner", p2p_identifier(), signalling.join_topic);
+	/* (a wire this build does not speak: the legacy wire's alone) */
+	signalling.join_wire = crossplay < 0 ? (p2p_wire_count() > 1 ? -1 : 0) : crossplay && p2p_wire_count() > 1;
+	for (wire = 0; wire < 2; wire++)
+	{
+		make_topic(wire, token, "host", signalling.join_host, signalling.join_host_topics[wire]);
+		make_topic(wire, token, "joiner", p2p_identifier(), signalling.join_topics[wire]);
+	}
 	/* (new each time: the host makes one session of a request) */
 	posix_random_bytes(signalling.join_nonce, NONCE_SIZE);
 	signalling.join_nonce_time = p2p_now();
@@ -3011,11 +3196,17 @@ void p2p_signal_stop_joining(void)
 	sync_all_topics();
 }
 
-void p2p_signal_lobby_topics(int listed, int browsing)
+void p2p_signal_lobby_topics(int listed, int listed_crossplay, int browsing)
 {
-	/* (the crossplay wire: browsing only, never listed) */
-	if (network_wire_crossplay())
-		listed = 0;
+	listed_crossplay = listed_crossplay && p2p_wire_count() > 1;
+	if (listed)
+	{
+		unsigned char hash[P2P_KEY_HASH_SIZE];
+
+		p2p_key_hash(p2p_public_key(), hash);
+		signalling.lobby_listed_crossplay = listed_crossplay;
+		p2p_lobby_slot_topic(listed_crossplay, hash, signalling.lobby_slot, sizeof(signalling.lobby_slot));
+	}
 	signalling.lobby_listed = listed;
 	signalling.lobby_browsing = browsing;
 	sync_all_topics();
@@ -3025,7 +3216,7 @@ void p2p_signal_lobby_publish(const unsigned char *listing, int size, int closin
 {
 	int index;
 
-	if (size > MAXIMUM_LISTING_SIZE || network_wire_crossplay())
+	if (size > MAXIMUM_LISTING_SIZE || !signalling.lobby_slot[0])
 		return;
 	memcpy(signalling.lobby_listing, listing, (size_t)size);
 	signalling.lobby_listing_size = size;
@@ -3042,7 +3233,7 @@ void p2p_signal_lobby_query(void)
 
 	for (index = 0; index < signalling.broker_count; index++)
 	{
-		if (signalling.brokers[index].topics[_topic_slots][0])
+		if (signalling.brokers[index].topics[_topic_slots][0] || signalling.brokers[index].topics[_topic_slots_crossplay][0])
 			signalling.brokers[index].query_pending = 1;
 		broker_update_lobby(&signalling.brokers[index]);
 	}
@@ -3063,9 +3254,9 @@ void p2p_signal_lobby_quit(void)
 		if (broker_carries_lobby(broker) && signalling.lobby_listing_size &&
 			(broker->lobby_version != signalling.lobby_version || broker->lobby_clear_pending))
 		{
-			broker_publish_slot(broker, next_packet_identifier(broker), signalling.lobby_listing,
+			broker_publish_slot(broker, next_packet_identifier(broker), signalling.lobby_slot, signalling.lobby_listing,
 				signalling.lobby_listing_size, 0);
-			broker_publish_slot(broker, next_packet_identifier(broker), NULL, 0, 0);
+			broker_publish_slot(broker, next_packet_identifier(broker), signalling.lobby_slot, NULL, 0, 0);
 		}
 		/* DISCONNECT (MQTT 5: a normal one, its reason and no properties) */
 		broker_send(broker, 0xE0, disconnect, broker->protocol == 5 ? 2 : 0);
@@ -3092,7 +3283,9 @@ void p2p_signal_stop(void)
 	signalling.broker_count = 0;
 	signalling.started = 0;
 	signalling.own_slot[0] = 0;
+	signalling.lobby_slot[0] = 0;
 	signalling.lobby_listed = 0;
+	signalling.lobby_listed_crossplay = 0;
 	signalling.lobby_browsing = 0;
 	signalling.lobby_listing_size = 0;
 	signalling.lobby_closing = 0;

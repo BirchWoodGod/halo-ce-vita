@@ -513,6 +513,7 @@ static struct
 	boolean setup_held;
 	short held_maximum;
 	boolean held_private;
+	boolean held_with_pc;
 	/* to be opened from the main loop: the System Link screen, the password
 	screen */
 	boolean open_system_link;
@@ -2586,9 +2587,11 @@ static void h3_mp_lobby_update(struct widget_instance *widget)
 	snprintf(text, sizeof(text), T("1 Player (%d max)"), maximum);
 	text_show(named(screen, "players"), text);
 	text_show(named(screen, "ready"), T("Ready"));
+	/* (online: who can join a game hosted, network.host_crossplay - the
+	server browser lists the Vitas' games and the PCs' together, tagged) */
 	if (h3_mp.network == _h3_network_online)
-		snprintf(text, sizeof(text), "%s", network_wire_crossplay() ? T("Crossplay is on: turn it off to host") :
-			T("Host a game on the Internet, or join one."));
+		snprintf(text, sizeof(text), "%s", network_wire_host_crossplay() ?
+			T("Host a game Vitas and PC players can join, or join one.") : T("Host a game on the Internet, or join one."));
 	else if (h3_mp.network == _h3_network_system_link)
 		snprintf(text, sizeof(text), "%s", T("Play with the PS Vitas on your Wi-Fi network."));
 	else if (h3_mp.network == _h3_network_adhoc)
@@ -4159,10 +4162,22 @@ static void browser_test_games(void)
 		entry->players = (int)(index * 7 % 16);
 		entry->maximum = 16;
 		entry->open = entry->compatible = 1;
+		snprintf(entry->tag, sizeof(entry->tag), "%s", crossplay_guard_tag(CROSSPLAY_PLATFORM_VITA));
+		snprintf(entry->badge, sizeof(entry->badge), "%s", entry->tag);
 		if (both && atoi(both))
 		{
+			/* (every second one a PC game, OpenCE's or ChupathingyCE's in
+			turn; every fourth Vita one for Vitas and PC) */
 			if (index % 2)
-				snprintf(entry->badge, sizeof(entry->badge), "%s", T("PC"));
+			{
+				entry->platform = index % 4 == 1 ? CROSSPLAY_PLATFORM_OPENCE : CROSSPLAY_PLATFORM_CHUPA;
+				entry->crossplay = 1;
+			}
+			else
+				entry->crossplay = index % 4 == 2;
+			snprintf(entry->tag, sizeof(entry->tag), "%s", crossplay_guard_tag(entry->platform));
+			crossplay_guard_row_badge(entry->badge, (int)sizeof(entry->badge), entry->platform, entry->crossplay, 0,
+				CROSSPLAY_GUARD_OK);
 			entry->locked = index % 3 == 2 && (!menu_functions.lan || lan_with_online());
 		}
 	}
@@ -4248,20 +4263,26 @@ static void lan_entries(void)
 		entry->open = game->open;
 		entry->has_teams = game->has_teams;
 		entry->compatible = 1;
-		/* (the crossplay wire's hosts are PC builds, with the online browser's
-		badges; else a Vita's games are the Vitas', a PC build's the PCs') */
-		if (network_wire_crossplay())
+		/* (every row's tag, as the online browser's: VITA for a Vita's game -
+		"+PC" when PC players can join it too - or the PC build's, with its
+		badges, a PC co-op game Experimental (no game engine, as OpenCE hosts
+		co-op); a PC build of this tree's games are the PCs') */
+		entry->crossplay = game->crossplay;
+		entry->platform = game->platform;
+#ifndef HALO_PORT_VITA_NETWORK
+		entry->platform = CROSSPLAY_PLATFORM_PC;
+#endif
+		if (game->pc_coop)
+			entry->coop = TRUE;
 		{
-			int verdict = crossplay_guard_judge(entry->coop, entry->players, entry->maximum);
+			int verdict = entry->platform == CROSSPLAY_PLATFORM_VITA ? CROSSPLAY_GUARD_OK :
+				crossplay_guard_judge(entry->coop, entry->players, entry->maximum);
 
 			entry->experimental = verdict != CROSSPLAY_GUARD_OK;
-			snprintf(entry->badge, sizeof(entry->badge), "%s%s", crossplay_guard_badge(1, 0),
-				crossplay_guard_badge_suffix(verdict));
+			snprintf(entry->tag, sizeof(entry->tag), "%s", crossplay_guard_tag(entry->platform));
+			crossplay_guard_row_badge(entry->badge, (int)sizeof(entry->badge), entry->platform, entry->crossplay, 0,
+				verdict);
 		}
-#ifndef HALO_PORT_VITA_NETWORK
-		else
-			snprintf(entry->badge, sizeof(entry->badge), "%s", T("PC"));
-#endif
 		/* the Rules line, as the online browser's: "Slayer on Blood Gulch",
 		"Co-op: The Pillar of Autumn, Heroic", ": full or starting" */
 		if (entry->coop)
@@ -4358,9 +4379,9 @@ static void lan_status(struct widget_instance *screen, char *line, int line_size
 		struct p2p_lobby_entry const *entry = &menu_functions.games[index];
 		size_t length = strlen(said);
 
-		snprintf(said + length, sizeof(said) - length, "%s%s%s (%s, %s, %d/%d%s)", index ? ", " : ": ",
+		snprintf(said + length, sizeof(said) - length, "%s%s%s (%s, %s, %d/%d, %s)", index ? ", " : ": ",
 			online && lan_entry(entry) ? "[LAN] " : "", entry->name, entry->map, entry->gametype, entry->players,
-			entry->maximum, entry->badge[0] ? ", PC" : "");
+			entry->maximum, entry->badge[0] ? entry->badge : "?");
 	}
 	/* (on a change, at most once in BROWSER_LOG_MILLISECONDS: the players'
 	counts change all the time online, and an insider.10 tester's log had
@@ -4443,17 +4464,22 @@ static void browser_update(struct widget_instance *list)
 			widget_instance_set_visibility_recursive(named(child, "row_lock"), entry->locked != 0);
 		/* (the Halo 3 browser's rows: the platform's badge, VITA or PC, with
 		the lock beside it for a password - row_badge's frames: VITA, PC, then
-		the same locked - and the rest of a PC game's badges, SERVER or
-		EXPERIMENTAL, before its name) */
+		the same locked - and the rest of the row's badge before its name: a
+		PC build's own (OPENCE, CHUPA: the art says PC), SERVER, EXPERIMENTAL,
+		or "+PC" for a Vita's game PC players can join too) */
 		if (named(child, "row_badge"))
 		{
 			char const *rest = entry->badge;
-			size_t pc = strlen(T("PC"));
+			size_t tag = strlen(entry->tag);
 
 			named(child, "row_badge")->animation.current_frame_index =
-				(short)((entry->badge[0] ? 1 : 0) + (entry->locked ? 2 : 0));
-			if (!strncmp(rest, T("PC"), pc))
-				rest += pc;
+				(short)((entry->platform != CROSSPLAY_PLATFORM_VITA ? 1 : 0) + (entry->locked ? 2 : 0));
+			/* (the tag the art says itself: VITA, PC) */
+			if (tag && !strncmp(rest, entry->tag, tag) && (entry->platform == CROSSPLAY_PLATFORM_VITA ||
+				entry->platform == CROSSPLAY_PLATFORM_PC))
+			{
+				rest += tag;
+			}
 			while (*rest == ' ')
 				rest++;
 			if (*rest)
@@ -4714,8 +4740,8 @@ static boolean browser_join(struct widget_instance *widget, boolean *widget_dele
 		}
 	}
 	/* (crossplay_guard.h: a large or co-op PC game, Experimental, asked
-	about once) */
-	if (network_wire_crossplay() && (entry->experimental || entry->coop) &&
+	about once; a Vita's game never) */
+	if (entry->platform != CROSSPLAY_PLATFORM_VITA && (entry->experimental || entry->coop) &&
 		crossplay_guard_answered(entry->name, system_milliseconds()) != 1)
 	{
 		int answer = crossplay_guard_test_answer();
@@ -4807,6 +4833,8 @@ static void setup_initialize(struct widget_instance *widget)
 	struct widget_instance *spinner;
 	long maximum = atol(setting_get("HALO_NET_MAX_PLAYERS", "16"));
 	boolean private_game = !strcmp(setting_get("HALO_NET_HOST_PUBLIC", "true"), "false");
+	/* (who can join: network.host_crossplay, network_wire.h) */
+	boolean with_pc = !strcmp(setting_get("HALO_NET_HOST_CROSSPLAY", "false"), "true");
 
 	menu_functions.create_pending = FALSE;
 	/* (back from the Halo 3 Create Game's GAME TYPE or MAP picker: what it
@@ -4815,6 +4843,7 @@ static void setup_initialize(struct widget_instance *widget)
 	{
 		maximum = menu_functions.held_maximum;
 		private_game = menu_functions.held_private;
+		with_pc = menu_functions.held_with_pc;
 	}
 	else
 	{
@@ -4831,6 +4860,10 @@ static void setup_initialize(struct widget_instance *widget)
 	spinner = spinner_of(screen, "op_visibility");
 	if (spinner)
 		spinner->parameters.list.selected_index = private_game ? 1 : 0;
+	/* (VITAS, VITAS AND PC) */
+	spinner = spinner_of(screen, "op_who");
+	if (spinner)
+		spinner->parameters.list.selected_index = with_pc ? 1 : 0;
 }
 
 /* (port h3 setup hold) the Halo 3 Create Game's GAME TYPE or MAP picker
@@ -4843,6 +4876,8 @@ static void setup_hold(struct widget_instance *widget)
 	menu_functions.held_maximum = (short)(spinner ? PIN(spinner->parameters.list.selected_index + 2, 2, 16) : 16);
 	spinner = spinner_of(screen, "op_visibility");
 	menu_functions.held_private = spinner && spinner->parameters.list.selected_index == 1;
+	spinner = spinner_of(screen, "op_who");
+	menu_functions.held_with_pc = spinner && spinner->parameters.list.selected_index == 1;
 	menu_functions.setup_held = TRUE;
 }
 
@@ -4890,11 +4925,17 @@ static boolean setup_start(struct widget_instance *widget)
 	spinner = spinner_of(screen, "op_visibility");
 	setting_set("HALO_NET_HOST_PUBLIC", spinner && spinner->parameters.list.selected_index == 1 ? "false" : "true");
 	setting_set("HALO_NET_LOBBY_PASSWORD", menu_functions.lobby_password);
+	{
+		struct widget_instance *who = spinner_of(screen, "op_who");
+
+		if (who)
+			setting_set("HALO_NET_HOST_CROSSPLAY", who->parameters.list.selected_index == 1 ? "true" : "false");
+	}
 	menu_functions.create_pending = TRUE;
 	menu_functions.create_system_link = FALSE;
-	platform_log("menus: Server Setup: %s, %s players, %s%s; the profile, then the map list", menu_functions.lobby_name,
+	platform_log("menus: Server Setup: %s, %s players, %s%s, %s; the profile, then the map list", menu_functions.lobby_name,
 		value, spinner && spinner->parameters.list.selected_index == 1 ? "private" : "public",
-		menu_functions.lobby_password[0] ? ", a password" : "");
+		menu_functions.lobby_password[0] ? ", a password" : "", network_wire_host_crossplay() ? "Vitas and PC" : "Vitas");
 	return TRUE;
 }
 
@@ -8116,8 +8157,38 @@ static void h3_pregame_update(struct widget_instance *widget)
 		char name[48];
 
 		h3_utf8(name, (int)sizeof(name), game->name);
-		snprintf(text, sizeof(text), T("Listed as: %s"), name);
-		text_show(named(screen, "listed"), host ? text : "");
+		/* (the host: its game's name and tag - VITA, or VITA+PC when PC
+		players can join it; a client: what hosts the game, in words) */
+		if (host)
+		{
+			char badge[24];
+
+			crossplay_guard_row_badge(badge, (int)sizeof(badge), CROSSPLAY_PLATFORM_VITA, network_wire_crossplay(), 0,
+				CROSSPLAY_GUARD_OK);
+			snprintf(text, sizeof(text), T("Listed as: %s (%s)"), name, badge);
+		}
+		else
+			snprintf(text, sizeof(text), "%s", crossplay_guard_platform_line(network_wire_host_platform(),
+				network_wire_crossplay()));
+		text_show(named(screen, "listed"), text);
+		/* (the host of a game for Vitas and PC, online: its join link, which
+		PC players (OpenCE) open as their own links - a bearer token, as the
+		code is: on the screen, never in the log - docs/crossplay.md T16) */
+		{
+			char invite[96];
+
+			text[0] = 0;
+			if (host && online && network_wire_crossplay() && p2p_hosting_invite(invite, (int)sizeof(invite)) &&
+				strlen(invite) > 38)
+			{
+				snprintf(text, sizeof(text), "%s\n%.38s\n%s", T("PC players (OpenCE) join with:"), invite, invite + 38);
+				snprintf(line + strlen(line), sizeof(line) - strlen(line), "; PC link shown");
+			}
+			text_show(named(screen, "pc_link"), text);
+		}
+		snprintf(line + strlen(line), sizeof(line) - strlen(line), "; %s", network_wire_crossplay() ?
+			(network_wire_host_vita() ? "crossplay wire, a Vita's game" : "crossplay wire, a PC's game") :
+			"the Vitas' wire");
 	}
 	{
 		boolean toggles = cooperative && waiting && online && config_boolean("network.public_lobby") &&

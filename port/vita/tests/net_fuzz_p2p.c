@@ -48,7 +48,7 @@ void p2p_signal_update(const int *read, int read_count, const int *write, int wr
 {
 	(void)read; (void)read_count; (void)write; (void)write_count;
 }
-void p2p_signal_host(const unsigned char *token, const char *code) { (void)token; (void)code; }
+void p2p_signal_host(const unsigned char *token, const char *code, int crossplay) { (void)token; (void)code; (void)crossplay; }
 void p2p_signal_stop_hosting(void) {}
 /* (the server browser's, p2p_lobby.c, and its signalling: nothing listed) */
 void p2p_lobby_update(const unsigned char *token, int player_count, int maximum_player_count)
@@ -71,7 +71,7 @@ void p2p_lobby_game_sent(const unsigned char *identifier) { (void)identifier; }
 void p2p_lobby_game_heard(const unsigned char *identifier) { (void)identifier; }
 void p2p_signal_lookup_code(const char *code, const unsigned char *host) { (void)code; (void)host; }
 void p2p_signal_stop_lookup(void) {}
-void p2p_signal_join(const unsigned char *host_hash, const unsigned char *token) { (void)host_hash; (void)token; }
+void p2p_signal_join(const unsigned char *host_hash, const unsigned char *token, int crossplay) { (void)host_hash; (void)token; (void)crossplay; }
 void p2p_signal_stop_joining(void) {}
 int p2p_signal_connected(void) { return 1; }
 int p2p_list_setting(const char *override_setting, const char *file_setting, char *text, size_t size)
@@ -341,7 +341,7 @@ static void fuzz_record(int kind, const unsigned char *data, int size)
 		if (p2p.lookup_requested)
 		{
 			p2p.looking_up = 1;
-			p2p_code_found(text);
+			p2p_code_found(text, 0);
 		}
 		break;
 	}

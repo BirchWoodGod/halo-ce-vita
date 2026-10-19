@@ -73,12 +73,6 @@ void network_game_client_request_immediate_start(
 	void);
 boolean create_global_network_game_server(
 	void);
-#ifdef HALO_LINUX
-/* port: refuses hosting on the crossplay wire, telling the player
-(network_game_globals.c) */
-boolean network_game_wire_refuses_hosting(
-	short controller_index);
-#endif
 /* a client of the distributed netcode (port/linux/NETCODE.md), which
 decides nothing the host does */
 boolean network_game_distributed_client(

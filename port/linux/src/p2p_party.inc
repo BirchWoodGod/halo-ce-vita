@@ -342,7 +342,8 @@ static int party_body_encode(const struct message *message, unsigned char *bytes
 		bytes[size++] = (unsigned char)message->game.maximum;
 		put_u16(bytes + size, (unsigned int)message->game.version);
 		size += 2;
-		bytes[size++] = (unsigned char)((message->game.wire ? 1 : 0) | (message->game.pc_map ? 2 : 0));
+		bytes[size++] = (unsigned char)((message->game.wire ? 1 : 0) | (message->game.pc_map ? 2 : 0) |
+			(message->game.wire && message->game.pc_host ? 4 : 0));
 		size += put_text(bytes + size, message->game.map, MAP_LENGTH);
 		size += put_text(bytes + size, message->game.gametype, GAMETYPE_LENGTH);
 		if (message->party_value & PARTY_FOLLOW_HAS_INVITE)
@@ -608,8 +609,9 @@ static void party_send_follow(void)
 	message.game.maximum = activity->maximum;
 	if (message.game.players > message.game.maximum)
 		message.game.players = message.game.maximum;
-	message.game.version = HALO_PORT_NETWORK_VERSION;
+	message.game.version = (int)network_wire_version_of(friends->host.crossplay);
 	message.game.wire = friends->host.crossplay;
+	message.game.pc_host = friends->host.pc_host;
 	message.game.pc_map = activity->pc_map;
 	snprintf(message.game.map, sizeof(message.game.map), "%s", activity->map);
 	snprintf(message.game.gametype, sizeof(message.game.gametype), "%s", activity->gametype);
@@ -1062,7 +1064,7 @@ static int party_follow_precheck(const struct message *message)
 		return P2P_PARTY_FOLLOW_PASSWORD;
 	if ((message->party_value & PARTY_FOLLOW_UNREACHABLE) || !(message->party_value & PARTY_FOLLOW_HAS_INVITE))
 		return P2P_PARTY_FOLLOW_UNREACHABLE;
-	if (message->game.version != HALO_PORT_NETWORK_VERSION || message->game.wire != friends->host.crossplay)
+	if (!game_wire_joinable(message->game.version, message->game.wire))
 		return P2P_PARTY_FOLLOW_VERSION;
 	if (friends->host.joined && p2p_equal(friends->host.joined_hash, message->game.invite_hash, P2P_KEY_HASH_SIZE))
 		return P2P_PARTY_FOLLOW_THERE;
@@ -1493,8 +1495,8 @@ static void party_update(void)
 			hash = host->joined_hash;
 			token = host->joined_token;
 		}
-		else if (friends->in_game || host->crossplay)
-			flags = friends->in_game ? PARTY_FOLLOW_UNREACHABLE : 0;
+		else if (friends->in_game)
+			flags = PARTY_FOLLOW_UNREACHABLE;
 		if (flags)
 		{
 			int changed = !friends->party.follow_active || flags != friends->party.follow_flags ||
@@ -2009,7 +2011,7 @@ int p2p_party_follow_pending(struct p2p_party_follow *follow)
 int p2p_party_follow_join(unsigned long serial)
 {
 	char link[P2P_LINK_SIZE], leader[P2P_PARTY_NAME_SIZE];
-	int result;
+	int result, wire = 0;
 
 	pthread_mutex_lock(&friends_lock);
 	if (!friends->party.active || !friends->party.follow_pending || friends->party.follow_message.party_serial != serial)
@@ -2023,6 +2025,8 @@ int p2p_party_follow_join(unsigned long serial)
 	if (!result)
 	{
 		invite_link(friends->party.follow_message.game.invite_hash, friends->party.follow_message.game.invite_token, link);
+		/* (on the leader's game's wire, whichever: network_wire.h) */
+		wire = game_wire_of(friends->party.follow_message.game.version, friends->party.follow_message.game.wire);
 		party_name_of(friends->party.members[friends->party.leader].key, "", leader, sizeof(leader));
 	}
 	pthread_mutex_unlock(&friends_lock);
@@ -2031,7 +2035,7 @@ int p2p_party_follow_join(unsigned long serial)
 		/* (the invite's own join, as an invite accepted joins: the host's
 		checks are where they always are) */
 		platform_log("party: following %s into their game", leader);
-		result = p2p_join_invite(link) ? P2P_PARTY_FOLLOW_JOINING : P2P_PARTY_FOLLOW_FAILED;
+		result = p2p_join_invite_on(link, wire) ? P2P_PARTY_FOLLOW_JOINING : P2P_PARTY_FOLLOW_FAILED;
 	}
 	p2p_party_follow_result(serial, result);
 	return result;

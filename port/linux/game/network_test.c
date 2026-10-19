@@ -431,6 +431,36 @@ static void network_test_read_settings(
 
 /* debug.network_test_join_file: whether the test has made it (checked
 twice a second) */
+/* the System Link list as the LAN browsers show it, each game's tag
+(crossplay_guard.h: VITA, VITA+PC, OPENCE, CHUPA, PC) with it, as it
+changes: the tests read it (run_netns_crossplay_test.sh browserboth) */
+static void network_test_log_listed(
+	void)
+{
+	static char said[512];
+	struct network_listed_game listed[16];
+	char line[512];
+	short count = network_game_client_listed_games(listed, (short)NUMBEROF(listed));
+	short index;
+	int length = 0;
+
+	line[0] = 0;
+	for (index = 0; index < count && length < (int)sizeof(line) - 1; index++)
+	{
+		char badge[48];
+
+		crossplay_guard_row_badge(badge, (int)sizeof(badge), listed[index].platform, listed[index].crossplay, 0,
+			CROSSPLAY_GUARD_OK);
+		length += snprintf(line + length, sizeof(line) - (size_t)length, "%s[%s] \"%s\"", index ? ", " : "", badge,
+			listed[index].name);
+	}
+	if (count && strcmp(line, said))
+	{
+		snprintf(said, sizeof(said), "%s", line);
+		platform_log("network test: the System Link list: %s", line);
+	}
+}
+
 static boolean network_test_join_file_there(
 	void)
 {
@@ -1843,6 +1873,25 @@ void network_test_update(
 
 				network_test.browse_seconds = 0.0f;
 				p2p_lobby_browse(TRUE);
+				/* (every row the browser shows, once each as it changes: its tag
+				and badges, as the browsers draw them - the tests read them:
+				run_netns_crossplay_test.sh browserboth) */
+				for (index = 0; p2p_lobby_entry(index, &entry); index++)
+				{
+					static char said[16][P2P_LOBBY_ID_SIZE + 64];
+					char line[P2P_LOBBY_ID_SIZE + 64];
+					int slot;
+
+					snprintf(line, sizeof(line), "%s %s %s", entry.id, entry.tag, entry.badge);
+					for (slot = 0; slot < 16 && strcmp(said[slot], line); slot++)
+						;
+					if (slot < 16)
+						continue;
+					memmove(said[1], said[0], sizeof(said[0]) * 15);
+					snprintf(said[0], sizeof(said[0]), "%s", line);
+					platform_log("network test: browser row [%s] \"%s\" (%d/%d, %s, %s)", entry.badge, entry.name,
+						entry.players, entry.maximum, entry.map, entry.crossplay ? "crossplay wire" : "the Vitas' wire");
+				}
 				for (index = 0; !network_test.lobby_id[0] && p2p_lobby_entry(index, &entry); index++)
 				{
 					if (entry.compatible && !entry.own &&
@@ -1854,7 +1903,7 @@ void network_test_update(
 						/* (as the browsers do, crossplay_guard.h: a large or co-op
 						PC game asked about once, the answer
 						HALO_CROSSPLAY_LARGE_ANSWER's) */
-						if (network_wire_crossplay() && (entry.experimental || entry.coop) &&
+						if (entry.platform != CROSSPLAY_PLATFORM_VITA && (entry.experimental || entry.coop) &&
 							crossplay_guard_answered(entry.name, system_milliseconds()) < 0)
 						{
 							int answer = crossplay_guard_test_answer();
@@ -1864,7 +1913,7 @@ void network_test_update(
 								answer > 0 ? "join anyway" : "no");
 							crossplay_guard_answer(entry.name, answer > 0, system_milliseconds());
 						}
-						if (network_wire_crossplay() && (entry.experimental || entry.coop) &&
+						if (entry.platform != CROSSPLAY_PLATFORM_VITA && (entry.experimental || entry.coop) &&
 							crossplay_guard_answered(entry.name, system_milliseconds()) == 0)
 						{
 							continue;
@@ -1915,8 +1964,8 @@ void network_test_update(
 		}
 		/* (debug.network_test_join_file: not before the test makes it) */
 		else if (!network_test.joined && network_test.join_file[0] && !network_test_join_file_there())
-			;
-		else if (!network_test.joined && network_game_client_join_first_available_game())
+			network_test_log_listed();
+		else if (!network_test.joined && (network_test_log_listed(), network_game_client_join_first_available_game()))
 		{
 			network_test.joined = TRUE;
 			ui_widgets_close_all();

@@ -3820,6 +3820,25 @@ void network_game_server_change_map_name(
 		NETWORK_GAME_MAP_NAME_LENGTH - 1);
 	server->game.map.name[NETWORK_GAME_MAP_NAME_LENGTH - 1] = 0;
 #ifdef HALO_LINUX
+	/* port: a Custom Edition multiplayer map (a Halo PC cache, an Xbox
+	level's name too: Halo PC's Blood Gulch) in a game on the crossplay wire,
+	hosted for Vitas and PC, named as OpenCE names it, custom_maps\<name>
+	(its network version 22 and after: crossplay_maps.h), its version below
+	the file's hash as OpenCE's 29 has it; the Xbox maps keep their Xbox
+	level paths, as on every PC build */
+	if (network_wire_crossplay() && !csstrncmp(server->game.map.name, "levels\\test\\", 12))
+	{
+		char const *leaf = tag_name_strip_path(server->game.map.name);
+
+		if (leaf && leaf[0] && csstrlen(leaf) < 26 && custom_edition_cache_is_custom_edition(leaf))
+		{
+			char named[NETWORK_GAME_MAP_NAME_LENGTH];
+
+			snprintf(named, sizeof(named), "custom_maps\\%s", leaf);
+			csstrncpy(server->game.map.name, named, NETWORK_GAME_MAP_NAME_LENGTH - 1);
+			server->game.map.name[NETWORK_GAME_MAP_NAME_LENGTH - 1] = 0;
+		}
+	}
 	/* port: which copy of a custom map this is, for the players to compare
 	theirs with (port/linux/game/custom_edition_maps.c); 0, as January sent,
 	for the Xbox levels */
@@ -5146,6 +5165,17 @@ static boolean network_game_server_handle_public_endpoint(
 			network_event(
 				"network_game_server_handle_datagram() failed in network_game_server_handle_public_endpoint()");
 		}
+#ifdef NET_FUZZ_TWIN_ENABLED
+		/* (tests only: a datagram's twin, its result ignored: net_fuzz_twin.h) */
+		else
+		{
+			static byte twin[sizeof(datagram_buffer)];
+			unsigned short twin_size;
+
+			if (net_fuzz_twin(message, datagram_size, sizeof(twin), twin, &twin_size, _net_fuzz_twin_host_datagram))
+				network_game_server_handle_datagram(server, (void *)twin, twin_size, &source_address);
+		}
+#endif
 
 		datagram_size = sizeof(datagram_buffer);
 	}
@@ -5216,6 +5246,23 @@ static boolean network_game_server_handle_client_machines(
 					(its graceful exit): its connection is gone */
 					if (client_machine->machine_index == NONE || client_machine->connection == NULL)
 						break;
+#ifdef NET_FUZZ_TWIN_ENABLED
+					/* (tests only: a mutated twin of a client's message handled
+					too, its result ignored - the host's side of the crossplay
+					security pass, docs/crossplay.md 7.4: net_fuzz_twin.h) */
+					{
+						static word twin[MAXIMUM_NETWORK_MESSAGE_SIZE / sizeof(word)];
+						unsigned short twin_size;
+
+						if (net_fuzz_twin(message, message_buffer_size, sizeof(twin), twin, &twin_size,
+							_net_fuzz_twin_host_from_client))
+						{
+							network_game_server_handle_client_message(server, client_machine, twin, (short)twin_size);
+							if (client_machine->machine_index == NONE || client_machine->connection == NULL)
+								break;
+						}
+					}
+#endif
 					/* (a connection that has not joined is timed from when it
 					connected: what it sends before its join does not count) */
 					if (network_game_server_client_machine_is_joined_to_game(server, client_machine))

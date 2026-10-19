@@ -76,6 +76,7 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 		<string text="JOIN GAME"/>
 		<string text="INTERNET PLAY IS OFF"/>
 		<string text="The game type your game starts with. Your\nown are made in EDIT GAME TYPES, on the lobby."/>
+		<string text="WHO CAN JOIN"/>
 	</strings>
 	<strings name="h3/networks">
 		<string text="ONLINE"/>
@@ -111,6 +112,7 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 		<string text="The most players your game takes,\nyou included (2 to 16)."/>
 		<string text="PUBLIC: listed in every Vita's server browser.\nPRIVATE: joined only with its code."/>
 		<string text="A public game asks joiners for it.\nNONE: anyone may join."/>
+		<string text="VITAS: Vitas join it. VITAS AND PC: PC players\n(OpenCE) can join too; old Vita versions can't."/>
 		<string text="Next: your profile, then the map and the\ngametype. The lobby shows your game's code."/>
 	</strings>
 	<strings name="h3/code_help">
@@ -681,10 +683,16 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 		<child widget="h3/setup/password_label"/>
 		<child widget="h3/setup/password_value"/>
 	</widget>
+	<widget name="h3/setup/who_label" type="text" left="0" top="0" width="250" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/mp_text" string_index="28"/>
+	<widget name="h3/setup/who_spinner" strings="VITAS|VITAS AND PC" type="spinner" left="0" top="0" width="160" height="20" flags="pass_unhandled_to_focused_child left_right_tabs_items" font="h3/font_item" color="#FFAABED6" align="center" text_y="2" header_bitmap="h3/arrow_left" footer_bitmap="h3/arrow_right" header_bounds="2 -12 18 -4" footer_bounds="2 164 18 172"/>
+	<widget name="h3/setup/op_who" width="536" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<child widget="h3/setup/who_label"/>
+		<child widget="h3/setup/who_spinner" x="280"/>
+	</widget>
 	<widget name="h3/setup/op_start" type="text" width="536" height="20" bitmap="h3/item" font="h3/font_item" color="#FFF2F6FA" text_x="10" text_y="3" string_list="h3/mp_text" string_index="1">
 		<on event="a start" run="port setup start" open="ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen"/>
 	</widget>
-	<widget name="h3/setup/setup_status" type="text" left="52" top="276" width="536" height="18" font="h3/font_small" color="#FF9FB6CC" text_y="1"/>
+	<widget name="h3/setup/setup_status" type="text" left="52" top="279" width="536" height="18" font="h3/font_small" color="#FF9FB6CC" text_y="1"/>
 	<widget name="h3/setup/help_rule" left="40" top="298" width="560" height="2" bitmap="h3/rule"/>
 	<widget name="h3/setup/setup_help" type="text" left="52" top="306" width="536" height="60" font="h3/font_small" color="#FFCFD9E3" string_list="h3/setup_help"/>
 	<widget name="h3/setup/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
@@ -695,7 +703,8 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 		<child widget="h3/setup/op_max_players" x="52" y="168"/>
 		<child widget="h3/setup/op_visibility" x="52" y="190"/>
 		<child widget="h3/setup/op_password" x="52" y="212"/>
-		<child widget="h3/setup/op_start" x="52" y="244"/>
+		<child widget="h3/setup/op_who" x="52" y="234"/>
+		<child widget="h3/setup/op_start" x="52" y="258"/>
 	</widget>
 	<widget name="h3/setup/screen" flags="pass_unhandled_to_focused_child">
 		<on event="created" run="port setup init"/>

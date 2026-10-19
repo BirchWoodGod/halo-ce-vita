@@ -38,6 +38,8 @@ and UBSan too).
 /* (the files in the test's folders, not ux0:) */
 #define P2P_FRIENDS_TEST
 #include "../../linux/src/p2p_friends.c"
+/* (the wires: which a friend's game is joined on, network_wire.h) */
+#include "../../linux/src/network_wire.c"
 
 #include <stdarg.h>
 /* (the platform layer's headers keep sys/stat.h out) */
@@ -148,6 +150,13 @@ int p2p_join_invite(const char *text)
 	snprintf(joined_link, sizeof(joined_link), "%s", text);
 	join_count++;
 	return 1;
+}
+/* (the wire of the game joined: its presence's, invite's or party's) */
+static int joined_wire = -1;
+int p2p_join_invite_on(const char *text, int crossplay)
+{
+	joined_wire = crossplay;
+	return p2p_join_invite(text);
 }
 
 /* ---------- the machines and the broker */
@@ -378,7 +387,8 @@ static void test_request_accept(void)
 	p2p_friends_set_activity(P2P_FRIEND_STATE_MULTIPLAYER, "bloodgulch", "Slayer", 2, -1, 0, 3, 16);
 	pass(8);
 	check(entry_of(0, P2P_FRIEND_KIND_FRIEND, 0, &entry) && entry.online, "the friend online");
-	check(!strcmp(entry.activity, "Slayer on Blood Gulch"), "the friend's activity: Slayer on Blood Gulch");
+	check(!strcmp(entry.activity, "Slayer on Blood Gulch (VITA)") && !entry.crossplay,
+		"the friend's activity: Slayer on Blood Gulch, tagged VITA (the Vitas' wire)");
 	check(!strcmp(entry.name, "Bravo"), "the friend's name cleaned as a player's");
 	check(entry_of(1, P2P_FRIEND_KIND_FRIEND, 0, &entry) && entry.online && !strcmp(entry.activity, "In the menus"),
 		"presence both ways: In the menus");
@@ -386,7 +396,7 @@ static void test_request_accept(void)
 	p2p_friends_set_activity(P2P_FRIEND_STATE_COOP, "a10", "", 0, 3, 0, 1, 4);
 	pass(8);
 	check(entry_of(1, P2P_FRIEND_KIND_FRIEND, 0, &entry) &&
-		!strcmp(entry.activity, "Co-op: The Pillar of Autumn, Legendary"), "co-op's activity with its difficulty");
+		!strcmp(entry.activity, "Co-op: The Pillar of Autumn, Legendary (VITA)"), "co-op's activity with its difficulty, tagged");
 	use(0);
 	p2p_friends_set_activity(P2P_FRIEND_STATE_FORGE, "", "", 0, -1, 0, 0, 0);
 	pass(8);
@@ -1664,6 +1674,27 @@ static int seed(const char *folder)
 	return 0;
 }
 
+/* the wire a friend's game is joined on (network_wire.h): this build's own
+by its version (18, the wire bit; the crossplay wire's version for a Vita's
+game for Vitas and PC), a PC friend's (OpenCE's friends) by its version,
+on the crossplay wire when that wire joins it; the friends' topics hcev's */
+static void test_wires(void)
+{
+	char topic[TOPIC_LENGTH + 1];
+	unsigned char key[P2P_KEY_SIZE] = { 1, 2, 3 };
+
+	check(game_wire_of(HALO_PORT_NETWORK_VERSION, 0) == 0, "a friend's Vita game (18): the legacy wire");
+	check(game_wire_of(HALO_PORT_NETWORK_VERSION, 1) == 1, "a game of 18 with the wire bit: the crossplay wire");
+	check(game_wire_of(HALO_PORT_CROSSPLAY_NETWORK_VERSION, 1) == 1 && game_wire_of(HALO_PORT_CROSSPLAY_NETWORK_VERSION, 0) == 1,
+		"a PC friend's game (OpenCE's 29), or a Vita's for Vitas and PC: the crossplay wire, joinable");
+	check(game_wire_of(28, 0) == -1 && game_wire_of(32, 1) == -1 && game_wire_of(19, 0) == -1 && game_wire_of(0, 0) == -1,
+		"a version neither wire joins (28, 32, 19, 0): not joinable");
+	check(network_wire_version_of(1) == HALO_PORT_CROSSPLAY_NETWORK_VERSION && network_wire_version_of(0) == 18,
+		"the version a presence says: its game's wire's");
+	mailbox_topic(key, topic);
+	check(!strncmp(topic, "hcev/f1/m/", 10), "the friends' topics are hcev/f1's on every build");
+}
+
 int main(void)
 {
 	char root[512];
@@ -1680,6 +1711,7 @@ int main(void)
 		memset(&hosts[index], 0, sizeof(hosts[index]));
 		hosts[index].online = 1;
 	}
+	test_wires();
 	test_codes();
 	test_request_accept();
 	test_join_invite();

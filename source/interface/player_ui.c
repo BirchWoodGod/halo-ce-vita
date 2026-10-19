@@ -600,11 +600,6 @@ long player_ui_get_player1_last_used_profile_index(
 void player_ui_fast_setup_network_server(
 	void)
 {
-#ifdef HALO_LINUX
-	/* port: never on the crossplay wire (the player told why) */
-	if (network_game_wire_refuses_hosting(NONE))
-		return;
-#endif
 	ui_widgets_close_all();
 	dispose_global_network_game_server();
 	dispose_global_network_game_client();

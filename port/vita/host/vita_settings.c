@@ -170,8 +170,8 @@ question; the game's main loop looks through the folders when the page
 opens, and deletes (only inside our folders, never through a link). Circle
 goes back to Modded maps.
 Multiplayer's Friends page (port/linux/src/p2p_friends.h; its row in Join
-with a code's place, which the PC menus' Direct Link leaves out, Online and
-not on the crossplay wire: the tab is a screen's height) is the Halo 3
+with a code's place, which the PC menus' Direct Link leaves out, Online:
+the tab is a screen's height) is the Halo 3
 FRIENDS screen's for the original menus: this Vita's friend code, Add a
 friend (the code typed with the D-pad, as Join with a code), Appear offline
 (HALO_FRIENDS_APPEAR_OFFLINE) and Friends can join (HALO_FRIENDS_JOIN), then
@@ -243,8 +243,8 @@ Multiplayer tab's way.
 #include "vita_update_verify.h"
 #include "vita_version.h"
 
-/* the wire the game runs (port/linux/src/network_wire.c): nonzero on the
-crossplay wire, where the Vita joins PC games and hosts none */
+/* the wire of the game the Vita hosts or joins (port/linux/src/network_wire.c):
+nonzero on the crossplay wire (a PC's game, or one hosted for Vitas and PC) */
 int network_wire_crossplay(void);
 
 #define DATA_DIRECTORY "ux0:data/haloce-vita"
@@ -293,6 +293,9 @@ enum
 	PAGE_FRIENDS,
 	/* (Multiplayer's Party: p2p_party.h) */
 	PAGE_PARTY,
+	/* (Multiplayer's Vita and PC: the browsers' filter, who can join a game
+	hosted - network_wire.h) */
+	PAGE_CROSSPLAY,
 	PAGE_COUNT
 };
 
@@ -320,6 +323,7 @@ static const struct
 	{ "Mod manager", TAB_MULTIPLAYER },
 	{ "Friends", TAB_MULTIPLAYER },
 	{ "Party", TAB_MULTIPLAYER },
+	{ "Vita and PC", TAB_MULTIPLAYER },
 };
 /* the headings over a tab's rows, as Halo Online's settings have them
 (HUD, Interface...): each above the row it names, when that row is shown */
@@ -654,14 +658,22 @@ static struct setting settings[] = {
 	NETWORK sets the same row) */
 	{ "Connection", "HALO_VITA_NETWORK", 0, 3, { "wifi", "adhoc", "online" }, { "Same Wi-Fi", "Ad hoc", "Online" },
 		"Vitas on one Wi-Fi network play together", 0, TAB_MULTIPLAYER },
-	/* (Crossplay, a switch between two worlds: Off, Vita to Vita, as betas
-	1-4; On, OpenCE's games (OpenCE, ChupathingyCE, DamnationCE hosts and
-	servers): network.crossplay, docs/crossplay.md. Not with Ad hoc, which
-	no PC reaches: setting_shown. After a restart: the game reads it once,
-	at the network's start, port/linux/include/network_wire.h. With it on
-	the Vita joins PC games and hosts none: guide_blocker) */
-	{ "Crossplay", "HALO_CROSSPLAY", 1, 2, { "0", "1" }, { "Off", "On" },
-		"On: play PCs (OpenCE). Off: play Vitas", 0, TAB_MULTIPLAYER },
+	/* (no switch since Oct 19 2026 (the owner): every game speaks its own
+	protocol, docs/crossplay.md, network_wire.h. The browsers list the
+	Vitas' games and OpenCE's (OpenCE, ChupathingyCE, DamnationCE hosts and
+	servers) together, tagged: Browser shows narrows them,
+	network.browser_filter, live. Who can join is the games this Vita hosts:
+	Vitas (the Vitas' protocol), or Vitas and PC (OpenCE's, listed for both),
+	network.host_crossplay, taken as a game is hosted; the Create Game
+	screens' WHO CAN JOIN sets the same row. Neither with Ad hoc, which no PC
+	reaches: setting_shown. The old Crossplay row's choice, in an older
+	settings.txt, becomes Browser shows: settings_load. On a page of their
+	own, in the old row's place: the tab is a screen's height) */
+	PAGE_ROW("Vita and PC", "Which games the browser lists; who joins yours", TAB_MULTIPLAYER, PAGE_CROSSPLAY),
+	{ "Browser shows", "HALO_NET_BROWSER_FILTER", 0, 3, { "all", "vita", "pc" }, { "All games", "Vita games", "PC games" },
+		"Vita and PC (OpenCE) games, each tagged", 0, PAGE_CROSSPLAY },
+	{ "Who can join", "HALO_NET_HOST_CROSSPLAY", 0, 2, { "false", "true" }, { "Vitas", "Vitas and PC" },
+		"Games you host. And PC: OpenCE players too", 0, PAGE_CROSSPLAY },
 	{ "Ad hoc room", "HALO_ADHOC_ROOM", 0, 4, { "1", "2", "3", "4" }, { "1", "2", "3", "4" },
 		"Vitas in the same room play together", 0, TAB_MULTIPLAYER },
 	{ "Join the room", NULL, 0, 0, { NULL }, { NULL }, "Then Multiplayer, System Link (LAN) in the game", 0,
@@ -1426,7 +1438,7 @@ static int setting_shown(const struct setting *setting)
 		return classic_panel();
 	if ((setting->variable && !strcmp(setting->variable, "HALO_ADHOC_ROOM")) || setting->action == ACTION_ADHOC_JOIN)
 		return network_is("adhoc");
-	if (setting->variable && !strcmp(setting->variable, "HALO_CROSSPLAY"))
+	if (setting->action == ACTION_PAGE && setting->opens == PAGE_CROSSPLAY)
 		return !network_is("adhoc");
 	if (setting->action == ACTION_CE_EXTRACT)
 		return maps_installer_state == 1;
@@ -1442,18 +1454,14 @@ static int setting_shown(const struct setting *setting)
 		return choice_of("HALO_BOTS") != 0;
 	/* (a code typed in: online, on a Vita whose game has not got the PC
 	menus' Direct Link, menu_tags.c) */
-	/* (not with Crossplay on: codes join Vita games, which a crossplay
-	machine does not, network_wire.h) */
 	if (setting->action == ACTION_JOIN_CODE)
-		return network_is("online") && halo_pc_menus_state != 1 && !network_wire_crossplay();
+		return network_is("online") && halo_pc_menus_state != 1;
 	/* (friends: their presence, joins and invites go through internet play;
 	in the code row's place, which the PC menus' Direct Link leaves out: the
 	tab is a screen's height, and a game with the PC menus is one whose
-	menus join friends' games. Online chosen and running; not on the
-	crossplay wire, whose Vita joins PCs' games, never a friend's) */
+	menus join friends' games. Online chosen and running) */
 	if (setting->action == ACTION_PAGE && setting->opens == PAGE_FRIENDS)
-		return !strcmp(running_network, "online") && !strcmp(chosen_network(), "online") && halo_pc_menus_state == 1 &&
-			!network_wire_crossplay();
+		return !strcmp(running_network, "online") && !strcmp(chosen_network(), "online") && halo_pc_menus_state == 1;
 	if (setting->action == ACTION_BROWSE ||
 		(setting->variable && !strcmp(setting->variable, "HALO_NET_HOST_PUBLIC")))
 		return network_is("online");
@@ -1725,6 +1733,8 @@ void vita_settings_load(void)
 	Visibility row's choice when settings.txt has none of its own) */
 	const char *old_public = NULL;
 	char old_public_value[8];
+	/* (the retired Crossplay switch's choice: -1 none) */
+	int old_crossplay = -1;
 
 	vita_settings_language_init();
 	memset(dev_saved, 0, sizeof(dev_saved));
@@ -1847,6 +1857,13 @@ void vita_settings_load(void)
 				old_public = old_public_value;
 				continue;
 			}
+			/* (the Crossplay switch, retired Oct 19 2026: its choice becomes
+			Browser shows, below; gone from settings.txt at the next save) */
+			if (strcmp(line, "HALO_CROSSPLAY") == 0)
+			{
+				old_crossplay = !strcmp(equals + 1, "1") || !strcmp(equals + 1, "true") ? 1 : 0;
+				continue;
+			}
 			/* (1.0.3's co-op rows: every game this Vita hosted became that
 			campaign level; co-op is now hosted from the Campaign screen's
 			difficulty, Y. An old choice loads as Off: not set, and gone
@@ -1903,6 +1920,23 @@ void vita_settings_load(void)
 
 		visibility->choice = find_choice(visibility, old_public);
 	}
+	/* (the retired Crossplay switch, settings.txt's or env.txt's, and no
+	Browser shows saved yet: On, a player's own choice to play PCs, shows PC
+	games, as it did; Off, as shipped, shows all, the Vitas' and PCs'
+	together - the switch is gone, every game joined on its own protocol) */
+	if (old_crossplay < 0 && getenv("HALO_CROSSPLAY"))
+		old_crossplay = !strcmp(getenv("HALO_CROSSPLAY"), "1") || !strcmp(getenv("HALO_CROSSPLAY"), "true") ? 1 : 0;
+	if (old_crossplay >= 0 && !named[setting_named("HALO_NET_BROWSER_FILTER") - settings])
+	{
+		struct setting *filter = setting_named("HALO_NET_BROWSER_FILTER");
+		char message[160];
+
+		filter->choice = find_choice(filter, old_crossplay ? "pc" : "all");
+		snprintf(message, sizeof(message), "settings: the Crossplay switch is gone (Crossplay %s): Browser shows %s",
+			old_crossplay ? "On" : "Off", old_crossplay ? "PC games" : "all games");
+		vita_host_log(message);
+	}
+	unsetenv("HALO_CROSSPLAY");
 	if (saved_profile >= 0)
 	{
 		int row;
@@ -3806,6 +3840,20 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 		status_line(status, sizeof(status));
 		if (status[0] && length < size)
 			length += snprintf(text + length, (size_t)(size - length), "\n\x04%s", status);
+		/* (hosting a game for Vitas and PC, online: its OpenCE join link, which
+		PC players open as their own; the Vitas' code above: docs/crossplay.md
+		T16) */
+		{
+			char invite[96];
+
+			if (!strcmp(running_network, "online") && network_wire_crossplay() &&
+				p2p_hosting_invite(invite, (int)sizeof(invite)) && strlen(invite) > 38 && length < size)
+			{
+				/* (the link in two lines of the panel's 46 characters) */
+				length += snprintf(text + length, (size_t)(size - length), "\n\x04%s\n\x04%.38s\n\x04%s",
+					T("PC players (OpenCE) join with:"), invite, invite + 38);
+			}
+		}
 	}
 	help_line(help, sizeof(help), count ? &lines[selected] : NULL);
 	if (length < size)
@@ -4009,25 +4057,27 @@ static void show_browse(void)
 			length += snprintf(text + length, sizeof(text) - length, T("Looking for games (%.24s)"), detail);
 		}
 	}
-	/* (a game a line: its name, players of most, map, [pw] for a password,
-	PC for a Halo PC map, DED for a dedicated server's. With Crossplay on,
-	every game a PC's (crossplay_guard.h): PC, or SRV for a server, then EXP
-	for a large one, COOP EXP for co-op: both asked about once) */
+	/* (a game a line: its tag first (crossplay_guard.h: VITA, V+PC for a
+	Vita's game PC players join too, or the PC build's: OPENCE, CHUPA,
+	DAMN, PC), its name, players of most, map, [pw] for a password, CE for
+	a Halo PC (Custom Edition) map, SRV for a dedicated server's, EXP for a
+	large PC game, COOP EXP for a PC co-op one: both asked about once) */
 	for (index = 0; index < browse_count && length < (int)sizeof(text); index++)
 	{
 		const struct p2p_lobby_entry *entry = &browse_entries[index];
-		char row[64];
+		const char *tag = entry->platform == CROSSPLAY_PLATFORM_VITA ? (entry->crossplay ? "V+PC" : "VITA") :
+			entry->platform == CROSSPLAY_PLATFORM_DAMNATION ? "DAMN" : crossplay_guard_tag(entry->platform);
+		/* (the panel's 46 characters at most: the badges past them cut) */
+		char row[47];
 		int end;
 
 		/* (a map not said: "-", as the game's browsers show it) */
-		if (entry->badge[0])
-			end = snprintf(row, sizeof(row), "%-15.15s %2d/%-2d %-12.12s%s %s%s", entry->name, entry->players,
-				entry->maximum, entry->map[0] ? entry->map : "-", entry->locked ? " [pw]" : "", entry->dedicated ? "SRV" : "PC",
-				entry->coop ? " COOP EXP" : entry->experimental ? " EXP" : "");
-		else
-			end = snprintf(row, sizeof(row), "%-15.15s %2d/%-2d %-14.14s%s%s%s", entry->name, entry->players,
-				entry->maximum, entry->map[0] ? entry->map : "-", entry->locked ? " [pw]" : "", entry->pc_map ? " PC" : "",
-				entry->dedicated ? " DED" : "");
+		end = snprintf(row, sizeof(row), "%-6.6s %-12.12s %2d/%-2d %-10.10s%s%s%s%s", tag, entry->name, entry->players,
+			entry->maximum, entry->map[0] ? entry->map : "-", entry->locked ? " [pw]" : "", entry->pc_map ? " CE" : "",
+			entry->dedicated ? " SRV" : "", entry->platform != CROSSPLAY_PLATFORM_VITA && (entry->coop ||
+			entry->experimental) ? " EXP" : "");
+		if (end >= (int)sizeof(row))
+			end = (int)sizeof(row) - 1;
 
 		while (end > 0 && row[end - 1] == ' ')
 			row[--end] = 0;
@@ -4044,11 +4094,14 @@ static void show_browse(void)
 				entry->failed ? 46 - lang_utf8_length(T("FAILED: ")) : 46, entry->rules);
 		if (entry->players_line[0] && length < (int)sizeof(text))
 			length += snprintf(text + length, sizeof(text) - length, "\n%.46s", entry->players_line);
-		/* (a PC game's badges in words) */
-		if (entry->badge[0] && length < (int)sizeof(text))
+		/* (its tag in words, and a PC game's badges) */
+		if (length < (int)sizeof(text))
+			length += snprintf(text + length, sizeof(text) - length, "\n%.46s",
+				crossplay_guard_platform_line(entry->platform, entry->crossplay));
+		if (entry->platform != CROSSPLAY_PLATFORM_VITA && (entry->coop || entry->experimental) &&
+			length < (int)sizeof(text))
 			length += snprintf(text + length, sizeof(text) - length, "\n%.46s", entry->coop ?
-				T("PC co-op: experimental on the Vita") : entry->experimental ?
-				T("Experimental: over 16 players may lag") : entry->dedicated ? T("A PC server") : T("A PC game"));
+				T("PC co-op: experimental on the Vita") : T("Experimental: over 16 players may lag"));
 	}
 	if (length < (int)sizeof(text))
 		snprintf(text + length, sizeof(text) - length, "\n%s", T("Cross: join   Square: refresh   Circle: back"));
@@ -4218,8 +4271,6 @@ static const char *guide_blocker(void)
 
 	if (strcmp(chosen_network(), running_network))
 		return T("Restart the game first: Connection changed");
-	if ((guide_action == ACTION_HOST || guide_action == ACTION_CAMPAIGN) && network_wire_crossplay())
-		return T("Crossplay is on: turn it off to host");
 	if (state == SYSTEM_LINK_STATE_PLAYING)
 		return T("Leave the level first: Start, then Quit");
 	if (state == SYSTEM_LINK_STATE_IN_GAME)
@@ -5329,8 +5380,8 @@ static void browse_input(unsigned long pressed)
 		const struct p2p_lobby_entry *entry = &browse_entries[browse_selected];
 
 		/* (crossplay_guard.h: a large or co-op PC game, Experimental, asked
-		about once, on a screen of its own) */
-		if (network_wire_crossplay() && (entry->experimental || entry->coop) &&
+		about once, on a screen of its own; a Vita's game never) */
+		if (entry->platform != CROSSPLAY_PLATFORM_VITA && (entry->experimental || entry->coop) &&
 			crossplay_guard_answered(entry->name, (unsigned long)(now_us() / 1000)) != 1)
 		{
 			browse_large = *entry;
