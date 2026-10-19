@@ -62,25 +62,28 @@
 #            FORGE, back: each lobby's camera written into its point of
 #            ui.map and glided to, ring_loop asleep meanwhile, the main menu
 #            waking it; then the same with HALO_MENU_SCENES=0: none
-#   h3characters  (PARKED: not in the default cases. The lobbies' Spartans are
-#            out of the lobby screens for now, the owner's call: their
-#            scene_object= attributes are removed, the code and the packs
-#            kept - menus/halo3/README.txt says how to bring them back; run
-#            this case again then. The preview's Spartan is h3customize's.)
-#            the lobbies' characters (scene_object= in menus/halo3; the
-#            menu_spartan scene pack, built from the maps folder's Blood Gulch
-#            the first time: port/linux/game/scene_packs.c,
-#            menu_scene_objects.c): the campaign lobby's two Spartans, the
-#            multiplayer and Forge lobbies' one, each made as its lobby opens
-#            and deleted as the main menu comes back (HALO_TEST_PROFILE's
-#            profile); the Customization screen's preview (the console's "pack
-#            preview": shown in a colour, recoloured, hidden); then with
-#            HALO_SCENE_PACKS=0, and with no multiplayer map in the maps
-#            folder: no character, nothing else changed
+#   h3lobbyscenes  the lobbies' scenes (scene_object= in menus/halo3:
+#            menu_scene_objects.c; the menu_campaign, menu_multiplayer and
+#            menu_monitor scene packs, built from the maps folder's own maps the
+#            first time: scene_packs.c), HALO_TEST_PROFILE's profile: CAMPAIGN's
+#            lobby a Warthog held mid-jump (frozen: its physics off) with the
+#            Master Chief seated as its driver and two Marines as its gunner
+#            and passenger, MULTIPLAYER's three white Spartans (a rocket
+#            launcher in a held airborne frame, the flag, a sniper rifle
+#            crouching), FORGE's 343 Guilty Spark looking at a Warthog; each
+#            made as its lobby opens, no effect or particle made meanwhile (no
+#            dust), let go as the main menu comes back; the Customization
+#            screen's preview (the console's "pack preview": shown in a colour,
+#            recoloured, hidden); then with HALO_SCENE_PACKS=0, Menu style Halo
+#            CE, no campaign map (the multiplayer scene alone) and no map at
+#            all: no scene where its pack cannot be, nothing else changed, no
+#            crash
 #   h3profiles  the Halo 3 SELECT PROFILE (menus/halo3/profiles.xml) stands for
 #            the Xbox's campaign profile screen: a first start (no profile)
 #            shows CREATE NEW PROFILE alone, a name of spaces refused, then
-#            Rookie made (blam.sav, its name) and the lobby opened; with
+#            Rookie made (blam.sav, its name) and the lobby opened; back on the
+#            list, the card's Spartan (the scene packs' menu_spartan, in
+#            Rookie's colour, in the card's window), let go with the screen; with
 #            HALO_TEST_PROFILE's profile too: Triangle with that profile's name
 #            refused (taken), Rookie made, played, then Square and its
 #            question's DELETE PROFILE delete it, the other profile's file left
@@ -88,7 +91,8 @@
 #   h3proftouch  taps: CAMPAIGN, SELECT PROFILE's New Profile (its icon and
 #            label): Rookie made, the lobby; the lobby's Back: SELECT PROFILE
 #   h3customize  CUSTOMIZATION (menus/halo3/customize.xml), with
-#            HALO_TEST_PROFILE's profile: the name typed, the colour, the stick
+#            HALO_TEST_PROFILE's profile: its list's card shows the profile's
+#            Spartan (as SELECT PROFILE's); the name typed, the colour, the stick
 #            layout, the look sensitivity and invert look changed, Circle saves
 #            them; blam.sav and SaveMeta.xbx read back (the other fields kept),
 #            then the harness started again on that save: the editor shows
@@ -120,6 +124,11 @@
 #            making it in the profile's colour), to the protected map's, back;
 #            Circle keeps the choice in t:\player_models.txt (blam.sav as it
 #            was); started again, the editor shows it; skipped without them
+#   h3modelsmany  CUSTOMIZATION's MODEL stepped through fourteen models
+#            (fourteen links to HALO_TEST_CE_MAPS' extinction.map under names
+#            of their own, a pack each), each resting: every one shown, each
+#            passed let go (scene_packs_release), none refused for want of
+#            room; then eight quick presses: the models passed not loaded
 #   h3damaged  a profile of a 0-byte blam.sav and one of garbage: SELECT
 #            PROFILE says each is damaged and plays neither, CUSTOMIZATION
 #            edits neither, CREATE NEW PROFILE still makes one; with
@@ -206,7 +215,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
@@ -585,9 +594,9 @@ for case in $cases; do
 		check_h3 h3scenes halo3
 		log=$out/h3scenes/run.log
 		grep -aE "menus: h3 scene|host command \(menu scene\)" "$log"
-		for scene in "h3/campaign/screen: camera point load_campaign at -15.00 5.00 0.00, yaw -10.0 pitch 30.0, over 0 ticks" \
-			"h3/mp/screen: camera point multiplayer at -40.00 -1.80 15.50, yaw 0.0 pitch 0.0, over 0 ticks" \
-			"h3/forge/lobby: camera point new_campaign at -10.00 -20.00 5.00, yaw 40.0 pitch 20.0, over 0 ticks"; do
+		for scene in "h3/campaign/screen: camera point load_campaign at -15.00 5.00 0.00, yaw -20.0 pitch 25.0, over 0 ticks, field of view 50" \
+			"h3/mp/screen: camera point multiplayer at -40.00 -1.80 15.50, yaw 0.0 pitch 0.0, over 0 ticks, field of view 55" \
+			"h3/forge/lobby: camera point new_campaign at -10.00 -20.00 5.00, yaw 40.0 pitch 20.0, over 0 ticks, field of view 40"; do
 			grep -aqF "menus: h3 scene: $scene" "$log" || fail h3scenes "no scene: $scene"
 		done
 		for command in "(sleep -1 ring_loop)" "(camera_set load_campaign 0)" "(camera_set multiplayer 0)" \
@@ -606,60 +615,93 @@ for case in $cases; do
 			fail h3scenes "HALO_MENU_SCENES=0 still moved the camera"
 		[ "$(grep -ac 'ui: screen pc.h3.campaign.screen\|ui: screen pc.h3.mp.screen\|ui: screen pc.h3.forge.lobby' "$out/h3scenes_off/run.log")" -ge 3 ] ||
 			fail h3scenes "HALO_MENU_SCENES=0: the three lobbies did not open" ;;
-	h3characters)
-		# (parked with the lobbies' Spartans: it needs their scene_object= back in the XML)
-		if ! grep -q 'scene_object=' "$HALO_MENUS_FOLDER"/halo3/campaign.xml; then
-			echo "--- h3characters"; echo "SKIP: parked (the lobbies have no scene_object=; menus/halo3/README.txt)"; continue
-		fi
+	h3lobbyscenes)
 		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
-			echo "--- h3characters"; echo "SKIP: no HALO_TEST_PROFILE"; continue
+			echo "--- h3lobbyscenes"; echo "SKIP: no HALO_TEST_PROFILE"; continue
 		fi
-		# (as h3scenes: CAMPAIGN (first since the main menu lost START SOLO GAME), the profile: the
-		# campaign lobby; B, B; down, A: MULTIPLAYER; B; down, A: FORGE; B)
-		characters_pad="wait:150:3000 a wait:150:3000 a wait:150:5000 b wait:150:2500 b wait:150:3000 down:150:700 a wait:150:5000 b wait:150:3000 down:150:700 a wait:150:5000 b wait:150:3000"
-		profile_from=$HALO_TEST_PROFILE run h3characters "$menus_data" 50 "$characters_pad" HALO_MENU_STYLE=halo3
+		# (as h3scenes: CAMPAIGN, the profile: the campaign lobby; B, B; down, A: MULTIPLAYER; B;
+		# down, A: FORGE; B - each lobby long enough for its packs' first build)
+		lobby_pad="wait:150:3000 a wait:150:3000 a wait:150:6000 b wait:150:2500 b wait:150:3000 down:150:700 a wait:150:6000 b wait:150:3000 down:150:700 a wait:150:8000 b wait:150:3000"
+		profile_from=$HALO_TEST_PROFILE run h3lobbyscenes "$menus_data" 60 "$lobby_pad" HALO_MENU_STYLE=halo3
 		# (the multiplayer lobby, then the preview: in colour 5, recoloured 9, hidden)
-		run h3characters_preview "$menus_data" 26 "wait:150:3000 down:150:700 a wait:150:15000" HALO_MENU_STYLE=halo3 \
+		run h3lobbyscenes_preview "$menus_data" 26 "wait:150:3000 down:150:700 a wait:150:15000" HALO_MENU_STYLE=halo3 \
 			"HALO_TEST_COMMANDS=330:pack preview 5;420:pack preview 9;510:pack preview off"
-		profile_from=$HALO_TEST_PROFILE run h3characters_off "$menus_data" 50 "$characters_pad" HALO_MENU_STYLE=halo3 HALO_SCENE_PACKS=0
-		# (a maps folder of ui.map and the Halo PC files alone: no multiplayer map to build from)
-		rm -rf "$out/nomap_data"
-		mkdir -p "$out/nomap_data/maps"
-		for map in ui bitmaps loc; do ln -s "$(readlink -f "$menus_data/maps/$map.map")" "$out/nomap_data/maps/$map.map"; done
-		run h3characters_nomap "$out/nomap_data" 22 "wait:150:3000 down:150:700 a wait:150:8000" HALO_MENU_STYLE=halo3
-		check_h3 h3characters halo3
-		log=$out/h3characters/run.log
-		grep -aE "scene packs:|h3 scene object" "$log"
-		grep -aq "scene packs: menu_spartan: built from bloodgulch" "$log" || fail h3characters "the pack was not built"
-		grep -aq "scene packs: menu_spartan: loaded from bloodgulch" "$log" || fail h3characters "the pack was not loaded"
-		[ "$(grep -ac 'h3 scene object 0: characters.cyborg_mp.cyborg_mp (menu_spartan) at .* made' "$log")" -ge 3 ] ||
-			fail h3characters "the three lobbies did not each have their Spartan"
-		grep -aq 'h3 scene object 1: characters.cyborg_mp.cyborg_mp (menu_spartan) at .* made' "$log" ||
-			fail h3characters "the campaign lobby did not have its second Spartan"
-		[ "$(grep -ac 'h3 scene object 0: deleted' "$log")" -ge 3 ] ||
-			fail h3characters "the main menu did not let the lobbies' Spartans go"
+		profile_from=$HALO_TEST_PROFILE run h3lobbyscenes_off "$menus_data" 60 "$lobby_pad" HALO_MENU_STYLE=halo3 HALO_SCENE_PACKS=0
+		profile_from=$HALO_TEST_PROFILE run h3lobbyscenes_classic "$menus_data" 30 "wait:150:3000 a wait:150:6000 b wait:150:3000" HALO_MENU_STYLE=classic
+		# (a maps folder of ui.map, the Halo PC files and Blood Gulch: no campaign map; and of ui.map and
+		# the Halo PC files alone: no map to build any pack from)
+		for folder in nocampaign nomap; do
+			rm -rf "$out/${folder}_data"
+			mkdir -p "$out/${folder}_data/maps"
+			maps="ui bitmaps loc"
+			[ $folder = nocampaign ] && maps="$maps bloodgulch"
+			for map in $maps; do ln -s "$(readlink -f "$menus_data/maps/$map.map")" "$out/${folder}_data/maps/$map.map"; done
+		done
+		profile_from=$HALO_TEST_PROFILE run h3lobbyscenes_nocampaign "$out/nocampaign_data" 60 "$lobby_pad" HALO_MENU_STYLE=halo3
+		profile_from=$HALO_TEST_PROFILE run h3lobbyscenes_nomap "$out/nomap_data" 60 "$lobby_pad" HALO_MENU_STYLE=halo3
+		check_h3 h3lobbyscenes halo3
+		log=$out/h3lobbyscenes/run.log
+		grep -aE "scene packs: menu_|h3 scene object" "$log"
+		for pack in "menu_campaign: built from a30" "menu_campaign: loaded from a30" "menu_multiplayer: built from bloodgulch" \
+			"menu_multiplayer: loaded from bloodgulch" "menu_monitor: built from c20" "menu_monitor: loaded from c20"; do
+			grep -aq "scene packs: $pack" "$log" || fail h3lobbyscenes "no \"$pack\""
+		done
+		for made in "objects: h3/campaign/screen: made" "objects: h3/mp/screen: made" "objects: h3/forge/lobby: made" \
+			"object 0: vehicles.warthog.warthog (menu_campaign) at .* facing 268 pitch 22" \
+			"object 1: characters.cyborg.cyborg seated as W-driver" \
+			"object 2: characters.marine_armored.marine_armored seated as W-gunner" \
+			"object 3: characters.marine_armored.marine_armored seated as W-passenger" \
+			"object 0: weapons.rocket launcher.rocket launcher in its hands" \
+			"object 0: characters.cyborg_mp.cyborg_mp (menu_multiplayer) at .* colour 0: made" \
+			"object 0: animation stand missile airborne, held" \
+			"object 1: weapons.flag.flag in its hands" \
+			"object 2: weapons.sniper rifle.sniper rifle in its hands" \
+			"object 2: animation crouch rifle idle, looped" \
+			"object 1: characters.monitor.monitor (menu_monitor) at .* made"; do
+			grep -aq "h3 scene $made" "$log" || fail h3lobbyscenes "no \"$made\""
+		done
+		[ "$(grep -ac 'h3 scene objects: let go after .* (at most 0 effects and 0 particles meanwhile)' "$log")" -ge 3 ] ||
+			fail h3lobbyscenes "the three scenes were not let go each, or an effect or particle was made (dust)"
+		grep -aE "h3 scene objects: let go" "$log"
+		grep -aqE "h3 scene object.*(could not|no seat|has no|no animation)" "$log" &&
+			fail h3lobbyscenes "a scene's object, weapon, seat or animation was missing"
 		[ "$(grep -ac 'ui: screen pc.h3.campaign.screen\|ui: screen pc.h3.mp.screen\|ui: screen pc.h3.forge.lobby' "$log")" -ge 3 ] ||
-			fail h3characters "the three lobbies did not open"
-		check_h3 h3characters_preview halo3
-		log=$out/h3characters_preview/run.log
+			fail h3lobbyscenes "the three lobbies did not open"
+		check_h3 h3lobbyscenes_preview halo3
+		log=$out/h3lobbyscenes_preview/run.log
 		grep -aE "h3 scene object|preview" "$log"
-		grep -aq "h3 scene object 4: characters.cyborg_mp.cyborg_mp (menu_spartan) at .* colour 5: made" "$log" ||
-			fail h3characters "the preview did not show a Spartan in colour 5"
-		grep -aq "h3 scene object: recoloured 9" "$log" || fail h3characters "the preview was not recoloured"
-		grep -aq "h3 scene object 4: deleted" "$log" || fail h3characters "the preview was not hidden"
-		check_h3 h3characters_off halo3
-		grep -aqE "scene packs: |h3 scene object .* made" "$out/h3characters_off/run.log" &&
-			fail h3characters "HALO_SCENE_PACKS=0: a pack or a character all the same"
-		[ "$(grep -ac 'ui: screen pc.h3.campaign.screen\|ui: screen pc.h3.mp.screen\|ui: screen pc.h3.forge.lobby' "$out/h3characters_off/run.log")" -ge 3 ] ||
-			fail h3characters "HALO_SCENE_PACKS=0: the three lobbies did not open"
-		check_h3 h3characters_nomap halo3
-		log=$out/h3characters_nomap/run.log
-		grep -aE "scene packs:|h3 scene object" "$log"
-		grep -aq "scene packs: menu_spartan: not built: none of its maps" "$log" ||
-			fail h3characters "no multiplayer map: the build did not say why it failed"
-		grep -aq "h3 scene object 0: the pack menu_spartan is failed: no character" "$log" ||
-			fail h3characters "no multiplayer map: the lobby did not go without its character"
-		grep -aq "ui: screen pc.h3.mp.screen" "$log" || fail h3characters "no multiplayer map: the lobby did not open" ;;
+		grep -aq "h3 scene object 6: characters.cyborg_mp.cyborg_mp (menu_spartan) at .* colour 5: made" "$log" ||
+			fail h3lobbyscenes "the preview did not show a Spartan in colour 5"
+		grep -aq "h3 scene object: recoloured 9" "$log" || fail h3lobbyscenes "the preview was not recoloured"
+		grep -aq "h3 scene object 6: deleted" "$log" || fail h3lobbyscenes "the preview was not hidden"
+		check_h3 h3lobbyscenes_off halo3
+		grep -aqE "scene packs: |h3 scene object.* made" "$out/h3lobbyscenes_off/run.log" &&
+			fail h3lobbyscenes "HALO_SCENE_PACKS=0: a pack or a scene all the same"
+		[ "$(grep -ac 'ui: screen pc.h3.campaign.screen\|ui: screen pc.h3.mp.screen\|ui: screen pc.h3.forge.lobby' "$out/h3lobbyscenes_off/run.log")" -ge 3 ] ||
+			fail h3lobbyscenes "HALO_SCENE_PACKS=0: the three lobbies did not open"
+		check_h3 h3lobbyscenes_classic classic
+		grep -aqE "scene packs: menu_|h3 scene object" "$out/h3lobbyscenes_classic/run.log" &&
+			fail h3lobbyscenes "Menu style Halo CE: a scene all the same"
+		check_h3 h3lobbyscenes_nocampaign halo3
+		log=$out/h3lobbyscenes_nocampaign/run.log
+		grep -aE "scene packs: menu_|h3 scene objects" "$log"
+		grep -aq "scene packs: menu_campaign: not built: none of its maps" "$log" ||
+			fail h3lobbyscenes "no campaign map: the build did not say why it failed"
+		grep -aq "h3 scene objects: h3/campaign/screen: the pack menu_campaign is failed: no scene" "$log" ||
+			fail h3lobbyscenes "no campaign map: the campaign lobby did not go without its scene"
+		grep -aq "h3 scene objects: h3/forge/lobby: the pack menu_.* is failed: no scene" "$log" ||
+			fail h3lobbyscenes "no campaign map: the Forge lobby did not go without its scene"
+		grep -aq "h3 scene objects: h3/mp/screen: made" "$log" ||
+			fail h3lobbyscenes "no campaign map: the multiplayer lobby did not have its scene"
+		grep -aq "h3 scene objects: h3/\(campaign/screen\|forge/lobby\): made" "$log" &&
+			fail h3lobbyscenes "no campaign map: a campaign scene all the same"
+		check_h3 h3lobbyscenes_nomap halo3
+		log=$out/h3lobbyscenes_nomap/run.log
+		grep -aq "h3 scene objects: .*: made" "$log" && fail h3lobbyscenes "no map: a scene all the same"
+		[ "$(grep -ac 'h3 scene objects: .*: the pack menu_.* is failed: no scene' "$log")" -ge 3 ] ||
+			fail h3lobbyscenes "no map: the three lobbies did not each go without their scene"
+		[ "$(grep -ac 'ui: screen pc.h3.campaign.screen\|ui: screen pc.h3.mp.screen\|ui: screen pc.h3.forge.lobby' "$log")" -ge 3 ] ||
+			fail h3lobbyscenes "no map: the three lobbies did not open" ;;
 	h3profiles)
 		# (a first start: CAMPAIGN; Cross on CREATE NEW PROFILE: spaces, refused; Cross again: Rookie,
 		# made and played, the lobby; Circle: SELECT PROFILE again, Rookie there)
@@ -678,6 +720,14 @@ for case in $cases; do
 			fail h3profiles "CREATE NEW PROFILE did not make and choose Rookie"
 		grep -aq "ui: screen pc.h3.campaign.screen" "$log" || fail h3profiles "the new profile did not go on to the lobby"
 		grep -aq "menus: h3 profiles: 1 profile (campaign): Rookie" "$log" || fail h3profiles "Rookie was not listed after"
+		# (the card's Spartan: none for CREATE NEW PROFILE, Rookie's in its colour once listed, let go
+		# with the screen)
+		grep -aE "menus: h3 profiles: the card|h3 scene object 6" "$log"
+		grep -aq "menus: h3 profiles: the card's Spartan asked for in colour" "$log" &&
+			grep -aq "menus: h3 profiles: the card shows the Spartan" "$log" ||
+			fail h3profiles "the card did not show Rookie's Spartan"
+		grep -aq "menus: h3 profiles: the card's Spartan hidden" "$log" ||
+			fail h3profiles "the card's Spartan was not let go (CREATE NEW PROFILE, or the screen gone)"
 		file=$(ls "$out"/h3profiles/save/u/UDATA/*/blam.sav 2>/dev/null | head -1)
 		[ -n "$file" ] && [ "$(profile_fields "$file" | cut -d'|' -f1)" = Rookie ] ||
 			fail h3profiles "Rookie's blam.sav was not written"
@@ -738,22 +788,28 @@ for case in $cases; do
 		grep -aq "menus: h3 customize: saved Vita Chief: color 2, stick 1, buttons 0, look 5, invert 1" "$log" ||
 			fail h3customize "Circle did not save the changes"
 		h3_no_xbox_profiles h3customize
+		# (CUSTOMIZATION's profile list: the card shows the focused profile's Spartan, as SELECT
+		# PROFILE's, before the editor's own preview)
+		grep -aq "menus: h3 profiles: [0-9]* profiles* (customization)" "$log" &&
+			grep -aq "menus: h3 profiles: the card's Spartan asked for in colour" "$log" &&
+			grep -aq "menus: h3 profiles: the card shows the Spartan" "$log" ||
+			fail h3customize "CUSTOMIZATION's profile list did not show the profile's Spartan"
 		# (the preview: the scene packs' Spartan in the editor's window, in the profile's colour - its
 		# RANDOM shown white -, made again in RED as COLOR changes, let go with the editor)
-		grep -aE "h3 customize: .*preview|h3 scene object 4|h3 scene: h3/custom" "$log"
+		grep -aE "h3 customize: .*preview|h3 scene object 6|h3 scene: h3/custom" "$log"
 		grep -aq "menus: h3 scene: h3/custom/screen: camera point multiplayer" "$log" ||
 			fail h3customize "the editor's own camera was not set"
 		grep -aq "menus: h3 customize: preview Spartan asked for in colour 0" "$log" ||
 			fail h3customize "the preview's Spartan was not asked for"
-		grep -aq "menus: h3 scene object 4: characters.cyborg_mp.cyborg_mp (menu_spartan) at .* colour 0: made" "$log" &&
+		grep -aq "menus: h3 scene object 6: characters.cyborg_mp.cyborg_mp (menu_spartan) at .* colour 0: made" "$log" &&
 			grep -aq "menus: h3 customize: the preview shows the Spartan" "$log" ||
 			fail h3customize "the preview did not show the Spartan"
 		grep -aq "menus: h3 customize: preview Spartan recoloured 2" "$log" &&
-			grep -aq "menus: h3 scene object 4: characters.cyborg_mp.cyborg_mp (menu_spartan) at .* colour 2: made" "$log" ||
+			grep -aq "menus: h3 scene object 6: characters.cyborg_mp.cyborg_mp (menu_spartan) at .* colour 2: made" "$log" ||
 			fail h3customize "the preview was not recoloured RED"
 		grep -aq "menus: h3 customize: the preview shows the swatch" "$log" &&
 			fail h3customize "the preview fell back to the swatch while it was recoloured"
-		grep -aq "menus: h3 customize: preview Spartan hidden" "$log" && grep -aq "menus: h3 scene object 4: deleted" "$log" ||
+		grep -aq "menus: h3 customize: preview Spartan hidden" "$log" && grep -aq "menus: h3 scene object 6: deleted" "$log" ||
 			fail h3customize "the preview's Spartan was not let go with the editor"
 		# (the profile's file: the fields changed, the others as they were; renamed, its folder too)
 		file=$(ls "$out"/h3customize/save/u/UDATA/*/blam.sav 2>/dev/null | head -1)
@@ -774,7 +830,7 @@ for case in $cases; do
 			"$h3pad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000 b wait:150:3000" HALO_MENU_STYLE=halo3 \
 			HALO_SCENE_PACKS=0
 		check_h3 h3customize_again halo3
-		grep -aqE "menus: h3 customize: the preview shows the Spartan|h3 scene object 4: .* made" "$out/h3customize_again/run.log" &&
+		grep -aqE "menus: h3 customize: the preview shows the Spartan|h3 scene object 6: .* made" "$out/h3customize_again/run.log" &&
 			fail h3customize "HALO_SCENE_PACKS=0: the preview showed a Spartan all the same"
 		grep -aq "menus: h3 customize: editing Vita Chief: color 2, stick 1, buttons 0, look 5, invert 1" "$out/h3customize_again/run.log" ||
 			fail h3customize "the changes were not there after a restart"
@@ -835,10 +891,10 @@ for case in $cases; do
 			fail h3models "the editor did not find the two models"
 		grep -aq "menus: h3 customize: model SPARTAN (EXTINCTION)" "$log" || fail h3models "MODEL did not step to the Extinction Spartan"
 		grep -aq "scene packs: pm_[0-9a-f]*: built from extinction" "$log" || fail h3models "its pack was not built"
-		grep -aq "menus: h3 scene object 4: characters.spartan.spartan_mp (pm_[0-9a-f]*) at .* made" "$log" &&
+		grep -aq "menus: h3 scene object 6: characters.spartan.spartan_mp (pm_[0-9a-f]*) at .* made" "$log" &&
 			grep -aq "menus: h3 customize: model Spartan (Extinction): loaded" "$log" ||
 			fail h3models "the preview did not show the Extinction Spartan"
-		grep -aq "menus: h3 scene object 4: protected.Covenant_V_Marines_Beta_5.bipd [0-9]* (pm_[0-9a-f]*) at .* made" "$log" ||
+		grep -aq "menus: h3 scene object 6: protected.Covenant_V_Marines_Beta_5.bipd [0-9]* (pm_[0-9a-f]*) at .* made" "$log" ||
 			fail h3models "the protected map's model was not shown"
 		grep -aq "player models: 869079979327 chose Spartan (Extinction)" "$log" &&
 			grep -aq "menus: h3 customize: birch: model 0 saved" "$log" || fail h3models "Circle did not keep the choice"
@@ -854,6 +910,40 @@ for case in $cases; do
 		grep -aq "menus: h3 customize: 2 player models in the maps folder's Custom Edition maps; this profile's: 0" \
 			"$out/h3models_again/run.log" || fail h3models "started again, the editor did not show the choice"
 		;;
+	h3modelsmany)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ] || [ ! -r "$ce_maps/extinction.map" ] || [ ! -r "$menus_data/maps/sounds.map" ]; then
+			echo "--- h3modelsmany"; echo "SKIP: no HALO_TEST_PROFILE, extinction.map (HALO_TEST_CE_MAPS) or sounds.map"; continue
+		fi
+		# (a maps folder of the data's and fourteen links to extinction.map under names of their own:
+		# fourteen models, each a pack of its own)
+		rm -rf "$out/manymodels_data"
+		mkdir -p "$out/manymodels_data/maps"
+		for file in "$(cd "$menus_data" && pwd)"/maps/*.map; do ln -sfn "$file" "$out/manymodels_data/maps/"; done
+		for index in 01 02 03 04 05 06 07 08 09 10 11 12 13 14; do
+			ln -sfn "$(cd "$ce_maps" && pwd)/extinction.map" "$out/manymodels_data/maps/model$index.map"
+		done
+		# (CUSTOMIZATION: the profile, Cross; down two to MODEL; right fourteen times, each model left to
+		# rest and show; then right eight times quickly, and a rest)
+		many_pad="$h3pad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000"
+		many_pad="$many_pad down:150:600 down:150:600"
+		for index in 01 02 03 04 05 06 07 08 09 10 11 12 13 14; do many_pad="$many_pad right:150:3500"; done
+		many_pad="$many_pad left:80:80 left:80:80 left:80:80 left:80:80 left:80:80 left:80:80 left:80:80 left:80:4000 b wait:150:3000"
+		profile_from=$HALO_TEST_PROFILE run h3modelsmany "$out/manymodels_data" 85 "$many_pad" HALO_MENU_STYLE=halo3
+		check_h3 h3modelsmany halo3
+		log=$out/h3modelsmany/run.log
+		grep -aE "scene packs: pm_.*(loaded|let go|refused|waits)|h3 customize: model .*: (loaded|failed)" "$log" | cut -c1-160
+		[ "$(grep -a 'menus: h3 scene object 6: characters.spartan.spartan_mp (pm_[0-9a-f]*) at .* made' "$log" |
+			sed 's/.*(\(pm_[0-9a-f]*\)).*/\1/' | sort -u | wc -l)" -ge 14 ] ||
+			fail h3modelsmany "the fourteen models were not each shown"
+		grep -aqE "scene packs: pm_.*: (refused|waits)|h3 customize: model .*: failed" "$log" &&
+			fail h3modelsmany "a model's pack was refused, or waited for room (the packs passed were kept)"
+		[ "$(grep -ac 'scene packs: pm_[0-9a-f]*: let go' "$log")" -ge 13 ] ||
+			fail h3modelsmany "the models passed were not let go"
+		# (the quick presses, back from the fourteenth to the sixth: none of the seven passed loaded again)
+		for index in 07 08 09 10 11 12 13; do
+			[ "$(grep -ac "scene packs: pm_[0-9a-f]*: loaded from model$index " "$log")" = 1 ] ||
+				fail h3modelsmany "model$index, passed quickly, was loaded again"
+		done ;;
 	h3damaged)
 		# (two damaged profiles: Broken, a 0-byte blam.sav; Garbage, 512 bytes of garbage)
 		rm -rf "$out/h3damaged_save"
@@ -1128,7 +1218,7 @@ for case in $cases; do
 		grep -a "ui: screen" "$log" | tail -1 | grep -q 'pc.h3.main.screen' ||
 			fail h3modstouch "a tap on Back did not go back to the main menu" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3lobbyscenes|h3modelsmany]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"

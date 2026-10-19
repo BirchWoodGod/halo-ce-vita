@@ -58,6 +58,14 @@ with a Custom Edition one): its state now */
 short scene_packs_want(
 	char const *name);
 
+/* (the menus' preview) the pack of that recipe let go: once it is the last
+loaded and nothing uses it (its objects deleted, its sounds silent), at the
+top of a frame, its tag cache room, file range and slot given back. Wanted
+again meanwhile, it stays; wanted after, it is loaded again from its file.
+Packs go last loaded first: one under another that stays waits for it */
+void scene_packs_release(
+	char const *name);
+
 /* (Forge's lobby) the pack of that recipe built, on the thread, if it is
 not built already, but not loaded with the map loaded now (the menus'):
 its state (ready once built). Wanted afterwards (scene_packs_want), it is

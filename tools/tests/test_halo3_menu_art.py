@@ -56,6 +56,9 @@ EXPECTED = {
     # (CUSTOMIZATION's editor: its panel, a window at the right for the
     # scene packs' Spartan)
     'custom_panel.png': (256, 256),
+    # (SELECT PROFILE's: its panel, a window at the card's lower right for
+    # the focused profile's Spartan)
+    'profiles_panel.png': (256, 256),
 }
 EXPECTED.update({'swatch_%02d.png' % index: (16, 16) for index in range(18)})
 # (the nameplate in each of those colours: the main menu's, the lobbies' and

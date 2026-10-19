@@ -139,8 +139,16 @@ ui.map's own, the rest this folder's art. -->
 	<widget name="h3/campaign/b_butn" left="110" top="447" width="16" height="16" bitmap="h3/glyph_circle"/>
 	<widget name="h3/campaign/back" type="text" left="130" top="446" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/main_items" string_index="10"/>
 	<!-- (scene: its own camera, written into ui.map's unused load_campaign point - "x y z yaw
-	pitch", world units and degrees -: the planet, the galaxy and a band of the ring) -->
-	<widget name="h3/campaign/screen" flags="pass_unhandled_to_focused_child" scene="load_campaign -15 5 0 -10 30">
+	pitch ticks fov", world units and degrees -: the galaxy and a band of the ring; in front of it
+	(scene_object=, menu_scene_objects.c; the menu_campaign pack, app0:packs) the Master Chief at
+	the wheel of a Warthog caught mid-jump - its nose up, its wheels hanging, held still: no dust -,
+	a Marine on its gun and one beside him; seen from its left, banked to its left so that the
+	Chief at the wheel shows) -->
+	<widget name="h3/campaign/screen" flags="pass_unhandled_to_focused_child" scene="load_campaign -15 5 0 -20 25 0 50"
+		scene_object="menu_campaign:warthog 4.2 0.82 -0.42 268 pitch=22 roll=14;
+			menu_campaign:cyborg in=1 seat=driver;
+			menu_campaign:marine_armored in=1 seat=gunner;
+			menu_campaign:marine_armored in=1 seat=passenger weapon=assault_rifle">
 		<on event="created" run="port h3 campaign init"/>
 		<on event="created" run="port h3 scene"/>
 		<on event="b back" back="true"/>
