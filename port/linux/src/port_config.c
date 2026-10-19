@@ -393,9 +393,16 @@ static const struct config_setting config_settings[] =
 	{ "network.host_crossplay", _config_boolean, "false", "HALO_NET_HOST_CROSSPLAY", _environment_value, _platform_all,
 		"Who can join the games this machine hosts: false (the default),\n"
 		"Vitas, on the Vitas' own protocol; true, Vitas and PC players\n"
-		"(OpenCE, ChupathingyCE), on OpenCE's protocol, listed in both\n"
+		"(OpenCE of network version 32), on OpenCE's protocol, listed in both\n"
 		"browsers as a Vita's game. Taken as a game is hosted; never in ad\n"
 		"hoc play." },
+	{ "network.block_mouse_aim_assist", _config_boolean, "false", "HALO_NET_BLOCK_MOUSE_AIM_ASSIST", _environment_value,
+		_platform_all,
+		"In a game this machine hosts for Vitas and PC: true tells the PC\n"
+		"players' builds to turn off the aim assist (magnetism) they may have\n"
+		"turned on for a mouse; false (the default) leaves it to each player,\n"
+		"as OpenCE's hosts do. Controllers, touch and the Vita keep theirs.\n"
+		"Read live while the game runs." },
 	{ "network.crossplay", _config_boolean, "false", "HALO_CROSSPLAY", _environment_value, _platform_all,
 		"Retired (Oct 19 2026): there is no switch, every game speaks its own\n"
 		"protocol. Read only to keep a player's choice: true, with\n"

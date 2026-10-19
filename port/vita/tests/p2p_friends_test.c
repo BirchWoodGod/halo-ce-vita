@@ -1767,9 +1767,12 @@ static void test_wires(void)
 	check(game_wire_of(HALO_PORT_NETWORK_VERSION, 0) == 0, "a friend's Vita game (18): the legacy wire");
 	check(game_wire_of(HALO_PORT_NETWORK_VERSION, 1) == 1, "a game of 18 with the wire bit: the crossplay wire");
 	check(game_wire_of(HALO_PORT_CROSSPLAY_NETWORK_VERSION, 1) == 1 && game_wire_of(HALO_PORT_CROSSPLAY_NETWORK_VERSION, 0) == 1,
-		"a PC friend's game (OpenCE's 29), or a Vita's for Vitas and PC: the crossplay wire, joinable");
-	check(game_wire_of(28, 0) == -1 && game_wire_of(32, 1) == -1 && game_wire_of(19, 0) == -1 && game_wire_of(0, 0) == -1,
-		"a version neither wire joins (28, 32, 19, 0): not joinable");
+		"a PC friend's game (OpenCE's 32), or a Vita's for Vitas and PC: the crossplay wire, joinable");
+	check(game_wire_of(29, 0) == 1 && game_wire_of(29, 1) == 1,
+		"a PC friend's game of 29 (ChupathingyCE, OpenCE build-206): the crossplay wire, joinable");
+	check(game_wire_of(28, 0) == -1 && game_wire_of(30, 1) == -1 && game_wire_of(31, 1) == -1 && game_wire_of(33, 1) == -1 &&
+		game_wire_of(19, 0) == -1 && game_wire_of(0, 0) == -1,
+		"a version neither wire joins (28, 30, 31, 33, 19, 0): not joinable");
 	check(network_wire_version_of(1) == HALO_PORT_CROSSPLAY_NETWORK_VERSION && network_wire_version_of(0) == 18,
 		"the version a presence says: its game's wire's");
 	mailbox_topic(key, topic);
