@@ -4,14 +4,15 @@ SCENE_PACKS.H
 Scene packs in the running game (scene_packs.c; the pack itself, its
 builder and checks: scene_pack.c). A pack is wanted by its recipe's name
 (app0:packs/<name>.txt); the first time, and whenever its recipe or its
-source map changes, it is built on a thread of its own from the player's
-maps, into t:\packs\<name>.pack; then, at the top of a frame, it is loaded
-beside the loaded map: its tags read into the tag cache after the map's
-(before the structure bsp, which loads at the top: the room between them),
-checked as any pack is, given the game's tag indices after the map's (and
-the menus' tags), its models' buffers registered, its pixels and samples
-read from its file when the texture and sound caches want them (file
-offsets of its own: scene_packs_read). It stays until the map goes.
+source map changes, it is built on the packs' worker thread from the
+player's maps, into t:\packs\<name>.pack; read into the tag cache after the
+map's tags (before the structure bsp, which loads at the top: the room
+between them) and checked as any pack is, there too; then, at the top of a
+frame, it is put beside the loaded map - given the game's tag indices after
+the map's (and the menus' tags), its models' buffers registered - the game
+thread's only part; its pixels and samples read from its file when the
+texture and sound caches want them (file offsets of its own:
+scene_packs_read). It stays until the map goes.
 
 Forge's use (the design's option B), as the menus' scenes use it:
   scene_packs_want(name)       wanted with this map: built (on a thread)
@@ -66,10 +67,13 @@ Packs go last loaded first: one under another that stays waits for it */
 void scene_packs_release(
 	char const *name);
 
-/* (Forge's lobby) the pack of that recipe built, on the thread, if it is
-not built already, but not loaded with the map loaded now (the menus'):
-its state (ready once built). Wanted afterwards (scene_packs_want), it is
-loaded as any */
+/* (Forge's lobby, the menus' prebuild) the pack of that recipe built, on
+the worker, if it is not built already, but not loaded with the map loaded
+now (the menus'): its state (ready once built). A prebuild's job is the
+worker's last: paced, paused while the game is busy (a map's copy, a
+network game, away from the main menu, the game's own reads), stopped for a
+pack wanted now; the prebuilds asked for in one frame share their maps'
+reads. Wanted afterwards (scene_packs_want), it is loaded as any */
 short scene_packs_prebuild(
 	char const *name);
 

@@ -50,6 +50,13 @@ every pack it names is loaded, and none is made when one of them cannot be
 pack does not have). The pickers opened from a lobby keep its scene; the main
 menu (scene="ring") and leaving the main menu let it go.
 
+A scene is shown once its packs are loaded (built and checked on the packs'
+worker: scene_packs.c) and their textures read (scene_packs_textures_ready,
+at most MENU_SCENE_TEXTURES_WAIT_US): it pops in whole, no stand-in texture
+in it. A flag held in a scene flies in a breeze along its camera's right
+(menu_scene_objects_flag_wind, flags.c): still, its cloth hung limp down the
+pole, edge on.
+
 It does nothing at all, and nothing breaks, when it cannot: Menu style Halo
 CE, HALO_MENU_SCENES=0 (no scene is asked for), HALO_SCENE_PACKS=0, a missing
 map: there is simply no scene.

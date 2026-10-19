@@ -1423,6 +1423,121 @@ and add with the next pack (HALO_SHADER_PRECOMPILE on Vita3K); until then a
 Vita without the compiler skips the draws that need it (d3d8_gxm.c's
 skipped_no_program): those parts of that model are missing.
 
+## Menus that never stall (as built, Oct 18 2026)
+
+Branch `feat/menu-speed`, from the owner's insider.11 test: the lobbies
+"took a hot minute" the first time, SELECT PROFILE froze while it loaded the
+card's Spartan, and the multiplayer scene's flag had no cloth on the Vita.
+
+### Nothing heavy on the game thread
+
+Every check, build, read and validation of a pack runs on the packs' worker
+thread (`scene_packs.c`), below the game's threads. A pack wanted now is
+built if it must be, then read into the tag cache room's start and checked
+there as any pack is - the file opened once (`scene_pack_open_file`,
+`scene_pack_load_file`): its tags read once and checked as read, its data's
+CRC through the handle that serves its pixels later, so what is checked is
+what is used - and given the tag indices, salt and file offsets the game's
+table will give it ("staged"). The top of the next frame only puts it in:
+the table grown, its buffers registered, other indices given if the table
+changed meanwhile (`scene_pack_rebase_again`): **0.01 ms** on x86, logged
+as "the game thread's part". A pack's bitmaps are read by the cache file
+thread, as a map's are (a texture read on the render's thread held its frame
+for the memory card's time), and a scene waits for its packs' textures
+before it is shown (`scene_packs_textures_ready`: no stand-ins), then pops
+in (a fade would need blended variants of the opaque shaders: new GPU
+programs). The game thread's time in the packs' work is logged from 16 ms.
+
+Measured on the Linux harness with the packs' own reads and writes slowed
+to a slow card's 2 MB/s (`HALO_TEST_SLOW_IO=2048`), no pack built:
+
+| | before (insider.11) | after |
+|---|---|---|
+| menu_spartan's load on the game thread | 982 ms | 0.01 ms |
+| menu_campaign's | 3013 ms | 0.01 ms |
+| menu_multiplayer's | 1688 ms | 0.01 ms |
+| menu_monitor's | 160 ms | 0.01 ms |
+| longest frame at the menus | 992 ms | 33.5 ms (the 30 fps cap) |
+
+### Prebuilt at the main menu
+
+Once the Halo 3 main menu has rested 2 s, every pack the menus'
+`scene_object=` lines name (and their weapons'), menu_spartan and the first
+profile's player model's are prebuilt (`menu_functions.c` h3 prebuild,
+`scene_packs_prebuild`), then loaded, the card's first: SELECT PROFILE shows
+its Spartan at once and a lobby its scene as soon as its textures are read.
+The four take 2.6 MB of the tag cache, which leaves the 16.6 MB a campaign
+map's build needs (b40's tag data). A prebuild's job is paced (1 ms each
+128 KB read, and it waits while the game's own reads are pending), paused
+while a map is copied to the cache partition, in a network game and away
+from the main menu, and stops to make way for any pack wanted now (built
+again later). `HALO_MENU_PREBUILD=0` turns it off.
+
+### Faster builds
+
+- **The cache partition's copy.** A build reads the game's decompressed copy
+  of its map (`z:\cacheNNN.map`, `cache_files_cached_copy_open`) in place,
+  seeking to what it wants, when that copy's header is the maps folder's
+  map's byte for byte and has a checksum (as the game itself keeps a copy);
+  the header and the cache file's copy generation are checked again after
+  each read, and a copy begun into it meanwhile makes the build start again
+  from the map. A recipe's map read in place is preferred to its others.
+  menu_campaign from a30: 224 MB inflated in 682 ms before, **17.6 MB read in
+  12.8 ms** from the copy (x86, the tool); in the game, paced, 125 ms against
+  4.2 s.
+- **One read for several packs** (`scene_pack_build_many`): the source's tag
+  data read once, then the union of every pack's pixels and samples, each
+  piece written to its pack as it goes by. menu_spartan and menu_multiplayer
+  from Blood Gulch: 163 ms together against 128 + 155 ms (x86). A pack wanted
+  now chooses its map alone (a larger shared map would delay it), and takes
+  the waiting builds that name the same map with it.
+- **Smaller packs.** Recipes' new `keep <graph>|<animation>` lines keep those
+  animations of a graph whole; its others are kept without frames (no nodes,
+  as the tag check makes an animation it refuses: their bytes are not in the
+  pack). The menu recipes keep the poses their scenes play (found by logging
+  every animation the lobbies, the card and the preview used; the lobbies'
+  screenshots are as before):
+
+  | Pack | tags before | after | file before | after |
+  |---|---|---|---|---|
+  | menu_spartan | 1137 KB | 382 KB | 2006 KB | 1251 KB |
+  | menu_multiplayer | 1433 KB | 703 KB | 3446 KB | 2716 KB |
+  | menu_campaign | 3075 KB | 1459 KB | 6152 KB | 4535 KB |
+  | menu_monitor | 84 KB | 84 KB | 325 KB | 325 KB |
+
+  Sounds were stripped already. The textures' top levels were tried (a
+  recipe line leaving out the levels above 256): menu_spartan's pixels 868 to
+  484 KB, menu_campaign's 3076 to 2436, menu_multiplayer's 2012 to 1372 - but
+  at the Vita's 960x544 the GL screenshots of the card and the lobbies
+  changed (up to ~2000 pixels a frame by 8 levels or more: the scenes do
+  sample their textures' top levels), so it was left out. The models' far
+  LODs were not stripped: a few tens of KB a model, for a remapping of every
+  region's permutations the tag check would have to pass uncorrected.
+
+### The multiplayer scene's flag
+
+Its draw was never missing: on the gxm-null harness the cloth is drawn every
+frame (360 triangles, alpha blended, its vertex alpha 1, texture alpha from
+flags_blue, DXT3) with programs shaders.pak has - all 18 of the scene's,
+the cloth's fragment program `e24186ce9800f90d.fp` among them. Held still
+in ui.map's space (no wind, no movement) the cloth hung limp down the pole,
+seen edge on: a strip a few pixels wide on the harness at every turbulence
+seed tried, nothing on the Vita. A flag held in a menu scene now flies in a
+steady breeze along its camera's right (`menu_scene_objects_flag_wind`, a
+force bringing the cloth's points to 2.5 world units a second against the
+air's friction, `flags.c`), streaming across the picture face on and
+rippling. `HALO_MENU_FLAG_BREEZE` sets the speed (0: limp, as before). Flags
+in a game are as they were. No new GPU program.
+
+### Tests
+
+`port/vita/tests/run_menu_speed_test.sh`: `cold` (no pack built, no
+prebuild, slow I/O: each load's game thread part under 5 ms, no pack work of
+50 ms on the game thread, the longest frame at the menus under 100 ms, every
+scene made, the flag flying), `prebuild` (everything built and loaded at the
+main menu, Blood Gulch's two packs in one read, the visits build and read
+nothing), `cached` (a30 played, then menu_campaign read in place).
+
 ## Open questions for the owner
 
 1. **The controls.** Is the button table right against your Halo 3

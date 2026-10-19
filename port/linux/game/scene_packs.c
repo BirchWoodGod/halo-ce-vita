@@ -7,26 +7,47 @@ wanted and used; the pack itself, its builder and checks: scene_pack.c).
 Where a pack is: its recipe in app0:packs/<name>.txt (halo_packs_file_read),
 its file in t:\packs\<name>.pack (the save root's t folder: on the Vita
 ux0:data/haloce-vita/saves/t/packs). A pack file is used only if its recipe's
-hash, its builder's version and its source map's (the first of the recipe's
-maps in the maps folder: its header and size) are what they are now;
-otherwise, or if it is missing, it is built again, on a thread of its own
-(one build at a time), with the tag cache's free room as the builder's
-scratch for the source map's tag data (a multiplayer map's 7 MB would not fit
-the Vita's C heap beside a session's): from the top of the room between the
-map's tags (and the packs loaded) and the lowest structure bsp's place.
+hash, its builder's version and its source map's identity (the recipe's map
+it was built from, still in the maps folder: its header and size) are what
+they are now; otherwise, or if it is missing, it is built again.
 
-Loading, at the top of a frame (scene_packs_update, main.c, as the tick
-does not run): the pack's tags read into the tag cache right after the
-map's tags and the packs loaded before it, checked (scene_pack_load: a pack
-that fails is deleted and built once more, then given up), given tag indices
-after the table's (the map's, then the menus' tags: menu_tags.c, which
-grew it first), its pixels' and samples' file offsets moved to its own
-range, its vertex and index buffers registered as the map's are, then the
-table (a copy with the pack's tags after it) put in place, the table first,
-then its count (cache_files_set_tag_instances). The bytes the packs hold
-after the map's tags are reserved: a structure bsp's load does not clear
-them, its check does not take them for scratch (cache_files.c,
-tag_validate.c), and a bsp whose place would overlap them is refused.
+Nothing heavy on the game thread: one worker thread (below the game's) does
+every pack's checks, builds, reads and validation, one job at a time, with
+the tag cache's free room as its scratch (a multiplayer map's 7 MB of tag
+data would not fit the Vita's C heap beside a session's): from the top of
+the room between the map's tags (and the packs loaded) and the lowest
+structure bsp's place.
+- A job for a pack wanted now (scene_packs_want): the pack checked, built
+  if it must be (with the other packs waiting for a build that name the
+  same map: one read of it for all, scene_pack_build_many), then read into
+  the room's start and checked there as any pack is (scene_pack_load_file:
+  the file opened once, its tags read once and checked as read, its data's
+  CRC through the handle that serves its reads later), given the tag
+  indices, salt and file offsets the game's table will give it: staged.
+- A prebuild's job (scene_packs_prebuild): every prebuild's checks, then
+  the builds of one map's read (the map most of them name), paced (a
+  millisecond each 128 KB, waiting while the game's own reads are pending:
+  cache_files_reads_pending), paused while a map is copied to the cache
+  partition, in a network game or away from the main menu; a pack wanted
+  meanwhile that it is not building stops it (built again later).
+- A build reads the cache partition's decompressed copy of its map when
+  there is one of it (cache_files_cached_copy_open: its header the map's,
+  byte for byte, with a checksum; a copy begun into its cache file meanwhile
+  is seen and the build made again from the map), in place of inflating the
+  compressed map twice.
+
+At the top of a frame (scene_packs_update, main.c) the job done is joined
+and its staged pack put in the game (pack_commit): given other indices if
+the table changed since (scene_pack_rebase_again), its vertex and index
+buffers registered as the map's are, then the table (a copy with the pack's
+tags after it) put in place, the table first, then its count
+(cache_files_set_tag_instances) - no read, no check: "the game thread's part"
+it logs (0.01 ms on x86). A pack that fails its check is deleted and built
+once more, then given up. The bytes the packs hold after the map's tags are
+reserved: a structure bsp's load does not clear them, its check does not
+take them for scratch (cache_files.c, tag_validate.c), and a bsp whose place
+would overlap them is refused. The game thread's time in the packs' work
+is logged once it reaches 16 ms ("scene packs: game thread: ...").
 
 Unloading (scenario_tags_unload, before the menus' tags and the map's go):
 a build stopped and waited for, every pack's buffers deregistered and file
@@ -36,8 +57,11 @@ Reads (scene_packs_read, cache_files_windows.c): a file offset from
 SCENE_PACK_FILE_BASE is a pack's (each loaded pack's pixels and samples have
 the offsets after the one loaded before it, all within
 SCENE_PACK_FILE_RANGE_BYTES, up to MAXIMUM_LOADED_SCENE_PACKS packs), served
-from its file at once, under a lock (the render's and the tick's threads
-both read), zeros when the file cannot be read.
+from its file under a lock, zeros when the file cannot be read: a bitmap's
+by the cache file thread, as a map's are (a texture's read on the render's
+thread held its frame for the memory card's time), others at once.
+scene_packs_textures_ready begins a loaded pack's bitmaps' reads and says
+when they are in (a menu scene waits for them: no stand-ins).
 
 A recipe is app0:packs/<name>.txt, or one the game made and registered
 (scene_packs_recipe_register: the player models from Custom Edition maps,
@@ -47,6 +71,9 @@ maps folder, or is another version of it, fails at once with the reason
 (scene_packs_recipe_available says so before it is wanted).
 
 HALO_SCENE_PACKS=0 turns them off (nothing is wanted, built or loaded).
+HALO_TEST_SLOW_IO=<KB/s>[:all] (tests, not the Vita's or a release build):
+the packs' reads and writes (with :all, their source maps' too) paced to a
+slow memory card's rate on the thread that makes them.
 */
 
 /* ---------- headers */
@@ -828,7 +855,11 @@ static void worker_io(unsigned long bytes, boolean source)
 	slow_io_pace(bytes, source);
 	if (!scene_packs_on_worker)
 		return;
-	while (!scene_packs.cancel && (__atomic_load_n(&scene_packs.pause_builds, __ATOMIC_ACQUIRE) ||
+	/* (a pack wanted now pauses only its source map's reads, the heavy
+	part: its own pack's few megabytes are read meanwhile, its scene not
+	held for a whole map's copy) */
+	while (!scene_packs.cancel && ((__atomic_load_n(&scene_packs.pause_builds, __ATOMIC_ACQUIRE) &&
+		(source || scene_packs.job.low)) ||
 		(scene_packs.job.low && __atomic_load_n(&scene_packs.pause_prebuilds, __ATOMIC_ACQUIRE))))
 	{
 		Sleep(20);

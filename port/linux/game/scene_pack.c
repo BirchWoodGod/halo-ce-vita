@@ -6,10 +6,14 @@ the recipe, the builder, and the checks and moves a pack's tags go through
 before anything reads them. No game state: scene_packs.c puts a pack into
 the running game, tools/scene_pack_test.c tests this alone.
 
-The builder reads its source map (an Xbox map, inflated as it is read, or
-already inflated) twice: once to the end of its tag data, which it walks
-there, then from the start again for the bitmaps' pixels and sounds'
-samples the pack's tags name, in the file's order. From the tag data:
+The builder reads its source map (an Xbox map, inflated as it is read; or
+already inflated, or the game's decompressed copy of it in the cache
+partition, scene_pack_copy_source: then read in place, seeking to what it
+wants) twice: once to the end of its tag data, which it walks there, then
+from the start again for the bitmaps' pixels and sounds' samples the pack's
+tags name, in the file's order - one read for several recipes' packs at
+once (scene_pack_build_many: the tag data once, the union of their pieces
+once). From the tag data:
 - the recipe's tags, then every tag they need (every reference the tag
   layouts know, tag_relocate.c's, and every tag index the tag schemas know,
   tag_schema*.c), but for the groups and tags the recipe strips, whose
@@ -22,7 +26,9 @@ samples the pack's tags name, in the file's order. From the tag data:
 - the models' parts' vertex and index buffers (their headers and bytes,
   which a map keeps beside the tags) copied with them;
 - the tag indices the schemas know, the bitmaps' pixels and the sounds'
-  samples made the pack's.
+  samples made the pack's;
+- (keep lines) an animation graph's animations the recipe does not keep
+  copied without frames (build_animations_plan, build_animations_patch).
 Anything of the source map that does not fit where it says is the map's
 damage: the build stops, nothing is written. What it writes is checked as
 any pack is when it is loaded.

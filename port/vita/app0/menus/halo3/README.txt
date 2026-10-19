@@ -189,9 +189,14 @@ ui.map's space has no lightmap under them).
 - forge_lobby.xml: 343 Guilty Spark behind a Warthog, looking at it (menu_monitor: from
   the player's c20, c10, c40 or d40; the Warthog menu_campaign's).
 - main.xml: the ring's own flight, nothing in it.
-The packs are built on the machine from the player's own maps the first time a
-lobby wants them (port/linux/game/scene_packs.c), into the save folder's
-t/packs, checked as any pack. A scene is made whole once all its packs are
+The packs are built on the machine from the player's own maps, into the save
+folder's t/packs, checked as any pack, all of it on the packs' worker thread
+(port/linux/game/scene_packs.c: the game thread only puts a checked pack in);
+once the main menu has rested 2 s every scene's pack and the card's are
+prebuilt in the background and loaded (HALO_MENU_PREBUILD=0: built the first
+time a lobby wants them). A scene is shown once its packs' textures are read.
+The multiplayer scene's flag flies in a breeze of the scene's
+(HALO_MENU_FLAG_BREEZE). A scene is made whole once all its packs are
 loaded, or not at all: no source map (a scene's pack names the maps it may be
 built from), HALO_SCENE_PACKS=0, the scenes off or Menu style Halo CE, and the
 lobby has no scene; nothing else changes.
@@ -211,7 +216,8 @@ Touch: the Vita's front screen points in the menus (a finger highlights, a tap
 presses A on the item or the button of a key); the button icons are named as
 the game's keys (a_butn, b_butn, start_butn) for that.
 
-Tests: port/vita/tests/run_menus_test.sh h3probe h3classic h3xbox h3broken
+Tests: port/vita/tests/run_menu_speed_test.sh (no stall, the prebuild);
+port/vita/tests/run_menus_test.sh h3probe h3classic h3xbox h3broken
 h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create
 h3mptouch h3coop h3coopguide h3scenes h3lobbyscenes h3modelsmany h3profiles h3proftouch h3customize h3models
 h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3friends h3friendspanel; the packs':
