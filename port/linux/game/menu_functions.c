@@ -3766,7 +3766,28 @@ static void browser_test_games(void)
 		snprintf(entry->id, sizeof(entry->id), "%stest%02ld", menu_functions.lan && !lan_with_online() ? LAN_ID_PREFIX :
 			"", index);
 		snprintf(entry->name, sizeof(entry->name), "Test game %02ld", index);
-		snprintf(entry->map, sizeof(entry->map), "%s", maps[index % 5]);
+		/* (HALO_TEST_BROWSER_NAMES=1: names of every sort of letter, as a
+		public list's are - run_menus_test.sh browserrows: each row's name,
+		map and game drawn, with all the glyphs a screen of them takes) */
+		if (getenv("HALO_TEST_BROWSER_NAMES") && atoi(getenv("HALO_TEST_BROWSER_NAMES")))
+		{
+			static char const *const names[] =
+			{
+				"Stink Fist", "DONT SKIP CINE.", "Krazy's COOP", "JACKDAWS LOVE MY BIG SPHINX OF QUARTZ",
+				"sphinx of black quartz, judge my vow", "Warthog Debug 1", "jesus", "PACK MY BOX WITH FIVE DOZEN JUGS",
+				"GUNGAME++ 24*7 = 168h!", "MLGTS 2v2 US3 @ 60Hz", "the quick brown fox jumps over", "ELMEME",
+				"Quiet Zebra Vaults %&$", "#1 xQuJoKe [V] <3", "Bumpy Wombat (EU) 0-9: 0123456789", "~Yeti_Kraken~ {/\\|}",
+			};
+			static char const *const custom_maps[] =
+			{
+				"airborne_aco", "The Truth and Reconciliation", "hugeass@ce", "Yoyorast_Island@ce", "bigassv2,104", "Extinction",
+			};
+
+			snprintf(entry->name, sizeof(entry->name), "%s", names[index % NUMBEROF(names)]);
+			snprintf(entry->map, sizeof(entry->map), "%s", index % 3 ? maps[index % 5] : custom_maps[index / 3 % NUMBEROF(custom_maps)]);
+		}
+		else
+			snprintf(entry->map, sizeof(entry->map), "%s", maps[index % 5]);
 		snprintf(entry->gametype, sizeof(entry->gametype), "%s", gametypes[index % 4]);
 		entry->players = (int)(index * 7 % 16);
 		entry->maximum = 16;
@@ -4121,7 +4142,7 @@ static void browser_update(struct widget_instance *list)
 		row_column(child, "row_players", text);
 #ifndef HALO_RELEASE
 		/* (the tests': each row as shown, said as it changes) */
-		if (getenv("HALO_TEST_BROWSER_ODD"))
+		if (getenv("HALO_TEST_BROWSER_ODD") || getenv("HALO_TEST_BROWSER_NAMES"))
 		{
 			static char said[BROWSER_ROWS][160];
 			char line[160];

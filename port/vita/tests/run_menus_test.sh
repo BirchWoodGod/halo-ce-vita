@@ -131,6 +131,11 @@
 #            its host's player's, one of other alphabets "?" for what the font
 #            lacks, co-op its difficulty and level (or "-"), every missing field
 #            "-", and a name or map wider than its column cut with "..."
+#   browserrows OpenCE's server browser (Menu style Halo CE) with 16 made-up games
+#            of varied names (HALO_TEST_BROWSER_NAMES), PC ones among them: every row
+#            named, and the glyph cache never going round each frame (the owner's
+#            photo of insider.10, Oct 18 2026: only the first row's name drawn on
+#            the Vita, each row below one column fewer)
 #   h3lan    the Halo 3 LAN browser (halo3/network.xml) with 14 made-up games of both
 #            platforms (HALO_TEST_BROWSER_GAMES, HALO_TEST_BROWSER_PC): BROWSE
 #            GAMES on SYSTEM LINK, the profile, then the LAN browser in place of
@@ -206,7 +211,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows browserrows}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
@@ -915,6 +920,27 @@ for case in $cases; do
 		done
 		grep -aqF "xXxNoScopeLegendsxXxForeverMore (cut)" "$out/h3oddrows/run.log" ||
 			fail h3oddrows "the long single-word name was not cut to its column" ;;
+	browserrows)
+		# (OpenCE's server browser, Menu style Halo CE: Multiplayer, SERVER BROWSER, with 16
+		# made-up games of names of every sort, PC ones among them)
+		# (the frame counter on, as on the owner's Vita: its digits are the HUD's tall font, whose
+		# rows in the glyph cache leave room for fewer of the browser's glyphs)
+		init_line='display_framerate 1' run browserrows "$menus_data" 30 "wait:150:2000 down:150:800 a wait:150:4000 a wait:150:10000" \
+			HALO_MENU_STYLE=classic $h3net HALO_TEST_BROWSER_GAMES=16 HALO_TEST_BROWSER_NAMES=1 HALO_TEST_BROWSER_PC=1
+		log=$out/browserrows/run.log
+		echo "--- browserrows"
+		grep -aE "menus: browser row [0-9]+: |text: the glyph cache" "$log" | sort -u | head -16
+		[ "$(cat "$out/browserrows/exit")" = 0 ] || fail browserrows "exit $(cat "$out/browserrows/exit")"
+		rows=$(grep -aE "menus: browser row [0-9]+: " "$log" | sed 's/.*browser row \([0-9]*\):.*/\1/' | sort -un | wc -l)
+		[ "$rows" -ge 12 ] || fail browserrows "$rows rows filled (12 wanted)"
+		grep -aE "menus: browser row [0-9]+: " "$log" | grep -aqE "row [0-9]+:  ?\|" && fail browserrows "a row without a name"
+		for name in "DONT SKIP CINE." "Krazy's COOP" "~Yeti_Kraken~" "#1 xQuJoKe [V]" "the quick brown fox jumps over"; do
+			grep -aqF "$name" "$log" || fail browserrows "no row named \"$name\""
+		done
+		# (every glyph of the screen kept: the cache going round each frame drew the later rows'
+		# text as nothing on the Vita)
+		grep -aq "text: the glyph cache .* goes round every frame" "$log" &&
+			fail browserrows "the glyph cache went round every frame: the later rows' text would be missing on the Vita" ;;
 	h3lan)
 		# (down five to BROWSE GAMES, A: the profile (A joins, A the profile, A); the LAN browser:
 		# down two, A; Y; Square; a tap on Back)
@@ -1128,7 +1154,7 @@ for case in $cases; do
 		grep -a "ui: screen" "$log" | tail -1 | grep -q 'pc.h3.main.screen' ||
 			fail h3modstouch "a tap on Back did not go back to the main menu" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|browserrows]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"

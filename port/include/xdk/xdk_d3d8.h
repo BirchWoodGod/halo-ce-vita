@@ -466,10 +466,15 @@ D3DINLINE void __stdcall D3DVertexBuffer_Unlock(D3DVertexBuffer *buffer)
 	(void)buffer;
 }
 
+/* (port/linux/src/d3d8_resources.c) the texels written while locked: the
+Vita's converted copy is made again from them (the lock alone marked them
+before the game wrote them) */
+void WINAPI D3DTexture_Unlocked(D3DTexture *texture);
+
 D3DINLINE void __stdcall D3DTexture_UnlockRect(D3DTexture *texture, UINT level)
 {
-	(void)texture;
 	(void)level;
+	D3DTexture_Unlocked(texture);
 }
 
 D3DINLINE void __stdcall D3DCubeTexture_UnlockRect(D3DCubeTexture *texture, D3DCUBEMAP_FACES face, UINT level)
