@@ -1029,6 +1029,24 @@ static void server_list_menu_update(
 			}
 		}
 
+#ifdef HALO_LINUX
+		/* port: the Vitas' games first, then the PCs' (the owner, Oct 19
+		2026), each group in the order above (open games, then the others) */
+		{
+			long vita_count = 0, index, moving;
+
+			for (index = 0; index < displayed_server_count; index++)
+			{
+				struct network_advertised_game *moved = displayed_servers[index];
+
+				if (!network_game_client_advertised_game_vita(moved))
+					continue;
+				for (moving = index; moving > vita_count; moving--)
+					displayed_servers[moving] = displayed_servers[moving - 1];
+				displayed_servers[vita_count++] = moved;
+			}
+		}
+#endif
 		widget->parameters.list.list_items = displayed_servers;
 		widget->parameters.list.number_of_items = (word)displayed_server_count;
 		widget->parameters.list.selected_list_item_index = (short)CEILING(

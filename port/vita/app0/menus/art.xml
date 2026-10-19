@@ -47,7 +47,7 @@
 		<string text="Internet play is off.\n\nOpen the settings panel (SELECT + DOWN),\nMultiplayer tab, set Connection to Online,\nthen restart the game."/>
 	</strings>
 	<strings name="legend">
-		<string text="%a-button Join   %x-button Refresh   %y-button Sort   %left-trigger%right-trigger Page   %b-button Back"/>
+		<string text="%a-button Join   %x-button Refresh   %y-button Sort   %left-trigger%right-trigger Page   D-pad Show   %b-button Back"/>
 	</strings>
 	<strings name="password_labels">
 		<string text="PASSWORD:"/>

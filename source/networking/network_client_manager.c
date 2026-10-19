@@ -4091,6 +4091,11 @@ short network_game_client_listed_games(
 				int platform;
 
 				listed->crossplay = network_game_client_advertised_wire(game_index, &platform) == 1;
+#ifndef HALO_PORT_VITA_NETWORK
+				/* (a build that does not play as a Vita: every game a PC's, as
+				its tags say - network_game_client_advertised_game_tag) */
+				platform = CROSSPLAY_PLATFORM_PC;
+#endif
 				listed->platform = (short)platform;
 				/* (a PC co-op game: no game engine on a level that is not one
 				of the Xbox's multiplayer ones, as OpenCE hosts it) */
@@ -4101,6 +4106,23 @@ short network_game_client_listed_games(
 			if (!network_wire_browser_shows(listed->platform == CROSSPLAY_PLATFORM_VITA))
 				continue;
 			count++;
+		}
+	}
+	/* (the Vitas' games first, then the PCs', each in the order above: the
+	System Link list's groups, ui_widget_game_data_input_functions.c) */
+	{
+		short vita_count = 0, index, moving;
+
+		for (index = 0; index < count; index++)
+		{
+			struct network_listed_game moved;
+
+			if (games[index].platform != CROSSPLAY_PLATFORM_VITA)
+				continue;
+			moved = games[index];
+			for (moving = index; moving > vita_count; moving--)
+				games[moving] = games[moving - 1];
+			games[vita_count++] = moved;
 		}
 	}
 	return count;
@@ -4140,7 +4162,25 @@ boolean network_game_client_advertised_game_shown(
 	if (!client || game < client->available_games || game >= client->available_games + MAXIMUM_NETWORK_ADVERTISED_GAMES)
 		return TRUE;
 	network_game_client_advertised_wire(game - client->available_games, &platform);
+#ifndef HALO_PORT_VITA_NETWORK
+	platform = CROSSPLAY_PLATFORM_PC;
+#endif
 	return network_wire_browser_shows(platform == CROSSPLAY_PLATFORM_VITA) != 0;
+}
+
+boolean network_game_client_advertised_game_vita(
+	struct network_advertised_game const *game)
+{
+	struct network_game_client *client = global_network_game_client_get();
+	int platform = CROSSPLAY_PLATFORM_PC;
+
+	if (!client || game < client->available_games || game >= client->available_games + MAXIMUM_NETWORK_ADVERTISED_GAMES)
+		return TRUE;
+	network_game_client_advertised_wire(game - client->available_games, &platform);
+#ifndef HALO_PORT_VITA_NETWORK
+	platform = CROSSPLAY_PLATFORM_PC;
+#endif
+	return platform == CROSSPLAY_PLATFORM_VITA;
 }
 
 /* port: the advertised game of a listed game's id, while it is listed */

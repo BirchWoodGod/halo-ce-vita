@@ -203,6 +203,8 @@ enum
 	_function_browser_sort,
 	_function_browser_page_up,
 	_function_browser_page_down,
+	_function_browser_filter_next,
+	_function_browser_filter_previous,
 	_function_h3_servers_on,
 	_function_h3_servers_off,
 	_function_h3_campaign_init,
@@ -477,8 +479,10 @@ static struct
 	/* every game listed, sorted as the player chose (Y: browser_list.h),
 	and the rows showing some of them (entries, entry_count: the rows
 	filled), which scroll (view; page: a trigger's page asked for); the game
-	chosen (its id stays its own as the list changes) */
-	struct p2p_lobby_entry games[P2P_LOBBY_MAXIMUM_ENTRIES];
+	chosen (its id stays its own as the list changes). The Vitas' games
+	first, then the PCs', a header row before each group (browser_list_group:
+	two more than the games) */
+	struct p2p_lobby_entry games[P2P_LOBBY_MAXIMUM_ENTRIES + 2];
 	long game_count;
 	short sort;
 	short page;
@@ -4182,8 +4186,71 @@ static void browser_test_games(void)
 				CROSSPLAY_GUARD_OK);
 			entry->locked = index % 3 == 2 && (!menu_functions.lan || lan_with_online());
 		}
+		/* (the filter's, as the real lists') */
+		if (!network_wire_browser_shows(entry->platform == CROSSPLAY_PLATFORM_VITA))
+			menu_functions.game_count--;
 	}
 #endif
+}
+
+/* the games the browser lists, its header rows (browser_list_group) not
+counted */
+static long browser_games(void)
+{
+	return menu_functions.game_count - browser_list_header_count(menu_functions.games, (int)menu_functions.game_count);
+}
+
+/* the games the rows show, as the player counts them (1 on; the header
+rows not counted): the first and the last */
+static long browser_shown_first(void)
+{
+	long offset = menu_functions.view.offset;
+
+	return offset + 1 - browser_list_header_count(menu_functions.games, (int)offset);
+}
+
+static long browser_shown_last(void)
+{
+	long end = menu_functions.view.offset + menu_functions.entry_count;
+
+	return end - browser_list_header_count(menu_functions.games, (int)end);
+}
+
+/* the browsers' filter (network.browser_filter, "Browser shows": the
+settings panel's, and the D-pad's left and right on the browsers): its
+name as the hint says it */
+static char const *browser_filter_name(void)
+{
+	switch (network_wire_browser_filter())
+	{
+	case NETWORK_WIRE_FILTER_VITA:
+		return T("Vita games");
+	case NETWORK_WIRE_FILTER_PC:
+		return T("PC games");
+	}
+	return T("All games");
+}
+
+/* the groups as they change, in the log (the tests read it): the headers'
+names in their order */
+static void browser_groups_log(void)
+{
+	static char said[96];
+	char line[96] = "";
+	long index;
+
+	for (index = 0; index < menu_functions.game_count; index++)
+	{
+		size_t length = strlen(line);
+
+		if (menu_functions.games[index].header)
+			snprintf(line + length, sizeof(line) - length, "%s%s", length ? ", " : "", menu_functions.games[index].name);
+	}
+	if (strcmp(line, said))
+	{
+		snprintf(said, sizeof(said), "%s", line);
+		platform_log("menus: the browser's groups (%s): %s", browser_filter_name(), line[0] ? line : "none");
+	}
 }
 
 /* ---- the Halo 3 LAN browser (halo3/network.xml): the server browser's
@@ -4327,12 +4394,13 @@ static void lan_status(struct widget_instance *screen, char *line, int line_size
 	long index;
 
 	boolean online = lan_with_online();
+	long games = browser_games(), shown;
 
 	text_show(named(screen, "lan_title"), adhoc ? T("AD HOC GAMES") : online ? T("CUSTOM GAMES") : T("SYSTEM LINK GAMES"));
 	message[0] = 0;
 	if (menu_functions.status[0])
 		snprintf(line, line_size, "%s", menu_functions.status);
-	else if (!menu_functions.game_count)
+	else if (!games)
 		snprintf(line, line_size, "%s", looking ? T("Looking for games...") : T("No games found"));
 	else if (online)
 	{
@@ -4340,21 +4408,17 @@ static void lan_status(struct widget_instance *screen, char *line, int line_size
 
 		for (index = 0; index < menu_functions.game_count; index++)
 			lan_count += lan_entry(&menu_functions.games[index]);
-		snprintf(line, line_size, T("%ld on your network, %ld online"), lan_count, menu_functions.game_count - lan_count);
+		snprintf(line, line_size, T("%ld on your network, %ld online"), lan_count, games - lan_count);
 	}
-	else if (menu_functions.game_count == 1)
+	else if (games == 1)
 		snprintf(line, line_size, "%s", adhoc ? T("1 game near you") : T("1 game on your network"));
 	else
-	{
-		snprintf(line, line_size, adhoc ? T("%ld games near you") : T("%ld games on your network"),
-			menu_functions.game_count);
-	}
+		snprintf(line, line_size, adhoc ? T("%ld games near you") : T("%ld games on your network"), games);
 	if (menu_functions.game_count > BROWSER_ROWS && !menu_functions.status[0])
 	{
 		size_t length = strlen(line);
 
-		snprintf(line + length, line_size - length, ", %ld-%ld", (long)menu_functions.view.offset + 1,
-			(long)menu_functions.view.offset + menu_functions.entry_count);
+		snprintf(line + length, line_size - length, ", %ld-%ld", browser_shown_first(), browser_shown_last());
 	}
 	if (menu_functions.game_count && !menu_functions.status[0])
 	{
@@ -4363,7 +4427,7 @@ static void lan_status(struct widget_instance *screen, char *line, int line_size
 
 		snprintf(line + length, line_size - length, ", %s", T(sorts[menu_functions.sort]));
 	}
-	if (!menu_functions.game_count && !looking)
+	if (!games && !looking)
 	{
 		char why[96];
 
@@ -4375,13 +4439,15 @@ static void lan_status(struct widget_instance *screen, char *line, int line_size
 			snprintf(message, message_size, "%s", adhoc ? T("No games found near you") : T("No games found on your network"));
 	}
 	/* (the list as it changes: the tests read it) */
-	snprintf(said, sizeof(said), "%ld", menu_functions.game_count);
-	for (index = 0; index < menu_functions.game_count && index < 4; index++)
+	snprintf(said, sizeof(said), "%ld", games);
+	for (index = 0, shown = 0; index < menu_functions.game_count && shown < 4; index++)
 	{
 		struct p2p_lobby_entry const *entry = &menu_functions.games[index];
 		size_t length = strlen(said);
 
-		snprintf(said + length, sizeof(said) - length, "%s%s%s (%s, %s, %d/%d, %s)", index ? ", " : ": ",
+		if (entry->header)
+			continue;
+		snprintf(said + length, sizeof(said) - length, "%s%s%s (%s, %s, %d/%d, %s)", shown++ ? ", " : ": ",
 			online && lan_entry(entry) ? "[LAN] " : "", entry->name, entry->map, entry->gametype, entry->players,
 			entry->maximum, entry->badge[0] ? entry->badge : "?");
 	}
@@ -4417,6 +4483,10 @@ static void browser_update(struct widget_instance *list)
 	}
 	browser_test_games();
 	browser_list_sort(menu_functions.games, (int)menu_functions.game_count, menu_functions.sort);
+	/* (the groups: VITA GAMES, then PC GAMES, each its header with its count) */
+	menu_functions.game_count = browser_list_group(menu_functions.games, (int)menu_functions.game_count,
+		(int)NUMBEROF(menu_functions.games), T("VITA GAMES (%d)"), T("PC GAMES (%d)"));
+	browser_groups_log();
 	/* the row the menus focus (a step up or down past the first or last
 	scrolls: browser_view_follow), and where the game chosen went */
 	for (index = 0, child = list->child; child; child = child->next)
@@ -4435,8 +4505,8 @@ static void browser_update(struct widget_instance *list)
 			break;
 		}
 	}
-	target = browser_view_follow(&menu_functions.view, BROWSER_ROWS, (int)menu_functions.game_count, (int)focused_row,
-		(int)chosen, menu_functions.page);
+	target = browser_view_follow_groups(&menu_functions.view, menu_functions.games, BROWSER_ROWS,
+		(int)menu_functions.game_count, (int)focused_row, (int)chosen, menu_functions.page);
 	menu_functions.page = 0;
 	menu_functions.entry_count = menu_functions.view.visible;
 	for (index = 0; index < menu_functions.entry_count; index++)
@@ -4460,6 +4530,37 @@ static void browser_update(struct widget_instance *list)
 		entry = &menu_functions.entries[index];
 		widget_instance_set_visibility_recursive(child, TRUE);
 		child->disabled = FALSE;
+		/* (a group's header: its name and count alone, no badge, lock or
+		columns; never chosen, browser_view_follow_groups) */
+		if (entry->header)
+		{
+			if (named(child, "row_lock"))
+				widget_instance_set_visibility_recursive(named(child, "row_lock"), FALSE);
+			if (named(child, "row_badge"))
+				widget_instance_set_visibility_recursive(named(child, "row_badge"), FALSE);
+			row_column(child, "row_name", entry->name);
+			if (named(child, "row_map"))
+				widget_instance_set_visibility_recursive(named(child, "row_map"), FALSE);
+			if (named(child, "row_game"))
+				widget_instance_set_visibility_recursive(named(child, "row_game"), FALSE);
+			if (named(child, "row_players"))
+				widget_instance_set_visibility_recursive(named(child, "row_players"), FALSE);
+#ifndef HALO_RELEASE
+			if (getenv("HALO_TEST_BROWSER_ODD") || getenv("HALO_TEST_BROWSER_NAMES"))
+			{
+				static char said[BROWSER_ROWS][160];
+				long row = index < BROWSER_ROWS ? index : BROWSER_ROWS - 1;
+
+				if (strcmp(entry->name, said[row]))
+				{
+					snprintf(said[row], sizeof(said[row]), "%s", entry->name);
+					platform_log("menus: browser row %ld: [%s]", row + 1, entry->name);
+				}
+			}
+#endif
+			index++;
+			continue;
+		}
 		/* (the lock: a game with a password, 2a6dc2b7; the Halo 3 rows' is
 		their badge's) */
 		if (named(child, "row_lock"))
@@ -4573,8 +4674,9 @@ static void browser_update(struct widget_instance *list)
 		if (getenv("HALO_TEST_BROWSER_GAMES") &&
 			(!menu_functions.chosen_valid || strcmp(menu_functions.chosen.id, menu_functions.games[target].id)))
 		{
-			platform_log("menus: the server browser's game %ld of %ld chosen: %s (rows from %d)", target + 1,
-				menu_functions.game_count, menu_functions.games[target].name, menu_functions.view.offset + 1);
+			platform_log("menus: the server browser's game %d of %ld chosen: %s (rows from %d)",
+				browser_list_game_number(menu_functions.games, (int)menu_functions.game_count, (int)target),
+				browser_games(), menu_functions.games[target].name, menu_functions.view.offset + 1);
 		}
 #endif
 		menu_functions.chosen = menu_functions.games[target];
@@ -4610,17 +4712,16 @@ static void browser_update(struct widget_instance *list)
 			break;
 		case P2P_LOBBY_BROWSE_GAMES:
 			/* (each count's words whole, for the translations) */
-			if (menu_functions.game_count == 1)
+			if (browser_games() == 1)
 				snprintf(line, sizeof(line), "%s", T("1 public game"));
 			else
-				snprintf(line, sizeof(line), T("%ld public games"), menu_functions.game_count);
+				snprintf(line, sizeof(line), T("%ld public games"), browser_games());
 			/* (the rows shown, when they scroll, and the sort: Y) */
 			if (menu_functions.game_count > BROWSER_ROWS)
 			{
 				size_t length = strlen(line);
 
-				snprintf(line + length, sizeof(line) - length, ", %ld-%ld", (long)menu_functions.view.offset + 1,
-					(long)menu_functions.view.offset + menu_functions.entry_count);
+				snprintf(line + length, sizeof(line) - length, ", %ld-%ld", browser_shown_first(), browser_shown_last());
 			}
 			{
 				static char const *const sorts[NUMBER_OF_BROWSER_SORTS] =
@@ -4638,6 +4739,16 @@ static void browser_update(struct widget_instance *list)
 		}
 		if (menu_functions.entry_count)
 			message[0] = 0;
+	}
+	/* (the filter: the Halo 3 browsers' hint says it, the D-pad's; OpenCE's
+	browser's status, unless all games) */
+	if (named(screen, "filter"))
+		text_show(named(screen, "filter"), browser_filter_name());
+	else if (network_wire_browser_filter() != NETWORK_WIRE_FILTER_ALL)
+	{
+		size_t length = strlen(line);
+
+		snprintf(line + length, sizeof(line) - length, ", %s", browser_filter_name());
 	}
 	text_show(named(screen, "browser_status"), line);
 	text_show(named(screen, "browser_message"), message);
@@ -4658,9 +4769,9 @@ static struct p2p_lobby_entry const *browser_entry(struct widget_instance *widge
 		long row = atol(widget->name + 4) - 1;
 
 		if (row >= 0 && row < menu_functions.entry_count)
-			return &menu_functions.entries[row];
+			return menu_functions.entries[row].header ? NULL : &menu_functions.entries[row];
 	}
-	return menu_functions.chosen_valid ? &menu_functions.chosen : NULL;
+	return menu_functions.chosen_valid && !menu_functions.chosen.header ? &menu_functions.chosen : NULL;
 }
 
 /* a game chosen to join, past the crossplay guardrails: its password
@@ -8378,6 +8489,22 @@ boolean pc_menu_event_function_invoke(
 	case _function_browser_page_down:
 		menu_functions.page = 1;
 		return TRUE;
+	case _function_browser_filter_next:
+	case _function_browser_filter_previous:
+	{
+		/* (the D-pad's right and left: all games, the Vitas' alone, the PCs'
+		alone, kept as the settings panel's Browser shows is) */
+		static char const *const filters[] = { "all", "vita", "pc" };
+		int filter = network_wire_browser_filter();
+
+		filter = (filter + (function_index == _function_browser_filter_next ? 1 : 2)) % 3;
+		setting_set("HALO_NET_BROWSER_FILTER", filters[filter]);
+		menu_functions.chosen_valid = FALSE;
+		browser_view_reset(&menu_functions.view);
+		platform_log("menus: the server browser shows %s", filter == NETWORK_WIRE_FILTER_VITA ? "the Vitas' games" :
+			filter == NETWORK_WIRE_FILTER_PC ? "the PCs' games" : "every game");
+		return TRUE;
+	}
 	case _function_browser_join:
 		return browser_join(widget, widget_deleted);
 	case _function_password_init:

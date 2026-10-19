@@ -279,6 +279,9 @@ struct p2p_lobby_entry
 	" SERVER", "+PC" (a Vita's game PC players join too), " EXPERIMENTAL" or
 	" CO-OP EXPERIMENTAL" (translated) */
 	char badge[48];
+	/* nonzero for no game: a group's header row in the menus' browsers
+	(browser_list.h: VITA GAMES, PC GAMES), never joined */
+	int header;
 };
 
 /* joins the game of a code: "ABCD-EFGH", with or without the dash, any

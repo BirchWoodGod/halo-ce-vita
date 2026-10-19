@@ -349,6 +349,7 @@ static char const *const port_function_names[] =
 	"port code init", "port code edit", "port code join", "port code back",
 	"port coop campaign",
 	"port browser sort", "port browser page up", "port browser page down",
+	"port browser filter next", "port browser filter previous",
 	"port h3 servers on", "port h3 servers off",
 	"port h3 campaign init", "port h3 mission set", "port h3 difficulty set", "port h3 campaign start",
 	"port h3 mission focus", "port h3 difficulty focus",

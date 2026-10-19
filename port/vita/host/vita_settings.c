@@ -5484,18 +5484,23 @@ static void browse_refresh(void)
 {
 	struct p2p_lobby_entry entry;
 	char selected[sizeof(entry.id)] = "";
-	int index;
+	int index, vita;
 
 	if (browse_selected < browse_count)
 		memcpy(selected, browse_entries[browse_selected].id, sizeof(selected));
 	browse_count = 0;
-	for (index = 0; browse_count < BROWSE_LINES && p2p_lobby_entry(index, &entry); index++)
+	/* (the Vitas' games first, then the PCs', as the menus' browsers group
+	them, each in the list's order) */
+	for (vita = 1; vita >= 0; vita--)
 	{
-		if (entry.own)
-			continue;
-		if (selected[0] && !strcmp(entry.id, selected))
-			browse_selected = browse_count;
-		browse_entries[browse_count++] = entry;
+		for (index = 0; browse_count < BROWSE_LINES && p2p_lobby_entry(index, &entry); index++)
+		{
+			if (entry.own || (entry.platform == CROSSPLAY_PLATFORM_VITA) != vita)
+				continue;
+			if (selected[0] && !strcmp(entry.id, selected))
+				browse_selected = browse_count;
+			browse_entries[browse_count++] = entry;
+		}
 	}
 	if (browse_selected >= browse_count)
 		browse_selected = browse_count ? browse_count - 1 : 0;

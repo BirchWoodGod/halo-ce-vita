@@ -98,6 +98,10 @@ void network_game_client_advertised_game_tag(
 	long size);
 boolean network_game_client_advertised_game_shown(
 	struct network_advertised_game const *game);
+/* whether the advertised game's host is a Vita (the lists show the Vitas'
+games first) */
+boolean network_game_client_advertised_game_vita(
+	struct network_advertised_game const *game);
 /* the advertised game of a listed game's id while it is still listed, or
 NULL (for ui_widget_port_join_advertised_game) */
 void const *network_game_client_listed_game_by_id(

@@ -178,7 +178,8 @@
 #               Vita host for Vitas and ours for Vitas and PC, all public; our
 #               clients see [PC ...], [VITA], [VITA+PC] and each joins one
 #               from the same list on its wire; Browser shows Vita games
-#               lists the Vitas' alone; on one LAN the System Link list's tags
+#               lists the Vitas' alone; on one LAN the System Link list's tags,
+#               the Vitas' games first
 #   crosspassword  a password on our host for Vitas and PC: a wrong one
 #               refused, the right one plays; OpenCE's browser leaves it alone
 #   pcversion   OpenCE of 28 (XPPC_OLD_BUILDS) and of 32 (XPPC_NEW_OPENCE) do
@@ -1010,7 +1011,7 @@ crosstls)
 			grep -aqE "Internet play: broker 198\.51\.100\.[0-9]+ ready \(MQTT [0-9.]+ over TLS \(TLS.*\) at 198\.51\.100\.[0-9]+:8883; carries the public games\)" "$log" ||
 			{ echo "  our $copy did not fall back to the broker's TLS port"; tls_ok=0; }
 	done
-	tls_connects=$(cat "$out"/broker-*.log 2>/dev/null | grep -c "^connect hceu-[0-9a-f]* mqtt[45] .* tls$")
+	tls_connects=$(cat "$out"/broker-*.log 2>/dev/null | grep -c "^connect hce[uv]-[0-9a-f]* mqtt[45] .* tls$")
 	plain_connects=$(cat "$out"/broker-*.log 2>/dev/null | grep "^connect hce" | grep -vc " tls$")
 	echo "  the brokers' connections: $tls_connects over TLS (ours), $plain_connects plain (OpenCE's)"
 	{ [ "$tls_connects" -ge 1 ] && [ "$plain_connects" -ge 2 ]; } || tls_ok=0
@@ -1236,6 +1237,8 @@ browserboth)
 	echo "  the System Link list: ${lan:-none}"
 	{ echo "$lan" | grep -q '\[OPENCE\]' && echo "$lan" | grep -q '\[VITA\] "Xplan-vita"' &&
 		echo "$lan" | grep -q '\[VITA+PC\] "Xplan-vitapc"'; } || result=lan-tags
+	# (the Vitas' games first, then the PCs': no Vita game after the OpenCE one)
+	echo "$lan" | grep -q '\[OPENCE\].*\[VITA' && result=lan-order
 	our_results="$our_results browserboth:$result"
 	echo "--- the brokers' topics"; broker_topics
 	;;

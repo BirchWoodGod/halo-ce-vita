@@ -12,7 +12,8 @@ h3 lan ...", "port h3 adhoc ..."):
   A joins it: a System Link row as A on its row in the System Link list joins it (the game's lobby
   next), an online row as the server browser joins it (a password asked first), its host's game
   then joined from this list once it shows. Square looks again, Triangle sorts, the triggers
-  page. (No more widgets than the server browser's: the menus' widget memory holds the screen's);
+  page, the D-pad's left and right show all games, the Vitas' or the PCs' (the Vitas' first, each
+  group under its header: VITA GAMES, PC GAMES). (No more widgets than the server browser's: the menus' widget memory holds the screen's);
 - the joining dialog: AD HOC's START GAME or BROWSE GAMES, or AD HOC CO-OP's START GAME, out of
   the ad hoc group: the system's dialog joins it (the Vita's host, as the settings panel's Host
   and Join), then what was asked goes on by itself; A tries again after a failure. It keeps no
@@ -32,6 +33,8 @@ h3 lan ...", "port h3 adhoc ..."):
 		<on event="y" run="port browser sort"/>
 		<on event="left_trigger" run="port browser page up"/>
 		<on event="right_trigger" run="port browser page down"/>
+		<on event="left stick_left" run="port browser filter previous"/>
+		<on event="right stick_right" run="port browser filter next"/>
 		<on event="deleted" run="dispose net game server list"/>
 		<child widget="h3/browser/row_1" x="20" y="92"/>
 		<child widget="h3/browser/row_2" x="20" y="112"/>
@@ -74,6 +77,8 @@ h3 lan ...", "port h3 adhoc ..."):
 		<child widget="h3/browser/y_butn"/>
 		<child widget="h3/browser/sort"/>
 		<child widget="h3/browser/page"/>
+		<child widget="h3/browser/filter_butn"/>
+		<child widget="h3/browser/filter"/>
 		<child widget="h3/browser/b_butn"/>
 		<child widget="h3/browser/back"/>
 	</widget>

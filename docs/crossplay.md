@@ -1324,7 +1324,16 @@ Branch feat/crossplay-auto. The owner's decisions:
    the settings panel's public games, friends' activity lines and the
    pregame lobby ("Listed as: name (VITA+PC)", "Hosted on PC (OpenCE)").
    Browser shows (network.browser_filter): all (as shipped), Vita, PC; the
-   retired switch's On becomes PC games, Off all.
+   retired switch's On becomes PC games, Off all. Every browser lists the
+   Vitas' games first, then the PCs' (the owner, Oct 19 2026): the Halo 3
+   and Halo CE browsers and the LAN browser under a header row for each
+   group with its count (VITA GAMES (n), PC GAMES (n); never chosen, stepped
+   over), the Xbox's System Link list and the settings panel's list in that
+   order; within a group the sort is Triangle's (players as shipped: the
+   most first, then games not failed, games taking players, the name; no
+   ping). The D-pad's left and right step the filter on those browsers (All
+   games, Vita games, PC games), kept as the panel's Browser shows is (the
+   Vita's settings.txt). `run_menus_test.sh h3groups`, `browser_list_test`.
 3. **PC joins Vita (T15, T16).** Who can join (the settings panel's Vita and
    PC page, and a WHO CAN JOIN row on both Create Game screens): Vitas (the
    legacy wire), or Vitas and PC (the crossplay wire). Such a game is listed

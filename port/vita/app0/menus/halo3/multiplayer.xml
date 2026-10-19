@@ -47,6 +47,9 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 	<bitmap name="h3/glyph_triangle">
 		<frame png="halo3/glyph_triangle.png" width="16" height="16"/>
 	</bitmap>
+	<bitmap name="h3/glyph_dpad_lr">
+		<frame png="halo3/glyph_dpad_lr.png" width="16" height="16"/>
+	</bitmap>
 	<strings name="h3/mp_text">
 		<string text="MULTIPLAYER LOBBY"/>
 		<string text="START GAME"/>
@@ -576,6 +579,8 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 		<on event="y" run="port browser sort"/>
 		<on event="left_trigger" run="port browser page up"/>
 		<on event="right_trigger" run="port browser page down"/>
+		<on event="left stick_left" run="port browser filter previous"/>
+		<on event="right stick_right" run="port browser filter next"/>
 		<child widget="h3/browser/row_1" x="20" y="92"/>
 		<child widget="h3/browser/row_2" x="20" y="112"/>
 		<child widget="h3/browser/row_3" x="20" y="132"/>
@@ -601,7 +606,9 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 	<widget name="h3/browser/refresh" type="text" left="138" top="443" width="80" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/mp_text" string_index="10"/>
 	<widget name="h3/browser/y_butn" left="226" top="444" width="16" height="16" bitmap="h3/glyph_triangle"/>
 	<widget name="h3/browser/sort" type="text" left="246" top="443" width="80" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/mp_text" string_index="11"/>
-	<widget name="h3/browser/page" type="text" left="334" top="443" width="110" height="18" font="h3/font_item" color="#FFC5D0DD" text_y="1" string_list="h3/mp_text" string_index="12"/>
+	<widget name="h3/browser/page" type="text" left="334" top="443" width="84" height="18" font="h3/font_item" color="#FFC5D0DD" text_y="1" string_list="h3/mp_text" string_index="12"/>
+	<widget name="h3/browser/filter_butn" left="420" top="444" width="16" height="16" bitmap="h3/glyph_dpad_lr"/>
+	<widget name="h3/browser/filter" type="text" left="440" top="443" width="88" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1"/>
 	<widget name="h3/browser/b_butn" left="532" top="444" width="16" height="16" bitmap="h3/glyph_circle"/>
 	<widget name="h3/browser/back" type="text" left="552" top="443" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/main_items" string_index="10"/>
 	<widget name="h3/browser/screen" flags="pass_unhandled_to_focused_child">
@@ -631,6 +638,8 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 		<child widget="h3/browser/y_butn"/>
 		<child widget="h3/browser/sort"/>
 		<child widget="h3/browser/page"/>
+		<child widget="h3/browser/filter_butn"/>
+		<child widget="h3/browser/filter"/>
 		<child widget="h3/browser/b_butn"/>
 		<child widget="h3/browser/back"/>
 	</widget>
