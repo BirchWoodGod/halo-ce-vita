@@ -75,6 +75,14 @@ file. `HALO_MOVIE_ASPECT=16:9` in `env.txt` forces a shape for files without
 one; `HALO_MOVIE_DUMP=n` writes the n-th frame as the decoder gave it
 (`movie_nv12.raw`) and as converted (`movie_rgb.raw`).
 
+The renderer draws a movie's frames itself, at the display's resolution,
+from memory of its own (uncached user RAM), with programs every build
+ships. `HALO_MOVIE_PATH` in `env.txt` picks another way for a test: `cdram`
+(the same frames in video memory) or `legacy` (the game's own texture and
+quad, as up to 1.1.1-insider.11: its GPU program is not in `shaders.pak`,
+so without the shader compiler the picture is black). `halo.log` says which
+way each movie went (`movie: path ...`).
+
 ## Controls
 
 | Vita | Xbox | In play |

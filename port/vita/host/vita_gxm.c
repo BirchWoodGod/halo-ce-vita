@@ -371,6 +371,16 @@ static struct
 	int interface_active;
 	unsigned long interface_source;
 	unsigned int interface_scenes_again;
+	/* the interface layer (interface_layer_ready): a 960x544 target of
+	its own in CDRAM the interface is drawn into, copied to the display at
+	the present; whether this frame's interface is there (else on the
+	display buffer, as before), and the frames of the report drawn each
+	way or not split (100% scale) */
+	struct block interface_memory;
+	SceGxmColorSurface interface_surface;
+	int interface_layer;
+	unsigned int interface_layer_used;
+	unsigned int interface_layer_frames, interface_display_frames, interface_full_frames;
 
 	/* the scene being recorded (an atlas's when the colour target is a
 	cell of it: scene_cell is that cell) */
@@ -3150,6 +3160,43 @@ static int display_scene_begin(int wait)
 	return 1;
 }
 
+/* begins a scene on the interface layer (vgxm_interface_begin, and
+scene_ensure when the interface's draws come back to it): no depth buffer,
+no display buffer - nothing waits for the display - and a dependency set,
+for the present's display scene that copies it. wait: after the scenes
+before it */
+static int interface_scene_begin(int wait)
+{
+	unsigned int flags = (wait ? SCE_GXM_SCENE_VERTEX_WAIT_FOR_DEPENDENCY : 0) |
+		(rtt_sync_enabled() ? SCE_GXM_SCENE_FRAGMENT_SET_DEPENDENCY : 0);
+	int result = sceGxmBeginScene(gxm.context, flags, gxm.display_render_target, NULL, NULL, NULL,
+		&gxm.interface_surface, NULL);
+
+	if (result < 0)
+	{
+		static unsigned int reported;
+
+		if (reported++ < 16)
+			log_line("gxm: cannot begin the interface layer's scene: 0x%08x", (unsigned)result);
+		return 0;
+	}
+	gxm.in_scene = 1;
+	gxm.scene_draws = 0;
+	gxm.scene_serial++;
+	if (wait)
+	{
+		gxm.wait_serial = gxm.scene_serial;
+		gxm.texture_scene_since_wait = 0;
+	}
+	gxm.targets[DISPLAY_TARGET - 1].written_serial = gxm.scene_serial;
+	shadow_invalidate();
+	gxm.scene_color = DISPLAY_TARGET;
+	gxm.scene_cell = 0;
+	gxm.scene_depth = 0;
+	sceGxmSetViewportEnable(gxm.context, SCE_GXM_VIEWPORT_ENABLED);
+	return 1;
+}
+
 static int scene_ensure(void)
 {
 	struct target *color, *depth;
@@ -3209,7 +3256,8 @@ static int scene_ensure(void)
 		/* (the interface's draws back on the display: its scene again,
 		waiting if a draw samples what a scene since drew) */
 		gxm.interface_scenes_again++;
-		return display_scene_begin(scene_dependency_needed(0));
+		return gxm.interface_layer ? interface_scene_begin(scene_dependency_needed(0)) :
+			display_scene_begin(scene_dependency_needed(0));
 	}
 	color = wanted_scene_color ? &gxm.targets[wanted_scene_color - 1] : NULL;
 	depth = gxm.wanted_depth ? &gxm.targets[gxm.wanted_depth - 1] : NULL;
@@ -3978,14 +4026,10 @@ unsigned long vgxm_visibility_count(int buffer, unsigned long slot)
 
 /* ---------- frames */
 
-static void blit(struct target *source)
+/* the built-in blit's vertex program (position, texcoord), made once */
+static SceGxmVertexProgram *blit_vertex_program(void)
 {
 	static SceGxmVertexProgram *vertex_program;
-	SceGxmFragmentProgram *fragment_program;
-	SceGxmTexture texture;
-	float *vertices;
-	unsigned short *indices;
-	float width, height, x0, x1;
 
 	if (!vertex_program)
 	{
@@ -4008,13 +4052,66 @@ static void blit(struct target *source)
 		stream.stride = 4 * sizeof(float);
 		stream.indexSource = SCE_GXM_INDEX_SOURCE_INDEX_16BIT;
 		if (sceGxmShaderPatcherCreateVertexProgram(gxm.patcher, shader->id, attributes, 2, &stream, 1, &vertex_program) < 0)
-			return;
+			return NULL;
 	}
+	return vertex_program;
+}
+
+/* the texture, opaque, over the display's pixels left..left+width,
+top..top+height, with the built-in blit programs (the display scene is
+the current one) */
+static void blit_texture(const SceGxmTexture *texture, float left, float top, float width, float height)
+{
+	SceGxmVertexProgram *vertex_program = blit_vertex_program();
+	SceGxmFragmentProgram *fragment_program;
+	float *vertices;
+	unsigned short *indices;
+	float x0, x1, y0, y1;
+
+	if (!vertex_program)
+		return;
 	fragment_program = fragment_program_get(gxm.blit_fragment, gxm.blit_vertex, NULL);
 	vertices = vgxm_worker_alloc(4 * 4 * sizeof(float), 16);
 	indices = vgxm_worker_alloc(4 * sizeof(unsigned short), 16);
 	if (!fragment_program || !vertices || !indices)
 		return;
+	x0 = 2.0f * left / DISPLAY_WIDTH - 1.0f;
+	x1 = 2.0f * (left + width) / DISPLAY_WIDTH - 1.0f;
+	y0 = 1.0f - 2.0f * top / DISPLAY_HEIGHT;
+	y1 = 1.0f - 2.0f * (top + height) / DISPLAY_HEIGHT;
+	{
+		float quad[4][4] = {
+			{ x0, y0, 0.0f, 0.0f }, { x1, y0, 1.0f, 0.0f },
+			{ x0, y1, 0.0f, 1.0f }, { x1, y1, 1.0f, 1.0f },
+		};
+
+		memcpy(vertices, quad, sizeof(quad));
+	}
+	indices[0] = 0; indices[1] = 1; indices[2] = 2; indices[3] = 3;
+	shadow.valid = 0;
+	sceGxmSetVertexProgram(gxm.context, vertex_program);
+	sceGxmSetFragmentProgram(gxm.context, fragment_program);
+	sceGxmSetVertexStream(gxm.context, 0, vertices);
+	sceGxmSetFragmentTexture(gxm.context, 0, texture);
+	sceGxmSetFrontDepthFunc(gxm.context, SCE_GXM_DEPTH_FUNC_ALWAYS);
+	sceGxmSetFrontDepthWriteEnable(gxm.context, SCE_GXM_DEPTH_WRITE_DISABLED);
+	sceGxmSetFrontStencilFunc(gxm.context, SCE_GXM_STENCIL_FUNC_ALWAYS, SCE_GXM_STENCIL_OP_KEEP,
+		SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP, 0, 0);
+	sceGxmSetCullMode(gxm.context, SCE_GXM_CULL_NONE);
+	sceGxmSetFrontDepthBias(gxm.context, 0, 0);
+	sceGxmSetViewportEnable(gxm.context, SCE_GXM_VIEWPORT_ENABLED);
+	sceGxmSetViewport(gxm.context, DISPLAY_WIDTH * 0.5f, DISPLAY_WIDTH * 0.5f, DISPLAY_HEIGHT * 0.5f,
+		-DISPLAY_HEIGHT * 0.5f, 0.0f, 1.0f);
+	sceGxmSetRegionClip(gxm.context, SCE_GXM_REGION_CLIP_OUTSIDE, 0, 0, DISPLAY_WIDTH - 1, DISPLAY_HEIGHT - 1);
+	sceGxmDraw(gxm.context, SCE_GXM_PRIMITIVE_TRIANGLE_STRIP, SCE_GXM_INDEX_FORMAT_U16, indices, 4);
+	gxm.scene_draws++;
+}
+
+static void blit(struct target *source)
+{
+	SceGxmTexture texture;
+	float width, height;
+
 	/* the picture at the display's height, its shape kept (a 4:3 frame,
 	HALO_DISPLAY_WIDTH=640, between black bars); sharp: the same size,
 	sampled nearest rather than bilinear */
@@ -4041,19 +4138,6 @@ static void blit(struct target *source)
 	gxm.picture_height = (float)(int)(height + 0.5f);
 	gxm.picture_left = (float)(int)((DISPLAY_WIDTH - gxm.picture_width) / 2.0f);
 	gxm.picture_top = (float)(int)((DISPLAY_HEIGHT - gxm.picture_height) / 2.0f);
-	x0 = 2.0f * gxm.picture_left / DISPLAY_WIDTH - 1.0f;
-	x1 = 2.0f * (gxm.picture_left + gxm.picture_width) / DISPLAY_WIDTH - 1.0f;
-	{
-		float y0 = 1.0f - 2.0f * gxm.picture_top / DISPLAY_HEIGHT;
-		float y1 = 1.0f - 2.0f * (gxm.picture_top + gxm.picture_height) / DISPLAY_HEIGHT;
-		float quad[4][4] = {
-			{ x0, y0, 0.0f, 0.0f }, { x1, y0, 1.0f, 0.0f },
-			{ x0, y1, 0.0f, 1.0f }, { x1, y1, 1.0f, 1.0f },
-		};
-
-		memcpy(vertices, quad, sizeof(quad));
-	}
-	indices[0] = 0; indices[1] = 1; indices[2] = 2; indices[3] = 3;
 	/* (its drawn rectangle: all of it but for the dynamic resolution) */
 	sceGxmTextureInitLinearStrided(&texture, source->memory.base, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB, drawn_width,
 		drawn_height, source->stride * 4);
@@ -4063,23 +4147,114 @@ static void blit(struct target *source)
 		sceGxmTextureSetMinFilter(&texture, filter);
 		sceGxmTextureSetMagFilter(&texture, filter);
 	}
-	shadow.valid = 0;
-	sceGxmSetVertexProgram(gxm.context, vertex_program);
-	sceGxmSetFragmentProgram(gxm.context, fragment_program);
-	sceGxmSetVertexStream(gxm.context, 0, vertices);
-	sceGxmSetFragmentTexture(gxm.context, 0, &texture);
-	sceGxmSetFrontDepthFunc(gxm.context, SCE_GXM_DEPTH_FUNC_ALWAYS);
-	sceGxmSetFrontDepthWriteEnable(gxm.context, SCE_GXM_DEPTH_WRITE_DISABLED);
-	sceGxmSetFrontStencilFunc(gxm.context, SCE_GXM_STENCIL_FUNC_ALWAYS, SCE_GXM_STENCIL_OP_KEEP,
-		SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP, 0, 0);
-	sceGxmSetCullMode(gxm.context, SCE_GXM_CULL_NONE);
-	sceGxmSetFrontDepthBias(gxm.context, 0, 0);
-	sceGxmSetViewportEnable(gxm.context, SCE_GXM_VIEWPORT_ENABLED);
-	sceGxmSetViewport(gxm.context, DISPLAY_WIDTH * 0.5f, DISPLAY_WIDTH * 0.5f, DISPLAY_HEIGHT * 0.5f,
-		-DISPLAY_HEIGHT * 0.5f, 0.0f, 1.0f);
-	sceGxmSetRegionClip(gxm.context, SCE_GXM_REGION_CLIP_OUTSIDE, 0, 0, DISPLAY_WIDTH - 1, DISPLAY_HEIGHT - 1);
-	sceGxmDraw(gxm.context, SCE_GXM_PRIMITIVE_TRIANGLE_STRIP, SCE_GXM_INDEX_FORMAT_U16, indices, 4);
-	gxm.scene_draws++;
+	blit_texture(&texture, gxm.picture_left, gxm.picture_top, gxm.picture_width, gxm.picture_height);
+}
+
+/* ---------- the movie (d3d8_gxm.c halo_d3d_movie_*)
+
+The movies' frames (bink_vita.c, vita_movie.c's conversion) are written by
+the CPU into memory of the renderer's own that the GPU reads as it is -
+user RAM mapped uncached (as the rings), or CDRAM - and drawn at the
+present over the frame's picture, at the display's resolution, with the
+built-in blit programs (shipped in every build: no program of the game's
+combiners is needed, which a Vita without the shader compiler could not
+make - the movie's own was missing from shaders.pak, the picture black
+while the sound played). */
+static struct block movie_memory;
+static int movie_memory_cdram;
+static struct
+{
+	const void *pixels;
+	unsigned int width, height, pitch;
+	float rect[4];
+	int pending;
+	unsigned long drawn;
+} movie_frame;
+
+void vgxm_movie_memory_free(void)
+{
+	if (!movie_memory.base)
+		return;
+	if (movie_memory_cdram)
+		memory_bytes[_memory_other] -= movie_memory.size;
+	memory_os_free(&movie_memory);
+	memset(&movie_memory, 0, sizeof(movie_memory));
+	memset(&movie_frame, 0, sizeof(movie_frame));
+}
+
+void *vgxm_movie_memory(unsigned long bytes, int cdram_first, const char **kind)
+{
+	int attempt;
+
+	vgxm_movie_memory_free();
+	for (attempt = 0; attempt < 2; attempt++)
+	{
+		int cdram = (attempt == 0) == (cdram_first != 0);
+
+		if (block_allocate(&movie_memory, cdram ? SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW :
+			SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE, (unsigned int)bytes, 1, "movie frames"))
+		{
+			movie_memory_cdram = cdram;
+			if (cdram)
+				memory_bytes[_memory_other] += movie_memory.size;
+			if (kind)
+				*kind = cdram ? "CDRAM" : "user RAM, uncached (USER_RW_UNCACHE)";
+			return movie_memory.base;
+		}
+		memset(&movie_memory, 0, sizeof(movie_memory));
+	}
+	return NULL;
+}
+
+void vgxm_movie_present(const void *pixels, unsigned long width, unsigned long height, unsigned long pitch,
+	const float rect[4])
+{
+	if (!pixels || !width || !height)
+		return;
+	movie_frame.pixels = pixels;
+	movie_frame.width = (unsigned int)width;
+	movie_frame.height = (unsigned int)height;
+	movie_frame.pitch = (unsigned int)pitch;
+	memcpy(movie_frame.rect, rect, sizeof(movie_frame.rect));
+	movie_frame.pending = 1;
+}
+
+/* (the present, in the display scene) the movie frame given for it */
+static void movie_draw(void)
+{
+	SceGxmTexture texture;
+	float left = gxm.picture_left, top = gxm.picture_top, width = gxm.picture_width, height = gxm.picture_height;
+	int result;
+
+	if (!movie_frame.pending)
+		return;
+	movie_frame.pending = 0;
+	result = sceGxmTextureInitLinearStrided(&texture, movie_frame.pixels, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB,
+		movie_frame.width, movie_frame.height, movie_frame.pitch);
+	if (result < 0)
+	{
+		static unsigned int logged;
+
+		if (logged++ < 4)
+			log_line("gxm: the movie frame %ux%u (rows %u bytes apart) at %p is no texture: 0x%08x", movie_frame.width,
+				movie_frame.height, movie_frame.pitch, movie_frame.pixels, (unsigned)result);
+		return;
+	}
+	sceGxmTextureSetMinFilter(&texture, SCE_GXM_TEXTURE_FILTER_LINEAR);
+	sceGxmTextureSetMagFilter(&texture, SCE_GXM_TEXTURE_FILTER_LINEAR);
+	if (width <= 0.0f || height <= 0.0f)
+	{
+		left = top = 0.0f;
+		width = DISPLAY_WIDTH;
+		height = DISPLAY_HEIGHT;
+	}
+	blit_texture(&texture, left + movie_frame.rect[0] * width, top + movie_frame.rect[1] * height,
+		(movie_frame.rect[2] - movie_frame.rect[0]) * width, (movie_frame.rect[3] - movie_frame.rect[1]) * height);
+	if (movie_frame.drawn++ == 0)
+		log_line("gxm: the movie drawn at the present: %ux%u from %p (%s), over the display's %.0f,%.0f %.0fx%.0f",
+			movie_frame.width, movie_frame.height, movie_frame.pixels, movie_memory_cdram ? "CDRAM" : "uncached user RAM",
+			left + movie_frame.rect[0] * width, top + movie_frame.rect[1] * height,
+			(movie_frame.rect[2] - movie_frame.rect[0]) * width, (movie_frame.rect[3] - movie_frame.rect[1]) * height);
 }
 
 /* ---------- the overlay (Xita's panel: fps, game and render ms, cores) */
@@ -5609,40 +5784,118 @@ static void display_buffering_apply(void)
 /* The interface at the display's resolution (Sharp interface, d3d8_gxm.c
 halo_d3d_interface_begin). The frame's 3D picture is in the back buffer, at
 the render scale; where the game's interface begins, the picture is scaled
-up to the display as the present would (blit), in the display scene the
-present then ends, and the game's draws and clears into the back buffer
-from then on go to the display instead (vgxm_set_targets): the display as
-a target of its own (DISPLAY_TARGET) whose size asked for is the back
-buffer's, so the viewports and clips the game gives in its 640 or 848 by
-480 are scaled to the picture on the display and moved to where it starts
-(4:3's bars), as a render-scaled target's are scaled down to its pixels.
-The display has no depth buffer (the interface draws without the depth
-and stencil tests: vgxm_draw, vgxm_clear). A draw into another target in
-between (a copy the loading screen blurs) ends the display scene, and the
-next one into the back buffer begins it again (scene_ensure). The settings
-panel and the overlay are drawn after it all, at the present, as before.
-No memory: the display buffers are there anyway. */
+up to the display's size as the present would (blit) into the interface
+layer - a 960x544 target of its own in CDRAM (interface_layer_ready) - and
+the game's draws and clears into the back buffer from then on go there
+instead (vgxm_set_targets): a target of its own (DISPLAY_TARGET) whose size
+asked for is the back buffer's, so the viewports and clips the game gives
+in its 640 or 848 by 480 are scaled to the picture and moved to where it
+starts (4:3's bars), as a render-scaled target's are scaled down to its
+pixels. It has no depth buffer (the interface draws without the depth and
+stencil tests: vgxm_draw, vgxm_clear). A draw into another target in
+between (a copy the loading screen blurs) ends its scene, and the next one
+into the back buffer begins it again (scene_ensure). The present copies
+the layer to the display buffer (vgxm_present), and the settings panel and
+the overlay are drawn after it, as before.
+
+Until 1.1.1-insider.11 the interface was drawn on the display buffer
+itself, its scene begun mid-frame: with double buffering the buffer is
+free only once the display has flipped away from it, so the GPU's work
+after it waited for the vertical blank. The layer is drawn whenever, and
+only the present's scene waits for the display, as without the Sharp
+interface. HALO_SHARP_UI_LAYER=0 (debug): on the display buffer, as before;
+also when the layer's 2 MB of CDRAM cannot be had.
+
+At 100% (the back buffer drawn at the size asked for, the dynamic
+resolution's part of it all of it) there is no split: the interface is
+drawn with the picture and scaled up with it at the present, as without the
+Sharp interface (HALO_SHARP_UI_FULL=1, debug: split anyway). */
+static int interface_layer_ready(void)
+{
+	static int enabled = -1;
+	static unsigned int retry_frame;
+
+	if (enabled < 0)
+	{
+		const char *setting = getenv("HALO_SHARP_UI_LAYER");
+
+		enabled = !setting || !*setting || atoi(setting) != 0;
+		if (!enabled)
+			log_line("gxm: Sharp interface on the display buffer (HALO_SHARP_UI_LAYER=0)");
+	}
+	if (!enabled)
+		return 0;
+	if (gxm.interface_memory.base)
+		return 1;
+	/* (refused: asked again 10 s later, not every frame) */
+	if (retry_frame && gxm.frame < retry_frame)
+		return 0;
+	if (!cdram_block_get(_memory_other, 4 * DISPLAY_STRIDE * DISPLAY_HEIGHT, "interface layer", &gxm.interface_memory))
+	{
+		retry_frame = gxm.frame + 600;
+		log_line("gxm: no CDRAM for the Sharp interface's layer (%u KB, %lu KB free): drawn on the display buffer",
+			4 * DISPLAY_STRIDE * DISPLAY_HEIGHT / 1024, memory_cdram_free() / 1024);
+		return 0;
+	}
+	memset(gxm.interface_memory.base, 0, 4 * DISPLAY_STRIDE * DISPLAY_HEIGHT);
+	sceGxmColorSurfaceInit(&gxm.interface_surface, SCE_GXM_COLOR_FORMAT_A8B8G8R8, SCE_GXM_COLOR_SURFACE_LINEAR,
+		SCE_GXM_COLOR_SURFACE_SCALE_NONE, SCE_GXM_OUTPUT_REGISTER_SIZE_32BIT, DISPLAY_WIDTH, DISPLAY_HEIGHT,
+		DISPLAY_STRIDE, gxm.interface_memory.base);
+	log_line("gxm: Sharp interface layer: %ux%u, %u KB of CDRAM at %p", DISPLAY_WIDTH, DISPLAY_HEIGHT,
+		gxm.interface_memory.size / 1024, gxm.interface_memory.base);
+	return 1;
+}
+
+/* the back buffer drawn at 100%: no split (above) */
+static int interface_full_scale(const struct target *source)
+{
+	static int split_anyway = -1;
+
+	if (split_anyway < 0)
+	{
+		const char *setting = getenv("HALO_SHARP_UI_FULL");
+
+		split_anyway = setting && atoi(setting) != 0;
+	}
+	return !split_anyway && source->scale_x <= 0.0f && source->scale_y <= 0.0f;
+}
+
 void vgxm_interface_begin(unsigned long color_target)
 {
 	struct target *source, *display = &gxm.targets[DISPLAY_TARGET - 1];
 	unsigned int asked_width, asked_height;
+	int layer;
 
 	if (!gxm.ready || gxm.interface_active || !color_target || color_target > gxm.target_count)
 		return;
 	source = &gxm.targets[color_target - 1];
 	if (source->depth || !source->memory.base || source->atlas)
 		return;
+	if (interface_full_scale(source))
+	{
+		gxm.interface_full_frames++;
+		return;
+	}
 	if (gxm.in_scene)
 	{
 		sceGxmEndScene(gxm.context, NULL, NULL);
 		gxm.in_scene = 0;
 	}
-	/* (the display buffer this frame is drawn into, as the present has it) */
-	if (gxm.display_wanted != (int)gxm.display_count)
-		display_buffering_apply();
 	gxm.presented_target = color_target;
-	if (!display_scene_begin(rtt_sync_enabled() && gxm.scene_serial))
-		return;
+	layer = interface_layer_ready();
+	if (layer)
+	{
+		if (!interface_scene_begin(rtt_sync_enabled() && gxm.scene_serial))
+			return;
+	}
+	else
+	{
+		/* (the display buffer this frame is drawn into, as the present has it) */
+		if (gxm.display_wanted != (int)gxm.display_count)
+			display_buffering_apply();
+		if (!display_scene_begin(rtt_sync_enabled() && gxm.scene_serial))
+			return;
+	}
 	blit(source);
 	asked_width = source->asked_width ? source->asked_width : source->width;
 	asked_height = source->asked_height ? source->asked_height : source->height;
@@ -5659,10 +5912,32 @@ void vgxm_interface_begin(unsigned long color_target)
 	display->rect_width = (unsigned int)(gxm.picture_left + gxm.picture_width);
 	display->rect_height = (unsigned int)(gxm.picture_top + gxm.picture_height);
 	display->written_serial = gxm.scene_serial;
-	display->color = gxm.display_surface[gxm.back_buffer];
+	display->color = layer ? gxm.interface_surface : gxm.display_surface[gxm.back_buffer];
 	display->render_target = gxm.display_render_target;
 	gxm.interface_source = color_target;
 	gxm.interface_active = 1;
+	gxm.interface_layer = layer;
+	if (layer)
+	{
+		gxm.interface_layer_frames++;
+		gxm.interface_layer_used = gxm.frame;
+	}
+	else
+		gxm.interface_display_frames++;
+}
+
+/* (the present, in the display scene) the interface layer over the whole
+display, texel for texel */
+static void interface_layer_copy(void)
+{
+	SceGxmTexture texture;
+
+	if (sceGxmTextureInitLinearStrided(&texture, gxm.interface_memory.base, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR,
+		DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_STRIDE * 4) < 0)
+		return;
+	sceGxmTextureSetMinFilter(&texture, SCE_GXM_TEXTURE_FILTER_POINT);
+	sceGxmTextureSetMagFilter(&texture, SCE_GXM_TEXTURE_FILTER_POINT);
+	blit_texture(&texture, 0.0f, 0.0f, DISPLAY_WIDTH, DISPLAY_HEIGHT);
 }
 
 void vgxm_present(unsigned long color_target, unsigned long width, unsigned long height)
@@ -5676,7 +5951,25 @@ void vgxm_present(unsigned long color_target, unsigned long width, unsigned long
 	if (!gxm.ready)
 		return;
 	present_mark = sceKernelGetProcessTimeWide();
-	if (gxm.interface_active && gxm.in_scene && gxm.scene_color == DISPLAY_TARGET)
+	if (gxm.interface_active && gxm.interface_layer)
+	{
+		/* (the interface layer, the picture and the interface in it, copied
+		to the display in the present's scene, which waits for it) */
+		if (gxm.in_scene)
+		{
+			sceGxmEndScene(gxm.context, NULL, NULL);
+			gxm.in_scene = 0;
+		}
+		present_step(0);
+		if (gxm.display_wanted != (int)gxm.display_count)
+			display_buffering_apply();
+		sceGxmBeginScene(gxm.context, rtt_sync_enabled() ? SCE_GXM_SCENE_VERTEX_WAIT_FOR_DEPENDENCY : 0,
+			gxm.display_render_target, NULL, NULL, gxm.display_sync[gxm.back_buffer],
+			&gxm.display_surface[gxm.back_buffer], NULL);
+		present_step(1);
+		interface_layer_copy();
+	}
+	else if (gxm.interface_active && gxm.in_scene && gxm.scene_color == DISPLAY_TARGET)
 	{
 		/* (the interface's display scene, the picture and the interface in
 		it: the overlay goes on) */
@@ -5708,6 +6001,7 @@ void vgxm_present(unsigned long color_target, unsigned long width, unsigned long
 			!gxm.targets[color_target - 1].depth)
 			blit(&gxm.targets[color_target - 1]);
 	}
+	movie_draw();
 	overlay_draw();
 	notification.address = gxm.notification;
 	notification.value = ++gxm.frame;
@@ -5715,7 +6009,17 @@ void vgxm_present(unsigned long color_target, unsigned long width, unsigned long
 		shader_sweep_start();
 	sceGxmEndScene(gxm.context, NULL, &notification);
 	gxm.in_scene = 0;
+	if (gxm.interface_memory.base && gxm.frame - gxm.interface_layer_used > 600)
+	{
+		/* (not drawn for 10 s - the Sharp interface off, 100%, a split
+		screen: the GPU long done with it) its CDRAM given back, made again
+		when next drawn */
+		cdram_block_put(_memory_other, &gxm.interface_memory);
+		memset(&gxm.interface_memory, 0, sizeof(gxm.interface_memory));
+		log_line("gxm: the Sharp interface's layer let go (not drawn for 10 s)");
+	}
 	gxm.interface_active = 0;
+	gxm.interface_layer = 0;
 	{
 		/* (the frame is all the GPU's now: frame_timing) */
 		unsigned int now = (unsigned int)sceKernelGetProcessTimeWide(), slot = gxm.frame % FRAME_TIMING_SLOTS;
@@ -5777,10 +6081,13 @@ void vgxm_present(unsigned long color_target, unsigned long width, unsigned long
 				log_line("gxm: render to texture: %.1f scene waits/frame, %.2f scenes begun again to wait/frame",
 					(double)gxm.dependency_waits / frames, (double)gxm.dependency_splits / frames);
 			gxm.dependency_waits = gxm.dependency_splits = 0;
-			if (gxm.interface_scenes_again)
-				log_line("gxm: Sharp interface: %.2f display scenes begun again/frame",
-					(double)gxm.interface_scenes_again / frames);
+			if (gxm.interface_scenes_again || gxm.interface_layer_frames || gxm.interface_display_frames ||
+				gxm.interface_full_frames)
+				log_line("gxm: Sharp interface: %u of %u frames on the layer, %u on the display buffer, %u at 100%% (no split); "
+					"%.2f interface scenes begun again/frame", gxm.interface_layer_frames, frames,
+					gxm.interface_display_frames, gxm.interface_full_frames, (double)gxm.interface_scenes_again / frames);
 			gxm.interface_scenes_again = 0;
+			gxm.interface_layer_frames = gxm.interface_display_frames = gxm.interface_full_frames = 0;
 			memset(present_step_us, 0, sizeof(present_step_us));
 			gxm_scene_splits = 0;
 			{
