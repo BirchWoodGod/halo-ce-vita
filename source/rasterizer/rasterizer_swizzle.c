@@ -576,6 +576,38 @@ boolean rasterizer_xbox_bitmap_rebuild_hardware_format(
 
 	match_assert("c:\\halo\\SOURCE\\rasterizer\\rasterizer_swizzle.c", 549, bitmap->base_address);
 
+#ifdef HALO_LINUX
+	/* (port) A compressed 2D bitmap's hardware format is its tag layout:
+	its levels one after another as they are, then zeros to 128 bytes. Every
+	Custom Edition bitmap arriving in the texture cache comes through here
+	(custom_edition_bitmaps.c), most of them DXT, and each took a buffer of
+	its size from the C heap and two copies of its pixels, under the map's
+	read lock the tick and the render worker wait on. When each level is
+	where the layout puts it, only the zeros are written: the same bytes. */
+	if (TEST_FLAG(bitmap->flags, _bitmap_compressed_bit) &&
+		!TEST_FLAG(bitmap->flags, _bitmap_linear_bit) &&
+		bitmap->type == _bitmap_type_2d)
+	{
+		short maximum_mipmap_index = rasterizer_xbox_bitmap_get_max_mipmap_count(bitmap);
+		short mipmap_index;
+		unsigned long level_offset = 0;
+		boolean in_place = TRUE;
+
+		for (mipmap_index = 0; mipmap_index <= maximum_mipmap_index && in_place; mipmap_index++)
+		{
+			byte *source = bitmap_mipmap_address(bitmap, mipmap_index);
+
+			in_place = source == (byte *)bitmap->base_address + level_offset;
+			level_offset += bitmap_mipmap_get_pixel_data_size(bitmap, mipmap_index);
+		}
+		if (in_place && level_offset <= size)
+		{
+			memset((byte *)bitmap->base_address + level_offset, 0, size - level_offset);
+			return TRUE;
+		}
+	}
+#endif
+
 	buffer = match_malloc("c:\\halo\\SOURCE\\rasterizer\\rasterizer_swizzle.c", 552, size);
 
 	if (buffer)
