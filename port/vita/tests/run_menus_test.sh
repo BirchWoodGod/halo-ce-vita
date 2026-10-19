@@ -89,7 +89,8 @@
 #   h3proftouch  taps: CAMPAIGN, SELECT PROFILE's New Profile (its icon and
 #            label): Rookie made, the lobby; the lobby's Back: SELECT PROFILE
 #   h3customize  CUSTOMIZATION (menus/halo3/customize.xml), with
-#            HALO_TEST_PROFILE's profile: the name typed, the colour, the stick
+#            HALO_TEST_PROFILE's profile: its list's card shows the profile's
+#            Spartan (as SELECT PROFILE's); the name typed, the colour, the stick
 #            layout, the look sensitivity and invert look changed, Circle saves
 #            them; blam.sav and SaveMeta.xbx read back (the other fields kept),
 #            then the harness started again on that save: the editor shows
@@ -589,7 +590,7 @@ for case in $cases; do
 			grep -aq "scene packs: $pack" "$log" || fail h3lobbyscenes "no \"$pack\""
 		done
 		for made in "objects: h3/campaign/screen: made" "objects: h3/mp/screen: made" "objects: h3/forge/lobby: made" \
-			"object 0: vehicles.warthog.warthog (menu_campaign) at .* pitch 18" \
+			"object 0: vehicles.warthog.warthog (menu_campaign) at .* facing 268 pitch 22" \
 			"object 1: characters.cyborg.cyborg seated as W-driver" \
 			"object 2: characters.marine_armored.marine_armored seated as W-gunner" \
 			"object 3: characters.marine_armored.marine_armored seated as W-passenger" \
@@ -730,6 +731,12 @@ for case in $cases; do
 		grep -aq "menus: h3 customize: saved Vita Chief: color 2, stick 1, buttons 0, look 5, invert 1" "$log" ||
 			fail h3customize "Circle did not save the changes"
 		h3_no_xbox_profiles h3customize
+		# (CUSTOMIZATION's profile list: the card shows the focused profile's Spartan, as SELECT
+		# PROFILE's, before the editor's own preview)
+		grep -aq "menus: h3 profiles: [0-9]* profiles* (customization)" "$log" &&
+			grep -aq "menus: h3 profiles: the card's Spartan asked for in colour" "$log" &&
+			grep -aq "menus: h3 profiles: the card shows the Spartan" "$log" ||
+			fail h3customize "CUSTOMIZATION's profile list did not show the profile's Spartan"
 		# (the preview: the scene packs' Spartan in the editor's window, in the profile's colour - its
 		# RANDOM shown white -, made again in RED as COLOR changes, let go with the editor)
 		grep -aE "h3 customize: .*preview|h3 scene object 6|h3 scene: h3/custom" "$log"

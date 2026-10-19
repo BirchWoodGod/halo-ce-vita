@@ -187,9 +187,9 @@ art (tools/halo3_menu_art.py). -->
 	planet; in front of it (scene_object=, the menu_multiplayer pack) three white Spartans: one
 	jumping with a rocket launcher, one holding the flag, one crouching with a sniper rifle) -->
 	<widget name="h3/mp/screen" flags="pass_unhandled_to_focused_child" scene="multiplayer -40 -1.8 15.5 0 0 0 55"
-		scene_object="menu_multiplayer:cyborg_mp 2.5 0.13 -0.28 60 pitch=-8 color=0 weapon=rocket_launcher anim=airborne frame=16;
-			menu_multiplayer:cyborg_mp 2.6 0.61 -0.71 15 color=0 weapon=flag;
-			menu_multiplayer:cyborg_mp 2.4 1.0 -0.67 -50 color=0 weapon=sniper_rifle anim=idle stance=crouch">
+		scene_object="menu_multiplayer:cyborg_mp 2.3 0.1 -0.2 45 pitch=-10 color=0 weapon=rocket_launcher anim=airborne frame=20;
+			menu_multiplayer:cyborg_mp 3.2 0.75 -0.76 0 color=0 weapon=flag;
+			menu_multiplayer:cyborg_mp 2.3 0.98 -0.66 -40 color=0 weapon=sniper_rifle anim=idle stance=crouch">
 		<on event="created" run="mp type menu initialize"/>
 		<on event="created" run="port mp screen init"/>
 		<on event="created" run="port h3 mp init"/>

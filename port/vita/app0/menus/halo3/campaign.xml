@@ -128,9 +128,10 @@ rest this folder's art. -->
 	pitch ticks fov", world units and degrees -: the galaxy and a band of the ring; in front of it
 	(scene_object=, menu_scene_objects.c; the menu_campaign pack, app0:packs) the Master Chief at
 	the wheel of a Warthog caught mid-jump - its nose up, its wheels hanging, held still: no dust -,
-	a Marine on its gun and one beside him) -->
+	a Marine on its gun and one beside him; seen from its left, banked to its left so that the
+	Chief at the wheel shows) -->
 	<widget name="h3/campaign/screen" flags="pass_unhandled_to_focused_child" scene="load_campaign -15 5 0 -20 25 0 50"
-		scene_object="menu_campaign:warthog 4.2 0.88 -0.42 300 pitch=18 roll=-6;
+		scene_object="menu_campaign:warthog 4.2 0.82 -0.42 268 pitch=22 roll=14;
 			menu_campaign:cyborg in=1 seat=driver;
 			menu_campaign:marine_armored in=1 seat=gunner;
 			menu_campaign:marine_armored in=1 seat=passenger weapon=assault_rifle">

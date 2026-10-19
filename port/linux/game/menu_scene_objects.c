@@ -18,7 +18,8 @@ units) - turned facing degrees from facing the camera (positive: its front
 to the picture's left). The options, each <name>=<value>:
 
 	pitch=<degrees>    its nose up (a Warthog mid-jump), roll=<degrees> its
-	                   right side down
+	                   left side down (banked to its left; negative: to its
+	                   right)
 	color=<0..17>      in that multiplayer colour (0: white), or
 	                   color=profile, the first local player's; without it,
 	                   the object's own colours
@@ -530,7 +531,7 @@ static void entry_position(struct menu_scene_object const *object, real_point3d 
 
 /* where the object stands, and its facing: toward the camera (or the entry
 it looks at, in the picture's plane), turned by facing about the picture's
-up, then its nose pitched up and its right side rolled down - so that it
+up, then its nose pitched up and its left side rolled down - so that it
 stands upright in the picture whatever the camera's pitch (a flying biped
 keeps its forward's pitch; its up follows it: biped_snap_facing) */
 static void object_place(struct menu_scene_object const *object, real_point3d *position, real_vector3d *forward,
@@ -589,7 +590,8 @@ static void object_place(struct menu_scene_object const *object, real_point3d *p
 		real c = (real)cos(angle), s = (real)sin(angle);
 		real_vector3d u = *up;
 
-		/* (its right: forward x up) */
+		/* (its right: forward x up; its up leans to its left, its left side
+		down) */
 		cross_product3d(forward, &u, &right);
 		up->i = u.i * c - right.i * s;
 		up->j = u.j * c - right.j * s;

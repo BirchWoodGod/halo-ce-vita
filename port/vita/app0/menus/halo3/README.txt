@@ -127,7 +127,7 @@ an object of a scene pack (app0:packs/<pack>.txt: its recipe's tag whose name
 ends in <tag>, '_' for a space) placed in the camera's frame (world units:
 along the view, right of it, up in the picture; facing in degrees from facing
 the camera, or the entry it looks at), and its options: pitch= and roll=
-(degrees: a Warthog's nose up), color= (a multiplayer colour, 0 white, or
+(degrees: a Warthog's nose up; banked to its left), color= (a multiplayer colour, 0 white, or
 profile), weapon=[<pack>:]<tag> (in its hands), anim= (its own animation named
 after its seat and weapon, "airborne", "idle", or whole with '_' for spaces),
 frame= (that frame held; without it looped), stance=crouch, in=<entry>
@@ -139,12 +139,13 @@ objects stand upright in the picture whatever the camera's pitch and are lit
 by a light of their own (a key from the upper left, a cool rim, an ambient:
 ui.map's space has no lightmap under them).
 - campaign.xml: the Master Chief at the wheel of a Warthog caught mid-jump,
-  its nose up and wheels hanging, a Marine on its gun and one beside him
+  its nose up and wheels hanging, banked to its left so that the Chief shows,
+  a Marine on its gun and one beside him
   (menu_campaign: from the player's a30, b30, b40 or a10).
 - multiplayer.xml: three white Spartans - jumping with a rocket launcher (a
   held frame of its airborne animation), holding the flag, crouching with a
   sniper rifle (menu_multiplayer: from the player's multiplayer maps).
-- forge_lobby.xml: 343 Guilty Spark looking at a Warthog (menu_monitor: from
+- forge_lobby.xml: 343 Guilty Spark behind a Warthog, looking at it (menu_monitor: from
   the player's c20, c10, c40 or d40; the Warthog menu_campaign's).
 - main.xml: the ring's own flight, nothing in it.
 The packs are built on the machine from the player's own maps the first time a
