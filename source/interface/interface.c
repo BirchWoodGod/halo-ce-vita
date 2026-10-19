@@ -106,6 +106,7 @@ symbols in this file:
 #include "units/units.h"
 #ifdef HALO_LINUX
 #include "latency_meter.h"
+#include "party_chat_overlay.h"
 #endif
 
 /* ---------- constants */
@@ -481,6 +482,8 @@ void interface_draw_fullscreen_overlays(
 	/* port: a network game's round trip to the host
 	(port/linux/game/latency_meter.c) */
 	latency_meter_draw();
+	/* port: the party's chat (port/linux/game/party_chat_overlay.c) */
+	party_chat_overlay_draw();
 #endif
 	main_framerate_render();
 	render_debug_profile();

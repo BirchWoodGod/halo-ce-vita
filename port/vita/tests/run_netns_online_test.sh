@@ -3756,6 +3756,8 @@ party)
 		grep -aq "system link: in another's lobby\|system link: in a network game" "$log" ||
 			fail "the $side did not get into Alpha's game"
 		grep -aq "party: chat from Alpha: hello party" "$log" || fail "the $side did not read Alpha's chat (cleaned)"
+		grep -aq "party: chat shown over the game: Alpha: hello party" "$log" ||
+			fail "the $side did not show Alpha's chat over the game"
 		grep -aqE "party: $first( #[A-Z0-9]{4})? leads the party now" "$log" ||
 			fail "the $side did not see $first, the longest-standing, lead once Alpha left"
 	done

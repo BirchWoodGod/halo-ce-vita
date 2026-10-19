@@ -104,7 +104,7 @@ enum
 	HALO_TEXT_INPUT_OPEN,
 	HALO_TEXT_INPUT_DONE,
 	HALO_TEXT_INPUT_CANCELLED,
-	HALO_TEXT_INPUT_SIZE = 64,
+	HALO_TEXT_INPUT_SIZE = 128,
 };
 
 extern volatile int halo_text_input_state;

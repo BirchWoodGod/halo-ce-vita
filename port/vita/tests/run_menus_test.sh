@@ -1394,10 +1394,10 @@ for case in $cases; do
 			fail h3friends "the code changed between starts" ;;
 	h3party)
 		# (FRIENDS; down three to PARTY, Cross: the PARTY screen (internet play off: no party, how to
-		# make one); B: FRIENDS again (on ADD FRIEND); down five to Bravo, Triangle: the options,
-		# offline no INVITE TO PARTY; B, B)
+		# make one); Square (QUICK CHAT) and Triangle (type): not in a party, said; B: FRIENDS again
+		# (on ADD FRIEND); down five to Bravo, Triangle: the options, offline no INVITE TO PARTY; B, B)
 		friends_seed "$out/h3friends-save"
-		save_from="$out/h3friends-save" run h3party "$menus_data" 40 "$h3friendspad down:150:500 down:150:500 down:150:500 a wait:150:3000 b wait:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 y wait:150:2500 b wait:150:2000 b wait:150:2000" \
+		save_from="$out/h3friends-save" run h3party "$menus_data" 45 "$h3friendspad down:150:500 down:150:500 down:150:500 a wait:150:3000 x wait:150:1500 y wait:150:1500 b wait:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 y wait:150:2500 b wait:150:2000 b wait:150:2000" \
 			HALO_MENU_STYLE=halo3 HALO_TEST_FRIENDS_SHOW=online
 		check_h3 h3party halo3
 		log=$out/h3party/run.log
@@ -1406,6 +1406,9 @@ for case in $cases; do
 		grep -aq "menus: the PARTY screen opened" "$log" && grep -aq "ui: screen pc.h3.party.screen" "$log" ||
 			fail h3party "the PARTY screen did not open"
 		grep -aq "menus: h3 party: Go online to make a party" "$log" || fail h3party "the PARTY screen did not say go online"
+		[ "$(grep -ac "menus: h3 party: Not in a party" "$log")" -ge 2 ] ||
+			fail h3party "QUICK CHAT and TYPE out of a party did not say so"
+		grep -aq "ui: screen pc.h3.party.quick" "$log" && fail h3party "QUICK CHAT opened out of a party"
 		grep -a "ui: screen" "$log" | grep -A1 "pc.h3.party.screen" | tail -1 | grep -q "pc.h3.friends.screen" ||
 			fail h3party "B did not go back to FRIENDS"
 		grep -aq "ui: screen pc.h3.friends.options" "$log" || fail h3party "Triangle did not open a friend's options" ;;

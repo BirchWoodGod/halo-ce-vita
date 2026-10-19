@@ -379,6 +379,8 @@ enum
 	ACTION_FRIEND_ADD,
 	/* (the Party page) this Vita out of its party */
 	ACTION_PARTY_LEAVE,
+	/* (the Party page) a chat message typed on the system's keyboard */
+	ACTION_PARTY_MESSAGE,
 };
 
 struct setting
@@ -674,6 +676,10 @@ static struct setting settings[] = {
 	The Friends page's first row: the Multiplayer tab is a screen's height;
 	SELECT + D-pad up opens it at once) */
 	PAGE_ROW("Party", "Invite friends, follow the leader, leave", PAGE_FRIENDS, PAGE_PARTY),
+	/* (party chat: typed on the system's keyboard; quick chat is the page's
+	line under it) */
+	{ "Send a message", NULL, 0, 0, { NULL }, { NULL }, "Party chat: type a message to your party", 0,
+		PAGE_PARTY, KIND_ACTION, ACTION_PARTY_MESSAGE },
 	{ "Leave the party", NULL, 0, 0, { NULL }, { NULL }, "You stay where you are; the others go on together", 0,
 		PAGE_PARTY, KIND_ACTION, ACTION_PARTY_LEAVE },
 	{ "Add a friend", NULL, 0, 0, { NULL }, { NULL }, "Type a friend's code: they accept, then you're friends", 0,
@@ -1078,6 +1084,12 @@ static int party_friends_view[P2P_FRIEND_ENTRIES_MAXIMUM];
 static int party_friends_count;
 static int party_friends_scroll;
 static struct p2p_party_member party_confirm_member;
+/* the quick chat preset shown on its line (left and right change it, cross
+sends it); a message being typed for the party */
+static int party_preset;
+static int party_message_pending;
+/* the chat lines the page shows (the newest) */
+#define PARTY_CHAT_PAGE_LINES 3
 /* (the party's leader) a friend's game warned of: fewer open slots than the
 party; a second press joins it */
 static char party_warned_id[P2P_FRIEND_ID_SIZE];
@@ -2546,6 +2558,8 @@ enum
 	LINE_PARTY_MEMBER,
 	LINE_PARTY_INVITE,
 	LINE_PARTY_FRIEND,
+	/* (the Party page's quick chat: its preset, party_preset) */
+	LINE_PARTY_PRESET,
 	/* (a line that is not chosen: a warning, a note) */
 	LINE_INFO,
 	/* (a heading over rows: headings; not chosen either) */
@@ -2937,8 +2951,28 @@ static int page_lines(struct line *lines)
 	}
 	if (page == PAGE_PARTY)
 	{
+		int in_party;
+
 		lines[count].type = LINE_INFO;
-		p2p_party_status(lines[count++].text, sizeof(lines[0].text));
+		in_party = p2p_party_status(lines[count++].text, sizeof(lines[0].text)) > 1;
+		/* (the chat: its newest lines, then quick chat) */
+		if (in_party)
+		{
+			struct p2p_party_chat_line chat[P2P_PARTY_CHAT_LINES];
+			int chat_count = p2p_party_chat_lines(chat, P2P_PARTY_CHAT_LINES, 0), first;
+
+			first = chat_count > PARTY_CHAT_PAGE_LINES ? chat_count - PARTY_CHAT_PAGE_LINES : 0;
+			for (index = first; index < chat_count; index++)
+			{
+				lines[count].type = LINE_INFO;
+				if (chat[index].notice)
+					snprintf(lines[count++].text, sizeof(lines[0].text), "%.100s", chat[index].text);
+				else
+					snprintf(lines[count++].text, sizeof(lines[0].text), "%.20s: %.100s", chat[index].name, chat[index].text);
+			}
+			lines[count].type = LINE_PARTY_PRESET;
+			lines[count++].index = party_preset;
+		}
 		for (index = 0; index < party_invites_count; index++)
 		{
 			lines[count].type = LINE_PARTY_INVITE;
@@ -3316,6 +3350,8 @@ static void help_line(char *text, int size, const struct line *line)
 
 		snprintf(text, (size_t)size, "%s: %.50s", entry->name, entry->party[0] ? entry->party : entry->activity);
 	}
+	else if (line && line->type == LINE_PARTY_PRESET)
+		snprintf(text, (size_t)size, "%s", T("Said to your party at once, in their language"));
 	else if (line && line->type == LINE_FRIEND)
 	{
 		const struct p2p_friend_entry *entry = &friends_view[line->index];
@@ -3416,6 +3452,8 @@ static void footer_line(char *text, int size, const struct line *line)
 		middle = T("Cross: join party  Square: no  ");
 	else if (line && line->type == LINE_PARTY_FRIEND)
 		middle = T("Cross: invite to party   ");
+	else if (line && line->type == LINE_PARTY_PRESET)
+		middle = T("Left/right: choose  Cross: send  ");
 	else if (line && line->type == LINE_FRIEND)
 	{
 		const struct p2p_friend_entry *entry = &friends_view[line->index];
@@ -3653,6 +3691,9 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 		else if (line->type == LINE_PARTY_FRIEND)
 			length += snprintf(text + length, (size_t)(size - length), "\n%.20s\x02  %s",
 				friends_view[party_friends_view[line->index]].name, T("Invite"));
+		else if (line->type == LINE_PARTY_PRESET)
+			length += snprintf(text + length, (size_t)(size - length), "\n%s\x02< %.24s >", T("Quick chat"),
+				p2p_party_chat_preset_text(party_preset));
 		else if (line->type == LINE_FRIEND)
 		{
 			const struct p2p_friend_entry *entry = &friends_view[line->index];
@@ -4777,6 +4818,17 @@ static void act(const struct setting *setting)
 	case ACTION_FRIEND_ADD:
 		screen = SCREEN_FRIEND_CODE;
 		break;
+	case ACTION_PARTY_MESSAGE:
+		if (p2p_party_status(NULL, 0) < 2)
+			set_notice("%s", p2p_party_outcome_text(P2P_PARTY_NOT_IN_PARTY));
+		else if (vita_ime_open(T("Party chat"), "", P2P_PARTY_CHAT_LENGTH, 0) != 0)
+			set_notice("%s", T("The keyboard did not open"));
+		else
+		{
+			party_message_pending = 1;
+			vgxm_menu_set(NULL, 0);
+		}
+		break;
 	case ACTION_PARTY_LEAVE:
 	{
 		int outcome = p2p_party_leave();
@@ -5172,6 +5224,20 @@ static void party_input(const struct line *line, unsigned long pressed)
 			p2p_party_outcome_text(outcome));
 		vita_host_log(log);
 	}
+	else if (line->type == LINE_PARTY_PRESET)
+	{
+		if (pressed & VITA_BUTTON_LEFT)
+			party_preset = (party_preset + P2P_PARTY_PRESETS - 1) % P2P_PARTY_PRESETS;
+		else if (pressed & VITA_BUTTON_RIGHT)
+			party_preset = (party_preset + 1) % P2P_PARTY_PRESETS;
+		else if (pressed & VITA_BUTTON_CROSS)
+		{
+			outcome = p2p_party_chat_preset(party_preset);
+			set_notice("%s", outcome == P2P_PARTY_DONE ? T("Sent to your party") : p2p_party_outcome_text(outcome));
+			snprintf(log, sizeof(log), "settings: party: quick chat %d: %s", party_preset, p2p_party_outcome_text(outcome));
+			vita_host_log(log);
+		}
+	}
 	else if (line->type == LINE_PARTY_FRIEND && (pressed & VITA_BUTTON_CROSS))
 	{
 		struct p2p_friend_entry entry = friends_view[party_friends_view[line->index]];
@@ -5388,15 +5454,27 @@ typed goes to its row (or the password to the chosen public game's join),
 and the panel is back */
 static int ime_input(void)
 {
-	char typed[64];
+	char typed[P2P_PARTY_CHAT_SIZE + 8];
 	int result;
 
-	if (!ime_setting && !browse_join_pending)
+	if (!ime_setting && !browse_join_pending && !party_message_pending)
 		return 0;
 	result = vita_ime_poll(typed, sizeof(typed));
 	if (result == 0)
 		return 1;
-	if (ime_setting)
+	if (party_message_pending)
+	{
+		party_message_pending = 0;
+		if (result > 0 && typed[0])
+		{
+			int outcome = p2p_party_chat_send(typed);
+
+			set_notice("%s", outcome == P2P_PARTY_DONE ? T("Sent to your party") : p2p_party_outcome_text(outcome));
+			vita_host_log(outcome == P2P_PARTY_DONE ? "settings: party: a message sent (settings panel)" :
+				"settings: party: a message not sent");
+		}
+	}
+	else if (ime_setting)
 	{
 		struct play_text *text = play_text_named(ime_setting->variable);
 
@@ -5670,6 +5748,28 @@ int vita_settings_input(const struct vita_host_pad *pad)
         both_since = 0;
         return 1;
     }
+	/* port: SELECT + D-pad up: the Party page at once (party chat, in play
+	and in the menus), or closed if it is the one open; the game sees
+	neither (the panel's SELECT + down's way) */
+	if ((buttons & VITA_BUTTON_SELECT) && (pressed & VITA_BUTTON_UP))
+	{
+		both_since = 0;
+		if (panel_open && page == PAGE_PARTY)
+			close_panel();
+		else
+		{
+			tab = TAB_MULTIPLAYER;
+			page = PAGE_PARTY;
+			screen = SCREEN_LIST;
+			notice[0] = 0;
+			if (!panel_open)
+				panel_begin();
+			else
+				show();
+			vita_host_log("settings: party: the Party page (SELECT + up)");
+		}
+		return 1;
+	}
 	/* (the game's menus asked for the panel: the Halo 3 main menu's Start,
 	which the panel never sees pressed, being held already) */
 	if (__atomic_exchange_n(&halo_settings_panel_request, 0, __ATOMIC_ACQ_REL) && !panel_open)
@@ -5850,7 +5950,7 @@ int vita_settings_input(const struct vita_host_pad *pad)
 					return 1;
 			}
 			else if (line->type == LINE_PARTY_MEMBER || line->type == LINE_PARTY_INVITE ||
-				line->type == LINE_PARTY_FRIEND)
+				line->type == LINE_PARTY_FRIEND || line->type == LINE_PARTY_PRESET)
 			{
 				party_input(line, pressed);
 			}

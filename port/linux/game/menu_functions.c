@@ -321,6 +321,8 @@ enum
 	_function_h3_party_option,
 	_function_h3_party_page_up,
 	_function_h3_party_page_down,
+	_function_h3_party_type,
+	_function_h3_party_preset,
 };
 
 /* in port_game_data_input_names' order */
@@ -369,6 +371,8 @@ enum
 	_input_h3_pregame,
 	_input_h3_party,
 	_input_h3_party_options,
+	_input_h3_party_chat,
+	_input_h3_party_quick,
 };
 
 /* what a line of typing is for */
@@ -384,6 +388,7 @@ enum
 	_typing_forge_name,
 	_typing_fileshare_rename,
 	_typing_friend_code,
+	_typing_party_chat,
 };
 
 /* the password and code screens' help lines (their strings' order) */
@@ -6767,6 +6772,8 @@ static void h3_party_message(char const *text)
 	platform_log("menus: h3 party: %s", text);
 }
 
+static void h3_party_chat_outcome(int outcome);
+
 /* the rows' items: LEAVE PARTY (in a party), the invites, the members */
 static int h3_party_leave_rows(void)
 {
@@ -6858,6 +6865,17 @@ static void h3_party_update(struct widget_instance *list)
 	char text[256];
 	int chosen;
 
+	{
+		char typed[HALO_TEXT_INPUT_SIZE];
+
+		if (typing_done(_typing_party_chat, typed, sizeof(typed)) && typed[0])
+		{
+			int outcome = p2p_party_chat_send(typed);
+
+			platform_log("menus: h3 party: a message typed: %s", p2p_party_outcome_text(outcome));
+			h3_party_chat_outcome(outcome);
+		}
+	}
 	h3_party_refresh(FALSE);
 	if (list != h3_party.list || list->creation_time != h3_party.list_creation_time)
 	{
@@ -6945,11 +6963,15 @@ static void h3_party_update(struct widget_instance *list)
 	text_show(named(screen, "party_message"), h3_party.message[0] &&
 		system_milliseconds() - h3_party.message_time < H3_PARTY_MESSAGE_MILLISECONDS ? h3_party.message : "");
 	text_show(named(screen, "a_label"), invite ? T("Join party") : member ? T("Options") : h3_party_items() ? T("Leave") : "");
-	text_show(named(screen, "x_label"), invite ? T("No") : "");
+	text_show(named(screen, "x_label"), invite ? T("No") : h3_party.member_count > 1 ? T("Quick chat") : "");
 	if (named(screen, "a_butn"))
 		widget_instance_set_visibility_recursive(named(screen, "a_butn"), h3_party_items() != 0);
 	if (named(screen, "x_butn"))
-		widget_instance_set_visibility_recursive(named(screen, "x_butn"), invite != NULL);
+		widget_instance_set_visibility_recursive(named(screen, "x_butn"), invite != NULL || h3_party.member_count > 1);
+	if (named(screen, "y_butn"))
+		widget_instance_set_visibility_recursive(named(screen, "y_butn"), h3_party.member_count > 1);
+	if (named(screen, "y_label"))
+		widget_instance_set_visibility_recursive(named(screen, "y_label"), h3_party.member_count > 1);
 }
 
 /* (port h3 party act: a row's Cross) TRUE: the member's options open */
@@ -7001,8 +7023,9 @@ static boolean h3_party_act(struct widget_instance *widget)
 	return TRUE;
 }
 
-/* (port h3 party second: Square) an invite said no to */
-static void h3_party_second(void)
+/* (port h3 party second: Square) an invite said no to; else QUICK CHAT
+opens (TRUE) in a party */
+static boolean h3_party_second(void)
 {
 	struct p2p_party_invite const *invite = h3_party_item_invite(h3_party_chosen_index());
 
@@ -7013,6 +7036,89 @@ static void h3_party_second(void)
 
 		h3_party_message(outcome == P2P_PARTY_DONE ? T("Party invite declined") : p2p_party_outcome_text(outcome));
 		h3_party_refresh(TRUE);
+		return FALSE;
+	}
+	if (h3_party.member_count < 2)
+	{
+		h3_party_message(p2p_party_outcome_text(P2P_PARTY_NOT_IN_PARTY));
+		return FALSE;
+	}
+	platform_log("menus: h3 party: QUICK CHAT");
+	return TRUE;
+}
+
+/* (port h3 party type: Triangle) a message typed (the system's keyboard on
+the Vita), sent once typed (h3_party_update) */
+static void h3_party_type(void)
+{
+	if (h3_party.member_count < 2)
+	{
+		h3_party_message(p2p_party_outcome_text(P2P_PARTY_NOT_IN_PARTY));
+		return;
+	}
+	typing_begin(_typing_party_chat, T("Party chat"), "", P2P_PARTY_CHAT_LENGTH, FALSE);
+}
+
+/* a chat's outcome said (sent: nothing; the line shows) */
+static void h3_party_chat_outcome(int outcome)
+{
+	if (outcome != P2P_PARTY_DONE)
+		h3_party_message(p2p_party_outcome_text(outcome));
+}
+
+/* (port h3 party quick) QUICK CHAT's rows: the presets in the language
+chosen */
+static void h3_party_quick_update(struct widget_instance *list)
+{
+	struct widget_instance *child;
+
+	for (child = list->child; child; child = child->next)
+	{
+		long preset;
+
+		if (strncmp(child->name, "preset_", 7) || !(child->name[7] >= '1' && child->name[7] <= '8'))
+			continue;
+		preset = child->name[7] - '1';
+		text_show(child, p2p_party_chat_preset_text((int)preset));
+	}
+}
+
+/* (port h3 party preset: a row of QUICK CHAT) sent */
+static void h3_party_preset(struct widget_instance *widget)
+{
+	long preset = widget && !strncmp(widget->name, "preset_", 7) ? widget->name[7] - '1' : -1;
+	int outcome;
+
+	if (preset < 0 || preset >= P2P_PARTY_PRESETS)
+		return;
+	outcome = p2p_party_chat_preset((int)preset);
+	platform_log("menus: h3 party: quick chat \"%s\": %s", p2p_party_chat_preset_text((int)preset),
+		p2p_party_outcome_text(outcome));
+	h3_party_chat_outcome(outcome);
+}
+
+/* (port h3 party chat) the chat's newest lines, oldest first */
+static void h3_party_chat_update(struct widget_instance *panel)
+{
+	struct p2p_party_chat_line lines[P2P_PARTY_CHAT_LINES];
+	int count = p2p_party_chat_lines(lines, P2P_PARTY_CHAT_LINES, 0), first = count > 5 ? count - 5 : 0, row;
+
+	for (row = 0; row < 5; row++)
+	{
+		char name[16], text[P2P_PARTY_NAME_SIZE + P2P_PARTY_CHAT_SIZE + 4];
+
+		snprintf(name, sizeof(name), "chat_%d", row + 1);
+		text[0] = 0;
+		if (first + row < count)
+		{
+			struct p2p_party_chat_line const *line = &lines[first + row];
+
+			if (line->notice)
+				snprintf(text, sizeof(text), "%s", line->text);
+			else
+				snprintf(text, sizeof(text), "%s: %s", line->name, line->text);
+		}
+		row_column(panel, name, text[0] ? text : " ");
 	}
 }
 
@@ -8388,7 +8494,12 @@ boolean pc_menu_event_function_invoke(
 	case _function_h3_party_act:
 		return h3_party_act(widget);
 	case _function_h3_party_second:
-		h3_party_second();
+		return h3_party_second();
+	case _function_h3_party_type:
+		h3_party_type();
+		return TRUE;
+	case _function_h3_party_preset:
+		h3_party_preset(widget);
 		return TRUE;
 	case _function_h3_party_option:
 		h3_party_option(widget);
@@ -8824,6 +8935,13 @@ void pc_menu_game_data_function_invoke(
 	case _input_h3_party_options:
 		if (widget->type == _ui_widget_type_column_list)
 			h3_party_options_update(widget);
+		break;
+	case _input_h3_party_chat:
+		h3_party_chat_update(widget);
+		break;
+	case _input_h3_party_quick:
+		if (widget->type == _ui_widget_type_column_list)
+			h3_party_quick_update(widget);
 		break;
 	default:
 		break;

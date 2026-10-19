@@ -424,7 +424,43 @@ int p2p_party_join_warning(int players, int maximum, char *text, int size)
 }
 const char *p2p_party_outcome_text(int outcome)
 {
-	return outcome == P2P_PARTY_DONE ? "Done" : "Not for this one";
+	return outcome == P2P_PARTY_DONE ? "Done" : outcome == P2P_PARTY_NOT_IN_PARTY ? "Not in a party" : "Not for this one";
+}
+static char party_said[P2P_PARTY_CHAT_SIZE];
+int p2p_party_chat_lines(struct p2p_party_chat_line *lines, int maximum_count, unsigned long after)
+{
+	static const char *const said[][2] = { { "Bravo", "hi" }, { "Delta #K7QX", "ready?" }, { "", "Echo joined the party" },
+		{ "Bravo", "go go" } };
+	int count = 0, index;
+
+	(void)after;
+	for (index = 0; index < 4 && count < maximum_count && test_party_count > 1; index++)
+	{
+		memset(&lines[count], 0, sizeof(lines[count]));
+		lines[count].number = (unsigned long)index + 1;
+		snprintf(lines[count].name, sizeof(lines[count].name), "%s", said[index][0]);
+		snprintf(lines[count].text, sizeof(lines[count].text), "%s", said[index][1]);
+		lines[count].notice = !said[index][0][0];
+		count++;
+	}
+	return count;
+}
+const char *p2p_party_chat_preset_text(int preset)
+{
+	static const char *const presets[P2P_PARTY_PRESETS] = { "Ready!", "Wait for me", "Let's go", "Good game", "Join me",
+		"Back in a minute", "Yes", "No" };
+
+	return preset >= 0 && preset < P2P_PARTY_PRESETS ? presets[preset] : "";
+}
+int p2p_party_chat_preset(int preset)
+{
+	snprintf(party_said, sizeof(party_said), "preset %d", preset);
+	return P2P_PARTY_DONE;
+}
+int p2p_party_chat_send(const char *text)
+{
+	snprintf(party_said, sizeof(party_said), "text %s", text);
+	return P2P_PARTY_DONE;
 }
 
 int p2p_hosting_code(char *code, int size)
@@ -1697,6 +1733,41 @@ static void test_party_page(void)
 	press(VITA_BUTTON_TRIANGLE);
 	press(VITA_BUTTON_CROSS);
 	check(!strcmp(party_acted, "kick d1"), "cross: removed");
+	/* party chat: the newest lines, quick chat, a message typed */
+	check(strstr(menu, "\n\x04" "Delta #K7QX: ready?\n") && strstr(menu, "\n\x04" "Echo joined the party\n") &&
+		strstr(menu, "\n\x04" "Bravo: go go\n") && !strstr(menu, ": hi\n"), "the chat's three newest lines");
+	check(to_line("Quick chat") && strstr(menu, "\nQuick chat\x02< Ready! >\n"), "quick chat: its preset");
+	press(VITA_BUTTON_RIGHT);
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nQuick chat\x02< Let's go >\n") != NULL, "right: the next presets");
+	press(VITA_BUTTON_CROSS);
+	check(!strcmp(party_said, "preset 2") && strstr(menu, "Sent to your party"), "cross: the preset sent");
+	clock_us += 6000000;
+	to_line("Send a message");
+	press(VITA_BUTTON_CROSS);
+	check(ime_open_now && !strcmp(ime_title, "Party chat") && ime_maximum == P2P_PARTY_CHAT_LENGTH,
+		"Send a message: the keyboard, 120 characters");
+	snprintf(ime_typed, sizeof(ime_typed), "see you there");
+	ime_result = 1;
+	press(0);
+	check(!strcmp(party_said, "text see you there") && strstr(menu, "Sent to your party"), "the message typed: sent");
+	/* SELECT + D-pad up: the Party page at once, again: closed */
+	press(VITA_BUTTON_CIRCLE);
+	press(VITA_BUTTON_CIRCLE);
+	check(!panel_open, "the panel closed");
+	press(VITA_BUTTON_SELECT | VITA_BUTTON_UP);
+	check(panel_open && page == PAGE_PARTY && strstr(menu, "\n\x03Multiplayer > Party\n"), "SELECT + up: the Party page");
+	press(0);
+	press(VITA_BUTTON_SELECT | VITA_BUTTON_UP);
+	check(!panel_open, "SELECT + up again: closed");
+	press(0);
+	panel_begin();
+	to_tab("Multiplayer");
+	to_line("Friends");
+	press(VITA_BUTTON_CROSS);
+	to_line("Party");
+	press(VITA_BUTTON_CROSS);
+	clock_us += 6000000;
 	to_line("Leave the party");
 	press(VITA_BUTTON_CROSS);
 	check(!strcmp(party_acted, "leave"), "Leave the party");

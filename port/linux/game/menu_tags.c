@@ -385,7 +385,7 @@ static char const *const port_function_names[] =
 	"port h3 join system link", "port h3 join split screen", "port h3 join a", "port h3 join previous",
 	"port h3 join next", "port h3 join leave", "port h3 pregame init",
 	"port h3 party init", "port h3 party act", "port h3 party second", "port h3 party option",
-	"port h3 party page up", "port h3 party page down",
+	"port h3 party page up", "port h3 party page down", "port h3 party type", "port h3 party preset",
 };
 
 /* the port's game data functions (menu_functions.c), from
@@ -407,7 +407,7 @@ static char const *const port_game_data_input_names[] =
 	"port h3 friends", "port h3 friends options", "port h3 friends panel",
 	"port h3 players", "port h3 players options",
 	"port h3 join", "port h3 pregame",
-	"port h3 party", "port h3 party options",
+	"port h3 party", "port h3 party options", "port h3 party chat", "port h3 party quick",
 };
 
 static struct

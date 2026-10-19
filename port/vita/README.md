@@ -165,6 +165,23 @@ second about x, y, z while the step is held, in place of the sensor;
 same all the time, and `HALO_GYRO_LOG=1` logs the yaw and pitch the game
 took (debug).
 
+## Party and party chat
+
+A party is up to eight friends who play together (`port/linux/src/p2p_party.h`):
+the leader invites friends (Halo 3 menus: FRIENDS, Triangle on a friend,
+INVITE TO PARTY, or a player's options on the PLAYERS screen; original menus:
+the settings panel's Multiplayer > Friends > Party). When the leader hosts a
+game the party joins its lobby by itself; when the leader joins another's
+game the party follows through that game's own join (a password game is never
+followed; a member who cannot get in is told why and stays in the party).
+**Select + D-pad up** opens the panel's Party page at once, in play or in the
+menus, for party chat: Send a message (the system's keyboard) and Quick chat
+(left and right choose a phrase, Cross sends it). Messages show at the left
+of the screen in play and on the Halo 3 PARTY screen (FRIENDS' PARTY row:
+Square quick chat, Triangle type). Everything goes through the friends'
+channel, sealed for the party's members alone; muting a member hides their
+chat on this Vita only.
+
 ## Settings panel
 
 Press **Select + D-pad down** (or hold **Select + Start** for about a second), in play or in the menus. **L and
