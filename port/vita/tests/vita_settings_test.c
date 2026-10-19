@@ -3174,6 +3174,23 @@ static void test_game_text_input(void)
 	check(frame(VITA_BUTTON_CIRCLE) == 1 && !panel_open, "settings request: circle closes it as ever");
 	frame(0);
 	check(frame(0) == 0, "settings request: then the game has the pad again");
+	/* the Halo 3 multiplayer pause's PARTY asks for the Party page ("port h3 mp pause party"); the
+	tab and page it was on put back after (the panel opens where it was left) */
+	{
+		int was_tab = tab, was_page = page, was_screen = screen;
+
+		halo_settings_panel_request = HALO_SETTINGS_PANEL_PARTY;
+		check(frame(0) == 1 && panel_open && page == PAGE_PARTY && strstr(menu, "\n\x03Multiplayer > Party\n") &&
+			!halo_settings_panel_request, "settings request: the multiplayer pause's PARTY opens the Party page");
+		frame(0);
+		press(VITA_BUTTON_CIRCLE);
+		press(VITA_BUTTON_CIRCLE);
+		check(!panel_open, "settings request: circle twice closes the Party page's panel");
+		check(frame(0) == 0, "settings request: then the game has the pad again (the Party page)");
+		tab = was_tab;
+		page = was_page;
+		screen = was_screen;
+	}
 }
 
 static void test_button_icons(void)
