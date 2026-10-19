@@ -9,6 +9,7 @@ docs/crossplay.md 6, T11).
 #include "lang.h"
 
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -185,6 +186,70 @@ int crossplay_guard_test_answer(void)
 		return -1;
 	return !strcmp(answer, "yes") || !strcmp(answer, "1");
 #endif
+}
+
+/* (network_wire.h's NETWORK_WIRE_ADVERTISED_VITA_HOST_FLAG, and
+ChupathingyCE's DELTA_ADVERTISED_FLAG, delta.h of 7d6d8f24) */
+enum
+{
+	ADVERTISED_VITA_HOST_FLAG = 0x40,
+	ADVERTISED_DELTA_FLAG = 0x04,
+};
+
+int crossplay_guard_platform_of_advertisement(int crossplay, int other_version, int flags)
+{
+	if (other_version)
+		return CROSSPLAY_PLATFORM_PC;
+	if (!crossplay || (flags & ADVERTISED_VITA_HOST_FLAG))
+		return CROSSPLAY_PLATFORM_VITA;
+	if (flags & ADVERTISED_DELTA_FLAG)
+		return CROSSPLAY_PLATFORM_CHUPA;
+	return CROSSPLAY_PLATFORM_OPENCE;
+}
+
+int crossplay_guard_platform_of_listing(int crossplay, int vita_host, int dedicated)
+{
+	if (!crossplay || vita_host)
+		return CROSSPLAY_PLATFORM_VITA;
+	return dedicated ? CROSSPLAY_PLATFORM_CHUPA : CROSSPLAY_PLATFORM_PC;
+}
+
+const char *crossplay_guard_tag(int platform)
+{
+	static const char *const tags[NUMBER_OF_CROSSPLAY_PLATFORMS] = { "VITA", "PC", "OPENCE", "CHUPA", "DAMNATION" };
+
+	return platform >= 0 && platform < NUMBER_OF_CROSSPLAY_PLATFORMS ? tags[platform] : tags[CROSSPLAY_PLATFORM_PC];
+}
+
+void crossplay_guard_row_badge(char *badge, int size, int platform, int crossplay, int dedicated, int verdict)
+{
+	int length;
+
+	if (!badge || size <= 0)
+		return;
+	length = snprintf(badge, (size_t)size, "%s%s", crossplay_guard_tag(platform), dedicated ? T(" SERVER") : "");
+	if (length < 0 || length >= size)
+		return;
+	if (platform == CROSSPLAY_PLATFORM_VITA)
+		snprintf(badge + length, (size_t)(size - length), "%s", crossplay ? "+PC" : "");
+	else
+		snprintf(badge + length, (size_t)(size - length), "%s", crossplay_guard_badge_suffix(verdict));
+}
+
+const char *crossplay_guard_platform_line(int platform, int crossplay)
+{
+	switch (platform)
+	{
+	case CROSSPLAY_PLATFORM_VITA:
+		return crossplay ? T("Hosted on a Vita: PC players can join") : T("Hosted on a Vita");
+	case CROSSPLAY_PLATFORM_OPENCE:
+		return T("Hosted on PC (OpenCE)");
+	case CROSSPLAY_PLATFORM_CHUPA:
+		return T("Hosted on PC (ChupathingyCE)");
+	case CROSSPLAY_PLATFORM_DAMNATION:
+		return T("Hosted on PC (DamnationCE)");
+	}
+	return T("Hosted on PC");
 }
 
 const char *crossplay_guard_badge(int crossplay, int dedicated)

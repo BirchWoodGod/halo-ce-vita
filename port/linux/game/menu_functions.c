@@ -203,6 +203,8 @@ enum
 	_function_browser_sort,
 	_function_browser_page_up,
 	_function_browser_page_down,
+	_function_browser_filter_next,
+	_function_browser_filter_previous,
 	_function_h3_servers_on,
 	_function_h3_servers_off,
 	_function_h3_campaign_init,
@@ -404,6 +406,8 @@ enum
 	_typing_fileshare_rename,
 	_typing_friend_code,
 	_typing_party_chat,
+	/* (a friend's game with a password: typed, then joined) */
+	_typing_friend_password,
 };
 
 /* the password and code screens' help lines (their strings' order) */
@@ -490,8 +494,10 @@ static struct
 	/* every game listed, sorted as the player chose (Y: browser_list.h),
 	and the rows showing some of them (entries, entry_count: the rows
 	filled), which scroll (view; page: a trigger's page asked for); the game
-	chosen (its id stays its own as the list changes) */
-	struct p2p_lobby_entry games[P2P_LOBBY_MAXIMUM_ENTRIES];
+	chosen (its id stays its own as the list changes). The Vitas' games
+	first, then the PCs', a header row before each group (browser_list_group:
+	two more than the games) */
+	struct p2p_lobby_entry games[P2P_LOBBY_MAXIMUM_ENTRIES + 2];
 	long game_count;
 	short sort;
 	short page;
@@ -528,6 +534,7 @@ static struct
 	boolean setup_held;
 	short held_maximum;
 	boolean held_private;
+	boolean held_with_pc;
 	/* to be opened from the main loop: the System Link screen, the password
 	screen */
 	boolean open_system_link;
@@ -2656,9 +2663,11 @@ static void h3_mp_lobby_update(struct widget_instance *widget)
 	snprintf(text, sizeof(text), T("1 Player (%d max)"), maximum);
 	text_show(named(screen, "players"), text);
 	text_show(named(screen, "ready"), T("Ready"));
+	/* (online: who can join a game hosted, network.host_crossplay - the
+	server browser lists the Vitas' games and the PCs' together, tagged) */
 	if (h3_mp.network == _h3_network_online)
-		snprintf(text, sizeof(text), "%s", network_wire_crossplay() ? T("Crossplay is on: turn it off to host") :
-			T("Host a game on the Internet, or join one."));
+		snprintf(text, sizeof(text), "%s", network_wire_host_crossplay() ?
+			T("Host a game Vitas and PC players can join, or join one.") : T("Host a game on the Internet, or join one."));
 	else if (h3_mp.network == _h3_network_system_link)
 		snprintf(text, sizeof(text), "%s", T("Play with the PS Vitas on your Wi-Fi network."));
 	else if (h3_mp.network == _h3_network_adhoc)
@@ -4518,14 +4527,89 @@ static void browser_test_games(void)
 		entry->players = (int)(index * 7 % 16);
 		entry->maximum = 16;
 		entry->open = entry->compatible = 1;
+		snprintf(entry->tag, sizeof(entry->tag), "%s", crossplay_guard_tag(CROSSPLAY_PLATFORM_VITA));
+		snprintf(entry->badge, sizeof(entry->badge), "%s", entry->tag);
 		if (both && atoi(both))
 		{
+			/* (every second one a PC game, OpenCE's or ChupathingyCE's in
+			turn; every fourth Vita one for Vitas and PC) */
 			if (index % 2)
-				snprintf(entry->badge, sizeof(entry->badge), "%s", T("PC"));
+			{
+				entry->platform = index % 4 == 1 ? CROSSPLAY_PLATFORM_OPENCE : CROSSPLAY_PLATFORM_CHUPA;
+				entry->crossplay = 1;
+			}
+			else
+				entry->crossplay = index % 4 == 2;
+			snprintf(entry->tag, sizeof(entry->tag), "%s", crossplay_guard_tag(entry->platform));
+			crossplay_guard_row_badge(entry->badge, (int)sizeof(entry->badge), entry->platform, entry->crossplay, 0,
+				CROSSPLAY_GUARD_OK);
 			entry->locked = index % 3 == 2 && (!menu_functions.lan || lan_with_online());
 		}
+		/* (the filter's, as the real lists') */
+		if (!network_wire_browser_shows(entry->platform == CROSSPLAY_PLATFORM_VITA))
+			menu_functions.game_count--;
 	}
 #endif
+}
+
+/* the games the browser lists, its header rows (browser_list_group) not
+counted */
+static long browser_games(void)
+{
+	return menu_functions.game_count - browser_list_header_count(menu_functions.games, (int)menu_functions.game_count);
+}
+
+/* the games the rows show, as the player counts them (1 on; the header
+rows not counted): the first and the last */
+static long browser_shown_first(void)
+{
+	long offset = menu_functions.view.offset;
+
+	return offset + 1 - browser_list_header_count(menu_functions.games, (int)offset);
+}
+
+static long browser_shown_last(void)
+{
+	long end = menu_functions.view.offset + menu_functions.entry_count;
+
+	return end - browser_list_header_count(menu_functions.games, (int)end);
+}
+
+/* the browsers' filter (network.browser_filter, "Browser shows": the
+settings panel's, and the D-pad's left and right on the browsers): its
+name as the hint says it */
+static char const *browser_filter_name(void)
+{
+	switch (network_wire_browser_filter())
+	{
+	case NETWORK_WIRE_FILTER_VITA:
+		return T("Vita games");
+	case NETWORK_WIRE_FILTER_PC:
+		return T("PC games");
+	}
+	return T("All games");
+}
+
+/* the groups as they change, in the log (the tests read it): the headers'
+names in their order */
+static void browser_groups_log(void)
+{
+	static char said[96];
+	char line[96] = "";
+	long index;
+
+	for (index = 0; index < menu_functions.game_count; index++)
+	{
+		size_t length = strlen(line);
+
+		if (menu_functions.games[index].header)
+			snprintf(line + length, sizeof(line) - length, "%s%s", length ? ", " : "", menu_functions.games[index].name);
+	}
+	if (strcmp(line, said))
+	{
+		snprintf(said, sizeof(said), "%s", line);
+		platform_log("menus: the browser's groups (%s): %s", browser_filter_name(), line[0] ? line : "none");
+	}
 }
 
 /* ---- the Halo 3 LAN browser (halo3/network.xml): the server browser's
@@ -4607,20 +4691,26 @@ static void lan_entries(void)
 		entry->open = game->open;
 		entry->has_teams = game->has_teams;
 		entry->compatible = 1;
-		/* (the crossplay wire's hosts are PC builds, with the online browser's
-		badges; else a Vita's games are the Vitas', a PC build's the PCs') */
-		if (network_wire_crossplay())
+		/* (every row's tag, as the online browser's: VITA for a Vita's game -
+		"+PC" when PC players can join it too - or the PC build's, with its
+		badges, a PC co-op game Experimental (no game engine, as OpenCE hosts
+		co-op); a PC build of this tree's games are the PCs') */
+		entry->crossplay = game->crossplay;
+		entry->platform = game->platform;
+#ifndef HALO_PORT_VITA_NETWORK
+		entry->platform = CROSSPLAY_PLATFORM_PC;
+#endif
+		if (game->pc_coop)
+			entry->coop = TRUE;
 		{
-			int verdict = crossplay_guard_judge(entry->coop, entry->players, entry->maximum);
+			int verdict = entry->platform == CROSSPLAY_PLATFORM_VITA ? CROSSPLAY_GUARD_OK :
+				crossplay_guard_judge(entry->coop, entry->players, entry->maximum);
 
 			entry->experimental = verdict != CROSSPLAY_GUARD_OK;
-			snprintf(entry->badge, sizeof(entry->badge), "%s%s", crossplay_guard_badge(1, 0),
-				crossplay_guard_badge_suffix(verdict));
+			snprintf(entry->tag, sizeof(entry->tag), "%s", crossplay_guard_tag(entry->platform));
+			crossplay_guard_row_badge(entry->badge, (int)sizeof(entry->badge), entry->platform, entry->crossplay, 0,
+				verdict);
 		}
-#ifndef HALO_PORT_VITA_NETWORK
-		else
-			snprintf(entry->badge, sizeof(entry->badge), "%s", T("PC"));
-#endif
 		/* the Rules line, as the online browser's: "Slayer on Blood Gulch",
 		"Co-op: The Pillar of Autumn, Heroic", ": full or starting" */
 		if (entry->coop)
@@ -4663,12 +4753,13 @@ static void lan_status(struct widget_instance *screen, char *line, int line_size
 	long index;
 
 	boolean online = lan_with_online();
+	long games = browser_games(), shown;
 
 	text_show(named(screen, "lan_title"), adhoc ? T("AD HOC GAMES") : online ? T("CUSTOM GAMES") : T("SYSTEM LINK GAMES"));
 	message[0] = 0;
 	if (menu_functions.status[0])
 		snprintf(line, line_size, "%s", menu_functions.status);
-	else if (!menu_functions.game_count)
+	else if (!games)
 		snprintf(line, line_size, "%s", looking ? T("Looking for games...") : T("No games found"));
 	else if (online)
 	{
@@ -4676,21 +4767,17 @@ static void lan_status(struct widget_instance *screen, char *line, int line_size
 
 		for (index = 0; index < menu_functions.game_count; index++)
 			lan_count += lan_entry(&menu_functions.games[index]);
-		snprintf(line, line_size, T("%ld on your network, %ld online"), lan_count, menu_functions.game_count - lan_count);
+		snprintf(line, line_size, T("%ld on your network, %ld online"), lan_count, games - lan_count);
 	}
-	else if (menu_functions.game_count == 1)
+	else if (games == 1)
 		snprintf(line, line_size, "%s", adhoc ? T("1 game near you") : T("1 game on your network"));
 	else
-	{
-		snprintf(line, line_size, adhoc ? T("%ld games near you") : T("%ld games on your network"),
-			menu_functions.game_count);
-	}
+		snprintf(line, line_size, adhoc ? T("%ld games near you") : T("%ld games on your network"), games);
 	if (menu_functions.game_count > BROWSER_ROWS && !menu_functions.status[0])
 	{
 		size_t length = strlen(line);
 
-		snprintf(line + length, line_size - length, ", %ld-%ld", (long)menu_functions.view.offset + 1,
-			(long)menu_functions.view.offset + menu_functions.entry_count);
+		snprintf(line + length, line_size - length, ", %ld-%ld", browser_shown_first(), browser_shown_last());
 	}
 	if (menu_functions.game_count && !menu_functions.status[0])
 	{
@@ -4699,7 +4786,7 @@ static void lan_status(struct widget_instance *screen, char *line, int line_size
 
 		snprintf(line + length, line_size - length, ", %s", T(sorts[menu_functions.sort]));
 	}
-	if (!menu_functions.game_count && !looking)
+	if (!games && !looking)
 	{
 		char why[96];
 
@@ -4711,15 +4798,17 @@ static void lan_status(struct widget_instance *screen, char *line, int line_size
 			snprintf(message, message_size, "%s", adhoc ? T("No games found near you") : T("No games found on your network"));
 	}
 	/* (the list as it changes: the tests read it) */
-	snprintf(said, sizeof(said), "%ld", menu_functions.game_count);
-	for (index = 0; index < menu_functions.game_count && index < 4; index++)
+	snprintf(said, sizeof(said), "%ld", games);
+	for (index = 0, shown = 0; index < menu_functions.game_count && shown < 4; index++)
 	{
 		struct p2p_lobby_entry const *entry = &menu_functions.games[index];
 		size_t length = strlen(said);
 
-		snprintf(said + length, sizeof(said) - length, "%s%s%s (%s, %s, %d/%d%s)", index ? ", " : ": ",
+		if (entry->header)
+			continue;
+		snprintf(said + length, sizeof(said) - length, "%s%s%s (%s, %s, %d/%d, %s)", shown++ ? ", " : ": ",
 			online && lan_entry(entry) ? "[LAN] " : "", entry->name, entry->map, entry->gametype, entry->players,
-			entry->maximum, entry->badge[0] ? ", PC" : "");
+			entry->maximum, entry->badge[0] ? entry->badge : "?");
 	}
 	/* (on a change, at most once in BROWSER_LOG_MILLISECONDS: the players'
 	counts change all the time online, and an insider.10 tester's log had
@@ -4753,6 +4842,10 @@ static void browser_update(struct widget_instance *list)
 	}
 	browser_test_games();
 	browser_list_sort(menu_functions.games, (int)menu_functions.game_count, menu_functions.sort);
+	/* (the groups: VITA GAMES, then PC GAMES, each its header with its count) */
+	menu_functions.game_count = browser_list_group(menu_functions.games, (int)menu_functions.game_count,
+		(int)NUMBEROF(menu_functions.games), T("VITA GAMES (%d)"), T("PC GAMES (%d)"));
+	browser_groups_log();
 	/* the row the menus focus (a step up or down past the first or last
 	scrolls: browser_view_follow), and where the game chosen went */
 	for (index = 0, child = list->child; child; child = child->next)
@@ -4771,8 +4864,8 @@ static void browser_update(struct widget_instance *list)
 			break;
 		}
 	}
-	target = browser_view_follow(&menu_functions.view, BROWSER_ROWS, (int)menu_functions.game_count, (int)focused_row,
-		(int)chosen, menu_functions.page);
+	target = browser_view_follow_groups(&menu_functions.view, menu_functions.games, BROWSER_ROWS,
+		(int)menu_functions.game_count, (int)focused_row, (int)chosen, menu_functions.page);
 	menu_functions.page = 0;
 	menu_functions.entry_count = menu_functions.view.visible;
 	for (index = 0; index < menu_functions.entry_count; index++)
@@ -4796,23 +4889,59 @@ static void browser_update(struct widget_instance *list)
 		entry = &menu_functions.entries[index];
 		widget_instance_set_visibility_recursive(child, TRUE);
 		child->disabled = FALSE;
+		/* (a group's header: its name and count alone, no badge, lock or
+		columns; never chosen, browser_view_follow_groups) */
+		if (entry->header)
+		{
+			if (named(child, "row_lock"))
+				widget_instance_set_visibility_recursive(named(child, "row_lock"), FALSE);
+			if (named(child, "row_badge"))
+				widget_instance_set_visibility_recursive(named(child, "row_badge"), FALSE);
+			row_column(child, "row_name", entry->name);
+			if (named(child, "row_map"))
+				widget_instance_set_visibility_recursive(named(child, "row_map"), FALSE);
+			if (named(child, "row_game"))
+				widget_instance_set_visibility_recursive(named(child, "row_game"), FALSE);
+			if (named(child, "row_players"))
+				widget_instance_set_visibility_recursive(named(child, "row_players"), FALSE);
+#ifndef HALO_RELEASE
+			if (getenv("HALO_TEST_BROWSER_ODD") || getenv("HALO_TEST_BROWSER_NAMES"))
+			{
+				static char said[BROWSER_ROWS][160];
+				long row = index < BROWSER_ROWS ? index : BROWSER_ROWS - 1;
+
+				if (strcmp(entry->name, said[row]))
+				{
+					snprintf(said[row], sizeof(said[row]), "%s", entry->name);
+					platform_log("menus: browser row %ld: [%s]", row + 1, entry->name);
+				}
+			}
+#endif
+			index++;
+			continue;
+		}
 		/* (the lock: a game with a password, 2a6dc2b7; the Halo 3 rows' is
 		their badge's) */
 		if (named(child, "row_lock"))
 			widget_instance_set_visibility_recursive(named(child, "row_lock"), entry->locked != 0);
 		/* (the Halo 3 browser's rows: the platform's badge, VITA or PC, with
 		the lock beside it for a password - row_badge's frames: VITA, PC, then
-		the same locked - and the rest of a PC game's badges, SERVER or
-		EXPERIMENTAL, before its name) */
+		the same locked - and the rest of the row's badge before its name: a
+		PC build's own (OPENCE, CHUPA: the art says PC), SERVER, EXPERIMENTAL,
+		or "+PC" for a Vita's game PC players can join too) */
 		if (named(child, "row_badge"))
 		{
 			char const *rest = entry->badge;
-			size_t pc = strlen(T("PC"));
+			size_t tag = strlen(entry->tag);
 
 			named(child, "row_badge")->animation.current_frame_index =
-				(short)((entry->badge[0] ? 1 : 0) + (entry->locked ? 2 : 0));
-			if (!strncmp(rest, T("PC"), pc))
-				rest += pc;
+				(short)((entry->platform != CROSSPLAY_PLATFORM_VITA ? 1 : 0) + (entry->locked ? 2 : 0));
+			/* (the tag the art says itself: VITA, PC) */
+			if (tag && !strncmp(rest, entry->tag, tag) && (entry->platform == CROSSPLAY_PLATFORM_VITA ||
+				entry->platform == CROSSPLAY_PLATFORM_PC))
+			{
+				rest += tag;
+			}
 			while (*rest == ' ')
 				rest++;
 			if (*rest)
@@ -4904,8 +5033,9 @@ static void browser_update(struct widget_instance *list)
 		if (getenv("HALO_TEST_BROWSER_GAMES") &&
 			(!menu_functions.chosen_valid || strcmp(menu_functions.chosen.id, menu_functions.games[target].id)))
 		{
-			platform_log("menus: the server browser's game %ld of %ld chosen: %s (rows from %d)", target + 1,
-				menu_functions.game_count, menu_functions.games[target].name, menu_functions.view.offset + 1);
+			platform_log("menus: the server browser's game %d of %ld chosen: %s (rows from %d)",
+				browser_list_game_number(menu_functions.games, (int)menu_functions.game_count, (int)target),
+				browser_games(), menu_functions.games[target].name, menu_functions.view.offset + 1);
 		}
 #endif
 		menu_functions.chosen = menu_functions.games[target];
@@ -4941,17 +5071,16 @@ static void browser_update(struct widget_instance *list)
 			break;
 		case P2P_LOBBY_BROWSE_GAMES:
 			/* (each count's words whole, for the translations) */
-			if (menu_functions.game_count == 1)
+			if (browser_games() == 1)
 				snprintf(line, sizeof(line), "%s", T("1 public game"));
 			else
-				snprintf(line, sizeof(line), T("%ld public games"), menu_functions.game_count);
+				snprintf(line, sizeof(line), T("%ld public games"), browser_games());
 			/* (the rows shown, when they scroll, and the sort: Y) */
 			if (menu_functions.game_count > BROWSER_ROWS)
 			{
 				size_t length = strlen(line);
 
-				snprintf(line + length, sizeof(line) - length, ", %ld-%ld", (long)menu_functions.view.offset + 1,
-					(long)menu_functions.view.offset + menu_functions.entry_count);
+				snprintf(line + length, sizeof(line) - length, ", %ld-%ld", browser_shown_first(), browser_shown_last());
 			}
 			{
 				static char const *const sorts[NUMBER_OF_BROWSER_SORTS] =
@@ -4969,6 +5098,16 @@ static void browser_update(struct widget_instance *list)
 		}
 		if (menu_functions.entry_count)
 			message[0] = 0;
+	}
+	/* (the filter: the Halo 3 browsers' hint says it, the D-pad's; OpenCE's
+	browser's status, unless all games) */
+	if (named(screen, "filter"))
+		text_show(named(screen, "filter"), browser_filter_name());
+	else if (network_wire_browser_filter() != NETWORK_WIRE_FILTER_ALL)
+	{
+		size_t length = strlen(line);
+
+		snprintf(line + length, sizeof(line) - length, ", %s", browser_filter_name());
 	}
 	text_show(named(screen, "browser_status"), line);
 	text_show(named(screen, "browser_message"), message);
@@ -4989,9 +5128,9 @@ static struct p2p_lobby_entry const *browser_entry(struct widget_instance *widge
 		long row = atol(widget->name + 4) - 1;
 
 		if (row >= 0 && row < menu_functions.entry_count)
-			return &menu_functions.entries[row];
+			return menu_functions.entries[row].header ? NULL : &menu_functions.entries[row];
 	}
-	return menu_functions.chosen_valid ? &menu_functions.chosen : NULL;
+	return menu_functions.chosen_valid && !menu_functions.chosen.header ? &menu_functions.chosen : NULL;
 }
 
 /* a game chosen to join, past the crossplay guardrails: its password
@@ -5073,8 +5212,8 @@ static boolean browser_join(struct widget_instance *widget, boolean *widget_dele
 		}
 	}
 	/* (crossplay_guard.h: a large or co-op PC game, Experimental, asked
-	about once) */
-	if (network_wire_crossplay() && (entry->experimental || entry->coop) &&
+	about once; a Vita's game never) */
+	if (entry->platform != CROSSPLAY_PLATFORM_VITA && (entry->experimental || entry->coop) &&
 		crossplay_guard_answered(entry->name, system_milliseconds()) != 1)
 	{
 		int answer = crossplay_guard_test_answer();
@@ -5166,6 +5305,8 @@ static void setup_initialize(struct widget_instance *widget)
 	struct widget_instance *spinner;
 	long maximum = atol(setting_get("HALO_NET_MAX_PLAYERS", "16"));
 	boolean private_game = !strcmp(setting_get("HALO_NET_HOST_PUBLIC", "true"), "false");
+	/* (who can join: network.host_crossplay, network_wire.h) */
+	boolean with_pc = !strcmp(setting_get("HALO_NET_HOST_CROSSPLAY", "false"), "true");
 
 	menu_functions.create_pending = FALSE;
 	/* (back from the Halo 3 Create Game's GAME TYPE or MAP picker: what it
@@ -5174,6 +5315,7 @@ static void setup_initialize(struct widget_instance *widget)
 	{
 		maximum = menu_functions.held_maximum;
 		private_game = menu_functions.held_private;
+		with_pc = menu_functions.held_with_pc;
 	}
 	else
 	{
@@ -5190,6 +5332,10 @@ static void setup_initialize(struct widget_instance *widget)
 	spinner = spinner_of(screen, "op_visibility");
 	if (spinner)
 		spinner->parameters.list.selected_index = private_game ? 1 : 0;
+	/* (VITAS, VITAS AND PC) */
+	spinner = spinner_of(screen, "op_who");
+	if (spinner)
+		spinner->parameters.list.selected_index = with_pc ? 1 : 0;
 }
 
 /* (port h3 setup hold) the Halo 3 Create Game's GAME TYPE or MAP picker
@@ -5202,6 +5348,8 @@ static void setup_hold(struct widget_instance *widget)
 	menu_functions.held_maximum = (short)(spinner ? PIN(spinner->parameters.list.selected_index + 2, 2, 16) : 16);
 	spinner = spinner_of(screen, "op_visibility");
 	menu_functions.held_private = spinner && spinner->parameters.list.selected_index == 1;
+	spinner = spinner_of(screen, "op_who");
+	menu_functions.held_with_pc = spinner && spinner->parameters.list.selected_index == 1;
 	menu_functions.setup_held = TRUE;
 }
 
@@ -5252,6 +5400,12 @@ static boolean setup_start(struct widget_instance *widget)
 	spinner = spinner_of(screen, "op_visibility");
 	setting_set("HALO_NET_HOST_PUBLIC", spinner && spinner->parameters.list.selected_index == 1 ? "false" : "true");
 	setting_set("HALO_NET_LOBBY_PASSWORD", menu_functions.lobby_password);
+	{
+		struct widget_instance *who = spinner_of(screen, "op_who");
+
+		if (who)
+			setting_set("HALO_NET_HOST_CROSSPLAY", who->parameters.list.selected_index == 1 ? "true" : "false");
+	}
 	/* (a live lobby, Menu style Halo 3: its game takes them now - its name
 	and most players from the settings each frame, public or private and a
 	password changed its listing - and START GAME goes on to its lobby) */
@@ -5260,16 +5414,16 @@ static boolean setup_start(struct widget_instance *widget)
 		p2p_lobby_set_public(spinner && spinner->parameters.list.selected_index == 1 ? 0 : 1);
 		if (strcmp(password_before, menu_functions.lobby_password))
 			p2p_lobby_set_password(menu_functions.lobby_password);
-		platform_log("menus: Server Setup: %s, %s players, %s%s; the live lobby's game takes them, its lobby next",
+		platform_log("menus: Server Setup: %s, %s players, %s%s, %s; the live lobby's game takes them, its lobby next",
 			menu_functions.lobby_name, value, spinner && spinner->parameters.list.selected_index == 1 ? "private" : "public",
-			menu_functions.lobby_password[0] ? ", a password" : "");
+			menu_functions.lobby_password[0] ? ", a password" : "", network_wire_crossplay() ? "Vitas and PC" : "Vitas");
 		return TRUE;
 	}
 	menu_functions.create_pending = TRUE;
 	menu_functions.create_system_link = FALSE;
-	platform_log("menus: Server Setup: %s, %s players, %s%s; the profile, then %s", menu_functions.lobby_name,
+	platform_log("menus: Server Setup: %s, %s players, %s%s, %s; the profile, then %s", menu_functions.lobby_name,
 		value, spinner && spinner->parameters.list.selected_index == 1 ? "private" : "public",
-		menu_functions.lobby_password[0] ? ", a password" : "",
+		menu_functions.lobby_password[0] ? ", a password" : "", network_wire_host_crossplay() ? "Vitas and PC" : "Vitas",
 		halo_menu_style_halo3() ? "the game's lobby" : "the map list");
 	return TRUE;
 }
@@ -6561,7 +6715,7 @@ static char const *h3_friends_tag(struct p2p_friend_entry const *entry)
 	case P2P_FRIEND_KIND_INVITE:
 		return T("INVITE");
 	case P2P_FRIEND_KIND_FRIEND:
-		return entry->joinable ? T("JOIN") : entry->online ? T("ONLINE") : "";
+		return entry->joinable ? T("JOINABLE") : entry->online ? T("ONLINE") : "";
 	case P2P_FRIEND_KIND_OUTGOING:
 		return T("SENT");
 	case P2P_FRIEND_KIND_BLOCKED:
@@ -6569,6 +6723,15 @@ static char const *h3_friends_tag(struct p2p_friend_entry const *entry)
 	}
 	return "";
 }
+
+/* a friend's game with a password being joined (its password typed, then
+opened on the lobby's thread: h3_friends_update) */
+static struct
+{
+	char id[P2P_FRIEND_ID_SIZE];
+	char name[P2P_FRIEND_NAME_SIZE];
+	boolean typing, watching;
+} h3_friends_password;
 
 /* (port h3 friends) the rows, the chosen one's facts, the code and status */
 static void h3_friends_update(struct widget_instance *list)
@@ -6585,6 +6748,35 @@ static void h3_friends_update(struct widget_instance *list)
 
 		h3_friends_message(p2p_friends_add_text(result));
 		h3_friends_refresh(TRUE);
+	}
+	/* (a friend's game with a password: typed, opened, then joined as any) */
+	if (h3_friends_password.typing && typing_done(_typing_friend_password, typed, sizeof(typed)))
+	{
+		int outcome = p2p_friends_join_password(h3_friends_password.id, typed);
+
+		memset(typed, 0, sizeof(typed));
+		h3_friends_password.typing = FALSE;
+		h3_friends_password.watching = outcome == P2P_FRIENDS_DONE;
+		h3_friends_message(outcome == P2P_FRIENDS_DONE ? T("Opening the game with its password...") :
+			p2p_friends_outcome_text(outcome));
+	}
+	if (h3_friends_password.watching)
+	{
+		int state = p2p_lobby_join_state();
+
+		if (state == P2P_LOBBY_JOIN_JOINING)
+		{
+			h3_friends_password.watching = FALSE;
+			snprintf(text, sizeof(text), T("Joining %s's game..."), h3_friends_password.name);
+			h3_friends_message(text);
+			menu_functions.open_system_link = TRUE;
+		}
+		else if (state == P2P_LOBBY_JOIN_WRONG_PASSWORD || state == P2P_LOBBY_JOIN_GONE)
+		{
+			h3_friends_password.watching = FALSE;
+			h3_friends_message(state == P2P_LOBBY_JOIN_WRONG_PASSWORD ? T("That is not the game's password") :
+				T("Their game can't be joined now"));
+		}
 	}
 	h3_friends_refresh(FALSE);
 	if (list != h3_friends.list || list->creation_time != h3_friends.list_creation_time)
@@ -6639,7 +6831,7 @@ static void h3_friends_update(struct widget_instance *list)
 				break;
 			case _h3_friends_row_join:
 				row_column(child, "row_name", T("FRIENDS CAN JOIN"));
-				row_column(child, "row_state", T("Your public games, in one press"));
+				row_column(child, "row_state", T("Your games, public or private, in one press"));
 				row_column(child, "row_tag", config_boolean_live("friends.join", "HALO_FRIENDS_JOIN") ? T("YES") : T("NO"));
 				break;
 			default:
@@ -6753,13 +6945,22 @@ static int h3_friends_row_item(struct widget_instance *widget)
 }
 
 /* an action on an entry, its outcome said (a join: the System Link screen
-next, as JOIN WITH CODE) */
+next, as JOIN WITH CODE; a game with a password asks for it first) */
 static void h3_friends_do(struct p2p_friend_entry const *entry, int action)
 {
 	struct p2p_friend_entry copy = *entry;
 	int outcome = p2p_friends_act(copy.id, copy.kind, action);
 	char text[160];
 
+	if (outcome == P2P_FRIENDS_PASSWORD)
+	{
+		snprintf(h3_friends_password.id, sizeof(h3_friends_password.id), "%s", copy.id);
+		snprintf(h3_friends_password.name, sizeof(h3_friends_password.name), "%s", copy.name);
+		h3_friends_password.typing = TRUE;
+		typing_begin(_typing_friend_password, T("Password"), "", P2P_LOBBY_PASSWORD_SIZE - 1, TRUE);
+		h3_friends_message(p2p_friends_outcome_text(outcome));
+		return;
+	}
 	if (outcome == P2P_FRIENDS_DONE && (action == P2P_FRIENDS_JOIN || action == P2P_FRIENDS_INVITE_ACCEPT))
 	{
 		snprintf(text, sizeof(text), T("Joining %s's game..."), copy.name);
@@ -6800,7 +7001,8 @@ static void h3_friends_act(struct widget_instance *widget)
 		case _h3_friends_row_join:
 			on = !config_boolean_live("friends.join", "HALO_FRIENDS_JOIN");
 			setting_set("HALO_FRIENDS_JOIN", on ? "true" : "false");
-			h3_friends_message(on ? T("Friends can join your public games") : T("Friends join only by your invites"));
+			h3_friends_message(on ? T("Friends can join your games, public or private") :
+				T("Friends join only by your invites"));
 			break;
 		case _h3_friends_row_party:
 			menu_functions.open_party = TRUE;
@@ -9376,8 +9578,38 @@ static void h3_pregame_update(struct widget_instance *widget)
 		char name[48];
 
 		h3_utf8(name, (int)sizeof(name), game->name);
-		snprintf(text, sizeof(text), T("Listed as: %s"), name);
-		text_show(named(screen, "listed"), host ? text : "");
+		/* (the host: its game's name and tag - VITA, or VITA+PC when PC
+		players can join it; a client: what hosts the game, in words) */
+		if (host)
+		{
+			char badge[24];
+
+			crossplay_guard_row_badge(badge, (int)sizeof(badge), CROSSPLAY_PLATFORM_VITA, network_wire_crossplay(), 0,
+				CROSSPLAY_GUARD_OK);
+			snprintf(text, sizeof(text), T("Listed as: %s (%s)"), name, badge);
+		}
+		else
+			snprintf(text, sizeof(text), "%s", crossplay_guard_platform_line(network_wire_host_platform(),
+				network_wire_crossplay()));
+		text_show(named(screen, "listed"), text);
+		/* (the host of a game for Vitas and PC, online: its join link, which
+		PC players (OpenCE) open as their own links - a bearer token, as the
+		code is: on the screen, never in the log - docs/crossplay.md T16) */
+		{
+			char invite[96];
+
+			text[0] = 0;
+			if (host && online && network_wire_crossplay() && p2p_hosting_invite(invite, (int)sizeof(invite)) &&
+				strlen(invite) > 38)
+			{
+				snprintf(text, sizeof(text), "%s\n%.38s\n%s", T("PC players (OpenCE) join with:"), invite, invite + 38);
+				snprintf(line + strlen(line), sizeof(line) - strlen(line), "; PC link shown");
+			}
+			text_show(named(screen, "pc_link"), text);
+		}
+		snprintf(line + strlen(line), sizeof(line) - strlen(line), "; %s", network_wire_crossplay() ?
+			(network_wire_host_vita() ? "crossplay wire, a Vita's game" : "crossplay wire, a PC's game") :
+			"the Vitas' wire");
 	}
 	{
 		boolean toggles = cooperative && waiting && online && config_boolean("network.public_lobby") &&
@@ -9479,6 +9711,22 @@ boolean pc_menu_event_function_invoke(
 	case _function_browser_page_down:
 		menu_functions.page = 1;
 		return TRUE;
+	case _function_browser_filter_next:
+	case _function_browser_filter_previous:
+	{
+		/* (the D-pad's right and left: all games, the Vitas' alone, the PCs'
+		alone, kept as the settings panel's Browser shows is) */
+		static char const *const filters[] = { "all", "vita", "pc" };
+		int filter = network_wire_browser_filter();
+
+		filter = (filter + (function_index == _function_browser_filter_next ? 1 : 2)) % 3;
+		setting_set("HALO_NET_BROWSER_FILTER", filters[filter]);
+		menu_functions.chosen_valid = FALSE;
+		browser_view_reset(&menu_functions.view);
+		platform_log("menus: the server browser shows %s", filter == NETWORK_WIRE_FILTER_VITA ? "the Vitas' games" :
+			filter == NETWORK_WIRE_FILTER_PC ? "the PCs' games" : "every game");
+		return TRUE;
+	}
 	case _function_browser_join:
 		return browser_join(widget, widget_deleted);
 	case _function_password_init:

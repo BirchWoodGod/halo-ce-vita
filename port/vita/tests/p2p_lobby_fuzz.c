@@ -95,6 +95,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 		return 0;
 	mode = (data[0] & 0x3F) % 3;
 	test_crossplay = (data[0] & 0x40) != 0;
+	/* (heard on that wire's topics; the hosted game on it too) */
+	test_heard = test_crossplay;
 	flags = data[1];
 	data += 2;
 	size -= 2;
@@ -153,11 +155,11 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	if (flags & 0x40)
 	{
 		pthread_mutex_lock(&p2p_lock);
-		p2p_lobby_query_heard();
+		p2p_lobby_query_heard(test_crossplay);
 		pthread_mutex_unlock(&p2p_lock);
 	}
 	pthread_mutex_lock(&p2p_lock);
-	p2p_lobby_slot_heard(heard_on, payload, payload_size, flags & 1);
+	p2p_lobby_slot_heard(test_heard, heard_on, payload, payload_size, flags & 1);
 	pthread_mutex_unlock(&p2p_lock);
 	lobby_update(NULL, 0, 0);
 	/* everything shown, and the first game joined (an open one at once; a

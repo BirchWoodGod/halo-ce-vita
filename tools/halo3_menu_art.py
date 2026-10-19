@@ -290,6 +290,24 @@ def dpad_arm(centre, dx, dy, arm, half):
     return [centre - half, y0, centre + half, y1]
 
 
+def dpad_left_right(size=16):
+    # the D-pad's left and right, a list's two ways (the browsers' filter):
+    # two pointed arms, back to back, in the START glyph's colour on a dark
+    # rounded tab as the shoulders' (readable at 16)
+    scale = 4
+    canvas = 64 * scale
+    image = Image.new('RGBA', (canvas, canvas), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle([2 * scale, 14 * scale, 62 * scale, 50 * scale], radius=14 * scale, fill=(44, 48, 55, 255),
+                           outline=(255, 255, 255, alpha(.3)), width=2 * scale)
+    colour = GLYPH_COLOURS['start'] + (255,)
+    centre, half = canvas / 2, 11 * scale
+    for dx in (-1, 1):
+        draw.polygon([(centre + dx * 4 * scale, centre - half), (centre + dx * 26 * scale, centre),
+                      (centre + dx * 4 * scale, centre + half)], fill=colour)
+    return image.resize((size, size), Image.Resampling.LANCZOS)
+
+
 def shoulder(letter, size=16):
     # the Vita's L or R: a dark rounded tab with its letter (as the round
     # buttons' glyphs, its colour the START glyph's)
@@ -564,6 +582,7 @@ ART = {
     'glyph_triangle.png': lambda: glyph('triangle'),
     'glyph_square.png': lambda: glyph('square'),
     'glyph_start.png': lambda: glyph('start'),
+    'glyph_dpad_lr.png': dpad_left_right,
     'glyph_l.png': lambda: shoulder('L'),
     'glyph_r.png': lambda: shoulder('R'),
     'glyph_atlas.png': glyph_atlas,

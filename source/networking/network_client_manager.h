@@ -75,7 +75,13 @@ struct network_listed_game
 	boolean open;
 	boolean has_teams;
 	boolean cooperative;
-	byte pad;
+	/* the game's wire (network_wire.h: its host's version), what hosts it
+	(crossplay_guard.h's CROSSPLAY_PLATFORM_*), and whether it is a PC
+	host's co-op game (no game engine, as OpenCE hosts co-op) */
+	boolean crossplay;
+	short platform;
+	boolean pc_coop;
+	byte pad[3];
 };
 /* the games the System Link list shows now (valid, of this platform: the
 open ones first, as it orders them), up to maximum: how many; 0 without a
@@ -83,6 +89,19 @@ client searching */
 short network_game_client_listed_games(
 	struct network_listed_game *games,
 	short maximum);
+/* the advertised game's tag (crossplay_guard.h: VITA, VITA+PC, OPENCE,
+CHUPA, PC) into badge, and whether the game lists show it
+(network.browser_filter) */
+void network_game_client_advertised_game_tag(
+	struct network_advertised_game const *game,
+	char *badge,
+	long size);
+boolean network_game_client_advertised_game_shown(
+	struct network_advertised_game const *game);
+/* whether the advertised game's host is a Vita (the lists show the Vitas'
+games first) */
+boolean network_game_client_advertised_game_vita(
+	struct network_advertised_game const *game);
 /* the advertised game of a listed game's id while it is still listed, or
 NULL (for ui_widget_port_join_advertised_game) */
 void const *network_game_client_listed_game_by_id(

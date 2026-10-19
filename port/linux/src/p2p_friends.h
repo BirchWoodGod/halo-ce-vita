@@ -82,6 +82,12 @@ struct p2p_friend_entry
 	int state;
 	int joinable;
 	int invitable;
+	/* (joinable) their game has a password: joining asks for it */
+	int locked;
+	/* (a friend online, or an invite) whether their game is on the crossplay
+	wire (network_wire.h: a Vita's game PC players can join too, or a PC
+	host's they joined): the lists tag it VITA+PC, else VITA */
+	int crossplay;
 	/* (a friend online, or an invite) the players in their game and the most */
 	int players, maximum;
 	/* the line the lists show: a friend's doing ("Offline" when not
@@ -161,8 +167,15 @@ enum
 	P2P_FRIENDS_FULL,
 	/* (a player's options) this machine appears offline: nothing asked */
 	P2P_FRIENDS_APPEARING_OFFLINE,
+	/* join: their game has a password - p2p_friends_join_password with it
+	(an invite into it joins without) */
+	P2P_FRIENDS_PASSWORD,
 };
 int p2p_friends_act(const char *id, int kind, int action);
+/* a friend's game with a password joined with it (its presence's sealed
+token opened on the lobby's thread: p2p_lobby_join_state says how it goes,
+P2P_LOBBY_JOIN_WRONG_PASSWORD a wrong one) */
+int p2p_friends_join_password(const char *id, const char *password);
 /* the outcome as the player reads it (in the language chosen) */
 const char *p2p_friends_outcome_text(int outcome);
 const char *p2p_friends_add_text(int result);

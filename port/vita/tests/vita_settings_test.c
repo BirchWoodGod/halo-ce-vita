@@ -78,8 +78,9 @@ in test_restart_offer; the restarts asked for (none of them returns here) */
 static int main_menu_idle_now, restarts_asked;
 int halo_main_menu_idle(void) { return main_menu_idle_now; }
 int vita_host_restart_game(void) { restarts_asked++; return 0x80010013; }
-/* (port/linux/src/network_wire.c's: the wire the game runs, a test's) */
-static int test_crossplay_wire;
+/* (port/linux/src/network_wire.c's: the wire of the game hosted or joined,
+a test's; and whether the public games list PC games, a test's) */
+static int test_crossplay_wire, test_pc_games;
 int network_wire_crossplay(void) { return test_crossplay_wire; }
 /* (the map in play: never deleted) */
 int halo_cache_map_in_use(const char *name) { return !strcmp(name, "inplay"); }
@@ -353,6 +354,14 @@ int p2p_friends_act(const char *id, int kind, int action)
 	friend_acted_action = action;
 	return friend_act_outcome;
 }
+/* (a friend's game with a password: the password typed) */
+static char friend_password_typed[64];
+int p2p_friends_join_password(const char *id, const char *password)
+{
+	snprintf(friend_acted_id, sizeof(friend_acted_id), "%s", id);
+	snprintf(friend_password_typed, sizeof(friend_password_typed), "%s", password);
+	return P2P_FRIENDS_DONE;
+}
 const char *p2p_friends_outcome_text(int outcome)
 {
 	return outcome == P2P_FRIENDS_DONE ? "Done" : outcome == P2P_FRIENDS_OFFLINE ? "Go online first" : "Not for this one";
@@ -482,6 +491,13 @@ int p2p_hosting_code(char *code, int size)
 	snprintf(code, (size_t)size, "QX7K-M2PA");
 	return 1;
 }
+int p2p_hosting_invite(char *invite, int size)
+{
+	if (!hosting)
+		return 0;
+	snprintf(invite, (size_t)size, "halo://join/%064d", 7);
+	return 1;
+}
 
 /* the hosted game's listing as p2p_lobby.c says it (P2P_LOBBY_HOSTING_*) */
 static int hosting_listing = P2P_LOBBY_HOSTING_NONE;
@@ -522,12 +538,13 @@ int p2p_lobby_join(const char *id, const char *password)
 
 int p2p_lobby_join_state(void) { return P2P_LOBBY_JOIN_IDLE; }
 
-/* this Vita's own game, an open one and a locked Halo PC one; with
-Crossplay on, PC games (p2p_lobby.c's badges, crossplay_guard.h): a large
-one, a co-op one and a server */
+/* this Vita's own game, an open one and a locked Halo PC one; with PC
+games listed too (test_pc_games), PC games (p2p_lobby.c's tags and badges,
+crossplay_guard.h): a large OpenCE one, a co-op one and a ChupathingyCE
+server */
 int p2p_lobby_entry(int index, struct p2p_lobby_entry *entry)
 {
-	if (test_crossplay_wire && browsing && index > 0 && index < 4)
+	if (test_pc_games && browsing && index > 0 && index < 4)
 	{
 		static const char *const names[] = { "", "pc host", "pc coop", "pc server" };
 
@@ -543,8 +560,11 @@ int p2p_lobby_entry(int index, struct p2p_lobby_entry *entry)
 		entry->experimental = index == 1 || index == 2;
 		entry->coop = index == 2;
 		entry->dedicated = index == 3;
-		snprintf(entry->badge, sizeof(entry->badge), "%s", index == 1 ? "PC EXPERIMENTAL" : index == 2 ? "PC CO-OP" :
-			"PC SERVER");
+		entry->crossplay = 1;
+		entry->platform = index == 1 ? CROSSPLAY_PLATFORM_OPENCE : index == 2 ? CROSSPLAY_PLATFORM_PC : CROSSPLAY_PLATFORM_CHUPA;
+		snprintf(entry->tag, sizeof(entry->tag), "%s", crossplay_guard_tag(entry->platform));
+		snprintf(entry->badge, sizeof(entry->badge), "%s", index == 1 ? "OPENCE EXPERIMENTAL" : index == 2 ?
+			"PC CO-OP EXPERIMENTAL" : "CHUPA SERVER");
 		return 1;
 	}
 	if (!browsing || index >= 3)
@@ -1582,7 +1602,7 @@ static void test_friends_page(void)
 	check(strstr(menu, "\n\x04Your friend code: KQ7M-3XPA-T9WE\n") && strstr(menu, "\n\x04" "1 of 2 friends online\n"),
 		"the code and the status");
 	/* (four entries shown at once, with the Party row: the fifth scrolled to) */
-	check(strstr(menu, "\nDelta\x02  Request\n") && strstr(menu, "\nBravo\x02  Join\n") &&
+	check(strstr(menu, "\nDelta\x02  Request\n") && strstr(menu, "\nBravo\x02  Joinable\n") &&
 		strstr(menu, "\nCharlie\x02  Offline\n") && strstr(menu, "\nA7ES-DA9D-2NMR\x02  Sent\n"),
 		"each entry: its name and a word of its state");
 	check(menu_fits() && menu_height_fits(), "the Friends page fits");
@@ -1826,7 +1846,7 @@ static void test_multiplayer_tab(void)
 	/* (the network this session runs: Online, from the environment; the
 	game has not said yet whether its menus have OpenCE's screens) */
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection|Crossplay*|Join with a code|Bots|Co-op players|Unseen players|Modded maps|Latency meter") && strstr(menu, "< Online"),
+	check(!strcmp(labels, "Connection|Vita and PC|Join with a code|Bots|Co-op players|Unseen players|Modded maps|Latency meter") && strstr(menu, "< Online"),
 		"Multiplayer: Connection, Join with a code (Online), Modded maps; no Play page (no ad hoc room: Online)");
 	check(!strstr(menu, "Play") && !strstr(menu, "Host a game") && !strstr(menu, "Lobby name") &&
 		!strstr(menu, "Max players") && !strstr(menu, "Visibility") && !strstr(menu, "Browse public games") &&
@@ -1836,7 +1856,7 @@ static void test_multiplayer_tab(void)
 		strstr(menu, "\n\x04Online: ready") && !strstr(menu, "Online menus"),
 		"before the game says: this Vita's name, no game, internet play's line");
 	check(menu_rows() == 8 && menu_fits(), "Multiplayer: eight rows, 46 characters a line");
-	check(!strcmp(outline_of(labels, sizeof(labels), 0), "=Network|Connection|Crossplay*|Join with a code|=Bots|Bots|"
+	check(!strcmp(outline_of(labels, sizeof(labels), 0), "=Network|Connection|Vita and PC|Join with a code|=Bots|Bots|"
 		"=Games|Co-op players|Unseen players|Modded maps|Latency meter") && menu_height_fits(),
 		"Multiplayer: Network over Connection, Bots over Bots, Games over Co-op players ... Latency meter; it fits the "
 		"panel's height");
@@ -1846,10 +1866,10 @@ static void test_multiplayer_tab(void)
 	press(VITA_BUTTON_RIGHT);
 	press(VITA_BUTTON_RIGHT);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection|Crossplay*|Join with a code|Bots|  Bot skill|  Bot teams|  Bot vehicles|  Bot routes|  Bot playlist|Co-op players|Unseen players|Modded maps|Latency meter") &&
+	check(!strcmp(labels, "Connection|Vita and PC|Join with a code|Bots|  Bot skill|  Bot teams|  Bot vehicles|  Bot routes|  Bot playlist|Co-op players|Unseen players|Modded maps|Latency meter") &&
 		getenv("HALO_BOTS") && !strcmp(getenv("HALO_BOTS"), "3") && !strstr(menu, "Restart the game") && menu_fits(),
 		"Bots 3: Bot skill, Bot teams, Bot vehicles, Bot routes and Bot playlist below it, live");
-	check(!strcmp(outline_of(labels, sizeof(labels), 0), "=Network|Connection|Crossplay*|Join with a code|=Bots|Bots|"
+	check(!strcmp(outline_of(labels, sizeof(labels), 0), "=Network|Connection|Vita and PC|Join with a code|=Bots|Bots|"
 		"  Bot skill|  Bot teams|  Bot vehicles|  Bot routes|  Bot playlist|=Games|Co-op players|Unseen players|"
 		"Modded maps|Latency meter"), "Bots 3: the bot rows under the Bots heading, Games after them");
 	to_line("  Bot skill");
@@ -1888,7 +1908,7 @@ static void test_multiplayer_tab(void)
 	press(VITA_BUTTON_LEFT);
 	press(VITA_BUTTON_LEFT);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection|Crossplay*|Join with a code|Bots|Co-op players|Unseen players|Modded maps|Latency meter") && !strcmp(getenv("HALO_BOTS"), "0"),
+	check(!strcmp(labels, "Connection|Vita and PC|Join with a code|Bots|Co-op players|Unseen players|Modded maps|Latency meter") && !strcmp(getenv("HALO_BOTS"), "0"),
 		"Bots Off: the bot rows hidden again");
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	check(strstr(menu, "\n\x04This Vita: vitauser  192.168.1.23\n") != NULL, "this Vita's address, as the others reach it");
@@ -1898,14 +1918,14 @@ static void test_multiplayer_tab(void)
 	halo_pc_menus_state = 1;
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection|Crossplay*|Friends|Bots|Co-op players|Unseen players|Modded maps|Latency meter") &&
+	check(!strcmp(labels, "Connection|Vita and PC|Friends|Bots|Co-op players|Unseen players|Modded maps|Latency meter") &&
 		!strstr(menu, "Online menus") && menu_height_fits(),
 		"the PC menus in the game: Connection, Friends (in the code row's place) and Modded maps; it fits");
 	halo_pc_menus_state = -1;
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	printf("%s\n--\n", menu);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection|Crossplay*|Join with a code|Bots|Co-op players|Unseen players|Modded maps|Latency meter") &&
+	check(!strcmp(labels, "Connection|Vita and PC|Join with a code|Bots|Co-op players|Unseen players|Modded maps|Latency meter") &&
 		strstr(menu, "\n\x04Online menus need bitmaps.map, loc.map: README\n") && menu_fits(),
 		"the Xbox's menus (no bitmaps.map, loc.map): one line says what the online menus need; Join with a code stays");
 	/* (that line too, on the classic panel - the Halo CE menus' -: short of
@@ -2119,7 +2139,7 @@ static void test_multiplayer_tab(void)
 	open_panel();
 	to_tab("Multiplayer");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection|Crossplay*|Bots|Co-op players|Unseen players|Modded maps|Latency meter") && menu_fits(), "Same Wi-Fi: Connection, Modded maps");
+	check(!strcmp(labels, "Connection|Vita and PC|Bots|Co-op players|Unseen players|Modded maps|Latency meter") && menu_fits(), "Same Wi-Fi: Connection, Modded maps");
 	/* Latency meter (latency_meter.c): On as shipped, Off and back, live */
 	to_line("Latency meter");
 	check(strstr(menu, "\nLatency meter\x02  On >") && setting_named("HALO_LATENCY_METER") &&
@@ -2146,18 +2166,35 @@ static void test_multiplayer_tab(void)
 	press(VITA_BUTTON_LEFT);
 	press(VITA_BUTTON_LEFT);
 	check(getenv("HALO_NET_REMOTE_LOD") && !strcmp(getenv("HALO_NET_REMOTE_LOD"), "auto"), "Unseen players Auto again: auto");
-	/* Crossplay (docs/crossplay.md): Off as shipped, On and back */
-	to_line("Crossplay");
-	check(strstr(menu, "\nCrossplay*\x02  Off >") && setting_named("HALO_CROSSPLAY") &&
-		strstr(setting_named("HALO_CROSSPLAY")->help, "play PCs (OpenCE)"), "Crossplay: Off as shipped, its help");
+	/* no Crossplay switch (docs/crossplay.md, Oct 19 2026): Browser shows
+	(all as shipped, Vita, PC) and Who can join (Vitas as shipped, Vitas and
+	PC), live: no restart */
+	check(open_page("Vita and PC") && strstr(menu, "\n\x03Multiplayer > Vita and PC\n"),
+		"Multiplayer's Vita and PC page, in the old Crossplay row's place");
+	to_line("Browser shows");
+	check(strstr(menu, "\nBrowser shows\x02  All games >") && setting_named("HALO_NET_BROWSER_FILTER") &&
+		!setting_named("HALO_NET_BROWSER_FILTER")->restart && !setting_named("HALO_CROSSPLAY") &&
+		strstr(setting_named("HALO_NET_BROWSER_FILTER")->help, "each tagged"),
+		"Browser shows: All games as shipped, live, its help; no Crossplay row");
 	press(VITA_BUTTON_RIGHT);
-	check(strstr(menu, "\nCrossplay*\x02< On  ") && getenv("HALO_CROSSPLAY") && !strcmp(getenv("HALO_CROSSPLAY"), "1"),
-		"Crossplay On: HALO_CROSSPLAY 1");
+	check(strstr(menu, "\nBrowser shows\x02< Vita games >") && getenv("HALO_NET_BROWSER_FILTER") &&
+		!strcmp(getenv("HALO_NET_BROWSER_FILTER"), "vita"), "Browser shows Vita games: HALO_NET_BROWSER_FILTER vita");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nBrowser shows\x02< PC games  ") && !strcmp(getenv("HALO_NET_BROWSER_FILTER"), "pc"),
+		"Browser shows PC games: pc");
 	press(VITA_BUTTON_LEFT);
-	check(getenv("HALO_CROSSPLAY") && !strcmp(getenv("HALO_CROSSPLAY"), "0"), "Crossplay Off again: 0");
-	/* (after a restart: the game reads it once; with it on the Vita hosts
-	nothing, Host a game and Host co-op campaign say why) */
-	check(setting_named("HALO_CROSSPLAY")->restart, "Crossplay: after a restart");
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_NET_BROWSER_FILTER"), "all"), "Browser shows all games again");
+	to_line("Who can join");
+	check(strstr(menu, "\nWho can join\x02  Vitas >") && !setting_named("HALO_NET_HOST_CROSSPLAY")->restart &&
+		strstr(setting_named("HALO_NET_HOST_CROSSPLAY")->help, "OpenCE"), "Who can join: Vitas as shipped, live, its help");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nWho can join\x02< Vitas and PC  ") && getenv("HALO_NET_HOST_CROSSPLAY") &&
+		!strcmp(getenv("HALO_NET_HOST_CROSSPLAY"), "true"), "Who can join Vitas and PC: HALO_NET_HOST_CROSSPLAY true");
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_NET_HOST_CROSSPLAY"), "false"), "Who can join Vitas again: false");
+	press(VITA_BUTTON_CIRCLE);
+	/* (hosting is never blocked by the wire now: Host a game opens as ever) */
 	{
 		char saved_network[sizeof(running_network)];
 		int saved_action = guide_action;
@@ -2166,14 +2203,10 @@ static void test_multiplayer_tab(void)
 		snprintf(running_network, sizeof(running_network), "%s", chosen_network());
 		test_crossplay_wire = 1;
 		guide_action = ACTION_HOST;
-		check(guide_blocker() && strstr(guide_blocker(), "Crossplay is on"), "Crossplay on: Host a game says to turn it off");
+		check(!guide_blocker() || !strstr(guide_blocker(), "Crossplay"), "a crossplay game had: Host a game not blocked");
 		guide_action = ACTION_CAMPAIGN;
-		check(guide_blocker() && strstr(guide_blocker(), "Crossplay is on"), "Crossplay on: Host co-op campaign too");
-		guide_action = ACTION_JOIN;
-		check(!guide_blocker() || !strstr(guide_blocker(), "Crossplay"), "Crossplay on: Join a game is not blocked by it");
+		check(!guide_blocker() || !strstr(guide_blocker(), "Crossplay"), "nor Host co-op campaign");
 		test_crossplay_wire = 0;
-		guide_action = ACTION_HOST;
-		check(!guide_blocker() || !strstr(guide_blocker(), "Crossplay"), "Crossplay off: Host a game is not blocked by it");
 		guide_action = saved_action;
 		snprintf(running_network, sizeof(running_network), "%s", saved_network);
 	}
@@ -2354,12 +2387,12 @@ static void test_crossplay_browser(void)
 	browse_count = browse_selected = 0;
 	browse_refresh();
 	show();
-	check(browse_count == 3 && strstr(menu, "\npc host         20/128 Blood Gulch  PC EXP\n") &&
-		strstr(menu, "\npc coop          2/16 Halo         PC COOP EXP\n") &&
-		strstr(menu, "\npc server        2/16 Blood Gulch  SRV\n") &&
-		strstr(menu, "\nExperimental: over 16 players may lag\n") && menu_lines_fit(),
-		"Crossplay: the public games badged: PC or SRV, EXP (more than 16), COOP EXP; the chosen one's in words");
-	if (!strstr(menu, "pc host         20/128"))
+	check(browse_count == 3 && strstr(menu, "\nOPENCE pc host      20/128 Blood Gulc EXP\n") &&
+		strstr(menu, "\nPC     pc coop       2/16 Halo       EXP\n") &&
+		strstr(menu, "\nCHUPA  pc server     2/16 Blood Gulc SRV\n") &&
+		strstr(menu, "\nHosted on PC (OpenCE)\n") && strstr(menu, "\nExperimental: over 16 players may lag\n") &&
+		menu_lines_fit(), "the public games tagged: their PC build (OPENCE, CHUPA, PC), SRV, EXP; the chosen one's in words");
+	if (!strstr(menu, "pc host      20/128"))
 		printf("%s\n--\n", menu);
 	/* a PC co-op game: experimental, asked about once (no: not joined; yes:
 	joined, remembered) */
@@ -2367,7 +2400,8 @@ static void test_crossplay_browser(void)
 	message_pending = 0;
 	browse_selected = 1;
 	show();
-	check(strstr(menu, "\nPC co-op: experimental on the Vita\n") != NULL, "a PC co-op game: experimental, it says");
+	check(strstr(menu, "\nPC co-op: experimental on the Vita\n") != NULL && strstr(menu, "\nHosted on PC\n"),
+		"a PC co-op game: experimental, it says; hosted on PC (its build not told)");
 	browse_input(VITA_BUTTON_CROSS);
 	show();
 	check(screen == SCREEN_LARGE && !joined_id[0] && !message_pending && strstr(menu, "PC co-op game") &&
@@ -2437,7 +2471,7 @@ static void test_online_rows(void)
 	vita_settings_load();
 	to_tab("Multiplayer");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection|Crossplay*|Join with a code|Bots|Co-op players|Unseen players|Modded maps|Latency meter") && !strstr(menu, "Ad hoc dialog"),
+	check(!strcmp(labels, "Connection|Vita and PC|Join with a code|Bots|Co-op players|Unseen players|Modded maps|Latency meter") && !strstr(menu, "Ad hoc dialog"),
 		"Online: the code row back (the ad hoc dialog stays in Dev)");
 
 	/* a code typed with the D-pad: B (up from A) on the first, 9 (down
@@ -2481,21 +2515,28 @@ static void test_online_rows(void)
 	hosting_listing = P2P_LOBBY_HOSTING_NONE;
 	hosting = 0;
 
-	/* Crossplay on (the wire the game runs): no code row, codes join Vita
-	games (docs/crossplay.md T11); the public games are PCs' */
+	/* hosting a game for Vitas and PC: the code (Vitas) and the OpenCE
+	join link (PC players), in lines that fit (docs/crossplay.md T16) */
+	hosting = 1;
 	test_crossplay_wire = 1;
+	clock_us += 5000000;
+	frame(0);
+	check(strstr(menu, "\n\x04Your code: QX7K-M2PA") && strstr(menu, "\n\x04PC players (OpenCE) join with:\n\x04halo://join/") &&
+		menu_fits(), "hosting for Vitas and PC: the code, and the PC players' join link in two lines that fit");
+	hosting = 0;
+	clock_us += 5000000;
+	frame(0);
+	check(!strstr(menu, "join with:"), "not hosting: no link");
+	/* a crossplay game had: the code row and the public games as ever */
 	to_tab("Dev");
 	to_tab("Multiplayer");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection|Crossplay*|Bots|Co-op players|Unseen players|Modded maps|Latency meter"),
-		"Crossplay on: no Join with a code row (codes join Vita games), no Friends row (friends' games are Vitas')");
+	check(!strcmp(labels, "Connection|Vita and PC|Join with a code|Bots|Co-op players|Unseen players|Modded maps|Latency meter"),
+		"a crossplay game: Join with a code still (codes join Vitas' games on either wire)");
+	test_pc_games = 1;
 	test_crossplay_browser();
+	test_pc_games = 0;
 	test_crossplay_wire = 0;
-	to_tab("Dev");
-	to_tab("Multiplayer");
-	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection|Crossplay*|Join with a code|Bots|Co-op players|Unseen players|Modded maps|Latency meter"),
-		"Crossplay off: Join with a code back");
 	to_tab("Dev");
 	to_line("Save report");
 }
@@ -2685,14 +2726,15 @@ static void test_tab_layouts(void)
 			old |= !strcmp(pages[index].name, "Screen") || !strcmp(pages[index].name, "First person") ||
 				!strcmp(pages[index].name, "Advanced") || !strcmp(pages[index].name, "General") ||
 				!strcmp(pages[index].name, "Graphics") || !strcmp(pages[index].name, "Audio");
-		check(!old && PAGE_GRAPHICS_DETAIL == TAB_COUNT && PAGE_COUNT == TAB_COUNT + 12 &&
+		check(!old && PAGE_GRAPHICS_DETAIL == TAB_COUNT && PAGE_COUNT == TAB_COUNT + 13 &&
 			!strcmp(pages[PAGE_GRAPHICS_DETAIL].name, "Detail") && !strcmp(pages[PAGE_GRAPHICS_PERFORMANCE].name, "Performance") &&
 			!strcmp(pages[PAGE_BUTTONS].name, "Button layout") && !strcmp(pages[PAGE_TOUCH].name, "Touch zones") &&
 			!strcmp(pages[PAGE_GYRO].name, "Gyro settings") && !strcmp(pages[PAGE_PLAY].name, "Play") &&
 			!strcmp(pages[PAGE_MAPS].name, "Modded maps") && !strcmp(pages[PAGE_DEV_AB].name, "A/B switches") &&
 			!strcmp(pages[PAGE_FORGE].name, "Forge and File Share") && !strcmp(pages[PAGE_MODS].name, "Mod manager") &&
-			!strcmp(pages[PAGE_FRIENDS].name, "Friends") && !strcmp(pages[PAGE_PARTY].name, "Party"),
-			"the pages rows open: Detail, Performance, Button layout, Touch zones, Gyro settings, Play, Modded maps, A/B "
+			!strcmp(pages[PAGE_FRIENDS].name, "Friends") && !strcmp(pages[PAGE_PARTY].name, "Party") &&
+			!strcmp(pages[PAGE_CROSSPLAY].name, "Vita and PC"),
+			"the pages rows open: Detail, Performance, Button layout, Touch zones, Gyro settings, Play, Modded maps, Vita and PC, A/B "
 			"switches, Forge and File Share, Mod manager, Friends, Party (no Screen, First person or Advanced page; no "
 			"General, Graphics or Audio tab)");
 	}
@@ -2717,7 +2759,7 @@ static void test_headings(void)
 		{ "Video", "=Quality|Profile|Render resolution|Dynamic minimum|Frame limit|Frame interpolation|=Screen|"
 			"Aspect ratio|Upscale filter|Sharp interface|=More|Detail|Performance" },
 		{ "Sound", "Sound voices*|Sound occlusion|Sound updates" },
-		{ "Multiplayer", "=Network|Connection|Crossplay*|Join with a code|=Bots|Bots|=Games|Co-op players|"
+		{ "Multiplayer", "=Network|Connection|Vita and PC|Join with a code|=Bots|Bots|=Games|Co-op players|"
 			"Unseen players|Modded maps|Latency meter" },
 	};
 	char outline[512], line[128];
@@ -2828,7 +2870,7 @@ static void test_variables_kept(void)
 		"HALO_XBOX_A", "HALO_XBOX_B", "HALO_XBOX_X", "HALO_XBOX_Y", "HALO_XBOX_BLACK", "HALO_XBOX_WHITE",
 		"HALO_XBOX_LEFT_TRIGGER", "HALO_XBOX_RIGHT_TRIGGER", "HALO_XBOX_LEFT_STICK", "HALO_XBOX_RIGHT_STICK",
 		"HALO_XBOX_BACK", "HALO_DEV_SETTINGS", "HALO_GYRO", "HALO_GYRO_BUTTON", "HALO_GYRO_SENS",
-		"HALO_GYRO_INVERT_Y", "HALO_GYRO_TURN", "HALO_GYRO_ASSIST", "HALO_MENU_STYLE", "HALO_VITA_NETWORK", "HALO_CROSSPLAY",
+		"HALO_GYRO_INVERT_Y", "HALO_GYRO_TURN", "HALO_GYRO_ASSIST", "HALO_MENU_STYLE", "HALO_VITA_NETWORK", "HALO_NET_BROWSER_FILTER", "HALO_NET_HOST_CROSSPLAY",
 		"HALO_ADHOC_ROOM", "HALO_CUSTOM_EDITION", PERFORMANCE_LOG, "HALO_HANG_CRASH",
 		"XV_FPS", "HALO_DEBUG_CAMERA", "HALO_GXM_WCLAMP", "HALO_TARGET_CHAIN_MIN_SIZE", "HALO_FRAME_PHASE_LOCK",
 		"HALO_GXM_RTT_SYNC", "HALO_ADHOC_DIALOG_MODE", "HALO_SUN_RAYS",
@@ -3504,9 +3546,9 @@ static void test_languages(void)
 	browse_count = 0;
 	show();
 	check(menu_lines_fit(), "Spanish: the public games, none");
-	/* (with Crossplay on: the PC games' badges, a co-op one chosen, a large
-	one's question) */
-	test_crossplay_wire = 1;
+	/* (the PC games' tags and badges, a co-op one chosen, a large one's
+	question) */
+	test_pc_games = 1;
 	browsing = 1;
 	browse_refresh();
 	for (index = 0; index < browse_count; index++)
@@ -3523,7 +3565,7 @@ static void test_languages(void)
 	printf("%s\n--\n", menu);
 	check(menu_lines_fit() && strstr(menu, "Cruz"), "Spanish: the large PC game's question fits");
 	screen = SCREEN_BROWSE;
-	test_crossplay_wire = 0;
+	test_pc_games = 0;
 	browsing = 0;
 	browse_count = browse_selected = 0;
 	screen = SCREEN_GUIDE;
@@ -3854,10 +3896,12 @@ static void test_menu_style_row(void)
 
 static void test_restart_offer(void)
 {
-	const char *crossplay = getenv("HALO_CROSSPLAY");
+	/* (a row that applies after a restart: Sound voices, its first choice
+	"16" the one moved to and back) */
+	const char *voices = getenv("HALO_SOUND_CHANNELS");
 	char before[8];
 
-	snprintf(before, sizeof(before), "%s", crossplay ? crossplay : "0");
+	snprintf(before, sizeof(before), "%s", voices ? voices : "0");
 	main_menu_idle_now = 1;
 	open_panel();
 	press(VITA_BUTTON_CIRCLE);
@@ -3865,13 +3909,13 @@ static void test_restart_offer(void)
 	check(!menu_visible, "no change that needs a restart: closing asks nothing");
 
 	open_panel();
-	to_tab("Multiplayer");
-	to_line("Crossplay");
-	press(strcmp(before, "1") ? VITA_BUTTON_RIGHT : VITA_BUTTON_LEFT);
+	to_tab("Sound");
+	to_line("Sound voices");
+	press(strcmp(before, "16") ? VITA_BUTTON_LEFT : VITA_BUTTON_RIGHT);
 	press(VITA_BUTTON_CIRCLE);
 	frame(0);
 	check(menu_visible && strstr(menu, "applies after a restart") && strstr(menu, "Cross: yes"),
-		"Crossplay changed, closed at the main menu: the restart is offered");
+		"Sound voices changed, closed at the main menu: the restart is offered");
 	press(VITA_BUTTON_CROSS);
 	frame(0);
 	check(restarts_asked == 1 && strstr(log_text, "settings: restarting the game") &&
@@ -3880,9 +3924,9 @@ static void test_restart_offer(void)
 	frame(0);
 
 	open_panel();
-	to_tab("Multiplayer");
-	to_line("Crossplay");
-	press(strcmp(before, "1") ? VITA_BUTTON_LEFT : VITA_BUTTON_RIGHT);
+	to_tab("Sound");
+	to_line("Sound voices");
+	press(strcmp(before, "16") ? VITA_BUTTON_RIGHT : VITA_BUTTON_LEFT);
 	press(VITA_BUTTON_CIRCLE);
 	frame(0);
 	check(menu_visible && strstr(menu, "applies after a restart"), "changed back: offered again");
@@ -3896,14 +3940,14 @@ static void test_restart_offer(void)
 
 	main_menu_idle_now = 0;
 	open_panel();
-	to_tab("Multiplayer");
-	to_line("Crossplay");
-	press(VITA_BUTTON_RIGHT);
-	press(VITA_BUTTON_LEFT);
+	to_tab("Sound");
+	to_line("Sound voices");
+	press(strcmp(before, "16") ? VITA_BUTTON_LEFT : VITA_BUTTON_RIGHT);
+	press(strcmp(before, "16") ? VITA_BUTTON_RIGHT : VITA_BUTTON_LEFT);
 	press(VITA_BUTTON_CIRCLE);
 	frame(0);
 	check(!menu_visible && restarts_asked == 1, "in a game: not offered (the help line says it)");
-	check(!strcmp(getenv("HALO_CROSSPLAY"), before), "Crossplay as it was");
+	check(getenv("HALO_SOUND_CHANNELS") && !strcmp(getenv("HALO_SOUND_CHANNELS"), before), "Sound voices as it was");
 }
 
 int main(void)
@@ -4568,6 +4612,35 @@ int main(void)
 			"a 1.0 settings.txt (Custom): its own rows kept, the rows it does not name at their defaults (no sun rays)");
 	}
 
+	/* the retired Crossplay switch (Oct 19 2026, docs/crossplay.md): On, a
+	player's choice to play PCs, loads as Browser shows PC games; Off (as
+	shipped) as all games; a Browser shows saved since wins; the old line is
+	gone at the next save */
+	{
+		static const char on[] = "HALO_CROSSPLAY=1\nHALO_VITA_NETWORK=online\n";
+		static const char off[] = "HALO_CROSSPLAY=0\nHALO_VITA_NETWORK=online\n";
+		static const char both[] = "HALO_CROSSPLAY=1\nHALO_NET_BROWSER_FILTER=vita\nHALO_VITA_NETWORK=online\n";
+
+		write_file(SETTINGS_FILE, on, sizeof(on) - 1);
+		unsetenv("HALO_NET_BROWSER_FILTER");
+		log_text[0] = 0;
+		vita_settings_load();
+		check(getenv("HALO_NET_BROWSER_FILTER") && !strcmp(getenv("HALO_NET_BROWSER_FILTER"), "pc") &&
+			!getenv("HALO_CROSSPLAY") && strstr(log_text, "the Crossplay switch is gone (Crossplay On): Browser shows PC games"),
+			"Crossplay On in an older settings.txt: Browser shows PC games, halo.log says so");
+		vita_settings_set("HALO_FRAME_CAP", "30");
+		check(!strstr(file_text(SETTINGS_FILE), "HALO_CROSSPLAY") &&
+			strstr(file_text(SETTINGS_FILE), "HALO_NET_BROWSER_FILTER=pc\n"), "the next save: Browser shows, no Crossplay line");
+		write_file(SETTINGS_FILE, off, sizeof(off) - 1);
+		unsetenv("HALO_NET_BROWSER_FILTER");
+		vita_settings_load();
+		check(!strcmp(getenv("HALO_NET_BROWSER_FILTER"), "all"), "Crossplay Off (as shipped): Browser shows all games");
+		write_file(SETTINGS_FILE, both, sizeof(both) - 1);
+		unsetenv("HALO_NET_BROWSER_FILTER");
+		vita_settings_load();
+		check(!strcmp(getenv("HALO_NET_BROWSER_FILTER"), "vita"), "a Browser shows saved since: it holds");
+		setenv("HALO_NET_BROWSER_FILTER", "all", 1);
+	}
 	/* 1.0.3's co-op choice (every game hosted became that level, the
 	owner's trap) loads as Off, and is gone from settings.txt at the next
 	save; its Online games row loads as Visibility */

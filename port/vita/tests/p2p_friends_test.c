@@ -38,6 +38,8 @@ and UBSan too).
 /* (the files in the test's folders, not ux0:) */
 #define P2P_FRIENDS_TEST
 #include "../../linux/src/p2p_friends.c"
+/* (the wires: which a friend's game is joined on, network_wire.h) */
+#include "../../linux/src/network_wire.c"
 
 #include <stdarg.h>
 /* (the platform layer's headers keep sys/stat.h out) */
@@ -148,6 +150,28 @@ int p2p_join_invite(const char *text)
 	snprintf(joined_link, sizeof(joined_link), "%s", text);
 	join_count++;
 	return 1;
+}
+/* (the wire of the game joined: its presence's, invite's or party's) */
+static int joined_wire = -1;
+/* (p2p_lobby.c's: a friend's game with a password opened with it) */
+static int sealed_joins;
+static char sealed_password[64];
+static unsigned char sealed_hash[P2P_KEY_HASH_SIZE], sealed_key[P2P_KEY_SIZE], sealed_seal[P2P_SEALED_TOKEN_SIZE];
+int p2p_lobby_join_sealed(const unsigned char *key_hash, const unsigned char *signing_key, const unsigned char *sealed,
+	const char *password, int crossplay)
+{
+	(void)crossplay;
+	memcpy(sealed_hash, key_hash, sizeof(sealed_hash));
+	memcpy(sealed_key, signing_key, sizeof(sealed_key));
+	memcpy(sealed_seal, sealed, sizeof(sealed_seal));
+	snprintf(sealed_password, sizeof(sealed_password), "%s", password ? password : "");
+	sealed_joins++;
+	return 1;
+}
+int p2p_join_invite_on(const char *text, int crossplay)
+{
+	joined_wire = crossplay;
+	return p2p_join_invite(text);
 }
 
 /* ---------- the machines and the broker */
@@ -378,7 +402,8 @@ static void test_request_accept(void)
 	p2p_friends_set_activity(P2P_FRIEND_STATE_MULTIPLAYER, "bloodgulch", "Slayer", 2, -1, 0, 3, 16);
 	pass(8);
 	check(entry_of(0, P2P_FRIEND_KIND_FRIEND, 0, &entry) && entry.online, "the friend online");
-	check(!strcmp(entry.activity, "Slayer on Blood Gulch"), "the friend's activity: Slayer on Blood Gulch");
+	check(!strcmp(entry.activity, "Slayer on Blood Gulch (VITA)") && !entry.crossplay,
+		"the friend's activity: Slayer on Blood Gulch, tagged VITA (the Vitas' wire)");
 	check(!strcmp(entry.name, "Bravo"), "the friend's name cleaned as a player's");
 	check(entry_of(1, P2P_FRIEND_KIND_FRIEND, 0, &entry) && entry.online && !strcmp(entry.activity, "In the menus"),
 		"presence both ways: In the menus");
@@ -386,7 +411,7 @@ static void test_request_accept(void)
 	p2p_friends_set_activity(P2P_FRIEND_STATE_COOP, "a10", "", 0, 3, 0, 1, 4);
 	pass(8);
 	check(entry_of(1, P2P_FRIEND_KIND_FRIEND, 0, &entry) &&
-		!strcmp(entry.activity, "Co-op: The Pillar of Autumn, Legendary"), "co-op's activity with its difficulty");
+		!strcmp(entry.activity, "Co-op: The Pillar of Autumn, Legendary (VITA)"), "co-op's activity with its difficulty, tagged");
 	use(0);
 	p2p_friends_set_activity(P2P_FRIEND_STATE_FORGE, "", "", 0, -1, 0, 0, 0);
 	pass(8);
@@ -422,35 +447,77 @@ static void test_join_invite(void)
 	join_count = 0;
 	check(p2p_friends_act(entry.id, P2P_FRIEND_KIND_FRIEND, P2P_FRIENDS_JOIN) == P2P_FRIENDS_DONE && join_count == 1 &&
 		!strcmp(joined_link, expected), "Join hands the friend's invite link to internet play");
-	/* a password: never joinable from presence, never invited */
+	/* a password, its sealed token not ready yet: not joinable */
 	host->locked = 1;
+	host->has_sealed = 0;
 	pass(10);
-	check(entry_of(0, P2P_FRIEND_KIND_FRIEND, 0, &entry) && !entry.joinable, "a password's game not joinable");
-	use(0);
-	join_count = 0;
-	check(p2p_friends_act(entry.id, P2P_FRIEND_KIND_FRIEND, P2P_FRIENDS_JOIN) == P2P_FRIENDS_NOT_JOINABLE &&
-		!join_count, "Join refused for a password's game");
+	check(entry_of(0, P2P_FRIEND_KIND_FRIEND, 0, &entry) && !entry.joinable, "a password's game, its seal not ready: not joinable");
+	/* ... ready: joinable, the password asked; the presence carries the host's
+	key and the sealed token, never the token (the owner, Oct 19 2026: a game
+	with a password still asks the friend for it) */
+	host->has_sealed = 1;
+	for (index = 0; index < P2P_KEY_SIZE; index++)
+		host->signing_key[index] = (unsigned char)(0xC0 + index);
+	for (index = 0; index < P2P_SEALED_TOKEN_SIZE; index++)
+		host->sealed_token[index] = (unsigned char)(0x60 + index);
+	pass(10);
+	check(entry_of(0, P2P_FRIEND_KIND_FRIEND, 0, &entry) && entry.joinable && entry.locked,
+		"a password's game, sealed: joinable, with its password");
 	use(1);
-	check(!memchr(machines[1].presence_plain, host->token[0], 0) && !machines[1].presence_joinable,
-		"a password's game's invite not in presence");
-	check(entry_of(1, P2P_FRIEND_KIND_FRIEND, 0, &entry) &&
-		p2p_friends_act(entry.id, P2P_FRIEND_KIND_FRIEND, P2P_FRIENDS_INVITE) == P2P_FRIENDS_NOT_JOINABLE,
-		"Invite refused with a password");
-	/* private: not joinable, but invited */
+	check(machines[1].presence_joinable == 2 && !memmem(machines[1].presence_plain, (size_t)machines[1].presence_size,
+		host->token, P2P_TOKEN_SIZE), "its presence holds no token (the sealed one in its place)");
+	use(0);
+	join_count = sealed_joins = 0;
+	check(p2p_friends_act(entry.id, P2P_FRIEND_KIND_FRIEND, P2P_FRIENDS_JOIN) == P2P_FRIENDS_PASSWORD && !join_count,
+		"Join asks for the password");
+	check(p2p_friends_join_password(entry.id, "hunter2") == P2P_FRIENDS_DONE && sealed_joins == 1 &&
+		!strcmp(sealed_password, "hunter2") && !memcmp(sealed_hash, host->key_hash, P2P_KEY_HASH_SIZE) &&
+		!memcmp(sealed_key, host->signing_key, P2P_KEY_SIZE) && !memcmp(sealed_seal, host->sealed_token,
+		P2P_SEALED_TOKEN_SIZE), "the password opens the presence's sealed token (the lobby's thread)");
+	/* ... an invite into it admits without the password (the host chose them) */
+	use(1);
+	check(entry_of(1, P2P_FRIEND_KIND_FRIEND, 0, &entry) && entry.invitable &&
+		p2p_friends_act(entry.id, P2P_FRIEND_KIND_FRIEND, P2P_FRIENDS_INVITE) == P2P_FRIENDS_DONE,
+		"Invite into a password's game sent");
+	pass(2);
+	use(0);
+	check(p2p_friends_take_invite(&entry), "the invite heard");
+	join_count = 0;
+	check(p2p_friends_act(entry.id, P2P_FRIEND_KIND_INVITE, P2P_FRIENDS_INVITE_ACCEPT) == P2P_FRIENDS_DONE &&
+		join_count == 1 && !strcmp(joined_link, expected), "the invite joins with no password");
 	host->locked = 0;
+	host->has_sealed = 0;
+	/* private (not listed): joinable from presence, no code typed (the
+	owner, Oct 19 2026), and to friends alone */
 	host->listed = 0;
 	pass(10);
-	check(entry_of(0, P2P_FRIEND_KIND_FRIEND, 0, &entry) && !entry.joinable, "a private game not joinable");
+	check(entry_of(0, P2P_FRIEND_KIND_FRIEND, 0, &entry) && entry.joinable && !entry.locked,
+		"a private game joinable by a friend");
+	use(0);
+	join_count = 0;
+	check(p2p_friends_act(entry.id, P2P_FRIEND_KIND_FRIEND, P2P_FRIENDS_JOIN) == P2P_FRIENDS_DONE && join_count == 1 &&
+		!strcmp(joined_link, expected), "Join of the private game: its invite link, no code");
+	{
+		int from_bravo = 0;
+
+		for (index = 0; index < carried_count; index++)
+			from_bravo += carried[index].from == 1 && !strcmp(carried[index].topic, machines[2].mailbox_topic);
+		check(!entry_of(2, P2P_FRIEND_KIND_FRIEND, 0, &entry) && from_bravo == 0,
+			"a player who is not a friend hears nothing of it");
+	}
 	use(1);
-	check(!machines[1].presence_joinable, "a private game's invite not in presence");
 	check(entry_of(1, P2P_FRIEND_KIND_FRIEND, 0, &entry) && entry.invitable &&
+		p2p_friends_act(entry.id, P2P_FRIEND_KIND_FRIEND, P2P_FRIENDS_INVITE) == P2P_FRIENDS_TOO_SOON,
+		"an invite a moment after the last refused");
+	/* (the invites' pace: one each INVITE_INTERVAL either way) */
+	pass(24);
+	use(1);
+	check(entry_of(1, P2P_FRIEND_KIND_FRIEND, 0, &entry) &&
 		p2p_friends_act(entry.id, P2P_FRIEND_KIND_FRIEND, P2P_FRIENDS_INVITE) == P2P_FRIENDS_DONE, "Invite sent");
-	check(p2p_friends_act(entry.id, P2P_FRIEND_KIND_FRIEND, P2P_FRIENDS_INVITE) == P2P_FRIENDS_TOO_SOON,
-		"a second invite a moment later refused");
 	pass(2);
 	check(count_of(0, P2P_FRIEND_KIND_INVITE) == 1, "the invite heard");
 	use(0);
-	check(p2p_friends_take_invite(&entry) && !strcmp(entry.name, "Bravo") && !strcmp(entry.activity, "CTF on Blood Gulch"),
+	check(p2p_friends_take_invite(&entry) && !strcmp(entry.name, "Bravo") && strstr(entry.activity, "CTF on Blood Gulch"),
 		"the invite's pop-up: who and what");
 	check(!p2p_friends_take_invite(&entry), "the pop-up once");
 	join_count = 0;
@@ -672,6 +739,30 @@ static void test_decline_block(void)
 	reset_drops(0);
 	pass(4);
 	check(count_of(0, P2P_FRIEND_KIND_REQUEST) == 0 && blocked_drops(0) >= 1, "and is dropped");
+	/* Alpha hosts a private game: the blocked player hears nothing of it */
+	{
+		struct p2p_friends_host *host = &hosts[0];
+		int sent = carried_count, index, to_charlie = 0;
+
+		memset(host, 0, sizeof(*host));
+		host->online = host->hosting = host->open = 1;
+		host->players = 1;
+		host->maximum = 16;
+		host->key_hash[0] = 0xAB;
+		host->token[0] = 0xCD;
+		use(0);
+		p2p_friends_set_activity(P2P_FRIEND_STATE_MULTIPLAYER, "bloodgulch", "Slayer", 2, -1, 0, 1, 16);
+		pass(10);
+		for (index = sent; index < carried_count; index++)
+			to_charlie += carried[index].from == 0 && !strcmp(carried[index].topic, machines[2].mailbox_topic);
+		check(to_charlie == 0 && count_of(2, P2P_FRIEND_KIND_FRIEND) == 0,
+			"a blocked player hears nothing of Alpha's private game: no presence, no join");
+		memset(host, 0, sizeof(*host));
+		host->online = 1;
+		use(0);
+		p2p_friends_set_activity(P2P_FRIEND_STATE_MENUS, "", "", 0, -1, 0, 0, 0);
+		pass(4);
+	}
 	use(2);
 	machines[2].outgoing_count = 0;
 }
@@ -1664,6 +1755,27 @@ static int seed(const char *folder)
 	return 0;
 }
 
+/* the wire a friend's game is joined on (network_wire.h): this build's own
+by its version (18, the wire bit; the crossplay wire's version for a Vita's
+game for Vitas and PC), a PC friend's (OpenCE's friends) by its version,
+on the crossplay wire when that wire joins it; the friends' topics hcev's */
+static void test_wires(void)
+{
+	char topic[TOPIC_LENGTH + 1];
+	unsigned char key[P2P_KEY_SIZE] = { 1, 2, 3 };
+
+	check(game_wire_of(HALO_PORT_NETWORK_VERSION, 0) == 0, "a friend's Vita game (18): the legacy wire");
+	check(game_wire_of(HALO_PORT_NETWORK_VERSION, 1) == 1, "a game of 18 with the wire bit: the crossplay wire");
+	check(game_wire_of(HALO_PORT_CROSSPLAY_NETWORK_VERSION, 1) == 1 && game_wire_of(HALO_PORT_CROSSPLAY_NETWORK_VERSION, 0) == 1,
+		"a PC friend's game (OpenCE's 29), or a Vita's for Vitas and PC: the crossplay wire, joinable");
+	check(game_wire_of(28, 0) == -1 && game_wire_of(32, 1) == -1 && game_wire_of(19, 0) == -1 && game_wire_of(0, 0) == -1,
+		"a version neither wire joins (28, 32, 19, 0): not joinable");
+	check(network_wire_version_of(1) == HALO_PORT_CROSSPLAY_NETWORK_VERSION && network_wire_version_of(0) == 18,
+		"the version a presence says: its game's wire's");
+	mailbox_topic(key, topic);
+	check(!strncmp(topic, "hcev/f1/m/", 10), "the friends' topics are hcev/f1's on every build");
+}
+
 int main(void)
 {
 	char root[512];
@@ -1680,6 +1792,7 @@ int main(void)
 		memset(&hosts[index], 0, sizeof(hosts[index]));
 		hosts[index].online = 1;
 	}
+	test_wires();
 	test_codes();
 	test_request_accept();
 	test_join_invite();

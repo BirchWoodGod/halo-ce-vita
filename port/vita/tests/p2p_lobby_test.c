@@ -14,17 +14,21 @@ listed until its key is ready, then listed locked (its token nowhere in the
 listing) and opened by its password alone; and the Vita's own: a listing
 signed under the PCs' label, or of OpenCE's format 1, or of another network
 version, turned away; names cleaned as players' are; the entries' Rules and
-Players lines. And on the crossplay wire (network_wire.h, crossplay_checks):
-an OpenCE host's listing (format 1, "hceu-lobby-1", network version 29)
-taken, read as OpenCE's (its flags only), and joined by its invite; the
-Vitas' format 2, their label and another version turned away. Prints PASS
-or the failures.
+Players lines. And on the crossplay wire's topics (network_wire.h,
+crossplay_checks): an OpenCE host's listing (format 1, "hceu-lobby-1",
+network version 29) taken, read as OpenCE's (its flags only), tagged, and
+joined by its invite on that wire; the Vitas' format 2, their label and
+another version turned away there; a Vita's game hosted for Vitas and PC
+listed as OpenCE's browsers read it (format 1, its Vita bit, its name
+tagged [VITA]) and tagged VITA+PC by the Vitas'; the browsers' filter.
+Prints PASS or the failures.
 
 It includes p2p_lobby.c, to reach its reader. run_p2p_lobby_test.sh builds it
 with the platform layer's flags (HALO_VITA: the Vitas' topics and label).
 */
 
 #include "../../linux/src/p2p_lobby.c"
+#include "monocypher.h"
 
 #include <stdarg.h>
 #include <unistd.h>
@@ -56,12 +60,23 @@ void posix_random_bytes(void *buffer, unsigned long size)
 }
 unsigned long p2p_now(void) { return clock_now; }
 int config_boolean(const char *name) { return !strcmp(name, "network.public_lobby"); }
-/* (port/linux/src/network_wire.c's: the wire, a check's) */
-static int test_crossplay;
+/* (port/linux/src/network_wire.c's: the hosted game's wire, the PC host's
+stand-in and the browsers' filter, a check's; the wire a listing is heard
+on, hear's) */
+static int test_crossplay, test_heard, test_pc_stand_in, test_filter;
 int network_wire_crossplay(void) { return test_crossplay; }
-int network_wire_version_accepted(unsigned int version)
+unsigned int network_wire_version_of(int crossplay)
 {
-	return version == (test_crossplay ? HALO_PORT_CROSSPLAY_NETWORK_VERSION : HALO_PORT_NETWORK_VERSION);
+	return crossplay ? HALO_PORT_CROSSPLAY_NETWORK_VERSION : HALO_PORT_NETWORK_VERSION;
+}
+int network_wire_version_accepted_on(int crossplay, unsigned int version)
+{
+	return version == network_wire_version_of(crossplay);
+}
+int network_wire_host_pc_stand_in(void) { return test_pc_stand_in; }
+int network_wire_browser_shows(int vita_host)
+{
+	return test_filter == 0 || (test_filter == 1) == (vita_host != 0);
 }
 const char *config_string(const char *name)
 {
@@ -123,7 +138,13 @@ void p2p_sign(const void *message, int size, unsigned char *signature)
 	p2p_ed25519_sign(seed, signing_key, message, size, signature);
 }
 void p2p_new_invite_if_listed(void) { new_invites++; }
-void p2p_signal_lobby_topics(int listed, int browsing) { (void)listed; (void)browsing; }
+static int topics_listed_crossplay;
+void p2p_signal_lobby_topics(int listed, int listed_crossplay, int browsing)
+{
+	(void)browsing;
+	if (listed)
+		topics_listed_crossplay = listed_crossplay;
+}
 void p2p_signal_lobby_query(void) {}
 void p2p_signal_lobby_publish(const unsigned char *listing, int size, int closing)
 {
@@ -142,9 +163,11 @@ void p2p_signal_brokers_text(char *text, int size, int what)
 	snprintf(text, (size_t)size, "the test's brokers (%d)", what);
 }
 void p2p_signal_kick(void) { kicks++; }
-int p2p_join_invite_locked(const char *text)
+static int joined_wire = -2;
+int p2p_join_invite_locked(const char *text, int crossplay)
 {
 	snprintf(joined_invite, sizeof(joined_invite), "%s", text);
+	joined_wire = crossplay;
 	return 1;
 }
 void p2p_set_status(const char *format, ...) { (void)format; }
@@ -274,13 +297,29 @@ static void crypto_checks(void)
 	check(!p2p_ed25519_verify(small, "anything", 8, forged), "a small-order key's signature");
 	/* a password's key: the same for the same password and salt, another
 	for another of either; a token sealed opens only with its key and salt */
-	p2p_password_key("hunter2", ed, key);
-	p2p_password_key("hunter2", ed, again);
+	p2p_password_key("hunter2", ed, key, 0);
+	p2p_password_key("hunter2", ed, again, 0);
 	check(!memcmp(key, again, sizeof(key)), "a password's key is the same each time");
-	p2p_password_key("hunter3", ed, again);
+	p2p_password_key("hunter3", ed, again, 0);
 	check(memcmp(key, again, sizeof(key)) != 0, "another password, another key");
-	p2p_password_key("hunter2", other_ed, again);
+	p2p_password_key("hunter2", other_ed, again, 0);
 	check(memcmp(key, again, sizeof(key)) != 0, "another host (salt), another key");
+	/* (the crossplay wire's: OpenCE's three passes, another key than the
+	Vitas' four of the same password) */
+	p2p_password_key("hunter2", ed, again, 1);
+	check(memcmp(key, again, sizeof(key)) != 0, "the crossplay wire's key (OpenCE's three passes) is not the Vitas'");
+	{
+		/* (OpenCE's p2p_password_key of 8102e711, Argon2id 4096 blocks, 3
+		passes, salted with the host's Ed25519 key: the same key, so a PC
+		player's password opens a Vita's crossplay game) */
+		crypto_argon2_config config = { CRYPTO_ARGON2_ID, 4096, 3, 1 };
+		crypto_argon2_inputs inputs = { (const unsigned char *)"hunter2", ed, 7, P2P_KEY_SIZE };
+		static unsigned char work[4096 * 1024];
+		unsigned char opence[P2P_PASSWORD_KEY_SIZE];
+
+		crypto_argon2(opence, sizeof(opence), work, config, inputs, crypto_argon2_no_extras);
+		check(!memcmp(opence, again, sizeof(opence)), "the crossplay wire's key is OpenCE's, byte for byte");
+	}
 	p2p_seal_token(key, ed, token, sealed);
 	check(p2p_unseal_token(key, ed, sealed, opened) && !memcmp(opened, token, sizeof(token)), "a sealed token opens");
 	check(!p2p_unseal_token(again, ed, sealed, opened), "another key opens nothing");
@@ -310,7 +349,7 @@ static void hear(const unsigned char *payload, int size, int retained, const cha
 	p2p_key_hash(x25519_public, hash);
 	p2p_hex(hash, P2P_KEY_HASH_SIZE, own);
 	pthread_mutex_lock(&p2p_lock);
-	p2p_lobby_slot_heard(slot ? slot : own, payload, size, retained);
+	p2p_lobby_slot_heard(test_heard, slot ? slot : own, payload, size, retained);
 	pthread_mutex_unlock(&p2p_lock);
 	lobby_update(hosting_token, 3, 16);
 }
@@ -376,11 +415,11 @@ static void lobby_checks(void)
 	check(p2p_lobby_entry(0, &entry) && !strcmp(entry.id, id) && entry.own && !strcmp(entry.map, "Blood Gulch") &&
 		!strcmp(entry.rules, "Slayer to 50 on Blood Gulch") &&
 		!strcmp(entry.players_line, "3 of 16: alpha, bravo, charlie") && !entry.locked && !entry.pc_map &&
-		!entry.badge[0] && !entry.experimental && !entry.coop,
-		"the entry's map, Rules and Players lines (no badges: the legacy wire's games are all the Vitas')");
+		!strcmp(entry.badge, "VITA") && !strcmp(entry.tag, "VITA") && !entry.crossplay && !entry.experimental &&
+		!entry.coop, "the entry's map, Rules and Players lines; its tag VITA (the legacy wire's games are the Vitas')");
 	/* joining it: its invite, at once */
 	check(p2p_lobby_join(id, NULL) && p2p_lobby_join_state() == P2P_LOBBY_JOIN_JOINING &&
-		!strcmp(joined_invite, expected_invite), "joining an open game joins its invite");
+		!strcmp(joined_invite, expected_invite) && joined_wire == 0, "joining an open game joins its invite, on its wire");
 	check(!p2p_lobby_join("00112233445566778899aabbccddeeff", NULL) &&
 		p2p_lobby_join_state() == P2P_LOBBY_JOIN_GONE, "a game not listed is not joined");
 	check(!p2p_lobby_join("not hex", NULL) && !p2p_lobby_join(NULL, NULL), "an id that is not one is not joined");
@@ -644,7 +683,7 @@ static void flood_checks(void)
 		p2p_key_hash(x25519_public, hash);
 		p2p_hex(hash, P2P_KEY_HASH_SIZE, slot);
 		pthread_mutex_lock(&p2p_lock);
-		p2p_lobby_slot_heard(slot, listing, size, 0);
+		p2p_lobby_slot_heard(0, slot, listing, size, 0);
 		pthread_mutex_unlock(&p2p_lock);
 		clock_now += 3;
 		lobby_update(NULL, 0, 0);
@@ -853,7 +892,7 @@ static void host_heard(int host, int players)
 	int size = host_listing(host, players, bytes, slot, identifier);
 
 	pthread_mutex_lock(&p2p_lock);
-	p2p_lobby_slot_heard(slot, bytes, size, 0);
+	p2p_lobby_slot_heard(0, slot, bytes, size, 0);
 	pthread_mutex_unlock(&p2p_lock);
 	lobby_update(NULL, 0, 0);
 }
@@ -1015,6 +1054,8 @@ static void failed_join_checks(void)
 /* (opence_listing's players, most players and game engine: a check's) */
 static int opence_players = 5, opence_maximum = 128, opence_engine = 2;
 static const char *opence_map = "bloodgulch";
+/* (its name: "PC game" unless a check sets one) */
+static const char *opence_text_name;
 
 /* an OpenCE host's listing (its p2p_lobby.c listing_make at 6399ed9d, CC0):
 format, version, flags and label given, signed with the PC host's key; its
@@ -1026,7 +1067,7 @@ static int opence_listing(unsigned char *bytes, const unsigned char *pc_seed, co
 	unsigned char data[64 + P2P_MAXIMUM_LISTING_SIZE];
 	int size = 0, label_size = (int)strlen(label), index;
 	unsigned long now = (unsigned long)time(NULL);
-	const char *const texts[3] = { "PC game", opence_map, "Slayer" };
+	const char *const texts[3] = { opence_text_name ? opence_text_name : "PC game", opence_map, "Slayer" };
 
 	bytes[size++] = 'H';
 	bytes[size++] = 'L';
@@ -1091,9 +1132,10 @@ static void crossplay_checks(void)
 	p2p_x25519(pc_public, pc_secret, NULL);
 	p2p_key_hash(pc_public, hash);
 	p2p_hex(hash, P2P_KEY_HASH_SIZE, slot);
-	test_crossplay = 1;
+	test_heard = 1;
 	p2p_lobby_browse(1);
-	check(!strcmp(P2P_LOBBY_SLOT_PREFIX, "hceu/3/lobby/s/"), "crossplay: OpenCE's slots (hceu/3/lobby/s/)");
+	check(!strcmp(P2P_LOBBY_SLOT_PREFIX(1), "hceu/3/lobby/s/") && !strcmp(P2P_LOBBY_SLOT_PREFIX(0),
+		P2P_SIGNAL_PREFIX "/3/lobby/s/"), "both wires' slots: OpenCE's (hceu/3/lobby/s/) and the Vitas'");
 	/* the Vitas' own kind of listing, their label, another version: not taken */
 	size = opence_listing(bytes, pc_seed, pc_key, 2, HALO_PORT_CROSSPLAY_NETWORK_VERSION, 1, sequence++, token,
 		"hceu-lobby-1", 4);
@@ -1111,15 +1153,17 @@ static void crossplay_checks(void)
 		"hceu-lobby-1", 4);
 	hear(bytes, size, 0, slot);
 	check(!entry_of(slot, &entry), "crossplay: one of format 1 with bytes left over is not");
-	/* OpenCE's own: taken, its flags OpenCE's (32 and 64, this build's Halo PC
-	map and co-op, not read; 128 ChupathingyCE's dedicated) */
-	size = opence_listing(bytes, pc_seed, pc_key, 1, HALO_PORT_CROSSPLAY_NETWORK_VERSION, 1 | 2 | 32 | 64 | 128,
+	/* OpenCE's own: taken, its flags OpenCE's (32, this build's Halo PC map
+	in format 2, not read; 128 ChupathingyCE's dedicated) */
+	size = opence_listing(bytes, pc_seed, pc_key, 1, HALO_PORT_CROSSPLAY_NETWORK_VERSION, 1 | 2 | 32 | 128,
 		sequence++, token, "hceu-lobby-1", 0);
 	hear(bytes, size, 0, slot);
 	check(entry_of(slot, &entry) && !strcmp(entry.name, "PC game") && !strcmp(entry.map, "Blood Gulch") &&
 		entry.players == 5 && entry.maximum == 128 && entry.open && entry.in_progress && !entry.pc_map &&
-		entry.dedicated && !entry.locked && !entry.own && entry.compatible && entry.score_limit == 0,
+		entry.dedicated && !entry.locked && !entry.own && entry.compatible && entry.score_limit == 0 && entry.crossplay,
 		"crossplay: an OpenCE host's listing (format 1, hceu-lobby-1, version 29) is taken, its flags OpenCE's");
+	check(entry.platform == CROSSPLAY_PLATFORM_CHUPA && !strcmp(entry.tag, "CHUPA"),
+		"crossplay: a dedicated server's listing is ChupathingyCE's: tagged CHUPA");
 	{
 		unsigned char parts[P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE];
 		char text[2 * sizeof(parts) + 1];
@@ -1129,20 +1173,22 @@ static void crossplay_checks(void)
 		p2p_hex(parts, sizeof(parts), text);
 		snprintf(invite, sizeof(invite), "halo://join/%s", text);
 	}
-	check(p2p_lobby_join(slot, NULL) && !strcmp(joined_invite, invite), "crossplay: joining it joins its invite");
+	check(p2p_lobby_join(slot, NULL) && !strcmp(joined_invite, invite) && joined_wire == 1,
+		"crossplay: joining it joins its invite, on the crossplay wire");
 	/* the guardrails' badges (crossplay_guard.h, docs/crossplay.md 6): a
 	maximum above 16 is Experimental (that server's 128), so is a game of
 	more than 16 players; 16 of 16 is not; no game engine is co-op (OpenCE's
 	listing has no co-op bit), shown without a difficulty it never sent */
-	check(entry.experimental && !entry.coop && !strcmp(entry.badge, "PC SERVER EXPERIMENTAL"),
-		"crossplay: a PC server of 128: badged PC SERVER EXPERIMENTAL");
+	check(entry.experimental && !entry.coop && !strcmp(entry.badge, "CHUPA SERVER EXPERIMENTAL"),
+		"crossplay: a PC server of 128: badged CHUPA SERVER EXPERIMENTAL");
 	opence_players = 16;
 	opence_maximum = 16;
 	size = opence_listing(bytes, pc_seed, pc_key, 1, HALO_PORT_CROSSPLAY_NETWORK_VERSION, 1, sequence++, token,
 		"hceu-lobby-1", 0);
 	hear(bytes, size, 0, slot);
-	check(entry_of(slot, &entry) && !entry.experimental && !entry.coop && !entry.dedicated && !strcmp(entry.badge, "PC"),
-		"crossplay: a PC host of 16 of 16: badged PC, not Experimental");
+	check(entry_of(slot, &entry) && !entry.experimental && !entry.coop && !entry.dedicated && !strcmp(entry.badge, "PC") &&
+		entry.platform == CROSSPLAY_PLATFORM_PC,
+		"crossplay: a PC host of 16 of 16: badged PC (its build not told by a listing), not Experimental");
 	opence_players = 17;
 	opence_maximum = 16;
 	size = opence_listing(bytes, pc_seed, pc_key, 1, HALO_PORT_CROSSPLAY_NETWORK_VERSION, 1, sequence++, token,
@@ -1178,12 +1224,92 @@ static void crossplay_checks(void)
 	opence_players = 5;
 	opence_maximum = 128;
 	opence_engine = 2;
-	/* back on the legacy wire: an OpenCE listing is not taken */
-	test_crossplay = 0;
+	/* the browsers' filter (network.browser_filter) */
+	test_filter = 1;
+	check(!entry_of(slot, &entry), "Browser shows Vita games: a PC game is not listed");
+	test_filter = 2;
+	check(entry_of(slot, &entry), "Browser shows PC games: it is");
+	test_filter = 0;
+	/* a Vita's game on the crossplay wire, heard there: its listing's bit
+	(64), its name's [VITA] taken off; tagged VITA+PC, never Experimental */
+	opence_maximum = 16;
+	opence_text_name = "[VITA] Vita Host";
+	size = opence_listing(bytes, pc_seed, pc_key, 1, HALO_PORT_CROSSPLAY_NETWORK_VERSION, 1 | 64, sequence++, token,
+		"hceu-lobby-1", 0);
+	hear(bytes, size, 0, slot);
+	check(entry_of(slot, &entry) && entry.platform == CROSSPLAY_PLATFORM_VITA && entry.crossplay &&
+		!strcmp(entry.badge, "VITA+PC") && !strcmp(entry.name, "Vita Host") && !entry.experimental,
+		"crossplay: a Vita's game for Vitas and PC: tagged VITA+PC, its name as the Vita chose it");
+	test_filter = 1;
+	check(entry_of(slot, &entry), "Browser shows Vita games: a Vita's crossplay game is listed");
+	test_filter = 0;
+	opence_text_name = "[VITA] ";
+	size = opence_listing(bytes, pc_seed, pc_key, 1, HALO_PORT_CROSSPLAY_NETWORK_VERSION, 1 | 64, sequence++, token,
+		"hceu-lobby-1", 0);
+	hear(bytes, size, 0, slot);
+	check(entry_of(slot, &entry) && entry.name[0] && strcmp(entry.name, "[VITA]"),
+		"crossplay: a Vita's listing named [VITA] and nothing: a name still");
+	opence_text_name = NULL;
+	opence_maximum = 128;
+	/* a listing of OpenCE's format heard on the Vitas' wire's topics: not taken */
+	test_heard = 0;
+	p2p_lobby_browse(0);
+	p2p_lobby_browse(1);
 	size = opence_listing(bytes, pc_seed, pc_key, 1, HALO_PORT_CROSSPLAY_NETWORK_VERSION, 1, sequence++, token,
 		"hceu-lobby-1", 0);
 	hear(bytes, size, 0, slot);
-	check(!strcmp(P2P_LOBBY_SLOT_PREFIX, P2P_SIGNAL_PREFIX "/3/lobby/s/"), "legacy: the Vitas' slots again");
+	check(!entry_of(slot, &entry), "the Vitas' topics: a listing of OpenCE's format is not taken there");
+	/* this Vita hosting for Vitas and PC: its listing OpenCE's (format 1,
+	version 29, under hceu-lobby-1), its Vita bit, its name tagged [VITA],
+	on the crossplay wire's slot */
+	{
+		static const unsigned char host_token[P2P_TOKEN_SIZE] = { 0x29, 0x29 };
+		struct listing read;
+		struct queued queued;
+		char own[2 * P2P_KEY_HASH_SIZE + 1];
+
+		lobby_update(NULL, 0, 0);
+		test_crossplay = 1;
+		hosting_token = host_token;
+		p2p_lobby_set_public(1);
+		p2p_set_game_listing("Vita Host", "bloodgulch", "Slayer", 2, 1, 0, 0);
+		p2p_set_game_listing_details(25, -1, 0, "alpha\n");
+		clock_now += 60000;
+		lobby_update(host_token, 2, 16);
+		check(p2p_lobby_listed() && topics_listed_crossplay && published[2] == LISTING_FORMAT_CROSSPLAY &&
+			(published[3] << 8 | published[4]) == HALO_PORT_CROSSPLAY_NETWORK_VERSION && (published[5] & 64) &&
+			!(published[5] & (32 | 128)), "hosting for Vitas and PC: listed on the crossplay wire, OpenCE's format 1, "
+			"version 29, its Vita bit");
+		check(p2p_lobby_listing_read(1, published, published_size, &read) && listing_signed(published, &read) &&
+			!strcmp(read.name, "[VITA] Vita Host") && read.maximum_player_count == 16,
+			"its listing reads as OpenCE's, signed under hceu-lobby-1, its name [VITA] Vita Host");
+		check(!p2p_lobby_listing_read(0, published, published_size, &read), "it is no listing of the Vitas' format 2");
+		memset(&queued, 0, sizeof(queued));
+		test_heard = 1;
+		p2p_key_hash(x25519_public, hash);
+		p2p_hex(hash, P2P_KEY_HASH_SIZE, own);
+		hear(published, published_size, 0, NULL);
+		check(entry_of(own, &entry) && entry.own && !strcmp(entry.badge, "VITA+PC") && !strcmp(entry.name, "Vita Host"),
+			"the Vitas' browser: its own game, tagged VITA+PC");
+		/* the PC host's stand-in (the tests'): no Vita bit */
+		test_pc_stand_in = 1;
+		p2p_set_game_listing(NULL, NULL, NULL, 2, 1, 1, 0);
+		clock_now += 60000;
+		lobby_update(host_token, 2, 16);
+		check(published[2] == LISTING_FORMAT_CROSSPLAY && !(published[5] & 64) &&
+			p2p_lobby_listing_read(1, published, published_size, &read) && !strcmp(read.name, "Vita Host"),
+			"the PC host's stand-in: no Vita bit, its name as it is");
+		test_pc_stand_in = 0;
+		/* hosting on the legacy wire again: its tombstone on the crossplay
+		slot, then listed in format 2 */
+		test_crossplay = 0;
+		clock_now += 60000;
+		lobby_update(host_token, 2, 16);
+		check(p2p_lobby_listed() && !topics_listed_crossplay && published[2] == LISTING_FORMAT,
+			"a game for Vitas next: listed in the Vitas' format 2, on their wire");
+		lobby_update(NULL, 0, 0);
+		test_heard = 0;
+	}
 }
 
 int main(void)

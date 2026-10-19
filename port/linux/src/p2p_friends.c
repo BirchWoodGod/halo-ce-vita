@@ -84,7 +84,7 @@ enum
 	/* type, sender, recipient, epoch, counter */
 	PLAIN_HEADER_SIZE = 1 + P2P_KEY_SIZE + P2P_KEY_SIZE + 8 + 4,
 	/* the longest body: a party's roster (its id, serial, count, leader and
-	eight keys; presence's is 116 bytes) */
+	eight keys; presence's is 116 bytes, 188 with a password's sealed token) */
 	MAXIMUM_BODY_SIZE = PARTY_ID_LENGTH + 4 + 1 + 1 + P2P_PARTY_MAXIMUM * P2P_KEY_SIZE,
 	MAXIMUM_PLAIN_SIZE = PLAIN_HEADER_SIZE + MAXIMUM_BODY_SIZE + P2P_SIGNATURE_SIZE,
 	/* a box's: the header, the ephemeral key, the nonce, the tag */
@@ -94,6 +94,11 @@ enum
 	PRESENCE_ONLINE = 1,
 	PRESENCE_WANT_REPLY = 2,
 	PRESENCE_JOINABLE = 4,
+	/* (with JOINABLE) the game has a password: the presence carries the
+	host's Ed25519 key and its token sealed with the password's key, which
+	the friend opens with the password (p2p_lobby_join_sealed), in place of
+	the token (since Oct 19 2026: builds before it drop such a presence) */
+	PRESENCE_LOCKED = 8,
 
 	TOPIC_LENGTH = 64,
 	/* the game's players' friend cards (exchanged over the tunnel: a
@@ -185,6 +190,10 @@ enum
 };
 
 static const char signature_label[] = "hcev-friends-1";
+/* the friends' topics' prefix: hcev on every build, whatever its
+signalling's (a PC build of this tree signals on hceu), as the labels are
+(OpenCE's friends, its PR, hcev/f1 and hcev-friends-1 too) */
+#define FRIENDS_TOPIC_PREFIX "hcev"
 
 /* ---------- structures */
 
@@ -233,11 +242,17 @@ struct presence
 	int online;
 	int state;
 	int joinable;
-	int engine, difficulty, players, maximum, version, wire, pc_map;
+	/* (wire: its game on the crossplay wire, network_wire.h; pc_host: and a
+	PC's (a game they joined), else a Vita's) */
+	int engine, difficulty, players, maximum, version, wire, pc_map, pc_host;
 	char map[MAP_LENGTH + 1];
 	char gametype[GAMETYPE_LENGTH + 1];
 	unsigned char invite_hash[P2P_KEY_HASH_SIZE];
 	unsigned char invite_token[P2P_TOKEN_SIZE];
+	/* (a joinable game with a password: PRESENCE_LOCKED) */
+	int locked;
+	unsigned char signing_key[P2P_KEY_SIZE];
+	unsigned char sealed_token[P2P_SEALED_TOKEN_SIZE];
 };
 
 struct friend_record
@@ -562,7 +577,9 @@ struct friends_state
 	unsigned long presence_time;
 	unsigned long presence_change_time;
 	int presence_online;
+	/* (own_joinable's: 0, 1, 2 with a password) and the token it carried */
 	int presence_joinable;
+	unsigned char presence_token[P2P_TOKEN_SIZE];
 	int presence_want_reply;
 	int appear_offline;
 
@@ -841,7 +858,7 @@ static void code_derive(const char *code, char *topic, unsigned char *seal_key, 
 
 		p2p_hmac_sha256((const unsigned char *)code, P2P_FRIEND_CODE_LENGTH, "inbox", 5, topic_digest);
 		p2p_hex(topic_digest, 16, hex);
-		snprintf(topic, TOPIC_LENGTH, "%s/f1/i/%s", P2P_SIGNAL_PREFIX, hex);
+		snprintf(topic, TOPIC_LENGTH, "%s/f1/i/%s", FRIENDS_TOPIC_PREFIX, hex);
 	}
 }
 
@@ -853,7 +870,7 @@ static void mailbox_topic(const unsigned char *key, char *topic)
 
 	p2p_hmac_sha256(key, P2P_KEY_SIZE, label, (int)sizeof(label) - 1, digest);
 	p2p_hex(digest, 16, hex);
-	snprintf(topic, TOPIC_LENGTH, "%s/f1/m/%s", P2P_SIGNAL_PREFIX, hex);
+	snprintf(topic, TOPIC_LENGTH, "%s/f1/m/%s", FRIENDS_TOPIC_PREFIX, hex);
 }
 
 /* ---------- the identity */
@@ -1523,7 +1540,8 @@ static int body_encode(const struct message *message, unsigned char *bytes)
 		bytes[size++] = (unsigned char)message->game.maximum;
 		put_u16(bytes + size, (unsigned int)message->game.version);
 		size += 2;
-		bytes[size++] = (unsigned char)((message->game.wire ? 1 : 0) | (message->game.pc_map ? 2 : 0));
+		bytes[size++] = (unsigned char)((message->game.wire ? 1 : 0) | (message->game.pc_map ? 2 : 0) |
+			(message->game.wire && message->game.pc_host ? 4 : 0));
 		size += put_text(bytes + size, message->name, NAME_LENGTH);
 		size += put_text(bytes + size, message->game.map, MAP_LENGTH);
 		size += put_text(bytes + size, message->game.gametype, GAMETYPE_LENGTH);
@@ -1531,8 +1549,18 @@ static int body_encode(const struct message *message, unsigned char *bytes)
 		{
 			memcpy(bytes + size, message->game.invite_hash, P2P_KEY_HASH_SIZE);
 			size += P2P_KEY_HASH_SIZE;
-			memcpy(bytes + size, message->game.invite_token, P2P_TOKEN_SIZE);
-			size += P2P_TOKEN_SIZE;
+			if (message->flags & PRESENCE_LOCKED)
+			{
+				memcpy(bytes + size, message->game.signing_key, P2P_KEY_SIZE);
+				size += P2P_KEY_SIZE;
+				memcpy(bytes + size, message->game.sealed_token, P2P_SEALED_TOKEN_SIZE);
+				size += P2P_SEALED_TOKEN_SIZE;
+			}
+			else
+			{
+				memcpy(bytes + size, message->game.invite_token, P2P_TOKEN_SIZE);
+				size += P2P_TOKEN_SIZE;
+			}
 		}
 		break;
 	case TYPE_INVITE:
@@ -1545,7 +1573,8 @@ static int body_encode(const struct message *message, unsigned char *bytes)
 		bytes[size++] = (unsigned char)(message->game.difficulty < 0 ? 0xFF : message->game.difficulty);
 		put_u16(bytes + size, (unsigned int)message->game.version);
 		size += 2;
-		bytes[size++] = (unsigned char)((message->game.wire ? 1 : 0) | (message->game.pc_map ? 2 : 0));
+		bytes[size++] = (unsigned char)((message->game.wire ? 1 : 0) | (message->game.pc_map ? 2 : 0) |
+			(message->game.wire && message->game.pc_host ? 4 : 0));
 		size += put_text(bytes + size, message->game.map, MAP_LENGTH);
 		size += put_text(bytes + size, message->game.gametype, GAMETYPE_LENGTH);
 		memcpy(bytes + size, message->game.invite_hash, P2P_KEY_HASH_SIZE);
@@ -1613,6 +1642,9 @@ static int game_decode(const unsigned char *bytes, int size, int *offset, struct
 	at += 2;
 	game->wire = bytes[at] & 1;
 	game->pc_map = (bytes[at] & 2) != 0;
+	/* (since Oct 19 2026: a PC's game; builds before it read nothing of the
+	bit) */
+	game->pc_host = game->wire && (bytes[at] & 4) != 0;
 	at++;
 	if (game->state >= P2P_FRIEND_STATE_COUNT || (game->difficulty > 3) || game->engine > 15 ||
 		game->players > HALO_PORT_MAXIMUM_NETWORK_PLAYERS || game->maximum > HALO_PORT_MAXIMUM_NETWORK_PLAYERS ||
@@ -1659,8 +1691,11 @@ static int plain_decode(const unsigned char *bytes, int size, struct message *me
 		if (offset >= body_end)
 			return 0;
 		message->flags = bytes[offset++];
-		if (message->flags & ~(PRESENCE_ONLINE | PRESENCE_WANT_REPLY | PRESENCE_JOINABLE))
+		if ((message->flags & ~(PRESENCE_ONLINE | PRESENCE_WANT_REPLY | PRESENCE_JOINABLE | PRESENCE_LOCKED)) ||
+			((message->flags & PRESENCE_LOCKED) && !(message->flags & PRESENCE_JOINABLE)))
+		{
 			return 0;
+		}
 		if (!game_decode(bytes, body_end, &offset, &message->game, 1) ||
 			!get_text(bytes, body_end, &offset, message->name, NAME_LENGTH, 1) ||
 			!get_text(bytes, body_end, &offset, message->game.map, MAP_LENGTH, 0) ||
@@ -1670,7 +1705,16 @@ static int plain_decode(const unsigned char *bytes, int size, struct message *me
 		}
 		message->game.online = (message->flags & PRESENCE_ONLINE) != 0;
 		message->game.joinable = (message->flags & PRESENCE_JOINABLE) != 0;
-		if (message->game.joinable)
+		message->game.locked = (message->flags & PRESENCE_LOCKED) != 0;
+		if (message->game.joinable && message->game.locked)
+		{
+			if (offset + P2P_KEY_HASH_SIZE + P2P_KEY_SIZE + P2P_SEALED_TOKEN_SIZE != body_end || !message->game.online)
+				return 0;
+			memcpy(message->game.invite_hash, bytes + offset, P2P_KEY_HASH_SIZE);
+			memcpy(message->game.signing_key, bytes + offset + P2P_KEY_HASH_SIZE, P2P_KEY_SIZE);
+			memcpy(message->game.sealed_token, bytes + offset + P2P_KEY_HASH_SIZE + P2P_KEY_SIZE, P2P_SEALED_TOKEN_SIZE);
+		}
+		else if (message->game.joinable)
 		{
 			if (offset + P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE != body_end || !message->game.online)
 				return 0;
@@ -1965,31 +2009,64 @@ static void send_accept(const unsigned char *key, const unsigned char *nonce, co
 
 /* ---------- presence */
 
-/* whether this machine's game can be joined by a friend from presence (the
-design's rule: hosted for the internet, public, no password, open with
-room, Friends can join, not appearing offline, this wire) */
+/* whether this machine's game can be joined by a friend from presence: 0
+no, 1 yes, 2 with its password. The design's rule: hosted for the internet,
+public or private (the owner, Oct 19 2026: "when I have a private lobby my
+friend should be able to join without a join code" - the presence, sealed
+for each friend alone, carries what joins it, never a listing or a
+stranger), open with room, Friends can join, not appearing offline; a game
+with a password once its sealed token is ready (the friend types the
+password); on either wire, which the presence says */
 static int own_joinable(void)
 {
 	const struct p2p_friends_host *host = &friends->host;
 
-	return friends->online && host->hosting && host->listed && !host->locked && host->open &&
-		host->players < host->maximum && setting_on("friends.join", "HALO_FRIENDS_JOIN") && !friends->appear_offline &&
-		!host->crossplay;
+	if (!friends->online || !host->hosting || !host->open || host->players >= host->maximum ||
+		!setting_on("friends.join", "HALO_FRIENDS_JOIN") || friends->appear_offline)
+	{
+		return 0;
+	}
+	if (host->locked)
+		return host->has_sealed ? 2 : 0;
+	return 1;
 }
 
-/* whether a friend can be invited now: hosting for the internet, no
-password (the password stays the way in), room */
+/* the wire a game a friend's presence, invite or party names is joined on
+(network_wire.h): 0 the legacy wire, 1 the crossplay wire, -1 not here.
+This build's own games say the version of their wire: 18 (the legacy wire;
+a builds' before the crossplay hosts' with the wire bit, the crossplay wire)
+or the crossplay wire's (a Vita's game for Vitas and PC, so that a PC
+friend (OpenCE's friends) sees a version it plays); a PC friend's game says
+its build's version, joined on the crossplay wire only when it is one that
+wire joins (the version list, network_wire_version_accepted_on), as any PC
+host's is; the crossplay wire only where this build speaks it */
+static int game_wire_of(int version, int wire)
+{
+	if (version == HALO_PORT_NETWORK_VERSION)
+		return !wire ? 0 : p2p_wire_count() > 1 ? 1 : -1;
+	return p2p_wire_count() > 1 && network_wire_version_accepted_on(1, (unsigned int)version) ? 1 : -1;
+}
+
+static int game_wire_joinable(int version, int wire)
+{
+	return game_wire_of(version, wire) >= 0;
+}
+
+/* whether a friend can be invited now: hosting for the internet, room; a
+game with a password too (the owner, Oct 19 2026: an invite admits, as the
+code does - the host chose them) */
 static int own_invitable(void)
 {
 	const struct p2p_friends_host *host = &friends->host;
 
-	return friends->online && host->hosting && !host->locked && host->players < host->maximum && !host->crossplay;
+	return friends->online && host->hosting && host->players < host->maximum;
 }
 
 /* this machine's presence signed anew (a new counter): online or not */
 static int presence_sign(int online, int want_reply)
 {
 	struct message message;
+	int joinable = 0;
 
 	message_start(&message, TYPE_PRESENCE, NULL);
 	own_name(message.name);
@@ -2009,13 +2086,23 @@ static int presence_sign(int online, int want_reply)
 			message.game.players = message.game.maximum;
 		snprintf(message.game.map, sizeof(message.game.map), "%s", activity->map);
 		snprintf(message.game.gametype, sizeof(message.game.gametype), "%s", activity->gametype);
-		message.game.version = HALO_PORT_NETWORK_VERSION;
+		/* (the version of its wire: a PC friend's build compares its own) */
+		message.game.version = (int)network_wire_version_of(friends->host.crossplay);
 		message.game.wire = friends->host.crossplay;
-		if (own_joinable())
+		message.game.pc_host = friends->host.pc_host;
+		joinable = own_joinable();
+		if (joinable)
 		{
-			message.flags |= PRESENCE_JOINABLE;
+			message.flags |= PRESENCE_JOINABLE | (joinable == 2 ? PRESENCE_LOCKED : 0);
 			memcpy(message.game.invite_hash, friends->host.key_hash, P2P_KEY_HASH_SIZE);
-			memcpy(message.game.invite_token, friends->host.token, P2P_TOKEN_SIZE);
+			if (joinable == 2)
+			{
+				message.game.locked = 1;
+				memcpy(message.game.signing_key, friends->host.signing_key, P2P_KEY_SIZE);
+				memcpy(message.game.sealed_token, friends->host.sealed_token, P2P_SEALED_TOKEN_SIZE);
+			}
+			else
+				memcpy(message.game.invite_token, friends->host.token, P2P_TOKEN_SIZE);
 			message.game.players = friends->host.players;
 			message.game.maximum = friends->host.maximum;
 		}
@@ -2024,7 +2111,8 @@ static int presence_sign(int online, int want_reply)
 	friends->presence_counter = message.counter;
 	friends->presence_time = now_stamp();
 	friends->presence_online = online;
-	friends->presence_joinable = (message.flags & PRESENCE_JOINABLE) != 0;
+	friends->presence_joinable = joinable;
+	memcpy(friends->presence_token, friends->host.token, P2P_TOKEN_SIZE);
 	friends->presence_want_reply = want_reply;
 	return friends->presence_size > 0;
 }
@@ -3257,6 +3345,8 @@ int p2p_friends_player_ask(int machine, int intent)
 	load();
 	if (!friends->in_game || machine < 0 || machine >= CARD_MACHINES || machine == friends->game_machine)
 		result = P2P_FRIENDS_GONE;
+	/* (the cards ride the tunnel: never to a PC machine's, a crossplay
+	game's, p2p.c) */
 	else if (!friends_on() || friends->host.crossplay)
 		result = P2P_FRIENDS_OFFLINE;
 	else if (friends->appear_offline)
@@ -3679,7 +3769,10 @@ void p2p_friends_update(const struct p2p_friends_host *host)
 	}
 	if (!friends->appear_offline && friends->friend_count && signatures < SIGNATURES_PER_PASS)
 	{
-		int change = friends->activity_changed || joinable != friends->presence_joinable;
+		/* (a new invite - gone private, a new password - is a change: the
+		presence carries the token) */
+		int change = friends->activity_changed || joinable != friends->presence_joinable ||
+			(joinable && !p2p_equal(friends->presence_token, friends->host.token, P2P_TOKEN_SIZE));
 
 		if (!friends->presence_size || !friends->presence_online)
 		{
@@ -3794,6 +3887,18 @@ void p2p_friends_activity_text(char *text, int size, int state, const char *map,
 	}
 }
 
+/* a game's tag after an activity line (a game's only: multiplayer or
+co-op), as the browsers tag their rows (crossplay_guard.h): VITA, VITA+PC
+(a Vita's game PC players can join too), PC (a PC's game they joined) */
+static void activity_tag(char *text, int size, int state, int wire, int pc_host)
+{
+	size_t length = strlen(text);
+
+	if ((state != P2P_FRIEND_STATE_MULTIPLAYER && state != P2P_FRIEND_STATE_COOP) || length + 1 >= (size_t)size)
+		return;
+	snprintf(text + length, (size_t)size - length, " (%s)", !wire ? "VITA" : pc_host ? "PC" : "VITA+PC");
+}
+
 /* a friend's entry */
 static void friend_entry(const struct friend_record *record, struct p2p_friend_entry *entry)
 {
@@ -3808,13 +3913,18 @@ static void friend_entry(const struct friend_record *record, struct p2p_friend_e
 	code_shown(code, entry->code, sizeof(entry->code));
 	entry->online = online;
 	entry->state = online ? record->presence.state : P2P_FRIEND_STATE_OFFLINE;
-	entry->joinable = online && record->presence.joinable && record->presence.version == HALO_PORT_NETWORK_VERSION &&
-		record->presence.wire == friends->host.crossplay;
+	entry->joinable = online && record->presence.joinable &&
+		game_wire_joinable(record->presence.version, record->presence.wire);
+	entry->crossplay = game_wire_of(record->presence.version, record->presence.wire) == 1;
+	entry->locked = entry->joinable && record->presence.locked;
 	entry->invitable = online && own_invitable();
 	entry->players = online ? record->presence.players : 0;
 	entry->maximum = online ? record->presence.maximum : 0;
 	p2p_friends_activity_text(entry->activity, sizeof(entry->activity), entry->state, record->presence.map,
 		record->presence.gametype, record->presence.engine, record->presence.difficulty, record->presence.pc_map);
+	if (online)
+		activity_tag(entry->activity, sizeof(entry->activity), entry->state, entry->crossplay,
+			record->presence.pc_host || record->presence.version != HALO_PORT_NETWORK_VERSION);
 	if (online)
 		party_friend_entry(record, entry);
 }
@@ -3901,9 +4011,12 @@ int p2p_friends_list(struct p2p_friend_entry *entries, int maximum_count)
 		snprintf(entry->name, sizeof(entry->name), "%s", record->name);
 		entry->online = 1;
 		entry->state = invite->game.state;
-		entry->joinable = invite->game.version == HALO_PORT_NETWORK_VERSION && invite->game.wire == friends->host.crossplay;
+		entry->joinable = game_wire_joinable(invite->game.version, invite->game.wire);
+		entry->crossplay = game_wire_of(invite->game.version, invite->game.wire) == 1;
 		p2p_friends_activity_text(game, sizeof(game), invite->game.state, invite->game.map, invite->game.gametype,
 			invite->game.engine, invite->game.difficulty, invite->game.pc_map);
+		activity_tag(game, sizeof(game), invite->game.state, entry->crossplay,
+			invite->game.pc_host || invite->game.version != HALO_PORT_NETWORK_VERSION);
 		snprintf(entry->activity, sizeof(entry->activity), T("Invited you: %s"), game);
 	}
 	first_friend = count;
@@ -4140,6 +4253,8 @@ int p2p_friends_act(const char *id, int kind, int action)
 	unsigned char key_copy[P2P_KEY_SIZE];
 	char link[P2P_LINK_SIZE], name[P2P_FRIEND_NAME_SIZE];
 	int index = -1, result = P2P_FRIENDS_DONE, join = 0, changed = 0;
+	/* (the wire the game joined plays: its presence's or invite's) */
+	int join_wire = 0;
 
 	if (!id)
 		return P2P_FRIENDS_GONE;
@@ -4277,11 +4392,16 @@ int p2p_friends_act(const char *id, int kind, int action)
 			friend_entry(&friends->friends[index], &entry);
 			if (!entry.joinable)
 				result = P2P_FRIENDS_NOT_JOINABLE;
+			/* (a game with a password: the player types it, then
+			p2p_friends_join_password) */
+			else if (entry.locked)
+				result = P2P_FRIENDS_PASSWORD;
 			else
 			{
 				invite_link(friends->friends[index].presence.invite_hash, friends->friends[index].presence.invite_token,
 					link);
 				snprintf(name, sizeof(name), "%s", friends->friends[index].name);
+				join_wire = game_wire_of(friends->friends[index].presence.version, friends->friends[index].presence.wire);
 				join = 1;
 			}
 		}
@@ -4312,8 +4432,10 @@ int p2p_friends_act(const char *id, int kind, int action)
 			message.game.engine = activity->engine & 15;
 			message.game.difficulty = activity->difficulty;
 			message.game.pc_map = activity->pc_map;
-			message.game.version = HALO_PORT_NETWORK_VERSION;
+			message.game.version = (int)network_wire_version_of(friends->host.crossplay);
 			message.game.wire = friends->host.crossplay;
+			message.game.pc_host = friends->host.pc_host;
+		message.game.pc_host = friends->host.pc_host;
 			snprintf(message.game.map, sizeof(message.game.map), "%s", activity->map);
 			snprintf(message.game.gametype, sizeof(message.game.gametype), "%s", activity->gametype);
 			memcpy(message.game.invite_hash, friends->host.key_hash, P2P_KEY_HASH_SIZE);
@@ -4342,11 +4464,12 @@ int p2p_friends_act(const char *id, int kind, int action)
 				platform_log("friends: ignored %s's invite", name);
 			else if (!friends_on())
 				result = P2P_FRIENDS_OFFLINE;
-			else if (invite.game.version != HALO_PORT_NETWORK_VERSION || invite.game.wire != friends->host.crossplay)
+			else if (!game_wire_joinable(invite.game.version, invite.game.wire))
 				result = P2P_FRIENDS_NOT_JOINABLE;
 			else
 			{
 				invite_link(invite.game.invite_hash, invite.game.invite_token, link);
+				join_wire = game_wire_of(invite.game.version, invite.game.wire);
 				join = 1;
 			}
 		}
@@ -4364,17 +4487,58 @@ int p2p_friends_act(const char *id, int kind, int action)
 	{
 		/* (the invite's own join, as a link pasted joins it: the host's checks
 		are where they always are) */
-		platform_log("friends: joining %s's game", name);
-		if (!p2p_join_invite(link))
+		platform_log("friends: joining %s's game (%s)", name, join_wire ? "Vitas and PC" : "Vitas");
+		if (!p2p_join_invite_on(link, join_wire))
 			result = P2P_FRIENDS_OFFLINE;
 	}
 	return result;
+}
+
+int p2p_friends_join_password(const char *id, const char *password)
+{
+	unsigned char hash[P2P_KEY_HASH_SIZE], signing_key[P2P_KEY_SIZE], sealed[P2P_SEALED_TOKEN_SIZE];
+	char name[P2P_FRIEND_NAME_SIZE];
+	int index = -1, result = P2P_FRIENDS_DONE, wire = 0;
+
+	if (!id)
+		return P2P_FRIENDS_GONE;
+	pthread_mutex_lock(&friends_lock);
+	load();
+	if (!entry_key(id, P2P_FRIEND_KIND_FRIEND, &index) || index < 0)
+		result = P2P_FRIENDS_GONE;
+	else if (!friends_on())
+		result = P2P_FRIENDS_OFFLINE;
+	else
+	{
+		struct p2p_friend_entry entry;
+
+		friend_entry(&friends->friends[index], &entry);
+		if (!entry.joinable || !entry.locked)
+			result = P2P_FRIENDS_NOT_JOINABLE;
+		else
+		{
+			memcpy(hash, friends->friends[index].presence.invite_hash, sizeof(hash));
+			memcpy(signing_key, friends->friends[index].presence.signing_key, sizeof(signing_key));
+			memcpy(sealed, friends->friends[index].presence.sealed_token, sizeof(sealed));
+			wire = game_wire_of(friends->friends[index].presence.version, friends->friends[index].presence.wire);
+			snprintf(name, sizeof(name), "%s", friends->friends[index].name);
+		}
+	}
+	pthread_mutex_unlock(&friends_lock);
+	if (result != P2P_FRIENDS_DONE)
+		return result;
+	/* (the password's key on the lobby's thread, the sealed token opened,
+	its invite joined as any; a wrong password: p2p_lobby_join_state) */
+	platform_log("friends: joining %s's game with its password (%s)", name, wire ? "Vitas and PC" : "Vitas");
+	return p2p_lobby_join_sealed(hash, signing_key, sealed, password, wire) ? P2P_FRIENDS_DONE : P2P_FRIENDS_NOT_JOINABLE;
 }
 
 const char *p2p_friends_outcome_text(int outcome)
 {
 	switch (outcome)
 	{
+	case P2P_FRIENDS_PASSWORD:
+		return T("Their game has a password: type it");
 	case P2P_FRIENDS_DONE:
 		return T("Done");
 	case P2P_FRIENDS_GONE:

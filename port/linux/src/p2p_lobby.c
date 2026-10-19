@@ -105,8 +105,9 @@ enum
 	LISTING_FORMAT = 2,
 	/* OpenCE's (the crossplay wire's, network_wire.h): format 2 without the
 	score, the difficulty and the players' names, and only its five flags
-	(and ChupathingyCE's dedicated bit, 128 as ours); read, never written:
-	a Vita on the crossplay wire browses, it hosts nothing */
+	(and ChupathingyCE's dedicated bit, 128 as ours, and a Vita's game's bit,
+	_listing_vita_host); read, and written for a game a Vita hosts for Vitas
+	and PC, on OpenCE's topics under its label, as OpenCE's browsers read it */
 	LISTING_FORMAT_CROSSPLAY = 1,
 	_listing_open = 1,
 	_listing_in_progress = 2,
@@ -119,6 +120,12 @@ enum
 	level */
 	_listing_pc_map = 32,
 	_listing_coop = 64,
+	/* (format 1, this build's) a Vita's game on the crossplay wire, for Vitas
+	and PC (network_wire.h's NETWORK_WIRE_ADVERTISED_VITA_HOST_FLAG's
+	listing): the Vitas' browsers tag it VITA; OpenCE's and ChupathingyCE's
+	ignore the bit (they test theirs alone), and see the name begin
+	VITA_NAME_TAG */
+	_listing_vita_host = 64,
 	/* a dedicated server's game (port/linux/DEDICATED_SERVER.md): a host
 	with no player of its own. Browsers before it ignore the bit (the
 	listing reads as before), and show the game as any other */
@@ -214,14 +221,20 @@ struct browse_counts
 static const char signature_label[] = SIGNATURE_LABEL;
 /* OpenCE's (the crossplay wire's): the same length as ours */
 static const char crossplay_signature_label[] = "hceu-lobby-1";
+/* what a Vita's game's name begins with in its crossplay listing, so that
+the PC browsers, which show nothing but the name for it, tell it a Vita's
+(the Vitas' browsers take it off and tag the row) */
+#define VITA_NAME_TAG "[VITA] "
 
 typedef char check_signature_labels[sizeof(signature_label) == sizeof(crossplay_signature_label) ? 1 : -1];
 
 typedef char check_listing_size[MAXIMUM_LISTING_SIZE <= P2P_MAXIMUM_LISTING_SIZE ? 1 : -1];
 
-/* a listing, read */
+/* a listing, read (crossplay: heard on the crossplay wire's topics,
+OpenCE's format) */
 struct listing
 {
+	int crossplay;
 	int version;
 	int flags;
 	unsigned long sequence;
@@ -274,6 +287,8 @@ struct tombstone
 
 struct queued
 {
+	/* heard on the crossplay wire's topics */
+	int crossplay;
 	unsigned char key_hash[P2P_KEY_HASH_SIZE];
 	unsigned char payload[MAXIMUM_LISTING_SIZE];
 	int size;
@@ -309,6 +324,8 @@ static struct
 	new password's is worked out (password_pending), the game is not listed */
 	int has_password;
 	unsigned char password_key[P2P_PASSWORD_KEY_SIZE];
+	/* the wire the key is of (the hosted game's: its passes, p2p_password_key) */
+	int password_key_crossplay;
 	int password_pending;
 	/* its key could not be worked out (no memory): not listed either */
 	int password_failed;
@@ -316,8 +333,10 @@ static struct
 	/* whether the password was set (else network.lobby_password is taken) */
 	int password_said;
 	char password[P2P_LOBBY_PASSWORD_SIZE];
-	/* listed: with this token; its listing as last published */
+	/* listed: with this token, on this wire (the hosted game's: network_wire.h);
+	its listing as last published */
 	int listed;
+	int listed_crossplay;
 	unsigned char token[P2P_TOKEN_SIZE];
 	unsigned long sequence;
 	unsigned char listing[MAXIMUM_LISTING_SIZE];
@@ -355,6 +374,8 @@ static struct
 	for key_thread */
 	int join_state;
 	unsigned char join_key_hash[P2P_KEY_HASH_SIZE];
+	/* its game's wire (joined on it) */
+	int join_crossplay;
 	int join_pending;
 	char join_password[P2P_LOBBY_PASSWORD_SIZE];
 	unsigned char join_signing_key[P2P_KEY_SIZE];
@@ -445,12 +466,12 @@ int p2p_lobby_clean_name(char *name)
 	return visible;
 }
 
-void p2p_lobby_slot_topic(const unsigned char *key_hash, char *topic, int size)
+void p2p_lobby_slot_topic(int crossplay, const unsigned char *key_hash, char *topic, int size)
 {
 	char text[2 * P2P_KEY_HASH_SIZE + 1];
 
 	p2p_hex(key_hash, P2P_KEY_HASH_SIZE, text);
-	snprintf(topic, (size_t)size, "%s%s", P2P_LOBBY_SLOT_PREFIX, text);
+	snprintf(topic, (size_t)size, "%s%s", P2P_LOBBY_SLOT_PREFIX(crossplay), text);
 }
 
 /* the hash of an Ed25519 key's X25519 form (an invite's host part); 0 if
@@ -495,6 +516,8 @@ tombstone) */
 static int listing_make(unsigned char *bytes, int flags)
 {
 	unsigned char data[sizeof(signature_label) - 1 + MAXIMUM_LISTING_SIZE];
+	int crossplay = lobby.listed_crossplay;
+	unsigned int version = network_wire_version_of(crossplay);
 	int size = 0;
 	int count, index;
 
@@ -503,11 +526,16 @@ static int listing_make(unsigned char *bytes, int flags)
 #ifdef HALO_DEDICATED_SERVER
 	flags |= _listing_dedicated;
 #endif
+	/* (the crossplay wire's: OpenCE's five flags and a Vita's game's bit;
+	the Halo PC map and co-op bits are format 2's) */
+	if (crossplay)
+		flags = (flags & (_listing_open | _listing_in_progress | _listing_has_teams | _listing_closed |
+			_listing_password)) | (network_wire_host_pc_stand_in() ? 0 : _listing_vita_host);
 	bytes[size++] = 'H';
 	bytes[size++] = 'L';
-	bytes[size++] = LISTING_FORMAT;
-	bytes[size++] = (unsigned char)(HALO_PORT_NETWORK_VERSION >> 8);
-	bytes[size++] = (unsigned char)HALO_PORT_NETWORK_VERSION;
+	bytes[size++] = crossplay ? LISTING_FORMAT_CROSSPLAY : LISTING_FORMAT;
+	bytes[size++] = (unsigned char)(version >> 8);
+	bytes[size++] = (unsigned char)version;
 	bytes[size++] = (unsigned char)flags;
 	put_long(bytes + size, ++lobby.sequence);
 	size += 4;
@@ -532,9 +560,28 @@ static int listing_make(unsigned char *bytes, int flags)
 	bytes[size++] = (unsigned char)(lobby.player_count > 255 ? 255 : lobby.player_count);
 	bytes[size++] = (unsigned char)(lobby.maximum_player_count > 255 ? 255 : lobby.maximum_player_count);
 	bytes[size++] = (unsigned char)lobby.engine_type;
-	size += put_text(bytes + size, lobby.name, P2P_LISTING_NAME_SIZE);
+	if (flags & _listing_vita_host)
+	{
+		char name[sizeof(VITA_NAME_TAG) + P2P_LISTING_NAME_SIZE];
+
+		snprintf(name, sizeof(name), "%s%s", VITA_NAME_TAG, lobby.name);
+		size += put_text(bytes + size, name, P2P_LISTING_NAME_SIZE);
+	}
+	else
+		size += put_text(bytes + size, lobby.name, P2P_LISTING_NAME_SIZE);
 	size += put_text(bytes + size, lobby.map, P2P_LISTING_MAP_SIZE);
 	size += put_text(bytes + size, lobby.gametype, P2P_LISTING_GAMETYPE_SIZE);
+	/* (OpenCE's format 1 ends here: its stamp, then the signature under its
+	label) */
+	if (crossplay)
+	{
+		memset(bytes + size, 0, STAMP_SIZE);
+		size += STAMP_SIZE;
+		memcpy(data, crossplay_signature_label, sizeof(crossplay_signature_label) - 1);
+		memcpy(data + sizeof(crossplay_signature_label) - 1, bytes, (size_t)size);
+		p2p_sign(data, (int)(sizeof(crossplay_signature_label) - 1) + size, bytes + size);
+		return size + P2P_SIGNATURE_SIZE;
+	}
 	bytes[size++] = (unsigned char)(lobby.score_limit >> 8);
 	bytes[size++] = (unsigned char)lobby.score_limit;
 	bytes[size++] = (unsigned char)lobby.difficulty;
@@ -565,14 +612,13 @@ static int get_text(const unsigned char *bytes, int size, int *offset, char *tex
 	return 1;
 }
 
-static int p2p_lobby_listing_read(const unsigned char *bytes, int size, struct listing *listing)
+static int p2p_lobby_listing_read(int crossplay, const unsigned char *bytes, int size, struct listing *listing)
 {
 	int offset = 0;
 	int index;
 
-	int crossplay = network_wire_crossplay();
-
 	memset(listing, 0, sizeof(*listing));
+	listing->crossplay = crossplay;
 	/* (OpenCE's format 1 is 4 bytes shorter at its least: no score,
 	difficulty or count of names) */
 	if (size < MINIMUM_LISTING_SIZE - (crossplay ? 4 : 0) || size > MAXIMUM_LISTING_SIZE || bytes[0] != 'H' ||
@@ -588,7 +634,7 @@ static int p2p_lobby_listing_read(const unsigned char *bytes, int size, struct l
 	build's Halo PC map and co-op) */
 	if (crossplay)
 		listing->flags &= _listing_open | _listing_in_progress | _listing_has_teams | _listing_closed |
-			_listing_password | _listing_dedicated;
+			_listing_password | _listing_dedicated | _listing_vita_host;
 	listing->sequence = get_long(bytes + offset);
 	offset += 4;
 	listing->time = get_long(bytes + offset);
@@ -650,7 +696,7 @@ static int listing_signed(const unsigned char *bytes, const struct listing *list
 {
 	unsigned char data[sizeof(signature_label) - 1 + MAXIMUM_LISTING_SIZE];
 
-	memcpy(data, network_wire_crossplay() ? crossplay_signature_label : signature_label, sizeof(signature_label) - 1);
+	memcpy(data, listing->crossplay ? crossplay_signature_label : signature_label, sizeof(signature_label) - 1);
 	memcpy(data + sizeof(signature_label) - 1, bytes, (size_t)listing->signed_size);
 	return p2p_ed25519_verify(listing->key, data, (int)(sizeof(signature_label) - 1) + listing->signed_size,
 		bytes + listing->signed_size);
@@ -688,7 +734,7 @@ static void stop_listing(void)
 	lobby.listed = 0;
 	lobby.republish_wanted = 0;
 	p2p_signal_lobby_publish(tombstone, size, 1);
-	p2p_signal_lobby_topics(0, lobby.browsing);
+	p2p_signal_lobby_topics(0, lobby.listed_crossplay, lobby.browsing);
 	platform_log("Internet play: the game is no longer listed in the public games");
 }
 
@@ -846,6 +892,14 @@ static void update_hosting(const unsigned char *token, int player_count, int max
 		lobby.password_said = 1;
 		set_password(config_string("network.lobby_password"));
 	}
+	/* (a password's key made for another wire than the hosted game's: made
+	again, its passes the wire's, the game not listed meanwhile) */
+	if (token && lobby.has_password && !lobby.password_pending &&
+		lobby.password_key_crossplay != network_wire_crossplay())
+	{
+		lobby.password_generation++;
+		lobby.password_pending = 1;
+	}
 	/* (a password's key, on its thread: only while internet play runs, as
 	this does) */
 	if (lobby.password_pending)
@@ -855,6 +909,10 @@ static void update_hosting(const unsigned char *token, int player_count, int max
 	would be open) */
 	lobby.hosting = token != NULL;
 	want = token && lobby.details_told && hosting_public() && !lobby.password_pending && !lobby.password_failed;
+	/* (a game of another wire than the one listed: its tombstone on that
+	wire's slot first, then listed on its own: network_wire.h) */
+	if (lobby.listed && want && lobby.listed_crossplay != network_wire_crossplay())
+		stop_listing();
 	if (lobby.listed && (!want || memcmp(token, lobby.token, P2P_TOKEN_SIZE)))
 	{
 		/* (the same game gone private by itself, as a game that becomes
@@ -885,15 +943,17 @@ static void update_hosting(const unsigned char *token, int player_count, int max
 
 		memcpy(lobby.token, token, P2P_TOKEN_SIZE);
 		lobby.listed = 1;
+		lobby.listed_crossplay = network_wire_crossplay();
 		lobby.listed_time = now_stamp();
 		lobby.listing_announced = 0;
 		lobby.not_listed_logged_time = 0;
-		p2p_signal_lobby_topics(1, lobby.browsing);
+		p2p_signal_lobby_topics(1, lobby.listed_crossplay, lobby.browsing);
 		publish();
 		/* (listed only once a broker acknowledges it: log_listing) */
 		p2p_signal_counts(&counts);
-		platform_log("Internet play: the game is public%s: its listing is being published (%d of %d brokers ready)",
-			lobby.has_password ? ", with a password" : "", counts.lobby, counts.brokers);
+		platform_log("Internet play: the game is public%s: its listing is being published (%d of %d brokers ready, %s)",
+			lobby.has_password ? ", with a password" : "", counts.lobby, counts.brokers,
+			lobby.listed_crossplay ? "the crossplay wire: Vitas and PC" : "the Vitas' wire");
 		return;
 	}
 	log_listing();
@@ -904,9 +964,9 @@ static void update_hosting(const unsigned char *token, int player_count, int max
 	}
 }
 
-void p2p_lobby_query_heard(void)
+void p2p_lobby_query_heard(int crossplay)
 {
-	if (lobby.listed)
+	if (lobby.listed && crossplay == lobby.listed_crossplay)
 	{
 		unsigned short jitter;
 
@@ -916,15 +976,20 @@ void p2p_lobby_query_heard(void)
 }
 
 /* the host's own slot was heard: anything but its listing is mended */
-static void own_slot_heard(const unsigned char *payload, int size, int retained)
+static void own_slot_heard(int crossplay, const unsigned char *payload, int size, int retained)
 {
 	struct listing listing;
 
-	if (!lobby.listed || (size == lobby.listing_size && !memcmp(payload, lobby.listing, (size_t)size)))
+	/* (the other wire's slot: a listing of a game hosted before, which its
+	tombstone ended, or the brokers' expiry ends) */
+	if (!lobby.listed || crossplay != lobby.listed_crossplay ||
+		(size == lobby.listing_size && !memcmp(payload, lobby.listing, (size_t)size)))
+	{
 		return;
+	}
 	/* (an older listing of its own, forwarded live, is the echo of a publish
 	before the last; as the slot's retained copy, the slot holds it) */
-	if (!retained && p2p_lobby_listing_read(payload, size, &listing) &&
+	if (!retained && p2p_lobby_listing_read(crossplay, payload, size, &listing) &&
 		!memcmp(listing.key, p2p_signing_key(), P2P_KEY_SIZE) && listing.sequence < lobby.sequence)
 	{
 		return;
@@ -1026,7 +1091,8 @@ static int listing_failed(const unsigned char *identifier, unsigned long fingerp
 
 static int game_hidden(const struct game *game)
 {
-	return game->used && listing_failed(game->listing.identifier, game->fingerprint) == 2;
+	return game->used && (listing_failed(game->listing.identifier, game->fingerprint) == 2 ||
+		!network_wire_browser_shows(game->listing.platform == CROSSPLAY_PLATFORM_VITA));
 }
 
 /* the games the browser shows */
@@ -1057,7 +1123,7 @@ static int parse_hex(const char *text, unsigned char *bytes, int size)
 	return 1;
 }
 
-void p2p_lobby_slot_heard(const char *hash_text, const unsigned char *payload, int size, int retained)
+void p2p_lobby_slot_heard(int crossplay, const char *hash_text, const unsigned char *payload, int size, int retained)
 {
 	unsigned char key_hash[P2P_KEY_HASH_SIZE];
 	struct game *game;
@@ -1074,7 +1140,7 @@ void p2p_lobby_slot_heard(const char *hash_text, const unsigned char *payload, i
 		char prefix[2 + 2 * P2P_KEY_HASH_SIZE + 1];
 		int length = (int)strlen(hash_text);
 
-		prefix[0] = (char)(network_wire_crossplay() ? 0x42 : 0x02);
+		prefix[0] = (char)(crossplay ? 0x42 : 0x02);
 		prefix[1] = 0x01;
 		memcpy(prefix + 2, hash_text, (size_t)length + 1);
 		net_fuzz_capture(_net_fuzz_capture_listing, payload[0], prefix, 2 + length + 1, payload, size);
@@ -1085,7 +1151,7 @@ void p2p_lobby_slot_heard(const char *hash_text, const unsigned char *payload, i
 
 		p2p_key_hash(p2p_public_key(), own);
 		if (!memcmp(own, key_hash, P2P_KEY_HASH_SIZE))
-			own_slot_heard(payload, size, retained);
+			own_slot_heard(crossplay, payload, size, retained);
 	}
 	if (!lobby.browsing)
 		return;
@@ -1104,7 +1170,8 @@ void p2p_lobby_slot_heard(const char *hash_text, const unsigned char *payload, i
 	}
 	/* the same listing again: heard, no work */
 	game = find_game(key_hash);
-	if (game && game->payload_size == size && !memcmp(game->payload, payload, (size_t)size))
+	if (game && game->listing.crossplay == crossplay && game->payload_size == size &&
+		!memcmp(game->payload, payload, (size_t)size))
 	{
 		game->heard_time = p2p_now();
 		lobby.counts.repeated++;
@@ -1112,7 +1179,8 @@ void p2p_lobby_slot_heard(const char *hash_text, const unsigned char *payload, i
 	}
 	for (index = 0; index < lobby.queue_count; index++)
 	{
-		if (lobby.queue[index].size == size && !memcmp(lobby.queue[index].payload, payload, (size_t)size))
+		if (lobby.queue[index].crossplay == crossplay && lobby.queue[index].size == size &&
+			!memcmp(lobby.queue[index].payload, payload, (size_t)size))
 		{
 			lobby.counts.repeated++;
 			return;
@@ -1124,6 +1192,7 @@ void p2p_lobby_slot_heard(const char *hash_text, const unsigned char *payload, i
 		return;
 	}
 	queued = &lobby.queue[lobby.queue_count++];
+	queued->crossplay = crossplay;
 	memcpy(queued->key_hash, key_hash, P2P_KEY_HASH_SIZE);
 	memcpy(queued->payload, payload, (size_t)size);
 	queued->size = size;
@@ -1245,16 +1314,32 @@ static void listing_take(const struct queued *queued, const struct listing *list
 	shown->open = (listing->flags & _listing_open) != 0;
 	shown->in_progress = (listing->flags & _listing_in_progress) != 0;
 	shown->has_teams = (listing->flags & _listing_has_teams) != 0;
-	shown->pc_map = (listing->flags & _listing_pc_map) != 0;
+	shown->crossplay = (unsigned char)listing->crossplay;
+	shown->vita_host = !listing->crossplay || (listing->flags & _listing_vita_host);
+	/* (format 2's bits: the crossplay wire's listing has none) */
+	shown->pc_map = !listing->crossplay && (listing->flags & _listing_pc_map) != 0;
 	/* (the crossplay wire's listing has no co-op bit nor difficulty: OpenCE
 	lists co-op as no game engine, the campaign's, docs/crossplay.md 6; never
 	on one of the Xbox's multiplayer levels) */
-	shown->coop = network_wire_crossplay() ?
+	shown->coop = listing->crossplay ?
 		listing->engine_type == 0 && !crossplay_guard_stock_multiplayer_map(listing->map, (int)sizeof(listing->map)) :
 		(listing->flags & _listing_coop) != 0;
 	shown->dedicated = (listing->flags & _listing_dedicated) != 0;
+	shown->platform = (unsigned char)crossplay_guard_platform_of_listing(listing->crossplay, shown->vita_host,
+		shown->dedicated);
+	/* (a Vita's crossplay listing's name, as the PC browsers show it, begins
+	VITA_NAME_TAG: the row says so itself) */
+	if (listing->crossplay && shown->vita_host && !strncmp(shown->name, VITA_NAME_TAG, sizeof(VITA_NAME_TAG) - 2) &&
+		(shown->name[sizeof(VITA_NAME_TAG) - 2] == ' ' || !shown->name[sizeof(VITA_NAME_TAG) - 2]))
+	{
+		size_t tag = shown->name[sizeof(VITA_NAME_TAG) - 2] ? sizeof(VITA_NAME_TAG) - 1 : sizeof(VITA_NAME_TAG) - 2;
+
+		memmove(shown->name, shown->name + tag, strlen(shown->name) - tag + 1);
+		if (!p2p_lobby_clean_name(shown->name))
+			snprintf(shown->name, sizeof(shown->name), "Halo");
+	}
 	shown->score_limit = listing->score_limit;
-	shown->difficulty = network_wire_crossplay() ? 255 : listing->difficulty;
+	shown->difficulty = listing->crossplay ? 255 : listing->difficulty;
 	shown->listed_player_count = 0;
 	for (index = 0; index < listing->listed_player_count; index++)
 	{
@@ -1287,9 +1372,9 @@ static int listing_check(const struct queued *queued, struct listing *listing, i
 	unsigned char key_hash[P2P_KEY_HASH_SIZE];
 	int reason;
 
-	if (!p2p_lobby_listing_read(queued->payload, queued->size, listing))
+	if (!p2p_lobby_listing_read(queued->crossplay, queued->payload, queued->size, listing))
 		reason = _drop_malformed;
-	else if (!network_wire_version_accepted((unsigned int)listing->version))
+	else if (!network_wire_version_accepted_on(queued->crossplay, (unsigned int)listing->version))
 		reason = _drop_version;
 	else if (!signing_key_hash(listing->key, key_hash) || memcmp(key_hash, queued->key_hash, P2P_KEY_HASH_SIZE))
 		reason = _drop_slot;
@@ -1588,10 +1673,11 @@ static void *key_thread(void *unused)
 		if (lobby.password_pending)
 		{
 			unsigned long generation = lobby.password_generation;
+			int crossplay = network_wire_crossplay();
 
 			memcpy(password, lobby.password, sizeof(password));
 			pthread_mutex_unlock(&p2p_lock);
-			made = p2p_password_key(password, p2p_signing_key(), key);
+			made = p2p_password_key(password, p2p_signing_key(), key, crossplay);
 			pthread_mutex_lock(&p2p_lock);
 			if (!made && generation == lobby.password_generation)
 			{
@@ -1609,6 +1695,7 @@ static void *key_thread(void *unused)
 				password or another, cannot join with it) */
 				p2p_new_invite_if_listed();
 				memcpy(lobby.password_key, key, sizeof(key));
+				lobby.password_key_crossplay = crossplay;
 				lobby.has_password = 1;
 				lobby.password_pending = 0;
 				platform_log("Internet play: the game's password is set");
@@ -1619,7 +1706,7 @@ static void *key_thread(void *unused)
 			unsigned char signing_key[P2P_KEY_SIZE], sealed[P2P_SEALED_TOKEN_SIZE], key_hash[P2P_KEY_HASH_SIZE];
 			unsigned char token[P2P_TOKEN_SIZE];
 			char invite[P2P_LINK_SIZE];
-			int opened;
+			int opened, crossplay;
 
 			lobby.join_pending = 0;
 			memcpy(password, lobby.join_password, sizeof(password));
@@ -1627,8 +1714,9 @@ static void *key_thread(void *unused)
 			memcpy(signing_key, lobby.join_signing_key, sizeof(signing_key));
 			memcpy(sealed, lobby.join_sealed_token, sizeof(sealed));
 			memcpy(key_hash, lobby.join_key_hash, sizeof(key_hash));
+			crossplay = lobby.join_crossplay;
 			pthread_mutex_unlock(&p2p_lock);
-			made = p2p_password_key(password, signing_key, key);
+			made = p2p_password_key(password, signing_key, key, crossplay);
 			opened = made && p2p_unseal_token(key, signing_key, sealed, token);
 			pthread_mutex_lock(&p2p_lock);
 			/* (only if no other join was asked for since) */
@@ -1639,7 +1727,7 @@ static void *key_thread(void *unused)
 				{
 					make_invite(key_hash, token, invite, sizeof(invite));
 					lobby.join_state = P2P_LOBBY_JOIN_JOINING;
-					p2p_join_invite_locked(invite);
+					p2p_join_invite_locked(invite, lobby.join_crossplay);
 					memset(invite, 0, sizeof(invite));
 				}
 				else if (!made)
@@ -1903,7 +1991,7 @@ void p2p_lobby_browse(int on)
 			p2p_signal_kick();
 		}
 		lobby.query_wanted = on;
-		p2p_signal_lobby_topics(lobby.listed, on);
+		p2p_signal_lobby_topics(lobby.listed, lobby.listed_crossplay, on);
 	}
 	pthread_mutex_unlock(&p2p_lock);
 }
@@ -2055,7 +2143,9 @@ int p2p_lobby_games(struct p2p_listing *games, int maximum_count)
 		if (!lobby.games[index].used)
 			continue;
 		failed = listing_failed(lobby.games[index].listing.identifier, lobby.games[index].fingerprint);
-		if (failed == 2)
+		/* (hidden after joining failed; or not of the platform the browser
+		shows, network.browser_filter) */
+		if (failed == 2 || !network_wire_browser_shows(lobby.games[index].listing.platform == CROSSPLAY_PLATFORM_VITA))
 			continue;
 		games[count] = lobby.games[index].listing;
 		games[count].failed = (unsigned char)failed;
@@ -2169,18 +2259,21 @@ static void entry_from_listing(const struct p2p_listing *listing, struct p2p_lob
 	entry->has_teams = listing->has_teams;
 	entry->failed = listing->failed;
 	entry->dedicated = listing->dedicated;
-	/* (crossplay_guard.h: a PC game's badges; the legacy wire's rows have
-	none, their games all the Vitas') */
+	/* (crossplay_guard.h: every row's tag - VITA, or the PC build's - and a
+	PC game's other badges: a co-op one is Experimental whatever its players,
+	asked about once, as a large one; a Vita's game is neither, its host
+	takes the Vitas' 16) */
 	entry->coop = listing->coop;
-	if (network_wire_crossplay())
+	entry->crossplay = listing->crossplay;
+	entry->platform = listing->platform;
 	{
-		/* (a co-op game is Experimental whatever its players: asked about
-		once, as a large one) */
-		int verdict = crossplay_guard_judge(entry->coop, entry->players, entry->maximum);
+		int verdict = listing->platform == CROSSPLAY_PLATFORM_VITA ? CROSSPLAY_GUARD_OK :
+			crossplay_guard_judge(entry->coop, entry->players, entry->maximum);
 
 		entry->experimental = verdict != CROSSPLAY_GUARD_OK;
-		snprintf(entry->badge, sizeof(entry->badge), "%s%s", crossplay_guard_badge(1, listing->dedicated),
-			crossplay_guard_badge_suffix(verdict));
+		snprintf(entry->tag, sizeof(entry->tag), "%s", crossplay_guard_tag(listing->platform));
+		crossplay_guard_row_badge(entry->badge, (int)sizeof(entry->badge), listing->platform, listing->crossplay,
+			listing->dedicated, verdict);
 	}
 	/* the Rules line: "Slayer to 50 on Wizard", "Co-op: Halo, Heroic" */
 	if (listing->coop)
@@ -2244,17 +2337,18 @@ int p2p_lobby_test_entries(struct p2p_lobby_entry *entries, int maximum_count)
 	static const struct
 	{
 		const char *name, *map, *gametype;
-		int players, maximum, engine, coop, difficulty, closed, badge;
+		int players, maximum, engine, coop, difficulty, closed, platform;
 		const char *player;
 	} odd[] = {
-		{ "   ", "bloodgulch", "Slayer", 8, 128, 2, 0, 255, 1, 1, "Spartan" },
-		{ "Jos\xc3\xa9 \xe2\x98\x85 Ma\xc3\xb1" "ana", "chillout", "CTF", 3, 16, 1, 0, 255, 0, 0, NULL },
-		{ "xXxNoScopeLegendsxXxForeverMore", "wizard", "", 2, 32, 4, 0, 255, 0, 0, NULL },
-		{ "true legendary run", "levels\\a10\\a10", "", 3, 4, 0, 1, 3, 0, 1, NULL },
-		{ "teto", "", "", 1, 4, 0, 1, 255, 0, 1, NULL },
-		{ "HALO UNIVERSAL CUSTOM SERVER 24/7", "bigassv2,104", "Team Slayer", 24, 32, 2, 0, 255, 0, 2, NULL },
-		{ "BIG TEAM 24*7", "", "", 0, 0, 255, 0, 255, 0, 2, NULL },
-		{ "Halo", "a30", "", 2, 2, 0, 1, 1, 0, 0, NULL },
+		{ "   ", "bloodgulch", "Slayer", 8, 128, 2, 0, 255, 1, CROSSPLAY_PLATFORM_OPENCE, "Spartan" },
+		{ "Jos\xc3\xa9 \xe2\x98\x85 Ma\xc3\xb1" "ana", "chillout", "CTF", 3, 16, 1, 0, 255, 0, CROSSPLAY_PLATFORM_VITA, NULL },
+		{ "xXxNoScopeLegendsxXxForeverMore", "wizard", "", 2, 32, 4, 0, 255, 0, CROSSPLAY_PLATFORM_VITA, NULL },
+		{ "true legendary run", "levels\\a10\\a10", "", 3, 4, 0, 1, 3, 0, CROSSPLAY_PLATFORM_PC, NULL },
+		{ "teto", "", "", 1, 4, 0, 1, 255, 0, CROSSPLAY_PLATFORM_PC, NULL },
+		{ "HALO UNIVERSAL CUSTOM SERVER 24/7", "bigassv2,104", "Team Slayer", 24, 32, 2, 0, 255, 0, CROSSPLAY_PLATFORM_CHUPA,
+			NULL },
+		{ "BIG TEAM 24*7", "", "", 0, 0, 255, 0, 255, 0, CROSSPLAY_PLATFORM_CHUPA, NULL },
+		{ "Halo", "a30", "", 2, 2, 0, 1, 1, 0, CROSSPLAY_PLATFORM_VITA, NULL },
 	};
 	const char *setting = getenv("HALO_TEST_BROWSER_ODD");
 	int count = 0, index;
@@ -2279,18 +2373,18 @@ int p2p_lobby_test_entries(struct p2p_lobby_entry *entries, int maximum_count)
 		listing.coop = (unsigned char)odd[index].coop;
 		listing.difficulty = odd[index].difficulty;
 		listing.open = !odd[index].closed;
+		/* (a PC game's tag and badges, as the crossplay wire's: a
+		ChupathingyCE row a server's) */
+		listing.platform = (unsigned char)odd[index].platform;
+		listing.crossplay = odd[index].platform != CROSSPLAY_PLATFORM_VITA;
+		listing.vita_host = !listing.crossplay;
+		listing.dedicated = odd[index].platform == CROSSPLAY_PLATFORM_CHUPA;
 		if (odd[index].player)
 		{
 			snprintf(listing.players[0], sizeof(listing.players[0]), "%s", odd[index].player);
 			listing.listed_player_count = 1;
 		}
 		entry_from_listing(&listing, &entries[count]);
-		/* (a PC game's badges, as the crossplay wire's) */
-		if (odd[index].badge)
-		{
-			snprintf(entries[count].badge, sizeof(entries[count].badge), "%s%s", T("PC"), odd[index].badge == 2 ?
-				" SERVER EXPERIMENTAL" : odd[index].coop ? " CO-OP EXPERIMENTAL" : " EXPERIMENTAL");
-		}
 		count++;
 	}
 	return count;
@@ -2348,6 +2442,7 @@ int p2p_lobby_join(const char *id, const char *password)
 	if (game && !(lobby.key_thread_running && lobby.join_state == P2P_LOBBY_JOIN_UNLOCKING))
 	{
 		memcpy(lobby.join_key_hash, key_hash, P2P_KEY_HASH_SIZE);
+		lobby.join_crossplay = game->listing.crossplay;
 		/* (whether its host's game answers: p2p_lobby_game_sent) */
 		lobby.watching = 1;
 		memcpy(lobby.watch_identifier, game->listing.identifier, P2P_IDENTIFIER_SIZE);
@@ -2371,7 +2466,7 @@ int p2p_lobby_join(const char *id, const char *password)
 		{
 			memcpy(invite, game->listing.invite, sizeof(invite));
 			lobby.join_state = P2P_LOBBY_JOIN_JOINING;
-			p2p_join_invite_locked(invite);
+			p2p_join_invite_locked(invite, game->listing.crossplay);
 		}
 		result = 1;
 	}
@@ -2381,6 +2476,56 @@ int p2p_lobby_join(const char *id, const char *password)
 	}
 	pthread_mutex_unlock(&p2p_lock);
 	return result;
+}
+
+int p2p_lobby_join_sealed(const unsigned char *key_hash, const unsigned char *signing_key, const unsigned char *sealed,
+	const char *password, int crossplay)
+{
+	unsigned char hash[P2P_KEY_HASH_SIZE];
+	int result = 0;
+
+	/* (the key the token is sealed with is the host's: its X25519 form's
+	hash is the invite's host part, or the seal is no host's) */
+	if (!key_hash || !signing_key || !sealed || !signing_key_hash(signing_key, hash) ||
+		memcmp(hash, key_hash, P2P_KEY_HASH_SIZE))
+	{
+		return 0;
+	}
+	pthread_mutex_lock(&p2p_lock);
+	if (!(lobby.key_thread_running && lobby.join_state == P2P_LOBBY_JOIN_UNLOCKING))
+	{
+		memcpy(lobby.join_key_hash, key_hash, P2P_KEY_HASH_SIZE);
+		lobby.join_crossplay = crossplay != 0;
+		/* (a friend's game: not a stranger's listing, never marked failed
+		from here) */
+		lobby.watching = 0;
+		lobby.joined_locked = 1;
+		memcpy(lobby.joined_locked_hash, key_hash, P2P_KEY_HASH_SIZE);
+		snprintf(lobby.join_password, sizeof(lobby.join_password), "%s", password ? password : "");
+		memcpy(lobby.join_signing_key, signing_key, P2P_KEY_SIZE);
+		memcpy(lobby.join_sealed_token, sealed, P2P_SEALED_TOKEN_SIZE);
+		lobby.join_pending = 1;
+		lobby.join_state = P2P_LOBBY_JOIN_UNLOCKING;
+		p2p_set_status(N_("opening a friend's game with its password"));
+		start_key_thread();
+		result = 1;
+	}
+	pthread_mutex_unlock(&p2p_lock);
+	return result;
+}
+
+int p2p_lobby_password_seal(const unsigned char *token, unsigned char *signing_key, unsigned char *sealed)
+{
+	/* (under p2p_lock, p2p.c's friends_host_view: the hosted game's key, made
+	for its wire, ready) */
+	if (!lobby.has_password || lobby.password_pending || lobby.password_failed ||
+		lobby.password_key_crossplay != network_wire_crossplay())
+	{
+		return 0;
+	}
+	memcpy(signing_key, p2p_signing_key(), P2P_KEY_SIZE);
+	p2p_seal_token(lobby.password_key, p2p_signing_key(), token, sealed);
+	return 1;
 }
 
 int p2p_lobby_join_state(void)

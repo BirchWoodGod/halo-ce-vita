@@ -206,6 +206,16 @@ enum
 	DEDICATED_PEER_PACKETS_PER_SECOND = 2000,
 	DEDICATED_PEERS_PER_ADDRESS = 8,
 #endif
+	/* a Vita hosting a game for Vitas and PC (the crossplay wire,
+	network_wire.h: strangers' PC clients, docs/crossplay.md 7.4): a peer's
+	packets a second past which the rest are dropped (a game sends a few
+	score a second; no map download on that wire), the peers one address
+	may have connected, and the players it reaches or has reached at once
+	(the game takes the Vitas' 16, its host and 15 machines; a few more
+	while some leave and others come) */
+	CROSSPLAY_HOST_PEER_PACKETS_PER_SECOND = 1000,
+	CROSSPLAY_HOST_PEERS_PER_ADDRESS = 8,
+	CROSSPLAY_HOST_MAXIMUM_PEERS = 24,
 };
 
 enum
@@ -299,13 +309,11 @@ struct peer
 	unsigned long stray_time;
 	/* a pong came back: it is reached both ways */
 	int two_way;
-#ifdef HALO_DEDICATED_SERVER
-	/* (a dedicated server) its packets this second, and since when; when an
-	excess was last logged */
+	/* (a dedicated server, a Vita's crossplay host) its packets this second,
+	and since when; when an excess was last logged */
 	int rate_count;
 	unsigned long rate_time;
 	unsigned long rate_logged_time;
-#endif
 	/* relays: those it offered; the allocation of the session (from its
 	secret); whether it is asked for through relays, and through which; the
 	endpoint is a relay's, since when; and when its addresses were last
@@ -466,6 +474,10 @@ static struct
 
 	/* joining: until the host is reached, or JOIN_TIMEOUT */
 	int join_requested;
+	/* the wire of the game being joined (network_wire.h: 0 legacy, 1
+	crossplay, -1 not known - an invite link's, asked on both until its host
+	answers: p2p_join_wire_known) */
+	int join_wire;
 	int joining;
 	unsigned char join_host[P2P_IDENTIFIER_SIZE];
 	unsigned char join_host_hash[P2P_KEY_HASH_SIZE];
@@ -1268,7 +1280,7 @@ static void drop_peer(struct peer *peer, const char *reason)
 	makes no second session from one request, which anyone who saw it could
 	send again) */
 	if (ask_again)
-		p2p_signal_join(p2p.join_host_hash, p2p.join_token);
+		p2p_signal_join(p2p.join_host_hash, p2p.join_token, p2p.join_wire);
 }
 
 static void add_candidates(struct peer *peer, const struct p2p_candidate *candidates, int count)
@@ -1307,6 +1319,17 @@ static struct peer *free_peer(void)
 	return NULL;
 }
 
+/* the players this host is reaching or has reached */
+static int joiner_peer_count(void)
+{
+	int count = 0;
+	int index;
+
+	for (index = 0; index < P2P_MAXIMUM_PEERS; index++)
+		count += p2p.peers[index].used && !p2p.peers[index].is_host;
+	return count;
+}
+
 /* the players this host is reaching and has not reached yet */
 static int opening_peer_count(void)
 {
@@ -1331,6 +1354,11 @@ int p2p_peer_turned_away(const unsigned char *peer_identifier, int is_host)
 		reason = "too many players";
 	else if (!is_host && opening_peer_count() >= MAXIMUM_OPENING_PEERS)
 		reason = "too many players connecting at once";
+	/* (a Vita hosting for Vitas and PC: the players a game of the Vitas' 16
+	has, and a few more, never a hundred strangers' tunnels) */
+	else if (!is_host && p2p.hosting && !p2p.adhoc && network_wire_crossplay() &&
+		joiner_peer_count() >= CROSSPLAY_HOST_MAXIMUM_PEERS)
+		reason = "as many players as a Vita's game for Vitas and PC takes";
 	if (!reason)
 		return 0;
 	/* (anyone with the invite can ask as often as they like) */
@@ -1879,9 +1907,10 @@ static void relay_setup(void)
 	char text[1024];
 	const char *entry;
 
-	/* (never on the crossplay wire: relays are this build's, which no PC
-	machine knows, network_wire.h) */
-	p2p.relay_allowed = config_boolean("network.allow_relay") && !p2p.adhoc && !network_wire_crossplay();
+	/* (the legacy wire's alone: relays are this build's, which no PC machine
+	knows, network_wire.h; a game on the crossplay wire offers and takes
+	none in its JOIN and ACCEPT, p2p_signal.c) */
+	p2p.relay_allowed = config_boolean("network.allow_relay") && !p2p.adhoc;
 	if (!p2p.relay_allowed)
 		return;
 	p2p_list_setting("network.relays", "network.relays_file", text, sizeof(text));
@@ -3356,15 +3385,25 @@ long p2p_ping_table(unsigned short *pings, int count, long *tick)
 
 /* ---------- the tunnel */
 
-#ifdef HALO_DEDICATED_SERVER
-/* (a dedicated server) a peer's sealed packet, from where it came: 0 if it
-is dropped, as one of more than DEDICATED_PEER_PACKETS_PER_SECOND, or with
-the peer, the first from an address that has DEDICATED_PEERS_PER_ADDRESS
-peers connected already (not through a relay, whose peers share it) */
-static int dedicated_peer_admitted(struct peer *peer, const struct sockaddr_in *from)
+/* (a dedicated server, or a Vita hosting for Vitas and PC) a peer's
+sealed packet, from where it came: 0 if it is dropped, as one of more than
+its packets a second (DEDICATED_PEER_PACKETS_PER_SECOND,
+CROSSPLAY_HOST_PEER_PACKETS_PER_SECOND), or with the peer, the first from
+an address that has as many peers connected already (DEDICATED_PEERS_PER_ADDRESS,
+CROSSPLAY_HOST_PEERS_PER_ADDRESS; not through a relay, whose peers share it).
+Anything else admitted */
+static int peer_admitted(struct peer *peer, const struct sockaddr_in *from)
 {
 	unsigned long now = p2p_now();
 	char text[32];
+#ifdef HALO_DEDICATED_SERVER
+	int packets_per_second = DEDICATED_PEER_PACKETS_PER_SECOND, peers_per_address = DEDICATED_PEERS_PER_ADDRESS;
+#else
+	int packets_per_second = CROSSPLAY_HOST_PEER_PACKETS_PER_SECOND, peers_per_address = CROSSPLAY_HOST_PEERS_PER_ADDRESS;
+
+	if (peer->is_host || !p2p.hosting || p2p.adhoc || !network_wire_crossplay())
+		return 1;
+#endif
 
 	if (!peer->connected && !peer_relay_at(peer, from->sin_addr.s_addr, from->sin_port))
 	{
@@ -3380,7 +3419,7 @@ static int dedicated_peer_admitted(struct peer *peer, const struct sockaddr_in *
 				count++;
 			}
 		}
-		if (count >= DEDICATED_PEERS_PER_ADDRESS)
+		if (count >= peers_per_address)
 		{
 			platform_log("Internet play: player %s refused: %d machines are connected from %s already", peer->name,
 				count, address_text(from->sin_addr.s_addr, 0, text));
@@ -3393,19 +3432,18 @@ static int dedicated_peer_admitted(struct peer *peer, const struct sockaddr_in *
 		peer->rate_time = now;
 		peer->rate_count = 0;
 	}
-	if (++peer->rate_count > DEDICATED_PEER_PACKETS_PER_SECOND)
+	if (++peer->rate_count > packets_per_second)
 	{
 		if (!peer->rate_logged_time || elapsed(peer->rate_logged_time, 10000))
 		{
 			peer->rate_logged_time = now ? now : 1;
 			platform_log("Internet play: player %s sends more than %d packets a second; the rest are dropped",
-				peer->name, DEDICATED_PEER_PACKETS_PER_SECOND);
+				peer->name, packets_per_second);
 		}
 		return 0;
 	}
 	return 1;
 }
-#endif
 
 static void tunnel_received(const unsigned char *packet, int size, const struct sockaddr_in *from)
 {
@@ -3460,10 +3498,8 @@ static void tunnel_received(const unsigned char *packet, int size, const struct 
 		size - TUNNEL_HEADER_SIZE, inner);
 	if (inner_size < 1)
 		return;
-#ifdef HALO_DEDICATED_SERVER
-	if (!dedicated_peer_admitted(peer, from))
+	if (!peer_admitted(peer, from))
 		return;
-#endif
 	newest = counter > peer->receive_highest;
 	packet_received(peer, counter);
 	peer_heard(peer, from->sin_addr.s_addr, from->sin_port, newest, inner[0] == _packet_pong && inner_size >= 5);
@@ -3644,13 +3680,8 @@ static int join_code(const char *code, int public, const unsigned char *host)
 	set_status(N_("a dedicated server joins no games (code %.4s-%.4s ignored)"), code, code + 4);
 	return 1;
 #endif
-	/* (codes are Vita games', the legacy wire's: no PC host has one,
-	network_wire.h) */
-	if (network_wire_crossplay())
-	{
-		set_status(N_("codes join Vita games: turn Crossplay off to use code %.4s-%.4s"), code, code + 4);
-		return 1;
-	}
+	/* (codes are this build's own: a Vita's game on either wire has one,
+	its record saying which; no PC host has one) */
 	if (p2p.code[0] && !memcmp(p2p.code, code, 4) && !memcmp(p2p.code + 5, code + 4, 4))
 	{
 		set_status(N_("that is this machine's own code"));
@@ -3666,8 +3697,10 @@ static int join_code(const char *code, int public, const unsigned char *host)
 }
 
 /* under p2p_lock: parse_invite's result (a code, with its dash, is looked
-up); public: the invite a public lobby's code led to */
-static int join_invite(const char *text, int public)
+up); public: the invite a public lobby's code led to; crossplay: the wire
+of its host's game (0 legacy, 1 crossplay, -1 not known: an invite link,
+asked on both) */
+static int join_invite(const char *text, int public, int crossplay)
 {
 	unsigned char hash[P2P_KEY_HASH_SIZE], host[P2P_IDENTIFIER_SIZE], token[P2P_TOKEN_SIZE];
 	char code[P2P_CODE_LENGTH + 1];
@@ -3699,11 +3732,12 @@ static int join_invite(const char *text, int public)
 		return 1;
 	}
 	if ((p2p.joining || p2p.join_requested) && !memcmp(hash, p2p.join_host_hash, sizeof(hash)) &&
-		!memcmp(token, p2p.join_token, sizeof(token)))
+		!memcmp(token, p2p.join_token, sizeof(token)) && (crossplay < 0 || p2p.join_wire == crossplay))
 		return 1;
 	memcpy(p2p.join_host, host, sizeof(host));
 	memcpy(p2p.join_host_hash, hash, sizeof(hash));
 	memcpy(p2p.join_token, token, sizeof(token));
+	p2p.join_wire = crossplay < 0 ? -1 : crossplay != 0;
 	p2p.join_requested = 1;
 	return 1;
 }
@@ -3713,10 +3747,10 @@ int p2p_running(void)
 	return p2p.running;
 }
 
-int p2p_join_invite_locked(const char *text)
+int p2p_join_invite_locked(const char *text, int crossplay)
 {
 	/* (the server browser's: its host is a stranger's) */
-	int result = join_invite(text, 1);
+	int result = join_invite(text, 1, crossplay);
 
 	if (result > 0 && !p2p.running)
 		platform_log("Internet play is off: the invite is ignored");
@@ -3738,7 +3772,22 @@ int p2p_join_invite(const char *text)
 
 	p2p_identifier();
 	pthread_mutex_lock(&p2p_lock);
-	result = join_invite(text, 0);
+	/* (a link: its host's wire not known, asked on both - a Vita's or a
+	PC's, OpenCE's links are ours, halo://join/<key hash><token>) */
+	result = join_invite(text, 0, -1);
+	pthread_mutex_unlock(&p2p_lock);
+	if (result > 0 && !p2p.running)
+		platform_log("Internet play is off (network.online in config.toml): the invite is ignored");
+	return result > 0;
+}
+
+int p2p_join_invite_on(const char *text, int crossplay)
+{
+	int result;
+
+	p2p_identifier();
+	pthread_mutex_lock(&p2p_lock);
+	result = join_invite(text, 0, crossplay != 0);
 	pthread_mutex_unlock(&p2p_lock);
 	if (result > 0 && !p2p.running)
 		platform_log("Internet play is off (network.online in config.toml): the invite is ignored");
@@ -3748,18 +3797,24 @@ int p2p_join_invite(const char *text)
 void p2p_invite_received(const char *text)
 {
 	/* (an older version's is logged as such) */
-	if (!join_invite(text, 0))
+	if (!join_invite(text, 0, -1))
 		set_status(N_("that is not an invite"));
 }
 
-void p2p_code_found(const char *text)
+void p2p_code_found(const char *text, int crossplay)
 {
 	if (!p2p.looking_up)
 		return;
 	p2p.looking_up = 0;
 	p2p_signal_stop_lookup();
 	set_status(N_("code %.4s-%.4s found; reaching its host"), p2p.lookup_code, p2p.lookup_code + 4);
-	join_invite(text, p2p.lookup_public);
+	join_invite(text, p2p.lookup_public, crossplay);
+}
+
+void p2p_join_wire_known(int crossplay)
+{
+	if (p2p.joining && p2p.join_wire < 0)
+		p2p.join_wire = crossplay != 0;
 }
 
 static int join_code_from(const char *text, int public)
@@ -3846,7 +3901,7 @@ static void update_joining(void)
 		p2p_hex(p2p.join_host, P2P_IDENTIFIER_SIZE, name);
 		set_status(N_("joining %s's game"), name);
 		p2p_signal_start();
-		p2p_signal_join(p2p.join_host_hash, p2p.join_token);
+		p2p_signal_join(p2p.join_host_hash, p2p.join_token, p2p.join_wire);
 	}
 	else if (p2p.joining && elapsed(p2p.join_time, JOIN_TIMEOUT))
 	{
@@ -3894,7 +3949,7 @@ void p2p_new_invite_if_listed(void)
 	{
 		/* (the code stays: it was never listed, and now leads to the new
 		invite) */
-		p2p_signal_host(p2p.token, p2p.code);
+		p2p_signal_host(p2p.token, p2p.code, network_wire_crossplay());
 		memcpy(p2p.clipboard, p2p.invite, sizeof(p2p.clipboard));
 		p2p.has_clipboard = 1;
 		/* (Discord is told the new one) */
@@ -3997,7 +4052,8 @@ static void update_hosting(void)
 		p2p_signal_start();
 		/* (a broker waiting after a failure tries now) */
 		p2p_signal_kick();
-		p2p_signal_host(p2p.token, p2p.code);
+		/* (on the game's wire: network_wire.h, chosen as its server was made) */
+		p2p_signal_host(p2p.token, p2p.code, network_wire_crossplay());
 		/* (the invite is a bearer token: anyone who reads it can join, so the
 		log shows only the host's part; the link itself goes to the
 		clipboard, or on the Vita to host_invite.txt) */
@@ -4178,13 +4234,17 @@ static void friends_host_view(struct p2p_friends_host *host)
 	memset(host, 0, sizeof(*host));
 	host->online = p2p.running && !p2p.adhoc && !p2p.stopping && config_boolean("network.online");
 	host->crossplay = network_wire_crossplay();
-	host->hosting = p2p.hosting && p2p.has_token && p2p.game_player_maximum > 0 && !host->crossplay;
+	host->pc_host = !network_wire_host_vita();
+	/* (a game with a password: its token sealed for friends, p2p_friends.c) */
+	if (p2p.hosting && p2p.has_token)
+		host->has_sealed = p2p_lobby_password_seal(p2p.token, host->signing_key, host->sealed_token);
+	host->hosting = p2p.hosting && p2p.has_token && p2p.game_player_maximum > 0;
 	if (!host->hosting)
 	{
 		int index;
 
 		/* (joined: the invite's host reached, its peer connected) */
-		for (index = 0; index < P2P_MAXIMUM_PEERS && !host->crossplay && !p2p.adhoc; index++)
+		for (index = 0; index < P2P_MAXIMUM_PEERS && !p2p.adhoc; index++)
 		{
 			const struct peer *peer = &p2p.peers[index];
 

@@ -204,8 +204,8 @@ static const struct config_setting config_settings[] =
 		"invite find each other (its messages are encrypted) and the server\n"
 		"browser's listings go, beside this file unless a full path (on the\n"
 		"Vita, the one in the game's package): one host:port on each line, up\n"
-		"to 4. Updates replace brokers.txt: keep a list of your own under\n"
-		"another name." },
+		"to 4 (with network.crossplay_brokers_file's, 6 in all). Updates\n"
+		"replace brokers.txt: keep a list of your own under another name." },
 	{ "network.crossplay_brokers_file", _config_string,
 #ifdef HALO_VITA
 		"\"app0:brokers_crossplay.txt\"",
@@ -213,9 +213,9 @@ static const struct config_setting config_settings[] =
 		"\"brokers_crossplay.txt\"",
 #endif
 		"HALO_NET_CROSSPLAY_BROKERS_FILE", _environment_value, _platform_all,
-		"With network.crossplay on, the brokers' file in place of\n"
-		"network.brokers_file's: OpenCE's list, where the PC hosts list their\n"
-		"games (the same format)." },
+		"OpenCE's brokers' file, where the PC hosts list their games (the same\n"
+		"format): the brokers used are those of network.brokers_file and of\n"
+		"this, each once, up to 6." },
 	{ "network.signalling_brokers", _config_string, "\"\"", "HALO_NET_BROKERS", _environment_value, _platform_all,
 		"Comma-separated host:port brokers in place of network.brokers_file's\n"
 		"(the automated tests' own); empty for the file's." },
@@ -311,9 +311,10 @@ static const struct config_setting config_settings[] =
 		"(they see it offline); their presence, requests and invites still\n"
 		"arrive. The settings panel's Friends page and the FRIENDS screen set it." },
 	{ "friends.join", _config_boolean, "true", "HALO_FRIENDS_JOIN", _environment_value, _platform_all,
-		"Whether friends can join this machine's game in one press: only a\n"
-		"public game without a password, with room (a private game is joined\n"
-		"by the invites its host sends)." },
+		"Whether friends can join this machine's game in one press, public or\n"
+		"private, with room (the join goes to each friend alone, sealed; never\n"
+		"to a stranger or a blocked player); a game with a password asks them\n"
+		"for it, unless its host invited them." },
 	{ "network.public_lobby", _config_boolean, "true", "HALO_NET_PUBLIC_LOBBY", _environment_value, _platform_all,
 		"The server browser: public games are listed through the signalling\n"
 		"brokers, and the settings panel's Browse public games shows them.\n"
@@ -383,10 +384,23 @@ static const struct config_setting config_settings[] =
 		"to download it (in a game joined from the public lobby, with a warning:\n"
 		"its host is a stranger), \"private\" asks except in public lobby games,\n"
 		"\"never\" never offers one." },
+	{ "network.browser_filter", _config_string, "\"all\"", "HALO_NET_BROWSER_FILTER", _environment_value, _platform_all,
+		"The games the server browsers list: \"all\" (the default: the Vitas'\n"
+		"and OpenCE's, PC hosts and servers running OpenCE, ChupathingyCE or\n"
+		"DamnationCE, side by side, each tagged), \"vita\" (games a Vita\n"
+		"hosts) or \"pc\" (PC hosts' and servers'). Joining a game speaks its\n"
+		"own protocol whatever this says (docs/crossplay.md)." },
+	{ "network.host_crossplay", _config_boolean, "false", "HALO_NET_HOST_CROSSPLAY", _environment_value, _platform_all,
+		"Who can join the games this machine hosts: false (the default),\n"
+		"Vitas, on the Vitas' own protocol; true, Vitas and PC players\n"
+		"(OpenCE, ChupathingyCE), on OpenCE's protocol, listed in both\n"
+		"browsers as a Vita's game. Taken as a game is hosted; never in ad\n"
+		"hoc play." },
 	{ "network.crossplay", _config_boolean, "false", "HALO_CROSSPLAY", _environment_value, _platform_all,
-		"Play OpenCE's games (PC hosts and servers running OpenCE,\n"
-		"ChupathingyCE or DamnationCE) instead of Vitas' (docs/crossplay.md).\n"
-		"Off, the default, plays Vita to Vita as betas 1-4 do." },
+		"Retired (Oct 19 2026): there is no switch, every game speaks its own\n"
+		"protocol. Read only to keep a player's choice: true, with\n"
+		"network.browser_filter left at \"all\", lists PC games only, as the\n"
+		"switch's On did." },
 	{ "network.remote_lod", _config_string, "\"auto\"", "HALO_NET_REMOTE_LOD", _environment_value, _platform_all,
 		"In a game this machine joined, another player out of view (on foot,\n"
 		"not shooting, throwing, meleeing, reloading, jumping or acting) updated\n"

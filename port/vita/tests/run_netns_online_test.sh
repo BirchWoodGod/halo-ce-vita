@@ -189,7 +189,13 @@
 #            nothing sent back, the host's re-sent requests muted (asked once)
 #   friendsblock  the joiner blocks the host's request: the host's re-sent
 #            requests dropped as a blocked player's
-#   friendsinvite  the host's game is private (not joinable from presence);
+#   friendsprivate  friends, the host's game private (Oct 19 2026: "when I have
+#            a private lobby my friend should be able to join without a join
+#            code"): the joiner sees it joinable and joins it from presence
+#   friendsprivatepw  the same with a password: the joiner is asked for it
+#            (join-friend:<password> types it) and joins by the presence's
+#            sealed token, opened with it
+#   friendsinvite  the host's game is private (joinable from presence too);
 #            the host invites the joiner (invite-after=), whose invite
 #            pop-up is answered Accept (HALO_TEST_FRIENDS_ANSWER: friends_game.c)
 #            at the menus; the joiner joins the private game by it and plays
@@ -970,7 +976,11 @@ code|lobby|lobbytls|lobbypw|relay|latency)
 		grep -aq 'network test: the public games list "' "$out/joiner/run.log" || fail "the joiner never listed the host's game"
 		grep -q 'publish .* hcev/3/lobby/s/[0-9a-f]\{32\} 0 B retained' "$out/broker.log" ||
 			fail "the host's slot was never cleared (its tombstone and clearing when it quit, or its will)"
-		grep -q 'publish .* hceu/' "$out/broker.log" && fail "a Vita build published on the PCs' topics"
+		# (a host for Vitas publishes nothing on the PCs' topics; the browser,
+		# which lists PC games too since Oct 19 2026, asks their hosts to
+		# republish - hceu/3/lobby/q, as OpenCE's browser does - and that alone)
+		grep 'publish .* hceu/' "$out/broker.log" | grep -vq 'publish .* hceu/3/lobby/q [0-9]* B' &&
+			fail "a Vita build published on the PCs' topics (more than the browser's query)"
 		if [ "$mode" = lobbypw ]; then
 			grep -aq 'network test: the public games list ".*\[pw\]' "$out/joiner/run.log" ||
 				fail "the game with a password was not listed locked"
@@ -1089,12 +1099,12 @@ browserscroll)
 menushost|pickjoin)
 	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 	# (Multiplayer, CREATE GAME INTERNET: Server Setup; A on SERVER NAME types
-	# it; down to START GAME; the System Link screen's profile (A A A), the map
+	# it; down to START GAME (past WHO CAN JOIN); the System Link screen's profile (A A A), the map
 	# list (A), the gametype (A): the lobby; START starts the game. pickjoin:
 	# the host stays on the map list a minute, the joiner joining meanwhile)
 	pick=5000
 	[ $mode = pickjoin ] && pick=${HALO_TEST_PICK_WAIT:-60000}
-	pad="wait:150:3000 down a wait:150:2000 down down down a wait:150:2000 a wait:150:1500 down down left down down a"
+	pad="wait:150:3000 down a wait:150:2000 down down down a wait:150:2000 a wait:150:1500 down down left down down down a"
 	pad="$pad wait:150:5000 a a a wait:150:$pick a wait:150:4000 a"
 	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=true \
 		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_TEST_INPUT=bot:1 HALO_NET_HOST_PUBLIC=false "HALO_TEST_PAD=$pad" \
@@ -2296,13 +2306,13 @@ h3online|h3pickjoin)
 		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS)"; exit 0
 	fi
 	# (MULTIPLAYER: the lobby on SYSTEM LINK; NETWORK, up to ONLINE, A: online, live; a while for
-	# the broker; Square: GAME OPTIONS (Create Game); down two to NAME, A: typed; down four to
-	# START GAME, A: the profile (A joins, A the profile, A): the game's lobby (h3pickjoin: a
+	# the broker; Square: GAME OPTIONS (Create Game); down two to NAME, A: typed; down five to
+	# START GAME (past WHO CAN JOIN), A: the profile (A joins, A the profile, A): the game's lobby (h3pickjoin: a
 	# minute there); a while for the joiner, then A starts the game, a few times)
 	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
 		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:1 HALO_NET_HOST_PUBLIC=true \
 		HALO_TEST_TEXT_INPUT=NetHost \
-		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:10000 x wait:150:4000 down:150:500 down:150:500 a wait:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:4000 a wait:150:2000 a wait:150:2000 a wait:150:$pick wait:150:4000 wait:150:${HALO_TEST_H3ONLINE_WAIT:-45000} a wait:150:5000 a wait:150:5000 a" \
+		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:10000 x wait:150:4000 down:150:500 down:150:500 a wait:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:4000 a wait:150:2000 a wait:150:2000 a wait:150:$pick wait:150:4000 wait:150:${HALO_TEST_H3ONLINE_WAIT:-45000} a wait:150:5000 a wait:150:5000 a" \
 		; host_pid=$last_pid
 	sleep 25
 	# (MULTIPLAYER: the lobby on SYSTEM LINK; NETWORK, up to ONLINE, A; a while for the broker;
@@ -3907,7 +3917,7 @@ CHECK
 		fail "the server crashed"
 	fi
 	;;
-friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged)
+friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsprivate|friendsprivatepw)
 	hc=$out/host.code jc=$out/joiner.code
 	host_steps="code-file=$hc,add-file=$jc"
 	join_steps="code-file=$jc"
@@ -3918,6 +3928,12 @@ friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged)
 	join_pad="wait:150:1000"
 	case $mode in
 	friends) join_steps="$join_steps,accept"; join_test=join-friend ;;
+	# (the owner, Oct 19 2026: a friend joins a private game with no code;
+	# one with a password asks the friend for it)
+	friendsprivate) join_steps="$join_steps,accept"; join_test=join-friend; host_extra="HALO_NET_HOST_PUBLIC=false" ;;
+	friendsprivatepw)
+		join_steps="$join_steps,accept"; join_test=join-friend:xpfriendpw
+		host_extra="HALO_NET_HOST_PUBLIC=false HALO_NET_LOBBY_PASSWORD=xpfriendpw" ;;
 	friendsdecline) join_steps="$join_steps,decline" ;;
 	friendsblock) join_steps="$join_steps,block" ;;
 	friendsinvite)
@@ -3952,7 +3968,7 @@ friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged)
 	grep -a "retained" "$out/broker.log" | grep -aq "/f1/" && fail "the broker kept a friends' message"
 	grep -aqE "Alpha|Bravo" "$out/broker.log" && fail "the broker's log shows a player's name"
 	case $mode in
-	friends|friendsinvite|friendsoffline|friendsforged)
+	friends|friendsinvite|friendsoffline|friendsforged|friendsprivate|friendsprivatepw)
 		grep -aq "friends: .* accepted the friend request; now friends" "$hl" || fail "the host did not become the joiner's friend"
 		grep -aq "friends: accepted .* friend request; now friends" "$jl" || fail "the joiner did not accept"
 		grep -aq "friends: .* is online: " "$hl" || fail "the host never saw the joiner online"
@@ -3979,8 +3995,22 @@ friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged)
 				fail "the blocked player's next request was not dropped"
 		fi
 		;;
+	friendsprivate|friendsprivatepw)
+		grep -aq "friends: .* is online: .*(joinable)" "$jl" || fail "the joiner did not see the host's private game joinable"
+		grep -aq "network test: joining friend .*: Done" "$jl" && [ $mode = friendsprivatepw ] &&
+			fail "the game with a password was joined without asking for it"
+		if [ $mode = friendsprivate ]; then
+			grep -aq "network test: joining friend .*: Done" "$jl" || fail "the joiner did not join its friend's private game"
+			grep -aq "friends: joining .*'s game" "$jl" || fail "the friend's invite link was not joined"
+		else
+			grep -aq "network test: joining friend .*: Their game has a password: type it" "$jl" ||
+				fail "the friend was not asked for the password"
+			grep -aq "network test: the friend's game's password typed: Done" "$jl" || fail "the password was not taken"
+			grep -aq "friends: joining .*'s game with its password" "$jl" || fail "the sealed token was not opened"
+		fi
+		grep -aqE "halo://join/[0-9a-f]{64}" "$out/broker.log" && fail "an invite link went through the broker in clear"
+		;;
 	friendsinvite)
-		grep -aq "(joinable)" "$jl" && fail "a private game was joinable from presence"
 		grep -aq "friends: invited .* into this machine's game" "$hl" || fail "the host did not invite"
 		grep -aq "friends: .* invited this machine: " "$jl" || fail "the joiner did not hear the invite"
 		grep -aq "friends: .* invited you: .* (the test answers)" "$jl" || fail "the invite's pop-up was not asked"
@@ -4007,7 +4037,7 @@ friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged)
 		grep -aq "friends: Forged\|Forged is online" "$jl" && fail "a forgery showed"
 		;;
 	esac
-	if [ $mode = friends ] || [ $mode = friendsinvite ]; then
+	if [ $mode = friends ] || [ $mode = friendsinvite ] || [ $mode = friendsprivate ] || [ $mode = friendsprivatepw ]; then
 		grep -aq "system link: in another's lobby\|system link: in a network game" "$jl" || fail "the joiner did not get into the host's game"
 		two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
 		echo "joiner's seconds with two players playing: $two"
@@ -4065,7 +4095,10 @@ party)
 	grep -aq "party: chat from Charlie[^:]*: gg" "$hl" || fail "Alpha did not read Charlie's chat"
 	grep -aq "party: chat from Charlie #[A-Z0-9]\{4\}: Ready!" "$jl" ||
 		fail "Bravo did not read Charlie's quick chat under Charlie's name and code (not a friend of Bravo's)"
-	grep -aq "joinable" "$jl" && fail "Alpha's private game showed joinable from presence"
+	# (since Oct 19 2026 a friend joins a private game from presence, the join
+	# sealed to each friend: Bravo, Alpha's friend, sees it joinable)
+	grep -aq "friends: Alpha is online: .* (joinable)" "$jl" ||
+		fail "Alpha's private game did not show joinable to Bravo, a friend"
 	# (the broker: the party's traffic sealed - no names, no chat - on the friends' hashed topics)
 	grep -aqE "hello party|Alpha|Bravo|Charlie|Ready!" "$out/broker.log" && fail "the broker's log shows a name or a chat"
 	grep -a "retained" "$out/broker.log" | grep -aq "/f1/" && fail "the broker kept a friends' message"
@@ -4130,7 +4163,7 @@ friendsplayers|friendsplayersoff|friendsplayersnone)
 	[ "$two" -ge 20 ] || fail "the joiner played the host's game for $two s with two players (20 wanted)"
 	;;
 *)
-	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|h3live|h3liveleave|h3liveinvite|h3online|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|party" >&2
+	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|h3live|h3liveleave|h3liveinvite|h3online|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|party|friendsprivate|friendsprivatepw" >&2
 	exit 2
 	;;
 esac

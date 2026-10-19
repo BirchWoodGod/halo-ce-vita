@@ -206,8 +206,15 @@
 #            GAMES on SYSTEM LINK, the profile, then the LAN browser in place of
 #            the Xbox's System Link list, no game locked; down to the third
 #            game, A: it is not listed by the game (a made-up one), and says
-#            so; Y sorts by name, Square looks again, a tap on the first row
-#            presses A on it, a tap on Back goes back to the profile; then with no games: "No games found on your network"
+#            so; Y sorts by name, Square looks again, a tap on the first game's
+#            row (under VITA GAMES) presses A on it, a tap on Back goes back to the profile; then with no games: "No games found on your network"
+#   h3groups the browsers' groups (the owner, Oct 19 2026): Halo 3's games
+#            browser (SYSTEM LINK) and OpenCE's (online), 14 made-up games of
+#            both platforms: VITA GAMES first, then PC GAMES, each with its
+#            count; the first game the fullest Vita game, never a header; the
+#            D-pad's right and left: Vita games, PC games, all games
+#            (network.browser_filter), the first game of each; at the Vita's
+#            picture (HALO_GL_VITA_DISPLAY), its frames with HALO_TEST_SHOTS
 #   h3adhoc  ad hoc play from the Halo 3 lobby: with the connection Ad hoc
 #            (HALO_NET_ADHOC) the lobby opens on AD HOC; BROWSE GAMES out of the
 #            ad hoc group opens the joining dialog, the system's dialog asked
@@ -281,7 +288,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
@@ -601,17 +608,17 @@ for case in $cases; do
 		grep -aq "ui: screen pc.mp.screen" "$log" && fail h3mp "OpenCE's Multiplayer screen opened with Menu style Halo 3" ;;
 	h3browser)
 		# (down five to BROWSE GAMES, A: the profile (A joins, A the profile, A): the games
-		# browser; down to the second game - locked -, A: its password; A: typed, down, A: JOIN
-		# GAME)
-		run h3browser "$menus_data" 60 "$h3mppad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:5000 down:150:600 a wait:150:4000 a wait:150:2000 down:150:600 a wait:150:4000" \
+		# browser; A on the first game - the fullest Vita game, locked -: its password; A: typed,
+		# down, A: JOIN GAME)
+		run h3browser "$menus_data" 60 "$h3mppad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:5000 wait:150:600 a wait:150:4000 a wait:150:2000 down:150:600 a wait:150:4000" \
 			HALO_MENU_STYLE=halo3 $h3net HALO_TEST_BROWSER_GAMES=16 HALO_TEST_BROWSER_PC=1 HALO_TEST_TEXT_INPUT=secret
 		check_h3 h3browser halo3
 		log=$out/h3browser/run.log
 		grep -aq "menus: h3 mp lobby: NETWORK: ONLINE" "$log" || fail h3browser "NETWORK was not ONLINE with internet play on"
 		grep -aq "ui: screen pc.h3.lan.screen" "$log" && grep -aq "menus: the LAN browser (system link and online)" "$log" ||
 			fail h3browser "BROWSE GAMES did not open the Halo 3 games browser with the online games"
-		grep -aq "menus: the server browser's game 2 of 16 chosen: Test game 02" "$log" ||
-			fail h3browser "the browser did not list the 16 games, the fullest first"
+		grep -aq "menus: the server browser's game 1 of 16 chosen: Test game 02" "$log" ||
+			fail h3browser "the browser did not list the 16 games, the fullest Vita game first"
 		grep -aq "menus: Halo 3 screen h3/password/screen for pc.join.password.screen" "$log" ||
 			fail h3browser "the locked game did not open the Halo 3 password screen"
 		grep -aq "menus: the public game Test game 02 is no longer listed" "$log" ||
@@ -620,14 +627,14 @@ for case in $cases; do
 			fail h3browser "OpenCE's browser or password screen opened with Menu style Halo 3" ;;
 	h3create)
 		# (Square: GAME OPTIONS (Create Game); GAME TYPE, A: the picker, down, A: SLAYER PRO; down two
-		# to NAME, A: typed; down four to START GAME, A)
-		run h3create "$menus_data" 50 "$h3mppad x wait:150:4000 a wait:150:3000 down:150:600 a wait:150:4000 down:150:500 down:150:500 a wait:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:5000" \
+		# to NAME, A: typed; down five to START GAME (past WHO CAN JOIN), A)
+		run h3create "$menus_data" 50 "$h3mppad x wait:150:4000 a wait:150:3000 down:150:600 a wait:150:4000 down:150:500 down:150:500 a wait:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:5000" \
 			HALO_MENU_STYLE=halo3 $h3net "HALO_TEST_TEXT_INPUT=Vita Night"
 		check_h3 h3create halo3
 		log=$out/h3create/run.log
 		grep -aq "ui: screen pc.h3.setup.screen" "$log" || fail h3create "Square did not open GAME OPTIONS (Create Game)"
 		grep -aq "menus: h3 mp: game type Slayer Pro" "$log" || fail h3create "the GAME TYPE picker did not set the game type"
-		grep -aq "menus: Server Setup: Vita Night, 16 players, public; the profile, then the game's lobby" "$log" ||
+		grep -aq "menus: Server Setup: Vita Night, 16 players, public, Vitas; the profile, then the game's lobby" "$log" ||
 			fail h3create "START GAME did not set up the game as Server Setup does"
 		grep -aqE "ui: screen (ui.shell.main_menu.multiplayer_type_select.connected.4way_profile_select.4way_start2join_screen|pc.h3.join.screen)" "$log" ||
 			fail h3create "START GAME did not open the profile" ;;
@@ -730,6 +737,49 @@ for case in $cases; do
 			fail h3livelobby "a scene was let go with a flag's cloth left behind"
 		[ -n "${HALO_TEST_SHOTS:-}" ] && mkdir -p "$HALO_TEST_SHOTS/h3livelobby" &&
 			cp "$out"/h3livelobby_shots/0*.bmp "$HALO_TEST_SHOTS/h3livelobby/" 2>/dev/null ;;
+	h3groups)
+		# (the owner, Oct 19 2026: the Vitas' games first, then the PCs', each under its header;
+		# the D-pad's right and left: Vita games, PC games, all games, kept as the setting.
+		# Halo 3's games browser on SYSTEM LINK (down five to BROWSE GAMES, A: the profile, A A A),
+		# 14 made-up games, half the PCs'; then OpenCE's browser (Menu style Halo CE) online. Each
+		# at the Vita's picture, its frames kept when HALO_TEST_SHOTS is set)
+		groups_pad="right:150:4000 right:150:4000 right:150:4000 left:150:4000 left:150:4000 wait:150:3000"
+		run h3groups "$menus_data" 60 "$h3mppad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:5000 down:150:800 $groups_pad" \
+			HALO_MENU_STYLE=halo3 HALO_TEST_BROWSER_GAMES=14 HALO_TEST_BROWSER_PC=1 HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1
+		run h3groups_classic "$menus_data" 50 "wait:150:2000 down:150:800 a wait:150:4000 a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:4000 $groups_pad" \
+			HALO_MENU_STYLE=classic $h3net HALO_TEST_BROWSER_GAMES=14 HALO_TEST_BROWSER_PC=1 HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1
+		check_h3 h3groups halo3
+		for name in h3groups h3groups_classic; do
+			log=$out/$name/run.log
+			echo "--- $name"; grep -aE "menus: the browser's groups|menus: the server browser (shows|'s game)" "$log" | head -16
+			[ "$(cat "$out/$name/exit")" = 0 ] || fail $name "exit $(cat "$out/$name/exit")"
+			# (the filters in turn: all, Vita, PC, all, then back: PC, Vita; all games grouped
+			# VITA GAMES then PC GAMES, each filter's its own group alone. Counts as the
+			# made-up games', or more: the System Link list may show another's game on this
+			# machine's network)
+			order=$(grep -a "menus: the browser's groups" "$log" | sed 's/.*groups (\([^)]*\)).*/\1/' | uniq | tr '\n' ';')
+			[ "$order" = "All games;Vita games;PC games;All games;PC games;Vita games;" ] ||
+				fail $name "the filters were not all, Vita, PC, all, PC, Vita: $order"
+			grep -a "menus: the browser's groups (All games)" "$log" |
+				grep -avqE "\): VITA GAMES \(([7-9]|[1-9][0-9])\), PC GAMES \(([7-9]|[1-9][0-9])\)$" &&
+				fail $name "all games were not grouped VITA GAMES, then PC GAMES"
+			grep -a "menus: the browser's groups (Vita games)" "$log" | grep -aq "PC GAMES" &&
+				fail $name "Vita games showed a PC game"
+			grep -a "menus: the browser's groups (PC games)" "$log" | grep -aq "VITA GAMES" &&
+				fail $name "PC games showed a Vita game"
+			grep -aq "menus: the server browser shows the Vitas' games" "$log" && grep -aq "menus: the server browser shows the PCs' games" "$log" &&
+				grep -aq "menus: the server browser shows every game" "$log" || fail $name "the D-pad did not step the filter"
+			# (the first game chosen: the fullest Vita game; down once, the next Vita game; with
+			# PC games alone, the fullest PC game; never a header)
+			grep -aqE "menus: the server browser's game 1 of 1[4-9] chosen: Test game 02" "$log" ||
+				fail $name "the first game was not the fullest Vita game"
+			grep -aqE "menus: the server browser's game 1 of ([7-9]|1[0-9]) chosen: Test game 09" "$log" ||
+				fail $name "PC games alone: the first game was not the fullest PC game"
+			grep -aq "chosen: VITA GAMES\|chosen: PC GAMES" "$log" && fail $name "a header row was chosen"
+		done
+		grep -aqE "menus: the server browser's game 2 of 1[4-9] chosen: Test game 04" "$out/h3groups/run.log" ||
+			fail h3groups "down from the first game did not choose the next Vita game"
+		if [ -n "${HALO_TEST_SHOTS:-}" ]; then echo "frames in $HALO_TEST_SHOTS/h3groups*"; fi ;;
 	h3mptouch)
 		# (MULTIPLAYER on the main menu; the lobby's MAP; BLOOD GULCH in the picker; the lobby's Back)
 		run h3mptouch "$menus_data" 30 "wait:150:20000" HALO_MENU_STYLE=halo3 \
@@ -1218,7 +1268,7 @@ for case in $cases; do
 			[ $name = h3oddrows_classic ] && coop="Co-op (Legendary)"
 			for row in "Spartan | Slayer | Blood Gulch | 8/128" "Jos?? ??? Ma??ana | CTF | Chill Out | 3/16" \
 				"true legendary run (cut) | $coop | The Pillar of Autumn (cut) | 3/4" "teto | Co-op | - | 1/4" \
-				"BIG TEAM 24*7 (cut) | - | - | -" "HALO UNIVERSAL CUSTOM SERVER 24/ (cut) | Team Slayer | bigassv2,104 | 24/32"; do
+				"BIG TEAM 24*7 | - | - | -" "HALO UNIVERSAL CUSTOM SERVER 24/ (cut) | Team Slayer | bigassv2,104 | 24/32"; do
 				grep -aqF "$row" "$log" || fail h3oddrows "$name: no row \"$row\""
 			done
 			grep -aE "menus: browser row [0-9]+: " "$log" | grep -aqE "row [0-9]+:  ?\|" && fail h3oddrows "$name: a row without a name"
@@ -1264,7 +1314,8 @@ for case in $cases; do
 		# made-up games of names of every sort, PC ones among them)
 		# (the frame counter on, as on the owner's Vita: its digits are the HUD's tall font, whose
 		# rows in the glyph cache leave room for fewer of the browser's glyphs)
-		init_line='display_framerate 1' run browserrows "$menus_data" 36 "wait:150:2000 down:150:800 a wait:150:4000 a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:10000" \
+		# (R twice: pages down, the PC GAMES group's rows under the Vitas')
+		init_line='display_framerate 1' run browserrows "$menus_data" 36 "wait:150:2000 down:150:800 a wait:150:4000 a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:5000 rt:150:4000 rt:150:4000" \
 			HALO_MENU_STYLE=classic $h3net HALO_TEST_BROWSER_GAMES=16 HALO_TEST_BROWSER_NAMES=1 HALO_TEST_BROWSER_PC=1
 		log=$out/browserrows/run.log
 		echo "--- browserrows"
@@ -1284,7 +1335,7 @@ for case in $cases; do
 		# (down five to BROWSE GAMES, A: the profile (A joins, A the profile, A); the LAN browser:
 		# down two, A; Y; Square; a tap on Back)
 		run h3lan "$menus_data" 60 "$h3mppad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:5000 down:150:600 down:150:600 a wait:150:2000 y wait:150:2000 x wait:150:20000" \
-			HALO_MENU_STYLE=halo3 HALO_TEST_BROWSER_GAMES=14 HALO_TEST_BROWSER_PC=1 "HALO_TEST_TAPS=46000:150,102 50000:552,452"
+			HALO_MENU_STYLE=halo3 HALO_TEST_BROWSER_GAMES=14 HALO_TEST_BROWSER_PC=1 "HALO_TEST_TAPS=46000:150,122 50000:552,452"
 		run h3lan_empty "$menus_data" 36 "$h3mppad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:12000" \
 			HALO_MENU_STYLE=halo3
 		check_h3 h3lan halo3
@@ -1296,15 +1347,17 @@ for case in $cases; do
 		grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected.server_list" "$log" &&
 			fail h3lan "the Xbox's System Link list opened with Menu style Halo 3"
 		grep -aq "menus: the LAN browser (system link)" "$log" || fail h3lan "the LAN browser was not the system link one"
-		grep -aq "menus: the LAN browser lists 14: Test game 09 (Chill Out, CTF, 15/16, PC), Test game 02 (" "$log" ||
-			fail h3lan "the LAN browser did not list the 14 games, the fullest first"
+		grep -aq "menus: the LAN browser lists 14: Test game 02 (Hang 'Em High, King, 14/16, VITA+PC), Test game 04 (" "$log" ||
+			fail h3lan "the LAN browser did not list the 14 games, the Vitas' first, the fullest first"
+		grep -aq "menus: the browser's groups (All games): VITA GAMES (7), PC GAMES (7)" "$log" ||
+			fail h3lan "the LAN browser did not group the games: VITA GAMES, then PC GAMES"
 		grep -aq "menus: the server browser's game 3 of 14 chosen" "$log" || fail h3lan "down two did not choose the third game"
 		grep -aq "menus: the LAN browser's game Test game .* is no longer listed" "$log" ||
 			fail h3lan "A on a game the System Link list does not show did not say it is not listed"
 		grep -aq "menus: the server browser sorts by name" "$log" || fail h3lan "Y did not sort the games by name"
 		grep -aq "menus: the LAN browser looks again" "$log" || fail h3lan "Square did not look again"
 		grep -aq "menus: the LAN browser's game Test game 00 is no longer listed" "$log" ||
-			fail h3lan "a tap on the first row (sorted by name) did not press A on it"
+			fail h3lan "a tap on the first game's row (sorted by name, under VITA GAMES) did not press A on it"
 		grep -a "ui: screen" "$log" | tail -1 | grep -qE '4way_start2join_screen|pc.h3.join.screen' ||
 			fail h3lan "a tap on Back did not go back to the profile"
 		check_h3 h3lan_empty halo3

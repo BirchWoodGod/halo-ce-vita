@@ -1000,7 +1000,12 @@ static void server_list_menu_update(
 		{
 			if (network_game_client_advertised_game_is_valid(&available_games[game_index]) &&
 				available_games[game_index].platform == _network_game_platform_xbox &&
-				available_games[game_index].open)
+				available_games[game_index].open
+#ifdef HALO_LINUX
+				/* port: the games the filter shows (network.browser_filter) */
+				&& network_game_client_advertised_game_shown(&available_games[game_index])
+#endif
+				)
 			{
 				displayed_servers[displayed_server_count] = &available_games[game_index];
 				displayed_server_count++;
@@ -1013,13 +1018,35 @@ static void server_list_menu_update(
 		{
 			if (network_game_client_advertised_game_is_valid(&available_games[game_index]) &&
 				available_games[game_index].platform == _network_game_platform_xbox &&
-				!available_games[game_index].open)
+				!available_games[game_index].open
+#ifdef HALO_LINUX
+				&& network_game_client_advertised_game_shown(&available_games[game_index])
+#endif
+				)
 			{
 				displayed_servers[displayed_server_count] = &available_games[game_index];
 				displayed_server_count++;
 			}
 		}
 
+#ifdef HALO_LINUX
+		/* port: the Vitas' games first, then the PCs' (the owner, Oct 19
+		2026), each group in the order above (open games, then the others) */
+		{
+			long vita_count = 0, index, moving;
+
+			for (index = 0; index < displayed_server_count; index++)
+			{
+				struct network_advertised_game *moved = displayed_servers[index];
+
+				if (!network_game_client_advertised_game_vita(moved))
+					continue;
+				for (moving = index; moving > vita_count; moving--)
+					displayed_servers[moving] = displayed_servers[moving - 1];
+				displayed_servers[vita_count++] = moved;
+			}
+		}
+#endif
 		widget->parameters.list.list_items = displayed_servers;
 		widget->parameters.list.number_of_items = (word)displayed_server_count;
 		widget->parameters.list.selected_list_item_index = (short)CEILING(
@@ -1039,6 +1066,16 @@ static void server_list_menu_update(
 			if (item->parameters.text_box.text)
 			{
 				short difficulty;
+#ifdef HALO_LINUX
+				/* port: each row's tag before its name (crossplay_guard.h:
+				VITA, VITA+PC, or the PC build's, with its badges) */
+				char badge[48];
+				wchar_t tagged[16 + 52];
+
+				network_game_client_advertised_game_tag(displayed_servers[item_index], badge, (long)sizeof(badge));
+				usnprintf(tagged, NUMBEROF(tagged), L"[%hs] %ls", badge, displayed_servers[item_index]->game_name);
+				tagged[NUMBEROF(tagged) - 1] = 0;
+#endif
 
 				/* port: a co-op game, by its level and difficulty */
 				if (network_game_client_advertised_game_cooperative(displayed_servers[item_index], &difficulty))
@@ -1064,10 +1101,17 @@ static void server_list_menu_update(
 				}
 				else if (displayed_servers[item_index]->open == TRUE)
 				{
+#ifdef HALO_LINUX
+					ustrncpy(
+						item->parameters.text_box.text,
+						tagged,
+						0x1F);
+#else
 					ustrncpy(
 						item->parameters.text_box.text,
 						displayed_servers[item_index]->game_name,
 						0x1F);
+#endif
 				}
 				else
 				{
@@ -1082,7 +1126,11 @@ static void server_list_menu_update(
 						0x1F,
 						L"%s %s",
 						closed_game_prefix,
+#ifdef HALO_LINUX
+						tagged);
+#else
 						displayed_servers[item_index]->game_name);
+#endif
 				}
 				item->parameters.text_box.text[0x1F] = 0;
 			}
