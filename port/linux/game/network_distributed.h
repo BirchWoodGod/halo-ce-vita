@@ -118,6 +118,14 @@ enum
 	NUMBER_OF_DISTRIBUTED_MESSAGES
 };
 
+/* OpenCE's network version 32 (docs/opence-net32-spec.md 7): the host's
+mouse aim assist policy, sent reliably to each client as it is ready, as a
+game starts and when it changes. Numbered by OpenCE, past this build's own
+kinds (NUMBER_OF_DISTRIBUTED_MESSAGES: it has no slot in the tables indexed
+by kind), and handled before every other check (network_distributed.c) */
+#define DISTRIBUTED_MESSAGE_AIM_ASSIST_POLICY 90
+#define DISTRIBUTED_AIM_ASSIST_POLICY_SIZE 12
+
 /* where a message goes */
 enum
 {
@@ -218,6 +226,13 @@ void distributed_trace_correction(char const *source, long object_index, real_po
 void network_distributed_byte_statistics(long *sent_bytes, long *received_bytes);
 /* (the host) the client machines in the game, but for its own; their count */
 short distributed_client_machines(long *machine_indices, short maximum);
+/* whether mouse aim assist is blocked in this machine's game (OpenCE 32's
+kind 90): the host's own setting (network.block_mouse_aim_assist) on the
+host; the host's word on a client, blocked until it comes; FALSE with no
+network game. This build aims with no mouse that has aim assist (a desktop
+mouse never has it, the Vita's gyro is no mouse): kept for the log, tests
+and a mouse that may have it one day */
+boolean network_distributed_mouse_aim_assist_blocked(void);
 /* (main.c) the host has no machine in its game but its own */
 boolean network_distributed_host_alone(void);
 /* (the host) how long a message takes that client and its answer back, in

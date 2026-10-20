@@ -326,6 +326,17 @@ static void network_connection_log_traffic_event(
 	enum network_connection_traffic_event event,
 	long amount,
 	struct network_connection *connection);
+/* (port) what the datagram queue holds after each datagram: where it came
+from, its IPv4 address and its port (OpenCE's network version 31 answers a
+client's datagrams at their source port: the host's
+network_game_server_note_datagram_source) */
+struct network_connection_datagram_source
+{
+	unsigned long ipv4_address;
+	word port;
+	word pad;
+};
+
 static boolean network_client_unreliable_connection_read(
 	struct network_connection *connection,
 	void *message,
@@ -642,7 +653,9 @@ static boolean network_client_unreliable_connection_read(
 	struct transport_address *source_address)
 {
 	message_header header;
-	unsigned long source_ipv4_address;
+	/* (port: the source's address and port, queued after the datagram:
+	network_connection_idle) */
+	struct network_connection_datagram_source source;
 	word message_size;
 
 	match_assert(
@@ -686,9 +699,9 @@ static boolean network_client_unreliable_connection_read(
 				message_size,
 				*buffer_size);
 		}
-		else if (message_size + sizeof(source_ipv4_address) <= (unsigned long)circular_queue_size(connection->unreliable_incoming_queue) &&
+		else if (message_size + sizeof(source) <= (unsigned long)circular_queue_size(connection->unreliable_incoming_queue) &&
 			circular_queue_dequeue_data(connection->unreliable_incoming_queue, message, message_size, TRUE) &&
-			circular_queue_dequeue_data(connection->unreliable_incoming_queue, &source_ipv4_address, sizeof(source_ipv4_address), TRUE))
+			circular_queue_dequeue_data(connection->unreliable_incoming_queue, &source, sizeof(source), TRUE))
 		{
 			*(message_header *)message = header;
 			match_vassert(
@@ -698,8 +711,10 @@ static boolean network_client_unreliable_connection_read(
 				"encryption should not be active");
 			if (source_address)
 			{
-				source_address->address.long_words[0] = source_ipv4_address;
-				source_address->port = 0;
+				source_address->address.long_words[0] = source.ipv4_address;
+				/* (port: the source's port too, which the host answers a
+				client's datagrams at: OpenCE's network version 31) */
+				source_address->port = source.port;
 				source_address->address_length = IPV4_ADDRESS_LENGTH;
 			}
 			*buffer_size = message_size;
@@ -1674,7 +1689,7 @@ boolean network_connection_idle(
 	long timeout,
 	struct network_connection **new_client_connection)
 {
-	byte buffer[DATAGRAM_MAXIMUM_SIZE + sizeof(unsigned long)];
+	byte buffer[DATAGRAM_MAXIMUM_SIZE + sizeof(struct network_connection_datagram_source)];
 	unsigned long current_time = system_milliseconds();
 	boolean success = TRUE;
 
@@ -1761,11 +1776,12 @@ boolean network_connection_idle(
 		long skipped = 0;
 
 		while (success &&
-			free_space >= DATAGRAM_MAXIMUM_SIZE + sizeof(unsigned long))
+			free_space >= DATAGRAM_MAXIMUM_SIZE + (long)sizeof(struct network_connection_datagram_source))
 		{
 			struct transport_address source_address;
 			long buffer_size;
 			unsigned long source_ipv4_address;
+			struct network_connection_datagram_source source;
 
 			if ((boolean)endpoint_connected(connection->unreliable_endpoint))
 			{
@@ -1827,11 +1843,14 @@ boolean network_connection_idle(
 			}
 			else if (source_ipv4_address)
 			{
+				csmemset(&source, 0, sizeof(source));
+				source.ipv4_address = source_ipv4_address;
+				source.port = source_address.port;
 				csmemcpy(
 					buffer + buffer_size,
-					&source_ipv4_address,
-					sizeof(source_ipv4_address));
-				buffer_size += sizeof(source_ipv4_address);
+					&source,
+					sizeof(source));
+				buffer_size += sizeof(source);
 				success = circular_queue_queue_data(
 					connection->unreliable_incoming_queue,
 					buffer,

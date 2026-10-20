@@ -402,15 +402,22 @@ static const struct config_setting config_settings[] =
 		"Who can join the games this machine hosts: \"vita\" (Vita: Vitas, on\n"
 		"the Vitas' own protocol: the PC build of this port is refused),\n"
 		"\"vita_pc\" (Vita PC: PS Vitas and Halo CE Vita on PC), \"everyone\"\n"
-		"(also OpenCE players on PC, on OpenCE's protocol, listed in both\n"
-		"browsers). Empty: a Vita's default, Vita; the PC build's and the\n"
-		"dedicated server's, Vita PC (the PC build offers no Vita, and takes\n"
-		"\"vita\" as Vita PC). Taken as a game is hosted; never\n"
-		"everyone in ad hoc play. Best effort: a modified client can say it\n"
-		"is a Vita (docs/crossplay.md)." },
+		"(also OpenCE players on PC, on OpenCE's protocol at its network\n"
+		"version 32, listed in both browsers). Empty: a Vita's default, Vita;\n"
+		"the PC build's and the dedicated server's, Vita PC (the PC build\n"
+		"offers no Vita, and takes \"vita\" as Vita PC). Taken as a game is\n"
+		"hosted; never everyone in ad hoc play. Best effort: a modified\n"
+		"client can say it is a Vita (docs/crossplay.md)." },
 	{ "network.host_crossplay", _config_boolean, "false", "HALO_NET_HOST_CROSSPLAY", _environment_value, _platform_all,
 		"Retired (Oct 20 2026) for network.who_can_join: read only when that\n"
 		"is empty, true as \"everyone\" (what was \"Vitas and PC\")." },
+	{ "network.block_mouse_aim_assist", _config_boolean, "false", "HALO_NET_BLOCK_MOUSE_AIM_ASSIST", _environment_value,
+		_platform_all,
+		"In a game this machine hosts for everyone (Who can join: EVERYONE):\n"
+		"true tells the OpenCE players' builds to turn off the aim assist\n"
+		"(magnetism) they may have turned on for a mouse; false (the default)\n"
+		"leaves it to each player, as OpenCE's hosts do. Controllers, touch\n"
+		"and the Vita keep theirs. Read live while the game runs." },
 	{ "network.crossplay", _config_boolean, "false", "HALO_CROSSPLAY", _environment_value, _platform_all,
 		"Retired (Oct 19 2026): there is no switch, every game speaks its own\n"
 		"protocol. Read only to keep a player's choice: true, with\n"

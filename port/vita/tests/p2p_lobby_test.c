@@ -69,9 +69,15 @@ unsigned int network_wire_version_of(int crossplay)
 {
 	return crossplay ? HALO_PORT_CROSSPLAY_NETWORK_VERSION : HALO_PORT_NETWORK_VERSION;
 }
+unsigned int network_wire_announced_version(int crossplay)
+{
+	return network_wire_version_of(crossplay);
+}
 int network_wire_version_accepted_on(int crossplay, unsigned int version)
 {
-	return version == network_wire_version_of(crossplay);
+	/* (the crossplay wire joins 29 and 32: network_wire.c) */
+	return version == network_wire_version_of(crossplay) ||
+		(crossplay && version == HALO_PORT_CROSSPLAY_OLDER_NETWORK_VERSION);
 }
 int network_wire_host_pc_stand_in(void) { return test_pc_stand_in; }
 /* (this machine's platform and who can join its game: the listing's stamp,

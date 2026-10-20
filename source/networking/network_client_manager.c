@@ -3832,6 +3832,7 @@ boolean network_game_client_advertised_game_compatible(
 	boolean vita_host;
 	boolean vita_client = FALSE;
 	char message[600];
+	char joined[32];
 	long game_wire;
 	int platform = CROSSPLAY_PLATFORM_VITA;
 
@@ -3853,7 +3854,7 @@ boolean network_game_client_advertised_game_compatible(
 			/* (docs/crossplay.md 6, T11: a PC co-op or large game joined as
 			experimental, asked about in its lobby: network_crossplay_guard.c;
 			a Vita's game is neither: its host takes the Vitas' 16) */
-			network_wire_choose(1, platform, "joining a game from the list");
+			network_wire_choose_version(theirs, platform, "joining a game from the list");
 			if (!network_crossplay_guard_advertisement(game->game_name, game->map.name, (long)sizeof(game->map.name),
 				game->engine_type, (long)game->player_count, (long)game->maximum_player_count, tell))
 			{
@@ -3866,6 +3867,11 @@ boolean network_game_client_advertised_game_compatible(
 		ChupathingyCE's 0.7.4e (26: DamnationCE's still): its game plays a
 		few things otherwise than ours with no message changed, so it is
 		refused rather than played wrong, network_wire.h) */
+		/* (port: the crossplay wire joins 29 and 32, network_wire.h: the
+		version told is the one to look for, the nearest joined above the
+		host's, else the newest) */
+		ours = network_wire_crossplay_version_near(theirs);
+		network_wire_crossplay_versions_text(joined, (int)sizeof(joined));
 		if (distributed && theirs < ours)
 		{
 			snprintf(message, sizeof(message),
@@ -3891,8 +3897,8 @@ boolean network_game_client_advertised_game_compatible(
 		}
 		if (tell)
 		{
-			network_event("not joining a host of network version %u%s (crossplay: this machine joins %u)%s", theirs,
-				distributed ? "" : " with the lockstep netcode", ours,
+			network_event("not joining a host of network version %u%s (crossplay: this machine joins %s)%s", theirs,
+				distributed ? "" : " with the lockstep netcode", joined,
 				distributed && theirs < ours ? ": an older PC build" : distributed ? ": a newer PC build" : "");
 			platform_show_message(T("Halo: cannot join this game"), message);
 		}

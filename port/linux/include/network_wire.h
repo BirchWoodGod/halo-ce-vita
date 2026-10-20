@@ -41,17 +41,31 @@ on wrong rather than being refused (docs/crossplay.md 5.1). Not 28 either:
 29 names a Custom Edition map and says which version it is otherwise (the
 map's own name, and its hash's first 32 bits as the record's map version,
 where 28 sent a hashed name and the header checksum), so the same record
-means another map to each (crossplay_maps.h). Nor 30 to 32 (OpenCE
-6ec42856, Oct 19 2026: docs/crossplay.md 10.7) until the suite passes
-against them.
+means another map to each (crossplay_maps.h).
+
+Since Oct 19 2026 (docs/crossplay.md 10.9, docs/opence-net32-spec.md) the
+crossplay wire has two sets of rules, chosen per game by the version the
+game's host announces: 29 (ChupathingyCE, DamnationCE when it moves, OpenCE
+build-206) and 32 (OpenCE 6ec42856 and after). 32 carries an elevator's
+riders by the same tick's movement on every machine and corrects a rider
+otherwise (30), drops datagrams 15 s from their sender's latest tick and
+answers a client's datagrams at their source port (31), and has the host
+send its mouse aim assist policy (32: kind 90). A client joins exactly those
+two and plays the host's; a host for everyone (Who can join: EVERYONE, a
+Vita's or the PC build's) announces 32, OpenCE's current. Not 30 or 31: no released build announces them, and each
+plays part of 32's rules alone, with nothing in a message to tell. One game
+plays one version's rules from its start to its end.
 */
 
 #ifndef __NETWORK_WIRE_H
 #define __NETWORK_WIRE_H
 
-/* the crossplay wire's network version: OpenCE's at 8102e711 (build-206
-and after), ChupathingyCE's since a501871f (0.7.5a) */
-#define HALO_PORT_CROSSPLAY_NETWORK_VERSION 29
+/* the crossplay wire's network versions: the one a host for everyone
+(network_wire_host_audience) announces, OpenCE's since 31ba6b37 (6ec42856, Oct 19 2026); and the
+older one its clients still join, OpenCE's at 8102e711 (build-206),
+ChupathingyCE's since a501871f (0.7.5a) */
+#define HALO_PORT_CROSSPLAY_NETWORK_VERSION 32
+#define HALO_PORT_CROSSPLAY_OLDER_NETWORK_VERSION 29
 
 /* a Vita's game on the crossplay wire says it is a Vita's: this bit in its
 advertisement's flags (HALO_PORT_ADVERTISED_FLAGS_OFFSET; OpenCE's 0x01 and
@@ -70,6 +84,11 @@ or this machine hosts it - else the PC build its advertisement tells); why,
 for the log. Ad hoc play, the dedicated server and builds that do not play
 as a Vita stay on the legacy wire whatever is asked */
 void network_wire_choose(int crossplay, int platform, const char *why);
+/* ... a client's, by the network version the game's host announces: the
+legacy wire's (18), or one the crossplay wire joins, whose rules the game
+then plays (network_wire_v30_rules ...); any other is the legacy wire (never
+a version this build does not play: the join is refused before this) */
+void network_wire_choose_version(unsigned int version, int platform, const char *why);
 /* whether the host of this machine's game is a Vita (see above; a legacy
 game's always), and what it is (CROSSPLAY_PLATFORM_*) */
 int network_wire_host_vita(void);
@@ -80,14 +99,31 @@ void network_wire_reset(void);
 /* whether this build speaks the crossplay wire at all: one that plays as a
 Vita, not the dedicated server, not in ad hoc play */
 int network_wire_crossplay_available(void);
-/* the network version of a wire: HALO_PORT_NETWORK_VERSION (18), or the
-crossplay wire's (the one a host announces) */
+/* the network version of a wire as this machine hosts it:
+HALO_PORT_NETWORK_VERSION (18), or the one a crossplay host announces
+(network_wire_host_version) */
 unsigned int network_wire_version_of(int crossplay);
-/* ... of this machine's game's wire */
+/* the version this machine's advertisement and listing say for a game it
+hosts on that wire: network_wire_version_of's; in test builds alone
+HALO_TEST_ANNOUNCE_VERSION=n says n on the crossplay wire whatever it plays
+(a stand-in for a PC host of a version no build has yet: pcversion) */
+unsigned int network_wire_announced_version(int crossplay);
+/* the version a host for everyone announces and plays:
+HALO_PORT_CROSSPLAY_NETWORK_VERSION (32); in test builds alone
+HALO_TEST_CROSSPLAY_HOST_VERSION may name another the wire joins (29) */
+unsigned int network_wire_host_version(void);
+/* ... of this machine's game: 18 on the legacy wire, the game's crossplay
+version (the host's, joined or hosted) on the crossplay wire */
 unsigned int network_wire_version(void);
 /* whether a host announcing the version can be joined on that wire:
-legacy, exactly 18; crossplay, the accepted list (29) */
+legacy, exactly 18; crossplay, the accepted list (29 and 32) */
 int network_wire_version_accepted_on(int crossplay, unsigned int version);
+/* the crossplay versions joined, for a log line or a message ("29 and 32") */
+void network_wire_crossplay_versions_text(char *text, int size);
+/* the crossplay version a player should look for instead of a host's
+version not joined: the lowest joined above it, else the highest joined
+(an older host: 26-28 -> 29, 30-31 -> 32; a newer one: 32) */
+unsigned int network_wire_crossplay_version_near(unsigned int version);
 /* ... on this machine's game's wire */
 int network_wire_version_accepted(unsigned int version);
 /* which wire a host announcing this version plays (its listing or
@@ -103,6 +139,22 @@ lights and the flashlight stay on past the Xbox's player and vehicle limits
 (game_engine.c), a second weapon picked up while firing is readied
 (units.c). The legacy wire plays the betas' (0). */
 int network_wire_v28_rules(void);
+/* nonzero when this machine's game plays OpenCE's network version 30's
+rules, which 32 keeps: a crossplay game of 32 (docs/opence-net32-spec.md 2-4).
+An elevator's riders carried by the movement of the same tick, after its
+nodes are recomputed (objects.c, device_machines.c: every machine must
+agree), a rider's height left to its client (the host takes a riding
+client player's prediction across, not up: network_distributed.c) and a
+client's own player on an elevator left within 4 units up or down. 0 on the
+legacy wire and in a crossplay game of 29: the Xbox's carry, a tick late */
+int network_wire_v30_rules(void);
+/* ... version 31's (spec 5-6): a datagram 15 s (450 ticks) from its
+sender's latest tick dropped (20 s otherwise), and the host's datagrams to a
+client sent to the address and port its datagrams come from */
+int network_wire_v31_rules(void);
+/* ... version 32's (spec 7): the host's mouse aim assist policy (distributed
+kind 90) sent by a host, taken by a client */
+int network_wire_v32_rules(void);
 
 /* hosting: whether the next game this machine hosts takes OpenCE's PC
 players too (network_wire_host_audience: everyone), on the crossplay wire;

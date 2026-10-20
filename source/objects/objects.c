@@ -43,6 +43,7 @@ void platform_log(const char *format, ...);
 #include "cseries/profile.h"
 #include "devices/device_definitions.h"
 #include "devices/devices.h"
+#include "devices/device_machines.h"
 #include "editor/editor_stubs.h"
 #include "effects/contrail_definitions.h"
 #include "effects/contrails.h"
@@ -4293,6 +4294,14 @@ static boolean object_update(
 			}
 		}
 
+#ifdef HALO_LINUX
+		/* port: an elevator's riders carried by this tick's movement
+		(OpenCE's 30, device_machines.h): where its node is before its
+		update, and moved by how far it went once its nodes are recomputed */
+		real_point3d elevator_before;
+		boolean elevator_carry = header->type == _object_type_machine &&
+			machine_elevator_carry_begin(object_index, &elevator_before);
+#endif
 		OBJECT_STEP_BEGIN(_objects_phase_type); object_type_update(object_index); OBJECT_STEP_END();
 		if (object_definition->object.collision_model.index!=NONE)
 		{
@@ -4346,6 +4355,8 @@ static boolean object_update(
 			{
 				object_compute_node_matrices(object_index);
 			}
+			if (elevator_carry)
+				machine_elevator_carry_end(object_index, &elevator_before);
 #else
 			object_compute_node_matrices(object_index);
 #endif

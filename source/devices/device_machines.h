@@ -52,4 +52,26 @@ void machine_try_to_open_with_damage(
 boolean machine_update(
 	long machine_index);
 
+#ifdef HALO_LINUX
+/* port: an elevator's riders carried by the same tick's movement, after
+the machine's nodes are recomputed (OpenCE's network version 30, which
+every machine of a crossplay game of 32 plays: network_wire_v30_rules;
+docs/opence-net32-spec.md 2), around a machine's update in object_update
+(objects.c): begin, before its type's update, notes where its elevator node
+is (FALSE: no carry this way - not an elevator, a node it does not have, or
+a game that plays the Xbox's carry, a tick late, in machine_update); end,
+once its nodes are recomputed, moves its riders by how far that node went */
+boolean machine_elevator_carry_begin(
+	long machine_index,
+	real_point3d *before);
+void machine_elevator_carry_end(
+	long machine_index,
+	real_point3d const *before);
+#ifndef HALO_RELEASE
+/* (automated tests only, after each tick: HALO_TEST_ELEVATOR_RIDE) */
+void machine_elevator_test_tick(
+	void);
+#endif
+#endif
+
 #endif // __DEVICE_MACHINES_H

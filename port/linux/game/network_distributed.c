@@ -71,6 +71,8 @@ machine (their datum identifiers need not be).
 #include "units/units.h"
 #include "units/biped_definitions.h"
 #include "units/bipeds.h"
+#include "devices/devices.h"
+#include "devices/device_machines.h"
 #include "network_coop.h"
 #include "network_distributed.h"
 #include "network_wire.h"
@@ -83,6 +85,7 @@ machine (their datum identifiers need not be).
 #include <limits.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <time.h>
 #include <math.h>
 
@@ -119,6 +122,9 @@ void network_game_server_kick_machine(long machine_index, boolean kept_out);
 unsigned long network_game_server_machine_address(long machine_index);
 char const *network_game_server_machine_hardware_id(long machine_index);
 void p2p_hardware_id_sanitize(char *destination, int size, const char *source);
+/* port_config.c's, ui_widget.c's */
+int config_boolean(const char *name);
+boolean main_menu_is_active(void);
 void p2p_discord_sanitize(char *destination, int size, const char *source, int name);
 void p2p_discord_identity(char *id, int id_size, char *name, int name_size);
 unsigned long p2p_peer_endpoint_address(unsigned long virtual_address);
@@ -153,6 +159,10 @@ sender had, either way (distributed_sender_times): as long as a machine may
 go silent before it is dropped (network_server_manager.c's 15 seconds),
 then caught up to the host's clock (network_client_manager.c), with room */
 #define DISTRIBUTED_TIME_WINDOW_TICKS (20 * TICKS_PER_SECOND)
+/* ... in a crossplay game of OpenCE's network version 31 and after: 15
+seconds, as every machine of such a game has it (docs/opence-net32-spec.md
+6.1; network_wire_v31_rules) */
+#define DISTRIBUTED_TIME_WINDOW_TICKS_V31 (15 * TICKS_PER_SECOND)
 /* a Discord user's id and name as kept, with their ends (p2p.h's
 P2P_DISCORD_ID_SIZE and P2P_DISCORD_NAME_SIZE) */
 #define DISCORD_ID_SIZE 24
@@ -287,6 +297,10 @@ host has it (no further than that: between the two they would disagree for
 good, the host's player somewhere its own is not) */
 #define HOST_ACCEPT_TOLERANCE 3.5f
 #define LOCAL_CORRECTION_TOLERANCE 3.0f
+/* (OpenCE's 30) how far up or down a client's own player on an elevator may
+be from where the host has it before it is corrected (world units: a
+platform's travel in a round trip; docs/opence-net32-spec.md 3.3) */
+#define ELEVATOR_VERTICAL_TOLERANCE 4.0f
 /* how fast a client's own player's unit moves at most (world units a tick) */
 #define MAXIMUM_PREDICTED_SPEED 2.0f
 /* ... on foot: this many times as fast as a player runs and jumps, or as
@@ -558,6 +572,9 @@ static struct distributed_own_position
 	long time;
 	long unit_index;
 	real_point3d position;
+	/* (OpenCE's 30) the elevator the unit stood on that tick, NONE for none
+	(distributed_supporting_elevator) */
+	long elevator_index;
 } distributed_own_positions[MAXIMUM_LOCAL_PLAYERS][OWN_POSITION_TICKS];
 static real distributed_own_round_trip;
 /* the host: the players each machine had when it last told the host that it
@@ -652,6 +669,24 @@ static struct distributed_client_clock
 /* the host: whether the message being handled came over its machine's
 stream (network_distributed_handle_stream_message) */
 static boolean distributed_handling_stream_message;
+/* OpenCE 32's mouse aim assist policy (DISTRIBUTED_MESSAGE_AIM_ASSIST_POLICY):
+a client's, as its host last said, blocked until it says (and whether it
+has said, this game); the host's, as last sent to every client this game
+(-1: not yet) */
+static boolean distributed_aim_assist_blocked = TRUE;
+static boolean distributed_aim_assist_heard;
+static int distributed_aim_assist_broadcast = -1;
+/* the policy's message: OpenCE's layout (docs/opence-net32-spec.md 7.1) */
+struct distributed_aim_assist_policy
+{
+	struct distributed_message_header header;
+	/* block_mouse (0 allowed, 1 blocked), then 0, each 16 bits little-endian */
+	byte policy[4];
+};
+typedef char distributed_aim_assist_policy_size_assert[
+	sizeof(struct distributed_aim_assist_policy) == DISTRIBUTED_AIM_ASSIST_POLICY_SIZE ? 1 : -1];
+static boolean distributed_host_mouse_aim_assist_blocked(void);
+static void distributed_send_aim_assist_policy(long machine_index);
 /* a client: the host's latest tick it has had a message of, and when it
 came (system_milliseconds) */
 static long distributed_host_time = NONE;
@@ -2152,6 +2187,45 @@ static boolean distributed_apply_state(
 	return TRUE;
 }
 
+/* (OpenCE's network version 30, docs/opence-net32-spec.md 3.1) the elevator
+a unit stands on this tick: a biped on the ground (not airborne, on a
+surface) that its physics found on an elevator this very tick (its
+countdown at 60: bipeds.c), a machine; NONE for none */
+static long distributed_supporting_elevator(
+	long unit_index)
+{
+	struct biped_datum *biped = unit_index != NONE ?
+		(struct biped_datum *)object_try_and_get_and_verify_type(unit_index, _object_mask_biped) : NULL;
+
+	if (!biped || TEST_FLAG(biped->biped.flags, _biped_airborne_bit) || biped->biped.support_surface_index == NONE ||
+		biped->biped.elevator_ticks != 60 || biped->biped.elevator_object_index == NONE ||
+		!object_try_and_get_and_verify_type(biped->biped.elevator_object_index, _object_mask_machine))
+	{
+		return NONE;
+	}
+	return biped->biped.elevator_object_index;
+}
+
+/* (OpenCE's 30, spec 3.2) whether a unit rides an elevator: a biped whose
+remembered elevator is a machine that moves, or stands still under it
+(distributed_supporting_elevator); not one it left that has stopped */
+static boolean distributed_riding_elevator(
+	long unit_index)
+{
+	struct biped_datum *biped = unit_index != NONE ?
+		(struct biped_datum *)object_try_and_get_and_verify_type(unit_index, _object_mask_biped) : NULL;
+	struct machine_datum *machine;
+
+	if (!biped || biped->biped.elevator_object_index == NONE)
+		return FALSE;
+	machine = (struct machine_datum *)object_try_and_get_and_verify_type(biped->biped.elevator_object_index,
+		_object_mask_machine);
+	if (!machine)
+		return FALSE;
+	return machine->device.position_velocity != 0.0f ||
+		distributed_supporting_elevator(unit_index) == biped->biped.elevator_object_index;
+}
+
 /* (a client) where its own players' units are this tick, noted */
 static void distributed_note_own_positions(
 	void)
@@ -2171,8 +2245,14 @@ static void distributed_note_own_positions(
 			unit_index = NONE;
 		own->time = game_time_get();
 		own->unit_index = unit_index;
+		own->elevator_index = NONE;
 		if (unit_index != NONE)
+		{
 			own->position = object_get(unit_index)->object.position;
+			/* (on foot alone: a rider's is its seat's) */
+			if (network_wire_v30_rules())
+				own->elevator_index = distributed_supporting_elevator(unit_index);
+		}
 	}
 }
 
@@ -2221,6 +2301,17 @@ static void distributed_correct_own_unit(
 			error.i = state->position.x - own->position.x;
 			error.j = state->position.y - own->position.y;
 			error.k = state->position.z - own->position.z;
+			/* (OpenCE's 30, spec 3.3: on the same elevator as at that tick,
+			a height off by no more than the platform goes in a round trip
+			is the platform's, not the player's: left; further, or across, is
+			corrected as ever) */
+			if (network_wire_v30_rules() && own->elevator_index != NONE &&
+				distributed_supporting_elevator(unit_index) == own->elevator_index &&
+				error.i * error.i + error.j * error.j <= LOCAL_CORRECTION_TOLERANCE * LOCAL_CORRECTION_TOLERANCE &&
+				error.k >= -ELEVATOR_VERTICAL_TOLERANCE && error.k <= ELEVATOR_VERTICAL_TOLERANCE)
+			{
+				error.k = 0.0f;
+			}
 			if (!(error.i * error.i + error.j * error.j + error.k * error.k >
 				LOCAL_CORRECTION_TOLERANCE * LOCAL_CORRECTION_TOLERANCE))
 			{
@@ -2558,12 +2649,24 @@ static void distributed_take_prediction(
 	long unit_index,
 	struct distributed_on_foot_bound const *bound)
 {
-	struct distributed_unit_state const *state = &distributed_predictions[player_index].state;
+	struct distributed_unit_state const *predicted = &distributed_predictions[player_index].state;
+	struct distributed_unit_state riding;
+	struct distributed_unit_state const *state = predicted;
 	struct object_datum *object = object_get(unit_index);
 	long now = game_time_get();
-	real dx = state->position.x - object->object.position.x;
-	real dy = state->position.y - object->object.position.y;
-	real dz = state->position.z - object->object.position.z;
+	real dx, dy, dz;
+
+	/* (OpenCE's 30, spec 3.2: a unit riding an elevator keeps the height the
+	host's own carry gives it, the client's word taken across, not up) */
+	if (network_wire_v30_rules() && distributed_riding_elevator(unit_index))
+	{
+		riding = *predicted;
+		riding.position.z = object->object.position.z;
+		state = &riding;
+	}
+	dx = state->position.x - object->object.position.x;
+	dy = state->position.y - object->object.position.y;
+	dz = state->position.z - object->object.position.z;
 
 	if (!(dx * dx + dy * dy + dz * dz <= HOST_ACCEPT_TOLERANCE * HOST_ACCEPT_TOLERANCE))
 		return;
@@ -3837,6 +3940,7 @@ void network_distributed_new_game(
 		{
 			distributed_own_positions[sender][type].time = NONE;
 			distributed_own_positions[sender][type].unit_index = NONE;
+			distributed_own_positions[sender][type].elevator_index = NONE;
 		}
 	}
 	distributed_own_round_trip = 0.0f;
@@ -3852,6 +3956,10 @@ void network_distributed_new_game(
 	distributed_machines.in_tick = FALSE;
 	distributed_machines.valid = FALSE;
 	distributed_host_time = NONE;
+	/* (a client's policy blocked until its host says; the host's sent anew) */
+	distributed_aim_assist_blocked = TRUE;
+	distributed_aim_assist_heard = FALSE;
+	distributed_aim_assist_broadcast = -1;
 	distributed_statistics_due = FALSE;
 	distributed_pickup_count = 0;
 	/* (each player's latest input: player_queues_new.c) */
@@ -3871,6 +3979,10 @@ void network_distributed_tick(
 	if (game_time_get() == distributed_last_sent_time)
 		return;
 	distributed_last_sent_time = game_time_get();
+#ifndef HALO_RELEASE
+	/* (tests only: HALO_TEST_ELEVATOR_RIDE, device_machines.c) */
+	machine_elevator_test_tick();
+#endif
 	distributed_machines.in_tick = TRUE;
 	/* (traced: every 30 s, the bytes sent of each message type so far) */
 	if (distributed_sync_trace() && game_time_get() % (30 * TICKS_PER_SECOND) == 0)
@@ -3932,6 +4044,19 @@ void network_distributed_tick(
 		distributed_send_pickups();
 		if (game_time_get() % GAME_STATE_INTERVAL_TICKS == 0)
 			distributed_send_game_state(NONE);
+		/* (OpenCE 32: the aim assist policy to every client as the game
+		starts and when it changes; a client still loading has it again as it
+		is ready) */
+		if (network_wire_v32_rules())
+		{
+			int blocked = distributed_host_mouse_aim_assist_blocked() ? 1 : 0;
+
+			if (blocked != distributed_aim_assist_broadcast)
+			{
+				distributed_send_aim_assist_policy(NONE);
+				distributed_aim_assist_broadcast = blocked;
+			}
+		}
 	}
 	else if (connection == _game_connection_network_client)
 	{
@@ -3982,7 +4107,8 @@ static boolean distributed_message_time_bounded(
 	distance = game_time > *latest ?
 		(unsigned long)game_time - (unsigned long)*latest :
 		(unsigned long)*latest - (unsigned long)game_time;
-	if (distance > DISTRIBUTED_TIME_WINDOW_TICKS)
+	if (distance > (unsigned long)(network_wire_v31_rules() ? DISTRIBUTED_TIME_WINDOW_TICKS_V31 :
+		DISTRIBUTED_TIME_WINDOW_TICKS))
 	{
 		if (!from_stream)
 		{
@@ -4510,11 +4636,164 @@ boolean distributed_machine_clock_fast(
 		distributed_client_clocks[machine_index].fast;
 }
 
+/* (the host) its own mouse aim assist policy: network.block_mouse_aim_assist,
+live (the environment's first, as the panel sets it) */
+static boolean distributed_host_mouse_aim_assist_blocked(
+	void)
+{
+	char const *value = getenv("HALO_NET_BLOCK_MOUSE_AIM_ASSIST");
+	boolean blocked = value && value[0] ? (!strcmp(value, "true") || !strcmp(value, "1")) :
+		config_boolean("network.block_mouse_aim_assist") != 0;
+
+#ifndef HALO_RELEASE
+	/* (automated tests only: HALO_TEST_AIM_ASSIST_TOGGLE=<seconds>, the
+	policy turned over that far into the game, as a host changing it) */
+	{
+		char const *toggle = getenv("HALO_TEST_AIM_ASSIST_TOGGLE");
+		long seconds = toggle ? atol(toggle) : 0;
+
+		if (seconds > 0 && seconds < 100000 && game_time_get() >= seconds * TICKS_PER_SECOND)
+			blocked = !blocked;
+	}
+#endif
+	return blocked;
+}
+
+/* (the host) the policy, reliably: to one client (as it is ready), or to
+every client (machine_index NONE) */
+static void distributed_send_aim_assist_policy(
+	long machine_index)
+{
+	struct distributed_aim_assist_policy message;
+	boolean blocked = distributed_host_mouse_aim_assist_blocked();
+
+	csmemset(&message, 0, sizeof(message));
+	message.policy[0] = blocked ? 1 : 0;
+	if (machine_index == NONE)
+	{
+		distributed_send(&message, DISTRIBUTED_MESSAGE_AIM_ASSIST_POLICY, 1, (word)sizeof(message),
+			_distributed_to_clients_reliably);
+	}
+	else
+	{
+		distributed_send_to_machine_reliably(machine_index, &message, DISTRIBUTED_MESSAGE_AIM_ASSIST_POLICY, 1,
+			(word)sizeof(message));
+	}
+	error(_error_silent, "aim assist policy sent to %s: mouse aim assist %s", machine_index == NONE ? "every client" :
+		"a client as it is ready", blocked ? "blocked" : "allowed");
+#ifndef HALO_RELEASE
+	/* (automated tests only: HALO_TEST_AIM_ASSIST_FORGE=1, with each sent
+	to a client as it is ready, the copies its checks must refuse: in a
+	datagram, 13 bytes long, of count 2, of value 2, its reserved bytes 1;
+	each after the real one, so that the real one stands) */
+	if (machine_index != NONE && getenv("HALO_TEST_AIM_ASSIST_FORGE") && !strcmp(getenv("HALO_TEST_AIM_ASSIST_FORGE"), "1"))
+	{
+		struct
+		{
+			struct distributed_aim_assist_policy policy;
+			byte extra[4];
+		} forged;
+
+		csmemset(&forged, 0, sizeof(forged));
+		forged.policy.policy[0] = blocked ? 1 : 0;
+		distributed_send_to_machine(machine_index, &forged, DISTRIBUTED_MESSAGE_AIM_ASSIST_POLICY, 1,
+			(word)sizeof(forged.policy));
+		distributed_send_to_machine_reliably(machine_index, &forged, DISTRIBUTED_MESSAGE_AIM_ASSIST_POLICY, 1,
+			(word)(sizeof(forged.policy) + 1));
+		distributed_send_to_machine_reliably(machine_index, &forged, DISTRIBUTED_MESSAGE_AIM_ASSIST_POLICY, 2,
+			(word)sizeof(forged.policy));
+		forged.policy.policy[0] = 2;
+		distributed_send_to_machine_reliably(machine_index, &forged, DISTRIBUTED_MESSAGE_AIM_ASSIST_POLICY, 1,
+			(word)sizeof(forged.policy));
+		forged.policy.policy[0] = blocked ? 1 : 0;
+		forged.policy.policy[2] = 1;
+		distributed_send_to_machine_reliably(machine_index, &forged, DISTRIBUTED_MESSAGE_AIM_ASSIST_POLICY, 1,
+			(word)sizeof(forged.policy));
+		error(_error_silent, "aim assist policy: forged copies sent (tests)");
+	}
+#endif
+}
+
+boolean network_distributed_mouse_aim_assist_blocked(
+	void)
+{
+	switch (game_connection())
+	{
+	case _game_connection_network_server: return distributed_host_mouse_aim_assist_blocked();
+	case _game_connection_network_client: return distributed_aim_assist_blocked;
+	}
+	return FALSE;
+}
+
 /* whether the messages handled now came in a batch (the unreliable ones;
 one sent reliably comes on its own): a killing blow sent again reliably is
 not overtaken by the newer damage sent with the ticks since
 (distributed_message_stale) */
 static boolean distributed_handling_batch;
+
+/* (a client) the host's aim assist policy (OpenCE 32, docs/opence-net32-spec.md
+7.3): taken only from the host, over its stream, in a crossplay game of 32
+under way, exactly as OpenCE lays it out; anything else ignored (logged at
+most once a second: anyone can send datagrams as from the host). Before the
+tick window, the stale checks and the kinds' sizes, which it has no part in */
+static void distributed_handle_aim_assist_policy(
+	long machine_index,
+	word const *message,
+	word size)
+{
+	static char const *const reasons[] =
+	{
+		"from a client", "this machine is not a client", "not a game of network version 32", "the main menu is up",
+		"in a datagram", "its size", "its header", "its count", "its value", "its reserved bytes",
+	};
+	/* (each reason logged at most once a second) */
+	static unsigned long logged_times[sizeof(reasons) / sizeof(reasons[0])];
+	byte const *bytes = (byte const *)message;
+	struct distributed_message_header header;
+	unsigned int block_mouse = 0;
+	short why = NONE;
+
+	if (machine_index != NONE)
+		why = 0;
+	else if (game_connection() != _game_connection_network_client)
+		why = 1;
+	else if (!network_wire_v32_rules())
+		why = 2;
+	else if (main_menu_is_active())
+		why = 3;
+	else if (distributed_handling_batch || network_connection_last_read_was_unreliable())
+		why = 4;
+	else if (size != DISTRIBUTED_AIM_ASSIST_POLICY_SIZE)
+		why = 5;
+	else
+	{
+		csmemcpy(&header, message, sizeof(header));
+		block_mouse = (unsigned int)bytes[8] | (unsigned int)bytes[9] << 8;
+		if (GET_MESSAGE_TYPE(header.header) != 2 || GET_MESSAGE_SIZE(header.header) != DISTRIBUTED_AIM_ASSIST_POLICY_SIZE)
+			why = 6;
+		else if (header.count != 1)
+			why = 7;
+		else if (block_mouse > 1)
+			why = 8;
+		else if (bytes[10] || bytes[11])
+			why = 9;
+	}
+	if (why != NONE)
+	{
+		unsigned long now = system_milliseconds();
+
+		if (!logged_times[why] || now - logged_times[why] >= 1000)
+		{
+			error(_error_silent, "aim assist policy ignored: %s", reasons[why]);
+			logged_times[why] = now ? now : 1;
+		}
+		return;
+	}
+	if (!distributed_aim_assist_heard || distributed_aim_assist_blocked != (block_mouse != 0))
+		error(_error_silent, "aim assist policy from the host: mouse aim assist %s", block_mouse ? "blocked" : "allowed");
+	distributed_aim_assist_blocked = block_mouse != 0;
+	distributed_aim_assist_heard = TRUE;
+}
 
 /* a message of the distributed kind; machine_index is the sender's on the
 host, NONE on a client */
@@ -4532,6 +4811,12 @@ void network_distributed_handle_message(
 	if (size < sizeof(header) || !game_in_progress())
 		return;
 	csmemcpy(&header, message, sizeof(header));
+	/* (OpenCE 32's aim assist policy: its own checks, before any other) */
+	if (header.type == DISTRIBUTED_MESSAGE_AIM_ASSIST_POLICY)
+	{
+		distributed_handle_aim_assist_policy(machine_index, message, size);
+		return;
+	}
 	/* a tick's messages in one: each as if it came alone */
 	if (header.type == _distributed_message_batch)
 	{
@@ -4832,6 +5117,9 @@ void network_distributed_handle_message(
 			distributed_send_all_statistics(machine_index);
 			distributed_send_game_state(machine_index);
 		}
+		/* (OpenCE 32: the aim assist policy, at each ready) */
+		if (network_wire_v32_rules())
+			distributed_send_aim_assist_policy(machine_index);
 		break;
 	}
 	case _distributed_message_damage_events:

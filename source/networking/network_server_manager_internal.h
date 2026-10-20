@@ -142,6 +142,19 @@ struct network_game_server_client_machine *network_game_server_get_client_machin
 struct network_game_server_client_machine *network_game_server_get_client_machine_at_address(
 	struct network_game_server *server,
 	unsigned long address);
+/* port: a joined client machine's latest distributed datagram came from
+this address and port (network_server_message_handler.c); and where the
+host's datagrams to that machine go: there in a game of OpenCE's network
+version 31 and after, while it is the machine's connection's address,
+else the connection's address at the standard client port (docs/opence-net32-spec.md 6.3) */
+void network_game_server_note_datagram_source(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *client_machine,
+	struct transport_address const *source_address);
+void network_game_server_datagram_destination(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *client_machine,
+	struct transport_address *address);
 struct network_game *network_game_server_get_game(
 	struct network_game_server *server);
 boolean network_game_server_remove_machine_from_game(

@@ -137,6 +137,11 @@ unsigned int network_wire_version_of(int crossplay)
 	return crossplay ? HALO_PORT_CROSSPLAY_NETWORK_VERSION : HALO_PORT_NETWORK_VERSION;
 }
 
+unsigned int network_wire_announced_version(int crossplay)
+{
+	return network_wire_version_of(crossplay);
+}
+
 unsigned int network_wire_version(void)
 {
 	return network_wire_version_of(net_fuzz_crossplay);
@@ -144,20 +149,37 @@ unsigned int network_wire_version(void)
 
 int network_wire_version_accepted_on(int crossplay, unsigned int version)
 {
-	return version == network_wire_version_of(crossplay);
+	/* (the crossplay wire joins 29 and 32: network_wire.c) */
+	return crossplay ? version == HALO_PORT_CROSSPLAY_NETWORK_VERSION || version == HALO_PORT_CROSSPLAY_OLDER_NETWORK_VERSION :
+		version == HALO_PORT_NETWORK_VERSION;
 }
 
 int network_wire_version_accepted(unsigned int version)
 {
-	return version == network_wire_version();
+	return network_wire_version_accepted_on(net_fuzz_crossplay, version);
 }
 
 int network_wire_of_version(unsigned int version)
 {
-	return version == HALO_PORT_NETWORK_VERSION ? 0 : version == HALO_PORT_CROSSPLAY_NETWORK_VERSION ? 1 : -1;
+	return version == HALO_PORT_NETWORK_VERSION ? 0 : network_wire_version_accepted_on(1, version) ? 1 : -1;
 }
 
 int network_wire_v28_rules(void)
+{
+	return net_fuzz_crossplay;
+}
+
+int network_wire_v30_rules(void)
+{
+	return net_fuzz_crossplay;
+}
+
+int network_wire_v31_rules(void)
+{
+	return net_fuzz_crossplay;
+}
+
+int network_wire_v32_rules(void)
 {
 	return net_fuzz_crossplay;
 }

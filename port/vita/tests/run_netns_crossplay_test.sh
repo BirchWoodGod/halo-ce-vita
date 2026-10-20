@@ -182,9 +182,27 @@
 #               the Vitas' games first
 #   crosspassword  a password on our host for Vitas and PC: a wrong one
 #               refused, the right one plays; OpenCE's browser leaves it alone
-#   pcversion   OpenCE of 28 (XPPC_OLD_BUILDS) and of 32 (XPPC_NEW_OPENCE) do
-#               not join our 29 host; our client refuses an OpenCE host of 32
-#               on a LAN (a newer version) and drops its listing online
+#   pcversion   OpenCE of 28 (XPPC_OLD_BUILDS) and of 29 (XPPC_OPENCE29) do
+#               not join our 32 host; our client refuses a host of 33 (our
+#               build standing in for a PC host, HALO_TEST_ANNOUNCE_VERSION) on
+#               a LAN (a newer version) and drops its listing online
+#   net32       OpenCE's network version 32 (docs/opence-net32-spec.md;
+#               XPPC_BUILDS's opence of 6ec42856): its aim assist policy
+#               (kind 90) taken by our client from OpenCE hosts blocking and
+#               allowing; sent by our host to an OpenCE client at each ready,
+#               as the game starts and when it changes (HALO_TEST_AIM_ASSIST_TOGGLE),
+#               seen on the wire (a sniffer on the host's LAN port: 12
+#               bytes, count 1, reserved 0); our client refusing forged
+#               copies (HALO_TEST_AIM_ASSIST_FORGE: in a datagram, of 13 bytes,
+#               count 2, value 2, reserved 1) from our host and playing on;
+#               an OpenCE client whose client port is held (it binds another)
+#               playing on our host, answered at its port; an OpenCE host
+#               deleting every object (its console's object_destroy_all) in a
+#               CTF game, our client following it without an assertion
+#   net29       the older version the crossplay wire still joins
+#               (XPPC_OPENCE29, an OpenCE of 29): our client on its LAN
+#               host, and our host announcing 29 (HALO_TEST_CROSSPLAY_HOST_VERSION)
+#               with its clients; played by 29's rules
 #   crossfuzzhost  the host side fuzzed (not in all; HALO_TEST_VITA an ASan
 #               HALO_NET_FUZZ_TWIN build): our host for Vitas and PC twins one
 #               in XPPC_FUZZ_RATE (2) of its OpenCE clients' messages and
@@ -275,7 +293,10 @@ mode=${1:-}
 
 case $mode in
 pcself|chupaopence|opencelan|opencehost|crosstls|chupahost|chupaserver|damnserver|crossrefuse|crossbig|crossmixed|crosscoop|crossctf) ;;
-pcjoinsvita|pccap|browserboth|crosspassword|crosscoophost) ;;
+pcjoinsvita|pccap|browserboth|crosspassword|crosscoophost|net32) ;;
+net29)
+	[ -n "${XPPC_OPENCE29:-}" ] && [ -x "$XPPC_OPENCE29" ] ||
+		{ echo "SKIP (net29): wants XPPC_OPENCE29 (an OpenCE of network version 29's binary: build_pc_crossplay.sh opence ... 8102e711)"; exit 0; } ;;
 h3pcjoin)
 	[ -r "${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}/maps/bitmaps.map" ] ||
 		{ echo "SKIP (h3pcjoin): wants the Halo PC files (HALO_TEST_DATA_MENUS)"; exit 0; } ;;
@@ -283,9 +304,8 @@ pclivelobby)
 	[ -r "${HALO_TEST_PROFILE:-}" ] && [ -r "${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}/maps/bitmaps.map" ] ||
 		{ echo "SKIP (pclivelobby): wants HALO_TEST_PROFILE and the Halo PC files (HALO_TEST_DATA_MENUS)"; exit 0; } ;;
 pcversion)
-	[ -n "${XPPC_OLD_BUILDS:-}" ] && [ -x "$XPPC_OLD_BUILDS/opence/src/build/linux/halo" ] && [ -n "${XPPC_NEW_OPENCE:-}" ] &&
-		[ -x "$XPPC_NEW_OPENCE" ] ||
-		{ echo "SKIP (pcversion): wants XPPC_OLD_BUILDS (an OpenCE of 28) and XPPC_NEW_OPENCE (an OpenCE of 32's binary)"; exit 0; } ;;
+	[ -n "${XPPC_OLD_BUILDS:-}" ] && [ -x "$XPPC_OLD_BUILDS/opence/src/build/linux/halo" ] ||
+		{ echo "SKIP (pcversion): wants XPPC_OLD_BUILDS (an OpenCE of 28; XPPC_OPENCE29 an OpenCE of 29's binary too)"; exit 0; } ;;
 crossfuzzhost)
 	grep -aq "net fuzz twin: one message in" "${HALO_TEST_VITA:-$root/build/linux/halo}" 2>/dev/null ||
 		{ echo "SKIP (crossfuzzhost): HALO_TEST_VITA is not a HALO_NET_FUZZ_TWIN build (AddressSanitizer)"; exit 0; } ;;
@@ -316,7 +336,7 @@ all)
 	status=0
 	mkdir -p "$HOME/halo-test-out"
 	all_log=$(mktemp "$HOME/halo-test-out/xppc-all.XXXX")
-	for m in pcself chupaopence opencelan opencehost crosstls chupahost chupaserver damnserver crossctf crossmaps crossmixed crossrefuse crossbig crosscoop crossold pcjoinsvita pclivelobby h3pcjoin browserboth crosspassword pcversion crossversion; do
+	for m in pcself chupaopence opencelan opencehost crosstls chupahost chupaserver damnserver crossctf crossmaps crossmixed crossrefuse crossbig crosscoop crossold pcjoinsvita pclivelobby h3pcjoin browserboth crosspassword pcversion net32 net29 crossversion; do
 		echo "=== $m"
 		HALO_TEST_OUT=${HALO_TEST_OUT:+$HALO_TEST_OUT/$m} "$0" "$m" | tee "$all_log"
 		rc=${PIPESTATUS[0]}
@@ -347,21 +367,47 @@ damnation=${XPPC_DAMNATION:-${builds:+$builds/damnation/src/build/linux/halo}}
 old_opence=${XPPC_OLD_BUILDS:+$XPPC_OLD_BUILDS/opence/src/build/linux/halo}
 old_chupa=${XPPC_OLD_BUILDS:+$XPPC_OLD_BUILDS/chupa/src/build/linux/halo}
 # (pcversion: an OpenCE of a newer network version than the crossplay wire's,
-# build_pc_crossplay.sh's opence of 6ec42856, 32)
+# build_pc_crossplay.sh's opence of 6ec42856, 32; no mode uses it since our
+# wire joins 32 too: kept for the next raise)
 new_opence=${XPPC_NEW_OPENCE:-}
-# the network version a PC build announces (its source's halo_port_limits.h,
-# beside its binary: build_pc_crossplay.sh's src), and ours on the crossplay
-# wire; a build of another is not played (empty: not known, played)
+# (pcversion, net29: an OpenCE of the older version the crossplay wire still
+# joins, 29: build_pc_crossplay.sh's opence of 8102e711)
+opence29=${XPPC_OPENCE29:-}
+# (an OpenCE client or host of ChupathingyCE's version, for the games of
+# ChupathingyCE's whose controls want one: OpenCE of 29 when XPPC_BUILDS's is
+# of 32 and XPPC_OPENCE29 is there, else XPPC_BUILDS's)
+opence_chupa=opence
+[ -n "$opence29" ] && [ -x "$opence29" ] && opence_chupa=opence29
+# the network version a PC build announces: the NETWORK_VERSION file beside
+# its BUILD_INFO if there is one; else by its commit, for the builds whose
+# source is not to be read (OpenCE is AGPL-3.0-or-later from 4b09168e: its
+# version is docs/opence-net32-spec.md's, never read from its tree); else its
+# source's halo_port_limits.h (the CC0 builds before it, beside its binary:
+# build_pc_crossplay.sh's src). Empty: not known, played
 pc_version() { # pc_version BINARY
+	local build commit
+	build=$(dirname "$1")/../../..
+	if [ -f "$build/NETWORK_VERSION" ]; then
+		tr -dc 0-9 < "$build/NETWORK_VERSION"
+		return
+	fi
+	commit=$(sed -n 's/^commit: //p' "$build/BUILD_INFO" 2>/dev/null)
+	case $commit in
+	6ec42856*) echo 32; return ;;
+	esac
 	sed -n 's/^#define HALO_PORT_NETWORK_VERSION \([0-9]*\).*/\1/p' \
 		"$(dirname "$1")/../../port/linux/include/halo_port_limits.h" 2>/dev/null | head -1
 }
+# the versions our crossplay wire joins (network_wire.h: each game by its
+# host's), "29 and 32" as our client logs them; the one our host announces
 our_version=$(sed -n 's/^#define HALO_PORT_CROSSPLAY_NETWORK_VERSION \([0-9]*\).*/\1/p' "$root/port/linux/include/network_wire.h")
-plays_ours() { # plays_ours BINARY NAME: 0 if the build's version is ours (or not known); else says so
+our_older_version=$(sed -n 's/^#define HALO_PORT_CROSSPLAY_OLDER_NETWORK_VERSION \([0-9]*\).*/\1/p' "$root/port/linux/include/network_wire.h")
+our_versions="${our_older_version:+$our_older_version and }$our_version"
+plays_ours() { # plays_ours BINARY NAME: 0 if the build's version is one ours joins (or not known); else says so
 	local version
 	version=$(pc_version "$1")
-	[ -z "$version" ] || [ "$version" = "$our_version" ] && return 0
-	echo "--- $2 left out: the build announces network version $version, the crossplay wire joins $our_version (crossold: refused)"
+	[ -z "$version" ] || [ "$version" = "$our_version" ] || [ "$version" = "$our_older_version" ] && return 0
+	echo "--- $2 left out: the build announces network version $version, the crossplay wire joins $our_versions (crossold: refused)"
 	return 1
 }
 vita=${HALO_TEST_VITA:-$root/build/linux/halo}
@@ -380,8 +426,8 @@ need OpenCE "$opence"
 case $mode in chupaopence|chupahost|crosscoop|crossctf) need ChupathingyCE "$chupa" ;; esac
 [ "$mode" = chupaserver ] && need "ChupathingyCE's server" "$chupa_server"
 case $mode in damnserver|crosscoop|crosscoopfuzz) need DamnationCE "$damnation" ;; esac
-[ "$mode" = pcversion ] && need "OpenCE of 32" "$new_opence"
 [ "$mode" = crosscoopfuzz ] && need ChupathingyCE "$chupa"
+[ "$mode" = net29 ] && need "OpenCE of 29" "$opence29"
 case $mode in pcself|chupaopence) ;; *) need "our Vita-path build" "$vita" ;; esac
 [ -f "$data/maps/bloodgulch.map" ] && [ -f "$data/maps/ui.map" ] ||
 	{ echo "BROKEN ($mode): no maps in $data/maps (HALO_TEST_DATA)"; exit 2; }
@@ -520,6 +566,13 @@ broker() { # broker -> broker_address: a broker of its own (198.51.100.10+), for
 	brokers=$((brokers + 1))
 }
 
+# (OpenCE 6ec42856 faults by itself once a network test's game is over, a
+# host and its clients alike, OpenCE's own control games too (Oct 19 2026:
+# docs/crossplay.md 10.9): crossplay_check.py notes that rather than failing
+# stability on it, for those copies alone; never for ours)
+case $(sed -n 's/^commit: //p' "$(dirname "$opence")/../../../BUILD_INFO" 2>/dev/null) in
+6ec42856*) export XPPC_POSTGAME_FAULT_KINDS="opence" ;;
+esac
 # the builds' commits
 for b in opence chupa damnation; do
 	[ -n "$builds" ] && [ -f "$builds/$b/BUILD_INFO" ] &&
@@ -534,6 +587,7 @@ run_copy() {
 	local name=$1 ns=$2 kind=$3 address=$4 broker=$5 binary dir=$out/$1
 	shift 5
 	mkdir -p "$dir/data" "$dir/save" "$dir/home" "$dir/bin"
+	echo "$kind" > "$dir/kind"
 	ln -sfn "${copy_maps:-$data/maps}" "$dir/data/maps"
 	# (crossmaps: a PC copy's Custom Edition maps, beside its maps folder)
 	[ -n "${copy_custom_maps:-}" ] && [ "$kind" != ours ] && ln -sfn "$copy_custom_maps" "$dir/data/custom_maps"
@@ -562,6 +616,7 @@ run_copy() {
 		oldopence) binary=$old_opence ;;
 		oldchupa) binary=$old_chupa ;;
 		newopence) binary=$new_opence ;;
+		opence29) binary=$opence29 ;;
 		chupaserver) binary=$chupa_server ;;
 		damnation) binary=$damnation ;;
 		esac
@@ -625,6 +680,19 @@ games_played() {
 
 pairs=0
 subnet=0
+# mark_stop NAME: where each copy's logs end as the harness stops them
+# (stop_offsets: run.log's and debug.txt's sizes), so that what a PC build
+# logs after it (OpenCE 6ec42856 faults as it is stopped once its game is
+# over, its own control games too: docs/crossplay.md 10.9) is told apart from
+# a crash in the game (crossplay_check.py); ours are held to everything
+mark_stop() {
+	local copy
+	for copy in "$out/$1"/*/; do
+		[ -f "$copy/run.log" ] || continue
+		echo "$(stat -c %s "$copy/run.log" 2>/dev/null || echo 0) $(stat -c %s "$copy/data/debug.txt" 2>/dev/null || echo 0)" \
+			> "$copy/stop_offsets"
+	done
+}
 # pair NAME TRANSPORT HOSTKIND CLIENTKIND [CLIENTENV]: a host and its client
 # (and the copy that comes back after the first leaves), in the background;
 # checked by check_pair. A server's: SERVERKIND and two clients, the first
@@ -677,6 +745,16 @@ pair() {
 			done
 			echo "$name: the host's invite: ${invite:+${invite:0:24}...}${invite:-none in its log}"
 		fi
+		# (hold_client_port: the client port, 5151, held by another program
+		# in each client's namespace, as a second copy on one computer has it:
+		# the client binds another, and the host must answer it there)
+		if [ -n "${hold_client_port:-}" ]; then
+			for ns in $client_ns $late_ns; do
+				nsenter -t "$ns" -n python3 -I -c 'import socket, time
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.bind(("0.0.0.0", 5151)); time.sleep(100000)' &
+				mine="$mine $!"
+			done
+		fi
 		copy_args=$invite copy_maps=${client_maps:-} run_copy "$name/client" "$client_ns" "$clientkind" "$client_ip" "$broker_address" \
 			$(client_env "$clientkind" "$transport" $((17 + pairs))) $extra ${client_extra:-}
 		mine="$mine $last_pid"; client_pid=$last_pid
@@ -713,6 +791,7 @@ pair() {
 			{ [ "$games" -ge 1 ] && [ $((SECONDS - seen_at)) -ge "$quiet_limit" ]; } && break
 			{ [ "$games" = 0 ] && [ "$now" -ge "$no_game_limit" ]; } && break
 		done
+		mark_stop "$name"
 		kill $mine 2>/dev/null; wait 2>/dev/null
 	) > "$out/$name/pair.log" 2>&1 &
 	pids="$pids $!"
@@ -752,7 +831,7 @@ pair_server() { # pair_server NAME TRANSPORT SERVERKIND SECONDCLIENTKIND [CLIENT
 			done
 			echo "$name: the server's invite: ${invite:-none in its log}"
 		fi
-		copy_args=$invite run_copy "$name/client" "$c1_ns" opence "$c1_ip" "$broker_address" $(client_env opence "$transport" $((41 + pairs)))
+		copy_args=$invite run_copy "$name/client" "$c1_ns" $opence_chupa "$c1_ip" "$broker_address" $(client_env $opence_chupa "$transport" $((41 + pairs)))
 		mine="$mine $last_pid"
 		sleep 4
 		copy_args=$invite run_copy "$name/client2" "$c2_ns" "$clientkind" "$c2_ip" "$broker_address" \
@@ -874,6 +953,7 @@ coop_game() {
 				fi
 			fi
 		done
+		mark_stop "$name"
 		kill $mine 2>/dev/null; wait 2>/dev/null
 	) > "$out/$name/pair.log" 2>&1 &
 	pids="$pids $!"
@@ -991,9 +1071,9 @@ chupaopence)
 	# invite; so an OpenCE host with a ChupathingyCE client opening its invite.
 	# ChupathingyCE's server, which lists and logs its invite whole, is
 	# chupaserver's)
-	pair lan-chupa-opence lan chupa opence
-	pair lan-opence-chupa lan opence chupa
-	pair invite-opence-chupa invite opence chupa
+	pair lan-chupa-opence lan chupa $opence_chupa
+	pair lan-opence-chupa lan $opence_chupa chupa
+	pair invite-opence-chupa invite $opence_chupa chupa
 	wait_pairs
 	for name in lan-chupa-opence lan-opence-chupa invite-opence-chupa; do
 		echo "--- $name"; check_pair "$name" || status=1
@@ -1012,6 +1092,14 @@ opencehost)
 	pair invite-opence-ours invite opence ours
 	probe net-opence-ours-probe && pair net-opence-ours-probe net opence ours "$cross_line"
 	run_our_modes
+	# (OpenCE 6ec42856's host logs only the start of its invite link, as
+	# ChupathingyCE's does: none to open, so that join is not tested here;
+	# docs/crossplay.md 10.9)
+	if grep -aq "the host's invite: none in its log" "$out/invite-opence-ours/pair.log" 2>/dev/null &&
+		grep -aq "halo://join/[0-9a-f]*\.\.\. (the rest is left out of the log)" "$out/invite-opence-ours/host/run.log" 2>/dev/null; then
+		echo "--- invite-opence-ours: not tested: the OpenCE host logs only the start of its invite link"
+		our_results=$(for r in $our_results; do case $r in invite-opence-ours:*) ;; *) printf '%s ' "$r" ;; esac; done)
+	fi
 	echo "--- the brokers: what each kind of client published and subscribed to (hceu: OpenCE's topics, hcev: ours)"; broker_topics
 	;;
 crosstls)
@@ -1042,7 +1130,7 @@ chupahost)
 	# (a player's ChupathingyCE game on a LAN only: its network test neither
 	# lists the game nor logs its invite whole; over the internet see
 	# chupaserver)
-	control lan-chupa-opence && pair lan-chupa-opence lan chupa opence
+	control lan-chupa-opence && pair lan-chupa-opence lan chupa $opence_chupa
 	test_names="lan-chupa-ours"
 	pair lan-chupa-ours lan chupa ours
 	probe lan-chupa-ours-probe && pair lan-chupa-ours-probe lan chupa ours "$cross_line"
@@ -1052,7 +1140,7 @@ chupahost)
 chupaserver|damnserver)
 	kind=$mode
 	if [ "$mode" = damnserver ] && ! plays_ours "$damnation" "DamnationCE's server"; then
-		echo "SKIP ($mode): DamnationCE's build is of network version $(pc_version "$damnation"), not $our_version"
+		echo "SKIP ($mode): DamnationCE's build is of network version $(pc_version "$damnation"), not $our_versions"
 		echo "logs in $out"
 		exit 0
 	fi
@@ -1063,7 +1151,7 @@ chupaserver|damnserver)
 	[ "$mode" = damnserver ] && internet=invite
 	for transport in lan $internet; do
 		if control "$transport-$mode-opence"; then
-			pair_server "$transport-$mode-opence" "$transport" "$kind" opence; : > "$out/$transport-$mode-opence/server"
+			pair_server "$transport-$mode-opence" "$transport" "$kind" $opence_chupa; : > "$out/$transport-$mode-opence/server"
 		fi
 		test_names="$test_names $transport-$mode-ours"
 		pair_server "$transport-$mode-ours" "$transport" "$kind" ours; : > "$out/$transport-$mode-ours/server"
@@ -1287,25 +1375,31 @@ crosspassword)
 	[ "${opence_joined:-0}" = 0 ] && our_results="$our_results pw-opence:pass" || our_results="$our_results pw-opence:joined"
 	;;
 pcversion)
-	# versions (docs/crossplay.md 5.2, 10.7): our Vita's game for Vitas and
-	# PC announces 29; an OpenCE of 28 (XPPC_OLD_BUILDS) and of 32 (OpenCE
-	# 6ec42856, XPPC_NEW_OPENCE) do not join it (their own checks: the host
-	# sees no version in a join); our client refuses an OpenCE host of 32 on
-	# a LAN, telling the player it is newer, and drops its listing online
+	# versions (docs/crossplay.md 5.2, 10.9): our Vita's game for Vitas and
+	# PC announces 32; an OpenCE of 28 (XPPC_OLD_BUILDS) and of 29
+	# (XPPC_OPENCE29, 8102e711) do not join it (their own checks: the host
+	# sees no version in a join); our client refuses a host of a version
+	# newer than it joins (33: our build standing in for a PC host,
+	# HALO_TEST_CROSSPLAY_HOST=1, announcing 33: HALO_TEST_ANNOUNCE_VERSION) on a
+	# LAN, telling the player it is newer, and drops its listing online
+	ver_names="ver-ours-old28 ver-new33-ours ver-net-new33-ours"
 	host_extra=HALO_NET_HOST_CROSSPLAY=true pair ver-ours-old28 lan ours oldopence
-	host_extra=HALO_NET_HOST_CROSSPLAY=true pair ver-ours-new32 lan ours newopence
-	pair ver-new32-ours lan newopence ours
-	pair ver-net-new32-ours net newopence ours
+	if [ -x "${opence29:-}" ]; then
+		ver_names="$ver_names ver-ours-old29"
+		host_extra=HALO_NET_HOST_CROSSPLAY=true pair ver-ours-old29 lan ours opence29
+	fi
+	host_extra="HALO_TEST_CROSSPLAY_HOST=1 HALO_TEST_ANNOUNCE_VERSION=33" pair ver-new33-ours lan ours ours
+	host_extra="HALO_TEST_CROSSPLAY_HOST=1 HALO_TEST_ANNOUNCE_VERSION=33" pair ver-net-new33-ours net ours ours
 	wait_pairs
-	for name in ver-ours-old28 ver-ours-new32 ver-new32-ours ver-net-new32-ours; do
+	for name in $ver_names; do
 		hostlog=$out/$name/host/run.log clientlog=$out/$name/client/run.log clientdebug=$out/$name/client/data/debug.txt
 		hosted=$(grep -ac "network test: hosting" "$hostlog" 2>/dev/null)
 		second=$(grep -ac "network test: player 1 is named" "$hostlog" 2>/dev/null)
 		said=
 		case $name in
-		ver-new32-ours) said=$(cat "$clientlog" "$clientdebug" 2>/dev/null |
-			grep -ac "not joining a host of network version 32 (crossplay: this machine joins 29): a newer PC build") ;;
-		ver-net-new32-ours) said=$(grep -ac "dropped [0-9]* of another version" "$clientlog" 2>/dev/null) ;;
+		ver-new33-ours) said=$(cat "$clientlog" "$clientdebug" 2>/dev/null |
+			grep -ac "not joining a host of network version 33 (crossplay: this machine joins $our_versions): a newer PC build") ;;
+		ver-net-new33-ours) said=$(grep -ac "dropped [0-9]* of another version" "$clientlog" 2>/dev/null) ;;
 		*) said=1 ;;
 		esac
 		echo "--- $name: hosted ${hosted:-0}, a second player ${second:-0}, refusal said ${said:-0}"
@@ -1316,6 +1410,144 @@ pcversion)
 		else
 			our_results="$our_results $name:hosted-$hosted-second-$second-said-$said"
 		fi
+	done
+	;;
+net32)
+	# OpenCE's network version 32 (docs/opence-net32-spec.md 6-7, 9.4)
+	# - the aim assist policy, our client: OpenCE hosts blocking and allowing
+	host_extra=HALO_NET_BLOCK_MOUSE_AIM_ASSIST=1 pair pol-opence-block lan opence ours
+	host_extra=HALO_NET_BLOCK_MOUSE_AIM_ASSIST=0 pair pol-opence-allow lan opence ours
+	# - our host's policy on the wire to an OpenCE client: a sniffer on the
+	# host's port of its LAN (unencrypted on a LAN), the policy turned over
+	# 25 s into the game
+	host_extra="HALO_NET_HOST_CROSSPLAY=true HALO_TEST_AIM_ASSIST_TOGGLE=25" pair pol-ours-opence lan ours opence
+	sniff_n=$subnet
+	sniff_router=$(for r in $routers; do [ "${r#*:}" = "$sniff_n" ] && echo "${r%%:*}"; done)
+	in_ns "$sniff_router" python3 -I - "l${sniff_n}_2" > "$out/pol-ours-opence/kind90.txt" 2>&1 <<'PYTHON' & pids="$pids $!"
+import re, socket, struct, sys, time
+# every TCP segment through the host's port: a distributed message of kind
+# 90 (its header 12 bytes, type 2, in either byte order; kind, count, tick,
+# block_mouse, reserved)
+s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(3))
+s.bind((sys.argv[1], 0))
+pattern = re.compile(rb"(\x00\xc8|\xc8\x00)\x5a(.)(.{4})(..)(..)", re.S)
+print("sniffing %s" % sys.argv[1], flush=True)
+while True:
+    frame = s.recv(65535)
+    if len(frame) < 34 or frame[12:14] != b"\x08\x00":
+        continue
+    ip = frame[14:]
+    header = (ip[0] & 15) * 4
+    if ip[9] != 6:
+        continue
+    total = struct.unpack(">H", ip[2:4])[0]
+    tcp = ip[header:total]
+    data = tcp[(tcp[12] >> 4) * 4:]
+    for m in pattern.finditer(data):
+        print("kind90 %s:%d -> %s:%d count %d block %d reserved %d at %.3f" % (socket.inet_ntoa(ip[12:16]),
+            struct.unpack(">H", tcp[0:2])[0], socket.inet_ntoa(ip[16:20]), struct.unpack(">H", tcp[2:4])[0],
+            m.group(2)[0], struct.unpack("<H", m.group(4))[0], struct.unpack("<H", m.group(5))[0], time.time()), flush=True)
+PYTHON
+	# - our client refusing forged copies from our host, and playing on
+	host_extra="HALO_NET_HOST_CROSSPLAY=true HALO_TEST_AIM_ASSIST_FORGE=1 HALO_TEST_AIM_ASSIST_TOGGLE=25" \
+		pair pol-ours-ours lan ours ours
+	# - the source port (spec 6.3, 6.4): an OpenCE client whose client port
+	# another program holds, on our host
+	hold_client_port=1 host_extra=HALO_NET_HOST_CROSSPLAY=true pair port-ours-opence lan ours opence
+	# - a CTF game whose host deletes every object, the flags with them
+	# (spec 9.4), 3 s into its game, on its console
+	host_variants=ctf host_extra=HALO_TELNET_CONSOLE=1 pair ctfdel-opence-ours lan opence ours
+	ctfdel_ns=$side_machine
+	(
+		for i in $(seq 1 90); do
+			grep -aq "network test: starting the game\|network test: tick 1 " "$out/ctfdel-opence-ours/host/run.log" 2>/dev/null && break
+			sleep 1
+		done
+		sleep 3
+		coop_console "$ctfdel_ns" "object_destroy_all" && echo "object_destroy_all sent" >> "$out/ctfdel-opence-ours/commands.log"
+	) & pids="$pids $!"
+	test_names="pol-opence-block pol-opence-allow pol-ours-opence pol-ours-ours port-ours-opence"
+	run_our_modes
+	for name in pol-opence-block pol-opence-allow pol-ours-ours; do
+		logs="$out/$name/client/run.log $out/$name/client/data/debug.txt $out/$name/late/run.log $out/$name/late/data/debug.txt"
+		logs="$logs $out/$name/back/run.log $out/$name/back/data/debug.txt"
+		blocked=$(cat $logs 2>/dev/null | grep -ac "aim assist policy from the host: mouse aim assist blocked")
+		allowed=$(cat $logs 2>/dev/null | grep -ac "aim assist policy from the host: mouse aim assist allowed")
+		echo "--- $name: our client took the host's policy: blocked $blocked, allowed $allowed"
+		case $name in
+		pol-opence-block) [ "${blocked:-0}" -ge 1 ] && [ "${allowed:-0}" = 0 ] || our_results="$our_results $name-policy:blocked-$blocked-allowed-$allowed" ;;
+		pol-opence-allow) [ "${allowed:-0}" -ge 1 ] && [ "${blocked:-0}" = 0 ] || our_results="$our_results $name-policy:blocked-$blocked-allowed-$allowed" ;;
+		pol-ours-ours)
+			[ "${allowed:-0}" -ge 1 ] && [ "${blocked:-0}" -ge 1 ] || our_results="$our_results $name-policy:blocked-$blocked-allowed-$allowed"
+			for why in "in a datagram" "its size" "its count" "its value" "its reserved bytes"; do
+				refused=$(cat $logs 2>/dev/null | grep -ac "aim assist policy ignored: $why")
+				echo "  forged, $why: refused $refused"
+				[ "${refused:-0}" -ge 1 ] || our_results="$our_results $name-forged:$(echo "$why" | tr ' ' '-')"
+			done ;;
+		esac
+	done
+	# (our host: sent at each ready, as the game started, at the change)
+	hostlogs="$out/pol-ours-opence/host/run.log $out/pol-ours-opence/host/data/debug.txt"
+	ready=$(cat $hostlogs 2>/dev/null | grep -ac "aim assist policy sent to a client as it is ready")
+	all_allowed=$(cat $hostlogs 2>/dev/null | grep -ac "aim assist policy sent to every client: mouse aim assist allowed")
+	all_blocked=$(cat $hostlogs 2>/dev/null | grep -ac "aim assist policy sent to every client: mouse aim assist blocked")
+	wire0=$(grep -ac "^kind90 192\.168\.$sniff_n\.2:.* count 1 block 0 reserved 0" "$out/pol-ours-opence/kind90.txt" 2>/dev/null)
+	wire1=$(grep -ac "^kind90 192\.168\.$sniff_n\.2:.* count 1 block 1 reserved 0" "$out/pol-ours-opence/kind90.txt" 2>/dev/null)
+	other=$(grep -a "^kind90" "$out/pol-ours-opence/kind90.txt" 2>/dev/null | grep -avc "count 1 block [01] reserved 0")
+	echo "--- pol-ours-opence: our host sent the policy at $ready readies, to every client allowed $all_allowed and blocked" \
+		"$all_blocked times; on the wire from it: block 0 $wire0, block 1 $wire1, otherwise $other"
+	grep -a "^kind90" "$out/pol-ours-opence/kind90.txt" 2>/dev/null | head -8 | sed 's/^/  /'
+	{ [ "${ready:-0}" -ge 2 ] && [ "${all_allowed:-0}" -ge 1 ] && [ "${all_blocked:-0}" -ge 1 ] &&
+		[ "${wire0:-0}" -ge 2 ] && [ "${wire1:-0}" -ge 1 ]; } ||
+		our_results="$our_results pol-ours-opence-sent:ready-$ready-all-$all_allowed-$all_blocked-wire-$wire0-$wire1"
+	# (the held port: the client bound another, our host answered it there)
+	answered=$(grep -ahc "datagrams come from port [0-9]*: answered there" "$out/port-ours-opence/host/run.log" \
+		"$out/port-ours-opence/host/data/debug.txt" 2>/dev/null | awk '{ s += $1 } END { print s + 0 }')
+	echo "--- port-ours-opence: our host answered a client at the port its datagrams came from: $answered"
+	grep -ah "datagrams come from port" "$out/port-ours-opence/host/run.log" "$out/port-ours-opence/host/data/debug.txt" 2>/dev/null |
+		head -3 | sed 's/^/  /'
+	[ "${answered:-0}" -ge 1 ] || our_results="$our_results port-ours-opence-answered:none"
+	# (the deleted flags: the command sent, our client on through it with no
+	# assertion, its flags gone once)
+	# (our copies: the client, the late one, the one back)
+	ctflogs= ctfdebugs=
+	for copy in client late back; do
+		ctflogs="$ctflogs $out/ctfdel-opence-ours/$copy/run.log"; ctfdebugs="$ctfdebugs $out/ctfdel-opence-ours/$copy/data/debug.txt"
+	done
+	sent=$(grep -ac "object_destroy_all sent" "$out/ctfdel-opence-ours/commands.log" 2>/dev/null)
+	ticks=$(cat $ctflogs 2>/dev/null | grep -ac "network test: tick [0-9]* ")
+	flags_before=$(cat $ctflogs 2>/dev/null | grep -a "network test: items at tick" | grep -ac "flag")
+	flags_gone=$(cat $ctfdebugs 2>/dev/null | grep -ac "network: a flag or ball deleted on the host's word")
+	asserted=$(cat $ctflogs $ctfdebugs 2>/dev/null | grep -aEc "ASSERT|assertion|EXCEPTION|halt_and_catch_fire|egmentation fault")
+	echo "--- ctfdel-opence-ours: object_destroy_all sent $sent; our copies $ticks ticks, item lines with a flag $flags_before," \
+		"flags deleted on the host's word $flags_gone; assertions or faults $asserted"
+	cat $ctfdebugs 2>/dev/null | grep -a "network: a flag or ball deleted" | sed 's/^[0-9.]* [0-9:]*  //' | head -4 | sed 's/^/  /'
+	cat $ctflogs 2>/dev/null | grep -a "network test: items at tick" | cut -c1-150 | head -4 | sed 's/^/  /'
+	if [ "${sent:-0}" = 0 ]; then
+		controls_ok=0; echo "BROKEN ($mode): the OpenCE host's console took no command"
+	elif [ "${asserted:-0}" != 0 ] || [ "${ticks:-0}" -lt 10 ] || [ "${flags_gone:-0}" = 0 ]; then
+		our_results="$our_results ctfdel-opence-ours:asserted-$asserted-ticks-$ticks-flags-gone-$flags_gone"
+	else
+		our_results="$our_results ctfdel-opence-ours:pass"
+	fi
+	;;
+net29)
+	# the older version (OpenCE 8102e711, 29), each game by its host's rules:
+	# our client on its LAN host; our host announcing 29 with its clients
+	control lan-opence29-opence29 && pair lan-opence29-opence29 lan opence29 opence29
+	test_names="lan-opence29-ours lan-ours29-opence29"
+	pair lan-opence29-ours lan opence29 ours
+	host_extra="HALO_NET_HOST_CROSSPLAY=true HALO_TEST_CROSSPLAY_HOST_VERSION=29" pair lan-ours29-opence29 lan ours opence29
+	run_our_modes
+	for name in lan-opence29-ours lan-ours29-opence29; do
+		case $name in
+		lan-opence29-ours) said=$(cat "$out/$name/client/run.log" "$out/$name/client/data/debug.txt" 2>/dev/null |
+			grep -ac "network: the crossplay wire (joining a game from the list, a PC's game), network version 29's rules") ;;
+		*) said=$(cat "$out/$name/host/run.log" "$out/$name/host/data/debug.txt" 2>/dev/null |
+			grep -ac "network: the crossplay wire (hosting for Vitas and PC, a Vita's game), network version 29's rules") ;;
+		esac
+		echo "--- $name: played by 29's rules: $said"
+		[ "${said:-0}" -ge 1 ] || our_results="$our_results $name-rules:not-29"
 	done
 	;;
 crossfuzzhost)
@@ -1906,7 +2138,7 @@ crossold)
 		# scenario logs those before any game)
 		joined=$(grep -ac "network test: joining" "$clientlog" 2>/dev/null)
 		said=$(cat "$clientlog" "$clientdebug" 2>/dev/null |
-			grep -ac "not joining a host of network version ${old_version:-[0-9]*} (crossplay: this machine joins $our_version): an older PC build")
+			grep -ac "not joining a host of network version ${old_version:-[0-9]*} (crossplay: this machine joins $our_versions): an older PC build")
 		told=$(cat "$clientlog" "$clientdebug" 2>/dev/null | grep -ac "runs an older version of OpenCE or ChupathingyCE")
 		listed=$(grep -ac "the public games list" "$clientlog" 2>/dev/null)
 		result=pass

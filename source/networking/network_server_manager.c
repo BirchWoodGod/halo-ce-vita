@@ -855,6 +855,18 @@ a datagram is matched to without asking every connection for its address
 (network_game_server_get_client_machine_at_address) */
 static unsigned long network_game_server_client_machine_addresses[MAXIMUM_NETWORK_MACHINE_COUNT];
 
+/* port: each joined client machine's latest distributed datagram's source
+(its address, port and the connection the machine had then; 0 and NULL for
+none), by slot: OpenCE's network version 31 sends a client its datagrams
+there (network_game_server_datagram_destination). Forgotten as the slot is
+taken or freed */
+static struct
+{
+	unsigned long address;
+	word port;
+	struct network_connection *connection;
+} network_game_server_datagram_sources[MAXIMUM_NETWORK_MACHINE_COUNT];
+
 /* port: the update number up to which a machine that has loaded (at the
 start, or joining the game in progress) gets the host's game update every
 tick; after that once a second (network_game_server_update_ticks) */
@@ -1416,6 +1428,7 @@ struct network_game_server *network_game_server_create(
 				server->client_machines[i].machine_index = NONE;
 				server->client_machines[i].flags = 0;
 				network_game_server_client_machine_addresses[i] = 0;
+				csmemset(&network_game_server_datagram_sources[i], 0, sizeof(network_game_server_datagram_sources[i]));
 				network_game_invalidate_machine(&server->game, i);
 			}
 
@@ -2347,6 +2360,8 @@ boolean network_game_server_accept_client_machine_into_game(
 					}
 				}
 				network_game_server_client_machine_addresses[machine_index] = address.address.long_words[0];
+				csmemset(&network_game_server_datagram_sources[machine_index], 0,
+					sizeof(network_game_server_datagram_sources[machine_index]));
 				network_game_server_client_machine_join_times[machine_index] = system_milliseconds();
 			}
 			else
@@ -3793,6 +3808,66 @@ struct network_game_server_client_machine *network_game_server_get_client_machin
 	return client_machine;
 }
 
+void network_game_server_note_datagram_source(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *client_machine,
+	struct transport_address const *source_address)
+{
+	long index;
+
+	if (!server || !client_machine || !source_address || client_machine < server->client_machines ||
+		client_machine >= server->client_machines + MAXIMUM_NETWORK_MACHINE_COUNT)
+	{
+		return;
+	}
+	index = (long)(client_machine - server->client_machines);
+	/* (only a source at the machine's own address: the lookup that found
+	the machine matched it) */
+	if (!source_address->port || source_address->address.long_words[0] != network_game_server_client_machine_addresses[index])
+		return;
+	if (network_game_server_datagram_sources[index].port != source_address->port &&
+		network_game_server_datagram_sources[index].port && network_wire_v31_rules())
+	{
+		network_event("machine #%ld's datagrams now come from port %u (were %u)", index,
+			(unsigned int)source_address->port, (unsigned int)network_game_server_datagram_sources[index].port);
+	}
+	else if (!network_game_server_datagram_sources[index].port && network_wire_v31_rules() &&
+		source_address->port != NETWORK_GAME_CLIENT_PORT)
+	{
+		network_event("machine #%ld's datagrams come from port %u: answered there", index,
+			(unsigned int)source_address->port);
+	}
+	network_game_server_datagram_sources[index].address = source_address->address.long_words[0];
+	network_game_server_datagram_sources[index].port = source_address->port;
+	network_game_server_datagram_sources[index].connection = client_machine->connection;
+}
+
+void network_game_server_datagram_destination(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *client_machine,
+	struct transport_address *address)
+{
+	struct network_connection *connection = network_game_server_get_client_connection(client_machine);
+	long index;
+
+	network_connection_get_address(connection, address, NULL);
+	address->port = NETWORK_GAME_CLIENT_PORT;
+	if (!network_wire_v31_rules() || !server || client_machine < server->client_machines ||
+		client_machine >= server->client_machines + MAXIMUM_NETWORK_MACHINE_COUNT)
+	{
+		return;
+	}
+	index = (long)(client_machine - server->client_machines);
+	/* (the source the machine's datagrams came from while it had this
+	connection, at the connection's own address) */
+	if (network_game_server_datagram_sources[index].port &&
+		network_game_server_datagram_sources[index].connection == connection &&
+		network_game_server_datagram_sources[index].address == address->address.long_words[0])
+	{
+		address->port = network_game_server_datagram_sources[index].port;
+	}
+}
+
 boolean network_game_server_game_can_start(
 	struct network_game_server *server)
 {
@@ -4063,6 +4138,7 @@ boolean network_game_server_remove_client_machine_from_game(
 			server->client_machines[i].machine_index = NONE;
 			server->client_machines[i].flags = 0;
 			network_game_server_client_machine_addresses[i] = 0;
+			csmemset(&network_game_server_datagram_sources[i], 0, sizeof(network_game_server_datagram_sources[i]));
 			success = TRUE;
 			break;
 		}

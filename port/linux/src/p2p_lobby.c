@@ -537,7 +537,7 @@ static int listing_make(unsigned char *bytes, int flags)
 {
 	unsigned char data[sizeof(signature_label) - 1 + MAXIMUM_LISTING_SIZE];
 	int crossplay = lobby.listed_crossplay;
-	unsigned int version = network_wire_version_of(crossplay);
+	unsigned int version = network_wire_announced_version(crossplay);
 	int size = 0;
 	int count, index;
 
