@@ -95,6 +95,7 @@ halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
 #include "../src/p2p_party.h"
 #include "../src/crossplay_guard.h"
 #include "network_wire.h"
+#include "network_anticheat.h"
 #include "browser_list.h"
 #include "../src/system_link_shortcut.h"
 #include "forge.h"
@@ -8240,6 +8241,13 @@ static char const *h3_players_team_name(int team)
 	return team >= 0 && team < (int)NUMBEROF(names) ? T(names[team]) : "-";
 }
 
+/* whether this machine hosts the network game the PLAYERS screen shows (its
+KICK and BAN) */
+static boolean h3_players_hosting(void)
+{
+	return global_network_game_server_get() != NULL && !network_game_is_splitscreen_local();
+}
+
 /* (port h3 players) the rows, the chosen one's facts */
 static void h3_players_update(struct widget_instance *list)
 {
@@ -8311,7 +8319,8 @@ static void h3_players_update(struct widget_instance *list)
 		if (player->machine == h3_players.own_machine)
 			snprintf(text, sizeof(text), "%s\n%s", player->name, T("A player of this PS Vita"));
 		else
-			snprintf(text, sizeof(text), "%s\n%s", player->name, h3_buttons(T("Cross: add them as a friend or block them")));
+			snprintf(text, sizeof(text), "%s\n%s", player->name, h3_buttons(h3_players_hosting() ?
+				T("Cross: add them as a friend, block, kick or ban them") : T("Cross: add them as a friend or block them")));
 		text_show(named(screen, "detail"), text);
 	}
 	else
@@ -8355,6 +8364,31 @@ static boolean h3_players_act(struct widget_instance *widget)
 	return TRUE;
 }
 
+/* (the host's KICK and BAN) the chosen player's machine dropped:
+network_anticheat.c tells every machine and logs it; a ban keeps it out of
+this host's games while it runs */
+static void h3_players_drop(short how)
+{
+	int index = h3_players_chosen_index();
+	char text[160];
+
+	if (index < 0)
+		return;
+	if (!h3_players_hosting())
+		snprintf(text, sizeof(text), "%s", T("Only the game's host can do that"));
+	else if (h3_players.players[index].machine == h3_players.own_machine ||
+		!network_anticheat_drop(h3_players.players[index].machine, how, NULL))
+	{
+		snprintf(text, sizeof(text), "%s", T("That player is not in the game"));
+	}
+	else
+	{
+		snprintf(text, sizeof(text), how == _anticheat_drop_kick ? T("Kicked %s") : T("Banned %s from your games"),
+			h3_players.players[index].name);
+	}
+	h3_players_message(text);
+}
+
 /* (port h3 players options) the question's words */
 static void h3_players_options_update(struct widget_instance *list)
 {
@@ -8375,12 +8409,23 @@ static void h3_players_options_update(struct widget_instance *list)
 		boolean party = state != P2P_FRIENDS_PLAYER_THIS_VITA && state != P2P_FRIENDS_PLAYER_BLOCKED &&
 			state != P2P_FRIENDS_PLAYER_NOT_TAKING;
 
+		/* (KICK and BAN: the game's host's alone, of another machine's
+		player) */
+		boolean host = h3_players_hosting() && state != P2P_FRIENDS_PLAYER_THIS_VITA;
+
 		for (child = list->child; child; child = child->next)
+		{
 			if (strstr(child->name, "option_party"))
 			{
 				widget_instance_set_visibility_recursive(child, party);
 				child->disabled = !party;
 			}
+			if (strstr(child->name, "option_kick") || strstr(child->name, "option_ban"))
+			{
+				widget_instance_set_visibility_recursive(child, host);
+				child->disabled = !host;
+			}
+		}
 	}
 }
 
@@ -8410,6 +8455,10 @@ static void h3_players_option(struct widget_instance *widget)
 		h3_players_do(P2P_FRIENDS_PLAYER_ADD);
 	else if (strstr(widget->name, "option_block"))
 		h3_players_do(P2P_FRIENDS_PLAYER_BLOCK);
+	else if (strstr(widget->name, "option_kick"))
+		h3_players_drop(_anticheat_drop_kick);
+	else if (strstr(widget->name, "option_ban"))
+		h3_players_drop(_anticheat_drop_session_ban);
 	else if (strstr(widget->name, "option_party"))
 	{
 		int index = h3_players_chosen_index(), outcome;

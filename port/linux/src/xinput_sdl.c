@@ -376,6 +376,16 @@ void test_input_hold_still(int hold)
 	test_input_holding_still = hold;
 }
 
+/* the automated tests (network_test.c's HALO_NETWORK_TEST_AIM): the
+scripted player holds the trigger and leaves the right stick alone (the
+test turns the player to its target), walking as before */
+static int test_input_holding_fire;
+
+void test_input_hold_fire(int hold)
+{
+	test_input_holding_fire = hold;
+}
+
 /* the automated tests (network_test.c's debug.network_test_scores): the
 player holds Back, the scoreboard, as the scripted player plays on */
 static int test_input_holding_back;
@@ -694,6 +704,12 @@ static void test_input_gamepad(XINPUT_GAMEPAD *pad)
 	}
 	if (fmod(t, 3.0) < 0.3)
 		pad->bAnalogButtons[XINPUT_GAMEPAD_RIGHT_TRIGGER] = 255;
+	if (test_input_holding_fire)
+	{
+		pad->sThumbRX = 0;
+		pad->sThumbRY = 0;
+		pad->bAnalogButtons[XINPUT_GAMEPAD_RIGHT_TRIGGER] = 255;
+	}
 	if (fmod(t, 5.0) < 0.1)
 		pad->bAnalogButtons[XINPUT_GAMEPAD_A] = 255;
 	if (fmod(t, 7.0) < 0.2)

@@ -13,6 +13,10 @@ release builds).
   HALO_NET_FUZZ_CAPTURE=d  the first NET_FUZZ_CAPTURE_EACH of each kind of
                          what a client takes from its host, written to d
                          (which must be there) as fuzz targets' seeds
+  HALO_NET_FUZZ_HOST_ONLY=1  twins of what a host takes alone (its clients'
+                         messages and datagrams), none of what a client takes:
+                         a host's own client, in its process, then reads its
+                         game as sent (run_netns_online_test.sh hostfuzz)
   HALO_NET_FUZZ_KINDS=list  only the distributed netcode's messages of these
                          kinds get twins (a comma list of numbers and ranges,
                          "64-77" for the AI and co-op messages, 16 for the
@@ -54,6 +58,7 @@ static struct
 {
 	int ready;
 	int rate;
+	int host_only;
 	/* HALO_NET_FUZZ_KINDS: the distributed kinds twinned, a bit each (none
 	set: every message) */
 	int filtered;
@@ -201,6 +206,7 @@ int net_fuzz_twin(
 
 		net_fuzz.ready = 1;
 		net_fuzz.rate = rate ? atoi(rate) : 0;
+		net_fuzz.host_only = getenv("HALO_NET_FUZZ_HOST_ONLY") && atoi(getenv("HALO_NET_FUZZ_HOST_ONLY"));
 		net_fuzz.state = seed ? strtoul(seed, NULL, 10) : 1;
 		net_fuzz_kinds_read(getenv("HALO_NET_FUZZ_KINDS"));
 		fprintf(stderr, "net fuzz twin: one message in %d twinned (direction %d), capture %s, kinds %s\n", net_fuzz.rate,
@@ -227,8 +233,11 @@ int net_fuzz_twin(
 		else if (((header >> 2) & 3) == 2)
 			net_fuzz_capture(_net_fuzz_capture_data, ((unsigned char const *)message)[2], NULL, 0, message, size);
 	}
-	if (net_fuzz.rate <= 0 || size < 3 || size > buffer_size || buffer_size > NET_FUZZ_TWIN_MAXIMUM)
+	if (net_fuzz.rate <= 0 || size < 3 || size > buffer_size || buffer_size > NET_FUZZ_TWIN_MAXIMUM ||
+		(net_fuzz.host_only && direction == _net_fuzz_twin_client_from_host))
+	{
 		return 0;
+	}
 	/* (HALO_NET_FUZZ_KINDS: a distributed message of a kind listed, its type
 	the byte after the message header) */
 	if (net_fuzz.filtered)

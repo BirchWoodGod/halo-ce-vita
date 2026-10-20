@@ -878,6 +878,9 @@ static boolean network_game_server_countdown_slowed[MAXIMUM_NETWORK_MACHINE_COUN
 
 /* port/linux/game/network_distributed.c's (the host's bans: bans.txt) */
 boolean network_distributed_banned(unsigned long address, char const *hardware_id);
+/* port/linux/game/network_anticheat.c's (the session's bans, and machines
+dropped by the anti-cheat limit, kept out a while) */
+boolean network_anticheat_refused(unsigned long address, char const *hardware_id);
 void network_distributed_ban(long machine_index, unsigned long address, char const *names);
 void network_distributed_kick(char const *names);
 /* port/linux/src/p2p.c's */
@@ -1188,6 +1191,19 @@ unsigned long network_game_server_machine_address(
 {
 	return VALID_INDEX(machine_index, MAXIMUM_NETWORK_MACHINE_COUNT) ?
 		network_game_server_client_machine_addresses[machine_index] : 0;
+}
+
+/* port: whether a machine is another machine joined to this server's game
+(the host's KICK and BAN take one: port/linux/game/network_anticheat.c) */
+boolean network_game_server_machine_is_remote_client(
+	long machine_index)
+{
+	struct network_game_server *server = global_network_game_server_get();
+
+	return server && VALID_INDEX(machine_index, MAXIMUM_NETWORK_MACHINE_COUNT) &&
+		server->client_machines[machine_index].machine_index == machine_index &&
+		network_game_server_client_machine_is_joined_to_game(server, &server->client_machines[machine_index]) &&
+		!network_game_server_client_machine_is_local(server, &server->client_machines[machine_index]);
 }
 
 /* port: the distributed netcode asks that a client machine be dropped (its
@@ -2291,6 +2307,21 @@ boolean network_game_server_accept_client_machine_into_game(
 					network_game_server_hardware_ids[machine_index] : ""))
 		{
 			network_event("refusing a machine @ %s: banned (bans.txt)", transport_address_to_string(&address));
+			network_game_server_refusal_code = _rejection_code_blacklisted_machine;
+			return FALSE;
+		}
+		/* (nor one banned for the session, or dropped by the anti-cheat
+		limit a while ago: by its real address, an internet play peer's
+		endpoint rather than the stand-in a new run of its game changes, or
+		its hardware id) */
+		if (!network_game_server_client_machine_is_local(server, machine) &&
+			address.address.long_words[0] != IPV4_LOOPBACK_ADDRESS &&
+			network_anticheat_refused(address.address.long_words[0],
+				VALID_INDEX(machine_index, MAXIMUM_NETWORK_MACHINE_COUNT) ?
+					network_game_server_hardware_ids[machine_index] : ""))
+		{
+			network_event("refusing a machine @ %s: kept out by the host (its ban for the session, or its anti-cheat "
+				"limit)", transport_address_to_string(&address));
 			network_game_server_refusal_code = _rejection_code_blacklisted_machine;
 			return FALSE;
 		}
@@ -5365,8 +5396,12 @@ static boolean network_game_server_handle_public_endpoint(
 			static byte twin[sizeof(datagram_buffer)];
 			unsigned short twin_size;
 
-			if (net_fuzz_twin(message, datagram_size, sizeof(twin), twin, &twin_size, _net_fuzz_twin_host_datagram))
+			/* (not the host's own client's, over the loopback) */
+			if (source_address.address.ipv4_address != IPV4_LOOPBACK_ADDRESS &&
+				net_fuzz_twin(message, datagram_size, sizeof(twin), twin, &twin_size, _net_fuzz_twin_host_datagram))
+			{
 				network_game_server_handle_datagram(server, (void *)twin, twin_size, &source_address);
+			}
 		}
 #endif
 
@@ -5447,8 +5482,11 @@ static boolean network_game_server_handle_client_machines(
 						static word twin[MAXIMUM_NETWORK_MESSAGE_SIZE / sizeof(word)];
 						unsigned short twin_size;
 
-						if (net_fuzz_twin(message, message_buffer_size, sizeof(twin), twin, &twin_size,
-							_net_fuzz_twin_host_from_client))
+						/* (another machine's alone: the host's own client may set
+						the game, and its messages are not a stranger's) */
+						if (!network_game_server_client_machine_is_local(server, client_machine) &&
+							net_fuzz_twin(message, message_buffer_size, sizeof(twin), twin, &twin_size,
+								_net_fuzz_twin_host_from_client))
 						{
 							network_game_server_handle_client_message(server, client_machine, twin, (short)twin_size);
 							if (client_machine->machine_index == NONE || client_machine->connection == NULL)

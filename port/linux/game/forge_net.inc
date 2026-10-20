@@ -63,6 +63,7 @@ network Forge (it ignores the hello, as an older build), for the tests.
 
 #include "forge_net_protocol.h"
 #include "network_distributed.h"
+#include "network_anticheat.h"
 #include "network_wire.h"
 #include "networking/network_messages.h"
 #include "networking/network_game_globals.h"
@@ -153,6 +154,9 @@ struct forge_net_actor
 	struct forge_net_drops drops;
 	unsigned long drops_logged;
 	struct forge_net_drops drops_said;
+	/* the host's tick its malformed or replayed requests were last counted
+	against its machine at (network_anticheat.c: once a tick) */
+	long anticheat_tick;
 	/* its state asked for (sent at the end of the frame), and since when it
 	has it (the changes then go to it too); when last asked */
 	boolean sync_pending;
@@ -1412,6 +1416,19 @@ static void forge_net_actor_release(
 	forge_net_act_end(actor);
 }
 
+/* a machine's malformed or replayed request counted against it
+(network_anticheat.c), once a host tick: it comes over its stream alone, and
+a burst of them (a client's bug, a tick's worth) weighs as one; a machine
+sending them tick after tick is dropped */
+static void forge_net_count_violation(
+	struct forge_net_actor *actor)
+{
+	if (actor->anticheat_tick == game_time_get() + 1)
+		return;
+	actor->anticheat_tick = game_time_get() + 1;
+	network_anticheat_violation(actor->machine_index, _anticheat_forge, TRUE, 1.0f);
+}
+
 /* a machine's request, checked and made */
 static void forge_net_host_request(
 	struct forge_net_actor *actor,
@@ -1426,12 +1443,14 @@ static void forge_net_host_request(
 	{
 		actor->drops.malformed++;
 		forge_net.requests_dropped++;
+		forge_net_count_violation(actor);
 		return;
 	}
 	if (!forge_net_sequence_accept(&actor->sequence, request.sequence))
 	{
 		actor->drops.replayed++;
 		forge_net.requests_dropped++;
+		forge_net_count_violation(actor);
 		return;
 	}
 	if (!forge_net_bucket_take(&actor->requests, now, FORGE_NET_REQUESTS_PER_SECOND, FORGE_NET_REQUESTS_BURST, 1.f) ||

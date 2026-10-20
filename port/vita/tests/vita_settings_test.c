@@ -92,6 +92,15 @@ volatile int halo_forge_request_map = -1;
 char halo_forge_request_variant[HALO_FORGE_VARIANT_SIZE];
 volatile int halo_forge_request_network;
 volatile int halo_forge_net_hosting;
+/* (the Players page's: the hosted game's players as the main loop publishes
+them, network_anticheat.c; none hosted unless a test says so) */
+volatile int halo_host_players_serial;
+volatile int halo_host_players_count = -1;
+volatile int halo_host_players_machines[HALO_HOST_PLAYERS_MAXIMUM];
+char halo_host_players_names[HALO_HOST_PLAYERS_MAXIMUM][HALO_HOST_PLAYER_NAME_SIZE];
+volatile int halo_host_session_bans;
+volatile int halo_host_player_request;
+volatile int halo_host_player_answer;
 static const char *const test_forge_maps[3][2] = {
 	{ "Battle Creek", "beavercreek" }, { "Blood Gulch", "bloodgulch" }, { "Chill Out", "chillout" },
 };
@@ -1582,6 +1591,74 @@ static void test_mod_manager_page(void)
 }
 
 
+/* Multiplayer > Vita and PC > Players: the hosted game's players (none hosted:
+said), each kicked with cross, banned with triangle and for good with
+square, asked of the main loop (halo_host_player_request) and its answer
+said; Anti-cheat saved; Clear bans asked */
+static void test_players_page(void)
+{
+	check(to_tab("Multiplayer") && open_page("Vita and PC"), "Multiplayer > Vita and PC");
+	if (!open_page("Players"))
+	{
+		check(0, "Vita and PC: the Players row opens its page");
+		printf("%s\n--\n", menu);
+		return;
+	}
+	check(strstr(menu, "\n\x03Multiplayer > Players\n") && strstr(menu, "\n\x04You host no network game\n") &&
+		strstr(menu, "\nAnti-cheat\x02  On >\n") && strstr(menu, "\nClear bans\x02  >\n"),
+		"the Players page: none hosted, Anti-cheat and Clear bans");
+	/* a game hosted: two other machines' players */
+	halo_host_players_serial += 2;
+	halo_host_players_count = 2;
+	halo_host_players_machines[0] = 3;
+	snprintf(halo_host_players_names[0], HALO_HOST_PLAYER_NAME_SIZE, "Cheater");
+	halo_host_players_machines[1] = 5;
+	snprintf(halo_host_players_names[1], HALO_HOST_PLAYER_NAME_SIZE, "Honest");
+	halo_host_session_bans = 1;
+	press(VITA_BUTTON_DOWN);
+	press(VITA_BUTTON_UP);
+	check(strstr(menu, "\nCheater\x02  In your game\n") && strstr(menu, "\nHonest\x02  In your game\n") &&
+		strstr(menu, "\n\x04" "1 kept out of your games\n"), "the hosted game's players, and the machines kept out");
+	check(menu_fits() && menu_height_fits(), "the Players page fits");
+	to_line("Cheater");
+	check(strstr(menu, "Cross: kick  Triangle: ban  Circle: back") != NULL, "a player: kick and ban in the footer");
+	press(VITA_BUTTON_TRIANGLE);
+	check(halo_host_player_request == (HALO_HOST_PLAYER_BAN << 8 | 3), "triangle: the ban of machine 3 asked");
+	/* (the main loop answers) */
+	halo_host_player_answer = HALO_HOST_ANSWER_DONE;
+	halo_host_player_request = 0;
+	press(VITA_BUTTON_DOWN);
+	check(strstr(menu, "Banned Cheater from your games") != NULL, "the ban said");
+	clock_us += 6000000;
+	to_line("Honest");
+	press(VITA_BUTTON_CROSS);
+	check(halo_host_player_request == (HALO_HOST_PLAYER_KICK << 8 | 5), "cross: the kick of machine 5 asked");
+	halo_host_player_answer = HALO_HOST_ANSWER_GONE;
+	halo_host_player_request = 0;
+	press(VITA_BUTTON_UP);
+	check(strstr(menu, "That player is not in the game") != NULL, "a kick of a player gone: said");
+	clock_us += 6000000;
+	to_line("Cheater");
+	press(VITA_BUTTON_SQUARE);
+	check(halo_host_player_request == (HALO_HOST_PLAYER_BAN_ALWAYS << 8 | 3), "square: the ban for good asked");
+	halo_host_player_request = 0;
+	halo_host_player_answer = HALO_HOST_ANSWER_DONE;
+	clock_us += 6000000;
+	to_line("Clear bans");
+	press(VITA_BUTTON_CROSS);
+	check(halo_host_player_request == HALO_HOST_PLAYER_CLEAR_BANS << 8, "Clear bans asked");
+	halo_host_player_request = 0;
+	to_line("Anti-cheat");
+	press(VITA_BUTTON_RIGHT);
+	check(getenv("HALO_NET_ANTICHEAT") && !strcmp(getenv("HALO_NET_ANTICHEAT"), "false"), "Anti-cheat off: set");
+	press(VITA_BUTTON_LEFT);
+	halo_host_players_serial += 2;
+	halo_host_players_count = -1;
+	halo_host_session_bans = 0;
+	press(VITA_BUTTON_CIRCLE);
+	check(strstr(menu, "*Multiplayer") && !strstr(menu, "\n\x03"), "circle: back to Multiplayer");
+}
+
 /* Multiplayer > Friends (p2p_friends.h, the test's list): the code and the
 status, Add a friend (typed with the D-pad), Appear offline and Friends can
 join (saved), each entry with a word of its state, its doing on the help
@@ -2774,16 +2851,16 @@ static void test_tab_layouts(void)
 			old |= !strcmp(pages[index].name, "Screen") || !strcmp(pages[index].name, "First person") ||
 				!strcmp(pages[index].name, "Advanced") || !strcmp(pages[index].name, "General") ||
 				!strcmp(pages[index].name, "Graphics") || !strcmp(pages[index].name, "Audio");
-		check(!old && PAGE_GRAPHICS_DETAIL == TAB_COUNT && PAGE_COUNT == TAB_COUNT + 13 &&
+		check(!old && PAGE_GRAPHICS_DETAIL == TAB_COUNT && PAGE_COUNT == TAB_COUNT + 14 &&
 			!strcmp(pages[PAGE_GRAPHICS_DETAIL].name, "Detail") && !strcmp(pages[PAGE_GRAPHICS_PERFORMANCE].name, "Performance") &&
 			!strcmp(pages[PAGE_BUTTONS].name, "Button layout") && !strcmp(pages[PAGE_TOUCH].name, "Touch zones") &&
 			!strcmp(pages[PAGE_GYRO].name, "Gyro settings") && !strcmp(pages[PAGE_PLAY].name, "Play") &&
 			!strcmp(pages[PAGE_MAPS].name, "Modded maps") && !strcmp(pages[PAGE_DEV_AB].name, "A/B switches") &&
 			!strcmp(pages[PAGE_FORGE].name, "Forge and File Share") && !strcmp(pages[PAGE_MODS].name, "Mod manager") &&
 			!strcmp(pages[PAGE_FRIENDS].name, "Friends") && !strcmp(pages[PAGE_PARTY].name, "Party") &&
-			!strcmp(pages[PAGE_CROSSPLAY].name, "Vita and PC"),
+			!strcmp(pages[PAGE_CROSSPLAY].name, "Vita and PC") && !strcmp(pages[PAGE_PLAYERS].name, "Players"),
 			"the pages rows open: Detail, Performance, Button layout, Touch zones, Gyro settings, Play, Modded maps, Vita and PC, A/B "
-			"switches, Forge and File Share, Mod manager, Friends, Party (no Screen, First person or Advanced page; no "
+			"switches, Forge and File Share, Mod manager, Friends, Party, Players (no Screen, First person or Advanced page; no "
 			"General, Graphics or Audio tab)");
 	}
 	check(settings[0].variable && !strcmp(settings[0].variable, "HALO_PROFILE") && !strcmp(settings[1].variable, "HALO_RENDER_SCALE") &&
@@ -2929,7 +3006,7 @@ static void test_variables_kept(void)
 		"HALO_BOT_VEHICLES", "HALO_BOT_ROUTES", "HALO_BOT_PLAYLIST", "HALO_NET_COOP_PLAYERS", "HALO_NET_REMOTE_LOD",
 		"HALO_LANGUAGE", "HALO_UPDATE_CHANNEL", "HALO_PARTICLE_BUDGET", "HALO_FIRST_PERSON_LEGS", "HALO_RAGDOLLS",
 		"HALO_MCC_MODS", "HALO_PC_MAP_VEHICLES", "HALO_SHARP_UI", "HALO_PLAYER_MODEL", "HALO_FRIENDS_APPEAR_OFFLINE",
-		"HALO_FRIENDS_JOIN", "HALO_NET_BLOCK_MOUSE_AIM_ASSIST",
+		"HALO_FRIENDS_JOIN", "HALO_NET_BLOCK_MOUSE_AIM_ASSIST", "HALO_NET_ANTICHEAT",
 	};
 	int index, all = 1, choices = 0;
 
@@ -4526,6 +4603,7 @@ int main(void)
 	test_mod_manager_page();
 	test_friends_page();
 	test_party_page();
+	test_players_page();
 
 	/* ---------- Dev, behind its switch */
 	press(VITA_BUTTON_R);

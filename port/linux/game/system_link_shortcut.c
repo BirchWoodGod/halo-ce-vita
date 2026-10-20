@@ -95,6 +95,14 @@ char halo_forge_request_variant[HALO_FORGE_VARIANT_SIZE];
 /* ... on the network: hosted, others joining (0: a local game) */
 volatile int halo_forge_request_network;
 volatile int halo_forge_net_hosting;
+/* (the settings panel's Players page: network_anticheat.c) */
+volatile int halo_host_players_serial;
+volatile int halo_host_players_count = -1;
+volatile int halo_host_players_machines[HALO_HOST_PLAYERS_MAXIMUM];
+char halo_host_players_names[HALO_HOST_PLAYERS_MAXIMUM][HALO_HOST_PLAYER_NAME_SIZE];
+volatile int halo_host_session_bans;
+volatile int halo_host_player_request;
+volatile int halo_host_player_answer;
 
 /* (network_client_manager.c's client states, in its order) */
 enum
@@ -379,6 +387,13 @@ void system_link_shortcut_update(
 		extern void friends_game_update(boolean main_menu_loaded);
 
 		friends_game_update(main_menu_loaded);
+	}
+	/* (the settings panel's Players page: the hosted game's players, and its
+	KICK and BAN, answered here: network_anticheat.c) */
+	{
+		extern void network_anticheat_panel_update(void);
+
+		network_anticheat_panel_update();
 	}
 	/* (the settings panel's Mod manager page: its look and deletes,
 	answered here, on the game's thread: mod_manager.c) */

@@ -272,6 +272,9 @@ void distributed_note_own_round_trip(long time);
 /* (the host, in its tick) the client machine a player is on, NONE for none
 (the host's own players') */
 long distributed_player_machine(short player_index);
+/* (the host) a client's player's move taken or refused (kind: network_anticheat.h's
+_anticheat_move or _anticheat_vehicle_move): refused for seconds on end, counted against its machine */
+void distributed_note_move(short player_index, short kind, boolean taken);
 /* (the host, in its tick) whether the client's players can see the player
 (or the player is its own, or it has none alive to see with) */
 boolean distributed_machine_sees_player(long machine_index, short player_index);

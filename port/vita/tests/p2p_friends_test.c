@@ -695,6 +695,27 @@ static void test_appear_offline(void)
 		check(from_bravo == 0, "appearing offline: nothing sent");
 	}
 	check(entry_of(1, P2P_FRIEND_KIND_FRIEND, 0, &entry) && entry.online, "appearing offline: friends still seen");
+	/* (a friend's friend request to the code of a machine appearing offline,
+	which answered a friend who lost it: no ACCEPT, no presence, nothing
+	that says it is on; security review 1.1.1-beta.1 F-04) */
+	{
+		struct outgoing_record probe;
+		char code_b[P2P_FRIEND_CODE_SIZE];
+		int index, from_bravo = 0;
+
+		code_of(1, code_b);
+		use(0);
+		memset(&probe, 0, sizeof(probe));
+		check(code_normalize(code_b, probe.code), "the probe's code");
+		posix_random_bytes(probe.nonce, NONCE_LENGTH);
+		send_request(&probe);
+		sent = carried_count;
+		pass(6);
+		for (index = sent; index < carried_count; index++)
+			from_bravo += carried[index].from == 1;
+		check(from_bravo == 0, "appearing offline: a friend's request to the code answered with nothing");
+		check(count_of(0, P2P_FRIEND_KIND_FRIEND) == 1, "the friendship stands");
+	}
 	machines[1].test_appeared_offline = 0;
 	pass(8);
 	check(entry_of(0, P2P_FRIEND_KIND_FRIEND, 0, &entry) && entry.online, "online again");
@@ -1680,6 +1701,32 @@ static void test_party(void)
 	check(party_leader_of(1) == 1 && party_leader_of(2) == 1 && party_count_of(1, NULL) == 2,
 		"the leader gone silent: Bravo leads on both machines");
 	party_offline = -1;
+	/* (Bravo, leading, is Charlie's party member, not his friend: Charlie
+	follows him into no game by himself; security review F-07) */
+	{
+		struct p2p_party_follow follow;
+
+		int at;
+
+		hosts[1].hosting = 1;
+		for (at = 0; at < P2P_KEY_HASH_SIZE; at++)
+			hosts[1].key_hash[at] = (unsigned char)(0x60 + at);
+		for (at = 0; at < P2P_TOKEN_SIZE; at++)
+			hosts[1].token[at] = (unsigned char)(0x70 + at);
+		hosts[1].open = 1;
+		hosts[1].players = 1;
+		hosts[1].maximum = 16;
+		use(1);
+		p2p_friends_set_activity(P2P_FRIEND_STATE_MULTIPLAYER, "bloodgulch", "Slayer", 2, -1, 0, 1, 16);
+		party_pass(4);
+		check(!p2p_party_follow_pending(NULL) && (use(2), !p2p_party_follow_pending(&follow)) &&
+			machines[2].party.follow_result == P2P_PARTY_FOLLOW_FAILED,
+			"a leader not Charlie's friend: not followed by himself");
+		hosts[1].hosting = 0;
+		use(1);
+		p2p_friends_set_activity(P2P_FRIEND_STATE_MENUS, "", "", 0, -1, 0, 0, 0);
+		party_pass(2);
+	}
 	check(party_friend_id(1, 3, id) && (use(1), p2p_party_invite(id)) == P2P_PARTY_DONE, "Bravo, leading, invites Delta");
 	party_pass(2);
 	party_answer_all(3, 1);

@@ -502,7 +502,12 @@ void p2p_friends_heard(int which, const unsigned char *payload, int size);
 /* the outgoing queue: the index-th message (its serial, topic, payload and
 the brokers it went through, bit n broker n): its size, or -1 past the end;
 sent through a broker; the messages that went through every ready broker
-(or are old) let go */
+(or are old) let go. The payload's room: P2P_FRIENDS_PAYLOAD_ROOM bytes,
+which every message fits (p2p_friends.c checks it as it builds) */
+enum
+{
+	P2P_FRIENDS_PAYLOAD_ROOM = 512,
+};
 int p2p_friends_outgoing(int index, unsigned long *serial, char *topic, int topic_size, unsigned char *payload,
 	int *sent_mask);
 void p2p_friends_outgoing_sent(unsigned long serial, int broker);

@@ -4,7 +4,9 @@ cursor on a player as on Halo 3's roster, and Cross for the player's options - A
 request, no code typed: the two machines exchange friend cards over internet play first, only when
 the other player has friends on and does not appear offline), INVITE TO PARTY (a friend's player,
 p2p_party.h) and BLOCK (port/linux/src/p2p_friends.h,
-menu_functions.c "port h3 players ..."). Triangle opens it in the game's lobby (the waiting screen)
+menu_functions.c "port h3 players ..."); and, for the game's host, KICK (dropped; may join again) and
+BAN (dropped and kept out of the host's games while it runs, by the machine's address and hardware
+id: port/linux/game/network_anticheat.c). Triangle opens it in the game's lobby (the waiting screen)
 and on the carnage report, and with the scoreboard up (Back held) in a game. Listed in menus.txt (the
 lobby) and ingame.txt (the scoreboard and the carnage report), so it uses only what both sets have
 (the haze, the panel, the strip, the rule, the Cross and Circle icons; its row picture its own).
@@ -25,6 +27,8 @@ The art is this folder's own (tools/halo3_menu_art.py). -->
 		<string text="BLOCK"/>
 		<string text="Select"/>
 		<string text="INVITE TO PARTY"/>
+		<string text="KICK"/>
+		<string text="BAN"/>
 	</strings>
 
 	<widget name="h3/players/haze" left="0" top="0" width="640" height="480" bitmap="h3/haze"/>
@@ -144,7 +148,7 @@ The art is this folder's own (tools/halo3_menu_art.py). -->
 	</widget>
 
 	<!-- the player's options: Halo 3's question, ADD FRIEND and BLOCK (hidden for this PS Vita's own
-	players), Back first -->
+	players), Back first; KICK and BAN shown to the game's host alone -->
 	<widget name="h3/players/options_panel" left="120" top="120" width="400" height="230" bitmap="h3/panel"/>
 	<widget name="h3/players/options_title" type="text" left="132" top="126" width="376" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1"/>
 	<widget name="h3/players/options_rule" left="120" top="154" width="400" height="2" bitmap="h3/rule"/>
@@ -162,12 +166,21 @@ The art is this folder's own (tools/halo3_menu_art.py). -->
 	<widget name="h3/players/option_party" type="text" width="376" height="18" bitmap="h3/players_row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/players_text" string_index="9">
 		<on event="a" run="port h3 players option" back="true"/>
 	</widget>
+	<!-- (the host's: another machine's player dropped, or dropped and kept out) -->
+	<widget name="h3/players/option_kick" type="text" width="376" height="18" bitmap="h3/players_row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/players_text" string_index="10">
+		<on event="a" run="port h3 players option" back="true"/>
+	</widget>
+	<widget name="h3/players/option_ban" type="text" width="376" height="18" bitmap="h3/players_row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/players_text" string_index="11">
+		<on event="a" run="port h3 players option" back="true"/>
+	</widget>
 	<widget name="h3/players/options_list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<data input="port h3 players options"/>
 		<child widget="h3/players/option_back" y="0"/>
-		<child widget="h3/players/option_add" y="20"/>
-		<child widget="h3/players/option_block" y="40"/>
-		<child widget="h3/players/option_party" y="60"/>
+		<child widget="h3/players/option_add" y="18"/>
+		<child widget="h3/players/option_block" y="36"/>
+		<child widget="h3/players/option_party" y="54"/>
+		<child widget="h3/players/option_kick" y="72"/>
+		<child widget="h3/players/option_ban" y="90"/>
 	</widget>
 	<widget name="h3/players/options_strip" left="120" top="330" width="400" height="20" bitmap="h3/strip"/>
 	<widget name="h3/players/options_a_butn" left="132" top="332" width="16" height="16" bitmap="h3/glyph_cross"/>
@@ -186,6 +199,6 @@ The art is this folder's own (tools/halo3_menu_art.py). -->
 		<child widget="h3/players/options_a_label"/>
 		<child widget="h3/players/options_b_butn"/>
 		<child widget="h3/players/options_back"/>
-		<child widget="h3/players/options_list" x="132" y="250"/>
+		<child widget="h3/players/options_list" x="132" y="222"/>
 	</widget>
 </menus>

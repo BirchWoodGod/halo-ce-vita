@@ -38,6 +38,45 @@ extern volatile int halo_forge_net_hosting;
 /* (SYSTEM_LINK_REQUEST_FORGE) a map variant's file name's room */
 #define HALO_FORGE_VARIANT_SIZE 40
 
+/* the other machines' players of the network game this machine hosts, for
+the settings panel's Players page (its KICK and BAN: the game's side,
+port/linux/game/network_anticheat.c), published by the main loop twice a
+second: halo_host_players_count -1 while it hosts none, the serial odd
+while they are written; the names ASCII, ended */
+enum
+{
+	HALO_HOST_PLAYERS_MAXIMUM = 16,
+	HALO_HOST_PLAYER_NAME_SIZE = 16,
+};
+extern volatile int halo_host_players_serial;
+extern volatile int halo_host_players_count;
+extern volatile int halo_host_players_machines[HALO_HOST_PLAYERS_MAXIMUM];
+extern char halo_host_players_names[HALO_HOST_PLAYERS_MAXIMUM][HALO_HOST_PLAYER_NAME_SIZE];
+/* ... the machines kept out for the session (its bans, the anti-cheat
+limit's), and whether the anti-cheat limit drops machines */
+extern volatile int halo_host_session_bans;
+/* the panel's request: HALO_HOST_PLAYER_* << 8 | the player's machine (0:
+none), answered in halo_host_player_answer (HALO_HOST_ANSWER_*) and set
+back to 0 */
+enum
+{
+	HALO_HOST_PLAYER_KICK = 1,
+	/* (dropped and kept out while this machine runs) */
+	HALO_HOST_PLAYER_BAN,
+	/* (and in bans.txt: for good) */
+	HALO_HOST_PLAYER_BAN_ALWAYS,
+	/* (the session's bans let go; no machine) */
+	HALO_HOST_PLAYER_CLEAR_BANS,
+};
+enum
+{
+	HALO_HOST_ANSWER_NONE,
+	HALO_HOST_ANSWER_DONE,
+	HALO_HOST_ANSWER_GONE,
+};
+extern volatile int halo_host_player_request;
+extern volatile int halo_host_player_answer;
+
 enum
 {
 	SYSTEM_LINK_ANSWER_NONE,

@@ -787,6 +787,17 @@ across. The crossplay wire now uses OpenCE's three (checked byte for byte in
 p2p_lobby_test); the legacy wire keeps four. A friend's private game with a
 password sends its sealed token to friends only, opened with the same key.
 
+**A modified PC client (1.1.1-beta.1).** A PC player can change anything
+in their game's memory. The host decides what matters and refuses what it
+can check, and since 1.1.1 it counts what it refuses and drops a machine
+that keeps sending what only a modified game sends (forged hits, hits
+through walls or of an empty weapon, moves refused for seconds on end),
+keeping it out of its games for ten minutes by its real address and
+hardware id; the host's KICK and BAN are in its menus
+(`port/linux/game/network_anticheat.c`; `port/linux/NETCODE.md`, "A
+modified client"; `docs/security-review-1.1.1-beta.1.md`). The same checks
+apply to a PC client and a Vita.
+
 **Leaks and identity.** As 7.2: a PC peer sees the Vita's address (no relay
 on the crossplay wire); the help says so (Who can join). Hardware ids are
 self-reported. Friends' messages never ride the tunnel to PC peers.

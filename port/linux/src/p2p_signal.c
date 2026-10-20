@@ -2829,7 +2829,8 @@ its bucket allows, past what is kept back for answers to joiners and the
 listing (or, flushing, whatever the bucket: internet play stopping) */
 static void broker_update_friends(struct broker *broker, int broker_index, int flushing)
 {
-	unsigned char payload[MAXIMUM_MESSAGE_SIZE + P2P_SEAL_OVERHEAD];
+	/* (p2p_friends_outgoing copies a message whole: the room it needs) */
+	unsigned char payload[P2P_FRIENDS_PAYLOAD_ROOM];
 	char topic[TOPIC_SIZE];
 	unsigned long serial;
 	int index, size, sent_mask;

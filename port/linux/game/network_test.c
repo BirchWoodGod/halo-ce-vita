@@ -89,6 +89,7 @@ Called from the main loop every frame (main.c).
 #include "game/game_engine.h"
 #include "game/game_engine_playlist.h"
 #include "game/players.h"
+#include "game/player_control.h"
 #include "objects/objects.h"
 #include "units/units.h"
 #include "units/unit_definitions.h"
@@ -97,6 +98,7 @@ Called from the main loop every frame (main.c).
 #include "items/projectile_definitions.h"
 #include "items/items.h"
 #include "objects/damage.h"
+#include "physics/collisions.h"
 #include "scenario/scenario.h"
 #include "scenario/scenario_definitions.h"
 #include "tag_files/tag_files.h"
@@ -140,6 +142,7 @@ void network_damage_statistics(long *sent_reports, long *dealt_reports, long *re
 void network_actors_client_statistics(long *tracked, long *most, long *untracked, long *rejected);
 /* xinput_sdl.c's */
 void test_input_hold_action(int hold);
+void test_input_hold_fire(int hold);
 void test_input_hold_back(int hold);
 void test_input_hold_still(int hold);
 /* game_engine.c's */
@@ -910,6 +913,24 @@ static void network_test_shoot(
 		if (weapon_index == NONE)
 			continue;
 		weapon = weapon_definition_get(object_get(weapon_index)->definition_index);
+		/* (no shot from a weapon whose first trigger's magazine has no
+		rounds: a player's could not be fired, and the host refuses its
+		hits) */
+		if (weapon->weapon.triggers.count > 0)
+		{
+			struct weapon_trigger_definition *first = TAG_BLOCK_GET_ELEMENT(&weapon->weapon.triggers, 0,
+				struct weapon_trigger_definition);
+			struct weapon_datum *datum = (struct weapon_datum *)object_get(weapon_index);
+
+			if (first->rounds_per_shot > 0 && first->magazine_index >= 0 &&
+				first->magazine_index < weapon->weapon.magazines.count &&
+				first->magazine_index < (short)NUMBEROF(datum->weapon.magazines) &&
+				datum->weapon.magazines[first->magazine_index].rounds_loaded <= 0 &&
+				datum->weapon.magazines[first->magazine_index].rounds_total <= 0)
+			{
+				continue;
+			}
+		}
 		if (weapon->weapon.triggers.count > 0)
 		{
 			trigger = TAG_BLOCK_GET_ELEMENT(&weapon->weapon.triggers, 0, struct weapon_trigger_definition);
@@ -947,8 +968,28 @@ static void network_test_shoot(
 			if (dx * dx + dy * dy + dz * dz > 1.5f * 1.5f)
 				continue;
 		}
+		/* (a shot that this machine sees no line to - a hill, a wall between -
+		is not one a player could land: not made, so that the host's check of
+		a shot's line of sight, network_damage.c, sees honest shots alone) */
+		if (!melee)
+		{
+			real_point3d eye;
+			real_vector3d line;
+
+			unit_get_camera_position(player->unit_index, &eye);
+			line.i = target_object->object.bounding_sphere_center.x - eye.x;
+			line.j = target_object->object.bounding_sphere_center.y - eye.y;
+			line.k = target_object->object.bounding_sphere_center.z - eye.z;
+			if (collision_test_vector_obstructed(FLAG(_collision_test_front_facing_surfaces_bit) |
+				FLAG(_collision_test_structure_bit), &eye, &line, player->unit_index))
+			{
+				continue;
+			}
+		}
 		/* (a shot reaches no further than its projectile flies, with a margin
 		for how far the target is from where the shot started) */
+		if (melee)
+			;
 		else if (reach > 0.0f)
 		{
 			real dx = target_object->object.position.x - unit->object.position.x;
@@ -976,6 +1017,249 @@ static void network_test_shoot(
 			(long)DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.datum_index), (long)(target - (struct player_datum *)player_data->data));
 	}
 }
+
+#ifndef HALO_RELEASE
+/* (test builds) HALO_NETWORK_TEST_AIM=1: this machine's players face the
+nearest other living player and hold the trigger: an honest player who
+fights the whole game, real shots, reloads and ammunition, around corners
+and through the open (the host's checks of their hits must take what hit:
+network_damage.c).
+
+HALO_NETWORK_TEST_CHEAT=<kind>,... (a joiner): a modified client, for the
+host's anti-cheat (network_anticheat.c) to drop and keep out: "damage" its
+hits ten times as hard as its weapon deals, once a second; "wall" its hits
+on the other player wherever they are, through walls and hills, every tick
+it can; "fly" its player held 4 world units above where it would be;
+"ammo" its weapon kept full (the host's copy runs dry) */
+static struct
+{
+	boolean read;
+	boolean aim;
+	boolean damage;
+	boolean wall;
+	boolean fly;
+	boolean ammo;
+	boolean holding;
+	long fly_unit;
+	real_point3d fly_position;
+} network_test_cheat;
+
+/* the nearest other living player's unit to this one (NONE: none) */
+static long network_test_nearest_enemy(
+	long unit_index)
+{
+	struct data_iterator iterator;
+	struct player_datum *player;
+	long nearest = NONE;
+	real best = 0.0f;
+
+	data_iterator_new(&iterator, player_data);
+	while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+	{
+		real dx, dy, dz, distance;
+
+		if (player->unit_index == NONE || player->unit_index == unit_index ||
+			TEST_FLAG(object_get(player->unit_index)->object.damage_flags, _object_dead_bit))
+		{
+			continue;
+		}
+		dx = object_get(player->unit_index)->object.position.x - object_get(unit_index)->object.position.x;
+		dy = object_get(player->unit_index)->object.position.y - object_get(unit_index)->object.position.y;
+		dz = object_get(player->unit_index)->object.position.z - object_get(unit_index)->object.position.z;
+		distance = dx * dx + dy * dy + dz * dz;
+		if (nearest == NONE || distance < best)
+		{
+			nearest = player->unit_index;
+			best = distance;
+		}
+	}
+	return nearest;
+}
+
+/* (test builds) HALO_NETWORK_TEST_RAY_BENCH=1: once in a game, the host's
+anti-cheat rays timed where its first player stands (network_anticheat.c,
+NETCODE.md "A modified client"): 2000 of a move's (0.2 world units, the
+map's structure as a shot meets it) and 500 of a shot's (20 world units),
+in microseconds a ray, logged ("network test: rays") */
+static void network_test_ray_bench(
+	void)
+{
+	static boolean done;
+	unsigned long long vita_host_time_us(void);
+	unsigned long collision_flags = FLAG(_collision_test_front_facing_surfaces_bit) |
+		FLAG(_collision_test_ignore_two_sided_surfaces_bit) | FLAG(_collision_test_ignore_invisible_surfaces_bit) |
+		FLAG(_collision_test_ignore_breakable_surfaces_bit) | FLAG(_collision_test_structure_bit);
+	struct data_iterator iterator;
+	struct player_datum *player;
+	long unit_index = NONE;
+	real_point3d center;
+	unsigned long long started, short_us, long_us;
+	long index, obstructed = 0;
+
+	if (done || !getenv("HALO_NETWORK_TEST_RAY_BENCH") || game_time_get() < 10 * TICKS_PER_SECOND)
+		return;
+	data_iterator_new(&iterator, player_data);
+	while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL && unit_index == NONE)
+		unit_index = player->unit_index;
+	if (unit_index == NONE)
+		return;
+	done = TRUE;
+	center = object_get(unit_index)->object.bounding_sphere_center;
+	started = vita_host_time_us();
+	for (index = 0; index < 2000; index++)
+	{
+		real angle = (real)index * 0.7f;
+		real_vector3d vector;
+
+		vector.i = 0.2f * (real)cos(angle);
+		vector.j = 0.2f * (real)sin(angle);
+		vector.k = 0.02f * (real)sin(angle * 3.0f);
+		obstructed += collision_test_vector_obstructed(collision_flags, &center, &vector, unit_index) != 0;
+	}
+	short_us = vita_host_time_us() - started;
+	started = vita_host_time_us();
+	for (index = 0; index < 500; index++)
+	{
+		real angle = (real)index * 0.7f;
+		real_vector3d vector;
+
+		vector.i = 20.0f * (real)cos(angle);
+		vector.j = 20.0f * (real)sin(angle);
+		vector.k = 1.0f * (real)sin(angle * 3.0f);
+		obstructed += collision_test_vector_obstructed(collision_flags, &center, &vector, unit_index) != 0;
+	}
+	long_us = vita_host_time_us() - started;
+	platform_log("network test: rays: a move's (0.2 wu) %.3f us, a shot's (20 wu) %.3f us; %ld of 2500 obstructed",
+		(double)short_us / 2000.0, (double)long_us / 500.0, obstructed);
+}
+
+/* (each frame in a level) the aim and the cheats */
+static void network_test_aim_and_cheat(
+	void)
+{
+	struct data_iterator iterator;
+	struct player_datum *player;
+	boolean fired = FALSE;
+
+	if (!network_test_cheat.read)
+	{
+		char const *cheats = getenv("HALO_NETWORK_TEST_CHEAT");
+
+		network_test_cheat.read = TRUE;
+		network_test_cheat.aim = getenv("HALO_NETWORK_TEST_AIM") && atoi(getenv("HALO_NETWORK_TEST_AIM"));
+		if (cheats && game_connection() != _game_connection_network_server)
+		{
+			network_test_cheat.damage = strstr(cheats, "damage") != NULL;
+			network_test_cheat.wall = strstr(cheats, "wall") != NULL;
+			network_test_cheat.fly = strstr(cheats, "fly") != NULL;
+			network_test_cheat.ammo = strstr(cheats, "ammo") != NULL;
+			platform_log("network test: playing as a modified client: %s", cheats);
+		}
+		network_test_cheat.fly_unit = NONE;
+	}
+	if (!network_test_cheat.aim && !network_test_cheat.damage && !network_test_cheat.wall && !network_test_cheat.fly &&
+		!network_test_cheat.ammo)
+	{
+		return;
+	}
+	data_iterator_new(&iterator, player_data);
+	while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+	{
+		struct unit_datum *unit;
+		long target_index;
+		long weapon_index;
+
+		if (player->local_player_index == NONE || player->unit_index == NONE ||
+			TEST_FLAG(object_get(player->unit_index)->object.damage_flags, _object_dead_bit))
+		{
+			continue;
+		}
+		unit = unit_get(player->unit_index);
+		target_index = network_test_nearest_enemy(player->unit_index);
+		weapon_index = unit->unit.current_weapon_index != NONE ?
+			unit->unit.weapon_object_indices[unit->unit.current_weapon_index] : NONE;
+		if ((network_test_cheat.aim || network_test_cheat.ammo) && target_index != NONE)
+		{
+			real_vector3d facing;
+			real_point3d from, to;
+
+			unit_get_camera_position(player->unit_index, &from);
+			to = object_get(target_index)->object.bounding_sphere_center;
+			facing.i = to.x - from.x;
+			facing.j = to.y - from.y;
+			facing.k = to.z - from.z;
+			if (normalize3d(&facing) > 0.0f)
+				player_control_set_facing(player->local_player_index, &facing);
+			fired = TRUE;
+		}
+		/* (a modified client's weapon never empties) */
+		if (network_test_cheat.ammo && weapon_index != NONE)
+		{
+			struct weapon_datum *weapon = (struct weapon_datum *)object_try_and_get_and_verify_type(weapon_index,
+				_object_mask_weapon);
+
+			if (weapon)
+			{
+				weapon->weapon.magazines[0].rounds_loaded = MAX(weapon->weapon.magazines[0].rounds_loaded, 30);
+				weapon->weapon.age = 0.0f;
+			}
+		}
+		/* (held in the air: put back each frame where the host's corrections
+		took it from) */
+		if (network_test_cheat.fly && unit->object.parent_object_index == NONE)
+		{
+			if (network_test_cheat.fly_unit != player->unit_index)
+			{
+				network_test_cheat.fly_unit = player->unit_index;
+				network_test_cheat.fly_position = unit->object.position;
+				network_test_cheat.fly_position.z += 4.0f;
+			}
+			object_set_position(player->unit_index, &network_test_cheat.fly_position, NULL, NULL);
+			unit->object.translational_velocity.k = 0.0f;
+		}
+		/* (hits no honest client reports: through walls, or ten times as hard
+		as the weapon deals) */
+		if ((network_test_cheat.damage && game_time_get() % TICKS_PER_SECOND == 0) ||
+			(network_test_cheat.wall && game_time_get() % 3 == 0))
+		{
+			if (target_index != NONE && weapon_index != NONE)
+			{
+				struct weapon_definition *weapon = weapon_definition_get(object_get(weapon_index)->definition_index);
+				struct weapon_trigger_definition *trigger = weapon->weapon.triggers.count > 0 ?
+					TAG_BLOCK_GET_ELEMENT(&weapon->weapon.triggers, 0, struct weapon_trigger_definition) : NULL;
+				long damage_index = trigger && trigger->projectile.index != NONE ?
+					projectile_definition_get(trigger->projectile.index)->projectile.impact_damage.index : NONE;
+
+				if (damage_index != NONE)
+				{
+					struct damage_data damage;
+					real_vector3d direction;
+
+					damage_data_new(&damage, damage_index);
+					damage.owner_player_index = iterator.datum_index;
+					damage.owner_object_index = player->unit_index;
+					damage.owner_team_index = unit->object.owner_team_index;
+					damage.origin = object_get(target_index)->object.bounding_sphere_center;
+					damage.epicenter = damage.origin;
+					direction.i = damage.origin.x - unit->object.position.x;
+					direction.j = damage.origin.y - unit->object.position.y;
+					direction.k = damage.origin.z - unit->object.position.z;
+					normalize3d(&direction);
+					damage.direction = direction;
+					damage.scale = network_test_cheat.damage && game_time_get() % TICKS_PER_SECOND == 0 ? 10.0f : 1.0f;
+					scenario_location_from_point(&damage.location, &damage.epicenter);
+					object_cause_damage(&damage, target_index, NONE, NONE, NONE, NULL);
+				}
+			}
+		}
+	}
+	if (fired != network_test_cheat.holding)
+	{
+		network_test_cheat.holding = fired;
+		test_input_hold_fire(fired);
+	}
+}
+#endif
 
 /* the host seats the last player as the nearest vehicle's driver, or out */
 /* the host brings the players far from the first (on foot) near it, so
@@ -1355,6 +1639,13 @@ void network_test_update(
 	game's time starts over) */
 	if (game_in_progress() && game_time_get() < network_test.logged_time)
 		network_test.logged_time = 0;
+#ifndef HALO_RELEASE
+	if (game_in_progress() && !main_menu_loaded)
+	{
+		network_test_aim_and_cheat();
+		network_test_ray_bench();
+	}
+#endif
 	if (game_in_progress() && !main_menu_loaded && game_time_get() - network_test.logged_time >= TICKS_PER_SECOND)
 	{
 		network_test.logged_time = game_time_get();
