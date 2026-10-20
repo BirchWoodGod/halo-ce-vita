@@ -976,6 +976,7 @@ enum
 	SCREEN_FRIEND_CONFIRM,
 	/* the Party page: the question before the leader removes a member */
 	SCREEN_PARTY_CONFIRM,
+	SCREEN_BAN_CONFIRM,
 };
 static int screen;
 /* the code being typed (eight characters of P2P_CODE_ALPHABET) and the
@@ -2970,26 +2971,71 @@ static void host_players_refresh(void)
 	}
 }
 
+/* (SCREEN_BAN_CONFIRM) the player a ban for good waits on */
+static int ban_confirm_index = -1;
+static char ban_confirm_name[HALO_HOST_PLAYER_NAME_SIZE];
+static int ban_confirm_machine;
+
+/* a kick or ban asked of the game's main loop */
+static void host_player_request(int how, const char *name, int machine)
+{
+	char log[128];
+
+	host_player_asked = how;
+	memcpy(host_player_asked_name, name, HALO_HOST_PLAYER_NAME_SIZE);
+	__atomic_store_n(&halo_host_player_answer, HALO_HOST_ANSWER_NONE, __ATOMIC_RELEASE);
+	__atomic_store_n(&halo_host_player_request, how << 8 | (machine & 0xFF), __ATOMIC_RELEASE);
+	snprintf(log, sizeof(log), "settings: players: %s %s", how == HALO_HOST_PLAYER_KICK ? "kick" :
+		how == HALO_HOST_PLAYER_BAN ? "ban (session)" : "ban (for good)", host_player_asked_name);
+	vita_host_log(log);
+}
+
 /* a Players page's line's buttons: Cross kicks, Triangle bans for the
-session, Square for good (bans.txt); asked of the game's main loop */
+session, Square for good (bans.txt) once its question is answered */
 static void host_player_input(const struct line *line, unsigned long pressed)
 {
 	int how = (pressed & VITA_BUTTON_CROSS) ? HALO_HOST_PLAYER_KICK : (pressed & VITA_BUTTON_TRIANGLE) ?
 		HALO_HOST_PLAYER_BAN : (pressed & VITA_BUTTON_SQUARE) ? HALO_HOST_PLAYER_BAN_ALWAYS : 0;
-	char log[128];
 
 	if (!how || line->index < 0 || line->index >= host_players_count ||
 		__atomic_load_n(&halo_host_player_request, __ATOMIC_ACQUIRE))
 	{
 		return;
 	}
-	host_player_asked = how;
-	memcpy(host_player_asked_name, host_players_names[line->index], HALO_HOST_PLAYER_NAME_SIZE);
-	__atomic_store_n(&halo_host_player_answer, HALO_HOST_ANSWER_NONE, __ATOMIC_RELEASE);
-	__atomic_store_n(&halo_host_player_request, how << 8 | (host_players_machines[line->index] & 0xFF), __ATOMIC_RELEASE);
-	snprintf(log, sizeof(log), "settings: players: %s %s", how == HALO_HOST_PLAYER_KICK ? "kick" :
-		how == HALO_HOST_PLAYER_BAN ? "ban (session)" : "ban (for good)", host_player_asked_name);
-	vita_host_log(log);
+	if (how == HALO_HOST_PLAYER_BAN_ALWAYS)
+	{
+		ban_confirm_index = line->index;
+		memcpy(ban_confirm_name, host_players_names[line->index], HALO_HOST_PLAYER_NAME_SIZE);
+		ban_confirm_name[HALO_HOST_PLAYER_NAME_SIZE - 1] = 0;
+		ban_confirm_machine = host_players_machines[line->index];
+		screen = SCREEN_BAN_CONFIRM;
+		vita_host_log("settings: players: ban for good asked");
+		return;
+	}
+	host_player_request(how, host_players_names[line->index], host_players_machines[line->index]);
+}
+
+/* the question before a ban for good (square) */
+static void show_ban_confirm(void)
+{
+	char text[512];
+
+	snprintf(text, sizeof(text), T("BAN FOR GOOD\n\n%.20s\n\nThey can't join your games again until you\nuse Clear bans.\n"
+		"Cross: ban   O: back"), ban_confirm_name);
+	vgxm_menu_set(text, -1);
+}
+
+/* the question's buttons */
+static void ban_confirm_input(unsigned long pressed)
+{
+	if (pressed & VITA_BUTTON_CIRCLE)
+		screen = SCREEN_LIST;
+	else if (pressed & VITA_BUTTON_CROSS)
+	{
+		screen = SCREEN_LIST;
+		if (!__atomic_load_n(&halo_host_player_request, __ATOMIC_ACQUIRE))
+			host_player_request(HALO_HOST_PLAYER_BAN_ALWAYS, ban_confirm_name, ban_confirm_machine);
+	}
 }
 
 /* the lines of the page shown: its rows, each heading (headings) above the
@@ -4636,6 +4682,8 @@ static void show(void)
 		show_friend_confirm();
 	else if (screen == SCREEN_PARTY_CONFIRM)
 		show_party_confirm();
+	else if (screen == SCREEN_BAN_CONFIRM)
+		show_ban_confirm();
 	else
 		show_list();
 }
@@ -6138,6 +6186,13 @@ int vita_settings_input(const struct vita_host_pad *pad)
 	if (screen == SCREEN_PARTY_CONFIRM)
 	{
 		party_confirm_input(pressed);
+		if (pressed)
+			show();
+		return 1;
+	}
+	if (screen == SCREEN_BAN_CONFIRM)
+	{
+		ban_confirm_input(pressed);
 		if (pressed)
 			show();
 		return 1;
