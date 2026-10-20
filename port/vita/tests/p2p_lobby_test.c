@@ -58,7 +58,21 @@ void posix_random_bytes(void *buffer, unsigned long size)
 	for (index = 0; index < size; index++)
 		bytes[index] = (unsigned char)(0x5a + counter++ * 7);
 }
-unsigned long p2p_now(void) { return clock_now; }
+/* (burst_checks: the clock real, running clock_scale times as fast - a
+Vita's signature check takes some 30 times this machine's - from
+clock_now) */
+static int clock_real;
+static double clock_scale = 1.0;
+static struct timespec clock_base;
+static unsigned long real_ms(void)
+{
+	struct timespec now;
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (unsigned long)(((double)(now.tv_sec - clock_base.tv_sec) * 1000.0 +
+		(double)(now.tv_nsec - clock_base.tv_nsec) / 1e6) * clock_scale);
+}
+unsigned long p2p_now(void) { return clock_real ? clock_now + real_ms() : clock_now; }
 int config_boolean(const char *name) { return !strcmp(name, "network.public_lobby"); }
 /* (port/linux/src/network_wire.c's: the hosted game's wire, the PC host's
 stand-in and the browsers' filter, a check's; the wire a listing is heard
@@ -1168,6 +1182,301 @@ static int entry_of(const char *id, struct p2p_lobby_entry *entry)
 }
 
 #ifndef P2P_LOBBY_FUZZ
+/* ---------- a flood of retained listings, as brokers send them all at once
+to a browser that subscribes (insider.15/16's logs: 1386 heard, 981 dropped
+past the queue): burst_checks, and the files of run_browser_flood_test.sh */
+
+struct flood_listing
+{
+	int crossplay;
+	char slot[2 * P2P_KEY_HASH_SIZE + 1];
+	unsigned char payload[P2P_MAXIMUM_LISTING_SIZE];
+	int size;
+};
+
+/* host number's listing on a wire: its sequence, its time this many seconds
+off flood_time (the same listing the same on every broker), its network
+version this much off this build's, signed with the host's own key (its
+seed from number) */
+static unsigned long flood_time;
+static void flood_listing_make(int number, int crossplay, unsigned long sequence, long time_offset, int version_offset,
+	struct flood_listing *out)
+{
+	unsigned char hash[P2P_KEY_HASH_SIZE];
+	unsigned int version = network_wire_version_of(crossplay) + (unsigned int)version_offset;
+	char saved_name[sizeof(lobby.name)];
+	int saved_crossplay, saved_password;
+	unsigned long saved_sequence;
+
+	memset(seed, 0, sizeof(seed));
+	seed[0] = 0xF1;
+	seed[1] = (unsigned char)(number >> 8);
+	seed[2] = (unsigned char)number;
+	p2p_ed25519_public(seed, signing_key, x25519_secret);
+	p2p_x25519(x25519_public, x25519_secret, NULL);
+	pthread_mutex_lock(&p2p_lock);
+	saved_crossplay = lobby.listed_crossplay;
+	saved_password = lobby.has_password;
+	saved_sequence = lobby.sequence;
+	memcpy(saved_name, lobby.name, sizeof(saved_name));
+	lobby.listed_crossplay = crossplay;
+	lobby.has_password = 0;
+	lobby.sequence = sequence - 1;
+	snprintf(lobby.name, sizeof(lobby.name), "Flood %04d", number);
+	out->size = listing_make(out->payload, _listing_open);
+	lobby.listed_crossplay = saved_crossplay;
+	lobby.has_password = saved_password;
+	lobby.sequence = saved_sequence;
+	memcpy(lobby.name, saved_name, sizeof(saved_name));
+	pthread_mutex_unlock(&p2p_lock);
+	out->payload[3] = (unsigned char)(version >> 8);
+	out->payload[4] = (unsigned char)version;
+	put_long(out->payload + 10, flood_time + (unsigned long)time_offset);
+	resign(out->payload, out->size, crossplay ? crossplay_signature_label : signature_label);
+	p2p_key_hash(x25519_public, hash);
+	p2p_hex(hash, P2P_KEY_HASH_SIZE, out->slot);
+	out->crossplay = crossplay;
+}
+
+/* what each of brokers holds retained: the live games (fresh, this build's
+version; a quarter on the crossplay wire where this build reads it; the last
+broker holding an older listing of every third, as a broker that missed a
+publish does), stale copies of hosts long gone (an hour old: three quarters
+the same on every broker, the rest each broker's own) and hosts of another
+version (OpenCE's newer PC builds), in an order of each broker's own. Each
+list is malloc'd; the browser must show the live games, all of them */
+static int flood_plan(int brokers, int live, int stale, int other, struct flood_listing **lists)
+{
+#ifdef HALO_PORT_VITA_NETWORK
+	const int wires = 2;
+#else
+	const int wires = 1;
+#endif
+	int broker, count = live + stale + other;
+
+	flood_time = (unsigned long)time(NULL);
+	for (broker = 0; broker < brokers; broker++)
+	{
+		struct flood_listing *list = malloc(sizeof(*list) * (size_t)count);
+		unsigned int random = 12345u + (unsigned int)broker * 977u;
+		int index, used = 0;
+
+		if (!list)
+			return 0;
+		for (index = 0; index < live; index++)
+		{
+			int older = broker == brokers - 1 && index % 3 == 0;
+
+			flood_listing_make(index, wires > 1 && index % 4 == 3, older ? 9 : 10, 0, 0, &list[used++]);
+		}
+		for (index = 0; index < stale; index++)
+		{
+			int number = index < stale * 3 / 4 ? 1000 + index : 2000 + broker * 1000 + index;
+
+			flood_listing_make(number, wires > 1 && index % 2, 4, -7200, 0, &list[used++]);
+		}
+		for (index = 0; index < other; index++)
+			flood_listing_make(9000 + index, wires > 1, 4, 0, 40, &list[used++]);
+		/* (each broker's own order) */
+		for (index = count - 1; index > 0; index--)
+		{
+			struct flood_listing swap;
+			int other_index;
+
+			random = random * 1103515245u + 12345u;
+			other_index = (int)((random >> 8) % (unsigned int)(index + 1));
+			swap = list[index];
+			list[index] = list[other_index];
+			list[other_index] = swap;
+		}
+		lists[broker] = list;
+	}
+	/* (this machine's own key again: none of the flood's) */
+	memset(seed, 0, sizeof(seed));
+	seed[0] = 42;
+	p2p_ed25519_public(seed, signing_key, x25519_secret);
+	p2p_x25519(x25519_public, x25519_secret, NULL);
+	return count;
+}
+
+/* 3 brokers each sending ~500 retained listings at once as the browser
+subscribes, as fast as p2p_signal.c reads them (each pass of the p2p
+thread: up to MAXIMUM_BROKER_READS of 4096 bytes from each broker), on a
+clock running at a Vita's pace for the signatures (clock_scale): no listing
+dropped past the queue, every live game shown */
+static void burst_checks(void)
+{
+	enum { BROKERS = 3, LIVE = 60, STALE = 400, OTHER = 40, PASS_BYTES = 8 * 4096 };
+	struct flood_listing *lists[BROKERS];
+	int position[BROKERS] = { 0 };
+	int count, broker, more, passes = 0, arrival_passes, heard = 0, shown;
+	int past_queue, stale_dropped, other_dropped, older_dropped, signature_dropped, repeated, room;
+	unsigned long slowest_enqueue_us = 0, verify_us;
+	struct timespec start, end;
+
+	count = flood_plan(BROKERS, LIVE, STALE, OTHER, lists);
+	check(count == LIVE + STALE + OTHER, "the flood's listings made");
+	if (count != LIVE + STALE + OTHER)
+		return;
+	/* (one signature check on this machine, for the scale) */
+	{
+		struct listing read;
+		int index;
+
+		p2p_lobby_listing_read(lists[0][0].crossplay, lists[0][0].payload, lists[0][0].size, &read);
+		clock_gettime(CLOCK_MONOTONIC, &start);
+		for (index = 0; index < 100; index++)
+			listing_signed(lists[0][0].payload, &read);
+		clock_gettime(CLOCK_MONOTONIC, &end);
+		verify_us = (unsigned long)(((double)(end.tv_sec - start.tv_sec) * 1e6 +
+			(double)(end.tv_nsec - start.tv_nsec) / 1e3) / 100.0);
+	}
+	p2p_lobby_browse(0);
+	clock_now += 20 * 60000;
+	p2p_lobby_browse(1);
+	/* (no summary while it runs: its counts are this check's) */
+	lobby.summary_time = 0;
+	lobby.summary_logged_time = now_stamp();
+	clock_scale = 30.0;
+	clock_gettime(CLOCK_MONOTONIC, &clock_base);
+	clock_real = 1;
+	do
+	{
+		more = 0;
+		for (broker = 0; broker < BROKERS; broker++)
+		{
+			int bytes = 0;
+
+			clock_gettime(CLOCK_MONOTONIC, &start);
+			pthread_mutex_lock(&p2p_lock);
+			while (position[broker] < count && bytes < PASS_BYTES)
+			{
+				const struct flood_listing *listing = &lists[broker][position[broker]++];
+
+				p2p_lobby_slot_heard(listing->crossplay, listing->slot, listing->payload, listing->size, 1);
+				/* (the PUBLISH's header and topic) */
+				bytes += listing->size + 2 + 2 + (int)strlen(P2P_LOBBY_SLOT_PREFIX(0)) + 2 * P2P_KEY_HASH_SIZE;
+				heard++;
+			}
+			pthread_mutex_unlock(&p2p_lock);
+			clock_gettime(CLOCK_MONOTONIC, &end);
+			{
+				unsigned long us = (unsigned long)((double)(end.tv_sec - start.tv_sec) * 1e6 +
+					(double)(end.tv_nsec - start.tv_nsec) / 1e3);
+
+				if (us > slowest_enqueue_us)
+					slowest_enqueue_us = us;
+			}
+			more |= position[broker] < count;
+		}
+		lobby_update(NULL, 0, 0);
+		passes++;
+	}
+	while (more);
+	arrival_passes = passes;
+	while (lobby.queue_count && passes < 100000)
+	{
+		lobby_update(NULL, 0, 0);
+		passes++;
+	}
+	clock_now += real_ms();
+	clock_real = 0;
+	shown = games(NULL);
+	room = lobby.queue_room;
+	past_queue = lobby.counts.drops[_drop_queue_full];
+	stale_dropped = lobby.counts.drops[_drop_stale];
+	other_dropped = lobby.counts.drops[_drop_version];
+	older_dropped = lobby.counts.drops[_drop_older];
+	signature_dropped = lobby.counts.drops[_drop_signature];
+	repeated = lobby.counts.repeated;
+	printf("burst: %d brokers x %d retained listings (%d live games, %d stale, %d of another version): %d heard, "
+		"%d again, %d games shown; dropped %d past the queue, %d stale, %d of another version, %d older, %d badly "
+		"signed; %d passes while they came, %d more to check them; a signature check %lu us here; the longest "
+		"broker's pass of hearing them %lu us; the queue's room %d\n", BROKERS, count, LIVE, STALE, OTHER, heard, repeated, shown,
+		past_queue, stale_dropped, other_dropped, older_dropped, signature_dropped, arrival_passes,
+		passes - arrival_passes, verify_us, slowest_enqueue_us, room);
+	check(past_queue == 0, "a burst of retained listings from 3 brokers: none dropped past the queue");
+	check(shown == LIVE, "a burst of retained listings from 3 brokers: every live game shown");
+	check(signature_dropped == 0, "a burst of retained listings: none badly signed");
+	check(room <= MAXIMUM_QUEUED, "the queue's room at most MAXIMUM_QUEUED");
+	p2p_lobby_browse(0);
+	check(!lobby.queue && !lobby.queue_room, "a browser that stops gives the queue's memory back");
+	/* a forgery on a host's slot claiming a newer sequence, heard first (a
+	broker anyone publishes to): the host's own listing is still checked and
+	its game shown; the forgery dropped, badly signed */
+	clock_now += 20 * 60000;
+	p2p_lobby_browse(1);
+	{
+		struct flood_listing *genuine = &lists[0][0], forged;
+		int index;
+
+		/* (a live game's: sequence 10) */
+		for (index = 0; index < count && get_long(lists[0][index].payload + 6) != 10; index++)
+			;
+		genuine = &lists[0][index < count ? index : 0];
+		forged = *genuine;
+
+		put_long(forged.payload + 6, 99);
+		pthread_mutex_lock(&p2p_lock);
+		p2p_lobby_slot_heard(forged.crossplay, forged.slot, forged.payload, forged.size, 1);
+		p2p_lobby_slot_heard(genuine->crossplay, genuine->slot, genuine->payload, genuine->size, 1);
+		pthread_mutex_unlock(&p2p_lock);
+		lobby_update(NULL, 0, 0);
+		check(games(NULL) == 1 && lobby.counts.drops[_drop_signature] == 1,
+			"a forged listing claiming a newer sequence hides no game");
+		/* and heard after it: checked first, and the host's still shown */
+		p2p_lobby_browse(0);
+		clock_now += 20 * 60000;
+		p2p_lobby_browse(1);
+		pthread_mutex_lock(&p2p_lock);
+		p2p_lobby_slot_heard(genuine->crossplay, genuine->slot, genuine->payload, genuine->size, 1);
+		p2p_lobby_slot_heard(forged.crossplay, forged.slot, forged.payload, forged.size, 1);
+		check(lobby.queue_count == 2 && get_long(queued_at(0)->payload + 6) == 99,
+			"a host's listing claiming a newer sequence is checked first");
+		pthread_mutex_unlock(&p2p_lock);
+		lobby_update(NULL, 0, 0);
+		check(games(NULL) == 1 && lobby.counts.drops[_drop_signature] == 1,
+			"... and, forged, hides no game");
+	}
+	for (broker = 0; broker < BROKERS; broker++)
+		free(lists[broker]);
+	p2p_lobby_browse(0);
+}
+
+/* run_browser_flood_test.sh's brokers' retained listings: PREFIX.0 ...
+PREFIX.<brokers - 1>, each line a slot's topic and its listing in hex */
+static int listings_files(const char *prefix, int live, int stale, int other, int brokers)
+{
+	struct flood_listing *lists[8];
+	int count, broker, index;
+
+	if (brokers < 1 || brokers > 8 || live < 0 || live > MAXIMUM_GAMES || stale < 0 || other < 0)
+		return 2;
+	count = flood_plan(brokers, live, stale, other, lists);
+	if (!count && live + stale + other)
+		return 1;
+	for (broker = 0; broker < brokers; broker++)
+	{
+		char path[1024], hex[2 * P2P_MAXIMUM_LISTING_SIZE + 1];
+		FILE *file;
+
+		snprintf(path, sizeof(path), "%s.%d", prefix, broker);
+		file = fopen(path, "w");
+		if (!file)
+			return 1;
+		for (index = 0; index < count; index++)
+		{
+			p2p_hex(lists[broker][index].payload, lists[broker][index].size, hex);
+			fprintf(file, "%s%s %s\n", P2P_LOBBY_SLOT_PREFIX(lists[broker][index].crossplay), lists[broker][index].slot,
+				hex);
+		}
+		fclose(file);
+		free(lists[broker]);
+	}
+	printf("%d listings for each of %d brokers: %d live games\n", count, brokers, live);
+	return 0;
+}
+
 static void crossplay_checks(void)
 {
 	static const unsigned char pc_seed[P2P_SEED_SIZE] = { 99, 1, 2 };
@@ -1363,12 +1672,16 @@ static void crossplay_checks(void)
 	}
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+	/* (run_browser_flood_test.sh: listings PREFIX LIVE STALE OTHER BROKERS) */
+	if (argc == 7 && !strcmp(argv[1], "listings"))
+		return listings_files(argv[2], atoi(argv[3]), atoi(argv[4]), atoi(argv[5]), atoi(argv[6]));
 	crypto_checks();
 	lobby_checks();
 	status_checks();
 	flood_checks();
+	burst_checks();
 	failed_join_checks();
 	crossplay_checks();
 	printf("%s (%d of %d checks failed)\n", failures ? "FAIL" : "PASS", failures, checks);

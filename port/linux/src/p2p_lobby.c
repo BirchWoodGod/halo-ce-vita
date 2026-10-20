@@ -65,10 +65,21 @@ key is ready.
 
 Checking signatures takes work, and anyone can send listings: at most
 VERIFY_BUDGET milliseconds of it each pass of the p2p thread (never the
-game's frame), from a queue of MAXIMUM_QUEUED; the rest is dropped (hosts
-publish again). A game's name, as the players' names, is cleaned as the game
-cleans a player's name (player_name_clean), and a game whose name has
-nothing left that names it is not shown.
+game's frame; the lock let go meanwhile), the passes LOOP_INTERVAL apart
+while listings wait (p2p_lobby_pending), from a queue that grows as it must
+to MAXIMUM_QUEUED; the rest is dropped (hosts publish again). A broker sends
+every slot it keeps at once as the browser subscribes, three or more of
+them the same slots (insider.15/16: 1386 listings heard, 981 dropped past a
+queue of 64, most of the games not shown), so what needs no signature is
+told before a listing is queued, as the checks after it would tell it: not
+a listing, another version, a stale retained copy, older than the host's
+listing taken, the same listing again (queued or taken). A host's listing
+claiming a newer sequence than one of its queued is checked first (the
+other is kept: what a listing claims is no proof until its signature is
+checked, and a forged one must hide no game). A game's name, as the
+players' names, is cleaned as the game cleans a player's name
+(player_name_clean), and a game whose name has nothing left that names it
+is not shown.
 
 A game the browser joined that cannot be joined is hidden FAILED_HIDE_TIME
 (5 minutes), or until its host lists it anew with anything changed (the
@@ -140,7 +151,10 @@ enum
 		P2P_SIGNATURE_SIZE,
 	MAXIMUM_GAMES = P2P_LOBBY_MAXIMUM_ENTRIES,
 	MAXIMUM_TOMBSTONES = 128,
-	MAXIMUM_QUEUED = 64,
+	/* the listings waiting for their signatures' checks: room for this many
+	at first, doubled as needed up to the most (about 100 KB) */
+	QUEUE_FIRST_ROOM = 32,
+	MAXIMUM_QUEUED = 256,
 
 	/* milliseconds */
 	REPUBLISH_INTERVAL = 30000,
@@ -356,8 +370,10 @@ static struct
 	/* browsing */
 	int browsing;
 	int query_wanted;
-	struct queued queue[MAXIMUM_QUEUED];
-	int queue_count;
+	/* (a ring: queue_count from queue_head, in queue_room; malloc'd as the
+	browser needs it, freed as it stops) */
+	struct queued *queue;
+	int queue_room, queue_head, queue_count;
 	struct game games[MAXIMUM_GAMES];
 	struct tombstone tombstones[MAXIMUM_TOMBSTONES];
 	int next_tombstone;
@@ -1153,12 +1169,122 @@ static int parse_hex(const char *text, unsigned char *bytes, int size)
 	return 1;
 }
 
+/* ---------- the queue of listings waiting for their signatures' checks */
+
+static struct queued *queued_at(int index)
+{
+	return &lobby.queue[(lobby.queue_head + index) % lobby.queue_room];
+}
+
+/* the queue emptied (and its memory given back, with release) */
+static void queue_clear(int release)
+{
+	lobby.queue_head = 0;
+	lobby.queue_count = 0;
+	if (release)
+	{
+		free(lobby.queue);
+		lobby.queue = NULL;
+		lobby.queue_room = 0;
+	}
+}
+
+/* room for one more queued: 0 if the queue is at its most (or no memory) */
+static int queue_room_for_one(void)
+{
+	struct queued *room;
+	int size, index;
+
+	if (lobby.queue_count < lobby.queue_room)
+		return 1;
+	if (lobby.queue_room >= MAXIMUM_QUEUED)
+		return 0;
+	size = lobby.queue_room ? 2 * lobby.queue_room : QUEUE_FIRST_ROOM;
+	if (size > MAXIMUM_QUEUED)
+		size = MAXIMUM_QUEUED;
+	room = malloc(sizeof(*room) * (size_t)size);
+	if (!room)
+		return 0;
+	/* (in order from the first, the ring's turn undone) */
+	for (index = 0; index < lobby.queue_count; index++)
+		room[index] = *queued_at(index);
+	free(lobby.queue);
+	lobby.queue = room;
+	lobby.queue_room = size;
+	lobby.queue_head = 0;
+	return 1;
+}
+
+/* the first queued, taken off the queue */
+static void queue_pop(struct queued *queued)
+{
+	*queued = lobby.queue[lobby.queue_head];
+	lobby.queue_head = (lobby.queue_head + 1) % lobby.queue_room;
+	lobby.queue_count--;
+}
+
+int p2p_lobby_pending(void)
+{
+	return lobby.queue_count > 0;
+}
+
+static void other_version_heard(const unsigned char *key_hash);
+
+/* a listing older than (or as old as) the one of its host taken, or than
+its host's tombstone: what the browser would drop once its signature is
+checked (listing_take), told by the sequence it claims */
+static int older_than_taken(const unsigned char *key_hash, unsigned long sequence)
+{
+	struct tombstone *tombstone = find_tombstone(key_hash);
+	struct game *game = find_game(key_hash);
+
+	return (tombstone && sequence <= tombstone->sequence) || (game && sequence <= game->sequence);
+}
+
+/* what a listing heard is, told without its signature's work (its first
+bytes alone: "HL", its format, version, flags, sequence and time): why it
+is to be dropped (a _drop_*), as the checks after it would drop it, or -1 to
+queue it for them. Nothing is taken for this: a listing queued gets all of
+listing_check and its signature checked */
+static int listing_glance(int crossplay, const unsigned char *payload, int size, int retained,
+	const unsigned char *key_hash)
+{
+	unsigned long sequence, listed_time;
+
+	if (size < MINIMUM_LISTING_SIZE - (crossplay ? 4 : 0) || payload[0] != 'H' || payload[1] != 'L' ||
+		payload[2] != (crossplay ? LISTING_FORMAT_CROSSPLAY : LISTING_FORMAT))
+	{
+		return _drop_malformed;
+	}
+	if (!network_wire_version_accepted_on(crossplay, (unsigned int)(payload[3] << 8 | payload[4])))
+		return _drop_version;
+	sequence = get_long(payload + 6);
+	listed_time = get_long(payload + 10);
+	/* (a slot's retained copy: only one of about now, listing_check's) */
+	if (retained)
+	{
+		long difference = (long)(listed_time - (unsigned long)time(NULL));
+
+		if (difference > RETAINED_WINDOW || difference < -RETAINED_WINDOW)
+		{
+			difference = difference < 0 ? -difference : difference;
+			if (difference > lobby.counts.stale_seconds)
+				lobby.counts.stale_seconds = difference;
+			return _drop_stale;
+		}
+	}
+	if (older_than_taken(key_hash, sequence))
+		return _drop_older;
+	return -1;
+}
+
 void p2p_lobby_slot_heard(int crossplay, const char *hash_text, const unsigned char *payload, int size, int retained)
 {
 	unsigned char key_hash[P2P_KEY_HASH_SIZE];
 	struct game *game;
 	struct queued *queued;
-	int index;
+	unsigned long sequence;
+	int index, drop, older = -1;
 
 	if (!parse_hex(hash_text, key_hash, P2P_KEY_HASH_SIZE))
 		return;
@@ -1193,7 +1319,9 @@ void p2p_lobby_slot_heard(int crossplay, const char *hash_text, const unsigned c
 	}
 	lobby.counts.heard++;
 	lobby.counts.retained += retained != 0;
-	if (size < MINIMUM_LISTING_SIZE || size > MAXIMUM_LISTING_SIZE)
+	/* (OpenCE's format 1 is 4 bytes shorter at its least, as
+	p2p_lobby_listing_read takes it) */
+	if (size < MINIMUM_LISTING_SIZE - (crossplay ? 4 : 0) || size > MAXIMUM_LISTING_SIZE)
 	{
 		lobby.counts.drops[_drop_malformed]++;
 		return;
@@ -1207,21 +1335,44 @@ void p2p_lobby_slot_heard(int crossplay, const char *hash_text, const unsigned c
 		lobby.counts.repeated++;
 		return;
 	}
+	/* what is dropped, told without the signature's work (every broker
+	sends all it keeps at once: hosts long gone, other versions') */
+	drop = listing_glance(crossplay, payload, size, retained, key_hash);
+	if (drop >= 0)
+	{
+		lobby.counts.drops[drop]++;
+		if (drop == _drop_version)
+			other_version_heard(key_hash);
+		return;
+	}
+	/* the same listing queued (another broker's copy): no work; another of
+	the same host claiming an older sequence: this one checked first */
+	sequence = get_long(payload + 6);
 	for (index = 0; index < lobby.queue_count; index++)
 	{
-		if (lobby.queue[index].crossplay == crossplay && lobby.queue[index].size == size &&
-			!memcmp(lobby.queue[index].payload, payload, (size_t)size))
+		queued = queued_at(index);
+		if (queued->crossplay != crossplay || memcmp(queued->key_hash, key_hash, P2P_KEY_HASH_SIZE))
+			continue;
+		if (queued->size == size && !memcmp(queued->payload, payload, (size_t)size))
 		{
 			lobby.counts.repeated++;
 			return;
 		}
+		if (older < 0 && get_long(queued->payload + 6) < sequence)
+			older = index;
 	}
-	if (lobby.queue_count == MAXIMUM_QUEUED)
+	if (!queue_room_for_one())
 	{
 		lobby.counts.drops[_drop_queue_full]++;
 		return;
 	}
-	queued = &lobby.queue[lobby.queue_count++];
+	queued = queued_at(lobby.queue_count++);
+	if (older >= 0)
+	{
+		/* (the older to the end: kept, and checked after it) */
+		*queued = *queued_at(older);
+		queued = queued_at(older);
+	}
 	queued->crossplay = crossplay;
 	memcpy(queued->key_hash, key_hash, P2P_KEY_HASH_SIZE);
 	memcpy(queued->payload, payload, (size_t)size);
@@ -1400,8 +1551,12 @@ static void listing_take(const struct queued *queued, const struct listing *list
 }
 
 /* checks a queued listing: 1 if it is to be taken (its signature too, with
-check), as a browser does; else why not in drop (a _drop_*), if not NULL */
-static int listing_check(const struct queued *queued, struct listing *listing, int check, int *drop)
+check), as a browser does; else why not in drop (a _drop_*), if not NULL,
+and a stale retained copy's clock difference (seconds) in stale_seconds, if
+not NULL. Nothing of the lobby's is read or written: the p2p thread checks
+without its lock */
+static int listing_check(const struct queued *queued, struct listing *listing, int check, int *drop,
+	long *stale_seconds)
 {
 	unsigned char key_hash[P2P_KEY_HASH_SIZE];
 	int reason;
@@ -1428,9 +1583,8 @@ static int listing_check(const struct queued *queued, struct listing *listing, i
 			if (difference > RETAINED_WINDOW || difference < -RETAINED_WINDOW)
 			{
 				reason = _drop_stale;
-				difference = difference < 0 ? -difference : difference;
-				if (difference > lobby.counts.stale_seconds)
-					lobby.counts.stale_seconds = difference;
+				if (stale_seconds)
+					*stale_seconds = difference < 0 ? -difference : difference;
 			}
 		}
 		if (reason < 0 && check && !listing_signed(queued->payload, listing))
@@ -1443,7 +1597,7 @@ static int listing_check(const struct queued *queued, struct listing *listing, i
 
 static int listing_acceptable(const struct queued *queued, struct listing *listing, int check)
 {
-	return listing_check(queued, listing, check, NULL);
+	return listing_check(queued, listing, check, NULL, NULL);
 }
 
 /* a line about a game shown or gone (GAME_LINES each GAME_LINES_INTERVAL;
@@ -1538,29 +1692,35 @@ static void update_browsing(void)
 	/* the queue, within the budget (one at least) */
 	while (lobby.queue_count && (p2p_now() == start || !elapsed(start, VERIFY_BUDGET)))
 	{
-		struct queued queued = lobby.queue[0];
+		struct queued queued;
 		struct listing listing;
+		long stale_seconds = 0;
 		int good, drop;
 
-		memmove(lobby.queue, lobby.queue + 1, sizeof(*lobby.queue) * (size_t)(--lobby.queue_count));
-		if (!listing_check(&queued, &listing, 0, &drop))
+		queue_pop(&queued);
+		/* (a listing of its host's taken meanwhile: no work) */
+		if (older_than_taken(queued.key_hash, get_long(queued.payload + 6)))
 		{
-			lobby.counts.drops[drop]++;
-			if (drop == _drop_version)
-				other_version_heard(queued.key_hash);
+			lobby.counts.drops[_drop_older]++;
 			continue;
 		}
 		/* (the work, without the lock: the game's threads need not wait) */
 		pthread_mutex_unlock(&p2p_lock);
-		good = listing_signed(queued.payload, &listing);
+		good = listing_check(&queued, &listing, 1, &drop, &stale_seconds);
 		pthread_mutex_lock(&p2p_lock);
 		if (!good)
-			lobby.counts.drops[_drop_signature]++;
+		{
+			lobby.counts.drops[drop]++;
+			if (drop == _drop_version)
+				other_version_heard(queued.key_hash);
+			if (stale_seconds > lobby.counts.stale_seconds)
+				lobby.counts.stale_seconds = stale_seconds;
+		}
 		else if (lobby.browsing)
 			listing_take(&queued, &listing);
 	}
-	if (lobby.queue_count && !lobby.browsing)
-		lobby.queue_count = 0;
+	if (lobby.queue && !lobby.browsing)
+		queue_clear(1);
 	for (index = 0; index < MAXIMUM_GAMES; index++)
 	{
 		if (lobby.games[index].used && elapsed(lobby.games[index].heard_time, GAME_EXPIRY))
@@ -1627,7 +1787,7 @@ void p2p_lobby_stop(void)
 	lobby.browsing = 0;
 	lobby.query_wanted = 0;
 	memset(lobby.games, 0, sizeof(lobby.games));
-	lobby.queue_count = 0;
+	queue_clear(1);
 	lobby.watching = 0;
 	lobby.join_state = P2P_LOBBY_JOIN_IDLE;
 	lobby.join_pending = 0;
@@ -2017,7 +2177,7 @@ void p2p_lobby_browse(int on)
 			browse_summary("closing");
 			platform_log("Internet play: stopped browsing the public games (%d shown)", shown);
 			memset(lobby.games, 0, sizeof(lobby.games));
-			lobby.queue_count = 0;
+			queue_clear(1);
 		}
 		else
 		{

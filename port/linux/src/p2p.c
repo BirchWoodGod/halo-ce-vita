@@ -4772,6 +4772,10 @@ static void *p2p_thread(void *unused)
 				read[read_count++] = p2p.listeners[index].socket;
 			}
 		}
+		/* (and while the server browser's listings wait for their
+		signatures' checks, a budget's worth each pass: p2p_lobby.c) */
+		if (p2p_lobby_pending())
+			wait = LOOP_INTERVAL;
 		for (index = 0; index < MAXIMUM_STREAMS; index++)
 		{
 			struct stream *stream = &p2p.streams[index];

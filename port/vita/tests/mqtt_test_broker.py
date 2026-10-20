@@ -23,7 +23,7 @@ gone), so that a test can tell what a topic held when.
     python3 mqtt_test_broker.py [--port 18830] [--host 127.0.0.1] [--mqtt311]
         [--takeover-will-delay 0.5]
         [--tls-port 8883 --tls-cert CERT.pem --tls-key KEY.pem]
-        [--plain ok|refuse|reset|silent|busy]
+        [--plain ok|refuse|reset|silent|busy] [--retained-file FILE]
 
 --mqtt311 refuses MQTT 5 as a 3.1.1 broker does (CONNACK 1), so the client
 must connect again with 3.1.1.
@@ -33,6 +33,11 @@ that certificate and key (a test authority's, made by the test at run time),
 on the same host, the same broker behind both: a subscriber on one gets
 what is published on the other, as on the public brokers. Its connections
 are logged with "tls" after the client identifier.
+
+--retained-file FILE keeps the retained messages FILE lists from the start,
+one a line as a topic and its payload in hex (run_browser_flood_test.sh: a
+public broker's hundreds of server browser listings, sent all at once to a
+browser that subscribes).
 
 --plain makes the plain listener misbehave as the public brokers' 1883 did
 (October 11 2026), while TLS works: refuse (not listening: refused),
@@ -374,7 +379,15 @@ async def main():
     parser.add_argument("--tls-cert")
     parser.add_argument("--tls-key")
     parser.add_argument("--plain", choices=["ok", "refuse", "reset", "silent", "busy"], default="ok")
+    parser.add_argument("--retained-file")
     arguments = parser.parse_args()
+    if arguments.retained_file:
+        with open(arguments.retained_file) as lines:
+            for line in lines:
+                if line.strip():
+                    topic, payload = line.split()
+                    retained[topic] = (bytes.fromhex(payload), None)
+        log(f"retained from {arguments.retained_file}: {len(retained)} messages")
     global only_311, takeover_will_delay, plain_mode
     only_311 = arguments.mqtt311
     takeover_will_delay = arguments.takeover_will_delay

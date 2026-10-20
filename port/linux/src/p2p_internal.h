@@ -425,6 +425,9 @@ int p2p_lobby_hosting_status_locked(char *text, int size);
 (p2p_lobby_reach_brokers): the p2p thread starts signalling */
 int p2p_lobby_brokers_wanted(void);
 int p2p_lobby_browsing(void);
+/* whether listings wait for their signatures' checks (under p2p_lock): the
+p2p thread's passes LOOP_INTERVAL apart until none do */
+int p2p_lobby_pending(void);
 /* a message on a slot of a wire (its key hash in hex) through a broker;
 retained: the slot's retained copy, sent on subscribing */
 void p2p_lobby_slot_heard(int crossplay, const char *hash_text, const unsigned char *payload, int size, int retained);
