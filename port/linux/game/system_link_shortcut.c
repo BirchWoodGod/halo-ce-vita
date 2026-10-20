@@ -94,6 +94,7 @@ volatile int halo_forge_request_map = NONE;
 char halo_forge_request_variant[HALO_FORGE_VARIANT_SIZE];
 /* ... on the network: hosted, others joining (0: a local game) */
 volatile int halo_forge_request_network;
+volatile int halo_forge_net_hosting;
 
 /* (network_client_manager.c's client states, in its order) */
 enum

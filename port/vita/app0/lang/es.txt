@@ -2020,5 +2020,7 @@
 "The PS Vitas on your Wi-Fi can join.\nSTART FORGE takes everyone here." = "Pueden unirse las PS Vita de tu Wi-Fi.\nEMPEZAR FORJA lleva a todos."
 # (the settings panel's Forge page: Network, for the Halo CE menus too)
 "No network: choose a connection on the Play page" = "Sin red: elige una conexión en la página Jugar"
-"Local: alone. Network: friends forge with you (8 players)" = "Local: solo. Red: tus amigos forjan contigo (8 jugadores)"
 "Local" = "Local"
+# (a network Forge game: never listed online, the owner's: its lobby's only)
+"Never listed: friends, the party, your\ninvites and your code join it." = "Nunca aparece en listas: entran amigos,\nel grupo, tus invitaciones y tu código."
+"Local: alone. Network: friends forge with you (8, never listed online)" = "Local: solo. Red: tus amigos forjan contigo (8, nunca en listas)"

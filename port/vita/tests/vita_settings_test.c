@@ -91,6 +91,7 @@ test's) */
 volatile int halo_forge_request_map = -1;
 char halo_forge_request_variant[HALO_FORGE_VARIANT_SIZE];
 volatile int halo_forge_request_network;
+volatile int halo_forge_net_hosting;
 static const char *const test_forge_maps[3][2] = {
 	{ "Battle Creek", "beavercreek" }, { "Blood Gulch", "bloodgulch" }, { "Chill Out", "chillout" },
 };
@@ -2295,7 +2296,7 @@ static void test_forge_page(void)
 	press(VITA_BUTTON_LEFT);
 	/* Network: Local, or the connection the game runs (a network Forge game) */
 	to_line("Network");
-	check(strstr(menu, "\n\x05Local: alone. Network: friends forge with you (8 players)\n") != NULL, "Network's help");
+	check(strstr(menu, "\n\x05Local: alone. Network: friends forge with you (8, never listed online)\n") != NULL, "Network's help");
 	press(VITA_BUTTON_RIGHT);
 	check(strstr(menu, "\nNetwork\x02< Same Wi-Fi  \n") != NULL, "Network right: the network (Same Wi-Fi, the game's connection)");
 	press(VITA_BUTTON_LEFT);

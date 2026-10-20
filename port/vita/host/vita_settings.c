@@ -1489,11 +1489,14 @@ static int setting_shown(const struct setting *setting)
 	menus join friends' games. Online chosen and running) */
 	if (setting->action == ACTION_PAGE && setting->opens == PAGE_FRIENDS)
 		return !strcmp(running_network, "online") && !strcmp(chosen_network(), "online") && halo_pc_menus_state == 1;
-	if (setting->action == ACTION_BROWSE ||
-		(setting->variable && !strcmp(setting->variable, "HALO_NET_HOST_PUBLIC")))
+	if (setting->action == ACTION_BROWSE)
 		return network_is("online");
+	/* (a network Forge game hosted: never listed, its lobby's only - no
+	Visibility, no password) */
+	if (setting->variable && !strcmp(setting->variable, "HALO_NET_HOST_PUBLIC"))
+		return network_is("online") && !halo_forge_net_hosting;
 	if (setting->variable && !strcmp(setting->variable, "HALO_NET_LOBBY_PASSWORD"))
-		return network_is("online") && choice_of("HALO_NET_HOST_PUBLIC");
+		return network_is("online") && choice_of("HALO_NET_HOST_PUBLIC") && !halo_forge_net_hosting;
 	if (setting->variable && !strcmp(setting->variable, "HALO_DYNAMIC_RES_MIN"))
 	{
 		const struct setting *scale = setting_named("HALO_RENDER_SCALE");
@@ -3379,7 +3382,7 @@ static void help_line(char *text, int size, const struct line *line)
 	else if (line && line->type == LINE_FORGE)
 		snprintf(text, (size_t)size, "%s", line->index == FORGE_LINE_MAP ? T("The multiplayer map to edit") :
 			line->index == FORGE_LINE_VARIANT ? T("Its objects placed as Forge starts") :
-			line->index == FORGE_LINE_NETWORK ? T("Local: alone. Network: friends forge with you (8 players)") :
+			line->index == FORGE_LINE_NETWORK ? T("Local: alone. Network: friends forge with you (8, never listed online)") :
 			line->index == FORGE_LINE_CLEAR_DEAD ? T("Dead AI you placed, out of the layout: room for more") :
 			line->index == FORGE_LINE_CLEAR_ALL ? T("Every AI you placed, alive or dead, out of the layout") :
 			T("A local game: you fly as the monitor and place objects"));

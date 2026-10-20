@@ -302,6 +302,10 @@ static struct
 	network.host_public until said) */
 	int public_said;
 	int public;
+	/* (p2p_lobby_set_never_listed) a network Forge game, the owner's lobby
+	only: never listed, whatever is chosen (friends, the party, invites and
+	its code reach it) */
+	int never_listed;
 	/* a co-op game's own (network.coop_public, OpenCE's: private unless
 	chosen), which the other's never changes */
 	int coop_public_said;
@@ -855,7 +859,7 @@ network.coop_public, private unless set); never with the server browser off
 (network.public_lobby) */
 static int hosting_public(void)
 {
-	if (!config_boolean("network.public_lobby"))
+	if (!config_boolean("network.public_lobby") || lobby.never_listed)
 		return 0;
 	if (lobby.flags & _listing_coop)
 		return lobby.coop_public_said ? lobby.coop_public : config_boolean("network.coop_public");
@@ -1790,6 +1794,20 @@ void p2p_lobby_set_public(int public)
 		p2p_new_invite_if_listed();
 	lobby.public = public;
 	lobby.public_said = 1;
+	pthread_mutex_unlock(&p2p_lock);
+}
+
+void p2p_lobby_set_never_listed(int never)
+{
+	pthread_mutex_lock(&p2p_lock);
+	never = never ? 1 : 0;
+	/* (a listing gone: a new invite, as going private makes one) */
+	if (never && hosting_public())
+		p2p_new_invite_if_listed();
+	if (never != lobby.never_listed)
+		platform_log("Internet play: %s", never ? "a network Forge game: never listed (friends, the party, invites and "
+			"its code reach it)" : "the game may be listed again");
+	lobby.never_listed = never;
 	pthread_mutex_unlock(&p2p_lock);
 }
 

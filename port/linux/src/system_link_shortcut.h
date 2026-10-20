@@ -32,6 +32,9 @@ enum
 
 /* (SYSTEM_LINK_REQUEST_FORGE, halo_forge_request_network) a network Forge
 game: hosted on the connection the game runs, its lobby (the game's) next */
+/* (the settings panel) nonzero while this machine hosts a network Forge
+game: never listed online, its Visibility row hidden (forge_net.inc) */
+extern volatile int halo_forge_net_hosting;
 /* (SYSTEM_LINK_REQUEST_FORGE) a map variant's file name's room */
 #define HALO_FORGE_VARIANT_SIZE 40
 

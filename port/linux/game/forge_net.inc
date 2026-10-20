@@ -77,6 +77,9 @@ network Forge (it ignores the hello, as an older build), for the tests.
 boolean network_game_client_send_to_server(struct network_game_client *client, void *message);
 /* (main.c's) */
 int halo_main_menu_loaded(void);
+/* (p2p_lobby.c's, system_link_shortcut.c's) */
+void p2p_lobby_set_never_listed(int never);
+extern volatile int halo_forge_net_hosting;
 void platform_show_message(char const *title, char const *text);
 
 /* ---------- constants */
@@ -632,6 +635,10 @@ boolean forge_net_host_begin(
 	}
 	forge_net.hosting = TRUE;
 	forge_net.client_session = FALSE;
+	/* (the owner's: a Forge game is the lobby's only - never listed online,
+	whatever Visibility says; the LAN's and ad hoc's own lists show it) */
+	p2p_lobby_set_never_listed(1);
+	halo_forge_net_hosting = 1;
 	platform_log("forge net: hosting a Forge game of %s%s%s (session %08x): joiners are asked to play it", map_path,
 		forge_globals.variant_title[0] ? ", map variant " : "", forge_globals.variant_title, (unsigned)forge_net.session);
 	return TRUE;
@@ -645,6 +652,8 @@ void forge_net_host_end(
 		return;
 	forge_net.hosting = FALSE;
 	forge_net_machines_forget();
+	p2p_lobby_set_never_listed(0);
+	halo_forge_net_hosting = 0;
 	if (!forge_globals.game_active)
 		forge_globals.game_requested = FALSE;
 	platform_log("forge net: the Forge game is hosted no more");

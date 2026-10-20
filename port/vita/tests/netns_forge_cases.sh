@@ -35,6 +35,14 @@
 #              lobby's BROWSE GAMES before START FORGE and is shown in the lobby's
 #              players; START FORGE takes both into the Forge game (the game's lobby, its
 #              countdown at once), where the joiner's edit is the host's
+#   h3forgeadhoc  h3forge on AD HOC (the emulated ad hoc group): the Forge game in the ad hoc
+#              browser, joined from it
+#   h3forgeonline  the Forge lobby on ONLINE, Visibility Public in the settings (the owner's: a
+#              Forge game is the lobby's only, never listed online): the host and a friend
+#              (codes through files), L INVITE FRIENDS, the friend accepts and lands in the
+#              lobby; a third machine browsing the public games never sees or joins it, the
+#              broker never gets a listing; START FORGE takes host and friend into Forge; the
+#              third machine then joins by the host's code, into the game in progress
 #   forgepanel the settings panel's Forge page, Network on (Menu style Halo CE: the
 #              classic menus' route), asked by HALO_SYSTEM_LINK_TEST=forgenet:9: the
 #              System Link screen's profile, then a network Forge game of Blood Gulch
@@ -238,8 +246,24 @@ forge_case() {
 		done
 		grep -aq "forge net:" "$out/host/run.log" && fail "the Slayer game's host spoke network Forge"
 		;;
-	h3forge)
+	h3forge|h3forgeadhoc)
 		local menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+		# (h3forgeadhoc: the two machines on a link of their own, the emulated ad hoc group, as
+		# h3adhoc's: NETWORK one up from LOCAL to AD HOC)
+		local join_ns=$lan host_net= join_net= ups="up:150:500 up:150:500" network="SYSTEM LINK"
+		if [ $mode = h3forgeadhoc ]; then
+			ip link add a_host type veth peer name a_join
+			ip link set a_host netns "$host_machine"
+			ip link set a_join netns "$join_machine"
+			in_ns "$host_machine" ip addr add 10.99.0.1/30 dev a_host
+			in_ns "$host_machine" ip link set a_host up
+			in_ns "$join_machine" ip addr add 10.99.0.2/30 dev a_join
+			in_ns "$join_machine" ip link set a_join up
+			join_ns=$join_machine
+			host_net="HALO_NET_ADHOC=true HALO_NET_ADHOC_EMULATE=10.99.0.1,10.99.0.2"
+			join_net="HALO_NET_ADHOC=true HALO_NET_ADHOC_EMULATE=10.99.0.2,10.99.0.1"
+			ups="up:150:500" network="AD HOC"
+		fi
 		if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
 			echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS) or no HALO_TEST_PROFILE"; return 0
 		fi
@@ -254,17 +278,17 @@ forge_case() {
 		# (OFFLINE): up two to SYSTEM LINK, A - the lobby live -; a while for the joiner; then
 		# down three to START FORGE, A: the game's lobby, its countdown at once)
 		local host_pad="wait:150:3000 down:150:600 down:150:600 a:150:3000 up:150:700 a:150:2000"
-		host_pad="$host_pad up:150:500 up:150:500 a:150:3000 @forge-lobby-system-link:0:300 wait:150:${HALO_TEST_LIVE_WAIT:-45000}"
+		host_pad="$host_pad $ups a:150:3000 @forge-lobby-$mode:0:300 wait:150:${HALO_TEST_LIVE_WAIT:-45000}"
 		host_pad="$host_pad @forge-lobby-joined:0:300 down:150:500 down:150:500 down:150:500 a:150:3000 @forge-countdown:0:300"
 		host_cmds="L300:forge net;L700:forge net"
 		join_cmds="L400:forge camera 60 -100 1.6 150 0;L420:forge spawn boulder;L430:forge distance 6;L440:forge drop;L600:forge net"
 		HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
-			HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 $(forge_shots mpforge-shots/h3forge-host) \
+			HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 $host_net $(forge_shots mpforge-shots/$mode-host) \
 			"HALO_TEST_PAD=$host_pad" "HALO_TEST_COMMANDS=$host_cmds"
 		host_pid=$last_pid
 		sleep 5
-		HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false \
-			HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 $(forge_shots mpforge-shots/h3forge-joiner) \
+		HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$join_ns" "$vita" "$cpu_b" HALO_NET_ONLINE=false \
+			HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 $join_net $(forge_shots mpforge-shots/$mode-joiner) \
 			"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a a a wait:150:15000 a wait:150:10000 @forge-joiner-lobby:0:300" \
 			"HALO_TEST_COMMANDS=$join_cmds"
 		join_pid=$last_pid
@@ -272,9 +296,11 @@ forge_case() {
 		forge_check_clean "$hl" "$jl"
 		echo "--- host"; grep -aE "menus: (forge lobby|h3 live lobby)|forge net: (machine|hosting)" "$hl" | head -30
 		echo "--- joiner"; grep -aE "menus: h3 pregame|forge net: (the host|holding|asked)|forge: .*loaded for" "$jl" | head -20
-		grep -aq "menus: forge lobby: NETWORK: SYSTEM LINK" "$hl" || fail "the Forge lobby's NETWORK did not change to SYSTEM LINK"
-		grep -aq "menus: h3 live lobby: open on SYSTEM LINK (Forge on Blood Gulch): others join it now" "$hl" ||
-			fail "the Forge lobby did not go live on SYSTEM LINK"
+		grep -aq "menus: forge lobby: NETWORK: $network" "$hl" || fail "the Forge lobby's NETWORK did not change to $network"
+		grep -aq "menus: h3 live lobby: open on $network (Forge on Blood Gulch): others join it now" "$hl" ||
+			fail "the Forge lobby did not go live on $network"
+		# (the owner's: on the LAN and ad hoc a Forge game is in the local browser, joined from it)
+		grep -aq "system link: in another's lobby" "$jl" || fail "the joiner did not join the Forge game from the $network browser"
 		grep -aqE "menus: h3 live lobby: Forge on Blood Gulch; players: [^;]+, [^;]+; 2/8" "$hl" ||
 			fail "the Forge lobby did not show the joiner among its players (of 8)"
 		grep -aq "forge net: machine 1 plays the Forge game" "$hl" || fail "the joiner did not answer the Forge hello in the lobby"
@@ -287,6 +313,68 @@ forge_case() {
 		forge_state "$hl" 700 | grep -aq "boulder" || fail "the host did not have the joiner's boulder"
 		grep -aq "forge net: the host's packs and bloodgulch's blocks prebuilt in its lobby" "$jl" ||
 			fail "the joiner did not prebuild the host's packs and blocks in the lobby"
+		;;
+	h3forgeonline)
+		local menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+		if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS) or no HALO_TEST_PROFILE"; return 0
+		fi
+		local hc=$out/host.code jc=$out/joiner.code jl2=$out/joiner2/run.log
+		mkdir -p "$out/host/save/u/UDATA/869079979327"
+		cp "$HALO_TEST_PROFILE" "$out/host/save/u/UDATA/869079979327/blam.sav"
+		[ -r "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" ] &&
+			cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$out/host/save/u/UDATA/869079979327/"
+		# (FORGE; NETWORK: up three from LOCAL to ONLINE; a while for the broker, the lobby live and
+		# the friendship; L, INVITE FRIENDS: Cross on the friend, Circle; a while for the friend;
+		# then down three to START FORGE, A)
+		local pad="wait:150:3000 down:150:600 down:150:600 a:150:3000 up:150:700 a:150:2000"
+		pad="$pad up:150:500 up:150:500 up:150:500 a:150:3000 wait:150:${HALO_TEST_INVITE_WAIT:-35000} @forge-online-lobby:0:300"
+		pad="$pad lt wait:150:4000 @forge-online-invite:0:300 a wait:150:3000 b wait:150:30000 @forge-online-joined:0:300"
+		pad="$pad down:150:500 down:150:500 down:150:500 a:150:3000 @forge-online-countdown:0:300"
+		HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
+			HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_NET_HOST_PUBLIC=true HALO_NET_LOBBY_NAME=Alpha \
+			"HALO_TEST_FRIENDS=code-file=$hc,add-file=$jc" $(forge_shots mpforge-shots/h3forgeonline-host) \
+			"HALO_TEST_PAD=$pad" "HALO_TEST_COMMANDS=L600:forge net"
+		host_pid=$last_pid
+		run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-invite \
+			HALO_NET_LOBBY_NAME=Bravo "HALO_TEST_FRIENDS=code-file=$jc,accept" HALO_TEST_FRIENDS_ANSWER=accept \
+			"HALO_TEST_COMMANDS=L300:forge camera 60 -100 1.6 150 0;L320:forge spawn boulder;L330:forge distance 6;L340:forge drop"
+		join_pid=$last_pid
+		sleep 50
+		run_copy joiner2 "$join2_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-public \
+			HALO_EXIT_AFTER=60 HALO_NET_LOBBY_NAME=Charlie
+		join2_pid=$last_pid
+		wait $join2_pid 2>/dev/null
+		# (then the same machine by the host's code: into the Forge game in progress)
+		local code
+		code=$(sed -n 's/.*others join with the code \([A-Z0-9]\{4\}-[A-Z0-9]\{4\}\).*/\1/p' "$hl" | head -1)
+		echo "the host's code: ${code:-none}"
+		mv "$out/joiner2" "$out/joiner2-public"
+		jl2=$out/joiner2-public/run.log
+		local jl3=$out/joiner2/run.log
+		run_copy joiner2 "$join2_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true "HALO_NETWORK_TEST=join-code:$code" \
+			HALO_EXIT_AFTER=80 HALO_NET_LOBBY_NAME=Delta "HALO_TEST_COMMANDS=L2400:forge net"
+		join2_pid=$last_pid
+		wait $join_pid $join2_pid $host_pid 2>/dev/null
+		forge_check_clean "$hl" "$jl" "$jl2"
+		echo "--- host"; grep -aE "menus: (forge lobby|h3 live lobby|h3 invite)|forge net: (machine|hosting)|Internet play: a network Forge" "$hl" | head -20
+		echo "--- third machine"; grep -aE "network test: (the public|join|search)|system link: (joining|in a)" "$jl2" | head -8
+		grep -aq "menus: h3 live lobby: open on ONLINE (Forge on Blood Gulch): others join it now" "$hl" ||
+			fail "the Forge lobby did not go live on ONLINE"
+		grep -aq "Internet play: a network Forge game: never listed" "$hl" || fail "the Forge game was not made never listed"
+		grep -aqE "publish .* hcev/3/lobby/s/[0-9a-f]{32} [1-9][0-9]* B retained" "$out/broker.log" &&
+			fail "the Forge game was listed (the broker took a listing)"
+		grep -aq "system link: in another's lobby" "$jl2" && fail "the third machine reached the Forge game from the public list"
+		grep -aq "friends: invited .* into this machine's game" "$hl" || fail "the host's invite was not sent"
+		grep -aq "system link: in another's lobby" "$jl" || fail "the friend did not land in the Forge lobby by the invite"
+		grep -aq "forge net: machine 1 plays the Forge game" "$hl" || fail "the friend did not play the Forge game"
+		grep -aq "forge: levels.test.bloodgulch.bloodgulch loaded for a Forge game" "$jl" || fail "the friend's Forge game did not start"
+		grep -aq "forge net: machine 1 spawned boulder" "$hl" || fail "the friend's edit was not the host's"
+		# (the code: the Forge game joined in progress, its layout given)
+		[ -n "$code" ] || fail "the host showed no code"
+		grep -aq "forge net: machine 2 plays the Forge game" "$hl" || fail "the machine with the code did not play the Forge game"
+		grep -aqE "forge net: the host's layout read: [1-9][0-9]* objects" "$jl3" ||
+			fail "the machine with the code was not given the layout"
 		;;
 	forgepanel)
 		local menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}

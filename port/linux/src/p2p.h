@@ -315,6 +315,10 @@ everyone's server browser (public) or reached only by its code and invite
 (private); going private makes a new invite, so that one seen in a listing
 lets no one in (the code leads to the new one) */
 void p2p_lobby_set_public(int listed);
+/* a game this machine hosts never listed while never is set, whatever
+p2p_lobby_set_public says (a network Forge game: the lobby's friends, party,
+invites and code only; forge_net.inc) */
+void p2p_lobby_set_never_listed(int never);
 /* the same for a co-op game (network.coop_public, OpenCE's: private unless
 chosen; the co-op lobby's choice, port/linux/game/coop_menu.c), which
 p2p_lobby_set_public does not change */

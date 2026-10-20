@@ -9566,7 +9566,9 @@ static void h3_live_lobby_show(struct widget_instance *screen)
 		int password = 0;
 		boolean listed = p2p_lobby_hosting_listed(&password) != 0;
 
-		if (with_pc)
+		if (h3_live.forge)
+			text_show(named(screen, "ready_sub"), T("Never listed: friends, the party, your\ninvites and your code join it."));
+		else if (with_pc)
 			text_show(named(screen, "ready_sub"), listed ? T("Public, Vitas and PC: friends join,\nand anyone from the games browser.") :
 				T("Private, Vitas and PC: friends, your\ninvites and your code join it."));
 		else

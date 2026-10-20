@@ -1874,8 +1874,13 @@ the host saves its map variant, a joiner a copy; undo per player.
   put them. Host only, as CLEAR AI and ALL AI; a client's menu says so.
 - **Lobby**: the Forge lobby's NETWORK row (LOCAL by default; SYSTEM LINK,
   ONLINE, AD HOC) makes it live as the multiplayer lobby: its game hosted at
-  once, private by default online, friends, party, codes, INVITE FRIENDS (L) and
-  the browser join it, its players listed (n/8), START FORGE takes everyone in.
+  once, its players listed (n/8), START FORGE takes everyone in. The owner (Oct
+  20): online, a Forge game is the lobby's only - **never listed** (no broker
+  listing, so in neither menu style's online browser, nor OpenCE's lobby), no
+  Public choice (the settings panel's Visibility and Password rows hidden while
+  one is hosted; `p2p_lobby_set_never_listed`): friends, the party, INVITE
+  FRIENDS (L) and its code reach it. On SYSTEM LINK and AD HOC it is in the
+  local browser as any game.
   The settings panel's Forge page has Network for the Halo CE menus' players
   (the System Link screen's profile, then the game's lobby). Joiners prebuild
   the host's packs and the map's blocks in the lobby.
@@ -1885,11 +1890,15 @@ the host saves its map variant, a joiner a copy; undo per player.
   object seen by all, leaving while holding), `forgeold` (insider.15 and
   `HALO_FORGE_NET=0` refused, then playing Slayer), `forgeleave` (the host
   leaves), `h3forge` (the lobby by the controller), `forgepanel` (the panel's
-  route); `run_net_fuzz_test.sh` target `forge` (checks and libFuzzer).
+  route), `h3forgeadhoc` (the ad hoc browser), `h3forgeonline` (online:
+  Visibility Public set, still never listed - no listing at the broker, a
+  third machine's public browse finds nothing -, a friend in by INVITE
+  FRIENDS, then the third by the code, into the game in progress);
+  `run_net_fuzz_test.sh` target `forge` (checks and libFuzzer).
 - **Open**: the map's own scenery is not editable online; Halo 3's monitor
-  model is a text marker; ONLINE and AD HOC Forge lobbies are not run in netns
-  (the multiplayer lobby's paths, shared); a host changing its packs after a
-  joiner answered is not told to it again.
+  model is a text marker; a host changing its packs after a joiner answered is
+  not told to it again; a joiner that came some other way than the lobby's
+  (a LAN or ad hoc browse) is not told apart: online there is no other way in.
 
 ## Open questions for the owner
 
