@@ -196,8 +196,8 @@ What is here
   (and SELECT and the D-pad's directions), which the game draws in place of
   the Xbox's in play and in the Halo CE menus when the settings panel's
   Button icons is PlayStation (source/interface/hud_draw.c).
-  key_atlas.png and xbox_atlas.png are the desktop build's only (never read
-  on the Vita): the keyboard's keycaps, the mouse and the Xbox controller's
+  key_atlas.png and xbox_atlas.png are the desktop build's only (left out of
+  the Vita's package: tools/vita_build.py): the keyboard's keycaps, the mouse and the Xbox controller's
   buttons, which the PC shows in their place, the Halo 3 menus' hints among
   them, with display.button_icons (port/linux/include/halo_button_icons.h
   lists the keys).
