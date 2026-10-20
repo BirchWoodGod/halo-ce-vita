@@ -129,6 +129,9 @@ reported is fixed and the features under "Before the public beta" are in.
   objective (Hunters guarding a base), AI respawning, AI on a team, and
   points for AI kills and objectives in the game type editor. We make the
   tools; the modes are up to the players.
+- **Infection built in**: a game type of its own (zombies with melee
+  only, the killed join the zombies, last human standing), for local,
+  bots, online and the official servers.
 - **Forge variants with AI played with the multiplayer bots.**
 - **Multiplayer lobbies with bots** on the Vita: bots filling the empty
   slots in games you host for other players.
