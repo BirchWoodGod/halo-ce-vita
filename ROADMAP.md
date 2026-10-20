@@ -124,6 +124,8 @@ reported is fixed and the features under "Before the public beta" are in.
 - **AI respawning** in Forge.
 - **Multiplayer bots that think like the campaign AI.**
 - **Forge variants with AI played with the multiplayer bots.**
+- **Multiplayer lobbies with bots** on the Vita: bots filling the empty
+  slots in games you host for other players.
 - **"VITA+"**: the VITA PC tag renamed if Android and iOS builds come.
 
 ### Claude's suggestions
