@@ -2083,6 +2083,7 @@
 "You host no network game" = "No eres anfitrión de ninguna partida en red"
 "No one else is in your game" = "No hay nadie más en tu partida"
 "Cross kicks, Triangle bans, Square for good" = "Cruz expulsa, Triángulo veta, Cuadrado siempre"
+"BAN FOR GOOD\n\n%.20s\n\nThey can't join your games again until you\nuse Clear bans.\nCross: ban   O: back" = "VETAR PARA SIEMPRE\n\n%.20s\n\nNo podrá unirse a tus partidas hasta que\nuses Quitar vetos.\nCruz: vetar   O: volver"
 "%d kept out of your games" = "%d fuera de tus partidas"
 "A ban keeps their PS Vita or PC out of your games" = "Un veto deja su PS Vita o PC fuera de tus partidas"
 "Cross: kick  Triangle: ban  " = "Cruz: expulsar  Triángulo: vetar  "

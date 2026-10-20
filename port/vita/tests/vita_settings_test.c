@@ -1642,7 +1642,17 @@ static void test_players_page(void)
 	clock_us += 6000000;
 	to_line("Cheater");
 	press(VITA_BUTTON_SQUARE);
-	check(halo_host_player_request == (HALO_HOST_PLAYER_BAN_ALWAYS << 8 | 3), "square: the ban for good asked");
+	check(halo_host_player_request == 0 && strstr(menu, "BAN FOR GOOD") && strstr(menu, "Cheater"),
+		"square: the ban for good asks first");
+	press(0);
+	press(VITA_BUTTON_CIRCLE);
+	check(halo_host_player_request == 0 && !strstr(menu, "BAN FOR GOOD"), "square, circle: no ban, the list again");
+	press(0);
+	to_line("Cheater");
+	press(VITA_BUTTON_SQUARE);
+	press(0);
+	press(VITA_BUTTON_CROSS);
+	check(halo_host_player_request == (HALO_HOST_PLAYER_BAN_ALWAYS << 8 | 3), "square, cross: the ban for good asked");
 	halo_host_player_request = 0;
 	halo_host_player_answer = HALO_HOST_ANSWER_DONE;
 	clock_us += 6000000;
