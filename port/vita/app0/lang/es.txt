@@ -1989,7 +1989,6 @@
 "This Forge game is full: it takes 8 players." = "Esta partida de Forja está llena: admite 8 jugadores."
 "This Forge game needs a newer Halo CE." = "Esta partida de Forja necesita un Halo CE más nuevo."
 "Halo: cannot join this Forge game" = "Halo: no puedes unirte a esta partida de Forja"
-||||||| eae1a1c18
 
 
 # ---------- Forge's building blocks (forge_blocks.c, forge.c)

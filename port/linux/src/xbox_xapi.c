@@ -164,12 +164,27 @@ DWORD WINAPI XCreateSaveGame(LPCSTR root_path_name, LPCWSTR save_game_name, DWOR
 		CreateDirectoryA(data_directory, NULL);
 		if (!CreateDirectoryA(directory, NULL))
 			return GetLastError();
-		snprintf(meta_path, sizeof(meta_path), "%s" SAVE_META_FILE, directory);
+		/* (written beside it, flushed, then named: a crash in the write
+		never leaves a name cut short) */
+		snprintf(meta_path, sizeof(meta_path), "%s" SAVE_META_FILE ".tmp", directory);
 		file = CreateFileA(meta_path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
 		if (file == INVALID_HANDLE_VALUE)
 			return GetLastError();
 		WriteFile(file, save_game_name, (DWORD)(wcslen(save_game_name) * sizeof(WCHAR)), &written, NULL);
+		FlushFileBuffers(file);
 		CloseHandle(file);
+		{
+			char final_path[MAX_PATH + 32];
+
+			snprintf(final_path, sizeof(final_path), "%s" SAVE_META_FILE, directory);
+			if (!MoveFileA(meta_path, final_path))
+			{
+				DWORD error = GetLastError();
+
+				DeleteFileA(meta_path);
+				return error ? error : ERROR_ACCESS_DENIED;
+			}
+		}
 	}
 	if (path_buffer && buffer_size)
 	{

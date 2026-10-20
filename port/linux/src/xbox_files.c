@@ -867,6 +867,31 @@ BOOL WINAPI WriteFile(HANDLE handle, LPCVOID buffer, DWORD count, LPDWORD bytes_
 	return result;
 }
 
+/* the file's writes on the disk (the Vita's memory card) before it returns:
+a profile's crash-safe write (saved_game_files.c) flushes its new file
+before it takes the old one's place */
+BOOL WINAPI FlushFileBuffers(HANDLE handle)
+{
+	struct platform_file *file = file_from_handle(handle);
+	unsigned long long started;
+	int result;
+
+	if (!file)
+		return FALSE;
+	started = file_call_started();
+	result = fsync(file->descriptor);
+	if (result != 0)
+		platform_set_last_error_from_errno(errno);
+	if (started)
+	{
+		DWORD error = GetLastError();
+
+		file_call_done(started, "flush", file->path, 0);
+		SetLastError(error);
+	}
+	return result == 0;
+}
+
 /* ReadFileEx/WriteFileEx complete immediately; as on Win32, the completion
 routine runs during the issuing thread's next alertable wait. */
 

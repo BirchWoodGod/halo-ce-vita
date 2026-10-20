@@ -1747,6 +1747,7 @@ int __stdcall WSAStartup(unsigned short, struct WSAData *);
 unsigned long __stdcall WaitForSingleObject(void *, unsigned long);
 unsigned long __stdcall WaitForSingleObjectEx(void *, unsigned long, int);
 int __stdcall WriteFile(void *, const void *, unsigned long, unsigned long *, struct _OVERLAPPED *);
+int __stdcall FlushFileBuffers(void *);
 int __stdcall WriteFileEx(void *, const void *, unsigned long, struct _OVERLAPPED *, void (__stdcall *)(unsigned long, unsigned long, struct _OVERLAPPED *));
 void *__stdcall XCalculateSignatureBegin(unsigned long);
 unsigned long __stdcall XCalculateSignatureEnd(void *, struct _XCALCSIG_SIGNATURE *);
