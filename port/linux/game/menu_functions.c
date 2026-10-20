@@ -98,6 +98,7 @@ halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
 #include "browser_list.h"
 #include "../src/system_link_shortcut.h"
 #include "forge.h"
+#include "forge_blocks.h"
 #include "mod_manager.h"
 #include "custom_edition_maps.h"
 #include "../src/port_config.h"
@@ -562,6 +563,10 @@ static struct
 	browser; lan: the browser's rows are the System Link list's games (the
 	LAN browser), since when it looks (lan_since), its list as last logged */
 	boolean browse_lan_pending;
+	/* (a join refused by the map share, from the Halo 3 games browser:
+	when it was asked, to open the browser again over the main menu the
+	refusal left at; 0 none) */
+	unsigned long browser_after_refusal;
 	/* (Menu style Halo CE) SERVER BROWSER: the profile screen first, then
 	the server browser in place of the System Link list it leads to
 	(browser_profile_pending); a game joined from it, the profile chosen,
@@ -1901,6 +1906,8 @@ static void h3_forge_lobby_update(struct widget_instance *widget)
 		h3_capitals(text);
 		text_show(named(screen, "packs_row"), text);
 		forge_packs_prebuild();
+		/* (the building blocks of the map chosen: forge_blocks.c) */
+		forge_blocks_prebuild(forge_map_short(h3_forge.map));
 	}
 	/* (the note: why START FORGE did not start, else a pack being built,
 	else the game's rules) */
@@ -4335,6 +4342,22 @@ static boolean party_warning_confirmed(char const *id);
 
 static void join_begin(struct p2p_lobby_entry const *entry, char const *password)
 {
+	/* (one join for one press: the press that answers the large game's
+	question reached the browser too, as Cross on the same row, and joined
+	the game a second time 14 ms after the answer's join - the owner's
+	insider.15 log -; the same game begun again within two seconds is that
+	press) */
+	static char begun_id[sizeof(entry->id)];
+	static unsigned long begun_at;
+	unsigned long now = system_milliseconds();
+
+	if (begun_at && now - begun_at < 2000 && !strcmp(begun_id, entry->id))
+	{
+		platform_log("menus: the public game %s: joining already (the same press)", entry->name);
+		return;
+	}
+	snprintf(begun_id, sizeof(begun_id), "%s", entry->id);
+	begun_at = now ? now : 1;
 	if (!p2p_lobby_join(entry->id, password ? password : ""))
 	{
 		snprintf(menu_functions.status, sizeof(menu_functions.status), T("%s is no longer listed"), entry->name);
@@ -4522,6 +4545,12 @@ static void browser_test_games(void)
 			};
 
 			snprintf(entry->name, sizeof(entry->name), "%s", names[index % NUMBEROF(names)]);
+			/* (and the rules and players a public list's carry, whole: the
+			ticker's texts beside the rows) */
+			snprintf(entry->rules, sizeof(entry->rules), "Slayer to 50 on %s: under way (DEDICATED)",
+				maps[index % 5]);
+			snprintf(entry->players_line, sizeof(entry->players_line),
+				"%ld of 16: Krazy, Stink Fist, xQuJoKe, Yeti_Kraken, Wombat +%ld more", index * 7 % 16, index % 9);
 			snprintf(entry->map, sizeof(entry->map), "%s", index % 3 ? maps[index % 5] : custom_maps[index / 3 % NUMBEROF(custom_maps)]);
 		}
 		else
@@ -8328,6 +8357,16 @@ void menu_functions_open_system_link(void)
 	menu_functions.open_system_link = TRUE;
 }
 
+/* (map_share.c: a join refused - the host's map not sent, the game under
+way -, the message shown) Menu style Halo 3: back to the games browser, with
+the message, rather than at the main menu */
+void menu_functions_join_refused(void)
+{
+	if (!halo_menu_style_halo3())
+		return;
+	menu_functions.browser_after_refusal = system_milliseconds() | 1;
+}
+
 /* (system_link_shortcut.c: the host an invite, a code or the online list
 joined, once its game is listed) the game joined from the Halo 3 games
 browser when it is the screen open, as A on its row joins it: 1 joined, 0
@@ -9191,8 +9230,10 @@ the profile joined (the one chosen this run, else the nameplate's), the
 server started, the lobby's GAME and MAP set */
 static void h3_live_open(void)
 {
-	/* (the nameplate's profile, none chosen this run: for this game alone -
-	SELECT PROFILE still asks the first time a game is browsed or joined) */
+	/* (the nameplate's profile, none chosen this run: the run's from now
+	on, as SELECT PROFILE's choice would be - the owner, insider.15: BROWSE
+	GAMES from the live lobby asked SELECT PROFILE for the profile the lobby
+	already played with -; one that cannot join is forgotten) */
 	boolean nameplate = h3_session.profile == NONE;
 	boolean joined;
 
@@ -9203,7 +9244,7 @@ static void h3_live_open(void)
 			h3_session_profile_chosen(0, h3_plate.shown);
 	}
 	joined = h3_session_profile_join();
-	if (nameplate)
+	if (nameplate && !joined)
 		h3_session_forget();
 	if (!joined)
 	{
@@ -10875,6 +10916,37 @@ void pc_menu_functions_update(
 	boolean main_menu_loaded)
 {
 	h3_live_update(main_menu_loaded);
+	/* (a join the host's map refused: the games browser again once the
+	main menu is up - the Xbox's error over it dismissed -, not the main
+	menu; given up after 30 s) */
+	if (menu_functions.browser_after_refusal)
+	{
+		struct widget_instance *active = ui_widget_port_active_screen(0);
+		long main_tag = menu_tags_ingame_screen("h3/main/screen");
+
+		if (system_milliseconds() - menu_functions.browser_after_refusal > 30000 || !halo_menu_style_halo3())
+			menu_functions.browser_after_refusal = 0;
+		else if (main_menu_loaded && active && main_tag != NONE && active->definition_tag_index == main_tag &&
+			!global_network_game_client_get())
+		{
+			/* (as BROWSE GAMES opens it: the profile - chosen already, set at
+			once -, then the games browser in the System Link list's place;
+			B on it goes back to the main menu) */
+			menu_functions.browser_after_refusal = 0;
+			menu_functions.create_pending = FALSE;
+			menu_functions.browse_lan_pending = TRUE;
+			if (ui_widget_load_by_name_or_tag(profiles_screen, NONE, NULL, active->local_player_index,
+				active->definition_tag_index, NONE, NONE))
+			{
+				platform_log("menus: the join was refused: the games browser again");
+			}
+			else
+			{
+				menu_functions.browse_lan_pending = FALSE;
+				platform_log("menus: the join was refused: the games browser did not open");
+			}
+		}
+	}
 	if (main_menu_loaded && menu_functions.open_party)
 	{
 		menu_functions.open_party = FALSE;

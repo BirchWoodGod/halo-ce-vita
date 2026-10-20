@@ -28,7 +28,7 @@ enum
 	/* a readable name's bytes (UTF-8) */
 	FORGE_NAME_SIZE = 64,
 	/* the scene packs Forge offers (forge.c forge_packs) */
-	FORGE_PACK_COUNT = 7,
+	FORGE_PACK_COUNT = 6,
 };
 
 /* the object browser's categories, in its order */
@@ -39,6 +39,8 @@ enum
 	_forge_category_equipment,
 	_forge_category_scenery,
 	_forge_category_characters,
+	/* (the building blocks the game makes: forge_blocks.c) */
+	_forge_category_blocks,
 	NUMBER_OF_FORGE_CATEGORIES
 };
 

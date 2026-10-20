@@ -32,6 +32,13 @@ usage:
       it. SCENE_PACK_COPY_DIR=<folder>: the decompressed copies a build may
       read instead of inflating (<folder>/<map>.map, as the game's cache
       partition holds them: scene_pack_copy_source)
+  scene_pack_test blocksfuzz <maps folder> <map> <iterations> [<seed>]
+      Forge's building blocks (a recipe with "blocks": scene_pack_blocks.c)
+      built from a damaged map, again and again: the map's tag data changed
+      as the blocks read it (the instances, roots and first bitmaps of its
+      shaders and bitmaps, any word), never on disk; each build refused or,
+      when it makes a pack, the pack refused or loaded clean twice; never a
+      crash or a hang. Exits 1 on any failure.
   scene_pack_test fuzz <pack> <iterations> [<seed>]
       damaged copies (cut short, grown, bytes changed with and without their
       CRCs made right, pointers and counts made wrong, the header's fields),
@@ -1027,6 +1034,218 @@ static int command_cefuzz(char const *recipe_path, char const *maps, long iterat
 	return failures ? 1 : 0;
 }
 
+/* ---------- damaged sources of Forge's blocks (scene_pack_blocks.c) */
+
+extern void (*scene_pack_blocks_source_hook)(unsigned char *tags, unsigned long size, unsigned long address,
+	unsigned long instances, long count);
+
+enum
+{
+	MAXIMUM_BLOCKS_MUTATIONS = 6,
+};
+
+static struct
+{
+	int count;
+	/* (what each change hits: 0 an instance's field, 1 a shader's or
+	bitmap's root, 2 a shader's bitmap's group or first bitmap, 3 any word of
+	the tag data) */
+	int kinds[MAXIMUM_BLOCKS_MUTATIONS];
+	unsigned long picks[MAXIMUM_BLOCKS_MUTATIONS];
+	unsigned long values[MAXIMUM_BLOCKS_MUTATIONS];
+	long applied;
+} blocks_damage;
+
+static unsigned long tags_u32(unsigned char const *tags, unsigned long size, unsigned long offset)
+{
+	return size >= 4 && offset <= size - 4 ? read_u32(tags + offset) : 0;
+}
+
+/* the source's tag data changed where the blocks read it: an instance of a
+shader or bitmap (its group, tag index, name or root), a word of a shader's
+or bitmap's root, of a bitmap's first bitmap, or anywhere */
+static void blocks_damage_hook(unsigned char *tags, unsigned long size, unsigned long address, unsigned long instances,
+	long count)
+{
+	int change;
+
+	for (change = 0; change < blocks_damage.count; change++)
+	{
+		unsigned long pick = blocks_damage.picks[change];
+		unsigned long at = 0xFFFFFFFFUL;
+		long candidates = 0, index;
+		long chosen = -1;
+
+		/* (the n-th shader or bitmap of the source, n from pick) */
+		for (index = 0; index < count && instances - address + (unsigned long)(index + 1) * 32 <= size; index++)
+		{
+			unsigned long group = tags_u32(tags, size, instances - address + (unsigned long)index * 32);
+
+			if (group == 'senv' || (!(pick & 3) && (group == 'soso' || group == 'bitm')))
+				candidates++;
+		}
+		if (candidates)
+		{
+			long wanted = (long)(pick % (unsigned long)candidates);
+
+			for (index = 0; index < count && instances - address + (unsigned long)(index + 1) * 32 <= size; index++)
+			{
+				unsigned long group = tags_u32(tags, size, instances - address + (unsigned long)index * 32);
+
+				if ((group == 'senv' || (!(pick & 3) && (group == 'soso' || group == 'bitm'))) && !wanted--)
+				{
+					chosen = index;
+					break;
+				}
+			}
+		}
+		if (chosen != -1)
+		{
+			unsigned long instance = instances - address + (unsigned long)chosen * 32;
+			unsigned long root = tags_u32(tags, size, instance + 20) - address;
+
+			switch (blocks_damage.kinds[change])
+			{
+			case 0:
+				at = instance + ((pick >> 8) % 6) * 4;
+				break;
+			case 1:
+				at = root + ((pick >> 8) % (0x344 / 4)) * 4;
+				break;
+			case 2:
+				/* (an environment shader's base or detail map's bitmap group:
+				its bitmaps block, at 0x60, and its first bitmap's words) */
+				{
+					static unsigned long const maps[] = { 0x88, 0xB8, 0xCC, 0xFC };
+					unsigned long reference = tags_u32(tags, size, root + maps[(pick >> 4) % 4] + 12);
+					long bitmap = (long)(reference & 0xFFFF);
+					unsigned long bitmap_root = bitmap < count ?
+						tags_u32(tags, size, instances - address + (unsigned long)bitmap * 32 + 20) - address : 0xFFFFFFFFUL;
+
+					if ((pick >> 6) & 1)
+						at = bitmap_root + ((pick >> 8) % 0x1C) * 4;
+					else
+						at = tags_u32(tags, size, bitmap_root + 0x60 + 4) - address + ((pick >> 8) % 12) * 4;
+				}
+				break;
+			}
+		}
+		if (blocks_damage.kinds[change] == 3)
+			at = ((pick >> 8) % (size / 4)) * 4;
+		if (size >= 4 && at <= size - 4)
+		{
+			write_u32(tags + at, blocks_damage.values[change]);
+			blocks_damage.applied++;
+		}
+	}
+}
+
+static int command_blocksfuzz(char const *maps, char const *map, long iterations, unsigned long seed)
+{
+	struct scene_pack_recipe *recipe = calloc(1, scene_pack_recipe_size());
+	struct scene_pack_build_result *result = calloc(1, sizeof(*result) + 64);
+	struct scene_pack_info info;
+	char text[256], why[256], pack_path[512];
+	long iteration, failures = 0;
+	long built = 0, refused_build = 0, loaded = 0, refused_load = 0;
+	long kinds[4] = { 0 };
+	void *tags;
+	struct sigaction action;
+
+	snprintf(text, sizeof(text), "pack blocks_%s\nmap %s\nblocks\n", map, map);
+	if (!recipe || !result || !scene_pack_recipe_parse(text, (long)strlen(text), recipe, why, sizeof(why)))
+	{
+		printf("scene_pack_test: the blocks' recipe cannot be made: %s\n", why);
+		return 1;
+	}
+	snprintf(pack_path, sizeof(pack_path), "%s/scene_pack_blocksfuzz.%d.pack", getenv("TMPDIR") ? getenv("TMPDIR") : "/tmp",
+		(int)getpid());
+	if (!scene_pack_build(recipe, maps, pack_path, NULL, 0, NULL, result) ||
+		!(tags = pack_load(pack_path, &info, 5000, why, sizeof(why))))
+	{
+		printf("scene_pack_test: the clean build failed: %s\n", result->why);
+		return 1;
+	}
+	free(tags);
+	memset(&action, 0, sizeof(action));
+	action.sa_handler = fuzz_signal;
+	sigaction(SIGSEGV, &action, NULL);
+	sigaction(SIGBUS, &action, NULL);
+	sigaction(SIGFPE, &action, NULL);
+	sigaction(SIGALRM, &action, NULL);
+	sigaction(SIGABRT, &action, NULL);
+	scene_pack_blocks_source_hook = blocks_damage_hook;
+	quiet = 1;
+	for (iteration = 0; iteration < iterations; iteration++)
+	{
+		int change;
+
+		fuzz_state = (unsigned long long)seed * 1000003ULL + (unsigned long long)iteration;
+		fuzz_random();
+		blocks_damage.count = 1 + (int)(fuzz_random() % MAXIMUM_BLOCKS_MUTATIONS);
+		for (change = 0; change < blocks_damage.count; change++)
+		{
+			unsigned long pick = fuzz_random() % 100;
+
+			blocks_damage.kinds[change] = pick < 30 ? 0 : pick < 75 ? 1 : pick < 90 ? 2 : 3;
+			kinds[blocks_damage.kinds[change]]++;
+			blocks_damage.picks[change] = fuzz_random();
+			blocks_damage.values[change] = fuzz_random() % 3 ? fuzz_odd_value(0x100000) : fuzz_random();
+		}
+		fuzz_signal_number = 0;
+		if (sigsetjmp(fuzz_jump, 1))
+		{
+			alarm(0);
+			printf("FAIL: iteration %ld (seed %lu): signal %d\n", iteration, seed, fuzz_signal_number);
+			failures++;
+			sigaction(SIGSEGV, &action, NULL);
+			continue;
+		}
+		alarm(60);
+		if (scene_pack_build(recipe, maps, pack_path, NULL, 0, NULL, result))
+		{
+			built++;
+			tags = pack_load(pack_path, &info, 5000, why, sizeof(why));
+			if (tags)
+			{
+				void *again;
+
+				loaded++;
+				free(tags);
+				again = pack_load(pack_path, &info, 5000, why, sizeof(why));
+				if (!again)
+				{
+					printf("FAIL: iteration %ld (seed %lu): accepted, then refused: %s\n", iteration, seed, why);
+					failures++;
+				}
+				else
+				{
+					free(again);
+				}
+			}
+			else
+			{
+				refused_load++;
+			}
+		}
+		else
+		{
+			refused_build++;
+		}
+		alarm(0);
+	}
+	quiet = 0;
+	scene_pack_blocks_source_hook = NULL;
+	remove(pack_path);
+	printf("blocksfuzz %s: %ld iterations from seed %lu (%ld changes made: %ld in shaders' and bitmaps' instances, %ld in "
+		"their roots, %ld in bitmaps' first bitmap, %ld anywhere in the tag data)\n", map, iterations, seed,
+		blocks_damage.applied, kinds[0], kinds[1], kinds[2], kinds[3]);
+	printf("  the build refused %ld; built %ld: %ld loaded clean twice, %ld refused when loaded\n", refused_build, built,
+		loaded, refused_load);
+	printf("%s: %ld failures\n", failures ? "FAIL" : "PASS", failures);
+	return failures ? 1 : 0;
+}
+
 /* (SCENE_PACK_COPY_DIR) the maps' decompressed copies */
 static FILE *copy_dir_open(char const *map, unsigned long *token)
 {
@@ -1117,7 +1336,10 @@ int main(int argc, char **argv)
 		return command_fuzz(argv[2], atol(argv[3]), argc == 5 ? strtoul(argv[4], NULL, 10) : 1);
 	if ((argc == 5 || argc == 6) && !strcmp(argv[1], "cefuzz"))
 		return command_cefuzz(argv[2], argv[3], atol(argv[4]), argc == 6 ? strtoul(argv[5], NULL, 10) : 1);
+	if ((argc == 5 || argc == 6) && !strcmp(argv[1], "blocksfuzz"))
+		return command_blocksfuzz(argv[2], argv[3], atol(argv[4]), argc == 6 ? strtoul(argv[5], NULL, 10) : 1);
 	fprintf(stderr, "usage: scene_pack_test build <recipe> <maps folder> <out.pack> | check <pack> [first] [-v] | "
-		"fuzz <pack> <iterations> [seed] | cefuzz <recipe> <maps folder> <iterations> [seed]\n");
+		"fuzz <pack> <iterations> [seed] | cefuzz <recipe> <maps folder> <iterations> [seed] | "
+		"blocksfuzz <maps folder> <map> <iterations> [seed]\n");
 	return 2;
 }

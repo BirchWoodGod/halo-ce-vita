@@ -52,6 +52,7 @@ correct.
 
 #include "scene_pack.h"
 #include "scene_pack_ce.h"
+#include "scene_pack_blocks.h"
 #include "tag_schema.h"
 #include "tag_relocate.h"
 #include "../../third_party/zlib/zlib_prefixed.h"
@@ -264,6 +265,10 @@ struct build_state
 	unsigned long source_address;
 	/* (a Custom Edition map's: scene_pack_ce.c) */
 	struct scene_pack_ce *custom_edition;
+	/* (a recipe with "blocks": Forge's building blocks, made from the
+	source's tags as more of them, its tags counting on from source_count:
+	scene_pack_blocks.c) */
+	struct scene_pack_blocks *blocks;
 	struct build_item *items;
 	long item_count;
 	long item_capacity;
@@ -322,6 +327,8 @@ struct build_state
 /* ---------- globals */
 
 void (*scene_pack_io_hook)(unsigned long bytes, boolean source) = NULL;
+void (*scene_pack_blocks_source_hook)(unsigned char *tags, unsigned long size, unsigned long address,
+	unsigned long instances, long count) = NULL;
 struct scene_pack_copy_source const *scene_pack_copy_source = NULL;
 
 /* ---------- prototypes */
@@ -691,6 +698,10 @@ boolean scene_pack_recipe_parse(
 			map->file_size = (unsigned long)size;
 			map->checksum = (unsigned long)strtoul(checksum_text, &end, 16);
 		}
+		else if (!strcmp(word, "blocks") && !*rest)
+		{
+			recipe->blocks = TRUE;
+		}
 		else if (!strcmp(word, "unit") && !strcmp(rest, "multiplayer") && recipe->root_count < SCENE_PACK_MAXIMUM_ROOTS)
 		{
 			recipe->roots[recipe->root_count].group_tag = 'unit';
@@ -755,9 +766,16 @@ boolean scene_pack_recipe_parse(
 			return FALSE;
 		}
 	}
-	if (!recipe->name[0] || !(recipe->map_count || recipe->custom_edition_map_count) || !recipe->root_count)
+	if (!recipe->name[0] || !(recipe->map_count || recipe->custom_edition_map_count) ||
+		!(recipe->root_count || recipe->blocks))
 	{
 		why_set(why, why_size, "the recipe has no pack name, map or tag%s", NULL);
+		return FALSE;
+	}
+	/* (the blocks are made from an Xbox map's tags) */
+	if (recipe->blocks && recipe->custom_edition_map_count)
+	{
+		why_set(why, why_size, "the recipe's blocks need an Xbox map%s", NULL);
 		return FALSE;
 	}
 	if (recipe->map_count && recipe->custom_edition_map_count)
@@ -877,6 +895,15 @@ boolean scene_pack_recipe_parse(
 		}
 		hash = fnv_bytes(hash, "|", 1);
 		hash = fnv_bytes(hash, recipe->keeps[index].animation, strlen(recipe->keeps[index].animation) + 1);
+	}
+	/* (the blocks' generator's version: blocks made otherwise are a pack
+	made again) */
+	if (recipe->blocks)
+	{
+		char blocks[16];
+
+		snprintf(blocks, sizeof(blocks), "b%d", SCENE_PACK_BLOCKS_VERSION);
+		hash = fnv_bytes(hash, blocks, strlen(blocks) + 1);
 	}
 	snprintf(version, sizeof(version), "v%d.%d%s", SCENE_PACK_VERSION, SCENE_PACK_BUILDER_VERSION,
 		recipe->custom_edition_map_count ? scene_pack_custom_edition_builder_version() : "");
@@ -1325,6 +1352,10 @@ static unsigned char *source_at(struct build_state const *state, unsigned long a
 {
 	unsigned long offset = address - state->source_address;
 
+	/* (the blocks' tags, at addresses of their own) */
+	if (state->blocks && address >= SCENE_PACK_BLOCKS_ADDRESS)
+		return scene_pack_blocks_at(state->blocks, address, size);
+
 	if (address < state->source_address || offset > state->tags_size || size > state->tags_size - offset)
 		return NULL;
 	return state->tags + offset;
@@ -1338,6 +1369,10 @@ static unsigned long link_address(unsigned long offset)
 /* a source tag (by its index in the source's table): its instance */
 static unsigned char *source_instance(struct build_state const *state, long index)
 {
+	if (index < 0)
+		return NULL;
+	if (index >= state->source_count)
+		return scene_pack_blocks_instance(state->blocks, index - state->source_count);
 	return source_at(state, state->instances + (unsigned long)index * TAG_INSTANCE_SIZE, TAG_INSTANCE_SIZE);
 }
 
@@ -1347,8 +1382,11 @@ static long source_tag(struct build_state const *state, long tag_index)
 	short absolute_index = (short)tag_index;
 	unsigned char *instance;
 
-	if (tag_index == NONE || absolute_index < 0 || absolute_index >= state->source_count)
+	if (tag_index == NONE || absolute_index < 0 ||
+		absolute_index >= state->source_count + scene_pack_blocks_tag_count(state->blocks))
+	{
 		return NONE;
+	}
 	instance = source_instance(state, absolute_index);
 	return instance && (long)read_u32(instance + 12) == tag_index ? absolute_index : NONE;
 }
@@ -1810,6 +1848,26 @@ static void model_part_buffers(struct build_state *state, unsigned long source, 
 {
 	unsigned char *part = source_at(state, source, MODEL_PART_SIZE);
 
+	/* (a block's: its vertices and strip made by scene_pack_blocks.c) */
+	if (state->blocks && part && source >= SCENE_PACK_BLOCKS_ADDRESS)
+	{
+		unsigned char *vertices = NULL, *indices = NULL;
+		unsigned long vertex_bytes = 0, index_bytes = 0;
+		long index_buffer, vertex_buffer;
+
+		if (!scene_pack_blocks_part_buffers(state->blocks, source, &vertices, &vertex_bytes, &indices, &index_bytes))
+		{
+			build_fail(state, "a block's model part was not made%s", NULL);
+			return;
+		}
+		index_buffer = buffer_made(state, indices, index_bytes, TRUE);
+		vertex_buffer = buffer_made(state, vertices, vertex_bytes, FALSE);
+		buffer_fixup(state, offset + MODEL_PART_TRIANGLE_BASE, index_buffer, TRUE);
+		buffer_fixup(state, offset + MODEL_PART_TRIANGLE_HARDWARE, index_buffer, FALSE);
+		buffer_fixup(state, offset + MODEL_PART_VERTEX_BASE, vertex_buffer, TRUE);
+		buffer_fixup(state, offset + MODEL_PART_VERTEX_HARDWARE, vertex_buffer, FALSE);
+		return;
+	}
 	/* (a Custom Edition model's part: its vertices compressed and strip
 	copied from the map's model data, scene_pack_ce.c) */
 	if (state->custom_edition && part)
@@ -2475,6 +2533,8 @@ static void build_state_free(struct build_state *state, void *scratch)
 		free(state->range_fixups);
 	if (state->reduced)
 		free(state->reduced);
+	if (state->blocks)
+		scene_pack_blocks_free(state->blocks);
 }
 
 /* (keep lines) each animation graph of the pack's that the recipe keeps
@@ -2593,6 +2653,12 @@ static void build_tags(struct build_state *state, unsigned long file_length)
 					scene_pack_group_text(recipe->roots[index].group_tag, text), recipe->roots[index].path);
 			state->failed = TRUE;
 		}
+	}
+	/* (the blocks' sceneries next: the pack's objects) */
+	for (index = 0; state->blocks && index < scene_pack_blocks_count() && !state->failed; index++)
+	{
+		if (pack_tag_add(state, state->source_count + scene_pack_blocks_scenery(state->blocks, (short)index)) == NONE)
+			build_fail(state, "a block's scenery cannot be taken%s", NULL);
 	}
 	for (index = 0; index < state->pack_tag_count && !state->failed; index++)
 	{
@@ -3209,6 +3275,7 @@ static void build_state_release(struct build_state *state)
 	state->ranges = NULL;
 	state->range_fixups = NULL;
 	state->reduced = NULL;
+	state->blocks = NULL;
 	state->tags = tags;
 }
 
@@ -3326,6 +3393,33 @@ static boolean build_many_once(
 			build_fail(state, "there is no memory to build the pack%s", NULL);
 		else if (!source_table_read(state))
 			build_fail(state, "the map's tag header is damaged%s", NULL);
+		if (!state->failed && state->recipe->blocks)
+		{
+			struct scene_pack_blocks_source source;
+			char why[SCENE_PACK_WHY_SIZE];
+
+			/* (tools/scene_pack_test.c's blocksfuzz: the source's tag data
+			damaged as the blocks read it) */
+			if (scene_pack_blocks_source_hook)
+				scene_pack_blocks_source_hook(state->tags, state->tags_size, state->source_address, state->instances,
+					state->source_count);
+			source.tags = state->tags;
+			source.tags_size = state->tags_size;
+			source.address = state->source_address;
+			source.instances = state->instances;
+			source.count = state->source_count;
+			source.map = map;
+			state->blocks = scene_pack_blocks_make(&source, why, sizeof(why));
+			if (!state->blocks)
+				build_fail(state, "%s", why);
+			else
+			{
+				char const *walls, *floors;
+
+				scene_pack_blocks_materials(state->blocks, &walls, &floors);
+				platform_log("scene packs: %s: the blocks' walls of %s, floors of %s", state->recipe->name, walls, floors);
+			}
+		}
 		if (!state->failed)
 		{
 			for (index = 0; index < 0x8000; index++)

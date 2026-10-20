@@ -165,6 +165,9 @@ struct scene_pack_slot
 	struct scene_pack_info info;
 	struct scene_pack_build_result build;
 	boolean built;
+	/* (packs_prepare) the recipe's maps a build found lacking one of its
+	tags (a bit each, the recipe's order): the next build tries the others */
+	unsigned long maps_lacking;
 	unsigned long long ready_us;
 	/* loaded: its tags in the tag cache (bytes of them), its tags' first
 	index in the game's table, its file range's slot, its file */
@@ -579,6 +582,32 @@ static boolean pack_built(struct scene_pack_slot *slot, struct scene_pack_build_
 	return TRUE;
 }
 
+/* the index of a map among a recipe's maps, or 32 if it is not one */
+static short recipe_map_index(struct scene_pack_recipe const *recipe, char const *map)
+{
+	short index;
+
+	for (index = 0; index < recipe->map_count && index < 32; index++)
+	{
+		if (!strcmp(recipe->maps[index], map))
+			return index;
+	}
+	return 32;
+}
+
+/* how many of a slot's recipe's maps have not been found lacking a tag */
+static short recipe_maps_left(struct scene_pack_slot const *slot)
+{
+	short index, left = 0;
+
+	for (index = 0; index < slot->recipe->map_count && index < 32; index++)
+	{
+		if (!(slot->maps_lacking & (1UL << index)))
+			left++;
+	}
+	return left;
+}
+
 /* the map a build of the lead slot (of slots[], those needing a build)
 reads: of the lead's recipe's maps there, one read in place (its maps
 folder file not compressed, or the game's decompressed copy of it:
@@ -598,6 +627,8 @@ static boolean build_map_choose(struct scene_pack_slot *const *slots, short coun
 		unsigned long long hash;
 		long score;
 
+		if (index < 32 && (slots[lead]->maps_lacking & (1UL << index)))
+			continue;
 		if (!scene_pack_source_identity(recipe, directory, recipe->maps[index], &hash))
 			continue;
 		score = scene_pack_source_seekable(directory, recipe->maps[index]) ? 1000 : 0;
@@ -650,9 +681,11 @@ static void packs_prepare(struct scene_pack_slot **slots, short count, unsigned 
 		struct scene_pack_recipe const *recipes[MAXIMUM_SCENE_PACK_SLOTS];
 		char const *paths[MAXIMUM_SCENE_PACK_SLOTS];
 		struct scene_pack_slot *group[MAXIMUM_SCENE_PACK_SLOTS];
+		short group_slot_index[MAXIMUM_SCENE_PACK_SLOTS];
 		char map[SCENE_PACK_NAME_SIZE];
 		short lead, group_count = 0;
 		boolean built;
+		boolean retried = FALSE;
 
 		for (lead = 0; lead < count && !need[lead]; lead++)
 			;
@@ -692,9 +725,12 @@ static void packs_prepare(struct scene_pack_slot **slots, short count, unsigned 
 			unsigned long long hash;
 
 			if (need[index] && !need[index]->recipe->custom_edition_map_count &&
+				!(recipe_map_index(need[index]->recipe, map) < 32 &&
+					(need[index]->maps_lacking & (1UL << recipe_map_index(need[index]->recipe, map)))) &&
 				scene_pack_source_identity(need[index]->recipe, cache_files_map_directory(), map, &hash))
 			{
 				group[group_count] = need[index];
+				group_slot_index[group_count] = index;
 				recipes[group_count] = need[index]->recipe;
 				paths[group_count] = need[index]->path;
 				need[index]->progress = &scene_packs_build_results[group_count].progress;
@@ -718,10 +754,30 @@ static void packs_prepare(struct scene_pack_slot **slots, short count, unsigned 
 				group[index]->progress = NULL;
 				continue;
 			}
+			/* (the map lacks one of its tags - a recipe's maps hold its tags
+			in the order they are named, but the map chosen first is the one
+			read in place, not always the first named - another of its maps
+			is tried before it fails) */
+			if (!this_built && !strncmp(scene_packs_build_results[index].why, "the map has no ", 15) &&
+				recipe_map_index(group[index]->recipe, map) < 32)
+			{
+				short tried = recipe_map_index(group[index]->recipe, map);
+
+				group[index]->maps_lacking |= 1UL << tried;
+				if (recipe_maps_left(group[index]) > 0)
+				{
+					platform_log("scene packs: %s: %s lacks a tag of it (%s): another of its maps next", group[index]->name,
+						map, scene_packs_build_results[index].why);
+					group[index]->progress = NULL;
+					need[group_slot_index[index]] = group[index];
+					retried = TRUE;
+					continue;
+				}
+			}
 			state_set(group[index], pack_built(group[index], &scene_packs_build_results[index], this_built,
 				(short)(group_count - 1)) ? _scene_pack_state_ready : _scene_pack_state_failed);
 		}
-		if (only_first)
+		if (only_first && !retried)
 			break;
 	}
 	for (index = 0; left && index < count; index++)

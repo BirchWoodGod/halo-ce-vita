@@ -74,6 +74,9 @@ equipment, scenery (scenery, machines, controls), and characters - the
 actor variants that name their unit, which spawn it with a free actor
 (ai_attach_free) and fight as the map's own do; a multiplayer map has none.
 Only the loaded map's: other maps' objects are the design's later phases.
+And blocks (BLOCKS): the building blocks the game makes of the map's own
+bitmaps (forge_blocks.c, scene_pack_blocks.c), whose corners SNAP puts on
+the grid so that they meet edge to edge.
 
 An object spawned is the game's own: object_placement_data_new and
 object_new, as the cheats' object_new spawns a weapon or vehicle
@@ -136,6 +139,10 @@ HALO_TEST_COMMANDS):
                            (back with -), as its properties' rows; "property
                            resetrot" its angles none
   forge distance <wu>      the held object that far from the camera
+  forge snap [on|off]      the Forge menu's SNAP (the grid), flipped or set
+  forge blocks ray|projectiles  (tests) a projectile's line along the view
+                           and what it meets; the projectiles in the world
+                           (forge_blocks.c)
   forge delete             the held (or aimed at) object deleted
   forge camera x y z yaw pitch   the monitor's camera put there (degrees)
   forge press <buttons> [frames]  the monitor's buttons pressed as a
@@ -226,6 +233,7 @@ Each logs what it did ("forge: ...").
 #include "units/unit_definitions.h"
 
 #include "forge.h"
+#include "forge_blocks.h"
 #include "forge_files.h"
 #include "forge_net_protocol.h"
 #include "halo_menus.h"
@@ -364,12 +372,12 @@ enum
 /* the browser's categories' names (forge.h's order) */
 static char const *const forge_category_names[NUMBER_OF_FORGE_CATEGORIES] =
 {
-	N_("VEHICLES"), N_("WEAPONS"), N_("EQUIPMENT"), N_("SCENERY"), N_("AI"),
+	N_("VEHICLES"), N_("WEAPONS"), N_("EQUIPMENT"), N_("SCENERY"), N_("AI"), N_("BLOCKS"),
 };
 /* (the log's) */
 static char const *const forge_category_log_names[NUMBER_OF_FORGE_CATEGORIES] =
 {
-	"vehicles", "weapons", "equipment", "scenery", "characters",
+	"vehicles", "weapons", "equipment", "scenery", "characters", "blocks",
 };
 
 /* the lobby's maps: the Xbox's multiplayer maps, in the order of ui.map's
@@ -414,7 +422,6 @@ static struct
 	{ "covenant_vehicles", N_("Covenant vehicles"), N_("The Banshee, the Wraith and the Shade.\nBuilt from your Assault on the Control\nRoom or Two Betrayals map."), TRUE },
 	{ "dropships", N_("Dropships"), N_("The Pelican, which you fly with ten\nriders, and the Covenant dropship. Built\nfrom your The Silent Cartographer or\nHalo map."), TRUE },
 	{ "covenant_ai", N_("Covenant AI"), N_("Grunts, jackals, elites (stealth and\nsword too) and hunters, as in the\ncampaign. Built from your Assault on the\nControl Room map."), FALSE },
-	{ "ce_pelican", N_("Extinction Pelican"), N_("The Pelican of Extinction: its guns, a\nco-pilot and eleven riders. Built from\nyour Extinction map (Halo Custom\nEdition, by (DA)Ender)."), TRUE },
 	{ "flood_ai", N_("Flood AI"), N_("Infection forms, combat forms and\ncarriers, on the Flood's team. Built from\nyour The Library map."), FALSE },
 	{ "sentinel_ai", N_("Sentinel AI"), N_("Sentinels, on their own team: they hunt\nthe Flood. Built from your The Library\nmap."), FALSE },
 	{ "marine_ai", N_("Marine AI"), N_("Marines with assault and sniper rifles,\non your side as in the campaign. Built\nfrom your Halo map."), FALSE },
@@ -438,7 +445,6 @@ static struct
 	{ "c gun turret", N_("Shade") },
 	{ "wraith", N_("Wraith") },
 	{ "pelican", N_("Pelican") },
-	{ "epelican", N_("Extinction Pelican") },
 	{ "c_dropship", N_("Covenant Dropship") },
 	/* weapons */
 	{ "assault rifle", N_("Assault Rifle") },
@@ -920,6 +926,12 @@ static void forge_tag_readable_name(
 	char const *found;
 	size_t length;
 
+	/* (a building block: forge_blocks.c's names) */
+	if (forge_blocks_of_tag(tag_index) != NONE)
+	{
+		forge_blocks_name(forge_blocks_of_tag(tag_index), name, (int)size);
+		return;
+	}
 	csstrncpy(leaf, forge_tag_leaf(tag_index), sizeof(leaf) - 1);
 	leaf[sizeof(leaf) - 1] = 0;
 	length = strlen(leaf);
@@ -981,6 +993,10 @@ static short forge_tag_category(
 	case EQUIPMENT_DEFINITION_TAG:
 		return strstr(name, "grenade") ? _forge_category_weapons : _forge_category_equipment;
 	case FORGE_SCENERY_DEFINITION_TAG:
+		/* (the building blocks: forge_blocks.c) */
+		if (forge_blocks_of_tag(tag_index) != NONE)
+			return _forge_category_blocks;
+		return _forge_category_scenery;
 	case MACHINE_DEFINITION_TAG:
 	case CONTROL_DEFINITION_TAG:
 		return _forge_category_scenery;
@@ -1070,7 +1086,9 @@ static void forge_palette_build(
 			entry = &forge_globals.palette[forge_globals.palette_count++];
 			entry->tag_index = tag_index;
 			entry->category = category;
-			entry->group = category == _forge_category_characters ? forge_ai_group_of_variant(tag_index) : 0;
+			/* (a character's side; the blocks in their set's order) */
+			entry->group = category == _forge_category_characters ? forge_ai_group_of_variant(tag_index) :
+				category == _forge_category_blocks ? forge_blocks_of_tag(tag_index) : 0;
 			forge_tag_readable_name(tag_index, entry->name, sizeof(entry->name));
 		}
 	}
@@ -3247,6 +3265,9 @@ static void forge_snapped(
 	turn = snapped - yaw;
 	rotate_vector_about_axis(forward, &axis, sine(turn), cosine(turn));
 	rotate_vector_about_axis(up, &axis, sine(turn), cosine(turn));
+	/* (a building block: its corner on the grid, up and down too, so that
+	blocks meet edge to edge: forge_blocks.c) */
+	forge_blocks_snap(forge_globals.held_object_index, FORGE_SNAP_GRID, position, forward, up);
 }
 
 /* ---- object properties (Square while holding an object: halo3/forge.xml's
@@ -3458,6 +3479,8 @@ static void forge_packs_load(
 
 	forge_globals.packs_report[0] = 0;
 	loaded[0] = 0;
+	/* (the building blocks first, of the map itself: forge_blocks.c) */
+	forge_blocks_load(forge_globals.game_map);
 	for (pack = 0; pack < FORGE_PACK_COUNT; pack++)
 	{
 		char why[SCENE_PACK_WHY_SIZE];
@@ -5674,6 +5697,9 @@ boolean forge_command(
 		forge_ai_all_set(!strcmp(rest, "on") ? TRUE : !strcmp(rest, "off") ? FALSE : forge_ai_state() == _forge_ai_all_off);
 		return TRUE;
 	}
+	/* (tests, the monitor's or the Spartan's: forge_blocks.c) */
+	if (!strcmp(word, "blocks"))
+		return forge_blocks_command(rest);
 	if (!forge_globals.active && strcmp(word, "where"))
 	{
 		platform_log("forge: %s: not in monitor mode (\"forge on\")", word);
@@ -5954,6 +5980,13 @@ boolean forge_command(
 	if (!strcmp(word, "distance"))
 	{
 		forge_globals.held_distance = PIN((real)atof(rest), FORGE_MINIMUM_HOLD_DISTANCE, FORGE_MAXIMUM_HOLD_DISTANCE);
+		return TRUE;
+	}
+	if (!strcmp(word, "snap"))
+	{
+		/* (the Forge menu's SNAP, flipped or set) */
+		forge_globals.snap = !strcmp(rest, "on") ? TRUE : !strcmp(rest, "off") ? FALSE : !forge_globals.snap;
+		platform_log("forge: snapping %s", forge_globals.snap ? "on" : "off");
 		return TRUE;
 	}
 	if (!strcmp(word, "delete"))

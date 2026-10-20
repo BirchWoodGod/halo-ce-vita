@@ -190,10 +190,8 @@ vehicles, the dropships, the Covenant AI), built in the background while the lob
 	</widget>
 
 	<!-- EXTRA OBJECTS: the scene packs Forge brings (port forge packs: each on or off, A to change;
-	built in the background from the player's own campaign maps - the Extinction Pelican from the
-	player's Halo Custom Edition map Extinction - while the lobby is open, its progress and what
-	stops one at the right: "Unavailable: extinction.map (Halo Custom Edition) is not in the maps
-	folder") -->
+	built in the background from the player's own campaign maps while the lobby is open, its
+	progress and what stops one at the right) -->
 	<widget name="h3/forge/packs/title" type="text" left="52" top="46" width="400" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/forge_text" string_index="8"/>
 	<widget name="h3/forge/packs/item_0" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
 		<on event="a" run="port forge pack toggle"/>
