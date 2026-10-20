@@ -12,8 +12,11 @@
 #             no work of the packs' on the game thread of 50 ms or more (they
 #             are logged from 16 ms: "scene packs: game thread: ..."), the
 #             longest frame under 100 ms (a load on the game thread made
-#             992 ms frames); every scene made, the card's Spartan shown, the
-#             multiplayer scene's flag flying
+#             992 ms frames; leaving the multiplayer lobby, which hosts its
+#             game, 1018 ms: the Xbox's second of sleep as its server went,
+#             network_server_manager.c); every scene made, the card's Spartan
+#             shown, the multiplayer scene's flag flying, the lobby's game
+#             hosted and closed as it is left
 #   prebuild  the main menu at rest builds every lobby's pack and the card's
 #             in the background (Blood Gulch's two packs in one read) and
 #             loads them; the visits after find them loaded: no build or
@@ -31,9 +34,24 @@
 #                          beside it; skipped without)
 #   HALO_TEST_OUT          where the logs go (deleted after a pass when the test
 #                          made it; HALO_TEST_KEEP=1 keeps them)
+#
+# It runs in a network namespace of its own (unshare -rn, as the netns tests)
+# with a LAN link of its own (a dummy one, 10.77.0.2): the multiplayer lobby
+# hosts its System Link game there as on a Vita on Wi-Fi - with no network
+# it says No Wi-Fi and hosts nothing - and no other harness on the machine
+# holds the game's port (one did: "could not host a game", the lobby an error
+# box). Without unprivileged user namespaces it runs as it is.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
+if [ "${HALO_NETNS_INSIDE:-}" != 1 ] && unshare -rn true 2> /dev/null; then
+	export HALO_NETNS_INSIDE=1
+	exec unshare -rn --fork "$0" "$@"
+fi
+if [ "${HALO_NETNS_INSIDE:-}" = 1 ]; then
+	ip link set lo up
+	ip link add halo0 type dummy && ip addr add 10.77.0.2/24 dev halo0 && ip link set halo0 up
+fi
 binary=$(readlink -f "${HALO_TEST_VITA:-$root/build/linux/halo}")
 data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menu_speed_test.$$}
@@ -111,6 +129,8 @@ scenes_made() { # NAME
 	expect "$1" "the multiplayer lobby's scene made" "h3 scene objects: h3/mp/screen: made"
 	expect "$1" "the Forge lobby's scene made" "h3 scene objects: h3/forge/lobby: made"
 	expect "$1" "the multiplayer scene's flag flies" "h3 scene object 1: its flag flies in a breeze"
+	expect "$1" "the multiplayer lobby hosts its game" "menus: h3 live lobby: open on SYSTEM LINK"
+	expect "$1" "leaving the lobby closes its game" "menus: h3 live lobby: closed \(the host left the lobby\)"
 }
 
 for c in $cases; do
