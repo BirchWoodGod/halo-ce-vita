@@ -34,6 +34,11 @@ on the same host, the same broker behind both: a subscriber on one gets
 what is published on the other, as on the public brokers. Its connections
 are logged with "tls" after the client identifier.
 
+MQTT_TEST_BROKER_DUMP=TEXT in the environment logs, in hex, the payload of
+each message published on a topic with TEXT in it ("dump TOPIC HEX"): a
+listing's bytes as another project's build sends them, looked at from the
+outside (lobby/s/).
+
 --plain makes the plain listener misbehave as the public brokers' 1883 did
 (October 11 2026), while TLS works: refuse (not listening: refused),
 reset (each connection reset at once), silent (connected, the CONNECT never
@@ -43,6 +48,7 @@ Each misbehaviour is logged ("plain refused"...).
 
 import argparse
 import asyncio
+import os
 import socket
 import ssl
 import struct
@@ -179,6 +185,9 @@ def publish(topic, payload, retain, sender, expiry=None, qos=0, origin=None):
             log_retained(topic, "removed")
     log(f"publish {sender} {topic} {len(payload)} B{' retained' if retain else ''}{' qos1' if qos else ''}"
         f"{f' expiry={expiry}' if expiry is not None else ''}")
+    dump = os.environ.get("MQTT_TEST_BROKER_DUMP")
+    if dump and dump in topic and payload:
+        log(f"dump {topic} {payload.hex()}")
     for client in list(clients):
         wanted = [pattern for pattern in client.subscriptions if matches(pattern, topic)]
         if origin is not None and client.name == origin:
