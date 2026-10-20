@@ -158,6 +158,14 @@ parser.add_argument(
     "port/vita/include/vita_version.h's, e.g. 1.1.0-beta.4 for an update test's newer build",
 )
 parser.add_argument(
+    "--windows-xwin",
+    metavar="DIR",
+    type=Path,
+    help="`ninja windows` from Linux: the Windows SDK and MSVC C runtime that xwin splatted here "
+    "(xwin --accept-license --arch x86 splat --output DIR); on Windows, Visual Studio's are used instead "
+    "(port/windows/README.md)",
+)
+parser.add_argument(
     "--android-ndk",
     type=str,
     help="Android NDK for `ninja android` (default: ANDROID_NDK_HOME, or the newest under the Android SDK)",
@@ -237,6 +245,7 @@ sln.vita_aligned = args.vita_aligned
 sln.vita_update_test_sources = args.vita_update_test_sources
 sln.vita_update_key = args.vita_update_key
 sln.vita_version = args.vita_version
+sln.windows_xwin = args.windows_xwin
 sln.android_ndk = args.android_ndk
 sln.android_guest_cc = args.android_guest_cc
 if not is_windows():

@@ -2,7 +2,8 @@
 
 `ninja windows` compiles the game with clang for 32-bit x86 Windows. The
 result is a native executable, `build/windows/halo.exe`, with `SDL3.dll`
-next to it. You must build on Windows.
+next to it. You can build on Windows, or on Linux with the Windows SDK and
+C runtime that xwin downloads (refer to "Build the game on Linux").
 
 The Windows build uses the platform layer of the Linux build
 (`port/linux/src`). The graphics, the sound, the input, the settings and
@@ -28,7 +29,40 @@ You do not need the Xbox SDK.
 2. Enter `python configure.py`.
 3. Enter `ninja windows`.
 
-`configure.py` generates the Windows build only on Windows.
+On Windows, `configure.py` always generates the Windows build. On another
+system, it generates the Windows build only with `--windows-xwin`.
+
+## Build the game on Linux
+
+The build uses clang and lld-link, as on Windows. The Windows SDK and the
+32-bit MSVC C runtime come from [xwin](https://github.com/Jake-Shadle/xwin),
+not from Visual Studio.
+
+- clang, lld (`lld-link`), Python 3 and ninja.
+- xwin. The download of the SDK and the C runtime accepts the license of
+  Microsoft (`--accept-license`). Enter this command once (approximately
+  800 MB on the disk; put the cache on the same disk as the output):
+
+  ```sh
+  xwin --accept-license --arch x86 --cache-dir ~/xwin-cache splat --output ~/xwin-sdk
+  rm -rf ~/xwin-cache
+  ```
+
+- A network connection for the first build (SDL, as on Windows).
+
+Then:
+
+```sh
+python3 configure.py --portable --linux-net-vita --windows-xwin ~/xwin-sdk
+ninja windows
+python3 tools/package_pc.py windows
+```
+
+`--windows-xwin` gives the include folders and the library folders of xwin
+to clang and lld-link (`xwin_flags` in `tools/windows_build.py`). xwin makes
+links for other spellings of the file names (`windows.h` for `Windows.h`).
+The game's own other spellings (`<StdDef.h>`) are in
+`build/windows/case_names`. `ninja linux` stays the default target.
 
 The build uses all the instructions of the processor of the computer that
 builds it (`-march=native`). Such a build does not always start on a
