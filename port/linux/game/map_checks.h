@@ -24,8 +24,8 @@ enum
 file's name): _map_check_playable, _missing or _unusable, and for the last
 two a short reason for the menus in `why` ("beavercreek.map is damaged -
 copy it again"). Looked at once a run: the answer kept until
-map_checks_forget; a file that did not read just now is looked at again the
-next time. Not an Xbox level's name: playable (another check's) */
+map_checks_forget; a file that did not read just now is looked at again 5 s
+later. Not an Xbox level's name: playable (another check's) */
 short map_check(char const *level_name, char *why, long why_size);
 /* map_check's answer is _map_check_playable */
 boolean map_check_playable(char const *level_name);

@@ -34,6 +34,8 @@ int halo_file_identity(const char *xbox_path, unsigned long *size, unsigned long
 #define MAP_CHECKS_MAXIMUM 32
 #define MAP_CHECK_NAME_SIZE 32
 #define MAP_CHECK_WHY_SIZE 160
+/* (a file that did not read: its next look, not every frame's) */
+#define MAP_CHECK_LOOK_AGAIN_MILLISECONDS 5000UL
 
 static struct
 {
@@ -42,13 +44,16 @@ static struct
 		char name[MAP_CHECK_NAME_SIZE];
 		short state;
 		char why[MAP_CHECK_WHY_SIZE];
+		/* (a file that did not read just now: looked at again from then,
+		system_milliseconds; 0 never) */
+		unsigned long look_again_at;
 	} entries[MAP_CHECKS_MAXIMUM];
 	short count;
 	unsigned long looks;
 } map_checks;
 
 /* a look at the file: its state, and a reason; `keep` FALSE when the file
-did not read just now (looked at again next time) */
+did not read just now (looked at again a while later) */
 static short map_check_look(char const *name, char *why, long why_size, boolean *keep)
 {
 	char path[256];
@@ -108,19 +113,24 @@ short map_check(char const *level_name, char *why, long why_size)
 	for (index = 0; index < map_checks.count; index++)
 	{
 		if (!csstrcasecmp(map_checks.entries[index].name, name))
-		{
-			if (why && why_size > 0)
-				snprintf(why, (size_t)why_size, "%s", map_checks.entries[index].why);
-			return map_checks.entries[index].state;
-		}
+			break;
+	}
+	if (index < map_checks.count && (!map_checks.entries[index].look_again_at ||
+		(long)(system_milliseconds() - map_checks.entries[index].look_again_at) < 0))
+	{
+		if (why && why_size > 0)
+			snprintf(why, (size_t)why_size, "%s", map_checks.entries[index].why);
+		return map_checks.entries[index].state;
 	}
 	state = map_check_look(name, reason, sizeof(reason), &keep);
-	if (keep && map_checks.count < MAP_CHECKS_MAXIMUM)
+	if (index == map_checks.count && map_checks.count < MAP_CHECKS_MAXIMUM)
+		map_checks.count++;
+	if (index < map_checks.count)
 	{
-		index = map_checks.count++;
 		snprintf(map_checks.entries[index].name, sizeof(map_checks.entries[index].name), "%s", name);
 		map_checks.entries[index].state = state;
 		snprintf(map_checks.entries[index].why, sizeof(map_checks.entries[index].why), "%s", reason);
+		map_checks.entries[index].look_again_at = keep ? 0 : (system_milliseconds() + MAP_CHECK_LOOK_AGAIN_MILLISECONDS) | 1;
 	}
 	if (why && why_size > 0)
 		snprintf(why, (size_t)why_size, "%s", reason);
@@ -154,6 +164,7 @@ void map_checks_unusable(char const *level_name)
 	}
 	snprintf(map_checks.entries[index].name, sizeof(map_checks.entries[index].name), "%s", name);
 	map_checks.entries[index].state = _map_check_unusable;
+	map_checks.entries[index].look_again_at = 0;
 	snprintf(map_checks.entries[index].why, sizeof(map_checks.entries[index].why), T("%s.map is damaged - copy it again"),
 		name);
 	platform_log("map checks: %s.map failed to load: unusable in the map lists", name);
