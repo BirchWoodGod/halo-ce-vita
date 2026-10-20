@@ -122,7 +122,8 @@ reported is fixed and the features under "Before the public beta" are in.
 - **Forge on the classic menus** too, not only the Halo 3 ones (OpenCE is
   adding Forge as well).
 - **AI respawning** in Forge.
-- **Multiplayer bots that think like the campaign AI.**
+- **Forge's AI using the multiplayer bots' logic**: campaign characters
+  (Elites, Grunts, Marines) playing the game type like the bots do.
 - **Forge variants with AI played with the multiplayer bots.**
 - **Multiplayer lobbies with bots** on the Vita: bots filling the empty
   slots in games you host for other players.
