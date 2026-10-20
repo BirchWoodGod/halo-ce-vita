@@ -242,6 +242,7 @@ Each logs what it did ("forge: ...").
 #include "scene_packs.h"
 #include "tag_schema.h"
 #include "../src/lang.h"
+#include "map_checks.h"
 #include "../src/forge_store.h"
 
 #include <stdarg.h>
@@ -4294,21 +4295,26 @@ char const *forge_map_name(
 	return map_index >= 0 && map_index < forge_map_count() ? forge_maps[map_index].name : "";
 }
 
+short forge_map_state(
+	short map_index,
+	char *why,
+	long why_size)
+{
+	if (why && why_size > 0)
+		why[0] = 0;
+	if (map_index < 0 || map_index >= forge_map_count())
+		return _map_check_missing;
+	/* (looked at once a run, map_checks.c: the lobby and its map picker ask
+	every frame, and each look was an fopen of the map - on Ben's insider.17
+	Vita the lobby ran at 10 frames a second, its game thread waiting on the
+	memory card for it) */
+	return map_check(forge_maps[map_index].path, why, why_size);
+}
+
 boolean forge_map_available(
 	short map_index)
 {
-	char path[512];
-	char const *slash;
-	FILE *file;
-
-	if (map_index < 0 || map_index >= forge_map_count())
-		return FALSE;
-	slash = strrchr(forge_maps[map_index].path, '\\');
-	snprintf(path, sizeof(path), "%s%s.map", cache_files_map_directory(), slash ? slash + 1 : forge_maps[map_index].path);
-	file = fopen(path, "rb");
-	if (file)
-		fclose(file);
-	return file != NULL;
+	return forge_map_state(map_index, NULL, 0) == _map_check_playable;
 }
 
 /* (free for all slayer: the map's own vehicles and weapons, players

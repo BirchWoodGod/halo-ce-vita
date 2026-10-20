@@ -406,6 +406,8 @@ void platform_translate_path(const char *xbox_path, char *host_path, unsigned lo
 	const char *cursor = xbox_path;
 	unsigned long length;
 
+	halo_load_profile_path_lookup();
+
 	snprintf(resolved, sizeof(resolved), "%s", platform_data_root());
 	if (((cursor[0] >= 'a' && cursor[0] <= 'z') || (cursor[0] >= 'A' && cursor[0] <= 'Z')) && cursor[1] == ':')
 	{

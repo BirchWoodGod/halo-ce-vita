@@ -101,6 +101,7 @@ halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
 #include "forge_blocks.h"
 #include "mod_manager.h"
 #include "custom_edition_maps.h"
+#include "map_checks.h"
 #include "../src/port_config.h"
 #include "camera/observer.h"
 #include "../src/forge_store.h"
@@ -1938,8 +1939,10 @@ static void h3_forge_lobby_update(struct widget_instance *widget)
 		card with them rather than holding them) */
 		scene_packs_prebuilds_wanted_now();
 		forge_packs_prebuild();
-		/* (the building blocks of the map chosen: forge_blocks.c) */
-		forge_blocks_prebuild(forge_map_short(h3_forge.map));
+		/* (the building blocks of the map chosen, one that can be played:
+		forge_blocks.c) */
+		if (available)
+			forge_blocks_prebuild(forge_map_short(h3_forge.map));
 	}
 	/* (the note: why START FORGE did not start, else a pack being built,
 	else the game's rules) */
@@ -2015,20 +2018,51 @@ static void h3_forge_maps_update(struct widget_instance *list)
 		widget_instance_set_visibility_recursive(found, FALSE);
 	for (child = list->child; child; child = child->next, index++)
 	{
-		boolean shown = forge_map_available(index);
+		/* (a map whose file is there but cannot be played - cut short,
+		damaged -: shown, marked, its reason in the description's place, and
+		not chosen, h3_forge_map_pick) */
+		short state = forge_map_state(index, NULL, 0);
+		boolean shown = state != _map_check_missing;
 		char text[96];
 
 		widget_instance_set_visibility_recursive(child, shown);
 		child->disabled = !shown;
 		snprintf(text, sizeof(text), "%s", T(forge_map_name(index)));
 		h3_capitals(text);
+		if (state == _map_check_unusable)
+			snprintf(text + strlen(text), sizeof(text) - strlen(text), "%s", T(" (DAMAGED)"));
 		text_show(child, text);
 		if (child == list->focused_child)
 			focused = index;
 	}
 	if ((found = named(screen, "maps_picture")) != NULL)
 		found->animation.current_frame_index = focused;
-	string_show(named(screen, "maps_text"), focused);
+	{
+		char why[160];
+		boolean unusable = forge_map_state(focused, why, sizeof(why)) == _map_check_unusable;
+
+		if ((found = named(screen, "maps_text")) != NULL)
+			widget_instance_set_visibility_recursive(found, !unusable);
+		if ((found = named(screen, "variant_text")) != NULL)
+			widget_instance_set_visibility_recursive(found, unusable);
+		if (unusable)
+			text_show(named(screen, "variant_text"), why);
+		else
+			string_show(named(screen, "maps_text"), focused);
+		/* (the focused map said, once: the tests read it) */
+		{
+			static char said[192];
+			char line[192];
+
+			snprintf(line, sizeof(line), "%s%s%s", forge_map_name(focused), unusable ? ": can't be played: " : "",
+				unusable ? why : "");
+			if (strcmp(line, said))
+			{
+				snprintf(said, sizeof(said), "%s", line);
+				platform_log("menus: forge maps: %s", line);
+			}
+		}
+	}
 }
 
 /* the categories the loaded map has objects of, in the browser's order */
@@ -5891,9 +5925,13 @@ static boolean h3_forge_map_pick(struct widget_instance *widget)
 	if (!h3_forge.picking_variant)
 	{
 		short map = (short)h3_child_index(widget);
+		char why[160];
 
-		if (!forge_map_available(map))
+		if (forge_map_state(map, why, sizeof(why)) != _map_check_playable)
+		{
+			platform_log("menus: forge maps: %s can't be chosen: %s", forge_map_name(map), why);
 			return FALSE;
+		}
 		h3_forge.pick_map = map;
 		h3_forge.picking_variant = TRUE;
 		h3_forge.pick_refocus = TRUE;
@@ -10461,8 +10499,14 @@ boolean pc_menu_event_function_invoke(
 		/* (START FORGE: the local game of the map, in Forge mode; nothing
 		with no map to play; on a network the lobby's live game's, START
 		FORGE's row of it) */
-		if (!forge_map_available(h3_forge.map) || h3_forge.network != _h3_network_offline)
+		if (h3_forge.network != _h3_network_offline)
 			return FALSE;
+		/* (a map that cannot be played: said, as a pack being built is) */
+		if (forge_map_state(h3_forge.map, h3_forge.note, sizeof(h3_forge.note)) != _map_check_playable)
+		{
+			platform_log("menus: forge lobby: not started: %s", h3_forge.note);
+			return FALSE;
+		}
 		{
 			char label[64];
 			long progress = 0;

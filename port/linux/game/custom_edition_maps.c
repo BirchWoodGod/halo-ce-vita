@@ -53,6 +53,7 @@ in lines of about 20 characters.
 #include "png_files.h"
 #include "custom_edition_cache.h"
 #include "custom_edition_maps.h"
+#include "map_checks.h"
 #include "crossplay_maps.h"
 #include "network_game_record.h"
 #include "cache_file_formats.h"
@@ -1410,10 +1411,18 @@ char const *custom_edition_maps_level_title(
 	return name;
 }
 
+boolean custom_edition_maps_is_xbox_level(
+	char const *name)
+{
+	return name && xbox_level_stock(name);
+}
+
 void custom_edition_maps_look_again(
 	void)
 {
 	custom_edition_maps_globals.looked_for = FALSE;
+	/* (and the Xbox levels' files looked at again: map_checks.c) */
+	map_checks_forget();
 
 	return;
 }
