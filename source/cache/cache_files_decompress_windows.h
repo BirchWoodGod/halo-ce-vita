@@ -46,6 +46,8 @@ void cache_copy_queue_end(
 #ifdef HALO_LINUX
 boolean cache_copy_stop_queued(
 	void);
+real cache_copy_progress(
+	void);
 #endif
 short cache_copy_get_status(
 	real *progress);

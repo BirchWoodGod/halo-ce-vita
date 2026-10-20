@@ -107,6 +107,15 @@ enum
 	/* the reads' and writes' bounce (and the inflate's input) */
 	BOUNCE_SIZE = 64 * 1024,
 
+	/* a shared build's progress (scene_pack_build_many): the tag data's
+	read to 40, the packs' tags made from it to 49 (each pack its share,
+	in steps: on the Vita a pack of hundreds of tags takes seconds), the
+	pixels' and samples' read from 50 to 99 */
+	BUILD_PROGRESS_TAGS_READ = 40,
+	BUILD_PROGRESS_TAGS_MADE = 49,
+	BUILD_PROGRESS_DATA = 50,
+	BUILD_PROGRESS_JOB_STEPS = 4,
+
 	/* the header's fields */
 	HEADER_SIGNATURE = 0,
 	HEADER_VERSION = 8,
@@ -240,10 +249,15 @@ struct source_reader
 	unsigned long file_length;
 	unsigned long long read_bytes;
 	int volatile const *cancel;
-	/* (the build's progress: the read's half, 0 or 50, and where it goes;
-	read in place, the bytes the half reads and has read) */
+	/* (the build's progress: where the read's part begins and how much
+	of it the read is (0 and 40, then 50 and 49), every pack's of the read
+	(the packs that share it show the same); read in place, the bytes the
+	part reads and has read) */
 	long progress_base;
-	long volatile *progress;
+	long progress_span;
+	unsigned long progress_length;
+	struct scene_pack_build_result *progress_results;
+	short progress_count;
 	unsigned long long phase_total;
 	unsigned long long phase_read;
 	/* (read from the map's decompressed copy: scene_pack_copy_source) its
@@ -426,6 +440,26 @@ static void io_done_source(unsigned long bytes)
 {
 	if (scene_pack_io_hook)
 		scene_pack_io_hook(bytes, TRUE);
+}
+
+/* the build's progress, value of 100, given to every pack of its read (the
+lobby shows any of them: one that shares another's read moves with it) */
+static void progress_set(struct scene_pack_build_result *results, short count, long value)
+{
+	short index;
+
+	for (index = 0; results && index < count; index++)
+		results[index].progress = value;
+}
+
+/* (scene_pack_build_many) the packs' tags made from the tag data read: the
+job's step of BUILD_PROGRESS_JOB_STEPS begun */
+static void build_job_progress(struct scene_pack_build_result *results, short count, short job, short step)
+{
+	long done = (long)job * BUILD_PROGRESS_JOB_STEPS + step;
+
+	progress_set(results, count, BUILD_PROGRESS_TAGS_READ +
+		done * (BUILD_PROGRESS_TAGS_MADE - BUILD_PROGRESS_TAGS_READ) / ((long)count * BUILD_PROGRESS_JOB_STEPS));
 }
 
 static void why_set(char *why, long why_size, char const *format, char const *detail)
@@ -1233,9 +1267,10 @@ static boolean source_read(struct source_reader *reader, unsigned long offset, u
 			done += chunk;
 			reader->phase_read += chunk;
 			io_done_source(chunk);
-			if (reader->progress && reader->phase_total)
-				*reader->progress = reader->progress_base +
-					(long)(MIN(reader->phase_read, reader->phase_total) * 49 / reader->phase_total);
+			if (reader->phase_total)
+				progress_set(reader->progress_results, reader->progress_count, reader->progress_base +
+					(long)(MIN(reader->phase_read, reader->phase_total) * (unsigned long long)reader->progress_span /
+						reader->phase_total));
 		}
 		reader->position = offset + size;
 		reader->read_bytes += size;
@@ -1272,9 +1307,10 @@ static boolean source_read(struct source_reader *reader, unsigned long offset, u
 			return FALSE;
 		reader->position += want - reader->stream.avail_out;
 		reader->read_bytes += want - reader->stream.avail_out;
-		if (reader->progress && reader->file_length)
-			*reader->progress = reader->progress_base +
-				(long)((unsigned long long)reader->position * 49 / reader->file_length);
+		if (reader->progress_length)
+			progress_set(reader->progress_results, reader->progress_count, reader->progress_base +
+				(long)((unsigned long long)MIN(reader->position, reader->progress_length) *
+					(unsigned long long)reader->progress_span / reader->progress_length));
 		if (result == Z_BUF_ERROR && reader->stream.avail_out == want && reader->stream.avail_in)
 			return FALSE;
 	}
@@ -3358,8 +3394,12 @@ static boolean build_many_once(
 	map_path(path, sizeof(path), maps_directory, map);
 	if (!source_open(&reader, path, map, header, cancel, try_copy))
 		failure = "the map cannot be read";
-	reader.progress = &results[0].progress;
+	/* (the read of the tag data 0 to 40, each pack's tags made from it to
+	49, the pixels' and samples' read 50 to 99) */
+	reader.progress_results = results;
+	reader.progress_count = count;
 	reader.progress_base = 0;
+	reader.progress_span = BUILD_PROGRESS_TAGS_READ;
 
 	/* the source's tag data (read to the end of it: it is the file's last),
 	once, for all of them */
@@ -3368,6 +3408,7 @@ static boolean build_many_once(
 		tags_size = read_u32(header + 20);
 		tags = scratch && scratch_size >= tags_size ? scratch : malloc(tags_size);
 		reader.phase_total = tags_size;
+		reader.progress_length = read_u32(header + 16) + tags_size;
 		if (!tags)
 			failure = "there is no memory to build the pack";
 		else if (!source_read(&reader, read_u32(header + 16), tags_size, tags))
@@ -3386,6 +3427,7 @@ static boolean build_many_once(
 		state->tags_size = tags_size;
 		if (state->failed)
 			continue;
+		build_job_progress(results, count, job_index, 0);
 		/* the pack's tags, then its file begun: a header to come, its tags */
 		state->pack_index = malloc(sizeof(long) * 0x8000);
 		state->pack_tags = malloc(sizeof(struct build_tag) * SCENE_PACK_MAXIMUM_TAGS);
@@ -3420,16 +3462,19 @@ static boolean build_many_once(
 				platform_log("scene packs: %s: the blocks' walls of %s, floors of %s", state->recipe->name, walls, floors);
 			}
 		}
+		build_job_progress(results, count, job_index, 1);
 		if (!state->failed)
 		{
 			for (index = 0; index < 0x8000; index++)
 				state->pack_index[index] = NONE;
 			build_tags(state, reader.file_length);
 		}
+		build_job_progress(results, count, job_index, 2);
 		if (!state->failed)
 			build_tunes(state);
 		if (!state->failed)
 			job->pieces = ranges_place(state, &job->piece_count, &job->data_size);
+		build_job_progress(results, count, job_index, 3);
 		if (!state->failed)
 		{
 			unsigned char placeholder[SCENE_PACK_HEADER_SIZE];
@@ -3462,7 +3507,9 @@ static boolean build_many_once(
 	/* the pixels and samples, every pack's, in the source's order (the
 	second read, once): the union of all their pieces read, each piece's
 	bytes written to its pack as they go by */
-	reader.progress_base = 50;
+	progress_set(results, count, BUILD_PROGRESS_TAGS_MADE);
+	reader.progress_base = BUILD_PROGRESS_DATA;
+	reader.progress_span = 99 - BUILD_PROGRESS_DATA;
 	reader.phase_read = 0;
 	for (job_index = 0; job_index < count; job_index++)
 	{
@@ -3507,6 +3554,8 @@ static boolean build_many_once(
 			for (index = 0; index < union_count; index++)
 				union_bytes += unions[index].size;
 			reader.phase_total = union_bytes;
+			/* (inflated, the read ends at the last piece's end) */
+			reader.progress_length = merged ? unions[merged - 1].source + unions[merged - 1].size : 0;
 			if (!source_rewind(&reader))
 				failure = "the map cannot be read again";
 		}
@@ -3531,7 +3580,6 @@ static boolean build_many_once(
 
 				if (job->state.failed)
 					continue;
-				results[job_index].progress = results[0].progress;
 				while (job->piece_cursor < job->piece_count)
 				{
 					struct build_range const *piece = &job->pieces[job->piece_cursor];

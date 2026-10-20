@@ -71,6 +71,9 @@ maps folder, or is another version of it, fails at once with the reason
 (scene_packs_recipe_available says so before it is wanted).
 
 HALO_SCENE_PACKS=0 turns them off (nothing is wanted, built or loaded).
+HALO_SCENE_PACKS_SHARE_CARD=0: the Forge lobby's builds held for a map's
+copy to the cache partition as the others are (the lobby says what they
+wait for), not sharing the memory card with it.
 HALO_TEST_SLOW_IO=<KB/s>[:all] (tests, not the Vita's or a release build):
 the packs' reads and writes (with :all, their source maps' too) paced to a
 slow memory card's rate on the thread that makes them.
@@ -127,6 +130,7 @@ boolean cache_files_cached_copy_unchanged(unsigned long token);
 void vita_host_thread_priority_set(int priority);
 #endif
 void halo_progress_heartbeat(void);
+char const *custom_edition_maps_level_title(char const *level_name);
 int halo_file_identity(const char *xbox_path, unsigned long *size, unsigned long *seconds, unsigned long *nanoseconds);
 boolean custom_edition_maps_turned_off(char const *name);
 void sound_cache_sound_delete(struct sound_permutation *sound);
@@ -260,6 +264,14 @@ static struct
 	also while the game reads) */
 	int volatile pause_builds;
 	int volatile pause_prebuilds;
+	/* (the game thread's) a map's copy under way that shares the memory
+	card with the builds wanted now (the Forge lobby's: their reads paced,
+	not paused), and until when they are wanted now
+	(scene_packs_prebuilds_wanted_now) */
+	int volatile card_shared;
+	unsigned long long wanted_now_until_us;
+	/* (the worker's) its build waits in a pause this moment */
+	int volatile held;
 } scene_packs = { { { 0 } }, 0, 0, 0, NULL, 0, { NULL }, 0, 0, FALSE };
 
 /* the worker's builds' results (its slots' progress points into them) */
@@ -427,6 +439,15 @@ static struct scene_pack_copy_source const scene_packs_copy_source =
 /* the game thread's time in the packs' work, once it is long enough to be
 a frame's hitch: logged ("scene packs: game thread: ...") */
 #define GAME_THREAD_LOG_US 16000ull
+
+/* the builds wanted now (scene_packs_prebuilds_wanted_now) for this long
+after the last ask; and, the memory card shared with a map's copy, the
+build's pause after each 128 KB of its reads and writes (the card reads
+128 KB in ~13 ms on the Vita, and the copy's 32 KB writes take ~43 ms each:
+a turn for the copy between the build's reads, the build slowed by a
+quarter at most) */
+#define PREBUILDS_WANTED_NOW_US 1000000ull
+#define SHARED_CARD_PAUSE_MS 4
 
 static void game_thread_time(char const *what, char const *name, unsigned long long started)
 {
@@ -1037,7 +1058,8 @@ static void *worker_thread(void *context)
 /* (scene_pack_io_hook) a build's or a load's read or write done: paced in
 the tests (slow_io_pace); on the worker, paused while the game wants it to
 (a map copied to the cache partition, a network game; a prebuild also
-while the game's own reads are waiting), and a prebuild's spaced out */
+while the game's own reads are waiting), and a prebuild's spaced out, as
+is a build wanted now that shares the card with a map's copy */
 static void worker_io(unsigned long bytes, boolean source)
 {
 	static __thread unsigned long since_yield;
@@ -1058,9 +1080,11 @@ static void worker_io(unsigned long bytes, boolean source)
 		(source || scene_packs.job.low)) ||
 		(scene_packs.job.low && __atomic_load_n(&scene_packs.pause_prebuilds, __ATOMIC_ACQUIRE))))
 	{
+		__atomic_store_n(&scene_packs.held, 1, __ATOMIC_RELEASE);
 		Sleep(20);
 	}
-	if (scene_packs.job.low)
+	__atomic_store_n(&scene_packs.held, 0, __ATOMIC_RELEASE);
+	if (scene_packs.job.low || __atomic_load_n(&scene_packs.card_shared, __ATOMIC_ACQUIRE))
 	{
 		since_yield += bytes;
 		if (since_yield >= 128 * 1024)
@@ -1070,6 +1094,11 @@ static void worker_io(unsigned long bytes, boolean source)
 			while (!scene_packs.cancel && scene_packs.job.low && cache_files_reads_pending())
 				Sleep(4);
 			Sleep(1);
+			/* (the card shared with a map's copy: a turn for the copy's
+			32 KB pieces (xbox_files.c) after each 128 KB, the copy never
+			stopped for the build) */
+			if (__atomic_load_n(&scene_packs.card_shared, __ATOMIC_ACQUIRE))
+				Sleep(SHARED_CARD_PAUSE_MS);
 		}
 	}
 }
@@ -1109,6 +1138,7 @@ static void build_thread_join(boolean stop)
 			platform_log("scene packs: %s: its build makes way for a pack wanted now", slot->name);
 	}
 	scene_packs.thread_running = FALSE;
+	scene_packs.held = FALSE;
 	scene_packs.cancel = FALSE;
 	scene_packs.scratch = NULL;
 	scene_packs.scratch_size = 0;
@@ -1681,6 +1711,54 @@ short scene_packs_status(
 	return state;
 }
 
+boolean scene_packs_building_now(
+	char const *name)
+{
+	struct scene_pack_slot const *slot = name ? slot_find(name) : NULL;
+
+	return slot && scene_packs.thread_running && state_get(slot) == _scene_pack_state_building && slot->progress;
+}
+
+static void pauses_set(void);
+
+void scene_packs_prebuilds_wanted_now(
+	void)
+{
+	scene_packs.wanted_now_until_us = vita_host_time_us() + PREBUILDS_WANTED_NOW_US;
+	/* (at once: the lobby's first frame says no wait that is over) */
+	pauses_set();
+}
+
+boolean scene_packs_builds_held(
+	char *map,
+	long map_size,
+	long *copy_progress)
+{
+	char name[64];
+	real progress = 0.0f;
+	short index;
+	boolean building = FALSE;
+
+	if (map && map_size > 0)
+		map[0] = 0;
+	if (copy_progress)
+		*copy_progress = 0;
+	for (index = 0; index < scene_packs.pack_count && !building; index++)
+		building = state_get(&scene_packs.packs[index]) == _scene_pack_state_building;
+	/* (held: the worker in a pause, or its job not begun for one) */
+	if (!building || !cache_files_precache_copy_progress(name, sizeof(name), &progress) ||
+		!(scene_packs.thread_running ? __atomic_load_n(&scene_packs.held, __ATOMIC_ACQUIRE) :
+			scene_packs.pause_builds || scene_packs.pause_prebuilds))
+	{
+		return FALSE;
+	}
+	if (map && map_size > 0)
+		snprintf(map, (size_t)map_size, "%s", custom_edition_maps_level_title(name));
+	if (copy_progress)
+		*copy_progress = PIN((long)(progress * 100.0f), 0, 99);
+	return TRUE;
+}
+
 char const *scene_packs_owner(
 	long tag_index)
 {
@@ -1927,19 +2005,46 @@ void scene_packs_update(
 	game_thread_time("the frame's update", NULL, started);
 }
 
+/* (the game thread) the worker's pauses: a map copied to the cache
+partition, a network game; a prebuild's also away from the main menu at
+rest. Builds wanted now - the Forge lobby's, the player waiting for them -
+share the card with a map's copy instead: their reads paced (worker_io),
+the game thread's calls behind neither (the copy's pieces give way to them,
+xbox_files.c; the builds' are one read's) */
+static void pauses_set(void)
+{
+	static int share = -1;
+	boolean copying = cache_files_precache_in_progress();
+	boolean network = game_connection() != _game_connection_local;
+	boolean wanted_now = vita_host_time_us() < scene_packs.wanted_now_until_us;
+	boolean shared;
+
+	/* (HALO_SCENE_PACKS_SHARE_CARD=0, env.txt: held for the copy as any,
+	the lobby saying so) */
+	if (share < 0)
+	{
+		char const *setting = getenv("HALO_SCENE_PACKS_SHARE_CARD");
+
+		share = !setting || strcmp(setting, "0");
+	}
+	wanted_now = wanted_now && share;
+	shared = copying && wanted_now && !network;
+	if (shared != (boolean)scene_packs.card_shared)
+		platform_log("scene packs: the builds wanted now %s the memory card with a map's copy",
+			shared ? "share" : "no longer share");
+	__atomic_store_n(&scene_packs.card_shared, shared, __ATOMIC_RELEASE);
+	if (wanted_now)
+		copying = FALSE;
+	__atomic_store_n(&scene_packs.pause_builds, copying || network, __ATOMIC_RELEASE);
+	__atomic_store_n(&scene_packs.pause_prebuilds, copying || network || !halo_main_menu_idle(), __ATOMIC_RELEASE);
+}
+
 static void scene_packs_update_internal(
 	void)
 {
-	int cache_files_reads_pending(void);
-	boolean copying = cache_files_precache_in_progress();
-	boolean network = game_connection() != _game_connection_local;
-
 	if (!scene_packs.pack_count)
 		return;
-	/* (the worker's pauses: a map copied to the cache partition, a network
-	game; a prebuild's also away from the main menu at rest) */
-	__atomic_store_n(&scene_packs.pause_builds, copying || network, __ATOMIC_RELEASE);
-	__atomic_store_n(&scene_packs.pause_prebuilds, copying || network || !halo_main_menu_idle(), __ATOMIC_RELEASE);
+	pauses_set();
 	if (scene_packs.thread_running && __atomic_load_n(&scene_packs.job.done, __ATOMIC_ACQUIRE))
 		job_finish();
 	/* (a build takes the free room for its scratch: loads and releases

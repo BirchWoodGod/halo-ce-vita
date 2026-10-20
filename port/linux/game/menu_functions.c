@@ -1905,6 +1905,9 @@ static void h3_forge_lobby_update(struct widget_instance *widget)
 		snprintf(text, sizeof(text), T("%s: %d OF %d"), T("EXTRA OBJECTS"), on, forge_pack_count());
 		h3_capitals(text);
 		text_show(named(screen, "packs_row"), text);
+		/* (the player waits for them here: a map's copy shares the memory
+		card with them rather than holding them) */
+		scene_packs_prebuilds_wanted_now();
 		forge_packs_prebuild();
 		/* (the building blocks of the map chosen: forge_blocks.c) */
 		forge_blocks_prebuild(forge_map_short(h3_forge.map));
@@ -1912,20 +1915,34 @@ static void h3_forge_lobby_update(struct widget_instance *widget)
 	/* (the note: why START FORGE did not start, else a pack being built,
 	else the game's rules) */
 	{
-		char label[64];
-		long progress = 0;
+		static char said_note[192];
+		char label[64], line[192], map[64];
+		long progress = 0, copied = 0;
 
 		if (h3_forge.note[0])
-			text_show(named(screen, "note"), h3_forge.note);
+			snprintf(line, sizeof(line), "%s", h3_forge.note);
 		else if (forge_packs_building(label, sizeof(label), &progress))
 		{
-			char line[160];
-
 			snprintf(line, sizeof(line), T("Building %s... %ld%%"), label, progress);
-			text_show(named(screen, "note"), line);
+			/* (held for a map's copy to the cache partition: what it waits
+			for, and how far that is, not a number standing still) */
+			if (scene_packs_builds_held(map, sizeof(map), &copied))
+			{
+				size_t length = strlen(line);
+
+				snprintf(line + length, sizeof(line) - length, "\n");
+				length = strlen(line);
+				snprintf(line + length, sizeof(line) - length, T("Waiting for %s to copy... (copy %ld%%)"), T(map), copied);
+			}
 		}
 		else
-			text_show(named(screen, "note"), T("No score or time limit."));
+			snprintf(line, sizeof(line), "%s", T("No score or time limit."));
+		text_show(named(screen, "note"), line);
+		if (strcmp(line, said_note))
+		{
+			snprintf(said_note, sizeof(said_note), "%s", line);
+			platform_log("menus: forge lobby note at %lu ms: %s", system_milliseconds(), line);
+		}
 	}
 	if (h3_forge.variant_file[0])
 		snprintf(text, sizeof(text), T("%s on %s"), h3_forge.variant_title, T(forge_map_name(h3_forge.map)));

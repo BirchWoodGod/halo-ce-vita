@@ -85,6 +85,26 @@ short scene_packs_status(
 	char *why,
 	long why_size);
 
+/* whether the pack's build is the worker's this moment (not waiting its
+turn behind another's) */
+boolean scene_packs_building_now(
+	char const *name);
+
+/* (the Forge lobby, each frame) the prebuilds are wanted now, the player
+waiting for them: a map's copy to the cache partition under way shares the
+memory card with them (their reads paced) rather than pausing them, for a
+second after the last call */
+void scene_packs_prebuilds_wanted_now(
+	void);
+
+/* whether the builds wait for a map's copy to the cache partition this
+moment (paused for it), and that map's title ("Battle Creek") and how far
+its copy is (0 to 99); FALSE when they are not held by one */
+boolean scene_packs_builds_held(
+	char *map,
+	long map_size,
+	long *copy_progress);
+
 /* the loaded pack whose tag a tag index is (its recipe's name), NULL for
 one of the map's */
 char const *scene_packs_owner(

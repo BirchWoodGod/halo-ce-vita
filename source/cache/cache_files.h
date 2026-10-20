@@ -143,6 +143,12 @@ boolean cache_files_precache_in_progress(
 
 boolean cache_files_precache_is_copying_map(
 	char const *map_name);
+#ifdef HALO_LINUX
+boolean cache_files_precache_copy_progress(
+	char *map_name,
+	long map_name_size,
+	real *progress);
+#endif
 boolean cache_files_precache_map_loaded(
 	char const *map_name);
 

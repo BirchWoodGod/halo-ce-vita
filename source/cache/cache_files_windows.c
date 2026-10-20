@@ -877,6 +877,32 @@ boolean cache_files_precache_is_copying_map(
 	return FALSE;
 }
 
+#ifdef HALO_LINUX
+/* port: the map the copy under way is making (its file name, "beavercreek")
+and how much of it is read, 0 to 1; FALSE with no copy under way (the
+Forge lobby's note while the scene packs' builds wait for it) */
+boolean cache_files_precache_copy_progress(
+	char *map_name,
+	long map_name_size,
+	real *progress)
+{
+	if (!cache_file_globals.copy_in_progress || cache_copy_stop_queued())
+	{
+		return FALSE;
+	}
+	if (map_name && map_name_size > 0)
+	{
+		csstrncpy(map_name, cache_file_globals.copying_to_map_file_name, map_name_size - 1);
+		map_name[map_name_size - 1] = 0;
+	}
+	if (progress)
+	{
+		*progress = cache_copy_progress();
+	}
+	return TRUE;
+}
+#endif
+
 boolean cache_files_precache_map_loaded(
 	const char *map_name)
 {
