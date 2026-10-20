@@ -111,6 +111,11 @@ void player_profile_save_level_completed_at(
 	short local_player_index,
 	short level,
 	short difficulty);
+/* port: the profiles held in memory (player_profile.c) forgotten: their
+files' list changed (a profile made, deleted or renamed, the memory units
+looked at again) */
+void player_profile_cache_forget(
+	void);
 #endif
 void player_profiles_enumerate_available_to_local_player_index(
 	short local_player_index,

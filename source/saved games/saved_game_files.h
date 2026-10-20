@@ -110,6 +110,15 @@ word saved_game_file_get_type(
 	long profile_index);
 void enumerate_memory_units_test(
 	void);
+#ifdef HALO_LINUX
+/* port: a saved game file's block (its first checksum_data_size bytes
+checksummed, the signature after them) written whole or not at all: see
+saved_game_files.c */
+boolean saved_game_file_write_block(
+	long profile_index,
+	void const *block,
+	word checksum_data_size);
+#endif
 
 /* ---------- globals */
 

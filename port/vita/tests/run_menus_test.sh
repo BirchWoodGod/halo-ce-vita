@@ -244,6 +244,13 @@
 #            and YES deletes it (only it: the maps folder's other files, the
 #            links' targets kept); the mod's folder deleted, the links in it
 #            gone, what they pointed at kept
+#   profileio  the profile read from memory, not its file, every frame (insider.15's testers:
+#            SELECT PROFILE's plates and the live lobby opened blam.sav 3-45 times a frame on the
+#            game thread, each behind a map copy's writes on the card): HALO_TEST_PROFILE's
+#            profile, a Vita-like card (HALO_IO_THROTTLE_KBPS, _WRITE_KBPS), the game thread's file
+#            calls logged (HALO_IO_TRACE_GAME): the live lobby on SYSTEM LINK (Battle Creek copied
+#            to the cache meanwhile), then ONLINE not live, START GAME: SELECT PROFILE's plates;
+#            blam.sav and z:\last*.txt each opened once at most by the game thread
 #   h3livelobby  the live lobby (HALO_TEST_PROFILE): MULTIPLAYER on SYSTEM LINK opens its game
 #            once its scene stands, START GAME its game's lobby at once (no profile asked, no
 #            other server), B back to the lobby (the game kept), B closes it; ONLINE with its
@@ -288,7 +295,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups profileio}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
@@ -737,6 +744,45 @@ for case in $cases; do
 			fail h3livelobby "a scene was let go with a flag's cloth left behind"
 		[ -n "${HALO_TEST_SHOTS:-}" ] && mkdir -p "$HALO_TEST_SHOTS/h3livelobby" &&
 			cp "$out"/h3livelobby_shots/0*.bmp "$HALO_TEST_SHOTS/h3livelobby/" 2>/dev/null ;;
+	profileio)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "--- profileio"; echo "SKIP: no HALO_TEST_PROFILE"; continue
+		fi
+		# (a first start at full speed: ui.map in the cache partition, as on a Vita that played before)
+		profile_from=$HALO_TEST_PROFILE run profileio_fill "$menus_data" 15 "wait:150:3000" HALO_MENU_STYLE=halo3
+		card="HALO_IO_THROTTLE_KBPS=10000 HALO_IO_THROTTLE_WRITE_KBPS=750 HALO_IO_TRACE_GAME=1 HALO_LOAD_PROFILE_MS=100"
+		d="down:150:500"
+		save_from=$out/profileio_fill/save run profileio_live "$menus_data" 40 \
+			"$h3mppad wait:150:8000 $d $d $d a wait:150:5000 b wait:150:4000 b wait:150:3000" HALO_MENU_STYLE=halo3 $card
+		save_from=$out/profileio_fill/save run profileio_join "$menus_data" 40 \
+			"$h3mppad wait:150:5000 $d $d $d a wait:150:8000 b wait:150:3000 b wait:150:3000" HALO_MENU_STYLE=halo3 $h3net $card
+		for name in profileio_live profileio_join; do
+			log=$out/$name/run.log
+			# (check_h3's, but for the render thread's skipped check of a cache file's header read
+			# while the slow card's copy writes it: "render assertion skipped (torn read?)")
+			echo "--- $name"
+			[ "$(cat "$out/$name/exit")" = 0 ] || fail "$name" "exit $(cat "$out/$name/exit")"
+			grep -aiE "assert|exception|halt" "$log" | grep -av "render assertion skipped (torn read?)" &&
+				fail "$name" "an assertion, exception or halt"
+			grep -aq "ui: screen pc.h3.*screen" "$log" || fail "$name" "the Halo 3 screen did not open"
+			opens=$(grep -ac 'io-trace: open .*\\blam\.sav:' "$log")
+			echo "$name: the game thread's file calls: $(grep -ac 'io-trace: ' "$log"), blam.sav opened $opens times;" \
+				"$(grep -ac 'frame-hitch' "$log") frames over 100 ms"
+			grep -a 'io-trace: open ' "$log" | sed 's/.*ms \([^:]*:[^:]*\):.*/\1/' | sort | uniq -c | sort -rn | head -5
+			[ "$opens" -le 1 ] || fail profileio "$name: the game thread opened blam.sav $opens times (once at most wanted)"
+			grep -aq 'frame-hitch.*blam\.sav' "$log" && fail profileio "$name: a frame waited on blam.sav"
+			# (read once at most: a game hosted writes lastmpmp.txt and lastmpvr.txt, which is no read)
+			for last in lastprof lastmpvr lastmpmp; do
+				[ "$(grep -ac "io-trace: read .*/$last\.txt:" "$log")" -le 1 ] ||
+					fail profileio "$name: z:\\$last.txt read more than once"
+			done
+		done
+		grep -aq "menus: h3 live lobby: open on SYSTEM LINK" "$out/profileio_live/run.log" ||
+			fail profileio "the live lobby did not open"
+		grep -aq "starting precaching of map 'beavercreek'" "$out/profileio_live/data/debug.txt" ||
+			fail profileio "no map copy in the live lobby"
+		grep -aq "ui: screen pc.h3.join.screen" "$out/profileio_join/run.log" ||
+			fail profileio "START GAME not live did not open SELECT PROFILE" ;;
 	h3groups)
 		# (the owner, Oct 19 2026: the Vitas' games first, then the PCs', each under its header;
 		# the D-pad's right and left: Vita games, PC games, all games, kept as the setting.
@@ -1705,7 +1751,7 @@ for case in $cases; do
 		grep -aq "4way_start2join_screen\|menus: Server Browser: the profile" "$log" &&
 			fail browserprofile "internet play off: the profile screen opened anyway" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3lobbyscenes|h3modelsmany|h3friends|h3friendspanel|browserprofile|h3players|browserrows|profilepaths|h3mppause|h3friendsfit|h3hostonline]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3lobbyscenes|h3modelsmany|h3friends|h3friendspanel|browserprofile|h3players|browserrows|profilepaths|h3mppause|h3friendsfit|h3hostonline|h3livelobby|h3groups|profileio]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"
