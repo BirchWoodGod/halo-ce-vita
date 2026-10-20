@@ -371,8 +371,14 @@ def check_direction(host, clients, score_to_win, rejoin):
             for entry in game.ticks:
                 if tick + TICKS_PER_SECOND <= entry[0] <= tick + 2 * TICKS_PER_SECOND:
                     host_state = seconds.near(entry[0])[1] or {}
+                    # (and still dead on the host a second on: a client
+                    # alive within a sample of the host's respawn - its
+                    # clock in step with the host's, or a tick ahead, the
+                    # death seen up to a sample late - is no body standing)
+                    host_later = seconds.near(entry[0] + TICKS_PER_SECOND)[1] or {}
                     mine = entry[1].get(victim)
-                    if mine and mine["alive"] and victim in host_state and not host_state[victim]["alive"]:
+                    if mine and mine["alive"] and victim in host_state and not host_state[victim]["alive"] and \
+                            victim in host_later and not host_later[victim]["alive"]:
                         standing.append((copy.name, number + 1, entry[0], victim))
     steps["kills"] = step(seen and not missed and not standing,
         f"{len(events)} deaths on the host ({host.scripted} scripted; {unwatched} with no client there); {seen} seen "

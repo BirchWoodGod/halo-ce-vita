@@ -1486,6 +1486,20 @@ of 29, OpenCE b1ef7f7e and ChupathingyCE 35fc7e8b of 28; our harness build
 | unit: network_wire_test (four builds), p2p_lobby, p2p_friends, lang, crossplay_guard, vita_settings, network fuzz targets' kept cases; wire contract against 8102e711 | PASS |
 | Vita release build (`--lto off --pgo off --portable --release`, `ninja vita`) | compiles (eboot.bin, halo.vpk) |
 
+**The iOS port and current OpenCE PCs (Oct 20 2026, insider.18).** SnailBBQ's
+Halo-CE-IOS is OpenCE build-244 at network version 32, the same as OpenCE
+6ec42856 (build-244) on PC, so it is joined and joins as that build is: a
+Vita's client joins its games (PC GAMES), and it joins a Vita's game hosted
+for Everyone (which announces 32). Whether a listing says its host is an iOS
+device was looked at from the outside only: OpenCE 6ec42856's listings, as
+its binary published them to the harness's broker
+(`MQTT_TEST_BROKER_DUMP=lobby/s/`), carry version 32, OpenCE's flags, the
+game's name, map and gametype, and an 8-byte stamp of zeros; nothing in them
+names a platform. No iOS listing could be seen offline, so the browsers tag
+an iOS host's game as any OpenCE PC's (no OPENCE (iOS) tag). If the iOS
+port's listings ever carry a mark, the stamp's first byte is where ours are
+(10.10), read only for a Vita's game.
+
 **Not verified here:** T5/T6 (a lift in a network game against OpenCE, the ±4
 bound injected): no stock multiplayer map has an elevator machine, and a
 campaign lift needs scripted riders on both machines; the carry itself is
