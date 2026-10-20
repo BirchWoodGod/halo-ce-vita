@@ -98,6 +98,7 @@ halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
 #include "browser_list.h"
 #include "../src/system_link_shortcut.h"
 #include "forge.h"
+#include "forge_blocks.h"
 #include "mod_manager.h"
 #include "custom_edition_maps.h"
 #include "../src/port_config.h"
@@ -1901,6 +1902,8 @@ static void h3_forge_lobby_update(struct widget_instance *widget)
 		h3_capitals(text);
 		text_show(named(screen, "packs_row"), text);
 		forge_packs_prebuild();
+		/* (the building blocks of the map chosen: forge_blocks.c) */
+		forge_blocks_prebuild(forge_map_short(h3_forge.map));
 	}
 	/* (the note: why START FORGE did not start, else a pack being built,
 	else the game's rules) */

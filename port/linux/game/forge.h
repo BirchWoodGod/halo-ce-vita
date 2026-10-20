@@ -39,6 +39,8 @@ enum
 	_forge_category_equipment,
 	_forge_category_scenery,
 	_forge_category_characters,
+	/* (the building blocks the game makes: forge_blocks.c) */
+	_forge_category_blocks,
 	NUMBER_OF_FORGE_CATEGORIES
 };
 
