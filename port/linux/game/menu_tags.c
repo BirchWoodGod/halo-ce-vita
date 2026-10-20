@@ -398,6 +398,11 @@ static char const *const port_function_names[] =
 	"port h3 host online", "port h3 game options",
 	"port h3 live leave", "port h3 invite ask", "port h3 invite init", "port h3 invite act",
 	"port forge start live",
+	"port h3 gametypes init", "port h3 gametypes choose", "port h3 gametypes new", "port h3 gametypes page up",
+	"port h3 gametypes page down", "port h3 gametype edit", "port h3 gametype copy", "port h3 gametype rename",
+	"port h3 gametype delete later", "port h3 gametype delete ask", "port h3 gametype delete", "port h3 gametype base",
+	"port h3 gametype next", "port h3 gametype previous", "port h3 gametype category", "port h3 gametype save",
+	"port h3 gametype save quit", "port h3 gametype leave ask", "port h3 gametype leave", "port h3 gametype discard",
 };
 
 /* the port's game data functions (menu_functions.c), from
@@ -422,6 +427,8 @@ static char const *const port_game_data_input_names[] =
 	"port h3 party", "port h3 party options", "port h3 party chat", "port h3 party quick",
 	"port h3 mp pause", "port h3 mp settings",
 	"port h3 invite",
+	"port h3 gametype list", "port h3 gametype actions", "port h3 gametype question", "port h3 gametype bases",
+	"port h3 gametype editor", "port h3 gametype options",
 };
 
 static struct

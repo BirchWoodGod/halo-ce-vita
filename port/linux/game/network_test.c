@@ -81,6 +81,7 @@ Called from the main loop every frame (main.c).
 #include "main/main.h"
 #include "interface/player_ui.h"
 #include "saved games/player_profile.h"
+#include "saved games/playlist_profile.h"
 #include "interface/ui_widget.h"
 #include "networking/network_game_globals.h"
 #include "networking/network_client_manager.h"
@@ -129,6 +130,9 @@ const char *config_string(char const *name);
 double config_real(char const *name);
 long config_integer(char const *name);
 void platform_log(char const *format, ...);
+/* menu_functions.c's: a variant's settings, as the Halo 3 game type
+editor's log has them */
+void menu_functions_gametype_rules(struct game_variant const *variant, char *text, int size);
 /* damage.c's */
 void damage_kill_object_for_player(long object_index, long player_index);
 /* network_distributed.c's */
@@ -183,6 +187,9 @@ static struct
 	boolean join_file_logged;
 	char map_name[64];
 	char variant_name[64];
+	/* ("saved=<name>": the game time the game's rules were last logged at,
+	so that each game's are logged once) */
+	long rules_logged_time;
 	/* ... the variant of this game, of variant_name's list; and the seconds
 	the last game's scores have been shown */
 	short variant_index;
@@ -328,6 +335,37 @@ made one by network_test_forge once its map is set) */
 	if (!strcmp(name, "forge"))
 	{
 		forge_variant_build(variant);
+		return;
+	}
+	/* ("saved=<name>": the player's saved game type of that name - the
+	Halo 3 game type editor's, z:\saved\playlists -, read as the lobby's
+	GAME reads it; none, Slayer) */
+	if (!strncmp(name, "saved=", 6))
+	{
+		long indices[100];
+		word count = NUMBEROF(indices);
+		word index;
+
+		playlist_profiles_enumerate_available_to_local_player_index(0, &count, indices);
+		for (index = 0; index < count; index++)
+		{
+			wchar_t display[128];
+			char text[128];
+			int length;
+
+			if (indices[index] == NONE || !playlist_profile_get_display_name(indices[index], display))
+				continue;
+			for (length = 0; display[length] && length < (int)sizeof(text) - 1; length++)
+				text[length] = (char)(display[length] < 0x80 ? display[length] : '?');
+			text[length] = 0;
+			if (!_stricmp(text, name + 6) && playlist_profile_get(indices[index], variant))
+			{
+				platform_log("network test: the saved game type %s", text);
+				return;
+			}
+		}
+		platform_log("network test: no saved game type %s: slayer", name + 6);
+		build_game_variant_slayer(variant);
 		return;
 	}
 	for (index = 0; index < NUMBEROF(others); index++)
@@ -1358,6 +1396,17 @@ void network_test_update(
 	if (game_in_progress() && !main_menu_loaded && game_time_get() - network_test.logged_time >= TICKS_PER_SECOND)
 	{
 		network_test.logged_time = game_time_get();
+		/* (a saved game type played: the rules the game plays by, its
+		engine's variant, logged once a game) */
+		if (game_engine_running() && !strncmp(network_test.variant_name, "saved=", 6) &&
+			(network_test.rules_logged_time == 0 || game_time_get() < network_test.rules_logged_time))
+		{
+			char rules[512];
+
+			network_test.rules_logged_time = MAX(game_time_get(), 1);
+			menu_functions_gametype_rules(game_engine_get_variant(), rules, sizeof(rules));
+			platform_log("network test: the game plays by: %s", rules);
+		}
 		if (network_test_watch_short_game() && game_engine_running() &&
 			game_engine_get_variant()->universal_variant.score_to_win != network_test.score_to_win)
 		{
