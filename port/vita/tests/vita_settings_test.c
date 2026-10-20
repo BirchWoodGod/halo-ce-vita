@@ -1078,7 +1078,7 @@ static void test_controls_tab(void)
 	check(menu_selected == 2 && strstr(menu, "\n\x05Right stick turning speed\n") &&
 		strstr(menu, "\n\x06L/R: tabs   Left/right: change   Circle: close"),
 		"Controls opens on Look sensitivity, its first row (not the heading over it)");
-	check(!strstr(menu, "\nTouch top left\x02") && !strstr(menu, "\nA\x02") && !strstr(menu, "\nGyro sensitivity\x02") &&
+	check(!strstr(menu, "\nTouch top left\x02") && !strstr(menu, "\nA (jump)\x02") && !strstr(menu, "\nGyro sensitivity\x02") &&
 		!strstr(menu, "Check for updates") && !strstr(menu, "Version ") && !strstr(menu, "\nShow dev settings\x02") &&
 		!strstr(menu, "\nUpdate channel\x02") && !strstr(menu, "\nButton icons\x02") && !strstr(menu, "\nAdvanced\x02"),
 		"Controls: the zones, the buttons, the gyro's details on their pages; the update check, Update channel, "
@@ -1125,18 +1125,29 @@ static void test_controls_tab(void)
 	check(frame_touch(0, 1UL << VITA_ZONE_REAR_LEFT) == 1, "panel open: a touch zone held does not reach the game");
 	press(VITA_BUTTON_RIGHT);
 	menu_lines(&longest, diagram, sizeof(diagram));
-	check(!strcmp(getenv("HALO_TOUCH_REAR_LEFT"), "a") && strstr(menu, "< A >") &&
+	check(!strcmp(getenv("HALO_TOUCH_REAR_LEFT"), "a") && strstr(menu, "< A (jump) >") &&
 		strstr(file_text(SETTINGS_FILE), "HALO_TOUCH_REAR_LEFT=a\n") && !strcmp(diagram, "----S- aaaaba"),
 		"Rear touch left: A, in the environment and settings.txt; the diagram shows it set");
 	for (index = 0; index < 4; index++)
 		press(VITA_BUTTON_RIGHT);
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_TOUCH_REAR_LEFT"), "y"), "Rear touch left: Y");
+	/* (zoom by its name: testers looked for a zoom choice to put on the
+	rear pad, and did not know it is the right stick's click) */
+	to_line("Rear touch right");
+	for (index = 0; index < VITA_XBOX_RIGHT_STICK; index++)
+		press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_TOUCH_REAR_RIGHT"), "rs") && strstr(menu, "\nRear touch right\x02< Right stick (zoom) >") &&
+		menu_fits(), "Rear touch right: Right stick (zoom), the choice that zooms says so, and fits");
+	for (index = 0; index < VITA_XBOX_RIGHT_STICK; index++)
+		press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_TOUCH_REAR_RIGHT"), "off"), "Rear touch right: Off again");
 	to_line("Touch top right");
 	for (index = 0; index < 20; index++)
 		press(VITA_BUTTON_RIGHT);
 	menu_lines(&longest, diagram, sizeof(diagram));
-	check(!strcmp(getenv("HALO_TOUCH_TOP_RIGHT"), "back") && strstr(menu, "< Back  ") && !strcmp(diagram, "-S--A- alaaea"),
+	check(!strcmp(getenv("HALO_TOUCH_TOP_RIGHT"), "back") && strstr(menu, "< Back (scoreboard)  ") &&
+		!strcmp(diagram, "-S--A- alaaea"),
 		"Touch top right: Back, the last choice; the rear zone still marked set");
 	press(VITA_BUTTON_CIRCLE);
 	check(menu_visible && strstr(menu, "*Controls") && !strstr(menu, "\n\x03") &&
@@ -1162,13 +1173,15 @@ static void test_controls_tab(void)
 	/* Button layout: the Xbox buttons by name */
 	check(open_page("Button layout") && strstr(menu, "\n\x03" "Controls > Button layout\n"), "Button layout opens its page");
 	printf("%s\n--\n", menu);
-	check(strstr(menu, "\nA\x02") && strstr(menu, "\nB\x02") && strstr(menu, "\nX\x02") && strstr(menu, "\nY\x02") &&
-		strstr(menu, "\nBlack\x02") && strstr(menu, "\nWhite\x02") && strstr(menu, "\nLeft trigger\x02") &&
-		strstr(menu, "\nRight trigger\x02") && strstr(menu, "\nLeft stick click\x02") &&
-		strstr(menu, "\nRight stick click\x02") && strstr(menu, "\nBack\x02") && menu_rows() == 11 &&
+	check(strstr(menu, "\nA (jump)\x02") && strstr(menu, "\nB (melee)\x02") && strstr(menu, "\nX (reload, action)\x02") &&
+		strstr(menu, "\nY (switch weapon)\x02") && strstr(menu, "\nBlack (grenade type)\x02") &&
+		strstr(menu, "\nWhite (flashlight)\x02") && strstr(menu, "\nLeft trigger (grenade)\x02") &&
+		strstr(menu, "\nRight trigger (fire)\x02") && strstr(menu, "\nLeft stick (crouch)\x02") &&
+		strstr(menu, "\nRight stick (zoom)\x02") && strstr(menu, "\nBack (scoreboard)\x02") && menu_rows() == 11 &&
 		!strstr(menu, " button") && !strchr(menu, '\x08') && menu_fits() && menu_height_fits(),
-		"Button layout: the eleven Xbox buttons by name (no headings), each fits");
-	check(!strncmp(menu_line(2, line, sizeof(line)), "A\x02", 2) && !strstr(menu, "Button icons") &&
+		"Button layout: the eleven Xbox buttons by name, each with what it does in play (Right stick (zoom)), "
+		"no headings, each fits");
+	check(!strncmp(menu_line(2, line, sizeof(line)), "A (jump)\x02", 9) && !strstr(menu, "Button icons") &&
 		vita_button_icons_playstation() == (VITA_BUTTON_ICONS_DEFAULT == 1),
 		"Button layout: A first, Button icons on Game (as shipped: VITA_BUTTON_ICONS_DEFAULT)");
 	to_line("White");
@@ -3400,14 +3413,14 @@ static void test_button_icons(void)
 	/* (the panel keeps the Xbox controller's names with either: the icons
 	change in the game only) */
 	to_tab("Controls");
-	check(open_page("Button layout") && strstr(menu, "\nA\x02  Cross >") && strstr(menu, "\nBlack\x02") &&
+	check(open_page("Button layout") && strstr(menu, "\nA (jump)\x02  Cross >") && strstr(menu, "\nBlack (grenade type)\x02") &&
 		!strstr(menu, "\nJump\x02") && menu_rows() == 11 && menu_fits(),
 		"PlayStation: the Button layout's rows keep the Xbox's names, each fits");
 	/* a remap: the game's icon follows (vita_controls.c) */
 	to_line("X");
 	press(VITA_BUTTON_RIGHT);
 	vita_controls_config_load(&config);
-	check(!strcmp(getenv("HALO_XBOX_X"), "triangle") && strstr(menu, "\nX\x02< Triangle >") &&
+	check(!strcmp(getenv("HALO_XBOX_X"), "triangle") && strstr(menu, "\nX (reload, action)\x02< Triangle >") &&
 		vita_button_glyph(&config, 2, 0) == VITA_GLYPH_TRIANGLE && vita_button_glyph(&config, 2, 1) == VITA_GLYPH_SQUARE,
 		"X on Triangle: the game's X icon shows Triangle in play (Square in the menus)");
 	press(VITA_BUTTON_LEFT);
@@ -3420,7 +3433,7 @@ static void test_button_icons(void)
 	check(open_page("Touch zones") && to_line("Rear touch left"), "Touch zones opens");
 	press(VITA_BUTTON_RIGHT);
 	menu_lines(&longest, diagram, sizeof(diagram));
-	check(!strcmp(getenv("HALO_TOUCH_REAR_LEFT"), "a") && strstr(menu, "\nRear touch left\x02< A >") && menu_fits(),
+	check(!strcmp(getenv("HALO_TOUCH_REAR_LEFT"), "a") && strstr(menu, "\nRear touch left\x02< A (jump) >") && menu_fits(),
 		"PlayStation: a zone's choice keeps the Xbox's name");
 	vita_controls_config_load(&config);
 	check(vita_button_glyph(&config, 0, 0) == VITA_GLYPH_CROSS, "A on Cross and a zone: Cross shows");
@@ -3449,7 +3462,7 @@ static void test_button_icons(void)
 		strstr(menu, "\nButton icons\x02  Xbox >") && strstr(file_text(SETTINGS_FILE), "HALO_BUTTON_ICONS=xbox\n"),
 		"Button icons Xbox again: saved");
 	to_tab("Controls");
-	check(open_page("Button layout") && strstr(menu, "\nA\x02  Cross >") && strstr(menu, "\nBlack\x02") &&
+	check(open_page("Button layout") && strstr(menu, "\nA (jump)\x02  Cross >") && strstr(menu, "\nBlack (grenade type)\x02") &&
 		!strstr(menu, "\nJump\x02"), "Xbox again: the Xbox's names");
 	press(VITA_BUTTON_CIRCLE);
 	press(VITA_BUTTON_CIRCLE);
