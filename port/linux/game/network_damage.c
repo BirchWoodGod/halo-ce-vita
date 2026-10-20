@@ -122,13 +122,16 @@ enum
 	own flight and the shooter's round trip (a client's last shots, fired
 	before the host's copy ran dry, come a round trip late) */
 	EMPTY_WEAPON_GRACE_TICKS = 2 * TICKS_PER_SECOND,
-	/* ... the ticks back a shot's line of sight is looked for from (now,
-	the report's and halfway: two eyes each, six rays for a shot no tick
-	sees), and the rays a host's tick spends on them at most: one such shot
-	a tick looked at whole, whatever is sent (the Vita's host: about 0.1-0.2
-	ms) (REPORT_LINE_OF_SIGHT_TOLERANCE) */
-	LINE_OF_SIGHT_TICKS = 3,
+	/* ... the ticks back a shot's line of sight is looked for from (spread
+	from now to the report's; the eyes as they stand, and raised at the
+	report's: six rays for a shot no tick sees), and the rays a host's tick
+	spends on them at most: one such shot a tick looked at whole, whatever
+	is sent (the Vita's host: about 0.1-0.2 ms) (REPORT_LINE_OF_SIGHT_TOLERANCE) */
+	LINE_OF_SIGHT_TICKS = 5,
 	LINE_OF_SIGHT_RAYS_PER_TICK = 6,
+	/* ... and how soon after another a shot no tick saw is refused (the
+	first in a while dealt, and counted) */
+	UNSEEN_SHOT_TICKS = 5 * TICKS_PER_SECOND,
 	/* the hits a second of what no trigger's rate says: melee, a
 	grenade, a vehicle, a weapon's own detonation */
 	MELEE_HITS_PER_SECOND = 4,
@@ -414,6 +417,8 @@ static struct
 	long throw_times[MAXIMUM_GRENADE_THROWS];
 	short throw_types[MAXIMUM_GRENADE_THROWS];
 	long driven_time;
+	/* (the host's tick its last shot no tick saw came at: NONE none) */
+	long unseen_time;
 	real hit_seconds;
 	long hit_seconds_time;
 } damage_players[MAXIMUM_TRACKED_PLAYERS];
@@ -1700,9 +1705,10 @@ static void distributed_log_empty(
 }
 
 /* whether the host had the player's eyes (their unit on foot: its camera
-as it stands now, and LINE_OF_SIGHT_RAISE higher - a player crouched now
-who stood to fire -, moved with the unit) at one of the ticks from now back
-to the report's (LINE_OF_SIGHT_TICKS of them, spread evenly) where they see
+as it stands now, moved with the unit, and at the report's tick also
+LINE_OF_SIGHT_RAISE higher - a player crouched now who stood to fire) at
+one of the ticks from now back to the report's (LINE_OF_SIGHT_TICKS of
+them, spread evenly) where they see
 the point through the map's structure (REPORT_LINE_OF_SIGHT_FLAGS), up to
 REPORT_LINE_OF_SIGHT_TOLERANCE before it; TRUE also when it cannot be told
 (no unit, riding: a vehicle's gun is not at its rider's eyes) or when this
@@ -1748,7 +1754,8 @@ static boolean distributed_point_seen(
 			break;
 		if (tick->objects[player_index][0].object_index != unit_index || tick->objects[player_index][1].object_index != NONE)
 			continue;
-		for (raise = 0; raise < 2; raise++)
+		/* (raised only at the report's tick: the last sample) */
+		for (raise = 0; raise < (sample == LINE_OF_SIGHT_TICKS - 1 ? 2 : 1); raise++)
 		{
 			real_point3d eye;
 			real_vector3d vector;
@@ -2211,8 +2218,19 @@ static short distributed_report_valid(
 #endif
 		if (!part_near)
 			return _anticheat_hit_part;
+		/* (a shot no tick saw: counted always; refused when another came in
+		the last UNSEEN_SHOT_TICKS - a wall hack's stream of them -, dealt
+		when it is the first in a while: an honest shot the host's view of a
+		lagging shooter misses now and then is never lost) */
 		if (!seen_point)
-			return _anticheat_hit_wall;
+		{
+			long last = damage_players[player_index].unseen_time;
+
+			damage_players[player_index].unseen_time = now;
+			if (last != NONE && now - last <= UNSEEN_SHOT_TICKS)
+				return _anticheat_hit_wall;
+			network_anticheat_violation(machine_index, _anticheat_hit_wall, TRUE, 1.0f);
+		}
 	}
 	/* the damage as the host deals it: what a client's hit can be, from the
 	player's own */
@@ -2682,6 +2700,7 @@ void network_damage_new_game(
 		for (index = 0; index < MAXIMUM_GRENADE_THROWS; index++)
 			damage_players[player_index].throw_times[index] = NONE;
 		damage_players[player_index].driven_time = -RECENT_WEAPON_TICKS - 1;
+		damage_players[player_index].unseen_time = NONE;
 		damage_players[player_index].hit_seconds = HIT_REPORT_BURST_SECONDS;
 		damage_explosions[player_index].time = NONE;
 		damage_explosions[player_index].count = 0;

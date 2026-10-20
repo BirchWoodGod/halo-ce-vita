@@ -285,14 +285,18 @@ sending it (`port/linux/game/network_anticheat.c`):
   have, made at a host tick still to come (a *forged* hit); of a weapon the
   player has not held in ten seconds; and, new in 1.1.1: of a shot (what
   hits at a point, not an explosion, a melee blow or a collision) whose
-  point none of three ticks (now, the report's and halfway) sees from
-  where the host had the shooter's eyes (as they stand now, and 0.3 world
-  units higher: one crouched now who stood to fire), through the map's
+  point none of five ticks spread from now back to the report's sees from
+  where the host had the shooter's eyes (as they stand now; at the
+  report's tick 0.3 world units higher too: one crouched now who stood to
+  fire), through the map's
   structure as a shot meets it (front faces; not two-sided, invisible or
   breakable ones), up to half a world unit before the point (*through a
   wall*; one ray, `collision_test_vector_obstructed`, when the first sees
   it, as an honest shot's does; six rays a host tick at most, one such
-  shot looked at whole a tick, past which a shot is taken); of a weapon the host's copy
+  shot looked at whole a tick, past which a shot is taken; the first such
+  shot in five seconds is dealt all the same, and counted: a lagging
+  honest shooter the host's view misses now and then loses nothing, a wall
+  hack's stream of them is refused); of a weapon the host's copy
   has had empty (no rounds loaded or not, no battery) for two seconds, the
   shooter's round trip and its projectile's flight (*infinite ammunition,
   no reload*); naming a part of a biped more than 0.75 world units from

@@ -968,8 +968,28 @@ static void network_test_shoot(
 			if (dx * dx + dy * dy + dz * dz > 1.5f * 1.5f)
 				continue;
 		}
+		/* (a shot that this machine sees no line to - a hill, a wall between -
+		is not one a player could land: not made, so that the host's check of
+		a shot's line of sight, network_damage.c, sees honest shots alone) */
+		if (!melee)
+		{
+			real_point3d eye;
+			real_vector3d line;
+
+			unit_get_camera_position(player->unit_index, &eye);
+			line.i = target_object->object.bounding_sphere_center.x - eye.x;
+			line.j = target_object->object.bounding_sphere_center.y - eye.y;
+			line.k = target_object->object.bounding_sphere_center.z - eye.z;
+			if (collision_test_vector_obstructed(FLAG(_collision_test_front_facing_surfaces_bit) |
+				FLAG(_collision_test_structure_bit), &eye, &line, player->unit_index))
+			{
+				continue;
+			}
+		}
 		/* (a shot reaches no further than its projectile flies, with a margin
 		for how far the target is from where the shot started) */
+		if (melee)
+			;
 		else if (reach > 0.0f)
 		{
 			real dx = target_object->object.position.x - unit->object.position.x;
