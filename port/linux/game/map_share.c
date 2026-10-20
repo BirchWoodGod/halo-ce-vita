@@ -1482,6 +1482,19 @@ static void map_share_client_refusal_text(
 /* Gives up: the host is told when it is sending, the file kept to continue
 (else deleted), and the joiner leaves the game at its next frame, telling
 the player `why`. */
+/* the join given up, its message shown: the menus' next screen (the Halo 3
+games browser again, menu_functions.c; a dedicated server has no menus) */
+static void map_share_join_refused(
+	void)
+{
+#ifndef HALO_DEDICATED_SERVER
+	extern void menu_functions_join_refused(void);
+
+	menu_functions_join_refused();
+#endif
+	return;
+}
+
 static void map_share_client_fail(
 	char const *why)
 {
@@ -2457,6 +2470,7 @@ void map_share_client_dispose(
 		if (download->state == _client_leaving)
 		{
 			platform_show_message(download->plain_map ? T("Halo: map") : T("Halo: custom map"), download->message);
+			map_share_join_refused();
 		}
 		else
 		{
@@ -2732,6 +2746,7 @@ boolean map_share_client_update(
 	{
 		platform_show_message(download->plain_map ? T("Halo: map") : T("Halo: custom map"), download->message);
 		csmemset(download, 0, sizeof(*download));
+		map_share_join_refused();
 		return FALSE;
 	}
 

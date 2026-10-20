@@ -199,7 +199,10 @@
 #   h3pcjoin    a PC game joined from the Halo 3 menus' games browser (the
 #               Halo PC files of HALO_TEST_DATA_MENUS): an OpenCE host, public;
 #               our client's BROWSE GAMES, A on its row, yes to the large game:
-#               joined once (one join for the one press), and played
+#               joined once (one join for the one press), and played; after
+#               a Vita game's lobby and B, the PC game joined; a Vita game on
+#               a Custom Edition map our client lacks (XPPC_CE_MAP), the
+#               download refused: the games browser again, not the main menu
 #   crosscoophost  co-op hosted by our Vita for Vitas and PC (experimental):
 #               an OpenCE client and one of ours beside the host's player
 #   all         every mode above, one after the other (expected failures as
@@ -1468,8 +1471,55 @@ h3pcjoin)
 			grep -aqE "egmentation fault|SIGSEGV|SIGABRT|EXCEPTION halt" && result=crash
 		our_results="$our_results $name:$result"
 	}
+	# (mapmissing: our Vita host's game on a Custom Edition map our client lacks - XPPC_CE_MAP,
+	# extinction.map by default -, the download not made (asked, and a run nobody watches answers
+	# no; a game under way, as the owner's H2-4 Maps on insider.15, is refused the same way):
+	# picked from the games browser, the message, the Xbox's error dismissed (START), and the
+	# games browser again, not the main menu)
+	h3mapjoin() { # h3mapjoin NAME
+		local name=$1 vita_ns client_ns client_ip pids_here map=${XPPC_CE_MAP:-$root/../custom-maps-dl/extinction.map} level
+		level=$(basename "$map" .map)
+		[ -r "$map" ] || { echo "--- $name: no Custom Edition map ($map): left out"; return; }
+		mkdir -p "$out/$name/host-maps"
+		for f in "$menus_data"/maps/*.map; do ln -sfn "$f" "$out/$name/host-maps/$(basename "$f")"; done
+		ln -sfn "$map" "$out/$name/host-maps/$level.map"
+		subnet=$((subnet + 1)); side "$subnet"; vita_ns=$side_machine
+		broker
+		run_seconds=${XPPC_H3JOIN_SECONDS:-170}
+		host_game=$level host_variants=slayer copy_maps=$out/$name/host-maps run_copy "$name/vita" "$vita_ns" ours \
+			"192.168.$subnet.2" "$broker_address" $(host_game=$level host_variants=slayer score_to_win=500 host_env ours net) \
+			HALO_NET_HOST_CROSSPLAY=false HALO_NET_LOBBY_NAME=XpVita HALO_CUSTOM_EDITION=1 HALO_TEST_INPUT=bot:1
+		pids_here=$last_pid
+		for i in $(seq 1 60); do
+			grep -aqE "network test: starting the game" "$out/$name/vita/run.log" 2>/dev/null && break
+			sleep 1
+		done
+		sleep 5
+		subnet=$((subnet + 1)); side "$subnet"; client_ns=$side_machine; client_ip=192.168.$subnet.2
+		local pad="wait:150:3000 down:150:700 a wait:150:3000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500"
+		pad="$pad a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:12000 a wait:150:15000 start:150:8000"
+		copy_maps=$menus_data/maps run_copy "$name/client" "$client_ns" ours "$client_ip" "$broker_address" HALO_NET_ONLINE=true \
+			HALO_NET_HOST_PUBLIC=false HALO_MENU_STYLE=halo3 HALO_UI_LOG=1 HALO_NETWORK_TEST=watch "HALO_TEST_PAD=$pad"
+		pids_here="$pids_here $last_pid"
+		wait $pids_here 2>/dev/null
+		local clientlog=$out/$name/client/run.log result=pass
+		echo "--- $name: our client"
+		grep -aE "menus: (joining the public game|the join was refused)|Halo: custom map|system link: (joining|in another)|ui: screen pc.h3.(lan|main|pregame)" \
+			"$clientlog" | head -16
+		if ! grep -aq "menus: joining the public game XpVita" "$clientlog"; then
+			result=vita-not-picked
+		elif ! grep -aq "Halo: custom map: " "$clientlog"; then
+			result=not-refused
+		elif ! sed -n '/Halo: custom map: /,$p' "$clientlog" | grep -aq "ui: screen pc.h3.lan.screen"; then
+			result=no-games-browser-after
+		fi
+		grep -aq "memory: the widget_memory_pool is full" "$clientlog" && result=widget-memory-full
+		cat "$out/$name"/*/run.log 2>/dev/null | grep -aqE "egmentation fault|SIGSEGV|SIGABRT|EXCEPTION halt" && result=crash
+		our_results="$our_results $name:$result"
+	}
 	h3join h3pcjoin-direct 0 "a:150:50 a wait:150:40000"
 	h3join h3pcjoin-aftervita 1 "a wait:150:10000 b wait:150:5000 down:150:800 down:150:800 a wait:150:40000"
+	h3mapjoin h3pcjoin-mapmissing
 	;;
 crosscoophost)
 	# co-op hosted by our Vita for Vitas and PC (T15: PC clients in a Vita's

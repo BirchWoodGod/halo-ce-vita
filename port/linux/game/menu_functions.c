@@ -562,6 +562,10 @@ static struct
 	browser; lan: the browser's rows are the System Link list's games (the
 	LAN browser), since when it looks (lan_since), its list as last logged */
 	boolean browse_lan_pending;
+	/* (a join refused by the map share, from the Halo 3 games browser:
+	when it was asked, to open the browser again over the main menu the
+	refusal left at; 0 none) */
+	unsigned long browser_after_refusal;
 	/* (Menu style Halo CE) SERVER BROWSER: the profile screen first, then
 	the server browser in place of the System Link list it leads to
 	(browser_profile_pending); a game joined from it, the profile chosen,
@@ -8350,6 +8354,16 @@ void menu_functions_open_system_link(void)
 	menu_functions.open_system_link = TRUE;
 }
 
+/* (map_share.c: a join refused - the host's map not sent, the game under
+way -, the message shown) Menu style Halo 3: back to the games browser, with
+the message, rather than at the main menu */
+void menu_functions_join_refused(void)
+{
+	if (!halo_menu_style_halo3())
+		return;
+	menu_functions.browser_after_refusal = system_milliseconds() | 1;
+}
+
 /* (system_link_shortcut.c: the host an invite, a code or the online list
 joined, once its game is listed) the game joined from the Halo 3 games
 browser when it is the screen open, as A on its row joins it: 1 joined, 0
@@ -10899,6 +10913,37 @@ void pc_menu_functions_update(
 	boolean main_menu_loaded)
 {
 	h3_live_update(main_menu_loaded);
+	/* (a join the host's map refused: the games browser again once the
+	main menu is up - the Xbox's error over it dismissed -, not the main
+	menu; given up after 30 s) */
+	if (menu_functions.browser_after_refusal)
+	{
+		struct widget_instance *active = ui_widget_port_active_screen(0);
+		long main_tag = menu_tags_ingame_screen("h3/main/screen");
+
+		if (system_milliseconds() - menu_functions.browser_after_refusal > 30000 || !halo_menu_style_halo3())
+			menu_functions.browser_after_refusal = 0;
+		else if (main_menu_loaded && active && main_tag != NONE && active->definition_tag_index == main_tag &&
+			!global_network_game_client_get())
+		{
+			/* (as BROWSE GAMES opens it: the profile - chosen already, set at
+			once -, then the games browser in the System Link list's place;
+			B on it goes back to the main menu) */
+			menu_functions.browser_after_refusal = 0;
+			menu_functions.create_pending = FALSE;
+			menu_functions.browse_lan_pending = TRUE;
+			if (ui_widget_load_by_name_or_tag(profiles_screen, NONE, NULL, active->local_player_index,
+				active->definition_tag_index, NONE, NONE))
+			{
+				platform_log("menus: the join was refused: the games browser again");
+			}
+			else
+			{
+				menu_functions.browse_lan_pending = FALSE;
+				platform_log("menus: the join was refused: the games browser did not open");
+			}
+		}
+	}
 	if (main_menu_loaded && menu_functions.open_party)
 	{
 		menu_functions.open_party = FALSE;
