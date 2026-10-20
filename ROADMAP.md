@@ -154,7 +154,7 @@ Claude is the AI that helps build the port.
 | Aim assist on/off for the stick | xal | Not answered yet | Open |
 | The stick's ramp-up as an option, dead zone and response curve settings | DestinyTellsFacts, xal, Wonka | Not answered yet | Open |
 | Touchscreen aiming | xal | Not answered yet | Open |
-| Skulls (campaign modifiers) | Wonka | Not answered yet | Open |
+| Skulls (campaign modifiers) | Wonka | "Skulls would be fun" | Planned |
 | A "potato" graphics preset (flat lighting, no shadows, no filtering) | Helldiver450 | Not answered yet | Open |
 | Dark armour colours easier to see in dark levels | DestinyTellsFacts | Not answered yet | Open |
 | European (PAL) game files: Spanish, Italian, French, German | sobredosis | Not answered yet | Open (sobredosis wrote a guide) |
