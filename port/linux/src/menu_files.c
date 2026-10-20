@@ -17,6 +17,7 @@ file and line, and then no file is used: the game keeps its own menus.
 #include "halo_menus.h"
 #include "platform.h"
 #include "port_config.h"
+#include "network_wire.h"
 
 #include "expat.h"
 #include "../game/cache_file_formats.h"
@@ -591,6 +592,9 @@ static void read_widget(struct reader *reader, const XML_Char **attributes, long
 	struct halo_menu_widget widget;
 	long index = menus->widget_count;
 	const char *child_controller = NULL;
+	/* (a spinner's strings on the port's PC build, in place of strings:
+	WHO CAN JOIN offers no VITA there - network_wire.h) */
+	const char *strings_pc = NULL;
 	struct attribute table[] =
 	{
 		{ "name", &widget.name }, { "type", &widget.type }, { "controller", &widget.controller },
@@ -602,7 +606,7 @@ static void read_widget(struct reader *reader, const XML_Char **attributes, long
 		{ "header_bitmap", &widget.header_bitmap }, { "footer_bitmap", &widget.footer_bitmap },
 		{ "header_bounds", &widget.header_bounds }, { "footer_bounds", &widget.footer_bounds },
 		{ "scene", &widget.scene }, { "scene_object", &widget.scene_object },
-		{ "child_controller", &child_controller },
+		{ "child_controller", &child_controller }, { "strings_pc", &strings_pc },
 		{ "x", NULL, &widget.x }, { "y", NULL, &widget.y }, { "left", NULL, &widget.left },
 		{ "top", NULL, &widget.top }, { "width", NULL, &widget.width, &widget.has_width },
 		{ "height", NULL, &widget.height, &widget.has_height }, { "text_x", NULL, &widget.text_x },
@@ -617,6 +621,8 @@ static void read_widget(struct reader *reader, const XML_Char **attributes, long
 	widget.file = reader->file;
 	widget.line = current_line(reader);
 	read_attributes(reader, "widget", attributes, table, sizeof(table) / sizeof(*table));
+	if (strings_pc && network_wire_this_platform() == NETWORK_PLATFORM_VITA_PC)
+		widget.strings = strings_pc;
 	if (!reader->failed && !widget.name)
 		reader_error(reader, "a <widget> needs a name");
 	GROW(reader, menus->widgets, index);

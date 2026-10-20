@@ -2905,6 +2905,10 @@ void network_game_client_rejected_by_game(
 	case _rejection_code_blacklisted_machine:
 		reason = "_rejection_code_blacklisted_machine";
 		break;
+
+	case _rejection_code_vitas_only:
+		reason = "_rejection_code_vitas_only";
+		break;
 	}
 
 	network_event(
@@ -2919,6 +2923,9 @@ void network_game_client_rejected_by_game(
 		platform_show_message(T("Halo: cannot join this game"),
 			T("The game is full: it has as many players as its host allows. Try another game."));
 	}
+	/* (a host for Vitas only refused the PC build: network_wire.h) */
+	if (rejection_code == _rejection_code_vitas_only)
+		platform_show_message(T("Halo: cannot join this game"), crossplay_guard_vitas_only_text());
 #endif
 	/* port: the join went to the pregame screen at once (and a machine
 	refused a game in progress, network_game_server_refuse_late_joiner, is in
@@ -3517,6 +3524,17 @@ static boolean network_game_client_idle_joining(
 
 				csmemset(&join_game_request, 0, sizeof(join_game_request));
 				network_game_generate_local_machine_name(join_game_request.machine_name);
+#ifdef HALO_PORT_VITA_NETWORK
+				/* port: which of this project's builds joins (a Vita, the PC
+				build), in the name's last character, which older hosts clear
+				(player_name_clean): on the legacy wire, where a host for
+				Vitas only refuses the PC build (network_wire.h) */
+				if (!network_wire_crossplay())
+				{
+					join_game_request.machine_name[NUMBEROF(join_game_request.machine_name) - 1] =
+						(wchar_t)network_wire_join_platform_mark();
+				}
+#endif
 				csmemcpy(
 					join_game_request.join_token,
 					client->join_parameters.join_token,

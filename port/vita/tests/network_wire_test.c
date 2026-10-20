@@ -70,14 +70,6 @@ const char *lang_text(const char *english)
 	return english;
 }
 
-/* (what a host for Vitas only would refuse: the PC build, on the legacy
-wire; an older build's join, which says nothing (-1), is a Vita's) */
-static int refuses_pc_build(int platform)
-{
-	return !network_wire_crossplay() && platform == NETWORK_PLATFORM_VITA_PC &&
-		network_wire_host_audience() == NETWORK_AUDIENCE_VITAS;
-}
-
 /* ---------- the checks */
 
 static int failures, checks;
@@ -129,6 +121,16 @@ int main(void)
 #endif
 	unsetenv("HALO_TEST_PLATFORM");
 #endif
+	check(network_wire_join_platform_of_mark(network_wire_join_platform_mark()) == network_wire_this_platform(),
+		"the join request's mark says this build's platform");
+	check(network_wire_join_platform_of_mark(0x5601) == NETWORK_PLATFORM_VITA &&
+		network_wire_join_platform_of_mark(0x5602) == NETWORK_PLATFORM_VITA_PC, "a Vita's mark, the PC build's");
+	check(network_wire_join_platform_of_mark(0) == NETWORK_WIRE_JOIN_PLATFORM_UNKNOWN &&
+		network_wire_join_platform_of_mark('a') == NETWORK_WIRE_JOIN_PLATFORM_UNKNOWN &&
+		network_wire_join_platform_of_mark(0x5600) == NETWORK_WIRE_JOIN_PLATFORM_UNKNOWN &&
+		network_wire_join_platform_of_mark(0x5603) == NETWORK_WIRE_JOIN_PLATFORM_UNKNOWN &&
+		network_wire_join_platform_of_mark(0xFFFF) == NETWORK_WIRE_JOIN_PLATFORM_UNKNOWN,
+		"no mark (an older build's, a name's character): unknown");
 	check(network_wire_audience_parse("vita") == NETWORK_AUDIENCE_VITAS &&
 		network_wire_audience_parse("vitas") == NETWORK_AUDIENCE_VITAS &&
 		network_wire_audience_parse("vita_pc") == NETWORK_AUDIENCE_VITA_PC &&
@@ -148,10 +150,10 @@ int main(void)
 #ifdef HALO_DEDICATED_SERVER
 	host_crossplay_setting = 0;
 	unsetenv("HALO_TEST_CROSSPLAY_HOST");
-	check(network_wire_host_audience() == NETWORK_AUDIENCE_VITA_PC && !refuses_pc_build(NETWORK_PLATFORM_VITA_PC),
+	check(network_wire_host_audience() == NETWORK_AUDIENCE_VITA_PC && !network_wire_host_refuses(NETWORK_PLATFORM_VITA_PC),
 		"the dedicated server takes the PC build, as shipped");
 	who_setting = "vita";
-	check(refuses_pc_build(NETWORK_PLATFORM_VITA_PC), "... and refuses it when set for Vita only");
+	check(network_wire_host_refuses(NETWORK_PLATFORM_VITA_PC), "... and refuses it when set for Vita only");
 	who_setting = "";
 	setenv("HALO_TEST_CROSSPLAY_HOST", "1", 1);
 #endif
@@ -195,18 +197,18 @@ int main(void)
 		check(network_wire_audience_default() == least && network_wire_audience_first() == least &&
 			network_wire_host_audience() == least && !network_wire_host_crossplay(),
 			pc ? "the PC build hosts for Vitas and Halo CE Vita PC, as shipped" : "a Vita hosts for Vitas only, as shipped");
-		check(refuses_pc_build(NETWORK_PLATFORM_VITA_PC) == !pc && !refuses_pc_build(NETWORK_PLATFORM_VITA) &&
-			!refuses_pc_build(-1),
+		check(network_wire_host_refuses(NETWORK_PLATFORM_VITA_PC) == !pc && !network_wire_host_refuses(NETWORK_PLATFORM_VITA) &&
+			!network_wire_host_refuses(NETWORK_WIRE_JOIN_PLATFORM_UNKNOWN),
 			pc ? "the PC build refuses no one" : "Vitas only: the PC build refused; a Vita, and a build that says nothing, not");
 		who_setting = "vita_pc";
 		check(network_wire_host_audience() == NETWORK_AUDIENCE_VITA_PC && !network_wire_host_crossplay() &&
-			!refuses_pc_build(NETWORK_PLATFORM_VITA_PC), "vita_pc: the legacy wire, the PC build joins");
+			!network_wire_host_refuses(NETWORK_PLATFORM_VITA_PC), "vita_pc: the legacy wire, the PC build joins");
 		who_setting = "vita";
 		check(network_wire_host_audience() == least,
 			pc ? "vitas on the PC build: Vitas and Halo CE Vita PC (a PC host is no Vita)" : "vitas: Vitas only");
 		who_setting = "everyone";
 		check(network_wire_host_audience() == NETWORK_AUDIENCE_EVERYONE && network_wire_host_crossplay() &&
-			!refuses_pc_build(NETWORK_PLATFORM_VITA_PC), "everyone: the crossplay wire");
+			!network_wire_host_refuses(NETWORK_PLATFORM_VITA_PC), "everyone: the crossplay wire");
 		who_setting = "";
 		host_crossplay_setting = 1;
 		check(network_wire_host_audience() == NETWORK_AUDIENCE_EVERYONE,
@@ -227,7 +229,7 @@ int main(void)
 		adhoc_setting = 0;
 		setenv("HALO_NET_WHO_CAN_JOIN", "vita", 1);
 		network_wire_choose(1, 0, "a crossplay game");
-		check(!refuses_pc_build(NETWORK_PLATFORM_VITA_PC), "on the crossplay wire nothing is refused");
+		check(!network_wire_host_refuses(NETWORK_PLATFORM_VITA_PC), "on the crossplay wire nothing is refused");
 		network_wire_reset();
 		unsetenv("HALO_NET_WHO_CAN_JOIN");
 		unsetenv("HALO_NET_HOST_CROSSPLAY");
@@ -235,7 +237,7 @@ int main(void)
 		/* (a test build standing in for a Vita) */
 		setenv("HALO_TEST_PLATFORM", "vita", 1);
 		setenv("HALO_NET_WHO_CAN_JOIN", "vita", 1);
-		check(network_wire_host_audience() == NETWORK_AUDIENCE_VITAS && refuses_pc_build(NETWORK_PLATFORM_VITA_PC),
+		check(network_wire_host_audience() == NETWORK_AUDIENCE_VITAS && network_wire_host_refuses(NETWORK_PLATFORM_VITA_PC),
 			"a Vita's stand-in for Vitas only refuses the PC build");
 		unsetenv("HALO_NET_WHO_CAN_JOIN");
 		unsetenv("HALO_TEST_PLATFORM");

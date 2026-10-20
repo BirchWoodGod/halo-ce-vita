@@ -1941,18 +1941,19 @@
 "Hosted on PC (DamnationCE)" = "Creada en PC (DamnationCE)"
 "Hosted on PC" = "Creada en PC"
 "WHO CAN JOIN" = "QUIÉN ENTRA"
-"VITAS: Vitas join it. VITAS AND PC: PC players\n(OpenCE) can join too; old Vita versions can't." = "VITAS: entran Vitas. VITAS Y PC: también\njugadores de PC (OpenCE); Vitas antiguas no."
-"VITAS" = "VITAS"
-"VITAS AND PC" = "VITAS Y PC"
+"VITA: PS Vitas only. VITA PC: Vitas and\nHalo CE Vita on PC. EVERYONE: also OpenCE\nplayers on PC." = "VITA: solo PS Vita. VITA PC: Vitas y\nHalo CE Vita en PC. TODOS: también los\njugadores de OpenCE en PC."
+"VITA PC" = "VITA PC"
+"EVERYONE" = "TODOS"
 "Browser shows" = "El navegador muestra"
 "All games" = "Todas"
 "Vita games" = "De Vita"
 "PC games" = "De PC"
 "Vita and PC (OpenCE) games, each tagged" = "Partidas de Vita y de PC (OpenCE), con etiqueta"
 "Who can join" = "Quién puede entrar"
-"Vitas" = "Vitas"
-"Vitas and PC" = "Vitas y PC"
-"Games you host. And PC: OpenCE players too" = "Tus partidas. Y PC: también jugadores de OpenCE"
+"Vita" = "Vita"
+"Vita PC" = "Vita PC"
+"Everyone" = "Todos"
+"Vita PC: Vitas and Halo CE Vita on PC. Everyone: also OpenCE" = "Vita PC: Vitas y Halo CE Vita en PC. Todos: también OpenCE"
 "Vita and PC" = "Vita y PC"
 "Which games the browser lists; who joins yours" = "Qué partidas lista el navegador; quién entra en las tuyas"
 # (friends join a private game too, Oct 19 2026)
@@ -2048,7 +2049,9 @@
 "mouse" = "ratón"
 
 # ---------- the PC build of the port (Oct 20 2026): its games tagged VITA
-# (PC); a game for Vitas only marked so in its browser
+# (PC), who can join a game this machine hosts (Vitas only, Vitas and Halo CE
+# Vita PC, everyone), and the refusal of the PC build by a game for Vitas only
 " VITAS ONLY" = " SOLO VITAS"
+"This game is for PS Vitas only" = "Esta partida es solo para PS Vita"
 "Hosted on a PC (Halo CE Vita)" = "Creada en un PC (Halo CE Vita)"
 "Hosted on a PC (Halo CE Vita): OpenCE players can join" = "Creada en un PC (Halo CE Vita): pueden entrar los de OpenCE"

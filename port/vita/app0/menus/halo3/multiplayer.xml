@@ -124,7 +124,7 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 		<string text="The most players your game takes,\nyou included (2 to 16)."/>
 		<string text="PUBLIC: listed in the games browser.\nPRIVATE: friends, invites and its code join it."/>
 		<string text="A public game asks joiners for it.\nNONE: anyone may join."/>
-		<string text="VITAS: Vitas join it. VITAS AND PC: PC players\n(OpenCE) can join too; old Vita versions can't."/>
+		<string text="VITA: PS Vitas only. VITA PC: Vitas and\nHalo CE Vita on PC. EVERYONE: also OpenCE\nplayers on PC."/>
 		<string text="Hosts at once with this game type and map (your\nprofile first, the first time): the game's lobby,\nwhich shows your game's code."/>
 	</strings>
 	<strings name="h3/code_help">
@@ -729,7 +729,7 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 		<child widget="h3/setup/password_value"/>
 	</widget>
 	<widget name="h3/setup/who_label" type="text" left="0" top="0" width="250" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/mp_text" string_index="30"/>
-	<widget name="h3/setup/who_spinner" strings="VITAS|VITAS AND PC" type="spinner" left="0" top="0" width="160" height="20" flags="pass_unhandled_to_focused_child left_right_tabs_items" font="h3/font_item" color="#FFAABED6" align="center" text_y="2" header_bitmap="h3/arrow_left" footer_bitmap="h3/arrow_right" header_bounds="2 -12 18 -4" footer_bounds="2 164 18 172"/>
+	<widget name="h3/setup/who_spinner" strings="VITA|VITA PC|EVERYONE" strings_pc="VITA PC|EVERYONE" type="spinner" left="0" top="0" width="160" height="20" flags="pass_unhandled_to_focused_child left_right_tabs_items" font="h3/font_item" color="#FFAABED6" align="center" text_y="2" header_bitmap="h3/arrow_left" footer_bitmap="h3/arrow_right" header_bounds="2 -12 18 -4" footer_bounds="2 164 18 172"/>
 	<widget name="h3/setup/op_who" width="536" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
 		<child widget="h3/setup/who_label"/>
 		<child widget="h3/setup/who_spinner" x="280"/>

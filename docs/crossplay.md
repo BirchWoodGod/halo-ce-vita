@@ -348,9 +348,10 @@ commit and in NETCODE.md.
 | **Crossplay wire** | everyone else | OpenCE's: hceu, format 1, 13,120-byte record, constant token, the version the table says to announce (29 since Oct 14: section 10.6) |
 
 **Hosts** speak one wire per game, chosen by the host's "Who can join"
-(network.host_crossplay, Oct 19 2026: 10.7):
-- Vitas: legacy;
-- Vitas and PC: crossplay.
+(network.who_can_join since Oct 20 2026, network.host_crossplay before:
+10.7, 10.9):
+- Vita (Vitas only) and Vita PC (Vitas and this port's PC build): legacy;
+- Everyone (what "Vitas and PC" was): crossplay.
 
 Dedicated servers choose in their config (`sv_crossplay 0/1`). The Linode can
 run both kinds side by side during the move.
@@ -1384,6 +1385,51 @@ run the suite against it, then move the built-in version (and the table,
 when T10 exists).
 
 ---
+
+### 10.9 This port's PC build and three-way Who can join (Oct 20 2026)
+
+The PC build (Linux, Windows: `--linux-net-vita`, `tools/package_pc.py`)
+speaks the legacy Vita wire, so before this its games looked like a Vita's
+everywhere. It now says what it is, in fields every older build ignores, so
+no network version is raised (`network_wire.h`):
+
+| Where | How | Older builds |
+|---|---|---|
+| Online listing (format 2, and a Vita's format 1) | the stamp's first byte (signed with the rest): 0x01 the host is the PC build, 0x02 the game takes Vitas only | read past the stamp (ours since beta.1, OpenCE's and ChupathingyCE's alike) |
+| System Link advertisement, legacy wire | `reserved[2]` bits 0x08 (PC build host) and 0x10 (Vitas only) | read 0x01, 0x02, 0x04 only |
+| ... crossplay wire (a Vita's game) | bit 0x80 (PC build host), beside 0x40 (4.1 reserves both for us) | PC builds test their own bits |
+| Join request | the machine name's last character, 0x5600 + platform + 1 | cleared by `player_name_clean` before use |
+| Friends' presence, invites, party follow | the game-flags byte's 0x08 (sender is the PC build), 0x10 (its game's host is), 0x20 (Vitas only) | read 0x01, 0x02, 0x04 only |
+
+A build that says nothing is taken for a Vita. Browsers tag the PC build's
+games **VITA (PC)** (`crossplay_guard_host_tag`), group and filter them
+with the PCs' (Browser shows PC games: OpenCE's and the PC build's), and
+friends and party lists put "(PC)" after its players.
+
+**Who can join** has three choices (the owner): **Vita** (Vitas only, a
+Vita's default), **Vita PC** (Vitas and the PC build, on the legacy wire;
+the PC build's default, and the least it offers: a PC host is no Vita, so
+its menus have only Vita PC and Everyone, `strings_pc`, and a stored "vita"
+reads as Vita PC; the dedicated server's default too), **Everyone** (also
+OpenCE's PC players, the crossplay wire). An older settings.txt's
+`HALO_NET_HOST_CROSSPLAY=false/true` loads as Vita / Everyone, and
+`network.host_crossplay = true` in config.toml as Everyone.
+
+A host for Vita refuses a joiner whose join request says it is the PC build
+(rejection code `_rejection_code_vitas_only`; the joiner is told "This game
+is for PS Vitas only"; an older client shows its generic refusal), and its
+listing and advertisement say Vitas only, which the PC build's browser marks
+**VITA VITAS ONLY**. **This is best effort, not a security line:** every mark
+is what the other machine says, and a modified PC build can say it is a
+Vita. Nothing else relies on it: the host's validation of what any client
+sends is the same for a Vita and a PC.
+
+| Test | Result |
+|---|---|
+| unit: network_wire_test (five builds: platform, marks, audiences, refusal, the retired setting), crossplay_guard_test, p2p_lobby_test (the stamp), p2p_friends_test (the presence bits), vita_settings_test (the row, its migration), lang | PASS |
+| `run_netns_online_test.sh vitapc`: a PC build's public game and a Vita's; a Vita's browser, and an older build's (HALO_TEST_VITA_OLD) | see the commit |
+| `run_netns_online_test.sh vitaonly`: a Vita host for Vita refuses the PC build, takes a Vita; for Vita PC takes both | see the commit |
+| `run_menus_test.sh h3vitapc h3createwho`: the tags and groups; WHO CAN JOIN's choices on a Vita and on the PC build | see the commit |
 
 ## 11. Licensing and credit
 

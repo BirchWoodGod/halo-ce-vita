@@ -400,7 +400,7 @@ static const struct config_setting config_settings[] =
 		"own protocol whatever this says (docs/crossplay.md)." },
 	{ "network.who_can_join", _config_string, "\"\"", "HALO_NET_WHO_CAN_JOIN", _environment_value, _platform_all,
 		"Who can join the games this machine hosts: \"vita\" (Vita: Vitas, on\n"
-		"the Vitas' own protocol),\n"
+		"the Vitas' own protocol: the PC build of this port is refused),\n"
 		"\"vita_pc\" (Vita PC: PS Vitas and Halo CE Vita on PC), \"everyone\"\n"
 		"(also OpenCE players on PC, on OpenCE's protocol, listed in both\n"
 		"browsers). Empty: a Vita's default, Vita; the PC build's and the\n"

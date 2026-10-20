@@ -1997,6 +1997,13 @@ static boolean network_game_server_handle_message_client_join_game_request(
 		{
 			struct transport_address source_address;
 			wchar_t machine_name[MAXIMUM_MACHINE_NAME_LENGTH];
+			/* port: the joiner's platform, from its name's last character
+			before the name is cleaned (network_wire.h; none from an older
+			build); a game for Vitas only refuses the PC build. Best effort:
+			what the joiner says */
+			int joiner_platform = network_wire_join_platform_of_mark(
+				(unsigned short)join_game_request.machine_name[NUMBEROF(join_game_request.machine_name) - 1]);
+			boolean vitas_only = network_wire_host_refuses(joiner_platform) != 0;
 			/* port: a lobby with no player slot free (its machines' players
 			fill it) is full: a machine that joined could add none, and held
 			the countdown for ever */
@@ -2040,7 +2047,7 @@ static boolean network_game_server_handle_message_client_join_game_request(
 					/* (the Xbox game refused a machine not named in the
 					development kit's d:\hosts.txt: a stray file of that name
 					on a PC refused machines) */
-					if (network_game_server_accept_client_machine_into_game(server, server_client_machine))
+					if (!vitas_only && network_game_server_accept_client_machine_into_game(server, server_client_machine))
 					{
 						struct message_server_machine_accepted acceptance;
 						struct network_message *reply;
@@ -2129,8 +2136,10 @@ static boolean network_game_server_handle_message_client_join_game_request(
 						struct network_message *reply;
 
 						/* port: a banned machine is told so (it was told the
-						game is not open) */
-						rejection.reason = network_game_server_last_refusal_code();
+						game is not open); the PC build, a game for Vitas only */
+						rejection.reason = vitas_only ? _rejection_code_vitas_only : network_game_server_last_refusal_code();
+						if (vitas_only)
+							network_event("refusing the PC build's machine: this game is for Vitas only (Who can join)");
 						network_event(
 							"server failed to accept valid client machine '%s' @%s into the game",
 							join_game_request.machine_name,

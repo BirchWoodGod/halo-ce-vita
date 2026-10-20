@@ -152,6 +152,20 @@ int network_wire_this_platform(void)
 #endif
 }
 
+unsigned short network_wire_join_platform_mark(void)
+{
+	return (unsigned short)(NETWORK_WIRE_JOIN_PLATFORM_MARK | (network_wire_this_platform() + 1));
+}
+
+int network_wire_join_platform_of_mark(unsigned short mark)
+{
+	int low = mark & 0xFF;
+
+	if ((mark & 0xFF00) != NETWORK_WIRE_JOIN_PLATFORM_MARK || low < 1 || low > NETWORK_PLATFORM_VITA_PC + 1)
+		return NETWORK_WIRE_JOIN_PLATFORM_UNKNOWN;
+	return low - 1;
+}
+
 static const char *const audience_values[NUMBER_OF_NETWORK_AUDIENCES] = { "vita", "vita_pc", "everyone" };
 
 const char *network_wire_audience_value(int audience)
@@ -221,6 +235,12 @@ int network_wire_host_audience(void)
 	if (audience == NETWORK_AUDIENCE_EVERYONE && !network_wire_crossplay_available())
 		audience = NETWORK_AUDIENCE_VITA_PC;
 	return audience;
+}
+
+int network_wire_host_refuses(int platform)
+{
+	return !network_wire_crossplay() && platform == NETWORK_PLATFORM_VITA_PC &&
+		network_wire_host_audience() == NETWORK_AUDIENCE_VITAS;
 }
 
 int network_wire_host_crossplay(void)

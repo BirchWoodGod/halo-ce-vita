@@ -2188,8 +2188,9 @@ static void test_multiplayer_tab(void)
 	press(VITA_BUTTON_LEFT);
 	check(getenv("HALO_NET_REMOTE_LOD") && !strcmp(getenv("HALO_NET_REMOTE_LOD"), "auto"), "Unseen players Auto again: auto");
 	/* no Crossplay switch (docs/crossplay.md, Oct 19 2026): Browser shows
-	(all as shipped, Vita, PC) and Who can join (Vitas as shipped, Vitas and
-	PC), live: no restart */
+	(all as shipped, Vita, PC) and Who can join (Vita as shipped, Vita PC -
+	the port's PC build too - and Everyone, OpenCE's players too: the owner,
+	Oct 20 2026), live: no restart */
 	check(open_page("Vita and PC") && strstr(menu, "\n\x03Multiplayer > Vita and PC\n"),
 		"Multiplayer's Vita and PC page, in the old Crossplay row's place");
 	to_line("Browser shows");
@@ -2207,13 +2208,19 @@ static void test_multiplayer_tab(void)
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_NET_BROWSER_FILTER"), "all"), "Browser shows all games again");
 	to_line("Who can join");
-	check(strstr(menu, "\nWho can join\x02  Vitas >") && !setting_named("HALO_NET_HOST_CROSSPLAY")->restart &&
-		strstr(setting_named("HALO_NET_HOST_CROSSPLAY")->help, "OpenCE"), "Who can join: Vitas as shipped, live, its help");
+	check(strstr(menu, "\nWho can join\x02  Vita >") && !setting_named("HALO_NET_WHO_CAN_JOIN")->restart &&
+		!setting_named("HALO_NET_HOST_CROSSPLAY") && strstr(setting_named("HALO_NET_WHO_CAN_JOIN")->help, "OpenCE") &&
+		strstr(setting_named("HALO_NET_WHO_CAN_JOIN")->help, "Halo CE Vita on PC"),
+		"Who can join: Vita as shipped, live, its help (Vita PC, Everyone)");
 	press(VITA_BUTTON_RIGHT);
-	check(strstr(menu, "\nWho can join\x02< Vitas and PC  ") && getenv("HALO_NET_HOST_CROSSPLAY") &&
-		!strcmp(getenv("HALO_NET_HOST_CROSSPLAY"), "true"), "Who can join Vitas and PC: HALO_NET_HOST_CROSSPLAY true");
+	check(strstr(menu, "\nWho can join\x02< Vita PC >") && getenv("HALO_NET_WHO_CAN_JOIN") &&
+		!strcmp(getenv("HALO_NET_WHO_CAN_JOIN"), "vita_pc"), "Who can join Vita PC: HALO_NET_WHO_CAN_JOIN vita_pc");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nWho can join\x02< Everyone  ") && !strcmp(getenv("HALO_NET_WHO_CAN_JOIN"), "everyone"),
+		"Who can join Everyone: everyone");
 	press(VITA_BUTTON_LEFT);
-	check(!strcmp(getenv("HALO_NET_HOST_CROSSPLAY"), "false"), "Who can join Vitas again: false");
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_NET_WHO_CAN_JOIN"), "vita"), "Who can join Vita again: vita");
 	press(VITA_BUTTON_CIRCLE);
 	/* (hosting is never blocked by the wire now: Host a game opens as ever) */
 	{
@@ -2900,7 +2907,7 @@ static void test_variables_kept(void)
 		"HALO_XBOX_A", "HALO_XBOX_B", "HALO_XBOX_X", "HALO_XBOX_Y", "HALO_XBOX_BLACK", "HALO_XBOX_WHITE",
 		"HALO_XBOX_LEFT_TRIGGER", "HALO_XBOX_RIGHT_TRIGGER", "HALO_XBOX_LEFT_STICK", "HALO_XBOX_RIGHT_STICK",
 		"HALO_XBOX_BACK", "HALO_DEV_SETTINGS", "HALO_GYRO", "HALO_GYRO_BUTTON", "HALO_GYRO_SENS",
-		"HALO_GYRO_INVERT_Y", "HALO_GYRO_TURN", "HALO_GYRO_ASSIST", "HALO_MENU_STYLE", "HALO_VITA_NETWORK", "HALO_NET_BROWSER_FILTER", "HALO_NET_HOST_CROSSPLAY",
+		"HALO_GYRO_INVERT_Y", "HALO_GYRO_TURN", "HALO_GYRO_ASSIST", "HALO_MENU_STYLE", "HALO_VITA_NETWORK", "HALO_NET_BROWSER_FILTER", "HALO_NET_WHO_CAN_JOIN",
 		"HALO_ADHOC_ROOM", "HALO_CUSTOM_EDITION", PERFORMANCE_LOG, "HALO_HANG_CRASH",
 		"XV_FPS", "HALO_DEBUG_CAMERA", "HALO_GXM_WCLAMP", "HALO_TARGET_CHAIN_MIN_SIZE", "HALO_FRAME_PHASE_LOCK",
 		"HALO_GXM_RTT_SYNC", "HALO_ADHOC_DIALOG_MODE", "HALO_SUN_RAYS",
@@ -4670,6 +4677,44 @@ int main(void)
 		vita_settings_load();
 		check(!strcmp(getenv("HALO_NET_BROWSER_FILTER"), "vita"), "a Browser shows saved since: it holds");
 		setenv("HALO_NET_BROWSER_FILTER", "all", 1);
+	}
+	/* the retired two-way Who can join (HALO_NET_HOST_CROSSPLAY, Oct 20
+	2026): Vitas loads as Vita, Vitas and PC as Everyone (OpenCE's players,
+	as it took); a three-way choice saved since wins; env.txt's too; the old
+	line is gone at the next save */
+	{
+		static const char vitas[] = "HALO_NET_HOST_CROSSPLAY=false\nHALO_VITA_NETWORK=online\n";
+		static const char with_pc[] = "HALO_NET_HOST_CROSSPLAY=true\nHALO_VITA_NETWORK=online\n";
+		static const char both[] = "HALO_NET_HOST_CROSSPLAY=true\nHALO_NET_WHO_CAN_JOIN=vita_pc\nHALO_VITA_NETWORK=online\n";
+		static const char plain[] = "HALO_VITA_NETWORK=online\n";
+
+		write_file(SETTINGS_FILE, with_pc, sizeof(with_pc) - 1);
+		unsetenv("HALO_NET_WHO_CAN_JOIN");
+		log_text[0] = 0;
+		vita_settings_load();
+		check(getenv("HALO_NET_WHO_CAN_JOIN") && !strcmp(getenv("HALO_NET_WHO_CAN_JOIN"), "everyone") &&
+			!getenv("HALO_NET_HOST_CROSSPLAY") &&
+			strstr(log_text, "Who can join has three choices now (it was Vitas and PC): Everyone"),
+			"the old Vitas and PC in settings.txt: Everyone, halo.log says so");
+		vita_settings_set("HALO_FRAME_CAP", "30");
+		check(!strstr(file_text(SETTINGS_FILE), "HALO_NET_HOST_CROSSPLAY") &&
+			strstr(file_text(SETTINGS_FILE), "HALO_NET_WHO_CAN_JOIN=everyone\n"),
+			"the next save: the three-way line, no old one");
+		write_file(SETTINGS_FILE, vitas, sizeof(vitas) - 1);
+		unsetenv("HALO_NET_WHO_CAN_JOIN");
+		vita_settings_load();
+		check(!strcmp(getenv("HALO_NET_WHO_CAN_JOIN"), "vita"), "the old Vitas: Vita");
+		write_file(SETTINGS_FILE, both, sizeof(both) - 1);
+		unsetenv("HALO_NET_WHO_CAN_JOIN");
+		vita_settings_load();
+		check(!strcmp(getenv("HALO_NET_WHO_CAN_JOIN"), "vita_pc"), "a three-way choice saved since: it holds");
+		write_file(SETTINGS_FILE, plain, sizeof(plain) - 1);
+		unsetenv("HALO_NET_WHO_CAN_JOIN");
+		setenv("HALO_NET_HOST_CROSSPLAY", "true", 1);
+		vita_settings_load();
+		check(!strcmp(getenv("HALO_NET_WHO_CAN_JOIN"), "everyone") && !getenv("HALO_NET_HOST_CROSSPLAY"),
+			"env.txt's old HALO_NET_HOST_CROSSPLAY=true: Everyone");
+		setenv("HALO_NET_WHO_CAN_JOIN", "vita", 1);
 	}
 	/* 1.0.3's co-op choice (every game hosted became that level, the
 	owner's trap) loads as Off, and is gone from settings.txt at the next

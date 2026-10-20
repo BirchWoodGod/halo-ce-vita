@@ -304,7 +304,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
@@ -673,6 +673,25 @@ for case in $cases; do
 			fail h3vitapc_vita "a game for Vitas only was not plain VITA to a Vita"
 		grep -aq "Test game 00 ([^)]*, VITA VITAS ONLY)" "$out/h3vitapc_pc/run.log" ||
 			fail h3vitapc_pc "a game for Vitas only was not marked VITAS ONLY to the PC build" ;;
+	h3createwho)
+		# (WHO CAN JOIN, the owner, Oct 20 2026: VITA, VITA PC, EVERYONE on a Vita; on the PC build
+		# VITA PC and EVERYONE alone (strings_pc), VITA PC its default. GAME OPTIONS: down six to
+		# WHO CAN JOIN, then right N times, down, A: START GAME. A Vita's right once: VITA PC; the
+		# PC build's: EVERYONE; the PC build's none: VITA PC)
+		for spec in "vita 1" "pc 1" "pc 0" "vita 0"; do
+			set -- $spec
+			who_pad="$h3mppad x wait:150:4000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500"
+			[ "$2" = 1 ] && who_pad="$who_pad right:150:800"
+			who_pad="$who_pad down:150:500 a wait:150:5000"
+			run h3createwho_$1_$2 "$menus_data" 36 "$who_pad" HALO_MENU_STYLE=halo3 $h3net "HALO_TEST_PLATFORM=$1"
+			check_h3 h3createwho_$1_$2 halo3
+		done
+		for spec in "vita_1 Vitas and Vita PC" "pc_1 Vitas and PC" "pc_0 Vitas and Vita PC" "vita_0 Vitas"; do
+			name=h3createwho_${spec%% *} said=${spec#* }
+			grep -a "menus: Server Setup: " "$out/$name/run.log" | head -1
+			grep -aq "menus: Server Setup: .*, public, $said; the profile" "$out/$name/run.log" ||
+				fail $name "WHO CAN JOIN was not $said"
+		done ;;
 	h3hostonline)
 		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
 			echo "--- h3hostonline"; echo "SKIP: no HALO_TEST_PROFILE"; continue

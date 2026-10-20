@@ -121,7 +121,8 @@ A build that plays as a Vita is a Vita (HALO_VITA) or the project's PC build
 Vita wire and plays with the Vitas. The PC build says so where older builds
 ignore it, with no network version raised: the listing's stamp
 (NETWORK_WIRE_STAMP_*, p2p_lobby.c), the System Link advertisement's flags
-(NETWORK_WIRE_ADVERTISED_*) and a friend's presence
+(NETWORK_WIRE_ADVERTISED_*), the join request (the last character of its
+machine name, NETWORK_WIRE_JOIN_PLATFORM_MARK) and a friend's presence
 (p2p_friends.c). The browsers then tag its games VITA (PC). A build that
 says nothing is taken for a Vita, as before. All of it is what the other
 machine says: best effort (a modified client can lie), never a security
@@ -148,6 +149,16 @@ the PC build; its game takes Vitas only */
 (docs/crossplay.md 4.1 reserves 0x40 and 0x80 for ours): the Vita host is
 the PC build */
 #define NETWORK_WIRE_ADVERTISED_CROSSPLAY_PC_HOST_FLAG 0x80
+/* the join request's mark: its machine name's last character (a name of
+at most 31; older hosts clear it, player_name_clean) is this with the
+joiner's NETWORK_PLATFORM_* + 1 in its low byte */
+#define NETWORK_WIRE_JOIN_PLATFORM_MARK 0x5600
+#define NETWORK_WIRE_JOIN_PLATFORM_UNKNOWN (-1)
+/* the mark for this build (put in the name's last character), and the
+platform a mark tells (NETWORK_WIRE_JOIN_PLATFORM_UNKNOWN: none, an older
+build's, which is taken for a Vita) */
+unsigned short network_wire_join_platform_mark(void);
+int network_wire_join_platform_of_mark(unsigned short mark);
 
 /* ---------- who can join (network.who_can_join, "Who can join"; the owner,
 Oct 20 2026) */
@@ -186,6 +197,11 @@ int network_wire_audience_default(void);
 /* the audiences this build offers when it hosts: 3 on a Vita (first
 NETWORK_AUDIENCE_VITAS), 2 on the PC build (from NETWORK_AUDIENCE_VITA_PC) */
 int network_wire_audience_first(void);
+/* whether the game this machine hosts refuses a joiner of this platform
+(NETWORK_PLATFORM_*, or NETWORK_WIRE_JOIN_PLATFORM_UNKNOWN: an older
+build's, taken for a Vita): the PC build, by a host for Vitas only, on the
+legacy wire */
+int network_wire_host_refuses(int platform);
 
 /* the server browsers' filter (network.browser_filter, "Browser shows"):
 every game, the Vitas' only, or PC hosts' only (OpenCE's, and the PC

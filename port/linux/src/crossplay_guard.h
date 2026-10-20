@@ -160,6 +160,8 @@ const char *crossplay_guard_host_line(int platform, int marks, int crossplay);
 /* whether a viewer that is the PC build cannot join a game with those
 marks: Vitas only, on the legacy wire (crossplay 0) */
 int crossplay_guard_vitas_only(int marks, int crossplay, int viewer_pc);
+/* the refusal's text (translated) */
+const char *crossplay_guard_vitas_only_text(void);
 
 /* the browser's badge for a game's host (short, translated): on the
 crossplay wire "PC" or "PC SERVER" (a dedicated server's), on the legacy

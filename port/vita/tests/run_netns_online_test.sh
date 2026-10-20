@@ -101,6 +101,9 @@
 #            them VITA (PC) and VITA and joins the PC build's; with
 #            HALO_TEST_VITA_OLD (a build of before the tags) an older
 #            browser lists both (as VITA) and joins the PC build's too
+#   vitaonly   Who can join: a Vita's game for Vita refuses the PC build
+#            ("This game is for PS Vitas only"), marked VITAS ONLY in its
+#            browser, and takes a Vita; one for Vita PC takes both
 #   unjoinable a game listed that cannot be joined (Oct 8 2026: beta.1 and
 #            beta.2 hosts list their Split Screen and bots games; joining one
 #            bounced from the System Link search to the menus, 8 times): the
@@ -620,6 +623,7 @@ seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = splitscreen ] && seconds=${HALO_TEST_SECONDS:-170}
 [ "$mode" = unjoinable ] && seconds=${HALO_TEST_SECONDS:-110}
 [ "$mode" = vitapc ] && seconds=${HALO_TEST_SECONDS:-120}
+[ "$mode" = vitaonly ] && seconds=${HALO_TEST_SECONDS:-200}
 [ "$mode" = pings ] && seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = pingsmixed ] && seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = mapmid ] && seconds=${HALO_TEST_SECONDS:-300}
@@ -727,7 +731,7 @@ side() { # side NAME WAN_SUBNET LAN_SUBNET -> sets ${NAME}_router ${NAME}_machin
 side host 10.10.1 192.168.1
 side join 10.10.2 192.168.2
 { [ "${HALO_TEST_SECOND_JOINER:-0}" = 1 ] || [ "$mode" = badmap ] || [ "$mode" = splitscreen ] || [ "$mode" = party ] ||
-	[ "$mode" = h3forgeonline ] || [ "$mode" = vitapc ]; } &&
+	[ "$mode" = h3forgeonline ] || [ "$mode" = vitapc ] || [ "$mode" = vitaonly ]; } &&
 	side join2 10.10.3 192.168.3
 { [ "$mode" = splitscreen ] || [ "$mode" = vitapc ]; } && side join3 10.10.4 192.168.4
 # (lobbytls: the broker's TLS port too, with a certificate from an
@@ -1400,6 +1404,52 @@ vitapc)
 	else
 		echo "(no HALO_TEST_VITA_OLD: the older build's browser left out)"
 	fi
+	;;
+vitaonly)
+	# Who can join (network_wire.h, Oct 20 2026): a Vita's game for Vita
+	# (Vitas only) refuses the PC build at the join, which is told "This
+	# game is for PS Vitas only", and takes a Vita; then a Vita's game for
+	# Vita PC takes both. What a joiner says: best effort
+	half=$((seconds / 2))
+	seconds=$half run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=true HALO_NET_HOST_PUBLIC=true \
+		HALO_NETWORK_TEST_PUBLIC=true HALO_NET_LOBBY_NAME=VitaOnly HALO_NET_WHO_CAN_JOIN=vita \
+		HALO_NETWORK_TEST=host:bloodgulch:slayer HALO_NETWORK_TEST_START=200 HALO_TEST_INPUT=bot:1; host_pid=$last_pid
+	sleep 12
+	seconds=$((half - 12)) run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_TEST_PLATFORM=pc HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=join-public HALO_NETWORK_TEST_PUBLIC_NAME=VitaOnly HALO_TEST_INPUT=bot:2; join_pid=$last_pid
+	seconds=$((half - 12)) run_copy joiner2 "$join2_machine" "$vita" "$cpu_c" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=join-public HALO_NETWORK_TEST_PUBLIC_NAME=VitaOnly HALO_TEST_INPUT=bot:3; join2_pid=$last_pid
+	wait $join_pid $join2_pid $host_pid 2>/dev/null
+	mkdir -p "$out/vitaonly"
+	for c in host joiner joiner2; do mv "$out/$c" "$out/vitaonly/$c"; done
+	v=$out/vitaonly
+	rows=$(grep -ah "network test: browser row" "$v/joiner/run.log" | sed 's/^.*browser row //' | sort -u)
+	echo "--- Vita only: the PC build's browser rows"; echo "$rows" | sed 's/^/  /'
+	echo "$rows" | grep -q '^\[VITA VITAS ONLY\] "VitaOnly"' || fail "the PC build's browser does not mark the game VITAS ONLY"
+	grep -a "refusing the PC build\|unable to join game" "$v"/*/data/debug.txt | cut -c1-160 | head -4
+	grep -aq "refusing the PC build's machine" "$v/host/data/debug.txt" || fail "the host did not refuse the PC build"
+	grep -aq "unable to join game: reason= #7/_rejection_code_vitas_only" "$v/joiner/data/debug.txt" ||
+		fail "the PC build was not told why (the rejection code)"
+	grep -aq "Halo: cannot join this game: This game is for PS Vitas only" "$v/joiner/run.log" ||
+		fail "the PC build's player was not told \"This game is for PS Vitas only\""
+	grep -aqE "system link: in a network game" "$v/joiner/run.log" && fail "the PC build got into the game for Vitas only"
+	grep -aqE "system link: (in another's lobby|in a network game)" "$v/joiner2/run.log" || fail "the Vita did not get in"
+	# the same for Vita PC: both get in
+	seconds=$half run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=true HALO_NET_HOST_PUBLIC=true \
+		HALO_NETWORK_TEST_PUBLIC=true HALO_NET_LOBBY_NAME=VitaPc HALO_NET_WHO_CAN_JOIN=vita_pc \
+		HALO_NETWORK_TEST=host:bloodgulch:slayer HALO_NETWORK_TEST_START=200 HALO_TEST_INPUT=bot:1; host_pid=$last_pid
+	sleep 12
+	seconds=$((half - 12)) run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_TEST_PLATFORM=pc HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=join-public HALO_NETWORK_TEST_PUBLIC_NAME=VitaPc HALO_TEST_INPUT=bot:2; join_pid=$last_pid
+	seconds=$((half - 12)) run_copy joiner2 "$join2_machine" "$vita" "$cpu_c" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=join-public HALO_NETWORK_TEST_PUBLIC_NAME=VitaPc HALO_TEST_INPUT=bot:3; join2_pid=$last_pid
+	wait $join_pid $join2_pid $host_pid 2>/dev/null
+	rows=$(grep -ah "network test: browser row" "$out/joiner/run.log" | sed 's/^.*browser row //' | sort -u)
+	echo "--- Vita PC: the PC build's browser rows"; echo "$rows" | sed 's/^/  /'
+	echo "$rows" | grep -q '^\[VITA\] "VitaPc"' || fail "the game for Vita PC is not plain VITA to the PC build"
+	grep -aq "refusing the PC build" "$out/host/data/debug.txt" && fail "the host for Vita PC refused the PC build"
+	grep -aqE "system link: (in another's lobby|in a network game)" "$out/joiner/run.log" || fail "the PC build did not get in"
+	grep -aqE "system link: (in another's lobby|in a network game)" "$out/joiner2/run.log" || fail "the Vita did not get in"
 	;;
 unjoinable)
 	after=${HALO_TEST_LOCAL_AFTER:-20}
@@ -4346,7 +4396,7 @@ forge|forge3|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline)
 	forge_case
 	;;
 *)
-	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|h3live|h3liveleave|h3liveagain|h3liveinvite|h3liveprivate|h3online|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|party|friendsprivate|friendsprivatepw|forge|forge3|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|vitapc" >&2
+	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|h3live|h3liveleave|h3liveagain|h3liveinvite|h3liveprivate|h3online|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|party|friendsprivate|friendsprivatepw|forge|forge3|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|vitapc|vitaonly" >&2
 	exit 2
 	;;
 esac

@@ -154,7 +154,7 @@ int main(void)
 			!crossplay_guard_vita_game(CROSSPLAY_PLATFORM_OPENCE, 0), "the Vitas' games: not the PC build's");
 		check(!strcmp(crossplay_guard_host_line(CROSSPLAY_PLATFORM_VITA, CROSSPLAY_HOST_PC_BUILD, 0),
 			"Hosted on a PC (Halo CE Vita)") && !strcmp(crossplay_guard_host_line(CROSSPLAY_PLATFORM_VITA, 0, 0),
-			"Hosted on a Vita"),
+			"Hosted on a Vita") && !strcmp(crossplay_guard_vitas_only_text(), "This game is for PS Vitas only"),
 			"the lines in words");
 	}
 	/* badges and texts */

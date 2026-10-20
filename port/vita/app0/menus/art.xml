@@ -69,7 +69,7 @@
 		<string text="The most players your game takes,\nyou included (2 to 16)."/>
 		<string text="PUBLIC: listed in the games browser.\nPRIVATE: friends, invites and its code join it."/>
 		<string text="A public game asks joiners for it.\nNONE: anyone may join."/>
-		<string text="VITAS: Vitas join it. VITAS AND PC: PC players\n(OpenCE) can join too; old Vita versions can't."/>
+		<string text="VITA: PS Vitas only. VITA PC: Vitas and\nHalo CE Vita on PC. EVERYONE: also OpenCE\nplayers on PC."/>
 		<string text="Next: your profile, then the map and the\ngametype. The lobby shows your game's code."/>
 	</strings>
 	<strings name="code_labels">

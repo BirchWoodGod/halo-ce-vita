@@ -669,18 +669,23 @@ static struct setting settings[] = {
 	protocol, docs/crossplay.md, network_wire.h. The browsers list the
 	Vitas' games and OpenCE's (OpenCE, ChupathingyCE, DamnationCE hosts and
 	servers) together, tagged: Browser shows narrows them,
-	network.browser_filter, live. Who can join is the games this Vita hosts:
-	Vitas (the Vitas' protocol), or Vitas and PC (OpenCE's, listed for both),
-	network.host_crossplay, taken as a game is hosted; the Create Game
-	screens' WHO CAN JOIN sets the same row. Neither with Ad hoc, which no PC
+	network.browser_filter, live. Who can join is the games this Vita hosts
+	(the owner, Oct 20 2026): Vitas only (the Vitas' protocol; the port's PC
+	build is refused), Vitas and Halo CE Vita PC (the same protocol, the PC
+	build joins too), or everyone (OpenCE's protocol, listed for both),
+	network.who_can_join, taken as a game is hosted; the Create Game
+	screens' WHO CAN JOIN sets the same row. The retired Vitas / Vitas and PC
+	(HALO_NET_HOST_CROSSPLAY false / true, in an older settings.txt or
+	env.txt) loads as Vitas only / everyone: settings_load. Neither with Ad hoc, which no PC
 	reaches: setting_shown. The old Crossplay row's choice, in an older
 	settings.txt, becomes Browser shows: settings_load. On a page of their
 	own, in the old row's place: the tab is a screen's height) */
 	PAGE_ROW("Vita and PC", "Which games the browser lists; who joins yours", TAB_MULTIPLAYER, PAGE_CROSSPLAY),
 	{ "Browser shows", "HALO_NET_BROWSER_FILTER", 0, 3, { "all", "vita", "pc" }, { "All games", "Vita games", "PC games" },
 		"Vita and PC (OpenCE) games, each tagged", 0, PAGE_CROSSPLAY },
-	{ "Who can join", "HALO_NET_HOST_CROSSPLAY", 0, 2, { "false", "true" }, { "Vitas", "Vitas and PC" },
-		"Games you host. And PC: OpenCE players too", 0, PAGE_CROSSPLAY },
+	{ "Who can join", "HALO_NET_WHO_CAN_JOIN", 0, 3, { "vita", "vita_pc", "everyone" },
+		{ "Vita", "Vita PC", "Everyone" },
+		"Vita PC: Vitas and Halo CE Vita on PC. Everyone: also OpenCE", 0, PAGE_CROSSPLAY },
 	{ "Ad hoc room", "HALO_ADHOC_ROOM", 0, 4, { "1", "2", "3", "4" }, { "1", "2", "3", "4" },
 		"Vitas in the same room play together", 0, TAB_MULTIPLAYER },
 	{ "Join the room", NULL, 0, 0, { NULL }, { NULL }, "Then Multiplayer, System Link (LAN) in the game", 0,
@@ -1765,6 +1770,9 @@ void vita_settings_load(void)
 	char old_public_value[8];
 	/* (the retired Crossplay switch's choice: -1 none) */
 	int old_crossplay = -1;
+	/* (the retired two-way Who can join, HALO_NET_HOST_CROSSPLAY: -1 none,
+	0 Vitas, 1 Vitas and PC) */
+	int old_host_crossplay = -1;
 
 	vita_settings_language_init();
 	memset(dev_saved, 0, sizeof(dev_saved));
@@ -1894,6 +1902,14 @@ void vita_settings_load(void)
 				old_crossplay = !strcmp(equals + 1, "1") || !strcmp(equals + 1, "true") ? 1 : 0;
 				continue;
 			}
+			/* (the two-way Who can join, retired Oct 20 2026: its choice
+			becomes the three-way one's, below; gone from settings.txt at the
+			next save) */
+			if (strcmp(line, "HALO_NET_HOST_CROSSPLAY") == 0)
+			{
+				old_host_crossplay = !strcmp(equals + 1, "1") || !strcmp(equals + 1, "true") ? 1 : 0;
+				continue;
+			}
 			/* (1.0.3's co-op rows: every game this Vita hosted became that
 			campaign level; co-op is now hosted from the Campaign screen's
 			difficulty, Y. An old choice loads as Off: not set, and gone
@@ -1967,6 +1983,24 @@ void vita_settings_load(void)
 		vita_host_log(message);
 	}
 	unsetenv("HALO_CROSSPLAY");
+	/* (the retired two-way Who can join, settings.txt's or env.txt's, and no
+	three-way choice saved yet: Vitas stays Vitas only, Vitas and PC becomes
+	Everyone - OpenCE's PC players, as it took) */
+	if (old_host_crossplay < 0 && getenv("HALO_NET_HOST_CROSSPLAY") && getenv("HALO_NET_HOST_CROSSPLAY")[0])
+		old_host_crossplay = !strcmp(getenv("HALO_NET_HOST_CROSSPLAY"), "1") ||
+			!strcmp(getenv("HALO_NET_HOST_CROSSPLAY"), "true") ? 1 : 0;
+	if (old_host_crossplay >= 0 && !named[setting_named("HALO_NET_WHO_CAN_JOIN") - settings] &&
+		!(getenv("HALO_NET_WHO_CAN_JOIN") && getenv("HALO_NET_WHO_CAN_JOIN")[0]))
+	{
+		struct setting *who = setting_named("HALO_NET_WHO_CAN_JOIN");
+		char message[160];
+
+		who->choice = find_choice(who, old_host_crossplay ? "everyone" : "vita");
+		snprintf(message, sizeof(message), "settings: Who can join has three choices now (it was %s): %s",
+			old_host_crossplay ? "Vitas and PC" : "Vitas", old_host_crossplay ? "Everyone" : "Vita");
+		vita_host_log(message);
+	}
+	unsetenv("HALO_NET_HOST_CROSSPLAY");
 	if (saved_profile >= 0)
 	{
 		int row;

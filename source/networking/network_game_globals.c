@@ -807,7 +807,8 @@ boolean create_global_network_game_server(
 #ifdef HALO_LINUX
 	/* port: the game's wire (network_wire.h): a server other machines can
 	join speaks the one its host chose (network.host_crossplay, "Who can
-	join": Vitas, or Vitas and PC on the crossplay wire); a local game's
+	join": Vitas only, Vitas and Halo CE Vita PC, or everyone on the
+	crossplay wire: network.who_can_join); a local game's
 	(split screen, bots) is no network game, on the legacy wire. For the
 	game's whole life: nothing switches under it */
 	if (bss_004566dc.accept_remote_connections)
@@ -815,7 +816,9 @@ boolean create_global_network_game_server(
 		/* (a test's stand-in for a PC host is OpenCE's: 2, crossplay_guard.h's
 		CROSSPLAY_PLATFORM_OPENCE) */
 		network_wire_choose(network_wire_host_crossplay(), network_wire_host_pc_stand_in() ? 2 : 0,
-			network_wire_host_crossplay() ? "hosting for Vitas and PC" : "hosting for Vitas");
+			network_wire_host_crossplay() ? "hosting for Vitas and PC" :
+			network_wire_host_audience() == NETWORK_AUDIENCE_VITA_PC ? "hosting for Vitas and Vita PC" :
+			"hosting for Vitas");
 	}
 	else
 		network_wire_choose(0, 0, "a local game");

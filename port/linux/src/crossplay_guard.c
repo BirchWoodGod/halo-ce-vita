@@ -296,6 +296,11 @@ int crossplay_guard_vitas_only(int marks, int crossplay, int viewer_pc)
 	return viewer_pc && !crossplay && (marks & CROSSPLAY_HOST_VITAS_ONLY);
 }
 
+const char *crossplay_guard_vitas_only_text(void)
+{
+	return T("This game is for PS Vitas only");
+}
+
 const char *crossplay_guard_badge(int crossplay, int dedicated)
 {
 	if (crossplay)

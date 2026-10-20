@@ -25,6 +25,9 @@ enum
 	_rejection_code_game_is_full,
 	_rejection_code_game_is_closed,
 	_rejection_code_blacklisted_machine,
+	/* port: a game for Vitas only, and the joiner said it is the PC build
+	(network_wire.h); an older client shows its generic refusal */
+	_rejection_code_vitas_only,
 	NUMBER_OF_SERVER_REJECTION_CODES,
 };
 

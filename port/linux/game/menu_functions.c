@@ -545,7 +545,8 @@ static struct
 	boolean setup_held;
 	short held_maximum;
 	boolean held_private;
-	boolean held_with_pc;
+	/* (WHO CAN JOIN: NETWORK_AUDIENCE_*) */
+	short held_audience;
 	/* to be opened from the main loop: the System Link screen, the password
 	screen */
 	boolean open_system_link;
@@ -5485,8 +5486,8 @@ static void setup_initialize(struct widget_instance *widget)
 	struct widget_instance *spinner;
 	long maximum = atol(setting_get("HALO_NET_MAX_PLAYERS", "16"));
 	boolean private_game = !strcmp(setting_get("HALO_NET_HOST_PUBLIC", "true"), "false");
-	/* (who can join: network.host_crossplay, network_wire.h) */
-	boolean with_pc = !strcmp(setting_get("HALO_NET_HOST_CROSSPLAY", "false"), "true");
+	/* (who can join: network.who_can_join, network_wire.h) */
+	int audience = network_wire_host_audience();
 
 	menu_functions.create_pending = FALSE;
 	/* (back from the Halo 3 Create Game's GAME TYPE or MAP picker: what it
@@ -5495,7 +5496,7 @@ static void setup_initialize(struct widget_instance *widget)
 	{
 		maximum = menu_functions.held_maximum;
 		private_game = menu_functions.held_private;
-		with_pc = menu_functions.held_with_pc;
+		audience = menu_functions.held_audience;
 	}
 	else
 	{
@@ -5512,10 +5513,12 @@ static void setup_initialize(struct widget_instance *widget)
 	spinner = spinner_of(screen, "op_visibility");
 	if (spinner)
 		spinner->parameters.list.selected_index = private_game ? 1 : 0;
-	/* (VITAS, VITAS AND PC) */
+	/* (VITA, VITA PC, EVERYONE: NETWORK_AUDIENCE_*'s order; the PC build's
+	spinner, its strings_pc, from VITA PC: it never hosts for Vitas only) */
 	spinner = spinner_of(screen, "op_who");
 	if (spinner)
-		spinner->parameters.list.selected_index = with_pc ? 1 : 0;
+		spinner->parameters.list.selected_index = (short)(PIN(audience, network_wire_audience_first(),
+			NUMBER_OF_NETWORK_AUDIENCES - 1) - network_wire_audience_first());
 }
 
 /* (port h3 setup hold) the Halo 3 Create Game's GAME TYPE or MAP picker
@@ -5529,7 +5532,8 @@ static void setup_hold(struct widget_instance *widget)
 	spinner = spinner_of(screen, "op_visibility");
 	menu_functions.held_private = spinner && spinner->parameters.list.selected_index == 1;
 	spinner = spinner_of(screen, "op_who");
-	menu_functions.held_with_pc = spinner && spinner->parameters.list.selected_index == 1;
+	menu_functions.held_audience = (short)(spinner ? spinner->parameters.list.selected_index +
+		network_wire_audience_first() : network_wire_audience_default());
 	menu_functions.setup_held = TRUE;
 }
 
@@ -5584,7 +5588,8 @@ static boolean setup_start(struct widget_instance *widget)
 		struct widget_instance *who = spinner_of(screen, "op_who");
 
 		if (who)
-			setting_set("HALO_NET_HOST_CROSSPLAY", who->parameters.list.selected_index == 1 ? "true" : "false");
+			setting_set("HALO_NET_WHO_CAN_JOIN", network_wire_audience_value(PIN(who->parameters.list.selected_index +
+				network_wire_audience_first(), network_wire_audience_first(), NUMBER_OF_NETWORK_AUDIENCES - 1)));
 	}
 	/* (a live lobby's game hosted for others than WHO CAN JOIN says now: a
 	game's wire is its own for its life (network_wire.h), so it closes, its
@@ -5606,14 +5611,16 @@ static boolean setup_start(struct widget_instance *widget)
 			p2p_lobby_set_password(menu_functions.lobby_password);
 		platform_log("menus: Server Setup: %s, %s players, %s%s, %s; the live lobby's game takes them, its lobby next",
 			menu_functions.lobby_name, value, spinner && spinner->parameters.list.selected_index == 1 ? "private" : "public",
-			menu_functions.lobby_password[0] ? ", a password" : "", network_wire_crossplay() ? "Vitas and PC" : "Vitas");
+			menu_functions.lobby_password[0] ? ", a password" : "", network_wire_crossplay() ? "Vitas and PC" :
+			network_wire_host_audience() == NETWORK_AUDIENCE_VITA_PC ? "Vitas and Vita PC" : "Vitas");
 		return TRUE;
 	}
 	menu_functions.create_pending = TRUE;
 	menu_functions.create_system_link = FALSE;
 	platform_log("menus: Server Setup: %s, %s players, %s%s, %s; the profile, then %s", menu_functions.lobby_name,
 		value, spinner && spinner->parameters.list.selected_index == 1 ? "private" : "public",
-		menu_functions.lobby_password[0] ? ", a password" : "", network_wire_host_crossplay() ? "Vitas and PC" : "Vitas",
+		menu_functions.lobby_password[0] ? ", a password" : "", network_wire_host_crossplay() ? "Vitas and PC" :
+		network_wire_host_audience() == NETWORK_AUDIENCE_VITA_PC ? "Vitas and Vita PC" : "Vitas",
 		halo_menu_style_halo3() ? "the game's lobby" : "the map list");
 	return TRUE;
 }
