@@ -116,6 +116,25 @@ int posix_stat(const char *path, struct posix_file_information *information)
 	return 0;
 }
 
+/* (the scene packs' records, port/linux/game/scene_packs.c) a file named by
+its Xbox path: its size and modification time; 0 on success, -1 if it
+cannot be told (or is 4 GB or more). As posix_files.c's. */
+void platform_translate_path(const char *xbox_path, char *host_path, unsigned long host_path_size);
+
+int halo_file_identity(const char *xbox_path, unsigned long *size, unsigned long *seconds, unsigned long *nanoseconds)
+{
+	char host[1024];
+	struct posix_file_information information;
+
+	platform_translate_path(xbox_path, host, sizeof(host));
+	if (posix_stat(host, &information) != 0 || information.size_high)
+		return -1;
+	*size = (unsigned long)information.size_low;
+	*seconds = (unsigned long)information.modification_seconds;
+	*nanoseconds = (unsigned long)information.modification_nanoseconds;
+	return 0;
+}
+
 int posix_is_link(const char *path)
 {
 	DWORD attributes = GetFileAttributesA(path);

@@ -19,7 +19,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .linux_build import (ZLIB_DIR, ZLIB_SOURCES, ZLIB_DEFINES, LINUX_PROFILE, MINIUPNPC_DIR, OPTIMISATION, WINDOWS_PROFILE, XDK_INCLUDE, lto_mode,
+from .linux_build import (MBEDTLS_DIR, ZLIB_DIR, ZLIB_SOURCES, ZLIB_DEFINES, LINUX_PROFILE, MINIUPNPC_DIR, OPTIMISATION, WINDOWS_PROFILE, XDK_INCLUDE, lto_mode,
                           LIBOGG_INCLUDE, ogg_sound_cflags, ogg_sound_sources,
                           march_flag, miniupnpc_sources, pgo_mode, compile_launcher, musl_math_cflags,
                           musl_math_sources, pgo_profile, profile_use_flags, xdk_headers)
@@ -396,6 +396,8 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
             f"-I{PORT_DIR / 'include'}",
             f"-I{TOML_DIR}",
             f"-I{EXPAT_DIR}",
+            # (linked in, not expat's DLL)
+            "-DXML_STATIC",
             f"-I{KCP_DIR}",
             f"-I{MONOCYPHER_DIR}",
             LIBOGG_INCLUDE,
@@ -413,14 +415,24 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
             f"-I{linux_platform}",
             f"-I{_quote(sdl_include)}",
         ])
+        mbedtls_include = (f"-I{MBEDTLS_DIR / 'include'} -I{posix_include} -I{linux_platform} "
+                           '-DMBEDTLS_USER_CONFIG_FILE=\\"mbedtls_linux_config.h\\"')
         replaced = set(config.get("replaced_platform_sources", []))
         for source in sorted(linux_platform.glob("*.c")):
             if source.name in replaced:
                 continue
             if source.name == "updater.c":
                 add_object(source, f"{platform_cflags} {updater_defines(getattr(sln, 'port_release', False))}")
+            elif source.name == "posix_https.c":
+                # the update check's and internet play's brokers' TLS, on
+                # Winsock and Mbed TLS, as the win32_*.c talk to Windows
+                add_object(source, f"{win32_cflags} {mbedtls_include}")
             else:
                 add_object(source, platform_cflags)
+        # Mbed TLS (port/third_party/mbedtls), with the Linux build's
+        # configuration (its threads: the POSIX threads of win32_posix.c)
+        for source in sorted((MBEDTLS_DIR / "library").glob("*.c")):
+            add_object(source, " ".join([abi, *WIN32_FLAGS, mbedtls_include, f"-I{MBEDTLS_DIR / 'library'}", "-w"]))
         miniupnpc_include = f"-I{MINIUPNPC_DIR / 'include'} -DMINIUPNP_STATICLIB"
         for source in sorted((PORT_DIR / "src").glob("*.c")):
             if source.name == "win32_upnp.c":
@@ -438,7 +450,7 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
         # the menus' XML parser (port/third_party/expat; menu_files.c), with
         # its hash salt from rand_s
         for name in EXPAT_SOURCES:
-            add_object(EXPAT_DIR / name, " ".join([abi, "-std=gnu11", f"-I{EXPAT_DIR}", "-w"]))
+            add_object(EXPAT_DIR / name, " ".join([abi, "-std=gnu11", f"-I{EXPAT_DIR}", "-DXML_STATIC", "-w"]))
         # internet play's reliable streams (port/third_party/kcp; p2p.c)
         add_object(KCP_DIR / "ikcp.c", " ".join([abi, "-std=gnu11", "-w"]))
         # the port's zlib (map inflation: cache_files_decompress_windows.c)

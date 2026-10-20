@@ -46,6 +46,7 @@ steps, comma-separated (test_steps below); everything is logged as
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 
 /* ---------- constants */

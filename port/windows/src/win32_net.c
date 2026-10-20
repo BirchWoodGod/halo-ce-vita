@@ -14,6 +14,7 @@ codes, so this passes nearly everything straight through.
 #include <windows.h>
 #include <iphlpapi.h>
 #include <bcrypt.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 

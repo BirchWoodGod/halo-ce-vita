@@ -374,6 +374,20 @@ int pthread_cond_broadcast(pthread_cond_t *condition)
 	return 0;
 }
 
+static BOOL CALLBACK once_routine(PINIT_ONCE once, PVOID routine, PVOID *context)
+{
+	(void)once;
+	(void)context;
+	((void (*)(void))routine)();
+	return TRUE;
+}
+
+int pthread_once(pthread_once_t *once, void (*routine)(void))
+{
+	_Static_assert(sizeof(INIT_ONCE) == sizeof(once->once), "pthread_once_t holds an INIT_ONCE");
+	return InitOnceExecuteOnce((PINIT_ONCE)&once->once, once_routine, (PVOID)routine, NULL) ? 0 : EINVAL;
+}
+
 /* ---------- time */
 
 int clock_gettime(clockid_t clock, struct timespec *time)

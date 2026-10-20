@@ -1111,7 +1111,7 @@ static FILE *copy_open(char const *map, unsigned char const *header, unsigned lo
 
 	if (!scene_pack_copy_source || !scene_pack_copy_source->open || checksum == 0 || checksum == 0xFFFFFFFFUL)
 		return NULL;
-	file = scene_pack_copy_source->open(map, token);
+	file = (scene_pack_copy_source->open)(map, token); /* (not Windows' open macro) */
 	if (!file)
 		return NULL;
 	size = file_size_get(file);

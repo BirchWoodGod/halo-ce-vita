@@ -148,8 +148,8 @@ void hud_draw_numbers(
 	real override_scale);
 
 /* (port) the PlayStation button icons (the settings panel's Button icons):
-the Vita's, and the Linux harness's, for its tests (HALO_BUTTON_ICONS) */
-#if defined(HALO_VITA) || (defined(HALO_LINUX) && defined(__linux__) && !defined(HALO_ANDROID))
+the Vita's, and the PC builds' (Linux and Windows: HALO_BUTTON_ICONS) */
+#if defined(HALO_VITA) || (defined(HALO_LINUX) && (defined(__linux__) || defined(_WIN32)) && !defined(HALO_ANDROID))
 #define HALO_BUTTON_GLYPHS 1
 #endif
 /* (port) and the desktop build's keyboard and mouse icons, and the Xbox's

@@ -21,7 +21,7 @@ type, a PlayStation's), "keyboard", "xbox" or "playstation".
 - The Xbox's: the game's own icons (VITA_GLYPH_NONE).
 */
 
-#if defined(HALO_LINUX) && defined(__linux__) && !defined(HALO_ANDROID) && !defined(HALO_VITA)
+#if defined(HALO_LINUX) && (defined(__linux__) || defined(_WIN32)) && !defined(HALO_ANDROID) && !defined(HALO_VITA)
 
 #include "../../vita/include/vita_controls.h"
 #include "../include/halo_button_icons.h"
