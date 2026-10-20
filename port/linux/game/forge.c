@@ -4543,20 +4543,26 @@ boolean forge_packs_building(
 	int size,
 	long *progress)
 {
-	short pack;
+	short pack, pass;
 
-	for (pack = 0; pack < FORGE_PACK_COUNT; pack++)
+	/* (the pack being built this moment first, then one waiting its turn:
+	the number shown is one that moves) */
+	for (pass = 0; pass < 2; pass++)
 	{
-		long done = 0;
-
-		if ((forge_globals.packs_enabled & (1UL << pack)) &&
-			scene_packs_status(forge_packs[pack].name, &done, NULL, 0) == _scene_pack_state_building)
+		for (pack = 0; pack < FORGE_PACK_COUNT; pack++)
 		{
-			if (label && size > 0)
-				snprintf(label, (size_t)size, "%s", T(forge_packs[pack].label));
-			if (progress)
-				*progress = done;
-			return TRUE;
+			long done = 0;
+
+			if ((forge_globals.packs_enabled & (1UL << pack)) &&
+				scene_packs_status(forge_packs[pack].name, &done, NULL, 0) == _scene_pack_state_building &&
+				(pass || scene_packs_building_now(forge_packs[pack].name)))
+			{
+				if (label && size > 0)
+					snprintf(label, (size_t)size, "%s", T(forge_packs[pack].label));
+				if (progress)
+					*progress = done;
+				return TRUE;
+			}
 		}
 	}
 	return FALSE;

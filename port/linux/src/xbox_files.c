@@ -156,6 +156,15 @@ void platform_file_background_end(void)
 	io_background_stop = NULL;
 }
 
+/* the background calls' bytes written, all told (a map copy's progress
+within its large writes: cache_copy_progress) */
+static volatile unsigned long long io_background_written;
+
+unsigned long long platform_file_background_written(void)
+{
+	return __atomic_load_n(&io_background_written, __ATOMIC_RELAXED);
+}
+
 /* (a call of a thread that is not a background one, at its start and end) */
 static void io_foreground_note(void)
 {
@@ -807,6 +816,8 @@ static BOOL write_at(struct platform_file *file, LPCVOID buffer, DWORD count, LP
 		}
 		io_card_request_write((unsigned long long)result, 1);
 		total += (DWORD)result;
+		if (io_background)
+			__atomic_add_fetch(&io_background_written, (unsigned long long)result, __ATOMIC_RELAXED);
 	}
 	if (bytes_written)
 		*bytes_written = total;

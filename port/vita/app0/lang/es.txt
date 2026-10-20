@@ -1482,6 +1482,7 @@
 "%s: %d OF %d" = "%s: %d DE %d"
 "EXTRA OBJECTS" = "OBJETOS EXTRA"
 "Building %s... %ld%%" = "Creando %s... %ld%%"
+"Waiting for %s to copy... (copy %ld%%)" = "Esperando la copia de %s... (%ld%%)"
 "Off: Forge leaves its objects out." = "No: Forja no trae sus objetos."
 "Building it... %ld%%" = "Creándolo... %ld%%"
 "Unavailable: %s" = "No disponible: %s"

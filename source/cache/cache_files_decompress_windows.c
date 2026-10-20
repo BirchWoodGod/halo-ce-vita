@@ -239,7 +239,11 @@ int vita_host_fourth_core_join(const char *role, int level);
 #ifdef HALO_LINUX
 /* (port/linux/src/xbox_files.c) */
 void platform_file_background_begin(int (*stop)(void));
+unsigned long long platform_file_background_written(void);
 static int cache_copy_stop_requested_for_files(void);
+/* (the background bytes written as the copy's writes began:
+cache_copy_progress) */
+static volatile unsigned long long cache_copy_written_base;
 #endif
 
 /* ---------- constants */
@@ -681,6 +685,27 @@ boolean cache_copy_stop_queued(
 	void)
 {
 	return global_self && global_self->copy_stop_event && cache_copy_stop_requested();
+}
+
+/* port: how much of its map the copy under way has made, 0 to 1: the
+lesser of its read's and its writes' (the writes trail the read by their
+buffers of megabytes, the memory card writing far slower than it reads;
+counted as their 32 KB pieces go, xbox_files.c) - the Forge lobby's note
+while the scene packs' builds wait for it
+(cache_files_precache_copy_progress) */
+real cache_copy_progress(
+	void)
+{
+	real progress, written;
+
+	if (!global_self || !global_self->copy_thread || global_self->header.size <= 0)
+		return 0.0f;
+	progress = global_self->read_progress;
+	written = (real)(platform_file_background_written() - cache_copy_written_base + sizeof(global_self->header)) /
+		(real)global_self->header.size;
+	if (written < progress)
+		progress = written;
+	return progress < 0.0f ? 0.0f : progress > 1.0f ? 1.0f : progress;
 }
 #endif
 
@@ -1807,6 +1832,9 @@ static unsigned long __stdcall simple_cache_copy_thread(
 
 				self->write_bytes_left = self->header.size - sizeof(self->header);
 				self->async_write_bytes_left = self->write_bytes_left;
+#ifdef HALO_LINUX
+				cache_copy_written_base = platform_file_background_written();
+#endif
 
 				cache_copy_issue_initial_reads(self);
 

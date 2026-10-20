@@ -62,6 +62,20 @@
 #               category); saved: the map variant names its packs; loaded
 #               again in a new run with Covenant AI off in the lobby: the
 #               variant brings it, its objects placed; the Pelican's seats
+#   packcopy    the lobby's EXTRA OBJECTS built while a map is copied to the
+#               cache partition on a Vita-like memory card (xbox_files.c's
+#               HALO_IO_THROTTLE_KBPS: reads at 10 MB/s, writes at 750 KB/s;
+#               the packs' reads at 20 MB/s, HALO_TEST_SLOW_IO): the Halo 3
+#               multiplayer lobby opened and left (Battle Creek's copy
+#               begun), then FORGE with no pack built. The builds share the
+#               card with the copy: their progress moves through it, the note
+#               never stands on one text for 5 s, the packs are ready, and no
+#               frame of the lobby takes 100 ms. packcopy-hold the same with
+#               HALO_SCENE_PACKS_SHARE_CARD=0: the builds wait for the copy,
+#               the note says so ("Waiting for Battle Creek to copy... (copy
+#               N%)", the copy's own progress moving), then builds them.
+#               With HALO_TEST_PROFILE's profile (the lobby hosts with one;
+#               default ../vita-save-backups/20261017-halo-profile)
 #   smallmap    Chill Out: the Warthog (the map's own tags) and the Banshee (a
 #               pack's) in the browser, both placed
 #   aiteam      the AI's team (the properties' AI TEAM, here the console's
@@ -173,7 +187,7 @@
 # HALO_TEST_KEEP=1, or copied to HALO_TEST_SHOTS when it is set.
 #
 #   run_forge_test.sh [CASE...]      (default: v1 budget fly b30 off files variants
-#                                     edit fileshare fstouch panel packs smallmap
+#                                     edit fileshare fstouch panel packs packcopy smallmap
 #                                     aiteam aioff round aisave allai allaimenu flood
 #                                     clearai clearaimenu rotate floodcov sentinels marines
 #                                     aivariant cepelican cepelicanoff pelican blocks)
@@ -199,7 +213,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_forge_test.$$}
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs smallmap aiteam aioff round aisave allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks}
+cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs packcopy smallmap aiteam aioff round aisave allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
@@ -558,6 +572,62 @@ smallmap_runs() {
 	mkdir -p "$store"
 	run smallmap 70 "" "L300:forge list vehicles" "$smallpad" HALO_MENU_STYLE=classic HALO_SAVE_ROOT="$store" \
 		HALO_SYSTEM_LINK_TEST=forge:6
+}
+
+# (packcopy: the Halo 3 main menu's MULTIPLAYER, its lobby (hosting Battle
+# Creek: its copy begins), back twice; FORGE: the lobby, packs building)
+packcopy_profile=${HALO_TEST_PROFILE:-$root/../vita-save-backups/20261017-halo-profile/blam-unlocked.sav}
+packcopypad="wait:150:3000 down:150:600 a:150:4000 b:150:3000 b:150:3000 down:150:600 a:150:2500 wait:150:120000"
+
+packcopy_runs() {
+	local store="$out/packcopy-store" name
+	rm -rf "$store" "$store-hold"
+	# (a player profile: the multiplayer lobby hosts only with one)
+	mkdir -p "$store/u/UDATA/869079979327"
+	cp "$packcopy_profile" "$store/u/UDATA/869079979327/blam.sav"
+	[ -r "$(dirname "$packcopy_profile")/SaveMeta.xbx" ] &&
+		cp "$(dirname "$packcopy_profile")/SaveMeta.xbx" "$store/u/UDATA/869079979327/"
+	# (the menus' ui.map copied first at the disk's speed: at the card's it
+	# takes the first minute)
+	run packcopy-prefill 15 "" "" "wait:150:1000" HALO_MENU_STYLE=halo3 HALO_SAVE_ROOT="$store"
+	cp -a "$store" "$store-hold"
+	for name in packcopy packcopy-hold; do
+		run "$name" 100 "" "" "$packcopypad" HALO_MENU_STYLE=halo3 HALO_SAVE_ROOT="$store${name#packcopy}" \
+			HALO_IO_THROTTLE_KBPS=10000 HALO_IO_THROTTLE_WRITE_KBPS=750 \
+			HALO_TEST_SLOW_IO=$([ "$name" = packcopy ] && echo 20000:all || echo 20000) \
+			HALO_SCENE_PACKS_SHARE_CARD=$([ "$name" = packcopy ] && echo 1 || echo 0) &
+	done
+	wait
+}
+
+# packcopy_check NAME: the lobby's notes (each "menus: forge lobby note at
+# T ms: TEXT", a second line its own) - how many, the longest any stood
+# with no "Waiting for" in it - and its frames over 100 ms
+packcopy_check() {
+	local name=$1 log="$out/$1/run.log" lobby notes stood hitches
+	lobby=$(awk '/ui: screen pc.h3.forge.lobby/ { on = 1 } on' "$log")
+	notes=$(awk '/menus: forge lobby note at/ { if (text != "") print text; sub(/.*note at /, ""); text = $0; next }
+		text != "" && !/^halo-linux: / { text = text " / " $0; next } { if (text != "") print text; text = "" }
+		END { if (text != "") print text }' <<< "$lobby")
+	stood=$(awk '{ t = $1 + 0 } NR > 1 && last !~ /Waiting for/ && last !~ /No score/ && t - at > most { most = t - at; what = last }
+		{ at = t; last = $0 } END { printf "%d ms (%s)", most, what }' <<< "$notes")
+	hitches=$(grep -ac "frame-hitch: " <<< "$lobby")
+	echo "  $name: $(grep -ac . <<< "$notes") notes, the longest one standing with no wait said: $stood;" \
+		"$hitches lobby frames over 100 ms"
+	if [ "$(grep -ac . <<< "$notes")" -lt 10 ]; then
+		fail "$name: the lobby's note hardly changed or was not logged ($out/$name/run.log)"
+	elif [ "${stood%% *}" -le 5000 ]; then
+		echo "  ok: $name: the note moves (never 5 s on one value with no wait said)"
+	else
+		fail "$name: the note stood $stood"
+	fi
+	[ "$hitches" = 0 ] && echo "  ok: $name: no lobby frame over 100 ms" ||
+		fail "$name: lobby frames over 100 ms: $(grep -a "frame-hitch: " <<< "$lobby" | head -3 | cut -c1-200)"
+	grep -aq "starting precaching of map 'beavercreek'" "$out/$name/data/debug.txt" &&
+		echo "  ok: $name: Battle Creek copied as the lobby opened" || fail "$name: no copy of Battle Creek"
+	grep -aq "^[0-9]* ms: No score or time limit" <<< "$notes" &&
+		echo "  ok: $name: the packs built in the lobby" || fail "$name: the packs not built in the lobby"
+	echo "$notes" > "$out/$name/notes.txt"
 }
 
 # (every multiplayer map, every pack: forge.c's maps in their order)
@@ -922,6 +992,12 @@ for c in $cases; do
 		packs_runs & ;;
 	smallmap)
 		smallmap_runs & ;;
+	packcopy)
+		if [ "$menus_files" = 0 ] || [ ! -r "$packcopy_profile" ]; then
+			echo "SKIP: packcopy: no Halo PC bitmaps.map and loc.map in $data/maps, or no profile ($packcopy_profile)"
+			continue
+		fi
+		packcopy_runs & ;;
 	aiteam)
 		aiteam_runs & ;;
 	aioff)
@@ -1514,6 +1590,28 @@ for c in $cases; do
 			fail "variants-full: a failed save left a file: $(grep -E "\.tmp$|\.old$|brand_new" "$out/variants-files.txt")"
 		else
 			echo "  ok: variants-full: nothing left by the failed saves"
+		fi
+		continue
+	fi
+	if [ "$c" = packcopy ]; then
+		if checked packcopy && checked packcopy-hold; then
+			packcopy_check packcopy
+			expect packcopy "the builds share the card with the copy" \
+				"scene packs: the builds wanted now share the memory card with a map's copy"
+			# (moved on during the copy: a number past 10% before it ended)
+			if sed -n "/wanted now share the memory card/,/wanted now no longer share/p" "$out/packcopy/run.log" |
+				grep -aqE "note at [0-9]+ ms: Building [^.]*\.\.\. ([1-9][0-9])%"; then
+				echo "  ok: packcopy: the builds moved on during the copy"
+			else
+				fail "packcopy: the builds did not move on during the copy"
+			fi
+			if grep -aq "Waiting for" "$out/packcopy/notes.txt"; then
+				fail "packcopy: the lobby said it waited: $(grep -a "Waiting for" "$out/packcopy/notes.txt" | head -1)"
+			fi
+			packcopy_check packcopy-hold
+			copies=$(grep -ao "Waiting for Battle Creek to copy\.\.\. (copy [0-9]*%)" "$out/packcopy-hold/notes.txt" | sort -u | wc -l)
+			[ "$copies" -ge 5 ] && echo "  ok: packcopy-hold: the wait said, the copy's progress moving ($copies values)" ||
+				fail "packcopy-hold: the wait for the copy not said with its progress ($copies values)"
 		fi
 		continue
 	fi
