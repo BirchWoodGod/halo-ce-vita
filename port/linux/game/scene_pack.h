@@ -142,6 +142,13 @@ struct scene_pack_recipe_tune
 	                             fly) once the pack is built; a tag that is
 	                             not what the tuning expects is left as it
 	                             is (said in the log)
+	blocks                       Forge's building blocks, made by the
+	                             game (scene_pack_blocks.c: their
+	                             scenery, models, collision models and
+	                             shaders, textured with the source map's
+	                             bitmaps), the pack's objects after its
+	                             tag lines' (a recipe may have them alone;
+	                             an Xbox map's only)
 	keep <graph>|<animation>     (an animation graph's, antr) an animation
 	                             it keeps: a graph with keep lines keeps
 	                             those whole, and each other animation of it
@@ -182,6 +189,8 @@ struct scene_pack_recipe
 		char graph[SCENE_PACK_TAG_PATH_SIZE];
 		char animation[SCENE_PACK_ANIMATION_NAME_SIZE];
 	} keeps[SCENE_PACK_MAXIMUM_KEEPS];
+	/* (a blocks line) Forge's building blocks made into it */
+	boolean blocks;
 };
 
 /* what a pack file's header says, once checked (scene_pack_open) */
@@ -242,6 +251,11 @@ and writes, with its bytes (source: a read of the source map, else of a
 pack): the build's thread pauses and paces itself there. NULL (the tools):
 nothing */
 extern void (*scene_pack_io_hook)(unsigned long bytes, boolean source);
+/* (tools/scene_pack_test.c, NULL in the game) a recipe with blocks: the
+source's tag data as the build has read it, before the blocks are made
+from it (and the rest of the pack taken from it): the tool damages it */
+extern void (*scene_pack_blocks_source_hook)(unsigned char *tags, unsigned long size, unsigned long address,
+	unsigned long instances, long count);
 /* (scene_packs.c) the maps' copies a build may read, NULL for none */
 extern struct scene_pack_copy_source const *scene_pack_copy_source;
 

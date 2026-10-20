@@ -623,6 +623,7 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
             # format code, the Ogg Vorbis decoder and the Xbox ADPCM encoder)
             pack_tool_objects = [pack_tool_object, obj_dir / (game_dir / "scene_pack.o"),
                                  obj_dir / (game_dir / "scene_pack_ce.o"),
+                                 obj_dir / (game_dir / "scene_pack_blocks.o"),
                                  obj_dir / (game_dir / "cache_file_formats.o"),
                                  obj_dir / "port/linux/src/ogg_sound.o",
                                  obj_dir / "port/linux/src/xbox_adpcm_encoder.o",
