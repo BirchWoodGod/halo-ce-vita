@@ -125,6 +125,20 @@
 #            a game of one player on the Linux harness); then started again on
 #            that save with mygulch turned off: the picker lists the thirteen
 #            only and the lobby is back on Battle Creek
+#   h3customrows  CUSTOMIZATION's preview the same on every row (insider.17:
+#            the Spartan lost its visor's reflection and its shading with
+#            VIBRATION, the last row, focused - Ben 10 and xal, on the
+#            Performance and the lowest Custom presets): with the testers'
+#            presets' values and HALO_TEST_PROFILE's profile, the editor
+#            opened, the preview's Spartan shown, then every row focused in
+#            turn down to VIBRATION, up and down again; HALO_PIXEL_SHADER_LOG
+#            (rasterizer_xbox.c) names each pixel shader the first time it is
+#            set whole: the models' (texture modes 00018421, the base, detail,
+#            multipurpose maps and the cube map) set before the rows are
+#            walked, and none of theirs new while they are (the menus'
+#            widgets left alpha stages in the shared definition, which the
+#            next frame's models ran: rasterizer_xbox_models.c
+#            set_environment_shader_pixel_shader)
 #   h3models  CUSTOMIZATION's MODEL (port/linux/game/player_models.c) with the
 #            Custom Edition maps of HALO_TEST_CE_MAPS (extinction.map,
 #            Covenant_V_Marines_Beta_5.map) and HALO_TEST_PROFILE's profile:
@@ -313,7 +327,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
@@ -1208,6 +1222,45 @@ for case in $cases; do
 			fail h3customize "the changes were not there after a restart"
 		grep -aq "menus: h3 customize: Vita Chief: no changes" "$out/h3customize_again/run.log" ||
 			fail h3customize "leaving the editor unchanged saved anyway" ;;
+	h3customrows)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "--- h3customrows"; echo "SKIP: no HALO_TEST_PROFILE"; continue
+		fi
+		# (CUSTOMIZATION: the profile, Cross: the editor on PLAYER NAME, the preview's Spartan made;
+		# then down through the nine rows below to VIBRATION, a second and a half on each, up to
+		# AUTO-CENTER, down to VIBRATION again; Circle, Circle)
+		rows_pad="$h3pad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:5000"
+		rows_pad="$rows_pad @rows-start:0:300"
+		for row in 1 2 3 4 5 6 7 8 9; do rows_pad="$rows_pad down:150:1500"; done
+		rows_pad="$rows_pad up:150:1500 down:150:1500 @rows-end:0:300 b wait:150:2500 b wait:150:2500"
+		# (the testers' presets: Performance - insider.17's halo.log, Ben 10 - and the lowest Custom - xal)
+		performance="HALO_RENDER_SCALE=dynamic HALO_MODEL_LOD_SCALE=0.5 HALO_MIN_OBJECT_PIXELS=8 HALO_SCENERY_UPDATE_DIVISOR=4"
+		performance="$performance HALO_LIGHTING_REFRESH_DIVISOR=3 HALO_SOUND_OBSTRUCTION_TICKS=6 HALO_SUN_RAYS=0 HALO_VITA_SHADOWS=0"
+		performance="$performance HALO_MAX_SCENE_LIGHTS=4 HALO_VITA_EFFECTS_QUALITY=1 HALO_PARTICLE_RENDER_DIVISOR=2 HALO_AI_THINK_DIVISOR=0"
+		performance="$performance HALO_SOUND_MANAGER_DIVISOR=2 HALO_PARTICLE_BUDGET=reduced HALO_DYNAMIC_RES_MIN=0.5 HALO_UPSCALE_FILTER=0"
+		lowest="HALO_RENDER_SCALE=dynamic HALO_MODEL_LOD_SCALE=0.35 HALO_MIN_OBJECT_PIXELS=12 HALO_SCENERY_UPDATE_DIVISOR=4"
+		lowest="$lowest HALO_LIGHTING_REFRESH_DIVISOR=3 HALO_SOUND_OBSTRUCTION_TICKS=3 HALO_SUN_RAYS=0 HALO_VITA_SHADOWS=0"
+		lowest="$lowest HALO_MAX_SCENE_LIGHTS=2 HALO_VITA_EFFECTS_QUALITY=0 HALO_PARTICLE_RENDER_DIVISOR=4 HALO_AI_THINK_DIVISOR=3"
+		lowest="$lowest HALO_SOUND_MANAGER_DIVISOR=1 HALO_PARTICLE_BUDGET=low HALO_DYNAMIC_RES_MIN=0.5 HALO_UPSCALE_FILTER=0"
+		for preset in performance lowest; do
+			name=h3customrows_$preset
+			# shellcheck disable=SC2086
+			profile_from=$HALO_TEST_PROFILE run $name "$menus_data" 45 "$rows_pad" HALO_MENU_STYLE=halo3 \
+				HALO_PIXEL_SHADER_LOG=1 ${!preset}
+			check_h3 $name halo3
+			log=$out/$name/run.log
+			grep -aq "ui: screen pc.h3.custom.screen" "$log" || fail $name "the editor did not open"
+			grep -aq "menus: h3 customize: the preview shows the Spartan" "$log" || fail $name "the preview did not show the Spartan"
+			grep -aq "test pad: @rows-start" "$log" && grep -aq "test pad: @rows-end" "$log" ||
+				fail $name "the rows were not walked"
+			# (the models' shader set before the walk: the Spartan drawn)
+			sed -n '1,/test pad: @rows-start/p' "$log" | grep -aq "pixel shader: [0-9a-f]*: modes 00018421," ||
+				fail $name "no model was drawn before the rows were walked"
+			# (and nothing new of theirs while the rows were)
+			changed=$(sed -n '/test pad: @rows-start/,/test pad: @rows-end/p' "$log" | grep -a "pixel shader: [0-9a-f]*: modes 00018421,")
+			echo "$name: models' pixel shaders new while the rows were walked: ${changed:-none}"
+			[ -z "$changed" ] || fail $name "the preview's Spartan was drawn with another pixel shader on a row"
+		done ;;
 	h3nameplate)
 		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
 			echo "--- h3nameplate"; echo "SKIP: no HALO_TEST_PROFILE"; continue

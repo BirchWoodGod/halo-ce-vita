@@ -922,6 +922,29 @@ static void set_environment_shader_pixel_shader(
 		107,
 		detail_mask>=0 && detail_mask<NUMBER_OF_SHADER_MODEL_DETAIL_MASKS);
 
+#ifdef HALO_LINUX
+	/* (port) the whole pixel shader set again (local_pixel_shader_dirty_flag,
+	below) starts from a cleared definition. pixel_shader is the rasterizer's
+	one shared definition (rasterizer_xbox.h): this shader sets the eight
+	combiners' colour halves and the first three alpha halves, and
+	rasterizer_set_pixel_shader writes all eight, so the alpha halves of
+	stages 3 to 7 (and the constants it leaves) were whatever the last
+	other user had left there. The menus' widget bitmaps are drawn with the
+	Xbox interface's plasma (ui_widget.c draw_bitmap_in_rect: the dynamic
+	screen geometry's min blend of two maps, rasterizer_xbox_dynavobgeom.c),
+	which fills alpha stages 3, 4 and 6; with Halo 3 CUSTOMIZATION's last
+	row, VIBRATION, focused, the frame's widgets left those there for the
+	next frame's models, whose stages 3 to 6 then ran them over the alpha
+	the colour stages read: the preview's Spartan lost its visor's
+	reflection and its shading, and a program of its own was compiled for
+	it (Ben 10 and xal, insider.17).
+	Cleared, they are the zeros every other frame drew with */
+	if (local_pixel_shader_dirty_flag)
+	{
+		memset(&pixel_shader, 0, sizeof(pixel_shader));
+	}
+#endif
+
 	{
 		unsigned long detail_mask_alpha_inputs[
 			NUMBER_OF_SHADER_MODEL_DETAIL_MASKS] =

@@ -1057,6 +1057,61 @@ void rasterizer_set_pixel_shader(
 		pixel_shader);
 	combiner_count = (short)(pixel_shader->combiner_count &
 		PIXEL_SHADER_COMBINER_COUNT_MASK);
+#ifdef HALO_LINUX
+	/* (port, debug) HALO_PIXEL_SHADER_LOG=1: each pixel shader set whole
+	logged the first time it is ("pixel shader: <hash>: modes <texture
+	modes>, <n> combiners"), the hash of what makes the program - the
+	combiners it writes, the final combiner's inputs, the texture modes,
+	the dot mapping, the input texture - and not of its constants: a menu's
+	widgets left alpha stages in pixel_shader that the next frame's model
+	shader wrote out (rasterizer_xbox_models.c
+	set_environment_shader_pixel_shader); run_menus_test.sh h3customrows
+	reads it */
+	{
+		static int log_on = -1;
+
+		if (log_on < 0)
+		{
+			char const *setting = getenv("HALO_PIXEL_SHADER_LOG");
+
+			log_on = setting && atoi(setting) != 0;
+		}
+		if (log_on)
+		{
+			static unsigned long seen[1024];
+			static long seen_count;
+			unsigned long hash = 2166136261UL;
+			long index;
+			short stage;
+
+#define PIXEL_SHADER_LOG_MIX(value) (hash = (hash ^ (unsigned long)(value)) * 16777619UL)
+			PIXEL_SHADER_LOG_MIX(pixel_shader->texture_modes);
+			PIXEL_SHADER_LOG_MIX(pixel_shader->combiner_count);
+			PIXEL_SHADER_LOG_MIX(pixel_shader->input_texture);
+			PIXEL_SHADER_LOG_MIX(pixel_shader->dot_mapping);
+			PIXEL_SHADER_LOG_MIX(pixel_shader->final_combiner_inputs_abcd);
+			PIXEL_SHADER_LOG_MIX(pixel_shader->final_combiner_inputs_efg);
+			for (stage = 0; stage < combiner_count && stage < 8; stage++)
+			{
+				PIXEL_SHADER_LOG_MIX(pixel_shader->alpha_inputs[stage]);
+				PIXEL_SHADER_LOG_MIX(pixel_shader->alpha_outputs[stage]);
+				PIXEL_SHADER_LOG_MIX(pixel_shader->rgb_inputs[stage]);
+				PIXEL_SHADER_LOG_MIX(pixel_shader->rgb_outputs[stage]);
+			}
+#undef PIXEL_SHADER_LOG_MIX
+			for (index = 0; index < seen_count && seen[index] != hash; index++)
+				;
+			if (index == seen_count && seen_count < (long)NUMBEROF(seen))
+			{
+				void platform_log(const char *format, ...);
+
+				seen[seen_count++] = hash;
+				platform_log("pixel shader: %08lx: modes %08lx, %d combiners", hash,
+					(unsigned long)pixel_shader->texture_modes, (int)combiner_count);
+			}
+		}
+	}
+#endif
 	if (combiner_count < MAXIMUM_INLINE_PIXEL_SHADER_COMBINERS)
 	{
 		boolean unique_constant_0 = (boolean)((pixel_shader->combiner_count >>
