@@ -5338,12 +5338,28 @@ static boolean h3_gametype_base(struct widget_instance *widget)
 	return h3_gametype_new_of(h3_gametypes.indices[type], h3_gametypes.names[type]);
 }
 
+/* whether the chosen game type's file is damaged (its checksum failed:
+playlist_profile_get would give Slayer's rules in its place), said */
+static boolean h3_gametype_chosen_damaged(void)
+{
+	short index;
+
+	for (index = 0; index < h3_gametypes.count; index++)
+	{
+		if (h3_gametypes.indices[index] == h3_gametypes.chosen_index && h3_gametypes.damaged[index])
+		{
+			h3_gametypes_status("%s", T("This game type's file is damaged and can't be loaded. Delete it."));
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
 /* (port h3 gametype edit: the options' EDIT) the chosen one's editor, over
 the list; one of the game's own a new one of it */
 static boolean h3_gametype_edit(void)
 {
 	struct game_variant variant;
-	short index;
 
 	if (h3_gametypes.chosen_index == NONE)
 		return FALSE;
@@ -5355,14 +5371,9 @@ static boolean h3_gametype_edit(void)
 			T("The game's own game types never change: SAVE makes this one a new game type of yours."));
 		return TRUE;
 	}
-	for (index = 0; index < h3_gametypes.count; index++)
-	{
-		if (h3_gametypes.indices[index] == h3_gametypes.chosen_index && h3_gametypes.damaged[index])
-		{
-			h3_gametypes_status("%s", T("This game type's file is damaged and can't be loaded. Delete it."));
-			return FALSE;
-		}
-	}
+	/* (a damaged file: said on the list, which the options go back to) */
+	if (h3_gametype_chosen_damaged())
+		return TRUE;
 	if (!playlist_profile_get(h3_gametypes.chosen_index, &variant))
 	{
 		h3_gametypes_status("%s", T("That game type can't be read now."));
@@ -5379,6 +5390,8 @@ static boolean h3_gametype_ask_name(short typing)
 
 	if (h3_gametypes.chosen_index == NONE)
 		return FALSE;
+	if (h3_gametype_chosen_damaged())
+		return TRUE;
 	if (typing == _typing_gametype_rename && h3_gametypes.chosen_builtin)
 	{
 		h3_gametypes_status("%s", T("The game's own game types can't be renamed: COPY makes one of yours."));

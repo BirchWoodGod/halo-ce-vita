@@ -271,6 +271,16 @@
 #            picker offers it
 #   h3modstouch  taps: MOD MANAGER on the main menu, mygulch's row (off), the
 #            screen's Back
+#   h3gametypes  the Halo 3 GAME TYPES (menus/halo3/gametypes.xml), HALO_TEST_PROFILE's
+#            profile, the lobby live on SYSTEM LINK: EDIT GAME TYPES lists the game's 26 game
+#            types; a new one from SLAYER, named (HALO_TEST_TEXT_INPUT), its kills to win,
+#            respawn time, shields and vehicle set changed, SAVE: blam.lst and SaveMeta.xbx as
+#            the Xbox writes them, the lobby's GAME on it and its live game hosted with its rules,
+#            GAME's picker, START GAME; COPY, RENAME and DELETE (its question); one of the game's
+#            own refused deletion; DISCARD CHANGES leaves the editor. Then the game plays by it
+#            (a local game of it, HALO_NETWORK_TEST saved=: its rules logged, Ghosts alone), Menu
+#            style Halo CE's Xbox screens open it, and screenshots in Spanish and with the
+#            keyboard's icons (HALO_TEST_GAMETYPES_SHOTS: where the screenshots go)
 #   pause   Campaign from the main menu (a new profile, Normal), the level's
 #           pause menu, Quit to Main Menu: a game map's widget runs its
 #           function and is back at the main menu, and asked about deleting
@@ -304,7 +314,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho h3gametypes}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
@@ -1846,8 +1856,145 @@ for case in $cases; do
 		grep -aq "ui: screen pc.mp.offline" "$log" || fail browserprofile "internet play off: SERVER BROWSER did not say how to turn it on"
 		grep -aq "4way_start2join_screen\|menus: Server Browser: the profile" "$log" &&
 			fail browserprofile "internet play off: the profile screen opened anyway" ;;
+	h3gametypes)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "--- h3gametypes"; echo "SKIP: no HALO_TEST_PROFILE"; continue
+		fi
+		# (the Halo 3 GAME TYPES, menus/halo3/gametypes.xml, HALO_TEST_PROFILE's profile: the lobby
+		# live on SYSTEM LINK; down four to EDIT GAME TYPES, A: the list; Triangle: the bases, A on
+		# SLAYER: the editor on a new one; NAME typed; GENERAL: kills to win right twice (50);
+		# RESPAWN: respawn time right twice (10 s); PLAYER: shields right (off); WEAPONS AND
+		# VEHICLES: vehicle set right (Ghosts); SLAYER SETTINGS looked at; SAVE. Circle: the lobby,
+		# its GAME the new one, its live game on it; GAME's picker; START GAME: the game's lobby;
+		# EDIT GAME TYPES again: COPY (typed), RENAME (typed), DELETE (the question, DELETE GAME
+		# TYPE); Square on one of the game's own (refused); Triangle, SLAYER, GAME right (CTF),
+		# Circle: SAVE CHANGES?, DISCARD CHANGES. Screenshots at the Vita's picture)
+		d="down:150:450" u="up:150:450" r="right:150:450" w="wait:150:2300"
+		gt_shots=${HALO_TEST_GAMETYPES_SHOTS:-$out/h3gametypes_shots}
+		gt_pad="wait:150:3000 down:150:700 a wait:150:6000 $d $d $d $d a $w @01-game-types:0:300 y $w @02-choose-a-base:0:300"
+		gt_pad="$gt_pad a $w a wait:150:1500 @03-editor-new:0:300 $d $d a $w $r $r @04-general:0:300 b $w $d a $w $r $r"
+		gt_pad="$gt_pad @05-respawn:0:300 b $w $d a $w $r @06-player:0:300 b $w $d a $w $d $d $r @07-weapons-vehicles:0:300 b $w"
+		gt_pad="$gt_pad $d $d a $w @08-slayer-settings:0:300 b $w $d @09-editor-save:0:300 a wait:150:3000 @10-saved:0:300"
+		gt_pad="$gt_pad b wait:150:4000 @11-lobby:0:300 $u $u $u a $w @12-game-picker:0:300 b $w $d $d a wait:150:4000"
+		gt_pad="$gt_pad @13-pregame:0:300 b wait:150:4000"
+		# (then on that save: EDIT GAME TYPES, on the lobby's GAME, Vita Slayer: its options, COPY
+		# (typed); the copy's options, RENAME (typed); its options, DELETE: the question, DELETE GAME
+		# TYPE; down to SLAYER (the game's own), Square: refused; Triangle, SLAYER: the editor, GAME
+		# right (CTF), Circle: SAVE CHANGES?, DISCARD CHANGES)
+		gt_files_pad="wait:150:3000 down:150:700 a wait:150:6000 $d $d $d $d a $w a $w @14-options:0:300 $d a wait:150:3000"
+		gt_files_pad="$gt_files_pad @15-copied:0:300 a $w $d $d a wait:150:3000 @16-renamed:0:300 a $w $d $d $d a $w"
+		gt_files_pad="$gt_files_pad @17-delete-question:0:300 $d a wait:150:3000 @18-deleted:0:300 $d x $w @19-builtin-not-deleted:0:300"
+		gt_files_pad="$gt_files_pad y $w a $w $d $r @20-editor-ctf:0:300 b $w @21-save-question:0:300 $d a wait:150:3000 @22-discarded:0:300"
+		rm -rf "$gt_shots"; mkdir -p "$gt_shots"
+		profile_from=$HALO_TEST_PROFILE run h3gametypes "$menus_data" 160 "$gt_pad" HALO_MENU_STYLE=halo3 \
+			"HALO_TEST_TEXT_INPUT=Vita Slayer" HALO_BUTTON_ICONS=playstation \
+			HALO_SCREENSHOT_DIR="$gt_shots" HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1
+		rm -rf "$out/h3gametypes_saved"; cp -r "$out/h3gametypes/save" "$out/h3gametypes_saved"
+		save_from=$out/h3gametypes_saved run h3gametypes_files "$menus_data" 120 "$gt_files_pad" HALO_MENU_STYLE=halo3 \
+			"HALO_TEST_TEXT_INPUT=Vita Copy|Night Copy" HALO_BUTTON_ICONS=playstation \
+			HALO_SCREENSHOT_DIR="$gt_shots" HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1
+		check_h3 h3gametypes halo3
+		check_h3 h3gametypes_files halo3
+		cat "$out/h3gametypes_files/run.log" >> "$out/h3gametypes/run.log"
+		log=$out/h3gametypes/run.log
+		grep -aE "ui: screen pc.h3.(gametypes|gt)|h3 gametypes: [0-9]|h3 gametypes: .*(copied|renamed|deleted|can't)|h3 gametype editor: (saved|editing|the changes)|h3 mp: the game's rules|h3 live lobby: now" "$log" | cut -c1-220 | head -40
+		grep -aq "menus: Halo 3 screen h3/gametypes/screen for ui.shell.main_menu.settings_select.multiplayer_setup.playlist_select.gametype_select_screen" "$log" ||
+			fail h3gametypes "GAME TYPES did not stand for the Xbox's game type list"
+		grep -aq "ui: screen ui.shell.main_menu.settings_select.multiplayer_setup" "$log" &&
+			fail h3gametypes "an Xbox game type screen opened with Menu style Halo 3"
+		grep -aq "menus: h3 gametypes: 26 game types: 0 of the player's (0 damaged), 26 of the game's" "$log" ||
+			fail h3gametypes "the list was not the game's 26 game types"
+		for screen in gametypes gtbase gtedit gtopt gtact gtdel gtquit; do
+			grep -aq "ui: screen pc.h3.$screen.screen" "$log" || fail h3gametypes "the screen h3/$screen did not open"
+		done
+		grep -aq "menus: h3 gametype editor: saved Vita Slayer (a new game type): slayer, score 50, lives 0, respawn 300, growth 0, suicide 300, shields 0, health 100, .*vehicles 3" "$log" ||
+			fail h3gametypes "SAVE did not save Vita Slayer with the changes"
+		grep -aq "menus: h3 gametypes: 27 game types: 1 of the player's (0 damaged), 26 of the game's" "$log" ||
+			fail h3gametypes "the list did not have the saved game type (its checksum good)"
+		grep -aq "menus: h3 mp lobby: .*GAME: VITA SLAYER" "$log" || fail h3gametypes "the lobby's GAME was not the saved game type"
+		grep -aq "menus: h3 live lobby: now Vita Slayer on Battle Creek, sent to its joiners" "$log" &&
+			grep -aq "menus: h3 mp: the game's rules: slayer, score 50, lives 0, respawn 300, growth 0, suicide 300, shields 0, .*vehicles 3" "$log" ||
+			fail h3gametypes "the live lobby's game was not hosted with the saved game type's rules"
+		grep -aq "ui: screen pc.h3.gametype.screen" "$log" || fail h3gametypes "the lobby's GAME picker did not open"
+		grep -aq "menus: h3 live lobby: START GAME: the game's lobby" "$log" || fail h3gametypes "START GAME did not open the game's lobby"
+		grep -aq "menus: h3 gametypes: Vita Slayer copied as Vita Copy." "$log" || fail h3gametypes "COPY did not copy it"
+		grep -aq "menus: h3 gametypes: Vita Copy renamed Night Copy." "$log" || fail h3gametypes "RENAME did not rename the copy"
+		grep -aq "menus: h3 gametypes: Night Copy was deleted." "$log" || fail h3gametypes "DELETE did not delete the copy"
+		grep -aq "menus: h3 gametypes: The game's own game types can't be deleted." "$log" ||
+			fail h3gametypes "Square on one of the game's own was not refused"
+		grep -aq "menus: h3 gametype editor: game ctf" "$log" && grep -aq "menus: h3 gametype editor: the changes discarded" "$log" ||
+			fail h3gametypes "the save question's DISCARD CHANGES did not leave the editor"
+		[ "$(grep -a "menus: h3 gametypes: [0-9]* game types" "$log" | tail -1 | grep -o "[0-9]* of the player's")" = "1 of the player's" ] ||
+			fail h3gametypes "the list did not end with the one game type of the player's"
+		# (the files: one game type's blam.lst, as the Xbox writes it - its fields at the variant's
+		# offsets, game_engine.h -, its SaveMeta.xbx named Vita Slayer)
+		gt_files=$(grep -l . "$out"/h3gametypes/save/u/UDATA/*/blam.lst 2>/dev/null)
+		[ "$(echo "$gt_files" | grep -c blam.lst)" = 1 ] || fail h3gametypes "not one game type's file: $gt_files"
+		gt_fields=$([ -n "$gt_files" ] && python3 - "$(echo "$gt_files" | head -1)" <<'PY'
+import struct, sys
+block = open(sys.argv[1], "rb").read()
+name = block[0:24].decode("utf-16-le").split("\0")[0]
+engine, teams, flags = struct.unpack_from("<i?3xI", block, 0x18)
+respawn, suicide, lives, health, score, weapons, vehicles = struct.unpack_from("<iiifiii", block, 0x30)
+variant_flags, = struct.unpack_from("<H", block, 0x64)
+print("|".join(str(v) for v in (name, engine, int(teams), flags & 8 and "noshields" or "shields", respawn, suicide, lives,
+	health, score, weapons, vehicles, variant_flags, len(block))))
+PY
+)
+		echo "game type file: $gt_fields"
+		[ "$gt_fields" = "Vita Slayer|2|0|noshields|300|300|0|1.0|50|0|3|0|512" ] ||
+			fail h3gametypes "blam.lst does not hold the game type as saved"
+		[ -n "$gt_files" ] && [ "$(tr -d '\0' < "$(dirname "$(echo "$gt_files" | head -1)")/SaveMeta.xbx")" = "Vita Slayer" ] ||
+			fail h3gametypes "SaveMeta.xbx does not name the game type Vita Slayer"
+		# (the game plays by it: a local game on Blood Gulch of the saved game type, HALO_NETWORK_TEST's
+		# saved=, the profile and a bot - the engine's variant logged, and Ghosts alone on the map)
+		rm -rf "$out/h3gametypes_saved"; cp -r "$out/h3gametypes/save" "$out/h3gametypes_saved"
+		save_from=$out/h3gametypes_saved run h3gametypes_play "$menus_data" 45 "wait:150:40000" HALO_MENU_STYLE=halo3 \
+			"HALO_NETWORK_TEST=local:bloodgulch:saved=Vita Slayer" HALO_NETWORK_TEST_PROFILE=1 HALO_NETWORK_TEST_START=3 HALO_BOTS=1
+		log=$out/h3gametypes_play/run.log
+		echo "--- h3gametypes_play"; grep -aE "network test: (the saved|the game plays by|vehicles at tick)" "$log" | head -4 | cut -c1-220
+		[ "$(cat "$out/h3gametypes_play/exit")" = 0 ] || fail h3gametypes_play "exit $(cat "$out/h3gametypes_play/exit")"
+		grep -aqiE "assert|exception|halt" "$log" && fail h3gametypes_play "an assertion, exception or halt"
+		grep -aq "network test: the saved game type Vita Slayer" "$log" || fail h3gametypes_play "the saved game type was not found"
+		grep -aq "network test: the game plays by: slayer, score 50, lives 0, respawn 300, growth 0, suicide 300, shields 0, .*vehicles 3" "$log" ||
+			fail h3gametypes_play "the game did not play by the saved game type's rules"
+		grep -aq "network test: vehicles at tick [0-9]*: vehicles.ghost.ghost_mp([0-9]*) [0-9]*$" "$log" ||
+			fail h3gametypes_play "the map did not have Ghosts alone (the vehicle set)"
+		# (Menu style Halo CE: the Xbox's game type list and edit screen, on the same file: Multiplayer,
+		# EDIT GAMETYPES, A on the list - the last used, Vita Slayer -: its edit screen, GAME OPTIONS, SLAYER:
+		# its rules)
+		rm -rf "$out/h3gametypes_saved"; cp -r "$out/h3gametypes/save" "$out/h3gametypes_saved"
+		save_from=$out/h3gametypes_saved run h3gametypes_classic "$menus_data" 45 \
+			"wait:150:3000 down:150:700 a wait:150:3000 $d $d $d $d $d $d $d a wait:150:3000 @23-classic-list:0:300 a wait:150:3000 @24-classic-edit:0:300 $d a wait:150:3000 a wait:150:3000 @25-classic-rules:0:300" \
+			HALO_MENU_STYLE=classic HALO_BUTTON_ICONS=playstation HALO_SCREENSHOT_DIR="$gt_shots" HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1
+		log=$out/h3gametypes_classic/run.log
+		echo "--- h3gametypes_classic"; grep -a "ui: screen" "$log"
+		[ "$(cat "$out/h3gametypes_classic/exit")" = 0 ] || fail h3gametypes_classic "exit $(cat "$out/h3gametypes_classic/exit")"
+		grep -aq "ui: screen ui.shell.main_menu.settings_select.multiplayer_setup.playlist_select.gametype_select_screen" "$log" &&
+			grep -aq "ui: screen ui.shell.main_menu.settings_select.multiplayer_setup.playlist_edit.gametype_edit_screen" "$log" ||
+			fail h3gametypes_classic "Menu style Halo CE did not keep the Xbox's game type screens"
+		grep -aq "ui: screen pc.h3" "$log" && fail h3gametypes_classic "a Halo 3 screen opened with Menu style Halo CE"
+		grep -aqi "checksum failed on playlist profile\|failed to retrieve playlist profile" "$log" "$out/h3gametypes_classic/data/debug.txt" &&
+			fail h3gametypes_classic "the Xbox's screens could not read the game type"
+		# (in Spanish: the list, the bases, the editor and a group, HALO_TEST_LANG_DIR)
+		rm -rf "$out/h3gametypes_saved"; cp -r "$out/h3gametypes/save" "$out/h3gametypes_saved"
+		save_from=$out/h3gametypes_saved run h3gametypes_es "$menus_data" 70 \
+			"wait:150:3000 down:150:700 a wait:150:6000 $d $d $d $d a $w @26-es-game-types:0:300 a $w @27-es-options:0:300 a $w @28-es-editor:0:300 $d $d $d $d a $w @29-es-player:0:300 b $w b $w y $w @30-es-bases:0:300" \
+			HALO_MENU_STYLE=halo3 HALO_LANGUAGE=es "HALO_TEST_LANG_DIR=$root/port/vita/app0/lang" HALO_BUTTON_ICONS=playstation \
+			HALO_SCREENSHOT_DIR="$gt_shots" HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1
+		check_h3 h3gametypes_es halo3
+		grep -aq "ui: screen pc.h3.gtopt.screen" "$out/h3gametypes_es/run.log" || fail h3gametypes_es "the editor's PLAYER group did not open"
+		# (with the keyboard's icons, the PC's: the editor)
+		save_from=$out/h3gametypes_saved run h3gametypes_keys "$menus_data" 50 \
+			"wait:150:3000 down:150:700 a wait:150:6000 $d $d $d $d a $w @31-keys-game-types:0:300 a $w a $w @32-keys-editor:0:300" \
+			HALO_MENU_STYLE=halo3 HALO_BUTTON_ICONS=keyboard HALO_SCREENSHOT_DIR="$gt_shots" HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1
+		check_h3 h3gametypes_keys halo3
+		for shot in "$gt_shots"/*.bmp; do
+			[ -e "$shot" ] && command -v magick > /dev/null && magick "$shot" "${shot%.bmp}.png" && rm -f "$shot"
+		done
+		ls "$gt_shots" | head -40 ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3lobbyscenes|h3modelsmany|h3friends|h3friendspanel|browserprofile|h3players|browserrows|profilepaths|h3mppause|h3friendsfit|h3hostonline|h3livelobby|h3groups|browserreopen|h3livebrowse|profileio]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3lobbyscenes|h3modelsmany|h3friends|h3friendspanel|browserprofile|h3players|browserrows|profilepaths|h3mppause|h3friendsfit|h3hostonline|h3livelobby|h3groups|browserreopen|h3livebrowse|profileio|h3vitapc|h3createwho|h3gametypes]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"
