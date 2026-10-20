@@ -1955,6 +1955,9 @@
 "Everyone" = "Todos"
 "Vita PC: Vitas and Halo CE Vita on PC. Everyone: also OpenCE" = "Vita PC: Vitas y Halo CE Vita en PC. Todos: también OpenCE"
 "Vita and PC" = "Vita y PC"
+"PC mouse aim assist" = "Ayuda ratón PC"
+"Their choice" = "Cada uno"
+"Everyone games: Off turns off OpenCE players' mouse aim assist" = "Partidas para Todos: No quita la ayuda con ratón a OpenCE"
 "Which games the browser lists; who joins yours" = "Qué partidas lista el navegador; quién entra en las tuyas"
 # (friends join a private game too, Oct 19 2026)
 "Their game has a password: type it" = "Su partida tiene contraseña: escríbela"

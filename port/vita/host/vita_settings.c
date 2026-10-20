@@ -686,6 +686,12 @@ static struct setting settings[] = {
 	{ "Who can join", "HALO_NET_WHO_CAN_JOIN", 0, 3, { "vita", "vita_pc", "everyone" },
 		{ "Vita", "Vita PC", "Everyone" },
 		"Vita PC: Vitas and Halo CE Vita on PC. Everyone: also OpenCE", 0, PAGE_CROSSPLAY },
+	/* (OpenCE's network version 32: a host for everyone tells its PC
+	players whether a mouse may have aim assist, network.block_mouse_aim_assist,
+	read live; network_distributed.c sends it. Nothing else changes: the
+	Vita's own aim assist is the Gyro page's) */
+	{ "PC mouse aim assist", "HALO_NET_BLOCK_MOUSE_AIM_ASSIST", 0, 2, { "false", "true" },
+		{ "Their choice", "Off" }, "Everyone games: Off turns off OpenCE players' mouse aim assist", 0, PAGE_CROSSPLAY },
 	{ "Ad hoc room", "HALO_ADHOC_ROOM", 0, 4, { "1", "2", "3", "4" }, { "1", "2", "3", "4" },
 		"Vitas in the same room play together", 0, TAB_MULTIPLAYER },
 	{ "Join the room", NULL, 0, 0, { NULL }, { NULL }, "Then Multiplayer, System Link (LAN) in the game", 0,

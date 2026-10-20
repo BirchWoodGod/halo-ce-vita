@@ -2221,6 +2221,17 @@ static void test_multiplayer_tab(void)
 	press(VITA_BUTTON_LEFT);
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_NET_WHO_CAN_JOIN"), "vita"), "Who can join Vita again: vita");
+	/* (OpenCE 32's mouse aim assist policy, for a game hosted for
+	everyone: network.block_mouse_aim_assist, live) */
+	to_line("PC mouse aim assist");
+	check(strstr(menu, "\nPC mouse aim assist\x02  Their choice >") &&
+		!setting_named("HALO_NET_BLOCK_MOUSE_AIM_ASSIST")->restart,
+		"PC mouse aim assist: their choice as shipped, live");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nPC mouse aim assist\x02< Off  ") && getenv("HALO_NET_BLOCK_MOUSE_AIM_ASSIST") &&
+		!strcmp(getenv("HALO_NET_BLOCK_MOUSE_AIM_ASSIST"), "true"), "PC mouse aim assist Off: HALO_NET_BLOCK_MOUSE_AIM_ASSIST true");
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_NET_BLOCK_MOUSE_AIM_ASSIST"), "false"), "PC mouse aim assist their choice again: false");
 	press(VITA_BUTTON_CIRCLE);
 	/* (hosting is never blocked by the wire now: Host a game opens as ever) */
 	{
@@ -2893,8 +2904,8 @@ with the values it saved, but the co-op pair (gone: co-op is hosted from
 the Campaign screen) and Online games (now Visibility, by OpenCE's name);
 and the rows added since (Sun rays, Button icons, Map downloads, Max
 players, Visibility, Fourth core helpers, Latency meter, Particles,
-First-person legs, MCC mods, PC map vehicles, Sharp interface, Player model; the Play
-page's two texts) */
+First-person legs, MCC mods, PC map vehicles, Sharp interface, Player model,
+PC mouse aim assist; the Play page's two texts) */
 static void test_variables_kept(void)
 {
 	static const char *const variables[] = {
@@ -2918,7 +2929,7 @@ static void test_variables_kept(void)
 		"HALO_BOT_VEHICLES", "HALO_BOT_ROUTES", "HALO_BOT_PLAYLIST", "HALO_NET_COOP_PLAYERS", "HALO_NET_REMOTE_LOD",
 		"HALO_LANGUAGE", "HALO_UPDATE_CHANNEL", "HALO_PARTICLE_BUDGET", "HALO_FIRST_PERSON_LEGS", "HALO_RAGDOLLS",
 		"HALO_MCC_MODS", "HALO_PC_MAP_VEHICLES", "HALO_SHARP_UI", "HALO_PLAYER_MODEL", "HALO_FRIENDS_APPEAR_OFFLINE",
-		"HALO_FRIENDS_JOIN",
+		"HALO_FRIENDS_JOIN", "HALO_NET_BLOCK_MOUSE_AIM_ASSIST",
 	};
 	int index, all = 1, choices = 0;
 
