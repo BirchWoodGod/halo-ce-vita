@@ -124,9 +124,11 @@ reported is fixed and the features under "Before the public beta" are in.
 - **AI respawning** in Forge.
 - **Forge's AI using the multiplayer bots' logic**: campaign characters
   (Elites, Grunts, Marines) playing the game type like the bots do.
-- **A Warzone-style mode** (as in Halo 5): two teams fighting each other
-  and the AI, with AI defending objectives (Hunters guarding a base,
-  bosses worth points) set up in Forge.
+- **Tools to build your own modes in Forge**, so players can make things
+  like Halo 5's Warzone themselves: AI that defends a spot or an
+  objective (Hunters guarding a base), AI respawning, AI on a team, and
+  points for AI kills and objectives in the game type editor. We make the
+  tools; the modes are up to the players.
 - **Forge variants with AI played with the multiplayer bots.**
 - **Multiplayer lobbies with bots** on the Vita: bots filling the empty
   slots in games you host for other players.
