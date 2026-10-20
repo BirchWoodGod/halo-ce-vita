@@ -147,7 +147,7 @@ boolean ui_widget_port_cooperative_campaign_host_level(struct widget_instance *w
 void ui_widget_port_give_focus(struct widget_instance *list, struct widget_instance *child);
 boolean system_link_shortcut_open(void);
 struct widget_instance *ui_widget_port_active_screen(short local_player_index);
-void ui_widget_port_go_back(short local_player_index);
+void ui_widget_port_go_back(short screen_index);
 boolean ui_widget_port_join_advertised_game(struct widget_instance *list, void const *server, boolean *widget_deleted);
 boolean transport_network_available(void);
 /* menu_tags.c's: a screen of the set by its widget's name (NONE: none) */
@@ -4408,6 +4408,9 @@ static struct
 	DISCARD CHANGES) */
 	short open_pending;
 	boolean leave_pending;
+	/* a game type saved, copied, renamed or deleted since the lobby was
+	last opened */
+	boolean changed;
 } h3_gametypes = { { 0 }, { { 0 } }, { 0 }, 0, 0, { 0 }, 0, 0, NONE, "", "", NONE };
 
 /* a game type's name (the variant's) as UTF-8 */
@@ -4610,8 +4613,8 @@ static char const *h3_gametype_setting_help(short setting, struct game_variant c
 		N_("Whether players have energy shields."),
 		N_("How much damage a player takes before dying: 100%\nis the usual."),
 		N_("Every player is always camouflaged."),
-		N_("The player in the lead gets no camouflage, overshield\nor waypoint help, and everyone sees them on radar."),
-		N_("CUSTOM: the weapons and grenades the map gives for\nthis game. GENERIC: the usual assault rifle and pistol."),
+		N_("The last player to die stays out of the game until\nsomeone else dies."),
+		N_("CUSTOM: the weapons and grenades the map gives for\nthis game. GENERIC: the game's standard ones."),
 		N_("How the objective is shown: on the motion tracker,\nas a waypoint on screen, or not at all."),
 		N_("Whether the motion tracker shows other players."),
 		N_("Teammates' names over their heads (waypoints)."),
@@ -4620,8 +4623,8 @@ static char const *h3_gametype_setting_help(short setting, struct game_variant c
 		N_("The vehicles on the map. MAP DEFAULT: the ones the\nmap places for this game."),
 		N_("Players play in teams (red and blue)."),
 		N_("A team's laps: its slowest player's (MINIMUM), its\nfastest's (MAXIMUM), or all of its players' (SUM)."),
-		N_("A player who dies runs faster for a while."),
-		N_("A player who kills runs slower for a while."),
+		N_("Each death makes a player a little faster."),
+		N_("Each kill makes a player a little slower."),
 		N_("Only your target counts: kill the player named\non screen to score."),
 		N_("Each team's flag is at the other team's base: they\nattack and defend the other way around."),
 		N_("One flag: one team defends it, the other attacks, and\nthey switch sides after this long. OFF: two flags."),
@@ -5115,8 +5118,14 @@ static void h3_gametypes_read(void)
 			h3_gametypes.cursor = (short)(index + 1);
 	}
 	h3_gametypes.focus_index = NONE;
-	platform_log("menus: h3 gametypes: %d game types: %d of the player's, %d of the game's", h3_gametypes.count,
-		h3_gametypes.saved_count, h3_gametypes.count - h3_gametypes.saved_count);
+	{
+		short damaged = 0;
+
+		for (index = 0; index < h3_gametypes.saved_count; index++)
+			damaged += h3_gametypes.damaged[index] ? 1 : 0;
+		platform_log("menus: h3 gametypes: %d game types: %d of the player's (%d damaged), %d of the game's",
+			h3_gametypes.count, h3_gametypes.saved_count, damaged, h3_gametypes.count - h3_gametypes.saved_count);
+	}
 }
 
 /* a typed name made a game type's (UTF-16, as the variant keeps it): its
@@ -5248,6 +5257,8 @@ static boolean h3_gametypes_choose(struct widget_instance *widget)
 	h3_gametypes.chosen_builtin = type >= h3_gametypes.saved_count;
 	snprintf(h3_gametypes.chosen_name, sizeof(h3_gametypes.chosen_name), "%s", h3_gametypes.names[type]);
 	h3_gametypes.status[0] = 0;
+	/* (the list, back from the options, on it) */
+	h3_gametypes.focus_index = h3_gametypes.chosen_index;
 	platform_log("menus: h3 gametypes: %s chosen (%s)", h3_gametypes.chosen_name,
 		h3_gametypes.chosen_builtin ? "the game's own" : "the player's");
 	return TRUE;
@@ -5416,6 +5427,7 @@ static void h3_gametype_copy_typed(char const *typed)
 	memcpy(variant.human_readable_game_description, name, sizeof(variant.human_readable_game_description));
 	playlist_profile_save(profile_index, &variant);
 	h3_gametype_write_wait(profile_index);
+	h3_gametypes.changed = TRUE;
 	h3_gametypes.focus_index = profile_index;
 	h3_gametypes_read();
 	{
@@ -5451,6 +5463,7 @@ static void h3_gametype_rename_typed(char const *typed)
 	memcpy(variant.human_readable_game_description, name, sizeof(variant.human_readable_game_description));
 	playlist_profile_save(h3_gametypes.chosen_index, &variant);
 	h3_gametype_write_wait(h3_gametypes.chosen_index);
+	h3_gametypes.changed = TRUE;
 	h3_gametypes.focus_index = h3_gametypes.chosen_index;
 	h3_gametypes_read();
 	h3_gametypes_status(T("%s renamed %s."), h3_gametypes.chosen_name, shown);
@@ -5469,6 +5482,7 @@ static boolean h3_gametype_delete_ask(boolean from_list)
 		h3_gametypes.chosen_index = h3_gametypes.indices[type];
 		h3_gametypes.chosen_builtin = type >= h3_gametypes.saved_count;
 		snprintf(h3_gametypes.chosen_name, sizeof(h3_gametypes.chosen_name), "%s", h3_gametypes.names[type]);
+		h3_gametypes.focus_index = h3_gametypes.chosen_index;
 	}
 	if (h3_gametypes.chosen_index == NONE)
 		return FALSE;
@@ -5494,6 +5508,7 @@ static void h3_gametype_delete(void)
 		return;
 	}
 	playlist_profile_delete(profile_index);
+	h3_gametypes.changed = TRUE;
 	h3_gametypes.card_index = NONE;
 	h3_gametypes_read();
 	h3_gametypes_status(T("%s was deleted."), h3_gametypes.chosen_name);
@@ -5556,6 +5571,7 @@ static boolean h3_gametype_save(void)
 	variant.flags &= ~H3_GAMETYPE_SYSTEM_DEFAULT_FLAG;
 	playlist_profile_save(profile_index, &variant);
 	h3_gametype_write_wait(profile_index);
+	h3_gametypes.changed = TRUE;
 	if (saved_game_file_get_path_to_enclosing_directory(profile_index, directory))
 		saved_game_file_remember_last_used_multiplayer_variant_directory(directory);
 	h3_gametype_rules_log(&variant, rules, sizeof(rules));
@@ -5945,7 +5961,7 @@ static void h3_gametype_editor_update(struct widget_instance *list)
 		static char const *const helps[] =
 		{
 			N_("The game type's name, as the lobby's GAME lists it\n(11 characters at most). Cross types it."),
-			N_("The game it plays: another one's settings start as\nits own game type's."),
+			N_("The game it plays. Another game starts with its own\nusual settings."),
 			N_("The score to win and the number of lives. (A game type\nholds no time limit.)"),
 			N_("How long dead players wait, and the suicide penalty."),
 			N_("Shields, health, camouflage, starting equipment and\nwhat the motion tracker and waypoints show."),
@@ -6020,6 +6036,8 @@ static void h3_gametypes_main_loop(void)
 
 	for (index = 0; index < 4 && !active; index++)
 		active = ui_widget_port_active_screen((short)index);
+	/* (the place it is open at) */
+	index--;
 	if (h3_gametypes.open_pending != _h3_gametype_open_none)
 	{
 		long list = tag_loaded(UI_WIDGET_DEFINITION_TAG, "pc\\h3\\gametypes\\screen");
@@ -6039,7 +6057,7 @@ static void h3_gametypes_main_loop(void)
 
 		h3_gametypes.leave_pending = FALSE;
 		if (active && editor != NONE && active->definition_tag_index == editor)
-			ui_widget_port_go_back(active->local_player_index);
+			ui_widget_port_go_back((short)index);
 	}
 }
 
@@ -8090,7 +8108,7 @@ static void h3_fileshare_update(struct widget_instance *list)
 		if (found)
 			widget_instance_set_visibility_recursive(found, FALSE);
 		text_show(named(screen, "info_name"), h3_mp.gametype_names[target]);
-		text_show(named(screen, "info_text"), T("A game variant.\nGame variants are made and changed in\nMULTIPLAYER, GAME."));
+		text_show(named(screen, "info_text"), T("A game variant.\nGame variants are made and changed in\nMULTIPLAYER, EDIT GAME TYPES."));
 		snprintf(line, sizeof(line), "%s", h3_mp.gametype_names[target]);
 	}
 	else
@@ -8141,7 +8159,7 @@ static void h3_fileshare_rename(void)
 	if (!entry || entry->damaged)
 	{
 		h3_fileshare_status("%s", h3_fileshare.kind == _fileshare_map_variants ? T("There is no map variant to rename.") :
-			T("Game variants are changed in MULTIPLAYER, GAME."));
+			T("Game variants are changed in MULTIPLAYER, EDIT GAME TYPES."));
 		return;
 	}
 	if (!typing_available())
@@ -8164,7 +8182,7 @@ static boolean h3_fileshare_ask_delete(void)
 	if (!entry)
 	{
 		h3_fileshare_status("%s", h3_fileshare.kind == _fileshare_map_variants ? T("There is no map variant to delete.") :
-			T("Game variants are changed in MULTIPLAYER, GAME."));
+			T("Game variants are changed in MULTIPLAYER, EDIT GAME TYPES."));
 		return FALSE;
 	}
 	snprintf(h3_fileshare.asked_map, sizeof(h3_fileshare.asked_map), "%s", entry->map_name);
@@ -12367,6 +12385,13 @@ boolean pc_menu_event_function_invoke(
 		h3_mp_initialize();
 		/* (opened again: a live lobby refused tries again) */
 		h3_live_retry();
+		/* (back from EDIT GAME TYPES with a game type saved, renamed or
+		deleted: a live lobby's game on its GAME as it is now) */
+		if (h3_gametypes.changed)
+		{
+			h3_gametypes.changed = FALSE;
+			h3_live_follow();
+		}
 		return TRUE;
 	case _function_h3_network_set:
 		return h3_mp_network_set(widget);

@@ -325,7 +325,7 @@ list it at once (menu_functions.c "port h3 gametype ..."). The art is this folde
 	<widget name="h3/gtedit/value" type="text" left="152" top="0" width="150" height="20" align="center" font="h3/font_item" color="#FFAABED6" text_y="2" text_flags="no_focus_test"/>
 	<widget name="h3/gtedit/arrow_left" left="144" top="2" width="8" height="16" bitmap="h3/arrow_left"/>
 	<widget name="h3/gtedit/arrow_right" left="302" top="2" width="8" height="16" bitmap="h3/arrow_right"/>
-	<widget name="h3/gtedit/label" type="text" left="0" top="0" width="190" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2"/>
+	<widget name="h3/gtedit/label" type="text" left="0" top="0" width="300" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2"/>
 	<widget name="h3/gtedit/op_name" width="312" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
 		<on event="a start" run="port h3 gametype next"/>
 		<child widget="h3/gtedit/label"/>

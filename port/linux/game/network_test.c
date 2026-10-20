@@ -12,7 +12,9 @@ Automated system link sessions for testing the netcode without the menus
   later; with more variants, once a game is over (debug.network_test_score
   makes it short) the next, as the host's button on the scores does
   ("<variant>@<map>" plays that game on another map: a map change;
-  "<variant>+vehicles" the variant with every vehicle the map places); a
+  "<variant>+vehicles" the variant with every vehicle the map places;
+  "saved=<name>" the player's saved game type of that name, the Halo 3
+  game type editor's, its rules logged once the game runs); a
   map with a path is that level (custom_maps\pcgulch: a Custom Edition map
   named as a PC host names it, OpenCE's, for the crossplay wire's map
   checks: port/vita/tests/run_crossplay_maps_test.sh);
