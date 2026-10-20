@@ -729,6 +729,51 @@ static void watchdog_thread(void *unused)
 	}
 }
 
+/* ---------- thread-local storage
+
+The game's __thread variables (the file layer's background copy and its
+stop, GetLastError, the APC queues, the scene packs' worker flags) are
+vitasdk GCC's emulated TLS: libgcc's __emutls_get_address keeps one value
+per thread only when it takes the threads as running, __gthread_active_p,
+which is a weak reference to pthread_cancel - and a weak reference pulls
+nothing out of libpthread.a. Nothing called pthread_cancel, so through
+insider.17 every __thread variable was ONE for the whole game: the map
+copy's thread marked itself a background one with a stop
+(platform_file_background_begin) for every thread, and once a copy was
+asked to stop - a host choosing another map while the menus' copy ran -
+every read and write of every thread ended at once with 0 bytes, until
+the next copy began, which never did: Ben's Battle Creek "cut short (0
+bytes)" (his 21 MB file), the game types that "could not be read", the
+Forge packs' builds stopping at 0%, then Blood Gulch and the main menu's
+ui.map "damaged" - the game stuck (Oct 2026). The strong reference here
+links pthread_cancel, and the check below says in the log that each
+thread has its own. */
+volatile void *halo_tls_pthread_cancel;
+static __thread int tls_probe;
+
+static void *tls_probe_thread(void *unused)
+{
+	(void)unused;
+	tls_probe = 2;
+	return NULL;
+}
+
+static void tls_check(void)
+{
+	pthread_t thread;
+
+	halo_tls_pthread_cancel = (void *)pthread_cancel;
+	tls_probe = 1;
+	if (pthread_create(&thread, NULL, tls_probe_thread, NULL) != 0)
+	{
+		vita_host_log("threads: thread-local storage not checked (no thread)");
+		return;
+	}
+	pthread_join(thread, NULL);
+	vita_host_log(tls_probe == 1 ? "threads: thread-local storage: each thread its own" :
+		"threads: thread-local storage SHARED by every thread: file calls, errors and copies will cross threads");
+}
+
 static int game_thread(SceSize arguments_size, void *arguments_data)
 {
 	static char *arguments[] = { "halo", NULL };
@@ -736,6 +781,7 @@ static int game_thread(SceSize arguments_size, void *arguments_data)
 	(void)arguments_size;
 	(void)arguments_data;
 	vita_host_thread_watch("game");
+	tls_check();
 	/* (above the game's threads, which spin at the default priority
 	while they wait on each other: at their priority it never ran) */
 	{

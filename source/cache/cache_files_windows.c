@@ -954,20 +954,27 @@ static short cache_files_last_copy_failure = 0;
 /* (and the cache file it was copying to) */
 static short cache_files_last_copy_slot = NONE;
 
-boolean cache_files_xbox_map_problem(
+boolean cache_files_xbox_map_problem_read(
 	char const *map_name,
 	char *why,
-	long why_size)
+	long why_size,
+	boolean *unreadable)
 {
 	char const *name = tag_name_strip_path(map_name ? map_name : "");
 	struct cache_file_header header;
 	char path[256];
 	HANDLE file = INVALID_HANDLE_VALUE;
 	unsigned long bytes_read = 0;
+	unsigned long file_size;
+	unsigned long read_error;
 	boolean read = FALSE;
 	long largest;
 
 	why[0] = 0;
+	if (unreadable)
+	{
+		*unreadable = FALSE;
+	}
 	if (!name[0])
 	{
 		snprintf(why, (size_t)why_size, T("the host named no map"));
@@ -984,11 +991,28 @@ boolean cache_files_xbox_map_problem(
 		return TRUE;
 	}
 	read = ReadFile(file, &header, sizeof(header), &bytes_read, NULL) && bytes_read == sizeof(header);
+	read_error = read ? 0 : GetLastError();
+	/* (port: the file's own size, to tell a file cut short from a read that
+	failed - Ben's insider.17 Vita said his whole beavercreek.map was "cut
+	short (0 bytes)" each time the read did not answer: not his file's
+	fault, and not a verdict to keep) */
+	file_size = GetFileSize(file, NULL);
 	CloseHandle(file);
 	if (!read)
 	{
+		if (file_size != INVALID_FILE_SIZE && file_size >= sizeof(header))
+		{
+			error(_error_silent, "cache: '%s.map' (%lu bytes) did not read (%lu bytes of its header, error %lu)", name,
+				(unsigned long)file_size, (unsigned long)bytes_read, (unsigned long)read_error);
+			snprintf(why, (size_t)why_size, T("your %s.map could not be read just now: try again"), name);
+			if (unreadable)
+			{
+				*unreadable = TRUE;
+			}
+			return TRUE;
+		}
 		snprintf(why, (size_t)why_size, T("your %s.map is cut short (%lu bytes): copy it to your maps folder again"),
-			name, bytes_read);
+			name, (unsigned long)(file_size != INVALID_FILE_SIZE ? file_size : bytes_read));
 		return TRUE;
 	}
 	/* (a Halo PC map named as an Xbox level: its loader is
@@ -1041,17 +1065,40 @@ boolean cache_files_xbox_map_problem(
 	return FALSE;
 }
 
+boolean cache_files_xbox_map_problem(
+	char const *map_name,
+	char *why,
+	long why_size)
+{
+	return cache_files_xbox_map_problem_read(map_name, why, why_size, NULL);
+}
+
+/* (cache_files_precache_failure_describe) whether the failure it described
+was the map file's own: cut short, damaged, another map's - not a read
+that did not answer, the card full or the memory */
+static boolean cache_files_last_failure_the_file = FALSE;
+
+boolean cache_files_precache_failure_the_file(
+	void)
+{
+	return cache_files_last_failure_the_file;
+}
+
 void cache_files_precache_failure_describe(
 	char const *map_name,
 	char *why,
 	long why_size)
 {
 	char const *name = tag_name_strip_path(map_name ? map_name : "");
+	boolean unreadable = FALSE;
 
-	if (cache_files_xbox_map_problem(map_name, why, why_size))
+	cache_files_last_failure_the_file = FALSE;
+	if (cache_files_xbox_map_problem_read(map_name, why, why_size, &unreadable))
 	{
+		cache_files_last_failure_the_file = !unreadable;
 		return;
 	}
+	cache_files_last_failure_the_file = cache_files_last_copy_failure == _cache_copy_bad_file_failure;
 	switch (cache_files_last_copy_failure)
 	{
 	case _cache_copy_write_failure:

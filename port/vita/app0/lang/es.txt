@@ -696,6 +696,7 @@
 "the game's map cache %s couldn't be written (is the memory card full, or the data folder read-only?)" = "no se pudo escribir la caché de mapas %s (¿la tarjeta de memoria está llena, o la carpeta de datos es de solo lectura?)"
 "your %s.map is cut short or damaged: copy it to your maps folder again" = "tu %s.map está incompleto o dañado: cópialo otra vez a tu carpeta de mapas"
 "your %s.map could not be read" = "no se pudo leer tu %s.map"
+"your %s.map could not be read just now: try again" = "no se pudo leer tu %s.map en este momento: inténtalo otra vez"
 
 # ---------- joining a game (source/networking/network_client_manager.c)
 "This PC game's network version (%u) is not one this version of the game can join (%u).\n\nUpdate the game, or join another game." = "La versión de red de esta partida de PC (%u) no es una a la que esta versión del juego pueda unirse (%u).\n\nActualiza el juego o únete a otra partida."

@@ -126,8 +126,22 @@ unsigned long long vita_host_time_us(void);
 static volatile unsigned long long io_foreground_last_us;
 /* (the other threads' calls under way) */
 static volatile int io_foreground_calls;
-static __thread int io_background;
-static __thread int (*io_background_stop)(void);
+/* (the background thread, by its id - not a __thread variable: on the Vita
+those were one for every thread through insider.17, vita_main.c's
+tls_check, and the copy's stop then ended every thread's reads with 0 bytes;
+one map copy runs at a time) */
+static volatile unsigned long io_background_thread;
+static int (*volatile io_background_stop)(void);
+
+unsigned long vita_host_thread_id(void);
+
+/* whether the calling thread is the background one */
+static int io_background_here(void)
+{
+	unsigned long thread = __atomic_load_n(&io_background_thread, __ATOMIC_ACQUIRE);
+
+	return thread && thread == vita_host_thread_id();
+}
 
 static size_t background_piece_size(void)
 {
@@ -146,14 +160,17 @@ static size_t background_piece_size(void)
 
 void platform_file_background_begin(int (*stop)(void))
 {
-	io_background = background_piece_size() != 0;
 	io_background_stop = stop;
+	__atomic_store_n(&io_background_thread, background_piece_size() != 0 ? vita_host_thread_id() : 0, __ATOMIC_RELEASE);
 }
 
 void platform_file_background_end(void)
 {
-	io_background = 0;
-	io_background_stop = NULL;
+	if (io_background_here())
+	{
+		__atomic_store_n(&io_background_thread, 0, __ATOMIC_RELEASE);
+		io_background_stop = NULL;
+	}
 }
 
 /* the background calls' bytes written, all told (a map copy's progress
@@ -168,7 +185,7 @@ unsigned long long platform_file_background_written(void)
 /* (a call of a thread that is not a background one, at its start and end) */
 static void io_foreground_note(void)
 {
-	if (!io_background)
+	if (!io_background_here())
 		__atomic_store_n(&io_foreground_last_us, vita_host_time_us(), __ATOMIC_RELAXED);
 }
 
@@ -187,8 +204,9 @@ its stop was asked for */
 static BOOL io_background_piece(void)
 {
 	unsigned long long waited = 0;
+	int (*stop)(void) = io_background_stop;
 
-	if (io_background_stop && io_background_stop())
+	if (stop && stop())
 	{
 		SetLastError(ERROR_OPERATION_ABORTED);
 		return FALSE;
@@ -215,7 +233,7 @@ static unsigned long long file_call_started(void)
 {
 	unsigned long long now;
 
-	if (!io_background)
+	if (!io_background_here())
 		__atomic_add_fetch(&io_foreground_calls, 1, __ATOMIC_RELAXED);
 	io_foreground_note();
 	now = halo_load_profile_now();
@@ -224,7 +242,7 @@ static unsigned long long file_call_started(void)
 
 static void file_call_done(unsigned long long started, const char *call, const char *path, unsigned long long bytes)
 {
-	if (!io_background)
+	if (!io_background_here())
 		__atomic_sub_fetch(&io_foreground_calls, 1, __ATOMIC_RELAXED);
 	io_foreground_note();
 	if (started > 1)
@@ -703,7 +721,7 @@ static BOOL read_at_timed(struct platform_file *file, LPVOID buffer, DWORD count
 
 		if (bounce && wanted > READ_BOUNCE_SIZE)
 			wanted = READ_BOUNCE_SIZE;
-		if (io_background)
+		if (io_background_here())
 		{
 			if (wanted > background_piece_size())
 				wanted = background_piece_size();
@@ -783,7 +801,7 @@ static BOOL write_at(struct platform_file *file, LPCVOID buffer, DWORD count, LP
 
 		if (wanted > write_piece_size())
 			wanted = write_piece_size();
-		if (io_background)
+		if (io_background_here())
 		{
 			if (wanted > background_piece_size())
 				wanted = background_piece_size();
@@ -816,7 +834,7 @@ static BOOL write_at(struct platform_file *file, LPCVOID buffer, DWORD count, LP
 		}
 		io_card_request_write((unsigned long long)result, 1);
 		total += (DWORD)result;
-		if (io_background)
+		if (io_background_here())
 			__atomic_add_fetch(&io_background_written, (unsigned long long)result, __ATOMIC_RELAXED);
 	}
 	if (bytes_written)
