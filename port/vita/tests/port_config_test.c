@@ -345,6 +345,16 @@ static void test_writes(void)
 	check(config_boolean("network.adhoc") == 1, "network.adhoc read back");
 	check(config_boolean("debug.telnet_console") == 1, "debug.telnet_console read back");
 	check(!log_has("config.toml:"), "read back without a word");
+#ifndef HALO_VITA
+	/* (a PC build, not standing in for a Vita: no ad hoc play, whatever
+	the file says; said once) */
+	unsetenv("HALO_TEST_PLATFORM");
+	check(!config_adhoc_offered() && config_boolean("network.adhoc") == 0, "a PC build: network.adhoc off all the same");
+	check(log_has("ad hoc play is the PS Vitas' own"), "a PC build: the ad hoc setting ignored, said");
+	setenv("HALO_TEST_PLATFORM", "vita", 1);
+#else
+	check(config_adhoc_offered(), "the Vita offers ad hoc play");
+#endif
 }
 
 static void test_hand(void)
@@ -503,6 +513,9 @@ int main(int argc, char **argv)
 	snprintf(folder, sizeof(folder), "%s", argv[1]);
 	snprintf(fixture, sizeof(fixture), "%s", argv[2]);
 	snprintf(config_file, sizeof(config_file), "%s/config.toml", folder);
+	/* (a desktop build stands in for a Vita, as the harness's tests do:
+	test_out.sh; a PC build has no ad hoc play, test_writes) */
+	setenv("HALO_TEST_PLATFORM", "vita", 1);
 #ifdef HALO_NOT_DESKTOP
 	setenv("HALO_DATA_ROOT", folder, 1);
 	printf("(the Vita's)\n");

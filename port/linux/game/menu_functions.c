@@ -1344,18 +1344,26 @@ static void h3_campaign_update(struct widget_instance *widget)
 /* a picker's list (the missions, the difficulties): the first count items
 shown (the levels not open yet hidden), the picture's frame and the
 description's string following the focused one */
-static void h3_pick_update(struct widget_instance *list, long count, char const *picture, char const *description)
+static void h3_pick_update(struct widget_instance *list, long count, long hidden, char const *picture,
+	char const *description)
 {
 	struct widget_instance *screen = screen_of(list);
 	struct widget_instance *child, *found;
-	long index = 0, focused = 0;
+	long index = 0, focused = 0, row = 0;
+	/* (the rows shown one under another: one left out, the next take its
+	place, from the first two's spacing) */
+	short top = list->child ? list->child->vertical_offset : 0;
+	short step = list->child && list->child->next ? list->child->next->vertical_offset - top : 0;
 
 	for (child = list->child; child; child = child->next, index++)
 	{
-		boolean shown = index < count;
+		boolean shown = index < count && index != hidden;
 
 		widget_instance_set_visibility_recursive(child, shown);
 		child->disabled = !shown;
+		if (hidden != NONE && shown && step > 0)
+			child->vertical_offset = (short)(top + step * row);
+		row += shown;
 		if (child == list->focused_child)
 			focused = index;
 	}
@@ -10984,10 +10992,10 @@ void pc_menu_game_data_function_invoke(
 		h3_campaign_update(widget);
 		break;
 	case _input_h3_missions:
-		h3_pick_update(widget, h3_campaign_unlocked(), "mission_picture", "mission_text");
+		h3_pick_update(widget, h3_campaign_unlocked(), NONE, "mission_picture", "mission_text");
 		break;
 	case _input_h3_difficulties:
-		h3_pick_update(widget, 4, "difficulty_emblem", "difficulty_text");
+		h3_pick_update(widget, 4, NONE, "difficulty_emblem", "difficulty_text");
 		break;
 	case _input_h3_mission_title:
 		h3_mission_title_update(widget);
@@ -11012,7 +11020,9 @@ void pc_menu_game_data_function_invoke(
 		h3_mp_lobby_update(widget);
 		break;
 	case _input_h3_networks:
-		h3_pick_update(widget, NUMBER_OF_H3_NETWORKS, "network_picture", "network_text");
+		/* (AD HOC: the PS Vitas' own, none on a PC) */
+		h3_pick_update(widget, NUMBER_OF_H3_NETWORKS, config_adhoc_offered() ? NONE : _h3_network_adhoc, "network_picture",
+			"network_text");
 		break;
 	case _input_h3_maps:
 		if (widget->type == _ui_widget_type_column_list)
@@ -11023,7 +11033,8 @@ void pc_menu_game_data_function_invoke(
 			h3_mp_gametypes_update(widget);
 		break;
 	case _input_h3_campaign_networks:
-		h3_pick_update(widget, NUMBER_OF_H3_CAMPAIGN_NETWORKS, "campnet_picture", "campnet_text");
+		h3_pick_update(widget, NUMBER_OF_H3_CAMPAIGN_NETWORKS, config_adhoc_offered() ? NONE : _h3_campaign_adhoc,
+			"campnet_picture", "campnet_text");
 		break;
 	case _input_h3_profiles:
 		if (widget->type == _ui_widget_type_column_list)

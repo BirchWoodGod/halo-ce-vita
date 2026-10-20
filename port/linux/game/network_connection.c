@@ -34,6 +34,9 @@ how it goes is published for the settings panel (halo_network_connection,
 halo_network_phase: system_link_shortcut.h), and said for the lobbies'
 status line (network_connection_status).
 
+A PC build has no Ad hoc (config_adhoc_offered: the PS Vitas' own): a
+setting or a choice of it is Same Wi-Fi there.
+
 (Debug, test builds) HALO_NETWORK_TEST_SWITCH="online,wifi,adhoc,..."
 switches through the list, one each HALO_NETWORK_TEST_SWITCH_SECONDS (8)
 at the main menu, as the lobby would, and logs this process's own threads
@@ -93,7 +96,22 @@ static short connection_of(char const *value)
 	for (index = 0; value && index < NUMBER_OF_NETWORK_CONNECTIONS; index++)
 	{
 		if (!strcmp(value, connection_values[index]))
+		{
+			/* (a PC: no ad hoc play - config_adhoc_offered -, Same Wi-Fi,
+			System Link, in its place; said once) */
+			if (index == NETWORK_CONNECTION_ADHOC && !config_adhoc_offered())
+			{
+				static boolean said;
+
+				if (!said)
+				{
+					said = TRUE;
+					platform_log("network: Ad hoc is the PS Vitas' own: Same Wi-Fi (System Link) on this PC");
+				}
+				return NETWORK_CONNECTION_WIFI;
+			}
 			return index;
+		}
 	}
 	return NETWORK_CONNECTION_WIFI;
 }
@@ -293,7 +311,12 @@ short network_connection_running(void)
 
 void network_connection_choose(short which)
 {
-	char const *value = connection_values[PIN(which, 0, NUMBER_OF_NETWORK_CONNECTIONS - 1)];
+	char const *value;
+
+	/* (none on a PC: System Link) */
+	if (which == NETWORK_CONNECTION_ADHOC && !config_adhoc_offered())
+		which = NETWORK_CONNECTION_WIFI;
+	value = connection_values[PIN(which, 0, NUMBER_OF_NETWORK_CONNECTIONS - 1)];
 
 	if (network_connection_wanted() == which && getenv("HALO_VITA_NETWORK"))
 		return;

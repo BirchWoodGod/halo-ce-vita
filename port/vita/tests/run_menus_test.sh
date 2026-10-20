@@ -234,6 +234,10 @@
 #            AD HOC switches to ad hoc play live (the system's dialog asked
 #            for), BROWSE GAMES opens the ad hoc LAN browser, and SYSTEM LINK
 #            leaves ad hoc play again
+#   pcnoadhoc  the PC build (HALO_TEST_PLATFORM=pc) has no AD HOC: the NETWORK picker
+#            goes SYSTEM LINK, OFFLINE and back up to SYSTEM LINK without it; the connection Ad hoc in
+#            the settings is System Link there, ad hoc play never started; the
+#            campaign lobby's NETWORK has no AD HOC CO-OP (HALO_TEST_PROFILE)
 #   h3adhoccoop  AD HOC CO-OP from the Halo 3 campaign lobby (HALO_TEST_PROFILE;
 #            skipped without), the connection Ad hoc and the join answered
 #            (HALO_ADHOC_TEST=join): START GAME, the joining dialog, then the
@@ -1505,6 +1509,42 @@ for case in $cases; do
 		check_h3 h3lan_empty halo3
 		grep -aq 'menus: the server browser says "No games found on your network"' "$out/h3lan_empty/run.log" ||
 			fail h3lan "with no games the LAN browser did not say none were found" ;;
+	pcnoadhoc)
+		# (the PC build, HALO_TEST_PLATFORM=pc: no AD HOC - the PS Vitas' own -, the owner, Oct 20
+		# 2026. NETWORK: the picker on SYSTEM LINK, down, A: OFFLINE, the next row; NETWORK, up, A:
+		# SYSTEM LINK again (a Vita's: AD HOC); ONLINE never chosen, the brokers TEST-NET addresses all
+		# the same. With the connection Ad hoc in the settings (HALO_NET_ADHOC, HALO_VITA_NETWORK=adhoc):
+		# SYSTEM LINK, said in the log. The campaign lobby's NETWORK: LOCAL, ONLINE CO-OP, SYSTEM LINK
+		# CO-OP and round to LOCAL, no AD HOC CO-OP)
+		run pcnoadhoc "$menus_data" 34 "$h3mppad a wait:150:2500 @pcnoadhoc_picker down:150:600 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:3000" \
+			HALO_MENU_STYLE=halo3 HALO_TEST_PLATFORM=pc HALO_SCREENSHOT_DIR="$out/pcnoadhoc" $h3net HALO_NET_ONLINE=false
+		run pcnoadhoc_setting "$menus_data" 20 "$h3mppad" HALO_MENU_STYLE=halo3 HALO_TEST_PLATFORM=pc HALO_NET_ADHOC=true \
+			HALO_VITA_NETWORK=adhoc $h3net HALO_NET_ONLINE=false
+		check_h3 pcnoadhoc halo3
+		log=$out/pcnoadhoc/run.log
+		grep -a "menus: h3 mp: network" "$log"
+		[ "$(grep -a "menus: h3 mp: network" "$log" | sed 's/.*network //' | tr '\n' ' ')" = "OFFLINE SYSTEM LINK " ] ||
+			fail pcnoadhoc "NETWORK did not go SYSTEM LINK, OFFLINE and up to SYSTEM LINK (AD HOC offered?)"
+		grep -aq "NETWORK: AD HOC\|network: switching from .* to Ad hoc" "$log" && fail pcnoadhoc "AD HOC was offered on the PC build"
+		[ -s "$out/pcnoadhoc/pcnoadhoc_picker.bmp" ] && [ -n "${HALO_TEST_SHOTS:-}" ] && cp "$out/pcnoadhoc/pcnoadhoc_picker.bmp" "$HALO_TEST_SHOTS/"
+		check_h3 pcnoadhoc_setting halo3
+		log=$out/pcnoadhoc_setting/run.log
+		grep -aq "menus: h3 mp lobby: NETWORK: SYSTEM LINK" "$log" || fail pcnoadhoc "the connection Ad hoc did not open the lobby on SYSTEM LINK"
+		grep -aq "network: Ad hoc is the PS Vitas' own: Same Wi-Fi (System Link) on this PC" "$log" ||
+			fail pcnoadhoc "the setting's Ad hoc was not said to be System Link here"
+		grep -aq "ad hoc: on\|network: Ad hoc (the connection" "$log" && fail pcnoadhoc "ad hoc play started on the PC build"
+		if [ -r "${HALO_TEST_PROFILE:-}" ]; then
+			# (CAMPAIGN, the profile; the lobby: up to NETWORK, A; down three, A: round to LOCAL past
+			# SYSTEM LINK CO-OP, the last; a Vita's would be AD HOC CO-OP)
+			profile_from=$HALO_TEST_PROFILE run pcnoadhoc_campaign "$menus_data" 34 "wait:150:3000 a wait:150:3000 a wait:150:3000 up:150:600 a wait:150:2500 down:150:600 down:150:600 down:150:600 a wait:150:3000" \
+				HALO_MENU_STYLE=halo3 HALO_TEST_PLATFORM=pc $h3net HALO_NET_ONLINE=false
+			check_h3 pcnoadhoc_campaign halo3
+			log=$out/pcnoadhoc_campaign/run.log
+			grep -a "menus: h3 campaign: network" "$log" | tail -1 | grep -q "network LOCAL" ||
+				fail pcnoadhoc "the campaign's NETWORK, three down from LOCAL, was not LOCAL again (AD HOC CO-OP offered?)"
+		else
+			echo "SKIP (pcnoadhoc): no HALO_TEST_PROFILE: the campaign lobby's NETWORK"
+		fi ;;
 	h3adhoc)
 		# (the connection Ad hoc: BROWSE GAMES, the joining dialog, joined: the profile (A joins,
 		# A the profile, A), the LAN browser)
