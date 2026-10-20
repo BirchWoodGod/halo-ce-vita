@@ -1060,6 +1060,16 @@ static void party_status_heard(struct party_member *member, const struct message
 game, another version, a full one; this machine there already (0: to join) */
 static int party_follow_precheck(const struct message *message)
 {
+	/* (a leader not this machine's friend - the longest-standing member, a
+	friend of the leader gone, who leads once that leader is silent - leads
+	no one into a game by itself: a stranger would choose which host this
+	machine reaches, and its address with it; security review 1.1.1-beta.1
+	F-07) */
+	if (friends->party.active && friends->party.leader >= 0 && friends->party.leader < friends->party.count &&
+		!find_friend(friends->party.members[friends->party.leader].key))
+	{
+		return P2P_PARTY_FOLLOW_FAILED;
+	}
 	if (message->party_value & PARTY_FOLLOW_LOCKED)
 		return P2P_PARTY_FOLLOW_PASSWORD;
 	if ((message->party_value & PARTY_FOLLOW_UNREACHABLE) || !(message->party_value & PARTY_FOLLOW_HAS_INVITE))

@@ -189,6 +189,10 @@ enum
 	PATH_SIZE = 512,
 };
 
+/* (a message fits the room p2p_signal.c gives it: p2p_friends_outgoing
+copies it whole) */
+typedef char friends_payload_room_assert[MAXIMUM_PAYLOAD_SIZE <= P2P_FRIENDS_PAYLOAD_ROOM ? 1 : -1];
+
 static const char signature_label[] = "hcev-friends-1";
 /* the friends' topics' prefix: hcev on every build, whatever its
 signalling's (a PC build of this tree signals on hceu), as the labels are
@@ -2359,17 +2363,28 @@ static void request_heard(const struct message *message)
 	if (find_muted(message->sender) >= 0)
 		return;
 	name_or_code(message->sender, message->name, text, sizeof(text));
-	/* (a friend who lost this machine: agreed to already, so answered) */
+	/* (a friend who lost this machine: agreed to already, so answered; not
+	while appearing offline, which an answer would give away: a friend could
+	send a request to learn whether this machine is on, security review
+	1.1.1-beta.1 F-04) */
 	record = find_friend(message->sender);
 	if (record)
 	{
 		snprintf(record->name, sizeof(record->name), "%s", message->name);
+		if (friends->appear_offline)
+		{
+			platform_log("friends: %s asked again (their list lost this one?); not answered while appearing offline",
+				text);
+			return;
+		}
 		send_accept(record->key, message->nonce, record->friendship);
 		record->presence_due = 1;
 		platform_log("friends: %s asked again (their list lost this one?); accepted again", text);
 		return;
 	}
-	/* (this machine asked them too: both said yes) */
+	/* (this machine asked them too: both said yes; while appearing offline
+	it stays a request, answered by hand) */
+	if (!friends->appear_offline)
 	{
 		char their[P2P_FRIEND_CODE_LENGTH + 1];
 		int outgoing;
@@ -2626,8 +2641,10 @@ static void pair_heard(const unsigned char *payload, int size)
 	{
 		struct tombstone_record *stone = &friends->tombstones[tombstone];
 
-		if (p2p_equal(message.sender, stone->key, P2P_KEY_SIZE) && plain_verify(plain, opened) &&
-			(!stone->reply_time || elapsed(stone->reply_time, REMOVE_REPLY_INTERVAL)))
+		/* (not while appearing offline: the answer would say this machine is
+		on) */
+		if (!friends->appear_offline && p2p_equal(message.sender, stone->key, P2P_KEY_SIZE) &&
+			plain_verify(plain, opened) && (!stone->reply_time || elapsed(stone->reply_time, REMOVE_REPLY_INTERVAL)))
 		{
 			stone->reply_time = now_stamp();
 			send_remove(stone->key, stone->friendship);
