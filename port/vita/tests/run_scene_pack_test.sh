@@ -85,7 +85,7 @@ recipes=$root/port/vita/app0/packs
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-tool damaged verified stale banshee ai cetool cepelican cemodels}
+cases=${*:-tool damaged verified stale banshee ai cetool cemodels}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 ce_resources=${HALO_TEST_CE_RESOURCES:-$data/maps}
 status=0
@@ -353,7 +353,7 @@ EOF
 			continue
 		fi
 		mkdir -p "$out/cetool"
-		"$tool" build "$recipes/ce_pelican.txt" "$out/cedata/maps" "$out/cetool/ce_pelican.pack" > "$out/cetool/build.log" 2>&1 ||
+		"$tool" build "$root/port/vita/tests/data/ce_pelican.txt" "$out/cedata/maps" "$out/cetool/ce_pelican.pack" > "$out/cetool/build.log" 2>&1 ||
 			fail "cetool: ce_pelican was not built ($out/cetool/build.log)"
 		grep -aE "^built|^loaded|groups|scene packs: extinction" "$out/cetool/build.log"
 		expect cetool "Extinction's tags checked as the game's Custom Edition loader checks them" \
@@ -363,15 +363,15 @@ EOF
 		TMPDIR="$out/cetool" "$tool" fuzz "$out/cetool/ce_pelican.pack" $(( ${HALO_TEST_FUZZ:-2000} / 4 )) 3 > "$out/cetool/fuzz.log" 2>&1 ||
 			fail "cetool: ce_pelican's fuzzing failed ($out/cetool/fuzz.log)"
 		tail -1 "$out/cetool/fuzz.log"
-		TMPDIR="$out/cetool" "$tool" cefuzz "$recipes/ce_pelican.txt" "$out/cedata/maps" "${HALO_TEST_CEFUZZ:-200}" 5 \
+		TMPDIR="$out/cetool" "$tool" cefuzz "$root/port/vita/tests/data/ce_pelican.txt" "$out/cedata/maps" "${HALO_TEST_CEFUZZ:-200}" 5 \
 			> "$out/cetool/cefuzz.log" 2>&1 || fail "cetool: damaged sources ($out/cetool/cefuzz.log)"
 		grep -aE "^cefuzz|the build refused|failures" "$out/cetool/cefuzz.log" | sed 's/^/  /'
 		# (the recipe's map of another version; not in the folder)
-		sed 's/^cemap extinction 97888771 c5372723/cemap extinction 97888771 c5372724/' "$recipes/ce_pelican.txt" > "$out/cetool/other.txt"
+		sed 's/^cemap extinction 97888771 c5372723/cemap extinction 97888771 c5372724/' "$root/port/vita/tests/data/ce_pelican.txt" > "$out/cetool/other.txt"
 		"$tool" build "$out/cetool/other.txt" "$out/cedata/maps" "$out/cetool/other.pack" > "$out/cetool/other.log" 2>&1 &&
 			fail "cetool: a pack built from another version of the map"
 		expect cetool "another version of the map: refused, said" "your extinction.map is another version" "$out/cetool/other.log"
-		sed 's/^cemap extinction /cemap nosuchmap /' "$recipes/ce_pelican.txt" > "$out/cetool/missing.txt"
+		sed 's/^cemap extinction /cemap nosuchmap /' "$root/port/vita/tests/data/ce_pelican.txt" > "$out/cetool/missing.txt"
 		"$tool" build "$out/cetool/missing.txt" "$out/cedata/maps" "$out/cetool/missing.pack" > "$out/cetool/missing.log" 2>&1 &&
 			fail "cetool: a pack built from a map that is not there"
 		expect cetool "no such map: refused, said" "nosuchmap.map \(Halo Custom Edition\) is not in the maps folder" "$out/cetool/missing.log"

@@ -1478,7 +1478,6 @@
 "Armored Marine Sniper Rifle" = "Marine blindado francotirador"
 "Armored Marine Sniper Rifle Major" = "Marine blindado francotirador mayor"
 "Covenant Dropship" = "Nave del Covenant"
-"Extinction Pelican" = "Pelican de Extinction"
 "The Pelican of Extinction: its guns, a\nco-pilot and eleven riders. Built from\nyour Extinction map (Halo Custom\nEdition, by (DA)Ender)." = "El Pelican de Extinction: sus armas,\ncopiloto y once pasajeros. Hecho con tu\nmapa Extinction (Halo Custom Edition, de\n(DA)Ender)."
 "%s: %d OF %d" = "%s: %d DE %d"
 "EXTRA OBJECTS" = "OBJETOS EXTRA"
