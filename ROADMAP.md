@@ -90,6 +90,24 @@ Fixes for the bugs found in the 1.1.0 betas.
   joiner scans it with the Vita's camera.
 - **Loading**: a level start without the remaining few seconds of waiting.
 
+### Asked for by testers
+
+- **Field of view** setting.
+- **The original loading screens** back, with their sound, and a fast
+  loading option.
+- **Aim**: aim assist on or off for the stick (the gyro already has it),
+  stick dead zone and response curve settings, the stick's ramp-up as an
+  option, and touchscreen aiming.
+- **Skulls**: modifiers for the campaign, as in the Anniversary edition.
+- **A "potato" graphics preset**: flat lighting, no shadows, no texture
+  filtering, for the most frames.
+- **More armour**: the 1999 reveal-trailer Master Chief in Customization
+  (a new model; modelers welcome, see Help wanted).
+- **Dark armour colours** easier to see in dark levels.
+- **European (PAL) game files**: the Spanish, Italian, French and German
+  versions of the game as the data source.
+- **Better sound**, from the player's own game files.
+
 ## Help wanted
 
 Bug reports with crash dumps are the most useful contribution: see
