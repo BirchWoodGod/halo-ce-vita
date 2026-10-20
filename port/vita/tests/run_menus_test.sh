@@ -201,6 +201,9 @@
 #            named, and the glyph cache never going round each frame (the owner's
 #            photo of insider.10, Oct 18 2026: only the first row's name drawn on
 #            the Vita, each row below one column fewer)
+#   h3livebrowse  BROWSE GAMES pressed as the live lobby goes live (SYSTEM LINK,
+#            HALO_TEST_PROFILE): the presses kept, the games browser, the live
+#            game closed, no SELECT PROFILE for the profile it played with
 #   browserreopen  the Halo 3 games browser opened and closed again and again
 #            (the testers, insider.15: names lost, then a crash), 34 made-up
 #            games of varied names, rules and players, 12 times more; the
@@ -294,7 +297,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
@@ -1337,6 +1340,28 @@ for case in $cases; do
 		# text as nothing on the Vita)
 		grep -aq "text: the glyph cache .* goes round every frame" "$log" &&
 			fail browserrows "the glyph cache went round every frame: the later rows' text would be missing on the Vita" ;;
+	h3livebrowse)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "--- h3livebrowse"; echo "SKIP: no HALO_TEST_PROFILE"; continue
+		fi
+		# (the owner, insider.15: the first visit to MULTIPLAYER, BROWSE GAMES pressed as the lobby
+		# went live: a press lost, then SELECT PROFILE asked for the profile the lobby already
+		# played with. MULTIPLAYER on SYSTEM LINK with a profile, down five to BROWSE GAMES pressed
+		# through the lobby going live - one every 300 ms from 600 ms after it opened -, A: the
+		# games browser, the live game closed, no SELECT PROFILE; B back, then BROWSE GAMES again:
+		# still none)
+		d="down:150:300"
+		pad="wait:150:3000 down:150:700 a wait:150:600 $d $d $d $d $d a wait:150:5000 b wait:150:5000 a wait:150:5000"
+		profile_from=$HALO_TEST_PROFILE run h3livebrowse "$menus_data" 40 "$pad" HALO_MENU_STYLE=halo3
+		check_h3 h3livebrowse halo3
+		log=$out/h3livebrowse/run.log
+		grep -aE "ui: screen|menus: h3 (live lobby|mp: browse|join)" "$log" | head -20
+		grep -aq "menus: h3 live lobby: open on SYSTEM LINK" "$log" || fail h3livebrowse "the lobby did not go live"
+		sed -n '/menus: h3 live lobby: open on/,$p' "$log" | grep -aq "menus: h3 live lobby: closed (the host browses the games)" ||
+			fail h3livebrowse "BROWSE GAMES did not close the live game (pressed as it went live)"
+		[ "$(grep -ac "ui: screen pc.h3.lan.screen" "$log")" = 2 ] || fail h3livebrowse "the games browser did not open twice"
+		grep -aq "ui: screen pc.h3.join.screen" "$log" &&
+			fail h3livebrowse "SELECT PROFILE asked for the profile the live lobby played with" ;;
 	browserreopen)
 		# (Halo 3's games browser opened and closed again and again, as the owner's crash, Oct 19 2026:
 		# BROWSE GAMES, the profile, B and A again; OpenCE's browser opens once per run here - with
@@ -1738,7 +1763,7 @@ for case in $cases; do
 		grep -aq "4way_start2join_screen\|menus: Server Browser: the profile" "$log" &&
 			fail browserprofile "internet play off: the profile screen opened anyway" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3lobbyscenes|h3modelsmany|h3friends|h3friendspanel|browserprofile|h3players|browserrows|profilepaths|h3mppause|h3friendsfit|h3hostonline|browserreopen]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3lobbyscenes|h3modelsmany|h3friends|h3friendspanel|browserprofile|h3players|browserrows|profilepaths|h3mppause|h3friendsfit|h3hostonline|browserreopen|h3livebrowse]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"

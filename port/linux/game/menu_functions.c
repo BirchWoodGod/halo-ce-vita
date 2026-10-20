@@ -9213,8 +9213,10 @@ the profile joined (the one chosen this run, else the nameplate's), the
 server started, the lobby's GAME and MAP set */
 static void h3_live_open(void)
 {
-	/* (the nameplate's profile, none chosen this run: for this game alone -
-	SELECT PROFILE still asks the first time a game is browsed or joined) */
+	/* (the nameplate's profile, none chosen this run: the run's from now
+	on, as SELECT PROFILE's choice would be - the owner, insider.15: BROWSE
+	GAMES from the live lobby asked SELECT PROFILE for the profile the lobby
+	already played with -; one that cannot join is forgotten) */
 	boolean nameplate = h3_session.profile == NONE;
 	boolean joined;
 
@@ -9225,7 +9227,7 @@ static void h3_live_open(void)
 			h3_session_profile_chosen(0, h3_plate.shown);
 	}
 	joined = h3_session_profile_join();
-	if (nameplate)
+	if (nameplate && !joined)
 		h3_session_forget();
 	if (!joined)
 	{
