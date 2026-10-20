@@ -2314,6 +2314,8 @@ static const char *map_format_name(int format)
 		format == MAP_CUSTOM_EDITION_CAMPAIGN ? "CE SP" : "?";
 }
 
+void map_checks_forget(void);
+
 /* deletes a map file, with its picture and description beside it */
 static void map_delete(const struct map_entry *map)
 {
@@ -2346,6 +2348,9 @@ static void map_delete(const struct map_entry *map)
 		map_set_disabled(map->name, 0);
 	}
 	set_notice(T("Deleted %.40s.%s"), map->name, map->extension);
+	/* (the menus' map lists look at the maps folder's files again:
+	port/linux/game/map_checks.c) */
+	map_checks_forget();
 	{
 		char line[160];
 

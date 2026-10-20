@@ -153,6 +153,13 @@ char const *forge_map_path(
 	short map_index);
 char const *forge_map_name(
 	short map_index);
+/* whether the map's file is in the maps folder and can be played: its
+map_checks.h state (_map_check_playable, _missing, _unusable) and, when it
+cannot, a short reason; looked at once a run (map_checks.c) */
+short forge_map_state(
+	short map_index,
+	char *why,
+	long why_size);
 boolean forge_map_available(
 	short map_index);
 

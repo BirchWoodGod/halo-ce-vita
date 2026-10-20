@@ -1544,6 +1544,8 @@ short main_get_window_count(
 
 #ifdef HALO_LINUX
 static void main_checkpoint_log_new_map(void);
+/* (main_new_map) the last map's load failed */
+static boolean main_new_map_failed;
 /* (HALO_TEST_COMMANDS' "M" commands) the maps loaded */
 static unsigned long main_test_maps_loaded;
 #endif
@@ -1562,7 +1564,51 @@ static void main_new_map(
 	platform_log("new map: loading");
 	main_checkpoint_log_new_map();
 	game_load_started = halo_load_profile_now();
+#ifndef HALO_RELEASE
+	/* (debug, the tests) HALO_TEST_UI_LOAD_FAILS=1: the main menu's map's
+	first load after another map failed to load is taken as failed, as
+	Ben's was */
+	{
+		static int fail_ui_once = -1;
+
+		if (fail_ui_once < 0)
+			fail_ui_once = getenv("HALO_TEST_UI_LOAD_FAILS") && atoi(getenv("HALO_TEST_UI_LOAD_FAILS")) > 0;
+		if (fail_ui_once && main_new_map_failed && !csstrcasecmp(tag_name_strip_path(options->map_name), "ui"))
+		{
+			fail_ui_once = 0;
+			platform_log("new map: (test) the main menu's map's load taken as failed");
+			loaded = FALSE;
+		}
+		else
+			loaded = game_load(options);
+	}
+#else
 	loaded = game_load(options);
+#endif
+	/* port: the main menu's own map that did not load - after another map
+	failed (Ben's insider.17 Vita, Oct 20 2026: Battle Creek, then Blood
+	Gulch, then ui.map "damaged", every read ended by a stopped map copy's
+	state, xbox_files.c) - is tried once more with no map copy under way: a
+	main menu that cannot load has no menu to go back to (main_menu_load
+	then found it "loaded" and the game stood on no map for ever) */
+	if (!loaded && !csstrcasecmp(tag_name_strip_path(options->map_name), "ui"))
+	{
+		platform_log("new map: the main menu's map did not load: the map copy stopped, tried again");
+		errors_clear();
+		if (cache_files_precache_in_progress())
+			cache_files_precache_map_end();
+		loaded = game_load(options);
+		if (!loaded)
+		{
+			extern void display_error_damaged_media_reason(char const *format, ...);
+			extern void display_error_damaged_media(void);
+
+			platform_log("new map: the main menu's map could not be loaded again: the damaged disc's error");
+			display_error_damaged_media_reason("the menus' map ui.map could not be loaded");
+			display_error_damaged_media();
+		}
+	}
+	main_new_map_failed = !loaded;
 	halo_load_profile_add(_halo_load_game_load, game_load_started, 0);
 	/* port: a custom or downloaded map that failed to load for any reason
 	(not only the Custom Edition loader's) goes back to the menu with a

@@ -405,6 +405,8 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 	</widget>
 	<widget name="h3/map/map_picture" left="320" top="84" width="140" height="114" bitmap="ui\shell\bitmaps\mp_map_grafix"/>
 	<widget name="h3/map/map_text" type="text" left="320" top="206" width="266" height="150" font="h3/font_small" color="#FFCFD9E3" string_list="ui\shell\main_menu\multiplayer_type_select\mp_map_select\map_data"/>
+	<!-- (a map whose file is missing or cannot be played: why, in its description's place, port h3 maps) -->
+	<widget name="h3/map/map_why" type="text" left="320" top="206" width="266" height="150" font="h3/font_small" color="#FFCFD9E3"/>
 	<widget name="h3/map/screen" flags="pass_unhandled_to_focused_child">
 		<on event="b back" back="true"/>
 		<child widget="h3/main/haze"/>
@@ -413,6 +415,7 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 		<child widget="h3/pick/rule"/>
 		<child widget="h3/map/map_picture"/>
 		<child widget="h3/map/map_text"/>
+		<child widget="h3/map/map_why"/>
 		<child widget="h3/pick/strip"/>
 		<child widget="h3/pick/a_butn"/>
 		<child widget="h3/pick/select"/>

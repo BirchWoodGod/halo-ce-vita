@@ -213,11 +213,22 @@ boolean cache_files_xbox_map_problem(
 	char const *map_name,
 	char *why,
 	long why_size);
+/* (the same, and `unreadable` TRUE when the file is whole but did not read
+just now: a passing failure, not the file's verdict) */
+boolean cache_files_xbox_map_problem_read(
+	char const *map_name,
+	char *why,
+	long why_size,
+	boolean *unreadable);
 /* port: why the last precache of `map_name` failed, for the player */
 void cache_files_precache_failure_describe(
 	char const *map_name,
 	char *why,
 	long why_size);
+/* port: whether the failure it described last was the map file's own (cut
+short, damaged, another map's), not a passing one */
+boolean cache_files_precache_failure_the_file(
+	void);
 /* port: a map that could not be precached (cache_files.c): said, and the
 game goes back to the menu or a joiner leaves its game, rather than a
 damaged disc. FALSE for the menus' own map, which has no menu to go back

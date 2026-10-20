@@ -176,6 +176,14 @@
 #               the vehicle ramp and off it, a shot stopping at a large wall
 #               (the projectiles' line meets it; the shot is gone at its face);
 #               the browser by the pad: BLOCKS, a wall placed from it
+#   lobbycost   the lobby's and its map picker's frames look up no file: the
+#               game thread's paths looked for (HALO_TEST_PATH_LOOKUPS, every
+#               30 frames) - the lobby asked whether its map's file was there
+#               every frame (an fopen: 5 file calls), the picker for all
+#               thirteen (65), and on Ben's insider.17 Vita the lobby ran at 10
+#               frames a second; the maps are looked at once (map_checks.c):
+#               most windows none, at most 150 in all, the picker's first look
+#               included
 #   panel       Forge from the settings panel's Forge and File Share page, for
 #               Menu style Halo CE (its request, HALO_SYSTEM_LINK_TEST=forge:):
 #               Blood Gulch with the test's good map variant starts and places
@@ -213,7 +221,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_forge_test.$$}
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs packcopy smallmap aiteam aioff round aisave allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks}
+cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs packcopy smallmap aiteam aioff round aisave allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks lobbycost}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
@@ -955,6 +963,10 @@ for c in $cases; do
 		run "$c" 90 "$b30" "L60:@skip;L205:(set cheat_deathless_player true);L1200:@shot 00-b30-player;L1210:forge on;L1220:forge camera -63 39 3.2 -50 -22;L1225:forge list characters;L1240:@shot 01-b30-monitor;L1250:forge spawn hunter;L1252:forge distance 4;L1258:@shot 02-b30-hunter-held;L1260:forge drop;L1280:forge spawn marine_armored assault rifle major;L1282:forge distance 3.5;L1285:forge drop;L1300:forge spawn ghost;L1302:forge distance 4;L1303:forge turn 90;L1305:forge drop;L1320:forge spawn elite commander;L1322:forge distance 5;L1325:forge drop;L1340:@shot 03-b30-spawned;L1420:@shot 04-b30-ai;L1430:forge camera -40 60 6 -50 -22;L1440:forge fill 34 marine_armored assault rifle major;L1450:forge budget;L1470:@shot 05-b30-ai-budget;L1520:forge where;L1600:forge off;L1605:@shot 06-b30-player" "" & ;;
 	off)
 		run "$c" 30 "$bloodgulch" "L300:@shot 00-off" "level:150:2000 rs:150:1500 x:150:1500 rs:150:1500" & ;;
+	lobbycost)
+		# (the lobby 8 s, its map picker 6 s, the lobby again 6 s)
+		run "$c" 40 "" "" "$lobby wait:150:8000 a:150:300 wait:150:6000 b:150:300 wait:150:6000" HALO_MENU_STYLE=halo3 \
+			HALO_TEST_PATH_LOOKUPS=30 & ;;
 	files)
 		mkdir -p "$out/files"
 		(TMPDIR="$out/files" "$here/run_forge_files_test.sh" > "$out/files/run.log" 2>&1; echo $? > "$out/files/exit") & ;;
@@ -1618,6 +1630,19 @@ for c in $cases; do
 	checked "$c" || continue
 	log="$out/$c/run.log"
 	case $c in
+	lobbycost)
+		lookups=$(sed -n '/ui: screen pc.h3.forge.lobby/,$p' "$log" | grep -a "path-lookups: " | sed 's/.*path-lookups: \([0-9]*\) .*/\1/')
+		windows=$(echo "$lookups" | grep -c .)
+		none=$(echo "$lookups" | grep -cx 0)
+		total=$(echo "$lookups" | awk '{ t += $1 } END { print t + 0 }')
+		grep -aq "ui: screen pc.h3.forge.maps.screen" "$log" || fail "$c: the map picker did not open"
+		if [ "$windows" -lt 12 ]; then
+			fail "$c: $windows windows of 30 frames counted in the lobby (HALO_TEST_PATH_LOOKUPS)"
+		elif [ "$total" -le 150 ] && [ "$((none * 2))" -ge "$windows" ]; then
+			echo "  ok: $c: the lobby and its map picker looked up $total paths in $windows windows of 30 frames ($none with none)"
+		else
+			fail "$c: the lobby and its map picker looked up $total paths in $windows windows of 30 frames ($none with none): $(echo $lookups)"
+		fi ;;
 	aimapfallback)
 		expect "$c" "b30 lacks a tag of covenant_ai: another map next" "covenant_ai: b30 lacks a tag of it .*another of its maps next"
 		expect "$c" "built from b40 instead" "scene packs: covenant_ai: built from b40"

@@ -1342,6 +1342,17 @@ boolean cache_files_precache_failed(
 	}
 	cache_files_precache_failure_describe(map_name, why, sizeof(why));
 	platform_log("map: %s could not be precached: %s", name, why);
+	/* (the menus' map lists show it as unusable from now on when it was the
+	file's fault: map_checks.c) */
+	{
+		void map_checks_unusable(char const *level_name);
+		void map_checks_forget(void);
+
+		if (cache_files_precache_failure_the_file())
+			map_checks_unusable(map_name);
+		else
+			map_checks_forget();
+	}
 	error(_error_silent, "cache: '%s' could not be precached: %s", map_name, why);
 	csstrncpy(cache_files_precache_failed_map, map_name, sizeof(cache_files_precache_failed_map) - 1);
 	cache_files_precache_failed_map[sizeof(cache_files_precache_failed_map) - 1] = 0;
