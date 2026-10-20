@@ -1683,6 +1683,138 @@ a flick of yaw, pitch and roll, R not dropping it, the exact angles, the
 mouse's yaw and roll, then dropped, saved, a new round and the variant
 loaded in another run, the facing checked at each).
 
+## Building blocks as built (Oct 19 2026)
+
+Branch `feat/forge-blocks` (from insider.15). The owner: "the building blocks
+of a map", Halo 3 Forge style. Halo CE's maps have none (their walls and
+floors are the structure bsp's), and nothing of Bungie's may be shipped, so
+the game makes its own: blocks, walls, platforms, bridges, columns, ramps
+and a corner, scenery objects with real collision, textured with the
+player's own map's bitmaps, made the same on every machine.
+
+### The set
+
+| Block | Size (x by y by z, world units) | Kind | Material |
+|---|---|---|---|
+| Small Block, Block, Large Block | 0.5, 1, 2 cubes | box | walls |
+| Small Wall, Wall, Large Wall | 1 x 0.25 x 1, 2 x 0.25 x 1, 4 x 0.25 x 2 | box | walls |
+| Small Platform, Platform, Large Platform | 1 x 1, 2 x 2, 4 x 4, 0.25 thick | box | floors |
+| Bridge, Long Bridge | 4 x 1, 8 x 1, 0.25 thick | box | floors |
+| Column, Tall Column | 0.5 x 0.5 x 2, x 4 | box | walls |
+| Small Ramp, Ramp | 1 x 1 x 1, 2 x 2 x 2 (45 degrees) | ramp | floors |
+| Vehicle Ramp | 4 x 2 x 1 (14 degrees) | ramp | floors |
+| Corner | 1 x 1 x 1, an L of two walls 0.25 thick | corner | walls |
+
+Every size is a multiple of Forge's grid (0.25), the origin at the middle,
+a ramp rising toward its +x. Tag paths `forge\blocks\<name>` (the same on
+every map), their names translated (forge_blocks.c).
+
+### How they are made (`port/linux/game/scene_pack_blocks.c`)
+
+A scene pack whose recipe has the new `blocks` line. Its recipe is the game's
+(forge_blocks.c registers `pack blocks_<map>`, `map <map>`, `blocks` for the
+Forge map), so each map's blocks wear that map's bitmaps and the pack is
+built once a map (`t:\packs\blocks_<map>.pack`, 0.4-0.7 MB, 56-57 tags, 67 KB
+of tag cache; built in 3 ms from the cache partition's copy of the map on the
+harness, about 160 ms when it inflates the map; the Forge lobby asks for the
+chosen map's in the background).
+
+- The builder reads the source map's tag data as for any pack; the
+  generator then lays out its own tags as more of the source's (three a
+  block - scenery, model, collision model - and two model shaders) at
+  addresses of their own (`SCENE_PACK_BLOCKS_ADDRESS`, past any map's tag
+  cache), which `source_at`, `source_instance` and `source_tag` take as the
+  map's: the closure, the copy, the links, the bitmaps' pixels are the
+  builder's as ever, the parts' vertices and strips are made buffers (as a
+  Custom Edition model's), and the pack is checked as any (no correction
+  allowed: every map's passes).
+- **Textures:** two model shaders of our own (not alpha tested, no
+  reflection, no multipurpose map): the base map and detail map (primary,
+  else secondary, else micro) of the source's environment shader that reads
+  most like a wall (metal, panels; one of the map's own level's shaders,
+  `levels\...\<map>\`, first: Blood Gulch's `cap_metal`), and of the one most
+  like a floor (plates, flat metal), another bitmap than the walls' when one
+  reads well enough; with no environment shader, a model shader's base map.
+  Chosen by the names' words in the source's order: the same on every
+  machine. Every read of the source is bounded.
+- **Models:** one node, one region, one geometry of one part (one draw call
+  a block): flat faces, 24 vertices and 12 triangles a box (a corner 46 and
+  24), compressed as `rasterizer_geometry_compress_vertices` compresses them,
+  one strip; the texture coordinates world units over 1 (blocks side by side
+  continue one another), the model's base map scale a power of two.
+- **Collision:** one material (thick metal: its bullet holes and sounds), one
+  region, no vitality (nothing damages a block), one bsp. A convex piece's
+  faces are a chain of nodes (each face's plane; in front of it a leaf naming
+  its surface; behind the last, solid), the corner's two pieces split first
+  by the plane between them (the leaves on each side naming the other
+  piece's face on it where it shows). Each surface's ring of edges counter-
+  clockwise seen from outside, each edge shared with the surface on its
+  other side (collision_bsp.c walks the rings; collision_features.c takes the
+  convex edges and the vertices). Vectors (shots, vehicles' mass points) and
+  spheres (bipeds) meet the faces as the structure's.
+- **Determinism:** the shapes are exact (quarters of a world unit, the
+  slopes' normals constants, the radii in 64ths found by whole numbers);
+  nothing but the source's tags and the tables decides a byte. Built twice,
+  the same bytes (and the recipe's hash carries the generator's version).
+  A multiplayer Forge game's machines, each with the same map, make the same
+  pack; the blocks are ordinary objects of their tag paths, loaded first
+  among Forge's packs so that their indices match wherever the same packs are
+  chosen.
+
+### In Forge
+
+- **BLOCKS** in the object browser (halo3/forge.xml; the classic menus play
+  Forge with the same browser), after AI, the set in its order.
+  `forge list blocks` on the console.
+- **Grid snap** (SNAP on): a block held has its corner, not its middle, on
+  the 0.25 grid along each world axis as it is turned, up and down too
+  (forge_blocks_snap), so blocks of any size meet edge to edge and stack;
+  rotate mode's 15/45/90 snapping turns them square.
+- Placed, moved, turned, deleted, copied, counted in the budget and saved in
+  map variants as any object (nothing in the file changed: old variants load
+  as before; a variant's blocks are found again in the map's own pack).
+- forge.c changes are hooks only: the category, the readable name, the snap,
+  the pack's load before the others, and two console words (`forge snap
+  [on|off]`, `forge blocks ray|projectiles` for the tests).
+
+### GPU programs
+
+No new program: collected on the gxm-null harness (HALO_SHADER_COLLECT) with
+blocks placed in view on all thirteen multiplayer maps, every program is in
+`shaders.pak` (94 of 94; on Blood Gulch the blocks add none to the game's
+own 60): a model shader with a base and a detail map is one the maps' own
+objects draw with.
+
+### Security
+
+The generator reads the player's map, anyone's file: every read is bounded
+(the instances, names, references, roots, bitmaps), and what it makes goes
+through the builder and the pack checks as any pack. `scene_pack_test
+blocksfuzz <maps> <map> <n> [seed]` damages the source's tag data where the
+blocks read it (shaders' and bitmaps' instances, roots and first bitmaps,
+any word) and builds again: 1000 builds (seed 11) and 400 with
+AddressSanitizer (seed 23), each refused or loaded clean twice, no crash.
+`scene_pack_test fuzz` over a blocks pack: 3000 copies, 0 failures.
+
+### Tests
+
+`run_forge_test.sh blocks`: the tool's packs (Blood Gulch twice, the same
+bytes; Chill Out), the structure placed with SNAP (each block where asked),
+the Spartan standing on the bridge (z 2.5) and walking up a ramp, a Warthog
+driven up the vehicle ramp and off it, a plasma bolt stopping at a large
+wall (gone at its face; with no wall it goes on), the projectiles' line
+meeting the wall (thick metal), the map variant saved and loaded again (10
+placed, 0 skipped), the browser by the pad (BLOCKS, a wall placed).
+
+### Not built
+
+- AI pathfinding around blocks (no pathfinding spheres: characters walk into
+  them and are stopped by the physics).
+- More shapes (curves, windows, doors, a corner ramp), more materials than
+  two a map, the blue ghost.
+- A network Forge game's joiners load the blocks as the host does only where
+  the multiplayer Forge branch calls forge_blocks_load (forge_packs_load).
+
 ## Open questions for the owner
 
 1. **The controls.** Is the button table right against your Halo 3
@@ -1705,6 +1837,8 @@ loaded in another run, the facing checked at each).
 6. **Forge blocks.** Halo 3 and Reach have walls, ramps and platforms made
    for Forge. Halo CE has none. Ours would have to be new models we make
    (CC0 or our own), shipped as our own pack. Wanted, and when?
+   *Decided (Oct 19): wanted; made by the game, textured with the map's own
+   bitmaps ("Building blocks as built").*
 7. **Sharing.** Friends only (a code, the Discord, a file on the memory
    card), or a public list on our server? Phase (c) assumes friends and
    lobbies; a public list needs moderation and is part 3's question.

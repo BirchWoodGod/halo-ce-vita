@@ -151,6 +151,17 @@
 #   cepelicanoff the same lobby without extinction.map: Extinction Pelican
 #               unavailable, the page says why; Forge starts without it, saying
 #               nothing in the game
+#   blocks      Forge's building blocks (forge_blocks.c, scene_pack_blocks.c): the
+#               pack built by the tool from Blood Gulch twice (the same bytes)
+#               and from Chill Out, each passing the pack check with no
+#               correction; in a Forge game of Blood Gulch, the pack built from
+#               it and loaded, BLOCKS in the browser (17), a structure put
+#               together with SNAP on (each block where asked, edge to edge),
+#               saved and loaded again in another run; the Spartan standing on
+#               the bridge and walking up a ramp (the pad), a Warthog driven up
+#               the vehicle ramp and off it, a shot stopping at a large wall
+#               (the projectiles' line meets it; the shot is gone at its face);
+#               the browser by the pad: BLOCKS, a wall placed from it
 #   panel       Forge from the settings panel's Forge and File Share page, for
 #               Menu style Halo CE (its request, HALO_SYSTEM_LINK_TEST=forge:):
 #               Blood Gulch with the test's good map variant starts and places
@@ -165,7 +176,7 @@
 #                                     edit fileshare fstouch panel packs smallmap
 #                                     aiteam aioff round aisave allai allaimenu flood
 #                                     clearai clearaimenu rotate floodcov sentinels marines
-#                                     aivariant cepelican cepelicanoff pelican)
+#                                     aivariant cepelican cepelicanoff pelican blocks)
 #   aipacks     (not by default) the AI packs' tag cache on Blood Gulch, the
 #               tightest map: each AI pack with the packs on by default, and
 #               every pack at once (the Extinction Pelican's extinction.map from
@@ -188,7 +199,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_forge_test.$$}
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs smallmap aiteam aioff round aisave allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant cepelican cepelicanoff pelican}
+cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs smallmap aiteam aioff round aisave allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant cepelican cepelicanoff pelican blocks}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
@@ -440,6 +451,93 @@ cepelican_runs() {
 pelicanpad="$lobby down:150:500 a:150:1500 down:150:400 wait:150:6000 @00-extra-objects:0:300 b:150:300 down:150:300"
 pelicanpad="$pelicanpad a:150:1500 level:150:12000 x:200:2500 @01-pilot:0:300 x:200:2500 @02-out:0:300 x:200:2500"
 pelicanpad="$pelicanpad lup+rup:1500:0 lup:2000:0 rdown:2500:0 lup:3000:0 rup:1000:0 wait:12000:0"
+
+# (blocks: Forge's building blocks, forge_blocks.c and scene_pack_blocks.c.
+# A block put at its spot by the console with SNAP on: the camera along +x
+# five ahead of it, a wait for the camera to get there, spawned, turned,
+# dropped; the structure: a large platform on the ground, a large block on
+# it with a ramp up to its top, two walls, a column, a small platform with a
+# column under a bridge from the block's top, a corner)
+blocks_tick=0
+blocks_put() { # NAME X Y Z TURN: appended to blocks_cmds, from blocks_tick
+	local x
+	x=$(awk -v x="$2" 'BEGIN { print x - 5 }')
+	blocks_cmds="$blocks_cmds;L$blocks_tick:forge camera $x $3 $4 0 0;L$((blocks_tick + 8)):forge spawn $1"
+	blocks_cmds="$blocks_cmds;L$((blocks_tick + 9)):forge distance 5"
+	[ "$5" != 0 ] && blocks_cmds="$blocks_cmds;L$((blocks_tick + 10)):forge turn $5"
+	blocks_cmds="$blocks_cmds;L$((blocks_tick + 18)):forge drop"
+	blocks_tick=$((blocks_tick + 22))
+}
+blocks_structure() { # FIRST TICK: blocks_cmds, blocks_tick after it
+	blocks_cmds="L240:forge snap on;L250:forge camera 80 -152 1 0 0"
+	blocks_tick=$1
+	blocks_put platform_large 86 -150 0.125 0
+	blocks_put block_large 87 -151 1.25 0
+	blocks_put ramp 85 -151 1.25 180
+	blocks_put wall 85 -148.125 0.75 0
+	blocks_put wall 87 -148.125 0.75 0
+	blocks_put column 87.75 -148.5 1.25 0
+	blocks_put platform_small 89.5 -151 0.125 0
+	blocks_put column 89.75 -151 1.25 0
+	blocks_put bridge 88 -151 2.375 0
+	blocks_put corner 84.5 -148.75 0.75 0
+}
+
+blocks_runs() {
+	local store="$out/blocks-store" tool="$root/build/linux/scene_pack_test" t c
+	rm -rf "$store" "$out/blocks-tool"
+	mkdir -p "$store" "$out/blocks-tool"
+	# (the pack alone, by the tool: Blood Gulch twice and Chill Out, each
+	# checked as the game checks a pack, no correction allowed)
+	(
+		cd "$out/blocks-tool" || exit 1
+		for m in bloodgulch chillout; do
+			printf 'pack blocks_%s\nmap %s\nblocks\n' "$m" "$m" > "blocks_$m.txt"
+		done
+		"$tool" build blocks_bloodgulch.txt "$data/maps" first.pack
+		"$tool" build blocks_bloodgulch.txt "$data/maps" second.pack
+		"$tool" build blocks_chillout.txt "$data/maps" chillout.pack
+		cmp first.pack second.pack && echo "blocks: the same bytes twice"
+	) > "$out/blocks-tool/run.log" 2>&1
+	# (the structure; the Spartan dropped on the bridge, then on foot at a ramp
+	# and a large block laid along his own facing (yaw 162.5, his spawn's) and
+	# walked up it by the pad; the map variant saved)
+	blocks_structure 290
+	c="$blocks_cmds;L515:forge list blocks;L520:forge objects;L525:forge camera 81.5 -155.5 2.2 40 -10;L545:@shot 00-structure"
+	c="$c;L550:forge camera 91.5 -145.5 3 -130 -18;L570:@shot 01-structure-back;L575:forge save Blocks Fort"
+	c="$c;L580:forge camera 88.5 -151 3.5 0 0;L600:forge off;L640:forge where;L660:forge where;L662:@shot 02-on-the-bridge"
+	c="$c;L670:forge on;L672:forge snap off;L674:forge camera 78.581 -149.497 1.0 -17.5 0;L694:forge spawn ramp"
+	c="$c;L695:forge distance 2.5;L702:forge drop;L704:forge camera 76.674 -148.895 1.0 -17.5 0;L724:forge spawn block_large"
+	c="$c;L725:forge distance 2.5;L732:forge drop;L734:forge camera 83.35 -151 1.0 162.5 0;L750:forge off"
+	for t in $(seq 760 10 900); do c="$c;L$t:forge where"; done
+	c="$c;L830:@shot 03-up-the-ramp"
+	run blocks 45 "" "$c" "level:10:23500 lup:2600:0" HALO_MENU_STYLE=classic HALO_SAVE_ROOT="$store" \
+		HALO_SYSTEM_LINK_TEST=forge:9 HALO_TEST_FORGE_PACKS=none HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1
+	run blocks-load 30 "" "L300:forge objects;L305:forge camera 81.5 -155.5 2.2 40 -10;L325:@shot 00-loaded" "" \
+		HALO_MENU_STYLE=classic HALO_SAVE_ROOT="$store" HALO_SYSTEM_LINK_TEST=forge:9:blocks_fort.hmv HALO_TEST_FORGE_PACKS=none
+	# (the Warthog: a vehicle ramp along the Spartan's facing, the Warthog
+	# before it; the Spartan its driver, the pad's throttle)
+	c="L250:forge snap off;L255:forge camera 78.555 -142.392 0.5 -17.5 0;L275:forge spawn ramp_shallow;L276:forge distance 5"
+	c="$c;L285:forge drop;L290:forge camera 86.185 -144.797 1.5 -17.5 0;L310:forge spawn warthog;L311:forge distance 4"
+	c="$c;L320:forge drop;L340:forge objects;L345:forge camera 91 -147 1.5 162.5 0;L355:forge off;L390:pack ride"
+	for t in $(seq 400 5 660); do c="$c;L$t:pack where"; done
+	run blocks-drive 32 "" "$c" "level:10:10800 lup:5000:0" HALO_MENU_STYLE=classic HALO_SAVE_ROOT="$store" \
+		HALO_SYSTEM_LINK_TEST=forge:9 HALO_TEST_FORGE_PACKS=none
+	# (a shot: a large wall across the Spartan's facing, three ahead; the
+	# projectiles' line along his view, and his gun's shots, every tick)
+	c="L250:forge snap off;L255:forge camera 90 -146 1.6 162.5 0;L268:forge blocks ray"
+	c="$c;L270:forge camera 88.642 -140.329 1.0 -107.5 0;L290:forge spawn wall_large;L291:forge distance 5;L300:forge drop"
+	c="$c;L302:forge camera 90 -146 1.6 162.5 0;L318:forge blocks ray;L319:forge camera 90 -146 1.6 162.5 0;L330:forge off"
+	c="$c;L360:forge where;L362:forge blocks ray"
+	for t in $(seq 335 1 520); do c="$c;L$t:forge blocks projectiles"; done
+	run blocks-shoot 26 "" "$c" "level:10:9800 rt:1200:0" HALO_MENU_STYLE=classic HALO_SAVE_ROOT="$store" \
+		HALO_SYSTEM_LINK_TEST=forge:9 HALO_TEST_FORGE_PACKS=none
+	# (the browser: Square, down to BLOCKS, A, down to WALL, A)
+	c="level:150:3000 x:150:1500 down:150:500 down:150:500 down:150:500 down:150:500 @00-blocks-category:0:300"
+	c="$c a:150:1500 @01-blocks:0:300 down:150:500 down:150:500 down:150:500 down:150:500 a:150:1500 @02-wall-held:0:300"
+	run blocks-browser 30 "" "" "$c" HALO_MENU_STYLE=classic HALO_SAVE_ROOT="$store" HALO_SYSTEM_LINK_TEST=forge:9 \
+		HALO_TEST_FORGE_PACKS=none HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1
+}
 
 pelican_runs() {
 	local cmds t
@@ -874,6 +972,12 @@ for c in $cases; do
 			continue
 		fi
 		run cepelicanoff 45 "" "" "$lobby down:150:500 a:150:1500 down:150:400 down:150:400 down:150:400 wait:150:4000 @00-unavailable:0:300 b:150:300 down:150:300 a:150:1500 level:150:3000" HALO_MENU_STYLE=halo3 & ;;
+	blocks)
+		if [ "$menus_files" = 0 ]; then
+			echo "SKIP: blocks: no Halo PC bitmaps.map and loc.map in $data/maps"
+			continue
+		fi
+		blocks_runs & ;;
 	pelican)
 		if [ "$menus_files" = 0 ] || { [ ! -r "$data/maps/b30.map" ] && [ ! -r "$data/maps/a50.map" ]; }; then
 			echo "SKIP: pelican: no Halo PC bitmaps.map and loc.map, or no b30.map or a50.map, in $data/maps"
@@ -1321,6 +1425,45 @@ for c in $cases; do
 		fi
 		continue
 	fi
+	if [ "$c" = blocks ]; then
+		for r in blocks blocks-load blocks-drive blocks-shoot blocks-browser; do
+			checked "$r"
+		done
+		l="$out/blocks-tool/run.log"
+		if grep -aq "blocks: the same bytes twice" "$l" && [ "$(grep -ac "passed in .* 0 corrections" "$l")" = 3 ]; then
+			echo "  ok: blocks: the tool's packs (Blood Gulch twice, the same bytes; Chill Out) pass the check, no correction"
+		else
+			fail "blocks: the tool's packs ($l)"
+		fi
+		expect blocks "built from the map, its own bitmaps" "scene packs: blocks_bloodgulch: the blocks' walls of .*cap_metal, floors of"
+		expect blocks "loaded with the Forge game" "forge: blocks: blocks_bloodgulch loaded"
+		expect blocks "the browser's BLOCKS" "forge: palette blocks: 17"
+		expect blocks "snapped: the large block where asked" "forge: object 1: Large Block .* alive at 87.00 -151.00 1.25"
+		expect blocks "snapped: the ramp against it" "forge: object 2: Ramp .* alive at 85.00 -151.00 1.25"
+		expect blocks "snapped: the bridge on the block's top" "forge: object 8: Bridge .* alive at 88.00 -151.00 2.38"
+		expect blocks "snapped: the corner" "forge: object 9: Corner .* alive at 84.50 -148.75 0.75"
+		expect blocks "saved" "forge: map variant \"Blocks Fort\" saved as bloodgulch/blocks_fort.hmv, 10 objects"
+		count blocks "the Spartan stands on the bridge" "forge: the player's unit at 8[89]\.[0-9]+ -15[01]\.[0-9]+ 2\.5[0-9]" 2
+		high=$(grep -a "forge: the player's unit at" "$out/blocks/run.log" | tail -15 | awk '{print $9}' | tr -d ',' | sort -n | tail -1)
+		awk -v h="$high" 'BEGIN { exit !(h >= 1.0) }' && echo "  ok: blocks: walked up the ramp (up to $high)" ||
+			fail "blocks: did not walk up the ramp (up to $high)"
+		expect blocks-load "the map variant's blocks placed" "applied: 10 placed, 0 skipped"
+		expect blocks-load "where they were saved" "forge: object 1: Large Block .* alive at 87.00 -151.00 1.25"
+		expect blocks-drive "the Warthog driven" "scene packs: ride: vehicles.warthog.warthog entered"
+		high=$(grep -a "where: the vehicle at" "$out/blocks-drive/run.log" | sed 's/.* at [^ ]* [^ ]* \([-0-9.]*\),.*/\1/' | sort -n | tail -1)
+		awk -v h="$high" 'BEGIN { exit !(h >= 2.0) }' && echo "  ok: blocks-drive: up the vehicle ramp and off it (up to $high)" ||
+			fail "blocks-drive: the Warthog did not climb the ramp (up to $high)"
+		expect blocks-shoot "a shot's line meets the wall" "forge: blocks: ray from .* meets the object forge.blocks.wall_large .* material 7"
+		positions=$(grep -a "forge: blocks: projectile " "$out/blocks-shoot/run.log" |
+			awk '{ x = $(NF-2); y = $(NF-1); printf "%.3f\n", (x - 87.14) * 0.953 + (y + 145.10) * (-0.303) }')
+		if [ "$(echo "$positions" | grep -c .)" -ge 3 ] && echo "$positions" | awk '{ if ($1 < -0.05) bad = 1 } END { exit bad }'; then
+			echo "  ok: blocks-shoot: the shot stopped at the wall ($(echo "$positions" | tr '\n' ' '))"
+		else
+			fail "blocks-shoot: a shot went through the wall or none was fired ($(echo "$positions" | tr '\n' ' '))"
+		fi
+		expect blocks-browser "BLOCKS chosen, a wall placed from it" "forge: spawned Wall \(wall, blocks\)"
+		continue
+	fi
 	if [ "$c" = variants ]; then
 		for r in variants-save variants-load variants-missing variants-damaged variants-full; do
 			checked "$r"
@@ -1554,7 +1697,8 @@ done
 if [ -n "${HALO_TEST_SHOTS:-}" ]; then
 	mkdir -p "$HALO_TEST_SHOTS"
 	for c in $cases variants-save variants-load variants-missing variants-damaged variants-full panel-damaged packs-load \
-		aiteam-player aiteam-covenant aisave-load marinesally aivariant-load; do
+		aiteam-player aiteam-covenant aisave-load marinesally aivariant-load blocks-load blocks-drive blocks-shoot \
+		blocks-browser; do
 		for shot in "$out/$c"/shots/*.bmp; do
 			[ -f "$shot" ] && cp "$shot" "$HALO_TEST_SHOTS/$c-$(basename "$shot")"
 		done
