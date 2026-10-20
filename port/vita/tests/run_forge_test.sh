@@ -188,7 +188,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_forge_test.$$}
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs smallmap aiteam aioff round aisave allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant cepelican cepelicanoff pelican}
+cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs smallmap aiteam aioff round aisave allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
@@ -738,10 +738,10 @@ aipacks_runs() {
 	[ -r "$ce_maps/extinction.map" ] && ln -sfn "$(cd "$ce_maps" && pwd)/extinction.map" "$folder/maps/extinction.map"
 	data_saved=$data
 	data=$folder
-	for set in covenant_vehicles,dropships,ce_pelican covenant_vehicles,dropships,ce_pelican,covenant_ai \
-		covenant_vehicles,dropships,ce_pelican,flood_ai covenant_vehicles,dropships,ce_pelican,sentinel_ai \
-		covenant_vehicles,dropships,ce_pelican,marine_ai covenant_ai,flood_ai,sentinel_ai,marine_ai \
-		covenant_vehicles,dropships,ce_pelican,covenant_ai,flood_ai,sentinel_ai,marine_ai; do
+	for set in covenant_vehicles,dropships covenant_vehicles,dropships,covenant_ai \
+		covenant_vehicles,dropships,flood_ai covenant_vehicles,dropships,sentinel_ai \
+		covenant_vehicles,dropships,marine_ai covenant_ai,flood_ai,sentinel_ai,marine_ai \
+		covenant_vehicles,dropships,covenant_ai,flood_ai,sentinel_ai,marine_ai; do
 		while [ "$(jobs -rp | wc -l)" -ge "$jobs" ]; do
 			wait -n
 		done
@@ -854,6 +854,14 @@ for c in $cases; do
 		marines_runs & ;;
 	aivariant)
 		aivariant_runs & ;;
+	aimapfallback)
+		# (covenant_ai's recipe with The Silent Cartographer named first: it
+		# lacks a needler elite, so the build moves on to Two Betrayals - as
+		# when b30's copy is the one read in place on the Vita)
+		mkdir -p "$out/aimapfallback-packs"
+		cp "$root/port/vita/app0/packs/"*.txt "$out/aimapfallback-packs/"
+		sed -i 's/^map b40 b30 a50$/map b30 b40 a50/' "$out/aimapfallback-packs/covenant_ai.txt"
+		ai_run aimapfallback 120 "L600:forge budget" HALO_PACKS_FOLDER="$out/aimapfallback-packs" & ;;
 	aipacks)
 		# (its runs take the cases' slots)
 		wait
@@ -1369,6 +1377,10 @@ for c in $cases; do
 	checked "$c" || continue
 	log="$out/$c/run.log"
 	case $c in
+	aimapfallback)
+		expect "$c" "b30 lacks a tag of covenant_ai: another map next" "covenant_ai: b30 lacks a tag of it .*another of its maps next"
+		expect "$c" "built from b40 instead" "scene packs: covenant_ai: built from b40"
+		expect "$c" "Covenant AI loaded in Forge" "forge: packs: covenant_ai loaded" ;;
 	v1)
 		expect "$c" "FORGE opened the Forge lobby" "ui: screen pc.h3.forge.lobby"
 		expect "$c" "the map picker opened" "ui: screen pc.h3.forge.maps.screen"
