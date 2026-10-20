@@ -4538,6 +4538,12 @@ static void browser_test_games(void)
 			};
 
 			snprintf(entry->name, sizeof(entry->name), "%s", names[index % NUMBEROF(names)]);
+			/* (and the rules and players a public list's carry, whole: the
+			ticker's texts beside the rows) */
+			snprintf(entry->rules, sizeof(entry->rules), "Slayer to 50 on %s: under way (DEDICATED)",
+				maps[index % 5]);
+			snprintf(entry->players_line, sizeof(entry->players_line),
+				"%ld of 16: Krazy, Stink Fist, xQuJoKe, Yeti_Kraken, Wombat +%ld more", index * 7 % 16, index % 9);
 			snprintf(entry->map, sizeof(entry->map), "%s", index % 3 ? maps[index % 5] : custom_maps[index / 3 % NUMBEROF(custom_maps)]);
 		}
 		else
