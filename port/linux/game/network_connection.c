@@ -280,10 +280,11 @@ static void connection_test_switch(boolean main_menu_loaded)
 }
 
 /* (debug, test builds) after a switch: this process's threads and open
-files (Linux's /proc), for the tests' leak check */
+files (Linux's /proc), for the tests' leak check; none on Windows (no
+/proc: posix_net.c's census is not in its build) */
 static void connection_test_census(void)
 {
-#if !defined(HALO_RELEASE) && !defined(HALO_VITA)
+#if !defined(HALO_RELEASE) && !defined(HALO_VITA) && !defined(_WIN32)
 	extern int posix_process_census(char *names, int size, int *own, int *files);
 	char names[512];
 	int threads, own, files;
