@@ -201,6 +201,7 @@ symbols in this file:
 #include "networking/network_game_manager.h"
 #include "networking/network_messages.h"
 #include "map_share.h"
+#include "forge.h"
 #include "network_game_record.h"
 #include "network_wire.h"
 #include "net_fuzz_twin.h"
@@ -734,6 +735,24 @@ boolean network_game_client_handle_message(
 						else
 						{
 							network_event("ignoring a map share message from a system that is not the host");
+						}
+						break;
+
+					/* port: network Forge's hello (port/linux/game/forge_net.inc),
+					the host's alone, and never on the crossplay wire (a PC
+					host has none) */
+					case _message_server_forge:
+						if (network_wire_crossplay())
+						{
+							network_event("ignoring a Forge message on the crossplay wire");
+						}
+						else if (network_game_client_address_matches_server(client, source_address))
+						{
+							forge_net_client_handle_lobby_message(client, message, message_size);
+						}
+						else
+						{
+							network_event("ignoring a Forge message from a system that is not the host");
 						}
 						break;
 

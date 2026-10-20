@@ -896,6 +896,10 @@ enum
 	_kick_rejoinable,
 };
 static byte network_game_server_kick_pending[MAXIMUM_NETWORK_MACHINE_COUNT];
+/* ... and the reason its rejection gives, plus one (0: a blacklisted
+machine's, the kicks' and bans'; network Forge's refusal of a machine that does not play
+it: network_game_server_port_refuse_machine) */
+static word network_game_server_kick_reason[MAXIMUM_NETWORK_MACHINE_COUNT];
 /* port: each client machine's hardware id as it told it joining, hex only
 (p2p_hardware_id_sanitize), by slot */
 static char network_game_server_hardware_ids[MAXIMUM_NETWORK_MACHINE_COUNT][P2P_HARDWARE_ID_SIZE];
@@ -1193,6 +1197,69 @@ void network_game_server_kick_machine(
 	}
 	network_game_server_kick_pending[machine_index] = kept_out ? _kick_kept_out : _kick_rejoinable;
 }
+
+#ifdef HALO_LINUX
+/* port (network Forge, port/linux/game/forge_net.inc): a machine that does
+not play it dropped from the Forge game, its rejection's reason the one
+given (an older build says it failed to join); it may join other games */
+void network_game_server_port_refuse_machine(
+	long machine_index,
+	word reason)
+{
+	struct network_game_server *server = global_network_game_server_get();
+
+	if (!server || !VALID_INDEX(machine_index, MAXIMUM_NETWORK_MACHINE_COUNT) ||
+		!network_game_server_client_machine_is_joined_to_game(server, &server->client_machines[machine_index]) ||
+		network_game_server_client_machine_is_local(server, &server->client_machines[machine_index]) ||
+		reason >= NUMBER_OF_SERVER_REJECTION_CODES)
+	{
+		return;
+	}
+	network_game_server_kick_reason[machine_index] = (word)(reason + 1);
+	network_game_server_kick_pending[machine_index] = _kick_rejoinable;
+}
+
+/* port (network Forge): the remote machines joined to the game, by their
+machine indices; how many */
+short network_game_server_port_joined_machines(
+	long *machine_indices,
+	short maximum)
+{
+	struct network_game_server *server = global_network_game_server_get();
+	short count = 0;
+	long index;
+
+	for (index = 0; server && index < MAXIMUM_NETWORK_MACHINE_COUNT && count < maximum; index++)
+	{
+		struct network_game_server_client_machine *machine = &server->client_machines[index];
+
+		if (machine->machine_index == index && network_game_server_client_machine_is_joined_to_game(server, machine) &&
+			!network_game_server_client_machine_is_local(server, machine))
+		{
+			machine_indices[count++] = index;
+		}
+	}
+	return count;
+}
+
+/* port (network Forge): a message to one joined remote machine, reliably;
+FALSE if it is not one */
+boolean network_game_server_port_send_to_machine(
+	long machine_index,
+	void *message)
+{
+	struct network_game_server *server = global_network_game_server_get();
+
+	if (!server || !message || !VALID_INDEX(machine_index, MAXIMUM_NETWORK_MACHINE_COUNT) ||
+		server->client_machines[machine_index].machine_index != machine_index ||
+		!network_game_server_client_machine_is_joined_to_game(server, &server->client_machines[machine_index]) ||
+		network_game_server_client_machine_is_local(server, &server->client_machines[machine_index]))
+	{
+		return FALSE;
+	}
+	return network_game_server_send_message_to_client_machine(server, &server->client_machines[machine_index], message);
+}
+#endif
 
 #ifdef HALO_DEDICATED_SERVER
 /* port (the dedicated server, port/linux/game/dedicated_server.c): the
@@ -2217,7 +2284,10 @@ boolean network_game_server_accept_client_machine_into_game(
 	}
 	/* (a kick asked for the slot's machine before is not this one's) */
 	if (VALID_INDEX(machine_index, MAXIMUM_NETWORK_MACHINE_COUNT))
+	{
 		network_game_server_kick_pending[machine_index] = _kick_none;
+		network_game_server_kick_reason[machine_index] = 0;
+	}
 	if (VALID_INDEX(machine_index, MAXIMUM_NETWORK_MACHINE_COUNT) &&
 		machine == &server->client_machines[machine_index])
 	{
@@ -5353,6 +5423,9 @@ static boolean network_game_server_handle_client_machines(
 				unsigned long address = network_game_server_client_machine_addresses[machine_index];
 				boolean kept_out = network_game_server_kick_pending[machine_index] == _kick_kept_out;
 
+				if (network_game_server_kick_reason[machine_index])
+					rejection.reason = (word)(network_game_server_kick_reason[machine_index] - 1);
+				network_game_server_kick_reason[machine_index] = 0;
 				network_game_server_kick_pending[machine_index] = _kick_none;
 				if (kept_out && address && !network_game_server_client_machine_is_local(server, client_machine))
 				{

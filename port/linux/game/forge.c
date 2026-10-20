@@ -227,6 +227,7 @@ Each logs what it did ("forge: ...").
 
 #include "forge.h"
 #include "forge_files.h"
+#include "forge_net_protocol.h"
 #include "halo_menus.h"
 #include "scene_pack.h"
 #include "scene_packs.h"
@@ -607,6 +608,12 @@ struct forge_placed
 	struct forge_transform home;
 	boolean has_home;
 	unsigned long settle_until;
+	/* (network Forge, forge_net.inc) the player holding it (absolute
+	index), NONE; a client's: the host's object index (NONE gone there) and
+	whether the netcode makes it (else this machine's own copy) */
+	long holder;
+	long net_object;
+	boolean networked;
 };
 
 /* a step of the undo history */
@@ -819,6 +826,38 @@ static struct
 } forge_globals = { FALSE, "", FALSE, FALSE, 0, NONE, FALSE, NONE, 0.f, { 0.f }, { 0.f }, _forge_speed_normal };
 
 /* ---------- private code */
+
+/* ---- network Forge (forge_net.inc, included at the end of this file for
+these statics) */
+static boolean forge_net_host(void);
+static boolean forge_net_client(void);
+static boolean forge_net_quiet(void);
+static boolean forge_net_held_by_other(long object_index);
+static short forge_net_holder(long object_index, long asking_machine);
+static void forge_net_client_spawn(long tag_index, real_point3d const *position, real_vector3d const *forward,
+	real distance);
+static void forge_net_client_grab(long object_index);
+static void forge_net_client_release(void);
+static void forge_net_client_delete(long object_index);
+static void forge_net_client_duplicate(long object_index, real_point3d const *position, real_vector3d const *forward,
+	real_vector3d const *up, real distance);
+static void forge_net_client_set(long object_index, real_vector3d const *forward, real_vector3d const *up);
+static boolean forge_net_client_property(short property, short step);
+static void forge_net_client_undo(boolean redo);
+static void forge_net_update(void);
+static void forge_net_map_loaded(void);
+static void forge_net_new_round(void);
+static void forge_net_draw_monitors(long font_index, short height);
+static void forge_net_log_state(char const *arguments);
+static char const *forge_net_host_title(void);
+static void forge_draw_line(long font_index, rectangle2d const *bounds, short justification, real red, real green,
+	real blue, char const *text);
+/* (forge_variant_capture) each record's placed entry, for the layout a
+joiner is sent */
+static short forge_net_capture_placed[FORGE_FILE_MAXIMUM_RECORDS];
+/* (the host acting for a machine: forge_net.inc) the machine's player's
+"who asks" for the holds */
+#define FORGE_NET_HOST_ASKS (-2)
 
 static char const *forge_tag_leaf(
 	long tag_index)
@@ -1170,6 +1209,17 @@ static void forge_notice(
 {
 	va_list arguments;
 
+	if (forge_net_quiet())
+	{
+		/* (another machine's: it says its own, the host's HUD not) */
+		char text[FORGE_LINE_SIZE];
+
+		va_start(arguments, format);
+		vsnprintf(text, sizeof(text), format, arguments);
+		va_end(arguments);
+		platform_log("forge: (for another machine) %s", text);
+		return;
+	}
 	va_start(arguments, format);
 	vsnprintf(forge_globals.notice, sizeof(forge_globals.notice), format, arguments);
 	va_end(arguments);
@@ -1184,6 +1234,16 @@ static void forge_menu_notice(
 {
 	va_list arguments;
 
+	if (forge_net_quiet())
+	{
+		char text[FORGE_LINE_SIZE];
+
+		va_start(arguments, format);
+		vsnprintf(text, sizeof(text), format, arguments);
+		va_end(arguments);
+		forge_notice("%s", text);
+		return;
+	}
 	va_start(arguments, format);
 	vsnprintf(forge_globals.menu_status, sizeof(forge_globals.menu_status), format, arguments);
 	va_end(arguments);
@@ -1333,6 +1393,9 @@ static void forge_homes_update(
 	unsigned long now = system_milliseconds();
 	short index;
 
+	/* (a network game's client: the placed spots are the host's) */
+	if (forge_net_client())
+		return;
 	for (index = 0; index < forge_globals.placed_count && index < FORGE_MAXIMUM_OBJECTS; index++)
 	{
 		struct forge_placed *placed = &forge_globals.placed[index];
@@ -1378,6 +1441,8 @@ static void forge_placed_add(
 	placed->flags = FORGE_RECORD_PLACE_AT_START;
 	placed->respawn_seconds = FORGE_DEFAULT_RESPAWN_SECONDS;
 	placed->ai_team = FORGE_AI_TEAM_DEFAULT;
+	placed->holder = NONE;
+	placed->net_object = NONE;
 	placed->id = ++forge_globals.next_id;
 	forge_globals.placed_count++;
 	if (ai)
@@ -1472,7 +1537,8 @@ static void forge_ai_apply(
 	long actor_index;
 	short team;
 
-	if (!placed || !placed->ai || !forge_object_alive(placed->object_index))
+	/* (a network game's client: the host's actors, not its) */
+	if (!placed || !placed->ai || !forge_object_alive(placed->object_index) || forge_net_client())
 		return;
 	unit = unit_get(placed->object_index);
 	if (TEST_FLAG(unit->object.damage_flags, _object_dead_bit))
@@ -1525,7 +1591,7 @@ static void forge_ai_unplaced_update(
 	struct object_iterator iterator;
 	struct unit_datum *unit;
 
-	if (!forge_globals.game_active || (!all_set && !forge_globals.ai_all_off))
+	if (!forge_globals.game_active || (!all_set && !forge_globals.ai_all_off) || forge_net_client())
 		return;
 	object_iterator_new(&iterator, _object_mask_unit, 0);
 	while ((unit = (struct unit_datum *)object_iterator_next(&iterator)) != NULL)
@@ -1555,6 +1621,9 @@ static void forge_ai_hold(
 	void)
 {
 	short index;
+
+	if (forge_net_client())
+		return;
 
 	for (index = 0; index < forge_globals.placed_count && index < FORGE_MAXIMUM_OBJECTS; index++)
 	{
@@ -2000,7 +2069,7 @@ static void forge_held_object_place(
 	return;
 }
 
-static void forge_grab(
+static void forge_grab_local(
 	long object_index)
 {
 	struct object_datum *object = object_try_and_get(object_index);
@@ -2032,11 +2101,32 @@ static void forge_grab(
 	return;
 }
 
+/* the object under the crosshair held: a network game's client asks the
+host; the host's own monitor never takes one another player holds */
+static void forge_grab(
+	long object_index)
+{
+	if (forge_net_client())
+	{
+		forge_net_client_grab(object_index);
+		return;
+	}
+	if (forge_net_held_by_other(object_index))
+		return;
+	forge_grab_local(object_index);
+}
+
 static void forge_drop(
 	void)
 {
 	struct object_datum *object = object_try_and_get(forge_globals.held_object_index);
 
+	/* (a network game's client: let go where it is, said to the host) */
+	if (forge_net_client())
+	{
+		forge_net_client_release();
+		return;
+	}
 	if (object)
 	{
 		char name[FORGE_NAME_SIZE];
@@ -2092,7 +2182,11 @@ static void forge_set_facing(
 		forge_globals.held_forward = *forward;
 		forge_globals.held_up = *up;
 	}
-	else
+	else if (forge_net_client())
+	{
+		forge_net_client_set(object_index, forward, up);
+	}
+	else if (!forge_net_held_by_other(object_index))
 	{
 		struct forge_transform from;
 
@@ -2313,6 +2407,13 @@ static void forge_delete(
 
 	if (!object || forge_object_is_players(object_index))
 		return;
+	if (forge_net_client())
+	{
+		forge_net_client_delete(object_index);
+		return;
+	}
+	if (!forge_net_quiet() && forge_net_held_by_other(object_index))
+		return;
 	forge_object_name(object_index, name, sizeof(name));
 	platform_log("forge: deleted %s (%s)", name, forge_tag_leaf(object->definition_index));
 	forge_notice(T("Deleted %s"), name);
@@ -2490,6 +2591,12 @@ static long forge_spawn(
 	facing.k = 0.f;
 	if (normalize3d(&facing) < 0.0001f)
 		facing = *global_forward3d;
+	/* (a network game's client: asked of the host, held once it is made) */
+	if (forge_net_client())
+	{
+		forge_net_client_spawn(tag_index, &point, &facing, distance);
+		return NONE;
+	}
 	object_index = forge_place(tag_index, &point, &facing, global_up3d, FALSE, &refusal);
 	if (object_index == NONE)
 		return NONE;
@@ -2540,6 +2647,23 @@ static void forge_duplicate(
 	}
 	forward = held ? forge_globals.held_forward : object->object.forward;
 	up = held ? forge_globals.held_up : object->object.up;
+	/* (a network game's client: the copy asked of the host, in the
+	monitor's hand where forge_spawn would put it) */
+	if (forge_net_client())
+	{
+		real_point3d camera, point;
+		real_vector3d look;
+		real at;
+
+		if (!forge_camera_get(&camera, &look))
+			return;
+		at = held ? distance : MAX(MIN(4.f, forge_structure_distance(&camera, &look) - 1.f), FORGE_MINIMUM_HOLD_DISTANCE);
+		point.x = camera.x + look.i * at;
+		point.y = camera.y + look.j * at;
+		point.z = camera.z + look.k * at;
+		forge_net_client_duplicate(object_index, &point, &forward, &up, at);
+		return;
+	}
 	if (held)
 		forge_drop();
 	if (forge_spawn(tag_index) != NONE)
@@ -2615,9 +2739,9 @@ static boolean forge_begin(
 
 	if (forge_globals.active)
 		return TRUE;
-	if (game_connection() != _game_connection_local)
+	if (game_connection() != _game_connection_local && !forge_net_host() && !forge_net_client())
 	{
-		platform_log("forge: only in a local game");
+		platform_log("forge: only in a local game or a network Forge game");
 		return FALSE;
 	}
 	forge_globals.local_player_index = 0;
@@ -2978,25 +3102,38 @@ static void forge_undo_set_transform(
 	forge_settle(object_index);
 }
 
-/* the last step undone (redo FALSE), or the next one redone */
-static void forge_undo_step(
-	boolean redo)
+/* the last step undone (redo FALSE), or the next one redone, by the host's
+own monitor or (network Forge, acting for it) a machine's (asking: its
+machine index, FORGE_NET_HOST_ASKS for the host's own): what came of it
+(forge_net_protocol.h's _forge_net_refuse_* words), the step's kind and tag
+(NONE, NONE with none), and who holds its object when another does */
+static short forge_undo_step_result(
+	boolean redo,
+	long asking,
+	short *kind,
+	long *tag_index,
+	short *holder)
 {
 	struct forge_undo *entry;
 	long object_index;
 	char words[FORGE_LINE_SIZE];
 	boolean done = TRUE;
 
+	*kind = NONE;
+	*tag_index = NONE;
+	*holder = NONE;
 	if (redo ? forge_globals.undo_cursor >= forge_globals.undo_count : forge_globals.undo_cursor <= 0)
-	{
-		forge_menu_notice("%s", redo ? T("Nothing to redo") : T("Nothing to undo"));
-		return;
-	}
+		return redo ? _forge_net_refuse_nothing_to_redo : _forge_net_refuse_nothing_to_undo;
 	if (object_try_and_get(forge_globals.held_object_index))
 		forge_drop();
 	entry = &forge_globals.undo[redo ? forge_globals.undo_cursor : forge_globals.undo_cursor - 1];
+	*kind = entry->kind;
+	*tag_index = entry->tag_index;
 	forge_undo_describe(entry, words, sizeof(words));
 	object_index = forge_undo_object(entry);
+	/* (another player holding its object: not now) */
+	if (object_index != NONE && (*holder = forge_net_holder(object_index, asking)) != NONE)
+		return _forge_net_refuse_held;
 	switch (entry->kind)
 	{
 	case _forge_undo_place:
@@ -3008,10 +3145,7 @@ static void forge_undo_step(
 			if (object_index != NONE)
 				break;
 			if (!forge_undo_bring_back(entry, entry->kind == _forge_undo_place ? &entry->to : &entry->from))
-			{
-				forge_menu_notice(redo ? T("Can't redo %s: the budget is full") : T("Can't undo %s: the budget is full"), words);
-				return;
-			}
+				return redo ? _forge_net_refuse_redo_budget : _forge_net_refuse_undo_budget;
 		}
 		else
 		{
@@ -3035,12 +3169,52 @@ static void forge_undo_step(
 		break;
 	}
 	forge_globals.undo_cursor += redo ? 1 : -1;
-	if (!done)
-		forge_menu_notice(redo ? T("Can't redo %s: it is gone") : T("Can't undo %s: it is gone"), words);
-	else
-		forge_menu_notice(redo ? T("Redone: %s") : T("Undone: %s"), words);
 	platform_log("forge: %s %s (%d of %d steps)", redo ? "redid" : "undid", words, forge_globals.undo_cursor,
 		forge_globals.undo_count);
+	if (!done)
+		return redo ? _forge_net_refuse_redo_gone : _forge_net_refuse_undo_gone;
+	return redo ? _forge_net_refuse_redone : _forge_net_refuse_undone;
+}
+
+/* the last step undone (redo FALSE), or the next one redone, said */
+static void forge_undo_step(
+	boolean redo)
+{
+	struct forge_undo entry;
+	char words[FORGE_LINE_SIZE];
+	short kind;
+	long tag_index;
+	short holder;
+	short result;
+
+	/* (a network game's client: the host's, of its own steps) */
+	if (forge_net_client())
+	{
+		forge_net_client_undo(redo);
+		return;
+	}
+	result = forge_undo_step_result(redo, FORGE_NET_HOST_ASKS, &kind, &tag_index, &holder);
+	csmemset(&entry, 0, sizeof(entry));
+	entry.kind = (short)PIN(kind, 0, NUMBER_OF_FORGE_UNDO_KINDS - 1);
+	entry.tag_index = tag_index;
+	words[0] = 0;
+	if (tag_index != NONE)
+		forge_undo_describe(&entry, words, sizeof(words));
+	switch (result)
+	{
+	case _forge_net_refuse_nothing_to_redo: forge_menu_notice("%s", T("Nothing to redo")); break;
+	case _forge_net_refuse_nothing_to_undo: forge_menu_notice("%s", T("Nothing to undo")); break;
+	case _forge_net_refuse_held:
+		forge_net_held_by_other(forge_undo_object(&forge_globals.undo[redo ? forge_globals.undo_cursor :
+			forge_globals.undo_cursor - 1]));
+		break;
+	case _forge_net_refuse_redo_budget: forge_menu_notice(T("Can't redo %s: the budget is full"), words); break;
+	case _forge_net_refuse_undo_budget: forge_menu_notice(T("Can't undo %s: the budget is full"), words); break;
+	case _forge_net_refuse_redo_gone: forge_menu_notice(T("Can't redo %s: it is gone"), words); break;
+	case _forge_net_refuse_undo_gone: forge_menu_notice(T("Can't undo %s: it is gone"), words); break;
+	case _forge_net_refuse_redone: forge_menu_notice(T("Redone: %s"), words); break;
+	default: forge_menu_notice(T("Undone: %s"), words); break;
+	}
 }
 
 /* ---- snapping (the Forge menu's SNAP): the object held on a grid of
@@ -3099,6 +3273,10 @@ static void forge_property_apply(
 	short index;
 
 	if (!placed)
+		return;
+	/* (a network game's client: the host's, but for its facing, which its
+	moves say) */
+	if (forge_net_client() && forge_net_client_property(property, step))
 		return;
 	switch (property)
 	{
@@ -3489,6 +3667,7 @@ static boolean forge_variant_capture(
 			skipped++;
 			continue;
 		}
+		forge_net_capture_placed[layout->record_count] = index;
 		layout->record_count++;
 	}
 	/* (the packs the records' tags are of: named, by recipe and hash, so
@@ -3715,7 +3894,9 @@ static void forge_session_update(
 
 	if (!forge_globals.game_active)
 		return;
-	if (game_connection() != _game_connection_local)
+	/* (a local game, or a network Forge game's host or client:
+	forge_net.inc) */
+	if (game_connection() != _game_connection_local && !forge_net_host() && !forge_net_client())
 	{
 		forge_globals.game_active = FALSE;
 		forge_globals.game_requested = FALSE;
@@ -3785,6 +3966,13 @@ static void forge_new_round_start(
 	else
 	{
 		forge_globals.round_monitor = FALSE;
+	}
+	/* (a network game: its own round, the netcode's map reset being a local
+	game's: forge_net.inc) */
+	if (forge_net_host())
+	{
+		forge_net_new_round();
+		return;
 	}
 	forge_globals.round_resetting = TRUE;
 	platform_log("forge: new round asked: the map resets, the layout's %d objects placed again (as the %s)",
@@ -4099,6 +4287,23 @@ boolean forge_map_available(
 	return file != NULL;
 }
 
+/* (free for all slayer: the map's own vehicles and weapons, players
+respawning at once; a score no one alone reaches - a kill of the player's
+own is the only score, AI's kills are not a player's - and no time limit,
+game_variant_options' default) */
+void forge_variant_build(
+	struct game_variant *variant)
+{
+	static wchar_t const name[] = L"Forge";
+
+	build_game_variant_slayer(variant);
+	csmemset(variant->human_readable_game_description, 0, sizeof(variant->human_readable_game_description));
+	csmemcpy(variant->human_readable_game_description, name, sizeof(name));
+	variant->universal_variant.score_to_win = 999;
+	variant->universal_variant.respawn_time = 0;
+	variant->universal_variant.suicide_penalty = 0;
+}
+
 boolean forge_game_start(
 	short map_index,
 	char const *variant_file,
@@ -4106,11 +4311,12 @@ boolean forge_game_start(
 	int why_size)
 {
 	struct game_variant variant;
-	static wchar_t const name[] = L"Forge";
 	char map_name[FORGE_FILE_MAP_NAME_SIZE];
 
 	if (map_index < 0 || map_index >= forge_map_count())
 		return FALSE;
+	/* (a local game: no network Forge game hosted any more) */
+	forge_net_host_end();
 	/* (the map variant chosen, read and checked whole before the game is
 	asked for: one that cannot be read starts nothing) */
 	forge_globals.variant_pending = FALSE;
@@ -4158,16 +4364,7 @@ boolean forge_game_start(
 		platform_log("forge: map variant \"%s\" (%s, %d objects) for the Forge game", forge_variant_layout.title, variant_file,
 			forge_variant_layout.record_count);
 	}
-	/* (free for all slayer: the map's own vehicles and weapons, players
-	respawning at once; a score no one alone reaches - a kill of the
-	player's own is the only score, AI's kills are not a player's - and no
-	time limit, game_variant_options' default) */
-	build_game_variant_slayer(&variant);
-	csmemset(variant.human_readable_game_description, 0, sizeof(variant.human_readable_game_description));
-	csmemcpy(variant.human_readable_game_description, name, sizeof(name));
-	variant.universal_variant.score_to_win = 999;
-	variant.universal_variant.respawn_time = 0;
-	variant.universal_variant.suicide_penalty = 0;
+	forge_variant_build(&variant);
 	game_connection_set(_game_connection_local);
 	game_set_game_variant(&variant);
 	main_set_map_name((char *)forge_maps[map_index].path);
@@ -4585,13 +4782,32 @@ void forge_map_loaded(
 		forge_monitor_flying = 0;
 		forge_globals.unit_index = NONE;
 	}
+	forge_net_map_loaded();
+	/* (a network Forge game's client: the host's map is the Forge game's,
+	whichever it is; its map variant the host's to place) */
+	if (forge_net_client_session() && game_connection() == _game_connection_network_client && scenario_name)
+	{
+		char map_name[FORGE_FILE_MAP_NAME_SIZE];
+
+		if (forge_map_short_name(scenario_name, map_name, sizeof(map_name)) && forge_map_of_short(map_name) != NONE)
+		{
+			forge_globals.game_requested = TRUE;
+			csstrncpy(forge_globals.game_map, scenario_name, sizeof(forge_globals.game_map) - 1);
+			forge_globals.game_map[sizeof(forge_globals.game_map) - 1] = 0;
+			forge_globals.variant_pending = FALSE;
+			snprintf(forge_globals.variant_title, sizeof(forge_globals.variant_title), "%s", forge_net_host_title());
+			forge_globals.variant_file[0] = 0;
+		}
+	}
 	forge_globals.game_active = forge_globals.game_requested && scenario_name &&
 		!_stricmp(scenario_name, forge_globals.game_map);
 	forge_game_playing = forge_globals.game_active;
 	/* (the session's packs, before the map's objects are placed) */
 	if (forge_globals.game_active)
 		forge_packs_load();
-	if (!forge_globals.game_active)
+	/* (a network Forge game's host keeps its request between games: its
+	lobby's next START FORGE plays it again) */
+	if (!forge_globals.game_active && !forge_net_hosting())
 		forge_globals.game_requested = FALSE;
 	else
 		platform_log("forge: %s loaded for a Forge game", scenario_name);
@@ -4780,6 +4996,15 @@ void forge_update(
 	if (forge_globals.game_active && forge_globals.ai_shots_counted)
 		forge_ai_shots_update();
 #endif
+	/* (ALL AI, CLEAR AI, NEW ROUND: a network game's host's only) */
+	if (forge_net_client() &&
+		(forge_globals.ai_all_requested || forge_globals.clear_ai_requested || forge_globals.round_requested))
+	{
+		forge_globals.ai_all_requested = FALSE;
+		forge_globals.clear_ai_requested = _forge_clear_ai_none;
+		forge_globals.round_requested = FALSE;
+		forge_menu_notice("%s", T("Only the host can do that"));
+	}
 	if (forge_globals.ai_all_requested)
 	{
 		forge_globals.ai_all_requested = FALSE;
@@ -4811,7 +5036,8 @@ void forge_update(
 	if (!forge_game_playing)
 		return;
 	player_index = local_player_get_player_index(forge_globals.local_player_index);
-	if (player_index == NONE || game_connection() != _game_connection_local)
+	if (player_index == NONE ||
+		(game_connection() != _game_connection_local && !forge_net_host() && !forge_net_client()))
 	{
 		/* (no player, or not a local game: the monitor's state is gone; the
 		player's own camera is the director's again) */
@@ -4872,6 +5098,8 @@ void forge_update(
 	forge_globals.menu_was_open = menu_open;
 	forge_placed_update();
 	forge_homes_update();
+	/* (a network Forge game: the requests and the layout's changes) */
+	forge_net_update();
 	if (forge_globals.game_active && pressed[_gamepad_binary_button_start] && !menu_open && !forge_globals.game_requested)
 	{
 		forge_menu_open_pause();
@@ -5077,6 +5305,8 @@ void forge_draw(
 	bounds.y0 = bounds.y1;
 	bounds.y1 = (short)(bounds.y0 + height);
 	forge_draw_line(font_index, &bounds, 0, 0.62f, 0.71f, 0.80f, forge_globals.hud_budget);
+	/* (a network game: the other players' monitors where they fly) */
+	forge_net_draw_monitors(font_index, height);
 	/* the notice, a while, at the left below the middle (where Halo
 	Online's Forge says "Movement Speed: Fast") */
 	if (forge_globals.notice[0] && system_milliseconds() < forge_globals.notice_until)
@@ -5428,6 +5658,12 @@ boolean forge_command(
 			word, forge_globals.placed_count, forge_globals.ai_count, forge_globals.ai_dead_count, forge_globals.ai_shots);
 		return TRUE;
 	}
+	/* (network Forge: its state in the log, forge_net.inc) */
+	if (!strcmp(word, "net"))
+	{
+		forge_net_log_state(rest);
+		return TRUE;
+	}
 	if (!strcmp(word, "round"))
 	{
 		forge_new_round_request();
@@ -5724,6 +5960,19 @@ boolean forge_command(
 	{
 		long object_index = forge_target_object();
 
+		/* ("#<id>": the layout's object of that id instead) */
+		if (rest[0] == '#')
+		{
+			long id = atol(rest + 1);
+			short index;
+
+			object_index = NONE;
+			for (index = 0; index < forge_globals.placed_count && index < FORGE_MAXIMUM_OBJECTS; index++)
+			{
+				if (forge_globals.placed[index].id == id && forge_object_alive(forge_globals.placed[index].object_index))
+					object_index = forge_globals.placed[index].object_index;
+			}
+		}
 		if (object_index == NONE)
 		{
 			platform_log("forge: nothing to delete");
@@ -5802,3 +6051,7 @@ boolean forge_command(
 	platform_log("forge: unknown command %s", word);
 	return FALSE;
 }
+
+/* ---------- network Forge (its statics shared with this file's) */
+
+#include "forge_net.inc"

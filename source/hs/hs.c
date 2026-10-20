@@ -16149,6 +16149,10 @@ static char const *hs_host_player_command(
 	return *text == ' ' || *text == '\t' || *text == 0 ? text : NULL;
 }
 
+/* port: network Forge's (port/linux/game/forge_net.inc): this machine plays
+the host's Forge game, whose edits are requests the host checks */
+boolean forge_net_client_session(void);
+
 /* port: a command someone typed (the console, the telnet console, a cheat
 button, init.txt): what it logs is its answer, shown whatever
 config.toml's game.console_log is (terminal_command_running) */
@@ -16182,7 +16186,8 @@ static boolean hs_compile_and_evaluate_command(
 	cheats, no game speed, nothing else a command changes of the game (the
 	game run each tick also puts back what was changed before joining,
 	cheats_network_client_enforce) */
-	if (hs_playing_in_anothers_game() && !hs_expression_changes_no_game(expression))
+	if (hs_playing_in_anothers_game() && !hs_expression_changes_no_game(expression) &&
+		!(hs_host_player_command(expression, "forge") && forge_net_client_session()))
 	{
 		console_warning("not while playing in another's game: the host decides the game");
 		return FALSE;

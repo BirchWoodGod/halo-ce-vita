@@ -61,6 +61,14 @@ enum network_game_message_type
 	_message_client_map_download,
 	_message_server_map_download_answer,
 	_message_server_map_download_data,
+	/* port: network Forge (port/linux/game/forge_net_protocol.h), an
+	optional capability: the host's hello to a machine joining a Forge game
+	(that it is Forge, its packs, its map variant), and the machine's answer
+	(that it plays it). A machine of a build without them drops the host's
+	as an unknown packet type and so never answers: the host then refuses it
+	from the Forge game alone. Never sent on the crossplay wire */
+	_message_client_forge,
+	_message_server_forge,
 	NUMBER_OF_NETWORK_GAME_MESSAGE_TYPES,
 };
 

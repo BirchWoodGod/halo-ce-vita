@@ -74,6 +74,8 @@ machine (their datum identifiers need not be).
 #include "network_coop.h"
 #include "network_distributed.h"
 #include "network_wire.h"
+#include "forge.h"
+#include "forge_net_protocol.h"
 #include "dedicated_server.h"
 #include "latency_meter.h"
 #include "../src/p2p.h"
@@ -4589,6 +4591,10 @@ void network_distributed_handle_message(
 	case _distributed_message_notice:
 	case _distributed_message_client_ready: entry_size = 0; break;
 	case _distributed_message_client_identity: entry_size = sizeof(struct distributed_client_identity); break;
+	case _distributed_message_forge_requests:
+	case _distributed_message_forge_updates: entry_size = sizeof(struct forge_net_record); break;
+	case _distributed_message_forge_palette: entry_size = sizeof(struct forge_net_palette_entry); break;
+	case _distributed_message_forge_layout: entry_size = sizeof(struct forge_net_layout_entry); break;
 	case _distributed_message_damage_events:
 	case _distributed_message_hit_reports: entry_size = network_damage_entry_size(header.type); break;
 	default: entry_size = network_objects_entry_size(header.type); break;
@@ -4618,8 +4624,17 @@ void network_distributed_handle_message(
 	ChupathingyCE's) */
 	if ((header.type == _distributed_message_client_ready ||
 			header.type == _distributed_message_client_identity ||
-			header.type == _distributed_message_hit_reports) &&
+			header.type == _distributed_message_hit_reports ||
+			header.type == _distributed_message_forge_requests) &&
 		!distributed_handling_stream_message)
+	{
+		return;
+	}
+	/* (network Forge's: never on the crossplay wire, a PC's game; a
+	host's only over its connection, never a datagram: forge_net.inc) */
+	if (header.type >= _distributed_message_forge_requests && header.type <= _distributed_message_forge_layout &&
+		(network_wire_crossplay() || (machine_index == NONE && network_connection_last_read_was_unreliable()) ||
+			distributed_handling_batch))
 	{
 		return;
 	}
@@ -4633,6 +4648,7 @@ void network_distributed_handle_message(
 	case _distributed_message_vehicle_prediction:
 	case _distributed_message_player_inputs:
 	case _distributed_message_coop_skip_vote:
+	case _distributed_message_forge_requests:
 		if (machine_index == NONE || game_connection() != _game_connection_network_server)
 			return;
 		/* (heard from: the latency meter's connection problem) */
@@ -4723,6 +4739,18 @@ void network_distributed_handle_message(
 		break;
 	case _distributed_message_coop_device_states:
 		network_coop_handle_device_states(entries, header.count);
+		break;
+	case _distributed_message_forge_requests:
+		forge_net_handle_requests(machine_index, entries, header.count);
+		break;
+	case _distributed_message_forge_updates:
+		forge_net_handle_updates(entries, header.count);
+		break;
+	case _distributed_message_forge_palette:
+		forge_net_handle_palette(entries, header.count);
+		break;
+	case _distributed_message_forge_layout:
+		forge_net_handle_layout(entries, header.count);
 		break;
 	case _distributed_message_player_statistics:
 	{

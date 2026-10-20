@@ -66,6 +66,7 @@ same datum index (identifier and all), so that any message can name one:
 #include "network_coop.h"
 #include "network_distributed.h"
 #include "network_wire.h"
+#include "forge.h"
 
 #include <math.h>
 
@@ -2424,7 +2425,15 @@ void network_objects_handle_changes(
 
 	for (index = 0; index < count; index++)
 	{
-		struct distributed_object_change const *change = &changes[index];
+		struct distributed_object_change translated = changes[index];
+		struct distributed_object_change const *change = &translated;
+
+		/* (network Forge: a host's pack tag as this machine's tag of its
+		path, which another load order of the packs gives another index;
+		NONE when this machine has none: not made, as a tag of another group
+		is not. forge_net.inc) */
+		if (change->change == _object_change_create)
+			translated.definition_index = forge_net_client_tag(translated.definition_index);
 		long absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(change->object_index);
 
 		if (!distributed_object_index_valid(change->object_index) ||
@@ -2589,6 +2598,10 @@ void network_objects_handle_states(
 		boolean at_rest;
 
 		if (!distributed_object_index_valid(state->object_index) || !network_objects_client_has(state->object_index))
+			continue;
+		/* (network Forge: an object this machine's monitor holds is where it
+		holds it, the host following its moves: forge_net.inc) */
+		if (forge_net_client_holds(state->object_index))
 			continue;
 		object = object_get(state->object_index);
 		/* (the unit's light as the host has it: only presses toggle it here,

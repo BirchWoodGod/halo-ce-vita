@@ -53,6 +53,20 @@ short network_game_server_last_refusal_code(
 void network_game_server_kick_machine(
 	long machine_index,
 	boolean kept_out);
+#ifdef HALO_LINUX
+/* port (network Forge, port/linux/game/forge_net.inc): a machine dropped
+with that rejection reason, rejoinable; the remote machines joined; a
+message to one of them */
+void network_game_server_port_refuse_machine(
+	long machine_index,
+	word reason);
+short network_game_server_port_joined_machines(
+	long *machine_indices,
+	short maximum);
+boolean network_game_server_port_send_to_machine(
+	long machine_index,
+	void *message);
+#endif
 /* the host's ban command (console.c, hs.c) */
 enum
 {

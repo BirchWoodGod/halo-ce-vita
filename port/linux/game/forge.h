@@ -363,4 +363,75 @@ void forge_budget_get(
 	short *ai,
 	short *dead_ai);
 
+/* ---------- prototypes/FORGE_NET.INC (network Forge, in forge.c: several
+players forging one map, the host authoritative; forge_net_protocol.h) */
+
+struct network_game_server;
+struct network_game_server_client_machine;
+struct network_game_client;
+struct game_variant;
+
+/* the Forge game's variant (free for all slayer, no score that can be
+reached, no time limit, "Forge"), as forge_game_start plays it */
+void forge_variant_build(
+	struct game_variant *variant);
+
+/* (the Forge lobby's live game, the settings panel, the network test) the
+game this machine hosts is a Forge game of the map at map_path, with that
+map variant of it (NULL, "" for none): joiners are asked to play it, and
+those that cannot are refused from it; FALSE with why if it cannot be */
+boolean forge_net_host_begin(
+	char const *map_path,
+	char const *variant_file,
+	char *why,
+	int why_size);
+/* ... a Forge game no more (the lobby closed, another game chosen) */
+void forge_net_host_end(
+	void);
+/* whether this machine hosts a Forge game, or plays the host's Forge game */
+boolean forge_net_hosting(
+	void);
+boolean forge_net_client_session(
+	void);
+
+/* (network_server_message_handler.c, network_client_message_handler.c)
+the lobby's messages: a joiner's answer, the host's hello or refusal */
+void forge_net_server_handle_lobby_message(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *machine,
+	word *message,
+	short message_size);
+void forge_net_client_handle_lobby_message(
+	struct network_game_client *client,
+	word *message,
+	short message_size);
+
+/* (network_distributed.c) a game's messages: a client's requests (its
+machine), the host's updates, palette and layout */
+void forge_net_handle_requests(
+	long machine_index,
+	void const *entries,
+	short count);
+void forge_net_handle_updates(
+	void const *entries,
+	short count);
+void forge_net_handle_palette(
+	void const *entries,
+	short count);
+void forge_net_handle_layout(
+	void const *entries,
+	short count);
+
+/* (main.c, each frame) the lobby's hellos and answers */
+void forge_net_frame(
+	void);
+
+/* (network_objects.c, a client) a host's tag index as this machine's (a
+pack's tags by path), NONE when this machine has no such tag; and whether
+it holds the object (its place its own while held) */
+long forge_net_client_tag(
+	long host_tag_index);
+boolean forge_net_client_holds(
+	long object_index);
+
 #endif

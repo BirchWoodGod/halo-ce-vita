@@ -631,6 +631,8 @@ seconds=${HALO_TEST_SECONDS:-180}
 # (h3liveinvite: a game and its END GAME after the invite; h3liveagain: two games)
 [ "$mode" = h3liveinvite ] && seconds=${HALO_TEST_SECONDS:-240}
 [ "$mode" = h3liveagain ] && seconds=${HALO_TEST_SECONDS:-280}
+# (network Forge: netns_forge_cases.sh)
+case $mode in forge) seconds=${HALO_TEST_SECONDS:-110} ;; forge3) seconds=${HALO_TEST_SECONDS:-125} ;; forgeold|forgeleave) seconds=${HALO_TEST_SECONDS:-80} ;; esac
 rejoin=${HALO_TEST_REJOIN:-0}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_netns_test.$$}
 . "$here/test_out.sh"
@@ -4266,8 +4268,31 @@ friendsplayers|friendsplayersoff|friendsplayersnone)
 	echo "joiner's seconds with two players playing: $two"
 	[ "$two" -ge 20 ] || fail "the joiner played the host's game for $two s with two players (20 wanted)"
 	;;
+forge|forge3|forgeold|forgeleave)
+	# network Forge (port/linux/game/forge_net.inc), on the host's LAN (system
+	# link): the host hosts a Forge game of Blood Gulch (the network test's
+	# host:bloodgulch:forge), the joiners join it by the System Link search;
+	# each machine's monitor edits by the console (HALO_TEST_COMMANDS,
+	# forge.c's commands), every edit a request the host checks and makes
+	forge_lan_machine() { # NAME_VARIABLE ADDRESS: a machine on the host's LAN
+		holder
+		local machine=$held number=${2##*.}
+		in_ns "$host_router" ip link add "l${number}_host" type veth peer name "m${number}_host"
+		in_ns "$host_router" ip link set "m${number}_host" netns "$machine"
+		in_ns "$host_router" ip link set "l${number}_host" master b_host
+		in_ns "$host_router" ip link set "l${number}_host" up
+		in_ns "$machine" ip link set lo up
+		in_ns "$machine" ip addr add "$2/24" broadcast 192.168.1.255 dev "m${number}_host"
+		in_ns "$machine" ip link set "m${number}_host" up
+		in_ns "$machine" ip route add default via 192.168.1.1
+		eval "$1=$machine"
+	}
+	forge_lan_machine lan 192.168.1.3
+	. "$here/netns_forge_cases.sh"
+	forge_case
+	;;
 *)
-	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|h3live|h3liveleave|h3liveagain|h3liveinvite|h3liveprivate|h3online|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|party|friendsprivate|friendsprivatepw" >&2
+	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|h3live|h3liveleave|h3liveagain|h3liveinvite|h3liveprivate|h3online|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|party|friendsprivate|friendsprivatepw|forge|forge3|forgeold|forgeleave" >&2
 	exit 2
 	;;
 esac

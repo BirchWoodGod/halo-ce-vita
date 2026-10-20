@@ -263,6 +263,7 @@ symbols in this file:
 #include "networking/network_server_message_handler.h"
 #include "text/unicode.h"
 #include "map_share.h"
+#include "forge.h"
 #include "network_game_record.h"
 #include "network_wire.h"
 #include "main/main.h"
@@ -1398,6 +1399,23 @@ boolean network_game_server_handle_client_message(
 								break;
 							}
 							map_share_server_handle_request(
+								server,
+								machine,
+								message,
+								message_buffer_size);
+							break;
+
+						/* port: network Forge's answer to the host's hello
+						(port/linux/game/forge_net.inc), from a machine joined
+						to the game (checked above); never on the crossplay
+						wire, which no Forge game is hosted on */
+						case _message_client_forge:
+							if (network_wire_crossplay())
+							{
+								network_event("ignoring a Forge answer on the crossplay wire");
+								break;
+							}
+							forge_net_server_handle_lobby_message(
 								server,
 								machine,
 								message,

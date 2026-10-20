@@ -121,6 +121,7 @@ _network_game_client_state_pregame) */
 /* the crossplay guardrails (docs/crossplay.md 6, T11) */
 #include "../src/crossplay_guard.h"
 #include "network_wire.h"
+#include "forge.h"
 
 /* the platform layer's (port/linux/src/port_config.c) */
 const char *config_string(char const *name);
@@ -320,6 +321,13 @@ static void network_test_variant_by_name(struct game_variant *variant, char cons
 	{
 		snprintf(base, sizeof(base), "%.*s", (int)(length - 9), name);
 		name = base;
+	}
+	/* ("forge": a network Forge game, forge.c's variant; the host's game
+made one by network_test_forge once its map is set) */
+	if (!strcmp(name, "forge"))
+	{
+		forge_variant_build(variant);
+		return;
 	}
 	for (index = 0; index < NUMBEROF(others); index++)
 	{
@@ -1851,6 +1859,25 @@ void network_test_update(
 				network_game_server_change_game_variant(global_network_game_server_get(), &variant);
 				network_test_variant_options(&variant);
 				network_test.map_set = TRUE;
+				/* ("forge": the hosted game a network Forge game of the map,
+				HALO_NETWORK_TEST_FORGE_VARIANT its map variant) */
+				{
+					char variant_name[64];
+
+					network_test_variant(network_test.variant_index, variant_name, sizeof(variant_name));
+					if (!strcmp(variant_name, "forge"))
+					{
+						char why[160];
+						char const *variant_file = getenv("HALO_NETWORK_TEST_FORGE_VARIANT");
+
+						if (!forge_net_host_begin(path, variant_file, why, (int)sizeof(why)))
+							platform_log("network test: the Forge game could not be hosted: %s", why);
+					}
+					else
+					{
+						forge_net_host_end();
+					}
+				}
 			}
 			else if (network_test.map_set && network_test.map_path[0] && global_network_game_server_get() &&
 				network_test.setup_seconds - network_test.map_checked_seconds >= 1.0f &&

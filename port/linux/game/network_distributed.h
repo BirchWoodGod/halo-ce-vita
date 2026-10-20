@@ -62,6 +62,17 @@ enum
 	/* a client's Discord user, as its Discord told it (reliable, with its
 	ready: distributed_client_send_identity) */
 	_distributed_message_client_identity,
+	/* network Forge (port/linux/game/forge_net.inc, forge_net_protocol.h),
+	between games' kinds: numbers of their own, clear of upstream's (its
+	pings at 19, its votes, voice and map sharing at 78-86) and of ours; a
+	build without them drops them as kinds it does not know, and only a
+	machine that answered the host's Forge hello is sent any. A client's
+	requests (reliable, over its stream only), the host's updates, palette
+	and layout (reliable) */
+	_distributed_message_forge_requests = 40,
+	_distributed_message_forge_updates,
+	_distributed_message_forge_palette,
+	_distributed_message_forge_layout,
 	/* the host's actors' units: their control and state (network_actors.c).
 	A number of its own, clear of the kinds upstream adds: a build without
 	it drops the message as a kind it does not know, so the network version
