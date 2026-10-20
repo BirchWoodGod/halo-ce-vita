@@ -42,12 +42,34 @@ in a folder of its own, with ux0:data/haloce-vita made there.
 Run port/vita/tests/run_vita_settings_test.sh.
 */
 
+/* (a memory card's slowness, test_save_off_thread: settings.txt put in
+place takes test_card_delay_us, as ux0's file calls took 27-137 ms a save
+on the testers' Vitas; the saves put in place counted) */
+static volatile unsigned long test_card_delay_us;
+static volatile int test_settings_renames;
+static int test_rename(const char *from, const char *to);
+#define rename test_rename
 #include "../host/vita_settings.c"
+#undef rename
+/* (stdio.h's, which the macro renamed) */
+int rename(const char *from, const char *to);
 
 #include <stdio.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 #include <utime.h>
+
+static int test_rename(const char *from, const char *to)
+{
+	if (!strcmp(to, SETTINGS_FILE))
+	{
+		if (test_card_delay_us)
+			usleep(test_card_delay_us);
+		__atomic_add_fetch(&test_settings_renames, 1, __ATOMIC_RELAXED);
+	}
+	return rename(from, to);
+}
 
 volatile unsigned long halo_settings_generation;
 /* (the game's side of Host a game and Join a game: system_link_shortcut.c) */
@@ -239,6 +261,48 @@ int vita_host_thread_start(const char *name, void (*function)(void *), void *arg
 	return 0;
 }
 
+/* (a thread that stays: settings.txt's writer, a real one here) */
+struct test_thread
+{
+	void (*function)(void *);
+	void *argument;
+};
+
+static void *test_thread_main(void *argument)
+{
+	struct test_thread start = *(struct test_thread *)argument;
+
+	free(argument);
+	start.function(start.argument);
+	return NULL;
+}
+
+int vita_host_thread_start_stack(const char *name, void (*function)(void *), void *argument, int core, int priority,
+	int stack_size)
+{
+	struct test_thread *start = malloc(sizeof(*start));
+	pthread_t thread;
+
+	(void)name;
+	(void)core;
+	(void)priority;
+	(void)stack_size;
+	if (!start)
+		return -1;
+	start->function = function;
+	start->argument = argument;
+	if (pthread_create(&thread, NULL, test_thread_main, start) != 0)
+	{
+		free(start);
+		return -1;
+	}
+	pthread_detach(thread);
+	return 0;
+}
+
+/* (vita_main.c's: the memory window made, threads allowed) */
+int vita_host_memory_window_made(void) { return 1; }
+
 int sceRtcGetCurrentClockLocalTime(SceDateTime *time)
 {
 	time->year = 2026;
@@ -304,9 +368,14 @@ void vgxm_overlay_enable(int enabled) { overlay_level = enabled; }
 void vgxm_upscale_filter_set(int filter) { (void)filter; }
 void vita_host_log(const char *line)
 {
-	size_t used = strlen(log_text);
+	/* (settings.txt's writer logs from its own thread) */
+	static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+	size_t used;
 
+	pthread_mutex_lock(&lock);
+	used = strlen(log_text);
 	snprintf(log_text + used, sizeof(log_text) - used, "%s\n", line);
+	pthread_mutex_unlock(&lock);
 }
 
 int p2p_join_code(const char *code)
@@ -724,13 +793,16 @@ static const char *menu_line(int wanted, char *line, int size)
 	return line;
 }
 
-/* the file's text ("" if there is none) */
+/* the file's text ("" if there is none; settings.txt once its writer has
+written what was asked) */
 static const char *file_text(const char *path)
 {
 	static char text[4096];
-	FILE *file = fopen(path, "r");
+	FILE *file;
 	size_t size = 0;
 
+	vita_settings_save_wait();
+	file = fopen(path, "r");
 	if (file)
 	{
 		size = fread(text, 1, sizeof(text) - 1, file);
@@ -742,10 +814,20 @@ static const char *file_text(const char *path)
 
 static void write_file(const char *path, const void *data, size_t size)
 {
-	FILE *file = fopen(path, "wb");
+	FILE *file;
 
+	/* (not a settings.txt the writer then puts its own in place of) */
+	vita_settings_save_wait();
+	file = fopen(path, "wb");
 	fwrite(data, 1, size, file);
 	fclose(file);
+}
+
+/* settings.txt deleted, once its writer is done */
+static void settings_file_delete(void)
+{
+	vita_settings_save_wait();
+	unlink(SETTINGS_FILE);
 }
 
 /* a fake map: the cache header's signature, version and scenario type
@@ -4087,6 +4169,79 @@ static void test_restart_offer(void)
 	check(getenv("HALO_SOUND_CHANNELS") && !strcmp(getenv("HALO_SOUND_CHANNELS"), before), "Sound voices as it was");
 }
 
+/* the milliseconds since start (the real clock) */
+static double real_ms(const struct timespec *start)
+{
+	struct timespec now;
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (double)(now.tv_sec - start->tv_sec) * 1000.0 + (double)(now.tv_nsec - start->tv_nsec) / 1e6;
+}
+
+/* settings.txt written off the game thread (BlazeRed, 1.1.0-beta.6: the game
+froze changing the performance preset or the gyro; halo.log showed each
+save - fopen, fclose, remove and rename on the memory card, on the game
+thread - holding a frame 104-549 ms): with every save taking 300 ms to put
+in place, as on a busy card, a press on Profile and on Gyro aiming returns
+at once; once the writer is done the file has both; presses in a row are
+written together; a row set to the value it has writes nothing */
+static void test_save_off_thread(void)
+{
+	struct timespec start;
+	char line[160], profile[32];
+	double elapsed;
+	int renames, index;
+
+	main_menu_idle_now = 0;
+	vita_settings_set("HALO_GYRO", "off");
+	vita_settings_save_wait();
+	test_card_delay_us = 300000;
+	open_panel();
+	to_tab("Video");
+	to_line("Profile");
+	renames = test_settings_renames;
+	clock_gettime(CLOCK_MONOTONIC, &start);
+	/* (from Custom, Balanced or Quality left; Performance right) */
+	press(strcmp(getenv("HALO_PROFILE"), "performance") ? VITA_BUTTON_LEFT : VITA_BUTTON_RIGHT);
+	elapsed = real_ms(&start);
+	snprintf(profile, sizeof(profile), "HALO_PROFILE=%s\n", getenv("HALO_PROFILE"));
+	check(strcmp(profile, "HALO_PROFILE=custom\n") != 0 && test_settings_renames == renames,
+		"Profile: a profile chosen, nothing put in place yet");
+	snprintf(line, sizeof(line), "Profile changed, the card taking 300 ms a save: the press returns at once (%.2f ms)",
+		elapsed);
+	check(elapsed < 50.0, line);
+	to_tab("Controls");
+	to_line("Gyro aiming");
+	clock_gettime(CLOCK_MONOTONIC, &start);
+	press(VITA_BUTTON_RIGHT);
+	elapsed = real_ms(&start);
+	snprintf(line, sizeof(line), "Gyro aiming On: the press returns at once (%.2f ms)", elapsed);
+	check(elapsed < 50.0 && !strcmp(getenv("HALO_GYRO"), "on"), line);
+	clock_gettime(CLOCK_MONOTONIC, &start);
+	for (index = 0; index < 3; index++)
+		press(index % 2 ? VITA_BUTTON_RIGHT : VITA_BUTTON_LEFT);
+	press(VITA_BUTTON_LEFT);
+	elapsed = real_ms(&start);
+	snprintf(line, sizeof(line), "Gyro aiming off, on, off, off again (four presses): %.2f ms in all", elapsed);
+	check(elapsed < 50.0 && !strcmp(getenv("HALO_GYRO"), "off"), line);
+	vita_settings_save_wait();
+	snprintf(line, sizeof(line), "settings.txt once written: the profile and the gyro off, in %d writes for five "
+		"changes (one each would be five)", test_settings_renames - renames);
+	check(strstr(file_text(SETTINGS_FILE), profile) && strstr(file_text(SETTINGS_FILE), "HALO_GYRO=off\n") &&
+		test_settings_renames - renames >= 1 && test_settings_renames - renames <= 3, line);
+	/* (the game's Server Setup sets its rows each time it opens: as they
+	are, nothing is written) */
+	renames = test_settings_renames;
+	clock_gettime(CLOCK_MONOTONIC, &start);
+	vita_settings_set("HALO_GYRO", "off");
+	vita_settings_save_wait();
+	check(test_settings_renames == renames && real_ms(&start) < 50.0,
+		"a row set to the value it has: settings.txt not written again");
+	press(VITA_BUTTON_CIRCLE);
+	frame(0);
+	test_card_delay_us = 0;
+}
+
 int main(void)
 {
 	char line[128];
@@ -4711,7 +4866,7 @@ int main(void)
 
 	/* a dev switch env.txt sets and settings.txt does not: env.txt's
 	value stands */
-	unlink(SETTINGS_FILE);
+	settings_file_delete();
 	settings[0].choice = 1;
 	for (index = 0; index < SETTING_COUNT; index++)
 		if (settings[index].dev)
@@ -4860,7 +5015,7 @@ int main(void)
 		vita_settings_load();
 		check(!strcmp(getenv("HALO_NET_LOBBY_NAME"), "Couch co-op!") && !strcmp(getenv("HALO_NET_LOBBY_PASSWORD"), "pw 1"),
 			"settings.txt's lobby name (printable characters only) and password at start-up");
-		unlink(SETTINGS_FILE);
+		settings_file_delete();
 		unsetenv("HALO_NET_LOBBY_NAME");
 		unsetenv("HALO_NET_LOBBY_PASSWORD");
 		vita_settings_load();
@@ -5073,7 +5228,7 @@ int main(void)
 			"env.txt naming the render resolution over a Balanced settings.txt: not moved by the profile (settings.txt's), Custom");
 		/* (env.txt's HALO_PROFILE: that profile's rows, under the ones it
 		names itself) */
-		unlink(SETTINGS_FILE);
+		settings_file_delete();
 		profile_rows_fresh();
 		setenv("HALO_PROFILE", "quality", 1);
 		setenv("HALO_AI_THINK_DIVISOR", "1", 1);
@@ -5135,7 +5290,7 @@ int main(void)
 			/* (back to the defaults) */
 			for (index = 0; index < (int)(sizeof(defaults) / sizeof(defaults[0])); index++)
 				vita_settings_set(defaults[index][0], defaults[index][1]);
-			unlink(SETTINGS_FILE);
+			settings_file_delete();
 			profile_rows_fresh();
 			vita_settings_load();
 			restart_pending = 0;
@@ -5192,6 +5347,7 @@ int main(void)
 	test_languages();
 	test_menu_style_row();
 	test_restart_offer();
+	test_save_off_thread();
 	printf("-- %d of %d checks failed\n", failures, checks);
 	return failures ? 1 : 0;
 }

@@ -38,6 +38,12 @@ int vita_host_thread_start(const char *name, void (*function)(void *), void *arg
 /* the same at a priority (64..191, lower runs first); core -1: any core */
 int vita_host_thread_start_priority(const char *name, void (*function)(void *), void *argument, int core,
 	int priority);
+/* the same with a stack of that many bytes (the others' are 1 MB) */
+int vita_host_thread_start_stack(const char *name, void (*function)(void *), void *argument, int core,
+	int priority, int stack_size);
+/* nonzero once the memory window is made (vita_host_arena): nothing - no
+thread, no memory block, no growth of the C heap - may be made before it */
+int vita_host_memory_window_made(void);
 
 /* ---------- the fourth core (port/vita/host/vita_fourth_core.c) */
 
@@ -152,6 +158,9 @@ void vita_gyro_status(char *text, int size);
 int vita_settings_input(const struct vita_host_pad *pad);
 /* the panel's settings.txt and the release defaults into the environment */
 void vita_settings_load(void);
+/* waits until settings.txt has the last change (its writer's thread,
+vita_settings.c): before the game restarts */
+void vita_settings_save_wait(void);
 void vita_settings_message(const char *title, const char *text);
 /* the language files read (app0:lang) and the Vita's system language
 chosen for the port's text, before anything is shown (lang.c) */

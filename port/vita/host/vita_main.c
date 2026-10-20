@@ -77,7 +77,8 @@ static int thread_trampoline(SceSize size, void *argument)
 	return 0;
 }
 
-int vita_host_thread_start_priority(const char *name, void (*function)(void *), void *argument, int core, int priority)
+int vita_host_thread_start_stack(const char *name, void (*function)(void *), void *argument, int core, int priority,
+	int stack_size)
 {
 	struct thread_start start;
 	SceUID thread;
@@ -85,12 +86,17 @@ int vita_host_thread_start_priority(const char *name, void (*function)(void *), 
 
 	start.function = function;
 	start.argument = argument;
-	thread = sceKernelCreateThread(name, thread_trampoline, priority, 1024 * 1024, 0,
+	thread = sceKernelCreateThread(name, thread_trampoline, priority, stack_size, 0,
 		core >= 0 && core < 3 ? masks[core] : 0, NULL);
 	if (thread < 0)
 		return -1;
 	sceKernelStartThread(thread, sizeof(start), &start);
 	return 0;
+}
+
+int vita_host_thread_start_priority(const char *name, void (*function)(void *), void *argument, int core, int priority)
+{
+	return vita_host_thread_start_stack(name, function, argument, core, priority, 1024 * 1024);
 }
 
 int vita_host_thread_start(const char *name, void (*function)(void *), void *argument, int core)
@@ -153,6 +159,11 @@ when the program's data segment crosses a megabyte; the contiguous
 allocator lays its blocks out where v1.0 put them all the same
 (port/linux/src/xbox_memory.c, VITA_LAYOUT_TOP). */
 static void io_bench(void);
+
+int vita_host_memory_window_made(void)
+{
+	return log_thread_allowed;
+}
 
 void *vita_host_arena(unsigned long *size)
 {

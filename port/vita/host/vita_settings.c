@@ -19,7 +19,8 @@ column of its own (a '\x02' between label and value, vita_gxm.c
 menu_build), the selected row's help on one line below the rows and the
 panel's buttons on the line under it. Each setting is one of the
 environment variables the port already reads (HALO_MODEL_LOD_SCALE...),
-kept in ux0:data/haloce-vita/settings.txt and set before the game starts;
+kept in ux0:data/haloce-vita/settings.txt (written by a thread of its own:
+save) and set before the game starts;
 which page shows a row changes nothing of that. A change
 bumps halo_settings_generation, and the readers that can take a new value
 mid-game read theirs again (the render resolution and the aspect ratio too:
@@ -1648,38 +1649,226 @@ static int apply_profile(int profile)
 	return restart;
 }
 
-/* settings.txt written anew: into a file of its own, then put in place of
-the old one (a file opened for writing is not cut short on Vita3K, which
-left the end of a longer old file after a shorter new one) */
-static void save(void)
+/* ---------- settings.txt
+
+Written off the game thread (Oct 20 2026; BlazeRed, 1.1.0-beta.6: the game
+froze changing the performance preset or the gyro). Each change wrote the
+file where it was made - the panel's left and right and the game's own
+rows (Server Setup, the lobbies' network) on the game thread - and the
+memory card's fopen, fclose, remove and rename held the frame: halo.log on
+the testers' Vitas has a hitch after every such save, nothing else in it
+(no texture, no shader, no wait for the worker): Server Setup's four rows
+one frame of 114 ms (a save each 27 ms apart), 549 ms with the card busy,
+a panel change 238 ms. Now the change makes the file's text (memory only,
+save_lines) and a thread of its own writes it: a change while it writes is
+written after, the newest text only (a press each frame is written once
+or twice), and a text the same as the last one asked for is not written at
+all (the game sets its rows as they are each time Server Setup opens).
+vita_settings_save_wait waits for the writer: before settings.txt is read
+again and before the game restarts. The thread is made at the first save
+after the memory window (vita_host_memory_window_made: nothing may be made
+before it); until then, or if it cannot be made, the file is written in
+place as before. */
+
+/* the most the text is (some 9 KB with every map and mod turned off): one
+longer is written in place */
+#define SAVE_TEXT_SIZE 16384
+
+/* where save_lines puts the text: the file, or memory */
+struct save_output
 {
 	FILE *file;
-	int index, ok;
+	char *text;
+	int size;
+	int length;
+};
 
-	remove(SETTINGS_FILE ".new");
-	file = fopen(SETTINGS_FILE ".new", "w");
-	if (!file)
-		return;
-	fprintf(file, "HALO_SETTINGS_BUILD=%s\n", HALO_VITA_VERSION);
+static void save_put(struct save_output *output, const char *format, ...)
+{
+	va_list arguments;
+
+	va_start(arguments, format);
+	if (output->file)
+		vfprintf(output->file, format, arguments);
+	else if (output->length < output->size)
+	{
+		int length = vsnprintf(output->text + output->length, (size_t)(output->size - output->length), format,
+			arguments);
+
+		output->length = length < 0 ? output->size : output->length + length;
+	}
+	va_end(arguments);
+}
+
+/* settings.txt's lines: the build, the rows, the Play page's texts, the
+maps and mods turned off */
+static void save_lines(struct save_output *output)
+{
+	int index;
+
+	save_put(output, "HALO_SETTINGS_BUILD=%s\n", HALO_VITA_VERSION);
 	for (index = 0; index < SETTING_COUNT; index++)
 		if (settings[index].kind == KIND_CHOICE && !(settings[index].dev && settings[index].choice == 0) &&
 			strcmp(settings[index].variable, "HALO_PLAYER_MODEL"))
 		{
-			fprintf(file, "%s=%s\n", settings[index].variable, settings[index].values[settings[index].choice]);
+			save_put(output, "%s=%s\n", settings[index].variable, settings[index].values[settings[index].choice]);
 		}
 	for (index = 0; index < PLAY_TEXT_COUNT; index++)
 		if (play_texts[index].named && play_texts[index].value[0])
-			fprintf(file, "%s=%s\n", play_texts[index].variable, play_texts[index].value);
+			save_put(output, "%s=%s\n", play_texts[index].variable, play_texts[index].value);
 	if (maps_disabled[0])
-		fprintf(file, "HALO_MAPS_DISABLED=%s\n", maps_disabled);
+		save_put(output, "HALO_MAPS_DISABLED=%s\n", maps_disabled);
 	if (mods_disabled[0])
-		fprintf(file, "HALO_MODS_DISABLED=%s\n", mods_disabled);
+		save_put(output, "HALO_MODS_DISABLED=%s\n", mods_disabled);
+}
+
+/* settings.txt written anew - the text, or with none the rows as they are
+now: into a file of its own, then put in place of the old one (a file
+opened for writing is not cut short on Vita3K, which left the end of a
+longer old file after a shorter new one); nonzero if it was */
+static int save_file(const char *text)
+{
+	FILE *file;
+	int ok;
+
+	remove(SETTINGS_FILE ".new");
+	file = fopen(SETTINGS_FILE ".new", "w");
+	if (!file)
+		return 0;
+	if (text)
+		fputs(text, file);
+	else
+	{
+		struct save_output output = { file, NULL, 0, 0 };
+
+		save_lines(&output);
+	}
 	ok = fclose(file) == 0;
 	if (ok)
 	{
 		remove(SETTINGS_FILE);
-		rename(SETTINGS_FILE ".new", SETTINGS_FILE);
+		ok = rename(SETTINGS_FILE ".new", SETTINGS_FILE) == 0;
 	}
+	return ok;
+}
+
+/* the writer's state (save_lock): the text made by the last save, the
+newest one asked for and the one being written; how many were asked for and
+written; the writer 0 not made yet, 1 running, -1 none (written in place) */
+static pthread_mutex_t save_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t save_asked_signal = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t save_written_signal = PTHREAD_COND_INITIALIZER;
+static char *save_text_made, *save_text_asked, *save_text_writing;
+static unsigned long save_asked, save_written;
+static int save_writer;
+
+static void save_thread(void *argument)
+{
+	(void)argument;
+	pthread_mutex_lock(&save_lock);
+	for (;;)
+	{
+		unsigned long asked, changes;
+		unsigned long long started;
+		int ok;
+
+		while (save_written == save_asked)
+			pthread_cond_wait(&save_asked_signal, &save_lock);
+		asked = save_asked;
+		changes = save_asked - save_written;
+		memcpy(save_text_writing, save_text_asked, strlen(save_text_asked) + 1);
+		pthread_mutex_unlock(&save_lock);
+		started = now_us();
+		ok = save_file(save_text_writing);
+		{
+			/* (the card's time, in halo.log when it would have been a
+			hitch: what the game thread no longer waits for) */
+			unsigned long long took = now_us() - started;
+
+			if (!ok || took >= 100000)
+			{
+				char line[128];
+
+				snprintf(line, sizeof(line), "settings: settings.txt %s in %.1f ms off the game thread (%lu change%s)",
+					ok ? "written" : "NOT written", (double)took / 1000.0, changes, changes == 1 ? "" : "s");
+				vita_host_log(line);
+			}
+		}
+		pthread_mutex_lock(&save_lock);
+		/* (not written: the next save writes it, the same text or not) */
+		if (!ok && save_asked == asked)
+			save_text_asked[0] = 0;
+		save_written = asked;
+		pthread_cond_broadcast(&save_written_signal);
+	}
+}
+
+/* (save_lock held) the writer made, at the first save after the memory
+window; nonzero if it runs */
+static int save_writer_ready(void)
+{
+	if (save_writer == 0 && vita_host_memory_window_made())
+	{
+		save_text_made = malloc(SAVE_TEXT_SIZE);
+		save_text_asked = calloc(1, SAVE_TEXT_SIZE);
+		save_text_writing = malloc(SAVE_TEXT_SIZE);
+		save_writer = -1;
+		if (save_text_made && save_text_asked && save_text_writing &&
+			vita_host_thread_start_stack("halo settings", save_thread, NULL, -1, 0x10000100, 64 * 1024) >= 0)
+		{
+			save_writer = 1;
+		}
+		else
+		{
+			free(save_text_made);
+			free(save_text_asked);
+			free(save_text_writing);
+			save_text_made = save_text_asked = save_text_writing = NULL;
+			vita_host_log("settings: no thread for settings.txt: written where it changes");
+		}
+	}
+	return save_writer > 0;
+}
+
+/* settings.txt as the rows are now, written by the writer (or in place
+before it exists) */
+static void save(void)
+{
+	pthread_mutex_lock(&save_lock);
+	if (save_writer_ready())
+	{
+		struct save_output output = { NULL, save_text_made, SAVE_TEXT_SIZE, 0 };
+
+		save_lines(&output);
+		if (output.length < SAVE_TEXT_SIZE)
+		{
+			/* (the same as the last one asked for: nothing to write) */
+			if (strcmp(save_text_made, save_text_asked) != 0)
+			{
+				memcpy(save_text_asked, save_text_made, (size_t)output.length + 1);
+				save_asked++;
+				pthread_cond_signal(&save_asked_signal);
+			}
+			pthread_mutex_unlock(&save_lock);
+			return;
+		}
+		/* (too long for the writer: in place, once it is idle, and the
+		next save written whatever it is) */
+		while (save_written != save_asked)
+			pthread_cond_wait(&save_written_signal, &save_lock);
+		save_text_asked[0] = 0;
+	}
+	save_file(NULL);
+	pthread_mutex_unlock(&save_lock);
+}
+
+/* waits until settings.txt has what was last asked for */
+void vita_settings_save_wait(void)
+{
+	pthread_mutex_lock(&save_lock);
+	while (save_writer > 0 && save_written != save_asked)
+		pthread_cond_wait(&save_written_signal, &save_lock);
+	pthread_mutex_unlock(&save_lock);
 }
 
 /* the chosen network as the platform layer's settings (port_config.c):
@@ -1772,7 +1961,7 @@ void vita_settings_load(void)
 {
 	extern int (*halo_test_setting_hook)(const char *variable, const char *value);
 
-	FILE *file = fopen(SETTINGS_FILE, "r");
+	FILE *file;
 	/* (a long line: the maps turned off) */
 	char line[1200];
 	int index;
@@ -1797,6 +1986,14 @@ void vita_settings_load(void)
 	0 Vitas, 1 Vitas and PC) */
 	int old_host_crossplay = -1;
 
+	/* (what the writer has yet to write first; then the file is what the
+	rows are, and the next save is written whatever it is) */
+	vita_settings_save_wait();
+	pthread_mutex_lock(&save_lock);
+	if (save_text_asked)
+		save_text_asked[0] = 0;
+	pthread_mutex_unlock(&save_lock);
+	file = fopen(SETTINGS_FILE, "r");
 	vita_settings_language_init();
 	memset(dev_saved, 0, sizeof(dev_saved));
 	memset(named, 0, sizeof(named));
@@ -2607,6 +2804,8 @@ static void report_thread(void *argument)
 	long long newest_time = -1;
 
 	(void)argument;
+	/* (settings.txt as the last change has it, not half put in place) */
+	vita_settings_save_wait();
 	memset(&time, 0, sizeof(time));
 	sceRtcGetCurrentClockLocalTime(&time);
 	snprintf(report_path, sizeof(report_path), DATA_DIRECTORY "/report-%04u%02u%02u-%02u%02u%02u",
