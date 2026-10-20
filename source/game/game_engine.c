@@ -556,8 +556,8 @@ symbols in this file:
 #include "interface/interface.h"
 #include "interface/hud.h"
 #include "interface/hud_definitions.h"
-#ifdef HALO_VITA
-#include "interface/hud_draw.h" /* (port) hud_vita_score_hint */
+#if defined(HALO_VITA) || defined(HALO_LINUX)
+#include "interface/hud_draw.h" /* (port) hud_vita_score_hint, hud_key_score_hint */
 #endif
 #ifdef HALO_LINUX
 #include "forge.h" /* port: port/linux/game/forge.c */
@@ -7946,6 +7946,10 @@ static boolean internal_rasterize_score(
 		/* (port) the Vita button the scoreboard is on, not the Xbox's BACK */
 		buffer[buffer_size - 1] = 0;
 		hud_vita_score_hint(buffer, buffer_size);
+#elif defined(HALO_KEY_GLYPHS)
+		/* (port) the key the scoreboard is on, with the keyboard's icons */
+		buffer[buffer_size - 1] = 0;
+		hud_key_score_hint(buffer, buffer_size);
 #endif
 		break;
 	default:

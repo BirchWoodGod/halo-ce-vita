@@ -152,6 +152,12 @@ the Vita's, and the Linux harness's, for its tests (HALO_BUTTON_ICONS) */
 #if defined(HALO_VITA) || (defined(HALO_LINUX) && defined(__linux__) && !defined(HALO_ANDROID))
 #define HALO_BUTTON_GLYPHS 1
 #endif
+/* (port) and the desktop build's keyboard and mouse icons, and the Xbox's
+in the Halo 3 menus (display.button_icons: port/linux/include/
+halo_button_icons.h); never the Vita's */
+#if defined(HALO_BUTTON_GLYPHS) && !defined(HALO_VITA)
+#define HALO_KEY_GLYPHS 1
+#endif
 
 #ifdef HALO_BUTTON_GLYPHS
 /* (port) the Vita's button icons, PlayStation's (hud_draw.c): a glyph is
@@ -185,6 +191,22 @@ boolean hud_vita_glyph_draw_in_rect(
 	short glyph,
 	real_rectangle2d const *rectangle,
 	pixel32 color);
+#ifdef HALO_KEY_GLYPHS
+/* the multiplayer score hint ("Hold BACK for score") naming the key Back is
+on, with the keyboard's icons (game_engine.c) */
+void hud_key_score_hint(
+	wchar_t *buffer,
+	long buffer_size);
+/* how much wider than the Xbox icon's sprite a glyph that hud_vita_glyph_draw
+draws there is (a wider keycap: SPACE, ENTER ...), in pixels: what a line of
+text moves on by past the sprite's width; 0 for the others */
+real hud_vita_glyph_flow_extra(
+	short glyph,
+	struct bitmap_data const *bitmap,
+	short placement,
+	real_rectangle2d const *clip,
+	real scale);
+#endif
 #endif
 
 /* ---------- public code */

@@ -624,6 +624,13 @@ static void render_state_bitmap(
 					(clip ? clip->x1 - clip->x0 : 1.0f) * bitmap_placed_width(bitmap) * bitmap_scale +
 					icon->width_offset * canvas_scale + point.x);
 			}
+#ifdef HALO_KEY_GLYPHS
+			if (glyph_drawn)
+			{
+				cursor_bounds->x0 += (short)hud_vita_glyph_flow_extra(
+					glyph, bitmap, _hud_corner_bottom_left, clip, bitmap_scale);
+			}
+#endif
 			return;
 		}
 #endif
@@ -660,6 +667,11 @@ static void render_state_bitmap(
 			cursor_bounds->x0 = (short)(
 				(bitmap_placed_width(bitmap) + icon->width_offset) * scale + point.x);
 		}
+#ifdef HALO_KEY_GLYPHS
+		/* (port) a wider keycap (SPACE ...): the text after it moved on */
+		if (glyph_drawn)
+			cursor_bounds->x0 += (short)hud_vita_glyph_flow_extra(glyph, bitmap, _hud_corner_bottom_left, clip, scale);
+#endif
 	}
 
 	return;

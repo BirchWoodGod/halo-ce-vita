@@ -53,6 +53,54 @@ void updater_poll(SDL_Window *window);
 static void platform_ce_installer(void);
 #endif
 
+#ifndef HALO_NOT_DESKTOP
+#include "../include/halo_button_icons.h"
+
+/* the device the player used last, for the button icons on auto
+(port/linux/include/halo_button_icons.h, button_glyphs.c): a key, a mouse
+button, the wheel or the mouse moved, or a gamepad's button, trigger or
+stick pushed well past its rest; -1 before any (a gamepad there at the
+start counts, else the keyboard) */
+static volatile int input_device_last = -1;
+
+/* (sticks and triggers: past half, so that a resting stick's drift never
+takes the icons from the keyboard) */
+#define INPUT_DEVICE_AXIS_THRESHOLD 16000
+
+static int gamepad_input_device(SDL_JoystickID id)
+{
+	SDL_Gamepad *gamepad = SDL_GetGamepadFromID(id);
+
+	switch (gamepad ? SDL_GetGamepadType(gamepad) : SDL_GAMEPAD_TYPE_UNKNOWN)
+	{
+	case SDL_GAMEPAD_TYPE_PS3:
+	case SDL_GAMEPAD_TYPE_PS4:
+	case SDL_GAMEPAD_TYPE_PS5:
+		return _halo_input_device_playstation_gamepad;
+	default:
+		return _halo_input_device_xbox_gamepad;
+	}
+}
+
+void platform_input_device_used(int device)
+{
+	static char const *const names[] = { "the keyboard and mouse", "an Xbox gamepad", "a PlayStation gamepad" };
+
+	if (device != input_device_last && device >= 0 && device <= _halo_input_device_playstation_gamepad)
+	{
+		platform_log("input: last used %s", names[device]);
+		input_device_last = device;
+	}
+}
+
+int platform_input_device_last(void)
+{
+	int device = input_device_last;
+
+	return device < 0 ? _halo_input_device_keyboard : device;
+}
+#endif
+
 BOOL platform_sdl_initialize(void)
 {
 	if (platform_sdl_started)
@@ -1024,6 +1072,10 @@ void platform_pump_events(void)
 					keys_pressed[event.key.scancode] = 1;
 			}
 			queue_keystroke(&event.key);
+#ifndef HALO_NOT_DESKTOP
+			if (event.key.down)
+				platform_input_device_used(_halo_input_device_keyboard);
+#endif
 			/* F12 releases or recaptures the mouse */
 			if (event.key.down && !event.key.repeat && event.key.scancode == SDL_SCANCODE_F12)
 			{
@@ -1042,6 +1094,8 @@ void platform_pump_events(void)
 			break;
 		case SDL_EVENT_MOUSE_MOTION:
 #ifndef HALO_NOT_DESKTOP
+			if (SDL_fabsf(event.motion.xrel) + SDL_fabsf(event.motion.yrel) >= 3.0f)
+				platform_input_device_used(_halo_input_device_keyboard);
 			/* in the menus the mouse moves the pointer, not the view */
 			if (input_state.ui_pointer)
 			{
@@ -1057,6 +1111,8 @@ void platform_pump_events(void)
 		case SDL_EVENT_MOUSE_BUTTON_DOWN:
 		case SDL_EVENT_MOUSE_BUTTON_UP:
 #ifndef HALO_NOT_DESKTOP
+			if (event.button.down)
+				platform_input_device_used(_halo_input_device_keyboard);
 			/* clicks in the menus go to the pointer; a button held down
 			when the menu closes stays up until pressed again, so the click
 			that resumes the game does not also fire */
@@ -1080,6 +1136,7 @@ void platform_pump_events(void)
 			break;
 		case SDL_EVENT_MOUSE_WHEEL:
 #ifndef HALO_NOT_DESKTOP
+			platform_input_device_used(_halo_input_device_keyboard);
 			if (input_state.ui_pointer)
 			{
 				/* whole notches: smooth-scrolling wheels send fractions */
@@ -1114,7 +1171,20 @@ void platform_pump_events(void)
 			break;
 		case SDL_EVENT_GAMEPAD_ADDED:
 			SDL_OpenGamepad(event.gdevice.which);
+#ifndef HALO_NOT_DESKTOP
+			if (input_device_last < 0)
+				platform_input_device_used(gamepad_input_device(event.gdevice.which));
+#endif
 			break;
+#ifndef HALO_NOT_DESKTOP
+		case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+			platform_input_device_used(gamepad_input_device(event.gbutton.which));
+			break;
+		case SDL_EVENT_GAMEPAD_AXIS_MOTION:
+			if (event.gaxis.value >= INPUT_DEVICE_AXIS_THRESHOLD || event.gaxis.value <= -INPUT_DEVICE_AXIS_THRESHOLD)
+				platform_input_device_used(gamepad_input_device(event.gaxis.which));
+			break;
+#endif
 		case SDL_EVENT_GAMEPAD_REMOVED:
 			/* port: closed (SDL keeps a gamepad open until it is closed,
 			even once the controller has gone), from OpenCE's leak fixes */

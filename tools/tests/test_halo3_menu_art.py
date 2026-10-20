@@ -40,9 +40,16 @@ EXPECTED = {
     'forge_emblem.png': (64, 64),
     'glyph_l.png': (16, 16),
     'glyph_r.png': (16, 16),
+    # (the browsers' filter: the D-pad's left and right)
+    'glyph_dpad_lr.png': (16, 16),
     # (not a widget's: the in-game button icons with Button icons PlayStation,
     # hud_draw.c, twelve 32x32 cells in VITA_GLYPH_CROSS ... SELECT's order)
     'glyph_atlas.png': (128, 128),
+    # (not a widget's either: the desktop build's keyboard and mouse icons and
+    # the Xbox controller's, hud_draw.c; the keys' list is
+    # port/linux/include/halo_button_icons.h's)
+    'key_atlas.png': (256, 256),
+    'xbox_atlas.png': (256, 128),
     # (the multiplayer screens: the value arrows, the server browser's badges)
     'arrow_left.png': (8, 16),
     'arrow_right.png': (8, 16),
@@ -180,6 +187,41 @@ class ArtTest(unittest.TestCase):
                 pixels = [p for p in cells[index].getdata() if p[3] == 255]
                 best = min(pixels, key=lambda p: sum(abs(a - b) for a, b in zip(p[:3], want)))
                 self.assertLessEqual(sum(abs(a - b) for a, b in zip(best[:3], want)), 24, index)
+
+    def test_key_atlas(self):
+        # (one square cell per key of halo_button_icons.h's list, in its
+        # order, each drawn and its corner clear; the wider keycaps from the
+        # header's row, the English then the Spanish, each as wide as the list
+        # says and no wider; the Xbox's seventeen buttons)
+        sys.path.insert(0, os.path.join(HERE, '..'))
+        import halo3_menu_art
+        keys, spanish = halo3_menu_art.key_glyph_lists()
+        self.assertEqual(keys[0][0], 'SPACE')
+        self.assertIn(('SPACE', 'ESPACIO', 64), spanish)
+        with tempfile.TemporaryDirectory() as folder:
+            generate(folder)
+            with Image.open(os.path.join(folder, 'key_atlas.png')) as atlas:
+                atlas = atlas.convert('RGBA')
+                for index in range(len(keys)):
+                    cell = atlas.crop(((index % 8) * 32, (index // 8) * 32, (index % 8) * 32 + 32, (index // 8) * 32 + 32))
+                    self.assertGreater(cell.getpixel((16, 14))[3], 0, keys[index][0])
+                    self.assertEqual(cell.getpixel((0, 0))[3], 0, keys[index][0])
+                wides = [width for name, compact, wide, width in keys if width] + [width for name, wide, width in spanish]
+                for slot, width in enumerate(wides):
+                    x, y = (slot % 4) * 64, (halo3_menu_art.KEY_ATLAS_WIDE_ROW + slot // 4) * 32
+                    cell = atlas.crop((x, y, x + 64, y + 32))
+                    box = cell.getbbox()
+                    self.assertIsNotNone(box, slot)
+                    self.assertLessEqual(box[2], width, slot)
+                    self.assertGreaterEqual(box[2], width - 2, slot)
+            with Image.open(os.path.join(folder, 'xbox_atlas.png')) as atlas:
+                atlas = atlas.convert('RGBA')
+                for index in range(32):
+                    cell = atlas.crop(((index % 8) * 32, (index // 8) * 32, (index % 8) * 32 + 32, (index // 8) * 32 + 32))
+                    if index < len(halo3_menu_art.XBOX_GLYPHS):
+                        self.assertGreater(cell.getpixel((16, 16))[3], 0, index)
+                    else:
+                        self.assertIsNone(cell.getbbox(), index)
 
 
 if __name__ == '__main__':

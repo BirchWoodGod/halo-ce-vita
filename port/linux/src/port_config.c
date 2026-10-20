@@ -112,6 +112,14 @@ static const struct config_setting config_settings[] =
 	{ "display.ragdolls", _config_boolean, "true", "HALO_RAGDOLLS", _environment_value, _platform_all,
 		"Dead bodies fall limp, thrown by the blow that killed them, and come\n"
 		"to rest where they land; only the picture changes." },
+	/* (port/linux/src/button_glyphs.c, port/linux/include/halo_button_icons.h;
+	the Vita keeps its own Button icons, its settings panel's. Live through
+	the variable) */
+	{ "display.button_icons", _config_string, "\"auto\"", "HALO_BUTTON_ICONS", _environment_value, _platform_desktop,
+		"The button icons of the prompts and the menus: \"auto\" shows the\n"
+		"keyboard and mouse's keys while you play with them and a gamepad's\n"
+		"buttons once you use one (a PlayStation pad's, its own);\n"
+		"\"keyboard\", \"xbox\" or \"playstation\" always shows those." },
 	/* (port/linux/game/particle_budget.c; the Vita's settings panel's
 	Particles row, Reduced in all three of its profiles) */
 	{ "graphics.particles", _config_string, "\"full\"", "HALO_PARTICLE_BUDGET", _environment_value, _platform_all,

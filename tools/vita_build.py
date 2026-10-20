@@ -427,8 +427,11 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
            command=f"python3 tools/vita_shader_pack.py --stamp $in --generator-header {generator_header} --output $out",
            description="VITA SHADER PACK $out", restat=True)
     app0_files = []
+    # (the desktop build's own pictures, never read on the Vita: its keyboard
+    # and Xbox button icons, port/linux/include/halo_button_icons.h)
+    desktop_only = {Path("menus/halo3/key_atlas.png"), Path("menus/halo3/xbox_atlas.png")}
     for asset in sorted((VITA_DIR / "app0").rglob("*")) if (VITA_DIR / "app0").is_dir() else []:
-        if asset.is_file():
+        if asset.is_file() and asset.relative_to(VITA_DIR / "app0") not in desktop_only:
             source = asset
             if asset.name == "shaders.pak":
                 source = BUILD / "app0" / asset.relative_to(VITA_DIR / "app0")

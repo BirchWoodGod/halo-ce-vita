@@ -4101,6 +4101,11 @@ static void render_state_bitmap(
 			cursor_bounds->x0 = (short)((clip->x1 - clip->x0) * bitmap->width + icon->width_offset + point.x);
 		else
 			cursor_bounds->x0 = bitmap->width + icon->width_offset + point.x;
+#ifdef HALO_KEY_GLYPHS
+		/* (port) a wider keycap (SPACE ...): the text after it moved on */
+		if (hud_vita_glyph_drawn(glyph))
+			cursor_bounds->x0 += (short)hud_vita_glyph_flow_extra(glyph, bitmap, _hud_anchor_bottom_left, clip, scale);
+#endif
 	}
 
 	return;
