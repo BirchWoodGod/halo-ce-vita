@@ -119,6 +119,11 @@ reported is fixed and the features under "Before the public beta" are in.
   future").
 - **More armour and models** for Customization (artists wanted).
 - **Sharing Forge variants with friends** through File Share.
+- **Forge on the classic menus** too, not only the Halo 3 ones (OpenCE is
+  adding Forge as well).
+- **AI respawning** in Forge.
+- **Multiplayer bots that think like the campaign AI.**
+- **Forge variants with AI played with the multiplayer bots.**
 - **"VITA+"**: the VITA PC tag renamed if Android and iOS builds come.
 
 ### Claude's suggestions
