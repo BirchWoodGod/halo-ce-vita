@@ -137,13 +137,95 @@ int network_wire_host_pc_stand_in(void)
 setenv, after the settings were read - are the environment's first, else
 config.toml's) */
 
+int network_wire_this_platform(void)
+{
+#if defined(HALO_VITA) || defined(HALO_DEDICATED_SERVER)
+	return NETWORK_PLATFORM_VITA;
+#else
+#ifndef HALO_RELEASE
+	const char *test = getenv("HALO_TEST_PLATFORM");
+
+	if (test && !strcmp(test, "vita"))
+		return NETWORK_PLATFORM_VITA;
+#endif
+	return NETWORK_PLATFORM_VITA_PC;
+#endif
+}
+
+static const char *const audience_values[NUMBER_OF_NETWORK_AUDIENCES] = { "vita", "vita_pc", "everyone" };
+
+const char *network_wire_audience_value(int audience)
+{
+	return audience >= 0 && audience < NUMBER_OF_NETWORK_AUDIENCES ? audience_values[audience] : audience_values[0];
+}
+
+int network_wire_audience_parse(const char *value)
+{
+	int audience;
+
+	if (!value || !value[0])
+		return -1;
+	for (audience = 0; audience < NUMBER_OF_NETWORK_AUDIENCES; audience++)
+	{
+		if (!strcmp(value, audience_values[audience]))
+			return audience;
+	}
+	/* (the retired network.host_crossplay's: "Vitas" and "Vitas and PC"; and
+	"vitas") */
+	if (!strcmp(value, "vitas"))
+		return NETWORK_AUDIENCE_VITAS;
+	if (!strcmp(value, "true") || !strcmp(value, "1"))
+		return NETWORK_AUDIENCE_EVERYONE;
+	if (!strcmp(value, "false") || !strcmp(value, "0"))
+		return NETWORK_AUDIENCE_VITAS;
+	return -1;
+}
+
+int network_wire_audience_default(void)
+{
+	return network_wire_this_platform() == NETWORK_PLATFORM_VITA_PC ? NETWORK_AUDIENCE_VITA_PC :
+#ifdef HALO_DEDICATED_SERVER
+		NETWORK_AUDIENCE_VITA_PC;
+#else
+		NETWORK_AUDIENCE_VITAS;
+#endif
+}
+
+int network_wire_audience_first(void)
+{
+	return network_wire_this_platform() == NETWORK_PLATFORM_VITA_PC ? NETWORK_AUDIENCE_VITA_PC : NETWORK_AUDIENCE_VITAS;
+}
+
+/* (the settings the Vita's settings panel and the menus change live -
+setenv - are the environment's first; then config.toml's) */
+int network_wire_host_audience(void)
+{
+	int audience = network_wire_audience_parse(getenv("HALO_NET_WHO_CAN_JOIN"));
+
+	/* (the retired setting: env.txt's, the tests', an older config.toml's
+	true) */
+	if (audience < 0)
+		audience = network_wire_audience_parse(getenv("HALO_NET_HOST_CROSSPLAY"));
+	if (audience < 0)
+		audience = network_wire_audience_parse(config_string("network.who_can_join"));
+	if (audience < 0 && config_boolean("network.host_crossplay"))
+		audience = NETWORK_AUDIENCE_EVERYONE;
+	if (audience < 0)
+		audience = network_wire_audience_default();
+	if (network_wire_host_pc_stand_in())
+		audience = NETWORK_AUDIENCE_EVERYONE;
+	/* (a PC host cannot host for Vitas only; with no crossplay wire, as in
+	ad hoc play, there is no PC player of OpenCE's to take) */
+	if (audience < network_wire_audience_first())
+		audience = network_wire_audience_first();
+	if (audience == NETWORK_AUDIENCE_EVERYONE && !network_wire_crossplay_available())
+		audience = NETWORK_AUDIENCE_VITA_PC;
+	return audience;
+}
+
 int network_wire_host_crossplay(void)
 {
-	const char *value = getenv("HALO_NET_HOST_CROSSPLAY");
-	int chosen = value && value[0] ? !strcmp(value, "true") || !strcmp(value, "1") :
-		config_boolean("network.host_crossplay");
-
-	return network_wire_crossplay_available() && (chosen || network_wire_host_pc_stand_in());
+	return network_wire_crossplay_available() && network_wire_host_audience() == NETWORK_AUDIENCE_EVERYONE;
 }
 
 int network_wire_browser_filter(void)

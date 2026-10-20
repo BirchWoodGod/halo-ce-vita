@@ -398,12 +398,19 @@ static const struct config_setting config_settings[] =
 		"DamnationCE, side by side, each tagged), \"vita\" (games a Vita\n"
 		"hosts) or \"pc\" (PC hosts' and servers'). Joining a game speaks its\n"
 		"own protocol whatever this says (docs/crossplay.md)." },
+	{ "network.who_can_join", _config_string, "\"\"", "HALO_NET_WHO_CAN_JOIN", _environment_value, _platform_all,
+		"Who can join the games this machine hosts: \"vita\" (Vita: Vitas, on\n"
+		"the Vitas' own protocol),\n"
+		"\"vita_pc\" (Vita PC: PS Vitas and Halo CE Vita on PC), \"everyone\"\n"
+		"(also OpenCE players on PC, on OpenCE's protocol, listed in both\n"
+		"browsers). Empty: a Vita's default, Vita; the PC build's and the\n"
+		"dedicated server's, Vita PC (the PC build offers no Vita, and takes\n"
+		"\"vita\" as Vita PC). Taken as a game is hosted; never\n"
+		"everyone in ad hoc play. Best effort: a modified client can say it\n"
+		"is a Vita (docs/crossplay.md)." },
 	{ "network.host_crossplay", _config_boolean, "false", "HALO_NET_HOST_CROSSPLAY", _environment_value, _platform_all,
-		"Who can join the games this machine hosts: false (the default),\n"
-		"Vitas, on the Vitas' own protocol; true, Vitas and PC players\n"
-		"(OpenCE, ChupathingyCE), on OpenCE's protocol, listed in both\n"
-		"browsers as a Vita's game. Taken as a game is hosted; never in ad\n"
-		"hoc play." },
+		"Retired (Oct 20 2026) for network.who_can_join: read only when that\n"
+		"is empty, true as \"everyone\" (what was \"Vitas and PC\")." },
 	{ "network.crossplay", _config_boolean, "false", "HALO_CROSSPLAY", _environment_value, _platform_all,
 		"Retired (Oct 19 2026): there is no switch, every game speaks its own\n"
 		"protocol. Read only to keep a player's choice: true, with\n"

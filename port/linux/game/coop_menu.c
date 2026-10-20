@@ -261,7 +261,8 @@ static void coop_menu_connection(
 		long length = ustrlen(text);
 
 		if (length < count - 1)
-			usnprintf(text + length, count - length, L" (VITA+PC)");
+			usnprintf(text + length, count - length, network_wire_this_platform() == NETWORK_PLATFORM_VITA_PC ?
+				L" (VITA (PC)+PC)" : L" (VITA+PC)");
 	}
 	text[count - 1] = 0;
 }
@@ -361,7 +362,11 @@ void coop_menu_render(
 		csmemset(machine_name, 0, sizeof(machine_name));
 		network_game_generate_local_machine_name(machine_name);
 #ifdef HALO_PORT_VITA_NETWORK
-		usnprintf(line, NUMBEROF(line), TW(L"This Vita: %ls"), machine_name);
+		/* (the PC build: "This machine") */
+		if (network_wire_this_platform() == NETWORK_PLATFORM_VITA_PC)
+			usnprintf(line, NUMBEROF(line), TW(L"This machine: %ls"), machine_name);
+		else
+			usnprintf(line, NUMBEROF(line), TW(L"This Vita: %ls"), machine_name);
 #else
 		usnprintf(line, NUMBEROF(line), TW(L"This machine: %ls"), machine_name);
 #endif

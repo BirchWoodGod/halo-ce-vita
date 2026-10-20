@@ -2804,7 +2804,7 @@ static void h3_mp_lobby_update(struct widget_instance *widget)
 	snprintf(text, sizeof(text), T("1 Player (%d max)"), maximum);
 	text_show(named(screen, "players"), text);
 	text_show(named(screen, "ready"), T("Ready"));
-	/* (online: who can join a game hosted, network.host_crossplay - the
+	/* (online: who can join a game hosted, network.who_can_join - the
 	server browser lists the Vitas' games and the PCs' together, tagged) */
 	if (h3_mp.network == _h3_network_online)
 		snprintf(text, sizeof(text), "%s", network_wire_host_crossplay() ?
@@ -4637,7 +4637,10 @@ N made-up games after those listed, for the browser's scrolling and sorts
 HALO_TEST_BROWSER_PC=1 too, both platforms (run_menus_test.sh h3browser):
 every second one a PC game (its badge PC, as the crossplay wire's), every
 third from the third one with a password (not in the games browser without
-the online list: System Link has none; run_menus_test.sh h3lan) */
+the online list: System Link has none; run_menus_test.sh h3lan). With
+HALO_TEST_BROWSER_VITA_PC=1 as well, every sixth Vita one from the fifth the
+PC build's (VITA (PC)) and every tenth one for Vitas only
+(run_menus_test.sh h3vitapc) */
 static void browser_test_games(void)
 {
 #ifndef HALO_RELEASE
@@ -4645,6 +4648,7 @@ static void browser_test_games(void)
 	static char const *const gametypes[] = { "Slayer", "CTF", "King", "Oddball" };
 	char const *value = getenv("HALO_TEST_BROWSER_GAMES");
 	char const *both = getenv("HALO_TEST_BROWSER_PC");
+	char const *vita_pc = getenv("HALO_TEST_BROWSER_VITA_PC");
 	long count = value ? atol(value) : 0, index;
 
 	/* (HALO_TEST_BROWSER_ODD=1: the odd listings, made into entries as the
@@ -4706,13 +4710,18 @@ static void browser_test_games(void)
 			}
 			else
 				entry->crossplay = index % 4 == 2;
-			snprintf(entry->tag, sizeof(entry->tag), "%s", crossplay_guard_tag(entry->platform));
-			crossplay_guard_row_badge(entry->badge, (int)sizeof(entry->badge), entry->platform, entry->crossplay, 0,
-				CROSSPLAY_GUARD_OK);
+			/* (and every sixth Vita one the PC build's, VITA (PC); every
+			tenth one for Vitas only) */
+			if (entry->platform == CROSSPLAY_PLATFORM_VITA && vita_pc && atoi(vita_pc))
+				entry->marks = (index % 6 == 4 ? CROSSPLAY_HOST_PC_BUILD : 0) |
+					(index % 10 == 0 && !entry->crossplay ? CROSSPLAY_HOST_VITAS_ONLY : 0);
+			snprintf(entry->tag, sizeof(entry->tag), "%s", crossplay_guard_host_tag(entry->platform, entry->marks));
+			crossplay_guard_host_badge(entry->badge, (int)sizeof(entry->badge), entry->platform, entry->marks,
+				entry->crossplay, 0, CROSSPLAY_GUARD_OK, network_wire_this_platform() == NETWORK_PLATFORM_VITA_PC);
 			entry->locked = index % 3 == 2 && (!menu_functions.lan || lan_with_online());
 		}
 		/* (the filter's, as the real lists') */
-		if (!network_wire_browser_shows(entry->platform == CROSSPLAY_PLATFORM_VITA))
+		if (!network_wire_browser_shows(crossplay_guard_vita_game(entry->platform, entry->marks)))
 			menu_functions.game_count--;
 	}
 #endif
@@ -4863,8 +4872,10 @@ static void lan_entries(void)
 		co-op); a PC build of this tree's games are the PCs') */
 		entry->crossplay = game->crossplay;
 		entry->platform = game->platform;
+		entry->marks = game->marks;
 #ifndef HALO_PORT_VITA_NETWORK
 		entry->platform = CROSSPLAY_PLATFORM_PC;
+		entry->marks = 0;
 #endif
 		if (game->pc_coop)
 			entry->coop = TRUE;
@@ -4873,9 +4884,9 @@ static void lan_entries(void)
 				crossplay_guard_judge(entry->coop, entry->players, entry->maximum);
 
 			entry->experimental = verdict != CROSSPLAY_GUARD_OK;
-			snprintf(entry->tag, sizeof(entry->tag), "%s", crossplay_guard_tag(entry->platform));
-			crossplay_guard_row_badge(entry->badge, (int)sizeof(entry->badge), entry->platform, entry->crossplay, 0,
-				verdict);
+			snprintf(entry->tag, sizeof(entry->tag), "%s", crossplay_guard_host_tag(entry->platform, entry->marks));
+			crossplay_guard_host_badge(entry->badge, (int)sizeof(entry->badge), entry->platform, entry->marks,
+				entry->crossplay, 0, verdict, network_wire_this_platform() == NETWORK_PLATFORM_VITA_PC);
 		}
 		/* the Rules line, as the online browser's: "Slayer on Blood Gulch",
 		"Co-op: The Pillar of Autumn, Heroic", ": full or starting" */
@@ -5102,7 +5113,10 @@ static void browser_update(struct widget_instance *list)
 
 			named(child, "row_badge")->animation.current_frame_index =
 				(short)((entry->platform != CROSSPLAY_PLATFORM_VITA ? 1 : 0) + (entry->locked ? 2 : 0));
-			/* (the tag the art says itself: VITA, PC) */
+			/* (the tag the art says itself: VITA, PC; the PC build's VITA
+			(PC): VITA, and "(PC)" before the name) */
+			if (entry->platform == CROSSPLAY_PLATFORM_VITA && (entry->marks & CROSSPLAY_HOST_PC_BUILD))
+				tag = strlen(crossplay_guard_tag(CROSSPLAY_PLATFORM_VITA));
 			if (tag && !strncmp(rest, entry->tag, tag) && (entry->platform == CROSSPLAY_PLATFORM_VITA ||
 				entry->platform == CROSSPLAY_PLATFORM_PC))
 			{
@@ -5114,7 +5128,7 @@ static void browser_update(struct widget_instance *list)
 			{
 				char badged[P2P_LOBBY_NAME_SIZE + sizeof(entry->badge) + 4];
 
-				snprintf(badged, sizeof(badged), "[%s] %s", rest, entry->name);
+				snprintf(badged, sizeof(badged), *rest == '(' ? "%s %s" : "[%s] %s", rest, entry->name);
 				name_cut = row_column(child, "row_name", badged);
 			}
 			/* (the System Link list's among the online ones: "[LAN]") */
@@ -7027,7 +7041,11 @@ static void h3_friends_update(struct widget_instance *list)
 		}
 		else
 		{
-			row_column(child, "row_name", entry->name);
+			char name[P2P_FRIEND_NAME_SIZE + 8];
+
+			/* (a friend on this project's PC build: "(PC)" after the name) */
+			snprintf(name, sizeof(name), entry->pc ? "%s (PC)" : "%s", entry->name);
+			row_column(child, "row_name", name);
 			row_column(child, "row_state", entry->activity);
 			row_column(child, "row_tag", h3_friends_tag(entry)[0] ? h3_friends_tag(entry) : " ");
 		}
@@ -7755,7 +7773,11 @@ static void h3_party_update(struct widget_instance *list)
 		}
 		else if (member)
 		{
-			row_column(child, "row_name", member->name);
+			char name[P2P_PARTY_NAME_SIZE + 8];
+
+			/* (a member on this project's PC build: "(PC)" after the name) */
+			snprintf(name, sizeof(name), member->pc ? "%s (PC)" : "%s", member->name);
+			row_column(child, "row_name", name);
 			row_column(child, "row_state", member->note[0] ? member->note : member->self ? T("You") :
 				member->online ? T("Online") : T("Not heard from"));
 			row_column(child, "row_tag", member->leader ? T("LEADER") : member->muted ? T("MUTED") : " ");
@@ -9196,7 +9218,7 @@ profile at all (START GAME asks for one, as before); a map not played with
 others. The lobby is as it was then, and START GAME hosts as before.
 Menu style Halo CE is unchanged.
 
-Who can join (network.host_crossplay): the lobby's game is hosted as any
+Who can join (network.who_can_join): the lobby's game is hosted as any
 game, on the wire WHO CAN JOIN says as its server is made (network_wire.h):
 Vitas, the Vitas' wire; Vitas and PC (ONLINE and SYSTEM LINK; ad hoc is
 always the Vitas'), OpenCE's crossplay wire, its PC joiners through the
@@ -9461,7 +9483,7 @@ static boolean h3_live_network_ready(void)
 	return FALSE;
 }
 
-/* the live game's wire against WHO CAN JOIN's now (network.host_crossplay:
+/* the live game's wire against WHO CAN JOIN's now (network.who_can_join:
 the Create Game screens' row, the settings panel's Vita and PC page): a
 game speaks one wire for its life (network_wire.h), Vitas' alone or Vitas'
 and PCs' (OpenCE's), so a live game hosted for others than chosen is closed,
@@ -10146,8 +10168,10 @@ static void h3_pregame_update(struct widget_instance *widget)
 		{
 			char badge[24];
 
-			crossplay_guard_row_badge(badge, (int)sizeof(badge), CROSSPLAY_PLATFORM_VITA, network_wire_crossplay(), 0,
-				CROSSPLAY_GUARD_OK);
+			/* (VITA (PC) on the PC build) */
+			crossplay_guard_host_badge(badge, (int)sizeof(badge), CROSSPLAY_PLATFORM_VITA,
+				network_wire_this_platform() == NETWORK_PLATFORM_VITA_PC ? CROSSPLAY_HOST_PC_BUILD : 0,
+				network_wire_crossplay(), 0, CROSSPLAY_GUARD_OK, 0);
 			snprintf(text, sizeof(text), T("Listed as: %s (%s)"), name, badge);
 		}
 		else

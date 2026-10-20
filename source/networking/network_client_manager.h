@@ -82,6 +82,9 @@ struct network_listed_game
 	short platform;
 	boolean pc_coop;
 	byte pad[3];
+	/* this project's marks of its host (crossplay_guard.h's
+	CROSSPLAY_HOST_*: the PC build; Vitas only) */
+	short marks;
 };
 /* the games the System Link list shows now (valid, of this platform: the
 open ones first, as it orders them), up to maximum: how many; 0 without a

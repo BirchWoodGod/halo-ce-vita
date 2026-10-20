@@ -90,7 +90,8 @@ static int clamp(
 int browser_list_vita(
 	struct p2p_lobby_entry const *entry)
 {
-	return entry->platform == CROSSPLAY_PLATFORM_VITA;
+	/* (the PC build's games, VITA (PC), are the PCs') */
+	return crossplay_guard_vita_game(entry->platform, entry->marks);
 }
 
 int browser_list_group(

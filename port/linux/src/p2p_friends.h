@@ -90,6 +90,9 @@ struct p2p_friend_entry
 	int crossplay;
 	/* (a friend online, or an invite) the players in their game and the most */
 	int players, maximum;
+	/* (a friend online, or an invite) they play on this project's PC build
+	(their presence says so: network_wire.h); the lists say PC */
+	int pc;
 	/* the line the lists show: a friend's doing ("Offline" when not
 	online), an invite's game, "Wants to be your friend", "Request sent",
 	"Blocked" (in the language chosen) */

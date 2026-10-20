@@ -2046,3 +2046,9 @@
 "mouse wheel" = "rueda del ratón"
 "mouse button 4" = "botón 4 del ratón"
 "mouse" = "ratón"
+
+# ---------- the PC build of the port (Oct 20 2026): its games tagged VITA
+# (PC); a game for Vitas only marked so in its browser
+" VITAS ONLY" = " SOLO VITAS"
+"Hosted on a PC (Halo CE Vita)" = "Creada en un PC (Halo CE Vita)"
+"Hosted on a PC (Halo CE Vita): OpenCE players can join" = "Creada en un PC (Halo CE Vita): pueden entrar los de OpenCE"

@@ -272,8 +272,11 @@ struct p2p_lobby_entry
 	/* the game's wire (network_wire.h: joined on it) and what hosts it
 	(crossplay_guard.h's CROSSPLAY_PLATFORM_*: a Vita, or a PC build) */
 	int crossplay, platform;
-	/* its tag, as every row shows it: VITA, OPENCE, CHUPA, DAMNATION or PC
-	(crossplay_guard_tag) */
+	/* this project's marks of its host (crossplay_guard.h's CROSSPLAY_HOST_*:
+	the PC build, Vitas only) */
+	int marks;
+	/* its tag, as every row shows it: VITA, VITA (PC), OPENCE, CHUPA,
+	DAMNATION or PC (crossplay_guard_host_tag) */
 	char tag[12];
 	/* the whole badge a row shows (crossplay_guard_row_badge): the tag, then
 	" SERVER", "+PC" (a Vita's game PC players join too), " EXPERIMENTAL" or

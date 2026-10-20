@@ -17,6 +17,12 @@ run_browser_list_test.sh (with ASan and UBSan there).
 
 #include "../../linux/game/browser_list.c"
 
+/* (crossplay_guard.c's: a Vita's game, not the port's PC build's) */
+int crossplay_guard_vita_game(int platform, int marks)
+{
+	return platform == CROSSPLAY_PLATFORM_VITA && !(marks & CROSSPLAY_HOST_PC_BUILD);
+}
+
 #include <stdio.h>
 #include <string.h>
 

@@ -872,6 +872,35 @@ static long network_game_client_advertised_wire(
 			version != HALO_PORT_NETWORK_VERSION, flags);
 	return game_wire;
 }
+
+/* port: this project's marks of the advertised game in that place
+(crossplay_guard.h's CROSSPLAY_HOST_*): its host is the PC build, its game
+takes Vitas only (network_wire.h's flags; none from an older build) */
+static int network_game_client_advertised_marks(
+	long game_index)
+{
+	int flags, platform, marks = 0;
+	long game_wire;
+
+	if (game_index < 0 || game_index >= MAXIMUM_NETWORK_ADVERTISED_GAMES)
+		return 0;
+	flags = network_game_client_advertised_versions[game_index].flags;
+	game_wire = network_game_client_advertised_wire(game_index, &platform);
+	if (platform != CROSSPLAY_PLATFORM_VITA)
+		return 0;
+	if (game_wire == 0)
+	{
+		if (flags & NETWORK_WIRE_ADVERTISED_PC_HOST_FLAG)
+			marks |= CROSSPLAY_HOST_PC_BUILD;
+		if (flags & NETWORK_WIRE_ADVERTISED_VITAS_ONLY_FLAG)
+			marks |= CROSSPLAY_HOST_VITAS_ONLY;
+	}
+	else if (game_wire == 1 && (flags & NETWORK_WIRE_ADVERTISED_CROSSPLAY_PC_HOST_FLAG))
+	{
+		marks |= CROSSPLAY_HOST_PC_BUILD;
+	}
+	return marks;
+}
 #endif
 
 struct network_game_client network_game_client_dont_use_directly;
@@ -4130,13 +4159,18 @@ short network_game_client_listed_games(
 				platform = CROSSPLAY_PLATFORM_PC;
 #endif
 				listed->platform = (short)platform;
+#ifdef HALO_PORT_VITA_NETWORK
+				listed->marks = (short)network_game_client_advertised_marks(game_index);
+#else
+				listed->marks = 0;
+#endif
 				/* (a PC co-op game: no game engine on a level that is not one
 				of the Xbox's multiplayer ones, as OpenCE hosts it) */
 				listed->pc_coop = platform != CROSSPLAY_PLATFORM_VITA && network_crossplay_guard_coop_game(game->map.name,
 					(long)sizeof(game->map.name), game->engine_type);
 			}
 			/* (the browsers' filter, network.browser_filter) */
-			if (!network_wire_browser_shows(listed->platform == CROSSPLAY_PLATFORM_VITA))
+			if (!network_wire_browser_shows(crossplay_guard_vita_game(listed->platform, listed->marks)))
 				continue;
 			count++;
 		}
@@ -4150,7 +4184,7 @@ short network_game_client_listed_games(
 		{
 			struct network_listed_game moved;
 
-			if (games[index].platform != CROSSPLAY_PLATFORM_VITA)
+			if (!crossplay_guard_vita_game(games[index].platform, games[index].marks))
 				continue;
 			moved = games[index];
 			for (moving = index; moving > vita_count; moving--)
@@ -4170,20 +4204,25 @@ void network_game_client_advertised_game_tag(
 	long size)
 {
 	struct network_game_client *client = global_network_game_client_get();
-	int platform = CROSSPLAY_PLATFORM_PC;
+	int platform = CROSSPLAY_PLATFORM_PC, marks = 0;
 	long game_wire = -1;
 
 	if (!badge || size <= 0)
 		return;
 	badge[0] = 0;
 	if (client && game >= client->available_games && game < client->available_games + MAXIMUM_NETWORK_ADVERTISED_GAMES)
+	{
 		game_wire = network_game_client_advertised_wire(game - client->available_games, &platform);
+		marks = network_game_client_advertised_marks(game - client->available_games);
+	}
 #ifndef HALO_PORT_VITA_NETWORK
 	platform = CROSSPLAY_PLATFORM_PC;
+	marks = 0;
 #endif
 	/* (the tag alone: the list's rows are 31 characters; the large or co-op
 	question says the rest when a PC game is joined) */
-	crossplay_guard_row_badge(badge, (int)size, platform, game_wire == 1, 0, CROSSPLAY_GUARD_OK);
+	crossplay_guard_host_badge(badge, (int)size, platform, marks, game_wire == 1, 0, CROSSPLAY_GUARD_OK,
+		network_wire_this_platform() == NETWORK_PLATFORM_VITA_PC);
 }
 
 boolean network_game_client_advertised_game_shown(
@@ -4197,8 +4236,11 @@ boolean network_game_client_advertised_game_shown(
 	network_game_client_advertised_wire(game - client->available_games, &platform);
 #ifndef HALO_PORT_VITA_NETWORK
 	platform = CROSSPLAY_PLATFORM_PC;
+	return network_wire_browser_shows(0) != 0;
+#else
+	return network_wire_browser_shows(crossplay_guard_vita_game(platform,
+		network_game_client_advertised_marks(game - client->available_games))) != 0;
 #endif
-	return network_wire_browser_shows(platform == CROSSPLAY_PLATFORM_VITA) != 0;
 }
 
 boolean network_game_client_advertised_game_vita(
@@ -4212,8 +4254,10 @@ boolean network_game_client_advertised_game_vita(
 	network_game_client_advertised_wire(game - client->available_games, &platform);
 #ifndef HALO_PORT_VITA_NETWORK
 	platform = CROSSPLAY_PLATFORM_PC;
+	return FALSE;
+#else
+	return crossplay_guard_vita_game(platform, network_game_client_advertised_marks(game - client->available_games));
 #endif
-	return platform == CROSSPLAY_PLATFORM_VITA;
 }
 
 /* port: the advertised game of a listed game's id, while it is listed */

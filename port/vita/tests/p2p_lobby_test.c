@@ -74,6 +74,11 @@ int network_wire_version_accepted_on(int crossplay, unsigned int version)
 	return version == network_wire_version_of(crossplay);
 }
 int network_wire_host_pc_stand_in(void) { return test_pc_stand_in; }
+/* (this machine's platform and who can join its game: the listing's stamp,
+network_wire.h; a Vita for Vitas and Halo CE Vita PC unless a check says) */
+static int test_platform = NETWORK_PLATFORM_VITA, test_audience = NETWORK_AUDIENCE_VITA_PC;
+int network_wire_this_platform(void) { return test_platform; }
+int network_wire_host_audience(void) { return test_audience; }
 int network_wire_browser_shows(int vita_host)
 {
 	return test_filter == 0 || (test_filter == 1) == (vita_host != 0);
@@ -417,6 +422,52 @@ static void lobby_checks(void)
 		!strcmp(entry.players_line, "3 of 16: alpha, bravo, charlie") && !entry.locked && !entry.pc_map &&
 		!strcmp(entry.badge, "VITA") && !strcmp(entry.tag, "VITA") && !entry.crossplay && !entry.experimental &&
 		!entry.coop, "the entry's map, Rules and Players lines; its tag VITA (the legacy wire's games are the Vitas')");
+	/* this project's marks, in the stamp's first byte (network_wire.h): the
+	Vita's game for Vitas and Halo CE Vita PC says nothing; the PC build's
+	is tagged VITA (PC), shown with the PCs'; a game for Vitas only is
+	marked so, which a viewer on the PC build sees after its badge. A
+	listing that says nothing (an older build's) is a Vita's */
+	check(published[published_size - P2P_SIGNATURE_SIZE - 8] == 0 && entry.marks == 0,
+		"a Vita's game for Vitas and Halo CE Vita PC: its stamp all zero, as an older build's");
+	{
+		unsigned char bytes[P2P_MAXIMUM_LISTING_SIZE];
+		int size;
+
+		test_platform = NETWORK_PLATFORM_VITA_PC;
+		pthread_mutex_lock(&p2p_lock);
+		size = listing_make(bytes, _listing_open | _listing_has_teams);
+		pthread_mutex_unlock(&p2p_lock);
+		check(bytes[size - P2P_SIGNATURE_SIZE - 8] == NETWORK_WIRE_STAMP_PC_HOST,
+			"the PC build's listing: its stamp's first byte says so, signed with the rest");
+		hear(bytes, size, 0, NULL);
+		check(p2p_lobby_entry(0, &entry) && entry.platform == CROSSPLAY_PLATFORM_VITA &&
+			entry.marks == CROSSPLAY_HOST_PC_BUILD && !strcmp(entry.tag, "VITA (PC)") && !strcmp(entry.badge, "VITA (PC)") &&
+			!crossplay_guard_vita_game(entry.platform, entry.marks), "the PC build's game: tagged VITA (PC), a PC's game");
+		test_filter = 1;
+		check(games(NULL) == 0, "the browser's Vita filter leaves the PC build's game out");
+		test_filter = 2;
+		check(games(NULL) == 1, "its PC filter shows it");
+		test_filter = 0;
+		test_platform = NETWORK_PLATFORM_VITA;
+		test_audience = NETWORK_AUDIENCE_VITAS;
+		pthread_mutex_lock(&p2p_lock);
+		size = listing_make(bytes, _listing_open | _listing_has_teams);
+		pthread_mutex_unlock(&p2p_lock);
+		check(bytes[size - P2P_SIGNATURE_SIZE - 8] == NETWORK_WIRE_STAMP_VITAS_ONLY, "a game for Vitas only: marked so");
+		hear(bytes, size, 0, NULL);
+		check(p2p_lobby_entry(0, &entry) && entry.marks == CROSSPLAY_HOST_VITAS_ONLY && !strcmp(entry.tag, "VITA") &&
+			!strcmp(entry.badge, "VITA"), "a Vita viewer: VITA, as before");
+		test_platform = NETWORK_PLATFORM_VITA_PC;
+		check(p2p_lobby_entry(0, &entry) && !strcmp(entry.badge, "VITA VITAS ONLY"),
+			"a viewer on the PC build: VITA VITAS ONLY (it would be refused)");
+		test_platform = NETWORK_PLATFORM_VITA;
+		test_audience = NETWORK_AUDIENCE_VITA_PC;
+		pthread_mutex_lock(&p2p_lock);
+		size = listing_make(bytes, _listing_open | _listing_has_teams);
+		pthread_mutex_unlock(&p2p_lock);
+		hear(bytes, size, 0, NULL);
+		check(p2p_lobby_entry(0, &entry) && entry.marks == 0 && !strcmp(entry.badge, "VITA"), "a Vita's game again: VITA");
+	}
 	/* joining it: its invite, at once */
 	check(p2p_lobby_join(id, NULL) && p2p_lobby_join_state() == P2P_LOBBY_JOIN_JOINING &&
 		!strcmp(joined_invite, expected_invite) && joined_wire == 0, "joining an open game joins its invite, on its wire");

@@ -304,7 +304,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
@@ -654,6 +654,25 @@ for case in $cases; do
 			fail h3create "START GAME did not set up the game as Server Setup does"
 		grep -aqE "ui: screen (ui.shell.main_menu.multiplayer_type_select.connected.4way_profile_select.4way_start2join_screen|pc.h3.join.screen)" "$log" ||
 			fail h3create "START GAME did not open the profile" ;;
+	h3vitapc)
+		# (the port's PC build, Oct 20 2026: the LAN browser's 6 made-up games - its log line
+		# names all 6 - the fifth (Test game 04) the PC build's: VITA (PC), grouped with the PCs';
+		# the first (Test game 00) for Vitas only, which a viewer on the PC build
+		# (HALO_TEST_PLATFORM=pc) sees marked VITAS ONLY)
+		for who in vita pc; do
+			run h3vitapc_$who "$menus_data" 40 "$h3mppad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:6000" \
+				HALO_MENU_STYLE=halo3 HALO_TEST_BROWSER_GAMES=6 HALO_TEST_BROWSER_PC=1 HALO_TEST_BROWSER_VITA_PC=1 HALO_TEST_PLATFORM=$who
+			check_h3 h3vitapc_$who halo3
+			log=$out/h3vitapc_$who/run.log
+			echo "--- h3vitapc_$who"; grep -aE "menus: the LAN browser lists|menus: the browser's groups" "$log" | head -3 | cut -c1-400
+			grep -aq "menus: the browser's groups (All games): VITA GAMES (2), PC GAMES (4)" "$log" ||
+				fail h3vitapc_$who "the PC build's games (VITA (PC)) were not grouped with the PCs'"
+			grep -aq "Test game 04 ([^)]*, VITA (PC))" "$log" || fail h3vitapc_$who "Test game 04 was not tagged VITA (PC)"
+		done
+		grep -aq "Test game 00 ([^)]*, VITA)" "$out/h3vitapc_vita/run.log" ||
+			fail h3vitapc_vita "a game for Vitas only was not plain VITA to a Vita"
+		grep -aq "Test game 00 ([^)]*, VITA VITAS ONLY)" "$out/h3vitapc_pc/run.log" ||
+			fail h3vitapc_pc "a game for Vitas only was not marked VITAS ONLY to the PC build" ;;
 	h3hostonline)
 		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
 			echo "--- h3hostonline"; echo "SKIP: no HALO_TEST_PROFILE"; continue

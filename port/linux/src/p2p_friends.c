@@ -245,6 +245,10 @@ struct presence
 	/* (wire: its game on the crossplay wire, network_wire.h; pc_host: and a
 	PC's (a game they joined), else a Vita's) */
 	int engine, difficulty, players, maximum, version, wire, pc_map, pc_host;
+	/* (since Oct 20 2026, bits older builds ignore: network_wire.h) the
+	sender is this project's PC build; the game's host is; the game takes
+	Vitas only */
+	int sender_pc, host_pc_build, vitas_only;
 	char map[MAP_LENGTH + 1];
 	char gametype[GAMETYPE_LENGTH + 1];
 	unsigned char invite_hash[P2P_KEY_HASH_SIZE];
@@ -425,6 +429,8 @@ struct party_member
 	int status_flags, follow_code;
 	unsigned long follow_serial;
 	int muted;
+	/* on this project's PC build, as its party follow said (network_wire.h) */
+	int pc;
 	struct budget chat_budget;
 	struct budget status_budget;
 };
@@ -1513,6 +1519,18 @@ static int box_key(const unsigned char *shared, const unsigned char *ephemeral, 
 }
 
 /* the body of a message; its size */
+/* a presence's, an invite's and a party follow's game flags byte: 1 its
+wire (the crossplay wire), 2 a Halo PC map, 4 a PC's game (a crossplay
+game's); and, since Oct 20 2026 (older builds read none of them: game_decode
+then took bits 1, 2 and 4 alone), 8 the sender is this project's PC build,
+16 the game's host is, 32 the game takes Vitas only (network_wire.h). What
+the sender says: best effort */
+static unsigned char game_flags(const struct presence *game)
+{
+	return (unsigned char)((game->wire ? 1 : 0) | (game->pc_map ? 2 : 0) | (game->wire && game->pc_host ? 4 : 0) |
+		(game->sender_pc ? 8 : 0) | (game->host_pc_build ? 16 : 0) | (!game->wire && game->vitas_only ? 32 : 0));
+}
+
 static int body_encode(const struct message *message, unsigned char *bytes)
 {
 	int size = 0;
@@ -1540,8 +1558,7 @@ static int body_encode(const struct message *message, unsigned char *bytes)
 		bytes[size++] = (unsigned char)message->game.maximum;
 		put_u16(bytes + size, (unsigned int)message->game.version);
 		size += 2;
-		bytes[size++] = (unsigned char)((message->game.wire ? 1 : 0) | (message->game.pc_map ? 2 : 0) |
-			(message->game.wire && message->game.pc_host ? 4 : 0));
+		bytes[size++] = game_flags(&message->game);
 		size += put_text(bytes + size, message->name, NAME_LENGTH);
 		size += put_text(bytes + size, message->game.map, MAP_LENGTH);
 		size += put_text(bytes + size, message->game.gametype, GAMETYPE_LENGTH);
@@ -1573,8 +1590,7 @@ static int body_encode(const struct message *message, unsigned char *bytes)
 		bytes[size++] = (unsigned char)(message->game.difficulty < 0 ? 0xFF : message->game.difficulty);
 		put_u16(bytes + size, (unsigned int)message->game.version);
 		size += 2;
-		bytes[size++] = (unsigned char)((message->game.wire ? 1 : 0) | (message->game.pc_map ? 2 : 0) |
-			(message->game.wire && message->game.pc_host ? 4 : 0));
+		bytes[size++] = game_flags(&message->game);
 		size += put_text(bytes + size, message->game.map, MAP_LENGTH);
 		size += put_text(bytes + size, message->game.gametype, GAMETYPE_LENGTH);
 		memcpy(bytes + size, message->game.invite_hash, P2P_KEY_HASH_SIZE);
@@ -1622,7 +1638,8 @@ static int plain_encode(struct message *message, unsigned char *bytes)
 	return size + P2P_SIGNATURE_SIZE;
 }
 
-/* a presence's or an invite's game fields, read and checked */
+/* a presence's or an invite's game fields, read and checked (the flags
+byte: game_flags') */
 static int game_decode(const unsigned char *bytes, int size, int *offset, struct presence *game, int with_counts)
 {
 	int at = *offset;
@@ -1645,6 +1662,11 @@ static int game_decode(const unsigned char *bytes, int size, int *offset, struct
 	/* (since Oct 19 2026: a PC's game; builds before it read nothing of the
 	bit) */
 	game->pc_host = game->wire && (bytes[at] & 4) != 0;
+	/* (since Oct 20 2026: this project's marks; builds before them read
+	nothing of these bits) */
+	game->sender_pc = (bytes[at] & 8) != 0;
+	game->host_pc_build = (bytes[at] & 16) != 0;
+	game->vitas_only = !game->wire && (bytes[at] & 32) != 0;
 	at++;
 	if (game->state >= P2P_FRIEND_STATE_COUNT || (game->difficulty > 3) || game->engine > 15 ||
 		game->players > HALO_PORT_MAXIMUM_NETWORK_PLAYERS || game->maximum > HALO_PORT_MAXIMUM_NETWORK_PLAYERS ||
@@ -2009,6 +2031,15 @@ static void send_accept(const unsigned char *key, const unsigned char *nonce, co
 
 /* ---------- presence */
 
+/* this machine's marks on a message's game (network_wire.h): it is the PC
+build; the game it hosts is the PC build's, or for Vitas only */
+static void own_platform_marks(struct presence *game)
+{
+	game->sender_pc = network_wire_this_platform() == NETWORK_PLATFORM_VITA_PC;
+	game->host_pc_build = friends->host.host_pc_build;
+	game->vitas_only = !game->wire && friends->host.vitas_only;
+}
+
 /* whether this machine's game can be joined by a friend from presence: 0
 no, 1 yes, 2 with its password. The design's rule: hosted for the internet,
 public or private (the owner, Oct 19 2026: "when I have a private lobby my
@@ -2090,6 +2121,7 @@ static int presence_sign(int online, int want_reply)
 		message.game.version = (int)network_wire_version_of(friends->host.crossplay);
 		message.game.wire = friends->host.crossplay;
 		message.game.pc_host = friends->host.pc_host;
+		own_platform_marks(&message.game);
 		joinable = own_joinable();
 		if (joinable)
 		{
@@ -3890,13 +3922,15 @@ void p2p_friends_activity_text(char *text, int size, int state, const char *map,
 /* a game's tag after an activity line (a game's only: multiplayer or
 co-op), as the browsers tag their rows (crossplay_guard.h): VITA, VITA+PC
 (a Vita's game PC players can join too), PC (a PC's game they joined) */
-static void activity_tag(char *text, int size, int state, int wire, int pc_host)
+static void activity_tag(char *text, int size, int state, int wire, int pc_host, int host_pc_build)
 {
 	size_t length = strlen(text);
 
 	if ((state != P2P_FRIEND_STATE_MULTIPLAYER && state != P2P_FRIEND_STATE_COOP) || length + 1 >= (size_t)size)
 		return;
-	snprintf(text + length, (size_t)size - length, " (%s)", !wire ? "VITA" : pc_host ? "PC" : "VITA+PC");
+	/* (the PC build's game: VITA (PC), as the browsers tag it) */
+	snprintf(text + length, (size_t)size - length, " (%s%s)", pc_host && wire ? "PC" : host_pc_build ? "VITA (PC)" :
+		"VITA", wire && !pc_host ? "+PC" : "");
 }
 
 /* a friend's entry */
@@ -3924,7 +3958,10 @@ static void friend_entry(const struct friend_record *record, struct p2p_friend_e
 		record->presence.gametype, record->presence.engine, record->presence.difficulty, record->presence.pc_map);
 	if (online)
 		activity_tag(entry->activity, sizeof(entry->activity), entry->state, entry->crossplay,
-			record->presence.pc_host || record->presence.version != HALO_PORT_NETWORK_VERSION);
+			record->presence.pc_host || record->presence.version != HALO_PORT_NETWORK_VERSION,
+			record->presence.host_pc_build);
+	/* (they play on this project's PC build: the lists say PC) */
+	entry->pc = online && record->presence.sender_pc;
 	if (online)
 		party_friend_entry(record, entry);
 }
@@ -4016,7 +4053,8 @@ int p2p_friends_list(struct p2p_friend_entry *entries, int maximum_count)
 		p2p_friends_activity_text(game, sizeof(game), invite->game.state, invite->game.map, invite->game.gametype,
 			invite->game.engine, invite->game.difficulty, invite->game.pc_map);
 		activity_tag(game, sizeof(game), invite->game.state, entry->crossplay,
-			invite->game.pc_host || invite->game.version != HALO_PORT_NETWORK_VERSION);
+			invite->game.pc_host || invite->game.version != HALO_PORT_NETWORK_VERSION, invite->game.host_pc_build);
+		entry->pc = invite->game.sender_pc;
 		snprintf(entry->activity, sizeof(entry->activity), T("Invited you: %s"), game);
 	}
 	first_friend = count;
@@ -4435,6 +4473,7 @@ int p2p_friends_act(const char *id, int kind, int action)
 			message.game.version = (int)network_wire_version_of(friends->host.crossplay);
 			message.game.wire = friends->host.crossplay;
 			message.game.pc_host = friends->host.pc_host;
+			own_platform_marks(&message.game);
 		message.game.pc_host = friends->host.pc_host;
 			snprintf(message.game.map, sizeof(message.game.map), "%s", activity->map);
 			snprintf(message.game.gametype, sizeof(message.game.gametype), "%s", activity->gametype);

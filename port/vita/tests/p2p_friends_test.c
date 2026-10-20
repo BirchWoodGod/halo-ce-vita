@@ -38,8 +38,11 @@ and UBSan too).
 /* (the files in the test's folders, not ux0:) */
 #define P2P_FRIENDS_TEST
 #include "../../linux/src/p2p_friends.c"
-/* (the wires: which a friend's game is joined on, network_wire.h) */
+/* (the wires: which a friend's game is joined on, network_wire.h; this
+machine's platform each test machine's own, below) */
+#define network_wire_this_platform network_wire_this_platform_built
 #include "../../linux/src/network_wire.c"
+#undef network_wire_this_platform
 
 #include <stdarg.h>
 /* (the platform layer's headers keep sys/stat.h out) */
@@ -57,6 +60,14 @@ static char save_root[512];
 static char joined_link[P2P_LINK_SIZE];
 static int join_count;
 static int appear_offline_setting, friends_join_setting = 1;
+/* (each machine's platform, network_wire.h: a Vita unless a check makes it
+the port's PC build) */
+static int current;
+static int machine_platform[8];
+int network_wire_this_platform(void)
+{
+	return machine_platform[current];
+}
 
 void posix_random_bytes(void *buffer, unsigned long size)
 {
@@ -185,7 +196,6 @@ enum
 static struct friends_state machines[MACHINES];
 static struct p2p_friends_host hosts[MACHINES];
 static char roots[MACHINES][512];
-static int current;
 
 /* every message the broker carried, as it was (replays) */
 static struct
@@ -405,6 +415,24 @@ static void test_request_accept(void)
 	check(!strcmp(entry.activity, "Slayer on Blood Gulch (VITA)") && !entry.crossplay,
 		"the friend's activity: Slayer on Blood Gulch, tagged VITA (the Vitas' wire)");
 	check(!strcmp(entry.name, "Bravo"), "the friend's name cleaned as a player's");
+	check(!entry.pc, "a Vita friend: not the PC build");
+	/* the port's PC build says so in its presence (bits older builds ignore,
+	network_wire.h): the lists say PC; its hosted game tagged VITA (PC) */
+	use(1);
+	machine_platform[1] = NETWORK_PLATFORM_VITA_PC;
+	hosts[1].host_pc_build = 1;
+	p2p_friends_set_activity(P2P_FRIEND_STATE_MULTIPLAYER, "bloodgulch", "Slayer", 2, -1, 0, 4, 16);
+	pass(8);
+	check(entry_of(0, P2P_FRIEND_KIND_FRIEND, 0, &entry) && entry.online && entry.pc &&
+		!strcmp(entry.activity, "Slayer on Blood Gulch (VITA (PC))"),
+		"a friend on the PC build: entry.pc, their game tagged VITA (PC)");
+	use(1);
+	machine_platform[1] = NETWORK_PLATFORM_VITA;
+	hosts[1].host_pc_build = 0;
+	p2p_friends_set_activity(P2P_FRIEND_STATE_MULTIPLAYER, "bloodgulch", "Slayer", 2, -1, 0, 3, 16);
+	pass(8);
+	check(entry_of(0, P2P_FRIEND_KIND_FRIEND, 0, &entry) && !entry.pc &&
+		!strcmp(entry.activity, "Slayer on Blood Gulch (VITA)"), "a Vita again: VITA");
 	check(entry_of(1, P2P_FRIEND_KIND_FRIEND, 0, &entry) && entry.online && !strcmp(entry.activity, "In the menus"),
 		"presence both ways: In the menus");
 	use(0);

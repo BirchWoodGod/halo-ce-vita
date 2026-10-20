@@ -28,3 +28,11 @@ test_out_done() {
 	fi
 	return 0
 }
+
+# The Linux builds the tests run stand in for Vitas (configure.py
+# --linux-net-vita). Since the port's PC build says it is one (network_wire.h,
+# Oct 20 2026: VITA (PC) tags, no Vita-only hosting), they say they are Vitas,
+# unless a test gives a copy HALO_TEST_PLATFORM=pc itself (a test build only:
+# a release build ignores it)
+HALO_TEST_PLATFORM=${HALO_TEST_PLATFORM:-vita}
+export HALO_TEST_PLATFORM

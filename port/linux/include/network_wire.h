@@ -25,8 +25,8 @@ wire it plays; a Vita that hosts chooses who can join (network.host_crossplay,
 
 The game's wire is chosen as the game begins: by a client from the game it
 joins (its advertisement's version and flags, or the listing, code record,
-friend's presence or party it came from), by a host from network.host_crossplay
-as its server is made. It holds for that game: nothing switches under it.
+friend's presence or party it came from), by a host from network.who_can_join
+(everyone: the crossplay wire) as its server is made. It holds for that game: nothing switches under it.
 With no game it is the legacy wire. Ad hoc play and the dedicated server are
 always on the legacy wire (no PC reaches ad hoc; the servers stay off the
 crossplay wire), and so is a build that does not play as a Vita.
@@ -104,9 +104,9 @@ lights and the flashlight stay on past the Xbox's player and vehicle limits
 (units.c). The legacy wire plays the betas' (0). */
 int network_wire_v28_rules(void);
 
-/* hosting: whether the next game this machine hosts takes PC players too
-(network.host_crossplay, "Who can join": Vitas and PC), on the crossplay
-wire; 0 where that wire is not available (above) */
+/* hosting: whether the next game this machine hosts takes OpenCE's PC
+players too (network_wire_host_audience: everyone), on the crossplay wire;
+0 where that wire is not available (above) */
 int network_wire_host_crossplay(void);
 /* (automated tests only, never in release builds) HALO_TEST_CROSSPLAY_HOST=1:
 this machine hosts on the crossplay wire as a stand-in for a PC host (its
@@ -114,10 +114,83 @@ advertisement and listing not marked a Vita's: run_crossplay_record_test.sh,
 run_crossplay_maps_test.sh) */
 int network_wire_host_pc_stand_in(void);
 
+/* ---------- this project's platforms (docs/crossplay.md 4.3)
+
+A build that plays as a Vita is a Vita (HALO_VITA) or the project's PC build
+(Linux, Windows: HALO_NET_AS_VITA, tools/package_pc.py), which speaks the
+Vita wire and plays with the Vitas. The PC build says so where older builds
+ignore it, with no network version raised: the listing's stamp
+(NETWORK_WIRE_STAMP_*, p2p_lobby.c), the System Link advertisement's flags
+(NETWORK_WIRE_ADVERTISED_*) and a friend's presence
+(p2p_friends.c). The browsers then tag its games VITA (PC). A build that
+says nothing is taken for a Vita, as before. All of it is what the other
+machine says: best effort (a modified client can lie), never a security
+line. The dedicated server is a Vita here (its games are tagged SERVER). */
+enum
+{
+	NETWORK_PLATFORM_VITA,
+	NETWORK_PLATFORM_VITA_PC,
+};
+/* this build's: a Vita, or the PC build. (automated tests only, never in
+release builds) HALO_TEST_PLATFORM=vita or pc makes a Linux build stand in
+for either */
+int network_wire_this_platform(void);
+
+/* the listing's stamp (its first byte; older builds read none of it) */
+#define NETWORK_WIRE_STAMP_PC_HOST 0x01
+#define NETWORK_WIRE_STAMP_VITAS_ONLY 0x02
+/* the System Link advertisement's flags on the legacy wire (bits older
+builds ignore; HALO_PORT_ADVERTISED_* has 0x01, 0x02 and 0x04): the host is
+the PC build; its game takes Vitas only */
+#define NETWORK_WIRE_ADVERTISED_PC_HOST_FLAG 0x08
+#define NETWORK_WIRE_ADVERTISED_VITAS_ONLY_FLAG 0x10
+/* ... on the crossplay wire, past NETWORK_WIRE_ADVERTISED_VITA_HOST_FLAG
+(docs/crossplay.md 4.1 reserves 0x40 and 0x80 for ours): the Vita host is
+the PC build */
+#define NETWORK_WIRE_ADVERTISED_CROSSPLAY_PC_HOST_FLAG 0x80
+
+/* ---------- who can join (network.who_can_join, "Who can join"; the owner,
+Oct 20 2026) */
+enum
+{
+	/* VITA, Vitas only (the Vita's default): the legacy wire; the PC build is
+	refused at the join ("This game is for PS Vitas only") */
+	NETWORK_AUDIENCE_VITAS,
+	/* VITA PC, PS Vitas and Halo CE Vita on PC (the PC build's default
+	and least: a PC
+	host cannot host for Vitas only; the dedicated server's): the legacy
+	wire, the PC build joins */
+	NETWORK_AUDIENCE_VITA_PC,
+	/* EVERYONE: also OpenCE players on PC, on the crossplay wire (what
+	"Vitas and PC" was) */
+	NETWORK_AUDIENCE_EVERYONE,
+	NUMBER_OF_NETWORK_AUDIENCES,
+};
+/* the setting's values (network.who_can_join, HALO_NET_WHO_CAN_JOIN):
+"vita", "vita_pc", "everyone" (the menus' VITA, VITA PC, EVERYONE; the
+PC build offers no VITA: its menus' spinners strings_pc, the Vita's
+panel alone has all three) */
+const char *network_wire_audience_value(int audience);
+/* a value read: NETWORK_AUDIENCE_*, or -1 for none. The retired
+network.host_crossplay's (HALO_NET_HOST_CROSSPLAY) "true" and "1" read as
+everyone, "false" and "0" as Vitas only */
+int network_wire_audience_parse(const char *value);
+/* who can join the next game this machine hosts: the setting (else the
+retired one's, else this build's default), what this build can host (the
+PC build: not Vitas only; no crossplay wire, as in ad hoc play: not
+everyone) */
+int network_wire_host_audience(void);
+/* the default: Vitas only on a Vita, Vitas and Halo CE Vita PC on the PC
+build and the dedicated server */
+int network_wire_audience_default(void);
+/* the audiences this build offers when it hosts: 3 on a Vita (first
+NETWORK_AUDIENCE_VITAS), 2 on the PC build (from NETWORK_AUDIENCE_VITA_PC) */
+int network_wire_audience_first(void);
+
 /* the server browsers' filter (network.browser_filter, "Browser shows"):
-every game, the Vitas' only, or PC hosts' only. network.crossplay (the
-retired switch, Oct 19 2026) set and the filter left at its default shows
-PC games only, as the switch did */
+every game, the Vitas' only, or PC hosts' only (OpenCE's, and the PC
+build's: VITA (PC)). network.crossplay (the retired switch, Oct 19 2026) set
+and the filter left at its default shows PC games only, as the switch did */
 enum
 {
 	NETWORK_WIRE_FILTER_ALL,
@@ -125,7 +198,8 @@ enum
 	NETWORK_WIRE_FILTER_PC,
 };
 int network_wire_browser_filter(void);
-/* whether the browsers show a game of a Vita's host (nonzero) or a PC's */
+/* whether the browsers show a game of a Vita's host (nonzero: a Vita, not
+the PC build) or a PC's */
 int network_wire_browser_shows(int vita_host);
 
 #endif /* __NETWORK_WIRE_H */

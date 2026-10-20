@@ -250,6 +250,8 @@ struct listing
 	int score_limit, difficulty;
 	int listed_player_count;
 	char players[LISTED_PLAYERS][LISTED_PLAYER_NAME_SIZE + 1];
+	/* the stamp's first byte: this project's marks (NETWORK_WIRE_STAMP_*) */
+	int stamp;
 	/* the signed part's size */
 	int signed_size;
 };
@@ -515,6 +517,20 @@ static int put_text(unsigned char *bytes, const char *text, int maximum)
 	return 1 + length;
 }
 
+/* the stamp's first byte (older builds read none of the stamp, signed as
+the rest: network_wire.h): the host is the PC build; its game takes Vitas
+only (on the legacy wire) */
+static unsigned char listing_stamp(int crossplay)
+{
+	unsigned char stamp = 0;
+
+	if (network_wire_this_platform() == NETWORK_PLATFORM_VITA_PC)
+		stamp |= NETWORK_WIRE_STAMP_PC_HOST;
+	if (!crossplay && network_wire_host_audience() == NETWORK_AUDIENCE_VITAS)
+		stamp |= NETWORK_WIRE_STAMP_VITAS_ONLY;
+	return stamp;
+}
+
 /* the listing of the game hosted, signed: flags (_listing_closed for a
 tombstone) */
 static int listing_make(unsigned char *bytes, int flags)
@@ -580,6 +596,9 @@ static int listing_make(unsigned char *bytes, int flags)
 	if (crossplay)
 	{
 		memset(bytes + size, 0, STAMP_SIZE);
+		/* (a Vita's game's marks: OpenCE's browsers read none of the stamp) */
+		if (flags & _listing_vita_host)
+			bytes[size] = listing_stamp(1);
 		size += STAMP_SIZE;
 		memcpy(data, crossplay_signature_label, sizeof(crossplay_signature_label) - 1);
 		memcpy(data + sizeof(crossplay_signature_label) - 1, bytes, (size_t)size);
@@ -595,6 +614,7 @@ static int listing_make(unsigned char *bytes, int flags)
 	for (index = 0; index < count; index++)
 		size += put_text(bytes + size, lobby.players[index], LISTED_PLAYER_NAME_SIZE);
 	memset(bytes + size, 0, STAMP_SIZE);
+	bytes[size] = listing_stamp(0);
 	size += STAMP_SIZE;
 	memcpy(data, signature_label, sizeof(signature_label) - 1);
 	memcpy(data + sizeof(signature_label) - 1, bytes, (size_t)size);
@@ -670,6 +690,9 @@ static int p2p_lobby_listing_read(int crossplay, const unsigned char *bytes, int
 	/* (the score, the difficulty and the count of names: format 2's) */
 	if (crossplay)
 	{
+		if (offset + STAMP_SIZE > size)
+			return 0;
+		listing->stamp = bytes[offset];
 		offset += STAMP_SIZE;
 		if (offset + P2P_SIGNATURE_SIZE != size)
 			return 0;
@@ -689,6 +712,9 @@ static int p2p_lobby_listing_read(int crossplay, const unsigned char *bytes, int
 		if (!get_text(bytes, size, &offset, listing->players[index], LISTED_PLAYER_NAME_SIZE))
 			return 0;
 	}
+	if (offset + STAMP_SIZE > size)
+		return 0;
+	listing->stamp = bytes[offset];
 	offset += STAMP_SIZE;
 	if (offset + P2P_SIGNATURE_SIZE != size)
 		return 0;
@@ -1096,7 +1122,7 @@ static int listing_failed(const unsigned char *identifier, unsigned long fingerp
 static int game_hidden(const struct game *game)
 {
 	return game->used && (listing_failed(game->listing.identifier, game->fingerprint) == 2 ||
-		!network_wire_browser_shows(game->listing.platform == CROSSPLAY_PLATFORM_VITA));
+		!network_wire_browser_shows(crossplay_guard_vita_game(game->listing.platform, game->listing.marks)));
 }
 
 /* the games the browser shows */
@@ -1331,6 +1357,10 @@ static void listing_take(const struct queued *queued, const struct listing *list
 	shown->dedicated = (listing->flags & _listing_dedicated) != 0;
 	shown->platform = (unsigned char)crossplay_guard_platform_of_listing(listing->crossplay, shown->vita_host,
 		shown->dedicated);
+	/* (this project's marks, from the stamp: a Vita's game's alone) */
+	shown->marks = (unsigned char)(!shown->vita_host ? 0 :
+		((listing->stamp & NETWORK_WIRE_STAMP_PC_HOST) ? CROSSPLAY_HOST_PC_BUILD : 0) |
+		((listing->stamp & NETWORK_WIRE_STAMP_VITAS_ONLY) && !listing->crossplay ? CROSSPLAY_HOST_VITAS_ONLY : 0));
 	/* (a Vita's crossplay listing's name, as the PC browsers show it, begins
 	VITA_NAME_TAG: the row says so itself) */
 	if (listing->crossplay && shown->vita_host && !strncmp(shown->name, VITA_NAME_TAG, sizeof(VITA_NAME_TAG) - 2) &&
@@ -2163,7 +2193,9 @@ int p2p_lobby_games(struct p2p_listing *games, int maximum_count)
 		failed = listing_failed(lobby.games[index].listing.identifier, lobby.games[index].fingerprint);
 		/* (hidden after joining failed; or not of the platform the browser
 		shows, network.browser_filter) */
-		if (failed == 2 || !network_wire_browser_shows(lobby.games[index].listing.platform == CROSSPLAY_PLATFORM_VITA))
+		if (failed == 2 ||
+			!network_wire_browser_shows(crossplay_guard_vita_game(lobby.games[index].listing.platform,
+				lobby.games[index].listing.marks)))
 			continue;
 		games[count] = lobby.games[index].listing;
 		games[count].failed = (unsigned char)failed;
@@ -2284,14 +2316,16 @@ static void entry_from_listing(const struct p2p_listing *listing, struct p2p_lob
 	entry->coop = listing->coop;
 	entry->crossplay = listing->crossplay;
 	entry->platform = listing->platform;
+	entry->marks = listing->marks;
 	{
 		int verdict = listing->platform == CROSSPLAY_PLATFORM_VITA ? CROSSPLAY_GUARD_OK :
 			crossplay_guard_judge(entry->coop, entry->players, entry->maximum);
 
 		entry->experimental = verdict != CROSSPLAY_GUARD_OK;
-		snprintf(entry->tag, sizeof(entry->tag), "%s", crossplay_guard_tag(listing->platform));
-		crossplay_guard_row_badge(entry->badge, (int)sizeof(entry->badge), listing->platform, listing->crossplay,
-			listing->dedicated, verdict);
+		snprintf(entry->tag, sizeof(entry->tag), "%s", crossplay_guard_host_tag(listing->platform, listing->marks));
+		crossplay_guard_host_badge(entry->badge, (int)sizeof(entry->badge), listing->platform, listing->marks,
+			listing->crossplay, listing->dedicated, verdict,
+			network_wire_this_platform() == NETWORK_PLATFORM_VITA_PC);
 	}
 	/* the Rules line: "Slayer to 50 on Wizard", "Co-op: Halo, Heroic" */
 	if (listing->coop)

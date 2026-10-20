@@ -342,8 +342,7 @@ static int party_body_encode(const struct message *message, unsigned char *bytes
 		bytes[size++] = (unsigned char)message->game.maximum;
 		put_u16(bytes + size, (unsigned int)message->game.version);
 		size += 2;
-		bytes[size++] = (unsigned char)((message->game.wire ? 1 : 0) | (message->game.pc_map ? 2 : 0) |
-			(message->game.wire && message->game.pc_host ? 4 : 0));
+		bytes[size++] = game_flags(&message->game);
 		size += put_text(bytes + size, message->game.map, MAP_LENGTH);
 		size += put_text(bytes + size, message->game.gametype, GAMETYPE_LENGTH);
 		if (message->party_value & PARTY_FOLLOW_HAS_INVITE)
@@ -612,6 +611,7 @@ static void party_send_follow(void)
 	message.game.version = (int)network_wire_version_of(friends->host.crossplay);
 	message.game.wire = friends->host.crossplay;
 	message.game.pc_host = friends->host.pc_host;
+	own_platform_marks(&message.game);
 	message.game.pc_map = activity->pc_map;
 	snprintf(message.game.map, sizeof(message.game.map), "%s", activity->map);
 	snprintf(message.game.gametype, sizeof(message.game.gametype), "%s", activity->gametype);
@@ -1088,6 +1088,8 @@ static void party_follow_heard(const unsigned char *sender, const struct message
 		return;
 	friends->party.follow_heard = message->party_serial;
 	friends->party.follow_message = *message;
+	/* (the leader on this project's PC build, as it says: the lists) */
+	friends->party.members[friends->party.leader].pc = message->game.sender_pc;
 	friends->party.follow_heard_time = now_stamp();
 	result = party_follow_precheck(message);
 	{
@@ -1784,6 +1786,10 @@ int p2p_party_members(struct p2p_party_member *members, int maximum_count)
 		entry->leader = index == friends->party.leader;
 		entry->self = p2p_equal(member->key, friends->key, P2P_KEY_SIZE);
 		entry->is_friend = find_friend(member->key) != NULL;
+		/* (on this project's PC build: this machine, a friend whose presence
+		says so, or the leader whose follow did: network_wire.h) */
+		entry->pc = entry->self ? network_wire_this_platform() == NETWORK_PLATFORM_VITA_PC :
+			(entry->is_friend && find_friend(member->key)->presence.sender_pc) || member->pc;
 		entry->muted = member->muted;
 		entry->blocked = find_blocked(member->key) >= 0;
 		entry->online = entry->self || (member->heard_time && !elapsed(member->heard_time, PARTY_TIMEOUT));

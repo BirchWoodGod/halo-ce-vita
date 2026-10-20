@@ -1803,6 +1803,12 @@ static boolean network_game_server_handle_message_client_broadcast_game_search(
 				if (network_wire_host_vita())
 				{
 					advertisement.reserved[HALO_PORT_ADVERTISED_FLAGS_OFFSET] |= NETWORK_WIRE_ADVERTISED_VITA_HOST_FLAG;
+					/* (... the PC build's: network_wire.h) */
+					if (network_wire_this_platform() == NETWORK_PLATFORM_VITA_PC)
+					{
+						advertisement.reserved[HALO_PORT_ADVERTISED_FLAGS_OFFSET] |=
+							NETWORK_WIRE_ADVERTISED_CROSSPLAY_PC_HOST_FLAG;
+					}
 				}
 			}
 			else
@@ -1810,6 +1816,12 @@ static boolean network_game_server_handle_message_client_broadcast_game_search(
 #ifdef HALO_PORT_VITA_NETWORK
 			/* (Vitas play only Vitas: halo_port_limits.h) */
 			advertisement.reserved[HALO_PORT_ADVERTISED_FLAGS_OFFSET] |= HALO_PORT_ADVERTISED_VITA_FLAG;
+			/* (this project's marks, bits older builds ignore: the host is the
+			PC build; its game takes Vitas only - network_wire.h) */
+			if (network_wire_this_platform() == NETWORK_PLATFORM_VITA_PC)
+				advertisement.reserved[HALO_PORT_ADVERTISED_FLAGS_OFFSET] |= NETWORK_WIRE_ADVERTISED_PC_HOST_FLAG;
+			if (network_wire_host_audience() == NETWORK_AUDIENCE_VITAS)
+				advertisement.reserved[HALO_PORT_ADVERTISED_FLAGS_OFFSET] |= NETWORK_WIRE_ADVERTISED_VITAS_ONLY_FLAG;
 #endif
 			}
 			/* (co-op: the lists show the level and its difficulty; the legacy

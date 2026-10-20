@@ -380,6 +380,9 @@ struct p2p_listing
 	it (the legacy wire's always; the crossplay wire's by its listing's
 	bit), and what hosts it (crossplay_guard.h's CROSSPLAY_PLATFORM_*) */
 	unsigned char crossplay, vita_host, platform;
+	/* this project's marks of its host (crossplay_guard.h's CROSSPLAY_HOST_*:
+	the PC build; Vitas only), from its listing's stamp */
+	unsigned char marks;
 	/* joining it failed this run */
 	unsigned char failed;
 	/* milliseconds, -1 if not known */
@@ -461,6 +464,9 @@ struct p2p_friends_host
 	own), and whether a PC hosts it (a PC's game joined) */
 	int crossplay;
 	int pc_host;
+	/* (hosting) this project's marks of the game (network_wire.h): its host
+	is the PC build; it takes Vitas only */
+	int host_pc_build, vitas_only;
 	/* hosting for the internet: its invite (the host's key hash and the
 	token), and as the server browser has it - listed (public), a password
 	(set, or its key being worked out), open, its players and most */

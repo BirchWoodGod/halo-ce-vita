@@ -252,6 +252,50 @@ const char *crossplay_guard_platform_line(int platform, int crossplay)
 	return T("Hosted on PC");
 }
 
+const char *crossplay_guard_host_tag(int platform, int marks)
+{
+	if (platform == CROSSPLAY_PLATFORM_VITA && (marks & CROSSPLAY_HOST_PC_BUILD))
+		return "VITA (PC)";
+	return crossplay_guard_tag(platform);
+}
+
+void crossplay_guard_host_badge(char *badge, int size, int platform, int marks, int crossplay, int dedicated,
+	int verdict, int viewer_pc)
+{
+	int length;
+
+	if (!badge || size <= 0)
+		return;
+	if (platform != CROSSPLAY_PLATFORM_VITA)
+	{
+		crossplay_guard_row_badge(badge, size, platform, crossplay, dedicated, verdict);
+		return;
+	}
+	length = snprintf(badge, (size_t)size, "%s%s%s", crossplay_guard_host_tag(platform, marks),
+		dedicated ? T(" SERVER") : "", crossplay ? "+PC" : "");
+	if (length < 0 || length >= size)
+		return;
+	if (crossplay_guard_vitas_only(marks, crossplay, viewer_pc))
+		snprintf(badge + length, (size_t)(size - length), "%s", T(" VITAS ONLY"));
+}
+
+int crossplay_guard_vita_game(int platform, int marks)
+{
+	return platform == CROSSPLAY_PLATFORM_VITA && !(marks & CROSSPLAY_HOST_PC_BUILD);
+}
+
+const char *crossplay_guard_host_line(int platform, int marks, int crossplay)
+{
+	if (platform == CROSSPLAY_PLATFORM_VITA && (marks & CROSSPLAY_HOST_PC_BUILD))
+		return crossplay ? T("Hosted on a PC (Halo CE Vita): OpenCE players can join") : T("Hosted on a PC (Halo CE Vita)");
+	return crossplay_guard_platform_line(platform, crossplay);
+}
+
+int crossplay_guard_vitas_only(int marks, int crossplay, int viewer_pc)
+{
+	return viewer_pc && !crossplay && (marks & CROSSPLAY_HOST_VITAS_ONLY);
+}
+
 const char *crossplay_guard_badge(int crossplay, int dedicated)
 {
 	if (crossplay)

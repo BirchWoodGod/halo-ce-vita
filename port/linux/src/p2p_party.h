@@ -63,6 +63,9 @@ struct p2p_party_member
 	int muted;
 	int blocked;
 	int online;
+	/* on this project's PC build, as far as this machine has heard (its
+	presence or its party follow: network_wire.h); the lists say PC */
+	int pc;
 	/* what they said of themselves: in a game, following, why they could not
 	follow ("Couldn't follow: the game is full") */
 	char note[P2P_PARTY_NOTE_SIZE];

@@ -3786,8 +3786,13 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 
 			/* (the name in the label's column, a word of its state in the
 			value's: the help line has the rest) */
-			length += snprintf(text + length, (size_t)(size - length), "\n%.20s\x02  %s",
-				entry->kind == P2P_FRIEND_KIND_OUTGOING ? entry->code : entry->name, friend_state_word(entry));
+			/* (a friend on this project's PC build: "(PC)" after the name) */
+			if (entry->pc && entry->kind != P2P_FRIEND_KIND_OUTGOING)
+				length += snprintf(text + length, (size_t)(size - length), "\n%.15s (PC)\x02  %s", entry->name,
+					friend_state_word(entry));
+			else
+				length += snprintf(text + length, (size_t)(size - length), "\n%.20s\x02  %s",
+					entry->kind == P2P_FRIEND_KIND_OUTGOING ? entry->code : entry->name, friend_state_word(entry));
 		}
 		else if (line->type == LINE_MOD)
 		{
@@ -4110,14 +4115,16 @@ static void show_browse(void)
 		}
 	}
 	/* (a game a line: its tag first (crossplay_guard.h: VITA, V+PC for a
-	Vita's game PC players join too, or the PC build's: OPENCE, CHUPA,
-	DAMN, PC), its name, players of most, map, [pw] for a password, CE for
+	Vita's game PC players join too, VPC for this project's PC build's game,
+	or the PC build's: OPENCE, CHUPA, DAMN, PC), its name, players of most, map, [pw] for a password, CE for
 	a Halo PC (Custom Edition) map, SRV for a dedicated server's, EXP for a
 	large PC game, COOP EXP for a PC co-op one: both asked about once) */
 	for (index = 0; index < browse_count && length < (int)sizeof(text); index++)
 	{
 		const struct p2p_lobby_entry *entry = &browse_entries[index];
-		const char *tag = entry->platform == CROSSPLAY_PLATFORM_VITA ? (entry->crossplay ? "V+PC" : "VITA") :
+		/* (the PC build's game: VPC, VPC+PC) */
+		const char *tag = entry->platform == CROSSPLAY_PLATFORM_VITA ? (entry->marks & CROSSPLAY_HOST_PC_BUILD ?
+			(entry->crossplay ? "VPC+PC" : "VPC") : entry->crossplay ? "V+PC" : "VITA") :
 			entry->platform == CROSSPLAY_PLATFORM_DAMNATION ? "DAMN" : crossplay_guard_tag(entry->platform);
 		/* (the panel's 46 characters at most: the badges past them cut) */
 		char row[47];
@@ -4149,7 +4156,7 @@ static void show_browse(void)
 		/* (its tag in words, and a PC game's badges) */
 		if (length < (int)sizeof(text))
 			length += snprintf(text + length, sizeof(text) - length, "\n%.46s",
-				crossplay_guard_platform_line(entry->platform, entry->crossplay));
+				crossplay_guard_host_line(entry->platform, entry->marks, entry->crossplay));
 		if (entry->platform != CROSSPLAY_PLATFORM_VITA && (entry->coop || entry->experimental) &&
 			length < (int)sizeof(text))
 			length += snprintf(text + length, sizeof(text) - length, "\n%.46s", entry->coop ?
@@ -5575,7 +5582,7 @@ static void browse_refresh(void)
 	{
 		for (index = 0; browse_count < BROWSE_LINES && p2p_lobby_entry(index, &entry); index++)
 		{
-			if (entry.own || (entry.platform == CROSSPLAY_PLATFORM_VITA) != vita)
+			if (entry.own || crossplay_guard_vita_game(entry.platform, entry.marks) != vita)
 				continue;
 			if (selected[0] && !strcmp(entry.id, selected))
 				browse_selected = browse_count;
