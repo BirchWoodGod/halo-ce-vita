@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """The Halo 3-style menus' own art (port/vita/app0/menus/halo3): panels,
 selection bars, strips, rules, the nameplate, the PlayStation button glyphs
-and the HALO title, drawn here, not taken from any game. The colours are the
+(and the desktop build's keyboard, mouse and Xbox controller icons) and the
+HALO title, drawn here, not taken from any game. The colours are the
 design's (docs/superpowers/specs/2026-10-18-halo3-menus-design.md), which
 follows Halo 3's own screens; the title's font is Saira Semi Condensed (SIL
 OFL, tools/fonts/OFL.txt). The same bytes each run.
@@ -342,6 +343,272 @@ def glyph_atlas():
     return image
 
 
+# the desktop build's keyboard and mouse icons, and the Xbox controller's
+# for the Halo 3 menus' hints (display.button_icons: source/interface/hud_draw.c
+# draws the HUD's prompts, the Halo CE menus' text and the hints with these).
+# The keys, their labels and the wider keycaps' widths are
+# port/linux/include/halo_button_icons.h's HALO_KEY_GLYPH_LIST, read here, so
+# the atlas and the game agree: the square keycaps in 32x32 cells, eight to a
+# row; from row KEY_ATLAS_WIDE_ROW the wider ones in 64x32 cells, four to a
+# row, left-aligned, the English then the Spanish (HALO_KEY_GLYPH_LIST_ES)
+BUTTON_ICONS_HEADER = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'port', 'linux', 'include',
+                                   'halo_button_icons.h')
+KEY_ATLAS_SIZE = 256
+KEY_ATLAS_WIDE_ROW = 5
+KEY_FACE = (68, 74, 84)
+KEY_SKIRT = (24, 26, 31)
+KEY_LABEL = (232, 236, 240)
+# (a mouse button lit: the menus' pale blue)
+MOUSE_LIT = (120, 200, 255)
+
+
+def key_glyph_lists(header=BUTTON_ICONS_HEADER):
+    """(keys, spanish): keys [(name, compact, wide, wide_width)] in the
+    header's order, spanish [(name, wide, wide_width)]"""
+    import re
+    with open(header, encoding='utf-8') as source:
+        text = source.read()
+
+    def block(macro):
+        start = text.index('#define %s(K)' % macro)
+        end = text.index('\n\n', start)
+        return text[start:end]
+    keys = [(name, compact, wide, int(width)) for name, compact, wide, width in
+            re.findall(r'K\((\w+), "([^"]*)", "([^"]*)", (\d+)\)', block('HALO_KEY_GLYPH_LIST'))]
+    spanish = [(name, wide, int(width)) for name, wide, width in
+               re.findall(r'K\((\w+), "([^"]*)", (\d+)\)', block('HALO_KEY_GLYPH_LIST_ES'))]
+    return keys, spanish
+
+
+def fitted_font(draw, label, room, largest, scale):
+    # the label's font: Saira's Medium, at most `largest`, as wide as `room`
+    size = largest
+    while size > 6:
+        font = ImageFont.truetype(os.path.join(FONTS, 'SairaSemiCondensed-Medium.ttf'), size * scale)
+        if draw.textlength(label, font=font) <= room * scale:
+            return font
+        size -= 1
+    return ImageFont.truetype(os.path.join(FONTS, 'SairaSemiCondensed-Medium.ttf'), 6 * scale)
+
+
+def keycap_base(width, scale):
+    # a keycap `width` x 32: a dark skirt under a lighter face, rounded, a
+    # faint edge (the keyboard's keys as drawn in the menus' own look)
+    image = Image.new('RGBA', (width * scale, 32 * scale), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle([1.5 * scale, 4 * scale, (width - 1.5) * scale, 30.5 * scale], radius=6 * scale,
+                           fill=KEY_SKIRT + (255,))
+    draw.rounded_rectangle([1.5 * scale, 1.5 * scale, (width - 1.5) * scale, 27 * scale], radius=6 * scale,
+                           fill=KEY_FACE + (255,), outline=(255, 255, 255, alpha(.45)), width=round(1.5 * scale))
+    return image, draw
+
+
+def key_label(draw, label, width, scale):
+    # the label in the face's middle, as large as fits
+    largest = 21 if len(label) == 1 else 16 if len(label) <= 2 else 13
+    font = fitted_font(draw, label, width - 8, largest, scale)
+    left, top, right, bottom = draw.textbbox((0, 0), label, font=font)
+    x = (width * scale - (right - left)) / 2 - left
+    y = (14.5 * scale - (bottom - top) / 2) - top
+    draw.text((x, y), label, font=font, fill=KEY_LABEL + (255,))
+
+
+def key_symbol(draw, symbol, scale):
+    # a symbol on a square keycap's face (its middle at 16, 14.5)
+    s = scale
+    colour = KEY_LABEL + (255,)
+    cx, cy = 16 * s, 14.5 * s
+    line = round(2.2 * s)
+    if symbol in ('up', 'down', 'left', 'right'):
+        dx, dy = DPAD_ARMS[symbol]
+        px, py = -dy, dx
+        tip, base, wide = 7 * s, 5 * s, 7 * s
+        draw.polygon([(cx + dx * tip, cy + dy * tip), (cx - dx * base + px * wide, cy - dy * base + py * wide),
+                      (cx - dx * base - px * wide, cy - dy * base - py * wide)], fill=colour)
+    elif symbol == 'leftright':
+        for dx in (-1, 1):
+            draw.polygon([(cx + dx * 10 * s, cy), (cx + dx * 2 * s, cy - 6 * s), (cx + dx * 2 * s, cy + 6 * s)],
+                         fill=colour)
+    elif symbol == 'space':
+        # the space bar's bracket
+        draw.line([(cx - 9 * s, cy - 3 * s), (cx - 9 * s, cy + 4 * s), (cx + 9 * s, cy + 4 * s), (cx + 9 * s, cy - 3 * s)],
+                  fill=colour, width=line, joint='curve')
+    elif symbol == 'enter':
+        # the return arrow: down from the top right, then left to a point
+        draw.line([(cx + 8 * s, cy - 8 * s), (cx + 8 * s, cy + 3 * s), (cx - 5 * s, cy + 3 * s)], fill=colour,
+                  width=line, joint='curve')
+        draw.polygon([(cx - 10 * s, cy + 3 * s), (cx - 4 * s, cy - 2.5 * s), (cx - 4 * s, cy + 8.5 * s)], fill=colour)
+    elif symbol == 'backspace':
+        # a left-pointing tag with a cross in it
+        points = [(cx - 11 * s, cy), (cx - 5 * s, cy - 7 * s), (cx + 10 * s, cy - 7 * s), (cx + 10 * s, cy + 7 * s),
+                  (cx - 5 * s, cy + 7 * s)]
+        draw.polygon(points, outline=colour, width=round(1.8 * s))
+        draw.line([(cx - 1 * s, cy - 3.5 * s), (cx + 6 * s, cy + 3.5 * s)], fill=colour, width=round(1.8 * s))
+        draw.line([(cx - 1 * s, cy + 3.5 * s), (cx + 6 * s, cy - 3.5 * s)], fill=colour, width=round(1.8 * s))
+    elif symbol == 'shift':
+        # the shift arrow's outline, pointing up
+        points = [(cx, cy - 10 * s), (cx + 9 * s, cy), (cx + 4 * s, cy), (cx + 4 * s, cy + 8 * s),
+                  (cx - 4 * s, cy + 8 * s), (cx - 4 * s, cy), (cx - 9 * s, cy)]
+        draw.polygon(points, outline=colour, width=round(2 * s))
+    elif symbol == 'wasd':
+        # the four keys, small: W over A S D
+        font = ImageFont.truetype(os.path.join(FONTS, 'SairaSemiCondensed-Medium.ttf'), 9 * s)
+        for letter, x, y in (('W', 16, 7.5), ('A', 7, 19), ('S', 16, 19), ('D', 25, 19)):
+            draw.rounded_rectangle([(x - 4.5) * s, (y - 5) * s, (x + 4.5) * s, (y + 5) * s], radius=1.5 * s,
+                                   outline=colour, width=round(1.2 * s))
+            left, top, right, bottom = draw.textbbox((0, 0), letter, font=font)
+            draw.text((x * s - (right - left) / 2 - left, y * s - (bottom - top) / 2 - top), letter, font=font,
+                      fill=colour)
+    else:
+        raise ValueError(symbol)
+
+
+def mouse_glyph(kind, scale):
+    # the mouse, upright, its button pressed lit: a dark body with a light
+    # edge, the buttons split from it, the wheel between them
+    s = scale
+    image = Image.new('RGBA', (32 * s, 32 * s), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    edge = (232, 236, 240, 255)
+    lit = MOUSE_LIT + (255,)
+    x0, x1, y0, y1 = 8 * s, 24 * s, 3 * s, 29 * s
+    split = 13 * s
+    draw.rounded_rectangle([x0, y0, x1, y1], radius=8 * s, fill=(44, 48, 55, 255))
+    if kind in ('lmb', 'rmb'):
+        # (the button's half of the top, clipped to the body's rounding)
+        mask = Image.new('L', image.size, 0)
+        ImageDraw.Draw(mask).rounded_rectangle([x0, y0, x1, y1], radius=8 * s, fill=255)
+        half = Image.new('L', image.size, 0)
+        if kind == 'lmb':
+            ImageDraw.Draw(half).rectangle([x0, y0, 16 * s, split], fill=255)
+        else:
+            ImageDraw.Draw(half).rectangle([16 * s, y0, x1, split], fill=255)
+        from PIL import ImageChops
+        image.paste(Image.new('RGBA', image.size, lit), (0, 0), ImageChops.multiply(mask, half))
+        draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle([x0, y0, x1, y1], radius=8 * s, outline=edge, width=round(1.6 * s))
+    draw.line([(x0, split), (x1, split)], fill=edge, width=round(1.4 * s))
+    draw.line([(16 * s, y0), (16 * s, split)], fill=edge, width=round(1.4 * s))
+    wheel = [14.2 * s, 5.5 * s, 17.8 * s, 11 * s]
+    draw.rounded_rectangle(wheel, radius=1.6 * s, fill=lit if kind in ('mmb', 'wheel') else (44, 48, 55, 255),
+                           outline=edge, width=round(1.1 * s))
+    if kind == 'wheel':
+        # (and which ways it turns: up and down beside the mouse)
+        for dy in (-1, 1):
+            tip = 16 * s + dy * 12 * s
+            draw.polygon([(28 * s, tip), (25 * s, tip - dy * 4 * s), (31 * s, tip - dy * 4 * s)], fill=lit)
+    elif kind == 'mouse4':
+        # (the side button, on its left)
+        draw.rounded_rectangle([5 * s, 15 * s, 9.5 * s, 21 * s], radius=1.5 * s, fill=lit, outline=edge,
+                               width=round(1 * s))
+    elif kind == 'mouse':
+        # (moved: arrows either side)
+        for dx in (-1, 1):
+            tip = 16 * s + dx * 15.5 * s
+            draw.polygon([(tip, 18 * s), (tip - dx * 4 * s, 14 * s), (tip - dx * 4 * s, 22 * s)], fill=lit)
+    return image
+
+
+def key_glyph(compact, scale=4):
+    # a key's square glyph, 32x32 at four times
+    if compact.startswith('@') and compact[1:] in ('lmb', 'rmb', 'mmb', 'wheel', 'mouse4', 'mouse'):
+        return mouse_glyph(compact[1:], scale)
+    image, draw = keycap_base(32, scale)
+    if compact.startswith('@'):
+        key_symbol(draw, compact[1:], scale)
+    else:
+        key_label(draw, compact, 32, scale)
+    return image
+
+
+def key_atlas():
+    scale = 4
+    keys, spanish = key_glyph_lists()
+    image = Image.new('RGBA', (KEY_ATLAS_SIZE, KEY_ATLAS_SIZE), (0, 0, 0, 0))
+    for index, (name, compact, wide, width) in enumerate(keys):
+        cell = key_glyph(compact, scale).resize((32, 32), Image.Resampling.LANCZOS)
+        image.paste(cell, ((index % 8) * 32, (index // 8) * 32))
+    wides = [(wide, width) for name, compact, wide, width in keys if width] + [(wide, width) for name, wide, width in spanish]
+    if KEY_ATLAS_WIDE_ROW * 32 + (len(wides) + 3) // 4 * 32 > KEY_ATLAS_SIZE:
+        raise ValueError('too many wide keycaps for the atlas')
+    for slot, (label, width) in enumerate(wides):
+        if not 32 < width <= 64:
+            raise ValueError('a wide keycap is 33 to 64 pixels across: %s' % label)
+        cap, draw = keycap_base(width, scale)
+        key_label(draw, label, width, scale)
+        cell = cap.resize((width, 32), Image.Resampling.LANCZOS)
+        image.paste(cell, ((slot % 4) * 64, (KEY_ATLAS_WIDE_ROW + slot // 4) * 32))
+    return image
+
+
+# the Xbox controller's buttons (the Halo 3 menus' hints with the Xbox's
+# icons on the desktop): the game's sixteen in its order (A B X Y Black White,
+# the triggers, the D-pad's up down left right, Start, Back, the sticks'
+# clicks), then the D-pad's left and right as one; 32x32 cells, eight to a row
+XBOX_FACE_COLOURS = {'A': (110, 200, 80), 'B': (235, 85, 75), 'X': (80, 150, 235), 'Y': (240, 200, 60)}
+XBOX_GLYPHS = ('A', 'B', 'X', 'Y', 'black', 'white', 'LT', 'RT', 'up', 'down', 'left', 'right', 'start', 'back', 'LS',
+               'RS', 'dpad_lr')
+
+
+def round_button(scale):
+    # the dark round button the PlayStation's glyphs sit on (glyph), empty
+    canvas = 64 * scale
+    image = Image.new('RGBA', (canvas, canvas), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    centre = canvas / 2
+    radius = 29 * scale
+    for step in range(radius, 0, -1):
+        t = step / radius
+        shade = lerp((74, 79, 87), (27, 30, 35), 1 - t * t)
+        draw.ellipse([centre - step, centre - step, centre + step, centre + step], fill=shade + (255,))
+    draw.ellipse([centre - radius, centre - radius, centre + radius, centre + radius],
+                 outline=(255, 255, 255, alpha(.3)), width=2 * scale)
+    return image, draw
+
+
+def xbox_glyph(kind, size=32):
+    scale = 4
+    canvas = 64 * scale
+    centre = canvas / 2
+    if kind in DPAD_ARMS:
+        return glyph(kind, size)
+    if kind == 'dpad_lr':
+        return dpad_left_right(size)
+    if kind in ('LT', 'RT'):
+        return shoulder(kind, size)
+    image, draw = round_button(scale)
+    if kind in XBOX_FACE_COLOURS or kind in ('LS', 'RS'):
+        colour = XBOX_FACE_COLOURS.get(kind, GLYPH_COLOURS['start'])
+        font = ImageFont.truetype(os.path.join(FONTS, 'SairaSemiCondensed-Medium.ttf'),
+                                  (40 if len(kind) == 1 else 28) * scale)
+        left, top, right, bottom = draw.textbbox((0, 0), kind, font=font)
+        draw.text((centre - (right - left) / 2 - left, centre - (bottom - top) / 2 - top), kind, font=font,
+                  fill=colour + (255,))
+    elif kind in ('black', 'white'):
+        fill = (16, 17, 20, 255) if kind == 'black' else (236, 238, 242, 255)
+        draw.ellipse([centre - 17 * scale, centre - 17 * scale, centre + 17 * scale, centre + 17 * scale], fill=fill,
+                     outline=(180, 186, 194, 255), width=2 * scale)
+    elif kind == 'start':
+        # (three lines: a menu)
+        for dy in (-9, 0, 9):
+            draw.rounded_rectangle([centre - 13 * scale, centre + (dy - 2.5) * scale, centre + 13 * scale,
+                                    centre + (dy + 2.5) * scale], radius=2 * scale, fill=GLYPH_COLOURS['start'] + (255,))
+    elif kind == 'back':
+        # (a pointer back, to the left)
+        draw.polygon([(centre - 13 * scale, centre), (centre + 9 * scale, centre - 12 * scale),
+                      (centre + 9 * scale, centre + 12 * scale)], fill=GLYPH_COLOURS['start'] + (255,))
+    else:
+        raise ValueError(kind)
+    return image.resize((size, size), Image.Resampling.LANCZOS)
+
+
+def xbox_atlas():
+    image = Image.new('RGBA', (256, 128), (0, 0, 0, 0))
+    for index, kind in enumerate(XBOX_GLYPHS):
+        image.paste(xbox_glyph(kind), ((index % 8) * 32, (index // 8) * 32))
+    return image
+
+
 def forge_emblem():
     # Forge's emblem over the lobby's map picture (where Halo 3 puts its
     # hammer): a monitor's eye of our own - a pale blue ring round a glowing
@@ -586,6 +853,8 @@ ART = {
     'glyph_l.png': lambda: shoulder('L'),
     'glyph_r.png': lambda: shoulder('R'),
     'glyph_atlas.png': glyph_atlas,
+    'key_atlas.png': key_atlas,
+    'xbox_atlas.png': xbox_atlas,
     'forge_emblem.png': forge_emblem,
     'title_halo.png': title_halo,
     'badge_vita.png': lambda: badge('VITA', (38, 104, 178), False),

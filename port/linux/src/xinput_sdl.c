@@ -35,6 +35,9 @@ drive the controller.
 #include "platform.h"
 #include "sdl_platform.h"
 #include "port_config.h"
+#ifndef HALO_NOT_DESKTOP
+#include "../include/halo_button_icons.h"
+#endif
 
 #include <SDL3/SDL.h>
 #include <math.h>
@@ -541,6 +544,12 @@ static void test_pad_step_begin(void)
 	if (name[0] == '@' && name[1])
 		snprintf(halo_screenshot_name, 64, "%s", name + 1);
 #endif
+#ifndef HALO_NOT_DESKTOP
+	/* ("kb": a key pressed, as far as the button icons on auto go: the
+	keyboard's again after the pad's presses) */
+	if (!strcmp(name, "kb"))
+		platform_input_device_used(_halo_input_device_keyboard);
+#endif
 }
 
 static void test_pad_gamepad(XINPUT_GAMEPAD *pad)
@@ -1000,8 +1009,27 @@ DWORD WINAPI XInputGetState(HANDLE device, PXINPUT_STATE state)
 			keyboard_gamepad(&input, &state->Gamepad);
 		if (count > 0)
 			sdl_gamepad_state(gamepads[0], &state->Gamepad);
+#ifndef HALO_NOT_DESKTOP
+		{
+			/* the tests' scripted pad pressing is a gamepad used (the
+			button icons on auto, halo_button_icons.h): an Xbox pad's, or
+			HALO_TEST_GAMEPAD_TYPE=playstation's */
+			XINPUT_GAMEPAD before = state->Gamepad;
+
+			test_input_gamepad(&state->Gamepad);
+			test_pad_gamepad(&state->Gamepad);
+			if (memcmp(&before, &state->Gamepad, sizeof(before)))
+			{
+				const char *type = getenv("HALO_TEST_GAMEPAD_TYPE");
+
+				platform_input_device_used(type && !strcmp(type, "playstation") ?
+					_halo_input_device_playstation_gamepad : _halo_input_device_xbox_gamepad);
+			}
+		}
+#else
 		test_input_gamepad(&state->Gamepad);
 		test_pad_gamepad(&state->Gamepad);
+#endif
 	}
 	else if (port < count)
 	{

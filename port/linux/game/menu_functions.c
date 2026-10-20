@@ -115,6 +115,12 @@ halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
 #include "game/game_engine.h"
 #include "networking/network_server_manager.h"
 #include "halo_port_limits.h"
+/* (the desktop's button icons: display.button_icons) */
+#if !defined(HALO_VITA) && !defined(HALO_ANDROID)
+#define H3_BUTTON_ICONS 1
+#include "halo_button_icons.h"
+#include <ctype.h>
+#endif
 #include "input/input.h"
 #include "coop_menu.h"
 #include "map_share.h"
@@ -2270,7 +2276,9 @@ static void h3_forge_title_update(struct widget_instance *widget)
 	text_show(named(screen, "toggle"), text);
 }
 
-/* the Forge menu's controls: the Vita's buttons, or the keyboard's */
+/* the Forge menu's controls: the Vita's buttons; on the desktop the
+keyboard's, or the gamepad's the button icons show (display.button_icons:
+an Xbox pad's or a PlayStation's, by SDL's names for its buttons) */
 static void h3_forge_controls_update(struct widget_instance *widget)
 {
 #ifdef HALO_VITA
@@ -2278,6 +2286,28 @@ static void h3_forge_controls_update(struct widget_instance *widget)
 		"Grab, drop: R. Copy: Circle. Delete: Triangle.\nObjects: Square. Holding one: its properties.\n"
 		"Rotate: hold L + right stick; with R: roll.\nL + left stick: distance. L + D-pad right: snap.\n"
 		"Upright: D-pad left. Speed: D-pad right.\nSpartan: Select + D-pad up."));
+#elif defined(H3_BUTTON_ICONS)
+	switch (halo_button_icons_shown())
+	{
+	case _halo_button_icons_xbox:
+		text_show(widget, T("Fly: left stick. Up: A. Down: left stick click.\nFaster: hold LT. Look: right stick.\n"
+			"Grab, drop: RT. Copy: B. Delete: Y.\nObjects: X. Holding one: its properties.\n"
+			"Rotate: hold LT + right stick; with RT: roll.\nLT + left stick: distance. LT + LB: snap.\n"
+			"Upright: RB. Speed: LB.\nSpartan: Back + right stick click."));
+		break;
+	case _halo_button_icons_playstation:
+		text_show(widget, T("Fly: left stick. Up: Cross. Down: L3.\nFaster: hold L2. Look: right stick.\n"
+			"Grab, drop: R2. Copy: Circle. Delete: Triangle.\nObjects: Square. Holding one: its properties.\n"
+			"Rotate: hold L2 + right stick; with R2: roll.\nL2 + left stick: distance. L2 + L1: snap.\n"
+			"Upright: R1. Speed: L1.\nSpartan: Share + R3."));
+		break;
+	default:
+		text_show(widget, T("Fly: W A S D. Up: Space. Down: C.\nFaster: Shift. Look: mouse.\n"
+			"Grab, drop: left button. Copy: F. Delete: Del.\nObjects: E. Holding one, E: its properties.\n"
+			"Rotate: hold right button + mouse; + left: roll.\nDistance: wheel, or W S. Snap: right button + Q.\n"
+			"Upright: X. Speed: Q.\nSpartan: Tab, or F1 + Z."));
+		break;
+	}
 #else
 	text_show(widget, T("Fly: W A S D. Up: Space. Down: C.\nFaster: Shift. Look: mouse.\n"
 		"Grab, drop: left button. Copy: F. Delete: Del.\nObjects: E. Holding one, E: its properties.\n"
@@ -2285,6 +2315,65 @@ static void h3_forge_controls_update(struct widget_instance *widget)
 		"Upright: X. Speed: Q.\nSpartan: Tab, or F1 + Z."));
 #endif
 }
+
+#ifndef H3_BUTTON_ICONS
+#define h3_buttons(text) (text)
+#else
+/* a help line's PlayStation buttons (Cross, Circle, Square, Triangle: the
+menus' A B X Y, as the Vita names them) named as the button icons show
+them on the desktop: the keyboard's keys (Enter, Backspace, E, Tab) or the
+Xbox pad's letters; a PlayStation pad's stay. Whole words, in the player's
+language; the text as it is when nothing changes. Four lines at a time */
+static char const *h3_buttons(char const *text)
+{
+	static char buffers[4][512];
+	static int next;
+	static char const *const playstation[4] = { N_("Cross"), N_("Circle"), N_("Square"), N_("Triangle") };
+	static char const *const keyboard[4] = { N_("Enter"), N_("Backspace"), "E", "Tab" };
+	static char const *const xbox_names[4] = { "A", "B", "X", "Y" };
+	int shown = halo_button_icons_shown();
+	char const *const *names = shown == _halo_button_icons_keyboard ? keyboard : xbox_names;
+	char *out;
+	int length = 0;
+
+	if (!text || shown == _halo_button_icons_playstation)
+		return text;
+	out = buffers[next];
+	next = (next + 1) % 4;
+	while (*text && length < (int)sizeof(buffers[0]) - 1)
+	{
+		/* (a word starts after a letter or a UTF-8 letter's bytes no more) */
+		boolean word_start = length == 0 || !(isalpha((unsigned char)out[length - 1]) || (out[length - 1] & 0x80));
+		int index;
+		int matched = 0;
+
+		for (index = 0; word_start && index < 4 && !matched; index++)
+		{
+			char const *word = T(playstation[index]);
+			size_t word_length = strlen(word);
+			char after = text[word_length];
+
+			if (!strncmp(text, word, word_length) && !isalpha((unsigned char)after) && !(after & 0x80))
+			{
+				char const *name = names == keyboard && index < 2 ? T(names[index]) : names[index];
+				int name_length = (int)strlen(name);
+
+				if (length + name_length >= (int)sizeof(buffers[0]) - 1)
+					break;
+				memcpy(out + length, name, name_length);
+				length += name_length;
+				text += word_length;
+				matched = 1;
+			}
+		}
+		if (!matched)
+			out[length++] = *text++;
+	}
+	out[length] = 0;
+
+	return out;
+}
+#endif
 
 /* a text box's string of its string list */
 static void string_show(struct widget_instance *widget, short index)
@@ -5239,7 +5328,7 @@ static boolean browser_join(struct widget_instance *widget, boolean *widget_dele
 		if (p2p_party_join_warning(entry->players, entry->maximum, warning, sizeof(warning)) &&
 			!party_warning_confirmed(entry->id))
 		{
-			snprintf(menu_functions.status, sizeof(menu_functions.status), "%s %s", warning, T("Cross again: join anyway."));
+			snprintf(menu_functions.status, sizeof(menu_functions.status), "%s %s", warning, h3_buttons(T("Cross again: join anyway.")));
 			return TRUE;
 		}
 	}
@@ -5596,7 +5685,7 @@ static void h3_variant_details(struct forge_store_entry const *entry, boolean in
 	if (entry->damaged)
 	{
 		snprintf(text + length, (size_t)(size - length), "%s", in_fileshare ?
-			T("This file is damaged and can't be used.\nTriangle deletes it.") :
+			h3_buttons(T("This file is damaged and can't be used.\nTriangle deletes it.")) :
 			T("This file is damaged and can't be used.\nDelete it in File Share."));
 		return;
 	}
@@ -6962,7 +7051,7 @@ static void h3_friends_update(struct widget_instance *list)
 
 		text_show(named(screen, "detail_name"), "");
 		text_show(named(screen, "detail_state"), "");
-		text_show(named(screen, "detail_help"), T(helps[item >= 0 && item < H3_FRIENDS_OWN_ROWS ? item : 0]));
+		text_show(named(screen, "detail_help"), h3_buttons(T(helps[item >= 0 && item < H3_FRIENDS_OWN_ROWS ? item : 0])));
 	}
 	text_show(named(screen, "a_label"), h3_friends_first_name(chosen));
 	text_show(named(screen, "x_label"), h3_friends_second_name(chosen));
@@ -7070,7 +7159,7 @@ static void h3_friends_act(struct widget_instance *widget)
 		if (entry->joinable && p2p_party_join_warning(entry->players, entry->maximum, warning, sizeof(warning)) &&
 			!party_warning_confirmed(entry->id))
 		{
-			snprintf(warning + strlen(warning), sizeof(warning) - strlen(warning), " %s", T("Cross again: join anyway."));
+			snprintf(warning + strlen(warning), sizeof(warning) - strlen(warning), " %s", h3_buttons(T("Cross again: join anyway.")));
 			h3_friends_message(warning);
 			break;
 		}
@@ -7081,7 +7170,7 @@ static void h3_friends_act(struct widget_instance *widget)
 		h3_friends_message(T("Waiting for them to accept."));
 		break;
 	default:
-		h3_friends_message(T("Triangle: unblock"));
+		h3_friends_message(h3_buttons(T("Triangle: unblock")));
 		break;
 	}
 }
@@ -7649,14 +7738,14 @@ static void h3_party_update(struct widget_instance *list)
 	p2p_party_status(text, sizeof(text));
 	text_show(named(screen, "party_status"), text);
 	if (invite)
-		snprintf(text, sizeof(text), "%s\n%s", invite->name, T("Cross joins their party: you'll follow them from game to game."));
+		snprintf(text, sizeof(text), "%s\n%s", invite->name, h3_buttons(T("Cross joins their party: you'll follow them from game to game.")));
 	else if (member)
 		snprintf(text, sizeof(text), "%s   %s\n%s", member->name, member->code, member->self ? T("You") :
 			member->is_friend ? T("Your friend") : T("Not on your friends list: shown with their code"));
 	else if (h3_party_items())
 		snprintf(text, sizeof(text), "%s", T("Leave the party: the others stay together."));
 	else
-		snprintf(text, sizeof(text), "%s", T("No party yet: on FRIENDS, Triangle on a friend, INVITE TO PARTY."));
+		snprintf(text, sizeof(text), "%s", h3_buttons(T("No party yet: on FRIENDS, Triangle on a friend, INVITE TO PARTY.")));
 	text_show(named(screen, "detail"), text);
 	text_show(named(screen, "party_message"), h3_party.message[0] &&
 		system_milliseconds() - h3_party.message_time < H3_PARTY_MESSAGE_MILLISECONDS ? h3_party.message : "");
@@ -8146,7 +8235,7 @@ static void h3_players_update(struct widget_instance *list)
 		if (player->machine == h3_players.own_machine)
 			snprintf(text, sizeof(text), "%s\n%s", player->name, T("A player of this PS Vita"));
 		else
-			snprintf(text, sizeof(text), "%s\n%s", player->name, T("Cross: add them as a friend or block them"));
+			snprintf(text, sizeof(text), "%s\n%s", player->name, h3_buttons(T("Cross: add them as a friend or block them")));
 		text_show(named(screen, "detail"), text);
 	}
 	else
@@ -8651,9 +8740,9 @@ static void h3_join_update(struct widget_instance *widget)
 			widget_instance_set_visibility_recursive(found, state == _h3_join_choosing && h3_join.count[plate] > 1);
 		if ((found = named(slot, "slot_right")) != NULL)
 			widget_instance_set_visibility_recursive(found, state == _h3_join_choosing && h3_join.count[plate] > 1);
-		text_show(named(slot, "slot_state"), state == _h3_join_out ? T("Press Cross or START to join.") :
-			state == _h3_join_choosing ? T("Left and right: your profile.\nCross: choose it.") :
-			T("READY. Circle: change the profile."));
+		text_show(named(slot, "slot_state"), state == _h3_join_out ? h3_buttons(T("Press Cross or START to join.")) :
+			state == _h3_join_choosing ? h3_buttons(T("Left and right: your profile.\nCross: choose it.")) :
+			h3_buttons(T("READY. Circle: change the profile.")));
 		snprintf(text, sizeof(text), "%s|%s", state == _h3_join_out ? "out" : state == _h3_join_choosing ? "choosing" : "ready",
 			name);
 		if (strcmp(text, h3_join.said[plate]))
@@ -8664,12 +8753,12 @@ static void h3_join_update(struct widget_instance *widget)
 		}
 	}
 	if (!in)
-		snprintf(text, sizeof(text), "%s", T("Press Cross to join with your profile."));
+		snprintf(text, sizeof(text), "%s", h3_buttons(T("Press Cross to join with your profile.")));
 	else if (ready < in)
-		snprintf(text, sizeof(text), "%s", T("Choose your profile, then Cross."));
+		snprintf(text, sizeof(text), "%s", h3_buttons(T("Choose your profile, then Cross.")));
 	else
-		snprintf(text, sizeof(text), "%s", h3_join.split ? T("Ready: Cross for the map.") :
-			T("Ready: Cross for the games."));
+		snprintf(text, sizeof(text), "%s", h3_join.split ? h3_buttons(T("Ready: Cross for the map.")) :
+			h3_buttons(T("Ready: Cross for the games.")));
 	text_show(named(screen, "next"), text);
 }
 
@@ -8982,7 +9071,7 @@ static void h3_invite_update(struct widget_instance *list)
 	}
 	else
 		text_show(named(screen, "invite_help"), h3_invite.entries[0].invitable ?
-			T("Cross invites a friend into your game.") : p2p_friends_outcome_text(P2P_FRIENDS_NOT_JOINABLE));
+			h3_buttons(T("Cross invites a friend into your game.")) : p2p_friends_outcome_text(P2P_FRIENDS_NOT_JOINABLE));
 	text_show(named(screen, "invite_message"), h3_invite.message[0] &&
 		system_milliseconds() - h3_invite.message_time < H3_FRIENDS_MESSAGE_MILLISECONDS ? h3_invite.message : "");
 	if ((child = named(screen, "a_butn")) != NULL)
@@ -9732,14 +9821,14 @@ static void h3_pregame_update(struct widget_instance *widget)
 		snprintf(text, sizeof(text), "%s", cooperative && game->maximum_players <= 2 ? T("Waiting for your partner") :
 			T("Waiting for other players"));
 	else if (host)
-		snprintf(text, sizeof(text), "%s", T("Ready: Cross starts the game"));
+		snprintf(text, sizeof(text), "%s", h3_buttons(T("Ready: Cross starts the game")));
 	else
 		snprintf(text, sizeof(text), "%s", T("Waiting for the host to start"));
 	text_show(named(screen, "status"), text);
 	/* (the log's line: the countdown once, not each second) */
 	snprintf(line, sizeof(line), "%s", seconds > 0 ? "Starting (the countdown)" : text);
 	text_show(named(screen, "status_sub"), waiting ? (cooperative ? T("Others join from MULTIPLAYER: BROWSE\nGAMES or JOIN WITH CODE.") :
-		T("Others join from BROWSE GAMES or\nJOIN WITH CODE.")) : seconds > 0 ? T("Square: wait longer.") : "");
+		T("Others join from BROWSE GAMES or\nJOIN WITH CODE.")) : seconds > 0 ? h3_buttons(T("Square: wait longer.")) : "");
 	/* (what is played: the mission and its difficulty, or the game type on
 	the map) */
 	if (cooperative)
