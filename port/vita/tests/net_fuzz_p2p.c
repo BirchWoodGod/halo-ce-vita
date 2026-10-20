@@ -58,6 +58,7 @@ void p2p_lobby_update(const unsigned char *token, int player_count, int maximum_
 int p2p_lobby_listed(void) { return 0; }
 int p2p_lobby_browsing(void) { return 0; }
 int p2p_lobby_brokers_wanted(void) { return 0; }
+int p2p_lobby_pending(void) { return 0; }
 int p2p_lobby_hosting_status_locked(char *text, int size)
 {
 	if (size > 0)
