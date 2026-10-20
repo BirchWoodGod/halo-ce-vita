@@ -152,6 +152,12 @@ Claude is the AI that helps build the port.
   Buttons and Touch zones pages, since players looked for it.
 - **Leftovers kept out of Forge**: Bungie's unfinished gravity rifle (it
   has no model and does no damage).
+- **Matchmaking playlists** on the official servers (Slayer, Infection,
+  Snipers, a featured community map): press "find game" and play.
+- **File Share with ratings**: browse, download and rate friends' and the
+  community's maps and game types.
+- **Credits in the game** for the testers and map makers.
+- **Game nights** on the official servers, announced in the Discord.
 
 ### Asked for by testers
 
