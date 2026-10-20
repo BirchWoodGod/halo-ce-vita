@@ -16,7 +16,7 @@ The folder keeps the tree's layout, as the game looks for its files there
 the packs beside them; config.toml, brokers.txt, brokers_crossplay.txt and
 relays.txt beside the executable):
 
-    halo.sh (Linux) / README.txt / licenses/
+    halo.sh (Linux) or halo.bat (Windows) / README.txt / licenses/
     build/linux/halo (or build/windows/halo.exe and SDL3.dll)
     build/<platform>/brokers.txt, brokers_crossplay.txt, relays.txt
     port/vita/app0/menus, lang, packs, shaders.pak, brokers*.txt, relays.txt
@@ -65,6 +65,18 @@ export LD_LIBRARY_PATH="$here/lib${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}"
 cd "$here" && exec "$here/build/linux/halo" "$@"
 """
 
+# (Windows) started from the package's folder, as halo.sh is, so that the
+# game data can sit there too (the data root is also looked for in the
+# current folder: port/linux/README.md "Start the game")
+BATCH = """@echo off
+rem Halo CE Vita {version} (PC build) - double-click this file to play.
+rem It needs your Xbox game data (the folder with maps\\): put it in this
+rem folder or in build\\windows, or the game asks for an Xbox disc image
+rem (.iso/.xiso) the first time.
+cd /d "%~dp0"
+"%~dp0build\\windows\\halo.exe" %*
+"""
+
 README = """Halo CE Vita {version} - PC build ({system})
 https://github.com/BirchWoodGod/halo-ce-vita
 
@@ -79,8 +91,24 @@ image (.iso/.xiso) when it asks: it copies maps/ next to the game. The Halo
 PC (Custom Edition) files are optional: they give the PC menus their
 pictures and Custom Edition maps (README.md, "Halo PC files").
 
-Controls: keyboard and mouse, or a gamepad. The table is in README.md on
-GitHub (PC section). F12 frees the mouse, F11 switches fullscreen.
+Controls: keyboard and mouse, or any gamepad.
+  W A S D / mouse            move / aim
+  left click / right click   fire / grenade (G too)
+  Space or Enter             jump, accept
+  F, Backspace, mouse 4      melee, back
+  E or R                     action, reload
+  Tab or mouse wheel         switch weapon
+  Q / X                      flashlight / switch grenade
+  Left Ctrl or C             crouch
+  Z or middle click          zoom
+  Escape / F1                pause / scoreboard
+  F11 / F12                  fullscreen / free the mouse
+In the menus the mouse moves a pointer: left click picks, right click goes
+back. The full table is in README.md on GitHub (PC section).
+
+Button icons: the prompts and menus show the keys you use (the keyboard's
+icons) and switch to your pad's buttons when you pick one up
+(display.button_icons in config.toml: auto, keyboard, xbox or playstation).
 
 Settings: config.toml beside the game ({exe_folder}). The game writes it
 the first time with every setting and its help.
@@ -198,7 +226,10 @@ def main() -> int:
         if not sdl_dll.is_file():
             fail("build/windows/SDL3.dll is missing: ninja windows")
         shutil.copy2(sdl_dll, exe_folder / "SDL3.dll")
-        readme = README.format(version=version, system="Windows, 32-bit x86", start="build\\windows\\halo.exe",
+        batch = folder / "halo.bat"
+        batch.write_text(BATCH.format(version=version).replace("\n", "\r\n"))
+        readme = README.format(version=version, system="Windows, 32-bit x86",
+                               start="double-click halo.bat (or build\\windows\\halo.exe)",
                                needs="Windows 10 or later. SDL3.dll is beside halo.exe.\n",
                                exe_folder="build\\windows", saves="%APPDATA%\\halo (paths.saves in config.toml)")
     (folder / "README.txt").write_text(readme if platform == "linux" else readme.replace("\n", "\r\n"))
