@@ -234,6 +234,15 @@
 #            AD HOC switches to ad hoc play live (the system's dialog asked
 #            for), BROWSE GAMES opens the ad hoc LAN browser, and SYSTEM LINK
 #            leaves ad hoc play again
+#   pctext   the PC build's text box (port/linux/src/pc_text_entry.c), typed into through
+#            SDL's own events (HALO_TEST_KEYS) and the gamepad's on-screen keyboard: a new
+#            profile's name by the keyboard (the editing keys, a paste, UTF-8 left out, 11 at
+#            most; no key reaching the menu behind) and by a gamepad alone; Escape and Y
+#            cancel (and nothing else); JOIN WITH CODE's code; a locked game's password
+#   pcnoadhoc  the PC build (HALO_TEST_PLATFORM=pc) has no AD HOC: the NETWORK picker
+#            goes SYSTEM LINK, OFFLINE and back up to SYSTEM LINK without it; the connection Ad hoc in
+#            the settings is System Link there, ad hoc play never started; the
+#            campaign lobby's NETWORK has no AD HOC CO-OP (HALO_TEST_PROFILE)
 #   h3adhoccoop  AD HOC CO-OP from the Halo 3 campaign lobby (HALO_TEST_PROFILE;
 #            skipped without), the connection Ad hoc and the join answered
 #            (HALO_ADHOC_TEST=join): START GAME, the joining dialog, then the
@@ -1505,6 +1514,116 @@ for case in $cases; do
 		check_h3 h3lan_empty halo3
 		grep -aq 'menus: the server browser says "No games found on your network"' "$out/h3lan_empty/run.log" ||
 			fail h3lan "with no games the LAN browser did not say none were found" ;;
+	pctext)
+		# (the PC build's text box, port/linux/src/pc_text_entry.c: typed into through SDL's own
+		# events, HALO_TEST_KEYS, and the gamepad's on-screen keyboard, HALO_TEST_PAD; no
+		# HALO_TEST_TEXT_INPUT. Each shot named pctext_* in the case's folder, and in HALO_TEST_SHOTS)
+		# (the keyboard alone: Enter on CAMPAIGN and on CREATE NEW PROFILE; "xo" and an é (left out),
+		# a paste of "okie" and an emoji (left out), Home, Delete, "R", End, ten X's (five fit: 11 at
+		# most), five Backspaces; E and Tab pressed (the menu's X and Y: nothing behind the box);
+		# Enter: Rookie made; Escape on the lobby: back)
+		bs="key:BackSpace key:BackSpace key:BackSpace key:BackSpace key:BackSpace"
+		run pctext_keyboard "$menus_data" 34 "" HALO_MENU_STYLE=halo3 HALO_SCREENSHOT_DIR="$out/pctext_keyboard" \
+			"HALO_TEST_KEYS=wait:6000 key:Return wait:3000 key:Return typing @pctext_keyboard_open text:xo%C3%A9 clip:okie%F0%9F%98%80 key:ctrl+V key:Home key:Delete text:R key:End key:E key:Tab text:XXXXXXXXXX @pctext_keyboard_full $bs @pctext_keyboard_typed key:Return closed wait:4000 key:Escape wait:3000"
+		# (a gamepad alone: CAMPAIGN, CREATE NEW PROFILE; on the grid, from q: SHIFT (the left shoulder),
+		# right three, A: R; SHIFT off, right five, A A: oo; down, left, A: k; up, A: i; left five, A A
+		# B: e (an e too many, deleted); Start: Rookie made)
+		q="150:350"
+		run pctext_pad "$menus_data" 46 "$h3pad a wait:150:3000 a wait:150:2500 white:$q right:$q right:$q right:$q a:$q white:$q right:$q right:$q right:$q right:$q right:$q a:$q a:$q down:$q left:$q a:$q up:$q a:$q left:$q left:$q left:$q left:$q left:$q a:$q a:$q b:$q @pctext_pad_typed start:150:4000 wait:150:3000" \
+			HALO_MENU_STYLE=halo3 HALO_SCREENSHOT_DIR="$out/pctext_pad" HALO_TEST_KEYS=wait:1
+		# (cancels: Escape on the box - not also the menu's back -; Y on the gamepad's - not also the
+		# menu's New Profile)
+		run pctext_cancel "$menus_data" 26 "" HALO_MENU_STYLE=halo3 \
+			"HALO_TEST_KEYS=wait:6000 key:Return wait:3000 key:Return typing text:Nope key:Escape closed wait:3000"
+		run pctext_cancel_pad "$menus_data" 26 "$h3pad a wait:150:3000 a wait:150:2500 a:150:400 y:150:3000 wait:150:2000" \
+			HALO_MENU_STYLE=halo3 HALO_TEST_KEYS=wait:1
+		# (JOIN WITH CODE on the multiplayer lobby, internet play on - its brokers TEST-NET addresses -:
+		# the code typed; a locked game's password in the games browser, typed: JOIN GAME tries it)
+		d="down:150:500"
+		run pctext_code "$menus_data" 30 "$h3mppad $d $d $d $d $d $d a wait:150:3000 a wait:150:3000 $d a wait:150:5000" \
+			HALO_MENU_STYLE=halo3 $h3net HALO_SCREENSHOT_DIR="$out/pctext_code" "HALO_TEST_KEYS=typing text:abcd-efgh @pctext_code key:Return"
+		run pctext_password "$menus_data" 60 "$h3mppad $d $d $d $d $d a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:5000 wait:150:600 a wait:150:4000 a wait:150:3000 $d a wait:150:4000" \
+			HALO_MENU_STYLE=halo3 $h3net HALO_TEST_BROWSER_GAMES=16 HALO_TEST_BROWSER_PC=1 \
+			HALO_SCREENSHOT_DIR="$out/pctext_password" "HALO_TEST_KEYS=typing text:sec text:ret @pctext_password key:Return"
+		for name in pctext_keyboard pctext_pad pctext_cancel pctext_cancel_pad pctext_code pctext_password; do
+			check_h3 $name halo3
+			grep -aE "text entry: |test keys: (text|key|clip)" "$out/$name/run.log" | head -8
+			grep -aq "menus: typing .*: typed\|menus: typing .*: cancelled" "$out/$name/run.log" &&
+				fail pctext "$name: the tests' answers typed in place of the text box"
+		done
+		log=$out/pctext_keyboard/run.log
+		grep -aq 'text entry: "New profile.s name" opened (up to 11 characters)$' "$log" ||
+			fail pctext "keyboard: the box did not open (or opened with the on-screen keyboard after the keyboard)"
+		grep -aq "text entry: pasted" "$log" || fail pctext "keyboard: Ctrl+V pasted nothing"
+		grep -aq 'text entry: "New profile.s name": done: "Rookie"' "$log" ||
+			fail pctext "keyboard: the name was not Rookie (the editing keys, the paste, the 11 at most, the UTF-8)"
+		grep -aq "menus: h3 profiles: created Rookie" "$log" || fail pctext "keyboard: Rookie was not made"
+		grep -aq "ui: screen pc.h3.profdel.screen" "$log" && fail pctext "keyboard: E reached the menu behind the box"
+		[ "$(grep -ac 'text entry: .* opened' "$log")" = 1 ] || fail pctext "keyboard: Tab or Enter reached the menu behind the box"
+		sed -n '/text entry: .*done/,$p' "$log" | grep -a "ui: screen" | tail -1 | grep -q "pc.h3.profiles.screen" ||
+			fail pctext "keyboard: Escape on the lobby did not go back to SELECT PROFILE"
+		log=$out/pctext_pad/run.log
+		grep -aq "text entry: .*the on-screen keyboard shown" "$log" || fail pctext "pad: the on-screen keyboard was not shown"
+		grep -aq 'text entry: "New profile.s name": done: "Rookie"' "$log" && grep -aq "menus: h3 profiles: created Rookie" "$log" ||
+			fail pctext "pad: Rookie was not typed on the on-screen keyboard and made"
+		log=$out/pctext_cancel/run.log
+		grep -aq 'text entry: "New profile.s name": cancelled' "$log" || fail pctext "cancel: Escape did not cancel"
+		grep -aq "menus: h3 profiles: created" "$log" && fail pctext "cancel: a profile was made"
+		sed -n '/text entry: .*cancelled/,$p' "$log" | grep -aq "ui: screen" &&
+			fail pctext "cancel: Escape also went back on the menu behind the box"
+		log=$out/pctext_cancel_pad/run.log
+		grep -aq 'text entry: "New profile.s name": cancelled' "$log" || fail pctext "cancel: Y did not cancel"
+		[ "$(grep -ac 'text entry: .* opened' "$log")" = 1 ] || fail pctext "cancel: Y also pressed New Profile behind the box"
+		grep -aq "menus: h3 profiles: created" "$log" && fail pctext "cancel: Y made a profile"
+		log=$out/pctext_code/run.log
+		grep -aq 'text entry: "Code (ABCD-EFGH)": done: "abcd-efgh"' "$log" && grep -aq "menus: joining the code abcd-efgh" "$log" ||
+			fail pctext "code: the code typed was not joined"
+		log=$out/pctext_password/run.log
+		grep -aq 'text entry: "Password": done (a password of 6 characters)' "$log" || fail pctext "password: not typed"
+		grep -aq "secret" "$log" && fail pctext "password: the password is in the log"
+		grep -aq "menus: the public game Test game 02 is no longer listed" "$log" ||
+			fail pctext "password: JOIN GAME did not try the game with the password typed"
+		if [ -n "${HALO_TEST_SHOTS:-}" ]; then
+			for shot in "$out"/pctext_*/pctext_*.bmp; do
+				[ -s "$shot" ] && cp "$shot" "$HALO_TEST_SHOTS/"
+			done
+		fi ;;
+	pcnoadhoc)
+		# (the PC build, HALO_TEST_PLATFORM=pc: no AD HOC - the PS Vitas' own -, the owner, Oct 20
+		# 2026. NETWORK: the picker on SYSTEM LINK, down, A: OFFLINE, the next row; NETWORK, up, A:
+		# SYSTEM LINK again (a Vita's: AD HOC); ONLINE never chosen, the brokers TEST-NET addresses all
+		# the same. With the connection Ad hoc in the settings (HALO_NET_ADHOC, HALO_VITA_NETWORK=adhoc):
+		# SYSTEM LINK, said in the log. The campaign lobby's NETWORK: LOCAL, ONLINE CO-OP, SYSTEM LINK
+		# CO-OP and round to LOCAL, no AD HOC CO-OP)
+		run pcnoadhoc "$menus_data" 34 "$h3mppad a wait:150:2500 @pcnoadhoc_picker down:150:600 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:3000" \
+			HALO_MENU_STYLE=halo3 HALO_TEST_PLATFORM=pc HALO_SCREENSHOT_DIR="$out/pcnoadhoc" $h3net HALO_NET_ONLINE=false
+		run pcnoadhoc_setting "$menus_data" 20 "$h3mppad" HALO_MENU_STYLE=halo3 HALO_TEST_PLATFORM=pc HALO_NET_ADHOC=true \
+			HALO_VITA_NETWORK=adhoc $h3net HALO_NET_ONLINE=false
+		check_h3 pcnoadhoc halo3
+		log=$out/pcnoadhoc/run.log
+		grep -a "menus: h3 mp: network" "$log"
+		[ "$(grep -a "menus: h3 mp: network" "$log" | sed 's/.*network //' | tr '\n' ' ')" = "OFFLINE SYSTEM LINK " ] ||
+			fail pcnoadhoc "NETWORK did not go SYSTEM LINK, OFFLINE and up to SYSTEM LINK (AD HOC offered?)"
+		grep -aq "NETWORK: AD HOC\|network: switching from .* to Ad hoc" "$log" && fail pcnoadhoc "AD HOC was offered on the PC build"
+		[ -s "$out/pcnoadhoc/pcnoadhoc_picker.bmp" ] && [ -n "${HALO_TEST_SHOTS:-}" ] && cp "$out/pcnoadhoc/pcnoadhoc_picker.bmp" "$HALO_TEST_SHOTS/"
+		check_h3 pcnoadhoc_setting halo3
+		log=$out/pcnoadhoc_setting/run.log
+		grep -aq "menus: h3 mp lobby: NETWORK: SYSTEM LINK" "$log" || fail pcnoadhoc "the connection Ad hoc did not open the lobby on SYSTEM LINK"
+		grep -aq "network: Ad hoc is the PS Vitas' own: Same Wi-Fi (System Link) on this PC" "$log" ||
+			fail pcnoadhoc "the setting's Ad hoc was not said to be System Link here"
+		grep -aq "ad hoc: on\|network: Ad hoc (the connection" "$log" && fail pcnoadhoc "ad hoc play started on the PC build"
+		if [ -r "${HALO_TEST_PROFILE:-}" ]; then
+			# (CAMPAIGN, the profile; the lobby: up to NETWORK, A; down three, A: round to LOCAL past
+			# SYSTEM LINK CO-OP, the last; a Vita's would be AD HOC CO-OP)
+			profile_from=$HALO_TEST_PROFILE run pcnoadhoc_campaign "$menus_data" 34 "wait:150:3000 a wait:150:3000 a wait:150:3000 up:150:600 a wait:150:2500 down:150:600 down:150:600 down:150:600 a wait:150:3000" \
+				HALO_MENU_STYLE=halo3 HALO_TEST_PLATFORM=pc $h3net HALO_NET_ONLINE=false
+			check_h3 pcnoadhoc_campaign halo3
+			log=$out/pcnoadhoc_campaign/run.log
+			grep -a "menus: h3 campaign: network" "$log" | tail -1 | grep -q "network LOCAL" ||
+				fail pcnoadhoc "the campaign's NETWORK, three down from LOCAL, was not LOCAL again (AD HOC CO-OP offered?)"
+		else
+			echo "SKIP (pcnoadhoc): no HALO_TEST_PROFILE: the campaign lobby's NETWORK"
+		fi ;;
 	h3adhoc)
 		# (the connection Ad hoc: BROWSE GAMES, the joining dialog, joined: the profile (A joins,
 		# A the profile, A), the LAN browser)

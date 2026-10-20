@@ -455,6 +455,22 @@ void player_control_aim_test_command(
 	{
 		player_control_aim_assist_log();
 	}
+	else if (!strcmp(word, "angles"))
+	{
+		/* (the first local player's facing, in degrees, and on the
+		desktop whether the mouse aims: run_mouse_look_test.sh) */
+		struct player_control *control = player_control_get(0);
+
+		platform_log("aim test: angles %.3f %.3f", (double)RADIANS_TO_DEGREES(control->desired_angles.yaw),
+			(double)RADIANS_TO_DEGREES(control->desired_angles.pitch));
+#if !defined(HALO_VITA) && !defined(HALO_ANDROID)
+		{
+			void platform_mouse_state_log(void);
+
+			platform_mouse_state_log();
+		}
+#endif
+	}
 	else if (!strcmp(word, "face"))
 	{
 		long player_index = local_player_get_player_index(0);

@@ -2088,3 +2088,9 @@
 "A ban keeps their PS Vita or PC out of your games" = "Un veto deja su PS Vita o PC fuera de tus partidas"
 "Cross: kick  Triangle: ban  " = "Cruz: expulsar  Triángulo: vetar  "
 "In your game" = "En tu partida"
+
+# ---------- the PC build's text box (pc_text_entry_overlay.c, Oct 20 2026):
+# its on-screen keyboard's keys and the hints of its strip
+"SPACE" = "ESPACIO"
+"DONE" = "LISTO"
+"Paste" = "Pegar"

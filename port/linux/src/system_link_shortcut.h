@@ -139,8 +139,10 @@ game fills halo_text_input_title, _text (the text to start from),
 _maximum and _password and sets halo_text_input_state to REQUESTED; the
 Vita's host opens the system's keyboard on it (vita_ime.c), the game
 getting no buttons meanwhile, and answers DONE (the text typed in
-halo_text_input_text, printable ASCII) or CANCELLED. Elsewhere the game
-answers itself (HALO_TEST_TEXT_INPUT) */
+halo_text_input_text, printable ASCII) or CANCELLED. Elsewhere the PC
+build's text box answers the same way (pc_text_entry.h: the keyboard, or an
+on-screen keyboard for a gamepad); a test build's HALO_TEST_TEXT_INPUT
+answers in its place */
 enum
 {
 	HALO_TEXT_INPUT_IDLE,

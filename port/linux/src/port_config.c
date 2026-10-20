@@ -297,7 +297,8 @@ static const struct config_setting config_settings[] =
 		"Ad hoc play: system link with the machines of this machine's ad hoc\n"
 		"group (the Vita's wireless group without a router, joined from its\n"
 		"settings panel), carried as internet play carries it, with or without\n"
-		"network.online; nothing goes to the internet." },
+		"network.online; nothing goes to the internet. The PS Vitas' own: a PC\n"
+		"build ignores it and plays System Link." },
 	{ "network.host_public", _config_boolean, "true", "HALO_NET_HOST_PUBLIC", _environment_value, _platform_all,
 		"Whether a game this machine hosts for internet play is public (listed in\n"
 		"everyone's server browser: anyone can find and join it) or, false,\n"
@@ -1673,9 +1674,45 @@ int config_set_override(const char *name, const char *text)
 
 /* ---------- public code */
 
+/* Ad hoc play is the PS Vitas' own (their wireless group with no router:
+p2p_adhoc.c); the PC build ("Vita+": network_wire_this_platform's
+NETWORK_PLATFORM_VITA_PC, which this mirrors) has none - the owner, Oct 20
+2026 - and plays System Link in its place. A test build stands in for a
+Vita with HALO_TEST_PLATFORM=vita (the tests' default: test_out.sh) */
+int config_adhoc_offered(void)
+{
+#if defined(HALO_VITA) || defined(HALO_DEDICATED_SERVER)
+	return 1;
+#else
+#ifndef HALO_RELEASE
+	const char *test = getenv("HALO_TEST_PLATFORM");
+
+	if (test && !strcmp(test, "vita"))
+		return 1;
+#endif
+	return 0;
+#endif
+}
+
 int config_boolean(const char *name)
 {
-	return config_value(name, _config_boolean)->boolean;
+	int value = config_value(name, _config_boolean)->boolean;
+
+	/* (network.adhoc on a PC: off, whatever config.toml, the environment or
+	a switch says; said once) */
+	if (value && !strcmp(name, "network.adhoc") && !config_adhoc_offered())
+	{
+		static int said;
+
+		if (!said)
+		{
+			said = 1;
+			platform_log("network: ad hoc play is the PS Vitas' own; this PC plays System Link instead (network.adhoc "
+				"ignored)");
+		}
+		return 0;
+	}
+	return value;
 }
 
 long config_integer(const char *name)

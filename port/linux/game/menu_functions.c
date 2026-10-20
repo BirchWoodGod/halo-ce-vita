@@ -70,7 +70,9 @@ internet play with:
   when the Vita is not in it ("port h3 adhoc ...").
 
 Text is typed on the Vita's system keyboard (system_link_shortcut.h
-halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
+halo_text_input_*, vita_settings.c), and on the PC build in its own text
+box (port/linux/src/pc_text_entry.c: the keyboard, or an on-screen keyboard
+for a gamepad); a test build's HALO_TEST_TEXT_INPUT answers in its place,
 "|" between the answers ("!" cancels one), for the automated tests.
 */
 
@@ -104,6 +106,7 @@ halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
 #include "custom_edition_maps.h"
 #include "map_checks.h"
 #include "../src/port_config.h"
+#include "../src/pc_text_entry.h"
 #include "camera/observer.h"
 #include "../src/forge_store.h"
 #include "scene_packs.h"
@@ -1392,18 +1395,26 @@ static void h3_campaign_update(struct widget_instance *widget)
 /* a picker's list (the missions, the difficulties): the first count items
 shown (the levels not open yet hidden), the picture's frame and the
 description's string following the focused one */
-static void h3_pick_update(struct widget_instance *list, long count, char const *picture, char const *description)
+static void h3_pick_update(struct widget_instance *list, long count, long hidden, char const *picture,
+	char const *description)
 {
 	struct widget_instance *screen = screen_of(list);
 	struct widget_instance *child, *found;
-	long index = 0, focused = 0;
+	long index = 0, focused = 0, row = 0;
+	/* (the rows shown one under another: one left out, the next take its
+	place, from the first two's spacing) */
+	short top = list->child ? list->child->vertical_offset : 0;
+	short step = list->child && list->child->next ? list->child->next->vertical_offset - top : 0;
 
 	for (child = list->child; child; child = child->next, index++)
 	{
-		boolean shown = index < count;
+		boolean shown = index < count && index != hidden;
 
 		widget_instance_set_visibility_recursive(child, shown);
 		child->disabled = !shown;
+		if (hidden != NONE && shown && step > 0)
+			child->vertical_offset = (short)(top + step * row);
+		row += shown;
 		if (child == list->focused_child)
 			focused = index;
 	}
@@ -2443,7 +2454,7 @@ static void h3_forge_controls_update(struct widget_instance *widget)
 #else
 /* a help line's PlayStation buttons (Cross, Circle, Square, Triangle: the
 menus' A B X Y, as the Vita names them) named as the button icons show
-them on the desktop: the keyboard's keys (Enter, Backspace, E, Tab) or the
+them on the desktop: the keyboard's keys (Enter, Esc, E, Tab) or the
 Xbox pad's letters; a PlayStation pad's stay. Whole words, in the player's
 language; the text as it is when nothing changes. Four lines at a time */
 static char const *h3_buttons(char const *text)
@@ -2451,7 +2462,7 @@ static char const *h3_buttons(char const *text)
 	static char buffers[4][512];
 	static int next;
 	static char const *const playstation[4] = { N_("Cross"), N_("Circle"), N_("Square"), N_("Triangle") };
-	static char const *const keyboard[4] = { N_("Enter"), N_("Backspace"), "E", "Tab" };
+	static char const *const keyboard[4] = { N_("Enter"), "Esc", "E", "Tab" };
 	static char const *const xbox_names[4] = { "A", "B", "X", "Y" };
 	int shown = halo_button_icons_shown();
 	char const *const *names = shown == _halo_button_icons_keyboard ? keyboard : xbox_names;
@@ -2477,7 +2488,7 @@ static char const *h3_buttons(char const *text)
 
 			if (!strncmp(text, word, word_length) && !isalpha((unsigned char)after) && !(after & 0x80))
 			{
-				char const *name = names == keyboard && index < 2 ? T(names[index]) : names[index];
+				char const *name = names == keyboard && index < 1 ? T(names[index]) : names[index];
 				int name_length = (int)strlen(name);
 
 				if (length + name_length >= (int)sizeof(buffers[0]) - 1)
@@ -3219,6 +3230,19 @@ static boolean h3_mp_network_set(struct widget_instance *widget)
 
 /* ---- typing */
 
+#if !defined(HALO_VITA) && !defined(HALO_RELEASE)
+/* (test builds) a scripted run's presses (HALO_TEST_PAD) with neither the
+answers (HALO_TEST_TEXT_INPUT) nor typing of its own (HALO_TEST_KEYS): no
+one to type in the text box, so none is asked for - typing cancelled, a
+name not asked (typing_available) - as before the PC build had one */
+static boolean typing_scripted_without_answers(void)
+{
+	char const *pad = getenv("HALO_TEST_PAD");
+
+	return pad && pad[0] && !getenv("HALO_TEST_TEXT_INPUT") && !getenv("HALO_TEST_KEYS");
+}
+#endif
+
 static void typing_begin(short typing, char const *title, char const *text, int maximum, boolean password)
 {
 	menu_functions.typing = typing;
@@ -3230,28 +3254,37 @@ static void typing_begin(short typing, char const *title, char const *text, int 
 	__atomic_store_n(&halo_text_input_state, HALO_TEXT_INPUT_REQUESTED, __ATOMIC_RELEASE);
 #else
 	{
-		/* (HALO_TEST_TEXT_INPUT: the next answer, "!" a cancel; none, or a
-		release build: cancelled) */
-		static int answered;
+		/* (tests, never in a release build: HALO_TEST_TEXT_INPUT, the next
+		answer, "!" a cancel, cancelled once they are all given) */
 #ifndef HALO_RELEASE
-		char const *answers = getenv("HALO_TEST_TEXT_INPUT");
+		char const *answers = typing_scripted_without_answers() ? "" : getenv("HALO_TEST_TEXT_INPUT");
 #else
 		char const *answers = NULL;
 #endif
+		static int answered;
 		int index = 0;
 		char answer[HALO_TEXT_INPUT_SIZE];
 		int length = 0;
 
-		while (answers && *answers && index < answered)
+		/* the PC build's own text box, as the Vita's system keyboard
+		(port/linux/src/pc_text_entry.c, drawn by pc_text_entry_overlay.c):
+		every PC build, a release one too, types there */
+		if (!answers)
+		{
+			pc_text_entry_request();
+			platform_log("menus: typing \"%s\": the text box asked for", title);
+			return;
+		}
+		while (*answers && index < answered)
 		{
 			if (*answers++ == '|')
 				index++;
 		}
-		while (answers && *answers && *answers != '|' && length < (int)sizeof(answer) - 1)
+		while (*answers && *answers != '|' && length < (int)sizeof(answer) - 1)
 			answer[length++] = *answers++;
 		answer[length] = 0;
 		answered++;
-		if (answers && (length || *answers == '|') && strcmp(answer, "!"))
+		if ((length || *answers == '|') && strcmp(answer, "!"))
 		{
 			snprintf(halo_text_input_text, sizeof(halo_text_input_text), "%s", answer);
 			__atomic_store_n(&halo_text_input_state, HALO_TEXT_INPUT_DONE, __ATOMIC_RELEASE);
@@ -5844,16 +5877,15 @@ static struct
 	char said[192];
 } h3_fileshare;
 
-/* whether text can be typed: the Vita's keyboard, or the tests' answers
-(HALO_TEST_TEXT_INPUT); elsewhere a name is not asked for */
+/* whether text can be typed: the Vita's keyboard, the PC build's text box
+(pc_text_entry.c), the tests' answers (HALO_TEST_TEXT_INPUT): yes, but for
+a test build's scripted run with no one to type */
 static boolean typing_available(void)
 {
-#ifdef HALO_VITA
-	return TRUE;
-#elif !defined(HALO_RELEASE)
-	return getenv("HALO_TEST_TEXT_INPUT") != NULL;
+#if !defined(HALO_VITA) && !defined(HALO_RELEASE)
+	return !typing_scripted_without_answers();
 #else
-	return FALSE;
+	return TRUE;
 #endif
 }
 
@@ -11202,11 +11234,11 @@ void pc_menu_game_data_function_invoke(
 		h3_campaign_update(widget);
 		break;
 	case _input_h3_missions:
-		h3_pick_update(widget, h3_campaign_unlocked(), "mission_picture", "mission_text");
+		h3_pick_update(widget, h3_campaign_unlocked(), NONE, "mission_picture", "mission_text");
 		h3_missions_why(widget);
 		break;
 	case _input_h3_difficulties:
-		h3_pick_update(widget, 4, "difficulty_emblem", "difficulty_text");
+		h3_pick_update(widget, 4, NONE, "difficulty_emblem", "difficulty_text");
 		break;
 	case _input_h3_mission_title:
 		h3_mission_title_update(widget);
@@ -11231,7 +11263,9 @@ void pc_menu_game_data_function_invoke(
 		h3_mp_lobby_update(widget);
 		break;
 	case _input_h3_networks:
-		h3_pick_update(widget, NUMBER_OF_H3_NETWORKS, "network_picture", "network_text");
+		/* (AD HOC: the PS Vitas' own, none on a PC) */
+		h3_pick_update(widget, NUMBER_OF_H3_NETWORKS, config_adhoc_offered() ? NONE : _h3_network_adhoc, "network_picture",
+			"network_text");
 		break;
 	case _input_h3_maps:
 		if (widget->type == _ui_widget_type_column_list)
@@ -11242,7 +11276,8 @@ void pc_menu_game_data_function_invoke(
 			h3_mp_gametypes_update(widget);
 		break;
 	case _input_h3_campaign_networks:
-		h3_pick_update(widget, NUMBER_OF_H3_CAMPAIGN_NETWORKS, "campnet_picture", "campnet_text");
+		h3_pick_update(widget, NUMBER_OF_H3_CAMPAIGN_NETWORKS, config_adhoc_offered() ? NONE : _h3_campaign_adhoc,
+			"campnet_picture", "campnet_text");
 		break;
 	case _input_h3_profiles:
 		if (widget->type == _ui_widget_type_column_list)

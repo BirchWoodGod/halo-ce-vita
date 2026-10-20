@@ -4,7 +4,8 @@
 # display.button_icons and auto's device; button_icons_test.c), then checks
 # that each key shown is one xinput_sdl.c's keyboard_gamepad really puts on
 # that button (in the menus, no mouse button: the mouse is the pointer
-# there). No SDK needed.
+# there; Escape B in the menus and Start in play, Space Start in the menus
+# and A in play). No SDK needed.
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
@@ -26,11 +27,22 @@ body = source[source.index('static void keyboard_gamepad('):]
 body = body[:body.index('\n}\n')]
 buttons = ['A', 'B', 'X', 'Y', 'BLACK', 'WHITE', 'LEFT_TRIGGER', 'RIGHT_TRIGGER', 'DPAD_UP', 'DPAD_DOWN', 'DPAD_LEFT',
            'DPAD_RIGHT', 'START', 'BACK', 'LEFT_THUMB', 'RIGHT_THUMB']
+# (a key bound only in the menus or only in play: "(k[SDL_SCANCODE_X] && x_in_menus)" or
+# "(k[...] && !x_in_menus)", the part it had when it went down: key_pressed_in_menus)
 bound = {name: set() for name in buttons}
+bound_play = {name: set() for name in buttons}
+bound_menus = {name: set() for name in buttons}
+moded = r'\(k\[(SDL_SCANCODE_\w+)\] && (!?)\w+_in_menus\)'
 for statement in body.split(';'):
     names = [name for name in re.findall(r'XINPUT_GAMEPAD_(\w+)', statement) if name in bound]
     for name in names:
-        bound[name] |= set(re.findall(r'SDL_(?:SCANCODE|BUTTON)_\w+', statement))
+        for token, negated in re.findall(moded, statement):
+            (bound_play if negated else bound_menus)[name].add(token)
+        plain = re.sub(moded, '', statement)
+        bound[name] |= set(re.findall(r'SDL_(?:SCANCODE|BUTTON)_\w+', plain))
+for name in buttons:
+    bound_play[name] |= bound[name]
+    bound_menus[name] |= bound[name]
 keys = {'SPACE': 'SDL_SCANCODE_SPACE', 'ENTER': 'SDL_SCANCODE_RETURN', 'ESC': 'SDL_SCANCODE_ESCAPE',
         'TAB': 'SDL_SCANCODE_TAB', 'BACKSPACE': 'SDL_SCANCODE_BACKSPACE', 'DELETE': 'SDL_SCANCODE_DELETE',
         'CTRL': 'SDL_SCANCODE_LCTRL', 'SHIFT': 'SDL_SCANCODE_LSHIFT', 'F1': 'SDL_SCANCODE_F1',
@@ -53,9 +65,18 @@ for table, menus in (('play_keys', False), ('menu_keys', True)):
             continue
         key = entry.replace('HALO_KEY_', '')
         token = keys.get(key)
-        ok = token in bound[button] and not (menus and token.startswith('SDL_BUTTON_'))
+        ok = token in (bound_menus if menus else bound_play)[button] and not (menus and token.startswith('SDL_BUTTON_'))
         print('%s %s %s: %s is %s' % ('PASS' if ok else 'FAIL', 'menus' if menus else 'play', button, key,
                                       'bound to it' if ok else 'not bound to it in keyboard_gamepad'))
+        failures += not ok
+    # (Escape: Start in play, B in the menus, never both at once; Space: A in play, Start in the
+    # menus - the owner, Oct 20 2026)
+    for token, play_button, menus_button in (('SDL_SCANCODE_ESCAPE', 'START', 'B'), ('SDL_SCANCODE_SPACE', 'A', 'START')):
+        wanted = menus_button if menus else play_button
+        other = play_button if menus else menus_button
+        held = (bound_menus if menus else bound_play)
+        ok = token in held[wanted] and token not in held[other]
+        print('%s %s %s: %s, not %s' % ('PASS' if ok else 'FAIL', 'menus' if menus else 'play', token, wanted, other))
         failures += not ok
     # (the sticks: W A S D on the left one's lines)
     if entries[16] != 'HALO_KEY_WASD' or not all('SDL_SCANCODE_%s' % letter in body for letter in 'WASD'):

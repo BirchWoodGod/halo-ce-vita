@@ -107,6 +107,7 @@ symbols in this file:
 #ifdef HALO_LINUX
 #include "latency_meter.h"
 #include "party_chat_overlay.h"
+#include "pc_text_entry_overlay.h"
 #endif
 
 /* ---------- constants */
@@ -484,6 +485,11 @@ void interface_draw_fullscreen_overlays(
 	latency_meter_draw();
 	/* port: the party's chat (port/linux/game/party_chat_overlay.c) */
 	party_chat_overlay_draw();
+#ifndef HALO_VITA
+	/* port: the PC build's text box, over all of it
+	(port/linux/game/pc_text_entry_overlay.c) */
+	pc_text_entry_overlay_draw();
+#endif
 #endif
 	main_framerate_render();
 	render_debug_profile();

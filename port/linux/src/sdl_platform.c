@@ -17,6 +17,7 @@ and the debug keyboard that the game's console reads.
 #include "xiso.h"
 #include "ce_installer.h"
 #include "posix.h"
+#include "pc_text_entry.h"
 #include "halo_port_limits.h"
 #include "../../vita/include/vita_version.h"
 
@@ -587,11 +588,107 @@ void platform_video_swap(void)
 }
 #endif
 
+/* Mouse aim needs SDL's relative mode: the cursor hidden and held, and
+each motion's distance reported however far the mouse goes. Some SDL builds
+cannot give it: on X11 it rests on XInput2, and the 32-bit SDL the Linux
+package ships was built without it (no 32-bit libXi), so the mode failed
+and the cursor stayed free: the view turned only until the cursor met the
+screen's edge, then not at all (the owner's report, insider.17: "I can't look
+around"). There the pointer is held here instead: hidden, kept in the
+window (SDL's mouse grab, which needs no XInput2) and put back at its centre
+whenever it strays from it, the motions between still counted as they
+come (mouse_emulation_recenter). */
+#ifndef HALO_NOT_DESKTOP
+static BOOL mouse_emulating;
+
+static BOOL mouse_relative_unavailable(void)
+{
+#ifndef HALO_RELEASE
+	/* (tests only) HALO_TEST_NO_RELATIVE_MOUSE=1: as an SDL without the
+	mode (run_mouse_look_test.sh) */
+	const char *test = getenv("HALO_TEST_NO_RELATIVE_MOUSE");
+
+	if (test && atoi(test))
+		return TRUE;
+#endif
+	return FALSE;
+}
+
+static void mouse_emulation(BOOL on)
+{
+	static BOOL said;
+
+	if (on == mouse_emulating)
+		return;
+	mouse_emulating = on;
+	SDL_SetWindowMouseGrab(platform_window, on ? true : false);
+	if (on)
+	{
+		int width, height;
+
+		if (!said)
+		{
+			said = TRUE;
+			platform_log("mouse: SDL's relative mode is not available (%s): the pointer is held at the window's "
+				"centre instead", mouse_relative_unavailable() ? "the tests' HALO_TEST_NO_RELATIVE_MOUSE" : SDL_GetError());
+		}
+		SDL_HideCursor();
+		SDL_GetWindowSize(platform_window, &width, &height);
+		SDL_WarpMouseInWindow(platform_window, width * 0.5f, height * 0.5f);
+	}
+	else
+	{
+		SDL_ShowCursor();
+	}
+}
+
+/* (the event loop, a motion while held) the pointer back at the window's
+centre once it is a quarter of the window from it, before it can reach an
+edge; the warp's own motion SDL reports as none */
+static void mouse_emulation_recenter(float x, float y)
+{
+	int width, height;
+
+	if (!mouse_emulating || SDL_GetKeyboardFocus() != platform_window)
+		return;
+	SDL_GetWindowSize(platform_window, &width, &height);
+	if (SDL_fabsf(x - width * 0.5f) > width * 0.25f || SDL_fabsf(y - height * 0.5f) > height * 0.25f)
+		SDL_WarpMouseInWindow(platform_window, width * 0.5f, height * 0.5f);
+}
+
+void platform_mouse_capture(BOOL capture)
+{
+	if (!platform_window)
+		return;
+	if (!capture)
+	{
+		mouse_emulation(FALSE);
+		SDL_SetWindowRelativeMouseMode(platform_window, false);
+		return;
+	}
+	/* (set again, not left as it was: SDL tries the mode only when the
+	window has the keyboard's focus, and keeps asking for it when it did
+	not get it - the window takes the focus later - without saying it
+	failed; this is called again as the focus comes) */
+	SDL_SetWindowRelativeMouseMode(platform_window, false);
+	if (mouse_relative_unavailable() ||
+		(!SDL_SetWindowRelativeMouseMode(platform_window, true) && SDL_GetKeyboardFocus() == platform_window))
+	{
+		SDL_SetWindowRelativeMouseMode(platform_window, false);
+		mouse_emulation(TRUE);
+	}
+	else
+	{
+		mouse_emulation(FALSE);
+	}
+}
+#else
 void platform_mouse_capture(BOOL capture)
 {
 	if (platform_window)
 		SDL_SetWindowRelativeMouseMode(platform_window, capture ? true : false);
 }
+#endif
 
 /* ---------- keyboard translation */
 
@@ -1030,6 +1127,197 @@ static void platform_show_pending_message(void)
 #endif
 }
 
+/* ---------- the text box (pc_text_entry.h) */
+
+#ifndef HALO_VITA
+/* the keys the text box took, kept from the game until they are let go
+(their repeats too: the Enter that typed a name must not also press A on
+the menu behind it) */
+static unsigned char keys_taken[SDL_SCANCODE_COUNT];
+
+/* (under input_lock, the event loop) a key pressed while the text box is
+open: its editing keys handed to it, nothing to the game; TRUE when taken */
+static BOOL text_entry_key(const SDL_KeyboardEvent *key)
+{
+	BOOL control = (key->mod & SDL_KMOD_CTRL) != 0;
+
+	if (key->scancode >= SDL_SCANCODE_COUNT)
+		return FALSE;
+	if (!key->down)
+	{
+		if (!keys_taken[key->scancode])
+			return FALSE;
+		keys_taken[key->scancode] = 0;
+		input_state.keys[key->scancode] = 0;
+		return TRUE;
+	}
+	if (!pc_text_entry_active())
+		return keys_taken[key->scancode] != 0;
+	/* (F11 and F12 stay the window's and the mouse's) */
+	if (key->scancode == SDL_SCANCODE_F11 || key->scancode == SDL_SCANCODE_F12)
+		return FALSE;
+	keys_taken[key->scancode] = 1;
+	switch (key->scancode)
+	{
+	case SDL_SCANCODE_BACKSPACE: pc_text_entry_key(PC_TEXT_KEY_BACKSPACE, key->repeat); break;
+	case SDL_SCANCODE_DELETE: pc_text_entry_key(PC_TEXT_KEY_DELETE, key->repeat); break;
+	case SDL_SCANCODE_LEFT: pc_text_entry_key(PC_TEXT_KEY_LEFT, key->repeat); break;
+	case SDL_SCANCODE_RIGHT: pc_text_entry_key(PC_TEXT_KEY_RIGHT, key->repeat); break;
+	case SDL_SCANCODE_HOME: pc_text_entry_key(PC_TEXT_KEY_HOME, key->repeat); break;
+	case SDL_SCANCODE_END: pc_text_entry_key(PC_TEXT_KEY_END, key->repeat); break;
+	case SDL_SCANCODE_RETURN:
+	case SDL_SCANCODE_KP_ENTER:
+		pc_text_entry_key(PC_TEXT_KEY_ACCEPT, key->repeat);
+		break;
+	case SDL_SCANCODE_ESCAPE: pc_text_entry_key(PC_TEXT_KEY_CANCEL, key->repeat); break;
+	case SDL_SCANCODE_V:
+	case SDL_SCANCODE_INSERT:
+		/* (Ctrl+V, Shift+Insert: the clipboard's text, as typed) */
+		if ((key->scancode == SDL_SCANCODE_V && control) ||
+			(key->scancode == SDL_SCANCODE_INSERT && (key->mod & SDL_KMOD_SHIFT)))
+		{
+			char *clipboard = SDL_GetClipboardText();
+
+			if (clipboard)
+			{
+				platform_log("text entry: pasted %d bytes", (int)strlen(clipboard));
+				pc_text_entry_type(clipboard);
+				SDL_free(clipboard);
+			}
+		}
+		break;
+	default:
+		break;
+	}
+	return TRUE;
+}
+
+/* (the event loop) SDL's text input on while the box is open (its
+events, and an input method's window where the system has one), off
+otherwise */
+static void text_entry_input(void)
+{
+	static BOOL started;
+	BOOL open = pc_text_entry_active();
+
+	if (open == started || !platform_window)
+		return;
+	started = open;
+	if (open)
+		SDL_StartTextInput(platform_window);
+	else
+		SDL_StopTextInput(platform_window);
+}
+
+#ifndef HALO_RELEASE
+/* (tests only, never in a release build) HALO_TEST_KEYS="steps": the
+keyboard's typing for the text box, through the same events a real
+keyboard sends (pushed into SDL's queue for this loop to take), each step
+after the one before it and a pause (TEST_KEYS_PAUSE_MS), separated by
+spaces:
+	typing        waits for the text box to open (then a pause)
+	closed        waits for it to close
+	text:TEXT     SDL_EVENT_TEXT_INPUT's text, %XX a byte (%20 a space,
+	              %C3%A9 an é)
+	key:NAME      a key pressed and let go (platform_test_key: Return,
+	              Escape, BackSpace, Left, Home, ctrl+V ...)
+	clip:TEXT     the clipboard's text (%XX as text:)
+	wait:MS       a pause
+	@NAME         the next frame saved as NAME.bmp (HALO_SCREENSHOT_DIR)
+halo.log says each step as it is taken ("test keys: ..."). */
+#define TEST_KEYS_PAUSE_MS 250
+
+BOOL platform_test_key(const char *name);
+
+static void test_keys_decode(char *out, int size, const char *text)
+{
+	int length = 0;
+
+	while (*text && length < size - 1)
+	{
+		unsigned int byte;
+
+		if (text[0] == '%' && text[1] && text[2] && sscanf(text + 1, "%2x", &byte) == 1)
+		{
+			out[length++] = (char)byte;
+			text += 3;
+		}
+		else
+			out[length++] = *text++;
+	}
+	out[length] = 0;
+}
+
+static void test_keys(void)
+{
+	static int parsed, count, next;
+	static char steps[64][128];
+	/* (the texts pushed: SDL keeps the pointer until the event is taken) */
+	static char texts[64][128];
+	static Uint64 at;
+	Uint64 now = SDL_GetTicks();
+	const char *step;
+
+	if (!parsed)
+	{
+		const char *setting = getenv("HALO_TEST_KEYS");
+		char copy[4096];
+		char *token, *end;
+
+		parsed = 1;
+		if (!setting)
+			return;
+		snprintf(copy, sizeof(copy), "%s", setting);
+		for (token = strtok_r(copy, " \t\r\n", &end); token && count < 64; token = strtok_r(NULL, " \t\r\n", &end))
+			snprintf(steps[count++], sizeof(steps[0]), "%s", token);
+		at = now;
+	}
+	while (next < count && now >= at)
+	{
+		step = steps[next];
+		if (!strcmp(step, "typing") && !pc_text_entry_active())
+			return;
+		if (!strcmp(step, "closed") && pc_text_entry_active())
+			return;
+		platform_log("test keys: %s", step);
+		at = now + TEST_KEYS_PAUSE_MS;
+		if (!strncmp(step, "text:", 5))
+		{
+			SDL_Event event;
+
+			test_keys_decode(texts[next], sizeof(texts[0]), step + 5);
+			memset(&event, 0, sizeof(event));
+			event.type = SDL_EVENT_TEXT_INPUT;
+			event.text.timestamp = SDL_GetTicksNS();
+			event.text.windowID = platform_window ? SDL_GetWindowID(platform_window) : 0;
+			event.text.text = texts[next];
+			SDL_PushEvent(&event);
+		}
+		else if (!strncmp(step, "key:", 4))
+			platform_test_key(step + 4);
+		else if (!strncmp(step, "clip:", 5))
+		{
+			test_keys_decode(texts[next], sizeof(texts[0]), step + 5);
+			if (!SDL_SetClipboardText(texts[next]))
+				platform_log("test keys: the clipboard was not set: %s", SDL_GetError());
+		}
+		else if (!strncmp(step, "wait:", 5))
+			at = now + (Uint64)atoi(step + 5);
+		else if (step[0] == '@' && step[1])
+		{
+			extern char halo_screenshot_name[64];
+
+			snprintf(halo_screenshot_name, 64, "%s", step + 1);
+		}
+		next++;
+		if (next == count)
+			platform_log("test keys: done");
+		return;
+	}
+}
+#endif
+#endif
+
 /* ---------- events */
 
 void platform_pump_events(void)
@@ -1067,17 +1355,42 @@ void platform_pump_events(void)
 #ifndef HALO_NOT_DESKTOP
 	updater_poll(platform_window);
 #endif
+#ifndef HALO_VITA
+#ifndef HALO_RELEASE
+	test_keys();
+#endif
+	text_entry_input();
+#endif
 	pthread_mutex_lock(&input_lock);
 	while (SDL_PollEvent(&event))
 	{
 		switch (event.type)
 		{
+#ifndef HALO_VITA
+		case SDL_EVENT_TEXT_INPUT:
+			/* (the text box's: SDL sends it only while the box has text
+			input on) */
+			if (event.text.text)
+				pc_text_entry_type(event.text.text);
+			break;
+#endif
 		case SDL_EVENT_QUIT:
 			pthread_mutex_unlock(&input_lock);
 			platform_log("window closed");
 			exit(EXIT_SUCCESS);
 		case SDL_EVENT_KEY_DOWN:
 		case SDL_EVENT_KEY_UP:
+#ifndef HALO_VITA
+			/* (the text box open: its keys, none for the game) */
+			if (text_entry_key(&event.key))
+			{
+#ifndef HALO_NOT_DESKTOP
+				if (event.key.down)
+					platform_input_device_used(_halo_input_device_keyboard);
+#endif
+				break;
+			}
+#endif
 			if (event.key.scancode < SDL_SCANCODE_COUNT)
 			{
 				input_state.keys[event.key.scancode] = event.key.down;
@@ -1120,9 +1433,17 @@ void platform_pump_events(void)
 #endif
 			input_state.mouse_dx += event.motion.xrel;
 			input_state.mouse_dy += event.motion.yrel;
+#ifndef HALO_NOT_DESKTOP
+			mouse_emulation_recenter(event.motion.x, event.motion.y);
+#endif
 			break;
 		case SDL_EVENT_MOUSE_BUTTON_DOWN:
 		case SDL_EVENT_MOUSE_BUTTON_UP:
+#ifndef HALO_VITA
+			/* (the text box open: no clicks for the menus behind it) */
+			if (event.button.down && pc_text_entry_active())
+				break;
+#endif
 #ifndef HALO_NOT_DESKTOP
 			if (event.button.down)
 				platform_input_device_used(_halo_input_device_keyboard);
@@ -1148,6 +1469,10 @@ void platform_pump_events(void)
 				input_state.mouse_buttons[event.button.button] = event.button.down;
 			break;
 		case SDL_EVENT_MOUSE_WHEEL:
+#ifndef HALO_VITA
+			if (pc_text_entry_active())
+				break;
+#endif
 #ifndef HALO_NOT_DESKTOP
 			platform_input_device_used(_halo_input_device_keyboard);
 			if (input_state.ui_pointer)
@@ -1236,6 +1561,7 @@ void platform_ui_pointer_set_active(BOOL active)
 	input_state.mouse_wheel = 0.0f;
 	memset(input_state.mouse_buttons, 0, sizeof(input_state.mouse_buttons));
 	pthread_mutex_unlock(&input_lock);
+	platform_log("mouse: the menus' pointer %s", active ? "on" : "off (the mouse aims)");
 	platform_mouse_capture(!active && !input_state.mouse_released);
 	if (active)
 	{
@@ -1272,6 +1598,93 @@ void platform_video_window_size(int *width, int *height)
 }
 
 #endif
+#ifndef HALO_VITA
+/* (main.c's "@aim angles") whether the mouse aims now: the menus' pointer,
+F12's release, SDL's relative mode, the window's focus */
+void platform_mouse_state_log(void)
+{
+	BOOL pointer, released, focused;
+
+	pthread_mutex_lock(&input_lock);
+	pointer = input_state.ui_pointer;
+	released = input_state.mouse_released;
+	focused = input_state.focused;
+	pthread_mutex_unlock(&input_lock);
+#ifndef HALO_NOT_DESKTOP
+	platform_log("mouse: pointer %d released %d relative %d held %d focused %d", (int)pointer, (int)released,
+		platform_window ? (int)SDL_GetWindowRelativeMouseMode(platform_window) : -1, (int)mouse_emulating, (int)focused);
+#else
+	platform_log("mouse: pointer %d released %d relative %d focused %d", (int)pointer, (int)released,
+		platform_window ? (int)SDL_GetWindowRelativeMouseMode(platform_window) : -1, (int)focused);
+#endif
+}
+#endif
+
+#if !defined(HALO_RELEASE) && !defined(HALO_VITA)
+/* (tests only, main.c's "@mouse dx dy") a motion of the mouse pushed into
+SDL's queue, as a real mouse's arrives: platform_pump_events takes it */
+void platform_test_mouse_motion(float dx, float dy)
+{
+	SDL_Event event;
+
+	memset(&event, 0, sizeof(event));
+	event.type = SDL_EVENT_MOUSE_MOTION;
+	event.motion.timestamp = SDL_GetTicksNS();
+	event.motion.windowID = platform_window ? SDL_GetWindowID(platform_window) : 0;
+	event.motion.x = 320.0f;
+	event.motion.y = 240.0f;
+	event.motion.xrel = dx;
+	event.motion.yrel = dy;
+	if (!SDL_PushEvent(&event))
+		platform_log("test mouse: the motion was not queued: %s", SDL_GetError());
+}
+#endif
+
+#if !defined(HALO_RELEASE) && !defined(HALO_VITA)
+/* (tests only: main.c's "@key name", HALO_TEST_KEYS) a key pressed and let
+go, pushed into SDL's queue as the keyboard's own events arrive, for the
+event loop to take: a key by SDL's name ("Escape", "Return", "Left", "A"),
+"ctrl+" or "shift+" before it held with it. FALSE for a name SDL does not
+know */
+BOOL platform_test_key(const char *name)
+{
+	SDL_Event event;
+	SDL_Keymod modifiers = SDL_KMOD_NONE;
+	SDL_Scancode scancode;
+
+	for (;;)
+	{
+		if (!SDL_strncasecmp(name, "ctrl+", 5))
+			modifiers |= SDL_KMOD_LCTRL, name += 5;
+		else if (!SDL_strncasecmp(name, "shift+", 6))
+			modifiers |= SDL_KMOD_LSHIFT, name += 6;
+		else
+			break;
+	}
+	scancode = SDL_GetScancodeFromName(name);
+	if (scancode == SDL_SCANCODE_UNKNOWN)
+	{
+		platform_log("test key: no key \"%s\"", name);
+		return FALSE;
+	}
+	memset(&event, 0, sizeof(event));
+	event.type = SDL_EVENT_KEY_DOWN;
+	event.key.timestamp = SDL_GetTicksNS();
+	event.key.windowID = platform_window ? SDL_GetWindowID(platform_window) : 0;
+	event.key.scancode = scancode;
+	event.key.key = SDL_GetKeyFromScancode(scancode, modifiers, false);
+	event.key.mod = modifiers;
+	event.key.down = true;
+	SDL_PushEvent(&event);
+	event.type = SDL_EVENT_KEY_UP;
+	event.key.down = false;
+	SDL_PushEvent(&event);
+	platform_log("test key: %s%s%s", modifiers & SDL_KMOD_CTRL ? "ctrl+" : "", modifiers & SDL_KMOD_SHIFT ? "shift+" : "",
+		SDL_GetScancodeName(scancode));
+	return TRUE;
+}
+#endif
+
 void platform_input_read(struct platform_input_state *state, BOOL consume_motion)
 {
 	pthread_mutex_lock(&input_lock);

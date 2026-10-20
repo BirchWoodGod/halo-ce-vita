@@ -16,6 +16,9 @@ Settings are named "section.key", as in the file: "display.vsync".
 #include <stddef.h>
 
 int config_boolean(const char *name);
+/* whether this build offers ad hoc play (network.adhoc): the Vitas', not
+the PC build's; network.adhoc is always off where it does not */
+int config_adhoc_offered(void);
 long config_integer(const char *name);
 double config_real(const char *name);
 /* never NULL; "" when unset */

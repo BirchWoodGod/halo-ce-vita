@@ -49,8 +49,8 @@ static const signed char play_glyphs[16] = {
 /* the key shown for each button (and the sticks, 16 and 17), the first of
 those xinput_sdl.c keyboard_gamepad puts on it: in play the mouse's
 buttons fire, throw and zoom; in the menus they are the pointer's, so the
-keys (Enter accepts, Backspace backs out, G the left trigger; the right
-trigger has none). Change these with keyboard_gamepad and README.md's
+keys (Enter accepts, Escape backs out - Backspace too -, Space is Start, G
+the left trigger; the right trigger has none). Change these with keyboard_gamepad and README.md's
 Controls table */
 static const signed char play_keys[18] = {
 	HALO_KEY_SPACE, HALO_KEY_F, HALO_KEY_E, HALO_KEY_TAB, HALO_KEY_X, HALO_KEY_Q,
@@ -58,8 +58,8 @@ static const signed char play_keys[18] = {
 	HALO_KEY_F1, HALO_KEY_CTRL, HALO_KEY_MMB, HALO_KEY_WASD, HALO_KEY_MOUSE,
 };
 static const signed char menu_keys[18] = {
-	HALO_KEY_ENTER, HALO_KEY_BACKSPACE, HALO_KEY_E, HALO_KEY_TAB, HALO_KEY_X, HALO_KEY_Q,
-	HALO_KEY_G, -1, HALO_KEY_UP, HALO_KEY_DOWN, HALO_KEY_LEFT, HALO_KEY_RIGHT, HALO_KEY_ESC,
+	HALO_KEY_ENTER, HALO_KEY_ESC, HALO_KEY_E, HALO_KEY_TAB, HALO_KEY_X, HALO_KEY_Q,
+	HALO_KEY_G, -1, HALO_KEY_UP, HALO_KEY_DOWN, HALO_KEY_LEFT, HALO_KEY_RIGHT, HALO_KEY_SPACE,
 	HALO_KEY_F1, HALO_KEY_CTRL, HALO_KEY_Z, HALO_KEY_WASD, -1,
 };
 
