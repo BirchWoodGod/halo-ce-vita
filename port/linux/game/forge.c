@@ -1,10 +1,11 @@
 /*
 FORGE.C
 
-Forge, version 1: a sandbox in a multiplayer map, as Halo 3's Forge (the
-design: docs/superpowers/specs/2026-10-18-forge-design.md). Nothing here is
-saved or sent over the network yet (phase b), and nothing changes until a
-Forge game is started or the console asks for the monitor.
+Forge: a sandbox in a multiplayer map, as Halo 3's Forge (the design:
+docs/superpowers/specs/2026-10-18-forge-design.md), local or forged together
+by up to 8 players over the network, the host authoritative (forge_net.inc,
+included at the end of this file; its rules forge_net_protocol.h). Nothing
+changes until a Forge game is started or the console asks for the monitor.
 
 The session: the Forge lobby (halo3/forge_lobby.xml, menu_functions.c)
 starts a local game of a multiplayer map in Forge mode (forge_game_start):

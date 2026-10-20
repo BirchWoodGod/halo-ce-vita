@@ -45,7 +45,8 @@ validator.
   objects, as Halo 3's does.
 - Scripting (Halo script) in layouts. A layout is data, never code.
 - Live co-editing (several monitors in one game) before phase (c). Halo 3
-  had it; it waits for the single-player loop to be right.
+  had it; it waits for the single-player loop to be right. *Built Oct 20:
+  "Network Forge as built" below.*
 - Custom Edition / MCC map content in the palette. Retail Xbox maps first;
   CE maps follow the same rules later (they are already loaded and
   validated by `custom_edition_cache.c` and `tag_validate.c`).
@@ -1814,6 +1815,81 @@ placed, 0 skipped), the browser by the pad (BLOCKS, a wall placed).
   two a map, the blue ghost.
 - A network Forge game's joiners load the blocks as the host does only where
   the multiplayer Forge branch calls forge_blocks_load (forge_packs_load).
+
+## Network Forge as built (Oct 20 2026)
+
+Branch `feat/mp-forge-sync` (from insider.15, insider.16 merged). The owner's
+decisions: up to 8 players; the host authoritative (every edit a request the
+host checks, makes and sends on; the first grab wins); each player a monitor
+who can be the Spartan; late joiners get the current layout; the host's map
+variant and packs carry over (a joiner builds them from its own maps, or is
+told what is missing and forges without those objects); an optional
+capability, no network version bump; host-only NEW ROUND, CLEAR AI, ALL AI;
+the host saves its map variant, a joiner a copy; undo per player.
+
+- **Capability** (`forge_net_protocol.h`, `forge_net.inc`): a Forge host says
+  hello to each machine that joins (the Bungie message `_message_server_forge`,
+  type 39, past upstream's: its version, session, packs and map variant's
+  title), again each second; the joiner answers (`_message_client_forge`, 38:
+  its version, capabilities, the packs it can build). A machine that does not
+  answer in 6 s (an older build drops type 39 unread) or answers another version
+  is refused from this game alone ("too old", which an older build says as a
+  failed join), as is a ninth player ("full"). Nothing changes in a game that is
+  not Forge; never on the crossplay wire. The wire contract's G12 lists the two
+  types as ours, sent only by `network_game_client_send_to_server`.
+- **In game**, four distributed kinds of their own (40-43, clear of upstream's
+  19 and 78-86; a build without them drops them): a client's requests (reliable,
+  over its stream only), the host's updates, palette and layout. Each request
+  is checked field by field (`forge_net_request_valid`: op, flags, every float's
+  bits, positions within +-5000, directions unit and square, property and step
+  ranges, the tag below the host's palette), against the sender's replay window
+  (16-bit sequence) and rate buckets (90 requests a second, 12 spawns at once
+  then 4 a second), then by the game (the object there, not a player's unit,
+  not the map's own scenery - nothing would show the others its move -, not
+  held by another, the tag one the host's browser offers, the budget, inside
+  the structure's world). Dropped requests are counted per machine and logged;
+  refusals are codes the client words in its own language.
+- **What the clients see**: the host compares its layout (`forge_placed`) with
+  what it sent each frame: an entry per object (id, tag as the host's palette
+  index, object, holder, placed spot, properties), its removal, and where the
+  objects the netcode does not move are (scenery, machines, controls, light
+  fixtures, the generated building blocks: each client makes its own copy by
+  tag path). Units, vehicles, weapons and equipment are the netcode's (made at
+  the host's index everywhere); a pack's tag index is translated by path on the
+  client (`forge_net_client_tag`, network_objects.c), so packs in another order,
+  or one missing, never make the wrong object. The palette is sent by tag path
+  and group and resolved on the client against its own browser (its allow
+  list).
+- **Late join**: a client that has loaded asks for the state (sync): the
+  palette, the layout as a map variant's bytes (`forge_variant_capture`), read
+  on the client through `forge_file_decode` with its own map expected, each
+  record's id, object and holder, the end; then the changes.
+- **Monitors**: each machine's monitor flies its own camera and tells the host
+  where five times a second; the host tells everyone; others' monitors are drawn
+  as "( O )" and the player's name, their units hidden (and unhurt on the host).
+  An object a client holds is moved by it and its moves sent fifteen times a
+  second; the netcode leaves its place to that client meanwhile.
+- **NEW ROUND** online is a round of its own (the engine's map reset is a local
+  game's): every hold let go, the layout's objects placed again where the editor
+  put them. Host only, as CLEAR AI and ALL AI; a client's menu says so.
+- **Lobby**: the Forge lobby's NETWORK row (LOCAL by default; SYSTEM LINK,
+  ONLINE, AD HOC) makes it live as the multiplayer lobby: its game hosted at
+  once, private by default online, friends, party, codes, INVITE FRIENDS (L) and
+  the browser join it, its players listed (n/8), START FORGE takes everyone in.
+  The settings panel's Forge page has Network for the Halo CE menus' players
+  (the System Link screen's profile, then the game's lobby). Joiners prebuild
+  the host's packs and the map's blocks in the lobby.
+- **Tests**: `run_netns_online_test.sh forge` (two machines: edits both ways,
+  grabs refused both ways, a client's Elite run by the host, undo, junk
+  requests, NEW ROUND, saves), `forge3` (a late joiner given the layout, its
+  object seen by all, leaving while holding), `forgeold` (insider.15 and
+  `HALO_FORGE_NET=0` refused, then playing Slayer), `forgeleave` (the host
+  leaves), `h3forge` (the lobby by the controller), `forgepanel` (the panel's
+  route); `run_net_fuzz_test.sh` target `forge` (checks and libFuzzer).
+- **Open**: the map's own scenery is not editable online; Halo 3's monitor
+  model is a text marker; ONLINE and AD HOC Forge lobbies are not run in netns
+  (the multiplayer lobby's paths, shared); a host changing its packs after a
+  joiner answered is not told to it again.
 
 ## Open questions for the owner
 
