@@ -587,11 +587,107 @@ void platform_video_swap(void)
 }
 #endif
 
+/* Mouse aim needs SDL's relative mode: the cursor hidden and held, and
+each motion's distance reported however far the mouse goes. Some SDL builds
+cannot give it: on X11 it rests on XInput2, and the 32-bit SDL the Linux
+package ships was built without it (no 32-bit libXi), so the mode failed
+and the cursor stayed free: the view turned only until the cursor met the
+screen's edge, then not at all (the owner's report, insider.17: "I can't look
+around"). There the pointer is held here instead: hidden, kept in the
+window (SDL's mouse grab, which needs no XInput2) and put back at its centre
+whenever it strays from it, the motions between still counted as they
+come (mouse_emulation_recenter). */
+#ifndef HALO_NOT_DESKTOP
+static BOOL mouse_emulating;
+
+static BOOL mouse_relative_unavailable(void)
+{
+#ifndef HALO_RELEASE
+	/* (tests only) HALO_TEST_NO_RELATIVE_MOUSE=1: as an SDL without the
+	mode (run_mouse_look_test.sh) */
+	const char *test = getenv("HALO_TEST_NO_RELATIVE_MOUSE");
+
+	if (test && atoi(test))
+		return TRUE;
+#endif
+	return FALSE;
+}
+
+static void mouse_emulation(BOOL on)
+{
+	static BOOL said;
+
+	if (on == mouse_emulating)
+		return;
+	mouse_emulating = on;
+	SDL_SetWindowMouseGrab(platform_window, on ? true : false);
+	if (on)
+	{
+		int width, height;
+
+		if (!said)
+		{
+			said = TRUE;
+			platform_log("mouse: SDL's relative mode is not available (%s): the pointer is held at the window's "
+				"centre instead", mouse_relative_unavailable() ? "the tests' HALO_TEST_NO_RELATIVE_MOUSE" : SDL_GetError());
+		}
+		SDL_HideCursor();
+		SDL_GetWindowSize(platform_window, &width, &height);
+		SDL_WarpMouseInWindow(platform_window, width * 0.5f, height * 0.5f);
+	}
+	else
+	{
+		SDL_ShowCursor();
+	}
+}
+
+/* (the event loop, a motion while held) the pointer back at the window's
+centre once it is a quarter of the window from it, before it can reach an
+edge; the warp's own motion SDL reports as none */
+static void mouse_emulation_recenter(float x, float y)
+{
+	int width, height;
+
+	if (!mouse_emulating || SDL_GetKeyboardFocus() != platform_window)
+		return;
+	SDL_GetWindowSize(platform_window, &width, &height);
+	if (SDL_fabsf(x - width * 0.5f) > width * 0.25f || SDL_fabsf(y - height * 0.5f) > height * 0.25f)
+		SDL_WarpMouseInWindow(platform_window, width * 0.5f, height * 0.5f);
+}
+
+void platform_mouse_capture(BOOL capture)
+{
+	if (!platform_window)
+		return;
+	if (!capture)
+	{
+		mouse_emulation(FALSE);
+		SDL_SetWindowRelativeMouseMode(platform_window, false);
+		return;
+	}
+	/* (set again, not left as it was: SDL tries the mode only when the
+	window has the keyboard's focus, and keeps asking for it when it did
+	not get it - the window takes the focus later - without saying it
+	failed; this is called again as the focus comes) */
+	SDL_SetWindowRelativeMouseMode(platform_window, false);
+	if (mouse_relative_unavailable() ||
+		(!SDL_SetWindowRelativeMouseMode(platform_window, true) && SDL_GetKeyboardFocus() == platform_window))
+	{
+		SDL_SetWindowRelativeMouseMode(platform_window, false);
+		mouse_emulation(TRUE);
+	}
+	else
+	{
+		mouse_emulation(FALSE);
+	}
+}
+#else
 void platform_mouse_capture(BOOL capture)
 {
 	if (platform_window)
 		SDL_SetWindowRelativeMouseMode(platform_window, capture ? true : false);
 }
+#endif
 
 /* ---------- keyboard translation */
 
@@ -1120,6 +1216,9 @@ void platform_pump_events(void)
 #endif
 			input_state.mouse_dx += event.motion.xrel;
 			input_state.mouse_dy += event.motion.yrel;
+#ifndef HALO_NOT_DESKTOP
+			mouse_emulation_recenter(event.motion.x, event.motion.y);
+#endif
 			break;
 		case SDL_EVENT_MOUSE_BUTTON_DOWN:
 		case SDL_EVENT_MOUSE_BUTTON_UP:
@@ -1236,6 +1335,7 @@ void platform_ui_pointer_set_active(BOOL active)
 	input_state.mouse_wheel = 0.0f;
 	memset(input_state.mouse_buttons, 0, sizeof(input_state.mouse_buttons));
 	pthread_mutex_unlock(&input_lock);
+	platform_log("mouse: the menus' pointer %s", active ? "on" : "off (the mouse aims)");
 	platform_mouse_capture(!active && !input_state.mouse_released);
 	if (active)
 	{
@@ -1272,6 +1372,48 @@ void platform_video_window_size(int *width, int *height)
 }
 
 #endif
+#ifndef HALO_VITA
+/* (main.c's "@aim angles") whether the mouse aims now: the menus' pointer,
+F12's release, SDL's relative mode, the window's focus */
+void platform_mouse_state_log(void)
+{
+	BOOL pointer, released, focused;
+
+	pthread_mutex_lock(&input_lock);
+	pointer = input_state.ui_pointer;
+	released = input_state.mouse_released;
+	focused = input_state.focused;
+	pthread_mutex_unlock(&input_lock);
+#ifndef HALO_NOT_DESKTOP
+	platform_log("mouse: pointer %d released %d relative %d held %d focused %d", (int)pointer, (int)released,
+		platform_window ? (int)SDL_GetWindowRelativeMouseMode(platform_window) : -1, (int)mouse_emulating, (int)focused);
+#else
+	platform_log("mouse: pointer %d released %d relative %d focused %d", (int)pointer, (int)released,
+		platform_window ? (int)SDL_GetWindowRelativeMouseMode(platform_window) : -1, (int)focused);
+#endif
+}
+#endif
+
+#if !defined(HALO_RELEASE) && !defined(HALO_VITA)
+/* (tests only, main.c's "@mouse dx dy") a motion of the mouse pushed into
+SDL's queue, as a real mouse's arrives: platform_pump_events takes it */
+void platform_test_mouse_motion(float dx, float dy)
+{
+	SDL_Event event;
+
+	memset(&event, 0, sizeof(event));
+	event.type = SDL_EVENT_MOUSE_MOTION;
+	event.motion.timestamp = SDL_GetTicksNS();
+	event.motion.windowID = platform_window ? SDL_GetWindowID(platform_window) : 0;
+	event.motion.x = 320.0f;
+	event.motion.y = 240.0f;
+	event.motion.xrel = dx;
+	event.motion.yrel = dy;
+	if (!SDL_PushEvent(&event))
+		platform_log("test mouse: the motion was not queued: %s", SDL_GetError());
+}
+#endif
+
 void platform_input_read(struct platform_input_state *state, BOOL consume_motion)
 {
 	pthread_mutex_lock(&input_lock);

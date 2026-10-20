@@ -4622,6 +4622,18 @@ static void main_test_commands_update(
 		run_gyro_assist_test.sh) */
 		else if (!strncmp(commands[index].command, "@aim ", 5))
 			player_control_aim_test_command(commands[index].command + 5);
+#if !defined(HALO_RELEASE) && !defined(HALO_VITA)
+		/* (@mouse dx dy: a motion of the mouse, as SDL reports one, through
+		the desktop build's own event path: sdl_platform.c) */
+		else if (!strncmp(commands[index].command, "@mouse ", 7))
+		{
+			void platform_test_mouse_motion(float dx, float dy);
+			float dx = 0.f, dy = 0.f;
+
+			sscanf(commands[index].command + 7, "%f %f", &dx, &dy);
+			platform_test_mouse_motion(dx, dy);
+		}
+#endif
 		else if (!strcmp(commands[index].command, "@seat"))
 		{
 			struct data_iterator iterator;
