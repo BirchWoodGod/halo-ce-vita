@@ -5068,6 +5068,22 @@ static boolean h3_gametype_same(long a, long b)
 		((unsigned long)a & ~PROFILE_INDEX_FLAGS) == ((unsigned long)b & ~PROFILE_INDEX_FLAGS);
 }
 
+/* whether a game type's file passes its checksum, read as
+playlist_profile_get_from_path reads one (the list's valid bit is the
+enumeration's, kept in the memory unit's map file from an earlier run:
+playlist_profile_get gives Slayer's rules for a file damaged since) */
+static boolean h3_gametype_file_good(long profile_index)
+{
+	char path[MAXIMUM_FILENAME_LENGTH + 1];
+	struct game_variant variant;
+
+	if (!saved_game_file_get_path_to_enclosing_directory(profile_index, path))
+		return FALSE;
+	csstrncat(path, "\\blam.lst", MAXIMUM_FILENAME_LENGTH);
+	path[MAXIMUM_FILENAME_LENGTH] = 0;
+	return playlist_profile_get_from_path(path, &variant);
+}
+
 /* the game types read again (the Xbox's list's), the item chosen on the
 one asked for (focus_index), else the lobby's (the last one used) */
 static void h3_gametypes_read(void)
@@ -5100,7 +5116,8 @@ static void h3_gametypes_read(void)
 			if (builtin && !TEST_FLAG(indices[index], _saved_game_file_index_valid_bit))
 				continue;
 			h3_gametypes.indices[slot] = indices[index];
-			h3_gametypes.damaged[slot] = !TEST_FLAG(indices[index], _saved_game_file_index_valid_bit);
+			h3_gametypes.damaged[slot] = !TEST_FLAG(indices[index], _saved_game_file_index_valid_bit) ||
+				(!builtin && !h3_gametype_file_good(indices[index]));
 			h3_gametypes.names[slot][0] = 0;
 			if (playlist_profile_get_display_name(indices[index], name))
 				h3_utf8(h3_gametypes.names[slot], sizeof(h3_gametypes.names[slot]), name);
