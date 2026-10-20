@@ -2055,3 +2055,9 @@
 "This game is for PS Vitas only" = "Esta partida es solo para PS Vita"
 "Hosted on a PC (Halo CE Vita)" = "Creada en un PC (Halo CE Vita)"
 "Hosted on a PC (Halo CE Vita): OpenCE players can join" = "Creada en un PC (Halo CE Vita): pueden entrar los de OpenCE"
+
+# ---------- the PC build's text box (pc_text_entry_overlay.c, Oct 20 2026):
+# its on-screen keyboard's keys and the hints of its strip
+"SPACE" = "ESPACIO"
+"DONE" = "LISTO"
+"Paste" = "Pegar"

@@ -105,7 +105,10 @@ Controls: keyboard and mouse, or any gamepad.
   F11 / F12                  fullscreen / free the mouse
 In the menus the arrows move, Enter accepts, Escape (or Backspace) goes
 back and Space is the pad's Start; the mouse moves a pointer: left click
-picks, right click goes back. The full table is in README.md on GitHub (PC section).
+picks, right click goes back.
+Typing (a profile's name, a password, a code): type, Enter accepts, Escape
+cancels, Ctrl+V pastes. With a gamepad an on-screen keyboard shows: A types
+the key, B erases, X a space, Start accepts, Y cancels. The full table is in README.md on GitHub (PC section).
 
 Button icons: the prompts and menus show the keys you use (the keyboard's
 icons) and switch to your pad's buttons when you pick one up

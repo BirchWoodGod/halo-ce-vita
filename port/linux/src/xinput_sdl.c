@@ -36,6 +36,7 @@ drive the controller.
 #include "platform.h"
 #include "sdl_platform.h"
 #include "port_config.h"
+#include "pc_text_entry.h"
 #ifndef HALO_NOT_DESKTOP
 #include "../include/halo_button_icons.h"
 #endif
@@ -926,6 +927,82 @@ static void forge_combo_filter(XINPUT_GAMEPAD *pad)
 		pad->wButtons &= (WORD)~XINPUT_GAMEPAD_BACK;
 }
 
+/* merges one controller's state into another's: buttons held on either,
+each analog button and stick as far as either pushes it */
+static void merge_gamepad(XINPUT_GAMEPAD *into, const XINPUT_GAMEPAD *from)
+{
+	int index;
+
+	into->wButtons |= from->wButtons;
+	for (index = 0; index < 8; index++)
+	{
+		if (from->bAnalogButtons[index] > into->bAnalogButtons[index])
+			into->bAnalogButtons[index] = from->bAnalogButtons[index];
+	}
+	if (abs(from->sThumbLX) > abs(into->sThumbLX)) into->sThumbLX = from->sThumbLX;
+	if (abs(from->sThumbLY) > abs(into->sThumbLY)) into->sThumbLY = from->sThumbLY;
+	if (abs(from->sThumbRX) > abs(into->sThumbRX)) into->sThumbRX = from->sThumbRX;
+	if (abs(from->sThumbRY) > abs(into->sThumbRY)) into->sThumbRY = from->sThumbRY;
+}
+
+/* ---------- the text box (pc_text_entry.h) */
+
+#ifndef HALO_VITA
+/* a controller's buttons as the text box's (PC_TEXT_PAD_*), an analog
+button pressed past half way */
+static unsigned int text_entry_buttons(const XINPUT_GAMEPAD *pad)
+{
+	static const struct
+	{
+		WORD digital;
+		unsigned int button;
+	} digital[] =
+	{
+		{ XINPUT_GAMEPAD_DPAD_UP, PC_TEXT_PAD_UP }, { XINPUT_GAMEPAD_DPAD_DOWN, PC_TEXT_PAD_DOWN },
+		{ XINPUT_GAMEPAD_DPAD_LEFT, PC_TEXT_PAD_LEFT }, { XINPUT_GAMEPAD_DPAD_RIGHT, PC_TEXT_PAD_RIGHT },
+		{ XINPUT_GAMEPAD_START, PC_TEXT_PAD_START }, { XINPUT_GAMEPAD_BACK, PC_TEXT_PAD_BACK },
+		{ XINPUT_GAMEPAD_LEFT_THUMB, PC_TEXT_PAD_STICK_CLICKS }, { XINPUT_GAMEPAD_RIGHT_THUMB, PC_TEXT_PAD_STICK_CLICKS },
+	};
+	static const unsigned int analog[8] =
+	{
+		PC_TEXT_PAD_A, PC_TEXT_PAD_B, PC_TEXT_PAD_X, PC_TEXT_PAD_Y, PC_TEXT_PAD_BLACK, PC_TEXT_PAD_WHITE,
+		PC_TEXT_PAD_LEFT_TRIGGER, PC_TEXT_PAD_RIGHT_TRIGGER,
+	};
+	unsigned int buttons = 0;
+	int index;
+
+	for (index = 0; index < (int)(sizeof(digital) / sizeof(digital[0])); index++)
+	{
+		if (pad->wButtons & digital[index].digital)
+			buttons |= digital[index].button;
+	}
+	for (index = 0; index < 8; index++)
+	{
+		if (pad->bAnalogButtons[index] >= 128)
+			buttons |= analog[index];
+	}
+	return buttons;
+}
+
+/* (port 0's read) the text box asked for opened; while it is open the
+gamepads (pads: theirs alone, not the keyboard's) drive its on-screen
+keyboard and the game gets an empty controller, and after it closes, until
+everything that closed it is let go */
+static void text_entry_controller(XINPUT_GAMEPAD *game, const XINPUT_GAMEPAD *pads)
+{
+	Uint64 now = SDL_GetTicks();
+	int gamepad_last = 0;
+
+#ifndef HALO_NOT_DESKTOP
+	gamepad_last = platform_input_device_last() != _halo_input_device_keyboard;
+#endif
+	pc_text_entry_frame((unsigned long)now, gamepad_last);
+	pc_text_entry_pad(text_entry_buttons(pads), pads->sThumbLX, pads->sThumbLY, (unsigned long)now);
+	if (pc_text_entry_holds_pad(text_entry_buttons(game)))
+		memset(game, 0, sizeof(*game));
+}
+#endif
+
 /* ---------- XAPI */
 
 VOID WINAPI XInitDevices(DWORD preallocation_type_count, PXDEVICE_PREALLOC_TYPE preallocation_types)
@@ -1039,20 +1116,25 @@ DWORD WINAPI XInputGetState(HANDLE device, PXINPUT_STATE state)
 		platform_input_read(&input, TRUE);
 		mouse_poll(&input);
 		wheel_update();
+		/* (the gamepads' own, apart: the text box's on-screen keyboard
+		takes them alone) */
+		XINPUT_GAMEPAD pads;
+
+		memset(&pads, 0, sizeof(pads));
 		if (!console_is_active())
 			keyboard_gamepad(&input, &state->Gamepad);
 		if (count > 0)
-			sdl_gamepad_state(gamepads[0], &state->Gamepad);
+			sdl_gamepad_state(gamepads[0], &pads);
 #ifndef HALO_NOT_DESKTOP
 		{
 			/* the tests' scripted pad pressing is a gamepad used (the
 			button icons on auto, halo_button_icons.h): an Xbox pad's, or
 			HALO_TEST_GAMEPAD_TYPE=playstation's */
-			XINPUT_GAMEPAD before = state->Gamepad;
+			XINPUT_GAMEPAD before = pads;
 
-			test_input_gamepad(&state->Gamepad);
-			test_pad_gamepad(&state->Gamepad);
-			if (memcmp(&before, &state->Gamepad, sizeof(before)))
+			test_input_gamepad(&pads);
+			test_pad_gamepad(&pads);
+			if (memcmp(&before, &pads, sizeof(before)))
 			{
 				const char *type = getenv("HALO_TEST_GAMEPAD_TYPE");
 
@@ -1061,13 +1143,30 @@ DWORD WINAPI XInputGetState(HANDLE device, PXINPUT_STATE state)
 			}
 		}
 #else
-		test_input_gamepad(&state->Gamepad);
-		test_pad_gamepad(&state->Gamepad);
+		test_input_gamepad(&pads);
+		test_pad_gamepad(&pads);
+#endif
+		merge_gamepad(&state->Gamepad, &pads);
+#ifndef HALO_VITA
+		{
+			/* (the other gamepads type in the text box too) */
+			int other;
+
+			if (pc_text_entry_active())
+				for (other = 1; other < count; other++)
+					sdl_gamepad_state(gamepads[other], &pads);
+			text_entry_controller(&state->Gamepad, &pads);
+		}
 #endif
 	}
 	else if (port < count)
 	{
 		sdl_gamepad_state(gamepads[port], &state->Gamepad);
+#ifndef HALO_VITA
+		/* (the text box open: nothing for the game from any controller) */
+		if (pc_text_entry_active())
+			memset(&state->Gamepad, 0, sizeof(state->Gamepad));
+#endif
 	}
 	if (port == 0)
 		forge_combo_filter(&state->Gamepad);

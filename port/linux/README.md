@@ -142,6 +142,42 @@ The prompts and the menus show the keys and the mouse buttons of this table
 while you play with the keyboard and the mouse, and a gamepad's buttons
 once you use a gamepad (`display.button_icons` in "Settings").
 
+### Typing
+
+When a menu asks for text (a new profile's name, a password, a game's code,
+a lobby's name, a friend's code, the party chat, a map variant's name), a
+text box opens over the game (`src/pc_text_entry.c`, drawn by
+`game/pc_text_entry_overlay.c`). While it is open, the game gets no keys,
+no clicks and no gamepad buttons.
+
+| Keyboard | |
+| --- | --- |
+| letters, digits, punctuation | type |
+| Backspace, Delete | erase before or after the caret |
+| Left, Right, Home, End | move the caret |
+| Ctrl+V, Shift+Insert | paste |
+| Enter | accept |
+| Escape | cancel |
+
+With a gamepad, the box shows an on-screen keyboard (it shows when the
+gamepad was the last device you used, or when you push a gamepad button):
+
+| Gamepad | |
+| --- | --- |
+| D-pad, left stick | choose a key (hold to repeat) |
+| A | push the key (ABC: capitals, #+=: symbols, SPACE, DELETE, DONE) |
+| B | erase |
+| X | space |
+| left / right shoulder | capitals / symbols |
+| left / right trigger | move the caret |
+| Start | accept |
+| Y | cancel |
+
+The text keeps only the characters that the game's text can show
+(printable ASCII). The game drops other characters (letters with accents,
+emoji). The box shows how many characters you typed and how many the field
+takes; a password shows as stars.
+
 ## Settings
 
 The settings are in `config.toml` next to the executable

@@ -70,7 +70,9 @@ internet play with:
   when the Vita is not in it ("port h3 adhoc ...").
 
 Text is typed on the Vita's system keyboard (system_link_shortcut.h
-halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
+halo_text_input_*, vita_settings.c), and on the PC build in its own text
+box (port/linux/src/pc_text_entry.c: the keyboard, or an on-screen keyboard
+for a gamepad); a test build's HALO_TEST_TEXT_INPUT answers in its place,
 "|" between the answers ("!" cancels one), for the automated tests.
 */
 
@@ -102,6 +104,7 @@ halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
 #include "mod_manager.h"
 #include "custom_edition_maps.h"
 #include "../src/port_config.h"
+#include "../src/pc_text_entry.h"
 #include "camera/observer.h"
 #include "../src/forge_store.h"
 #include "scene_packs.h"
@@ -3086,6 +3089,19 @@ static boolean h3_mp_network_set(struct widget_instance *widget)
 
 /* ---- typing */
 
+#if !defined(HALO_VITA) && !defined(HALO_RELEASE)
+/* (test builds) a scripted run's presses (HALO_TEST_PAD) with neither the
+answers (HALO_TEST_TEXT_INPUT) nor typing of its own (HALO_TEST_KEYS): no
+one to type in the text box, so none is asked for - typing cancelled, a
+name not asked (typing_available) - as before the PC build had one */
+static boolean typing_scripted_without_answers(void)
+{
+	char const *pad = getenv("HALO_TEST_PAD");
+
+	return pad && pad[0] && !getenv("HALO_TEST_TEXT_INPUT") && !getenv("HALO_TEST_KEYS");
+}
+#endif
+
 static void typing_begin(short typing, char const *title, char const *text, int maximum, boolean password)
 {
 	menu_functions.typing = typing;
@@ -3097,28 +3113,37 @@ static void typing_begin(short typing, char const *title, char const *text, int 
 	__atomic_store_n(&halo_text_input_state, HALO_TEXT_INPUT_REQUESTED, __ATOMIC_RELEASE);
 #else
 	{
-		/* (HALO_TEST_TEXT_INPUT: the next answer, "!" a cancel; none, or a
-		release build: cancelled) */
-		static int answered;
+		/* (tests, never in a release build: HALO_TEST_TEXT_INPUT, the next
+		answer, "!" a cancel, cancelled once they are all given) */
 #ifndef HALO_RELEASE
-		char const *answers = getenv("HALO_TEST_TEXT_INPUT");
+		char const *answers = typing_scripted_without_answers() ? "" : getenv("HALO_TEST_TEXT_INPUT");
 #else
 		char const *answers = NULL;
 #endif
+		static int answered;
 		int index = 0;
 		char answer[HALO_TEXT_INPUT_SIZE];
 		int length = 0;
 
-		while (answers && *answers && index < answered)
+		/* the PC build's own text box, as the Vita's system keyboard
+		(port/linux/src/pc_text_entry.c, drawn by pc_text_entry_overlay.c):
+		every PC build, a release one too, types there */
+		if (!answers)
+		{
+			pc_text_entry_request();
+			platform_log("menus: typing \"%s\": the text box asked for", title);
+			return;
+		}
+		while (*answers && index < answered)
 		{
 			if (*answers++ == '|')
 				index++;
 		}
-		while (answers && *answers && *answers != '|' && length < (int)sizeof(answer) - 1)
+		while (*answers && *answers != '|' && length < (int)sizeof(answer) - 1)
 			answer[length++] = *answers++;
 		answer[length] = 0;
 		answered++;
-		if (answers && (length || *answers == '|') && strcmp(answer, "!"))
+		if ((length || *answers == '|') && strcmp(answer, "!"))
 		{
 			snprintf(halo_text_input_text, sizeof(halo_text_input_text), "%s", answer);
 			__atomic_store_n(&halo_text_input_state, HALO_TEXT_INPUT_DONE, __ATOMIC_RELEASE);
@@ -5711,16 +5736,15 @@ static struct
 	char said[192];
 } h3_fileshare;
 
-/* whether text can be typed: the Vita's keyboard, or the tests' answers
-(HALO_TEST_TEXT_INPUT); elsewhere a name is not asked for */
+/* whether text can be typed: the Vita's keyboard, the PC build's text box
+(pc_text_entry.c), the tests' answers (HALO_TEST_TEXT_INPUT): yes, but for
+a test build's scripted run with no one to type */
 static boolean typing_available(void)
 {
-#ifdef HALO_VITA
-	return TRUE;
-#elif !defined(HALO_RELEASE)
-	return getenv("HALO_TEST_TEXT_INPUT") != NULL;
+#if !defined(HALO_VITA) && !defined(HALO_RELEASE)
+	return !typing_scripted_without_answers();
 #else
-	return FALSE;
+	return TRUE;
 #endif
 }
 

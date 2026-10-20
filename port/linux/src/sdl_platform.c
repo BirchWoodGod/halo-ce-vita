@@ -17,6 +17,7 @@ and the debug keyboard that the game's console reads.
 #include "xiso.h"
 #include "ce_installer.h"
 #include "posix.h"
+#include "pc_text_entry.h"
 #include "halo_port_limits.h"
 #include "../../vita/include/vita_version.h"
 
@@ -1126,6 +1127,197 @@ static void platform_show_pending_message(void)
 #endif
 }
 
+/* ---------- the text box (pc_text_entry.h) */
+
+#ifndef HALO_VITA
+/* the keys the text box took, kept from the game until they are let go
+(their repeats too: the Enter that typed a name must not also press A on
+the menu behind it) */
+static unsigned char keys_taken[SDL_SCANCODE_COUNT];
+
+/* (under input_lock, the event loop) a key pressed while the text box is
+open: its editing keys handed to it, nothing to the game; TRUE when taken */
+static BOOL text_entry_key(const SDL_KeyboardEvent *key)
+{
+	BOOL control = (key->mod & SDL_KMOD_CTRL) != 0;
+
+	if (key->scancode >= SDL_SCANCODE_COUNT)
+		return FALSE;
+	if (!key->down)
+	{
+		if (!keys_taken[key->scancode])
+			return FALSE;
+		keys_taken[key->scancode] = 0;
+		input_state.keys[key->scancode] = 0;
+		return TRUE;
+	}
+	if (!pc_text_entry_active())
+		return keys_taken[key->scancode] != 0;
+	/* (F11 and F12 stay the window's and the mouse's) */
+	if (key->scancode == SDL_SCANCODE_F11 || key->scancode == SDL_SCANCODE_F12)
+		return FALSE;
+	keys_taken[key->scancode] = 1;
+	switch (key->scancode)
+	{
+	case SDL_SCANCODE_BACKSPACE: pc_text_entry_key(PC_TEXT_KEY_BACKSPACE, key->repeat); break;
+	case SDL_SCANCODE_DELETE: pc_text_entry_key(PC_TEXT_KEY_DELETE, key->repeat); break;
+	case SDL_SCANCODE_LEFT: pc_text_entry_key(PC_TEXT_KEY_LEFT, key->repeat); break;
+	case SDL_SCANCODE_RIGHT: pc_text_entry_key(PC_TEXT_KEY_RIGHT, key->repeat); break;
+	case SDL_SCANCODE_HOME: pc_text_entry_key(PC_TEXT_KEY_HOME, key->repeat); break;
+	case SDL_SCANCODE_END: pc_text_entry_key(PC_TEXT_KEY_END, key->repeat); break;
+	case SDL_SCANCODE_RETURN:
+	case SDL_SCANCODE_KP_ENTER:
+		pc_text_entry_key(PC_TEXT_KEY_ACCEPT, key->repeat);
+		break;
+	case SDL_SCANCODE_ESCAPE: pc_text_entry_key(PC_TEXT_KEY_CANCEL, key->repeat); break;
+	case SDL_SCANCODE_V:
+	case SDL_SCANCODE_INSERT:
+		/* (Ctrl+V, Shift+Insert: the clipboard's text, as typed) */
+		if ((key->scancode == SDL_SCANCODE_V && control) ||
+			(key->scancode == SDL_SCANCODE_INSERT && (key->mod & SDL_KMOD_SHIFT)))
+		{
+			char *clipboard = SDL_GetClipboardText();
+
+			if (clipboard)
+			{
+				platform_log("text entry: pasted %d bytes", (int)strlen(clipboard));
+				pc_text_entry_type(clipboard);
+				SDL_free(clipboard);
+			}
+		}
+		break;
+	default:
+		break;
+	}
+	return TRUE;
+}
+
+/* (the event loop) SDL's text input on while the box is open (its
+events, and an input method's window where the system has one), off
+otherwise */
+static void text_entry_input(void)
+{
+	static BOOL started;
+	BOOL open = pc_text_entry_active();
+
+	if (open == started || !platform_window)
+		return;
+	started = open;
+	if (open)
+		SDL_StartTextInput(platform_window);
+	else
+		SDL_StopTextInput(platform_window);
+}
+
+#ifndef HALO_RELEASE
+/* (tests only, never in a release build) HALO_TEST_KEYS="steps": the
+keyboard's typing for the text box, through the same events a real
+keyboard sends (pushed into SDL's queue for this loop to take), each step
+after the one before it and a pause (TEST_KEYS_PAUSE_MS), separated by
+spaces:
+	typing        waits for the text box to open (then a pause)
+	closed        waits for it to close
+	text:TEXT     SDL_EVENT_TEXT_INPUT's text, %XX a byte (%20 a space,
+	              %C3%A9 an é)
+	key:NAME      a key pressed and let go (platform_test_key: Return,
+	              Escape, BackSpace, Left, Home, ctrl+V ...)
+	clip:TEXT     the clipboard's text (%XX as text:)
+	wait:MS       a pause
+	@NAME         the next frame saved as NAME.bmp (HALO_SCREENSHOT_DIR)
+halo.log says each step as it is taken ("test keys: ..."). */
+#define TEST_KEYS_PAUSE_MS 250
+
+BOOL platform_test_key(const char *name);
+
+static void test_keys_decode(char *out, int size, const char *text)
+{
+	int length = 0;
+
+	while (*text && length < size - 1)
+	{
+		unsigned int byte;
+
+		if (text[0] == '%' && text[1] && text[2] && sscanf(text + 1, "%2x", &byte) == 1)
+		{
+			out[length++] = (char)byte;
+			text += 3;
+		}
+		else
+			out[length++] = *text++;
+	}
+	out[length] = 0;
+}
+
+static void test_keys(void)
+{
+	static int parsed, count, next;
+	static char steps[64][128];
+	/* (the texts pushed: SDL keeps the pointer until the event is taken) */
+	static char texts[64][128];
+	static Uint64 at;
+	Uint64 now = SDL_GetTicks();
+	const char *step;
+
+	if (!parsed)
+	{
+		const char *setting = getenv("HALO_TEST_KEYS");
+		char copy[4096];
+		char *token, *end;
+
+		parsed = 1;
+		if (!setting)
+			return;
+		snprintf(copy, sizeof(copy), "%s", setting);
+		for (token = strtok_r(copy, " \t\r\n", &end); token && count < 64; token = strtok_r(NULL, " \t\r\n", &end))
+			snprintf(steps[count++], sizeof(steps[0]), "%s", token);
+		at = now;
+	}
+	while (next < count && now >= at)
+	{
+		step = steps[next];
+		if (!strcmp(step, "typing") && !pc_text_entry_active())
+			return;
+		if (!strcmp(step, "closed") && pc_text_entry_active())
+			return;
+		platform_log("test keys: %s", step);
+		at = now + TEST_KEYS_PAUSE_MS;
+		if (!strncmp(step, "text:", 5))
+		{
+			SDL_Event event;
+
+			test_keys_decode(texts[next], sizeof(texts[0]), step + 5);
+			memset(&event, 0, sizeof(event));
+			event.type = SDL_EVENT_TEXT_INPUT;
+			event.text.timestamp = SDL_GetTicksNS();
+			event.text.windowID = platform_window ? SDL_GetWindowID(platform_window) : 0;
+			event.text.text = texts[next];
+			SDL_PushEvent(&event);
+		}
+		else if (!strncmp(step, "key:", 4))
+			platform_test_key(step + 4);
+		else if (!strncmp(step, "clip:", 5))
+		{
+			test_keys_decode(texts[next], sizeof(texts[0]), step + 5);
+			if (!SDL_SetClipboardText(texts[next]))
+				platform_log("test keys: the clipboard was not set: %s", SDL_GetError());
+		}
+		else if (!strncmp(step, "wait:", 5))
+			at = now + (Uint64)atoi(step + 5);
+		else if (step[0] == '@' && step[1])
+		{
+			extern char halo_screenshot_name[64];
+
+			snprintf(halo_screenshot_name, 64, "%s", step + 1);
+		}
+		next++;
+		if (next == count)
+			platform_log("test keys: done");
+		return;
+	}
+}
+#endif
+#endif
+
 /* ---------- events */
 
 void platform_pump_events(void)
@@ -1163,17 +1355,42 @@ void platform_pump_events(void)
 #ifndef HALO_NOT_DESKTOP
 	updater_poll(platform_window);
 #endif
+#ifndef HALO_VITA
+#ifndef HALO_RELEASE
+	test_keys();
+#endif
+	text_entry_input();
+#endif
 	pthread_mutex_lock(&input_lock);
 	while (SDL_PollEvent(&event))
 	{
 		switch (event.type)
 		{
+#ifndef HALO_VITA
+		case SDL_EVENT_TEXT_INPUT:
+			/* (the text box's: SDL sends it only while the box has text
+			input on) */
+			if (event.text.text)
+				pc_text_entry_type(event.text.text);
+			break;
+#endif
 		case SDL_EVENT_QUIT:
 			pthread_mutex_unlock(&input_lock);
 			platform_log("window closed");
 			exit(EXIT_SUCCESS);
 		case SDL_EVENT_KEY_DOWN:
 		case SDL_EVENT_KEY_UP:
+#ifndef HALO_VITA
+			/* (the text box open: its keys, none for the game) */
+			if (text_entry_key(&event.key))
+			{
+#ifndef HALO_NOT_DESKTOP
+				if (event.key.down)
+					platform_input_device_used(_halo_input_device_keyboard);
+#endif
+				break;
+			}
+#endif
 			if (event.key.scancode < SDL_SCANCODE_COUNT)
 			{
 				input_state.keys[event.key.scancode] = event.key.down;
@@ -1222,6 +1439,11 @@ void platform_pump_events(void)
 			break;
 		case SDL_EVENT_MOUSE_BUTTON_DOWN:
 		case SDL_EVENT_MOUSE_BUTTON_UP:
+#ifndef HALO_VITA
+			/* (the text box open: no clicks for the menus behind it) */
+			if (event.button.down && pc_text_entry_active())
+				break;
+#endif
 #ifndef HALO_NOT_DESKTOP
 			if (event.button.down)
 				platform_input_device_used(_halo_input_device_keyboard);
@@ -1247,6 +1469,10 @@ void platform_pump_events(void)
 				input_state.mouse_buttons[event.button.button] = event.button.down;
 			break;
 		case SDL_EVENT_MOUSE_WHEEL:
+#ifndef HALO_VITA
+			if (pc_text_entry_active())
+				break;
+#endif
 #ifndef HALO_NOT_DESKTOP
 			platform_input_device_used(_halo_input_device_keyboard);
 			if (input_state.ui_pointer)
