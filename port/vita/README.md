@@ -19,7 +19,7 @@ Combat Evolved for the Xbox.
 
 ## Installing
 
-1. Install `halo.vpk` with VitaShell. The bubble is called **Halo CE**
+1. Install the release's VPK (`halo-ce-vita-<version>-vita.vpk`; `build/vita/halo.vpk` when you build it) with VitaShell. The bubble is called **Halo CE**
    (title ID `HCEV00001`).
 2. Copy the Xbox game's maps to `ux0:data/haloce-vita/maps/` (the whole
    `maps` folder), and the disc's `default.xbe` to `ux0:data/haloce-vita/`:

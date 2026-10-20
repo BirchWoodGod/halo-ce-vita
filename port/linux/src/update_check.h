@@ -39,6 +39,15 @@ starts on Stable.
 that is not one */
 #define UPDATE_URL_ALL "https://api.github.com/repos/" UPDATE_REPOSITORY "/releases?per_page=6"
 #define UPDATE_URL_STABLE "https://api.github.com/repos/" UPDATE_REPOSITORY "/releases/latest"
+/* a release's files: halo-ce-vita-<version>-vita.vpk (the Vita's updater
+downloads it: vita_update_verify.h), and the PC builds',
+halo-ce-vita-<version> UPDATE_ASSET_PC_SUFFIX (tools/package_pc.py), which a
+PC build names when it finds a newer version (the player downloads it) */
+#if defined(_WIN32)
+#define UPDATE_ASSET_PC_SUFFIX "-pc-windows.zip"
+#else
+#define UPDATE_ASSET_PC_SUFFIX "-pc-linux.tar.gz"
+#endif
 /* the most of a response read: more is refused (six releases with their
 notes are ~60 KB) */
 #define UPDATE_RESPONSE_MAXIMUM (256 * 1024)

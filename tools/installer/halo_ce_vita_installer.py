@@ -2158,7 +2158,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         elif arguments.command == "vpk":
             vpk = arguments.vpk or (find_local_vpks() or [None])[0]
             if not vpk:
-                raise InstallerError("No VPK given and none next to this tool. Download halo.vpk from " +
+                raise InstallerError("No VPK given and none next to this tool. Download halo-ce-vita-<version>-vita.vpk from " +
                                      RELEASES_URL)
             name = upload_vpk(arguments.host, vpk, arguments.port, progress, _console_log)
             _console_log(VPK_INSTRUCTIONS.format(name=name))
@@ -2531,7 +2531,7 @@ class InstallerWindow:
         ("Copy to the Vita", "Required", "Copy to the Vita",
          "Everything gathered goes to %s over VitaShell's FTP." % VITA_GAME_FOLDER),
         ("Install the VPK", "Required for a first install", "Install the VPK",
-         "Copy halo.vpk to the Vita's ux0:data/, then install it with VitaShell."),
+         "Copy the VPK to the Vita's ux0:data/, then install it with VitaShell."),
         ("Done", "", "All done",
          "What was gathered and copied, and what to do next on the Vita."),
     )
@@ -3702,10 +3702,10 @@ class InstallerWindow:
 
     def page_5(self):
         px = self.px
-        self.paragraph(self.body, "Download halo.vpk from the official releases (or put it next to this program), "
+        self.paragraph(self.body, "Download halo-ce-vita-<version>-vita.vpk from the official releases (or put it next to this program), "
                                   "then copy it to the Vita's ux0:data/ here. VitaShell installs it: this program "
                                   "cannot.", pady=(0, px(4)))
-        self.link("Releases: download halo.vpk", RELEASES_URL)
+        self.link("Releases: download the VPK", RELEASES_URL)
         self.ttk.Frame(self.body, height=px(10)).pack(fill="x")
         self.path_row("VPK", self.vpk, browse_file=True, filetypes=[("VPK", "*.vpk"), ("All files", "*")])
         self.address_row(port=False)

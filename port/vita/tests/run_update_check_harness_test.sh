@@ -92,7 +92,7 @@ for case in $cases; do
 		run newer 40 "300:@update;450:@update" "HALO_UPDATE_URL=$base/releases/v9.9.9-beta.1/1"
 		common newer
 		log=$out/newer/run.log
-		grep -aq "update: 9.9.9-beta.1 is available (this is $version; Update channel experimental): github.com/BirchWoodGod/halo-ce-vita/releases" "$log" ||
+		grep -aq "update: 9.9.9-beta.1 is available (this is $version (PC); Update channel experimental): halo-ce-vita-9.9.9-beta.1-pc-linux.tar.gz from github.com/BirchWoodGod/halo-ce-vita/releases" "$log" ||
 			fail newer "halo.log does not say 9.9.9-beta.1 is available"
 		grep -aq 'update: the main menu shows "Update: 9.9.9-beta.1"' "$log" ||
 			fail newer "the main menu does not show it"
@@ -139,7 +139,7 @@ for case in $cases; do
 		*-*)
 			[ "$(grep -ac "update: the Update channel stable is not for a pre-release build ($version): experimental" "$out/stable/run.log")" = 1 ] ||
 				fail stable "Stable on a pre-release build not refused once"
-			grep -aq "update: 9.9.9-beta.5 is available (this is $version; Update channel experimental)" "$out/stable/run.log" ||
+			grep -aq "update: 9.9.9-beta.5 is available (this is $version (PC); Update channel experimental)" "$out/stable/run.log" ||
 				fail stable "Experimental not used" ;;
 		*)
 			grep -aq "update: no release for the Update channel stable\|update: up to date ($version; Update channel stable)" "$out/stable/run.log" ||

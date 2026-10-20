@@ -17,6 +17,8 @@ and the debug keyboard that the game's console reads.
 #include "xiso.h"
 #include "ce_installer.h"
 #include "posix.h"
+#include "halo_port_limits.h"
+#include "../../vita/include/vita_version.h"
 
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -101,6 +103,13 @@ int platform_input_device_last(void)
 }
 #endif
 
+/* the window's title: the PC build of the Vita port says so */
+#if defined(HALO_PORT_VITA_NETWORK) && !defined(HALO_VITA)
+#define PLATFORM_WINDOW_TITLE "Halo CE Vita (PC build)"
+#else
+#define PLATFORM_WINDOW_TITLE "Halo"
+#endif
+
 BOOL platform_sdl_initialize(void)
 {
 	if (platform_sdl_started)
@@ -130,6 +139,10 @@ BOOL platform_sdl_initialize(void)
 		return FALSE;
 	}
 	platform_sdl_started = TRUE;
+#if defined(HALO_PORT_VITA_NETWORK) && !defined(HALO_VITA) && !defined(HALO_DEDICATED_SERVER)
+	/* (the PC build of the Vita port: which one a report came from) */
+	platform_log("Halo CE Vita " HALO_VITA_VERSION_SHOWN " starting");
+#endif
 #ifndef HALO_NOT_DESKTOP
 	/* found (or offered to the player, platform_offer_game_data) before the
 	game's window opens */
@@ -525,7 +538,7 @@ BOOL platform_video_initialize(unsigned long width, unsigned long height)
 	false, where the game draws the display's shape at its resolution
 	(d3d8_gl.c); the window size is the windowed mode F11 switches to and
 	from, where it draws 640x480 */
-	platform_window = SDL_CreateWindow("Halo", (int)(width * scale), (int)(height * scale),
+	platform_window = SDL_CreateWindow(PLATFORM_WINDOW_TITLE, (int)(width * scale), (int)(height * scale),
 		SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
 		(config_boolean("debug.hidden_window") ? SDL_WINDOW_HIDDEN : 0) |
 		(platform_fullscreen_setting() ? SDL_WINDOW_FULLSCREEN : 0));

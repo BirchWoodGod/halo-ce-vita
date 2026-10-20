@@ -10,16 +10,42 @@ public half of the key (`port/vita/include/vita_update_key.h`). The private
 key never goes into git, GitHub, CI or anyone else's hands: whoever holds it
 can make every updating Vita offer their file as the next Halo.
 
-A release the game can download carries three assets:
+## Release files
 
-| asset | what |
-| --- | --- |
-| `halo.vpk` | the game, as before |
-| `halo-update.txt` | the manifest: version, title ID, file, size, SHA-512 of `halo.vpk` |
-| `halo-update.txt.sig` | the manifest's Ed25519 signature (128 hex digits) |
+From 1.1.1 a release's files are named for the project, the version and
+the platform:
 
-A release without the two extra files still installs with VitaShell as
-before; the in-game download refuses it ("the server answered 404").
+| asset | what | made by |
+| --- | --- | --- |
+| `halo-ce-vita-<version>-vita.vpk` | the Vita's game | `ninja vita`, then `sign_update.py` copies it under this name |
+| `halo-ce-vita-<version>-pc-windows.zip` | the PC build, Windows | `tools/package_pc.py windows` (CI's Windows job, artifact `halo-ce-vita-pc-windows`) |
+| `halo-ce-vita-<version>-pc-linux.tar.gz` | the PC build, Linux | `tools/package_pc.py linux` (CI's Linux job, artifact `halo-ce-vita-pc-linux`) |
+| `halo-update.txt` | the Vita updater's manifest: version, title ID, file, size, SHA-512 of the VPK | `sign_update.py` |
+| `halo-update.txt.sig` | the manifest's Ed25519 signature (128 hex digits) | `sign_update.py` |
+| `halo.vpk` | the same VPK under its old name, **1.1.1 releases only** | `sign_update.py --legacy-name` |
+
+The Vita's updater (from 1.1.1) downloads the file the signed manifest
+names, `halo-ce-vita-<version>-vita.vpk` or `halo.vpk`, and no other. The
+builds before 1.1.1 ask for `halo.vpk` alone and refuse a manifest naming
+anything else, so the 1.1.1 releases (betas included) are signed with
+`--legacy-name`: the manifest names `halo.vpk`, uploaded beside the new
+name. From 1.1.2 on, sign without it (a 1.1.0 Vita then gets "the manifest
+names another file" and installs by hand, as before the updater).
+
+The PC build is packed from a build configured with `--linux-net-vita` (it
+plays with the Vitas; `package_pc.py` refuses one without it):
+
+```
+python3 configure.py --lto off --pgo off --portable --release --linux-net-vita
+ninja linux
+python3 tools/package_pc.py linux       # dist/halo-ce-vita-<version>-pc-linux.tar.gz
+```
+
+The PC files are not signed for an updater: the PC build never downloads
+itself (port/linux/README.md, "Updates").
+
+A release without the manifest and signature still installs with VitaShell
+as before; the in-game download refuses it ("the server answered 404").
 
 ## Once: make the key
 
@@ -64,13 +90,17 @@ against the game's Monocypher by `port/vita/tests/run_update_download_test.sh`).
    --portable --release`, `ninja vita`) with the version in
    `port/vita/include/vita_version.h` and the real public key in
    `vita_update_key.h` - **without** any of the test options below.
-2. Sign the exact `halo.vpk` you will upload, on your machine, with the key
-   plugged in:
+2. Sign the exact VPK you will upload, on your machine, with the key
+   plugged in (`--legacy-name` for the 1.1.1 releases: "Release files"):
 
    ```
    python3 tools/release/sign_update.py --key ~/halo-update-key/halo-update.key \
-       --vpk build/vita/halo.vpk --version 1.1.0-beta.4 --out release-files/
+       --vpk build/vita/halo.vpk --version 1.1.1-beta.1 --out release-files/ --legacy-name
    ```
+
+   `release-files/` then holds `halo-ce-vita-1.1.1-beta.1-vita.vpk`
+   (and `halo.vpk`, with `--legacy-name`), `halo-update.txt` and
+   `halo-update.txt.sig`.
 
    It refuses a version that is not a tag's (`x.y.z`, `x.y.z-beta.n` or
    `x.y.z-rc.n`), a file that is not a VPK or is over 64 MB, and a test
@@ -79,17 +109,16 @@ against the game's Monocypher by `port/vita/tests/run_update_download_test.sh`).
 3. Check what you will upload (optional, the same checks the Vita makes):
 
    ```
-   cp build/vita/halo.vpk release-files/
-   python3 tools/release/verify_update.py --dir release-files/ --version 1.1.0-beta.4
+   python3 tools/release/verify_update.py --dir release-files/ --version 1.1.1-beta.1
    ```
 
-4. Unplug the key. Upload `halo.vpk`, `halo-update.txt` and
-   `halo-update.txt.sig` to the release tagged `v1.1.0-beta.4` (the tag must
+4. Unplug the key. Upload everything in `release-files/`, and the PC
+   files, to the release tagged `v1.1.1-beta.1` (the tag must
    be the version with a `v`: the game asks for exactly that tag's files and
    refuses a manifest naming another version, or one not newer than the
    running build).
 
-Do not re-upload a different `halo.vpk` without signing again: the Vita
+Do not re-upload a different VPK without signing again: the Vita
 refuses a file whose SHA-512 is not the manifest's.
 
 ## CI
@@ -110,7 +139,8 @@ two signature files the owner made locally, never a key.
   (`port/linux/src/update_roots.h`).
 - The manifest's signature first, with the built-in key; then its form, that
   its version is the tag's and newer than the running build, the title
-  (`HCEV00001`), the file (`halo.vpk`) and a size of at most 64 MB.
+  (`HCEV00001`), the file (`halo-ce-vita-<version>-vita.vpk`, or `halo.vpk`;
+  before 1.1.1 `halo.vpk` alone) and a size of at most 64 MB.
 - The card's free space; `halo.vpk` downloaded to that size at most (resumed
   if cut), its size and SHA-512 the manifest's. Only then is it kept, as
   `update/halo-<version>.vpk` beside its signed manifest, older kept ones

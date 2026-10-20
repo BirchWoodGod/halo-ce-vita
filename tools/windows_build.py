@@ -302,7 +302,10 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
         description="WINDOWS COPY $out",
     )
 
-    abi = " ".join(WINDOWS_ABI_FLAGS + [march_flag(sln)] + (["-DHALO_RELEASE"] if getattr(sln, "port_release", False) else []))
+    abi = " ".join(WINDOWS_ABI_FLAGS + [march_flag(sln)] + (["-DHALO_RELEASE"] if getattr(sln, "port_release", False) else [])
+                   # (configure.py --linux-net-vita: the PC build plays with
+                   # the Vitas, as the Linux one does)
+                   + (["-DHALO_NET_AS_VITA=1"] if getattr(sln, "linux_net_vita", False) else []))
     sdl_include = SDL_DIR / "include"
     excluded = set(linux_config.get("exclude_sources", []))
     libs = " ".join(

@@ -144,13 +144,18 @@ def vpk(path, version, title="HCEV00001"):
         info.compress_type = zipfile.ZIP_STORED
         archive.writestr(info, os.urandom(70000))
 
-def release(version, key="test.key", title="HCEV00001"):
+# (legacy: the manifest names halo.vpk, as the 1.1.1 releases are signed;
+# else the release's own name, halo-ce-vita-<version>-vita.vpk, alone)
+def release(version, key="test.key", title="HCEV00001", legacy=True):
     folder = os.path.join(out, "releases", "v" + version)
     os.makedirs(folder)
     vpk(os.path.join(folder, "halo.vpk"), version, title)
     subprocess.run([sys.executable, os.path.join(root, "tools/release/sign_update.py"), "--key",
                     os.path.join(out, "keys", key), "--vpk", os.path.join(folder, "halo.vpk"), "--version", version,
-                    "--out", folder], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    "--out", folder] + (["--legacy-name"] if legacy else []), check=True, stdout=subprocess.DEVNULL,
+                   stderr=subprocess.DEVNULL)
+    if not legacy:
+        os.remove(os.path.join(folder, "halo.vpk"))
     return folder
 
 def sign_text(folder, text):
@@ -162,6 +167,7 @@ good = release("1.1.0-beta.4")
 release("1.1.0-beta.5")                                  # a newer one (the older kept is removed)
 release("1.1.0-rc.1")                                    # a release candidate
 release("1.1.0-beta.2")                                  # older than the running build
+release("1.1.0-beta.9", legacy=False)                    # the release's VPK name (from 1.1.1) alone
 replay = os.path.join(out, "releases", "v1.1.0-beta.16") # beta.4's files under another tag
 shutil.copytree(good, replay)
 tampered = release("1.1.0-beta.6")                       # the VPK changed after signing
@@ -230,12 +236,13 @@ nothing_kept() {
 	[ "$(tree "$data")" = "$data_before" ] || fail "$1: the data folder changed"
 	if [ -d "$data/update" ] && [ -n "$(ls -A "$data/update")" ]; then ls "$data/update"; fail "$1: files left in update/"; fi
 }
-# kept_only WHAT VERSION: update/ holds exactly that release's three files, the VPK the release's
+# kept_only WHAT VERSION [VPK]: update/ holds exactly that release's three files, the VPK the release's
+# (halo.vpk, or the name given)
 kept_only() {
 	[ "$(tree "$data")" = "$data_before" ] || fail "$1: the data folder changed"
 	[ "$(ls "$data/update" | LC_ALL=C sort | tr '\n' ' ')" = "halo-$2.txt halo-$2.txt.sig halo-$2.vpk " ] ||
 		{ ls "$data/update"; fail "$1: update/ holds other files"; }
-	cmp -s "$data/update/halo-$2.vpk" "$out/releases/v$2/halo.vpk" || fail "$1: the kept VPK is not the release's"
+	cmp -s "$data/update/halo-$2.vpk" "$out/releases/v$2/${3:-halo.vpk}" || fail "$1: the kept VPK is not the release's"
 }
 
 echo "--- update_download_harness"
@@ -261,6 +268,14 @@ kept_only "rc" 1.1.0-rc.1
 run kept "$http/dl" x 1.1.0-rc.1
 expect "0" "the start, once that version runs: nothing to install"
 nothing_kept "installed, removed at start"
+
+scenario newname
+run fetch "$http/dl" 1.1.0-beta.9
+expect "0 $data/update/halo-1.1.0-beta.9.vpk" "a release's VPK under its own name (halo-ce-vita-<version>-vita.vpk)"
+kept_only newname 1.1.0-beta.9 halo-ce-vita-1.1.0-beta.9-vita.vpk
+grep -q "/dl/v1.1.0-beta.9/halo-ce-vita-1.1.0-beta.9-vita.vpk " "$out/requests" ||
+	fail "the VPK the manifest names was not the one asked for"
+grep -q "/dl/v1.1.0-beta.9/halo.vpk " "$out/requests" && fail "halo.vpk asked for, though the manifest names the other"
 
 scenario tamperkept
 run fetch "$http/dl" 1.1.0-beta.4

@@ -124,8 +124,9 @@ parser.add_argument(
 parser.add_argument(
     "--linux-net-vita",
     action="store_true",
-    help="the Linux build plays online as a PlayStation Vita (HALO_NET_AS_VITA): Vitas play only Vitas, so the "
-    "automated network tests need a Linux build on the Vitas' side (port/linux/include/halo_port_limits.h)",
+    help="the PC build (Linux, and Windows) plays online on the Vitas' side (HALO_NET_AS_VITA), as the released "
+    "PC build does (tools/package_pc.py), and the automated network tests' Linux builds stand in for Vitas "
+    "(port/linux/include/halo_port_limits.h)",
 )
 parser.add_argument(
     "--vita-aligned",

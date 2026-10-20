@@ -365,6 +365,8 @@ symbols in this file:
 
 #ifdef HALO_LINUX
 #include <stdlib.h>
+#include "halo_port_limits.h"
+#include "../../port/vita/include/vita_version.h" /* port: the PC build's version, below */
 #endif
 
 /* ---------- constants */
@@ -2282,7 +2284,13 @@ static void set_textbox_to_build_number(
 	   the function is unattested. January corroborates: .bss +0x28, referenced only here. */
 	static wchar_t build_number_string[64];
 
-#if defined(HALO_LINUX) && defined(HALO_RELEASE)
+#if defined(HALO_LINUX) && defined(HALO_PORT_VITA_NETWORK) && !defined(HALO_VITA) && !defined(HALO_DEDICATED_SERVER)
+	/* (port) the PC build of the Vita port shows its version there,
+	"1.1.1-beta.1 (PC)", the line a report quotes (the Vita's is in its
+	settings panel; vita_version.h) */
+#define BUILD_NUMBER_TEXT HALO_VITA_VERSION_SHOWN
+	if (!build_number_string[0])
+#elif defined(HALO_LINUX) && defined(HALO_RELEASE)
 	/* (the main menu's corner showed the beta's build number, which players
 	of the port's releases took for leftover debug text, issue #6: a
 	release build leaves the text box empty and puts the number in the log
@@ -2304,10 +2312,18 @@ static void set_textbox_to_build_number(
 	if (!build_number_string[0])
 #endif
 	{
+#ifdef BUILD_NUMBER_TEXT
+		ascii_to_wide(
+			BUILD_NUMBER_TEXT,
+			build_number_string,
+			sizeof(build_number_string));
+#undef BUILD_NUMBER_TEXT
+#else
 		ascii_to_wide(
 			"01.01.14.2342",
 			build_number_string,
 			sizeof(build_number_string));
+#endif
 	}
 
 	if (!widget->parameters.text_box.text)

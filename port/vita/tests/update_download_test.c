@@ -226,6 +226,16 @@ static void fields(void)
 	manifest_of(text, sizeof(text), "1.1.0-beta.4", TITLE, "eboot.bin", "100");
 	check(check_signed(text, "1.1.0-beta.4", CURRENT, &manifest, error) == UPDATE_VERIFY_WRONG_FILE,
 		"another file refused");
+	/* (the release's name from 1.1.1, its own version's alone) */
+	manifest_of(text, sizeof(text), "1.1.0-beta.4", TITLE, "halo-ce-vita-1.1.0-beta.4-vita.vpk", "100");
+	check(check_signed(text, "1.1.0-beta.4", CURRENT, &manifest, error) == UPDATE_VERIFY_OK &&
+		!strcmp(manifest.file, "halo-ce-vita-1.1.0-beta.4-vita.vpk"), "the release's VPK name taken");
+	manifest_of(text, sizeof(text), "1.1.0-beta.4", TITLE, "halo-ce-vita-1.1.0-beta.5-vita.vpk", "100");
+	check(check_signed(text, "1.1.0-beta.4", CURRENT, &manifest, error) == UPDATE_VERIFY_WRONG_FILE,
+		"another version's VPK name refused");
+	manifest_of(text, sizeof(text), "1.1.0-beta.4", TITLE, "halo-ce-vita-1.1.0-beta.4-pc-linux.tar.gz", "100");
+	check(check_signed(text, "1.1.0-beta.4", CURRENT, &manifest, error) == UPDATE_VERIFY_WRONG_FILE,
+		"the PC build's file refused");
 	manifest_of(text, sizeof(text), "1.1.0-beta.4", TITLE, "halo.vpk", "67108864");
 	check(check_signed(text, "1.1.0-beta.4", CURRENT, &manifest, error) == UPDATE_VERIFY_OK, "64 MB taken");
 	manifest_of(text, sizeof(text), "1.1.0-beta.4", TITLE, "halo.vpk", "67108865");
@@ -311,6 +321,11 @@ static void urls(void)
 	check(update_asset_url(url, sizeof(url), UPDATE_DOWNLOAD_BASE, "1.1.0-rc.1", "halo.vpk"), "a release candidate: a URL");
 	check(!update_asset_url(url, sizeof(url), UPDATE_DOWNLOAD_BASE, "1.1.0/../../x", "halo.vpk"), "a path: no URL");
 	check(!update_asset_url(url, sizeof(url), UPDATE_DOWNLOAD_BASE, "1.1.0", "eboot.bin"), "another asset: no URL");
+	check(update_asset_url(url, sizeof(url), UPDATE_DOWNLOAD_BASE, "1.1.1-beta.1", "halo-ce-vita-1.1.1-beta.1-vita.vpk") &&
+		!strcmp(url, "https://github.com/BirchWoodGod/halo-ce-vita/releases/download/v1.1.1-beta.1/"
+		"halo-ce-vita-1.1.1-beta.1-vita.vpk"), "the release's VPK name's URL");
+	check(!update_asset_url(url, sizeof(url), UPDATE_DOWNLOAD_BASE, "1.1.1-beta.1", "halo-ce-vita-1.1.1-beta.2-vita.vpk"),
+		"another version's VPK name: no URL");
 	check(!update_asset_url(url, sizeof(url), "https://evil.example/dl", "1.1.0", "halo.vpk"), "another host: no URL");
 	check(update_asset_url(url, sizeof(url), "https://github.com/someone/halo-update-test/releases/download", "1.1.0",
 		"halo.vpk") && !strcmp(url, "https://github.com/someone/halo-update-test/releases/download/v1.1.0/halo.vpk"),

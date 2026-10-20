@@ -211,29 +211,24 @@ Mesa. To stop this, set the environment variable `mesa_glthread=false`.
 
 ## Updates
 
-The builds from GitHub Actions (refer to the main [README](../../README.md#download))
-can update themselves. At start-up, the game asks GitHub for the latest
-release. The game does not wait for the answer. If the latest release is not
-newer, the game does nothing.
+This project's releases (`github.com/BirchWoodGod/halo-ce-vita/releases`,
+tagged `v<version>`) carry the PC build as `halo-ce-vita-<version>-pc-linux.tar.gz`
+and `halo-ce-vita-<version>-pc-windows.zip` (made by `tools/package_pc.py`),
+beside the Vita's `halo-ce-vita-<version>-vita.vpk`. To update, download the
+file for your platform and unpack it over the old folder: `config.toml`,
+the game data and the saves stay.
 
-If the latest release is newer, the game asks: "Do you want to update?"
+The PC build does not look for updates by itself (nothing asks the network
+unless the player does) and never replaces itself: watch the releases page.
+An update check run by the tests (`@update`) names the file for this
+platform in `halo.log` (`update: ... is available ...:
+halo-ce-vita-<version>-pc-linux.tar.gz from ...`).
 
-- Select "Yes" to update. The game downloads the release for this platform,
-  replaces its files and starts the new version. The old files get the
-  extension `.old`. The new version deletes them.
-- Select "No" to continue. The game asks again at the next start.
-- Select "Do not ask again", then "Yes", to stop the questions. The game
-  writes `auto = false` in the `[update]` section of `config.toml`. To get
-  the questions again, set `auto = true`.
-
-The game downloads through HTTPS. It examines the certificate of the server
-against the certificate authorities of the system: on Linux, the bundle of
-the distribution (`src/posix_update.c`, with Mbed TLS); on Windows, the
-certificate store of Windows (WinHTTP). The folder of the executable must
-let the game write to it.
-
-Builds that you make yourself have no build number. They do not look for
-updates.
+The upstream port's self-updater (`src/updater.c`: `update.auto`, the
+question "Do you want to update?") follows the upstream port's numbered
+builds (`build-<number>` releases of `cybersecurity/halo-ce-universal`).
+Only the upstream repository's CI gives a build its number
+(`tools/ci_build.py`); this project's builds have none, so they never ask.
 
 ## Frame rate
 

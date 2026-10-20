@@ -13,7 +13,7 @@ disc image, your Halo PC files.
 
 - **Windows:** download `HaloCEVitaInstaller.exe` from the
   [releases](https://github.com/BirchWoodGod/halo-ce-vita/releases/latest)
-  (it is attached next to `halo.vpk`) and double-click it. It is one
+  (it is attached next to the VPK, `halo-ce-vita-<version>-vita.vpk`) and double-click it. It is one
   program of about 48 MB that unpacks itself to a temporary folder at each
   start, so it takes a few seconds to open. It is not signed: Windows
   SmartScreen says "Windows protected your PC" the first time (click
@@ -92,7 +92,7 @@ Custom maps you put in that `maps` folder yourself are copied too.
    size are skipped, so it goes on from where it stopped. Every file is
    checked by its size on the Vita after copying. "Copy files already on the
    Vita again" replaces them all.
-5. **The VPK.** Download `halo.vpk` from the
+5. **The VPK.** Download `halo-ce-vita-<version>-vita.vpk` from the
    [releases](https://github.com/BirchWoodGod/halo-ce-vita/releases/latest)
    (a VPK next to the tool is picked up by itself). The tool copies it to
    `ux0:data/`. Then, on the Vita, leave FTP mode, open `ux0:data/` in

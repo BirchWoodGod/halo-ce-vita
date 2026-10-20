@@ -21,4 +21,15 @@ reads it from here.
 #endif
 #define HALO_VITA_APP_VER "01.10"
 
+/* the version as a build shows it (halo.log, the main menu, the window):
+a PC build's (Linux, Windows) with " (PC)" after it, "1.1.1-beta.1 (PC)",
+so a report says which it came from; the release's files are named
+halo-ce-vita-<version>-vita.vpk and -pc-windows.zip, -pc-linux.tar.gz
+(tools/package_pc.py, tools/release/README.md) */
+#if defined(HALO_VITA) || defined(__vita__)
+#define HALO_VITA_VERSION_SHOWN HALO_VITA_VERSION
+#else
+#define HALO_VITA_VERSION_SHOWN HALO_VITA_VERSION " (PC)"
+#endif
+
 #endif
