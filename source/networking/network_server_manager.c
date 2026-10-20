@@ -4884,6 +4884,15 @@ static long network_game_server_port_maximum_players(
 	long most = MAXIMUM_NETWORK_PLAYER_COUNT;
 #endif
 
+#ifdef HALO_LINUX
+	/* (a network Forge game takes 8 players at most: forge_net.inc) */
+	{
+		boolean forge_net_hosting(void);
+
+		if (forge_net_hosting())
+			return MIN(maximum >= 2 ? MIN(maximum, most) : unset, 8);
+	}
+#endif
 	return maximum >= 2 ? MIN(maximum, most) : unset;
 }
 

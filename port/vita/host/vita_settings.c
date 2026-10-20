@@ -1175,6 +1175,9 @@ void forge_panel_clear_ai(int all);
 its map variant's file name ("" none), with SYSTEM_LINK_REQUEST_FORGE */
 extern volatile int halo_forge_request_map;
 extern char halo_forge_request_variant[HALO_FORGE_VARIANT_SIZE];
+/* ... and whether on the network (the connection the game runs: a network
+Forge game others join; 0, a local game) */
+extern volatile int halo_forge_request_network;
 
 /* the map variants listed (File Share's), the ones shown at once */
 #define FORGE_PANEL_MAXIMUM 32
@@ -1184,6 +1187,8 @@ enum
 {
 	FORGE_LINE_MAP,
 	FORGE_LINE_VARIANT,
+	/* (Local, or the network: the connection's, others joining) */
+	FORGE_LINE_NETWORK,
 	FORGE_LINE_START,
 	/* (while a Forge game is played) */
 	FORGE_LINE_CLEAR_DEAD,
@@ -1197,6 +1202,8 @@ static int forge_entry_count, forge_scroll;
 variant (0 none, else the nth of the map's that is not damaged), and the
 variant asked about (SCREEN_FORGE_DELETE) */
 static int forge_map = -1, forge_variant, forge_delete_index = -1;
+/* (Network) Start Forge's game a network Forge game (1) or a local one (0) */
+static int forge_network;
 
 /* ---------- the report */
 
@@ -2815,6 +2822,7 @@ static void forge_start(void)
 		return;
 	}
 	halo_forge_request_map = forge_map;
+	halo_forge_request_network = forge_network;
 	snprintf(halo_forge_request_variant, sizeof(halo_forge_request_variant), "%s", variant ? variant->file_name : "");
 	__atomic_store_n(&halo_system_link_request, SYSTEM_LINK_REQUEST_FORGE, __ATOMIC_RELEASE);
 	vita_host_log("settings: Forge asked for (settings panel)");
@@ -3371,6 +3379,7 @@ static void help_line(char *text, int size, const struct line *line)
 	else if (line && line->type == LINE_FORGE)
 		snprintf(text, (size_t)size, "%s", line->index == FORGE_LINE_MAP ? T("The multiplayer map to edit") :
 			line->index == FORGE_LINE_VARIANT ? T("Its objects placed as Forge starts") :
+			line->index == FORGE_LINE_NETWORK ? T("Local: alone. Network: friends forge with you (8 players)") :
 			line->index == FORGE_LINE_CLEAR_DEAD ? T("Dead AI you placed, out of the layout: room for more") :
 			line->index == FORGE_LINE_CLEAR_ALL ? T("Every AI you placed, alive or dead, out of the layout") :
 			T("A local game: you fly as the monitor and place objects"));
@@ -3717,6 +3726,10 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 			else if (line->index == FORGE_LINE_VARIANT)
 				length += snprintf(text + length, (size_t)(size - length), "\n%s\x02%c %.24s %c", T("Map variant"),
 					forge_variant > 0 ? '<' : ' ', variant ? variant->title : T("None"), forge_variant < variants ? '>' : ' ');
+			else if (line->index == FORGE_LINE_NETWORK)
+				length += snprintf(text + length, (size_t)(size - length), "\n%s\x02%c %s %c", T("Network"),
+					forge_network ? '<' : ' ', !forge_network ? T("Local") : !strcmp(running_network, "online") ? T("Online") :
+					!strcmp(running_network, "adhoc") ? T("Ad hoc") : T("Same Wi-Fi"), forge_network ? ' ' : '>');
 			else if (line->index == FORGE_LINE_CLEAR_DEAD || line->index == FORGE_LINE_CLEAR_ALL)
 			{
 				int alive = 0, dead = 0;
@@ -6198,6 +6211,11 @@ int vita_settings_input(const struct vita_host_pad *pad)
 						forge_map = map;
 						forge_variant = 0;
 					}
+				}
+				else if (line->index == FORGE_LINE_NETWORK && (pressed & (VITA_BUTTON_LEFT | VITA_BUTTON_RIGHT)))
+				{
+					forge_network = step > 0;
+					vita_host_log(forge_network ? "settings: Forge on the network" : "settings: Forge local");
 				}
 				else if (line->index == FORGE_LINE_VARIANT && (pressed & (VITA_BUTTON_LEFT | VITA_BUTTON_RIGHT)))
 				{

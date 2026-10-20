@@ -29,6 +29,17 @@
 #              game, then plays a Slayer game of the same host's build
 #   forgeleave the host leaves its Forge game (the main menu): the joiner is
 #              told, back at the menus
+#   h3forge    the Forge lobby by the controller (Menu style Halo 3, HALO_TEST_PROFILE):
+#              the host opens FORGE, NETWORK: SYSTEM LINK - its lobby live, a Forge game
+#              of Blood Gulch hosted -, a joiner on its LAN joins it from the multiplayer
+#              lobby's BROWSE GAMES before START FORGE and is shown in the lobby's
+#              players; START FORGE takes both into the Forge game (the game's lobby, its
+#              countdown at once), where the joiner's edit is the host's
+#   forgepanel the settings panel's Forge page, Network on (Menu style Halo CE: the
+#              classic menus' route), asked by HALO_SYSTEM_LINK_TEST=forgenet:9: the
+#              System Link screen's profile, then a network Forge game of Blood Gulch
+#              hosted and its lobby (the Xbox's pregame); the joiner joins it by the
+#              System Link search, the host starts it, both forge
 forge_shots() { # NAME: the copy's screenshots at the Vita's picture, in HALO_TEST_SHOTS/mpforge-shots
 	[ -n "${HALO_TEST_SHOTS:-}" ] || return 0
 	mkdir -p "$HALO_TEST_SHOTS/$1"
@@ -68,7 +79,7 @@ forge_case() {
 		host_cmds="$host_cmds;L760:forge ai;L900:forge net;L920:forge destroy #1;L960:forge round;L1020:forge net"
 		host_cmds="$host_cmds;L1040:forge camera 62 -102 1.6 128 6;L1060:@shot forge-host-sees-joiner;L1080:forge save Net Test"
 		join_cmds="L250:forge net;L260:forge camera 60 -100 1.6 150 0;L270:forge spawn teleporter base;L280:forge distance 6"
-		join_cmds="$join_cmds;L290:forge drop;L380:forge grab #3;L390:forge distance 7;L480:forge drop;L520:forge grab #3"
+		join_cmds="$join_cmds;L290:forge drop;L380:forge grab #3;L390:forge distance 7;L480:forge drop;L535:forge net grab #3"
 		join_cmds="$join_cmds;L600:forge grab #1;L610:forge distance 10;L620:forge drop;L640:forge delete #2;L650:forge undo"
 		join_cmds="$join_cmds;L660:forge net;L700:forge spawn elite major;L705:forge distance 6;L710:forge drop;L800:forge net"
 		join_cmds="$join_cmds;L840:forge net junk 60;L1030:forge net;L1040:forge camera 49 -90 3 322 -4"
@@ -98,7 +109,8 @@ forge_case() {
 		# (conflicting grabs: the first wins, the other refused, both ways)
 		sed -n '/test command at tick 430: forge grab #3/,+3p' "$hl" | grep -aq "forge: Player 2 is holding it" ||
 			fail "the host's grab of the joiner's held object was not refused"
-		# (the same tick's grabs: the host's own first, the joiner's refused by the host)
+		# (both grab it: the host's own first, the joiner's grab - asked of the host whatever its
+		# own copy of the layout says, as when both ask at once - refused by the host)
 		grep -aq "forge net: refused machine 1's grab: held by another" "$hl" ||
 			fail "the host did not refuse the joiner's grab of the object it held"
 		grep -aq "forge: Player is holding it" "$jl" || fail "the joiner was not told the host held it"
@@ -225,6 +237,85 @@ forge_case() {
 			[ "$played" -ge 15 ] || fail "$side did not play the Slayer game ($played s)"
 		done
 		grep -aq "forge net:" "$out/host/run.log" && fail "the Slayer game's host spoke network Forge"
+		;;
+	h3forge)
+		local menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+		if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS) or no HALO_TEST_PROFILE"; return 0
+		fi
+		local name
+		for name in host joiner; do
+			mkdir -p "$out/$name/save/u/UDATA/869079979327"
+			cp "$HALO_TEST_PROFILE" "$out/$name/save/u/UDATA/869079979327/blam.sav"
+			[ -r "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" ] &&
+				cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$out/$name/save/u/UDATA/869079979327/"
+		done
+		# (the host: FORGE (down two, A); the lobby on MAP: up to NETWORK, A, the picker on LOCAL
+		# (OFFLINE): up two to SYSTEM LINK, A - the lobby live -; a while for the joiner; then
+		# down three to START FORGE, A: the game's lobby, its countdown at once)
+		local host_pad="wait:150:3000 down:150:600 down:150:600 a:150:3000 up:150:700 a:150:2000"
+		host_pad="$host_pad up:150:500 up:150:500 a:150:3000 @forge-lobby-system-link:0:300 wait:150:${HALO_TEST_LIVE_WAIT:-45000}"
+		host_pad="$host_pad @forge-lobby-joined:0:300 down:150:500 down:150:500 down:150:500 a:150:3000 @forge-countdown:0:300"
+		host_cmds="L300:forge net;L700:forge net"
+		join_cmds="L400:forge camera 60 -100 1.6 150 0;L420:forge spawn boulder;L430:forge distance 6;L440:forge drop;L600:forge net"
+		HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
+			HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 $(forge_shots mpforge-shots/h3forge-host) \
+			"HALO_TEST_PAD=$host_pad" "HALO_TEST_COMMANDS=$host_cmds"
+		host_pid=$last_pid
+		sleep 5
+		HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false \
+			HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 $(forge_shots mpforge-shots/h3forge-joiner) \
+			"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a a a wait:150:15000 a wait:150:10000 @forge-joiner-lobby:0:300" \
+			"HALO_TEST_COMMANDS=$join_cmds"
+		join_pid=$last_pid
+		wait $join_pid $host_pid 2>/dev/null
+		forge_check_clean "$hl" "$jl"
+		echo "--- host"; grep -aE "menus: (forge lobby|h3 live lobby)|forge net: (machine|hosting)" "$hl" | head -30
+		echo "--- joiner"; grep -aE "menus: h3 pregame|forge net: (the host|holding|asked)|forge: .*loaded for" "$jl" | head -20
+		grep -aq "menus: forge lobby: NETWORK: SYSTEM LINK" "$hl" || fail "the Forge lobby's NETWORK did not change to SYSTEM LINK"
+		grep -aq "menus: h3 live lobby: open on SYSTEM LINK (Forge on Blood Gulch): others join it now" "$hl" ||
+			fail "the Forge lobby did not go live on SYSTEM LINK"
+		grep -aqE "menus: h3 live lobby: Forge on Blood Gulch; players: [^;]+, [^;]+; 2/8" "$hl" ||
+			fail "the Forge lobby did not show the joiner among its players (of 8)"
+		grep -aq "forge net: machine 1 plays the Forge game" "$hl" || fail "the joiner did not answer the Forge hello in the lobby"
+		grep -aq "menus: forge lobby: START FORGE: the game's lobby, everyone in it into Forge on Blood Gulch" "$hl" ||
+			fail "START FORGE did not take the lobby into the game"
+		grep -aq "menus: h3 live lobby: the game's lobby: the countdown begun" "$hl" || fail "START FORGE began no countdown"
+		grep -aq "forge: levels.test.bloodgulch.bloodgulch loaded for a Forge game" "$hl" || fail "the host's Forge game did not start"
+		grep -aq "forge: levels.test.bloodgulch.bloodgulch loaded for a Forge game" "$jl" || fail "the joiner's Forge game did not start"
+		grep -aq "forge net: machine 1 spawned boulder" "$hl" || fail "the joiner's edit was not the host's"
+		forge_state "$hl" 700 | grep -aq "boulder" || fail "the host did not have the joiner's boulder"
+		grep -aq "forge net: the host's packs and bloodgulch's blocks prebuilt in its lobby" "$jl" ||
+			fail "the joiner did not prebuild the host's packs and blocks in the lobby"
+		;;
+	forgepanel)
+		local menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+		if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS) or no HALO_TEST_PROFILE"; return 0
+		fi
+		mkdir -p "$out/host/save/u/UDATA/869079979327"
+		cp "$HALO_TEST_PROFILE" "$out/host/save/u/UDATA/869079979327/blam.sav"
+		[ -r "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" ] &&
+			cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$out/host/save/u/UDATA/869079979327/"
+		# (the panel's request 3 s into the main menu; the profile screen: A joins, A the profile, A;
+		# the game's lobby; a while for the joiner; Start, the Xbox's lobby's start)
+		HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
+			HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_SYSTEM_LINK_TEST=forgenet:9 $(forge_shots mpforge-shots/forgepanel-host) \
+			"HALO_TEST_PAD=wait:150:8000 a:150:1500 a:150:1500 a:150:3000 @forgepanel-lobby:0:300 wait:150:${HALO_TEST_LIVE_WAIT:-35000} @forgepanel-joined:0:300 start:150:3000" \
+			"HALO_TEST_COMMANDS=L300:forge net"
+		host_pid=$last_pid
+		sleep 10
+		run_copy joiner "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join \
+			"HALO_TEST_COMMANDS=L200:forge camera 60 -100 1.6 150 0;L220:forge spawn boulder;L230:forge distance 6;L240:forge drop"
+		join_pid=$last_pid
+		wait $join_pid $host_pid 2>/dev/null
+		forge_check_clean "$hl" "$jl"
+		echo "--- host"; grep -aE "system link: the settings panel|menus: forge|forge net: (machine|hosting)|ui: screen" "$hl" | head -20
+		grep -aq "menus: forge: the network Forge game's server started; the game's lobby" "$hl" ||
+			fail "the panel's network Forge game was not hosted"
+		grep -aq "forge net: machine 1 plays the Forge game" "$hl" || fail "the joiner did not play the panel's Forge game"
+		grep -aq "forge: levels.test.bloodgulch.bloodgulch loaded for a Forge game" "$jl" || fail "the joiner's Forge game did not start"
+		grep -aq "forge net: machine 1 spawned boulder" "$hl" || fail "the joiner's edit was not the host's"
 		;;
 	forgeleave)
 		host_cmds="L150:forge camera 60 -100 1.6 130 0;L160:forge spawn warthog;L165:forge distance 8;L170:forge drop;L600:@menu"

@@ -2010,3 +2010,15 @@
 "Ramp" = "Rampa"
 "Vehicle Ramp" = "Rampa para vehículos"
 "Corner" = "Esquina"
+
+# ---------- the Forge lobby on a network: live as the multiplayer lobby (menu_functions.c)
+"The lobby isn't open yet: wait for the\nnetwork, or choose NETWORK: LOCAL." = "El lobby aún no está abierto: espera a\nla red, o elige RED: LOCAL."
+"Forge with friends on the Internet." = "Forja con amigos por Internet."
+"Forge with the PS Vitas near you." = "Forja con las PS Vita cercanas."
+"Forge with the PS Vitas on your Wi-Fi." = "Forja con las PS Vita de tu Wi-Fi."
+"The PS Vitas near you can join.\nSTART FORGE takes everyone here." = "Pueden unirse las PS Vita cercanas.\nEMPEZAR FORJA lleva a todos."
+"The PS Vitas on your Wi-Fi can join.\nSTART FORGE takes everyone here." = "Pueden unirse las PS Vita de tu Wi-Fi.\nEMPEZAR FORJA lleva a todos."
+# (the settings panel's Forge page: Network, for the Halo CE menus too)
+"No network: choose a connection on the Play page" = "Sin red: elige una conexión en la página Jugar"
+"Local: alone. Network: friends forge with you (8 players)" = "Local: solo. Red: tus amigos forjan contigo (8 jugadores)"
+"Local" = "Local"

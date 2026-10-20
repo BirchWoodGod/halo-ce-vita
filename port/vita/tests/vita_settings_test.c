@@ -90,6 +90,7 @@ folder - the Forge game asked for, and forge_store.c's map variants, a
 test's) */
 volatile int halo_forge_request_map = -1;
 char halo_forge_request_variant[HALO_FORGE_VARIANT_SIZE];
+volatile int halo_forge_request_network;
 static const char *const test_forge_maps[3][2] = {
 	{ "Battle Creek", "beavercreek" }, { "Blood Gulch", "bloodgulch" }, { "Chill Out", "chillout" },
 };
@@ -2273,11 +2274,12 @@ static void test_forge_page(void)
 	printf("%s\n--\n", menu);
 	check(!strcmp(menu_line(2, line, sizeof(line)), "Map\x02  Blood Gulch") &&
 		!strcmp(menu_line(3, line, sizeof(line)), "Map variant\x02  None >") &&
-		!strcmp(menu_line(4, line, sizeof(line)), "Start Forge\x02  >") && !menu_line(5, line, sizeof(line))[0] &&
-		!strcmp(menu_line(6, line, sizeof(line)), "\x08" "File Share") &&
+		!strcmp(menu_line(4, line, sizeof(line)), "Network\x02  Local >") &&
+		!strcmp(menu_line(5, line, sizeof(line)), "Start Forge\x02  >") && !menu_line(6, line, sizeof(line))[0] &&
+		!strcmp(menu_line(7, line, sizeof(line)), "\x08" "File Share") &&
 		strstr(menu, "\nGulch A\x02  Blood Gulch\n") && strstr(menu, "\nDamaged file\x02  Blood Gulch\n") &&
 		strstr(menu, "\nCold\x02  Chill Out\n") && menu_fits() && menu_height_fits(),
-		"Forge: Map (Blood Gulch first), Map variant (None), Start Forge; File Share's map variants, each fits");
+		"Forge: Map (Blood Gulch first), Map variant (None), Network (Local), Start Forge; File Share's map variants, each fits");
 	check(menu_selected == 2 && strstr(menu, "\n\x05The multiplayer map to edit\n") &&
 		strstr(menu, "Left/right: change"), "Map chosen first, its help");
 	press(VITA_BUTTON_RIGHT);
@@ -2291,6 +2293,13 @@ static void test_forge_page(void)
 	press(VITA_BUTTON_RIGHT);
 	check(strstr(menu, "\nMap variant\x02< Gulch B  \n") != NULL, "right: Gulch B, the last (the damaged one is not offered)");
 	press(VITA_BUTTON_LEFT);
+	/* Network: Local, or the connection the game runs (a network Forge game) */
+	to_line("Network");
+	check(strstr(menu, "\n\x05Local: alone. Network: friends forge with you (8 players)\n") != NULL, "Network's help");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nNetwork\x02< Same Wi-Fi  \n") != NULL, "Network right: the network (Same Wi-Fi, the game's connection)");
+	press(VITA_BUTTON_LEFT);
+	check(strstr(menu, "\nNetwork\x02  Local >\n") != NULL, "Network left: Local again");
 	/* in a level: not started */
 	halo_multiplayer_status[SYSTEM_LINK_STATUS_STATE] = SYSTEM_LINK_STATE_PLAYING;
 	to_line("Start Forge");
@@ -2302,7 +2311,8 @@ static void test_forge_page(void)
 	halo_multiplayer_status[SYSTEM_LINK_STATUS_STATE] = SYSTEM_LINK_STATE_MENUS;
 	press(VITA_BUTTON_CROSS);
 	check(!menu_visible && halo_system_link_request == SYSTEM_LINK_REQUEST_FORGE && halo_forge_request_map == 1 &&
-		!strcmp(halo_forge_request_variant, "gulch_a.hmv"), "at the menus: the game asked for Forge on Blood Gulch, Gulch A; closed");
+		!strcmp(halo_forge_request_variant, "gulch_a.hmv") && !halo_forge_request_network,
+		"at the menus: the game asked for Forge on Blood Gulch, Gulch A, a local game; closed");
 	halo_system_link_request = SYSTEM_LINK_REQUEST_NONE;
 	frame(0);
 	/* File Share: delete, asked first */

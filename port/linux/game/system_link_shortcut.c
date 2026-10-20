@@ -92,6 +92,8 @@ int halo_text_input_password;
 file ("" none) of the Forge game the panel asks for */
 volatile int halo_forge_request_map = NONE;
 char halo_forge_request_variant[HALO_FORGE_VARIANT_SIZE];
+/* ... on the network: hosted, others joining (0: a local game) */
+volatile int halo_forge_request_network;
 
 /* (network_client_manager.c's client states, in its order) */
 enum
@@ -236,11 +238,15 @@ static void system_link_shortcut_test(
 		return;
 	done = TRUE;
 	platform_log("system link: HALO_SYSTEM_LINK_TEST=%s", test);
-	if (!strncmp(test, "forge:", 6))
+	if (!strncmp(test, "forge:", 6) || !strncmp(test, "forgenet:", 9))
 	{
-		char const *file = strchr(test + 6, ':');
+		/* ("forgenet:<map>[:<variant>]": the network Forge game) */
+		boolean network = !strncmp(test, "forgenet:", 9);
+		char const *map = test + (network ? 9 : 6);
+		char const *file = strchr(map, ':');
 
-		halo_forge_request_map = atoi(test + 6);
+		halo_forge_request_network = network;
+		halo_forge_request_map = atoi(map);
 		snprintf(halo_forge_request_variant, sizeof(halo_forge_request_variant), "%s", file ? file + 1 : "");
 		__atomic_store_n(&halo_system_link_request, SYSTEM_LINK_REQUEST_FORGE, __ATOMIC_RELEASE);
 		return;
@@ -415,6 +421,27 @@ void system_link_shortcut_update(
 		{
 			answer = SYSTEM_LINK_ANSWER_UNAVAILABLE;
 			snprintf(why, sizeof(why), "%s", T("No multiplayer map is in the maps folder."));
+		}
+		/* (on the network: the profile, then the game hosted and its lobby,
+		menu_functions.c; no network up: said) */
+		else if (halo_forge_request_network)
+		{
+			extern boolean menu_functions_forge_host(short map_index, char const *variant_file, char *why, int why_size);
+
+			if (!transport_network_available())
+			{
+				answer = SYSTEM_LINK_ANSWER_NO_NETWORK;
+				snprintf(why, sizeof(why), "%s", T("No network: choose a connection on the Play page"));
+			}
+			/* (the screens opened first: the multiplayer screen's opening
+			forgets a game asked to be created before it) */
+			else if (system_link_shortcut_open() &&
+				menu_functions_forge_host((short)halo_forge_request_map, variant, why, sizeof(why)))
+			{
+				answer = SYSTEM_LINK_ANSWER_OPENED;
+			}
+			else
+				answer = SYSTEM_LINK_ANSWER_UNAVAILABLE;
 		}
 		else if (forge_game_start((short)halo_forge_request_map, variant, why, sizeof(why)))
 			answer = SYSTEM_LINK_ANSWER_OPENED;

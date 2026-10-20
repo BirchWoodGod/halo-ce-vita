@@ -1,7 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- The Halo 3-style Forge lobby (the main menu's FORGE): laid out as Halo 3's - the column at the
-left (FORGE LOBBY, Network, Map, Extra Objects, START FORGE, Ready, the map's picture with Forge's emblem, "Edit
-Objects on <map>"), the nameplate at the right; Map opens a picker as Halo 3's Select Map (the
+left (FORGE LOBBY, NETWORK, MAP, EXTRA OBJECTS, START FORGE, Ready, the map's picture with Forge's emblem, "Edit
+Objects on <map>"), the nameplate at the right; NETWORK is the multiplayer lobby's (LOCAL, its OFFLINE: a
+local game; ONLINE, SYSTEM LINK, AD HOC: the settings panel's Connection, switched as it is chosen, its status
+under it). On a network the lobby is live as the multiplayer lobby is (menu_functions.c h3_live): its game a
+network Forge game of its map, hosted the moment the lobby is up (private by default online), which friends,
+the party, a code, INVITE FRIENDS (L, online) and the games browser join; its players in the rows at the right
+in the nameplate's place; START FORGE takes everyone into the Forge game (the game's lobby, its countdown at
+once). Map opens a picker as Halo 3's Select Map (the
 multiplayer maps in the maps folder, each its picture and description), and the map chosen its
 variants, as Halo 3's: the map itself first, then the player's saved map variants of it
 (port/linux/src/forge_store.c), each its details; B goes back to the maps. START FORGE starts a
@@ -41,30 +47,45 @@ vehicles, the dropships, the Covenant AI), built in the background while the lob
 
 	<!-- the lobby -->
 	<widget name="h3/forge/title" type="text" left="16" top="18" width="240" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/forge_text" string_index="0"/>
-	<widget name="h3/forge/network" type="text" left="16" top="49" width="240" height="18" font="h3/font_item" color="#FFC5D0DD" text_y="2" string_list="h3/forge_text" string_index="1"/>
+	<widget name="h3/forge/network_row" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3">
+		<on event="a" open="h3/network/screen"/>
+	</widget>
+	<!-- (the connection's status under NETWORK, as the multiplayer lobby's) -->
+	<widget name="h3/forge/network_status" type="text" left="24" top="71" width="226" height="14" font="h3/font_small" color="#FF9FB6CC">
+		<data input="port h3 network status"/>
+	</widget>
 	<widget name="h3/forge/map_row" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3">
 		<on event="a" open="h3/forge/maps/screen"/>
 	</widget>
 	<widget name="h3/forge/packs_row" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3">
 		<on event="a" open="h3/forge/packs/screen"/>
 	</widget>
+	<!-- (START FORGE: LOCAL's, a local game; a network's, the live game's lobby - the profile screen
+	gives way to it, pc_menu_functions_profile_skip -, everyone in it into the Forge game; the other
+	network's row hidden, port forge lobby) -->
 	<widget name="h3/forge/start_row" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/forge_text" string_index="2">
 		<on event="a start" run="port forge start"/>
 	</widget>
+	<widget name="h3/forge/start_live" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/forge_text" string_index="2">
+		<on event="a start" run="port forge start live" open="ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen"/>
+	</widget>
 	<widget name="h3/forge/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<on event="y" open="h3/friends/screen"/>
-		<child widget="h3/forge/map_row" x="0" y="0"/>
-		<child widget="h3/forge/packs_row" x="0" y="20"/>
-		<child widget="h3/forge/start_row" x="0" y="40"/>
+		<on event="left_trigger" run="port h3 invite ask" open="h3/invite/screen"/>
+		<child widget="h3/forge/network_row" x="0" y="0"/>
+		<child widget="h3/forge/map_row" x="0" y="38"/>
+		<child widget="h3/forge/packs_row" x="0" y="58"/>
+		<child widget="h3/forge/start_row" x="0" y="78"/>
+		<child widget="h3/forge/start_live" x="0" y="78"/>
 	</widget>
-	<widget name="h3/forge/rule2" left="8" top="132" width="250" height="2" bitmap="h3/rule"/>
-	<widget name="h3/forge/ready" type="text" left="16" top="137" width="240" height="18" font="h3/font_item" color="#FFE6ECF2" text_y="1" string_list="h3/forge_text" string_index="3"/>
-	<widget name="h3/forge/ready_sub" type="text" left="16" top="153" width="240" height="16" font="h3/font_small" color="#FF9FB6CC" text_y="1" string_list="h3/forge_text" string_index="4"/>
-	<widget name="h3/forge/map_picture" left="16" top="176" width="140" height="114" bitmap="h3/mp_maps"/>
-	<widget name="h3/forge/emblem" left="22" top="182" width="64" height="64" bitmap="h3/forge_emblem"/>
-	<widget name="h3/forge/caption" type="text" left="16" top="296" width="240" height="20" font="h3/font_item" color="#FFEEF2F6" text_y="1"/>
+	<widget name="h3/forge/rule2" left="8" top="172" width="250" height="2" bitmap="h3/rule"/>
+	<widget name="h3/forge/ready" type="text" left="16" top="177" width="240" height="18" font="h3/font_item" color="#FFE6ECF2" text_y="1"/>
+	<widget name="h3/forge/ready_sub" type="text" left="16" top="193" width="240" height="34" font="h3/font_small" color="#FF9FB6CC" text_y="1"/>
+	<widget name="h3/forge/map_picture" left="16" top="232" width="140" height="114" bitmap="h3/mp_maps"/>
+	<widget name="h3/forge/emblem" left="22" top="238" width="64" height="64" bitmap="h3/forge_emblem"/>
+	<widget name="h3/forge/caption" type="text" left="16" top="350" width="240" height="20" font="h3/font_item" color="#FFEEF2F6" text_y="1"/>
 	<!-- (the variant's words, or why START FORGE did not start: port forge lobby) -->
-	<widget name="h3/forge/note" type="text" left="16" top="320" width="240" height="60" font="h3/font_small" color="#FF9FB6CC" text_y="1"/>
+	<widget name="h3/forge/note" type="text" left="16" top="372" width="240" height="60" font="h3/font_small" color="#FF9FB6CC" text_y="1"/>
 	<widget name="h3/forge/a_butn" left="16" top="447" width="16" height="16" bitmap="h3/glyph_cross"/>
 	<widget name="h3/forge/select" type="text" left="36" top="446" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/forge_text" string_index="5"/>
 	<widget name="h3/forge/b_butn" left="110" top="447" width="16" height="16" bitmap="h3/glyph_circle"/>
@@ -77,13 +98,14 @@ vehicles, the dropships, the Covenant AI), built in the background while the lob
 			menu_monitor:monitor 4.2 0.0 0.22 0 look=1">
 		<on event="created" run="port forge lobby init"/>
 		<on event="created" run="port h3 scene"/>
+		<on event="b back" run="port h3 live leave"/>
 		<on event="b back" back="true"/>
 		<data input="port forge lobby"/>
 		<child widget="h3/main/haze"/>
 		<child widget="h3/campaign/column"/>
 		<child widget="h3/forge/title"/>
 		<child widget="h3/campaign/rule1"/>
-		<child widget="h3/forge/network"/>
+		<child widget="h3/forge/network_status"/>
 		<child widget="h3/forge/rule2"/>
 		<child widget="h3/forge/ready"/>
 		<child widget="h3/forge/ready_sub"/>
@@ -96,10 +118,21 @@ vehicles, the dropships, the Covenant AI), built in the background while the lob
 		<child widget="h3/forge/select"/>
 		<child widget="h3/forge/b_butn"/>
 		<child widget="h3/forge/leave"/>
-		<child widget="h3/main/players"/>
+		<child widget="h3/mp/players"/>
 		<child widget="h3/main/nameplate"/>
 		<child widget="h3/friends/lobby_panel"/>
-		<child widget="h3/forge/list" x="8" y="70"/>
+		<!-- (live: L, INVITE FRIENDS online, and the game's players in the nameplate's place) -->
+		<child widget="h3/mp/l_butn"/>
+		<child widget="h3/mp/invite"/>
+		<child widget="h3/pregame/row_1" x="380" y="38"/>
+		<child widget="h3/pregame/row_2" x="380" y="56"/>
+		<child widget="h3/pregame/row_3" x="380" y="74"/>
+		<child widget="h3/pregame/row_4" x="380" y="92"/>
+		<child widget="h3/pregame/row_5" x="380" y="110"/>
+		<child widget="h3/pregame/row_6" x="380" y="128"/>
+		<child widget="h3/pregame/row_7" x="380" y="146"/>
+		<child widget="h3/pregame/row_8" x="380" y="164"/>
+		<child widget="h3/forge/list" x="8" y="50"/>
 	</widget>
 
 	<!-- the map picker: Halo 3's Select Map (the list at the left, the picture and its words at the

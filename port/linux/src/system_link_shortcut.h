@@ -30,6 +30,8 @@ enum
 	SYSTEM_LINK_REQUEST_FORGE,
 };
 
+/* (SYSTEM_LINK_REQUEST_FORGE, halo_forge_request_network) a network Forge
+game: hosted on the connection the game runs, its lobby (the game's) next */
 /* (SYSTEM_LINK_REQUEST_FORGE) a map variant's file name's room */
 #define HALO_FORGE_VARIANT_SIZE 40
 

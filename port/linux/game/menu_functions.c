@@ -338,6 +338,7 @@ enum
 	_function_h3_invite_ask,
 	_function_h3_invite_init,
 	_function_h3_invite_act,
+	_function_forge_start_live,
 };
 
 /* in port_game_data_input_names' order */
@@ -529,6 +530,9 @@ static struct
 	Halo 3 lobby's START GAME on SYSTEM LINK asked it, not Create Game */
 	boolean create_pending;
 	boolean create_system_link;
+	/* (the settings panel's network Forge game: menu_functions_forge_host)
+	the game created a Forge game of h3_forge's map, its lobby next */
+	boolean create_forge;
 	/* (the Halo 3 Create Game: its GAME TYPE or MAP picker opened, port h3
 	setup hold) what the screen showed, which it shows again when it is back
 	(setup_initialize) rather than the settings' */
@@ -599,6 +603,10 @@ static boolean h3_live_follow_wire(boolean reopen);
 static boolean h3_live_keep(void);
 static void h3_live_retry(void);
 static void h3_live_public_chosen(void);
+/* (the Forge lobby, halo3/forge_lobby.xml: its live game, h3_live's) */
+static void h3_live_forge_follow(void);
+static boolean h3_live_forge_start(void);
+static boolean h3_live_forge_live(void);
 
 static struct widget_instance *named(struct widget_instance *widget, char const *name)
 {
@@ -1853,9 +1861,23 @@ static struct
 	/* why START FORGE did not start (the lobby's note), until another
 	choice */
 	char note[FORGE_STORE_WHY_SIZE];
+	/* the NETWORK row said last (the tests read it); the lobby's first
+	opening this run (MAP focused) */
+	char network_said[96];
+	boolean focused_once;
+	/* the lobby's NETWORK (h3_mp's networks: OFFLINE - LOCAL here, a local
+	game - by default, as the lobby always was; set at its first update),
+	and whether the network picker was opened from this lobby (the last
+	lobby shown) rather than the multiplayer lobby */
+	short network;
+	boolean network_set;
+	boolean lobby_last;
 } h3_forge;
 
 static void h3_forge_variant_check(void);
+/* (the lobby's NETWORK, its live game's players and status: below, with
+the multiplayer lobby's) */
+static void h3_forge_lobby_network_update(struct widget_instance *screen);
 
 /* the lobby opened: Blood Gulch the first time (Halo 3's first Forge map
 is its open one), a map of the maps folder; what was chosen since, after */
@@ -1939,6 +1961,7 @@ static void h3_forge_lobby_update(struct widget_instance *widget)
 	}
 	if ((found = named(screen, "map_picture")) != NULL)
 		found->animation.current_frame_index = h3_forge.map;
+	h3_forge_lobby_network_update(screen);
 }
 
 /* the map picker: the maps of the maps folder shown, each its name, the
@@ -2622,6 +2645,8 @@ static void h3_mp_lobby_update(struct widget_instance *widget)
 	shows) */
 	if (h3_mp.network != _h3_network_offline)
 		h3_mp.network = h3_mp_network_of_connection();
+	if (named(screen, "network_row"))
+		h3_forge.lobby_last = FALSE;
 	snprintf(text, sizeof(text), "%s: %s", T("NETWORK"), h3_network_name(h3_mp.network));
 	h3_capitals(text);
 	text_show(named(screen, "network_row"), text);
@@ -2925,10 +2950,13 @@ and AD HOC the connection too, switched live (network_connection.c) */
 static boolean h3_mp_network_set(struct widget_instance *widget)
 {
 	short network = (short)PIN(h3_child_index(widget), 0, NUMBER_OF_H3_NETWORKS - 1);
+	/* (the picker of the lobby shown last: the multiplayer lobby's, or
+	the Forge lobby's own NETWORK) */
+	short *lobby_network = h3_forge.lobby_last ? &h3_forge.network : &h3_mp.network;
 
 	/* (a live lobby's game closed first: the connection switches only
 	with no network game, and the lobby opens again on the new one) */
-	if (network != h3_mp.network)
+	if (network != *lobby_network)
 		h3_live_close("another network chosen");
 	h3_live_retry();
 	if (network != _h3_network_offline)
@@ -2936,8 +2964,8 @@ static boolean h3_mp_network_set(struct widget_instance *widget)
 		network_connection_choose(network == _h3_network_online ? NETWORK_CONNECTION_ONLINE :
 			network == _h3_network_adhoc ? NETWORK_CONNECTION_ADHOC : NETWORK_CONNECTION_WIFI);
 	}
-	h3_mp.network = network;
-	platform_log("menus: h3 mp: network %s", h3_network_name(network));
+	*lobby_network = network;
+	platform_log("menus: %s: network %s", h3_forge.lobby_last ? "forge lobby" : "h3 mp", h3_network_name(network));
 	return TRUE;
 }
 
@@ -5780,6 +5808,8 @@ static boolean h3_forge_map_pick(struct widget_instance *widget)
 		h3_forge.variant_title[0] = 0;
 		platform_log("menus: forge lobby: %s", forge_map_name(h3_forge.map));
 	}
+	/* (a live lobby's game on it: its joiners' lobbies follow) */
+	h3_live_forge_follow();
 	return TRUE;
 }
 
@@ -9114,7 +9144,141 @@ static struct
 	host comes back to the lobby, the game kept (pc_menu_functions_live
 	_lobby_after_game) */
 	boolean game_of_lobby;
-} h3_live = { FALSE, NONE, FALSE, FALSE, FALSE, 0, 0, "", FALSE, "", FALSE };
+	/* the lobby is the Forge lobby's (halo3/forge_lobby.xml): its game a
+	network Forge game of its map (forge_net.inc), START FORGE its start */
+	boolean forge;
+} h3_live = { FALSE, NONE, FALSE, FALSE, FALSE, 0, 0, "", FALSE, "", FALSE, FALSE };
+
+/* the network of the lobby whose game it is: the multiplayer lobby's, or
+the Forge lobby's own NETWORK */
+#define H3_LIVE_NETWORK (h3_live.forge ? h3_forge.network : h3_mp.network)
+
+/* the lobby's game type and map as said (the Forge lobby's: Forge, its map) */
+static char const *h3_live_gametype_name(void)
+{
+	return h3_live.forge ? T("Forge") : h3_mp_gametype_name();
+}
+
+static char const *h3_live_map_name(void)
+{
+	return h3_live.forge ? T(forge_map_name(h3_forge.map)) : h3_mp_map_name();
+}
+
+/* (the Forge lobby's live game) its map and the Forge variant set on the
+game, as the multiplayer lobby's GAME and MAP are (h3_mp_host_choices), and
+the game a network Forge game (forge_net_host_begin: its joiners asked to
+play it, those that cannot refused from it): FALSE if it cannot be */
+static boolean h3_forge_host_choices(void)
+{
+	struct game_variant variant;
+	char const *map = forge_map_path(h3_forge.map);
+	struct network_game_server *server = global_network_game_server_get();
+	char build[0x20];
+	char why[FORGE_STORE_WHY_SIZE];
+
+	if (!server || !map || !forge_map_available(h3_forge.map))
+	{
+		platform_log("menus: forge lobby: no map to host");
+		return FALSE;
+	}
+	if (!cache_files_map_plays_multiplayer(map, build))
+	{
+		cache_files_show_multiplayer_unavailable(map, build);
+		platform_log("menus: forge lobby: %s is not played with others", map);
+		return FALSE;
+	}
+	if (!forge_net_host_begin(map, h3_forge.variant_file, why, (int)sizeof(why)))
+	{
+		snprintf(h3_forge.note, sizeof(h3_forge.note), "%s", why);
+		platform_log("menus: forge lobby: not hosted: %s", why);
+		return FALSE;
+	}
+	main_set_multiplayer_map_name((char *)map);
+	game_engine_override_map_name((char *)map);
+	network_game_server_change_map_name(server, (char *)map);
+	forge_variant_build(&variant);
+	player_ui_set_game_variant(&variant);
+	network_game_server_change_game_variant(server, &variant);
+	platform_log("menus: forge lobby: hosting Forge on %s%s%s", forge_map_name(h3_forge.map),
+		h3_forge.variant_file[0] ? ", map variant " : "", h3_forge.variant_title);
+	return TRUE;
+}
+
+/* the lobby's GAME and MAP (or the Forge lobby's map) set on its game */
+static boolean h3_live_host_choices(void)
+{
+	return h3_live.forge ? h3_forge_host_choices() : h3_mp_host_choices();
+}
+
+/* (the Forge lobby) whether its game is live; its map or map variant chosen
+(its live game on it); START FORGE on a network (its game's lobby next, the
+countdown at once: TRUE if live) */
+static boolean h3_live_forge_live(void)
+{
+	return h3_live.live && h3_live.forge;
+}
+
+static void h3_live_forge_follow(void)
+{
+	if (h3_live_forge_live())
+		h3_live_follow();
+}
+
+static void h3_live_lobby_show(struct widget_instance *screen);
+
+/* (port forge lobby) the Forge lobby's NETWORK row (LOCAL for OFFLINE, a
+local game; ONLINE, SYSTEM LINK, AD HOC: the connection's), START FORGE's
+row of it (a local game's, or the live game's), and, live, its players, who
+can join and L, INVITE FRIENDS (online), as the multiplayer lobby shows them */
+static void h3_forge_lobby_network_update(struct widget_instance *screen)
+{
+	struct widget_instance *found;
+	char text[96];
+	boolean local;
+
+	if (!h3_mp.initialized)
+		h3_mp_initialize();
+	h3_forge.lobby_last = TRUE;
+	if (!h3_forge.network_set)
+	{
+		h3_forge.network_set = TRUE;
+		h3_forge.network = _h3_network_offline;
+	}
+	if (h3_forge.network != _h3_network_offline)
+		h3_forge.network = h3_mp_network_of_connection();
+	local = h3_forge.network == _h3_network_offline;
+	snprintf(text, sizeof(text), "%s: %s", T("NETWORK"), local ? T("LOCAL") : h3_network_name(h3_forge.network));
+	h3_capitals(text);
+	text_show(named(screen, "network_row"), text);
+	if ((found = named(screen, "start_row")) != NULL)
+	{
+		widget_instance_set_visibility_recursive(found, local);
+		found->disabled = !local;
+	}
+	if ((found = named(screen, "start_live")) != NULL)
+	{
+		widget_instance_set_visibility_recursive(found, !local);
+		found->disabled = local;
+	}
+	if ((found = named(screen, "network_status")) != NULL)
+		widget_instance_set_visibility_recursive(found, !local);
+	/* (not live: the network's words; live: the game's, h3_live) */
+	if (!h3_live_forge_live())
+	{
+		text_show(named(screen, "players"), T("1 Player"));
+		text_show(named(screen, "ready"), T("Ready"));
+		text_show(named(screen, "ready_sub"), local ? T("This party is local to this PS Vita.") :
+			h3_forge.network == _h3_network_online ? T("Forge with friends on the Internet.") :
+			h3_forge.network == _h3_network_adhoc ? T("Forge with the PS Vitas near you.") :
+			T("Forge with the PS Vitas on your Wi-Fi."));
+	}
+	h3_live_lobby_show(screen);
+	if (strcmp(text, h3_forge.network_said))
+	{
+		snprintf(h3_forge.network_said, sizeof(h3_forge.network_said), "%s", text);
+		platform_log("menus: forge lobby: %s", text);
+	}
+}
 
 /* the setting's value now ("true", "false") */
 static void h3_live_public_setting(char *value, int size)
@@ -9130,7 +9294,7 @@ panel's Visibility otherwise only GAME OPTIONS' default */
 static void h3_live_private_by_default(void)
 {
 	h3_live_public_setting(h3_live.public_setting, (int)sizeof(h3_live.public_setting));
-	if (h3_mp.network != _h3_network_online || h3_live.public_chosen)
+	if (H3_LIVE_NETWORK != _h3_network_online || h3_live.public_chosen)
 		return;
 	p2p_lobby_set_public(0);
 	platform_log("menus: h3 live lobby: private until the host chooses Public (GAME OPTIONS, the settings panel)");
@@ -9166,6 +9330,7 @@ static void h3_live_close(char const *why)
 	network_game_accept_remote_connections(FALSE);
 	player_ui_clear_multiplayer_variant();
 	h3_live_forget_public();
+	forge_net_host_end();
 	platform_log("menus: h3 live lobby: closed (%s): its joiners are told the host left", why);
 }
 
@@ -9175,7 +9340,7 @@ static boolean h3_live_network_ready(void)
 {
 	char text[128];
 
-	switch (h3_mp.network)
+	switch (H3_LIVE_NETWORK)
 	{
 	case _h3_network_online:
 		return internet_play() && network_connection_running() == NETWORK_CONNECTION_ONLINE &&
@@ -9258,23 +9423,24 @@ static void h3_live_open(void)
 		h3_live_refuse("the game's server did not start");
 		return;
 	}
-	if (!h3_mp_host_choices())
+	if (!h3_live_host_choices())
 	{
 		dispose_global_network_game_client();
 		dispose_global_network_game_server();
 		network_game_accept_remote_connections(FALSE);
 		player_ui_clear_multiplayer_variant();
+		forge_net_host_end();
 		h3_live_refuse("its map or game type cannot be played with others");
 		return;
 	}
 	h3_live.live = TRUE;
-	h3_live.network = h3_mp.network;
+	h3_live.network = H3_LIVE_NETWORK;
 	h3_live.start_pending = FALSE;
 	h3_live.in_pregame = FALSE;
 	h3_live.opened_time = system_milliseconds();
 	h3_live.said[0] = 0;
-	platform_log("menus: h3 live lobby: open on %s (%s on %s): others join it now", h3_network_name(h3_mp.network),
-		h3_mp_gametype_name(), h3_mp_map_name());
+	platform_log("menus: h3 live lobby: open on %s (%s on %s): others join it now", h3_network_name(H3_LIVE_NETWORK),
+		h3_live_gametype_name(), h3_live_map_name());
 }
 
 /* (the lobby opened again, another network) a refused lobby tried again */
@@ -9295,9 +9461,9 @@ static boolean h3_live_follow(void)
 		return TRUE;
 	if (!server || !network_game_server_port_in_lobby(server))
 		return TRUE;
-	if (!h3_mp_host_choices())
+	if (!h3_live_host_choices())
 		return FALSE;
-	platform_log("menus: h3 live lobby: now %s on %s, sent to its joiners", h3_mp_gametype_name(), h3_mp_map_name());
+	platform_log("menus: h3 live lobby: now %s on %s, sent to its joiners", h3_live_gametype_name(), h3_live_map_name());
 	return TRUE;
 }
 
@@ -9408,7 +9574,10 @@ static void h3_live_lobby_show(struct widget_instance *screen)
 				T("Private: friends, your invites and\nyour code join it."));
 	}
 	else
-		text_show(named(screen, "ready_sub"), h3_live.network == _h3_network_adhoc ?
+		text_show(named(screen, "ready_sub"), h3_live.forge ? (h3_live.network == _h3_network_adhoc ?
+			T("The PS Vitas near you can join.\nSTART FORGE takes everyone here.") :
+			T("The PS Vitas on your Wi-Fi can join.\nSTART FORGE takes everyone here.")) :
+			h3_live.network == _h3_network_adhoc ?
 			T("The PS Vitas near you can join.\nSTART GAME plays with everyone here.") : with_pc ?
 			T("PS Vitas and PCs on your Wi-Fi can\njoin. START GAME plays with everyone.") :
 			T("The PS Vitas on your Wi-Fi can join.\nSTART GAME plays with everyone here."));
@@ -9417,7 +9586,7 @@ static void h3_live_lobby_show(struct widget_instance *screen)
 	if (strcmp(line, h3_live.said))
 	{
 		snprintf(h3_live.said, sizeof(h3_live.said), "%s", line);
-		platform_log("menus: h3 live lobby: %s on %s%s", h3_mp_gametype_name(), h3_mp_map_name(), line);
+		platform_log("menus: h3 live lobby: %s on %s%s", h3_live_gametype_name(), h3_live_map_name(), line);
 	}
 }
 
@@ -9429,8 +9598,13 @@ static void h3_live_update(boolean main_menu_loaded)
 {
 	struct widget_instance *active = ui_widget_port_active_screen(0);
 	long lobby_tag = menu_tags_ingame_screen("h3/mp/screen");
+	long forge_tag = menu_tags_ingame_screen("h3/forge/lobby");
 	long main_tag = menu_tags_ingame_screen("h3/main/screen");
-	boolean lobby_up = active && lobby_tag != NONE && active->definition_tag_index == lobby_tag;
+	/* (the multiplayer lobby, or the Forge lobby: each live the same way,
+	the Forge lobby's game a network Forge game, forge_net.inc) */
+	boolean mp_up = active && lobby_tag != NONE && active->definition_tag_index == lobby_tag;
+	boolean forge_up = active && forge_tag != NONE && active->definition_tag_index == forge_tag;
+	boolean lobby_up = mp_up || forge_up;
 	struct network_game_server *server = global_network_game_server_get();
 	struct network_game_client *client = global_network_game_client_get();
 
@@ -9473,11 +9647,17 @@ static void h3_live_update(boolean main_menu_loaded)
 			h3_live_close("the host is back at the main menu");
 			return;
 		}
+		/* (the other lobby opened: its game is another kind) */
+		if ((mp_up && h3_live.forge) || (forge_up && !h3_live.forge))
+		{
+			h3_live_close(forge_up ? "the Forge lobby opened" : "the multiplayer lobby opened");
+			return;
+		}
 		if (lobby_up)
 			h3_live.in_pregame = FALSE;
 		/* (the connection another now - Online's fallback to Same Wi-Fi -:
 		the game was the old one's) */
-		if (h3_mp.network != h3_live.network)
+		if (H3_LIVE_NETWORK != h3_live.network)
 		{
 			h3_live_close("the lobby's network changed");
 			return;
@@ -9538,12 +9718,14 @@ static void h3_live_update(boolean main_menu_loaded)
 	}
 	if (!h3_live.lobby_up_since)
 		h3_live.lobby_up_since = system_milliseconds() ? system_milliseconds() : 1;
+	/* (which lobby's game: the multiplayer lobby's or the Forge lobby's) */
+	h3_live.forge = forge_up;
 	/* (a game the lobby's START GAME hosted the way it did before it was
 	live - not ready then, or no profile - its lobby left with B, the game
 	kept as the Xbox's lobby keeps it: the lobby's live game now, its
 	players with it, when the network carries it; else closed, its joiners
 	told: never a game left behind the lobby, holding the connection) */
-	if (server && client && !h3_live.refused && h3_mp.network != _h3_network_offline && halo_menu_style_halo3() &&
+	if (server && client && !h3_live.refused && H3_LIVE_NETWORK != _h3_network_offline && halo_menu_style_halo3() &&
 		network_game_server_port_in_lobby(server) && system_milliseconds() - h3_live.lobby_up_since >= H3_LIVE_SETTLE_MILLISECONDS)
 	{
 		if (!h3_live_keep())
@@ -9553,7 +9735,7 @@ static void h3_live_update(boolean main_menu_loaded)
 		}
 		return;
 	}
-	if (h3_live.refused || h3_mp.network == _h3_network_offline || !halo_menu_style_halo3() || server || client ||
+	if (h3_live.refused || H3_LIVE_NETWORK == _h3_network_offline || !halo_menu_style_halo3() || server || client ||
 		!h3_live_network_ready())
 	{
 		return;
@@ -9583,6 +9765,13 @@ static boolean h3_live_start(void)
 	return TRUE;
 }
 
+static boolean h3_live_forge_start(void)
+{
+	if (!h3_live_forge_live())
+		return FALSE;
+	return h3_live_start();
+}
+
 /* (the game's lobby opening, port h3 pregame init) after START GAME on a
 live lobby: the countdown begun at once */
 static void h3_live_pregame(void)
@@ -9604,17 +9793,17 @@ played and over) the lobby's live game, when the network carries it and
 the lobby's GAME and MAP can be played: TRUE */
 static boolean h3_live_keep(void)
 {
-	if (!h3_live_network_ready() || !h3_mp_host_choices())
+	if (!h3_live_network_ready() || !h3_live_host_choices())
 		return FALSE;
 	h3_live_private_by_default();
 	h3_live.live = TRUE;
-	h3_live.network = h3_mp.network;
+	h3_live.network = H3_LIVE_NETWORK;
 	h3_live.start_pending = FALSE;
 	h3_live.in_pregame = FALSE;
 	h3_live.opened_time = system_milliseconds();
 	h3_live.said[0] = 0;
-	platform_log("menus: h3 live lobby: its game kept, live on %s (%s on %s)", h3_network_name(h3_mp.network),
-		h3_mp_gametype_name(), h3_mp_map_name());
+	platform_log("menus: h3 live lobby: its game kept, live on %s (%s on %s)", h3_network_name(H3_LIVE_NETWORK),
+		h3_live_gametype_name(), h3_live_map_name());
 	return TRUE;
 }
 
@@ -9627,7 +9816,8 @@ lobby as between any two games - its GAME and MAP the lobby's
 (h3_live_update's kept game). TRUE if the lobby opened */
 boolean pc_menu_functions_live_lobby_after_game(void)
 {
-	long lobby_tag = menu_tags_ingame_screen("h3/mp/screen");
+	/* (the Forge lobby's game: back to the Forge lobby) */
+	long lobby_tag = menu_tags_ingame_screen(h3_live.forge ? "h3/forge/lobby" : "h3/mp/screen");
 	long main_tag = menu_tags_ingame_screen("h3/main/screen");
 	struct network_game_server *server = global_network_game_server_get();
 	struct widget_instance *screen;
@@ -9647,8 +9837,8 @@ boolean pc_menu_functions_live_lobby_after_game(void)
 		static char const *const start_rows[NUMBER_OF_H3_NETWORKS] = { "start_online", "start_link", "start_adhoc",
 			"start_offline" };
 		struct widget_instance *list = named(screen, "list");
-		struct widget_instance *start = h3_mp.network >= 0 && h3_mp.network < NUMBER_OF_H3_NETWORKS ?
-			named(screen, start_rows[h3_mp.network]) : NULL;
+		struct widget_instance *start = h3_live.forge ? named(screen, "start_live") :
+			h3_mp.network >= 0 && h3_mp.network < NUMBER_OF_H3_NETWORKS ? named(screen, start_rows[h3_mp.network]) : NULL;
 
 		if (list && start)
 			ui_widget_port_give_focus(list, start);
@@ -10102,6 +10292,16 @@ boolean pc_menu_event_function_invoke(
 		return TRUE;
 	case _function_forge_lobby_init:
 		h3_forge_lobby_initialize();
+		/* (the first time this run, MAP focused, as before NETWORK came
+		first) */
+		if (!h3_forge.focused_once)
+		{
+			struct widget_instance *list = named(screen_of(widget), "list");
+
+			h3_forge.focused_once = TRUE;
+			if (list)
+				h3_focus_child(list, 1);
+		}
 		return TRUE;
 	case _function_forge_map_set:
 		if (forge_map_available((short)h3_child_index(widget)) && h3_forge.map != (short)h3_child_index(widget))
@@ -10120,8 +10320,9 @@ boolean pc_menu_event_function_invoke(
 		return TRUE;
 	case _function_forge_start:
 		/* (START FORGE: the local game of the map, in Forge mode; nothing
-		with no map to play) */
-		if (!forge_map_available(h3_forge.map))
+		with no map to play; on a network the lobby's live game's, START
+		FORGE's row of it) */
+		if (!forge_map_available(h3_forge.map) || h3_forge.network != _h3_network_offline)
 			return FALSE;
 		{
 			char label[64];
@@ -10146,6 +10347,23 @@ boolean pc_menu_event_function_invoke(
 			return FALSE;
 		}
 		return TRUE;
+	case _function_forge_start_live:
+		/* (START FORGE on ONLINE, SYSTEM LINK or AD HOC: the live game's
+		lobby, everyone in it taken into the Forge game; not live - the
+		network not ready, no profile -: said, nothing opened) */
+		if (h3_forge.network == _h3_network_offline || !forge_map_available(h3_forge.map))
+			return FALSE;
+		if (h3_live_forge_start())
+		{
+			platform_log("menus: forge lobby: START FORGE: the game's lobby, everyone in it into Forge on %s",
+				forge_map_name(h3_forge.map));
+			return TRUE;
+		}
+		if (!h3_forge.note[0])
+			snprintf(h3_forge.note, sizeof(h3_forge.note), "%s",
+				T("The lobby isn't open yet: wait for the\nnetwork, or choose NETWORK: LOCAL."));
+		platform_log("menus: forge lobby: START FORGE: the lobby is not live yet");
+		return FALSE;
 	case _function_forge_browser_init:
 		h3_forge.page = 0;
 		h3_forge.said[0] = 0;
@@ -10180,7 +10398,7 @@ boolean pc_menu_event_function_invoke(
 	case _function_h3_network_set:
 		return h3_mp_network_set(widget);
 	case _function_h3_network_focus:
-		h3_focus_child(widget, h3_mp.network);
+		h3_focus_child(widget, h3_forge.lobby_last ? h3_forge.network : h3_mp.network);
 		return TRUE;
 	case _function_h3_host_system_link:
 		/* (START GAME on SYSTEM LINK: the System Link list, once the profile
@@ -10772,6 +10990,33 @@ void pc_menu_game_data_function_invoke(
 	}
 }
 
+/* (the settings panel's Forge page, Network on: system_link_shortcut.c, for
+the Halo CE menus too) a network Forge game of that map and map variant
+hosted once the System Link screen's profile is chosen, its lobby (the
+game's) next; FALSE with why if the map cannot be */
+boolean menu_functions_forge_host(
+	short map_index,
+	char const *variant_file,
+	char *why,
+	int why_size)
+{
+	if (map_index < 0 || map_index >= forge_map_count() || !forge_map_available(map_index))
+	{
+		snprintf(why, (size_t)why_size, "%s", T("No multiplayer map is in the maps folder."));
+		return FALSE;
+	}
+	h3_forge.map = map_index;
+	snprintf(h3_forge.variant_file, sizeof(h3_forge.variant_file), "%s", variant_file ? variant_file : "");
+	h3_forge.variant_title[0] = 0;
+	h3_forge_variant_check();
+	menu_functions.create_pending = TRUE;
+	menu_functions.create_system_link = network_connection_running() != NETWORK_CONNECTION_ONLINE;
+	menu_functions.create_forge = TRUE;
+	platform_log("menus: forge: the settings panel's network Forge game of %s: the profile, then its lobby",
+		forge_map_name(map_index));
+	return TRUE;
+}
+
 /* (menu_tags_screen) a screen of the game's that opens: Server Setup's START
 went to the System Link screen's profile; once chosen, the new game's map
 list, its server started (as the System Link list's Y does) */
@@ -10785,10 +11030,31 @@ long pc_menu_functions_screen(
 		START GAME on SYSTEM LINK) */
 		char const *asked = menu_functions.create_system_link ? "Multiplayer > System Link" : "Create Game > Internet";
 
+		boolean forge = menu_functions.create_forge;
+
 		menu_functions.create_pending = FALSE;
 		menu_functions.create_system_link = FALSE;
+		menu_functions.create_forge = FALSE;
 		if (map_select != NONE && ui_widget_port_start_network_game_server())
 		{
+			/* (the settings panel's network Forge game: its map and the Forge
+			variant, the game a Forge game, its lobby at once - the Halo CE
+			menus' pregame screen) */
+			if (forge)
+			{
+				long pregame = tag_loaded(UI_WIDGET_DEFINITION_TAG, pregame_screen);
+
+				if (pregame != NONE && h3_forge_host_choices())
+				{
+					menu_functions.pregame_drop_profile = menu_functions.profile_shown;
+					menu_functions.profile_shown = FALSE;
+					platform_log("menus: forge: the network Forge game's server started; the game's lobby");
+					return pregame;
+				}
+				platform_log("menus: forge: the network Forge game could not be hosted: the map list");
+				forge_net_host_end();
+				return map_select;
+			}
 			/* (Menu style Halo 3: the lobby's GAME and MAP, chosen there,
 			not asked for again: the game's lobby at once) */
 			long pregame = tag_loaded(UI_WIDGET_DEFINITION_TAG, pregame_screen);

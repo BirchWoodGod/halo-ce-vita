@@ -75,6 +75,8 @@ network Forge (it ignores the hello, as an older build), for the tests.
 
 /* (network_client_manager.c's) */
 boolean network_game_client_send_to_server(struct network_game_client *client, void *message);
+/* (main.c's) */
+int halo_main_menu_loaded(void);
 void platform_show_message(char const *title, char const *text);
 
 /* ---------- constants */
@@ -235,6 +237,8 @@ static struct
 	/* --- the lobby, a joiner's: the host said Forge (its hello, kept) */
 	boolean client_session;
 	uint32_t client_session_id;
+	/* (a joiner) its packs and blocks to be prebuilt in the lobby */
+	boolean prebuild_wanted;
 	char host_title[FORGE_NET_TITLE_SIZE];
 	char missing_packs[FORGE_LINE_SIZE];
 	boolean refused_said;
@@ -722,7 +726,8 @@ static void forge_net_host_lobby_update(
 		forge_net_host_end();
 		return;
 	}
-	if (network_wire_crossplay())
+	/* (none until the host's own machine is known: never asked) */
+	if (network_wire_crossplay() || network_game_client_get_local_machine_index() == NONE)
 		return;
 	count = network_game_server_port_joined_machines(machines, (short)NUMBEROF(machines));
 	in_progress = network_game_server_get_state(server, NULL) == FORGE_NET_SERVER_STATE_INGAME;
@@ -756,6 +761,11 @@ static void forge_net_host_lobby_update(
 		long machine_index = machines[index];
 		short slot;
 		short free_slot = NONE;
+
+		/* (the host's own machine, joined to its own game as a lobby's
+		host is: never asked) */
+		if (machine_index == network_game_client_get_local_machine_index())
+			continue;
 
 		for (slot = 0; slot < FORGE_NET_MAXIMUM_MACHINES; slot++)
 		{
@@ -879,8 +889,9 @@ void forge_net_client_handle_lobby_message(
 		network_event("forge net: a host's message that could not be decoded");
 		return;
 	}
-	/* (a machine that does not play it ignores it, as an older build) */
-	if (!forge_net_capable())
+	/* (a machine that does not play it ignores it, as an older build; the
+	host its own, joined to its own game) */
+	if (!forge_net_capable() || forge_net.hosting)
 		return;
 	if (!forge_net_lobby_valid(&hello, TRUE))
 	{
@@ -958,9 +969,11 @@ void forge_net_client_handle_lobby_message(
 		if (!reply || !network_game_client_send_to_server(client, reply))
 			network_event("forge net: the answer could not be sent");
 	}
-	/* (the packs it brings are built as its map loads, as the host's are
-	without its lobby: a prebuild here would still be going, paused for the
-	map's copy, as the map's load waits for it) */
+	/* (the packs it brings, and the building blocks of the host's map,
+	built meanwhile in the lobby, at the main menu's pace: what is not
+	built yet when the map loads is built then - its load stops a prebuild's
+	pauses, scene_packs_load_now -) */
+	forge_net.prebuild_wanted = TRUE;
 	platform_log("forge net: the host's game is a Forge game (session %08x%s%s): playing it, packs %lx%s%s",
 		(unsigned)hello.session, hello.title[0] ? ", map variant " : "", hello.title, forge_globals.packs_session,
 		forge_net.missing_packs[0] ? ", missing: " : "", forge_net.missing_packs);
@@ -977,6 +990,27 @@ void forge_net_frame(
 	{
 		forge_net.client_session = FALSE;
 		platform_log("forge net: the host's Forge game left");
+	}
+	/* (a joiner in the host's lobby: its packs and the map's blocks
+	prebuilt, once the lobby's map is known) */
+	if (forge_net.client_session && forge_net.prebuild_wanted && halo_main_menu_loaded())
+	{
+		struct network_game *game = network_game_get_game();
+		char map_name[FORGE_FILE_MAP_NAME_SIZE];
+		short index;
+
+		if (game && game->map.name[0] && forge_map_short_name(game->map.name, map_name, sizeof(map_name)) &&
+			forge_map_of_short(map_name) != NONE)
+		{
+			forge_net.prebuild_wanted = FALSE;
+			for (index = 0; index < FORGE_PACK_COUNT; index++)
+			{
+				if (forge_globals.packs_session & (1UL << index))
+					scene_packs_prebuild(forge_packs[index].name);
+			}
+			forge_blocks_prebuild(map_name);
+			platform_log("forge net: the host's packs and %s's blocks prebuilt in its lobby", map_name);
+		}
 	}
 }
 
@@ -3343,6 +3377,20 @@ static void forge_net_log_state(
 	if (arguments && !strncmp(arguments, "junk", 4))
 	{
 		forge_net_junk(MAX(1, atol(arguments + 4)));
+		return;
+	}
+	/* (tests: "forge net grab #<id>", a client) the grab asked of the host
+	whatever this machine's own copy of the layout says of its holder: the
+	host's own check of the first grab, as when both ask at once */
+	if (arguments && !strncmp(arguments, "grab #", 6) && forge_net_client())
+	{
+		struct forge_net_record record;
+
+		forge_net_request_init(&record, _forge_net_request_grab);
+		record.id = (uint32_t)atol(arguments + 6);
+		forge_net_request_send(&record);
+		forge_net_grant_wait(_forge_net_grant_grab);
+		platform_log("forge net: asked the host to grab #%lu, unchecked here", (unsigned long)record.id);
 		return;
 	}
 #endif

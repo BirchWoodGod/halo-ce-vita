@@ -1810,6 +1810,12 @@ boolean scene_packs_load_now(
 				scene_packs.cancel = TRUE;
 			}
 			scene_packs.job.low = FALSE;
+			/* (the game thread waits for this job now: never paused for a
+			map's copy or a network game meanwhile - a joiner's map load in a
+			network Forge game waited for a build its own wait paused, for
+			ever; the next frame's update pauses builds again) */
+			__atomic_store_n(&scene_packs.pause_builds, FALSE, __ATOMIC_RELEASE);
+			__atomic_store_n(&scene_packs.pause_prebuilds, FALSE, __ATOMIC_RELEASE);
 			job_finish();
 		}
 		state = state_get(slot);
@@ -1931,15 +1937,19 @@ static void scene_packs_update_internal(
 	void)
 {
 	int cache_files_reads_pending(void);
+	int halo_main_menu_loaded(void);
 	boolean copying = cache_files_precache_in_progress();
-	boolean network = game_connection() != _game_connection_local;
+	/* (a network game under way; its lobby, at the main menu, builds as
+	the main menu does: a network Forge game's joiner's packs prebuilt there,
+	forge_net.inc) */
+	boolean network = game_connection() != _game_connection_local && !halo_main_menu_loaded();
 
 	if (!scene_packs.pack_count)
 		return;
 	/* (the worker's pauses: a map copied to the cache partition, a network
 	game; a prebuild's also away from the main menu at rest) */
 	__atomic_store_n(&scene_packs.pause_builds, copying || network, __ATOMIC_RELEASE);
-	__atomic_store_n(&scene_packs.pause_prebuilds, copying || network || !halo_main_menu_idle(), __ATOMIC_RELEASE);
+	__atomic_store_n(&scene_packs.pause_prebuilds, copying || network || !halo_main_menu_loaded(), __ATOMIC_RELEASE);
 	if (scene_packs.thread_running && __atomic_load_n(&scene_packs.job.done, __ATOMIC_ACQUIRE))
 		job_finish();
 	/* (a build takes the free room for its scratch: loads and releases
