@@ -99,10 +99,10 @@ int config_boolean(const char *name)
 		return friends_join_setting;
 	return 0;
 }
+static const char *lobby_name_setting = "";
 const char *config_string(const char *name)
 {
-	(void)name;
-	return "";
+	return !strcmp(name, "network.lobby_name") ? lobby_name_setting : "";
 }
 static int quiet;
 void platform_log(const char *format, ...)
@@ -206,6 +206,9 @@ static struct
 	int from;
 } carried[LOGGED];
 static int carried_count;
+/* how many brokers carry each message (the game publishes through every
+broker at once: each copy heard, the same signed message again) */
+static int broker_copies = 1;
 
 static void use(int machine)
 {
@@ -259,7 +262,12 @@ static void broker(void)
 			}
 			for (to = 0; to < MACHINES; to++)
 				if (to != from)
-					hand(to, entry.topic, entry.payload, entry.size);
+				{
+					int copy;
+
+					for (copy = 0; copy < broker_copies; copy++)
+						hand(to, entry.topic, entry.payload, entry.size);
+				}
 		}
 		use(from);
 		friends->outbound_count = 0;
@@ -1854,6 +1862,93 @@ static void test_wires(void)
 	check(!strncmp(topic, "hcev/f1/m/", 10), "the friends' topics are hcev/f1's on every build");
 }
 
+/* a friend whose game closed and started again (a new run: the same
+identity, a newer epoch, nothing of the party kept) is invited again at once,
+the invite heard and the party joined, with every message carried by two
+brokers (each heard twice: the copies dropped as replays, nothing new
+dropped) - insider.18: the invite sent to the run that closed stood for two
+minutes, a new one refused as too soon, so "I didn't get it, try again?" got
+nothing */
+static void test_party_restart(void)
+{
+	char id[P2P_FRIEND_ID_SIZE];
+	struct p2p_party_follow follow;
+	unsigned long long epoch_before;
+
+	party_reset();
+	broker_copies = 2;
+	use(0);
+	p2p_friends_set_name("Alpha");
+	use(1);
+	p2p_friends_set_name("Bravo");
+	party_make_friends(0, 1);
+	party_pass(10);
+	check(party_friend_id(0, 1, id) && p2p_party_invite(id) == P2P_PARTY_DONE, "restart: Alpha invites Bravo");
+	party_pass(2);
+	use(1);
+	check(friends->party_invite_count == 1, "restart: Bravo heard the invite once (its copy dropped)");
+	check(drops(1) > 0, "restart: the second broker's copies dropped as replays");
+	/* Bravo's game closes before answering, and starts again */
+	use(1);
+	save(1);
+	epoch_before = machines[1].epoch;
+	memset(&machines[1], 0, sizeof(machines[1]));
+	memset(&hosts[1], 0, sizeof(hosts[1]));
+	hosts[1].online = 1;
+	use(1);
+	p2p_friends_set_game(-1, 0, NULL, 0);
+	/* (its profile not chosen yet: its first presences carry no name, never
+	the lobby's) */
+	lobby_name_setting = "Bloodgulch ctf";
+	party_pass(1);
+	use(1);
+	check(machines[1].epoch > epoch_before && friends->party_invite_count == 0, "restart: Bravo's new run, no invite");
+	party_pass(4);
+	use(0);
+	check(find_friend(machines[1].key) && !strcmp(find_friend(machines[1].key)->name, "Bravo"),
+		"restart: Bravo's name kept before their profile's is said (not the lobby's)");
+	lobby_name_setting = "";
+	use(1);
+	p2p_friends_set_name("Bravo");
+	party_pass(10);
+	use(0);
+	check(find_friend(machines[1].key) && find_friend(machines[1].key)->presence.online, "restart: Bravo online again");
+	check(party_friend_id(0, 1, id) && p2p_party_invite(id) == P2P_PARTY_DONE,
+		"restart: Alpha invites Bravo's new run at once");
+	party_pass(2);
+	use(1);
+	check(friends->party_invite_count == 1, "restart: the new run heard the invite");
+	check(party_answer_all(1, 1) == 1, "restart: Bravo accepts");
+	party_pass(4);
+	check(party_count_of(0, NULL) == 2 && party_count_of(1, NULL) == 2, "restart: a party of two on each machine");
+	/* the leader hosts: the member is told to follow, through both brokers */
+	{
+		char expected[P2P_LINK_SIZE];
+		int index;
+
+		hosts[0].hosting = 1;
+		for (index = 0; index < P2P_KEY_HASH_SIZE; index++)
+			hosts[0].key_hash[index] = (unsigned char)(0x31 + index);
+		for (index = 0; index < P2P_TOKEN_SIZE; index++)
+			hosts[0].token[index] = (unsigned char)(0x51 + index);
+		hosts[0].open = 1;
+		hosts[0].players = 1;
+		hosts[0].maximum = 16;
+		use(0);
+		p2p_friends_set_activity(P2P_FRIEND_STATE_MULTIPLAYER, "bloodgulch", "Forge", 2, -1, 0, 1, 16);
+		party_pass(4);
+		use(1);
+		check(p2p_party_follow_pending(&follow) && follow.hosting, "restart: the member is told to follow the leader");
+		invite_link(hosts[0].key_hash, hosts[0].token, expected);
+		join_count = 0;
+		use(1);
+		check(p2p_party_follow_join(follow.serial) == P2P_PARTY_FOLLOW_JOINING && join_count == 1 &&
+			!strcmp(joined_link, expected), "restart: the follow joins the leader's invite");
+		hosts[0].hosting = hosts[0].open = 0;
+	}
+	broker_copies = 1;
+}
+
 int main(void)
 {
 	char root[512];
@@ -1882,6 +1977,7 @@ int main(void)
 	test_limits();
 	test_cards();
 	test_party();
+	test_party_restart();
 	if (failures)
 	{
 		printf("%d failures\n", failures);

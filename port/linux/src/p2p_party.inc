@@ -747,6 +747,44 @@ static void party_remove_index(int index, const char *why)
 	friends->party.presence_due = 1;
 }
 
+/* a friend heard from in a new run (p2p_friends.c's replay_check): the
+invites to and from the run that closed are gone with it (one sent there
+stood for PARTY_INVITE_LIFETIME, a new one to the new run refused as too soon
+meanwhile, though the run it went to could never answer), and a member who
+was that run is not in the party any more (its party went with it: not
+waited for for PARTY_TIMEOUT, its slot not followed into games) */
+static void party_friend_new_run(struct friend_record *record)
+{
+	int index, cleared = 0;
+
+	invites_of_remove(record->key);
+	for (index = friends->party.sent_count - 1; index >= 0; index--)
+		if (p2p_equal(friends->party.sent[index].key, record->key, P2P_KEY_SIZE))
+		{
+			memmove(&friends->party.sent[index], &friends->party.sent[index + 1],
+				sizeof(friends->party.sent[0]) * (size_t)(friends->party.sent_count - index - 1));
+			friends->party.sent_count--;
+			cleared++;
+		}
+	for (index = friends->party_invite_count - 1; index >= 0; index--)
+		if (p2p_equal(friends->party_invites[index].key, record->key, P2P_KEY_SIZE))
+		{
+			memmove(&friends->party_invites[index], &friends->party_invites[index + 1],
+				sizeof(friends->party_invites[0]) * (size_t)(friends->party_invite_count - index - 1));
+			friends->party_invite_count--;
+			cleared++;
+		}
+	record->party_invite_sent_time = 0;
+	index = friends->party.active ? party_member_index(record->key) : -1;
+	if (index >= 0 && !p2p_equal(record->key, friends->key, P2P_KEY_SIZE))
+	{
+		party_remove_index(index, T("went offline"));
+		cleared++;
+	}
+	if (cleared)
+		platform_log("party: %s's game started again: %d invites or places of its last run let go", record->name, cleared);
+}
+
 static int party_keys_unique(const struct message *message)
 {
 	int index, other, self = 0;
