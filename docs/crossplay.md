@@ -1427,9 +1427,10 @@ sends is the same for a Vita and a PC.
 | Test | Result |
 |---|---|
 | unit: network_wire_test (five builds: platform, marks, audiences, refusal, the retired setting), crossplay_guard_test, p2p_lobby_test (the stamp), p2p_friends_test (the presence bits), vita_settings_test (the row, its migration), lang | PASS |
-| `run_netns_online_test.sh vitapc`: a PC build's public game and a Vita's; a Vita's browser, and an older build's (HALO_TEST_VITA_OLD) | see the commit |
-| `run_netns_online_test.sh vitaonly`: a Vita host for Vita refuses the PC build, takes a Vita; for Vita PC takes both | see the commit |
-| `run_menus_test.sh h3vitapc h3createwho`: the tags and groups; WHO CAN JOIN's choices on a Vita and on the PC build | see the commit |
+| `run_netns_online_test.sh vitapc`: a PC build's public game and a Vita's; a Vita's browser, and an older build's (HALO_TEST_VITA_OLD: 717e788e4) | PASS: rows `[VITA (PC)] "PcBuildHost"`, `[VITA] "VitaHost"`; the Vita joins the PC build's game; the older build lists both as `[VITA]` and joins it too |
+| `run_netns_online_test.sh vitaonly`: a Vita host for Vita refuses the PC build, takes a Vita; for Vita PC takes both | PASS: the PC build's row `[VITA VITAS ONLY] "VitaOnly"`, refused with `_rejection_code_vitas_only` and told "This game is for PS Vitas only"; the Vita in; for Vita PC both in |
+| `run_menus_test.sh h3vitapc h3createwho`: the tags and groups; WHO CAN JOIN's choices on a Vita and on the PC build | PASS (and h3create, h3mp, h3browser, h3lan, h3groups, h3oddrows, browserrows as before) |
+| `run_netns_online_test.sh code lan lobby`, `run_netns_crossplay_test.sh browserboth` | code, lan, lobby PASS; browserboth's Vita rows as before (`[VITA]`, `[VITA+PC]`, online and on the LAN), its OpenCE half not run: the OpenCE builds at hand announce 26 and 32, which the crossplay wire refuses |
 
 ## 11. Licensing and credit
 
