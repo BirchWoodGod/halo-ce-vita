@@ -1096,7 +1096,6 @@
 "Plasma Rifle" = "Rifle de plasma"
 "Needler" = "Aguijoneador"
 "Fuel Rod Gun" = "Cañón de combustible"
-"Gravity Rifle" = "Rifle gravitatorio"
 "Energy Sword" = "Espada de energía"
 "Frag Grenade" = "Granada de fragmentación"
 "Plasma Grenade" = "Granada de plasma"
