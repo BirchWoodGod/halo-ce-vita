@@ -62,7 +62,8 @@ host) and debug.network_test_vehicle (the host seats the last player as a
 vehicle's driver that many seconds in, takes them out 15 seconds on, and 5
 seconds later stands them at a vehicle's driver's entrance, where a joining
 machine's player holds the action button, as getting in does)
-and debug.network_test_pickup (the last player stands on a weapon lying
+and debug.network_test_pickup (the last player - the first with
+HALO_NETWORK_TEST_PICKUP_PLAYER=first - stands on a weapon lying
 about that many seconds in, and a joining machine's player holds the action
 button a second later, to pick it up). HALO_NETWORK_TEST_PLAYER_DRIVES
 (seconds; a "local:" game) seats this machine's player as the nearest
@@ -1196,17 +1197,34 @@ link-time optimisation read the rest as garbage: every init.txt command was refu
 boolean player_handle_powerup(long player_index, short powerup_type, short duration);
 
 /* the host gives the last player a second weapon, lying about */
-static void network_test_second_weapon(
+/* the player network_test_pickup stands on a weapon: the last, or with
+HALO_NETWORK_TEST_PICKUP_PLAYER=first the first (a local game's own player
+with HALO_BOTS: its HUD shows the prompt, the button icons' screenshots) */
+static struct player_datum *network_test_pickup_player(
 	void)
 {
 	struct data_iterator iterator;
 	struct player_datum *player;
 	struct player_datum *last = NULL;
-	struct object_iterator weapons;
+	char const *which = getenv("HALO_NETWORK_TEST_PICKUP_PLAYER");
 
 	data_iterator_new(&iterator, player_data);
 	while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+	{
 		last = player;
+		if (which && !strcmp(which, "first"))
+			break;
+	}
+
+	return last;
+}
+
+static void network_test_second_weapon(
+	void)
+{
+	struct player_datum *last = network_test_pickup_player();
+	struct object_iterator weapons;
+
 	if (!last || last->unit_index == NONE)
 		return;
 	object_iterator_new(&weapons, _object_mask_weapon, 0);
@@ -1235,17 +1253,12 @@ it has it, within a tolerance) */
 static void network_test_pickup(
 	void)
 {
-	struct data_iterator iterator;
-	struct player_datum *player;
-	struct player_datum *last = NULL;
+	struct player_datum *last = network_test_pickup_player();
 	struct object_iterator weapons;
 	long nearest_index = NONE;
 	real nearest_distance = 0.0f;
 	struct unit_datum *unit;
 
-	data_iterator_new(&iterator, player_data);
-	while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
-		last = player;
 	if (!last || last->unit_index == NONE)
 		return;
 	unit = unit_get(last->unit_index);
