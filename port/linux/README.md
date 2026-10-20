@@ -105,7 +105,7 @@ to 4.
 | mouse | (direct aim) | aim |
 | left mouse button | right trigger | fire |
 | right mouse button, G | left trigger | throw a grenade |
-| space, enter | A | jump, accept |
+| space, enter | A | jump, accept (in the menus space is start) |
 | F, backspace, mouse button 4 | B | melee, back |
 | E, R | X | action, reload |
 | tab, mouse wheel | Y | change the weapon |
@@ -114,7 +114,7 @@ to 4.
 | left ctrl, C | left stick click | crouch |
 | Z, middle mouse button | right stick click | zoom |
 | arrow keys | D-pad | |
-| escape | start | pause menu |
+| escape | start; B in the menus | pause menu; back in the menus |
 | F1 | back | |
 | \` | | open the developer console |
 | F12 | | release or capture the mouse |
@@ -132,8 +132,10 @@ In the menus, the mouse moves a pointer:
 - A right click goes back.
 - The mouse wheel moves through the items.
 
-The keyboard also operates the menus. When the game continues, the mouse
-aims again. A mouse button that you hold from the menu does not fire until
+The keyboard also operates the menus: the arrow keys move, Enter accepts,
+Escape (or Backspace) goes back, and space is the controller's start. In
+play, Escape opens the pause menu; Escape in the pause menu closes it.
+When the game continues, the mouse aims again. A mouse button that you hold from the menu does not fire until
 you push it again.
 
 The prompts and the menus show the keys and the mouse buttons of this table
@@ -162,7 +164,7 @@ the setting for one start of the game. It has priority over the file.
 | `display.interpolation` | `true` | `HALO_INTERPOLATION` | `true`: one frame for each refresh of the display. `false`: 30 frames each second, as on the Xbox. Refer to "Frame rate". |
 | `display.first_person_legs` | `false` | `HALO_FIRST_PERSON_LEGS` | `true`: in first person, your own body is drawn from the waist down, so you see your legs when you look down, moving as everyone else sees them. Not in a vehicle, zoomed, in a cutscene or in third person. Only the picture changes: hit boxes, the camera and the network are as before. From OpenCE. |
 | `display.ragdolls` | `true` | `HALO_RAGDOLLS` | `true`: a character killed falls limp, thrown by the blow that killed it, and comes to rest where it lands, instead of its death animation's last pose laid on the ground. Only the picture changes: the body's place, hit boxes, saved games and the network are as before, and each machine simulates its own. Four fall at once at most (`HALO_RAGDOLLS_ACTIVE`), twelve are kept. The idea is from jojoxdk's Halo 1 MCC Box3D Physics Mod. |
-| `display.button_icons` | `"auto"` | `HALO_BUTTON_ICONS` | The button icons of the prompts, the menus' hints and the help lines (the HUD's "Hold E to pick up", the Halo 3 menus' strips, the Halo CE menus' keys, the Forge menu's controls). `"auto"`: the keyboard and mouse's keys and buttons while you play with them, a gamepad's buttons once you use one (a PlayStation pad's, by SDL's gamepad type, the PlayStation's; any other the Xbox's), and back to the keyboard's at the next key or mouse use, as Halo PC did; the keyboard's before any input, unless a gamepad is connected at the start. `"keyboard"`, `"xbox"` or `"playstation"`: always those. The variable is read each time (a test's `@set HALO_BUTTON_ICONS ...` is live). The keys are the ones in "Controls" (in the menus, where the mouse moves the pointer: Enter, Backspace, G; the right trigger has no key there and keeps the Xbox's icon). Our own art: `tools/halo3_menu_art.py` draws the keycaps (Saira Semi Condensed, SIL OFL), the mouse and the Xbox buttons into `menus/halo3/key_atlas.png` and `xbox_atlas.png`; without them, words ("Space", "left click"). Not on the Vita, which keeps its own Button icons. |
+| `display.button_icons` | `"auto"` | `HALO_BUTTON_ICONS` | The button icons of the prompts, the menus' hints and the help lines (the HUD's "Hold E to pick up", the Halo 3 menus' strips, the Halo CE menus' keys, the Forge menu's controls). `"auto"`: the keyboard and mouse's keys and buttons while you play with them, a gamepad's buttons once you use one (a PlayStation pad's, by SDL's gamepad type, the PlayStation's; any other the Xbox's), and back to the keyboard's at the next key or mouse use, as Halo PC did; the keyboard's before any input, unless a gamepad is connected at the start. `"keyboard"`, `"xbox"` or `"playstation"`: always those. The variable is read each time (a test's `@set HALO_BUTTON_ICONS ...` is live). The keys are the ones in "Controls" (in the menus, where the mouse moves the pointer: Enter, Escape, G, and space for start; the right trigger has no key there and keeps the Xbox's icon). Our own art: `tools/halo3_menu_art.py` draws the keycaps (Saira Semi Condensed, SIL OFL), the mouse and the Xbox buttons into `menus/halo3/key_atlas.png` and `xbox_atlas.png`; without them, words ("Space", "left click"). Not on the Vita, which keeps its own Button icons. |
 | `graphics.particles` | `"full"` | `HALO_PARTICLE_BUDGET` | The particles that the effects of a fight make. `"full"`: all, as on the Xbox. `"reduced"` or `"low"`: fewer sparks, smoke, dust and debris, and they go sooner (in multiplayer, out of view, after a sixth of a second; `"low"` a tenth). Muzzle flashes, flashes, your own weapon and the effects of scripts and cutscenes are not changed. |
 | `audio.enabled` | `true` | `HALO_NO_AUDIO=1` sets `false` | `false`: no audio device. The sound continues without output. |
 | `audio.volume` | `1.0` | `HALO_VOLUME` | The master volume. |

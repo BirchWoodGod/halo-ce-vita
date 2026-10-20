@@ -103,8 +103,9 @@ Controls: keyboard and mouse, or any gamepad.
   Z or middle click          zoom
   Escape / F1                pause / scoreboard
   F11 / F12                  fullscreen / free the mouse
-In the menus the mouse moves a pointer: left click picks, right click goes
-back. The full table is in README.md on GitHub (PC section).
+In the menus the arrows move, Enter accepts, Escape (or Backspace) goes
+back and Space is the pad's Start; the mouse moves a pointer: left click
+picks, right click goes back. The full table is in README.md on GitHub (PC section).
 
 Button icons: the prompts and menus show the keys you use (the keyboard's
 icons) and switch to your pad's buttons when you pick one up

@@ -1414,6 +1414,51 @@ void platform_test_mouse_motion(float dx, float dy)
 }
 #endif
 
+#if !defined(HALO_RELEASE) && !defined(HALO_VITA)
+/* (tests only: main.c's "@key name", HALO_TEST_KEYS) a key pressed and let
+go, pushed into SDL's queue as the keyboard's own events arrive, for the
+event loop to take: a key by SDL's name ("Escape", "Return", "Left", "A"),
+"ctrl+" or "shift+" before it held with it. FALSE for a name SDL does not
+know */
+BOOL platform_test_key(const char *name)
+{
+	SDL_Event event;
+	SDL_Keymod modifiers = SDL_KMOD_NONE;
+	SDL_Scancode scancode;
+
+	for (;;)
+	{
+		if (!SDL_strncasecmp(name, "ctrl+", 5))
+			modifiers |= SDL_KMOD_LCTRL, name += 5;
+		else if (!SDL_strncasecmp(name, "shift+", 6))
+			modifiers |= SDL_KMOD_LSHIFT, name += 6;
+		else
+			break;
+	}
+	scancode = SDL_GetScancodeFromName(name);
+	if (scancode == SDL_SCANCODE_UNKNOWN)
+	{
+		platform_log("test key: no key \"%s\"", name);
+		return FALSE;
+	}
+	memset(&event, 0, sizeof(event));
+	event.type = SDL_EVENT_KEY_DOWN;
+	event.key.timestamp = SDL_GetTicksNS();
+	event.key.windowID = platform_window ? SDL_GetWindowID(platform_window) : 0;
+	event.key.scancode = scancode;
+	event.key.key = SDL_GetKeyFromScancode(scancode, modifiers, false);
+	event.key.mod = modifiers;
+	event.key.down = true;
+	SDL_PushEvent(&event);
+	event.type = SDL_EVENT_KEY_UP;
+	event.key.down = false;
+	SDL_PushEvent(&event);
+	platform_log("test key: %s%s%s", modifiers & SDL_KMOD_CTRL ? "ctrl+" : "", modifiers & SDL_KMOD_SHIFT ? "shift+" : "",
+		SDL_GetScancodeName(scancode));
+	return TRUE;
+}
+#endif
+
 void platform_input_read(struct platform_input_state *state, BOOL consume_motion)
 {
 	pthread_mutex_lock(&input_lock);

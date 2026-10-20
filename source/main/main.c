@@ -4392,7 +4392,9 @@ bringto) as the Vita's Play page does (main_request_host_command),
 "@sound tag [n]" plays that sound tag (the nth so named) as
 sound_impulse_start does with no object, and "@weapon P name" takes
 player P's weapons and gives it one of the first weapon tag with name in
-its name. Each runs once,
+its name. In a desktop test build "@mouse dx dy" and "@key name" push a
+motion of the mouse or a key's press into SDL's queue, as the real ones
+arrive (sdl_platform.c; "@aim angles" logs the facing). Each runs once,
 at the first frame whose game time has reached its tick. */
 void game_state_save_to_persistent_storage(void);
 /* (the Vita's settings panel sets it: vita_settings_load) */
@@ -4632,6 +4634,14 @@ static void main_test_commands_update(
 
 			sscanf(commands[index].command + 7, "%f %f", &dx, &dy);
 			platform_test_mouse_motion(dx, dy);
+		}
+		/* (@key name: a key pressed and let go through the same path,
+		"Escape", "ctrl+V" ...) */
+		else if (!strncmp(commands[index].command, "@key ", 5))
+		{
+			int platform_test_key(char const *name);
+
+			platform_test_key(commands[index].command + 5);
 		}
 #endif
 		else if (!strcmp(commands[index].command, "@seat"))

@@ -64,7 +64,7 @@ static void test_keys(void)
 	} expected[] =
 	{
 		{ A, HALO_KEY_SPACE, HALO_KEY_ENTER, "A: Space in play (jump), Enter in the menus" },
-		{ B, HALO_KEY_F, HALO_KEY_BACKSPACE, "B: F in play (melee), Backspace in the menus" },
+		{ B, HALO_KEY_F, HALO_KEY_ESC, "B: F in play (melee), Escape in the menus (back; Backspace too)" },
 		{ X, HALO_KEY_E, HALO_KEY_E, "X: E (action, reload)" },
 		{ Y, HALO_KEY_TAB, HALO_KEY_TAB, "Y: Tab (change the weapon)" },
 		{ BLACK, HALO_KEY_X, HALO_KEY_X, "Black: X (change the grenade)" },
@@ -75,7 +75,7 @@ static void test_keys(void)
 		{ DOWN, HALO_KEY_DOWN, HALO_KEY_DOWN, "D-pad down: the down arrow" },
 		{ LEFT, HALO_KEY_LEFT, HALO_KEY_LEFT, "D-pad left: the left arrow" },
 		{ RIGHT, HALO_KEY_RIGHT, HALO_KEY_RIGHT, "D-pad right: the right arrow" },
-		{ START, HALO_KEY_ESC, HALO_KEY_ESC, "Start: Escape" },
+		{ START, HALO_KEY_ESC, HALO_KEY_SPACE, "Start: Escape in play (the pause menu), Space in the menus" },
 		{ BACK, HALO_KEY_F1, HALO_KEY_F1, "Back: F1" },
 		{ LS, HALO_KEY_CTRL, HALO_KEY_CTRL, "left stick click: Ctrl (crouch)" },
 		{ RS, HALO_KEY_MMB, HALO_KEY_Z, "right stick click: the middle button in play (zoom), Z in the menus" },

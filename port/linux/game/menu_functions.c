@@ -2362,7 +2362,7 @@ static void h3_forge_controls_update(struct widget_instance *widget)
 #else
 /* a help line's PlayStation buttons (Cross, Circle, Square, Triangle: the
 menus' A B X Y, as the Vita names them) named as the button icons show
-them on the desktop: the keyboard's keys (Enter, Backspace, E, Tab) or the
+them on the desktop: the keyboard's keys (Enter, Esc, E, Tab) or the
 Xbox pad's letters; a PlayStation pad's stay. Whole words, in the player's
 language; the text as it is when nothing changes. Four lines at a time */
 static char const *h3_buttons(char const *text)
@@ -2370,7 +2370,7 @@ static char const *h3_buttons(char const *text)
 	static char buffers[4][512];
 	static int next;
 	static char const *const playstation[4] = { N_("Cross"), N_("Circle"), N_("Square"), N_("Triangle") };
-	static char const *const keyboard[4] = { N_("Enter"), N_("Backspace"), "E", "Tab" };
+	static char const *const keyboard[4] = { N_("Enter"), "Esc", "E", "Tab" };
 	static char const *const xbox_names[4] = { "A", "B", "X", "Y" };
 	int shown = halo_button_icons_shown();
 	char const *const *names = shown == _halo_button_icons_keyboard ? keyboard : xbox_names;
@@ -2396,7 +2396,7 @@ static char const *h3_buttons(char const *text)
 
 			if (!strncmp(text, word, word_length) && !isalpha((unsigned char)after) && !(after & 0x80))
 			{
-				char const *name = names == keyboard && index < 2 ? T(names[index]) : names[index];
+				char const *name = names == keyboard && index < 1 ? T(names[index]) : names[index];
 				int name_length = (int)strlen(name);
 
 				if (length + name_length >= (int)sizeof(buffers[0]) - 1)

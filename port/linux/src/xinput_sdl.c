@@ -11,6 +11,7 @@ Keyboard and mouse (port 0):
 	mouse            aim (see halo_linux_mouse_look)
 	left button      right trigger       right button, G  left trigger
 	space, enter     A                   F, backspace, X1 B
+	                 (in the menus Space is Start and Escape is B, back)
 	E, R             X                   tab, wheel       Y
 	Q                white               X                black
 	left ctrl, C     left stick click    Z, middle button right stick click
@@ -267,12 +268,44 @@ static BYTE analog(BOOL down)
 	return down ? 0xff : 0x00;
 }
 
+#ifndef HALO_NOT_DESKTOP
+/* source/interface/ui_widget.c: whether a menu is up (the pause menu too) */
+int ui_widget_menus_active(void);
+#endif
+
+/* whether a key held now was pressed while a menu was up: its part is the
+one it had when it went down, kept until it is let go (*latched: -1 up),
+so Escape that opens the pause menu is not also its B, nor Escape that
+closes it a melee */
+static BOOL key_pressed_in_menus(BOOL down, BOOL menus, int *latched)
+{
+	if (!down)
+	{
+		*latched = -1;
+		return FALSE;
+	}
+	if (*latched < 0)
+		*latched = menus != FALSE;
+	return *latched != 0;
+}
+
 static void keyboard_gamepad(const struct platform_input_state *input, XINPUT_GAMEPAD *pad)
 {
 	const unsigned char *k = input->keys;
 	BOOL mouse = !input->mouse_released;
 	const unsigned char *m = input->mouse_buttons;
 	int x = 0, y = 0;
+	/* Escape is Start in play (the pause menu) and B in the menus (back, as
+	Backspace: the owner, Oct 20 2026); Space is A in play (jump) and Start
+	in the menus, where Enter accepts. button_glyphs.c's menu_keys show them */
+	static int escape_latched = -1, space_latched = -1;
+#ifndef HALO_NOT_DESKTOP
+	BOOL menus = ui_widget_menus_active() != 0;
+#else
+	BOOL menus = FALSE;
+#endif
+	BOOL escape_in_menus = key_pressed_in_menus(k[SDL_SCANCODE_ESCAPE], menus, &escape_latched);
+	BOOL space_in_menus = key_pressed_in_menus(k[SDL_SCANCODE_SPACE], menus, &space_latched);
 
 	if (k[SDL_SCANCODE_D]) x++;
 	if (k[SDL_SCANCODE_A]) x--;
@@ -291,15 +324,16 @@ static void keyboard_gamepad(const struct platform_input_state *input, XINPUT_GA
 	if (k[SDL_SCANCODE_DOWN]) pad->wButtons |= XINPUT_GAMEPAD_DPAD_DOWN;
 	if (k[SDL_SCANCODE_LEFT]) pad->wButtons |= XINPUT_GAMEPAD_DPAD_LEFT;
 	if (k[SDL_SCANCODE_RIGHT]) pad->wButtons |= XINPUT_GAMEPAD_DPAD_RIGHT;
-	if (k[SDL_SCANCODE_ESCAPE]) pad->wButtons |= XINPUT_GAMEPAD_START;
+	if ((k[SDL_SCANCODE_ESCAPE] && !escape_in_menus) || (k[SDL_SCANCODE_SPACE] && space_in_menus))
+		pad->wButtons |= XINPUT_GAMEPAD_START;
 	if (k[SDL_SCANCODE_F1]) pad->wButtons |= XINPUT_GAMEPAD_BACK;
 	if (k[SDL_SCANCODE_LCTRL] || k[SDL_SCANCODE_C]) pad->wButtons |= XINPUT_GAMEPAD_LEFT_THUMB;
 	if (k[SDL_SCANCODE_Z] || (mouse && m[SDL_BUTTON_MIDDLE])) pad->wButtons |= XINPUT_GAMEPAD_RIGHT_THUMB;
 
-	pad->bAnalogButtons[XINPUT_GAMEPAD_A] |= analog(k[SDL_SCANCODE_SPACE] || k[SDL_SCANCODE_RETURN] ||
+	pad->bAnalogButtons[XINPUT_GAMEPAD_A] |= analog((k[SDL_SCANCODE_SPACE] && !space_in_menus) || k[SDL_SCANCODE_RETURN] ||
 		k[SDL_SCANCODE_KP_ENTER]);
 	pad->bAnalogButtons[XINPUT_GAMEPAD_B] |= analog(k[SDL_SCANCODE_F] || k[SDL_SCANCODE_BACKSPACE] ||
-		(mouse && m[SDL_BUTTON_X1]));
+		(k[SDL_SCANCODE_ESCAPE] && escape_in_menus) || (mouse && m[SDL_BUTTON_X1]));
 #ifdef HALO_ANDROID
 	/* the system back key (gesture or button) backs out of menus */
 	pad->bAnalogButtons[XINPUT_GAMEPAD_B] |= analog(k[SDL_SCANCODE_AC_BACK]);
