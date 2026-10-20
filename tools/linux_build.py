@@ -160,6 +160,29 @@ MINIUPNPC_DEFINES = ["-DMINIUPNP_STATICLIB", "-DMINIUPNPC_SET_SOCKET_TIMEOUT", "
                      "-D_BSD_SOURCE", "-D_DEFAULT_SOURCE"]
 
 
+# configure.py --vita-version: a release's x.y.z, its insider builds'
+# -insider.n, its betas' and candidates' -beta.n and -rc.n, each with an
+# optional -<word> of a candidate's (1.1.1-beta.1-rc), or a test build's own
+# word (1.1.1-forge). The updater orders a pre-release below its x.y.z,
+# insider < beta < rc (update_check.c); a -<word> after the number orders
+# above every number of its kind (beta.1-rc above beta.99)
+VERSION_PATTERN = r"\d{1,3}\.\d{1,3}\.\d{1,3}(-(((insider|beta|rc)\.\d{1,3})(-[a-z]{1,16})?|[a-z]{1,16}))?"
+
+
+def version_defines(sln: Any) -> List[str]:
+    """configure.py's --vita-version as the define every build reads
+    (HALO_VITA_VERSION, port/vita/include/vita_version.h: halo.log's first
+    line, the main menu, the window's title, the settings panel, the update
+    check): the Vita's, Linux's and Windows'. None without it: the header's"""
+    version = getattr(sln, "vita_version", None)
+    if not version:
+        return []
+    if not re.fullmatch(VERSION_PATTERN, version):
+        raise RuntimeError("--vita-version: x.y.z, x.y.z-insider.n, x.y.z-beta.n, x.y.z-rc.n (each with an optional "
+                           "-<word>: 1.1.1-beta.1-rc) or x.y.z-<word> (1.1.1-forge)")
+    return [f'-DHALO_VITA_VERSION=\\"{version}\\"']
+
+
 def miniupnpc_sources() -> List[Path]:
     """miniupnpc's library sources (port/third_party/miniupnpc/src)"""
     return sorted((MINIUPNPC_DIR / "src").glob("*.c"))
@@ -400,7 +423,10 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
     )
 
     abi = " ".join(LINUX_ABI_FLAGS + [march_flag(sln)] + (["-DHALO_RELEASE"] if getattr(sln, "port_release", False) else [])
-                   + (["-DHALO_NET_AS_VITA=1"] if getattr(sln, "linux_net_vita", False) else []))
+                   + (["-DHALO_NET_AS_VITA=1"] if getattr(sln, "linux_net_vita", False) else [])
+                   # (configure.py --vita-version: the PC build says the
+                   # version the Vita's does)
+                   + version_defines(sln))
     port_include = PORT_DIR / "include"
     sdk_flags = f"-idirafter {XDK_INCLUDE}"
     excluded = set(config.get("exclude_sources", []))

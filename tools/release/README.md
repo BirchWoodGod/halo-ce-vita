@@ -158,7 +158,7 @@ the build is a release build:
 | --- | --- |
 | `--vita-update-test-sources` | defines `HALO_UPDATE_TEST_SOURCES`: the build takes `HALO_UPDATE_URL` (the releases list: `https://api.github.com/...` or a loopback `http://127.x`) and `HALO_UPDATE_DOWNLOAD_BASE` (`https://github.com/<owner>/<repo>/releases/download` or a loopback `http://127.x`) from `env.txt`; a release build ignores both and logs it |
 | `--vita-update-key HEX` | the build's public key, in place of `vita_update_key.h`'s |
-| `--vita-version VERSION` | the version the build says it is, in place of `vita_version.h`'s |
+| `--vita-version VERSION` | the version the build says it is, in place of `vita_version.h`'s: the Vita's and the PC builds' (Linux, Windows) alike; `tools/package_pc.py` names its files for it |
 
 `build.ninja` then says "TEST BUILD of the updater", and `sign_update.py`
 refuses that tree's `build/vita/halo.vpk` without `--test-build`. Files a

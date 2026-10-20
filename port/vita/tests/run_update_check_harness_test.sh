@@ -33,7 +33,10 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_update_check_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
 cases=${*:-idle newer same older cached stale stable offline}
-version=$(sed -n 's/^#define HALO_VITA_VERSION "\(.*\)"$/\1/p' "$root/port/vita/include/vita_version.h")
+# (the version the binary says it is: configure.py --vita-version's, else
+# vita_version.h's)
+version=$(grep -aoE 'Halo CE Vita [0-9A-Za-z.-]+ \(PC\) starting' "$binary" | head -1 | sed 's/^Halo CE Vita \(.*\) (PC) starting$/\1/')
+[ -n "$version" ] || version=$(sed -n 's/^#define HALO_VITA_VERSION "\(.*\)"$/\1/p' "$root/port/vita/include/vita_version.h")
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
 server_pid=

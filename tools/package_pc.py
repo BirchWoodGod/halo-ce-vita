@@ -24,8 +24,11 @@ relays.txt beside the executable):
 
 The PC build plays with the Vitas only when it was configured with
 --linux-net-vita (HALO_NET_AS_VITA); a build without it is refused unless
---any-wire is given. The version is port/vita/include/vita_version.h's
-unless --version says otherwise (an insider build's).
+--any-wire is given. The version is the one the build was configured with
+(configure.py --vita-version, which the build says it is), else
+port/vita/include/vita_version.h's; --version names the files otherwise.
+The executable must say the version it is packed as (a build configured
+anew and not built again is refused).
 """
 
 import argparse
@@ -36,6 +39,7 @@ import sys
 import tarfile
 import zipfile
 from pathlib import Path
+from typing import Optional
 
 ROOT = Path(__file__).resolve().parent.parent
 APP0 = ROOT / "port/vita/app0"
@@ -132,6 +136,19 @@ def source_version() -> str:
     return re.search(r'#define HALO_VITA_VERSION "([^"]+)"', header).group(1)
 
 
+def configured_version() -> Optional[str]:
+    """the version build.ninja compiles the builds as (configure.py
+    --vita-version: tools/linux_build.py's version_defines), or None for the
+    header's"""
+    ninja = ROOT / "build.ninja"
+    if not ninja.is_file():
+        return None
+    versions = set(re.findall(r'-DHALO_VITA_VERSION=\\"([^"\\]+)\\"', ninja.read_text(errors="replace")))
+    if len(versions) > 1:
+        fail("build.ninja names more than one version: " + ", ".join(sorted(versions)))
+    return versions.pop() if versions else None
+
+
 def plays_as_vita(platform: str) -> bool:
     """whether build.ninja compiles the PC build with HALO_NET_AS_VITA"""
     ninja = ROOT / "build.ninja"
@@ -176,13 +193,22 @@ def main() -> int:
     parser.add_argument("--no-archive", action="store_true", help="make the folder only")
     args = parser.parse_args()
 
-    version = args.version or source_version()
-    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?", version):
-        fail(f"{version!r} is not a version (x.y.z or x.y.z-beta.n)")
+    built_version = configured_version() or source_version()
+    version = args.version or built_version
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?", version):
+        fail(f"{version!r} is not a version (x.y.z, x.y.z-beta.n or x.y.z-beta.n-rc)")
     platform = args.platform
     executable = ROOT / ("build/linux/halo" if platform == "linux" else "build/windows/halo.exe")
     if not executable.is_file():
         fail(f"{executable.relative_to(ROOT)} is not built: ninja {platform}")
+    # (the window, halo.log and the main menu say "<version> (PC)":
+    # vita_version.h's HALO_VITA_VERSION_SHOWN)
+    shown = f"{built_version} (PC)".encode()
+    if shown not in executable.read_bytes():
+        fail(f"{executable.relative_to(ROOT)} does not say {built_version} (PC): configured since it was built? "
+             f"ninja {platform}")
+    if version != built_version:
+        print(f"package_pc: the files named {version}, the build says {built_version}", file=sys.stderr)
     if not args.any_wire and not plays_as_vita(platform):
         fail("this build does not play with the Vitas: configure.py --linux-net-vita, then ninja " + platform +
              " (or --any-wire)")

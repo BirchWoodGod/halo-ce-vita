@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from .linux_build import (MBEDTLS_DIR, ZLIB_DIR, ZLIB_SOURCES, ZLIB_DEFINES, LINUX_PROFILE, MINIUPNPC_DIR, OPTIMISATION, WINDOWS_PROFILE, XDK_INCLUDE, lto_mode,
                           LIBOGG_INCLUDE, ogg_sound_cflags, ogg_sound_sources,
                           march_flag, miniupnpc_sources, pgo_mode, compile_launcher, musl_math_cflags,
-                          musl_math_sources, pgo_profile, profile_use_flags, xdk_headers)
+                          musl_math_sources, pgo_profile, profile_use_flags, version_defines, xdk_headers)
 from .ninja_syntax import Writer
 
 LINUX_DIR = Path("port/linux")
@@ -362,7 +362,9 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
     abi = " ".join(WINDOWS_ABI_FLAGS + xwin_cflags + [march_flag(sln)] + (["-DHALO_RELEASE"] if getattr(sln, "port_release", False) else [])
                    # (configure.py --linux-net-vita: the PC build plays with
                    # the Vitas, as the Linux one does)
-                   + (["-DHALO_NET_AS_VITA=1"] if getattr(sln, "linux_net_vita", False) else []))
+                   + (["-DHALO_NET_AS_VITA=1"] if getattr(sln, "linux_net_vita", False) else [])
+                   # (configure.py --vita-version, as on Linux and the Vita)
+                   + version_defines(sln))
     sdl_include = SDL_DIR / "include"
     excluded = set(linux_config.get("exclude_sources", []))
     libs = " ".join(

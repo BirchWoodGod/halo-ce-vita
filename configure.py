@@ -154,8 +154,10 @@ parser.add_argument(
 parser.add_argument(
     "--vita-version",
     type=str,
-    help="TEST builds only: the version the Vita build says it is (HALO_VITA_VERSION) in place of "
-    "port/vita/include/vita_version.h's, e.g. 1.1.0-beta.4 for an update test's newer build",
+    help="the version the builds say they are (HALO_VITA_VERSION: the Vita's, and the PC builds', Linux and "
+    "Windows, with \" (PC)\" after it) in place of port/vita/include/vita_version.h's: an insider build's "
+    "1.1.1-insider.17, a candidate's 1.1.1-beta.1-rc, an update test's newer 1.1.0-beta.4; "
+    "tools/package_pc.py names its files for the one configured",
 )
 parser.add_argument(
     "--windows-xwin",

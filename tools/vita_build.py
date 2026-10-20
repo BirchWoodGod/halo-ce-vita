@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from .ninja_syntax import Writer
 from .vita_shader_generator_id import SOURCES as SHADER_GENERATOR_NAMES
-from .linux_build import (MBEDTLS_DIR, GAME_FLAGS, PLATFORM_FLAGS, XDK_INCLUDE, TOML_DIR, KCP_DIR, ZLIB_DIR, ZLIB_SOURCES,
+from .linux_build import (version_defines, MBEDTLS_DIR, GAME_FLAGS, PLATFORM_FLAGS, XDK_INCLUDE, TOML_DIR, KCP_DIR, ZLIB_DIR, ZLIB_SOURCES,
                           ZLIB_DEFINES, MONOCYPHER_DIR, MONOCYPHER_SOURCES, EXPAT_DIR, EXPAT_SOURCES, musl_math_sources,
                           LIBOGG_INCLUDE, ogg_sound_sources, PROFILE_USE_FLAGS,
                           MUSL_MATH_DIR, LIBMSPACK_DIR, LIBMSPACK_SOURCES, LIBMSPACK_FLAGS,
@@ -145,9 +145,9 @@ VITA_LIBRARIES = [
 
 
 def vita_update_test_defines(sln: Any) -> List[str]:
-    """configure.py's --vita-update-test-sources, --vita-update-key and
-    --vita-version: the defines of a TEST build of the updater
-    (tools/release/README.md), none for a release"""
+    """configure.py's --vita-update-test-sources and --vita-update-key: the
+    defines of a TEST build of the updater (tools/release/README.md), none
+    for a release (--vita-version is every build's: version_defines)"""
     defines = []
     if getattr(sln, "vita_update_test_sources", False):
         defines.append("-DHALO_UPDATE_TEST_SOURCES=1")
@@ -156,16 +156,6 @@ def vita_update_test_defines(sln: Any) -> List[str]:
         if not re.fullmatch(r"[0-9a-fA-F]{64}", key) or not key.strip("0"):
             raise RuntimeError("--vita-update-key: 64 hexadecimal digits, not all zero")
         defines.append(f'-DHALO_UPDATE_PUBLIC_KEY=\\"{key.lower()}\\"')
-    version = getattr(sln, "vita_version", None)
-    if version:
-        # (a release's x.y.z, its insider builds' -insider.n, its betas' and
-        # candidates' -beta.n and -rc.n, or a test build's own word,
-        # 1.1.1-forge: a pre-release the updater orders below its x.y.z,
-        # insider < beta < rc, update_check.c)
-        if not re.fullmatch(r"\d{1,3}\.\d{1,3}\.\d{1,3}(-((insider|beta|rc)\.\d{1,3}|[a-z]{1,16}))?", version):
-            raise RuntimeError("--vita-version: x.y.z, x.y.z-insider.n, x.y.z-beta.n, x.y.z-rc.n or x.y.z-<word> "
-                               "(1.1.1-forge)")
-        defines.append(f'-DHALO_VITA_VERSION=\\"{version}\\"')
     return defines
 
 
@@ -280,7 +270,10 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
                    (["-DHALO_RELEASE"] if getattr(sln, "port_release", False) else []) +
                    (["-flto"] if lto else []) +
                    ([f"-fprofile-use={_quote(profile.resolve())}", *PROFILE_USE_FLAGS] if profile else []) +
-                   test_defines)
+                   test_defines +
+                   # (configure.py --vita-version: the version this build
+                   # says it is, the PC builds' alike)
+                   version_defines(sln))
     port_include = LINUX_DIR / "include"
     vita_include = VITA_DIR / "include"
     sdk_flags = f"-idirafter {XDK_INCLUDE}"
