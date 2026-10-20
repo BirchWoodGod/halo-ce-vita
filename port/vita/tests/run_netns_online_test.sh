@@ -170,6 +170,39 @@
 #            round trip on both sides before (the joiner its own, the host
 #            the joiner's), both must say "connection problem" in the
 #            blackout and recover after it, and the game play on
+#   anticheatlag  code, honest players on a poor link (HALO_TEST_NETEM, "delay
+#            150ms 50ms loss 2%" on both sides by default: a 300 ms round trip,
+#            100 ms of jitter each way, one datagram in 50 lost) in one long
+#            game: both aim at each other and fire (HALO_NETWORK_TEST_AIM,
+#            real shots, reloads, empty weapons, corners) and land a shot every
+#            HALO_TEST_SHOOT seconds (3, debug.network_test_shoot) after the
+#            host brings them together. The host's anti-cheat
+#            (network_anticheat.c) must drop no one and count nothing that only
+#            a modified client sends (forged hits, hits of a weapon not held);
+#            what it counted is shown, and the host's net-tick timing
+#            (HALO_TICK_PROFILE=1: the hit checks and the moves' wall test)
+#   anticheat  code, the joiner a modified client (HALO_NETWORK_TEST_CHEAT:
+#            HALO_TEST_CHEAT, "damage,fly" by default: hits ten times as hard
+#            as its weapon deals, its player held in the air; "wall", "ammo"
+#            too): the host must drop it (every machine told, a line in
+#            cheaters.txt) within HALO_TEST_KICK_WITHIN seconds of the game's
+#            start (60), and refuse it when it joins again by the code
+#            (HALO_NETWORK_TEST_RETRY; it plays HALO_TEST_CHEAT_SECONDS, 90);
+#            then, the modified client gone, a new
+#            run of the game on its machine (a new internet play identity: a
+#            new stand-in address) joins by the code and must be refused too,
+#            kept out by its real address and hardware id for
+#            network.anticheat_ban_minutes
+#   hostfuzz the host's side fuzzed on the Vitas' own wire (not in all): the
+#            host HALO_TEST_FUZZ_HOST, an AddressSanitizer + UBSan
+#            HALO_NET_FUZZ_TWIN build, twins one in HALO_TEST_FUZZ_RATE (2) of
+#            what a Vita client sends it (its join and lobby packets, inputs,
+#            predictions, vehicle moves, hit reports - the joiner aims, fires
+#            and lands shots -, readiness, identity, the datagram batches),
+#            over internet play; its anti-cheat counts what the twins break
+#            and drops no one (HALO_NET_ANTICHEAT=false: the fuzz goes on).
+#            Passes with no sanitizer memory error, no crash and the host
+#            playing to its end
 #   lan      online off, both copies on one LAN (system link over Wi-Fi)
 #   uptime   lan, both machines up for 25 days (HALO_TEST_UPTIME_SECONDS,
 #            test builds only: 2^31 ms of a machine's uptime overflowed the
@@ -583,6 +616,9 @@ mode=${1:-code}
 # (latency: a home connection's delay unless one is given)
 [ "$mode" = latency ] && [ -z "${HALO_TEST_NETEM:-}${HALO_TEST_NETEM_HOST:-}${HALO_TEST_NETEM_JOIN:-}" ] &&
 	export HALO_TEST_NETEM="delay 40ms"
+# (anticheatlag: a poor link's: 150 ms each way, 50 ms of jitter, 2% lost)
+[ "$mode" = anticheatlag ] && [ -z "${HALO_TEST_NETEM:-}${HALO_TEST_NETEM_HOST:-}${HALO_TEST_NETEM_JOIN:-}" ] &&
+	export HALO_TEST_NETEM="delay 150ms 50ms loss 2%"
 # (dedicatedfullcache: a jittery link unless one is given)
 # (coopstarts: the joiners' links a home connection's, and the Vita's
 # Performance rows, the start's fault's conditions: with neither, one start
@@ -1478,6 +1514,101 @@ PY
 	case $verdict in listed*) ;; *) fail "the hosted game was never listed (before the switch)" ;; esac
 	case $verdict in *removed=None*) fail "the host's slot was not emptied at the switch" ;; esac
 	case $verdict in *late=0) ;; *) fail "the host listed something after its slot was emptied" ;; esac
+	;;
+hostfuzz)
+	fuzz_host=${HALO_TEST_FUZZ_HOST:-}
+	[ -x "$fuzz_host" ] || { echo "SKIP (hostfuzz): HALO_TEST_FUZZ_HOST is not an ASan HALO_NET_FUZZ_TWIN build"; exit 0; }
+	run_copy host "$host_machine" "$fuzz_host" "$cpu_a" $host_env \
+		"HALO_NETWORK_TEST=host:bloodgulch:slayer" HALO_NETWORK_TEST_SCORE=200 HALO_NETWORK_TEST_SHOOT=3 \
+		HALO_NET_ANTICHEAT=false HALO_NET_FUZZ_RATE=${HALO_TEST_FUZZ_RATE:-2} HALO_NET_FUZZ_HOST_ONLY=1 \
+		HALO_NET_FUZZ_DUMP=fuzz-dump.bin \
+		ASAN_OPTIONS=detect_leaks=0:halt_on_error=0:log_path=asan UBSAN_OPTIONS=print_stacktrace=1:log_path=ubsan
+	host_pid=$last_pid
+	code=$(wait_code)
+	[ -n "$code" ] || { fail "the host never showed a code"; tail -20 "$out/host/run.log"; exit 1; }
+	run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=join-code:$code HALO_TEST_INPUT=bot:2 HALO_NETWORK_TEST_AIM=1 HALO_NETWORK_TEST_SHOOT=3 \
+		HALO_NETWORK_TEST_RETRY=5; join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	twins=$(grep -ahoE "net fuzz twin: [0-9]+ twins" "$out/host/run.log" "$out/host/data/debug.txt" 2>/dev/null | tail -1)
+	asan=$(cat "$out/host"/asan* "$out/host/data"/asan* 2>/dev/null | grep -ac "ERROR: AddressSanitizer")
+	crash=$(grep -aEc "egmentation fault|SIGSEGV|SIGABRT|EXCEPTION halt|stack trace" "$out/host/run.log" 2>/dev/null)
+	ticks=$(grep -ac "network test: tick" "$out/host/run.log" 2>/dev/null)
+	ub=$(cat "$out/host"/ubsan* "$out/host/data"/ubsan* 2>/dev/null | grep -a "runtime error" | sed 's/:[0-9]*:[0-9]*:/:/' |
+		sort | uniq -c | sort -rn | head -8)
+	echo "--- hostfuzz: ${twins:-no twin count}; AddressSanitizer errors ${asan:-0}; crashes ${crash:-0}; host ticks ${ticks:-0}"
+	[ -n "$ub" ] && echo "$ub" | sed 's/^/  UBSan: /'
+	grep -ah "anticheat: the last game" "$out/host/data/debug.txt" | tail -2
+	[ "${asan:-0}" = 0 ] || fail "AddressSanitizer: $asan errors"
+	[ "${crash:-0}" = 0 ] || fail "the host crashed"
+	[ "${ticks:-0}" -ge 60 ] || fail "the host played ${ticks:-0} s (60 wanted)"
+	[ -n "$twins" ] || fail "no twins made (not a HALO_NET_FUZZ_TWIN build?)"
+	;;
+anticheat|anticheatlag)
+	# (one long game; the host lands its shots too, and brings the players
+	# together before each)
+	game="HALO_NETWORK_TEST=${HALO_TEST_HOST_GAME:-host:bloodgulch:slayer} HALO_NETWORK_TEST_SCORE=${HALO_TEST_SCORE:-200}
+		HALO_NETWORK_TEST_SHOOT=${HALO_TEST_SHOOT:-3} HALO_TICK_PROFILE=1"
+	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env $game HALO_NETWORK_TEST_AIM=1 ${HALO_TEST_HOST_ENV:-}
+	host_pid=$last_pid
+	code=$(wait_code)
+	[ -n "$code" ] || { fail "the host never showed a code"; tail -20 "$out/host/run.log"; exit 1; }
+	echo "host's code: $code"
+	if [ "$mode" = anticheat ]; then
+		join_extra="HALO_NETWORK_TEST_CHEAT=${HALO_TEST_CHEAT:-damage,fly} HALO_NETWORK_TEST_RETRY=3 HALO_EXIT_AFTER=${HALO_TEST_CHEAT_SECONDS:-90}"
+	else
+		join_extra="HALO_NETWORK_TEST_AIM=1 HALO_NETWORK_TEST_SHOOT=${HALO_TEST_SHOOT:-3}"
+	fi
+	run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=join-code:$code HALO_TEST_INPUT=bot:2 $join_extra; join_pid=$last_pid
+	if [ "$mode" = anticheat ]; then
+		# (the modified client's machine again, a new run: a new identity)
+		wait $join_pid 2>/dev/null
+		run_copy rejoiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
+			HALO_NETWORK_TEST=join-code:$code HALO_TEST_INPUT=bot:2 HALO_NETWORK_TEST_RETRY=2 HALO_EXIT_AFTER=50
+		join_pid=$last_pid
+	fi
+	wait $join_pid $host_pid 2>/dev/null
+	hostlog="$out/host/run.log" hostdebug="$out/host/data/debug.txt"
+	echo "--- the host's anti-cheat"
+	grep -ah "anticheat:\|dropped by the host\|kept out by the host" "$hostdebug" "$hostlog" | sort -u | head -30
+	hits=$(grep -a "network test: tick" "$hostlog" | grep -ao "hits [0-9]* dealt [0-9]* rejected [0-9]*" | tail -1)
+	echo "the host's hit reports (the last count): ${hits:-none}"
+	echo "--- the host's net-tick timing (ms a tick, calls a tick)"
+	grep -a "net-tick" "$hostlog" | tail -3
+	dropped=$(cat "$hostdebug" "$hostlog" 2>/dev/null | grep -ac "dropped by the host")
+	if [ "$mode" = anticheatlag ]; then
+		two=$(grep -a "network test: tick" "$out/joiner/run.log" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+		echo "joiner's seconds with two players playing: $two"
+		[ "$two" -ge 60 ] || fail "the joiner played the host's game for $two s with two players (60 wanted)"
+		[ "$dropped" = 0 ] || fail "the host dropped an honest player on a poor link ($dropped)"
+		grep -aq "anticheat: .*\(forged hit\|hit of a weapon not held\)" "$hostdebug" &&
+			fail "the host counted what only a modified client sends of an honest one"
+		dealt=$(echo "$hits" | sed -n 's/.*dealt \([0-9]*\).*/\1/p')
+		[ "${dealt:-0}" -ge 5 ] || fail "the host dealt ${dealt:-0} of the joiner's hits (5 wanted)"
+	else
+		[ "$dropped" -ge 1 ] || fail "the host never dropped the modified client"
+		when=$(grep -ah "dropped by the host" "$hostdebug" "$hostlog" | head -1)
+		echo "the drop: ${when:-none}"
+		grep -aq "reason=dropped: " "$out/host/data/cheaters.txt" 2>/dev/null ||
+			fail "no line in the host's cheaters.txt for the drop"
+		echo "--- cheaters.txt"; cat "$out/host/data/cheaters.txt" 2>/dev/null | head -5
+		grep -aq "network test: joining again" "$out/joiner/run.log" || fail "the modified client never tried to join again"
+		grep -aqE "refusing a machine @ .*: (dropped from this game for cheating|kept out by the host)" "$hostdebug" ||
+			fail "the host did not refuse the dropped machine joining again"
+		echo "--- the host's refusals"; grep -a "refusing a machine" "$hostdebug" | head -8
+		grep -aq "network test: joining" "$out/rejoiner/run.log" || fail "the new run on the modified client's machine never tried to join"
+		grep -aq "refusing a machine @ .*: kept out by the host" "$hostdebug" ||
+			fail "the host let the dropped machine's new run in (its real address and hardware id kept out)"
+		two=$(grep -a "network test: tick" "$out/rejoiner/run.log" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+		[ "${two:-0}" = 0 ] || fail "the dropped machine's new run played $two s in the host's game"
+		# (no more than HALO_TEST_KICK_WITHIN seconds of the game's play: the
+		# joiner's last tick before it was dropped)
+		last=$(grep -a "network test: tick" "$out/joiner/run.log" | head -400 | sed -n 's/.*network test: tick \([0-9]*\) .*/\1/p' | sort -n | tail -1)
+		echo "the modified client played to tick ${last:-none} of its game"
+		[ -n "$last" ] && [ "$last" -le $(( ${HALO_TEST_KICK_WITHIN:-60} * 30 )) ] ||
+			fail "the modified client played past ${HALO_TEST_KICK_WITHIN:-60} s"
+	fi
 	;;
 pc)
 	[ -n "$pc" ] || { echo "pc mode needs HALO_TEST_PC (a build without --linux-net-vita)"; exit 2; }

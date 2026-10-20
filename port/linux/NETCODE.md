@@ -267,6 +267,92 @@ A speed hack of less than a tenth is let be: the host's bounds on how far
 and how fast a client's player moves and fires hold it to the host's time
 anyway.
 
+## A modified client
+
+With the PC build public, a client is anyone's program: memory edits, or a
+client of their own. The host decides everything that matters (damage,
+deaths, health and shields, scores, the game type's flags, balls and hills,
+pickups, spawns, teams, the game's objects; a client's word on any of them
+is not read), and checks what it does take of a client (its hits, its own
+player's and vehicle's moves, its input's numbers, its Forge requests), so
+what a modified client sends is refused and changes nothing. Since 1.1.1
+the host also counts what it refuses, and drops the machine that keeps
+sending it (`port/linux/game/network_anticheat.c`):
+
+- **What is refused.** A hit report (stage 5) of another machine's player,
+  of numbers that are not numbers, harder than its weapon deals, of a
+  shape the game never gives that damage, of a part its target does not
+  have, made at a host tick still to come (a *forged* hit); of a weapon the
+  player has not held in ten seconds; and, new in 1.1.1: of a shot (what
+  hits at a point, not an explosion, a melee blow or a collision) whose
+  point none of three ticks (now, the report's and halfway) sees from
+  where the host had the shooter's eyes (as they stand now, and 0.3 world
+  units higher: one crouched now who stood to fire), through the map's
+  structure as a shot meets it (front faces; not two-sided, invisible or
+  breakable ones), up to half a world unit before the point (*through a
+  wall*; one ray, `collision_test_vector_obstructed`, when the first sees
+  it, as an honest shot's does; six rays a host tick at most, one such
+  shot looked at whole a tick, past which a shot is taken); of a weapon the host's copy
+  has had empty (no rounds loaded or not, no battery) for two seconds, the
+  shooter's round trip and its projectile's flight (*infinite ammunition,
+  no reload*); naming a part of a biped more than 0.75 world units from
+  where it hit, with the host's node moved to where the shooter saw the
+  target (*a headshot claimed of a shot at the legs*). A player's own move
+  through the map's walls or floor (the segment from where the host has
+  them to where the client says, at the bounding sphere's centre) is not
+  taken (*noclip*), as moves past the speed, height and fall bounds above
+  never were; but after three seconds of nothing else it is (an honest
+  client the host's copy parted from across a wall, thrown by a blast it
+  hears of a round trip late, is never held there: a walk through a wall
+  stalls three seconds each time).
+- **What is counted.** Each refusal has a weight
+  (`network.anticheat_weights`, in network_anticheat.h's order): a forged
+  hit 25, a weapon not held 10, through a wall 6, a part far from the shot
+  6, an empty weapon 4, hits past the weapon's rate 0.25, moves through a
+  wall 1 (once a second at most), Forge requests malformed or replayed 2 (once a tick);
+  what a client on a poor
+  link sends too (a hit out of reach of where the host had the shooter, the
+  target far from where the host had it, too old, a grenade's throw the
+  host did not see) 0. A player's (or their vehicle's) moves count only
+  when refused for five seconds on end, 10 for each second it goes on: an
+  honest client's are taken again within a round trip (the host puts its
+  player back where it has it), a teleport, flight or speed hack's never.
+  A machine's score falls by `network.anticheat_decay` (4) a second.
+- **What is done.** A machine past `network.anticheat_kick_score` (100) is
+  dropped, every machine told (in red on its console, "dropped by the host:
+  forged hit"), a line added to `cheaters.txt`, and kept out of the host's
+  games for `network.anticheat_ban_minutes` (10): by its real address (an
+  internet play peer's endpoint, not its stand-in, which a new run of its
+  game changes), its stand-in and its hardware id, so neither the game's
+  code nor its invite joins it meanwhile. `network.anticheat` false counts
+  and logs, and drops no one.
+- **Whose word.** Only what came over the machine's own connection, or in a
+  datagram internet play's tunnel sealed to it, drops it. A LAN's datagram
+  is known by its source address alone, which any machine on the LAN can
+  send as another's: counted and logged, never acted on (as the speed
+  hack's check).
+- **Logged.** The violations of each kind, once a second at most per
+  machine, and the game's totals at its end (`anticheat:` in `debug.txt`);
+  every drop, kick and ban (`cheaters.txt`). `cheaters.txt` keeps its last
+  2000 lines and `bans.txt` its last 512.
+- **The host's own.** KICK (dropped, may join again) and BAN (dropped and
+  kept out while the host runs: its real address, stand-in and hardware
+  id; and the player's friend identity blocked, when their machine gives
+  its friend card, so their friend requests, invites and party messages
+  are dropped too) on the Halo 3 PLAYERS screen (Triangle in the lobby, Back held in a
+  game: a player's options, the host's alone), and on the settings panel's
+  Players page (Multiplayer, Vita and PC, Players: Cross kicks, Triangle
+  bans, Square bans for good, in `bans.txt`; Anti-cheat on or off; Clear
+  bans); the console's `kick` and `ban` as before.
+
+Not caught: an aimbot or a wall hack that only shows the player more
+(their input and their shots are a player's); a headshot whose made-up
+point is about the head (the host has the target's pose a round trip late,
+not the shooter's). Tested by `run_netns_online_test.sh anticheat` (a
+modified client dropped within seconds and kept out, a new run of its game
+too) and `anticheatlag` (honest players fighting over a 300 ms, jittery,
+lossy link: no one dropped).
+
 ## Joining a game in progress
 
 A game stays open when it starts (on the Xbox it closed, since every
@@ -440,7 +526,7 @@ a pregame keep-alive every five seconds from the host
      the client's round trip and a second before the report came; not checked for what the tags do
      not bound: a projectile that sticks, which what it sticks to carries,
      one whose timer starts once it bounces or rests, a weapon's own
-     detonation; no line of sight); the target within a few world units of
+     detonation; a shot's line of sight: "A modified client" above); the target within a few world units of
      where the host had it at the tick the report was made at (a player's
      unit or vehicle: the host keeps a second of where they were) or of
      where it is (more for a fast one; also for one that is no longer a

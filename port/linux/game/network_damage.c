@@ -56,7 +56,13 @@ being hit looks and feels like on the clients).
 #include "scenario/scenario.h"
 #include "units/units.h"
 #include "network_distributed.h"
+#include "network_anticheat.h"
 #include "network_wire.h"
+#include "physics/collisions.h"
+#include "items/weapons.h"
+#include "tag_files/tag_files.h"
+
+#include <stdio.h>
 
 #include <math.h>
 
@@ -75,10 +81,18 @@ boolean distributed_get_death(short dead_player_index, byte *killing_player_inde
 	boolean *killed_by_vehicle);
 /* cache_files.c's */
 boolean tag_index_is_group(long tag_index, long group_tag);
+#ifdef HALO_LINUX
+/* (HALO_TICK_PROFILE) the host's checks timed, in the net-tick report
+(tick_detail.c) */
+unsigned long long halo_net_tick_begin(void);
+void halo_net_tick_end(const char *name, unsigned long long started);
+#endif
 /* game_engine.c's */
 long game_engine_network_player_score(long player_index);
 /* physics.c's (world units a tick, each tick) */
 extern real global_gravity;
+/* cseries_windows.c's */
+unsigned long system_milliseconds(void);
 
 enum
 {
@@ -103,6 +117,18 @@ enum
 	pellets, a spray); an explosion's hits are one, however many it hits */
 	HIT_REPORT_BURST_SECONDS = 3,
 	HIT_REPORT_RATE_MARGIN = 2,
+	/* a weapon the host has had empty this long (its rounds, loaded and
+	not, or its battery): what it fires is refused, after its projectiles'
+	own flight and the shooter's round trip (a client's last shots, fired
+	before the host's copy ran dry, come a round trip late) */
+	EMPTY_WEAPON_GRACE_TICKS = 2 * TICKS_PER_SECOND,
+	/* ... the ticks back a shot's line of sight is looked for from (now,
+	the report's and halfway: two eyes each, six rays for a shot no tick
+	sees), and the rays a host's tick spends on them at most: one such shot
+	a tick looked at whole, whatever is sent (the Vita's host: about 0.1-0.2
+	ms) (REPORT_LINE_OF_SIGHT_TOLERANCE) */
+	LINE_OF_SIGHT_TICKS = 3,
+	LINE_OF_SIGHT_RAYS_PER_TICK = 6,
 	/* the hits a second of what no trigger's rate says: melee, a
 	grenade, a vehicle, a weapon's own detonation */
 	MELEE_HITS_PER_SECOND = 4,
@@ -240,6 +266,25 @@ largest damage scale a client's hit has: a melee blow's, airborne
 (unit_update_melee), anything else's all of it */
 #define REPORT_WORLD_BOUND 32768.0f
 #define REPORT_MAXIMUM_MELEE_SCALE 1.5f
+/* a modified client's hits (network_anticheat.c): what a shot hits is
+seen from where the host had the shooter's eyes (through no more of the
+map than the tolerance before the point: a corner the point is on, the
+ground it stands on) at one of the ticks it could have been fired at, every
+LINE_OF_SIGHT_STEP_TICKS back from now (a client's own player is ahead of
+the host's copy, the shot fired where the client had it) ... */
+#define REPORT_LINE_OF_SIGHT_TOLERANCE 0.5f
+/* ... and from eyes this much higher too (a player crouched now who stood
+to fire: a crouch is about 0.27 world units lower) */
+#define LINE_OF_SIGHT_RAISE 0.3f
+/* ... of the map's structure as a shot meets it: front faces, not two
+sided ones (fences, grates), not invisible ones, not ones that break */
+#define REPORT_LINE_OF_SIGHT_FLAGS (FLAG(_collision_test_front_facing_surfaces_bit) | \
+	FLAG(_collision_test_ignore_two_sided_surfaces_bit) | FLAG(_collision_test_ignore_invisible_surfaces_bit) | \
+	FLAG(_collision_test_ignore_breakable_surfaces_bit) | FLAG(_collision_test_structure_bit))
+/* ... and the part of the target a hit names no further from where it hit
+than this (with where the host had the part, moved to where the shooter
+saw the target: a headshot claimed of a shot at the legs) */
+#define REPORT_PART_TOLERANCE 0.75f
 
 /* the damage flags a client's hit has: what its own object_cause_damage is
 given (neither the host's instant kills nor its passengers' passthrough) */
@@ -363,6 +408,8 @@ static struct
 {
 	long definition_indices[MAXIMUM_RECENT_WEAPONS];
 	long times[MAXIMUM_RECENT_WEAPONS];
+	/* (the last tick the host had each with rounds or charge: NONE never) */
+	long armed_times[MAXIMUM_RECENT_WEAPONS];
 	/* (the grenades thrown, not yet gone off: NONE for none) */
 	long throw_times[MAXIMUM_GRENADE_THROWS];
 	short throw_types[MAXIMUM_GRENADE_THROWS];
@@ -1205,20 +1252,26 @@ weapons, lately, a grenade the host saw them throw that has not gone off
 (or one going off this tick, hitting more than one object, dealing more
 than one damage), the vehicle they drove lately; 0 when none of them deals
 it; how they deal it (the _damage_source flags); how far from them what
-they fire deals it; and the type of grenade when nothing but a grenade of
-theirs deals it, else NONE */
+they fire deals it; the type of grenade when nothing but a grenade of
+theirs deals it, else NONE; and whether the only things of theirs that deal
+it are weapons the host has had empty for longer than grace_ticks and their
+shots' flight (empty: infinite ammunition, or no reload) */
 static real distributed_player_deals(
 	short player_index,
 	long damage_index,
+	long grace_ticks,
 	byte *kinds,
 	struct damage_reach *reach,
-	short *grenade_type)
+	short *grenade_type,
+	boolean *empty)
 {
 	struct game_globals *globals = scenario_get_game_globals();
 	short index;
 	real rate = 0.0f;
 	real grenade_rate = 0.0f;
+	boolean armed = FALSE;
 
+	*empty = FALSE;
 	*kinds = 0;
 	*grenade_type = NONE;
 	reach->distance = 0.0f;
@@ -1235,7 +1288,19 @@ static real distributed_player_deals(
 				damage_index, FALSE, &weapon_kinds, &weapon_reach);
 
 			if (weapon_rate > 0.0f)
+			{
+				long armed_time = damage_players[player_index].armed_times[index];
+
 				distributed_reach_combine(reach, &weapon_reach);
+				/* (a melee blow, what flies unbounded by the tags, or a shot
+				fired while it had rounds and in flight since) */
+				if (TEST_FLAG(weapon_kinds, _damage_source_melee_bit) || weapon_reach.distance < 0.0f ||
+					(armed_time != NONE && (real)(game_time_get() - armed_time) <=
+						(real)grace_ticks + MIN(weapon_reach.ticks, (real)PLAYER_TRAIL_TICKS)))
+				{
+					armed = TRUE;
+				}
+			}
 			rate = MAX(rate, weapon_rate);
 			*kinds |= weapon_kinds;
 		}
@@ -1252,6 +1317,7 @@ static real distributed_player_deals(
 		{
 			rate = MAX(rate, VEHICLE_HITS_PER_SECOND);
 			SET_FLAG(*kinds, _damage_source_collision_bit, TRUE);
+			armed = TRUE;
 		}
 	}
 	/* (a grenade's damage only from one thrown: holding grenades deals
@@ -1283,8 +1349,33 @@ static real distributed_player_deals(
 	}
 	if (rate > 0.0f)
 		*grenade_type = NONE;
+	*empty = rate > 0.0f && !armed && grenade_rate <= 0.0f;
 	rate = MAX(rate, grenade_rate);
 	return rate * HIT_REPORT_RATE_MARGIN;
+}
+
+/* whether a grenade of any type deals the damage (a report of it, refused,
+may be a throw the host's game did not see: a poor link's) */
+static boolean distributed_grenade_deals(
+	long damage_index)
+{
+	struct game_globals *globals = scenario_get_game_globals();
+	short index;
+
+	for (index = 0; index < globals->grenades.count && index < NUMBER_OF_UNIT_GRENADE_TYPES; index++)
+	{
+		struct game_globals_grenade *grenade = TAG_BLOCK_GET_ELEMENT(&globals->grenades, index,
+			struct game_globals_grenade);
+		byte kinds;
+		struct damage_reach reach;
+
+		if (grenade->projectile.index != NONE &&
+			distributed_source_deals(grenade->projectile.index, damage_index, TRUE, &kinds, &reach) > 0.0f)
+		{
+			return TRUE;
+		}
+	}
+	return FALSE;
 }
 
 /* the distance between the points, squared */
@@ -1535,6 +1626,184 @@ static boolean distributed_player_could_fire(
 	return FALSE;
 }
 
+/* whether the host's copy of a weapon can fire: a trigger of it that fires
+from a magazine with rounds in it, loaded or not, or one that fires from
+none or takes no rounds a shot (a plasma weapon's, which only its battery -
+its age, for a weapon that cannot fire at the most - stops) */
+static boolean distributed_weapon_armed(
+	long weapon_index)
+{
+	struct weapon_datum *weapon = (struct weapon_datum *)object_try_and_get_and_verify_type(weapon_index,
+		_object_mask_weapon);
+	struct weapon_definition *definition;
+	short trigger_index;
+
+	if (!weapon)
+		return FALSE;
+	definition = weapon_definition_get(weapon->definition_index);
+	/* (no trigger: nothing to tell; armed) */
+	if (definition->weapon.triggers.count <= 0)
+		return TRUE;
+	for (trigger_index = 0; trigger_index < definition->weapon.triggers.count; trigger_index++)
+	{
+		struct weapon_trigger_definition *trigger = TAG_BLOCK_GET_ELEMENT(&definition->weapon.triggers, trigger_index,
+			struct weapon_trigger_definition);
+		short magazine_index = trigger->magazine_index;
+
+		/* (a trigger that fires from no magazine, or takes no rounds a shot:
+		the weapon's battery alone stops it) */
+		if (magazine_index == NONE || magazine_index < 0 || magazine_index >= definition->weapon.magazines.count ||
+			magazine_index >= (short)NUMBEROF(weapon->weapon.magazines) || trigger->rounds_per_shot <= 0)
+		{
+			if (!TEST_FLAG(definition->weapon.flags, _weapon_cannot_fire_at_maximum_age_bit) || weapon->weapon.age < 1.0f)
+				return TRUE;
+			continue;
+		}
+		if (weapon->weapon.magazines[magazine_index].rounds_loaded > 0 ||
+			weapon->weapon.magazines[magazine_index].rounds_total > 0)
+		{
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
+/* (debug.txt) a hit refused as of an empty weapon: the player's weapons
+of late, and what the host's copies have, once a second at most */
+static void distributed_log_empty(
+	short player_index,
+	long damage_index)
+{
+	static unsigned long logged;
+	char line[384];
+	int length = 0;
+	short index;
+
+	if (logged && system_milliseconds() - logged < 1000)
+		return;
+	logged = system_milliseconds() | 1;
+	for (index = 0; index < MAXIMUM_RECENT_WEAPONS && length < (int)sizeof(line) - 96; index++)
+	{
+		long definition_index = damage_players[player_index].definition_indices[index];
+		char const *name;
+
+		if (definition_index == NONE)
+			continue;
+		name = tag_get_name(definition_index);
+		length += snprintf(line + length, sizeof(line) - length, " %s (held %ld ticks ago, armed %ld ago)",
+			name ? name : "?", game_time_get() - damage_players[player_index].times[index],
+			damage_players[player_index].armed_times[index] == NONE ? -1L :
+				game_time_get() - damage_players[player_index].armed_times[index]);
+	}
+	error(_error_log, "anticheat: player %d's hit of %s refused as of an empty weapon; weapons:%s", player_index,
+		tag_get_name(damage_index) ? tag_get_name(damage_index) : "?", length ? line : " none");
+}
+
+/* whether the host had the player's eyes (their unit on foot: its camera
+as it stands now, and LINE_OF_SIGHT_RAISE higher - a player crouched now
+who stood to fire -, moved with the unit) at one of the ticks from now back
+to the report's (LINE_OF_SIGHT_TICKS of them, spread evenly) where they see
+the point through the map's structure (REPORT_LINE_OF_SIGHT_FLAGS), up to
+REPORT_LINE_OF_SIGHT_TOLERANCE before it; TRUE also when it cannot be told
+(no unit, riding: a vehicle's gun is not at its rider's eyes) or when this
+tick's rays are spent (LINE_OF_SIGHT_RAYS_PER_TICK: a host never spends
+more on it, whoever sends what; a report already paid for its weapon's
+rate gets here, so a flood of reports does not) */
+static boolean distributed_point_seen(
+	short player_index,
+	real_point3d const *point,
+	long ticks)
+{
+	static long rays_tick = NONE;
+	static short rays_spent;
+	long unit_index = distributed_living_unit(distributed_player(player_index));
+	real_point3d camera;
+	real_point3d origin;
+	real_vector3d eye_offset;
+	short sample;
+	short tested = 0;
+
+	if (unit_index == NONE || object_get(unit_index)->object.parent_object_index != NONE)
+		return TRUE;
+	if (rays_tick != game_time_get())
+	{
+		rays_tick = game_time_get();
+		rays_spent = 0;
+	}
+	unit_get_camera_position(unit_index, &camera);
+	object_get_origin(unit_index, &origin);
+	eye_offset.i = camera.x - origin.x;
+	eye_offset.j = camera.y - origin.y;
+	eye_offset.k = camera.z - origin.z;
+	if (ticks >= TARGET_HISTORY_TICKS)
+		ticks = TARGET_HISTORY_TICKS - 1;
+	for (sample = 0; sample < LINE_OF_SIGHT_TICKS; sample++)
+	{
+		long back = ticks * sample / (LINE_OF_SIGHT_TICKS - 1);
+		long time = game_time_get() - back;
+		struct damage_history_tick const *tick = &damage_history[time & (TARGET_HISTORY_TICKS - 1)];
+		short raise;
+
+		if (tick->time != time)
+			break;
+		if (tick->objects[player_index][0].object_index != unit_index || tick->objects[player_index][1].object_index != NONE)
+			continue;
+		for (raise = 0; raise < 2; raise++)
+		{
+			real_point3d eye;
+			real_vector3d vector;
+			real length;
+
+			if (rays_spent >= LINE_OF_SIGHT_RAYS_PER_TICK)
+				return TRUE;
+			eye.x = tick->objects[player_index][0].position.x + eye_offset.i;
+			eye.y = tick->objects[player_index][0].position.y + eye_offset.j;
+			eye.z = tick->objects[player_index][0].position.z + eye_offset.k + (raise ? LINE_OF_SIGHT_RAISE : 0.0f);
+			vector.i = point->x - eye.x;
+			vector.j = point->y - eye.y;
+			vector.k = point->z - eye.z;
+			length = (real)sqrt(vector.i * vector.i + vector.j * vector.j + vector.k * vector.k);
+			/* (within the tolerance of the point: nothing between to look for) */
+			if (!(length > REPORT_LINE_OF_SIGHT_TOLERANCE))
+				return TRUE;
+			vector.i *= (length - REPORT_LINE_OF_SIGHT_TOLERANCE) / length;
+			vector.j *= (length - REPORT_LINE_OF_SIGHT_TOLERANCE) / length;
+			vector.k *= (length - REPORT_LINE_OF_SIGHT_TOLERANCE) / length;
+			rays_spent++;
+			if (!collision_test_vector_obstructed(REPORT_LINE_OF_SIGHT_FLAGS, &eye, &vector, unit_index))
+				return TRUE;
+			tested++;
+		}
+	}
+	/* (no tick of the history the shooter was on foot at: told nothing) */
+	return tested == 0;
+}
+
+/* whether the part a hit names of a biped (its node) is about where it
+hit: the host's node, moved by how far the shooter saw the target from
+where the host has it, within REPORT_PART_TOLERANCE of the point */
+static boolean distributed_part_near(
+	long object_index,
+	short node_index,
+	real_point3d const *target_position,
+	real_point3d const *point)
+{
+	real_matrix4x3 const *node;
+	real_point3d origin;
+	real_point3d part;
+
+	if (node_index == NONE || !object_try_and_get_and_verify_type(object_index, _object_mask_biped))
+		return TRUE;
+	node = object_get_node_matrix(object_index, node_index);
+	if (!node)
+		return TRUE;
+	object_get_origin(object_index, &origin);
+	part.x = node->position.x - origin.x + target_position->x;
+	part.y = node->position.y - origin.y + target_position->y;
+	part.z = node->position.z - origin.z + target_position->z;
+	return distributed_distance_squared(&part, point) <= REPORT_PART_TOLERANCE * REPORT_PART_TOLERANCE;
+}
+
 /* the weapons each player carries, and whether they drive, noted */
 static void distributed_note_weapons(
 	void)
@@ -1598,8 +1867,13 @@ static void distributed_note_weapons(
 				{
 					index = oldest;
 					damage_players[player_index].definition_indices[index] = definition_index;
+					damage_players[player_index].armed_times[index] = NONE;
 				}
 				damage_players[player_index].times[index] = game_time_get();
+				/* (a vehicle's weapons are not counted empty: their gunner's
+				turret is the vehicle's) */
+				if (unit_number == 1 || distributed_weapon_armed(weapon_index))
+					damage_players[player_index].armed_times[index] = game_time_get();
 			}
 		}
 	}
@@ -1739,7 +2013,7 @@ at the target in each, and what hits at a point within its reach of where
 the host had the player since it was fired; and area damage or not as the
 game deals it, an explosion's direction and scale from the epicenter to the
 target. */
-static boolean distributed_report_valid(
+static short distributed_report_valid(
 	long machine_index,
 	struct distributed_hit_report const *report,
 	struct damage_data *damage)
@@ -1761,23 +2035,27 @@ static boolean distributed_report_valid(
 	short seen;
 	short grenade_type;
 	short throw_index = NONE;
+	boolean empty;
 
 	/* that machine's player */
 	if (player_index == NO_PLAYER || player_index >= MAXIMUM_TRACKED_PLAYERS ||
 		!(player = distributed_player(player_index)) || !distributed_machine_has_player(machine_index, player_index))
 	{
-		return FALSE;
+		return _anticheat_hit_forged;
 	}
 	/* one of the host's objects (the index whole: identifier 0 is any
-	object at the index) */
-	if (!distributed_object_index_valid(report->object_index))
-		return FALSE;
+	object at the index; one gone since is a poor link's) */
+	if (!distributed_object_index_valid(report->object_index) ||
+		!tag_index_is_group(report->damage.definition_index, DAMAGE_EFFECT_DEFINITION_TAG))
+	{
+		return _anticheat_hit_forged;
+	}
 	target = (struct object_datum *)object_try_and_get_and_verify_type(report->object_index,
 		_object_mask_biped | _object_mask_vehicle | _object_mask_weapon | _object_mask_equipment);
 	if (!target && static_target(report->object_index))
 		target = object_get(report->object_index);
-	if (!target || !tag_index_is_group(report->damage.definition_index, DAMAGE_EFFECT_DEFINITION_TAG))
-		return FALSE;
+	if (!target)
+		return _anticheat_hit_refused;
 	/* numbers the game can take */
 	if (!distributed_damage_numbers_valid(&report->damage) ||
 		!distributed_point_valid(&report->target_position, REPORT_WORLD_BOUND) ||
@@ -1785,20 +2063,26 @@ static boolean distributed_report_valid(
 		!distributed_damage_indices_valid(report->object_index, report->node_index, report->region_index,
 			report->material_index))
 	{
-		return FALSE;
+		return _anticheat_hit_forged;
 	}
 	/* made at a tick of the host's not later than now nor long before (one
 	held back is refused, as a burst after the network was lost is), and
 	looked back over from then: however long it took to come (sent again,
 	reliably), where the shooter saw the target */
-	if (report->host_time == NONE || report->host_time > now || now - report->host_time > REPORT_MAXIMUM_AGE_TICKS)
-		return FALSE;
+	if (report->host_time != NONE && report->host_time > now)
+		return _anticheat_hit_forged;
+	/* (none: made before the client heard the host, at a game's start) */
+	if (report->host_time == NONE || now - report->host_time > REPORT_MAXIMUM_AGE_TICKS)
+		return _anticheat_hit_refused;
 	ticks = MIN(now - report->host_time + TARGET_HISTORY_SLACK_TICKS, TARGET_HISTORY_TICKS - 1);
-	/* damage that player could deal, and how they deal it */
-	rate = distributed_player_deals(player_index, report->damage.definition_index, &kinds, &fired_reach,
-		&grenade_type);
+	/* damage that player could deal, and how they deal it (one of a grenade
+	the host did not see thrown: a poor link's; of a weapon not held in
+	ten seconds: no honest client's) */
+	rate = distributed_player_deals(player_index, report->damage.definition_index,
+		EMPTY_WEAPON_GRACE_TICKS + (long)distributed_machine_round_trip_ticks(machine_index), &kinds, &fired_reach,
+		&grenade_type, &empty);
 	if (rate <= 0.0f)
-		return FALSE;
+		return distributed_grenade_deals(report->damage.definition_index) ? _anticheat_hit_refused : _anticheat_hit_weapon;
 	/* ... of its shape: at a point, else a melee blow, else a collision; and
 	area damage as the game deals it (the report's only when the damage is
 	dealt both ways) */
@@ -1825,19 +2109,19 @@ static boolean distributed_report_valid(
 	}
 	else
 	{
-		return FALSE;
+		return _anticheat_hit_forged;
 	}
 	/* ... no harder than it can be (all of it, but an airborne melee
 	blow's) */
 	if (!(report->damage.scale >= 0.0f && report->damage.scale <= (melee ? REPORT_MAXIMUM_MELEE_SCALE : 1.0f)))
-		return FALSE;
+		return _anticheat_hit_forged;
 	/* the origin at the target (an explosion's within its reach) */
 	definition = damage_effect_definition_get(report->damage.definition_index);
 	reach = target->object.bounding_sphere_radius + REPORT_IMPACT_TOLERANCE;
 	if (area)
 		reach += definition->cutoff_radius;
 	if (!(distributed_distance_squared(&report->damage.origin, &report->target_position) <= reach * reach))
-		return FALSE;
+		return _anticheat_hit_forged;
 	/* what only a grenade of theirs deals, from one the host saw them throw
 	that has not gone off: its explosion once (the explosion's other objects
 	that tick come free, distributed_report_paid, and its other damage takes
@@ -1848,13 +2132,20 @@ static boolean distributed_report_valid(
 	{
 		throw_index = distributed_grenade_throw(player_index, grenade_type);
 		if (throw_index == NONE)
-			return FALSE;
+			return _anticheat_hit_refused;
 	}
 	/* no more than the weapon fires */
 	if (!distributed_report_paid(player_index, report, rate, area && !melee && !collision,
 		definition->cutoff_radius > 0.0f))
 	{
-		return FALSE;
+		return _anticheat_hit_rate;
+	}
+	/* (paid for: what a weapon the host has had empty a while fires, which
+	infinite ammunition or no reload sends) */
+	if (empty)
+	{
+		distributed_log_empty(player_index, report->damage.definition_index);
+		return _anticheat_hit_empty;
 	}
 	/* (the grenade gone off: its throw spent) */
 	if (throw_index != NONE && area && !melee && !collision)
@@ -1865,28 +2156,28 @@ static boolean distributed_report_valid(
 	if (melee && (!distributed_player_was_near(player_index, &report->damage.epicenter, ticks) ||
 		!distributed_player_was_near(player_index, &report->damage.origin, ticks)))
 	{
-		return FALSE;
+		return _anticheat_hit_refused;
 	}
 	if (collision && !distributed_player_drove_into(player_index, &report->damage.epicenter, &report->target_position,
 		target->object.bounding_sphere_radius, ticks))
 	{
-		return FALSE;
+		return _anticheat_hit_refused;
 	}
 	/* what hits at a point (a shot, an explosion) within its reach of where
 	the host had the player since it was fired, where the tags bound that
-	(no line of sight: a wall between is not looked for) */
+	(a shot's line of sight is looked for last: distributed_point_seen) */
 	if (!melee && !collision && fired_reach.distance >= 0.0f &&
 		!distributed_player_could_fire(machine_index, player_index, &report->damage.origin, &fired_reach,
 			report->host_time))
 	{
-		return FALSE;
+		return _anticheat_hit_refused;
 	}
 	/* the target about where the host had it when the shooter saw it: a
 	player's unit or vehicle as far back as the report was made, else (what
 	no player has) about where it is */
 	seen = distributed_target_seen(report->object_index, &report->target_position, ticks);
 	if (seen == FALSE)
-		return FALSE;
+		return _anticheat_hit_refused;
 	if (seen == NONE)
 	{
 		real_point3d origin;
@@ -1899,12 +2190,34 @@ static boolean distributed_report_valid(
 		tolerance = REPORT_TARGET_TOLERANCE + REPORT_TARGET_LEAD_TICKS *
 			(real)sqrt(velocity.i * velocity.i + velocity.j * velocity.j + velocity.k * velocity.k);
 		if (!(distributed_distance_squared(&report->target_position, &origin) <= tolerance * tolerance))
-			return FALSE;
+			return _anticheat_hit_refused;
+	}
+	/* a shot's (what hits at a point, not an explosion) part of a biped
+	about where it hit, and the point seen from where the host had the
+	shooter's eyes: no headshot claimed of a shot at the legs, nor a hit
+	through a wall (the cheapest last, the line of sight the dearest) */
+	if (!area && !melee && !collision)
+	{
+		boolean part_near, seen_point;
+#ifdef HALO_LINUX
+		unsigned long long started = halo_net_tick_begin();
+#endif
+
+		part_near = distributed_part_near(report->object_index, report->node_index, &report->target_position,
+			&report->damage.origin);
+		seen_point = part_near && distributed_point_seen(player_index, &report->damage.origin, ticks);
+#ifdef HALO_LINUX
+		halo_net_tick_end("anticheat_hit_sight", started);
+#endif
+		if (!part_near)
+			return _anticheat_hit_part;
+		if (!seen_point)
+			return _anticheat_hit_wall;
 	}
 	/* the damage as the host deals it: what a client's hit can be, from the
 	player's own */
 	if (!distributed_damage_to_data(&report->damage, damage))
-		return FALSE;
+		return _anticheat_hit_forged;
 	damage->flags &= REPORT_DAMAGE_FLAGS;
 	SET_FLAG(damage->flags, _damage_area_of_effect_bit, area);
 	/* ... an explosion's direction and scale as the game gives them
@@ -1945,7 +2258,7 @@ static boolean distributed_report_valid(
 	unit_index = distributed_living_unit(player);
 	if (!distributed_object_is_players(player_index, unit_index, damage->owner_object_index))
 		damage->owner_object_index = unit_index;
-	return TRUE;
+	return NONE;
 }
 
 void network_damage_handle_reports(
@@ -1961,9 +2274,14 @@ void network_damage_handle_reports(
 		struct distributed_hit_report const *report = &reports[index];
 		struct damage_data damage;
 
-		if (!distributed_report_valid(machine_index, report, &damage))
+		short refused = distributed_report_valid(machine_index, report, &damage);
+
+		if (refused != NONE)
 		{
 			damage_rejected_reports++;
+			/* (counted against the machine: a report comes over its stream
+			alone, network_distributed.c) */
+			network_anticheat_violation(machine_index, refused, TRUE, 1.0f);
 			continue;
 		}
 		damage_dealt_reports++;
@@ -2357,7 +2675,10 @@ void network_damage_new_game(
 		short index;
 
 		for (index = 0; index < MAXIMUM_RECENT_WEAPONS; index++)
+		{
 			damage_players[player_index].definition_indices[index] = NONE;
+			damage_players[player_index].armed_times[index] = NONE;
+		}
 		for (index = 0; index < MAXIMUM_GRENADE_THROWS; index++)
 			damage_players[player_index].throw_times[index] = NONE;
 		damage_players[player_index].driven_time = -RECENT_WEAPON_TICKS - 1;

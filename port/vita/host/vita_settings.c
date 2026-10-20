@@ -299,6 +299,9 @@ enum
 	/* (Multiplayer's Vita and PC: the browsers' filter, who can join a game
 	hosted - network_wire.h) */
 	PAGE_CROSSPLAY,
+	/* the players of the game this Vita hosts: kick, ban (the game's side:
+	port/linux/game/network_anticheat.c) */
+	PAGE_PLAYERS,
 	PAGE_COUNT
 };
 
@@ -327,6 +330,7 @@ static const struct
 	{ "Friends", TAB_MULTIPLAYER },
 	{ "Party", TAB_MULTIPLAYER },
 	{ "Vita and PC", TAB_MULTIPLAYER },
+	{ "Players", TAB_MULTIPLAYER },
 };
 /* the headings over a tab's rows, as Halo Online's settings have them
 (HUD, Interface...): each above the row it names, when that row is shown */
@@ -388,6 +392,9 @@ enum
 	ACTION_PARTY_LEAVE,
 	/* (the Party page) a chat message typed on the system's keyboard */
 	ACTION_PARTY_MESSAGE,
+	/* (the Players page) the machines this host banned for the session, and
+	those its anti-cheat dropped, let in again */
+	ACTION_CLEAR_BANS,
 };
 
 struct setting
@@ -703,6 +710,15 @@ static struct setting settings[] = {
 		PAGE_PARTY, KIND_ACTION, ACTION_PARTY_LEAVE },
 	{ "Add a friend", NULL, 0, 0, { NULL }, { NULL }, "Type a friend's code: they accept, then you're friends", 0,
 		PAGE_FRIENDS, KIND_ACTION, ACTION_FRIEND_ADD },
+	/* (the game this Vita hosts: its players kicked or banned, the host's
+	anti-cheat; network_anticheat.c answers, system_link_shortcut.h) */
+	PAGE_ROW("Players", "The game you host: kick or ban a player", PAGE_CROSSPLAY, PAGE_PLAYERS),
+	/* (network.anticheat: a machine that keeps sending what only a modified
+	game sends dropped and kept out a while; read as each game starts) */
+	{ "Anti-cheat", "HALO_NET_ANTICHEAT", 0, 2, { "true", "false" }, { "On", "Off" },
+		"On: cheaters are dropped from your games a while", 0, PAGE_PLAYERS },
+	{ "Clear bans", NULL, 0, 0, { NULL }, { NULL }, "Let banned and dropped players join again", 0,
+		PAGE_PLAYERS, KIND_ACTION, ACTION_CLEAR_BANS },
 	/* (friends.appear_offline: nothing sent to friends; live) */
 	{ "Appear offline", "HALO_FRIENDS_APPEAR_OFFLINE", 0, 2, { "false", "true" }, { "Off", "On" },
 		"On: friends see you offline; you still see them", 0, PAGE_FRIENDS },
@@ -2624,6 +2640,8 @@ enum
 	LINE_PARTY_FRIEND,
 	/* (the Party page's quick chat: its preset, party_preset) */
 	LINE_PARTY_PRESET,
+	/* (the Players page's players: host_players_view) */
+	LINE_HOST_PLAYER,
 	/* (a line that is not chosen: a warning, a note) */
 	LINE_INFO,
 	/* (a heading over rows: headings; not chosen either) */
@@ -2899,6 +2917,81 @@ static const char *friend_state_word(const struct p2p_friend_entry *entry)
 	return T("Blocked");
 }
 
+/* the Players page's view of the hosted game's players (published by the
+game's main loop: system_link_shortcut.h), read whole (the serial even and
+the same before and after), and the panel's request's answer awaited */
+static int host_players_count = -1;
+static int host_players_machines[HALO_HOST_PLAYERS_MAXIMUM];
+static char host_players_names[HALO_HOST_PLAYERS_MAXIMUM][HALO_HOST_PLAYER_NAME_SIZE];
+static int host_session_bans;
+static int host_player_asked;
+static char host_player_asked_name[HALO_HOST_PLAYER_NAME_SIZE];
+
+static void host_players_refresh(void)
+{
+	int tries;
+
+	/* (the panel's last request answered: said) */
+	if (host_player_asked && !__atomic_load_n(&halo_host_player_request, __ATOMIC_ACQUIRE))
+	{
+		int answer = __atomic_load_n(&halo_host_player_answer, __ATOMIC_ACQUIRE);
+
+		if (host_player_asked == HALO_HOST_PLAYER_CLEAR_BANS)
+			set_notice("%s", T("Banned players can join again"));
+		else if (answer != HALO_HOST_ANSWER_DONE)
+			set_notice("%s", T("That player is not in the game"));
+		else if (host_player_asked == HALO_HOST_PLAYER_KICK)
+			set_notice(T("Kicked %s"), host_player_asked_name);
+		else
+			set_notice(T("Banned %s from your games"), host_player_asked_name);
+		host_player_asked = 0;
+	}
+	for (tries = 0; tries < 4; tries++)
+	{
+		int serial = __atomic_load_n(&halo_host_players_serial, __ATOMIC_ACQUIRE), count, index;
+
+		if (serial & 1)
+			continue;
+		count = halo_host_players_count;
+		if (count > HALO_HOST_PLAYERS_MAXIMUM)
+			count = HALO_HOST_PLAYERS_MAXIMUM;
+		for (index = 0; index < count; index++)
+		{
+			host_players_machines[index] = halo_host_players_machines[index];
+			memcpy(host_players_names[index], halo_host_players_names[index], HALO_HOST_PLAYER_NAME_SIZE);
+			host_players_names[index][HALO_HOST_PLAYER_NAME_SIZE - 1] = 0;
+		}
+		host_session_bans = halo_host_session_bans;
+		if (__atomic_load_n(&halo_host_players_serial, __ATOMIC_ACQUIRE) == serial)
+		{
+			host_players_count = count;
+			return;
+		}
+	}
+}
+
+/* a Players page's line's buttons: Cross kicks, Triangle bans for the
+session, Square for good (bans.txt); asked of the game's main loop */
+static void host_player_input(const struct line *line, unsigned long pressed)
+{
+	int how = (pressed & VITA_BUTTON_CROSS) ? HALO_HOST_PLAYER_KICK : (pressed & VITA_BUTTON_TRIANGLE) ?
+		HALO_HOST_PLAYER_BAN : (pressed & VITA_BUTTON_SQUARE) ? HALO_HOST_PLAYER_BAN_ALWAYS : 0;
+	char log[128];
+
+	if (!how || line->index < 0 || line->index >= host_players_count ||
+		__atomic_load_n(&halo_host_player_request, __ATOMIC_ACQUIRE))
+	{
+		return;
+	}
+	host_player_asked = how;
+	memcpy(host_player_asked_name, host_players_names[line->index], HALO_HOST_PLAYER_NAME_SIZE);
+	__atomic_store_n(&halo_host_player_answer, HALO_HOST_ANSWER_NONE, __ATOMIC_RELEASE);
+	__atomic_store_n(&halo_host_player_request, how << 8 | (host_players_machines[line->index] & 0xFF), __ATOMIC_RELEASE);
+	snprintf(log, sizeof(log), "settings: players: %s %s", how == HALO_HOST_PLAYER_KICK ? "kick" :
+		how == HALO_HOST_PLAYER_BAN ? "ban (session)" : "ban (for good)", host_player_asked_name);
+	vita_host_log(log);
+}
+
 /* the lines of the page shown: its rows, each heading (headings) above the
 row it names (Game's Check for updates with the version and the answer
 under it), then the gyroscope's line (Gyro settings) or the maps (Modded
@@ -2911,6 +3004,8 @@ static int page_lines(struct line *lines)
 		friends_refresh(0);
 	if (page == PAGE_PARTY)
 		party_refresh(0);
+	if (page == PAGE_PLAYERS)
+		host_players_refresh();
 
 	for (index = 0; index < SETTING_COUNT; index++)
 		if (settings[index].page == page && setting_shown(&settings[index]))
@@ -3015,6 +3110,26 @@ static int page_lines(struct line *lines)
 		for (index = 0; index < friends_count; index++)
 		{
 			lines[count].type = LINE_FRIEND;
+			lines[count++].index = index;
+		}
+	}
+	if (page == PAGE_PLAYERS)
+	{
+		lines[count].type = LINE_INFO;
+		if (host_players_count < 0)
+			snprintf(lines[count++].text, sizeof(lines[0].text), "%s", T("You host no network game"));
+		else if (!host_players_count)
+			snprintf(lines[count++].text, sizeof(lines[0].text), "%s", T("No one else is in your game"));
+		else
+			snprintf(lines[count++].text, sizeof(lines[0].text), "%s", T("Cross kicks, Triangle bans, Square for good"));
+		if (host_session_bans)
+		{
+			lines[count].type = LINE_INFO;
+			snprintf(lines[count++].text, sizeof(lines[0].text), T("%d kept out of your games"), host_session_bans);
+		}
+		for (index = 0; index < host_players_count && index < HALO_HOST_PLAYERS_MAXIMUM; index++)
+		{
+			lines[count].type = LINE_HOST_PLAYER;
 			lines[count++].index = index;
 		}
 	}
@@ -3424,6 +3539,8 @@ static void help_line(char *text, int size, const struct line *line)
 	}
 	else if (line && line->type == LINE_PARTY_PRESET)
 		snprintf(text, (size_t)size, "%s", T("Said to your party at once, in their language"));
+	else if (line && line->type == LINE_HOST_PLAYER)
+		snprintf(text, (size_t)size, "%s", T("A ban keeps their PS Vita or PC out of your games"));
 	else if (line && line->type == LINE_FRIEND)
 	{
 		const struct p2p_friend_entry *entry = &friends_view[line->index];
@@ -3527,6 +3644,8 @@ static void footer_line(char *text, int size, const struct line *line)
 		middle = T("Cross: invite to party   ");
 	else if (line && line->type == LINE_PARTY_PRESET)
 		middle = T("Left/right: choose  Cross: send  ");
+	else if (line && line->type == LINE_HOST_PLAYER)
+		middle = T("Cross: kick  Triangle: ban  ");
 	else if (line && line->type == LINE_FRIEND)
 	{
 		const struct p2p_friend_entry *entry = &friends_view[line->index];
@@ -3780,6 +3899,9 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 		else if (line->type == LINE_PARTY_PRESET)
 			length += snprintf(text + length, (size_t)(size - length), "\n%s\x02< %.24s >", T("Quick chat"),
 				p2p_party_chat_preset_text(party_preset));
+		else if (line->type == LINE_HOST_PLAYER)
+			length += snprintf(text + length, (size_t)(size - length), "\n%.15s\x02  %s",
+				host_players_names[line->index], T("In your game"));
 		else if (line->type == LINE_FRIEND)
 		{
 			const struct p2p_friend_entry *entry = &friends_view[line->index];
@@ -4962,6 +5084,14 @@ static void act(const struct setting *setting)
 		{
 			party_message_pending = 1;
 			vgxm_menu_set(NULL, 0);
+		}
+		break;
+	case ACTION_CLEAR_BANS:
+		if (!__atomic_load_n(&halo_host_player_request, __ATOMIC_ACQUIRE))
+		{
+			host_player_asked = HALO_HOST_PLAYER_CLEAR_BANS;
+			__atomic_store_n(&halo_host_player_request, HALO_HOST_PLAYER_CLEAR_BANS << 8, __ATOMIC_RELEASE);
+			vita_host_log("settings: players: the session's bans cleared");
 		}
 		break;
 	case ACTION_PARTY_LEAVE:
@@ -6150,6 +6280,8 @@ int vita_settings_input(const struct vita_host_pad *pad)
 			{
 				party_input(line, pressed);
 			}
+			else if (line->type == LINE_HOST_PLAYER)
+				host_player_input(line, pressed);
 			else if (pressed == VITA_BUTTON_TRIANGLE)
 				;
 			else if (line->type == LINE_MOD)

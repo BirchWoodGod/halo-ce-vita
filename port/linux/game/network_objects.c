@@ -65,6 +65,7 @@ same datum index (identifier and all), so that any message can name one:
 #include "cutscene/cinematics.h"
 #include "network_coop.h"
 #include "network_distributed.h"
+#include "network_anticheat.h"
 #include "network_wire.h"
 #include "forge.h"
 
@@ -1929,11 +1930,17 @@ void network_objects_apply_vehicle_predictions(
 		dz = state->position.z - vehicle->object.position.z;
 		/* (so written that a position not a number is not taken) */
 		if (!(dx * dx + dy * dy + dz * dz <= HOST_VEHICLE_ACCEPT_TOLERANCE * HOST_VEHICLE_ACCEPT_TOLERANCE))
+		{
+			distributed_note_move(player_index, _anticheat_vehicle_move, FALSE);
 			continue;
+		}
 		/* (no higher in the air than it was thrown up leaving the ground,
 		falling since: past that the host's copy falls as its ticks have it) */
 		if (!network_objects_vehicle_below_ceiling(player_index, state->object_index, &state->position))
+		{
+			distributed_note_move(player_index, _anticheat_vehicle_move, FALSE);
 			continue;
+		}
 		/* (how fast it may go, a tick) */
 		{
 			struct vehicle_definition const *definition = vehicle_specific_definition_get(vehicle->definition_index);
@@ -2006,7 +2013,10 @@ void network_objects_apply_vehicle_predictions(
 				dy = state->position.y - from->y;
 				dz = state->position.z - from->z;
 				if (ticks <= 0 || !(dx * dx + dy * dy + dz * dz <= reach * reach))
+				{
+					distributed_note_move(player_index, _anticheat_vehicle_move, FALSE);
 					continue;
+				}
 			}
 		}
 		distributed_object_state_unpack(state, &forward, &up, &velocity, &angular_velocity);
@@ -2015,7 +2025,11 @@ void network_objects_apply_vehicle_predictions(
 		distributed_vector_clamp(&velocity, speed);
 		distributed_vector_clamp(&angular_velocity, MAXIMUM_PREDICTED_VEHICLE_ANGULAR_SPEED);
 		if (!distributed_transform_valid(&state->position, &forward, &up, &velocity, &angular_velocity, &forward, &up))
+		{
+			distributed_note_move(player_index, _anticheat_vehicle_move, FALSE);
 			continue;
+		}
+		distributed_note_move(player_index, _anticheat_vehicle_move, TRUE);
 		{
 			real_point3d previous_position = vehicle->object.position;
 

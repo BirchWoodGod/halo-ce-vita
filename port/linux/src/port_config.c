@@ -416,6 +416,34 @@ static const struct config_setting config_settings[] =
 		"animation, footsteps and weapon run at half rate until seen. \"auto\",\n"
 		"the default, in games of more than 16 players (only crossplay's PC games\n"
 		"are that large); \"1\" always; \"0\" never." },
+	{ "network.anticheat", _config_boolean, "true", "HALO_NET_ANTICHEAT", _environment_value, _platform_all,
+		"A host drops a client machine that keeps sending what only a modified\n"
+		"game sends (hits harder than their weapon, through walls, of an empty\n"
+		"weapon; moves the host refuses for seconds on end), keeps it out of\n"
+		"its games for network.anticheat_ban_minutes and logs it to\n"
+		"cheaters.txt. Off: refused all the same, counted and logged, never\n"
+		"dropped (port/linux/NETCODE.md, \"A modified client\")." },
+	{ "network.anticheat_kick_score", _config_integer, "100", "HALO_NET_ANTICHEAT_KICK_SCORE", _environment_value,
+		_platform_all,
+		"The score past which a client machine is dropped: each refusal adds\n"
+		"its kind's weight (network.anticheat_weights), and the score falls by\n"
+		"network.anticheat_decay a second." },
+	{ "network.anticheat_decay", _config_integer, "4", "HALO_NET_ANTICHEAT_DECAY", _environment_value, _platform_all,
+		"How much a client machine's anti-cheat score falls a second." },
+	{ "network.anticheat_ban_minutes", _config_integer, "10", "HALO_NET_ANTICHEAT_BAN_MINUTES", _environment_value,
+		_platform_all,
+		"How long a machine the anti-cheat limit dropped is kept out of this\n"
+		"host's games, its code and invites too (minutes; 0 none, 1440 at\n"
+		"most)." },
+	{ "network.anticheat_weights", _config_string, "\"\"", "HALO_NET_ANTICHEAT_WEIGHTS", _environment_value,
+		_platform_all,
+		"Each refusal's weight, comma-separated, in this order (empty keeps\n"
+		"each default): a forged hit (25), a hit of a weapon not held (10),\n"
+		"through a wall (6), of an empty weapon (4), of a part far from the\n"
+		"shot (6), a hit refused as a poor link's can be (0), hits past the\n"
+		"weapon's rate (0.25), moves refused for seconds on end (10, a second),\n"
+		"through walls (1), a vehicle's moves refused (10, a second), Forge\n"
+		"requests malformed (2, once a tick)." },
 	{ "network.latency_meter", _config_boolean, "true", "HALO_LATENCY_METER", _environment_value, _platform_all,
 		"Show the round trip to the host in a network game, in milliseconds,\n"
 		"at the screen's top right (the host: its slowest player's), and\n"
