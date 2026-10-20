@@ -701,6 +701,7 @@
 # ---------- the menus' map lists: a map that cannot be played (port/linux/game/map_checks.c, menu_functions.c)
 "%s.map is damaged - copy it again" = "%s.map está dañado: cópialo otra vez"
 " (DAMAGED)" = " (DAÑADO)"
+" (MISSING)" = " (FALTA)"
 
 # ---------- joining a game (source/networking/network_client_manager.c)
 "This PC game's network version (%u) is not one this version of the game can join (%u).\n\nUpdate the game, or join another game." = "La versión de red de esta partida de PC (%u) no es una a la que esta versión del juego pueda unirse (%u).\n\nActualiza el juego o únete a otra partida."

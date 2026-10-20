@@ -272,6 +272,8 @@ ui.map's own, the rest this folder's art. -->
 	</widget>
 	<widget name="h3/mission/mission_picture" left="320" top="84" width="140" height="114" bitmap="h3/sp_levels"/>
 	<widget name="h3/mission/mission_text" type="text" left="320" top="206" width="266" height="120" font="h3/font_small" color="#FFCFD9E3" string_list="ui\shell\main_menu\solo_level_select\map_data"/>
+	<!-- (a level whose file is missing or cannot be played: why, in its description's place, port h3 missions) -->
+	<widget name="h3/mission/mission_why" type="text" left="320" top="206" width="266" height="120" font="h3/font_small" color="#FFCFD9E3"/>
 	<widget name="h3/mission/screen" flags="pass_unhandled_to_focused_child">
 		<on event="b back" back="true"/>
 		<child widget="h3/main/haze"/>
@@ -280,6 +282,7 @@ ui.map's own, the rest this folder's art. -->
 		<child widget="h3/pick/rule"/>
 		<child widget="h3/mission/mission_picture"/>
 		<child widget="h3/mission/mission_text"/>
+		<child widget="h3/mission/mission_why"/>
 		<child widget="h3/pick/strip"/>
 		<child widget="h3/pick/a_butn"/>
 		<child widget="h3/pick/select"/>

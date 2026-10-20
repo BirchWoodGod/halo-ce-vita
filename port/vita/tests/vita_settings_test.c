@@ -107,6 +107,8 @@ int forge_panel_map_count(void) { return 3; }
 const char *forge_panel_map_name(int map_index) { return map_index >= 0 && map_index < 3 ? test_forge_maps[map_index][0] : ""; }
 const char *forge_panel_map_short(int map_index) { return map_index >= 0 && map_index < 3 ? test_forge_maps[map_index][1] : ""; }
 int forge_panel_map_available(int map_index) { return map_index == 1 || map_index == 2; }
+/* (port/linux/game/map_checks.c: the map lists' looks forgotten as a map is deleted) */
+void map_checks_forget(void) { }
 /* (a Forge game played, with its placed characters alive and dead; what
 the panel asked cleared: -1 nothing, 0 the dead, 1 all) */
 static int test_forge_playing, test_forge_alive, test_forge_dead, test_forge_cleared = -1;

@@ -1244,6 +1244,44 @@ static void h3_focus_child(struct widget_instance *list, long index)
 /* the lobby's rows (mission_row, difficulty_row), its picture (picture: the
 level's frame of the game's own level pictures), the difficulty emblem
 (emblem) and the caption */
+/* (port h3 missions) the focused mission's level file missing or one that
+cannot be played: why, in its description's place (mission_why) */
+static void h3_missions_why(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *child, *found;
+	short index = 0, focused = NONE;
+	char why[160];
+	boolean playable;
+
+	if (list->type != _ui_widget_type_column_list)
+		return;
+	for (child = list->child; child; child = child->next, index++)
+	{
+		if (child == list->focused_child)
+			focused = index;
+	}
+	if (focused < 0 || focused >= NUMBER_OF_SINGLE_PLAYER_LEVELS)
+		return;
+	playable = map_check(h3_level_paths[focused], why, sizeof(why)) == _map_check_playable;
+	if ((found = named(screen, "mission_text")) != NULL)
+		widget_instance_set_visibility_recursive(found, playable);
+	if ((found = named(screen, "mission_why")) != NULL)
+	{
+		widget_instance_set_visibility_recursive(found, !playable);
+		text_show(found, playable ? "" : why);
+	}
+	/* (a mission that cannot be played said once as it is focused: the
+	tests read it) */
+	{
+		static short said = NONE;
+
+		if (!playable && said != focused)
+			platform_log("menus: h3 missions: %s: can't be played: %s", h3_level_names[focused], why);
+		said = playable ? NONE : focused;
+	}
+}
+
 static void h3_campaign_update(struct widget_instance *widget)
 {
 	struct widget_instance *screen = screen_of(widget);
@@ -1288,6 +1326,14 @@ static void h3_campaign_update(struct widget_instance *widget)
 		snprintf(text, sizeof(text), "%s", T("Co-op with the PS Vitas near you."));
 	else
 		snprintf(text, sizeof(text), "%s", T("This party is local to this PS Vita."));
+	/* (the mission's level cannot be played: why; START GAME then says it
+	again as the map fails to load, back at the main menu) */
+	{
+		char why[160];
+
+		if (map_check(h3_level_paths[h3_campaign.level], why, sizeof(why)) != _map_check_playable)
+			snprintf(text, sizeof(text), "%s", why);
+	}
 	text_show(named(screen, "ready_sub"), text);
 	snprintf(text, sizeof(text), "%s: %s", T("MISSION"), T(h3_level_names[h3_campaign.level]));
 	h3_capitals(text);
@@ -2605,7 +2651,7 @@ static struct
 	short map_cursor;
 	short map_page;
 	char said[192];
-	char map_said[96];
+	char map_said[288];
 } h3_mp;
 
 static char const *h3_network_name(short network)
@@ -2681,7 +2727,31 @@ static void h3_mp_gametypes_read(void)
 	}
 }
 
-/* the map the Xbox's level list opens on: the one last used, else its first */
+/* (the lobby's map one of the Xbox's whose file is missing or cannot be
+played - Ben's 0-byte beavercreek.map, Battle Creek being the lobby's
+first: its live lobby never opened -) the first that can be, said */
+static void h3_mp_map_playable(void)
+{
+	char why[160];
+	short index;
+
+	if (h3_mp.map_index == NONE || map_check(h3_map_paths[h3_mp.map_index], why, sizeof(why)) == _map_check_playable)
+		return;
+	for (index = 0; index < H3_MAP_COUNT; index++)
+	{
+		if (map_check_playable(h3_map_paths[index]))
+		{
+			platform_log("menus: h3 mp: %s can't be played (%s): the lobby's map is %s", h3_map_names[h3_mp.map_index], why,
+				h3_map_names[index]);
+			h3_mp.map_index = index;
+			return;
+		}
+	}
+	platform_log("menus: h3 mp: no multiplayer map can be played (%s)", why);
+}
+
+/* the map the Xbox's level list opens on: the one last used, else its
+first; one that can be played (h3_mp_map_playable) */
 static void h3_mp_map_read(void)
 {
 	char map[MAXIMUM_FILENAME_LENGTH + 1];
@@ -2691,13 +2761,17 @@ static void h3_mp_map_read(void)
 	h3_mp.map_other[0] = 0;
 	map[0] = 0;
 	if (!saved_game_file_retrieve_last_used_multiplayer_map(map) || !map[0])
+	{
+		h3_mp_map_playable();
 		return;
+	}
 	map[sizeof(map) - 1] = 0;
 	for (index = 0; index < H3_MAP_COUNT; index++)
 	{
 		if (!_stricmp(map, h3_map_paths[index]))
 		{
 			h3_mp.map_index = index;
+			h3_mp_map_playable();
 			return;
 		}
 	}
@@ -2706,6 +2780,7 @@ map list: the Xbox's list opens on its first map, and so does the lobby) */
 	if (custom_edition_maps_display_index(map) == NONE)
 	{
 		platform_log("menus: h3 mp: the last map used, %s, is not in the map list (off or gone)", map);
+		h3_mp_map_playable();
 		return;
 	}
 	h3_mp.map_index = NONE;
@@ -3010,6 +3085,17 @@ static void h3_mp_maps_update(struct widget_instance *list)
 			continue;
 		snprintf(text, sizeof(text), "%s", h3_mp.map_names[h3_mp.map_view.offset + index]);
 		h3_capitals(text);
+		/* (one of the Xbox's maps whose file is not there, or cannot be
+		played: marked, not chosen, h3_mp_map_set) */
+		switch (map_check(h3_mp.map_paths[h3_mp.map_view.offset + index], NULL, 0))
+		{
+		case _map_check_missing:
+			snprintf(text + strlen(text), sizeof(text) - strlen(text), "%s", T(" (MISSING)"));
+			break;
+		case _map_check_unusable:
+			snprintf(text + strlen(text), sizeof(text) - strlen(text), "%s", T(" (DAMAGED)"));
+			break;
+		}
 		text_show(child, text);
 		if (index == h3_mp.map_view.row)
 			focus = child;
@@ -3018,12 +3104,23 @@ static void h3_mp_maps_update(struct widget_instance *list)
 		ui_widget_port_give_focus(list, focus);
 	if (target >= 0 && target < h3_mp.map_count)
 	{
-		char said[96];
+		char said[288];
+		char why[160];
+		boolean playable = map_check(h3_mp.map_paths[target], why, sizeof(why)) == _map_check_playable;
 
 		if ((found = named(screen, "map_picture")) != NULL)
 			found->animation.current_frame_index = h3_mp.map_displays[target];
 		string_show(named(screen, "map_text"), h3_mp.map_displays[target]);
-		snprintf(said, sizeof(said), "%s (%ld of %d)", h3_mp.map_names[target], target + 1, h3_mp.map_count);
+		/* (why it cannot be played, in its description's place) */
+		if ((found = named(screen, "map_text")) != NULL)
+			widget_instance_set_visibility_recursive(found, playable);
+		if ((found = named(screen, "map_why")) != NULL)
+		{
+			widget_instance_set_visibility_recursive(found, !playable);
+			text_show(found, playable ? "" : why);
+		}
+		snprintf(said, sizeof(said), "%s (%ld of %d)%s%s", h3_mp.map_names[target], target + 1, h3_mp.map_count,
+			playable ? "" : ": can't be played: ", playable ? "" : why);
 		if (strcmp(said, h3_mp.map_said))
 		{
 			snprintf(h3_mp.map_said, sizeof(h3_mp.map_said), "%s", said);
@@ -3035,14 +3132,22 @@ static void h3_mp_maps_update(struct widget_instance *list)
 /* (port h3 map set) the picker's choice: the map the Xbox's level list
 opens on, as its own choice keeps it (a custom map by its level's path:
 START GAME, Create Game and the map's sharing take it from there) */
-static void h3_mp_map_set(struct widget_instance *widget)
+static boolean h3_mp_map_set(struct widget_instance *widget)
 {
 	long index = h3_mp.map_view.offset + h3_child_index(widget);
 	short before_index = h3_mp.map_index;
 	char before_other[sizeof(h3_mp.map_other)];
+	char why[160];
 
 	if (index < 0 || index >= h3_mp.map_count)
-		return;
+		return TRUE;
+	/* (a map that cannot be played: not chosen, the picker stays on it, its
+	reason shown) */
+	if (map_check(h3_mp.map_paths[index], why, sizeof(why)) != _map_check_playable)
+	{
+		platform_log("menus: h3 maps: %s can't be chosen: %s", h3_mp.map_names[index], why);
+		return FALSE;
+	}
 	snprintf(before_other, sizeof(before_other), "%s", h3_mp.map_other);
 	if (index < H3_MAP_COUNT)
 	{
@@ -3068,6 +3173,7 @@ static void h3_mp_map_set(struct widget_instance *widget)
 			before_other));
 		platform_log("menus: h3 live lobby: that map refused: still %s", h3_mp_map_name());
 	}
+	return TRUE;
 }
 
 /* (port h3 network status: the lobbies' line under NETWORK) the connection's
@@ -8982,6 +9088,15 @@ static boolean h3_mp_host_choices(void)
 		platform_log("menus: h3 mp: no map or game type chosen: the map list");
 		return FALSE;
 	}
+	{
+		char why[160];
+
+		if (map_check(map, why, sizeof(why)) != _map_check_playable)
+		{
+			platform_log("menus: h3 mp: %s can't be played: %s: the map list", map, why);
+			return FALSE;
+		}
+	}
 	if (!cache_files_map_plays_multiplayer(map, build))
 	{
 		cache_files_show_multiplayer_unavailable(map, build);
@@ -10430,9 +10545,20 @@ boolean pc_menu_event_function_invoke(
 		h3_campaign_initialize();
 		return TRUE;
 	case _function_h3_mission_set:
-		h3_campaign.level = (short)PIN(h3_child_index(widget), 0, h3_campaign_unlocked() - 1);
+	{
+		short level = (short)PIN(h3_child_index(widget), 0, h3_campaign_unlocked() - 1);
+		char why[160];
+
+		/* (a level that cannot be played: not chosen, its reason shown) */
+		if (map_check(h3_level_paths[level], why, sizeof(why)) != _map_check_playable)
+		{
+			platform_log("menus: h3 campaign: %s can't be chosen: %s", h3_level_names[level], why);
+			return FALSE;
+		}
+		h3_campaign.level = level;
 		h3_campaign_said();
 		return TRUE;
+	}
 	case _function_h3_difficulty_set:
 		h3_campaign.difficulty = (short)PIN(h3_child_index(widget), 0, 3);
 		h3_campaign_said();
@@ -10639,8 +10765,7 @@ boolean pc_menu_event_function_invoke(
 			_h3_network_online ? "online and system link" : "system link");
 		return TRUE;
 	case _function_h3_map_set:
-		h3_mp_map_set(widget);
-		return TRUE;
+		return h3_mp_map_set(widget);
 	case _function_h3_map_focus:
 		h3_mp_maps_read();
 		return TRUE;
@@ -11029,6 +11154,7 @@ void pc_menu_game_data_function_invoke(
 		break;
 	case _input_h3_missions:
 		h3_pick_update(widget, h3_campaign_unlocked(), "mission_picture", "mission_text");
+		h3_missions_why(widget);
 		break;
 	case _input_h3_difficulties:
 		h3_pick_update(widget, 4, "difficulty_emblem", "difficulty_text");
