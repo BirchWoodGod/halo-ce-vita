@@ -4335,6 +4335,22 @@ static boolean party_warning_confirmed(char const *id);
 
 static void join_begin(struct p2p_lobby_entry const *entry, char const *password)
 {
+	/* (one join for one press: the press that answers the large game's
+	question reached the browser too, as Cross on the same row, and joined
+	the game a second time 14 ms after the answer's join - the owner's
+	insider.15 log -; the same game begun again within two seconds is that
+	press) */
+	static char begun_id[sizeof(entry->id)];
+	static unsigned long begun_at;
+	unsigned long now = system_milliseconds();
+
+	if (begun_at && now - begun_at < 2000 && !strcmp(begun_id, entry->id))
+	{
+		platform_log("menus: the public game %s: joining already (the same press)", entry->name);
+		return;
+	}
+	snprintf(begun_id, sizeof(begun_id), "%s", entry->id);
+	begun_at = now ? now : 1;
 	if (!p2p_lobby_join(entry->id, password ? password : ""))
 	{
 		snprintf(menu_functions.status, sizeof(menu_functions.status), T("%s is no longer listed"), entry->name);

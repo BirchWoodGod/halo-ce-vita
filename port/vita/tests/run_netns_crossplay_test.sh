@@ -196,6 +196,10 @@
 #               LAN joins it in the lobby, before START GAME; the host's MAP
 #               (Blood Gulch) and GAME reach it there; START GAME plays it
 #               on Blood Gulch, the OpenCE client in the game
+#   h3pcjoin    a PC game joined from the Halo 3 menus' games browser (the
+#               Halo PC files of HALO_TEST_DATA_MENUS): an OpenCE host, public;
+#               our client's BROWSE GAMES, A on its row, yes to the large game:
+#               joined once (one join for the one press), and played
 #   crosscoophost  co-op hosted by our Vita for Vitas and PC (experimental):
 #               an OpenCE client and one of ours beside the host's player
 #   all         every mode above, one after the other (expected failures as
@@ -269,6 +273,9 @@ mode=${1:-}
 case $mode in
 pcself|chupaopence|opencelan|opencehost|crosstls|chupahost|chupaserver|damnserver|crossrefuse|crossbig|crossmixed|crosscoop|crossctf) ;;
 pcjoinsvita|pccap|browserboth|crosspassword|crosscoophost) ;;
+h3pcjoin)
+	[ -r "${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}/maps/bitmaps.map" ] ||
+		{ echo "SKIP (h3pcjoin): wants the Halo PC files (HALO_TEST_DATA_MENUS)"; exit 0; } ;;
 pclivelobby)
 	[ -r "${HALO_TEST_PROFILE:-}" ] && [ -r "${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}/maps/bitmaps.map" ] ||
 		{ echo "SKIP (pclivelobby): wants HALO_TEST_PROFILE and the Halo PC files (HALO_TEST_DATA_MENUS)"; exit 0; } ;;
@@ -306,7 +313,7 @@ all)
 	status=0
 	mkdir -p "$HOME/halo-test-out"
 	all_log=$(mktemp "$HOME/halo-test-out/xppc-all.XXXX")
-	for m in pcself chupaopence opencelan opencehost crosstls chupahost chupaserver damnserver crossctf crossmaps crossmixed crossrefuse crossbig crosscoop crossold pcjoinsvita pclivelobby browserboth crosspassword pcversion crossversion; do
+	for m in pcself chupaopence opencelan opencehost crosstls chupahost chupaserver damnserver crossctf crossmaps crossmixed crossrefuse crossbig crosscoop crossold pcjoinsvita pclivelobby h3pcjoin browserboth crosspassword pcversion crossversion; do
 		echo "=== $m"
 		HALO_TEST_OUT=${HALO_TEST_OUT:+$HALO_TEST_OUT/$m} "$0" "$m" | tee "$all_log"
 		rc=${PIPESTATUS[0]}
@@ -1389,6 +1396,80 @@ pclivelobby)
 	cat "$hostlog" "$hostdebug" "$clientlog" "$clientdebug" 2>/dev/null |
 		grep -aqE "egmentation fault|SIGSEGV|SIGABRT|EXCEPTION halt" && result=crash
 	our_results="$our_results pclivelobby:$result"
+	;;
+h3pcjoin)
+	# a PC game joined from the Halo 3 menus' games browser (the owner, insider.15, Oct 19
+	# 2026: an OpenCE game picked there, the large game's question answered, its host reached,
+	# and then nothing). An OpenCE host behind NAT A, public, playing Slayer to 50; our client
+	# behind NAT B, Menu style Halo 3: MULTIPLAYER, BROWSE GAMES, the profile (A joins, A the
+	# profile, A), then:
+	#   direct   A on the first game (the OpenCE one, under PC GAMES) twice, 50 ms apart, yes to
+	#            the large game (HALO_CROSSPLAY_LARGE_ANSWER): joined once (the owner's Cross
+	#            that answered the question joined a second time), and played
+	#   aftervita  as the owner did: our Vita host's game (its lobby, not started, on the legacy
+	#            wire, behind NAT C) first - A, its lobby -, B back to the browser, down twice to the
+	#            OpenCE game, A: that one joined, and played (the owner's: the Vita game's lobby
+	#            did not open, the widgets' memory full - 16 KB, the Xbox's -, so the browser
+	#            stayed with its client in that lobby and the PC game picked next was never
+	#            joined; HALO_TEST_WIDGET_POOL_BYTES=14000 in XPPC_OUR_ENV shows it again)
+	# Neither may fill the widgets' memory
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	h3join() { # h3join NAME VITA_HOST(0, 1) PAD_AFTER_THE_BROWSER
+		local name=$1 vita_host=$2 after=$3 n host_ns client_ns client_ip vita_ns pids_here
+		subnet=$((subnet + 1)); n=$subnet
+		side "$n"; host_ns=$side_machine
+		broker
+		subnet=$((subnet + 1)); side "$subnet"; client_ns=$side_machine; client_ip=192.168.$subnet.2
+		run_seconds=${XPPC_H3JOIN_SECONDS:-170}
+		run_copy "$name/host" "$host_ns" opence "192.168.$n.2" "$broker_address" $(score_to_win=50 host_env opence net)
+		pids_here=$last_pid
+		if [ "$vita_host" = 1 ]; then
+			subnet=$((subnet + 1)); side "$subnet"; vita_ns=$side_machine
+			run_copy "$name/vita" "$vita_ns" ours "192.168.$subnet.2" "$broker_address" \
+				$(start_delay=1000 host_env ours net) HALO_NET_HOST_CROSSPLAY=false HALO_NET_LOBBY_NAME=XpVita
+			pids_here="$pids_here $last_pid"
+		fi
+		for i in $(seq 1 60); do
+			grep -aqE "network test: (player 0 is named|starting the game)" "$out/$name/host/run.log" 2>/dev/null && break
+			sleep 1
+		done
+		local pad="wait:150:3000 down:150:700 a wait:150:3000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500"
+		pad="$pad a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:12000 $after"
+		copy_maps=$menus_data/maps run_copy "$name/client" "$client_ns" ours "$client_ip" "$broker_address" HALO_NET_ONLINE=true \
+			HALO_NET_HOST_PUBLIC=false HALO_MENU_STYLE=halo3 HALO_UI_LOG=1 HALO_NETWORK_TEST=watch HALO_TEST_INPUT=bot:1 \
+			"HALO_TEST_PAD=$pad"
+		pids_here="$pids_here $last_pid"
+		wait $pids_here 2>/dev/null
+		local clientlog=$out/$name/client/run.log
+		echo "--- $name: our client"
+		grep -aE "menus: (joining the public game|the (large|co-op) PC game|the games browser joins|the public game's invite|the public game .*: joining already)|system link: (the joined host|joining|in another|looking)|Internet play: connected to host|ui: screen pc.h3.(lan|pregame)" \
+			"$clientlog" | head -24
+		local joins pc ticks result=pass
+		joins=$(grep -ac "menus: joining the public game" "$clientlog")
+		pc=$(grep -a "menus: the LAN browser lists" "$clientlog" | grep -aoE "[^:,]+ \([^)]*PC EXPERIMENTAL\)" | head -1 | sed 's/^ *//; s/ (.*//')
+		ticks=$(grep -a "network test: tick" "$clientlog" 2>/dev/null | grep -aEc "player [0-9]+: \(.* player [0-9]+: \(")
+		echo "  the OpenCE game listed as: ${pc:-none}; joins begun: ${joins:-0}; seconds with two players alive in the game: ${ticks:-0}"
+		if ! grep -aq "menus: the LAN browser (system link and online)" "$clientlog"; then
+			result=no-games-browser
+		elif [ -z "$pc" ] || ! grep -aqF "menus: joining the public game $pc" "$clientlog"; then
+			result=pc-not-picked
+		elif [ "$vita_host" = 0 ] && [ "${joins:-0}" != 1 ]; then
+			result=joined-$joins-times
+		elif [ "$vita_host" = 1 ] && ! grep -aq "menus: joining the public game XpVita" "$clientlog"; then
+			result=vita-not-picked
+		elif grep -aq "memory: the widget_memory_pool is full" "$clientlog"; then
+			result=widget-memory-full
+		elif ! grep -aq "system link: joining" "$clientlog"; then
+			result=reached-not-joined
+		elif [ "${ticks:-0}" -lt 15 ]; then
+			result=played-${ticks:-0}
+		fi
+		cat "$out/$name"/*/run.log "$out/$name"/*/data/debug.txt 2>/dev/null |
+			grep -aqE "egmentation fault|SIGSEGV|SIGABRT|EXCEPTION halt" && result=crash
+		our_results="$our_results $name:$result"
+	}
+	h3join h3pcjoin-direct 0 "a:150:50 a wait:150:40000"
+	h3join h3pcjoin-aftervita 1 "a wait:150:10000 b wait:150:5000 down:150:800 down:150:800 a wait:150:40000"
 	;;
 crosscoophost)
 	# co-op hosted by our Vita for Vitas and PC (T15: PC clients in a Vita's

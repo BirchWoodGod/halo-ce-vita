@@ -1103,6 +1103,26 @@ static struct stack_memory_pool_block *stack_memory_pool_allocate(
 		}
 		else
 		{
+#ifdef HALO_LINUX
+			/* port: said in halo.log, release builds too (whose assertions
+			say nothing): a pool that runs out loses what was asked of it -
+			a widget pool's screen opens without it, a text box draws blank -
+			(at most once a second) */
+			{
+				extern unsigned long system_milliseconds(void);
+				void platform_log(const char *format, ...);
+				static unsigned long said_at;
+				unsigned long now = system_milliseconds();
+
+				if (!said_at || now - said_at >= 1000)
+				{
+					said_at = now ? now : 1;
+					platform_log("memory: the %s is full: %lu bytes asked, %ld of %ld in use in %lu blocks (%s:%lu)",
+						pool->name ? pool->name : "pool", size, pool->bytes_used, pool->size, pool->block_count,
+						file ? file : "?", line);
+				}
+			}
+#endif
 			display_assert(
 				"allocation from memory pool failed; unable to find sufficient space in the pool",
 				"c:\\halo\\SOURCE\\memory\\stack_memory_pool.c",
@@ -1193,3 +1213,22 @@ static struct stack_memory_pool_block *stack_memory_pool_resize_block(
 	}
 	return new_block;
 }
+
+#ifdef HALO_LINUX
+/* port: a pool's use (bytes and blocks in use, the most of each), for the
+port's logs and tests */
+void stack_memory_pool_port_usage(
+	struct stack_memory_pool const *pool,
+	long *bytes_used,
+	long *maximum_bytes_used,
+	long *block_count,
+	long *size)
+{
+	*bytes_used = pool->bytes_used;
+	*maximum_bytes_used = pool->maximum_bytes_used;
+	*block_count = (long)pool->block_count;
+	*size = pool->size;
+
+	return;
+}
+#endif

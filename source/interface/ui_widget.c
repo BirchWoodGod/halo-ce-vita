@@ -692,7 +692,20 @@ struct widget_instance;
 
 enum
 {
+#ifdef HALO_LINUX
+	/* port: 128 KB, not the Xbox's 16 KB. OpenCE's screens and the Halo 3
+	ones (port/vita/app0/menus) are far bigger than the Xbox's: the games
+	browsers alone took 14-16 KB of it with a page of games (run_menus_test.sh
+	browserreopen), and a screen's first widget is made before the one it
+	replaces is let go. Past 16 KB a text drew blank (the classic browser's
+	empty cells, the owner's photo of insider.15), a screen did not open (the
+	game's lobby after a join from the Halo 3 games browser: the browser
+	stayed, its client in that game's lobby, so a game picked next was never
+	joined) and a widget missing crashed the menus */
+	WIDGET_MEMORY_POOL_SIZE = 0x20000,
+#else
 	WIDGET_MEMORY_POOL_SIZE = 0x4000,
+#endif
 	MAXIMUM_WIDGET_MEMORY_POOL_BLOCKS = 4096
 };
 
@@ -2130,13 +2143,24 @@ void ui_widgets_initialize(
 	byte *base_address;
 	long local_player_index;
 
-	base_address = pool_alloc(WIDGET_MEMORY_POOL_SIZE);
-	if (base_address)
 	{
-		widget_memory_pool->base_address = base_address;
-		widget_memory_pool->size = WIDGET_MEMORY_POOL_SIZE;
+		long pool_size = WIDGET_MEMORY_POOL_SIZE;
+
+#if defined(HALO_LINUX) && !defined(HALO_RELEASE)
+		/* (automated tests only, never in release builds)
+		HALO_TEST_WIDGET_POOL_BYTES: another size, the Xbox's 16384 to show
+		what it did (run_netns_crossplay_test.sh h3pcjoin) */
+		if (getenv("HALO_TEST_WIDGET_POOL_BYTES") && atol(getenv("HALO_TEST_WIDGET_POOL_BYTES")) >= 4096)
+			pool_size = atol(getenv("HALO_TEST_WIDGET_POOL_BYTES"));
+#endif
+		base_address = pool_alloc(pool_size);
+		if (base_address)
+		{
+			widget_memory_pool->base_address = base_address;
+			widget_memory_pool->size = pool_size;
+		}
 	}
-	else
+	if (!base_address)
 	{
 		success = FALSE;
 	}
@@ -3908,7 +3932,14 @@ struct widget_instance *ui_widget_load_by_name_or_tag(
 					{
 						void platform_log(const char *format, ...);
 
+						void stack_memory_pool_port_usage(struct stack_memory_pool const *pool, long *bytes_used,
+							long *maximum_bytes_used, long *block_count, long *size);
+						long used, most, blocks, size;
+
+						stack_memory_pool_port_usage(widget_memory_pool, &used, &most, &blocks, &size);
 						platform_log("ui: screen %s", tag_get_name(tag_index));
+						platform_log("ui: widget memory %ld of %ld bytes, %ld blocks (at most %ld bytes)", used, size,
+							blocks, most);
 					}
 				}
 #endif
