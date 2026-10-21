@@ -958,6 +958,10 @@ static void settings_file_delete(void)
 {
 	vita_settings_save_wait();
 	unlink(SETTINGS_FILE);
+	/* (and the copies the writer keeps, which the load reads when
+	settings.txt is not there) */
+	unlink(SETTINGS_FILE ".bak");
+	unlink(SETTINGS_FILE ".new");
 }
 
 /* a fake map: the cache header's signature, version and scenario type
@@ -4435,6 +4439,233 @@ static void test_save_any_thread(void)
 	test_card_delay_us = 0;
 }
 
+/* ---------- settings.txt read safely (M4J0R_l-l0LL4ND, Oct 21 2026: a
+crash as a setting changed, then every start took the whole Vita down) */
+
+/* the rows a start's screen and GPU set-up read */
+static const char *const start_rows[] = { "HALO_RENDER_SCALE", "HALO_DYNAMIC_RES_MIN", "HALO_DISPLAY_WIDTH",
+	"HALO_FRAME_CAP", "HALO_INTERPOLATION", "HALO_UPSCALE_FILTER", "HALO_SHARP_UI", "HALO_MODEL_LOD_SCALE" };
+#define START_ROWS ((int)(sizeof(start_rows) / sizeof(start_rows[0])))
+
+/* every row as shipped, nothing in the environment: a first start */
+static void rows_fresh(void)
+{
+	int index;
+
+	for (index = 0; index < SETTING_COUNT; index++)
+		if (settings[index].kind == KIND_CHOICE && settings[index].variable && !settings[index].dev)
+		{
+			unsetenv(settings[index].variable);
+			settings[index].choice = shipped_choice[index];
+		}
+}
+
+/* the start rows as shipped, in the environment; the first that is not, in
+`report` */
+static int start_rows_shipped(char *report, size_t size)
+{
+	int row;
+
+	report[0] = 0;
+	for (row = 0; row < START_ROWS; row++)
+	{
+		struct setting *setting = setting_named(start_rows[row]);
+		const char *value = getenv(start_rows[row]);
+		const char *shipped = setting->values[shipped_choice[setting - settings]];
+
+		if (!value || strcmp(value, shipped))
+		{
+			snprintf(report, size, " (%s=%s, shipped %s)", start_rows[row], value ? value : "(none)", shipped);
+			return 0;
+		}
+	}
+	return 1;
+}
+
+/* settings.txt as `text` (size bytes), no copies beside it, loaded on a
+first start */
+static void load_settings_text(const void *text, size_t size)
+{
+	settings_file_delete();
+	write_file(SETTINGS_FILE, text, size);
+	rows_fresh();
+	log_text[0] = 0;
+	vita_settings_load();
+}
+
+static void load_settings_string(const char *text)
+{
+	load_settings_text(text, strlen(text));
+}
+
+static void test_settings_load_safe(void)
+{
+	static const char *const bad_scales[] = { "0", "999", "-1", "-0.5", "abc", "nan", "inf", "-inf", "", "0.3", "1.5",
+		"0x1", "1e9", "0.5x", " 0.5", "\x01\x02", "dynamicx", "DYNAMIC" };
+	char report[160], text[2048];
+	int index;
+
+	/* a settings.txt the writer wrote: its last line, the one before it
+	kept as settings.txt.bak */
+	settings_file_delete();
+	rows_fresh();
+	vita_settings_load();
+	vita_settings_set("HALO_RENDER_SCALE", "0.75");
+	vita_settings_save_wait();
+	vita_settings_set("HALO_RENDER_SCALE", "0.5");
+	vita_settings_save_wait();
+	{
+		char now[4096];
+
+		snprintf(now, sizeof(now), "%s", file_text(SETTINGS_FILE));
+		check(strstr(now, "HALO_RENDER_SCALE=0.5\n") && strlen(now) > 20 &&
+			!strcmp(now + strlen(now) - strlen(SETTINGS_END "=1\n"), SETTINGS_END "=1\n") &&
+			strstr(file_text(SETTINGS_FILE ".bak"), "HALO_RENDER_SCALE=0.75\n") &&
+			access(SETTINGS_FILE ".new", F_OK) != 0,
+			"safe load: settings.txt ends with its last line; the one before it is settings.txt.bak; no .new left");
+		/* (every cut of it: the rows it has, the rest the defaults, never a
+		value cut in two read as another - "0.5" cut to "0." is 0, none) */
+		{
+			size_t length = strlen(now), cut;
+			int all = 1;
+
+			for (cut = 0; cut < length; cut++)
+			{
+				const char *scale;
+
+				load_settings_text(now, cut);
+				scale = getenv("HALO_RENDER_SCALE");
+				if (!scale || (strcmp(scale, "0.5") && strcmp(scale, "dynamic")) ||
+					!setting_named("HALO_DISPLAY_WIDTH")->values[choice_of("HALO_DISPLAY_WIDTH")][0])
+				{
+					printf("cut at %zu: HALO_RENDER_SCALE=%s\n", cut, scale ? scale : "(none)");
+					all = 0;
+				}
+			}
+			check(all, "safe load: settings.txt cut short at each of its bytes: what it has, the rest the defaults");
+		}
+	}
+
+	/* values no build wrote: the row's default, said in halo.log - the
+	render resolution and its minimum with every one, the other start rows
+	with ones off their lists */
+	for (index = 0; index < (int)(sizeof(bad_scales) / sizeof(bad_scales[0])); index++)
+	{
+		int length = snprintf(text, sizeof(text), "HALO_RENDER_SCALE=%s\nHALO_DYNAMIC_RES_MIN=%s\nHALO_MODEL_LOD_SCALE=%s\n"
+			SETTINGS_END "=1\n", bad_scales[index], bad_scales[index], bad_scales[index]);
+		int shipped;
+
+		load_settings_text(text, (size_t)length);
+		shipped = start_rows_shipped(report, sizeof(report));
+		if (!shipped)
+			printf("value \"%s\":%s\n", bad_scales[index], report);
+		check(shipped && strstr(log_text, "settings: settings.txt's HALO_RENDER_SCALE=") &&
+			strstr(log_text, "is none of its choices: dynamic"),
+			"safe load: a render resolution off its list (0, 999, -1, abc, nan, inf, empty, 0x1, ' 0.5'...): the default, in halo.log");
+	}
+	{
+		static const char *const others[][2] = {
+			{ "HALO_DISPLAY_WIDTH", "0" }, { "HALO_DISPLAY_WIDTH", "999" }, { "HALO_DISPLAY_WIDTH", "-848" },
+			{ "HALO_DISPLAY_WIDTH", "wide" }, { "HALO_FRAME_CAP", "-1" }, { "HALO_FRAME_CAP", "999" },
+			{ "HALO_FRAME_CAP", "fast" }, { "HALO_INTERPOLATION", "maybe" }, { "HALO_UPSCALE_FILTER", "2" },
+			{ "HALO_UPSCALE_FILTER", "-1" }, { "HALO_SHARP_UI", "on" }, { "HALO_SHARP_UI", "" } };
+		int all = 1;
+
+		for (index = 0; index < (int)(sizeof(others) / sizeof(others[0])); index++)
+		{
+			int length = snprintf(text, sizeof(text), "%s=%s\n" SETTINGS_END "=1\n", others[index][0], others[index][1]);
+
+			load_settings_text(text, (size_t)length);
+			if (!start_rows_shipped(report, sizeof(report)) || !strstr(log_text, "is none of its choices"))
+			{
+				printf("%s=%s:%s\n", others[index][0], others[index][1], report);
+				all = 0;
+			}
+		}
+		check(all, "safe load: the aspect ratio, frame limit, interpolation, filters off their lists: the defaults");
+	}
+	/* (a number between a row's choices, an older build's: the nearest, as
+	before) */
+	load_settings_string("HALO_RENDER_SCALE=0.6\nHALO_DYNAMIC_RES_MIN=0.7\n");
+	check(!strcmp(getenv("HALO_RENDER_SCALE"), "0.625") && !strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.75"),
+		"safe load: a number between a row's choices: the nearest");
+	/* (a value on the list stays one; the profile line's garbage is no
+	profile) */
+	load_settings_string("HALO_PROFILE=\xff\xfe\nHALO_RENDER_SCALE=0.875\n");
+	check(!strcmp(getenv("HALO_RENDER_SCALE"), "0.875") && !strcmp(settings[0].names[settings[0].choice], "Custom"),
+		"safe load: a garbage profile line passed over, the rows read");
+
+	/* garbage: binary, a line of 5000 characters, NULs - the defaults */
+	{
+		static unsigned char binary[8192];
+
+		for (index = 0; index < (int)sizeof(binary); index++)
+			binary[index] = (unsigned char)(index * 131 + 7);
+		load_settings_text(binary, sizeof(binary));
+		check(start_rows_shipped(report, sizeof(report)) && strstr(log_text, "has no settings in it, and there is no copy"),
+			"safe load: a settings.txt of binary garbage, no copy: the defaults, in halo.log");
+		memset(binary, 'A', sizeof(binary));
+		memcpy(binary + 5000, "\nHALO_RENDER_SCALE=0.75\n", 24);
+		binary[100] = 0;
+		load_settings_text(binary, 5024);
+		check(!strcmp(getenv("HALO_RENDER_SCALE"), "0.75") && start_rows_shipped(report, sizeof(report)) == 0,
+			"safe load: a 5000-character line with a NUL in it passed over, the line after it read");
+		load_settings_string("");
+		check(start_rows_shipped(report, sizeof(report)), "safe load: an empty settings.txt: the defaults");
+		load_settings_string("=\n==\nHALO_RENDER_SCALE\n=0.5\n\n\r\n");
+		check(start_rows_shipped(report, sizeof(report)), "safe load: lines of no name or no value: the defaults");
+	}
+
+	/* settings.txt gone or garbage, its copies there: the newest whole one */
+	{
+		static const char older[] = "HALO_RENDER_SCALE=0.75\n" SETTINGS_END "=1\n";
+		static const char newer[] = "HALO_RENDER_SCALE=0.5\n" SETTINGS_END "=1\n";
+		static const char newer_cut[] = "HALO_RENDER_SCALE=0.5\nHALO_FRAME";
+
+		settings_file_delete();
+		write_file(SETTINGS_FILE ".bak", older, sizeof(older) - 1);
+		write_file(SETTINGS_FILE ".new", newer, sizeof(newer) - 1);
+		rows_fresh();
+		log_text[0] = 0;
+		vita_settings_load();
+		check(!strcmp(getenv("HALO_RENDER_SCALE"), "0.5") && strstr(log_text, "settings.txt is not there: read from settings.txt.new"),
+			"safe load: stopped between putting the old one aside and the new one in place: the new one (.new)");
+		settings_file_delete();
+		write_file(SETTINGS_FILE ".bak", older, sizeof(older) - 1);
+		write_file(SETTINGS_FILE ".new", newer_cut, sizeof(newer_cut) - 1);
+		rows_fresh();
+		log_text[0] = 0;
+		vita_settings_load();
+		check(!strcmp(getenv("HALO_RENDER_SCALE"), "0.75") && strstr(log_text, "read from settings.txt.bak"),
+			"safe load: stopped while the new one was written: the one before it (.bak), not the part");
+		settings_file_delete();
+		write_file(SETTINGS_FILE, "\x00\x01garbage\xff", 11);
+		write_file(SETTINGS_FILE ".bak", older, sizeof(older) - 1);
+		rows_fresh();
+		log_text[0] = 0;
+		vita_settings_load();
+		check(!strcmp(getenv("HALO_RENDER_SCALE"), "0.75") &&
+			strstr(log_text, "settings.txt has no settings in it: read from settings.txt.bak"),
+			"safe load: settings.txt damaged on the card: settings.txt.bak");
+		/* (an older build's settings.txt, no last line: read, not the copy) */
+		settings_file_delete();
+		write_file(SETTINGS_FILE, "HALO_RENDER_SCALE=0.875\n", 24);
+		write_file(SETTINGS_FILE ".bak", older, sizeof(older) - 1);
+		rows_fresh();
+		log_text[0] = 0;
+		vita_settings_load();
+		check(!strcmp(getenv("HALO_RENDER_SCALE"), "0.875") && strstr(log_text, "has no last line"),
+			"safe load: an older build's settings.txt (no last line) is read, not the copy");
+		/* (the next save makes it whole again) */
+		vita_settings_set("HALO_FRAME_CAP", "60");
+		check(strstr(file_text(SETTINGS_FILE), "HALO_RENDER_SCALE=0.875\n") &&
+			strstr(file_text(SETTINGS_FILE), SETTINGS_END "=1\n"), "safe load: ... and the next save writes it whole");
+	}
+	settings_file_delete();
+	rows_fresh();
+	vita_settings_load();
+}
+
 int main(void)
 {
 	char line[128];
@@ -5542,6 +5773,7 @@ int main(void)
 	test_restart_offer();
 	test_save_off_thread();
 	test_save_any_thread();
+	test_settings_load_safe();
 	printf("-- %d of %d checks failed\n", failures, checks);
 	return failures ? 1 : 0;
 }

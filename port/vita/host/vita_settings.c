@@ -224,6 +224,7 @@ Multiplayer tab's way.
 #include <psp2/system_param.h>
 
 #include <dirent.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <pthread.h>
@@ -231,6 +232,7 @@ Multiplayer tab's way.
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "lang.h"
 #include "forge_store.h"
@@ -254,6 +256,8 @@ int network_wire_crossplay(void);
 
 #define DATA_DIRECTORY "ux0:data/haloce-vita"
 #define SETTINGS_FILE DATA_DIRECTORY "/settings.txt"
+/* settings.txt's last line (save_lines): the file was written whole */
+#define SETTINGS_END "HALO_SETTINGS_END"
 /* where the system writes its crash dumps (psp2core-*.psp2dmp) */
 #define DUMP_DIRECTORY "ux0:data"
 #define MAXIMUM_CHOICES 24
@@ -1736,16 +1740,22 @@ static void save_lines(struct save_output *output)
 		save_put(output, "HALO_MAPS_DISABLED=%s\n", maps_disabled);
 	if (mods_disabled[0])
 		save_put(output, "HALO_MODS_DISABLED=%s\n", mods_disabled);
+	/* (the last line: a file with it was written whole - settings_source) */
+	save_put(output, SETTINGS_END "=1\n");
 }
 
 /* settings.txt written anew - the text, or with none the rows as they are
-now: into a file of its own, then put in place of the old one (a file
+now: into a file of its own (settings.txt.new), flushed to the card, then
+put in place of the old one, which is kept as settings.txt.bak (a file
 opened for writing is not cut short on Vita3K, which left the end of a
-longer old file after a shorter new one); nonzero if it was */
+longer old file after a shorter new one; the Vita's rename does not write
+over a file). Whenever the game stops - a crash, the battery, the power
+button held - one of the three is whole (settings_source reads the one
+that is); nonzero if it was put in place */
 static int save_file(const char *text)
 {
 	FILE *file;
-	int ok;
+	int ok, kept;
 
 	remove(SETTINGS_FILE ".new");
 	file = fopen(SETTINGS_FILE ".new", "w");
@@ -1759,12 +1769,24 @@ static int save_file(const char *text)
 
 		save_lines(&output);
 	}
-	ok = fclose(file) == 0;
+	ok = fflush(file) == 0 && !ferror(file);
+	/* (on the card before the old one is moved) */
 	if (ok)
+		fsync(fileno(file));
+	ok = fclose(file) == 0 && ok;
+	if (!ok)
 	{
-		remove(SETTINGS_FILE);
-		ok = rename(SETTINGS_FILE ".new", SETTINGS_FILE) == 0;
+		remove(SETTINGS_FILE ".new");
+		return 0;
 	}
+	remove(SETTINGS_FILE ".bak");
+	kept = rename(SETTINGS_FILE, SETTINGS_FILE ".bak") == 0;
+	if (!kept)
+		remove(SETTINGS_FILE);
+	ok = rename(SETTINGS_FILE ".new", SETTINGS_FILE) == 0;
+	/* (not put in place: the old one back where it was) */
+	if (!ok && kept)
+		rename(SETTINGS_FILE ".bak", SETTINGS_FILE);
 	return ok;
 }
 
@@ -1991,6 +2013,153 @@ static void log_dev_switches(void)
 	}
 }
 
+/* ---------- settings.txt read safely
+
+(Oct 21 2026, M4J0R_l-l0LL4ND, insider.19: the game crashed as a setting
+changed, and every start after it took the whole Vita down, C0-15008-4.)
+Nothing settings.txt holds reaches the game unchecked: a file cut short, of
+garbage, or with a value no build wrote is read as far as it makes sense and
+the rest is the defaults, said in halo.log. */
+
+/* what a file of settings is: none, there but no line of settings in it
+(garbage, empty), lines but not the last (an older build's - before
+insider.21 none had it - or one cut short), or whole */
+enum
+{
+	SETTINGS_SOURCE_NONE,
+	SETTINGS_SOURCE_GARBAGE,
+	SETTINGS_SOURCE_PARTIAL,
+	SETTINGS_SOURCE_WHOLE
+};
+
+/* whether line (NAME=value, its end trimmed) is one a build of this game
+could have written: a name of capitals, digits and '_' */
+static int settings_line_named(const char *line)
+{
+	const char *at = line;
+
+	while ((*at >= 'A' && *at <= 'Z') || (*at >= '0' && *at <= '9') || *at == '_')
+		at++;
+	return at > line && *at == '=';
+}
+
+static int settings_source_kind(const char *path)
+{
+	FILE *file = fopen(path, "r");
+	char line[1200];
+	int kind;
+
+	if (!file)
+		return SETTINGS_SOURCE_NONE;
+	kind = SETTINGS_SOURCE_GARBAGE;
+	while (fgets(line, sizeof(line), file))
+	{
+		if (!settings_line_named(line))
+			continue;
+		if (strncmp(line, SETTINGS_END "=", sizeof(SETTINGS_END)) == 0)
+		{
+			kind = SETTINGS_SOURCE_WHOLE;
+			break;
+		}
+		kind = SETTINGS_SOURCE_PARTIAL;
+	}
+	fclose(file);
+	return kind;
+}
+
+/* the file to read the settings from (NULL: none, the defaults): settings.txt
+when it is whole or an older build's; else the last save not yet put in
+place, or the one before it (settings.txt.new, .bak) - a game stopped while
+it wrote the file, or a file damaged on the card */
+static FILE *settings_source(void)
+{
+	static const char *const names[] = { "settings.txt.new", "settings.txt.bak" };
+	static const char *const paths[] = { SETTINGS_FILE ".new", SETTINGS_FILE ".bak" };
+	int kind = settings_source_kind(SETTINGS_FILE), index, best = -1, best_kind = SETTINGS_SOURCE_GARBAGE;
+	char message[200];
+
+	if (kind == SETTINGS_SOURCE_WHOLE)
+		return fopen(SETTINGS_FILE, "r");
+	if (kind == SETTINGS_SOURCE_PARTIAL)
+	{
+		vita_host_log("settings: settings.txt has no last line (an older build's, or cut short): what it has is read, "
+			"the rest at the defaults");
+		return fopen(SETTINGS_FILE, "r");
+	}
+	for (index = 0; index < 2; index++)
+	{
+		int other = settings_source_kind(paths[index]);
+
+		/* (.new only whole: a part of it is a save that was stopped) */
+		if (other > best_kind && (other == SETTINGS_SOURCE_WHOLE || index == 1))
+		{
+			best = index;
+			best_kind = other;
+		}
+	}
+	if (best >= 0)
+	{
+		snprintf(message, sizeof(message), "settings: settings.txt %s: read from %s%s",
+			kind == SETTINGS_SOURCE_NONE ? "is not there" : "has no settings in it", names[best],
+			best_kind == SETTINGS_SOURCE_WHOLE ? "" : " (cut short: the rest at the defaults)");
+		vita_host_log(message);
+		return fopen(paths[best], "r");
+	}
+	if (kind == SETTINGS_SOURCE_GARBAGE)
+		vita_host_log("settings: settings.txt has no settings in it, and there is no copy: the defaults");
+	return NULL;
+}
+
+/* (for halo.log: a value as the file has it, at most 24 printable
+characters) */
+static void settings_value_shown(char *shown, size_t size, const char *value)
+{
+	size_t index;
+
+	for (index = 0; index + 1 < size && index < 24 && value[index]; index++)
+		shown[index] = value[index] >= ' ' && value[index] < 127 ? value[index] : '?';
+	shown[index] = 0;
+}
+
+/* settings.txt's value for a row: one of its choices, or a number between
+its first and last numbers (the nearest one, as env.txt's: find_choice) -
+written by an older build whose choices were others. Anything else (not a
+number, out of the row's range, empty) is no choice: 0, and the row keeps
+the one it has (env.txt's, or the default) */
+static int settings_value_choice(const struct setting *setting, const char *value, int *choice)
+{
+	double number, lowest = HUGE_VAL, highest = -HUGE_VAL;
+	char *end;
+	int index;
+
+	for (index = 0; index < setting->count; index++)
+		if (strcmp(setting->values[index], value) == 0)
+		{
+			*choice = index;
+			return 1;
+		}
+	/* (a number as a build writes one: digits, a point, a sign - not hex,
+	exponents, spaces or "nan") */
+	if (strspn(value, "-0123456789.") != strlen(value))
+		return 0;
+	number = strtod(value, &end);
+	if (!value[0] || end == value || *end || !isfinite(number))
+		return 0;
+	for (index = 0; index < setting->count; index++)
+	{
+		double offered = strtod(setting->values[index], &end);
+
+		if (!setting->values[index][0] || *end || !isfinite(offered))
+			continue;
+		lowest = offered < lowest ? offered : lowest;
+		highest = offered > highest ? offered : highest;
+	}
+	if (lowest > highest || number < lowest || number > highest)
+		return 0;
+	*choice = find_choice(setting, value);
+	return 1;
+}
+
 int vita_settings_set(const char *variable, const char *value);
 
 void vita_settings_load(void)
@@ -2029,7 +2198,7 @@ void vita_settings_load(void)
 	if (save_text_asked)
 		save_text_asked[0] = 0;
 	pthread_mutex_unlock(&save_lock);
-	file = fopen(SETTINGS_FILE, "r");
+	file = settings_source();
 	vita_settings_language_init();
 	memset(dev_saved, 0, sizeof(dev_saved));
 	memset(named, 0, sizeof(named));
@@ -2140,6 +2309,8 @@ void vita_settings_load(void)
 				texts_named[text] = 1;
 				continue;
 			}
+			if (strcmp(line, SETTINGS_END) == 0)
+				continue;
 			if (strcmp(line, "HALO_SETTINGS_BUILD") == 0)
 			{
 				snprintf(saved_build, sizeof(saved_build), "%s", equals + 1);
@@ -2192,7 +2363,19 @@ void vita_settings_load(void)
 			}
 			else if (setting && setting->kind == KIND_CHOICE)
 			{
-				setting->choice = find_choice(setting, equals + 1);
+				int choice;
+
+				if (!settings_value_choice(setting, equals + 1, &choice))
+				{
+					char shown[32], message[200];
+
+					settings_value_shown(shown, sizeof(shown), equals + 1);
+					snprintf(message, sizeof(message), "settings: settings.txt's %s=%s is none of its choices: %s",
+						setting->variable, shown, setting->values[setting->choice]);
+					vita_host_log(message);
+					continue;
+				}
+				setting->choice = choice;
 				named[setting - settings] = 1;
 				if (setting->dev)
 					dev_saved[setting - settings] = 1;

@@ -525,7 +525,7 @@ float vgxm_render_scale(void)
 		const char *setting = getenv("HALO_RENDER_SCALE");
 
 		null_render_scale = setting && strcmp(setting, "dynamic") ? (float)atof(setting) : 1.0f;
-		if (null_render_scale < 0.5f || null_render_scale > 1.0f)
+		if (!(null_render_scale >= 0.5f && null_render_scale <= 1.0f))
 			null_render_scale = 1.0f;
 	}
 	return null_render_scale;

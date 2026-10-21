@@ -2386,7 +2386,9 @@ static float render_scale_get(void)
 		const char *setting = getenv("HALO_RENDER_SCALE");
 
 		render_scale = setting && strcmp(setting, "dynamic") ? (float)atof(setting) : 1.0f;
-		if (render_scale < 0.5f || render_scale > 1.0f)
+		/* (written so that a NaN is out of range too: never a target size
+		from it) */
+		if (!(render_scale >= 0.5f && render_scale <= 1.0f))
 			render_scale = 1.0f;
 		if (render_scale < 1.0f)
 			log_line("gxm: screen-sized targets at %.0f%% (HALO_RENDER_SCALE)", render_scale * 100.0f);
@@ -2401,7 +2403,7 @@ float vgxm_render_scale(void)
 
 void vgxm_render_scale_set(float scale)
 {
-	if (scale < 0.5f || scale > 1.0f)
+	if (!(scale >= 0.5f && scale <= 1.0f))
 		scale = 1.0f;
 	render_scale = scale;
 }
