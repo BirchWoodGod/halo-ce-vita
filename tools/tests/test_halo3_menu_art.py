@@ -40,6 +40,8 @@ EXPECTED = {
     'title_halo.png': (512, 128),
     # (Forge: its lobby's emblem, the object browser's L and R)
     'forge_emblem.png': (64, 64),
+    # (the carnage report's mark on the winners' rows)
+    'carnage_won.png': (16, 16),
     'glyph_l.png': (16, 16),
     'glyph_r.png': (16, 16),
     # (the browsers' filter: the D-pad's left and right)
