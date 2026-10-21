@@ -174,13 +174,28 @@ def version_defines(sln: Any) -> List[str]:
     (HALO_VITA_VERSION, port/vita/include/vita_version.h: halo.log's first
     line, the main menu, the window's title, the settings panel, the update
     check): the Vita's, Linux's and Windows'. None without it: the header's"""
+    defines = testers_test_defines(sln)
     version = getattr(sln, "vita_version", None)
     if not version:
-        return []
+        return defines
     if not re.fullmatch(VERSION_PATTERN, version):
         raise RuntimeError("--vita-version: x.y.z, x.y.z-insider.n, x.y.z-beta.n, x.y.z-rc.n (each with an optional "
                            "-<word>: 1.1.1-beta.1-rc) or x.y.z-<word> (1.1.1-forge)")
-    return [f'-DHALO_VITA_VERSION=\\"{version}\\"']
+    return defines + [f'-DHALO_VITA_VERSION=\\"{version}\\"']
+
+
+def testers_test_defines(sln: Any) -> List[str]:
+    """configure.py's --testers-test-key: a TEST build (never a release:
+    refused with --release) that trusts a throwaway key's signed tester list
+    (port/linux/src/tester_list.h) in place of the owner's release key"""
+    key = getattr(sln, "testers_test_key", None)
+    if not key:
+        return []
+    if getattr(sln, "port_release", False):
+        raise RuntimeError("--testers-test-key is for test builds only, never with --release")
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", key) or not key.strip("0"):
+        raise RuntimeError("--testers-test-key: 64 hexadecimal digits, not all zero")
+    return [f'-DHALO_TESTERS_TEST_KEY=\\"{key.lower()}\\"']
 
 
 def miniupnpc_sources() -> List[Path]:
