@@ -3642,13 +3642,16 @@ enum
 	_h3_custom_flight,
 	_h3_custom_autocenter,
 	_h3_custom_vibration,
+	/* (port: the tester's flaming helmet, a listed tester's alone:
+	port/linux/src/p2p_flame.inc; player.flaming_helmet, not the profile's) */
+	_h3_custom_flame,
 	NUMBER_OF_H3_CUSTOM_ROWS
 };
 
 static char const *const h3_custom_rows[NUMBER_OF_H3_CUSTOM_ROWS] =
 {
 	"op_name", "op_color", "op_model", "op_stick", "op_buttons", "op_look", "op_invert", "op_flight", "op_autocenter",
-	"op_vibration",
+	"op_vibration", "op_flame",
 };
 /* (the game's colours, in its order: player_profile.c profile_color_table) */
 static char const *const h3_color_names[H3_SWATCH_FRAMES] =
@@ -3728,6 +3731,12 @@ static struct
 	short model;
 	short model_saved;
 	char model_said[160];
+	/* (port) the flaming helmet's row shown (a listed tester: p2p_flame_listed,
+	asked as the editor opens), the help's place without it */
+	boolean flame_listed;
+	boolean flame_asked;
+	short help_offset;
+	boolean help_offset_kept;
 } h3_custom;
 
 static void h3_profiles_spartan(struct widget_instance *screen, struct player_profile const *profile,
@@ -3951,6 +3960,7 @@ static boolean h3_profile_edit(short item)
 		return FALSE;
 	}
 	h3_custom.index = h3_profiles.indices[item];
+	h3_custom.flame_asked = FALSE;
 	h3_custom.status[0] = 0;
 	h3_custom.said[0] = 0;
 	h3_custom.preview_asked = FALSE;
@@ -4349,6 +4359,10 @@ static void h3_custom_value(short row, struct player_profile const *profile, cha
 	case _h3_custom_vibration:
 		snprintf(text, size, "%s", settings->vibration_disabled ? T("OFF") : T("ON"));
 		break;
+	case _h3_custom_flame:
+		snprintf(text, size, "%s", config_boolean_live("player.flaming_helmet", "HALO_FLAMING_HELMET") ? T("ON") :
+			T("OFF"));
+		break;
 	}
 }
 
@@ -4429,6 +4443,14 @@ static boolean h3_custom_change(struct widget_instance *widget, int step)
 	case _h3_custom_vibration:
 		settings->vibration_disabled = !settings->vibration_disabled;
 		break;
+	case _h3_custom_flame:
+		/* (this machine's setting, as the settings panel's Flaming helmet:
+		kept at once, not with the profile) */
+		if (!h3_custom.flame_listed)
+			return FALSE;
+		setting_set("HALO_FLAMING_HELMET",
+			config_boolean_live("player.flaming_helmet", "HALO_FLAMING_HELMET") ? "false" : "true");
+		break;
 	}
 	h3_custom_value(row, profile, text, sizeof(text));
 	platform_log("menus: h3 customize: %s %s", h3_custom_rows[row] + 3, text);
@@ -4483,6 +4505,14 @@ static void h3_custom_spartan_preview(struct widget_instance *screen, short colo
 		h3_custom.preview_shown = shown;
 		platform_log("menus: h3 customize: the preview shows %s", shown ? "the Spartan" : "the swatch");
 	}
+	/* (the tester's flaming helmet on it, while worn: flaming_helmet.c) */
+	{
+		long menu_scene_spartan_object(void);
+		void flaming_helmet_preview(long object_index);
+
+		flaming_helmet_preview(shown && h3_custom.flame_listed &&
+			config_boolean_live("player.flaming_helmet", "HALO_FLAMING_HELMET") ? menu_scene_spartan_object() : NONE);
+	}
 }
 
 /* the preview's Spartan let go (the editor gone) */
@@ -4494,6 +4524,11 @@ static void h3_custom_spartan_hide(void)
 	menu_scene_spartan_model(NULL);
 	h3_custom.preview_asked = FALSE;
 	h3_custom.preview_shown = FALSE;
+	{
+		void flaming_helmet_preview(long object_index);
+
+		flaming_helmet_preview(NONE);
+	}
 }
 
 /* (port h3 custom: the editor's list) the rows' values, the focused row's
@@ -4523,6 +4558,29 @@ static void h3_custom_update(struct widget_instance *list)
 		}
 		else
 			platform_log("menus: h3 customize: the name \"%s\" was refused: %s", text, h3_custom.status);
+	}
+	/* (the flaming helmet's row: a listed tester's alone; the help a row
+	lower for it) */
+	if (!h3_custom.flame_asked)
+	{
+		h3_custom.flame_asked = TRUE;
+		h3_custom.flame_listed = (boolean)p2p_flame_listed();
+		platform_log("menus: h3 customize: flaming helmet row %s", h3_custom.flame_listed ? "shown (a listed tester)" :
+			"hidden");
+	}
+	if ((found = named(list, h3_custom_rows[_h3_custom_flame])) != NULL)
+	{
+		widget_instance_set_visibility_recursive(found, h3_custom.flame_listed);
+		found->disabled = !h3_custom.flame_listed;
+	}
+	if ((found = named(screen, "custom_help")) != NULL)
+	{
+		if (!h3_custom.help_offset_kept)
+		{
+			h3_custom.help_offset_kept = TRUE;
+			h3_custom.help_offset = found->vertical_offset;
+		}
+		found->vertical_offset = (short)(h3_custom.help_offset + (h3_custom.flame_listed ? 18 : 0));
 	}
 	for (row = 0; row < NUMBER_OF_H3_CUSTOM_ROWS; row++)
 	{
@@ -6650,6 +6708,7 @@ static void h3_mp_settings_initialize(struct widget_instance *widget)
 			h3_mp_pause.profile_index = profile_index;
 	}
 	h3_custom.index = h3_mp_pause.profile_index;
+	h3_custom.flame_asked = FALSE;
 	platform_log("menus: h3 mp settings: local player %d, profile %s", local_player_index,
 		h3_mp_pause.profile_index != NONE ? "edited" : "none (only ALL SETTINGS)");
 }

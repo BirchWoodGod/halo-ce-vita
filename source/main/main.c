@@ -4534,6 +4534,8 @@ static void main_test_commands_update(
 	void)
 {
 	static boolean pan_active;
+	static boolean flamecam_active;
+	static float flamecam[2];
 	static float pan[7];
 	static long pan_start;
 	static int parsed = 0;
@@ -4629,6 +4631,17 @@ static void main_test_commands_update(
 		}
 		else if (!strncmp(commands[index].command, "@camera ", 8))
 			main_test_camera(commands[index].command + 8);
+		else if (!strncmp(commands[index].command, "@flamecam", 9))
+		{
+			/* (@flamecam [distance] [angle]: from then on the camera looks at
+			the first local player's head from that far (world units) and that
+			side (degrees from its facing), for the flaming helmet's
+			screenshots: flaming_helmet.c) */
+			flamecam[0] = 0.9f;
+			flamecam[1] = 0.0f;
+			sscanf(commands[index].command + 9, "%f %f", &flamecam[0], &flamecam[1]);
+			flamecam_active = TRUE;
+		}
 		else if (!strcmp(commands[index].command, "@where"))
 		{
 			/* (@where: every vehicle's and scenery object's tag and place,
@@ -4894,6 +4907,14 @@ static void main_test_commands_update(
 		}
 		else
 			hs_compile_and_evaluate(commands[index].command);
+	}
+	if (flamecam_active)
+	{
+		char line[120];
+		boolean flaming_helmet_test_camera(char *line, int size, float distance, float angle);
+
+		if (flaming_helmet_test_camera(line, (int)sizeof(line), flamecam[0], flamecam[1]))
+			main_test_camera(line);
 	}
 	if (pan_active)
 	{

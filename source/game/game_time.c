@@ -621,8 +621,12 @@ void game_time_update(
 						only, none of the game's) */
 						{
 							void ragdolls_tick(void);
+							void flaming_helmet_tick(void);
 
 							ragdolls_tick();
+							/* (the tester's flaming helmet: particles of its
+							own, port/linux/game/flaming_helmet.c) */
+							flaming_helmet_tick();
 						}
 #endif
 						game_time_globals->server_time++;

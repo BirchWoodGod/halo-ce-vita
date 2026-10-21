@@ -51,6 +51,8 @@
 "HUD, menus and text at full resolution" = "HUD, menús y texto a resolución completa"
 "First-person legs" = "Piernas visibles"
 "Your legs when you look down, as others see them" = "Tus piernas al mirar abajo, como las ven los demás"
+"Flaming helmet" = "Casco en llamas"
+"Testers: your blue flame; other players' games check it's yours" = "Testers: tu llama azul; el juego de los demás comprueba que es tuya"
 "Player model" = "Modelo de jugador"
 "Offline: you, or a Custom Edition map's player" = "Sin conexión: tú, o el jugador de un mapa de Custom Edition"
 "Spartan" = "Spartan"
@@ -1277,6 +1279,7 @@
 "INVERT FLIGHT" = "INVERTIR VUELO"
 "AUTO-CENTER" = "AUTOCENTRAR"
 "VIBRATION" = "VIBRACIÓN"
+"FLAMING HELMET" = "CASCO EN LLAMAS"
 "MODEL" = "MODELO"
 "SPARTAN" = "SPARTAN"
 "Building the model... %ld%%" = "Creando el modelo... %ld%%"
@@ -1322,6 +1325,7 @@
 "Push up to dive in the Banshee and the other\naircraft, as with a flight stick." = "Empuja hacia arriba para bajar en la Banshee y\nlas demás naves, como con una palanca de vuelo."
 "The view levels itself as you move." = "La vista se nivela sola al moverte."
 "For a controller that vibrates (on a PC). The\nPS Vita has no vibration motor." = "Para un mando que vibra (en PC). La PS Vita\nno tiene motor de vibración."
+"Testers: your blue flame. Everyone else's game\nchecks your signed proof before showing it." = "Testers: tu llama azul. El juego de los demás\ncomprueba tu prueba firmada antes de mostrarla."
 "Who you play as offline (multiplayer, bots, Forge):\nthe Spartan, or a player model from one of your\nHalo Custom Edition maps. Online: the Spartan." = "Con quién juegas sin conexión (multijugador, bots,\nForge): el Spartan, o el modelo de jugador de uno\nde tus mapas de Halo Custom Edition. En línea: el Spartan."
 
 # ---------- Forge's map variants and File Share (forge.c, forge_store.c, menu_functions.c, halo3/forge*.xml, halo3/fileshare.xml)
