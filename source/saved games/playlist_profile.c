@@ -95,7 +95,9 @@ enum
 {
 	PLAYLIST_PROFILE_CHECKSUM_DATA_SIZE = 104,
 	MAXIMUM_GAME_VARIANT_NAME_LENGTH = 12,
-	NUMBER_OF_DEFAULT_PLAYLIST_PROFILES = 26,
+	/* port: the Xbox's 26, then Infection's (port/linux/game/infection.c:
+	its name and description the port's, text_group.c) */
+	NUMBER_OF_DEFAULT_PLAYLIST_PROFILES = 27,
 };
 
 enum
@@ -117,13 +119,16 @@ struct playlist_profile_data
 };
 #pragma pack(pop)
 
+/* (the Xbox's 0x68 bytes of functions and 0x69 in all, one more function
+since Infection) */
 typedef char verify_playlist_profile_building_functions_size[
 	sizeof(((struct playlist_profile_data *)0)->
-		default_variant_building_functions) == 0x68 ? 1 : -1];
+		default_variant_building_functions) == NUMBER_OF_DEFAULT_PLAYLIST_PROFILES * sizeof(void *) ? 1 : -1];
 typedef char verify_playlist_profile_first_time_offset[
-	offsetof(struct playlist_profile_data, first_time) == 0x68 ? 1 : -1];
+	offsetof(struct playlist_profile_data, first_time) == NUMBER_OF_DEFAULT_PLAYLIST_PROFILES * sizeof(void *) ?
+	1 : -1];
 typedef char verify_playlist_profile_data_size[
-	sizeof(struct playlist_profile_data) == 0x69 ? 1 : -1];
+	sizeof(struct playlist_profile_data) == NUMBER_OF_DEFAULT_PLAYLIST_PROFILES * sizeof(void *) + 1 ? 1 : -1];
 
 struct playlist_profile_write_request
 {
@@ -203,6 +208,8 @@ struct playlist_profile_data playlist_profile_default_data =
 		build_game_variant_team_oddball,
 		build_game_variant_team_king,
 		build_game_variant_team_slayer,
+		/* port: Infection */
+		build_game_variant_infection,
 	},
 	TRUE
 };

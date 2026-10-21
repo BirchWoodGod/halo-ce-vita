@@ -1606,7 +1606,9 @@ void network_player_attach_unit(
 	game_variant_options, moves a player to the other team at his death,
 	and his next unit is the other team's; OpenCE's, c9ee319a; only with
 	the option, as the legacy wire's games never have it) */
-	if (game_engine_has_teams() && game_variant_options_get()->auto_team_balance &&
+	/* (and Infection's: a human killed comes back a zombie, the host's
+	unit its team's; port/linux/game/infection.c) */
+	if (game_engine_has_teams() && (game_variant_options_get()->auto_team_balance || infection_active()) &&
 		unit->object.owner_team_index >= 0 && unit->object.owner_team_index < 2)
 		player->team_index = unit->object.owner_team_index;
 	unit->object.owner_player_index = player_index;
@@ -4775,7 +4777,21 @@ void players_update_before_game(
 						unit_get(player->unit_index)->unit.current_weapon_index);
 					if (weapon_index != NONE && weapon_must_be_readied(weapon_index))
 					{
-						if (TEST_FLAG(action->control_flags, _unit_control_weapon_primary_trigger_bit) ||
+						/* port: an Infection zombie's skull is never let go:
+						its trigger is a blow, as Halo 3's zombies swing at
+						the trigger (port/linux/game/infection.c) */
+						if (infection_player_is_zombie(iterator.datum_index))
+						{
+							if (TEST_FLAG(action->control_flags, _unit_control_weapon_primary_trigger_bit) ||
+								TEST_FLAG(action->control_flags, _unit_control_weapon_secondary_trigger_bit))
+							{
+								action->control_flags |= FLAG(_unit_control_use_equipment_bit);
+							}
+							action->control_flags &= ~(FLAG(_unit_control_weapon_primary_trigger_bit) |
+								FLAG(_unit_control_weapon_secondary_trigger_bit));
+							action->primary_trigger = 0.0f;
+						}
+						else if (TEST_FLAG(action->control_flags, _unit_control_weapon_primary_trigger_bit) ||
 							TEST_FLAG(action->control_flags, _unit_control_weapon_secondary_trigger_bit))
 						{
 							unit_drop_current_weapon(player->unit_index, TRUE);
