@@ -111,7 +111,10 @@ these screens stand for the Xbox's own, over the same animated Halo ring:
   same file, checksum and SaveMeta.xbx name), the lobby's GAME then on it;
   Circle with changes asks whether to save them. A game type holds no time
   limit, friendly fire or betrayal penalty (a PC host's options), and the
-  help says so. Menu style Halo CE keeps the Xbox's screens.
+  help says so. A game type of the player's whose file fails its checksum
+  (damaged, or edited outside the game) is DAMAGED in the list - EDIT, COPY
+  and RENAME refused, Square deletes it - and left out of the lobby's GAME.
+  Menu style Halo CE keeps the Xbox's screens.
 - mods.xml: the MOD MANAGER the main menu opens, beside FILE SHARE (where
   Halo 3 keeps the player's content; it covers campaign and multiplayer
   content alike, so no lobby holds it): Halo 3's file list of the player's

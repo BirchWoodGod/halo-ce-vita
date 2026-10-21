@@ -2753,16 +2753,21 @@ static void h3_utf8(char *out, int size, wchar_t const *text)
 	out[length] = 0;
 }
 
+static boolean h3_gametype_file_good(long profile_index);
+
 /* the game types the Xbox's game type list offers (the first local
 player's, the valid ones), and the one it opens on: the one last used, else
-its first */
+its first. A player's game type whose file fails its checksum (damaged or
+edited since: the valid bit is the memory unit's map file's, from an earlier
+run) is left out - playlist_profile_get would play Slayer's rules under its
+name -; GAME TYPES says it is damaged */
 static void h3_mp_gametypes_read(void)
 {
 	long indices[H3_MAXIMUM_GAMETYPES];
 	word count = H3_MAXIMUM_GAMETYPES;
 	char directory[MAXIMUM_FILENAME_LENGTH + 1];
 	long remembered = NONE;
-	short index;
+	short index, damaged = 0, unreadable = 0;
 
 	playlist_profiles_enumerate_available_to_local_player_index(0, &count, indices);
 	h3_mp.gametype_count = 0;
@@ -2772,14 +2777,34 @@ static void h3_mp_gametypes_read(void)
 		wchar_t name[128];
 		short slot = h3_mp.gametype_count;
 
-		if (indices[index] == NONE || !TEST_FLAG(indices[index], _saved_game_file_index_valid_bit))
+		if (indices[index] == NONE)
 			continue;
+		if (!TEST_FLAG(indices[index], _saved_game_file_index_valid_bit))
+		{
+			unreadable += TEST_FLAG(indices[index], _saved_game_file_index_read_only_bit) ? 0 : 1;
+			continue;
+		}
+		if (!TEST_FLAG(indices[index], _saved_game_file_index_read_only_bit))
+		{
+			struct game_variant waited;
+
+			/* (playlist_profile_get waits for a write still going on) */
+			playlist_profile_get(indices[index], &waited);
+			if (!h3_gametype_file_good(indices[index]))
+			{
+				damaged++;
+				continue;
+			}
+		}
 		h3_mp.gametypes[slot] = indices[index];
 		h3_mp.gametype_names[slot][0] = 0;
 		if (playlist_profile_get_display_name(indices[index], name))
 			h3_utf8(h3_mp.gametype_names[slot], sizeof(h3_mp.gametype_names[slot]), name);
 		h3_mp.gametype_count++;
 	}
+	if (damaged || unreadable)
+		platform_log("menus: h3 mp: %d game types, %d of the player's left out (%d failing the checksum, %d unreadable)",
+			h3_mp.gametype_count, damaged + unreadable, damaged, unreadable);
 	if (saved_game_file_retrieve_last_used_multiplayer_variant_directory(directory))
 		remembered = saved_game_file_find_profile_index_for_directory_path(directory, 1);
 	h3_mp.gametype = h3_mp.gametype_count ? 0 : NONE;
@@ -5275,6 +5300,12 @@ static boolean h3_gametype_file_good(long profile_index)
 	csstrncat(path, "\\blam.lst", MAXIMUM_FILENAME_LENGTH);
 	path[MAXIMUM_FILENAME_LENGTH] = 0;
 	return playlist_profile_get_from_path(path, &variant);
+}
+
+/* (network_test.c's saved=) whether a game type's file passes its checksum */
+boolean menu_functions_gametype_file_good(long profile_index)
+{
+	return h3_gametype_file_good(profile_index);
 }
 
 /* the game types read again (the Xbox's list's), the item chosen on the

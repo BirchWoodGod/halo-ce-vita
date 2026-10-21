@@ -2192,6 +2192,55 @@ PY
 			"wait:150:3000 down:150:700 a wait:150:6000 $d $d $d $d a $w @31-keys-game-types:0:300 a $w a $w @32-keys-editor:0:300" \
 			HALO_MENU_STYLE=halo3 HALO_BUTTON_ICONS=keyboard HALO_SCREENSHOT_DIR="$gt_shots" HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1
 		check_h3 h3gametypes_keys halo3
+		# (a damaged game type: its blam.lst's score to win changed with its checksum left -
+		# edited or damaged since -: GAME TYPES says it is damaged, up to it (the list on the
+		# lobby's GAME, Slayer), its EDIT refused (no editor),
+		# Square deletes it after the question; the lobby's GAME leaves it out, and a game of it
+		# (HALO_NETWORK_TEST saved=) is not played by it)
+		rm -rf "$out/h3gametypes_damaged_save"; cp -r "$out/h3gametypes/save" "$out/h3gametypes_damaged_save"
+		gt_damaged=$(ls "$out"/h3gametypes_damaged_save/u/UDATA/*/blam.lst 2>/dev/null | head -1)
+		if [ -z "$gt_damaged" ]; then
+			fail h3gametypes_damaged "no game type's file to damage"
+		else
+			python3 - "$gt_damaged" <<'PY'
+import struct, sys
+path = sys.argv[1]
+block = bytearray(open(path, "rb").read())
+struct.pack_into("<i", block, 0x40, 7)
+open(path, "wb").write(block)
+PY
+			save_from=$out/h3gametypes_damaged_save run h3gametypes_damaged "$menus_data" 60 \
+				"wait:150:3000 down:150:700 a wait:150:6000 $d $d $d $d a $w $u @33-damaged-list:0:300 a $w a $w @34-damaged-edit-refused:0:300 x $w @35-damaged-delete-question:0:300 $d a wait:150:3000 @36-damaged-deleted:0:300 b $w" \
+				HALO_MENU_STYLE=halo3 HALO_BUTTON_ICONS=playstation HALO_SCREENSHOT_DIR="$gt_shots" HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1
+			check_h3 h3gametypes_damaged halo3
+			log=$out/h3gametypes_damaged/run.log
+			echo "--- h3gametypes_damaged"; grep -aE "h3 gametypes: |h3 gametype editor: |h3 mp: [0-9]+ game types|h3 mp lobby: .*GAME" "$log" | cut -c1-200 | head -12
+			grep -aqE "menus: h3 mp: 26 game types, 1 of the player's left out" "$log" ||
+				fail h3gametypes_damaged "the lobby's GAME did not leave the damaged game type out"
+			grep -aq "menus: h3 mp lobby: .*GAME: VITA SLAYER" "$log" &&
+				fail h3gametypes_damaged "the lobby's GAME was the damaged game type"
+			grep -aq "menus: h3 gametypes: 27 game types: 1 of the player's (1 damaged), 26 of the game's" "$log" ||
+				fail h3gametypes_damaged "GAME TYPES did not say the game type was damaged"
+			grep -aq "menus: h3 gametypes: This game type's file is damaged and can't be loaded. Delete it." "$log" ||
+				fail h3gametypes_damaged "EDIT of the damaged game type was not refused"
+			grep -aqE "menus: h3 gametype editor: (editing|now)" "$log" &&
+				fail h3gametypes_damaged "the editor opened on the damaged game type"
+			grep -aq "ui: screen pc.h3.gtedit.screen" "$log" && fail h3gametypes_damaged "the editor's screen opened"
+			grep -aq "menus: h3 gametypes: Vita Slayer was deleted." "$log" ||
+				fail h3gametypes_damaged "Square did not delete the damaged game type"
+			[ "$(grep -a "menus: h3 gametypes: [0-9]* game types" "$log" | tail -1 | grep -o "[0-9]* of the player's")" = "0 of the player's" ] ||
+				fail h3gametypes_damaged "the list did not end with none of the player's"
+			# (a game of it: Slayer's rules, the file not played)
+			rm -rf "$out/h3gametypes_damaged_save"; cp -r "$out/h3gametypes/save" "$out/h3gametypes_damaged_save"
+			gt_damaged=$(ls "$out"/h3gametypes_damaged_save/u/UDATA/*/blam.lst | head -1)
+			printf '\007' | dd of="$gt_damaged" bs=1 seek=$((0x40)) conv=notrunc status=none
+			save_from=$out/h3gametypes_damaged_save run h3gametypes_damaged_play "$menus_data" 30 "wait:150:20000" HALO_MENU_STYLE=halo3 \
+				"HALO_NETWORK_TEST=local:bloodgulch:saved=Vita_Slayer" HALO_NETWORK_TEST_PROFILE=1 HALO_NETWORK_TEST_START=3 HALO_BOTS=1
+			log=$out/h3gametypes_damaged_play/run.log
+			grep -aqE "network test: (the saved game type Vita Slayer is damaged|no saved game type Vita_Slayer): slayer" "$log" ||
+				fail h3gametypes_damaged_play "a game of the damaged game type was not refused"
+			grep -aq "network test: the game plays by: .*score 7" "$log" && fail h3gametypes_damaged_play "the damaged file's rules were played"
+		fi
 		for shot in "$gt_shots"/*.bmp; do
 			[ -e "$shot" ] && command -v magick > /dev/null && magick "$shot" "${shot%.bmp}.png" && rm -f "$shot"
 		done

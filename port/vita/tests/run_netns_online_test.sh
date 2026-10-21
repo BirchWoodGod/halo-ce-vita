@@ -583,6 +583,10 @@
 #                    (host:<map>[:<variant>]; code/lobby/adhoc: no map change
 #                    is then looked for)
 #   HALO_TEST_JOIN_ENV   more VAR=value settings for the joiner
+#   HALO_TEST_HOST_SAVE  a save folder (u/UDATA/...) copied into the host's: its
+#                    game types (code: HALO_TEST_HOST_GAME=host:bloodgulch:saved=Vita_Slayer,
+#                    '_' for a space, hosts the saved game type online; the joiner must
+#                    play by the same rules: the network test's "the game plays by")
 #   HALO_TEST_SECONDS  how long the copies run (default 180)
 #   HALO_TEST_REJOIN   seconds into its game the joiner leaves (code; 0 never)
 #   HALO_TEST_OUT    where the logs go (deleted after a pass when the test made it; HALO_TEST_KEEP=1 keeps them)
@@ -809,6 +813,7 @@ run_copy() { # run_copy NAME NETNS_PID BINARY CPUS [ENV...]
 	local name=$1 ns=$2 binary=$3 cores=$4
 	shift 4
 	mkdir -p "$out/$name/data" "$out/$name/save"
+	[ "$name" = host ] && [ -n "${HALO_TEST_HOST_SAVE:-}" ] && cp -r "$HALO_TEST_HOST_SAVE"/. "$out/$name/save/"
 	local folder=$data
 	case $name in
 	host) folder=${HALO_TEST_DATA_HOST:-$data} ;;
@@ -1001,6 +1006,18 @@ code|lobby|lobbytls|lobbypw|relay|latency)
 		echo "host's first game (s score, k kills, d deaths, f own-side kills: suicides): $first_game"
 		grep -aq "network test: map chillout" "$out/host/run.log" || fail "the host never changed map"
 	fi
+	# (a saved game type hosted online, HALO_TEST_HOST_GAME's saved=: the host plays it, and the
+	# joiner - HALO_NETWORK_TEST_RULES=1 in HALO_TEST_JOIN_ENV - by the same rules, as they came)
+	case ${HALO_TEST_HOST_GAME:-} in
+	*saved=*)
+		grep -aq "network test: the saved game type " "$out/host/run.log" || fail "the host did not find its saved game type"
+		host_rules=$(sed -n 's/.*network test: the game plays by: //p' "$out/host/run.log" | head -1)
+		join_rules=$(sed -n 's/.*network test: the game plays by: //p' "$out/joiner/run.log" | head -1)
+		echo "the host's game type: $host_rules"
+		echo "the joiner's:         $join_rules"
+		[ -n "$host_rules" ] && [ "$host_rules" = "$join_rules" ] ||
+			fail "the joiner did not play by the host's saved game type's rules" ;;
+	esac
 	if [ "$rejoin" != 0 ]; then
 		grep -aq "network test: joining again" "$out/joiner/run.log" || fail "the joiner never left and joined again"
 		again=$(sed -n '/network test: joining again/,$p' "$out/joiner/run.log" | two_players)

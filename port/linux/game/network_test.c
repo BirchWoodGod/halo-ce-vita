@@ -84,6 +84,7 @@ Called from the main loop every frame (main.c).
 #include "interface/player_ui.h"
 #include "saved games/player_profile.h"
 #include "saved games/playlist_profile.h"
+#include "saved games/saved_game_files.h"
 #include "interface/ui_widget.h"
 #include "networking/network_game_globals.h"
 #include "networking/network_client_manager.h"
@@ -137,6 +138,7 @@ void platform_log(char const *format, ...);
 /* menu_functions.c's: a variant's settings, as the Halo 3 game type
 editor's log has them */
 void menu_functions_gametype_rules(struct game_variant const *variant, char *text, int size);
+boolean menu_functions_gametype_file_good(long profile_index);
 /* damage.c's */
 void damage_kill_object_for_player(long object_index, long player_index);
 /* network_distributed.c's */
@@ -356,6 +358,8 @@ made one by network_test_forge once its map is set) */
 		{
 			wchar_t display[128];
 			char text[128];
+			char same[128];
+			char wanted[128];
 			int length;
 
 			if (indices[index] == NONE || !playlist_profile_get_display_name(indices[index], display))
@@ -363,7 +367,29 @@ made one by network_test_forge once its map is set) */
 			for (length = 0; display[length] && length < (int)sizeof(text) - 1; length++)
 				text[length] = (char)(display[length] < 0x80 ? display[length] : '?');
 			text[length] = 0;
-			if (!_stricmp(text, name + 6) && playlist_profile_get(indices[index], variant))
+			/* ('_' for a space: a name in a test's space-split settings) */
+			snprintf(wanted, sizeof(wanted), "%s", name + 6);
+			snprintf(same, sizeof(same), "%s", text);
+			for (length = 0; same[length]; length++)
+			{
+				if (same[length] == ' ')
+					same[length] = '_';
+			}
+			for (length = 0; wanted[length]; length++)
+			{
+				if (wanted[length] == ' ')
+					wanted[length] = '_';
+			}
+			if (_stricmp(same, wanted))
+				continue;
+			/* (a file damaged or edited since: not played, as the lobby's GAME leaves it out) */
+			if (!TEST_FLAG(indices[index], _saved_game_file_index_read_only_bit) &&
+				!menu_functions_gametype_file_good(indices[index]))
+			{
+				platform_log("network test: the saved game type %s is damaged: slayer", text);
+				break;
+			}
+			if (playlist_profile_get(indices[index], variant))
 			{
 				platform_log("network test: the saved game type %s", text);
 				return;
@@ -1689,9 +1715,11 @@ void network_test_update(
 	if (game_in_progress() && !main_menu_loaded && game_time_get() - network_test.logged_time >= TICKS_PER_SECOND)
 	{
 		network_test.logged_time = game_time_get();
-		/* (a saved game type played: the rules the game plays by, its
-		engine's variant, logged once a game) */
-		if (game_engine_running() && !strncmp(network_test.variant_name, "saved=", 6) &&
+		/* (a saved game type played - or HALO_NETWORK_TEST_RULES=1: a
+		joiner's, the host's game type as it came -: the rules the game
+		plays by, its engine's variant, logged once a game) */
+		if (game_engine_running() && (!strncmp(network_test.variant_name, "saved=", 6) ||
+			(getenv("HALO_NETWORK_TEST_RULES") && !strcmp(getenv("HALO_NETWORK_TEST_RULES"), "1"))) &&
 			(network_test.rules_logged_time == 0 || game_time_get() < network_test.rules_logged_time))
 		{
 			char rules[512];
