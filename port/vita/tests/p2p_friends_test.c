@@ -2616,9 +2616,18 @@ static void test_flame(void)
 	flame_reask(3, 2);
 	flame_make_answer(answer, 2, 3, machines[3].machines[2].flame_nonce, machines[0].key, machines[2].seed,
 		flame_names[2]);
+	reset_drops(3);
+	flame_hear(3, answer);
+	check(!machines[3].machines[2].flame_verified && machines[3].dropped_forged >= 1,
+		"flame: a listed key's proof signed by another key: refused");
+	check(!machines[3].machines[2].flame_refused, "flame: ... asked again while tries remain (a name may have changed)");
+	flame_reask(3, 2);
+	machines[3].machines[2].flame_tries = FLAME_TRIES;
+	flame_make_answer(answer, 2, 3, machines[3].machines[2].flame_nonce, machines[0].key, machines[2].seed,
+		flame_names[2]);
 	flame_hear(3, answer);
 	check(!machines[3].machines[2].flame_verified && machines[3].machines[2].flame_refused,
-		"flame: a listed key's proof signed by another key: refused");
+		"flame: ... refused for good once its tries are spent");
 	flame_reask(3, 1);
 	{
 		unsigned short other[12];
@@ -2626,8 +2635,9 @@ static void test_flame(void)
 		memset(other, 0, sizeof(other));
 		other[0] = 'M';
 		flame_make_answer(answer, 1, 3, machines[3].machines[1].flame_nonce, machines[1].key, machines[1].seed, other);
+		reset_drops(3);
 		flame_hear(3, answer);
-		check(!machines[3].machines[1].flame_verified && machines[3].machines[1].flame_refused,
+		check(!machines[3].machines[1].flame_verified && machines[3].dropped_forged >= 1,
 			"flame: a proof for another player's name: refused");
 	}
 	flame_reask(3, 1);
@@ -2646,6 +2656,37 @@ static void test_flame(void)
 		flame_names[2]);
 	flame_hear(3, answer);
 	check(!machines[3].machines[2].flame_verified, "flame: this machine's own key as another's: refused");
+	/* a machine that does not know its own player's name in the record yet
+	(what its proof signs) answers nothing: asked again later */
+	{
+		unsigned short none[12];
+		unsigned char ask[CARD_HEADER_SIZE];
+
+		memset(none, 0, sizeof(none));
+		use(1);
+		p2p_flame_set_players(claims, &flame_names[0][0], MACHINES, none);
+		machines[1].card_outbound_count = 0;
+		machines[1].machines[0].flame_answered_time = 0;
+		ask[0] = CARD_VERSION;
+		ask[1] = CARD_FLAME_ASK;
+		ask[2] = 0;
+		ask[3] = 1;
+		posix_random_bytes(ask + 4, NONCE_LENGTH);
+		p2p_friends_tunnel_heard(virtual_of(0), 1, ask, CARD_HEADER_SIZE);
+		pthread_mutex_lock(&friends_lock);
+		cards_update();
+		pthread_mutex_unlock(&friends_lock);
+		check(!flame_take(1, CARD_FLAME_ANSWER, answer), "flame: no proof before its own name is known");
+		machines[1].card_outbound_count = 0;
+		p2p_flame_set_players(claims, &flame_names[0][0], MACHINES, flame_names[1]);
+		p2p_friends_tunnel_heard(virtual_of(0), 1, ask, CARD_HEADER_SIZE);
+		clock_now += CARD_ANSWER_INTERVAL;
+		pthread_mutex_lock(&friends_lock);
+		cards_update();
+		pthread_mutex_unlock(&friends_lock);
+		check(flame_take(1, CARD_FLAME_ANSWER, answer) == FLAME_ANSWER_SIZE, "flame: ... and a proof once it is");
+		machines[1].card_outbound_count = 0;
+	}
 	/* a claim gone (the player left, another in the slot): forgotten */
 	claims[1] = 0;
 	flame_players(claims);

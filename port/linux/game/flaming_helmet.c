@@ -75,6 +75,11 @@ static struct
 	unsigned long logged_time;
 	/* (the preview's unit: CUSTOMIZATION's Spartan, flaming_helmet_preview) */
 	long preview_object;
+	/* (this second's answers: this machine wears it; each machine's checked,
+	-1 not asked yet) */
+	int refresh_ticks;
+	boolean wearing;
+	signed char verified[256];
 } flaming_helmet = { 0, NONE, NONE, FALSE, 0, NONE };
 
 /* the colour: the body's Covenant smoke (blue of its own) pulled toward
@@ -193,11 +198,20 @@ static void flame_emit(long object_index, short local_player_index)
 	}
 }
 
+static boolean flame_verified(int machine)
+{
+	if (machine < 0 || machine >= (int)sizeof(flaming_helmet.verified))
+		return FALSE;
+	if (flaming_helmet.verified[machine] < 0)
+		flaming_helmet.verified[machine] = (signed char)(p2p_flame_verified(machine) != 0);
+	return flaming_helmet.verified[machine] != 0;
+}
+
 /* (game_time.c, each tick after the game's) every flame shown */
 void flaming_helmet_tick(void)
 {
 #ifndef HALO_DEDICATED_SERVER
-	boolean wearing = -1;
+	boolean wearing;
 	int drawn = 0;
 	long player_index;
 	boolean log_now = FALSE;
@@ -218,6 +232,15 @@ void flaming_helmet_tick(void)
 #endif
 	if (!player_data)
 		return;
+	/* (what the checks say, asked once a second at most: their lock is the
+	friends', which internet play's thread holds while it checks signatures) */
+	if (flaming_helmet.refresh_ticks-- <= 0)
+	{
+		flaming_helmet.refresh_ticks = 30;
+		flaming_helmet.wearing = (boolean)p2p_flame_wearing();
+		memset(flaming_helmet.verified, -1, sizeof(flaming_helmet.verified));
+	}
+	wearing = flaming_helmet.wearing;
 	for (player_index = data_next_index(player_data, NONE); player_index != NONE;
 		player_index = data_next_index(player_data, player_index))
 	{
@@ -229,14 +252,12 @@ void flaming_helmet_tick(void)
 			continue;
 		if (player->local_player_index == 0)
 		{
-			if (wearing == (boolean)-1)
-				wearing = (boolean)p2p_flame_wearing();
 			if (!wearing)
 				continue;
 			local_player_index = 0;
 		}
 		else if (player->local_player_index != NONE || network->icon_index != NETWORK_PLAYER_FLAME_CLAIM ||
-			!p2p_flame_verified(network->machine_index))
+			!flame_verified(network->machine_index))
 		{
 			continue;
 		}

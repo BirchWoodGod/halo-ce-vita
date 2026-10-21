@@ -62,6 +62,17 @@ static int flame_test_setting(const char *name)
 #endif
 }
 
+/* a name of the game's record had (not all zeros) */
+static int flame_name_known(const unsigned char *name)
+{
+	int index;
+
+	for (index = 0; index < FLAME_NAME_SIZE; index++)
+		if (name[index])
+			return 1;
+	return 0;
+}
+
 static int flame_kind(int kind)
 {
 	return kind == CARD_FLAME_ASK || kind == CARD_FLAME_ANSWER;
@@ -203,6 +214,12 @@ static int flame_proof_valid(const unsigned char *bytes, int from, int to, const
 	return 1;
 }
 
+/* (an answer's key listed now: its proof failed on its signature alone) */
+static int listed_now(const unsigned char *bytes)
+{
+	return tester_list_find(&friends->flame_list, bytes + CARD_HEADER_SIZE, unix_now()) >= 0;
+}
+
 /* this machine's answer to an ask of a machine (its nonce) */
 static void flame_answer(int machine, const unsigned char *nonce)
 {
@@ -293,13 +310,14 @@ static void flame_heard(int from, const unsigned char *bytes)
 {
 	struct card_machine *machine = &friends->machines[from];
 	const char *why = "";
-	int other;
+	int other, signature_failed = 0;
 
 	if (bytes[1] == CARD_FLAME_ASK)
 	{
-		/* (not wearing it, or no claim seen for this machine's player: never
-		told why) */
-		if (!flame_wearing())
+		/* (not wearing it: never told why; nor before this machine knows its
+		own player's name in the game's record, which the proof signs: the
+		asker asks again) */
+		if (!flame_wearing() || !flame_name_known(friends->flame_own_name))
 			return;
 		if (machine->flame_answered_time && !elapsed(machine->flame_answered_time, CARD_ANSWER_INTERVAL / 3))
 		{
@@ -324,7 +342,7 @@ static void flame_heard(int from, const unsigned char *bytes)
 	else if (p2p_equal(bytes + CARD_HEADER_SIZE, friends->key, P2P_KEY_SIZE))
 		why = "it is this machine's own key";
 	else if (!flame_proof_valid(bytes, from, friends->game_machine, machine->flame_name, &why))
-		;
+		signature_failed = listed_now(bytes);
 	else
 	{
 		for (other = 0; other < CARD_MACHINES; other++)
@@ -346,7 +364,11 @@ static void flame_heard(int from, const unsigned char *bytes)
 		}
 	}
 	friends->dropped_forged++;
-	machine->flame_refused = 1;
+	/* (a bad signature asked again while tries remain: the two machines may
+	not have had the same record yet, a name just changed; never drawn
+	unless a proof checks) */
+	if (!signature_failed || machine->flame_tries >= FLAME_TRIES)
+		machine->flame_refused = 1;
 	platform_log("flame: machine %d's flame claim refused: %s", from, why);
 }
 

@@ -36,6 +36,8 @@ fail() { echo "FAIL ($scenario): $*"; status=1; }
 # machine index of a copy in its game (its log's "friends: in a game, machine N")
 machine_of() { sed -n 's/.*friends: in a game, machine \([0-9]*\).*/\1/p' "$1" | head -1; }
 verified() { grep -aq "flame: machine $2's flaming helmet verified" "$1"; }
+# (a copy drew machine N's player's flame: flaming_helmet.c's HALO_TEST_FLAME_LOG lines)
+drawn() { grep -aq "flame: drawn on player [0-9]* (machine $2)" "$1"; }
 
 run_scenario() {
 	scenario=$1
@@ -75,7 +77,8 @@ EOF
 		join2_env=
 	fi
 	HALO_TEST_OUT=$out HALO_TEST_KEEP=1 HALO_TEST_SECOND_JOINER=1 HALO_TEST_SECONDS=${HALO_TEST_SECONDS:-150} \
-		HALO_TEST_HOST_ENV="$host_env" HALO_TEST_JOIN_ENV="HALO_FLAMING_HELMET=1" HALO_TEST_JOIN2_ENV="$join2_env" \
+		HALO_TEST_HOST_ENV="$host_env HALO_TEST_FLAME_LOG=1" HALO_TEST_JOIN_ENV="HALO_FLAMING_HELMET=1 HALO_TEST_FLAME_LOG=1" \
+		HALO_TEST_JOIN2_ENV="$join2_env" \
 		"$here/run_netns_online_test.sh" code > "$out/online.log" 2>&1
 	echo "--- $scenario: the online test said: $(grep -c '^FAIL' "$out/online.log") failures"
 	grep '^FAIL' "$out/online.log" | head -5
@@ -98,6 +101,12 @@ EOF
 			fail "the host did not refuse to relay the forced proof"
 		grep -aq "flame: machine $j2's flame claim refused: its key is on no tester list" "$hl" ||
 			fail "the host did not refuse the forced claim itself"
+		drawn "$j2l" "$h" && drawn "$j2l" "$j" && drawn "$hl" "$j" && drawn "$jl" "$h" ||
+			fail "a checked flame was not drawn"
+		drawn "$hl" "$j2" && fail "the host drew the forced flame"
+		drawn "$jl" "$j2" && fail "the joiner drew the forced flame"
+		grep -aq "flame: drawn on player [0-9]* (machine $h, this machine's own)" "$hl" ||
+			fail "the host did not draw its own flame (third person)"
 	else
 		grep -aq "flame: test: the modified host forged" "$hl" || fail "the modified host forged nothing (no test)"
 		for log in "$jl" "$j2l"; do
@@ -108,6 +117,10 @@ EOF
 		verified "$jl" "$j2" && fail "the joiner drew the unlisted player's flame the host claimed"
 		verified "$j2l" "$h" && fail "the second joiner drew the modified host's flame"
 		verified "$j2l" "$j" && fail "a forged proof of the listed joiner was taken"
+		for log in "$jl" "$j2l"; do
+			grep -a "flame: drawn on player" "$log" | grep -vq "this machine's own" &&
+				fail "$(basename "$(dirname "$log")") drew another player's flame"
+		done
 	fi
 	grep -ah "flame:" "$hl" "$jl" "$j2l" | sed 's/^.*flame:/flame:/' | sort | uniq -c | sort -rn | head -20
 	if [ $status = 0 ] && [ "${HALO_TEST_KEEP:-0}" != 1 ]; then rm -rf "$out"; else echo "output kept in $out"; fi

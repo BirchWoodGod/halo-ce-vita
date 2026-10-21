@@ -137,7 +137,7 @@ enum
 	unanswered in this long; a host relays a machine's flame packets this
 	often at most (the cards' budget in all) */
 	FLAME_ASK_INTERVAL = 4000,
-	FLAME_TRIES = 3,
+	FLAME_TRIES = 4,
 	FLAME_ANSWER_TIME = 8000,
 	FLAME_RELAY_MACHINE_INTERVAL = 200,
 	MAXIMUM_INBOUND = 64,
