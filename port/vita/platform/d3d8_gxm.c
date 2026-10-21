@@ -3005,8 +3005,10 @@ static int waiter_sleep(struct worker_waiter *waiter, int (*ready)(unsigned long
 	result = vita_host_wake_wait(waiter->wake, wait_timeout_us());
 	if (result == 1)
 	{
-		unsigned long seen = waiter->published();
+		/* (the publish count read after the test: the publish the test
+		saw is one of those counted) */
 		int now_ready = ready(argument), late = 0;
+		unsigned long seen = waiter->published();
 
 		waiter->timeouts++;
 		if (now_ready)
