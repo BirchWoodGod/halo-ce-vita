@@ -341,13 +341,14 @@ static const struct config_setting config_settings[] =
 	{ "menus.style", _config_string, "\"halo3\"", "HALO_MENU_STYLE", _environment_value, _platform_all,
 		"The menus: \"classic\" (Halo CE's own) or \"halo3\" (Halo 3-style screens\n"
 		"over the same animated Halo ring: port/vita/app0/menus/halo3). Read each\n"
-		"time a screen opens. The Vita's settings panel (Graphics, Screen, Menu\n"
+		"time a screen opens. The Vita's settings panel (Game, Menus, Menu\n"
 		"style) sets it." },
 	{ "menus.carnage_report", _config_string, "\"halo3\"", "HALO_CARNAGE_REPORT", _environment_value, _platform_all,
 		"With the Halo 3 menus, the report at a multiplayer game's end: \"halo3\"\n"
 		"(Halo 3's CARNAGE REPORT: port/vita/app0/menus/halo3/carnage.xml) or\n"
 		"\"classic\" (the game's own). Menu style Halo CE always shows the\n"
-		"game's own." },
+		"game's own. The Vita's settings panel (Game, Menus, Carnage report)\n"
+		"sets it." },
 	{ "menus.scenes", _config_boolean, "true", "HALO_MENU_SCENES", _environment_value, _platform_all,
 		"With the Halo 3 menus, a camera of its own behind each lobby (the\n"
 		"campaign, multiplayer and Forge lobbies: their scene= in\n"
