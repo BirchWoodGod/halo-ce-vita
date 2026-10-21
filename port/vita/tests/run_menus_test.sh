@@ -2447,14 +2447,14 @@ PY
 			fail h3gametypes "GAME TYPES did not stand for the Xbox's game type list"
 		grep -aq "ui: screen ui.shell.main_menu.settings_select.multiplayer_setup" "$log" &&
 			fail h3gametypes "an Xbox game type screen opened with Menu style Halo 3"
-		grep -aq "menus: h3 gametypes: 26 game types: 0 of the player's (0 damaged), 26 of the game's" "$log" ||
-			fail h3gametypes "the list was not the game's 26 game types"
+		grep -aq "menus: h3 gametypes: 27 game types: 0 of the player's (0 damaged), 27 of the game's" "$log" ||
+			fail h3gametypes "the list was not the game's 27 game types (the Xbox's 26 and Infection)"
 		for screen in gametypes gtbase gtedit gtopt gtact gtdel gtquit; do
 			grep -aq "ui: screen pc.h3.$screen.screen" "$log" || fail h3gametypes "the screen h3/$screen did not open"
 		done
 		grep -aq "menus: h3 gametype editor: saved Vita Slayer (a new game type): slayer, score 50, lives 0, respawn 300, growth 0, suicide 300, shields 0, health 100, .*vehicles 3" "$log" ||
 			fail h3gametypes "SAVE did not save Vita Slayer with the changes"
-		grep -aq "menus: h3 gametypes: 27 game types: 1 of the player's (0 damaged), 26 of the game's" "$log" ||
+		grep -aq "menus: h3 gametypes: 28 game types: 1 of the player's (0 damaged), 27 of the game's" "$log" ||
 			fail h3gametypes "the list did not have the saved game type (its checksum good)"
 		grep -aq "menus: h3 mp lobby: .*GAME: VITA SLAYER" "$log" || fail h3gametypes "the lobby's GAME was not the saved game type"
 		grep -aq "menus: h3 live lobby: now Vita Slayer on Battle Creek, sent to its joiners" "$log" &&
@@ -2557,11 +2557,11 @@ PY
 			check_h3 h3gametypes_damaged halo3
 			log=$out/h3gametypes_damaged/run.log
 			echo "--- h3gametypes_damaged"; grep -aE "h3 gametypes: |h3 gametype editor: |h3 mp: [0-9]+ game types|h3 mp lobby: .*GAME" "$log" | cut -c1-200 | head -12
-			grep -aqE "menus: h3 mp: 26 game types, 1 of the player's left out" "$log" ||
+			grep -aqE "menus: h3 mp: 27 game types, 1 of the player's left out" "$log" ||
 				fail h3gametypes_damaged "the lobby's GAME did not leave the damaged game type out"
 			grep -aq "menus: h3 mp lobby: .*GAME: VITA SLAYER" "$log" &&
 				fail h3gametypes_damaged "the lobby's GAME was the damaged game type"
-			grep -aq "menus: h3 gametypes: 27 game types: 1 of the player's (1 damaged), 26 of the game's" "$log" ||
+			grep -aq "menus: h3 gametypes: 28 game types: 1 of the player's (1 damaged), 27 of the game's" "$log" ||
 				fail h3gametypes_damaged "GAME TYPES did not say the game type was damaged"
 			grep -aq "menus: h3 gametypes: This game type's file is damaged and can't be loaded. Delete it." "$log" ||
 				fail h3gametypes_damaged "EDIT of the damaged game type was not refused"
@@ -2583,6 +2583,37 @@ PY
 				fail h3gametypes_damaged_play "a game of the damaged game type was not refused"
 			grep -aq "network test: the game plays by: .*score 7" "$log" && fail h3gametypes_damaged_play "the damaged file's rules were played"
 		fi
+		# (Infection, the game's 27th game type: listed last as one of the game's own; its options,
+		# COPY (typed): the copy's blam.lst keeps Infection's magic and settings in Slayer's part
+		# (game_engine.h), the list says INFECTION for it, and a game of the copy plays Infection)
+		gt_inf_downs=""; for gt_step in $(seq 26); do gt_inf_downs="$gt_inf_downs $d"; done
+		profile_from=$HALO_TEST_PROFILE run h3gametypes_infection "$menus_data" 60 \
+			"wait:150:3000 down:150:700 a wait:150:6000 $d $d $d $d a $w$gt_inf_downs $w a $w $d a wait:150:4000" \
+			HALO_MENU_STYLE=halo3 "HALO_TEST_TEXT_INPUT=Vita Infect" HALO_BUTTON_ICONS=playstation
+		check_h3 h3gametypes_infection halo3
+		log=$out/h3gametypes_infection/run.log
+		echo "--- h3gametypes_infection"; grep -aE "h3 gametypes: (Infection|Vita Infect|[0-9]+ game types)" "$log" | cut -c1-200 | head -8
+		grep -aq "menus: h3 gametypes: Infection (built-in) (27 of 27)" "$log" ||
+			fail h3gametypes_infection "Infection was not the game's 27th game type"
+		grep -aq "menus: h3 gametypes: Infection copied as Vita Infect." "$log" || fail h3gametypes_infection "COPY did not copy Infection"
+		gt_inf_file=$(ls "$out"/h3gametypes_infection/save/u/UDATA/*/blam.lst 2>/dev/null | head -1)
+		gt_inf=$([ -n "$gt_inf_file" ] && python3 - "$gt_inf_file" <<'PY'
+import struct, sys
+block = open(sys.argv[1], "rb").read()
+name = block[0:24].decode("utf-16-le").split("\0")[0]
+engine, = struct.unpack_from("<i", block, 0x18)
+print(name, engine, block.find(b"INFC") >= 0)
+PY
+)
+		echo "the copy: $gt_inf"
+		[ "$gt_inf" = "Vita Infect 2 True" ] || fail h3gametypes_infection "the copy's file is not a Slayer variant with Infection's magic"
+		rm -rf "$out/h3gametypes_saved"; cp -r "$out/h3gametypes_infection/save" "$out/h3gametypes_saved"
+		save_from=$out/h3gametypes_saved run h3gametypes_infection_play "$menus_data" 40 "wait:150:30000" HALO_MENU_STYLE=halo3 \
+			"HALO_NETWORK_TEST=local:bloodgulch:saved=Vita Infect" HALO_NETWORK_TEST_PROFILE=1 HALO_NETWORK_TEST_START=3 HALO_BOTS=3
+		log=$out/h3gametypes_infection_play/run.log
+		grep -aE "network test: the saved|infection: the round begins" "$log" | head -3 | cut -c1-200
+		grep -aq "network test: the saved game type Vita Infect" "$log" || fail h3gametypes_infection_play "the saved copy was not found"
+		grep -aq "infection: the round begins" "$log" || fail h3gametypes_infection_play "a game of the copy did not play Infection"
 		for shot in "$gt_shots"/*.bmp; do
 			[ -e "$shot" ] && command -v magick > /dev/null && magick "$shot" "${shot%.bmp}.png" && rm -f "$shot"
 		done

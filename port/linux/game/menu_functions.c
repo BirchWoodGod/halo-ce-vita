@@ -4846,7 +4846,7 @@ static char const *h3_gametype_kind_name(struct game_variant const *variant)
 {
 	if (infection_variant(variant))
 		return T("INFECTION");
-	return h3_gametype_kind_name(variant);
+	return h3_gametype_engine_name(variant->game_engine_index);
 }
 
 /* (the logs') the game's name, in English */
