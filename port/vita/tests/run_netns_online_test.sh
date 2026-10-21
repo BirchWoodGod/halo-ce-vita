@@ -362,6 +362,15 @@
 #            HALO_NET_ADHOC_EMULATE): both lobbies open on AD HOC, in the group
 #            from the start (no system's dialog to join it), the LAN browser's
 #            title AD HOC GAMES; nothing may reach the broker
+#   h3liveonline the Halo 3 multiplayer lobby, live on SYSTEM LINK with the
+#            profile (HALO_TEST_PROFILE, the Halo PC files; skipped without),
+#            switched to ONLINE (its System Link game closed, the lobby open
+#            again online once the broker is reached), left (B) and opened
+#            again from the main menu, ONLINE kept: no frame of the host's
+#            over 500 ms on the way (the Xbox's second of sleep as the
+#            hosted game closed, network_server_manager.c, held one 1000 ms
+#            each time: time+ui 1000.4 ms, LadyCassie's audio stutter on
+#            opening MULTIPLAYER), the lobby open online each time
 #   h3online the connection switched live from the Halo 3 lobby (both copies
 #            start with online off and the Halo PC files, HALO_TEST_DATA_MENUS;
 #            skipped without): each lobby's NETWORK: ONLINE starts internet
@@ -674,6 +683,7 @@ seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = h3mppause ] && seconds=${HALO_TEST_SECONDS:-150}
 [ "$mode" = h3live ] && seconds=${HALO_TEST_SECONDS:-150}
 [ "$mode" = h3liveleave ] && seconds=${HALO_TEST_SECONDS:-100}
+[ "$mode" = h3liveonline ] && seconds=${HALO_TEST_SECONDS:-90}
 # (h3liveinvite: a game and its END GAME after the invite; h3liveagain: two games)
 [ "$mode" = h3liveinvite ] && seconds=${HALO_TEST_SECONDS:-240}
 [ "$mode" = h3liveagain ] && seconds=${HALO_TEST_SECONDS:-280}
@@ -2638,6 +2648,41 @@ h3mppause)
 		fail "the host's END GAME did not end the game (the host back at the menus)"
 	grep -aq "network test: joining" "$out/joiner2/run.log" || fail "the second joiner did not join"
 	;;
+h3liveonline)
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS) or no HALO_TEST_PROFILE"; exit 0
+	fi
+	mkdir -p "$out/host/save/u/UDATA/869079979327"
+	cp "$HALO_TEST_PROFILE" "$out/host/save/u/UDATA/869079979327/blam.sav"
+	[ -r "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" ] &&
+		cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$out/host/save/u/UDATA/869079979327/"
+	# (MULTIPLAYER: the lobby live on SYSTEM LINK; NETWORK (A), up to ONLINE, A: its game
+	# closed, the lobby open again online; a while; B: the lobby left; A: MULTIPLAYER again,
+	# ONLINE kept)
+	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
+		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:1 \
+		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:8000 a wait:150:2500 up:150:600 a wait:150:20000 b wait:150:5000 a wait:150:20000" \
+		; host_pid=$last_pid
+	wait $host_pid 2>/dev/null
+	hl=$out/host/run.log
+	grep -aE "network: (switching|Online|status)|menus: h3 (live lobby: (open|closed)|mp: network)|frame-hitch: " "$hl" | cut -c1-200 | head -30
+	grep -av "assertion skipped (torn read?)" "$hl" | grep -aqiE "assert|exception|halt_and_catch_fire|segmentation" &&
+		fail "the host: an assertion, exception or crash"
+	grep -aq "menus: h3 live lobby: open on SYSTEM LINK" "$hl" || fail "the lobby did not open live on SYSTEM LINK"
+	grep -aq "menus: h3 live lobby: closed (another network chosen)" "$hl" || fail "ONLINE did not close the System Link game"
+	grep -aq "network: Online (a broker reached)" "$hl" || fail "the host did not reach the broker"
+	online=$(grep -ac "menus: h3 live lobby: open on ONLINE" "$hl")
+	echo "the lobby open online $online times"
+	[ "$online" -ge 2 ] || fail "the lobby did not open online both times ($online)"
+	grep -aq "menus: h3 live lobby: closed (the host left the lobby)" "$hl" || fail "B did not close the online lobby"
+	worst=$(sed -n 's/.*frame-hitch: \([0-9.]*\) ms.*/\1/p' "$hl" | sort -n | tail -1)
+	echo "the host's longest frame over 100 ms: ${worst:-none}"
+	if [ -n "$worst" ] && awk -v w="$worst" 'BEGIN { exit !(w >= 500) }'; then
+		grep -a "frame-hitch: " "$hl" | cut -c1-200
+		fail "a frame of ${worst} ms (500 allowed)"
+	fi
+	;;
 h3online|h3pickjoin)
 	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 	# (h3pickjoin: the host stays on the map list a minute, the joiner joining its lobby meanwhile)
@@ -4527,7 +4572,7 @@ forge|forge3|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h
 	forge_case
 	;;
 *)
-	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|h3live|h3liveleave|h3liveagain|h3liveinvite|h3liveprivate|h3online|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|party|friendsprivate|friendsprivatepw|forge|forge3|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|vitapc|vitaonly" >&2
+	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|h3live|h3liveleave|h3liveagain|h3liveonline|h3liveinvite|h3liveprivate|h3online|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|party|friendsprivate|friendsprivatepw|forge|forge3|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|vitapc|vitaonly" >&2
 	exit 2
 	;;
 esac
