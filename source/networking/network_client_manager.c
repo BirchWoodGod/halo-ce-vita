@@ -2044,7 +2044,14 @@ boolean network_game_client_add_player(
 	user's name (network_game_local_player_name), not the empty one */
 	network_game_local_player_name(profile.player_name, player.name, NETWORK_PLAYER_NAME_LENGTH);
 	player.primary_color_index = profile.primary_color_index;
-	player.icon_index = NONE;
+	/* port: the tester's flaming helmet claimed (its first player's alone):
+	a hint every machine checks with this machine's signed proof
+	(port/linux/game/friends_game.c, port/linux/src/p2p_flame.inc) */
+	{
+		extern boolean friends_game_flame_claim(short local_player_index);
+
+		player.icon_index = friends_game_flame_claim(local_player_index) ? NETWORK_PLAYER_FLAME_CLAIM : NONE;
+	}
 	player.team_index = NONE;
 	player.player_list_index = NONE;
 

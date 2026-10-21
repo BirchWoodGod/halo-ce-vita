@@ -2717,6 +2717,18 @@ void network_game_server_handle_client_update_packet(
 	return;
 }
 
+void network_game_server_flame_claim(
+	struct network_player *player)
+{
+	/* (the tests' modified host claims it for everyone: p2p_flame.inc) */
+	extern int p2p_flame_forging_host(void);
+
+	if (player->icon_index != NETWORK_PLAYER_FLAME_CLAIM)
+		player->icon_index = NONE;
+	if (p2p_flame_forging_host())
+		player->icon_index = NETWORK_PLAYER_FLAME_CLAIM;
+}
+
 boolean network_game_server_add_player_to_game(
 	struct network_game_server *server,
 	struct network_game_server_client_machine *machine,
@@ -2773,6 +2785,9 @@ boolean network_game_server_add_player_to_game(
 
 		/* (the name comes from the wire) */
 		player->name[NETWORK_PLAYER_NAME_LENGTH - 1] = 0;
+		/* port: icon_index carries the flaming helmet's claim alone, a hint
+		that every machine checks itself (port/linux/src/p2p_flame.inc) */
+		network_game_server_flame_claim(player);
 		if (!player->name[0])
 			get_unique_random_name(server, player);
 

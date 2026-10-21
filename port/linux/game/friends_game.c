@@ -61,6 +61,7 @@ other machine's player, as its options' ADD FRIEND does.
 #include "custom_edition_cache.h"
 #include "forge.h"
 #include "../src/port_config.h"
+#include "network_wire.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -250,6 +251,58 @@ static void friends_game_invites(boolean main_menu_loaded)
 	}
 }
 
+/* ---------- the tester's flaming helmet (port/linux/src/p2p_flame.inc) */
+
+/* (a network player's name: players.h's 12 wide characters) */
+#define FLAME_PLAYER_NAME_LENGTH 12
+
+boolean friends_game_flame_claim(short local_player_index)
+{
+	/* (its first player's alone; never on the crossplay wire, whose PC
+	builds are not this project's) */
+	return local_player_index == 0 && !network_wire_crossplay() && p2p_flame_wearing();
+}
+
+/* the game's record told to the flame's checks: each machine's claim and
+its claimant's name, and this machine's own player's name there */
+static void friends_game_flame_players(struct network_game_client *client)
+{
+	static int claims[HALO_PORT_MAXIMUM_NETWORK_MACHINES];
+	static unsigned short names[HALO_PORT_MAXIMUM_NETWORK_MACHINES][FLAME_PLAYER_NAME_LENGTH];
+	unsigned short own_name[FLAME_PLAYER_NAME_LENGTH];
+	struct network_game *game = network_game_client_get_game(client);
+	int own = network_game_client_get_machine_index(client), own_found = 0;
+	long index;
+
+	typedef char name_length_check[FLAME_PLAYER_NAME_LENGTH == 12 ? 1 : -1];
+	(void)sizeof(name_length_check);
+	memset(claims, 0, sizeof(claims));
+	memset(names, 0, sizeof(names));
+	memset(own_name, 0, sizeof(own_name));
+	for (index = 0; index < HALO_PORT_MAXIMUM_NETWORK_PLAYERS && game; index++)
+	{
+		struct network_player *player = &game->players[index];
+		int machine = player->machine_index, unit;
+
+		if (!network_player_is_valid(player) || machine < 0 || machine >= HALO_PORT_MAXIMUM_NETWORK_MACHINES)
+			continue;
+		if (machine == own && (!own_found || player->icon_index == NETWORK_PLAYER_FLAME_CLAIM))
+		{
+			own_found = 1;
+			for (unit = 0; unit < FLAME_PLAYER_NAME_LENGTH && player->name[unit]; unit++)
+				own_name[unit] = (unsigned short)player->name[unit];
+			for (; unit < FLAME_PLAYER_NAME_LENGTH; unit++)
+				own_name[unit] = 0;
+		}
+		if (player->icon_index != NETWORK_PLAYER_FLAME_CLAIM || claims[machine])
+			continue;
+		claims[machine] = 1;
+		for (unit = 0; unit < FLAME_PLAYER_NAME_LENGTH && player->name[unit]; unit++)
+			names[machine][unit] = (unsigned short)player->name[unit];
+	}
+	p2p_flame_set_players(claims, &names[0][0], HALO_PORT_MAXIMUM_NETWORK_MACHINES, own_name);
+}
+
 /* the game this machine plays, told to friends: its machine, whether it
 hosts, and (a host's) each machine's address */
 static void friends_game_network(void)
@@ -269,6 +322,7 @@ static void friends_game_network(void)
 		addresses[index] = server ? network_game_server_machine_address(index) : 0;
 	p2p_friends_set_game(network_game_client_get_machine_index(client), server != NULL, addresses,
 		HALO_PORT_MAXIMUM_NETWORK_MACHINES);
+	friends_game_flame_players(client);
 	if (!friends_game.in_game_since)
 		friends_game.in_game_since = system_milliseconds() ? system_milliseconds() : 1;
 }

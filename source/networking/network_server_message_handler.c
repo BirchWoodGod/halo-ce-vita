@@ -2580,6 +2580,8 @@ static boolean network_game_server_handle_message_client_player_settings_request
 			slot out of the list over the machines), with a name that ends,
 			and on a team of the game's: else the one the host has it on */
 			network_game_server_get_client_machine(server, client_machine, &machine_index);
+			/* (icon_index: the flaming helmet's claim alone, network_server_manager.h) */
+			network_game_server_flame_claim(&player);
 			network_game_server_clean_player_name(server, &player,
 				VALID_INDEX(player.player_list_index, MAXIMUM_NUMBER_OF_PLAYERS) ? player.player_list_index : NONE);
 			if (VALID_INDEX(player.player_list_index, MAXIMUM_NUMBER_OF_PLAYERS) &&

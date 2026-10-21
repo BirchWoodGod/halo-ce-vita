@@ -67,6 +67,13 @@ typedef char player_action_desired_facing_yaw_offset_assert[
 typedef char player_action_desired_facing_pitch_offset_assert[
 	offsetof(struct player_action, desired_facing.pitch) == 0x8 ? 1 : -1];
 
+/* port: network_player.icon_index's value for a player who claims the
+tester's flaming helmet (port/linux/src/p2p_flame.inc): a hint to ask that
+player's machine for its signed proof, never trusted. The game never read
+icon_index (NONE always) and the record carries it whole; builds before it
+ignore it */
+#define NETWORK_PLAYER_FLAME_CLAIM 0x4648
+
 struct network_player
 {
 	wchar_t name[12];

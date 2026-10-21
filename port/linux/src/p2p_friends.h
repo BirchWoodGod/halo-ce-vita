@@ -255,4 +255,21 @@ void p2p_friends_set_activity(int state, const char *map, const char *gametype, 
 void p2p_friends_activity_text(char *text, int size, int state, const char *map, const char *gametype, int engine,
 	int difficulty, int pc_map);
 
+/* ---------- the tester's flaming helmet (p2p_flame.inc; tester_list.h) */
+
+/* this machine's friend identity is on the newest valid signed tester list
+(not expired): the options show Flaming helmet */
+int p2p_flame_listed(void);
+/* this machine wears it: listed and the option (player.flaming_helmet) on
+(its player claims it as it joins a game; its own flame drawn) */
+int p2p_flame_wearing(void);
+/* (the tests' modified host, not in release builds) */
+int p2p_flame_forging_host(void);
+/* the game's record, each second: each machine's player's claim (count
+machines; nonzero: claimed) and its name (12 UTF-16 units a machine), and
+this machine's own player's name there (what its proof signs) */
+void p2p_flame_set_players(const int *claims, const unsigned short *names, int count, const unsigned short *own_name);
+/* a machine's player's flame proven to this machine (draw it) */
+int p2p_flame_verified(int machine);
+
 #endif
