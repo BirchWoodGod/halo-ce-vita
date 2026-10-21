@@ -151,6 +151,44 @@ unsigned char *halo_packs_file_read(char const *path, unsigned long *size)
 	return (unsigned char *)data;
 }
 
+/* a file of app0's own (the in-game chat's chat/filter.txt): the menus
+folder's parent (<...>/menus/ -> <...>/; app0: on the Vita) */
+unsigned char *halo_app0_file_read(char const *path, unsigned long *size)
+{
+	char app0[1100];
+	char full[1200];
+	size_t length = 0, end;
+	char *data;
+
+	if (!path || !*path || strstr(path, "..") || strchr(path, ':') || path[0] == '/' || path[0] == '\\')
+		return NULL;
+	folder_find();
+	snprintf(app0, sizeof(app0), "%s", folder);
+	end = strlen(app0);
+	while (end && app0[end - 1] == '/')
+		app0[--end] = 0;
+	if (end >= 5 && !strcmp(app0 + end - 5, "menus"))
+		app0[end - 5] = 0;
+	else
+		snprintf(app0 + end, sizeof(app0) - end, "/../");
+	snprintf(full, sizeof(full), "%s%s", app0, path);
+	data = config_file_read(full, &length);
+	if (!data)
+		return NULL;
+	if (length > MAXIMUM_FILE_BYTES)
+	{
+		free(data);
+		return NULL;
+	}
+	*size = (unsigned long)length;
+	return (unsigned char *)data;
+}
+
+void halo_app0_file_free(unsigned char *data)
+{
+	free(data);
+}
+
 /* the files menus.txt lists */
 /* the files a list names (menus.txt, ingame.txt), added to files */
 static void files_gather(char const *list_name)

@@ -486,6 +486,16 @@ static const struct config_setting config_settings[] =
 		"Show the round trip to the host in a network game, in milliseconds,\n"
 		"at the screen's top right (the host: its slowest player's), and\n"
 		"\"Connection problem\" when the host has sent nothing for two seconds." },
+	{ "network.chat", _config_boolean, "true", "HALO_CHAT", _environment_value, _platform_all,
+		"The in-game chat (port/linux/game/game_chat.c): lines to everyone, the team\n"
+		"or the party, from the quick chat wheel (Back + D-pad left in play; F1 +\n"
+		"Left on the keyboard) or typed. false: no chat shown over the game and none\n"
+		"sent from it." },
+	{ "network.chat_filter", _config_boolean, "true", "HALO_CHAT_FILTER", _environment_value, _platform_all,
+		"The chat's slur filter: slurs and hate speech in other players' lines\n"
+		"(PC players' too) shown as ****, however they are spelled, and a player\n"
+		"it catches three times in five minutes muted here. It changes only what\n"
+		"this player sees (port/vita/app0/chat/filter.txt)." },
 	{ "network.player_name", _config_string, "\"\"", "HALO_NET_PLAYER_NAME", _environment_value, _platform_all,
 		"The name a player goes by in network games when their profile has none\n"
 		"(the default profiles); the Vita's user name on the Vita; empty for\n"

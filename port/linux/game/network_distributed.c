@@ -79,6 +79,8 @@ machine (their datum identifiers need not be).
 #include "network_anticheat.h"
 #include "network_wire.h"
 #include "forge.h"
+#include "game_chat.h"
+#include "game_chat_protocol.h"
 #include "forge_net_protocol.h"
 #include "dedicated_server.h"
 #include "latency_meter.h"
@@ -5110,6 +5112,16 @@ void network_distributed_handle_message(
 	if (header.type == DISTRIBUTED_MESSAGE_AIM_ASSIST_POLICY)
 	{
 		distributed_handle_aim_assist_policy(machine_index, message, size);
+		return;
+	}
+	/* (the in-game chat's, OpenCE's kinds 87-89, on either wire:
+	game_chat.c checks each, taken only over a connection's stream, never
+	a datagram or a batch) */
+	if (header.type >= GAME_CHAT_KIND_UP && header.type <= GAME_CHAT_KIND_CONFIG)
+	{
+		game_chat_handle_message(machine_index, header.type, header.count, entries, (unsigned long)(size - sizeof(header)),
+			!distributed_handling_batch && (machine_index != NONE ? distributed_handling_stream_message :
+				!network_connection_last_read_was_unreliable()));
 		return;
 	}
 	/* a tick's messages in one: each as if it came alone */
