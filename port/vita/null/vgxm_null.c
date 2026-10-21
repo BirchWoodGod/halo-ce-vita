@@ -163,6 +163,23 @@ void vita_host_wake_signal(int id)
 	sem_post(&wakes[id]);
 }
 
+/* (vita_host.h) no clocks to set here: the level asked for, logged, for
+the governor's tests (d3d8_gxm.c clocks_governor) */
+void vita_host_clocks_start(void)
+{
+}
+
+void vita_host_clocks_set(int level)
+{
+	static int current;
+	static const char *const names[3] = { "play", "loading", "idle" };
+
+	if (level == current || level < VITA_CLOCKS_PLAY || level > VITA_CLOCKS_IDLE)
+		return;
+	current = level;
+	platform_log("clocks: %s (harness: none set)", names[level]);
+}
+
 void vita_host_cpu_usage(unsigned char busy[4])
 {
 	busy[0] = busy[1] = busy[2] = busy[3] = 255;

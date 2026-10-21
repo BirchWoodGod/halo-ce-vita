@@ -101,6 +101,132 @@ static void renderer_map_unloaded(void);
 static unsigned long cdram_census_frame(void);
 static void cdram_census(const char *when);
 
+/* ---------- the clocks by what the game is doing
+
+(port; Sierra-III's battery handoff, Oct 21 2026) The game's thread at each
+present asks the host for the clocks the frame needs (vita_host_clocks_set,
+vita_clocks.c): play's, the top, in play - lowering them there would cost
+frames in the fights that already limit the game, and the GPU's would push
+the dynamic resolution down -; a loading screen's (the GPU's lowered, the
+CPU's kept for the load); idle's in the main menu (a local one: no network
+game's lobby) and with the game paused. Down only after a second of such
+frames, up at the first frame of play. Lowered, a frame slower than 30 a
+second 4 times in 16 (a pause over a heavy scene, which the render draws
+whole each frame) takes the clocks back up for the rest of that stretch.
+HALO_CLOCK_GOVERNOR=0, the settings panel's Battery saver in menus: Off,
+keeps play's clocks always (as before). */
+short game_connection(void);
+int halo_main_menu_idle(void);
+unsigned char game_loading_screen_up_here(void);
+unsigned char game_time_initialized(void);
+unsigned char game_time_get_paused(void);
+unsigned char cache_files_precache_in_progress(void);
+
+#define CLOCKS_DOWN_AFTER_US 1000000ull
+#define CLOCKS_LATE_FRAME_US 36700ull
+/* the frames after a change that are not judged late (the change itself,
+and the GPU's frames still queued at the old clocks) */
+#define CLOCKS_SETTLE_FRAMES 3
+
+/* the level the clocks are at (the worker's dynamic resolution reads it),
+and the frames after a rise the dynamic resolution leaves out: the GPU's
+time measured at lower clocks says nothing of play's */
+static volatile int clocks_level;
+static volatile int clocks_dynres_skip;
+
+static int clocks_wanted(void)
+{
+	if (game_loading_screen_up_here())
+		return VITA_CLOCKS_LOADING;
+	if (halo_main_menu_idle())
+		return cache_files_precache_in_progress() ? VITA_CLOCKS_LOADING : VITA_CLOCKS_IDLE;
+	if (game_time_initialized() && game_time_get_paused() && game_connection() == 0)
+		return VITA_CLOCKS_IDLE;
+	return VITA_CLOCKS_PLAY;
+}
+
+static void clocks_set(int level)
+{
+	if (level == clocks_level)
+		return;
+	if (level == VITA_CLOCKS_PLAY)
+		__atomic_store_n(&clocks_dynres_skip, 4, __ATOMIC_RELEASE);
+	__atomic_store_n(&clocks_level, level, __ATOMIC_RELEASE);
+	vita_host_clocks_set(level);
+}
+
+static void clocks_governor(void)
+{
+	extern volatile unsigned long halo_settings_generation;
+	static unsigned long settings_seen = (unsigned long)-1;
+	static int enabled = 1, refused, settle;
+	static unsigned long long last_present, lower_since;
+	static unsigned short late_history;
+	unsigned long generation = __atomic_load_n(&halo_settings_generation, __ATOMIC_ACQUIRE);
+	unsigned long long now = vita_host_time_us(), interval = last_present ? now - last_present : 0;
+	int wanted;
+
+	last_present = now;
+	if (generation != settings_seen)
+	{
+		const char *setting = getenv("HALO_CLOCK_GOVERNOR");
+		int was = enabled;
+
+		settings_seen = generation;
+		enabled = !setting || atoi(setting) != 0;
+		if (enabled != was)
+			platform_log("clocks: battery saver in menus %s", enabled ? "on" : "off");
+	}
+	wanted = enabled ? clocks_wanted() : VITA_CLOCKS_PLAY;
+	/* (play again ends a stretch the clocks were taken back up in) */
+	if (wanted == VITA_CLOCKS_PLAY)
+		refused = 0;
+	if (refused && wanted == VITA_CLOCKS_IDLE)
+		wanted = VITA_CLOCKS_PLAY;
+	/* lowered: the frames judged (a loading screen's are the load's) */
+	if (clocks_level == VITA_CLOCKS_IDLE && wanted == VITA_CLOCKS_IDLE && interval)
+	{
+		if (settle)
+			settle--;
+		else
+		{
+			int count = 0, bit;
+
+			late_history = (unsigned short)((late_history << 1) | (interval > CLOCKS_LATE_FRAME_US));
+			for (bit = 0; bit < 16; bit++)
+				count += (late_history >> bit) & 1;
+			if (count >= 4)
+			{
+				platform_log("clocks: idle frames too slow (%d of the last 16 over %llu ms): play's clocks until play",
+					count, CLOCKS_LATE_FRAME_US / 1000);
+				refused = 1;
+				wanted = VITA_CLOCKS_PLAY;
+			}
+		}
+	}
+	if (wanted < clocks_level)
+	{
+		/* up at once */
+		lower_since = 0;
+		clocks_set(wanted);
+	}
+	else if (wanted > clocks_level)
+	{
+		/* down after a second of it */
+		if (!lower_since)
+			lower_since = now;
+		else if (now - lower_since >= CLOCKS_DOWN_AFTER_US)
+		{
+			lower_since = 0;
+			late_history = 0;
+			settle = CLOCKS_SETTLE_FRAMES;
+			clocks_set(wanted);
+		}
+	}
+	else
+		lower_since = 0;
+}
+
 long halo_screen_commit(void)
 {
 	extern volatile unsigned long halo_settings_generation;
@@ -122,6 +248,7 @@ long halo_screen_commit(void)
 		dynres_configure();
 	}
 	cdram_wanted_relieve();
+	clocks_governor();
 	return screen_width;
 }
 
@@ -5872,10 +5999,21 @@ static void dynres_frame_end(void)
 	dynres_controller_limits(&dynres.controller, dynres.floor, ceiling, dynres.budget_ms);
 	level = dynres.controller.level;
 	dynres.frames++;
-	/* (drained whether on or not: the overlay's GPU line) */
-	while (vgxm_gpu_frame_next(&frame))
-		if (!dynres.sim_ms)
-			level = dynres_measured(frame.gpu_ms, frame.tail_ms, dynres_level_of(frame.scale), frame.interval_ms);
+	/* (drained whether on or not: the overlay's GPU line; not measured
+	while the clocks are lowered, nor in the frames after they rise:
+	clocks_governor) */
+	{
+		int lowered = __atomic_load_n(&clocks_level, __ATOMIC_ACQUIRE) != VITA_CLOCKS_PLAY;
+
+		if (!lowered && __atomic_load_n(&clocks_dynres_skip, __ATOMIC_ACQUIRE) > 0)
+		{
+			__atomic_sub_fetch(&clocks_dynres_skip, 1, __ATOMIC_ACQ_REL);
+			lowered = 1;
+		}
+		while (vgxm_gpu_frame_next(&frame))
+			if (!dynres.sim_ms && !lowered)
+				level = dynres_measured(frame.gpu_ms, frame.tail_ms, dynres_level_of(frame.scale), frame.interval_ms);
+	}
 	if (dynres.sim_ms)
 	{
 		/* (debug) a GPU whose time grows with the pixels, 8% noise, its

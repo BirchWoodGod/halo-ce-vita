@@ -871,18 +871,9 @@ int main(int argc, char **argv)
 	/* the port's text in the Vita's language, from here on (lang.c; the
 	settings' Language row's choice is applied when they are loaded) */
 	vita_settings_language_init();
-	/* the clocks the game needs as floors: raised to them, never lowered
-	from more (a 500 MHz profile of PSVshell or another overclocking plugin
-	stays; 444/222/222/166 are the system's highest otherwise) - from
-	Bruno Santana's modified build */
-	if (scePowerGetArmClockFrequency() < 444)
-		scePowerSetArmClockFrequency(444);
-	if (scePowerGetBusClockFrequency() < 222)
-		scePowerSetBusClockFrequency(222);
-	if (scePowerGetGpuClockFrequency() < 222)
-		scePowerSetGpuClockFrequency(222);
-	if (scePowerGetGpuXbarClockFrequency() < 166)
-		scePowerSetGpuXbarClockFrequency(166);
+	/* the clocks the game needs as floors, raised to (vita_clocks.c: the
+	ones found are noted, the floors of the lower clocks in the menus) */
+	vita_host_clocks_start();
 
 	sceIoMkdir(VITA_DEFAULT_DATA_ROOT, 0777);
 	setenv("HALO_DATA_ROOT", VITA_DEFAULT_DATA_ROOT, 0);

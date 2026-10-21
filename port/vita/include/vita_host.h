@@ -91,6 +91,19 @@ int vita_host_wake_poll(int id);
 by any) */
 void vita_host_wake_signal(int id);
 
+/* ---------- the clocks (port/vita/host/vita_clocks.c) */
+
+/* the clocks a level asks for: play's (main's, the top), a loading
+screen's (the GPU's lowered, the CPU's kept: the load is CPU work), idle's
+(menus and pause: all lowered); never below the clocks found at start */
+#define VITA_CLOCKS_PLAY 0
+#define VITA_CLOCKS_LOADING 1
+#define VITA_CLOCKS_IDLE 2
+/* (main, at start) the clocks found noted, play's set */
+void vita_host_clocks_start(void);
+/* the clocks of that level set, if they are not already */
+void vita_host_clocks_set(int level);
+
 /* ---------- movies (port/vita/host/vita_movie.c): the Vita's video player
 for the game's Bink movies, from H.264 copies */
 

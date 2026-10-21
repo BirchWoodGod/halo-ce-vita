@@ -3039,6 +3039,7 @@ static void test_tab_layouts(void)
 		{ PAGE_GRAPHICS_PERFORMANCE, "Object lighting", "HALO_LIGHTING_REFRESH_DIVISOR", "1|2|3", 0, "3" },
 		{ PAGE_GRAPHICS_PERFORMANCE, "AI think rate", "HALO_AI_THINK_DIVISOR", "1|0|2|3", 0, "0" },
 		{ PAGE_GRAPHICS_PERFORMANCE, "Fourth core helpers", "HALO_CPU3_AUX", "0|1|2", 1, "2" },
+		{ PAGE_GRAPHICS_PERFORMANCE, "Battery saver in menus", "HALO_CLOCK_GOVERNOR", "1|0", 0, "1" },
 	};
 	static const struct layout_row sound[] = {
 		{ TAB_AUDIO, "Sound voices", "HALO_SOUND_CHANNELS", "16|24|32|0", 1, "0" },
@@ -3066,7 +3067,8 @@ static void test_tab_layouts(void)
 	check(layout_is(TAB_GRAPHICS, 1, video, (int)(sizeof(video) / sizeof(video[0]))),
 		"Video: Profile, Render resolution, Dynamic minimum, Frame limit, Frame interpolation, Aspect ratio, Upscale "
 		"filter, Sharp interface (on), Detail, Performance; Detail (Model detail ... Particles, Particle density, Ragdolls), Performance "
-		"(Scenery updates, Object lighting, AI think rate, Fourth core helpers*): each row's variable, values, default "
+		"(Scenery updates, Object lighting, AI think rate, Fourth core helpers*, Battery saver in menus): each row's "
+		"variable, values, default "
 		"and restart as before");
 	check(layout_is(TAB_AUDIO, 1, sound, (int)(sizeof(sound) / sizeof(sound[0]))),
 		"Sound: Sound voices*, Sound occlusion, Sound updates (Language on Game): as before");
@@ -3277,7 +3279,7 @@ static void test_variables_kept(void)
 		"HALO_FRIENDS_JOIN", "HALO_NET_BLOCK_MOUSE_AIM_ASSIST", "HALO_NET_ANTICHEAT",
 		"HALO_INFECTION_ZOMBIES", "HALO_INFECTION_SPEED", "HALO_INFECTION_TIME", "HALO_INFECTION_RESPAWN",
 		"HALO_INFECTION_SHIELDS", "HALO_INFECTION_TOUGH",
-		"HALO_CARNAGE_REPORT",
+		"HALO_CARNAGE_REPORT", "HALO_CLOCK_GOVERNOR",
 	};
 	int index, all = 1, choices = 0;
 
@@ -5064,10 +5066,11 @@ int main(void)
 		!strcmp(menu_line(2, line, sizeof(line)), "Scenery updates\x02< Quarter  ") &&
 		!strcmp(menu_line(3, line, sizeof(line)), "Object lighting\x02< Third  ") &&
 		!strcmp(menu_line(4, line, sizeof(line)), "AI think rate\x02< Adaptive >") &&
-		!strcmp(menu_line(5, line, sizeof(line)), "Fourth core helpers*\x02< All async  ") && menu_rows() == 4 &&
+		!strcmp(menu_line(5, line, sizeof(line)), "Fourth core helpers*\x02< All async  ") &&
+		!strcmp(menu_line(6, line, sizeof(line)), "Battery saver in menus\x02  On >") && menu_rows() == 5 &&
 		menu_fits() && menu_height_fits() && !strstr(menu, "Scenery updates*") && !strstr(menu, "AI think rate*"),
 		"Video, Performance: scenery (Quarter), lighting (Third), AI think rate (Adaptive), fourth core helpers "
-		"(All async, after a restart)");
+		"(All async, after a restart), battery saver in menus (On)");
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_SCENERY_UPDATE_DIVISOR"), "2") && !strcmp(settings[0].names[settings[0].choice], "Custom") &&
 		!restart_pending, "a rate changed on its page (Scenery updates Half): the profile Custom, no restart");

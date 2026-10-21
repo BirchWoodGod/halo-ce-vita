@@ -131,6 +131,8 @@
 "Fourth core helpers" = "Cuarto núcleo"
 "Needs CapUnlocker: audio, or all background work" = "Requiere CapUnlocker: el audio, o todo el trabajo de fondo"
 "All async" = "Todo asíncrono"
+"Battery saver in menus" = "Ahorro de batería"
+"Lower clocks in the menus, paused and loading" = "Relojes más bajos en menús, en pausa y al cargar"
 
 # ---------- Audio
 "Language" = "Idioma"
