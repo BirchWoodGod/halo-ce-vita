@@ -220,6 +220,7 @@ and left, the defenders' posts. The map's teleporters are logged once.
 
 #include "bots.h"
 #include "bots_tactics.h"
+#include "infection.h"
 
 #include <math.h>
 #include <pthread.h>
@@ -1053,6 +1054,23 @@ static boolean bots_peaceful(void)
 		peaceful = setting && atoi(setting) ? 1 : 0;
 	}
 	return peaceful != 0;
+}
+
+/* port: (debug) HALO_BOT_PEACEFUL_HUMANS=1: in Infection, the humans' bots
+fight no one (the zombies' blows alone, for run_infection_test.sh) */
+static boolean bots_peaceful_player(long player_index)
+{
+	static int humans = -1;
+
+	if (bots_peaceful())
+		return TRUE;
+	if (humans < 0)
+	{
+		char const *setting = getenv("HALO_BOT_PEACEFUL_HUMANS");
+
+		humans = setting && atoi(setting) ? 1 : 0;
+	}
+	return humans && infection_active() && !infection_player_is_zombie(player_index);
 }
 
 /* whether bots take vehicles (bots.vehicles, the Vita's settings panel's
@@ -4636,6 +4654,29 @@ static void bots_choose_goal(struct bots_bot *bot, long player_index, real_point
 	bots_tactics_check((long)(bot - bots_globals.bots), player_index);
 	if (bot->vehicle_index != NONE && bots_vehicle_goal(bot, player_get(player_index)->unit_index))
 		return;
+	/* port: an Infection zombie goes for the nearest human, wherever it is
+	(as Halo 3's zombies know where the humans are), no item, powerup or
+	vehicle on the way: the skull is all it holds (infection.c) */
+	if (infection_player_is_zombie(player_index))
+	{
+		real_point3d human, ground;
+		long surface_index;
+
+		if (infection_bot_hunt(player_index, position, &human) &&
+			(surface_index = bots_surface_below(&human, &ground)) != NONE)
+		{
+			/* (the path kept while the human is near where it went, three
+			seconds at most: a search a tick for a running human was many) */
+			if (bot->goal_kind == _bots_goal_enemy && bots_distance3d(&bot->goal_point, &ground) < 5.0f &&
+				now - bot->goal_tick < TICKS_PER_SECOND * 3)
+			{
+				return;
+			}
+			bots_set_goal(bot, _bots_goal_enemy, &ground, surface_index);
+			bot->hunting = TRUE;
+			return;
+		}
+	}
 	/* port: a health pack when hurt, an overshield or camouflage near: before
 	the game's goals, but for the flag or the ball it carries */
 	if (!bot->held_objective && bots_powerup_goal(bot, unit_get(player_get(player_index)->unit_index), position, fighting))
@@ -4996,7 +5037,7 @@ HALO_BOT_PEACEFUL=1: never, for the moving alone), and forgetting the one
 gone a while */
 static void bots_bot_look(struct bots_bot *bot, struct bots_tick *tick)
 {
-	if (tick->now >= bot->next_look_tick && !bots_peaceful())
+	if (tick->now >= bot->next_look_tick && !bots_peaceful_player(bot->player_index))
 	{
 		long target = bots_find_target(bot, tick->player, tick->unit, bots_tick_eye(tick));
 
@@ -5114,8 +5155,17 @@ static void bots_bot_fight(struct bots_bot *bot, struct bots_tick *tick)
 			tick->flags |= FLAG(_unit_control_weapon_primary_trigger_bit);
 		}
 	}
-	/* a blow close up */
-	if (tick->target_distance < 1.1f && now >= bot->melee_tick)
+	/* a blow close up (port: an Infection zombie's skull, from a little
+	further and more often: its one way to fight) */
+	if (infection_player_is_zombie(bot->player_index))
+	{
+		if (tick->target_distance < 1.6f && now >= bot->melee_tick)
+		{
+			tick->flags |= FLAG(_unit_control_use_equipment_bit);
+			bot->melee_tick = now + TICKS_PER_SECOND * 2 / 3;
+		}
+	}
+	else if (tick->target_distance < 1.1f && now >= bot->melee_tick)
 	{
 		tick->flags |= FLAG(_unit_control_use_equipment_bit);
 		bot->melee_tick = now + TICKS_PER_SECOND;
@@ -5143,6 +5193,13 @@ static void bots_bot_fight(struct bots_bot *bot, struct bots_tick *tick)
 		real range = bots_weapon_range(tick->weapon_index);
 		real forward = tick->target_distance > range * 1.3f ? 0.8f : tick->target_distance < range * 0.6f ? -0.5f : 0.0f;
 		real side = bot->strafe_sign;
+
+		/* port: an Infection zombie runs at its target, weaving a little */
+		if (infection_player_is_zombie(bot->player_index))
+		{
+			forward = 1.0f;
+			side *= tick->target_distance > 6.0f ? 0.35f : 0.1f;
+		}
 
 		tick->move_direction = (real)atan2((real)sin(to_target) * forward + (real)sin(to_target + BOTS_PI * 0.5f) * side,
 			(real)cos(to_target) * forward + (real)cos(to_target + BOTS_PI * 0.5f) * side);
@@ -5416,6 +5473,9 @@ static void bots_vehicle_consider(struct bots_bot *bot, struct bots_tick *tick)
 
 	if (bot->vehicle_index != NONE || now < bot->vehicle_check_tick || now < bot->vehicle_rest_until_tick)
 		return;
+	/* port: an Infection zombie hunts on foot (infection.c) */
+	if (infection_player_is_zombie(bot->player_index))
+		return;
 	bot->vehicle_check_tick = now + TICKS_PER_SECOND;
 	/* (the setting looked at once a second: a configuration lookup) */
 	if (!bots_vehicles_enabled())
@@ -5550,6 +5610,7 @@ static void bots_turret_consider(struct bots_bot *bot, struct bots_tick *tick)
 	real best_distance = BOTS_TURRET_REACH;
 
 	if (bots_globals.turret_count <= 0 || bot->vehicle_index != NONE || now < bot->turret_check_tick ||
+		infection_player_is_zombie(bot->player_index) ||
 		now < bot->vehicle_rest_until_tick || bot->held_objective || bot->target_player_index == NONE ||
 		now - bot->target_seen_tick > TICKS_PER_SECOND * 5 ||
 		(bot->goal_kind == _bots_goal_item && bot->item_powerup != _bots_powerup_none))
@@ -6635,7 +6696,7 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 		short held = 0;
 
 		/* (the ball is a weapon_is_flag too) */
-		if (tick.weapon_index != NONE &&
+		if (tick.weapon_index != NONE && !infection_player_is_zombie(bot->player_index) &&
 			(weapon_is_flag(tick.weapon_index) || bots_weapon_value(weapon_get(tick.weapon_index)->definition_index) < 0))
 		{
 			held = game_engine_get_variant()->game_engine_index == game_engine_ctf ? 1 : 2;

@@ -887,7 +887,9 @@ void weapon_delete(
 			return;
 		}
 #endif
-		match_assert("c:\\halo\\SOURCE\\items\\weapons.c", 234, !weapon_is_flag(weapon_index));
+		/* port: an Infection zombie's skull is the host's to delete
+		(port/linux/game/infection.c) */
+		match_assert("c:\\halo\\SOURCE\\items\\weapons.c", 234, !weapon_is_flag(weapon_index) || infection_active());
 	}
 
 	return;

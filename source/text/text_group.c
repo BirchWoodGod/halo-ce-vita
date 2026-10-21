@@ -33,6 +33,7 @@ symbols in this file:
 
 #include "tag_files/tag_files.h"
 #include "custom_edition_maps.h"
+#include "../../port/linux/src/lang.h"
 
 #define MULTIPLAYER_GAME_TEXT_TAG_NAME "ui\\multiplayer_game_text"
 #define FIRST_FALLBACK_MULTIPLAYER_GAME_TEXT_STRING 36
@@ -209,6 +210,15 @@ static wchar_t *const fallback_multiplayer_game_text_strings[] =
 typedef char fallback_multiplayer_game_text_string_count_check[
 	NUMBEROF(fallback_multiplayer_game_text_strings) == 184 - FIRST_FALLBACK_MULTIPLAYER_GAME_TEXT_STRING ? 1 : -1];
 
+/* port: the game's own game types' names and descriptions past the
+Xbox's 26 (playlist_profile.c's default playlists: Infection, the 27th,
+port/linux/game/infection.c), in the player's language */
+#define DEFAULT_GAME_TYPE_NAMES_TAG_NAME "ui\\default_multiplayer_game_setting_names"
+#define GAME_TYPE_DESCRIPTIONS_TAG_NAME "ui\\shell\\strings\\game_variant_descriptions"
+#define INFECTION_DEFAULT_GAME_TYPE_INDEX 26
+/* (a default game type's description is its index plus 10: ui_widget_game_data_input_functions.c) */
+#define INFECTION_DESCRIPTION_INDEX (INFECTION_DEFAULT_GAME_TYPE_INDEX + 10)
+
 /* the built-in string for a string list too short to hold string_index
 (an NTSC map's multiplayer string, a Custom Edition map's name or
 description), or NULL */
@@ -220,6 +230,14 @@ static wchar_t *fallback_string(long tag_index, short string_index)
 	if (!csstrcasecmp(tag_name, LEVEL_NAMES_TAG_NAME) || !csstrcasecmp(tag_name, CAMPAIGN_LEVEL_NAMES_TAG_NAME))
 	{
 		return custom_edition_maps_name(string_index);
+	}
+	if (!csstrcasecmp(tag_name, DEFAULT_GAME_TYPE_NAMES_TAG_NAME))
+		return string_index == INFECTION_DEFAULT_GAME_TYPE_INDEX ? (wchar_t *)TW(L"Infection") : NULL;
+	if (!csstrcasecmp(tag_name, GAME_TYPE_DESCRIPTIONS_TAG_NAME))
+	{
+		return string_index == INFECTION_DESCRIPTION_INDEX ?
+			(wchar_t *)TW(L"Zombies with the skull hunt the humans. A human killed joins them; the last human standing wins.") :
+			NULL;
 	}
 	if (!csstrcasecmp(tag_name, LEVEL_DESCRIPTIONS_TAG_NAME) ||
 		!csstrcasecmp(tag_name, CAMPAIGN_LEVEL_DESCRIPTIONS_TAG_NAME))

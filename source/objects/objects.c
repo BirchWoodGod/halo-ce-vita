@@ -2051,8 +2051,10 @@ static void object_delete_initial_recursive(
 	on the host's word, a flag the host returns or resets included, so a
 	client's flag deletion is no bug (ChupathingyCE 2ec77029, CC0: it halted
 	debug builds in CTF games online; release builds check nothing) */
+	/* port: nor an Infection zombie's skull, which the host deletes as the
+	zombie drops it (port/linux/game/infection.c) */
 	if (game_engine_running() && object->object.type == _object_type_weapon &&
-		!network_game_distributed_client())
+		!network_game_distributed_client() && !infection_active())
 	{
 		match_assert("c:\\halo\\SOURCE\\objects\\objects.c", 829, !(weapon_is_flag(object_index)));
 	}

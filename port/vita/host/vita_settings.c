@@ -145,6 +145,14 @@ menus need bitmaps.map, loc.map: README" (halo_pc_menus_state).
   gametype by itself, port/linux/game/bots_playlist.c) show below it. Live:
   the lobby and the bots follow them.
 
+Multiplayer's Vita and PC page has an Infection page (below Players): it sets the game's own
+Infection game type as this Vita hosts it, from any menus' game type list
+(port/linux/game/infection.c; infection.* in config.toml): First zombies (one
+in every 4 to 16 players, 8 by default), Zombie speed (100% to 150%, 115%),
+Round time (the humans left then win: none, 3 to 30 minutes, 6), Zombie
+respawn (3 to 15 seconds, 3), Zombie shields (On) and Tough zombies (half
+the damage: Off). A game type saved with its own settings plays by those.
+
 Multiplayer's Modded maps page lists the maps in the maps folder that are not the Xbox's own:
 name, size, Xbox or Custom Edition (CE; CE+OS for OpenSauce's .yelo; CE SP
 for a Custom Edition campaign map, which the Campaign's level list offers
@@ -308,6 +316,9 @@ enum
 	/* the players of the game this Vita hosts: kick, ban (the game's side:
 	port/linux/game/network_anticheat.c) */
 	PAGE_PLAYERS,
+	/* (Multiplayer's Infection: the built-in Infection game type's settings,
+	port/linux/game/infection.c) */
+	PAGE_INFECTION,
 	PAGE_COUNT
 };
 
@@ -337,6 +348,7 @@ static const struct
 	{ "Party", TAB_MULTIPLAYER },
 	{ "Vita and PC", TAB_MULTIPLAYER },
 	{ "Players", TAB_MULTIPLAYER },
+	{ "Infection", TAB_MULTIPLAYER },
 };
 /* the headings over a tab's rows, as Halo Online's settings have them
 (HUD, Interface...): each above the row it names, when that row is shown */
@@ -732,6 +744,11 @@ static struct setting settings[] = {
 	/* (the game this Vita hosts: its players kicked or banned, the host's
 	anti-cheat; network_anticheat.c answers, system_link_shortcut.h) */
 	PAGE_ROW("Players", "The game you host: kick or ban a player", PAGE_CROSSPLAY, PAGE_PLAYERS),
+	/* (the game's own Infection game type as this Vita hosts it, in any
+	menus' game type lists: port/linux/game/infection.c's infection.*
+	settings, read as a game starts. Beside Players, the games you host's:
+	the Multiplayer tab is a screen's height) */
+	PAGE_ROW("Infection", "The game you host: Infection's zombies and round", PAGE_CROSSPLAY, PAGE_INFECTION),
 	/* (network.anticheat: a machine that keeps sending what only a modified
 	game sends dropped and kept out a while; read as each game starts) */
 	{ "Anti-cheat", "HALO_NET_ANTICHEAT", 0, 2, { "true", "false" }, { "On", "Off" },
@@ -778,6 +795,26 @@ static struct setting settings[] = {
 	are; a sixth to a third less of a 24-player game's tick. Live) */
 	{ "Unseen players", "HALO_NET_REMOTE_LOD", 0, 3, { "auto", "1", "0" }, { "Auto", "Reduced", "Full" },
 		"Reduced: smoother big games. Auto: over 16 players", 0, TAB_MULTIPLAYER },
+	/* (the game's own Infection game type as this Vita hosts it, in any
+	game's menus' game type lists: port/linux/game/infection.c's
+	infection.* settings, read as a game starts. On a page of its own, its
+	row on Vita and PC: the Multiplayer tab is a screen's height) */
+	{ "First zombies", "HALO_INFECTION_ZOMBIES", 0, 6, { "4", "6", "8", "10", "12", "16" },
+		{ "1 per 4 players", "1 per 6 players", "1 per 8 players", "1 per 10 players", "1 per 12 players",
+		"1 per 16 players" }, "Zombies at the start, chosen at random (one at least)", 2, PAGE_INFECTION },
+	{ "Zombie speed", "HALO_INFECTION_SPEED", 0, 6, { "100", "110", "115", "125", "135", "150" },
+		{ "100%", "110%", "115%", "125%", "135%", "150%" }, "How fast zombies run; humans run at 100", 2,
+		PAGE_INFECTION },
+	{ "Round time", "HALO_INFECTION_TIME", 0, 9, { "0", "3", "5", "6", "8", "10", "15", "20", "30" },
+		{ "No limit", "3 minutes", "5 minutes", "6 minutes", "8 minutes", "10 minutes", "15 minutes", "20 minutes",
+		"30 minutes" }, "The humans still alive then win", 3, PAGE_INFECTION },
+	{ "Zombie respawn", "HALO_INFECTION_RESPAWN", 0, 5, { "3", "5", "8", "10", "15" },
+		{ "3 seconds", "5 seconds", "8 seconds", "10 seconds", "15 seconds" }, "How soon a dead zombie comes back", 0,
+		PAGE_INFECTION },
+	{ "Zombie shields", "HALO_INFECTION_SHIELDS", 0, 2, { "1", "0" }, { "On", "Off" },
+		"Off: zombies have their body alone", 0, PAGE_INFECTION },
+	{ "Tough zombies", "HALO_INFECTION_TOUGH", 0, 2, { "0", "1" }, { "Off", "On" },
+		"On: zombies take half the damage", 0, PAGE_INFECTION },
 	PAGE_ROW("Modded maps", "Custom maps: on, off, delete; PC maps", TAB_MULTIPLAYER, PAGE_MAPS),
 	/* (the latency meter, port/linux/game/latency_meter.c: the round trip
 	to the host at the top right of a network game and in the scoreboard's

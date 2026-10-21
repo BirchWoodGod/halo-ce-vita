@@ -264,6 +264,7 @@ symbols in this file:
 #include "text/unicode.h"
 #include "map_share.h"
 #include "forge.h"
+#include "infection_net.h"
 #include "network_game_record.h"
 #include "network_wire.h"
 #include "main/main.h"
@@ -1410,6 +1411,22 @@ boolean network_game_server_handle_client_message(
 						(port/linux/game/forge_net.inc), from a machine joined
 						to the game (checked above); never on the crossplay
 						wire, which no Forge game is hosted on */
+						/* port: a joiner's answer to the game's rules
+						(port/linux/game/infection_net.c), from a machine joined
+						to the game (checked above); never on the crossplay wire */
+						case _message_client_game_rules:
+							if (network_wire_crossplay())
+							{
+								network_event("ignoring a game rules answer on the crossplay wire");
+								break;
+							}
+							game_rules_net_server_handle_message(
+								server,
+								machine,
+								message,
+								message_buffer_size);
+							break;
+
 						case _message_client_forge:
 							if (network_wire_crossplay())
 							{

@@ -349,6 +349,22 @@ static const struct config_setting config_settings[] =
 		"campaign, multiplayer and Forge lobbies: their scene= in\n"
 		"port/vita/app0/menus/halo3), the main menu the ring's own flight;\n"
 		"false keeps the ring's flight behind every screen." },
+	{ "infection.players_per_zombie", _config_integer, "8", "HALO_INFECTION_ZOMBIES", _environment_value, _platform_all,
+		"Infection (port/linux/game/infection.c), the game's own Infection game\n"
+		"type as this machine hosts it: one first zombie for each this many\n"
+		"players (2 to 16). The Vita's settings panel (Multiplayer, Infection)\n"
+		"sets it." },
+	{ "infection.zombie_speed", _config_integer, "115", "HALO_INFECTION_SPEED", _environment_value, _platform_all,
+		"Infection: the zombies' speed, a percentage of a player's (100 to 150)." },
+	{ "infection.time_limit", _config_integer, "6", "HALO_INFECTION_TIME", _environment_value, _platform_all,
+		"Infection: minutes until the humans left win (0 for none, to 30)." },
+	{ "infection.zombie_respawn", _config_integer, "3", "HALO_INFECTION_RESPAWN", _environment_value, _platform_all,
+		"Infection: seconds before a dead zombie comes back (3 to 15)." },
+	{ "infection.zombie_shields", _config_integer, "1", "HALO_INFECTION_SHIELDS", _environment_value, _platform_all,
+		"Infection: 1, the zombies have shields as players do; 0, none." },
+	{ "infection.zombie_tough", _config_integer, "0", "HALO_INFECTION_TOUGH", _environment_value, _platform_all,
+		"Infection: 1, the zombies take half the damage a player does; 0, as a\n"
+		"player." },
 	{ "bots.count", _config_integer, "0", "HALO_BOTS", _environment_value, _platform_all,
 		"Computer players (bots) in a local (split screen) multiplayer game:\n"
 		"0 to 15 join its lobby with the players, as far as the game has room.\n"

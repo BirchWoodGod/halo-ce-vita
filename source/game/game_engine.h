@@ -92,11 +92,65 @@ struct ctf_variant
 	long single_flag_time;
 };
 
+/* port: Infection (port/linux/game/infection.c): Team Slayer whose dead
+humans join the zombies, the last human standing winning. Its settings are
+one struct with its defaults (infection_settings_default), kept in Slayer's
+part of the variant past Slayer's own three switches: the variant's 0x68
+bytes go as they are to every machine of a network game, into the game
+types' files (playlist_profile.c) and through a game type editor, so an
+Infection game type is a Slayer variant with INFECTION_VARIANT_MAGIC there.
+An older build reads it as Team Slayer (and is refused from an Infection
+game: infection_net.c). */
+enum
+{
+	/* 'INFC' (no other game's union holds it there: Oddball's speed with the
+	ball is 0 to 2, CTF's single flag time a few minutes' ticks) */
+	INFECTION_VARIANT_MAGIC = 0x43464E49,
+	INFECTION_VARIANT_VERSION = 1,
+};
+
+enum
+{
+	/* the zombies' one weapon: the skull (the Oddball ball: a blow, nothing
+	fired), which every multiplayer map's globals have */
+	_infection_zombie_weapon_skull = 0,
+	NUMBER_OF_INFECTION_ZOMBIE_WEAPONS,
+};
+
+/* (each field a byte, its range infection_settings_clamp's) */
+struct infection_settings
+{
+	/* one first zombie for each this many players (2 to 16; 8) */
+	byte players_per_first_zombie;
+	/* the zombies' speed, a percentage of a player's (100 to 150; 115) */
+	byte zombie_speed_percent;
+	/* minutes: the humans left then win (0: none, to 30; 6) */
+	byte time_limit_minutes;
+	/* _infection_zombie_weapon_... */
+	byte zombie_weapon;
+	/* seconds before a dead zombie comes back (3 to 15; 3) */
+	byte zombie_respawn_seconds;
+	/* the zombies' shields: TRUE as a player's, FALSE none (TRUE) */
+	byte zombie_shields;
+	/* TRUE: the zombies take half the damage a player does, as Oddball's
+	toughness trait (FALSE: the skull's blow kills at once already) */
+	byte zombie_tough;
+	/* (zeros: room for later settings) */
+	byte reserved[9];
+};
+
+typedef char verify_infection_settings_size[sizeof(struct infection_settings) == 0x10 ? 1 : -1];
+
 struct slayer_variant
 {
 	boolean no_death_bonus;
 	boolean no_kill_penalty;
 	boolean kill_in_order;
+	/* port: Infection's version (INFECTION_VARIANT_VERSION), its magic and
+	its settings; zeros in every other Slayer variant */
+	byte infection_version;
+	unsigned long infection_magic;
+	struct infection_settings infection;
 };
 
 struct king_variant
@@ -146,6 +200,7 @@ struct game_variant
 };
 
 typedef char verify_game_variant_size[sizeof(struct game_variant) == 0x68 ? 1 : -1];
+typedef char verify_game_engine_variant_size[sizeof(union game_engine_variant) == 0x18 ? 1 : -1];
 
 /* port: the PC version's gametype options that the Xbox's variant has not
 (OpenCE's, c9ee319a, 6b1d81c7: its gametype editor's). The network game
@@ -715,6 +770,58 @@ void game_engine_player_killed(
 	long killing_object_index,
 	long dead_player_index,
 	boolean friendly_fire);
+
+/* ---------- prototypes/INFECTION.C (port/linux/game/infection.c) */
+
+/* Infection's defaults, and its settings brought into their ranges */
+void infection_settings_default(
+	struct infection_settings *settings);
+void infection_settings_clamp(
+	struct infection_settings *settings);
+/* whether a variant is an Infection game type (a Slayer one with its magic) */
+boolean infection_variant(
+	struct game_variant const *variant);
+/* the built-in Infection game type (its settings the defaults, or this
+machine's infection.* settings: infection_settings_configured) */
+struct game_variant *build_game_variant_infection(
+	struct game_variant *variant);
+/* the engine an Infection variant plays: Slayer's, Infection's rules on top
+(game_engine_initialize) */
+struct game_engine *infection_engine_get(
+	void);
+/* whether the game played is Infection, and a player's side in it */
+boolean infection_active(
+	void);
+boolean infection_player_is_zombie(
+	long player_index);
+/* game_engine.c's hooks */
+void infection_postspawn_player_update(
+	long player_index);
+boolean infection_should_end_game(
+	void);
+boolean infection_title_string(
+	long player_index,
+	wchar_t *title_string,
+	long maximum_count);
+boolean infection_change_color(
+	long player_index,
+	union real_rgb_color *color);
+long infection_time_limit_minutes(
+	void);
+/* units.c: a zombie takes no grenades */
+boolean infection_unit_refuses_grenades(
+	long unit_index);
+/* the distributed netcode: Infection's part of the game type's state, after
+Slayer's (game_engine_write_network_state): its size, and a client's read */
+long infection_network_state_size(
+	void);
+long infection_write_network_state(
+	byte *buffer,
+	long size);
+boolean infection_read_network_state(
+	byte const *buffer,
+	long size,
+	boolean first);
 
 /* ---------- globals */
 

@@ -5248,11 +5248,15 @@ void main_loop(
 			void scene_packs_update(void);
 			void player_models_update(void);
 			void forge_net_frame(void);
+			void game_rules_net_frame(void);
 
 			scene_packs_update();
 			/* (network Forge's lobby: the host's hellos to its joiners and
 			their answers, port/linux/game/forge_net.inc) */
 			forge_net_frame();
+			/* (an Infection game's lobby: the host asks each joiner whether
+			it plays Infection, port/linux/game/infection_net.c) */
+			game_rules_net_frame();
 			/* (the player models from Custom Edition maps: the maps folder
 			looked through once, the settings panel's choice taken:
 			player_models.c) */

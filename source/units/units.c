@@ -2249,7 +2249,8 @@ boolean unit_add_grenade_to_inventory(
 		error(_error_silent, "### ERROR %s has grenade type %d; it can't be picked up",
 			tag_get_name(equipment->definition_index), equipment_definition->equipment.grenade_type);
 	}
-	if (grenade &&
+	/* port: an Infection zombie takes no grenades (port/linux/game/infection.c) */
+	if (grenade && !infection_unit_refuses_grenades(unit_index) &&
 		VALID_INDEX(equipment_definition->equipment.grenade_type, NUMBER_OF_UNIT_GRENADE_TYPES) &&
 		unit->unit.grenade_counts[equipment_definition->equipment.grenade_type] <
 			grenade->maximum_count)

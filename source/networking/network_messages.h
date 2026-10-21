@@ -69,6 +69,13 @@ enum network_game_message_type
 	from the Forge game alone. Never sent on the crossplay wire */
 	_message_client_forge,
 	_message_server_forge,
+	/* port: the game's rules a joiner plays (port/linux/game/infection_net.h),
+	an optional capability as network Forge's: the host of an Infection game
+	asks each machine that joins, and refuses one that does not answer (an
+	older build drops the host's as an unknown packet type) from that game
+	alone. Never sent on the crossplay wire */
+	_message_client_game_rules,
+	_message_server_game_rules,
 	NUMBER_OF_NETWORK_GAME_MESSAGE_TYPES,
 };
 

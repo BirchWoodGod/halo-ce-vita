@@ -3092,17 +3092,41 @@ static void test_tab_layouts(void)
 			old |= !strcmp(pages[index].name, "Screen") || !strcmp(pages[index].name, "First person") ||
 				!strcmp(pages[index].name, "Advanced") || !strcmp(pages[index].name, "General") ||
 				!strcmp(pages[index].name, "Graphics") || !strcmp(pages[index].name, "Audio");
-		check(!old && PAGE_GRAPHICS_DETAIL == TAB_COUNT && PAGE_COUNT == TAB_COUNT + 14 &&
+		check(!old && PAGE_GRAPHICS_DETAIL == TAB_COUNT && PAGE_COUNT == TAB_COUNT + 15 &&
 			!strcmp(pages[PAGE_GRAPHICS_DETAIL].name, "Detail") && !strcmp(pages[PAGE_GRAPHICS_PERFORMANCE].name, "Performance") &&
 			!strcmp(pages[PAGE_BUTTONS].name, "Button layout") && !strcmp(pages[PAGE_TOUCH].name, "Touch zones") &&
 			!strcmp(pages[PAGE_GYRO].name, "Gyro settings") && !strcmp(pages[PAGE_PLAY].name, "Play") &&
 			!strcmp(pages[PAGE_MAPS].name, "Modded maps") && !strcmp(pages[PAGE_DEV_AB].name, "A/B switches") &&
 			!strcmp(pages[PAGE_FORGE].name, "Forge and File Share") && !strcmp(pages[PAGE_MODS].name, "Mod manager") &&
 			!strcmp(pages[PAGE_FRIENDS].name, "Friends") && !strcmp(pages[PAGE_PARTY].name, "Party") &&
-			!strcmp(pages[PAGE_CROSSPLAY].name, "Vita and PC") && !strcmp(pages[PAGE_PLAYERS].name, "Players"),
+			!strcmp(pages[PAGE_CROSSPLAY].name, "Vita and PC") && !strcmp(pages[PAGE_PLAYERS].name, "Players") &&
+			!strcmp(pages[PAGE_INFECTION].name, "Infection"),
 			"the pages rows open: Detail, Performance, Button layout, Touch zones, Gyro settings, Play, Modded maps, Vita and PC, A/B "
-			"switches, Forge and File Share, Mod manager, Friends, Party, Players (no Screen, First person or Advanced page; no "
-			"General, Graphics or Audio tab)");
+			"switches, Forge and File Share, Mod manager, Friends, Party, Players, Infection (no Screen, First person or Advanced "
+			"page; no General, Graphics or Audio tab)");
+	}
+	{
+		/* (Infection's page: its six rows, on it alone, each default the
+		game's own, infection.c's infection_settings_default and
+		port_config.c's) */
+		static const struct { const char *variable, *value; } rows[] = {
+			{ "HALO_INFECTION_ZOMBIES", "8" }, { "HALO_INFECTION_SPEED", "115" }, { "HALO_INFECTION_TIME", "6" },
+			{ "HALO_INFECTION_RESPAWN", "3" }, { "HALO_INFECTION_SHIELDS", "1" }, { "HALO_INFECTION_TOUGH", "0" },
+		};
+		int good = 1, row, on_page = 0;
+
+		for (row = 0; row < (int)(sizeof(rows) / sizeof(rows[0])); row++)
+		{
+			struct setting *setting = setting_named(rows[row].variable);
+
+			good &= setting && setting->page == PAGE_INFECTION &&
+				!strcmp(setting->values[setting->choice], rows[row].value);
+		}
+		for (index = 0; index < SETTING_COUNT; index++)
+			on_page += settings[index].page == PAGE_INFECTION;
+		check(good && on_page == 6 && pages[PAGE_INFECTION].tab == TAB_MULTIPLAYER,
+			"Infection: First zombies 1 per 8, Zombie speed 115%, Round time 6 minutes, Zombie respawn 3 s, shields On, "
+			"Tough zombies Off, on its page alone");
 	}
 	check(settings[0].variable && !strcmp(settings[0].variable, "HALO_PROFILE") && !strcmp(settings[1].variable, "HALO_RENDER_SCALE") &&
 		!strcmp(settings[2].variable, "HALO_DYNAMIC_RES_MIN"), "Profile still settings[0], Render resolution and its minimum after it");
@@ -3248,6 +3272,8 @@ static void test_variables_kept(void)
 		"HALO_LANGUAGE", "HALO_UPDATE_CHANNEL", "HALO_PARTICLE_BUDGET", "HALO_FIRST_PERSON_LEGS", "HALO_RAGDOLLS",
 		"HALO_MCC_MODS", "HALO_PC_MAP_VEHICLES", "HALO_SHARP_UI", "HALO_PLAYER_MODEL", "HALO_FRIENDS_APPEAR_OFFLINE",
 		"HALO_FRIENDS_JOIN", "HALO_NET_BLOCK_MOUSE_AIM_ASSIST", "HALO_NET_ANTICHEAT",
+		"HALO_INFECTION_ZOMBIES", "HALO_INFECTION_SPEED", "HALO_INFECTION_TIME", "HALO_INFECTION_RESPAWN",
+		"HALO_INFECTION_SHIELDS", "HALO_INFECTION_TOUGH",
 	};
 	int index, all = 1, choices = 0;
 

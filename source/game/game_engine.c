@@ -600,6 +600,7 @@ real_argb_color *hud_get_text_color(real_argb_color *color);
 #include "units/units.h"
 #ifdef HALO_LINUX
 #include "latency_meter.h"
+#include "infection.h" /* port: port/linux/game/infection.c */
 #endif
 #include "../../port/linux/src/lang.h" /* port: port/linux/src/lang.c */
 
@@ -1291,6 +1292,9 @@ static void game_engine_generate_title_string(
 			break;
 		}
 	}
+	/* port: Infection's humans and zombies left (infection.c) */
+	else if (infection_title_string(player_index, title_string, 80))
+		;
 	else if (game_engine_has_teams())
 	{
 		/* port: room for any score a game type writes as a team's name
@@ -2030,6 +2034,16 @@ void game_engine_post_rasterize_post_game(
 			string_list_index != NONE ?
 				unicode_string_list_get_string(string_list_index, 0x42) :
 				L"";
+		/* port: Infection's teams by their sides' names (infection.c) */
+		if (infection_active())
+		{
+			static wchar_t infection_team_formats[2][48];
+
+			usnprintf(infection_team_formats[0], NUMBEROF(infection_team_formats[0]), L"\t%s\t%%s", TW(L"Zombies"));
+			usnprintf(infection_team_formats[1], NUMBEROF(infection_team_formats[1]), L"\t%s\t%%s", TW(L"Humans"));
+			team_formats[0] = infection_team_formats[0];
+			team_formats[1] = infection_team_formats[1];
+		}
 
 		if (!red_team_won)
 		{
@@ -4367,6 +4381,9 @@ boolean game_engine_has_shield(
 
 	if (game_engine && player_index!=NONE)
 		has_shield = !TEST_FLAG(global_variant.universal_variant.flags, _game_variant_no_shields_bit);
+	/* port: Infection's zombies without shields, if so set (infection.c) */
+	if (has_shield && infection_player_is_zombie(player_index) && !infection_zombie_shields())
+		has_shield = FALSE;
 
 	return has_shield;
 }
@@ -4657,6 +4674,9 @@ boolean game_engine_should_end_game(
 {
 	boolean should_end_game = FALSE;
 
+	/* port: Infection's round (port/linux/game/infection.c): its own end */
+	if (infection_active())
+		return infection_should_end_game();
 	if (game_engine && !multiple_teams_alive())
 		should_end_game = TRUE;
 	/* port: the gametype's time limit (game_variant_options; OpenCE's) */
@@ -6179,6 +6199,9 @@ struct game_variant *game_engine_get_variant_by_name(
 		result = *build_game_variant_slayer(&temporary);
 	else if (csstrcmp(name, "team_slayer") == 0)
 		result = *build_game_variant_team_slayer(&temporary);
+	/* port: Infection (port/linux/game/infection.c) */
+	else if (csstrcmp(name, "infection") == 0)
+		result = *build_game_variant_infection(&temporary);
 	else if (csstrcmp(name, "elimination") == 0)
 		result = *build_game_variant_elimination(&temporary);
 	else if (csstrcmp(name, "stalker") == 0)
@@ -6269,7 +6292,10 @@ real_rgb_color *game_engine_player_get_change_color(
 	struct player_datum *player = player_get(player_index);
 	real_rgb_color result;
 
-	if (global_variant.universal_variant.teams)
+	/* port: an Infection zombie's green (port/linux/game/infection.c) */
+	if (infection_change_color(player_index, &result))
+		;
+	else if (global_variant.universal_variant.teams)
 	{
 		if (player->team_index == 0)
 			result = *global_real_rgb_red;
@@ -6365,6 +6391,12 @@ void game_engine_variant_cleanup(
 		variant->game_engine_variant.slayer.no_death_bonus = !!variant->game_engine_variant.slayer.no_death_bonus;
 		variant->game_engine_variant.slayer.no_kill_penalty = !!variant->game_engine_variant.slayer.no_kill_penalty;
 		variant->game_engine_variant.slayer.kill_in_order = !!variant->game_engine_variant.slayer.kill_in_order;
+		/* port: Infection's settings in their ranges (a host's, a file's) */
+		if (infection_variant(variant))
+		{
+			variant->game_engine_variant.slayer.infection_version = INFECTION_VARIANT_VERSION;
+			infection_settings_clamp(&variant->game_engine_variant.slayer.infection);
+		}
 		break;
 
 	case game_engine_oddball:
@@ -6488,6 +6520,10 @@ void game_engine_initialize(
 		game_engine_variant_cleanup(&global_variant);
 		/* port: the cleaned variant's (the one given may be any number) */
 		game_engine = game_engines[global_variant.game_engine_index];
+		/* port: an Infection game type plays Slayer with Infection's rules
+		on top (port/linux/game/infection.c) */
+		if (infection_variant(&global_variant))
+			game_engine = infection_engine_get();
 	}
 
 	return;
@@ -8318,6 +8354,9 @@ void game_engine_postspawn_player_update(
 		}
 	}
 
+	/* port: an Infection zombie's skull alone (port/linux/game/infection.c) */
+	infection_postspawn_player_update(player_index);
+
 	return;
 }
 
@@ -8726,7 +8765,16 @@ long game_engine_write_network_state(
 	switch (game_engine_get_type())
 	{
 	case game_engine_ctf: written = game_engine_ctf_write_network_state(buffer, size); break;
-	case game_engine_slayer: written = game_engine_slayer_write_network_state(buffer, size); break;
+	case game_engine_slayer:
+		written = game_engine_slayer_write_network_state(buffer, size);
+		/* port: Infection's part after Slayer's (infection.c) */
+		if (written > 0 && infection_active())
+		{
+			long infection_written = infection_write_network_state(buffer + written, size - written);
+
+			written = infection_written > 0 ? written + infection_written : 0;
+		}
+		break;
 	case game_engine_oddball: written = game_engine_oddball_write_network_state(buffer, size); break;
 	case game_engine_king: written = game_engine_king_write_network_state(buffer, size); break;
 	case game_engine_race: written = game_engine_race_write_network_state(buffer, size); break;
@@ -8753,7 +8801,18 @@ void game_engine_read_network_state(
 	switch (game_engine_get_type())
 	{
 	case game_engine_ctf: read = game_engine_ctf_read_network_state(buffer, size, first); break;
-	case game_engine_slayer: read = game_engine_slayer_read_network_state(buffer, size, first); break;
+	case game_engine_slayer:
+		/* port: Infection's part after Slayer's (infection.c), each read whole */
+		if (infection_active())
+		{
+			long tail = infection_network_state_size();
+
+			read = size >= tail && game_engine_slayer_read_network_state(buffer, size - tail, first) &&
+				infection_read_network_state(buffer + size - tail, tail, first);
+		}
+		else
+			read = game_engine_slayer_read_network_state(buffer, size, first);
+		break;
 	case game_engine_oddball: read = game_engine_oddball_read_network_state(buffer, size, first); break;
 	case game_engine_king: read = game_engine_king_read_network_state(buffer, size, first); break;
 	case game_engine_race: read = game_engine_race_read_network_state(buffer, size, first); break;
