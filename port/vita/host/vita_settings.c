@@ -6027,24 +6027,30 @@ static void mod_delete_input(unsigned long pressed)
 stays chosen while the list changes under it */
 static void browse_refresh(void)
 {
-	struct p2p_lobby_entry entry;
-	char selected[sizeof(entry.id)] = "";
-	int index, vita;
+	/* (the list taken once: p2p_lobby_entry by index took it again for
+	each, and a game that moved up between two - its players changed, one
+	above it gone - was read twice) */
+	static struct p2p_lobby_entry games[P2P_LOBBY_MAXIMUM_ENTRIES];
+	char selected[sizeof(games[0].id)] = "";
+	int index, vita, count;
 
 	if (browse_selected < browse_count)
 		memcpy(selected, browse_entries[browse_selected].id, sizeof(selected));
 	browse_count = 0;
+	count = p2p_lobby_entries(games, P2P_LOBBY_MAXIMUM_ENTRIES);
 	/* (the Vitas' games first, then the PCs', as the menus' browsers group
 	them, each in the list's order) */
 	for (vita = 1; vita >= 0; vita--)
 	{
-		for (index = 0; browse_count < BROWSE_LINES && p2p_lobby_entry(index, &entry); index++)
+		for (index = 0; browse_count < BROWSE_LINES && index < count; index++)
 		{
-			if (entry.own || crossplay_guard_vita_game(entry.platform, entry.marks) != vita)
+			struct p2p_lobby_entry const *entry = &games[index];
+
+			if (entry->own || crossplay_guard_vita_game(entry->platform, entry->marks) != vita)
 				continue;
-			if (selected[0] && !strcmp(entry.id, selected))
+			if (selected[0] && !strcmp(entry->id, selected))
 				browse_selected = browse_count;
-			browse_entries[browse_count++] = entry;
+			browse_entries[browse_count++] = *entry;
 		}
 	}
 	if (browse_selected >= browse_count)

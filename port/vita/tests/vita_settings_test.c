@@ -803,6 +803,16 @@ int p2p_lobby_entry(int index, struct p2p_lobby_entry *entry)
 	return 1;
 }
 
+/* the list at once, as p2p_lobby.c's: the entries above, in order */
+int p2p_lobby_entries(struct p2p_lobby_entry *entries, int maximum_count)
+{
+	int count = 0;
+
+	while (count < maximum_count && p2p_lobby_entry(count, &entries[count]))
+		count++;
+	return count;
+}
+
 /* (vita_ime.c's keyboard: opened, then closed with ime_result and
 ime_typed once a test says so) */
 int vita_ime_open(const char *title, const char *text, int maximum_length, int password)

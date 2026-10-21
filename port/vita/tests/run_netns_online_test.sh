@@ -371,6 +371,11 @@
 #            hosted game closed, network_server_manager.c, held one 1000 ms
 #            each time: time+ui 1000.4 ms, LadyCassie's audio stutter on
 #            opening MULTIPLAYER), the lobby open online each time
+#   h3onlinelan h3online with the joiner on the host's LAN (h3lan's): the
+#            host's game reaches its System Link search and is listed online,
+#            and the games browser shows it once, its online row (it showed
+#            twice: LadyCassie, insider.18, a server joined before still a
+#            peer, whose broadcasts reach the System Link search too)
 #   h3online the connection switched live from the Halo 3 lobby (both copies
 #            start with online off and the Halo PC files, HALO_TEST_DATA_MENUS;
 #            skipped without): each lobby's NETWORK: ONLINE starts internet
@@ -2683,7 +2688,7 @@ h3liveonline)
 		fail "a frame of ${worst} ms (500 allowed)"
 	fi
 	;;
-h3online|h3pickjoin)
+h3online|h3pickjoin|h3onlinelan)
 	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 	# (h3pickjoin: the host stays on the map list a minute, the joiner joining its lobby meanwhile)
 	pick=5000
@@ -2704,8 +2709,23 @@ h3online|h3pickjoin)
 	# (MULTIPLAYER: the lobby on SYSTEM LINK; NETWORK, up to ONLINE, A; a while for the broker;
 	# down five to BROWSE GAMES, A: the profile (A joins, A the profile, A): the games browser;
 	# a while, A on the host's game: joined from there once the host is reached)
-	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=false \
-		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:2 \
+	# (h3onlinelan: the joiner on the host's LAN, as h3lan's: the host's game both in its System
+	# Link search and listed online - one row, its online one, the browser's rows logged)
+	joiner_ns=$join_machine joiner_rows=
+	if [ $mode = h3onlinelan ]; then
+		holder; joiner_ns=$held
+		in_ns "$host_router" ip link add l2_host type veth peer name m2_host
+		in_ns "$host_router" ip link set m2_host netns "$joiner_ns"
+		in_ns "$host_router" ip link set l2_host master b_host
+		in_ns "$host_router" ip link set l2_host up
+		in_ns "$joiner_ns" ip link set lo up
+		in_ns "$joiner_ns" ip addr add 192.168.1.3/24 broadcast 192.168.1.255 dev m2_host
+		in_ns "$joiner_ns" ip link set m2_host up
+		in_ns "$joiner_ns" ip route add default via 192.168.1.1
+		joiner_rows=HALO_TEST_BROWSER_NAMES=1
+	fi
+	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$joiner_ns" "$vita" "$cpu_b" HALO_NET_ONLINE=false \
+		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:2 $joiner_rows \
 		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:10000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:10000 a" \
 		; join_pid=$last_pid
 	wait $join_pid $host_pid 2>/dev/null
@@ -2735,6 +2755,15 @@ h3online|h3pickjoin)
 		fail "the host's game was not hosted on the lobby's map as its server started"
 	grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected" "$hl" &&
 		fail "an Xbox screen (the map or game type list) opened on the host's way"
+	if [ $mode = h3onlinelan ]; then
+		echo "--- the joiner's browser rows"; grep -a "menus: browser row" "$jl" | head -12
+		grep -aq "menus: browser row [0-9]*: .*NetHost" "$jl" || fail "the joiner's browser never showed the host's game"
+		# (the one game: on one row, its group's count 1 - a System Link row as well as its online
+		# one made it two rows, VITA GAMES (2))
+		rows=$(grep -a "menus: browser row [0-9]*: .*NetHost" "$jl" | sed 's/.*browser row \([0-9]*\):.*/\1/' | sort -u | wc -l)
+		[ "$rows" -le 1 ] || fail "the host's game shown on $rows rows (listed twice)"
+		grep -aq "menus: browser row [0-9]*: \[VITA GAMES (2)\]" "$jl" && fail "the browser counted the one game twice"
+	fi
 	if [ $mode = h3pickjoin ]; then
 		grep -aq "network: holding machine" "$hl" && fail "a join was held (the map is set as the server starts)"
 		grep -aq "join: the host's map is levels" "$jl" || fail "the joiner was not told the host's map"
@@ -4572,7 +4601,7 @@ forge|forge3|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h
 	forge_case
 	;;
 *)
-	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|h3live|h3liveleave|h3liveagain|h3liveonline|h3liveinvite|h3liveprivate|h3online|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|party|friendsprivate|friendsprivatepw|forge|forge3|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|h3variant|vitapc|vitaonly" >&2
+	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|h3live|h3liveleave|h3liveagain|h3liveonline|h3liveinvite|h3liveprivate|h3online|h3onlinelan|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|party|friendsprivate|friendsprivatepw|forge|forge3|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|h3variant|vitapc|vitaonly" >&2
 	exit 2
 	;;
 esac

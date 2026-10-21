@@ -2434,6 +2434,7 @@ static void entry_from_listing(const struct p2p_listing *listing, struct p2p_lob
 
 	memset(entry, 0, sizeof(*entry));
 	p2p_hex(listing->key_hash, P2P_KEY_HASH_SIZE, entry->id);
+	p2p_identifier_from_hash(listing->key_hash, entry->host);
 	snprintf(entry->name, sizeof(entry->name), "%s", listing->name);
 	/* (never a blank row: a closed game's name may name nothing - its
 	host's player's then, else "Unnamed game") */

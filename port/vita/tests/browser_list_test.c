@@ -308,11 +308,74 @@ static void groups(void)
 	check(target == 22 && view.offset == 21 && view.row == 1, "from further down, up to it: PC GAMES brought into the rows");
 }
 
+static void hosted(struct p2p_lobby_entry *e, char const *id, char const *name, unsigned char host)
+{
+	entry(e, id, name, "Wizard", "SWAT", 28, 0, 1);
+	if (host)
+	{
+		e->host[0] = 0x02;
+		e->host[5] = host;
+	}
+}
+
+/* the games browser's System Link rows and the online ones after them: a
+host in both (an internet play peer's game, which its broadcasts bring to
+the System Link search; a LAN host that lists online) is one row, its
+online one; different hosts, the same name or none known, all kept */
+static void merge_lan(void)
+{
+	struct p2p_lobby_entry entries[8];
+	int count, lan;
+
+	/* (LadyCassie, insider.18: ". SWAT pistols" twice, the server joined
+	before still a peer) */
+	hosted(&entries[0], "lan:swat", ". SWAT pistols", 7);
+	hosted(&entries[1], "lan:home", "Halo", 9);
+	hosted(&entries[2], "online:swat", ". SWAT pistols", 7);
+	hosted(&entries[3], "online:other", "Halo", 3);
+	lan = 2;
+	count = browser_list_merge_lan(entries, 4, &lan);
+	check(count == 3 && lan == 1, "a peer's game in both lists: one row");
+	check(order_is(entries, count, "lan:home online:swat online:other"), "its online row kept, the rest in order");
+
+	/* two games of the same name, different hosts: both */
+	hosted(&entries[0], "lan:a", "Halo", 1);
+	hosted(&entries[1], "online:b", "Halo", 2);
+	lan = 1;
+	count = browser_list_merge_lan(entries, 2, &lan);
+	check(count == 2 && lan == 1, "the same name, different hosts: both kept");
+
+	/* a System Link row whose host is not known (all zero) is never taken
+	for an online game's, nor an online row with none */
+	hosted(&entries[0], "lan:a", "Halo", 0);
+	hosted(&entries[1], "online:b", "Halo", 0);
+	lan = 1;
+	count = browser_list_merge_lan(entries, 2, &lan);
+	check(count == 2 && lan == 1, "no host known: kept");
+
+	/* every System Link row online too; no online games; none at all */
+	hosted(&entries[0], "lan:a", "A", 1);
+	hosted(&entries[1], "lan:b", "B", 2);
+	hosted(&entries[2], "online:b", "B", 2);
+	hosted(&entries[3], "online:a", "A", 1);
+	lan = 2;
+	count = browser_list_merge_lan(entries, 4, &lan);
+	check(count == 2 && lan == 0 && order_is(entries, count, "online:b online:a"), "every LAN row online too: the online rows");
+	hosted(&entries[0], "lan:a", "A", 1);
+	hosted(&entries[1], "lan:b", "B", 1);
+	lan = 2;
+	count = browser_list_merge_lan(entries, 2, &lan);
+	check(count == 2 && lan == 2, "no online games: the System Link rows as they are (two of one host kept)");
+	lan = 0;
+	check(browser_list_merge_lan(entries, 0, &lan) == 0 && lan == 0, "no games");
+}
+
 int main(void)
 {
 	sorts();
 	scrolling();
 	groups();
+	merge_lan();
 	printf("-- %d of %d checks failed\n", failures, checks);
 	return failures != 0;
 }
