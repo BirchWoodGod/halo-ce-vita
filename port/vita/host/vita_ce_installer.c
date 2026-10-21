@@ -47,6 +47,8 @@ int halo_main_menu_idle(void);
 unless it failed, with the system's error */
 int vita_host_restart_game(void)
 {
+	/* (the last change in settings.txt first: its writer's) */
+	vita_settings_save_wait();
 	return sceAppMgrLoadExec("app0:eboot.bin", NULL, NULL);
 }
 
@@ -200,7 +202,7 @@ static void extraction_thread(void *argument)
 			vita_settings_progress(TITLE, T("Restarting the game for the PC multiplayer menus..."));
 			vita_host_log("ce installer: restarting the game for the PC menus");
 			vita_host_sleep_us(1500000);
-			error_code = sceAppMgrLoadExec("app0:eboot.bin", NULL, NULL);
+			error_code = vita_host_restart_game();
 			vita_settings_progress(NULL, NULL);
 			snprintf(text, sizeof(text), "ce installer: the restart failed (0x%08X)", (unsigned int)error_code);
 			vita_host_log(text);
