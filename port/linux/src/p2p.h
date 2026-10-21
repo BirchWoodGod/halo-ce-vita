@@ -285,6 +285,11 @@ struct p2p_lobby_entry
 	/* nonzero for no game: a group's header row in the menus' browsers
 	(browser_list.h: VITA GAMES, PC GAMES), never joined */
 	int header;
+	/* its host's identifier, as its games' XNADDR abEnet carries it (6
+	bytes, p2p_identifier: from its key's hash); a System Link row's the
+	advertising machine's (menu_functions.c's lan_entries); all zero when
+	not known */
+	unsigned char host[6];
 };
 
 /* joins the game of a code: "ABCD-EFGH", with or without the dash, any

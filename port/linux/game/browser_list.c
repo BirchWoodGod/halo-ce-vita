@@ -195,6 +195,47 @@ int browser_list_skip_header(
 	return -1;
 }
 
+static int host_known(
+	unsigned char const *host)
+{
+	int index;
+
+	for (index = 0; index < 6; index++)
+	{
+		if (host[index])
+			return 1;
+	}
+	return 0;
+}
+
+int browser_list_merge_lan(
+	struct p2p_lobby_entry *entries,
+	int count,
+	int *lan_count)
+{
+	int lan, index, online, kept = 0;
+
+	if (!entries || count <= 0 || !lan_count)
+		return entries && count > 0 ? count : 0;
+	lan = clamp(*lan_count, 0, count);
+	for (index = 0; index < lan; index++)
+	{
+		int listed = 0;
+
+		for (online = lan; host_known(entries[index].host) && !listed && online < count; online++)
+			listed = !entries[online].header && !memcmp(entries[index].host, entries[online].host, sizeof(entries[index].host));
+		if (listed)
+			continue;
+		if (kept != index)
+			entries[kept] = entries[index];
+		kept++;
+	}
+	*lan_count = kept;
+	if (kept != lan)
+		memmove(&entries[kept], &entries[lan], (size_t)(count - lan) * sizeof(*entries));
+	return kept + count - lan;
+}
+
 void browser_view_show_header(
 	struct browser_view *view,
 	struct p2p_lobby_entry const *entries,

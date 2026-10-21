@@ -4193,6 +4193,7 @@ short network_game_client_listed_games(
 				listed->pc_coop = platform != CROSSPLAY_PLATFORM_VITA && network_crossplay_guard_coop_game(game->map.name,
 					(long)sizeof(game->map.name), game->engine_type);
 			}
+			csmemcpy(listed->host, ((XNADDR const *)&game->xnaddr)->abEnet, sizeof(listed->host));
 			/* (the browsers' filter, network.browser_filter) */
 			if (!network_wire_browser_shows(crossplay_guard_vita_game(listed->platform, listed->marks)))
 				continue;

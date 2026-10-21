@@ -75,6 +75,17 @@ none */
 int browser_view_follow_groups(struct browser_view *view, struct p2p_lobby_entry const *entries, int rows, int count,
 	int focused_row, int chosen, int page);
 
+/* the games browser's System Link rows (the first lan_count entries) and
+the online games after them, one row a game: a System Link row whose host
+(entry->host, nonzero) has an online game listed too is left out - an
+internet play peer's game reaches the System Link search as well (p2p.c
+sends the game's broadcasts to every peer: a server joined before, still a
+peer, was listed twice, LadyCassie, insider.18), as does a host on the LAN
+that lists its game online. Its online row is kept (the signed listing:
+its password, its tag). Games of different hosts, the same name or not,
+are all kept. The new count; *lan_count the System Link rows left */
+int browser_list_merge_lan(struct p2p_lobby_entry *entries, int count, int *lan_count);
+
 /* the view's first frame (the browser opened, or sorted again) */
 void browser_view_reset(struct browser_view *view);
 

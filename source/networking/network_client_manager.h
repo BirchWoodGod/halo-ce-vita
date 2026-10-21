@@ -85,6 +85,10 @@ struct network_listed_game
 	/* this project's marks of its host (crossplay_guard.h's
 	CROSSPLAY_HOST_*: the PC build; Vitas only) */
 	short marks;
+	/* the host's XNADDR abEnet (an internet play machine's identifier,
+	xnet.c: the same host's online listing carries it, p2p_lobby_entry's
+	host) */
+	byte host[6];
 };
 /* the games the System Link list shows now (valid, of this platform: the
 open ones first, as it orders them), up to maximum: how many; 0 without a

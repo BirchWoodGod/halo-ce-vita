@@ -5060,6 +5060,7 @@ static void lan_entries(void)
 		entry->open = game->open;
 		entry->has_teams = game->has_teams;
 		entry->compatible = 1;
+		memcpy(entry->host, game->host, sizeof(entry->host));
 		/* (every row's tag, as the online browser's: VITA for a Vita's game -
 		"+PC" when PC players can join it too - or the PC build's, with its
 		badges, a PC co-op game Experimental (no game engine, as OpenCE hosts
@@ -5103,11 +5104,18 @@ static void lan_entries(void)
 	server browser's) */
 	if (lan_with_online())
 	{
+		int lan_count = (int)menu_functions.game_count;
+
 		join_watch();
 		browser_large_watch();
 		menu_functions.lan_online_count = p2p_lobby_entries(menu_functions.games + menu_functions.game_count,
 			P2P_LOBBY_MAXIMUM_ENTRIES - (int)menu_functions.game_count);
 		menu_functions.game_count += menu_functions.lan_online_count;
+		/* (a game both System Link and online - an internet play peer's,
+		whose broadcasts reach the System Link search too: one row, its
+		online one) */
+		menu_functions.game_count = browser_list_merge_lan(menu_functions.games, (int)menu_functions.game_count,
+			&lan_count);
 	}
 	else
 		menu_functions.lan_online_count = 0;
