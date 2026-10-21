@@ -935,6 +935,22 @@ void game_sound_set_mouth_aperture(
 	long object_index,
 	real mouth_aperture)
 {
+#ifdef HALO_LINUX
+	/* (debug) HALO_NO_MOUTH=1: no mouth aperture. Lip sync reads the
+	sound's play position, which follows the clock and the mixer, and the
+	mouth's overlay moves the speaker's nodes, so its markers and shots: on
+	a map with dialogue, two runs that differ only in timing (the tick
+	thread on, the Vita) part for that alone. For tick-hash comparisons
+	only, on both sides; mouths stay shut (Sierra-III's handoff, 6) */
+	extern char *getenv(const char *name);
+	extern int atoi(const char *text);
+	static int no_mouth = -1;
+
+	if (no_mouth < 0)
+		no_mouth = getenv("HALO_NO_MOUTH") && atoi(getenv("HALO_NO_MOUTH"));
+	if (no_mouth)
+		return;
+#endif
 	if (game_looping_sound_data->valid)
 	{
 		if (object_try_and_get_and_verify_type(object_index, _object_mask_unit))
