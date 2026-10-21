@@ -1030,7 +1030,12 @@ host's anti-cheat (network_anticheat.c) to drop and keep out: "damage" its
 hits ten times as hard as its weapon deals, once a second; "wall" its hits
 on the other player wherever they are, through walls and hills, every tick
 it can; "fly" its player held 4 world units above where it would be;
-"ammo" its weapon kept full (the host's copy runs dry) */
+"ammo" its weapon kept full (the host's copy runs dry) and its shots landed
+at the weapon's own rate (5 a second at most) whenever it sees the other
+player within reach, its trigger pressed for each, as a player firing a
+weapon that never empties would: each such hit, made as an honest shot is
+(network_test_shoot), one the host refuses only as of an empty weapon (with
+the host's HALO_NETWORK_TEST_DRAIN, network_test_drain) */
 static struct
 {
 	boolean read;
@@ -1039,6 +1044,7 @@ static struct
 	boolean wall;
 	boolean fly;
 	boolean ammo;
+	boolean ammo_logged;
 	boolean holding;
 	long fly_unit;
 	real_point3d fly_position;
@@ -1140,6 +1146,7 @@ static void network_test_aim_and_cheat(
 	struct data_iterator iterator;
 	struct player_datum *player;
 	boolean fired = FALSE;
+	boolean ammo_shot = FALSE;
 
 	if (!network_test_cheat.read)
 	{
@@ -1190,7 +1197,11 @@ static void network_test_aim_and_cheat(
 			facing.k = to.z - from.z;
 			if (normalize3d(&facing) > 0.0f)
 				player_control_set_facing(player->local_player_index, &facing);
-			fired = TRUE;
+			/* (the ammo cheat's trigger: pressed for its shots alone, below,
+			so that a weapon that fires once a press fires each, and the
+			host's copy runs dry) */
+			if (network_test_cheat.aim)
+				fired = TRUE;
 		}
 		/* (a modified client's weapon never empties) */
 		if (network_test_cheat.ammo && weapon_index != NONE)
@@ -1200,8 +1211,36 @@ static void network_test_aim_and_cheat(
 
 			if (weapon)
 			{
+				struct weapon_definition *definition = weapon_definition_get(weapon->definition_index);
+				real rate = 5.0f;
+				long interval;
+
 				weapon->weapon.magazines[0].rounds_loaded = MAX(weapon->weapon.magazines[0].rounds_loaded, 30);
 				weapon->weapon.age = 0.0f;
+				/* (the trigger's own rate, 5 a second at most: the host's
+				bucket takes twice a weapon's rate, so these are refused only
+				as of an empty weapon) */
+				if (definition->weapon.triggers.count > 0)
+				{
+					struct weapon_trigger_definition *trigger = TAG_BLOCK_GET_ELEMENT(&definition->weapon.triggers, 0,
+						struct weapon_trigger_definition);
+					real most = MAX(trigger->initial_rate_of_fire, trigger->final_rate_of_fire);
+
+					if (most > 0.0f && most < rate)
+						rate = most;
+				}
+				interval = (long)(TICKS_PER_SECOND / rate + 0.999f);
+				if (target_index != NONE && interval > 0 && game_time_get() % interval == 0)
+				{
+					ammo_shot = TRUE;
+					fired = TRUE;
+				}
+				if (!network_test_cheat.ammo_logged)
+				{
+					network_test_cheat.ammo_logged = TRUE;
+					platform_log("network test: the ammo cheat's weapon %s: a shot every %ld ticks",
+						tag_get_name(weapon->definition_index) ? tag_get_name(weapon->definition_index) : "?", interval);
+				}
 			}
 		}
 		/* (held in the air: put back each frame where the host's corrections
@@ -1257,6 +1296,61 @@ static void network_test_aim_and_cheat(
 	{
 		network_test_cheat.holding = fired;
 		test_input_hold_fire(fired);
+	}
+	/* (the ammo cheat's shots: as the scripted shooter's, seen, within
+	reach) */
+	if (ammo_shot)
+		network_test_shoot();
+}
+
+/* (test builds, the host) HALO_NETWORK_TEST_DRAIN=1: the host's copies of
+its clients' weapons kept dry - no rounds, loaded or not, and a battery
+spent -, as those of a client that has fired them all are; an honest
+client's then fire no more, and a modified client's ("ammo") hits are its
+weapon's that never empties, for the host's empty weapon check
+(network_damage.c distributed_weapon_armed) */
+static void network_test_drain(
+	void)
+{
+	static boolean logged;
+	struct data_iterator iterator;
+	struct player_datum *player;
+
+	if (game_connection() != _game_connection_network_server || !getenv("HALO_NETWORK_TEST_DRAIN") ||
+		!atoi(getenv("HALO_NETWORK_TEST_DRAIN")))
+	{
+		return;
+	}
+	data_iterator_new(&iterator, player_data);
+	while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+	{
+		struct unit_datum *unit;
+		short slot;
+
+		if (player->local_player_index != NONE || player->unit_index == NONE)
+			continue;
+		unit = unit_get(player->unit_index);
+		for (slot = 0; slot < MAXIMUM_WEAPONS_PER_UNIT; slot++)
+		{
+			long weapon_index = unit->unit.weapon_object_indices[slot];
+			struct weapon_datum *weapon = weapon_index != NONE ?
+				(struct weapon_datum *)object_try_and_get_and_verify_type(weapon_index, _object_mask_weapon) : NULL;
+			short magazine;
+
+			if (!weapon)
+				continue;
+			for (magazine = 0; magazine < (short)NUMBEROF(weapon->weapon.magazines); magazine++)
+			{
+				weapon->weapon.magazines[magazine].rounds_loaded = 0;
+				weapon->weapon.magazines[magazine].rounds_total = 0;
+			}
+			weapon->weapon.age = 1.0f;
+			if (!logged)
+			{
+				logged = TRUE;
+				platform_log("network test: the host keeps its clients' weapons dry");
+			}
+		}
 	}
 }
 #endif
@@ -1643,6 +1737,7 @@ void network_test_update(
 	if (game_in_progress() && !main_menu_loaded)
 	{
 		network_test_aim_and_cheat();
+		network_test_drain();
 		network_test_ray_bench();
 	}
 #endif

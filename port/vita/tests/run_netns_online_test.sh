@@ -192,10 +192,16 @@
 #   anticheat  code, the joiner a modified client (HALO_NETWORK_TEST_CHEAT:
 #            HALO_TEST_CHEAT, "damage,fly" by default: hits ten times as hard
 #            as its weapon deals, its player held in the air; "wall", "ammo"
-#            too): the host must drop it (every machine told, a line in
+#            too; "ammo": its weapon never empties, its trigger pressed at
+#            the weapon's rate and its hits landed when it sees the other
+#            player, the host keeping its copies of the clients' weapons dry,
+#            HALO_NETWORK_TEST_DRAIN, as a client's that fired them all are:
+#            alone, its drop must be for an empty weapon's hits): the host
+#            must drop it (every machine told, a line in
 #            cheaters.txt) within HALO_TEST_KICK_WITHIN seconds of the game's
-#            start (60), and refuse it when it joins again by the code
-#            (HALO_NETWORK_TEST_RETRY; it plays HALO_TEST_CHEAT_SECONDS, 90);
+#            start (60; 90 with "ammo"), and refuse it when it joins again
+#            by the code (HALO_NETWORK_TEST_RETRY; it plays
+#            HALO_TEST_CHEAT_SECONDS, 30 more than that);
 #            then, the modified client gone, a new
 #            run of the game on its machine (a new internet play identity: a
 #            new stand-in address) joins by the code and must be refused too,
@@ -1735,13 +1741,23 @@ anticheat|anticheatlag)
 	# together before each)
 	game="HALO_NETWORK_TEST=${HALO_TEST_HOST_GAME:-host:bloodgulch:slayer} HALO_NETWORK_TEST_SCORE=${HALO_TEST_SCORE:-200}
 		HALO_NETWORK_TEST_SHOOT=${HALO_TEST_SHOOT:-3} HALO_TICK_PROFILE=1"
+	# (the ammo cheat: the host's copies of its clients' weapons dry, as a
+	# client's that fired them all are; the cheater's weapon never is)
+	cheat=${HALO_TEST_CHEAT:-damage,fly}
+	kick_within=${HALO_TEST_KICK_WITHIN:-60}
+	if [ "$mode" = anticheat ]; then
+		case $cheat in *ammo*)
+			game="$game HALO_NETWORK_TEST_DRAIN=1"
+			kick_within=${HALO_TEST_KICK_WITHIN:-90} ;;
+		esac
+	fi
 	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env $game HALO_NETWORK_TEST_AIM=1 ${HALO_TEST_HOST_ENV:-}
 	host_pid=$last_pid
 	code=$(wait_code)
 	[ -n "$code" ] || { fail "the host never showed a code"; tail -20 "$out/host/run.log"; exit 1; }
 	echo "host's code: $code"
 	if [ "$mode" = anticheat ]; then
-		join_extra="HALO_NETWORK_TEST_CHEAT=${HALO_TEST_CHEAT:-damage,fly} HALO_NETWORK_TEST_RETRY=3 HALO_EXIT_AFTER=${HALO_TEST_CHEAT_SECONDS:-90}"
+		join_extra="HALO_NETWORK_TEST_CHEAT=$cheat HALO_NETWORK_TEST_RETRY=3 HALO_EXIT_AFTER=${HALO_TEST_CHEAT_SECONDS:-$((kick_within + 30))}"
 	else
 		join_extra="HALO_NETWORK_TEST_AIM=1 HALO_NETWORK_TEST_SHOOT=${HALO_TEST_SHOOT:-3}"
 	fi
@@ -1778,6 +1794,14 @@ anticheat|anticheatlag)
 		echo "the drop: ${when:-none}"
 		grep -aq "reason=dropped: " "$out/host/data/cheaters.txt" 2>/dev/null ||
 			fail "no line in the host's cheaters.txt for the drop"
+		# (the ammo cheat alone: dropped for its empty weapon's hits, the
+		# host's empty weapon check, and nothing else)
+		if [ "$cheat" = ammo ]; then
+			grep -aq "refused as of an empty weapon" "$hostdebug" ||
+				fail "the host refused none of the modified client's hits as of an empty weapon"
+			grep -aq "reason=dropped: hit of an empty weapon" "$out/host/data/cheaters.txt" 2>/dev/null ||
+				fail "the modified client was not dropped for its empty weapon's hits"
+		fi
 		echo "--- cheaters.txt"; cat "$out/host/data/cheaters.txt" 2>/dev/null | head -5
 		grep -aq "network test: joining again" "$out/joiner/run.log" || fail "the modified client never tried to join again"
 		grep -aqE "refusing a machine @ .*: (dropped from this game for cheating|kept out by the host)" "$hostdebug" ||
@@ -1792,8 +1816,8 @@ anticheat|anticheatlag)
 		# joiner's last tick before it was dropped)
 		last=$(grep -a "network test: tick" "$out/joiner/run.log" | head -400 | sed -n 's/.*network test: tick \([0-9]*\) .*/\1/p' | sort -n | tail -1)
 		echo "the modified client played to tick ${last:-none} of its game"
-		[ -n "$last" ] && [ "$last" -le $(( ${HALO_TEST_KICK_WITHIN:-60} * 30 )) ] ||
-			fail "the modified client played past ${HALO_TEST_KICK_WITHIN:-60} s"
+		[ -n "$last" ] && [ "$last" -le $(( kick_within * 30 )) ] ||
+			fail "the modified client played past $kick_within s"
 	fi
 	;;
 pc)
