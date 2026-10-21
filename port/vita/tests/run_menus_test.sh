@@ -185,6 +185,14 @@
 #            INVITE TO PARTY (the party's own steps: run_netns_online_test.sh party)
 #   h3friendspanel the lobbies' FRIENDS panel: the multiplayer lobby shows who is online
 #            and the requests, Triangle opens the FRIENDS screen, B back; the Forge lobby too
+#   h3partyplates  the party as Halo 3 shows it (the owner: "when they join your party it
+#            should be another nameplate added"): a made-up party (HALO_TEST_PARTY_PLATES)
+#            of the player and two, joining and leaving on the clock: no plate alone; on the
+#            main menu Bravo's nameplate (LEADER) under the player's, then Charlie's under
+#            it; MULTIPLAYER: the lobby shows them too; Charlie leaves (one plate), then
+#            Bravo (none). The lobby's FRIENDS panel lists no party rows (the plates do).
+#            The main menu's live servers (five made up) move down under the plates.
+#            Frames 00-alone 01-party 02-lobby 03-left (HALO_TEST_SHOTS keeps them)
 #   h3mppause the Halo 3 multiplayer pause (menus/halo3/mppause.xml, standing for the Xbox's
 #            1p_pause_game) in a local Team Slayer game on Blood Gulch with an offline bot
 #            (HALO_NETWORK_TEST local, HALO_TEST_PROFILE's profile played; skipped without):
@@ -327,7 +335,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho}
+cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3partyplates h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
@@ -1988,6 +1996,29 @@ for case in $cases; do
 		[ "$(grep -ac "ui: screen pc.h3.friends.screen" "$log")" -ge 2 ] ||
 			fail h3friendspanel "Triangle did not open FRIENDS from both lobbies"
 		grep -aq "ui: screen pc.h3.forge.lobby" "$log" || fail h3friendspanel "the Forge lobby did not open" ;;
+	h3partyplates)
+		# (the plates' clock starts at the main menu's first frame: Bravo, the leader, from 4 s
+		# to 26 s, Charlie from 7 s to 17 s; alone at 2 s, the three at 10 s; MULTIPLAYER at about
+		# 11 s, the lobby with both at 14 s, Charlie gone at 20 s, Bravo at 28 s)
+		rm -rf "$out/h3partyplates_shots"
+		mkdir -p "$out/h3partyplates_shots"
+		plates_pad="wait:150:2000 @00-alone:0:300 wait:150:7500 @01-party:0:300 down:150:700 a wait:150:2500"
+		plates_pad="$plates_pad @02-lobby:0:300 wait:150:5500 @03-left:0:300 wait:150:9000"
+		run h3partyplates "$menus_data" 36 "$plates_pad" HALO_MENU_STYLE=halo3 HALO_NET_PLAYER_NAME=Birch HALO_TEST_BROWSER_GAMES=5 \
+			"HALO_TEST_PARTY_PLATES=Bravo*@4-26,Charlie@7-17" HALO_SCREENSHOT_DIR="$out/h3partyplates_shots"
+		check_h3 h3partyplates halo3
+		log=$out/h3partyplates/run.log
+		grep -a "menus: party plates\|ui: screen pc.h3.mp.screen\|friends panel" "$log"
+		plates=$(grep -a "menus: party plates: \|ui: screen pc.h3.mp.screen" "$log" | sed 's/.*menus: party plates: //; s/.*ui: screen pc.h3.mp.screen.*/LOBBY/' | tr '\n' '|')
+		echo "plates: $plates"
+		case $plates in
+		'1 under Birch: Bravo (leader)|2 under Birch: Bravo (leader), Charlie|LOBBY|1 under Birch: Bravo (leader)|none|') ;;
+		*) fail h3partyplates "the plates did not go none, Bravo, Bravo and Charlie, the lobby, Bravo, none" ;;
+		esac
+		grep -aq "menus: party plates: none (the nameplate hidden)" "$log" && fail h3partyplates "the nameplate was hidden"
+		ls "$out/h3partyplates_shots"/0[0-3]-*.bmp > /dev/null 2>&1 || fail h3partyplates "the frames were not saved"
+		[ -n "${HALO_TEST_SHOTS:-}" ] && mkdir -p "$HALO_TEST_SHOTS/h3partyplates" &&
+			cp "$out"/h3partyplates_shots/0*.bmp "$HALO_TEST_SHOTS/h3partyplates/" 2>/dev/null ;;
 	browserprofile)
 		# (Halo CE: Multiplayer, SERVER BROWSER (its first item): the profile (A joins, A the profile,
 		# A), the server browser; B, B)
