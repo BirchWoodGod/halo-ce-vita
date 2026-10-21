@@ -19,6 +19,7 @@ ever written.
 #include "tomlc17.h"
 #ifdef HALO_NOT_DESKTOP
 #include "posix.h"
+#include <unistd.h>
 #endif
 
 #include <SDL3/SDL.h>
@@ -709,16 +710,35 @@ static char *config_read_file(const char *path, size_t *size)
 #endif
 }
 
+/* a file written whole or not at all (Oct 21 2026: a Vita whose game
+stopped mid-write must start again): into path.new, flushed to the card,
+then put in place - the Vita's rename does not write over a file, so the
+old one goes first; a start that finds only path.new takes it
+(config_file_settle) */
 static int config_write_file_length(const char *path, const char *text, size_t length)
 {
 #ifdef HALO_NOT_DESKTOP
-	FILE *file = fopen(path, "wb");
+	char temporary[1100];
+	FILE *file;
 	int written;
 
+	if (snprintf(temporary, sizeof(temporary), "%s.new", path) >= (int)sizeof(temporary))
+		return 0;
+	remove(temporary);
+	file = fopen(temporary, "wb");
 	if (!file)
 		return 0;
-	written = fwrite(text, 1, length, file) == length;
-	return fclose(file) == 0 && written;
+	written = fwrite(text, 1, length, file) == length && fflush(file) == 0;
+	if (written)
+		fsync(fileno(file));
+	written = fclose(file) == 0 && written;
+	if (!written)
+	{
+		remove(temporary);
+		return 0;
+	}
+	remove(path);
+	return rename(temporary, path) == 0;
 #else
 	return SDL_SaveFile(path, text, length);
 #endif
@@ -743,6 +763,22 @@ static int config_file_exists(const char *path)
 	return posix_stat(path, &information) == 0;
 #else
 	return SDL_GetPathInfo(path, NULL);
+#endif
+}
+
+/* (a start after a write stopped between taking the old file away and
+putting the new one in place: the new one, whole - config_write_file_length
+removes the old one only once the new one is on the card) */
+static void config_file_settle(const char *path)
+{
+#ifdef HALO_NOT_DESKTOP
+	char temporary[1100];
+
+	if (snprintf(temporary, sizeof(temporary), "%s.new", path) < (int)sizeof(temporary) &&
+		!config_file_exists(path) && config_file_exists(temporary) && rename(temporary, path) == 0)
+		platform_log("settings: %s put in place from %s (a write the game did not finish)", path, temporary);
+#else
+	(void)path;
 #endif
 }
 
@@ -1501,6 +1537,7 @@ static void config_load(void)
 	}
 
 	config_path(path, sizeof(path));
+	config_file_settle(path);
 	text = config_read_file(path, &size);
 	if (text)
 	{

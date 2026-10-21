@@ -5316,7 +5316,7 @@ static void screen_settings_apply(void)
 	int restored = TRUE, made_new, lowered_old = FALSE;
 
 	screen_scale_retry = FALSE;
-	if (scale < 0.5f || scale > 1.0f)
+	if (!(scale >= 0.5f && scale <= 1.0f))
 		scale = 1.0f;
 	if (!device.created || !device.gpu_ready)
 		return;
@@ -5528,7 +5528,8 @@ static struct
 
 static int dynres_level_of(float scale)
 {
-	int level = (int)(scale * DYNRES_UNITS + 0.5f);
+	/* (a NaN or a huge number is no level: the full size) */
+	int level = scale >= 0.0f && scale <= 1.0f ? (int)(scale * DYNRES_UNITS + 0.5f) : DYNRES_UNITS;
 
 	return level < 1 ? 1 : level > DYNRES_UNITS ? DYNRES_UNITS : level;
 }
