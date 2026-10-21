@@ -882,6 +882,11 @@ boolean network_distributed_banned(unsigned long address, char const *hardware_i
 /* port/linux/game/network_anticheat.c's (the session's bans, and machines
 dropped by the anti-cheat limit, kept out a while) */
 boolean network_anticheat_refused(unsigned long address, char const *hardware_id);
+/* (the joins' limits by one person's address: an internet play peer's real
+address, security review 1.1.1-beta.1 F-11) */
+unsigned long network_anticheat_person_address(unsigned long address);
+boolean network_anticheat_address_room(unsigned long address, unsigned long const *addresses, long const *players,
+	long count, long maximum_players, long adding);
 void network_distributed_ban(long machine_index, unsigned long address, char const *names);
 void network_distributed_kick(char const *names);
 /* port/linux/src/p2p.c's */
@@ -1371,6 +1376,58 @@ boolean network_game_server_dedicated_drop_player(
 }
 #endif
 
+/* port: whether a client machine's address (one person's: an internet play
+peer's real address, not its stand-in, which a new run of its game
+changes) has room for the machine's first player (a machine joining) or one
+more: the players of one person's machines no more than half the game's
+(network_anticheat_address_room). A machine joining again from the very
+address of one in the game (whose old connection is dropped as it joins) is
+not counted twice (security review 1.1.1-beta.1 F-11: one person's machines
+filled a public game) */
+static boolean network_game_server_address_has_room(
+	struct network_game_server *server,
+	long machine_index,
+	unsigned long address)
+{
+	unsigned long addresses[MAXIMUM_NETWORK_MACHINE_COUNT];
+	long players[MAXIMUM_NETWORK_MACHINE_COUNT];
+	long count = 0, own = 0, index;
+
+	if (!address || address == IPV4_LOOPBACK_ADDRESS)
+		return TRUE;
+	for (index = 0; index < MAXIMUM_NETWORK_MACHINE_COUNT; index++)
+	{
+		struct network_game_server_client_machine *other = &server->client_machines[index];
+		long player_index, machine_players = 0;
+
+		if (other->machine_index == NONE || !VALID_INDEX(other->machine_index, MAXIMUM_NETWORK_MACHINE_COUNT) ||
+			!network_game_server_client_machine_is_joined_to_game(server, other) ||
+			network_game_server_client_machine_is_local(server, other))
+		{
+			continue;
+		}
+		for (player_index = 0; player_index < MAXIMUM_NETWORK_PLAYER_COUNT; player_index++)
+		{
+			if (network_player_is_valid(&server->game.players[player_index]) &&
+				server->game.players[player_index].machine_index == other->machine_index)
+			{
+				machine_players++;
+			}
+		}
+		if (other->machine_index == machine_index)
+		{
+			own = machine_players;
+			continue;
+		}
+		if (network_game_server_client_machine_addresses[other->machine_index] == address)
+			continue;
+		addresses[count] = network_game_server_client_machine_addresses[other->machine_index];
+		players[count] = machine_players;
+		count++;
+	}
+	return network_anticheat_address_room(address, addresses, players, count, server->game.maximum_players, own + 1);
+}
+
 /* (a client machine's player queued to add in game: one refused is as one
 the game has no room for) */
 static boolean network_game_server_machine_may_add_player_ingame(
@@ -1384,7 +1441,10 @@ static boolean network_game_server_machine_may_add_player_ingame(
 	{
 		return TRUE;
 	}
-	count = network_game_server_ingame_addition_count(network_game_server_client_machine_addresses[machine_index], FALSE);
+	/* (by one person's address: a new run of a peer's game, a new stand-in,
+	is the same person, F-11) */
+	count = network_game_server_ingame_addition_count(
+		network_anticheat_person_address(network_game_server_client_machine_addresses[machine_index]), FALSE);
 	if (count && *count >= MAXIMUM_INGAME_ADDITIONS_PER_ADDRESS)
 	{
 		network_event("client machine #%ld added too many players in game", machine_index);
@@ -2336,6 +2396,16 @@ boolean network_game_server_accept_client_machine_into_game(
 			network_game_server_refusal_code = _rejection_code_blacklisted_machine;
 			return FALSE;
 		}
+		/* (nor one more machine of a person whose machines have their share
+		of the game's players, F-11) */
+		if (!network_game_server_client_machine_is_local(server, machine) &&
+			!network_game_server_address_has_room(server, machine_index, address.address.long_words[0]))
+		{
+			network_event("refusing a machine @ %s: its address has its share of this game's players",
+				transport_address_to_string(&address));
+			network_game_server_refusal_code = _rejection_code_game_is_full;
+			return FALSE;
+		}
 	}
 	/* (a kick asked for the slot's machine before is not this one's) */
 	if (VALID_INDEX(machine_index, MAXIMUM_NETWORK_MACHINE_COUNT))
@@ -2712,6 +2782,16 @@ boolean network_game_server_add_player_to_game(
 		if (player->primary_color_index == NONE)
 			get_unique_random_color(server, player);
 
+		/* (one person's machines: half the game's players at most, F-11) */
+		if (!network_game_server_client_machine_is_local(server, machine) &&
+			VALID_INDEX(machine->machine_index, MAXIMUM_NETWORK_MACHINE_COUNT) &&
+			!network_game_server_address_has_room(server, machine->machine_index,
+				network_game_server_client_machine_addresses[machine->machine_index]))
+		{
+			network_event("machine #%d's address has its share of this game's players: its player at controller "
+				"index #%d refused", player->machine_index, player->controller_index);
+			return FALSE;
+		}
 		/* (the host chooses the player's slot, which is its datum on every
 		machine: network_game_add_player) */
 		player->player_list_index = NONE;
@@ -2843,7 +2923,8 @@ void network_game_server_update_ticks(
 					if (!network_game_server_client_machine_is_local(server, client_machine))
 					{
 						short *count = network_game_server_ingame_addition_count(
-							network_game_server_client_machine_addresses[client_machine_index], TRUE);
+							network_anticheat_person_address(
+								network_game_server_client_machine_addresses[client_machine_index]), TRUE);
 
 						if (count)
 							(*count)++;
@@ -5294,8 +5375,14 @@ static boolean network_game_server_add_new_client(
 						if (!other->connection || network_game_server_client_machine_is_joined_to_game(server, other))
 							continue;
 						network_connection_get_address(other->connection, &other_address, NULL);
-						if (other_address.address.ipv4_address == client_address.address.ipv4_address)
+						/* (one person's: an internet play peer's real address,
+						whatever identity each run of its game takes, F-11) */
+						if (other_address.address.ipv4_address == client_address.address.ipv4_address ||
+							network_anticheat_person_address(other_address.address.long_words[0]) ==
+								network_anticheat_person_address(client_address.address.long_words[0]))
+						{
 							waiting_count++;
+						}
 					}
 					if (!network_game_should_accept_remote_connections() &&
 						client_address.address.ipv4_address != IPV4_LOOPBACK_ADDRESS)

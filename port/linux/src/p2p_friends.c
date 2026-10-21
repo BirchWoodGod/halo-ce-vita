@@ -133,6 +133,18 @@ enum
 	MAXIMUM_SEEN_REQUESTS = 64,
 	MAXIMUM_TOMBSTONES = 32,
 	MAXIMUM_MUTED = 32,
+	/* the newest request (epoch and counter) of each key this machine
+	declined, removed or blocked, kept in marks.dat: an older one, replayed
+	off a broker, is dropped however long ago it was seen (security review
+	1.1.1-beta.1 F-10; the seen ring alone forgot it after 64 others' or a
+	restart) */
+	MAXIMUM_MARKS = 128,
+	/* the inbox's share of the inbound queue: strangers' requests, and those
+	of a key known here (a request waiting, a friend, the key of a code this
+	machine sent a request to); a flood of requests leaves room for the
+	friends' messages and the known keys' requests (F-06) */
+	MAXIMUM_INBOUND_STRANGERS = 12,
+	MAXIMUM_INBOUND_KNOWN = 8,
 	MAXIMUM_BROKER_MASK = 0xFF,
 	/* messages handled in one pass of internet play's thread */
 	MESSAGES_PER_PASS = 16,
@@ -160,6 +172,13 @@ enum
 	/* budgets: at most this many at once, one more each interval */
 	REQUEST_BUDGET = 10,
 	REQUEST_BUDGET_INTERVAL = 2000,
+	/* (a known key's requests: its own budget, apart from strangers') */
+	KNOWN_REQUEST_BUDGET = 2,
+	KNOWN_REQUEST_BUDGET_INTERVAL = 20000,
+	/* a request waiting that its sender has not sent again in this long (a
+	sender sends it again every REQUEST_SLOW_INTERVAL at most) makes room
+	for a new one when the list is full (F-06) */
+	REQUEST_IDLE_TIME = REQUEST_SLOW_INTERVAL + 60000,
 	BOX_BUDGET = 10,
 	BOX_BUDGET_INTERVAL = 500,
 	/* pair messages no key opened (each tried with every friend's): past
@@ -171,6 +190,9 @@ enum
 	OUTGOING_LIFETIME = 14 * 24 * 3600,
 	MUTE_TIME = 7 * 24 * 3600,
 	TOMBSTONE_TIME = 30 * 24 * 3600,
+	/* a request waiting not heard again in this long goes (its sender's
+	stopped sending it: OUTGOING_LIFETIME) */
+	REQUEST_LIFETIME = OUTGOING_LIFETIME + 24 * 3600,
 
 	/* the files */
 	IDENTITY_VERSION = 1,
@@ -183,6 +205,13 @@ enum
 	BLOCKED_RECORD_SIZE = P2P_KEY_SIZE + 1 + NAME_LENGTH,
 	TOMBSTONE_RECORD_SIZE = P2P_KEY_SIZE + FRIENDSHIP_LENGTH + 8,
 	MUTED_RECORD_SIZE = P2P_KEY_SIZE + 8,
+	/* marks.dat: "HFRM", its version, the marks' and the requests' counts,
+	the records (key, epoch, counter, time), its SHA-256 */
+	MARKS_VERSION = 1,
+	MARKS_HEADER_SIZE = 4 + 1 + 1 + 1,
+	MARK_RECORD_SIZE = P2P_KEY_SIZE + 8 + 4 + 8,
+	MAXIMUM_MARKS_SIZE = MARKS_HEADER_SIZE + (MAXIMUM_MARKS + P2P_FRIEND_REQUESTS_MAXIMUM) * MARK_RECORD_SIZE +
+		P2P_SHA256_SIZE,
 	MAXIMUM_LIST_SIZE = LIST_HEADER_SIZE + P2P_FRIENDS_MAXIMUM * FRIEND_RECORD_SIZE +
 		P2P_FRIEND_REQUESTS_MAXIMUM * REQUEST_RECORD_SIZE + P2P_FRIEND_OUTGOING_MAXIMUM * OUTGOING_RECORD_SIZE +
 		P2P_FRIEND_BLOCKED_MAXIMUM * BLOCKED_RECORD_SIZE + MAXIMUM_TOMBSTONES * TOMBSTONE_RECORD_SIZE +
@@ -192,6 +221,8 @@ enum
 
 /* (a message fits the room p2p_signal.c gives it: p2p_friends_outgoing
 copies it whole) */
+/* (load reads marks.dat into the list's buffer) */
+typedef char friends_marks_room_assert[MAXIMUM_MARKS_SIZE < MAXIMUM_LIST_SIZE ? 1 : -1];
 typedef char friends_payload_room_assert[MAXIMUM_PAYLOAD_SIZE <= P2P_FRIENDS_PAYLOAD_ROOM ? 1 : -1];
 
 static const char signature_label[] = "hcev-friends-1";
@@ -302,6 +333,8 @@ struct friend_record
 	unsigned long party_heard_time;
 	unsigned long party_invite_sent_time;
 	unsigned long party_invite_heard_time;
+	/* (their friend requests: a friend who lost this machine asks again) */
+	struct budget request_budget;
 };
 
 struct request_record
@@ -310,6 +343,12 @@ struct request_record
 	char name[P2P_FRIEND_NAME_SIZE];
 	unsigned char nonce[NONCE_LENGTH];
 	unsigned long long time;
+	/* (marks.dat) the newest of its requests heard; (this run) when it was
+	last heard, and its own budget */
+	unsigned long long epoch;
+	unsigned long counter;
+	unsigned long heard_time;
+	struct budget budget;
 };
 
 struct outgoing_record
@@ -320,6 +359,18 @@ struct outgoing_record
 	/* this run: when it was last sent, and since when it is sent */
 	unsigned long sent_time;
 	unsigned long first_time;
+	/* (its code's own request, both asking: its budget) */
+	struct budget budget;
+};
+
+/* a key's newest request heard, kept once this machine declined, removed or
+blocked it (F-10) */
+struct request_mark
+{
+	unsigned char key[P2P_KEY_SIZE];
+	unsigned long long epoch;
+	unsigned long counter;
+	unsigned long long time;
 };
 
 struct blocked_record
@@ -366,6 +417,8 @@ struct seen_request
 struct inbound
 {
 	int which;
+	/* (an inbox request: its sender's key known here, as it was queued) */
+	int known;
 	int size;
 	unsigned char payload[MAXIMUM_PAYLOAD_SIZE];
 };
@@ -550,6 +603,8 @@ struct friends_state
 	int invite_count;
 	struct seen_request seen[MAXIMUM_SEEN_REQUESTS];
 	int seen_next;
+	struct request_mark marks[MAXIMUM_MARKS];
+	int mark_count;
 
 	/* the party (p2p_party.inc), its invites heard, its replays, its chat */
 	struct party_state party;
@@ -1121,6 +1176,53 @@ static int find_outgoing(const char *code)
 	return -1;
 }
 
+static int find_mark(const unsigned char *key)
+{
+	int index;
+
+	for (index = 0; index < friends->mark_count; index++)
+		if (p2p_equal(friends->marks[index].key, key, P2P_KEY_SIZE))
+			return index;
+	return -1;
+}
+
+/* whether an epoch and counter are newer than a mark's */
+static int mark_newer(const struct request_mark *mark, unsigned long long epoch, unsigned long counter)
+{
+	return epoch > mark->epoch || (epoch == mark->epoch && counter > mark->counter);
+}
+
+/* a key's newest request (or message) heard, kept: its requests no newer
+dropped from now on (F-10); the oldest mark goes when they are all used */
+static void mark_note(const unsigned char *key, unsigned long long epoch, unsigned long counter)
+{
+	int index = find_mark(key);
+
+	if (!epoch && !counter)
+		return;
+	if (index < 0)
+	{
+		if (friends->mark_count >= MAXIMUM_MARKS)
+		{
+			int oldest = 0;
+
+			for (index = 1; index < friends->mark_count; index++)
+				if (friends->marks[index].time < friends->marks[oldest].time)
+					oldest = index;
+			friends->marks[oldest] = friends->marks[--friends->mark_count];
+		}
+		index = friends->mark_count++;
+		memset(&friends->marks[index], 0, sizeof(friends->marks[index]));
+		memcpy(friends->marks[index].key, key, P2P_KEY_SIZE);
+	}
+	else if (!mark_newer(&friends->marks[index], epoch, counter))
+		return;
+	friends->marks[index].epoch = epoch;
+	friends->marks[index].counter = counter;
+	friends->marks[index].time = unix_now();
+	friends->dirty = 1;
+}
+
 /* the list's bytes (friends.dat) */
 static int list_encode(unsigned char *bytes)
 {
@@ -1339,6 +1441,107 @@ bad:
 	return 0;
 }
 
+/* marks.dat's bytes: the marks, then the requests waiting's epochs and
+counters (friends.dat, which builds before this one read, has no room for
+them; they read no marks.dat) */
+static int marks_encode(unsigned char *bytes)
+{
+	int size = 0, index;
+
+	memcpy(bytes, "HFRM", 4);
+	size += 4;
+	bytes[size++] = MARKS_VERSION;
+	bytes[size++] = (unsigned char)friends->mark_count;
+	bytes[size++] = (unsigned char)friends->request_count;
+	for (index = 0; index < friends->mark_count + friends->request_count; index++)
+	{
+		const unsigned char *key;
+		unsigned long long epoch, time;
+		unsigned long counter;
+
+		if (index < friends->mark_count)
+		{
+			key = friends->marks[index].key;
+			epoch = friends->marks[index].epoch;
+			counter = friends->marks[index].counter;
+			time = friends->marks[index].time;
+		}
+		else
+		{
+			const struct request_record *request = &friends->requests[index - friends->mark_count];
+
+			key = request->key;
+			epoch = request->epoch;
+			counter = request->counter;
+			time = 0;
+		}
+		memcpy(bytes + size, key, P2P_KEY_SIZE);
+		size += P2P_KEY_SIZE;
+		put_u64(bytes + size, epoch);
+		size += 8;
+		put_u32(bytes + size, counter);
+		size += 4;
+		put_u64(bytes + size, time);
+		size += 8;
+	}
+	p2p_sha256(bytes, size, bytes + size);
+	return size + P2P_SHA256_SIZE;
+}
+
+/* the reverse, after the list (its requests given their epochs): 1, or 0
+(nothing taken) */
+static int marks_decode(const unsigned char *bytes, int size)
+{
+	unsigned char digest[P2P_SHA256_SIZE];
+	int marks, requests, index, offset = MARKS_HEADER_SIZE;
+
+	friends->mark_count = 0;
+	if (size < MARKS_HEADER_SIZE + P2P_SHA256_SIZE || memcmp(bytes, "HFRM", 4) || bytes[4] != MARKS_VERSION)
+		return 0;
+	marks = bytes[5];
+	requests = bytes[6];
+	if (marks > MAXIMUM_MARKS || requests > P2P_FRIEND_REQUESTS_MAXIMUM ||
+		size != MARKS_HEADER_SIZE + (marks + requests) * MARK_RECORD_SIZE + P2P_SHA256_SIZE)
+	{
+		return 0;
+	}
+	p2p_sha256(bytes, size - P2P_SHA256_SIZE, digest);
+	if (!p2p_equal(digest, bytes + size - P2P_SHA256_SIZE, P2P_SHA256_SIZE))
+		return 0;
+	for (index = 0; index < marks + requests; index++, offset += MARK_RECORD_SIZE)
+	{
+		const unsigned char *key = bytes + offset;
+		unsigned long long epoch = get_u64(bytes + offset + P2P_KEY_SIZE);
+		unsigned long counter = get_u32(bytes + offset + P2P_KEY_SIZE + 8);
+
+		if (!key_usable(key))
+			continue;
+		if (index < marks)
+		{
+			struct request_mark *mark;
+
+			if (find_mark(key) >= 0)
+				continue;
+			mark = &friends->marks[friends->mark_count++];
+			memcpy(mark->key, key, P2P_KEY_SIZE);
+			mark->epoch = epoch;
+			mark->counter = counter;
+			mark->time = get_u64(bytes + offset + P2P_KEY_SIZE + 12);
+		}
+		else
+		{
+			int request = find_request(key);
+
+			if (request >= 0)
+			{
+				friends->requests[request].epoch = epoch;
+				friends->requests[request].counter = counter;
+			}
+		}
+	}
+	return 1;
+}
+
 /* a file's bytes, the file itself or (a write cut short between its
 renames) its .old; -1 if neither */
 static int file_take(const char *name, unsigned char *bytes, int capacity, int old)
@@ -1408,7 +1611,22 @@ static void load(void)
 				file_set_aside("friends.dat");
 		}
 	}
+	/* (the marks: none, a file an older build left, read as none) */
+	taken = 0;
+	for (old = 0; old < 2 && !taken; old++)
+	{
+		size = file_take("marks.dat", bytes, MAXIMUM_MARKS_SIZE + 1, old);
+		if (size >= 0)
+		{
+			taken = marks_decode(bytes, size);
+			if (!taken && !old)
+				file_set_aside("marks.dat");
+		}
+	}
 	pthread_mutex_unlock(&friends_file_lock);
+	/* (the requests waiting: heard as of now, for REQUEST_IDLE_TIME) */
+	for (old = 0; old < friends->request_count; old++)
+		friends->requests[old].heard_time = now_stamp();
 	{
 		char shown[P2P_FRIEND_CODE_SIZE];
 
@@ -1423,8 +1641,8 @@ static void load(void)
 the interval). Takes friends_lock itself */
 static void save(int force)
 {
-	unsigned char bytes[MAXIMUM_LIST_SIZE];
-	int size, written;
+	unsigned char bytes[MAXIMUM_LIST_SIZE], *marks;
+	int size, marks_size, written;
 
 	pthread_mutex_lock(&friends_lock);
 	if (!friends->loaded || (!friends->dirty && !(friends->counters_dirty && (force ||
@@ -1434,7 +1652,15 @@ static void save(int force)
 		pthread_mutex_unlock(&friends_lock);
 		return;
 	}
+	/* (marks.dat's bytes off the stack: the game's thread saves too) */
+	marks = malloc(MAXIMUM_MARKS_SIZE);
+	if (!marks)
+	{
+		pthread_mutex_unlock(&friends_lock);
+		return;
+	}
 	size = list_encode(bytes);
+	marks_size = marks_encode(marks);
 	friends->dirty = 0;
 	friends->counters_dirty = 0;
 	friends->saved_time = now_stamp();
@@ -1442,7 +1668,10 @@ static void save(int force)
 	pthread_mutex_unlock(&friends_lock);
 	pthread_mutex_lock(&friends_file_lock);
 	written = file_put("friends.dat", bytes, size);
+	if (written && !file_put("marks.dat", marks, marks_size))
+		written = 0;
 	pthread_mutex_unlock(&friends_file_lock);
+	free(marks);
 	if (!written)
 	{
 		pthread_mutex_lock(&friends_lock);
@@ -2393,7 +2622,7 @@ static void request_heard(const struct message *message)
 {
 	struct friend_record *record;
 	char text[64];
-	int index;
+	int index = -1;
 
 	if (!p2p_equal(message->recipient, friends->code_recipient, P2P_SHA256_SIZE))
 	{
@@ -2416,6 +2645,22 @@ static void request_heard(const struct message *message)
 		friends->dropped_replays++;
 		return;
 	}
+	/* (an old request of a friend's, or of a key declined, removed or
+	blocked here, replayed off a broker: no newer than the newest of theirs
+	this machine has, however long ago that was - a friend's, not even
+	within its replay window, F-10; a new run of theirs is a newer epoch, a
+	request sent again a newer counter) */
+	record = find_friend(message->sender);
+	if (record ? (message->epoch < record->epoch || (message->epoch == record->epoch &&
+		message->counter <= record->counter) || !replay_check(record, message->epoch, message->counter)) :
+		(index = find_mark(message->sender)) >= 0 && !mark_newer(&friends->marks[index], message->epoch,
+			message->counter))
+	{
+		friends->dropped_replays++;
+		return;
+	}
+	if (!record && index >= 0)
+		mark_note(message->sender, message->epoch, message->counter);
 	if (find_muted(message->sender) >= 0)
 		return;
 	name_or_code(message->sender, message->name, text, sizeof(text));
@@ -2423,7 +2668,6 @@ static void request_heard(const struct message *message)
 	while appearing offline, which an answer would give away: a friend could
 	send a request to learn whether this machine is on, security review
 	1.1.1-beta.1 F-04) */
-	record = find_friend(message->sender);
 	if (record)
 	{
 		snprintf(record->name, sizeof(record->name), "%s", message->name);
@@ -2467,16 +2711,41 @@ static void request_heard(const struct message *message)
 	{
 		if (friends->request_count >= P2P_FRIEND_REQUESTS_MAXIMUM)
 		{
-			friends->dropped_rate++;
-			return;
+			/* (full: the request its sender has not sent again the longest
+			makes room, if that is longer than a sender waits to send it
+			again - its sender stopped; a list filled once and left stays
+			full no longer, F-06) */
+			int each, idle = -1;
+
+			for (each = 0; each < friends->request_count; each++)
+				if (elapsed(friends->requests[each].heard_time, REQUEST_IDLE_TIME) &&
+					(idle < 0 || (long)(friends->requests[each].heard_time - friends->requests[idle].heard_time) < 0))
+				{
+					idle = each;
+				}
+			if (idle < 0)
+			{
+				friends->dropped_rate++;
+				return;
+			}
+			platform_log("friends: a friend request not sent again in a while made room for a new one");
+			request_remove(idle);
 		}
 		index = friends->request_count++;
+		memset(&friends->requests[index], 0, sizeof(friends->requests[index]));
 		platform_log("friends: a friend request from %s", text);
 	}
 	memcpy(friends->requests[index].key, message->sender, P2P_KEY_SIZE);
 	snprintf(friends->requests[index].name, sizeof(friends->requests[index].name), "%s", message->name);
 	memcpy(friends->requests[index].nonce, message->nonce, NONCE_LENGTH);
 	friends->requests[index].time = unix_now();
+	friends->requests[index].heard_time = now_stamp();
+	if (message->epoch > friends->requests[index].epoch || (message->epoch == friends->requests[index].epoch &&
+		message->counter > friends->requests[index].counter))
+	{
+		friends->requests[index].epoch = message->epoch;
+		friends->requests[index].counter = message->counter;
+	}
 	friends->dirty = 1;
 }
 
@@ -2618,6 +2887,7 @@ static void remove_heard(int index, const struct message *message)
 		return;
 	}
 	platform_log("friends: %s removed this machine from their friends", record->name);
+	mark_note(record->key, record->epoch, record->counter);
 	friend_remove_index(index);
 	friends->dirty = 1;
 }
@@ -2742,6 +3012,61 @@ static void pair_heard(const unsigned char *payload, int size)
 	}
 }
 
+/* (friends_lock held) a request's sender known here: a request of theirs
+waiting, a friend (who lost this machine), or the key of a code this
+machine sent a request to (both asking) */
+static int request_key_known(const unsigned char *key)
+{
+	char code[P2P_FRIEND_CODE_LENGTH + 1];
+
+	if (find_request(key) >= 0 || find_friend(key))
+		return 1;
+	code_of_key(key, code);
+	return find_outgoing(code) >= 0;
+}
+
+/* (friends_lock held) the same for an inbox payload as it is queued: its
+envelope opened (symmetric, as cheap as a copy: anyone with the code seals
+one) for the sender it names, which its signature proves later (one that
+does not is dropped then, and spends that key's budget alone) */
+static int inbox_sender_known(const unsigned char *payload, int size)
+{
+	unsigned char plain[MAXIMUM_PAYLOAD_SIZE];
+	int opened;
+
+	if (!friends->loaded || !friends->has_identity)
+		return 0;
+	opened = envelope_open(KIND_REQUEST, friends->inbox_key, payload, size, plain);
+	if (opened < PLAIN_HEADER_SIZE || plain[0] != TYPE_REQUEST)
+		return 0;
+	return request_key_known(plain + 1);
+}
+
+/* the budget a request of a key is taken from: its own when it is known
+here, else the strangers' */
+static struct budget *request_budget_of(const unsigned char *key, int *maximum, int *interval)
+{
+	char code[P2P_FRIEND_CODE_LENGTH + 1];
+	struct friend_record *record;
+	int index;
+
+	*maximum = KNOWN_REQUEST_BUDGET;
+	*interval = KNOWN_REQUEST_BUDGET_INTERVAL;
+	index = find_request(key);
+	if (index >= 0)
+		return &friends->requests[index].budget;
+	record = find_friend(key);
+	if (record)
+		return &record->request_budget;
+	code_of_key(key, code);
+	index = find_outgoing(code);
+	if (index >= 0)
+		return &friends->outgoing[index].budget;
+	*maximum = REQUEST_BUDGET;
+	*interval = REQUEST_BUDGET_INTERVAL;
+	return &friends->request_budget;
+}
+
 /* one message heard: its envelope opened, its plaintext read, signed, new */
 static void handle(int which, const unsigned char *payload, int size)
 {
@@ -2756,16 +3081,17 @@ static void handle(int which, const unsigned char *payload, int size)
 	}
 	if (which == P2P_FRIENDS_INBOX)
 	{
+		struct budget *budget;
+		int maximum, interval;
+
 		if (payload[2] != KIND_REQUEST)
 		{
 			friends->dropped_malformed++;
 			return;
 		}
-		if (!budget_left(&friends->request_budget, REQUEST_BUDGET, REQUEST_BUDGET_INTERVAL, 1))
-		{
-			friends->dropped_rate++;
-			return;
-		}
+		/* (opened before its budget is spent: a symmetric open, and the
+		budget is its sender's - a key known here has its own, strangers
+		share theirs - before the signature's work, F-06) */
 		opened = envelope_open(KIND_REQUEST, friends->inbox_key, payload, size, plain);
 		if (opened < 0)
 		{
@@ -2775,6 +3101,12 @@ static void handle(int which, const unsigned char *payload, int size)
 		if (!plain_decode(plain, opened, &message) || message.type != TYPE_REQUEST)
 		{
 			friends->dropped_malformed++;
+			return;
+		}
+		budget = request_budget_of(message.sender, &maximum, &interval);
+		if (!budget_left(budget, maximum, interval, 1))
+		{
+			friends->dropped_rate++;
 			return;
 		}
 		/* (a blocked key's: dropped before the work of its signature) */
@@ -3118,16 +3450,46 @@ static int card_route(int machine, unsigned long *address)
 	return *address != 0;
 }
 
-static void card_signed_data(const unsigned char *packet, unsigned char *data, int *size)
+/* an ask's nonce from a build that checks a card is bound to its machine
+begins with this (security review 1.1.1-beta.1 F-05): its answer is
+signed over the machines too. The rest of the nonce is random; the packet
+is the same, so a host of an older build relays it as before, and a machine
+of an older build answers it as before (its card not bound: taken, as
+from an older build) */
+static const unsigned char card_bound_mark[4] = { 'h', 'c', 'B', 0x02 };
+
+static int card_nonce_bound(const unsigned char *nonce)
+{
+	return !memcmp(nonce, card_bound_mark, sizeof(card_bound_mark));
+}
+
+/* what an answer's signature covers: the kind, the nonce, the key and the
+name; bound, also the answering machine and the asker's as the answer
+names them, so that a host's relay can no longer present one player's
+card as another player's (the host corrects "from" to the sender it has,
+which is what an honest host's answerer signed) */
+static void card_signed_data(const unsigned char *packet, unsigned char *data, int *size, int bound)
 {
 	static const char label[] = "hcev-friends-1 card";
+	static const char bound_label[] = "hcev-friends-2 card";
 	int at = 0;
 
-	memcpy(data, label, sizeof(label) - 1);
-	at += (int)sizeof(label) - 1;
-	/* (the kind, the nonce, the key and the name: the machines are the
-	game's numbers, which the host's relay may correct) */
+	if (bound)
+	{
+		memcpy(data, bound_label, sizeof(bound_label) - 1);
+		at += (int)sizeof(bound_label) - 1;
+	}
+	else
+	{
+		memcpy(data, label, sizeof(label) - 1);
+		at += (int)sizeof(label) - 1;
+	}
 	data[at++] = packet[1];
+	if (bound)
+	{
+		data[at++] = packet[2];
+		data[at++] = packet[3];
+	}
 	memcpy(data + at, packet + 4, NONCE_LENGTH + P2P_KEY_SIZE + 1 + NAME_LENGTH);
 	at += NONCE_LENGTH + P2P_KEY_SIZE + 1 + NAME_LENGTH;
 	*size = at;
@@ -3152,7 +3514,7 @@ static void card_answer(int machine, const unsigned char *nonce)
 	memcpy(packet + CARD_HEADER_SIZE, friends->key, P2P_KEY_SIZE);
 	own_name(name);
 	put_text(packet + CARD_HEADER_SIZE + P2P_KEY_SIZE, name, NAME_LENGTH);
-	card_signed_data(packet, data, &size);
+	card_signed_data(packet, data, &size, card_nonce_bound(nonce));
 	p2p_ed25519_sign(friends->seed, friends->key, data, size, packet + CARD_ANSWER_SIZE - P2P_SIGNATURE_SIZE);
 	card_queue(address, packet, CARD_ANSWER_SIZE);
 }
@@ -3246,8 +3608,9 @@ static void card_heard(const struct card_packet *packet)
 		struct card_machine *machine = &friends->machines[from];
 		unsigned char data[64 + CARD_ANSWER_SIZE];
 		const unsigned char *key = bytes + CARD_HEADER_SIZE;
+		const unsigned char *signature = bytes + CARD_ANSWER_SIZE - P2P_SIGNATURE_SIZE;
 		char name[P2P_FRIEND_NAME_SIZE];
-		int size;
+		int size, bound, other;
 
 		if (!machine->asking || !p2p_equal(machine->nonce, bytes + 4, NONCE_LENGTH) ||
 			bytes[CARD_HEADER_SIZE + P2P_KEY_SIZE] > NAME_LENGTH)
@@ -3255,13 +3618,54 @@ static void card_heard(const struct card_packet *packet)
 			friends->dropped_replays++;
 			return;
 		}
-		card_signed_data(bytes, data, &size);
-		if (!key_usable(key) || !p2p_ed25519_verify(key, data, size, bytes + CARD_ANSWER_SIZE - P2P_SIGNATURE_SIZE))
+		/* (signed over the machines, as this machine's ask asked; else as an
+		older build's machine signs, over its nonce alone - a host can still
+		swap such a card with another's, as before) */
+		bound = 0;
+		if (!key_usable(key))
+			size = 0;
+		else
+		{
+			if (card_nonce_bound(machine->nonce))
+			{
+				unsigned char as_heard[CARD_ANSWER_SIZE];
+
+				/* (from: the machine this answer is taken as, the host's own
+				reading of its sender on a host) */
+				memcpy(as_heard, bytes, CARD_ANSWER_SIZE);
+				as_heard[2] = (unsigned char)from;
+				card_signed_data(as_heard, data, &size, 1);
+				bound = p2p_ed25519_verify(key, data, size, signature);
+			}
+			if (!bound)
+			{
+				card_signed_data(bytes, data, &size, 0);
+				if (!p2p_ed25519_verify(key, data, size, signature))
+					size = 0;
+			}
+		}
+		if (!size)
 		{
 			friends->dropped_forged++;
-			platform_log("friends: a friend card that is not its key's dropped");
+			platform_log("friends: a friend card that is not its key's (or not its machine's) dropped");
 			return;
 		}
+		/* (nor the card another player of this game gave, or this machine's
+		own: a host presenting it as this player's) */
+		for (other = 0; other < CARD_MACHINES; other++)
+			if (other != from && friends->machines[other].has_card &&
+				p2p_equal(friends->machines[other].key, key, P2P_KEY_SIZE))
+			{
+				break;
+			}
+		if (other < CARD_MACHINES || p2p_equal(key, friends->key, P2P_KEY_SIZE))
+		{
+			friends->dropped_forged++;
+			platform_log("friends: a friend card that another player of this game gave dropped");
+			return;
+		}
+		if (!bound)
+			platform_log("friends: machine %d's friend card is an older build's (not bound to its machine)", from);
 		if (!clean_text(name, NAME_LENGTH, bytes + CARD_HEADER_SIZE + P2P_KEY_SIZE + 1,
 			bytes[CARD_HEADER_SIZE + P2P_KEY_SIZE], 1))
 		{
@@ -3445,6 +3849,8 @@ int p2p_friends_player_ask(int machine, int intent)
 			record->intent = intent;
 			record->asked_time = now_stamp();
 			posix_random_bytes(record->nonce, NONCE_LENGTH);
+			/* (marked: its answer bound to its machine, F-05) */
+			memcpy(record->nonce, card_bound_mark, sizeof(card_bound_mark));
 			packet[0] = CARD_VERSION;
 			packet[1] = CARD_ASK;
 			packet[2] = (unsigned char)friends->game_machine;
@@ -3595,15 +4001,35 @@ void p2p_friends_heard(int which, const unsigned char *payload, int size)
 {
 	struct inbound *entry;
 
+	int known = 0;
+
 	if (size <= 0 || size > MAXIMUM_PAYLOAD_SIZE || (which != P2P_FRIENDS_INBOX && which != P2P_FRIENDS_MAILBOX))
 		return;
 	pthread_mutex_lock(&friends_lock);
+	/* (the inbox's requests: their share of the queue, strangers' apart
+	from known keys', so that a flood of requests from new keys crowds out
+	neither the friends' messages nor a known key's request, F-06) */
+	if (which == P2P_FRIENDS_INBOX)
+	{
+		int index, queued = 0;
+
+		known = inbox_sender_known(payload, size);
+		for (index = 0; index < friends->inbound_count; index++)
+			queued += friends->inbound[index].which == P2P_FRIENDS_INBOX && friends->inbound[index].known == known;
+		if (queued >= (known ? MAXIMUM_INBOUND_KNOWN : MAXIMUM_INBOUND_STRANGERS))
+		{
+			friends->dropped_rate++;
+			pthread_mutex_unlock(&friends_lock);
+			return;
+		}
+	}
 	if (friends->inbound_count >= MAXIMUM_INBOUND)
 		friends->dropped_rate++;
 	else
 	{
 		entry = &friends->inbound[friends->inbound_count++];
 		entry->which = which;
+		entry->known = known;
 		entry->size = size;
 		memcpy(entry->payload, payload, (size_t)size);
 	}
@@ -3790,6 +4216,13 @@ void p2p_friends_update(const struct p2p_friends_host *host)
 		if (!record->sent_time || elapsed(record->sent_time, interval))
 			send_request(record);
 	}
+	/* requests waiting their senders stopped sending go (F-06) */
+	for (index = friends->request_count - 1; index >= 0; index--)
+		if (friends->requests[index].time && unix_now() > friends->requests[index].time + REQUEST_LIFETIME)
+		{
+			request_remove(index);
+			friends->dirty = 1;
+		}
 	/* old mutes and tombstones go */
 	for (index = friends->muted_count - 1; index >= 0; index--)
 		if (unix_now() > friends->muted[index].time + MUTE_TIME)
@@ -4294,11 +4727,15 @@ static int block_key(const unsigned char *key, const char *name)
 		/* (told it is over, then never told anything again) */
 		if (friends_on())
 			send_remove(key, friends->friends[index].friendship);
+		mark_note(key, friends->friends[index].epoch, friends->friends[index].counter);
 		friend_remove_index(index);
 	}
 	index = find_request(key);
 	if (index >= 0)
+	{
+		mark_note(key, friends->requests[index].epoch, friends->requests[index].counter);
 		request_remove(index);
+	}
 	index = find_tombstone(key);
 	if (index >= 0)
 		tombstone_remove(index);
@@ -4391,10 +4828,12 @@ int p2p_friends_act(const char *id, int kind, int action)
 				result = P2P_FRIENDS_FULL;
 				break;
 			}
-			/* (their epoch is learnt from their next message) */
-			record->epoch = 0;
-			record->counter = 0;
-			record->window = 0;
+			/* (their epoch is learnt from their next message; the request's
+			own, when known, so that it is no newer than they are: replayed,
+			it is dropped, F-10) */
+			record->epoch = request.epoch;
+			record->counter = request.counter;
+			record->window = request.epoch ? 1 : 0;
 			request_remove(index);
 			send_accept(request.key, request.nonce, friendship);
 			name_or_code(request.key, request.name, text, sizeof(text));
@@ -4409,6 +4848,8 @@ int p2p_friends_act(const char *id, int kind, int action)
 		else
 		{
 			muted_add(friends->requests[index].key);
+			/* (its requests no newer than this one never shown again, F-10) */
+			mark_note(friends->requests[index].key, friends->requests[index].epoch, friends->requests[index].counter);
 			platform_log("friends: declined %s's friend request (nothing sent)", friends->requests[index].name);
 			request_remove(index);
 			changed = 1;
@@ -4453,6 +4894,7 @@ int p2p_friends_act(const char *id, int kind, int action)
 
 			platform_log("friends: removed %s", record->name);
 			tombstone_add(record->key, record->friendship);
+			mark_note(record->key, record->epoch, record->counter);
 			if (friends_on())
 				send_remove(record->key, record->friendship);
 			friend_remove_index(index);

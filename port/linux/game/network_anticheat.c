@@ -78,6 +78,9 @@ enum
 {
 	/* the machines kept out at once (the oldest gives way) */
 	MAXIMUM_SESSION_BANS = 64,
+	/* (the players one person's address may have in a game: a machine's
+	own four at least, F-11) */
+	MAXIMUM_PLAYERS_PER_ADDRESS_FLOOR = 4,
 	/* a machine's violations logged no more often than this (milliseconds) */
 	VIOLATION_LOG_MILLISECONDS = 1000,
 	HARDWARE_ID_SIZE = 33,
@@ -448,6 +451,43 @@ boolean network_anticheat_refused(
 		}
 	}
 	return FALSE;
+}
+
+unsigned long network_anticheat_person_address(
+	unsigned long address)
+{
+	unsigned long real = address ? network_distributed_real_address(address) : 0;
+
+	return real ? real : address;
+}
+
+long network_anticheat_address_player_limit(
+	long maximum_players)
+{
+	long limit = (maximum_players + 1) / 2;
+
+	return limit < MAXIMUM_PLAYERS_PER_ADDRESS_FLOOR ? MAXIMUM_PLAYERS_PER_ADDRESS_FLOOR : limit;
+}
+
+boolean network_anticheat_address_room(
+	unsigned long address,
+	unsigned long const *addresses,
+	long const *players,
+	long count,
+	long maximum_players,
+	long adding)
+{
+	unsigned long person = network_anticheat_person_address(address);
+	long index, total = adding;
+
+	if (!person)
+		return TRUE;
+	for (index = 0; index < count; index++)
+	{
+		if (addresses[index] && network_anticheat_person_address(addresses[index]) == person)
+			total += players[index] > 0 ? players[index] : 1;
+	}
+	return total <= network_anticheat_address_player_limit(maximum_players);
 }
 
 boolean network_anticheat_drop(

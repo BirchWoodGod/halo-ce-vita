@@ -1949,6 +1949,417 @@ static void test_party_restart(void)
 	broker_copies = 1;
 }
 
+/* ---------- the security review's follow-ups (1.1.1-beta.1 F-05, F-06,
+F-10) */
+
+/* identities that are no machine of the test's: requests to a machine's
+code, signed and sealed as a stranger's game would */
+static struct friends_state strangers[2];
+
+static void stranger_make(int which, unsigned long long epoch)
+{
+	struct friends_state *was = friends;
+
+	memset(&strangers[which], 0, sizeof(strangers[which]));
+	friends = &strangers[which];
+	posix_random_bytes(friends->seed, sizeof(friends->seed));
+	identity_from_seed();
+	friends->epoch = epoch;
+	friends = was;
+}
+
+/* a request of a stranger's (or a new key's, with stranger NULL) to a
+machine; its payload and topic */
+static int stranger_request(struct friends_state *stranger, int to, const char *name, unsigned char *payload,
+	char *topic)
+{
+	struct friends_state *was = friends;
+	static struct friends_state fresh;
+	struct message message;
+	unsigned char plain[MAXIMUM_PLAIN_SIZE], seal_key[P2P_SHA256_SIZE], recipient[P2P_SHA256_SIZE];
+	int size;
+
+	if (!stranger)
+	{
+		memset(&fresh, 0, sizeof(fresh));
+		stranger = &fresh;
+		friends = stranger;
+		posix_random_bytes(friends->seed, sizeof(friends->seed));
+		identity_from_seed();
+		friends->epoch = 1700000000ULL;
+	}
+	friends = stranger;
+	code_derive(machines[to].code, topic, seal_key, recipient);
+	message_start(&message, TYPE_REQUEST, recipient);
+	snprintf(message.name, sizeof(message.name), "%s", name);
+	posix_random_bytes(message.nonce, NONCE_LENGTH);
+	size = plain_encode(&message, plain);
+	size = envelope_seal(KIND_REQUEST, seal_key, plain, size, payload);
+	friends = was;
+	return size;
+}
+
+/* a machine's request of that name: its index on the list (-1 none) */
+static int request_named(int machine, const char *name, struct p2p_friend_entry *entry)
+{
+	int nth;
+
+	for (nth = 0; entry_of(machine, P2P_FRIEND_KIND_REQUEST, nth, entry); nth++)
+		if (!strcmp(entry->name, name))
+			return nth;
+	return -1;
+}
+
+/* requests of new keys, one every two seconds (the strangers' budget), so
+that each is heard: the replay ring of 64 turned over */
+static void strangers_heard(int to, int count)
+{
+	unsigned char payload[MAXIMUM_PAYLOAD_SIZE];
+	char topic[TOPIC_LENGTH];
+	int index, size;
+
+	for (index = 0; index < count; index++)
+	{
+		size = stranger_request(NULL, to, "Passerby", payload, topic);
+		hand(to, topic, payload, size);
+		pass(4);
+	}
+}
+
+/* a machine's new run: its state read back from its files */
+static void restart(int machine)
+{
+	char code[P2P_FRIEND_CODE_SIZE];
+
+	use(machine);
+	friends->dirty = 1;
+	save(1);
+	memset(&machines[machine], 0, sizeof(machines[machine]));
+	code_of(machine, code);
+}
+
+static void test_request_replays(void)
+{
+	unsigned char payload[MAXIMUM_PAYLOAD_SIZE], echo[MAXIMUM_PAYLOAD_SIZE], bravo[MAXIMUM_PAYLOAD_SIZE];
+	char topic[TOPIC_LENGTH], echo_topic[TOPIC_LENGTH];
+	struct p2p_friend_entry entry;
+	int size, echo_size, bravo_size = 0, index;
+
+	/* Alpha's first request to Bravo (they are friends since), as the
+	broker carried it */
+	for (index = 0; index < carried_count && !bravo_size; index++)
+		if (carried[index].from == 0 && !strcmp(carried[index].topic, machines[1].inbox_topic))
+		{
+			memcpy(bravo, carried[index].payload, (size_t)carried[index].size);
+			bravo_size = carried[index].size;
+		}
+	check(bravo_size > 0, "F-10: Alpha's old request carried");
+	use(1);
+	check(find_friend(machines[0].key) != NULL, "F-10: Alpha a friend of Bravo's");
+	use(0);
+	machines[0].request_count = 0;
+	machines[0].muted_count = 0;
+	/* (the budgets the flood before spent, earned again) */
+	pass(40);
+	/* Echo asks Alpha; Alpha declines */
+	stranger_make(0, 1700000100ULL);
+	echo_size = stranger_request(&strangers[0], 0, "Echo", echo, echo_topic);
+	hand(0, echo_topic, echo, echo_size);
+	pass(2);
+	check(request_named(0, "Echo", &entry) >= 0, "F-10: Echo's request heard");
+	use(0);
+	check(p2p_friends_act(entry.id, P2P_FRIEND_KIND_REQUEST, P2P_FRIENDS_DECLINE) == P2P_FRIENDS_DONE, "F-10: declined");
+	/* a week on (the mute over), and 70 other strangers' requests heard
+	since: Echo's old request replayed off the broker */
+	use(0);
+	machines[0].muted_count = 0;
+	strangers_heard(0, 70);
+	use(0);
+	machines[0].request_count = 0;
+	reset_drops(0);
+	hand(0, echo_topic, echo, echo_size);
+	pass(2);
+	check(request_named(0, "Echo", &entry) < 0, "F-10: a declined request replayed after 64 others: not shown again");
+	check(machines[0].dropped_replays + machines[0].total_replays >= 1, "F-10: and counted a replay");
+	/* Alpha's old request replayed to Bravo (64 others since: the ring
+	turned over): no answer again, nothing changed */
+	strangers_heard(1, 70);
+	use(1);
+	machines[1].request_count = 0;
+	pass(2);
+	reset_drops(1);
+	hand(1, machines[1].inbox_topic, bravo, bravo_size);
+	use(1);
+	p2p_friends_update(&hosts[1]);
+	check(machines[1].dropped_replays + machines[1].total_replays >= 1 && machines[1].outbound_count == 0,
+		"F-10: a friend's old request replayed: dropped, not answered");
+	machines[1].outbound_count = 0;
+	/* a new run of Alpha's (the ring empty): the replay again */
+	restart(0);
+	hand(0, echo_topic, echo, echo_size);
+	pass(2);
+	check(request_named(0, "Echo", &entry) < 0, "F-10: a declined request replayed after a restart: not shown");
+	/* Echo asks again (a newer counter), then from a new run (a newer
+	epoch): heard */
+	size = stranger_request(&strangers[0], 0, "Echo", payload, topic);
+	hand(0, topic, payload, size);
+	pass(2);
+	check(request_named(0, "Echo", &entry) >= 0, "F-10: Echo's new request heard");
+	use(0);
+	machines[0].request_count = 0;
+	strangers[0].epoch++;
+	strangers[0].counter = 0;
+	size = stranger_request(&strangers[0], 0, "Echo", payload, topic);
+	hand(0, topic, payload, size);
+	pass(2);
+	check(request_named(0, "Echo", &entry) >= 0, "F-10: Echo's request from a new run heard");
+	use(0);
+	machines[0].request_count = 0;
+	machines[0].dirty = 1;
+	save(1);
+}
+
+static void test_request_floods(void)
+{
+	unsigned char payload[MAXIMUM_PAYLOAD_SIZE];
+	char topic[TOPIC_LENGTH];
+	struct p2p_friend_entry entry;
+	int size, index;
+
+	use(0);
+	machines[0].request_count = 0;
+	/* 16 strangers fill Alpha's requests, then stop */
+	for (index = 0; index < P2P_FRIEND_REQUESTS_MAXIMUM; index++)
+	{
+		size = stranger_request(NULL, 0, "Filler", payload, topic);
+		hand(0, topic, payload, size);
+		pass(4);
+	}
+	check(machines[0].request_count == P2P_FRIEND_REQUESTS_MAXIMUM, "F-06: the list filled");
+	/* Foxtrot's request: no room yet */
+	stranger_make(1, 1700000200ULL);
+	size = stranger_request(&strangers[1], 0, "Foxtrot", payload, topic);
+	hand(0, topic, payload, size);
+	pass(4);
+	check(request_named(0, "Foxtrot", &entry) < 0, "F-06: a full list takes no new request at once");
+	/* the fillers silent past a sender's longest wait: Foxtrot's request
+	sent again makes room */
+	pass((REQUEST_IDLE_TIME + 2000) / 500);
+	size = stranger_request(&strangers[1], 0, "Foxtrot", payload, topic);
+	hand(0, topic, payload, size);
+	pass(2);
+	check(request_named(0, "Foxtrot", &entry) >= 0, "F-06: a list filled once and left takes a new request");
+	/* a flood of new keys' requests in one pass: Foxtrot's request (a key
+	known here now) sent again, renamed, and Bravo's messages to Alpha,
+	still heard */
+	use(0);
+	reset_drops(0);
+	for (index = 0; index < 200; index++)
+	{
+		size = stranger_request(NULL, 0, "Flood", payload, topic);
+		hand(0, topic, payload, size);
+	}
+	size = stranger_request(&strangers[1], 0, "Foxtrot2", payload, topic);
+	hand(0, topic, payload, size);
+	for (index = 0; index < 10; index++)
+	{
+		use(0);
+		p2p_friends_update(&hosts[0]);
+	}
+	check(request_named(0, "Foxtrot2", &entry) >= 0, "F-06: a known key's request heard through a flood");
+	check(machines[0].request_count <= P2P_FRIEND_REQUESTS_MAXIMUM, "F-06: the list's room kept");
+	{
+		int queued_inbox = 0;
+
+		for (index = 0; index < 200; index++)
+		{
+			size = stranger_request(NULL, 0, "Flood", payload, topic);
+			hand(0, topic, payload, size);
+		}
+		use(0);
+		for (index = 0; index < machines[0].inbound_count; index++)
+			queued_inbox += machines[0].inbound[index].which == P2P_FRIENDS_INBOX;
+		check(queued_inbox <= MAXIMUM_INBOUND_STRANGERS + MAXIMUM_INBOUND_KNOWN &&
+			machines[0].inbound_count < MAXIMUM_INBOUND, "F-06: a flood leaves the friends' messages room");
+		machines[0].inbound_count = 0;
+	}
+	/* Alpha and Charlie (strangers) both ask each other during a flood:
+	friends */
+	{
+		char code_a[P2P_FRIEND_CODE_SIZE], code_c[P2P_FRIEND_CODE_SIZE];
+		int step;
+
+		code_of(0, code_a);
+		code_of(2, code_c);
+		use(2);
+		machines[2].outgoing_count = 0;
+		use(0);
+		machines[0].outgoing_count = 0;
+		if (find_friend(machines[2].key))
+			friend_remove_index(find_friend_index(machines[2].key));
+		while (find_blocked(machines[2].key) >= 0)
+			machines[0].blocked_count = 0;
+		use(2);
+		while (find_blocked(machines[0].key) >= 0)
+			machines[2].blocked_count = 0;
+		if (find_friend(machines[0].key))
+			friend_remove_index(find_friend_index(machines[0].key));
+		machines[0].muted_count = 0;
+		machines[2].muted_count = 0;
+		machines[0].mark_count = 0;
+		use(0);
+		check(p2p_friends_add(code_c) == P2P_FRIENDS_ADD_SENT, "F-06: Alpha asks Charlie");
+		for (step = 0; step < 40; step++)
+		{
+			for (index = 0; index < 30; index++)
+			{
+				size = stranger_request(NULL, 0, "Flood", payload, topic);
+				hand(0, topic, payload, size);
+			}
+			if (step == 1)
+			{
+				use(2);
+				p2p_friends_add(code_a);
+			}
+			pass(1);
+		}
+		use(0);
+		check(find_friend(machines[2].key) != NULL, "F-06: two who both ask become friends through a flood");
+	}
+	use(0);
+	machines[0].request_count = 0;
+	machines[0].inbound_count = 0;
+	machines[0].dirty = 1;
+	save(1);
+}
+
+/* F-05: the host of a game presents one player's card as another's */
+static void test_card_binding(void)
+{
+	unsigned long addresses[MACHINES];
+	unsigned char ask[CARD_ANSWER_SIZE], answer[CARD_ANSWER_SIZE];
+	int index, ask_size = 0, answer_size = 0;
+
+	for (index = 0; index < MACHINES; index++)
+	{
+		addresses[index] = virtual_of(index);
+		use(index);
+		machines[index].test_appeared_offline = 0;
+		memset(machines[index].machines, 0, sizeof(machines[index].machines));
+		machines[index].card_outbound_count = machines[index].card_inbound_count = 0;
+	}
+	/* Alpha hosts (0); Bravo (1), Charlie (2) and Delta (3) joined */
+	use(0);
+	p2p_friends_set_game(0, 1, addresses, MACHINES);
+	for (index = 1; index < MACHINES; index++)
+	{
+		use(index);
+		p2p_friends_set_game(index, 0, NULL, 0);
+	}
+	pass(8);
+	/* Bravo asks Delta's card; the host sends the ask to Charlie instead,
+	and Charlie's answer back as Delta's */
+	use(1);
+	check(p2p_friends_player_ask(3, P2P_FRIENDS_PLAYER_ADD) == P2P_FRIENDS_DONE, "F-05: Bravo asks Delta's card");
+	if (machines[1].card_outbound_count == 1)
+	{
+		ask_size = machines[1].card_outbound[0].size;
+		memcpy(ask, machines[1].card_outbound[0].bytes, (size_t)ask_size);
+	}
+	machines[1].card_outbound_count = 0;
+	check(ask_size == CARD_HEADER_SIZE, "F-05: the ask the same size as before (older hosts relay it)");
+	ask[2] = 1;
+	ask[3] = 2;
+	use(2);
+	p2p_friends_tunnel_heard(virtual_of(0), 1, ask, ask_size);
+	p2p_friends_update(&hosts[2]);
+	if (machines[2].card_outbound_count == 1)
+	{
+		answer_size = machines[2].card_outbound[0].size;
+		memcpy(answer, machines[2].card_outbound[0].bytes, (size_t)answer_size);
+	}
+	machines[2].card_outbound_count = 0;
+	check(answer_size == CARD_ANSWER_SIZE, "F-05: Charlie answered (the same size as before)");
+	answer[2] = 3;
+	reset_drops(1);
+	use(1);
+	p2p_friends_tunnel_heard(virtual_of(0), 1, answer, answer_size);
+	p2p_friends_update(&hosts[1]);
+	check(!machines[1].machines[3].has_card, "F-05: Charlie's card presented as Delta's: dropped");
+	check(machines[1].dropped_forged + machines[1].total_forged >= 1, "F-05: and counted forged");
+	machines[1].outbound_count = 0;
+	machines[1].card_outbound_count = 0;
+	/* the honest relay: Delta's own card taken, bound */
+	clock_now += CARD_ASK_INTERVAL + 1000;
+	machines[1].machines[3].asking = 0;
+	machines[1].machines[3].asked_time = 0;
+	use(1);
+	check(p2p_friends_player_ask(3, P2P_FRIENDS_PLAYER_BLOCK) == P2P_FRIENDS_DONE, "F-05: Bravo asks again");
+	game_pass(6);
+	use(1);
+	check(machines[1].machines[3].has_card && p2p_equal(machines[1].machines[3].key, machines[3].key, P2P_KEY_SIZE),
+		"F-05: Delta's own card, relayed honestly, taken");
+	/* an older build's ask (no mark in its nonce): answered as before, over
+	the nonce alone, which an older asker checks */
+	{
+		unsigned char data[64 + CARD_ANSWER_SIZE];
+		int data_size;
+
+		memset(ask, 0, sizeof(ask));
+		ask[0] = CARD_VERSION;
+		ask[1] = CARD_ASK;
+		ask[2] = 1;
+		ask[3] = 2;
+		posix_random_bytes(ask + 4, NONCE_LENGTH);
+		ask[4] = 'x';
+		use(2);
+		clock_now += CARD_ANSWER_INTERVAL + 1000;
+		p2p_friends_tunnel_heard(virtual_of(0), 1, ask, CARD_HEADER_SIZE);
+		p2p_friends_update(&hosts[2]);
+		check(machines[2].card_outbound_count == 1, "F-05: an older build's ask answered");
+		if (machines[2].card_outbound_count == 1)
+		{
+			memcpy(answer, machines[2].card_outbound[0].bytes, CARD_ANSWER_SIZE);
+			card_signed_data(answer, data, &data_size, 0);
+			check(p2p_ed25519_verify(machines[2].key, data, data_size, answer + CARD_ANSWER_SIZE - P2P_SIGNATURE_SIZE),
+				"F-05: ... signed as an older build checks it");
+		}
+		machines[2].card_outbound_count = 0;
+		/* an older build's answer (signed over the nonce alone) to this
+		build's ask: taken */
+		use(1);
+		machines[1].machines[2].asking = 0;
+		machines[1].machines[2].asked_time = 0;
+		machines[1].machines[2].has_card = 0;
+		check(p2p_friends_player_ask(2, P2P_FRIENDS_PLAYER_BLOCK) == P2P_FRIENDS_DONE, "F-05: Bravo asks Charlie's card");
+		machines[1].card_outbound_count = 0;
+		memset(answer, 0, sizeof(answer));
+		answer[0] = CARD_VERSION;
+		answer[1] = CARD_ANSWER;
+		answer[2] = 2;
+		answer[3] = 1;
+		memcpy(answer + 4, machines[1].machines[2].nonce, NONCE_LENGTH);
+		memcpy(answer + CARD_HEADER_SIZE, machines[2].key, P2P_KEY_SIZE);
+		card_signed_data(answer, data, &data_size, 0);
+		p2p_ed25519_sign(machines[2].seed, machines[2].key, data, data_size, answer + CARD_ANSWER_SIZE - P2P_SIGNATURE_SIZE);
+		use(1);
+		p2p_friends_tunnel_heard(virtual_of(0), 1, answer, CARD_ANSWER_SIZE);
+		p2p_friends_update(&hosts[1]);
+		check(machines[1].machines[2].has_card, "F-05: an older build's card taken");
+		machines[1].outbound_count = 0;
+	}
+	for (index = 0; index < MACHINES; index++)
+	{
+		use(index);
+		p2p_friends_set_game(-1, 0, NULL, 0);
+		machines[index].card_outbound_count = 0;
+	}
+	use(1);
+	machines[1].blocked_count = 0;
+	machines[1].dirty = 1;
+	save(1);
+}
+
 int main(void)
 {
 	char root[512];
@@ -1975,7 +2386,10 @@ int main(void)
 	test_remove();
 	test_files();
 	test_limits();
+	test_request_replays();
+	test_request_floods();
 	test_cards();
+	test_card_binding();
 	test_party();
 	test_party_restart();
 	if (failures)

@@ -375,7 +375,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 			memcpy(card + 4, machines[T].machines[2].nonce, NONCE_LENGTH);
 			memcpy(card + CARD_HEADER_SIZE, machines[S].key, P2P_KEY_SIZE);
 			use(S);
-			card_signed_data(card, signed_data, &signed_size);
+			card_signed_data(card, signed_data, &signed_size, card_nonce_bound(card + 4) && (flags & 64) == 0);
 			p2p_ed25519_sign(machines[S].seed, machines[S].key, signed_data, signed_size,
 				card + CARD_ANSWER_SIZE - P2P_SIGNATURE_SIZE);
 			length = CARD_ANSWER_SIZE;
