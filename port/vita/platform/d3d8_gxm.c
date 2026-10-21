@@ -3015,14 +3015,16 @@ static int waiter_sleep(struct worker_waiter *waiter, int (*ready)(unsigned long
 			way (the publisher between the two: up to 100 ms more), is a
 			wake-up that came late; none, or one for a later publish only,
 			is one lost */
-			late = vita_host_wake_poll(waiter->wake) == 0 ||
-				(vita_host_wake_wait(waiter->wake, 100000) == 0 &&
-					(long)(__atomic_load_n(&waiter->woken_at, __ATOMIC_ACQUIRE) - seen) <= 0);
+			int signal = vita_host_wake_poll(waiter->wake) == 0 ? 2 : vita_host_wake_wait(waiter->wake, 100000) == 0;
+			unsigned long woken_at = __atomic_load_n(&waiter->woken_at, __ATOMIC_ACQUIRE);
+
+			late = signal == 2 || (signal && (long)(woken_at - seen) <= 0);
 			if (late)
 				waiter->late++;
 			else if (++waiter->lost <= 8)
-				platform_log("render worker: lost wake-up %lu (%s): the wait ran out with its work there", waiter->lost,
-					waiter->name);
+				platform_log("render worker: lost wake-up %lu (%s): the wait ran out with its work there (publish %lu "
+					"seen, the last signal for %lu, %s)", waiter->lost, waiter->name, seen, woken_at,
+					signal ? "a signal came after" : "no signal in 100 ms more");
 		}
 		if (wait_stats() >= 2 && (!now_ready || late))
 			platform_log("render worker: a wait of %s ran out of time (%lu us), %s", waiter->name, wait_timeout_us(),
