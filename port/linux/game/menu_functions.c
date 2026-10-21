@@ -1948,6 +1948,11 @@ static struct
 	/* why START FORGE did not start (the lobby's note), until another
 	choice */
 	char note[FORGE_STORE_WHY_SIZE];
+	/* the note when it is START FORGE's "Still building <pack> (N%)": kept
+	beside it so the lobby's update knows the note is that one and redraws
+	its number as the pack builds, and clears it when the packs are done
+	(insider.18: it stood on the number of the press until X again) */
+	char note_building[FORGE_STORE_WHY_SIZE];
 	/* the NETWORK row said last (the tests read it); the lobby's first
 	opening this run (MAP focused) */
 	char network_said[96];
@@ -1983,6 +1988,15 @@ static void h3_forge_lobby_initialize(void)
 	h3_forge.note[0] = 0;
 	platform_log("menus: forge lobby: %s%s%s", forge_map_name(h3_forge.map), h3_forge.variant_file[0] ? ", map variant " : "",
 		h3_forge.variant_title);
+}
+
+/* START FORGE refused for a pack being built: the note says which and how
+far (h3_forge_lobby_update keeps its number moving) */
+static void h3_forge_note_building(char const *label, long progress)
+{
+	snprintf(h3_forge.note, sizeof(h3_forge.note),
+		T("Still building %s (%ld%%).\nSTART FORGE when it is done, or\nturn it off in EXTRA OBJECTS."), label, progress);
+	snprintf(h3_forge.note_building, sizeof(h3_forge.note_building), "%s", h3_forge.note);
 }
 
 /* the lobby's map row, picture (map_picture: its frame of ui.map's
@@ -2030,6 +2044,16 @@ static void h3_forge_lobby_update(struct widget_instance *widget)
 		char label[64], line[192], map[64];
 		long progress = 0, copied = 0;
 
+		/* (START FORGE's "Still building": its number kept moving each
+		frame, the note gone once the packs are built - not the number of
+		the press standing until the next) */
+		if (h3_forge.note[0] && !strcmp(h3_forge.note, h3_forge.note_building))
+		{
+			if (forge_packs_building(label, sizeof(label), &progress))
+				h3_forge_note_building(label, progress);
+			else
+				h3_forge.note[0] = 0;
+		}
 		if (h3_forge.note[0])
 			snprintf(line, sizeof(line), "%s", h3_forge.note);
 		else if (forge_packs_building(label, sizeof(label), &progress))
@@ -11214,9 +11238,7 @@ boolean pc_menu_event_function_invoke(
 			load would hold the screen for as long) */
 			if (forge_packs_building(label, sizeof(label), &progress))
 			{
-				snprintf(h3_forge.note, sizeof(h3_forge.note),
-					T("Still building %s (%ld%%).\nSTART FORGE when it is done, or\nturn it off in EXTRA OBJECTS."), label,
-					progress);
+				h3_forge_note_building(label, progress);
 				platform_log("menus: forge lobby: not started: %s is being built (%ld%%)", label, progress);
 				return FALSE;
 			}
