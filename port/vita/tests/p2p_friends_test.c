@@ -1949,6 +1949,133 @@ static void test_party_restart(void)
 	broker_copies = 1;
 }
 
+/* F-05: the host of a game presents one player's card as another's */
+static void test_card_binding(void)
+{
+	unsigned long addresses[MACHINES];
+	unsigned char ask[CARD_ANSWER_SIZE], answer[CARD_ANSWER_SIZE];
+	int index, ask_size = 0, answer_size = 0;
+
+	for (index = 0; index < MACHINES; index++)
+	{
+		addresses[index] = virtual_of(index);
+		use(index);
+		machines[index].test_appeared_offline = 0;
+		memset(machines[index].machines, 0, sizeof(machines[index].machines));
+		machines[index].card_outbound_count = machines[index].card_inbound_count = 0;
+	}
+	/* Alpha hosts (0); Bravo (1), Charlie (2) and Delta (3) joined */
+	use(0);
+	p2p_friends_set_game(0, 1, addresses, MACHINES);
+	for (index = 1; index < MACHINES; index++)
+	{
+		use(index);
+		p2p_friends_set_game(index, 0, NULL, 0);
+	}
+	pass(8);
+	/* Bravo asks Delta's card; the host sends the ask to Charlie instead,
+	and Charlie's answer back as Delta's */
+	use(1);
+	check(p2p_friends_player_ask(3, P2P_FRIENDS_PLAYER_ADD) == P2P_FRIENDS_DONE, "F-05: Bravo asks Delta's card");
+	if (machines[1].card_outbound_count == 1)
+	{
+		ask_size = machines[1].card_outbound[0].size;
+		memcpy(ask, machines[1].card_outbound[0].bytes, (size_t)ask_size);
+	}
+	machines[1].card_outbound_count = 0;
+	check(ask_size == CARD_HEADER_SIZE, "F-05: the ask the same size as before (older hosts relay it)");
+	ask[2] = 1;
+	ask[3] = 2;
+	use(2);
+	p2p_friends_tunnel_heard(virtual_of(0), 1, ask, ask_size);
+	p2p_friends_update(&hosts[2]);
+	if (machines[2].card_outbound_count == 1)
+	{
+		answer_size = machines[2].card_outbound[0].size;
+		memcpy(answer, machines[2].card_outbound[0].bytes, (size_t)answer_size);
+	}
+	machines[2].card_outbound_count = 0;
+	check(answer_size == CARD_ANSWER_SIZE, "F-05: Charlie answered (the same size as before)");
+	answer[2] = 3;
+	reset_drops(1);
+	use(1);
+	p2p_friends_tunnel_heard(virtual_of(0), 1, answer, answer_size);
+	p2p_friends_update(&hosts[1]);
+	check(!machines[1].machines[3].has_card, "F-05: Charlie's card presented as Delta's: dropped");
+	check(machines[1].dropped_forged + machines[1].total_forged >= 1, "F-05: and counted forged");
+	machines[1].outbound_count = 0;
+	machines[1].card_outbound_count = 0;
+	/* the honest relay: Delta's own card taken, bound */
+	clock_now += CARD_ASK_INTERVAL + 1000;
+	machines[1].machines[3].asking = 0;
+	machines[1].machines[3].asked_time = 0;
+	use(1);
+	check(p2p_friends_player_ask(3, P2P_FRIENDS_PLAYER_BLOCK) == P2P_FRIENDS_DONE, "F-05: Bravo asks again");
+	game_pass(6);
+	use(1);
+	check(machines[1].machines[3].has_card && p2p_equal(machines[1].machines[3].key, machines[3].key, P2P_KEY_SIZE),
+		"F-05: Delta's own card, relayed honestly, taken");
+	/* an older build's ask (no mark in its nonce): answered as before, over
+	the nonce alone, which an older asker checks */
+	{
+		unsigned char data[64 + CARD_ANSWER_SIZE];
+		int data_size;
+
+		memset(ask, 0, sizeof(ask));
+		ask[0] = CARD_VERSION;
+		ask[1] = CARD_ASK;
+		ask[2] = 1;
+		ask[3] = 2;
+		posix_random_bytes(ask + 4, NONCE_LENGTH);
+		ask[4] = 'x';
+		use(2);
+		clock_now += CARD_ANSWER_INTERVAL + 1000;
+		p2p_friends_tunnel_heard(virtual_of(0), 1, ask, CARD_HEADER_SIZE);
+		p2p_friends_update(&hosts[2]);
+		check(machines[2].card_outbound_count == 1, "F-05: an older build's ask answered");
+		if (machines[2].card_outbound_count == 1)
+		{
+			memcpy(answer, machines[2].card_outbound[0].bytes, CARD_ANSWER_SIZE);
+			card_signed_data(answer, data, &data_size, 0);
+			check(p2p_ed25519_verify(machines[2].key, data, data_size, answer + CARD_ANSWER_SIZE - P2P_SIGNATURE_SIZE),
+				"F-05: ... signed as an older build checks it");
+		}
+		machines[2].card_outbound_count = 0;
+		/* an older build's answer (signed over the nonce alone) to this
+		build's ask: taken */
+		use(1);
+		machines[1].machines[2].asking = 0;
+		machines[1].machines[2].asked_time = 0;
+		machines[1].machines[2].has_card = 0;
+		check(p2p_friends_player_ask(2, P2P_FRIENDS_PLAYER_BLOCK) == P2P_FRIENDS_DONE, "F-05: Bravo asks Charlie's card");
+		machines[1].card_outbound_count = 0;
+		memset(answer, 0, sizeof(answer));
+		answer[0] = CARD_VERSION;
+		answer[1] = CARD_ANSWER;
+		answer[2] = 2;
+		answer[3] = 1;
+		memcpy(answer + 4, machines[1].machines[2].nonce, NONCE_LENGTH);
+		memcpy(answer + CARD_HEADER_SIZE, machines[2].key, P2P_KEY_SIZE);
+		card_signed_data(answer, data, &data_size, 0);
+		p2p_ed25519_sign(machines[2].seed, machines[2].key, data, data_size, answer + CARD_ANSWER_SIZE - P2P_SIGNATURE_SIZE);
+		use(1);
+		p2p_friends_tunnel_heard(virtual_of(0), 1, answer, CARD_ANSWER_SIZE);
+		p2p_friends_update(&hosts[1]);
+		check(machines[1].machines[2].has_card, "F-05: an older build's card taken");
+		machines[1].outbound_count = 0;
+	}
+	for (index = 0; index < MACHINES; index++)
+	{
+		use(index);
+		p2p_friends_set_game(-1, 0, NULL, 0);
+		machines[index].card_outbound_count = 0;
+	}
+	use(1);
+	machines[1].blocked_count = 0;
+	machines[1].dirty = 1;
+	save(1);
+}
+
 int main(void)
 {
 	char root[512];
@@ -1976,6 +2103,7 @@ int main(void)
 	test_files();
 	test_limits();
 	test_cards();
+	test_card_binding();
 	test_party();
 	test_party_restart();
 	if (failures)

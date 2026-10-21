@@ -3118,16 +3118,46 @@ static int card_route(int machine, unsigned long *address)
 	return *address != 0;
 }
 
-static void card_signed_data(const unsigned char *packet, unsigned char *data, int *size)
+/* an ask's nonce from a build that checks a card is bound to its machine
+begins with this (security review 1.1.1-beta.1 F-05): its answer is
+signed over the machines too. The rest of the nonce is random; the packet
+is the same, so a host of an older build relays it as before, and a machine
+of an older build answers it as before (its card not bound: taken, as
+from an older build) */
+static const unsigned char card_bound_mark[4] = { 'h', 'c', 'B', 0x02 };
+
+static int card_nonce_bound(const unsigned char *nonce)
+{
+	return !memcmp(nonce, card_bound_mark, sizeof(card_bound_mark));
+}
+
+/* what an answer's signature covers: the kind, the nonce, the key and the
+name; bound, also the answering machine and the asker's as the answer
+names them, so that a host's relay can no longer present one player's
+card as another player's (the host corrects "from" to the sender it has,
+which is what an honest host's answerer signed) */
+static void card_signed_data(const unsigned char *packet, unsigned char *data, int *size, int bound)
 {
 	static const char label[] = "hcev-friends-1 card";
+	static const char bound_label[] = "hcev-friends-2 card";
 	int at = 0;
 
-	memcpy(data, label, sizeof(label) - 1);
-	at += (int)sizeof(label) - 1;
-	/* (the kind, the nonce, the key and the name: the machines are the
-	game's numbers, which the host's relay may correct) */
+	if (bound)
+	{
+		memcpy(data, bound_label, sizeof(bound_label) - 1);
+		at += (int)sizeof(bound_label) - 1;
+	}
+	else
+	{
+		memcpy(data, label, sizeof(label) - 1);
+		at += (int)sizeof(label) - 1;
+	}
 	data[at++] = packet[1];
+	if (bound)
+	{
+		data[at++] = packet[2];
+		data[at++] = packet[3];
+	}
 	memcpy(data + at, packet + 4, NONCE_LENGTH + P2P_KEY_SIZE + 1 + NAME_LENGTH);
 	at += NONCE_LENGTH + P2P_KEY_SIZE + 1 + NAME_LENGTH;
 	*size = at;
@@ -3152,7 +3182,7 @@ static void card_answer(int machine, const unsigned char *nonce)
 	memcpy(packet + CARD_HEADER_SIZE, friends->key, P2P_KEY_SIZE);
 	own_name(name);
 	put_text(packet + CARD_HEADER_SIZE + P2P_KEY_SIZE, name, NAME_LENGTH);
-	card_signed_data(packet, data, &size);
+	card_signed_data(packet, data, &size, card_nonce_bound(nonce));
 	p2p_ed25519_sign(friends->seed, friends->key, data, size, packet + CARD_ANSWER_SIZE - P2P_SIGNATURE_SIZE);
 	card_queue(address, packet, CARD_ANSWER_SIZE);
 }
@@ -3246,8 +3276,9 @@ static void card_heard(const struct card_packet *packet)
 		struct card_machine *machine = &friends->machines[from];
 		unsigned char data[64 + CARD_ANSWER_SIZE];
 		const unsigned char *key = bytes + CARD_HEADER_SIZE;
+		const unsigned char *signature = bytes + CARD_ANSWER_SIZE - P2P_SIGNATURE_SIZE;
 		char name[P2P_FRIEND_NAME_SIZE];
-		int size;
+		int size, bound, other;
 
 		if (!machine->asking || !p2p_equal(machine->nonce, bytes + 4, NONCE_LENGTH) ||
 			bytes[CARD_HEADER_SIZE + P2P_KEY_SIZE] > NAME_LENGTH)
@@ -3255,13 +3286,54 @@ static void card_heard(const struct card_packet *packet)
 			friends->dropped_replays++;
 			return;
 		}
-		card_signed_data(bytes, data, &size);
-		if (!key_usable(key) || !p2p_ed25519_verify(key, data, size, bytes + CARD_ANSWER_SIZE - P2P_SIGNATURE_SIZE))
+		/* (signed over the machines, as this machine's ask asked; else as an
+		older build's machine signs, over its nonce alone - a host can still
+		swap such a card with another's, as before) */
+		bound = 0;
+		if (!key_usable(key))
+			size = 0;
+		else
+		{
+			if (card_nonce_bound(machine->nonce))
+			{
+				unsigned char as_heard[CARD_ANSWER_SIZE];
+
+				/* (from: the machine this answer is taken as, the host's own
+				reading of its sender on a host) */
+				memcpy(as_heard, bytes, CARD_ANSWER_SIZE);
+				as_heard[2] = (unsigned char)from;
+				card_signed_data(as_heard, data, &size, 1);
+				bound = p2p_ed25519_verify(key, data, size, signature);
+			}
+			if (!bound)
+			{
+				card_signed_data(bytes, data, &size, 0);
+				if (!p2p_ed25519_verify(key, data, size, signature))
+					size = 0;
+			}
+		}
+		if (!size)
 		{
 			friends->dropped_forged++;
-			platform_log("friends: a friend card that is not its key's dropped");
+			platform_log("friends: a friend card that is not its key's (or not its machine's) dropped");
 			return;
 		}
+		/* (nor the card another player of this game gave, or this machine's
+		own: a host presenting it as this player's) */
+		for (other = 0; other < CARD_MACHINES; other++)
+			if (other != from && friends->machines[other].has_card &&
+				p2p_equal(friends->machines[other].key, key, P2P_KEY_SIZE))
+			{
+				break;
+			}
+		if (other < CARD_MACHINES || p2p_equal(key, friends->key, P2P_KEY_SIZE))
+		{
+			friends->dropped_forged++;
+			platform_log("friends: a friend card that another player of this game gave dropped");
+			return;
+		}
+		if (!bound)
+			platform_log("friends: machine %d's friend card is an older build's (not bound to its machine)", from);
 		if (!clean_text(name, NAME_LENGTH, bytes + CARD_HEADER_SIZE + P2P_KEY_SIZE + 1,
 			bytes[CARD_HEADER_SIZE + P2P_KEY_SIZE], 1))
 		{
@@ -3445,6 +3517,8 @@ int p2p_friends_player_ask(int machine, int intent)
 			record->intent = intent;
 			record->asked_time = now_stamp();
 			posix_random_bytes(record->nonce, NONCE_LENGTH);
+			/* (marked: its answer bound to its machine, F-05) */
+			memcpy(record->nonce, card_bound_mark, sizeof(card_bound_mark));
 			packet[0] = CARD_VERSION;
 			packet[1] = CARD_ASK;
 			packet[2] = (unsigned char)friends->game_machine;
