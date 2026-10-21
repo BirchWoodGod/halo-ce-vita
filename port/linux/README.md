@@ -56,9 +56,10 @@ If the game finds no data, it asks for an Xbox disc image (`.xiso` or
 - Select "Yes" to open a file picker. Select the disc image. The game copies
   `maps/` and `default.xbe` next to the executable and shows the progress.
 
-The loading screen takes its picture from the disc's `default.xbe` (the
-retail Xbox game has it in the executable, not in `maps/`). Put the file in
-the data root, next to `maps/`. Without it, the loading screen stays dark.
+The loading screen takes its picture and its hum from the disc's
+`default.xbe` (the retail Xbox game has them in the executable, not in
+`maps/`). Put the file in the data root, next to `maps/`, or in the folder
+above it. Without it, the loading screen stays dark and silent.
 
 The game writes the copy to `maps.partial`. When the copy is complete, the
 game changes the name to `maps`. If the copy stops before it is complete,

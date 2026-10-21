@@ -495,6 +495,72 @@ void platform_translate_path(const char *xbox_path, char *host_path, unsigned lo
 	snprintf(host_path, host_path_size, "%s", resolved);
 }
 
+void *platform_read_file_in_parent_folder(const char *xbox_directory, const char *name, long maximum_size,
+	long *size, char *host_path, unsigned long host_path_size)
+{
+	char folder[1024];
+	char path[1100];
+	char on_disk[256];
+	char *slash;
+	FILE *file;
+	unsigned char *bytes = NULL;
+	long length = -1;
+
+	*size = 0;
+	platform_translate_path(xbox_directory, folder, sizeof(folder));
+	trim_separators(folder);
+	/* the folder above: its last component dropped (never a device's root,
+	"ux0:"), or "/.." added to a relative one with none to drop (".") */
+	slash = strrchr(folder, '/');
+	{
+		/* (a Windows data root's own separators) */
+		char *backslash = strrchr(folder, '\\');
+
+		if (backslash && (!slash || backslash > slash))
+			slash = backslash;
+	}
+	if (slash && slash != folder && slash[-1] != ':' && strcmp(slash + 1, ".") && strcmp(slash + 1, ".."))
+		*slash = '\0';
+	else if (!strchr(folder, ':') && folder[0] != '/')
+		snprintf(folder + strlen(folder), sizeof(folder) - strlen(folder), "/..");
+	else
+		folder[0] = '\0';
+	if (!folder[0])
+	{
+		if (host_path && host_path_size)
+			host_path[0] = '\0';
+		return NULL;
+	}
+	if (!posix_find_entry_case_insensitive(folder, name, on_disk, sizeof(on_disk)))
+		snprintf(on_disk, sizeof(on_disk), "%s", name);
+	snprintf(path, sizeof(path), "%s/%s", folder, on_disk);
+	if (host_path && host_path_size)
+		snprintf(host_path, host_path_size, "%s", path);
+	file = fopen(path, "rb");
+	if (!file)
+		return NULL;
+	if (!fseek(file, 0, SEEK_END))
+		length = ftell(file);
+	if (length > 0 && length <= maximum_size && !fseek(file, 0, SEEK_SET))
+	{
+		bytes = malloc((size_t)length);
+		if (bytes && fread(bytes, 1, (size_t)length, file) != (size_t)length)
+		{
+			free(bytes);
+			bytes = NULL;
+		}
+	}
+	fclose(file);
+	if (bytes)
+		*size = length;
+	return bytes;
+}
+
+void platform_read_file_free(void *bytes)
+{
+	free(bytes);
+}
+
 /* ---------- file handles */
 
 struct platform_file
