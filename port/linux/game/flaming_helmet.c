@@ -26,7 +26,12 @@ large and slow; three of its white smoke tinted lavender, smaller and
 rising fast), 180 a second a wearer, alive for the tags' own short life,
 under the particle budget like any effect's; moving with the unit as they
 leave it. A
-map without it draws nothing. Each machine draws its own (no network
+map without it draws nothing. CUSTOMIZATION's preview (the main menu,
+ui.map, the scene pack's Spartan): no white smoke there, so the tongues are
+the grey smoke still, tinted lavender, smaller, one a tick; and no player, so
+its particles skip the players' potentially visible set
+(particles_new_ignore_players_pvs: every one was refused as unseen and the
+preview showed no flame at all). Each machine draws its own (no network
 traffic, nothing deterministic: the local random seed).
 
 (debug, not in release builds) HALO_TEST_FLAME_LOG=1 logs once a second
@@ -56,6 +61,7 @@ unsigned long system_milliseconds(void);
 #define FLAME_PARTICLE "effects\\particles\\energy\\smoke c generic"
 #define FLAME_TONGUE_PARTICLE "effects\\particles\\energy\\smoke white c generic"
 #define FLAME_PARTICLE_FALLBACK "effects\\particles\\energy\\flash c generic"
+#define FLAME_TONGUE_PARTICLE_FALLBACK "effects\\particles\\air\\smoke h generic still"
 /* the flame's particles a tick, their size, how they rise (world units a
 second), how far from the head they start */
 #define FLAME_PARTICLES_PER_TICK 3
@@ -80,6 +86,8 @@ static struct
 	long particle;
 	/* (the tongues': the white smoke, tinted lavender) */
 	long tongue_particle;
+	real tongue_radius_scale;
+	int tongues_per_tick;
 	boolean looked_up;
 	unsigned long logged_time;
 	/* (the preview's unit: CUSTOMIZATION's Spartan, flaming_helmet_preview) */
@@ -89,7 +97,7 @@ static struct
 	int refresh_ticks;
 	boolean wearing;
 	signed char verified[256];
-} flaming_helmet = { 0, NONE, NONE, FALSE, 0, NONE };
+} flaming_helmet = { 0, NONE, NONE, 1.0f, FLAME_PARTICLES_PER_TICK, FALSE, 0, NONE };
 
 /* the colour: the body's Covenant smoke (blue of its own) pulled toward
 violet, the tongues' white smoke lavender: blue at the core, blue-violet to
@@ -118,12 +126,28 @@ static long flame_particle(void)
 		if (getenv("HALO_TEST_FLAME_PARTICLE"))
 			flaming_helmet.particle = tag_loaded(PARTICLE_TAG, getenv("HALO_TEST_FLAME_PARTICLE"));
 #endif
-		/* (the menus' map has none: the Covenant flash, also made to be tinted) */
+		/* (a map without it: the Covenant flash, also made to be tinted) */
 		if (flaming_helmet.particle == NONE)
 			flaming_helmet.particle = tag_loaded(PARTICLE_TAG, FLAME_PARTICLE_FALLBACK);
 		flaming_helmet.tongue_particle = tag_loaded(PARTICLE_TAG, FLAME_TONGUE_PARTICLE);
+		flaming_helmet.tongue_radius_scale = 1.0f;
+		flaming_helmet.tongues_per_tick = FLAME_PARTICLES_PER_TICK;
+		/* (ui.map's CUSTOMIZATION preview: no white smoke; the plain grey
+		smoke still, tinted lavender, smaller, gives the tips their violet -
+		the Covenant smoke tinted so stays blue -; one a tick, as it lives
+		far longer: about 160 particles in all, not 400) */
 		if (flaming_helmet.tongue_particle == NONE)
+		{
+			flaming_helmet.tongue_particle = tag_loaded(PARTICLE_TAG, FLAME_TONGUE_PARTICLE_FALLBACK);
+			flaming_helmet.tongue_radius_scale = 0.65f;
+			flaming_helmet.tongues_per_tick = 1;
+		}
+		if (flaming_helmet.tongue_particle == NONE)
+		{
 			flaming_helmet.tongue_particle = flaming_helmet.particle;
+			flaming_helmet.tongue_radius_scale = 1.0f;
+			flaming_helmet.tongues_per_tick = FLAME_PARTICLES_PER_TICK;
+		}
 		platform_log("flame: the flame's particle %s in this map", flaming_helmet.particle == NONE ? "not" : "found");
 	}
 	return flaming_helmet.particle;
@@ -192,7 +216,7 @@ static void flame_emit(long object_index, short local_player_index)
 		return;
 	}
 	object_get_velocities(object_index, &velocity, &angular);
-	for (index = 0; index < 2 * FLAME_PARTICLES_PER_TICK; index++)
+	for (index = 0; index < FLAME_PARTICLES_PER_TICK + flaming_helmet.tongues_per_tick; index++)
 	{
 		struct new_particle_data data;
 		/* (half of them tongues: smaller, paler, rising faster) */
@@ -225,7 +249,8 @@ static void flame_emit(long object_index, short local_player_index)
 		data.initial_impulse = *global_zero_vector3d;
 		data.rotation = real_seed_random_range(seed, 0.0f, 2.0f * _pi);
 		data.angular_velocity = real_seed_random_range(seed, -3.0f, 3.0f);
-		data.radius = tongue ? real_seed_random_range(seed, FLAME_RADIUS_LOWER * 0.7f, FLAME_RADIUS_LOWER) :
+		data.radius = tongue ? flaming_helmet.tongue_radius_scale *
+			real_seed_random_range(seed, FLAME_RADIUS_LOWER * 0.7f, FLAME_RADIUS_LOWER) :
 			real_seed_random_range(seed, FLAME_RADIUS_LOWER, FLAME_RADIUS_UPPER);
 		flame_color(&data.color, seed, tongue);
 		particle_new(&data);
@@ -304,7 +329,16 @@ void flaming_helmet_tick(void)
 	if (flaming_helmet.preview_object != NONE)
 	{
 		if (object_try_and_get_and_verify_type(flaming_helmet.preview_object, _object_mask_all))
+		{
+			/* (the main menu has no player and so no player's potentially
+			visible set, which refuses every new particle as unseen: the
+			preview's camera sees its Spartan) */
+			particles_new_ignore_players_pvs = TRUE;
 			flame_emit(flaming_helmet.preview_object, NONE);
+			particles_new_ignore_players_pvs = FALSE;
+			if (log_now)
+				platform_log("flame: drawn on the preview (%d particles)", particle_data ? (int)particle_data->actual_count : 0);
+		}
 		else
 			flaming_helmet.preview_object = NONE;
 	}

@@ -4487,6 +4487,11 @@ behind) or before the scene is known; the window keeps the colour's swatch
 until the Spartan stands there (menu_scene_spartan_shown: its pack loaded,
 built from the player's multiplayer map the first time). */
 #define H3_CUSTOM_SPARTAN_PLACEMENT "1.53 0.59 -0.25 20"
+/* (a listed tester's: a step further back and lower, the same place in the
+window, so the flaming helmet's flame rises inside the window rather than
+behind the panel above it - the helmet sat a few pixels under the window's
+top; kept whether the flame is on or off, so it never jumps) */
+#define H3_CUSTOM_SPARTAN_FLAME_PLACEMENT "1.75 0.645 -0.33 20"
 
 static void h3_custom_spartan_preview(struct widget_instance *screen, short color)
 {
@@ -4501,7 +4506,8 @@ static void h3_custom_spartan_preview(struct widget_instance *screen, short colo
 	if (!h3_custom.preview_asked)
 	{
 		if (h3_scenes_enabled() && (scene = h3_scene_of(screen, name, sizeof(name), NULL)) != NULL &&
-			menu_scene_spartan_show(scene, H3_CUSTOM_SPARTAN_PLACEMENT, shown_color))
+			menu_scene_spartan_show(scene, h3_custom.flame_listed ? H3_CUSTOM_SPARTAN_FLAME_PLACEMENT :
+				H3_CUSTOM_SPARTAN_PLACEMENT, shown_color))
 		{
 			h3_custom.preview_asked = TRUE;
 			h3_custom.preview_color = shown_color;

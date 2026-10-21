@@ -29,9 +29,19 @@
 #   offline   no network (no namespaces): a listed tester's own flame drawn
 #             offline in multiplayer (Blood Gulch) and in the campaign (a10);
 #             an unlisted machine's not, even with the option on.
+#   preview   no network: Halo 3 CUSTOMIZATION's Spartan preview (the main
+#             menu, ui.map) with HALO_TEST_PROFILE's profile: a listed
+#             tester's preview carries the flame - its particles made (the
+#             main menu has no player's visible set: before, every one was
+#             refused and none showed) - and its FLAMING HELMET row shows;
+#             with the option off no flame; an unlisted machine neither row
+#             nor flame. Screenshots preview-*.bmp in the shots folder.
 #
-#   run_netns_flame_test.sh [allowed|modified|lan|adhoc|coop|offline|all]
+#   run_netns_flame_test.sh [allowed|modified|lan|adhoc|coop|offline|preview|all]
 #
+# HALO_TEST_DATA_MENUS: preview's maps' folder with Halo PC's bitmaps.map and
+# loc.map (as run_menus_test.sh's), HALO_TEST_PROFILE: a blam.sav (preview is
+# skipped without them).
 # HALO_TEST_TESTERS_KEY: the test key file (tools/release/make_update_key.py)
 # whose public half the build was configured with; HALO_TEST_VITA the build
 # (default build/linux/halo); HALO_TEST_DATA the maps' folder; HALO_TEST_OUT,
@@ -131,6 +141,22 @@ offline_run() { # offline_run NAME INIT COMMANDS [ENV...]
 	rm -rf "$dir/save/z" "$dir/save/u"
 }
 
+menu_run() { # menu_run NAME PAD [ENV...]: Menu style Halo 3 with HALO_TEST_PROFILE's profile
+	local name=$1 pad=$2 dir=$out/$1
+	shift 2
+	mkdir -p "$dir/data" "$dir/save/u/UDATA/869079979327"
+	cp "$HALO_TEST_PROFILE" "$dir/save/u/UDATA/869079979327/blam.sav"
+	[ -r "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" ] &&
+		cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$dir/save/u/UDATA/869079979327/"
+	ln -sfn "$(cd "$menus_data" && pwd)/maps" "$dir/data/maps"
+	(cd "$dir" && env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=offscreen HALO_DATA_ROOT="$dir/data" \
+		HALO_SAVE_ROOT="$dir/save" HALO_NO_VSYNC=1 HALO_FRAME_CAP=30 HALO_EXIT_AFTER=${menu_seconds:-25} HALO_FULLSCREEN=0 \
+		HALO_HIDDEN_WINDOW=1 HALO_NO_AUDIO=1 HALO_TICK_THREAD=1 HALO_UPDATE_AUTO=false HALO_NET_ONLINE=false \
+		HALO_MENU_STYLE=halo3 HALO_MENUS_FOLDER="$root/port/vita/app0/menus/" HALO_TEST_FLAME_LOG=1 \
+		HALO_SCREENSHOT_DIR="$shots" HALO_GL_VITA_DISPLAY=1 "HALO_TEST_PAD=$pad" "$@" \
+		timeout -k 5 120 "$binary" > "$dir/run.log" 2>&1)
+}
+
 run_scenario() {
 	scenario=$1
 	out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/flame_netns}.$scenario.$$
@@ -209,15 +235,45 @@ run_scenario() {
 		drawn_own "$out/campaign/run.log" || fail "a listed tester's own flame not drawn in the campaign (a10)"
 		ls "$shots"/offline-*.bmp > /dev/null 2>&1 || fail "no screenshot"
 		;;
+	preview)
+		menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ] || [ ! -r "$menus_data/maps/bitmaps.map" ]; then
+			echo "--- preview: SKIP (no HALO_TEST_PROFILE or no Halo PC bitmaps.map in $menus_data/maps)"
+		else
+			identities tester tester_off other -- tester tester_off
+			# (Halo 3's main menu down five to CUSTOMIZATION, the profile, Cross: the editor; shots
+			# a third of a second apart; down ten to FLAMING HELMET)
+			pad="wait:150:3000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000"
+			pad="$pad a wait:150:4000 @preview-1:0:300 @preview-2:0:300 @preview-3:0:300 @preview-4:0:300"
+			for row in 1 2 3 4 5 6 7 8 9 10; do pad="$pad down:150:600"; done
+			pad="$pad wait:150:1000 @preview-row:0:300"
+			menu_seconds=40 menu_run tester "$pad" HALO_FLAMING_HELMET=1
+			log=$out/tester/run.log
+			grep -aq "menus: h3 customize: flaming helmet row shown" "$log" || fail "a listed tester's FLAMING HELMET row not shown"
+			grep -aq "menus: h3 customize: the preview shows the Spartan" "$log" || fail "the preview showed no Spartan"
+			grep -aq "flame: drawn on the preview ([1-9][0-9]* particles)" "$log" ||
+				fail "the preview's flame made no particles (refused as unseen?)"
+			ls "$shots"/preview-1.bmp "$shots"/preview-row.bmp > /dev/null 2>&1 || fail "no preview screenshot"
+			menu_run tester_off "wait:150:3000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:4000" \
+				HALO_FLAMING_HELMET=0
+			grep -aq "menus: h3 customize: flaming helmet row shown" "$out/tester_off/run.log" || fail "the option-off run's row not shown (no test)"
+			grep -aq "flame: drawn on the preview" "$out/tester_off/run.log" && fail "the preview drew the flame with the option off"
+			menu_run other "wait:150:3000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:4000" \
+				HALO_FLAMING_HELMET=1
+			grep -aq "menus: h3 customize: flaming helmet row hidden" "$out/other/run.log" ||
+				fail "an unlisted machine's FLAMING HELMET row not hidden"
+			grep -aq "flame: drawn on the preview" "$out/other/run.log" && fail "an unlisted machine's preview drew the flame"
+		fi
+		;;
 	esac
 	if [ $status = 0 ] && [ "${HALO_TEST_KEEP:-0}" != 1 ]; then rm -rf "$out"; else echo "output kept in $out"; fi
 }
 
 export ROOT=$root
 case $which in
-allowed|modified|lan|adhoc|coop|offline) run_scenario "$which" ;;
-all) for s in offline allowed modified lan adhoc coop; do run_scenario "$s"; done ;;
-*) echo "usage: $0 [allowed|modified|lan|adhoc|coop|offline|all]"; exit 2 ;;
+allowed|modified|lan|adhoc|coop|offline|preview) run_scenario "$which" ;;
+all) for s in offline preview allowed modified lan adhoc coop; do run_scenario "$s"; done ;;
+*) echo "usage: $0 [allowed|modified|lan|adhoc|coop|offline|preview|all]"; exit 2 ;;
 esac
 [ $status = 0 ] && echo "PASS"
 exit $status
