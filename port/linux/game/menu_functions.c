@@ -603,6 +603,24 @@ static struct
 
 /* ---------- private code */
 
+/* (the party's plates, h3_party_plates_update) the players the lobbies' and
+the main menu's count says: this machine and its party's members shown
+(1 out of a party), and that count's words: "1 Player", "3 Players",
+"3 Players (16 max)" with a maximum (0: none) - Halo 3's count over the
+nameplates */
+static int h3_party_players = 1;
+
+static void h3_party_players_text(char *text, int size, int maximum)
+{
+	if (maximum > 0)
+		snprintf(text, (size_t)size, h3_party_players == 1 ? T("1 Player (%d max)") : T("%d Players (%d max)"),
+			h3_party_players == 1 ? maximum : h3_party_players, maximum);
+	else if (h3_party_players == 1)
+		snprintf(text, (size_t)size, "%s", T("1 Player"));
+	else
+		snprintf(text, (size_t)size, T("%d Players"), h3_party_players);
+}
+
 /* (the Halo 3 multiplayer flows: a profile chosen this run is not asked
 for again) */
 static void h3_session_profile_chosen(short plate, long profile_index);
@@ -2924,7 +2942,7 @@ static void h3_mp_lobby_update(struct widget_instance *widget)
 	/* ("1 Player (16 max)": the most players a game of that network takes) */
 	maximum = h3_mp.network == _h3_network_offline ? 4 : h3_mp.network != _h3_network_online ? 16 :
 		(int)PIN(atol(setting_get("HALO_NET_MAX_PLAYERS", "16")), 2, 16);
-	snprintf(text, sizeof(text), T("1 Player (%d max)"), maximum);
+	h3_party_players_text(text, (int)sizeof(text), maximum);
 	text_show(named(screen, "players"), text);
 	text_show(named(screen, "ready"), T("Ready"));
 	/* (online: who can join a game hosted, network.who_can_join - the
@@ -7711,6 +7729,18 @@ static void h3_party_plates_update(struct widget_instance *container)
 		text_show(found, row && self_leads ? T("LEADER") : "");
 		widget_instance_set_visibility_recursive(found, row > 0);
 	}
+	/* (the count over the nameplates: the player and the members shown -
+	the lobbies' own words take it, h3_party_players_text -; the main menu's
+	and the campaign lobby's "1 Player" (h3/main/players) said here) */
+	if (shown)
+		h3_party_players = row + 1;
+	if (shown && !named(screen, "invite") && (found = named(screen, "players")) != NULL)
+	{
+		char count[64];
+
+		h3_party_players_text(count, (int)sizeof(count), 0);
+		text_show(found, count);
+	}
 	/* (the main menu's live servers under the last plate) */
 	if ((found = named(screen, "servers")) != NULL)
 		found->vertical_offset = (short)(row * H3_PARTY_PLATE_SPACING);
@@ -9778,7 +9808,8 @@ static void h3_forge_lobby_network_update(struct widget_instance *screen)
 	/* (not live: the network's words; live: the game's, h3_live) */
 	if (!h3_live_forge_live())
 	{
-		text_show(named(screen, "players"), T("1 Player"));
+		h3_party_players_text(text, (int)sizeof(text), 0);
+		text_show(named(screen, "players"), text);
 		text_show(named(screen, "ready"), T("Ready"));
 		text_show(named(screen, "ready_sub"), local ? T("This party is local to this PS Vita.") :
 			h3_forge.network == _h3_network_online ? T("Forge with friends on the Internet.") :

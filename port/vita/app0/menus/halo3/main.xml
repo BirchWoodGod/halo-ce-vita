@@ -121,7 +121,8 @@ art is this folder's own (tools/halo3_menu_art.py). -->
 	<widget name="h3/main/start_butn" left="16" top="447" width="16" height="16" bitmap="h3/glyph_start"/>
 	<widget name="h3/main/settings" type="text" left="36" top="445" width="150" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="0" text_y="2" string_list="h3/main_items" string_index="4"/>
 	<widget name="h3/main/title" left="352" top="286" width="256" height="64" bitmap="h3/title"/>
-	<widget name="h3/main/players" type="text" left="380" top="20" width="200" height="16" font="h3/font_small" color="#FFEEF2F6" text_x="0" text_y="0" string_list="h3/main_items" string_index="5"/>
+	<!-- ("1 Player", "3 Players": the player and the party's members, said by port h3 party plates) -->
+	<widget name="h3/main/players" type="text" left="380" top="20" width="200" height="16" font="h3/font_small" color="#FFEEF2F6" text_x="0" text_y="0"/>
 	<widget name="h3/main/nameplate" type="text" left="380" top="38" width="256" height="16" bitmap="h3/nameplate" font="h3/font_small" color="#FF10220A" text_x="22" text_y="0">
 		<data input="port h3 nameplate"/>
 	</widget>
