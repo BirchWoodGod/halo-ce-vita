@@ -325,7 +325,10 @@
 #            once its scene stands, START GAME its game's lobby at once (no profile asked, no
 #            other server), B back to the lobby (the game kept), B closes it; ONLINE with its
 #            brokers unreachable never live, START GAME as before; the lobby's scene whole
-#            behind the game's lobby, never a flag's cloth left (screenshots, the Vita's picture)
+#            behind the game's lobby, never a flag's cloth left (screenshots, the Vita's picture);
+#            going live keeps the lobby as it looked (LadyCassie, insider.20): the scene not made
+#            again, the nameplate kept (no other machine in the game), and no copy of the
+#            playlist's first map (Carousel) begun as its server starts on the lobby's map
 #   h3modspicker  MOD MANAGER, mygulch off, then MULTIPLAYER, MAP: the lobby's map
 #            picker (the list START GAME hosts from) leaves it out; again with
 #            it off (HALO_MAPS_DISABLED) and turned on in MOD MANAGER: the
@@ -929,6 +932,15 @@ for case in $cases; do
 			fail h3livelobby "the scene lost an object in the live lobby or its game's lobby (all of it, or none)"
 		grep -aq "h3 scene objects: let go after .*, 0 flags left" "$log" ||
 			fail h3livelobby "the scene was let go with a flag's cloth left behind"
+		sed -n '/menus: h3 live lobby: open on/,/menus: h3 live lobby: closed/p' "$log" |
+			grep -aq "h3 scene objects: h3/mp/screen: made" && fail h3livelobby "going live made the lobby's scene again"
+		sed -n '/menus: h3 live lobby: open on/,/menus: h3 live lobby: closed/p' "$log" |
+			grep -aq "menus: party plates: none (the nameplate hidden)" &&
+			fail h3livelobby "going live hid the nameplate (no other machine in its game)"
+		grep -aq "starting precaching of map 'carousel'" "$out/h3livelobby/data/debug.txt" &&
+			fail h3livelobby "going live began a copy of the playlist's first map (Carousel), not the lobby's"
+		grep -aq "starting precaching of map 'beavercreek'" "$out/h3livelobby/data/debug.txt" ||
+			fail h3livelobby "the lobby's map (Battle Creek) was not copied as it went live"
 		check_h3 h3livelobby_online halo3
 		log=$out/h3livelobby_online/run.log
 		grep -aE "ui: screen|menus: h3 live lobby|h3 scene objects: (h3/mp|let go)|h3 join:|network: status" "$log" | head -20

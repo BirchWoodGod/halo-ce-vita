@@ -3939,6 +3939,27 @@ boolean ui_widget_port_start_network_game_server(
 	return network_game_start_new_server(NULL, NULL, NULL);
 }
 
+/* port: (the Halo 3 live lobby) the same, its game on that map from the
+start (the lobby's MAP, set again as the lobby's choices are): the
+playlist's first map (Carousel on the default playlist) is neither named
+nor its copy into the map cache begun and dropped on the way - a read of
+the memory card on the game thread, and the copy's buffer taken from the
+texture cache, as the lobby went live (LadyCassie, insider.20: a 404 ms
+frame) */
+static char port_server_map_name[256];
+
+boolean ui_widget_port_start_network_game_server_on_map(
+	char const *map_name)
+{
+	boolean result;
+
+	csstrncpy(port_server_map_name, map_name ? map_name : "", sizeof(port_server_map_name) - 1);
+	port_server_map_name[sizeof(port_server_map_name) - 1] = 0;
+	result = network_game_start_new_server(NULL, NULL, NULL);
+	port_server_map_name[0] = 0;
+	return result;
+}
+
 /* port: a function's name, as the tags name it, by its index (NULL past the
 last), for the menus' files (port/linux/game/menu_tags.c) */
 char const *ui_widget_event_handler_function_name(
@@ -3984,6 +4005,12 @@ static boolean network_game_start_new_server(
 	if (!global_network_game_server_get())
 	{
 		game_engine_playlist_initialize();
+#ifdef HALO_LINUX
+		/* port: the live lobby's map, not the playlist's first
+		(ui_widget_port_start_network_game_server_on_map) */
+		if (port_server_map_name[0])
+			game_engine_override_map_name(port_server_map_name);
+#endif
 		result = create_global_network_game_server();
 		if (result == TRUE)
 		{
