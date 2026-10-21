@@ -61,6 +61,23 @@ static char const *carnage_team_name(long team)
 	return team >= 0 && team < CARNAGE_REPORT_MAXIMUM_TEAMS ? T(names[team]) : "";
 }
 
+/* a score as the game type formats it, its padding left out (" :14", a
+time under a minute: "0:14") */
+static void carnage_score_text(char *text)
+{
+	char const *start = text;
+
+	while (*start == ' ')
+		start++;
+	if (*start == ':')
+	{
+		memmove(text + 1, start, strlen(start) + 1);
+		text[0] = '0';
+	}
+	else if (start != text)
+		memmove(text, start, strlen(start) + 1);
+}
+
 /* wide text (a player's name, a score) as UTF-8 */
 static void carnage_utf8(char *text, int size, wchar_t const *wide, int length)
 {
@@ -109,6 +126,7 @@ static void carnage_player_row(struct carnage_report_row *row, long player_index
 		score[NUMBEROF(score) - 1] = 0;
 	}
 	carnage_utf8(row->score, (int)sizeof(row->score), score, (int)NUMBEROF(score));
+	carnage_score_text(row->score);
 	row->score_value = game_engine->get_player_score ? game_engine->get_player_score(player_index, _get_score_individual) : 0;
 	row->kills = player->statistics.kills[0];
 	row->deaths = player->statistics.deaths;
@@ -141,7 +159,7 @@ char const *carnage_report_objective_name(long type, int index)
 		return index == 0 ? N_("GRABS") : index == 1 ? N_("RETURNS") : NULL;
 	case game_engine_oddball:
 		/* (kills with the ball; ball carriers killed) */
-		return index == 0 ? N_("BALL KILLS") : index == 1 ? N_("CARRIER KILLS") : NULL;
+		return index == 0 ? N_("BALL KILLS") : index == 1 ? N_("CARRIERS") : NULL;
 	case game_engine_race:
 		return index == 0 ? N_("BEST LAP") : NULL;
 	}
@@ -170,7 +188,8 @@ boolean carnage_report_read(struct carnage_report *report)
 	long player_indices[CARNAGE_REPORT_MAXIMUM_ROWS];
 	long places[CARNAGE_REPORT_MAXIMUM_ROWS];
 	boolean tied[CARNAGE_REPORT_MAXIMUM_ROWS];
-	struct carnage_report_row players[HALO_PORT_MAXIMUM_NETWORK_PLAYERS];
+	/* (off the stack: 128 players' rows; the menus' thread's alone) */
+	static struct carnage_report_row players[HALO_PORT_MAXIMUM_NETWORK_PLAYERS];
 	long count, index;
 
 	memset(report, 0, sizeof(*report));
@@ -258,6 +277,7 @@ boolean carnage_report_read(struct carnage_report *report)
 				score[NUMBEROF(score) - 1] = 0;
 			}
 			carnage_utf8(entry->score, (int)sizeof(entry->score), score, (int)NUMBEROF(score));
+			carnage_score_text(entry->score);
 			entry->score_value = game_engine_get_team_score(team);
 			order[team_count++] = (short)team;
 		}

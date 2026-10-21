@@ -179,6 +179,26 @@ In each level's map (ingame.txt):
 - forge.xml: Forge's screens over the game: the object browser (Square, as
   the monitor), the Forge menu (Start in a Forge game) and its question
   before leaving.
+- carnage.xml: the CARNAGE REPORT, Halo 3's results at a multiplayer game's
+  end (local, System Link, ad hoc and online; every game type), opened over
+  the game once its scores come up, in the place of the game's own report
+  (game_engine.c game_engine_post_rasterize_post_game, drawn with Menu style
+  Halo CE, or menus.carnage_report "classic"): the winner, the players
+  ranked as the game ranks them (a team game's under their team's row - its
+  score, its players' sums -, the winning team first), each on a nameplate
+  in their colour or their team's, this machine's rows lit, the winners
+  marked. L and R: SUMMARY (the game type's score - kills, flags, the
+  ball's or the hill's time, laps -, kills, deaths, assists, +/-) and
+  DETAILS (suicides, betrayals in a team game, the game type's own - flag
+  grabs and returns, kills with the ball and ball carriers killed, the best
+  lap -, K/D); up and down scroll a long list. Cross: the host goes on to
+  the lobby with everyone (by itself after 30 s on the report); a machine
+  that joined waits for the host, Circle leaves the game (asked first).
+  Triangle: PLAYERS. Its numbers are the game's own record
+  (port/linux/game/carnage_report.c), on a joined machine the host's as the
+  distributed netcode sends them: every machine shows the same; nothing is
+  counted for it but betrayals, which are a teammate's death only now (a
+  player's own was counted as one too: game_statistics.c).
 Each <menus root=... replaces="<the Xbox screen>"> names the screen it stands
 for (or OpenCE's, for the password screen); port/linux/game/menu_tags.c
 opens it in that one's place while Menu style is Halo 3. Like OpenCE's screens in the folder above, they are built when
@@ -204,7 +224,8 @@ What is here
   The server browser's badges (badge_*.png: the words VITA and PC on a plate,
   a padlock beside them) and the value arrows (arrow_*.png) are drawn there
   too, no maker's logo. The profiles' colour swatches (swatch_*.png: the
-  game's eighteen player colours, and swatch_random.png for none) too. The look follows Halo 3's screens; nothing of Bungie's, Microsoft's or
+  game's eighteen player colours, and swatch_random.png for none) and the
+  carnage report's winners' mark (carnage_won.png, a gold chevron) too. The look follows Halo 3's screens; nothing of Bungie's, Microsoft's or
   Halo Online's is in this folder.
 - The level pictures, the difficulty emblems, the multiplayer maps' pictures
   (mp_map_grafix) and descriptions are ui.map's own (<frame map=...>,
@@ -292,8 +313,8 @@ port/vita/tests/run_menus_test.sh h3probe h3classic h3xbox h3broken
 h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create
 h3mptouch h3coop h3coopguide h3scenes h3lobbyscenes h3modelsmany h3profiles h3proftouch h3customize h3models
 h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3friends h3friendspanel
-h3friendsfit h3mppause; the packs':
+h3friendsfit h3mppause h3carnage; the packs':
 port/vita/tests/run_scene_pack_test.sh; Forge's: port/vita/tests/run_forge_test.sh,
 port/vita/tests/run_forge_files_test.sh; between two machines:
-port/vita/tests/run_netns_online_test.sh h3coopmenu h3lan h3adhoc h3online h3mppause netswitch, and friends'
+port/vita/tests/run_netns_online_test.sh h3coopmenu h3lan h3adhoc h3online h3mppause carnage netswitch, and friends'
 friends friendsdecline friendsblock friendsinvite friendsoffline friendsforged.

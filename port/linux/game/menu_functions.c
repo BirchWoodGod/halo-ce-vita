@@ -8983,6 +8983,7 @@ static struct
 	char message[160];
 	unsigned long message_time;
 	char said[96];
+	boolean end_said;
 	struct carnage_report report;
 } h3_carnage;
 
@@ -8997,11 +8998,16 @@ static long h3_carnage_continue_seconds(void)
 	return H3_CARNAGE_CONTINUE_SECONDS;
 }
 
-/* (menus.carnage_report: the settings panel's Carnage report) whether the
-Halo 3 report stands for the game's own */
+/* (Menu style Halo 3, and menus.carnage_report - HALO_CARNAGE_REPORT - not
+"classic") whether the Halo 3 report stands for the game's own */
 static boolean h3_carnage_wanted(void)
 {
-	return halo_menu_style_halo3() && strcmp(config_string("menus.carnage_report"), "classic") != 0;
+	/* (its variable, live; else config.toml's) */
+	char const *report = getenv("HALO_CARNAGE_REPORT");
+
+	if (!report)
+		report = config_string("menus.carnage_report");
+	return halo_menu_style_halo3() && strcmp(report, "classic") != 0;
 }
 
 /* this machine's network game, not split screen's (PLAYERS, LEAVE) */
@@ -9162,7 +9168,17 @@ static void h3_carnage_update(struct widget_instance *lines)
 	name[0] = map[0] = 0;
 	if (game)
 	{
-		h3_mp_game_name(game, name, (int)sizeof(name));
+		/* (the game type's own name; a variant with none, the game type's) */
+		if (game->variant.human_readable_game_description[0])
+			h3_mp_game_name(game, name, (int)sizeof(name));
+		else
+		{
+			static char const *const types[] = { "", N_("Capture the Flag"), N_("Slayer"), N_("Oddball"),
+				N_("King of the Hill"), N_("Race") };
+
+			snprintf(name, sizeof(name), "%s", report->type > 0 && report->type < (long)NUMBEROF(types) ?
+				T(types[report->type]) : "");
+		}
 		snprintf(map, sizeof(map), "%s", custom_edition_maps_level_title(game->map.name));
 	}
 	snprintf(text, sizeof(text), name[0] && map[0] ? T("%s on %s") : "%s%s", name, map);
@@ -9334,6 +9350,13 @@ static void h3_carnage_frame(boolean main_menu_loaded)
 		memset(&h3_carnage, 0, sizeof(h3_carnage) - sizeof(h3_carnage.report));
 		carnage_report_set_shown(FALSE);
 		return;
+	}
+	if (!h3_carnage.end_said)
+	{
+		h3_carnage.end_said = TRUE;
+		platform_log("menus: h3 carnage: the game is over: %s", h3_carnage_wanted() ? "the Halo 3 carnage report" :
+			halo_menu_style_halo3() ? "the game's own report (menus.carnage_report classic)" :
+			"the game's own report (Menu style Halo CE)");
 	}
 	if (h3_carnage.leave_pending)
 	{

@@ -56,6 +56,8 @@ players in loading zones ("@bsp") and kills them ("@kill").
 
 Scripted play for the netcode's parts the bots' wandering does not reach:
 debug.network_test_kill (the host kills the last player every so often),
+debug.network_test_end (the host ends the game that many seconds in, as a
+time limit does: any game type's end, its scores and carnage report),
 debug.network_test_shoot (every so often each machine's player hits the
 next with their weapon's projectile: a client's through its report to the
 host) and debug.network_test_vehicle (the host seats the last player as a
@@ -206,6 +208,8 @@ static struct
 	real joined_seconds;
 	boolean team_set;
 	real kill_interval;
+	/* debug.network_test_end: the seconds a game lasts (0: its own end) */
+	real end_seconds;
 	/* debug.network_test_kill: the game time of the last scripted kill (0:
 	none yet: the game's start), the game time last seen (a smaller one: the
 	next game), and whether the first player has had this game's grenades */
@@ -428,6 +432,7 @@ static void network_test_read_settings(
 	}
 	network_test.start_delay = (real)config_real("debug.network_test_start");
 	network_test.kill_interval = (real)config_real("debug.network_test_kill");
+	network_test.end_seconds = (real)config_real("debug.network_test_end");
 	network_test.shoot_interval = (real)config_real("debug.network_test_shoot");
 	network_test.vehicle_time = (real)config_real("debug.network_test_vehicle");
 	network_test.pickup_time = (real)config_real("debug.network_test_pickup");
@@ -1811,6 +1816,14 @@ void network_test_update(
 		}
 	}
 
+	/* debug.network_test_end: the host ends the game, as a time limit does */
+	if (network_test.mode == _network_test_host && network_test.started && network_test.end_seconds > 0.0f &&
+		game_engine_running() && !main_menu_loaded && game_engine_can_score() &&
+		game_time_get() >= (long)(network_test.end_seconds * TICKS_PER_SECOND))
+	{
+		platform_log("network test: the game ended at %.0f s (debug.network_test_end)", network_test.end_seconds);
+		game_engine_end_game();
+	}
 	/* the next game of the list: once the scores have been shown a while,
 	the host's button (the bots may press it first) */
 	if (network_test.mode == _network_test_host && network_test.started && game_engine_running() &&
