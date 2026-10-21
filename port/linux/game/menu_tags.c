@@ -398,6 +398,8 @@ static char const *const port_function_names[] =
 	"port h3 host online", "port h3 game options",
 	"port h3 live leave", "port h3 invite ask", "port h3 invite init", "port h3 invite act",
 	"port forge start live",
+	"port h3 carnage init", "port h3 carnage continue", "port h3 carnage leave ask", "port h3 carnage leave",
+	"port h3 carnage players", "port h3 carnage page", "port h3 carnage up", "port h3 carnage down",
 };
 
 /* the port's game data functions (menu_functions.c), from
@@ -422,6 +424,7 @@ static char const *const port_game_data_input_names[] =
 	"port h3 party", "port h3 party options", "port h3 party chat", "port h3 party quick",
 	"port h3 mp pause", "port h3 mp settings",
 	"port h3 invite", "port h3 party plates",
+	"port h3 carnage",
 };
 
 static struct

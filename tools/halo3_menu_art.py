@@ -798,6 +798,19 @@ def arrow(pointing):
     return image.resize((8, 16), Image.Resampling.LANCZOS)
 
 
+def carnage_won():
+    # the carnage report's mark on the winners' rows (halo3/carnage.xml): a
+    # gold chevron pointing up, 16x16, drawn at four times and scaled down
+    scale = 4
+    image = Image.new('RGBA', (16 * scale, 16 * scale), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    outer = [(2, 12), (8, 3), (14, 12), (11, 12), (8, 7.5), (5, 12)]
+    draw.polygon([(x * scale, y * scale) for x, y in outer], fill=(240, 186, 70, 255),
+                 outline=(255, 226, 150, 255))
+    draw.rectangle([4 * scale, 13 * scale, 12 * scale, 14.4 * scale], fill=(240, 186, 70, 255))
+    return image.resize((16, 16), Image.Resampling.LANCZOS)
+
+
 # the player colours a profile may have, in the game's order
 # (source/saved games/player_profile.c profile_color_table): white, black,
 # red, blue, gray, yellow, green, pink, purple, cyan, cobalt, orange, teal,
@@ -864,6 +877,7 @@ ART = {
     'arrow_left.png': lambda: arrow('left'),
     'arrow_right.png': lambda: arrow('right'),
     'swatch_random.png': lambda: swatch(None),
+    'carnage_won.png': carnage_won,
 }
 for _index, _colour in enumerate(PLAYER_COLOURS):
     ART['swatch_%02d.png' % _index] = (lambda colour: lambda: swatch(colour))(_colour)
