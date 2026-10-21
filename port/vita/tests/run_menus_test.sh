@@ -174,7 +174,7 @@
 #            profile screen, then OpenCE's server browser (B: the profile again, B: Multiplayer);
 #            the Halo 3 lobby's BROWSE GAMES on ONLINE: the profile, then the games browser;
 #            internet play off: SERVER BROWSER says how to turn it on, no profile
-#   h3players  the Halo 3 PLAYERS screen (menus/halo3/players.xml; the owner: "Can I move the
+#   h3players  the Halo 3 PLAYERS screen (menus/halo3/players.xml, MUTE CHAT too; the owner: "Can I move the
 #            cursor over the player like on Halo 3 and add friend?"), HALO_TEST_PROFILE's
 #            profile: SYSTEM LINK CO-OP hosted from the campaign lobby, the game's lobby;
 #            Triangle: PLAYERS, this machine's player and three made up
@@ -1089,9 +1089,12 @@ for case in $cases; do
 		players_pad="wait:150:3000 a wait:150:3000 a wait:150:3000 up:150:600 a wait:150:2500 down:150:600 down:150:600 a wait:150:2500"
 		players_pad="$players_pad down:150:600 down:150:600 down:150:600 a wait:150:8000 y wait:150:2500 @00-players:0:300"
 		players_pad="$players_pad down:150:700 a wait:150:2000 @01-options:0:300 down:150:700 a wait:150:2000 @02-added:0:300"
+		# (then Cross on it again, down three: MUTE CHAT, Cross: muted here, the in-game chat's)
+		players_pad="$players_pad a wait:150:2000 down:150:700 down:150:700 down:150:700 @03-mute-option:0:300 a wait:150:2000"
+		players_pad="$players_pad @04-muted:0:300"
 		players_pad="$players_pad up:150:700 a wait:150:2000 b wait:150:3000"
 		# (co-op's most players its own, network.coop_players: 4 here; the lobby's PLAYERS says it)
-		profile_from=$HALO_TEST_PROFILE run h3players "$menus_data" 60 "$players_pad" \
+		profile_from=$HALO_TEST_PROFILE run h3players "$menus_data" 80 "$players_pad" \
 			HALO_MENU_STYLE=halo3 HALO_TEST_PLAYERS_FAKE=3 HALO_NET_COOP_PLAYERS=4
 		check_h3 h3players halo3
 		log=$out/h3players/run.log
@@ -1106,6 +1109,8 @@ for case in $cases; do
 		grep -aq "menus: h3 players: options for Spartan 1 (machine 10)" "$log" &&
 			grep -aq "ui: screen pc.h3.players.options" "$log" || fail h3players "Cross on a player did not open its options"
 		grep -aq "menus: h3 players: Go online first" "$log" || fail h3players "ADD FRIEND offline did not say go online first"
+		grep -aq "menus: h3 players: Spartan 1 muted: their chat is hidden here" "$log" &&
+			grep -aq "chat: Spartan 1 muted here" "$log" || fail h3players "MUTE CHAT did not mute the player's chat here"
 		grep -aq "menus: h3 players: A player of this PS Vita" "$log" ||
 			fail h3players "this machine's own player was given options"
 		grep -a "ui: screen" "$log" | tail -1 | grep -qE 'connected_pregame_screen|pc.h3.pregame.screen' ||

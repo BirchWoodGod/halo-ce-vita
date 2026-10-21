@@ -262,7 +262,10 @@ static struct
 
 	/* the tests' script (HALO_TEST_CHAT): the next step */
 	short script_step;
-	unsigned int script_pad[16];
+	unsigned int script_pad[48];
+	/* (the script's "open": the wheel held open for a screenshot, the
+	real controllers' presses - a test bot's - not taken meanwhile) */
+	boolean script_hold;
 	short script_pad_count;
 	short script_pad_at;
 } game_chat;
@@ -1083,6 +1086,13 @@ int game_chat_pad(unsigned int buttons, unsigned long now)
 	int taken;
 
 	pthread_mutex_lock(&game_chat_lock);
+#ifndef HALO_RELEASE
+	if (game_chat.script_hold)
+	{
+		pthread_mutex_unlock(&game_chat_lock);
+		return TRUE;
+	}
+#endif
 	taken = game_chat_pad_locked(buttons, now);
 	pthread_mutex_unlock(&game_chat_lock);
 	return taken;
@@ -1196,7 +1206,8 @@ right pressed, Cross: as a player), type:TEXT (the keyboard's line to ALL),
 mute:NAME, unmute:NAME, flood:N (N lines sent past this machine's own
 rate, for the host to drop), malformed (lines the host must drop: two in
 one message, none, cut short, unknown flags, a notice, another machine's
-player, over a datagram), shot:NAME (a screenshot, main.c's @shot) */
+player, over a datagram), shot:NAME (a screenshot, main.c's @shot), open (the wheel left open), close, teams
+(each player's team logged) */
 static void game_chat_test_raw(unsigned char player_index, unsigned char flags, short count, word entry_size,
 	short destination, char const *text)
 {
@@ -1220,10 +1231,13 @@ static void game_chat_script(unsigned long now)
 	short index = 0;
 	unsigned long at;
 
-	/* (the wheel's presses, one each frame) */
+	/* (the wheel's presses, one each frame; a "wheel" step's the real
+	controllers' - a test bot's - held off until they are done) */
 	if (game_chat.script_pad_at < game_chat.script_pad_count)
 	{
 		game_chat_pad_locked(game_chat.script_pad[game_chat.script_pad_at++], now);
+		if (game_chat.script_pad_at == game_chat.script_pad_count && !game_chat.wheel_open)
+			game_chat.script_hold = FALSE;
 		return;
 	}
 	if (!script || !*script || !game_chat.in_game)
@@ -1279,12 +1293,12 @@ static void game_chat_script(unsigned long now)
 
 			game_chat.script_pad[count++] = GAME_CHAT_PAD_COMBO;
 			game_chat.script_pad[count++] = 0;
-			while (downs-- > 0 && count < 12)
+			while (downs-- > 0 && count < 40)
 			{
 				game_chat.script_pad[count++] = GAME_CHAT_PAD_DOWN;
 				game_chat.script_pad[count++] = 0;
 			}
-			while (rights-- > 0 && count < 14)
+			while (rights-- > 0 && count < 46)
 			{
 				game_chat.script_pad[count++] = GAME_CHAT_PAD_RIGHT;
 				game_chat.script_pad[count++] = 0;
@@ -1293,6 +1307,7 @@ static void game_chat_script(unsigned long now)
 			game_chat.script_pad[count++] = 0;
 			game_chat.script_pad_count = count;
 			game_chat.script_pad_at = 0;
+			game_chat.script_hold = TRUE;
 		}
 		else if (!strcmp(verb, "open"))
 		{
@@ -1305,9 +1320,35 @@ static void game_chat_script(unsigned long now)
 			game_chat.script_pad[5] = 0;
 			game_chat.script_pad_count = 6;
 			game_chat.script_pad_at = 0;
+			game_chat.script_hold = TRUE;
 		}
 		else if (!strcmp(verb, "close"))
+		{
+			game_chat.script_hold = FALSE;
 			game_chat_wheel_close("the test");
+		}
+		else if (!strcmp(verb, "teams"))
+		{
+			/* (each player's team, as this machine has them) */
+			struct data_iterator iterator;
+			struct player_datum *player;
+			char line[256];
+			int length = 0;
+
+			data_iterator_new(&iterator, player_data);
+			while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL &&
+				length < (int)sizeof(line) - 32)
+			{
+				char name[GAME_CHAT_NAME_SIZE];
+
+				if (player->quit_out_of_game)
+					continue;
+				game_chat_player_name(player, name, 12);
+				length += snprintf(line + length, sizeof(line) - (size_t)length, " %s t%ld", name, player->team_index);
+			}
+			line[length] = 0;
+			platform_log("chat: teams:%s", line);
+		}
 		else if (!strcmp(verb, "flood"))
 		{
 			int lines = atoi(argument);
@@ -1648,14 +1689,22 @@ static void game_chat_draw_wheel(rectangle2d const *bounds, short line_height, l
 	wchar_t wide[160];
 	char text[160];
 	short top, entry, channel, left;
-	short row_height = (short)(line_height + 3);
+	short row_height = (short)(line_height + 2);
+	short hint_top;
 
 	panel.x0 = (short)(bounds->x0 + width * 58 / 100);
 	panel.x1 = (short)(bounds->x0 + width * 97 / 100);
-	panel.y0 = (short)(bounds->y0 + height * 14 / 100);
-	panel.y1 = (short)(panel.y0 + row_height * (GAME_CHAT_WHEEL_ENTRIES + 4) + 10);
+	/* (under the latency meter at the top right) */
+	panel.y0 = (short)(bounds->y0 + height * 25 / 100);
+	/* (its title, the channels, the entries, a gap and the buttons' two
+	lines) */
+	panel.y1 = (short)(panel.y0 + row_height * (GAME_CHAT_WHEEL_ENTRIES + 2) + 2 * line_height + 22);
 	if (panel.y1 > bounds->y1 - 4)
+	{
+		panel.y0 = (short)MAX(bounds->y0 + 4, panel.y0 - (panel.y1 - (bounds->y1 - 4)));
 		panel.y1 = (short)(bounds->y1 - 4);
+	}
+	hint_top = (short)(panel.y1 - 2 * line_height - 6);
 	draw_quad(&panel, game_chat_pixel(0.72f, 0.02f, 0.05f, 0.09f));
 	place = panel;
 	place.y1 = (short)(panel.y0 + 2);
@@ -1696,7 +1745,7 @@ static void game_chat_draw_wheel(rectangle2d const *bounds, short line_height, l
 	}
 	top = (short)(top + row_height + 3);
 	/* (the phrases, the chosen one lit; then Type a message) */
-	for (entry = 0; entry < GAME_CHAT_WHEEL_ENTRIES && top + line_height < panel.y1 - row_height; entry++)
+	for (entry = 0; entry < GAME_CHAT_WHEEL_ENTRIES && top + line_height <= hint_top - 2; entry++)
 	{
 		boolean chosen = entry == game_chat.wheel_entry;
 
@@ -1732,8 +1781,8 @@ static void game_chat_draw_wheel(rectangle2d const *bounds, short line_height, l
 	game_chat_widen(wide, NUMBEROF(wide), text);
 	color.red = 0.70f; color.green = 0.76f; color.blue = 0.84f;
 	draw_string_set_draw_mode(font_index, NONE, 0, 0, &color);
-	place.x0 = left; place.x1 = (short)(panel.x1 - 4); place.y0 = (short)(panel.y1 - row_height - 2);
-	place.y1 = (short)(panel.y1 - 2);
+	place.x0 = left; place.x1 = (short)(panel.x1 - 4); place.y0 = (short)(hint_top + line_height);
+	place.y1 = (short)(place.y0 + line_height);
 	{
 		/* (on two rows when it is wider than the panel) */
 		int fit = game_chat_fit(&place, wide, 0, (short)(place.x1 - place.x0));
