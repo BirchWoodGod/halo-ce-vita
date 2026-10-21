@@ -17,7 +17,15 @@
 #             (HALO_NETWORK_TEST local, HALO_TEST_PROFILE's profile; skipped
 #             without), Menu style Halo 3 and Halo CE; the pause opened and
 #             closed first (Start, then B): the pointer on, then off again, and
-#             the mouse aiming after it
+#             the mouse aiming after it. The bot (the game starts with one: a
+#             team game of one player does not) once killed the player during
+#             the motions - insider.18's "0 degrees turned": a dead player's
+#             camera turns nothing - so the player cannot die
+#             (cheat_deathless_player) and each facing read must be the living
+#             player's ("aim test: player alive 1"). Each in a network
+#             namespace of its own (unshare -rn) where there are unprivileged
+#             ones: another copy of the game holding the game's ports left the
+#             local game unhosted (no game started, no facing read)
 #
 # Each run must exit by itself with no assertion or exception.
 #
@@ -63,7 +71,12 @@ run() {
 		cp "$profile_from" "$dir/save/u/UDATA/869079979327/blam.sav"
 		[ -r "$(dirname "$profile_from")/SaveMeta.xbx" ] && cp "$(dirname "$profile_from")/SaveMeta.xbx" "$dir/save/u/UDATA/869079979327/"
 	fi
-	(cd "$dir" && exec env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=offscreen HALO_DATA_ROOT="$dir/data" \
+	# (own_network: the run in a network namespace of its own, unshare -rn, as run_bots_test.sh's:
+	# the local game hosts on the game's ports, which another test's or program's copy of the game
+	# may hold - "could not host a game", no game, no facing read)
+	local wrap=()
+	[ -n "${own_network:-}" ] && wrap=(unshare -rn sh -c 'ip link set lo up 2> /dev/null; exec "$@"' sh)
+	(cd "$dir" && exec "${wrap[@]}" env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=offscreen HALO_DATA_ROOT="$dir/data" \
 		HALO_SAVE_ROOT="$dir/save" HALO_NO_VSYNC=1 HALO_FRAME_CAP=30 HALO_EXIT_AFTER="$seconds" HALO_FULLSCREEN=0 \
 		HALO_HIDDEN_WINDOW=1 HALO_NO_AUDIO=1 HALO_TICK_THREAD=1 HALO_UPDATE_AUTO=false HALO_NET_ONLINE=false \
 		HALO_MENUS_FOLDER="$root/port/vita/app0/menus/" HALO_UI_LOG=1 HALO_TEST_COMMANDS="$commands" "HALO_TEST_PAD=$pad" \
@@ -88,6 +101,12 @@ looked() {
 		grep -a "mouse: pointer" "$log" | grep -aqv "relative 0 held 1" && fail "$name: the pointer was not held in play"
 	else
 		grep -a "mouse: pointer" "$log" | grep -aqv "relative 1 held 0" && fail "$name: the mouse was not in relative mode in play"
+	fi
+	# (each facing read a living player's: a dead one's camera turns nothing - a killed player is
+	# no mouse failure, and is said as such)
+	if [ "$(grep -ac "aim test: player alive 1" "$log")" != 3 ]; then
+		fail "$name: the player was not alive at each of the 3 facings read ($(grep -a "aim test: player alive" "$log" |
+			sed 's/.*alive //' | tr '\n' ' ')): not a mouse look result"
 	fi
 	angles=$(grep -a "aim test: angles" "$log" | sed -E 's/.*angles //' | tr '\n' ' ')
 	python3 - "$name" $angles <<'PY' || status=1
@@ -128,7 +147,10 @@ for case in $cases; do
 		fi
 		style=halo3
 		[ "$case" = mpclassic ] && style=classic
-		profile_from=$HALO_TEST_PROFILE run "$case" 70 "$(look 450)" "$pause_pad" "" HALO_MENU_STYLE=$style $mp_env
+		own_network=
+		unshare -rn true 2> /dev/null && own_network=1 ||
+			echo "(no unprivileged network namespaces: the game's ports shared with the machine's)"
+		own_network=$own_network profile_from=$HALO_TEST_PROFILE run "$case" 70 "L30:cheat_deathless_player 1;$(look 450)" "$pause_pad" "" HALO_MENU_STYLE=$style $mp_env
 		looked "$case"
 		log="$out/$case/run.log"
 		sed -n '/test pad: start/,$p' "$log" | grep -aq "mouse: the menus' pointer on" ||

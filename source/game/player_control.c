@@ -460,9 +460,16 @@ void player_control_aim_test_command(
 		/* (the first local player's facing, in degrees, and on the
 		desktop whether the mouse aims: run_mouse_look_test.sh) */
 		struct player_control *control = player_control_get(0);
+		long player_index = local_player_get_player_index(0);
+		struct player_datum *player = player_index != NONE ? player_get(player_index) : NULL;
+		struct object_datum *unit = player && player->unit_index != NONE ? object_try_and_get(player->unit_index) : NULL;
+		boolean alive = unit && !TEST_FLAG(unit->object.damage_flags, _object_dead_bit);
 
 		platform_log("aim test: angles %.3f %.3f", (double)RADIANS_TO_DEGREES(control->desired_angles.yaw),
 			(double)RADIANS_TO_DEGREES(control->desired_angles.pitch));
+		/* (whether those are a living player's: a dead one's camera turns
+		nothing, run_mouse_look_test.sh's multiplayer cases) */
+		platform_log("aim test: player alive %d", alive ? 1 : 0);
 #if !defined(HALO_VITA) && !defined(HALO_ANDROID)
 		{
 			void platform_mouse_state_log(void);
