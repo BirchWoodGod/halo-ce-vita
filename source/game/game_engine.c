@@ -1969,6 +1969,16 @@ void game_engine_post_rasterize_post_game(
 
 	if (!game_engine)
 		return;
+#ifdef HALO_LINUX
+	/* port: the Halo 3 carnage report stands for it (Menu style Halo 3:
+	port/linux/game/carnage_report.c), drawn by the menus over the game */
+	{
+		boolean carnage_report_replaces_postgame(void);
+
+		if (carnage_report_replaces_postgame())
+			return;
+	}
+#endif
 
 	tab_stops[0] = 50;
 	tab_stops[1] = 125;
@@ -4324,6 +4334,18 @@ void game_engine_update_non_deterministic(
 			if (game_engine_globals.postgame_progress > 1.0f)
 				game_engine_globals.postgame_progress = 1.0f;
 
+#ifdef HALO_LINUX
+			/* port: not while a screen is up over the scores (the Halo 3
+			carnage report, whose own buttons go on or leave; the PLAYERS
+			screen, whose Circle goes back), nor for the press that closed
+			one: carnage_report.c */
+			{
+				boolean carnage_report_holds_buttons(void);
+
+				if (carnage_report_holds_buttons())
+					break;
+			}
+#endif
 			if (test_any_gamepad_button(0) || test_any_gamepad_button(12))
 			{
 				if (global_network_game_server_get())
@@ -8744,6 +8766,43 @@ long game_engine_network_player_score(
 		return 0;
 	return game_engine->get_player_score(player_index, TRUE);
 }
+
+#ifdef HALO_LINUX
+/* port: the Halo 3 carnage report (port/linux/game/carnage_report.c): every
+player, those who quit too, ranked and placed as the game's own post-game
+report ranks them (populate_statistic_buffer's ranking: the score, then
+kills, deaths, assists), each its player's index, place (0 first) and
+whether it is shared; the count */
+long game_engine_postgame_ranking(
+	long *player_indices,
+	long *places,
+	boolean *tied,
+	long maximum)
+{
+	struct statistic_buffer entries[MULTIPLAYER_MAXIMUM_PLAYERS];
+	long count;
+	long index;
+
+	if (!game_engine || !player_data)
+		return 0;
+	count = populate_statistic_buffer_of(entries, _postgame_statistic_ranking, FALSE, FALSE);
+	for (index = 0; index < count && index < maximum; index++)
+	{
+		player_indices[index] = entries[index].player_index;
+		places[index] = place_get_position(&entries[index]);
+		tied[index] = is_place_tied(&entries[index]);
+	}
+	return index;
+}
+
+/* ... and whether a team won the game (the game type's say, as the post-game
+report's order of the teams) */
+boolean game_engine_postgame_team_won(
+	long team_index)
+{
+	return game_engine && player_data && game_engine_did_team_win(team_index) == TRUE;
+}
+#endif
 
 /* the distributed netcode (port/linux/game/network_distributed.c): the
 current game type's state (scores, and what else every machine must agree

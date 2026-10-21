@@ -214,6 +214,22 @@
 #            shows, five rows, and asks for the settings panel's Party page; Menu style Halo
 #            CE: the Xbox's own pause, nothing of Halo 3's (system link host and joiner:
 #            run_netns_online_test.sh h3mppause)
+#   h3carnage the Halo 3 CARNAGE REPORT (menus/halo3/carnage.xml, port/linux/game/carnage_report.c)
+#            at a local game's end (HALO_NETWORK_TEST local, offline bots, HALO_TEST_PROFILE's
+#            profile played; skipped without): Slayer on Chill Out to 3 with three bots, Team
+#            Slayer on Blood Gulch to 3 with five, CTF on Blood Gulch and Oddball on Chill
+#            Out with five, each ended at 45 s (debug.network_test_end, as a time limit
+#            ends one). Each: the report opens in the game's own report's place
+#            once the scores come up (the pad's "carnage" step), its rows ranked as the game
+#            ranks them - places in order, a place shared only by players alike in score,
+#            kills, deaths and assists, the first the winner; a team game's team rows first
+#            the winning team's, each team's kills its players' -, this machine's player
+#            marked; R shows DETAILS, L SUMMARY again; Circle on the
+#            host's report leaves nothing; Cross goes on to the lobby (CTF's DETAILS: GRABS and
+#            RETURNS; Oddball's BALL TIME a time, "0:14"). Then with
+#            menus.carnage_report classic (HALO_CARNAGE_REPORT) and with Menu style Halo CE:
+#            no Halo 3 report, the game's own. HALO_TEST_SHOTS: carnage_summary.bmp and
+#            carnage_details.bmp of each
 #   h3friendsfit the lobbies' FRIENDS panel's line with no one to show ("Go online to see
 #            your friends", cut short in the name's column on insider.14) in its own
 #            box across the panel, in one or two lines, never cut: the Forge lobby in
@@ -372,7 +388,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3partyplates h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho h3gametypes}
+cases=${*:-fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3partyplates h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
@@ -2180,6 +2196,130 @@ PY
 			fail h3mppause "Menu style Halo CE did not open the Xbox's multiplayer pause"
 		grep -aq "h3/mppause\|pc.h3.mppause" "$out/h3mppause_classic/run.log" &&
 			fail h3mppause "Menu style Halo CE opened the Halo 3 multiplayer pause" ;;
+	h3carnage)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "--- h3carnage"; echo "SKIP: no HALO_TEST_PROFILE"; continue
+		fi
+		# (once the report is up: its picture, R (DETAILS) and its picture, L, Circle (the
+		# host's: nothing), Cross: the lobby)
+		carnage_pad="wait:150:1000 carnage:150:3000 @carnage_summary rt:150:2000 @carnage_details lt:150:1500 b:150:2000 a:150:4000"
+		carnage_env="HALO_NETWORK_TEST_PROFILE=1 HALO_NETWORK_TEST_START=3 HALO_BOT_SKILL=legendary HALO_TEST_CARNAGE_SECONDS=60"
+		profile_from=$HALO_TEST_PROFILE run h3carnage "$menus_data" 160 "$carnage_pad" HALO_MENU_STYLE=halo3 $carnage_env \
+			HALO_NETWORK_TEST=local:chillout:slayer HALO_NETWORK_TEST_SCORE=3 HALO_BOTS=3
+		profile_from=$HALO_TEST_PROFILE run h3carnage_team "$menus_data" 160 "$carnage_pad" HALO_MENU_STYLE=halo3 $carnage_env \
+			HALO_NETWORK_TEST=local:bloodgulch:team_slayer HALO_NETWORK_TEST_SCORE=3 HALO_BOTS=5
+		profile_from=$HALO_TEST_PROFILE run h3carnage_ctf "$menus_data" 110 "$carnage_pad" HALO_MENU_STYLE=halo3 $carnage_env \
+			HALO_NETWORK_TEST=local:bloodgulch:ctf HALO_NETWORK_TEST_END=45 HALO_BOTS=5
+		profile_from=$HALO_TEST_PROFILE run h3carnage_oddball "$menus_data" 110 "$carnage_pad" HALO_MENU_STYLE=halo3 $carnage_env \
+			HALO_NETWORK_TEST=local:chillout:oddball HALO_NETWORK_TEST_END=45 HALO_BOTS=5
+		# (the game's own report: menus.carnage_report classic, and Menu style Halo CE)
+		profile_from=$HALO_TEST_PROFILE run h3carnage_classic "$menus_data" 90 "wait:150:1000" HALO_MENU_STYLE=halo3 \
+			HALO_CARNAGE_REPORT=classic $carnage_env HALO_NETWORK_TEST=local:chillout:slayer HALO_NETWORK_TEST_END=30 HALO_BOTS=3
+		profile_from=$HALO_TEST_PROFILE run h3carnage_ce "$menus_data" 90 "wait:150:1000" HALO_MENU_STYLE=classic \
+			$carnage_env HALO_NETWORK_TEST=local:chillout:slayer HALO_NETWORK_TEST_END=30 HALO_BOTS=3
+		for name in h3carnage h3carnage_team h3carnage_ctf h3carnage_oddball h3carnage_classic h3carnage_ce; do
+			log=$out/$name/run.log
+			echo "--- $name"
+			grep -aE "carnage: |menus: h3 carnage" "$log" | head -14
+			[ "$(cat "$out/$name/exit")" = 0 ] || fail h3carnage "$name: exit $(cat "$out/$name/exit")"
+			grep -av "render assertion skipped" "$log" | grep -aqiE "assert|exception|halt_and_catch_fire" &&
+				fail h3carnage "$name: an assertion, exception or halt"
+		done
+		for name in h3carnage h3carnage_team h3carnage_ctf h3carnage_oddball; do
+			log=$out/$name/run.log
+			grep -aq "ui: screen pc.h3.carnage.screen" "$log" && grep -aq "menus: h3 carnage: the carnage report opened (the host)" "$log" ||
+				{ fail h3carnage "$name: the carnage report did not open at the game's end"; continue; }
+			# (the rows of the report as last said: ranked as the game ranks them)
+			python3 - "$log" "$name" <<'PY' || fail h3carnage "$name: the report's rows were not ranked as the game ranks them"
+import re, sys
+log, name = sys.argv[1], sys.argv[2]
+head, rows = None, []
+for line in open(log, encoding='utf-8', errors='replace'):
+    m = re.search(r'carnage: [^:]*report[^:]*: (type .*)', line)
+    if m:
+        head, rows = m.group(1), []
+        continue
+    m = re.search(r'carnage: row \d+: (team )?(.*) place (\d+)( \(tied\))?( won)? team (-?\d+) score (\S+) kills (\d+) '
+                  r'deaths (\d+) assists (\d+) suicides (\d+) betrayals (\d+) objective (-?\d+) (-?\d+)(.*)', line)
+    if m:
+        rows.append(dict(team_row=bool(m.group(1)), name=m.group(2), place=int(m.group(3)), tied=bool(m.group(4)),
+            won=bool(m.group(5)), team=int(m.group(6)), score=m.group(7), kills=int(m.group(8)), deaths=int(m.group(9)),
+            assists=int(m.group(10)), local='[this machine]' in m.group(15)))
+problems = []
+def say(text):
+    problems.append(text)
+if not head or not rows:
+    say('no report said')
+teams = head and ', teams,' in head
+def score(text):
+    # (a time, "1:05", in seconds; a number as it is)
+    if ':' in text:
+        minutes, seconds = text.split(':', 1)
+        return int(minutes or 0) * 60 + int(seconds)
+    return int(text) if text.lstrip('-').isdigit() else 0
+def key(r):
+    return (score(r['score']), r['kills'], -r['deaths'], r['assists'])
+players = [r for r in rows if not r['team_row']]
+if not any(r['local'] for r in players):
+    say("this machine's player is not marked")
+ranked = sorted(players, key=lambda r: r['place'])
+for a, b in zip(ranked, ranked[1:]):
+    if key(a) < key(b):
+        say('%s placed above %s with less' % (a['name'], b['name']))
+    # (a place is shared only by players alike; players alike as shown may
+    # differ by less than a second of a time's score)
+    if a['place'] == b['place'] and key(a) != key(b):
+        say('%s and %s share a place, not alike' % (a['name'], b['name']))
+if not teams:
+    for index, r in enumerate(rows):
+        if index and rows[index - 1]['place'] > r['place']:
+            say('the rows are not in their places\' order')
+    first = rows[0] if rows else None
+    if first and first['won'] == first['tied']:
+        say('the first row is not the winner (or a tie is)')
+    for index, r in enumerate(ranked):
+        expected = next(i for i, o in enumerate(ranked) if o['place'] == r['place']) + 1
+        if r['place'] != expected:
+            say('%s is placed %d, not %d (a shared place counts its players)' % (r['name'], r['place'], expected))
+else:
+    team_rows = [r for r in rows if r['team_row']]
+    if not rows[0]['team_row']:
+        say('a team game\'s report does not start with a team')
+    if len(team_rows) >= 2 and score(team_rows[0]['score']) < score(team_rows[1]['score']):
+        say('the first team has the lower score')
+    if team_rows and team_rows[0]['won'] == team_rows[0]['tied']:
+        say('the first team is not the winner (or a tie is)')
+    if team_rows and team_rows[0]['tied'] and not (len(team_rows) >= 2 and team_rows[1]['tied'] and
+            score(team_rows[0]['score']) == score(team_rows[1]['score'])):
+        say('a tie of teams not alike')
+    for t in team_rows:
+        members = [r for r in players if r['team'] == t['team']]
+        if sum(r['kills'] for r in members) != t['kills'] or sum(r['deaths'] for r in members) != t['deaths']:
+            say("%s's kills or deaths are not its players'" % t['name'])
+        if any(r['won'] != t['won'] for r in members):
+            say("%s's players are not marked as their team" % t['name'])
+print('%s: %s, %d rows: %s' % (name, head, len(rows), 'ranked' if not problems else '; '.join(problems)))
+sys.exit(1 if problems else 0)
+PY
+			grep -aq "menus: h3 carnage: page 1, " "$log" || fail h3carnage "$name: R did not show DETAILS"
+			sed -n '/menus: h3 carnage: page 1, /,$p' "$log" | grep -aq "menus: h3 carnage: page 0, " ||
+				fail h3carnage "$name: L did not show SUMMARY again"
+			grep -aq "menus: h3 carnage: the host goes on: the lobby" "$log" || fail h3carnage "$name: Cross did not go on to the lobby"
+			grep -aq "LEAVE GAME: the game left\|ui: screen pc.h3.carnage.leave" "$log" && fail h3carnage "$name: the host's Circle asked to leave"
+			grep -aq "menus: h3 carnage: closed with the game" "$log" || fail h3carnage "$name: the report did not close with the game"
+		done
+		grep -aq "carnage: .*report: type 1, teams" "$out/h3carnage_ctf/run.log" || fail h3carnage "CTF's report was not a team game's"
+		grep -aq "carnage: .*report: type 3, free for all" "$out/h3carnage_oddball/run.log" ||
+			fail h3carnage "Oddball's report was not a free for all game's"
+		grep -aqE "carnage: row 1: .* score [0-9]+:[0-9][0-9] kills" "$out/h3carnage_oddball/run.log" ||
+			fail h3carnage "Oddball's score was not a time"
+		for name in h3carnage_classic h3carnage_ce; do
+			log=$out/$name/run.log
+			grep -aq "menus: h3 carnage: the game is over: the game's own report" "$log" ||
+				fail h3carnage "$name: the game did not end with the game's own report"
+			grep -aq "ui: screen pc.h3.carnage\|menus: h3 carnage: the carnage report opened" "$log" &&
+				fail h3carnage "$name: the Halo 3 report opened (the game's own wanted)"
+		done ;;
 	h3friendsfit)
 		# (FORGE: its lobby's FRIENDS panel, internet play off: its line; in English, then Spanish)
 		run h3friendsfit "$menus_data" 22 "wait:150:3000 down:150:700 down:150:700 a wait:150:5000" HALO_MENU_STYLE=halo3
@@ -2448,7 +2588,7 @@ PY
 		done
 		ls "$gt_shots" | head -40 ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3renamed|pausesave|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3lobbyscenes|h3modelsmany|h3friends|h3friendspanel|browserprofile|h3players|browserrows|profilepaths|h3mppause|h3friendsfit|h3hostonline|h3livelobby|h3groups|browserreopen|h3livebrowse|profileio|h3vitapc|h3createwho|h3gametypes]...|profileio]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3renamed|pausesave|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3lobbyscenes|h3modelsmany|h3friends|h3friendspanel|browserprofile|h3players|browserrows|profilepaths|h3mppause|h3friendsfit|h3hostonline|h3livelobby|h3groups|browserreopen|h3livebrowse|profileio|h3carnage]...|h3vitapc|h3createwho|h3gametypes]...|profileio]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"

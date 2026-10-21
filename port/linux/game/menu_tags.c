@@ -403,6 +403,8 @@ static char const *const port_function_names[] =
 	"port h3 gametype delete later", "port h3 gametype delete ask", "port h3 gametype delete", "port h3 gametype base",
 	"port h3 gametype next", "port h3 gametype previous", "port h3 gametype category", "port h3 gametype save",
 	"port h3 gametype save quit", "port h3 gametype leave ask", "port h3 gametype leave", "port h3 gametype discard",
+	"port h3 carnage init", "port h3 carnage continue", "port h3 carnage leave ask", "port h3 carnage leave",
+	"port h3 carnage players", "port h3 carnage page", "port h3 carnage up", "port h3 carnage down",
 };
 
 /* the port's game data functions (menu_functions.c), from
@@ -429,6 +431,7 @@ static char const *const port_game_data_input_names[] =
 	"port h3 invite", "port h3 party plates",
 	"port h3 gametype list", "port h3 gametype actions", "port h3 gametype question", "port h3 gametype bases",
 	"port h3 gametype editor", "port h3 gametype options",
+	"port h3 carnage",
 };
 
 static struct

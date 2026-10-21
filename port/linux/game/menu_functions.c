@@ -130,6 +130,7 @@ for a gamepad); a test build's HALO_TEST_TEXT_INPUT answers in its place,
 #include "input/input.h"
 #include "coop_menu.h"
 #include "map_share.h"
+#include "carnage_report.h"
 
 #include <math.h>
 #include <stdarg.h>
@@ -374,6 +375,14 @@ enum
 	_function_h3_gametype_leave_ask,
 	_function_h3_gametype_leave,
 	_function_h3_gametype_discard,
+	_function_h3_carnage_init,
+	_function_h3_carnage_continue,
+	_function_h3_carnage_leave_ask,
+	_function_h3_carnage_leave,
+	_function_h3_carnage_players,
+	_function_h3_carnage_page,
+	_function_h3_carnage_up,
+	_function_h3_carnage_down,
 };
 
 /* in port_game_data_input_names' order */
@@ -434,6 +443,7 @@ enum
 	_input_h3_gametype_bases,
 	_input_h3_gametype_editor,
 	_input_h3_gametype_options,
+	_input_h3_carnage,
 };
 
 /* what a line of typing is for */
@@ -11199,6 +11209,514 @@ int menu_functions_players_add_first(void)
 	return 0;
 }
 
+/* ---- port h3 carnage: the Halo 3 CARNAGE REPORT (halo3/carnage.xml) over a
+multiplayer game's end, in the place of the game's own report
+(game_engine_post_rasterize_post_game), on every machine of the game: opened
+once the scores come up (the game's rasterize delay: game_engine_force_
+single_screen) when Menu style is Halo 3 and nothing else is up, again if
+something closed it. Its numbers are carnage_report.c's (the game's record:
+a joined machine's the host's). Cross goes on to the lobby for the host (the
+game's own report's A: network_game_server_reset_to_pregame, done at the
+next frame, out of the widget's event), by itself after
+H3_CARNAGE_CONTINUE_SECONDS on the report; a joined machine waits for the
+host, its Circle leaves (asked first: the game's own report's B,
+network_game_abort). The scores' own buttons wait while it is up
+(carnage_report_holds_buttons). */
+
+#define H3_CARNAGE_SCREEN "h3/carnage/screen"
+#define H3_CARNAGE_ROWS 14
+#define H3_CARNAGE_COLUMNS 5
+#define H3_CARNAGE_CONTINUE_SECONDS 30
+#define H3_CARNAGE_MESSAGE_MILLISECONDS 5000
+
+enum
+{
+	_h3_carnage_summary,
+	_h3_carnage_details,
+	NUMBER_OF_H3_CARNAGE_PAGES
+};
+
+/* a page's column */
+enum
+{
+	_h3_carnage_score,
+	_h3_carnage_kills,
+	_h3_carnage_deaths,
+	_h3_carnage_assists,
+	_h3_carnage_spread,
+	_h3_carnage_suicides,
+	_h3_carnage_betrayals,
+	_h3_carnage_objective_0,
+	_h3_carnage_objective_1,
+	_h3_carnage_ratio,
+	_h3_carnage_none,
+};
+
+static struct
+{
+	/* the report is up (or could not be: the game's own then) this game's end */
+	boolean shown;
+	boolean unavailable;
+	short page;
+	long offset;
+	boolean offset_set;
+	/* the host's time with the report up (ms), and the last frame's time */
+	unsigned long up_milliseconds;
+	unsigned long last_frame;
+	/* the host's Cross or its time (gone on), a joined machine's LEAVE: done
+	at the next frame */
+	boolean go_on_pending;
+	boolean gone_on;
+	boolean leave_pending;
+	char message[160];
+	unsigned long message_time;
+	char said[96];
+	boolean end_said;
+	struct carnage_report report;
+} h3_carnage;
+
+static long h3_carnage_continue_seconds(void)
+{
+#ifndef HALO_RELEASE
+	char const *seconds = getenv("HALO_TEST_CARNAGE_SECONDS");
+
+	if (seconds && atol(seconds) > 0)
+		return atol(seconds);
+#endif
+	return H3_CARNAGE_CONTINUE_SECONDS;
+}
+
+/* (Menu style Halo 3, and menus.carnage_report - HALO_CARNAGE_REPORT - not
+"classic") whether the Halo 3 report stands for the game's own */
+static boolean h3_carnage_wanted(void)
+{
+	/* (its variable, live; else config.toml's) */
+	char const *report = getenv("HALO_CARNAGE_REPORT");
+
+	if (!report)
+		report = config_string("menus.carnage_report");
+	return halo_menu_style_halo3() && strcmp(report, "classic") != 0;
+}
+
+/* this machine's network game, not split screen's (PLAYERS, LEAVE) */
+static boolean h3_carnage_network(void)
+{
+	return global_network_game_client_get() != NULL && !network_game_is_splitscreen_local();
+}
+
+static boolean h3_carnage_hosting(void)
+{
+	return global_network_game_server_get() != NULL;
+}
+
+static void h3_carnage_say(char const *text)
+{
+	snprintf(h3_carnage.message, sizeof(h3_carnage.message), "%s", text);
+	h3_carnage.message_time = system_milliseconds();
+	platform_log("menus: h3 carnage: %s", text);
+}
+
+/* a place, as the game's report has it ("1st", "2nd"; the language's) */
+static void h3_carnage_place(long place, char *text, int size)
+{
+	long number = place + 1;
+	char const *suffix = "th";
+
+	if (number % 100 < 11 || number % 100 > 13)
+		suffix = number % 10 == 1 ? "st" : number % 10 == 2 ? "nd" : number % 10 == 3 ? "rd" : "th";
+	snprintf(text, (size_t)size, "%ld%s", number, T(suffix));
+}
+
+/* the page's columns, in order (a game without teams has no betrayals; the
+game type's own where it has them) */
+static int h3_carnage_columns(struct carnage_report const *report, short page, int columns[H3_CARNAGE_COLUMNS])
+{
+	int count = 0, index;
+
+	for (index = 0; index < H3_CARNAGE_COLUMNS; index++)
+		columns[index] = _h3_carnage_none;
+	if (page == _h3_carnage_summary)
+	{
+		columns[count++] = _h3_carnage_score;
+		columns[count++] = _h3_carnage_kills;
+		columns[count++] = _h3_carnage_deaths;
+		columns[count++] = _h3_carnage_assists;
+		columns[count++] = _h3_carnage_spread;
+		return count;
+	}
+	columns[count++] = _h3_carnage_suicides;
+	if (report->teams)
+		columns[count++] = _h3_carnage_betrayals;
+	if (carnage_report_objective_name(report->type, 0))
+		columns[count++] = _h3_carnage_objective_0;
+	if (carnage_report_objective_name(report->type, 1))
+		columns[count++] = _h3_carnage_objective_1;
+	columns[count++] = _h3_carnage_ratio;
+	return count;
+}
+
+static char const *h3_carnage_column_name(struct carnage_report const *report, int column)
+{
+	switch (column)
+	{
+	case _h3_carnage_score:
+		switch (report->type)
+		{
+		case game_engine_ctf:
+			return T("FLAGS");
+		case game_engine_oddball:
+			return T("BALL TIME");
+		case game_engine_king:
+			return T("HILL TIME");
+		case game_engine_race:
+			return T("LAPS");
+		}
+		return T("SCORE");
+	case _h3_carnage_kills:
+		return T("KILLS");
+	case _h3_carnage_deaths:
+		return T("DEATHS");
+	case _h3_carnage_assists:
+		return T("ASSISTS");
+	case _h3_carnage_spread:
+		return "+/-";
+	case _h3_carnage_suicides:
+		return T("SUICIDES");
+	case _h3_carnage_betrayals:
+		return T("BETRAYALS");
+	case _h3_carnage_objective_0:
+		return T(carnage_report_objective_name(report->type, 0));
+	case _h3_carnage_objective_1:
+		return T(carnage_report_objective_name(report->type, 1));
+	case _h3_carnage_ratio:
+		return "K/D";
+	}
+	return "";
+}
+
+static void h3_carnage_value(struct carnage_report const *report, struct carnage_report_row const *row, int column,
+	char *text, int size)
+{
+	switch (column)
+	{
+	case _h3_carnage_score:
+		snprintf(text, (size_t)size, "%s", row->score[0] ? row->score : "0");
+		break;
+	case _h3_carnage_kills:
+		snprintf(text, (size_t)size, "%ld", row->kills);
+		break;
+	case _h3_carnage_deaths:
+		snprintf(text, (size_t)size, "%ld", row->deaths);
+		break;
+	case _h3_carnage_assists:
+		snprintf(text, (size_t)size, "%ld", row->assists);
+		break;
+	case _h3_carnage_spread:
+		snprintf(text, (size_t)size, row->kills > row->deaths ? "+%ld" : "%ld", row->kills - row->deaths);
+		break;
+	case _h3_carnage_suicides:
+		snprintf(text, (size_t)size, "%ld", row->suicides);
+		break;
+	case _h3_carnage_betrayals:
+		snprintf(text, (size_t)size, "%ld", row->betrayals);
+		break;
+	case _h3_carnage_objective_0:
+	case _h3_carnage_objective_1:
+		carnage_report_objective_text(report, row, column == _h3_carnage_objective_0 ? 0 : 1, text, size);
+		break;
+	case _h3_carnage_ratio:
+		/* (kills for each death; a player never killed: their kills) */
+		snprintf(text, (size_t)size, "%.2f", row->deaths ? (double)row->kills / (double)row->deaths : (double)row->kills);
+		break;
+	default:
+		snprintf(text, (size_t)size, " ");
+		break;
+	}
+}
+
+/* (port h3 carnage: its rows' container, each frame) the report read again
+(a late statistic of the host's shows), the title, the result, the page's
+columns and the rows shown, the buttons this machine has */
+static void h3_carnage_update(struct widget_instance *lines)
+{
+	struct widget_instance *screen = screen_of(lines);
+	struct carnage_report *report = &h3_carnage.report;
+	struct network_game *game = network_game_get_game();
+	boolean host = h3_carnage_hosting();
+	boolean network = h3_carnage_network();
+	struct widget_instance *child, *found;
+	int columns[H3_CARNAGE_COLUMNS];
+	long index, local_row = NONE, first;
+	char text[256], name[64], map[96];
+
+	if (!carnage_report_read(report))
+		report->row_count = 0;
+	carnage_report_log(report, h3_carnage_hosting() ? "the host's report" : "the report (the host's numbers)");
+	/* (the game type on the map, at the right of the title) */
+	name[0] = map[0] = 0;
+	if (game)
+	{
+		/* (the game type's own name; a variant with none, the game type's) */
+		if (game->variant.human_readable_game_description[0])
+			h3_mp_game_name(game, name, (int)sizeof(name));
+		else
+		{
+			static char const *const types[] = { "", N_("Capture the Flag"), N_("Slayer"), N_("Oddball"),
+				N_("King of the Hill"), N_("Race") };
+
+			snprintf(name, sizeof(name), "%s", report->type > 0 && report->type < (long)NUMBEROF(types) ?
+				T(types[report->type]) : "");
+		}
+		snprintf(map, sizeof(map), "%s", custom_edition_maps_level_title(game->map.name));
+	}
+	snprintf(text, sizeof(text), name[0] && map[0] ? T("%s on %s") : "%s%s", name, map);
+	h3_capitals(text);
+	text_show(named(screen, "game"), text);
+	/* the result: the winner, or a tie */
+	if (report->teams && report->winning_team != NONE)
+	{
+		for (index = 0; index < report->row_count; index++)
+			if (report->rows[index].team_row && report->rows[index].team == report->winning_team)
+				break;
+		snprintf(text, sizeof(text), T("%s WINS"), index < report->row_count ? report->rows[index].name : "");
+	}
+	else if (!report->teams && report->winning_row != NONE)
+		snprintf(text, sizeof(text), T("%s WINS"), report->rows[report->winning_row].name);
+	else
+		snprintf(text, sizeof(text), "%s", report->row_count ? T("TIE GAME") : "");
+	h3_capitals(text);
+	text_show(named(screen, "result"), text);
+	/* under it: the teams' scores, or this machine's player's place */
+	text[0] = 0;
+	for (index = 0; index < report->row_count; index++)
+	{
+		struct carnage_report_row const *row = &report->rows[index];
+
+		if (row->local && !row->team_row && local_row == NONE)
+			local_row = index;
+		if (report->teams && row->team_row)
+			snprintf(text + strlen(text), sizeof(text) - strlen(text), "%s%s %s", text[0] ? "   " : "", row->name,
+				row->score[0] ? row->score : "0");
+	}
+	if (!report->teams && local_row != NONE)
+	{
+		char place[24];
+
+		h3_carnage_place(report->rows[local_row].place, place, (int)sizeof(place));
+		snprintf(text, sizeof(text), report->rows[local_row].tied ? T("You tied for %s of %ld") : T("You placed %s of %ld"),
+			place, report->player_count);
+	}
+	text_show(named(screen, "result_sub"), text);
+	/* the pages, the one shown lit */
+	if ((found = named(screen, "tab_summary")) != NULL)
+		found->animation.current_frame_index = h3_carnage.page == _h3_carnage_summary ? 1 : 0;
+	if ((found = named(screen, "tab_details")) != NULL)
+		found->animation.current_frame_index = h3_carnage.page == _h3_carnage_details ? 1 : 0;
+	h3_carnage_columns(report, h3_carnage.page, columns);
+	for (index = 0; index < H3_CARNAGE_COLUMNS; index++)
+	{
+		snprintf(name, sizeof(name), "header_%ld", index + 1);
+		text_show(named(screen, name), h3_carnage_column_name(report, columns[index]));
+	}
+	/* (the first time, this machine's player in sight) */
+	if (!h3_carnage.offset_set && report->row_count)
+	{
+		h3_carnage.offset_set = TRUE;
+		h3_carnage.offset = local_row != NONE && local_row >= H3_CARNAGE_ROWS ? local_row - H3_CARNAGE_ROWS + 1 : 0;
+	}
+	h3_carnage.offset = PIN(h3_carnage.offset, 0, MAX(0, report->row_count - H3_CARNAGE_ROWS));
+	first = h3_carnage.offset;
+	for (index = 0, child = lines->child; child; child = child->next)
+	{
+		struct carnage_report_row const *row;
+		long column;
+
+		if (strncmp(child->name, "line_", 5))
+			continue;
+		if (first + index >= report->row_count)
+		{
+			widget_instance_set_visibility_recursive(child, FALSE);
+			index++;
+			continue;
+		}
+		row = &report->rows[first + index];
+		widget_instance_set_visibility_recursive(child, TRUE);
+		/* (this machine's players lit) */
+		child->animation.current_frame_index = row->local && !row->team_row ? 1 : 0;
+		/* (a team game's places are its teams') */
+		if (report->teams && !row->team_row)
+			text[0] = 0;
+		else
+			h3_carnage_place(row->place, text, (int)sizeof(text));
+		text_show(named(child, "row_place"), text);
+		if ((found = named(child, "row_won")) != NULL)
+			widget_instance_set_visibility_recursive(found, row->won);
+		snprintf(text, sizeof(text), "%s%s", row->name, row->quit ? T(" (left)") : "");
+		row_column(child, "row_name", text);
+		if ((found = named(child, "row_name")) != NULL)
+			found->animation.current_frame_index = (short)(row->color < 0 || row->color >= 18 ? 0 : row->color + 1);
+		for (column = 0; column < H3_CARNAGE_COLUMNS; column++)
+		{
+			char value[32];
+
+			snprintf(name, sizeof(name), "row_%ld", column + 1);
+			h3_carnage_value(report, row, columns[column], value, (int)sizeof(value));
+			text_show(named(child, name), value);
+		}
+		index++;
+	}
+	if (report->row_count > H3_CARNAGE_ROWS)
+		snprintf(text, sizeof(text), T("%ld-%ld of %ld: up and down for more"), first + 1,
+			MIN(first + H3_CARNAGE_ROWS, report->row_count), report->row_count);
+	else
+		text[0] = 0;
+	text_show(named(screen, "scroll"), text);
+	text_show(named(screen, "message"), h3_carnage.message[0] &&
+		system_milliseconds() - h3_carnage.message_time < H3_CARNAGE_MESSAGE_MILLISECONDS ? h3_carnage.message : "");
+	/* the buttons: Cross the host's (once the scores are up), Triangle a
+	network game's, Circle a joined machine's */
+	{
+		boolean go_on = host && game_engine_showing_postgame() && !h3_carnage.gone_on;
+
+		if ((found = named(screen, "a_butn")) != NULL)
+			widget_instance_set_visibility_recursive(found, go_on);
+		text_show(named(screen, "a_label"), go_on ? T("Continue") : host ? "" : T("Waiting for the host"));
+		if ((found = named(screen, "y_butn")) != NULL)
+			widget_instance_set_visibility_recursive(found, network);
+		if ((found = named(screen, "y_label")) != NULL)
+			widget_instance_set_visibility_recursive(found, network);
+		if ((found = named(screen, "b_butn")) != NULL)
+			widget_instance_set_visibility_recursive(found, network && !host);
+		if ((found = named(screen, "b_label")) != NULL)
+			widget_instance_set_visibility_recursive(found, network && !host);
+		text[0] = 0;
+		if (go_on)
+		{
+			long left = h3_carnage_continue_seconds() - (long)(h3_carnage.up_milliseconds / 1000);
+
+			snprintf(text, sizeof(text), T("To the lobby in %ld"), MAX(left, 0L));
+		}
+		text_show(named(screen, "status"), text);
+	}
+	snprintf(text, sizeof(text), "page %d, rows %ld-%ld of %ld, %s", h3_carnage.page, first + 1,
+		MIN(first + H3_CARNAGE_ROWS, report->row_count), report->row_count, host ? "the host" : "joined");
+	if (strcmp(text, h3_carnage.said))
+	{
+		snprintf(h3_carnage.said, sizeof(h3_carnage.said), "%s", text);
+		platform_log("menus: h3 carnage: %s", text);
+	}
+}
+
+/* (Cross) the host goes on to the lobby, everyone with it, at the next frame */
+static void h3_carnage_continue(void)
+{
+	if (!h3_carnage_hosting())
+	{
+		h3_carnage_say(T("Waiting for the host to go on"));
+		return;
+	}
+	if (!game_engine_showing_postgame() || h3_carnage.gone_on)
+		return;
+	h3_carnage.go_on_pending = TRUE;
+}
+
+/* (each frame, pc_menu_functions_update) the report opened over the game's
+end, the host's time on it, what its buttons asked for */
+static void h3_carnage_frame(boolean main_menu_loaded)
+{
+#ifndef HALO_DEDICATED_SERVER
+	boolean over = !main_menu_loaded && game_engine_running() && game_engine_force_single_screen();
+	unsigned long now = system_milliseconds();
+	struct widget_instance *active;
+	long tag;
+	short index;
+
+	if (!over)
+	{
+		if (h3_carnage.shown)
+			platform_log("menus: h3 carnage: closed with the game");
+		memset(&h3_carnage, 0, sizeof(h3_carnage) - sizeof(h3_carnage.report));
+		carnage_report_set_shown(FALSE);
+		return;
+	}
+	if (!h3_carnage.end_said)
+	{
+		h3_carnage.end_said = TRUE;
+		platform_log("menus: h3 carnage: the game is over: %s", h3_carnage_wanted() ? "the Halo 3 carnage report" :
+			halo_menu_style_halo3() ? "the game's own report (menus.carnage_report classic)" :
+			"the game's own report (Menu style Halo CE)");
+	}
+	if (h3_carnage.leave_pending)
+	{
+		h3_carnage.leave_pending = FALSE;
+		platform_log("menus: h3 carnage: LEAVE GAME: the game left");
+		network_game_abort();
+		return;
+	}
+	if (h3_carnage.go_on_pending)
+	{
+		struct network_game_server *server = global_network_game_server_get();
+
+		h3_carnage.go_on_pending = FALSE;
+		if (server && game_engine_showing_postgame() && !h3_carnage.gone_on)
+		{
+			h3_carnage.gone_on = TRUE;
+			platform_log("menus: h3 carnage: the host goes on: the lobby");
+			network_game_server_reset_to_pregame(server);
+		}
+		return;
+	}
+	if (h3_carnage.unavailable || !h3_carnage_wanted())
+	{
+		carnage_report_set_shown(FALSE);
+		return;
+	}
+	tag = menu_tags_ingame_screen(H3_CARNAGE_SCREEN);
+	if (tag == NONE)
+	{
+		h3_carnage.unavailable = TRUE;
+		platform_log("menus: h3 carnage: not in this map's menus: the game's own report");
+		return;
+	}
+	active = ui_widget_port_active_screen(0);
+	/* (opened when nothing is up - the game's own report meanwhile -, and
+	again if something closed it) */
+	if (!active)
+	{
+		for (index = 1; index < MAXIMUM_LOCAL_PLAYERS; index++)
+			if (ui_widget_port_active_screen(index))
+				return;
+		if (!ui_widget_load_by_name_or_tag(NULL, tag, NULL, 0, NONE, NONE, NONE))
+		{
+			h3_carnage.unavailable = TRUE;
+			carnage_report_set_shown(FALSE);
+			platform_log("menus: h3 carnage: the screen did not open: the game's own report");
+			return;
+		}
+		platform_log("menus: h3 carnage: the carnage report %s (%s)", h3_carnage.shown ? "opened again" : "opened",
+			h3_carnage_hosting() ? "the host" : "joined");
+		h3_carnage.shown = TRUE;
+		carnage_report_set_shown(TRUE);
+		h3_carnage.last_frame = now;
+		return;
+	}
+	/* (the host: by itself after a while on the report - not while another
+	screen is over it) */
+	if (h3_carnage.shown && h3_carnage_hosting() && !h3_carnage.gone_on && game_engine_showing_postgame() &&
+		active->definition_tag_index == tag)
+	{
+		if (h3_carnage.last_frame)
+			h3_carnage.up_milliseconds += MIN(now - h3_carnage.last_frame, 1000UL);
+		if (h3_carnage.up_milliseconds >= (unsigned long)h3_carnage_continue_seconds() * 1000UL)
+		{
+			platform_log("menus: h3 carnage: %ld s on the report: the lobby by itself", h3_carnage_continue_seconds());
+			h3_carnage.go_on_pending = TRUE;
+		}
+	}
+	h3_carnage.last_frame = now;
+#endif
+}
+
 /* ---------- public code */
 
 /* (friends_game.c: a friend's game joined, its invite handed on) the System
@@ -13236,6 +13754,38 @@ boolean pc_menu_event_function_invoke(
 				T("The lobby isn't open yet: wait for the\nnetwork, or choose NETWORK: LOCAL."));
 		platform_log("menus: forge lobby: START FORGE: the lobby is not live yet");
 		return FALSE;
+	/* (the Halo 3 carnage report: halo3/carnage.xml) */
+	case _function_h3_carnage_init:
+		h3_carnage.page = _h3_carnage_summary;
+		h3_carnage.offset_set = FALSE;
+		h3_carnage.message[0] = 0;
+		h3_carnage.said[0] = 0;
+		return TRUE;
+	case _function_h3_carnage_continue:
+		h3_carnage_continue();
+		return TRUE;
+	case _function_h3_carnage_leave_ask:
+		/* (a joined machine's: the question; the host goes on instead) */
+		return h3_carnage_network() && !h3_carnage_hosting();
+	case _function_h3_carnage_leave:
+		h3_carnage.leave_pending = TRUE;
+		return TRUE;
+	case _function_h3_carnage_players:
+		if (!h3_carnage_network())
+			return FALSE;
+		h3_players.chosen_machine = -1;
+		h3_players.message[0] = 0;
+		platform_log("menus: the PLAYERS screen opened (the carnage report)");
+		return TRUE;
+	case _function_h3_carnage_page:
+		h3_carnage.page = (short)((h3_carnage.page + 1) % NUMBER_OF_H3_CARNAGE_PAGES);
+		return TRUE;
+	case _function_h3_carnage_up:
+		h3_carnage.offset--;
+		return TRUE;
+	case _function_h3_carnage_down:
+		h3_carnage.offset++;
+		return TRUE;
 	case _function_forge_browser_init:
 		h3_forge.page = 0;
 		h3_forge.said[0] = 0;
@@ -13967,6 +14517,9 @@ void pc_menu_game_data_function_invoke(
 		if (widget->type == _ui_widget_type_column_list)
 			h3_gametype_options_update(widget);
 		break;
+	case _input_h3_carnage:
+		h3_carnage_update(widget);
+		break;
 	default:
 		break;
 	}
@@ -14164,6 +14717,7 @@ void pc_menu_functions_update(
 	boolean main_menu_loaded)
 {
 	h3_live_update(main_menu_loaded);
+	h3_carnage_frame(main_menu_loaded);
 	/* (a join the host's map refused: the games browser again once the
 	main menu is up - the Xbox's error over it dismissed -, not the main
 	menu; given up after 30 s) */

@@ -449,7 +449,9 @@ right start back ls rs, the sticks pushed all the way lup ldown lleft
 lright rup rdown rleft rright, several at once joined by "+"; "wait" presses
 none, "level" none until a level (not the main menu) has run three
 seconds' frames, its hold and pause counted from then (a map's load takes
-as long as it takes), and "@name" none, the next frame saved as name.bmp
+as long as it takes), "carnage" none until a multiplayer game's Halo 3
+carnage report is up (port/linux/game/carnage_report.c: a game's end comes
+when it comes), and "@name" none, the next frame saved as name.bmp
 (HALO_SCREENSHOT_DIR, as HALO_TEST_COMMANDS' @shot). halo.log says each
 step as it is pressed. */
 static struct
@@ -517,7 +519,7 @@ static void test_pad_parse(void)
 		{ "left", -1, XINPUT_GAMEPAD_DPAD_LEFT }, { "right", -1, XINPUT_GAMEPAD_DPAD_RIGHT },
 		{ "start", -1, XINPUT_GAMEPAD_START }, { "back", -1, XINPUT_GAMEPAD_BACK },
 		{ "ls", -1, XINPUT_GAMEPAD_LEFT_THUMB }, { "rs", -1, XINPUT_GAMEPAD_RIGHT_THUMB },
-		{ "wait", -1, 0 }, { "level", -1, 0 },
+		{ "wait", -1, 0 }, { "level", -1, 0 }, { "carnage", -1, 0 },
 		{ "lup", -1, 0, TEST_PAD_LEFT_UP }, { "ldown", -1, 0, TEST_PAD_LEFT_DOWN },
 		{ "lleft", -1, 0, TEST_PAD_LEFT_LEFT }, { "lright", -1, 0, TEST_PAD_LEFT_RIGHT },
 		{ "rup", -1, 0, TEST_PAD_RIGHT_UP }, { "rdown", -1, 0, TEST_PAD_RIGHT_DOWN },
@@ -621,6 +623,17 @@ static void test_pad_gamepad(XINPUT_GAMEPAD *pad)
 			!strncmp(test_pad.steps[test_pad.index].name, "level:", 6))
 		{
 			if (test_pad_level_frames < 90)
+			{
+				test_pad.started = now;
+				return;
+			}
+		}
+		/* ("carnage": until the carnage report is up) */
+		if (!strcmp(test_pad.steps[test_pad.index].name, "carnage"))
+		{
+			extern unsigned char carnage_report_replaces_postgame(void);
+
+			if (!carnage_report_replaces_postgame())
 			{
 				test_pad.started = now;
 				return;

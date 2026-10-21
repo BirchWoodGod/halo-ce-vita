@@ -344,6 +344,11 @@ static const struct config_setting config_settings[] =
 		"over the same animated Halo ring: port/vita/app0/menus/halo3). Read each\n"
 		"time a screen opens. The Vita's settings panel (Graphics, Screen, Menu\n"
 		"style) sets it." },
+	{ "menus.carnage_report", _config_string, "\"halo3\"", "HALO_CARNAGE_REPORT", _environment_value, _platform_all,
+		"With the Halo 3 menus, the report at a multiplayer game's end: \"halo3\"\n"
+		"(Halo 3's CARNAGE REPORT: port/vita/app0/menus/halo3/carnage.xml) or\n"
+		"\"classic\" (the game's own). Menu style Halo CE always shows the\n"
+		"game's own." },
 	{ "menus.scenes", _config_boolean, "true", "HALO_MENU_SCENES", _environment_value, _platform_all,
 		"With the Halo 3 menus, a camera of its own behind each lobby (the\n"
 		"campaign, multiplayer and Forge lobbies: their scene= in\n"
@@ -502,6 +507,10 @@ static const struct config_setting config_settings[] =
 		"Seconds after hosting that an automated test game starts." },
 	{ "debug.network_test_kill", _config_real, "0.0", "HALO_NETWORK_TEST_KILL", _environment_value, _platform_all,
 		"Every this many seconds an automated test host kills its last player; 0 never." },
+	{ "debug.network_test_end", _config_real, "0.0", "HALO_NETWORK_TEST_END", _environment_value, _platform_all,
+		"This many seconds into an automated test game its host ends it, as a\n"
+		"time limit does (the carnage report's tests: run_menus_test.sh h3carnage);\n"
+		"0 never." },
 	{ "debug.network_test_shoot", _config_real, "0.0", "HALO_NETWORK_TEST_SHOOT", _environment_value, _platform_all,
 		"Every this many seconds each automated test player hits the next with\n"
 		"their weapon; 0 never." },
