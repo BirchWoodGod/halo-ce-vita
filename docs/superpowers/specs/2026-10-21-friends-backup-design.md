@@ -1,8 +1,9 @@
 # Friend code backup (design)
 
-Date: 2026-10-21. Branch `feat/friends-backup`, from `sec/review-followups`
-(691650eab, itself on `1.1.1-insider.20`, 6f4efacf; `fix/party-replay-drops`
-is already in insider.20). Code: `port/linux/src/p2p_friends_backup.inc`
+Date: 2026-10-21. Branch `feat/friends-backup`, on
+`integration/1.1.1-insider.21` (b9bf39392, which has `sec/review-followups`
+and `fix/party-replay-drops`); first written on `sec/review-followups`
+(691650eab) and rebased. Code: `port/linux/src/p2p_friends_backup.inc`
 (part of `p2p_friends.c`), the crypto in `p2p_crypto.c`, the menus in
 `menu_functions.c` (Halo 3 FRIENDS) and `vita_settings.c` (the settings
 panel). The friends design this builds on:
@@ -19,15 +20,16 @@ code and every friendship (each friend would have to add the new code).
 ## What the player does
 
 **Back up** (Halo 3 FRIENDS: the FRIEND CODE BACKUP row, then BACK UP
-FRIEND CODE; the settings panel: Multiplayer > Friends > Friend code backup,
-Cross): a file name (default `friends-backup`), a password, the password
+FRIEND CODE in FRIENDS' options question; the settings panel, for the
+original menus: Multiplayer > Friends, the "Friend code" row - its value
+this Vita's code, in place of the line that showed it - Cross, then Cross): a file name (default `friends-backup`), a password, the password
 again, then "with the friends list" or "the friend code alone". The file is
 `ux0:data/haloce-vita/<name>.hfb` (on a PC, in the save folder). It holds
 the identity, and the list if chosen. The screens say: anyone with the file
 and its password can be you; keep both safe.
 
 **Restore** (FRIEND CODE BACKUP, then RESTORE FRIEND CODE; the panel's
-Square): the file's name, its password. The file is opened and checked
+Friend code row, Cross, then Square): the file's name, its password. The file is opened and checked
 first (a wrong password or a damaged file is said, nothing changes). Then
 the Halo 3 question, CONFIRM or CANCEL: "Your friend code ABCD-... becomes
 WXYZ-... (n friends in the backup)". Confirmed: the identity it replaces is
@@ -140,8 +142,8 @@ always did). So:
   subscribe its topics and both hold the key.
 
 That is what the owner's rule asks: one friend code per Vita, used on one
-at a time. The restore screens say so ("Use it on one Vita at a time:
-friends see the one that started last"). Refusing a second machine would
+at a time. The restore question says so ("One Vita at a time: friends see
+the one started last"). Refusing a second machine would
 need a server or a broker-side lock; the brokers are dumb pipes and keep
 nothing, so it is not done.
 
@@ -180,8 +182,16 @@ passes it (the same holds for a Vita's own identity today).
   as a restore reads them.
 - `run_netns_online_test.sh friendsbackup`: three copies of the Linux build
   on local brokers in network namespaces: Alpha and Bravo become friends,
-  Bravo backs up and quits, Charlie (a new machine) restores Bravo's backup;
-  Alpha must see Bravo's code online again as Charlie, Charlie must see
-  Alpha, and no log may hold the password.
-- The menus: `run_vita_settings_test.sh` (the panel's flow, Spanish too),
-  `run_lang_test.sh`.
+  Bravo backs up and quits, Charlie (a new machine, its own code) restores
+  Bravo's backup; Charlie must have Bravo's code and Alpha for a friend and
+  see Alpha online, Alpha must see that same friend online again (from
+  Charlie; the name stays Bravo's until Charlie's game says its profile's),
+  with no new friend request; no log, the broker's included, may hold the
+  password.
+- `run_menus_test.sh h3friendsbackup`: the Halo 3 flow on the Linux harness
+  (typing answered by HALO_TEST_TEXT_INPUT): a backup written on one save,
+  restored on a new save after a wrong password; the first save's code and
+  friends back, the replaced identity kept.
+- The panel: `run_vita_settings_test.sh` (back up, passwords that differ,
+  a restore cancelled then confirmed, the keyboard cancelled; every screen
+  fits, Spanish too); `run_lang_test.sh`.
