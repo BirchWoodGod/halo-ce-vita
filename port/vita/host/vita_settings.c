@@ -472,6 +472,12 @@ static struct setting settings[] = {
 		"Up to 60 FPS: frames between the 30 Hz ticks", 0, TAB_GRAPHICS },
 	{ "Aspect ratio", "HALO_DISPLAY_WIDTH", 0, 2, { "848", "640" }, { "16:9", "4:3" },
 		"4:3: the Xbox's framing, black bars", 0, TAB_GRAPHICS },
+	/* (port/linux/game/field_of_view.c: Halo's degrees, 70 the original
+	view; wider at the sides, 16:9 adding its strips as at 70; zoomed views
+	and the first-person weapon kept as they were. In no profile. Live) */
+	{ "Field of view", "HALO_FIELD_OF_VIEW", 0, 7, { "70", "75", "80", "85", "90", "95", "100" },
+		{ "70 (original)", "75", "80", "85", "90", "95", "100" },
+		"Wider shows more, but more to draw can cost frame rate", 0, TAB_GRAPHICS },
 	{ "Upscale filter", "HALO_UPSCALE_FILTER", 0, 2, { "0", "1" }, { "Smooth", "Sharp" },
 		"Scaling to the screen: Sharp = crisp pixels", 0, TAB_GRAPHICS },
 	/* (d3d8_gxm.c, Sharp interface: the HUD, the menus, their text, the
