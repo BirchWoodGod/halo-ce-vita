@@ -354,6 +354,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 			p2p_friends_set_game(0, 1, addresses, CARD_MACHINES);
 		else
 			p2p_friends_set_game(1, 0, NULL, 0);
+		memset(card, 0, sizeof(card));
 		memcpy(card, data, (size_t)length);
 		if (mode == 8 && !(flags & 16))
 		{
@@ -380,6 +381,22 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 				card + CARD_ANSWER_SIZE - P2P_SIGNATURE_SIZE);
 			length = CARD_ANSWER_SIZE;
 			use(T);
+		}
+		if (mode == 7 && (flags & 128))
+		{
+			/* (the flaming helmet's: every machine claims it, the packet an
+			ask or an answer of its size, the rest the input's) */
+			static int claims[CARD_MACHINES];
+			static unsigned short names[CARD_MACHINES * 12];
+
+			for (index = 0; index < CARD_MACHINES; index++)
+				claims[index] = 1;
+			p2p_flame_set_players(claims, names, CARD_MACHINES, names);
+			card[0] = CARD_VERSION;
+			card[1] = flags & 1 ? CARD_FLAME_ANSWER : CARD_FLAME_ASK;
+			length = flags & 1 ? FLAME_ANSWER_SIZE : CARD_HEADER_SIZE;
+			if (flags & 64)
+				machines[T].machines[card[2] % CARD_MACHINES].flame_asking = 1;
 		}
 		p2p_friends_tunnel_heard(addresses[(flags >> 2) % 4], (flags & 8) != 0, card, length);
 		clock_now += 50;

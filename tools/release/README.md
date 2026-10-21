@@ -222,3 +222,78 @@ What these settle, which the Linux tests cannot: the Vita's TLS to
 to `update_roots.h`), that a safe homebrew writes `ux0:data/haloce-vita/update`
 and VitaShell installs the file from there, that the download costs the game
 no frames, and how long each stage takes on the Vita.
+
+## Tester list (the flaming helmet)
+
+Testers wear a blue flaming helmet that every other player's game shows,
+and that nobody can fake for anyone else's screen: the list of testers is
+signed with the release key above (the same private key file, the same
+`HALO_RELEASE_PUBLIC_KEY` in `port/vita/include/vita_update_key.h`), and in
+each game every machine asks a claiming player's machine to prove, with its
+own friend identity (the per-machine key behind the friend code), that it is
+the listed one (`port/linux/src/p2p_flame.inc`; the file's form:
+`port/linux/src/tester_list.h`). Each machine checks the list's signature
+and the proof itself; the host's word counts for nothing.
+
+### Adding a tester
+
+1. Get the tester's friend identity. Their game writes it, nothing secret in
+   it, to `friends/tester-id.txt` in its save folder:
+   `ux0:data/haloce-vita/friends/tester-id.txt` on the Vita (VitaShell's FTP
+   or USB), the save folder's `friends/tester-id.txt` on a PC. They send you
+   that file. Or, if you are friends with them in the game, your own
+   `friends/friends.dat` holds their key: use `--friends-dat` with their
+   name or friend code.
+2. Sign a new list version (from the repository, with the release key):
+
+   ```
+   python3 tools/release/sign_testers.py --key ~/halo-update-key/halo-update.key \
+       --list port/vita/app0/testers.txt --add-id tester-id.txt [--expires 2027-01-31]
+   python3 tools/release/sign_testers.py --key ~/halo-update-key/halo-update.key \
+       --list port/vita/app0/testers.txt --friends-dat /path/to/your/friends.dat --add-friend ABCD-EFGH-JKLM
+   python3 tools/release/sign_testers.py --list port/vita/app0/testers.txt --show
+   ```
+
+   Each change bumps the list's version by one (or `--version N`, higher);
+   `--expires` (YYYY-MM-DD, the end of that day UTC, or a Unix second) ends
+   an entry by itself; `--remove NAME|CODE|KEY` takes a tester off.
+3. Ship it: commit `port/vita/app0/testers.txt` (it is only public keys and
+   a signature). `ninja vita` puts it in the VPK (`app0:testers.txt`) and
+   `tools/package_pc.py` beside the PC executable; the dedicated servers read
+   it beside theirs (copy it next to `halo-server`), so they check what they
+   relay.
+4. Before a release carries it, a newer list can be handed out: dropped in
+   `ux0:data/haloce-vita/testers.txt` (a PC's save folder's `testers.txt`)
+   it wins over the packaged one when its version is higher and its
+   signature good; it is read as the game starts.
+
+The tester turns it on or off with Flaming helmet in CUSTOMIZATION or the
+settings panel (Game), shown only once their identity is on a valid list
+(on by default); it takes effect in the next game they join.
+
+### Revoking
+
+Sign a new version without them (`--remove`) and ship it (or hand it out as
+above). The newest valid list a machine has wins, so a machine still on an
+older list keeps showing the old testers until it gets the new one: for an
+urgent revocation hand the new list out to the testers and the servers.
+
+### What it does not stop
+
+- Anyone can draw a flame on their own screen with a modified build: no one
+  else's game shows it.
+- A tester can give their flame away (as by giving away their
+  `friends/identity.dat`): only a new list version takes it back. One key
+  lights one player a game.
+- LAN (System Link) and ad hoc games carry no proofs (they are internet
+  play's tunnel's): no flames there but your own. Nor on the crossplay wire
+  (OpenCE PC hosts), nor in a game whose host is an older build (it drops
+  the proofs: only its joiners' own flames, on their own screens).
+
+### Tests
+
+`port/vita/tests/run_tester_list_test.sh` (the list and the tool, ASan),
+`run_p2p_friends_test.sh` (the proofs, ASan) and
+`run_netns_flame_test.sh` (three copies online in namespaces, a throwaway
+key: configure with `--testers-test-key <its public key>`, test builds only,
+refused with `--release`; `HALO_TEST_TESTERS_KEY=<its private key file>`).
