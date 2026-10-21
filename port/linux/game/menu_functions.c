@@ -146,6 +146,7 @@ int platform_question_answer(void);
 
 /* the game's (port) */
 boolean ui_widget_port_start_network_game_server(void);
+boolean ui_widget_port_start_network_game_server_on_map(char const *map_name);
 boolean ui_widget_port_cooperative_campaign_host_level(struct widget_instance *widget, struct event_record *event,
 	char const *level, short difficulty);
 void ui_widget_port_give_focus(struct widget_instance *list, struct widget_instance *child);
@@ -630,6 +631,7 @@ static void h3_live_lobby_show(struct widget_instance *screen);
 static boolean h3_live_follow(void);
 static void h3_live_close(char const *why);
 static boolean h3_live_start(void);
+static boolean h3_live_open_now(char const *why);
 static boolean h3_live_follow_wire(boolean reopen);
 static boolean h3_live_keep(void);
 static void h3_live_retry(void);
@@ -5793,7 +5795,12 @@ static boolean setup_start(struct widget_instance *widget)
 	private chosen for the lobby - its live game's now, or the one hosted
 	next and kept by the lobby - the panel's Visibility its default) */
 	if (halo_menu_style_halo3() && h3_mp.network == _h3_network_online)
+	{
 		h3_live_public_chosen();
+		/* (the lobby hosted on demand: its game now, public or private as
+		just chosen; its settings taken below) */
+		h3_live_open_now("GAME OPTIONS' START GAME");
+	}
 	/* (a live lobby, Menu style Halo 3: its game takes them now - its name
 	and most players from the settings each frame, public or private and a
 	password changed its listing - and START GAME goes on to its lobby) */
@@ -9407,7 +9414,13 @@ static struct
 hosts a game friends can be invited into now: online, its own server */
 static boolean h3_invite_ask(void)
 {
-	boolean can = network_game_server_port_in_lobby(global_network_game_server_get()) && internet_play() &&
+	boolean can;
+
+	/* (the multiplayer or Forge lobby on ONLINE, hosted on demand: its game
+	now, the friends invited into it) */
+	if (h3_mp.network == _h3_network_online || h3_forge.network == _h3_network_online)
+		h3_live_open_now("INVITE FRIENDS");
+	can = network_game_server_port_in_lobby(global_network_game_server_get()) && internet_play() &&
 		!network_game_is_splitscreen_local();
 
 	platform_log("menus: h3 invite: INVITE FRIENDS %s", can ? "opens" : "not now (no game of this machine's online)");
@@ -9626,6 +9639,28 @@ reached any other way), another NETWORK, BROWSE GAMES or JOIN WITH CODE
 close the game: its joiners are told the host left (the game's own
 graceful exit, network_game_server_dispose).
 
+ONLINE hosts on demand (LadyCassie, insider.20: the lobby went live by itself
+a moment after MULTIPLAYER opened, its game hosted for nobody; the owner
+agreed): the lobby opened there is this machine's alone (Ready) until the
+player asks for its game - START GAME (START FORGE), L's INVITE FRIENDS,
+GAME OPTIONS' START GAME (h3_live_open_now) - or someone could join it from
+their own menus: a friend online (their one-press join needs a game to
+join: the presence carries its sealed token, p2p_friends.c own_joinable) or
+the party (its members follow the leader's game, p2p_party.inc). Then it
+goes live as it did. SYSTEM LINK and AD HOC go live as the lobby is up, as
+before: the Vitas around find a game there only by its broadcast, none
+asks first.
+
+Going live keeps the lobby as it looks: the scene stands (the main menu's
+ticks stop for a network game's lobby, menu_scene_objects_settled; it is
+not made again), the nameplate and the party's plates stay while the
+game's players are all this machine's - the players' rows come once
+another machine's player is in (h3_live_lobby_show) -, and the game's
+server starts on the lobby's own map (ui_widget_port_start_network_game
+_server_on_map): no copy of the playlist's first map begun and dropped
+on the way, which read the memory card on the game thread and took its
+buffer from the texture cache (LadyCassie's hitch: 404 ms).
+
 Not live: OFFLINE; the network not ready (Online still connecting, no
 Wi-Fi, out of the ad hoc group - AD HOC's START GAME still opens the
 system's dialog); no
@@ -9690,7 +9725,18 @@ static struct
 	/* the lobby is the Forge lobby's (halo3/forge_lobby.xml): its game a
 	network Forge game of its map (forge_net.inc), START FORGE its start */
 	boolean forge;
-} h3_live = { FALSE, NONE, FALSE, FALSE, FALSE, 0, 0, "", FALSE, "", FALSE, FALSE };
+	/* (ONLINE: hosted on demand) the player asked for this lobby's game -
+	START GAME or START FORGE, INVITE FRIENDS, GAME OPTIONS' START GAME -:
+	kept while the lobby is (hosted again as its wire changes), forgotten
+	as it closes */
+	boolean wanted;
+	/* (ONLINE) someone could join the lobby from their own menus - a friend
+	online, the party -, as looked at last (each second) */
+	boolean others_could_join;
+	unsigned long others_checked_time;
+	/* (ONLINE) the lobby's waiting for the player said (the tests read it) */
+	boolean said_local;
+} h3_live = { FALSE, NONE, FALSE, FALSE, FALSE, 0, 0, "", FALSE, "", FALSE, FALSE, FALSE, FALSE, 0, FALSE };
 
 /* the network of the lobby whose game it is: the multiplayer lobby's, or
 the Forge lobby's own NETWORK */
@@ -9868,6 +9914,7 @@ static void h3_live_close(char const *why)
 	h3_live.live = FALSE;
 	h3_live.start_pending = FALSE;
 	h3_live.in_pregame = FALSE;
+	h3_live.wanted = FALSE;
 	h3_live.said[0] = 0;
 	dispose_global_network_game_client();
 	dispose_global_network_game_server();
@@ -9912,13 +9959,15 @@ static boolean h3_live_follow_wire(boolean reopen)
 	if (!h3_live.live || !global_network_game_server_get() || (network_wire_crossplay() != 0) == with_pc)
 		return FALSE;
 	{
-		/* (the same lobby, hosted again: public or private as chosen) */
-		boolean chosen = h3_live.public_chosen;
+		/* (the same lobby, hosted again: public or private as chosen, and
+		online as the player asked for it) */
+		boolean chosen = h3_live.public_chosen, wanted = h3_live.wanted;
 
 		h3_live.public_chosen = TRUE;
 		h3_live_close(with_pc ? "WHO CAN JOIN is Vitas and PC now: hosted again on the crossplay wire" :
 			"WHO CAN JOIN is Vitas now: hosted again on the Vitas' wire");
 		h3_live.public_chosen = chosen;
+		h3_live.wanted = wanted;
 		if (!chosen)
 			p2p_lobby_set_public(0);
 	}
@@ -9962,7 +10011,10 @@ static void h3_live_open(void)
 	}
 	/* (before its server: never listed a moment by itself) */
 	h3_live_private_by_default();
-	if (!ui_widget_port_start_network_game_server())
+	/* (on the lobby's map from the start: the playlist's first map never
+	copied meanwhile) */
+	if (!ui_widget_port_start_network_game_server_on_map(h3_live.forge ? forge_map_path(h3_forge.map) :
+		h3_mp.map_index != NONE ? h3_map_paths[h3_mp.map_index] : h3_mp.map_other))
 	{
 		h3_live_refuse("the game's server did not start");
 		return;
@@ -9985,6 +10037,58 @@ static void h3_live_open(void)
 	h3_live.said[0] = 0;
 	platform_log("menus: h3 live lobby: open on %s (%s on %s): others join it now", h3_network_name(H3_LIVE_NETWORK),
 		h3_live_gametype_name(), h3_live_map_name());
+}
+
+/* (ONLINE, the lobby not live) whether someone could join its game from
+their own menus, so that it is hosted before the player asks: a friend
+online (the one-press join from their FRIENDS needs a game: the presence's
+sealed token is its server's) or this machine's party (its members follow
+the game of whoever leads; this machine's while it leads). Looked at once a
+second */
+static boolean h3_live_others_could_join(void)
+{
+	unsigned long now = system_milliseconds();
+
+	if (!h3_live.others_checked_time || now - h3_live.others_checked_time >= 1000)
+	{
+		struct p2p_party_member party[P2P_PARTY_MAXIMUM];
+		int online = 0;
+		boolean could;
+
+		h3_live.others_checked_time = now ? now : 1;
+		p2p_friends_count(&online);
+		could = online > 0 || p2p_party_members(party, P2P_PARTY_MAXIMUM) > 1;
+		if (could != h3_live.others_could_join)
+		{
+			h3_live.others_could_join = could;
+			if (could)
+				platform_log("menus: h3 live lobby: %s: its game hosted for them", online > 0 ?
+					"a friend is online" : "in a party");
+		}
+	}
+	return h3_live.others_could_join;
+}
+
+/* (ONLINE, the player's own in the lobby, or its GAME OPTIONS: START GAME
+or START FORGE, L's INVITE FRIENDS, GAME OPTIONS' START GAME) the lobby's
+game hosted now, if it is not yet and can be - the network ready, nothing
+hosted or joined already -, and wanted from now while the lobby is (its
+wire's change hosts it again): TRUE if the lobby is live */
+static boolean h3_live_open_now(char const *why)
+{
+	if (h3_live.live)
+		return TRUE;
+	if (h3_live.refused || H3_LIVE_NETWORK == _h3_network_offline || !halo_menu_style_halo3() ||
+		!halo_main_menu_loaded() || global_network_game_server_get() || global_network_game_client_get() ||
+		!h3_live_network_ready())
+	{
+		return FALSE;
+	}
+	platform_log("menus: h3 live lobby: %s: its game hosted now", why);
+	h3_live_open();
+	if (h3_live.live)
+		h3_live.wanted = TRUE;
+	return h3_live.live;
 }
 
 /* (the lobby opened again, another network) a refused lobby tried again */
@@ -10079,24 +10183,39 @@ static void h3_live_lobby_show(struct widget_instance *screen)
 {
 	struct network_game *game = h3_live.live ? network_game_get_game() : NULL;
 	struct network_game_client *client = global_network_game_client_get();
+	short local_machine = client ? network_game_client_get_local_machine_index() : NONE;
 	struct widget_instance *found;
 	char text[192], line[256];
-	long count;
-	boolean with_pc;
+	long count, index;
+	boolean with_pc, others = FALSE, invite;
 
+	/* (another machine's player in the game: its players in the rows;
+	until then the lobby as it was before it went live - the nameplate in
+	the profile's colour, the party's plates, "1 Player (16 max)" -: going
+	live changes nothing the player looks at but the words under Ready) */
+	for (index = 0; game && index < (long)NUMBEROF(game->players) && !others; index++)
+	{
+		others = network_player_is_valid(&game->players[index]) &&
+			game->players[index].machine_index != local_machine;
+	}
 	if ((found = named(screen, "nameplate")) != NULL)
-		widget_instance_set_visibility_recursive(found, game == NULL);
-	/* (L: INVITE FRIENDS, online) */
+		widget_instance_set_visibility_recursive(found, !others);
+	/* (L: INVITE FRIENDS, online: the lobby's game hosted for it first if
+	it is not yet, h3_invite_ask) */
+	invite = game ? h3_live.network == _h3_network_online :
+		H3_LIVE_NETWORK == _h3_network_online && halo_menu_style_halo3() && h3_live_network_ready();
 	if ((found = named(screen, "l_butn")) != NULL)
-		widget_instance_set_visibility_recursive(found, game != NULL && h3_live.network == _h3_network_online);
+		widget_instance_set_visibility_recursive(found, invite);
 	if ((found = named(screen, "invite")) != NULL)
-		widget_instance_set_visibility_recursive(found, game != NULL && h3_live.network == _h3_network_online);
+		widget_instance_set_visibility_recursive(found, invite);
 	line[0] = 0;
-	count = h3_roster_show(screen, game, TRUE, client ? network_game_client_get_local_machine_index() : NONE,
-		game ? H3_LIVE_ROWS : 0, line, (int)sizeof(line));
+	count = h3_roster_show(screen, game, TRUE, local_machine, others ? H3_LIVE_ROWS : 0, line, (int)sizeof(line));
 	if (!game)
 		return;
-	snprintf(text, sizeof(text), T("PLAYERS %ld/%d"), count, (int)game->maximum_players);
+	if (others)
+		snprintf(text, sizeof(text), T("PLAYERS %ld/%d"), count, (int)game->maximum_players);
+	else
+		h3_party_players_text(text, (int)sizeof(text), (int)game->maximum_players);
 	text_show(named(screen, "players"), text);
 	if (count > 1)
 		snprintf(text, sizeof(text), T("Lobby open: %ld players"), count);
@@ -10256,10 +10375,15 @@ static void h3_live_update(boolean main_menu_loaded)
 	if (!lobby_up)
 	{
 		h3_live.lobby_up_since = 0;
+		h3_live.said_local = FALSE;
 		/* (back at the main menu with no live game: the next lobby is a new
-		one, private by default again) */
-		if (h3_live.public_chosen && active && main_tag != NONE && active->definition_tag_index == main_tag && !server)
-			h3_live_forget_public();
+		one, private by default again, hosted on demand again) */
+		if (active && main_tag != NONE && active->definition_tag_index == main_tag && !server)
+		{
+			if (h3_live.public_chosen)
+				h3_live_forget_public();
+			h3_live.wanted = FALSE;
+		}
 		return;
 	}
 	if (!h3_live.lobby_up_since)
@@ -10284,6 +10408,17 @@ static void h3_live_update(boolean main_menu_loaded)
 	if (h3_live.refused || H3_LIVE_NETWORK == _h3_network_offline || !halo_menu_style_halo3() || server || client ||
 		!h3_live_network_ready())
 	{
+		return;
+	}
+	/* (ONLINE: when the player asks for it, or someone could join it) */
+	if (H3_LIVE_NETWORK == _h3_network_online && !h3_live.wanted && !h3_live_others_could_join())
+	{
+		if (!h3_live.said_local)
+		{
+			h3_live.said_local = TRUE;
+			platform_log("menus: h3 live lobby: ready on ONLINE, not hosted: START GAME, INVITE FRIENDS or GAME OPTIONS "
+				"hosts it (or a friend online, the party)");
+		}
 		return;
 	}
 	/* (once its scene stands, posed, its camera in place: a network game's
@@ -10929,6 +11064,8 @@ boolean pc_menu_event_function_invoke(
 		network not ready, no profile -: said, nothing opened) */
 		if (h3_forge.network == _h3_network_offline || !forge_map_available(h3_forge.map))
 			return FALSE;
+		if (h3_forge.network == _h3_network_online)
+			h3_live_open_now("START FORGE");
 		if (h3_live_forge_start())
 		{
 			platform_log("menus: forge lobby: START FORGE: the game's lobby, everyone in it into Forge on %s",
@@ -10992,6 +11129,8 @@ boolean pc_menu_event_function_invoke(
 		MAP, once the profile is chosen: pc_menu_functions_screen) */
 		if (!internet_play() && network_connection_wanted() != NETWORK_CONNECTION_ONLINE)
 			return TRUE;
+		/* (the lobby hosted on demand: its game now, then its lobby) */
+		h3_live_open_now("START GAME");
 		if (h3_live_start())
 			return TRUE;
 		menu_functions.create_pending = TRUE;

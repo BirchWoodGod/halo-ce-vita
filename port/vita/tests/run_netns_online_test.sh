@@ -364,13 +364,21 @@
 #            title AD HOC GAMES; nothing may reach the broker
 #   h3liveonline the Halo 3 multiplayer lobby, live on SYSTEM LINK with the
 #            profile (HALO_TEST_PROFILE, the Halo PC files; skipped without),
-#            switched to ONLINE (its System Link game closed, the lobby open
-#            again online once the broker is reached), left (B) and opened
-#            again from the main menu, ONLINE kept: no frame of the host's
-#            over 500 ms on the way (the Xbox's second of sleep as the
-#            hosted game closed, network_server_manager.c, held one 1000 ms
-#            each time: time+ui 1000.4 ms, LadyCassie's audio stutter on
-#            opening MULTIPLAYER), the lobby open online each time
+#            switched to ONLINE (its System Link game closed). ONLINE hosts on
+#            demand (LadyCassie, insider.20: the lobby went live by itself a
+#            moment after MULTIPLAYER, its scene and nameplate changing): no
+#            friend online, no party, the broker reached, the lobby stays
+#            Ready, nothing hosted, until L (INVITE FRIENDS) hosts it and
+#            opens the friends to invite; B back to the live lobby, B left;
+#            MULTIPLAYER again from the main menu, ONLINE kept: not hosted
+#            again by itself; START GAME hosts it and opens its game's lobby
+#            (no SELECT PROFILE, no other server), B back to it. No frame of
+#            the host's over 500 ms on the way (the Xbox's second of sleep as
+#            the hosted game closed, network_server_manager.c, held one 1000
+#            ms each time: time+ui 1000.4 ms, LadyCassie's audio stutter on
+#            opening MULTIPLAYER); no copy of the playlist's first map begun
+#            as a lobby went live, and the nameplate kept with no other
+#            machine in its game
 #   h3online the connection switched live from the Halo 3 lobby (both copies
 #            start with online off and the Halo PC files, HALO_TEST_DATA_MENUS;
 #            skipped without): each lobby's NETWORK: ONLINE starts internet
@@ -683,7 +691,7 @@ seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = h3mppause ] && seconds=${HALO_TEST_SECONDS:-150}
 [ "$mode" = h3live ] && seconds=${HALO_TEST_SECONDS:-150}
 [ "$mode" = h3liveleave ] && seconds=${HALO_TEST_SECONDS:-100}
-[ "$mode" = h3liveonline ] && seconds=${HALO_TEST_SECONDS:-90}
+[ "$mode" = h3liveonline ] && seconds=${HALO_TEST_SECONDS:-110}
 # (h3liveinvite: a game and its END GAME after the invite; h3liveagain: two games)
 [ "$mode" = h3liveinvite ] && seconds=${HALO_TEST_SECONDS:-240}
 [ "$mode" = h3liveagain ] && seconds=${HALO_TEST_SECONDS:-280}
@@ -2658,24 +2666,52 @@ h3liveonline)
 	[ -r "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" ] &&
 		cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$out/host/save/u/UDATA/869079979327/"
 	# (MULTIPLAYER: the lobby live on SYSTEM LINK; NETWORK (A), up to ONLINE, A: its game
-	# closed, the lobby open again online; a while; B: the lobby left; A: MULTIPLAYER again,
-	# ONLINE kept)
+	# closed; 20 s on ONLINE, not hosted; L: INVITE FRIENDS hosts it; B: the live lobby; B: left
+	# (closed); A: MULTIPLAYER again, ONLINE kept; 15 s, not hosted; down three to START GAME, A:
+	# hosted, its game's lobby; B: back to the live lobby)
+	d="down:150:500"
 	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
 		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:1 \
-		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:8000 a wait:150:2500 up:150:600 a wait:150:20000 b wait:150:5000 a wait:150:20000" \
+		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:8000 a wait:150:2500 up:150:600 a wait:150:20000 lt wait:150:5000 b wait:150:4000 b wait:150:5000 a wait:150:15000 $d $d $d a wait:150:6000 b wait:150:5000" \
 		; host_pid=$last_pid
 	wait $host_pid 2>/dev/null
 	hl=$out/host/run.log
-	grep -aE "network: (switching|Online|status)|menus: h3 (live lobby: (open|closed)|mp: network)|frame-hitch: " "$hl" | cut -c1-200 | head -30
+	grep -aE "network: (switching|Online|status)|menus: h3 (live lobby: |mp: network|invite: INVITE)|ui: screen pc.h3.(pregame|invite|join)|Internet play: hosting;|frame-hitch: " "$hl" | cut -c1-200 | head -40
 	grep -av "assertion skipped (torn read?)" "$hl" | grep -aqiE "assert|exception|halt_and_catch_fire|segmentation" &&
 		fail "the host: an assertion, exception or crash"
 	grep -aq "menus: h3 live lobby: open on SYSTEM LINK" "$hl" || fail "the lobby did not open live on SYSTEM LINK"
 	grep -aq "menus: h3 live lobby: closed (another network chosen)" "$hl" || fail "ONLINE did not close the System Link game"
 	grep -aq "network: Online (a broker reached)" "$hl" || fail "the host did not reach the broker"
-	online=$(grep -ac "menus: h3 live lobby: open on ONLINE" "$hl")
-	echo "the lobby open online $online times"
-	[ "$online" -ge 2 ] || fail "the lobby did not open online both times ($online)"
+	# (hosted on demand: ready, not hosted, each time the lobby is up on ONLINE; live only after L,
+	# then START GAME)
+	ready=$(grep -ac "menus: h3 live lobby: ready on ONLINE, not hosted" "$hl")
+	echo "the lobby ready on ONLINE, not hosted, $ready times"
+	[ "$ready" -ge 2 ] || fail "the lobby on ONLINE did not wait for the player both times ($ready)"
+	grep -aq "menus: h3 live lobby: a friend is online\|menus: h3 live lobby: in a party" "$hl" &&
+		fail "a friend or a party was seen with neither"
+	first=$(grep -an "menus: h3 live lobby: open on ONLINE" "$hl" | head -1 | cut -d: -f1)
+	asked=$(grep -an "menus: h3 live lobby: INVITE FRIENDS: its game hosted now" "$hl" | head -1 | cut -d: -f1)
+	[ -n "$asked" ] || fail "L (INVITE FRIENDS) did not host the lobby's game"
+	[ -n "$first" ] && [ -n "$asked" ] && [ "$first" -gt "$asked" ] || fail "the lobby went live on ONLINE before L asked for it"
+	sed -n '/menus: h3 live lobby: closed (another network chosen)/,/menus: h3 live lobby: INVITE FRIENDS: its game hosted now/p' "$hl" |
+		grep -aq "Internet play: hosting;" && fail "the lobby's game was hosted online before the player asked"
+	grep -aq "menus: h3 invite: INVITE FRIENDS opens" "$hl" && grep -aq "ui: screen pc.h3.invite.screen" "$hl" ||
+		fail "INVITE FRIENDS did not open once the lobby was hosted"
 	grep -aq "menus: h3 live lobby: closed (the host left the lobby)" "$hl" || fail "B did not close the online lobby"
+	again=$(grep -an "menus: h3 live lobby: START GAME: its game hosted now" "$hl" | head -1 | cut -d: -f1)
+	[ -n "$again" ] || fail "START GAME did not host the lobby's game"
+	[ -n "$again" ] && sed -n "/menus: h3 live lobby: closed (the host left the lobby)/,${again}p" "$hl" |
+		grep -aq "menus: h3 live lobby: open on ONLINE" && fail "the lobby opened again went live by itself"
+	grep -aq "menus: h3 live lobby: START GAME: the game's lobby, its countdown begun" "$hl" &&
+		grep -aq "ui: screen pc.h3.pregame.screen" "$hl" || fail "START GAME did not open the hosted game's lobby"
+	grep -aq "ui: screen pc.h3.join.screen" "$hl" && fail "SELECT PROFILE was asked (the nameplate's profile plays)"
+	grep -aq "the game's server started" "$hl" && fail "START GAME started another server"
+	grep -aq "menus: h3 live lobby: back from the game's lobby: the countdown stopped, the game kept" "$hl" ||
+		fail "B on the game's lobby did not go back to the live lobby"
+	grep -aq "menus: party plates: none (the nameplate hidden)" "$hl" &&
+		fail "the nameplate was hidden with no other machine in the lobby's game"
+	grep -aq "starting precaching of map 'carousel'" "$out/host/data/debug.txt" &&
+		fail "a lobby going live began a copy of the playlist's first map (Carousel)"
 	worst=$(sed -n 's/.*frame-hitch: \([0-9.]*\) ms.*/\1/p' "$hl" | sort -n | tail -1)
 	echo "the host's longest frame over 100 ms: ${worst:-none}"
 	if [ -n "$worst" ] && awk -v w="$worst" 'BEGIN { exit !(w >= 500) }'; then

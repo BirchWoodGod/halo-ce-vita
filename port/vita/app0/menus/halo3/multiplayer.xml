@@ -12,9 +12,11 @@ and MAP (the profile first, once a run: menu_functions.c h3_session), the game's
 or game type list; on ONLINE Square opens GAME OPTIONS (Create Game: name, max players, public or
 private, password), which START GAME hosts with.
 On ONLINE, SYSTEM LINK and AD HOC, with a profile and the network ready, the lobby is live (menu_functions.c
-h3_live): its game is hosted from the moment it is up, others join it there, GAME and MAP changed go to
-them, its players are shown in the game's lobby's rows, L invites friends (online), START GAME opens the
-game's lobby on that game with its countdown, B closes it (the joiners told).
+h3_live): its game is hosted - on SYSTEM LINK and AD HOC from the moment it is up; on ONLINE once the
+player asks (START GAME, L's INVITE FRIENDS, GAME OPTIONS' START GAME) or a friend is online or the party
+there -, others join it there, GAME and MAP changed go to them, its players are shown in the game's
+lobby's rows once another machine's is in (the nameplate until then), L invites friends (online),
+START GAME opens the game's lobby on that game with its countdown, B closes it (the joiners told).
 The map pictures and descriptions are ui.map's own; the rest this folder's art
 (tools/halo3_menu_art.py). -->
 <menus root="h3/mp/screen" replaces="ui\shell\main_menu\multiplayer_type_select\multiplayer_type_select_screen">
@@ -232,9 +234,9 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 	<widget name="h3/mp/x_butn" left="184" top="447" width="16" height="16" bitmap="h3/glyph_square"/>
 	<widget name="h3/mp/options" type="text" left="203" top="446" width="55" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/mp_text" string_index="28"/>
 	<widget name="h3/mp/players" type="text" left="380" top="20" width="250" height="16" font="h3/font_small" color="#FFEEF2F6"/>
-	<!-- (the live lobby on ONLINE: L, INVITE FRIENDS - the friends online, Cross invites one into
+	<!-- (the lobby on ONLINE: L, INVITE FRIENDS - the friends online, Cross invites one into
 	the game, halo3/friends.xml h3/invite/screen - beside the FRIENDS panel's Triangle; shown while
-	the lobby's game runs, port h3 mp lobby) -->
+	the lobby's game runs or Online is ready, the game hosted as L opens it, port h3 mp lobby) -->
 	<widget name="h3/mp/l_butn" left="500" top="410" width="16" height="16" bitmap="h3/glyph_l"/>
 	<widget name="h3/mp/invite" type="text" left="520" top="409" width="112" height="18" font="h3/font_small" color="#FFEEF2F6" text_y="2" string_list="h3/mp_text" string_index="29"/>
 	<!-- (scene: its own camera in ui.map's unused multiplayer point: the whole ring before the
@@ -274,7 +276,8 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 		<child widget="h3/mp/network_status"/>
 		<child widget="h3/main/nameplate"/>
 		<child widget="h3/main/party_plates"/>
-		<!-- (the live lobby's players, the game's lobby's rows: hidden when not live) -->
+		<!-- (the live lobby's players, the game's lobby's rows: hidden when not live, or no other
+		machine's player in its game) -->
 		<child widget="h3/pregame/row_1" x="380" y="38"/>
 		<child widget="h3/pregame/row_2" x="380" y="56"/>
 		<child widget="h3/pregame/row_3" x="380" y="74"/>
