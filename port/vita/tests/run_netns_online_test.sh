@@ -143,6 +143,23 @@
 #            the joiner's join (the server browser) held meanwhile - nothing of
 #            the game sent, no map copied - and answered once the host chooses
 #            the map (network_game_server_port_map_pending); then played
+#   infection  code, the host's game Infection (port/linux/game/infection.c) on
+#            Prisoner (HALO_TEST_HOST_GAME), two joiners behind NATs of their
+#            own (three players: one first zombie), a round of two minutes; the
+#            host's scripted kills (one every 20 s) turn a human now and then.
+#            The host must ask each joiner whether it plays Infection
+#            (infection_net.c) and have both answer; every machine must log the
+#            game's end with the same winner (the humans left on time, or the
+#            zombies), each joiner hear of every player the host turned ("the
+#            host says NAME is a zombie"), and its players'
+#            teams each second (t0 zombies, t1 humans) agree with the host's at
+#            the same tick, 90% of the samples at least (a side changes at a
+#            death, a client hears of it a moment later)
+#   infectionold  the same with one joiner of an older build: HALO_TEST_VITA_JOINER
+#            (one before Infection: refused), else this build with
+#            HALO_GAME_RULES_NET=0 (it does not answer, as an older build): the
+#            host must refuse it from the Infection game within seconds, and it
+#            must never play it
 #   h3live  the Halo 3 live lobby (HALO_TEST_PROFILE): the host opens MULTIPLAYER on SYSTEM
 #            LINK, its lobby's game open at once; a joiner on its LAN joins it from BROWSE GAMES
 #            before START GAME; the host changes MAP (Blood Gulch) and GAME (the next game type),
@@ -766,6 +783,8 @@ side() { # side NAME WAN_SUBNET LAN_SUBNET -> sets ${NAME}_router ${NAME}_machin
 }
 side host 10.10.1 192.168.1
 side join 10.10.2 192.168.2
+# (infection: three players, a second joiner unless told otherwise)
+[ "$mode" = infection ] && export HALO_TEST_SECOND_JOINER=${HALO_TEST_SECOND_JOINER:-1}
 { [ "${HALO_TEST_SECOND_JOINER:-0}" = 1 ] || [ "$mode" = badmap ] || [ "$mode" = splitscreen ] || [ "$mode" = party ] ||
 	[ "$mode" = h3forgeonline ] || [ "$mode" = vitapc ] || [ "$mode" = vitaonly ]; } &&
 	side join2 10.10.3 192.168.3
@@ -911,8 +930,100 @@ check_latency() { # check_latency LOW HIGH
 	done
 }
 
+# infection, infectionold: what the host and its joiners logged of the
+# Infection game (infection.c, infection_net.c), checked
+check_infection() {
+	local side over winners name joiners=joiner
+	[ -s "$out/joiner2/run.log" ] && joiners="joiner joiner2"
+	echo "--- infection"
+	for side in host $joiners; do
+		grep -a "infection:\|game rules net:" "$out/$side/run.log" | grep -v trace | sed "s/^halo-linux: /$side: /" | head -24
+	done
+	if [ "$mode" = infectionold ]; then
+		grep -aq "game rules net: machine [0-9]* did not answer in [0-9]* ms (a build without Infection): refused from the Infection game\|game rules net: machine [0-9]* plays rules [0-9a-f]*, not the game's" "$out/host/run.log" ||
+			fail "the host did not refuse the older build from its Infection game"
+		[ "$two" -le 5 ] || fail "the older build played the Infection game ($two s with two players)"
+		grep -aq "game rules net: machine [0-9]* plays Infection" "$out/host/run.log" &&
+			fail "the older build was taken as one that plays Infection"
+		return 0
+	fi
+	for side in $joiners; do
+		grep -aq "game rules net: the host's game needs rules 1: this build plays 1" "$out/$side/run.log" ||
+			fail "the $side was not asked whether it plays Infection, or did not answer"
+	done
+	[ "$(grep -ac "game rules net: machine [0-9]* plays Infection" "$out/host/run.log")" -ge "$(echo $joiners | wc -w)" ] ||
+		fail "the host did not take every joiner's answer"
+	grep -aq "game rules net: .*refused" "$out/host/run.log" && fail "the host refused a joiner of this build"
+	grep -aq "infection: the round begins" "$out/host/run.log" || fail "the host's round never began"
+	[ "$(grep -ac "is a zombie (a first zombie, at random)" "$out/host/run.log")" = 1 ] ||
+		fail "the host did not choose one first zombie"
+	over=$(grep -a "infection: the round is over" "$out/host/run.log" | head -1)
+	[ -n "$over" ] || fail "the host's round never ended"
+	winners=
+	for side in host $joiners; do
+		w=$(sed -n 's/.*infection: game over here: the \([a-z]*\) win.*/\1/p' "$out/$side/run.log" | head -1)
+		echo "$side: the game's end, the ${w:-(none)} win"
+		[ -n "$w" ] || fail "the $side never logged the game's end"
+		winners="$winners $w"
+	done
+	[ "$(echo $winners | tr ' ' '\n' | sort -u | wc -l)" = 1 ] || fail "the machines disagree on the winner:$winners"
+	# (every player the host turned, each joiner heard of)
+	grep -a "infection: .* is a zombie (" "$out/host/run.log" | sed 's/.*infection: \(.*\) is a zombie (.*/\1/' |
+		sort -u > "$out/infection.turned"
+	echo "the host turned: $(tr '\n' ',' < "$out/infection.turned")"
+	[ "$(wc -l < "$out/infection.turned")" -ge 1 ] || fail "the host turned no one"
+	for side in $joiners; do
+		while read -r name; do
+			grep -aqF "infection: the host says $name is a zombie" "$out/$side/run.log" ||
+				fail "the $side never heard the host turn $name"
+		done < "$out/infection.turned"
+	done
+	# (the teams each second, the host's and each joiner's at the same tick)
+	for side in $joiners; do
+		python3 - "$out/host/run.log" "$out/$side/run.log" "$side" <<'PY' || fail "the $side's teams did not agree with the host's"
+import re, sys
+def seconds(path):
+	found, playing = {}, False
+	tail = re.compile(r' s-?\d+ k\d+ d\d+ f\d+ t(\d+) m\d+\s*$')
+	for line in open(path, errors='replace'):
+		if 'infection: the round begins' in line or 'infection: the host says' in line:
+			playing = True
+		if 'infection: game over here' in line:
+			break
+		if not playing or 'network test: tick' not in line or '| playing' not in line:
+			continue
+		tick = int(line.split('network test: tick ')[1].split()[0])
+		teams = {}
+		for segment in re.split(r'(?=player \d+: )', line.split('|')[0])[1:]:
+			number = segment.split(':', 1)[0].split()[1]
+			team = tail.search(segment)
+			if team:
+				teams[number] = team.group(1)
+		found[tick] = teams
+	return found
+host, joiner = seconds(sys.argv[1]), seconds(sys.argv[2])
+host_ticks = sorted(host)
+samples = agree = 0
+for tick, teams in joiner.items():
+	if not host_ticks:
+		break
+	nearest = min(host_ticks, key=lambda t: abs(t - tick))
+	if abs(nearest - tick) > 45:
+		continue
+	for number, team in teams.items():
+		if number in host[nearest] and team in '01':
+			samples += 1
+			agree += host[nearest][number] == team
+share = agree / samples if samples else 0
+print('%s: %d of %d samples of the players\' teams agree with the host\'s (%.0f%%)' % (sys.argv[3], agree, samples,
+	share * 100))
+sys.exit(0 if samples >= 20 and share >= 0.9 else 1)
+PY
+	done
+}
+
 case $mode in
-code|lobby|lobbytls|lobbypw|relay|latency)
+code|lobby|lobbytls|lobbypw|relay|latency|infection|infectionold)
 	extra=
 	password=${HALO_TEST_LOBBY_PASSWORD:-hunter2}
 	[ "$mode" = lobby ] && extra="HALO_NET_HOST_PUBLIC=true"
@@ -920,12 +1031,20 @@ code|lobby|lobbytls|lobbypw|relay|latency)
 	[ "$mode" = lobbypw ] && extra="HALO_NET_HOST_PUBLIC=true HALO_NET_LOBBY_PASSWORD=$password"
 	# (latency: one game the whole run, no game over in the blackout)
 	[ "$mode" = latency ] && extra="HALO_NETWORK_TEST=${HALO_TEST_HOST_GAME:-host:bloodgulch:slayer} HALO_NETWORK_TEST_SCORE=${HALO_TEST_SCORE:-50}"
+	# (infection: one Infection game, the host's scripted kills turning the
+	# humans; infectionold: a joiner that does not answer the host's ask)
+	case $mode in infection|infectionold)
+		extra="HALO_NETWORK_TEST=${HALO_TEST_HOST_GAME:-host:prisoner:infection} HALO_INFECTION_ZOMBIES=8 HALO_INFECTION_TIME=2"
+		[ "$mode" = infectionold ] && [ -z "${HALO_TEST_VITA_JOINER:-}" ] &&
+			export HALO_TEST_JOIN_ENV="HALO_GAME_RULES_NET=0 ${HALO_TEST_JOIN_ENV:-}"
+		;;
+	esac
 	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env $extra ${HALO_TEST_HOST_ENV:-}; host_pid=$last_pid
 	code=$(wait_code)
 	[ -n "$code" ] || { fail "the host never showed a code"; tail -20 "$out/host/run.log"; exit 1; }
 	echo "host's code: $code"
 	case $mode in
-	code|relay|latency) join_mode="join-code:$code" ;;
+	code|relay|latency|infection|infectionold) join_mode="join-code:$code" ;;
 	lobby|lobbytls) join_mode=join-public ;;
 	lobbypw) join_mode="join-public:$password" ;;
 	esac
@@ -969,11 +1088,14 @@ code|lobby|lobbytls|lobbypw|relay|latency)
 	two_players() { grep -a "network test: tick" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:"; }
 	two=$(two_players < "$out/joiner/run.log")
 	echo "joiner's seconds with two players playing: $two"
-	[ "$two" -ge 60 ] || fail "the joiner played the host's game for $two s with two players (60 wanted)"
+	case $mode in
+	infection|infectionold) check_infection ;;
+	*) [ "$two" -ge 60 ] || fail "the joiner played the host's game for $two s with two players (60 wanted)" ;;
+	esac
 	# (the latency meter: about the routers' round trip)
 	rtt=$(netem_round_trip)
 	echo "the routers' round trip: $rtt ms"
-	check_latency "$rtt" $((rtt + 90))
+	[ "$mode" = infectionold ] || check_latency "$rtt" $((rtt + 90))
 	if [ "$mode" = latency ]; then
 		echo "--- latency"; grep -ah "latency: .*\(connection problem\|heard again\)" "$out"/joiner/run.log "$out"/host/run.log
 		grep -aq "latency: the host silent for [0-9]* ms: connection problem" "$out/joiner/run.log" ||
@@ -1024,7 +1146,7 @@ code|lobby|lobbytls|lobbypw|relay|latency)
 		bytes=$(sed -n 's/^summary: .* packets (\([0-9]*\) B) relayed.*/\1/p' "$out/relay.log" | tail -1)
 		echo "relayed ${bytes:-0} B in ${seconds} s: $(( ${bytes:-0} * 8 / seconds / 1000 )) kbit/s both ways together"
 		[ "${bytes:-0}" -gt 0 ] || fail "the relay carried nothing"
-	elif [ "$mode" != code ] && [ "$mode" != latency ]; then
+	elif [ "$mode" != code ] && [ "$mode" != latency ] && [ "$mode" != infection ] && [ "$mode" != infectionold ]; then
 		# (the listing on the host's slot, at least once; republished every 30 s
 		# and when the game changes, at most every 5 s)
 		sends=$(grep -c 'publish .* hcev/3/lobby/s/[0-9a-f]\{32\} [1-9][0-9]* B retained qos1' "$out/broker.log")
@@ -4527,7 +4649,7 @@ forge|forge3|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h
 	forge_case
 	;;
 *)
-	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|h3live|h3liveleave|h3liveagain|h3liveinvite|h3liveprivate|h3online|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|party|friendsprivate|friendsprivatepw|forge|forge3|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|vitapc|vitaonly" >&2
+	echo "usage: $0 code|infection|infectionold|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|h3live|h3liveleave|h3liveagain|h3liveinvite|h3liveprivate|h3online|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|party|friendsprivate|friendsprivatepw|forge|forge3|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|vitapc|vitaonly" >&2
 	exit 2
 	;;
 esac

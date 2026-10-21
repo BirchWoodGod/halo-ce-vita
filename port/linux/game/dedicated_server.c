@@ -337,6 +337,8 @@ static boolean gametype_variant(
 		{ "teamsnipers", "team_snipers" },
 		{ "tsnipers", "team_snipers" },
 		{ "team_sniper", "team_snipers" },
+		{ "zombies", "infection" },
+		{ "zombie", "infection" },
 	};
 	char lower[GAMETYPE_NAME_SIZE];
 	long index;

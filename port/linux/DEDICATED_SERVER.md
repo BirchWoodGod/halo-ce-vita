@@ -272,6 +272,7 @@ The gametypes are the game's own: `slayer`, `team_slayer`, `ctf`,
 | `snipers` | `ffa_snipers` | Snipers: the game's own Snipers variant with the sniper rifle the only weapon. |
 | `team_snipers` | `teamsnipers`, `tsnipers`, `team_sniper` | Snipers for two teams (score 50). |
 | `btb` | `big_team_slayer`, `big_team`, `bigteam`, `team_slayer_vehicles` | Big Team Battle: Team Slayer with every vehicle the map places. |
+| `infection` | `zombies`, `zombie` | Infection: the game's own since 1.1.1 (below). |
 
 The server browser and the Vitas show them as "SWAT", "Team SWAT",
 "Snipers", "Team Sniper" (the name has room for eleven characters) and
@@ -319,6 +320,23 @@ gametypes place only the Warthogs; `btb` places every Warthog, Ghost and
 Scorpion of the map. Of the Xbox maps only Blood Gulch and Sidewinder
 place vehicles (each two Warthogs, four Ghosts and two Scorpions); on the
 others `btb` plays as Team Slayer.
+
+### Infection
+
+`infection` is the game's own Infection game type (since 1.1.1:
+`port/linux/game/infection.c`), Team Slayer underneath: at the round's
+start one player in eight (`infection.players_per_zombie`) is chosen at
+random to be a zombie, the rest are humans with the map's loadouts; a
+human killed, by anything, comes back a zombie, and a player joining the
+round under way is one. Zombies hold the skull alone (the Oddball ball:
+its trigger a blow, never dropped; no grenades, no pickups), run at 115%
+(`infection.zombie_speed`), come back 3 seconds after dying
+(`infection.zombie_respawn`) and are green on the red team; humans are
+the blue team. The zombies win when no human is left; the humans still
+alive win after six minutes (`infection.time_limit`). No vehicles. The
+server decides every side and sends it to the players; a build older than
+1.1.1 is refused from an Infection game (it cannot play it), and plays the
+server's other games as before. `sv_mapcycle_add prisoner infection`.
 
 ### Starting weapons
 

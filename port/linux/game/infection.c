@@ -114,6 +114,9 @@ static struct
 	boolean problem_logged;
 	/* the game over seen here (every machine) */
 	boolean over_logged;
+	/* the host giving a zombie its skull (infection_arm_zombie): the one
+	pickup a zombie takes */
+	boolean arming;
 } infection_globals;
 
 /* ---------- settings */
@@ -186,6 +189,10 @@ struct game_variant *build_game_variant_infection(
 	struct game_variant result;
 
 	csmemset(&result, 0, sizeof(result));
+	/* (its name, as the game's own lists' file has it: the dedicated server's,
+	the network tests' and the server browser's listing) */
+	ustrncpy(result.human_readable_game_description, L"Infection",
+		NUMBEROF(result.human_readable_game_description) - 1);
 	result.game_engine_index = game_engine_slayer;
 	/* (the motion tracker, friends' nav points; shields; the map's own
 	equipment, as Team Slayer) */
@@ -464,6 +471,9 @@ static void infection_begin_round(void)
 	if (infection_globals.round != _infection_round_waiting)
 		return;
 	infection_globals.round = _infection_round_active;
+	/* (the time limit played, the sooner of the settings' and the host's
+	options': the clients' from the state) */
+	infection_globals.settings.time_limit_minutes = (byte)PIN(infection_time_limit_minutes(), 0, 30);
 	data_iterator_new(&iterator, player_data);
 	while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
 	{
@@ -552,11 +562,14 @@ static void infection_arm_zombie(long player_index)
 	}
 	if (getenv("HALO_INFECTION_TRACE"))
 		platform_log("infection: trace: player %ld given skull %lx", absolute_index, (unsigned long)weapon_index);
+	infection_globals.arming = TRUE;
 	if (!unit_add_weapon_to_inventory(player->unit_index, weapon_index, _unit_add_weapon_starting))
 	{
+		infection_globals.arming = FALSE;
 		infection_log_once("infection: a zombie could not take its skull");
 		object_delete(weapon_index);
 	}
+	infection_globals.arming = FALSE;
 }
 
 /* ---------- the engine's callbacks */
@@ -665,19 +678,19 @@ static void infection_update(void)
 			else
 			{
 				struct unit_datum *unit = unit_get(player->unit_index);
-				short slot;
-				boolean has_skull = FALSE, has_other = FALSE;
+				short slot, skulls = 0;
+				boolean has_other = FALSE;
 
 				for (slot = 0; slot < MAXIMUM_WEAPONS_PER_UNIT; slot++)
 				{
 					if (unit->unit.weapon_object_indices[slot] == NONE)
 						continue;
 					if (infection_weapon_is_skull(unit->unit.weapon_object_indices[slot]))
-						has_skull = TRUE;
+						skulls++;
 					else
 						has_other = TRUE;
 				}
-				if (has_other || (!has_skull && (infection_globals.skull_given_time[absolute_index] == NONE ||
+				if (has_other || skulls > 1 || (!skulls && (infection_globals.skull_given_time[absolute_index] == NONE ||
 					now - infection_globals.skull_given_time[absolute_index] >= TICKS_PER_SECOND)))
 				{
 					infection_arm_zombie(iterator.datum_index);
@@ -779,9 +792,11 @@ static boolean infection_allow_pick_up(long unit_index, long weapon_index)
 
 	if (player_index == NONE)
 		return slayer_engine.allow_pick_up ? slayer_engine.allow_pick_up(unit_index, weapon_index) : TRUE;
-	/* (a zombie its skull alone; a human anything but the skull) */
+	/* (a zombie the skull it is given and holds alone, none from the
+	ground: a dead zombie's; a human anything but the skull. Asked too as a
+	unit readies a weapon it holds: unit_can_use_weapon) */
 	if (infection_side(player_index) == _infection_side_zombie)
-		return skull;
+		return skull && (infection_globals.arming || unit_has_weapon(unit_index, weapon_index));
 	return !skull;
 }
 
@@ -892,7 +907,7 @@ boolean infection_should_end_game(
 	void)
 {
 	long humans, zombies;
-	long limit = infection_globals.settings.time_limit_minutes * 60L * TICKS_PER_SECOND;
+	long limit = infection_time_limit_minutes() * 60L * TICKS_PER_SECOND;
 	boolean end = FALSE;
 	char const *why = NULL;
 
@@ -922,7 +937,7 @@ boolean infection_title_string(
 	long maximum_count)
 {
 	long humans, zombies;
-	long limit = infection_globals.settings.time_limit_minutes * 60L * TICKS_PER_SECOND;
+	long limit = infection_time_limit_minutes() * 60L * TICKS_PER_SECOND;
 
 	if (!infection_active())
 		return FALSE;
@@ -956,7 +971,16 @@ boolean infection_change_color(
 long infection_time_limit_minutes(
 	void)
 {
-	return infection_active() ? infection_globals.settings.time_limit_minutes : 0;
+	long minutes = infection_globals.settings.time_limit_minutes;
+	long options = game_variant_options_get()->time_limit;
+
+	if (!infection_active())
+		return 0;
+	/* (a PC host's or the dedicated server's time limit too, the sooner:
+	sv_timelimit) */
+	if (options > 0 && (minutes == 0 || options < minutes))
+		minutes = options;
+	return minutes;
 }
 
 boolean infection_unit_refuses_grenades(

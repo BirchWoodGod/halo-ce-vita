@@ -217,6 +217,24 @@ a PC game of more than 16 players are joined after asking once
 (Experimental: `port/linux/src/crossplay_guard.c`). The switch is read
 once, at the network's start.
 
+**Game rules a joiner must play** (`port/linux/game/infection_net.c`).
+A game type only newer builds play - Infection, since 1.1.1
+(`port/linux/game/infection.c`): an older build would take it for Team
+Slayer - changes no network version. Its host asks each machine that joins
+(in the lobby or the game in progress) which rules it plays
+(`_message_server_game_rules`, a message type past network Forge's, which
+an older build drops unread) and refuses one that does not answer in six
+seconds, or answers without the game's rule, from that game alone (the
+"version too old" an older build shows); every other game type plays with
+every build as before. Infection's state - each player's side (human or
+zombie), the round and its settings - follows Slayer's in the game type's
+state the host sends (`infection_write_network_state`), each value checked
+by the client before it is taken; the host alone chooses the first
+zombies, turns a human killed and ends the round. Tested by
+`run_netns_online_test.sh infection` (two joiners agree with the host on
+every player's team each second and on the winner) and `infectionold` (an
+older build refused).
+
 A client plays by its host's rules: in another's game (searching for it,
 in its lobby, or playing it) the developer console, the telnet console
 and the cheat buttons run only commands that change nothing of the game
