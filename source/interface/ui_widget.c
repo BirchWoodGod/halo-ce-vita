@@ -2652,6 +2652,17 @@ void ui_widget_port_go_back(
 		widget_instance_go_back_to_previous(screen);
 }
 
+/* port: (tests: the scripted pad's "until/" steps, xinput_sdl.c) the name of
+the first local player's screen open, "" with none */
+char const *ui_widget_port_active_screen_name(
+	void)
+{
+	struct widget_instance *screen = widget_globals.initialized ? widget_globals.active_widgets[0] : NULL;
+	char const *name = screen ? tag_get_name(screen->definition_tag_index) : NULL;
+
+	return name ? name : "";
+}
+
 #endif
 #ifdef HALO_LINUX
 /* port: gives a list's child the focus, as up and down do (OpenCE's lists,
@@ -5240,6 +5251,15 @@ void ui_widget_port_text_override(
 		NUMBEROF(ui_widget_port_text_overrides[override_index].text) - 1);
 	ui_widget_port_text_overrides[override_index].text[
 		NUMBEROF(ui_widget_port_text_overrides[override_index].text) - 1] = 0;
+}
+
+/* port: the port's own text an error's text box shows in place of the
+error's (display_error_text_deferred, the host's game closed), or NULL: the
+Halo 3 dialog's (port/linux/game/menu_functions.c "port h3 dialog") */
+wchar_t const *ui_widget_port_error_text_of(
+	struct widget_instance const *widget)
+{
+	return widget && widget == ui_widget_port_error_text_box ? ui_widget_port_error_text : NULL;
 }
 
 /* port: whether the text is wider than width in the text box's font */

@@ -7,3 +7,6 @@ halo3/forge.xml
 halo3/players.xml
 halo3/mppause.xml
 halo3/carnage.xml
+# (the Halo 3 dialog: the game's message boxes and questions)
+halo3/dialog.xml
+halo3/dialog_ingame.xml

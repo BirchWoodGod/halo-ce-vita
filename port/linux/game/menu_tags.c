@@ -87,6 +87,7 @@ long pc_menu_functions_profile_skip(long tag_index);
 /* forge.c's: whether a Forge game is played (its Start opens the Forge menu) */
 boolean forge_game_active(void);
 long menu_tags_ingame_screen(char const *name);
+static void menu_tags_dump(long tag_index, int depth);
 
 /* ---------- constants */
 
@@ -111,7 +112,7 @@ version's own menus have) */
 #define MAXIMUM_PNG_BYTES (512 * 1024)
 /* the Halo 3 set's screens that stand for an Xbox one (main menu, campaign,
 their pickers...) */
-#define MAXIMUM_H3_SCREENS 16
+#define MAXIMUM_H3_SCREENS 64
 
 /* the layout of a bitmap tag and a string list tag held by a Custom Edition
 resource map (the item is the whole tag, its addresses counting from the
@@ -406,6 +407,7 @@ static char const *const port_function_names[] =
 	"port h3 gametype save quit", "port h3 gametype leave ask", "port h3 gametype leave", "port h3 gametype discard",
 	"port h3 carnage init", "port h3 carnage continue", "port h3 carnage leave ask", "port h3 carnage leave",
 	"port h3 carnage players", "port h3 carnage page", "port h3 carnage up", "port h3 carnage down",
+	"port h3 dialog ok", "port h3 dialog yes", "port h3 dialog no",
 };
 
 /* the port's game data functions (menu_functions.c), from
@@ -433,6 +435,7 @@ static char const *const port_game_data_input_names[] =
 	"port h3 gametype list", "port h3 gametype actions", "port h3 gametype question", "port h3 gametype bases",
 	"port h3 gametype editor", "port h3 gametype options",
 	"port h3 carnage",
+	"port h3 dialog",
 };
 
 static struct
@@ -2217,6 +2220,10 @@ void menu_tags_preload(
 	}
 }
 
+/* (menu_functions.c: the tags it keeps the indices of, looked up again
+when this changes) the maps' tags loaded or let go since the start */
+static long menu_tags_changes;
+
 /* ui.map's tags loaded: ours added, if the player's Halo PC data is there
 (only their names and the XML: the rest at first use). A level's map (any
 other): the in-game set (ingame.txt: the Halo 3 pause screen), the same way,
@@ -2230,6 +2237,7 @@ void menu_tags_loaded(
 	unsigned long long started = vita_host_time_us(), checked, read;
 	boolean ingame = strcmp(map_name, "ui") != 0;
 
+	menu_tags_changes++;
 	menu_tags.root_tag = menu_tags.xbox_root_tag = NONE;
 	/* (until they are added: the Xbox's menus) */
 	if (!ingame)
@@ -2374,6 +2382,22 @@ void menu_tags_loaded(
 		menu_tags.h3_replaces[menu_tags.h3_count] = screen->replaces;
 		menu_tags.h3_count++;
 	}
+	/* (debug: HALO_MENUS_DUMP_TAGS=<path>;<path>...: those screens of the
+	map's dumped as it loads, as HALO_MENUS_DUMP dumps one as it opens) */
+	if (getenv("HALO_MENUS_DUMP_TAGS"))
+	{
+		char paths[1024];
+		char *path, *rest;
+
+		snprintf(paths, sizeof(paths), "%s", getenv("HALO_MENUS_DUMP_TAGS"));
+		for (path = strtok_r(paths, ";", &rest); path; path = strtok_r(NULL, ";", &rest))
+		{
+			long tag = tag_loaded(UI_WIDGET_DEFINITION_TAG, path);
+
+			if (tag != NONE)
+				menu_tags_dump(tag, 0);
+		}
+	}
 	if (menus->screen_count)
 		platform_log("menus: Halo 3 set: %ld of %ld screens (Menu style %s)", menu_tags.h3_count, menus->screen_count,
 			halo_menu_style_halo3() ? "Halo 3" : "Halo CE");
@@ -2403,9 +2427,16 @@ done:
 	memset(&build, 0, sizeof(build));
 }
 
+long menu_tags_generation(
+	void)
+{
+	return menu_tags_changes;
+}
+
 void menu_tags_unloaded(
 	void)
 {
+	menu_tags_changes++;
 	/* (what was read ahead and never taken) */
 	halo_menus_art_release();
 	if (menu_tags.loaded || menu_tags.block_count || menu_tags.original_instances)
@@ -2428,12 +2459,12 @@ static void menu_tags_dump(long tag_index, int depth)
 
 	if (!definition || depth > 9)
 		return;
-	platform_log("menus dump: %*s%s type %d at %d,%d-%d,%d flags %08lx bitmap %s text %s[%d] font %s",
+	platform_log("menus dump: %*s%s type %d at %d,%d-%d,%d flags %08lx bitmap %s text %s[%d] font %s auto close %ld/%ld",
 		depth * 2, "", tag_get_name(tag_index), (int)definition->type, (int)definition->bounds.x0,
 		(int)definition->bounds.y0, (int)definition->bounds.x1, (int)definition->bounds.y1,
 		(unsigned long)definition->flags, dump_name(&definition->background_bitmap),
 		dump_name(&definition->text_label_string_list), (int)definition->string_list_index,
-		dump_name(&definition->text_font));
+		dump_name(&definition->text_font), definition->milliseconds_to_auto_close, definition->auto_close_fade_time);
 	for (index = 0; index < definition->game_data_inputs.count; index++)
 	{
 		struct ui_widget_game_data_input_reference *input = TAG_BLOCK_GET_ELEMENT(&definition->game_data_inputs, index,

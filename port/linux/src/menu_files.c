@@ -228,6 +228,7 @@ enum element
 	_element_data,
 	_element_conditional,
 	_element_replace,
+	_element_screen,
 };
 
 /* an attribute an element may have: its text (text) or number (number,
@@ -756,6 +757,20 @@ static void read_replace(struct reader *reader, const XML_Char **attributes, lon
 	LIST_ADD(reader, owner, first_replace, last_replace, replaces, index);
 }
 
+/* (a Halo 3 screen) root stands for the Xbox screen replaces while Menu
+style is Halo 3 (menu_tags.c) */
+static void screen_add(struct reader *reader, const char *root, const char *replaces)
+{
+	struct halo_menus *menus = &reader->menus;
+
+	GROW(reader, menus->screens, menus->screen_count);
+	menus->screens[menus->screen_count].root = root;
+	menus->screens[menus->screen_count].replaces = replaces;
+	menus->screens[menus->screen_count].file = reader->file;
+	menus->screens[menus->screen_count].line = current_line(reader);
+	menus->screen_count++;
+}
+
 static void read_menus(struct reader *reader, const XML_Char **attributes)
 {
 	const char *root = NULL, *replaces = NULL;
@@ -766,22 +781,33 @@ static void read_menus(struct reader *reader, const XML_Char **attributes)
 	Halo 3, menu_tags.c; else the Multiplayer screen's root) */
 	if (replaces)
 	{
-		struct halo_menus *menus = &reader->menus;
-
 		if (!root)
 		{
 			reader_error(reader, "a <menus replaces=...> needs its root");
 			return;
 		}
-		GROW(reader, menus->screens, menus->screen_count);
-		menus->screens[menus->screen_count].root = root;
-		menus->screens[menus->screen_count].replaces = replaces;
-		menus->screens[menus->screen_count].file = reader->file;
-		menus->screens[menus->screen_count].line = current_line(reader);
-		menus->screen_count++;
+		screen_add(reader, root, replaces);
 	}
 	else if (root)
 		reader->menus.root = root;
+}
+
+/* <screen root="..." replaces="..."/>: one more Halo 3 screen of the file,
+as <menus root= replaces=> names one (the Halo 3 dialogs, halo3/dialog.xml,
+stand for many of the Xbox's) */
+static void read_screen(struct reader *reader, const XML_Char **attributes)
+{
+	const char *root = NULL, *replaces = NULL;
+	struct attribute table[] = { { "root", &root }, { "replaces", &replaces } };
+
+	read_attributes(reader, "screen", attributes, table, sizeof(table) / sizeof(*table));
+	if (!reader->failed && (!root || !replaces))
+	{
+		reader_error(reader, "a <screen> needs root and replaces");
+		return;
+	}
+	if (!reader->failed)
+		screen_add(reader, root, replaces);
 }
 
 static void XMLCALL element_start(void *data, const XML_Char *name, const XML_Char **attributes)
@@ -818,6 +844,11 @@ static void XMLCALL element_start(void *data, const XML_Char *name, const XML_Ch
 	{
 		element = _element_frame;
 		read_frame(reader, attributes, owner);
+	}
+	else if (!strcmp(name, "screen") && parent == _element_menus)
+	{
+		element = _element_screen;
+		read_screen(reader, attributes);
 	}
 	else if (!strcmp(name, "font") && parent == _element_menus)
 	{

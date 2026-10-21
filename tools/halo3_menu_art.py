@@ -85,6 +85,15 @@ def haze():
     ])
 
 
+def dim():
+    # the Halo 3 dialog's (halo3/dialog.xml): what is behind a message box or
+    # question dimmed, darker than the haze, the same blue cast
+    return vertical_gradient((64, 64), [
+        (0.0, (6, 12, 28, alpha(.66))),
+        (1.0, (2, 6, 16, alpha(.74))),
+    ])
+
+
 def panel():
     # the lobby and settings panel (Halo Online's window gradient)
     return vertical_gradient((64, 64), [
@@ -862,6 +871,7 @@ ART = {
     'column.png': column,
     'haze.png': haze,
     'menu_column.png': menu_column,
+    'dim.png': dim,
     'panel.png': panel,
     'custom_panel.png': custom_panel,
     'profiles_panel.png': profiles_panel,

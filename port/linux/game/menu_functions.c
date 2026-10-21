@@ -131,8 +131,10 @@ for a gamepad); a test build's HALO_TEST_TEXT_INPUT answers in its place,
 #include "coop_menu.h"
 #include "map_share.h"
 #include "carnage_report.h"
+#include "cutscene/cinematics.h"
 
 #include <math.h>
+#include <pthread.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -384,6 +386,9 @@ enum
 	_function_h3_carnage_page,
 	_function_h3_carnage_up,
 	_function_h3_carnage_down,
+	_function_h3_dialog_ok,
+	_function_h3_dialog_yes,
+	_function_h3_dialog_no,
 };
 
 /* in port_game_data_input_names' order */
@@ -445,6 +450,7 @@ enum
 	_input_h3_gametype_editor,
 	_input_h3_gametype_options,
 	_input_h3_carnage,
+	_input_h3_dialog,
 };
 
 /* what a line of typing is for */
@@ -13981,6 +13987,627 @@ static void h3_pregame_update(struct widget_instance *widget)
 	}
 }
 
+/* ---------- the Halo 3 dialog (halo3/dialog.xml) */
+
+/* Menu style Halo 3: every message box and question the game shows is the
+Halo 3 dialog - halo3/dialog.xml's screens, standing for the Xbox's boxes
+(dialog_ui.xml, dialog_ingame.xml: menu_tags.c) and for the platform's own
+(sdl_platform.c platform_show_message, platform_ask_question: map sharing,
+the invites, the crossplay check). "port h3 dialog" gives each its title and
+text, the port's own words in the player's language; an error's text box
+(display_error) holds the error's number, which picks them. With Menu style
+Halo CE the Xbox's and the platform's own boxes, as ever */
+
+/* the screens, by their root's name: what each is */
+enum
+{
+	_h3_dialog_error,
+	_h3_dialog_abort,
+	_h3_dialog_exit,
+	_h3_dialog_revert,
+	_h3_dialog_restart,
+	_h3_dialog_quit,
+	_h3_dialog_saving_progress,
+	_h3_dialog_saving,
+	_h3_dialog_creating,
+	_h3_dialog_delete_profile,
+	_h3_dialog_delete_gametype,
+	_h3_dialog_message,
+	_h3_dialog_question,
+};
+
+static struct
+{
+	char const *name;
+	short kind;
+} const h3_dialog_screens[] =
+{
+	{ "error", _h3_dialog_error }, { "notice", _h3_dialog_error }, { "half_error", _h3_dialog_error },
+	{ "half_notice", _h3_dialog_error }, { "abort", _h3_dialog_abort }, { "abort_final", _h3_dialog_abort },
+	{ "exit", _h3_dialog_exit }, { "revert", _h3_dialog_revert }, { "half_revert", _h3_dialog_revert },
+	{ "restart", _h3_dialog_restart }, { "half_restart", _h3_dialog_restart }, { "half_quit", _h3_dialog_quit },
+	{ "savequit", _h3_dialog_saving_progress }, { "saved", _h3_dialog_saving_progress },
+	{ "saving", _h3_dialog_saving }, { "creating", _h3_dialog_creating }, { "delprof", _h3_dialog_delete_profile },
+	{ "delgt", _h3_dialog_delete_gametype }, { "message", _h3_dialog_message }, { "question", _h3_dialog_question },
+};
+
+/* each error's title and text (ui_widget.h's error codes, in order): the
+port's own words; NULL text, the map's (its displayed_error_messages) */
+static struct
+{
+	char const *title;
+	char const *text;
+} const h3_dialog_errors[NUMBER_OF_ERROR_CODES] =
+{
+	{ N_("ERROR"), N_("Something went wrong.") },
+	{ N_("NETWORK ERROR"), N_("There's a problem with the network connection.") },
+	{ N_("GAME CLOSED"), N_("That game isn't open to join anymore.") },
+	{ N_("COULDN'T JOIN"), N_("You couldn't join that game.") },
+	{ N_("GAME ENDED"), N_("The host has closed the game.") },
+	{ N_("NO NETWORK"), N_("There's no network connection. Check your Wi-Fi and try again.") },
+	{ N_("CONNECTION LOST"), N_("The connection to the game was lost.") },
+	{ N_("COULDN'T JOIN"), N_("Joining the game failed. It may be full, or gone.") },
+	{ N_("OUT OF SYNC"), N_("Your game fell out of step with the host's, so it ended.") },
+	{ N_("CONNECTION PROBLEM"), N_("The connection is having trouble. The game may end.") },
+	{ N_("NETWORK ERROR"), NULL },
+	{ N_("CONTROLLER"), N_("There's a problem with a controller.") },
+	{ N_("CONTROLLER DISCONNECTED"), N_("Reconnect the controller, then press START to go on.") },
+	{ N_("CONTROLLER DISCONNECTED"), N_("Reconnect the controller to go on.") },
+	{ N_("STORAGE"), NULL },
+	{ N_("SAVING"), NULL },
+	{ N_("SAVING"), NULL },
+	{ N_("SAVING"), NULL },
+	{ N_("CO-OP"), N_("Each co-op player needs a controller of their own.") },
+	{ N_("CO-OP"), N_("Co-op needs two controllers.") },
+	{ N_("CONTROLLER"), NULL },
+	{ N_("ERROR"), NULL },
+	{ N_("REVERT TO CHECKPOINT"), NULL },
+	{ N_("RESTART MISSION"), NULL },
+	{ N_("DELETE PROFILE"), NULL },
+	{ N_("DELETE GAME TYPE"), NULL },
+	{ N_("CAN'T DELETE"), N_("The game's own game types can't be deleted.") },
+	{ N_("NAME TAKEN"), N_("There's already a file with that name. Choose another one.") },
+	{ N_("DISCARD CHANGES"), N_("Leave without saving your changes?") },
+	{ N_("NAME NEEDED"), N_("Type a name first.") },
+	{ N_("SAVING"), NULL },
+	{ N_("DAMAGED FILE"), N_("A saved file is damaged and can't be used.") },
+	{ N_("ERROR"), NULL },
+	{ N_("STORAGE FULL"), NULL },
+	{ N_("TOO MANY FILES"), N_("There are too many saved files. Delete some to save more.") },
+	{ N_("DAMAGED DATA"), N_("The game's data can't be read. Its files may be damaged or missing.") },
+	{ N_("TOO MANY FILES"), N_("No more of these files can be made. Delete one to make another.") },
+	{ N_("PROFILE ERROR"), N_("The profile couldn't be saved.") },
+	{ N_("SAVE ERROR"), N_("The game type couldn't be saved.") },
+	{ N_("DAMAGED SAVE"), N_("The saved game is damaged and can't be loaded.") },
+};
+
+/* (the port's words for an error whose text is the port's: the Xbox's code
+that carries it, display_error_text_deferred) */
+#define H3_DIALOG_PORT_TEXT_ERROR _error_cannot_create_saved_game_file_with_empty_name
+/* the messages waiting their turn (platform_show_message) */
+#define H3_DIALOG_MESSAGES 4
+
+static struct
+{
+	/* (platform_dialog_hook's, from any thread) */
+	pthread_mutex_t lock;
+	/* the dialog can show the platform's messages now: Menu style Halo 3,
+	the dialog in the loaded map (each frame, pc_menu_functions_update) */
+	volatile boolean ready;
+	/* the platform's messages waiting, the first one shown */
+	char message_titles[H3_DIALOG_MESSAGES][80];
+	char messages[H3_DIALOG_MESSAGES][640];
+	short message_count;
+	boolean message_shown;
+	/* its question: asked, shown (opened at least once), withdrawn */
+	boolean question_asked;
+	boolean question_shown;
+	boolean question_withdrawn;
+	char question_title[80];
+	char question[640];
+	/* the dialog last logged (its screen, made when, its title) */
+	void const *logged_screen;
+	long logged_creation;
+	char logged[96];
+} h3_dialog = { PTHREAD_MUTEX_INITIALIZER };
+
+/* sdl_platform.c's */
+extern int (*platform_dialog_hook)(int question, const char *title, const char *text);
+void platform_question_answered(int yes);
+void platform_show_message_box(const char *title, const char *message);
+void platform_ask_question_box(const char *title, const char *text);
+
+/* a text box's own text, as text_show, longer (a map download's question) */
+static void h3_dialog_text(struct widget_instance *widget, char const *text)
+{
+	unsigned short characters[700];
+	long length;
+
+	if (!widget || widget->type != _ui_widget_type_text_box)
+		return;
+	length = halo_menus_utf16(text ? text : "", characters, (long)NUMBEROF(characters));
+	widget->parameters.text_box.text = ui_widget_realloc(widget->parameters.text_box.text,
+		(word)(length * sizeof(wchar_t)), __FILE__, __LINE__);
+	if (widget->parameters.text_box.text)
+		memcpy(widget->parameters.text_box.text, characters, length * sizeof(wchar_t));
+}
+
+/* whether a line of text is wider than the dialog's text box */
+static boolean h3_dialog_too_wide(struct widget_instance *widget, char const *text, short width)
+{
+	unsigned short characters[700];
+
+	halo_menus_utf16(text, characters, (long)NUMBEROF(characters));
+	return ui_widget_port_text_too_wide(widget, (wchar_t const *)characters, width);
+}
+
+/* (the dialog's text box: the text in lines that fit its width, broken at
+spaces; its own line breaks kept) the text shown, made once for each text
+and box (the box measures it in its font) */
+static void h3_dialog_text_wrapped(struct widget_instance *widget, char const *text)
+{
+	static struct
+	{
+		void const *widget;
+		long creation;
+		char text[700];
+		char wrapped[760];
+	} made;
+	char line[700];
+	char const *cursor = text;
+	size_t length = 0;
+	short width;
+
+	if (!widget || !text)
+		return;
+	if (made.widget == widget && made.creation == widget->creation_time && !strcmp(made.text, text))
+	{
+		h3_dialog_text(widget, made.wrapped);
+		return;
+	}
+	made.widget = widget;
+	made.creation = widget->creation_time;
+	snprintf(made.text, sizeof(made.text), "%s", text);
+	made.wrapped[0] = 0;
+	width = ui_widget_port_text_box_width(widget);
+	line[0] = 0;
+	while (*cursor)
+	{
+		size_t word_length = strcspn(cursor, " \n");
+		char candidate[700];
+
+		snprintf(candidate, sizeof(candidate), "%s%s%.*s", line, line[0] ? " " : "", (int)word_length, cursor);
+		if (line[0] && width > 0 && h3_dialog_too_wide(widget, candidate, width))
+		{
+			length += snprintf(made.wrapped + length, length < sizeof(made.wrapped) ? sizeof(made.wrapped) - length : 0,
+				"%s\n", line);
+			snprintf(line, sizeof(line), "%.*s", (int)word_length, cursor);
+		}
+		else
+			snprintf(line, sizeof(line), "%s", candidate);
+		cursor += word_length;
+		if (*cursor == '\n')
+		{
+			length += snprintf(made.wrapped + length, length < sizeof(made.wrapped) ? sizeof(made.wrapped) - length : 0,
+				"%s\n", line);
+			line[0] = 0;
+		}
+		if (*cursor)
+			cursor++;
+	}
+	if (length < sizeof(made.wrapped))
+		snprintf(made.wrapped + length, sizeof(made.wrapped) - length, "%s", line);
+	h3_dialog_text(widget, made.wrapped);
+}
+
+/* the game's UTF-16 made UTF-8 (the map's error text, the port's own) */
+static void h3_dialog_utf8(wchar_t const *text, char *out, size_t size)
+{
+	size_t length = 0;
+
+	for (; text && *text && length + 4 < size; text++)
+	{
+		unsigned long character = (unsigned short)*text;
+
+		if (character < 0x80)
+			out[length++] = (char)character;
+		else if (character < 0x800)
+		{
+			out[length++] = (char)(0xC0 | (character >> 6));
+			out[length++] = (char)(0x80 | (character & 0x3F));
+		}
+		else
+		{
+			out[length++] = (char)(0xE0 | (character >> 12));
+			out[length++] = (char)(0x80 | ((character >> 6) & 0x3F));
+			out[length++] = (char)(0x80 | (character & 0x3F));
+		}
+	}
+	out[length] = 0;
+}
+
+/* a title in capitals, Latin-1's accented letters too (the Spanish
+"mapa" of "Halo: custom map"); "Halo: " left off, as the dialog is the game's */
+static void h3_dialog_title_of(char const *title, char *out, size_t size)
+{
+	unsigned char *character;
+
+	if (!title)
+		title = "";
+	if (!strncmp(title, "Halo: ", 6))
+		title += 6;
+	snprintf(out, size, "%s", title);
+	for (character = (unsigned char *)out; *character; character++)
+	{
+		if (*character >= 'a' && *character <= 'z')
+			*character = (unsigned char)(*character - 'a' + 'A');
+		/* (U+00E0 to U+00FE but U+00F7: two bytes, C3 A0-BE) */
+		else if (*character == 0xC3 && character[1] >= 0xA0 && character[1] <= 0xBE && character[1] != 0xB7)
+			*++character -= 0x20;
+	}
+}
+
+/* (the screen's root name) which dialog, NONE not one */
+static short h3_dialog_kind(struct widget_instance *screen)
+{
+	char const *name = screen ? tag_get_name(screen->definition_tag_index) : NULL;
+	static char const prefix[] = "pc\\h3\\dlg\\";
+	size_t index;
+
+	if (!name || strncmp(name, prefix, sizeof(prefix) - 1))
+		return NONE;
+	name += sizeof(prefix) - 1;
+	for (index = 0; index < NUMBEROF(h3_dialog_screens); index++)
+	{
+		size_t length = strlen(h3_dialog_screens[index].name);
+
+		if (!strncmp(name, h3_dialog_screens[index].name, length) && !strcmp(name + length, "\\screen"))
+			return h3_dialog_screens[index].kind;
+	}
+	return NONE;
+}
+
+/* an error's words: the port's text for it (the error's box showing the
+port's own), else this table's, else the map's */
+static void h3_dialog_error_words(struct widget_instance *code_box, short code, char *title, size_t title_size,
+	char *text, size_t text_size)
+{
+	wchar_t const *port_text = ui_widget_port_error_text_of(code_box);
+
+	code = PIN(code, 0, NUMBER_OF_ERROR_CODES - 1);
+	snprintf(title, title_size, "%s", T(h3_dialog_errors[code].title));
+	if (port_text)
+	{
+		h3_dialog_utf8(port_text, text, text_size);
+		if (code == H3_DIALOG_PORT_TEXT_ERROR)
+			snprintf(title, title_size, "%s", T("NOTICE"));
+		return;
+	}
+	switch (code)
+	{
+	case _error_warning_revert_to_saved_progress_will_be_lost:
+		snprintf(text, text_size, "%s", T("Go back to your last checkpoint? What you've done since then will be lost."));
+		return;
+	case _error_warning_restart_level_progress_will_be_lost:
+		snprintf(text, text_size, "%s", T("Start this mission over? Your progress in it will be lost."));
+		return;
+	case _error_warning_delete_player_profile:
+		snprintf(text, text_size, "%s", T("Delete this profile? Its settings and campaign progress will be gone for good."));
+		return;
+	case _error_warning_delete_multiplayer_profile:
+		snprintf(text, text_size, "%s", T("Delete this game type? It can't be undone."));
+		return;
+	case _error_controller_saving_file_warning:
+	case _error_warning_saving_checkpoint:
+#ifdef HALO_VITA
+		snprintf(text, text_size, "%s", T("Saving. Don't turn off your PS Vita."));
+#else
+		snprintf(text, text_size, "%s", T("Saving. Don't close the game."));
+#endif
+		return;
+	case _error_controller_creating_player_profile_warning:
+		snprintf(text, text_size, "%s", T("Creating your profile..."));
+		return;
+	case _error_controller_creating_game_settings_file_warning:
+		snprintf(text, text_size, "%s", T("Saving your game type..."));
+		return;
+	case _error_hard_drive_not_enough_free_space:
+#ifdef HALO_VITA
+		snprintf(text, text_size, "%s", T("There isn't enough free space on the memory card to save. Free some space, or go on without saving."));
+#else
+		snprintf(text, text_size, "%s", T("There isn't enough free space on the disk to save. Free some space, or go on without saving."));
+#endif
+		return;
+	}
+	if (h3_dialog_errors[code].text)
+	{
+		snprintf(text, text_size, "%s", T(h3_dialog_errors[code].text));
+		return;
+	}
+	text[0] = 0;
+	{
+		long list = tag_loaded('ustr', "ui\\shell\\strings\\displayed_error_messages");
+		wchar_t const *map_text = list != NONE ? unicode_string_list_get_string(list, code) : NULL;
+
+		h3_dialog_utf8(map_text, text, text_size);
+	}
+}
+
+/* (port h3 dialog: the dialog's screen, each frame) its title and text */
+static void h3_dialog_update(struct widget_instance *widget)
+{
+	struct widget_instance *screen = screen_of(widget);
+	short kind = h3_dialog_kind(screen);
+	char title[96], text[700];
+	short code = NONE;
+
+	if (kind == NONE)
+		return;
+	title[0] = text[0] = 0;
+	switch (kind)
+	{
+	case _h3_dialog_error:
+	case _h3_dialog_abort:
+	{
+		/* (display_error's: the code box, the first child's first child;
+		display_error_abort_to_dashboard's: the screen itself) */
+		struct widget_instance *code_box = kind == _h3_dialog_abort ? screen : named(screen, "code_text");
+
+		code = code_box ? code_box->parameters.text_box.string_list_index : NONE;
+		h3_dialog_error_words(code_box, code, title, sizeof(title), text, sizeof(text));
+		if (kind == _h3_dialog_abort)
+		{
+			size_t length = strlen(text);
+
+			snprintf(text + length, sizeof(text) - length, "%s%s", length ? "\n\n" : "",
+				named(screen, "row_continue") ?
+				T("CONTINUE plays on without saving. QUIT GAME closes Halo.") : T("Halo has to close."));
+		}
+		break;
+	}
+	case _h3_dialog_exit:
+		snprintf(title, sizeof(title), "%s", T("QUITTING"));
+		snprintf(text, sizeof(text), "%s", T("Halo is closing..."));
+		break;
+	case _h3_dialog_revert:
+		h3_dialog_error_words(NULL, _error_warning_revert_to_saved_progress_will_be_lost, title, sizeof(title), text,
+			sizeof(text));
+		break;
+	case _h3_dialog_restart:
+		h3_dialog_error_words(NULL, _error_warning_restart_level_progress_will_be_lost, title, sizeof(title), text,
+			sizeof(text));
+		break;
+	case _h3_dialog_quit:
+		snprintf(title, sizeof(title), "%s", T("QUIT MISSION"));
+		snprintf(text, sizeof(text), "%s", T("Quit to the main menu? What you've done since your last checkpoint will be lost."));
+		break;
+	case _h3_dialog_saving_progress:
+		snprintf(title, sizeof(title), "%s", T("SAVING"));
+#ifdef HALO_VITA
+		snprintf(text, sizeof(text), "%s", T("Saving your progress. Don't turn off your PS Vita."));
+#else
+		snprintf(text, sizeof(text), "%s", T("Saving your progress. Don't close the game."));
+#endif
+		break;
+	case _h3_dialog_saving:
+		h3_dialog_error_words(NULL, _error_controller_saving_file_warning, title, sizeof(title), text, sizeof(text));
+		break;
+	case _h3_dialog_creating:
+		h3_dialog_error_words(NULL, _error_controller_creating_player_profile_warning, title, sizeof(title), text,
+			sizeof(text));
+		break;
+	case _h3_dialog_delete_profile:
+		h3_dialog_error_words(NULL, _error_warning_delete_player_profile, title, sizeof(title), text, sizeof(text));
+		break;
+	case _h3_dialog_delete_gametype:
+		h3_dialog_error_words(NULL, _error_warning_delete_multiplayer_profile, title, sizeof(title), text,
+			sizeof(text));
+		break;
+	case _h3_dialog_message:
+		pthread_mutex_lock(&h3_dialog.lock);
+		if (h3_dialog.message_count)
+		{
+			h3_dialog_title_of(h3_dialog.message_titles[0], title, sizeof(title));
+			snprintf(text, sizeof(text), "%s", h3_dialog.messages[0]);
+		}
+		pthread_mutex_unlock(&h3_dialog.lock);
+		break;
+	case _h3_dialog_question:
+		pthread_mutex_lock(&h3_dialog.lock);
+		if (h3_dialog.question_asked)
+		{
+			h3_dialog_title_of(h3_dialog.question_title, title, sizeof(title));
+			snprintf(text, sizeof(text), "%s", h3_dialog.question);
+		}
+		pthread_mutex_unlock(&h3_dialog.lock);
+		break;
+	}
+	h3_dialog_text(named(screen, "title"), title);
+	h3_dialog_text_wrapped(named(screen, "body"), text);
+	/* (each dialog said once in the log as it opens: the tests read it) */
+	if (h3_dialog.logged_screen != screen || h3_dialog.logged_creation != screen->creation_time ||
+		strcmp(h3_dialog.logged, title))
+	{
+		h3_dialog.logged_screen = screen;
+		h3_dialog.logged_creation = screen->creation_time;
+		snprintf(h3_dialog.logged, sizeof(h3_dialog.logged), "%s", title);
+		platform_log("menus: h3 dialog: %s \"%s\"", tag_get_name(screen->definition_tag_index), title);
+		if (code != NONE)
+			platform_log("menus: h3 dialog: error %d", (int)code);
+	}
+}
+
+/* (port h3 dialog ok, yes, no: the port's message or question answered) */
+static void h3_dialog_answer(long function)
+{
+	if (function == _function_h3_dialog_ok)
+	{
+		pthread_mutex_lock(&h3_dialog.lock);
+		if (h3_dialog.message_count)
+		{
+			h3_dialog.message_count--;
+			memmove(h3_dialog.messages[0], h3_dialog.messages[1], sizeof(h3_dialog.messages[0]) * h3_dialog.message_count);
+			memmove(h3_dialog.message_titles[0], h3_dialog.message_titles[1],
+				sizeof(h3_dialog.message_titles[0]) * h3_dialog.message_count);
+		}
+		h3_dialog.message_shown = FALSE;
+		pthread_mutex_unlock(&h3_dialog.lock);
+		platform_log("menus: h3 dialog: message dismissed");
+		return;
+	}
+	pthread_mutex_lock(&h3_dialog.lock);
+	h3_dialog.question_asked = FALSE;
+	h3_dialog.question_shown = FALSE;
+	pthread_mutex_unlock(&h3_dialog.lock);
+	platform_question_answered(function == _function_h3_dialog_yes);
+	platform_log("menus: h3 dialog: question answered %s", function == _function_h3_dialog_yes ? "yes" : "no");
+}
+
+/* (sdl_platform.c platform_dialog_hook: any thread) a message or question
+of the platform's taken by the dialog while it can show it: Menu style
+Halo 3, the dialog in the map (and a window someone watches: a test's
+hidden one only with HALO_TEST_DIALOGS); text NULL, the question withdrawn */
+static int h3_dialog_port_hook(int question, char const *title, char const *text)
+{
+	int taken = 0;
+
+	pthread_mutex_lock(&h3_dialog.lock);
+	if (!text)
+	{
+		if (question && h3_dialog.question_asked)
+		{
+			h3_dialog.question_asked = FALSE;
+			h3_dialog.question_withdrawn = h3_dialog.question_shown;
+			h3_dialog.question_shown = FALSE;
+		}
+		pthread_mutex_unlock(&h3_dialog.lock);
+		return 1;
+	}
+	if (h3_dialog.ready && ((!config_boolean("debug.hidden_window") && !config_boolean("debug.null_renderer")) ||
+		getenv("HALO_TEST_DIALOGS")))
+	{
+		if (question)
+		{
+			snprintf(h3_dialog.question_title, sizeof(h3_dialog.question_title), "%s", title ? title : "");
+			snprintf(h3_dialog.question, sizeof(h3_dialog.question), "%s", text);
+			h3_dialog.question_asked = TRUE;
+			h3_dialog.question_shown = FALSE;
+			h3_dialog.question_withdrawn = FALSE;
+			taken = 1;
+		}
+		else if (h3_dialog.message_count < H3_DIALOG_MESSAGES)
+		{
+			snprintf(h3_dialog.message_titles[h3_dialog.message_count], sizeof(h3_dialog.message_titles[0]), "%s",
+				title ? title : "");
+			snprintf(h3_dialog.messages[h3_dialog.message_count], sizeof(h3_dialog.messages[0]), "%s", text);
+			h3_dialog.message_count++;
+			taken = 1;
+		}
+	}
+	pthread_mutex_unlock(&h3_dialog.lock);
+	return taken;
+}
+
+/* (each frame, the main loop) the platform's message or question opened in
+the dialog when nothing else is up in front (an error's box, a cinematic,
+another dialog of these): over the screen showing, or over the game; a
+question withdrawn closes its dialog; the dialog gone from the map (Menu
+style Halo CE chosen, a map without it), what waits goes to the platform's
+own box */
+static void h3_dialog_port_update(void)
+{
+	long menu_tags_generation(void);
+	/* (the screens' tags, looked up once for each map's) */
+	static long message_tag = NONE, question_tag = NONE, generation = -1;
+	struct widget_instance *active = ui_widget_port_active_screen(0);
+	boolean ready, open_message = FALSE, open_question = FALSE;
+	char title[80], text[640];
+
+	if (generation != menu_tags_generation())
+	{
+		generation = menu_tags_generation();
+		message_tag = menu_tags_ingame_screen("h3/dlg/message/screen");
+		question_tag = menu_tags_ingame_screen("h3/dlg/question/screen");
+	}
+	ready = halo_menu_style_halo3() && message_tag != NONE && question_tag != NONE;
+
+	if (!platform_dialog_hook)
+		platform_dialog_hook = h3_dialog_port_hook;
+	h3_dialog.ready = ready;
+	pthread_mutex_lock(&h3_dialog.lock);
+	if (!ready)
+	{
+		/* (the platform's own box for what waits) */
+		if (h3_dialog.question_asked)
+		{
+			snprintf(title, sizeof(title), "%s", h3_dialog.question_title);
+			snprintf(text, sizeof(text), "%s", h3_dialog.question);
+			h3_dialog.question_asked = FALSE;
+			h3_dialog.question_shown = FALSE;
+			pthread_mutex_unlock(&h3_dialog.lock);
+			platform_ask_question_box(title, text);
+			pthread_mutex_lock(&h3_dialog.lock);
+		}
+		while (h3_dialog.message_count)
+		{
+			snprintf(title, sizeof(title), "%s", h3_dialog.message_titles[0]);
+			snprintf(text, sizeof(text), "%s", h3_dialog.messages[0]);
+			h3_dialog.message_count--;
+			memmove(h3_dialog.messages[0], h3_dialog.messages[1], sizeof(h3_dialog.messages[0]) * h3_dialog.message_count);
+			memmove(h3_dialog.message_titles[0], h3_dialog.message_titles[1],
+				sizeof(h3_dialog.message_titles[0]) * h3_dialog.message_count);
+			pthread_mutex_unlock(&h3_dialog.lock);
+			platform_show_message_box(title, text);
+			pthread_mutex_lock(&h3_dialog.lock);
+		}
+		h3_dialog.message_shown = FALSE;
+		pthread_mutex_unlock(&h3_dialog.lock);
+		return;
+	}
+	/* (a question withdrawn: its dialog closed, if it is up) */
+	if (h3_dialog.question_withdrawn)
+	{
+		h3_dialog.question_withdrawn = FALSE;
+		if (active && active->definition_tag_index == question_tag)
+		{
+			pthread_mutex_unlock(&h3_dialog.lock);
+			platform_log("menus: h3 dialog: the question was withdrawn");
+			ui_widget_delete(active);
+			return;
+		}
+	}
+	/* (the dialog up already, or something else in front) */
+	if (active && (active->definition_tag_index == message_tag || active->definition_tag_index == question_tag ||
+		active->widget_is_error_dialog))
+	{
+		if (active->definition_tag_index == question_tag)
+			h3_dialog.question_shown = TRUE;
+		if (active->definition_tag_index == message_tag)
+			h3_dialog.message_shown = TRUE;
+		pthread_mutex_unlock(&h3_dialog.lock);
+		return;
+	}
+	/* (asked and not up: opened, the question first; again if its screen
+	went - a map's change -, as it is not answered) */
+	if (h3_dialog.question_asked)
+		open_question = TRUE;
+	else if (h3_dialog.message_count)
+		open_message = TRUE;
+	pthread_mutex_unlock(&h3_dialog.lock);
+	if ((!open_question && !open_message) || cinematic_in_progress())
+		return;
+	if (ui_widget_load_by_name_or_tag(NULL, open_question ? question_tag : message_tag, NULL, 0,
+		active ? active->definition_tag_index : NONE, NONE, NONE))
+	{
+		pthread_mutex_lock(&h3_dialog.lock);
+		if (open_question)
+			h3_dialog.question_shown = TRUE;
+		else
+			h3_dialog.message_shown = TRUE;
+		pthread_mutex_unlock(&h3_dialog.lock);
+	}
+}
+
 boolean pc_menu_event_function_invoke(
 	struct widget_instance *widget,
 	struct event_record *event,
@@ -14814,6 +15441,12 @@ boolean pc_menu_event_function_invoke(
 		h3_gametype_edit_end();
 		h3_gametypes.leave_pending = TRUE;
 		return TRUE;
+	/* (the Halo 3 dialog: the port's message or question answered) */
+	case _function_h3_dialog_ok:
+	case _function_h3_dialog_yes:
+	case _function_h3_dialog_no:
+		h3_dialog_answer(function_index);
+		return TRUE;
 	case _function_coop_campaign:
 	case _function_unwired:
 	default:
@@ -14959,6 +15592,9 @@ void pc_menu_game_data_function_invoke(
 		break;
 	case _input_h3_party_plates:
 		h3_party_plates_update(widget);
+		break;
+	case _input_h3_dialog:
+		h3_dialog_update(widget);
 		break;
 	case _input_h3_players:
 		if (widget->type == _ui_widget_type_column_list)
@@ -15222,6 +15858,7 @@ outside the widgets' own events */
 void pc_menu_functions_update(
 	boolean main_menu_loaded)
 {
+	h3_dialog_port_update();
 	h3_live_update(main_menu_loaded);
 	h3_carnage_frame(main_menu_loaded);
 	/* (a join the host's map refused: the games browser again once the

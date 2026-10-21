@@ -24,6 +24,8 @@ EXPECTED = {
     'column.png': (64, 64),
     'menu_column.png': (64, 64),
     'haze.png': (64, 64),
+    # (the Halo 3 dialog's dimmed background)
+    'dim.png': (64, 64),
     'panel.png': (64, 64),
     'item_on.png': (128, 16),
     'item_off.png': (128, 16),

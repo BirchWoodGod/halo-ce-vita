@@ -451,7 +451,9 @@ none, "level" none until a level (not the main menu) has run three
 seconds' frames, its hold and pause counted from then (a map's load takes
 as long as it takes), "carnage" none until a multiplayer game's Halo 3
 carnage report is up (port/linux/game/carnage_report.c: a game's end comes
-when it comes), and "@name" none, the next frame saved as name.bmp
+when it comes), "until/TEXT" none until the screen open is one whose tag's
+name has TEXT in it (a message box: "until/dlg\error"), and "@name" none,
+the next frame saved as name.bmp
 (HALO_SCREENSHOT_DIR, as HALO_TEST_COMMANDS' @shot). halo.log says each
 step as it is pressed. */
 static struct
@@ -460,9 +462,11 @@ static struct
 	int count;
 	int index;
 	Uint64 started;
+	/* (the "until/" step whose screen was open: going on) */
+	int until_index;
 	struct
 	{
-		char name[24];
+		char name[48];
 		int buttons;
 		WORD digital;
 		/* (the sticks pushed all the way: TEST_PAD_STICK_*) */
@@ -534,6 +538,7 @@ static void test_pad_parse(void)
 	char *token, *token_end;
 
 	test_pad.parsed = 1;
+	test_pad.until_index = -1;
 	if (!setting || !*setting)
 		return;
 	snprintf(text, sizeof(text), "%s", setting);
@@ -618,6 +623,21 @@ static void test_pad_gamepad(XINPUT_GAMEPAD *pad)
 		Uint64 elapsed;
 		int analog;
 
+		/* ("until/TEXT": until the screen open is one whose tag's name has
+		TEXT in it, a message box's "dlg\question"; its hold and pause
+		counted from then) */
+		if (!strncmp(test_pad.steps[test_pad.index].name, "until/", 6) && test_pad.until_index != test_pad.index)
+		{
+			char const *ui_widget_port_active_screen_name(void);
+
+			if (!strstr(ui_widget_port_active_screen_name(), test_pad.steps[test_pad.index].name + 6))
+			{
+				test_pad.started = now;
+				return;
+			}
+			/* (met: the step goes on, whatever opens meanwhile) */
+			test_pad.until_index = test_pad.index;
+		}
 		/* ("level": until a level has run 90 frames) */
 		if (!strcmp(test_pad.steps[test_pad.index].name, "level") ||
 			!strncmp(test_pad.steps[test_pad.index].name, "level:", 6))

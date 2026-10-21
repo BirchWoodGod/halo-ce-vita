@@ -226,7 +226,28 @@ In each level's map (ingame.txt):
   distributed netcode sends them: every machine shows the same; nothing is
   counted for it but betrayals, which are a teammate's death only now (a
   player's own was counted as one too: game_statistics.c).
-Each <menus root=... replaces="<the Xbox screen>"> names the screen it stands
+In both (menus.txt and ingame.txt):
+- dialog.xml: the Halo 3 dialog, every message box and question the game
+  shows - a title, the text, up to three choices in rows, Cross Select and
+  Circle Back in the strip (the button icons setting's), over what is behind,
+  dimmed (dim.png). dialog_ui.xml (ui.map) and dialog_ingame.xml (a level's
+  map) make its screens stand for the Xbox's boxes (ui\shell\error\...): the
+  errors (display_error: connection lost, the host's game closed, join
+  failures, damaged files, profile and save errors, storage full, the port's
+  own error texts), the errors that end the game (CONTINUE or QUIT GAME),
+  the pause screen's REVERT TO CHECKPOINT and RESTART MISSION questions
+  (split screen's halves and co-op's QUIT too), SAVE AND QUIT's "Saving",
+  the main menu's "Saving" and "Creating your profile", the Xbox's delete
+  profile and delete game type questions; their handlers are the Xbox
+  boxes'. The platform's own message and yes or no question (map sharing,
+  the friend and party invites, the crossplay check, Forge's notes) open it
+  too (menu_functions.c h3_dialog_port_update), over the screen showing or
+  the game. "port h3 dialog" gives each its title and text, the port's own
+  words in the player's language. Split screen's quarter screens' errors
+  stay the Xbox's. Menu style Halo CE keeps the Xbox's boxes and the
+  platform's.
+Each <menus root=... replaces="<the Xbox screen>"> (or <screen root=...
+replaces=...>, several in a file) names the screen it stands
 for (or OpenCE's, for the password screen); port/linux/game/menu_tags.c
 opens it in that one's place while Menu style is Halo 3. Like OpenCE's screens in the folder above, they are built when
 ui.map loads and need the Halo PC (Custom Edition) files in the maps folder;

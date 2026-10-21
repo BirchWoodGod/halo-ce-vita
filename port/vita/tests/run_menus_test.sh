@@ -364,6 +364,19 @@
 #            (a local game of it, HALO_NETWORK_TEST saved=: its rules logged, Ghosts alone), Menu
 #            style Halo CE's Xbox screens open it, and screenshots in Spanish and with the
 #            keyboard's icons (HALO_TEST_GAMETYPES_SHOTS: where the screenshots go)
+#   msgboxes  the Halo 3 dialog (menus/halo3/dialog.xml; the owner, Oct 21 2026: one
+#            Halo 3 look for every message box and prompt) with Menu style Halo 3: on the
+#            main menu error 6 (CONNECTION LOST: Circle closes it), error 31 (DAMAGED FILE:
+#            Cross on OK), the error that offers to quit (STORAGE FULL: CONTINUE), the
+#            platform's message (map sharing's: OK) and two questions (YES, then Circle:
+#            NO) - HALO_TEST_COMMANDS' @error, @abort, @say, @ask -, each answered as
+#            pressed (@answer) and none of the Xbox's boxes; Menu style Halo CE: the Xbox's
+#            boxes, the platform's own for the message and question; then (with
+#            HALO_TEST_PROFILE) a level's pause: REVERT TO CHECKPOINT's question
+#            (Circle: back to the pause screen; again, REVERT TO CHECKPOINT: reverted),
+#            RESTART MISSION's (Circle: not restarted), SAVE AND QUIT's "Saving" boxes and
+#            the main menu; and Menu style Halo CE's pause: the Xbox's question
+#            (HALO_TEST_SHOTS: each dialog's picture)
 #   pause   Campaign from the main menu (a new profile, Normal), the level's
 #           pause menu, Quit to Main Menu: a game map's widget runs its
 #           function and is back at the main menu, and asked about deleting
@@ -397,7 +410,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendsbackup h3friendspanel h3partyplates h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes}
+cases=${*:-fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendsbackup h3friendspanel h3partyplates h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes msgboxes}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
@@ -641,7 +654,7 @@ for case in $cases; do
 			fail pausesave_classic "the Xbox's SAVE AND QUIT did not show its saving screen"
 		pausesave_run pausesave_halo3 halo3 'levels\a30\a30' savegame.bin 3
 		grep -aq "ui: screen pc.h3.pause.screen" "$out/pausesave_halo3/run.log" || fail pausesave_halo3 "the Halo 3 pause did not open"
-		grep -aq "ui: screen ui.shell.error.warning_saving_file_screen_ingame" "$out/pausesave_halo3/run.log" ||
+		grep -aqE "ui: screen (ui.shell.error.warning_saving_file_screen_ingame|pc.h3.dlg.savequit.screen)" "$out/pausesave_halo3/run.log" ||
 			fail pausesave_halo3 "SAVE AND QUIT did not show its saving screen"
 		if [ ! -r "${HALO_TEST_CE_CAMPAIGN:-}" ]; then
 			echo "--- pausesave_custom"; echo "SKIP: no HALO_TEST_CE_CAMPAIGN (a Custom Edition campaign map)"; continue
@@ -723,7 +736,7 @@ for case in $cases; do
 		grep -aq "menus: the in-game screens: .* added to b30.map" "$log" || fail h3pause "the in-game screens were not built into b30.map"
 		grep -aq "menus: Halo 3 screen h3/pause/screen for ui.shell.solo_game.pause_game.pause_game" "$log" ||
 			fail h3pause "the Halo 3 pause screen did not stand for the level's"
-		grep -aq "ui: screen ui.shell.error.warning_saving_file_screen_ingame" "$log" ||
+		grep -aqE "ui: screen (ui.shell.error.warning_saving_file_screen_ingame|pc.h3.dlg.savequit.screen)" "$log" ||
 			fail h3pause "SAVE AND QUIT did not save"
 		grep -a "ui: screen" "$log" | tail -1 | grep -q 'pc.h3.main.screen' ||
 			fail h3pause "SAVE AND QUIT did not go back to the Halo 3 main menu"
@@ -2682,8 +2695,81 @@ PY
 			[ -e "$shot" ] && command -v magick > /dev/null && magick "$shot" "${shot%.bmp}.png" && rm -f "$shot"
 		done
 		ls "$gt_shots" | head -40 ;;
+	msgboxes)
+		# (the main menu: each dialog waited for - until/ -, its picture, then answered)
+		dialogs="150:@error 6;350:@error 31;550:@abort 33;750:@say Halo: custom map|The download was damaged.;950:@ask Halo: custom map|Download mygulch (12.3 MB) from the host?;1150:@answer;1200:@ask FRIEND INVITE|Bravo invites you to their game. Join?;1400:@answer"
+		run msgboxes "$menus_data" 110 "until/dlg\\error:150:1500 @error6 b:150:1500 until/h3\\main:150:500 until/dlg\\error:150:1500 @error31 a:150:1500 until/dlg\\abort:150:1500 @abort a:150:1500 until/dlg\\message:150:1500 @message a:150:1500 until/dlg\\question:150:1500 @question down:150:800 @question_yes a:150:1500 until/h3\\main:150:1500 until/dlg\\question:150:1500 @question2 b:150:1500 wait:150:4000" \
+			HALO_MENU_STYLE=halo3 HALO_TEST_DIALOGS=1 "HALO_TEST_COMMANDS=$dialogs"
+		log=$out/msgboxes/run.log
+		echo "--- msgboxes"
+		grep -aE "h3 dialog|ui: screen|question's answer" "$log"
+		[ "$(cat "$out/msgboxes/exit")" = 0 ] || fail msgboxes "exit $(cat "$out/msgboxes/exit")"
+		grep -aqiE "assert|exception|halt" "$log" && fail msgboxes "an assertion, exception or halt"
+		for said in 'pc.h3.dlg.error.screen "CONNECTION LOST"' 'pc.h3.dlg.error.screen "DAMAGED FILE"' \
+			'pc.h3.dlg.abort.screen "STORAGE FULL"' 'pc.h3.dlg.message.screen "CUSTOM MAP"' \
+			'pc.h3.dlg.question.screen "CUSTOM MAP"' 'pc.h3.dlg.question.screen "FRIEND INVITE"'; do
+			grep -aqE "menus: h3 dialog: $said" "$log" || fail msgboxes "no Halo 3 dialog $said"
+		done
+		grep -aq "ui: screen ui.shell.error" "$log" && fail msgboxes "an Xbox box opened with Menu style Halo 3"
+		grep -aq "menus: h3 dialog: message dismissed" "$log" || fail msgboxes "OK did not dismiss the message"
+		[ "$(grep -a "question's answer" "$log" | sed 's/.*answer: //' | tr '\n' ' ')" = "1 0 " ] ||
+			fail msgboxes "the questions were not answered YES, then NO (Circle)"
+		[ "$(grep -ac 'ui: screen pc.h3.main.screen' "$log")" -ge 7 ] ||
+			fail msgboxes "a dialog did not go back to the main menu as it closed"
+		# (Menu style Halo CE: the Xbox's boxes; the message and question the platform's - a run
+		# nobody watches answers no)
+		run msgboxes_classic "$menus_data" 110 "until/error_modal:150:1500 @classic_error6 a:150:1500 until/main_menu\\main_menu:150:500 until/error_modal:150:1500 @classic_error31 a:150:1500 until/error_abort:150:1500 @classic_abort a:150:1500 wait:150:6000" \
+			HALO_MENU_STYLE=classic HALO_TEST_DIALOGS=1 "HALO_TEST_COMMANDS=$dialogs"
+		log=$out/msgboxes_classic/run.log
+		echo "--- msgboxes (Menu style Halo CE)"
+		grep -aE "h3 dialog|ui: screen|question's answer" "$log"
+		[ "$(cat "$out/msgboxes_classic/exit")" = 0 ] || fail msgboxes "Halo CE: exit $(cat "$out/msgboxes_classic/exit")"
+		grep -aqiE "assert|exception|halt" "$log" && fail msgboxes "Halo CE: an assertion, exception or halt"
+		[ "$(grep -ac 'ui: screen ui.shell.error.error_modal_fullscreen' "$log")" = 2 ] ||
+			fail msgboxes "Halo CE: the Xbox's error box did not open for both errors"
+		grep -aq "ui: screen ui.shell.error.error_abort_to_dashboard" "$log" || fail msgboxes "Halo CE: no Xbox abort box"
+		grep -aq "h3 dialog\|pc.h3.dlg" "$log" && fail msgboxes "Halo CE: a Halo 3 dialog opened"
+		[ "$(grep -a "question's answer" "$log" | sed 's/.*answer: //' | tr '\n' ' ')" = "0 0 " ] ||
+			fail msgboxes "Halo CE: the questions were not the platform's (a hidden window's: no)"
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "SKIP: msgboxes' campaign: no HALO_TEST_PROFILE (a blam.sav with every level)"; continue
+		fi
+		# (a level from the Halo 3 lobby, its pause: REVERT TO CHECKPOINT, Circle; again, down to
+		# REVERT TO CHECKPOINT, Cross; the pause, RESTART MISSION, Circle; SAVE AND QUIT)
+		profile_from=$HALO_TEST_PROFILE run msgboxes_campaign "$menus_data" 200 "wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:2500 down:150:600 down:150:600 down:150:600 a wait:150:2500 down:150:600 down:150:600 a level:150:25000 start:150:3000 until/h3\\pause down:150:1200 a:150:1500 until/dlg\\revert @revert b:150:1500 until/h3\\pause @pause_again a:150:1500 until/dlg\\revert down:150:800 @revert_yes a:150:8000 start:150:3000 until/h3\\pause down:150:800 down:150:800 a:150:1500 until/dlg\\restart @restart b:150:1500 until/h3\\pause down:150:800 a:150:1000 until/dlg\\savequit @saving wait:150:1000 until/h3\\main:150:3000 @menu" \
+			HALO_MENU_STYLE=halo3 HALO_TEST_COMMANDS="L150:@skip;L300:@skip"
+		log=$out/msgboxes_campaign/run.log
+		echo "--- msgboxes (a level's pause)"
+		grep -aE "h3 dialog|ui: screen|pause menu" "$log" | tail -24
+		[ "$(cat "$out/msgboxes_campaign/exit")" = 0 ] || fail msgboxes "campaign: exit $(cat "$out/msgboxes_campaign/exit")"
+		grep -aqiE "assert|exception|halt" "$log" && fail msgboxes "campaign: an assertion, exception or halt"
+		[ "$(grep -ac 'menus: h3 dialog: pc.h3.dlg.revert.screen "REVERT TO CHECKPOINT"' "$log")" = 2 ] ||
+			fail msgboxes "campaign: REVERT TO CHECKPOINT's question did not open twice"
+		[ "$(grep -ac 'pause menu: restart at checkpoint' "$log")" = 1 ] ||
+			fail msgboxes "campaign: not reverted once (Circle must not, REVERT TO CHECKPOINT must)"
+		grep -aq 'menus: h3 dialog: pc.h3.dlg.restart.screen "RESTART MISSION"' "$log" ||
+			fail msgboxes "campaign: RESTART MISSION's question did not open"
+		grep -aq "pause menu: restart level" "$log" && fail msgboxes "campaign: Circle restarted the mission"
+		grep -aq 'menus: h3 dialog: pc.h3.dlg.savequit.screen "SAVING"' "$log" &&
+			grep -aq 'ui: screen pc.h3.dlg.saved.screen' "$log" || fail msgboxes "campaign: SAVE AND QUIT's Halo 3 boxes did not open"
+		grep -a "ui: screen" "$log" | tail -1 | grep -q 'pc.h3.main.screen' ||
+			fail msgboxes "campaign: SAVE AND QUIT did not go back to the Halo 3 main menu"
+		grep -aq "ui: screen ui.shell.error" "$log" && fail msgboxes "campaign: an Xbox box opened with Menu style Halo 3"
+		# (Menu style Halo CE: a new profile's a10, the Xbox's pause and its question; Circle back)
+		run msgboxes_campaign_classic "$menus_data" 110 "a:150:3000 start:150:3000 wait:150:6000 a level:150:25000 start:150:3000 until/pause_game:150:500 down:150:1500 a:150:1500 until/confirm_restartatsave:150:1500 @classic_revert b:150:1500 until/pause_game:150:1500 @classic_pause_back wait:150:3000" \
+			HALO_MENU_STYLE=classic HALO_TEST_COMMANDS="L150:@skip;L300:@skip"
+		log=$out/msgboxes_campaign_classic/run.log
+		echo "--- msgboxes (a level's pause, Menu style Halo CE)"
+		grep -aE "h3 dialog|ui: screen|pause menu" "$log" | tail -8
+		[ "$(cat "$out/msgboxes_campaign_classic/exit")" = 0 ] || fail msgboxes "campaign, Halo CE: exit $(cat "$out/msgboxes_campaign_classic/exit")"
+		grep -aq "ui: screen ui.shell.error.confirm_restartatsave_modal_fullscreen" "$log" ||
+			fail msgboxes "campaign, Halo CE: the Xbox's question did not open"
+		grep -a "ui: screen" "$log" | tail -1 | grep -q 'ui.shell.solo_game.pause_game.pause_game' ||
+			fail msgboxes "campaign, Halo CE: Circle did not go back to the Xbox's pause"
+		grep -aq "h3 dialog\|pc.h3.dlg" "$log" && fail msgboxes "campaign, Halo CE: a Halo 3 dialog opened"
+		grep -aq "pause menu: restart at checkpoint" "$log" && fail msgboxes "campaign, Halo CE: Circle reverted" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3renamed|pausesave|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3lobbyscenes|h3modelsmany|h3friends|h3friendspanel|browserprofile|h3players|browserrows|profilepaths|h3mppause|h3friendsfit|h3hostonline|h3livelobby|h3groups|browserreopen|h3livebrowse|profileio|h3carnage|h3vitapc|h3createwho|h3gametypes]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3renamed|pausesave|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3lobbyscenes|h3modelsmany|h3friends|h3friendspanel|browserprofile|h3players|browserrows|profilepaths|h3mppause|h3friendsfit|h3hostonline|h3livelobby|h3groups|browserreopen|h3livebrowse|profileio|h3carnage|h3vitapc|h3createwho|h3gametypes|msgboxes]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"
