@@ -118,6 +118,7 @@ for a gamepad); a test build's HALO_TEST_TEXT_INPUT answers in its place,
 #include "player_models.h"
 #include "game/players.h"
 #include "game/game_engine.h"
+#include "game/game_engine_playlist.h"
 #include "networking/network_server_manager.h"
 #include "halo_port_limits.h"
 /* (the desktop's button icons: display.button_icons) */
@@ -151,6 +152,7 @@ boolean ui_widget_port_cooperative_campaign_host_level(struct widget_instance *w
 void ui_widget_port_give_focus(struct widget_instance *list, struct widget_instance *child);
 boolean system_link_shortcut_open(void);
 struct widget_instance *ui_widget_port_active_screen(short local_player_index);
+void ui_widget_port_go_back(short screen_index);
 boolean ui_widget_port_join_advertised_game(struct widget_instance *list, void const *server, boolean *widget_deleted);
 boolean transport_network_available(void);
 /* menu_tags.c's: a screen of the set by its widget's name (NONE: none) */
@@ -352,6 +354,26 @@ enum
 	_function_forge_start_live,
 	_function_h3_maps_back,
 	_function_h3_mp_offline_start,
+	_function_h3_gametypes_init,
+	_function_h3_gametypes_choose,
+	_function_h3_gametypes_new,
+	_function_h3_gametypes_page_up,
+	_function_h3_gametypes_page_down,
+	_function_h3_gametype_edit,
+	_function_h3_gametype_copy,
+	_function_h3_gametype_rename,
+	_function_h3_gametype_delete_later,
+	_function_h3_gametype_delete_ask,
+	_function_h3_gametype_delete,
+	_function_h3_gametype_base,
+	_function_h3_gametype_next,
+	_function_h3_gametype_previous,
+	_function_h3_gametype_category,
+	_function_h3_gametype_save,
+	_function_h3_gametype_save_quit,
+	_function_h3_gametype_leave_ask,
+	_function_h3_gametype_leave,
+	_function_h3_gametype_discard,
 };
 
 /* in port_game_data_input_names' order */
@@ -406,6 +428,12 @@ enum
 	_input_h3_mp_settings,
 	_input_h3_invite,
 	_input_h3_party_plates,
+	_input_h3_gametype_list,
+	_input_h3_gametype_actions,
+	_input_h3_gametype_question,
+	_input_h3_gametype_bases,
+	_input_h3_gametype_editor,
+	_input_h3_gametype_options,
 };
 
 /* what a line of typing is for */
@@ -427,6 +455,10 @@ enum
 	/* (the PC build: the classic menus' keyboard, virtual_keyboard.c, a
 	profile's or a game variant's name) */
 	_typing_classic,
+	/* (GAME TYPES: the editor's NAME, a copy's name, a new name) */
+	_typing_gametype_name,
+	_typing_gametype_copy,
+	_typing_gametype_rename,
 };
 
 /* the password and code screens' help lines (their strings' order) */
@@ -2785,16 +2817,21 @@ static void h3_utf8(char *out, int size, wchar_t const *text)
 	out[length] = 0;
 }
 
+static boolean h3_gametype_file_good(long profile_index);
+
 /* the game types the Xbox's game type list offers (the first local
 player's, the valid ones), and the one it opens on: the one last used, else
-its first */
+its first. A player's game type whose file fails its checksum (damaged or
+edited since: the valid bit is the memory unit's map file's, from an earlier
+run) is left out - playlist_profile_get would play Slayer's rules under its
+name -; GAME TYPES says it is damaged */
 static void h3_mp_gametypes_read(void)
 {
 	long indices[H3_MAXIMUM_GAMETYPES];
 	word count = H3_MAXIMUM_GAMETYPES;
 	char directory[MAXIMUM_FILENAME_LENGTH + 1];
 	long remembered = NONE;
-	short index;
+	short index, damaged = 0, unreadable = 0;
 
 	playlist_profiles_enumerate_available_to_local_player_index(0, &count, indices);
 	h3_mp.gametype_count = 0;
@@ -2804,14 +2841,34 @@ static void h3_mp_gametypes_read(void)
 		wchar_t name[128];
 		short slot = h3_mp.gametype_count;
 
-		if (indices[index] == NONE || !TEST_FLAG(indices[index], _saved_game_file_index_valid_bit))
+		if (indices[index] == NONE)
 			continue;
+		if (!TEST_FLAG(indices[index], _saved_game_file_index_valid_bit))
+		{
+			unreadable += TEST_FLAG(indices[index], _saved_game_file_index_read_only_bit) ? 0 : 1;
+			continue;
+		}
+		if (!TEST_FLAG(indices[index], _saved_game_file_index_read_only_bit))
+		{
+			struct game_variant waited;
+
+			/* (playlist_profile_get waits for a write still going on) */
+			playlist_profile_get(indices[index], &waited);
+			if (!h3_gametype_file_good(indices[index]))
+			{
+				damaged++;
+				continue;
+			}
+		}
 		h3_mp.gametypes[slot] = indices[index];
 		h3_mp.gametype_names[slot][0] = 0;
 		if (playlist_profile_get_display_name(indices[index], name))
 			h3_utf8(h3_mp.gametype_names[slot], sizeof(h3_mp.gametype_names[slot]), name);
 		h3_mp.gametype_count++;
 	}
+	if (damaged || unreadable)
+		platform_log("menus: h3 mp: %d game types, %d of the player's left out (%d failing the checksum, %d unreadable)",
+			h3_mp.gametype_count, damaged + unreadable, damaged, unreadable);
 	if (saved_game_file_retrieve_last_used_multiplayer_variant_directory(directory))
 		remembered = saved_game_file_find_profile_index_for_directory_path(directory, 1);
 	h3_mp.gametype = h3_mp.gametype_count ? 0 : NONE;
@@ -4578,6 +4635,1856 @@ static void h3_custom_save(void)
 		saved.controller_settings.button_preset, saved.controller_settings.look_sensitivity,
 		saved.controller_settings.invert_look, saved.controller_settings.flight_stick_aircraft_controls,
 		saved.controller_settings.autocenter, saved.controller_settings.vibration_disabled ? "off" : "on");
+}
+
+static boolean typing_available(void);
+
+/* ---- the Halo 3 GAME TYPES (halo3/gametypes.xml): it stands for the
+Xbox's game type list (playlist_select\gametype_select_screen, the lobby's
+EDIT GAME TYPES) and its edit screens. It reads and writes the game types as
+those screens do, with the same functions on the same files
+(z:\saved\playlists, blam.lst and SaveMeta.xbx):
+
+- the list is the Xbox's (multiplayer_profiles_list_initialize:
+  playlist_profiles_enumerate_available_to_local_player_index, the player's
+  then the game's own, z:\saved\playlists\default_playlist), each named as
+  the Xbox's list names it (playlist_profile_get_display_name);
+- a game type is read as "playlist profile begin editing" reads it
+  (playlist_profile_get), and saved as "playlist profile save changes"
+  saves it (player_ui_save_profile: playlist_profile_save, which cleans it
+  up with game_engine_variant_cleanup, writes the file, its checksum and its
+  SaveMeta.xbx name; one of the game's own saved as a new one with
+  playlist_profile_new, as the Xbox's save-as of a renamed default does),
+  then remembered as the last one used, as the Xbox's save remembers it: the
+  lobby's GAME is the game type saved;
+- its settings are the ones the Xbox's edit screens change, each with the
+  values their spinners offer (playlist_profile_change_player_options,
+  _item_options, _indicator_options, _slayer_rules, _ctf_rules,
+  _oddball_rules, _koth_rules, _racing_rules, playlist_profile_set_game
+  _engine): a game type saved here reads back the same in the Halo CE
+  menus' screens. A game type holds no time limit, friendly fire or
+  betrayal penalty (the PC version's options, game_variant_options: a PC
+  host's), and the help says so;
+- DELETE is "final del playlist profile" (playlist_profile_delete: the
+  player's own, never the game's); COPY and NEW make one as "create&edit
+  playlist profile" does (playlist_profile_new), with the rules of the one
+  copied or the base chosen. */
+
+#define H3_GAMETYPES_ROWS 10
+#define H3_GAMETYPE_BASE_ROWS 12
+#define H3_GAMETYPES_MAXIMUM 100
+#define H3_GAMETYPE_OPTION_ROWS 8
+/* (a game type's name: its variant's human_readable_game_description,
+eleven characters and the end: playlist_profile.c's
+MAXIMUM_GAME_VARIANT_NAME_LENGTH) */
+#define H3_GAMETYPE_NAME_LENGTH 11
+/* (the variant's flags: one of the game's own, playlist_profile.c's
+_game_variant_is_system_default_bit) */
+#define H3_GAMETYPE_SYSTEM_DEFAULT_FLAG 0x0001
+
+/* the editor's groups of settings, in its rows' order (after NAME and GAME) */
+enum
+{
+	_h3_gametype_general,
+	_h3_gametype_respawn,
+	_h3_gametype_player,
+	_h3_gametype_items,
+	_h3_gametype_team,
+	_h3_gametype_rules,
+	NUMBER_OF_H3_GAMETYPE_GROUPS
+};
+
+/* the settings, each a field of the variant (game_engine.h) */
+enum
+{
+	_h3_gametype_score,
+	_h3_gametype_lives,
+	_h3_gametype_respawn_time,
+	_h3_gametype_respawn_growth,
+	_h3_gametype_suicide_penalty,
+	_h3_gametype_shields,
+	_h3_gametype_health,
+	_h3_gametype_invisible,
+	_h3_gametype_odd_man_out,
+	_h3_gametype_equipment,
+	_h3_gametype_indicator,
+	_h3_gametype_radar,
+	_h3_gametype_friends,
+	_h3_gametype_weapons,
+	_h3_gametype_grenades,
+	_h3_gametype_vehicles,
+	_h3_gametype_teams,
+	_h3_gametype_team_scoring,
+	_h3_gametype_death_bonus,
+	_h3_gametype_kill_penalty,
+	_h3_gametype_kill_in_order,
+	_h3_gametype_assault,
+	_h3_gametype_single_flag,
+	_h3_gametype_flag_must_reset,
+	_h3_gametype_flag_at_home,
+	_h3_gametype_ball_type,
+	_h3_gametype_ball_count,
+	_h3_gametype_random_start,
+	_h3_gametype_ball_speed,
+	_h3_gametype_trait_with_ball,
+	_h3_gametype_trait_without_ball,
+	_h3_gametype_moving_hill,
+	_h3_gametype_race_type,
+	NUMBER_OF_H3_GAMETYPE_SETTINGS
+};
+
+/* what a pending open is */
+enum
+{
+	_h3_gametype_open_none,
+	_h3_gametype_open_editor,
+	_h3_gametype_open_delete,
+};
+
+static char const *const h3_gametype_editor_rows[] =
+{
+	"op_name", "op_game", "op_general", "op_respawn", "op_player", "op_items", "op_team", "op_rules", "op_save",
+};
+
+/* the games, in the GAME row's order (the Xbox's game list's, Slayer first) */
+static long const h3_gametype_engines[] =
+{
+	game_engine_slayer, game_engine_ctf, game_engine_oddball, game_engine_king, game_engine_race,
+};
+
+static struct
+{
+	/* the game types listed: the player's (saved_count of them), then the
+	game's own; each one's file and name, and whether its file is good */
+	long indices[H3_GAMETYPES_MAXIMUM];
+	char names[H3_GAMETYPES_MAXIMUM][48];
+	boolean damaged[H3_GAMETYPES_MAXIMUM];
+	short count;
+	short saved_count;
+	/* the list's rows (they scroll: browser_list.h) on its items,
+	CREATE NEW GAME TYPE then the game types; the item chosen; a trigger's
+	page */
+	struct browser_view view;
+	short cursor;
+	short page;
+	/* the game type to choose when the list is next read (NONE: the
+	lobby's) */
+	long focus_index;
+	char status[192];
+	char said[256];
+	/* a card's game type, as last read (NONE: none) */
+	long card_index;
+	struct game_variant card;
+	boolean card_good;
+	/* the game type an action is for */
+	long chosen_index;
+	char chosen_name[48];
+	boolean chosen_builtin;
+	/* the bases' rows (the game's own) */
+	struct browser_view base_view;
+	short base_cursor;
+	short base_page;
+	/* the editor: the game type edited (edit_index NONE: a new one, not
+	saved yet), as read and as changed; the group of settings open */
+	boolean editing;
+	long edit_index;
+	struct game_variant original;
+	struct game_variant current;
+	short group;
+	char edit_status[192];
+	char edit_said[512];
+	/* what the main loop opens over the list (the editor, the delete
+	question), and the editor gone back from (a question's SAVE CHANGES,
+	DISCARD CHANGES) */
+	short open_pending;
+	boolean leave_pending;
+	/* a game type saved, copied, renamed or deleted since the lobby was
+	last opened */
+	boolean changed;
+} h3_gametypes = { { 0 }, { { 0 } }, { 0 }, 0, 0, { 0 }, 0, 0, NONE, "", "", NONE };
+
+/* a game type's name (the variant's) as UTF-8 */
+static void h3_gametype_name(char *out, int size, struct game_variant const *variant)
+{
+	wchar_t name[H3_GAMETYPE_NAME_LENGTH + 1];
+
+	memcpy(name, variant->human_readable_game_description, sizeof(wchar_t) * H3_GAMETYPE_NAME_LENGTH);
+	name[H3_GAMETYPE_NAME_LENGTH] = 0;
+	h3_utf8(out, size, name);
+}
+
+static char const *h3_gametype_engine_name(long engine)
+{
+	switch (engine)
+	{
+	case game_engine_ctf:
+		return T("CTF");
+	case game_engine_oddball:
+		return T("ODDBALL");
+	case game_engine_king:
+		return T("KING OF THE HILL");
+	case game_engine_race:
+		return T("RACE");
+	default:
+		return T("SLAYER");
+	}
+}
+
+/* (the logs') the game's name, in English */
+static char const *h3_gametype_engine_key(long engine)
+{
+	switch (engine)
+	{
+	case game_engine_ctf:
+		return "ctf";
+	case game_engine_oddball:
+		return "oddball";
+	case game_engine_king:
+		return "king";
+	case game_engine_race:
+		return "race";
+	case game_engine_slayer:
+		return "slayer";
+	default:
+		return "none";
+	}
+}
+
+/* the settings of a group, for a game (count) */
+static int h3_gametype_group_settings(short group, long engine, short *settings)
+{
+	int count = 0;
+
+	switch (group)
+	{
+	case _h3_gametype_general:
+		settings[count++] = _h3_gametype_score;
+		settings[count++] = _h3_gametype_lives;
+		break;
+	case _h3_gametype_respawn:
+		settings[count++] = _h3_gametype_respawn_time;
+		settings[count++] = _h3_gametype_respawn_growth;
+		settings[count++] = _h3_gametype_suicide_penalty;
+		break;
+	case _h3_gametype_player:
+		settings[count++] = _h3_gametype_shields;
+		settings[count++] = _h3_gametype_health;
+		settings[count++] = _h3_gametype_invisible;
+		settings[count++] = _h3_gametype_odd_man_out;
+		settings[count++] = _h3_gametype_equipment;
+		settings[count++] = _h3_gametype_indicator;
+		settings[count++] = _h3_gametype_radar;
+		settings[count++] = _h3_gametype_friends;
+		break;
+	case _h3_gametype_items:
+		settings[count++] = _h3_gametype_weapons;
+		settings[count++] = _h3_gametype_grenades;
+		settings[count++] = _h3_gametype_vehicles;
+		break;
+	case _h3_gametype_team:
+		settings[count++] = _h3_gametype_teams;
+		if (engine == game_engine_race)
+			settings[count++] = _h3_gametype_team_scoring;
+		break;
+	case _h3_gametype_rules:
+		switch (engine)
+		{
+		case game_engine_ctf:
+			settings[count++] = _h3_gametype_assault;
+			settings[count++] = _h3_gametype_single_flag;
+			settings[count++] = _h3_gametype_flag_must_reset;
+			settings[count++] = _h3_gametype_flag_at_home;
+			break;
+		case game_engine_oddball:
+			settings[count++] = _h3_gametype_ball_type;
+			settings[count++] = _h3_gametype_ball_count;
+			settings[count++] = _h3_gametype_random_start;
+			settings[count++] = _h3_gametype_ball_speed;
+			settings[count++] = _h3_gametype_trait_with_ball;
+			settings[count++] = _h3_gametype_trait_without_ball;
+			break;
+		case game_engine_king:
+			settings[count++] = _h3_gametype_moving_hill;
+			break;
+		case game_engine_race:
+			settings[count++] = _h3_gametype_race_type;
+			break;
+		default:
+			settings[count++] = _h3_gametype_death_bonus;
+			settings[count++] = _h3_gametype_kill_penalty;
+			settings[count++] = _h3_gametype_kill_in_order;
+			break;
+		}
+		break;
+	}
+	return count;
+}
+
+static char const *h3_gametype_group_name(short group, long engine)
+{
+	static char const *const names[NUMBER_OF_H3_GAMETYPE_GROUPS] =
+	{
+		N_("GENERAL SETTINGS"), N_("RESPAWN SETTINGS"), N_("PLAYER SETTINGS"), N_("WEAPONS AND VEHICLES"),
+		N_("TEAM SETTINGS"), "",
+	};
+
+	if (group != _h3_gametype_rules)
+		return T(names[PIN(group, 0, NUMBER_OF_H3_GAMETYPE_GROUPS - 1)]);
+	switch (engine)
+	{
+	case game_engine_ctf:
+		return T("CTF SETTINGS");
+	case game_engine_oddball:
+		return T("ODDBALL SETTINGS");
+	case game_engine_king:
+		return T("KING OF THE HILL SETTINGS");
+	case game_engine_race:
+		return T("RACE SETTINGS");
+	default:
+		return T("SLAYER SETTINGS");
+	}
+}
+
+/* a group's note: what a game type holds none of, and where it is set */
+static char const *h3_gametype_group_note(short group)
+{
+	switch (group)
+	{
+	case _h3_gametype_general:
+		return T("A game type holds no time limit: a game lasts until its score\n(a PC host's game, or a dedicated server's, may set one).");
+	case _h3_gametype_respawn:
+		return T("A game type holds no betrayal penalty: a team killer respawns\nas anyone does (a PC host's game may add one).");
+	case _h3_gametype_team:
+		return T("A game type holds no friendly fire setting: team games hurt\nteammates as the Xbox game does (a PC host's game may change it).");
+	default:
+		return "";
+	}
+}
+
+static char const *h3_gametype_setting_label(short setting, long engine)
+{
+	static char const *const labels[NUMBER_OF_H3_GAMETYPE_SETTINGS] =
+	{
+		"", N_("NUMBER OF LIVES"), N_("RESPAWN TIME"), N_("RESPAWN TIME GROWTH"), N_("SUICIDE PENALTY"),
+		N_("SHIELDS"), N_("MAXIMUM HEALTH"), N_("INVISIBLE PLAYERS"), N_("ODD MAN OUT"), N_("STARTING EQUIPMENT"),
+		N_("OBJECTIVE INDICATOR"), N_("PLAYERS ON RADAR"), N_("FRIEND INDICATORS"), N_("WEAPON SET"),
+		N_("INFINITE GRENADES"), N_("VEHICLE SET"), N_("TEAMS"), N_("TEAM SCORING"), N_("DEATH BONUS"),
+		N_("KILL PENALTY"), N_("KILL IN ORDER"), N_("ASSAULT"), N_("SINGLE FLAG"), N_("FLAG MUST RESET"),
+		N_("FLAG AT HOME TO SCORE"), N_("BALL TYPE"), N_("NUMBER OF BALLS"), N_("RANDOM START"),
+		N_("SPEED WITH BALL"), N_("TRAIT WITH BALL"), N_("TRAIT WITHOUT BALL"), N_("MOVING HILL"), N_("RACE TYPE"),
+	};
+
+	if (setting == _h3_gametype_score)
+	{
+		switch (engine)
+		{
+		case game_engine_slayer:
+			return T("KILLS TO WIN");
+		case game_engine_ctf:
+			return T("CAPTURES TO WIN");
+		case game_engine_race:
+			return T("LAPS TO WIN");
+		default:
+			return T("SCORE TO WIN");
+		}
+	}
+	return T(labels[PIN(setting, 0, NUMBER_OF_H3_GAMETYPE_SETTINGS - 1)]);
+}
+
+static char const *h3_gametype_setting_help(short setting, struct game_variant const *variant)
+{
+	static char const *const helps[NUMBER_OF_H3_GAMETYPE_SETTINGS] =
+	{
+		"",
+		N_("How many times a player can respawn. UNLIMITED: as\noften as they die."),
+		N_("How long a dead player waits to respawn."),
+		N_("Added to the respawn time with each death."),
+		N_("Added to the respawn time of a player who kills\nthemselves."),
+		N_("Whether players have energy shields."),
+		N_("How much damage a player takes before dying: 100%\nis the usual."),
+		N_("Every player is always camouflaged."),
+		N_("The last player to die stays out of the game until\nsomeone else dies."),
+		N_("CUSTOM: the weapons and grenades the map gives for\nthis game. GENERIC: the game's standard ones."),
+		N_("How the objective is shown: on the motion tracker,\nas a waypoint on screen, or not at all."),
+		N_("Whether the motion tracker shows other players."),
+		N_("Teammates' names over their heads (waypoints)."),
+		N_("The weapons placed on the map and carried at the\nstart. NO GRENADES: the usual weapons, no grenades."),
+		N_("Grenades never run out."),
+		N_("The vehicles on the map. MAP DEFAULT: the ones the\nmap places for this game."),
+		N_("Players play in teams (red and blue)."),
+		N_("A team's laps: its slowest player's (MINIMUM), its\nfastest's (MAXIMUM), or all of its players' (SUM)."),
+		N_("Each death makes a player a little faster."),
+		N_("Each kill makes a player a little slower."),
+		N_("Only your target counts: kill the player named\non screen to score."),
+		N_("Each team's flag is at the other team's base: they\nattack and defend the other way around."),
+		N_("One flag: one team defends it, the other attacks, and\nthey switch sides after this long. OFF: two flags."),
+		N_("A dropped flag can't be returned by touching it: it\nresets by itself after a while."),
+		N_("A team scores only while its own flag is at home."),
+		N_("NORMAL: hold the ball to score. REVERSE TAG: the\nball carrier is hunted. JUGGERNAUT: kill to score."),
+		N_("How many balls are on the map."),
+		N_("The ball starts at a random place on the map."),
+		N_("How fast the ball carrier runs."),
+		N_("What holding the ball does to its carrier."),
+		N_("What players without the ball get."),
+		N_("The hill moves to another place every minute."),
+		N_("NORMAL: the checkpoints in order. ANY ORDER: all of\nthem, any order. RALLY: one at a time, where shown."),
+	};
+
+	if (setting == _h3_gametype_score)
+	{
+		switch (variant->game_engine_index)
+		{
+		case game_engine_slayer:
+			return T("The kills a player (or team) needs to win.");
+		case game_engine_ctf:
+			return T("The flag captures a team needs to win.");
+		case game_engine_king:
+			return T("The minutes in the hill a player (or team) needs\nto win.");
+		case game_engine_race:
+			return T("The laps a player (or team) needs to win.");
+		default:
+			return variant->game_engine_variant.oddball.oddball_ball_type == 2 ?
+				T("The points a player (or team) needs to win: a kill\nas juggernaut, or of the juggernaut.") :
+				T("The minutes holding the ball a player (or team)\nneeds to win.");
+		}
+	}
+	if (setting == _h3_gametype_teams && variant->game_engine_index == game_engine_ctf)
+		return T("Capture the Flag is always played in teams.");
+	return T(helps[PIN(setting, 0, NUMBER_OF_H3_GAMETYPE_SETTINGS - 1)]);
+}
+
+/* the values a setting takes (the Xbox's spinners'), count */
+static int h3_gametype_values(short setting, struct game_variant const *variant, long *values)
+{
+	static long const respawns[] = { 0, 150, 300, 450 };
+	static long const lives[] = { 0, 1, 3, 5 };
+	static long const health[] = { 50, 100, 150, 200, 300, 400 };
+	static long const slayer_scores[] = { 5, 10, 15, 25, 50 };
+	static long const ctf_scores[] = { 1, 3, 5, 10, 15 };
+	static long const king_scores[] = { 1, 2, 5, 10, 15 };
+	static long const race_scores[] = { 1, 3, 5, 10, 15, 25 };
+	static long const single_flag[] = { 0, 1800, 3600, 5400, 9000, 18000 };
+	long const *list = NULL;
+	int count = 0, index;
+
+	switch (setting)
+	{
+	case _h3_gametype_score:
+		switch (variant->game_engine_index)
+		{
+		case game_engine_slayer:
+			list = slayer_scores, count = NUMBEROF(slayer_scores);
+			break;
+		case game_engine_ctf:
+			list = ctf_scores, count = NUMBEROF(ctf_scores);
+			break;
+		case game_engine_race:
+			list = race_scores, count = NUMBEROF(race_scores);
+			break;
+		default:
+			/* (king and oddball: the same) */
+			list = king_scores, count = NUMBEROF(king_scores);
+			break;
+		}
+		break;
+	case _h3_gametype_lives:
+		list = lives, count = NUMBEROF(lives);
+		break;
+	case _h3_gametype_respawn_time:
+	case _h3_gametype_respawn_growth:
+	case _h3_gametype_suicide_penalty:
+		list = respawns, count = NUMBEROF(respawns);
+		break;
+	case _h3_gametype_health:
+		list = health, count = NUMBEROF(health);
+		break;
+	case _h3_gametype_single_flag:
+		list = single_flag, count = NUMBEROF(single_flag);
+		break;
+	case _h3_gametype_indicator:
+	case _h3_gametype_team_scoring:
+	case _h3_gametype_ball_type:
+	case _h3_gametype_ball_speed:
+	case _h3_gametype_race_type:
+		count = 3;
+		break;
+	case _h3_gametype_trait_with_ball:
+	case _h3_gametype_trait_without_ball:
+		count = 4;
+		break;
+	case _h3_gametype_vehicles:
+		count = 5;
+		break;
+	case _h3_gametype_weapons:
+		count = 11;
+		break;
+	case _h3_gametype_ball_count:
+		for (index = 0; index < MAXIMUM_ODDBALLS; index++)
+			values[index] = index + 1;
+		return MAXIMUM_ODDBALLS;
+	case _h3_gametype_teams:
+		/* (CTF: teams always, game_engine_variant_cleanup) */
+		if (variant->game_engine_index == game_engine_ctf)
+		{
+			values[0] = TRUE;
+			return 1;
+		}
+		count = 2;
+		break;
+	default:
+		/* (OFF, ON) */
+		count = 2;
+		break;
+	}
+	for (index = 0; index < count; index++)
+		values[index] = list ? list[index] : index;
+	return count;
+}
+
+static long h3_gametype_flag(struct game_variant const *variant, unsigned long flag)
+{
+	return (variant->universal_variant.flags & flag) != 0;
+}
+
+static void h3_gametype_flag_set(struct game_variant *variant, unsigned long flag, long on)
+{
+	if (on)
+		variant->universal_variant.flags |= flag;
+	else
+		variant->universal_variant.flags &= ~flag;
+}
+
+/* a setting's value, as h3_gametype_values has them */
+static long h3_gametype_get(short setting, struct game_variant const *variant)
+{
+	struct universal_variant const *universal = &variant->universal_variant;
+	union game_engine_variant const *engine = &variant->game_engine_variant;
+
+	switch (setting)
+	{
+	case _h3_gametype_score: return universal->score_to_win;
+	case _h3_gametype_lives: return universal->lives;
+	case _h3_gametype_respawn_time: return universal->respawn_time;
+	case _h3_gametype_respawn_growth: return universal->respawn_time_growth;
+	case _h3_gametype_suicide_penalty: return universal->suicide_penalty;
+	case _h3_gametype_shields: return !h3_gametype_flag(variant, FLAG(_game_variant_no_shields_bit));
+	case _h3_gametype_health: return (long)(universal->health * 100.0f + 0.5f);
+	case _h3_gametype_invisible: return h3_gametype_flag(variant, FLAG(_game_variant_always_invisible_bit));
+	case _h3_gametype_odd_man_out: return universal->odd_man_out != FALSE;
+	/* (the generic starting equipment's bit: game_engine.c's
+	_game_variant_generic_starting_equipment_bit, 5) */
+	case _h3_gametype_equipment: return h3_gametype_flag(variant, FLAG(5));
+	case _h3_gametype_indicator: return universal->goal_radar;
+	case _h3_gametype_radar: return h3_gametype_flag(variant, FLAG(_game_variant_draw_object_in_motion_sensor_bit));
+	case _h3_gametype_friends: return h3_gametype_flag(variant, FLAG(_game_variant_allow_friendly_navpoints_bit));
+	case _h3_gametype_weapons: return universal->weapon_set;
+	case _h3_gametype_grenades: return h3_gametype_flag(variant, FLAG(_game_variant_infinite_grenades_bit));
+	case _h3_gametype_vehicles: return universal->vehicle_set;
+	case _h3_gametype_teams: return universal->teams != FALSE;
+	case _h3_gametype_team_scoring: return engine->race.team_scoring;
+	case _h3_gametype_death_bonus: return !engine->slayer.no_death_bonus;
+	case _h3_gametype_kill_penalty: return !engine->slayer.no_kill_penalty;
+	case _h3_gametype_kill_in_order: return engine->slayer.kill_in_order != FALSE;
+	case _h3_gametype_assault: return engine->ctf.assault != FALSE;
+	case _h3_gametype_single_flag: return engine->ctf.single_flag_time;
+	case _h3_gametype_flag_must_reset: return engine->ctf.flag_must_reset != FALSE;
+	case _h3_gametype_flag_at_home: return engine->ctf.flag_at_home_to_score != FALSE;
+	case _h3_gametype_ball_type: return engine->oddball.oddball_ball_type;
+	case _h3_gametype_ball_count: return engine->oddball.ball_spawn_count;
+	case _h3_gametype_random_start: return engine->oddball.random_start != FALSE;
+	case _h3_gametype_ball_speed: return engine->oddball.speed_with_ball;
+	case _h3_gametype_trait_with_ball: return engine->oddball.trait_with_ball;
+	case _h3_gametype_trait_without_ball: return engine->oddball.trait_without_ball;
+	case _h3_gametype_moving_hill: return engine->king.moving_hill != FALSE;
+	case _h3_gametype_race_type: return engine->race.race_type;
+	}
+	return 0;
+}
+
+/* a setting changed, as the Xbox's edit screens change it */
+static void h3_gametype_set(short setting, struct game_variant *variant, long value)
+{
+	struct universal_variant *universal = &variant->universal_variant;
+	union game_engine_variant *engine = &variant->game_engine_variant;
+
+	switch (setting)
+	{
+	case _h3_gametype_score: universal->score_to_win = value; break;
+	case _h3_gametype_lives: universal->lives = value; break;
+	case _h3_gametype_respawn_time: universal->respawn_time = value; break;
+	case _h3_gametype_respawn_growth: universal->respawn_time_growth = value; break;
+	case _h3_gametype_suicide_penalty: universal->suicide_penalty = value; break;
+	case _h3_gametype_shields: h3_gametype_flag_set(variant, FLAG(_game_variant_no_shields_bit), !value); break;
+	/* (the Xbox's maximum health spinner's floats) */
+	case _h3_gametype_health: universal->health = (real)value / 100.0f; break;
+	case _h3_gametype_invisible: h3_gametype_flag_set(variant, FLAG(_game_variant_always_invisible_bit), value); break;
+	case _h3_gametype_odd_man_out: universal->odd_man_out = (boolean)(value != 0); break;
+	case _h3_gametype_equipment: h3_gametype_flag_set(variant, FLAG(5), value); break;
+	case _h3_gametype_indicator: universal->goal_radar = value; break;
+	case _h3_gametype_radar:
+		h3_gametype_flag_set(variant, FLAG(_game_variant_draw_object_in_motion_sensor_bit), value);
+		break;
+	case _h3_gametype_friends:
+		h3_gametype_flag_set(variant, FLAG(_game_variant_allow_friendly_navpoints_bit), value);
+		break;
+	case _h3_gametype_weapons: universal->weapon_set = value; break;
+	case _h3_gametype_grenades: h3_gametype_flag_set(variant, FLAG(_game_variant_infinite_grenades_bit), value); break;
+	case _h3_gametype_vehicles: universal->vehicle_set = value; break;
+	case _h3_gametype_teams:
+		universal->teams = (boolean)(value != 0 || variant->game_engine_index == game_engine_ctf);
+		break;
+	case _h3_gametype_team_scoring: engine->race.team_scoring = value; break;
+	case _h3_gametype_death_bonus: engine->slayer.no_death_bonus = (boolean)!value; break;
+	case _h3_gametype_kill_penalty: engine->slayer.no_kill_penalty = (boolean)!value; break;
+	case _h3_gametype_kill_in_order: engine->slayer.kill_in_order = (boolean)(value != 0); break;
+	case _h3_gametype_assault: engine->ctf.assault = (boolean)(value != 0); break;
+	case _h3_gametype_single_flag: engine->ctf.single_flag_time = value; break;
+	case _h3_gametype_flag_must_reset: engine->ctf.flag_must_reset = (boolean)(value != 0); break;
+	case _h3_gametype_flag_at_home: engine->ctf.flag_at_home_to_score = (boolean)(value != 0); break;
+	case _h3_gametype_ball_type: engine->oddball.oddball_ball_type = value; break;
+	case _h3_gametype_ball_count: engine->oddball.ball_spawn_count = value; break;
+	case _h3_gametype_random_start: engine->oddball.random_start = (boolean)(value != 0); break;
+	case _h3_gametype_ball_speed: engine->oddball.speed_with_ball = value; break;
+	case _h3_gametype_trait_with_ball: engine->oddball.trait_with_ball = value; break;
+	case _h3_gametype_trait_without_ball: engine->oddball.trait_without_ball = value; break;
+	case _h3_gametype_moving_hill: engine->king.moving_hill = (boolean)(value != 0); break;
+	case _h3_gametype_race_type: engine->race.race_type = value; break;
+	}
+}
+
+/* a setting's value shown */
+static void h3_gametype_value_text(short setting, struct game_variant const *variant, char *text, int size)
+{
+	static char const *const weapons[] =
+	{
+		N_("NORMAL"), N_("PISTOLS"), N_("RIFLES"), N_("PLASMA"), N_("SNIPERS"), N_("NO SNIPING"),
+		N_("ROCKET LAUNCHERS"), N_("SHOTGUNS"), N_("SHORT RANGE"), N_("HUMAN"), N_("NO GRENADES"),
+	};
+	static char const *const vehicles[] =
+	{
+		N_("MAP DEFAULT"), N_("NONE"), N_("WARTHOGS"), N_("GHOSTS"), N_("SCORPIONS"),
+	};
+	static char const *const indicators[] = { N_("MOTION TRACKER"), N_("NAV POINTS"), N_("NONE") };
+	static char const *const team_scorings[] = { N_("MINIMUM"), N_("MAXIMUM"), N_("SUM") };
+	static char const *const ball_types[] = { N_("NORMAL"), N_("REVERSE TAG"), N_("JUGGERNAUT") };
+	static char const *const speeds[] = { N_("SLOW"), N_("NORMAL"), N_("FAST") };
+	static char const *const traits[] = { N_("NONE"), N_("INVISIBLE"), N_("EXTRA DAMAGE"), N_("DAMAGE RESISTANT") };
+	static char const *const race_types[] = { N_("NORMAL"), N_("ANY ORDER"), N_("RALLY") };
+	long value = h3_gametype_get(setting, variant);
+
+#define H3_GAMETYPE_NAMED(names) \
+	snprintf(text, size, "%s", value >= 0 && value < (long)NUMBEROF(names) ? T(names[value]) : "?")
+	switch (setting)
+	{
+	case _h3_gametype_score:
+		/* (king's minutes in the hill; oddball's minutes with the ball, but
+		juggernaut's points) */
+		if (variant->game_engine_index == game_engine_king ||
+			(variant->game_engine_index == game_engine_oddball &&
+				variant->game_engine_variant.oddball.oddball_ball_type != 2))
+		{
+			snprintf(text, size, T("%d MIN"), (int)value);
+		}
+		else
+			snprintf(text, size, "%d", (int)value);
+		break;
+	case _h3_gametype_lives:
+		if (value <= 0)
+			snprintf(text, size, "%s", T("UNLIMITED"));
+		else
+			snprintf(text, size, "%d", (int)value);
+		break;
+	case _h3_gametype_respawn_time:
+	case _h3_gametype_respawn_growth:
+	case _h3_gametype_suicide_penalty:
+		if (value <= 0)
+			snprintf(text, size, "%s", setting == _h3_gametype_respawn_time ? T("INSTANT") : T("NONE"));
+		else
+			snprintf(text, size, T("%d SECONDS"), (int)((value + TICKS_PER_SECOND / 2) / TICKS_PER_SECOND));
+		break;
+	case _h3_gametype_health:
+		snprintf(text, size, "%d%%", (int)value);
+		break;
+	case _h3_gametype_single_flag:
+		if (value <= 0)
+			snprintf(text, size, "%s", T("OFF"));
+		else
+			snprintf(text, size, T("%d MIN"), (int)((value + 30 * TICKS_PER_SECOND) / (60 * TICKS_PER_SECOND)));
+		break;
+	case _h3_gametype_equipment:
+		snprintf(text, size, "%s", value ? T("GENERIC") : T("CUSTOM"));
+		break;
+	case _h3_gametype_indicator: H3_GAMETYPE_NAMED(indicators); break;
+	case _h3_gametype_weapons: H3_GAMETYPE_NAMED(weapons); break;
+	case _h3_gametype_vehicles: H3_GAMETYPE_NAMED(vehicles); break;
+	case _h3_gametype_team_scoring: H3_GAMETYPE_NAMED(team_scorings); break;
+	case _h3_gametype_ball_type: H3_GAMETYPE_NAMED(ball_types); break;
+	case _h3_gametype_ball_speed: H3_GAMETYPE_NAMED(speeds); break;
+	case _h3_gametype_trait_with_ball:
+	case _h3_gametype_trait_without_ball:
+		H3_GAMETYPE_NAMED(traits);
+		break;
+	case _h3_gametype_race_type: H3_GAMETYPE_NAMED(race_types); break;
+	case _h3_gametype_ball_count:
+		snprintf(text, size, "%d", (int)value);
+		break;
+	default:
+		snprintf(text, size, "%s", value ? T("ON") : T("OFF"));
+		break;
+	}
+#undef H3_GAMETYPE_NAMED
+}
+
+/* a setting stepped to its next value (step 1) or its last (-1), wrapping;
+one not among them (a file made elsewhere) to the next one past it */
+static void h3_gametype_step(short setting, struct game_variant *variant, int step)
+{
+	long values[MAXIMUM_ODDBALLS];
+	int count = h3_gametype_values(setting, variant, values);
+	long value = h3_gametype_get(setting, variant);
+	int index, chosen = NONE;
+
+	if (count <= 0)
+		return;
+	for (index = 0; index < count; index++)
+	{
+		if (values[index] == value)
+			chosen = (index + step + count) % count;
+	}
+	if (chosen == NONE)
+	{
+		chosen = step > 0 ? 0 : count - 1;
+		for (index = 0; index < count; index++)
+		{
+			if (step > 0 && values[index] > value)
+			{
+				chosen = index;
+				break;
+			}
+			if (step < 0 && values[index] < value)
+				chosen = index;
+		}
+	}
+	h3_gametype_set(setting, variant, values[chosen]);
+}
+
+/* (the logs, in English) a variant's settings, every one its game has */
+static void h3_gametype_rules_log(struct game_variant const *variant, char *text, int size)
+{
+	static char const *const keys[NUMBER_OF_H3_GAMETYPE_SETTINGS] =
+	{
+		"score", "lives", "respawn", "growth", "suicide", "shields", "health", "invisible", "odd_man_out",
+		"generic_equipment", "indicator", "radar", "friends", "weapons", "infinite_grenades", "vehicles", "teams",
+		"team_scoring", "death_bonus", "kill_penalty", "kill_in_order", "assault", "single_flag", "flag_must_reset",
+		"flag_at_home", "ball_type", "balls", "random_start", "ball_speed", "trait_with_ball", "trait_without_ball",
+		"moving_hill", "race_type",
+	};
+	short group;
+	int length;
+
+	length = snprintf(text, size, "%s", h3_gametype_engine_key(variant->game_engine_index));
+	for (group = 0; group < NUMBER_OF_H3_GAMETYPE_GROUPS; group++)
+	{
+		short settings[H3_GAMETYPE_OPTION_ROWS];
+		int count = h3_gametype_group_settings(group, variant->game_engine_index, settings), index;
+
+		for (index = 0; index < count && length > 0 && length < size; index++)
+		{
+			length += snprintf(text + length, size - length, "%s%s %ld", length ? ", " : "", keys[settings[index]],
+				h3_gametype_get(settings[index], variant));
+		}
+	}
+}
+
+/* (network_test.c's: a saved game type played) the same, for the logs */
+void menu_functions_gametype_rules(struct game_variant const *variant, char *text, int size)
+{
+	h3_gametype_rules_log(variant, text, size);
+}
+
+/* (a card, the editor's) a variant's rules, a line each: its game and the
+settings that tell it apart */
+static void h3_gametype_rules_text(struct game_variant const *variant, boolean game, char *text, int size)
+{
+	static short const shown[] =
+	{
+		_h3_gametype_score, _h3_gametype_lives, _h3_gametype_teams, _h3_gametype_respawn_time, _h3_gametype_shields,
+		_h3_gametype_health, _h3_gametype_weapons, _h3_gametype_vehicles,
+	};
+	int length = 0, index;
+	char value[64];
+
+	text[0] = 0;
+	if (game)
+		length = snprintf(text, size, "%s: %s", T("GAME"), h3_gametype_engine_name(variant->game_engine_index));
+	for (index = 0; index < (int)NUMBEROF(shown) && length >= 0 && length < size; index++)
+	{
+		h3_gametype_value_text(shown[index], variant, value, sizeof(value));
+		length += snprintf(text + length, size - length, "%s%s: %s", length ? "\n" : "",
+			h3_gametype_setting_label(shown[index], variant->game_engine_index), value);
+	}
+}
+
+/* a game type read for a card (cached: a file's read), FALSE when it
+cannot be */
+static boolean h3_gametype_card(long profile_index, struct game_variant *variant)
+{
+	if (profile_index == NONE)
+		return FALSE;
+	if (profile_index != h3_gametypes.card_index)
+	{
+		h3_gametypes.card_index = profile_index;
+		h3_gametypes.card_good = playlist_profile_get(profile_index, &h3_gametypes.card);
+	}
+	if (h3_gametypes.card_good)
+		*variant = h3_gametypes.card;
+	return h3_gametypes.card_good;
+}
+
+/* (playlist_profile_save writes on a thread of its own: playlist_profile
+_read waits for it) a game type's write finished */
+static void h3_gametype_write_wait(long profile_index)
+{
+	struct game_variant variant;
+
+	if (profile_index != NONE)
+		playlist_profile_get(profile_index, &variant);
+	h3_gametypes.card_index = NONE;
+}
+
+static boolean h3_gametype_same(long a, long b)
+{
+	return a != NONE && b != NONE &&
+		((unsigned long)a & ~PROFILE_INDEX_FLAGS) == ((unsigned long)b & ~PROFILE_INDEX_FLAGS);
+}
+
+/* whether a game type's file passes its checksum, read as
+playlist_profile_get_from_path reads one (the list's valid bit is the
+enumeration's, kept in the memory unit's map file from an earlier run:
+playlist_profile_get gives Slayer's rules for a file damaged since) */
+static boolean h3_gametype_file_good(long profile_index)
+{
+	char path[MAXIMUM_FILENAME_LENGTH + 1];
+	struct game_variant variant;
+
+	if (!saved_game_file_get_path_to_enclosing_directory(profile_index, path))
+		return FALSE;
+	csstrncat(path, "\\blam.lst", MAXIMUM_FILENAME_LENGTH);
+	path[MAXIMUM_FILENAME_LENGTH] = 0;
+	return playlist_profile_get_from_path(path, &variant);
+}
+
+/* (network_test.c's saved=) whether a game type's file passes its checksum */
+boolean menu_functions_gametype_file_good(long profile_index)
+{
+	return h3_gametype_file_good(profile_index);
+}
+
+/* the game types read again (the Xbox's list's), the item chosen on the
+one asked for (focus_index), else the lobby's (the last one used) */
+static void h3_gametypes_read(void)
+{
+	long indices[H3_GAMETYPES_MAXIMUM];
+	word count = H3_GAMETYPES_MAXIMUM;
+	char directory[MAXIMUM_FILENAME_LENGTH + 1];
+	long focus = h3_gametypes.focus_index;
+	short pass, index;
+
+	playlist_profiles_enumerate_available_to_local_player_index(0, &count, indices);
+	h3_gametypes.count = 0;
+	h3_gametypes.saved_count = 0;
+	h3_gametypes.card_index = NONE;
+	/* (the player's first, then the game's own) */
+	for (pass = 0; pass < 2; pass++)
+	{
+		for (index = 0; index < (short)MIN(count, H3_GAMETYPES_MAXIMUM); index++)
+		{
+			wchar_t name[128];
+			short slot = h3_gametypes.count;
+			boolean builtin;
+
+			if (indices[index] == NONE)
+				continue;
+			builtin = TEST_FLAG(indices[index], _saved_game_file_index_read_only_bit) != 0;
+			if (builtin != (pass == 1))
+				continue;
+			/* (the game's own: only good ones, as the lobby's GAME lists them) */
+			if (builtin && !TEST_FLAG(indices[index], _saved_game_file_index_valid_bit))
+				continue;
+			h3_gametypes.indices[slot] = indices[index];
+			h3_gametypes.damaged[slot] = !TEST_FLAG(indices[index], _saved_game_file_index_valid_bit) ||
+				(!builtin && !h3_gametype_file_good(indices[index]));
+			h3_gametypes.names[slot][0] = 0;
+			if (playlist_profile_get_display_name(indices[index], name))
+				h3_utf8(h3_gametypes.names[slot], sizeof(h3_gametypes.names[slot]), name);
+			h3_gametypes.count++;
+			if (!builtin)
+				h3_gametypes.saved_count++;
+		}
+	}
+	if (focus == NONE && saved_game_file_retrieve_last_used_multiplayer_variant_directory(directory))
+		focus = saved_game_file_find_profile_index_for_directory_path(directory, _saved_game_file_type_game_variant);
+	h3_gametypes.cursor = 0;
+	for (index = 0; index < h3_gametypes.count && focus != NONE; index++)
+	{
+		if (h3_gametype_same(h3_gametypes.indices[index], focus))
+			h3_gametypes.cursor = (short)(index + 1);
+	}
+	h3_gametypes.focus_index = NONE;
+	{
+		short damaged = 0;
+
+		for (index = 0; index < h3_gametypes.saved_count; index++)
+			damaged += h3_gametypes.damaged[index] ? 1 : 0;
+		platform_log("menus: h3 gametypes: %d game types: %d of the player's (%d damaged), %d of the game's",
+			h3_gametypes.count, h3_gametypes.saved_count, damaged, h3_gametypes.count - h3_gametypes.saved_count);
+	}
+}
+
+/* a typed name made a game type's (UTF-16, as the variant keeps it): its
+spaces at the ends dropped, not empty, at most eleven characters, and no
+other game type's (the list's, the game's own too, and no other saved
+file's: saved_game_file_name_unique) unless it is the one's own (original);
+FALSE with the reason in status */
+static boolean h3_gametype_name_check(char const *typed, wchar_t *name, wchar_t const *original, char *status, int size)
+{
+	char trimmed[H3_GAMETYPE_NAME_LENGTH + 1];
+	char other[48];
+	boolean letter = FALSE;
+	int start = 0, length, index;
+
+	while (typed[start] == ' ')
+		start++;
+	snprintf(trimmed, sizeof(trimmed), "%s", typed + start);
+	length = (int)strlen(trimmed);
+	while (length > 0 && trimmed[length - 1] == ' ')
+		trimmed[--length] = 0;
+	memset(name, 0, (H3_GAMETYPE_NAME_LENGTH + 1) * sizeof(wchar_t));
+	for (index = 0; index < length; index++)
+	{
+		name[index] = (wchar_t)(unsigned char)trimmed[index];
+		if ((trimmed[index] >= '0' && trimmed[index] <= '9') || (trimmed[index] >= 'a' && trimmed[index] <= 'z') ||
+			(trimmed[index] >= 'A' && trimmed[index] <= 'Z'))
+		{
+			letter = TRUE;
+		}
+	}
+	if (!letter)
+	{
+		snprintf(status, size, "%s", T("A game type's name needs a letter or a number."));
+		return FALSE;
+	}
+	if (original)
+	{
+		h3_utf8(other, sizeof(other), original);
+		if (!strcmp(other, trimmed))
+			return TRUE;
+	}
+	for (index = 0; index < h3_gametypes.count; index++)
+	{
+		if (!_stricmp(h3_gametypes.names[index], trimmed) && !(original && !_stricmp(other, trimmed)))
+		{
+			snprintf(status, size, "%s", T("Another game type has that name."));
+			return FALSE;
+		}
+	}
+	if (!saved_game_file_name_unique(name))
+	{
+		snprintf(status, size, "%s", T("Another saved file has that name."));
+		return FALSE;
+	}
+	return TRUE;
+}
+
+/* a name for a new game type of another's: its own, else with a number
+after it ("Slayer 2"), no other game type's */
+static void h3_gametype_unique_name(char const *base, char *out, int size)
+{
+	int number;
+
+	snprintf(out, size, "%.*s", H3_GAMETYPE_NAME_LENGTH, base);
+	for (number = 2; number < 100; number++)
+	{
+		int index;
+		boolean taken = FALSE;
+
+		for (index = 0; index < h3_gametypes.count && !taken; index++)
+			taken = !_stricmp(h3_gametypes.names[index], out);
+		if (!taken)
+			return;
+		{
+			char suffix[8];
+			int keep;
+
+			snprintf(suffix, sizeof(suffix), " %d", number);
+			keep = H3_GAMETYPE_NAME_LENGTH - (int)strlen(suffix);
+			snprintf(out, size, "%.*s%s", keep, base, suffix);
+		}
+	}
+}
+
+static void h3_gametypes_status(char const *format, ...)
+{
+	va_list arguments;
+
+	va_start(arguments, format);
+	vsnprintf(h3_gametypes.status, sizeof(h3_gametypes.status), format, arguments);
+	va_end(arguments);
+	platform_log("menus: h3 gametypes: %s", h3_gametypes.status);
+}
+
+static void h3_gametype_edit_status(char const *format, ...)
+{
+	va_list arguments;
+
+	va_start(arguments, format);
+	vsnprintf(h3_gametypes.edit_status, sizeof(h3_gametypes.edit_status), format, arguments);
+	va_end(arguments);
+	platform_log("menus: h3 gametype editor: %s", h3_gametypes.edit_status);
+}
+
+/* (port h3 gametypes init: the list opened, or back on it) */
+static void h3_gametypes_initialize(void)
+{
+	h3_gametypes_read();
+	browser_view_reset(&h3_gametypes.view);
+	h3_gametypes.page = 0;
+}
+
+/* the game type of an item (0: CREATE NEW GAME TYPE), NONE for none */
+static short h3_gametypes_item_type(short item)
+{
+	return item >= 1 && item <= h3_gametypes.count ? (short)(item - 1) : NONE;
+}
+
+/* (A on a row) the game type of the row chosen for its options, FALSE on
+CREATE NEW GAME TYPE */
+static boolean h3_gametypes_choose(struct widget_instance *widget)
+{
+	short type = h3_gametypes_item_type((short)(h3_gametypes.view.offset + h3_child_index(widget)));
+
+	if (type == NONE)
+		return FALSE;
+	h3_gametypes.cursor = (short)(type + 1);
+	h3_gametypes.chosen_index = h3_gametypes.indices[type];
+	h3_gametypes.chosen_builtin = type >= h3_gametypes.saved_count;
+	snprintf(h3_gametypes.chosen_name, sizeof(h3_gametypes.chosen_name), "%s", h3_gametypes.names[type]);
+	h3_gametypes.status[0] = 0;
+	/* (the list, back from the options, on it) */
+	h3_gametypes.focus_index = h3_gametypes.chosen_index;
+	platform_log("menus: h3 gametypes: %s chosen (%s)", h3_gametypes.chosen_name,
+		h3_gametypes.chosen_builtin ? "the game's own" : "the player's");
+	return TRUE;
+}
+
+/* (A on CREATE NEW GAME TYPE, Triangle) the bases, FALSE on another row */
+static boolean h3_gametypes_new(struct widget_instance *widget)
+{
+	if (widget && widget->name && !strncmp(widget->name, "row_", 4) &&
+		h3_gametypes.view.offset + h3_child_index(widget) != 0)
+	{
+		return FALSE;
+	}
+	if (h3_gametypes.count <= h3_gametypes.saved_count)
+	{
+		h3_gametypes_status("%s", T("The game's own game types can't be read now."));
+		return FALSE;
+	}
+	browser_view_reset(&h3_gametypes.base_view);
+	h3_gametypes.base_cursor = 0;
+	h3_gametypes.base_page = 0;
+	h3_gametypes.status[0] = 0;
+	return TRUE;
+}
+
+/* the editor begun on a variant (edit_index NONE: a new game type) */
+static void h3_gametype_edit_begin(long profile_index, struct game_variant const *variant)
+{
+	char name[48], rules[512];
+
+	h3_gametypes.editing = TRUE;
+	h3_gametypes.edit_index = profile_index;
+	h3_gametypes.original = *variant;
+	h3_gametypes.current = *variant;
+	h3_gametypes.group = _h3_gametype_general;
+	h3_gametypes.edit_status[0] = 0;
+	h3_gametypes.edit_said[0] = 0;
+	h3_gametypes.open_pending = _h3_gametype_open_editor;
+	h3_gametype_name(name, sizeof(name), variant);
+	h3_gametype_rules_log(variant, rules, sizeof(rules));
+	platform_log("menus: h3 gametype editor: editing %s (%s): %s", name, profile_index == NONE ? "new" : "saved",
+		rules);
+}
+
+/* a new game type of one of the game's own (a base, or EDIT on one): its
+rules, a name of its own, not saved yet */
+static boolean h3_gametype_new_of(long profile_index, char const *base_name)
+{
+	struct game_variant variant;
+	char name[48];
+	short index;
+
+	if (!playlist_profile_get(profile_index, &variant))
+	{
+		h3_gametypes_status("%s", T("That game type can't be read now."));
+		return FALSE;
+	}
+	/* (no longer the game's own: as the Xbox's save of a renamed default) */
+	variant.flags &= ~H3_GAMETYPE_SYSTEM_DEFAULT_FLAG;
+	h3_gametype_unique_name(base_name, name, sizeof(name));
+	memset(variant.human_readable_game_description, 0, sizeof(variant.human_readable_game_description));
+	for (index = 0; index < H3_GAMETYPE_NAME_LENGTH && name[index]; index++)
+		variant.human_readable_game_description[index] = (wchar_t)(unsigned char)name[index];
+	h3_gametype_edit_begin(NONE, &variant);
+	return TRUE;
+}
+
+/* (port h3 gametype base: a base's A) the new game type's editor, over the
+list */
+static boolean h3_gametype_base(struct widget_instance *widget)
+{
+	short type = (short)(h3_gametypes.saved_count + h3_gametypes.base_view.offset + h3_child_index(widget));
+
+	if (type < h3_gametypes.saved_count || type >= h3_gametypes.count)
+		return FALSE;
+	platform_log("menus: h3 gametypes: a new game type of %s", h3_gametypes.names[type]);
+	return h3_gametype_new_of(h3_gametypes.indices[type], h3_gametypes.names[type]);
+}
+
+/* whether the chosen game type's file is damaged (its checksum failed:
+playlist_profile_get would give Slayer's rules in its place), said */
+static boolean h3_gametype_chosen_damaged(void)
+{
+	short index;
+
+	for (index = 0; index < h3_gametypes.count; index++)
+	{
+		if (h3_gametypes.indices[index] == h3_gametypes.chosen_index && h3_gametypes.damaged[index])
+		{
+			h3_gametypes_status("%s", T("This game type's file is damaged and can't be loaded. Delete it."));
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
+/* (port h3 gametype edit: the options' EDIT) the chosen one's editor, over
+the list; one of the game's own a new one of it */
+static boolean h3_gametype_edit(void)
+{
+	struct game_variant variant;
+
+	if (h3_gametypes.chosen_index == NONE)
+		return FALSE;
+	if (h3_gametypes.chosen_builtin)
+	{
+		if (!h3_gametype_new_of(h3_gametypes.chosen_index, h3_gametypes.chosen_name))
+			return FALSE;
+		snprintf(h3_gametypes.edit_status, sizeof(h3_gametypes.edit_status), "%s",
+			T("The game's own game types never change: SAVE makes this one a new game type of yours."));
+		return TRUE;
+	}
+	/* (a damaged file: said on the list, which the options go back to) */
+	if (h3_gametype_chosen_damaged())
+		return TRUE;
+	if (!playlist_profile_get(h3_gametypes.chosen_index, &variant))
+	{
+		h3_gametypes_status("%s", T("That game type can't be read now."));
+		return FALSE;
+	}
+	h3_gametype_edit_begin(h3_gametypes.chosen_index, &variant);
+	return TRUE;
+}
+
+/* (COPY, RENAME) the name asked for */
+static boolean h3_gametype_ask_name(short typing)
+{
+	char name[48];
+
+	if (h3_gametypes.chosen_index == NONE)
+		return FALSE;
+	if (h3_gametype_chosen_damaged())
+		return TRUE;
+	if (typing == _typing_gametype_rename && h3_gametypes.chosen_builtin)
+	{
+		h3_gametypes_status("%s", T("The game's own game types can't be renamed: COPY makes one of yours."));
+		return FALSE;
+	}
+	if (!typing_available())
+	{
+		h3_gametypes_status("%s", T("Naming a game type needs the PS Vita's keyboard."));
+		return TRUE;
+	}
+	if (typing == _typing_gametype_copy)
+	{
+		h3_gametype_unique_name(h3_gametypes.chosen_name, name, sizeof(name));
+		typing_begin(typing, T("The copy's name"), name, H3_GAMETYPE_NAME_LENGTH, FALSE);
+	}
+	else
+		typing_begin(typing, T("Game type name"), h3_gametypes.chosen_name, H3_GAMETYPE_NAME_LENGTH, FALSE);
+	return TRUE;
+}
+
+/* a copy of the chosen game type made, named as typed (playlist_profile_new,
+then its rules saved over the new file's) */
+static void h3_gametype_copy_typed(char const *typed)
+{
+	struct game_variant variant;
+	wchar_t name[H3_GAMETYPE_NAME_LENGTH + 1];
+	long profile_index;
+
+	if (!h3_gametype_name_check(typed, name, NULL, h3_gametypes.status, sizeof(h3_gametypes.status)))
+	{
+		platform_log("menus: h3 gametypes: the name \"%s\" was refused: %s", typed, h3_gametypes.status);
+		return;
+	}
+	if (!playlist_profile_get(h3_gametypes.chosen_index, &variant))
+	{
+		h3_gametypes_status("%s", T("That game type can't be read now."));
+		return;
+	}
+	profile_index = playlist_profile_new(0, name);
+	if (profile_index == NONE)
+	{
+		h3_gametypes_status(T("\"%s\" couldn't be created."), typed);
+		return;
+	}
+	variant.flags &= ~H3_GAMETYPE_SYSTEM_DEFAULT_FLAG;
+	memcpy(variant.human_readable_game_description, name, sizeof(variant.human_readable_game_description));
+	playlist_profile_save(profile_index, &variant);
+	h3_gametype_write_wait(profile_index);
+	h3_gametypes.changed = TRUE;
+	h3_gametypes.focus_index = profile_index;
+	h3_gametypes_read();
+	{
+		char shown[48];
+
+		h3_utf8(shown, sizeof(shown), name);
+		h3_gametypes_status(T("%s copied as %s."), h3_gametypes.chosen_name, shown);
+	}
+}
+
+/* the chosen game type renamed as typed, as the Xbox's name edit and SAVE
+CHANGES rename it (its variant's name saved: the file and SaveMeta.xbx) */
+static void h3_gametype_rename_typed(char const *typed)
+{
+	struct game_variant variant;
+	wchar_t name[H3_GAMETYPE_NAME_LENGTH + 1];
+	char shown[48];
+
+	if (!playlist_profile_get(h3_gametypes.chosen_index, &variant))
+	{
+		h3_gametypes_status("%s", T("That game type can't be read now."));
+		return;
+	}
+	if (!h3_gametype_name_check(typed, name, variant.human_readable_game_description, h3_gametypes.status,
+		sizeof(h3_gametypes.status)))
+	{
+		platform_log("menus: h3 gametypes: the name \"%s\" was refused: %s", typed, h3_gametypes.status);
+		return;
+	}
+	h3_utf8(shown, sizeof(shown), name);
+	if (!strcmp(shown, h3_gametypes.chosen_name))
+		return;
+	memcpy(variant.human_readable_game_description, name, sizeof(variant.human_readable_game_description));
+	playlist_profile_save(h3_gametypes.chosen_index, &variant);
+	h3_gametype_write_wait(h3_gametypes.chosen_index);
+	h3_gametypes.changed = TRUE;
+	h3_gametypes.focus_index = h3_gametypes.chosen_index;
+	h3_gametypes_read();
+	h3_gametypes_status(T("%s renamed %s."), h3_gametypes.chosen_name, shown);
+}
+
+/* (Square on the list, DELETE in the options) the game type to delete
+after the question; the game's own and CREATE NEW GAME TYPE none */
+static boolean h3_gametype_delete_ask(boolean from_list)
+{
+	if (from_list)
+	{
+		short type = h3_gametypes_item_type(h3_gametypes.cursor);
+
+		if (type == NONE)
+			return FALSE;
+		h3_gametypes.chosen_index = h3_gametypes.indices[type];
+		h3_gametypes.chosen_builtin = type >= h3_gametypes.saved_count;
+		snprintf(h3_gametypes.chosen_name, sizeof(h3_gametypes.chosen_name), "%s", h3_gametypes.names[type]);
+		h3_gametypes.focus_index = h3_gametypes.chosen_index;
+	}
+	if (h3_gametypes.chosen_index == NONE)
+		return FALSE;
+	if (h3_gametypes.chosen_builtin)
+	{
+		h3_gametypes_status("%s", T("The game's own game types can't be deleted."));
+		return FALSE;
+	}
+	platform_log("menus: h3 gametypes: delete %s? asked", h3_gametypes.chosen_name);
+	return TRUE;
+}
+
+/* the question's DELETE GAME TYPE: deleted as "final del playlist profile"
+deletes it (a game type of the player's, never the game's own) */
+static void h3_gametype_delete(void)
+{
+	long profile_index = h3_gametypes.chosen_index;
+
+	h3_gametypes.chosen_index = NONE;
+	if (profile_index == NONE || TEST_FLAG(profile_index, _saved_game_file_index_read_only_bit) ||
+		saved_game_file_get_type(profile_index) != _saved_game_file_type_game_variant)
+	{
+		return;
+	}
+	playlist_profile_delete(profile_index);
+	h3_gametypes.changed = TRUE;
+	h3_gametypes.card_index = NONE;
+	h3_gametypes_read();
+	h3_gametypes_status(T("%s was deleted."), h3_gametypes.chosen_name);
+}
+
+static void h3_gametype_edit_end(void)
+{
+	h3_gametypes.editing = FALSE;
+	h3_gametypes.edit_index = NONE;
+}
+
+static boolean h3_gametype_dirty(void)
+{
+	return h3_gametypes.editing && (h3_gametypes.edit_index == NONE ||
+		memcmp(&h3_gametypes.original, &h3_gametypes.current, sizeof(h3_gametypes.current)) != 0);
+}
+
+/* (SAVE, the question's SAVE CHANGES) the game type saved as the Xbox's
+SAVE CHANGES saves it: playlist_profile_save (game_engine_variant_cleanup,
+the file, its checksum, its SaveMeta.xbx name), a new one's file made first
+(playlist_profile_new); remembered as the last one used (the lobby's GAME);
+FALSE, said, when it can't be */
+static boolean h3_gametype_save(void)
+{
+	struct game_variant variant;
+	wchar_t name[H3_GAMETYPE_NAME_LENGTH + 1];
+	char typed[48], directory[MAXIMUM_FILENAME_LENGTH + 1], rules[512];
+	long profile_index = h3_gametypes.edit_index;
+	boolean created = FALSE;
+
+	if (!h3_gametypes.editing)
+		return FALSE;
+	variant = h3_gametypes.current;
+	h3_gametype_name(typed, sizeof(typed), &variant);
+	/* (a new one: its name no other's; saved over, its own allowed) */
+	if (!h3_gametype_name_check(typed, name, profile_index == NONE ? NULL :
+		h3_gametypes.original.human_readable_game_description, h3_gametypes.edit_status,
+		sizeof(h3_gametypes.edit_status)))
+	{
+		platform_log("menus: h3 gametype editor: %s can't be saved: %s", typed, h3_gametypes.edit_status);
+		return FALSE;
+	}
+	memcpy(variant.human_readable_game_description, name, sizeof(variant.human_readable_game_description));
+	if (profile_index == NONE)
+	{
+		profile_index = playlist_profile_new(0, name);
+		if (profile_index == NONE)
+		{
+			h3_gametype_edit_status(T("\"%s\" couldn't be saved."), typed);
+			return FALSE;
+		}
+		created = TRUE;
+	}
+	else if (!h3_gametype_dirty())
+	{
+		platform_log("menus: h3 gametype editor: %s: no changes", typed);
+		h3_gametype_edit_end();
+		return TRUE;
+	}
+	variant.flags &= ~H3_GAMETYPE_SYSTEM_DEFAULT_FLAG;
+	playlist_profile_save(profile_index, &variant);
+	h3_gametype_write_wait(profile_index);
+	h3_gametypes.changed = TRUE;
+	if (saved_game_file_get_path_to_enclosing_directory(profile_index, directory))
+		saved_game_file_remember_last_used_multiplayer_variant_directory(directory);
+	h3_gametype_rules_log(&variant, rules, sizeof(rules));
+	platform_log("menus: h3 gametype editor: saved %s (%s): %s", typed, created ? "a new game type" : "changed", rules);
+	h3_gametypes.focus_index = profile_index;
+	snprintf(h3_gametypes.status, sizeof(h3_gametypes.status), T("%s was saved."), typed);
+	h3_gametype_edit_end();
+	return TRUE;
+}
+
+/* (port h3 gametype category: a group's A) the group the options screen
+shows */
+static boolean h3_gametype_category(struct widget_instance *widget)
+{
+	short row;
+
+	for (row = 0; widget && widget->name && row < (short)NUMBEROF(h3_gametype_editor_rows); row++)
+	{
+		if (!strcmp(widget->name, h3_gametype_editor_rows[row]))
+		{
+			if (row < 2 || row - 2 >= NUMBER_OF_H3_GAMETYPE_GROUPS || !h3_gametypes.editing)
+				return FALSE;
+			h3_gametypes.group = (short)(row - 2);
+			h3_gametypes.edit_status[0] = 0;
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
+/* (port h3 gametype next and previous) the editor's NAME (typed) and GAME,
+or a setting of the options screen's group, stepped */
+static boolean h3_gametype_change(struct widget_instance *widget, int step)
+{
+	struct game_variant *variant = &h3_gametypes.current;
+	char text[64];
+
+	if (!h3_gametypes.editing || !widget || !widget->name)
+		return FALSE;
+	h3_gametypes.edit_status[0] = 0;
+	if (!strcmp(widget->name, "op_name"))
+	{
+		if (!typing_available())
+		{
+			h3_gametype_edit_status("%s", T("Naming a game type needs the PS Vita's keyboard."));
+			return TRUE;
+		}
+		h3_gametype_name(text, sizeof(text), variant);
+		typing_begin(_typing_gametype_name, T("Game type name"), text, H3_GAMETYPE_NAME_LENGTH, FALSE);
+		return TRUE;
+	}
+	if (!strcmp(widget->name, "op_game"))
+	{
+		/* (another game: its settings as its base's - the Xbox's game list
+		cleared them, playlist_profile_set_game_engine -, and the score to
+		win its base's, counted as the new game counts it) */
+		long engine = variant->game_engine_index;
+		int index, count = (int)NUMBEROF(h3_gametype_engines);
+		struct game_variant base;
+
+		for (index = 0; index < count && h3_gametype_engines[index] != engine; index++)
+			;
+		index = index < count ? (index + step + count) % count : 0;
+		engine = h3_gametype_engines[index];
+		switch (engine)
+		{
+		case game_engine_ctf: build_game_variant_ctf(&base); break;
+		case game_engine_oddball: build_game_variant_oddball(&base); break;
+		case game_engine_king: build_game_variant_king(&base); break;
+		case game_engine_race: build_game_variant_race(&base); break;
+		default: build_game_variant_slayer(&base); break;
+		}
+		variant->game_engine_index = engine;
+		variant->game_engine_variant = base.game_engine_variant;
+		variant->universal_variant.score_to_win = base.universal_variant.score_to_win;
+		if (engine == game_engine_ctf)
+			variant->universal_variant.teams = TRUE;
+		platform_log("menus: h3 gametype editor: game %s", h3_gametype_engine_key(engine));
+		return TRUE;
+	}
+	if (!strncmp(widget->name, "op_", 3) && widget->name[3] >= '1' && widget->name[3] <= '9')
+	{
+		short settings[H3_GAMETYPE_OPTION_ROWS];
+		int count = h3_gametype_group_settings(h3_gametypes.group, variant->game_engine_index, settings);
+		int row = widget->name[3] - '1';
+
+		if (row >= count)
+			return FALSE;
+		h3_gametype_step(settings[row], variant, step);
+		h3_gametype_value_text(settings[row], variant, text, sizeof(text));
+		platform_log("menus: h3 gametype editor: %s %s (%ld)", h3_gametype_setting_label(settings[row],
+			variant->game_engine_index), text, h3_gametype_get(settings[row], variant));
+		return TRUE;
+	}
+	return FALSE;
+}
+
+/* a row's focus shown: its bar lit, its arrows */
+static void h3_gametype_row_focus(struct widget_instance *item, boolean focused, boolean arrows)
+{
+	struct widget_instance *found;
+
+	item->animation.current_frame_index = focused ? 1 : 0;
+	if ((found = named(item, "arrow_left")) != NULL)
+		widget_instance_set_visibility_recursive(found, focused && arrows);
+	if ((found = named(item, "arrow_right")) != NULL)
+		widget_instance_set_visibility_recursive(found, focused && arrows);
+}
+
+/* (port h3 gametypes) the list's rows (row_1 to row_10: row_name,
+row_note), scrolling past ten; the chosen one's card; the status; a name
+typed for COPY or RENAME taken */
+static void h3_gametypes_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *child, *focus = NULL;
+	long index, focused_row = NONE;
+	int target;
+	short type;
+	char text[512], line[64];
+
+	if (typing_done(_typing_gametype_copy, text, sizeof(text)))
+		h3_gametype_copy_typed(text);
+	if (typing_done(_typing_gametype_rename, text, sizeof(text)))
+		h3_gametype_rename_typed(text);
+	for (index = 0, child = list->child; child; child = child->next, index++)
+	{
+		if (child == list->focused_child)
+			focused_row = index;
+	}
+	target = browser_view_follow(&h3_gametypes.view, H3_GAMETYPES_ROWS, h3_gametypes.count + 1, (int)focused_row,
+		h3_gametypes.cursor, h3_gametypes.page);
+	h3_gametypes.page = 0;
+	h3_gametypes.cursor = (short)MAX(target, 0);
+	for (index = 0, child = list->child; child; child = child->next, index++)
+	{
+		long item = h3_gametypes.view.offset + index;
+		boolean shown = index < h3_gametypes.view.visible;
+
+		widget_instance_set_visibility_recursive(child, shown);
+		child->disabled = !shown;
+		if (!shown)
+			continue;
+		type = h3_gametypes_item_type((short)item);
+		if (type == NONE)
+		{
+			snprintf(text, sizeof(text), "%s", T("CREATE NEW GAME TYPE"));
+			line[0] = 0;
+		}
+		else
+		{
+			snprintf(text, sizeof(text), "%s", h3_gametypes.names[type]);
+			h3_capitals(text);
+			if (h3_gametypes.damaged[type])
+				snprintf(line, sizeof(line), "%s", T("DAMAGED"));
+			else if (type >= h3_gametypes.saved_count)
+				snprintf(line, sizeof(line), "%s", T("BUILT-IN"));
+			else
+				line[0] = 0;
+		}
+		text_show(named(child, "row_name"), text);
+		text_show(named(child, "row_note"), line);
+		child->animation.current_frame_index = index == h3_gametypes.view.row ? 1 : 0;
+		if (index == h3_gametypes.view.row)
+			focus = child;
+	}
+	if (focus && focus != list->focused_child)
+		ui_widget_port_give_focus(list, focus);
+	/* (the card) */
+	type = h3_gametypes_item_type(h3_gametypes.cursor);
+	if (type == NONE)
+	{
+		text_show(named(screen, "info_name"), T("NEW GAME TYPE"));
+		text_show(named(screen, "info_kind"), "");
+		text_show(named(screen, "info_text"),
+			T("Make a game type of your own: choose\nthe game type it starts as, then change\nits rules and SAVE it. It is then in\nthe lobby's GAME, for every network."));
+		snprintf(line, sizeof(line), "CREATE NEW GAME TYPE");
+	}
+	else
+	{
+		struct game_variant variant;
+		boolean builtin = type >= h3_gametypes.saved_count;
+
+		snprintf(text, sizeof(text), "%s", h3_gametypes.names[type]);
+		h3_capitals(text);
+		text_show(named(screen, "info_name"), text);
+		if (h3_gametypes.damaged[type])
+		{
+			text_show(named(screen, "info_kind"), T("YOUR GAME TYPE"));
+			text_show(named(screen, "info_text"), T("This game type's file is damaged\nand can't be loaded. Square deletes it."));
+		}
+		else if (h3_gametype_card(h3_gametypes.indices[type], &variant))
+		{
+			snprintf(text, sizeof(text), "%s \xc2\xb7 %s", h3_gametype_engine_name(variant.game_engine_index),
+				builtin ? T("THE GAME'S OWN") : T("YOURS"));
+			text_show(named(screen, "info_kind"), text);
+			h3_gametype_rules_text(&variant, FALSE, text, sizeof(text));
+			text_show(named(screen, "info_text"), text);
+		}
+		else
+		{
+			text_show(named(screen, "info_kind"), "");
+			text_show(named(screen, "info_text"), T("That game type can't be read now."));
+		}
+		snprintf(line, sizeof(line), "%s%s", h3_gametypes.names[type], builtin ? " (built-in)" : "");
+	}
+	text_show(named(screen, "status"), h3_gametypes.status);
+	{
+		char said[256];
+
+		snprintf(said, sizeof(said), "%s (%d of %d)", line, h3_gametypes.cursor, h3_gametypes.count);
+		if (strcmp(said, h3_gametypes.said))
+		{
+			snprintf(h3_gametypes.said, sizeof(h3_gametypes.said), "%s", said);
+			platform_log("menus: h3 gametypes: %s", said);
+		}
+	}
+}
+
+/* (port h3 gametype actions) the options' title and help; RENAME and DELETE
+hidden for the game's own */
+static void h3_gametype_actions_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *child;
+	char text[64];
+	short focused = 0, index;
+
+	snprintf(text, sizeof(text), "%s", h3_gametypes.chosen_name);
+	h3_capitals(text);
+	text_show(named(screen, "title"), text);
+	for (index = 0, child = list->child; child; child = child->next, index++)
+	{
+		boolean shown = !h3_gametypes.chosen_builtin || index < 2;
+
+		widget_instance_set_visibility_recursive(child, shown);
+		child->disabled = !shown;
+		if (child == list->focused_child)
+			focused = index;
+	}
+	{
+		static char const *const helps[] =
+		{
+			N_("Change its rules in the game type editor."),
+			N_("Make a game type of yours with the same rules, under\nanother name."),
+			N_("Give it another name."),
+			N_("Delete it, after a question."),
+		};
+
+		if (h3_gametypes.chosen_builtin && focused == 0)
+			text_show(named(screen, "help"), T("Change its rules in the game type editor: the game's\nown never change, so SAVE makes a new one of yours."));
+		else
+			text_show(named(screen, "help"), T(helps[PIN(focused, 0, (short)NUMBEROF(helps) - 1)]));
+	}
+}
+
+/* (port h3 gametype question) the delete question's text, or the save
+question's */
+static void h3_gametype_question_update(struct widget_instance *widget)
+{
+	struct widget_instance *screen = screen_of(widget);
+	char text[256], name[48];
+
+	if (named(screen, "op_discard"))
+	{
+		h3_gametype_name(name, sizeof(name), &h3_gametypes.current);
+		snprintf(text, sizeof(text), T("%s has changes that aren't saved."), name);
+	}
+	else
+		snprintf(text, sizeof(text), T("Delete the game type %s?\nIt can't be brought back."), h3_gametypes.chosen_name);
+	text_show(widget, text);
+}
+
+/* (port h3 gametype bases) the bases' rows (item_1 to item_12): the game's
+own game types, scrolling past twelve; the chosen one's rules */
+static void h3_gametype_bases_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *child, *focus = NULL;
+	long index, focused_row = NONE;
+	int bases = h3_gametypes.count - h3_gametypes.saved_count;
+	int target;
+	char text[512];
+
+	for (index = 0, child = list->child; child; child = child->next, index++)
+	{
+		if (child == list->focused_child)
+			focused_row = index;
+	}
+	target = browser_view_follow(&h3_gametypes.base_view, H3_GAMETYPE_BASE_ROWS, bases, (int)focused_row,
+		h3_gametypes.base_cursor, h3_gametypes.page);
+	h3_gametypes.page = 0;
+	h3_gametypes.base_cursor = (short)MAX(target, 0);
+	for (index = 0, child = list->child; child; child = child->next, index++)
+	{
+		boolean shown = index < h3_gametypes.base_view.visible;
+
+		widget_instance_set_visibility_recursive(child, shown);
+		child->disabled = !shown;
+		if (!shown)
+			continue;
+		snprintf(text, sizeof(text), "%s", h3_gametypes.names[h3_gametypes.saved_count + h3_gametypes.base_view.offset +
+			index]);
+		h3_capitals(text);
+		text_show(child, text);
+		if (index == h3_gametypes.base_view.row)
+			focus = child;
+	}
+	if (focus && focus != list->focused_child)
+		ui_widget_port_give_focus(list, focus);
+	if (target >= 0 && target < bases)
+	{
+		struct game_variant variant;
+		short type = (short)(h3_gametypes.saved_count + target);
+
+		snprintf(text, sizeof(text), "%s", h3_gametypes.names[type]);
+		h3_capitals(text);
+		text_show(named(screen, "info_name"), text);
+		if (h3_gametype_card(h3_gametypes.indices[type], &variant))
+			h3_gametype_rules_text(&variant, TRUE, text, sizeof(text));
+		else
+			snprintf(text, sizeof(text), "%s", T("That game type can't be read now."));
+		text_show(named(screen, "info_text"), text);
+	}
+}
+
+/* (port h3 gametype editor) the editor's rows' values, the focused row's
+arrows and help, the rules at the right, the status; a name typed taken */
+static void h3_gametype_editor_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct game_variant *variant = &h3_gametypes.current;
+	short row, focused = 0;
+	char text[512], name[48];
+
+	if (!h3_gametypes.editing)
+		return;
+	if (typing_done(_typing_gametype_name, text, sizeof(text)))
+	{
+		wchar_t typed[H3_GAMETYPE_NAME_LENGTH + 1];
+
+		if (h3_gametype_name_check(text, typed, h3_gametypes.edit_index != NONE ?
+			h3_gametypes.original.human_readable_game_description : NULL, h3_gametypes.edit_status,
+			sizeof(h3_gametypes.edit_status)))
+		{
+			memcpy(variant->human_readable_game_description, typed, sizeof(variant->human_readable_game_description));
+			platform_log("menus: h3 gametype editor: name %s", text);
+		}
+		else
+			platform_log("menus: h3 gametype editor: the name \"%s\" was refused: %s", text, h3_gametypes.edit_status);
+	}
+	for (row = 0; row < (short)NUMBEROF(h3_gametype_editor_rows); row++)
+	{
+		struct widget_instance *item = named(list, h3_gametype_editor_rows[row]);
+		boolean has_focus = item && item == list->focused_child;
+
+		if (!item)
+			continue;
+		if (has_focus)
+			focused = row;
+		text[0] = 0;
+		if (row == 0)
+		{
+			text_show(named(item, "label"), T("NAME"));
+			h3_gametype_name(text, sizeof(text), variant);
+		}
+		else if (row == 1)
+		{
+			text_show(named(item, "label"), T("GAME"));
+			snprintf(text, sizeof(text), "%s", h3_gametype_engine_name(variant->game_engine_index));
+		}
+		else if (row - 2 < NUMBER_OF_H3_GAMETYPE_GROUPS)
+			text_show(named(item, "label"), h3_gametype_group_name((short)(row - 2), variant->game_engine_index));
+		text_show(named(item, "value"), text);
+		h3_gametype_row_focus(item, has_focus, row == 1);
+	}
+	h3_gametype_name(name, sizeof(name), variant);
+	snprintf(text, sizeof(text), "%s", name);
+	h3_capitals(text);
+	text_show(named(screen, "info_name"), text);
+	snprintf(text, sizeof(text), h3_gametypes.edit_index == NONE ? T("A new game type: %s, not saved yet.") :
+		h3_gametype_dirty() ? T("%s: changed, not saved yet.") : "%s", name);
+	text_show(named(screen, "subtitle"), text);
+	h3_gametype_rules_text(variant, TRUE, text, sizeof(text));
+	text_show(named(screen, "info_text"), text);
+	{
+		static char const *const helps[] =
+		{
+			N_("The game type's name, as the lobby's GAME lists it\n(11 characters at most). Cross types it."),
+			N_("The game it plays. Another game starts with its own\nusual settings."),
+			N_("The score to win and the number of lives. (A game type\nholds no time limit.)"),
+			N_("How long dead players wait, and the suicide penalty."),
+			N_("Shields, health, camouflage, starting equipment and\nwhat the motion tracker and waypoints show."),
+			N_("The weapon set, infinite grenades and the vehicles."),
+			N_("Whether players play in teams."),
+			N_("The settings of its own game."),
+			N_("Saves the game type: it is then in the lobby's GAME,\nSTART GAME, online games and the Halo CE menus."),
+		};
+
+		text_show(named(screen, "help"), T(helps[PIN(focused, 0, (short)NUMBEROF(helps) - 1)]));
+	}
+	text_show(named(screen, "status"), h3_gametypes.edit_status);
+	{
+		char said[512];
+
+		h3_gametype_rules_log(variant, text, sizeof(text));
+		snprintf(said, sizeof(said), "%s: %s", name, text);
+		if (strcmp(said, h3_gametypes.edit_said))
+		{
+			snprintf(h3_gametypes.edit_said, sizeof(h3_gametypes.edit_said), "%s", said);
+			platform_log("menus: h3 gametype editor: now %s", said);
+		}
+	}
+}
+
+/* (port h3 gametype options) a group's rows (op_1 to op_8: label, value),
+the others hidden; the focused row's help, the group's note */
+static void h3_gametype_options_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct game_variant *variant = &h3_gametypes.current;
+	short settings[H3_GAMETYPE_OPTION_ROWS];
+	int count = h3_gametype_group_settings(h3_gametypes.group, variant->game_engine_index, settings);
+	struct widget_instance *child;
+	short index, focused = 0;
+	char text[96], name[48];
+
+	if (!h3_gametypes.editing)
+		return;
+	for (index = 0, child = list->child; child; child = child->next, index++)
+	{
+		boolean shown = index < count;
+		boolean has_focus = shown && child == list->focused_child;
+		long values[MAXIMUM_ODDBALLS];
+
+		widget_instance_set_visibility_recursive(child, shown);
+		child->disabled = !shown;
+		if (!shown)
+			continue;
+		if (has_focus)
+			focused = index;
+		text_show(named(child, "label"), h3_gametype_setting_label(settings[index], variant->game_engine_index));
+		h3_gametype_value_text(settings[index], variant, text, sizeof(text));
+		text_show(named(child, "value"), text);
+		h3_gametype_row_focus(child, has_focus, h3_gametype_values(settings[index], variant, values) > 1);
+	}
+	text_show(named(screen, "title"), h3_gametype_group_name(h3_gametypes.group, variant->game_engine_index));
+	h3_gametype_name(name, sizeof(name), variant);
+	snprintf(text, sizeof(text), "%s \xc2\xb7 %s", name, h3_gametype_engine_name(variant->game_engine_index));
+	text_show(named(screen, "subtitle"), text);
+	text_show(named(screen, "help"), count > 0 ? h3_gametype_setting_help(settings[focused], variant) : "");
+	text_show(named(screen, "note"), h3_gametype_group_note(h3_gametypes.group));
+}
+
+/* (the main loop) what the GAME TYPES screens asked for once back on the
+list: the editor or the delete question opened over it; the editor gone
+back from once its question closed */
+static void h3_gametypes_main_loop(void)
+{
+	struct widget_instance *active = NULL;
+	long index;
+
+	for (index = 0; index < 4 && !active; index++)
+		active = ui_widget_port_active_screen((short)index);
+	/* (the place it is open at) */
+	index--;
+	if (h3_gametypes.open_pending != _h3_gametype_open_none)
+	{
+		long list = tag_loaded(UI_WIDGET_DEFINITION_TAG, "pc\\h3\\gametypes\\screen");
+		long next = tag_loaded(UI_WIDGET_DEFINITION_TAG, h3_gametypes.open_pending == _h3_gametype_open_editor ?
+			"pc\\h3\\gtedit\\screen" : "pc\\h3\\gtdel\\screen");
+
+		h3_gametypes.open_pending = _h3_gametype_open_none;
+		if (active && list != NONE && next != NONE && active->definition_tag_index == list)
+		{
+			ui_widget_load_by_name_or_tag(NULL, next, NULL, active->local_player_index, active->definition_tag_index,
+				NONE, NONE);
+		}
+	}
+	if (h3_gametypes.leave_pending)
+	{
+		long editor = tag_loaded(UI_WIDGET_DEFINITION_TAG, "pc\\h3\\gtedit\\screen");
+
+		h3_gametypes.leave_pending = FALSE;
+		if (active && editor != NONE && active->definition_tag_index == editor)
+			ui_widget_port_go_back((short)index);
+	}
 }
 
 /* ---- the Halo 3 multiplayer pause screen (halo3/mppause.xml): it stands
@@ -6839,7 +8746,7 @@ static void h3_fileshare_update(struct widget_instance *list)
 		if (found)
 			widget_instance_set_visibility_recursive(found, FALSE);
 		text_show(named(screen, "info_name"), h3_mp.gametype_names[target]);
-		text_show(named(screen, "info_text"), T("A game variant.\nGame variants are made and changed in\nMULTIPLAYER, GAME."));
+		text_show(named(screen, "info_text"), T("A game variant.\nGame variants are made and changed in\nMULTIPLAYER, EDIT GAME TYPES."));
 		snprintf(line, sizeof(line), "%s", h3_mp.gametype_names[target]);
 	}
 	else
@@ -6890,7 +8797,7 @@ static void h3_fileshare_rename(void)
 	if (!entry || entry->damaged)
 	{
 		h3_fileshare_status("%s", h3_fileshare.kind == _fileshare_map_variants ? T("There is no map variant to rename.") :
-			T("Game variants are changed in MULTIPLAYER, GAME."));
+			T("Game variants are changed in MULTIPLAYER, EDIT GAME TYPES."));
 		return;
 	}
 	if (!typing_available())
@@ -6913,7 +8820,7 @@ static boolean h3_fileshare_ask_delete(void)
 	if (!entry)
 	{
 		h3_fileshare_status("%s", h3_fileshare.kind == _fileshare_map_variants ? T("There is no map variant to delete.") :
-			T("Game variants are changed in MULTIPLAYER, GAME."));
+			T("Game variants are changed in MULTIPLAYER, EDIT GAME TYPES."));
 		return FALSE;
 	}
 	snprintf(h3_fileshare.asked_map, sizeof(h3_fileshare.asked_map), "%s", entry->map_name);
@@ -9758,6 +11665,12 @@ static boolean h3_mp_host_choices(void)
 	network_game_server_change_game_variant(server, &variant);
 	platform_log("menus: h3 mp: hosting %s on %s (the lobby's GAME and MAP); the game's lobby", h3_mp_gametype_name(),
 		h3_mp_map_name());
+	{
+		char rules[512];
+
+		h3_gametype_rules_log(&variant, rules, sizeof(rules));
+		platform_log("menus: h3 mp: the game's rules: %s", rules);
+	}
 	return TRUE;
 }
 
@@ -11353,6 +13266,13 @@ boolean pc_menu_event_function_invoke(
 		h3_mp_initialize();
 		/* (opened again: a live lobby refused tries again) */
 		h3_live_retry();
+		/* (back from EDIT GAME TYPES with a game type saved, renamed or
+		deleted: a live lobby's game on its GAME as it is now) */
+		if (h3_gametypes.changed)
+		{
+			h3_gametypes.changed = FALSE;
+			h3_live_follow();
+		}
 		return TRUE;
 	case _function_h3_network_set:
 		return h3_mp_network_set(widget);
@@ -11775,6 +13695,69 @@ boolean pc_menu_event_function_invoke(
 	case _function_h3_players_page_down:
 		h3_players.page = 1;
 		return TRUE;
+	case _function_h3_gametypes_init:
+		h3_gametypes_initialize();
+		return TRUE;
+	/* (A on a row: its options, or on CREATE NEW GAME TYPE the bases - the
+	other's handler fails, so that its screen does not open; Triangle the
+	bases) */
+	case _function_h3_gametypes_choose:
+		return h3_gametypes_choose(widget);
+	case _function_h3_gametypes_new:
+		return h3_gametypes_new(widget);
+	case _function_h3_gametypes_page_up:
+		h3_gametypes.page = -1;
+		return TRUE;
+	case _function_h3_gametypes_page_down:
+		h3_gametypes.page = 1;
+		return TRUE;
+	case _function_h3_gametype_edit:
+		return h3_gametype_edit();
+	case _function_h3_gametype_copy:
+		return h3_gametype_ask_name(_typing_gametype_copy);
+	case _function_h3_gametype_rename:
+		return h3_gametype_ask_name(_typing_gametype_rename);
+	/* (the options' DELETE: the question opened over the list, from the
+	main loop) */
+	case _function_h3_gametype_delete_later:
+		if (!h3_gametype_delete_ask(FALSE))
+			return FALSE;
+		h3_gametypes.open_pending = _h3_gametype_open_delete;
+		return TRUE;
+	case _function_h3_gametype_delete_ask:
+		return h3_gametype_delete_ask(TRUE);
+	case _function_h3_gametype_delete:
+		h3_gametype_delete();
+		return TRUE;
+	case _function_h3_gametype_base:
+		return h3_gametype_base(widget);
+	case _function_h3_gametype_next:
+		return h3_gametype_change(widget, 1);
+	case _function_h3_gametype_previous:
+		return h3_gametype_change(widget, -1);
+	case _function_h3_gametype_category:
+		return h3_gametype_category(widget);
+	case _function_h3_gametype_save:
+		return h3_gametype_save();
+	/* (the question's SAVE CHANGES: saved, the editor left for the list;
+	not saved, back in the editor, which says why) */
+	case _function_h3_gametype_save_quit:
+		if (h3_gametype_save())
+			h3_gametypes.leave_pending = TRUE;
+		return TRUE;
+	/* (Circle in the editor: with changes, the question; else gone) */
+	case _function_h3_gametype_leave_ask:
+		return h3_gametype_dirty();
+	case _function_h3_gametype_leave:
+		if (h3_gametypes.editing)
+			platform_log("menus: h3 gametype editor: left, nothing changed");
+		h3_gametype_edit_end();
+		return TRUE;
+	case _function_h3_gametype_discard:
+		platform_log("menus: h3 gametype editor: the changes discarded");
+		h3_gametype_edit_end();
+		h3_gametypes.leave_pending = TRUE;
+		return TRUE;
 	case _function_coop_campaign:
 	case _function_unwired:
 	default:
@@ -11960,6 +13943,29 @@ void pc_menu_game_data_function_invoke(
 	case _input_h3_invite:
 		if (widget->type == _ui_widget_type_column_list)
 			h3_invite_update(widget);
+		break;
+	case _input_h3_gametype_list:
+		if (widget->type == _ui_widget_type_column_list)
+			h3_gametypes_update(widget);
+		break;
+	case _input_h3_gametype_actions:
+		if (widget->type == _ui_widget_type_column_list)
+			h3_gametype_actions_update(widget);
+		break;
+	case _input_h3_gametype_question:
+		h3_gametype_question_update(widget);
+		break;
+	case _input_h3_gametype_bases:
+		if (widget->type == _ui_widget_type_column_list)
+			h3_gametype_bases_update(widget);
+		break;
+	case _input_h3_gametype_editor:
+		if (widget->type == _ui_widget_type_column_list)
+			h3_gametype_editor_update(widget);
+		break;
+	case _input_h3_gametype_options:
+		if (widget->type == _ui_widget_type_column_list)
+			h3_gametype_options_update(widget);
 		break;
 	default:
 		break;
@@ -12223,6 +14229,8 @@ void pc_menu_functions_update(
 		menu_functions.open_password = FALSE;
 		menu_functions.create_pending = FALSE;
 		h3_profiles.open_pending = FALSE;
+		h3_gametypes.open_pending = _h3_gametype_open_none;
+		h3_gametypes.leave_pending = FALSE;
 		menu_functions.browse_lan_pending = FALSE;
 		h3_adhoc.open_then = FALSE;
 		h3_adhoc.then = _h3_adhoc_then_none;
@@ -12266,6 +14274,10 @@ while it closes: browser dispose) */
 				NONE, NONE);
 		}
 	}
+	/* (GAME TYPES: the editor or the delete question over the list, the
+	editor closed under its question) */
+	if (h3_gametypes.open_pending != _h3_gametype_open_none || h3_gametypes.leave_pending)
+		h3_gametypes_main_loop();
 	/* (a join's watch goes on from here as the screens change) */
 	join_watch();
 	if (h3_adhoc.open_then)

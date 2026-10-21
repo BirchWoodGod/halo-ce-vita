@@ -2636,6 +2636,22 @@ struct widget_instance *ui_widget_port_active_screen(
 	return widget_globals.active_widgets[local_player_index];
 }
 
+/* port: the screen open at that place (ui_widget_port_active_screen's)
+gone back from, to the one before it in its history, as an event handler's
+back= goes (port/linux/game/menu_functions.c: a Halo 3 dialog's choice that
+closes the screen under it too) */
+void ui_widget_port_go_back(
+	short screen_index)
+{
+	struct widget_instance *screen;
+
+	if (screen_index < 0 || screen_index >= MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
+		return;
+	screen = widget_globals.active_widgets[screen_index];
+	if (screen)
+		widget_instance_go_back_to_previous(screen);
+}
+
 #endif
 #ifdef HALO_LINUX
 /* port: gives a list's child the focus, as up and down do (OpenCE's lists,

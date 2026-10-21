@@ -146,8 +146,9 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 	goes on itself) - the rows of the other networks hidden (port h3 mp lobby); ONLINE, SYSTEM
 	LINK and AD HOC are the settings panel's Connection, switched live when chosen, its status
 	under NETWORK;
-	EDIT GAME TYPES the Xbox's own; ONLINE's rows need internet play, else the screen saying how
-	to turn it on -->
+	EDIT GAME TYPES the Xbox's game type list, which Menu style Halo 3 has in Halo 3's style
+	(halo3/gametypes.xml: the list, the bases, the editor); ONLINE's rows need internet play, else
+	the screen saying how to turn it on -->
 	<widget name="h3/mp/network_row" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3">
 		<on event="a" open="h3/network/screen"/>
 	</widget>

@@ -59,7 +59,7 @@ these screens stand for the Xbox's own, over the same animated Halo ring:
   screen's), GAME OPTIONS on ONLINE (Square: Create Game's name, max
   players, public or private and password, the settings panel's Play page's
   too, which START GAME hosts with),
-  EDIT GAME TYPES (the Xbox's), BROWSE GAMES (the profile, then the games
+  EDIT GAME TYPES (gametypes.xml, below), BROWSE GAMES (the profile, then the games
   browser, network.xml: ONLINE the System Link and the online games in one
   list) and JOIN WITH CODE; ONLINE, SYSTEM LINK and AD HOC are the
   settings panel's Connection (port/linux/game/network_connection.c),
@@ -89,6 +89,32 @@ these screens stand for the Xbox's own, over the same animated Halo ring:
   widget names; the browser's rows show a VITA or PC badge with a lock for a
   password. When internet play is off, ONLINE's rows open a dialog saying how to
   turn it on.
+- gametypes.xml: GAME TYPES, the lobby's EDIT GAME TYPES (it stands for the
+  Xbox's game type list, playlist_select\gametype_select_screen, and its edit
+  screens): the player's saved game types (z:\saved\playlists' files, as
+  the Xbox's list reads them), then the game's own; CREATE NEW GAME TYPE and
+  Triangle make one from a base (one of the game's own); Cross on one opens
+  its options - EDIT, COPY, RENAME (its name typed), DELETE (after a
+  question); the game's own have EDIT and COPY, which make one of the
+  player's -, Square deletes it. The editor: NAME, GAME (Slayer, CTF,
+  Oddball, King of the Hill, Race), then the settings in Halo 3's groups -
+  GENERAL (score to win, lives), RESPAWN (respawn time, its growth, suicide
+  penalty), PLAYER (shields, maximum health, invisible players, odd man out,
+  starting equipment, objective indicator, players on radar, friend
+  indicators), WEAPONS AND VEHICLES (weapon set, infinite grenades, vehicle
+  set), TEAM (teams, Race's team scoring) and the game's own (Slayer's death
+  bonus, kill penalty, kill in order; CTF's assault, single flag, flag must
+  reset, flag at home to score; Oddball's ball type, balls, random start,
+  speed and traits; King's moving hill; Race's type) -, each value stepped
+  through the values the Xbox's edit screens offer; SAVE writes it with the
+  game's own functions (playlist_profile_new, playlist_profile_save: the
+  same file, checksum and SaveMeta.xbx name), the lobby's GAME then on it;
+  Circle with changes asks whether to save them. A game type holds no time
+  limit, friendly fire or betrayal penalty (a PC host's options), and the
+  help says so. A game type of the player's whose file fails its checksum
+  (damaged, or edited outside the game) is DAMAGED in the list - EDIT, COPY
+  and RENAME refused, Square deletes it - and left out of the lobby's GAME.
+  Menu style Halo CE keeps the Xbox's screens.
 - mods.xml: the MOD MANAGER the main menu opens, beside FILE SHARE (where
   Halo 3 keeps the player's content; it covers campaign and multiplayer
   content alike, so no lobby holds it): Halo 3's file list of the player's

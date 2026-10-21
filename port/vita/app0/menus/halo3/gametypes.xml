@@ -1,0 +1,559 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The Halo 3-style GAME TYPES (Menu style Halo 3): it stands for the Xbox's game type list
+(ui\shell\main_menu\settings_select\multiplayer_setup\playlist_select\gametype_select_screen, which
+the multiplayer lobby's EDIT GAME TYPES opens) and the edit screens it leads to (name, game, the
+rules of each game, player, item and indicator options). Its rows are the player's saved game
+types (z:\saved\playlists, the files the Xbox's list reads), then the game's own, CREATE NEW GAME
+TYPE first: Cross on one opens its options - EDIT, COPY, RENAME, DELETE (the game's own: EDIT and
+COPY, which make a game type of the player's) -, Triangle makes a new one from a base (the game's
+own), Square deletes one after a question. The editor is laid out as Halo 3's: NAME, GAME, then
+its settings in groups (GENERAL, RESPAWN, PLAYER, WEAPONS AND VEHICLES, TEAM and the game's own),
+each a screen of rows with their values in ice blue, left and right stepping through the values
+the Xbox's spinners offer, the focused row's help under them; SAVE writes it with the game's
+functions (playlist_profile_new, playlist_profile_save: the same file, its checksum and name), as
+the Xbox's SAVE CHANGES did, and the lobby's GAME, START GAME, online hosting and the Halo CE menus
+list it at once (menu_functions.c "port h3 gametype ..."). The art is this folder's own
+(tools/halo3_menu_art.py). -->
+<menus root="h3/gametypes/screen" replaces="ui\shell\main_menu\settings_select\multiplayer_setup\playlist_select\gametype_select_screen">
+	<strings name="h3/gametype_text">
+		<string text="GAME TYPES"/>
+		<string text="Your game types, then the game's own. Cross: its options."/>
+		<string text="Delete"/>
+		<string text="New Game Type"/>
+		<string text="EDIT"/>
+		<string text="COPY"/>
+		<string text="RENAME"/>
+		<string text="DELETE"/>
+		<string text="DELETE GAME TYPE"/>
+		<string text="CANCEL"/>
+		<string text="CHOOSE A BASE"/>
+		<string text="EDIT GAME TYPE"/>
+		<string text="SAVE"/>
+		<string text="SAVE CHANGES?"/>
+		<string text="SAVE CHANGES"/>
+		<string text="DISCARD CHANGES"/>
+		<string text="Change"/>
+		<string text="The game type your new one starts as: its rules, which\nyou then change. The game's own are never changed."/>
+	</strings>
+
+	<!-- the list: ten rows (they scroll past ten: menu_functions.c h3_gametypes_update), each the
+	game type's name and its game (BUILT-IN for the game's own, DAMAGED for a file that failed its
+	checksum); the first CREATE NEW GAME TYPE. A row's Cross opens the game type's options, or on
+	CREATE NEW GAME TYPE the bases (each handler fails on the other's row) -->
+	<widget name="h3/gametypes/row_name" type="text" left="8" top="0" width="190" height="20" font="h3/font_item" color="#FFE6ECF2" text_y="2"/>
+	<widget name="h3/gametypes/row_note" type="text" left="190" top="0" width="94" height="20" align="right" font="h3/font_small" color="#FF9FB6CC" text_y="3"/>
+	<widget name="h3/gametypes/row_1" width="290" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 gametypes choose" open="h3/gtact/screen"/>
+		<on event="a start" run="port h3 gametypes new" open="h3/gtbase/screen"/>
+		<child widget="h3/gametypes/row_name"/>
+		<child widget="h3/gametypes/row_note"/>
+	</widget>
+	<widget name="h3/gametypes/row_2" width="290" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 gametypes choose" open="h3/gtact/screen"/>
+		<on event="a start" run="port h3 gametypes new" open="h3/gtbase/screen"/>
+		<child widget="h3/gametypes/row_name"/>
+		<child widget="h3/gametypes/row_note"/>
+	</widget>
+	<widget name="h3/gametypes/row_3" width="290" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 gametypes choose" open="h3/gtact/screen"/>
+		<on event="a start" run="port h3 gametypes new" open="h3/gtbase/screen"/>
+		<child widget="h3/gametypes/row_name"/>
+		<child widget="h3/gametypes/row_note"/>
+	</widget>
+	<widget name="h3/gametypes/row_4" width="290" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 gametypes choose" open="h3/gtact/screen"/>
+		<on event="a start" run="port h3 gametypes new" open="h3/gtbase/screen"/>
+		<child widget="h3/gametypes/row_name"/>
+		<child widget="h3/gametypes/row_note"/>
+	</widget>
+	<widget name="h3/gametypes/row_5" width="290" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 gametypes choose" open="h3/gtact/screen"/>
+		<on event="a start" run="port h3 gametypes new" open="h3/gtbase/screen"/>
+		<child widget="h3/gametypes/row_name"/>
+		<child widget="h3/gametypes/row_note"/>
+	</widget>
+	<widget name="h3/gametypes/row_6" width="290" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 gametypes choose" open="h3/gtact/screen"/>
+		<on event="a start" run="port h3 gametypes new" open="h3/gtbase/screen"/>
+		<child widget="h3/gametypes/row_name"/>
+		<child widget="h3/gametypes/row_note"/>
+	</widget>
+	<widget name="h3/gametypes/row_7" width="290" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 gametypes choose" open="h3/gtact/screen"/>
+		<on event="a start" run="port h3 gametypes new" open="h3/gtbase/screen"/>
+		<child widget="h3/gametypes/row_name"/>
+		<child widget="h3/gametypes/row_note"/>
+	</widget>
+	<widget name="h3/gametypes/row_8" width="290" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 gametypes choose" open="h3/gtact/screen"/>
+		<on event="a start" run="port h3 gametypes new" open="h3/gtbase/screen"/>
+		<child widget="h3/gametypes/row_name"/>
+		<child widget="h3/gametypes/row_note"/>
+	</widget>
+	<widget name="h3/gametypes/row_9" width="290" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 gametypes choose" open="h3/gtact/screen"/>
+		<on event="a start" run="port h3 gametypes new" open="h3/gtbase/screen"/>
+		<child widget="h3/gametypes/row_name"/>
+		<child widget="h3/gametypes/row_note"/>
+	</widget>
+	<widget name="h3/gametypes/row_10" width="290" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 gametypes choose" open="h3/gtact/screen"/>
+		<on event="a start" run="port h3 gametypes new" open="h3/gtbase/screen"/>
+		<child widget="h3/gametypes/row_name"/>
+		<child widget="h3/gametypes/row_note"/>
+	</widget>
+	<widget name="h3/gametypes/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port h3 gametype list"/>
+		<on event="left_trigger" run="port h3 gametypes page up"/>
+		<on event="right_trigger" run="port h3 gametypes page down"/>
+		<child widget="h3/gametypes/row_1" x="52" y="102"/>
+		<child widget="h3/gametypes/row_2" x="52" y="124"/>
+		<child widget="h3/gametypes/row_3" x="52" y="146"/>
+		<child widget="h3/gametypes/row_4" x="52" y="168"/>
+		<child widget="h3/gametypes/row_5" x="52" y="190"/>
+		<child widget="h3/gametypes/row_6" x="52" y="212"/>
+		<child widget="h3/gametypes/row_7" x="52" y="234"/>
+		<child widget="h3/gametypes/row_8" x="52" y="256"/>
+		<child widget="h3/gametypes/row_9" x="52" y="278"/>
+		<child widget="h3/gametypes/row_10" x="52" y="300"/>
+	</widget>
+	<!-- (the chosen one's card at the right: its name, its game and whose it is, its rules) -->
+	<widget name="h3/gametypes/info_name" type="text" left="368" top="104" width="222" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1"/>
+	<widget name="h3/gametypes/info_kind" type="text" left="368" top="130" width="222" height="16" font="h3/font_small" color="#FF9FB6CC" text_y="1"/>
+	<widget name="h3/gametypes/info_text" type="text" left="368" top="152" width="222" height="180" font="h3/font_small" color="#FFCFD9E3"/>
+	<widget name="h3/gametypes/status" type="text" left="52" top="340" width="536" height="34" font="h3/font_small" color="#FFF0B070" text_y="1"/>
+	<widget name="h3/gametypes/title" type="text" left="52" top="46" width="400" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/gametype_text" string_index="0"/>
+	<widget name="h3/gametypes/subtitle" type="text" left="52" top="76" width="536" height="16" font="h3/font_small" color="#FFCFD9E3" string_list="h3/gametype_text" string_index="1"/>
+	<!-- (the buttons: Cross Select, Circle Back, Square Delete, Triangle New Game Type; the icons
+	named as the game's keys, a tap presses them: x_butn is the Xbox's X, the Vita's Square) -->
+	<widget name="h3/gametypes/x_butn" left="240" top="422" width="16" height="16" bitmap="h3/glyph_square"/>
+	<widget name="h3/gametypes/delete" type="text" left="260" top="421" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/gametype_text" string_index="2"/>
+	<widget name="h3/gametypes/y_butn" left="334" top="422" width="16" height="16" bitmap="h3/glyph_triangle"/>
+	<widget name="h3/gametypes/new" type="text" left="354" top="421" width="150" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/gametype_text" string_index="3"/>
+	<widget name="h3/gametypes/screen" flags="pass_unhandled_to_focused_child">
+		<on event="created" run="port h3 gametypes init"/>
+		<on event="b back" back="true"/>
+		<on event="x" run="port h3 gametype delete ask" open="h3/gtdel/screen"/>
+		<on event="y" run="port h3 gametypes new" open="h3/gtbase/screen"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/pick/panel"/>
+		<child widget="h3/gametypes/title"/>
+		<child widget="h3/gametypes/subtitle"/>
+		<child widget="h3/pick/rule"/>
+		<child widget="h3/gametypes/info_name"/>
+		<child widget="h3/gametypes/info_kind"/>
+		<child widget="h3/gametypes/info_text"/>
+		<child widget="h3/gametypes/status"/>
+		<child widget="h3/pick/strip"/>
+		<child widget="h3/pick/a_butn"/>
+		<child widget="h3/pick/select"/>
+		<child widget="h3/pick/b_butn"/>
+		<child widget="h3/pick/back"/>
+		<child widget="h3/gametypes/x_butn"/>
+		<child widget="h3/gametypes/delete"/>
+		<child widget="h3/gametypes/y_butn"/>
+		<child widget="h3/gametypes/new"/>
+		<child widget="h3/gametypes/list"/>
+	</widget>
+
+	<!-- a game type's options, a Halo 3 dialog: EDIT (the editor, over the list), COPY and RENAME
+	(its name typed), DELETE (the question); the game's own have EDIT and COPY alone (port h3
+	gametype actions hides the others), the focused one's help under them -->
+	<widget name="h3/gtact/panel" left="120" top="120" width="400" height="220" bitmap="h3/panel"/>
+	<widget name="h3/gtact/title" type="text" left="132" top="126" width="376" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1"/>
+	<widget name="h3/gtact/rule" left="120" top="154" width="400" height="2" bitmap="h3/rule"/>
+	<widget name="h3/gtact/op_edit" type="text" width="376" height="20" bitmap="h3/item" font="h3/font_item" color="#FFF2F6FA" text_x="10" text_y="3" string_list="h3/gametype_text" string_index="4">
+		<on event="a start" run="port h3 gametype edit" back="true"/>
+	</widget>
+	<widget name="h3/gtact/op_copy" type="text" width="376" height="20" bitmap="h3/item" font="h3/font_item" color="#FFF2F6FA" text_x="10" text_y="3" string_list="h3/gametype_text" string_index="5">
+		<on event="a start" run="port h3 gametype copy" back="true"/>
+	</widget>
+	<widget name="h3/gtact/op_rename" type="text" width="376" height="20" bitmap="h3/item" font="h3/font_item" color="#FFF2F6FA" text_x="10" text_y="3" string_list="h3/gametype_text" string_index="6">
+		<on event="a start" run="port h3 gametype rename" back="true"/>
+	</widget>
+	<widget name="h3/gtact/op_delete" type="text" width="376" height="20" bitmap="h3/item" font="h3/font_item" color="#FFF2F6FA" text_x="10" text_y="3" string_list="h3/gametype_text" string_index="7">
+		<on event="a start" run="port h3 gametype delete later" back="true"/>
+	</widget>
+	<widget name="h3/gtact/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port h3 gametype actions"/>
+		<child widget="h3/gtact/op_edit" x="132" y="164"/>
+		<child widget="h3/gtact/op_copy" x="132" y="186"/>
+		<child widget="h3/gtact/op_rename" x="132" y="208"/>
+		<child widget="h3/gtact/op_delete" x="132" y="230"/>
+	</widget>
+	<widget name="h3/gtact/help" type="text" left="132" top="260" width="376" height="54" font="h3/font_small" color="#FFCFD9E3"/>
+	<widget name="h3/gtact/strip" left="120" top="320" width="400" height="20" bitmap="h3/strip"/>
+	<widget name="h3/gtact/a_butn" left="132" top="322" width="16" height="16" bitmap="h3/glyph_cross"/>
+	<widget name="h3/gtact/select" type="text" left="152" top="321" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/campaign_text" string_index="5"/>
+	<widget name="h3/gtact/b_butn" left="226" top="322" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/gtact/back" type="text" left="246" top="321" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/main_items" string_index="10"/>
+	<widget name="h3/gtact/screen" flags="pass_unhandled_to_focused_child">
+		<on event="b back" back="true"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/gtact/panel"/>
+		<child widget="h3/gtact/title"/>
+		<child widget="h3/gtact/rule"/>
+		<child widget="h3/gtact/help"/>
+		<child widget="h3/gtact/strip"/>
+		<child widget="h3/gtact/a_butn"/>
+		<child widget="h3/gtact/select"/>
+		<child widget="h3/gtact/b_butn"/>
+		<child widget="h3/gtact/back"/>
+		<child widget="h3/gtact/list"/>
+	</widget>
+
+	<!-- the question before a delete: CANCEL first (focused), then DELETE GAME TYPE, which deletes
+	it as the Xbox's "final del playlist profile" does (playlist_profile_delete: the player's own,
+	never the game's) -->
+	<widget name="h3/gtdel/panel" left="120" top="150" width="400" height="180" bitmap="h3/panel"/>
+	<widget name="h3/gtdel/title" type="text" left="132" top="156" width="376" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/gametype_text" string_index="8"/>
+	<widget name="h3/gtdel/rule" left="120" top="184" width="400" height="2" bitmap="h3/rule"/>
+	<widget name="h3/gtdel/question" type="text" left="132" top="194" width="376" height="40" font="h3/font_small" color="#FFCFD9E3">
+		<data input="port h3 gametype question"/>
+	</widget>
+	<widget name="h3/gtdel/op_cancel" type="text" width="376" height="20" bitmap="h3/item" font="h3/font_item" color="#FFF2F6FA" text_x="10" text_y="3" string_list="h3/gametype_text" string_index="9">
+		<on event="a start" back="true"/>
+	</widget>
+	<widget name="h3/gtdel/op_delete" type="text" width="376" height="20" bitmap="h3/item" font="h3/font_item" color="#FFF2F6FA" text_x="10" text_y="3" string_list="h3/gametype_text" string_index="8">
+		<on event="a start" run="port h3 gametype delete" back="true"/>
+	</widget>
+	<widget name="h3/gtdel/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<child widget="h3/gtdel/op_cancel" x="132" y="250"/>
+		<child widget="h3/gtdel/op_delete" x="132" y="274"/>
+	</widget>
+	<widget name="h3/gtdel/strip" left="120" top="310" width="400" height="20" bitmap="h3/strip"/>
+	<widget name="h3/gtdel/a_butn" left="132" top="312" width="16" height="16" bitmap="h3/glyph_cross"/>
+	<widget name="h3/gtdel/select" type="text" left="152" top="311" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/campaign_text" string_index="5"/>
+	<widget name="h3/gtdel/b_butn" left="226" top="312" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/gtdel/back" type="text" left="246" top="311" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/main_items" string_index="10"/>
+	<widget name="h3/gtdel/screen" flags="pass_unhandled_to_focused_child">
+		<on event="b back" back="true"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/gtdel/panel"/>
+		<child widget="h3/gtdel/title"/>
+		<child widget="h3/gtdel/rule"/>
+		<child widget="h3/gtdel/question"/>
+		<child widget="h3/gtdel/strip"/>
+		<child widget="h3/gtdel/a_butn"/>
+		<child widget="h3/gtdel/select"/>
+		<child widget="h3/gtdel/b_butn"/>
+		<child widget="h3/gtdel/back"/>
+		<child widget="h3/gtdel/list"/>
+	</widget>
+
+	<!-- CREATE NEW GAME TYPE (and Triangle): the bases, the game's own game types, as Halo 3's
+	Select Map picker (the lobby's GAME's look); Cross makes the new one of it and opens its editor
+	over the list -->
+	<widget name="h3/gtbase/title" type="text" left="52" top="46" width="400" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/gametype_text" string_index="10"/>
+	<widget name="h3/gtbase/item_1" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a start" run="port h3 gametype base" back="true"/>
+	</widget>
+	<widget name="h3/gtbase/item_2" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a start" run="port h3 gametype base" back="true"/>
+	</widget>
+	<widget name="h3/gtbase/item_3" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a start" run="port h3 gametype base" back="true"/>
+	</widget>
+	<widget name="h3/gtbase/item_4" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a start" run="port h3 gametype base" back="true"/>
+	</widget>
+	<widget name="h3/gtbase/item_5" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a start" run="port h3 gametype base" back="true"/>
+	</widget>
+	<widget name="h3/gtbase/item_6" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a start" run="port h3 gametype base" back="true"/>
+	</widget>
+	<widget name="h3/gtbase/item_7" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a start" run="port h3 gametype base" back="true"/>
+	</widget>
+	<widget name="h3/gtbase/item_8" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a start" run="port h3 gametype base" back="true"/>
+	</widget>
+	<widget name="h3/gtbase/item_9" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a start" run="port h3 gametype base" back="true"/>
+	</widget>
+	<widget name="h3/gtbase/item_10" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a start" run="port h3 gametype base" back="true"/>
+	</widget>
+	<widget name="h3/gtbase/item_11" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a start" run="port h3 gametype base" back="true"/>
+	</widget>
+	<widget name="h3/gtbase/item_12" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a start" run="port h3 gametype base" back="true"/>
+	</widget>
+	<widget name="h3/gtbase/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port h3 gametype bases"/>
+		<on event="left_trigger" run="port h3 gametypes page up"/>
+		<on event="right_trigger" run="port h3 gametypes page down"/>
+		<child widget="h3/gtbase/item_1" y="0"/>
+		<child widget="h3/gtbase/item_2" y="19"/>
+		<child widget="h3/gtbase/item_3" y="38"/>
+		<child widget="h3/gtbase/item_4" y="57"/>
+		<child widget="h3/gtbase/item_5" y="76"/>
+		<child widget="h3/gtbase/item_6" y="95"/>
+		<child widget="h3/gtbase/item_7" y="114"/>
+		<child widget="h3/gtbase/item_8" y="133"/>
+		<child widget="h3/gtbase/item_9" y="152"/>
+		<child widget="h3/gtbase/item_10" y="171"/>
+		<child widget="h3/gtbase/item_11" y="190"/>
+		<child widget="h3/gtbase/item_12" y="209"/>
+	</widget>
+	<widget name="h3/gtbase/base_help" type="text" left="320" top="84" width="266" height="40" font="h3/font_small" color="#FFCFD9E3" string_list="h3/gametype_text" string_index="17"/>
+	<widget name="h3/gtbase/info_name" type="text" left="320" top="130" width="266" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1"/>
+	<widget name="h3/gtbase/info_text" type="text" left="320" top="158" width="266" height="170" font="h3/font_small" color="#FFCFD9E3"/>
+	<widget name="h3/gtbase/screen" flags="pass_unhandled_to_focused_child">
+		<on event="b back" back="true"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/pick/panel"/>
+		<child widget="h3/gtbase/title"/>
+		<child widget="h3/pick/rule"/>
+		<child widget="h3/gtbase/base_help"/>
+		<child widget="h3/gtbase/info_name"/>
+		<child widget="h3/gtbase/info_text"/>
+		<child widget="h3/pick/strip"/>
+		<child widget="h3/pick/a_butn"/>
+		<child widget="h3/pick/select"/>
+		<child widget="h3/pick/b_butn"/>
+		<child widget="h3/pick/back"/>
+		<child widget="h3/gtbase/list" x="52" y="84"/>
+	</widget>
+
+	<!-- the editor: NAME (Cross types it), GAME (left and right: SLAYER, CTF, ODDBALL, KING OF THE
+	HILL, RACE - the Xbox's game list; another game's own settings start as its base's), the
+	settings' groups (Cross opens each: h3/gtopt/screen), SAVE; the game type's rules at the right,
+	the focused row's help under the rows. Circle with changes not saved asks first (h3/gtquit) -->
+	<widget name="h3/gtedit/value" type="text" left="152" top="0" width="150" height="20" align="center" font="h3/font_item" color="#FFAABED6" text_y="2" text_flags="no_focus_test"/>
+	<widget name="h3/gtedit/arrow_left" left="144" top="2" width="8" height="16" bitmap="h3/arrow_left"/>
+	<widget name="h3/gtedit/arrow_right" left="302" top="2" width="8" height="16" bitmap="h3/arrow_right"/>
+	<widget name="h3/gtedit/label" type="text" left="0" top="0" width="300" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2"/>
+	<widget name="h3/gtedit/op_name" width="312" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a start" run="port h3 gametype next"/>
+		<child widget="h3/gtedit/label"/>
+		<child widget="h3/gtedit/value"/>
+	</widget>
+	<widget name="h3/gtedit/op_game" width="312" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a right stick_right" run="port h3 gametype next"/>
+		<on event="left stick_left" run="port h3 gametype previous"/>
+		<child widget="h3/gtedit/label"/>
+		<child widget="h3/gtedit/value"/>
+		<child widget="h3/gtedit/arrow_left"/>
+		<child widget="h3/gtedit/arrow_right"/>
+	</widget>
+	<widget name="h3/gtedit/op_general" width="312" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a start" run="port h3 gametype category" open="h3/gtopt/screen"/>
+		<child widget="h3/gtedit/label"/>
+		<child widget="h3/gtedit/value"/>
+	</widget>
+	<widget name="h3/gtedit/op_respawn" width="312" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a start" run="port h3 gametype category" open="h3/gtopt/screen"/>
+		<child widget="h3/gtedit/label"/>
+		<child widget="h3/gtedit/value"/>
+	</widget>
+	<widget name="h3/gtedit/op_player" width="312" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a start" run="port h3 gametype category" open="h3/gtopt/screen"/>
+		<child widget="h3/gtedit/label"/>
+		<child widget="h3/gtedit/value"/>
+	</widget>
+	<widget name="h3/gtedit/op_items" width="312" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a start" run="port h3 gametype category" open="h3/gtopt/screen"/>
+		<child widget="h3/gtedit/label"/>
+		<child widget="h3/gtedit/value"/>
+	</widget>
+	<widget name="h3/gtedit/op_team" width="312" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a start" run="port h3 gametype category" open="h3/gtopt/screen"/>
+		<child widget="h3/gtedit/label"/>
+		<child widget="h3/gtedit/value"/>
+	</widget>
+	<widget name="h3/gtedit/op_rules" width="312" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a start" run="port h3 gametype category" open="h3/gtopt/screen"/>
+		<child widget="h3/gtedit/label"/>
+		<child widget="h3/gtedit/value"/>
+	</widget>
+	<widget name="h3/gtedit/op_save" type="text" width="312" height="20" bitmap="h3/item" font="h3/font_item" color="#FFF2F6FA" text_x="10" text_y="3" string_list="h3/gametype_text" string_index="12">
+		<on event="a start" run="port h3 gametype save" back="true"/>
+	</widget>
+	<widget name="h3/gtedit/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port h3 gametype editor"/>
+		<child widget="h3/gtedit/op_name" x="52" y="102"/>
+		<child widget="h3/gtedit/op_game" x="52" y="124"/>
+		<child widget="h3/gtedit/op_general" x="52" y="150"/>
+		<child widget="h3/gtedit/op_respawn" x="52" y="172"/>
+		<child widget="h3/gtedit/op_player" x="52" y="194"/>
+		<child widget="h3/gtedit/op_items" x="52" y="216"/>
+		<child widget="h3/gtedit/op_team" x="52" y="238"/>
+		<child widget="h3/gtedit/op_rules" x="52" y="260"/>
+		<child widget="h3/gtedit/op_save" x="52" y="286"/>
+	</widget>
+	<widget name="h3/gtedit/title" type="text" left="52" top="46" width="400" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/gametype_text" string_index="11"/>
+	<widget name="h3/gtedit/subtitle" type="text" left="52" top="76" width="536" height="16" font="h3/font_small" color="#FFCFD9E3"/>
+	<widget name="h3/gtedit/info_name" type="text" left="380" top="104" width="210" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1"/>
+	<widget name="h3/gtedit/info_text" type="text" left="380" top="132" width="210" height="180" font="h3/font_small" color="#FFCFD9E3"/>
+	<widget name="h3/gtedit/help" type="text" left="52" top="318" width="536" height="50" font="h3/font_small" color="#FFCFD9E3"/>
+	<widget name="h3/gtedit/status" type="text" left="52" top="372" width="536" height="34" font="h3/font_small" color="#FFF0B070" text_y="1"/>
+	<widget name="h3/gtedit/change" type="text" left="72" top="421" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/gametype_text" string_index="16"/>
+	<widget name="h3/gtedit/screen" flags="pass_unhandled_to_focused_child">
+		<on event="b back" run="port h3 gametype leave ask" open="h3/gtquit/screen"/>
+		<on event="b back" run="port h3 gametype leave" back="true"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/pick/panel"/>
+		<child widget="h3/gtedit/title"/>
+		<child widget="h3/gtedit/subtitle"/>
+		<child widget="h3/pick/rule"/>
+		<child widget="h3/gtedit/info_name"/>
+		<child widget="h3/gtedit/info_text"/>
+		<child widget="h3/gtedit/help"/>
+		<child widget="h3/gtedit/status"/>
+		<child widget="h3/pick/strip"/>
+		<child widget="h3/pick/a_butn"/>
+		<child widget="h3/gtedit/change"/>
+		<child widget="h3/pick/b_butn"/>
+		<child widget="h3/pick/back"/>
+		<child widget="h3/gtedit/list"/>
+	</widget>
+
+	<!-- a group of settings: up to eight rows (port h3 gametype options names and fills them, the
+	others hidden), each its label and its value; Cross and right step a value on, left back, through
+	the values the Xbox's spinners offer; the focused row's help under them, and for what a game
+	type holds none of (time limit, friendly fire, betrayal penalty) where it is set -->
+	<widget name="h3/gtopt/value" type="text" left="300" top="0" width="222" height="20" align="center" font="h3/font_item" color="#FFAABED6" text_y="2" text_flags="no_focus_test"/>
+	<widget name="h3/gtopt/arrow_left" left="292" top="2" width="8" height="16" bitmap="h3/arrow_left"/>
+	<widget name="h3/gtopt/arrow_right" left="522" top="2" width="8" height="16" bitmap="h3/arrow_right"/>
+	<widget name="h3/gtopt/label" type="text" left="0" top="0" width="290" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2"/>
+	<widget name="h3/gtopt/op_1" width="536" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a start right stick_right" run="port h3 gametype next"/>
+		<on event="left stick_left" run="port h3 gametype previous"/>
+		<child widget="h3/gtopt/label"/>
+		<child widget="h3/gtopt/value"/>
+		<child widget="h3/gtopt/arrow_left"/>
+		<child widget="h3/gtopt/arrow_right"/>
+	</widget>
+	<widget name="h3/gtopt/op_2" width="536" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a start right stick_right" run="port h3 gametype next"/>
+		<on event="left stick_left" run="port h3 gametype previous"/>
+		<child widget="h3/gtopt/label"/>
+		<child widget="h3/gtopt/value"/>
+		<child widget="h3/gtopt/arrow_left"/>
+		<child widget="h3/gtopt/arrow_right"/>
+	</widget>
+	<widget name="h3/gtopt/op_3" width="536" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a start right stick_right" run="port h3 gametype next"/>
+		<on event="left stick_left" run="port h3 gametype previous"/>
+		<child widget="h3/gtopt/label"/>
+		<child widget="h3/gtopt/value"/>
+		<child widget="h3/gtopt/arrow_left"/>
+		<child widget="h3/gtopt/arrow_right"/>
+	</widget>
+	<widget name="h3/gtopt/op_4" width="536" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a start right stick_right" run="port h3 gametype next"/>
+		<on event="left stick_left" run="port h3 gametype previous"/>
+		<child widget="h3/gtopt/label"/>
+		<child widget="h3/gtopt/value"/>
+		<child widget="h3/gtopt/arrow_left"/>
+		<child widget="h3/gtopt/arrow_right"/>
+	</widget>
+	<widget name="h3/gtopt/op_5" width="536" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a start right stick_right" run="port h3 gametype next"/>
+		<on event="left stick_left" run="port h3 gametype previous"/>
+		<child widget="h3/gtopt/label"/>
+		<child widget="h3/gtopt/value"/>
+		<child widget="h3/gtopt/arrow_left"/>
+		<child widget="h3/gtopt/arrow_right"/>
+	</widget>
+	<widget name="h3/gtopt/op_6" width="536" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a start right stick_right" run="port h3 gametype next"/>
+		<on event="left stick_left" run="port h3 gametype previous"/>
+		<child widget="h3/gtopt/label"/>
+		<child widget="h3/gtopt/value"/>
+		<child widget="h3/gtopt/arrow_left"/>
+		<child widget="h3/gtopt/arrow_right"/>
+	</widget>
+	<widget name="h3/gtopt/op_7" width="536" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a start right stick_right" run="port h3 gametype next"/>
+		<on event="left stick_left" run="port h3 gametype previous"/>
+		<child widget="h3/gtopt/label"/>
+		<child widget="h3/gtopt/value"/>
+		<child widget="h3/gtopt/arrow_left"/>
+		<child widget="h3/gtopt/arrow_right"/>
+	</widget>
+	<widget name="h3/gtopt/op_8" width="536" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a start right stick_right" run="port h3 gametype next"/>
+		<on event="left stick_left" run="port h3 gametype previous"/>
+		<child widget="h3/gtopt/label"/>
+		<child widget="h3/gtopt/value"/>
+		<child widget="h3/gtopt/arrow_left"/>
+		<child widget="h3/gtopt/arrow_right"/>
+	</widget>
+	<widget name="h3/gtopt/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port h3 gametype options"/>
+		<child widget="h3/gtopt/op_1" x="52" y="102"/>
+		<child widget="h3/gtopt/op_2" x="52" y="124"/>
+		<child widget="h3/gtopt/op_3" x="52" y="146"/>
+		<child widget="h3/gtopt/op_4" x="52" y="168"/>
+		<child widget="h3/gtopt/op_5" x="52" y="190"/>
+		<child widget="h3/gtopt/op_6" x="52" y="212"/>
+		<child widget="h3/gtopt/op_7" x="52" y="234"/>
+		<child widget="h3/gtopt/op_8" x="52" y="256"/>
+	</widget>
+	<widget name="h3/gtopt/title" type="text" left="52" top="46" width="536" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1"/>
+	<widget name="h3/gtopt/subtitle" type="text" left="52" top="76" width="536" height="16" font="h3/font_small" color="#FFCFD9E3"/>
+	<widget name="h3/gtopt/help" type="text" left="52" top="296" width="536" height="50" font="h3/font_small" color="#FFCFD9E3"/>
+	<widget name="h3/gtopt/note" type="text" left="52" top="356" width="536" height="50" font="h3/font_small" color="#FF9FB6CC"/>
+	<widget name="h3/gtopt/screen" flags="pass_unhandled_to_focused_child">
+		<on event="b back" back="true"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/pick/panel"/>
+		<child widget="h3/gtopt/title"/>
+		<child widget="h3/gtopt/subtitle"/>
+		<child widget="h3/pick/rule"/>
+		<child widget="h3/gtopt/help"/>
+		<child widget="h3/gtopt/note"/>
+		<child widget="h3/pick/strip"/>
+		<child widget="h3/pick/a_butn"/>
+		<child widget="h3/gtedit/change"/>
+		<child widget="h3/pick/b_butn"/>
+		<child widget="h3/pick/back"/>
+		<child widget="h3/gtopt/list"/>
+	</widget>
+
+	<!-- Circle in the editor with changes not saved: SAVE CHANGES (as SAVE), DISCARD CHANGES, CANCEL
+	(back to the editor); the first two leave the editor too, for the list -->
+	<widget name="h3/gtquit/panel" left="120" top="150" width="400" height="190" bitmap="h3/panel"/>
+	<widget name="h3/gtquit/title" type="text" left="132" top="156" width="376" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/gametype_text" string_index="13"/>
+	<widget name="h3/gtquit/rule" left="120" top="184" width="400" height="2" bitmap="h3/rule"/>
+	<widget name="h3/gtquit/question" type="text" left="132" top="194" width="376" height="40" font="h3/font_small" color="#FFCFD9E3">
+		<data input="port h3 gametype question"/>
+	</widget>
+	<widget name="h3/gtquit/op_save" type="text" width="376" height="20" bitmap="h3/item" font="h3/font_item" color="#FFF2F6FA" text_x="10" text_y="3" string_list="h3/gametype_text" string_index="14">
+		<on event="a start" run="port h3 gametype save quit" back="true"/>
+	</widget>
+	<widget name="h3/gtquit/op_discard" type="text" width="376" height="20" bitmap="h3/item" font="h3/font_item" color="#FFF2F6FA" text_x="10" text_y="3" string_list="h3/gametype_text" string_index="15">
+		<on event="a start" run="port h3 gametype discard" back="true"/>
+	</widget>
+	<widget name="h3/gtquit/op_cancel" type="text" width="376" height="20" bitmap="h3/item" font="h3/font_item" color="#FFF2F6FA" text_x="10" text_y="3" string_list="h3/gametype_text" string_index="9">
+		<on event="a start" back="true"/>
+	</widget>
+	<widget name="h3/gtquit/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<child widget="h3/gtquit/op_save" x="132" y="240"/>
+		<child widget="h3/gtquit/op_discard" x="132" y="262"/>
+		<child widget="h3/gtquit/op_cancel" x="132" y="284"/>
+	</widget>
+	<widget name="h3/gtquit/strip" left="120" top="320" width="400" height="20" bitmap="h3/strip"/>
+	<widget name="h3/gtquit/a_butn" left="132" top="322" width="16" height="16" bitmap="h3/glyph_cross"/>
+	<widget name="h3/gtquit/select" type="text" left="152" top="321" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/campaign_text" string_index="5"/>
+	<widget name="h3/gtquit/b_butn" left="226" top="322" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/gtquit/back" type="text" left="246" top="321" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/main_items" string_index="10"/>
+	<widget name="h3/gtquit/screen" flags="pass_unhandled_to_focused_child">
+		<on event="b back" back="true"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/gtquit/panel"/>
+		<child widget="h3/gtquit/title"/>
+		<child widget="h3/gtquit/rule"/>
+		<child widget="h3/gtquit/question"/>
+		<child widget="h3/gtquit/strip"/>
+		<child widget="h3/gtquit/a_butn"/>
+		<child widget="h3/gtquit/select"/>
+		<child widget="h3/gtquit/b_butn"/>
+		<child widget="h3/gtquit/back"/>
+		<child widget="h3/gtquit/list"/>
+	</widget>
+</menus>

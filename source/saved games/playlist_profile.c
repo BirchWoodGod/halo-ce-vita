@@ -279,8 +279,22 @@ void playlist_profiles_enumerate_available_to_local_player_index(
 {
 	if (playlist_profile_default_data.first_time == TRUE)
 	{
+#ifdef HALO_LINUX
+		/* port: the game's own game types made under the saved game files'
+		mutex: an enumeration on another thread meanwhile (the profiles'
+		for the nameplate, SELECT PROFILE) read the ones made so far
+		(playlist_profile_number_of_default_profiles_on_disk), and, ending
+		after this notified the change, cleared memory_units_dirty: the game
+		type lists then lacked the rest for the whole run (15 to 21 of the
+		26, the Halo 3 GAME TYPES screen's tests) */
+		boolean locked = saved_game_files_take_mutex();
+#endif
 		playlist_profile_create_default_profiles_on_disk();
 		playlist_profile_default_data.first_time = FALSE;
+#ifdef HALO_LINUX
+		if (locked)
+			saved_game_files_release_mutex();
+#endif
 	}
 
 	saved_game_files_enumerate_available_to_local_player_index(
