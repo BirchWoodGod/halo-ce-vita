@@ -39,12 +39,7 @@ fixes from players' dumps (dropped weapons, HUD sounds, vehicles); fixed
 checkpoints; Warthog windshields, energy shields, camouflage, scopes and
 water drawn correctly.
 
-## In beta: 1.1.0: multiplayer, co-op and custom maps
-
-The 1.1.0 betas are on the
-[releases page](https://github.com/BirchWoodGod/halo-ce-vita/releases) as
-pre-releases (network version 18: every Vita in a game needs the same
-version).
+### 1.1.0 (October 14, 2026): multiplayer, co-op and custom maps
 
 - **Online play between Vitas** with OpenCE's in-game multiplayer menus: a
   server browser of public games (with passwords), Join by code, and
@@ -73,22 +68,118 @@ version).
 - Fixes for #30 (16:9 scopes), #31 (sun glow), #32 (muzzle flash) and #33
   (The Maw's armoury: shadows, and the cloaked Flood's slowdown).
 
-### Coming in the later 1.1.0 betas
+## Next: 1.1.1 (insider builds now, public beta next)
 
-- **The Quality profile at 30 fps** in the big fights: the Xbox's full
-  detail at a steadier frame rate (no change to the network, so the betas
-  keep playing together).
+Testers in the [Discord](https://discord.gg/Ed7sbCgAF5) play the insider
+builds first. The public 1.1.1 beta comes out once every problem they
+reported is fixed and the features under "Before the public beta" are in.
 
-## Next: 1.1.1
+### Already in the insider builds
 
-Fixes for the bugs found in the 1.1.0 betas.
+- **Halo 3-style menus**: main menu, campaign and multiplayer lobbies, a
+  live multiplayer lobby, SELECT PROFILE, new pause menus. The classic
+  menus stay as a setting, and every option stays in the settings panel.
+- **Friends, party (up to 8) and party chat**: friend codes, invites,
+  joining a friend's game without a code.
+- **Forge**: fly as the Monitor, place, move and rotate objects, AI
+  (Covenant, Flood, Sentinels, Marines), Banshees, Wraiths, Shades and the
+  flyable Pelican on every map, building blocks, saved map variants, and
+  multiplayer Forge for up to 8.
+- **File Share and a mod manager**, and MCC campaign mods (offline).
+- **Crossplay with PC**: one browser for Vita and PC games, WHO CAN JOIN
+  for hosts, OpenCE's newer network versions, and host-side anti-cheat.
+- **System Link and Ad hoc browsers**, and Ad hoc co-op.
+- **PC builds** of this port (Linux and Windows) with keyboard and mouse.
+- Ragdolls, movies fixed, and a sharp interface layer.
+
+### Before the public beta
+
+- Every bug reported on the insider builds fixed (joining, map downloads,
+  the server browser, freezes, the Customization preview, checkpoints).
+- **Game type editor** in the Halo 3 style (being built).
+- **Carnage report** after a game, Halo 3 style.
+- **Halo 3-style message boxes** and campaign prompts.
+- **"Classic plus"**: the new features on the classic menus too.
+- **Renamed custom maps** (like `cursed-bloodgulch`) in the map lists.
+- **Friends backup**: your friend identity saved with a password.
+- **Infection built in**: zombies with melee only, the killed join the
+  zombies, last human standing; local, bots, online and the official
+  servers.
 
 ## Later
 
-- **A steady 30 fps** in the biggest fights.
+### Birch's ideas
+
+- **A steady 30 fps** in the biggest fights, and the Quality profile at
+  30 fps there.
+- **Better performance on Custom Edition maps.**
 - **QR code invites**: the host shows its lobby code as a QR code, and the
   joiner scans it with the Vita's camera.
 - **Loading**: a level start without the remaining few seconds of waiting.
+- **Text chat in games** (voice chat is likely too heavy for the Vita).
+- **Split screen** on the PS TV.
+- **Halo Reach-style menus** ("could be another thing to add in the
+  future").
+- **More armour and models** for Customization (artists wanted).
+- **Sharing Forge variants with friends** through File Share.
+- **Forge on the classic menus** too, not only the Halo 3 ones (OpenCE is
+  adding Forge as well).
+- **AI respawning** in Forge.
+- **Forge's AI using the multiplayer bots' logic**: campaign characters
+  (Elites, Grunts, Marines) playing the game type like the bots do.
+- **Tools to build your own modes in Forge**, so players can make things
+  like Halo 5's Warzone themselves: AI that defends a spot or an
+  objective (Hunters guarding a base), AI respawning, AI on a team, and
+  points for AI kills and objectives in the game type editor. We make the
+  tools; the modes are up to the players.
+- **Forge variants with AI played with the multiplayer bots.**
+- **Multiplayer lobbies with bots** on the Vita: bots filling the empty
+  slots in games you host for other players.
+- **"VITA+"**: the VITA PC tag renamed if Android and iOS builds come.
+
+### Claude's suggestions
+
+Claude is the AI that helps build the port.
+
+- **Game logic speed-ups** seen in other Halo CE projects: collision tests
+  in one pass, sound occlusion that stops at the first hit, light passes
+  limited to their area.
+- **More online hardening**: more of the host's own checks on what
+  players send.
+- **The Windows build tested on real Windows** before it's called
+  supported (it's tested under Wine so far).
+- **Controls you can find**: zoom labelled "Right stick (zoom)" on the
+  Buttons and Touch zones pages, since players looked for it.
+- **Leftovers kept out of Forge**: Bungie's unfinished gravity rifle (it
+  has no model and does no damage).
+- **Matchmaking playlists** on the official servers (Slayer, Infection,
+  Snipers, a featured community map): press "find game" and play.
+- **File Share with ratings**: browse, download and rate friends' and the
+  community's maps and game types.
+- **Credits in the game** for the testers and map makers.
+- **Game nights** on the official servers, announced in the Discord.
+
+### Asked for by testers
+
+| Request | Asked by | Birch's answer | Status |
+|---|---|---|---|
+| Field of view setting | DestinyTellsFacts | "I will add the fov btw, its on the list" | Planned |
+| The original loading screens with their sound, and a fast loading option | xal | "Yeah they are broken right now, trying to bring them back" / "that loading screen is essential" | Planned |
+| The 1999 reveal-trailer Master Chief armour | Wonka | "It's on the way. If anyone is good at modeling please hit me up!" | Needs a modeler |
+| Zoom on the rear touchpad or the D-pad | BlazeRed | "There should be a remapping section and touch controls mapping" | Already there (zoom is "Right stick"); a clearer label is planned |
+| Zoom on Select | Gold Yoshi | (xal: select + down, Controls tab) | Already possible |
+| Aim assist off while using the gyro | Boopop | "I can add that option" | Done (insider.15) |
+| A restart prompt after switching crossplay | LadyCassie | "Im actually adding a feature to be able to change the network settings live" | Done (no switch, no restart) |
+| Linux build with bots | Helldiver450, Bruno Santana | "Comes with everything the vita version comes with and forge" | Done (insider.17) |
+| Show renamed custom maps (`cursed-bloodgulch`) in the menus | Grunt pirate | Made a must for the beta | Before the public beta |
+| Halo Reach-style menus | NXBLE | "maybe another time. If someone else makes it that'll help me a lot" | Later, help wanted |
+| Aim assist on/off for the stick | xal | Not answered yet | Open |
+| The stick's ramp-up as an option, dead zone and response curve settings | DestinyTellsFacts, xal, Wonka | Not answered yet | Open |
+| Touchscreen aiming | xal | Not answered yet | Open |
+| Skulls (campaign modifiers) | Wonka | "Skulls would be fun" | Planned |
+| A "potato" graphics preset (flat lighting, no shadows, no filtering) | Helldiver450 | Not answered yet | Open |
+| Dark armour colours easier to see in dark levels | DestinyTellsFacts | Not answered yet | Open |
+| European (PAL) game files: Spanish, Italian, French, German | sobredosis | Not answered yet | Open (sobredosis wrote a guide) |
 
 ## Help wanted
 
