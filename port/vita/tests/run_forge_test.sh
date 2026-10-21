@@ -79,6 +79,12 @@
 #               N%)", the copy's own progress moving), then builds them.
 #               With HALO_TEST_PROFILE's profile (the lobby hosts with one;
 #               default ../vita-save-backups/20261017-halo-profile)
+#   packnote    START FORGE pressed while the lobby's EXTRA OBJECTS build
+#               (their reads slowed, HALO_TEST_SLOW_IO): refused, "Still
+#               building <pack> (N%)"; then no input at all: the note's number
+#               moves on by itself, and once the packs are built the note
+#               goes (insider.18: it stood on the number of the press until X
+#               was pressed again); screenshots of the two
 #   smallmap    Chill Out: the Warthog (the map's own tags) and the Banshee (a
 #               pack's) in the browser, both placed
 #   aiteam      the AI's team (the properties' AI TEAM, here the console's
@@ -198,7 +204,7 @@
 # HALO_TEST_KEEP=1, or copied to HALO_TEST_SHOTS when it is set.
 #
 #   run_forge_test.sh [CASE...]      (default: v1 budget fly b30 off files variants
-#                                     edit fileshare fstouch panel packs packcopy smallmap
+#                                     edit fileshare fstouch panel packs packnote packcopy smallmap
 #                                     aiteam aioff round aisave allai allaimenu flood
 #                                     clearai clearaimenu rotate floodcov sentinels marines
 #                                     aivariant cepelican cepelicanoff pelican blocks)
@@ -224,7 +230,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_forge_test.$$}
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs packcopy smallmap aiteam aioff round aisave allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks lobbycost}
+cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs packnote packcopy smallmap aiteam aioff round aisave allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks lobbycost}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
@@ -441,6 +447,18 @@ packs_runs() {
 	"$out/forge_files_test" --dump "$store/forge/bloodgulch/pack_test.hmv" > "$out/packs/dump.txt" 2>&1
 	run packs-load 70 "" "" "$(pick 1)" HALO_MENU_STYLE=halo3 HALO_SAVE_ROOT="$store"
 	mkdir -p "$out/packs"
+}
+
+# (packnote: the lobby, down to START FORGE (past MAP and EXTRA OBJECTS), A:
+# refused while the packs build; then nothing pressed)
+packnotepad="$lobby down:150:500 down:150:500 a:150:300 @00-refused:0:300 wait:150:20000 @01-no-input:0:300"
+packnotepad="$packnotepad wait:150:75000"
+
+packnote_runs() {
+	local store="$out/packnote-store"
+	rm -rf "$store"
+	mkdir -p "$store"
+	run packnote 110 "" "" "$packnotepad" HALO_MENU_STYLE=halo3 HALO_SAVE_ROOT="$store" HALO_TEST_SLOW_IO=20000:all
 }
 
 # (cepelican: EXTRA OBJECTS, down three to Extinction Pelican, the builds
@@ -1005,6 +1023,12 @@ for c in $cases; do
 			continue
 		fi
 		packs_runs & ;;
+	packnote)
+		if [ "$menus_files" = 0 ]; then
+			echo "SKIP: packnote: no Halo PC bitmaps.map and loc.map in $data/maps"
+			continue
+		fi
+		packnote_runs & ;;
 	smallmap)
 		smallmap_runs & ;;
 	packcopy)
@@ -1181,6 +1205,20 @@ for c in $cases; do
 			expect cepelicanoff "the others loaded, nothing said of it in the game" \
 				"forge: packs: loaded: Covenant vehicles, Dropships; left out: none"
 		fi
+		continue
+	fi
+	if [ "$c" = packnote ]; then
+		checked packnote || continue
+		log="$out/packnote/run.log"
+		expect packnote "START FORGE refused while a pack builds" "menus: forge lobby: not started: .* is being built"
+		# (after the press, no input: the lobby's notes as they changed)
+		after=$(sed -n '/menus: forge lobby: not started: /,$p' "$log")
+		values=$(grep -ao "note at [0-9]* ms: Still building [^(]*([0-9]*%)" <<< "$after" | sed 's/.*ms: //' | sort -u | wc -l)
+		[ "$values" -ge 3 ] && echo "  ok: packnote: the refused note's number moved with no input ($values values)" ||
+			fail "packnote: the refused note stood ($values values of \"Still building\" after the press)"
+		grep -aq "note at [0-9]* ms: No score or time limit" <<< "$after" &&
+			echo "  ok: packnote: the note went once the packs were built, with no input" ||
+			fail "packnote: the note never cleared after the packs were built"
 		continue
 	fi
 	if [ "$c" = packs ]; then
