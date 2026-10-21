@@ -112,6 +112,8 @@ static struct
 	/* the round's end logged, and a problem */
 	boolean end_logged;
 	boolean problem_logged;
+	/* the game over seen here (every machine) */
+	boolean over_logged;
 } infection_globals;
 
 /* ---------- settings */
@@ -568,6 +570,7 @@ static boolean infection_initialize_for_new_map(void)
 	infection_globals.last_human_told = NONE;
 	infection_globals.end_logged = FALSE;
 	infection_globals.problem_logged = FALSE;
+	infection_globals.over_logged = FALSE;
 	return slayer_engine.initialize_for_new_map ? slayer_engine.initialize_for_new_map() : TRUE;
 }
 
@@ -619,6 +622,14 @@ static void infection_update(void)
 
 	if (slayer_engine.update)
 		slayer_engine.update();
+	/* (every machine: the game's end as it has it, for its log) */
+	if (!infection_globals.over_logged && !game_engine_in_play())
+	{
+		infection_globals.over_logged = TRUE;
+		infection_count(&humans, &zombies);
+		platform_log("infection: game over here: the %s win (%ld humans, %ld zombies)",
+			humans > 0 ? "humans" : "zombies", humans, zombies);
+	}
 	/* (every machine: no grenades in a zombie's hands, its own predicted
 	unit's too) */
 	data_iterator_new(&iterator, player_data);
