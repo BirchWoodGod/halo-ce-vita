@@ -17,6 +17,8 @@ import sys
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 FONTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fonts')
+# (the owner's own artwork the menus use, as drawn)
+ART_SOURCES = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'art')
 
 
 def lerp(a, b, t):
@@ -636,37 +638,19 @@ def forge_emblem():
 
 
 def title_halo():
-    # HALO in a soft blue glow, COMBAT EVOLVED under it (Halo 3's title look)
-    # (drawn at four times and scaled down: the menus draw a picture 1:1,
-    # 256x64 in the 640x480 screen)
-    scale = 4
-    image = Image.new('RGBA', (256 * scale, 64 * scale), (0, 0, 0, 0))
-    big = ImageFont.truetype(os.path.join(FONTS, 'SairaSemiCondensed-Medium.ttf'), 42 * scale)
-    small = ImageFont.truetype(os.path.join(FONTS, 'SairaSemiCondensed-Regular.ttf'), 9 * scale)
-    text = Image.new('RGBA', image.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(text)
-    spacing = 11 * scale
-    width = 256 * scale
-    widths = [draw.textlength(c, font=big) for c in 'HALO']
-    total = sum(widths) + spacing * 3
-    x = (width - total) / 2
-    for c, w in zip('HALO', widths):
-        draw.text((x, -4 * scale), c, font=big, fill=(207, 227, 245, 255))
-        x += w + spacing
-    sub = 'COMBAT EVOLVED'
-    sub_spacing = 4.5 * scale
-    sub_widths = [draw.textlength(c, font=small) for c in sub]
-    sub_total = sum(sub_widths) + sub_spacing * (len(sub) - 1)
-    x = (width - sub_total) / 2
-    for c, w in zip(sub, sub_widths):
-        draw.text((x, 49 * scale), c, font=small, fill=(159, 182, 204, 255))
-        x += w + sub_spacing
-    glow = text.split()[3].filter(ImageFilter.GaussianBlur(3.5 * scale))
-    halo = Image.new('RGBA', image.size, (140, 200, 255, 0))
-    halo.putalpha(glow.point(lambda value: round(value * .55)))
-    image = Image.alpha_composite(image, halo)
-    image = Image.alpha_composite(image, text)
-    return image.resize((256, 64), Image.Resampling.LANCZOS)
+    # the owner's HALO CE VITA logo (tools/art/halo_ce_vita_logo.png, his own
+    # drawing), fitted into the title's 256x64 and centred (the menus draw a
+    # picture 1:1, 256x64 in the 640x480 screen)
+    logo = Image.open(os.path.join(ART_SOURCES, 'halo_ce_vita_logo.png')).convert('RGBA')
+    box = logo.getbbox()
+    if box:
+        logo = logo.crop(box)
+    fit = min(256 / logo.width, 64 / logo.height)
+    size = (max(1, round(logo.width * fit)), max(1, round(logo.height * fit)))
+    logo = logo.resize(size, Image.Resampling.LANCZOS)
+    image = Image.new('RGBA', (256, 64), (0, 0, 0, 0))
+    image.paste(logo, ((256 - size[0]) // 2, (64 - size[1]) // 2), logo)
+    return image
 
 
 # the menus' fonts (menu_tags.c makes each a font tag of the game's): the
