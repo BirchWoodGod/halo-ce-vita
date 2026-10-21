@@ -390,6 +390,18 @@ int forge_net_lobby_valid(
 		if (message->capabilities != 0 || message->packs_ready != 0)
 			return 0;
 	}
+	else if (message->command == _forge_net_lobby_building)
+	{
+		/* (the packs still building, bits of the hello's; flags its
+		percent) */
+		if (message->capabilities != 0 || message->flags > 100)
+			return 0;
+		if (message->reason != _forge_net_refusal_none || message->pack_count != 0 || message->title[0] ||
+			message->packs_ready >> FORGE_NET_MAXIMUM_PACKS)
+		{
+			return 0;
+		}
+	}
 	else
 	{
 		if (message->command != _forge_net_lobby_answer)
@@ -404,7 +416,7 @@ int forge_net_lobby_valid(
 	{
 		return 0;
 	}
-	if (message->flags & ~FORGE_NET_SESSION_FLAGS_KNOWN)
+	if (message->command != _forge_net_lobby_building && (message->flags & ~FORGE_NET_SESSION_FLAGS_KNOWN))
 		return 0;
 	if (message->pack_count > FORGE_NET_MAXIMUM_PACKS)
 		return 0;

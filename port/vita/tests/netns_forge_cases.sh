@@ -43,6 +43,15 @@
 #              lobby; a third machine browsing the public games never sees or joins it, the
 #              broker never gets a listing; START FORGE takes host and friend into Forge; the
 #              third machine then joins by the host's code, into the game in progress
+#   h3forgeslow  h3forgeonline's host and friend only, the friend's packs built as slowly as a
+#              Vita's (HALO_TEST_SLOW_IO, its source maps' reads too: minutes): the friend
+#              says it still builds the host's packs, START FORGE's countdown holds at 0 for
+#              it ("Waiting for ... to build the extra objects") and the game starts once
+#              they are built; the friend plays and edits. insider.18 (Oct 20, two Vitas):
+#              the countdown ran out at once, the friend built them as the map loaded, past
+#              the host's minute-long wait for the machines' loads, and was dropped
+#              ("forcibly removing client ... timeout while loading"), the host's screen
+#              still meanwhile
 #   forgepanel the settings panel's Forge page, Network on (Menu style Halo CE: the
 #              classic menus' route), asked by HALO_SYSTEM_LINK_TEST=forgenet:9: the
 #              System Link screen's profile, then a network Forge game of Blood Gulch
@@ -375,6 +384,48 @@ forge_case() {
 		grep -aq "forge net: machine 2 plays the Forge game" "$hl" || fail "the machine with the code did not play the Forge game"
 		grep -aqE "forge net: the host's layout read: [1-9][0-9]* objects" "$jl3" ||
 			fail "the machine with the code was not given the layout"
+		;;
+	h3forgeslow)
+		local menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+		if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS) or no HALO_TEST_PROFILE"; return 0
+		fi
+		local hc=$out/host.code jc=$out/joiner.code hd=$out/host/data/debug.txt
+		mkdir -p "$out/host/save/u/UDATA/869079979327"
+		cp "$HALO_TEST_PROFILE" "$out/host/save/u/UDATA/869079979327/blam.sav"
+		[ -r "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" ] &&
+			cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$out/host/save/u/UDATA/869079979327/"
+		# (h3forgeonline's pad: FORGE, ONLINE, INVITE FRIENDS, START FORGE)
+		local pad="wait:150:3000 down:150:600 down:150:600 a:150:3000 up:150:700 a:150:2000"
+		pad="$pad up:150:500 up:150:500 up:150:500 a:150:3000 wait:150:${HALO_TEST_INVITE_WAIT:-35000} @forge-slow-lobby:0:300"
+		pad="$pad lt wait:150:4000 a wait:150:3000 b wait:150:30000 @forge-slow-joined:0:300"
+		pad="$pad down:150:500 down:150:500 down:150:500 a:150:3000 @forge-slow-countdown:0:300"
+		HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
+			HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_NET_LOBBY_NAME=Alpha \
+			"HALO_TEST_FRIENDS=code-file=$hc,add-file=$jc" "HALO_TEST_PAD=$pad"
+		host_pid=$last_pid
+		# (the friend's packs' reads, and their source maps', at 4 MB/s: b40's and b30's a
+		# minute each, as on a Vita's memory card with its inflating)
+		run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-invite \
+			HALO_NET_LOBBY_NAME=Bravo "HALO_TEST_FRIENDS=code-file=$jc,accept" HALO_TEST_FRIENDS_ANSWER=accept \
+			HALO_TEST_SLOW_IO=${HALO_TEST_SLOW_BUILD_RATE:-4096}:all \
+			"HALO_TEST_COMMANDS=L300:forge camera 60 -100 1.6 150 0;L320:forge spawn boulder;L330:forge distance 6;L340:forge drop"
+		join_pid=$last_pid
+		wait $join_pid $host_pid 2>/dev/null
+		forge_check_clean "$hl" "$jl"
+		echo "--- host"; grep -aE "forge net: machine|menus: h3 pregame: (Starting|Waiting for)" "$hl" | head -12
+		grep -aq "friends: invited .* into this machine's game" "$hl" || fail "the host's invite was not sent"
+		grep -aq "system link: in another's lobby" "$jl" || fail "the friend did not land in the Forge lobby by the invite"
+		grep -aq "forge net: the host's packs still building here: said to the host" "$jl" ||
+			fail "the friend did not say it was still building the host's packs"
+		grep -aq "forge net: machine 1 builds the host's packs: the game's start waits for it" "$hl" ||
+			fail "the host did not hold the start for the friend's build"
+		grep -aq "menus: h3 pregame: Waiting for .* to build the extra objects" "$hl" || fail "the host's lobby did not say why it waits"
+		grep -aq "forge net: machine 1 has built the host's packs" "$hl" || fail "the host was not told the friend's packs were built"
+		grep -aq "forcibly removing client system .* due to timeout while loading" "$hd" &&
+			fail "the host dropped the friend while it loaded (its packs built at the map's load)"
+		grep -aq "forge: levels.test.bloodgulch.bloodgulch loaded for a Forge game" "$jl" || fail "the friend's Forge game did not start"
+		grep -aq "forge net: machine 1 spawned boulder" "$hl" || fail "the friend's edit was not the host's"
 		;;
 	forgepanel)
 		local menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}

@@ -1464,6 +1464,7 @@ static void party_update(void);
 static void party_leave_now(int tell, const char *why);
 static void party_key_blocked(const unsigned char *key);
 static void party_friend_entry(const struct friend_record *record, struct p2p_friend_entry *entry);
+static void party_friend_new_run(struct friend_record *record);
 
 /* ---------- messages */
 
@@ -1960,6 +1961,22 @@ static void own_name(char *name)
 		snprintf(name, P2P_FRIEND_NAME_SIZE, "Player");
 }
 
+/* the name a presence carries: the game's player's, or none until the
+game says it - friends keep the name they know then (a presence's name is
+taken only when it has one; their friend request brought one). own_name's
+stand-in, the lobby's name, is a game's name, not the player's: a run's
+first presences, sent before its profile was chosen, renamed this machine on
+every friend's list to it ("Bloodgulch ctf") until the profile's came. (A
+party status keeps own_name: the members who are not friends know a member
+by it alone) */
+static void own_presence_name(char *name)
+{
+	if (friends->name[0])
+		own_name(name);
+	else
+		name[0] = 0;
+}
+
 /* a pair message to a friend */
 static int send_pair(struct friend_record *record, struct message *message)
 {
@@ -2105,7 +2122,7 @@ static int presence_sign(int online, int want_reply)
 	int joinable = 0;
 
 	message_start(&message, TYPE_PRESENCE, NULL);
-	own_name(message.name);
+	own_presence_name(message.name);
 	message.flags = (online ? PRESENCE_ONLINE : 0) | (want_reply ? PRESENCE_WANT_REPLY : 0);
 	message.game.difficulty = -1;
 	if (online)
@@ -2319,6 +2336,12 @@ static int replay_check(struct friend_record *record, unsigned long long epoch, 
 		return 0;
 	if (epoch > record->epoch)
 	{
+		/* (a new run of theirs after one seen: what was between this machine
+		and the run that closed - its game's invite, the party's invites
+		either way, its place in the party - went with it; signed, and newer
+		than every message of theirs seen, so never a replay's doing) */
+		if (record->epoch)
+			party_friend_new_run(record);
 		record->epoch = epoch;
 		record->counter = counter;
 		record->window = 1;

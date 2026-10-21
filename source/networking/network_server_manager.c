@@ -475,6 +475,7 @@ symbols in this file:
 #include "custom_edition_cache.h"
 #include "custom_edition_maps.h"
 #include "map_share.h"
+#include "forge.h"
 #include "dedicated_server.h"
 #include "bots.h"
 #include "network_wire.h"
@@ -5772,6 +5773,9 @@ static boolean network_game_server_idle_pregame_tasks(
 				/* port: no machine is downloading the map (the lobby shows
 				how far: port/linux/game/map_share.c) */
 				!map_share_server_holds_start(server) &&
+				/* port: no joiner is still building the packs of the
+				host's network Forge game (forge_net.inc) */
+				!forge_net_server_holds_start(server, NULL, 0, NULL) &&
 #endif
 				network_game_server_have_all_machines_have_precached(server) &&
 				server->countdown_state.paused == FALSE)

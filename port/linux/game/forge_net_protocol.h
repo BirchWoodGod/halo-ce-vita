@@ -68,6 +68,14 @@ they do not have is left out, said, and its objects not shown.
 #define FORGE_NET_HELLO_MILLISECONDS 6000
 /* the host's hello sent again this often until answered */
 #define FORGE_NET_HELLO_RESEND_MILLISECONDS 1000
+/* a joiner still building the host's packs says so this often (its
+_forge_net_lobby_building), and the host holds its game's start for it
+while the last said is this recent (a joiner gone silent holds nothing) */
+#define FORGE_NET_BUILDING_MILLISECONDS 2000
+#define FORGE_NET_BUILDING_STALE_MILLISECONDS 10000
+/* the longest a joiner's build holds the start (then the game starts, and
+it loads what is left as before) */
+#define FORGE_NET_BUILDING_MAXIMUM_MILLISECONDS 300000
 
 /* the lobby message's room */
 #define FORGE_NET_MAXIMUM_PACKS 8
@@ -124,6 +132,13 @@ enum
 	_forge_net_lobby_answer,
 	/* (the host's) it is refused from this Forge game, why */
 	_forge_net_lobby_refused,
+	/* (a joiner's, after its answer) the hello's packs it is still
+	building (packs_ready: their bits; 0: all built) and how far (flags:
+	0 to 100 percent): the host holds the game's start until each is built -
+	a joiner that built them as the map loaded took longer on a Vita than the
+	host waits for a machine's load, and was dropped. An older host drops it
+	unread (an invalid answer), as before */
+	_forge_net_lobby_building,
 	NUMBER_OF_FORGE_NET_LOBBY_COMMANDS
 };
 
