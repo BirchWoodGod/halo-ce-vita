@@ -2892,19 +2892,29 @@ and a load. Either the sleeper's test sees the publish or the publisher
 sees the sleeper (both sides' accesses sequentially consistent); a signal
 the sleeper did not wait for is a spurious wake-up later, and every wait
 tests again in a loop. The waits are timed (HALO_WAIT_TIMEOUT_US, default
-100 ms): one that runs out of time with its work there and no signal given
-is a lost wake-up, counted and logged - none is expected. Without a
-semaphore (none could be made) the waits sleep 50 us at a time, as before. */
+100 ms): one that runs out of time with its work there is a lost wake-up
+unless the publish it saw is one whose signal is on its way (the
+publisher between its publish and its signal: `woken_at`, the publish a
+signal was given for, says which) - counted and logged, none is expected.
+Without a semaphore (none could be made) the waits sleep 50 us at a time,
+as before. */
 struct worker_waiter
 {
 	volatile int sleepers;
 	int wake;
 	const char *name;
-	/* sleeps, the ones that ran out of time, the lost wake-ups */
-	unsigned long sleeps, timeouts, lost;
+	/* the publishes it waits on, counted (command_head, frames_presented),
+	and the count the last signal was given at */
+	unsigned long (*published)(void);
+	volatile unsigned long woken_at;
+	/* sleeps, the ones that ran out of time, the signals that came after
+	the time ran out, the lost wake-ups */
+	unsigned long sleeps, timeouts, late, lost;
 };
-static struct worker_waiter worker_waiter = { 0, -1, "the render worker", 0, 0, 0 };
-static struct worker_waiter game_waiter = { 0, -1, "the game's thread", 0, 0, 0 };
+static unsigned long records_published(void);
+static unsigned long frames_published(void);
+static struct worker_waiter worker_waiter = { 0, -1, "the render worker", records_published, 0, 0, 0, 0, 0 };
+static struct worker_waiter game_waiter = { 0, -1, "the game's thread", frames_published, 0, 0, 0, 0, 0 };
 /* the record the worker sleeps before, and the records that wake it at
 once (one past the last present or flushing record committed): others
 wake it only WORKER_WAKE_BATCH at a time, since most wait for the present
@@ -2949,6 +2959,16 @@ static void waiter_initialize(struct worker_waiter *waiter, const char *semaphor
 		platform_log("render worker: no semaphore for %s (%d): its waits poll", waiter->name, waiter->wake);
 }
 
+static unsigned long records_published(void)
+{
+	return __atomic_load_n(&command_head, __ATOMIC_SEQ_CST);
+}
+
+static unsigned long frames_published(void)
+{
+	return __atomic_load_n(&frames_presented, __ATOMIC_SEQ_CST);
+}
+
 /* (after a publish) the sleepers woken */
 static void waiter_wake(struct worker_waiter *waiter)
 {
@@ -2959,6 +2979,8 @@ static void waiter_wake(struct worker_waiter *waiter)
 	if (!__atomic_load_n(&waiter->sleepers, __ATOMIC_RELAXED))
 		return;
 	sleepers = __atomic_exchange_n(&waiter->sleepers, 0, __ATOMIC_SEQ_CST);
+	if (sleepers > 0)
+		__atomic_store_n(&waiter->woken_at, waiter->published(), __ATOMIC_RELEASE);
 	while (sleepers-- > 0)
 		vita_host_wake_signal(waiter->wake);
 }
@@ -2983,14 +3005,26 @@ static int waiter_sleep(struct worker_waiter *waiter, int (*ready)(unsigned long
 	result = vita_host_wake_wait(waiter->wake, wait_timeout_us());
 	if (result == 1)
 	{
-		int now_ready = ready(argument);
+		unsigned long seen = waiter->published();
+		int now_ready = ready(argument), late = 0;
 
 		waiter->timeouts++;
-		/* (a signal given since is a wake-up that came late, not one lost) */
-		if (now_ready && vita_host_wake_poll(waiter->wake) != 0 && ++waiter->lost <= 8)
-			platform_log("render worker: lost wake-up %lu (%s): the wait ran out with its work there", waiter->lost,
-				waiter->name);
-		else if (wait_stats() >= 2)
+		if (now_ready)
+		{
+			/* the signal for the publish seen given meanwhile, or on its
+			way (the publisher between the two: up to 100 ms more), is a
+			wake-up that came late; none, or one for a later publish only,
+			is one lost */
+			late = vita_host_wake_poll(waiter->wake) == 0 ||
+				(vita_host_wake_wait(waiter->wake, 100000) == 0 &&
+					(long)(__atomic_load_n(&waiter->woken_at, __ATOMIC_ACQUIRE) - seen) <= 0);
+			if (late)
+				waiter->late++;
+			else if (++waiter->lost <= 8)
+				platform_log("render worker: lost wake-up %lu (%s): the wait ran out with its work there", waiter->lost,
+					waiter->name);
+		}
+		if (wait_stats() >= 2 && (!now_ready || late))
 			platform_log("render worker: a wait of %s ran out of time (%lu us), %s", waiter->name, wait_timeout_us(),
 				now_ready ? "its signal given meanwhile" : "its work not there yet");
 	}
@@ -3005,9 +3039,9 @@ static void wait_stats_report(void)
 
 	if (!wait_stats() || ++presents % 1800)
 		return;
-	platform_log("waits: the render worker slept %lu times (%lu ran out of time, %lu lost wake-ups), the game's thread "
-		"%lu (%lu, %lu)", worker_waiter.sleeps, worker_waiter.timeouts, worker_waiter.lost, game_waiter.sleeps,
-		game_waiter.timeouts, game_waiter.lost);
+	platform_log("waits: the render worker slept %lu times (%lu ran out of time, %lu woken late, %lu lost wake-ups), the "
+		"game's thread %lu (%lu, %lu, %lu)", worker_waiter.sleeps, worker_waiter.timeouts, worker_waiter.late,
+		worker_waiter.lost, game_waiter.sleeps, game_waiter.timeouts, game_waiter.late, game_waiter.lost);
 }
 
 /* the worker's sleep before record `position` ends: enough records, or one
