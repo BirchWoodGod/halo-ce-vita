@@ -3524,6 +3524,15 @@ void halo_d3d_indices_written(const void *data, unsigned long bytes)
 	(void)bytes;
 }
 
+/* (rasterizer_xbox_environment.c) how far a stage's coordinates reach, in
+its texels: the Vita's device takes far-reaching ones back near zero
+(d3d8_gxm.c); a desktop GPU filters them in full precision */
+void halo_d3d_texcoord_extent(long stage, float texels_per_unit)
+{
+	(void)stage;
+	(void)texels_per_unit;
+}
+
 void halo_d3d_stream_attribute(long reg, long stream)
 {
 	device.extra_attribute_active = reg >= 0 && reg < XGPU_VERTEX_ATTRIBUTE_COUNT && stream >= 0 && stream < 16;

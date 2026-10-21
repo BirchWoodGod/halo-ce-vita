@@ -390,8 +390,20 @@ unsigned long vgxm_shader_get(const char *source, int fragment)
 	return ++null.shader_count;
 }
 
+/* (tests) HALO_NULL_REFUSE=text: a program whose Cg holds the text does
+not compile, as the device's compiler refuses one (run_wrapped_coordinates_test.sh) */
 unsigned long vgxm_shader_request(const char *source, int fragment)
 {
+	static const char *refuse = (const char *)-1;
+
+	if (refuse == (const char *)-1)
+	{
+		refuse = getenv("HALO_NULL_REFUSE");
+		if (refuse && !*refuse)
+			refuse = NULL;
+	}
+	if (refuse && strstr(source, refuse))
+		return 0;
 	return vgxm_shader_get(source, fragment);
 }
 

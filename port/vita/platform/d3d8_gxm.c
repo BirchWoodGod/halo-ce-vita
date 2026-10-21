@@ -1920,6 +1920,58 @@ COMPLEX_RENDER_STATE(RopZCmpAlwaysRead, D3DRS_ROPZCMPALWAYSREAD)
 COMPLEX_RENDER_STATE(RopZRead, D3DRS_ROPZREAD)
 COMPLEX_RENDER_STATE(DoNotCullUncompressed, D3DRS_DONOTCULLUNCOMPRESSED)
 
+/* Far-reaching texture coordinates. The game says how many texels one
+unit of a stage's coordinates spans (halo_d3d_texcoord_extent: the
+environment's detail, micro detail, bump and self-illumination maps,
+rasterizer_xbox_environment.c). a30's ground repeats its detail maps 240
+and 300 times across its one base map (61 440 to 153 600 texels a unit,
+the base coordinates 0..1), its cliffs their micro detail map over base
+coordinates up to 5 (61 440 a unit): on the Vita those surfaces drew as
+coarse blocks of texels and zigzag streaks (a player's 1.1.0 photos, Oct
+21 2026) where the PC filters them smoothly - read as the fraction of so
+large a coordinate being lost before the texture unit (inferred from the
+pictures and the numbers; the harness draws nothing to check it on).
+Blood Gulch's ground (30 720 at most) draws fine; Battle Creek has one
+micro detail map at 61 440. A stage at WRAP_COORDINATES_TEXELS or more
+(HALO_WRAP_TEXELS=n; 0 never) is marked in a stage state of the port's
+own past the Xbox's (D3DTSS_COLORKEYCOLOR is 30, D3DTSS_MAX 32), which
+the materials carry like any other; a marked raw 2D stage with WRAP
+addressing fetches the varying's fraction, with the varying's own
+derivatives so the mip level is the same (nv2a_psh_cg.c). Should the
+device's compiler refuse such a program, the marking stops for the
+session and the draws go back to the plain fetch. */
+#define HALO_TSS_WRAP_COORDINATES 31
+#define WRAP_COORDINATES_TEXELS 32768.0f
+static int wrap_coordinates_refused;
+
+/* (the key builders) whether a stage with these states takes its
+coordinates wrapped */
+static BOOL coordinates_wrapped(const DWORD *stage_state)
+{
+	return stage_state[HALO_TSS_WRAP_COORDINATES] && !wrap_coordinates_refused &&
+		stage_state[D3DTSS_ADDRESSU] == D3DTADDRESS_WRAP && stage_state[D3DTSS_ADDRESSV] == D3DTADDRESS_WRAP;
+}
+
+static void texture_state_store(DWORD stage, unsigned long type, DWORD value);
+
+void halo_d3d_texcoord_extent(long stage, float texels_per_unit)
+{
+	static float threshold = -1.0f;
+
+	if (threshold < 0.0f)
+	{
+		const char *setting = getenv("HALO_WRAP_TEXELS");
+
+		threshold = setting && *setting ? (float)atof(setting) : WRAP_COORDINATES_TEXELS;
+		if (threshold < 0.0f)
+			threshold = 0.0f;
+	}
+	if (stage < 0 || stage >= D3DTSS_MAXSTAGES)
+		return;
+	texture_state_store((DWORD)stage, HALO_TSS_WRAP_COORDINATES,
+		threshold > 0.0f && texels_per_unit >= threshold && !wrap_coordinates_refused);
+}
+
 /* stores a texture stage state, marking the state dirty if it changes */
 static void texture_state_store(DWORD stage, unsigned long type, DWORD value)
 {
@@ -2313,6 +2365,13 @@ static void fragment_entry_resolve(struct fragment_entry *entry)
 		dump_shader(source, "ps", entry->hash);
 	if (!shader)
 		platform_log("pixel shader %08lx does not compile", entry->hash);
+	if (!shader && entry->key.wrapped_coordinates && !wrap_coordinates_refused)
+	{
+		/* (the draws' keys go back to plain fetches from the next record) */
+		wrap_coordinates_refused = 1;
+		platform_log("pixel shader %08lx (wrapped coordinates) does not compile: far-reaching coordinates are fetched "
+			"as they are from now on", entry->hash);
+	}
 	free(source);
 }
 
@@ -3219,6 +3278,7 @@ static int worker_texture_bits(struct render_command *command, const struct reco
 	}
 	key->raw_coordinates = 0;
 	key->projective_coordinates = 0;
+	key->wrapped_coordinates = 0;
 	for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
 	{
 		unsigned long mode = (rs[D3DRS_PSTEXTUREMODES] >> (5 * stage)) & 0x1f;
@@ -3243,7 +3303,11 @@ static int worker_texture_bits(struct render_command *command, const struct reco
 				if (!description.linear && !description.cube_map)
 				{
 					if (!(program->texcoord_w_mask & (1UL << stage)))
+					{
 						key->raw_coordinates |= (unsigned char)(1U << stage);
+						if (coordinates_wrapped(state->material->texture_state[stage]))
+							key->wrapped_coordinates |= (unsigned char)(1U << stage);
+					}
 					else
 					{
 						key->projective_coordinates |= (unsigned char)(1U << stage);
@@ -7039,7 +7103,11 @@ static struct render_record *record_draw(BOOL immediate)
 				if (!description->linear && !description->cube_map)
 				{
 					if (!(program->texcoord_w_mask & (1UL << stage)))
+					{
 						key->raw_coordinates |= (unsigned char)(1U << stage);
+						if (coordinates_wrapped(state))
+							key->wrapped_coordinates |= (unsigned char)(1U << stage);
+					}
 					else
 					{
 						/* the program writes the coordinate's w: a
