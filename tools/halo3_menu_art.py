@@ -672,16 +672,12 @@ def title_halo():
     shape.paste(logo.getchannel('A'), at)
     image = Image.new('RGBA', (width, height), (0, 0, 0, 0))
     # (two blurs of the shape: a wide faint one and a closer one)
-    for radius, strength in ((14, .2), (5, .16)):
+    for radius, strength in ((14, .42), (5, .38)):
         spread = shape.filter(ImageFilter.GaussianBlur(radius))
         spread = spread.point(lambda value, strength=strength: round(min(255, value * strength * 1.6)))
         glow = Image.new('RGBA', (width, height), (96, 160, 235, 0))
         glow.putalpha(spread)
         image = Image.alpha_composite(image, glow)
-    # (the logo itself a little dimmer than drawn: on the dark menus at full
-    # brightness it outshone the rest; Halo 3's title is a soft pale blue)
-    logo = Image.merge('RGBA', [band.point(lambda value: round(value * .8)) for band in logo.split()[:3]] +
-        [logo.getchannel('A')])
     layer = Image.new('RGBA', (width, height), (0, 0, 0, 0))
     layer.paste(logo, at)
     return Image.alpha_composite(image, layer)
