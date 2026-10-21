@@ -127,10 +127,14 @@ enum
 	CARD_RELAY_INTERVAL = 250,
 	CARD_RELAY_MACHINE_INTERVAL = 1000,
 	/* the flaming helmet's (p2p_flame.inc): a claim's proof asked for and
-	given on the cards' channel, kinds a build before it drops unread; the
-	name signed is the claimant's in the game's record, 12 UTF-16 units */
+	given in the game's own messages (port/linux/game/flame_net.c: any wire
+	but the crossplay one; a build before it drops them unread), laid out as
+	a card's; the name signed is the claimant's in the game's record, 12
+	UTF-16 units */
 	CARD_FLAME_ASK = 3,
 	CARD_FLAME_ANSWER = 4,
+	MAXIMUM_FLAME_PACKETS = 16,
+	FLAME_PACKETS_PER_PASS = 4,
 	FLAME_NAME_SIZE = 24,
 	FLAME_ANSWER_SIZE = CARD_HEADER_SIZE + P2P_KEY_SIZE + P2P_SIGNATURE_SIZE,
 	/* a claim asked about this often, at most this many times a game;
@@ -139,7 +143,10 @@ enum
 	FLAME_ASK_INTERVAL = 4000,
 	FLAME_TRIES = 4,
 	FLAME_ANSWER_TIME = 8000,
-	FLAME_RELAY_MACHINE_INTERVAL = 200,
+	FLAME_RELAY_MACHINE_BUDGET = 8,
+	FLAME_RELAY_MACHINE_INTERVAL = 250,
+	FLAME_RELAY_BUDGET = 32,
+	FLAME_RELAY_INTERVAL = 50,
 	MAXIMUM_INBOUND = 64,
 	MAXIMUM_OUTBOUND = 64,
 	/* what is kept free of the outgoing queue for what is not presence */
@@ -248,6 +255,13 @@ signalling's (a PC build of this tree signals on hceu), as the labels are
 
 /* ---------- structures */
 
+/* work allowed: some at once, and one more each interval (p2p_signal.c's) */
+struct budget
+{
+	int left;
+	unsigned long time;
+};
+
 /* a player's machine in the game this machine plays (p2p_friends_set_game):
 its address (the host's table), and its friend card once asked for */
 struct card_machine
@@ -271,6 +285,7 @@ struct card_machine
 	machine's player claims it (its name there); this machine's ask (its
 	nonce, when, how many); what came of it (proven: the listed key that
 	proved it; refused); (answering, relaying) when last */
+	int flame_present;
 	int flame_claim;
 	unsigned char flame_name[FLAME_NAME_SIZE];
 	int flame_asking;
@@ -281,7 +296,17 @@ struct card_machine
 	int flame_refused;
 	unsigned char flame_key[P2P_KEY_SIZE];
 	unsigned long flame_answered_time;
-	unsigned long flame_relayed_time;
+	struct budget flame_relay_budget;
+};
+
+/* a flaming helmet packet heard in the game's messages, or to send there
+(p2p_flame.inc) */
+struct flame_packet
+{
+	int machine;
+	int from_host;
+	int size;
+	unsigned char bytes[CARD_HEADER_SIZE + P2P_KEY_SIZE + P2P_SIGNATURE_SIZE];
 };
 
 /* a card packet heard on the tunnel (p2p.c), or to send there */
@@ -293,13 +318,6 @@ struct card_packet
 	int from_host;
 	int size;
 	unsigned char bytes[CARD_ANSWER_SIZE];
-};
-
-/* work allowed: some at once, and one more each interval (p2p_signal.c's) */
-struct budget
-{
-	int left;
-	unsigned long time;
 };
 
 /* what a friend's presence said */
@@ -713,6 +731,14 @@ struct friends_state
 	record (what it signs) */
 	int flame_loaded;
 	struct tester_list flame_list;
+	/* its packets heard (sender: the host's reading of the machine, -1 one
+	from the host) and to send (machine: the host's destination, -1 to the
+	host) */
+	struct flame_packet flame_inbound[MAXIMUM_FLAME_PACKETS];
+	int flame_inbound_count;
+	struct flame_packet flame_outbound[MAXIMUM_FLAME_PACKETS];
+	int flame_outbound_count;
+	struct budget flame_relay_budget;
 	unsigned char flame_own_name[FLAME_NAME_SIZE];
 #ifdef P2P_FRIENDS_TEST
 	int test_flame_force, test_flame_forge;
@@ -3474,12 +3500,6 @@ never the sender's word; a few a second at most, per machine and in all.
 Every field is checked: the sizes, the machines, the nonce of an ask this
 machine made, the signature, the key. */
 
-/* the flaming helmet's (p2p_flame.inc) */
-static int flame_kind(int kind);
-static void flame_relay(int sender, int to, const unsigned char *bytes, int size);
-static void flame_heard(int from, const unsigned char *bytes);
-static void flame_update(void);
-
 static void card_queue(unsigned long address, const unsigned char *bytes, int size)
 {
 	struct card_packet *packet;
@@ -3596,11 +3616,9 @@ static void card_heard(const struct card_packet *packet)
 	const unsigned char *bytes = packet->bytes;
 	int from, to;
 
-	if (packet->size < CARD_HEADER_SIZE || bytes[0] != CARD_VERSION ||
-		!((bytes[1] == CARD_ASK && packet->size == CARD_HEADER_SIZE) ||
-		(bytes[1] == CARD_ANSWER && packet->size == CARD_ANSWER_SIZE) ||
-		(bytes[1] == CARD_FLAME_ASK && packet->size == CARD_HEADER_SIZE) ||
-		(bytes[1] == CARD_FLAME_ANSWER && packet->size == FLAME_ANSWER_SIZE)) || !friends->in_game)
+	if (packet->size < CARD_HEADER_SIZE || bytes[0] != CARD_VERSION || (bytes[1] != CARD_ASK && bytes[1] != CARD_ANSWER) ||
+		(bytes[1] == CARD_ASK && packet->size != CARD_HEADER_SIZE) ||
+		(bytes[1] == CARD_ANSWER && packet->size != CARD_ANSWER_SIZE) || !friends->in_game)
 	{
 		friends->dropped_malformed++;
 		return;
@@ -3624,24 +3642,6 @@ static void card_heard(const struct card_packet *packet)
 			return;
 		}
 		from = sender;
-		/* (the flaming helmet's: relayed only proven, p2p_flame.inc) */
-		if (flame_kind(bytes[1]))
-		{
-			if (to != friends->game_machine)
-			{
-				flame_relay(sender, to, bytes, packet->size);
-				return;
-			}
-		}
-#ifdef HALO_DEDICATED_SERVER
-		else
-		{
-			/* (a server relays the flaming helmet's alone: no player of its
-			own, no friends) */
-			friends->dropped_malformed++;
-			return;
-		}
-#endif
 		if (to != friends->game_machine)
 		{
 			struct card_machine *machine = &friends->machines[sender];
@@ -3664,11 +3664,6 @@ static void card_heard(const struct card_packet *packet)
 	{
 		/* (a joiner hears cards from its host alone, to its own machine) */
 		friends->dropped_forged++;
-		return;
-	}
-	if (flame_kind(bytes[1]))
-	{
-		flame_heard(from, bytes);
 		return;
 	}
 	if (bytes[1] == CARD_ASK)
@@ -3842,7 +3837,6 @@ static void cards_update(void)
 				"or an older build)", index);
 		}
 	}
-	flame_update();
 }
 
 void p2p_friends_set_game(int machine, int hosting, const unsigned long *addresses, int count)
@@ -4207,14 +4201,8 @@ void p2p_friends_update(const struct p2p_friends_host *host)
 	int was_online, was_on, appear_offline, joinable;
 
 #ifdef HALO_DEDICATED_SERVER
-	/* (no identity made, nothing heard or sent: only the flaming helmet's
-	proofs relayed between the game's players, checked, p2p_flame.inc) */
-	pthread_mutex_lock(&friends_lock);
-	friends->host = *host;
-	cards_update();
-	pthread_mutex_unlock(&friends_lock);
-	(void)index, (void)handled, (void)signatures, (void)keys, (void)was_online, (void)was_on, (void)appear_offline,
-		(void)joinable;
+	/* (no identity made, nothing heard or sent) */
+	(void)host;
 	return;
 #endif
 	pthread_mutex_lock(&friends_lock);

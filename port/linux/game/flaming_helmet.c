@@ -8,7 +8,12 @@ host's word), and of this machine's own first player while it wears it
 (player.flaming_helmet, listed). Never in the wearer's own first person
 view (the particles are the local player's, not drawn first person: render
 particles), in third person (a vehicle, dead), for everyone else, and on
-CUSTOMIZATION's Spartan (flaming_helmet_preview).
+CUSTOMIZATION's Spartan (flaming_helmet_preview). In every game: online,
+System Link, ad hoc, co-op, and offline (split screen, bots, Forge, the
+campaign), where a listed tester's own needs no proof (their own screen);
+in split screen player 1's alone (the identity is the machine's, not a
+profile's). Cutscenes: drawn on the player's biped when the cutscene shows
+it; never on one a script hid or took off the map (a stand-in in its place).
 
 No art of the project's: the stock multiplayer maps' own Covenant smoke
 particle (FLAME_PARTICLE, in every one of them; grey, made to be tinted:
@@ -177,8 +182,15 @@ static void flame_emit(long object_index, short local_player_index)
 	long particle = flame_particle();
 	int index;
 
-	if (particle == NONE || !flame_head(object_index, &head))
+	struct object_datum *object = object_try_and_get(object_index);
+
+	/* (a biped a script hid or took off the map - a cutscene's player put
+	aside for a stand-in - carries none; one a cutscene shows does) */
+	if (particle == NONE || !object || TEST_FLAG(object->object.flags, _object_invisible_bit) ||
+		!TEST_FLAG(object->object.flags, _object_connected_to_map_bit) || !flame_head(object_index, &head))
+	{
 		return;
+	}
 	object_get_velocities(object_index, &velocity, &angular);
 	for (index = 0; index < 2 * FLAME_PARTICLES_PER_TICK; index++)
 	{

@@ -259,6 +259,7 @@ symbols in this file:
 #include "networking/network_game_manager.h"
 #include "networking/network_game_protocol.h"
 #include "networking/network_messages.h"
+#include "flame_net.h"
 #include "networking/network_server_manager_internal.h"
 #include "networking/network_server_message_handler.h"
 #include "text/unicode.h"
@@ -1414,6 +1415,22 @@ boolean network_game_server_handle_client_message(
 						/* port: a joiner's answer to the game's rules
 						(port/linux/game/infection_net.c), from a machine joined
 						to the game (checked above); never on the crossplay wire */
+						/* port: the flaming helmet's proofs (port/linux/game/
+						flame_net.c), from a machine joined to the game (checked
+						above), in any state; never on the crossplay wire */
+						case _message_client_flame:
+							if (network_wire_crossplay())
+							{
+								network_event("ignoring a flame message on the crossplay wire");
+								break;
+							}
+							flame_net_server_handle_message(
+								server,
+								machine,
+								message,
+								message_buffer_size);
+							break;
+
 						case _message_client_game_rules:
 							if (network_wire_crossplay())
 							{

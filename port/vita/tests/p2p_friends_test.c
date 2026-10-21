@@ -2419,7 +2419,7 @@ static void flame_players(const int *claims)
 	for (index = 0; index < MACHINES; index++)
 	{
 		use(index);
-		p2p_flame_set_players(claims, &flame_names[0][0], MACHINES, flame_names[index]);
+		p2p_flame_set_players(claims, claims, &flame_names[0][0], MACHINES, flame_names[index]);
 	}
 }
 
@@ -2429,11 +2429,11 @@ static int flame_take(int machine, int kind, unsigned char *bytes)
 {
 	int index;
 
-	for (index = 0; index < machines[machine].card_outbound_count; index++)
-		if (machines[machine].card_outbound[index].bytes[1] == kind)
+	for (index = 0; index < machines[machine].flame_outbound_count; index++)
+		if (machines[machine].flame_outbound[index].bytes[1] == kind)
 		{
-			memcpy(bytes, machines[machine].card_outbound[index].bytes, (size_t)machines[machine].card_outbound[index].size);
-			return machines[machine].card_outbound[index].size;
+			memcpy(bytes, machines[machine].flame_outbound[index].bytes, (size_t)machines[machine].flame_outbound[index].size);
+			return machines[machine].flame_outbound[index].size;
 		}
 	return 0;
 }
@@ -2470,21 +2470,54 @@ static void flame_reask(int asker, int machine)
 	record->flame_tries = 0;
 	record->flame_asked_time = 0;
 	use(asker);
-	machines[asker].card_outbound_count = 0;
+	machines[asker].flame_outbound_count = 0;
 	pthread_mutex_lock(&friends_lock);
 	flame_update();
 	pthread_mutex_unlock(&friends_lock);
-	machines[asker].card_outbound_count = 0;
+	machines[asker].flame_outbound_count = 0;
 }
 
 static void flame_hear(int machine, const unsigned char *packet)
 {
 	use(machine);
-	p2p_friends_tunnel_heard(virtual_of(0), 1, packet, FLAME_ANSWER_SIZE);
-	pthread_mutex_lock(&friends_lock);
-	cards_update();
-	pthread_mutex_unlock(&friends_lock);
-	machines[machine].card_outbound_count = 0;
+	p2p_flame_heard(-1, packet, FLAME_ANSWER_SIZE);
+	p2p_flame_update();
+	machines[machine].flame_outbound_count = 0;
+}
+
+/* a pass of every machine's flame work (the game's main loop's), its
+packets carried as the game's messages: a joiner's to the host (which
+reads the sender's machine itself), the host's to its destination */
+static void flame_pass(int count, int host)
+{
+	int pass_index, from, index;
+
+	for (pass_index = 0; pass_index < count; pass_index++)
+	{
+		clock_now += 500;
+		for (from = 0; from < MACHINES; from++)
+		{
+			use(from);
+			p2p_flame_update();
+		}
+		for (from = 0; from < MACHINES; from++)
+		{
+			struct flame_packet packets[MAXIMUM_FLAME_PACKETS];
+			int count_out = machines[from].flame_outbound_count;
+
+			memcpy(packets, machines[from].flame_outbound, sizeof(packets[0]) * (size_t)count_out);
+			machines[from].flame_outbound_count = 0;
+			for (index = 0; index < count_out; index++)
+			{
+				int to = from == host ? packets[index].machine : host;
+
+				if (to < 0 || to >= MACHINES || to == from)
+					continue;
+				use(to);
+				p2p_flame_heard(from == host ? -1 : from, packets[index].bytes, packets[index].size);
+			}
+		}
+	}
 }
 
 static void test_flame(void)
@@ -2502,7 +2535,7 @@ static void test_flame(void)
 		flame_key_hex(index, keys[index]);
 		addresses[index] = virtual_of(index);
 		memset(machines[index].machines, 0, sizeof(machines[index].machines));
-		machines[index].card_outbound_count = machines[index].card_inbound_count = 0;
+		machines[index].flame_outbound_count = machines[index].flame_inbound_count = 0;
 		machines[index].test_appeared_offline = 0;
 	}
 	flame_name(0, "Alpha");
@@ -2570,7 +2603,7 @@ static void test_flame(void)
 	flame_players(claims);
 	for (index = 0; index < MACHINES; index++)
 		reset_drops(index);
-	game_pass(40);
+	flame_pass(40, 0);
 	use(1);
 	check(p2p_flame_verified(0), "flame: Bravo checked the host's (Alpha's) flame");
 	use(2);
@@ -2664,28 +2697,24 @@ static void test_flame(void)
 
 		memset(none, 0, sizeof(none));
 		use(1);
-		p2p_flame_set_players(claims, &flame_names[0][0], MACHINES, none);
-		machines[1].card_outbound_count = 0;
+		p2p_flame_set_players(claims, claims, &flame_names[0][0], MACHINES, none);
+		machines[1].flame_outbound_count = 0;
 		machines[1].machines[0].flame_answered_time = 0;
 		ask[0] = CARD_VERSION;
 		ask[1] = CARD_FLAME_ASK;
 		ask[2] = 0;
 		ask[3] = 1;
 		posix_random_bytes(ask + 4, NONCE_LENGTH);
-		p2p_friends_tunnel_heard(virtual_of(0), 1, ask, CARD_HEADER_SIZE);
-		pthread_mutex_lock(&friends_lock);
-		cards_update();
-		pthread_mutex_unlock(&friends_lock);
+		p2p_flame_heard(-1, ask, CARD_HEADER_SIZE);
+		p2p_flame_update();
 		check(!flame_take(1, CARD_FLAME_ANSWER, answer), "flame: no proof before its own name is known");
-		machines[1].card_outbound_count = 0;
-		p2p_flame_set_players(claims, &flame_names[0][0], MACHINES, flame_names[1]);
-		p2p_friends_tunnel_heard(virtual_of(0), 1, ask, CARD_HEADER_SIZE);
+		machines[1].flame_outbound_count = 0;
+		p2p_flame_set_players(claims, claims, &flame_names[0][0], MACHINES, flame_names[1]);
+		p2p_flame_heard(-1, ask, CARD_HEADER_SIZE);
 		clock_now += CARD_ANSWER_INTERVAL;
-		pthread_mutex_lock(&friends_lock);
-		cards_update();
-		pthread_mutex_unlock(&friends_lock);
+		p2p_flame_update();
 		check(flame_take(1, CARD_FLAME_ANSWER, answer) == FLAME_ANSWER_SIZE, "flame: ... and a proof once it is");
-		machines[1].card_outbound_count = 0;
+		machines[1].flame_outbound_count = 0;
 	}
 	/* a claim gone (the player left, another in the slot): forgotten */
 	claims[1] = 0;
@@ -2700,7 +2729,7 @@ static void test_flame(void)
 	{
 		use(index);
 		p2p_friends_set_game(-1, 0, NULL, 0);
-		machines[index].card_outbound_count = 0;
+		machines[index].flame_outbound_count = 0;
 	}
 
 	/* a modified host: Charlie hosts (2), claims the flame for everyone and
@@ -2721,11 +2750,7 @@ static void test_flame(void)
 		claims[index] = 1;
 	flame_players(claims);
 	/* (the joiners route their packets to the host, Charlie) */
-	for (index = 0; index < 40; index++)
-	{
-		pass(1);
-		tunnel_route(2);
-	}
+	flame_pass(40, 2);
 	use(0);
 	check(!p2p_flame_verified(2) && !p2p_flame_verified(3) && !p2p_flame_verified(1),
 		"flame: a modified host's forged proofs: Alpha draws none of them");
@@ -2739,7 +2764,7 @@ static void test_flame(void)
 	{
 		use(index);
 		p2p_friends_set_game(-1, 0, NULL, 0);
-		machines[index].card_outbound_count = 0;
+		machines[index].flame_outbound_count = 0;
 		machines[index].flame_loaded = 0;
 	}
 	unsetenv("HALO_FLAMING_HELMET");

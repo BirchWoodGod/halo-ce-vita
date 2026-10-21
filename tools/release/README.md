@@ -285,15 +285,23 @@ urgent revocation hand the new list out to the testers and the servers.
 - A tester can give their flame away (as by giving away their
   `friends/identity.dat`): only a new list version takes it back. One key
   lights one player a game.
-- LAN (System Link) and ad hoc games carry no proofs (they are internet
-  play's tunnel's): no flames there but your own. Nor on the crossplay wire
-  (OpenCE PC hosts), nor in a game whose host is an older build (it drops
-  the proofs: only its joiners' own flames, on their own screens).
+- The proofs travel in the game's own messages, so every network game has
+  them: online, System Link, ad hoc, co-op, a dedicated server's. Not the
+  crossplay wire (OpenCE PC hosts), nor a game whose host is an older build
+  (it drops them: only its joiners' own flames, on their own screens).
+- Offline (split screen, bots, Forge, the campaign) a listed tester's own
+  flame shows with nothing to prove: it is their own screen. In split screen
+  it is player 1's alone (the identity is the machine's, not a profile's).
+- Cutscenes show it on the Master Chief when the cutscene shows the player's
+  own biped; one a script hides or takes off the map (a stand-in in its
+  place) carries none.
 
 ### Tests
 
 `port/vita/tests/run_tester_list_test.sh` (the list and the tool, ASan),
 `run_p2p_friends_test.sh` (the proofs, ASan) and
-`run_netns_flame_test.sh` (three copies online in namespaces, a throwaway
-key: configure with `--testers-test-key <its public key>`, test builds only,
-refused with `--release`; `HALO_TEST_TESTERS_KEY=<its private key file>`).
+`run_netns_flame_test.sh all` (offline multiplayer and campaign; online,
+a modified host, System Link, ad hoc and online co-op in namespaces; a
+throwaway key: configure with `--testers-test-key <its public key>`, test
+builds only, refused with `--release`; `HALO_TEST_TESTERS_KEY=<its private
+key file>`).
