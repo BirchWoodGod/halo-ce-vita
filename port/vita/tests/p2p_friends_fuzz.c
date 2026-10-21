@@ -32,6 +32,11 @@ pending, so that every handler is reached. The input's first byte says how:
 	   pair's key
 	10 the rest as a party message's body from S, the member not a friend
 	   (roster, leave, status, follow, chat), sealed with S's and T's pair key
+	11 the rest as a friend identity backup's file, its header checked
+	   (p2p_friends_backup.inc), and as a backup's contents, opened: checked,
+	   then read as a restore reads them (the second byte's 1: with a list;
+	   2: its magic, version, flags and key made right and its sizes
+	   bounded; 4: its list's and marks' magic and hashes made right too)
 
 and its second byte its flags: the clock stepped, the header's type and
 recipient kept from the input, the list read after. After each input the
@@ -49,15 +54,15 @@ enum
 	T = 0,
 	F = 1,
 	S = 2,
-	MAXIMUM_INPUT = 2 + MAXIMUM_LIST_SIZE + 64,
-	MODES = 11,
+	MAXIMUM_INPUT = 2 + BACKUP_PLAIN_SIZE + 64,
+	MODES = 12,
 };
 
 /* T's party as setup made it: F leads, T and S members (put back when an
 input ended it) */
 static struct party_state party_saved;
 
-static unsigned long inputs, lists_taken, requests_taken, friends_seen, party_lines, party_follows;
+static unsigned long inputs, lists_taken, requests_taken, friends_seen, party_lines, party_follows, backups_read;
 static char fuzz_root[512];
 
 /* the three machines as the fuzz wants them: T and F friends, T's request
@@ -421,6 +426,64 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 		machines[T] = saved;
 		return 0;
 	}
+	case 11:
+	{
+		unsigned char *contents = calloc(1, BACKUP_PLAIN_SIZE);
+		struct friends_state *restored = calloc(1, sizeof(*restored));
+		int length = size > BACKUP_PLAIN_SIZE ? BACKUP_PLAIN_SIZE : (int)size, list = flags & 1 ? BACKUP_FLAG_LIST : 0;
+		int file_flags, plain_size, friend_count, index;
+		unsigned long blocks, passes;
+
+		if (!contents || !restored)
+			abort();
+		backup_header_check(data, (int)size, &file_flags, &blocks, &passes, &plain_size);
+		memcpy(contents, data, (size_t)length);
+		if (flags & 2)
+		{
+			unsigned long list_size = get_u32(contents + 88) % (MAXIMUM_LIST_SIZE + 1);
+			unsigned long marks_size = get_u32(contents + 92) % (MAXIMUM_MARKS_SIZE + 1);
+
+			memcpy(contents, "HFBP", 4);
+			contents[4] = BACKUP_VERSION;
+			contents[5] = (unsigned char)list;
+			contents[6] = contents[7] = 0;
+			p2p_ed25519_public(contents + 8, contents + 40, NULL);
+			if (!list)
+				list_size = marks_size = 0;
+			put_u32(contents + 88, list_size);
+			put_u32(contents + 92, marks_size);
+			if ((flags & 4) && list_size >= LIST_HEADER_SIZE + P2P_SHA256_SIZE)
+			{
+				memcpy(contents + BACKUP_PLAIN_HEADER_SIZE, "HFRL", 4);
+				contents[BACKUP_PLAIN_HEADER_SIZE + 4] = LIST_VERSION;
+				p2p_sha256(contents + BACKUP_PLAIN_HEADER_SIZE, (int)list_size - P2P_SHA256_SIZE,
+					contents + BACKUP_PLAIN_HEADER_SIZE + list_size - P2P_SHA256_SIZE);
+			}
+			if ((flags & 4) && marks_size >= MARKS_HEADER_SIZE + P2P_SHA256_SIZE)
+			{
+				unsigned char *marks = contents + BACKUP_PLAIN_HEADER_SIZE + list_size;
+
+				memcpy(marks, "HFRM", 4);
+				marks[4] = MARKS_VERSION;
+				p2p_sha256(marks, (int)marks_size - P2P_SHA256_SIZE, marks + marks_size - P2P_SHA256_SIZE);
+			}
+			for (index = BACKUP_PLAIN_HEADER_SIZE + (int)(list_size + marks_size); index < BACKUP_PLAIN_SIZE; index++)
+				contents[index] = 0;
+		}
+		use(T);
+		if (backup_plain_check(contents, BACKUP_PLAIN_SIZE, list, &friend_count) == P2P_FRIENDS_BACKUP_IDLE)
+		{
+			pthread_mutex_lock(&friends_lock);
+			backups_read += backup_read_plain(contents, list, restored);
+			pthread_mutex_unlock(&friends_lock);
+			check(friends == &machines[T], "a backup read: the machine's state its own again");
+			for (index = 0; index < restored->friend_count; index++)
+				check(strlen(restored->friends[index].name) <= NAME_LENGTH, "a backup's friend's name bounded");
+		}
+		free(contents);
+		free(restored);
+		return 0;
+	}
 	}
 	if (payload_size > 0)
 		p2p_friends_heard(which, payload, payload_size);
@@ -449,7 +512,7 @@ static unsigned int next_random(void)
 
 enum
 {
-	SEEDS = 44,
+	SEEDS = 48,
 };
 
 static unsigned char seeds[SEEDS][MAXIMUM_INPUT];
@@ -530,6 +593,27 @@ static void make_seeds(void)
 		}
 		else if (mode == 6)
 			size = identity_encode(machines[T].seed, 12345, plain);
+		else if (mode == 11)
+		{
+			/* (a real backup's contents, T's, its list in it: the input's own
+			buffer, too big for plain) */
+			unsigned long list_size, marks_size;
+
+			use(T);
+			memset(seeds[index] + 2, 0, BACKUP_PLAIN_SIZE);
+			memcpy(seeds[index] + 2, "HFBP", 4);
+			seeds[index][2 + 4] = BACKUP_VERSION;
+			seeds[index][2 + 5] = BACKUP_FLAG_LIST;
+			memcpy(seeds[index] + 2 + 8, machines[T].seed, P2P_SEED_SIZE);
+			memcpy(seeds[index] + 2 + 40, machines[T].key, P2P_KEY_SIZE);
+			list_size = (unsigned long)list_encode(seeds[index] + 2 + BACKUP_PLAIN_HEADER_SIZE);
+			marks_size = (unsigned long)marks_encode(seeds[index] + 2 + BACKUP_PLAIN_HEADER_SIZE + list_size);
+			put_u32(seeds[index] + 2 + 88, list_size);
+			put_u32(seeds[index] + 2 + 92, marks_size);
+			seeds[index][1] = (unsigned char)(1 | (index & 2) | (index & 4));
+			seed_sizes[index] = 2 + BACKUP_PLAIN_HEADER_SIZE + (int)(list_size + marks_size) + 16;
+			continue;
+		}
 		else if (mode < 2)
 		{
 			/* (a real sealed message, as T would hear it) */
@@ -626,7 +710,8 @@ int main(int count, char **arguments)
 			fprintf(stderr, "%lu inputs\n", run + 1);
 	}
 	printf("PASS (%lu inputs; lists read whole %lu times, %lu entries checked; party chat shown after %lu inputs, a follow "
-		"taken after %lu)\n", runs, lists_taken, friends_seen, party_lines, party_follows);
+		"taken after %lu; backups' contents read whole %lu times)\n", runs, lists_taken, friends_seen, party_lines,
+		party_follows, backups_read);
 	return 0;
 }
 #endif

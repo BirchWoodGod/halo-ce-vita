@@ -29,7 +29,16 @@ of internet play. Checked:
   key) set aside and not used, the .old one taken after a write cut short;
   the identity kept, its epoch newer each run;
 - remove: the friend told, gone on both sides; a tombstone answering later
-  messages with REMOVE again.
+  messages with REMOVE again;
+- the friend identity's backup (p2p_friends_backup.inc): a round trip to
+  another machine (the same code, its friends list, its friend seeing it as
+  the same friend; two machines with one identity: the newest run heard, the
+  other's dropped as replays), the file's size and contents (no seed, no
+  password in it; its key's parameters), a wrong password, a cut file, a
+  flipped byte, a newer version (the file's and its contents'), what a file
+  may ask of the key, names and passwords refused, the identity replaced
+  kept, the code alone restored, the same identity restored on its own
+  machine (a newer run), a save of the old list waiting not written.
 
 Prints PASS or the failures. run_p2p_friends_test.sh builds it (with ASan
 and UBSan too).
@@ -48,6 +57,7 @@ machine's platform each test machine's own, below) */
 /* (the platform layer's headers keep sys/stat.h out) */
 int mkdir(const char *path, unsigned int mode);
 #include <unistd.h>
+#include <dirent.h>
 
 /* ---------- stand-ins */
 
@@ -190,12 +200,15 @@ int p2p_join_invite_on(const char *text, int crossplay)
 enum
 {
 	MACHINES = 4,
+	/* (two more for the backup's checks, apart from the broker's passes:
+	test_backup) */
+	ALL_MACHINES = MACHINES + 2,
 	LOGGED = 256,
 };
 
-static struct friends_state machines[MACHINES];
-static struct p2p_friends_host hosts[MACHINES];
-static char roots[MACHINES][512];
+static struct friends_state machines[ALL_MACHINES];
+static struct p2p_friends_host hosts[ALL_MACHINES];
+static char roots[ALL_MACHINES][512];
 
 /* every message the broker carried, as it was (replays) */
 static struct
@@ -2360,6 +2373,457 @@ static void test_card_binding(void)
 	save(1);
 }
 
+/* ---------- the friend identity's backup (p2p_friends_backup.inc) */
+
+static char backup_said[PATH_SIZE + 64];
+
+/* (a save on a thread of its own, the machine's state chosen before) */
+static void *backup_save_thread(void *unused)
+{
+	(void)unused;
+	save(1);
+	return NULL;
+}
+
+/* the job's outcome, once its thread is done */
+static int backup_wait(void)
+{
+	int state = -1, rounds;
+
+	for (rounds = 0; rounds < 120000; rounds++)
+	{
+		state = p2p_friends_backup_state(backup_said, sizeof(backup_said));
+		if (state != P2P_FRIENDS_BACKUP_WORKING)
+			return state;
+		usleep(2000);
+	}
+	return state;
+}
+
+/* a pass of some machines' threads, the broker carrying their messages
+between them alone (the others' dropped) */
+static void backup_pass(const int *list, int list_count, int count)
+{
+	int index, member, other, entry;
+
+	for (index = 0; index < count; index++)
+	{
+		clock_now += 500;
+		for (member = 0; member < list_count; member++)
+		{
+			use(list[member]);
+			p2p_friends_update(&hosts[list[member]]);
+		}
+		for (member = 0; member < list_count; member++)
+		{
+			use(list[member]);
+			for (entry = 0; entry < friends->outbound_count; entry++)
+			{
+				struct outbound copy = friends->outbound[entry];
+
+				for (other = 0; other < list_count; other++)
+					if (other != member)
+						hand(list[other], copy.topic, copy.payload, copy.size);
+			}
+			use(list[member]);
+			friends->outbound_count = 0;
+		}
+	}
+}
+
+static int file_bytes(const char *path, unsigned char *bytes, int capacity)
+{
+	return file_read(path, bytes, capacity);
+}
+
+static int bytes_find(const unsigned char *bytes, int size, const void *needle, int needle_size)
+{
+	int index;
+
+	for (index = 0; index + needle_size <= size; index++)
+		if (!memcmp(bytes + index, needle, (size_t)needle_size))
+			return 1;
+	return 0;
+}
+
+/* a file written as the backup writes it, from contents and a key of the
+test's choosing */
+static void backup_write_crafted(const char *path, unsigned char *plain, int flags, const char *password,
+	unsigned long blocks, unsigned long passes)
+{
+	unsigned char *file = malloc(BACKUP_FILE_SIZE);
+
+	check(file && backup_seal_file(plain, flags, password, (int)strlen(password), blocks, passes, file),
+		"backup: a crafted file sealed");
+	if (file)
+		file_write(path, file, BACKUP_FILE_SIZE);
+	free(file);
+}
+
+/* a restore that must fail, and how; nothing changed on the machine */
+static void backup_refused(int machine, const char *name, const char *password, int expected, const char *what)
+{
+	unsigned char before[IDENTITY_SIZE + 8], after[IDENTITY_SIZE + 8];
+	char path[600], code_before[P2P_FRIEND_CODE_SIZE], code_after[P2P_FRIEND_CODE_SIZE];
+	int before_size, after_size, outcome, friends_before;
+
+	code_of(machine, code_before);
+	friends_before = machines[machine].friend_count;
+	snprintf(path, sizeof(path), "%s/friends/identity.dat", roots[machine]);
+	before_size = file_bytes(path, before, sizeof(before));
+	use(machine);
+	outcome = p2p_friends_backup_restore(name, password);
+	if (outcome == P2P_FRIENDS_BACKUP_WORKING)
+		outcome = backup_wait();
+	if (outcome != expected)
+		printf("  (%s: %d, not %d: %s)\n", what, outcome, expected, backup_said);
+	check(outcome == expected, what);
+	check(p2p_friends_backup_confirm() == P2P_FRIENDS_BACKUP_NOTHING, "backup: nothing to confirm after a refusal");
+	code_of(machine, code_after);
+	after_size = file_bytes(path, after, sizeof(after));
+	check(!strcmp(code_before, code_after) && machines[machine].friend_count == friends_before &&
+		before_size == after_size && !memcmp(before, after, (size_t)before_size), "backup: a refusal changes nothing");
+}
+
+static void test_backup(void)
+{
+	static const int trio[] = { 1, 4, 5 };
+	unsigned char *file = malloc(BACKUP_FILE_SIZE + 64), *plain = malloc(BACKUP_PLAIN_SIZE);
+	char code_a[P2P_FRIEND_CODE_SIZE], code_b[P2P_FRIEND_CODE_SIZE], code_f[P2P_FRIEND_CODE_SIZE], found[32];
+	char current[32], path[600], copy[600], name[P2P_FRIENDS_BACKUP_NAME_SIZE];
+	struct p2p_friend_entry entry;
+	int size, friend_count, flags, outcome, f_friends, index;
+	unsigned long long a_epoch;
+
+	if (!file || !plain)
+	{
+		check(0, "backup: memory for the checks");
+		return;
+	}
+	/* names and passwords */
+	check(p2p_friends_backup_name(" friends-backup.HFB ", name) && !strcmp(name, "friends-backup"),
+		"backup: a name typed with .hfb and spaces taken");
+	check(!p2p_friends_backup_name("../identity", name) && !p2p_friends_backup_name("a/b", name) &&
+		!p2p_friends_backup_name("", name) && !p2p_friends_backup_name("ux0:data", name) &&
+		!p2p_friends_backup_name("a b", name) && !p2p_friends_backup_name("abcdefghijklmnopqrstuvwxyz0123456", name),
+		"backup: names with a path, a colon, a space, none or too long refused");
+	check(p2p_friends_backup_password_check("1234567") == P2P_FRIENDS_BACKUP_SHORT_PASSWORD &&
+		p2p_friends_backup_password_check("  1234567  ") == P2P_FRIENDS_BACKUP_SHORT_PASSWORD &&
+		p2p_friends_backup_password_check("12345678") == P2P_FRIENDS_BACKUP_IDLE &&
+		p2p_friends_backup_password_check("caf\xc3\xa9 au lait") == P2P_FRIENDS_BACKUP_BAD_PASSWORD &&
+		p2p_friends_backup_password_check("0123456789012345678901234567890123456789012345678901234567890123") ==
+		P2P_FRIENDS_BACKUP_IDLE &&
+		p2p_friends_backup_password_check("01234567890123456789012345678901234567890123456789012345678901234") ==
+		P2P_FRIENDS_BACKUP_BAD_PASSWORD, "backup: passwords: 8 to 64 printable characters");
+	use(4);
+	check(p2p_friends_backup_export("x", "short", 1) == P2P_FRIENDS_BACKUP_SHORT_PASSWORD &&
+		p2p_friends_backup_export("../x", "long enough", 1) == P2P_FRIENDS_BACKUP_BAD_NAME,
+		"backup: a short password or a bad name: nothing started");
+	/* Echo (machine 4) and Bravo (machine 1) friends */
+	use(4);
+	p2p_friends_set_name("Echo");
+	use(5);
+	p2p_friends_set_name("Foxtrot");
+	code_of(4, code_a);
+	code_of(5, code_b);
+	code_of(1, code_f);
+	check(strcmp(code_a, code_b) != 0, "backup: two machines, two codes");
+	use(4);
+	check(p2p_friends_add(code_f) == P2P_FRIENDS_ADD_SENT, "backup: Echo asks Bravo");
+	backup_pass(trio, 3, 2);
+	check(entry_of(1, P2P_FRIEND_KIND_REQUEST, 0, &entry) && !strcmp(entry.code, code_a), "backup: Bravo heard Echo");
+	use(1);
+	check(p2p_friends_act(entry.id, P2P_FRIEND_KIND_REQUEST, P2P_FRIENDS_ACCEPT) == P2P_FRIENDS_DONE,
+		"backup: Bravo accepts");
+	backup_pass(trio, 3, 4);
+	check(count_of(4, P2P_FRIEND_KIND_FRIEND) == 1, "backup: Echo has Bravo for a friend");
+	f_friends = count_of(1, P2P_FRIEND_KIND_FRIEND);
+	/* the backup written: its size whatever the list, its key's parameters,
+	nothing of the seed or the password in it */
+	use(4);
+	outcome = p2p_friends_backup_export("echo", "correct horse battery", 1);
+	check(outcome == P2P_FRIENDS_BACKUP_WORKING, "backup: started");
+	check(p2p_friends_backup_export("echo2", "correct horse battery", 1) == P2P_FRIENDS_BACKUP_BUSY,
+		"backup: one at a time");
+	outcome = backup_wait();
+	snprintf(path, sizeof(path), "%s/echo.hfb", roots[4]);
+	check(outcome == P2P_FRIENDS_BACKUP_SAVED && strstr(backup_said, path), "backup: saved, and where it went said");
+	check(p2p_friends_backup_state(NULL, 0) == P2P_FRIENDS_BACKUP_IDLE, "backup: its outcome given once");
+	size = file_bytes(path, file, BACKUP_FILE_SIZE + 64);
+	check(size == BACKUP_FILE_SIZE, "backup: the file's size");
+	check(!memcmp(file, "HFBK", 4) && file[4] == BACKUP_VERSION && file[5] == BACKUP_KDF_ARGON2ID &&
+		file[6] == BACKUP_FLAG_LIST && get_u32(file + 8) == 8192 && get_u32(file + 12) == 5,
+		"backup: Argon2id, 8 MiB, five passes, the list in it");
+	check(!bytes_find(file, size, machines[4].seed, P2P_SEED_SIZE) && !bytes_find(file, size, "correct horse", 13) &&
+		!bytes_find(file, size, machines[4].key, P2P_KEY_SIZE) && !bytes_find(file, size, "HFRL", 4),
+		"backup: no seed, key, list or password in the file");
+	{
+		unsigned char second[BACKUP_HEADER_SIZE];
+
+		memcpy(second, file, sizeof(second));
+		use(4);
+		check(p2p_friends_backup_export("echo-again", "correct horse battery", 1) == P2P_FRIENDS_BACKUP_WORKING &&
+			backup_wait() == P2P_FRIENDS_BACKUP_SAVED, "backup: written again");
+		snprintf(copy, sizeof(copy), "%s/echo-again.hfb", roots[4]);
+		check(file_bytes(copy, file, BACKUP_FILE_SIZE + 64) == BACKUP_FILE_SIZE &&
+			memcmp(file + 16, second + 16, BACKUP_SALT_SIZE) && memcmp(file + 32, second + 32, BACKUP_NONCE_SIZE),
+			"backup: a salt and a nonce of its own each time");
+		check(!bytes_find((const unsigned char *)backup.password, sizeof(backup.password), "correct", 7) && !backup.plain,
+			"backup: the job's copy of the password and the contents wiped");
+	}
+	/* the file taken to another machine (Foxtrot, machine 5) */
+	snprintf(copy, sizeof(copy), "%s/echo.hfb", roots[5]);
+	size = file_bytes(path, file, BACKUP_FILE_SIZE + 64);
+	file_write(copy, file, size);
+	/* refusals: nothing changes */
+	backup_refused(5, "echo", "correct horse batterY", P2P_FRIENDS_BACKUP_WRONG_PASSWORD, "backup: a wrong password");
+	backup_refused(5, "echo", "short", P2P_FRIENDS_BACKUP_WRONG_PASSWORD, "backup: a short password opens nothing");
+	backup_refused(5, "nobody", "correct horse battery", P2P_FRIENDS_BACKUP_NO_FILE, "backup: no such file");
+	backup_refused(5, "../echo", "correct horse battery", P2P_FRIENDS_BACKUP_BAD_NAME, "backup: a name with a path");
+	snprintf(copy, sizeof(copy), "%s/cut.hfb", roots[5]);
+	file_write(copy, file, size - 1);
+	backup_refused(5, "cut", "correct horse battery", P2P_FRIENDS_BACKUP_DAMAGED, "backup: a cut file");
+	file_write(copy, file, 40);
+	backup_refused(5, "cut", "correct horse battery", P2P_FRIENDS_BACKUP_DAMAGED, "backup: a file cut in its header");
+	{
+		unsigned char *altered = malloc(BACKUP_FILE_SIZE + 64);
+
+		snprintf(copy, sizeof(copy), "%s/altered.hfb", roots[5]);
+		/* a byte of the sealed contents, of the tag, of the salt, of the flags */
+		memcpy(altered, file, (size_t)size);
+		altered[BACKUP_HEADER_SIZE + 100] ^= 1;
+		file_write(copy, altered, size);
+		backup_refused(5, "altered", "correct horse battery", P2P_FRIENDS_BACKUP_WRONG_PASSWORD,
+			"backup: a flipped byte of the contents");
+		memcpy(altered, file, (size_t)size);
+		altered[size - 1] ^= 0x80;
+		file_write(copy, altered, size);
+		backup_refused(5, "altered", "correct horse battery", P2P_FRIENDS_BACKUP_WRONG_PASSWORD,
+			"backup: a flipped byte of the tag");
+		memcpy(altered, file, (size_t)size);
+		altered[20] ^= 1;
+		file_write(copy, altered, size);
+		backup_refused(5, "altered", "correct horse battery", P2P_FRIENDS_BACKUP_WRONG_PASSWORD,
+			"backup: a flipped byte of the salt");
+		memcpy(altered, file, (size_t)size);
+		altered[6] = 0;
+		file_write(copy, altered, size);
+		backup_refused(5, "altered", "correct horse battery", P2P_FRIENDS_BACKUP_WRONG_PASSWORD,
+			"backup: the list's flag taken off (the header is bound to the contents)");
+		memcpy(altered, file, (size_t)size);
+		altered[0] = 'X';
+		file_write(copy, altered, size);
+		backup_refused(5, "altered", "correct horse battery", P2P_FRIENDS_BACKUP_DAMAGED, "backup: not a backup");
+		/* versions */
+		memcpy(altered, file, (size_t)size);
+		altered[4] = BACKUP_VERSION + 1;
+		file_write(copy, altered, size);
+		backup_refused(5, "altered", "correct horse battery", P2P_FRIENDS_BACKUP_NEWER, "backup: a newer file's version");
+		memcpy(altered, file, (size_t)size);
+		altered[4] = 0;
+		file_write(copy, altered, size);
+		backup_refused(5, "altered", "correct horse battery", P2P_FRIENDS_BACKUP_DAMAGED, "backup: a version 0");
+		memcpy(altered, file, (size_t)size);
+		altered[5] = 2;
+		file_write(copy, altered, size);
+		backup_refused(5, "altered", "correct horse battery", P2P_FRIENDS_BACKUP_NEWER, "backup: another key derivation");
+		/* what the key may ask: refused before any work */
+		memcpy(altered, file, (size_t)size);
+		put_u32(altered + 8, 4096);
+		file_write(copy, altered, size);
+		backup_refused(5, "altered", "correct horse battery", P2P_FRIENDS_BACKUP_DAMAGED, "backup: less memory refused");
+		put_u32(altered + 8, BACKUP_MAXIMUM_BLOCKS + 1);
+		file_write(copy, altered, size);
+		backup_refused(5, "altered", "correct horse battery", P2P_FRIENDS_BACKUP_DAMAGED, "backup: more memory refused");
+		put_u32(altered + 8, 8192);
+		put_u32(altered + 12, 4);
+		file_write(copy, altered, size);
+		backup_refused(5, "altered", "correct horse battery", P2P_FRIENDS_BACKUP_DAMAGED, "backup: fewer passes refused");
+		put_u32(altered + 12, BACKUP_MAXIMUM_PASSES + 1);
+		file_write(copy, altered, size);
+		backup_refused(5, "altered", "correct horse battery", P2P_FRIENDS_BACKUP_DAMAGED, "backup: more passes refused");
+		memcpy(altered, file, (size_t)size);
+		put_u32(altered + 56, BACKUP_PLAIN_SIZE - 1);
+		file_write(copy, altered, size);
+		backup_refused(5, "altered", "correct horse battery", P2P_FRIENDS_BACKUP_DAMAGED,
+			"backup: a size not the file's refused");
+		free(altered);
+	}
+	/* the contents' own version, under a good key; a seed that is not the
+	key named; another memory and passes as strong, taken */
+	use(4);
+	memset(plain, 0, BACKUP_PLAIN_SIZE);
+	memcpy(plain, "HFBP", 4);
+	plain[4] = BACKUP_VERSION + 1;
+	memcpy(plain + 8, machines[4].seed, P2P_SEED_SIZE);
+	memcpy(plain + 40, machines[4].key, P2P_KEY_SIZE);
+	snprintf(copy, sizeof(copy), "%s/crafted.hfb", roots[5]);
+	backup_write_crafted(copy, plain, 0, "correct horse battery", BACKUP_BLOCKS, BACKUP_PASSES);
+	backup_refused(5, "crafted", "correct horse battery", P2P_FRIENDS_BACKUP_NEWER, "backup: newer contents");
+	plain[4] = BACKUP_VERSION;
+	plain[40] ^= 1;
+	backup_write_crafted(copy, plain, 0, "correct horse battery", BACKUP_BLOCKS, BACKUP_PASSES);
+	backup_refused(5, "crafted", "correct horse battery", P2P_FRIENDS_BACKUP_DAMAGED, "backup: a key not the seed's");
+	plain[40] ^= 1;
+	plain[5] = BACKUP_FLAG_LIST;
+	backup_write_crafted(copy, plain, 0, "correct horse battery", BACKUP_BLOCKS, BACKUP_PASSES);
+	backup_refused(5, "crafted", "correct horse battery", P2P_FRIENDS_BACKUP_DAMAGED, "backup: flags not the header's");
+	plain[5] = 0;
+	plain[BACKUP_PLAIN_SIZE - 1] = 1;
+	backup_write_crafted(copy, plain, 0, "correct horse battery", BACKUP_BLOCKS, BACKUP_PASSES);
+	backup_refused(5, "crafted", "correct horse battery", P2P_FRIENDS_BACKUP_DAMAGED, "backup: bytes past the contents");
+	plain[BACKUP_PLAIN_SIZE - 1] = 0;
+	backup_write_crafted(copy, plain, 0, "correct horse battery", 16384, 3);
+	use(5);
+	check(p2p_friends_backup_restore("crafted", "correct horse battery") == P2P_FRIENDS_BACKUP_WORKING &&
+		backup_wait() == P2P_FRIENDS_BACKUP_READY, "backup: 16 MiB and three passes taken (as strong)");
+	check(p2p_friends_backup_found(found, current, sizeof(found), &friend_count) && !strcmp(found, code_a) &&
+		!strcmp(current, code_b) && friend_count == -1, "backup: what it holds said: the code, no list");
+	p2p_friends_backup_cancel();
+	check(!backup.plain && p2p_friends_backup_confirm() == P2P_FRIENDS_BACKUP_NOTHING,
+		"backup: cancelled: wiped, nothing to confirm");
+	code_of(5, current);
+	check(!strcmp(current, code_b), "backup: cancelled: Foxtrot's code its own");
+	/* restored: the same code, the list; the identity replaced kept */
+	{
+		unsigned char old_identity[IDENTITY_SIZE + 8], seed[P2P_SEED_SIZE], old_seed[P2P_SEED_SIZE];
+		unsigned long long epoch;
+		char kept[700];
+		DIR *folder;
+		struct dirent *item;
+		int kept_found = 0, old_size;
+
+		memcpy(old_seed, machines[5].seed, P2P_SEED_SIZE);
+		snprintf(path, sizeof(path), "%s/friends/identity.dat", roots[5]);
+		old_size = file_bytes(path, old_identity, sizeof(old_identity));
+		check(old_size == IDENTITY_SIZE, "backup: Foxtrot's own identity on file");
+		a_epoch = machines[4].epoch;
+		use(5);
+		check(p2p_friends_backup_restore("echo", "  correct horse battery ") == P2P_FRIENDS_BACKUP_WORKING &&
+			backup_wait() == P2P_FRIENDS_BACKUP_READY, "backup: opened (spaces at its ends ignored)");
+		check(p2p_friends_backup_found(found, current, sizeof(found), &friend_count) && !strcmp(found, code_a) &&
+			friend_count == 1, "backup: its code and its one friend said");
+		outcome = p2p_friends_backup_confirm();
+		check(outcome == P2P_FRIENDS_BACKUP_RESTORED, "backup: restored");
+		check(p2p_friends_backup_confirm() == P2P_FRIENDS_BACKUP_NOTHING, "backup: restored once");
+		code_of(5, current);
+		check(!strcmp(current, code_a), "backup: Foxtrot has Echo's friend code");
+		check(machines[5].epoch > a_epoch, "backup: its run newer than Echo's");
+		check(count_of(5, P2P_FRIEND_KIND_FRIEND) == 1 && entry_of(5, P2P_FRIEND_KIND_FRIEND, 0, &entry) &&
+			!strcmp(entry.code, code_f), "backup: Echo's friends list restored: Bravo");
+		check(identity_decode((file_bytes(path, file, BACKUP_FILE_SIZE), file), IDENTITY_SIZE, seed, &epoch) &&
+			!memcmp(seed, machines[4].seed, P2P_SEED_SIZE) && epoch == machines[5].epoch, "backup: identity.dat written");
+		snprintf(kept, sizeof(kept), "%s/friends", roots[5]);
+		folder = opendir(kept);
+		while (folder && (item = readdir(folder)))
+			if (!strncmp(item->d_name, "replaced-", 9))
+			{
+				unsigned char replaced[IDENTITY_SIZE + 8];
+
+				snprintf(kept, sizeof(kept), "%s/friends/%s/identity.dat", roots[5], item->d_name);
+				kept_found = file_bytes(kept, replaced, sizeof(replaced)) == old_size &&
+					identity_decode(replaced, old_size, seed, &epoch) && !memcmp(seed, old_seed, P2P_SEED_SIZE);
+			}
+		if (folder)
+			closedir(folder);
+		check(kept_found, "backup: the identity replaced kept in friends/replaced-<date>");
+		/* a new run reads it back */
+		memset(&machines[5], 0, sizeof(machines[5]));
+		use(5);
+		p2p_friends_set_name("Foxtrot");
+		code_of(5, current);
+		check(!strcmp(current, code_a) && machines[5].friend_count == 1, "backup: a new run of Foxtrot keeps it");
+	}
+	/* two machines with one identity: the newest run is heard, the other's
+	dropped as replays; Bravo sees one friend, Foxtrot's name */
+	reset_drops(1);
+	/* (Echo still running, its game changing: its presence sent again) */
+	use(4);
+	p2p_friends_set_activity(P2P_FRIEND_STATE_MULTIPLAYER, "bloodgulch", "Slayer", 2, -1, 0, 2, 16);
+	backup_pass(trio, 3, 12);
+	check(count_of(1, P2P_FRIEND_KIND_FRIEND) == f_friends, "backup: Bravo has as many friends as before");
+	{
+		int found_friend = 0;
+
+		for (index = 0; index < count_of(1, P2P_FRIEND_KIND_FRIEND); index++)
+			if (entry_of(1, P2P_FRIEND_KIND_FRIEND, index, &entry) && !strcmp(entry.code, code_a))
+				found_friend = entry.online && !strcmp(entry.name, "Foxtrot");
+		check(found_friend, "backup: Bravo sees Echo's code online, as Foxtrot (its name now)");
+	}
+	use(1);
+	{
+		const struct friend_record *record = find_friend(machines[4].key);
+
+		check(record && record->epoch == machines[5].epoch, "backup: Bravo takes the newest run (Foxtrot's)");
+	}
+	check(machines[1].dropped_replays + machines[1].total_replays > 0, "backup: Echo's older run dropped as replays");
+	check(entry_of(5, P2P_FRIEND_KIND_FRIEND, 0, &entry) && entry.online, "backup: Foxtrot sees Bravo online");
+	/* the same identity restored on its own machine: a newer run again */
+	{
+		unsigned long long epoch_before = machines[5].epoch;
+
+		snprintf(path, sizeof(path), "%s/echo.hfb", roots[5]);
+		use(5);
+		check(p2p_friends_backup_restore("echo", "correct horse battery") == P2P_FRIENDS_BACKUP_WORKING &&
+			backup_wait() == P2P_FRIENDS_BACKUP_READY && p2p_friends_backup_confirm() == P2P_FRIENDS_BACKUP_RESTORED,
+			"backup: restored again on the machine that has it");
+		check(machines[5].epoch > epoch_before, "backup: ... its run newer than the one it replaced");
+		reset_drops(1);
+		backup_pass(trio, 3, 4);
+		use(1);
+		check(find_friend(machines[4].key) && find_friend(machines[4].key)->epoch == machines[5].epoch,
+			"backup: ... and heard by its friend");
+	}
+	/* a save that read the list before the files were replaced (a restore
+	meanwhile): not written over the new ones */
+	{
+		pthread_t thread;
+		unsigned char marker[16] = "restored files", read_back[32];
+
+		use(5);
+		machines[5].dirty = 1;
+		machines[5].saved_time = 0;
+		snprintf(path, sizeof(path), "%s/friends/friends.dat", roots[5]);
+		pthread_mutex_lock(&friends_file_lock);
+		check(pthread_create(&thread, NULL, backup_save_thread, NULL) == 0, "backup: a save started");
+		usleep(300000);
+		/* (as a restore does: its files written, the generation moved on) */
+		file_write(path, marker, sizeof(marker));
+		machines[5].files_generation++;
+		pthread_mutex_unlock(&friends_file_lock);
+		pthread_join(thread, NULL);
+		check(file_bytes(path, read_back, sizeof(read_back)) == (int)sizeof(marker) &&
+			!memcmp(read_back, marker, sizeof(marker)), "backup: the old list's save waiting not written over them");
+		machines[5].dirty = 1;
+		save(1);
+		check(file_bytes(path, read_back, sizeof(read_back)) != (int)sizeof(marker), "backup: the next save writes");
+	}
+	/* the code alone: a third machine (a new folder) gets it, no list */
+	use(4);
+	check(p2p_friends_backup_export("echo-code", "correct horse battery", 0) == P2P_FRIENDS_BACKUP_WORKING &&
+		backup_wait() == P2P_FRIENDS_BACKUP_SAVED, "backup: the code alone saved");
+	snprintf(path, sizeof(path), "%s/echo-code.hfb", roots[4]);
+	size = file_bytes(path, file, BACKUP_FILE_SIZE + 64);
+	check(size == BACKUP_FILE_SIZE && file[6] == 0, "backup: the same size without the list");
+	snprintf(roots[5], sizeof(roots[5]), "%s-new", roots[4]);
+	mkdir(roots[5], 0755);
+	snprintf(copy, sizeof(copy), "%s/echo-code.hfb", roots[5]);
+	file_write(copy, file, size);
+	memset(&machines[5], 0, sizeof(machines[5]));
+	code_of(5, current);
+	check(strcmp(current, code_a) != 0, "backup: a new machine, a new code");
+	use(5);
+	flags = p2p_friends_backup_restore("echo-code", "correct horse battery") == P2P_FRIENDS_BACKUP_WORKING &&
+		backup_wait() == P2P_FRIENDS_BACKUP_READY;
+	check(flags && p2p_friends_backup_found(found, NULL, sizeof(found), &friend_count) && friend_count == -1,
+		"backup: the code alone opened");
+	check(p2p_friends_backup_confirm() == P2P_FRIENDS_BACKUP_RESTORED, "backup: the code alone restored");
+	code_of(5, current);
+	check(!strcmp(current, code_a) && machines[5].friend_count == 0, "backup: Echo's code, no friends");
+	free(file);
+	free(plain);
+}
+
 int main(void)
 {
 	char root[512];
@@ -2369,7 +2833,7 @@ int main(void)
 		return seed(getenv("FRIENDS_TEST_SEED_DIR"));
 
 	snprintf(root, sizeof(root), "%s", getenv("FRIENDS_TEST_ROOT") ? getenv("FRIENDS_TEST_ROOT") : ".");
-	for (index = 0; index < MACHINES; index++)
+	for (index = 0; index < ALL_MACHINES; index++)
 	{
 		snprintf(roots[index], sizeof(roots[index]), "%s/machine%d", root, index);
 		mkdir(roots[index], 0755);
@@ -2392,6 +2856,7 @@ int main(void)
 	test_card_binding();
 	test_party();
 	test_party_restart();
+	test_backup();
 	if (failures)
 	{
 		printf("%d failures\n", failures);
