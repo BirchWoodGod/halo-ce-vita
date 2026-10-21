@@ -284,6 +284,15 @@
 #            (replay-at=), then three forgeries (forge-at=: a flipped byte,
 #            another key's signature, another sender): the joiner must drop
 #            each, and nothing of them show
+#   friendsbackup  the friend code backup (p2p_friends_backup.inc): the host (Alpha) and
+#            the joiner (Bravo) become friends (codes through files); HALO_TEST_BACKUP_AT
+#            seconds in (45) Bravo backs up its code and friends list (backup=) with a
+#            password and quits at HALO_TEST_BACKUP_QUIT (70); a new machine, Charlie
+#            (behind a third NAT, a save of its own: its own code), is given the file and
+#            restores it 5 s in (restore=, confirmed): it must have Bravo's code and Alpha
+#            for a friend, and see Alpha online; Alpha, which saw Bravo go offline, must
+#            see that same friend online again (from Charlie), with no friend request
+#            from anyone new; no log, the broker's included, may hold the password
 #   friendsplayers  no codes typed (the owner: "Can I move the cursor over the player
 #            like on Halo 3 and add friend?"): the joiner joins the host's public game,
 #            and HALO_TEST_ADD_AT seconds in (25) its PLAYERS screen opens and adds the
@@ -743,6 +752,7 @@ seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = swatmixed ] && seconds=${HALO_TEST_SECONDS:-500}
 [ "$mode" = coopstarts ] && seconds=${HALO_TEST_SECONDS:-75}
 [ "$mode" = party ] && seconds=${HALO_TEST_SECONDS:-210}
+[ "$mode" = friendsbackup ] && seconds=${HALO_TEST_SECONDS:-200}
 # (pickjoin, h3pickjoin: a minute more on the map list than their modes' own)
 [ "$mode" = pickjoin ] && seconds=${HALO_TEST_SECONDS:-230}
 [ "$mode" = h3pickjoin ] && seconds=${HALO_TEST_SECONDS:-240}
@@ -846,6 +856,7 @@ side join 10.10.2 192.168.2
 # (infection: three players, a second joiner unless told otherwise)
 [ "$mode" = infection ] && export HALO_TEST_SECOND_JOINER=${HALO_TEST_SECOND_JOINER:-1}
 { [ "${HALO_TEST_SECOND_JOINER:-0}" = 1 ] || [ "$mode" = badmap ] || [ "$mode" = splitscreen ] || [ "$mode" = party ] ||
+	[ "$mode" = friendsbackup ] ||
 	[ "$mode" = h3forgeonline ] || [ "$mode" = vitapc ] || [ "$mode" = vitaonly ]; } &&
 	side join2 10.10.3 192.168.3
 { [ "$mode" = splitscreen ] || [ "$mode" = vitapc ]; } && side join3 10.10.4 192.168.4
@@ -4859,6 +4870,55 @@ friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|f
 		[ "$two" -ge 20 ] || fail "the joiner played the host's game for $two s with two players (20 wanted)"
 	fi
 	;;
+friendsbackup)
+	# (Alpha and Bravo friends; Bravo's backup, then Bravo gone; Charlie restores it)
+	hc=$out/host.code jc=$out/joiner.code j2c=$out/joiner2.code
+	password=${HALO_TEST_BACKUP_PASSWORD:-correct-horse-7-backup}
+	backup_at=${HALO_TEST_BACKUP_AT:-45} backup_quit=${HALO_TEST_BACKUP_QUIT:-70}
+	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env HALO_NET_HOST_PUBLIC=true HALO_NET_LOBBY_NAME=Alpha \
+		"HALO_TEST_FRIENDS=code-file=$hc,add-file=$jc" ${HALO_TEST_HOST_ENV:-}; host_pid=$last_pid
+	run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=watch HALO_TEST_INPUT=bot:2 HALO_NET_LOBBY_NAME=Bravo \
+		"HALO_TEST_FRIENDS=code-file=$jc,accept,backup=$backup_at:bravo-code:$password" "HALO_TEST_PAD=wait:150:1000000" \
+		HALO_EXIT_AFTER=$backup_quit; join_pid=$last_pid
+	wait $join_pid 2>/dev/null
+	jl=$out/joiner/run.log
+	# (the file, as a player copies it to another Vita's ux0:data/haloce-vita)
+	mkdir -p "$out/joiner2/save"
+	cp "$out/joiner/save/bravo-code.hfb" "$out/joiner2/save/" 2>/dev/null || fail "Bravo wrote no bravo-code.hfb"
+	run_copy joiner2 "$join2_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_c" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=watch HALO_TEST_INPUT=bot:3 HALO_NET_LOBBY_NAME=Charlie \
+		"HALO_TEST_FRIENDS=code-file=$j2c,restore=5:bravo-code:$password" "HALO_TEST_PAD=wait:150:1000000" \
+		HALO_EXIT_AFTER=$((seconds - backup_quit - 10)); join2_pid=$last_pid
+	wait $join2_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log j2l=$out/joiner2/run.log
+	bravo=$(tr -d '\n' < "$jc" 2>/dev/null) charlie=$(tr -d '\n' < "$j2c" 2>/dev/null)
+	echo "Alpha's code: $(cat "$hc" 2>/dev/null)  Bravo's: $bravo  Charlie's own: $charlie"
+	for side in host joiner joiner2; do
+		echo "--- $side"; grep -a "friends:" "$out/$side/run.log" | grep -av "dropped: " | head -16
+	done
+	[ -n "$bravo" ] && [ -n "$charlie" ] && [ "$bravo" != "$charlie" ] || fail "Charlie had no code of its own before the restore"
+	grep -aq "friends: .* accepted the friend request; now friends" "$hl" || fail "Alpha and Bravo did not become friends"
+	grep -aq "friends: backup: written to .*/bravo-code.hfb (the friend code and the friends list)" "$jl" ||
+		fail "Bravo did not write its backup with the list"
+	grep -aq "friends: Bravo went offline" "$hl" || fail "Alpha did not see Bravo go offline"
+	grep -aq "friends: backup: .*bravo-code.hfb opened: the friend code $bravo, 1 friends (its list)" "$j2l" ||
+		fail "Charlie did not open Bravo's backup"
+	grep -aq "friends: backup: restored: this machine's friend code is now $bravo (1 friends" "$j2l" ||
+		fail "Charlie did not take Bravo's code and its friend"
+	grep -aq "friends: Alpha is online" "$j2l" || fail "Charlie did not see Alpha online"
+	# (Bravo gone before Charlie started: the friend online again is Charlie, under the name
+	# Alpha knows until Charlie's game says its profile's - a run's presences carry no other)
+	awk '/friends: Bravo went offline/ { gone = 1 } gone && /friends: (Bravo|Charlie) is online/ { seen = 1 }
+		END { exit !seen }' "$hl" || fail "Alpha did not see its friend (Bravo's code) online again, from Charlie"
+	grep -aq "friends: a friend request from" "$hl" && fail "Alpha heard a friend request (a new friend, not the same one)"
+	grep -aqF -- "$charlie" "$hl" && fail "Alpha heard of Charlie's own code"
+	[ "$(grep -ac "now friends" "$hl")" = 1 ] || fail "Alpha made more than one friend"
+	grep -arqF -- "$password" "$out/host" "$out/joiner" "$out/joiner2" "$out/broker.log" &&
+		fail "a log or file holds the backup's password"
+	grep -aqF -- "$password" "$out/joiner2/save/bravo-code.hfb" && fail "the backup holds its password"
+	grep -a "retained" "$out/broker.log" | grep -aq "/f1/" && fail "the broker kept a friends' message"
+	;;
 party)
 	# (the party, p2p_party.h: Alpha (the host) friends with Bravo (joiner) and Charlie
 	# (joiner2), its game private (no one joins it from presence or the browser); Alpha invites
@@ -5001,7 +5061,7 @@ forge|forge3|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h
 	forge_case
 	;;
 *)
-	echo "usage: $0 code|infection|infectionold|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|carnage|h3live|h3liveleave|h3liveagain|h3liveonline|h3liveinvite|h3liveprivate|h3online|h3onlinelan|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|party|friendsprivate|friendsprivatepw|forge|forge3|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|h3variant|vitapc|vitaonly|hostfuzz|hostfuzzforge|hostfuzzmap" >&2
+	echo "usage: $0 code|infection|infectionold|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|carnage|h3live|h3liveleave|h3liveagain|h3liveonline|h3liveinvite|h3liveprivate|h3online|h3onlinelan|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|friendsbackup|party|friendsprivate|friendsprivatepw|forge|forge3|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|h3variant|vitapc|vitaonly|hostfuzz|hostfuzzforge|hostfuzzmap" >&2
 	exit 2
 	;;
 esac

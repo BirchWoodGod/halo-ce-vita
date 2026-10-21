@@ -410,6 +410,9 @@ enum
 	ACTION_UPDATE_CHECK,
 	/* (the Friends page) a friend's code typed with the D-pad */
 	ACTION_FRIEND_ADD,
+	/* (the Friends page) the friend code backed up to a file with a
+	password, or restored from one */
+	ACTION_FRIEND_BACKUP,
 	/* (the Party page) this Vita out of its party */
 	ACTION_PARTY_LEAVE,
 	/* (the Party page) a chat message typed on the system's keyboard */
@@ -759,6 +762,12 @@ static struct setting settings[] = {
 		PAGE_PARTY, KIND_ACTION, ACTION_PARTY_LEAVE },
 	{ "Add a friend", NULL, 0, 0, { NULL }, { NULL }, "Type a friend's code: they accept, then you're friends", 0,
 		PAGE_FRIENDS, KIND_ACTION, ACTION_FRIEND_ADD },
+	/* (this Vita's friend code, shown as the row's value; cross: the code
+	kept in a file with a password, or restored from one on this Vita or
+	another, p2p_friends_backup.inc; the Halo 3 menus' FRIEND CODE BACKUP
+	does the same) */
+	{ "Friend code", NULL, 0, 0, { NULL }, { NULL }, "Back it up to a file with a password, or restore it", 0,
+		PAGE_FRIENDS, KIND_ACTION, ACTION_FRIEND_BACKUP },
 	/* (the game this Vita hosts: its players kicked or banned, the host's
 	anti-cheat; network_anticheat.c answers, system_link_shortcut.h) */
 	PAGE_ROW("Players", "The game you host: kick or ban a player", PAGE_CROSSPLAY, PAGE_PLAYERS),
@@ -1048,6 +1057,8 @@ enum
 	or blocking one */
 	SCREEN_FRIEND_CODE,
 	SCREEN_FRIEND_CONFIRM,
+	/* the Friends page's Friend code backup: its steps (friend_backup) */
+	SCREEN_FRIEND_BACKUP,
 	/* the Party page: the question before the leader removes a member */
 	SCREEN_PARTY_CONFIRM,
 	SCREEN_BAN_CONFIRM,
@@ -1177,6 +1188,36 @@ static int friend_code_cursor;
 P2P_FRIENDS_BLOCK) */
 static struct p2p_friend_entry friend_confirm_entry;
 static int friend_confirm_action;
+/* Friend code backup (p2p_friends.h, p2p_friends_backup.inc): back up
+(cross) or restore (square); the file's name, its password on the system's
+keyboard (and again, to back up), with the friends list or not; the work
+watched; a restore opened asks before it replaces anything. What was typed
+is wiped once used */
+enum
+{
+	FRIEND_BACKUP_MENU,
+	FRIEND_BACKUP_NAME,
+	FRIEND_BACKUP_PASSWORD,
+	FRIEND_BACKUP_AGAIN,
+	FRIEND_BACKUP_LIST,
+	FRIEND_BACKUP_WORKING,
+	FRIEND_BACKUP_CONFIRM,
+	FRIEND_BACKUP_DONE,
+};
+static struct
+{
+	int step;
+	int restore;
+	/* the keyboard up for the step; to be opened at the next frame */
+	int ime_pending;
+	int ime_next;
+	char name[P2P_FRIENDS_BACKUP_NAME_SIZE];
+	char password[P2P_FRIENDS_BACKUP_PASSWORD_MAXIMUM + 1];
+	/* (CONFIRM) the codes, the friends in it; (DONE) what came of it */
+	char code[P2P_FRIEND_CODE_SIZE], current[P2P_FRIEND_CODE_SIZE];
+	int friend_count;
+	char said[256];
+} friend_backup;
 
 /* ---------- the party
 
@@ -3666,11 +3707,7 @@ static int page_lines(struct line *lines)
 	}
 	if (page == PAGE_FRIENDS)
 	{
-		char code[P2P_FRIEND_CODE_SIZE];
-
-		p2p_friends_code(code, sizeof(code));
-		lines[count].type = LINE_INFO;
-		snprintf(lines[count++].text, sizeof(lines[0].text), T("Your friend code: %s"), code);
+		/* (the code: the Friend code row's value) */
 		lines[count].type = LINE_INFO;
 		p2p_friends_status(lines[count++].text, sizeof(lines[0].text));
 		lines[count].type = LINE_INFO;
@@ -4243,6 +4280,12 @@ static void page_summary(char *text, int size, const struct setting *setting)
 	int index, set = 0, moved = 0;
 
 	text[0] = 0;
+	/* (the Friend code row: the code) */
+	if (setting->action == ACTION_FRIEND_BACKUP)
+	{
+		p2p_friends_code(text, size);
+		return;
+	}
 	switch (setting->opens)
 	{
 	case PAGE_BUTTONS:
@@ -4760,6 +4803,47 @@ static void show_friend_code(void)
 	vgxm_menu_set(text, 2);
 }
 
+/* Friend code backup's screen: its question, the work, the restore's
+question, what came of it */
+static void show_friend_backup(void)
+{
+	char text[1024], list[64];
+
+	switch (friend_backup.step)
+	{
+	case FRIEND_BACKUP_LIST:
+		snprintf(text, sizeof(text), "%s\n\n%s\n\n%s", T("BACK UP FRIEND CODE"),
+			T("Put your friends list in the backup too?\nIt comes back with your code."),
+			T("Cross: with the list   Square: code only\nCircle: cancel"));
+		break;
+	case FRIEND_BACKUP_WORKING:
+		snprintf(text, sizeof(text), "%s\n\n%s", T("FRIEND CODE BACKUP"),
+			p2p_friends_backup_text(P2P_FRIENDS_BACKUP_WORKING));
+		break;
+	case FRIEND_BACKUP_CONFIRM:
+		if (friend_backup.friend_count < 0)
+			snprintf(list, sizeof(list), "%s", T("the friend code alone"));
+		else
+			snprintf(list, sizeof(list), T("%d friends in it"), friend_backup.friend_count);
+		snprintf(text, sizeof(text), T("RESTORE FRIEND CODE\n\nYour code %s\nbecomes %s\n(%s).\n"
+			"Yours now is kept on the memory card.\nUse a code on one Vita at a time:\n"
+			"friends see the one started last.\n\nCross: confirm   Circle: cancel"), friend_backup.current,
+			friend_backup.code, list);
+		break;
+	case FRIEND_BACKUP_DONE:
+		snprintf(text, sizeof(text), "%s\n\n%s\n\n%s", T("FRIEND CODE BACKUP"), friend_backup.said,
+			T("Cross or Circle: back"));
+		break;
+	default:
+		snprintf(text, sizeof(text), "%s\n\n%s\n\n%s", T("FRIEND CODE BACKUP"),
+			T("Save your friend code (and friends list)\nto a file with a password, or restore one.\n"
+			"Anyone with the file and its password\ncan be you: keep both safe."),
+			T("Cross: back up   Square: restore\nCircle: back"));
+		break;
+	}
+	vgxm_menu_set(text, -1);
+}
+
 /* the question before the leader removes a member (triangle) */
 static void show_party_confirm(void)
 {
@@ -5222,6 +5306,8 @@ static void show(void)
 		show_friend_code();
 	else if (screen == SCREEN_FRIEND_CONFIRM)
 		show_friend_confirm();
+	else if (screen == SCREEN_FRIEND_BACKUP)
+		show_friend_backup();
 	else if (screen == SCREEN_PARTY_CONFIRM)
 		show_party_confirm();
 	else if (screen == SCREEN_BAN_CONFIRM)
@@ -5386,6 +5472,16 @@ static void close_panel(void)
 {
 	if (screen == SCREEN_BROWSE || screen == SCREEN_LARGE)
 		p2p_lobby_browse(0);
+	/* (Friend code backup left: a restore opened let go, nothing typed kept;
+	work going on goes on) */
+	if (screen == SCREEN_FRIEND_BACKUP)
+	{
+		if (friend_backup.step == FRIEND_BACKUP_CONFIRM)
+			p2p_friends_backup_cancel();
+		memset(friend_backup.password, 0, sizeof(friend_backup.password));
+		friend_backup.step = FRIEND_BACKUP_MENU;
+		friend_backup.ime_next = 0;
+	}
 	panel_open = 0;
 	screen = SCREEN_LIST;
 	/* (it opens again on the tab's own page) */
@@ -5664,6 +5760,12 @@ static void act(const struct setting *setting)
 	/* (friends: their code typed, sent once online) */
 	case ACTION_FRIEND_ADD:
 		screen = SCREEN_FRIEND_CODE;
+		break;
+	case ACTION_FRIEND_BACKUP:
+		memset(friend_backup.password, 0, sizeof(friend_backup.password));
+		friend_backup.step = FRIEND_BACKUP_MENU;
+		friend_backup.ime_next = 0;
+		screen = SCREEN_FRIEND_BACKUP;
 		break;
 	case ACTION_PARTY_MESSAGE:
 		if (p2p_party_status(NULL, 0) < 2)
@@ -6141,6 +6243,189 @@ static void party_confirm_input(unsigned long pressed)
 	}
 }
 
+/* Friend code backup's end: what came of it said, what was typed wiped (a
+restore opened let go) */
+static void friend_backup_finish(const char *said)
+{
+	if (friend_backup.step == FRIEND_BACKUP_CONFIRM)
+		p2p_friends_backup_cancel();
+	memset(friend_backup.password, 0, sizeof(friend_backup.password));
+	snprintf(friend_backup.said, sizeof(friend_backup.said), "%s", said);
+	friend_backup.step = FRIEND_BACKUP_DONE;
+	friend_backup.ime_next = 0;
+}
+
+/* the system's keyboard for the step: the file's name, the password, the
+password again */
+static void friend_backup_keyboard(void)
+{
+	const char *title = T("The password again");
+	int name = friend_backup.step == FRIEND_BACKUP_NAME;
+
+	friend_backup.ime_next = 0;
+	if (name)
+		title = T("Backup file name");
+	else if (friend_backup.step == FRIEND_BACKUP_PASSWORD)
+		title = friend_backup.restore ? T("The backup's password") : T("A password (8 characters or more)");
+	if (vita_ime_open(title, name ? P2P_FRIENDS_BACKUP_DEFAULT_NAME : "", name ? P2P_FRIENDS_BACKUP_NAME_SIZE - 1 :
+		P2P_FRIENDS_BACKUP_PASSWORD_MAXIMUM, !name) != 0)
+	{
+		friend_backup_finish(T("The keyboard did not open"));
+		return;
+	}
+	friend_backup.ime_pending = 1;
+	vgxm_menu_set(NULL, 0);
+}
+
+/* (ime_input) what was typed for the step (result: the keyboard's) */
+static void friend_backup_typed(int result, const char *typed)
+{
+	int outcome;
+
+	if (result <= 0)
+	{
+		/* (cancelled: the question again, nothing kept) */
+		memset(friend_backup.password, 0, sizeof(friend_backup.password));
+		friend_backup.step = FRIEND_BACKUP_MENU;
+		return;
+	}
+	switch (friend_backup.step)
+	{
+	case FRIEND_BACKUP_NAME:
+		if (!p2p_friends_backup_name(typed, friend_backup.name))
+			friend_backup_finish(p2p_friends_backup_text(P2P_FRIENDS_BACKUP_BAD_NAME));
+		else
+		{
+			friend_backup.step = FRIEND_BACKUP_PASSWORD;
+			friend_backup.ime_next = 1;
+		}
+		break;
+	case FRIEND_BACKUP_PASSWORD:
+		if (friend_backup.restore)
+		{
+			outcome = p2p_friends_backup_restore(friend_backup.name, typed);
+			if (outcome == P2P_FRIENDS_BACKUP_WORKING)
+				friend_backup.step = FRIEND_BACKUP_WORKING;
+			else
+				friend_backup_finish(p2p_friends_backup_text(outcome));
+			vita_host_log("settings: friends: a friend code backup being opened (settings panel)");
+			break;
+		}
+		outcome = p2p_friends_backup_password_check(typed);
+		if (outcome != P2P_FRIENDS_BACKUP_IDLE)
+			friend_backup_finish(p2p_friends_backup_text(outcome));
+		else
+		{
+			snprintf(friend_backup.password, sizeof(friend_backup.password), "%.64s", typed);
+			friend_backup.step = FRIEND_BACKUP_AGAIN;
+			friend_backup.ime_next = 1;
+		}
+		break;
+	case FRIEND_BACKUP_AGAIN:
+		if (strcmp(typed, friend_backup.password))
+			friend_backup_finish(p2p_friends_backup_text(P2P_FRIENDS_BACKUP_MISMATCH));
+		else
+			friend_backup.step = FRIEND_BACKUP_LIST;
+		break;
+	}
+}
+
+/* Friend code backup's buttons (each frame: the work watched) */
+static void friend_backup_input(unsigned long pressed)
+{
+	char text[256];
+	int outcome;
+
+	if (friend_backup.ime_next)
+	{
+		friend_backup_keyboard();
+		return;
+	}
+	switch (friend_backup.step)
+	{
+	case FRIEND_BACKUP_MENU:
+		if (pressed & (VITA_BUTTON_CROSS | VITA_BUTTON_SQUARE))
+		{
+			friend_backup.restore = (pressed & VITA_BUTTON_SQUARE) != 0;
+			friend_backup.step = FRIEND_BACKUP_NAME;
+			friend_backup_keyboard();
+		}
+		else if (pressed & VITA_BUTTON_CIRCLE)
+			screen = SCREEN_LIST;
+		break;
+	case FRIEND_BACKUP_LIST:
+		if (pressed & (VITA_BUTTON_CROSS | VITA_BUTTON_SQUARE))
+		{
+			int with_list = (pressed & VITA_BUTTON_CROSS) != 0;
+
+			outcome = p2p_friends_backup_export(friend_backup.name, friend_backup.password, with_list);
+			memset(friend_backup.password, 0, sizeof(friend_backup.password));
+			if (outcome == P2P_FRIENDS_BACKUP_WORKING)
+				friend_backup.step = FRIEND_BACKUP_WORKING;
+			else
+				friend_backup_finish(p2p_friends_backup_text(outcome));
+			vita_host_log(with_list ? "settings: friends: backing up the friend code and the list (settings panel)" :
+				"settings: friends: backing up the friend code (settings panel)");
+		}
+		else if (pressed & VITA_BUTTON_CIRCLE)
+			friend_backup_finish(T("Not backed up"));
+		break;
+	case FRIEND_BACKUP_WORKING:
+		outcome = p2p_friends_backup_state(text, sizeof(text));
+		if (outcome == P2P_FRIENDS_BACKUP_READY)
+		{
+			if (p2p_friends_backup_found(friend_backup.code, friend_backup.current, sizeof(friend_backup.code),
+				&friend_backup.friend_count))
+			{
+				friend_backup.step = FRIEND_BACKUP_CONFIRM;
+			}
+			else
+				friend_backup_finish(p2p_friends_backup_text(P2P_FRIENDS_BACKUP_NOTHING));
+		}
+		else if (outcome == P2P_FRIENDS_BACKUP_SAVED)
+		{
+			char said[192];
+
+			snprintf(said, sizeof(said), "%s\nux0:data/haloce-vita/\n%s.hfb\n%s", T("Backup saved to"),
+				friend_backup.name, T("Keep it and its password safe."));
+			friend_backup_finish(said);
+		}
+		else if (outcome != P2P_FRIENDS_BACKUP_WORKING)
+			friend_backup_finish(outcome == P2P_FRIENDS_BACKUP_IDLE ? p2p_friends_backup_text(P2P_FRIENDS_BACKUP_NOTHING) :
+				text);
+		break;
+	case FRIEND_BACKUP_CONFIRM:
+		if (pressed & VITA_BUTTON_CROSS)
+		{
+			outcome = p2p_friends_backup_confirm();
+			friend_backup.step = FRIEND_BACKUP_DONE;
+			if (outcome == P2P_FRIENDS_BACKUP_RESTORED)
+			{
+				char code[P2P_FRIEND_CODE_SIZE];
+
+				p2p_friends_code(code, sizeof(code));
+				snprintf(text, sizeof(text), "%s\n%s", T("Friend code restored:"), code);
+				friend_backup_finish(text);
+				vita_host_log("settings: friends: the friend code restored (settings panel)");
+			}
+			else
+				friend_backup_finish(p2p_friends_backup_text(outcome));
+			friends_refresh(1);
+		}
+		else if (pressed & VITA_BUTTON_CIRCLE)
+			friend_backup_finish(T("Not restored: your friend code stays"));
+		break;
+	default:
+		if (pressed & (VITA_BUTTON_CROSS | VITA_BUTTON_CIRCLE))
+		{
+			friend_backup.step = FRIEND_BACKUP_MENU;
+			friend_backup.said[0] = 0;
+			screen = SCREEN_LIST;
+		}
+		break;
+	}
+}
+
 /* the question's buttons */
 static void friend_confirm_input(unsigned long pressed)
 {
@@ -6338,12 +6623,21 @@ static int ime_input(void)
 	char typed[P2P_PARTY_CHAT_SIZE + 8];
 	int result;
 
-	if (!ime_setting && !browse_join_pending && !party_message_pending && !friend_password_pending)
+	if (!ime_setting && !browse_join_pending && !party_message_pending && !friend_password_pending &&
+		!friend_backup.ime_pending)
+	{
 		return 0;
+	}
 	result = vita_ime_poll(typed, sizeof(typed));
 	if (result == 0)
 		return 1;
-	if (friend_password_pending)
+	if (friend_backup.ime_pending)
+	{
+		friend_backup.ime_pending = 0;
+		friend_backup_typed(result, typed);
+		memset(typed, 0, sizeof(typed));
+	}
+	else if (friend_password_pending)
 	{
 		friend_password_pending = 0;
 		if (result > 0)
@@ -6444,6 +6738,7 @@ static int game_text_input(void)
 		return 1;
 	if (result > 0)
 		snprintf(halo_text_input_text, sizeof(halo_text_input_text), "%s", typed);
+	memset(typed, 0, sizeof(typed));
 	__atomic_store_n(&halo_text_input_state, result > 0 ? HALO_TEXT_INPUT_DONE : HALO_TEXT_INPUT_CANCELLED,
 		__ATOMIC_RELEASE);
 	/* (the presses that closed the keyboard are not the game's) */
@@ -6729,6 +7024,19 @@ int vita_settings_input(const struct vita_host_pad *pad)
 		friend_confirm_input(pressed);
 		if (pressed)
 			show();
+		return 1;
+	}
+	if (screen == SCREEN_FRIEND_BACKUP)
+	{
+		int step = friend_backup.step;
+
+		friend_backup_input(pressed);
+		/* (not over the keyboard just opened) */
+		if (!friend_backup.ime_pending && (pressed || step != friend_backup.step || screen != SCREEN_FRIEND_BACKUP ||
+			now - last_shown > 500000))
+		{
+			show();
+		}
 		return 1;
 	}
 	if (screen == SCREEN_PARTY_CONFIRM)

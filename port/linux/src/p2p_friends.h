@@ -272,4 +272,98 @@ void p2p_flame_set_players(const int *claims, const unsigned short *names, int c
 /* a machine's player's flame proven to this machine (draw it) */
 int p2p_flame_verified(int machine);
 
+/* ---------- the friend identity's backup (p2p_friends_backup.inc; the
+file's format, its crypto and what restoring does:
+docs/superpowers/specs/2026-10-21-friends-backup-design.md)
+
+This machine's friend identity (its key, so its friend code) and, if
+chosen, its friends list put in a file sealed with a password (Argon2id of
+8 MiB and five passes, XChaCha20-Poly1305), in the game's own folder
+(ux0:data/haloce-vita on the Vita; the save folder on a PC): <name>.hfb.
+Restoring opens such a file with its password and, once confirmed, makes
+its identity this machine's (the same friend code: the friends who had it
+see this machine as that friend), the friends list too if the file has
+one; the identity it replaces is kept in friends/replaced-<date>/. The
+password is never kept nor logged. The work (the password's key takes about
+a second on a Vita) runs on a thread of its own: these calls start it and
+read how it went. */
+
+enum
+{
+	/* a password's characters (printable ASCII; spaces at either end
+	ignored, as the menus' typing drops them) */
+	P2P_FRIENDS_BACKUP_PASSWORD_MINIMUM = 8,
+	P2P_FRIENDS_BACKUP_PASSWORD_MAXIMUM = 64,
+	/* a file's name as typed (letters, digits, - and _; ".hfb" added) and
+	its terminator */
+	P2P_FRIENDS_BACKUP_NAME_SIZE = 33,
+};
+/* the default name ("friends-backup": friends-backup.hfb) */
+#define P2P_FRIENDS_BACKUP_DEFAULT_NAME "friends-backup"
+
+/* where a backup is, and how it went */
+enum
+{
+	/* nothing going on (or its outcome taken) */
+	P2P_FRIENDS_BACKUP_IDLE,
+	P2P_FRIENDS_BACKUP_WORKING,
+	/* the file written */
+	P2P_FRIENDS_BACKUP_SAVED,
+	/* (restoring) the file opened with its password: p2p_friends_backup_found
+	says what it holds; p2p_friends_backup_confirm restores it,
+	p2p_friends_backup_cancel lets it go */
+	P2P_FRIENDS_BACKUP_READY,
+	/* the identity restored */
+	P2P_FRIENDS_BACKUP_RESTORED,
+	/* refused or failed (nothing changed) */
+	P2P_FRIENDS_BACKUP_BUSY,
+	P2P_FRIENDS_BACKUP_SHORT_PASSWORD,
+	/* a password with characters other than printable ASCII, or too long */
+	P2P_FRIENDS_BACKUP_BAD_PASSWORD,
+	/* (the menus' own check) the password typed again is not the same */
+	P2P_FRIENDS_BACKUP_MISMATCH,
+	P2P_FRIENDS_BACKUP_BAD_NAME,
+	P2P_FRIENDS_BACKUP_NO_FILE,
+	/* the password does not open it (or the file was altered) */
+	P2P_FRIENDS_BACKUP_WRONG_PASSWORD,
+	/* not a backup, cut short, or its checks failed */
+	P2P_FRIENDS_BACKUP_DAMAGED,
+	/* a backup of a newer version of the game */
+	P2P_FRIENDS_BACKUP_NEWER,
+	P2P_FRIENDS_BACKUP_NO_MEMORY,
+	P2P_FRIENDS_BACKUP_WRITE_FAILED,
+	/* (restoring) the file opened before was let go, or there is none */
+	P2P_FRIENDS_BACKUP_NOTHING,
+	P2P_FRIENDS_BACKUP_OUTCOME_COUNT
+};
+
+/* a name as typed: its file name's part (".hfb" taken off; at most
+P2P_FRIENDS_BACKUP_NAME_SIZE - 1 characters) into name; 0 if it is no name */
+int p2p_friends_backup_name(const char *typed, char *name);
+/* a password's check: P2P_FRIENDS_BACKUP_IDLE (fine), _SHORT_PASSWORD or
+_BAD_PASSWORD */
+int p2p_friends_backup_password_check(const char *password);
+/* this machine's identity (and with_list: its friends list) written to the
+named file, sealed with the password: P2P_FRIENDS_BACKUP_WORKING (started),
+or why not */
+int p2p_friends_backup_export(const char *name, const char *password, int with_list);
+/* the named file opened with the password (nothing changed yet):
+P2P_FRIENDS_BACKUP_WORKING (started), or why not */
+int p2p_friends_backup_restore(const char *name, const char *password);
+/* how it goes: WORKING, READY, or its outcome (given once; then IDLE) and,
+if text is not NULL, the outcome as the player reads it (in the language
+chosen: where the file went, the code restored) */
+int p2p_friends_backup_state(char *text, int size);
+/* (READY) what the file holds: its friend code (with its dashes), this
+machine's now, the friends in its list (-1: no list in it); 0 if there is
+nothing opened */
+int p2p_friends_backup_found(char *code, char *current_code, int code_size, int *friend_count);
+/* (READY) the identity restored, the one it replaces kept first:
+P2P_FRIENDS_BACKUP_RESTORED or why not (nothing changed then) */
+int p2p_friends_backup_confirm(void);
+/* (READY) what was opened let go, wiped */
+void p2p_friends_backup_cancel(void);
+/* an outcome as the player reads it (in the language chosen) */
+const char *p2p_friends_backup_text(int outcome);
+
 #endif

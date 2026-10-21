@@ -194,6 +194,12 @@
 #            FRIENDS' PARTY row opens it (internet play off: no party, go online
 #            first), B goes back to FRIENDS; a friend's options offline have no
 #            INVITE TO PARTY (the party's own steps: run_netns_online_test.sh party)
+#   h3friendsbackup FRIENDS' FRIEND CODE BACKUP (port/linux/src/p2p_friends_backup.inc): a save's
+#            friends (as h3friends'); BACK UP FRIEND CODE, the name and the password twice typed
+#            (HALO_TEST_TEXT_INPUT), WITH FRIENDS LIST: the file written. A second start on a new
+#            save (another friend code) with that file: RESTORE FRIEND CODE, a wrong password
+#            said and nothing changed, then the right one: CONFIRM, the first start's code and
+#            friends; no log holds the password
 #   h3friendspanel the lobbies' FRIENDS panel: the multiplayer lobby shows who is online
 #            and the requests, Triangle opens the FRIENDS screen, B back; the Forge lobby too
 #   h3partyplates  the party as Halo 3 shows it (the owner: "when they join your party it
@@ -391,7 +397,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3partyplates h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes}
+cases=${*:-fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendsbackup h3friendspanel h3partyplates h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
@@ -2110,10 +2116,10 @@ PY
 			fail h3modstouch "a tap on Back did not go back to the main menu" ;;
 	h3friends)
 		# (FRIENDS, the seventh item; ADD FRIEND: a code typed; APPEAR OFFLINE; FRIENDS CAN JOIN;
-		# PARTY passed; Delta's request: Square declines; Bravo (focused then): Cross joins
-		# (offline: go online first), Triangle, down to REMOVE FRIEND, A; B)
+		# PARTY and FRIEND CODE BACKUP passed; Delta's request: Square declines; Bravo (focused
+		# then): Cross joins (offline: go online first), Triangle, down to REMOVE FRIEND, A; B)
 		friends_seed "$out/h3friends-save"
-		save_from="$out/h3friends-save" run h3friends "$menus_data" 45 "$h3friendspad a wait:150:2500 down:150:500 a wait:150:1500 down:150:500 a wait:150:1500 down:150:500 down:150:500 x wait:150:2500 a wait:150:2000 y wait:150:2500 down:150:500 a wait:150:2500 b wait:150:2000" \
+		save_from="$out/h3friends-save" run h3friends "$menus_data" 45 "$h3friendspad a wait:150:2500 down:150:500 a wait:150:1500 down:150:500 a wait:150:1500 down:150:500 down:150:500 down:150:500 x wait:150:2500 a wait:150:2000 y wait:150:2500 down:150:500 a wait:150:2500 b wait:150:2000" \
 			HALO_MENU_STYLE=halo3 HALO_TEST_FRIENDS_SHOW=online "HALO_TEST_TEXT_INPUT=abcd efgh-jklm"
 		check_h3 h3friends halo3
 		log=$out/h3friends/run.log
@@ -2144,12 +2150,56 @@ PY
 		[ "$(grep -a "this machine's friend code is" "$log" | sed 's/.*code is \([^ ]*\).*/\1/')" = \
 			"$(grep -a "this machine's friend code is" "$out/h3friends_again/run.log" | sed 's/.*code is \([^ ]*\).*/\1/')" ] ||
 			fail h3friends "the code changed between starts" ;;
+	h3friendsbackup)
+		# (FRIENDS; down four to FRIEND CODE BACKUP, Cross: its question (Back focused); down, Cross:
+		# BACK UP FRIEND CODE; the name, the password, again; down, Cross: WITH FRIENDS LIST; B)
+		backup_pad="down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:2500"
+		friends_seed "$out/h3friendsbackup-save"
+		save_from="$out/h3friendsbackup-save" run h3friendsbackup "$menus_data" 40 \
+			"$h3friendspad $backup_pad down:150:500 a wait:150:3000 down:150:500 a wait:150:6000 b wait:150:2000" \
+			HALO_MENU_STYLE=halo3 "HALO_TEST_TEXT_INPUT=my-code|hunter2hunter2|hunter2hunter2"
+		check_h3 h3friendsbackup halo3
+		log=$out/h3friendsbackup/run.log
+		grep -a "menus: h3 friends\|friends: backup" "$log" | grep -av "menus: h3 friends: \(request\|friend\|blocked\) " | head -12
+		code1=$(grep -a "this machine's friend code is" "$log" | head -1 | sed 's/.*code is \([^ ]*\).*/\1/')
+		grep -aq "menus: h3 friends: the friend code backup's question" "$log" || fail h3friendsbackup "FRIEND CODE BACKUP asked nothing"
+		grep -aq "ui: screen pc.h3.friends.options" "$log" || fail h3friendsbackup "its question did not open"
+		grep -aq "friends: backup: written to .*/my-code.hfb (the friend code and the friends list)" "$log" ||
+			fail h3friendsbackup "the backup was not written with the list"
+		grep -aq "menus: h3 friends: Saved to .*my-code.hfb. Keep it and its password safe." "$log" ||
+			fail h3friendsbackup "where it went was not said"
+		[ -s "$out/h3friendsbackup/save/my-code.hfb" ] || fail h3friendsbackup "no my-code.hfb in the save folder"
+		# (a second start, a new save: its own code; the backup opened with a wrong password, then
+		# the right one, CONFIRM)
+		rm -rf "$out/h3friendsrestore-save"
+		mkdir -p "$out/h3friendsrestore-save"
+		cp "$out/h3friendsbackup/save/my-code.hfb" "$out/h3friendsrestore-save/"
+		restore_pad="$backup_pad down:150:500 down:150:500 a wait:150:5000 wait:150:2000"
+		restore_pad="$restore_pad $backup_pad down:150:500 down:150:500 a wait:150:6000 down:150:500 a wait:150:3000 b wait:150:2000"
+		save_from="$out/h3friendsrestore-save" run h3friendsrestore "$menus_data" 50 "$h3friendspad $restore_pad" \
+			HALO_MENU_STYLE=halo3 "HALO_TEST_TEXT_INPUT=my-code|hunter2hunter3|my-code|hunter2hunter2"
+		check_h3 h3friendsrestore halo3
+		log=$out/h3friendsrestore/run.log
+		grep -a "menus: h3 friends: [^rfb]\|friends: backup\|friend code is" "$log" | head -12
+		code2=$(grep -a "this machine's friend code is" "$log" | head -1 | sed 's/.*code is \([^ ]*\).*/\1/')
+		[ -n "$code1" ] && [ -n "$code2" ] && [ "$code1" != "$code2" ] || fail h3friendsbackup "the new save had no code of its own"
+		grep -aq "friends: backup: .*my-code.hfb: Wrong password, or the file was changed" "$log" ||
+			fail h3friendsbackup "a wrong password was not said"
+		grep -aq "friends: backup: .*my-code.hfb opened: the friend code $code1, 2 friends (its list)" "$log" ||
+			fail h3friendsbackup "the backup was not opened with the right password"
+		grep -aq "friends: backup: restored: this machine's friend code is now $code1 (2 friends, 1 requests, 1 sent, 1 blocked" "$log" ||
+			fail h3friendsbackup "the first start's code and friends were not restored"
+		grep -aq "menus: h3 friends: Friend code restored: $code1" "$log" || fail h3friendsbackup "the restore was not said"
+		ls "$out/h3friendsrestore/save/friends/" | grep -q "^replaced-" || fail h3friendsbackup "the replaced identity was not kept"
+		grep -aq "hunter2" "$out/h3friendsbackup/run.log" "$log" "$out"/h3friends*/data/debug.txt 2>/dev/null &&
+			fail h3friendsbackup "a log holds the password" ;;
 	h3party)
 		# (FRIENDS; down three to PARTY, Cross: the PARTY screen (internet play off: no party, how to
 		# make one); Square (QUICK CHAT) and Triangle (type): not in a party, said; B: FRIENDS again
-		# (on ADD FRIEND); down five to Bravo, Triangle: the options, offline no INVITE TO PARTY; B, B)
+		# (on ADD FRIEND); down six to Bravo (FRIEND CODE BACKUP passed), Triangle: the options,
+		# offline no INVITE TO PARTY; B, B)
 		friends_seed "$out/h3friends-save"
-		save_from="$out/h3friends-save" run h3party "$menus_data" 45 "$h3friendspad down:150:500 down:150:500 down:150:500 a wait:150:3000 x wait:150:1500 y wait:150:1500 b wait:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 y wait:150:2500 b wait:150:2000 b wait:150:2000" \
+		save_from="$out/h3friends-save" run h3party "$menus_data" 45 "$h3friendspad down:150:500 down:150:500 down:150:500 a wait:150:3000 x wait:150:1500 y wait:150:1500 b wait:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 y wait:150:2500 b wait:150:2000 b wait:150:2000" \
 			HALO_MENU_STYLE=halo3 HALO_TEST_FRIENDS_SHOW=online
 		check_h3 h3party halo3
 		log=$out/h3party/run.log

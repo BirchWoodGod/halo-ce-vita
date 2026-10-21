@@ -347,6 +347,21 @@ void p2p_seal_token(const unsigned char *key, const unsigned char *signing_key, 
 int p2p_unseal_token(const unsigned char *key, const unsigned char *signing_key, const unsigned char *sealed,
 	unsigned char *token);
 
+/* a friend identity's backup (p2p_friends_backup.inc): the key of its
+password (Argon2id of `blocks` KiB and `passes` passes, P2P_PASSWORD_KEY_SIZE
+bytes; 0 if there was no memory for it); its contents sealed with
+XChaCha20-Poly1305 (a 24-byte nonce; sealed: the ciphertext, size bytes,
+then the 16-byte tag) bound to additional data, and opened (0: the key is
+not the one it was sealed with - a wrong password - or it was altered;
+nothing is written to plaintext then); a secret wiped */
+int p2p_backup_key(const char *password, int password_size, const unsigned char *salt, int salt_size,
+	unsigned long blocks, unsigned long passes, unsigned char *key);
+void p2p_backup_seal(const unsigned char *key, const unsigned char *nonce, const void *additional,
+	int additional_size, const void *plaintext, int size, unsigned char *sealed);
+int p2p_backup_open(const unsigned char *key, const unsigned char *nonce, const void *additional,
+	int additional_size, const unsigned char *sealed, int size, unsigned char *plaintext);
+void p2p_wipe(void *secret, int size);
+
 /* ---------- p2p_lobby.c: public games' listings */
 
 enum

@@ -651,6 +651,9 @@ struct friends_state
 	int counters_dirty;
 	unsigned long saved_time;
 	unsigned long counters_saved_time;
+	/* the files replaced whole (a backup restored: p2p_friends_backup.inc):
+	a save that read the list before is not written */
+	unsigned long files_generation;
 
 	struct inbound inbound[MAXIMUM_INBOUND];
 	int inbound_count;
@@ -735,6 +738,13 @@ struct friends_state
 	unsigned char test_last_sent[MAXIMUM_PAYLOAD_SIZE];
 	int test_last_sent_size;
 	char test_last_topic[TOPIC_LENGTH];
+	/* (the backup's steps: p2p_friends_backup.inc) a backup written at a
+	second, or one restored (confirmed once opened); its name, password and
+	whether it has the list */
+	long test_backup_at, test_restore_at;
+	int test_backup_started, test_restore_started, test_backup_list;
+	char test_backup_name[P2P_FRIENDS_BACKUP_NAME_SIZE];
+	char test_backup_password[P2P_FRIENDS_BACKUP_PASSWORD_MAXIMUM + 1];
 };
 
 /* ---------- globals */
@@ -1606,6 +1616,28 @@ static void file_set_aside(const char *name)
 
 /* the identity and the list read, once; a new identity made if there is
 none (under friends_lock) */
+/* (friends_lock held) the identity's public key and code in friends/tester-id.txt,
+for the owner's tester list (tools/release/sign_testers.py --add-id; nothing
+secret): at load, and again when a backup's identity is restored */
+static void tester_id_write(void)
+{
+	char text[160], key_text[2 * P2P_KEY_SIZE + 1], path[PATH_SIZE];
+	unsigned char bytes[160];
+	int length, index;
+
+	if (!friends->has_identity)
+		return;
+	for (index = 0; index < P2P_KEY_SIZE; index++)
+		snprintf(key_text + 2 * index, 3, "%02x", friends->key[index]);
+	length = snprintf(text, sizeof(text), "halo-ce-vita-tester-id 1\nkey %s\ncode %.4s-%.4s-%.4s\n", key_text,
+		friends->code, friends->code + 4, friends->code + 8);
+	if (file_path("tester-id", ".txt", path, sizeof(path)) && length > 0 && length < (int)sizeof(text) &&
+		(file_read(path, bytes, (int)sizeof(bytes)) != length || memcmp(bytes, text, (size_t)length)))
+	{
+		file_write(path, (const unsigned char *)text, length);
+	}
+}
+
 static void load(void)
 {
 	unsigned char bytes[MAXIMUM_LIST_SIZE + 1];
@@ -1639,22 +1671,7 @@ static void load(void)
 	friends->epoch_written = file_put("identity.dat", bytes, size);
 	if (!friends->epoch_written)
 		platform_log("friends: the identity could not be written; friends will see this run's messages, not keep it");
-	/* (the identity's public key and code, for the owner's tester list:
-	tools/release/sign_testers.py --add-id; nothing secret) */
-	{
-		char text[160], key_text[2 * P2P_KEY_SIZE + 1], path[PATH_SIZE];
-		int length, index;
-
-		for (index = 0; index < P2P_KEY_SIZE; index++)
-			snprintf(key_text + 2 * index, 3, "%02x", friends->key[index]);
-		length = snprintf(text, sizeof(text), "halo-ce-vita-tester-id 1\nkey %s\ncode %.4s-%.4s-%.4s\n", key_text,
-			friends->code, friends->code + 4, friends->code + 8);
-		if (file_path("tester-id", ".txt", path, sizeof(path)) && length > 0 && length < (int)sizeof(text) &&
-			(file_read(path, bytes, (int)sizeof(bytes)) != length || memcmp(bytes, text, (size_t)length)))
-		{
-			file_write(path, (const unsigned char *)text, length);
-		}
-	}
+	tester_id_write();
 	taken = 0;
 	for (old = 0; old < 2 && !taken; old++)
 	{
@@ -1698,6 +1715,9 @@ static void save(int force)
 {
 	unsigned char bytes[MAXIMUM_LIST_SIZE], *marks;
 	int size, marks_size, written;
+	/* (the state saved, and its files' generation as the list was read) */
+	struct friends_state *state;
+	unsigned long generation;
 
 	pthread_mutex_lock(&friends_lock);
 	if (!friends->loaded || (!friends->dirty && !(friends->counters_dirty && (force ||
@@ -1720,8 +1740,18 @@ static void save(int force)
 	friends->counters_dirty = 0;
 	friends->saved_time = now_stamp();
 	friends->counters_saved_time = friends->saved_time;
+	state = friends;
+	generation = friends->files_generation;
 	pthread_mutex_unlock(&friends_lock);
 	pthread_mutex_lock(&friends_file_lock);
+	/* (the files replaced whole since the list was read - a backup
+	restored: these bytes are the old identity's list, not written) */
+	if (generation != state->files_generation)
+	{
+		pthread_mutex_unlock(&friends_file_lock);
+		free(marks);
+		return;
+	}
 	written = file_put("friends.dat", bytes, size);
 	if (written && !file_put("marks.dat", marks, marks_size))
 		written = 0;
@@ -1749,6 +1779,8 @@ static void party_leave_now(int tell, const char *why);
 static void party_key_blocked(const unsigned char *key);
 static void party_friend_entry(const struct friend_record *record, struct p2p_friend_entry *entry);
 static void party_friend_new_run(struct friend_record *record);
+/* (p2p_friends_backup.inc) a backup opened and left let go */
+static void backup_expire(void);
 
 /* ---------- messages */
 
@@ -3226,7 +3258,10 @@ friend online invited, S seconds after hosting), appear-offline-at=S,
 remove-at=S (every friend removed), cancel-at=S (every request sent taken
 back), replay-at=S (the last message sent, sent again as it was), forge-at=S
 (a presence tampered with, one signed by another key, one of another sender:
-all must be dropped) */
+all must be dropped), backup=S:NAME:PASSWORD (S seconds in, the friend code
+and the friends list backed up to NAME.hfb: p2p_friends_backup.inc),
+backup-code=S:NAME:PASSWORD (the code alone), restore=S:NAME:PASSWORD (NAME.hfb
+opened S seconds in, and restored once opened); the password never logged */
 static void test_parse(void)
 {
 	const char *setting = getenv("HALO_TEST_FRIENDS");
@@ -3236,6 +3271,7 @@ static void test_parse(void)
 	friends->test_parsed = 1;
 	friends->test_invite_after = friends->test_appear_offline_at = friends->test_remove_at = -1;
 	friends->test_replay_at = friends->test_forge_at = friends->test_cancel_at = -1;
+	friends->test_backup_at = friends->test_restore_at = -1;
 	if (!setting || !setting[0])
 		return;
 	snprintf(copy, sizeof(copy), "%s", setting);
@@ -3263,8 +3299,47 @@ static void test_parse(void)
 			friends->test_replay_at = atol(step + 10);
 		else if (!strncmp(step, "forge-at=", 9))
 			friends->test_forge_at = atol(step + 9);
+		/* (backup=SECONDS:NAME:PASSWORD with the list, backup-code= the code
+		alone; restore=SECONDS:NAME:PASSWORD, confirmed once opened) */
+		else if (!strncmp(step, "backup=", 7) || !strncmp(step, "backup-code=", 12) || !strncmp(step, "restore=", 8))
+		{
+			int restore = step[0] == 'r';
+			char *at = strchr(step, '=') + 1, *name = strchr(at, ':'), *password = name ? strchr(name + 1, ':') : NULL;
+
+			if (!password)
+				continue;
+			*name++ = 0;
+			*password++ = 0;
+			if (restore)
+				friends->test_restore_at = atol(at);
+			else
+			{
+				friends->test_backup_at = atol(at);
+				friends->test_backup_list = step[6] == '=';
+			}
+			snprintf(friends->test_backup_name, sizeof(friends->test_backup_name), "%s", name);
+			snprintf(friends->test_backup_password, sizeof(friends->test_backup_password), "%s", password);
+		}
 	}
-	platform_log("friends: test steps: %s", setting);
+	/* (the steps logged, a backup's password not) */
+	{
+		char shown[1024], listed[1024];
+		int length = 0;
+
+		snprintf(listed, sizeof(listed), "%s", setting);
+		shown[0] = 0;
+		for (step = strtok_r(listed, ",", &save_pointer); step; step = strtok_r(NULL, ",", &save_pointer))
+		{
+			char *second = strchr(step, ':') ? strchr(strchr(step, ':') + 1, ':') : NULL;
+			int backup_step = !strncmp(step, "backup", 6) || !strncmp(step, "restore=", 8);
+
+			length += snprintf(shown + length, sizeof(shown) - (size_t)length, "%s%.*s%s", length ? "," : "",
+				backup_step && second ? (int)(second - step) : (int)strlen(step), step, backup_step && second ? ":***" : "");
+			if (length >= (int)sizeof(shown))
+				break;
+		}
+		platform_log("friends: test steps: %s", shown);
+	}
 }
 
 static int test_due(long at)
@@ -3328,6 +3403,7 @@ static void test_forge(void)
 }
 
 static void test_add_codes(void);
+static void test_backup_steps(void);
 
 static void test_steps(void)
 {
@@ -3418,6 +3494,7 @@ static void test_steps(void)
 		friends->test_forged = 1;
 		test_forge();
 	}
+	test_backup_steps();
 }
 
 static void test_add_codes(void)
@@ -4217,6 +4294,7 @@ void p2p_friends_update(const struct p2p_friends_host *host)
 		(void)joinable;
 	return;
 #endif
+	backup_expire();
 	pthread_mutex_lock(&friends_lock);
 	load();
 	was_online = friends->online;
@@ -5296,3 +5374,7 @@ void p2p_friends_set_activity(int state, const char *map, const char *gametype, 
 /* ---------- the flaming helmet (tester_list.h) */
 
 #include "p2p_flame.inc"
+
+/* ---------- the friend identity's backup (p2p_friends.h) */
+
+#include "p2p_friends_backup.inc"

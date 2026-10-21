@@ -170,6 +170,12 @@ static void close_box(int accepted)
 	{
 		platform_log("text entry: \"%s\": cancelled", entry.title);
 	}
+	/* (a password: the box keeps no copy of it) */
+	if (entry.password)
+	{
+		memset(entry.text, 0, sizeof(entry.text));
+		entry.length = entry.caret = 0;
+	}
 	__atomic_store_n(&halo_text_input_state, accepted ? HALO_TEXT_INPUT_DONE : HALO_TEXT_INPUT_CANCELLED,
 		__ATOMIC_RELEASE);
 }

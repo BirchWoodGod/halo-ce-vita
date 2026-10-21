@@ -748,3 +748,53 @@ int p2p_ed25519_verify(const unsigned char *public_key, const void *message, int
 	return p2p_ed25519_to_x25519(public_key, x25519_public) &&
 		crypto_ed25519_check(signature, public_key, message, (size_t)size) == 0;
 }
+
+/* ---------- a friend identity's backup (p2p_friends_backup.inc): the key
+of its password, Argon2id with the file's own memory (KiB blocks) and passes
+and its random salt; its contents sealed with XChaCha20-Poly1305 (a random
+24-byte nonce of its own), its header the additional data */
+
+int p2p_backup_key(const char *password, int password_size, const unsigned char *salt, int salt_size,
+	unsigned long blocks, unsigned long passes, unsigned char *key)
+{
+	crypto_argon2_config config;
+	crypto_argon2_inputs inputs;
+	void *work_area;
+
+	if (password_size < 0 || salt_size < 8 || blocks < 8 || passes < 1)
+		return 0;
+	work_area = malloc((size_t)blocks * 1024);
+	if (!work_area)
+		return 0;
+	config.algorithm = CRYPTO_ARGON2_ID;
+	config.nb_blocks = (uint32_t)blocks;
+	config.nb_passes = (uint32_t)passes;
+	config.nb_lanes = 1;
+	inputs.pass = (const unsigned char *)password;
+	inputs.pass_size = (uint32_t)password_size;
+	inputs.salt = salt;
+	inputs.salt_size = (uint32_t)salt_size;
+	crypto_argon2(key, P2P_PASSWORD_KEY_SIZE, work_area, config, inputs, crypto_argon2_no_extras);
+	crypto_wipe(work_area, (size_t)blocks * 1024);
+	free(work_area);
+	return 1;
+}
+
+void p2p_backup_seal(const unsigned char *key, const unsigned char *nonce, const void *additional,
+	int additional_size, const void *plaintext, int size, unsigned char *sealed)
+{
+	crypto_aead_lock(sealed, sealed + size, key, nonce, additional, (size_t)additional_size, plaintext, (size_t)size);
+}
+
+int p2p_backup_open(const unsigned char *key, const unsigned char *nonce, const void *additional,
+	int additional_size, const unsigned char *sealed, int size, unsigned char *plaintext)
+{
+	return crypto_aead_unlock(plaintext, sealed + size, key, nonce, additional, (size_t)additional_size, sealed,
+		(size_t)size) == 0;
+}
+
+void p2p_wipe(void *secret, int size)
+{
+	if (secret && size > 0)
+		crypto_wipe(secret, (size_t)size);
+}
