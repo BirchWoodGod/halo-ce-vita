@@ -139,6 +139,12 @@ enum
 	1.1.1-beta.1 F-10; the seen ring alone forgot it after 64 others' or a
 	restart) */
 	MAXIMUM_MARKS = 128,
+	/* the inbox's share of the inbound queue: strangers' requests, and those
+	of a key known here (a request waiting, a friend, the key of a code this
+	machine sent a request to); a flood of requests leaves room for the
+	friends' messages and the known keys' requests (F-06) */
+	MAXIMUM_INBOUND_STRANGERS = 12,
+	MAXIMUM_INBOUND_KNOWN = 8,
 	MAXIMUM_BROKER_MASK = 0xFF,
 	/* messages handled in one pass of internet play's thread */
 	MESSAGES_PER_PASS = 16,
@@ -166,6 +172,13 @@ enum
 	/* budgets: at most this many at once, one more each interval */
 	REQUEST_BUDGET = 10,
 	REQUEST_BUDGET_INTERVAL = 2000,
+	/* (a known key's requests: its own budget, apart from strangers') */
+	KNOWN_REQUEST_BUDGET = 2,
+	KNOWN_REQUEST_BUDGET_INTERVAL = 20000,
+	/* a request waiting that its sender has not sent again in this long (a
+	sender sends it again every REQUEST_SLOW_INTERVAL at most) makes room
+	for a new one when the list is full (F-06) */
+	REQUEST_IDLE_TIME = REQUEST_SLOW_INTERVAL + 60000,
 	BOX_BUDGET = 10,
 	BOX_BUDGET_INTERVAL = 500,
 	/* pair messages no key opened (each tried with every friend's): past
@@ -177,6 +190,9 @@ enum
 	OUTGOING_LIFETIME = 14 * 24 * 3600,
 	MUTE_TIME = 7 * 24 * 3600,
 	TOMBSTONE_TIME = 30 * 24 * 3600,
+	/* a request waiting not heard again in this long goes (its sender's
+	stopped sending it: OUTGOING_LIFETIME) */
+	REQUEST_LIFETIME = OUTGOING_LIFETIME + 24 * 3600,
 
 	/* the files */
 	IDENTITY_VERSION = 1,
@@ -317,6 +333,8 @@ struct friend_record
 	unsigned long party_heard_time;
 	unsigned long party_invite_sent_time;
 	unsigned long party_invite_heard_time;
+	/* (their friend requests: a friend who lost this machine asks again) */
+	struct budget request_budget;
 };
 
 struct request_record
@@ -325,9 +343,12 @@ struct request_record
 	char name[P2P_FRIEND_NAME_SIZE];
 	unsigned char nonce[NONCE_LENGTH];
 	unsigned long long time;
-	/* (marks.dat) the newest of its requests heard */
+	/* (marks.dat) the newest of its requests heard; (this run) when it was
+	last heard, and its own budget */
 	unsigned long long epoch;
 	unsigned long counter;
+	unsigned long heard_time;
+	struct budget budget;
 };
 
 struct outgoing_record
@@ -338,6 +359,8 @@ struct outgoing_record
 	/* this run: when it was last sent, and since when it is sent */
 	unsigned long sent_time;
 	unsigned long first_time;
+	/* (its code's own request, both asking: its budget) */
+	struct budget budget;
 };
 
 /* a key's newest request heard, kept once this machine declined, removed or
@@ -394,6 +417,8 @@ struct seen_request
 struct inbound
 {
 	int which;
+	/* (an inbox request: its sender's key known here, as it was queued) */
+	int known;
 	int size;
 	unsigned char payload[MAXIMUM_PAYLOAD_SIZE];
 };
@@ -1599,6 +1624,9 @@ static void load(void)
 		}
 	}
 	pthread_mutex_unlock(&friends_file_lock);
+	/* (the requests waiting: heard as of now, for REQUEST_IDLE_TIME) */
+	for (old = 0; old < friends->request_count; old++)
+		friends->requests[old].heard_time = now_stamp();
 	{
 		char shown[P2P_FRIEND_CODE_SIZE];
 
@@ -2683,8 +2711,25 @@ static void request_heard(const struct message *message)
 	{
 		if (friends->request_count >= P2P_FRIEND_REQUESTS_MAXIMUM)
 		{
-			friends->dropped_rate++;
-			return;
+			/* (full: the request its sender has not sent again the longest
+			makes room, if that is longer than a sender waits to send it
+			again - its sender stopped; a list filled once and left stays
+			full no longer, F-06) */
+			int each, idle = -1;
+
+			for (each = 0; each < friends->request_count; each++)
+				if (elapsed(friends->requests[each].heard_time, REQUEST_IDLE_TIME) &&
+					(idle < 0 || (long)(friends->requests[each].heard_time - friends->requests[idle].heard_time) < 0))
+				{
+					idle = each;
+				}
+			if (idle < 0)
+			{
+				friends->dropped_rate++;
+				return;
+			}
+			platform_log("friends: a friend request not sent again in a while made room for a new one");
+			request_remove(idle);
 		}
 		index = friends->request_count++;
 		memset(&friends->requests[index], 0, sizeof(friends->requests[index]));
@@ -2694,6 +2739,7 @@ static void request_heard(const struct message *message)
 	snprintf(friends->requests[index].name, sizeof(friends->requests[index].name), "%s", message->name);
 	memcpy(friends->requests[index].nonce, message->nonce, NONCE_LENGTH);
 	friends->requests[index].time = unix_now();
+	friends->requests[index].heard_time = now_stamp();
 	if (message->epoch > friends->requests[index].epoch || (message->epoch == friends->requests[index].epoch &&
 		message->counter > friends->requests[index].counter))
 	{
@@ -2966,6 +3012,61 @@ static void pair_heard(const unsigned char *payload, int size)
 	}
 }
 
+/* (friends_lock held) a request's sender known here: a request of theirs
+waiting, a friend (who lost this machine), or the key of a code this
+machine sent a request to (both asking) */
+static int request_key_known(const unsigned char *key)
+{
+	char code[P2P_FRIEND_CODE_LENGTH + 1];
+
+	if (find_request(key) >= 0 || find_friend(key))
+		return 1;
+	code_of_key(key, code);
+	return find_outgoing(code) >= 0;
+}
+
+/* (friends_lock held) the same for an inbox payload as it is queued: its
+envelope opened (symmetric, as cheap as a copy: anyone with the code seals
+one) for the sender it names, which its signature proves later (one that
+does not is dropped then, and spends that key's budget alone) */
+static int inbox_sender_known(const unsigned char *payload, int size)
+{
+	unsigned char plain[MAXIMUM_PAYLOAD_SIZE];
+	int opened;
+
+	if (!friends->loaded || !friends->has_identity)
+		return 0;
+	opened = envelope_open(KIND_REQUEST, friends->inbox_key, payload, size, plain);
+	if (opened < PLAIN_HEADER_SIZE || plain[0] != TYPE_REQUEST)
+		return 0;
+	return request_key_known(plain + 1);
+}
+
+/* the budget a request of a key is taken from: its own when it is known
+here, else the strangers' */
+static struct budget *request_budget_of(const unsigned char *key, int *maximum, int *interval)
+{
+	char code[P2P_FRIEND_CODE_LENGTH + 1];
+	struct friend_record *record;
+	int index;
+
+	*maximum = KNOWN_REQUEST_BUDGET;
+	*interval = KNOWN_REQUEST_BUDGET_INTERVAL;
+	index = find_request(key);
+	if (index >= 0)
+		return &friends->requests[index].budget;
+	record = find_friend(key);
+	if (record)
+		return &record->request_budget;
+	code_of_key(key, code);
+	index = find_outgoing(code);
+	if (index >= 0)
+		return &friends->outgoing[index].budget;
+	*maximum = REQUEST_BUDGET;
+	*interval = REQUEST_BUDGET_INTERVAL;
+	return &friends->request_budget;
+}
+
 /* one message heard: its envelope opened, its plaintext read, signed, new */
 static void handle(int which, const unsigned char *payload, int size)
 {
@@ -2980,16 +3081,17 @@ static void handle(int which, const unsigned char *payload, int size)
 	}
 	if (which == P2P_FRIENDS_INBOX)
 	{
+		struct budget *budget;
+		int maximum, interval;
+
 		if (payload[2] != KIND_REQUEST)
 		{
 			friends->dropped_malformed++;
 			return;
 		}
-		if (!budget_left(&friends->request_budget, REQUEST_BUDGET, REQUEST_BUDGET_INTERVAL, 1))
-		{
-			friends->dropped_rate++;
-			return;
-		}
+		/* (opened before its budget is spent: a symmetric open, and the
+		budget is its sender's - a key known here has its own, strangers
+		share theirs - before the signature's work, F-06) */
 		opened = envelope_open(KIND_REQUEST, friends->inbox_key, payload, size, plain);
 		if (opened < 0)
 		{
@@ -2999,6 +3101,12 @@ static void handle(int which, const unsigned char *payload, int size)
 		if (!plain_decode(plain, opened, &message) || message.type != TYPE_REQUEST)
 		{
 			friends->dropped_malformed++;
+			return;
+		}
+		budget = request_budget_of(message.sender, &maximum, &interval);
+		if (!budget_left(budget, maximum, interval, 1))
+		{
+			friends->dropped_rate++;
 			return;
 		}
 		/* (a blocked key's: dropped before the work of its signature) */
@@ -3893,15 +4001,35 @@ void p2p_friends_heard(int which, const unsigned char *payload, int size)
 {
 	struct inbound *entry;
 
+	int known = 0;
+
 	if (size <= 0 || size > MAXIMUM_PAYLOAD_SIZE || (which != P2P_FRIENDS_INBOX && which != P2P_FRIENDS_MAILBOX))
 		return;
 	pthread_mutex_lock(&friends_lock);
+	/* (the inbox's requests: their share of the queue, strangers' apart
+	from known keys', so that a flood of requests from new keys crowds out
+	neither the friends' messages nor a known key's request, F-06) */
+	if (which == P2P_FRIENDS_INBOX)
+	{
+		int index, queued = 0;
+
+		known = inbox_sender_known(payload, size);
+		for (index = 0; index < friends->inbound_count; index++)
+			queued += friends->inbound[index].which == P2P_FRIENDS_INBOX && friends->inbound[index].known == known;
+		if (queued >= (known ? MAXIMUM_INBOUND_KNOWN : MAXIMUM_INBOUND_STRANGERS))
+		{
+			friends->dropped_rate++;
+			pthread_mutex_unlock(&friends_lock);
+			return;
+		}
+	}
 	if (friends->inbound_count >= MAXIMUM_INBOUND)
 		friends->dropped_rate++;
 	else
 	{
 		entry = &friends->inbound[friends->inbound_count++];
 		entry->which = which;
+		entry->known = known;
 		entry->size = size;
 		memcpy(entry->payload, payload, (size_t)size);
 	}
@@ -4088,6 +4216,13 @@ void p2p_friends_update(const struct p2p_friends_host *host)
 		if (!record->sent_time || elapsed(record->sent_time, interval))
 			send_request(record);
 	}
+	/* requests waiting their senders stopped sending go (F-06) */
+	for (index = friends->request_count - 1; index >= 0; index--)
+		if (friends->requests[index].time && unix_now() > friends->requests[index].time + REQUEST_LIFETIME)
+		{
+			request_remove(index);
+			friends->dirty = 1;
+		}
 	/* old mutes and tombstones go */
 	for (index = friends->muted_count - 1; index >= 0; index--)
 		if (unix_now() > friends->muted[index].time + MUTE_TIME)

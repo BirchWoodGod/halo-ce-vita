@@ -2119,6 +2119,120 @@ static void test_request_replays(void)
 	save(1);
 }
 
+static void test_request_floods(void)
+{
+	unsigned char payload[MAXIMUM_PAYLOAD_SIZE];
+	char topic[TOPIC_LENGTH];
+	struct p2p_friend_entry entry;
+	int size, index;
+
+	use(0);
+	machines[0].request_count = 0;
+	/* 16 strangers fill Alpha's requests, then stop */
+	for (index = 0; index < P2P_FRIEND_REQUESTS_MAXIMUM; index++)
+	{
+		size = stranger_request(NULL, 0, "Filler", payload, topic);
+		hand(0, topic, payload, size);
+		pass(4);
+	}
+	check(machines[0].request_count == P2P_FRIEND_REQUESTS_MAXIMUM, "F-06: the list filled");
+	/* Foxtrot's request: no room yet */
+	stranger_make(1, 1700000200ULL);
+	size = stranger_request(&strangers[1], 0, "Foxtrot", payload, topic);
+	hand(0, topic, payload, size);
+	pass(4);
+	check(request_named(0, "Foxtrot", &entry) < 0, "F-06: a full list takes no new request at once");
+	/* the fillers silent past a sender's longest wait: Foxtrot's request
+	sent again makes room */
+	pass((REQUEST_IDLE_TIME + 2000) / 500);
+	size = stranger_request(&strangers[1], 0, "Foxtrot", payload, topic);
+	hand(0, topic, payload, size);
+	pass(2);
+	check(request_named(0, "Foxtrot", &entry) >= 0, "F-06: a list filled once and left takes a new request");
+	/* a flood of new keys' requests in one pass: Foxtrot's request (a key
+	known here now) sent again, renamed, and Bravo's messages to Alpha,
+	still heard */
+	use(0);
+	reset_drops(0);
+	for (index = 0; index < 200; index++)
+	{
+		size = stranger_request(NULL, 0, "Flood", payload, topic);
+		hand(0, topic, payload, size);
+	}
+	size = stranger_request(&strangers[1], 0, "Foxtrot2", payload, topic);
+	hand(0, topic, payload, size);
+	for (index = 0; index < 10; index++)
+	{
+		use(0);
+		p2p_friends_update(&hosts[0]);
+	}
+	check(request_named(0, "Foxtrot2", &entry) >= 0, "F-06: a known key's request heard through a flood");
+	check(machines[0].request_count <= P2P_FRIEND_REQUESTS_MAXIMUM, "F-06: the list's room kept");
+	{
+		int queued_inbox = 0;
+
+		for (index = 0; index < 200; index++)
+		{
+			size = stranger_request(NULL, 0, "Flood", payload, topic);
+			hand(0, topic, payload, size);
+		}
+		use(0);
+		for (index = 0; index < machines[0].inbound_count; index++)
+			queued_inbox += machines[0].inbound[index].which == P2P_FRIENDS_INBOX;
+		check(queued_inbox <= MAXIMUM_INBOUND_STRANGERS + MAXIMUM_INBOUND_KNOWN &&
+			machines[0].inbound_count < MAXIMUM_INBOUND, "F-06: a flood leaves the friends' messages room");
+		machines[0].inbound_count = 0;
+	}
+	/* Alpha and Charlie (strangers) both ask each other during a flood:
+	friends */
+	{
+		char code_a[P2P_FRIEND_CODE_SIZE], code_c[P2P_FRIEND_CODE_SIZE];
+		int step;
+
+		code_of(0, code_a);
+		code_of(2, code_c);
+		use(2);
+		machines[2].outgoing_count = 0;
+		use(0);
+		machines[0].outgoing_count = 0;
+		if (find_friend(machines[2].key))
+			friend_remove_index(find_friend_index(machines[2].key));
+		while (find_blocked(machines[2].key) >= 0)
+			machines[0].blocked_count = 0;
+		use(2);
+		while (find_blocked(machines[0].key) >= 0)
+			machines[2].blocked_count = 0;
+		if (find_friend(machines[0].key))
+			friend_remove_index(find_friend_index(machines[0].key));
+		machines[0].muted_count = 0;
+		machines[2].muted_count = 0;
+		machines[0].mark_count = 0;
+		use(0);
+		check(p2p_friends_add(code_c) == P2P_FRIENDS_ADD_SENT, "F-06: Alpha asks Charlie");
+		for (step = 0; step < 40; step++)
+		{
+			for (index = 0; index < 30; index++)
+			{
+				size = stranger_request(NULL, 0, "Flood", payload, topic);
+				hand(0, topic, payload, size);
+			}
+			if (step == 1)
+			{
+				use(2);
+				p2p_friends_add(code_a);
+			}
+			pass(1);
+		}
+		use(0);
+		check(find_friend(machines[2].key) != NULL, "F-06: two who both ask become friends through a flood");
+	}
+	use(0);
+	machines[0].request_count = 0;
+	machines[0].inbound_count = 0;
+	machines[0].dirty = 1;
+	save(1);
+}
+
 /* F-05: the host of a game presents one player's card as another's */
 static void test_card_binding(void)
 {
@@ -2273,6 +2387,7 @@ int main(void)
 	test_files();
 	test_limits();
 	test_request_replays();
+	test_request_floods();
 	test_cards();
 	test_card_binding();
 	test_party();
