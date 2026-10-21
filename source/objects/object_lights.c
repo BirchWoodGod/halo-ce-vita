@@ -1118,6 +1118,42 @@ static short lights_scene_maximum(
 	}
 	return (short)maximum;
 }
+
+/* (port) a local player's flashlight: the first-person flashlight light
+(the cyborg's characters\cyborg\flashlight_cyborg has the flag) of a unit a
+player on this machine drives - not another player's, whose flashlights a
+network game has many of */
+static boolean lights_local_flashlight(
+	struct light_datum const *light,
+	struct point_light_definition const *definition)
+{
+	long unit_index, player_index;
+
+	if (!TEST_FLAG(definition->flags, _light_definition_is_first_person_flashlight_bit) ||
+		light->object_index == NONE || !object_try_and_get(light->object_index))
+	{
+		return FALSE;
+	}
+	unit_index = object_get_ultimate_parent(light->object_index);
+	player_index = unit_index != NONE ? player_index_from_unit_index(unit_index) : NONE;
+	return player_index != NONE && player_get(player_index)->local_player_index != NONE;
+}
+
+/* (port, debug) HALO_LIGHTS_LOG=1: once a second, the frame's lights - in
+view, submitted, the cap - and each light's tag, its place in the scene's
+list, its object and whether it was submitted (=2: every light) */
+static int lights_log_level(void)
+{
+	static int level = -1;
+
+	if (level < 0)
+	{
+		const char *setting = getenv("HALO_LIGHTS_LOG");
+
+		level = setting ? atoi(setting) : 0;
+	}
+	return level;
+}
 #endif
 
 void lights_preprocess_scene(
@@ -1128,6 +1164,10 @@ void lights_preprocess_scene(
 	short rendered_cluster_index;
 	short scene_light_index;
 	short queued_lens_flare_index;
+#ifdef HALO_LINUX
+	/* (the local players' flashlights submitted past the cap) */
+	short exempt_submitted = 0;
+#endif
 
 	profile_enter(lights_section);
 	debug_rasterizer_light_count = 0;
@@ -1324,8 +1364,15 @@ void lights_preprocess_scene(
 #ifdef HALO_LINUX
 				/* (HALO_MAX_SCENE_LIGHTS, above: the lights past the cap are
 				not submitted; their colour and radius are worked out as
-				before, the game reads them) */
-				if (light->radius != 0.0f && debug_rasterizer_light_count < lights_scene_maximum())
+				before, the game reads them. A local player's flashlight is
+				never one of them, nor counted against the cap: Ben 10,
+				insider.18, c10 on Performance (4 lights) - the flashlight was
+				on but lit the world only looking some ways, where fewer of
+				the lights the walk finds before it were in view) */
+				boolean exempt = light->radius != 0.0f && lights_local_flashlight(light, definition);
+
+				if (light->radius != 0.0f &&
+					(exempt || debug_rasterizer_light_count - exempt_submitted < lights_scene_maximum()))
 #else
 				if (light->radius != 0.0f)
 #endif
@@ -1388,6 +1435,10 @@ void lights_preprocess_scene(
 					light->rasterizer_light_index = rasterizer_light_submit(
 						&light_parameters);
 					debug_rasterizer_light_count = light->rasterizer_light_index + 1;
+#ifdef HALO_LINUX
+					if (exempt && light->rasterizer_light_index != NONE)
+						exempt_submitted++;
+#endif
 				}
 			}
 			else
@@ -1489,6 +1540,41 @@ void lights_preprocess_scene(
 	}
 	lights_globals.queued_lens_flare_count = 0;
 	rasterizer_lights_end();
+	#ifdef HALO_LINUX
+	if (lights_log_level() > 0)
+	{
+		static unsigned long last_ms;
+		unsigned long now_ms = system_milliseconds();
+
+		if (now_ms - last_ms >= 1000)
+		{
+			short index;
+
+			last_ms = now_ms;
+			platform_log("lights: %d in view, %d submitted (cap %d)", lights_globals.scene_point_light_count,
+				debug_rasterizer_light_count, lights_scene_maximum());
+			for (index = 0; index < lights_globals.scene_point_light_count; index++)
+			{
+				struct light_datum *light = light_get(lights_globals.scene_point_lights[index]);
+				struct point_light_definition *definition = light ? light_definition_get(light->definition_index) : NULL;
+				struct object_datum *object = light && light->object_index != NONE ? object_try_and_get(light->object_index) : NULL;
+				long parent = object ? object_get_ultimate_parent(light->object_index) : NONE;
+
+				if (!light || !definition)
+					continue;
+				if (lights_log_level() < 2 && !TEST_FLAG(definition->flags, _light_definition_is_first_person_flashlight_bit) &&
+					!(parent != NONE && player_index_from_unit_index(parent) != NONE))
+				{
+					continue;
+				}
+				platform_log("lights:   %d: %s flags %x, object type %d, a player's %s, radius %.2f, %s", index,
+					tag_get_name(light->definition_index), (unsigned)definition->flags, object ? object->object.type : -1,
+					parent != NONE && player_index_from_unit_index(parent) != NONE ? "yes" : "no", light->radius,
+					light->rasterizer_light_index != NONE ? "submitted" : "NOT submitted");
+			}
+		}
+	}
+#endif
 	profile_exit(lights_section);
 
 	return;
