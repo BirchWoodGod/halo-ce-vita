@@ -1753,8 +1753,10 @@ boolean custom_edition_cache_missing_resource_maps(
 	return missing_size > 0 && missing[0];
 }
 
-boolean custom_edition_cache_xbox_multiplayer(
-	char const *map_name)
+/* (custom_edition_cache_xbox_multiplayer and _renamed) */
+static boolean custom_edition_cache_xbox_multiplayer_check(
+	char const *map_name,
+	boolean *renamed)
 {
 	/* the cache partition's room for a multiplayer map
 	(cache_files_windows.c, MULTIPLAYER_CACHE_FILE_MAXIMUM_SIZE), which its
@@ -1766,6 +1768,7 @@ boolean custom_edition_cache_xbox_multiplayer(
 	struct cache_file_identity identity;
 	boolean multiplayer = FALSE;
 
+	*renamed = FALSE;
 	if (strlen(cache_files_map_directory()) + strlen(name) + strlen(MAP_FILE_EXTENSION) >= MAP_PATH_SIZE)
 	{
 		return FALSE;
@@ -1780,8 +1783,13 @@ boolean custom_edition_cache_xbox_multiplayer(
 		identity.scenario_type == _scenario_type_multiplayer)
 	{
 		/* the cache partition knows a copied map by the name in its header
-		(cache_files_windows.c, cached_map_files_find_map) */
-		if (csstrcasecmp(identity.name, name))
+		(cache_files_windows.c, cached_map_files_find_map): a renamed copy
+		by its file's (cache_file_read_header_from_dvd), but for an Xbox
+		level's name, which must be the one inside, and a name longer than
+		the header's */
+		if (csstrcasecmp(identity.name, name) &&
+			(custom_edition_maps_is_xbox_level(name) || !csstrcasecmp(name, "ui") ||
+				strlen(name) >= CACHE_FILE_STRING_BYTES))
 		{
 			error(_error_silent, "custom maps: '%s' is named '%s' inside: rename the file to %s.map", path, identity.name, identity.name);
 		}
@@ -1797,11 +1805,28 @@ boolean custom_edition_cache_xbox_multiplayer(
 		else
 		{
 			multiplayer = TRUE;
+			*renamed = csstrcasecmp(identity.name, name) != 0;
 		}
 	}
 	custom_edition_file_close(&file);
 
 	return multiplayer;
+}
+
+boolean custom_edition_cache_xbox_multiplayer(
+	char const *map_name)
+{
+	boolean renamed;
+
+	return custom_edition_cache_xbox_multiplayer_check(map_name, &renamed);
+}
+
+boolean custom_edition_cache_xbox_renamed(
+	char const *map_name)
+{
+	boolean renamed;
+
+	return custom_edition_cache_xbox_multiplayer_check(map_name, &renamed) && renamed;
 }
 
 /* the identities custom_edition_cache_map_identity worked out, by file

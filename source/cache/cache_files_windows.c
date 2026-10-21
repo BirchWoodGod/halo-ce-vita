@@ -464,6 +464,14 @@ static void cached_map_file_invalidate(
 	short map_file_index);
 static short cached_map_files_find_map(
 	const char *map_name);
+#ifdef HALO_LINUX
+static boolean cache_file_renamed_multiplayer_map(
+	const char *map_name,
+	struct cache_file_header const *header);
+static void cache_file_header_name_as_file(
+	const char *map_name,
+	struct cache_file_header *header);
+#endif
 
 /* ---------- globals */
 
@@ -546,6 +554,11 @@ static boolean shared_slot_attach(
 	shared_precache.slot_shared[map_file_index] = TRUE;
 	map_file->file = handle;
 	cached_map_file_read_header(map_file_index);
+	/* (a renamed copy's shared file says the name inside it: the slot is
+	known by the file's, as the DVD header read says it,
+	cache_file_read_header_from_dvd; the shared file is left as it is) */
+	if (map_file->header.name[0] && cache_file_renamed_multiplayer_map(dvd_header->name, &map_file->header))
+		cache_file_header_name_as_file(dvd_header->name, &map_file->header);
 	if (_stricmp(map_file->header.name, dvd_header->name) != 0 ||
 		map_file->header.checksum != dvd_header->checksum ||
 		map_file->header.file_length != dvd_header->file_length)
@@ -1293,6 +1306,41 @@ void cache_files_precache_map_end(
 	texture_cache_return_memory();
 	cached_map_file_set_modification_date(cache_file_globals.copying_to_map_file_index);
 	cached_map_file_read_header(cache_file_globals.copying_to_map_file_index);
+#ifdef HALO_LINUX
+	/* port: a renamed copy of a multiplayer map (cache_file_read_header
+	_from_dvd): its slot's header named as its file, in memory and in the
+	cache file, so that the copy is found by that name in this run and the
+	next, and never as the map named inside it */
+	{
+		struct cached_map_file *map_file = cached_map_file_get(cache_file_globals.copying_to_map_file_index);
+
+		if (map_file->header.name[0] &&
+			cache_file_renamed_multiplayer_map(cache_file_globals.copying_to_map_file_name, &map_file->header))
+		{
+			OVERLAPPED overlapped;
+			volatile boolean completion_flag = FALSE;
+
+			cache_file_header_name_as_file(cache_file_globals.copying_to_map_file_name, &map_file->header);
+			cached_map_issue_async_write(
+				map_file->file,
+				&overlapped,
+				&map_file->header,
+				sizeof(struct cache_file_header),
+				0,
+				&completion_flag,
+				cache_file_blocking_io_completion_routine);
+			cached_map_block_on_async_request(&completion_flag);
+			if (!completion_flag)
+			{
+				/* (not written: the slot forgotten, copied again when asked
+				for, never found by the name inside) */
+				error(_error_silent, "map '%s': its cache file's header could not be named as its file",
+					cache_file_globals.copying_to_map_file_name);
+				memset(&map_file->header, 0, sizeof(struct cache_file_header));
+			}
+		}
+	}
+#endif
 	cache_file_globals.copy_in_progress = FALSE;
 	cache_file_globals.copying_to_map_file_index = NONE;
 
@@ -2218,6 +2266,35 @@ static void cache_file_get_map_path(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) whether a multiplayer map's file named `map_name` and named
+`inside_name` inside is a copy a player renamed (cursed-bloodgulch.map,
+bloodgulch inside), which the cache partition knows by its file's name: not
+the menus' map, nor one named as an Xbox level, whose name must be the one
+inside (custom_edition_cache_xbox_multiplayer) */
+boolean custom_edition_maps_is_xbox_level(char const *name);
+
+static boolean cache_file_renamed_multiplayer_map(
+	const char *map_name,
+	struct cache_file_header const *header)
+{
+	return header->scenario_type == _scenario_type_multiplayer &&
+		_stricmp(header->name, map_name) != 0 &&
+		_stricmp(map_name, "ui") != 0 &&
+		strlen(map_name) < sizeof(header->name) &&
+		!custom_edition_maps_is_xbox_level(map_name);
+}
+
+/* (port) a renamed copy's header, named as its file */
+static void cache_file_header_name_as_file(
+	const char *map_name,
+	struct cache_file_header *header)
+{
+	memset(header->name, 0, sizeof(header->name));
+	strncpy(header->name, map_name, sizeof(header->name) - 1);
+}
+#endif
+
 static boolean cache_file_read_header_from_dvd(
 	const char *map_name,
 	struct cache_file_header *header)
@@ -2249,6 +2326,18 @@ static boolean cache_file_read_header_from_dvd(
 			cache_file_header_verify(header, path, TRUE))
 		{
 			result = TRUE;
+#ifdef HALO_LINUX
+			/* port: a renamed copy of a multiplayer map is known by its
+			file's name (its cache file slot's header says it too:
+			cache_files_precache_map_end), so that it neither stands for
+			the map named inside it nor is refused */
+			if (cache_file_renamed_multiplayer_map(map_name, header))
+			{
+				error(_error_silent, "map '%s' names itself '%s' in its header: a renamed copy, known as '%s'",
+					map_name, header->name, map_name);
+				cache_file_header_name_as_file(map_name, header);
+			}
+#endif
 		}
 		CloseHandle(file);
 	}
