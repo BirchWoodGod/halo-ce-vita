@@ -831,6 +831,12 @@ static struct
 	long ai_shots;
 	long ai_shot_seen[128];
 	short ai_shot_cursor;
+	/* the session is a map variant played (the multiplayer lobby's MAP: a
+	game of its game type with the layout's objects, forge_play_*), not
+	Forge: no monitor, no editing, the layout placed as the game starts and
+	given to joiners as a network Forge game's is (last: the initializer
+	above names the first fields in order) */
+	boolean playing;
 } forge_globals = { FALSE, "", FALSE, FALSE, 0, NONE, FALSE, NONE, 0.f, { 0.f }, { 0.f }, _forge_speed_normal };
 
 /* ---------- private code */
@@ -858,6 +864,7 @@ static void forge_net_new_round(void);
 static void forge_net_draw_monitors(long font_index, short height);
 static void forge_net_log_state(char const *arguments);
 static char const *forge_net_host_title(void);
+static boolean forge_net_client_playing(void);
 static void forge_draw_line(long font_index, rectangle2d const *bounds, short justification, real red, real green,
 	real blue, char const *text);
 /* (forge_variant_capture) each record's placed entry, for the layout a
@@ -3926,8 +3933,10 @@ static void forge_session_update(
 	if (!forge_globals.game_active)
 		return;
 	/* (a local game, or a network Forge game's host or client:
-	forge_net.inc) */
-	if (game_connection() != _game_connection_local && !forge_net_host() && !forge_net_client())
+	forge_net.inc; a map variant played, any game this machine hosts -
+	split screen is hosted, its machine alone in it) */
+	if (game_connection() != _game_connection_local && !forge_net_host() && !forge_net_client() &&
+		!(forge_globals.playing && game_connection() == _game_connection_network_server))
 	{
 		forge_globals.game_active = FALSE;
 		forge_globals.game_requested = FALSE;
@@ -3942,7 +3951,26 @@ static void forge_session_update(
 		forge_globals.hud_crosshair_font_index = tag_loaded(FORGE_FONT_TAG, "pc\\h3\\font_title");
 		forge_globals.hud_font_looked_up = TRUE;
 	}
-	if (forge_globals.game_requested)
+	if (forge_globals.game_requested && forge_globals.playing)
+	{
+		/* (a map variant played: its layout placed once the player has
+		spawned, as Forge's is, the player the Spartan; a network game's
+		client is given the host's - forge_net.inc's sync) */
+		player_index = local_player_get_player_index(0);
+		if (player_index != NONE && player_get(player_index)->unit_index != NONE)
+		{
+			forge_globals.game_requested = FALSE;
+			forge_palette_ready();
+			platform_log("forge: the map variant \"%s\" is played on %s (%s)", forge_globals.variant_title,
+				forge_globals.game_map, forge_net_client() ? "the host's layout" : "placed here");
+			if (forge_globals.variant_pending)
+			{
+				forge_globals.variant_pending = FALSE;
+				forge_variant_apply(&forge_variant_layout, FALSE);
+			}
+		}
+	}
+	if (forge_globals.game_requested && !forge_globals.playing)
 	{
 		player_index = local_player_get_player_index(0);
 		if (player_index != NONE && player_get(player_index)->unit_index != NONE && forge_begin())
@@ -4353,6 +4381,7 @@ boolean forge_game_start(
 		return FALSE;
 	/* (a local game: no network Forge game hosted any more) */
 	forge_net_host_end();
+	forge_globals.playing = FALSE;
 	/* (the map variant chosen, read and checked whole before the game is
 	asked for: one that cannot be read starts nothing) */
 	forge_globals.variant_pending = FALSE;
@@ -4413,6 +4442,75 @@ boolean forge_game_start(
 	/* (as "main menu switch to solo game": the map loads after the main
 	menu's fade) */
 	main_menu_switch_to_single_player();
+	return TRUE;
+}
+
+boolean forge_play_local_request(
+	char const *map_path,
+	char const *variant_file,
+	char *why,
+	int why_size)
+{
+	short map_index = NONE;
+	short index;
+	char map_name[FORGE_FILE_MAP_NAME_SIZE];
+
+	if (why && why_size > 0)
+		why[0] = 0;
+	/* (none: a request of one, not played yet, forgotten) */
+	if (!variant_file || !variant_file[0])
+	{
+		if (forge_globals.playing && !forge_globals.game_active && !forge_net_hosting())
+		{
+			forge_globals.game_requested = FALSE;
+			forge_globals.playing = FALSE;
+			forge_globals.variant_pending = FALSE;
+		}
+		return TRUE;
+	}
+	for (index = 0; map_path && index < forge_map_count(); index++)
+	{
+		if (!_stricmp(forge_maps[index].path, map_path))
+			map_index = index;
+	}
+	if (map_index == NONE)
+	{
+		if (why)
+			snprintf(why, (size_t)why_size, "%s", T("Map variants are played on the multiplayer maps only."));
+		return FALSE;
+	}
+	/* (a local game: no network game hosted for it) */
+	forge_net_host_end();
+	forge_globals.variant_pending = FALSE;
+	forge_globals.variant_title[0] = 0;
+	forge_globals.variant_file[0] = 0;
+	forge_globals.game_requested = FALSE;
+	forge_globals.playing = FALSE;
+	forge_packs_defaults();
+	forge_globals.packs_session = 0;
+	if (!forge_map_short_name(forge_maps[map_index].path, map_name, sizeof(map_name)) ||
+		!forge_store_load(map_name, variant_file, &forge_variant_layout, why, why_size))
+	{
+		platform_log("forge: the map variant %s of %s was not read: %s", variant_file, map_path, why ? why : "");
+		return FALSE;
+	}
+	snprintf(forge_globals.variant_title, sizeof(forge_globals.variant_title), "%s", forge_variant_layout.title);
+	snprintf(forge_globals.variant_file, sizeof(forge_globals.variant_file), "%s", variant_file);
+	forge_globals.variant_pending = TRUE;
+	/* (the packs it names, ours: brought for its objects) */
+	for (index = 0; index < forge_variant_layout.pack_count; index++)
+	{
+		short pack = forge_pack_of_name(forge_variant_layout.packs[index].name);
+
+		if (pack != NONE)
+			forge_globals.packs_session |= 1UL << pack;
+	}
+	csstrncpy(forge_globals.game_map, forge_maps[map_index].path, sizeof(forge_globals.game_map) - 1);
+	forge_globals.game_map[sizeof(forge_globals.game_map) - 1] = 0;
+	forge_globals.game_requested = TRUE;
+	forge_globals.playing = TRUE;
+	platform_log("forge: map variant \"%s\" (%s, %d objects) for the local game of %s", forge_variant_layout.title,
+		variant_file, forge_variant_layout.record_count, map_path);
 	return TRUE;
 }
 
@@ -4839,11 +4937,14 @@ void forge_map_loaded(
 			forge_globals.variant_pending = FALSE;
 			snprintf(forge_globals.variant_title, sizeof(forge_globals.variant_title), "%s", forge_net_host_title());
 			forge_globals.variant_file[0] = 0;
+			/* (the host's map variant played in its game, not Forge: the
+			hello said so) */
+			forge_globals.playing = forge_net_client_playing();
 		}
 	}
 	forge_globals.game_active = forge_globals.game_requested && scenario_name &&
 		!_stricmp(scenario_name, forge_globals.game_map);
-	forge_game_playing = forge_globals.game_active;
+	forge_game_playing = forge_globals.game_active && !forge_globals.playing;
 	/* (the session's packs, before the map's objects are placed) */
 	if (forge_globals.game_active)
 		forge_packs_load();
@@ -4852,13 +4953,21 @@ void forge_map_loaded(
 	if (!forge_globals.game_active && !forge_net_hosting())
 		forge_globals.game_requested = FALSE;
 	else
-		platform_log("forge: %s loaded for a Forge game", scenario_name);
+		platform_log("forge: %s loaded for a %s", scenario_name, forge_globals.playing ? "game of a map variant" : "Forge game");
 }
 
 boolean forge_game_active(
 	void)
 {
-	return forge_globals.game_active;
+	/* (a map variant played is the game's own game, its menus, scores and
+	controls: not Forge's) */
+	return forge_globals.game_active && !forge_globals.playing;
+}
+
+boolean forge_variant_playing(
+	void)
+{
+	return forge_globals.game_active && forge_globals.playing;
 }
 
 boolean forge_monitor_active(
@@ -5004,7 +5113,31 @@ void forge_update(
 	if (forge_globals.test_sticks_frames > 0)
 		forge_globals.test_sticks_frames--;
 	forge_session_update();
-	forge_game_playing = forge_globals.active || forge_globals.game_active;
+	forge_game_playing = forge_globals.active || (forge_globals.game_active && !forge_globals.playing);
+	/* (a map variant played: the layout kept and given to joiners, nothing
+	of Forge's asked for or shown - no monitor, menu, save, AI or round
+	of its own) */
+	if (forge_globals.game_active && forge_globals.playing)
+	{
+		forge_globals.save_requested = FALSE;
+		forge_globals.undo_requested = 0;
+		forge_globals.snap_requested = FALSE;
+		forge_globals.property_requested = FALSE;
+		forge_globals.ai_all_requested = FALSE;
+		forge_globals.clear_ai_requested = _forge_clear_ai_none;
+		forge_globals.round_requested = FALSE;
+		forge_globals.toggle_requested = FALSE;
+		forge_globals.browser_chosen = FALSE;
+		if (!forge_globals.game_requested && local_player_get_player_index(forge_globals.local_player_index) != NONE &&
+			(game_connection() == _game_connection_local || game_connection() == _game_connection_network_server ||
+				forge_net_client()))
+		{
+			forge_placed_update();
+			forge_homes_update();
+			forge_net_update();
+		}
+		return;
+	}
 	if (forge_globals.save_requested)
 	{
 		if (forge_game_playing && !forge_globals.game_requested)

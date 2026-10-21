@@ -231,6 +231,13 @@ static struct
 	session, each machine's answer */
 	boolean hosting;
 	uint32_t session;
+	/* (the host's) the game plays a map variant, not Forge
+	(forge_play_host_begin: the hello's FORGE_NET_SESSION_PLAY) */
+	boolean host_play;
+	/* (the host's, a map variant played) the map and the variant's file
+	its session is of */
+	char host_map[256];
+	char host_variant[FORGE_FILE_NAME_SIZE];
 	struct
 	{
 		boolean known;
@@ -250,6 +257,9 @@ static struct
 	/* --- the lobby, a joiner's: the host said Forge (its hello, kept) */
 	boolean client_session;
 	uint32_t client_session_id;
+	/* (a joiner) the host's game plays its map variant, not Forge (its
+	hello's FORGE_NET_SESSION_PLAY) */
+	boolean client_play;
 	/* (a joiner) its packs and blocks to be prebuilt in the lobby */
 	boolean prebuild_wanted;
 	/* (a joiner) each hello pack's own pack (NONE: not brought), the hello's
@@ -368,6 +378,13 @@ static char const *forge_net_host_title(
 	void)
 {
 	return forge_net.host_title;
+}
+
+/* (a client) whether the host's game plays its map variant, not Forge */
+static boolean forge_net_client_playing(
+	void)
+{
+	return forge_net.client_play;
 }
 
 /* ---------- small helpers */
@@ -584,9 +601,10 @@ static void forge_net_machines_forget(
 machine hosts is a Forge game of map: its joiners told so; the session's
 packs and map variant those forge_game_start sets for a local one. FALSE
 (why said) if it cannot be */
-boolean forge_net_host_begin(
+static boolean forge_net_host_begin_as(
 	char const *map_path,
 	char const *variant_file,
+	boolean play,
 	char *why,
 	int why_size)
 {
@@ -609,14 +627,17 @@ boolean forge_net_host_begin(
 	if (network_wire_crossplay())
 	{
 		if (why)
-			snprintf(why, (size_t)why_size, "%s", T("Forge is played with Vitas only (WHO CAN JOIN: Vitas)."));
+			snprintf(why, (size_t)why_size, "%s", play ? T("Map variants are played with Vitas only (WHO CAN JOIN: Vitas).") :
+				T("Forge is played with Vitas only (WHO CAN JOIN: Vitas)."));
 		return FALSE;
 	}
 	forge_globals.variant_pending = FALSE;
 	forge_globals.variant_title[0] = 0;
 	forge_globals.variant_file[0] = 0;
 	forge_packs_defaults();
-	forge_globals.packs_session = forge_globals.packs_enabled;
+	/* (a map variant played brings the packs its objects need alone, not
+	the Forge lobby's for the browser) */
+	forge_globals.packs_session = play ? 0 : forge_globals.packs_enabled;
 	if (variant_file && variant_file[0])
 	{
 		char map_name[FORGE_FILE_MAP_NAME_SIZE];
@@ -643,7 +664,12 @@ boolean forge_net_host_begin(
 	csstrncpy(forge_globals.game_map, forge_maps[map_index].path, sizeof(forge_globals.game_map) - 1);
 	forge_globals.game_map[sizeof(forge_globals.game_map) - 1] = 0;
 	forge_globals.game_requested = TRUE;
-	if (!forge_net.hosting)
+	/* (another game than the one hosted - Forge for a map variant played,
+	or another map variant -: a session of its own, every machine asked
+	again) */
+	if (!forge_net.hosting || forge_net.host_play != play ||
+		(play && (_stricmp(forge_net.host_map, forge_globals.game_map) ||
+			strcmp(forge_net.host_variant, forge_globals.variant_file))))
 	{
 		forge_net_machines_forget();
 		forge_net.session = (uint32_t)system_milliseconds() * 2654435761u ^ 0x5F0F6E7u;
@@ -651,14 +677,44 @@ boolean forge_net_host_begin(
 			forge_net.session = 1;
 	}
 	forge_net.hosting = TRUE;
+	forge_net.host_play = play;
+	snprintf(forge_net.host_map, sizeof(forge_net.host_map), "%s", forge_globals.game_map);
+	snprintf(forge_net.host_variant, sizeof(forge_net.host_variant), "%s", forge_globals.variant_file);
 	forge_net.client_session = FALSE;
+	forge_globals.playing = play;
 	/* (the owner's: a Forge game is the lobby's only - never listed online,
-	whatever Visibility says; the LAN's and ad hoc's own lists show it) */
-	p2p_lobby_set_never_listed(1);
-	halo_forge_net_hosting = 1;
-	platform_log("forge net: hosting a Forge game of %s%s%s (session %08x): joiners are asked to play it", map_path,
-		forge_globals.variant_title[0] ? ", map variant " : "", forge_globals.variant_title, (unsigned)forge_net.session);
+	whatever Visibility says; the LAN's and ad hoc's own lists show it. A
+	map variant played is a custom game: listed as the lobby chooses) */
+	p2p_lobby_set_never_listed(play ? 0 : 1);
+	halo_forge_net_hosting = play ? 0 : 1;
+	platform_log("forge net: hosting a %s of %s%s%s (session %08x): joiners are asked to play it",
+		play ? "game of a map variant" : "Forge game", map_path, forge_globals.variant_title[0] ? ", map variant " : "",
+		forge_globals.variant_title, (unsigned)forge_net.session);
 	return TRUE;
+}
+
+boolean forge_net_host_begin(
+	char const *map_path,
+	char const *variant_file,
+	char *why,
+	int why_size)
+{
+	return forge_net_host_begin_as(map_path, variant_file, FALSE, why, why_size);
+}
+
+boolean forge_play_host_begin(
+	char const *map_path,
+	char const *variant_file,
+	char *why,
+	int why_size)
+{
+	if (!variant_file || !variant_file[0])
+	{
+		if (why && why_size > 0)
+			snprintf(why, (size_t)why_size, "%s", T("No map variant chosen."));
+		return FALSE;
+	}
+	return forge_net_host_begin_as(map_path, variant_file, TRUE, why, why_size);
 }
 
 /* the game hosted is a Forge game no more (the lobby closed, another game) */
@@ -668,11 +724,15 @@ void forge_net_host_end(
 	if (!forge_net.hosting)
 		return;
 	forge_net.hosting = FALSE;
+	forge_net.host_play = FALSE;
 	forge_net_machines_forget();
 	p2p_lobby_set_never_listed(0);
 	halo_forge_net_hosting = 0;
 	if (!forge_globals.game_active)
+	{
 		forge_globals.game_requested = FALSE;
+		forge_globals.playing = FALSE;
+	}
 	platform_log("forge net: the Forge game is hosted no more");
 }
 
@@ -687,7 +747,7 @@ static void forge_net_hello_fill(
 	message->command = _forge_net_lobby_hello;
 	message->version = FORGE_NET_VERSION;
 	message->session = forge_net.session;
-	message->flags = in_progress ? FORGE_NET_SESSION_IN_PROGRESS : 0;
+	message->flags = (in_progress ? FORGE_NET_SESSION_IN_PROGRESS : 0) | (forge_net.host_play ? FORGE_NET_SESSION_PLAY : 0);
 	for (pack = 0; pack < FORGE_PACK_COUNT && message->pack_count < FORGE_NET_MAXIMUM_PACKS; pack++)
 	{
 		unsigned long long hash;
@@ -1028,6 +1088,7 @@ void forge_net_client_handle_lobby_message(
 		forge_net.client_session_id = hello.session;
 		forge_net.refused_said = FALSE;
 		forge_net.hosting = FALSE;
+		forge_net.client_play = (hello.flags & FORGE_NET_SESSION_PLAY) != 0;
 		snprintf(forge_net.host_title, sizeof(forge_net.host_title), "%s", hello.title);
 		forge_globals.packs_session = 0;
 		forge_net.missing_packs[0] = 0;
@@ -1613,6 +1674,16 @@ static void forge_net_host_request(
 	if (!forge_net_sequence_accept(&actor->sequence, request.sequence))
 	{
 		actor->drops.replayed++;
+		forge_net.requests_dropped++;
+		forge_net_count_violation(actor);
+		return;
+	}
+	/* (a map variant played: nothing is edited and no one is a monitor -
+	a monitor's unit would be hidden and unhurt -, the layout alone asked
+	for; a client of this build sends nothing else) */
+	if (forge_net.host_play && request.op != _forge_net_request_sync)
+	{
+		actor->drops.malformed++;
 		forge_net.requests_dropped++;
 		forge_net_count_violation(actor);
 		return;
@@ -3205,8 +3276,8 @@ static void forge_net_client_frame(
 			forge_net.move_sent = now;
 		}
 	}
-	/* (its monitor, five times a second) */
-	if (now - forge_net.monitor_sent >= FORGE_NET_MONITOR_MILLISECONDS)
+	/* (its monitor, five times a second; none in a map variant played) */
+	if (!forge_net.client_play && now - forge_net.monitor_sent >= FORGE_NET_MONITOR_MILLISECONDS)
 	{
 		struct forge_net_record record;
 		real_point3d position;

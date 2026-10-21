@@ -397,6 +397,31 @@ boolean forge_net_host_begin(
 /* ... a Forge game no more (the lobby closed, another game chosen) */
 void forge_net_host_end(
 	void);
+/* (the multiplayer lobby's MAP: a saved map variant played in a game of
+the lobby's game type, not Forge) the game this machine hosts plays the
+map variant variant_file of the map at map_path: its layout placed as the
+game starts, joiners asked to play it as a network Forge game's are (one
+that cannot is refused from it) and given the layout as Forge gives it,
+nothing edited, no monitor. Vitas only (WHO CAN JOIN: Vitas). FALSE with
+why if it cannot be; forge_net_host_end ends it */
+boolean forge_play_host_begin(
+	char const *map_path,
+	char const *variant_file,
+	char *why,
+	int why_size);
+/* ... the local game (split screen) about to start on the map at map_path
+plays that map variant: placed once the player has spawned, if the game's
+map is that one. FALSE with why if the variant could not be read */
+boolean forge_play_local_request(
+	char const *map_path,
+	char const *variant_file,
+	char *why,
+	int why_size);
+/* whether the game played now plays a map variant (forge_game_active: a
+Forge game, the monitor's) */
+boolean forge_variant_playing(
+	void);
+
 /* whether this machine hosts a Forge game, or plays the host's Forge game */
 boolean forge_net_hosting(
 	void);

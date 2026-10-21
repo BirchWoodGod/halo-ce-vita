@@ -170,7 +170,7 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 		<on event="a start" run="error if no network connection" open="ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen"/>
 	</widget>
 	<widget name="h3/mp/start_offline" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFE6ECF2" text_x="8" text_y="3" string_list="h3/mp_text" string_index="1">
-		<on event="a start" open="ui\shell\main_menu\multiplayer_type_select\split_screen\4way_profile_select\4way_start2join_screen"/>
+		<on event="a start" run="port h3 mp offline start" open="ui\shell\main_menu\multiplayer_type_select\split_screen\4way_profile_select\4way_start2join_screen"/>
 	</widget>
 	<widget name="h3/mp/edit_row" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/mp_text" string_index="4">
 		<on event="a start" open="ui\shell\main_menu\settings_select\multiplayer_setup\playlist_select\gametype_select_screen"/>
@@ -409,7 +409,7 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 	<!-- (a map whose file is missing or cannot be played: why, in its description's place, port h3 maps) -->
 	<widget name="h3/map/map_why" type="text" left="320" top="206" width="266" height="150" font="h3/font_small" color="#FFCFD9E3"/>
 	<widget name="h3/map/screen" flags="pass_unhandled_to_focused_child">
-		<on event="b back" back="true"/>
+		<on event="b back" run="port h3 maps back" back="true"/>
 		<child widget="h3/main/haze"/>
 		<child widget="h3/pick/panel"/>
 		<child widget="h3/map/title"/>
