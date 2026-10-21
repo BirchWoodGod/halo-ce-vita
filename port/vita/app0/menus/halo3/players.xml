@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- The Halo 3-style PLAYERS screen: the players of the network game this PS Vita plays, the
-cursor on a player as on Halo 3's roster, and Cross for the player's options - ADD FRIEND (a friend
+cursor on a player as on Halo 3's roster, and Cross for the player's options - MUTE CHAT (the
+in-game chat's lines of theirs hidden on this PS Vita: game_chat.c), ADD FRIEND (a friend
 request, no code typed: the two machines exchange friend cards over internet play first, only when
 the other player has friends on and does not appear offline), INVITE TO PARTY (a friend's player,
 p2p_party.h) and BLOCK (port/linux/src/p2p_friends.h,
@@ -29,6 +30,7 @@ The art is this folder's own (tools/halo3_menu_art.py). -->
 		<string text="INVITE TO PARTY"/>
 		<string text="KICK"/>
 		<string text="BAN"/>
+		<string text="MUTE CHAT"/>
 	</strings>
 
 	<widget name="h3/players/haze" left="0" top="0" width="640" height="480" bitmap="h3/haze"/>
@@ -152,7 +154,7 @@ The art is this folder's own (tools/halo3_menu_art.py). -->
 	<widget name="h3/players/options_panel" left="120" top="120" width="400" height="230" bitmap="h3/panel"/>
 	<widget name="h3/players/options_title" type="text" left="132" top="126" width="376" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1"/>
 	<widget name="h3/players/options_rule" left="120" top="154" width="400" height="2" bitmap="h3/rule"/>
-	<widget name="h3/players/options_text" type="text" left="132" top="162" width="376" height="56" font="h3/font_small" color="#FFCFD9E3"/>
+	<widget name="h3/players/options_text" type="text" left="132" top="162" width="376" height="38" font="h3/font_small" color="#FFCFD9E3"/>
 	<widget name="h3/players/option_back" type="text" width="376" height="18" bitmap="h3/players_row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/players_text" string_index="5">
 		<on event="a" back="true"/>
 	</widget>
@@ -160,6 +162,11 @@ The art is this folder's own (tools/halo3_menu_art.py). -->
 		<on event="a" run="port h3 players option" back="true"/>
 	</widget>
 	<widget name="h3/players/option_block" type="text" width="376" height="18" bitmap="h3/players_row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/players_text" string_index="7">
+		<on event="a" run="port h3 players option" back="true"/>
+	</widget>
+	<!-- (the in-game chat's mute, this PS Vita's alone: MUTE CHAT or UNMUTE CHAT, never for its own
+	players; port/linux/game/game_chat.c) -->
+	<widget name="h3/players/option_mute" type="text" width="376" height="18" bitmap="h3/players_row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/players_text" string_index="12">
 		<on event="a" run="port h3 players option" back="true"/>
 	</widget>
 	<!-- (a friend's player, the party's: shown only when they can be invited) -->
@@ -178,9 +185,10 @@ The art is this folder's own (tools/halo3_menu_art.py). -->
 		<child widget="h3/players/option_back" y="0"/>
 		<child widget="h3/players/option_add" y="18"/>
 		<child widget="h3/players/option_block" y="36"/>
-		<child widget="h3/players/option_party" y="54"/>
-		<child widget="h3/players/option_kick" y="72"/>
-		<child widget="h3/players/option_ban" y="90"/>
+		<child widget="h3/players/option_mute" y="54"/>
+		<child widget="h3/players/option_party" y="72"/>
+		<child widget="h3/players/option_kick" y="90"/>
+		<child widget="h3/players/option_ban" y="108"/>
 	</widget>
 	<widget name="h3/players/options_strip" left="120" top="330" width="400" height="20" bitmap="h3/strip"/>
 	<widget name="h3/players/options_a_butn" left="132" top="332" width="16" height="16" bitmap="h3/glyph_cross"/>
@@ -199,6 +207,6 @@ The art is this folder's own (tools/halo3_menu_art.py). -->
 		<child widget="h3/players/options_a_label"/>
 		<child widget="h3/players/options_b_butn"/>
 		<child widget="h3/players/options_back"/>
-		<child widget="h3/players/options_list" x="132" y="222"/>
+		<child widget="h3/players/options_list" x="132" y="204"/>
 	</widget>
 </menus>

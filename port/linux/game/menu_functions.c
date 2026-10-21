@@ -98,6 +98,7 @@ for a gamepad); a test build's HALO_TEST_TEXT_INPUT answers in its place,
 #include "../src/crossplay_guard.h"
 #include "network_wire.h"
 #include "network_anticheat.h"
+#include "game_chat.h"
 #include "browser_list.h"
 #include "../src/system_link_shortcut.h"
 #include "forge.h"
@@ -11076,6 +11077,8 @@ static void h3_players_options_update(struct widget_instance *list)
 		/* (KICK and BAN: the game's host's alone, of another machine's
 		player) */
 		boolean host = h3_players_hosting() && state != P2P_FRIENDS_PLAYER_THIS_VITA;
+		/* (MUTE CHAT: another machine's player; UNMUTE CHAT once muted) */
+		boolean other = state != P2P_FRIENDS_PLAYER_THIS_VITA;
 
 		for (child = list->child; child; child = child->next)
 		{
@@ -11088,6 +11091,13 @@ static void h3_players_options_update(struct widget_instance *list)
 			{
 				widget_instance_set_visibility_recursive(child, host);
 				child->disabled = !host;
+			}
+			if (strstr(child->name, "option_mute"))
+			{
+				widget_instance_set_visibility_recursive(child, other);
+				child->disabled = !other;
+				text_show(child, game_chat_name_muted(h3_players.players[index].name) ? T("UNMUTE CHAT") :
+					T("MUTE CHAT"));
 			}
 		}
 	}
@@ -11119,6 +11129,18 @@ static void h3_players_option(struct widget_instance *widget)
 		h3_players_do(P2P_FRIENDS_PLAYER_ADD);
 	else if (strstr(widget->name, "option_block"))
 		h3_players_do(P2P_FRIENDS_PLAYER_BLOCK);
+	else if (strstr(widget->name, "option_mute"))
+	{
+		int index = h3_players_chosen_index();
+		char text[160];
+
+		if (index < 0 || h3_players.players[index].machine == h3_players.own_machine)
+			return;
+		snprintf(text, sizeof(text), game_chat_mute_name(h3_players.players[index].name,
+			!game_chat_name_muted(h3_players.players[index].name)) ? T("%s muted: their chat is hidden here") :
+			T("%s unmuted"), h3_players.players[index].name);
+		h3_players_message(text);
+	}
 	else if (strstr(widget->name, "option_kick"))
 		h3_players_drop(_anticheat_drop_kick);
 	else if (strstr(widget->name, "option_ban"))

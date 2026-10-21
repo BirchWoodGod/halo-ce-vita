@@ -249,6 +249,7 @@ Multiplayer tab's way.
 #include "p2p.h"
 #include "p2p_friends.h"
 #include "p2p_party.h"
+#include "game_chat_share.h"
 #include "crossplay_guard.h"
 #include "system_link_shortcut.h"
 #include "update_check.h"
@@ -322,6 +323,9 @@ enum
 	PAGE_INFECTION,
 	/* (Game's Menus: Menu style, the Halo 3 menus' Carnage report) */
 	PAGE_MENUS,
+	/* (Multiplayer > Friends > Chat: the in-game chat, its filter, the
+	players muted: port/linux/game/game_chat.c, game_chat_share.h) */
+	PAGE_CHAT,
 	PAGE_COUNT
 };
 
@@ -353,6 +357,7 @@ static const struct
 	{ "Players", TAB_MULTIPLAYER },
 	{ "Infection", TAB_MULTIPLAYER },
 	{ "Menus", TAB_GAME },
+	{ "Chat", TAB_MULTIPLAYER },
 };
 /* the headings over a tab's rows, as Halo Online's settings have them
 (HUD, Interface...): each above the row it names, when that row is shown */
@@ -745,6 +750,10 @@ static struct setting settings[] = {
 	The Friends page's first row: the Multiplayer tab is a screen's height;
 	SELECT + D-pad left opens it at once) */
 	PAGE_ROW("Party", "Invite friends, follow the leader, leave", PAGE_FRIENDS, PAGE_PARTY),
+	{ "Chat", "HALO_CHAT", 0, 2, { "1", "0" }, { "On", "Off" },
+		"Off: no chat over the game, none sent from it", 0, PAGE_CHAT },
+	{ "Chat filter", "HALO_CHAT_FILTER", 0, 2, { "1", "0" }, { "On", "Off" },
+		"On: slurs others type shown as ****; only you see it", 0, PAGE_CHAT },
 	/* (party chat: typed on the system's keyboard; quick chat is the page's
 	line under it) */
 	{ "Send a message", NULL, 0, 0, { NULL }, { NULL }, "Party chat: type a message to your party", 0,
@@ -755,6 +764,11 @@ static struct setting settings[] = {
 		PAGE_FRIENDS, KIND_ACTION, ACTION_FRIEND_ADD },
 	/* (the game this Vita hosts: its players kicked or banned, the host's
 	anti-cheat; network_anticheat.c answers, system_link_shortcut.h) */
+	/* (the in-game chat, port/linux/game/game_chat.c: SELECT + D-pad left in
+	play opens its quick chat; its page: on or off, the slur filter, the
+	players muted. Here, before the games' players: the Multiplayer tab and
+	the Friends page are a screen's height) */
+	PAGE_ROW("Chat", "In-game chat: on or off, the slur filter, mute players", PAGE_CROSSPLAY, PAGE_CHAT),
 	PAGE_ROW("Players", "The game you host: kick or ban a player", PAGE_CROSSPLAY, PAGE_PLAYERS),
 	/* (the game's own Infection game type as this Vita hosts it, in any
 	menus' game type lists: port/linux/game/infection.c's infection.*
@@ -833,6 +847,7 @@ static struct setting settings[] = {
 	Ping column; the host's, its slowest player's) */
 	{ "Latency meter", "HALO_LATENCY_METER", 0, 2, { "1", "0" }, { "On", "Off" },
 		"Ping to the host in network games, top right", 0, TAB_MULTIPLAYER },
+
 	/* (the hosted game's settings, which the game's Server Setup sets
 	(vita_settings_set, menu_functions.c) and settings.txt keeps: on a page
 	no row opens) */
@@ -3161,6 +3176,8 @@ enum
 	LINE_PARTY_PRESET,
 	/* (the Players page's players: host_players_view) */
 	LINE_HOST_PLAYER,
+	/* (the Chat page's: the game's players, chat_players_names) */
+	LINE_CHAT_PLAYER,
 	/* (a line that is not chosen: a warning, a note) */
 	LINE_INFO,
 	/* (a heading over rows: headings; not chosen either) */
@@ -3489,6 +3506,69 @@ static void host_players_refresh(void)
 	}
 }
 
+/* the Chat page's view of the game's players (published by the game:
+game_chat_share.h), read whole as host_players_refresh reads its own */
+static int chat_players_count = -1;
+static int chat_players_muted[HALO_CHAT_PLAYERS_MAXIMUM];
+static int chat_players_local[HALO_CHAT_PLAYERS_MAXIMUM];
+static char chat_players_names[HALO_CHAT_PLAYERS_MAXIMUM][HALO_CHAT_PLAYER_NAME_SIZE];
+
+static void chat_players_refresh(void)
+{
+	int tries;
+
+	for (tries = 0; tries < 4; tries++)
+	{
+		int serial = __atomic_load_n(&halo_chat_players_serial, __ATOMIC_ACQUIRE), count, index;
+
+		if (serial & 1)
+			continue;
+		count = halo_chat_players_count;
+		if (count > HALO_CHAT_PLAYERS_MAXIMUM)
+			count = HALO_CHAT_PLAYERS_MAXIMUM;
+		for (index = 0; index < count; index++)
+		{
+			chat_players_muted[index] = halo_chat_players_muted[index];
+			chat_players_local[index] = halo_chat_players_local[index];
+			memcpy(chat_players_names[index], halo_chat_players_names[index], HALO_CHAT_PLAYER_NAME_SIZE);
+			chat_players_names[index][HALO_CHAT_PLAYER_NAME_SIZE - 1] = 0;
+		}
+		if (__atomic_load_n(&halo_chat_players_serial, __ATOMIC_ACQUIRE) == serial)
+		{
+			chat_players_count = count;
+			return;
+		}
+	}
+}
+
+/* a Chat page's player's line: Cross mutes them here, or unmutes them (the
+game takes it at its next frame: never told to anyone) */
+static void chat_player_input(const struct line *line, unsigned long pressed)
+{
+	int index = line->index;
+	char log[96];
+
+	if (!(pressed & VITA_BUTTON_CROSS) || index < 0 || index >= chat_players_count)
+		return;
+	if (chat_players_local[index])
+	{
+		set_notice("%s", T("A player of this PS Vita"));
+		return;
+	}
+	if (__atomic_load_n(&halo_chat_mute_request, __ATOMIC_ACQUIRE))
+		return;
+	memcpy(halo_chat_mute_request_name, chat_players_names[index], HALO_CHAT_PLAYER_NAME_SIZE);
+	__atomic_store_n(&halo_chat_mute_request, (index + 1) | (chat_players_muted[index] ? 0 : HALO_CHAT_MUTE_REQUEST_MUTE),
+		__ATOMIC_RELEASE);
+	/* (shown at once as it will be) */
+	chat_players_muted[index] = !chat_players_muted[index];
+	set_notice(chat_players_muted[index] ? T("%s muted: their chat is hidden here") : T("%s unmuted"),
+		chat_players_names[index]);
+	snprintf(log, sizeof(log), "settings: chat: %s %s", chat_players_names[index],
+		chat_players_muted[index] ? "muted" : "unmuted");
+	vita_host_log(log);
+}
+
 /* (SCREEN_BAN_CONFIRM) the player a ban for good waits on */
 static int ban_confirm_index = -1;
 static char ban_confirm_name[HALO_HOST_PLAYER_NAME_SIZE];
@@ -3570,6 +3650,8 @@ static int page_lines(struct line *lines)
 		party_refresh(0);
 	if (page == PAGE_PLAYERS)
 		host_players_refresh();
+	if (page == PAGE_CHAT)
+		chat_players_refresh();
 
 	for (index = 0; index < SETTING_COUNT; index++)
 		if (settings[index].page == page && setting_shown(&settings[index]))
@@ -3694,6 +3776,21 @@ static int page_lines(struct line *lines)
 		for (index = 0; index < host_players_count && index < HALO_HOST_PLAYERS_MAXIMUM; index++)
 		{
 			lines[count].type = LINE_HOST_PLAYER;
+			lines[count++].index = index;
+		}
+	}
+	if (page == PAGE_CHAT)
+	{
+		lines[count].type = LINE_INFO;
+		snprintf(lines[count++].text, sizeof(lines[0].text), "%s", T("In play: SELECT + D-pad left, quick chat"));
+		lines[count].type = LINE_INFO;
+		if (chat_players_count < 0)
+			snprintf(lines[count++].text, sizeof(lines[0].text), "%s", T("Mute players: in a network game"));
+		else
+			snprintf(lines[count++].text, sizeof(lines[0].text), "%s", T("Cross mutes a player's chat here"));
+		for (index = 0; index < chat_players_count && index < HALO_CHAT_PLAYERS_MAXIMUM; index++)
+		{
+			lines[count].type = LINE_CHAT_PLAYER;
 			lines[count++].index = index;
 		}
 	}
@@ -4105,6 +4202,8 @@ static void help_line(char *text, int size, const struct line *line)
 		snprintf(text, (size_t)size, "%s", T("Said to your party at once, in their language"));
 	else if (line && line->type == LINE_HOST_PLAYER)
 		snprintf(text, (size_t)size, "%s", T("A ban keeps their PS Vita or PC out of your games"));
+	else if (line && line->type == LINE_CHAT_PLAYER)
+		snprintf(text, (size_t)size, "%s", T("Muted: their chat is hidden here; they're never told"));
 	else if (line && line->type == LINE_FRIEND)
 	{
 		const struct p2p_friend_entry *entry = &friends_view[line->index];
@@ -4210,6 +4309,9 @@ static void footer_line(char *text, int size, const struct line *line)
 		middle = T("Left/right: choose  Cross: send  ");
 	else if (line && line->type == LINE_HOST_PLAYER)
 		middle = T("Cross: kick  Triangle: ban  ");
+	else if (line && line->type == LINE_CHAT_PLAYER)
+		middle = chat_players_local[line->index] ? "" : chat_players_muted[line->index] ? T("Cross: unmute  ") :
+			T("Cross: mute  ");
 	else if (line && line->type == LINE_FRIEND)
 	{
 		const struct p2p_friend_entry *entry = &friends_view[line->index];
@@ -4474,6 +4576,10 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 		else if (line->type == LINE_HOST_PLAYER)
 			length += snprintf(text + length, (size_t)(size - length), "\n%.15s\x02  %s",
 				host_players_names[line->index], T("In your game"));
+		else if (line->type == LINE_CHAT_PLAYER)
+			length += snprintf(text + length, (size_t)(size - length), "\n%.15s\x02  %s",
+				chat_players_names[line->index], chat_players_local[line->index] ? T("You") :
+				chat_players_muted[line->index] ? T("Muted") : T("Chat shown"));
 		else if (line->type == LINE_FRIEND)
 		{
 			const struct p2p_friend_entry *entry = &friends_view[line->index];
@@ -6644,6 +6750,15 @@ int vita_settings_input(const struct vita_host_pad *pad)
 	and in the menus), or closed if it is the one open; the game sees
 	neither (the panel's SELECT + down's way; not SELECT + up, Forge's
 	monitor and Spartan) */
+	/* (in play with the in-game chat - a network game, or a party's -
+	the combo is the chat's quick chat: the game's, vita_pad.c and
+	port/linux/game/game_chat.c, the panel closed) */
+	if ((buttons & VITA_BUTTON_SELECT) && (pressed & VITA_BUTTON_LEFT) && !panel_open &&
+		__atomic_load_n(&halo_game_chat_active, __ATOMIC_ACQUIRE))
+	{
+		both_since = 0;
+		return 0;
+	}
 	if ((buttons & VITA_BUTTON_SELECT) && (pressed & VITA_BUTTON_LEFT))
 	{
 		both_since = 0;
@@ -6876,6 +6991,8 @@ int vita_settings_input(const struct vita_host_pad *pad)
 			}
 			else if (line->type == LINE_HOST_PLAYER)
 				host_player_input(line, pressed);
+			else if (line->type == LINE_CHAT_PLAYER)
+				chat_player_input(line, pressed);
 			else if (pressed == VITA_BUTTON_TRIANGLE)
 				;
 			else if (line->type == LINE_MOD)
