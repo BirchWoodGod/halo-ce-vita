@@ -98,6 +98,16 @@ host path below the data root. Components are matched case-insensitively
 against what exists on disk, as the Xbox file system is case-insensitive. */
 void platform_translate_path(const char *xbox_path, char *host_path, unsigned long host_path_size);
 const char *platform_data_root(void);
+/* reads name, whole, from the folder that holds the Xbox directory
+xbox_directory (d:\ the data root, d:\maps the maps folder, wherever
+HALO_MAPS_ROOT puts it): the one place the port reads a file above the data
+root, as platform_translate_path drops "..". Returns the bytes (*size of
+them; given back with platform_read_file_free, not the game's free) or NULL
+when there is no such file or it is larger than maximum_size; *host_path
+(when not NULL) gets the path tried */
+void *platform_read_file_in_parent_folder(const char *xbox_directory, const char *name, long maximum_size,
+	long *size, char *host_path, unsigned long host_path_size);
+void platform_read_file_free(void *bytes);
 /* on the desktop, when the data root has no maps folder: offers to copy it
 out of an Xbox disc image into destination (sdl_platform.c), and quits if
 the player declines; nonzero once destination has one */

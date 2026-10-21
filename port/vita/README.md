@@ -23,8 +23,8 @@ Combat Evolved for the Xbox.
    (title ID `HCEV00001`).
 2. Copy the Xbox game's maps to `ux0:data/haloce-vita/maps/` (the whole
    `maps` folder), and the disc's `default.xbe` to `ux0:data/haloce-vita/`:
-   the loading screen takes its picture from the executable, and stays dark
-   without it. (A copy that [Xita](https://github.com/Xita-Project/xita)'s installer put in
+   the loading screen takes its picture and its rising hum from the
+   executable, and stays dark and silent without it. (A copy that [Xita](https://github.com/Xita-Project/xita)'s installer put in
    `ux0:data/xita/haloce/maps/` is used if that folder is missing, with the
    `default.xbe` next to it.)
 3. Start the game. The first load of each map takes a while: the game
@@ -35,7 +35,7 @@ The game keeps its files in `ux0:data/haloce-vita/`:
 | Path | What |
 | --- | --- |
 | `maps/` | the Xbox maps |
-| `default.xbe` | the Xbox executable (the loading screen's picture) |
+| `default.xbe` | the Xbox executable (the loading screen's picture and hum) |
 | `data/` | settings (`config.toml`), `init.txt`, the game's log (`debug.txt`) |
 | `saves/` | profiles and saved games |
 | `movies/` | the movies as MP4 (optional) |
