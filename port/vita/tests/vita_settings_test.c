@@ -3095,7 +3095,7 @@ static void test_tab_layouts(void)
 			old |= !strcmp(pages[index].name, "Screen") || !strcmp(pages[index].name, "First person") ||
 				!strcmp(pages[index].name, "Advanced") || !strcmp(pages[index].name, "General") ||
 				!strcmp(pages[index].name, "Graphics") || !strcmp(pages[index].name, "Audio");
-		check(!old && PAGE_GRAPHICS_DETAIL == TAB_COUNT && PAGE_COUNT == TAB_COUNT + 15 &&
+		check(!old && PAGE_GRAPHICS_DETAIL == TAB_COUNT && PAGE_COUNT == TAB_COUNT + 16 &&
 			!strcmp(pages[PAGE_GRAPHICS_DETAIL].name, "Detail") && !strcmp(pages[PAGE_GRAPHICS_PERFORMANCE].name, "Performance") &&
 			!strcmp(pages[PAGE_BUTTONS].name, "Button layout") && !strcmp(pages[PAGE_TOUCH].name, "Touch zones") &&
 			!strcmp(pages[PAGE_GYRO].name, "Gyro settings") && !strcmp(pages[PAGE_PLAY].name, "Play") &&
