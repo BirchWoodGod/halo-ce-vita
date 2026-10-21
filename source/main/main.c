@@ -4411,7 +4411,10 @@ tick, for testing the save paths without a controller, e.g.
 level: not the main menu's scenario). Besides the console's
 own, @skip asks for a cinematic skip (as the controller does), @quit
 does the pause menu's Save and Quit, @menu goes back to the main menu
-without saving, @exit ends the game, and "@camera x y z yaw pitch" puts
+without saving, "@error N [nonmodal]" shows error N's dialog (display_error),
+"@abort N" the error that offers to end the game, "@say title|text" and
+"@ask title|text" the platform's message and question (@answer logs its
+answer), @exit ends the game, and "@camera x y z yaw pitch" puts
 the debug camera there (degrees; yaw 0 looks along +x, pitch up is
 positive), through d:\\camera.txt and debug_camera_load ("@pan x y z yaw
 pitch yaw_rate pitch_rate": from then on turned by the rates, in degrees a
@@ -4605,6 +4608,51 @@ static void main_test_commands_update(
 		leaving it does, without saving) */
 		else if (!strcmp(commands[index].command, "@menu"))
 			main_goto_main_menu();
+		/* (@error N [nonmodal]: error N's dialog, as the game shows it -
+		display_error -, for the message boxes' tests: run_menus_test.sh
+		msgboxes) */
+		else if (!strncmp(commands[index].command, "@error ", 7))
+		{
+			int code = atoi(commands[index].command + 7);
+
+			if (code >= 0 && code < NUMBER_OF_ERROR_CODES)
+				display_error((short)code, 0, strstr(commands[index].command, "nonmodal") == NULL, FALSE);
+		}
+		/* (@abort N: the error that offers to end the game, as the saved
+		games' checks show it - display_error_abort_to_dashboard, optional) */
+		else if (!strncmp(commands[index].command, "@abort ", 7))
+		{
+			int code = atoi(commands[index].command + 7);
+
+			if (code >= 0 && code < NUMBER_OF_ERROR_CODES)
+				display_error_abort_to_dashboard((short)code, TRUE);
+		}
+		/* (@say title|text, @ask title|text: the platform's message and yes or
+		no question, as map sharing and the invites show them; @answer logs
+		the question's answer) */
+		else if (!strncmp(commands[index].command, "@say ", 5) || !strncmp(commands[index].command, "@ask ", 5))
+		{
+			void platform_show_message(char const *title, char const *message);
+			void platform_ask_question(char const *title, char const *text);
+			char title[64];
+			char const *bar = strchr(commands[index].command + 5, '|');
+
+			if (bar)
+			{
+				csstrncpy(title, commands[index].command + 5, MIN((size_t)(bar - commands[index].command - 5), sizeof(title) - 1));
+				title[MIN((size_t)(bar - commands[index].command - 5), sizeof(title) - 1)] = 0;
+				if (commands[index].command[1] == 's')
+					platform_show_message(title, bar + 1);
+				else
+					platform_ask_question(title, bar + 1);
+			}
+		}
+		else if (!strcmp(commands[index].command, "@answer"))
+		{
+			int platform_question_answer(void);
+
+			platform_log("test command: the question's answer: %d", platform_question_answer());
+		}
 		else if (!strncmp(commands[index].command, "@shot ", 6))
 			csstrncpy(halo_screenshot_name, commands[index].command + 6, sizeof(halo_screenshot_name) - 1);
 		else if (!strncmp(commands[index].command, "@pan ", 5))

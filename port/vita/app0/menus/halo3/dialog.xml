@@ -64,6 +64,12 @@ With Menu style Halo CE the Xbox's own boxes open, as ever.
 	<widget name="h3/dlg/half/select" type="text" left="152" top="211" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/dlg_text" string_index="0"/>
 	<widget name="h3/dlg/half/b_butn" left="226" top="212" width="16" height="16" bitmap="h3/glyph_circle"/>
 	<widget name="h3/dlg/half/back" type="text" left="246" top="211" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/dlg_text" string_index="1"/>
+	<!-- (and the boxes with no choice - "Saving", "Quitting" -: a shorter panel in the middle) -->
+	<widget name="h3/dlg/busy/panel" left="120" top="170" width="400" height="120" bitmap="h3/panel"/>
+	<widget name="h3/dlg/busy/title" type="text" left="132" top="176" width="376" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1"/>
+	<widget name="h3/dlg/busy/rule" left="120" top="204" width="400" height="2" bitmap="h3/rule"/>
+	<widget name="h3/dlg/busy/body" type="text" left="132" top="212" width="376" height="56" font="h3/font_small" color="#FFCFD9E3"/>
+	<widget name="h3/dlg/busy/strip" left="120" top="270" width="400" height="20" bitmap="h3/strip"/>
 	<!-- (display_error's text box, the screen's first child's first child: the error's number
 	set in it, read by "port h3 dialog"; it shows nothing itself) -->
 	<widget name="h3/dlg/code" width="1" height="1">
@@ -250,11 +256,11 @@ With Menu style Halo CE the Xbox's own boxes open, as ever.
 		<on event="b back" run="NULL"/>
 		<data input="port h3 dialog"/>
 		<child widget="h3/dlg/haze"/>
-		<child widget="h3/dlg/panel"/>
-		<child widget="h3/dlg/title"/>
-		<child widget="h3/dlg/rule"/>
-		<child widget="h3/dlg/body"/>
-		<child widget="h3/dlg/strip"/>
+		<child widget="h3/dlg/busy/panel"/>
+		<child widget="h3/dlg/busy/title"/>
+		<child widget="h3/dlg/busy/rule"/>
+		<child widget="h3/dlg/busy/body"/>
+		<child widget="h3/dlg/busy/strip"/>
 	</widget>
 	<widget name="h3/dlg/revert/screen" width="640" height="480" flags="pass_unhandled_to_focused_child pause_game">
 		<on event="b back" close="current"/>
@@ -338,41 +344,41 @@ With Menu style Halo CE the Xbox's own boxes open, as ever.
 		<on event="deleted" run="pause game return to main menu" open="h3/dlg/saved/screen"/>
 		<data input="port h3 dialog"/>
 		<child widget="h3/dlg/haze"/>
-		<child widget="h3/dlg/panel"/>
-		<child widget="h3/dlg/title"/>
-		<child widget="h3/dlg/rule"/>
-		<child widget="h3/dlg/body"/>
-		<child widget="h3/dlg/strip"/>
+		<child widget="h3/dlg/busy/panel"/>
+		<child widget="h3/dlg/busy/title"/>
+		<child widget="h3/dlg/busy/rule"/>
+		<child widget="h3/dlg/busy/body"/>
+		<child widget="h3/dlg/busy/strip"/>
 	</widget>
 	<widget name="h3/dlg/saved/screen" width="640" height="480" flags="pass_unhandled_to_focused_child pause_game no_history">
 		<on event="b back" run="NULL"/>
 		<data input="port h3 dialog"/>
 		<child widget="h3/dlg/haze"/>
-		<child widget="h3/dlg/panel"/>
-		<child widget="h3/dlg/title"/>
-		<child widget="h3/dlg/rule"/>
-		<child widget="h3/dlg/body"/>
-		<child widget="h3/dlg/strip"/>
+		<child widget="h3/dlg/busy/panel"/>
+		<child widget="h3/dlg/busy/title"/>
+		<child widget="h3/dlg/busy/rule"/>
+		<child widget="h3/dlg/busy/body"/>
+		<child widget="h3/dlg/busy/strip"/>
 	</widget>
 	<widget name="h3/dlg/saving/screen" width="640" height="480" flags="pass_unhandled_to_focused_child" auto_close="3000" auto_close_fade="1000">
 		<on event="b back" run="NULL"/>
 		<data input="port h3 dialog"/>
 		<child widget="h3/dlg/haze"/>
-		<child widget="h3/dlg/panel"/>
-		<child widget="h3/dlg/title"/>
-		<child widget="h3/dlg/rule"/>
-		<child widget="h3/dlg/body"/>
-		<child widget="h3/dlg/strip"/>
+		<child widget="h3/dlg/busy/panel"/>
+		<child widget="h3/dlg/busy/title"/>
+		<child widget="h3/dlg/busy/rule"/>
+		<child widget="h3/dlg/busy/body"/>
+		<child widget="h3/dlg/busy/strip"/>
 	</widget>
 	<widget name="h3/dlg/creating/screen" width="640" height="480" flags="pass_unhandled_to_focused_child" auto_close="3000" auto_close_fade="1000">
 		<on event="b back" run="NULL"/>
 		<data input="port h3 dialog"/>
 		<child widget="h3/dlg/haze"/>
-		<child widget="h3/dlg/panel"/>
-		<child widget="h3/dlg/title"/>
-		<child widget="h3/dlg/rule"/>
-		<child widget="h3/dlg/body"/>
-		<child widget="h3/dlg/strip"/>
+		<child widget="h3/dlg/busy/panel"/>
+		<child widget="h3/dlg/busy/title"/>
+		<child widget="h3/dlg/busy/rule"/>
+		<child widget="h3/dlg/busy/body"/>
+		<child widget="h3/dlg/busy/strip"/>
 	</widget>
 	<widget name="h3/dlg/delprof/screen" width="640" height="480" flags="pass_unhandled_to_focused_child">
 		<on event="b back" run="cancel profile delete" close="current"/>

@@ -2636,6 +2636,17 @@ struct widget_instance *ui_widget_port_active_screen(
 	return widget_globals.active_widgets[local_player_index];
 }
 
+/* port: (tests: the scripted pad's "until/" steps, xinput_sdl.c) the name of
+the first local player's screen open, "" with none */
+char const *ui_widget_port_active_screen_name(
+	void)
+{
+	struct widget_instance *screen = widget_globals.initialized ? widget_globals.active_widgets[0] : NULL;
+	char const *name = screen ? tag_get_name(screen->definition_tag_index) : NULL;
+
+	return name ? name : "";
+}
+
 #endif
 #ifdef HALO_LINUX
 /* port: gives a list's child the focus, as up and down do (OpenCE's lists,
