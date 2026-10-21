@@ -156,6 +156,16 @@ static __inline boolean game_state_get_persistent_storage_path(
 	char *path);
 /* bumped whenever this program writes or deletes the campaign save */
 static unsigned long game_state_persistent_storage_generation = 1;
+/* (port) the save file's name without its extension: the campaign's
+(savegame) unless game_state_set_persistent_storage_custom chose the
+custom campaign maps' own (savegame_custom: a Custom Edition or MCC mod
+campaign map's Save and Quit, kept apart from the stock campaign's) */
+static boolean game_state_persistent_storage_custom;
+static char const *game_state_persistent_storage_name(
+	void)
+{
+	return game_state_persistent_storage_custom ? "savegame_custom" : "savegame";
+}
 static struct
 {
 	boolean valid;
@@ -207,8 +217,8 @@ static boolean persistent_check_paths(
 
 	if (!game_state_get_persistent_storage_path(directory) || strlen(directory) > 200)
 		return FALSE;
-	sprintf(save_path, "%ssavegame.bin", directory);
-	sprintf(check_path, "%ssavegame.chk", directory);
+	sprintf(save_path, "%s%s.bin", directory, game_state_persistent_storage_name());
+	sprintf(check_path, "%s%s.chk", directory, game_state_persistent_storage_name());
 	if (!GetFileAttributesExA(save_path, GetFileExInfoStandard, &attributes))
 		return FALSE;
 	*file_size = attributes.nFileSizeLow;
@@ -813,6 +823,34 @@ const char *game_state_get_persistent_storage_filename(
 	return "savegame.bin";
 }
 
+#ifdef HALO_LINUX
+/* (port) which save the persistent storage calls below use: the stock
+campaign's (FALSE, the default) or the custom campaign maps' (TRUE); the
+previous choice is returned, for the caller to put back */
+boolean game_state_set_persistent_storage_custom(
+	boolean custom)
+{
+	boolean previous = game_state_persistent_storage_custom;
+
+	game_state_persistent_storage_custom = custom ? TRUE : FALSE;
+	return previous;
+}
+
+/* (port) whether the chosen save's file is there (opening it would make
+one, 16 MB of zeroes) */
+boolean game_state_persistent_storage_exists(
+	void)
+{
+	char path[256];
+
+	if (!game_state_get_persistent_storage_path(path) || strlen(path) > 200)
+		return FALSE;
+	strcat(path, game_state_persistent_storage_name());
+	strcat(path, ".bin");
+	return GetFileAttributesA(path) != (unsigned long)-1;
+}
+#endif
+
 static __inline boolean game_state_get_persistent_storage_path(
 	char *path)
 {
@@ -870,7 +908,12 @@ static HANDLE game_state_open_persistent_storage(
 		{
 			game_state_get_persistent_storage_path(path);
 		}
+#ifdef HALO_LINUX
+		strcat(path, game_state_persistent_storage_name());
+		strcat(path, ".bin");
+#else
 		strcat(path, "savegame.bin");
+#endif
 
 		file = CreateFileA(path, GENERIC_READ|GENERIC_WRITE, 0, NULL, OPEN_ALWAYS, 0,
 			NULL);
@@ -960,7 +1003,12 @@ boolean game_state_read_header_from_persistent_storage(
 	(game_state_persistent_storage_generation); a different profile's save
 	is another path. */
 	char cache_path[256];
-	boolean have_path = game_state_get_persistent_storage_path(cache_path);
+	boolean have_path = game_state_get_persistent_storage_path(cache_path) && strlen(cache_path) < 200;
+
+	/* (the file's name too: the campaign's save and the custom maps' share
+	the directory) */
+	if (have_path)
+		strcat(cache_path, game_state_persistent_storage_name());
 
 	if (have_path && persistent_header_cache.valid &&
 		persistent_header_cache.generation == game_state_persistent_storage_generation &&

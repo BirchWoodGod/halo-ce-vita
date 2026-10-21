@@ -113,6 +113,10 @@ void main_set_game_connection_to_film_playback(
 
 short main_get_current_solo_level(
 	void);
+#ifdef HALO_LINUX
+boolean main_current_level_is_custom_campaign(
+	void);
+#endif
 
 char const *main_get_solo_level_name(
 	short level);

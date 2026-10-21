@@ -332,6 +332,18 @@ PAUSE_BUTTONS = [
     ("change_settings_button", 300, (50, 300)),
     ("quit_netgame_button", 101, ()),
 ]
+SOLO_PAUSE_FOLDER = "ui\\shell\\solo_game\\pause_game\\"
+SOLO_PAUSE_LIST = SOLO_PAUSE_FOLDER + "pause_list"
+# Halo PC's campaign pause menu: each button's handler function (SAVE LAST
+# CHECKPOINT runs Halo PC's own 179; QUIT the Xbox's save and quit, 13)
+SOLO_PAUSE_BUTTONS = [
+    ("resume_game_button", 0),
+    ("save_checkpoint_button", 179),
+    ("restart_at_save_point_button", 0),
+    ("restart_level_button", 0),
+    ("change_settings_button", 137),
+    ("quit_to_main_menu_button", 13),
+]
 
 
 def add_widget(blob, handler_function, game_data_functions, children=()):
@@ -482,7 +494,7 @@ class Map:
                  model=None, bsp_material=None, shaders=(), animation_overlay=None, script_nodes=None,
                  weapon_hud=None, hud_bitmap_flags=None, strings_name="test\\strings", strings=("hello", "world!"),
                  weapon_function_modes=None, name=b"test", tags_checksum=0, pause_menu=False,
-                 tag_space=None, in_map_bitmap=None, mcc_hud=None):
+                 tag_space=None, in_map_bitmap=None, mcc_hud=None, solo_pause_menu=False):
         self.bsp_sizes = bsp_sizes
         # the tag space the structure BSPs are placed at the top of (Invader's
         # --tag-space), without OpenSauce's header
@@ -511,6 +523,8 @@ class Map:
         self.mcc_hud = mcc_hud
         # Halo PC's multiplayer pause menu: its list and four buttons
         self.pause_menu = pause_menu
+        # Halo PC's campaign pause menu: its list and six buttons
+        self.solo_pause_menu = solo_pause_menu
         self.weapon_function_modes = weapon_function_modes
         self.strings_name = strings_name
         self.strings = strings
@@ -576,6 +590,9 @@ class Map:
             tags += [("hudg", "test\\hud globals", False), ("hud#", "test\\digits", False)]
         if self.pause_menu:
             tags += [("DeLa", PAUSE_LIST, False)] + [("DeLa", PAUSE_FOLDER + button, False) for button, _, _ in PAUSE_BUTTONS]
+        if self.solo_pause_menu:
+            tags += [("DeLa", SOLO_PAUSE_LIST, False)] + [
+                ("DeLa", SOLO_PAUSE_FOLDER + button, False) for button, _ in SOLO_PAUSE_BUTTONS]
         # further structure BSPs go last, so the indices above never move
         bsp_tag_indices = [1] + [len(tags) + extra for extra in range(len(self.bsp_sizes) - 1)]
         tags += [("sbsp", f"test\\bsp {extra + 2}", False) for extra in range(len(self.bsp_sizes) - 1)]
@@ -690,6 +707,13 @@ class Map:
                 address_of[PAUSE_FOLDER + button] = add_widget(tag_data, handler_function, game_data_functions)
             address_of[PAUSE_LIST] = add_widget(tag_data, None, (), children=[
                 (names.index(PAUSE_FOLDER + button), 35 * index) for index, (button, _, _) in enumerate(PAUSE_BUTTONS)])
+        if self.solo_pause_menu:
+            names = [name for _, name, _ in tags]
+            for button, handler_function in SOLO_PAUSE_BUTTONS:
+                address_of[SOLO_PAUSE_FOLDER + button] = add_widget(tag_data, handler_function, ())
+            address_of[SOLO_PAUSE_LIST] = add_widget(tag_data, None, (), children=[
+                (names.index(SOLO_PAUSE_FOLDER + button), 10 + 22 * index)
+                for index, (button, _) in enumerate(SOLO_PAUSE_BUTTONS)])
         for tag_index, (group_name, name, external) in enumerate(tags):
             if name in address_of:
                 tag_data.u32(instances + tag_index * 0x20 + 0x14, address_of[name])
@@ -1468,6 +1492,35 @@ def test_halo_pc_widget_functions_run_none_and_the_pause_menu_is_the_xboxs(repor
     kept = [(names[u32_at(tags, children + index * 0x50 + 0x0C) & 0xFFFF].split("\\")[-1],
              s16_at(tags, children + index * 0x50 + 0x36)) for index in range(count)]
     assert kept == [("resume_game_button", 35), ("quit_netgame_button", 70)]
+
+
+def test_halo_pc_campaign_pause_menu_has_no_save_last_checkpoint(report_tool, tmp_path):
+    """Halo PC's campaign pause menu saves the last checkpoint with a
+    function of its own (nothing here); its QUIT saves and quits. SAVE LAST
+    CHECKPOINT is taken out, the rows under it moved up, and every row half
+    a row down to stay in the middle of the box; the others, QUIT's save and
+    quit among them, are kept as they were (the owner, insider.19)."""
+    cache = Map(solo_pause_menu=True)
+    returncode, report, tags = converted(report_tool, cache, tmp_path)
+    assert returncode == 0
+    assert report["solo_pause_save_removed"] == "1" and report["pause_menu_trimmed"] == "0"
+    pause_list = cache.addresses[SOLO_PAUSE_LIST]
+    count, children = u32_at(tags, pause_list + 0x3E0), u32_at(tags, pause_list + 0x3E0 + 4)
+    names = [name for _, name, _ in cache.tags]
+    kept = [(names[u32_at(tags, children + index * 0x50 + 0x0C) & 0xFFFF].split("\\")[-1],
+             s16_at(tags, children + index * 0x50 + 0x36)) for index in range(count)]
+    assert kept == [("resume_game_button", 21), ("restart_at_save_point_button", 43),
+                    ("restart_level_button", 65), ("change_settings_button", 87),
+                    ("quit_to_main_menu_button", 109)]
+    quit_button = cache.addresses[SOLO_PAUSE_FOLDER + "quit_to_main_menu_button"]
+    handler = u32_at(tags, quit_button + 0x54 + 4)
+    assert (u32_at(tags, handler), u16_at(tags, handler + 6)) == (0x81, 13)
+
+
+def test_a_map_without_halo_pcs_campaign_pause_menu_is_left_alone(report_tool, tmp_path):
+    """No campaign pause list: nothing taken out."""
+    returncode, report, _ = converted(report_tool, Map(pause_menu=True), tmp_path)
+    assert returncode == 0 and report["solo_pause_save_removed"] == "0"
 
 
 SCORE_HINT = 'Hold "%s" for score'

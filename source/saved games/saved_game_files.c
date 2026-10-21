@@ -1589,6 +1589,23 @@ boolean synchronize_metadata_display_name_with_profile_name(
 #endif
 									success = (boolean)CopyFileA(
 										old_persistent_storage_path, new_persistent_storage_path, TRUE);
+#ifdef HALO_LINUX
+									/* port: and the custom campaign maps' save beside it
+									(game_state_save_to_persistent_storage), when there is
+									one: the renamed profile keeps it (its copy failing
+									loses that save alone, not the rename) */
+									if (success && filename - old_persistent_storage_path +
+										sizeof("savegame_custom.bin") <= sizeof(old_persistent_storage_path))
+									{
+										strcpy(filename, "savegame_custom.bin");
+										_snprintf(new_persistent_storage_path, MAXIMUM_FILENAME_LENGTH, "%s%s",
+											save_game_directory, "savegame_custom.bin");
+										new_persistent_storage_path[MAXIMUM_FILENAME_LENGTH] = 0;
+										if (GetFileAttributesA(old_persistent_storage_path) != (unsigned long)-1 &&
+											!CopyFileA(old_persistent_storage_path, new_persistent_storage_path, TRUE))
+											error(_error_silent, "the custom campaign maps' save was not copied to the renamed profile");
+									}
+#endif
 								}
 								else
 								{
