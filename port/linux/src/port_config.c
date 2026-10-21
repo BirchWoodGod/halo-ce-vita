@@ -108,6 +108,12 @@ static const struct config_setting config_settings[] =
 	{ "display.first_person_legs", _config_boolean, "true", "HALO_FIRST_PERSON_LEGS", _environment_value, _platform_all,
 		"Your own legs in first person, seen looking down: your body as others\n"
 		"see it, drawn from the waist down, moving as it moves." },
+	/* (port/linux/game/field_of_view.c; the Vita's settings panel's Field
+	of view row, Video > Screen. Live) */
+	{ "display.field_of_view", _config_integer, "70", "HALO_FIELD_OF_VIEW", _environment_value, _platform_all,
+		"The field of view in Halo's degrees: 70 is the original view, larger\n"
+		"shows more at the sides (Halo PC's; 50 to 120). Zoomed views and the\n"
+		"first-person weapon stay as they were. Wider means more to draw." },
 	/* (port/linux/game/ragdolls.c; the Vita's settings panel's Ragdolls
 	row, Graphics > Detail. Live) */
 	{ "display.ragdolls", _config_boolean, "true", "HALO_RAGDOLLS", _environment_value, _platform_all,

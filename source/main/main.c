@@ -1240,19 +1240,34 @@ static void screenshot_record(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* port/linux/game/field_of_view.c */
+real field_of_view_world_scale(short local_player_index, real observer_field_of_view);
+#endif
+
 void set_window_camera_values(
 	struct render_window *window,
 	struct observer_result const *observer)
 {
 	if (observer)
 	{
+		real field_of_view_scale = 1.0f;
+
+#ifdef HALO_LINUX
+		/* port: the player's Field of view (display.field_of_view,
+		port/linux/game/field_of_view.c): the view's tangent widened, 1 at
+		the stock 70, zoomed or not a player's view */
+		field_of_view_scale = field_of_view_world_scale(
+			window->local_player_index,
+			observer->field_of_view);
+#endif
 		window->rasterizer_camera.position = observer->position;
 		window->rasterizer_camera.forward = observer->forward;
 		window->rasterizer_camera.up = observer->up;
 		window->rasterizer_camera.vertical_field_of_view =
 			2.0f * arctangent(
 				0.75f * render_camera_get_adjusted_field_of_view_tangent(
-					observer->field_of_view),
+					observer->field_of_view) * field_of_view_scale,
 				1.0f);
 
 		if (window->local_player_index != NONE &&
@@ -4465,6 +4480,7 @@ void platform_log(const char *format, ...);
 char halo_screenshot_name[64];
 
 static void main_test_camera(char const *arguments);
+static void main_test_field_of_view(void);
 static void main_test_trigger_volume(char const *name);
 static void main_test_bsp_switch_trigger(char const *arguments);
 /* damage.c's */
@@ -4662,7 +4678,8 @@ static void main_test_commands_update(
 		{
 			float pitch;
 			int zoom;
-			int given = sscanf(commands[index].command + 6, "%f %d", &pitch, &zoom);
+			float yaw;
+			int given = sscanf(commands[index].command + 6, "%f %d %f", &pitch, &zoom, &yaw);
 
 			if (given >= 1 && local_player_get_player_index(0) != NONE)
 			{
@@ -4671,8 +4688,16 @@ static void main_test_commands_update(
 				control->desired_angles.pitch = DEGREES_TO_RADIANS(pitch);
 				if (given >= 2)
 					control->zoom_level = (short)zoom;
+				/* (a third number: the yaw too, degrees, 0 along +x:
+				run_field_of_view_test.sh's same spot) */
+				if (given >= 3)
+					control->desired_angles.yaw = DEGREES_TO_RADIANS(yaw);
 			}
 		}
+		/* (@fov: each player's window's field of view and where its aim
+		lands on the screen, field_of_view.c, run_field_of_view_test.sh) */
+		else if (!strcmp(commands[index].command, "@fov"))
+			main_test_field_of_view();
 		else if (!strcmp(commands[index].command, "@legs"))
 		{
 			unsigned long first_person_legs_drawn_frames(real *set_back_last, real *set_back_most);
@@ -5037,6 +5062,74 @@ static void main_test_bsp_switch_trigger(
 	}
 	if (player_absolute_index != -2)
 		platform_log("test command: no BSP switch trigger %d from BSP %d", wanted, (int)global_structure_bsp_index_get());
+}
+
+/* (@fov) each local player's window as last drawn: the setting, the
+vertical and horizontal fields of view (and the horizontal at 4:3), the
+first-person weapon's (field_of_view.c), and where the unit's aim and its
+aim assist's target land against the view's centre, the crosshair's (in
+the window's pixels) */
+static void main_test_field_of_view(
+	void)
+{
+	long field_of_view_setting(void);
+	real field_of_view_first_person_scale(short local_player_index);
+	boolean render_camera_world_to_screen(const struct render_camera *camera, const struct render_frustum *frustum,
+		const real_point3d *world_point, real_point2d *screen_point);
+	short window_index;
+
+	for (window_index = 0; window_index < MAXIMUM_WINDOWS; window_index++)
+	{
+		struct render_window const *window = &global_screenshot_count.windows[window_index];
+		struct render_camera const *camera = &window->render_camera;
+		struct render_frustum frustum;
+		real width = (real)(camera->viewport_bounds.x1 - camera->viewport_bounds.x0);
+		real height = (real)(camera->viewport_bounds.y1 - camera->viewport_bounds.y0);
+		real vertical_tangent = tangent(camera->vertical_field_of_view * 0.5f);
+		real first_person_scale;
+		long unit_index;
+		long target_index;
+		real_point2d aim = { -1.0f, -1.0f };
+		real_point2d target = { -1.0f, -1.0f };
+		boolean aim_seen = FALSE;
+		boolean target_seen = FALSE;
+
+		if (window->console_window || window->local_player_index == NONE || width <= 0.0f || height <= 0.0f)
+			continue;
+		first_person_scale = field_of_view_first_person_scale(window->local_player_index);
+		render_camera_build_frustum(camera, NULL, &frustum, TRUE);
+		unit_index = player_control_get_unit_index(window->local_player_index);
+		if (unit_index != NONE)
+		{
+			struct unit_datum *unit = unit_get(unit_index);
+			real_point3d point;
+
+			point_from_line3d(&camera->position, &unit->unit.aiming_vector, 20.0f, &point);
+			aim_seen = render_camera_world_to_screen(camera, &frustum, &point, &aim);
+		}
+		target_index = player_control_get_target_object_index(window->local_player_index);
+		if (target_index != NONE)
+		{
+			struct object_datum *object = object_get(target_index);
+
+			target_seen = render_camera_world_to_screen(camera, &frustum, &object->object.bounding_sphere_center,
+				&target);
+		}
+		platform_log("test command: field of view: window %d player %d setting %ld: vertical %.2f, horizontal %.2f "
+			"(%dx%d), at 4:3 %.2f; first-person weapon at 4:3 %.2f (scale %.4f); aim %s %.2f %.2f from the centre; "
+			"target %s %.2f %.2f",
+			(int)window_index, (int)window->local_player_index, field_of_view_setting(),
+			(double)RADIANS_TO_DEGREES(camera->vertical_field_of_view),
+			(double)RADIANS_TO_DEGREES(2.0f * arctangent(vertical_tangent * width / height, 1.0f)), (int)width,
+			(int)height, (double)RADIANS_TO_DEGREES(2.0f * arctangent(vertical_tangent * 4.0f / 3.0f, 1.0f)),
+			(double)RADIANS_TO_DEGREES(2.0f * arctangent(vertical_tangent * 4.0f / 3.0f / first_person_scale, 1.0f)),
+			(double)first_person_scale, aim_seen ? "at" : "off-screen",
+			(double)(aim.x - (camera->viewport_bounds.x0 + width * 0.5f)),
+			(double)(aim.y - (camera->viewport_bounds.y0 + height * 0.5f)),
+			target_index == NONE ? "none" : target_seen ? "at" : "off-screen",
+			(double)(target.x - (camera->viewport_bounds.x0 + width * 0.5f)),
+			(double)(target.y - (camera->viewport_bounds.y0 + height * 0.5f)));
+	}
 }
 
 static void main_test_camera(
