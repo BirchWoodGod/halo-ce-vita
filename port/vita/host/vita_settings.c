@@ -8,7 +8,8 @@ tabs that L and R switch between, laid out as Halo Online's settings (Oct
 2026): Game, Controls, Video, Sound and Multiplayer, and Dev once "Show
 dev settings" (Game) is on; a tab's rows under headings (Interface, First
 person, Updates...). No tab is longer than a screen: the rows few players
-change open from a row marked > as a page of their own (Video's Detail and
+change open from a row marked > as a page of their own (Game's Menus: Menu
+style and, with the Halo 3 menus, Carnage report; Video's Detail and
 Performance; Controls' Button layout, Touch zones and Gyro settings;
 Multiplayer's Play and Modded maps; Dev's A/B switches), and circle goes
 back.
@@ -319,6 +320,8 @@ enum
 	/* (Multiplayer's Infection: the built-in Infection game type's settings,
 	port/linux/game/infection.c) */
 	PAGE_INFECTION,
+	/* (Game's Menus: Menu style, the Halo 3 menus' Carnage report) */
+	PAGE_MENUS,
 	PAGE_COUNT
 };
 
@@ -349,6 +352,7 @@ static const struct
 	{ "Vita and PC", TAB_MULTIPLAYER },
 	{ "Players", TAB_MULTIPLAYER },
 	{ "Infection", TAB_MULTIPLAYER },
+	{ "Menus", TAB_GAME },
 };
 /* the headings over a tab's rows, as Halo Online's settings have them
 (HUD, Interface...): each above the row it names, when that row is shown */
@@ -358,7 +362,7 @@ static const struct
 	const char *row;
 	const char *name;
 } headings[] = {
-	{ TAB_GAME, "Menu style", N_("Interface") },
+	{ TAB_GAME, "Menus", N_("Interface") },
 	{ TAB_GAME, "First-person legs", N_("First person") },
 	{ TAB_GAME, "Check for updates", N_("Updates") },
 	{ TAB_CONTROLS, "Look sensitivity", N_("Look") },
@@ -542,8 +546,16 @@ static struct setting settings[] = {
 	/* (the menus: Halo CE's own, or the Halo 3-style ones over the same
 	animated Halo ring - port/vita/app0/menus/halo3, menu_tags.c, which
 	reads it each time a screen opens: live) */
+	PAGE_ROW("Menus", "Menu style, the multiplayer game's carnage report", TAB_GAME, PAGE_MENUS),
 	{ "Menu style", "HALO_MENU_STYLE", 0, 2, { "classic", "halo3" }, { "Halo CE", "Halo 3" },
-		"Halo 3: the new menus over the Halo ring. Halo CE: the original menus.", 1, TAB_GAME },
+		"Halo 3: the new menus over the Halo ring. Halo CE: the original menus.", 1, PAGE_MENUS },
+	/* (menu_functions.c h3_carnage_wanted, config.toml's menus.carnage_report:
+	a multiplayer game's end, Halo 3's CARNAGE REPORT or the game's own;
+	read when the scores come up: live. Shown with Menu style Halo 3 - Halo
+	CE always shows the game's own -: setting_shown. On this page, with
+	Menu style, as the Game tab is a screen's height) */
+	{ "Carnage report", "HALO_CARNAGE_REPORT", 0, 2, { "classic", "halo3" }, { "Classic", "Halo 3" },
+		"A multiplayer game's end: Halo 3's report, or the original", 1, PAGE_MENUS },
 	/* (the game's button icons: the Xbox's, or the Vita button each is on,
 	in the menus and in play: vita_controls.h; not part of the layout,
 	which Reset controls and the page's summary leave out) */
@@ -1536,6 +1548,9 @@ static int setting_shown(const struct setting *setting)
 	original menus, the Halo CE Menu style, the panel does) */
 	if (setting->action == ACTION_PAGE && setting->opens == PAGE_FORGE)
 		return classic_panel();
+	/* (the Halo 3 menus' report: with Menu style Halo 3) */
+	if (setting->variable && !strcmp(setting->variable, "HALO_CARNAGE_REPORT"))
+		return !classic_panel();
 	if ((setting->variable && !strcmp(setting->variable, "HALO_ADHOC_ROOM")) || setting->action == ACTION_ADHOC_JOIN)
 		return network_is("adhoc");
 	if (setting->action == ACTION_PAGE && setting->opens == PAGE_CROSSPLAY)
@@ -4228,6 +4243,14 @@ static void page_summary(char *text, int size, const struct setting *setting)
 				moved = 1;
 		snprintf(text, (size_t)size, "%s", moved ? T("Custom") : T("As shipped"));
 		break;
+	case PAGE_MENUS:
+	{
+		/* (the menus chosen: Halo 3 or Halo CE) */
+		const struct setting *style = setting_named("HALO_MENU_STYLE");
+
+		snprintf(text, (size_t)size, "%s", style ? T(style->names[style->choice]) : "");
+		break;
+	}
 	case PAGE_TOUCH:
 		for (index = 0; index < SETTING_COUNT; index++)
 			if (settings[index].page == PAGE_TOUCH && settings[index].choice)

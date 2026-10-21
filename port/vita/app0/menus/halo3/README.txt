@@ -209,7 +209,8 @@ In each level's map (ingame.txt):
   end (local, System Link, ad hoc and online; every game type), opened over
   the game once its scores come up, in the place of the game's own report
   (game_engine.c game_engine_post_rasterize_post_game, drawn with Menu style
-  Halo CE, or menus.carnage_report "classic"): the winner, the players
+  Halo CE, or menus.carnage_report "classic" - the settings panel's Game >
+  Menus > Carnage report Classic): the winner, the players
   ranked as the game ranks them (a team game's under their team's row - its
   score, its players' sums -, the winning team first), each on a nameplate
   in their colour or their team's, this machine's rows lit, the winners

@@ -2984,7 +2984,10 @@ static void test_tab_layouts(void)
 	char languages[64];
 	const struct layout_row game[] = {
 		/* (Halo 3's menus as shipped from 1.1.1: the owner's) */
-		{ TAB_GAME, "Menu style", "HALO_MENU_STYLE", "classic|halo3", 0, "halo3" },
+		{ TAB_GAME, "Menus", NULL, NULL, 0, NULL, ACTION_PAGE, PAGE_MENUS },
+		{ PAGE_MENUS, "Menu style", "HALO_MENU_STYLE", "classic|halo3", 0, "halo3" },
+		/* (shown with Menu style Halo 3) */
+		{ PAGE_MENUS, "Carnage report", "HALO_CARNAGE_REPORT", "classic|halo3", 0, "halo3" },
 		{ TAB_GAME, "Button icons", "HALO_BUTTON_ICONS", "xbox|playstation", 0,
 			VITA_BUTTON_ICONS_DEFAULT ? "playstation" : "xbox" },
 		{ TAB_GAME, "Language", "HALO_LANGUAGE", languages, 0, "auto" },
@@ -3054,7 +3057,7 @@ static void test_tab_layouts(void)
 		!strcmp(pages[TAB_AUDIO].name, "Sound") && !strcmp(pages[TAB_MULTIPLAYER].name, "Multiplayer") &&
 		!strcmp(pages[TAB_DEV].name, "Dev"), "the tabs in order: Game, Controls, Video, Sound, Multiplayer, Dev");
 	check(layout_is(TAB_GAME, 1, game, (int)(sizeof(game) / sizeof(game[0]))),
-		"Game: Menu style (Halo 3 as shipped), Button icons, Language, FPS counter; First-person legs, Smooth weapon "
+		"Game: Menus (Menu style, Carnage report), Button icons, Language, FPS counter; First-person legs, Smooth weapon "
 		"motion; Check for updates, Update channel, Show dev settings: each row's variable, values, default and restart "
 		"as before; no page of its own");
 	check(layout_is(TAB_CONTROLS, 0, controls, (int)(sizeof(controls) / sizeof(controls[0]))),
@@ -3100,9 +3103,9 @@ static void test_tab_layouts(void)
 			!strcmp(pages[PAGE_FORGE].name, "Forge and File Share") && !strcmp(pages[PAGE_MODS].name, "Mod manager") &&
 			!strcmp(pages[PAGE_FRIENDS].name, "Friends") && !strcmp(pages[PAGE_PARTY].name, "Party") &&
 			!strcmp(pages[PAGE_CROSSPLAY].name, "Vita and PC") && !strcmp(pages[PAGE_PLAYERS].name, "Players") &&
-			!strcmp(pages[PAGE_INFECTION].name, "Infection"),
+			!strcmp(pages[PAGE_INFECTION].name, "Infection") && !strcmp(pages[PAGE_MENUS].name, "Menus"),
 			"the pages rows open: Detail, Performance, Button layout, Touch zones, Gyro settings, Play, Modded maps, Vita and PC, A/B "
-			"switches, Forge and File Share, Mod manager, Friends, Party, Players, Infection (no Screen, First person or Advanced "
+			"switches, Forge and File Share, Mod manager, Friends, Party, Players, Infection, Menus (no Screen, First person or Advanced "
 			"page; no General, Graphics or Audio tab)");
 	}
 	{
@@ -3142,7 +3145,7 @@ static void test_headings(void)
 	{
 		const char *tab, *outline;
 	} tabs[] = {
-		{ "Game", "=Interface|Menu style|Button icons|Language|FPS counter|=First person|First-person legs|"
+		{ "Game", "=Interface|Menus|Button icons|Language|FPS counter|=First person|First-person legs|"
 			"Smooth weapon motion|=Updates|Check for updates|Update channel|Show dev settings" },
 		{ "Controls", "=Look|Look sensitivity|Invert look|Stick deadzone|=Buttons|Crouch|Button layout|Reset controls|"
 			"=Gyro|Gyro aiming|Gyro settings|=Touch|Rear touch guard|Touch zones" },
@@ -3206,7 +3209,7 @@ static void test_headings(void)
 	check(fits, "each tab with its headings: every line fits, and the page the panel's height");
 	check(steps, "down and up through each tab: every row chosen once each way, never a heading");
 	to_tab("Game");
-	check(strstr(menu, "\t*Game|") && strstr(menu, "\n\x08Interface\nMenu style\x02") &&
+	check(strstr(menu, "\t*Game|") && strstr(menu, "\n\x08Interface\nMenus\x02") &&
 		strstr(menu, "\nFPS counter\x02  Off >\n\x08" "First person\nFirst-person legs\x02") &&
 		strstr(menu, "\nSmooth weapon motion\x02  On >\n\x08Updates\nCheck for updates\x02"),
 		"Game's text: Interface, First person and Updates each on a line of its own, marked '\\x08', over its rows");
@@ -3247,7 +3250,7 @@ the Campaign screen) and Online games (now Visibility, by OpenCE's name);
 and the rows added since (Sun rays, Button icons, Map downloads, Max
 players, Visibility, Fourth core helpers, Latency meter, Particles,
 First-person legs, MCC mods, PC map vehicles, Sharp interface, Player model,
-PC mouse aim assist; the Play page's two texts) */
+PC mouse aim assist, Carnage report; the Play page's two texts) */
 static void test_variables_kept(void)
 {
 	static const char *const variables[] = {
@@ -3274,6 +3277,7 @@ static void test_variables_kept(void)
 		"HALO_FRIENDS_JOIN", "HALO_NET_BLOCK_MOUSE_AIM_ASSIST", "HALO_NET_ANTICHEAT",
 		"HALO_INFECTION_ZOMBIES", "HALO_INFECTION_SPEED", "HALO_INFECTION_TIME", "HALO_INFECTION_RESPAWN",
 		"HALO_INFECTION_SHIELDS", "HALO_INFECTION_TOUGH",
+		"HALO_CARNAGE_REPORT",
 	};
 	int index, all = 1, choices = 0;
 
@@ -4035,7 +4039,7 @@ static void test_languages(void)
 	tab = page = TAB_GAME;
 	open_panel();
 	check(!strcmp(lang_current(), "en") && strstr(menu, "\t*Game|Controls|Video|Sound|Multiplayer") &&
-		strstr(menu, "\n\x08Interface\nMenu style\x02"), "English again, at once");
+		strstr(menu, "\n\x08Interface\nMenus\x02"), "English again, at once");
 	menu_line(0, line, sizeof(line));
 	close_panel();
 	vita_settings_set("HALO_LANGUAGE", "auto");
@@ -4153,13 +4157,13 @@ static void test_updates(void)
 		menu_fits() && menu_height_fits() && menu_rows() == 10,
 		"an update: under the version, in amber, the new version and where to get it; all of the tab still fits (ten "
 		"rows on the classic panel: Forge and File Share's too)");
-	check(!strstr(menu, "Interface") && !strncmp(menu_line(1, line, sizeof(line)), "Menu style\x02", 11) &&
+	check(!strstr(menu, "Interface") && !strncmp(menu_line(1, line, sizeof(line)), "Menus\x02", 6) &&
 		!strstr(menu, "\n\x08" "First person\n") && strstr(menu, "\n\x08Updates\n") && menu_selected == 8,
 		"the classic panel, short of room: the first headings, Interface and First person, give way (the tab bar over "
 		"Menu style); Updates stays, Check for updates still chosen");
 	vita_settings_set("HALO_MENU_STYLE", "halo3");
 	redraw();
-	check(strstr(menu, "\n\x08Interface\nMenu style\x02") && strstr(menu, "\n\x08Updates\nCheck for updates\x02") &&
+	check(strstr(menu, "\n\x08Interface\nMenus\x02") && strstr(menu, "\n\x08Updates\nCheck for updates\x02") &&
 		menu_selected == 10, "the Halo 3 panel (its rows fitted to its height): every heading kept");
 	vita_settings_set("HALO_MENU_STYLE", "classic");
 	redraw();
@@ -4209,7 +4213,7 @@ static void test_updates(void)
 	update_status_value = UPDATE_STATUS_NONE;
 	redraw();
 	check(!strstr(menu, "Couldn't") && !strstr(menu, "Checking"), "no look yet: no line");
-	check(strstr(menu, "\n\x08Interface\nMenu style\x02") && menu_height_fits(),
+	check(strstr(menu, "\n\x08Interface\nMenus\x02") && menu_height_fits(),
 		"room again (the version alone): Interface back");
 	press(VITA_BUTTON_CIRCLE);
 	check(!menu_visible, "circle on Game closes the panel");
@@ -4259,13 +4263,16 @@ static void test_menu_style_row(void)
 	unsigned long generation;
 	char line[128];
 
-	check(style && style->page == TAB_GAME && !strcmp(style->values[shipped_choice[style - settings]], "halo3") &&
+	check(style && style->page == PAGE_MENUS && !strcmp(style->values[shipped_choice[style - settings]], "halo3") &&
 		!strcmp(style->names[shipped_choice[style - settings]], "Halo 3"), "Menu style: Halo 3 as shipped");
 	open_panel();
 	to_tab("Game");
-	check(to_line("Menu style") && menu_selected == 2 && !strcmp(menu_line(1, line, sizeof(line)), "\x08Interface") &&
-		strstr(menu, "\n\x05" "Halo 3: the new menus over the Halo ring. Halo CE: the original menus.\n") && menu_fits(),
-		"Menu style: Game's first row, under Interface, and its help");
+	check(to_line("Menus") && menu_selected == 2 && !strcmp(menu_line(1, line, sizeof(line)), "\x08Interface") &&
+		strstr(menu, "\nMenus\x02  Halo 3  >\n") && !strstr(menu, "\nMenu style\x02"),
+		"Menus: Game's first row, under Interface, the menus chosen (Halo 3) as its value");
+	check(open_page("Menus") && strstr(menu, "\n\x03Game > Menus\n") && to_line("Menu style") &&
+		strstr(menu, "\n\x05" "Halo 3: the new menus over the Halo ring. Halo CE: the original menus.\n") && menu_fits() &&
+		menu_height_fits(), "Menu style: the Menus page's first row, and its help");
 	check(!strcmp(getenv("HALO_MENU_STYLE"), "halo3") && strstr(menu, "\nMenu style\x02< Halo 3  "),
 		"Menu style: Halo 3 (no settings.txt naming it), in the environment");
 	generation = halo_settings_generation;
@@ -4283,6 +4290,46 @@ static void test_menu_style_row(void)
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(getenv("HALO_MENU_STYLE"), "halo3") && strstr(menu, "\nMenu style\x02< Halo 3  ") &&
 		strstr(file_text(SETTINGS_FILE), "HALO_MENU_STYLE=halo3\n"), "Menu style back to Halo 3, saved");
+	press(VITA_BUTTON_CIRCLE);
+	check(menu_visible && strstr(menu, "\nMenus\x02  Halo 3  >\n"), "Circle: back to Game, Menus saying Halo 3");
+	press(VITA_BUTTON_CIRCLE);
+}
+
+/* the Carnage report row (Game > Menus, under Menu style; menu_functions.c
+h3_carnage_wanted, config.toml's menus.carnage_report): Halo 3's CARNAGE
+REPORT or the game's own at a multiplayer game's end, Halo 3 as shipped,
+live; shown with Menu style Halo 3 only (Halo CE always shows the game's
+own) */
+static void test_carnage_report_row(void)
+{
+	struct setting *report = setting_named("HALO_CARNAGE_REPORT");
+	char line[128];
+
+	check(report && report->page == PAGE_MENUS && !report->restart &&
+		!strcmp(report->values[shipped_choice[report - settings]], "halo3"), "Carnage report: Halo 3 as shipped");
+	open_panel();
+	to_tab("Game");
+	check(open_page("Menus") && !strcmp(menu_line(2, line, sizeof(line)), "Menu style\x02< Halo 3  ") &&
+		!strcmp(menu_line(3, line, sizeof(line)), "Carnage report\x02< Halo 3  ") && menu_rows() == 2 && menu_fits() &&
+		menu_height_fits(), "Game > Menus: Menu style, then Carnage report (Halo 3)");
+	check(to_line("Carnage report") &&
+		strstr(menu, "\n\x05" "A multiplayer game's end: Halo 3's report, or the original\n"), "Carnage report: its help");
+	press(VITA_BUTTON_LEFT);
+	check(getenv("HALO_CARNAGE_REPORT") && !strcmp(getenv("HALO_CARNAGE_REPORT"), "classic") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_CARNAGE_REPORT=classic\n") &&
+		strstr(menu, "\nCarnage report\x02  Classic >") && !strstr(menu, "Carnage report*") && !restart_pending,
+		"Carnage report Classic: in the environment and settings.txt at once, no restart");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_CARNAGE_REPORT"), "halo3") && strstr(file_text(SETTINGS_FILE), "HALO_CARNAGE_REPORT=halo3\n"),
+		"Carnage report back to Halo 3, saved");
+	to_line("Menu style");
+	press(VITA_BUTTON_LEFT);
+	check(!strstr(menu, "\nCarnage report") && menu_rows() == 1 && !strcmp(getenv("HALO_MENU_STYLE"), "classic"),
+		"Menu style Halo CE: no Carnage report row (the game's own report)");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nCarnage report\x02< Halo 3  \n") && !strcmp(getenv("HALO_MENU_STYLE"), "halo3"),
+		"Menu style Halo 3 again: Carnage report back");
+	press(VITA_BUTTON_CIRCLE);
 	press(VITA_BUTTON_CIRCLE);
 }
 
@@ -4733,7 +4780,7 @@ int main(void)
 		"SELECT+START opens the Game tab, the first; five tabs: Game, Controls, Video, Sound, Multiplayer (Dev hidden)");
 	/* Game: Halo Online's Interface, First person and Updates */
 	check(!strcmp(menu_line(1, line, sizeof(line)), "\x08Interface") &&
-		!strcmp(menu_line(2, line, sizeof(line)), "Menu style\x02< Halo 3  ") &&
+		!strcmp(menu_line(2, line, sizeof(line)), "Menus\x02  Halo 3  >") &&
 		!strcmp(menu_line(3, line, sizeof(line)),
 			VITA_BUTTON_ICONS_DEFAULT ? "Button icons\x02< PlayStation  " : "Button icons\x02  Xbox >") &&
 		!strcmp(menu_line(4, line, sizeof(line)), "Language\x02  Automatic >") &&
@@ -4746,12 +4793,12 @@ int main(void)
 		!strcmp(menu_line(11, line, sizeof(line)), "\x04" "Version " HALO_VITA_VERSION) &&
 		!strncmp(menu_line(12, line, sizeof(line)), "Update channel\x02", 15) &&
 		!strcmp(menu_line(13, line, sizeof(line)), "Show dev settings\x02  Off >") &&
-		!strcmp(menu_line(14, line, sizeof(line)), "\x05" "Halo 3: the new menus over the Halo ring. Halo CE: the original menus.") &&
+		!strcmp(menu_line(14, line, sizeof(line)), "\x05" "Menu style, the multiplayer game's carnage report") &&
 		!strncmp(menu_line(15, line, sizeof(line)), "\x06L/R: tabs", 10) && menu_height_fits(),
-		"Game: Interface (Menu style Halo 3, Button icons, Language, FPS counter), First person (First-person legs, "
+		"Game: Interface (Menus: Halo 3, Button icons, Language, FPS counter), First person (First-person legs, "
 		"Smooth weapon motion), Updates (Check for updates and the version, Update channel, Show dev settings); help, buttons");
 	check(menu_selected == 2 && menu_fits() && menu_rows() == 9 && !strstr(menu, "*\x02"),
-		"Game: Menu style chosen first (not the heading over it); nine rows, each fits, all live (no *)");
+		"Game: Menus chosen first (not the heading over it); nine rows, each fits, all live (no *)");
 	check(!strstr(menu, "Profile") && !strstr(menu, "Aspect ratio") && !strstr(menu, "Look sensitivity") &&
 		!strstr(menu, "Stick deadzone") && !strstr(menu, "Sound voices") && !strstr(menu, "\nScreen\x02") &&
 		!strstr(menu, "\nFirst person\x02") && !strstr(menu, "\nAdvanced\x02"),
@@ -5796,6 +5843,7 @@ int main(void)
 	snprintf(update_version_value, sizeof(update_version_value), "1.1.0-beta.4");
 	test_languages();
 	test_menu_style_row();
+	test_carnage_report_row();
 	test_restart_offer();
 	test_save_off_thread();
 	test_save_any_thread();
