@@ -74,6 +74,23 @@ unsigned long long vita_host_time_us(void);
 /* the calling thread asleep for this long */
 void vita_host_sleep_us(unsigned long microseconds);
 
+/* ---------- a thread woken by another (d3d8_gxm.c's worker and game
+waits): a counting semaphore, a kernel one on the Vita - safe on any thread,
+sceKernelCreateThread's too, which have no pthread data for
+pthread_cond_wait (vita_settings.c save_wake) - and a POSIX one in the
+harness (vgxm_null.c) */
+
+/* a semaphore at 0: its id, or negative when none could be made */
+int vita_host_wake_create(const char *name);
+/* one signal taken, waited for up to timeout_us (0: for ever): 0 when
+taken, 1 when the time ran out, negative on an error */
+int vita_host_wake_wait(int id, unsigned long timeout_us);
+/* one signal taken if one is waiting: 0 taken, 1 none */
+int vita_host_wake_poll(int id);
+/* one signal given (none past the semaphore's most, 8: a waiter is woken
+by any) */
+void vita_host_wake_signal(int id);
+
 /* ---------- movies (port/vita/host/vita_movie.c): the Vita's video player
 for the game's Bink movies, from H.264 copies */
 

@@ -14,6 +14,7 @@ ux0:data/haloce-vita/log.txt (stderr).
 #include <psp2/kernel/clib.h>
 #include <psp2/kernel/processmgr.h>
 #include <psp2/kernel/threadmgr.h>
+#include <psp2/kernel/error.h>
 #include <psp2/appmgr.h>
 #include <psp2/kernel/sysmem.h>
 #include <psp2/io/dirent.h>
@@ -107,6 +108,36 @@ int vita_host_thread_start(const char *name, void (*function)(void *), void *arg
 void vita_host_sleep_us(unsigned long microseconds)
 {
 	sceKernelDelayThread((SceUInt)microseconds);
+}
+
+/* (vita_host.h) a kernel semaphore: no pthread data needed, so any thread
+may wait on it */
+#define WAKE_MAXIMUM 8
+
+int vita_host_wake_create(const char *name)
+{
+	return sceKernelCreateSema(name, 0, 0, WAKE_MAXIMUM, NULL);
+}
+
+int vita_host_wake_wait(int id, unsigned long timeout_us)
+{
+	SceUInt timeout = (SceUInt)timeout_us;
+	int result = sceKernelWaitSema(id, 1, timeout_us ? &timeout : NULL);
+
+	if (result == (int)SCE_KERNEL_ERROR_WAIT_TIMEOUT)
+		return 1;
+	return result < 0 ? result : 0;
+}
+
+int vita_host_wake_poll(int id)
+{
+	return sceKernelPollSema(id, 1) < 0;
+}
+
+void vita_host_wake_signal(int id)
+{
+	/* (past the most it refuses: the waiter has a signal already) */
+	sceKernelSignalSema(id, 1);
 }
 
 /* the calling thread's priority (64-191, the lower the sooner): the Ogg

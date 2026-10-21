@@ -19,7 +19,9 @@ their Cg; they are never compiled.
 #include "vita_host.h"
 #include "vita_controls.h"
 
+#include <errno.h>
 #include <pthread.h>
+#include <semaphore.h>
 #include <stddef.h>
 #include <sched.h>
 #include <stdio.h>
@@ -93,6 +95,72 @@ int vita_host_thread_start_priority(const char *name, void (*function)(void *), 
 {
 	(void)priority;
 	return vita_host_thread_start(name, function, argument, core);
+}
+
+/* (vita_host.h) the Vita's kernel semaphores as POSIX ones */
+#define WAKE_COUNT 16
+#define WAKE_MAXIMUM 8
+static sem_t wakes[WAKE_COUNT];
+static int wake_count;
+
+int vita_host_wake_create(const char *name)
+{
+	int id = __atomic_fetch_add(&wake_count, 1, __ATOMIC_ACQ_REL);
+
+	(void)name;
+	if (id >= WAKE_COUNT || sem_init(&wakes[id], 0, 0) != 0)
+		return -1;
+	return id;
+}
+
+int vita_host_wake_wait(int id, unsigned long timeout_us)
+{
+	struct timespec deadline;
+
+	if (id < 0 || id >= WAKE_COUNT)
+		return -1;
+	if (!timeout_us)
+	{
+		while (sem_wait(&wakes[id]) != 0)
+			if (errno != EINTR)
+				return -1;
+		return 0;
+	}
+	clock_gettime(CLOCK_REALTIME, &deadline);
+	deadline.tv_sec += (time_t)(timeout_us / 1000000UL);
+	deadline.tv_nsec += (long)(timeout_us % 1000000UL) * 1000L;
+	if (deadline.tv_nsec >= 1000000000L)
+	{
+		deadline.tv_nsec -= 1000000000L;
+		deadline.tv_sec++;
+	}
+	while (sem_timedwait(&wakes[id], &deadline) != 0)
+	{
+		if (errno == ETIMEDOUT)
+			return 1;
+		if (errno != EINTR)
+			return -1;
+	}
+	return 0;
+}
+
+int vita_host_wake_poll(int id)
+{
+	if (id < 0 || id >= WAKE_COUNT)
+		return 1;
+	return sem_trywait(&wakes[id]) != 0;
+}
+
+void vita_host_wake_signal(int id)
+{
+	int value = 0;
+
+	if (id < 0 || id >= WAKE_COUNT)
+		return;
+	/* (as the Vita's: no more than its most) */
+	if (sem_getvalue(&wakes[id], &value) == 0 && value >= WAKE_MAXIMUM)
+		return;
+	sem_post(&wakes[id]);
 }
 
 void vita_host_cpu_usage(unsigned char busy[4])

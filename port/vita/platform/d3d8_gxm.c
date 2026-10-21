@@ -2744,14 +2744,192 @@ static void *lasting_alloc(unsigned long bytes, const char *name)
 }
 
 /* a single-producer, single-consumer ring: the game's thread advances the
-head, the worker the tail; neither locks, and a thread with nothing to do
-sleeps briefly rather than being signalled (a signal per draw is a system
-call per draw) */
+head, the worker the tail; neither locks. A thread with nothing to do
+spins a little, then sleeps until the other wakes it (worker_waiter,
+game_waiter) */
 static struct render_record *commands;
 static volatile unsigned long command_head, command_tail;
 static volatile unsigned long frames_requested, frames_presented;
 void vita_host_sleep_us(unsigned long microseconds);
 static int worker_enabled = -1;
+
+/* (port) A thread asleep on another's progress (Sierra-III's handoff, Oct
+21 2026, for the battery: the worker and the game's waits slept 50-100 us
+at a time, waking hundreds of times a frame on a core with nothing to do).
+The sleeper counts itself in `sleepers`, tests once more, then waits on a
+semaphore (vita_host_wake_*: the Vita's kernel one, which any thread may
+wait on - no pthread_cond_wait, which a thread of sceKernelCreateThread's
+cannot use); the publisher, after its publish, looks at `sleepers` and
+signals only when someone sleeps, so the per-record publish stays a fence
+and a load. Either the sleeper's test sees the publish or the publisher
+sees the sleeper (both sides' accesses sequentially consistent); a signal
+the sleeper did not wait for is a spurious wake-up later, and every wait
+tests again in a loop. The waits are timed (HALO_WAIT_TIMEOUT_US, default
+100 ms): one that runs out of time with its work there and no signal given
+is a lost wake-up, counted and logged - none is expected. Without a
+semaphore (none could be made) the waits sleep 50 us at a time, as before. */
+struct worker_waiter
+{
+	volatile int sleepers;
+	int wake;
+	const char *name;
+	/* sleeps, the ones that ran out of time, the lost wake-ups */
+	unsigned long sleeps, timeouts, lost;
+};
+static struct worker_waiter worker_waiter = { 0, -1, "the render worker", 0, 0, 0 };
+static struct worker_waiter game_waiter = { 0, -1, "the game's thread", 0, 0, 0 };
+/* the record the worker sleeps before, and the records that wake it at
+once (one past the last present or flushing record committed): others
+wake it only WORKER_WAKE_BATCH at a time, since most wait for the present
+anyway (a signal per record was a system call per draw on the game's core) */
+static volatile unsigned long worker_sleep_from, command_urgent;
+#define WORKER_WAKE_BATCH 64
+
+/* (debug) HALO_WAIT_STATS=1: the waits' counts every 1800 frames
+(wait_stats_report); 2: also every wait that ran out of time */
+static int wait_stats(void)
+{
+	static int level = -1;
+
+	if (level < 0)
+	{
+		const char *setting = getenv("HALO_WAIT_STATS");
+
+		level = setting ? atoi(setting) : 0;
+	}
+	return level;
+}
+
+static unsigned long wait_timeout_us(void)
+{
+	static unsigned long timeout;
+
+	if (!timeout)
+	{
+		const char *setting = getenv("HALO_WAIT_TIMEOUT_US");
+		unsigned long value = setting ? strtoul(setting, NULL, 10) : 0;
+
+		timeout = value >= 1000 ? value : 100000;
+	}
+	return timeout;
+}
+
+static void waiter_initialize(struct worker_waiter *waiter, const char *semaphore_name)
+{
+	waiter->sleepers = 0;
+	waiter->wake = vita_host_wake_create(semaphore_name);
+	if (waiter->wake < 0)
+		platform_log("render worker: no semaphore for %s (%d): its waits poll", waiter->name, waiter->wake);
+}
+
+/* (after a publish) the sleepers woken */
+static void waiter_wake(struct worker_waiter *waiter)
+{
+	int sleepers;
+
+	/* (the publish before this seen before `sleepers` is read) */
+	__atomic_thread_fence(__ATOMIC_SEQ_CST);
+	if (!__atomic_load_n(&waiter->sleepers, __ATOMIC_RELAXED))
+		return;
+	sleepers = __atomic_exchange_n(&waiter->sleepers, 0, __ATOMIC_SEQ_CST);
+	while (sleepers-- > 0)
+		vita_host_wake_signal(waiter->wake);
+}
+
+/* one sleep of a wait whose spin ran out: counted among the sleepers,
+ready(argument) tested once more, then the wake-up waited for; nonzero
+when the wait ran out of time */
+static int waiter_sleep(struct worker_waiter *waiter, int (*ready)(unsigned long), unsigned long argument)
+{
+	int result;
+
+	if (waiter->wake < 0)
+	{
+		vita_host_sleep_us(50);
+		return 0;
+	}
+	__atomic_add_fetch(&waiter->sleepers, 1, __ATOMIC_SEQ_CST);
+	__atomic_thread_fence(__ATOMIC_SEQ_CST);
+	if (ready(argument))
+		return 0;
+	waiter->sleeps++;
+	result = vita_host_wake_wait(waiter->wake, wait_timeout_us());
+	if (result == 1)
+	{
+		int now_ready = ready(argument);
+
+		waiter->timeouts++;
+		/* (a signal given since is a wake-up that came late, not one lost) */
+		if (now_ready && vita_host_wake_poll(waiter->wake) != 0 && ++waiter->lost <= 8)
+			platform_log("render worker: lost wake-up %lu (%s): the wait ran out with its work there", waiter->lost,
+				waiter->name);
+		else if (wait_stats() >= 2)
+			platform_log("render worker: a wait of %s ran out of time (%lu us), %s", waiter->name, wait_timeout_us(),
+				now_ready ? "its signal given meanwhile" : "its work not there yet");
+	}
+	else if (result < 0)
+		vita_host_sleep_us(50);
+	return result == 1;
+}
+
+static void wait_stats_report(void)
+{
+	static unsigned long presents;
+
+	if (!wait_stats() || ++presents % 1800)
+		return;
+	platform_log("waits: the render worker slept %lu times (%lu ran out of time, %lu lost wake-ups), the game's thread "
+		"%lu (%lu, %lu)", worker_waiter.sleeps, worker_waiter.timeouts, worker_waiter.lost, game_waiter.sleeps,
+		game_waiter.timeouts, game_waiter.lost);
+}
+
+/* the worker's sleep before record `position` ends: enough records, or one
+that wakes it at once */
+static int worker_records_ready(unsigned long position)
+{
+	return __atomic_load_n(&command_head, __ATOMIC_SEQ_CST) - position >= WORKER_WAKE_BATCH ||
+		(long)(__atomic_load_n(&command_urgent, __ATOMIC_SEQ_CST) - position) > 0;
+}
+
+/* (the game's thread, after a record is committed) the worker woken if it
+sleeps and the record is one it wants now */
+static void worker_wake_for_records(void)
+{
+	__atomic_thread_fence(__ATOMIC_SEQ_CST);
+	if (__atomic_load_n(&worker_waiter.sleepers, __ATOMIC_RELAXED) &&
+		worker_records_ready(__atomic_load_n(&worker_sleep_from, __ATOMIC_RELAXED)))
+	{
+		waiter_wake(&worker_waiter);
+	}
+}
+
+/* the game's waits for the worker: until it has presented all but `behind`
+of the frames recorded, or freed room in the ring */
+static int frames_presented_within(unsigned long behind)
+{
+	return __atomic_load_n(&frames_presented, __ATOMIC_SEQ_CST) + behind >= frames_requested;
+}
+
+static int ring_has_room(unsigned long unused)
+{
+	(void)unused;
+	return command_head - __atomic_load_n(&command_tail, __ATOMIC_SEQ_CST) < COMMAND_RING;
+}
+
+/* until frames_presented_within(behind): a short spin, then asleep; the
+worker woken first, should it sleep on records it has not run */
+static void worker_wait_presented(unsigned long behind)
+{
+	unsigned long spins = 0;
+
+	while (!frames_presented_within(behind))
+	{
+		if (++spins < 200)
+			continue;
+		waiter_wake(&worker_waiter);
+		waiter_sleep(&game_waiter, frames_presented_within, behind);
+	}
+}
 static unsigned long long worker_time, worker_kind_time[4];
 static unsigned long blend_histogram[16][16];
 /* the host's hang watchdog (vita_main.c) watches this */
@@ -4022,10 +4200,12 @@ static void *render_worker(void *unused)
 
 			while (__atomic_load_n(&command_head, __ATOMIC_ACQUIRE) == command_tail + index)
 			{
-				/* a short spin covers the gap between draws; then sleep */
+				/* a short spin covers the gap between draws; then asleep
+				until the game's thread wakes it (worker_wake_for_records) */
 				if (++spins < 200)
 					continue;
-				vita_host_sleep_us(50);
+				__atomic_store_n(&worker_sleep_from, command_tail + index, __ATOMIC_RELAXED);
+				waiter_sleep(&worker_waiter, worker_records_ready, command_tail + index);
 			}
 			command = &commands[(command_tail + index) % COMMAND_RING];
 			/* (a present, or a record before which what came before is
@@ -4057,6 +4237,7 @@ static void *render_worker(void *unused)
 				execute_command(command);
 				__atomic_store_n(&frames_presented, frames_presented + 1, __ATOMIC_RELEASE);
 				__atomic_store_n(&command_tail, command_tail + index + 1, __ATOMIC_RELEASE);
+				waiter_wake(&game_waiter);
 				index = 0;
 			}
 			else if (command->hoistable && command->wave)
@@ -4096,6 +4277,8 @@ static void worker_start(void)
 		pthread_t thread;
 		pthread_attr_t attributes;
 
+		waiter_initialize(&worker_waiter, "halo render worker");
+		waiter_initialize(&game_waiter, "halo render game");
 		pthread_attr_init(&attributes);
 		pthread_attr_setstacksize(&attributes, 1024 * 1024);
 		if (pthread_create(&thread, &attributes, render_worker, NULL) != 0)
@@ -4493,8 +4676,11 @@ static struct render_record *command_begin(unsigned long kind)
 		return NULL;
 	if (worker_enabled)
 	{
-		while (command_head - __atomic_load_n(&command_tail, __ATOMIC_ACQUIRE) >= COMMAND_RING)
-			vita_host_sleep_us(100);
+		while (!ring_has_room(0))
+		{
+			waiter_wake(&worker_waiter);
+			waiter_sleep(&game_waiter, ring_has_room, 0);
+		}
 	}
 	{
 		/* HALO_NO_SMALL_TARGETS=1: nothing is drawn into the small targets
@@ -4852,7 +5038,12 @@ static void command_commit(struct render_record *command)
 	if (worker_enabled)
 	{
 		small_target_wave(command);
+		/* (a present, or a record before which the frame's records run:
+		the worker woken for it at once) */
+		if (command->kind == _command_present || command->flush_before)
+			__atomic_store_n(&command_urgent, command_head + 1, __ATOMIC_RELAXED);
 		__atomic_store_n(&command_head, command_head + 1, __ATOMIC_RELEASE);
+		worker_wake_for_records();
 	}
 	else
 	{
@@ -4871,10 +5062,16 @@ static void worker_drain(void)
 	if (!worker_enabled)
 		return;
 	unsigned long long waited_from = 0;
+	unsigned long spins = 0;
 
-	while (__atomic_load_n(&frames_presented, __ATOMIC_ACQUIRE) + 1 < frames_requested)
+	while (!frames_presented_within(1))
 	{
-		vita_host_sleep_us(50);
+		/* (a short spin, then asleep until the worker's present wakes it,
+		or the wait's time - 100 ms - runs out, for the check below) */
+		if (++spins < 200)
+			continue;
+		waiter_wake(&worker_waiter);
+		waiter_sleep(&game_waiter, frames_presented_within, 1);
 		/* the worker not finishing a frame for 12 s is logged (a first
 		launch compiles every shader on the device, seconds each, and the
 		game thread waits here through it); HALO_HANG_CRASH=1 makes it a
@@ -4913,10 +5110,7 @@ void halo_render_wait_for_gpu(void)
 	unsigned long long started = vita_host_time_us();
 
 	if (worker_enabled > 0)
-	{
-		while (__atomic_load_n(&frames_presented, __ATOMIC_ACQUIRE) < frames_requested)
-			vita_host_sleep_us(100);
-	}
+		worker_wait_presented(0);
 	vgxm_wait_gpu_idle();
 	platform_log("structure bsp switch: waited %llu us for the worker and the GPU",
 		(unsigned long long)(vita_host_time_us() - started));
@@ -5136,10 +5330,7 @@ static void renderer_map_unloaded(void)
 	if (!device.created || !device.gpu_ready)
 		return;
 	if (worker_enabled > 0)
-	{
-		while (__atomic_load_n(&frames_presented, __ATOMIC_ACQUIRE) < frames_requested)
-			vita_host_sleep_us(100);
-	}
+		worker_wait_presented(0);
 	vgxm_wait_gpu_idle();
 	vita_texture_decodes_quiesce();
 	freed = vita_texture_pool_release();
@@ -5254,10 +5445,7 @@ static void cdram_wanted_relieve(void)
 		return;
 	relieved_frame = device.frame;
 	if (worker_enabled > 0)
-	{
-		while (__atomic_load_n(&frames_presented, __ATOMIC_ACQUIRE) < frames_requested)
-			vita_host_sleep_us(100);
-	}
+		worker_wait_presented(0);
 	vgxm_wait_gpu_idle();
 	freed = cdram_relieve(&dozed);
 	while (vgxm_cdram_free() < wanted + 256 * 1024 && (moved = cdram_relieve_pool()) != 0)
@@ -5345,10 +5533,7 @@ static void screen_settings_apply(void)
 	}
 	started = vita_host_time_us();
 	if (worker_enabled > 0)
-	{
-		while (__atomic_load_n(&frames_presented, __ATOMIC_ACQUIRE) < frames_requested)
-			vita_host_sleep_us(100);
-	}
+		worker_wait_presented(0);
 	vgxm_wait_gpu_idle();
 	/* (a frame's target that found no CDRAM, kept for cdram_wanted_relieve
 	past the change's own refusals) */
@@ -8251,10 +8436,7 @@ static struct
 static void movie_wait_idle(void)
 {
 	if (worker_enabled > 0)
-	{
-		while (__atomic_load_n(&frames_presented, __ATOMIC_ACQUIRE) < frames_requested)
-			vita_host_sleep_us(100);
-	}
+		worker_wait_presented(0);
 	vgxm_wait_gpu_idle();
 }
 
@@ -8672,6 +8854,7 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 			command->present.frame = device.frame;
 			frames_requested++;
 			command_commit(command);
+			wait_stats_report();
 		}
 		if (halo_trace_active())
 			platform_log("trace: present %lu drain", device.frame);

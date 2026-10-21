@@ -5664,6 +5664,29 @@ static void present_step(int step)
 	present_mark = now;
 }
 
+/* (port) How often the waits for the GPU look at its notification
+(Sierra-III's handoff, Oct 21 2026, for the battery): every 1 ms, not every
+0.1 ms - ten times fewer wake-ups of a core with nothing to do. The present's
+wait (the GPU two frames behind) leaves the GPU a frame and more queued, so a
+later look delays no GPU work; the others are rare (a map's change, a
+setting's). sceGxmNotificationWait is not used: the SDK says nothing of
+what it waits for, Vita3K's waits for the value exactly, and a GPU already
+past it would wait for ever. HALO_GPU_WAIT_POLL_US=<50..5000>: another
+step, for the hardware's measures (100: as before) */
+static SceUInt gpu_wait_poll_us(void)
+{
+	static SceUInt poll;
+
+	if (!poll)
+	{
+		const char *setting = getenv("HALO_GPU_WAIT_POLL_US");
+		long value = setting ? atol(setting) : 0;
+
+		poll = value >= 50 && value <= 5000 ? (SceUInt)value : 1000;
+	}
+	return poll;
+}
+
 void vgxm_wait_gpu_idle(void)
 {
 	unsigned int frame = __atomic_load_n(&gxm.frame, __ATOMIC_ACQUIRE);
@@ -5671,7 +5694,7 @@ void vgxm_wait_gpu_idle(void)
 	if (!gxm.ready)
 		return;
 	while ((int)(*gxm.notification - frame) < 0)
-		sceKernelDelayThread(100);
+		sceKernelDelayThread(gpu_wait_poll_us());
 }
 
 void vgxm_frame_submit_begin(void)
@@ -6055,7 +6078,7 @@ void vgxm_present(unsigned long color_target, unsigned long width, unsigned long
 		unsigned long long before = sceKernelGetProcessTimeWide();
 
 		while ((int)(*gxm.notification - wait_for) < 0)
-			sceKernelDelayThread(100);
+			sceKernelDelayThread(gpu_wait_poll_us());
 		waited += sceKernelGetProcessTimeWide() - before;
 		if (!started)
 			started = before;
