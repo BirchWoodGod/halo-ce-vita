@@ -2112,6 +2112,7 @@
 # type's name and description in the game's lists, what its players are told,
 # its score line, and the settings panel's Infection page
 "Infection" = "Infección"
+"INFECTION" = "INFECCIÓN"
 "Zombies with the skull hunt the humans. A human killed joins them; the last human standing wins." = "Los zombis con la calavera cazan a los humanos. Un humano muerto se les une; gana el último humano en pie."
 "%s is a zombie now" = "%s ahora es un zombi"
 "You are a zombie: infect the humans" = "Eres un zombi: infecta a los humanos"
@@ -2155,6 +2156,8 @@
 "Tough zombies" = "Zombis duros"
 "On: zombies take half the damage" = "Sí: los zombis reciben la mitad del daño"
 "Zombies" = "Zombis"
+"ZOMBIES" = "ZOMBIS"
+"HUMANS" = "HUMANOS"
 
 # ---------- GAME TYPES (menus/halo3/gametypes.xml: the game type list, its
 # bases, the editor and its settings; menu_functions.c "port h3 gametype ...")

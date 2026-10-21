@@ -4840,6 +4840,15 @@ static char const *h3_gametype_engine_name(long engine)
 	}
 }
 
+/* the game a game type plays, as shown: Infection's (a Slayer variant with
+its magic, infection.c) its own name, so a copy of it reads as Infection */
+static char const *h3_gametype_kind_name(struct game_variant const *variant)
+{
+	if (infection_variant(variant))
+		return T("INFECTION");
+	return h3_gametype_kind_name(variant);
+}
+
 /* (the logs') the game's name, in English */
 static char const *h3_gametype_engine_key(long engine)
 {
@@ -5426,7 +5435,7 @@ static void h3_gametype_rules_text(struct game_variant const *variant, boolean g
 
 	text[0] = 0;
 	if (game)
-		length = snprintf(text, size, "%s: %s", T("GAME"), h3_gametype_engine_name(variant->game_engine_index));
+		length = snprintf(text, size, "%s: %s", T("GAME"), h3_gametype_kind_name(variant));
 	for (index = 0; index < (int)NUMBEROF(shown) && length >= 0 && length < size; index++)
 	{
 		h3_gametype_value_text(shown[index], variant, value, sizeof(value));
@@ -6201,7 +6210,7 @@ static void h3_gametypes_update(struct widget_instance *list)
 		}
 		else if (h3_gametype_card(h3_gametypes.indices[type], &variant))
 		{
-			snprintf(text, sizeof(text), "%s \xc2\xb7 %s", h3_gametype_engine_name(variant.game_engine_index),
+			snprintf(text, sizeof(text), "%s \xc2\xb7 %s", h3_gametype_kind_name(&variant),
 				builtin ? T("THE GAME'S OWN") : T("YOURS"));
 			text_show(named(screen, "info_kind"), text);
 			h3_gametype_rules_text(&variant, FALSE, text, sizeof(text));
@@ -6377,7 +6386,7 @@ static void h3_gametype_editor_update(struct widget_instance *list)
 		else if (row == 1)
 		{
 			text_show(named(item, "label"), T("GAME"));
-			snprintf(text, sizeof(text), "%s", h3_gametype_engine_name(variant->game_engine_index));
+			snprintf(text, sizeof(text), "%s", h3_gametype_kind_name(variant));
 		}
 		else if (row - 2 < NUMBER_OF_H3_GAMETYPE_GROUPS)
 			text_show(named(item, "label"), h3_gametype_group_name((short)(row - 2), variant->game_engine_index));
@@ -6456,7 +6465,7 @@ static void h3_gametype_options_update(struct widget_instance *list)
 	}
 	text_show(named(screen, "title"), h3_gametype_group_name(h3_gametypes.group, variant->game_engine_index));
 	h3_gametype_name(name, sizeof(name), variant);
-	snprintf(text, sizeof(text), "%s \xc2\xb7 %s", name, h3_gametype_engine_name(variant->game_engine_index));
+	snprintf(text, sizeof(text), "%s \xc2\xb7 %s", name, h3_gametype_kind_name(variant));
 	text_show(named(screen, "subtitle"), text);
 	text_show(named(screen, "help"), count > 0 ? h3_gametype_setting_help(settings[focused], variant) : "");
 	text_show(named(screen, "note"), h3_gametype_group_note(h3_gametypes.group));

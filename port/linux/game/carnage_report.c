@@ -58,6 +58,10 @@ static char const *carnage_team_name(long team)
 	static char const *const names[CARNAGE_REPORT_MAXIMUM_TEAMS] = { N_("RED TEAM"), N_("BLUE TEAM"),
 		N_("GREEN TEAM"), N_("YELLOW TEAM"), N_("PURPLE TEAM"), N_("ORANGE TEAM"), N_("BROWN TEAM"), N_("PINK TEAM") };
 
+	/* (Infection's two teams by their sides, as the classic postgame names
+	them: red the zombies, blue the humans, infection.c) */
+	if (infection_active() && (team == 0 || team == 1))
+		return team == 0 ? T("ZOMBIES") : T("HUMANS");
 	return team >= 0 && team < CARNAGE_REPORT_MAXIMUM_TEAMS ? T(names[team]) : "";
 }
 
