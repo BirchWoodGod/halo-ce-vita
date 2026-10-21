@@ -1717,6 +1717,8 @@ static void party_leave_now(int tell, const char *why);
 static void party_key_blocked(const unsigned char *key);
 static void party_friend_entry(const struct friend_record *record, struct p2p_friend_entry *entry);
 static void party_friend_new_run(struct friend_record *record);
+/* (p2p_friends_backup.inc) a backup opened and left let go */
+static void backup_expire(void);
 
 /* ---------- messages */
 
@@ -4192,6 +4194,7 @@ void p2p_friends_update(const struct p2p_friends_host *host)
 	(void)host;
 	return;
 #endif
+	backup_expire();
 	pthread_mutex_lock(&friends_lock);
 	load();
 	was_online = friends->online;

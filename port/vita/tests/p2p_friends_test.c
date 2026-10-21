@@ -2684,6 +2684,13 @@ static void test_backup(void)
 		"backup: cancelled: wiped, nothing to confirm");
 	code_of(5, current);
 	check(!strcmp(current, code_b), "backup: cancelled: Foxtrot's code its own");
+	/* opened and left: let go a while later */
+	use(5);
+	check(p2p_friends_backup_restore("crafted", "correct horse battery") == P2P_FRIENDS_BACKUP_WORKING &&
+		backup_wait() == P2P_FRIENDS_BACKUP_READY, "backup: opened again");
+	clock_now += BACKUP_READY_LIFETIME + 1000;
+	check(!p2p_friends_backup_found(found, NULL, sizeof(found), &friend_count) && !backup.plain &&
+		p2p_friends_backup_confirm() == P2P_FRIENDS_BACKUP_NOTHING, "backup: opened and left: let go, wiped");
 	/* restored: the same code, the list; the identity replaced kept */
 	{
 		unsigned char old_identity[IDENTITY_SIZE + 8], seed[P2P_SEED_SIZE], old_seed[P2P_SEED_SIZE];
@@ -2736,8 +2743,10 @@ static void test_backup(void)
 	}
 	/* two machines with one identity: the newest run is heard, the other's
 	dropped as replays; Bravo sees one friend, Foxtrot's name */
+	backup_pass(trio, 3, 4);
 	reset_drops(1);
-	/* (Echo still running, its game changing: its presence sent again) */
+	/* (Echo still running, its game changing after Bravo heard Foxtrot's
+	run: its presence sent again) */
 	use(4);
 	p2p_friends_set_activity(P2P_FRIEND_STATE_MULTIPLAYER, "bloodgulch", "Slayer", 2, -1, 0, 2, 16);
 	backup_pass(trio, 3, 12);

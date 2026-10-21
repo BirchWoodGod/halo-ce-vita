@@ -71,6 +71,9 @@ enum
 
 	BACKUP_EXPORT = 1,
 	BACKUP_RESTORE = 2,
+	/* (milliseconds) a backup opened and neither confirmed nor cancelled
+	(its menu left) is let go, wiped, after this long */
+	BACKUP_READY_LIFETIME = 180000,
 };
 
 /* the job: one at a time */
@@ -87,9 +90,11 @@ static struct
 	int flags;
 	/* the contents: to seal (export), or opened (restore, READY) */
 	unsigned char *plain;
-	/* (READY) its code and the friends in its list (-1 none) */
+	/* (READY) its code and the friends in its list (-1 none); when it was
+	opened */
 	char code[P2P_FRIEND_CODE_SIZE];
 	int friend_count;
+	unsigned long ready_time;
 	/* (SAVED) where it went */
 	char said[PATH_SIZE];
 } backup;
@@ -402,6 +407,7 @@ static void *backup_thread(void *unused)
 			code_shown(code, backup.code, sizeof(backup.code));
 			backup.friend_count = friend_count;
 			backup.flags = flags;
+			backup.ready_time = now_stamp();
 		}
 	}
 	backup_wipe(backup.password, sizeof(backup.password));
@@ -440,6 +446,25 @@ static void backup_clear(void)
 	backup.password_size = 0;
 	backup.code[0] = 0;
 	backup.friend_count = -1;
+}
+
+/* (under backup_lock) a backup opened long ago and left let go */
+static void backup_expire_locked(void)
+{
+	if (!backup.running && backup.state == P2P_FRIENDS_BACKUP_READY && elapsed(backup.ready_time, BACKUP_READY_LIFETIME))
+	{
+		backup_clear();
+		backup.state = P2P_FRIENDS_BACKUP_IDLE;
+		platform_log("friends: backup: the backup opened and left let go (not restored)");
+	}
+}
+
+/* (internet play's thread, each pass) the same, taking backup_lock */
+static void backup_expire(void)
+{
+	pthread_mutex_lock(&backup_lock);
+	backup_expire_locked();
+	pthread_mutex_unlock(&backup_lock);
 }
 
 /* a job started (its fields set: the path, the password, the contents):
@@ -563,6 +588,7 @@ int p2p_friends_backup_state(char *text, int size)
 	int state;
 
 	pthread_mutex_lock(&backup_lock);
+	backup_expire_locked();
 	state = backup.state;
 	if (text && size > 0)
 	{
@@ -583,6 +609,7 @@ int p2p_friends_backup_found(char *code, char *current_code, int code_size, int 
 	int found;
 
 	pthread_mutex_lock(&backup_lock);
+	backup_expire_locked();
 	found = backup.state == P2P_FRIENDS_BACKUP_READY && backup.plain && !backup.running;
 	if (found)
 	{
@@ -837,6 +864,7 @@ int p2p_friends_backup_confirm(void)
 	int flags, outcome;
 
 	pthread_mutex_lock(&backup_lock);
+	backup_expire_locked();
 	if (backup.running || backup.state != P2P_FRIENDS_BACKUP_READY || !backup.plain)
 	{
 		pthread_mutex_unlock(&backup_lock);
