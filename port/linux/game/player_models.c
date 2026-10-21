@@ -62,6 +62,7 @@ is left out: its maps have no tag cache to spare for a pack (Forge design,
 #include "scene_pack_ce.h"
 #include "scene_packs.h"
 #include "player_models.h"
+#include "../src/posix.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -69,11 +70,6 @@ is left out: its maps have no tag cache to spare for a pack (Forge design,
 
 void platform_log(char const *format, ...);
 void platform_translate_path(const char *xbox_path, char *host_path, unsigned long host_path_size);
-/* (posix.h's: a directory listed by this caller alone, where the game's
-find_files is one listing at a time for the whole game) */
-void *posix_directory_open(const char *path);
-int posix_directory_next(void *directory, char *name, unsigned long name_size);
-void posix_directory_close(void *directory);
 
 /* ---------- constants */
 
@@ -439,6 +435,19 @@ void player_models_scan(
 		unsigned char identity[8];
 		boolean stock;
 
+		/* (a folder named as a map - Oct 21 2026, a player's maps folder
+		held a map's folder of development files: never opened as one) */
+		{
+			char path[1100];
+			struct posix_file_information information;
+
+			if (snprintf(path, sizeof(path), "%s/%s.map", host_path, name) >= (int)sizeof(path) ||
+				posix_stat(path, &information) != 0 || (information.flags & _posix_file_is_directory))
+			{
+				platform_log("player models: %s.map: a folder, or not there, not a map file: left out", name);
+				continue;
+			}
+		}
 		/* (an Xbox map is no Custom Edition one: refused at once) */
 		if (!scene_pack_ce_multiplayer_unit(cache_files_map_directory(), name, &unit, why, sizeof(why)))
 		{
