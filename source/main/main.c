@@ -5102,10 +5102,10 @@ static void main_test_field_of_view(
 			(double)RADIANS_TO_DEGREES(2.0f * arctangent(vertical_tangent * width / height, 1.0f)), (int)width,
 			(int)height, (double)RADIANS_TO_DEGREES(2.0f * arctangent(vertical_tangent * 4.0f / 3.0f, 1.0f)),
 			(double)RADIANS_TO_DEGREES(2.0f * arctangent(vertical_tangent * 4.0f / 3.0f / first_person_scale, 1.0f)),
-			(double)first_person_scale, aim_seen ? "at" : "off screen",
+			(double)first_person_scale, aim_seen ? "at" : "off-screen",
 			(double)(aim.x - (camera->viewport_bounds.x0 + width * 0.5f)),
 			(double)(aim.y - (camera->viewport_bounds.y0 + height * 0.5f)),
-			target_index == NONE ? "none" : target_seen ? "at" : "off screen",
+			target_index == NONE ? "none" : target_seen ? "at" : "off-screen",
 			(double)(target.x - (camera->viewport_bounds.x0 + width * 0.5f)),
 			(double)(target.y - (camera->viewport_bounds.y0 + height * 0.5f)));
 	}

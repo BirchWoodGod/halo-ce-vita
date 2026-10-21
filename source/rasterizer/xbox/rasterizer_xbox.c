@@ -3304,6 +3304,45 @@ void rasterizer_set_stencil_mode(
 real field_of_view_first_person_scale(short local_player_index);
 #endif
 
+#ifdef HALO_LINUX
+/* port: (field_of_view.c) the first-person weapon's x and y projection on
+the window's frustum, or the window's own again, for what is projected on
+the processor from it: the weapon's lights' lens flares
+(rasterizer_lights.c) */
+void rasterizer_first_person_projection(
+	boolean first_person)
+{
+	static real window_projection[2];
+	static boolean applied = FALSE;
+	static long applied_scene;
+
+	/* (a new window's frustum: nothing to put back) */
+	if (applied && applied_scene != render.scene_index)
+		applied = FALSE;
+	if (first_person && !applied)
+	{
+		real scale = field_of_view_first_person_scale(render.local_player_index);
+
+		if (scale != 1.0f)
+		{
+			window_projection[0] = global_window_parameters.frustum.projection_matrix[0][0];
+			window_projection[1] = global_window_parameters.frustum.projection_matrix[1][1];
+			global_window_parameters.frustum.projection_matrix[0][0] *= scale;
+			global_window_parameters.frustum.projection_matrix[1][1] *= scale;
+			applied = TRUE;
+			applied_scene = render.scene_index;
+		}
+	}
+	else if (!first_person && applied)
+	{
+		global_window_parameters.frustum.projection_matrix[0][0] = window_projection[0];
+		global_window_parameters.frustum.projection_matrix[1][1] = window_projection[1];
+		applied = FALSE;
+	}
+	return;
+}
+#endif
+
 void rasterizer_set_frustum_z(
 	real z_near,
 	real z_far)

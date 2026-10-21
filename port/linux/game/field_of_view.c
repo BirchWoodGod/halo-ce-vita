@@ -31,7 +31,9 @@ The first-person weapon is drawn with its own depth range already
 (rasterizer_set_frustum_z with the first-person clip distances); while it is,
 the projection's x and y scales are put back to the stock field of view
 (field_of_view_first_person_scale), so the gun keeps its size and shape at
-any field of view.
+any field of view; its particles go through the same depth range, and its
+lights' lens flares, projected on the processor, are put at its projection
+too (rasterizer_first_person_projection, rasterizer_lights.c).
 
 The HUD's nav points and waypoints are placed through the drawn frustum
 (render_camera_world_to_screen) and the crosshair is the view's centre, so
