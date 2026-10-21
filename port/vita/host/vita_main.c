@@ -703,6 +703,8 @@ static void heartbeat_thread(void *unused)
 			if (!idle_minutes || now - vita_host_last_input_us < (unsigned long long)idle_minutes * 60000000ULL)
 				sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
 		}
+		/* the battery's drain in halo.log (vita_clocks.c) */
+		vita_host_battery_log();
 		if (!write_beats)
 			continue;
 		file = sceIoOpen(VITA_DATA_DIRECTORY "/heartbeat.txt", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_APPEND, 0666);

@@ -103,6 +103,9 @@ screen's (the GPU's lowered, the CPU's kept: the load is CPU work), idle's
 void vita_host_clocks_start(void);
 /* the clocks of that level set, if they are not already */
 void vita_host_clocks_set(int level);
+/* (the heartbeat thread) the battery's charge in halo.log once a minute,
+when HALO_BATTERY_LOG asks (unset: in a pre-release build) */
+void vita_host_battery_log(void);
 
 /* ---------- movies (port/vita/host/vita_movie.c): the Vita's video player
 for the game's Bink movies, from H.264 copies */

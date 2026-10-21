@@ -18,6 +18,11 @@ second of them, play at once); this sets them.
 No clock is ever set below the one found at start: an overclocking
 plugin's choice stands, and the idle clocks are then at most what the
 system gave the game.
+
+The battery's charge goes to halo.log once a minute (vita_host_battery_log,
+from the heartbeat thread), so a tester's log shows the drain:
+HALO_BATTERY_LOG=1 on, 0 off; unset (the Dev tab's Battery log: Auto), on
+in a pre-release build (an insider's, a beta's), off in a release.
 */
 
 #include <psp2/kernel/processmgr.h>
@@ -25,8 +30,10 @@ system gave the game.
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "vita_host.h"
+#include "vita_version.h"
 
 /* the clocks of each level: ARM, bus, GPU, crossbar */
 static int found[4], play[4], loading[4], idle[4];
@@ -121,4 +128,40 @@ void vita_host_clocks_set(int level)
 		scePowerGetArmClockFrequency(), scePowerGetBusClockFrequency(), scePowerGetGpuClockFrequency(),
 		scePowerGetGpuXbarClockFrequency(), (unsigned long long)(sceKernelGetProcessTimeWide() - before));
 	vita_host_log(message);
+}
+
+/* (the heartbeat thread, every 2 s) a line a minute: the charge in percent
+and mAh, what went since the last line, the voltage, the charger, the
+clocks' level */
+void vita_host_battery_log(void)
+{
+	static const char *const names[3] = { "play", "loading", "idle" };
+	static unsigned long long last;
+	static int last_capacity = -1;
+	unsigned long long now = sceKernelGetProcessTimeWide();
+	const char *setting = getenv("HALO_BATTERY_LOG");
+	int on = setting && setting[0] ? atoi(setting) != 0 : strchr(HALO_VITA_VERSION, '-') != NULL;
+	int percent, capacity, full, volts, charging, online;
+	char since[48], message[224];
+
+	if (!on || (last && now - last < 60000000ULL))
+		return;
+	percent = scePowerGetBatteryLifePercent();
+	capacity = scePowerGetBatteryRemainCapacity();
+	full = scePowerGetBatteryFullCapacity();
+	volts = scePowerGetBatteryVolt();
+	charging = scePowerIsBatteryCharging();
+	online = scePowerIsPowerOnline();
+	if (last && last_capacity >= 0 && capacity >= 0)
+		snprintf(since, sizeof(since), ", %+d mAh in %.1f min", capacity - last_capacity, (now - last) / 60000000.0);
+	else
+		since[0] = 0;
+	snprintf(message, sizeof(message), "battery: %d%%, %d of %d mAh%s, %d.%03d V, %s, clocks %s %d/%d/%d/%d, up %llu min",
+		percent, capacity, full, since, volts / 1000, volts % 1000,
+		charging ? "charging" : online ? "on the charger" : "on battery", current >= 0 ? names[current] : "unset",
+		scePowerGetArmClockFrequency(), scePowerGetBusClockFrequency(), scePowerGetGpuClockFrequency(),
+		scePowerGetGpuXbarClockFrequency(), now / 60000000ULL);
+	vita_host_log(message);
+	last = now;
+	last_capacity = capacity;
 }

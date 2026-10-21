@@ -3279,7 +3279,7 @@ static void test_variables_kept(void)
 		"HALO_FRIENDS_JOIN", "HALO_NET_BLOCK_MOUSE_AIM_ASSIST", "HALO_NET_ANTICHEAT",
 		"HALO_INFECTION_ZOMBIES", "HALO_INFECTION_SPEED", "HALO_INFECTION_TIME", "HALO_INFECTION_RESPAWN",
 		"HALO_INFECTION_SHIELDS", "HALO_INFECTION_TOUGH",
-		"HALO_CARNAGE_REPORT", "HALO_CLOCK_GOVERNOR",
+		"HALO_CARNAGE_REPORT", "HALO_CLOCK_GOVERNOR", "HALO_BATTERY_LOG",
 	};
 	int index, all = 1, choices = 0;
 
@@ -5286,10 +5286,11 @@ int main(void)
 		!strncmp(menu_line(2, line, sizeof(line)), "Crash dump on hang\x02", 19) &&
 		!strncmp(menu_line(3, line, sizeof(line)), "FPS overlay\x02", 12) &&
 		!strncmp(menu_line(4, line, sizeof(line)), "Debug camera\x02", 13) &&
-		!strncmp(menu_line(5, line, sizeof(line)), "Ad hoc dialog\x02", 14) &&
-		!strcmp(menu_line(6, line, sizeof(line)), "Save report\x02  >") &&
-		!strcmp(menu_line(7, line, sizeof(line)), "A/B switches\x02  >") && menu_rows() == 7 && menu_fits(),
-		"Dev: the switches, Debug camera, Ad hoc dialog, Save report, then A/B switches");
+		!strcmp(menu_line(5, line, sizeof(line)), "Battery log\x02  Auto >") &&
+		!strncmp(menu_line(6, line, sizeof(line)), "Ad hoc dialog\x02", 14) &&
+		!strcmp(menu_line(7, line, sizeof(line)), "Save report\x02  >") &&
+		!strcmp(menu_line(8, line, sizeof(line)), "A/B switches\x02  >") && menu_rows() == 8 && menu_fits(),
+		"Dev: the switches, Debug camera, Battery log (Auto), Ad hoc dialog, Save report, then A/B switches");
 	check(!strstr(file_text(SETTINGS_FILE), "HALO_GXM_RTT_SYNC") && !strstr(file_text(SETTINGS_FILE), "XV_FPS"),
 		"dev switches off: not in settings.txt");
 	press(VITA_BUTTON_RIGHT);
