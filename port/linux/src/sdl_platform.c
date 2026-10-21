@@ -908,11 +908,29 @@ static char platform_message_title[80];
 static char platform_message_text[600];
 static BOOL platform_message_pending;
 
+/* (Menu style Halo 3: port/linux/game/menu_functions.c h3_dialog_port_hook)
+the game's own Halo 3 dialog takes the player's messages and questions while
+it can show them: 1 taken - a question's answer then comes from
+platform_question_answered -, 0 the platform's own box. A question withdrawn
+is told with text NULL */
+int (*platform_dialog_hook)(int question, const char *title, const char *text);
+
+void platform_show_message_box(const char *title, const char *message);
+
 /* shows the player a message in a box of its own (the network code's: a
 host of another version), and logs it */
 void platform_show_message(const char *title, const char *message)
 {
 	platform_log("%s: %s", title, message);
+	if (platform_dialog_hook && message && platform_dialog_hook(0, title, message))
+		return;
+	platform_show_message_box(title, message);
+}
+
+/* (platform_show_message's, and the game's when its dialog cannot show it
+after all) the platform's own box */
+void platform_show_message_box(const char *title, const char *message)
+{
 	/* (a run nobody watches: the log only) */
 	if (config_boolean("debug.hidden_window") || config_boolean("debug.null_renderer"))
 		return;
@@ -935,6 +953,11 @@ static int platform_question_result = -1;
 /* a question asked and neither answered nor withdrawn
 (platform_question_asking: one more waits its turn) */
 static BOOL platform_question_open;
+/* the open question is the game's dialog's (platform_dialog_hook), its
+answer platform_question_answered's */
+static BOOL platform_question_by_game;
+
+void platform_ask_question_box(const char *title, const char *text);
 
 /* asks the player a yes or no question (NULL withdraws one); the answer
 comes later, platform_question_answer. A run nobody watches answers no. */
@@ -942,9 +965,19 @@ void platform_ask_question(const char *title, const char *text)
 {
 	if (!text)
 	{
+		BOOL by_game;
+
+		pthread_mutex_lock(&platform_message_lock);
+		by_game = platform_question_by_game;
+		platform_question_by_game = FALSE;
+		pthread_mutex_unlock(&platform_message_lock);
+		if (by_game && platform_dialog_hook)
+			platform_dialog_hook(1, NULL, NULL);
 #ifdef HALO_VITA
-		extern void vita_settings_question(const char *title, const char *text);
-		vita_settings_question(NULL, NULL);
+		{
+			extern void vita_settings_question(const char *title, const char *text);
+			vita_settings_question(NULL, NULL);
+		}
 #endif
 		pthread_mutex_lock(&platform_message_lock);
 		platform_question_pending = FALSE;
@@ -954,6 +987,35 @@ void platform_ask_question(const char *title, const char *text)
 		return;
 	}
 	platform_log("%s: %s (yes or no?)", title, text);
+	if (platform_dialog_hook && platform_dialog_hook(1, title, text))
+	{
+		pthread_mutex_lock(&platform_message_lock);
+		platform_question_pending = FALSE;
+		platform_question_result = -1;
+		platform_question_open = TRUE;
+		platform_question_by_game = TRUE;
+		pthread_mutex_unlock(&platform_message_lock);
+		return;
+	}
+	platform_ask_question_box(title, text);
+}
+
+/* (the game's dialog) the open question's answer: 1 yes, 0 no */
+void platform_question_answered(int yes)
+{
+	pthread_mutex_lock(&platform_message_lock);
+	if (platform_question_open && platform_question_by_game)
+		platform_question_result = yes ? 1 : 0;
+	pthread_mutex_unlock(&platform_message_lock);
+}
+
+/* (platform_ask_question's, and the game's when its dialog cannot ask it
+after all) the platform's own box */
+void platform_ask_question_box(const char *title, const char *text)
+{
+	pthread_mutex_lock(&platform_message_lock);
+	platform_question_by_game = FALSE;
+	pthread_mutex_unlock(&platform_message_lock);
 #ifdef HALO_VITA
 	{
 		extern void vita_settings_question(const char *title, const char *text);
@@ -989,8 +1051,15 @@ int platform_question_answer(void)
 #ifdef HALO_VITA
 	extern int vita_settings_question_answer(void);
 
-	result = vita_settings_question_answer();
 	pthread_mutex_lock(&platform_message_lock);
+	if (platform_question_by_game)
+		result = platform_question_result;
+	else
+	{
+		pthread_mutex_unlock(&platform_message_lock);
+		result = vita_settings_question_answer();
+		pthread_mutex_lock(&platform_message_lock);
+	}
 #else
 	pthread_mutex_lock(&platform_message_lock);
 	result = platform_question_result;

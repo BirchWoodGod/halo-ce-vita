@@ -20,3 +20,5 @@ halo3/players.xml
 halo3/join.xml
 halo3/join_split.xml
 halo3/pregame.xml
+halo3/dialog.xml
+halo3/dialog_ui.xml

@@ -5226,6 +5226,15 @@ void ui_widget_port_text_override(
 		NUMBEROF(ui_widget_port_text_overrides[override_index].text) - 1] = 0;
 }
 
+/* port: the port's own text an error's text box shows in place of the
+error's (display_error_text_deferred, the host's game closed), or NULL: the
+Halo 3 dialog's (port/linux/game/menu_functions.c "port h3 dialog") */
+wchar_t const *ui_widget_port_error_text_of(
+	struct widget_instance const *widget)
+{
+	return widget && widget == ui_widget_port_error_text_box ? ui_widget_port_error_text : NULL;
+}
+
 /* port: whether the text is wider than width in the text box's font */
 boolean ui_widget_port_text_too_wide(
 	struct widget_instance *widget,
