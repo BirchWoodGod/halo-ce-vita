@@ -350,6 +350,8 @@ enum
 	_function_h3_invite_init,
 	_function_h3_invite_act,
 	_function_forge_start_live,
+	_function_h3_maps_back,
+	_function_h3_mp_offline_start,
 };
 
 /* in port_game_data_input_names' order */
@@ -2683,7 +2685,42 @@ static struct
 	short map_page;
 	char said[192];
 	char map_said[288];
+	/* the map's saved map variant played (forge_files.h: its file and
+	title; none when variant_file is empty), of the Xbox's map variant_map
+	(its index); the map picker showing a map's variants (Halo 3's: the map
+	itself first, then each of its map variants), that map's row and the
+	variants' rows (they scroll) */
+	char variant_file[FORGE_FILE_NAME_SIZE];
+	char variant_title[FORGE_FILE_TITLE_SIZE];
+	short variant_map;
+	boolean picking_variant;
+	short pick_index;
+	boolean pick_refocus;
+	struct browser_view variant_view;
+	int variant_chosen;
+	char variant_said[192];
 } h3_mp;
+
+/* (the map picker's variants: after the Forge lobby's, whose lists they
+share) */
+static boolean h3_mp_variants_offer(long index);
+static void h3_mp_variants_update(struct widget_instance *list);
+static boolean h3_mp_variant_pick(struct widget_instance *widget);
+static void h3_mp_variant_check(void);
+
+/* whether the lobby plays a saved map variant of its map */
+static boolean h3_mp_variant_chosen(void)
+{
+	return h3_mp.variant_file[0] && h3_mp.map_index != NONE && h3_mp.variant_map == h3_mp.map_index;
+}
+
+/* the lobby's map variant forgotten (another map, a damaged or gone file) */
+static void h3_mp_variant_clear(void)
+{
+	h3_mp.variant_file[0] = 0;
+	h3_mp.variant_title[0] = 0;
+	h3_mp.variant_map = NONE;
+}
 
 static char const *h3_network_name(short network)
 {
@@ -2839,15 +2876,23 @@ static void h3_mp_initialize(void)
 	menu_functions.browse_lan_pending = FALSE;
 	h3_mp_map_read();
 	h3_mp_gametypes_read();
+	h3_mp_variant_check();
 }
 
 static char const *h3_mp_map_name(void)
 {
-	static char name[48];
+	static char name[48 + FORGE_FILE_TITLE_SIZE];
 	char const *slash;
 	short display;
 	wchar_t const *custom;
 
+	/* (a map variant: "Blood Gulch - My Fort", as the Forge lobby's MAP
+	row says it) */
+	if (h3_mp_variant_chosen())
+	{
+		snprintf(name, sizeof(name), "%s - %s", h3_map_names[h3_mp.map_index], h3_mp.variant_title);
+		return name;
+	}
 	if (h3_mp.map_index != NONE)
 		return h3_map_names[h3_mp.map_index];
 	/* (a custom map: its own name, as the Xbox's list names it) */
@@ -3081,6 +3126,8 @@ static void h3_mp_maps_read(void)
 	browser_view_reset(&h3_mp.map_view);
 	h3_mp.map_page = 0;
 	h3_mp.map_said[0] = 0;
+	h3_mp.picking_variant = FALSE;
+	h3_mp.pick_refocus = FALSE;
 	platform_log("menus: h3 mp: the map picker: %d maps (%d custom)", h3_mp.map_count,
 		MAX(h3_mp.map_count - H3_MAP_COUNT, 0));
 }
@@ -3096,10 +3143,22 @@ static void h3_mp_maps_update(struct widget_instance *list)
 	struct widget_instance *child, *focus = NULL, *found;
 	long index, focused_row = NONE, target;
 
+	/* (a map's variants shown: their rows) */
+	if (h3_mp.picking_variant)
+	{
+		h3_mp_variants_update(list);
+		return;
+	}
 	for (index = 0, child = list->child; child; child = child->next, index++)
 	{
 		if (child == list->focused_child)
 			focused_row = index;
+	}
+	/* (back from a map's variants: on that map's row) */
+	if (h3_mp.pick_refocus)
+	{
+		focused_row = NONE;
+		h3_mp.pick_refocus = FALSE;
 	}
 	target = browser_view_follow(&h3_mp.map_view, H3_MAP_ROWS, h3_mp.map_count, (int)focused_row, h3_mp.map_cursor,
 		h3_mp.map_page);
@@ -3163,29 +3222,34 @@ static void h3_mp_maps_update(struct widget_instance *list)
 /* (port h3 map set) the picker's choice: the map the Xbox's level list
 opens on, as its own choice keeps it (a custom map by its level's path:
 START GAME, Create Game and the map's sharing take it from there) */
-static boolean h3_mp_map_set(struct widget_instance *widget)
+static boolean h3_mp_map_choose(long index, char const *variant_file, char const *variant_title)
 {
-	long index = h3_mp.map_view.offset + h3_child_index(widget);
 	short before_index = h3_mp.map_index;
 	char before_other[sizeof(h3_mp.map_other)];
-	char why[160];
+	char before_file[sizeof(h3_mp.variant_file)];
+	char before_title[sizeof(h3_mp.variant_title)];
+	short before_variant_map = h3_mp.variant_map;
 
-	if (index < 0 || index >= h3_mp.map_count)
-		return TRUE;
-	/* (a map that cannot be played: not chosen, the picker stays on it, its
-	reason shown) */
-	if (map_check(h3_mp.map_paths[index], why, sizeof(why)) != _map_check_playable)
-	{
-		platform_log("menus: h3 maps: %s can't be chosen: %s", h3_mp.map_names[index], why);
-		return FALSE;
-	}
 	snprintf(before_other, sizeof(before_other), "%s", h3_mp.map_other);
+	snprintf(before_file, sizeof(before_file), "%s", h3_mp.variant_file);
+	snprintf(before_title, sizeof(before_title), "%s", h3_mp.variant_title);
+	h3_mp_variant_clear();
 	if (index < H3_MAP_COUNT)
 	{
 		h3_mp.map_index = (short)index;
 		h3_mp.map_other[0] = 0;
 		saved_game_file_remember_last_used_multiplayer_map(h3_map_paths[index]);
-		platform_log("menus: h3 mp: map %s", h3_map_names[index]);
+		/* (one of its saved map variants: placed in its games) */
+		if (variant_file && variant_file[0])
+		{
+			snprintf(h3_mp.variant_file, sizeof(h3_mp.variant_file), "%s", variant_file);
+			snprintf(h3_mp.variant_title, sizeof(h3_mp.variant_title), "%s", variant_title ? variant_title : "");
+			h3_mp.variant_map = (short)index;
+			platform_log("menus: h3 mp: map %s, map variant %s (%s)", h3_map_names[index], h3_mp.variant_title,
+				h3_mp.variant_file);
+		}
+		else
+			platform_log("menus: h3 mp: map %s", h3_map_names[index]);
 	}
 	else
 	{
@@ -3195,16 +3259,45 @@ static boolean h3_mp_map_set(struct widget_instance *widget)
 		platform_log("menus: h3 mp: map %s (a custom map: %s)", h3_mp.map_names[index], h3_mp.map_paths[index]);
 	}
 	/* (a live lobby's game on it; refused - a map this version does not
-	play with others: said - the lobby's back on the game's map) */
+	play with others, a map variant that cannot be played: said - the
+	lobby's back on the game's map) */
 	if (!h3_live_follow())
 	{
 		h3_mp.map_index = before_index;
 		snprintf(h3_mp.map_other, sizeof(h3_mp.map_other), "%s", before_other);
+		snprintf(h3_mp.variant_file, sizeof(h3_mp.variant_file), "%s", before_file);
+		snprintf(h3_mp.variant_title, sizeof(h3_mp.variant_title), "%s", before_title);
+		h3_mp.variant_map = before_variant_map;
 		saved_game_file_remember_last_used_multiplayer_map((char *)(before_index != NONE ? h3_map_paths[before_index] :
 			before_other));
 		platform_log("menus: h3 live lobby: that map refused: still %s", h3_mp_map_name());
 	}
 	return TRUE;
+}
+
+static boolean h3_mp_map_set(struct widget_instance *widget)
+{
+	long index = h3_mp.map_view.offset + h3_child_index(widget);
+	char why[160];
+
+	/* (a map's variants shown: the one chosen, or the map itself) */
+	if (h3_mp.picking_variant)
+		return h3_mp_variant_pick(widget);
+	if (index < 0 || index >= h3_mp.map_count)
+		return TRUE;
+	/* (a map that cannot be played: not chosen, the picker stays on it, its
+	reason shown) */
+	if (map_check(h3_mp.map_paths[index], why, sizeof(why)) != _map_check_playable)
+	{
+		platform_log("menus: h3 maps: %s can't be chosen: %s", h3_mp.map_names[index], why);
+		return FALSE;
+	}
+	/* (one of the Xbox's maps with saved map variants: its variants shown,
+	the map itself first - the picker stays -; a map with none chosen at
+	once, as before) */
+	if (h3_mp_variants_offer(index))
+		return FALSE;
+	return h3_mp_map_choose(index, NULL, NULL);
 }
 
 /* (port h3 network status: the lobbies' line under NETWORK) the connection's
@@ -5861,6 +5954,7 @@ enum
 	_variants_nobody,
 	_variants_lobby,
 	_variants_fileshare,
+	_variants_mp,
 };
 
 /* File Share's kinds */
@@ -6150,6 +6244,206 @@ static boolean h3_forge_maps_back(struct widget_instance *widget)
 	list = named(screen_of(widget), "list");
 	if (list)
 		h3_focus_child(list, h3_forge.pick_map);
+	return FALSE;
+}
+
+/* ---- the multiplayer lobby's map variants (Halo 3's: the MAP picker,
+a map chosen, shows the map itself first, then the player's saved map
+variants of it; the variant is played in the lobby's game, its objects
+placed as it starts - forge.c's forge_play_*: a local game's, or the
+hosted game's, its joiners given the layout as network Forge gives it) */
+
+/* a map of the Xbox's, its short name (bloodgulch: its map variants'
+folder), NULL for another's or one Forge does not play */
+static char const *h3_mp_map_short(long index)
+{
+	char const *leaf;
+
+	if (index < 0 || index >= H3_MAP_COUNT)
+		return NULL;
+	leaf = strrchr(h3_map_paths[index], '\\');
+	leaf = leaf ? leaf + 1 : h3_map_paths[index];
+	return forge_map_of_short(leaf) != NONE ? leaf : NULL;
+}
+
+/* (A on a map) a map with saved map variants: its variants shown in the
+picker (TRUE: the picker stays); else FALSE, the map chosen at once */
+static boolean h3_mp_variants_offer(long index)
+{
+	struct forge_store_entry const *entry;
+	char const *map_name = h3_mp_map_short(index);
+	int count, row;
+
+	if (!map_name)
+		return FALSE;
+	h3_variants_list(_variants_mp, map_name, TRUE);
+	count = h3_forge_pick_rows(-1, &entry);
+	if (count <= 1)
+		return FALSE;
+	h3_mp.picking_variant = TRUE;
+	h3_mp.pick_index = (short)index;
+	h3_mp.pick_refocus = TRUE;
+	h3_mp.map_page = 0;
+	h3_mp.variant_chosen = 0;
+	h3_mp.variant_said[0] = 0;
+	browser_view_reset(&h3_mp.variant_view);
+	/* (the lobby's variant of that map chosen again) */
+	if (h3_mp_variant_chosen() && h3_mp.map_index == index)
+	{
+		for (row = 1; row < count; row++)
+		{
+			h3_forge_pick_rows(row, &entry);
+			if (entry && !strcmp(entry->file_name, h3_mp.variant_file))
+				h3_mp.variant_chosen = row;
+		}
+	}
+	platform_log("menus: h3 mp: %s's map variants (%d)", h3_map_names[index], count - 1);
+	return TRUE;
+}
+
+/* (port h3 maps, a map's variants shown) the rows (item_0 to item_12): the
+map itself, then its map variants, scrolling; the map's picture, the
+variant's details in the description's place */
+static void h3_mp_variants_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *child, *focus = NULL, *found;
+	struct forge_store_entry const *entry;
+	long index, focused_row = NONE, rows = 0;
+	int target, count;
+	char text[256];
+
+	count = h3_forge_pick_rows(-1, &entry);
+	for (index = 0, child = list->child; child; child = child->next, index++)
+	{
+		if (child == list->focused_child)
+			focused_row = index;
+		rows++;
+	}
+	/* (just shown: the focus on the variant chosen, not the row pressed) */
+	if (h3_mp.pick_refocus)
+	{
+		focused_row = NONE;
+		h3_mp.pick_refocus = FALSE;
+	}
+	target = browser_view_follow(&h3_mp.variant_view, (int)rows, count, (int)focused_row, h3_mp.variant_chosen,
+		h3_mp.map_page);
+	h3_mp.map_page = 0;
+	h3_mp.variant_chosen = target;
+	for (index = 0, child = list->child; child; child = child->next, index++)
+	{
+		boolean shown = index < h3_mp.variant_view.visible;
+
+		widget_instance_set_visibility_recursive(child, shown);
+		child->disabled = !shown;
+		if (!shown)
+			continue;
+		h3_forge_pick_rows((int)(h3_mp.variant_view.offset + index), &entry);
+		snprintf(text, sizeof(text), "%s", entry ? entry->title : T(h3_map_names[h3_mp.pick_index]));
+		h3_capitals(text);
+		text_show(child, text);
+		if (index == h3_mp.variant_view.row)
+			focus = child;
+	}
+	if (focus && focus != list->focused_child)
+		ui_widget_port_give_focus(list, focus);
+	if ((found = named(screen, "map_picture")) != NULL)
+		found->animation.current_frame_index = h3_mp.map_displays[h3_mp.pick_index];
+	if ((found = named(screen, "map_text")) != NULL)
+		widget_instance_set_visibility_recursive(found, FALSE);
+	h3_forge_pick_rows(target, &entry);
+	if (entry)
+		h3_variant_details(entry, FALSE, text, sizeof(text));
+	else
+		snprintf(text, sizeof(text), "%s", T("The original map: nothing placed yet."));
+	if ((found = named(screen, "map_why")) != NULL)
+	{
+		widget_instance_set_visibility_recursive(found, TRUE);
+		text_show(found, text);
+	}
+	{
+		char said[192];
+
+		snprintf(said, sizeof(said), "%s: %s (%d of %d)", h3_map_names[h3_mp.pick_index], entry ? entry->title :
+			"the original", target + 1, count);
+		if (strcmp(said, h3_mp.variant_said))
+		{
+			snprintf(h3_mp.variant_said, sizeof(h3_mp.variant_said), "%s", said);
+			platform_log("menus: h3 mp variants: %s", said);
+		}
+	}
+}
+
+/* (A on a map's variants) a variant of it, or the map itself: the lobby's,
+and back to the lobby (TRUE) */
+static boolean h3_mp_variant_pick(struct widget_instance *widget)
+{
+	struct forge_store_entry const *entry;
+	long row = h3_mp.variant_view.offset + h3_child_index(widget);
+
+	h3_forge_pick_rows((int)row, &entry);
+	h3_mp.picking_variant = FALSE;
+	return h3_mp_map_choose(h3_mp.pick_index, entry ? entry->file_name : NULL, entry ? entry->title : NULL);
+}
+
+/* (port h3 maps back, B in the map picker) from a map's variants, back to
+the maps on that map (FALSE: the picker stays); from the maps, back */
+static boolean h3_mp_maps_back(void)
+{
+	if (!h3_mp.picking_variant)
+		return TRUE;
+	h3_mp.picking_variant = FALSE;
+	h3_mp.map_cursor = h3_mp.pick_index;
+	h3_mp.pick_refocus = TRUE;
+	h3_mp.map_said[0] = 0;
+	return FALSE;
+}
+
+/* the lobby's map variant still a file of its map (deleted in File Share:
+none) */
+static void h3_mp_variant_check(void)
+{
+	char const *map_name = h3_mp_variant_chosen() ? h3_mp_map_short(h3_mp.map_index) : NULL;
+
+	if (h3_mp.variant_file[0] && (!map_name || !forge_store_exists(map_name, h3_mp.variant_file)))
+	{
+		platform_log("menus: h3 mp: the map variant %s is gone, or not of the lobby's map", h3_mp.variant_file);
+		h3_mp_variant_clear();
+	}
+}
+
+/* (the lobby's game: hosted, or the local one about to start) the map
+variant played in it, if one is chosen: TRUE; FALSE, said, if it cannot be
+(its file gone, damaged; Vitas and PC: map variants are the Vitas') - the
+lobby's variant then forgotten, the map played as it is */
+static boolean h3_mp_variant_play(boolean hosted, char const *map)
+{
+	char why[FORGE_STORE_WHY_SIZE];
+	boolean played;
+
+	h3_mp_variant_check();
+	if (!h3_mp_variant_chosen())
+	{
+		/* (no map variant: no game of one hosted, none asked for locally) */
+		if (hosted)
+			forge_net_host_end();
+		else
+			forge_play_local_request(NULL, NULL, NULL, 0);
+		return TRUE;
+	}
+	played = hosted ? forge_play_host_begin(map, h3_mp.variant_file, why, (int)sizeof(why)) :
+		forge_play_local_request(map, h3_mp.variant_file, why, (int)sizeof(why));
+	if (played)
+	{
+		platform_log("menus: h3 mp: the map variant %s is played on %s (%s)", h3_mp.variant_title, h3_map_names[h3_mp.map_index],
+			hosted ? "the game hosted" : "the local game");
+		return TRUE;
+	}
+	platform_log("menus: h3 mp: the map variant %s can't be played: %s: the map as it is", h3_mp.variant_title, why);
+	platform_show_message(T("Halo: map variant"), why);
+	h3_mp_variant_clear();
+	if (hosted)
+		forge_net_host_end();
 	return FALSE;
 }
 
@@ -9363,6 +9657,10 @@ static boolean h3_mp_host_choices(void)
 		platform_log("menus: h3 mp: the game type could not be read: the map list");
 		return FALSE;
 	}
+	/* (the lobby's map variant played in the game hosted: its joiners asked
+	to play it, as a network Forge game's are; one that cannot be played is
+	said and the map played as it is) */
+	h3_mp_variant_play(TRUE, map);
 	main_set_multiplayer_map_name((char *)map);
 	game_engine_override_map_name((char *)map);
 	network_game_server_change_map_name(server, (char *)map);
@@ -11040,6 +11338,17 @@ boolean pc_menu_event_function_invoke(
 	case _function_h3_map_page_down:
 		h3_mp.map_page = function_index == _function_h3_map_page_up ? -1 : 1;
 		return TRUE;
+	case _function_h3_maps_back:
+		return h3_mp_maps_back();
+	case _function_h3_mp_offline_start:
+	{
+		/* (OFFLINE's START GAME: split screen's own screens next; the
+		lobby's map variant played if the game's map is its) */
+		char const *map = h3_mp.map_index != NONE ? h3_map_paths[h3_mp.map_index] : h3_mp.map_other;
+
+		h3_mp_variant_play(FALSE, map);
+		return TRUE;
+	}
 	case _function_h3_join_system_link:
 	case _function_h3_join_split_screen:
 		h3_join_initialize(function_index == _function_h3_join_split_screen);

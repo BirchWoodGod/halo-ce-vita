@@ -160,7 +160,12 @@ enum
 {
 	/* the host's game is under way (a machine joining it in progress) */
 	FORGE_NET_SESSION_IN_PROGRESS = 1 << 0,
-	FORGE_NET_SESSION_FLAGS_KNOWN = FORGE_NET_SESSION_IN_PROGRESS,
+	/* the game plays a map variant (the multiplayer lobby's MAP), not
+	Forge: the layout given to the joiner as Forge's is, nothing edited,
+	no monitor; a build without this bit drops the hello as invalid and is
+	refused from the game, as one that does not play network Forge */
+	FORGE_NET_SESSION_PLAY = 1 << 1,
+	FORGE_NET_SESSION_FLAGS_KNOWN = FORGE_NET_SESSION_IN_PROGRESS | FORGE_NET_SESSION_PLAY,
 };
 
 /* a record's operation: a client's request, or the host's update */

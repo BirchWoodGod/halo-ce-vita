@@ -94,6 +94,16 @@
 #               overshield gone; a new round (the engine's map reset): all three
 #               back whole at their placed spots, the player respawned, the
 #               monitor where it flew
+#   mpvariant   a saved map variant played in a multiplayer game (forge.c
+#               forge_play_local_request): a Warthog and a boulder placed
+#               in a Forge game of Blood Gulch and saved ("MP Gulch"); then,
+#               with HALO_TEST_PROFILE's profile, the Halo 3 multiplayer
+#               lobby by the controller: NETWORK OFFLINE, MAP: Blood Gulch
+#               shows its variants (the map itself, then MP Gulch), MP Gulch
+#               chosen, START GAME: split screen's screens, the player joins,
+#               Slayer on Blood Gulch starts with the layout's two objects
+#               placed, the player the Spartan (no monitor, no Forge menu).
+#               The network side: run_netns_online_test.sh h3variant
 #   aisave      a map variant with the AI's settings (a Flood Elite with its AI
 #               off, an Elite of the player's team, a Warthog) saved as version
 #               2 (forge_files_test --dump), then started again from the
@@ -224,7 +234,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_forge_test.$$}
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs packcopy smallmap aiteam aioff round aisave allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks lobbycost}
+cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs packcopy smallmap aiteam aioff round aisave allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks lobbycost mpvariant}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
@@ -732,6 +742,30 @@ round_runs() {
 	ai_run round 45 "$c"
 }
 
+# (mpvariant: MULTIPLAYER; NETWORK (A), down two to OFFLINE (past AD HOC), A; MAP (down two, A),
+# Blood Gulch (down nine, A): its variants, down to MP Gulch, A; START GAME
+# (down, A): split screen's SELECT PROFILE, A joins, A the profile, Start;
+# the Xbox's map list (on Blood Gulch, the last used), A; its game type, A;
+# A: the game starts)
+mpvariantpad="wait:150:3000 down:150:700 a wait:150:4000 a:150:2000 down:150:500 down:150:500 a:150:2500 down:150:500 down:150:500 a:150:2500"
+mpvariantpad="$mpvariantpad $(for i in 1 2 3 4 5 6 7 8 9; do printf 'down:150:300 '; done)a:150:2500 @00-variants:0:300"
+mpvariantpad="$mpvariantpad down:150:500 a:150:3000 @01-lobby:0:300 down:150:500 a:150:4000 a:150:2000 a:150:2000"
+mpvariantpad="$mpvariantpad start:150:3000 a:150:3000 a:150:3000 a:150:3000 wait:150:15000 @02-game:0:300"
+
+mpvariant_runs() {
+	local store="$out/mpvariant-store"
+	rm -rf "$store"
+	mkdir -p "$store/u/UDATA/869079979327"
+	cp "$packcopy_profile" "$store/u/UDATA/869079979327/blam.sav"
+	[ -r "$(dirname "$packcopy_profile")/SaveMeta.xbx" ] &&
+		cp "$(dirname "$packcopy_profile")/SaveMeta.xbx" "$store/u/UDATA/869079979327/"
+	local c="L200:forge camera 60 -100 1.6 130 0;L202:forge spawn warthog;L203:forge distance 8;L204:forge drop"
+	c="$c;L210:forge spawn boulder;L211:forge distance 5;L212:forge drop;L230:forge save MP Gulch"
+	run mpvariant-save 30 "" "$c" "" HALO_MENU_STYLE=classic HALO_SYSTEM_LINK_TEST=forge:9 HALO_TEST_FORGE_PACKS=none \
+		HALO_SAVE_ROOT="$store"
+	run mpvariant 90 "" "L300:forge net" "$mpvariantpad" HALO_MENU_STYLE=halo3 HALO_SAVE_ROOT="$store"
+}
+
 aisave_runs() {
 	local store="$out/aisave-store"
 	rm -rf "$store"
@@ -1023,6 +1057,12 @@ for c in $cases; do
 		round_runs & ;;
 	aisave)
 		aisave_runs & ;;
+	mpvariant)
+		if [ "$menus_files" = 0 ] || [ ! -r "$packcopy_profile" ]; then
+			echo "SKIP: mpvariant: no Halo PC bitmaps.map and loc.map in $data/maps, or no profile ($packcopy_profile)"
+			continue
+		fi
+		mpvariant_runs & ;;
 	allai)
 		allai_runs & ;;
 	allaimenu)
@@ -1650,6 +1690,24 @@ for c in $cases; do
 		expect "$c" "b30 lacks a tag of covenant_ai: another map next" "covenant_ai: b30 lacks a tag of it .*another of its maps next"
 		expect "$c" "built from b40 instead" "scene packs: covenant_ai: built from b40"
 		expect "$c" "Covenant AI loaded in Forge" "forge: packs: covenant_ai loaded" ;;
+	mpvariant)
+		grep -aq 'forge: map variant "MP Gulch" saved as bloodgulch/mp_gulch.hmv, 2 objects' "$out/mpvariant-save/run.log" &&
+			echo "  ok: $c: MP Gulch saved in Forge (2 objects)" || fail "$c: the map variant was not saved in Forge"
+		expect "$c" "OFFLINE chosen" "menus: h3 mp: network OFFLINE"
+		expect "$c" "MAP: Blood Gulch shows its map variants" "menus: h3 mp: Blood Gulch's map variants \\(1\\)"
+		expect "$c" "the map itself first" "menus: h3 mp variants: Blood Gulch: the original \\(1 of 2\\)"
+		expect "$c" "MP Gulch chosen" "menus: h3 mp: map Blood Gulch, map variant MP Gulch \\(mp_gulch.hmv\\)"
+		expect "$c" "the lobby's MAP row" "menus: h3 mp lobby: NETWORK: OFFLINE, GAME: SLAYER, MAP: BLOOD GULCH - MP GULCH"
+		expect "$c" "START GAME asked for it in the local game" "menus: h3 mp: the map variant MP Gulch is played on Blood Gulch \\(the local game\\)"
+		expect "$c" "split screen's map list" "menus: h3 join: on to split screen's map list"
+		expect "$c" "the game played it" 'forge: the map variant "MP Gulch" is played on levels.test.bloodgulch.bloodgulch \(placed here\)'
+		expect "$c" "its objects placed" 'forge: map variant "MP Gulch" applied: 2 placed, 0 skipped'
+		state=$(sed -n '/test command at tick 300: forge net$/,/test command at tick/p' "$log" | grep -a "forge net: #")
+		echo "$state" | grep -a " warthog " | grep -aqv "object ffffffff" && echo "$state" | grep -a " boulder " |
+			grep -aqv "object ffffffff" && echo "  ok: $c: the Warthog and the boulder there in the game" ||
+			fail "$c: the layout's objects not there in the game"
+		grep -aq "forge: monitor mode at" "$log" && fail "$c: the monitor in a multiplayer game"
+		grep -aq "ui: screen pc.h3.forge.pause.screen\|menus: the Forge menu for" "$log" && fail "$c: Forge's menu in a multiplayer game" ;;
 	v1)
 		expect "$c" "FORGE opened the Forge lobby" "ui: screen pc.h3.forge.lobby"
 		expect "$c" "the map picker opened" "ui: screen pc.h3.forge.maps.screen"

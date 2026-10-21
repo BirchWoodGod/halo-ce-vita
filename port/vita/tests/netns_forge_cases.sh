@@ -52,6 +52,15 @@
 #              the host's minute-long wait for the machines' loads, and was dropped
 #              ("forcibly removing client ... timeout while loading"), the host's screen
 #              still meanwhile
+#   h3variant  a saved map variant played in a multiplayer game (forge.c forge_play_*): the
+#              host saves one in a local Forge game of Blood Gulch (a Warthog and a boulder,
+#              the console's SAVE MAP VARIANT: "MP Gulch"), then opens MULTIPLAYER (Menu
+#              style Halo 3, HALO_TEST_PROFILE, live on SYSTEM LINK), MAP: Blood Gulch shows
+#              its variants (the map itself, then MP Gulch), MP Gulch chosen; a joiner on its
+#              LAN joins from BROWSE GAMES; START GAME: a Slayer game, not Forge (no monitor
+#              on either), the host's layout placed as it starts and given to the joiner as
+#              network Forge gives it (its Warthog the netcode's, its boulder the joiner's own
+#              copy): both objects there on both machines, the two players play
 #   forgepanel the settings panel's Forge page, Network on (Menu style Halo CE: the
 #              classic menus' route), asked by HALO_SYSTEM_LINK_TEST=forgenet:9: the
 #              System Link screen's profile, then a network Forge game of Blood Gulch
@@ -322,6 +331,82 @@ forge_case() {
 		forge_state "$hl" 700 | grep -aq "boulder" || fail "the host did not have the joiner's boulder"
 		grep -aq "forge net: the host's packs and bloodgulch's blocks prebuilt in its lobby" "$jl" ||
 			fail "the joiner did not prebuild the host's packs and blocks in the lobby"
+		;;
+	h3variant)
+		local menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+		if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS) or no HALO_TEST_PROFILE"; return 0
+		fi
+		local name
+		for name in host joiner; do
+			mkdir -p "$out/$name/save/u/UDATA/869079979327"
+			cp "$HALO_TEST_PROFILE" "$out/$name/save/u/UDATA/869079979327/blam.sav"
+			[ -r "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" ] &&
+				cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$out/$name/save/u/UDATA/869079979327/"
+		done
+		# (the map variant saved first, in a local Forge game of Blood Gulch, into the host's save)
+		local all_seconds=$seconds save_cmds copy_data_hostsave=$menus_data
+		save_cmds="L200:forge camera 60 -100 1.6 130 0;L202:forge spawn warthog;L203:forge distance 8;L204:forge drop"
+		save_cmds="$save_cmds;L210:forge spawn boulder;L211:forge distance 5;L212:forge drop;L230:forge save MP Gulch"
+		seconds=30
+		HALO_TEST_DATA_HOST=$menus_data run_copy hostsave "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
+			HALO_MENU_STYLE=classic HALO_SYSTEM_LINK_TEST=forge:9 HALO_TEST_FORGE_PACKS=none \
+			HALO_SAVE_ROOT="$out/host/save" "HALO_TEST_COMMANDS=$save_cmds"
+		wait $last_pid 2>/dev/null
+		seconds=$all_seconds
+		grep -aq 'forge: map variant "MP Gulch" saved as bloodgulch/mp_gulch.hmv, 2 objects' "$out/hostsave/run.log" ||
+			{ fail "the map variant was not saved in Forge"; grep -a "forge:" "$out/hostsave/run.log" | tail -5; return 0; }
+		# (the host: MULTIPLAYER, the lobby live on SYSTEM LINK; MAP (down two, A), Blood Gulch (down
+		# nine, A): its variants, down to MP Gulch, A; a while for the joiner; START GAME (down, A))
+		local host_pad="wait:150:3000 down:150:700 a wait:150:8000 down:150:500 down:150:500 a wait:150:2500"
+		for name in 1 2 3 4 5 6 7 8 9; do host_pad="$host_pad down:150:300"; done
+		host_pad="$host_pad a wait:150:2500 @variant-picker:0:300 down:150:500 a wait:150:3000 @variant-lobby:0:300"
+		host_pad="$host_pad wait:150:${HALO_TEST_LIVE_WAIT:-40000} down:150:500 a wait:150:3000 @variant-countdown:0:300"
+		host_cmds="L600:forge net;L900:forge net"
+		join_cmds="L600:forge net;L900:forge net"
+		HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
+			HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 $(forge_shots mpforge-shots/$mode-host) \
+			"HALO_TEST_PAD=$host_pad" "HALO_TEST_COMMANDS=$host_cmds"
+		host_pid=$last_pid
+		sleep 5
+		HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false \
+			HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 $(forge_shots mpforge-shots/$mode-joiner) \
+			"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a a a wait:150:15000 a wait:150:10000 @variant-joiner-lobby:0:300" \
+			"HALO_TEST_COMMANDS=$join_cmds"
+		join_pid=$last_pid
+		wait $join_pid $host_pid 2>/dev/null
+		forge_check_clean "$hl" "$jl"
+		echo "--- host"; grep -aE "menus: h3 (mp: map|mp variants|live lobby: (open|now|START))|forge net: (machine|hosting)|forge: (map variant|.*loaded for|the map variant)" "$hl" | head -30
+		echo "--- joiner"; grep -aE "menus: h3 pregame|forge net: (the host|asked)|forge: (map variant|.*loaded for|the map variant)" "$jl" | head -20
+		grep -aq "menus: h3 mp variants: Blood Gulch: MP Gulch (2 of 2)" "$hl" || fail "MAP did not show Blood Gulch's map variants"
+		grep -aq "menus: h3 mp: map Blood Gulch, map variant MP Gulch (mp_gulch.hmv)" "$hl" || fail "the map variant was not chosen"
+		grep -aq "forge net: hosting a game of a map variant of levels.test.bloodgulch.bloodgulch, map variant MP Gulch" "$hl" ||
+			fail "the lobby's game did not host the map variant"
+		grep -aq "menus: h3 live lobby: now Slayer on Blood Gulch - MP Gulch, sent to its joiners" "$hl" ||
+			fail "the live lobby's game did not follow the map variant"
+		grep -aq "system link: in another's lobby" "$jl" || fail "the joiner did not join the host's lobby"
+		grep -aq "forge net: machine 1 plays the Forge game" "$hl" || fail "the joiner did not answer the host's hello"
+		grep -aq "forge net: the host's game is a Forge game (session [0-9a-f]*, map variant MP Gulch)" "$jl" ||
+			fail "the joiner was not told of the map variant"
+		grep -aq 'forge: map variant "MP Gulch" applied: 2 placed' "$hl" || fail "the host did not place the map variant's objects"
+		grep -aq "forge: the map variant \"MP Gulch\" is played on levels.test.bloodgulch.bloodgulch (the host's layout)" "$jl" ||
+			fail "the joiner did not play the host's map variant"
+		grep -aq "forge: monitor mode" "$hl" "$jl" && fail "a monitor in the map variant's game (it is not Forge)"
+		grep -aq "forge net: client, 2 objects, .*synced yes, monitor off" "$jl" || fail "the joiner was not given the layout's 2 objects"
+		local tick
+		for tick in 600 900; do
+			for name in host joiner; do
+				local state
+				state=$(forge_state "$out/$name/run.log" $tick)
+				echo "$name at $tick:"; echo "$state" | sed 's/^/  /'
+				echo "$state" | grep -a "warthog" | grep -aqv "object ffffffff" || fail "$name: no Warthog of the layout at tick $tick"
+				echo "$state" | grep -a "boulder" | grep -aqv "object ffffffff" || fail "$name: no boulder of the layout at tick $tick"
+			done
+		done
+		local two
+		two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+		echo "joiner's seconds with two players playing: $two"
+		[ "$two" -ge 15 ] || fail "the joiner played the host's game for $two s with two players (15 wanted)"
 		;;
 	h3forgeonline)
 		local menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
