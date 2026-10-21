@@ -302,6 +302,19 @@
 #            picker offers it
 #   h3modstouch  taps: MOD MANAGER on the main menu, mygulch's row (off), the
 #            screen's Back
+#   pausesave  the campaign pause's save and quit writes the save and the level
+#           resumes from it (insider.19, dalmor's video: the classic pause's SAVE
+#           LAST CHECKPOINT did nothing): The Truth and Reconciliation's checkpoint
+#           at tick 600, Start, the save and quit row - Menu style Halo CE the
+#           Xbox's SAVE AND QUIT (its saving screen), Halo 3 the Halo 3 pause's
+#           SAVE AND QUIT -: savegame.bin (HALO_TEST_PERSISTENT_DIR) changed on
+#           disk, debug.txt's "saved the last checkpoint", the main menu again;
+#           started again, the level resumes at that checkpoint's tick. With a
+#           Custom Edition campaign map (HALO_TEST_CE_CAMPAIGN, e.g. a converted
+#           Ruby's a30; skipped without), Halo PC's pause: SAVE LAST CHECKPOINT
+#           taken out, the fourth row down QUIT, which writes savegame_custom.bin
+#           (the stock savegame.bin byte for byte as it was) and the map resumes
+#           from it
 #   pause   Campaign from the main menu (a new profile, Normal), the level's
 #           pause menu, Quit to Main Menu: a game map's widget runs its
 #           function and is back at the main menu, and asked about deleting
@@ -335,7 +348,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3partyplates h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho}
+cases=${*:-fresh level xbox pause pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3partyplates h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
@@ -412,6 +425,52 @@ check() { # NAME SCREENS_WANTED
 # (pause: Campaign, a new profile, Normal, the level started; its cinematic
 # skipped, the pause menu, down to Quit to Main Menu, A)
 pause_pad=${HALO_TEST_PAUSE_PAD:-"a:150:3000 start:150:3000 wait:150:6000 a:150:45000 start:150:3000 down:150:800 down:150:800 down:150:800 a:150:3000 wait:150:8000"}
+# (pausesave: in the level, Start, down three - the save and quit row, or Halo PC's
+# QUIT once SAVE LAST CHECKPOINT is out -, A)
+pausesave_pad="wait:150:1000 level:150:30000 start:150:4000 down:150:800 down:150:800 down:150:800 a:150:10000 wait:150:3000"
+# pausesave_run NAME STYLE LEVEL FILE DOWNS: the save written by the pause's row, then
+# resumed from it in a second run
+pausesave_run() {
+	local name=$1 style=$2 level=$3 file=$4 pad=$pausesave_pad folder=$pausesave_maps
+	[ "$5" = 4 ] && pad=${pad/start:150:4000 /start:150:4000 down:150:800 }
+	local seed=$out/${name}_seed dir=u/UDATA/TEST log debug saved resumed before after
+	rm -rf "$seed"
+	mkdir -p "$seed/$dir"
+	# (an old save of the same size, all zeroes, to be overwritten; and the
+	# other save, which must be left alone)
+	head -c 16777216 /dev/zero > "$seed/$dir/$file"
+	printf 'the other save' > "$seed/$dir/$( [ "$file" = savegame.bin ] && echo savegame_custom.bin || echo savegame.bin)"
+	before=$(md5sum < "$seed/$dir/$file")
+	save_from=$seed run "$name" "$folder" 120 "$pad" "HALO_TEST_COMMANDS=60:map_name $level;L150:@skip;L600:game_save_totally_unsafe" \
+		HALO_MENU_STYLE="$style" HALO_CUSTOM_EDITION=1 'HALO_TEST_PERSISTENT_DIR=u:\UDATA\TEST\'
+	log=$out/$name/run.log debug=$out/$name/data/debug.txt
+	echo "--- $name"
+	grep -aE "ui: screen|save and quit|campaign save" "$log" | head -12
+	[ "$(cat "$out/$name/exit")" = 0 ] || fail "$name" "exit $(cat "$out/$name/exit")"
+	grep -aqiE "assert|exception|halt" "$log" && fail "$name" "an assertion, exception or halt"
+	saved=$(grep -ao "save and quit: .* at tick [0-9]* written to $file" "$log" | grep -o "tick [0-9]*" | head -1)
+	[ -n "$saved" ] || fail "$name" "the pause's row did not save and quit into $file"
+	grep -aq "saved the last checkpoint to persistent storage" "$debug" || fail "$name" "debug.txt: the save was not written"
+	after=$(md5sum < "$out/$name/save/$dir/$file")
+	[ "$(stat -c %s "$out/$name/save/$dir/$file")" = 16777216 ] && [ "$before" != "$after" ] ||
+		fail "$name" "$file did not change on disk"
+	[ "$(cat "$out/$name/save/$dir/$( [ "$file" = savegame.bin ] && echo savegame_custom.bin || echo savegame.bin)")" = 'the other save' ] ||
+		fail "$name" "the other save was changed"
+	# (the main menu after the save; Halo PC's QUIT goes there at once, its press
+	# still held as it opens on the harness, which may open Campaign after it)
+	local menu='ui.shell.main_menu.main_menu'
+	[ "$style" = halo3 ] && menu='pc.h3.main.screen'
+	awk -v menu="ui: screen $menu" '/save and quit: .* written to/ { saved = 1 } saved && $0 ~ menu { found = 1 }
+		END { exit !found }' "$log" || fail "$name" "not back at the main menu after the save"
+	# (started again on that save, the same difficulty: resumed at the checkpoint)
+	save_from=$out/$name/save init_line="map_name $level" run "${name}_resume" "$folder" 25 "wait:150:1000" \
+		HALO_MENU_STYLE="$style" HALO_CUSTOM_EDITION=1 'HALO_TEST_PERSISTENT_DIR=u:\UDATA\TEST\'
+	log=$out/${name}_resume/run.log
+	grep -aE "campaign save" "$log" | head -3
+	resumed=$(grep -ao "campaign save: resumed at tick [0-9]*" "$log" | grep -o "tick [0-9]*" | head -1)
+	[ -n "$saved" ] && [ "$resumed" = "$saved" ] || fail "$name" "started again, the level did not resume at the checkpoint ($saved; resumed: ${resumed:-no})"
+}
+
 check_pause() {
 	local log=$out/pause/run.log
 	echo "--- pause"
@@ -523,6 +582,29 @@ for case in $cases; do
 		init_line='map_name levels\a10\a10' run level "$menus_data" 90 "$pad" "HALO_TEST_COMMANDS=L150:@quit"
 		grep -aq "ui: screen ui.shell.main_menu.main_menu" "$out/level/run.log" || fail level "the level did not go back to the main menu"
 		check level pc ;;
+	pausesave)
+		pausesave_maps=$out/pausesave_maps
+		rm -rf "$pausesave_maps"
+		mkdir -p "$pausesave_maps/maps"
+		ln -s "$(cd "$menus_data" && pwd)"/maps/* "$pausesave_maps/maps/"
+		pausesave_run pausesave_classic classic 'levels\a30\a30' savegame.bin 3
+		grep -aq "ui: screen ui.shell.error.warning_saving_file_screen_ingame" "$out/pausesave_classic/run.log" ||
+			fail pausesave_classic "the Xbox's SAVE AND QUIT did not show its saving screen"
+		pausesave_run pausesave_halo3 halo3 'levels\a30\a30' savegame.bin 3
+		grep -aq "ui: screen pc.h3.pause.screen" "$out/pausesave_halo3/run.log" || fail pausesave_halo3 "the Halo 3 pause did not open"
+		grep -aq "ui: screen ui.shell.error.warning_saving_file_screen_ingame" "$out/pausesave_halo3/run.log" ||
+			fail pausesave_halo3 "SAVE AND QUIT did not show its saving screen"
+		if [ ! -r "${HALO_TEST_CE_CAMPAIGN:-}" ]; then
+			echo "--- pausesave_custom"; echo "SKIP: no HALO_TEST_CE_CAMPAIGN (a Custom Edition campaign map)"; continue
+		fi
+		ln -s "$(readlink -f "$HALO_TEST_CE_CAMPAIGN")" "$pausesave_maps/maps/"
+		custom=$(basename "$HALO_TEST_CE_CAMPAIGN" .map)
+		# (Halo PC's pause: RESUME GAME, LOAD LAST CHECKPOINT, RESTART LEVEL, CHANGE
+		# SETTINGS, QUIT - four rows down; with SAVE LAST CHECKPOINT still there, the
+		# fourth would be CHANGE SETTINGS, and nothing saved)
+		pausesave_run pausesave_custom classic "custom_maps\\$custom" savegame_custom.bin 4
+		grep -aq "the campaign pause menu's SAVE LAST CHECKPOINT taken out" "$out/pausesave_custom/data/debug.txt" ||
+			fail pausesave_custom "SAVE LAST CHECKPOINT was not taken out of Halo PC's pause" ;;
 	pause)
 		run pause "$menus_data" "${HALO_TEST_PAUSE_SECONDS:-120}" "$pause_pad" "HALO_TEST_COMMANDS=L150:@skip" \
 			HALO_TEST_WIDGET_FUNCTION=76
@@ -2050,7 +2132,7 @@ for case in $cases; do
 		grep -aq "4way_start2join_screen\|menus: Server Browser: the profile" "$log" &&
 			fail browserprofile "internet play off: the profile screen opened anyway" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3lobbyscenes|h3modelsmany|h3friends|h3friendspanel|browserprofile|h3players|browserrows|profilepaths|h3mppause|h3friendsfit|h3hostonline|h3livelobby|h3groups|browserreopen|h3livebrowse|profileio]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|pausesave|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3lobbyscenes|h3modelsmany|h3friends|h3friendspanel|browserprofile|h3players|browserrows|profilepaths|h3mppause|h3friendsfit|h3hostonline|h3livelobby|h3groups|browserreopen|h3livebrowse|profileio]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"

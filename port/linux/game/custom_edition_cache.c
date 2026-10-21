@@ -1210,6 +1210,10 @@ static boolean custom_edition_cache_tags_convert(
 	{
 		error(_error_silent, "custom edition: the multiplayer score hint names the BACK button where Halo PC names a key");
 	}
+	if (conversion.solo_pause_save_removed)
+	{
+		error(_error_silent, "custom edition: the campaign pause menu's SAVE LAST CHECKPOINT taken out (its QUIT saves the checkpoint)");
+	}
 	if (conversion.widget_functions_cleared || conversion.pause_menu_trimmed)
 	{
 		error(

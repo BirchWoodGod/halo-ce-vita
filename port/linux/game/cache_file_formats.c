@@ -390,6 +390,9 @@ ui_widget_game_data_input_functions.c run them up to 0x7FFF) */
 #define MULTIPLAYER_PAUSE_LIST_NAME "ui\\shell\\multiplayer_game\\pause_game\\mp_pause_list"
 #define MULTIPLAYER_PAUSE_RESUME_NAME "resume_game_button"
 #define MULTIPLAYER_PAUSE_QUIT_NAME "quit_netgame_button"
+/* the campaign pause menu's list, and its SAVE LAST CHECKPOINT */
+#define SOLO_PAUSE_LIST_NAME "ui\\shell\\solo_game\\pause_game\\pause_list"
+#define SOLO_PAUSE_SAVE_CHECKPOINT_NAME "save_checkpoint_button"
 #define UNICODE_STRING_LIST_BYTES 0x0C
 #define UNICODE_STRING_LIST_STRINGS_OFFSET 0x00
 #define SCORE_KEY_PLACEHOLDER_CHARACTERS 4
@@ -5074,6 +5077,71 @@ static void multiplayer_pause_list_convert(
 	return;
 }
 
+/* Halo PC's campaign pause menu (RESUME GAME, SAVE LAST CHECKPOINT, LOAD
+LAST CHECKPOINT, RESTART LEVEL, CHANGE SETTINGS, QUIT) saves the last
+checkpoint with a function of Halo PC's own (none here: the row did
+nothing). Its QUIT is the Xbox's save and quit (pause game return to main
+menu), which saves the checkpoint (game_state_save_to_persistent_storage):
+SAVE LAST CHECKPOINT is taken out, the rows under it moved up, and the
+rows moved down half a row for each taken out, to stay in the middle of
+their box (the owner, insider.19). */
+static void solo_pause_list_convert(
+	struct load_state const *state,
+	uint32_t widget_offset,
+	struct custom_edition_conversion_report *report)
+{
+	uint8_t *block = state->tag_cache + widget_offset + UI_WIDGET_CHILD_WIDGETS_OFFSET;
+	int32_t child_count;
+	uint32_t children_offset;
+	uint8_t *children;
+	int16_t row;
+	int16_t first;
+	int32_t child_index;
+	int32_t kept = 0;
+
+	if (!loaded_block_get(
+			block,
+			tag_cache_address,
+			state->used_bytes,
+			UI_WIDGET_CHILD_BYTES,
+			&child_count,
+			&children_offset) ||
+		child_count < 2)
+	{
+		return;
+	}
+	children = state->tag_cache + children_offset;
+	/* (the rows' spacing, from the first two, and the first's place) */
+	first = read_s16(children + UI_WIDGET_CHILD_VERTICAL_OFFSET);
+	row = (int16_t)(read_s16(children + UI_WIDGET_CHILD_BYTES + UI_WIDGET_CHILD_VERTICAL_OFFSET) - first);
+	for (child_index = 0; child_index < child_count; child_index++)
+	{
+		uint8_t *child = children + (uint32_t)child_index * UI_WIDGET_CHILD_BYTES;
+		uint32_t handle = read_u32(child + TAG_REFERENCE_INDEX_OFFSET);
+		char const *name = custom_edition_cache_tag_name(state->tag_cache, state->used_bytes, (int32_t)(handle & 0xFFFF));
+
+		if (!name || !tag_name_item_is(name, SOLO_PAUSE_SAVE_CHECKPOINT_NAME))
+		{
+			if (kept != child_index)
+				memmove(children + (uint32_t)kept * UI_WIDGET_CHILD_BYTES, child, UI_WIDGET_CHILD_BYTES);
+			kept++;
+		}
+	}
+	if (kept == 0 || kept == child_count)
+	{
+		return;
+	}
+	for (child_index = 0; child_index < kept; child_index++)
+	{
+		write_u16(children + (uint32_t)child_index * UI_WIDGET_CHILD_BYTES + UI_WIDGET_CHILD_VERTICAL_OFFSET,
+			(uint16_t)(first + row * child_index + row * (child_count - kept) / 2));
+	}
+	write_u32(block + TAG_BLOCK_COUNT_OFFSET, (uint32_t)kept);
+	report->solo_pause_save_removed = 1;
+
+	return;
+}
+
 enum cache_file_status custom_edition_cache_convert(
 	uint8_t *tag_cache,
 	uint32_t loaded_bytes,
@@ -5161,6 +5229,8 @@ enum cache_file_status custom_edition_cache_convert(
 			widget_pc_functions_clear(&state, offset, report);
 			if (!strcmp(custom_edition_cache_tag_name(tag_cache, loaded_bytes, tag_index), MULTIPLAYER_PAUSE_LIST_NAME))
 				multiplayer_pause_list_convert(&state, offset, report);
+			else if (!strcmp(custom_edition_cache_tag_name(tag_cache, loaded_bytes, tag_index), SOLO_PAUSE_LIST_NAME))
+				solo_pause_list_convert(&state, offset, report);
 		}
 		if (!shader_type)
 		{

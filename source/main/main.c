@@ -1399,6 +1399,20 @@ short main_get_current_solo_level(
 	return main_get_solo_level_from_name(main_globals.soloplayer_map_name);
 }
 
+#ifdef HALO_LINUX
+/* (port) whether the level being played alone is a Custom Edition campaign
+map (custom_maps\...) or an MCC mod's (mods\...): its Save and Quit writes
+the custom campaign maps' save (game_state_save_to_persistent_storage) */
+boolean main_current_level_is_custom_campaign(
+	void)
+{
+	char const *name = main_globals.soloplayer_map_name;
+
+	return main_globals.connection == _game_connection_local && !game_engine_running() &&
+		(custom_edition_level_name(name) || custom_edition_mods_level_name(name));
+}
+#endif
+
 char const *main_get_solo_level_name(
 	short level)
 {

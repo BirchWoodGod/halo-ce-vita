@@ -55,9 +55,14 @@ by their titles ("The Pillar of Autumn"), described by the mod's title and
 the level's description, with the level's thumbnail as its picture (a
 `<map>.bmp` beside the map takes its place). Choose one, then the
 difficulty: it plays alone, offline. Won, a level goes on to the next one
-its campaign lists, on the same difficulty. There is no campaign save or
-profile progress for them (Save and Quit keeps the stock campaign's), as
-for Custom Edition campaign maps.
+its campaign lists, on the same difficulty. There is no profile progress
+for them, as for Custom Edition campaign maps; Save and Quit (Halo PC's
+pause menu's QUIT) writes the last checkpoint to a save of the custom
+campaign maps' own, `savegame_custom.bin` beside the profile's
+`savegame.bin` (which it leaves alone), and the same map started again
+on the same difficulty resumes from it. Halo PC's pause menu has no SAVE
+LAST CHECKPOINT (a function of Halo PC's own, which did nothing here): its
+QUIT saves.
 
 - **The folder's name** is the mod's key: in lower case, its letters,
   digits and `-` only, at most 12 (`ruby`; Steam's `2915693904` works too,
@@ -298,8 +303,9 @@ must be there too, as for any Custom Edition map, and PC maps on). They
 are listed in Campaign after the ten levels, by their pictures and titles;
 the stock `a10.map` ... stay as they are. A converted level won goes on to
 the next of its prefix (`ruby_a10` to `ruby_a30`: `custom_edition_maps_campaign_next_level`),
-on the same difficulty; there is no campaign save or profile progress for
-them (Save and Quit keeps the stock campaign's).
+on the same difficulty; there is no profile progress for them, and Save
+and Quit writes the custom campaign maps' own save (`savegame_custom.bin`,
+the stock campaign's kept), which the map resumes from.
 
 ## MCC's PC multiplayer maps
 

@@ -513,18 +513,30 @@ void game_state_save_to_persistent_storage(
 	void)
 {
 #ifdef HALO_LINUX
-	/* port: the campaign save is the campaign's: a level not in it (a
-	Custom Edition campaign map's) is never saved in its place */
+	/* port: the campaign save is the campaign's: a level not in it is never
+	saved in its place. A Custom Edition or MCC mod campaign map's (Halo
+	PC's pause menu's QUIT, the Halo 3 pause's SAVE AND QUIT) has a save
+	of its own beside it, savegame_custom.bin (game_state_xbox.c), which
+	that map resumes from when it is started again on the same difficulty
+	(game_state_try_and_load_from_persistent_storage: the header's map name
+	and map checksum must be this map's); any other level is not saved */
+	boolean custom = FALSE;
+
 	if (main_get_current_solo_level() == NONE)
 	{
-		error(_error_silent, "save and quit: not a campaign level, not saved (the campaign save is kept)");
-		return;
+		if (!main_current_level_is_custom_campaign())
+		{
+			error(_error_silent, "save and quit: not a campaign level, not saved (the campaign save is kept)");
+			return;
+		}
+		custom = TRUE;
 	}
 #endif
 	if (player_spawn_count==1)
 	{
 #ifdef HALO_LINUX
 		unsigned long long started;
+		boolean previous = game_state_set_persistent_storage_custom(custom);
 
 #endif
 		game_state_note_event("save and quit");
@@ -540,6 +552,10 @@ void game_state_save_to_persistent_storage(
 			/* the whole of the native builds' larger game state */
 			GAME_STATE_SIZE);
 		halo_load_profile_add(_halo_load_persistent_write, started, GAME_STATE_SIZE);
+		game_state_set_persistent_storage_custom(previous);
+		platform_log("save and quit: %s at tick %ld written to %s (debug.txt says whether it was)",
+			tag_get_name(global_scenario_index), (long)game_time_get(),
+			custom ? "savegame_custom.bin, the custom campaign maps' save" : "savegame.bin, the campaign save");
 #else
 			0x345000);
 #endif
@@ -1236,7 +1252,13 @@ static boolean game_state_persistent_storage_made_here(
 }
 #endif
 
+#ifdef HALO_LINUX
+/* (game_state_try_and_load_from_persistent_storage, below: the save it
+chose) */
+static void game_state_try_and_load_from_chosen_persistent_storage(
+#else
 void game_state_try_and_load_from_persistent_storage(
+#endif
 	void)
 {
 	struct game_state_header header;
@@ -1283,6 +1305,7 @@ void game_state_try_and_load_from_persistent_storage(
 		game_state_call_after_load_procs();
 		halo_load_profile_add(_halo_load_persistent_after_load, started, 0);
 		game_state_save();
+		platform_log("campaign save: resumed at tick %ld", (long)game_time_get());
 		return;
 	}
 	if (staged < 0)
@@ -1341,6 +1364,27 @@ void game_state_try_and_load_from_persistent_storage(
 
 	return;
 }
+
+#ifdef HALO_LINUX
+/* (port) a map's start resumes the campaign save, or a Custom Edition or
+MCC mod campaign map's start the custom campaign maps' save
+(game_state_save_to_persistent_storage), when its header is this map's on
+this difficulty; a custom map with no save of its own reads nothing (and
+makes no file) */
+void game_state_try_and_load_from_persistent_storage(
+	void)
+{
+	boolean custom = main_get_current_solo_level() == NONE && main_current_level_is_custom_campaign();
+	boolean previous = game_state_set_persistent_storage_custom(custom);
+
+	if (custom && !game_state_persistent_storage_exists())
+		platform_log("campaign save: none to resume (no custom campaign maps' save)");
+	else
+		game_state_try_and_load_from_chosen_persistent_storage();
+	game_state_set_persistent_storage_custom(previous);
+	return;
+}
+#endif
 
 void game_state_load_core(
 	const char *name)

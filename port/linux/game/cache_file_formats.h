@@ -568,6 +568,9 @@ struct custom_edition_conversion_report
 	made the Xbox's resume and quit */
 	int32_t widget_functions_cleared;
 	int32_t pause_menu_trimmed;
+	/* 1 when the campaign pause menu's SAVE LAST CHECKPOINT was taken out
+	(its QUIT saves the checkpoint) */
+	int32_t solo_pause_save_removed;
 	/* the Halo PC behaviours the map relies on (enum
 	custom_edition_behaviour, flags) */
 	uint32_t behaviours;
