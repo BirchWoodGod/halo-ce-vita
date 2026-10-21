@@ -10,7 +10,12 @@ name, as the level levels\test\<name>\<name> as the Xbox levels are named:
 the cache file loader finds a map by the last part of its level name. The
 game engine keeps a level name in 64 characters, so a map whose name is
 longer than 25 characters is left out, and so is a map named as one of the
-Xbox levels, which that level already offers.
+Xbox levels, which that level already offers. A copy a player renamed
+(cursed-bloodgulch.map, named bloodgulch inside) is offered under its
+file's name as well: a Custom Edition one as any other, an Xbox one known
+by that name in the cache partition too (cache_files_windows.c,
+cache_file_read_header_from_dvd), and never shared
+(custom_edition_maps_shareable).
 
 The Custom Edition caches of solo scenarios, the campaign maps
 (custom_edition_cache_campaign), are the campaign's level list's, after its
@@ -143,6 +148,10 @@ struct custom_edition_map
 	/* an Xbox cache (a modded or newly built Xbox map), not a Custom Edition
 	one */
 	boolean xbox_cache;
+	/* (port) an Xbox cache a player renamed, named inside as another map
+	(custom_edition_cache_xbox_renamed): listed and played by its file's
+	name, never shared */
+	boolean xbox_renamed;
 	/* a Custom Edition campaign map (a solo scenario) */
 	boolean campaign;
 	/* (port) a mod's map (custom_edition_mods.c), at `mod_order` in the
@@ -188,6 +197,7 @@ struct remembered_map_file
 	struct file_last_modification_date date;
 	boolean custom_edition_enabled;
 	boolean xbox_cache;
+	boolean xbox_renamed;
 	boolean multiplayer;
 	boolean campaign;
 	/* its description file's text, as read when it was last written */
@@ -530,6 +540,7 @@ static void custom_edition_map_add(
 	boolean custom_edition_enabled = halo_custom_edition_enabled();
 	short map_index;
 	boolean xbox_cache;
+	boolean xbox_renamed = FALSE;
 	boolean multiplayer;
 	boolean campaign = FALSE;
 
@@ -568,6 +579,7 @@ static void custom_edition_map_add(
 	if (remembered)
 	{
 		xbox_cache = remembered->xbox_cache;
+		xbox_renamed = remembered->xbox_renamed;
 		multiplayer = remembered->multiplayer;
 		campaign = remembered->campaign;
 	}
@@ -576,6 +588,8 @@ static void custom_edition_map_add(
 		/* a modded or newly built Xbox map plays as the Xbox levels do; a
 		Custom Edition one only with the setting on */
 		xbox_cache = !csstrcasecmp(extension, "map") && custom_edition_cache_xbox_multiplayer(name);
+		/* (a renamed copy: by its file's name) */
+		xbox_renamed = xbox_cache && custom_edition_cache_xbox_renamed(name);
 		multiplayer = !xbox_cache && custom_edition_enabled && custom_edition_cache_multiplayer(name);
 		/* (a campaign map: the campaign's level list's) */
 		campaign = !xbox_cache && !multiplayer && custom_edition_enabled && custom_edition_cache_campaign(name);
@@ -588,6 +602,7 @@ static void custom_edition_map_add(
 			remembered->date = *date;
 			remembered->custom_edition_enabled = custom_edition_enabled;
 			remembered->xbox_cache = xbox_cache;
+			remembered->xbox_renamed = xbox_renamed;
 			remembered->multiplayer = multiplayer;
 			remembered->campaign = campaign;
 		}
@@ -618,6 +633,7 @@ static void custom_edition_map_add(
 	map = &globals->maps[globals->map_count++];
 	csmemset(map, 0, sizeof(*map));
 	map->xbox_cache = xbox_cache;
+	map->xbox_renamed = xbox_renamed;
 	map->campaign = campaign;
 	csstrcpy(map->name, name);
 	if (campaign)
@@ -1539,11 +1555,14 @@ boolean custom_edition_maps_shareable(
 	name = tag_name_strip_path(level_name);
 
 	/* (turned off since the list was made: HALO_MAPS_DISABLED is the panel's
-	switch, read anew; port: a mod's map never) */
+	switch, read anew; port: a mod's map never, nor a renamed Xbox map's
+	copy, which map sharing would know by the name inside it,
+	map_share_protocol.c) */
 	return !xbox_level_stock(name) &&
 		!custom_edition_mods_level_name(level_name) &&
 		(custom_edition_maps_display_index(level_name) == NONE ||
-			!custom_edition_map_get(custom_edition_maps_display_index(level_name))->mod) &&
+			(!custom_edition_map_get(custom_edition_maps_display_index(level_name))->mod &&
+				!custom_edition_map_get(custom_edition_maps_display_index(level_name))->xbox_renamed)) &&
 		!custom_edition_map_disabled(name) &&
 		custom_edition_maps_display_index(level_name) != NONE;
 }

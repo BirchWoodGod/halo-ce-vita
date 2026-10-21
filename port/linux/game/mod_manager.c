@@ -9,8 +9,9 @@ What is listed:
   loc, ui). What it is comes from the cache file loader's own check of its
   header and tag index (custom_edition_cache_file_check, cache_file_identify):
   an Xbox cache of a multiplayer scenario, which must also be one the cache
-  partition takes (custom_edition_cache_xbox_multiplayer: named inside as
-  its file is, not too large); a Custom Edition cache of a multiplayer or a
+  partition takes (custom_edition_cache_xbox_multiplayer: not too large, and
+  named inside as its file is when that is an Xbox level's name; a renamed
+  copy otherwise); a Custom Edition cache of a multiplayer or a
   solo scenario (a campaign map, played alone or as co-op), which needs PC
   maps on and the resource maps it takes tags from
   (custom_edition_cache_missing_resource_maps); anything else fails, with

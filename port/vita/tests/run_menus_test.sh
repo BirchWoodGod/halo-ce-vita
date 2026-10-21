@@ -125,6 +125,17 @@
 #            a game of one player on the Linux harness); then started again on
 #            that save with mygulch turned off: the picker lists the thirteen
 #            only and the lobby is back on Battle Creek
+#   h3renamed  maps players renamed (Grunt pirate, insider.19: cursed-bloodgulch):
+#            Blood Gulch's Xbox map copied as cursed-bloodgulch.map and gulch_two.map
+#            (both named bloodgulch inside), and with HALO_TEST_CE_MAPS' extinction.map
+#            a Custom Edition copy, cursed-extinction.map, beside it: the multiplayer
+#            level list (the Halo 3 MAP picker's and Halo CE's Create Game's) has each
+#            under its file's name after the thirteen, Blood Gulch once; the picker's
+#            first custom row is CURSED-BLOODGULCH, chosen for the lobby. With
+#            HALO_TEST_PROFILE, local games: cursed-bloodgulch loads and plays (its
+#            cache file named cursed-bloodgulch), then Blood Gulch is its own copy
+#            (precached, not the renamed one), then cursed-bloodgulch again found by
+#            its name in the cache files
 #   h3customrows  CUSTOMIZATION's preview the same on every row (insider.17:
 #            the Spartan lost its visor's reflection and its shading with
 #            VIBRATION, the last row, focused - Ben 10 and xal, on the
@@ -335,7 +346,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3partyplates h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho}
+cases=${*:-fresh level xbox pause h3renamed h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendspanel h3partyplates h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
@@ -1812,6 +1823,68 @@ for case in $cases; do
 		grep -aq "mod manager: mygulch turned on" "$out/h3modspicker_on/run.log" || fail h3modspicker "mygulch was not turned on"
 		grep -aq "menus: h3 mp: the map picker: 14 maps (1 custom)" "$out/h3modspicker_on/run.log" ||
 			fail h3modspicker "the map picker did not offer mygulch, turned on again" ;;
+	h3renamed)
+		renamed_data=$out/renamed-data
+		rm -rf "$renamed_data"
+		mkdir -p "$renamed_data/maps"
+		for file in "$menus_data"/maps/*; do
+			ln -s "$(readlink -f "$file")" "$renamed_data/maps/$(basename "$file")"
+		done
+		ln -s "$(readlink -f "$menus_data/maps/bloodgulch.map")" "$renamed_data/maps/cursed-bloodgulch.map"
+		ln -s "$(readlink -f "$menus_data/maps/bloodgulch.map")" "$renamed_data/maps/gulch_two.map"
+		renamed_ce=
+		if [ -r "$ce_maps/extinction.map" ]; then
+			renamed_ce=1
+			ln -s "$(readlink -f "$ce_maps/extinction.map")" "$renamed_data/maps/extinction.map"
+			ln -s "$(readlink -f "$ce_maps/extinction.map")" "$renamed_data/maps/cursed-extinction.map"
+		fi
+		# (MULTIPLAYER, down two to MAP, A: the picker; down thirteen to the first custom row, A)
+		renamed_pad="$h3mppad down:150:500 down:150:500 a wait:150:2000"
+		for row in $(seq 1 13); do renamed_pad="$renamed_pad down:150:400"; done
+		renamed_pad="$renamed_pad a wait:150:3000"
+		run h3renamed "$renamed_data" 35 "$renamed_pad" HALO_MENU_STYLE=halo3 HALO_CUSTOM_EDITION=${renamed_ce:-0}
+		check_h3 h3renamed halo3
+		log=$out/h3renamed/run.log debug=$out/h3renamed/data/debug.txt
+		list=$(grep -ao "custom edition: the multiplayer level list: 13 Xbox levels, then .*" "$debug" | tail -1 | tr -d '\r')
+		echo "$list"
+		for name in cursed-bloodgulch gulch_two ${renamed_ce:+cursed-extinction extinction}; do
+			case "$list, " in *" $name, "*) ;; *) fail h3renamed "$name is not in the multiplayer level list" ;; esac
+		done
+		case "$list, " in *" bloodgulch, "*) fail h3renamed "Blood Gulch is listed twice" ;; esac
+		grep -aq "menus: h3 mp: map Cursed-bloodgulch (a custom map: levels.test.cursed-bloodgulch.cursed-bloodgulch)" "$log" ||
+			fail h3renamed "CURSED-BLOODGULCH was not the picker's first custom row, chosen"
+		grep -aq "menus: h3 mp lobby: NETWORK: SYSTEM LINK, GAME: SLAYER, MAP: CURSED-BLOODGULCH" "$log" ||
+			fail h3renamed "the lobby did not say CURSED-BLOODGULCH"
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "--- h3renamed_play"; echo "SKIP: no HALO_TEST_PROFILE"; continue
+		fi
+		# (local games, as h3mppause's: the renamed copy, Blood Gulch, the copy again, each on
+		# the save folder - its cache files - the one before left)
+		renamed_from=
+		for step in cursed-bloodgulch:play bloodgulch:stock cursed-bloodgulch:again; do
+			level=${step%%:*} name=h3renamed_${step##*:}
+			save_from=$renamed_from profile_from=$HALO_TEST_PROFILE run "$name" "$renamed_data" 45 "wait:150:3000" \
+				HALO_MENU_STYLE=halo3 HALO_NETWORK_TEST=local:$level:slayer HALO_NETWORK_TEST_PROFILE=1 \
+				HALO_NETWORK_TEST_START=3 HALO_BOTS=1
+			renamed_from=$out/$name/save
+			log=$out/$name/run.log debug=$out/$name/data/debug.txt
+			echo "--- $name"
+			grep -aE "network test: (map|starting)|join: the host's map" "$log" | head -4
+			grep -aq "network test: tick 300 " "$log" || fail "$name" "$level did not play (no tick 300)"
+			grep -aqiE "assert|exception|halt" "$log" && fail "$name" "an assertion, exception or halt"
+			grep -aq "names itself .* refused" "$debug" && fail "$name" "a map was refused for the name inside it"
+		done
+		grep -aq "map 'cursed-bloodgulch' names itself 'bloodgulch' in its header: a renamed copy, known as 'cursed-bloodgulch'" \
+			"$out/h3renamed_play/data/debug.txt" || fail h3renamed_play "cursed-bloodgulch was not taken as a renamed copy"
+		python3 - "$out/h3renamed_play/save/z" <<'PY' || fail h3renamed_play "no cache file is named cursed-bloodgulch"
+import glob, sys
+names = [open(f, 'rb').read(0x40)[0x20:0x40].split(b'\0')[0] for f in glob.glob(sys.argv[1] + '/cache00*.map')]
+sys.exit(0 if b'cursed-bloodgulch' in names and b'bloodgulch' not in names else 1)
+PY
+		grep -aq "starting precaching of map 'bloodgulch'" "$out/h3renamed_stock/data/debug.txt" ||
+			fail h3renamed_stock "Blood Gulch was taken from the renamed copy's cache file"
+		grep -aq "starting precaching of map 'cursed-bloodgulch'" "$out/h3renamed_again/data/debug.txt" &&
+			fail h3renamed_again "the renamed copy's cache file was not found by its name (copied again)" ;;
 	h3mpcustom)
 		# (MULTIPLAYER: the lobby on SYSTEM LINK; down two to MAP, A: the picker; down thirteen: past the
 		# last row it scrolls to MYGULCH; A: chosen; down to START GAME, A: the profile, A to join, A
@@ -2050,7 +2123,7 @@ for case in $cases; do
 		grep -aq "4way_start2join_screen\|menus: Server Browser: the profile" "$log" &&
 			fail browserprofile "internet play off: the profile screen opened anyway" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3lobbyscenes|h3modelsmany|h3friends|h3friendspanel|browserprofile|h3players|browserrows|profilepaths|h3mppause|h3friendsfit|h3hostonline|h3livelobby|h3groups|browserreopen|h3livebrowse|profileio]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3renamed|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3lobbyscenes|h3modelsmany|h3friends|h3friendspanel|browserprofile|h3players|browserrows|profilepaths|h3mppause|h3friendsfit|h3hostonline|h3livelobby|h3groups|browserreopen|h3livebrowse|profileio]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"

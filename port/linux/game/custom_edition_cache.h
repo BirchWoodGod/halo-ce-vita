@@ -88,10 +88,20 @@ boolean custom_edition_cache_missing_resource_maps(
 	char *missing,
 	long missing_size);
 /* TRUE when the map `map_name` names is an Xbox cache of a multiplayer
-scenario that the cache partition can take (named inside as its file is,
-and no longer than the Xbox's multiplayer maps): a modded or newly built
-Xbox map for the level list (custom_edition_maps.c); it needs no setting. */
+scenario that the cache partition can take (no longer than the Xbox's
+multiplayer maps): a modded or newly built Xbox map for the level list
+(custom_edition_maps.c); it needs no setting. A copy a player renamed
+(cursed-bloodgulch.map, named bloodgulch inside) is taken by its file's
+name, which the cache partition then knows it by
+(cache_files_windows.c, cache_file_read_header_from_dvd): not one named as
+an Xbox level, whose name must be the one inside. */
 boolean custom_edition_cache_xbox_multiplayer(
+	char const *map_name);
+/* TRUE when the map `map_name` names is such an Xbox cache named inside as
+another map (a renamed copy): never shared (custom_edition_maps_shareable),
+as map sharing knows an Xbox map by the name inside it
+(map_share_protocol.c). */
+boolean custom_edition_cache_xbox_renamed(
 	char const *map_name);
 /* What tells this machine's copy of the map `map_name` names from another
 (an Xbox or Custom Edition cache): its header checksum with its length, or

@@ -376,7 +376,12 @@ for a Halo Custom Edition one, **CE+OS** for an OpenSauce `.yelo`, marked
 the folder but is left out of the multiplayer map list (`HALO_MAPS_DISABLED`
 in `settings.txt`; a game on a map you turned off may not be joinable).
 Square deletes a map, with its `.bmp` picture and `.txt` description, after
-asking (not the map being played). **PC maps** (Off by default,
+asking (not the map being played). A map is listed and played under its
+file's name: a copy you renamed (`cursed-bloodgulch.map`, Blood Gulch
+inside) is a map of its own, beside the original, and the Xbox's own
+level stays listed once; a renamed Xbox map is not offered for download to
+joiners (they need the same file), as map sharing knows an Xbox map by the
+name inside it. **PC maps** (Off by default,
 experimental) puts the Custom Edition maps in the map list; the page warns
 when the Custom Edition resource maps they need (`bitmaps.map`,
 `sounds.map`, `loc.map`) are not in the maps folder. A Halo Custom Edition
