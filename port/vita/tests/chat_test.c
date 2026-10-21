@@ -398,6 +398,51 @@ static void test_filter_edges(void)
 		text[CHAT_FILTER_MAXIMUM_LENGTH] = 0;
 		check(chat_filter_count(text) > 0, "a word at the end of the longest line");
 	}
+	/* (a line made to try every way of reading symbols as letters: bounded,
+	masked whole; an ordinary line far from the bound) */
+	{
+		static const char *const hard[] =
+		{
+			"!@]&)!\\[(]^$*[!|]#(/]$|!^[\\&&^<<!(**!*#!&#/$)*!#])*]#]#(#/$#&#|",
+			"|!|!|!|!|!|!|!|!|!|!|!|!|!|!|!|!|!|!|!|!|!|!|!|!|!|!|!|!|!|!|!|",
+			"(|)(|)(|)(|)(|)(|)(|)(|)(|)(|)(|)(|)(|)(|)(|)(|)(|)(|)(|)(|)(|)",
+		};
+		unsigned int seed = 7;
+		long most = 0;
+
+		for (index = 0; index < (int)(sizeof(hard) / sizeof(hard[0])); index++)
+		{
+			chat_filter_count(hard[index]);
+			check(chat_filter_last_steps() <= CHAT_FILTER_MAXIMUM_STEPS + 1, "a hard line bounded (%ld steps)",
+				chat_filter_last_steps());
+		}
+		/* (symbol soup at random: each bounded; masked whole only when the
+		bound was reached) */
+		for (index = 0; index < 2000; index++)
+		{
+			static const char symbols[] = "!@#$%^&*()|<>[]/\\";
+			char line[64];
+			int at;
+
+			for (at = 0; at < 63; at++)
+			{
+				seed = seed * 1103515245u + 12345u;
+				line[at] = symbols[(seed >> 8) % (sizeof(symbols) - 1)];
+			}
+			line[63] = 0;
+			chat_filter_count(line);
+			if (chat_filter_last_steps() > most)
+				most = chat_filter_last_steps();
+		}
+		check(most <= CHAT_FILTER_MAXIMUM_STEPS + 1, "symbol soup bounded (%ld)", most);
+		check(chat_filter_count("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!") == 0 &&
+			chat_filter_count("???????????????????????????????????????????????????????????????") == 0 &&
+			chat_filter_count("lol 1111111111111111111111111111111111111111111111111111111111") == 0,
+			"runs of one symbol not masked");
+		chat_filter_count("the quick brown fox jumps over the lazy dog, nice shot! gg wp");
+		check(chat_filter_last_steps() < CHAT_FILTER_MAXIMUM_STEPS / 10, "an ordinary line's steps (%ld)",
+			chat_filter_last_steps());
+	}
 	/* (the file's lines it cannot read: skipped) */
 	chat_filter_reset();
 	check(chat_filter_load("whole\nwhole x\nwhole ab cd\nbogus abc\nanywhere a1b\n# c\nallow 12\n", 63) == 0,

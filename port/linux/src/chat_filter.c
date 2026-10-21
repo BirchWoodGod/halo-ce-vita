@@ -360,6 +360,9 @@ struct attempt
 	int rule;
 	long start;
 	long end;
+	/* the line's steps so far (every attempt's), and whether they ran out */
+	long *steps;
+	int *exhausted;
 };
 
 /* what a match has crossed so far */
@@ -494,6 +497,13 @@ static int chat_filter_next(struct attempt *attempt, long term_index, long eleme
 {
 	const struct element *element;
 
+	/* (a bound on the work: a line made to send the search down every way
+	of reading it stops here, and is masked whole) */
+	if (*attempt->exhausted || ++*attempt->steps > CHAT_FILTER_MAXIMUM_STEPS)
+	{
+		*attempt->exhausted = 1;
+		return 0;
+	}
 	if (term_index == attempt->length)
 		return chat_filter_finish(attempt, element_index, path);
 	if (element_index >= attempt->count)
@@ -586,12 +596,22 @@ static int chat_filter_try_letter(struct attempt *attempt, long term_index, long
 
 /* the text's characters that spell a word, marked in marked (as long as
 the text); how many matches */
+/* the steps the last line took (the tests') */
+static long chat_filter_steps_last;
+
+long chat_filter_last_steps(void)
+{
+	return chat_filter_steps_last;
+}
+
 static int chat_filter_find(const char *text, long length, unsigned char *marked)
 {
 	struct element elements[CHAT_FILTER_MAXIMUM_LENGTH];
 	long count;
 	long start;
 	int matches = 0;
+	long steps = 0;
+	int exhausted = 0;
 
 	memset(marked, 0, (size_t)length);
 	if (!chat_filter_words.term_count)
@@ -624,6 +644,8 @@ static int chat_filter_find(const char *text, long length, unsigned char *marked
 				attempt.rule = term->rule;
 				attempt.start = start;
 				attempt.end = start;
+				attempt.steps = &steps;
+				attempt.exhausted = &exhausted;
 				memset(&path, 0, sizeof(path));
 				if (chat_filter_try_letter(&attempt, 0, start, path))
 				{
@@ -633,8 +655,24 @@ static int chat_filter_find(const char *text, long length, unsigned char *marked
 						marked[unit] = 1;
 					matches++;
 				}
+				if (exhausted)
+					break;
 			}
+			if (exhausted)
+				break;
 		}
+		if (exhausted)
+			break;
+	}
+	chat_filter_steps_last = steps;
+	/* (the work ran out: the whole line masked, its spaces kept) */
+	if (exhausted)
+	{
+		long unit;
+
+		for (unit = 0; unit < length; unit++)
+			marked[unit] = text[unit] != ' ';
+		matches++;
 	}
 	return matches;
 }

@@ -32,6 +32,11 @@ enum chat_filter_rule
 
 /* the longest text looked at (the rest is masked by nothing) */
 #define CHAT_FILTER_MAXIMUM_LENGTH 256
+/* the most steps the search takes over one line: the ways a line of
+symbols and digits can be read as letters multiply, so a line made to try
+them all would take seconds; past these it stops, and the line is masked
+whole (an ordinary line takes a few hundred) */
+#define CHAT_FILTER_MAXIMUM_STEPS 20000
 
 /* every word and allowed word let go */
 void chat_filter_reset(void);
@@ -51,6 +56,8 @@ match's whole span, its spaces and punctuation too); how many matches */
 int chat_filter_mask(char *text);
 /* ... and only counted (text unchanged) */
 int chat_filter_count(const char *text);
+/* (the tests) the steps the last line's search took */
+long chat_filter_last_steps(void);
 
 #ifdef __cplusplus
 }
