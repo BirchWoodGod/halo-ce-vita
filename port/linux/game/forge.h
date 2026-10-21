@@ -402,6 +402,14 @@ boolean forge_net_hosting(
 	void);
 boolean forge_net_client_session(
 	void);
+/* (network_server_manager.c, the countdown at 0; the game's lobby) whether
+a joiner still building the host's packs holds the game's start: its
+machine's name and how far */
+boolean forge_net_server_holds_start(
+	struct network_game_server *server,
+	char *name,
+	int name_size,
+	short *percent);
 
 /* (network_server_message_handler.c, network_client_message_handler.c)
 the lobby's messages: a joiner's answer, the host's hello or refusal */

@@ -10288,7 +10288,18 @@ static void h3_pregame_update(struct widget_instance *widget)
 	if (seconds > 0)
 		snprintf(text, sizeof(text), T("Starting in %d:%02d"), seconds / 60, seconds % 60);
 	else if (seconds == 0)
-		snprintf(text, sizeof(text), "%s", T("Starting..."));
+	{
+		char builder[64];
+		short percent = 0;
+
+		/* (the host: a joiner still building the extra objects holds the
+		start, forge_net.inc) */
+		if (host && forge_net_server_holds_start(server, builder, (int)sizeof(builder), &percent))
+			snprintf(text, sizeof(text), T("Waiting for %s to build the extra objects (%d%%)"),
+				builder[0] ? builder : "?", (int)percent);
+		else
+			snprintf(text, sizeof(text), "%s", T("Starting..."));
+	}
 	else if (waiting)
 		snprintf(text, sizeof(text), "%s", cooperative && game->maximum_players <= 2 ? T("Waiting for your partner") :
 			T("Waiting for other players"));

@@ -240,12 +240,25 @@ static struct
 		unsigned long joined_time;
 		unsigned long hello_time;
 		uint32_t packs_ready;
+		/* (its _forge_net_lobby_building) the packs it still builds, how
+		far, when it last said */
+		uint32_t packs_building;
+		short building_percent;
+		unsigned long building_time;
+		unsigned long building_since;
 	} machines[FORGE_NET_MAXIMUM_MACHINES];
 	/* --- the lobby, a joiner's: the host said Forge (its hello, kept) */
 	boolean client_session;
 	uint32_t client_session_id;
 	/* (a joiner) its packs and blocks to be prebuilt in the lobby */
 	boolean prebuild_wanted;
+	/* (a joiner) each hello pack's own pack (NONE: not brought), the hello's
+	pack count; the building it said last and when */
+	short client_pack_of[FORGE_NET_MAXIMUM_PACKS];
+	short client_pack_count;
+	uint32_t client_building_said;
+	boolean client_building_any_said;
+	unsigned long client_building_time;
 	char host_title[FORGE_NET_TITLE_SIZE];
 	char missing_packs[FORGE_LINE_SIZE];
 	boolean refused_said;
@@ -863,13 +876,34 @@ void forge_net_server_handle_lobby_message(
 		if (forge_net.machines[slot].known && forge_net.machines[slot].machine_index == machine_index)
 			break;
 	}
-	if (slot == FORGE_NET_MAXIMUM_MACHINES || forge_net.machines[slot].refused || forge_net.machines[slot].answered)
+	if (slot == FORGE_NET_MAXIMUM_MACHINES || forge_net.machines[slot].refused)
 		return;
 	if (answer.session != forge_net.session)
 	{
 		network_event("forge net: an answer to another session");
 		return;
 	}
+	if (answer.command == _forge_net_lobby_building)
+	{
+		/* (after its answer only; the packs it brings only) */
+		uint32_t building = answer.packs_ready & forge_net.machines[slot].packs_ready;
+
+		if (!forge_net.machines[slot].answered)
+			return;
+		if (building != forge_net.machines[slot].packs_building)
+		{
+			platform_log("forge net: machine %ld %s (%d%%)", machine_index, building ?
+				"builds the host's packs: the game's start waits for it" : "has built the host's packs", (int)answer.flags);
+		}
+		if (building && !forge_net.machines[slot].packs_building)
+			forge_net.machines[slot].building_since = system_milliseconds();
+		forge_net.machines[slot].packs_building = building;
+		forge_net.machines[slot].building_percent = (short)answer.flags;
+		forge_net.machines[slot].building_time = system_milliseconds();
+		return;
+	}
+	if (forge_net.machines[slot].answered)
+		return;
 	if (answer.version != FORGE_NET_VERSION || !(answer.capabilities & FORGE_NET_CAPABILITY_FORGE))
 	{
 		platform_log("forge net: machine %ld plays network Forge version %d (this one %d): refused from the Forge game",
@@ -881,6 +915,62 @@ void forge_net_server_handle_lobby_message(
 	forge_net.machines[slot].answered = TRUE;
 	forge_net.machines[slot].packs_ready = answer.packs_ready;
 	platform_log("forge net: machine %ld plays the Forge game (packs ready %x)", machine_index, (unsigned)answer.packs_ready);
+}
+
+/* (network_server_manager.c, the countdown at 0) a joiner still building
+the packs the host brings holds the game's start, as a map's download does
+(map_share_server_holds_start): one that built them as the map loaded
+held its load past the host's wait for the machines' loads on a Vita (a
+minute: NETWORK_GAME_SERVER_MAXIMUM_WAIT_TIME_FOR_LEVEL_LOADING) and was
+dropped, the host's screen still for that minute. A joiner silent for
+FORGE_NET_BUILDING_STALE_MILLISECONDS holds nothing, nor one building for
+longer than FORGE_NET_BUILDING_MAXIMUM_MILLISECONDS (a joiner never holds a
+lobby for ever); one that leaves is forgotten */
+boolean forge_net_server_holds_start(
+	struct network_game_server *server,
+	char *name,
+	int name_size,
+	short *percent)
+{
+	static unsigned long logged_time;
+	unsigned long now = system_milliseconds();
+	short slot;
+
+	if (name && name_size > 0)
+		name[0] = 0;
+	if (percent)
+		*percent = 0;
+	if (!forge_net.hosting || !server)
+		return FALSE;
+	for (slot = 0; slot < FORGE_NET_MAXIMUM_MACHINES; slot++)
+	{
+		if (!forge_net.machines[slot].known || forge_net.machines[slot].refused || !forge_net.machines[slot].answered ||
+			!forge_net.machines[slot].packs_building ||
+			now - forge_net.machines[slot].building_time >= FORGE_NET_BUILDING_STALE_MILLISECONDS ||
+			now - forge_net.machines[slot].building_since >= FORGE_NET_BUILDING_MAXIMUM_MILLISECONDS)
+		{
+			continue;
+		}
+		if (name && name_size > 0)
+		{
+			struct network_game *game = network_game_get_game();
+			long machine_index = forge_net.machines[slot].machine_index;
+
+			if (game && machine_index >= 0 && machine_index < (long)NUMBEROF(game->machines))
+				wide_to_ascii(game->machines[machine_index].name, name, name_size);
+		}
+		if (percent)
+			*percent = forge_net.machines[slot].building_percent;
+		if (!logged_time || now - logged_time >= 5000)
+		{
+			network_event("forge net: the game's start waits for machine #%ld's build of the host's packs (%d%%)",
+				forge_net.machines[slot].machine_index, (int)forge_net.machines[slot].building_percent);
+			logged_time = now;
+		}
+		return TRUE;
+	}
+	logged_time = 0;
+	return FALSE;
 }
 
 void forge_net_client_handle_lobby_message(
@@ -952,6 +1042,10 @@ void forge_net_client_handle_lobby_message(
 	not shown) */
 	forge_globals.packs_session = 0;
 	forge_net.missing_packs[0] = 0;
+	forge_net.client_pack_count = (short)hello.pack_count;
+	forge_net.client_building_any_said = FALSE;
+	for (index = 0; index < FORGE_NET_MAXIMUM_PACKS; index++)
+		forge_net.client_pack_of[index] = NONE;
 	for (index = 0; index < hello.pack_count; index++)
 	{
 		struct forge_net_pack pack;
@@ -969,6 +1063,7 @@ void forge_net_client_handle_lobby_message(
 			{
 				forge_globals.packs_session |= 1UL << ours;
 				answer.packs_ready |= 1u << index;
+				forge_net.client_pack_of[index] = ours;
 				continue;
 			}
 		}
@@ -990,6 +1085,70 @@ void forge_net_client_handle_lobby_message(
 	platform_log("forge net: the host's game is a Forge game (session %08x%s%s): playing it, packs %lx%s%s",
 		(unsigned)hello.session, hello.title[0] ? ", map variant " : "", hello.title, forge_globals.packs_session,
 		forge_net.missing_packs[0] ? ", missing: " : "", forge_net.missing_packs);
+}
+
+/* (a joiner in the host's lobby) the hello's packs it brings that are
+still being built, said to the host every FORGE_NET_BUILDING_MILLISECONDS,
+and once when none is left (_forge_net_lobby_building) */
+static void forge_net_client_building_update(
+	void)
+{
+	struct network_game_client *client = global_network_game_client_get();
+	struct forge_net_lobby_message building;
+	unsigned long now = system_milliseconds();
+	long done_sum = 0;
+	short index, count = 0;
+
+	if (!client)
+		return;
+	csmemset(&building, 0, sizeof(building));
+	building.command = _forge_net_lobby_building;
+	building.version = FORGE_NET_VERSION;
+	building.session = forge_net.client_session_id;
+	for (index = 0; index < forge_net.client_pack_count && index < FORGE_NET_MAXIMUM_PACKS; index++)
+	{
+		short ours = forge_net.client_pack_of[index];
+		short state;
+		long done = 0;
+
+		if (ours == NONE)
+			continue;
+		state = scene_packs_status(forge_packs[ours].name, &done, NULL, 0);
+		/* (being checked or built, or waiting its turn: a failed one is
+		left out, never waited for) */
+		if (state == _scene_pack_state_building)
+		{
+			building.packs_ready |= 1u << index;
+			done_sum += PIN(done, 0, 100);
+			count++;
+		}
+	}
+	building.flags = count ? (uint32_t)(done_sum / count) : 100;
+	if (forge_net.client_building_any_said && building.packs_ready == forge_net.client_building_said &&
+		(!building.packs_ready || now - forge_net.client_building_time < FORGE_NET_BUILDING_MILLISECONDS))
+	{
+		return;
+	}
+	/* (none ever building: nothing to say) */
+	if (!forge_net.client_building_any_said && !building.packs_ready)
+		return;
+	{
+		void *reply = create_network_game_message(_message_client_forge, &building, sizeof(building));
+
+		if (!reply || !network_game_client_send_to_server(client, reply))
+		{
+			network_event("forge net: the packs' build could not be said");
+			return;
+		}
+	}
+	if (building.packs_ready != forge_net.client_building_said || !forge_net.client_building_any_said)
+	{
+		platform_log("forge net: %s", building.packs_ready ? "the host's packs still building here: said to the host" :
+			"the host's packs built here: said to the host");
+	}
+	forge_net.client_building_said = building.packs_ready;
+	forge_net.client_building_any_said = TRUE;
+	forge_net.client_building_time = now;
 }
 
 /* (main.c, each frame) the lobby: the host's hellos; a joiner's session
@@ -1025,6 +1184,11 @@ void forge_net_frame(
 			platform_log("forge net: the host's packs and %s's blocks prebuilt in its lobby", map_name);
 		}
 	}
+	/* (a joiner in the host's lobby, its prebuild asked: the packs still
+	building said to the host, which holds the game's start for them; once
+	more when all are built) */
+	if (forge_net.client_session && !forge_net.prebuild_wanted && halo_main_menu_loaded())
+		forge_net_client_building_update();
 }
 
 /* ---------- the host: its palette */

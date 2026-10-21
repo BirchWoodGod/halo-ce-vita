@@ -593,6 +593,33 @@ int net_fuzz_checks(void)
 	CHECK(!forge_net_lobby_valid(&message, 1), "a refusal of no reason refused");
 	message.reason = _forge_net_refusal_full;
 	CHECK(forge_net_lobby_valid(&message, 1), "a refusal taken");
+	/* (a joiner's packs still building: their bits and its percent) */
+	memset(&message, 0, sizeof(message));
+	message.command = _forge_net_lobby_building;
+	message.version = FORGE_NET_VERSION;
+	message.packs_ready = 0x3;
+	message.flags = 40;
+	CHECK(forge_net_lobby_valid(&message, 0), "a joiner's build said taken");
+	CHECK(!forge_net_lobby_valid(&message, 1), "a build said by the host refused");
+	message.flags = 101;
+	CHECK(!forge_net_lobby_valid(&message, 0), "a build past 100% refused");
+	message.flags = 100;
+	message.packs_ready = 0x100;
+	CHECK(!forge_net_lobby_valid(&message, 0), "a build of a ninth pack refused");
+	message.packs_ready = 0;
+	message.capabilities = 1;
+	CHECK(!forge_net_lobby_valid(&message, 0), "a build said with capabilities refused");
+	message.capabilities = 0;
+	message.pack_count = 1;
+	CHECK(!forge_net_lobby_valid(&message, 0), "a build said naming packs refused");
+	message.pack_count = 0;
+	strcpy(message.title, "x");
+	CHECK(!forge_net_lobby_valid(&message, 0), "a build said with a title refused");
+	message.title[0] = 0;
+	message.reason = _forge_net_refusal_full;
+	CHECK(!forge_net_lobby_valid(&message, 0), "a build said with a reason refused");
+	message.reason = 0;
+	CHECK(forge_net_lobby_valid(&message, 0), "all built said taken");
 
 	/* the replay window */
 	memset(&sequence, 0, sizeof(sequence));
