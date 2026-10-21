@@ -100,6 +100,13 @@ before the whole cache (an approximate LRU); 0, the whole cache always */
 void lruv_set_search_window(
 	struct lruv_cache *cache,
 	long blocks);
+
+/* (port) lruv_block_new, but the blocks used this tick are not held: the
+least recently used run of the size is taken, with them in it only when no
+run is free of them (still never a locked block) */
+long lruv_block_new_least_recent(
+	struct lruv_cache *cache,
+	long size);
 #endif
 
 void lruv_idle(

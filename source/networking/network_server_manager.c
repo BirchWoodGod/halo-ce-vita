@@ -1572,7 +1572,17 @@ void network_game_server_dispose(
 		network_connection_delete(server->connection);
 
 #ifdef xbox
+	/* port: not the Xbox's second of sleep, on the game thread: leaving the
+	Halo 3 multiplayer lobby (h3_live_close), or any hosted game, held a frame
+	1000 ms (time+ui 1000.3 ms in halo.log's frame-hitch line). It gave
+	XNet time to send the going-down message above before the key went;
+	here that message is in the machines' streams already, each connection's
+	last reliable messages are flushed as it is deleted
+	(network_connection_flush_reliable_last) and its socket closes
+	gracefully, delivering what it holds */
+#ifndef HALO_LINUX
 	SleepEx(MILLISECONDS_PER_SECOND, FALSE);
+#endif
 	transport_server_terminate();
 #endif
 
