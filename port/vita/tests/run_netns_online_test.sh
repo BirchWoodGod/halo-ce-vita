@@ -662,6 +662,8 @@
 #                    is then looked for)
 #   HALO_TEST_JOIN_ENV   more VAR=value settings for the joiner
 #   HALO_TEST_JOIN2_ENV  more VAR=value settings for the second joiner alone
+#   HALO_TEST_ENV_<copy>  more VAR=value settings for that copy alone (its
+#                    name: host, joiner, joiner2, joiner1 ...)
 #   HALO_TEST_HOST_SAVE  a save folder (u/UDATA/...) copied into the host's: its
 #                    game types (code: HALO_TEST_HOST_GAME=host:bloodgulch:saved=Vita_Slayer,
 #                    '_' for a space, hosts the saved game type online; the joiner must
@@ -922,6 +924,7 @@ run_copy() { # run_copy NAME NETNS_PID BINARY CPUS [ENV...]
 		"$@" ${HALO_TEST_ENV:-} \
 		$([ "$name" = joiner ] || [ "$name" = joiner2 ] && echo "${HALO_TEST_JOIN_ENV:-}") \
 		$([ "$name" = joiner2 ] && echo "${HALO_TEST_JOIN2_ENV:-}") \
+		$(eval "echo \"\${HALO_TEST_ENV_$name:-}\"") \
 		taskset -c "$cores" timeout -k 5 $((seconds + 60)) "$binary" $copy_args > "$out/$name/run.log" 2>&1) &
 	pids="$pids $!"
 	last_pid=$!

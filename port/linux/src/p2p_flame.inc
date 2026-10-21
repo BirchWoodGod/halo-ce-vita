@@ -11,10 +11,12 @@ has not checked it itself.
   NETWORK_PLAYER_FLAME_CLAIM (players.h), a field the game leaves unread
   (NONE always, before this) and the record carries whole; a hint to ask,
   never trusted. Builds before it carry it and read nothing of it. Never on
-  the crossplay wire (the cards are not either).
+  the crossplay wire.
 - The proof: every machine that sees a claim asks the claimant's machine
-  (on the friend cards' channel, p2p.c's packet type 7, relayed by the host
-  as cards are: CARD_FLAME_ASK, a fresh nonce) and the claimant answers
+  in the game's own messages (port/linux/game/flame_net.c: any network
+  game, online, System Link, ad hoc, a dedicated server's; the host relays
+  between its joiners, its own reading of each sender's machine in place
+  of the sender's word: CARD_FLAME_ASK, a fresh nonce) and the claimant answers
   (CARD_FLAME_ANSWER) with its friend identity's key and an Ed25519
   signature of "hcev-flame-1 claim", its machine, the asker's, the nonce,
   the key and its player's name as the game's record has it. The asker
@@ -30,10 +32,11 @@ has not checked it itself.
 - What a tester can do with their own key (lend their flame, as by giving
   away their identity.dat) only a new list takes back: one key lights one
   player a game.
-- Builds before this one drop the two kinds as malformed (card_heard): their
-  host relays none (its joiners see only the host's own flame and their own,
-  none the host's: an older host has no flame), their joiners ask nothing
-  and answer nothing.
+- Builds before this one drop the two messages as unknown packet types:
+  their host relays none (its joiners see only their own flames), their
+  joiners ask nothing and answer nothing.
+- The work (the signatures) is done on the game's main loop, a few packets
+  a frame (p2p_flame_update): a handful of proofs a game.
 
 (debug, not in release builds) HALO_TEST_FLAME_FORCE=1: claims and answers
 as if listed (a player who forced the bit: nobody may draw it);
@@ -71,11 +74,6 @@ static int flame_name_known(const unsigned char *name)
 		if (name[index])
 			return 1;
 	return 0;
-}
-
-static int flame_kind(int kind)
-{
-	return kind == CARD_FLAME_ASK || kind == CARD_FLAME_ANSWER;
 }
 
 /* a list's file read whole (at most the largest list, one byte more to see
@@ -220,14 +218,44 @@ static int listed_now(const unsigned char *bytes)
 	return tester_list_find(&friends->flame_list, bytes + CARD_HEADER_SIZE, unix_now()) >= 0;
 }
 
+/* where a packet for a machine goes: a host's, that machine (one of the
+game's); a joiner's, the host (-1) */
+static int flame_route(int machine, int *destination)
+{
+	if (machine < 0 || machine >= CARD_MACHINES)
+		return 0;
+	if (!friends->game_hosting)
+	{
+		*destination = -1;
+		return 1;
+	}
+	*destination = machine;
+	return machine != friends->game_machine && friends->machines[machine].flame_present;
+}
+
+static void flame_queue(int destination, const unsigned char *bytes, int size)
+{
+	struct flame_packet *packet;
+
+	if (friends->flame_outbound_count >= MAXIMUM_FLAME_PACKETS || size > (int)sizeof(packet->bytes))
+	{
+		friends->dropped_rate++;
+		return;
+	}
+	packet = &friends->flame_outbound[friends->flame_outbound_count++];
+	packet->machine = destination;
+	packet->from_host = 0;
+	packet->size = size;
+	memcpy(packet->bytes, bytes, (size_t)size);
+}
+
 /* this machine's answer to an ask of a machine (its nonce) */
 static void flame_answer(int machine, const unsigned char *nonce)
 {
 	unsigned char packet[FLAME_ANSWER_SIZE], data[64 + FLAME_ANSWER_SIZE + FLAME_NAME_SIZE];
-	unsigned long address;
-	int size;
+	int size, destination;
 
-	if (!card_route(machine, &address))
+	if (!flame_route(machine, &destination))
 		return;
 	packet[0] = CARD_VERSION;
 	packet[1] = CARD_FLAME_ANSWER;
@@ -237,7 +265,7 @@ static void flame_answer(int machine, const unsigned char *nonce)
 	memcpy(packet + CARD_HEADER_SIZE, friends->key, P2P_KEY_SIZE);
 	size = flame_signed_data(friends->game_machine, machine, nonce, friends->key, friends->flame_own_name, data);
 	p2p_ed25519_sign(friends->seed, friends->key, data, size, packet + FLAME_ANSWER_SIZE - P2P_SIGNATURE_SIZE);
-	card_queue(address, packet, FLAME_ANSWER_SIZE);
+	flame_queue(destination, packet, FLAME_ANSWER_SIZE);
 }
 
 /* (the tests' modified host) an ask for another machine answered by the
@@ -248,7 +276,7 @@ static void flame_forge_answer(int asker, int claimant, const unsigned char *non
 	unsigned char packet[FLAME_ANSWER_SIZE], data[64 + FLAME_ANSWER_SIZE + FLAME_NAME_SIZE];
 	int size;
 
-	if (!friends->machines[asker].address)
+	if (!friends->machines[asker].flame_present)
 		return;
 	flame_load();
 	packet[0] = CARD_VERSION;
@@ -261,7 +289,7 @@ static void flame_forge_answer(int asker, int claimant, const unsigned char *non
 	size = flame_signed_data(claimant, asker, nonce, packet + CARD_HEADER_SIZE, friends->machines[claimant].flame_name,
 		data);
 	p2p_ed25519_sign(friends->seed, friends->key, data, size, packet + FLAME_ANSWER_SIZE - P2P_SIGNATURE_SIZE);
-	card_queue(friends->machines[asker].address, packet, FLAME_ANSWER_SIZE);
+	flame_queue(asker, packet, FLAME_ANSWER_SIZE);
 	platform_log("flame: test: the modified host forged machine %d's flame proof for machine %d", claimant, asker);
 }
 
@@ -274,14 +302,16 @@ static void flame_relay(int sender, int to, const unsigned char *bytes, int size
 	unsigned char relayed[FLAME_ANSWER_SIZE];
 	int forging = flame_test_setting("HALO_TEST_FLAME_FORGE_HOST");
 
-	if (!friends->machines[to].address ||
-		(machine->flame_relayed_time && !elapsed(machine->flame_relayed_time, FLAME_RELAY_MACHINE_INTERVAL)) ||
-		!budget_left(&friends->card_relay_budget, CARD_RELAY_BUDGET, CARD_RELAY_INTERVAL, 1))
+	/* (a few at once from a machine - an ask of each claimant, its answers -
+	then one each FLAME_RELAY_MACHINE_INTERVAL; a few dozen a second in all) */
+	if (!friends->machines[to].flame_present ||
+		!budget_left(&machine->flame_relay_budget, FLAME_RELAY_MACHINE_BUDGET, FLAME_RELAY_MACHINE_INTERVAL, 1) ||
+		!budget_left(&friends->flame_relay_budget, FLAME_RELAY_BUDGET, FLAME_RELAY_INTERVAL, 1))
 	{
 		friends->dropped_rate++;
+		platform_log("flame: machine %d's flame packet to machine %d not relayed: too many at once", sender, to);
 		return;
 	}
-	machine->flame_relayed_time = now_stamp();
 	if (forging && bytes[1] == CARD_FLAME_ASK && to < CARD_MACHINES)
 	{
 		flame_forge_answer(sender, to, bytes + 4);
@@ -301,7 +331,7 @@ static void flame_relay(int sender, int to, const unsigned char *bytes, int size
 	}
 	memcpy(relayed, bytes, (size_t)size);
 	relayed[2] = (unsigned char)sender;
-	card_queue(friends->machines[to].address, relayed, size);
+	flame_queue(to, relayed, size);
 }
 
 /* a flame packet for this machine, from a machine (the host's reading of
@@ -372,7 +402,7 @@ static void flame_heard(int from, const unsigned char *bytes)
 	platform_log("flame: machine %d's flame claim refused: %s", from, why);
 }
 
-/* (cards_update, friends_lock held) the claims seen, asked about */
+/* (friends_lock held) the claims seen, asked about */
 static void flame_update(void)
 {
 	int index;
@@ -381,13 +411,13 @@ static void flame_update(void)
 	/* (a server draws nothing: it asks nothing, relays checked proofs) */
 	return;
 #endif
-	if (!friends->in_game || friends->host.crossplay)
+	if (!friends->in_game)
 		return;
 	for (index = 0; index < CARD_MACHINES; index++)
 	{
 		struct card_machine *machine = &friends->machines[index];
 		unsigned char packet[CARD_HEADER_SIZE];
-		unsigned long address;
+		int destination;
 
 		if (index == friends->game_machine || !machine->flame_claim || machine->flame_verified ||
 			machine->flame_refused)
@@ -403,7 +433,7 @@ static void flame_update(void)
 		}
 		if (machine->flame_tries >= FLAME_TRIES ||
 			(machine->flame_asked_time && !elapsed(machine->flame_asked_time, FLAME_ASK_INTERVAL)) ||
-			!card_route(index, &address))
+			!flame_route(index, &destination))
 		{
 			continue;
 		}
@@ -416,12 +446,119 @@ static void flame_update(void)
 		packet[2] = (unsigned char)friends->game_machine;
 		packet[3] = (unsigned char)index;
 		memcpy(packet + 4, machine->flame_nonce, NONCE_LENGTH);
-		card_queue(address, packet, CARD_HEADER_SIZE);
+		flame_queue(destination, packet, CARD_HEADER_SIZE);
 		platform_log("flame: machine %d's player claims the flaming helmet; asked for its proof", index);
 	}
 }
 
+/* (friends_lock held) a packet heard: checked, relayed by a host, else
+taken as this machine's */
+static void flame_packet_heard(const struct flame_packet *packet)
+{
+	const unsigned char *bytes = packet->bytes;
+	int from, to;
+
+	if (packet->size < CARD_HEADER_SIZE || bytes[0] != CARD_VERSION ||
+		!((bytes[1] == CARD_FLAME_ASK && packet->size == CARD_HEADER_SIZE) ||
+		(bytes[1] == CARD_FLAME_ANSWER && packet->size == FLAME_ANSWER_SIZE)) || !friends->in_game)
+	{
+		friends->dropped_malformed++;
+		return;
+	}
+	from = bytes[2];
+	to = bytes[3];
+	if (from >= CARD_MACHINES || to >= CARD_MACHINES || from == to)
+	{
+		friends->dropped_malformed++;
+		return;
+	}
+	if (friends->game_hosting)
+	{
+		/* (the sender's machine as this host has it, whatever it said) */
+		if (packet->from_host || packet->machine < 0 || packet->machine >= CARD_MACHINES ||
+			packet->machine == friends->game_machine)
+		{
+			friends->dropped_forged++;
+			return;
+		}
+		from = packet->machine;
+		if (to != friends->game_machine)
+		{
+			flame_relay(from, to, bytes, packet->size);
+			return;
+		}
+	}
+	else if (!packet->from_host || to != friends->game_machine)
+	{
+		/* (a joiner hears them from its host alone, to its own machine) */
+		friends->dropped_forged++;
+		return;
+	}
+	flame_heard(from, bytes);
+}
+
 /* ---------- the game's side (p2p_friends.h) */
+
+void p2p_flame_heard(int machine, const unsigned char *bytes, int size)
+{
+	struct flame_packet *packet;
+
+	if (size <= 0 || size > FLAME_ANSWER_SIZE)
+		return;
+	pthread_mutex_lock(&friends_lock);
+	if (friends->flame_inbound_count >= MAXIMUM_FLAME_PACKETS)
+		friends->dropped_rate++;
+	else
+	{
+		packet = &friends->flame_inbound[friends->flame_inbound_count++];
+		packet->machine = machine;
+		packet->from_host = machine < 0;
+		packet->size = size;
+		memcpy(packet->bytes, bytes, (size_t)size);
+	}
+	pthread_mutex_unlock(&friends_lock);
+}
+
+void p2p_flame_update(void)
+{
+	int handled = 0;
+
+	pthread_mutex_lock(&friends_lock);
+	while (friends->flame_inbound_count && handled < FLAME_PACKETS_PER_PASS)
+	{
+		struct flame_packet packet = friends->flame_inbound[0];
+
+		memmove(&friends->flame_inbound[0], &friends->flame_inbound[1],
+			sizeof(friends->flame_inbound[0]) * (size_t)(friends->flame_inbound_count - 1));
+		friends->flame_inbound_count--;
+		flame_packet_heard(&packet);
+		handled++;
+	}
+	flame_update();
+	pthread_mutex_unlock(&friends_lock);
+}
+
+int p2p_flame_outgoing(int index, int *machine, unsigned char *bytes, int capacity)
+{
+	int size = -1;
+
+	pthread_mutex_lock(&friends_lock);
+	if (index >= 0 && index < friends->flame_outbound_count && friends->flame_outbound[index].size <= capacity)
+	{
+		*machine = friends->flame_outbound[index].machine;
+		size = friends->flame_outbound[index].size;
+		memcpy(bytes, friends->flame_outbound[index].bytes, (size_t)size);
+	}
+	pthread_mutex_unlock(&friends_lock);
+	return size;
+}
+
+void p2p_flame_sent(void)
+{
+	pthread_mutex_lock(&friends_lock);
+	friends->flame_outbound_count = 0;
+	pthread_mutex_unlock(&friends_lock);
+}
 
 int p2p_flame_listed(void)
 {
@@ -448,7 +585,8 @@ int p2p_flame_forging_host(void)
 	return flame_test_setting("HALO_TEST_FLAME_FORGE_HOST");
 }
 
-void p2p_flame_set_players(const int *claims, const unsigned short *names, int count, const unsigned short *own_name)
+void p2p_flame_set_players(const int *present, const int *claims, const unsigned short *names, int count,
+	const unsigned short *own_name)
 {
 	int index, unit;
 
@@ -465,6 +603,8 @@ void p2p_flame_set_players(const int *claims, const unsigned short *names, int c
 		struct card_machine *machine = &friends->machines[index];
 		unsigned char name[FLAME_NAME_SIZE];
 		int claim = claims && index < count && claims[index];
+
+		machine->flame_present = (present && index < count && present[index]) || claim;
 
 		memset(name, 0, sizeof(name));
 		for (unit = 0; claim && unit < FLAME_NAME_SIZE / 2; unit++)

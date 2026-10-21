@@ -265,10 +265,22 @@ int p2p_flame_listed(void);
 int p2p_flame_wearing(void);
 /* (the tests' modified host, not in release builds) */
 int p2p_flame_forging_host(void);
-/* the game's record, each second: each machine's player's claim (count
-machines; nonzero: claimed) and its name (12 UTF-16 units a machine), and
-this machine's own player's name there (what its proof signs) */
-void p2p_flame_set_players(const int *claims, const unsigned short *names, int count, const unsigned short *own_name);
+/* the game's record, each second: which machines have a player in it, each
+machine's player's claim (count machines; nonzero: claimed) and its name
+(12 UTF-16 units a machine), and this machine's own player's name there
+(what its proof signs) */
+void p2p_flame_set_players(const int *present, const int *claims, const unsigned short *names, int count,
+	const unsigned short *own_name);
+/* the proofs' packets, in the game's own messages (port/linux/game/
+flame_net.c): one heard (machine: a host's reading of the joiner that sent
+it; -1 one from the host), the work of a pass (the game's main loop, each
+frame: the signatures checked and made here), the index-th to send (its
+machine: a host's destination, -1 the host; its size, -1 past the end),
+then all let go */
+void p2p_flame_heard(int machine, const unsigned char *bytes, int size);
+void p2p_flame_update(void);
+int p2p_flame_outgoing(int index, int *machine, unsigned char *bytes, int capacity);
+void p2p_flame_sent(void);
 /* a machine's player's flame proven to this machine (draw it) */
 int p2p_flame_verified(int machine);
 

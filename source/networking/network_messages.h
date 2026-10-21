@@ -76,6 +76,13 @@ enum network_game_message_type
 	alone. Never sent on the crossplay wire */
 	_message_client_game_rules,
 	_message_server_game_rules,
+	/* port: the tester's flaming helmet's proofs (port/linux/game/flame_net.h,
+	port/linux/src/p2p_flame.inc), both ways, in any state of any network
+	game: a joiner's to the host, the host's (its own or relayed) to a
+	joiner. A build without them drops them as unknown packet types. Never
+	sent on the crossplay wire */
+	_message_client_flame,
+	_message_server_flame,
 	NUMBER_OF_NETWORK_GAME_MESSAGE_TYPES,
 };
 

@@ -204,6 +204,7 @@ symbols in this file:
 #include "forge.h"
 #include "infection_net.h"
 #include "network_game_record.h"
+#include "flame_net.h"
 #include "network_wire.h"
 #include "net_fuzz_twin.h"
 
@@ -745,6 +746,23 @@ boolean network_game_client_handle_message(
 					/* port: the game's rules the host's game needs
 					(port/linux/game/infection_net.c), the host's alone, never on
 					the crossplay wire */
+					/* port: the flaming helmet's proofs (port/linux/game/
+					flame_net.c), the host's alone, never on the crossplay wire */
+					case _message_server_flame:
+						if (network_wire_crossplay())
+						{
+							network_event("ignoring a flame message on the crossplay wire");
+						}
+						else if (network_game_client_address_matches_server(client, source_address))
+						{
+							flame_net_client_handle_message(client, message, message_size);
+						}
+						else
+						{
+							network_event("ignoring a flame message from a system that is not the host");
+						}
+						break;
+
 					case _message_server_game_rules:
 						if (network_wire_crossplay())
 						{

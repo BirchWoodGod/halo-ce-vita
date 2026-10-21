@@ -268,6 +268,7 @@ its claimant's name, and this machine's own player's name there */
 static void friends_game_flame_players(struct network_game_client *client)
 {
 	static int claims[HALO_PORT_MAXIMUM_NETWORK_MACHINES];
+	static int present[HALO_PORT_MAXIMUM_NETWORK_MACHINES];
 	static unsigned short names[HALO_PORT_MAXIMUM_NETWORK_MACHINES][FLAME_PLAYER_NAME_LENGTH];
 	unsigned short own_name[FLAME_PLAYER_NAME_LENGTH];
 	struct network_game *game = network_game_client_get_game(client);
@@ -277,6 +278,7 @@ static void friends_game_flame_players(struct network_game_client *client)
 	typedef char name_length_check[FLAME_PLAYER_NAME_LENGTH == 12 ? 1 : -1];
 	(void)sizeof(name_length_check);
 	memset(claims, 0, sizeof(claims));
+	memset(present, 0, sizeof(present));
 	memset(names, 0, sizeof(names));
 	memset(own_name, 0, sizeof(own_name));
 	for (index = 0; index < HALO_PORT_MAXIMUM_NETWORK_PLAYERS && game; index++)
@@ -286,6 +288,7 @@ static void friends_game_flame_players(struct network_game_client *client)
 
 		if (!network_player_is_valid(player) || machine < 0 || machine >= HALO_PORT_MAXIMUM_NETWORK_MACHINES)
 			continue;
+		present[machine] = 1;
 		if (machine == own && (!own_found || player->icon_index == NETWORK_PLAYER_FLAME_CLAIM))
 		{
 			own_found = 1;
@@ -300,7 +303,7 @@ static void friends_game_flame_players(struct network_game_client *client)
 		for (unit = 0; unit < FLAME_PLAYER_NAME_LENGTH && player->name[unit]; unit++)
 			names[machine][unit] = (unsigned short)player->name[unit];
 	}
-	p2p_flame_set_players(claims, &names[0][0], HALO_PORT_MAXIMUM_NETWORK_MACHINES, own_name);
+	p2p_flame_set_players(present, claims, &names[0][0], HALO_PORT_MAXIMUM_NETWORK_MACHINES, own_name);
 }
 
 /* the game this machine plays, told to friends: its machine, whether it
@@ -468,6 +471,13 @@ void friends_game_update(boolean main_menu_loaded)
 		friends_game.activity_time = now ? now : 1;
 		friends_game_activity(main_menu_loaded);
 		friends_game_network();
+	}
+	/* (the flaming helmet's proofs: their checks' work and their packets,
+	each frame: flame_net.c) */
+	{
+		void flame_net_update(void);
+
+		flame_net_update();
 	}
 	friends_game_invites(main_menu_loaded);
 	friends_game_party_invites(main_menu_loaded);
