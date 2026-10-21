@@ -2276,7 +2276,9 @@ if not any(r['local'] for r in players):
     say("this machine's player is not marked")
 ranked = sorted(players, key=lambda r: r['place'])
 for a, b in zip(ranked, ranked[1:]):
-    if key(a) < key(b):
+    # (a time's score is ranked by its ticks: two shown alike, "0:02", may
+    # differ by less than a second, the one with fewer kills placed above)
+    if key(a) < key(b) and not (':' in a['score'] and ':' in b['score'] and score(a['score']) == score(b['score'])):
         say('%s placed above %s with less' % (a['name'], b['name']))
     # (a place is shared only by players alike; players alike as shown may
     # differ by less than a second of a time's score)
