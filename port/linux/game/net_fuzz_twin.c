@@ -65,6 +65,11 @@ static struct
 	unsigned char kinds[32];
 	unsigned long state;
 	unsigned long count;
+	/* the twins made of each direction, and of a client's messages on the
+	host each type (a game packet's) or kind (a distributed message's, 256
+	on): what a run reached, for the tests to check */
+	unsigned long direction_counts[3];
+	unsigned long client_types[512];
 	char dump_path[512];
 	struct
 	{
@@ -364,9 +369,39 @@ int net_fuzz_twin(
 	memcpy(net_fuzz.ring[slot].original, message, size);
 	memcpy(net_fuzz.ring[slot].bytes, bytes, (size_t)length);
 	net_fuzz.count++;
+	if (direction >= 0 && direction < 3)
+		net_fuzz.direction_counts[direction]++;
+	if (direction == _net_fuzz_twin_host_from_client)
+	{
+		unsigned short header;
+
+		memcpy(&header, message, 2);
+		if (((header >> 2) & 3) == 3)
+			net_fuzz.client_types[((unsigned char const *)message)[size - 1]]++;
+		else if (((header >> 2) & 3) == 2)
+			net_fuzz.client_types[256 + ((unsigned char const *)message)[2]]++;
+	}
 	if (!(net_fuzz.count % 1024) || net_fuzz.count == 16 || net_fuzz.count == 256)
 	{
+		char types[1024];
+		int index, at = 0;
+
 		fprintf(stderr, "net fuzz twin: %lu twins (direction %d)\n", net_fuzz.count, direction);
+		/* (what was reached: twins of the clients' messages and datagrams;
+		the messages' packet types, and distributed kinds as d<kind>) */
+		types[0] = 0;
+		for (index = 0; index < 512 && at < (int)sizeof(types) - 24; index++)
+		{
+			if (net_fuzz.client_types[index])
+			{
+				at += snprintf(types + at, sizeof(types) - at, index < 256 ? " %d:%lu" : " d%d:%lu", index & 255,
+					net_fuzz.client_types[index]);
+			}
+		}
+		fprintf(stderr, "net fuzz twin: client messages %lu, datagrams %lu, host messages %lu; client types%s\n",
+			net_fuzz.direction_counts[_net_fuzz_twin_host_from_client],
+			net_fuzz.direction_counts[_net_fuzz_twin_host_datagram],
+			net_fuzz.direction_counts[_net_fuzz_twin_client_from_host], types);
 		net_fuzz_dump();
 	}
 	return 1;
