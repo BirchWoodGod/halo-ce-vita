@@ -45,6 +45,10 @@ struct halo_menu_bitmap
 {
 	char const *name;
 	char const *resource;
+	/* fit="widget": each frame drawn whole into its widget's bounds,
+	scaled (a picture of more pixels than the 640x480 screen gives it, so
+	sharp on the Vita's 960x544 interface layer), not 1:1 from its top left */
+	char const *fit;
 	/* its frames: frame_count from first_frame in the frames */
 	long first_frame, frame_count;
 	char const *file;

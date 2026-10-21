@@ -16,6 +16,10 @@ art is this folder's own (tools/halo3_menu_art.py). -->
 	<bitmap name="h3/column">
 		<frame png="halo3/column.png" width="64" height="64"/>
 	</bitmap>
+	<!-- (the list's panel: Halo 3's see-through navy, more opaque toward the bottom) -->
+	<bitmap name="h3/menu_column">
+		<frame png="halo3/menu_column.png" width="64" height="64"/>
+	</bitmap>
 	<bitmap name="h3/item">
 		<frame png="halo3/item_off.png" width="128" height="16"/>
 		<frame png="halo3/item_on.png" width="128" height="16"/>
@@ -23,8 +27,10 @@ art is this folder's own (tools/halo3_menu_art.py). -->
 	<bitmap name="h3/rule">
 		<frame png="halo3/rule.png" width="128" height="2"/>
 	</bitmap>
-	<bitmap name="h3/title">
-		<frame png="halo3/title_halo.png" width="256" height="64"/>
+	<!-- (the owner's HALO CE VITA logo, 512x128 drawn whole into the title's widget: sharp on
+	the Vita's 960x544 interface layer) -->
+	<bitmap name="h3/title" fit="widget">
+		<frame png="halo3/title_halo.png" width="512" height="128"/>
 	</bitmap>
 	<!-- (the nameplate in the profile's primary colour: frame 0 none - Halo 3's green -, then the
 	game's eighteen colours in its order, as the swatches: menu_functions.c h3_nameplate_update) -->
@@ -115,12 +121,15 @@ art is this folder's own (tools/halo3_menu_art.py). -->
 	</widget>
 
 	<widget name="h3/main/haze" left="0" top="0" width="640" height="480" bitmap="h3/haze"/>
-	<widget name="h3/main/column" left="8" top="266" width="190" height="214" bitmap="h3/column"/>
+	<widget name="h3/main/column" left="8" top="266" width="190" height="214" bitmap="h3/menu_column"/>
 	<widget name="h3/main/rule1" left="8" top="290" width="190" height="2" bitmap="h3/rule"/>
 	<widget name="h3/main/rule2" left="8" top="440" width="190" height="2" bitmap="h3/rule"/>
 	<widget name="h3/main/start_butn" left="16" top="447" width="16" height="16" bitmap="h3/glyph_start"/>
 	<widget name="h3/main/settings" type="text" left="36" top="445" width="150" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="0" text_y="2" string_list="h3/main_items" string_index="4"/>
-	<widget name="h3/main/title" left="352" top="286" width="256" height="64" bitmap="h3/title"/>
+	<!-- (Halo 3's place and size: the right half, the logo half the 640 columns wide - 38% of a
+	16:9 screen -, its top level with the column's first row; under the nameplates and the live
+	servers) -->
+	<widget name="h3/main/title" left="289" top="255" width="340" height="85" bitmap="h3/title"/>
 	<!-- ("1 Player", "3 Players": the player and the party's members, said by port h3 party plates) -->
 	<widget name="h3/main/players" type="text" left="380" top="20" width="200" height="16" font="h3/font_small" color="#FFEEF2F6" text_x="0" text_y="0"/>
 	<widget name="h3/main/nameplate" type="text" left="380" top="38" width="256" height="16" bitmap="h3/nameplate" font="h3/font_small" color="#FF10220A" text_x="22" text_y="0">

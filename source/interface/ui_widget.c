@@ -6448,6 +6448,11 @@ static void widget_instance_render_recursive(
 			short margin = (short)((halo_screen_width() - 640) / 2);
 			rectangle2d destination = bounds;
 			rectangle2d wide_clip;
+			extern boolean menu_tags_bitmap_fits_widget(long bitmap_tag_index);
+			/* (a menus folder picture drawn whole into the widget, scaled:
+			menu_tags.c, <bitmap fit="widget">) */
+			boolean fit = !custom_edition_picture &&
+				menu_tags_bitmap_fits_widget(definition->background_bitmap.index);
 
 			if (margin > 0 && bounds.x0 <= 0 && bounds.x1 >= 640)
 			{
@@ -6467,7 +6472,7 @@ static void widget_instance_render_recursive(
 			draw_bitmap_in_rect(
 				bitmap,
 				&destination,
-				&bounds,
+				fit ? NULL : &bounds,
 				clip,
 				color,
 				&multitexture_params,

@@ -71,6 +71,7 @@ void menu_tags_preload(char const *map_name);
 void menu_tags_loaded(char const *map_name);
 void menu_tags_unloaded(void);
 long menu_tags_screen(long tag_index);
+boolean menu_tags_bitmap_fits_widget(long bitmap_tag_index);
 boolean pc_menu_tag(long tag_index);
 char const *pc_menu_function_name(long function_index);
 char const *pc_menu_game_data_input_name(long function_index);
@@ -440,6 +441,9 @@ static struct
 	long string_resource_count;
 	struct menu_png_frame *png_frames;
 	long png_frame_count;
+	/* the bitmaps drawn whole into their widgets' bounds (fit="widget") */
+	long *fit_bitmaps;
+	long fit_bitmap_count;
 	boolean loaded;
 	/* the art: not read yet (0), read (1), failed (-1: the Xbox's screen) */
 	int art;
@@ -840,6 +844,12 @@ static void *bitmap_build(struct halo_menu_bitmap const *source, long tag_index)
 
 	if (build.failed)
 		return NULL;
+	if (source->fit)
+	{
+		if (!array_grow((void **)&menu_tags.fit_bitmaps, menu_tags.fit_bitmap_count, sizeof(*menu_tags.fit_bitmaps)))
+			return NULL;
+		menu_tags.fit_bitmaps[menu_tags.fit_bitmap_count++] = tag_index;
+	}
 	/* (the player's: filled when the screens first open) */
 	if (source->resource)
 	{
@@ -1535,6 +1545,8 @@ static void menu_tags_release(void)
 		free(menu_tags.string_resources);
 	if (menu_tags.png_frames)
 		free(menu_tags.png_frames);
+	if (menu_tags.fit_bitmaps)
+		free(menu_tags.fit_bitmaps);
 	memset(&menu_tags, 0, sizeof(menu_tags));
 	menu_tags.root_tag = menu_tags.xbox_root_tag = NONE;
 }
@@ -2460,6 +2472,25 @@ static void menu_tags_dump(long tag_index, int depth)
 		if (child->widget_tag.index != NONE)
 			menu_tags_dump(child->widget_tag.index, depth + 1);
 	}
+}
+
+/* (ui_widget.c, a widget's background) whether its bitmap is drawn whole
+into the widget's bounds, scaled (<bitmap fit="widget">: a picture of more
+pixels than its place in the 640x480 screen, sharp on the Vita's interface
+layer), rather than 1:1 from its top left */
+boolean menu_tags_bitmap_fits_widget(
+	long bitmap_tag_index)
+{
+	long index;
+
+	if (bitmap_tag_index == NONE)
+		return FALSE;
+	for (index = 0; index < menu_tags.fit_bitmap_count; index++)
+	{
+		if (menu_tags.fit_bitmaps[index] == bitmap_tag_index)
+			return TRUE;
+	}
+	return FALSE;
 }
 
 /* (ui_widget_load_by_name_or_tag) a screen the game opens: ours in place of
