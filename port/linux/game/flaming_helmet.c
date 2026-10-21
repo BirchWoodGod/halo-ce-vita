@@ -13,8 +13,9 @@ CUSTOMIZATION's Spartan (flaming_helmet_preview).
 No art of the project's: the stock multiplayer maps' own Covenant smoke
 particle (FLAME_PARTICLE, in every one of them; grey, made to be tinted:
 their fire's is orange and cannot be made blue), tinted blue,
-emitted from one point a little behind and above the head marker ("head",
-else the object's centre raised), billowing up behind and above it: six
+emitted from one point in the head marker's own frame ("head": it turns
+as the head turns and aims; else the object's centre raised): its base on
+the helmet's top, over its middle a little toward the visor, rising up: six
 particles a tick (three of the Covenant smoke, blue pulled toward violet,
 large and slow; three of its white smoke tinted lavender, smaller and
 rising fast), 180 a second a wearer, alive for the tags' own short life,
@@ -53,17 +54,20 @@ unsigned long system_milliseconds(void);
 /* the flame's particles a tick, their size, how they rise (world units a
 second), how far from the head they start */
 #define FLAME_PARTICLES_PER_TICK 3
-#define FLAME_RADIUS_LOWER 0.09f
-#define FLAME_RADIUS_UPPER 0.15f
+#define FLAME_RADIUS_LOWER 0.07f
+#define FLAME_RADIUS_UPPER 0.12f
 #define FLAME_RISE_LOWER 0.08f
 #define FLAME_RISE_UPPER 0.8f
-#define FLAME_SPREAD 0.1f
+#define FLAME_SPREAD 0.07f
 #define FLAME_TONGUE_RISE_LOWER 1.2f
 #define FLAME_TONGUE_RISE_UPPER 2.0f
 /* above the head marker (its origin sits inside the helmet) */
-#define FLAME_HEIGHT (-0.01f)
-/* behind the head (world units against its facing): the face stays clear */
-#define FLAME_BEHIND 0.07f
+/* the emitter in the head marker's frame (world units): up to the helmet's
+top, forward toward the visor (over the helmet, not in front of the visor),
+and its spread front to back */
+#define FLAME_HEIGHT 0.0f
+#define FLAME_FORWARD 0.03f
+#define FLAME_SPREAD_FORWARD 0.035f
 
 static struct
 {
@@ -120,25 +124,47 @@ static long flame_particle(void)
 	return flaming_helmet.particle;
 }
 
-/* where the flame starts: the head marker's position, else the object's
-centre raised */
-static boolean flame_head(long object_index, real_point3d *position)
+/* the head's frame: the head marker's ("head": its position and axes,
+which turn as the head turns and aims), else the object's centre raised and
+its own axes */
+struct flame_frame
+{
+	real_point3d position;
+	real_vector3d forward, left, up;
+};
+
+static boolean flame_head(long object_index, struct flame_frame *frame)
 {
 	struct object_marker marker;
 	struct object_datum *object;
 
 	if (object_get_marker_by_name(object_index, "head", &marker, 1))
 	{
-		*position = marker.matrix.position;
-		position->z += FLAME_HEIGHT;
+		frame->position = marker.matrix.position;
+		frame->forward = marker.matrix.forward;
+		frame->left = marker.matrix.left;
+		frame->up = marker.matrix.up;
 		return TRUE;
 	}
 	object = object_get(object_index);
 	if (!object)
 		return FALSE;
-	*position = object->object.bounding_sphere_center;
-	position->z += object->object.bounding_sphere_radius * 0.75f;
+	frame->position = object->object.bounding_sphere_center;
+	frame->position.z += object->object.bounding_sphere_radius * 0.75f;
+	frame->forward = object->object.forward;
+	frame->up = object->object.up;
+	frame->left.i = frame->up.j * frame->forward.k - frame->up.k * frame->forward.j;
+	frame->left.j = frame->up.k * frame->forward.i - frame->up.i * frame->forward.k;
+	frame->left.k = frame->up.i * frame->forward.j - frame->up.j * frame->forward.i;
 	return TRUE;
+}
+
+/* a point of the head's frame: forward, left and up of its origin */
+static void flame_point(struct flame_frame const *frame, real forward, real left, real up, real_point3d *point)
+{
+	point->x = frame->position.x + frame->forward.i * forward + frame->left.i * left + frame->up.i * up;
+	point->y = frame->position.y + frame->forward.j * forward + frame->left.j * left + frame->up.j * up;
+	point->z = frame->position.z + frame->forward.k * forward + frame->left.k * left + frame->up.k * up;
 }
 
 /* the flame on an object, for a tick: local_player_index the wearer's own
@@ -147,20 +173,12 @@ static void flame_emit(long object_index, short local_player_index)
 {
 	unsigned long *seed = get_global_local_random_seed_address();
 	real_vector3d velocity, angular;
-	real_point3d head;
+	struct flame_frame head;
 	long particle = flame_particle();
 	int index;
 
 	if (particle == NONE || !flame_head(object_index, &head))
 		return;
-	/* (one emitter, a little behind the head: the flames billow up behind
-	and above it, wider than the helmet, the visor clear) */
-	{
-		struct object_datum *object = object_get(object_index);
-
-		head.x -= object->object.forward.i * FLAME_BEHIND;
-		head.y -= object->object.forward.j * FLAME_BEHIND;
-	}
 	object_get_velocities(object_index, &velocity, &angular);
 	for (index = 0; index < 2 * FLAME_PARTICLES_PER_TICK; index++)
 	{
@@ -176,9 +194,13 @@ static void flame_emit(long object_index, short local_player_index)
 		data.attached_to_local_player = FALSE;
 		data.dont_draw_first_person = local_player_index != NONE;
 		data.dont_draw_third_person = FALSE;
-		data.position.x = head.x + real_seed_random_range(seed, -FLAME_SPREAD, FLAME_SPREAD);
-		data.position.y = head.y + real_seed_random_range(seed, -FLAME_SPREAD, FLAME_SPREAD);
-		data.position.z = head.z + real_seed_random_range(seed, 0.0f, FLAME_SPREAD * 0.6f);
+		/* (one emitter in the head's own frame: its base on the helmet's top,
+		over its middle a little toward the visor, spread across the helmet;
+		the flames then rise straight up) */
+		flame_point(&head,
+			FLAME_FORWARD + real_seed_random_range(seed, -FLAME_SPREAD_FORWARD, FLAME_SPREAD_FORWARD),
+			real_seed_random_range(seed, -FLAME_SPREAD, FLAME_SPREAD),
+			FLAME_HEIGHT + real_seed_random_range(seed, 0.0f, FLAME_SPREAD * 0.5f), &data.position);
 		data.direction.i = 0.0f;
 		data.direction.j = 0.0f;
 		data.direction.k = 1.0f;
@@ -293,11 +315,13 @@ boolean flaming_helmet_test_camera(char *line, int size, float distance, float a
 	{
 		struct player_datum *player = player_get(player_index);
 		struct object_datum *object;
+		struct flame_frame frame;
 		real_point3d head;
 		real facing, yaw, cosine_value, sine_value;
 
-		if (player->local_player_index != 0 || player->unit_index == NONE || !flame_head(player->unit_index, &head))
+		if (player->local_player_index != 0 || player->unit_index == NONE || !flame_head(player->unit_index, &frame))
 			continue;
+		head = frame.position;
 		object = object_get(player->unit_index);
 		facing = atan2f(object->object.forward.j, object->object.forward.i);
 		yaw = facing + angle * _pi / 180.0f;
