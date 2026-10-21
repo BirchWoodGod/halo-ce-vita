@@ -2034,6 +2034,16 @@ void game_engine_post_rasterize_post_game(
 			string_list_index != NONE ?
 				unicode_string_list_get_string(string_list_index, 0x42) :
 				L"";
+		/* port: Infection's teams by their sides' names (infection.c) */
+		if (infection_active())
+		{
+			static wchar_t infection_team_formats[2][48];
+
+			usnprintf(infection_team_formats[0], NUMBEROF(infection_team_formats[0]), L"\t%s\t%%s", TW(L"Zombies"));
+			usnprintf(infection_team_formats[1], NUMBEROF(infection_team_formats[1]), L"\t%s\t%%s", TW(L"Humans"));
+			team_formats[0] = infection_team_formats[0];
+			team_formats[1] = infection_team_formats[1];
+		}
 
 		if (!red_team_won)
 		{

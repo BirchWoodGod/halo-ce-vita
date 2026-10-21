@@ -2149,3 +2149,4 @@
 "Off: zombies have their body alone" = "No: los zombis solo tienen su cuerpo"
 "Tough zombies" = "Zombis duros"
 "On: zombies take half the damage" = "Sí: los zombis reciben la mitad del daño"
+"Zombies" = "Zombis"
