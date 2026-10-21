@@ -557,6 +557,10 @@
 #            views the same: their census (network test's, every 10 s) and
 #            their players' lines (shields, grenades, the kinds of weapons
 #            carried), some player hurt with no shield in SWAT
+#   dedicatedfill  five machines behind one NAT (one home: one real address,
+#            a stand-in each) join the dedicated server's 8-player game: four
+#            play, the fifth is refused (security review F-11: one person's
+#            machines no more than half a game's players)
 #   swatmixed the same with HALO_TEST_VITA_OLD (a v1.1.0-beta.3 build, or
 #            beta.2/beta.1: no change on their side) as the first and third
 #            joiners: they must play every game with the others and see in
@@ -651,6 +655,7 @@ seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = dedicated ] && seconds=${HALO_TEST_SECONDS:-260}
 [ "$mode" = dedicatedpc ] && seconds=${HALO_TEST_SECONDS:-120}
 [ "$mode" = dedicatedban ] && seconds=${HALO_TEST_SECONDS:-150}
+[ "$mode" = dedicatedfill ] && seconds=${HALO_TEST_SECONDS:-150}
 [ "$mode" = dedicatedcoop ] && seconds=${HALO_TEST_SECONDS:-200}
 [ "$mode" = dedicatedmulti ] && seconds=${HALO_TEST_SECONDS:-220}
 [ "$mode" = dedicatedfullcache ] && seconds=${HALO_TEST_SECONDS:-200}
@@ -2940,7 +2945,7 @@ solo)
 	echo "seconds of solo game logged: $ticks"
 	[ "$ticks" -ge 30 ] || fail "the solo game ran $ticks s"
 	;;
-dedicated|dedicatedpc|dedicatedban|dedicatedcoop|dedicatedmulti|dedicatedfullcache|dedicatedreload|scoreboard|pings|pingsmixed|mapmid|mapmidmixed|swat|swatmixed)
+dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedcoop|dedicatedmulti|dedicatedfullcache|dedicatedreload|scoreboard|pings|pingsmixed|mapmid|mapmidmixed|swat|swatmixed)
 	server=${HALO_TEST_SERVER:-$root/build/linux/halo-server}
 	if [ "$mode" = swatmixed ]; then
 		vita_old=${HALO_TEST_VITA_OLD:-}
@@ -3189,6 +3194,46 @@ INIT
 	fi
 	sl=$out/server/run.log sd=$out/server/data/debug.txt
 	case $mode in
+	dedicatedfill)
+		# five machines of one home - the joiners' LAN behind one NAT: one
+		# real address, a stand-in of its own each (a run of the game an
+		# identity) - join the server's 8-player game by its code, one every
+		# 8 s: four play, the fifth is refused (security review F-11: one
+		# person's machines no more than half a game's players)
+		join_lan() { # join_lan N: a machine on the joiners' LAN (192.168.2.N) -> lan
+			holder; lan=$held
+			in_ns "$join_router" ip link add "l${1}_join" type veth peer name "m${1}_join"
+			in_ns "$join_router" ip link set "m${1}_join" netns "$lan"
+			in_ns "$join_router" ip link set "l${1}_join" master b_join
+			in_ns "$join_router" ip link set "l${1}_join" up
+			in_ns "$lan" ip link set lo up
+			in_ns "$lan" ip addr add "192.168.2.$1/24" broadcast 192.168.2.255 dev "m${1}_join"
+			in_ns "$lan" ip link set "m${1}_join" up
+			in_ns "$lan" ip route add default via 192.168.2.1
+		}
+		fill_pids=
+		for n in 1 2 3 4 5; do
+			machine=$join_machine
+			[ "$n" = 1 ] || { join_lan $((n + 1)); machine=$lan; }
+			run_copy "fill$n" "$machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$code \
+				HALO_NETWORK_TEST_RETRY=2 HALO_NET_PLAYER_NAME=Fill$n HALO_TEST_INPUT=bot:$((n + 1)) \
+				HALO_EXIT_AFTER=$((seconds - 15))
+			fill_pids="$fill_pids $last_pid"
+			sleep 8
+		done
+		wait $fill_pids 2>/dev/null
+		played=0
+		for n in 1 2 3 4 5; do
+			t=$(grep -a "network test: tick" "$out/fill$n/run.log" 2>/dev/null | grep -a "| playing" | grep -ac "player [0-9]*:")
+			echo "fill$n played $t s"
+			[ "$t" -ge 15 ] && played=$((played + 1))
+		done
+		refused=$(grep -ac "its address has its share of this game's players" "$sd" 2>/dev/null)
+		echo "machines of the one home that played: $played; the server's refusals for the address's share: ${refused:-0}"
+		[ "${refused:-0}" -ge 1 ] || fail "the server never refused a machine past its address's share"
+		[ "$played" -le 4 ] || fail "$played machines of one home played an 8-player game (4 at most)"
+		[ "$played" -ge 4 ] || fail "only $played machines of one home played (its share, 4, wanted)"
+		;;
 	dedicatedmulti)
 		# two Vitas a server, each behind a NAT of its own: VitaNc by the code,
 		# VitaNb from the server browser (the server's name)
@@ -4527,7 +4572,7 @@ forge|forge3|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h
 	forge_case
 	;;
 *)
-	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|h3live|h3liveleave|h3liveagain|h3liveinvite|h3liveprivate|h3online|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|party|friendsprivate|friendsprivatepw|forge|forge3|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|vitapc|vitaonly" >&2
+	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|h3live|h3liveleave|h3liveagain|h3liveinvite|h3liveprivate|h3online|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|party|friendsprivate|friendsprivatepw|forge|forge3|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|vitapc|vitaonly" >&2
 	exit 2
 	;;
 esac

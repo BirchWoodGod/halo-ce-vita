@@ -405,6 +405,40 @@ int main(void)
 	check(kicks[13] == 0, "a client counts nothing (the host's alone)");
 	connection = 2;
 
+	/* one person's machines (security review F-11): an address's share of
+	a game's players, by its real address (a new run's stand-in the same
+	person's) */
+	{
+		/* (stand-ins of one real address, 203.0.113.7, and a LAN machine) */
+		unsigned long others[4] = { 0x64400107UL, 0x64400207UL, 0x64400307UL, 0x0A0A0505UL };
+		long players[4] = { 4, 3, 0, 4 };
+
+		check(network_anticheat_address_player_limit(16) == 8 && network_anticheat_address_player_limit(8) == 4 &&
+			network_anticheat_address_player_limit(4) == 4 && network_anticheat_address_player_limit(15) == 8,
+			"F-11: half a game's players, four at least");
+		check(network_anticheat_person_address(0x64400107UL) == network_anticheat_person_address(0x64400907UL) &&
+			network_anticheat_person_address(0x0A0A0505UL) == 0x0A0A0505UL,
+			"F-11: a person's address: a stand-in's real address, any other as it is");
+		/* (16 players: 4 + 3 + one coming = 8 of that address) */
+		check(!network_anticheat_address_room(0x64400407UL, others, players, 3, 16, 1),
+			"F-11: a new run of the same real address refused past half the players");
+		check(network_anticheat_address_room(0x64400407UL, others, players, 2, 16, 1),
+			"F-11: ... let in while within half");
+		check(network_anticheat_address_room(0x64400408UL, others, players, 4, 16, 4),
+			"F-11: another address's machine of four let in");
+		check(!network_anticheat_address_room(0x0A0A0505UL, others + 3, players + 3, 1, 16, 5) &&
+			network_anticheat_address_room(0x0A0A0505UL, others + 3, players + 3, 1, 16, 4),
+			"F-11: a LAN machine's address the same rule");
+		/* (two Vitas of one home, a player each, in a 4-player co-op game) */
+		{
+			unsigned long home[1] = { 0x64400a07UL };
+			long one[1] = { 1 };
+
+			check(network_anticheat_address_room(0x64400b07UL, home, one, 1, 4, 1),
+				"F-11: two machines of one home join a small game");
+		}
+	}
+
 	if (failures)
 		printf("%d FAILED\n", failures);
 	else
