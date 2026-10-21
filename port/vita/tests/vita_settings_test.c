@@ -48,17 +48,62 @@ on the testers' Vitas; the saves put in place counted) */
 static volatile unsigned long test_card_delay_us;
 static volatile int test_settings_renames;
 static int test_rename(const char *from, const char *to);
+/* (the Vita's rule for the threads vita_host_thread_start_* makes: theirs
+is sceKernelCreateThread's, and such a thread has no pthread data - vitasdk
+makes it only for pthread_create's threads and for a thread that has called
+pthread_create itself - while pthread_cond_wait and pthread_cond_timedwait,
+cancellation points, read it: a data abort in
+pte_osSemaphoreCancellablePend. insider.19's settings.txt writer waited so
+and the game crashed at the first change of any setting (LadyCassie's and
+xal's core dumps, Oct 21 2026). Here such a thread is marked, and a wait on
+a condition from one stops the test as the Vita would.) */
+#include <pthread.h>
+static __thread int test_sce_thread;
+static int test_pthread_cond_wait(pthread_cond_t *condition, pthread_mutex_t *mutex);
+static int test_pthread_cond_timedwait(pthread_cond_t *condition, pthread_mutex_t *mutex,
+	const struct timespec *deadline);
 #define rename test_rename
+#define pthread_cond_wait test_pthread_cond_wait
+#define pthread_cond_timedwait test_pthread_cond_timedwait
 #include "../host/vita_settings.c"
 #undef rename
+#undef pthread_cond_wait
+#undef pthread_cond_timedwait
 /* (stdio.h's, which the macro renamed) */
 int rename(const char *from, const char *to);
 
+#include <psp2/kernel/threadmgr.h>
 #include <stdio.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 #include <utime.h>
+
+/* (a thread of sceKernelCreateThread's waiting on a condition: the Vita's
+data abort) */
+static void test_sce_thread_wait(const char *call)
+{
+	if (test_sce_thread)
+	{
+		printf("FAIL: %s on a thread vita_host_thread_start_* made (sceKernelCreateThread's: no pthread data on the "
+			"Vita, a data abort - insider.19's crash at a setting's change)\n", call);
+		fflush(stdout);
+		abort();
+	}
+}
+
+static int test_pthread_cond_wait(pthread_cond_t *condition, pthread_mutex_t *mutex)
+{
+	test_sce_thread_wait("pthread_cond_wait");
+	return pthread_cond_wait(condition, mutex);
+}
+
+static int test_pthread_cond_timedwait(pthread_cond_t *condition, pthread_mutex_t *mutex,
+	const struct timespec *deadline)
+{
+	test_sce_thread_wait("pthread_cond_timedwait");
+	return pthread_cond_timedwait(condition, mutex, deadline);
+}
 
 static int test_rename(const char *from, const char *to)
 {
@@ -255,9 +300,15 @@ void vita_gyro_status(char *text, int size) { snprintf(text, (size_t)size, "Gyro
 
 int vita_host_thread_start(const char *name, void (*function)(void *), void *argument, int core)
 {
+	/* (run here and now, as a thread of sceKernelCreateThread's: Save
+	report's, the CE installer's) */
+	int was = test_sce_thread;
+
 	(void)name;
 	(void)core;
+	test_sce_thread = 1;
 	function(argument);
+	test_sce_thread = was;
 	return 0;
 }
 
@@ -273,6 +324,8 @@ static void *test_thread_main(void *argument)
 	struct test_thread start = *(struct test_thread *)argument;
 
 	free(argument);
+	/* (sceKernelCreateThread's on the Vita: no pthread data) */
+	test_sce_thread = 1;
 	start.function(start.argument);
 	return NULL;
 }
@@ -302,6 +355,73 @@ int vita_host_thread_start_stack(const char *name, void (*function)(void *), voi
 
 /* (vita_main.c's: the memory window made, threads allowed) */
 int vita_host_memory_window_made(void) { return 1; }
+
+void vita_host_sleep_us(unsigned long microseconds) { usleep((useconds_t)microseconds); }
+
+/* (the Vita's kernel semaphores, which any thread may wait on) */
+static struct
+{
+	pthread_mutex_t lock;
+	pthread_cond_t signal;
+	int count, most;
+} test_semas[8];
+static int test_sema_count;
+
+SceUID sceKernelCreateSema(const char *name, SceUInt attr, int initVal, int maxVal, SceKernelSemaOptParam *option)
+{
+	int index = __atomic_fetch_add(&test_sema_count, 1, __ATOMIC_RELAXED);
+
+	(void)name;
+	(void)attr;
+	(void)option;
+	if (index >= (int)(sizeof(test_semas) / sizeof(test_semas[0])))
+		return -1;
+	pthread_mutex_init(&test_semas[index].lock, NULL);
+	pthread_cond_init(&test_semas[index].signal, NULL);
+	test_semas[index].count = initVal;
+	test_semas[index].most = maxVal;
+	return 0x40010000 + index;
+}
+
+int sceKernelDeleteSema(SceUID semaid)
+{
+	(void)semaid;
+	return 0;
+}
+
+int sceKernelSignalSema(SceUID semaid, int signal)
+{
+	int index = semaid - 0x40010000, result = 0;
+
+	if (index < 0 || index >= test_sema_count)
+		return -1;
+	pthread_mutex_lock(&test_semas[index].lock);
+	/* (over the most: refused, SCE_KERNEL_ERROR_SEMA_OVF) */
+	if (test_semas[index].count + signal > test_semas[index].most)
+		result = (int)0x80028184;
+	else
+	{
+		test_semas[index].count += signal;
+		pthread_cond_broadcast(&test_semas[index].signal);
+	}
+	pthread_mutex_unlock(&test_semas[index].lock);
+	return result;
+}
+
+int sceKernelWaitSema(SceUID semaid, int signal, SceUInt *timeout)
+{
+	int index = semaid - 0x40010000;
+
+	(void)timeout;
+	if (index < 0 || index >= test_sema_count)
+		return -1;
+	pthread_mutex_lock(&test_semas[index].lock);
+	while (test_semas[index].count < signal)
+		pthread_cond_wait(&test_semas[index].signal, &test_semas[index].lock);
+	test_semas[index].count -= signal;
+	pthread_mutex_unlock(&test_semas[index].lock);
+	return 0;
+}
 
 int sceRtcGetCurrentClockLocalTime(SceDateTime *time)
 {
@@ -4255,6 +4375,56 @@ static void test_save_off_thread(void)
 	test_card_delay_us = 0;
 }
 
+/* (test_save_any_thread: a wait for the writer from a thread of
+vita_host_thread_start's, as Save report's and the CE installer's are) */
+static volatile int test_waited;
+
+static void test_wait_thread(void *argument)
+{
+	(void)argument;
+	vita_settings_save_wait();
+	__atomic_store_n(&test_waited, 1, __ATOMIC_RELEASE);
+}
+
+/* insider.19's crash (Oct 21 2026: LadyCassie, xal, the owner): any setting
+changed - the panel's rows, the main menu's Appear offline and the game's
+network rows (vita_settings_set) - and the game gone, settings.txt's writer
+(a thread of sceKernelCreateThread's) waiting on a pthread condition with
+no pthread data on the Vita. The test's threads of vita_host_thread_start_*
+stop it as the Vita would (test_sce_thread_wait): Appear offline as the
+main menu sets it and the network as a game's row does, each written while
+the card is slow; then the writer waited for, while it writes, from a thread
+of its own and from one run as Save report's is */
+static void test_save_any_thread(void)
+{
+	struct timespec start;
+	int renames = test_settings_renames;
+
+	test_card_delay_us = 100000;
+	check(vita_settings_set("HALO_FRIENDS_APPEAR_OFFLINE", "true") &&
+		vita_settings_set("HALO_VITA_NETWORK", "adhoc"), "Appear offline On and the network Ad hoc, as the game sets them");
+	test_waited = 0;
+	check(vita_host_thread_start_stack("test wait", test_wait_thread, NULL, -1, 0x10000100, 64 * 1024) == 0,
+		"a thread of its own waiting for the writer");
+	clock_gettime(CLOCK_MONOTONIC, &start);
+	while (!__atomic_load_n(&test_waited, __ATOMIC_ACQUIRE) && real_ms(&start) < 5000.0)
+		usleep(1000);
+	check(test_waited, "... waits for it, and returns");
+	check(strstr(file_text(SETTINGS_FILE), "HALO_FRIENDS_APPEAR_OFFLINE=true\n") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_VITA_NETWORK=adhoc\n") && test_settings_renames - renames >= 1,
+		"settings.txt has both once written");
+	renames = test_settings_renames;
+	vita_settings_set("HALO_FRIENDS_APPEAR_OFFLINE", "false");
+	vita_settings_set("HALO_VITA_NETWORK", "wifi");
+	test_waited = 0;
+	vita_host_thread_start("test wait", test_wait_thread, NULL, -1);
+	check(test_waited && test_settings_renames - renames >= 1 &&
+		strstr(file_text(SETTINGS_FILE), "HALO_FRIENDS_APPEAR_OFFLINE=false\n") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_VITA_NETWORK=wifi\n"),
+		"Appear offline Off and the network back, waited for as Save report waits: written");
+	test_card_delay_us = 0;
+}
+
 int main(void)
 {
 	char line[128];
@@ -5361,6 +5531,7 @@ int main(void)
 	test_menu_style_row();
 	test_restart_offer();
 	test_save_off_thread();
+	test_save_any_thread();
 	printf("-- %d of %d checks failed\n", failures, checks);
 	return failures ? 1 : 0;
 }

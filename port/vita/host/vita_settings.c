@@ -219,6 +219,7 @@ Multiplayer tab's way.
 
 #include <psp2/apputil.h>
 #include <psp2/kernel/processmgr.h>
+#include <psp2/kernel/threadmgr.h>
 #include <psp2/rtc.h>
 #include <psp2/system_param.h>
 
@@ -1670,7 +1671,20 @@ vita_settings_save_wait waits for the writer: before settings.txt is read
 again and before the game restarts. The thread is made at the first save
 after the memory window (vita_host_memory_window_made: nothing may be made
 before it); until then, or if it cannot be made, the file is written in
-place as before. */
+place as before.
+
+No pthread_cond_wait here (insider.19's crash, Oct 21 2026: LadyCassie,
+xal and the owner, any setting changed - in the panel, the game's rows,
+the main menu's Appear offline - and the game gone). The writer is a thread
+of sceKernelCreateThread's (vita_host_thread_start_stack), and so are Save
+report's and the CE installer's, which wait for it: vitasdk gives a thread
+its pthread data only when pthread_create made it or it has called
+pthread_create itself, and pthread_cond_wait, a cancellation point, reads
+it - NULL, a data abort in pte_osSemaphoreCancellablePend (both core dumps:
+thread "halo settings", R4 0, at its first wait). So the writer sleeps on a
+kernel semaphore (save_wake) and the waits for it (vita_settings_save_wait,
+a text too long for it) look every millisecond; save_lock, a mutex, is
+not a cancellation point and is safe on any thread. */
 
 /* the most the text is (some 9 KB with every map and mod turned off): one
 longer is written in place */
@@ -1756,13 +1770,25 @@ static int save_file(const char *text)
 
 /* the writer's state (save_lock): the text made by the last save, the
 newest one asked for and the one being written; how many were asked for and
-written; the writer 0 not made yet, 1 running, -1 none (written in place) */
+written; the writer 0 not made yet, 1 running, -1 none (written in place);
+the semaphore it sleeps on, signalled when a text is asked for */
 static pthread_mutex_t save_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t save_asked_signal = PTHREAD_COND_INITIALIZER;
-static pthread_cond_t save_written_signal = PTHREAD_COND_INITIALIZER;
+static SceUID save_wake = -1;
 static char *save_text_made, *save_text_asked, *save_text_writing;
 static unsigned long save_asked, save_written;
 static int save_writer;
+
+/* (save_lock held) until the writer has written what was asked for: a look
+each millisecond (any thread may wait so; see above) */
+static void save_written_wait(void)
+{
+	while (save_writer > 0 && save_written != save_asked)
+	{
+		pthread_mutex_unlock(&save_lock);
+		vita_host_sleep_us(1000);
+		pthread_mutex_lock(&save_lock);
+	}
+}
 
 static void save_thread(void *argument)
 {
@@ -1775,7 +1801,11 @@ static void save_thread(void *argument)
 		int ok;
 
 		while (save_written == save_asked)
-			pthread_cond_wait(&save_asked_signal, &save_lock);
+		{
+			pthread_mutex_unlock(&save_lock);
+			sceKernelWaitSema(save_wake, 1, NULL);
+			pthread_mutex_lock(&save_lock);
+		}
 		asked = save_asked;
 		changes = save_asked - save_written;
 		memcpy(save_text_writing, save_text_asked, strlen(save_text_asked) + 1);
@@ -1801,7 +1831,6 @@ static void save_thread(void *argument)
 		if (!ok && save_asked == asked)
 			save_text_asked[0] = 0;
 		save_written = asked;
-		pthread_cond_broadcast(&save_written_signal);
 	}
 }
 
@@ -1815,13 +1844,20 @@ static int save_writer_ready(void)
 		save_text_asked = calloc(1, SAVE_TEXT_SIZE);
 		save_text_writing = malloc(SAVE_TEXT_SIZE);
 		save_writer = -1;
-		if (save_text_made && save_text_asked && save_text_writing &&
+		/* (a signal while one is pending is refused: the writer looks at
+		save_asked each time it wakes) */
+		if (save_text_made && save_text_asked && save_text_writing)
+			save_wake = sceKernelCreateSema("halo settings", 0, 0, 1, NULL);
+		if (save_wake >= 0 &&
 			vita_host_thread_start_stack("halo settings", save_thread, NULL, -1, 0x10000100, 64 * 1024) >= 0)
 		{
 			save_writer = 1;
 		}
 		else
 		{
+			if (save_wake >= 0)
+				sceKernelDeleteSema(save_wake);
+			save_wake = -1;
 			free(save_text_made);
 			free(save_text_asked);
 			free(save_text_writing);
@@ -1849,15 +1885,14 @@ static void save(void)
 			{
 				memcpy(save_text_asked, save_text_made, (size_t)output.length + 1);
 				save_asked++;
-				pthread_cond_signal(&save_asked_signal);
+				sceKernelSignalSema(save_wake, 1);
 			}
 			pthread_mutex_unlock(&save_lock);
 			return;
 		}
 		/* (too long for the writer: in place, once it is idle, and the
 		next save written whatever it is) */
-		while (save_written != save_asked)
-			pthread_cond_wait(&save_written_signal, &save_lock);
+		save_written_wait();
 		save_text_asked[0] = 0;
 	}
 	save_file(NULL);
@@ -1868,8 +1903,7 @@ static void save(void)
 void vita_settings_save_wait(void)
 {
 	pthread_mutex_lock(&save_lock);
-	while (save_writer > 0 && save_written != save_asked)
-		pthread_cond_wait(&save_written_signal, &save_lock);
+	save_written_wait();
 	pthread_mutex_unlock(&save_lock);
 }
 
