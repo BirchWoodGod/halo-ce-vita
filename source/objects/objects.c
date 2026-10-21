@@ -2138,6 +2138,15 @@ void object_reconnect_to_map(
 		if (location->cluster_index!=NONE)
 		{
 			object->object.location = *location;
+#ifdef HALO_LINUX
+			/* (port) the original game's bug: the locations made on the
+			stack never set bonus (only scenario_location_award_bonus
+			writes it, to NONE, and play never reads it), so the stack's
+			garbage was copied into the object - into game state, saved
+			games and the resting lights' hash below (Sierra-III's handoff,
+			5.6) */
+			object->object.location.bonus = (word)NONE;
+#endif
 			header->cluster_index = object->object.location.cluster_index;
 
 			SET_FLAG(object->object.flags, _object_outside_of_map_bit, FALSE);

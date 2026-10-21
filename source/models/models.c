@@ -466,7 +466,13 @@ static void render_model_part_in_pass(
 					part->triangle_buffer.count,
 					&part->vertex_buffer,
 					NONE);
-				rasterizer_debug_model_vertices(object_index, skinning, part);
+#ifdef HALO_LINUX
+				/* (port) skipped while the debug display is off: it returns at once
+				then, but its frame (2,048 debug vertices, two strings) is set up
+				for every model part - Sierra-III's handoff, 5.1 */
+				if (rasterizer_debug_model_vertices_on())
+#endif
+					rasterizer_debug_model_vertices(object_index, skinning, part);
 				RENDER_MODEL_PART_END(0);
 			}
 		}
@@ -744,7 +750,13 @@ static void render_model_parts(
 										part->triangle_buffer.count,
 										&part->vertex_buffer,
 										NONE);
-									rasterizer_debug_model_vertices(object_index, skinning, part);
+#ifdef HALO_LINUX
+									/* (port) skipped while the debug display is off: it returns at once
+									then, but its frame (2,048 debug vertices, two strings) is set up
+									for every model part - Sierra-III's handoff, 5.1 */
+									if (rasterizer_debug_model_vertices_on())
+#endif
+										rasterizer_debug_model_vertices(object_index, skinning, part);
 									RENDER_MODEL_PART_END(0);
 								}
 							}

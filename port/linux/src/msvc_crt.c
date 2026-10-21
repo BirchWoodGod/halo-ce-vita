@@ -31,12 +31,18 @@ size_t malloc_usable_size(void *pointer);
 
 /* ---------- strings */
 
+/* tolower in the C locale, inline: A-Z only. The game never sets a locale
+(no setlocale in source/ or port/), so this is what tolower did, without a
+call per character (Sierra-III's handoff, 5.3: ~1% of b30's beach on their
+PSP, model_find_marker's binary search among the callers) */
+#define msvc_fold(c) ((c) >= 'A' && (c) <= 'Z' ? (c) + ('a' - 'A') : (c))
+
 int _stricmp(const char *string1, const char *string2)
 {
 	for (;; string1++, string2++)
 	{
-		int c1 = tolower((unsigned char)*string1);
-		int c2 = tolower((unsigned char)*string2);
+		int c1 = msvc_fold((unsigned char)*string1);
+		int c2 = msvc_fold((unsigned char)*string2);
 
 		if (c1 != c2 || !c1)
 			return c1 - c2;
@@ -47,8 +53,8 @@ int _strnicmp(const char *string1, const char *string2, size_t count)
 {
 	for (; count; count--, string1++, string2++)
 	{
-		int c1 = tolower((unsigned char)*string1);
-		int c2 = tolower((unsigned char)*string2);
+		int c1 = msvc_fold((unsigned char)*string1);
+		int c2 = msvc_fold((unsigned char)*string2);
 
 		if (c1 != c2 || !c1)
 			return c1 - c2;

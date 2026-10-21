@@ -59,5 +59,11 @@ void rasterizer_debug_model_vertices(
 	long object_index,
 	struct rasterizer_model_skinning const *skinning,
 	struct model_geometry_part const *part);
+#ifdef HALO_LINUX
+/* (port) whether rasterizer_debug_model_vertices draws anything: its
+callers skip the call while it is off (rasterizer.c) */
+boolean rasterizer_debug_model_vertices_on(
+	void);
+#endif
 
 #endif // __RASTERIZER_MODELS_H

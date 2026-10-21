@@ -321,7 +321,16 @@ void lightning_submit(
 						if (first_marker)
 						{
 							point_count = 0;
+#ifdef HALO_LINUX
+							/* (port) not the whole 147 KB of points a chain, every
+							frame (Sierra-III's handoff, 5.4): only `valid` is read
+							before it is written (the asserts that a point is
+							new); the first point is written in full below, and a
+							segment's points have theirs cleared as it begins */
+							points[0].valid = FALSE;
+#else
 							csmemset(points, 0, sizeof(points));
+#endif
 							object_get_marker_by_name(object_index, marker_definition->attachment_marker, &marker, 1);
 							points[0].position = marker.matrix.position;
 							lightning_offset_marker_position(
@@ -498,6 +507,16 @@ void lightning_submit(
 							real_vector3d up;
 							short octave_index;
 
+#ifdef HALO_LINUX
+							/* (port) the segment's points, as the clear left them
+							(the guard above keeps them inside points) */
+							{
+								short clear_index;
+
+								for (clear_index = 1; clear_index <= segment_point_count; clear_index++)
+									points[point_count + clear_index].valid = FALSE;
+							}
+#endif
 							match_assert("c:\\halo\\SOURCE\\objects\\widgets\\lightning.c", 383, !points[point_count+segment_point_count].valid);
 
 							object_get_marker_by_name(object_index, next_marker_definition->attachment_marker, &marker, 1);

@@ -19,8 +19,13 @@ machine's speed. Two more things make runs byte-identical:
 	- a build with every stack local zero-initialised (clang
 	  -ftrivial-auto-var-init=zero, added by a compiler wrapper): stack
 	  bytes the game copies into its state uninitialised (struct
-	  location's bonus word, which nothing reads, and the like) are
+	  location's bonus word, which nothing reads, and the like - the
+	  objects' own is now set as it is copied, objects.c) are
 	  otherwise whatever the stack held.
+HALO_NO_MOUTH=1 (game_sound.c) on both sides of a comparison made with the
+tick thread on or on the Vita: lip sync otherwise carries the mixer's timing
+into the speakers' nodes (HALO_FIXED_TICK runs the sound on the frame clock,
+so it needs none).
 Then two runs of one binary agree tick for tick (b30, 3741 ticks), and a
 change meant to leave the simulation alone is checked by running both
 builds the same way and comparing (tools/tick_hash_compare.py).
