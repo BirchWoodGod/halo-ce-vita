@@ -61,6 +61,20 @@ def column():
     ])
 
 
+def menu_column():
+    # Halo 3's main-menu list panel, measured on its screen (each row's
+    # pixels just inside the panel's straight edges against those just
+    # outside, where the scene behind is alike): one dark navy tint whose
+    # opacity grows with the height, about half see-through at the first row
+    # and a quarter at the bottom - a gradient, not only the darker scene
+    # showing through; the main menu's own (the lobbies keep column())
+    return vertical_gradient((64, 64), [
+        (0.0, (6, 16, 42, alpha(.50))),
+        (0.6, (4, 12, 34, alpha(.64))),
+        (1.0, (2, 8, 26, alpha(.78))),
+    ])
+
+
 def haze():
     # Halo 3's blue cast over the menu's 3D scene: full screen (a widget as
     # wide as the 640 columns stretches over the wide screen too), deeper at
@@ -639,18 +653,34 @@ def forge_emblem():
 
 def title_halo():
     # the owner's HALO CE VITA logo (tools/art/halo_ce_vita_logo.png, his own
-    # drawing), fitted into the title's 256x64 and centred (the menus draw a
-    # picture 1:1, 256x64 in the 640x480 screen)
+    # drawing, its drop shadow kept) in a 512x128 picture the main menu draws
+    # whole into its title's widget (<bitmap fit="widget">, menu_tags.c), 340x85
+    # of the 640x480 screen: more pixels than that place, so sharp on
+    # the Vita's 960x544 interface layer (and close enough to its size there
+    # to be drawn smoothly without mipmaps). Behind it a soft blue glow made
+    # here from the logo's own shape, as Halo 3's title has
+    width, height, margin_x = 512, 128, 16
     logo = Image.open(os.path.join(ART_SOURCES, 'halo_ce_vita_logo.png')).convert('RGBA')
     box = logo.getbbox()
     if box:
         logo = logo.crop(box)
-    fit = min(256 / logo.width, 64 / logo.height)
+    fit = min((width - 2 * margin_x) / logo.width, height / logo.height)
     size = (max(1, round(logo.width * fit)), max(1, round(logo.height * fit)))
     logo = logo.resize(size, Image.Resampling.LANCZOS)
-    image = Image.new('RGBA', (256, 64), (0, 0, 0, 0))
-    image.paste(logo, ((256 - size[0]) // 2, (64 - size[1]) // 2), logo)
-    return image
+    at = ((width - size[0]) // 2, (height - size[1]) // 2)
+    shape = Image.new('L', (width, height), 0)
+    shape.paste(logo.getchannel('A'), at)
+    image = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+    # (two blurs of the shape: a wide faint one and a closer one)
+    for radius, strength in ((14, .42), (5, .38)):
+        spread = shape.filter(ImageFilter.GaussianBlur(radius))
+        spread = spread.point(lambda value, strength=strength: round(min(255, value * strength * 1.6)))
+        glow = Image.new('RGBA', (width, height), (96, 160, 235, 0))
+        glow.putalpha(spread)
+        image = Image.alpha_composite(image, glow)
+    layer = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+    layer.paste(logo, at)
+    return Image.alpha_composite(image, layer)
 
 
 # the menus' fonts (menu_tags.c makes each a font tag of the game's): the
@@ -831,6 +861,7 @@ def swatch(colour):
 ART = {
     'column.png': column,
     'haze.png': haze,
+    'menu_column.png': menu_column,
     'panel.png': panel,
     'custom_panel.png': custom_panel,
     'profiles_panel.png': profiles_panel,

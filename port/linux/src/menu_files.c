@@ -446,7 +446,7 @@ static void read_bitmap(struct reader *reader, const XML_Char **attributes)
 	struct attribute table[] =
 	{
 		{ "name", &bitmap.name }, { "resource", &bitmap.resource }, { "frames", &frames },
-		{ "width", NULL, &width }, { "height", NULL, &height },
+		{ "width", NULL, &width }, { "height", NULL, &height }, { "fit", &bitmap.fit },
 	};
 
 	memset(&bitmap, 0, sizeof(bitmap));
@@ -490,6 +490,8 @@ static void read_bitmap(struct reader *reader, const XML_Char **attributes)
 	}
 	if (!reader->failed && !bitmap.name)
 		reader_error(reader, "a <bitmap> needs a name");
+	if (!reader->failed && bitmap.fit && strcmp(bitmap.fit, "widget"))
+		reader_error(reader, "a <bitmap>'s fit is \"widget\" (drawn whole into its widget) or not given");
 	GROW(reader, menus->bitmaps, menus->bitmap_count);
 	menus->bitmaps[menus->bitmap_count++] = bitmap;
 }

@@ -18,9 +18,11 @@ GENERATOR = os.path.join(HERE, '..', 'halo3_menu_art.py')
 
 # (the menus draw a picture 1:1 and crop it to its widget, or stretch it when
 # the widget is larger: ui_widget.c draw_bitmap_in_rect; so each is at most its
-# widget's size, in the 640x480 screen, and a power of two)
+# widget's size, in the 640x480 screen, and a power of two; title_halo.png is
+# drawn whole into its widget, scaled: <bitmap fit="widget">, menu_tags.c)
 EXPECTED = {
     'column.png': (64, 64),
+    'menu_column.png': (64, 64),
     'haze.png': (64, 64),
     'panel.png': (64, 64),
     'item_on.png': (128, 16),
@@ -35,7 +37,7 @@ EXPECTED = {
     'glyph_triangle.png': (16, 16),
     'glyph_square.png': (16, 16),
     'glyph_start.png': (16, 16),
-    'title_halo.png': (256, 64),
+    'title_halo.png': (512, 128),
     # (Forge: its lobby's emblem, the object browser's L and R)
     'forge_emblem.png': (64, 64),
     'glyph_l.png': (16, 16),
