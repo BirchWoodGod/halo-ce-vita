@@ -279,6 +279,8 @@ wchar_t virtual_keyboard_get_current_character(
 	void);
 static void virtual_keyboard_render_internal(
 	void);
+static void virtual_keyboard_done(
+	void);
 static boolean virtual_keyboard_select(
 	void);
 static void virtual_keyboard_process_internal(
@@ -344,6 +346,14 @@ static rectangle2d keyboard_rect[NUMBER_OF_VIRTUAL_KEYS] =
 };
 
 struct virtual_keyboard_globals virtual_keyboard_globals= {0};
+
+#if defined(HALO_LINUX) && !defined(HALO_VITA)
+/* port: the name being typed in the PC build's text box, not on the
+keyboard (virtual_keyboard_launch); menu_functions.c asks the box */
+static boolean virtual_keyboard_pc_typing;
+boolean pc_menu_classic_typing_begin(short caption_index, wchar_t const *text, int maximum);
+int pc_menu_classic_typing_poll(wchar_t *text, int count);
+#endif
 
 /* ---------- public code */
 
@@ -457,6 +467,14 @@ boolean virtual_keyboard_launch(
 			MAXIMUM_VIRTUAL_KEYBOARD_SAVED_TEXT_LENGTH);
 		virtual_keyboard_globals.saved_text[MAXIMUM_VIRTUAL_KEYBOARD_SAVED_TEXT_LENGTH - 1] = L'\0';
 		virtual_keyboard_globals.last_exit_saved_text = FALSE;
+#if defined(HALO_LINUX) && !defined(HALO_VITA)
+		/* port: the PC build types the name in its own text box (the
+		keyboard, or a gamepad's on-screen keyboard: pc_text_entry.c), as
+		the Halo 3 menus' names are, not on the Xbox's keyboard; the
+		keyboard stays active, undrawn, until the box answers */
+		virtual_keyboard_pc_typing = pc_menu_classic_typing_begin(caption_index, text_buffer,
+			(int)(virtual_keyboard_globals.buffer_size / sizeof(wchar_t)) - 1);
+#endif
 		ui_play_audio_feedback_sound(_ui_audio_feedback_forward);
 		result = TRUE;
 	}
@@ -946,6 +964,11 @@ void virtual_keyboard_close(
 void virtual_keyboard_render(
 	void)
 {
+#if defined(HALO_LINUX) && !defined(HALO_VITA)
+	/* port: the text box draws itself (pc_text_entry_overlay.c) */
+	if (virtual_keyboard_pc_typing)
+		return;
+#endif
 	if (virtual_keyboard_globals.active)
 		virtual_keyboard_render_internal();
 
@@ -955,6 +978,40 @@ void virtual_keyboard_render(
 void virtual_keyboard_process(
 	void)
 {
+#if defined(HALO_LINUX) && !defined(HALO_VITA)
+	/* port: the PC build's text box answered: typed, the name checked and
+	kept as the keyboard's Done does; cancelled (Escape, Y), as its B. The
+	menu behind gets no event meanwhile */
+	if (virtual_keyboard_pc_typing)
+	{
+		struct event_record event;
+		wchar_t typed[MAXIMUM_VIRTUAL_KEYBOARD_BUFFER_SIZE / sizeof(wchar_t)];
+		long count = MIN(virtual_keyboard_globals.buffer_size / (long)sizeof(wchar_t), (long)NUMBEROF(typed));
+		int answer;
+
+		while (get_next_event(&event, NONE))
+			;
+		if (!virtual_keyboard_globals.active)
+		{
+			virtual_keyboard_pc_typing = FALSE;
+			return;
+		}
+		answer = pc_menu_classic_typing_poll(typed, (int)count);
+		if (answer == 0)
+			return;
+		virtual_keyboard_pc_typing = FALSE;
+		if (answer < 0)
+		{
+			virtual_keyboard_cancel();
+			event_manager_flush();
+			return;
+		}
+		ustrncpy(virtual_keyboard_globals.text_buffer, typed, count);
+		virtual_keyboard_globals.text_buffer[count - 1] = L'\0';
+		virtual_keyboard_done();
+		return;
+	}
+#endif
 	if (virtual_keyboard_globals.active)
 		virtual_keyboard_process_internal();
 
@@ -962,6 +1019,51 @@ void virtual_keyboard_process(
 }
 
 /* ---------- private code */
+
+/* Done: the name checked (a port's: player_name_clean), refused if empty
+or another file's, else kept (last_exit_saved_text); the keyboard closed.
+Its own function for the PC build's text box too (pc_typing) */
+static void virtual_keyboard_done(
+	void)
+{
+	/* port: a name kept to one the host's ban command can name: its
+	spaces before and after dropped, and one without a character it can
+	type (player_name_clean) empty, which is refused below */
+	if (!player_name_clean(virtual_keyboard_globals.text_buffer,
+		virtual_keyboard_globals.buffer_size / (long)sizeof(wchar_t)))
+	{
+		virtual_keyboard_globals.text_buffer[0] = 0;
+	}
+	if (ustrcmp(virtual_keyboard_globals.saved_text, virtual_keyboard_globals.text_buffer) != 0)
+	{
+		if (virtual_keyboard_globals.text_buffer[0])
+		{
+			if (saved_game_file_name_unique(virtual_keyboard_globals.text_buffer))
+			{
+				virtual_keyboard_globals.last_exit_saved_text = TRUE;
+			}
+			else
+			{
+				display_error(_error_already_a_saved_game_file_with_that_name, NONE, TRUE, FALSE);
+				virtual_keyboard_cancel();
+			}
+		}
+		else
+		{
+			display_error(_error_cannot_create_saved_game_file_with_empty_name, NONE, TRUE, FALSE);
+			virtual_keyboard_cancel();
+		}
+	}
+	else
+	{
+		virtual_keyboard_globals.last_exit_saved_text = TRUE;
+	}
+	ui_play_audio_feedback_sound(_ui_audio_feedback_back);
+	virtual_keyboard_globals.active = FALSE;
+	event_manager_flush();
+
+	return;
+}
 
 static boolean virtual_keyboard_select(
 	void)
@@ -971,41 +1073,7 @@ static boolean virtual_keyboard_select(
 	switch (keycode)
 	{
 	case _vkey_done:
-		/* port: a name kept to one the host's ban command can name: its
-		spaces before and after dropped, and one without a character it can
-		type (player_name_clean) empty, which is refused below */
-		if (!player_name_clean(virtual_keyboard_globals.text_buffer,
-			virtual_keyboard_globals.buffer_size / (long)sizeof(wchar_t)))
-		{
-			virtual_keyboard_globals.text_buffer[0] = 0;
-		}
-		if (ustrcmp(virtual_keyboard_globals.saved_text, virtual_keyboard_globals.text_buffer) != 0)
-		{
-			if (virtual_keyboard_globals.text_buffer[0])
-			{
-				if (saved_game_file_name_unique(virtual_keyboard_globals.text_buffer))
-				{
-					virtual_keyboard_globals.last_exit_saved_text = TRUE;
-				}
-				else
-				{
-					display_error(_error_already_a_saved_game_file_with_that_name, NONE, TRUE, FALSE);
-					virtual_keyboard_cancel();
-				}
-			}
-			else
-			{
-				display_error(_error_cannot_create_saved_game_file_with_empty_name, NONE, TRUE, FALSE);
-				virtual_keyboard_cancel();
-			}
-		}
-		else
-		{
-			virtual_keyboard_globals.last_exit_saved_text = TRUE;
-		}
-		ui_play_audio_feedback_sound(_ui_audio_feedback_back);
-		virtual_keyboard_globals.active = FALSE;
-		event_manager_flush();
+		virtual_keyboard_done();
 		break;
 
 	case _vkey_shift:
