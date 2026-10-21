@@ -133,6 +133,12 @@ enum
 	MAXIMUM_SEEN_REQUESTS = 64,
 	MAXIMUM_TOMBSTONES = 32,
 	MAXIMUM_MUTED = 32,
+	/* the newest request (epoch and counter) of each key this machine
+	declined, removed or blocked, kept in marks.dat: an older one, replayed
+	off a broker, is dropped however long ago it was seen (security review
+	1.1.1-beta.1 F-10; the seen ring alone forgot it after 64 others' or a
+	restart) */
+	MAXIMUM_MARKS = 128,
 	MAXIMUM_BROKER_MASK = 0xFF,
 	/* messages handled in one pass of internet play's thread */
 	MESSAGES_PER_PASS = 16,
@@ -183,6 +189,13 @@ enum
 	BLOCKED_RECORD_SIZE = P2P_KEY_SIZE + 1 + NAME_LENGTH,
 	TOMBSTONE_RECORD_SIZE = P2P_KEY_SIZE + FRIENDSHIP_LENGTH + 8,
 	MUTED_RECORD_SIZE = P2P_KEY_SIZE + 8,
+	/* marks.dat: "HFRM", its version, the marks' and the requests' counts,
+	the records (key, epoch, counter, time), its SHA-256 */
+	MARKS_VERSION = 1,
+	MARKS_HEADER_SIZE = 4 + 1 + 1 + 1,
+	MARK_RECORD_SIZE = P2P_KEY_SIZE + 8 + 4 + 8,
+	MAXIMUM_MARKS_SIZE = MARKS_HEADER_SIZE + (MAXIMUM_MARKS + P2P_FRIEND_REQUESTS_MAXIMUM) * MARK_RECORD_SIZE +
+		P2P_SHA256_SIZE,
 	MAXIMUM_LIST_SIZE = LIST_HEADER_SIZE + P2P_FRIENDS_MAXIMUM * FRIEND_RECORD_SIZE +
 		P2P_FRIEND_REQUESTS_MAXIMUM * REQUEST_RECORD_SIZE + P2P_FRIEND_OUTGOING_MAXIMUM * OUTGOING_RECORD_SIZE +
 		P2P_FRIEND_BLOCKED_MAXIMUM * BLOCKED_RECORD_SIZE + MAXIMUM_TOMBSTONES * TOMBSTONE_RECORD_SIZE +
@@ -192,6 +205,8 @@ enum
 
 /* (a message fits the room p2p_signal.c gives it: p2p_friends_outgoing
 copies it whole) */
+/* (load reads marks.dat into the list's buffer) */
+typedef char friends_marks_room_assert[MAXIMUM_MARKS_SIZE < MAXIMUM_LIST_SIZE ? 1 : -1];
 typedef char friends_payload_room_assert[MAXIMUM_PAYLOAD_SIZE <= P2P_FRIENDS_PAYLOAD_ROOM ? 1 : -1];
 
 static const char signature_label[] = "hcev-friends-1";
@@ -310,6 +325,9 @@ struct request_record
 	char name[P2P_FRIEND_NAME_SIZE];
 	unsigned char nonce[NONCE_LENGTH];
 	unsigned long long time;
+	/* (marks.dat) the newest of its requests heard */
+	unsigned long long epoch;
+	unsigned long counter;
 };
 
 struct outgoing_record
@@ -320,6 +338,16 @@ struct outgoing_record
 	/* this run: when it was last sent, and since when it is sent */
 	unsigned long sent_time;
 	unsigned long first_time;
+};
+
+/* a key's newest request heard, kept once this machine declined, removed or
+blocked it (F-10) */
+struct request_mark
+{
+	unsigned char key[P2P_KEY_SIZE];
+	unsigned long long epoch;
+	unsigned long counter;
+	unsigned long long time;
 };
 
 struct blocked_record
@@ -550,6 +578,8 @@ struct friends_state
 	int invite_count;
 	struct seen_request seen[MAXIMUM_SEEN_REQUESTS];
 	int seen_next;
+	struct request_mark marks[MAXIMUM_MARKS];
+	int mark_count;
 
 	/* the party (p2p_party.inc), its invites heard, its replays, its chat */
 	struct party_state party;
@@ -1121,6 +1151,53 @@ static int find_outgoing(const char *code)
 	return -1;
 }
 
+static int find_mark(const unsigned char *key)
+{
+	int index;
+
+	for (index = 0; index < friends->mark_count; index++)
+		if (p2p_equal(friends->marks[index].key, key, P2P_KEY_SIZE))
+			return index;
+	return -1;
+}
+
+/* whether an epoch and counter are newer than a mark's */
+static int mark_newer(const struct request_mark *mark, unsigned long long epoch, unsigned long counter)
+{
+	return epoch > mark->epoch || (epoch == mark->epoch && counter > mark->counter);
+}
+
+/* a key's newest request (or message) heard, kept: its requests no newer
+dropped from now on (F-10); the oldest mark goes when they are all used */
+static void mark_note(const unsigned char *key, unsigned long long epoch, unsigned long counter)
+{
+	int index = find_mark(key);
+
+	if (!epoch && !counter)
+		return;
+	if (index < 0)
+	{
+		if (friends->mark_count >= MAXIMUM_MARKS)
+		{
+			int oldest = 0;
+
+			for (index = 1; index < friends->mark_count; index++)
+				if (friends->marks[index].time < friends->marks[oldest].time)
+					oldest = index;
+			friends->marks[oldest] = friends->marks[--friends->mark_count];
+		}
+		index = friends->mark_count++;
+		memset(&friends->marks[index], 0, sizeof(friends->marks[index]));
+		memcpy(friends->marks[index].key, key, P2P_KEY_SIZE);
+	}
+	else if (!mark_newer(&friends->marks[index], epoch, counter))
+		return;
+	friends->marks[index].epoch = epoch;
+	friends->marks[index].counter = counter;
+	friends->marks[index].time = unix_now();
+	friends->dirty = 1;
+}
+
 /* the list's bytes (friends.dat) */
 static int list_encode(unsigned char *bytes)
 {
@@ -1339,6 +1416,107 @@ bad:
 	return 0;
 }
 
+/* marks.dat's bytes: the marks, then the requests waiting's epochs and
+counters (friends.dat, which builds before this one read, has no room for
+them; they read no marks.dat) */
+static int marks_encode(unsigned char *bytes)
+{
+	int size = 0, index;
+
+	memcpy(bytes, "HFRM", 4);
+	size += 4;
+	bytes[size++] = MARKS_VERSION;
+	bytes[size++] = (unsigned char)friends->mark_count;
+	bytes[size++] = (unsigned char)friends->request_count;
+	for (index = 0; index < friends->mark_count + friends->request_count; index++)
+	{
+		const unsigned char *key;
+		unsigned long long epoch, time;
+		unsigned long counter;
+
+		if (index < friends->mark_count)
+		{
+			key = friends->marks[index].key;
+			epoch = friends->marks[index].epoch;
+			counter = friends->marks[index].counter;
+			time = friends->marks[index].time;
+		}
+		else
+		{
+			const struct request_record *request = &friends->requests[index - friends->mark_count];
+
+			key = request->key;
+			epoch = request->epoch;
+			counter = request->counter;
+			time = 0;
+		}
+		memcpy(bytes + size, key, P2P_KEY_SIZE);
+		size += P2P_KEY_SIZE;
+		put_u64(bytes + size, epoch);
+		size += 8;
+		put_u32(bytes + size, counter);
+		size += 4;
+		put_u64(bytes + size, time);
+		size += 8;
+	}
+	p2p_sha256(bytes, size, bytes + size);
+	return size + P2P_SHA256_SIZE;
+}
+
+/* the reverse, after the list (its requests given their epochs): 1, or 0
+(nothing taken) */
+static int marks_decode(const unsigned char *bytes, int size)
+{
+	unsigned char digest[P2P_SHA256_SIZE];
+	int marks, requests, index, offset = MARKS_HEADER_SIZE;
+
+	friends->mark_count = 0;
+	if (size < MARKS_HEADER_SIZE + P2P_SHA256_SIZE || memcmp(bytes, "HFRM", 4) || bytes[4] != MARKS_VERSION)
+		return 0;
+	marks = bytes[5];
+	requests = bytes[6];
+	if (marks > MAXIMUM_MARKS || requests > P2P_FRIEND_REQUESTS_MAXIMUM ||
+		size != MARKS_HEADER_SIZE + (marks + requests) * MARK_RECORD_SIZE + P2P_SHA256_SIZE)
+	{
+		return 0;
+	}
+	p2p_sha256(bytes, size - P2P_SHA256_SIZE, digest);
+	if (!p2p_equal(digest, bytes + size - P2P_SHA256_SIZE, P2P_SHA256_SIZE))
+		return 0;
+	for (index = 0; index < marks + requests; index++, offset += MARK_RECORD_SIZE)
+	{
+		const unsigned char *key = bytes + offset;
+		unsigned long long epoch = get_u64(bytes + offset + P2P_KEY_SIZE);
+		unsigned long counter = get_u32(bytes + offset + P2P_KEY_SIZE + 8);
+
+		if (!key_usable(key))
+			continue;
+		if (index < marks)
+		{
+			struct request_mark *mark;
+
+			if (find_mark(key) >= 0)
+				continue;
+			mark = &friends->marks[friends->mark_count++];
+			memcpy(mark->key, key, P2P_KEY_SIZE);
+			mark->epoch = epoch;
+			mark->counter = counter;
+			mark->time = get_u64(bytes + offset + P2P_KEY_SIZE + 12);
+		}
+		else
+		{
+			int request = find_request(key);
+
+			if (request >= 0)
+			{
+				friends->requests[request].epoch = epoch;
+				friends->requests[request].counter = counter;
+			}
+		}
+	}
+	return 1;
+}
+
 /* a file's bytes, the file itself or (a write cut short between its
 renames) its .old; -1 if neither */
 static int file_take(const char *name, unsigned char *bytes, int capacity, int old)
@@ -1408,6 +1586,18 @@ static void load(void)
 				file_set_aside("friends.dat");
 		}
 	}
+	/* (the marks: none, a file an older build left, read as none) */
+	taken = 0;
+	for (old = 0; old < 2 && !taken; old++)
+	{
+		size = file_take("marks.dat", bytes, MAXIMUM_MARKS_SIZE + 1, old);
+		if (size >= 0)
+		{
+			taken = marks_decode(bytes, size);
+			if (!taken && !old)
+				file_set_aside("marks.dat");
+		}
+	}
 	pthread_mutex_unlock(&friends_file_lock);
 	{
 		char shown[P2P_FRIEND_CODE_SIZE];
@@ -1423,8 +1613,8 @@ static void load(void)
 the interval). Takes friends_lock itself */
 static void save(int force)
 {
-	unsigned char bytes[MAXIMUM_LIST_SIZE];
-	int size, written;
+	unsigned char bytes[MAXIMUM_LIST_SIZE], *marks;
+	int size, marks_size, written;
 
 	pthread_mutex_lock(&friends_lock);
 	if (!friends->loaded || (!friends->dirty && !(friends->counters_dirty && (force ||
@@ -1434,7 +1624,15 @@ static void save(int force)
 		pthread_mutex_unlock(&friends_lock);
 		return;
 	}
+	/* (marks.dat's bytes off the stack: the game's thread saves too) */
+	marks = malloc(MAXIMUM_MARKS_SIZE);
+	if (!marks)
+	{
+		pthread_mutex_unlock(&friends_lock);
+		return;
+	}
 	size = list_encode(bytes);
+	marks_size = marks_encode(marks);
 	friends->dirty = 0;
 	friends->counters_dirty = 0;
 	friends->saved_time = now_stamp();
@@ -1442,7 +1640,10 @@ static void save(int force)
 	pthread_mutex_unlock(&friends_lock);
 	pthread_mutex_lock(&friends_file_lock);
 	written = file_put("friends.dat", bytes, size);
+	if (written && !file_put("marks.dat", marks, marks_size))
+		written = 0;
 	pthread_mutex_unlock(&friends_file_lock);
+	free(marks);
 	if (!written)
 	{
 		pthread_mutex_lock(&friends_lock);
@@ -2393,7 +2594,7 @@ static void request_heard(const struct message *message)
 {
 	struct friend_record *record;
 	char text[64];
-	int index;
+	int index = -1;
 
 	if (!p2p_equal(message->recipient, friends->code_recipient, P2P_SHA256_SIZE))
 	{
@@ -2416,6 +2617,22 @@ static void request_heard(const struct message *message)
 		friends->dropped_replays++;
 		return;
 	}
+	/* (an old request of a friend's, or of a key declined, removed or
+	blocked here, replayed off a broker: no newer than the newest of theirs
+	this machine has, however long ago that was - a friend's, not even
+	within its replay window, F-10; a new run of theirs is a newer epoch, a
+	request sent again a newer counter) */
+	record = find_friend(message->sender);
+	if (record ? (message->epoch < record->epoch || (message->epoch == record->epoch &&
+		message->counter <= record->counter) || !replay_check(record, message->epoch, message->counter)) :
+		(index = find_mark(message->sender)) >= 0 && !mark_newer(&friends->marks[index], message->epoch,
+			message->counter))
+	{
+		friends->dropped_replays++;
+		return;
+	}
+	if (!record && index >= 0)
+		mark_note(message->sender, message->epoch, message->counter);
 	if (find_muted(message->sender) >= 0)
 		return;
 	name_or_code(message->sender, message->name, text, sizeof(text));
@@ -2423,7 +2640,6 @@ static void request_heard(const struct message *message)
 	while appearing offline, which an answer would give away: a friend could
 	send a request to learn whether this machine is on, security review
 	1.1.1-beta.1 F-04) */
-	record = find_friend(message->sender);
 	if (record)
 	{
 		snprintf(record->name, sizeof(record->name), "%s", message->name);
@@ -2471,12 +2687,19 @@ static void request_heard(const struct message *message)
 			return;
 		}
 		index = friends->request_count++;
+		memset(&friends->requests[index], 0, sizeof(friends->requests[index]));
 		platform_log("friends: a friend request from %s", text);
 	}
 	memcpy(friends->requests[index].key, message->sender, P2P_KEY_SIZE);
 	snprintf(friends->requests[index].name, sizeof(friends->requests[index].name), "%s", message->name);
 	memcpy(friends->requests[index].nonce, message->nonce, NONCE_LENGTH);
 	friends->requests[index].time = unix_now();
+	if (message->epoch > friends->requests[index].epoch || (message->epoch == friends->requests[index].epoch &&
+		message->counter > friends->requests[index].counter))
+	{
+		friends->requests[index].epoch = message->epoch;
+		friends->requests[index].counter = message->counter;
+	}
 	friends->dirty = 1;
 }
 
@@ -2618,6 +2841,7 @@ static void remove_heard(int index, const struct message *message)
 		return;
 	}
 	platform_log("friends: %s removed this machine from their friends", record->name);
+	mark_note(record->key, record->epoch, record->counter);
 	friend_remove_index(index);
 	friends->dirty = 1;
 }
@@ -4368,11 +4592,15 @@ static int block_key(const unsigned char *key, const char *name)
 		/* (told it is over, then never told anything again) */
 		if (friends_on())
 			send_remove(key, friends->friends[index].friendship);
+		mark_note(key, friends->friends[index].epoch, friends->friends[index].counter);
 		friend_remove_index(index);
 	}
 	index = find_request(key);
 	if (index >= 0)
+	{
+		mark_note(key, friends->requests[index].epoch, friends->requests[index].counter);
 		request_remove(index);
+	}
 	index = find_tombstone(key);
 	if (index >= 0)
 		tombstone_remove(index);
@@ -4465,10 +4693,12 @@ int p2p_friends_act(const char *id, int kind, int action)
 				result = P2P_FRIENDS_FULL;
 				break;
 			}
-			/* (their epoch is learnt from their next message) */
-			record->epoch = 0;
-			record->counter = 0;
-			record->window = 0;
+			/* (their epoch is learnt from their next message; the request's
+			own, when known, so that it is no newer than they are: replayed,
+			it is dropped, F-10) */
+			record->epoch = request.epoch;
+			record->counter = request.counter;
+			record->window = request.epoch ? 1 : 0;
 			request_remove(index);
 			send_accept(request.key, request.nonce, friendship);
 			name_or_code(request.key, request.name, text, sizeof(text));
@@ -4483,6 +4713,8 @@ int p2p_friends_act(const char *id, int kind, int action)
 		else
 		{
 			muted_add(friends->requests[index].key);
+			/* (its requests no newer than this one never shown again, F-10) */
+			mark_note(friends->requests[index].key, friends->requests[index].epoch, friends->requests[index].counter);
 			platform_log("friends: declined %s's friend request (nothing sent)", friends->requests[index].name);
 			request_remove(index);
 			changed = 1;
@@ -4527,6 +4759,7 @@ int p2p_friends_act(const char *id, int kind, int action)
 
 			platform_log("friends: removed %s", record->name);
 			tombstone_add(record->key, record->friendship);
+			mark_note(record->key, record->epoch, record->counter);
 			if (friends_on())
 				send_remove(record->key, record->friendship);
 			friend_remove_index(index);
