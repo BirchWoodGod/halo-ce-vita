@@ -2677,7 +2677,10 @@ static void maps_scan(void)
 		if (stock)
 			continue;
 		snprintf(path, sizeof(path), "%s/%s", directory, entry->d_name);
-		map->size = stat(path, &status) == 0 ? (unsigned long long)status.st_size : 0;
+		/* (a folder named as a map is none: not listed, never opened) */
+		if (stat(path, &status) != 0 || !S_ISREG(status.st_mode))
+			continue;
+		map->size = (unsigned long long)status.st_size;
 		map->format = map_format(path, map->extension);
 		if (map->format == MAP_CUSTOM_EDITION || map->format == MAP_OPENSAUCE || map->format == MAP_CUSTOM_EDITION_CAMPAIGN)
 			maps_have_custom_edition = 1;
