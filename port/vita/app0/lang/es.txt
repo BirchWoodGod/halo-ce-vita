@@ -1249,6 +1249,7 @@
 "INVERTED" = "INVERTIDO"
 "New profile's name" = "Nombre del perfil nuevo"
 "Player name" = "Nombre del jugador"
+"Game variant name" = "Nombre de la variante de juego"
 "A profile's name needs a letter or a number." = "El nombre de un perfil necesita una letra o un número."
 "Another profile has that name." = "Otro perfil ya tiene ese nombre."
 "The profile could not be created." = "No se pudo crear el perfil."

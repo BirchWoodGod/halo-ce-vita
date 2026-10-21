@@ -422,6 +422,9 @@ enum
 	_typing_party_chat,
 	/* (a friend's game with a password: typed, then joined) */
 	_typing_friend_password,
+	/* (the PC build: the classic menus' keyboard, virtual_keyboard.c, a
+	profile's or a game variant's name) */
+	_typing_classic,
 };
 
 /* the password and code screens' help lines (their strings' order) */
@@ -3329,6 +3332,58 @@ static boolean typing_done(short typing, char *text, int size)
 	sanitize(text, size, halo_text_input_text);
 	return TRUE;
 }
+
+#ifndef HALO_VITA
+/* (the PC build, Menu style Halo CE: virtual_keyboard.c's launch) the
+classic menus' names - a new profile's, a profile's rename, a game
+variant's - typed in the PC build's text box, as the Halo 3 menus' are,
+rather than on the Xbox's on-screen keyboard: CAPTION_INDEX the keyboard's
+caption (8 a profile's name, 9 a game variant's, 10 either's rename), TEXT
+the name now, MAXIMUM its characters. FALSE: not taken (a test build's
+scripted run with no one to type, typing_available) - the Xbox's keyboard
+as before */
+static boolean typing_available(void);
+
+boolean pc_menu_classic_typing_begin(short caption_index, wchar_t const *text, int maximum)
+{
+	char now[HALO_TEXT_INPUT_SIZE];
+	int length = 0;
+
+	if (!typing_available() || maximum <= 0)
+		return FALSE;
+	for (; text && *text && length < (int)sizeof(now) - 1; text++)
+	{
+		if (*text >= 0x20 && *text <= 0x7E)
+			now[length++] = (char)*text;
+	}
+	now[length] = 0;
+	typing_begin(_typing_classic, caption_index == 9 ? T("Game variant name") : T("Player name"), now,
+		PIN(maximum, 1, HALO_TEXT_INPUT_SIZE - 1), FALSE);
+	return TRUE;
+}
+
+/* (virtual_keyboard.c, each frame while it waits) 0 still typing; 1 typed,
+TEXT (COUNT characters with its end) the name, sanitized as the Halo 3
+menus' names are; -1 cancelled */
+int pc_menu_classic_typing_poll(wchar_t *text, int count)
+{
+	char typed[HALO_TEXT_INPUT_SIZE];
+	int state = __atomic_load_n(&halo_text_input_state, __ATOMIC_ACQUIRE);
+	int index;
+
+	if (menu_functions.typing != _typing_classic)
+		return -1;
+	if (state != HALO_TEXT_INPUT_DONE && state != HALO_TEXT_INPUT_CANCELLED)
+		return 0;
+	if (!typing_done(_typing_classic, typed, sizeof(typed)))
+		return -1;
+	for (index = 0; typed[index] && index < count - 1; index++)
+		text[index] = (wchar_t)(unsigned char)typed[index];
+	if (count > 0)
+		text[index] = 0;
+	return 1;
+}
+#endif
 
 /* ---- the Halo 3 profile screens (halo3/profiles.xml, customize.xml):
 SELECT PROFILE stands for the Xbox's profile screens, the campaign's

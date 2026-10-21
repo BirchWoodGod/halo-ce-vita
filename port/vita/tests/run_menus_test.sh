@@ -261,6 +261,9 @@
 #            profile's name by the keyboard (the editing keys, a paste, UTF-8 left out, 11 at
 #            most; no key reaching the menu behind) and by a gamepad alone; Escape and Y
 #            cancel (and nothing else); JOIN WITH CODE's code; a locked game's password
+#   pcclassic  Menu style Halo CE on the PC build: a new profile's name typed in the PC build's
+#            text box (not the Xbox's on-screen keyboard) by the keyboard and by a gamepad's
+#            on-screen keyboard, the profile made and the campaign going on; Escape cancels
 #   pcnoadhoc  the PC build (HALO_TEST_PLATFORM=pc) has no AD HOC: the NETWORK picker
 #            goes SYSTEM LINK, OFFLINE and back up to SYSTEM LINK without it; the connection Ad hoc in
 #            the settings is System Link there, ad hoc play never started; the
@@ -1649,6 +1652,50 @@ for case in $cases; do
 				[ -s "$shot" ] && cp "$shot" "$HALO_TEST_SHOTS/"
 			done
 		fi ;;
+	pcclassic)
+		# (Menu style Halo CE on the PC build: the Xbox menus' names typed in the PC build's text box,
+		# as the Halo 3 menus' are, not on the Xbox's on-screen keyboard - Grunt pirate, insider.18.
+		# The keyboard alone: Enter on CAMPAIGN; the new profile's name box open on the name the Xbox
+		# offers (New001); End, its six characters erased, "Rookie", Enter: made as the Xbox's Done
+		# makes it, the difficulty next)
+		bs="key:BackSpace key:BackSpace key:BackSpace key:BackSpace key:BackSpace key:BackSpace"
+		run pcclassic_keyboard "$menus_data" 30 "" HALO_SCREENSHOT_DIR="$out/pcclassic_keyboard" \
+			"HALO_TEST_KEYS=wait:5000 key:Return typing @pcclassic_keyboard_open key:End $bs text:Rookie @pcclassic_keyboard_typed key:Return closed wait:6000 @pcclassic_keyboard_after"
+		# (a gamepad alone: A on CAMPAIGN; B six times erases New001; then pctext_pad's keys from q:
+		# Rookie; Start)
+		q="150:350"
+		b6="b:$q b:$q b:$q b:$q b:$q b:$q"
+		run pcclassic_pad "$menus_data" 40 "wait:150:5000 a wait:150:2500 $b6 white:$q right:$q right:$q right:$q a:$q white:$q right:$q right:$q right:$q right:$q right:$q a:$q a:$q down:$q left:$q a:$q up:$q a:$q left:$q left:$q left:$q left:$q left:$q a:$q a:$q b:$q @pcclassic_pad_typed start:150:4000 wait:150:3000" \
+			HALO_SCREENSHOT_DIR="$out/pcclassic_pad" HALO_TEST_KEYS=wait:1
+		# (Escape cancels: no profile, the Xbox's keyboard never drawn after)
+		run pcclassic_cancel "$menus_data" 24 "" \
+			"HALO_TEST_KEYS=wait:5000 key:Return typing text:Nope key:Escape closed wait:4000"
+		for name in pcclassic_keyboard pcclassic_pad pcclassic_cancel; do
+			check_h3 $name classic
+			grep -aq "menus: typing .*: typed\|menus: typing .*: cancelled" "$out/$name/run.log" &&
+				fail pcclassic "$name: the tests' answers typed in place of the text box"
+		done
+		log=$out/pcclassic_keyboard/run.log
+		grep -aq 'text entry: "Player name" opened (up to 11 characters)$' "$log" ||
+			fail pcclassic "keyboard: the text box did not open for the new profile's name"
+		grep -aq 'text entry: "Player name": done: "Rookie"' "$log" || fail pcclassic "keyboard: Rookie was not typed"
+		sed -n '/text entry: .*done/,$p' "$log" | grep -aq "ui: screen ui.shell.main_menu.difficulty_select" ||
+			fail pcclassic "keyboard: the profile's name did not go on to the difficulty"
+		log=$out/pcclassic_pad/run.log
+		grep -aq "text entry: .*the on-screen keyboard shown" "$log" || fail pcclassic "pad: the on-screen keyboard was not shown"
+		grep -aq 'text entry: "Player name": done: "Rookie"' "$log" || fail pcclassic "pad: Rookie was not typed on the on-screen keyboard"
+		sed -n '/text entry: .*done/,$p' "$log" | grep -aq "ui: screen ui.shell.main_menu.difficulty_select" ||
+			fail pcclassic "pad: the profile's name did not go on to the difficulty"
+		for name in pcclassic_keyboard pcclassic_pad; do
+			found=$(find "$out/$name/save" -name blam.sav | head -1)
+			[ -n "$found" ] && [ "$(profile_fields "$found" | cut -d'|' -f1)" = Rookie ] &&
+				echo "  ok: $name: the profile Rookie saved" || fail pcclassic "$name: no profile Rookie saved"
+		done
+		log=$out/pcclassic_cancel/run.log
+		grep -aq 'text entry: "Player name": cancelled' "$log" || fail pcclassic "cancel: Escape did not cancel"
+		grep -aq "ui: screen ui.shell.main_menu.difficulty_select" "$log" && fail pcclassic "cancel: the campaign went on"
+		[ -z "$(find "$out/pcclassic_cancel/save" -name blam.sav)" ] || fail pcclassic "cancel: a profile was saved"
+		;;
 	pcnoadhoc)
 		# (the PC build, HALO_TEST_PLATFORM=pc: no AD HOC - the PS Vitas' own -, the owner, Oct 20
 		# 2026. NETWORK: the picker on SYSTEM LINK, down, A: OFFLINE, the next row; NETWORK, up, A:
