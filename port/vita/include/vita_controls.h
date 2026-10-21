@@ -177,10 +177,15 @@ enum
 };
 
 /* the Xbox buttons as settings.txt values and as the panel shows them (in
-the enum's order; macros, for the panel's row initialisers) */
+the enum's order; macros, for the panel's row initialisers): each with
+what it does in play where that fits the value column in every language
+(20 characters), so that a touch zone is set to zoom without knowing it
+is the right stick's click (testers looked for a zoom choice); the
+triggers' do not fit in Spanish and are plain */
 #define VITA_XBOX_VALUES "off", "a", "b", "x", "y", "black", "white", "lt", "rt", "ls", "rs", "back"
-#define VITA_XBOX_NAMES "Off", "A", "B", "X", "Y", "Black", "White", "Left trigger", "Right trigger", \
-	"Left stick", "Right stick", "Back"
+#define VITA_XBOX_NAMES "Off", "A (jump)", "B (melee)", "X (reload, action)", "Y (switch weapon)", \
+	"Black (grenade type)", "White (flashlight)", "Left trigger", "Right trigger", "Left stick (crouch)", \
+	"Right stick (zoom)", "Back (scoreboard)"
 
 /* (two letters each, for the panel's zone diagram) */
 #define VITA_XBOX_SHORT_NAMES "", "A", "B", "X", "Y", "Bl", "Wh", "LT", "RT", "LS", "RS", "Bk"

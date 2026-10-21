@@ -702,8 +702,9 @@ static void test_names(void)
 	static const char *const xbox_short[] = { VITA_XBOX_SHORT_NAMES };
 	static const char *const button_values[] = { VITA_BUTTON_VALUES }, *const button_names[] = { VITA_BUTTON_NAMES };
 	static const char *const guard_values[] = { VITA_REAR_GUARD_VALUES }, *const guard_names[] = { VITA_REAR_GUARD_NAMES };
-	static const char *const xbox_terms[] = { "Off", "A", "B", "X", "Y", "Black", "White", "Left trigger",
-		"Right trigger", "Left stick", "Right stick", "Back" };
+	static const char *const xbox_terms[] = { "Off", "A (jump)", "B (melee)", "X (reload, action)",
+		"Y (switch weapon)", "Black (grenade type)", "White (flashlight)", "Left trigger", "Right trigger",
+		"Left stick (crouch)", "Right stick (zoom)", "Back (scoreboard)" };
 	int index, fits = 1, plain = 1, terms = 1;
 
 	check(sizeof(xbox_values) == sizeof(xbox_names) && sizeof(xbox_names) == sizeof(xbox_short) &&
@@ -727,7 +728,8 @@ static void test_names(void)
 	}
 	for (index = 0; index < VITA_REAR_GUARD_COUNT; index++)
 		fits &= strlen(guard_names[index]) + 4 <= 24;
-	check(terms, "the touch zones' choices are the Xbox controller's (A B X Y, Black, White, triggers, sticks, Back)");
+	check(terms, "the touch zones' choices are the Xbox controller's (A B X Y, Black, White, triggers, sticks, Back), "
+		"each with what it does in play where it fits (\"Right stick (zoom)\": testers looked for zoom)");
 	check(plain, "no choice is called a \"button\" (\"grenade button\"...): the buttons by name");
 	check(fits, "every choice's name fits the panel's value column (\"< name >\", 24 characters)");
 	{

@@ -18,7 +18,10 @@
 #               first, back at the Halo 3 main menu
 #   budget      the budget (256 objects): the console's monitor in Blood
 #               Gulch fills 260 boulders; 256 placed, the rest refused with
-#               a message; one deleted, another placed
+#               a message; one deleted, another placed. And the browser's
+#               weapons: Bungie's unfinished gravity rifle, in the map's tags,
+#               neither listed nor spawned (it hurt nobody, had no first-person
+#               model and its prompt read "<need a string entry here>")
 #   b30         the beach: the console's monitor; AI characters (each given
 #               a free actor, ai_attach_free) and a Ghost; the characters'
 #               budget (32): 34 marines asked for, 32 placed, refused after
@@ -956,7 +959,7 @@ for c in $cases; do
 		# (no packs: the map's own three vehicles, as v1 was written)
 		run "$c" 110 "" "" "$v1pad" HALO_MENU_STYLE=halo3 HALO_TEST_FORGE_PACKS=none & ;;
 	budget)
-		run "$c" 50 "$bloodgulch" "L200:forge on;L210:forge fill 260 boulder;L230:forge budget;L240:@shot 00-budget-full;L260:forge delete;L270:forge budget;L280:forge spawn boulder;L285:forge drop;L290:forge budget;L300:@shot 01-budget-after" "" & ;;
+		run "$c" 50 "$bloodgulch" "L200:forge on;L204:forge list weapons;L206:forge spawn gravity rifle;L210:forge fill 260 boulder;L230:forge budget;L240:@shot 00-budget-full;L260:forge delete;L270:forge budget;L280:forge spawn boulder;L285:forge drop;L290:forge budget;L300:@shot 01-budget-after" "" & ;;
 	fly)
 		run "$c" 40 "$bloodgulch" "L200:forge on;L230:forge camera 60 -120 5 0 45;L240:forge where;L250:forge stick 0 1 0 0 60;L320:forge where;L330:forge camera 60 -120 5 0 -45;L340:forge where;L350:forge stick 0 1 0 0 60;L420:forge where" "" & ;;
 	b30)
@@ -1699,7 +1702,14 @@ for c in $cases; do
 		expect "$c" "the rest refused, said on the screen" "forge: Budget full: 256 objects"
 		expect "$c" "the budget full" "forge: budget 256/256 objects"
 		expect "$c" "one deleted" "forge: deleted Boulder"
-		expect "$c" "another placed" "forge: spawned Boulder .*budget 256/256 objects" ;;
+		expect "$c" "another placed" "forge: spawned Boulder .*budget 256/256 objects"
+		expect "$c" "the browser lists the map's weapons" "forge: weapons [0-9]+: Assault Rifle \\(weapons"
+		expect "$c" "the gravity rifle is not spawned" "forge: no palette tag named gravity rifle"
+		if grep -aiE "forge: (weapons [0-9]+|spawned|dropped).*gravity" "$out/$c/run.log"; then
+			fail "$c: the browser offers the gravity rifle"
+		else
+			echo "  ok: $c: the browser does not offer the gravity rifle"
+		fi ;;
 	fly)
 		# (the monitor flies where it looks: forward looking up climbs, looking
 		# down dives; the four "where" lines' heights)

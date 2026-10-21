@@ -70,10 +70,11 @@ the keys of its own the layout has no room for: forge_keys):
 The palette is every tag of the loaded map that the browser offers, with a
 readable name each (forge_names: our own names for the multiplayer maps'
 objects, translated; else the tag's own name made words): vehicles,
-weapons (grenades among them; not a vehicle's gun, the flag or the ball),
-equipment, scenery (scenery, machines, controls), and characters - the
-actor variants that name their unit, which spawn it with a free actor
-(ai_attach_free) and fight as the map's own do; a multiplayer map has none.
+weapons (grenades among them; not a vehicle's gun, the flag, the ball or
+Bungie's unfinished gravity rifle), equipment, scenery (scenery, machines,
+controls), and characters - the actor variants that name their unit, which
+spawn it with a free actor (ai_attach_free) and fight as the map's own do;
+a multiplayer map has none.
 Only the loaded map's: other maps' objects are the design's later phases.
 And blocks (BLOCKS): the building blocks the game makes of the map's own
 bitmaps (forge_blocks.c, scene_pack_blocks.c), whose corners SNAP puts on
@@ -459,7 +460,6 @@ static struct
 	{ "plasma rifle", N_("Plasma Rifle") },
 	{ "needler", N_("Needler") },
 	{ "plasma_cannon", N_("Fuel Rod Gun") },
-	{ "gravity rifle", N_("Gravity Rifle") },
 	{ "energy sword", N_("Energy Sword") },
 	{ "frag grenade", N_("Frag Grenade") },
 	{ "plasma grenade", N_("Plasma Grenade") },
@@ -991,6 +991,12 @@ static short forge_tag_category(
 		{
 			return NONE;
 		}
+		/* (nor Bungie's unfinished gravity rifle, in every multiplayer
+		map's tags though no game puts it down: it fires as the
+		flamethrower, hurts nobody, has no first-person model, and its
+		pickup prompt is the tag's "<need a string entry here>") */
+		if (!strncmp(name, "weapons\\gravity rifle\\", 22))
+			return NONE;
 		return _forge_category_weapons;
 	case EQUIPMENT_DEFINITION_TAG:
 		return strstr(name, "grenade") ? _forge_category_weapons : _forge_category_equipment;
