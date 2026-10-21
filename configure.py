@@ -152,6 +152,12 @@ parser.add_argument(
     "port/vita/include/vita_update_key.h's (HALO_UPDATE_PUBLIC_KEY)",
 )
 parser.add_argument(
+    "--testers-test-key",
+    type=str,
+    help="TEST builds only, never a release: the tester list's Ed25519 public key (64 hexadecimal digits) in place "
+    "of the owner's release key (port/linux/src/tester_list.h; the flaming helmet's automated tests)",
+)
+parser.add_argument(
     "--vita-version",
     type=str,
     help="the version the builds say they are (HALO_VITA_VERSION: the Vita's, and the PC builds', Linux and "
@@ -247,6 +253,7 @@ sln.vita_aligned = args.vita_aligned
 sln.vita_update_test_sources = args.vita_update_test_sources
 sln.vita_update_key = args.vita_update_key
 sln.vita_version = args.vita_version
+sln.testers_test_key = args.testers_test_key
 sln.windows_xwin = args.windows_xwin
 sln.android_ndk = args.android_ndk
 sln.android_guest_cc = args.android_guest_cc

@@ -1700,6 +1700,12 @@ int menu_scene_spartan_shown(
 	return menu_scene_objects_initialized && object->wanted && object->object_index != NONE;
 }
 
+long menu_scene_spartan_object(
+	void)
+{
+	return menu_scene_spartan_shown() ? menu_scene_objects.slots[MENU_SCENE_PREVIEW].object_index : NONE;
+}
+
 /* the slot that made this object (NONE: none) */
 static short slot_of(long object_index)
 {

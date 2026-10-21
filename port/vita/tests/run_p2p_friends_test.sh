@@ -32,7 +32,13 @@ game_flags="-ffunction-sections -fdata-sections -fms-extensions -fshort-wchar -f
 	-include build/linux/platform_msvc_semantics.h -Iport/linux/src -Iport/linux/include -Iport/third_party/monocypher
 	-Isource -Isource/cseries -idirafter port/include/xdk"
 crypto="port/linux/src/p2p_crypto.c port/third_party/monocypher/monocypher.c port/third_party/monocypher/monocypher-ed25519.c
-	port/linux/src/lang.c"
+	port/linux/src/lang.c port/linux/src/tester_list.c"
+# (the flaming helmet's checks: a throwaway tester list key, made here, the
+# build's HALO_TESTERS_TEST_KEY and its seed the test's)
+mkdir -p "$out/keys"
+python3 tools/release/make_update_key.py --private "$out/keys/testers.key" > /dev/null
+flame_flags="-DHALO_TESTERS_TEST_KEY=\"$(sed -n 's/^# public key: //p' "$out/keys/testers.key")\"
+	-DFLAME_TEST_SEED=\"$(grep -v '^#' "$out/keys/testers.key")\""
 mode=${1:-test}
 if [ "$mode" = seed ]; then
 	# (run_menus_test.sh's FRIENDS cases: a save folder's friends, made in $2)
@@ -53,12 +59,12 @@ if [ "$mode" = fuzz ]; then
 fi
 status=0
 $clang --target=i686-linux-gnu -m32 -malign-double -freg-struct-return -O2 $game_flags -Wl,--gc-sections \
-	-Wl,--unresolved-symbols=ignore-in-object-files -o "$out/p2p_friends_test" "$here/p2p_friends_test.c" $crypto -lpthread
+	-Wl,--unresolved-symbols=ignore-in-object-files $flame_flags -o "$out/p2p_friends_test" "$here/p2p_friends_test.c" $crypto -lpthread
 mkdir -p "$out/plain"
 FRIENDS_TEST_ROOT="$out/plain" "$out/p2p_friends_test" > "$out/plain.log" 2>&1 || status=1
 grep -v '^  log:' "$out/plain.log"
 ${FUZZ_CLANG:-clang} -m32 -O1 -fsanitize=address,undefined -fno-sanitize-recover=undefined $game_flags \
-	-Wl,--unresolved-symbols=ignore-in-object-files \
+	-Wl,--unresolved-symbols=ignore-in-object-files $flame_flags \
 	-o "$out/p2p_friends_test_san" "$here/p2p_friends_test.c" $crypto -lpthread
 mkdir -p "$out/san"
 echo "--- with ASan and UBSan"

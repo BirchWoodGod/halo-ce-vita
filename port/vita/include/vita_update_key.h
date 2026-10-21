@@ -18,8 +18,13 @@ hardware test's; never a release.)
 #ifndef VITA_UPDATE_KEY_H
 #define VITA_UPDATE_KEY_H
 
+/* (the owner's key itself, whatever a test build gives: what the signed
+tester list is checked with, port/linux/src/tester_list.h, which a test
+build replaces only by its own switch, HALO_TESTERS_TEST_KEY) */
+#define HALO_RELEASE_PUBLIC_KEY "65b2979d2f239b9530c649a4761e99f8ebbc2fd39a45e246f694d9950f16f537"
+
 #ifndef HALO_UPDATE_PUBLIC_KEY
-#define HALO_UPDATE_PUBLIC_KEY "65b2979d2f239b9530c649a4761e99f8ebbc2fd39a45e246f694d9950f16f537"
+#define HALO_UPDATE_PUBLIC_KEY HALO_RELEASE_PUBLIC_KEY
 #endif
 
 #endif

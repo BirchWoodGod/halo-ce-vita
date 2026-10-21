@@ -76,7 +76,7 @@ def source_public_key():
         text = KEY_HEADER.read_text(encoding="utf-8")
     except OSError:
         return None
-    match = re.search(r'#define HALO_UPDATE_PUBLIC_KEY "([0-9a-fA-F]{64})"', text)
+    match = re.search(r'#define HALO_(?:RELEASE|UPDATE)_PUBLIC_KEY "([0-9a-fA-F]{64})"', text)
     return match.group(1).lower() if match else None
 
 

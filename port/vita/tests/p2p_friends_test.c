@@ -2360,6 +2360,393 @@ static void test_card_binding(void)
 	save(1);
 }
 
+/* ---------- the tester's flaming helmet (p2p_flame.inc; tester_list.h) */
+
+#ifdef FLAME_TEST_SEED
+/* a list signed with the build's test key (FLAME_TEST_SEED its private
+half), written to path */
+static void flame_list_write(const char *path, const char *body)
+{
+	unsigned char seed[32], key[32], signature[64];
+	const char *hex = FLAME_TEST_SEED;
+	FILE *file;
+	int index;
+
+	for (index = 0; index < 32; index++)
+	{
+		unsigned int value;
+
+		sscanf(hex + 2 * index, "%2x", &value);
+		seed[index] = (unsigned char)value;
+	}
+	p2p_ed25519_public(seed, key, NULL);
+	p2p_ed25519_sign(seed, key, body, (int)strlen(body), signature);
+	file = fopen(path, "wb");
+	if (!file)
+		return;
+	fputs(body, file);
+	fputs("signature ", file);
+	for (index = 0; index < 64; index++)
+		fprintf(file, "%02x", signature[index]);
+	fputs("\n", file);
+	fclose(file);
+}
+
+static void flame_key_hex(int machine, char *text)
+{
+	int index;
+
+	for (index = 0; index < P2P_KEY_SIZE; index++)
+		sprintf(text + 2 * index, "%02x", machines[machine].key[index]);
+}
+
+static unsigned short flame_names[MACHINES][12];
+
+static void flame_name(int machine, const char *name)
+{
+	int index;
+
+	memset(flame_names[machine], 0, sizeof(flame_names[machine]));
+	for (index = 0; name[index] && index < 12; index++)
+		flame_names[machine][index] = (unsigned short)name[index];
+}
+
+/* the game's record told to every machine: claims[] each machine's claim */
+static void flame_players(const int *claims)
+{
+	int index;
+
+	for (index = 0; index < MACHINES; index++)
+	{
+		use(index);
+		p2p_flame_set_players(claims, &flame_names[0][0], MACHINES, flame_names[index]);
+	}
+}
+
+/* a flame packet of a machine's outbound queue (its first of a kind): its
+size, else 0 */
+static int flame_take(int machine, int kind, unsigned char *bytes)
+{
+	int index;
+
+	for (index = 0; index < machines[machine].card_outbound_count; index++)
+		if (machines[machine].card_outbound[index].bytes[1] == kind)
+		{
+			memcpy(bytes, machines[machine].card_outbound[index].bytes, (size_t)machines[machine].card_outbound[index].size);
+			return machines[machine].card_outbound[index].size;
+		}
+	return 0;
+}
+
+/* an answer for a nonce, as machine "claimant" (to "asker"), with a key and
+a seed and a name of the caller's */
+static void flame_make_answer(unsigned char *packet, int claimant, int asker, const unsigned char *nonce,
+	const unsigned char *key, const unsigned char *seed, const unsigned short *name)
+{
+	unsigned char data[256], name_bytes[FLAME_NAME_SIZE];
+	int size, unit;
+
+	for (unit = 0; unit < 12; unit++)
+	{
+		name_bytes[2 * unit] = (unsigned char)(name[unit] & 0xFF);
+		name_bytes[2 * unit + 1] = (unsigned char)(name[unit] >> 8);
+	}
+	packet[0] = CARD_VERSION;
+	packet[1] = CARD_FLAME_ANSWER;
+	packet[2] = (unsigned char)claimant;
+	packet[3] = (unsigned char)asker;
+	memcpy(packet + 4, nonce, NONCE_LENGTH);
+	memcpy(packet + CARD_HEADER_SIZE, key, P2P_KEY_SIZE);
+	size = flame_signed_data(claimant, asker, nonce, key, name_bytes, data);
+	p2p_ed25519_sign(seed, key, data, size, packet + FLAME_ANSWER_SIZE - P2P_SIGNATURE_SIZE);
+}
+
+/* Delta (3) asks a machine afresh: its nonce */
+static void flame_reask(int asker, int machine)
+{
+	struct card_machine *record = &machines[asker].machines[machine];
+
+	record->flame_verified = record->flame_refused = record->flame_asking = 0;
+	record->flame_tries = 0;
+	record->flame_asked_time = 0;
+	use(asker);
+	machines[asker].card_outbound_count = 0;
+	pthread_mutex_lock(&friends_lock);
+	flame_update();
+	pthread_mutex_unlock(&friends_lock);
+	machines[asker].card_outbound_count = 0;
+}
+
+static void flame_hear(int machine, const unsigned char *packet)
+{
+	use(machine);
+	p2p_friends_tunnel_heard(virtual_of(0), 1, packet, FLAME_ANSWER_SIZE);
+	pthread_mutex_lock(&friends_lock);
+	cards_update();
+	pthread_mutex_unlock(&friends_lock);
+	machines[machine].card_outbound_count = 0;
+}
+
+static void test_flame(void)
+{
+	char body[2048], keys[MACHINES][65], path[600];
+	unsigned long addresses[MACHINES];
+	unsigned char answer[FLAME_ANSWER_SIZE], old_answer[FLAME_ANSWER_SIZE];
+	int claims[MACHINES], index, size;
+
+	setenv("HALO_FLAMING_HELMET", "1", 1);
+	for (index = 0; index < MACHINES; index++)
+	{
+		use(index);
+		load();
+		flame_key_hex(index, keys[index]);
+		addresses[index] = virtual_of(index);
+		memset(machines[index].machines, 0, sizeof(machines[index].machines));
+		machines[index].card_outbound_count = machines[index].card_inbound_count = 0;
+		machines[index].test_appeared_offline = 0;
+	}
+	flame_name(0, "Alpha");
+	flame_name(1, "Bravo");
+	flame_name(2, "Charlie");
+	flame_name(3, "Delta");
+	/* the shipped list (version 1) lists Charlie; the newer one dropped in
+	the save folder (version 2) Alpha and Bravo, Delta expired: Charlie
+	revoked */
+	for (index = 0; index < MACHINES; index++)
+	{
+		snprintf(body, sizeof(body), "halo-ce-vita-testers 1\nversion 1\ntester %s 0 Charlie\n", keys[2]);
+		snprintf(path, sizeof(path), "%s/shipped-testers.txt", roots[index]);
+		flame_list_write(path, body);
+		snprintf(body, sizeof(body), "halo-ce-vita-testers 1\nversion 2\ntester %s 0 Alpha\ntester %s 0 Bravo\n"
+			"tester %s 1000 Delta\n", keys[0], keys[1], keys[3]);
+		snprintf(path, sizeof(path), "%s/testers.txt", roots[index]);
+		flame_list_write(path, body);
+		machines[index].flame_loaded = 0;
+	}
+	/* (Charlie's shipped list: a version 9 listing Charlie, a byte changed
+	after it was signed: not taken, the version 2 one is) */
+	snprintf(body, sizeof(body), "halo-ce-vita-testers 1\nversion 9\ntester %s 0 Charlie\n", keys[2]);
+	snprintf(path, sizeof(path), "%s/shipped-testers.txt", roots[2]);
+	flame_list_write(path, body);
+	{
+		FILE *file = fopen(path, "r+b");
+
+		if (file)
+		{
+			/* (the version's digit: 9 made 8) */
+			fseek(file, 31, SEEK_SET);
+			fputc('8', file);
+			fclose(file);
+		}
+	}
+	use(0);
+	check(p2p_flame_listed(), "flame: Alpha listed (the newer list)");
+	use(1);
+	check(p2p_flame_listed() && p2p_flame_wearing(), "flame: Bravo listed and wearing it");
+	use(2);
+	check(!p2p_flame_listed() && !p2p_flame_wearing(), "flame: Charlie revoked by the newer list");
+	check(machines[2].flame_list.version == 2, "flame: the newest valid list taken");
+	use(3);
+	check(!p2p_flame_listed(), "flame: Delta's entry expired");
+	setenv("HALO_FLAMING_HELMET", "0", 1);
+	use(1);
+	check(!p2p_flame_wearing(), "flame: the option off: not worn");
+	setenv("HALO_FLAMING_HELMET", "1", 1);
+
+	/* a game: Alpha hosts (0); Bravo (1), Charlie (2) and Delta (3) joined.
+	Alpha and Bravo claim it; Charlie forced the claim (and answers as if
+	listed); Delta too (expired) */
+	machines[2].test_flame_force = 1;
+	machines[3].test_flame_force = 1;
+	use(0);
+	p2p_friends_set_game(0, 1, addresses, MACHINES);
+	for (index = 1; index < MACHINES; index++)
+	{
+		use(index);
+		p2p_friends_set_game(index, 0, NULL, 0);
+	}
+	for (index = 0; index < MACHINES; index++)
+		claims[index] = 1;
+	flame_players(claims);
+	for (index = 0; index < MACHINES; index++)
+		reset_drops(index);
+	game_pass(40);
+	use(1);
+	check(p2p_flame_verified(0), "flame: Bravo checked the host's (Alpha's) flame");
+	use(2);
+	check(p2p_flame_verified(0) && p2p_flame_verified(1), "flame: Charlie checked Alpha's and Bravo's");
+	use(3);
+	check(p2p_flame_verified(0) && p2p_flame_verified(1), "flame: Delta checked Alpha's and Bravo's");
+	use(0);
+	check(p2p_flame_verified(1), "flame: the host checked Bravo's");
+	check(!p2p_flame_verified(2) && machines[0].machines[2].flame_refused, "flame: the host refused Charlie's forced claim");
+	check(!p2p_flame_verified(3) && machines[0].machines[3].flame_refused, "flame: the host refused Delta's expired one");
+	use(1);
+	check(!p2p_flame_verified(2) && !p2p_flame_verified(3), "flame: Bravo draws neither forced claim");
+	use(3);
+	check(!p2p_flame_verified(2), "flame: Delta draws not Charlie's");
+	check(machines[0].dropped_forged + machines[0].total_forged >= 2,
+		"flame: the host refused to relay the unproven proofs (counted forged)");
+	use(0);
+	check(!p2p_flame_verified(0), "flame: a machine's own is not asked about");
+
+	/* a replay: Bravo's proof for Delta, heard again with no ask, and for a
+	new ask (another nonce) */
+	flame_reask(3, 1);
+	memcpy(old_answer, answer, 0);
+	{
+		unsigned char nonce[NONCE_LENGTH];
+
+		memcpy(nonce, machines[3].machines[1].flame_nonce, NONCE_LENGTH);
+		flame_make_answer(old_answer, 1, 3, nonce, machines[1].key, machines[1].seed, flame_names[1]);
+		flame_hear(3, old_answer);
+		check(p2p_flame_verified(1), "flame: Bravo's proof for Delta's nonce taken");
+		reset_drops(3);
+		flame_hear(3, old_answer);
+		check(machines[3].dropped_replays >= 1, "flame: the same proof again (no ask): dropped as a replay");
+		flame_reask(3, 1);
+		reset_drops(3);
+		flame_hear(3, old_answer);
+		check(!machines[3].machines[1].flame_verified && machines[3].dropped_replays >= 1,
+			"flame: an old proof for a new ask (another nonce): dropped as a replay");
+	}
+	/* forged: Alpha's listed key, signed by Charlie (who does not hold it);
+	a proof for another name; a proof by another listed key for Charlie's
+	machine once that key lit Alpha (a tester lending their flame) */
+	flame_reask(3, 2);
+	flame_make_answer(answer, 2, 3, machines[3].machines[2].flame_nonce, machines[0].key, machines[2].seed,
+		flame_names[2]);
+	reset_drops(3);
+	flame_hear(3, answer);
+	check(!machines[3].machines[2].flame_verified && machines[3].dropped_forged >= 1,
+		"flame: a listed key's proof signed by another key: refused");
+	check(!machines[3].machines[2].flame_refused, "flame: ... asked again while tries remain (a name may have changed)");
+	flame_reask(3, 2);
+	machines[3].machines[2].flame_tries = FLAME_TRIES;
+	flame_make_answer(answer, 2, 3, machines[3].machines[2].flame_nonce, machines[0].key, machines[2].seed,
+		flame_names[2]);
+	flame_hear(3, answer);
+	check(!machines[3].machines[2].flame_verified && machines[3].machines[2].flame_refused,
+		"flame: ... refused for good once its tries are spent");
+	flame_reask(3, 1);
+	{
+		unsigned short other[12];
+
+		memset(other, 0, sizeof(other));
+		other[0] = 'M';
+		flame_make_answer(answer, 1, 3, machines[3].machines[1].flame_nonce, machines[1].key, machines[1].seed, other);
+		reset_drops(3);
+		flame_hear(3, answer);
+		check(!machines[3].machines[1].flame_verified && machines[3].dropped_forged >= 1,
+			"flame: a proof for another player's name: refused");
+	}
+	flame_reask(3, 1);
+	flame_make_answer(answer, 1, 2, machines[3].machines[1].flame_nonce, machines[1].key, machines[1].seed,
+		flame_names[1]);
+	flame_hear(3, answer);
+	check(!machines[3].machines[1].flame_verified, "flame: a proof made for another asker: refused");
+	flame_reask(3, 2);
+	flame_make_answer(answer, 2, 3, machines[3].machines[2].flame_nonce, machines[0].key, machines[0].seed,
+		flame_names[2]);
+	flame_hear(3, answer);
+	check(!machines[3].machines[2].flame_verified && machines[3].machines[0].flame_verified,
+		"flame: a key that lit another player of the game: refused");
+	flame_reask(3, 2);
+	flame_make_answer(answer, 2, 3, machines[3].machines[2].flame_nonce, machines[3].key, machines[3].seed,
+		flame_names[2]);
+	flame_hear(3, answer);
+	check(!machines[3].machines[2].flame_verified, "flame: this machine's own key as another's: refused");
+	/* a machine that does not know its own player's name in the record yet
+	(what its proof signs) answers nothing: asked again later */
+	{
+		unsigned short none[12];
+		unsigned char ask[CARD_HEADER_SIZE];
+
+		memset(none, 0, sizeof(none));
+		use(1);
+		p2p_flame_set_players(claims, &flame_names[0][0], MACHINES, none);
+		machines[1].card_outbound_count = 0;
+		machines[1].machines[0].flame_answered_time = 0;
+		ask[0] = CARD_VERSION;
+		ask[1] = CARD_FLAME_ASK;
+		ask[2] = 0;
+		ask[3] = 1;
+		posix_random_bytes(ask + 4, NONCE_LENGTH);
+		p2p_friends_tunnel_heard(virtual_of(0), 1, ask, CARD_HEADER_SIZE);
+		pthread_mutex_lock(&friends_lock);
+		cards_update();
+		pthread_mutex_unlock(&friends_lock);
+		check(!flame_take(1, CARD_FLAME_ANSWER, answer), "flame: no proof before its own name is known");
+		machines[1].card_outbound_count = 0;
+		p2p_flame_set_players(claims, &flame_names[0][0], MACHINES, flame_names[1]);
+		p2p_friends_tunnel_heard(virtual_of(0), 1, ask, CARD_HEADER_SIZE);
+		clock_now += CARD_ANSWER_INTERVAL;
+		pthread_mutex_lock(&friends_lock);
+		cards_update();
+		pthread_mutex_unlock(&friends_lock);
+		check(flame_take(1, CARD_FLAME_ANSWER, answer) == FLAME_ANSWER_SIZE, "flame: ... and a proof once it is");
+		machines[1].card_outbound_count = 0;
+	}
+	/* a claim gone (the player left, another in the slot): forgotten */
+	claims[1] = 0;
+	flame_players(claims);
+	use(2);
+	check(!p2p_flame_verified(1), "flame: a claim gone: not drawn");
+	claims[1] = 1;
+	flame_players(claims);
+	use(2);
+	check(!p2p_flame_verified(1), "flame: a claim again: asked again, not taken as before");
+	for (index = 0; index < MACHINES; index++)
+	{
+		use(index);
+		p2p_friends_set_game(-1, 0, NULL, 0);
+		machines[index].card_outbound_count = 0;
+	}
+
+	/* a modified host: Charlie hosts (2), claims the flame for everyone and
+	answers every ask itself with Alpha's listed key, relaying unchecked;
+	Alpha (0), Bravo (1) and Delta (3) joined; nobody forced but its host */
+	machines[2].test_flame_force = 0;
+	machines[3].test_flame_force = 0;
+	machines[2].test_flame_forge = 1;
+	for (index = 0; index < MACHINES; index++)
+	{
+		use(index);
+		memset(machines[index].machines, 0, sizeof(machines[index].machines));
+		p2p_friends_set_game(index, index == 2, index == 2 ? addresses : NULL, index == 2 ? MACHINES : 0);
+	}
+	/* (machine addresses as the host has them: its peers) */
+	flame_name(0, "Alpha");
+	for (index = 0; index < MACHINES; index++)
+		claims[index] = 1;
+	flame_players(claims);
+	/* (the joiners route their packets to the host, Charlie) */
+	for (index = 0; index < 40; index++)
+	{
+		pass(1);
+		tunnel_route(2);
+	}
+	use(0);
+	check(!p2p_flame_verified(2) && !p2p_flame_verified(3) && !p2p_flame_verified(1),
+		"flame: a modified host's forged proofs: Alpha draws none of them");
+	use(3);
+	check(!p2p_flame_verified(2) && !p2p_flame_verified(0) && !p2p_flame_verified(1),
+		"flame: ... nor Delta (Alpha's own proof answered by the host, forged)");
+	check(machines[3].machines[0].flame_refused || machines[3].machines[2].flame_refused,
+		"flame: ... refused as forged");
+	machines[2].test_flame_forge = 0;
+	for (index = 0; index < MACHINES; index++)
+	{
+		use(index);
+		p2p_friends_set_game(-1, 0, NULL, 0);
+		machines[index].card_outbound_count = 0;
+		machines[index].flame_loaded = 0;
+	}
+	unsetenv("HALO_FLAMING_HELMET");
+	(void)size;
+}
+#endif
+
 int main(void)
 {
 	char root[512];
@@ -2390,6 +2777,9 @@ int main(void)
 	test_request_floods();
 	test_cards();
 	test_card_binding();
+#ifdef FLAME_TEST_SEED
+	test_flame();
+#endif
 	test_party();
 	test_party_restart();
 	if (failures)

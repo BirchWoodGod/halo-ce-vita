@@ -45,9 +45,9 @@ def main():
         file.write(seed.hex() + "\n")
     print(f"private key written to {path} (mode 600). Keep it offline.")
     print()
-    print("public key (paste into port/vita/include/vita_update_key.h, in place of the 64 zeros):")
+    print("public key (paste into port/vita/include/vita_update_key.h as HALO_RELEASE_PUBLIC_KEY):")
     print()
-    print(f'#define HALO_UPDATE_PUBLIC_KEY "{public}"')
+    print(f'#define HALO_RELEASE_PUBLIC_KEY "{public}"')
 
 
 if __name__ == "__main__":

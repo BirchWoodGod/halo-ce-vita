@@ -583,6 +583,12 @@ static struct setting settings[] = {
 	choices. Shown while the maps folder has one) */
 	{ "Player model", "HALO_PLAYER_MODEL", 0, 1, { "0" }, { "Spartan" },
 		"Offline: you, or a Custom Edition map's player", 0, TAB_GAME },
+	/* (port/linux/src/p2p_flame.inc: the tester's blue flaming helmet,
+	shown only while this Vita's friend identity is on the owner's signed
+	tester list, p2p_flame_listed; CUSTOMIZATION has it too. The next game
+	joined) */
+	{ "Flaming helmet", "HALO_FLAMING_HELMET", 0, 2, { "false", "true" }, { "Off", "On" },
+		"Testers: your blue flame; other players' games check it's yours", 1, TAB_GAME },
 	{ "Smooth weapon motion", "HALO_INTERPOLATE_FIRST_PERSON", 0, 2, { "1", "0" }, { "On", "Off" },
 		"The weapon's animation blended between game ticks", 0, TAB_GAME },
 
@@ -1563,6 +1569,9 @@ static int setting_shown(const struct setting *setting)
 		return choice_of("HALO_CUSTOM_EDITION") || choice_of("HALO_PC_MAP_VEHICLES");
 	if (setting->variable && !strcmp(setting->variable, "HALO_PLAYER_MODEL"))
 		return setting->count > 1;
+	/* (the tester's flaming helmet: a listed tester's alone) */
+	if (setting->variable && !strcmp(setting->variable, "HALO_FLAMING_HELMET"))
+		return p2p_flame_listed();
 	if (setting->variable && (!strcmp(setting->variable, "HALO_BOT_SKILL") || !strcmp(setting->variable, "HALO_BOT_TEAMS") ||
 		!strcmp(setting->variable, "HALO_BOT_VEHICLES") || !strcmp(setting->variable, "HALO_BOT_ROUTES") ||
 		!strcmp(setting->variable, "HALO_BOT_PLAYLIST")))

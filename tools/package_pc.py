@@ -230,6 +230,10 @@ def main() -> int:
     # (the game reads these beside config.toml, which is beside the executable)
     for item in BESIDE_EXECUTABLE:
         shutil.copy2(APP0 / item, exe_folder / item)
+    # (the owner's signed tester list, once there is one: the flaming
+    # helmet's, port/linux/src/tester_list.h; read beside the executable)
+    if (APP0 / "testers.txt").is_file():
+        shutil.copy2(APP0 / "testers.txt", exe_folder / "testers.txt")
     licenses = folder / "licenses"
     licenses.mkdir()
     for target, source in LICENSES.items():

@@ -527,6 +527,13 @@ static void test_friend(const char *id, int kind, const char *name, const char *
 	entry->maximum = joinable ? 16 : 0;
 	snprintf(entry->activity, sizeof(entry->activity), "%s", activity);
 }
+/* (the flaming helmet, p2p_friends.h: whether this machine is a listed
+tester, the test's) */
+static int test_flame_listed;
+int p2p_flame_listed(void)
+{
+	return test_flame_listed;
+}
 int p2p_friends_code(char *code, int size)
 {
 	snprintf(code, (size_t)size, "KQ7M-3XPA-T9WE");
@@ -2995,6 +3002,8 @@ static void test_tab_layouts(void)
 		{ TAB_GAME, "First-person legs", "HALO_FIRST_PERSON_LEGS", "0|1", 0, "1" },
 		/* (shown while the maps folder has a Custom Edition player model) */
 		{ TAB_GAME, "Player model", "HALO_PLAYER_MODEL", "0", 0, "0" },
+		/* (shown to a listed tester alone: p2p_flame_listed) */
+		{ TAB_GAME, "Flaming helmet", "HALO_FLAMING_HELMET", "false|true", 0, "true" },
 		{ TAB_GAME, "Smooth weapon motion", "HALO_INTERPOLATE_FIRST_PERSON", "1|0", 0, "1" },
 		{ TAB_GAME, "Check for updates", NULL, NULL, 0, NULL, ACTION_UPDATE_CHECK },
 		{ TAB_GAME, "Update channel", "HALO_UPDATE_CHANNEL", "experimental|stable", 0, channel },
@@ -3208,6 +3217,17 @@ static void test_headings(void)
 	check(marked, "a heading: '\\n\\x08' and its name, a line of its own with no value, a row right under it");
 	check(fits, "each tab with its headings: every line fits, and the page the panel's height");
 	check(steps, "down and up through each tab: every row chosen once each way, never a heading");
+	/* (the tester's flaming helmet: a listed tester's Game tab has it, under
+	First-person legs; the page still fits, down and up still step over it) */
+	test_flame_listed = 1;
+	check(to_tab("Game") && !strcmp(outline_of(outline, sizeof(outline), 0), "=Interface|Menus|Button icons|Language|"
+		"FPS counter|=First person|First-person legs|Flaming helmet|Smooth weapon motion|=Updates|Check for updates|"
+		"Update channel|Show dev settings") && menu_fits() && menu_height_fits() && steps_skip_headings(),
+		"a listed tester: Flaming helmet under First-person legs (On), the page still fitting");
+	check(strstr(menu, "\nFlaming helmet\x02< On  ") || strstr(menu, "\nFlaming helmet\x02  On >") ||
+		strstr(menu, "\nFlaming helmet\x02< On >"), "Flaming helmet On by default");
+	test_flame_listed = 0;
+	check(to_tab("Controls") && to_tab("Game") && !strstr(menu, "Flaming helmet"), "not a listed tester: no Flaming helmet row");
 	to_tab("Game");
 	check(strstr(menu, "\t*Game|") && strstr(menu, "\n\x08Interface\nMenus\x02") &&
 		strstr(menu, "\nFPS counter\x02  Off >\n\x08" "First person\nFirst-person legs\x02") &&
@@ -3277,7 +3297,7 @@ static void test_variables_kept(void)
 		"HALO_FRIENDS_JOIN", "HALO_NET_BLOCK_MOUSE_AIM_ASSIST", "HALO_NET_ANTICHEAT",
 		"HALO_INFECTION_ZOMBIES", "HALO_INFECTION_SPEED", "HALO_INFECTION_TIME", "HALO_INFECTION_RESPAWN",
 		"HALO_INFECTION_SHIELDS", "HALO_INFECTION_TOUGH",
-		"HALO_CARNAGE_REPORT",
+		"HALO_CARNAGE_REPORT", "HALO_FLAMING_HELMET",
 	};
 	int index, all = 1, choices = 0;
 

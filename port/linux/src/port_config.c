@@ -311,6 +311,13 @@ static const struct config_setting config_settings[] =
 		"its code or invite link): its own, which network.host_public (the\n"
 		"other games') never changes. X on the waiting screen of co-op hosted\n"
 		"from the campaign's menus writes its choice here (OpenCE's setting)." },
+	/* (port/linux/src/p2p_flame.inc; CUSTOMIZATION's and the settings
+	panel's Flaming helmet row, shown to listed testers alone. The next game
+	joined) */
+	{ "player.flaming_helmet", _config_boolean, "true", "HALO_FLAMING_HELMET", _environment_value, _platform_all,
+		"(testers on the owner's signed tester list) The tester's blue flaming\n"
+		"helmet, which the other players' games show once they have checked\n"
+		"your signed proof. Takes effect in the next game joined." },
 	{ "friends.enabled", _config_boolean, "true", "HALO_FRIENDS", _environment_value, _platform_all,
 		"Friends (port/linux/src/p2p_friends.c): this machine's friend code, friend\n"
 		"requests, friends' presence, joining and inviting them, through the\n"

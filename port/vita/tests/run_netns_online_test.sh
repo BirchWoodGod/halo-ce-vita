@@ -652,6 +652,7 @@
 #                    (host:<map>[:<variant>]; code/lobby/adhoc: no map change
 #                    is then looked for)
 #   HALO_TEST_JOIN_ENV   more VAR=value settings for the joiner
+#   HALO_TEST_JOIN2_ENV  more VAR=value settings for the second joiner alone
 #   HALO_TEST_HOST_SAVE  a save folder (u/UDATA/...) copied into the host's: its
 #                    game types (code: HALO_TEST_HOST_GAME=host:bloodgulch:saved=Vita_Slayer,
 #                    '_' for a space, hosts the saved game type online; the joiner must
@@ -909,6 +910,7 @@ run_copy() { # run_copy NAME NETNS_PID BINARY CPUS [ENV...]
 		HALO_NET_BROKERS=198.51.100.1:1883 HALO_NET_STUN=198.51.100.1:3478 HALO_NET_RELAYS=198.51.100.1:47320 \
 		"$@" ${HALO_TEST_ENV:-} \
 		$([ "$name" = joiner ] || [ "$name" = joiner2 ] && echo "${HALO_TEST_JOIN_ENV:-}") \
+		$([ "$name" = joiner2 ] && echo "${HALO_TEST_JOIN2_ENV:-}") \
 		taskset -c "$cores" timeout -k 5 $((seconds + 60)) "$binary" $copy_args > "$out/$name/run.log" 2>&1) &
 	pids="$pids $!"
 	last_pid=$!

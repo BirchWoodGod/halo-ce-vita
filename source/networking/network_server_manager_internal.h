@@ -93,6 +93,11 @@ boolean network_game_server_client_machine_is_joined_to_game(
 boolean network_game_server_accept_client_machine_into_game(
 	struct network_game_server *server,
 	struct network_game_server_client_machine *client_machine);
+/* port: a player's icon_index as the host keeps it: the flaming helmet's
+claim (NETWORK_PLAYER_FLAME_CLAIM, players.h) or NONE, nothing else
+(port/linux/src/p2p_flame.inc) */
+void network_game_server_flame_claim(
+	struct network_player *player);
 boolean network_game_server_add_player_to_game(
 	struct network_game_server *server,
 	struct network_game_server_client_machine *client_machine,
