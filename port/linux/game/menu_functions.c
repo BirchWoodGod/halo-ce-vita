@@ -470,6 +470,10 @@ enum
 	_typing_gametype_name,
 	_typing_gametype_copy,
 	_typing_gametype_rename,
+	/* (FRIENDS' FRIEND CODE BACKUP: the file's name, its password, again) */
+	_typing_backup_name,
+	_typing_backup_password,
+	_typing_backup_again,
 };
 
 /* the password and code screens' help lines (their strings' order) */
@@ -609,6 +613,9 @@ static struct
 	/* (the Halo 3 lobby's Square on ONLINE) GAME OPTIONS opened at the next
 	frame, over the lobby */
 	boolean open_game_options;
+	/* (FRIENDS' FRIEND CODE BACKUP) its question opened at the next frame,
+	over FRIENDS */
+	boolean open_friends_question;
 	/* (a game hosted from the Halo 3 lobby) SELECT PROFILE was shown on
 	the way (profile_shown): the game's lobby takes it out of the history,
 	so that B goes back to the multiplayer lobby (pregame_drop_profile) */
@@ -3514,8 +3521,15 @@ static boolean typing_done(short typing, char *text, int size)
 	menu_functions.typing = _typing_none;
 	__atomic_store_n(&halo_text_input_state, HALO_TEXT_INPUT_IDLE, __ATOMIC_RELEASE);
 	if (state != HALO_TEXT_INPUT_DONE)
+	{
+		if (halo_text_input_password)
+			memset(halo_text_input_text, 0, sizeof(halo_text_input_text));
 		return FALSE;
+	}
 	sanitize(text, size, halo_text_input_text);
+	/* (a password typed: no copy of it kept here) */
+	if (halo_text_input_password)
+		memset(halo_text_input_text, 0, sizeof(halo_text_input_text));
 	return TRUE;
 }
 
@@ -9241,19 +9255,26 @@ static void h3_mods_delete(void)
 
 /* ---- the Halo 3 FRIENDS screen and the lobbies' FRIENDS panel
 (halo3/friends.xml; port/linux/src/p2p_friends.h): the list's rows are
-three of its own (ADD FRIEND, APPEAR OFFLINE, FRIENDS CAN JOIN) and then the
-entries p2p_friends_list gives, in its order (requests, invites, friends
+five of its own (ADD FRIEND, APPEAR OFFLINE, FRIENDS CAN JOIN, PARTY, FRIEND
+CODE BACKUP) and then the entries p2p_friends_list gives, in its order (requests, invites, friends
 online, offline, requests sent, blocked), scrolling as the mod manager's.
 The entry chosen stays chosen by its id and kind as the list changes */
 
 #define H3_FRIENDS_ROWS 10
-#define H3_FRIENDS_OWN_ROWS 4
+#define H3_FRIENDS_OWN_ROWS 5
 #define H3_FRIENDS_MESSAGE_MILLISECONDS 6000
 #define H3_FRIENDS_REFRESH_MILLISECONDS 500
 #define H3_FRIENDS_PANEL_ROWS 5
 /* (the options' party rows: not p2p_friends_act's) */
 #define H3_FRIENDS_PARTY_INVITE 1000
 #define H3_FRIENDS_PARTY_KICK 1001
+/* (FRIEND CODE BACKUP's questions' rows: p2p_friends_backup_*) */
+#define H3_FRIENDS_BACKUP_EXPORT 1002
+#define H3_FRIENDS_BACKUP_RESTORE 1003
+#define H3_FRIENDS_BACKUP_WITH_LIST 1004
+#define H3_FRIENDS_BACKUP_CODE_ONLY 1005
+#define H3_FRIENDS_BACKUP_CONFIRM 1006
+#define H3_FRIENDS_BACKUP_CANCEL 1007
 
 
 /* the three rows of the screen's own */
@@ -9264,6 +9285,9 @@ enum
 	_h3_friends_row_join,
 	/* (the party: its screen, halo3/party.xml) */
 	_h3_friends_row_party,
+	/* (the friend code backed up to a file with a password, or restored:
+	its question, then the typing) */
+	_h3_friends_row_backup,
 };
 
 static struct
@@ -9281,10 +9305,13 @@ static struct
 	unsigned long message_time;
 	struct widget_instance *list;
 	long list_creation_time;
-	/* the options' question: its entry, and what each of its rows does */
+	/* the options' question: its entry, and what each of its rows does;
+	(FRIEND CODE BACKUP's) its own title and words */
 	struct p2p_friend_entry options_entry;
 	int options[3];
 	int option_count;
+	char options_title[64];
+	char options_text[256];
 	/* the lobbies' panel: its own copy, refreshed each second */
 	struct p2p_friend_entry panel_entries[P2P_FRIEND_ENTRIES_MAXIMUM];
 	int panel_count;
@@ -9442,6 +9469,235 @@ static struct
 	boolean typing, watching;
 } h3_friends_password;
 
+/* ---- FRIENDS' FRIEND CODE BACKUP (port/linux/src/p2p_friends.h,
+p2p_friends_backup.inc): Cross on its row asks BACK UP FRIEND CODE or
+RESTORE FRIEND CODE (FRIENDS' options question, its own words); then the
+file's name (friends-backup), its password (8 characters or more), and to
+back up the password again and WITH FRIENDS LIST or FRIEND CODE ONLY; the
+work on friends' own thread, said under the list; a restore opened asks
+CONFIRM or CANCEL with the codes before and after, and replaces nothing
+until confirmed. What was typed is wiped once used */
+
+enum
+{
+	_h3_backup_none,
+	/* typing: the name, the password, the password again */
+	_h3_backup_name,
+	_h3_backup_password,
+	_h3_backup_again,
+	/* the question: with the friends list or not */
+	_h3_backup_list,
+	_h3_backup_working,
+	/* the question: CONFIRM or CANCEL */
+	_h3_backup_confirm,
+};
+
+static struct
+{
+	int step;
+	boolean restore;
+	char name[P2P_FRIENDS_BACKUP_NAME_SIZE];
+	char password[P2P_FRIENDS_BACKUP_PASSWORD_MAXIMUM + 1];
+	/* (its questions) when one was last shown: gone without an answer
+	(Back), what was typed or opened let go */
+	unsigned long question_time;
+} h3_backup;
+
+static void h3_backup_wipe(void)
+{
+	memset(h3_backup.password, 0, sizeof(h3_backup.password));
+}
+
+static void h3_backup_stop(char const *message)
+{
+	if (h3_backup.step == _h3_backup_confirm)
+		p2p_friends_backup_cancel();
+	h3_backup_wipe();
+	h3_backup.step = _h3_backup_none;
+	if (message && message[0])
+		h3_friends_message(message);
+}
+
+/* FRIENDS' options question with the backup's words and rows */
+static void h3_backup_question(char const *title, char const *text, int first, int second)
+{
+	memset(&h3_friends.options_entry, 0, sizeof(h3_friends.options_entry));
+	snprintf(h3_friends.options_title, sizeof(h3_friends.options_title), "%s", title);
+	snprintf(h3_friends.options_text, sizeof(h3_friends.options_text), "%s", text);
+	h3_friends.options[0] = first;
+	h3_friends.options[1] = second;
+	h3_friends.option_count = 2;
+	h3_backup.question_time = 0;
+	menu_functions.open_friends_question = TRUE;
+}
+
+/* (the row's Cross) back up or restore? */
+static void h3_backup_menu(void)
+{
+	if (h3_backup.step == _h3_backup_working)
+	{
+		h3_friends_message(p2p_friends_backup_text(P2P_FRIENDS_BACKUP_WORKING));
+		return;
+	}
+	h3_backup_stop(NULL);
+	h3_backup_question(T("FRIEND CODE BACKUP"),
+		T("Save your friend code to a file with a password,\nor restore one. Anyone with the file and its\n"
+		"password can be you: keep both safe."), H3_FRIENDS_BACKUP_EXPORT, H3_FRIENDS_BACKUP_RESTORE);
+	platform_log("menus: h3 friends: the friend code backup's question");
+}
+
+/* (its questions' rows) */
+static void h3_backup_option(int option)
+{
+	switch (option)
+	{
+	case H3_FRIENDS_BACKUP_EXPORT:
+	case H3_FRIENDS_BACKUP_RESTORE:
+		h3_backup.restore = option == H3_FRIENDS_BACKUP_RESTORE;
+		h3_backup.step = _h3_backup_name;
+		typing_begin(_typing_backup_name, T("Backup file name"), P2P_FRIENDS_BACKUP_DEFAULT_NAME,
+			P2P_FRIENDS_BACKUP_NAME_SIZE - 1, FALSE);
+		break;
+	case H3_FRIENDS_BACKUP_WITH_LIST:
+	case H3_FRIENDS_BACKUP_CODE_ONLY:
+	{
+		int outcome;
+
+		if (h3_backup.step != _h3_backup_list)
+			break;
+		outcome = p2p_friends_backup_export(h3_backup.name, h3_backup.password, option == H3_FRIENDS_BACKUP_WITH_LIST);
+		h3_backup_wipe();
+		h3_backup.step = outcome == P2P_FRIENDS_BACKUP_WORKING ? _h3_backup_working : _h3_backup_none;
+		h3_friends_message(p2p_friends_backup_text(outcome));
+		platform_log("menus: h3 friends: backing up the friend code%s",
+			option == H3_FRIENDS_BACKUP_WITH_LIST ? " and the friends list" : "");
+		break;
+	}
+	case H3_FRIENDS_BACKUP_CONFIRM:
+	{
+		char code[P2P_FRIEND_CODE_SIZE], text[160];
+		int outcome;
+
+		if (h3_backup.step != _h3_backup_confirm)
+			break;
+		h3_backup.step = _h3_backup_none;
+		outcome = p2p_friends_backup_confirm();
+		if (outcome == P2P_FRIENDS_BACKUP_RESTORED)
+		{
+			p2p_friends_code(code, sizeof(code));
+			snprintf(text, sizeof(text), T("Friend code restored: %s"), code);
+			h3_friends_message(text);
+		}
+		else
+			h3_friends_message(p2p_friends_backup_text(outcome));
+		h3_friends_refresh(TRUE);
+		break;
+	}
+	case H3_FRIENDS_BACKUP_CANCEL:
+		h3_backup_stop(T("Not restored: your friend code stays"));
+		break;
+	}
+}
+
+/* (each frame of FRIENDS) what was typed taken, the work watched */
+static void h3_backup_update(void)
+{
+	char typed[HALO_TEXT_INPUT_SIZE], text[256];
+	int outcome;
+
+	if (h3_backup.step == _h3_backup_name && menu_functions.typing != _typing_backup_name)
+		h3_backup_stop(NULL);
+	if (typing_done(_typing_backup_name, typed, sizeof(typed)) && h3_backup.step == _h3_backup_name)
+	{
+		if (!p2p_friends_backup_name(typed, h3_backup.name))
+			h3_backup_stop(p2p_friends_backup_text(P2P_FRIENDS_BACKUP_BAD_NAME));
+		else
+		{
+			h3_backup.step = _h3_backup_password;
+			typing_begin(_typing_backup_password, h3_backup.restore ? T("The backup's password") :
+				T("A password (8 characters or more)"), "", P2P_FRIENDS_BACKUP_PASSWORD_MAXIMUM, TRUE);
+		}
+	}
+	else if (h3_backup.step == _h3_backup_password && typing_done(_typing_backup_password, typed, sizeof(typed)))
+	{
+		outcome = p2p_friends_backup_password_check(typed);
+		if (h3_backup.restore)
+		{
+			outcome = p2p_friends_backup_restore(h3_backup.name, typed);
+			h3_backup.step = outcome == P2P_FRIENDS_BACKUP_WORKING ? _h3_backup_working : _h3_backup_none;
+			h3_friends_message(p2p_friends_backup_text(outcome));
+			platform_log("menus: h3 friends: opening the backup %s", h3_backup.name);
+		}
+		else if (outcome != P2P_FRIENDS_BACKUP_IDLE)
+			h3_backup_stop(p2p_friends_backup_text(outcome));
+		else
+		{
+			snprintf(h3_backup.password, sizeof(h3_backup.password), "%s", typed);
+			h3_backup.step = _h3_backup_again;
+			typing_begin(_typing_backup_again, T("The password again"), "", P2P_FRIENDS_BACKUP_PASSWORD_MAXIMUM, TRUE);
+		}
+	}
+	else if (h3_backup.step == _h3_backup_again && typing_done(_typing_backup_again, typed, sizeof(typed)))
+	{
+		if (strcmp(typed, h3_backup.password))
+			h3_backup_stop(p2p_friends_backup_text(P2P_FRIENDS_BACKUP_MISMATCH));
+		else
+		{
+			h3_backup.step = _h3_backup_list;
+			h3_backup_question(T("BACK UP FRIEND CODE"),
+				T("Put your friends list in the backup too?\nIt comes back with your code."), H3_FRIENDS_BACKUP_WITH_LIST,
+				H3_FRIENDS_BACKUP_CODE_ONLY);
+		}
+	}
+	/* (a typing cancelled: no typing of the step's going on) */
+	else if ((h3_backup.step == _h3_backup_password && menu_functions.typing != _typing_backup_password) ||
+		(h3_backup.step == _h3_backup_again && menu_functions.typing != _typing_backup_again))
+	{
+		h3_backup_stop(NULL);
+	}
+	memset(typed, 0, sizeof(typed));
+	if (h3_backup.step == _h3_backup_working)
+	{
+		outcome = p2p_friends_backup_state(text, sizeof(text));
+		if (outcome == P2P_FRIENDS_BACKUP_READY)
+		{
+			char code[P2P_FRIEND_CODE_SIZE], current[P2P_FRIEND_CODE_SIZE], words[256];
+			int friend_count;
+
+			if (!p2p_friends_backup_found(code, current, sizeof(code), &friend_count))
+				h3_backup_stop(p2p_friends_backup_text(P2P_FRIENDS_BACKUP_NOTHING));
+			else
+			{
+				char list[64];
+
+				if (friend_count < 0)
+					snprintf(list, sizeof(list), "%s", T("the friend code alone"));
+				else
+					snprintf(list, sizeof(list), T("%d friends in it"), friend_count);
+				snprintf(words, sizeof(words), T("Your friend code %s becomes %s\n(%s). Yours now is kept on the memory card.\n"
+					"One Vita at a time: friends see the one started last."), current, code, list);
+				h3_backup.step = _h3_backup_confirm;
+				h3_backup_question(T("RESTORE FRIEND CODE"), words, H3_FRIENDS_BACKUP_CONFIRM, H3_FRIENDS_BACKUP_CANCEL);
+				h3_friends_message("");
+			}
+		}
+		else if (outcome != P2P_FRIENDS_BACKUP_WORKING)
+		{
+			h3_backup.step = _h3_backup_none;
+			if (outcome == P2P_FRIENDS_BACKUP_SAVED)
+				snprintf(text + strlen(text), sizeof(text) - strlen(text), ". %s", T("Keep it and its password safe."));
+			h3_friends_message(text);
+		}
+	}
+	/* (a question gone without an answer: Back) */
+	if ((h3_backup.step == _h3_backup_confirm || h3_backup.step == _h3_backup_list) && h3_backup.question_time &&
+		system_milliseconds() - h3_backup.question_time > 750)
+	{
+		h3_backup_stop(h3_backup.step == _h3_backup_confirm ? T("Not restored: your friend code stays") :
+			T("Not backed up"));
+	}
+}
+
 /* (port h3 friends) the rows, the chosen one's facts, the code and status */
 static void h3_friends_update(struct widget_instance *list)
 {
@@ -9451,6 +9707,7 @@ static void h3_friends_update(struct widget_instance *list)
 	long index, focused_row = NONE, target;
 	char text[192], typed[HALO_TEXT_INPUT_SIZE];
 
+	h3_backup_update();
 	if (typing_done(_typing_friend_code, typed, sizeof(typed)))
 	{
 		int result = p2p_friends_add(typed);
@@ -9543,6 +9800,11 @@ static void h3_friends_update(struct widget_instance *list)
 				row_column(child, "row_state", T("Your games, public or private, in one press"));
 				row_column(child, "row_tag", config_boolean_live("friends.join", "HALO_FRIENDS_JOIN") ? T("YES") : T("NO"));
 				break;
+			case _h3_friends_row_backup:
+				row_column(child, "row_name", T("FRIEND CODE BACKUP"));
+				row_column(child, "row_state", T("Save your code to a file, or restore it"));
+				row_column(child, "row_tag", h3_backup.step == _h3_backup_working ? T("WORKING") : " ");
+				break;
 			default:
 			{
 				char party[96], tag[16];
@@ -9628,6 +9890,7 @@ static void h3_friends_update(struct widget_instance *list)
 			N_("Your friends see you offline; you still see them."),
 			N_("Friends join your public games without a password in one press."),
 			N_("Your party: who's in it, and leave. Triangle on a friend invites them."),
+			N_("A file with a password keeps your code if you lose your memory card."),
 		};
 		int item = h3_friends_chosen_index();
 
@@ -9721,6 +9984,9 @@ static void h3_friends_act(struct widget_instance *widget)
 			menu_functions.open_party = TRUE;
 			platform_log("menus: h3 friends: the PARTY screen next");
 			break;
+		case _h3_friends_row_backup:
+			h3_backup_menu();
+			break;
 		}
 		return;
 	}
@@ -9788,6 +10054,7 @@ static boolean h3_friends_options_ask(void)
 	struct p2p_friend_entry const *entry = h3_friends_item_entry(h3_friends_chosen_index());
 
 	h3_friends.option_count = 0;
+	h3_friends.options_title[0] = 0;
 	if (!entry)
 		return FALSE;
 	h3_friends.options_entry = *entry;
@@ -9833,6 +10100,18 @@ static char const *h3_friends_option_name(int action)
 		return T("INVITE TO PARTY");
 	case H3_FRIENDS_PARTY_KICK:
 		return T("REMOVE FROM PARTY");
+	case H3_FRIENDS_BACKUP_EXPORT:
+		return T("BACK UP FRIEND CODE");
+	case H3_FRIENDS_BACKUP_RESTORE:
+		return T("RESTORE FRIEND CODE");
+	case H3_FRIENDS_BACKUP_WITH_LIST:
+		return T("WITH FRIENDS LIST");
+	case H3_FRIENDS_BACKUP_CODE_ONLY:
+		return T("FRIEND CODE ONLY");
+	case H3_FRIENDS_BACKUP_CONFIRM:
+		return T("CONFIRM");
+	case H3_FRIENDS_BACKUP_CANCEL:
+		return T("CANCEL");
 	case P2P_FRIENDS_REMOVE:
 		return T("REMOVE FRIEND");
 	case P2P_FRIENDS_BLOCK:
@@ -9859,9 +10138,19 @@ static void h3_friends_options_update(struct widget_instance *list)
 	struct widget_instance *child;
 	char text[192];
 
-	text_show(named(screen, "options_title"), h3_friends.options_entry.name);
-	snprintf(text, sizeof(text), "%s\n%s", h3_friends.options_entry.code, h3_friends.options_entry.activity);
-	text_show(named(screen, "options_text"), text);
+	/* (FRIEND CODE BACKUP's questions: their own words; seen now) */
+	if (h3_friends.options_title[0])
+	{
+		text_show(named(screen, "options_title"), h3_friends.options_title);
+		text_show(named(screen, "options_text"), h3_friends.options_text);
+		h3_backup.question_time = system_milliseconds() ? system_milliseconds() : 1;
+	}
+	else
+	{
+		text_show(named(screen, "options_title"), h3_friends.options_entry.name);
+		snprintf(text, sizeof(text), "%s\n%s", h3_friends.options_entry.code, h3_friends.options_entry.activity);
+		text_show(named(screen, "options_text"), text);
+	}
 	for (child = list->child; child; child = child->next)
 	{
 		long option;
@@ -9890,6 +10179,16 @@ static void h3_friends_option(struct widget_instance *widget)
 
 	if (option < 0 || option >= h3_friends.option_count)
 		return;
+	if (h3_friends.options[option] >= H3_FRIENDS_BACKUP_EXPORT && h3_friends.options[option] <= H3_FRIENDS_BACKUP_CANCEL)
+	{
+		int chosen = h3_friends.options[option];
+
+		/* (answered: the question's words not shown again for an entry's) */
+		h3_friends.options_title[0] = 0;
+		h3_friends.option_count = 0;
+		h3_backup_option(chosen);
+		return;
+	}
 	if (h3_friends.options[option] == H3_FRIENDS_PARTY_INVITE || h3_friends.options[option] == H3_FRIENDS_PARTY_KICK)
 	{
 		int invite = h3_friends.options[option] == H3_FRIENDS_PARTY_INVITE;
@@ -14902,6 +15201,20 @@ void pc_menu_functions_update(
 		menu_functions.open_party = FALSE;
 		h3_party_open();
 	}
+	/* (FRIEND CODE BACKUP's question, over FRIENDS) */
+	if (main_menu_loaded && menu_functions.open_friends_question)
+	{
+		long question = menu_tags_ingame_screen("h3/friends/options");
+		struct widget_instance *active = ui_widget_port_active_screen(0);
+
+		menu_functions.open_friends_question = FALSE;
+		if (question == NONE || !active || !ui_widget_load_by_name_or_tag(NULL, question, NULL,
+			active->local_player_index, active->definition_tag_index, NONE, NONE))
+		{
+			platform_log("menus: h3 friends: the backup's question did not open");
+			h3_backup_stop(T("That did not open: try again"));
+		}
+	}
 	/* (GAME OPTIONS over the lobby, which B goes back to; internet play
 	off, the screen saying how to turn it on) */
 	if (main_menu_loaded && menu_functions.open_game_options)
@@ -14923,6 +15236,7 @@ void pc_menu_functions_update(
 	if (!main_menu_loaded)
 	{
 		menu_functions.open_party = FALSE;
+		menu_functions.open_friends_question = FALSE;
 		menu_functions.open_game_options = FALSE;
 		menu_functions.open_system_link = FALSE;
 		menu_functions.open_system_link_list = FALSE;

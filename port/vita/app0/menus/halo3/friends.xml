@@ -2,7 +2,10 @@
 <!-- The Halo 3-style FRIENDS screen (the main menu's FRIENDS, Triangle in the lobbies) and the
 FRIENDS panel at the right of the lobbies (port/linux/src/p2p_friends.h; menu_functions.c "port h3
 friends ..."), laid out as Halo 3's friends list: the title strip with how many are online, this
-Vita's friend code, ADD FRIEND, APPEAR OFFLINE and FRIENDS CAN JOIN, then the requests, invites,
+Vita's friend code, ADD FRIEND, APPEAR OFFLINE, FRIENDS CAN JOIN, PARTY and FRIEND CODE BACKUP (the
+code kept in a file with a password, or restored from one: the options question below asks which,
+with the friends list or not, and CONFIRM or CANCEL before a restore replaces anything), then the
+requests, invites,
 friends (online first, what each is doing, JOIN when their game can be joined), the requests sent
 and the blocked players, the chosen one's facts under the list, the buttons in the strip at the
 foot. Cross does the row's first thing (Accept, Join, type a code), Square its second (Decline,

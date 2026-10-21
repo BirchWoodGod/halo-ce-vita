@@ -572,9 +572,98 @@ const char *p2p_friends_add_text(int result)
 {
 	return result == P2P_FRIENDS_ADD_SENT ? "Friend request sent" : "That's not a friend code";
 }
+/* (the friend code's backup, p2p_friends_backup.inc: what the panel asked;
+the work done at the next look, its outcome the test's) */
+static char backup_name_asked[64], backup_password_asked[80];
+static int backup_list_asked = -1, backup_state_now, backup_outcome = P2P_FRIENDS_BACKUP_SAVED, backup_confirms,
+	backup_cancels;
+int p2p_friends_backup_name(const char *typed, char *name)
+{
+	int length = 0;
+
+	for (; *typed; typed++)
+	{
+		if (!((*typed >= 'a' && *typed <= 'z') || (*typed >= '0' && *typed <= '9') || *typed == '-') || length >= 32)
+			return 0;
+		name[length++] = *typed;
+	}
+	name[length] = 0;
+	return length > 0;
+}
+int p2p_friends_backup_password_check(const char *password)
+{
+	return strlen(password) < 8 ? P2P_FRIENDS_BACKUP_SHORT_PASSWORD : P2P_FRIENDS_BACKUP_IDLE;
+}
+int p2p_friends_backup_export(const char *name, const char *password, int with_list)
+{
+	snprintf(backup_name_asked, sizeof(backup_name_asked), "%s", name);
+	snprintf(backup_password_asked, sizeof(backup_password_asked), "%s", password);
+	backup_list_asked = with_list;
+	backup_state_now = P2P_FRIENDS_BACKUP_WORKING;
+	return P2P_FRIENDS_BACKUP_WORKING;
+}
+int p2p_friends_backup_restore(const char *name, const char *password)
+{
+	snprintf(backup_name_asked, sizeof(backup_name_asked), "%s", name);
+	snprintf(backup_password_asked, sizeof(backup_password_asked), "%s", password);
+	backup_state_now = P2P_FRIENDS_BACKUP_WORKING;
+	return P2P_FRIENDS_BACKUP_WORKING;
+}
+const char *p2p_friends_backup_text(int outcome)
+{
+	switch (outcome)
+	{
+	case P2P_FRIENDS_BACKUP_WORKING:
+		return "Working on it: a few seconds...";
+	case P2P_FRIENDS_BACKUP_MISMATCH:
+		return "The passwords don't match";
+	case P2P_FRIENDS_BACKUP_WRONG_PASSWORD:
+		return "Wrong password, or the file was changed";
+	case P2P_FRIENDS_BACKUP_SHORT_PASSWORD:
+		return "The password needs 8 characters or more";
+	}
+	return "Done";
+}
+int p2p_friends_backup_state(char *text, int size)
+{
+	int state = backup_state_now;
+
+	/* (the work: done at the next look) */
+	if (state == P2P_FRIENDS_BACKUP_WORKING)
+	{
+		backup_state_now = backup_outcome;
+		return state;
+	}
+	if (text)
+		snprintf(text, (size_t)size, "%s", p2p_friends_backup_text(state));
+	if (state != P2P_FRIENDS_BACKUP_READY)
+		backup_state_now = P2P_FRIENDS_BACKUP_IDLE;
+	return state;
+}
+int p2p_friends_backup_found(char *code, char *current_code, int code_size, int *friend_count)
+{
+	if (backup_state_now != P2P_FRIENDS_BACKUP_READY)
+		return 0;
+	snprintf(code, (size_t)code_size, "WXYZ-2345-6789");
+	snprintf(current_code, (size_t)code_size, "KQ7M-3XPA-T9WE");
+	*friend_count = 12;
+	return 1;
+}
+int p2p_friends_backup_confirm(void)
+{
+	backup_confirms++;
+	backup_state_now = P2P_FRIENDS_BACKUP_IDLE;
+	return P2P_FRIENDS_BACKUP_RESTORED;
+}
+void p2p_friends_backup_cancel(void)
+{
+	backup_cancels++;
+	backup_state_now = P2P_FRIENDS_BACKUP_IDLE;
+}
 
 /* (the party, p2p_party.h: the test's) */
-static struct p2p_party_member test_party[P2P_PARTY_MAXIMUM];
+/* (room for more than a party holds: the page's check of a party of 12) */
+static struct p2p_party_member test_party[16];
 static int test_party_count, test_party_leading;
 static struct p2p_party_invite test_party_invites[2];
 static int test_party_invite_count;
@@ -1900,6 +1989,102 @@ static void test_players_page(void)
 	check(strstr(menu, "*Multiplayer") && !strstr(menu, "\n\x03"), "circle: back to Multiplayer");
 }
 
+/* Multiplayer > Friends > Friend code (p2p_friends_backup.inc, the test's
+work): cross on the code's row, then cross backs up - the name, the
+password twice on the keyboard (a password's typing hidden), with the list
+or the code alone, the work, where it went -, square restores - the name,
+the password, the codes before and after asked about, Circle letting it go,
+Cross restoring -; passwords that differ said; each screen fits */
+static void test_friend_backup(void)
+{
+	clock_us += 6000000;
+	check(to_line("Friend code") && strstr(menu, "Back it up to a file with a password, or restore it"),
+		"Friend code: its help");
+	press(VITA_BUTTON_CROSS);
+	check(!strncmp(menu, "FRIEND CODE BACKUP", 18) && strstr(menu, "Cross: back up   Square: restore") &&
+		strstr(menu, "can be you"), "cross: back up or restore, and the warning");
+	check(menu_fits(), "the backup's question fits");
+	/* back up */
+	ime_opens = 0;
+	press(VITA_BUTTON_CROSS);
+	check(ime_opens == 1 && !strcmp(ime_title, "Backup file name") && !strcmp(ime_initial, "friends-backup") &&
+		!ime_password, "cross: the file's name on the keyboard, friends-backup to start from");
+	keyboard_closes("my-code");
+	frame(0);
+	check(ime_opens == 2 && ime_password && ime_maximum == P2P_FRIENDS_BACKUP_PASSWORD_MAXIMUM,
+		"then its password, hidden");
+	keyboard_closes("hunter2hunter2");
+	frame(0);
+	check(ime_opens == 3 && ime_password && !strcmp(ime_title, "The password again"), "then the password again");
+	keyboard_closes("hunter2hunter2");
+	check(!strncmp(menu, "BACK UP FRIEND CODE", 19) && strstr(menu, "Cross: with the list") && menu_fits(),
+		"with the friends list or not");
+	backup_outcome = P2P_FRIENDS_BACKUP_SAVED;
+	press(VITA_BUTTON_CROSS);
+	check(!strcmp(backup_name_asked, "my-code") && !strcmp(backup_password_asked, "hunter2hunter2") &&
+		backup_list_asked == 1, "cross: backed up with the list, the name and password typed");
+	frame(0);
+	frame(0);
+	check(strstr(menu, "Backup saved to") && strstr(menu, "ux0:data/haloce-vita/\nmy-code.hfb") && menu_fits(),
+		"where it went said");
+	check(!strstr(log_text, "hunter2"), "the password never logged");
+	press(VITA_BUTTON_CIRCLE);
+	check(strstr(menu, "> Friends\n") != NULL, "circle: the Friends page");
+	/* passwords that differ */
+	to_line("Friend code");
+	press(VITA_BUTTON_CROSS);
+	press(VITA_BUTTON_CROSS);
+	keyboard_closes("my-code");
+	frame(0);
+	keyboard_closes("hunter2hunter2");
+	frame(0);
+	keyboard_closes("hunter2hunter3");
+	check(strstr(menu, "The passwords don't match") != NULL, "passwords that differ: said, nothing backed up");
+	press(VITA_BUTTON_CROSS);
+	/* restore: opened, asked, let go, then restored */
+	to_line("Friend code");
+	press(VITA_BUTTON_CROSS);
+	ime_opens = 0;
+	press(VITA_BUTTON_SQUARE);
+	check(ime_opens == 1 && !strcmp(ime_title, "Backup file name"), "square: the name of the backup to restore");
+	keyboard_closes("my-code");
+	frame(0);
+	check(ime_opens == 2 && ime_password && !strcmp(ime_title, "The backup's password"), "then its password");
+	backup_outcome = P2P_FRIENDS_BACKUP_READY;
+	keyboard_closes("hunter2hunter2");
+	check(!strcmp(backup_password_asked, "hunter2hunter2"), "the backup opened with it");
+	frame(0);
+	frame(0);
+	check(!strncmp(menu, "RESTORE FRIEND CODE", 19) && strstr(menu, "KQ7M-3XPA-T9WE") && strstr(menu, "WXYZ-2345-6789") &&
+		strstr(menu, "12 friends in it") && strstr(menu, "Cross: confirm   Circle: cancel"),
+		"opened: the code now and the backup's, its friends; confirm or cancel");
+	check(menu_fits(), "the restore's question fits");
+	backup_cancels = backup_confirms = 0;
+	press(VITA_BUTTON_CIRCLE);
+	check(backup_cancels == 1 && !backup_confirms && strstr(menu, "Not restored"), "circle: let go, nothing restored");
+	press(VITA_BUTTON_CIRCLE);
+	to_line("Friend code");
+	press(VITA_BUTTON_CROSS);
+	press(VITA_BUTTON_SQUARE);
+	keyboard_closes("my-code");
+	frame(0);
+	keyboard_closes("hunter2hunter2");
+	frame(0);
+	frame(0);
+	press(VITA_BUTTON_CROSS);
+	check(backup_confirms == 1 && strstr(menu, "Friend code restored:") && menu_fits(), "cross: restored, said");
+	press(VITA_BUTTON_CROSS);
+	check(strstr(menu, "> Friends\n") != NULL, "back on the Friends page");
+	/* the keyboard cancelled: the question again */
+	to_line("Friend code");
+	press(VITA_BUTTON_CROSS);
+	press(VITA_BUTTON_CROSS);
+	keyboard_closes(NULL);
+	check(!strncmp(menu, "FRIEND CODE BACKUP", 18) && strstr(menu, "Cross: back up"), "the keyboard cancelled: the question");
+	press(VITA_BUTTON_CIRCLE);
+	check(!strstr(log_text, "hunter2"), "no password in the log");
+}
+
 /* Multiplayer > Friends (p2p_friends.h, the test's list): the code and the
 status, Add a friend (typed with the D-pad), Appear offline and Friends can
 join (saved), each entry with a word of its state, its doing on the help
@@ -1938,8 +2123,8 @@ static void test_friends_page(void)
 	check(strstr(menu, "\n\x03Multiplayer > Friends\n") != NULL, "cross: the Friends page");
 	check(strstr(menu, "\nAdd a friend\x02  >\n") && strstr(menu, "\nAppear offline\x02  Off >\n") &&
 		strstr(menu, "\nFriends can join\x02  On >\n"), "its rows: Add a friend, Appear offline, Friends can join");
-	check(strstr(menu, "\n\x04Your friend code: KQ7M-3XPA-T9WE\n") && strstr(menu, "\n\x04" "1 of 2 friends online\n"),
-		"the code and the status");
+	check(strstr(menu, "\nFriend code\x02  KQ7M-3XPA-T9WE  >\n") && strstr(menu, "\n\x04" "1 of 2 friends online\n"),
+		"the code (the Friend code row's value) and the status");
 	/* (four entries shown at once, with the Party row: the fifth scrolled to) */
 	check(strstr(menu, "\nDelta\x02  Request\n") && strstr(menu, "\nBravo\x02  Joinable\n") &&
 		strstr(menu, "\nCharlie\x02  Offline\n") && strstr(menu, "\nA7ES-DA9D-2NMR\x02  Sent\n"),
@@ -2015,6 +2200,7 @@ static void test_friends_page(void)
 	press(VITA_BUTTON_CROSS);
 	check(friend_acted_action == P2P_FRIENDS_UNBLOCK && !strcmp(friend_acted_id, "e1"), "cross: unblocked");
 	(void)line;
+	test_friend_backup();
 	press(VITA_BUTTON_CIRCLE);
 	halo_pc_menus_state = -1;
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
