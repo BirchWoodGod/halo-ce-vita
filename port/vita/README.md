@@ -174,13 +174,53 @@ the settings panel's Multiplayer > Friends > Party). When the leader hosts a
 game the party joins its lobby by itself; when the leader joins another's
 game the party follows through that game's own join (a password game is never
 followed; a member who cannot get in is told why and stays in the party).
-**Select + D-pad left** opens the panel's Party page at once, in play or in the
-menus, for party chat: Send a message (the system's keyboard) and Quick chat
-(left and right choose a phrase, Cross sends it). Messages show at the left
-of the screen in play and on the Halo 3 PARTY screen (FRIENDS' PARTY row:
-Square quick chat, Triangle type). Everything goes through the friends'
+In the menus **Select + D-pad left** opens the panel's Party page at once, for
+party chat: Send a message (the system's keyboard) and Quick chat (left and
+right choose a phrase, Cross sends it); in play it opens the in-game chat's
+quick chat wheel, whose PARTY channel is the same chat (below). Messages show
+at the bottom left in play and on the Halo 3 PARTY screen (FRIENDS' PARTY
+row: Square quick chat, Triangle type). Everything goes through the friends'
 channel, sealed for the party's members alone; muting a member hides their
 chat on this Vita only.
+
+## In-game chat
+
+In a network game (and in any game with a party), **Select + D-pad left**
+opens the quick chat wheel at the right of the screen (a PC's pad: Back +
+D-pad left; its keyboard: F1 + Left): **up and down** choose a phrase (Need
+backup!, Enemy spotted!, Flag taken!, Our flag is taken!, Follow me, On my
+way, Cover me, Nice shot!, Thanks!, Sorry!, Yes, No, GG) or *Type a
+message...*, **left and right** or **L and R** the channel (ALL, TEAM,
+PARTY), **Cross** sends, **Triangle** types a line on the system keyboard (63
+characters; the party's 120), **Circle** closes. The game sees no buttons
+while the wheel is open (the sticks still move and look). Lines show at the
+bottom left above the motion tracker, the name in its team's colour,
+`[Team]`, `[Party]` and `[Vehicle]` marked, and fade after eight seconds as
+Halo PC's; with the wheel open the last twelve are all shown, and holding
+the combo shows them alone. A phrase goes to the others as its English and
+shows in each player's language.
+
+The chat is OpenCE's text chat on the wire (`port/linux/game/game_chat_protocol.h`),
+so players of OpenCE's PC builds (since Oct 17 2026, network version 32) and
+the Vitas read each other's lines, in a Vita's game or a PC's; an older PC
+build or a Vita of before 1.1.1-insider.22 drops the lines, and the chat says
+its host has none. The host relays each line to the players who hear it (a
+team's to the team), five at once and one each 1.5 s from a machine at most,
+links refused; it never changes a line. What each player sees, their own
+machine decides:
+
+- **Chat filter** (Multiplayer > Vita and PC > Chat; on by default): slurs and
+  hate speech in other players' lines and names, PC players' too, masked as
+  `****` however they are spelled (leet, spaces, dots, repeated letters),
+  whole-word where the word is also part of others (Scunthorpe). A player it
+  catches three times in five minutes is muted on this Vita. Turning it off
+  changes only what this player sees. The words are
+  `app0:chat/filter.txt` (OpenCE's review of Surge AI's profanity list, its
+  slurs alone; `tools/chat_filter_words.py`).
+- **Mute**: the Chat page's players (Cross), or MUTE CHAT on the Halo 3
+  PLAYERS screen (Triangle with the scoreboard up): their lines hidden on this
+  Vita, by name; they are never told.
+- **Chat** (On/Off): Off shows no chat over the game and sends none.
 
 ## Settings panel
 

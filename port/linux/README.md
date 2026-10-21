@@ -214,6 +214,8 @@ the setting for one start of the game. It has priority over the file.
 | `network.address` | `""` | `HALO_NET_ADDRESS` | The IPv4 address of this machine for system link. Refer to "Play on one computer". |
 | `network.broadcast` | `""` | `HALO_NET_BROADCAST` | IPv4 addresses, with commas between them, that get the broadcasts of the game. Empty: 255.255.255.255. |
 | `network.online` | `true` | `HALO_NET_ONLINE` | `true`: internet play. `false`: system link on the local network only. |
+| `network.chat` | `true` | `HALO_CHAT` | The in-game chat (`port/linux/game/game_chat.c`): lines to everyone, the team or the party, from the quick chat wheel (Back + D-pad left in play; F1 + Left on the keyboard: up and down a phrase or Type a message, left and right or the shoulders the channel, A sends, Y types, B closes) or typed. OpenCE's text chat on the wire: its players and the Vitas read each other's lines. `false`: no chat over the game, none sent. |
+| `network.chat_filter` | `true` | `HALO_CHAT_FILTER` | Slurs and hate speech in other players' chat lines (PC players' too) shown as `****`, however they are spelled; a player it catches three times in five minutes muted here. Changes only what this player sees. The words: `port/vita/app0/chat/filter.txt`. |
 | `network.join_from_clipboard` | `true` | `HALO_NET_JOIN_FROM_CLIPBOARD` | `true`: when the game comes to the front, it joins the game of an invite link on the clipboard. |
 | `network.tunnel_port` | `0` | `HALO_NET_TUNNEL_PORT` | The UDP port for internet play. `0`: the game selects a port. Refer to "Internet play". |
 | `network.allow_upnp` | `true` | `HALO_NET_ALLOW_UPNP` | `true`: internet play can ask the router to forward its port (UPnP). `false`: the game does not ask. Refer to "Internet play". |
