@@ -1164,6 +1164,7 @@
 "JOIN WITH CODE" = "UNIRSE CON CÓDIGO"
 "EDIT GAME TYPES" = "EDITAR TIPOS DE JUEGO"
 "1 Player (%d max)" = "1 jugador (%d máx.)"
+"%d Players (%d max)" = "%d jugadores (%d máx.)"
 "Host a game on the Internet, or join one." = "Crea una partida en Internet o únete a una."
 "Play with the PS Vitas on your Wi-Fi network." = "Juega con las PS Vita de tu red Wi-Fi."
 "Play with the PS Vitas near you." = "Juega con las PS Vita cercanas."

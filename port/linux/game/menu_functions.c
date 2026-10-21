@@ -403,6 +403,7 @@ enum
 	_input_h3_mp_pause,
 	_input_h3_mp_settings,
 	_input_h3_invite,
+	_input_h3_party_plates,
 };
 
 /* what a line of typing is for */
@@ -601,6 +602,24 @@ static struct
 } menu_functions;
 
 /* ---------- private code */
+
+/* (the party's plates, h3_party_plates_update) the players the lobbies' and
+the main menu's count says: this machine and its party's members shown
+(1 out of a party), and that count's words: "1 Player", "3 Players",
+"3 Players (16 max)" with a maximum (0: none) - Halo 3's count over the
+nameplates */
+static int h3_party_players = 1;
+
+static void h3_party_players_text(char *text, int size, int maximum)
+{
+	if (maximum > 0)
+		snprintf(text, (size_t)size, h3_party_players == 1 ? T("1 Player (%d max)") : T("%d Players (%d max)"),
+			h3_party_players == 1 ? maximum : h3_party_players, maximum);
+	else if (h3_party_players == 1)
+		snprintf(text, (size_t)size, "%s", T("1 Player"));
+	else
+		snprintf(text, (size_t)size, T("%d Players"), h3_party_players);
+}
 
 /* (the Halo 3 multiplayer flows: a profile chosen this run is not asked
 for again) */
@@ -2923,7 +2942,7 @@ static void h3_mp_lobby_update(struct widget_instance *widget)
 	/* ("1 Player (16 max)": the most players a game of that network takes) */
 	maximum = h3_mp.network == _h3_network_offline ? 4 : h3_mp.network != _h3_network_online ? 16 :
 		(int)PIN(atol(setting_get("HALO_NET_MAX_PLAYERS", "16")), 2, 16);
-	snprintf(text, sizeof(text), T("1 Player (%d max)"), maximum);
+	h3_party_players_text(text, (int)sizeof(text), maximum);
 	text_show(named(screen, "players"), text);
 	text_show(named(screen, "ready"), T("Ready"));
 	/* (online: who can join a game hosted, network.who_can_join - the
@@ -7575,6 +7594,176 @@ static void h3_friends_option(struct widget_instance *widget)
 	h3_friends_do(&h3_friends.options_entry, h3_friends.options[option]);
 }
 
+/* (port h3 party plates: the lobbies' and the main menu's) the party as
+Halo 3 shows it: each member but this machine a nameplate of its own,
+stacked under the player's (h3/main/nameplate), the longest-standing first,
+added as they join and taken away as they leave; the leader's marked
+LEADER (this machine's own nameplate too when it leads). Members tell no
+colour of theirs (the party's messages carry none: p2p_party.h), so each
+member's plate is the nameplate's own green, the player's in the
+profile's colour above them. Hidden where the player's nameplate is (a
+live lobby lists the game's players in its place: h3_live_lobby_show).
+The main menu's live servers (h3/main/servers) move down under the last
+plate. The PARTY screen (FRIENDS' PARTY row, the settings panel's
+Multiplayer > Party) keeps the party's steps: leave, remove, mute, chat */
+#define H3_PARTY_PLATES (P2P_PARTY_MAXIMUM - 1)
+#define H3_PARTY_PLATE_SPACING 18
+
+#ifndef HALO_RELEASE
+/* (the tests' made-up party, HALO_TEST_PARTY_PLATES: comma-separated
+NAME[*][@FROM-UNTIL], '*' the leader, FROM and UNTIL seconds since the
+plates were first drawn - the member in the party between them -; this
+machine its leader unless one is marked) */
+static int h3_party_plates_fake(struct p2p_party_member *members, int maximum)
+{
+	static unsigned long first;
+	char const *setting = getenv("HALO_TEST_PARTY_PLATES");
+	char list[256], *entry, *rest;
+	unsigned long seconds;
+	int count = 1, leader_marked = 0;
+
+	if (!setting || !setting[0] || maximum < 2)
+		return 0;
+	if (!first)
+		first = system_milliseconds() ? system_milliseconds() : 1;
+	seconds = (system_milliseconds() - first) / 1000;
+	memset(members, 0, sizeof(*members) * (size_t)maximum);
+	snprintf(list, sizeof(list), "%s", setting);
+	for (entry = strtok_r(list, ",", &rest); entry && count < maximum; entry = strtok_r(NULL, ",", &rest))
+	{
+		char *at = strchr(entry, '@');
+		unsigned long from = 0, until = ~0UL;
+		size_t length;
+		int leader;
+
+		if (at)
+		{
+			*at++ = 0;
+			from = strtoul(at, &at, 10);
+			if (*at == '-')
+				until = strtoul(at + 1, NULL, 10);
+		}
+		length = strlen(entry);
+		leader = length && entry[length - 1] == '*';
+		if (leader)
+			entry[--length] = 0;
+		if (!length || seconds < from || seconds >= until)
+			continue;
+		snprintf(members[count].id, sizeof(members[count].id), "test-%d", count);
+		snprintf(members[count].name, sizeof(members[count].name), "%s", entry);
+		members[count].leader = leader && !leader_marked;
+		members[count].online = 1;
+		leader_marked |= members[count].leader;
+		count++;
+	}
+	if (count < 2)
+		return 0;
+	members[0].self = 1;
+	members[0].leader = !leader_marked;
+	h3_player_name(members[0].name, (int)sizeof(members[0].name));
+	return count;
+}
+#endif
+
+static void h3_party_plates_update(struct widget_instance *container)
+{
+	static struct p2p_party_member party[P2P_PARTY_MAXIMUM];
+	static unsigned long party_time;
+	static int party_count;
+	static char said[256];
+	struct widget_instance *screen = screen_of(container);
+	struct widget_instance *plate = named(screen, "nameplate"), *found;
+	unsigned long time = system_milliseconds();
+	boolean shown = plate && plate->visible;
+	char line[256];
+	int member, row = 0, length = 0;
+	boolean self_leads = FALSE;
+
+	/* (read again each second, as the FRIENDS panel's) */
+	if (!party_time || time - party_time >= 1000)
+	{
+		party_time = time ? time : 1;
+		party_count = p2p_party_members(party, P2P_PARTY_MAXIMUM);
+#ifndef HALO_RELEASE
+		if (party_count < 2)
+			party_count = h3_party_plates_fake(party, P2P_PARTY_MAXIMUM);
+#endif
+	}
+	line[0] = 0;
+	for (member = 0; shown && party_count > 1 && member < party_count; member++)
+	{
+		char name[24];
+
+		if (party[member].self)
+		{
+			self_leads = party[member].leader != 0;
+			continue;
+		}
+		if (row >= H3_PARTY_PLATES)
+			break;
+		row++;
+		snprintf(name, sizeof(name), "party_plate_%d", row);
+		if ((found = named(container, name)) != NULL)
+		{
+			widget_instance_set_visibility_recursive(found, TRUE);
+			found->animation.current_frame_index = 0;
+		}
+		snprintf(name, sizeof(name), "party_name_%d", row);
+		row_column(container, name, party[member].name);
+		snprintf(name, sizeof(name), "party_tag_%d", row);
+		text_show(named(container, name), party[member].leader ? T("LEADER") : "");
+		if (length < (int)sizeof(line) - 1)
+			length += snprintf(line + length, sizeof(line) - (size_t)length, "%s%s%s", row > 1 ? ", " : "",
+				party[member].name, party[member].leader ? " (leader)" : "");
+	}
+	for (member = row + 1; member <= H3_PARTY_PLATES; member++)
+	{
+		char name[24];
+
+		snprintf(name, sizeof(name), "party_plate_%d", member);
+		if ((found = named(container, name)) != NULL)
+			widget_instance_set_visibility_recursive(found, FALSE);
+	}
+	if ((found = named(container, "party_self_tag")) != NULL)
+	{
+		text_show(found, row && self_leads ? T("LEADER") : "");
+		widget_instance_set_visibility_recursive(found, row > 0);
+	}
+	/* (the count over the nameplates: the player and the members shown -
+	the lobbies' own words take it, h3_party_players_text -; the main menu's
+	and the campaign lobby's "1 Player" (h3/main/players) said here) */
+	if (shown)
+		h3_party_players = row + 1;
+	if (shown && !named(screen, "invite") && (found = named(screen, "players")) != NULL)
+	{
+		char count[64];
+
+		h3_party_players_text(count, (int)sizeof(count), 0);
+		text_show(found, count);
+	}
+	/* (the main menu's live servers under the last plate) */
+	if ((found = named(screen, "servers")) != NULL)
+		found->vertical_offset = (short)(row * H3_PARTY_PLATE_SPACING);
+	/* (said each time it changes: the tests read it) */
+	{
+		char summary[256];
+		char own[64];
+
+		h3_player_name(own, (int)sizeof(own));
+		if (row)
+			snprintf(summary, sizeof(summary), "%d under %s%s: %s", row, own, self_leads ? " (leader)" : "", line);
+		else
+			snprintf(summary, sizeof(summary), "none%s", shown ? "" : " (the nameplate hidden)");
+		if (strcmp(summary, said))
+		{
+			/* (no word of none at a start: only once plates were shown) */
+			if (row || said[0])
+				platform_log("menus: party plates: %s", summary);
+			snprintf(said, sizeof(said), "%s", summary);
+		}
+	}
+}
+
 /* (port h3 friends panel: the lobbies') who is online and what they do */
 /* a line of the port's text in a text box, in at most two lines: as it is
 when it fits the box's width, else broken at the last space that leaves
@@ -7646,10 +7835,9 @@ static void h3_friends_panel_update(struct widget_instance *panel)
 		static struct p2p_party_member party[P2P_PARTY_MAXIMUM];
 		static unsigned long party_time;
 		static int party_count;
-		int member;
 
-		/* (the party first, its members but this machine: Halo 3's lobby
-		roster; refreshed with the friends) */
+		/* (the party's size in the count; its members are nameplates of
+		their own under the player's, Halo 3's: h3_party_plates_update) */
 		if (!party_time || time - party_time >= 1000)
 		{
 			party_time = time ? time : 1;
@@ -7663,20 +7851,6 @@ static void h3_friends_panel_update(struct widget_instance *panel)
 			snprintf(text, sizeof(text), T("%d ONLINE"), online);
 		text_show(named(panel, "lobby_count"), text);
 		row = 1;
-		for (member = 0; party_count > 1 && member < party_count && row <= H3_FRIENDS_PANEL_ROWS; member++)
-		{
-			char name[24], state[24];
-
-			if (party[member].self)
-				continue;
-			snprintf(name, sizeof(name), "lobby_name_%d", row);
-			snprintf(state, sizeof(state), "lobby_state_%d", row);
-			text_show(named(panel, name), party[member].name);
-			row_column(panel, state, party[member].note[0] ? party[member].note : party[member].leader ?
-				T("Party leader") : T("In your party"));
-			shown++;
-			row++;
-		}
 	}
 	for (index = 0; row <= H3_FRIENDS_PANEL_ROWS; row++)
 	{
@@ -9634,7 +9808,8 @@ static void h3_forge_lobby_network_update(struct widget_instance *screen)
 	/* (not live: the network's words; live: the game's, h3_live) */
 	if (!h3_live_forge_live())
 	{
-		text_show(named(screen, "players"), T("1 Player"));
+		h3_party_players_text(text, (int)sizeof(text), 0);
+		text_show(named(screen, "players"), text);
 		text_show(named(screen, "ready"), T("Ready"));
 		text_show(named(screen, "ready_sub"), local ? T("This party is local to this PS Vita.") :
 			h3_forge.network == _h3_network_online ? T("Forge with friends on the Internet.") :
@@ -11348,6 +11523,9 @@ void pc_menu_game_data_function_invoke(
 		break;
 	case _input_h3_friends_panel:
 		h3_friends_panel_update(widget);
+		break;
+	case _input_h3_party_plates:
+		h3_party_plates_update(widget);
 		break;
 	case _input_h3_players:
 		if (widget->type == _ui_widget_type_column_list)

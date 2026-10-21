@@ -273,6 +273,7 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 		<child widget="h3/mp/invite"/>
 		<child widget="h3/mp/network_status"/>
 		<child widget="h3/main/nameplate"/>
+		<child widget="h3/main/party_plates"/>
 		<!-- (the live lobby's players, the game's lobby's rows: hidden when not live) -->
 		<child widget="h3/pregame/row_1" x="380" y="38"/>
 		<child widget="h3/pregame/row_2" x="380" y="56"/>

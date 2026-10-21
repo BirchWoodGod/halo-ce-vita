@@ -421,7 +421,7 @@ static char const *const port_game_data_input_names[] =
 	"port h3 join", "port h3 pregame",
 	"port h3 party", "port h3 party options", "port h3 party chat", "port h3 party quick",
 	"port h3 mp pause", "port h3 mp settings",
-	"port h3 invite",
+	"port h3 invite", "port h3 party plates",
 };
 
 static struct

@@ -120,6 +120,7 @@ vehicles, the dropships, the Covenant AI), built in the background while the lob
 		<child widget="h3/forge/leave"/>
 		<child widget="h3/mp/players"/>
 		<child widget="h3/main/nameplate"/>
+		<child widget="h3/main/party_plates"/>
 		<child widget="h3/friends/lobby_panel"/>
 		<!-- (live: L, INVITE FRIENDS online, and the game's players in the nameplate's place) -->
 		<child widget="h3/mp/l_butn"/>
