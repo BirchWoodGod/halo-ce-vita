@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Menu style Halo CE: the Xbox's main menu with the port's rows (classic_patch: the map's
+     list itself while the style is Halo CE; Halo 3's main menu is menus/halo3/main.xml) -->
+<menus>
+	<strings name="ce/main_items">
+		<string text="FORGE"/>
+		<string text="FRIENDS"/>
+		<string text="FILE SHARE"/>
+		<string text="MOD MANAGER"/>
+	</strings>
+	<widget name="ce/main/forge" extends="ui\shell\main_menu\main_menu_item_settings" drop="handlers" bitmap="none" font="ui\large_ui" color="#FF5AA0E6" align="center" text_y="4" string_list="ce/main_items" string_index="0">
+		<on event="a start" open="h3/forge/lobby"/>
+	</widget>
+	<widget name="ce/main/friends" extends="ui\shell\main_menu\main_menu_item_settings" drop="handlers" bitmap="none" font="ui\large_ui" color="#FF5AA0E6" align="center" text_y="4" string_list="ce/main_items" string_index="1">
+		<on event="a start" open="h3/friends/screen"/>
+	</widget>
+	<widget name="ce/main/fileshare" extends="ui\shell\main_menu\main_menu_item_settings" drop="handlers" bitmap="none" font="ui\large_ui" color="#FF5AA0E6" align="center" text_y="4" string_list="ce/main_items" string_index="2">
+		<on event="a start" run="port fileshare enter" open="h3/fileshare/screen"/>
+	</widget>
+	<widget name="ce/main/mods" extends="ui\shell\main_menu\main_menu_item_settings" drop="handlers" bitmap="none" font="ui\large_ui" color="#FF5AA0E6" align="center" text_y="4" string_list="ce/main_items" string_index="3">
+		<on event="a start" run="port h3 mods init" open="h3/mods/screen"/>
+	</widget>
+	<widget name="ce/main/list" extends="ui\shell\main_menu\main_menu_select_list" classic_patch="true" drop="children">
+		<child widget="ui\shell\main_menu\main_menu_item_load_camp" x="194" y="232"/>
+		<child widget="ui\shell\main_menu\main_menu_item_multiplayer" x="192" y="264"/>
+		<child widget="ui\shell\main_menu\main_menu_item_settings" x="192" y="296"/>
+		<child widget="ce/main/forge" x="192" y="328"/>
+		<child widget="ce/main/friends" x="192" y="360"/>
+		<child widget="ce/main/fileshare" x="192" y="392"/>
+		<child widget="ce/main/mods" x="192" y="424"/>
+	</widget>
+</menus>

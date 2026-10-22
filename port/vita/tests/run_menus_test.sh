@@ -390,6 +390,11 @@
 #            RESTART MISSION's (Circle: not restarted), SAVE AND QUIT's "Saving" boxes and
 #            the main menu; and Menu style Halo CE's pause: the Xbox's question
 #            (HALO_TEST_SHOTS: each dialog's picture)
+#   ceplusmain  Menu style Halo CE's main menu (menus/classic/main.xml: the Xbox's list with the
+#           port's rows, classic_patch): FORGE, FRIENDS, FILE SHARE and MOD MANAGER under SETTINGS,
+#           each opens its screen (the Halo 3 Forge lobby, FRIENDS, FILE SHARE, MOD MANAGER) and B
+#           comes back to the Xbox's main menu; Menu style Halo 3: the map's own list, its main menu
+#           the Halo 3 one
 #   pause   Campaign from the main menu (a new profile, Normal), the level's
 #           pause menu, Quit to Main Menu: a game map's widget runs its
 #           function and is back at the main menu, and asked about deleting
@@ -432,7 +437,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-all_cases="fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendsbackup h3friendspanel h3partyplates h3party h3partyonline browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes h3offline h3offlineend msgboxes"
+all_cases="fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendsbackup h3friendspanel h3partyplates h3party h3partyonline browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes h3offline h3offlineend msgboxes ceplusmain"
 # (the PC build's own, asked for by name: not in the default list)
 pc_cases="pctext pcclassic pcnoadhoc"
 cases=${*:-$all_cases}
@@ -2962,6 +2967,33 @@ PY
 			fail msgboxes "campaign, Halo CE: Circle did not go back to the Xbox's pause"
 		grep -aq "h3 dialog\|pc.h3.dlg" "$log" && fail msgboxes "campaign, Halo CE: a Halo 3 dialog opened"
 		grep -aq "pause menu: restart at checkpoint" "$log" && fail msgboxes "campaign, Halo CE: Circle reverted" ;;
+	ceplusmain)
+		# (the main menu's rows under SETTINGS: down three to FORGE, four to FRIENDS, five to FILE
+		# SHARE, six to MOD MANAGER; A, then B back)
+		d="down:150:500"
+		for row in "3 forge pc.h3.forge.lobby" "4 friends pc.h3.friends.screen" "5 fileshare pc.h3.fileshare.screen" \
+			"6 mods pc.h3.mods.screen"; do
+			set -- $row
+			downs=""
+			for i in $(seq "$1"); do downs="$downs $d"; done
+			run "ceplusmain_$2" "$menus_data" 20 "wait:150:3000$downs a:150:4000 b:150:3000" HALO_SCENE_PACKS=0
+			log=$out/ceplusmain_$2/run.log
+			echo "--- ceplusmain ($2)"
+			grep -aE "ui: screen|menus: Menu style" "$log" | head -6
+			[ "$(cat "$out/ceplusmain_$2/exit")" = 0 ] || fail ceplusmain "$2: exit $(cat "$out/ceplusmain_$2/exit")"
+			grep -aqiE "assert|exception|halt_and_catch_fire" "$log" && fail ceplusmain "$2: an assertion, exception or halt"
+			grep -aqE "menus: Menu style Halo CE: the Xbox screens' [0-9]+ widgets with the port's rows" "$log" ||
+				fail ceplusmain "$2: the Xbox screens were not given the port's rows"
+			grep -aq "ui: screen $3" "$log" || fail ceplusmain "$2: the row did not open its screen ($3)"
+			sed -n "/ui: screen $3/,\$p" "$log" | grep -aq "ui: screen ui.shell.main_menu.main_menu" ||
+				fail ceplusmain "$2: B did not go back to the Xbox's main menu"
+		done
+		# (Menu style Halo 3: the map's own list, the Halo 3 main menu, none of the port's rows)
+		run ceplusmain_h3 "$menus_data" 15 "wait:150:3000" HALO_MENU_STYLE=halo3
+		log=$out/ceplusmain_h3/run.log
+		grep -aqE "menus: Menu style Halo 3: the Xbox screens' [0-9]+ widgets as the map has them" "$log" ||
+			fail ceplusmain "Menu style Halo 3: the Xbox screens kept the port's rows"
+		grep -aq "ui: screen pc.h3.main.screen" "$log" || fail ceplusmain "Menu style Halo 3: not the Halo 3 main menu" ;;
 	*)
 		echo "usage: $0 [$(echo $all_cases $pc_cases | tr ' ' '|')]..." >&2; exit 2 ;;
 	esac

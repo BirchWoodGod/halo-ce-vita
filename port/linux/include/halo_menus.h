@@ -127,6 +127,20 @@ struct halo_menu_widget
 	[<option>=<value> ...] [; ...]" (menu_scene_objects.c; the packs:
 	scene_packs.c) */
 	char const *scene_object;
+	/* (Menu style Halo CE's additions) extends="<ui.map widget path>": the
+	widget is a copy of the map's look (its text, bounds, children), with
+	what the element gives in place of the map's: bitmap, flags, font,
+	color, align, text or string_list (string_index with it) and
+	width/height; its <child> elements after the map's own, or in their
+	place with drop="children"; its <on> and <data> its own (never the
+	map's: they would run as ours, menu_tags.c). classic_patch="true" (with
+	extends): the map's widget itself is this one while Menu style is Halo
+	CE (menu_tags.c swaps the tag's definition as each screen opens), the
+	map's own while it is Halo 3 - an Xbox screen keeps its name, history,
+	look and events (drop="handlers inputs" leaves those out), with the rows
+	the port adds; still the map's widget, it runs none of the port's
+	functions (ui_widget_function_denied): those go on widgets of ours */
+	char const *extends, *drop, *classic_patch;
 	long x, y, left, top, width, height, text_x, text_y, auto_close, auto_close_fade, string_index;
 	long has_width, has_height;
 	/* indices in their arrays, or HALO_MENU_NONE */

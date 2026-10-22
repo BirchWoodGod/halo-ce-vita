@@ -648,6 +648,7 @@ static void read_widget(struct reader *reader, const XML_Char **attributes, long
 		{ "header_bounds", &widget.header_bounds }, { "footer_bounds", &widget.footer_bounds },
 		{ "scene", &widget.scene }, { "scene_object", &widget.scene_object },
 		{ "child_controller", &child_controller }, { "strings_pc", &strings_pc },
+		{ "extends", &widget.extends }, { "drop", &widget.drop }, { "classic_patch", &widget.classic_patch },
 		{ "x", NULL, &widget.x }, { "y", NULL, &widget.y }, { "left", NULL, &widget.left },
 		{ "top", NULL, &widget.top }, { "width", NULL, &widget.width, &widget.has_width },
 		{ "height", NULL, &widget.height, &widget.has_height }, { "text_x", NULL, &widget.text_x },
@@ -666,6 +667,8 @@ static void read_widget(struct reader *reader, const XML_Char **attributes, long
 		widget.strings = strings_pc;
 	if (!reader->failed && !widget.name)
 		reader_error(reader, "a <widget> needs a name");
+	if (!reader->failed && widget.classic_patch && (!widget.extends || strcmp(widget.classic_patch, "true")))
+		reader_error(reader, "classic_patch is \"true\", with extends");
 	GROW(reader, menus->widgets, index);
 	menus->widgets[index] = widget;
 	menus->widget_count++;

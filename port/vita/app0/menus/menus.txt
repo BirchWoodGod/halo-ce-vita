@@ -4,6 +4,7 @@ multiplayer.xml
 browser.xml
 setup.xml
 halo3/main.xml
+classic/main.xml
 halo3/campaign.xml
 halo3/profiles.xml
 halo3/profiles_coop.xml
