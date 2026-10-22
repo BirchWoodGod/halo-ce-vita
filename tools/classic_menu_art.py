@@ -8,10 +8,12 @@ tools/fonts/OFL.txt). The same bytes each run.
   over the button key).
 - <lang>/main_<row>_0.png and _1.png: the main menu's new rows (FORGE,
   FRIENDS, FILE SHARE, MOD MANAGER) as words in the look of the game's own
-  CAMPAIGN, MULTIPLAYER and SETTINGS (a row 256 x 32, capitals 19 pixels
-  high from its 7th row, about 17.5 pixels a letter): 0 not focused (a
-  solid mid blue), 1 focused (white with a blue glow), the two frames the
-  game's column list shows by focus.
+  CAMPAIGN, MULTIPLAYER and SETTINGS (a picture 256 x 64, capitals 20
+  pixels high from its 6th row, about 17.5 pixels a letter): 0 not focused
+  (a solid mid blue), 1 focused (white with a blue glow), the two frames the
+  game's column list shows by focus. In English they are only the fallback:
+  the game makes them of the player's ui.map's own letters as the menus load
+  (port/linux/game/menu_words.c).
 - <lang>/header_lobby_options.png: LOBBY OPTIONS's heading in the look of the
   Multiplayer screens' (512 x 64 at 35,11: blue capitals 23 pixels high).
 - In English (en/) and in each language of port/vita/app0/lang (es/), the
@@ -97,12 +99,12 @@ def word_mask(text, cap, per_letter, most):
 
 
 def main_row(text, focused):
-    """a main menu row: 256 x 32, the word centred, its capitals 19 high from
-    the 7th row, as the game's own rows"""
-    width, height = 256, 32
-    mask, margin = word_mask(text, 19, 17.5, width - 12)
+    """a main menu row: 256 x 64 as the game's own rows' pictures, the word
+    centred, its capitals 20 high from the 6th row"""
+    width, height = 256, 64
+    mask, margin = word_mask(text, 20, 17.5, width - 12)
     shape = Image.new('L', (width, height), 0)
-    shape.paste(mask, ((width - mask.size[0]) // 2, 7 - margin))
+    shape.paste(mask, ((width - mask.size[0]) // 2, 6 - margin))
     image = Image.new('RGBA', (width, height), (0, 0, 0, 0))
     if focused:
         glow = shape.filter(ImageFilter.GaussianBlur(2.2)).point(lambda v: min(255, int(v * 2.2)))

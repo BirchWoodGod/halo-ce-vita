@@ -8,20 +8,20 @@
      place (its three were 36 apart: as little closer as fits above the screen's bottom) -->
 <menus>
 	<bitmap name="ce/main/forge_art">
-		<frame png="classic/{lang}/main_forge_0.png" width="256" height="32"/>
-		<frame png="classic/{lang}/main_forge_1.png" width="256" height="32"/>
+		<frame png="classic/{lang}/main_forge_0.png" width="256" height="64"/>
+		<frame png="classic/{lang}/main_forge_1.png" width="256" height="64"/>
 	</bitmap>
 	<bitmap name="ce/main/friends_art">
-		<frame png="classic/{lang}/main_friends_0.png" width="256" height="32"/>
-		<frame png="classic/{lang}/main_friends_1.png" width="256" height="32"/>
+		<frame png="classic/{lang}/main_friends_0.png" width="256" height="64"/>
+		<frame png="classic/{lang}/main_friends_1.png" width="256" height="64"/>
 	</bitmap>
 	<bitmap name="ce/main/fileshare_art">
-		<frame png="classic/{lang}/main_fileshare_0.png" width="256" height="32"/>
-		<frame png="classic/{lang}/main_fileshare_1.png" width="256" height="32"/>
+		<frame png="classic/{lang}/main_fileshare_0.png" width="256" height="64"/>
+		<frame png="classic/{lang}/main_fileshare_1.png" width="256" height="64"/>
 	</bitmap>
 	<bitmap name="ce/main/mods_art">
-		<frame png="classic/{lang}/main_mods_0.png" width="256" height="32"/>
-		<frame png="classic/{lang}/main_mods_1.png" width="256" height="32"/>
+		<frame png="classic/{lang}/main_mods_0.png" width="256" height="64"/>
+		<frame png="classic/{lang}/main_mods_1.png" width="256" height="64"/>
 	</bitmap>
 	<widget name="ce/main/forge" extends="ui\shell\main_menu\main_menu_item_settings" bitmap="ce/main/forge_art">
 		<on event="a start" open="h3/forge/lobby"/>

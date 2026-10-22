@@ -2144,6 +2144,8 @@ static char const *menu_png_language_path(char const *png, char const *code, cha
 	return path;
 }
 
+unsigned char *menu_words_frame(char const *png, long width, long height);
+
 static boolean menu_png_frame_load(struct menu_png_frame const *frame)
 {
 	struct bitmap_data *bitmap = frame->bitmap;
@@ -2153,6 +2155,14 @@ static boolean menu_png_frame_load(struct menu_png_frame const *frame)
 	byte *data = png ? NULL : halo_menus_art_png(frame->png, &size);
 	byte *pixels;
 
+	/* (the main menu's new rows: the game's own letters, menu_words.c) */
+	pixels = menu_words_frame(frame->png, bitmap->width, bitmap->height);
+	if (pixels)
+	{
+		if (data)
+			halo_menus_file_free(data);
+		goto made;
+	}
 	if (png)
 	{
 		data = halo_menus_file_read(png, &size);
@@ -2170,6 +2180,7 @@ static boolean menu_png_frame_load(struct menu_png_frame const *frame)
 			"the frame's size):", frame->png);
 		return FALSE;
 	}
+made:
 	bitmap->base_address = pixels;
 	if (!rasterizer_bitmap_new(bitmap) || !bitmap->hardware_format)
 	{

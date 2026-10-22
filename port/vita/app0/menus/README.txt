@@ -52,7 +52,10 @@ Menu style Halo CE's additions (classic/)
   port's (translated, lang/), drawn in the map's own fonts or as pictures of
   the port's own (tools/classic_menu_art.py, Saira Semi Condensed, SIL OFL):
   the main menu's new rows and LOBBY OPTIONS's heading in the look of the
-  game's, one set per language (classic/en/, classic/es/: "{lang}" in a
+  game's, one set per language - in English the main menu's rows are made,
+  as the menus load, of the very letters of the player's ui.map's own
+  CAMPAIGN, MULTIPLAYER, SETTINGS and GAME DEMOS (port/linux/game/
+  menu_words.c, kept in the data folder; the pictures here the fallback) (classic/en/, classic/es/: "{lang}" in a
   <frame png=...> is the language chosen's, English's when it has none), and
   the multiplayer pause's box (classic/pausebox.png); the other pictures are
   the map's own or the player's Halo PC data's, as above.
