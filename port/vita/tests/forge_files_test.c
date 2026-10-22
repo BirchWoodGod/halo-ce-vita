@@ -587,8 +587,11 @@ static void test_version_2(void)
 	layout.version = 1;
 	CHECK(encode_refused(&layout), "AI settings in a version 1 layout are not written");
 	sample_layout_2(&layout);
+	layout.version = 4;
+	CHECK(encode_refused(&layout), "version 4 is not written");
+	sample_layout_2(&layout);
 	layout.version = 3;
-	CHECK(encode_refused(&layout), "version 3 is not written");
+	CHECK(encode_refused(&layout), "version 3 without a respawning character is not written");
 	sample_layout_2(&layout);
 	layout.records[5].ai_team = NUMBER_OF_FORGE_AI_TEAMS;
 	CHECK(encode_refused(&layout), "an unknown AI team is not written");
@@ -599,13 +602,43 @@ static void test_version_2(void)
 	layout.records[1].flags |= FORGE_RECORD_AI_OFF;
 	CHECK(encode_refused(&layout), "a boulder's brain is not written");
 	sample_layout_2(&layout);
-	layout.records[5].flags |= 0x04;
-	CHECK(encode_refused(&layout), "an unknown flag in version 2 is not written");
+	layout.records[5].flags |= 0x08;
+	CHECK(encode_refused(&layout), "an unknown flag is not written");
+	sample_layout_2(&layout);
+	layout.version = 2;
+	layout.records[5].flags |= FORGE_RECORD_AI_RESPAWN;
+	CHECK(encode_refused(&layout), "a character's respawn in a version 2 layout is not written");
+	sample_layout_2(&layout);
+	layout.records[1].flags |= FORGE_RECORD_AI_RESPAWN;
+	CHECK(encode_refused(&layout), "a boulder's respawn is not written");
+	sample_layout_2(&layout);
+	layout.records[5].flags |= FORGE_RECORD_AI_RESPAWN;
+	layout.records[5].respawn_seconds = 0;
+	CHECK(encode_refused(&layout), "a character's respawn after no time is not written");
+	/* (version 3, Oct 22 2026: a character's respawn written as version 3,
+	read back; the same file called version 2 refused) */
+	{
+		unsigned char good3[FORGE_FILE_MAXIMUM_SIZE];
+		int good3_size;
+
+		sample_layout_2(&layout);
+		layout.records[5].flags |= FORGE_RECORD_AI_RESPAWN;
+		layout.records[5].respawn_seconds = 30;
+		good3_size = forge_file_encode(&layout, good3, sizeof(good3), &result);
+		CHECK(good3_size > 0 && good3[4] == 3 && good3[5] == 0, "a respawning character is written as version 3");
+		CHECK(decode(good3, good3_size, "bloodgulch") == _forge_file_ok && (decoded.records[5].flags & FORGE_RECORD_AI_RESPAWN) &&
+			decoded.records[5].respawn_seconds == 30 && decoded.version == 3, "version 3 read back: the character respawns after 30 s");
+		memcpy(work, good3, (size_t)good3_size);
+		put_u16(work, 4, 2);
+		CHECK(decode(work, good3_size, "bloodgulch") == _forge_file_bad_record, "a character's respawn in a file called version 2: refused");
+	}
 	/* (the reader's: version 0 and 3; each field of the characters'
 	records, checksum right) */
 	memcpy(work, good2, (size_t)good2_size);
 	put_u16(work, 4, 3);
-	CHECK(decode(work, good2_size, "bloodgulch") == _forge_file_bad_version, "version 3: refused");
+	CHECK(decode(work, good2_size, "bloodgulch") == _forge_file_bad_version, "version 3 without a respawning character: refused");
+	put_u16(work, 4, 4);
+	CHECK(decode(work, good2_size, "bloodgulch") == _forge_file_bad_version, "version 4: refused");
 	put_u16(work, 4, 0);
 	CHECK(decode(work, good2_size, "bloodgulch") == _forge_file_bad_version, "version 0: refused");
 	memcpy(work, good2, (size_t)good2_size);

@@ -95,7 +95,10 @@ static int forge_net_properties_valid(
 	if (record->ai_team >= FORGE_NET_AI_TEAM_COUNT)
 		return 0;
 	/* (a character's settings on a character only) */
-	if (!(record->flags & FORGE_NET_FLAG_AI) && (record->ai_team != 0 || (record->record_flags & 0x02)))
+	if (!(record->flags & FORGE_NET_FLAG_AI) && (record->ai_team != 0 || (record->record_flags & 0x06)))
+		return 0;
+	/* (a character's respawn: after a second or more) */
+	if ((record->record_flags & 0x04) && record->respawn_seconds == 0)
 		return 0;
 	return 1;
 }
@@ -192,17 +195,29 @@ int forge_net_request_valid(
 		return (record->flags & ~FORGE_NET_FLAG_MAP_OBJECT) == 0;
 	case _forge_net_request_move:
 	case _forge_net_request_release:
-	case _forge_net_request_set:
 		if (record->flags & ~FORGE_NET_FLAG_MAP_OBJECT)
 			return 0;
+		return forge_net_transform_valid(&record->transform);
+	case _forge_net_request_set:
+		/* (a spawn marker's: a placed character's id, never a map object) */
+		if ((record->flags & ~(FORGE_NET_FLAG_MAP_OBJECT | FORGE_NET_FLAG_SPAWN)) ||
+			(record->flags == (FORGE_NET_FLAG_MAP_OBJECT | FORGE_NET_FLAG_SPAWN)) ||
+			((record->flags & FORGE_NET_FLAG_SPAWN) && record->id == 0))
+		{
+			return 0;
+		}
 		return forge_net_transform_valid(&record->transform);
 	case _forge_net_request_duplicate:
 		if (record->flags & ~(FORGE_NET_FLAG_MAP_OBJECT | FORGE_NET_FLAG_HOLD))
 			return 0;
 		return forge_net_transform_valid(&record->transform);
 	case _forge_net_request_property:
-		if (record->flags & ~FORGE_NET_FLAG_MAP_OBJECT)
+		if ((record->flags & ~(FORGE_NET_FLAG_MAP_OBJECT | FORGE_NET_FLAG_SPAWN)) ||
+			(record->flags == (FORGE_NET_FLAG_MAP_OBJECT | FORGE_NET_FLAG_SPAWN)) ||
+			((record->flags & FORGE_NET_FLAG_SPAWN) && record->id == 0))
+		{
 			return 0;
+		}
 		return record->aux < FORGE_NET_PROPERTY_COUNT && (record->step == 1 || record->step == -1);
 	case _forge_net_request_undo:
 		return record->flags == 0 && record->aux <= 1;
@@ -213,6 +228,11 @@ int forge_net_request_valid(
 		return !(record->flags & FORGE_NET_FLAG_MONITOR) || forge_net_view_valid(&record->transform);
 	case _forge_net_request_sync:
 		return record->flags == 0;
+	case _forge_net_request_command:
+		if (record->flags != 0 || record->aux >= NUMBER_OF_FORGE_NET_COMMANDS)
+			return 0;
+		/* (ALL AI's on or off in value; the others' value none) */
+		return record->aux == _forge_net_command_all_ai ? record->value <= 1 : record->value == 0;
 	default:
 		return 0;
 	}
@@ -607,7 +627,7 @@ char const *forge_net_refusal_name(
 		"none", "budget", "AI budget", "held by another", "not allowed", "outside the map", "cannot be placed",
 		"cannot be copied", "host only", "rate limited", "gone", "the map's scenery", "nothing to undo",
 		"nothing to redo", "not held", "undone", "redone", "undo: gone", "redo: gone", "undo: budget full",
-		"redo: budget full",
+		"redo: budget full", "cleared dead AI", "cleared all AI", "AI set", "new round", "not now",
 	};
 
 	return refusal >= 0 && refusal < NUMBER_OF_FORGE_NET_REFUSALS ? names[refusal] : "?";
@@ -619,6 +639,7 @@ char const *forge_net_op_name(
 	static char const *const requests[] =
 	{
 		"none", "spawn", "grab", "move", "release", "set", "delete", "duplicate", "property", "undo", "monitor", "sync",
+		"command",
 	};
 	static char const *const updates[] =
 	{

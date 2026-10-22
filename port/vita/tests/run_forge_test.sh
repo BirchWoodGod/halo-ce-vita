@@ -24,7 +24,7 @@
 #               model and its prompt read "<need a string entry here>")
 #   b30         the beach: the console's monitor; AI characters (each given
 #               a free actor, ai_attach_free) and a Ghost; the characters'
-#               budget (32): 34 marines asked for, 32 placed, refused after
+#               budget (32 alive): 34 marines asked for, refused past 32 alive
 #   off         no Forge: a multiplayer game of Blood Gulch, D-pad up
 #               (zoom) and Square pressed: no "forge:" line at all
 #   files       the map variant files' writer, validator and names, and the
@@ -115,6 +115,29 @@
 #               off, an Elite of the player's team, a Warthog) saved as version
 #               2 (forge_files_test --dump), then started again from the
 #               settings panel's route: its characters' teams and AI as saved
+#   airespawn   a character's RESPAWN (its properties, the owner's of Oct 22 2026): an
+#               Elite's set to 10 s ("forge property respawn" while held: off,
+#               then 10 s), another left off; both killed: 8 s on both dead,
+#               after 10 s the first back alive where it was put (its id, its
+#               actor), the second still dead; saved as version 3 (only the
+#               first respawning: forge_files_test --dump), started again from
+#               it: both placed, the first killed and back 10 s later, the
+#               second killed and not
+#   aicap       only the living count (the owner, Oct 22 2026), the most alive
+#               made 4 (HALO_TEST_FORGE_MAXIMUM_AI): ALL AI off, an Elite set to
+#               RESPAWN 10 s, three grunts: 4 alive; the Elite killed - the HUD
+#               says AI 3/4 - and a fifth (an Elite) placed (the dead count not); 10 s on
+#               the Elite waits for room ("AI 4/4, 1 waiting"), never a fifth
+#               alive; the fifth killed: the first placed at once; the fifth's
+#               body taken away its time after its death (15 s here,
+#               HALO_TEST_FORGE_BODY_SECONDS; 45 s), the fifth still the layout's
+#   aimarker    a character's spawn marker (the owner, Oct 22 2026): an Elite at
+#               RESPAWN 10 s, killed, its body taken away (3 s here); its marker
+#               drawn where it was put (screenshot), taken (the console's "forge
+#               marker #1", as R on it), carried 6 world units off and let go:
+#               the Elite respawns there; its RESPAWN changed from the marker
+#               (Square, "forge property respawn": 30 s); saved: its record at
+#               the new place, 30 s; the markers hidden for the Spartan
 #   allai       the Forge menu's ALL AI: an Elite, a grunt, a jackal and a
 #               hunter fight the Spartan; ALL AI (the console's "forge allai",
 #               as the menu's row) turns them all off: for 10 s none moves (a
@@ -135,8 +158,8 @@
 #               AI pack's characters fill the AI budget (32), a carrier
 #               destroyed (its infection forms the game's, never counted), an
 #               infection form and two combat forms killed: the HUD counts 28
-#               alive and 4 back next round, a 33rd refused with "Clear dead AI
-#               to place more"; CLEAR DEAD AI frees their places, another
+#               alive and the dead nowhere (Oct 22 2026: only the living
+#               count), a 33rd placed; CLEAR DEAD AI takes the dead out, another
 #               placed; NEW ROUND brings back only what the layout still has;
 #               CLEAR ALL AI empties it, and a map variant saved after has only
 #               the Warthog (forge_files_test --dump)
@@ -241,7 +264,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_forge_test.$$}
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs packnote packcopy smallmap aiteam aioff round aisave allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks lobbycost mpvariant}
+cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs packnote packcopy smallmap aiteam aioff round aisave airespawn aicap aimarker allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks lobbycost mpvariant}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
@@ -798,6 +821,46 @@ aisave_runs() {
 		HALO_TEST_FORGE_PACKS=covenant_ai HALO_SAVE_ROOT="$store"
 }
 
+airespawn_runs() {
+	local store="$out/airespawn-store"
+	rm -rf "$store"
+	mkdir -p "$store"
+	local c="$ai_setup;L307:forge property respawn;L308:forge drop;L311:forge spawn elite minor plasma rifle"
+	c="$c;L312:forge distance 4;L314:forge drop;L400:forge ai;L440:forge kill #1;L442:forge kill #2;L460:forge ai"
+	c="$c;L680:forge ai;L800:forge ai;L820:forge save AI Respawn"
+	ai_run airespawn 40 "$c" HALO_SAVE_ROOT="$store"
+	"$out/forge_files_test" --dump "$store/forge/bloodgulch/ai_respawn.hmv" > "$out/airespawn/dump.txt" 2>&1
+	run airespawn-load 40 "" "L400:forge ai;L440:forge kill #1;L442:forge kill #2;L460:forge ai;L800:forge ai" "" \
+		HALO_MENU_STYLE=classic HALO_SYSTEM_LINK_TEST=forge:9:ai_respawn.hmv HALO_TEST_FORGE_PACKS=covenant_ai \
+		HALO_SAVE_ROOT="$store"
+}
+
+aicap_runs() {
+	# (the AI's most alive made 4 for the test, HALO_TEST_FORGE_MAXIMUM_AI: four
+	# placed one by one on the flat ground in front of the camera)
+	local c="L200:(set cheat_deathless_player true);$ai_setup;L307:forge property respawn;L308:forge drop;L309:forge allai off"
+	c="$c;L312:forge spawn grunt minor plasma pistol;L313:forge distance 5;L314:forge drop"
+	c="$c;L316:forge spawn grunt minor plasma pistol;L317:forge distance 4;L318:forge drop"
+	c="$c;L320:forge spawn grunt minor plasma pistol;L321:forge distance 6;L322:forge drop;L330:forge budget"
+	c="$c;L400:forge kill #1;L420:forge budget;L424:forge spawn elite minor plasma rifle;L425:forge distance 3;L426:forge drop"
+	c="$c;L440:forge budget;L760:forge budget;L800:forge kill #5;L830:forge budget;L1500:forge ai;L2200:forge budget;L2210:forge ai"
+	ai_run aicap 90 "$c" HALO_TEST_FORGE_MAXIMUM_AI=4 HALO_TEST_FORGE_BODY_SECONDS=15
+}
+
+aimarker_runs() {
+	local store="$out/aimarker-store"
+	rm -rf "$store"
+	mkdir -p "$store"
+	local c="L200:(set cheat_deathless_player true);$ai_setup;L307:forge property respawn;L308:forge drop;L309:forge allai off"
+	c="$c;L330:forge kill #1;L420:forge camera 60 -100 2.2 130 -12;L440:forge markers;L442:@shot 00-marker"
+	c="$c;L450:forge marker #1;L452:forge markers;L455:@shot 01-marker-held;L460:forge camera 70 -100 2.2 130 -12"
+	c="$c;L470:forge distance 7;L480:@shot 02-marker-carried;L490:forge drop;L495:forge ai"
+	c="$c;L800:forge ai;L820:forge marker #1;L822:forge property respawn;L824:forge drop;L830:forge save Marker Test"
+	c="$c;L840:forge off;L850:forge markers"
+	ai_run aimarker 45 "$c" HALO_SAVE_ROOT="$store" HALO_TEST_FORGE_BODY_SECONDS=3 HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1
+	"$out/forge_files_test" --dump "$store/forge/bloodgulch/marker_test.hmv" > "$out/aimarker/dump.txt" 2>&1
+}
+
 # ("forge ai" and "forge where" from tick FIRST to LAST)
 ai_looks() { # FIRST LAST STEP
 	local t w=""
@@ -864,7 +927,8 @@ clearai_runs() {
 	c="$c;L315:forge distance 5;L316:forge drop;L318:forge spawn floodcombat_human assault;L319:forge distance 7;L320:forge drop"
 	c="$c;L322:forge spawn floodcombat_human shotgun;L323:forge distance 9;L324:forge drop;L326:forge budget"
 	c="$c;L330:forge destroy #30;L332:forge kill #31;L334:forge kill #2;L336:forge kill #3;L360:forge budget;L361:forge ai"
-	c="$c;L362:@shot 00-dead-apart;L364:forge spawn flood_infection;L370:forge clearai dead;L372:forge spawn flood_infection"
+	c="$c;L362:@shot 00-dead-apart;L364:forge spawn flood_infection;L365:forge distance 4;L366:forge drop"
+	c="$c;L370:forge clearai dead;L372:forge spawn flood_infection"
 	c="$c;L373:forge distance 5;L374:forge drop;L376:forge budget;L378:forge objects;L390:forge round"
 	c="$c;L520:forge budget;L522:forge objects;L530:forge clearai all;L532:forge budget;L534:forge ai;L536:forge save Clear Test"
 	c="$c;L540:@shot 01-all-cleared;L560:forge clearai dead"
@@ -1082,6 +1146,12 @@ for c in $cases; do
 		round_runs & ;;
 	aisave)
 		aisave_runs & ;;
+	airespawn)
+		airespawn_runs & ;;
+	aicap)
+		aicap_runs & ;;
+	aimarker)
+		aimarker_runs & ;;
 	mpvariant)
 		if [ "$menus_files" = 0 ] || [ ! -r "$packcopy_profile" ]; then
 			echo "SKIP: mpvariant: no Halo PC bitmaps.map and loc.map in $data/maps, or no profile ($packcopy_profile)"
@@ -1325,6 +1395,88 @@ for c in $cases; do
 			"forge: ai 1: Elite Minor Plasma Rifle .* alive .* AI team player, engine team 0, AI on, actor yes"
 		continue
 	fi
+	if [ "$c" = airespawn ]; then
+		checked airespawn || continue
+		checked airespawn-load
+		log="$out/airespawn/run.log"
+		ai_at() { # LOG TICK ID: the "forge ai" line of that id at that tick's command
+			sed -n "/test command at tick $2: forge ai\$/,/test command at tick/p" "$1" | grep -a "forge: ai [0-9]*: .*(id $3) "
+		}
+		expect airespawn "RESPAWN: off, then 10 s" "forge: properties: team -1, respawn 10 s, placed at start, AI team default"
+		ai_at "$log" 680 1 | grep -aq " dead " && ai_at "$log" 680 2 | grep -aq " dead " &&
+			echo "  ok: airespawn: 8 s on, both dead" || fail "airespawn: 8 s on, not both dead: $(ai_at "$log" 680 1) / $(ai_at "$log" 680 2)"
+		expect airespawn "after 10 s the first back where it was put" "forge: elite major plasma rifle \(#1\) respawned after 10 s at "
+		ai_at "$log" 800 1 | grep -aq " alive .* actor yes" && echo "  ok: airespawn: the first alive again, its id, its actor" ||
+			fail "airespawn: the first not back alive: $(ai_at "$log" 800 1)"
+		ai_at "$log" 800 2 | grep -aq " dead " && echo "  ok: airespawn: the second (RESPAWN off) still dead" ||
+			fail "airespawn: the second came back: $(ai_at "$log" 800 2)"
+		grep -aq "forge: elite minor plasma rifle (#2) respawned" "$log" && fail "airespawn: the second respawned"
+		if grep -q "^version 3 " "$out/airespawn/dump.txt" &&
+			grep -q "^record [01]: characters.elite.elite major.elite major plasma rifle kind 0 team -1 ai team 0 respawn 10 flags 5 " "$out/airespawn/dump.txt" &&
+			grep -q "^record [01]: characters.elite.elite minor.elite minor plasma rifle kind 0 team -1 ai team 0 respawn 30 flags 1 " "$out/airespawn/dump.txt"; then
+			echo "  ok: airespawn: written as version 3, the first respawning after 10 s, the second not"
+		else
+			fail "airespawn: the file: $(cat "$out/airespawn/dump.txt")"
+		fi
+		log="$out/airespawn-load/run.log"
+		expect airespawn-load "the variant started again" "forge: map variant \"AI Respawn\" applied: 2 placed, 0 skipped"
+		expect airespawn-load "its respawning Elite killed and back after 10 s" "forge: elite major plasma rifle \(#[0-9]+\) respawned after 10 s"
+		grep -aq "forge: elite minor plasma rifle (#[0-9]*) respawned" "$log" && fail "airespawn-load: the Elite with RESPAWN off respawned"
+		continue
+	fi
+	if [ "$c" = aicap ]; then
+		checked aicap || continue
+		log="$out/aicap/run.log"
+		budget_at() { sed -n "/test command at tick $1: forge budget\$/,+1p" "$log" | grep -a "forge: budget"; }
+		budget_at 330 | grep -aq "4/4 AI (4 alive, 0 dead); HUD: Objects 4/256, AI 4/4$" &&
+			echo "  ok: aicap: 4 alive, the most" || fail "aicap: not 4 alive: $(budget_at 330)"
+		budget_at 420 | grep -aq "(3 alive, 1 dead); HUD: Objects 3/256, AI 3/4$" &&
+			echo "  ok: aicap: the dead Elite counts nowhere (AI 3/4)" || fail "aicap: the dead counted: $(budget_at 420)"
+		budget_at 440 | grep -aq "5/4 AI (4 alive, 1 dead); HUD: Objects 4/256, AI 4/4$" &&
+			echo "  ok: aicap: a fifth placed in the dead one's room" || fail "aicap: no fifth: $(budget_at 440)"
+		expect aicap "10 s on, the Elite waits for room" "forge: elite major plasma rifle \\(#1\\) waits to respawn: 4 characters alive"
+		budget_at 760 | grep -aq "(4 alive, 1 dead); HUD: Objects 4/256, AI 4/4, 1 waiting$" &&
+			echo "  ok: aicap: the HUD says it waits" || fail "aicap: the HUD: $(budget_at 760)"
+		grep -a "forge: budget .*([0-9]* alive" "$log" | sed 's/.*(\([0-9]*\) alive.*/\1/' | awk '$1 > 4 { bad = 1 } END { exit bad }' &&
+			echo "  ok: aicap: never more than 4 alive" || fail "aicap: more than 4 alive"
+		expect aicap "the fifth killed: the first placed at once" "forge: elite major plasma rifle \\(#1\\) placed: room for it"
+		budget_at 830 | grep -aq "(4 alive, 1 dead); HUD: Objects 4/256, AI 4/4$" &&
+			echo "  ok: aicap: 4 alive again, none waiting" || fail "aicap: after: $(budget_at 830)"
+		# (its body taken away its time after its death: 15 s here, HALO_TEST_FORGE_BODY_SECONDS -
+		# the engine takes a multiplayer map's away itself after half a minute or so)
+		expect aicap "the fifth's body taken away 15 s on" "forge: elite minor plasma rifle \\(#5\\): its body cleared after 15 s"
+		sed -n '/test command at tick 1500: forge ai$/,/test command at tick/p' "$log" | grep -aq "(id 5) gone at" &&
+			echo "  ok: aicap: the fifth's body gone" || fail "aicap: the fifth's body not taken away"
+		budget_at 2200 | grep -aq "(4 alive, 1 dead)" && echo "  ok: aicap: its character still the layout's (dead, no body)" ||
+			fail "aicap: the fifth left the layout: $(budget_at 2200)"
+		continue
+	fi
+	if [ "$c" = aimarker ]; then
+		checked aimarker || continue
+		log="$out/aimarker/run.log"
+		expect aimarker "the Elite's body taken away" "forge: elite major plasma rifle \\(#1\\): its body cleared after 3 s"
+		sed -n '/test command at tick 440: forge markers$/,+1p' "$log" | grep -aq "forge: 1 spawn markers drawn, none held" &&
+			echo "  ok: aimarker: its marker drawn where it was put" || fail "aimarker: no marker drawn: $(grep -a 'spawn markers drawn' "$log" | head -1)"
+		expect aimarker "taken" "forge: grabbed the spawn marker of .* \\(#1\\) at"
+		local moved respawned
+		moved=$(sed -n 's/.*forge: the spawn marker of .* (#1) moved to \([^ ]*\) \([^ ]*\) .*/\1 \2/p' "$log" | head -1)
+		respawned=$(sed -n 's/.*forge: elite major plasma rifle (#1) respawned after 10 s at \([^ ]*\) \([^ ]*\) .*/\1 \2/p' "$log" | head -1)
+		placed=$(sed -n 's/.*forge: dropped Elite Major Plasma Rifle (elite) at \([^ ]*\) \([^ ]*\) .*/\1 \2/p' "$log" | head -1)
+		if [ -n "$moved" ] && [ -n "$respawned" ] && awk -v m="$moved" -v r="$respawned" -v p="$placed" 'BEGIN { split(m, a); split(r, b);
+			split(p, c); exit !((a[1] - b[1]) ^ 2 + (a[2] - b[2]) ^ 2 < 0.01 && (a[1] - c[1]) ^ 2 + (a[2] - c[2]) ^ 2 > 9) }'; then
+			echo "  ok: aimarker: carried off (placed $placed, let go at $moved) and the Elite respawned there ($respawned)"
+		else
+			fail "aimarker: not respawned where the marker was let go (placed $placed, marker $moved, respawned $respawned)"
+		fi
+		expect aimarker "its RESPAWN changed from the marker" "forge: properties: team -1, respawn 30 s, placed at start, AI team default"
+		expect aimarker "saved" "forge: map variant \"Marker Test\" saved as bloodgulch/marker_test.hmv, 1 objects"
+		mx=$(sed -n 's/.*forge: the spawn marker of .* (#1) moved to \([^ ]*\) .*/\1/p' "$log" | tail -1)
+		grep -q "^record 0: characters.elite.elite major.elite major plasma rifle kind 0 team -1 ai team 0 respawn 30 flags 7 at $mx " "$out/aimarker/dump.txt" &&
+			echo "  ok: aimarker: the file: at the marker's place, 30 s" || fail "aimarker: the file: $(cat "$out/aimarker/dump.txt")"
+		sed -n '/test command at tick 850: forge markers$/,+1p' "$log" | grep -aq "forge: 0 spawn markers drawn" &&
+			echo "  ok: aimarker: the Spartan sees none" || fail "aimarker: markers shown to the Spartan"
+		continue
+	fi
 	if [ "$c" = allai ]; then
 		checked allai || continue
 		log="$out/allai/run.log"
@@ -1418,26 +1570,26 @@ for c in $cases; do
 		alive=$(echo "$line" | sed -n 's/.*(\([0-9]*\) alive, \([0-9]*\) dead).*/\1/p')
 		dead=$(echo "$line" | sed -n 's/.*(\([0-9]*\) alive, \([0-9]*\) dead).*/\2/p')
 		if [ -n "$alive" ] && [ -n "$dead" ] && [ $((alive + dead)) = 32 ] && [ "$dead" -ge 4 ] &&
-			echo "$line" | grep -q "HUD: Objects 33/256, AI $alive/32, $dead back next round$"; then
-			echo "  ok: clearai: $dead dead: the HUD counts the $alive alive, the dead apart ($line)"
+			echo "$line" | grep -q "HUD: Objects $((33 - dead))/256, AI $alive/32$"; then
+			echo "  ok: clearai: $dead dead: the HUD counts the $alive alive alone, the dead nowhere ($line)"
 		else
-			fail "clearai: the dead not apart: $line"
+			fail "clearai: the dead counted: $line"
 			alive=0 dead=0
 		fi
 		expect clearai "the carrier's infection forms are the game's, not counted" \
 			"forge: ai: [1-9][0-9]* characters not of the layout alive"
-		expect clearai "a 33rd refused: clear the dead to place more" \
-			"forge: AI budget full: 32 characters, $dead of them dead. Clear dead AI to place more."
-		expect clearai "CLEAR DEAD AI took the $dead out" \
-			"forge: cleared $dead dead AI; budget $((33 - dead))/256 objects, $alive/32 AI \\(0 dead\\)"
-		expect clearai "then another placed" \
+		expect clearai "a 33rd placed: the dead count not" \
 			"forge: spawned Flood Infection Form .*budget $((34 - dead))/256 objects, $((alive + 1))/32 AI"
+		expect clearai "CLEAR DEAD AI took the $dead out" \
+			"forge: cleared $dead dead AI; budget $((34 - dead))/256 objects, $((alive + 1))/32 AI \\(0 dead\\)"
+		expect clearai "then another placed" \
+			"forge: spawned Flood Infection Form .*budget $((35 - dead))/256 objects, $((alive + 2))/32 AI"
 		expect clearai "NEW ROUND takes the layout as it is" \
-			"forge: new round 1: the layout taken: $((34 - dead)) objects \\($((alive + 1)) characters\\)"
-		expect clearai "and places only that again" "forge: new round 1: $((34 - dead)) placed again, 0 skipped"
+			"forge: new round 1: the layout taken: $((35 - dead)) objects \\($((alive + 2)) characters\\)"
+		expect clearai "and places only that again" "forge: new round 1: $((35 - dead)) placed again, 0 skipped"
 		expect clearai "after the round" \
-			"forge: budget $((34 - dead))/256 objects, $((alive + 1))/32 AI \\($((alive + 1)) alive, 0 dead\\)"
-		expect clearai "CLEAR ALL AI emptied it" "forge: cleared $((alive + 1)) placed AI; budget 1/256 objects, 0/32 AI \\(0 dead\\)"
+			"forge: budget $((35 - dead))/256 objects, $((alive + 2))/32 AI \\($((alive + 2)) alive, 0 dead\\)"
+		expect clearai "CLEAR ALL AI emptied it" "forge: cleared $((alive + 2)) placed AI; budget 1/256 objects, 0/32 AI \\(0 dead\\)"
 		expect clearai "the HUD after" "forge: budget 1/256 objects, 0/32 AI \\(0 alive, 0 dead\\); HUD: Objects 1/256, AI 0/32$"
 		expect clearai "nothing dead left to clear" "forge: No dead AI to clear"
 		expect clearai "saved after: one object" "forge: map variant \"Clear Test\" saved as bloodgulch/clear_test.hmv, 1 objects"
@@ -1828,7 +1980,8 @@ for c in $cases; do
 		expect "$c" "an Elite given a free actor" "forge: elite special given a free actor \\([0-9a-f]{8}\\)"
 		expect "$c" "a Ghost spawned" "forge: spawned Ghost \\(ghost, vehicles\\)"
 		expect "$c" "the AI budget refused past 32" "forge: AI budget full: 32 characters"
-		expect "$c" "32 characters at most" "forge: budget [0-9]+/256 objects, 32/32 AI"
+		# (32 alive: the dead count not, Oct 22 2026 - one a fall killed leaves room)
+		expect "$c" "32 characters alive at most" "forge: budget [0-9]+/256 objects, [0-9]+/32 AI \\(32 alive"
 		if grep -aq "given a free actor (ffffffff)" "$log"; then
 			fail "$c: a character got no actor"
 		fi ;;

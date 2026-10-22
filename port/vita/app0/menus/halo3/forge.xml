@@ -17,7 +17,9 @@ pause screen (ingame.txt; its fonts and pictures are halo3/pause.xml's, the same
   whether it is placed at the start, its exact angles (yaw, pitch, roll: left and right step them,
   by rotate mode's snapping or 15 degrees) and their reset, and a character's AI team and AI on or
   off (those two rows hidden for any other object), A or left and right to change one, B to close;
-  kept in the map variant;
+  kept in the map variant. A character's RESPAWN is NEVER or 10, 30, 60, 120 S: dead, it is placed
+  again that long after (map variant version 3); opened from its spawn marker too (R takes the
+  marker, Square its character's properties: forge_markers.inc);
 - the question before leaving.
 The art is this folder's own (tools/halo3_menu_art.py). -->
 <menus>

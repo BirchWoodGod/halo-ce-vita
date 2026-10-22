@@ -97,6 +97,17 @@ static void menu_tags_dump(long tag_index, int depth);
 game (halo3/forge.xml, whatever the Menu style) */
 #define XBOX_PAUSE_SCREEN "ui\\shell\\solo_game\\pause_game\\pause_game"
 #define FORGE_PAUSE_SCREEN "h3/forge/pause/screen"
+/* a network game's pause screens (ui_widget.c ui_check_for_pause_game opens
+one of them by the machine's players): a network Forge game's Start opens
+the Forge menu in their place too, the host's and every joiner's, whatever
+the Menu style (insider.21: the Xbox's multiplayer pause opened, and with
+forge.c's own the Forge menu was closed by it at once) */
+static char const *const network_pause_screens[] =
+{
+	"ui\\shell\\multiplayer_game\\pause_game\\1p_pause_game",
+	"ui\\shell\\multiplayer_game\\pause_game\\2p_pause_game",
+	"ui\\shell\\multiplayer_game\\pause_game\\4p_pause_game",
+};
 /* the Halo 3 multiplayer pause (halo3/mppause.xml): never in a Forge game,
 whose Start opens the Forge menu (forge.c) */
 #define H3_MULTIPLAYER_PAUSE_SCREEN "h3/mppause/screen"
@@ -2546,14 +2557,25 @@ long menu_tags_screen(
 		return tag_index;
 	/* (a Forge game: its menu for the level's pause screen, which would
 	save the game and offer the campaign's checkpoints) */
-	if (forge_game_active() && tag_index == tag_loaded(UI_WIDGET_DEFINITION_TAG, XBOX_PAUSE_SCREEN))
+	if (forge_game_active())
 	{
-		long forge_menu = menu_tags_ingame_screen(FORGE_PAUSE_SCREEN);
+		char const *pause = tag_index == tag_loaded(UI_WIDGET_DEFINITION_TAG, XBOX_PAUSE_SCREEN) ? XBOX_PAUSE_SCREEN : NULL;
+		short index;
 
-		if (forge_menu != NONE)
+		for (index = 0; !pause && index < (short)NUMBEROF(network_pause_screens); index++)
 		{
-			platform_log("menus: the Forge menu for %s", XBOX_PAUSE_SCREEN);
-			return forge_menu;
+			if (tag_index == tag_loaded(UI_WIDGET_DEFINITION_TAG, network_pause_screens[index]))
+				pause = network_pause_screens[index];
+		}
+		if (pause)
+		{
+			long forge_menu = menu_tags_ingame_screen(FORGE_PAUSE_SCREEN);
+
+			if (forge_menu != NONE)
+			{
+				platform_log("menus: the Forge menu for %s", pause);
+				return forge_menu;
+			}
 		}
 	}
 	/* (Menu style Halo 3: the Halo 3 set's screen for the Xbox's, its

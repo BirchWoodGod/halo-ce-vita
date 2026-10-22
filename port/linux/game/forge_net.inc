@@ -151,6 +151,8 @@ struct forge_net_actor
 	struct forge_net_sequence sequence;
 	struct forge_net_bucket requests;
 	struct forge_net_bucket spawns;
+	/* (its Forge menu's commands: CLEAR AI, ALL AI, NEW ROUND) */
+	struct forge_net_bucket commands;
 	struct forge_net_drops drops;
 	unsigned long drops_logged;
 	struct forge_net_drops drops_said;
@@ -270,6 +272,9 @@ static struct
 	boolean client_building_any_said;
 	unsigned long client_building_time;
 	char host_title[FORGE_NET_TITLE_SIZE];
+	/* (a client) the host's hello's version: FORGE_NET_HOST_VERSION_COMMANDS
+	and on, it takes the Forge menu's commands */
+	unsigned short host_version;
 	char missing_packs[FORGE_LINE_SIZE];
 	boolean refused_said;
 	/* --- the game */
@@ -745,7 +750,7 @@ static void forge_net_hello_fill(
 
 	csmemset(message, 0, sizeof(*message));
 	message->command = _forge_net_lobby_hello;
-	message->version = FORGE_NET_VERSION;
+	message->version = FORGE_NET_HOST_VERSION;
 	message->session = forge_net.session;
 	message->flags = (in_progress ? FORGE_NET_SESSION_IN_PROGRESS : 0) | (forge_net.host_play ? FORGE_NET_SESSION_PLAY : 0);
 	for (pack = 0; pack < FORGE_PACK_COUNT && message->pack_count < FORGE_NET_MAXIMUM_PACKS; pack++)
@@ -1089,6 +1094,7 @@ void forge_net_client_handle_lobby_message(
 		forge_net.refused_said = FALSE;
 		forge_net.hosting = FALSE;
 		forge_net.client_play = (hello.flags & FORGE_NET_SESSION_PLAY) != 0;
+		forge_net.host_version = hello.version;
 		snprintf(forge_net.host_title, sizeof(forge_net.host_title), "%s", hello.title);
 		forge_globals.packs_session = 0;
 		forge_net.missing_packs[0] = 0;
@@ -1654,6 +1660,81 @@ static void forge_net_count_violation(
 	network_anticheat_violation(actor->machine_index, _anticheat_forge, TRUE, 1.0f);
 }
 
+/* a machine's Forge menu command (CLEAR DEAD AI, CLEAR ALL AI, ALL AI, NEW
+ROUND), checked and made as the host's own menu makes it: in a Forge game
+being played (not while one starts or a round resets), a few a second at
+most; what came of it said back to that machine alone */
+static void forge_net_host_command(
+	struct forge_net_actor *actor,
+	struct forge_net_record const *request,
+	unsigned long now)
+{
+	static char const *const names[NUMBER_OF_FORGE_NET_COMMANDS] =
+	{
+		"clear dead AI", "clear all AI", "all AI", "new round",
+	};
+	short result = _forge_net_refuse_none;
+	uint16_t value = 0;
+
+	if (!forge_net_bucket_take(&actor->commands, now, FORGE_NET_COMMANDS_PER_SECOND, FORGE_NET_COMMANDS_BURST, 1.f))
+	{
+		actor->drops.rate_limited++;
+		forge_net.requests_dropped++;
+		forge_net_refuse(actor, request, _forge_net_refuse_rate, 0, 0);
+		return;
+	}
+	if (!forge_globals.game_active || forge_globals.game_requested || forge_globals.round_pending ||
+		forge_globals.round_resetting || forge_globals.round_requested)
+	{
+		forge_net_refuse(actor, request, _forge_net_refuse_not_now, 0, 0);
+		return;
+	}
+	platform_log("forge net: machine %ld asked: %s", actor->machine_index, names[request->aux]);
+	switch (request->aux)
+	{
+	case _forge_net_command_clear_dead_ai:
+	case _forge_net_command_clear_all_ai:
+	{
+		boolean all = request->aux == _forge_net_command_clear_all_ai;
+
+		/* (as that machine: its own hold of a character let go, its
+		notices its own) */
+		forge_net_act_begin(actor);
+		value = (uint16_t)forge_ai_clear(all);
+		forge_net_act_end(actor);
+		result = all ? _forge_net_refuse_cleared_all : _forge_net_refuse_cleared_dead;
+		break;
+	}
+	case _forge_net_command_all_ai:
+		forge_net_act_begin(actor);
+		forge_ai_all_set(request->value != 0);
+		forge_net_act_end(actor);
+		value = request->value;
+		result = _forge_net_refuse_ai_set;
+		break;
+	case _forge_net_command_new_round:
+		/* (started once the host's own Forge menu is closed: forge_update) */
+		forge_globals.round_requested = TRUE;
+		result = _forge_net_refuse_round;
+		break;
+	}
+	if (result != _forge_net_refuse_none)
+	{
+		/* (what came of it: no refusal, not counted as one) */
+		struct forge_net_record record;
+
+		csmemset(&record, 0, sizeof(record));
+		record.op = _forge_net_update_refuse;
+		record.sequence = request->sequence;
+		record.aux = (uint8_t)result;
+		record.value = value;
+		record.tag = FORGE_NET_NO_TAG;
+		record.player = FORGE_NET_NO_PLAYER;
+		record.object = FORGE_NET_NO_OBJECT;
+		forge_net_direct(actor, &record);
+	}
+}
+
 /* a machine's request, checked and made */
 static void forge_net_host_request(
 	struct forge_net_actor *actor,
@@ -1701,7 +1782,8 @@ static void forge_net_host_request(
 	}
 	if (request.op != _forge_net_request_monitor && request.op != _forge_net_request_sync &&
 		request.op != _forge_net_request_undo && request.op != _forge_net_request_property &&
-		request.op != _forge_net_request_grab && request.op != _forge_net_request_delete)
+		request.op != _forge_net_request_grab && request.op != _forge_net_request_delete &&
+		request.op != _forge_net_request_command)
 	{
 		forge_net_transform_square(&request.transform);
 		if (!forge_net_inside_world(&request.transform))
@@ -1727,6 +1809,9 @@ static void forge_net_host_request(
 		actor->monitor = (request.flags & FORGE_NET_FLAG_MONITOR) != 0;
 		if (actor->monitor)
 			actor->view = request.transform;
+		return;
+	case _forge_net_request_command:
+		forge_net_host_command(actor, &request, now);
 		return;
 	case _forge_net_request_spawn:
 	case _forge_net_request_duplicate:
@@ -1806,7 +1891,7 @@ static void forge_net_host_request(
 			if (refusal == _forge_place_budget)
 				forge_net_refuse(actor, &request, _forge_net_refuse_budget, FORGE_MAXIMUM_OBJECTS, 0);
 			else if (refusal == _forge_place_ai_budget)
-				forge_net_refuse(actor, &request, _forge_net_refuse_ai_budget, FORGE_MAXIMUM_AI, forge_globals.ai_dead_count);
+				forge_net_refuse(actor, &request, _forge_net_refuse_ai_budget, FORGE_MAXIMUM_AI, 0);
 			else
 				forge_net_refuse(actor, &request, _forge_net_refuse_cannot_place, 0, 0);
 			return;
@@ -1898,6 +1983,29 @@ static void forge_net_host_request(
 		real_point3d position;
 		real_vector3d forward, up;
 
+		/* (a spawn marker's: its character's home, where it is placed
+		again; not one whose character another player holds) */
+		if (request.flags & FORGE_NET_FLAG_SPAWN)
+		{
+			struct forge_placed *placed = forge_placed_of_id((long)request.id);
+			struct forge_transform home;
+
+			if (!placed || !placed->ai)
+			{
+				forge_net_refuse(actor, &request, _forge_net_refuse_gone, 0, 0);
+				return;
+			}
+			holder = placed->object_index != NONE ? forge_net_holder(placed->object_index, actor->machine_index) : NONE;
+			if (holder != NONE)
+			{
+				forge_net_refuse(actor, &request, _forge_net_refuse_held, holder, 0);
+				return;
+			}
+			forge_net_transform_to(&request.transform, &home.position, &home.forward, &home.up);
+			platform_log("forge net: machine %ld moved the spawn marker of #%ld", actor->machine_index, placed->id);
+			forge_marker_home_set(placed, &home);
+			return;
+		}
 		if ((object_index = forge_net_request_object(actor, &request)) == NONE)
 			return;
 		holder = forge_net_holder(object_index, actor->machine_index);
@@ -1952,6 +2060,33 @@ static void forge_net_host_request(
 	{
 		struct forge_placed *placed;
 
+		/* (from a spawn marker: its character's, by id; its facing the
+		marker's move's) */
+		if (request.flags & FORGE_NET_FLAG_SPAWN)
+		{
+			placed = forge_placed_of_id((long)request.id);
+			if (!placed || !placed->ai)
+			{
+				forge_net_refuse(actor, &request, _forge_net_refuse_gone, 0, 0);
+				return;
+			}
+			holder = placed->object_index != NONE ? forge_net_holder(placed->object_index, actor->machine_index) : NONE;
+			if (holder != NONE)
+			{
+				forge_net_refuse(actor, &request, _forge_net_refuse_held, holder, 0);
+				return;
+			}
+			if (request.aux >= _forge_property_yaw && request.aux <= _forge_property_reset_rotation)
+				return;
+			forge_net_act_begin(actor);
+			forge_property_target_id = placed->id;
+			forge_property_apply(request.aux, request.step);
+			forge_property_target_id = 0;
+			forge_net_act_end(actor);
+			platform_log("forge net: machine %ld changed #%ld's properties from its spawn marker", actor->machine_index,
+				placed->id);
+			return;
+		}
 		if ((object_index = forge_net_request_object(actor, &request)) == NONE)
 			return;
 		placed = forge_placed_of_object(object_index);
@@ -2064,7 +2199,9 @@ static void forge_net_entry_fill(
 	record->respawn_seconds = (uint16_t)MIN(placed->respawn_seconds, FORGE_FILE_MAXIMUM_RESPAWN_SECONDS);
 	record->ai_team = placed->ai ? (uint8_t)(placed->ai_team % NUMBER_OF_FORGE_AI_TEAMS) : 0;
 	if (!placed->ai)
-		record->record_flags &= (uint8_t)~FORGE_RECORD_AI_OFF;
+		record->record_flags &= (uint8_t)~(FORGE_RECORD_AI_OFF | FORGE_RECORD_AI_RESPAWN);
+	if (!record->respawn_seconds)
+		record->record_flags &= (uint8_t)~FORGE_RECORD_AI_RESPAWN;
 	if (placed->has_home)
 		home = placed->home;
 	else if (forge_object_alive(placed->object_index))
@@ -2710,6 +2847,73 @@ static void forge_net_client_undo(
 	forge_net_request_send(&record);
 }
 
+/* (forge_markers.inc, a client) a spawn marker let go, its character's
+property changed from it: asked of the host (a host of
+FORGE_NET_HOST_VERSION_SPAWNS; an older one is not asked: said) */
+static boolean forge_net_client_spawn_move(
+	long id,
+	struct forge_transform const *home)
+{
+	struct forge_net_record record;
+
+	if (!forge_net_client() || forge_net.host_version < FORGE_NET_HOST_VERSION_SPAWNS)
+	{
+		forge_notice("%s", T("The host's game can't move spawn markers"));
+		return FALSE;
+	}
+	forge_net_request_init(&record, _forge_net_request_set);
+	record.flags = FORGE_NET_FLAG_SPAWN;
+	record.id = (uint32_t)id;
+	forge_net_transform_from(&record.transform, &home->position, &home->forward, &home->up);
+	forge_net_request_send(&record);
+	platform_log("forge net: asked the host to move the spawn marker of #%ld to %.2f %.2f %.2f", id, home->position.x,
+		home->position.y, home->position.z);
+	return TRUE;
+}
+
+static boolean forge_net_client_spawn_property(
+	long id,
+	short property,
+	short step)
+{
+	struct forge_net_record record;
+
+	if (!forge_net_client() || forge_net.host_version < FORGE_NET_HOST_VERSION_SPAWNS)
+	{
+		forge_notice("%s", T("The host's game can't move spawn markers"));
+		return FALSE;
+	}
+	forge_net_request_init(&record, _forge_net_request_property);
+	record.flags = FORGE_NET_FLAG_SPAWN;
+	record.id = (uint32_t)id;
+	record.aux = (uint8_t)property;
+	record.step = (int8_t)(step < 0 ? -1 : 1);
+	forge_net_request_send(&record);
+	return TRUE;
+}
+
+/* (forge_update, a client) a Forge menu command asked of the host: FALSE
+if this host does not take them (an older build: the menu says only the
+host can) */
+static boolean forge_net_client_command(
+	short command,
+	uint16_t value)
+{
+	struct forge_net_record record;
+
+	if (!forge_net_client() || forge_net.host_version < FORGE_NET_HOST_VERSION_COMMANDS)
+		return FALSE;
+	forge_net_request_init(&record, _forge_net_request_command);
+	record.aux = (uint8_t)command;
+	record.value = value;
+	forge_net_request_send(&record);
+	platform_log("forge net: asked the host: %s", forge_net_refusal_name(
+		command == _forge_net_command_clear_dead_ai ? _forge_net_refuse_cleared_dead :
+		command == _forge_net_command_clear_all_ai ? _forge_net_refuse_cleared_all :
+		command == _forge_net_command_all_ai ? _forge_net_refuse_ai_set : _forge_net_refuse_round));
+	return TRUE;
+}
+
 /* this machine's tag of a host's palette entry (by group and path; a
 placeable one only if it is one of this machine's palette: its allow
 list), NONE */
@@ -3122,6 +3326,21 @@ static void forge_net_client_update_take(
 		case _forge_net_refuse_redo_gone: forge_menu_notice(T("Can't redo %s: it is gone"), words); break;
 		case _forge_net_refuse_undo_budget: forge_menu_notice(T("Can't undo %s: the budget is full"), words); break;
 		case _forge_net_refuse_redo_budget: forge_menu_notice(T("Can't redo %s: the budget is full"), words); break;
+		case _forge_net_refuse_cleared_dead:
+			if (record->value)
+				forge_menu_notice(T("Cleared %d dead AI"), (int)record->value);
+			else
+				forge_menu_notice("%s", T("No dead AI to clear"));
+			break;
+		case _forge_net_refuse_cleared_all:
+			if (record->value)
+				forge_menu_notice(T("Cleared all AI: %d characters"), (int)record->value);
+			else
+				forge_menu_notice("%s", T("No AI to clear"));
+			break;
+		case _forge_net_refuse_ai_set: forge_menu_notice("%s", record->value ? T("AI: On") : T("AI: Off")); break;
+		case _forge_net_refuse_round: forge_menu_notice("%s", T("New round: the host starts it")); break;
+		case _forge_net_refuse_not_now: forge_menu_notice("%s", T("Not now: the host's game is starting a round")); break;
 		}
 		platform_log("forge net: the host said: %s", forge_net_refusal_name(record->aux));
 		return;
@@ -3428,51 +3647,278 @@ static void forge_net_new_round(
 		forge_globals.placed_count);
 }
 
-/* (forge_draw) the other players' monitors: where each is, its name */
+/* another player's monitor as this machine knows it: whether that player
+flies one (the host from its machine's requests, a client from the host's
+updates), where it is and faces */
+static boolean forge_net_monitor_view(
+	short index,
+	struct forge_net_transform *view)
+{
+	if (index < 0 || index >= FORGE_NET_PLAYERS || index == forge_net_local_player() || !distributed_player(index))
+		return FALSE;
+	if (forge_net_host())
+	{
+		short slot;
+
+		for (slot = 0; slot < FORGE_NET_ACTORS; slot++)
+		{
+			struct forge_net_actor *actor = &forge_net.actors[slot];
+
+			if (actor->used && actor->monitor && forge_net_machine_player(actor->machine_index) == index)
+			{
+				*view = actor->view;
+				return TRUE;
+			}
+		}
+		return FALSE;
+	}
+	if (forge_net_client() && forge_net.monitors[index].monitor)
+	{
+		*view = forge_net.monitors[index].view;
+		return TRUE;
+	}
+	return FALSE;
+}
+
+/* ---- the other players' monitors in the world (insider.21: "no floating
+orbs for others in forge, no forge ball" - each was a "( O )" on the HUD
+alone, and only to a player who was a monitor too): a ball with Halo 3's
+monitor's eye, where each flies and facing where it looks, drawn in the 3D
+(the walls in front of it hide it) for monitor and Spartan alike, its
+player's name over it on the HUD. Its place comes five times a second, so
+the ball eases to it. Drawn as the game's debug geometry is (a colour a
+vertex, no texture: the same vertex and pixel shaders on every platform),
+on this machine alone: no object, nothing networked, nothing the host
+checks */
+
+#define FORGE_NET_ORB_RADIUS 0.15f
+#define FORGE_NET_ORB_SEGMENTS 14
+/* the rings' angles from the eye (degrees): the eye, its dark rim, a light
+band, then the shell */
+static float const forge_net_orb_rings[] = { 0.f, 15.f, 19.f, 28.f, 31.f, 40.f, 58.f, 76.f, 94.f, 112.f, 130.f, 148.f, 166.f, 180.f };
+#define FORGE_NET_ORB_RINGS ((short)(sizeof(forge_net_orb_rings) / sizeof(forge_net_orb_rings[0])))
+#define FORGE_NET_ORB_TRIANGLES (FORGE_NET_ORB_SEGMENTS * 2 * (FORGE_NET_ORB_RINGS - 2))
+
+static struct
+{
+	boolean shown;
+	real_point3d position;
+	real_vector3d forward;
+	unsigned long time;
+	/* (when it was last in a view and drawn: the tests' log) */
+	unsigned long drawn;
+} forge_net_orbs[FORGE_NET_PLAYERS];
+
+/* (the debug vertex: rasterizer_debug.c's) */
+struct forge_net_orb_vertex
+{
+	real_point3d point;
+	unsigned long color;
+};
+
+static unsigned long forge_net_orb_pixel(
+	float red,
+	float green,
+	float blue)
+{
+	unsigned long r = (unsigned long)(PIN(red, 0.f, 1.f) * 255.f + 0.5f);
+	unsigned long g = (unsigned long)(PIN(green, 0.f, 1.f) * 255.f + 0.5f);
+	unsigned long b = (unsigned long)(PIN(blue, 0.f, 1.f) * 255.f + 0.5f);
+
+	return 0xFF000000UL | (r << 16) | (g << 8) | b;
+}
+
+/* a point of the ball (ring, segment) and its colour: lit from above, the
+eye glowing (no light on it) */
+static void forge_net_orb_point(
+	real_point3d const *center,
+	real_vector3d const *forward,
+	real_vector3d const *left,
+	real_vector3d const *up,
+	short ring,
+	short segment,
+	struct forge_net_orb_vertex *vertex)
+{
+	static real_vector3d const light = { 0.30f, 0.20f, 0.93f };
+	float polar = forge_net_orb_rings[ring] * (float)(3.14159265358979 / 180.0);
+	float around = (float)segment * (float)(2.0 * 3.14159265358979) / (float)FORGE_NET_ORB_SEGMENTS;
+	float along = cosf(polar);
+	float out = sinf(polar);
+	real_vector3d normal;
+	float lit;
+
+	normal.i = forward->i * along + (left->i * cosf(around) + up->i * sinf(around)) * out;
+	normal.j = forward->j * along + (left->j * cosf(around) + up->j * sinf(around)) * out;
+	normal.k = forward->k * along + (left->k * cosf(around) + up->k * sinf(around)) * out;
+	vertex->point.x = center->x + normal.i * FORGE_NET_ORB_RADIUS;
+	vertex->point.y = center->y + normal.j * FORGE_NET_ORB_RADIUS;
+	vertex->point.z = center->z + normal.k * FORGE_NET_ORB_RADIUS;
+	lit = 0.42f + 0.58f * MAX(0.f, (float)dot_product3d(&normal, &light));
+	switch (ring)
+	{
+	case 0: vertex->color = forge_net_orb_pixel(0.80f, 0.97f, 1.f); break;
+	case 1: vertex->color = forge_net_orb_pixel(0.30f, 0.75f, 1.f); break;
+	case 2:
+	case 3: vertex->color = forge_net_orb_pixel(0.06f * lit, 0.07f * lit, 0.09f * lit); break;
+	case 4: vertex->color = forge_net_orb_pixel(0.86f * lit, 0.89f * lit, 0.92f * lit); break;
+	default: vertex->color = forge_net_orb_pixel(0.52f * lit, 0.56f * lit, 0.62f * lit); break;
+	}
+}
+
+/* (forge_render_world, each player's window, after the objects) the balls */
+static void forge_net_render_monitors(
+	void)
+{
+	static struct forge_net_orb_vertex vertices[FORGE_NET_ORB_TRIANGLES * 3];
+	unsigned long now = system_milliseconds();
+	short index;
+
+	if (!forge_globals.game_active || forge_globals.playing || (!forge_net_host() && !forge_net_client()))
+		return;
+	for (index = 0; index < FORGE_NET_PLAYERS; index++)
+	{
+		struct forge_net_transform view;
+		real_point3d target;
+		real_vector3d forward;
+		real_vector3d left;
+		real_vector3d up;
+		real_vector3d world_up = { 0.f, 0.f, 1.f };
+		real_vector3d to_orb;
+		long count = 0;
+		long buffer;
+		short ring;
+		short segment;
+		float step;
+
+		if (!forge_net_monitor_view(index, &view))
+		{
+			forge_net_orbs[index].shown = FALSE;
+			continue;
+		}
+		target.x = view.position[0];
+		target.y = view.position[1];
+		target.z = view.position[2];
+		forward.i = view.forward[0];
+		forward.j = view.forward[1];
+		forward.k = view.forward[2];
+		/* (eased to where it is: snapped there when new or far) */
+		if (!forge_net_orbs[index].shown || distance_squared3d(&forge_net_orbs[index].position, &target) > 25.f)
+		{
+			forge_net_orbs[index].shown = TRUE;
+			forge_net_orbs[index].position = target;
+			forge_net_orbs[index].forward = forward;
+		}
+		else
+		{
+			step = PIN((float)(now - forge_net_orbs[index].time) / 120.f, 0.f, 1.f);
+			forge_net_orbs[index].position.x += (target.x - forge_net_orbs[index].position.x) * step;
+			forge_net_orbs[index].position.y += (target.y - forge_net_orbs[index].position.y) * step;
+			forge_net_orbs[index].position.z += (target.z - forge_net_orbs[index].position.z) * step;
+			forge_net_orbs[index].forward.i += (forward.i - forge_net_orbs[index].forward.i) * step;
+			forge_net_orbs[index].forward.j += (forward.j - forge_net_orbs[index].forward.j) * step;
+			forge_net_orbs[index].forward.k += (forward.k - forge_net_orbs[index].forward.k) * step;
+		}
+		forge_net_orbs[index].time = now;
+		forward = forge_net_orbs[index].forward;
+		if (normalize3d(&forward) == 0.f)
+			continue;
+		/* (not behind the camera, nor out of its frustum) */
+		to_orb.i = forge_net_orbs[index].position.x - render.camera.position.x;
+		to_orb.j = forge_net_orbs[index].position.y - render.camera.position.y;
+		to_orb.k = forge_net_orbs[index].position.z - render.camera.position.z;
+		if (dot_product3d(&to_orb, &render.camera.forward) < -FORGE_NET_ORB_RADIUS ||
+			!render_frustum_sphere_visible(&render.frustum, &forge_net_orbs[index].position, FORGE_NET_ORB_RADIUS))
+		{
+			continue;
+		}
+		/* (its frame: the eye forward, up as near the world's as can be) */
+		if (fabsf(forward.k) > 0.98f)
+		{
+			world_up.i = 1.f;
+			world_up.k = 0.f;
+		}
+		cross_product3d(&world_up, &forward, &left);
+		normalize3d(&left);
+		cross_product3d(&forward, &left, &up);
+		for (ring = 0; ring + 1 < FORGE_NET_ORB_RINGS; ring++)
+		{
+			for (segment = 0; segment < FORGE_NET_ORB_SEGMENTS; segment++)
+			{
+				short next = (short)((segment + 1) % FORGE_NET_ORB_SEGMENTS);
+				struct forge_net_orb_vertex a, b, c, d;
+
+				forge_net_orb_point(&forge_net_orbs[index].position, &forward, &left, &up, ring, segment, &a);
+				forge_net_orb_point(&forge_net_orbs[index].position, &forward, &left, &up, ring, next, &b);
+				forge_net_orb_point(&forge_net_orbs[index].position, &forward, &left, &up, (short)(ring + 1), segment, &c);
+				forge_net_orb_point(&forge_net_orbs[index].position, &forward, &left, &up, (short)(ring + 1), next, &d);
+				/* (the eye's middle and the back: one triangle a segment) */
+				if (ring > 0 && count + 3 <= FORGE_NET_ORB_TRIANGLES * 3)
+				{
+					vertices[count++] = a;
+					vertices[count++] = b;
+					vertices[count++] = c;
+				}
+				if (ring + 2 < FORGE_NET_ORB_RINGS && count + 3 <= FORGE_NET_ORB_TRIANGLES * 3)
+				{
+					vertices[count++] = b;
+					vertices[count++] = d;
+					vertices[count++] = c;
+				}
+			}
+		}
+		if (count < 3)
+			continue;
+		buffer = rasterizer_dynamic_vertices_new(_rasterizer_vertex_type_debug, count);
+		if (buffer == NONE)
+			continue;
+		{
+			void *locked;
+
+			rasterizer_globals.current_lock_operation = _rasterizer_lock_debug;
+			locked = rasterizer_dynamic_vertices_lock(buffer);
+			if (locked)
+			{
+				csmemcpy(locked, vertices, (size_t)count * sizeof(vertices[0]));
+				rasterizer_dynamic_vertices_unlock(buffer);
+				rasterizer_debug_drawing_begin(TRUE);
+				rasterizer_draw_dynamic_vertices(0, count / 3, buffer, 3);
+				rasterizer_debug_drawing_end();
+				forge_net_orbs[index].drawn = now | 1;
+			}
+			rasterizer_globals.current_lock_operation = _rasterizer_lock_none;
+		}
+		rasterizer_dynamic_vertices_delete(buffer);
+	}
+}
+
+/* (forge_draw) the other players' monitors' names, over each ball */
 static void forge_net_draw_monitors(
 	long font_index,
 	short height)
 {
 	short index;
-	short local = forge_net_local_player();
 
 	if (!forge_net_host() && !forge_net_client())
 		return;
 	for (index = 0; index < FORGE_NET_PLAYERS; index++)
 	{
 		struct forge_net_transform view;
-		boolean monitor = FALSE;
 		real_point3d position;
 		real_point2d screen;
 		real_vector3d to_monitor;
 
-		if (index == local || !distributed_player(index))
+		if (!forge_net_monitor_view(index, &view))
 			continue;
-		if (forge_net_host())
+		/* (the ball's eased place, its name a little above it) */
+		if (forge_net_orbs[index].shown)
+			position = forge_net_orbs[index].position;
+		else
 		{
-			short slot;
-
-			for (slot = 0; slot < FORGE_NET_ACTORS; slot++)
-			{
-				struct forge_net_actor *actor = &forge_net.actors[slot];
-
-				if (actor->used && actor->monitor && forge_net_machine_player(actor->machine_index) == index)
-				{
-					monitor = TRUE;
-					view = actor->view;
-				}
-			}
+			position.x = view.position[0];
+			position.y = view.position[1];
+			position.z = view.position[2];
 		}
-		else if (forge_net.monitors[index].monitor)
-		{
-			monitor = TRUE;
-			view = forge_net.monitors[index].view;
-		}
-		if (!monitor)
-			continue;
-		position.x = view.position[0];
-		position.y = view.position[1];
-		position.z = view.position[2];
+		position.z += FORGE_NET_ORB_RADIUS * 1.6f;
 		to_monitor.i = position.x - render.camera.position.x;
 		to_monitor.j = position.y - render.camera.position.y;
 		to_monitor.k = position.z - render.camera.position.z;
@@ -3490,9 +3936,6 @@ static void forge_net_draw_monitors(
 			bounds.x1 = (short)(x + 120);
 			bounds.y0 = (short)(y - height);
 			bounds.y1 = y;
-			forge_draw_line(font_index, &bounds, 2, 0.47f, 0.84f, 1.f, "( O )");
-			bounds.y0 = y;
-			bounds.y1 = (short)(y + height);
 			forge_draw_line(font_index, &bounds, 2, 0.95f, 0.62f, 0.30f, name);
 		}
 	}
@@ -3708,6 +4151,19 @@ static void forge_net_log_state(
 			platform_log("forge net: player %d (%s): %s", index, name,
 				index == forge_net_local_player() ? (forge_globals.active ? "monitor" : "Spartan") :
 				forge_net.monitors[index].monitor ? "monitor" : "Spartan");
+		}
+		/* (another's monitor: where this machine has it, and its ball) */
+		{
+			struct forge_net_transform view;
+
+			if (forge_net_monitor_view(index, &view))
+			{
+				platform_log("forge net: player %d (%s): monitor at %.2f %.2f %.2f facing %.2f %.2f %.2f; ball %s at %.2f %.2f %.2f",
+					index, name, view.position[0], view.position[1], view.position[2], view.forward[0], view.forward[1],
+					view.forward[2], forge_net_orbs[index].drawn && system_milliseconds() - forge_net_orbs[index].drawn < 1000 ?
+					"drawn" : "not in view", forge_net_orbs[index].position.x,
+					forge_net_orbs[index].position.y, forge_net_orbs[index].position.z);
+			}
 		}
 	}
 }

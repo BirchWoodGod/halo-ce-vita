@@ -89,13 +89,16 @@ meets in front of the structure (a weapon on the ground has no collision
 model a collision vector would meet). The budget (forge_placed, the layout)
 counts the objects this session placed and has not deleted - one gone in
 play (picked up, destroyed) is still the layout's, back with the next round
-- at most FORGE_MAXIMUM_OBJECTS, and the characters among them, dead or
-alive, at most FORGE_MAXIMUM_AI: past either the browser's choice is
-refused, said on the screen. Its table is a fixed array, each index checked.
-The HUD counts the characters alive, the dead apart ("AI 5/32, 3 back next
-round"): a dead one keeps its place (the next round brings it back, and
-must have room) until the Forge menu's CLEAR DEAD AI takes the dead out of
-the layout - the refusal says so - or CLEAR ALL AI (asked first) every
+- at most FORGE_MAXIMUM_OBJECTS, and the characters among them alive at
+most FORGE_MAXIMUM_AI: past either the browser's choice is refused, said on
+the screen. Its table is a fixed array, each index checked. A dead
+character counts nowhere (the owner, Oct 22 2026: not the AI's, not the
+objects', not the HUD's): it stays the layout's (the next round brings it
+back, its RESPAWN after its time, a saved variant keeps it), its body taken
+away after a while or past FORGE_MAXIMUM_BODIES; one that would be alive
+past FORGE_MAXIMUM_AI waits for room ("AI 32/32, 4 waiting":
+forge_ai_life_update) until the Forge menu's CLEAR DEAD AI takes the dead
+out of the layout or CLEAR ALL AI (asked first) every
 character, alive or dead (forge_ai_clear: a dead Flood body vanishes, so
 nothing is left to aim at and delete). A Flood combat form feigning death
 is not dead (it gets back up as the same unit), and what the game spawns
@@ -220,6 +223,8 @@ Each logs what it did ("forge: ...").
 #include "physics/collisions.h"
 #include "cache/physical_memory_map.h"
 #include "rasterizer/rasterizer.h"
+#include "rasterizer/rasterizer_geometry.h"
+#include "rasterizer/xbox/rasterizer_xbox_draw_primitives.h"
 #include "render/render.h"
 #include "scenario/scenario.h"
 #include "scenario/scenario_definitions.h"
@@ -233,6 +238,7 @@ Each logs what it did ("forge: ...").
 #include "units/units.h"
 #include "units/vehicle_definitions.h"
 #include "units/unit_definitions.h"
+#include "networking/network_game_globals.h"
 
 #include "forge.h"
 #include "forge_blocks.h"
@@ -311,6 +317,9 @@ enum
 #define FORGE_CAMERA_THRUST 4.f
 #define FORGE_CAMERA_LOOK_RATE 2.5f
 #define FORGE_PICK_RANGE 60.f
+/* (forge_markers.inc) where the crosshair takes a spawn marker: a sphere at
+its pillar's middle */
+#define FORGE_MARKER_PICK_RADIUS 0.32f
 #define FORGE_PUSH_RATE 3.f
 #define FORGE_WHEEL_PUSH 0.5f
 #define FORGE_MOUSE_TURN 1.f
@@ -622,6 +631,14 @@ struct forge_placed
 	long holder;
 	long net_object;
 	boolean networked;
+	/* (a character) the game tick it was first seen dead at, plus one; 0
+	while alive: its respawn (FORGE_RECORD_AI_RESPAWN) and its body's
+	clearing count from it */
+	long dead_tick;
+	/* (a character) not placed yet for want of room - FORGE_MAXIMUM_AI alive
+	already: a new round's, a variant's or a respawn's -, placed as soon as
+	one alive is fewer; no object meanwhile */
+	boolean waiting;
 };
 
 /* a step of the undo history */
@@ -701,8 +718,12 @@ static struct
 	short placed_count;
 	/* the characters of the layout, and the dead among them (they hold
 	their places in the budget: they come back with the next round) */
+	/* the layout's characters, those not alive among them (dead, or
+	waiting for room), and the waiting: only the living count against
+	FORGE_MAXIMUM_AI, the HUD and the objects' budget */
 	short ai_count;
 	short ai_dead_count;
+	short ai_waiting_count;
 	/* the buttons down last frame */
 	boolean was_down[NUMBER_OF_GAMEPAD_BUTTONS];
 	boolean toggle_was_down;
@@ -837,6 +858,12 @@ static struct
 	given to joiners as a network Forge game's is (last: the initializer
 	above names the first fields in order) */
 	boolean playing;
+	/* (forge_markers.inc) the character whose spawn marker the monitor holds
+	(its id; 0 none), where it is held, and how many markers the last frame
+	drew */
+	long held_marker_id;
+	real_point3d held_marker_position;
+	short markers_drawn;
 } forge_globals = { FALSE, "", FALSE, FALSE, 0, NONE, FALSE, NONE, 0.f, { 0.f }, { 0.f }, _forge_speed_normal };
 
 /* ---------- private code */
@@ -858,6 +885,17 @@ static void forge_net_client_duplicate(long object_index, real_point3d const *po
 static void forge_net_client_set(long object_index, real_vector3d const *forward, real_vector3d const *up);
 static boolean forge_net_client_property(short property, short step);
 static void forge_net_client_undo(boolean redo);
+static boolean forge_net_client_command(short command, uint16_t value);
+static boolean forge_net_client_spawn_move(long id, struct forge_transform const *home);
+static boolean forge_net_client_spawn_property(long id, short property, short step);
+/* ---- the characters' spawn markers (forge_markers.inc) */
+static boolean forge_markers_shown(void);
+static long forge_marker_under_crosshair(real *distance);
+static void forge_marker_grab(long id, real distance);
+static void forge_marker_held_update(void);
+static void forge_marker_drop(void);
+static void forge_marker_home_set(struct forge_placed *placed, struct forge_transform const *home);
+static struct forge_placed *forge_placed_of_id(long id);
 static void forge_net_update(void);
 static void forge_net_map_loaded(void);
 static void forge_net_new_round(void);
@@ -1329,6 +1367,7 @@ static void forge_placed_update(
 
 	forge_globals.ai_count = 0;
 	forge_globals.ai_dead_count = 0;
+	forge_globals.ai_waiting_count = 0;
 	forge_globals.placed_count = (short)PIN(forge_globals.placed_count, 0, FORGE_MAXIMUM_OBJECTS);
 	for (index = 0; index < forge_globals.placed_count; index++)
 	{
@@ -1339,10 +1378,56 @@ static void forge_placed_update(
 		if (placed->ai)
 		{
 			forge_globals.ai_count++;
+			if (placed->waiting && placed->object_index == NONE)
+				forge_globals.ai_waiting_count++;
+			else
+				placed->waiting = FALSE;
 			if (forge_placed_dead(placed))
 				forge_globals.ai_dead_count++;
 		}
 	}
+}
+
+/* the most characters alive: FORGE_MAXIMUM_AI (the tests' builds:
+HALO_TEST_FORGE_MAXIMUM_AI, 2 to FORGE_MAXIMUM_AI, so that a test fills it
+with a few on flat ground) */
+static short forge_ai_maximum(
+	void)
+{
+#ifndef HALO_RELEASE
+	static short maximum = 0;
+
+	if (!maximum)
+	{
+		char const *setting = getenv("HALO_TEST_FORGE_MAXIMUM_AI");
+
+		maximum = setting && atoi(setting) > 0 ? (short)PIN(atoi(setting), 2, FORGE_MAXIMUM_AI) : FORGE_MAXIMUM_AI;
+	}
+	return maximum;
+#else
+	return FORGE_MAXIMUM_AI;
+#endif
+}
+
+/* (the owner, Oct 22 2026: only the living count) the characters alive;
+the objects the budget counts (the layout's but its characters not alive);
+the dead characters (not the waiting) */
+static short forge_ai_alive(
+	void)
+{
+	return (short)(forge_globals.ai_count - forge_globals.ai_dead_count);
+}
+
+static short forge_objects_counted(
+	void)
+{
+	return (short)(forge_globals.placed_count - forge_globals.ai_dead_count);
+}
+
+static short forge_ai_dead_only(
+	void)
+{
+	return (short)(forge_globals.ai_dead_count - forge_globals.ai_waiting_count);
 }
 
 /* an entry of the layout taken out (the editor's delete, an undone
@@ -1476,6 +1561,7 @@ static void forge_placed_add(
 	placed->ai_team = FORGE_AI_TEAM_DEFAULT;
 	placed->holder = NONE;
 	placed->net_object = NONE;
+	placed->dead_tick = 0;
 	placed->id = ++forge_globals.next_id;
 	forge_globals.placed_count++;
 	if (ai)
@@ -1746,8 +1832,9 @@ one of them alive or dead, taken out of the layout and the world: they do
 not come back with the next round, a map variant saved after has them not,
 and the steps of the undo history that name them go (nothing brings a
 cleared character back). A Flood combat form feigning death is not dead.
-What the game spawned (a carrier's infection forms) is the game's, left */
-static void forge_ai_clear(
+What the game spawned (a carrier's infection forms) is the game's, left.
+The characters cleared, counted */
+static short forge_ai_clear(
 	boolean all)
 {
 	short index;
@@ -1759,7 +1846,7 @@ static void forge_ai_clear(
 	{
 		struct forge_placed *placed = &forge_globals.placed[index];
 
-		if (!placed->ai || (!all && !forge_placed_dead(placed)))
+		if (!placed->ai || (!all && (!forge_placed_dead(placed) || placed->waiting)))
 			continue;
 		if (placed->object_index != NONE && placed->object_index == forge_globals.held_object_index)
 		{
@@ -1797,7 +1884,7 @@ static void forge_ai_clear(
 	}
 	forge_placed_update();
 	platform_log("forge: cleared %d %s AI; budget %d/%d objects, %d/%d AI (%d dead)", cleared, all ? "placed" : "dead",
-		forge_globals.placed_count, FORGE_MAXIMUM_OBJECTS, forge_globals.ai_count, FORGE_MAXIMUM_AI,
+		forge_globals.placed_count, FORGE_MAXIMUM_OBJECTS, forge_globals.ai_count, forge_ai_maximum(),
 		forge_globals.ai_dead_count);
 	if (!cleared)
 		forge_menu_notice("%s", all ? T("No AI to clear") : T("No dead AI to clear"));
@@ -1805,6 +1892,7 @@ static void forge_ai_clear(
 		forge_menu_notice(T("Cleared all AI: %d characters"), cleared);
 	else
 		forge_menu_notice(T("Cleared %d dead AI"), cleared);
+	return cleared;
 }
 
 #ifndef HALO_RELEASE
@@ -1994,8 +2082,8 @@ its collision model (a vehicle, a biped, scenery, a machine), or, for a
 weapon or equipment on the ground, which has none a line would meet, by its
 bounding sphere - before the structure; not the player's, nothing attached
 to another, not the one held; NONE if none */
-static long forge_object_under_crosshair(
-	void)
+static long forge_object_under_crosshair_at(
+	real *distance)
 {
 	real_point3d position;
 	real_vector3d forward;
@@ -2062,8 +2150,15 @@ static long forge_object_under_crosshair(
 			nearest_index = iterator.index;
 		}
 	}
-
+	if (distance)
+		*distance = nearest;
 	return nearest_index;
+}
+
+static long forge_object_under_crosshair(
+	void)
+{
+	return forge_object_under_crosshair_at(NULL);
 }
 
 static void forge_undo_record(short kind, long object_index, struct forge_transform const *from);
@@ -2494,29 +2589,36 @@ static long forge_place(
 		snprintf(name, sizeof(name), "%s", forge_globals.palette[entry].name);
 	else
 		forge_tag_readable_name(tag_index, name, sizeof(name));
-	/* (the budget) */
+	/* (the budget: the living only - a dead character counts nowhere,
+	the owner's of Oct 22 2026 -; and the layout's table, which keeps the
+	dead and the waiting too, full) */
 	forge_placed_update();
-	if (forge_globals.placed_count >= FORGE_MAXIMUM_OBJECTS)
+	if (forge_objects_counted() >= FORGE_MAXIMUM_OBJECTS)
 	{
 		*refusal = _forge_place_budget;
 		if (!quiet)
 			forge_notice(T("Budget full: %d objects. Delete one to place another."), FORGE_MAXIMUM_OBJECTS);
 		return NONE;
 	}
+	if (forge_globals.placed_count >= FORGE_MAXIMUM_OBJECTS)
+	{
+		*refusal = _forge_place_budget;
+		if (!quiet)
+			forge_notice(T("The layout is full: %d dead characters hold its room. Clear dead AI to place more."),
+				forge_globals.ai_dead_count);
+		return NONE;
+	}
 	/* (a character: its actor variant's unit, then a free actor of that
 	variant for it) */
 	if (tag_get_group_tag(tag_index) == ACTOR_VARIANT_DEFINITION_TAG)
 	{
-		/* (the dead keep their places: they come back with the next
-		round, which must have room for them; CLEAR DEAD AI frees them) */
-		if (forge_globals.ai_count >= FORGE_MAXIMUM_AI)
+		/* (FORGE_MAXIMUM_AI alive at most: the dead and the waiting
+		count not) */
+		if (forge_ai_alive() >= forge_ai_maximum())
 		{
 			*refusal = _forge_place_ai_budget;
-			if (!quiet && forge_globals.ai_dead_count > 0)
-				forge_notice(T("AI budget full: %d characters, %d of them dead. Clear dead AI to place more."),
-					FORGE_MAXIMUM_AI, forge_globals.ai_dead_count);
-			else if (!quiet)
-				forge_notice(T("AI budget full: %d characters."), FORGE_MAXIMUM_AI);
+			if (!quiet)
+				forge_notice(T("AI budget full: %d characters."), forge_ai_maximum());
 			return NONE;
 		}
 		actor_variant_index = tag_index;
@@ -2591,7 +2693,7 @@ static long forge_place(
 		platform_log("forge: spawned %s (%s, %s) at %.2f %.2f %.2f facing %.2f %.2f %.2f; budget %d/%d objects, %d/%d AI",
 			name, forge_tag_leaf(tag_index), entry != NONE ? forge_category_log_names[forge_globals.palette[entry].category] : "?",
 			placement.position.x, placement.position.y, placement.position.z, placement.forward.i, placement.forward.j,
-			placement.forward.k, forge_globals.placed_count, FORGE_MAXIMUM_OBJECTS, forge_globals.ai_count, FORGE_MAXIMUM_AI);
+			placement.forward.k, forge_objects_counted(), FORGE_MAXIMUM_OBJECTS, forge_ai_alive(), forge_ai_maximum());
 		forge_notice(T("Placed %s"), name);
 	}
 
@@ -2810,6 +2912,8 @@ static void forge_end(
 		return;
 	if (object_try_and_get(forge_globals.held_object_index))
 		forge_drop();
+	if (forge_globals.held_marker_id)
+		forge_marker_drop();
 	unit = object_try_and_get(forge_globals.unit_index);
 	if (unit)
 	{
@@ -2845,27 +2949,38 @@ static void forge_end(
 }
 
 /* the monitor's HUD's first line: Forge and the map's name */
-static void forge_hud_title_update(
-	void)
+/* the loaded level's name as Forge says it (its lobby's, else the
+scenario's own words): by the scenario loaded, so a network game's joiner,
+whose solo map name is none, says it too (the Forge menu's title) */
+void forge_level_name(
+	char *name,
+	short size)
 {
 	char const *scenario = global_scenario_index != NONE ? tag_get_name(global_scenario_index) : NULL;
-	char const *name = NULL;
 	short map_index;
-	char words[FORGE_NAME_SIZE];
 
 	for (map_index = 0; scenario && map_index < forge_map_count(); map_index++)
 	{
 		if (!_stricmp(scenario, forge_maps[map_index].path))
-			name = T(forge_maps[map_index].name);
+		{
+			snprintf(name, size, "%s", T(forge_maps[map_index].name));
+			return;
+		}
 	}
-	if (!name)
 	{
 		char const *slash = scenario ? strrchr(scenario, '\\') : NULL;
 
-		forge_name_words(slash ? slash + 1 : scenario ? scenario : "", words, sizeof(words));
-		name = words;
+		forge_name_words(slash ? slash + 1 : scenario ? scenario : "", name, size);
 	}
-	snprintf(forge_globals.hud_title, sizeof(forge_globals.hud_title), "%s \xc2\xb7 %s", T("FORGE"), name);
+}
+
+static void forge_hud_title_update(
+	void)
+{
+	char words[FORGE_NAME_SIZE];
+
+	forge_level_name(words, sizeof(words));
+	snprintf(forge_globals.hud_title, sizeof(forge_globals.hud_title), "%s \xc2\xb7 %s", T("FORGE"), words);
 }
 
 /* the monitor's HUD's other lines: the budget, and the object held or
@@ -2875,19 +2990,48 @@ static void forge_hud_update(
 {
 	long object_index;
 
-	/* (the AI alive; the dead apart, back with the next round) */
-	if (forge_globals.ai_dead_count > 0)
-		snprintf(forge_globals.hud_budget, sizeof(forge_globals.hud_budget), T("Objects %d/%d, AI %d/%d, %d back next round"),
-			forge_globals.placed_count, FORGE_MAXIMUM_OBJECTS, forge_globals.ai_count - forge_globals.ai_dead_count,
-			FORGE_MAXIMUM_AI, forge_globals.ai_dead_count);
+	/* (the living alone; the characters waiting for room apart) */
+	if (forge_globals.ai_waiting_count > 0)
+		snprintf(forge_globals.hud_budget, sizeof(forge_globals.hud_budget), T("Objects %d/%d, AI %d/%d, %d waiting"),
+			forge_objects_counted(), FORGE_MAXIMUM_OBJECTS, forge_ai_alive(), forge_ai_maximum(),
+			forge_globals.ai_waiting_count);
 	else
 		snprintf(forge_globals.hud_budget, sizeof(forge_globals.hud_budget), T("Objects %d/%d, AI %d/%d"),
-			forge_globals.placed_count, FORGE_MAXIMUM_OBJECTS, forge_globals.ai_count, FORGE_MAXIMUM_AI);
+			forge_objects_counted(), FORGE_MAXIMUM_OBJECTS, forge_ai_alive(), forge_ai_maximum());
 	forge_globals.hud_label[0] = 0;
 	forge_globals.hud_label_held = object_try_and_get(forge_globals.held_object_index) != NULL;
 	object_index = forge_globals.hud_label_held ? forge_globals.held_object_index : forge_object_under_crosshair();
 	if (object_index != NONE)
 		forge_object_name(object_index, forge_globals.hud_label, sizeof(forge_globals.hud_label));
+	/* (a spawn marker held, or under the crosshair before what is behind
+	it: "Elite Major spawn") */
+	{
+		real object_distance = FORGE_PICK_RANGE;
+		real marker_distance = FORGE_PICK_RANGE;
+		long marker = forge_globals.held_marker_id ? forge_globals.held_marker_id :
+			forge_globals.hud_label_held ? NONE : forge_marker_under_crosshair(&marker_distance);
+		struct forge_placed const *placed;
+
+		if (marker != NONE && !forge_globals.held_marker_id)
+		{
+			forge_object_under_crosshair_at(&object_distance);
+			if (marker_distance > object_distance + FORGE_MARKER_PICK_RADIUS)
+				marker = NONE;
+		}
+		placed = marker != NONE ? forge_placed_of_id(marker) : NULL;
+		if (placed)
+		{
+			char name[FORGE_NAME_SIZE];
+			short entry = forge_palette_of_tag(placed->tag_index);
+
+			if (entry != NONE)
+				snprintf(name, sizeof(name), "%s", forge_globals.palette[entry].name);
+			else
+				forge_tag_readable_name(placed->tag_index, name, sizeof(name));
+			snprintf(forge_globals.hud_label, sizeof(forge_globals.hud_label), T("%s spawn"), name);
+			forge_globals.hud_label_held = forge_globals.held_marker_id != 0;
+		}
+	}
 	/* (holding one: rotate mode's snapping; rotating, its angles too) */
 	forge_globals.hud_rotate[0] = 0;
 	if (forge_globals.hud_label_held)
@@ -3292,11 +3436,22 @@ exact angles (yaw, pitch, roll, forge_angles_from_facing's: the map
 variant keeps all three) and their reset */
 
 static short const forge_respawn_choices[] = { 0, 10, 20, 30, 45, 60, 90, 120, 180 };
+/* a character's: off (never), or its respawn time (the owner's, Oct 22) */
+static short const forge_ai_respawn_choices[] = { 0, 10, 30, 60, 120 };
 
 /* the placed entry of the object held, NULL for none or one of the map's */
+/* (a network game's host, a machine's property request from a spawn
+marker: forge_net.inc) the character it names, in place of what is held */
+static long forge_property_target_id = 0;
+
 static struct forge_placed *forge_properties_target(
 	void)
 {
+	if (forge_property_target_id)
+		return forge_placed_of_id(forge_property_target_id);
+	/* (a spawn marker held: its character's) */
+	if (forge_globals.held_marker_id)
+		return forge_placed_of_id(forge_globals.held_marker_id);
 	return object_try_and_get(forge_globals.held_object_index) ? forge_placed_of_object(forge_globals.held_object_index) :
 		NULL;
 }
@@ -3311,8 +3466,14 @@ static void forge_property_apply(
 	if (!placed)
 		return;
 	/* (a network game's client: the host's, but for its facing, which its
-	moves say) */
-	if (forge_net_client() && forge_net_client_property(property, step))
+	moves say - a spawn marker's, its letting go) */
+	if (forge_net_client() && forge_globals.held_marker_id &&
+		(property < _forge_property_yaw || property > _forge_property_reset_rotation))
+	{
+		forge_net_client_spawn_property(forge_globals.held_marker_id, property, step);
+		return;
+	}
+	if (forge_net_client() && !forge_globals.held_marker_id && forge_net_client_property(property, step))
 		return;
 	switch (property)
 	{
@@ -3321,6 +3482,32 @@ static void forge_property_apply(
 		placed->team = (signed char)(((placed->team + 1 + step + 3) % 3) - 1);
 		break;
 	case _forge_property_respawn:
+		/* (a character's: off, or its respawn time once dead) */
+		if (placed->ai)
+		{
+			short count = (short)NUMBEROF(forge_ai_respawn_choices);
+
+			for (index = 0; index < count - 1; index++)
+			{
+				if ((placed->flags & FORGE_RECORD_AI_RESPAWN) ? forge_ai_respawn_choices[index] >= placed->respawn_seconds :
+					forge_ai_respawn_choices[index] == 0)
+				{
+					break;
+				}
+			}
+			index = (short)((index + step + count) % count);
+			if (forge_ai_respawn_choices[index])
+			{
+				placed->flags |= FORGE_RECORD_AI_RESPAWN;
+				placed->respawn_seconds = (unsigned short)forge_ai_respawn_choices[index];
+			}
+			else
+			{
+				placed->flags &= (unsigned char)~FORGE_RECORD_AI_RESPAWN;
+			}
+			placed->dead_tick = 0;
+			break;
+		}
 		for (index = 0; index < (short)NUMBEROF(forge_respawn_choices) - 1; index++)
 		{
 			if (forge_respawn_choices[index] >= placed->respawn_seconds)
@@ -3371,7 +3558,17 @@ static void forge_property_apply(
 			angles[axis] = DEGREES_TO_RADIANS(degrees);
 		}
 		forge_facing_from_angles(angles, &forward, &up);
-		forge_set_facing(forge_globals.held_object_index, &forward, &up);
+		/* (a spawn marker's: where its character faces when placed again,
+		kept as it is held) */
+		if (forge_globals.held_marker_id && !forge_property_target_id)
+		{
+			forge_globals.held_forward = forward;
+			forge_globals.held_up = up;
+		}
+		else
+		{
+			forge_set_facing(forge_globals.held_object_index, &forward, &up);
+		}
 		break;
 	}
 	case _forge_property_ai_team:
@@ -3399,7 +3596,8 @@ static void forge_property_apply(
 		if (placed->ai)
 		{
 			platform_log("forge: properties: team %d, respawn %d s, %splaced at start, AI team %s (%d), AI %s, %s", placed->team,
-				placed->respawn_seconds, (placed->flags & FORGE_RECORD_PLACE_AT_START) ? "" : "not ",
+				(placed->flags & FORGE_RECORD_AI_RESPAWN) ? placed->respawn_seconds : 0,
+				(placed->flags & FORGE_RECORD_PLACE_AT_START) ? "" : "not ",
 				forge_ai_team_log_names[placed->ai_team % NUMBER_OF_FORGE_AI_TEAMS],
 				forge_ai_team_index(placed->ai_team, placed->object_index), (placed->flags & FORGE_RECORD_AI_OFF) ? "off" : "on",
 				rotation);
@@ -3687,7 +3885,10 @@ static boolean forge_variant_capture(
 		if (placed->ai && group_tag == ACTOR_VARIANT_DEFINITION_TAG)
 			record->ai_team = (unsigned char)(placed->ai_team % NUMBER_OF_FORGE_AI_TEAMS);
 		else
-			record->flags &= (unsigned char)~FORGE_RECORD_AI_OFF;
+			record->flags &= (unsigned char)~(FORGE_RECORD_AI_OFF | FORGE_RECORD_AI_RESPAWN);
+		/* (a character's respawn: version 3, after a second or more) */
+		if ((record->flags & FORGE_RECORD_AI_RESPAWN) && !record->respawn_seconds)
+			record->flags &= (unsigned char)~FORGE_RECORD_AI_RESPAWN;
 		record->position[0] = home.position.x;
 		record->position[1] = home.position.y;
 		record->position[2] = home.position.z;
@@ -3813,6 +4014,7 @@ static void forge_variant_apply(
 	short over_budget = 0;
 	short refused = 0;
 	short other_kinds = 0;
+	short waiting = 0;
 	short skipped;
 	short index;
 	struct structure_bsp *structure = global_structure_bsp_get();
@@ -3872,6 +4074,26 @@ static void forge_variant_apply(
 		}
 		forge_facing_from_angles(record->angles, &forward, &up);
 		object_index = forge_place(tags[record->path_index], &position, &forward, &up, TRUE, &refusal);
+		/* (a character past FORGE_MAXIMUM_AI alive: kept, waiting for room
+		- placed as soon as one alive is fewer: forge_ai_life_update) */
+		if (object_index == NONE && refusal == _forge_place_ai_budget && forge_globals.placed_count < FORGE_MAXIMUM_OBJECTS)
+		{
+			struct forge_placed *entry;
+
+			forge_placed_add(NONE, tags[record->path_index], TRUE);
+			entry = &forge_globals.placed[forge_globals.placed_count - 1];
+			entry->team = record->team;
+			entry->flags = record->flags;
+			entry->respawn_seconds = record->respawn_seconds;
+			entry->ai_team = record->ai_team;
+			entry->home.position = position;
+			entry->home.forward = forward;
+			entry->home.up = up;
+			entry->has_home = TRUE;
+			entry->waiting = TRUE;
+			waiting++;
+			continue;
+		}
 		if (object_index == NONE)
 		{
 			if (refusal == _forge_place_budget || refusal == _forge_place_ai_budget)
@@ -3891,7 +4113,7 @@ static void forge_variant_apply(
 			if (!entry->ai)
 			{
 				entry->ai_team = FORGE_AI_TEAM_DEFAULT;
-				entry->flags &= (unsigned char)~FORGE_RECORD_AI_OFF;
+				entry->flags &= (unsigned char)~(FORGE_RECORD_AI_OFF | FORGE_RECORD_AI_RESPAWN);
 			}
 			forge_ai_apply(entry);
 		}
@@ -3906,7 +4128,8 @@ static void forge_variant_apply(
 	if (round)
 	{
 		platform_log("forge: new round %ld: %d placed again, %d skipped (%d missing tags, %d outside the map, %d past the "
-			"budget, %d refused)", forge_globals.round_count, placed, skipped, missing, outside, over_budget, refused);
+			"budget, %d refused), %d characters waiting for room", forge_globals.round_count, placed, skipped, missing, outside,
+			over_budget, refused, waiting);
 		forge_notice(T("New round: %d objects placed"), placed);
 		return;
 	}
@@ -3914,8 +4137,8 @@ static void forge_variant_apply(
 		platform_log("forge: the map variant was made with another copy of this map (%08x, this one %08lx)", layout->map_hash,
 			(unsigned long)cache_files_get_checksum());
 	platform_log("forge: map variant \"%s\" applied: %d placed, %d skipped (%d missing tags, %d outside the map, %d past the "
-		"budget, %d refused, %d not objects)", layout->title, placed, skipped, missing, outside, over_budget, refused,
-		other_kinds);
+		"budget, %d refused, %d not objects), %d characters waiting for room", layout->title, placed, skipped, missing, outside,
+		over_budget, refused, other_kinds, waiting);
 	if (skipped)
 		forge_notice(T("Map variant %s: %d placed, %d skipped"), layout->title, placed, skipped);
 	else
@@ -4725,7 +4948,8 @@ boolean forge_properties_get(
 		return FALSE;
 	forge_object_name(placed->object_index, properties->name, sizeof(properties->name));
 	properties->team = placed->team;
-	properties->respawn_seconds = placed->respawn_seconds;
+	/* (a character's: 0, never, unless it respawns) */
+	properties->respawn_seconds = placed->ai && !(placed->flags & FORGE_RECORD_AI_RESPAWN) ? 0 : placed->respawn_seconds;
 	properties->place_at_start = (placed->flags & FORGE_RECORD_PLACE_AT_START) != 0;
 	{
 		float angles[3];
@@ -4796,9 +5020,9 @@ int forge_panel_ai_counts(
 	int *dead)
 {
 	if (alive)
-		*alive = forge_globals.ai_count - forge_globals.ai_dead_count;
+		*alive = forge_ai_alive();
 	if (dead)
-		*dead = forge_globals.ai_dead_count;
+		*dead = forge_ai_dead_only();
 	return forge_globals.game_active && !forge_globals.game_requested;
 }
 
@@ -5041,10 +5265,10 @@ void forge_budget_get(
 	short *ai,
 	short *dead_ai)
 {
-	*objects = forge_globals.placed_count;
-	*ai = (short)(forge_globals.ai_count - forge_globals.ai_dead_count);
+	*objects = forge_objects_counted();
+	*ai = forge_ai_alive();
 	if (dead_ai)
-		*dead_ai = forge_globals.ai_dead_count;
+		*dead_ai = forge_ai_dead_only();
 }
 
 boolean forge_camera_input(
@@ -5097,6 +5321,180 @@ boolean forge_camera_input(
 	return TRUE;
 }
 
+/* (each update: a local game's, a network game's host's, the Forge game's
+and a map variant's played) the layout's characters' lives:
+- one that respawns (FORGE_RECORD_AI_RESPAWN, the properties' RESPAWN), seen
+  dead its respawn time of game time (a paused game's stands still), is
+  placed again where the editor put it, its properties and its id kept (its
+  history's steps still name it; a network game's joiners are sent it as any
+  change of the layout), its body taken away;
+- one waiting for room (a new round's, a variant's or a respawn's past
+  FORGE_MAXIMUM_AI alive) is placed as soon as one alive is fewer - the
+  living never pass FORGE_MAXIMUM_AI;
+- a body is taken away FORGE_BODY_SECONDS after death, and the oldest first
+  past FORGE_MAXIMUM_BODIES: only the object, the character stays the
+  layout's (it respawns as its RESPAWN says, the next round brings it back,
+  a map variant saved keeps it).
+Never what anyone holds (skipped until the next update); a client never:
+the host's game does it */
+#define FORGE_TICKS_PER_SECOND 30
+#define FORGE_BODY_SECONDS 45
+#define FORGE_MAXIMUM_BODIES 32
+/* (a body's time: FORGE_BODY_SECONDS; the tests' builds:
+HALO_TEST_FORGE_BODY_SECONDS. The engine takes a multiplayer map's bodies
+away on its own too, sooner: this is for those it keeps) */
+static short forge_body_seconds(
+	void)
+{
+#ifndef HALO_RELEASE
+	static short seconds = 0;
+
+	if (!seconds)
+	{
+		char const *setting = getenv("HALO_TEST_FORGE_BODY_SECONDS");
+
+		seconds = setting && atoi(setting) > 0 ? (short)PIN(atoi(setting), 1, 3600) : FORGE_BODY_SECONDS;
+	}
+	return seconds;
+#else
+	return FORGE_BODY_SECONDS;
+#endif
+}
+
+static void forge_ai_life_update(
+	void)
+{
+	long now;
+	short index;
+	short bodies = 0;
+
+	if (!forge_globals.game_active || forge_globals.game_requested || forge_globals.round_pending ||
+		forge_globals.round_resetting || forge_net_client() || !game_in_progress())
+	{
+		return;
+	}
+	now = game_time_get();
+	forge_placed_update();
+	for (index = 0; index < forge_globals.placed_count && index < FORGE_MAXIMUM_OBJECTS; index++)
+	{
+		struct forge_placed *placed = &forge_globals.placed[index];
+		struct forge_placed kept;
+		long object_index;
+		short refusal;
+		boolean held;
+
+		if (!placed->ai || (!placed->waiting && !forge_placed_dead(placed)))
+		{
+			placed->dead_tick = 0;
+			continue;
+		}
+		held = placed->object_index != NONE && (placed->object_index == forge_globals.held_object_index ||
+			forge_net_holder(placed->object_index, NONE) != NONE);
+		if (!placed->waiting)
+		{
+			if (!placed->dead_tick)
+				placed->dead_tick = now + 1;
+			/* (its body: gone after a while) */
+			if (placed->object_index != NONE && !held &&
+				now + 1 - placed->dead_tick >= (long)forge_body_seconds() * FORGE_TICKS_PER_SECOND)
+			{
+				platform_log("forge: %s (#%ld): its body cleared after %d s", forge_tag_leaf(placed->tag_index), placed->id,
+					(int)forge_body_seconds());
+				object_delete(placed->object_index);
+				placed->object_index = NONE;
+			}
+			if (placed->object_index != NONE)
+				bodies++;
+			if (!(placed->flags & FORGE_RECORD_AI_RESPAWN) || !placed->has_home ||
+				now + 1 - placed->dead_tick < (long)placed->respawn_seconds * FORGE_TICKS_PER_SECOND)
+			{
+				continue;
+			}
+		}
+		if (held || !placed->has_home)
+			continue;
+		/* (no room: waiting, its body gone, until one alive is fewer) */
+		forge_placed_update();
+		if (forge_ai_alive() >= forge_ai_maximum())
+		{
+			if (!placed->waiting)
+			{
+				if (forge_object_alive(placed->object_index))
+					object_delete(placed->object_index);
+				placed->object_index = NONE;
+				placed->waiting = TRUE;
+				platform_log("forge: %s (#%ld) waits to respawn: %d characters alive", forge_tag_leaf(placed->tag_index),
+					placed->id, forge_ai_maximum());
+			}
+			continue;
+		}
+		kept = *placed;
+		if (forge_object_alive(placed->object_index))
+			object_delete(placed->object_index);
+		forge_placed_remove(index);
+		object_index = forge_place(kept.tag_index, &kept.home.position, &kept.home.forward, &kept.home.up, TRUE, &refusal);
+		if (object_index == NONE || forge_globals.placed_count <= 0 ||
+			forge_globals.placed[forge_globals.placed_count - 1].object_index != object_index)
+		{
+			/* (not placed: the entry kept, waiting, tried again) */
+			if (forge_globals.placed_count < FORGE_MAXIMUM_OBJECTS)
+			{
+				kept.object_index = NONE;
+				kept.waiting = TRUE;
+				forge_globals.placed[forge_globals.placed_count++] = kept;
+				forge_placed_update();
+			}
+			platform_log("forge: %s (#%ld) could not respawn (%d)", forge_tag_leaf(kept.tag_index), kept.id, (int)refusal);
+			continue;
+		}
+		{
+			struct forge_placed *entry = &forge_globals.placed[forge_globals.placed_count - 1];
+
+			entry->id = kept.id;
+			entry->team = kept.team;
+			entry->flags = kept.flags;
+			entry->respawn_seconds = kept.respawn_seconds;
+			entry->ai_team = kept.ai_team;
+			entry->home = kept.home;
+			entry->has_home = TRUE;
+			forge_ai_apply(entry);
+		}
+		if (kept.waiting)
+			platform_log("forge: %s (#%ld) placed: room for it at %.2f %.2f %.2f", forge_tag_leaf(kept.tag_index), kept.id,
+				kept.home.position.x, kept.home.position.y, kept.home.position.z);
+		else
+			platform_log("forge: %s (#%ld) respawned after %d s at %.2f %.2f %.2f", forge_tag_leaf(kept.tag_index), kept.id,
+				(int)kept.respawn_seconds, kept.home.position.x, kept.home.position.y, kept.home.position.z);
+		/* (the entry moved to the end: this index holds the next one) */
+		index--;
+	}
+	/* (past FORGE_MAXIMUM_BODIES bodies: the oldest taken away) */
+	while (bodies > FORGE_MAXIMUM_BODIES)
+	{
+		short oldest = NONE;
+
+		for (index = 0; index < forge_globals.placed_count && index < FORGE_MAXIMUM_OBJECTS; index++)
+		{
+			struct forge_placed const *placed = &forge_globals.placed[index];
+
+			if (!placed->ai || placed->waiting || !placed->dead_tick || !forge_object_alive(placed->object_index) ||
+				placed->object_index == forge_globals.held_object_index || forge_net_holder(placed->object_index, NONE) != NONE)
+			{
+				continue;
+			}
+			if (oldest == NONE || placed->dead_tick < forge_globals.placed[oldest].dead_tick)
+				oldest = index;
+		}
+		if (oldest == NONE)
+			break;
+		platform_log("forge: %s (#%ld): its body cleared, %d bodies past %d", forge_tag_leaf(forge_globals.placed[oldest].tag_index),
+			forge_globals.placed[oldest].id, bodies, FORGE_MAXIMUM_BODIES);
+		object_delete(forge_globals.placed[oldest].object_index);
+		forge_globals.placed[oldest].object_index = NONE;
+		bodies--;
+	}
+}
+
 void forge_update(
 	void)
 {
@@ -5134,6 +5532,8 @@ void forge_update(
 		{
 			forge_placed_update();
 			forge_homes_update();
+			/* (its characters that respawn: the game's host's) */
+			forge_ai_life_update();
 			forge_net_update();
 		}
 		return;
@@ -5167,18 +5567,33 @@ void forge_update(
 	}
 	if (forge_game_playing)
 		forge_ai_hold();
+	forge_ai_life_update();
 #ifndef HALO_RELEASE
 	if (forge_globals.game_active && forge_globals.ai_shots_counted)
 		forge_ai_shots_update();
 #endif
-	/* (ALL AI, CLEAR AI, NEW ROUND: a network game's host's only) */
+	/* (ALL AI, CLEAR AI, NEW ROUND in a network game: the host's to make; a
+	client asks it, the host checks and makes it and says what came of it -
+	a host of insider.21 or before takes none: only the host can then) */
 	if (forge_net_client() &&
 		(forge_globals.ai_all_requested || forge_globals.clear_ai_requested || forge_globals.round_requested))
 	{
+		boolean asked = TRUE;
+
+		if (forge_globals.ai_all_requested)
+			asked = forge_net_client_command(_forge_net_command_all_ai, forge_ai_state() == _forge_ai_all_off ? 1 : 0) && asked;
+		if (forge_globals.clear_ai_requested)
+		{
+			asked = forge_net_client_command(forge_globals.clear_ai_requested == _forge_clear_ai_all ?
+				_forge_net_command_clear_all_ai : _forge_net_command_clear_dead_ai, 0) && asked;
+		}
+		if (forge_globals.round_requested)
+			asked = forge_net_client_command(_forge_net_command_new_round, 0) && asked;
 		forge_globals.ai_all_requested = FALSE;
 		forge_globals.clear_ai_requested = _forge_clear_ai_none;
 		forge_globals.round_requested = FALSE;
-		forge_menu_notice("%s", T("Only the host can do that"));
+		if (!asked)
+			forge_menu_notice("%s", T("Only the host can do that"));
 	}
 	if (forge_globals.ai_all_requested)
 	{
@@ -5275,7 +5690,11 @@ void forge_update(
 	forge_homes_update();
 	/* (a network Forge game: the requests and the layout's changes) */
 	forge_net_update();
-	if (forge_globals.game_active && pressed[_gamepad_binary_button_start] && !menu_open && !forge_globals.game_requested)
+	/* (a network game: the game's own Start opens the multiplayer pause,
+	which menu_tags.c makes the Forge menu - opened here too, the game's
+	Start would close it again at once) */
+	if (forge_globals.game_active && pressed[_gamepad_binary_button_start] && !menu_open && !forge_globals.game_requested &&
+		!network_game_is_active())
 	{
 		forge_menu_open_pause();
 		menu_open = forge_menu_open();
@@ -5328,10 +5747,11 @@ void forge_update(
 	}
 	if (!menu_open)
 	{
-		/* (Square: holding an object, its properties; else the browser) */
+		/* (Square: holding an object or a spawn marker, its properties; else
+		the browser) */
 		if (pressed[_forge_button_browser])
 		{
-			if (object_try_and_get(forge_globals.held_object_index))
+			if (object_try_and_get(forge_globals.held_object_index) || forge_globals.held_marker_id)
 				forge_properties_open();
 			else
 				forge_browser_open();
@@ -5353,26 +5773,39 @@ void forge_update(
 			forge_globals.speed = (short)((forge_globals.speed + 1) % NUMBER_OF_FORGE_SPEEDS);
 			forge_notice("%s", T(forge_speed_names[forge_globals.speed]));
 		}
-		if (pressed[_forge_button_straighten])
+		if (pressed[_forge_button_straighten] && !forge_globals.held_marker_id)
 			forge_straighten(forge_target_object());
-		if (pressed[_forge_button_duplicate])
+		if (pressed[_forge_button_duplicate] && !forge_globals.held_marker_id)
 			forge_duplicate();
 		/* (R in rotate mode: roll, never a drop) */
 		if (pressed[_forge_button_grab] && !rotating)
 		{
-			if (object_try_and_get(forge_globals.held_object_index))
+			if (forge_globals.held_marker_id)
+			{
+				forge_marker_drop();
+			}
+			else if (object_try_and_get(forge_globals.held_object_index))
 			{
 				forge_drop();
 			}
 			else
 			{
-				long object_index = forge_object_under_crosshair();
+				/* (the nearer of an object and a spawn marker: a marker before
+				the character standing on it) */
+				real object_distance = FORGE_PICK_RANGE;
+				real marker_distance = FORGE_PICK_RANGE;
+				long object_index = forge_object_under_crosshair_at(&object_distance);
+				long marker = forge_marker_under_crosshair(&marker_distance);
 
-				if (object_index != NONE)
+				/* (object_distance: the nearest thing hit, a wall too - a marker
+				behind one is not taken) */
+				if (marker != NONE && marker_distance <= object_distance + FORGE_MARKER_PICK_RADIUS)
+					forge_marker_grab(marker, marker_distance);
+				else if (object_index != NONE)
 					forge_grab(object_index);
 			}
 		}
-		if (pressed[_forge_button_delete])
+		if (pressed[_forge_button_delete] && !forge_globals.held_marker_id)
 			forge_delete(forge_target_object());
 		rotating = rotating && object_try_and_get(forge_globals.held_object_index);
 		if (rotating)
@@ -5404,6 +5837,12 @@ void forge_update(
 	forge_globals.pending_mouse_pitch = 0.f;
 	if (object_try_and_get(forge_globals.held_object_index))
 		forge_held_object_place();
+	if (forge_globals.held_marker_id)
+	{
+		forge_globals.held_distance = PIN(forge_globals.held_distance + pad.wheel * FORGE_WHEEL_PUSH,
+			FORGE_MINIMUM_HOLD_DISTANCE, FORGE_MAXIMUM_HOLD_DISTANCE);
+		forge_marker_held_update();
+	}
 	forge_hud_update();
 
 	return;
@@ -5452,8 +5891,14 @@ void forge_draw(
 	short label_height;
 	short crosshair_height;
 
-	if (!forge_globals.active || local_player_index != forge_globals.local_player_index || forge_globals.hud_hidden)
+	/* (the Spartan's in a network Forge game: the other monitors' names
+	alone, over their balls) */
+	if ((!forge_globals.active && !(forge_globals.game_active && !forge_globals.playing &&
+			(forge_net_host() || forge_net_client()))) ||
+		local_player_index != forge_globals.local_player_index || forge_globals.hud_hidden)
+	{
 		return;
+	}
 	/* (the Halo 3 menus' fonts when the map has them, else the HUD's) */
 	font_index = forge_globals.hud_font_looked_up ? forge_globals.hud_font_index : NONE;
 	label_font_index = forge_globals.hud_font_looked_up ? forge_globals.hud_label_font_index : NONE;
@@ -5470,6 +5915,11 @@ void forge_draw(
 	label_height = forge_font_height(label_font_index);
 	crosshair_height = forge_font_height(crosshair_font_index);
 	window = render.camera.window_bounds;
+	if (!forge_globals.active)
+	{
+		forge_net_draw_monitors(font_index, height);
+		return;
+	}
 
 	/* the map and the budget, top left */
 	bounds = window;
@@ -5677,7 +6127,7 @@ boolean forge_command(
 	{
 		forge_placed_update();
 		platform_log("forge: budget %d/%d objects, %d/%d AI (%d alive, %d dead); HUD: %s", forge_globals.placed_count,
-			FORGE_MAXIMUM_OBJECTS, forge_globals.ai_count, FORGE_MAXIMUM_AI, forge_globals.ai_count - forge_globals.ai_dead_count,
+			FORGE_MAXIMUM_OBJECTS, forge_globals.ai_count, forge_ai_maximum(), forge_globals.ai_count - forge_globals.ai_dead_count,
 			forge_globals.ai_dead_count, forge_globals.hud_budget);
 		return TRUE;
 	}
@@ -5687,7 +6137,11 @@ boolean forge_command(
 		ALL AI) */
 		if (strcmp(rest, "dead") && strcmp(rest, "all"))
 			return FALSE;
-		forge_ai_clear(!strcmp(rest, "all"));
+		/* (a network game's client: asked of the host, as its menu asks) */
+		if (forge_net_client())
+			forge_clear_ai_request(!strcmp(rest, "all"));
+		else
+			forge_ai_clear(!strcmp(rest, "all"));
 		return TRUE;
 	}
 	if (!strcmp(word, "press") || !strcmp(word, "stick"))
@@ -5846,13 +6300,18 @@ boolean forge_command(
 	}
 	if (!strcmp(word, "allai"))
 	{
+		if (forge_net_client())
+		{
+			forge_ai_all_request();
+			return TRUE;
+		}
 		forge_ai_all_set(!strcmp(rest, "on") ? TRUE : !strcmp(rest, "off") ? FALSE : forge_ai_state() == _forge_ai_all_off);
 		return TRUE;
 	}
 	/* (tests, the monitor's or the Spartan's: forge_blocks.c) */
 	if (!strcmp(word, "blocks"))
 		return forge_blocks_command(rest);
-	if (!forge_globals.active && strcmp(word, "where"))
+	if (!forge_globals.active && strcmp(word, "where") && strcmp(word, "markers"))
 	{
 		platform_log("forge: %s: not in monitor mode (\"forge on\")", word);
 		return FALSE;
@@ -6116,7 +6575,49 @@ boolean forge_command(
 	}
 	if (!strcmp(word, "drop"))
 	{
-		forge_drop();
+		if (forge_globals.held_marker_id)
+			forge_marker_drop();
+		else
+			forge_drop();
+		return TRUE;
+	}
+	if (!strcmp(word, "marker"))
+	{
+		/* ("marker #<id>": that character's spawn marker held, as R on it
+		would; "marker": the one under the crosshair; "markers": how many
+		the last frame drew) */
+		real distance = 5.f;
+		long id = rest[0] == '#' ? atol(rest + 1) : forge_marker_under_crosshair(&distance);
+		struct forge_placed *placed = forge_placed_of_id(id);
+
+		if (!placed || !placed->ai)
+		{
+			platform_log("forge: no spawn marker there");
+			return FALSE;
+		}
+		if (object_try_and_get(forge_globals.held_object_index))
+			forge_drop();
+		if (rest[0] == '#')
+		{
+			real_point3d position;
+			real_vector3d forward;
+			real_vector3d to_home;
+
+			if (forge_camera_get(&position, &forward))
+			{
+				to_home.i = placed->home.position.x - position.x;
+				to_home.j = placed->home.position.y - position.y;
+				to_home.k = placed->home.position.z - position.z;
+				distance = magnitude3d(&to_home) - FORGE_MARKER_PICK_RADIUS;
+			}
+		}
+		forge_marker_grab(id, distance);
+		return TRUE;
+	}
+	if (!strcmp(word, "markers"))
+	{
+		platform_log("forge: %d spawn markers drawn, %s held", forge_globals.markers_drawn,
+			forge_globals.held_marker_id ? "one" : "none");
 		return TRUE;
 	}
 	if (!strcmp(word, "turn"))
@@ -6198,7 +6699,7 @@ boolean forge_command(
 			held ? forge_tag_leaf(held->definition_index) : "nothing", forge_globals.held_distance,
 			aimed != NONE ? forge_tag_leaf(object_get(aimed)->definition_index) : "nothing",
 			forge_globals.spawned_count, forge_globals.deleted_count, forge_globals.placed_count, FORGE_MAXIMUM_OBJECTS,
-			forge_globals.ai_count, FORGE_MAXIMUM_AI);
+			forge_globals.ai_count, forge_ai_maximum());
 		if (object_try_and_get(unit_index))
 		{
 			struct object_datum *unit = object_get(unit_index);
@@ -6240,3 +6741,4 @@ boolean forge_command(
 /* ---------- network Forge (its statics shared with this file's) */
 
 #include "forge_net.inc"
+#include "forge_markers.inc"

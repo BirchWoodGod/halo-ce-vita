@@ -2534,6 +2534,14 @@ static void h3_forge_title_update(struct widget_instance *widget)
 		if (!_stricmp(scenario, forge_map_path(index)))
 			name = T(forge_map_name(index));
 	}
+	/* (a network game's joiner has no solo map name: the level loaded's) */
+	if (!name[0])
+	{
+		static char level[64];
+
+		forge_level_name(level, (short)sizeof(level));
+		name = level;
+	}
 	snprintf(text, sizeof(text), "%s \xc2\xb7 %s", T("FORGE"), name);
 	h3_capitals(text);
 	text_show(widget, text);
@@ -2546,39 +2554,45 @@ keyboard's, or the gamepad's the button icons show (display.button_icons:
 an Xbox pad's or a PlayStation's, by SDL's names for its buttons) */
 static void h3_forge_controls_update(struct widget_instance *widget)
 {
+	char const *controls;
+	char text[640];
+
 #ifdef HALO_VITA
-	text_show(widget, T("Fly: left stick. Up: Cross. Down: D-pad down.\nFaster: hold L. Look: right stick.\n"
+	controls = T("Fly: left stick. Up: Cross. Down: D-pad down.\nFaster: hold L. Look: right stick.\n"
 		"Grab, drop: R. Copy: Circle. Delete: Triangle.\nObjects: Square. Holding one: its properties.\n"
 		"Rotate: hold L + right stick; with R: roll.\nL + left stick: distance. L + D-pad right: snap.\n"
-		"Upright: D-pad left. Speed: D-pad right.\nSpartan: Select + D-pad up."));
+		"Upright: D-pad left. Speed: D-pad right.\nSpartan: Select + D-pad up.");
 #elif defined(H3_BUTTON_ICONS)
 	switch (halo_button_icons_shown())
 	{
 	case _halo_button_icons_xbox:
-		text_show(widget, T("Fly: left stick. Up: A. Down: left stick click.\nFaster: hold LT. Look: right stick.\n"
+		controls = T("Fly: left stick. Up: A. Down: left stick click.\nFaster: hold LT. Look: right stick.\n"
 			"Grab, drop: RT. Copy: B. Delete: Y.\nObjects: X. Holding one: its properties.\n"
 			"Rotate: hold LT + right stick; with RT: roll.\nLT + left stick: distance. LT + LB: snap.\n"
-			"Upright: RB. Speed: LB.\nSpartan: Back + right stick click."));
+			"Upright: RB. Speed: LB.\nSpartan: Back + right stick click.");
 		break;
 	case _halo_button_icons_playstation:
-		text_show(widget, T("Fly: left stick. Up: Cross. Down: L3.\nFaster: hold L2. Look: right stick.\n"
+		controls = T("Fly: left stick. Up: Cross. Down: L3.\nFaster: hold L2. Look: right stick.\n"
 			"Grab, drop: R2. Copy: Circle. Delete: Triangle.\nObjects: Square. Holding one: its properties.\n"
 			"Rotate: hold L2 + right stick; with R2: roll.\nL2 + left stick: distance. L2 + L1: snap.\n"
-			"Upright: R1. Speed: L1.\nSpartan: Share + R3."));
+			"Upright: R1. Speed: L1.\nSpartan: Share + R3.");
 		break;
 	default:
-		text_show(widget, T("Fly: W A S D. Up: Space. Down: C.\nFaster: Shift. Look: mouse.\n"
+		controls = T("Fly: W A S D. Up: Space. Down: C.\nFaster: Shift. Look: mouse.\n"
 			"Grab, drop: left button. Copy: F. Delete: Del.\nObjects: E. Holding one, E: its properties.\n"
 			"Rotate: hold right button + mouse; + left: roll.\nDistance: wheel, or W S. Snap: right button + Q.\n"
-			"Upright: X. Speed: Q.\nSpartan: Tab, or F1 + Z."));
+			"Upright: X. Speed: Q.\nSpartan: Tab, or F1 + Z.");
 		break;
 	}
 #else
-	text_show(widget, T("Fly: W A S D. Up: Space. Down: C.\nFaster: Shift. Look: mouse.\n"
+	controls = T("Fly: W A S D. Up: Space. Down: C.\nFaster: Shift. Look: mouse.\n"
 		"Grab, drop: left button. Copy: F. Delete: Del.\nObjects: E. Holding one, E: its properties.\n"
 		"Rotate: hold right button + mouse; + left: roll.\nDistance: wheel, or W S. Snap: right button + Q.\n"
-		"Upright: X. Speed: Q.\nSpartan: Tab, or F1 + Z."));
+		"Upright: X. Speed: Q.\nSpartan: Tab, or F1 + Z.");
 #endif
+	/* (and a character's RESPAWN, Oct 22 2026: dead, it comes back) */
+	snprintf(text, sizeof(text), "%s\n%s", controls, T("AI respawn: a character's properties, RESPAWN."));
+	text_show(widget, text);
 }
 
 #ifndef H3_BUTTON_ICONS
