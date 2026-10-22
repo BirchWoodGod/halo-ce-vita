@@ -2616,7 +2616,6 @@
 "Initial Spawn" = "Aparición inicial"
 "%s, Red" = "%s, rojo"
 "%s, Blue" = "%s, azul"
-"ALL" = "TODOS"
 "SEVERAL" = "VARIOS"
 "ANY" = "CUALQUIERA"
 "SPAWN" = "APARICIÓN"
