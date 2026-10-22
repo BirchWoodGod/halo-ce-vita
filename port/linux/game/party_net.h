@@ -46,7 +46,7 @@ party's token sent to the host, when this machine is in a party */
 void party_net_client_send(struct network_game_client *client);
 /* (friends_game.c, each frame) a joiner in a game whose party's token is
 new since it last told its host (a party formed after it joined: a leader
-who joined first, then invited) tells it again, once a second at most */
+who joined first, then invited) tells it again at once */
 void party_net_update(void);
 /* (network_server_message_handler.c) a joiner's message: its machine's
 token kept */

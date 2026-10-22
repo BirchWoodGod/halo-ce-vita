@@ -1026,6 +1026,9 @@ void *create_network_game_message(
 	case _message_server_flame:
 		match_assert(__FILE__, __LINE__, message_struct_size==sizeof(message_server_flame));
 		break;
+	case _message_client_party:
+		match_assert(__FILE__, __LINE__, message_struct_size==sizeof(message_client_party));
+		break;
 	default:
 #line 213 "c:\\halo\\SOURCE\\networking\\network_messages.c"
 		match_vassert(__FILE__, __LINE__, FALSE, "unknown network game message structure type");

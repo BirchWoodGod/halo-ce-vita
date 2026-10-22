@@ -47,7 +47,6 @@ static struct
 {
 	boolean told;
 	uint8_t token[PARTY_NET_TOKEN_BYTES];
-	unsigned long checked_time;
 } party_net_client;
 
 void party_net_client_send(struct network_game_client *client)
@@ -118,18 +117,21 @@ int party_net_machine_token(long machine_index, uint8_t *token)
 void party_net_update(void)
 {
 	struct network_game_client *client = global_network_game_client_get();
-	unsigned long now = system_milliseconds();
 	uint8_t token[PARTY_NET_TOKEN_BYTES];
 	short state = client ? network_game_client_get_state(client, NULL) : NONE;
+
+#ifdef HALO_DEDICATED_SERVER
+	/* (no party, no player: nothing to tell) */
+	return;
+#endif
 
 	if (state != PARTY_NET_CLIENT_STATE_PREGAME && state != PARTY_NET_CLIENT_STATE_INGAME)
 	{
 		party_net_client.told = FALSE;
 		return;
 	}
-	if (party_net_client.checked_time && now - party_net_client.checked_time < 1000)
-		return;
-	party_net_client.checked_time = now ? now : 1;
+	/* (each frame: a party formed in a game - its leader's, whose members
+	follow it in at once - is told before a member's player is added) */
 	if (network_game_is_splitscreen_local() || network_wire_crossplay() ||
 		!p2p_party_team_token(token, PARTY_NET_TOKEN_BYTES))
 	{

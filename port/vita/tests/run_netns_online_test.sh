@@ -3453,7 +3453,7 @@ solo)
 	echo "seconds of solo game logged: $ticks"
 	[ "$ticks" -ge 30 ] || fail "the solo game ran $ticks s"
 	;;
-dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedbots|dedicatedcompat|partyserver|hostbots|dedicatedcoop|dedicatedmulti|dedicatedfullcache|dedicatedreload|scoreboard|pings|pingsmixed|mapmid|mapmidmixed|swat|swatmixed)
+dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedbots|dedicatedcompat|partyserver|dedicatedcoop|dedicatedmulti|dedicatedfullcache|dedicatedreload|scoreboard|pings|pingsmixed|mapmid|mapmidmixed|swat|swatmixed)
 	server=${HALO_TEST_SERVER:-$root/build/linux/halo-server}
 	if [ "$mode" = swatmixed ]; then
 		vita_old=${HALO_TEST_VITA_OLD:-}
@@ -5279,12 +5279,18 @@ hostbots)
 	python3 - "$here" "$hl" "$out/old/run.log" "$most" <<'HOSTBOTS' || fail "the host's bots, teams or the 1.1.0 joiner's view"
 import re, sys
 sys.path.insert(0, sys.argv[1])
-from netns_compat_check import parse_ticks, read
+from netns_compat_check import parse_ticks, read, games_of, quitters
 host, old, most = parse_ticks(read(sys.argv[2])), parse_ticks(read(sys.argv[3])), int(sys.argv[4])
 bad = False
 def people_of(players, names):
     return {names.get(n, n): v[0] for n, v in players.items()}
-playing = [t for t in host if t[1] == "playing"]
+# (players who left - bots that left for people in play - stay on Halo's
+# scores, dead to the game's end: not counted)
+gone = quitters(host)
+playing = []
+for game, t in zip(games_of(host), host):
+    if t[1] == "playing":
+        playing.append((t[0], t[1], t[2], {n: v for n, v in t[3].items() if (game, n) not in gone}, t[4]))
 everyone = []
 for tick, state, local, players, names in playing:
     named = people_of(players, names)
