@@ -2624,3 +2624,15 @@
 "Spawn points full: %d. Delete one to place another." = "Puntos de aparición llenos: %d. Borra uno para colocar otro."
 "The host's game has no spawn points" = "La partida del anfitrión no tiene puntos de aparición"
 "Spawn points: Objects, SPAWNING. Held: team, game type." = "Apariciones: Objetos, APARICIONES. En mano: equipo y tipo."
+
+# ---------- Menu style Halo CE's additions (menus/classic: the Xbox screens with the port's rows)
+"No network: wait for it, or choose\nNETWORK: LOCAL." = "Sin red: espérala, o elige\nRED: LOCAL."
+"GAMETYPES PLUS" = "TIPOS DE JUEGO+"
+"Every gametype, Infection's too:\nmake new ones from any base and\nset all of their rules." = "Todos los tipos de juego, también\nInfección: crea nuevos desde cualquier\nbase y ajusta todas sus reglas."
+"MORE OPTIONS" = "MÁS OPCIONES"
+"LOBBY OPTIONS" = "OPCIONES DEL LOBBY"
+"%y-button PLAYERS   %right-trigger LOBBY OPTIONS" = "%y-button JUGADORES   %right-trigger OPCIONES DEL LOBBY"
+"The players in this game: add one as a\nfriend, mute their chat; the host kicks\nor bans." = "Los jugadores de esta partida: agrega uno\ncomo amigo, silencia su chat; el anfitrión\nexpulsa o veta."
+"Your friends online: invite them into\nthis game." = "Tus amigos conectados: invítalos a\nesta partida."
+"Play one of your Forge map variants of\nthis map (FORGE, then FILE SHARE): each\n%a-button the next, then NONE." = "Juega una de tus variantes de Forja de\neste mapa (FORJA, luego ARCHIVOS\nCOMPARTIDOS): cada %a-button la siguiente."
+"Your player model, the flaming helmet,\nlook sensitivity, invert flight and the\nrest of this profile's settings." = "Tu modelo de jugador, el casco en llamas,\nla sensibilidad, el vuelo invertido y el\nresto de ajustes de este perfil."

@@ -27,3 +27,35 @@ The format is OpenCE's (port/assets/menus/README.md in its repository), read
 by port/linux/src/menu_files.c and built by port/linux/game/menu_tags.c, with
 resource= added on <bitmap> and <strings>; the functions the screens run are
 port/linux/game/menu_functions.c's.
+
+Menu style Halo CE's additions (classic/)
+- The new features in the original menus' look: the Xbox screens of ui.map
+  (and of a level's map: the multiplayer pause) with the port's rows, built as
+  OpenCE's are. A <widget extends="ui\..."> is a copy of the map's widget's
+  look (its picture, font, colour, bounds and children) with what the element
+  gives; with classic_patch="true" it is the map's widget itself while Menu
+  style is Halo CE, and the map's own again while it is Halo 3 (menu_tags.c
+  swaps the tag's definition as each screen opens), so the Xbox screen keeps
+  its name, history and look and the Halo 3 menus are as they were.
+- main.xml: the main menu's FORGE, FRIENDS (its PARTY row; the friend code
+  and its backup), FILE SHARE and MOD MANAGER under SETTINGS, each opening the
+  port's screen (halo3/forge_lobby.xml, friends.xml, fileshare.xml, mods.xml).
+- profile.xml: SETTINGS' profile settings' MORE OPTIONS (the player model,
+  the flaming helmet and the rest: halo3/customize.xml's editor).
+- pregame.xml: the network game's lobby, Y PLAYERS and the right trigger's
+  LOBBY OPTIONS (PLAYERS, INVITE FRIENDS, MAP VARIANT).
+- pause.xml (ingame.txt): the multiplayer pause's PLAYERS and PARTY.
+- OpenCE's Multiplayer screen's GAMETYPES PLUS (multiplayer.xml: the
+  Halo 3 GAME TYPES, Infection's rules too) and Server Setup's BOTS
+  (setup.xml) are theirs.
+- No Bungie picture or line of text is added: the new rows' words are the
+  port's (translated, lang/), drawn in the map's own fonts or as pictures of
+  the port's own (tools/classic_menu_art.py, Saira Semi Condensed, SIL OFL):
+  the main menu's new rows and LOBBY OPTIONS's heading in the look of the
+  game's, one set per language - in English the main menu's rows are made,
+  as the menus load, of the very letters of the player's ui.map's own
+  CAMPAIGN, MULTIPLAYER, SETTINGS and GAME DEMOS (port/linux/game/
+  menu_words.c, kept in the data folder; the pictures here the fallback) (classic/en/, classic/es/: "{lang}" in a
+  <frame png=...> is the language chosen's, English's when it has none), and
+  the multiplayer pause's box (classic/pausebox.png); the other pictures are
+  the map's own or the player's Halo PC data's, as above.

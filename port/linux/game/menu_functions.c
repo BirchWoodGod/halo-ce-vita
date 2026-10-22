@@ -163,6 +163,7 @@ struct widget_instance *ui_widget_port_active_screen(short local_player_index);
 void ui_widget_port_go_back(short screen_index);
 boolean ui_widget_port_join_advertised_game(struct widget_instance *list, void const *server, boolean *widget_deleted);
 boolean transport_network_available(void);
+boolean menu_functions_forge_host(short map_index, char const *variant_file, char *why, int why_size);
 /* menu_tags.c's: a screen of the set by its widget's name (NONE: none) */
 long menu_tags_ingame_screen(char const *name);
 extern int (*halo_test_setting_hook)(const char *variable, const char *value);
@@ -393,6 +394,9 @@ enum
 	_function_h3_dialog_ok,
 	_function_h3_dialog_yes,
 	_function_h3_dialog_no,
+	_function_ce_pregame_init,
+	_function_ce_variant_next,
+	_function_ce_custom,
 };
 
 /* in port_game_data_input_names' order */
@@ -455,6 +459,8 @@ enum
 	_input_h3_gametype_options,
 	_input_h3_carnage,
 	_input_h3_dialog,
+	_input_ce_lobby,
+	_input_ce_profile,
 };
 
 /* what a line of typing is for */
@@ -3853,7 +3859,16 @@ static struct
 	boolean flame_asked;
 	short help_offset;
 	boolean help_offset_kept;
+	/* (Menu style Halo CE) opened from the Xbox's profile settings (MORE
+	OPTIONS): the profile's editing theirs, never ended here */
+	boolean classic;
 } h3_custom;
+
+static void h3_custom_begin(long profile_index, struct player_profile *profile, char const *name);
+/* (Menu style Halo CE's additions: the Xbox's pregame) */
+static void ce_pregame_initialize(void);
+static boolean ce_variant_next(void);
+static void ce_lobby_update(struct widget_instance *list);
 
 static void h3_profiles_spartan(struct widget_instance *screen, struct player_profile const *profile,
 	long profile_index);
@@ -4075,7 +4090,16 @@ static boolean h3_profile_edit(short item)
 		h3_profiles.status_item = -2;
 		return FALSE;
 	}
-	h3_custom.index = h3_profiles.indices[item];
+	h3_custom.classic = FALSE;
+	h3_custom_begin(h3_profiles.indices[item], profile, name);
+	return TRUE;
+}
+
+/* the editor on the profile being edited (profile_index, read: profile),
+named name */
+static void h3_custom_begin(long profile_index, struct player_profile *profile, char const *name)
+{
+	h3_custom.index = profile_index;
 	h3_custom.flame_asked = FALSE;
 	h3_custom.status[0] = 0;
 	h3_custom.said[0] = 0;
@@ -4092,7 +4116,64 @@ static boolean h3_profile_edit(short item)
 		profile->controller_settings.button_preset, profile->controller_settings.look_sensitivity,
 		profile->controller_settings.invert_look, profile->controller_settings.flight_stick_aircraft_controls,
 		profile->controller_settings.autocenter, profile->controller_settings.vibration_disabled ? "off" : "on");
+}
+
+/* (Menu style Halo CE: the Xbox's profile settings' MORE OPTIONS, port ce
+custom) the Halo 3 editor on the profile the Xbox's screens edit - its
+model, flaming helmet and the rest -, its edits theirs: Circle saves the
+profile (what the Xbox's rows changed too) and the Xbox's screen goes on
+editing it (h3_custom.classic: the editing not ended) */
+static boolean ce_custom_open(void)
+{
+	long index = player_ui_get_edit_profile_index();
+	struct player_profile *profile = player_ui_get_edit_player_profile();
+	char name[48];
+
+	if (index == NONE || !profile)
+	{
+		platform_log("menus: ce customize: no profile being edited");
+		return FALSE;
+	}
+	h3_profile_name(name, sizeof(name), profile);
+	h3_custom.classic = TRUE;
+	h3_custom_begin(index, profile, name);
+	platform_log("menus: ce customize: MORE OPTIONS for %s (the Xbox's profile settings)", name);
 	return TRUE;
+}
+
+/* (port ce profile: Menu style Halo CE's profile settings, a widget of
+ours on them) the list's description as the Xbox's "plyr prof edit select
+menu upd8" sets it - its words and picture by the focused row - counting the
+Xbox's rows alone; on MORE OPTIONS (its row: more) the panel with the port's
+words (more_help) */
+static void ce_profile_description_update(struct widget_instance *widget)
+{
+	struct widget_instance *list = named(screen_of(widget), "profile_edit_select_list");
+	struct widget_instance *description, *child, *help;
+	boolean more;
+	short index = 0;
+
+	if (!list || !list->focused_child || !(description = list->parameters.list.extended_description) ||
+		!description->child || !description->child->next)
+	{
+		return;
+	}
+	for (child = list->child; child && child != list->focused_child; child = child->next)
+	{
+		if (!child->name || strcmp(child->name, "more"))
+			index++;
+	}
+	/* (MORE OPTIONS: the panel, its own words in it - more_help -, not the
+	Xbox's picture and words) */
+	more = list->focused_child->name && !strcmp(list->focused_child->name, "more");
+	widget_instance_set_visibility_recursive(description, !more);
+	description->visible = TRUE;
+	if ((help = named(screen_of(widget), "more_help")) != NULL)
+		widget_instance_set_visibility_recursive(help, more);
+	if (more)
+		return;
+	description->child->parameters.text_box.string_list_index = index;
+	description->child->next->animation.current_frame_index = index;
 }
 
 /* (CREATE NEW PROFILE, Triangle) its name asked for */
@@ -4808,7 +4889,8 @@ static void h3_custom_save(void)
 	}
 	if (!player_ui_edit_profile_is_dirty())
 	{
-		player_ui_end_editing_profile();
+		if (!h3_custom.classic)
+			player_ui_end_editing_profile();
 		platform_log("menus: h3 customize: %s: no changes", name);
 		return;
 	}
@@ -7137,7 +7219,7 @@ static void join_watch(void)
 /* ---- the Multiplayer screen */
 
 /* (each item's description and picture: by its place in the list) */
-static short const multiplayer_pictures[] = { 0, 1, 0, 0, 1, 0, 1, 2 };
+static short const multiplayer_pictures[] = { 0, 1, 0, 0, 1, 0, 1, 2, 2 };
 
 static void multiplayer_update(struct widget_instance *list)
 {
@@ -7784,6 +7866,15 @@ static void browser_update(struct widget_instance *list)
 						snprintf(text, sizeof(text), "%d+%d", people, entry->bots);
 				}
 			}
+		}
+		/* (Menu style Halo CE's server browser, OpenCE's rows: the people and
+		the bots apart too, "6+5/16", in its narrow column) */
+		else if (entry->bots > 0 && entry->bots <= entry->players)
+		{
+			if (entry->maximum > 0)
+				snprintf(text, sizeof(text), "%d+%d/%d", entry->players - entry->bots, entry->bots, entry->maximum);
+			else
+				snprintf(text, sizeof(text), "%d+%d", entry->players - entry->bots, entry->bots);
 		}
 		row_column(child, "row_players", text);
 #ifndef HALO_RELEASE
@@ -15606,6 +15697,33 @@ boolean pc_menu_event_function_invoke(
 		network not ready, no profile -: said, nothing opened) */
 		if (h3_forge.network == _h3_network_offline || !forge_map_available(h3_forge.map))
 			return FALSE;
+		/* (Menu style Halo CE, the lobby opened from the Xbox main menu's
+		FORGE: no live lobby there - the settings panel's network Forge game's
+		way, the profile, then the game hosted and the Xbox's pregame) */
+		if (!halo_menu_style_halo3())
+		{
+			if (!transport_network_available())
+			{
+				snprintf(h3_forge.note, sizeof(h3_forge.note), "%s",
+					T("No network: wait for it, or choose\nNETWORK: LOCAL."));
+				platform_log("menus: forge lobby: START FORGE (Halo CE menus): no network");
+				return FALSE;
+			}
+			if (h3_forge.network == _h3_network_online && !internet_play())
+			{
+				snprintf(h3_forge.note, sizeof(h3_forge.note), "%s", T("Internet play is off"));
+				return FALSE;
+			}
+			platform_log("menus: forge lobby: START FORGE (Halo CE menus): the profile, then the game hosted on %s",
+				forge_map_name(h3_forge.map));
+			{
+				/* (its own copy: menu_functions_forge_host writes the lobby's) */
+				char variant[sizeof(h3_forge.variant_file)];
+
+				snprintf(variant, sizeof(variant), "%s", h3_forge.variant_file);
+				return menu_functions_forge_host(h3_forge.map, variant, h3_forge.note, sizeof(h3_forge.note));
+			}
+		}
 		if (h3_forge.network == _h3_network_online)
 			h3_live_open_now("START FORGE");
 		if (h3_live_forge_start())
@@ -15896,8 +16014,10 @@ boolean pc_menu_event_function_invoke(
 	edit screen left without SAVE CHANGES) */
 	case _function_h3_custom_close:
 		h3_custom_spartan_hide();
-		if (player_ui_get_edit_player_profile())
+		/* (opened from the Xbox's profile settings: theirs to end) */
+		if (player_ui_get_edit_player_profile() && !h3_custom.classic)
 			player_ui_end_editing_profile();
+		h3_custom.classic = FALSE;
 		return TRUE;
 	case _function_forge_map_pick:
 		return h3_forge_map_pick(widget);
@@ -15937,6 +16057,14 @@ boolean pc_menu_event_function_invoke(
 		return TRUE;
 	/* (the multiplayer pause's PARTY: on the Vita the settings panel's
 	Party page, its chat and quick chat) */
+	/* (Menu style Halo CE's additions: menus/classic) */
+	case _function_ce_pregame_init:
+		ce_pregame_initialize();
+		return TRUE;
+	case _function_ce_variant_next:
+		return ce_variant_next();
+	case _function_ce_custom:
+		return ce_custom_open();
 	case _function_h3_mp_pause_party:
 #ifdef HALO_VITA
 		__atomic_store_n(&halo_settings_panel_request, HALO_SETTINGS_PANEL_PARTY, __ATOMIC_RELEASE);
@@ -16337,6 +16465,13 @@ void pc_menu_game_data_function_invoke(
 	case _input_h3_dialog:
 		h3_dialog_update(widget);
 		break;
+	case _input_ce_profile:
+		ce_profile_description_update(widget);
+		break;
+	case _input_ce_lobby:
+		if (widget->type == _ui_widget_type_column_list)
+			ce_lobby_update(widget);
+		break;
 	case _input_h3_players:
 		if (widget->type == _ui_widget_type_column_list)
 			h3_players_update(widget);
@@ -16412,6 +16547,181 @@ void pc_menu_game_data_function_invoke(
 the Halo CE menus too) a network Forge game of that map and map variant
 hosted once the System Link screen's profile is chosen, its lobby (the
 game's) next; FALSE with why if the map cannot be */
+/* ---- Menu style Halo CE's additions (menus/classic: the Xbox screens with
+the port's rows, menu_tags.c classic_patch) */
+
+/* (LOBBY OPTIONS' rows, as OpenCE's Multiplayer screen's) */
+#define CE_LOBBY_ROW_SPACING 33
+
+/* the Xbox's pregame (connected_pregame_screen) of a game this machine
+hosts: the map variant its game is played with, chosen on its LOBBY
+OPTIONS' MAP VARIANT (menus/classic/pregame.xml) among its map's (none
+first), as the Halo 3 lobby's MAP picker chooses one - forge_play_host_begin,
+the joiners asked to play it */
+static struct
+{
+	/* the variant chosen (its file and title; none: "") and whether this
+	pregame hosts it (forge_play_host_begin), the map it was chosen for */
+	char file[FORGE_FILE_NAME_SIZE];
+	char title[FORGE_FILE_TITLE_SIZE];
+	boolean hosted;
+	short map;
+	char note[160];
+	char said[256];
+} ce_pregame = { "", "", FALSE, NONE, "", "" };
+
+/* the game hosted here, in its lobby (else NULL) */
+static struct network_game_server *ce_hosted_server(void)
+{
+	struct network_game_server *server = global_network_game_server_get();
+
+	return server && network_game_server_port_in_lobby(server) ? server : NULL;
+}
+
+/* the lobby map (forge.c's) of the game hosted, NONE for one not in it */
+static short ce_hosted_map(void)
+{
+	char const *map = main_get_multiplayer_map_name();
+	short index;
+
+	for (index = 0; map && map[0] && index < forge_map_count(); index++)
+	{
+		char const *path = forge_map_path(index);
+
+		if (path && !_stricmp(path, map))
+			return index;
+	}
+	return NONE;
+}
+
+/* (the pregame's created: port ce pregame init) a variant hosted before -
+the game since ended, another map - forgotten */
+static void ce_pregame_initialize(void)
+{
+	ce_pregame.note[0] = 0;
+	if (ce_pregame.hosted && (!forge_net_hosting() || !ce_hosted_server() || ce_hosted_map() != ce_pregame.map))
+		ce_pregame.hosted = FALSE;
+	if (!ce_pregame.hosted)
+		ce_pregame.file[0] = ce_pregame.title[0] = 0;
+}
+
+/* (port ce variant next: LOBBY OPTIONS' MAP VARIANT) the hosted map's next
+map variant, after the last none again */
+static boolean ce_variant_next(void)
+{
+	short map = ce_hosted_map();
+	char why[FORGE_STORE_WHY_SIZE];
+	int index, next = 0;
+
+	ce_pregame.note[0] = 0;
+	if (!ce_hosted_server() || map == NONE)
+		return FALSE;
+	/* (a network Forge game hosted: its own variant, not this) */
+	if (forge_net_hosting() && !ce_pregame.hosted)
+		return FALSE;
+	h3_variants_list(_variants_lobby, forge_map_short(map), TRUE);
+	/* (the one after the chosen one; none after the last) */
+	for (index = 0; index < h3_variants.count; index++)
+	{
+		if (!h3_variants.entries[index].damaged && ce_pregame.file[0] &&
+			!strcmp(h3_variants.entries[index].file_name, ce_pregame.file))
+		{
+			next = index + 1;
+			break;
+		}
+	}
+	while (next < h3_variants.count && h3_variants.entries[next].damaged)
+		next++;
+	if (next >= h3_variants.count || !h3_variants.count)
+	{
+		if (ce_pregame.hosted)
+			forge_net_host_end();
+		ce_pregame.hosted = FALSE;
+		ce_pregame.file[0] = ce_pregame.title[0] = 0;
+		platform_log("menus: ce pregame: no map variant: %s as it is", forge_map_name(map));
+		return TRUE;
+	}
+	/* (the one played before let go first: one variant's session at a time) */
+	if (ce_pregame.hosted)
+		forge_net_host_end();
+	ce_pregame.hosted = FALSE;
+	if (!forge_play_host_begin(forge_map_path(map), h3_variants.entries[next].file_name, why, (int)sizeof(why)))
+	{
+		snprintf(ce_pregame.note, sizeof(ce_pregame.note), "%s", why);
+		/* (kept, so that the next press goes on past it) */
+		snprintf(ce_pregame.file, sizeof(ce_pregame.file), "%s", h3_variants.entries[next].file_name);
+		ce_pregame.title[0] = 0;
+		platform_log("menus: ce pregame: the map variant %s can't be played: %s", h3_variants.entries[next].title, why);
+		return TRUE;
+	}
+	snprintf(ce_pregame.file, sizeof(ce_pregame.file), "%s", h3_variants.entries[next].file_name);
+	snprintf(ce_pregame.title, sizeof(ce_pregame.title), "%s", h3_variants.entries[next].title);
+	ce_pregame.hosted = TRUE;
+	ce_pregame.map = map;
+	platform_log("menus: ce pregame: the map variant %s is played on %s", ce_pregame.title, forge_map_name(map));
+	return TRUE;
+}
+
+/* (port ce lobby: the pregame's LOBBY OPTIONS, its list) PLAYERS for
+everyone; the host's INVITE FRIENDS (a game hosted online) and MAP VARIANT
+(a map of the lobby's, not a network Forge game), a hidden row's place taken
+by the rows under it; the description's panel: the hosted map's picture and
+name, the map variant played, the focused row's words */
+static void ce_lobby_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *row, *child, *found;
+	struct network_game_server *server = ce_hosted_server();
+	short map = ce_hosted_map();
+	boolean invite = server && internet_play() && !network_game_is_splitscreen_local();
+	boolean variant = server && map != NONE && (!forge_net_hosting() || ce_pregame.hosted);
+	char text[256];
+	short index = 0, shown = 0, base;
+
+	if ((row = named(screen, "op_invite")) != NULL)
+	{
+		widget_instance_set_visibility_recursive(row, invite);
+		row->disabled = !invite;
+	}
+	if ((row = named(screen, "op_variant")) != NULL)
+	{
+		widget_instance_set_visibility_recursive(row, variant);
+		row->disabled = !variant;
+	}
+	/* (the rows shown one under the other, as the list's first stands) */
+	base = list->child ? list->child->vertical_offset : 0;
+	for (child = list->child; child; child = child->next)
+	{
+		if (child->visible)
+			child->vertical_offset = (short)(base + shown++ * CE_LOBBY_ROW_SPACING);
+	}
+	if ((found = named(screen, "map_picture")) != NULL)
+	{
+		widget_instance_set_visibility_recursive(found, map != NONE);
+		if (map != NONE)
+			found->animation.current_frame_index = map;
+	}
+	text_show(named(screen, "map_name"), map != NONE ? T(forge_map_name(map)) : "");
+	if (variant)
+	{
+		snprintf(text, sizeof(text), "%s:\r\n%s", T("MAP VARIANT"), ce_pregame.note[0] ? ce_pregame.note :
+			ce_pregame.title[0] ? ce_pregame.title : T("NONE"));
+		text_show(named(screen, "variant_value"), text);
+	}
+	else
+		text_show(named(screen, "variant_value"), "");
+	for (child = list->child; child && child != list->focused_child; child = child->next)
+		index++;
+	string_show(named(screen, "lobby_help"), index);
+	snprintf(text, sizeof(text), "PLAYERS%s%s%s%s", invite ? ", INVITE FRIENDS" : "", variant ? ", MAP VARIANT " : "",
+		variant ? (ce_pregame.title[0] ? ce_pregame.title : "NONE") : "", ce_pregame.note[0] ? " (not played)" : "");
+	if (strcmp(ce_pregame.said, text))
+	{
+		snprintf(ce_pregame.said, sizeof(ce_pregame.said), "%s", text);
+		platform_log("menus: ce lobby options: %s", text);
+	}
+}
+
 boolean menu_functions_forge_host(
 	short map_index,
 	char const *variant_file,

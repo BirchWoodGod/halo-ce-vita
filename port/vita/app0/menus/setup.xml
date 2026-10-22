@@ -34,11 +34,19 @@
 		<child widget="setup/who_label"/>
 		<child widget="setup/who_spinner" x="320" y="1"/>
 	</widget>
-	<widget name="setup/op_start" type="text" left="256" top="212" width="128" height="24" bitmap="text_button_background" string_list="setup_options" string_index="4" font="ui\small_ui" color="#FFFFFFFF" align="center" text_y="2">
+	<!-- (the port's: Bots online, bots.online - the bots a game hosted online fills its lobby with,
+	     as the Halo 3 GAME OPTIONS' BOTS: menu_functions.c reads op_bots' spinner) -->
+	<widget name="setup/bots_label" string_list="setup_labels" string_index="2" type="text" width="230" height="22" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4"/>
+	<widget name="setup/bots_spinner" strings="FULL|OFF|1|2|3|5|7|9|11|13" type="spinner" left="3" top="2" width="147" height="20" flags="pass_unhandled_to_focused_child left_right_tabs_items" font="ui\large_ui" color="#FF2896FF" align="center" text_y="1" header_bitmap="arrow_sm_left" footer_bitmap="arrow_sm_right" header_bounds="7 -6 19 0" footer_bounds="7 150 19 156"/>
+	<widget name="setup/op_bots" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="#FF2896FF">
+		<child widget="setup/bots_label"/>
+		<child widget="setup/bots_spinner" x="320" y="1"/>
+	</widget>
+	<widget name="setup/op_start" type="text" left="256" top="238" width="128" height="24" bitmap="text_button_background" string_list="setup_options" string_index="4" font="ui\small_ui" color="#FFFFFFFF" align="center" text_y="2">
 		<on event="a start" run="port setup start" open="ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen"/>
 	</widget>
-	<widget name="setup/setup_status" type="text" left="68" top="252" width="520" height="20" font="ui\small_ui" color="#FFE5E500"/>
-	<widget name="setup/setup_help" type="text" left="68" top="290" width="520" height="80" string_list="setup_help" font="ui\large_ui" color="#FFFFFFFF"/>
+	<widget name="setup/setup_status" type="text" left="68" top="274" width="520" height="20" font="ui\small_ui" color="#FFE5E500"/>
+	<widget name="setup/setup_help" type="text" left="68" top="304" width="520" height="80" string_list="setup_help" font="ui\large_ui" color="#FFFFFFFF"/>
 	<widget name="setup/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<data input="port setup update"/>
 		<child widget="setup/op_name" x="54" y="73"/>
@@ -46,6 +54,7 @@
 		<child widget="setup/op_visibility" x="54" y="125"/>
 		<child widget="setup/op_password" x="54" y="151"/>
 		<child widget="setup/op_who" x="54" y="177"/>
+		<child widget="setup/op_bots" x="54" y="203"/>
 		<child widget="setup/op_start"/>
 	</widget>
 	<widget name="setup/screen" flags="pass_unhandled_to_focused_child" bitmap="gradient">

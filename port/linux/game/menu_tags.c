@@ -124,6 +124,8 @@ version's own menus have) */
 /* the Halo 3 set's screens that stand for an Xbox one (main menu, campaign,
 their pickers...) */
 #define MAXIMUM_H3_SCREENS 64
+/* the Xbox screens' widgets Menu style Halo CE adds rows to (classic_patch=) */
+#define MAXIMUM_CLASSIC_PATCHES 32
 
 /* the layout of a bitmap tag and a string list tag held by a Custom Edition
 resource map (the item is the whole tag, its addresses counting from the
@@ -419,6 +421,7 @@ static char const *const port_function_names[] =
 	"port h3 carnage init", "port h3 carnage continue", "port h3 carnage leave ask", "port h3 carnage leave",
 	"port h3 carnage players", "port h3 carnage page", "port h3 carnage up", "port h3 carnage down",
 	"port h3 dialog ok", "port h3 dialog yes", "port h3 dialog no",
+	"port ce pregame init", "port ce variant next", "port ce custom",
 };
 
 /* the port's game data functions (menu_functions.c), from
@@ -447,6 +450,7 @@ static char const *const port_game_data_input_names[] =
 	"port h3 gametype editor", "port h3 gametype options",
 	"port h3 carnage",
 	"port h3 dialog",
+	"port ce lobby", "port ce profile",
 };
 
 static struct
@@ -482,6 +486,14 @@ static struct
 	char const *h3_root[MAXIMUM_H3_SCREENS];
 	char const *h3_replaces[MAXIMUM_H3_SCREENS];
 	boolean h3_left_out_said;
+	/* Menu style Halo CE's additions (classic_patch="true"): the map's
+	widget, its own definition and ours, which stands for it while Menu style
+	is Halo CE (classic_patches_apply); whether ours are in place now */
+	long classic_count;
+	long classic_tags[MAXIMUM_CLASSIC_PATCHES];
+	void *classic_original[MAXIMUM_CLASSIC_PATCHES];
+	void *classic_patched[MAXIMUM_CLASSIC_PATCHES];
+	int classic_applied;
 } menu_tags;
 
 /* the build under way */
@@ -1234,6 +1246,110 @@ static long event_words_count(char const *text)
 	return count;
 }
 
+/* a block of the map's widget's followed by ours (or ours alone, the map's
+dropped) */
+static void block_join(struct tag_block *joined, struct tag_block const *map, struct tag_block const *ours,
+	long element_size, boolean dropped)
+{
+	long map_count = dropped ? 0 : map->count;
+	long count = map_count + ours->count;
+	byte *elements;
+
+	joined->count = 0;
+	joined->address = NULL;
+	if (!count)
+		return;
+	elements = allocate(count * element_size);
+	if (!elements)
+		return;
+	if (map_count)
+		memcpy(elements, map->address, map_count * element_size);
+	if (ours->count)
+		memcpy(elements + map_count * element_size, ours->address, ours->count * element_size);
+	joined->count = count;
+	joined->address = elements;
+}
+
+static boolean drop_named(struct halo_menu_widget const *source, char const *what)
+{
+	return source->drop && strstr(source->drop, what) != NULL;
+}
+
+/* (extends=) the map's widget's definition with what the element gives in
+its place (halo_menus.h), built as ours is (built); the map without the
+widget (a level's map: its screens differ): ours alone, said */
+static void *widget_extend(struct halo_menu_widget const *source, struct menu_widget_definition *built)
+{
+	long tag_index = tag_loaded(UI_WIDGET_DEFINITION_TAG, source->extends);
+	struct menu_widget_definition const *map;
+	struct menu_widget_definition *definition;
+
+	if (tag_index == NONE || !(map = tag_get(UI_WIDGET_DEFINITION_TAG, tag_index)))
+		return built;
+	definition = allocate(sizeof(*definition));
+	if (!definition)
+		return built;
+	*definition = *map;
+	/* (an Xbox screen's widget it stands for keeps its name: the logs, and
+	the Xbox's own code that looks for it by name, see the map's) */
+	if (!source->classic_patch)
+		memcpy(definition->name, built->name, sizeof(definition->name));
+	if (source->bitmap)
+		definition->background_bitmap = built->background_bitmap;
+	if (source->flags)
+		definition->flags = built->flags;
+	if (source->font)
+		definition->text_font = built->text_font;
+	if (source->color)
+		definition->text_color = built->text_color;
+	if (source->align)
+		definition->justification = built->justification;
+	if (source->text || source->string_list || source->strings)
+	{
+		definition->text_label_string_list = built->text_label_string_list;
+		definition->string_list_index = built->string_list_index;
+	}
+	if (source->text_x)
+		definition->horizontal_offset = built->horizontal_offset;
+	if (source->text_y)
+		definition->vertical_offset = built->vertical_offset;
+	if (source->has_width)
+		definition->bounds.x1 = (short)(definition->bounds.x0 + source->width);
+	if (source->has_height)
+		definition->bounds.y1 = (short)(definition->bounds.y0 + source->height);
+	if (source->description)
+		definition->extended_description_widget = built->extended_description_widget;
+	/* (a widget of ours - not a classic patch, which keeps the map's tag and
+	so its trust, ui_widget_function_denied - takes the map's look alone:
+	never its events or data inputs, which would run as ours, the port's
+	functions and the main menu's allowed - a level's map is the player's,
+	maybe a Custom Edition one) */
+	block_join(&definition->child_widgets, &map->child_widgets, &built->child_widgets,
+		sizeof(struct ui_widget_child_reference), drop_named(source, "children"));
+	block_join(&definition->event_handlers, &map->event_handlers, &built->event_handlers,
+		sizeof(struct ui_widget_event_handler_reference), !source->classic_patch || drop_named(source, "handlers"));
+	block_join(&definition->game_data_inputs, &map->game_data_inputs, &built->game_data_inputs,
+		sizeof(struct ui_widget_game_data_input_reference), !source->classic_patch || drop_named(source, "inputs"));
+	if (source->classic_patch)
+	{
+		long index;
+
+		for (index = 0; index < menu_tags.classic_count && menu_tags.classic_tags[index] != tag_index; index++)
+			;
+		if (index < menu_tags.classic_count || menu_tags.classic_count == MAXIMUM_CLASSIC_PATCHES)
+			problem(source->file, source->line, index < menu_tags.classic_count ?
+				"two widgets patch the map's" : "too many classic patches:", source->extends);
+		else
+		{
+			menu_tags.classic_tags[index] = tag_index;
+			menu_tags.classic_original[index] = (void *)map;
+			menu_tags.classic_patched[index] = definition;
+			menu_tags.classic_count++;
+		}
+	}
+	return definition;
+}
+
 static void *widget_build(long widget_index)
 {
 	struct halo_menus const *menus = build.menus;
@@ -1246,6 +1362,16 @@ static void *widget_build(long widget_index)
 		return NULL;
 	strncpy(definition->name, leaf, sizeof(definition->name) - 1);
 	definition->type = _widget_type_container;
+	/* (extends= a widget this map has not - a level's map of another kind:
+	the multiplayer pause's rows on a campaign map -: an empty widget, its
+	children, events and inputs not looked for, and nothing stands for the
+	map's; said once, the set still added) */
+	if (source->extends && tag_loaded(UI_WIDGET_DEFINITION_TAG, source->extends) == NONE)
+	{
+		platform_log("menus: %s:%ld: this map has no %s for %s to extend: left out here", source->file, source->line,
+			source->extends, source->name);
+		return definition;
+	}
 	if (source->type)
 	{
 		long type = name_index(source->type, widget_type_names, NUMBEROF(widget_type_names));
@@ -1272,7 +1398,7 @@ static void *widget_build(long widget_index)
 	definition->milliseconds_to_auto_close = source->auto_close;
 	definition->auto_close_fade_time = source->auto_close_fade;
 	reference_clear(&definition->background_bitmap, BITMAP_GROUP_TAG);
-	if (source->bitmap)
+	if (source->bitmap && strcmp(source->bitmap, "none"))
 	{
 		reference_set(&definition->background_bitmap, BITMAP_GROUP_TAG,
 			tag_named(BITMAP_GROUP_TAG, source->bitmap, source->file, source->line));
@@ -1471,6 +1597,8 @@ static void *widget_build(long widget_index)
 			}
 		}
 	}
+	if (source->extends)
+		return widget_extend(source, definition);
 	return definition;
 }
 
@@ -1573,6 +1701,33 @@ static void menu_tags_release(void)
 		free(menu_tags.fit_bitmaps);
 	memset(&menu_tags, 0, sizeof(menu_tags));
 	menu_tags.root_tag = menu_tags.xbox_root_tag = NONE;
+}
+
+/* (Menu style Halo CE's additions) the Xbox screens' widgets the port adds
+rows to: ours while Menu style is Halo CE, the map's own while it is Halo 3
+(a style changed in the settings panel takes at the next screen, as the Halo
+3 set's does) */
+static void classic_patches_apply(void)
+{
+	int classic = !halo_menu_style_halo3();
+	struct cache_file_tag_instance *instances;
+	long count, index;
+
+	if (!menu_tags.classic_count || menu_tags.classic_applied == (classic ? 1 : -1))
+		return;
+	instances = cache_files_tag_instances(&count);
+	if (!instances)
+		return;
+	for (index = 0; index < menu_tags.classic_count; index++)
+	{
+		long absolute = DATUM_INDEX_TO_ABSOLUTE_INDEX(menu_tags.classic_tags[index]);
+
+		if (absolute >= 0 && absolute < count)
+			instances[absolute].base_address = classic ? menu_tags.classic_patched[index] : menu_tags.classic_original[index];
+	}
+	menu_tags.classic_applied = classic ? 1 : -1;
+	platform_log("menus: Menu style %s: the Xbox screens' %ld widgets %s", classic ? "Halo CE" : "Halo 3",
+		menu_tags.classic_count, classic ? "with the port's rows" : "as the map has them");
 }
 
 /* ---------- the player's Halo PC data */
@@ -1976,14 +2131,45 @@ static byte *png_decode(byte const *data, unsigned long size, long width, long h
 	return pixels;
 }
 
+/* a PNG's path with "{lang}" in it: the language's (lang_current, as the
+menus load: menus/classic's words drawn in each language), else English's
+(en) - the language having none of its own; NULL: the path as written */
+static char const *menu_png_language_path(char const *png, char const *code, char *path, int size)
+{
+	char const *at = strstr(png, "{lang}");
+
+	if (!at)
+		return NULL;
+	snprintf(path, (size_t)size, "%.*s%s%s", (int)(at - png), png, code, at + 6);
+	return path;
+}
+
+unsigned char *menu_words_frame(char const *png, long width, long height);
+
 static boolean menu_png_frame_load(struct menu_png_frame const *frame)
 {
 	struct bitmap_data *bitmap = frame->bitmap;
 	unsigned long size = 0;
-	byte *data = halo_menus_art_png(frame->png, &size);
+	char path[256];
+	char const *png = menu_png_language_path(frame->png, lang_current(), path, (int)sizeof(path));
+	byte *data = png ? NULL : halo_menus_art_png(frame->png, &size);
 	byte *pixels;
 
-	if (!data)
+	/* (the main menu's new rows: the game's own letters, menu_words.c) */
+	pixels = menu_words_frame(frame->png, bitmap->width, bitmap->height);
+	if (pixels)
+	{
+		if (data)
+			halo_menus_file_free(data);
+		goto made;
+	}
+	if (png)
+	{
+		data = halo_menus_file_read(png, &size);
+		if (!data)
+			data = halo_menus_file_read(menu_png_language_path(frame->png, "en", path, (int)sizeof(path)), &size);
+	}
+	else if (!data)
 		data = halo_menus_file_read(frame->png, &size);
 	pixels = data && size <= MAXIMUM_PNG_BYTES ? png_decode(data, size, bitmap->width, bitmap->height) : NULL;
 
@@ -1994,6 +2180,7 @@ static boolean menu_png_frame_load(struct menu_png_frame const *frame)
 			"the frame's size):", frame->png);
 		return FALSE;
 	}
+made:
 	bitmap->base_address = pixels;
 	if (!rasterizer_bitmap_new(bitmap) || !bitmap->hardware_format)
 	{
@@ -2082,9 +2269,16 @@ static void menu_tags_art_preread(void)
 		paths[at++] = menu_tags.string_resources[index].path;
 	plan.string_count = menu_tags.string_resource_count;
 	plan.png_names = paths + at;
+	/* (a language's PNG, "{lang}": read when it loads, the language's then) */
+	plan.png_count = 0;
 	for (index = 0; index < menu_tags.png_frame_count; index++)
-		paths[at++] = menu_tags.png_frames[index].png;
-	plan.png_count = menu_tags.png_frame_count;
+	{
+		if (!strstr(menu_tags.png_frames[index].png, "{lang}"))
+		{
+			paths[at++] = menu_tags.png_frames[index].png;
+			plan.png_count++;
+		}
+	}
 	plan.bitmaps_block_offset = RESOURCE_BITMAP_BITMAPS_OFFSET;
 	plan.bitmap_data_bytes = RESOURCE_BITMAP_DATA_BYTES;
 	plan.pixels_offset_offset = offsetof(struct bitmap_data, pixels_offset);
@@ -2250,6 +2444,8 @@ void menu_tags_loaded(
 
 	menu_tags_changes++;
 	menu_tags.root_tag = menu_tags.xbox_root_tag = NONE;
+	menu_tags.classic_count = 0;
+	menu_tags.classic_applied = 0;
 	/* (until they are added: the Xbox's menus) */
 	if (!ingame)
 		halo_pc_menus_state = -1;
@@ -2413,6 +2609,7 @@ void menu_tags_loaded(
 		platform_log("menus: Halo 3 set: %ld of %ld screens (Menu style %s)", menu_tags.h3_count, menus->screen_count,
 			halo_menu_style_halo3() ? "Halo 3" : "Halo CE");
 	menu_tags.loaded = TRUE;
+	classic_patches_apply();
 	if (!ingame)
 		halo_pc_menus_state = 1;
 	menu_tags_art_preread();
@@ -2555,6 +2752,8 @@ long menu_tags_screen(
 		menu_tags_dump(tag_index, 0);
 	if (!menu_tags.loaded || tag_index == NONE)
 		return tag_index;
+	/* (the Xbox screens with Menu style Halo CE's rows, or without) */
+	classic_patches_apply();
 	/* (a Forge game: its menu for the level's pause screen, which would
 	save the game and offer the campaign's checkpoints) */
 	if (forge_game_active())
