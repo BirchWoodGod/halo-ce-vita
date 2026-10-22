@@ -767,7 +767,7 @@ seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = h3liveinvite ] && seconds=${HALO_TEST_SECONDS:-240}
 [ "$mode" = h3liveagain ] && seconds=${HALO_TEST_SECONDS:-280}
 # (network Forge: netns_forge_cases.sh)
-case $mode in forge) seconds=${HALO_TEST_SECONDS:-110} ;; forge3) seconds=${HALO_TEST_SECONDS:-125} ;; forgeold|forgeleave) seconds=${HALO_TEST_SECONDS:-80} ;; forgemp) seconds=${HALO_TEST_SECONDS:-120} ;; h3forge|h3forgeadhoc|forgepanel) seconds=${HALO_TEST_SECONDS:-130} ;; h3forgeonline) seconds=${HALO_TEST_SECONDS:-230} ;; h3variant) seconds=${HALO_TEST_SECONDS:-150} ;; h3forgeslow) seconds=${HALO_TEST_SECONDS:-330} ;; esac
+case $mode in forge) seconds=${HALO_TEST_SECONDS:-110} ;; forge3) seconds=${HALO_TEST_SECONDS:-125} ;; forgeold|forgeleave) seconds=${HALO_TEST_SECONDS:-80} ;; forgemp) seconds=${HALO_TEST_SECONDS:-150} ;; h3forge|h3forgeadhoc|forgepanel) seconds=${HALO_TEST_SECONDS:-130} ;; h3forgeonline) seconds=${HALO_TEST_SECONDS:-230} ;; h3variant) seconds=${HALO_TEST_SECONDS:-150} ;; h3forgeslow) seconds=${HALO_TEST_SECONDS:-330} ;; esac
 rejoin=${HALO_TEST_REJOIN:-0}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_netns_test.$$}
 . "$here/test_out.sh"

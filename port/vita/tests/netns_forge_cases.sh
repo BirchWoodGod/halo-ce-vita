@@ -69,7 +69,10 @@
 #              the Xbox's multiplayer pause, the game not paused) and its CLEAR DEAD AI asks
 #              the host, which clears them (two, then the third killed after) and says so
 #              back; every machine has the others' monitors where they fly and the first
-#              joiner draws both balls in its view (HALO_TEST_SHOTS: its screenshot)
+#              joiner draws both balls in its view (HALO_TEST_SHOTS: its screenshot). Then the
+#              host places a fourth and kills it, and the first joiner's NEW ROUND (Grunt pirate:
+#              no way to respawn the AI) is made by the host, the Elite back alive; neither
+#              joiner has a map variant in its store (none saved)
 #   forgepanel the settings panel's Forge page, Network on (Menu style Halo CE: the
 #              classic menus' route), asked by HALO_SYSTEM_LINK_TEST=forgenet:9: the
 #              System Link screen's profile, then a network Forge game of Blood Gulch
@@ -428,19 +431,26 @@ forge_case() {
 		host_cmds="L150:forge camera 60 -100 1.6 130 0;L160:forge spawn elite major;L165:forge distance 6;L170:forge drop"
 		host_cmds="$host_cmds;L180:forge spawn elite major;L185:forge distance 8;L190:forge drop"
 		host_cmds="$host_cmds;L200:forge spawn elite major;L205:forge distance 10;L210:forge drop"
-		host_cmds="$host_cmds;L260:forge kill #1;L270:forge kill #2;L300:forge budget;L1150:forge kill #3;L1200:forge budget"
-		host_cmds="$host_cmds;L1900:forge net;L1910:forge budget"
+		host_cmds="$host_cmds;L260:forge kill #1;L270:forge kill #2;L300:forge budget;L1150:forge kill #3;L1750:forge budget"
+		# (a fourth, killed: NEW ROUND, the first joiner's, brings it back)
+		host_cmds="$host_cmds;L1780:forge spawn elite major;L1785:forge distance 6;L1790:forge drop;L1830:forge kill #4"
+		host_cmds="$host_cmds;L1900:forge net;L2440:forge net;L2450:forge budget"
 		# (each joiner a monitor: the first looking at where the second and the host fly)
-		join_cmds="L150:forge camera 50 -90 3 315 -8;L1850:forge net;L1880:@shot forgemp-joiner-sees-monitors;L1900:forge budget"
-		join2_cmds="L150:forge camera 53 -93 3 135 -8;L1850:forge net;L1880:@shot forgemp-joiner2;L1900:forge budget"
+		join_cmds="L150:forge camera 50 -90 3 315 -8;L1750:forge budget;L1850:forge net;L1880:@shot forgemp-joiner-sees-monitors"
+		join2_cmds="L150:forge camera 53 -93 3 135 -8;L1750:forge budget;L1850:forge net;L1880:@shot forgemp-joiner2"
 		# (Start: the Forge menu; down seven to CLEAR DEAD AI, A; B closes it)
 		local menu_pad="start:150:3000 @MENU-open:0:300 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500"
 		menu_pad="$menu_pad down:150:500 down:150:500 a:150:3000 @MENU-cleared:0:300 b:150:2000"
+		# (the first joiner's NEW ROUND, later: down nine, A, the menu closed by it)
+		local round_pad="start:150:3000" step
+		for step in 1 2 3 4 5 6 7 8 9; do round_pad="$round_pad down:150:500"; done
+		round_pad="$round_pad @forgemp-joiner-round:0:300 a:150:3000"
 		HALO_TEST_DATA_HOST=$menus_data forge_host "$host_cmds" HALO_UI_LOG=1 $(forge_shots mpforge-shots/forgemp-host)
 		sleep 5
 		HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join \
 			HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 "HALO_TEST_COMMANDS=$join_cmds" \
-			"HALO_TEST_PAD=level wait:150:22000 ${menu_pad//MENU/forgemp-joiner-menu}" $(forge_shots mpforge-shots/forgemp-joiner)
+			"HALO_TEST_PAD=level wait:150:22000 ${menu_pad//MENU/forgemp-joiner-menu} wait:150:31000 $round_pad" \
+			$(forge_shots mpforge-shots/forgemp-joiner)
 		join_pid=$last_pid
 		HALO_TEST_DATA_JOINER2=$menus_data run_copy joiner2 "$lan2" "$vita" "$cpu_c" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join \
 			HALO_UI_LOG=1 HALO_MENU_STYLE=classic "HALO_TEST_COMMANDS=$join2_cmds" \
@@ -477,8 +487,24 @@ forge_case() {
 			sed 's/.*cleared \([0-9]*\) dead.*/\1/' | tr '\n' ' ')" = "2 1 " ] ||
 			fail "the joiners' CLEAR DEAD AI did not clear the two dead Elites, then the third"
 		for log in "$hl" "$jl" "$hl2"; do
-			grep -aq "forge: budget 0/[0-9]* objects, 0/[0-9]* AI (0 alive, 0 dead)" "$log" ||
+			sed -n '/test command at tick 1750: forge budget/,+1p' "$log" |
+				grep -aq "forge: budget 0/[0-9]* objects, 0/[0-9]* AI (0 alive, 0 dead)" ||
 				fail "$(basename "$(dirname "$log")"): the cleared Elites are still in its layout"
+		done
+		# (the first joiner's NEW ROUND: asked, made by the host, the dead Elite back alive)
+		grep -aq "forge net: asked the host: new round" "$jl" || fail "the first joiner's NEW ROUND was not asked of the host"
+		grep -aq "forge net: machine [0-9]* asked: new round" "$hl" || fail "the host did not take the joiner's NEW ROUND"
+		grep -aq "forge net: new round 1: the layout's 1 objects placed again" "$hl" || fail "the host did not start the new round"
+		grep -aq "forge net: the host said: new round" "$jl" || fail "the joiner was not told of its NEW ROUND"
+		grep -aq "forge net: the host started round 1" "$jl" || fail "the joiner did not get the new round"
+		sed -n '/test command at tick 2450: forge budget/,+1p' "$hl" |
+			grep -aq "forge: budget 1/[0-9]* objects, 1/[0-9]* AI (1 alive, 0 dead)" ||
+			fail "the new round did not bring the dead Elite back"
+		# (LadyCassie, insider.21: the layout stayed after leaving and starting again - a joiner keeps
+		# nothing of the host's layout in its own store: none saved on either joiner)
+		for log in "$jl" "$hl2"; do
+			[ -z "$(find "$(dirname "$log")/save" -name '*.hmv' 2>/dev/null)" ] ||
+				fail "$(basename "$(dirname "$log")"): a map variant written to its store, none saved"
 		done
 		# (the monitors: each machine has the two others' where they fly; the first joiner, looking
 		# at them, draws both balls)
