@@ -10,6 +10,13 @@ a second, the same in 1.1.0 and the insider builds) give every player's team
 
 One line a check, [PASS], [FAIL], [WARN] (said, not failed) or [NOT RUN] (the
 run never got there: a FAIL unless --lenient); exit 1 on any FAIL.
+
+--gametype (the cycle's first game's, "infection" by default): any other
+game type skips Infection's round, turns and skull, and checks instead that
+the server's game ended, each client saw its end, the two clients agree on
+every player's team and (a team game) see each player on the team the
+server put them on, and the server kept its teams within one of each other
+once settled ("teams:" in its sv_status).
 """
 import argparse
 import collections
@@ -95,6 +102,8 @@ def main():
     ap.add_argument("--most", type=int, default=16)
     ap.add_argument("--client", action="append", required=True, help="NAME:PLAYER:FOLDER:EXIT")
     ap.add_argument("--lenient", action="store_true", help="a check the run never reached is a warning")
+    ap.add_argument("--gametype", default="infection")
+    ap.add_argument("--teams", action="store_true", help="a team game (not Infection)")
     args = ap.parse_args()
     not_run = "WARN" if args.lenient else "NOT RUN"
 
@@ -121,21 +130,41 @@ def main():
     rules = [l.split("game rules net: ", 1)[1] for l in sl if "game rules net: machine" in l]
     for line in rules[:6]:
         check("INFO", "game rules net", line)
-    # ---- the round
-    began = any("infection: the round begins" in l for l in sl)
-    ok(began, "the server's Infection round began")
-    over = [re.search(r"infection: the round is over \((.*?)\)", l) for l in sl]
-    over = [m.group(1) for m in over if m]
+    infection = args.gametype == "infection"
     winner = None
-    if over:
-        winner = "humans" if "humans win" in over[0] else "zombies" if "zombies win" in over[0] else None
-    ok(winner is not None, "the server's round ended with a winner", over[0] if over else "never ended")
     turned = []
-    for l in sl:
-        m = re.search(r"infection: (.+?) is a zombie \((.*?)\)", l)
-        if m:
-            turned.append((m.group(1), m.group(2)))
-    check("INFO", "players turned on the server", "%d (%s)" % (len(turned), ", ".join("%s: %s" % t for t in turned[:8])))
+    if not infection:
+        started = any(re.search(r"server: the game starts: %s on " % re.escape(args.gametype), l) for l in sl)
+        ok(started, "the server's %s game started" % args.gametype)
+        ended = [l for l in sl if re.search(r"server: the game ends \(", l)]
+        ok(bool(ended), "the server's game ended", ended[0].split("server: ", 1)[1].strip() if ended else "never")
+    # ---- the round
+    began = infection and any("infection: the round begins" in l for l in sl)
+    if infection:
+        ok(began, "the server's Infection round began")
+        over = [re.search(r"infection: the round is over \((.*?)\)", l) for l in sl]
+        over = [m.group(1) for m in over if m]
+        if over:
+            winner = "humans" if "humans win" in over[0] else "zombies" if "zombies win" in over[0] else None
+        ok(winner is not None, "the server's round ended with a winner", over[0] if over else "never ended")
+        for l in sl:
+            m = re.search(r"infection: (.+?) is a zombie \((.*?)\)", l)
+            if m:
+                turned.append((m.group(1), m.group(2)))
+        check("INFO", "players turned on the server", "%d (%s)" % (len(turned), ", ".join("%s: %s" % t for t in turned[:8])))
+    # ---- the teams: within one of each other once settled (sv_status's "teams:")
+    if args.teams:
+        sizes = []
+        for l in sl:
+            m = re.search(r"server: teams: red (\d+)\+(\d+), blue (\d+)\+(\d+)", l)
+            if m:
+                p0, b0, p1, b1 = map(int, m.groups())
+                sizes.append((p0 + b0, p1 + b1, p0, p1))
+        played = [z for z in sizes if z[2] + z[3] > 0 and z[0] + z[1] >= args.most - 1]
+        uneven = [z for z in played if abs(z[0] - z[1]) > 1]
+        ok(len(played) >= 5 and len(uneven) <= max(1, len(played) // 10), "the server's teams within one of each other",
+           "%d sv_status with people in and the game filled, %d uneven: %s" % (len(played), len(uneven),
+                                                                                sorted(set(played))[:6]))
     # ---- the bots: once settled, people + bots = most - 1 (a free slot)
     status = []
     for l in sl:
@@ -186,7 +215,9 @@ def main():
         ok(ended, "%s saw the game end" % c["name"])
         here = [re.search(r"infection: game over here: the (\w+) win", l) for l in c["log"]]
         here = [m.group(1) for m in here if m]
-        if here:
+        if not infection:
+            pass
+        elif here:
             ok(here[0] == winner, "%s's winner is the server's" % c["name"], "%s here, %s on the server" % (here[0], winner))
         elif c is not v110:
             ok(False, "%s logged Infection's end (infection: game over here)" % c["name"])
@@ -198,6 +229,8 @@ def main():
         c["own"] = own
         ok(own is not None, "%s knows its own player" % c["name"], "player %s" % own)
 
+    if not infection:
+        return finish(clients, sl, args)
     # ---- the zombies' skull: the weapon the zombies hold alone, as either client sees them
     print("== teams and the skull")
     held = collections.Counter()
@@ -290,27 +323,98 @@ def main():
            "%d of %d turned players seen as zombies%s" % (
                len(expected) - len(missing), len(expected), (": missing " + ", ".join(missing[:5])) if missing else ""))
 
-    # ---- the two clients agree on every player's team, second by second (no desync)
+    return finish(clients, sl, args)
+
+
+def games_of(ticks):
+    """each second's game: a new game when the tick count starts again"""
+    games, game, last = [], 0, None
+    for t in ticks:
+        if last is not None and t[0] + 300 < last:
+            game += 1
+        last = t[0]
+        games.append(game)
+    return games
+
+
+def quitters(ticks):
+    """the players of each game dead for 20 s or more in a row: those who left
+    (Halo keeps a player who quits on the scores, always dead)"""
+    gone, run = set(), collections.Counter()
+    for game, t in zip(games_of(ticks), ticks):
+        for number, (team, alive, _) in t[3].items():
+            key = (game, number)
+            run[key] = 0 if alive else run[key] + 1
+            if run[key] >= 20:
+                gone.add(key)
+    return gone
+
+
+def agree_teams(clients):
     a, b = clients[0], clients[1]
-    bt = {t[0]: t for t in b["ticks"] if t[1] == "playing"}
+    bt = {(g, t[0]): t for g, t in zip(games_of(b["ticks"]), b["ticks"]) if t[1] == "playing"}
     keys = sorted(bt)
     samples = agree = 0
     import bisect
-    for tick, state, _, players, _ in a["ticks"]:
+    for game, (tick, state, _, players, _) in zip(games_of(a["ticks"]), a["ticks"]):
         if state != "playing" or not keys:
             continue
-        i = bisect.bisect_left(keys, tick)
-        near = min((k for k in keys[max(0, i - 1):i + 1]), key=lambda k: abs(k - tick))
-        if abs(near - tick) > 15:
+        i = bisect.bisect_left(keys, (game, tick))
+        near = min((k for k in keys[max(0, i - 1):i + 1]), key=lambda k: (k[0] != game, abs(k[1] - tick)))
+        if near[0] != game or abs(near[1] - tick) > 15:
             continue
         other = bt[near][3]
         for number, (team, _, _) in players.items():
             if number in other:
                 samples += 1
                 agree += other[number][0] == team
-    ok(samples >= 100 and agree >= 0.9 * samples, "the clients agree on the teams (no desync)",
-       "%d of %d player-seconds agree" % (agree, samples))
+    return agree, samples
 
+
+def finish(clients, sl, args):
+    print("== the teams on the clients")
+    agree, samples = agree_teams(clients)
+    strict = args.gametype != "infection"
+    ok(samples >= 100 and agree >= (0.98 if strict else 0.9) * samples, "the clients agree on the teams (no desync)",
+       "%d of %d player-seconds agree" % (agree, samples))
+    if args.teams:
+        # (the people's teams - which never change in a game - as the server
+        # put them, sv_players's, on each client; then the team sizes each
+        # client sees, bots and people, within one of each other)
+        server_team = {}
+        for l in sl:
+            m = re.search(r"server: #\d+\s+(\S+)\s+team (\d+)\s+machine", l)
+            if m:
+                server_team[m.group(1)] = int(m.group(2))
+        people = [c["player"] for c in clients]
+        for c in clients:
+            # (each person's team in each game as it sees it: one a game; its
+            # first game's the server's, sv_players's, which ran in it)
+            seen = {}
+            for game, (_, state, _, players, names) in zip(games_of(c["ticks"]), c["ticks"]):
+                for number, (team, _, _) in players.items():
+                    name = names.get(number)
+                    if name in people and state == "playing":
+                        seen.setdefault((name, game), set()).add(team)
+            first = {n: seen.get((n, 0)) for n in people}
+            wrong = [n for n in people if n in server_team and first[n] != {server_team[n]}]
+            split = [k for k, v in seen.items() if len(v) > 1]
+            ok(all(first[n] for n in people) and not wrong and not split,
+               "%s sees the people on the server's teams" % c["name"],
+               "first game %s; the server's %s; a team change in a game: %s" % (
+                   {n: sorted(first[n] or ()) for n in people}, {n: server_team.get(n) for n in people}, split or "none"))
+            gone = quitters(c["ticks"])
+            full = even = 0
+            for game, t in zip(games_of(c["ticks"]), c["ticks"]):
+                if t[1] != "playing":
+                    continue
+                here = {n: v for n, v in t[3].items() if (game, n) not in gone}
+                if len(here) < args.most - 1:
+                    continue
+                full += 1
+                even += abs(sum(1 for v in here.values() if v[0] == 0) - sum(1 for v in here.values() if v[0] == 1)) <= 1
+            ok(full >= 20 and even >= 0.9 * full, "%s sees even teams" % c["name"],
+               "%d of %d full seconds within one (players who left not counted)" % (even, full))
     fails = [r for r in results if r[0] in ("FAIL", "NOT RUN")]
     print("== %s: %d checks, %d failed%s" % ("PASS" if not fails else "FAIL", len(results), len(fails),
                                             "".join("\n   - %s" % r[1] for r in fails)))

@@ -558,7 +558,11 @@ static void note_players(
 
 				address_text(real_address(network_game_server_machine_address(game->players[index].machine_index)),
 					address, sizeof(address));
-				say("player #%ld %s joined from %s", index, name, address);
+				if (game->variant.universal_variant.teams)
+					say("player #%ld %s joined from %s (team %d)", index, name, address,
+						(int)game->players[index].team_index);
+				else
+					say("player #%ld %s joined from %s", index, name, address);
 			}
 			csstrcpy(dedicated.seen_names[index], name);
 		}
@@ -659,6 +663,26 @@ static void command_status(
 			dedicated.playing.gametype, dedicated.coop ? config_string("network.coop_level") : dedicated.playing.map,
 			player_count(), (int)game->maximum_players, network_game_server_dedicated_bot_count(),
 			dedicated.bots_fill ? 1 : 0);
+	/* (a team game: each team's people and bots, "teams: red 2+4, blue
+	1+5") */
+	if (game && game->variant.universal_variant.teams)
+	{
+		long people[2] = { 0, 0 }, bots[2] = { 0, 0 };
+		long index;
+
+		for (index = 0; index < HALO_PORT_MAXIMUM_NETWORK_PLAYERS; index++)
+		{
+			struct network_player const *player = &game->players[index];
+
+			if (!network_player_is_valid(player) || player->team_index < 0 || player->team_index > 1)
+				continue;
+			if (bots_machine_is_bot(player->machine_index))
+				bots[player->team_index]++;
+			else
+				people[player->team_index]++;
+		}
+		say("teams: red %ld+%ld, blue %ld+%ld (people+bots)", people[0], bots[0], people[1], bots[1]);
+	}
 }
 
 static void command_players(

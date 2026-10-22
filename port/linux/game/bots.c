@@ -225,6 +225,7 @@ and left, the defenders' posts. The map's teleporters are logged once.
 #include "bots.h"
 #include "bots_tactics.h"
 #include "infection.h"
+#include "network_connection.h"
 
 #include <math.h>
 #include <pthread.h>
@@ -1001,6 +1002,22 @@ short bots_skill(void)
 	if (name[0] >= '0' && name[0] <= '3' && !name[1])
 		return (short)(name[0] - '0');
 	return _bots_skill_normal;
+}
+
+long bots_online_fill(void)
+{
+	char const *value = bots_setting_string("HALO_BOTS_ONLINE", "bots.online");
+	long count;
+
+	/* (Online alone: not Same Wi-Fi, System Link or ad hoc) */
+	if (network_connection_running() != NETWORK_CONNECTION_ONLINE)
+		return 0;
+	if (!strcmp(value, "full"))
+		return BOTS_MAXIMUM;
+	if (!strcmp(value, "off"))
+		return 0;
+	count = atol(value);
+	return count < 0 ? 0 : count > BOTS_MAXIMUM ? BOTS_MAXIMUM : count;
 }
 
 short bots_teams(void)
@@ -6918,19 +6935,14 @@ static void bots_report(void)
 	}
 }
 
-/* where bots play: a local (split screen) game's, and the dedicated
-server's (port/linux/game/dedicated_server.c, sv_bots_fill: the host alone
-runs them; its clients see players driven by the input and the units the
-host sends, as any other machine's) */
+/* where bots play: a local (split screen) game's, and a network game's
+host's - the dedicated server's (port/linux/game/dedicated_server.c,
+sv_bots_fill) or a 1.1.1 host's online (bots.online): the host alone runs
+them (network_server_manager.c's bot fill); its clients see players driven
+by the input and the units the host sends, as any other machine's */
 static boolean bots_play_here(void)
 {
-	if (network_game_is_splitscreen_local())
-		return TRUE;
-#ifdef HALO_DEDICATED_SERVER
-	if (global_network_game_server_get())
-		return TRUE;
-#endif
-	return FALSE;
+	return network_game_is_splitscreen_local() || global_network_game_server_get() != NULL;
 }
 
 void bots_update_actions(struct player_action *actions)
@@ -6979,11 +6991,10 @@ void bots_update_actions(struct player_action *actions)
 		if (absolute_index >= 0 && absolute_index < HALO_PORT_MAXIMUM_NETWORK_PLAYERS)
 		{
 			bots_bot_update(bot, bot_index, &actions[absolute_index]);
-#ifdef HALO_DEDICATED_SERVER
-			/* (the server's bots: what its clients are sent of them is what
-			they played, network_distributed.c) */
-			update_server_set_ticked_action((short)absolute_index, &actions[absolute_index]);
-#endif
+			/* (a network game host's bots: what its clients are sent of them
+			is what they played, network_distributed.c) */
+			if (!network_game_is_splitscreen_local())
+				update_server_set_ticked_action((short)absolute_index, &actions[absolute_index]);
 		}
 		count++;
 	}

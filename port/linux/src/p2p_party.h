@@ -185,6 +185,11 @@ const char *p2p_party_follow_text(int result);
 if the game has fewer open slots than the party has players */
 int p2p_party_join_warning(int players, int maximum, char *text, int size);
 
+/* (party_net.c: the game's host puts a party's members on one team) this
+party's team token, the first `size` bytes (32 at most) of SHA-256 of a label
+and the party's id: nonzero while this machine is in a party of two or more */
+int p2p_party_team_token(unsigned char *token, int size);
+
 /* ---------- chat */
 
 /* a line kept: who said it (as the lists show them: a member's name), what,

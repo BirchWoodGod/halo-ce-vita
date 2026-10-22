@@ -2,6 +2,9 @@
 # (sourced by it, inside its dedicated servers' case: run_copy, side, console,
 # $code, $sl, $sd and fail are its). README_dedicated_compat.md says how to run it.
 #
+# (Any game type: HALO_TEST_COMPAT_CYCLE's first game's decides the checks,
+# Infection's or another's - a team game's teams: README_dedicated_compat.md.)
+#
 # The question it answers: can the PUBLIC 1.1.0 build (and the insider.21
 # build beside it) join and play the dedicated server's Infection with the
 # bots filling it (the s8 server)? The server (HALO_TEST_SERVER, this tree's
@@ -28,6 +31,11 @@ dedicated_compat_init() {
 		# (HALO_TEST_COMPAT_CYCLE: games separated by ';', "map gametype" each)
 		echo "$cycle" | tr ';' '\n' | while read -r entry; do
 			[ -n "$entry" ] && echo "sv_mapcycle_add $entry"
+		done
+		# (HALO_TEST_COMPAT_EXTRA: more commands, separated by ';': an official
+		# server's own, "sv_starting_weapons generic;sv_bots_skill easy")
+		echo "${HALO_TEST_COMPAT_EXTRA:-}" | tr ';' '\n' | while read -r entry; do
+			[ -n "$entry" ] && echo "$entry"
 		done
 		echo "sv_timelimit ${HALO_TEST_COMPAT_MINUTES:-3}"
 		echo "sv_start_delay 5"
@@ -65,6 +73,7 @@ dedicated_compat_run() {
 	new_pid=$last_pid
 	sleep 60
 	console sv_players
+	console sv_status
 	wait "$v110_pid" 2>/dev/null; v110_rc=$?
 	wait "$new_pid" 2>/dev/null; new_rc=$?
 	kill "$status_pid" 2>/dev/null; wait "$status_pid" 2>/dev/null
@@ -78,8 +87,13 @@ dedicated_compat_run() {
 	echo "--- the insider client's infection lines"
 	grep -aE "infection:|game rules net:" "$out/insider/run.log" | grep -av "trace:" | head -24
 	echo "--- checks"
+	# (the cycle's first game's type: Infection's checks, or another's - a
+	# team game's teams)
+	local first_type teams=
+	first_type=$(echo "${HALO_TEST_COMPAT_CYCLE:-prisoner infection}" | cut -d';' -f1 | awk '{print $2}')
+	case $first_type in team_*|ctf|btb) teams=--teams ;; esac
 	python3 "$here/netns_compat_check.py" --server-log "$sl" --server-debug "$sd" --server-rc "$server_rc" \
-		--most "$compat_most" \
+		--most "$compat_most" --gametype "$first_type" $teams \
 		--client "v110:Old110:$out/v110:$v110_rc" --client "insider:Ins21:$out/insider:$new_rc" \
 		$([ "${HALO_TEST_COMPAT_LENIENT:-0}" = 1 ] && echo --lenient) ||
 		fail "the compatibility checks failed (the [FAIL] lines above)"

@@ -42,12 +42,6 @@ boolean dedicated_server_bots_when_empty(void);
 /* (network_server_manager.c, for the server) the remote machines joined to
 the game, and the players of the remote machines */
 long network_game_server_dedicated_machine_count(void);
-/* the bots in the game (sv_bots_fill) */
-long network_game_server_dedicated_bot_count(void);
-/* (a machine joining, a player being added, the game full) a bot's slot
-taken: TRUE if the game has a free slot now */
-struct network_game_server;
-boolean network_game_server_port_bots_make_room(struct network_game_server *server);
 /* drops the machine of the player at that index of the game's player list
 (and bans it: its line in bans.txt); FALSE (said) if there is none */
 boolean network_game_server_dedicated_drop_player(long player_index, boolean ban);
@@ -55,5 +49,25 @@ boolean network_game_server_dedicated_drop_player(long player_index, boolean ban
 boolean network_distributed_say(char const *text);
 
 #endif
+
+/* (any host: the dedicated server, a 1.1.1 host online - network_server_manager.c's
+bot fill) */
+/* the bots in the game (sv_bots_fill; a host's Bots online too) */
+long network_game_server_dedicated_bot_count(void);
+/* (a machine joining, a player being added, the game full) a bot's slot
+taken: TRUE if the game has a free slot now */
+struct network_game_server;
+struct network_player;
+boolean network_game_server_port_bots_make_room(struct network_game_server *server);
+/* ... a bot of that team's, when it has one (a person joining it) */
+boolean network_game_server_port_bots_make_room_on_team(struct network_game_server *server, long team);
+/* (any host's bot fill: a dedicated server's, a 1.1.1 host's Bots online)
+the team of a person's player joining a team game it fills: its party's
+(party_net.h), else the team with fewer people, then fewer players; NONE
+when the fill keeps no teams (no fill, free for all, Infection) */
+long network_game_server_port_person_team(struct network_game_server *server, long machine_index);
+/* ... a person's player added (the team a tie between the teams takes a
+bot from) */
+void network_game_server_port_person_added(struct network_game_server *server, struct network_player const *player);
 
 #endif

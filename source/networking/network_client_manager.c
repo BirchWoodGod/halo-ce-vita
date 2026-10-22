@@ -403,6 +403,7 @@ symbols in this file:
 #include "network_crossplay_guard.h"
 #include "../src/crossplay_guard.h"
 #include "map_share.h"
+#include "party_net.h"
 #include "net_fuzz_twin.h"
 /* (port/linux/src/lang.h, through the -iquote port/linux/game path) */
 #include "../src/lang.h"
@@ -2036,6 +2037,16 @@ boolean network_game_client_add_player(
 		network_game_client_add_player_request_times[local_player_index] = now;
 	}
 
+#ifdef HALO_LINUX
+	/* port: a party's team token first (party_net.h), so that a host which
+	fills its game with bots has it as it picks the player's team: on the
+	same stream, before the request */
+	if (local_player_index == 0 &&
+		(client->state == _network_game_client_state_pregame || client->state == _network_game_client_state_ingame))
+	{
+		party_net_client_send(client);
+	}
+#endif
 	player_ui_get_active_player_profile(local_player_index, &profile);
 
 	player.controller_index = (char)local_player_index;

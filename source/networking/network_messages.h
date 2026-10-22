@@ -83,6 +83,11 @@ enum network_game_message_type
 	sent on the crossplay wire */
 	_message_client_flame,
 	_message_server_flame,
+	/* port: a joiner's party's team token (port/linux/game/party_net.h),
+	before its request to add its player: a host that fills its game with
+	bots puts a party's members on one team. A build without it drops it as
+	an unknown packet type. Never sent on the crossplay wire */
+	_message_client_party,
 	NUMBER_OF_NETWORK_GAME_MESSAGE_TYPES,
 };
 
