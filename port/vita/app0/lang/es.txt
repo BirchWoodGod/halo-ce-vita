@@ -136,6 +136,8 @@
 "Fourth core helpers" = "Cuarto núcleo"
 "Needs CapUnlocker: audio, or all background work" = "Requiere CapUnlocker: el audio, o todo el trabajo de fondo"
 "All async" = "Todo asíncrono"
+"Battery saver in menus" = "Ahorro de batería"
+"Lower clocks in the menus, paused and loading" = "Relojes más bajos en menús, en pausa y al cargar"
 
 # ---------- Audio
 "Language" = "Idioma"
@@ -455,6 +457,8 @@
 "Frame, render and tick timing in halo.log (at start-up)" = "Tiempos de cuadro, render y tick en halo.log (al iniciar)"
 "Crash dump on hang" = "Volcado si se cuelga"
 "A hang of 8 s crashes for a dump (psp2core) to send" = "Un bloqueo de 8 s genera un volcado (psp2core) para enviar"
+"Battery log" = "Registro batería"
+"Charge left in halo.log each minute. Auto: test builds" = "Carga en halo.log cada minuto. Auto: versiones de prueba"
 "FPS overlay" = "Panel de FPS"
 "Top right. Full: tick and render times, the cores' load" = "Arriba a la derecha. Total: tiempos de tick y render, carga de núcleos"
 "FPS only" = "Solo FPS"

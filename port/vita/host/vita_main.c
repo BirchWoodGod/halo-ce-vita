@@ -14,6 +14,7 @@ ux0:data/haloce-vita/log.txt (stderr).
 #include <psp2/kernel/clib.h>
 #include <psp2/kernel/processmgr.h>
 #include <psp2/kernel/threadmgr.h>
+#include <psp2/kernel/error.h>
 #include <psp2/appmgr.h>
 #include <psp2/kernel/sysmem.h>
 #include <psp2/io/dirent.h>
@@ -107,6 +108,36 @@ int vita_host_thread_start(const char *name, void (*function)(void *), void *arg
 void vita_host_sleep_us(unsigned long microseconds)
 {
 	sceKernelDelayThread((SceUInt)microseconds);
+}
+
+/* (vita_host.h) a kernel semaphore: no pthread data needed, so any thread
+may wait on it */
+#define WAKE_MAXIMUM 8
+
+int vita_host_wake_create(const char *name)
+{
+	return sceKernelCreateSema(name, 0, 0, WAKE_MAXIMUM, NULL);
+}
+
+int vita_host_wake_wait(int id, unsigned long timeout_us)
+{
+	SceUInt timeout = (SceUInt)timeout_us;
+	int result = sceKernelWaitSema(id, 1, timeout_us ? &timeout : NULL);
+
+	if (result == (int)SCE_KERNEL_ERROR_WAIT_TIMEOUT)
+		return 1;
+	return result < 0 ? result : 0;
+}
+
+int vita_host_wake_poll(int id)
+{
+	return sceKernelPollSema(id, 1) < 0;
+}
+
+void vita_host_wake_signal(int id)
+{
+	/* (past the most it refuses: the waiter has a signal already) */
+	sceKernelSignalSema(id, 1);
 }
 
 /* the calling thread's priority (64-191, the lower the sooner): the Ogg
@@ -672,6 +703,8 @@ static void heartbeat_thread(void *unused)
 			if (!idle_minutes || now - vita_host_last_input_us < (unsigned long long)idle_minutes * 60000000ULL)
 				sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
 		}
+		/* the battery's drain in halo.log (vita_clocks.c) */
+		vita_host_battery_log();
 		if (!write_beats)
 			continue;
 		file = sceIoOpen(VITA_DATA_DIRECTORY "/heartbeat.txt", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_APPEND, 0666);
@@ -840,18 +873,9 @@ int main(int argc, char **argv)
 	/* the port's text in the Vita's language, from here on (lang.c; the
 	settings' Language row's choice is applied when they are loaded) */
 	vita_settings_language_init();
-	/* the clocks the game needs as floors: raised to them, never lowered
-	from more (a 500 MHz profile of PSVshell or another overclocking plugin
-	stays; 444/222/222/166 are the system's highest otherwise) - from
-	Bruno Santana's modified build */
-	if (scePowerGetArmClockFrequency() < 444)
-		scePowerSetArmClockFrequency(444);
-	if (scePowerGetBusClockFrequency() < 222)
-		scePowerSetBusClockFrequency(222);
-	if (scePowerGetGpuClockFrequency() < 222)
-		scePowerSetGpuClockFrequency(222);
-	if (scePowerGetGpuXbarClockFrequency() < 166)
-		scePowerSetGpuXbarClockFrequency(166);
+	/* the clocks the game needs as floors, raised to (vita_clocks.c: the
+	ones found are noted, the floors of the lower clocks in the menus) */
+	vita_host_clocks_start();
 
 	sceIoMkdir(VITA_DEFAULT_DATA_ROOT, 0777);
 	setenv("HALO_DATA_ROOT", VITA_DEFAULT_DATA_ROOT, 0);

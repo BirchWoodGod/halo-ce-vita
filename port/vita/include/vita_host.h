@@ -74,6 +74,39 @@ unsigned long long vita_host_time_us(void);
 /* the calling thread asleep for this long */
 void vita_host_sleep_us(unsigned long microseconds);
 
+/* ---------- a thread woken by another (d3d8_gxm.c's worker and game
+waits): a counting semaphore, a kernel one on the Vita - safe on any thread,
+sceKernelCreateThread's too, which have no pthread data for
+pthread_cond_wait (vita_settings.c save_wake) - and a POSIX one in the
+harness (vgxm_null.c) */
+
+/* a semaphore at 0: its id, or negative when none could be made */
+int vita_host_wake_create(const char *name);
+/* one signal taken, waited for up to timeout_us (0: for ever): 0 when
+taken, 1 when the time ran out, negative on an error */
+int vita_host_wake_wait(int id, unsigned long timeout_us);
+/* one signal taken if one is waiting: 0 taken, 1 none */
+int vita_host_wake_poll(int id);
+/* one signal given (none past the semaphore's most, 8: a waiter is woken
+by any) */
+void vita_host_wake_signal(int id);
+
+/* ---------- the clocks (port/vita/host/vita_clocks.c) */
+
+/* the clocks a level asks for: play's (main's, the top), a loading
+screen's (the GPU's lowered, the CPU's kept: the load is CPU work), idle's
+(menus and pause: all lowered); never below the clocks found at start */
+#define VITA_CLOCKS_PLAY 0
+#define VITA_CLOCKS_LOADING 1
+#define VITA_CLOCKS_IDLE 2
+/* (main, at start) the clocks found noted, play's set */
+void vita_host_clocks_start(void);
+/* the clocks of that level set, if they are not already */
+void vita_host_clocks_set(int level);
+/* (the heartbeat thread) the battery's charge in halo.log once a minute,
+when HALO_BATTERY_LOG asks (unset: in a pre-release build) */
+void vita_host_battery_log(void);
+
 /* ---------- movies (port/vita/host/vita_movie.c): the Vita's video player
 for the game's Bink movies, from H.264 copies */
 

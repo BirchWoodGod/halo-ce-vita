@@ -9,8 +9,10 @@ on Xita: an object may be drawn mid-update. On the Vita the tick runs on
 the third core (the game's thread has the first, the render worker the
 second). */
 
+#include <errno.h>
 #include <pthread.h>
 #include <stdlib.h>
+#include <time.h>
 
 #include "platform.h"
 #include "render_epoch.h"
@@ -62,12 +64,107 @@ volatile unsigned long long halo_tick_sound_us;
 volatile unsigned long halo_tick_sound_ticks;
 unsigned long long vita_host_time_us(void);
 
-static void pause_briefly(void)
+/* (port) The waits between the game's thread and the tick (Sierra-III's
+handoff, Oct 21 2026, for the battery): a short spin for the near misses,
+then asleep until the other side's publish wakes it, so an idle core rests
+instead of waking every 50 us as it did. Each publish (started, finished,
+main_joining) is made under tick_wake_lock with a broadcast, so a wait that
+tests under the lock cannot miss one. pthread condition variables are safe
+on both threads here, the Vita's too: the tick is a pthread, and the game's
+thread (vita_main.c game_thread, sceKernelCreateThread's) has its pthread
+data, having called pthread_create itself (tls_check, then
+halo_tick_thread_enabled) - and it already waits on one at each present
+(d3d8_gxm.c). A thread of sceKernelCreateThread's that never called
+pthread_create must not wait here (vita_settings.c save_wake).
+
+The waits are timed (1-2 s): one that runs out of time with its work there
+and no publish since is a lost wake-up, counted and logged - none is
+expected (the harness's long runs look for "lost wake-up" in the log). */
+static pthread_mutex_t tick_wake_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t tick_wake = PTHREAD_COND_INITIALIZER;
+/* (under the lock) publishes made, and the lost wake-ups found */
+static unsigned long tick_wake_publishes, tick_lost_wakes;
+
+static void tick_publish_begin(void)
 {
-	if (vita_host_sleep_us)
-		vita_host_sleep_us(50);
-	else
-		sched_yield();
+	pthread_mutex_lock(&tick_wake_lock);
+}
+
+static void tick_publish_end(void)
+{
+	tick_wake_publishes++;
+	pthread_cond_broadcast(&tick_wake);
+	pthread_mutex_unlock(&tick_wake_lock);
+}
+
+/* until ready(): `spin` tests, then asleep; what names the wait in the
+log's lost wake-ups */
+static void tick_wait(int (*ready)(void), unsigned long spin, const char *what)
+{
+	/* (the deadline is on the realtime clock, which the condition variable
+	times by; should the platform's pthreads time it otherwise - a wait
+	that ends at once, or never -, the waits go untimed: a wait ended far
+	too soon, twice, says so) */
+	static int untimed, early;
+	unsigned long spins = 0;
+
+	while (!ready())
+	{
+		unsigned long lost = 0;
+		int said_untimed = 0;
+
+		if (++spins < spin)
+			continue;
+		pthread_mutex_lock(&tick_wake_lock);
+		while (!ready())
+		{
+			unsigned long seen = tick_wake_publishes;
+			unsigned long long before = vita_host_time_us ? vita_host_time_us() : 0;
+			struct timespec deadline;
+			int result;
+
+			if (untimed)
+			{
+				pthread_cond_wait(&tick_wake, &tick_wake_lock);
+				continue;
+			}
+			/* (1-2 s on: time() is the C library's realtime clock, which
+			the condition variable times by, and the game's build hides
+			clock_gettime) */
+			deadline.tv_sec = time(NULL) + 2;
+			deadline.tv_nsec = 0;
+			result = pthread_cond_timedwait(&tick_wake, &tick_wake_lock, &deadline);
+			if (result != ETIMEDOUT)
+				continue;
+			if (before && vita_host_time_us() - before < 500000 && ++early >= 2)
+			{
+				untimed = said_untimed = 1;
+				continue;
+			}
+			if (ready() && tick_wake_publishes == seen)
+				lost = ++tick_lost_wakes;
+		}
+		pthread_mutex_unlock(&tick_wake_lock);
+		if (said_untimed)
+			platform_log("tick thread: the timed waits end too soon here: untimed from now on");
+		if (lost && lost <= 8)
+			platform_log("tick thread: lost wake-up %lu (%s): the wait ran out with its work there", lost, what);
+	}
+}
+
+static int tick_requested(void)
+{
+	return __atomic_load_n(&started, __ATOMIC_ACQUIRE) != finished;
+}
+
+static int tick_done(void)
+{
+	return __atomic_load_n(&finished, __ATOMIC_ACQUIRE) == started;
+}
+
+static int main_is_joining(void)
+{
+	return __atomic_load_n(&main_joining, __ATOMIC_ACQUIRE) != 0;
 }
 
 /* (harness) HALO_TICK_SLOWDOWN=<factor>: the tick takes that many times as
@@ -115,15 +212,9 @@ static void *tick_thread(void *unused)
 	halo_epoch_register_mutator();
 	for (;;)
 	{
-		unsigned long spins = 0;
 		float delta;
 
-		while (__atomic_load_n(&started, __ATOMIC_ACQUIRE) == finished)
-		{
-			if (++spins < 500)
-				continue;
-			pause_briefly();
-		}
+		tick_wait(tick_requested, 500, "the tick waiting for work");
 		delta = pending_delta;
 		halo_epoch_begin();
 		{
@@ -176,7 +267,9 @@ static void *tick_thread(void *unused)
 				last_tick_us = vita_host_time_us() - before;
 			}
 		}
+		tick_publish_begin();
 		__atomic_store_n(&finished, finished + 1, __ATOMIC_RELEASE);
+		tick_publish_end();
 	}
 	return NULL;
 }
@@ -207,7 +300,9 @@ void halo_tick_thread_start(float delta)
 {
 	pending_delta = delta;
 	render_tick_poses_tick_started();
+	tick_publish_begin();
 	__atomic_store_n(&started, started + 1, __ATOMIC_RELEASE);
+	tick_publish_end();
 }
 
 /* calls the main thread made into the game state while a tick ran, made at
@@ -236,15 +331,11 @@ int halo_tick_thread_defer(void (*call)(void))
 
 void halo_tick_thread_join(void)
 {
-	unsigned long spins = 0;
-
+	/* (main_joining also ends the tick's halo_tick_wait_for_render) */
+	tick_publish_begin();
 	__atomic_store_n(&main_joining, 1, __ATOMIC_RELEASE);
-	while (__atomic_load_n(&finished, __ATOMIC_ACQUIRE) != started)
-	{
-		if (++spins < 500)
-			continue;
-		pause_briefly();
-	}
+	tick_publish_end();
+	tick_wait(tick_done, 500, "the game's thread joining the tick");
 	__atomic_store_n(&main_joining, 0, __ATOMIC_RELEASE);
 	halo_render_elapsed_ticks = finished_elapsed;
 	halo_render_tick_fraction = finished_fraction;
@@ -266,8 +357,7 @@ void halo_tick_wait_for_render(void)
 	{
 		if (halo_trace_active && halo_trace_active())
 			platform_log("trace: tick waits for the render");
-		while (!__atomic_load_n(&main_joining, __ATOMIC_ACQUIRE))
-			pause_briefly();
+		tick_wait(main_is_joining, 0, "the tick waiting for the render");
 	}
 	/* then (with the tick on its thread or not) until the GPU has drawn
 	what the render recorded: it reads the bsp's geometry in place */

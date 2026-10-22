@@ -552,6 +552,12 @@ static struct setting settings[] = {
 	profile) */
 	{ "Fourth core helpers", "HALO_CPU3_AUX", 1, 3, { "0", "1", "2" }, { "Off", "Audio", "All async" },
 		"Needs CapUnlocker: audio, or all background work", 2, PAGE_GRAPHICS_PERFORMANCE },
+	/* (d3d8_gxm.c clocks_governor, vita_clocks.c: the CPU and GPU clocks
+	lowered after a second in the main menu, paused or on a loading screen,
+	play's again at once; never below the clocks found at start, so an
+	overclocking plugin's stand. On by default, in no profile. Live) */
+	{ "Battery saver in menus", "HALO_CLOCK_GOVERNOR", 0, 2, { "1", "0" }, { "On", "Off" },
+		"Lower clocks in the menus, paused and loading", 0, PAGE_GRAPHICS_PERFORMANCE },
 	/* (the menus: Halo CE's own, or the Halo 3-style ones over the same
 	animated Halo ring - port/vita/app0/menus/halo3, menu_tags.c, which
 	reads it each time a screen opens: live) */
@@ -915,6 +921,10 @@ static struct setting settings[] = {
 		"Top right. Full: tick and render times, the cores' load", 0, TAB_DEV, KIND_CHOICE, ACTION_NONE, 1 },
 	{ "Debug camera", "HALO_DEBUG_CAMERA", 0, 2, { "0", "1" }, { "Off", "On" },
 		"Hold Black 1 s: follow, orbit, then a flying camera", 0, TAB_DEV, KIND_CHOICE, ACTION_NONE, 1 },
+	/* (vita_clocks.c vita_host_battery_log: the charge in halo.log once a
+	minute; Auto, the variable unset: on in a pre-release build) */
+	{ "Battery log", "HALO_BATTERY_LOG", 0, 3, { "", "1", "0" }, { "Auto", "On", "Off" },
+		"Charge left in halo.log each minute. Auto: test builds", 0, TAB_DEV, KIND_CHOICE, ACTION_NONE, 1 },
 	/* (the system's ad hoc dialog's way of joining, for testers) */
 	{ "Ad hoc dialog", "HALO_ADHOC_DIALOG_MODE", 0, 3, { "0", "1", "2" }, { "Connect", "Create", "Join" },
 		"How the system dialog joins: try Connect first", 0, TAB_DEV },
