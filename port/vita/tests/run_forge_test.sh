@@ -1616,8 +1616,11 @@ for c in $cases; do
 		[ -f "$log" ] && {
 			grep -aE "forge: player [0-9]* \(team 0\) spawns at .*\(team blue|forge: player [0-9]* \(team 1\) spawns at .*\(team red" "$log" | grep -aq . &&
 				fail "spawnplay-teams: a player at the other team's point" || echo "  ok: spawnplay-teams: red at red or any, blue at blue or any"
-			grep -aq "(team 0) spawns at .*(team red" "$log" && grep -aq "(team 1) spawns at .*(team blue" "$log" &&
-				echo "  ok: spawnplay-teams: each team at its own points" || fail "spawnplay-teams: a team never at its own points"
+			# (which of a team's points it spawns at is the engine's rating's, random: what fits is not -
+			# each team its two and the two for any)
+			grep -a "(team [01]) spawns at the respawn point" "$log" | grep -avq ", 4 of 8 fitting," &&
+				fail "spawnplay-teams: a team's fitting points not 4" ||
+				echo "  ok: spawnplay-teams: 4 of 8 fit each team (its own two, the two for any)"
 		}
 		log="$out/spawnplay-ctf/run.log"
 		[ -f "$log" ] && {
