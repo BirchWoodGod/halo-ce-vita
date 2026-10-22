@@ -157,14 +157,15 @@ int halo_custom_edition_enabled(void);
 /* Whether a mod's Halo: CE Anniversary maps in the mods folder may be listed
 and played, offline (HALO_MCC_MODS, experimental; needs PC maps on). */
 int halo_mcc_mods_enabled(void);
-/* (port) Whether Halo CE content is MCC files (game.content = "mcc",
-HALO_CONTENT): the campaign and multiplayer maps of the player's Halo: The
-Master Chief Collection's halo1 folder are listed and played too
-(port/linux/game/mcc_content.c). Read every time (the Vita's panel sets the
-variable). Never on the dedicated server. */
-int halo_mcc_content_enabled(void);
-/* (port) MCC's halo1 folder (xbox_files.c: paths.mcc, the Vita's data
-root's mcc/halo1, Steam's libraries), which the game names d:\mcc\: its host
+/* (port) Whether there is a Halo content folder (paths.content,
+HALO_CONTENT_ROOT, or the one found: the player's own Halo: The Master
+Chief Collection folder) with Halo CE (halo1) maps, whose campaign and
+multiplayer maps are then listed and played beside the Xbox's
+(port/linux/game/mcc_content.c); without one the Xbox maps alone, as
+before. Never on the dedicated server. */
+int halo_content_library_found(void);
+/* (port) The Halo content folder (xbox_files.c: paths.content, the Vita's
+data root's mcc, Steam's libraries), which the game names d:\mcc\: its host
 path into `out` (`out_size` bytes; empty when none) and TRUE when found;
 looked for once, and again after platform_mcc_root_forget when none was.
 platform_xbox_path_write_refused: TRUE (and the error set, logged) for an

@@ -22,8 +22,8 @@ a Windows bitmap <map>.bmp beside the map takes the place of. A map its campaign
 list comes after those it does, in the stock levels' order and then the
 order of their names.
 
-(port) Halo CE content MCC files (game.content = "mcc", mcc_content.h) adds
-MCC's own campaign as a mod of its own, first: key mcc, its maps MCC's
+(port) The Halo content folder (paths.content, mcc_content.h) adds MCC's
+own campaign as a mod of its own, first: key mcc, its maps MCC's
 halo1 folder's (d:\mcc\maps\a10.map ...: mcc_a10, mods\mcc_a10) in the
 campaign's order, titled as the stock levels, whatever MCC mods is. Nothing
 else of that folder is read (no campaign file, no picture), and the mod
@@ -92,7 +92,7 @@ struct custom_edition_mod
 	short map_files;
 	short maps_valid;
 	char problem[MOD_PROBLEM_BYTES];
-	/* (port) MCC's own halo1 folder's campaign (mcc_content.h), not a
+	/* (port) the Halo content folder's campaign (mcc_content.h), not a
 	folder of the mods folder */
 	boolean mcc;
 };
@@ -508,7 +508,7 @@ static void mod_add(
 	are MCC's alone) */
 	if (!csstrcmp(mod->key, MCC_CONTENT_MOD_KEY))
 	{
-		error(_error_silent, "mods: '%s' is not looked at: its name is kept for MCC's own files (Halo CE content)", folder);
+		error(_error_silent, "mods: '%s' is not looked at: its name is kept for MCC's own files (the Halo content folder)", folder);
 		if (globals->survey)
 		{
 			mod_problem(mod, T("Its name is kept for MCC files: rename its folder"));
@@ -641,7 +641,7 @@ static void mod_add(
 	return;
 }
 
-/* (port) Adds MCC's own campaign (Halo CE content MCC files, mcc_content.h)
+/* (port) Adds MCC's own campaign (the Halo content folder, mcc_content.h)
 as the first mod: each of the ten levels whose map is in MCC's maps folder
 and is a Halo: CE Anniversary cache of a solo scenario
 (custom_edition_cache_mod_map_identify), in the campaign's order, titled
@@ -685,7 +685,9 @@ static void mcc_mod_add(
 			continue;
 		}
 		mod->map_files++;
-		if (!custom_edition_cache_mod_map_identify(path))
+		/* (the loader its header asks for Halo CE's: mcc_content.h's table) */
+		if (custom_edition_cache_content_loader(path, NULL) != _content_library_loader_halo1 ||
+			!custom_edition_cache_mod_map_identify(path))
 		{
 			continue;
 		}
@@ -701,7 +703,7 @@ static void mcc_mod_add(
 		csstrncpy(map->description, T("Your MCC files' own level. No sound yet: MCC keeps it in sound banks this version doesn't read."),
 			sizeof(map->description) - 1);
 	}
-	error(_error_silent, "mcc: %d campaign maps of MCC's halo1 folder (%d of the ten missing)", mod->maps_valid, missing);
+	error(_error_silent, "mcc: %d campaign maps of the Halo content folder's halo1 (%d of the ten missing)", mod->maps_valid, missing);
 
 	return;
 }
@@ -791,9 +793,9 @@ static short custom_edition_mods_find(
 	looked in, and no name finds a map there) */
 	return 0;
 #else
-	/* (port: MCC's own campaign first, with Halo CE content MCC files; never
+	/* (port: MCC's own campaign first, with the Halo content folder; never
 	the survey's, which is the mods folder's alone) */
-	if (!survey && halo_mcc_content_enabled())
+	if (!survey && halo_content_library_found())
 	{
 		mcc_mod_add();
 	}
@@ -1034,13 +1036,13 @@ boolean custom_edition_mods_map_path(
 	long path_size)
 {
 	struct custom_edition_mod_map const *map =
-		halo_mcc_mods_enabled() || halo_mcc_content_enabled() ? mod_map_named(name) : NULL;
+		halo_mcc_mods_enabled() || halo_content_library_found() ? mod_map_named(name) : NULL;
 
 	/* (port: MCC's own, mcc_content.h: in MCC's maps folder, with Halo CE
 	content MCC files alone) */
 	if (map && custom_edition_mods_globals.mods[map->mod_index].mcc)
 	{
-		return halo_mcc_content_enabled() && mcc_content_map_path(map->stem, path, (unsigned long)path_size);
+		return halo_content_library_found() && mcc_content_map_path(map->stem, path, (unsigned long)path_size);
 	}
 	if (!map || !halo_mcc_mods_enabled() ||
 		snprintf(path, (size_t)path_size, "%s%s\\maps\\%s.map", CUSTOM_EDITION_MODS_DIRECTORY,

@@ -401,26 +401,39 @@ const char *platform_save_root(void)
 	return root;
 }
 
-/* ---------- (port) MCC's halo1 folder
+/* ---------- (port) the Halo content folder
 
-game.content = "mcc" (port/linux/game/mcc_content.c) reads the maps of the
-player's Halo: The Master Chief Collection, whose halo1 folder the game
-names d:\mcc\ (MCC_XBOX_ROOT): paths.mcc (HALO_MCC_ROOT) when set, else on
-the PS Vita the data root's mcc/halo1 (or mcc, holding maps itself), else
-the first Steam library with one (mcc_paths.c: each Steam's
-libraryfolders.vdf, and the Steam folder itself). Looked for once, again
-after platform_mcc_root_forget when none was found. Nothing in it is ever
+The Halo content folder (port/linux/game/mcc_content.c) is the player's own
+Halo: The Master Chief Collection folder, the one holding halo1 (halo2,
+halo3 ... beside it), which the game names d:\mcc\: paths.content
+(HALO_CONTENT_ROOT, the settings panel's, read anew when it changes; a
+halo1 folder named there stands for the folder holding it), else on the
+PS Vita the data root's mcc, else the first Steam library with MCC's
+folder (mcc_paths.c: each Steam's libraryfolders.vdf, and the Steam folder
+itself). It is the folder when it holds a game folder with maps in it (for
+now halo1). Looked for once, again when the setting changes or after
+platform_mcc_root_forget when none was found. Nothing in it is ever
 written: every call here that writes, makes, moves or deletes a file or
 folder refuses a path in it (platform_host_path_is_mcc). */
 
 static pthread_mutex_t mcc_root_lock = PTHREAD_MUTEX_INITIALIZER;
 static char mcc_root[MAX_PATH];
-/* 0 not looked for, 1 found, -1 not found */
+/* 0 not looked for, 1 found, -1 not found; and the setting it was found for */
 static int mcc_root_state;
+static char mcc_root_setting[MAX_PATH];
+
+/* whether `path` is a content folder: a game folder of it has maps */
+static int mcc_root_valid(const char *path)
+{
+	char game[MAX_PATH + 16];
+
+	snprintf(game, sizeof(game), "%s/halo1", path);
+	return has_maps(game);
+}
 
 static int mcc_root_try(const char *path)
 {
-	if (!path || !path[0] || !has_maps(path))
+	if (!path || !path[0] || !mcc_root_valid(path))
 		return 0;
 	snprintf(mcc_root, sizeof(mcc_root), "%s", path);
 	trim_separators(mcc_root);
@@ -428,7 +441,7 @@ static int mcc_root_try(const char *path)
 }
 
 #ifndef HALO_NOT_DESKTOP
-/* the halo1 folder of a Steam folder's libraries, or of the folder itself */
+/* MCC's folder in a Steam folder's libraries, or in the folder itself */
 static int mcc_root_try_steam(const char *steam)
 {
 	char path[MCC_PATHS_BYTES + 64];
@@ -449,33 +462,48 @@ static int mcc_root_try_steam(const char *steam)
 		fclose(stream);
 		count = mcc_paths_library_folders(text, (unsigned long)size, folders, MCC_PATHS_MAXIMUM_LIBRARIES);
 	}
-	for (index = 0; index < count; index++)
+	for (index = 0; index <= count; index++)
 	{
-		if (mcc_paths_halo1(folders[index], halo1, sizeof(halo1)) && mcc_root_try(halo1))
+		if (mcc_paths_mcc(index < count ? folders[index] : steam, halo1, sizeof(halo1)) && mcc_root_try(halo1))
 			return 1;
 	}
-	return mcc_paths_halo1(steam, halo1, sizeof(halo1)) && mcc_root_try(halo1);
+	return 0;
 }
 #endif
 
+static const char *mcc_root_setting_now(void)
+{
+	const char *setting = getenv("HALO_CONTENT_ROOT");
+
+	if (!setting)
+		setting = config_string("paths.content");
+	/* (the Vita panel's Found by itself) */
+	return setting && strcasecmp(setting, "auto") ? setting : "";
+}
+
 static void mcc_root_find(void)
 {
-	const char *setting = config_string("paths.mcc");
+	const char *setting = mcc_root_setting_now();
 	char path[MAX_PATH];
 
 	mcc_root[0] = 0;
+	snprintf(mcc_root_setting, sizeof(mcc_root_setting), "%s", setting ? setting : "");
 	if (setting && *setting)
 	{
-		/* (the player's: taken as it is, found or not) */
+		const char *slash;
+
+		/* (the player's: taken as it is, found or not; its halo1 folder
+		named, the folder holding it) */
 		snprintf(mcc_root, sizeof(mcc_root), "%s", setting);
 		trim_separators(mcc_root);
-		mcc_root_state = has_maps(mcc_root) ? 1 : -1;
-		platform_log("mcc: halo1 folder (paths.mcc): %s%s", mcc_root, mcc_root_state > 0 ? "" : " (no maps folder there)");
+		slash = strrchr(mcc_root, '/');
+		if (!mcc_root_valid(mcc_root) && has_maps(mcc_root) && slash && !strcasecmp(slash + 1, "halo1"))
+			mcc_root[slash - mcc_root] = 0;
+		mcc_root_state = mcc_root_valid(mcc_root) ? 1 : -1;
+		platform_log("content: the Halo content folder (paths.content): %s%s", mcc_root,
+			mcc_root_state > 0 ? "" : " (no halo1/maps there)");
 		return;
 	}
-	snprintf(path, sizeof(path), "%s/mcc/halo1", platform_data_root());
-	if (mcc_root_try(path))
-		goto found;
 	snprintf(path, sizeof(path), "%s/mcc", platform_data_root());
 	if (mcc_root_try(path))
 		goto found;
@@ -511,19 +539,21 @@ static void mcc_root_find(void)
 	}
 #endif
 	mcc_root_state = -1;
-	platform_log("mcc: no halo1 folder found (paths.mcc; %s/mcc/halo1; Steam's libraries)", platform_data_root());
+	platform_log("content: no Halo content folder (paths.content; %s/mcc; Steam's libraries): the Xbox maps alone",
+		platform_data_root());
 	return;
 found:
 	mcc_root_state = 1;
-	platform_log("mcc: halo1 folder: %s", mcc_root);
+	platform_log("content: the Halo content folder: %s", mcc_root);
 }
 
 int platform_mcc_root(char *out, unsigned long out_size)
 {
 	int found;
+	const char *setting = mcc_root_setting_now();
 
 	pthread_mutex_lock(&mcc_root_lock);
-	if (!mcc_root_state)
+	if (!mcc_root_state || strcmp(setting ? setting : "", mcc_root_setting))
 		mcc_root_find();
 	found = mcc_root_state > 0;
 	if (out && out_size)
@@ -562,7 +592,7 @@ static int mcc_write_refused(const char *host_path)
 {
 	if (!platform_host_path_is_mcc(host_path))
 		return 0;
-	platform_log("mcc: refused: a write to MCC's folder (%s); it is only read", host_path);
+	platform_log("content: refused: a write to the Halo content folder (%s); it is only read", host_path);
 	SetLastError(ERROR_ACCESS_DENIED);
 	errno = EACCES;
 	return 1;
@@ -613,7 +643,7 @@ void platform_translate_path(const char *xbox_path, char *host_path, unsigned lo
 			if (maps_root && !*maps_root)
 				maps_root = NULL;
 		}
-		/* (port) d:\mcc\: MCC's halo1 folder, wherever it is (above) */
+		/* (port) d:\mcc\: the Halo content folder, wherever it is (above) */
 		if (!strcmp(resolved, platform_data_root()))
 		{
 			const char *name = cursor;
@@ -623,7 +653,7 @@ void platform_translate_path(const char *xbox_path, char *host_path, unsigned lo
 			if (!strncasecmp(name, "mcc", 3) && (name[3] == '\\' || name[3] == '/' || !name[3]))
 			{
 				if (!platform_mcc_root(resolved, sizeof(resolved)))
-					snprintf(resolved, sizeof(resolved), "%s/mcc/halo1", platform_data_root());
+					snprintf(resolved, sizeof(resolved), "%s/mcc", platform_data_root());
 				cursor = name + 3;
 				/* (and never above it: ".." stops there) */
 				dot_dot_floor = strlen(resolved);

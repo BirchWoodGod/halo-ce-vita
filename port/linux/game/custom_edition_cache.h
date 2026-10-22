@@ -256,6 +256,13 @@ a Halo: CE Anniversary cache of a solo scenario this build loads (its
 header and tag index alone are read); logs why not. */
 boolean custom_edition_cache_mod_map_identify(
 	char const *path);
+/* (port) The loader the Halo content folder's map file at `path` asks for
+by its header (mcc_content.h's table: enum content_library_loader), and its
+game's index into `game_index` (may be NULL): none for a file that cannot
+be read or that no loader of this build plays. */
+short custom_edition_cache_content_loader(
+	char const *path,
+	int *game_index);
 /* (port) What the file at `path` is, by the cache file loader's own check of
 its header and tag index (cache_file_identify): its status (enum
 cache_file_status; _cache_file_status_read_failed for a file that cannot be

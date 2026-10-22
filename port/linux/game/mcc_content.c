@@ -1,7 +1,7 @@
 /*
 MCC_CONTENT.C
 
-(port) The names of Halo CE content: MCC files (mcc_content.h): MCC's stock
+(port) The Halo content folder's names and loaders (mcc_content.h): MCC's stock
 maps, their titles and pictures, and the level names that are MCC's. Plain
 C; what is done with them is custom_edition_cache.c's (loading),
 custom_edition_maps.c's and custom_edition_mods.c's (the level lists).
@@ -21,7 +21,57 @@ struct mcc_content_map
 	int frame;
 };
 
-/* MCC's halo1\maps: the campaign in its order, then the multiplayer maps
+/* the content folder's games, and the loader of each one's map files: the
+cache header's 'head' and version choose (content_library_loader_for_header).
+Halo CE's alone has a loader in this build; the others' are found and said
+(custom_edition_maps.c), and plug in here, a row and a loader, as they come */
+static struct content_library_game const content_library_games[] =
+{
+	{ "halo1", "Halo: Combat Evolved Anniversary", 13, _content_library_loader_halo1 },
+	{ "halo2", "Halo 2", 0, _content_library_loader_none },
+	{ "halo3", "Halo 3", 0, _content_library_loader_none },
+	{ "halo3odst", "Halo 3: ODST", 0, _content_library_loader_none },
+	{ "haloreach", "Halo: Reach", 0, _content_library_loader_none },
+	{ "halo4", "Halo 4", 0, _content_library_loader_none },
+};
+
+#define CONTENT_LIBRARY_GAME_COUNT ((int)(sizeof(content_library_games) / sizeof(content_library_games[0])))
+/* 'head', as the cache header's first four bytes read little-endian */
+#define CACHE_HEADER_SIGNATURE 0x68656164UL
+
+struct content_library_game const *content_library_game_get(int index)
+{
+	return index >= 0 && index < CONTENT_LIBRARY_GAME_COUNT ? &content_library_games[index] : NULL;
+}
+
+int content_library_loader_for_header(unsigned char const *header, unsigned long size, int *game_index)
+{
+	unsigned long signature, version;
+	int index;
+
+	if (game_index)
+		*game_index = -1;
+	if (!header || size < 8)
+		return _content_library_loader_none;
+	signature = (unsigned long)header[0] | (unsigned long)header[1] << 8 | (unsigned long)header[2] << 16 |
+		(unsigned long)header[3] << 24;
+	version = (unsigned long)header[4] | (unsigned long)header[5] << 8 | (unsigned long)header[6] << 16 |
+		(unsigned long)header[7] << 24;
+	if (signature != CACHE_HEADER_SIGNATURE)
+		return _content_library_loader_none;
+	for (index = 0; index < CONTENT_LIBRARY_GAME_COUNT; index++)
+	{
+		if (content_library_games[index].cache_version && content_library_games[index].cache_version == version)
+		{
+			if (game_index)
+				*game_index = index;
+			return content_library_games[index].loader;
+		}
+	}
+	return _content_library_loader_none;
+}
+
+/* Halo CE's (halo1\maps): the campaign in its order, then the multiplayer maps
 (the Xbox's thirteen in the menus' order, whose pictures are those frames
 of the multiplayer level pictures, then Halo PC's six) */
 static struct mcc_content_map const mcc_content_maps[] =

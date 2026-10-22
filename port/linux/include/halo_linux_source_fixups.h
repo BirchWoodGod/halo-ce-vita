@@ -75,9 +75,9 @@ int halo_custom_edition_enabled(void);
 /* whether the mods folder's Halo: CE Anniversary maps may be listed and
 played (HALO_MCC_MODS: port/linux/src/xbox_memory.c) */
 int halo_mcc_mods_enabled(void);
-/* (port) Halo CE content is MCC files (game.content, HALO_CONTENT: platform.h),
-and MCC's halo1 folder (d:\mcc\): platform.h */
-int halo_mcc_content_enabled(void);
+/* (port) the Halo content folder (d:\mcc\, paths.content) and whether it
+holds Halo CE maps: platform.h */
+int halo_content_library_found(void);
 int platform_mcc_root(char *out, unsigned long out_size);
 void platform_mcc_root_forget(void);
 void *halo_custom_edition_tag_cache_acquire(unsigned long bytes);

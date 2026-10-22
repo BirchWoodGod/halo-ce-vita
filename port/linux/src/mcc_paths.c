@@ -1,12 +1,12 @@
 /*
 MCC_PATHS.C
 
-(port) Where a player's Halo: The Master Chief Collection keeps its halo1
-folder (mcc_paths.h): Steam's library folders, read from its
+(port) Where a player's Halo: The Master Chief Collection is, the Halo
+content folder (mcc_paths.h): Steam's library folders, read from its
 libraryfolders.vdf, each holding steamapps/common/Halo The Master Chief
-Collection/halo1. Plain C on the text it is given, no file read here
+Collection. Plain C on the text it is given, no file read here
 (xbox_files.c reads the files and looks for the folders), so that
-port/vita/tests/mcc_paths_test.c tests it with made-up files.
+port/vita/tests/mcc_content_test.c tests it with made-up files.
 
 The file is Valve's KeyValues text: quoted keys and values, braces for
 blocks. Steam writes each library as a block with a "path" key ("0" {
@@ -109,7 +109,7 @@ int mcc_paths_library_folders(const char *text, unsigned long size, char folders
 	return count;
 }
 
-int mcc_paths_halo1(const char *library, char *out, unsigned long out_size)
+int mcc_paths_mcc(const char *library, char *out, unsigned long out_size)
 {
 	unsigned long length;
 	int written;
@@ -119,6 +119,6 @@ int mcc_paths_halo1(const char *library, char *out, unsigned long out_size)
 	length = strlen(library);
 	while (length > 1 && (library[length - 1] == '/' || library[length - 1] == '\\'))
 		length--;
-	written = snprintf(out, out_size, "%.*s/" MCC_PATHS_STEAM_HALO1, (int)length, library);
+	written = snprintf(out, out_size, "%.*s/" MCC_PATHS_STEAM_MCC, (int)length, library);
 	return written > 0 && (unsigned long)written < out_size;
 }

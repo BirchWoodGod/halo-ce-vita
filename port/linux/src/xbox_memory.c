@@ -25,7 +25,6 @@ HALO_CUSTOM_EDITION is set (docs/custom_edition_caches.md).
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
 #ifndef HALO_VITA
 #include <sys/mman.h>
 #endif
@@ -193,19 +192,15 @@ int halo_mcc_mods_enabled(void)
 	return config_boolean("game.mcc_mods");
 }
 
-int halo_mcc_content_enabled(void)
+int halo_content_library_found(void)
 {
-	/* game.content (port_config.c): "xbox" (the default) or "mcc"; read as
-	halo_custom_edition_enabled is (the Vita's panel sets the variable) */
 #ifdef HALO_DEDICATED_SERVER
 	/* (the dedicated server plays the Xbox maps alone) */
 	return 0;
 #else
-	const char *setting = getenv("HALO_CONTENT");
-
-	if (!setting || !*setting)
-		setting = config_string("game.content");
-	return setting && !strcasecmp(setting, "mcc");
+	/* the Halo content folder (paths.content, HALO_CONTENT_ROOT, or found:
+	xbox_files.c), holding MCC's halo1 maps; none, the Xbox maps alone */
+	return platform_mcc_root(NULL, 0);
 #endif
 }
 

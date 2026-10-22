@@ -1029,10 +1029,11 @@ static char const *const h3_level_names[NUMBER_OF_SINGLE_PLAYER_LEVELS] =
 	"Assault on the Control Room", "343 Guilty Spark", "The Library", "Two Betrayals", "Keyes", "The Maw",
 };
 static char const *const h3_difficulty_names[4] = { "Easy", "Normal", "Heroic", "Legendary" };
-/* (port) with Halo CE content MCC files (mcc_content.h), the missions are
-MCC's own campaign maps, as the mods' (custom_edition_mods.c): played on
-this machine alone, every one open (they keep no profile progress), saved
-in the custom campaign maps' save, savegame_custom.bin */
+/* (port) with a Halo content folder (mcc_content.h), each mission whose map
+it has is MCC's own campaign map, as the mods' (custom_edition_mods.c),
+else the Xbox's: played on this machine alone, every one open (they keep
+no profile progress), saved in the custom campaign maps' save,
+savegame_custom.bin. Looked at as the lobby opens (h3_mcc_levels_find) */
 static char const *const h3_mcc_level_paths[NUMBER_OF_SINGLE_PLAYER_LEVELS] =
 {
 	"mods\\mcc_a10", "mods\\mcc_a30", "mods\\mcc_a50", "mods\\mcc_b30", "mods\\mcc_b40",
@@ -1041,33 +1042,50 @@ static char const *const h3_mcc_level_paths[NUMBER_OF_SINGLE_PLAYER_LEVELS] =
 boolean game_state_set_persistent_storage_custom(boolean custom);
 boolean custom_edition_cache_playable(char const *map_name);
 
-static boolean h3_mcc_campaign(void)
+static boolean h3_mcc_levels[NUMBER_OF_SINGLE_PLAYER_LEVELS];
+static boolean h3_mcc_any;
+
+/* which missions the Halo content folder has (as the loader takes them) */
+static void h3_mcc_levels_find(void)
 {
-	return halo_mcc_content_enabled() != 0;
+	short level;
+
+	h3_mcc_any = FALSE;
+	for (level = 0; level < NUMBER_OF_SINGLE_PLAYER_LEVELS; level++)
+	{
+		h3_mcc_levels[level] = halo_content_library_found() && custom_edition_cache_playable(h3_mcc_level_paths[level]);
+		h3_mcc_any |= h3_mcc_levels[level];
+	}
+	if (h3_mcc_any)
+		platform_log("menus: h3 campaign: the missions of the Halo content folder are MCC's");
 }
 
-/* the mission's level name: the Xbox level's, or MCC's own */
+static boolean h3_mcc_campaign(void)
+{
+	return h3_mcc_any;
+}
+
+static boolean h3_mcc_level(short level)
+{
+	return h3_mcc_levels[PIN(level, 0, NUMBER_OF_SINGLE_PLAYER_LEVELS - 1)];
+}
+
+/* the mission's level name: MCC's own, else the Xbox level's */
 static char const *h3_level_path(short level)
 {
 	level = (short)PIN(level, 0, NUMBER_OF_SINGLE_PLAYER_LEVELS - 1);
-	return h3_mcc_campaign() ? h3_mcc_level_paths[level] : h3_level_paths[level];
+	return h3_mcc_levels[level] ? h3_mcc_level_paths[level] : h3_level_paths[level];
 }
 
-/* whether the mission can be played (map_checks.c; MCC's own: its file in
-MCC's folder, as the loader takes it), `why` not */
+/* whether the mission can be played (map_checks.c; MCC's own: found as the
+lobby opened), `why` not */
 static short h3_mission_check(short level, char *why, long why_size)
 {
-	if (!h3_mcc_campaign())
+	if (!h3_mcc_level(level))
 		return map_check(h3_level_paths[level], why, why_size);
-	if (custom_edition_cache_playable(h3_level_path(level)))
-	{
-		if (why && why_size > 0)
-			why[0] = 0;
-		return _map_check_playable;
-	}
 	if (why && why_size > 0)
-		snprintf(why, (size_t)why_size, "%s", T("Not in your MCC files (mcc/halo1/maps), or not one this game plays."));
-	return _map_check_missing;
+		why[0] = 0;
+	return _map_check_playable;
 }
 
 /* ---- ad hoc play in the Halo 3 lobbies (the multiplayer lobby's AD HOC,
@@ -1352,7 +1370,10 @@ was chosen since, after */
 static void h3_campaign_initialize(void)
 {
 	struct player_profile profile;
-	short unlocked = h3_campaign_unlocked();
+	short unlocked;
+
+	h3_mcc_levels_find();
+	unlocked = h3_campaign_unlocked();
 
 	if (!h3_campaign.initialized || h3_campaign.profile_index != player_ui_get_active_player_profile_index(0))
 	{
@@ -1496,7 +1517,7 @@ static void h3_campaign_update(struct widget_instance *widget)
 		snprintf(text, sizeof(text), "%s", T("Co-op with the PS Vitas on your Wi-Fi."));
 	else if (h3_campaign.network == _h3_campaign_adhoc)
 		snprintf(text, sizeof(text), "%s", T("Co-op with the PS Vitas near you."));
-	else if (h3_mcc_campaign())
+	else if (h3_mcc_level(h3_campaign.level))
 		snprintf(text, sizeof(text), "%s", T("MCC files, on this PS Vita alone. No sound yet."));
 	else
 		snprintf(text, sizeof(text), "%s", T("This party is local to this PS Vita."));
@@ -1507,7 +1528,7 @@ static void h3_campaign_update(struct widget_instance *widget)
 
 		if (h3_mission_check(h3_campaign.level, why, sizeof(why)) != _map_check_playable)
 			snprintf(text, sizeof(text), "%s", why);
-		else if (h3_mcc_campaign() && h3_campaign.network != _h3_campaign_local)
+		else if (h3_mcc_level(h3_campaign.level) && h3_campaign.network != _h3_campaign_local)
 			snprintf(text, sizeof(text), "%s", T("MCC missions play on this machine alone: LOCAL."));
 	}
 	text_show(named(screen, "ready_sub"), text);
@@ -1627,7 +1648,7 @@ static boolean h3_campaign_host(struct widget_instance *widget, struct event_rec
 	if (h3_campaign.network == _h3_campaign_local)
 		return FALSE;
 	/* (MCC's own missions are never hosted, as no mod's map is) */
-	if (h3_mcc_campaign())
+	if (h3_mcc_level(h3_campaign.level))
 	{
 		platform_log("menus: h3 campaign: co-op not hosted: MCC missions play on this machine alone");
 		return FALSE;

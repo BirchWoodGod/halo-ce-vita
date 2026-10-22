@@ -1478,7 +1478,7 @@ enum network_game_client_map_check
 	check's crossplay verdict, crossplay_maps.h) */
 	_network_game_client_map_crossplay_refused,
 	/* (port) one of MCC's own maps (mcc_content.h) that this machine does
-	not have (Halo CE content not MCC files, or no such file), or whose file
+	not have (no Halo content folder, or no such file in it), or whose file
 	is not the host's (another MCC version), or a host that does not say
 	which it plays: never downloaded */
 	_network_game_client_map_mcc_missing,
@@ -1520,7 +1520,7 @@ static short network_game_client_map_check(
 			return _network_game_client_map_build_unsupported;
 		return _network_game_client_map_playable;
 	}
-	/* port: one of MCC's own maps (Halo CE content MCC files,
+	/* port: one of MCC's own maps (the Halo content folder,
 	mcc_content.h): this machine's own MCC file, the same as the host's
 	(its identity, as a custom map's, and one the host must give); never
 	asked of the host, which shares none */
@@ -1588,8 +1588,8 @@ static void network_game_client_map_refusal_show(
 		break;
 	case _network_game_client_map_mcc_missing:
 		length = snprintf(message, sizeof(message),
-			T("The host is playing %s from its MCC files. To join, set Halo CE content to MCC files (Multiplayer > "
-			"Modded maps) with your own copy of Halo: The Master Chief Collection's halo1 folder."), name);
+			T("The host is playing %s from its MCC files. To join, set the Halo content folder (Multiplayer > Modded "
+			"maps) to your own copy of Halo: The Master Chief Collection's folder."), name);
 		break;
 	case _network_game_client_map_mcc_different:
 		length = snprintf(message, sizeof(message),
