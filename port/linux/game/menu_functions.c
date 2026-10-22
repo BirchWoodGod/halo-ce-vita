@@ -115,6 +115,7 @@ for a gamepad); a test build's HALO_TEST_TEXT_INPUT answers in its place,
 #include "networking/network_game_globals.h"
 #include "networking/network_game_manager.h"
 #include "networking/network_server_manager.h"
+#include "dedicated_server.h"
 #include "network_connection.h"
 #include "player_models.h"
 #include "game/players.h"
@@ -14463,7 +14464,9 @@ static void h3_pregame_update(struct widget_instance *widget)
 		return;
 	cooperative = coop_menu_game_is_cooperative(game);
 	online = config_boolean("network.online") && p2p_running();
-	waiting = host && game->machine_count < 2;
+	/* (the host's bots - Bots online - are players of machines of their own,
+	not in the count: a host with them is not alone) */
+	waiting = host && game->machine_count < 2 && network_game_server_dedicated_bot_count() == 0;
 	code[0] = 0;
 	if (host && online)
 		p2p_hosting_code(code, (int)sizeof(code));
