@@ -506,7 +506,11 @@ static unsigned char *tag_cache_room(unsigned char **room_end)
 	unsigned char *start = base + ((cache_file_tag_data_size() + SCENE_PACK_ALIGNMENT - 1) & ~(SCENE_PACK_ALIGNMENT - 1)) +
 		scene_packs.reserved;
 	unsigned char *end = base + TAG_CACHE_SIZE;
-	struct scenario *scenario = global_scenario_get();
+	/* (the try: no scenario yet is expected here - global_scenario_get
+	asserts one, which on the main thread, not the tick's, was logged as
+	"render assertion skipped (torn read?)" each time FORGE START loaded
+	a map, insider.21) */
+	struct scenario *scenario = global_scenario_try_and_get();
 
 	/* (as a map loads - Forge's and the player models' packs load as its
 	tags are read, before the scenario is the game's - its own scenario
