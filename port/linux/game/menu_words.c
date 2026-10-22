@@ -11,9 +11,11 @@ game's column list shows the one by focus); each letter is the columns
 between the gaps of its word, half way to its neighbours (the same columns
 in both; letters that touch, CA, LT, LAYE..., split at their faintest
 column), set one after the other the originals' mean gap apart. F and H,
-which those words have not, are made of their letters' own strokes: F of
-E down to its middle arm and I's stem below it, H of two I's and E's
-middle arm between them. The words are kept in the game's data folder
+which those words have not, are made of the font's own strokes, copied
+pixel for pixel: F is E down to its middle arm, E's straight stem row on
+to the bottom, I's square end and side glow, the top arm's glow under the
+middle arm; H is two I stems N's width apart and E's middle arm between
+them (letter_f, letter_h). The words are kept in the game's data folder
 (t:\menu_words_<row>_<frame>.rgba, with the pictures' checksum: made again
 when the map's pictures change).
 
@@ -34,6 +36,7 @@ asks (menu_words_frame) as it loads a frame of classic/{lang}/main_*.
 
 #include "../src/lang.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,7 +54,7 @@ unsigned long long vita_host_time_us(void);
 /* (DXT3: 16 bytes a block of 4 x 4) */
 #define BITMAP_FORMAT_DXT3 15
 #define BITMAP_CACHED_BIT 7
-#define WORDS_FILE_SIGNATURE 0x3344574DUL /* 'MWD3': made again when the way of making them changes */
+#define WORDS_FILE_SIGNATURE 0x3844574DUL /* 'MWD8': made again when the way of making them changes */
 
 /* the game's words and the letters of each, in their pictures */
 static struct
@@ -534,110 +537,303 @@ static void blit(byte *word, long at_x, long source, long frame, long x0, long x
 	}
 }
 
-/* E's middle arm's rows (the inked rows of E's right half between its top
-and bottom arms), and I's stem's width */
-static void e_arm_rows(struct letter const *e, long stem, long *top, long *bottom)
+/* ---- F and H, of the font's own strokes
+
+E (GAME DEMOS's, cut clean) gives: its stem (the inked run from the left of
+a row between its middle and bottom arms: straight there, its own soft
+edge), its three arms' rows, and the glow over its top arm (the rows above
+it: a horizontal stroke's glow alone, nothing else near). I gives a stem's
+square ends and the glow at its side and ends. N gives a letter's width.
+Each piece is copied pixel for pixel, never scaled: the strokes are the
+font's own. Glow meeting glow keeps the stronger (blit, put) */
+
+#define STROKE_GLOW 5
+
+struct strokes
 {
-	long y, x, first = -1, last = -1, runs = 0;
+	struct letter const *e, *i, *n;
+	/* E's stem's ink columns and a straight row of it */
+	long stem0, stem1, stem_row;
+	/* E's arms' rows (top, middle, bottom: first and last) and the middle
+	arm's last inked column */
+	long arm[3][2];
+	long middle_end;
+	/* I's stem's ink columns */
+	long i_stem0, i_stem1;
+};
+
+static boolean strokes_find(struct strokes *strokes)
+{
+	struct letter const *e = letter_find('E');
+	long y, x, runs = 0;
 	boolean was = FALSE;
 
-	*top = *bottom = -1;
+	memset(strokes, 0, sizeof(*strokes));
+	strokes->e = e;
+	strokes->i = letter_find('I');
+	strokes->n = letter_find('N');
+	if (!e || !strokes->i || !strokes->n || e->split || strokes->i->split)
+		return FALSE;
+	strokes->i_stem0 = strokes->i->ink0;
+	strokes->i_stem1 = strokes->i->ink1;
+	/* (the arms: the runs of rows inked right of the stem's width from E's
+	ink: an I's width and two) */
 	for (y = 0; y < WORD_HEIGHT; y++)
 	{
 		boolean row = FALSE;
 
-		for (x = e->ink0 + stem + 1; x <= e->ink1; x++)
+		for (x = e->ink0 + (strokes->i_stem1 - strokes->i_stem0 + 1) + 2; x <= e->ink1; x++)
 		{
 			if (inked(e->source, x, y))
 				row = TRUE;
 		}
-		if (row && !was)
-		{
-			runs++;
-			if (runs == 2)
-				first = y;
-		}
-		if (!row && was && runs == 2)
-			last = y - 1;
+		if (row && !was && runs < 3)
+			strokes->arm[runs][0] = y;
+		if (!row && was && runs < 3)
+			strokes->arm[runs++][1] = y - 1;
 		was = row;
 	}
-	*top = first;
-	*bottom = last;
+	if (runs != 3)
+		return FALSE;
+	/* (the stem: a row half way between the middle and bottom arms) */
+	/* (the row of the gap between the middle and bottom arms whose stem has
+	the least ink left of its run - E's stem bows a little: its straightest) */
+	{
+		long best = 0x7FFFFFFF, row;
+
+		strokes->stem_row = (strokes->arm[1][1] + strokes->arm[2][0]) / 2;
+		for (row = strokes->arm[1][1] + 2; row <= strokes->arm[2][0] - 2; row++)
+		{
+			long first, left = 0;
+
+			for (first = e->x0; first <= e->x1 && !inked(e->source, first, row); first++)
+				left += alpha_at(e->source, first, row);
+			if (first <= e->x1 && alpha_at(e->source, first - 1, row) < best)
+			{
+				best = alpha_at(e->source, first - 1, row);
+				strokes->stem_row = row;
+			}
+		}
+	}
+	for (x = e->x0; x <= e->x1 && !inked(e->source, x, strokes->stem_row); x++)
+		;
+	strokes->stem0 = x;
+	for (; x <= e->x1 && inked(e->source, x, strokes->stem_row); x++)
+		;
+	strokes->stem1 = x - 1;
+	for (x = e->ink1; x > strokes->stem1 && !inked(e->source, x, (strokes->arm[1][0] + strokes->arm[1][1]) / 2); x--)
+		;
+	strokes->middle_end = x;
+	return strokes->stem1 >= strokes->stem0 && strokes->middle_end > strokes->stem1 + 2;
 }
 
-/* a letter of the pictures, or made of others' strokes (F, H): its cell's
-width (-1: none), and, with word, it drawn with its cell at at_x */
+static byte const *pixel_at(long source, long frame, long x, long y)
+{
+	static byte const none[4] = { 0, 0, 0, 0 };
+
+	if (x < 0 || x >= WORD_WIDTH || y < 0 || y >= WORD_HEIGHT)
+		return none;
+	return &menu_words.pixels[source][frame][(y * WORD_WIDTH + x) * 4];
+}
+
+/* a pixel of a letter's cell, none outside it (a neighbour's ink there) */
+static byte const *cell_pixel(struct letter const *letter, long frame, long x, long y)
+{
+	static byte const none[4] = { 0, 0, 0, 0 };
+
+	if (x < letter->x0 || x > letter->x1)
+		return none;
+	return pixel_at(letter->source, frame, x, y);
+}
+
+/* one pixel put into a word's picture, the stronger kept */
+static void put(byte *word, long x, long y, byte const *from)
+{
+	byte *out;
+
+	if (x < 0 || x >= WORD_WIDTH || y < 0 || y >= WORD_HEIGHT)
+		return;
+	out = &word[(y * WORD_WIDTH + x) * 4];
+	if (from[3] > out[3])
+		memcpy(out, from, 4);
+}
+
+/* E's top arm's glow above it, k rows up from the arm, at a column (the
+glow of a horizontal stroke alone) */
+static byte const *bar_glow(struct strokes const *strokes, long frame, long x, long k)
+{
+	return cell_pixel(strokes->e, frame, x, strokes->arm[0][0] - k);
+}
+
+/* F: E above its middle arm's last row (its rounded top, both arms as they
+are); below it E's straight stem row again to the bottom, I's square end
+under it, I's glow at the stem's right, the top arm's glow mirrored under
+the middle arm. at_x: the cell's place (E's cell's columns) */
+static void letter_f(struct strokes const *strokes, long frame, byte *word, long at_x)
+{
+	struct letter const *e = strokes->e;
+	long bottom = strokes->arm[2][1];
+	long y, x, k;
+	/* (I's columns put on E's: its stem's left edge on E's stem's - both
+	stems' full columns alike, E's with a soft one at its right) */
+	long i_shift = strokes->stem0 - strokes->i_stem0;
+
+	for (y = 0; y < WORD_HEIGHT; y++)
+	{
+		for (x = e->x0; x <= e->x1; x++)
+		{
+			long to = at_x + (x - e->x0);
+
+			if (y <= strokes->arm[1][1])
+				put(word, to, y, cell_pixel(e, frame, x, y));
+			else if (y <= bottom)
+			{
+				/* (the stem and its soft right edge: E's straight row; past
+				them, I's side at that row) */
+				if (x <= strokes->stem1 + 1)
+					put(word, to, y, cell_pixel(e, frame, x, strokes->stem_row));
+				else
+					put(word, to, y, cell_pixel(strokes->i, frame, x - i_shift, y));
+			}
+			else
+			{
+				/* (under the stem: I's square end and its glow) */
+				put(word, to, y, cell_pixel(strokes->i, frame, x - i_shift, y));
+			}
+		}
+	}
+	/* (under the middle arm: the glow a bar has, mirrored from over the top
+	arm, along the arm's columns) */
+	for (k = 1; k <= STROKE_GLOW; k++)
+	{
+		for (x = strokes->stem1 + 1; x <= e->x1; x++)
+			put(word, at_x + (x - e->x0), strokes->arm[1][1] + k, bar_glow(strokes, frame, x, k));
+	}
+}
+
+/* H: two of I's stems, N's width apart (ink to ink), E's middle arm between
+them at its rows - one column of its middle, the same in every column, its
+glow over and under it the top arm's - square ends and glow all I's. Its
+cell: I's left margin, N's ink's width, I's right margin */
+static long letter_h(struct strokes const *strokes, long frame, byte *word, long at_x)
+{
+	struct letter const *i = strokes->i;
+	long width = strokes->n->ink1 - strokes->n->ink0 + 1;
+	long left = i->ink0 - i->x0;
+	long cell = left + width + (i->x1 - i->ink1);
+	long bar_column = (strokes->stem1 + strokes->middle_end) / 2;
+	long inner0 = left + (i->ink1 - i->ink0) + 1, inner1 = left + width - (i->ink1 - i->ink0 + 1) - 1;
+	long x, y, k;
+
+	if (!word)
+		return cell;
+	/* (the stems: I's cell twice) */
+	blit(word, at_x, i->source, frame, i->x0, i->x1, 0, WORD_HEIGHT - 1);
+	blit(word, at_x + width - (i->ink1 - i->ink0 + 1), i->source, frame, i->x0, i->x1, 0, WORD_HEIGHT - 1);
+	/* (the bar, between the stems' ink) */
+	for (x = inner0; x <= inner1; x++)
+	{
+		for (y = strokes->arm[1][0]; y <= strokes->arm[1][1]; y++)
+			put(word, at_x + x, y, cell_pixel(strokes->e, frame, bar_column, y));
+		for (k = 1; k <= STROKE_GLOW; k++)
+		{
+			put(word, at_x + x, strokes->arm[1][0] - k, bar_glow(strokes, frame, bar_column, k));
+			put(word, at_x + x, strokes->arm[1][1] + k, bar_glow(strokes, frame, bar_column, k));
+		}
+	}
+	return cell;
+}
+
+/* L, cut out of LT (MULTIPLAYER's): T's bar's end over its foot's columns
+taken away - L is its stem and its foot alone: nothing right of its stem
+above its foot's rows */
+static void letter_l_clean(struct letter const *letter, byte *word, long at_x)
+{
+	long middle = 0, top = WORD_HEIGHT, bottom = -1, foot, stem1, x, y;
+
+	for (y = 0; y < WORD_HEIGHT; y++)
+	{
+		for (x = letter->ink0; x <= letter->ink1; x++)
+		{
+			if (inked(letter->source, x, y))
+			{
+				top = MIN(top, y);
+				bottom = MAX(bottom, y);
+			}
+		}
+	}
+	if (bottom < top)
+		return;
+	middle = (top + bottom) / 2;
+	for (x = letter->ink0; x <= letter->ink1 && !inked(letter->source, x, middle); x++)
+		;
+	for (; x <= letter->ink1 && inked(letter->source, x, middle); x++)
+		;
+	stem1 = x - 1;
+	/* (the foot: the rows inked right of the stem going up from the bottom) */
+	for (foot = bottom; foot > middle; foot--)
+	{
+		boolean row = FALSE;
+
+		for (x = stem1 + 2; x <= letter->ink1; x++)
+		{
+			if (inked(letter->source, x, foot))
+				row = TRUE;
+		}
+		if (!row)
+			break;
+	}
+	for (y = 0; y <= foot; y++)
+	{
+		for (x = stem1 + 2; x <= letter->x1; x++)
+		{
+			long to = at_x + (x - letter->x0);
+
+			if (to >= 0 && to < WORD_WIDTH)
+				memset(&word[(y * WORD_WIDTH + to) * 4], 0, 4);
+		}
+	}
+}
+
+/* a letter of the pictures, or made of the font's strokes (F, H): its
+cell's width (-1: none), and, with word, it drawn with its cell at at_x */
 static long glyph(char character, long frame, byte *word, long at_x)
 {
 	struct letter const *letter = letter_find(character);
-	struct letter const *e, *i;
-	long stem, arm_top, arm_bottom, i_left;
+	struct strokes strokes;
 
 	if (letter)
 	{
 		if (word)
+		{
 			blit(word, at_x, letter->source, frame, letter->x0, letter->x1, 0, WORD_HEIGHT - 1);
+			if (character == 'L' && letter->split)
+				letter_l_clean(letter, word, at_x);
+		}
 		return letter->x1 - letter->x0 + 1;
 	}
-	if ((character != 'F' && character != 'H') || !(e = letter_find('E')) || !(i = letter_find('I')))
+	if ((character != 'F' && character != 'H') || !strokes_find(&strokes))
 		return -1;
-	stem = i->ink1 - i->ink0 + 1;
-	e_arm_rows(e, stem, &arm_top, &arm_bottom);
-	if (arm_top < 0 || arm_bottom < arm_top)
-		return -1;
-	/* (I's cell placed so that its stem is where E's is) */
-	i_left = (e->ink0 - e->x0) - (i->ink0 - i->x0);
 	if (character == 'F')
 	{
-		/* E above the gap under its middle arm (its glow with it); I's
-		stem below: E without its bottom arm */
-		long cut = arm_bottom + (WORD_HEIGHT > 0 ? 2 : 0);
-
 		if (word)
-		{
-			blit(word, at_x, e->source, frame, e->x0, e->x1, 0, cut);
-			blit(word, at_x + i_left, i->source, frame, i->x0, i->x1, arm_top, WORD_HEIGHT - 1);
-		}
-		return e->x1 - e->x0 + 1;
+			letter_f(&strokes, frame, word, at_x);
+		return strokes.e->x1 - strokes.e->x0 + 1;
 	}
-	/* H: E's stem (I's), E's middle arm drawn on as long as the space between
-	the stems, I's stem at the right: an E's width and a stem more */
-	{
-		long inner = (e->ink1 - e->ink0 + 1) - stem;
-		long right_stem = (e->ink0 - e->x0) + stem + inner;
-
-		if (word)
-		{
-			long arm_x0 = e->ink0 + stem, arm_x1 = e->ink1 - 1, done = 0, length = arm_x1 - arm_x0 + 1;
-
-			blit(word, at_x + i_left, i->source, frame, i->x0, i->x1, 0, WORD_HEIGHT - 1);
-			while (length > 0 && done < inner)
-			{
-				long piece = MIN(length, inner - done);
-
-				blit(word, at_x + (e->ink0 - e->x0) + stem + done, e->source, frame, arm_x0, arm_x0 + piece - 1,
-					arm_top - 3, arm_bottom + 3);
-				done += piece;
-			}
-			blit(word, at_x + right_stem - (i->ink0 - i->x0), i->source, frame, i->x0, i->x1, 0, WORD_HEIGHT - 1);
-		}
-		return right_stem + stem + (i->x1 - i->ink1);
-	}
+	return letter_h(&strokes, frame, word, at_x);
 }
 
 /* a letter's cell's margins: its ink's left and right of it */
 static void glyph_margins(char character, long *left, long *right)
 {
 	struct letter const *letter = letter_find(character);
-	struct letter const *i = letter_find('I');
 
-	if (!letter && (character == 'F' || character == 'H'))
+	if (!letter && character == 'F')
 		letter = letter_find('E');
+	if (!letter && character == 'H')
+		letter = letter_find('I');
 	*left = letter ? letter->ink0 - letter->x0 : 0;
 	*right = letter ? letter->x1 - letter->ink1 : 0;
-	/* (H's right is I's) */
-	if (character == 'H' && i)
-		*right = i->x1 - i->ink1;
 }
 
 /* a word composed: its letters' ink the originals' gap apart, centred as
@@ -696,6 +892,87 @@ static boolean word_compose(char const *text, long frame, byte *word)
 	return TRUE;
 }
 
+/* the focused picture's glow, made again over the whole word from the not
+focused one's shape - each letter's own glow (cut at its cell's edges, its
+first neighbours' in it) would show seams where letters from different words
+meet. As the originals' is, measured: their alpha 1.25 times a 7 x 7 maximum
+of the not focused alpha, blurred (Gaussian, sigma 1.5) - within 10 of 255
+of theirs -, the colour a blue that pales with it (red 0.18 alpha + 25,
+green 0.07 alpha + 144, blue 255). The letters themselves (the not focused
+alpha past 15) keep their own focused pixels */
+static void glow_remake(byte const *shape, byte *focused)
+{
+	static float most[WORD_HEIGHT][WORD_WIDTH], blurred[WORD_HEIGHT][WORD_WIDTH];
+	float kernel[9], total = 0.0f;
+	long x, y, k;
+
+	for (k = -4; k <= 4; k++)
+		total += kernel[k + 4] = (float)exp(-(double)(k * k) / (2.0 * 1.5 * 1.5));
+	for (k = 0; k < 9; k++)
+		kernel[k] /= total;
+	/* (the 7 x 7 maximum: rows, then columns) */
+	for (y = 0; y < WORD_HEIGHT; y++)
+	{
+		for (x = 0; x < WORD_WIDTH; x++)
+		{
+			byte value = 0;
+
+			for (k = MAX(0, x - 3); k <= MIN(WORD_WIDTH - 1, x + 3); k++)
+				value = MAX(value, shape[(y * WORD_WIDTH + k) * 4 + 3]);
+			blurred[y][x] = value;
+		}
+	}
+	for (y = 0; y < WORD_HEIGHT; y++)
+	{
+		for (x = 0; x < WORD_WIDTH; x++)
+		{
+			float value = 0.0f;
+
+			for (k = MAX(0, y - 3); k <= MIN(WORD_HEIGHT - 1, y + 3); k++)
+				value = MAX(value, blurred[k][x]);
+			most[y][x] = value;
+		}
+	}
+	/* (the blur: rows, then columns; outside the picture none) */
+	for (y = 0; y < WORD_HEIGHT; y++)
+	{
+		for (x = 0; x < WORD_WIDTH; x++)
+		{
+			float value = 0.0f;
+
+			for (k = -4; k <= 4; k++)
+			{
+				if (x + k >= 0 && x + k < WORD_WIDTH)
+					value += most[y][x + k] * kernel[k + 4];
+			}
+			blurred[y][x] = value;
+		}
+	}
+	for (y = 0; y < WORD_HEIGHT; y++)
+	{
+		for (x = 0; x < WORD_WIDTH; x++)
+		{
+			float value = 0.0f;
+			byte *out = &focused[(y * WORD_WIDTH + x) * 4];
+			long alpha;
+
+			for (k = -4; k <= 4; k++)
+			{
+				if (y + k >= 0 && y + k < WORD_HEIGHT)
+					value += blurred[y + k][x] * kernel[k + 4];
+			}
+			if (shape[(y * WORD_WIDTH + x) * 4 + 3] > 15)
+				continue;
+			alpha = (long)(value * 1.25f + 0.5f);
+			alpha = MIN(alpha, 255);
+			out[0] = 255;
+			out[1] = (byte)MIN(255, (long)(0.07f * alpha + 144.5f));
+			out[2] = (byte)MIN(255, (long)(0.18f * alpha + 25.0f));
+			out[3] = (byte)alpha;
+		}
+	}
+}
+
 /* the word kept in the data folder, if it is of these pictures */
 static boolean cache_read(char const *name, long frame, byte *word)
 {
@@ -737,6 +1014,23 @@ static void cache_write(char const *name, long frame, byte const *word)
 	fclose(file);
 }
 
+/* the focused picture's glow made of the not focused word's shape */
+static boolean focused_finish(char const *text, byte *focused)
+{
+	byte *shape = malloc(WORD_BYTES);
+
+	if (!shape)
+		return FALSE;
+	if (!word_compose(text, 0, shape))
+	{
+		free(shape);
+		return FALSE;
+	}
+	glow_remake(shape, focused);
+	free(shape);
+	return TRUE;
+}
+
 /* ---------- public code */
 
 /* (menu_tags.c, a frame of a PNG of the menus folder about to be read) the
@@ -767,7 +1061,8 @@ unsigned char *menu_words_frame(
 		return NULL;
 	if (cache_read(name, frame, word))
 		return word;
-	if (!word_compose(rows[index].word, frame, word))
+	if (!word_compose(rows[index].word, frame, word) ||
+		(frame == 1 && !focused_finish(rows[index].word, word)))
 	{
 		platform_log("menu words: %s cannot be made of the game's letters: the port's picture", rows[index].word);
 		free(word);
