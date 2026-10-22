@@ -338,15 +338,21 @@ def games_of(ticks):
 
 
 def quitters(ticks):
-    """the players of each game dead for 20 s or more in a row: those who left
-    (Halo keeps a player who quits on the scores, always dead)"""
-    gone, run = set(), collections.Counter()
-    for game, t in zip(games_of(ticks), ticks):
+    """the players of each game who left: dead from some second to the
+    game's end, 20 s or more (Halo keeps a player who quits on the scores,
+    always dead; a long respawn - Big Team's - is not one)"""
+    run, gone = collections.Counter(), set()
+    games = games_of(ticks)
+    last_game = None
+    for game, t in zip(games, ticks):
+        if game != last_game:
+            gone |= {k for k, n in run.items() if n >= 20 and k[0] == last_game}
+            run = collections.Counter({k: n for k, n in run.items() if k[0] == game})
+            last_game = game
         for number, (team, alive, _) in t[3].items():
             key = (game, number)
             run[key] = 0 if alive else run[key] + 1
-            if run[key] >= 20:
-                gone.add(key)
+    gone |= {k for k, n in run.items() if n >= 20}
     return gone
 
 
