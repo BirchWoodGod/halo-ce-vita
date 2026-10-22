@@ -91,6 +91,7 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 		<string text="Options"/>
 		<string text="Invite Friends"/>
 		<string text="WHO CAN JOIN"/>
+		<string text="BOTS"/>
 	</strings>
 	<strings name="h3/networks">
 		<string text="ONLINE"/>
@@ -127,6 +128,7 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 		<string text="PUBLIC: listed in the games browser.\nPRIVATE: friends, invites and its code join it."/>
 		<string text="A public game asks joiners for it.\nNONE: anyone may join."/>
 		<string text="VITA: PS Vitas only. VITA PC: Vitas and\nHalo CE Vita on PC. EVERYONE: also OpenCE\nplayers on PC."/>
+		<string text="FULL: bots fill every slot but one and\nleave as players join (a party on one team).\nOFF: none. Or the most bots."/>
 		<string text="Hosts at once with this game type and map (your\nprofile first, the first time): the game's lobby,\nwhich shows your game's code."/>
 	</strings>
 	<strings name="h3/code_help">
@@ -691,7 +693,8 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 	<!-- GAME OPTIONS (Create Game: Square on the lobby on ONLINE): OpenCE's Server Setup (setup.xml: its functions, rows'
 	and values' names) as Halo 3's game options - rows with their values at the right in ice blue,
 	the chosen one's help below; GAME TYPE and MAP open the lobby's pickers (port h3 setup hold
-	keeps what the rows show meanwhile); START GAME as Server Setup's -->
+	keeps what the rows show meanwhile); BOTS, Bots online (bots.online: the bots a game hosted
+online fills its lobby with); START GAME as Server Setup's -->
 	<widget name="h3/setup/panel" left="40" top="40" width="560" height="400" bitmap="h3/panel"/>
 	<widget name="h3/setup/title" type="text" left="52" top="46" width="400" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/mp_text" string_index="18"/>
 	<widget name="h3/setup/subtitle" type="text" left="52" top="72" width="536" height="16" font="h3/font_small" color="#FFCFD9E3" string_list="h3/mp_text" string_index="23"/>
@@ -742,12 +745,18 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 		<child widget="h3/setup/who_label"/>
 		<child widget="h3/setup/who_spinner" x="280"/>
 	</widget>
+	<widget name="h3/setup/bots_label" type="text" left="0" top="0" width="250" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/mp_text" string_index="31"/>
+	<widget name="h3/setup/bots_spinner" strings="FULL|OFF|1|2|3|5|7|9|11|13" type="spinner" left="0" top="0" width="100" height="20" flags="pass_unhandled_to_focused_child left_right_tabs_items" font="h3/font_item" color="#FFAABED6" align="center" text_y="2" header_bitmap="h3/arrow_left" footer_bitmap="h3/arrow_right" header_bounds="2 -12 18 -4" footer_bounds="2 104 18 112"/>
+	<widget name="h3/setup/op_bots" width="536" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<child widget="h3/setup/bots_label"/>
+		<child widget="h3/setup/bots_spinner" x="280"/>
+	</widget>
 	<widget name="h3/setup/op_start" type="text" width="536" height="20" bitmap="h3/item" font="h3/font_item" color="#FFF2F6FA" text_x="10" text_y="3" string_list="h3/mp_text" string_index="1">
 		<on event="a start" run="port setup start" open="ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen"/>
 	</widget>
-	<widget name="h3/setup/setup_status" type="text" left="52" top="279" width="536" height="18" font="h3/font_small" color="#FF9FB6CC" text_y="1"/>
-	<widget name="h3/setup/help_rule" left="40" top="298" width="560" height="2" bitmap="h3/rule"/>
-	<widget name="h3/setup/setup_help" type="text" left="52" top="306" width="536" height="60" font="h3/font_small" color="#FFCFD9E3" string_list="h3/setup_help"/>
+	<widget name="h3/setup/setup_status" type="text" left="52" top="301" width="536" height="18" font="h3/font_small" color="#FF9FB6CC" text_y="1"/>
+	<widget name="h3/setup/help_rule" left="40" top="320" width="560" height="2" bitmap="h3/rule"/>
+	<widget name="h3/setup/setup_help" type="text" left="52" top="328" width="536" height="60" font="h3/font_small" color="#FFCFD9E3" string_list="h3/setup_help"/>
 	<widget name="h3/setup/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<data input="port setup update"/>
 		<child widget="h3/setup/op_game" x="52" y="102"/>
@@ -757,7 +766,8 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 		<child widget="h3/setup/op_visibility" x="52" y="190"/>
 		<child widget="h3/setup/op_password" x="52" y="212"/>
 		<child widget="h3/setup/op_who" x="52" y="234"/>
-		<child widget="h3/setup/op_start" x="52" y="258"/>
+		<child widget="h3/setup/op_bots" x="52" y="256"/>
+		<child widget="h3/setup/op_start" x="52" y="280"/>
 	</widget>
 	<widget name="h3/setup/screen" flags="pass_unhandled_to_focused_child">
 		<on event="created" run="port setup init"/>
