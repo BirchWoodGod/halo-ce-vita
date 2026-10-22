@@ -401,6 +401,12 @@
 #   HALO_TEST_SHOTS       a folder for each case's frames (HALO_SCREENSHOT_DIR, every
 #                         60 frames, in <folder>/<case>); none by default
 #   HALO_TEST_OUT         where the logs go (deleted after a pass when the test made it; HALO_TEST_KEEP=1 keeps them)
+#   HALO_TEST_PROFILE     a player profile's blam.sav (never in the repository; the cases that
+#                         need one skipped without); h3campaign and h3pause play
+#                         blam-unlocked.sav from the same folder when it is there (every
+#                         level open)
+# On a gxm-null harness (configure.py --linux-d3d gxm-null) the taps, the saved frames and the
+# PC text box's typing are SKIPs: it draws nothing to tap, save or type into.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
@@ -410,10 +416,26 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendsbackup h3friendspanel h3partyplates h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes msgboxes}
+all_cases="fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendsbackup h3friendspanel h3partyplates h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes msgboxes"
+cases=${*:-$all_cases}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
+# (a gxm-null harness, configure.py --linux-d3d gxm-null: the Vita's renderer recording into
+# nothing - no picture to save, tap or type into (the touch, screenshot and keyboard checks are
+# the GL build's: SKIP here, not FAIL))
+gxm_null=0
+grep -aq "HALO_CDRAM_HIDDEN_MB" "$binary" 2>/dev/null && gxm_null=1
+skip_null() { # CASE WHAT: TRUE (and SKIP said) on a gxm-null harness
+	[ $gxm_null = 1 ] || return 1
+	echo "--- $1"; echo "SKIP ($1): $2 (a gxm-null harness: the GL build's check)"
+	return 0
+}
+# (the campaign cases' profile: every level unlocked - blam-unlocked.sav beside HALO_TEST_PROFILE's
+# blam.sav when there is one, else HALO_TEST_PROFILE itself)
+campaign_profile=${HALO_TEST_PROFILE:-}
+[ -n "$campaign_profile" ] && [ -r "$(dirname "$campaign_profile")/blam-unlocked.sav" ] &&
+	campaign_profile=$(dirname "$campaign_profile")/blam-unlocked.sav
 
 if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "$menus_data/maps/loc.map" ]; then
 	echo "SKIP: no Halo PC bitmaps.map and loc.map in $menus_data/maps (HALO_TEST_DATA_MENUS)"
@@ -702,6 +724,7 @@ for case in $cases; do
 		grep -aq "menus: h3 servers: 3 shown of 5: Test game 02 (14/16), Test game 04 (12/16), Test game 01 (7/16)" \
 			"$out/h3online/run.log" || fail h3online "the three fullest games were not shown" ;;
 	h3touch)
+		skip_null h3touch "taps" && continue
 		# (FORGE's row on the main menu, then the Forge lobby's Leave: icon and label)
 		run h3touch "$menus_data" 20 "wait:150:12000" HALO_MENU_STYLE=halo3 "HALO_TEST_TAPS=4000:60,318 8000:140,455"
 		check_h3 h3touch halo3
@@ -729,7 +752,7 @@ for case in $cases; do
 		fi
 		# (the lobby: Mission, The Silent Cartographer, Start Game; in the level - a10's start
 		# is the cryo tube, no pausing - Start: the Halo 3 pause screen; down to SAVE AND QUIT, A)
-		profile_from=$HALO_TEST_PROFILE run h3pause "$menus_data" 170 "wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:2500 down:150:600 down:150:600 down:150:600 a wait:150:2500 down:150:600 down:150:600 a wait:150:60000 start:150:4000 wait:150:4000 down:150:1500 wait:150:4000 down:150:800 down:150:800 a:150:4000 wait:150:20000" \
+		profile_from=$campaign_profile run h3pause "$menus_data" 170 "wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:2500 down:150:600 down:150:600 down:150:600 a wait:150:2500 down:150:600 down:150:600 a wait:150:60000 start:150:4000 wait:150:4000 down:150:1500 wait:150:4000 down:150:800 down:150:800 a:150:4000 wait:150:20000" \
 			HALO_MENU_STYLE=halo3 HALO_TEST_COMMANDS=L150:@skip
 		log=$out/h3pause/run.log
 		echo "--- h3pause"
@@ -747,7 +770,7 @@ for case in $cases; do
 		fi
 		# (the main menu: down to CAMPAIGN, A; the profile, A; the lobby: Mission, down three, A;
 		# Difficulty - the picker opens on Normal -, down one, A; Start Game)
-		profile_from=$HALO_TEST_PROFILE run h3campaign "$menus_data" 75 "wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:2500 down:150:600 down:150:600 down:150:600 a wait:150:2500 down:150:700 a wait:150:2500 down:150:600 a wait:150:2500 down:150:700 a wait:150:15000" \
+		profile_from=$campaign_profile run h3campaign "$menus_data" 75 "wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:2500 down:150:600 down:150:600 down:150:600 a wait:150:2500 down:150:700 a wait:150:2500 down:150:600 a wait:150:2500 down:150:700 a wait:150:15000" \
 			HALO_MENU_STYLE=halo3
 		check_h3 h3campaign halo3
 		log=$out/h3campaign/run.log
@@ -873,9 +896,11 @@ for case in $cases; do
 		fi
 		# (ONLINE, its brokers unreachable: MULTIPLAYER; down two to MAP, A: the picker, down nine to
 		# BLOOD GULCH, A; down to START GAME, A: SELECT PROFILE (A joins, A the profile, A): the game
-		# hosted on Blood Gulch, its lobby; B: the multiplayer lobby (the brokers unreachable, the
-		# connection falls back to Same Wi-Fi after a while: START GAME again is h3mp's); Menu style
-		# Halo CE: CREATE GAME INTERNET is OpenCE's Server Setup as before)
+		# hosted on Blood Gulch, its lobby - its code and PUBLIC not shown while the brokers are not
+		# reached: Connecting..., then why -; B: the multiplayer lobby (the brokers unreachable, the
+		# connection stays Online, its status line saying so - insider.21 fell back to Same Wi-Fi,
+		# its ONLINE rows then saying internet play was off); Menu style Halo CE: CREATE GAME
+		# INTERNET is OpenCE's Server Setup as before)
 		hostonline_pad="$h3mppad down:150:500 down:150:500 a wait:150:2500"
 		for row in $(seq 1 9); do hostonline_pad="$hostonline_pad down:150:300"; done
 		hostonline_pad="$hostonline_pad a wait:150:2500 down:150:500 a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:5000"
@@ -895,6 +920,12 @@ for case in $cases; do
 		grep -aq "join: the host's map is levels.test.bloodgulch.bloodgulch" "$log" ||
 			fail h3hostonline "the hosted game is not on Blood Gulch"
 		grep -aq "ui: screen pc.h3.pregame.screen" "$log" || fail h3hostonline "the game's lobby did not open"
+		grep -a "menus: h3 pregame: \|network: Online\|network: Same Wi-Fi" "$log" | sed 's/code [A-Z0-9-]*/code (hidden)/' | head -8
+		grep -aqE "menus: h3 pregame: .*; (connecting|not reached)" "$log" ||
+			fail h3hostonline "the game's lobby did not say it was connecting (or why it is not listed)"
+		grep -aqE "menus: h3 pregame: .*(; public|; code )" "$log" &&
+			fail h3hostonline "the game's lobby showed its code or PUBLIC with the brokers not reached"
+		grep -aq "network: Same Wi-Fi chosen" "$log" && fail h3hostonline "Online's failure switched the connection to Same Wi-Fi"
 		sed -n '/ui: screen pc.h3.pregame.screen/,$p' "$log" | grep -a "ui: screen" | sed -n 2p | grep -q "pc.h3.mp.screen" ||
 			fail h3hostonline "B on the game's lobby did not go back to the multiplayer lobby"
 		grep -aq "ui: screen pc.h3.setup.screen" "$log" && fail h3hostonline "START GAME opened Create Game on the way"
@@ -1058,6 +1089,7 @@ for case in $cases; do
 			fail h3groups "down from the first game did not choose the next Vita game"
 		if [ -n "${HALO_TEST_SHOTS:-}" ]; then echo "frames in $HALO_TEST_SHOTS/h3groups*"; fi ;;
 	h3mptouch)
+		skip_null h3mptouch "taps" && continue
 		# (MULTIPLAYER on the main menu; the lobby's MAP; BLOOD GULCH in the picker; the lobby's Back)
 		run h3mptouch "$menus_data" 30 "wait:150:20000" HALO_MENU_STYLE=halo3 \
 			"HALO_TEST_TAPS=4000:60,298 8000:60,118 12000:100,263 16000:140,455"
@@ -1125,7 +1157,7 @@ for case in $cases; do
 		grep -aq "menus: h3 players: options for Spartan 1 (machine 10)" "$log" &&
 			grep -aq "ui: screen pc.h3.players.options" "$log" || fail h3players "Cross on a player did not open its options"
 		grep -aq "menus: h3 players: Go online first" "$log" || fail h3players "ADD FRIEND offline did not say go online first"
-		grep -aq "menus: h3 players: A player of this PS Vita" "$log" ||
+		grep -aq "menus: h3 players: no options for .*, a player of this PS Vita" "$log" ||
 			fail h3players "this machine's own player was given options"
 		grep -a "ui: screen" "$log" | tail -1 | grep -qE 'connected_pregame_screen|pc.h3.pregame.screen' ||
 			fail h3players "Circle did not go back to the game's lobby" ;;
@@ -1305,6 +1337,7 @@ for case in $cases; do
 			fail h3profiles "the test profile's blam.sav changed"
 		h3_no_xbox_profiles h3profiles_delete ;;
 	h3proftouch)
+		skip_null h3proftouch "taps" && continue
 		# (CAMPAIGN's row on the main menu; SELECT PROFILE's New Profile; the lobby's Back)
 		run h3proftouch "$menus_data" 22 "wait:150:14000" HALO_MENU_STYLE=halo3 HALO_TEST_TEXT_INPUT=Rookie \
 			"HALO_TEST_TAPS=4000:60,278 8000:400,430 12000:140,455"
@@ -1721,14 +1754,19 @@ for case in $cases; do
 			fail h3lan "A on a game the System Link list does not show did not say it is not listed"
 		grep -aq "menus: the server browser sorts by name" "$log" || fail h3lan "Y did not sort the games by name"
 		grep -aq "menus: the LAN browser looks again" "$log" || fail h3lan "Square did not look again"
-		grep -aq "menus: the LAN browser's game Test game 00 is no longer listed" "$log" ||
-			fail h3lan "a tap on the first game's row (sorted by name, under VITA GAMES) did not press A on it"
-		grep -a "ui: screen" "$log" | tail -1 | grep -qE '4way_start2join_screen|pc.h3.join.screen' ||
-			fail h3lan "a tap on Back did not go back to the profile"
+		if [ $gxm_null = 1 ]; then
+			echo "SKIP (h3lan): the taps on a row and on Back (a gxm-null harness: the GL build's check)"
+		else
+			grep -aq "menus: the LAN browser's game Test game 00 is no longer listed" "$log" ||
+				fail h3lan "a tap on the first game's row (sorted by name, under VITA GAMES) did not press A on it"
+			grep -a "ui: screen" "$log" | tail -1 | grep -qE '4way_start2join_screen|pc.h3.join.screen' ||
+				fail h3lan "a tap on Back did not go back to the profile"
+		fi
 		check_h3 h3lan_empty halo3
 		grep -aq 'menus: the server browser says "No games found on your network"' "$out/h3lan_empty/run.log" ||
 			fail h3lan "with no games the LAN browser did not say none were found" ;;
 	pctext)
+		skip_null pctext "the PC build's text box typed into (keyboard)" && continue
 		# (the PC build's text box, port/linux/src/pc_text_entry.c: typed into through SDL's own
 		# events, HALO_TEST_KEYS, and the gamepad's on-screen keyboard, HALO_TEST_PAD; no
 		# HALO_TEST_TEXT_INPUT. Each shot named pctext_* in the case's folder, and in HALO_TEST_SHOTS)
@@ -2117,6 +2155,7 @@ PY
 		[ -n "${HALO_TEST_SHOTS:-}" ] && mkdir -p "$HALO_TEST_SHOTS/h3mpcustom" &&
 			cp "$out"/h3mpcustom_shots/*.bmp "$HALO_TEST_SHOTS/h3mpcustom/" 2>/dev/null ;;
 	h3modstouch)
+		skip_null h3modstouch "taps" && continue
 		# (MOD MANAGER's row on the main menu; mygulch's row, the third; the screen's Back: icon and label)
 		mods_data "$out/h3mods-data"
 		run h3modstouch "$out/h3mods-data" 25 "wait:150:16000" HALO_MENU_STYLE=halo3 \
@@ -2445,7 +2484,11 @@ PY
 		*) fail h3partyplates "the plates did not go none, Bravo, Bravo and Charlie, the lobby, Bravo, none" ;;
 		esac
 		grep -aq "menus: party plates: none (the nameplate hidden)" "$log" && fail h3partyplates "the nameplate was hidden"
-		ls "$out/h3partyplates_shots"/0[0-3]-*.bmp > /dev/null 2>&1 || fail h3partyplates "the frames were not saved"
+		if [ $gxm_null = 1 ]; then
+			echo "SKIP (h3partyplates): the frames saved (a gxm-null harness: the GL build's check)"
+		else
+			ls "$out/h3partyplates_shots"/0[0-3]-*.bmp > /dev/null 2>&1 || fail h3partyplates "the frames were not saved"
+		fi
 		[ -n "${HALO_TEST_SHOTS:-}" ] && mkdir -p "$HALO_TEST_SHOTS/h3partyplates" &&
 			cp "$out"/h3partyplates_shots/0*.bmp "$HALO_TEST_SHOTS/h3partyplates/" 2>/dev/null ;;
 	browserprofile)
@@ -2769,7 +2812,7 @@ PY
 		grep -aq "h3 dialog\|pc.h3.dlg" "$log" && fail msgboxes "campaign, Halo CE: a Halo 3 dialog opened"
 		grep -aq "pause menu: restart at checkpoint" "$log" && fail msgboxes "campaign, Halo CE: Circle reverted" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3renamed|pausesave|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3lobbyscenes|h3modelsmany|h3friends|h3friendspanel|browserprofile|h3players|browserrows|profilepaths|h3mppause|h3friendsfit|h3hostonline|h3livelobby|h3groups|browserreopen|h3livebrowse|profileio|h3carnage|h3vitapc|h3createwho|h3gametypes|msgboxes]..." >&2; exit 2 ;;
+		echo "usage: $0 [$(echo $all_cases | tr ' ' '|')]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"
