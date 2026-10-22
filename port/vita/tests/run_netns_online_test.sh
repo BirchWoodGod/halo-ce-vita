@@ -425,6 +425,20 @@
 #            pauses the game (its ticks go on); a team game's pause (no CHANGE
 #            TEAMS) is run_menus_test.sh h3mppause's. HALO_TEST_SHOTS: the copies' screenshots
 #            at the Vita's 960x544 kept there
+#   h3scoreboard the Halo 3 SCOREBOARD (halo3/scoreboard.xml) in an online game: a Vita host
+#            (Team Slayer on Blood Gulch, Bots online 2: two bots on the teams) and two
+#            joiners by its code, every copy Menu style Halo 3 with the Halo PC files
+#            (HALO_TEST_DATA_MENUS; the host with HALO_TEST_PROFILE's profile, skipped
+#            without), each holding Back half of every 4 s (debug.network_test_scores): each
+#            holds the scoreboard up, and the three see the same players - names, teams,
+#            BOT - in their last rows, the three and a bot or two (a joiner takes a bot's
+#            place); the host's own row has the host's crown
+#            on the host. A joiner opens it (Triangle with Back held), the cursor on another
+#            machine's player (HALO_TEST_SCOREBOARD_CHOOSE), Cross: their options are BACK,
+#            MUTE CHAT and ADD FRIEND, no KICK; the host's, the same with KICK (left
+#            unpressed: Circle). The first joiner's KICK, pressed as the options' does
+#            (HALO_TEST_SCOREBOARD_KICK), is refused (only the host kicks) and the host
+#            drops no one
 #   carnage  the Halo 3 CARNAGE REPORT (halo3/carnage.xml) at the end of an online game:
 #            both copies Menu style Halo 3 with the Halo PC files (HALO_TEST_DATA_MENUS)
 #            and HALO_TEST_PROFILE's profile played by the host (skipped without), the
@@ -857,6 +871,7 @@ fi
 [ "$mode" = h3pickjoin ] && seconds=${HALO_TEST_SECONDS:-240}
 [ "$mode" = h3mppause ] && seconds=${HALO_TEST_SECONDS:-150}
 [ "$mode" = carnage ] && seconds=${HALO_TEST_SECONDS:-200}
+[ "$mode" = h3scoreboard ] && seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = h3live ] && seconds=${HALO_TEST_SECONDS:-150}
 [ "$mode" = h3liveleave ] && seconds=${HALO_TEST_SECONDS:-100}
 [ "$mode" = h3liveonline ] && seconds=${HALO_TEST_SECONDS:-110}
@@ -957,7 +972,7 @@ side join 10.10.2 192.168.2
 { [ "${HALO_TEST_SECOND_JOINER:-0}" = 1 ] || [ "$mode" = badmap ] || [ "$mode" = splitscreen ] || [ "$mode" = party ] || [ "$mode" = chat ] ||
 	[ "$mode" = partyfollow ] ||
 	[ "$mode" = partyserver ] ||
-	[ "$mode" = hostbots ] ||
+	[ "$mode" = hostbots ] || [ "$mode" = h3scoreboard ] ||
 	[ "$mode" = friendsbackup ] ||
 	[ "$mode" = h3forgeonline ] || [ "$mode" = vitapc ] || [ "$mode" = vitaonly ]; } &&
 	side join2 10.10.3 192.168.3
@@ -3037,6 +3052,91 @@ h3mppause)
 	sed -n '/ui: screen pc.h3.mppause.end_screen/,$p' "$hl" | grep -aqE "ui: screen pc.h3.(main|mp).screen" ||
 		fail "the host's END GAME did not end the game (the host back at the menus)"
 	grep -aq "network test: joining" "$out/joiner2/run.log" || fail "the second joiner did not join"
+	;;
+h3scoreboard)
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS) or no HALO_TEST_PROFILE"; exit 0
+	fi
+	mkdir -p "$out/host/save/u/UDATA/869079979327"
+	cp "$HALO_TEST_PROFILE" "$out/host/save/u/UDATA/869079979327/blam.sav"
+	[ -r "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" ] &&
+		cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$out/host/save/u/UDATA/869079979327/"
+	sb_env="HALO_NET_ONLINE=true HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_NETWORK_TEST_SCORES=4 HALO_TEST_SCOREBOARD_CHOOSE=other"
+	# (each copy, its game well under way: Back held and Triangle, the scoreboard open on
+	# another machine's player; Cross, the options; Circle, Circle; then it plays on, holding
+	# Back every 4 s; a pad's Back is the tests' too: the open screen waits for it let go)
+	sb_pad() { echo "HALO_TEST_PAD=wait:150:$1 back:600:0 back+y:150:0 back:300:2000 a:150:2500 b:150:1500 b:150:1500"; }
+	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" $sb_env HALO_NETWORK_TEST_PROFILE=1 \
+		HALO_NETWORK_TEST=host:bloodgulch:team_slayer HALO_NETWORK_TEST_START=30 HALO_NETWORK_TEST_SCORE=200 \
+		HALO_NET_MAX_PLAYERS=5 HALO_BOTS_ONLINE=2 HALO_BOT_SKILL=easy HALO_TEST_INPUT=bot:1 \
+		"$(sb_pad 95000)"; host_pid=$last_pid
+	code=$(wait_code)
+	[ -n "$code" ] || { fail "the host never showed a code"; tail -20 "$out/host/run.log"; exit 1; }
+	echo "host's code: $code"
+	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$join_machine" "$vita" "$cpu_b" $sb_env HALO_NETWORK_TEST=join-code:$code \
+		HALO_NET_PLAYER_NAME=Joiner1 HALO_TEST_INPUT=bot:2 HALO_TEST_SCOREBOARD_KICK=1 HALO_EXIT_AFTER=$((seconds - 10)) \
+		"$(sb_pad 75000)"; join_pid=$last_pid
+	HALO_TEST_DATA_JOINER2=$menus_data run_copy joiner2 "$join2_machine" "$vita" "$cpu_b" $sb_env HALO_NETWORK_TEST=join-code:$code \
+		HALO_NET_PLAYER_NAME=Joiner2 HALO_TEST_INPUT=bot:3 HALO_EXIT_AFTER=$((seconds - 10)) \
+		"$(sb_pad 80000)"; join2_pid=$last_pid
+	wait $join_pid $join2_pid 2>/dev/null
+	kill -TERM "$host_pid" 2>/dev/null; wait "$host_pid" 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log j2l=$out/joiner2/run.log
+	# (each copy's last rows, as names, teams and BOT: who is in the game, as each sees it)
+	sb_people() { # LOG
+		python3 - "$1" <<'PY'
+import sys
+line = ''
+for text in open(sys.argv[1], encoding='utf-8', errors='replace'):
+    if 'menus: h3 scoreboard: ' in text and ' rows, ' in text:
+        line = text.split('menus: h3 scoreboard: ', 1)[1].strip()
+people, team = [], None
+for row in [r.strip() for r in line.partition(':')[2].split('|') if r.strip()]:
+    if row.startswith('team '):
+        team = ' '.join(row.split()[1:-1])
+        continue
+    fields = row.split()
+    people.append('%s/%s%s' % (fields[0], (team or '-').replace(' ', '_'), '/bot' if 'bot' in fields[3:] else ''))
+print(' '.join(sorted(people)))
+PY
+	}
+	for side in host joiner joiner2; do
+		log=$out/$side/run.log
+		echo "--- $side"
+		grep -aE "menus: h3 scoreboard: (held|opened|options|test|Only|Kicked|That player)|network test: scoreboard held" "$log" | head -12
+		grep -av "render assertion skipped" "$log" | grep -aqiE "assert|exception|halt_and_catch_fire|segmentation" &&
+			fail "the $side: an assertion, exception or crash"
+		grep -aq "menus: h3 scoreboard: held up (local player 0, full screen)" "$log" ||
+			fail "the $side never held the Halo 3 scoreboard up"
+		grep -aq "XLaunchNewImage" "$log" && fail "the $side went to the dashboard"
+		sb_people "$log" > "$out/$side.people"; echo "people: $(cat "$out/$side.people")"
+	done
+	# (three people and a bot at least: a joiner takes a bot's place)
+	people=$(wc -w < "$out/host.people")
+	bots=$(grep -o '/bot' "$out/host.people" | wc -l)
+	[ "$((people - bots))" = 3 ] && [ "$bots" -ge 1 ] ||
+		fail "the host's scoreboard did not list the three players and a bot ($(cat "$out/host.people"))"
+	for side in joiner joiner2; do
+		cmp -s "$out/host.people" "$out/$side.people" ||
+			{ fail "the $side's scoreboard does not list the host's players"; diff "$out/host.people" "$out/$side.people"; }
+	done
+	grep -a "menus: h3 scoreboard: [0-9]* rows, " "$hl" | tail -1 | grep -aqE "\| [^|]* own[^|]* host" ||
+		fail "the host's own row had no host's crown on the host"
+	for side in joiner joiner2; do
+		grep -aqE "menus: h3 scoreboard: options [A-Za-z0-9]+: back, mute, (add|view) friend$" "$out/$side/run.log" ||
+			fail "the $side's options for another player were not BACK, MUTE CHAT, ADD FRIEND (and no KICK)"
+	done
+	grep -aqE "menus: h3 scoreboard: options [A-Za-z0-9]+: back, mute, (add|view) friend, kick$" "$hl" ||
+		fail "the host's options for a joined player had no KICK"
+	grep -aq "menus: h3 scoreboard: test: KICK .* (joined)" "$jl" || fail "the joiner's KICK was not tried"
+	grep -aq "menus: h3 scoreboard: Only the game's host can kick a player" "$jl" || fail "the joiner's KICK was not refused"
+	grep -aqiE "kicked by the host|Kicked " "$hl" "$jl" "$j2l" && fail "a player was kicked"
+	for side in joiner joiner2; do
+		n=$(grep -a "network test: tick" "$out/$side/run.log" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+		echo "$side: $n s playing with another player"
+		[ "$n" -ge 40 ] || fail "the $side played with another player for $n s (40 wanted)"
+	done
 	;;
 carnage)
 	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
@@ -5758,7 +5858,7 @@ forge|forge3|forgemp|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forge
 	forge_case
 	;;
 *)
-	echo "usage: $0 code|infection|infectionold|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|carnage|h3live|h3liveleave|h3liveagain|h3liveonline|h3liveinvite|h3liveprivate|h3online|h3onlinelan|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedbots|dedicatedcompat|partyserver|hostbots|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|friendsbackup|party|partyfollow|chat|friendsprivate|friendsprivatepw|forge|forge3|forgemp|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|h3variant|vitapc|vitaonly|hostfuzz|hostfuzzforge|hostfuzzmap" >&2
+	echo "usage: $0 code|infection|infectionold|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|carnage|h3scoreboard|h3live|h3liveleave|h3liveagain|h3liveonline|h3liveinvite|h3liveprivate|h3online|h3onlinelan|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedbots|dedicatedcompat|partyserver|hostbots|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|friendsbackup|party|partyfollow|chat|friendsprivate|friendsprivatepw|forge|forge3|forgemp|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|h3variant|vitapc|vitaonly|hostfuzz|hostfuzzforge|hostfuzzmap" >&2
 	exit 2
 	;;
 esac

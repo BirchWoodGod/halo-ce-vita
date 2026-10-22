@@ -153,6 +153,11 @@ int p2p_party_leading(void);
 /* whether this machine is in a party (of two or more, or its invites out):
 a party plays online, the lobbies' NETWORK ONLINE (menu_functions.c) */
 int p2p_party_in_party(void);
+/* (the Halo 3 scoreboard's party mark) whether another machine's player of
+the game this machine plays is in its party: their friend card's key when
+this machine has it, else the name they gave the party (a Halo name, cut at
+eleven characters); 0 for this machine's own players and out of a party */
+int p2p_party_player_member(int machine, const char *name);
 /* (a member) whether the game whose host just closed it was the party
 leader's: the members follow the leader, no error said */
 int p2p_party_host_left_quiet(void);

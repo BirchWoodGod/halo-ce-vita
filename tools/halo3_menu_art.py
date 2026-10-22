@@ -334,6 +334,13 @@ def dpad_left_right(size=16):
     return image.resize((size, size), Image.Resampling.LANCZOS)
 
 
+def dpad_up_down(size=16):
+    # the D-pad's up and down, a list's scroll (the scoreboard's): as
+    # dpad_left_right's, its tab and arms turned upright
+    return dpad_left_right(size * 4).transpose(Image.Transpose.ROTATE_90).resize((size, size),
+                                                                                Image.Resampling.LANCZOS)
+
+
 def shoulder(letter, size=16):
     # the Vita's L or R: a dark rounded tab with its letter (as the round
     # buttons' glyphs, its colour the START glyph's)
@@ -834,6 +841,113 @@ def carnage_won():
     return image.resize((16, 16), Image.Resampling.LANCZOS)
 
 
+# the Halo 3 scoreboard's (halo3/scoreboard.xml): the teams' colours, in the
+# game's team order (red, blue, green, yellow, purple, orange, brown, pink;
+# carnage_report.c carnage_team_color's)
+SCOREBOARD_TEAM_COLOURS = [
+    (196, 44, 40), (44, 86, 196), (52, 160, 60), (206, 180, 38), (132, 58, 186), (222, 118, 30),
+    (122, 82, 44), (222, 96, 160),
+]
+
+
+def scoreboard_team(colour):
+    # a team's panel header on the scoreboard: a band of the team's colour,
+    # deep enough for white text, lighter at the left, 256x16 (stretched to
+    # the row)
+    rgb = colour
+    light = tuple(min(255, round(c + (255 - c) * .18)) for c in rgb)
+    dark = tuple(round(c * .55) for c in rgb)
+    image = horizontal_gradient((256, 16), [
+        (0.0, light + (240,)),
+        (0.6, rgb + (230,)),
+        (1.0, dark + (210,)),
+    ])
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([0, 0, 255, 0], fill=(255, 255, 255, alpha(.35)))
+    draw.rectangle([0, 15, 255, 15], fill=(0, 0, 0, alpha(.35)))
+    return image
+
+
+def scoreboard_self():
+    # this machine's own players' rows on the scoreboard: a pale steel band
+    # across the row, brightest at the left (the cursor's is row_on's orange)
+    image = horizontal_gradient((128, 16), [
+        (0.0, (170, 200, 235, alpha(.42))),
+        (0.7, (150, 180, 220, alpha(.22))),
+        (1.0, (150, 180, 220, alpha(.12))),
+    ])
+    draw = ImageDraw.Draw(image)
+    draw.line([(0, 0), (127, 0)], fill=(230, 240, 255, alpha(.4)))
+    return image
+
+
+def scoreboard_ping(bars):
+    # a player's ping on the scoreboard, as the latency meter's bars: four
+    # bars rising left to right, the ones the ping earns lit (four green,
+    # three yellow, two or one red), the rest dim; none lit when it is not
+    # known; 32x16
+    scale = 4
+    image = Image.new('RGBA', (32 * scale, 16 * scale), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    lit = (90, 230, 100) if bars >= 4 else (240, 205, 60) if bars == 3 else (235, 80, 70)
+    for index in range(4):
+        x0 = (6 + index * 5) * scale
+        top = (12 - index * 3) * scale
+        fill = lit + (255,) if index < bars else (150, 166, 186, alpha(.35))
+        draw.rectangle([x0, top, x0 + 3 * scale, 14 * scale], fill=fill)
+    return image.resize((32, 16), Image.Resampling.LANCZOS)
+
+
+def scoreboard_host():
+    # the host's mark: a small gold crown, 16x16
+    scale = 4
+    image = Image.new('RGBA', (16 * scale, 16 * scale), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    points = [(2, 12), (2, 5), (5.2, 8.4), (8, 3.4), (10.8, 8.4), (14, 5), (14, 12)]
+    draw.polygon([(x * scale, y * scale) for x, y in points], fill=(240, 196, 80, 255), outline=(255, 232, 160, 255))
+    draw.rectangle([2 * scale, 12.6 * scale, 14 * scale, 14 * scale], fill=(240, 196, 80, 255))
+    return image.resize((16, 16), Image.Resampling.LANCZOS)
+
+
+def scoreboard_party():
+    # a party member's mark: three small linked dots in ice blue, 16x16
+    scale = 4
+    image = Image.new('RGBA', (16 * scale, 16 * scale), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    colour = (150, 205, 255, 255)
+    centres = [(4, 10.5), (8, 5), (12, 10.5)]
+    draw.line([(x * scale, y * scale) for x, y in centres + [centres[0]]], fill=colour, width=round(1.2 * scale))
+    for x, y in centres:
+        draw.ellipse([(x - 2.4) * scale, (y - 2.4) * scale, (x + 2.4) * scale, (y + 2.4) * scale], fill=colour,
+                     outline=(230, 244, 255, 255))
+    return image.resize((16, 16), Image.Resampling.LANCZOS)
+
+
+def scoreboard_flame():
+    # the tester's flaming helmet, small: a blue flame of our own, 16x16
+    scale = 4
+    image = Image.new('RGBA', (16 * scale, 16 * scale), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    outer = [(8, 1), (11, 5.5), (12.6, 9), (12, 12.4), (8, 15), (4, 12.4), (3.4, 9), (5, 6), (6.4, 8.4)]
+    draw.polygon([(x * scale, y * scale) for x, y in outer], fill=(70, 120, 255, 255), outline=(150, 180, 255, 255))
+    inner = [(8, 6), (10, 9.6), (9.6, 12.4), (8, 13.6), (6.4, 12.4), (6, 10)]
+    draw.polygon([(x * scale, y * scale) for x, y in inner], fill=(200, 220, 255, 255))
+    return image.resize((16, 16), Image.Resampling.LANCZOS)
+
+
+def scoreboard_bot():
+    # a bot's tag on the scoreboard: BOT on a small grey plate, 32x16
+    scale = 4
+    image = Image.new('RGBA', (32 * scale, 16 * scale), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle([1 * scale, 3 * scale, 29 * scale - 1, 13 * scale - 1], radius=3 * scale,
+                           fill=(92, 102, 116, 235), outline=(255, 255, 255, alpha(.4)), width=scale)
+    font = ImageFont.truetype(os.path.join(FONTS, 'SairaSemiCondensed-Medium.ttf'), 9 * scale)
+    width = draw.textlength('BOT', font=font)
+    draw.text(((30 * scale - width) / 2, 8 * scale), 'BOT', font=font, fill=(240, 244, 248, 255), anchor='lm')
+    return image.resize((32, 16), Image.Resampling.LANCZOS)
+
+
 # the player colours a profile may have, in the game's order
 # (source/saved games/player_profile.c profile_color_table): white, black,
 # red, blue, gray, yellow, green, pink, purple, cyan, cobalt, orange, teal,
@@ -888,6 +1002,7 @@ ART = {
     'glyph_square.png': lambda: glyph('square'),
     'glyph_start.png': lambda: glyph('start'),
     'glyph_dpad_lr.png': dpad_left_right,
+    'glyph_dpad_ud.png': dpad_up_down,
     'glyph_l.png': lambda: shoulder('L'),
     'glyph_r.png': lambda: shoulder('R'),
     'glyph_atlas.png': glyph_atlas,
@@ -903,7 +1018,16 @@ ART = {
     'arrow_right.png': lambda: arrow('right'),
     'swatch_random.png': lambda: swatch(None),
     'carnage_won.png': carnage_won,
+    'scoreboard_self.png': scoreboard_self,
+    'scoreboard_host.png': scoreboard_host,
+    'scoreboard_party.png': scoreboard_party,
+    'scoreboard_flame.png': scoreboard_flame,
+    'scoreboard_bot.png': scoreboard_bot,
 }
+for _bars in range(5):
+    ART['scoreboard_ping_%d.png' % _bars] = (lambda bars: lambda: scoreboard_ping(bars))(_bars)
+for _index, _colour in enumerate(SCOREBOARD_TEAM_COLOURS):
+    ART['scoreboard_team_%d.png' % _index] = (lambda colour: lambda: scoreboard_team(colour))(_colour)
 for _index, _colour in enumerate(PLAYER_COLOURS):
     ART['swatch_%02d.png' % _index] = (lambda colour: lambda: swatch(colour))(_colour)
     ART['nameplate_%02d.png' % _index] = (lambda colour: lambda: nameplate_colour(colour))(_colour)

@@ -55,6 +55,11 @@ struct carnage_report_row
 	long betrayals;
 	/* the game type's own (carnage_report_objective_names) */
 	long objective[CARNAGE_REPORT_OBJECTIVE_STATISTICS];
+	/* (a player's row) the game's player (NONE on a team's row), their
+	machine and local player (NONE: another machine's) */
+	long player_index;
+	short machine;
+	short local_player_index;
 };
 
 struct carnage_report
@@ -74,6 +79,10 @@ struct carnage_report
 /* the report of the game shown now (its scores up: the game over), read
 from the game's record; FALSE when there is no multiplayer game */
 boolean carnage_report_read(struct carnage_report *report);
+/* (the Halo 3 scoreboard, menu_functions.c "port h3 scoreboard") the game
+being played, ranked as the game's own in-game score ranks it: the players
+still in the game (not those who quit), the team rows over them */
+boolean carnage_report_read_in_game(struct carnage_report *report);
 /* the game type's objective statistics' names (English, for T()), NULL for
 none */
 char const *carnage_report_objective_name(long type, int index);

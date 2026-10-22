@@ -419,6 +419,8 @@ static char const *const port_function_names[] =
 	"port h3 carnage init", "port h3 carnage continue", "port h3 carnage leave ask", "port h3 carnage leave",
 	"port h3 carnage players", "port h3 carnage page", "port h3 carnage up", "port h3 carnage down",
 	"port h3 dialog ok", "port h3 dialog yes", "port h3 dialog no",
+	"port h3 scoreboard act", "port h3 scoreboard option", "port h3 scoreboard close", "port h3 scoreboard page up",
+	"port h3 scoreboard page down",
 };
 
 /* the port's game data functions (menu_functions.c), from
@@ -447,6 +449,7 @@ static char const *const port_game_data_input_names[] =
 	"port h3 gametype editor", "port h3 gametype options",
 	"port h3 carnage",
 	"port h3 dialog",
+	"port h3 scoreboard", "port h3 scoreboard options",
 };
 
 static struct

@@ -2149,6 +2149,15 @@ static void pool_free(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* port: the screens held up over the players' views (ui_widget_port_held_screen_show) */
+static struct
+{
+	struct widget_instance *screen;
+	point2d offset;
+} ui_widget_port_held[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
+#endif
+
 void ui_widgets_initialize(
 	void)
 {
@@ -2179,6 +2188,10 @@ void ui_widgets_initialize(
 	}
 	stack_memory_pool_reset(widget_memory_pool);
 
+#ifdef HALO_LINUX
+	/* port: (the pool made again) no screen held up */
+	memset(ui_widget_port_held, 0, sizeof(ui_widget_port_held));
+#endif
 	memset(&widget_globals, 0, sizeof(widget_globals));
 	widget_globals.main_menu_deferred_error_code = NONE;
 	widget_globals.deferred_dashboard_error_code = NONE;
@@ -2676,6 +2689,108 @@ char const *ui_widget_port_active_screen_name(
 	return name ? name : "";
 }
 
+/* port: a screen held up over a local player's view without being open
+(port/linux/game/menu_functions.c "port h3 scoreboard": the Halo 3
+scoreboard while Back is held): drawn under the screens open, at the place
+given in the player's view, its game data functions run as it is drawn, but
+on no stack - it takes no event and no controller (the player plays on),
+has no history, and the menus do not count it as up. One a local player;
+gone with the widgets (ui_widgets_close_all). (ui_widget_port_held is
+declared before ui_widgets_initialize, which forgets it) */
+
+static void ui_widget_port_held_delete(
+	short local_player_index)
+{
+	struct widget_instance *screen = ui_widget_port_held[local_player_index].screen;
+
+	ui_widget_port_held[local_player_index].screen = NULL;
+	if (screen && widget_globals.initialized)
+	{
+		/* (no player's buttons held back for it, as an open screen's are:
+		it had none of them) */
+		screen->local_player_index = NONE;
+		ui_widget_delete(screen);
+	}
+}
+
+/* the screen (a widget tag) held up for the local player at that place,
+made the first time (and again for another tag): it, NULL if it could not
+be made */
+struct widget_instance *ui_widget_port_held_screen_show(
+	short local_player_index,
+	long tag_index,
+	short x,
+	short y)
+{
+	struct widget_instance *screen;
+	struct ui_widget_definition *definition;
+
+	if (local_player_index < 0 || local_player_index >= MAXIMUM_NUMBER_OF_LOCAL_PLAYERS || tag_index == NONE ||
+		!widget_globals.initialized)
+	{
+		return NULL;
+	}
+	screen = ui_widget_port_held[local_player_index].screen;
+	if (screen && screen->definition_tag_index != tag_index)
+	{
+		ui_widget_port_held_delete(local_player_index);
+		screen = NULL;
+	}
+	ui_widget_port_held[local_player_index].offset.x = x;
+	ui_widget_port_held[local_player_index].offset.y = y;
+	if (screen)
+		return screen;
+	definition = ui_widget_definition_get(tag_index);
+	screen = pool_new_pointer(widget_memory_pool, sizeof(struct widget_instance), __FILE__, __LINE__);
+	if (!screen)
+		return NULL;
+	widget_instance_initialize(screen, NULL, definition, tag_index, local_player_index, local_player_index);
+	/* (a screen that would pause the game is never held up) */
+	if (screen->pause_game_time)
+	{
+		ui_widget_port_held[local_player_index].screen = screen;
+		ui_widget_port_held_delete(local_player_index);
+		return NULL;
+	}
+	ui_widget_port_held[local_player_index].screen = screen;
+	return screen;
+}
+
+void ui_widget_port_held_screen_hide(
+	short local_player_index)
+{
+	if (local_player_index >= 0 && local_player_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
+		ui_widget_port_held_delete(local_player_index);
+}
+
+struct widget_instance *ui_widget_port_held_screen(
+	short local_player_index)
+{
+	if (local_player_index < 0 || local_player_index >= MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
+		return NULL;
+	return ui_widget_port_held[local_player_index].screen;
+}
+
+/* (render_ui_widgets) the player's held screen drawn, in its view */
+static void ui_widget_port_held_render(
+	short local_player_index,
+	rectangle2d const *window_bounds)
+{
+	struct widget_instance *screen;
+	rectangle2d bounds;
+
+	if (local_player_index < 0 || local_player_index >= MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
+		return;
+	screen = ui_widget_port_held[local_player_index].screen;
+	if (!screen)
+		return;
+	bounds.x0 = 0;
+	bounds.y0 = 0;
+	bounds.x1 = window_bounds->x1 - window_bounds->x0;
+	bounds.y1 = window_bounds->y1 - window_bounds->y0;
+	widget_instance_render_recursive(screen, &bounds, ui_widget_port_held[local_player_index].offset, TRUE, FALSE);
+}
+
 #endif
 #ifdef HALO_LINUX
 /* port: gives a list's child the focus, as up and down do (OpenCE's lists,
@@ -2986,6 +3101,10 @@ void ui_widgets_close_all(
 		local_player_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS;
 		local_player_index++)
 	{
+#ifdef HALO_LINUX
+		/* port: a screen held up goes too */
+		ui_widget_port_held_delete((short)local_player_index);
+#endif
 		if (widget_globals.active_widgets[local_player_index])
 			ui_widget_delete(widget_globals.active_widgets[local_player_index]);
 		if (widget_globals.widget_stack[local_player_index])
@@ -6274,6 +6393,36 @@ int ui_widget_menus_active(
 }
 #endif
 
+/* port: where the pointer is this frame and whether a finger is down on
+it (the touch screen's), for a screen that scrolls by a drag (menu_functions.c
+"port h3 scoreboard"); while that screen says a drag is on
+(ui_widget_port_pointer_drag), the pointer's moves and lifts are the drag's,
+not the highlight's or a tap's */
+static struct
+{
+	boolean present;
+	boolean held;
+	short x, y;
+	boolean dragging;
+} ui_widget_port_pointer_state;
+
+boolean ui_widget_port_pointer(
+	short *x,
+	short *y,
+	boolean *held)
+{
+	*x = ui_widget_port_pointer_state.x;
+	*y = ui_widget_port_pointer_state.y;
+	*held = ui_widget_port_pointer_state.held;
+	return ui_widget_port_pointer_state.present;
+}
+
+void ui_widget_port_pointer_drag(
+	boolean dragging)
+{
+	ui_widget_port_pointer_state.dragging = dragging;
+}
+
 /* the pointer's motion, clicks and wheel since the last frame, as the first
 player's controller events */
 static void ui_widgets_process_mouse(
@@ -6282,13 +6431,28 @@ static void ui_widgets_process_mouse(
 	struct halo_ui_pointer pointer;
 	struct ui_mouse_target *target;
 	short controller_index = 0;
+	boolean present = halo_ui_pointer_update(ui_mouse_menus_active(), &pointer);
 
-	if (!halo_ui_pointer_update(ui_mouse_menus_active(), &pointer) ||
-		virtual_keyboard_active())
+	ui_widget_port_pointer_state.present = present;
+	ui_widget_port_pointer_state.held = present && pointer.held;
+	if (present)
+	{
+		ui_widget_port_pointer_state.x = pointer.x;
+		ui_widget_port_pointer_state.y = pointer.y;
+	}
+	if (!present || virtual_keyboard_active())
 	{
 		ui_mouse_press_count = 0;
 		ui_mouse_hover_pending = FALSE;
 		ui_mouse_click_pending = FALSE;
+	}
+	else if (ui_widget_port_pointer_state.dragging)
+	{
+		/* (a drag's: nothing highlighted or tapped by it) */
+		ui_mouse_hover_pending = FALSE;
+		ui_mouse_click_pending = FALSE;
+		if (!pointer.held)
+			ui_widget_port_pointer_state.dragging = FALSE;
 	}
 	else
 	{
@@ -6714,6 +6878,10 @@ void render_ui_widgets(
 			local_player_index,
 			0,
 			MAXIMUM_NUMBER_OF_LOCAL_PLAYERS - 1);
+#ifdef HALO_LINUX
+		/* port: the player's held screen first, under the screens open */
+		ui_widget_port_held_render(local_player_index, window_bounds);
+#endif
 		for (widget_index = 0;
 			widget_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS;
 			widget_index++)

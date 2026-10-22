@@ -266,6 +266,32 @@ static boolean flame_verified(int machine)
 	return flaming_helmet.verified[machine] != 0;
 }
 
+/* (the Halo 3 scoreboard, menu_functions.c: its small flame) whether the
+player wears the flame as this machine shows it - the same rule as the
+flame drawn (this machine's own first player while it wears it; another
+machine's player whose claim this machine checked: never the host's word),
+alive or not. This second's answers (flaming_helmet_tick asks them) */
+boolean flaming_helmet_player_shown(long player_index)
+{
+#ifndef HALO_DEDICATED_SERVER
+	struct player_datum *player = player_data && player_index != NONE ? player_try_and_get(player_index) : NULL;
+
+	if (!player)
+		return FALSE;
+	if (player->local_player_index == 0)
+		return flaming_helmet.wearing;
+	if (player->local_player_index != NONE ||
+		player->network_player_data.icon_index != NETWORK_PLAYER_FLAME_CLAIM)
+	{
+		return FALSE;
+	}
+	return flame_verified(player->network_player_data.machine_index);
+#else
+	(void)player_index;
+	return FALSE;
+#endif
+}
+
 /* (game_time.c, each tick after the game's) every flame shown */
 void flaming_helmet_tick(void)
 {

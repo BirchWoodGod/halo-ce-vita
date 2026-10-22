@@ -178,6 +178,18 @@ long latency_meter_player_ping(
 	return ping;
 }
 
+short latency_meter_player_bars(
+	short player_index,
+	long *ping)
+{
+	real_argb_color color;
+	long milliseconds = distributed_player_ping(player_index);
+
+	if (ping)
+		*ping = milliseconds;
+	return milliseconds != NONE ? latency_bars(milliseconds, &color) : 0;
+}
+
 /* (interface.c's overlays, over the whole screen) */
 void latency_meter_draw(
 	void)

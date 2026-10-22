@@ -21,6 +21,9 @@ struct halo_ui_pointer
 	unsigned char right_clicks;
 	/* whole wheel notches, away from the user positive */
 	signed char wheel_steps;
+	/* a finger on the touch screen (the Vita's; the tests' drags): a drag's
+	frames, until it lifts (a mouse's button: 0) */
+	unsigned char held;
 };
 
 /* frees the mouse for the menus while menus_active, and captures it again

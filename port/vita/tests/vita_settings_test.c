@@ -3325,6 +3325,7 @@ static void test_tab_layouts(void)
 		{ PAGE_MENUS, "Menu style", "HALO_MENU_STYLE", "classic|halo3", 0, "halo3" },
 		/* (shown with Menu style Halo 3) */
 		{ PAGE_MENUS, "Carnage report", "HALO_CARNAGE_REPORT", "classic|halo3", 0, "halo3" },
+		{ PAGE_MENUS, "Scoreboard", "HALO_SCOREBOARD", "classic|halo3", 0, "halo3" },
 		/* (Forge and File Share, shown with Menu style Halo CE: under Menus) */
 		{ TAB_GAME, "Forge and File Share", NULL, NULL, 0, NULL, ACTION_PAGE, PAGE_FORGE },
 		{ TAB_GAME, "Button icons", "HALO_BUTTON_ICONS", "xbox|playstation", 0,
@@ -3398,7 +3399,7 @@ static void test_tab_layouts(void)
 		!strcmp(pages[TAB_AUDIO].name, "Sound") && !strcmp(pages[TAB_MULTIPLAYER].name, "Multiplayer") &&
 		!strcmp(pages[TAB_DEV].name, "Dev"), "the tabs in order: Game, Controls, Video, Sound, Multiplayer, Dev");
 	check(layout_is(TAB_GAME, 1, game, (int)(sizeof(game) / sizeof(game[0]))),
-		"Game: Menus (Menu style, Carnage report), Button icons, Language, FPS counter; First-person legs, Smooth weapon "
+		"Game: Menus (Menu style, Carnage report, Scoreboard), Button icons, Language, FPS counter; First-person legs, Smooth weapon "
 		"motion; Check for updates, Update channel, Show dev settings: each row's variable, values, default and restart "
 		"as before; no page of its own");
 	check(layout_is(TAB_CONTROLS, 0, controls, (int)(sizeof(controls) / sizeof(controls[0]))),
@@ -3605,7 +3606,7 @@ and the rows added since (Sun rays, Button icons, Map downloads, Max
 players, Visibility, Fourth core helpers, Latency meter, Particles,
 First-person legs, MCC mods, PC map vehicles, Sharp interface, Player model,
 PC mouse aim assist, Carnage report, Field of view, Chat, Chat filter, Online
-bots; the Play page's two texts) */
+bots, Scoreboard; the Play page's two texts) */
 static void test_variables_kept(void)
 {
 	static const char *const variables[] = {
@@ -3633,7 +3634,7 @@ static void test_variables_kept(void)
 		"HALO_INFECTION_ZOMBIES", "HALO_INFECTION_SPEED", "HALO_INFECTION_TIME", "HALO_INFECTION_RESPAWN",
 		"HALO_INFECTION_SHIELDS", "HALO_INFECTION_TOUGH",
 		"HALO_CARNAGE_REPORT", "HALO_FLAMING_HELMET", "HALO_FIELD_OF_VIEW", "HALO_CLOCK_GOVERNOR", "HALO_BATTERY_LOG",
-		"HALO_CHAT", "HALO_CHAT_FILTER", "HALO_BOTS_ONLINE",
+		"HALO_CHAT", "HALO_CHAT_FILTER", "HALO_BOTS_ONLINE", "HALO_SCOREBOARD",
 	};
 	int index, all = 1, choices = 0;
 
@@ -4668,8 +4669,9 @@ static void test_carnage_report_row(void)
 	open_panel();
 	to_tab("Game");
 	check(open_page("Menus") && !strcmp(menu_line(2, line, sizeof(line)), "Menu style\x02< Halo 3  ") &&
-		!strcmp(menu_line(3, line, sizeof(line)), "Carnage report\x02< Halo 3  ") && menu_rows() == 2 && menu_fits() &&
-		menu_height_fits(), "Game > Menus: Menu style, then Carnage report (Halo 3)");
+		!strcmp(menu_line(3, line, sizeof(line)), "Carnage report\x02< Halo 3  ") &&
+		!strcmp(menu_line(4, line, sizeof(line)), "Scoreboard\x02< Halo 3  ") && menu_rows() == 3 && menu_fits() &&
+		menu_height_fits(), "Game > Menus: Menu style, then Carnage report and Scoreboard (Halo 3)");
 	check(to_line("Carnage report") &&
 		strstr(menu, "\n\x05" "A multiplayer game's end: Halo 3's report, or the original\n"), "Carnage report: its help");
 	press(VITA_BUTTON_LEFT);
@@ -4682,11 +4684,42 @@ static void test_carnage_report_row(void)
 		"Carnage report back to Halo 3, saved");
 	to_line("Menu style");
 	press(VITA_BUTTON_LEFT);
-	check(!strstr(menu, "\nCarnage report") && menu_rows() == 1 && !strcmp(getenv("HALO_MENU_STYLE"), "classic"),
-		"Menu style Halo CE: no Carnage report row (the game's own report)");
+	check(!strstr(menu, "\nCarnage report") && !strstr(menu, "\nScoreboard") && menu_rows() == 1 &&
+		!strcmp(getenv("HALO_MENU_STYLE"), "classic"),
+		"Menu style Halo CE: no Carnage report or Scoreboard row (the game's own report and scores)");
 	press(VITA_BUTTON_RIGHT);
-	check(strstr(menu, "\nCarnage report\x02< Halo 3  \n") && !strcmp(getenv("HALO_MENU_STYLE"), "halo3"),
-		"Menu style Halo 3 again: Carnage report back");
+	check(strstr(menu, "\nCarnage report\x02< Halo 3  \n") && strstr(menu, "\nScoreboard\x02< Halo 3  \n") &&
+		!strcmp(getenv("HALO_MENU_STYLE"), "halo3"), "Menu style Halo 3 again: Carnage report and Scoreboard back");
+	press(VITA_BUTTON_CIRCLE);
+	press(VITA_BUTTON_CIRCLE);
+}
+
+/* the Scoreboard row (Game > Menus, under Carnage report; menu_functions.c
+h3_scoreboard_wanted, config.toml's menus.scoreboard): Halo 3's scoreboard
+or the game's own while Back is held in a multiplayer game, Halo 3 as
+shipped, live; shown with Menu style Halo 3 only (Halo CE always shows the
+game's own: the original stays) */
+static void test_scoreboard_row(void)
+{
+	struct setting *board = setting_named("HALO_SCOREBOARD");
+	char line[128];
+
+	check(board && board->page == PAGE_MENUS && !board->restart &&
+		!strcmp(board->values[shipped_choice[board - settings]], "halo3"), "Scoreboard: Halo 3 as shipped");
+	open_panel();
+	to_tab("Game");
+	check(open_page("Menus") && !strcmp(menu_line(4, line, sizeof(line)), "Scoreboard\x02< Halo 3  ") && menu_fits() &&
+		menu_height_fits(), "Game > Menus: Scoreboard (Halo 3), under Carnage report");
+	check(to_line("Scoreboard") &&
+		strstr(menu, "\n\x05" "Scores in a game: Halo 3's scoreboard, or the original\n"), "Scoreboard: its help");
+	press(VITA_BUTTON_LEFT);
+	check(getenv("HALO_SCOREBOARD") && !strcmp(getenv("HALO_SCOREBOARD"), "classic") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_SCOREBOARD=classic\n") &&
+		strstr(menu, "\nScoreboard\x02  Halo CE >") && !strstr(menu, "Scoreboard*") && !restart_pending,
+		"Scoreboard Halo CE: in the environment and settings.txt at once, no restart");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_SCOREBOARD"), "halo3") && strstr(file_text(SETTINGS_FILE), "HALO_SCOREBOARD=halo3\n"),
+		"Scoreboard back to Halo 3, saved");
 	press(VITA_BUTTON_CIRCLE);
 	press(VITA_BUTTON_CIRCLE);
 }
@@ -5151,7 +5184,7 @@ int main(void)
 		!strcmp(menu_line(11, line, sizeof(line)), "\x04" "Version " HALO_VITA_VERSION) &&
 		!strncmp(menu_line(12, line, sizeof(line)), "Update channel\x02", 15) &&
 		!strcmp(menu_line(13, line, sizeof(line)), "Show dev settings\x02  Off >") &&
-		!strcmp(menu_line(14, line, sizeof(line)), "\x05" "Menu style, the multiplayer game's carnage report") &&
+		!strcmp(menu_line(14, line, sizeof(line)), "\x05" "Menu style, the carnage report and scoreboard") &&
 		!strncmp(menu_line(15, line, sizeof(line)), "\x06L/R: tabs", 10) && menu_height_fits(),
 		"Game: Interface (Menus: Halo 3, Button icons, Language, FPS counter), First person (First-person legs, "
 		"Smooth weapon motion), Updates (Check for updates and the version, Update channel, Show dev settings); help, buttons");
@@ -6236,6 +6269,7 @@ int main(void)
 	test_languages();
 	test_menu_style_row();
 	test_carnage_report_row();
+	test_scoreboard_row();
 	test_restart_offer();
 	test_save_off_thread();
 	test_save_any_thread();
