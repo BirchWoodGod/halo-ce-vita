@@ -285,6 +285,32 @@ void flags_update(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* port: the flags of one object (a weapon held in the Halo 3 menus' scene)
+stepped outside the game's frames: the scene made in a network game's lobby,
+whose main menu's frames update no widgets, settled by hand
+(port/linux/game/menu_scene_objects.c scene_settle) */
+void flags_port_update_object(
+	long object_index,
+	real delta)
+{
+	long flag_index;
+
+	for (flag_index = data_next_index(flag_data, NONE);
+		flag_index != NONE;
+		flag_index = data_next_index(flag_data, flag_index))
+	{
+		struct flag_datum_prefix *flag = flag_get(flag_index);
+
+		if (flag->object_index == object_index)
+		{
+			flag->updates_since_last_render = 0;
+			flag_update(flag, flag_definition_get(flag->definition_index), delta);
+		}
+	}
+}
+#endif
+
 void flag_render(
 	long object_index,
 	long flag_index,

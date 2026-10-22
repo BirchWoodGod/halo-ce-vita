@@ -457,9 +457,22 @@ void game_state_port_restamp_revert_time(
 	game_state_globals.revert_time = game_time_get();
 }
 
+/* port: the reverts so far (player_control.c: a cinematic skip's press is
+one revert, never one more for each tick it is held - a10's start checkpoint
+is its opening cinematic's, and the press that took the pause's REVERT TO
+CHECKPOINT, held on, skipped it again and again) */
+static unsigned long game_state_revert_count;
+
+unsigned long game_state_port_revert_count(
+	void)
+{
+	return game_state_revert_count;
+}
+
 void game_state_revert(
 	void)
 {
+	game_state_revert_count++;
 	if (!game_state_globals.saved_game_valid && !recover_saved_games_hack)
 	{
 #ifdef HALO_LINUX
