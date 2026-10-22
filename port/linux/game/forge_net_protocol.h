@@ -63,8 +63,12 @@ which every host takes: a joiner reads any hello of version 1 or more):
 CLEAR DEAD AI, CLEAR ALL AI, ALL AI, NEW ROUND); a client sends them only
 to a host of 2 or more - one of 1 (insider.21 and before) would count the
 record as malformed - and says "Only the host can do that" to an older one */
-#define FORGE_NET_HOST_VERSION 2
+#define FORGE_NET_HOST_VERSION 3
 #define FORGE_NET_HOST_VERSION_COMMANDS 2
+/* 3: it takes a spawn marker's move and its character's properties
+(_forge_net_request_set and _forge_net_request_property with
+FORGE_NET_FLAG_SPAWN): a client asks them only of a host of 3 or more */
+#define FORGE_NET_HOST_VERSION_SPAWNS 3
 /* a joiner's capabilities (its answer's bits) */
 #define FORGE_NET_CAPABILITY_FORGE 0x00000001u
 #define FORGE_NET_CAPABILITIES_KNOWN FORGE_NET_CAPABILITY_FORGE
@@ -232,7 +236,11 @@ enum
 	vehicle, weapon or equipment): the client finds it at the host's index;
 	else the client makes its own copy */
 	FORGE_NET_FLAG_NETWORKED = 1 << 4,
-	FORGE_NET_FLAGS_KNOWN = 0x1F,
+	/* (set, property) the reference is a placed character's id, the
+	request its spawn marker's: set moves its home (where it is placed
+	again), property changes it from its marker - not its object */
+	FORGE_NET_FLAG_SPAWN = 1 << 5,
+	FORGE_NET_FLAGS_KNOWN = 0x3F,
 };
 
 /* how a grant came */

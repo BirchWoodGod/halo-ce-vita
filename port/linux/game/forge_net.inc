@@ -1983,6 +1983,29 @@ static void forge_net_host_request(
 		real_point3d position;
 		real_vector3d forward, up;
 
+		/* (a spawn marker's: its character's home, where it is placed
+		again; not one whose character another player holds) */
+		if (request.flags & FORGE_NET_FLAG_SPAWN)
+		{
+			struct forge_placed *placed = forge_placed_of_id((long)request.id);
+			struct forge_transform home;
+
+			if (!placed || !placed->ai)
+			{
+				forge_net_refuse(actor, &request, _forge_net_refuse_gone, 0, 0);
+				return;
+			}
+			holder = placed->object_index != NONE ? forge_net_holder(placed->object_index, actor->machine_index) : NONE;
+			if (holder != NONE)
+			{
+				forge_net_refuse(actor, &request, _forge_net_refuse_held, holder, 0);
+				return;
+			}
+			forge_net_transform_to(&request.transform, &home.position, &home.forward, &home.up);
+			platform_log("forge net: machine %ld moved the spawn marker of #%ld", actor->machine_index, placed->id);
+			forge_marker_home_set(placed, &home);
+			return;
+		}
 		if ((object_index = forge_net_request_object(actor, &request)) == NONE)
 			return;
 		holder = forge_net_holder(object_index, actor->machine_index);
@@ -2037,6 +2060,33 @@ static void forge_net_host_request(
 	{
 		struct forge_placed *placed;
 
+		/* (from a spawn marker: its character's, by id; its facing the
+		marker's move's) */
+		if (request.flags & FORGE_NET_FLAG_SPAWN)
+		{
+			placed = forge_placed_of_id((long)request.id);
+			if (!placed || !placed->ai)
+			{
+				forge_net_refuse(actor, &request, _forge_net_refuse_gone, 0, 0);
+				return;
+			}
+			holder = placed->object_index != NONE ? forge_net_holder(placed->object_index, actor->machine_index) : NONE;
+			if (holder != NONE)
+			{
+				forge_net_refuse(actor, &request, _forge_net_refuse_held, holder, 0);
+				return;
+			}
+			if (request.aux >= _forge_property_yaw && request.aux <= _forge_property_reset_rotation)
+				return;
+			forge_net_act_begin(actor);
+			forge_property_target_id = placed->id;
+			forge_property_apply(request.aux, request.step);
+			forge_property_target_id = 0;
+			forge_net_act_end(actor);
+			platform_log("forge net: machine %ld changed #%ld's properties from its spawn marker", actor->machine_index,
+				placed->id);
+			return;
+		}
 		if ((object_index = forge_net_request_object(actor, &request)) == NONE)
 			return;
 		placed = forge_placed_of_object(object_index);
@@ -2795,6 +2845,51 @@ static void forge_net_client_undo(
 	forge_net_request_init(&record, _forge_net_request_undo);
 	record.aux = redo ? 1 : 0;
 	forge_net_request_send(&record);
+}
+
+/* (forge_markers.inc, a client) a spawn marker let go, its character's
+property changed from it: asked of the host (a host of
+FORGE_NET_HOST_VERSION_SPAWNS; an older one is not asked: said) */
+static boolean forge_net_client_spawn_move(
+	long id,
+	struct forge_transform const *home)
+{
+	struct forge_net_record record;
+
+	if (!forge_net_client() || forge_net.host_version < FORGE_NET_HOST_VERSION_SPAWNS)
+	{
+		forge_notice("%s", T("The host's game can't move spawn markers"));
+		return FALSE;
+	}
+	forge_net_request_init(&record, _forge_net_request_set);
+	record.flags = FORGE_NET_FLAG_SPAWN;
+	record.id = (uint32_t)id;
+	forge_net_transform_from(&record.transform, &home->position, &home->forward, &home->up);
+	forge_net_request_send(&record);
+	platform_log("forge net: asked the host to move the spawn marker of #%ld to %.2f %.2f %.2f", id, home->position.x,
+		home->position.y, home->position.z);
+	return TRUE;
+}
+
+static boolean forge_net_client_spawn_property(
+	long id,
+	short property,
+	short step)
+{
+	struct forge_net_record record;
+
+	if (!forge_net_client() || forge_net.host_version < FORGE_NET_HOST_VERSION_SPAWNS)
+	{
+		forge_notice("%s", T("The host's game can't move spawn markers"));
+		return FALSE;
+	}
+	forge_net_request_init(&record, _forge_net_request_property);
+	record.flags = FORGE_NET_FLAG_SPAWN;
+	record.id = (uint32_t)id;
+	record.aux = (uint8_t)property;
+	record.step = (int8_t)(step < 0 ? -1 : 1);
+	forge_net_request_send(&record);
+	return TRUE;
 }
 
 /* (forge_update, a client) a Forge menu command asked of the host: FALSE
@@ -3670,8 +3765,8 @@ static void forge_net_orb_point(
 	}
 }
 
-/* (render.c, each player's window, after the objects) the balls */
-void forge_render_world(
+/* (forge_render_world, each player's window, after the objects) the balls */
+static void forge_net_render_monitors(
 	void)
 {
 	static struct forge_net_orb_vertex vertices[FORGE_NET_ORB_TRIANGLES * 3];

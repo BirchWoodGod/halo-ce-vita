@@ -195,17 +195,29 @@ int forge_net_request_valid(
 		return (record->flags & ~FORGE_NET_FLAG_MAP_OBJECT) == 0;
 	case _forge_net_request_move:
 	case _forge_net_request_release:
-	case _forge_net_request_set:
 		if (record->flags & ~FORGE_NET_FLAG_MAP_OBJECT)
 			return 0;
+		return forge_net_transform_valid(&record->transform);
+	case _forge_net_request_set:
+		/* (a spawn marker's: a placed character's id, never a map object) */
+		if ((record->flags & ~(FORGE_NET_FLAG_MAP_OBJECT | FORGE_NET_FLAG_SPAWN)) ||
+			(record->flags == (FORGE_NET_FLAG_MAP_OBJECT | FORGE_NET_FLAG_SPAWN)) ||
+			((record->flags & FORGE_NET_FLAG_SPAWN) && record->id == 0))
+		{
+			return 0;
+		}
 		return forge_net_transform_valid(&record->transform);
 	case _forge_net_request_duplicate:
 		if (record->flags & ~(FORGE_NET_FLAG_MAP_OBJECT | FORGE_NET_FLAG_HOLD))
 			return 0;
 		return forge_net_transform_valid(&record->transform);
 	case _forge_net_request_property:
-		if (record->flags & ~FORGE_NET_FLAG_MAP_OBJECT)
+		if ((record->flags & ~(FORGE_NET_FLAG_MAP_OBJECT | FORGE_NET_FLAG_SPAWN)) ||
+			(record->flags == (FORGE_NET_FLAG_MAP_OBJECT | FORGE_NET_FLAG_SPAWN)) ||
+			((record->flags & FORGE_NET_FLAG_SPAWN) && record->id == 0))
+		{
 			return 0;
+		}
 		return record->aux < FORGE_NET_PROPERTY_COUNT && (record->step == 1 || record->step == -1);
 	case _forge_net_request_undo:
 		return record->flags == 0 && record->aux <= 1;

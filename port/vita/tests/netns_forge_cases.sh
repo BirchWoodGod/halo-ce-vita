@@ -70,7 +70,8 @@
 #              the host, which clears them (two, then the third killed after) and says so
 #              back; every machine has the others' monitors where they fly and the first
 #              joiner draws both balls in its view (HALO_TEST_SHOTS: its screenshot). Then the
-#              host places a fourth and kills it, and the first joiner's NEW ROUND (Grunt pirate:
+#              host places a fourth and kills it, the second joiner moves its spawn marker (made
+#              by the host), and the first joiner's NEW ROUND (Grunt pirate:
 #              no way to respawn the AI) is made by the host, the Elite back alive; neither
 #              joiner has a map variant in its store (none saved)
 #   forgepanel the settings panel's Forge page, Network on (Menu style Halo CE: the
@@ -438,6 +439,10 @@ forge_case() {
 		# (each joiner a monitor: the first looking at where the second and the host fly)
 		join_cmds="L150:forge camera 50 -90 3 315 -8;L1750:forge budget;L1850:forge net;L1880:@shot forgemp-joiner-sees-monitors"
 		join2_cmds="L150:forge camera 53 -93 3 135 -8;L1750:forge budget;L1850:forge net;L1880:@shot forgemp-joiner2"
+		# (the second joiner takes the fourth Elite's spawn marker, carries it off and lets it go: asked
+		# of the host, which moves where it is placed again)
+		join2_cmds="$join2_cmds;L1950:forge marker #4;L1952:forge markers;L1960:forge camera 50 -95 3 135 -8;L1970:forge distance 5"
+		join2_cmds="$join2_cmds;L1980:forge drop"
 		# (Start: the Forge menu; down seven to CLEAR DEAD AI, A; B closes it)
 		local menu_pad="start:150:3000 @MENU-open:0:300 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500"
 		menu_pad="$menu_pad down:150:500 down:150:500 a:150:3000 @MENU-cleared:0:300 b:150:2000"
@@ -500,6 +505,11 @@ forge_case() {
 		sed -n '/test command at tick 2450: forge budget/,+1p' "$hl" |
 			grep -aq "forge: budget 1/[0-9]* objects, 1/[0-9]* AI (1 alive, 0 dead)" ||
 			fail "the new round did not bring the dead Elite back"
+		# (a joiner's spawn marker move, made by the host)
+		grep -aq "forge: grabbed the spawn marker of .* (#4)" "$hl2" || fail "the second joiner did not take the Elite's spawn marker"
+		grep -aq "forge net: asked the host to move the spawn marker of #4" "$hl2" || fail "the second joiner did not ask the host"
+		grep -aq "forge net: machine [0-9]* moved the spawn marker of #4" "$hl" || fail "the host did not take the marker's move"
+		grep -aq "forge: the spawn marker of .* (#4) moved to" "$hl" || fail "the host did not move the Elite's spawn"
 		# (LadyCassie, insider.21: the layout stayed after leaving and starting again - a joiner keeps
 		# nothing of the host's layout in its own store: none saved on either joiner)
 		for log in "$jl" "$hl2"; do

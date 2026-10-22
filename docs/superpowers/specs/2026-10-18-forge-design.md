@@ -1882,6 +1882,15 @@ the host saves its map variant, a joiner a copy; undo per player.
   4 waiting"), as do a new round's and a variant's extra characters. The
   host (or a local game) does it all, in Forge and in a variant played
   (`forge_ai_life_update`).
+- **Spawn markers** (`forge_markers.inc`): each character's home shown to the
+  monitor as a ghosted marker in its AI team's colour; R takes it (before the
+  character standing on it), it is carried and let go on the ground below,
+  moving where the character is placed again; Square while holding it opens
+  the character's properties. A joiner's move or property change is a request
+  (`FORGE_NET_FLAG_SPAWN`, the hello's version 3) the host checks and makes.
+  Hidden for the Spartan and in a variant played. `struct forge_marker` and
+  `forge_marker_draw` are every kind's: the player's spawn points are to use
+  them.
 - **The Forge menu** in a network game: Start opens the game's multiplayer
   pause, which `menu_tags.c` makes the Forge menu (host and joiners, either
   Menu style); it never pauses the game. insider.21 opened the Xbox's pause in

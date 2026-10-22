@@ -130,6 +130,13 @@
 #               alive; the fifth killed: the first placed at once; the fifth's
 #               body taken away its time after its death (15 s here,
 #               HALO_TEST_FORGE_BODY_SECONDS; 45 s), the fifth still the layout's
+#   aimarker    a character's spawn marker (the owner, Oct 22 2026): an Elite at
+#               RESPAWN 10 s, killed, its body taken away (3 s here); its marker
+#               drawn where it was put (screenshot), taken (the console's "forge
+#               marker #1", as R on it), carried 6 world units off and let go:
+#               the Elite respawns there; its RESPAWN changed from the marker
+#               (Square, "forge property respawn": 30 s); saved: its record at
+#               the new place, 30 s; the markers hidden for the Spartan
 #   allai       the Forge menu's ALL AI: an Elite, a grunt, a jackal and a
 #               hunter fight the Spartan; ALL AI (the console's "forge allai",
 #               as the menu's row) turns them all off: for 10 s none moves (a
@@ -256,7 +263,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_forge_test.$$}
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs packnote packcopy smallmap aiteam aioff round aisave airespawn aicap allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks lobbycost mpvariant}
+cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs packnote packcopy smallmap aiteam aioff round aisave airespawn aicap aimarker allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks lobbycost mpvariant}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
@@ -839,6 +846,20 @@ aicap_runs() {
 	ai_run aicap 90 "$c" HALO_TEST_FORGE_MAXIMUM_AI=4 HALO_TEST_FORGE_BODY_SECONDS=15
 }
 
+aimarker_runs() {
+	local store="$out/aimarker-store"
+	rm -rf "$store"
+	mkdir -p "$store"
+	local c="L200:(set cheat_deathless_player true);$ai_setup;L307:forge property respawn;L308:forge drop;L309:forge allai off"
+	c="$c;L330:forge kill #1;L420:forge camera 60 -100 2.2 130 -12;L440:forge markers;L442:@shot 00-marker"
+	c="$c;L450:forge marker #1;L452:forge markers;L455:@shot 01-marker-held;L460:forge camera 70 -100 2.2 130 -12"
+	c="$c;L470:forge distance 7;L480:@shot 02-marker-carried;L490:forge drop;L495:forge ai"
+	c="$c;L800:forge ai;L820:forge marker #1;L822:forge property respawn;L824:forge drop;L830:forge save Marker Test"
+	c="$c;L840:forge off;L850:forge markers"
+	ai_run aimarker 45 "$c" HALO_SAVE_ROOT="$store" HALO_TEST_FORGE_BODY_SECONDS=3 HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1
+	"$out/forge_files_test" --dump "$store/forge/bloodgulch/marker_test.hmv" > "$out/aimarker/dump.txt" 2>&1
+}
+
 # ("forge ai" and "forge where" from tick FIRST to LAST)
 ai_looks() { # FIRST LAST STEP
 	local t w=""
@@ -1128,6 +1149,8 @@ for c in $cases; do
 		airespawn_runs & ;;
 	aicap)
 		aicap_runs & ;;
+	aimarker)
+		aimarker_runs & ;;
 	mpvariant)
 		if [ "$menus_files" = 0 ] || [ ! -r "$packcopy_profile" ]; then
 			echo "SKIP: mpvariant: no Halo PC bitmaps.map and loc.map in $data/maps, or no profile ($packcopy_profile)"
@@ -1425,6 +1448,32 @@ for c in $cases; do
 			echo "  ok: aicap: the fifth's body gone" || fail "aicap: the fifth's body not taken away"
 		budget_at 2200 | grep -aq "(4 alive, 1 dead)" && echo "  ok: aicap: its character still the layout's (dead, no body)" ||
 			fail "aicap: the fifth left the layout: $(budget_at 2200)"
+		continue
+	fi
+	if [ "$c" = aimarker ]; then
+		checked aimarker || continue
+		log="$out/aimarker/run.log"
+		expect aimarker "the Elite's body taken away" "forge: elite major plasma rifle \\(#1\\): its body cleared after 3 s"
+		sed -n '/test command at tick 440: forge markers$/,+1p' "$log" | grep -aq "forge: 1 spawn markers drawn, none held" &&
+			echo "  ok: aimarker: its marker drawn where it was put" || fail "aimarker: no marker drawn: $(grep -a 'spawn markers drawn' "$log" | head -1)"
+		expect aimarker "taken" "forge: grabbed the spawn marker of .* \\(#1\\) at"
+		local moved respawned
+		moved=$(sed -n 's/.*forge: the spawn marker of .* (#1) moved to \([^ ]*\) \([^ ]*\) .*/\1 \2/p' "$log" | head -1)
+		respawned=$(sed -n 's/.*forge: elite major plasma rifle (#1) respawned after 10 s at \([^ ]*\) \([^ ]*\) .*/\1 \2/p' "$log" | head -1)
+		placed=$(sed -n 's/.*forge: dropped Elite Major Plasma Rifle (elite) at \([^ ]*\) \([^ ]*\) .*/\1 \2/p' "$log" | head -1)
+		if [ -n "$moved" ] && [ -n "$respawned" ] && awk -v m="$moved" -v r="$respawned" -v p="$placed" 'BEGIN { split(m, a); split(r, b);
+			split(p, c); exit !((a[1] - b[1]) ^ 2 + (a[2] - b[2]) ^ 2 < 0.01 && (a[1] - c[1]) ^ 2 + (a[2] - c[2]) ^ 2 > 9) }'; then
+			echo "  ok: aimarker: carried off (placed $placed, let go at $moved) and the Elite respawned there ($respawned)"
+		else
+			fail "aimarker: not respawned where the marker was let go (placed $placed, marker $moved, respawned $respawned)"
+		fi
+		expect aimarker "its RESPAWN changed from the marker" "forge: properties: team -1, respawn 30 s, placed at start, AI team default"
+		expect aimarker "saved" "forge: map variant \"Marker Test\" saved as bloodgulch/marker_test.hmv, 1 objects"
+		mx=$(sed -n 's/.*forge: the spawn marker of .* (#1) moved to \([^ ]*\) .*/\1/p' "$log" | tail -1)
+		grep -q "^record 0: characters.elite.elite major.elite major plasma rifle kind 0 team -1 ai team 0 respawn 30 flags 7 at $mx " "$out/aimarker/dump.txt" &&
+			echo "  ok: aimarker: the file: at the marker's place, 30 s" || fail "aimarker: the file: $(cat "$out/aimarker/dump.txt")"
+		sed -n '/test command at tick 850: forge markers$/,+1p' "$log" | grep -aq "forge: 0 spawn markers drawn" &&
+			echo "  ok: aimarker: the Spartan sees none" || fail "aimarker: markers shown to the Spartan"
 		continue
 	fi
 	if [ "$c" = allai ]; then

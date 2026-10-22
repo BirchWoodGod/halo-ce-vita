@@ -317,6 +317,9 @@ enum
 #define FORGE_CAMERA_THRUST 4.f
 #define FORGE_CAMERA_LOOK_RATE 2.5f
 #define FORGE_PICK_RANGE 60.f
+/* (forge_markers.inc) where the crosshair takes a spawn marker: a sphere at
+its pillar's middle */
+#define FORGE_MARKER_PICK_RADIUS 0.32f
 #define FORGE_PUSH_RATE 3.f
 #define FORGE_WHEEL_PUSH 0.5f
 #define FORGE_MOUSE_TURN 1.f
@@ -855,6 +858,12 @@ static struct
 	given to joiners as a network Forge game's is (last: the initializer
 	above names the first fields in order) */
 	boolean playing;
+	/* (forge_markers.inc) the character whose spawn marker the monitor holds
+	(its id; 0 none), where it is held, and how many markers the last frame
+	drew */
+	long held_marker_id;
+	real_point3d held_marker_position;
+	short markers_drawn;
 } forge_globals = { FALSE, "", FALSE, FALSE, 0, NONE, FALSE, NONE, 0.f, { 0.f }, { 0.f }, _forge_speed_normal };
 
 /* ---------- private code */
@@ -877,6 +886,16 @@ static void forge_net_client_set(long object_index, real_vector3d const *forward
 static boolean forge_net_client_property(short property, short step);
 static void forge_net_client_undo(boolean redo);
 static boolean forge_net_client_command(short command, uint16_t value);
+static boolean forge_net_client_spawn_move(long id, struct forge_transform const *home);
+static boolean forge_net_client_spawn_property(long id, short property, short step);
+/* ---- the characters' spawn markers (forge_markers.inc) */
+static boolean forge_markers_shown(void);
+static long forge_marker_under_crosshair(real *distance);
+static void forge_marker_grab(long id, real distance);
+static void forge_marker_held_update(void);
+static void forge_marker_drop(void);
+static void forge_marker_home_set(struct forge_placed *placed, struct forge_transform const *home);
+static struct forge_placed *forge_placed_of_id(long id);
 static void forge_net_update(void);
 static void forge_net_map_loaded(void);
 static void forge_net_new_round(void);
@@ -2063,8 +2082,8 @@ its collision model (a vehicle, a biped, scenery, a machine), or, for a
 weapon or equipment on the ground, which has none a line would meet, by its
 bounding sphere - before the structure; not the player's, nothing attached
 to another, not the one held; NONE if none */
-static long forge_object_under_crosshair(
-	void)
+static long forge_object_under_crosshair_at(
+	real *distance)
 {
 	real_point3d position;
 	real_vector3d forward;
@@ -2131,8 +2150,15 @@ static long forge_object_under_crosshair(
 			nearest_index = iterator.index;
 		}
 	}
-
+	if (distance)
+		*distance = nearest;
 	return nearest_index;
+}
+
+static long forge_object_under_crosshair(
+	void)
+{
+	return forge_object_under_crosshair_at(NULL);
 }
 
 static void forge_undo_record(short kind, long object_index, struct forge_transform const *from);
@@ -2886,6 +2912,8 @@ static void forge_end(
 		return;
 	if (object_try_and_get(forge_globals.held_object_index))
 		forge_drop();
+	if (forge_globals.held_marker_id)
+		forge_marker_drop();
 	unit = object_try_and_get(forge_globals.unit_index);
 	if (unit)
 	{
@@ -2975,6 +3003,35 @@ static void forge_hud_update(
 	object_index = forge_globals.hud_label_held ? forge_globals.held_object_index : forge_object_under_crosshair();
 	if (object_index != NONE)
 		forge_object_name(object_index, forge_globals.hud_label, sizeof(forge_globals.hud_label));
+	/* (a spawn marker held, or under the crosshair before what is behind
+	it: "Elite Major spawn") */
+	{
+		real object_distance = FORGE_PICK_RANGE;
+		real marker_distance = FORGE_PICK_RANGE;
+		long marker = forge_globals.held_marker_id ? forge_globals.held_marker_id :
+			forge_globals.hud_label_held ? NONE : forge_marker_under_crosshair(&marker_distance);
+		struct forge_placed const *placed;
+
+		if (marker != NONE && !forge_globals.held_marker_id)
+		{
+			forge_object_under_crosshair_at(&object_distance);
+			if (marker_distance > object_distance + FORGE_MARKER_PICK_RADIUS)
+				marker = NONE;
+		}
+		placed = marker != NONE ? forge_placed_of_id(marker) : NULL;
+		if (placed)
+		{
+			char name[FORGE_NAME_SIZE];
+			short entry = forge_palette_of_tag(placed->tag_index);
+
+			if (entry != NONE)
+				snprintf(name, sizeof(name), "%s", forge_globals.palette[entry].name);
+			else
+				forge_tag_readable_name(placed->tag_index, name, sizeof(name));
+			snprintf(forge_globals.hud_label, sizeof(forge_globals.hud_label), T("%s spawn"), name);
+			forge_globals.hud_label_held = forge_globals.held_marker_id != 0;
+		}
+	}
 	/* (holding one: rotate mode's snapping; rotating, its angles too) */
 	forge_globals.hud_rotate[0] = 0;
 	if (forge_globals.hud_label_held)
@@ -3383,9 +3440,18 @@ static short const forge_respawn_choices[] = { 0, 10, 20, 30, 45, 60, 90, 120, 1
 static short const forge_ai_respawn_choices[] = { 0, 10, 30, 60, 120 };
 
 /* the placed entry of the object held, NULL for none or one of the map's */
+/* (a network game's host, a machine's property request from a spawn
+marker: forge_net.inc) the character it names, in place of what is held */
+static long forge_property_target_id = 0;
+
 static struct forge_placed *forge_properties_target(
 	void)
 {
+	if (forge_property_target_id)
+		return forge_placed_of_id(forge_property_target_id);
+	/* (a spawn marker held: its character's) */
+	if (forge_globals.held_marker_id)
+		return forge_placed_of_id(forge_globals.held_marker_id);
 	return object_try_and_get(forge_globals.held_object_index) ? forge_placed_of_object(forge_globals.held_object_index) :
 		NULL;
 }
@@ -3400,8 +3466,14 @@ static void forge_property_apply(
 	if (!placed)
 		return;
 	/* (a network game's client: the host's, but for its facing, which its
-	moves say) */
-	if (forge_net_client() && forge_net_client_property(property, step))
+	moves say - a spawn marker's, its letting go) */
+	if (forge_net_client() && forge_globals.held_marker_id &&
+		(property < _forge_property_yaw || property > _forge_property_reset_rotation))
+	{
+		forge_net_client_spawn_property(forge_globals.held_marker_id, property, step);
+		return;
+	}
+	if (forge_net_client() && !forge_globals.held_marker_id && forge_net_client_property(property, step))
 		return;
 	switch (property)
 	{
@@ -3486,7 +3558,17 @@ static void forge_property_apply(
 			angles[axis] = DEGREES_TO_RADIANS(degrees);
 		}
 		forge_facing_from_angles(angles, &forward, &up);
-		forge_set_facing(forge_globals.held_object_index, &forward, &up);
+		/* (a spawn marker's: where its character faces when placed again,
+		kept as it is held) */
+		if (forge_globals.held_marker_id && !forge_property_target_id)
+		{
+			forge_globals.held_forward = forward;
+			forge_globals.held_up = up;
+		}
+		else
+		{
+			forge_set_facing(forge_globals.held_object_index, &forward, &up);
+		}
 		break;
 	}
 	case _forge_property_ai_team:
@@ -5665,10 +5747,11 @@ void forge_update(
 	}
 	if (!menu_open)
 	{
-		/* (Square: holding an object, its properties; else the browser) */
+		/* (Square: holding an object or a spawn marker, its properties; else
+		the browser) */
 		if (pressed[_forge_button_browser])
 		{
-			if (object_try_and_get(forge_globals.held_object_index))
+			if (object_try_and_get(forge_globals.held_object_index) || forge_globals.held_marker_id)
 				forge_properties_open();
 			else
 				forge_browser_open();
@@ -5690,26 +5773,39 @@ void forge_update(
 			forge_globals.speed = (short)((forge_globals.speed + 1) % NUMBER_OF_FORGE_SPEEDS);
 			forge_notice("%s", T(forge_speed_names[forge_globals.speed]));
 		}
-		if (pressed[_forge_button_straighten])
+		if (pressed[_forge_button_straighten] && !forge_globals.held_marker_id)
 			forge_straighten(forge_target_object());
-		if (pressed[_forge_button_duplicate])
+		if (pressed[_forge_button_duplicate] && !forge_globals.held_marker_id)
 			forge_duplicate();
 		/* (R in rotate mode: roll, never a drop) */
 		if (pressed[_forge_button_grab] && !rotating)
 		{
-			if (object_try_and_get(forge_globals.held_object_index))
+			if (forge_globals.held_marker_id)
+			{
+				forge_marker_drop();
+			}
+			else if (object_try_and_get(forge_globals.held_object_index))
 			{
 				forge_drop();
 			}
 			else
 			{
-				long object_index = forge_object_under_crosshair();
+				/* (the nearer of an object and a spawn marker: a marker before
+				the character standing on it) */
+				real object_distance = FORGE_PICK_RANGE;
+				real marker_distance = FORGE_PICK_RANGE;
+				long object_index = forge_object_under_crosshair_at(&object_distance);
+				long marker = forge_marker_under_crosshair(&marker_distance);
 
-				if (object_index != NONE)
+				/* (object_distance: the nearest thing hit, a wall too - a marker
+				behind one is not taken) */
+				if (marker != NONE && marker_distance <= object_distance + FORGE_MARKER_PICK_RADIUS)
+					forge_marker_grab(marker, marker_distance);
+				else if (object_index != NONE)
 					forge_grab(object_index);
 			}
 		}
-		if (pressed[_forge_button_delete])
+		if (pressed[_forge_button_delete] && !forge_globals.held_marker_id)
 			forge_delete(forge_target_object());
 		rotating = rotating && object_try_and_get(forge_globals.held_object_index);
 		if (rotating)
@@ -5741,6 +5837,12 @@ void forge_update(
 	forge_globals.pending_mouse_pitch = 0.f;
 	if (object_try_and_get(forge_globals.held_object_index))
 		forge_held_object_place();
+	if (forge_globals.held_marker_id)
+	{
+		forge_globals.held_distance = PIN(forge_globals.held_distance + pad.wheel * FORGE_WHEEL_PUSH,
+			FORGE_MINIMUM_HOLD_DISTANCE, FORGE_MAXIMUM_HOLD_DISTANCE);
+		forge_marker_held_update();
+	}
 	forge_hud_update();
 
 	return;
@@ -6209,7 +6311,7 @@ boolean forge_command(
 	/* (tests, the monitor's or the Spartan's: forge_blocks.c) */
 	if (!strcmp(word, "blocks"))
 		return forge_blocks_command(rest);
-	if (!forge_globals.active && strcmp(word, "where"))
+	if (!forge_globals.active && strcmp(word, "where") && strcmp(word, "markers"))
 	{
 		platform_log("forge: %s: not in monitor mode (\"forge on\")", word);
 		return FALSE;
@@ -6473,7 +6575,49 @@ boolean forge_command(
 	}
 	if (!strcmp(word, "drop"))
 	{
-		forge_drop();
+		if (forge_globals.held_marker_id)
+			forge_marker_drop();
+		else
+			forge_drop();
+		return TRUE;
+	}
+	if (!strcmp(word, "marker"))
+	{
+		/* ("marker #<id>": that character's spawn marker held, as R on it
+		would; "marker": the one under the crosshair; "markers": how many
+		the last frame drew) */
+		real distance = 5.f;
+		long id = rest[0] == '#' ? atol(rest + 1) : forge_marker_under_crosshair(&distance);
+		struct forge_placed *placed = forge_placed_of_id(id);
+
+		if (!placed || !placed->ai)
+		{
+			platform_log("forge: no spawn marker there");
+			return FALSE;
+		}
+		if (object_try_and_get(forge_globals.held_object_index))
+			forge_drop();
+		if (rest[0] == '#')
+		{
+			real_point3d position;
+			real_vector3d forward;
+			real_vector3d to_home;
+
+			if (forge_camera_get(&position, &forward))
+			{
+				to_home.i = placed->home.position.x - position.x;
+				to_home.j = placed->home.position.y - position.y;
+				to_home.k = placed->home.position.z - position.z;
+				distance = magnitude3d(&to_home) - FORGE_MARKER_PICK_RADIUS;
+			}
+		}
+		forge_marker_grab(id, distance);
+		return TRUE;
+	}
+	if (!strcmp(word, "markers"))
+	{
+		platform_log("forge: %d spawn markers drawn, %s held", forge_globals.markers_drawn,
+			forge_globals.held_marker_id ? "one" : "none");
 		return TRUE;
 	}
 	if (!strcmp(word, "turn"))
@@ -6597,3 +6741,4 @@ boolean forge_command(
 /* ---------- network Forge (its statics shared with this file's) */
 
 #include "forge_net.inc"
+#include "forge_markers.inc"
