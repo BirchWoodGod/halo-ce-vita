@@ -233,6 +233,7 @@ Each logs what it did ("forge: ...").
 #include "units/units.h"
 #include "units/vehicle_definitions.h"
 #include "units/unit_definitions.h"
+#include "networking/network_game_globals.h"
 
 #include "forge.h"
 #include "forge_blocks.h"
@@ -858,6 +859,7 @@ static void forge_net_client_duplicate(long object_index, real_point3d const *po
 static void forge_net_client_set(long object_index, real_vector3d const *forward, real_vector3d const *up);
 static boolean forge_net_client_property(short property, short step);
 static void forge_net_client_undo(boolean redo);
+static boolean forge_net_client_command(short command, uint16_t value);
 static void forge_net_update(void);
 static void forge_net_map_loaded(void);
 static void forge_net_new_round(void);
@@ -1746,8 +1748,9 @@ one of them alive or dead, taken out of the layout and the world: they do
 not come back with the next round, a map variant saved after has them not,
 and the steps of the undo history that name them go (nothing brings a
 cleared character back). A Flood combat form feigning death is not dead.
-What the game spawned (a carrier's infection forms) is the game's, left */
-static void forge_ai_clear(
+What the game spawned (a carrier's infection forms) is the game's, left.
+The characters cleared, counted */
+static short forge_ai_clear(
 	boolean all)
 {
 	short index;
@@ -1805,6 +1808,7 @@ static void forge_ai_clear(
 		forge_menu_notice(T("Cleared all AI: %d characters"), cleared);
 	else
 		forge_menu_notice(T("Cleared %d dead AI"), cleared);
+	return cleared;
 }
 
 #ifndef HALO_RELEASE
@@ -2845,27 +2849,38 @@ static void forge_end(
 }
 
 /* the monitor's HUD's first line: Forge and the map's name */
-static void forge_hud_title_update(
-	void)
+/* the loaded level's name as Forge says it (its lobby's, else the
+scenario's own words): by the scenario loaded, so a network game's joiner,
+whose solo map name is none, says it too (the Forge menu's title) */
+void forge_level_name(
+	char *name,
+	short size)
 {
 	char const *scenario = global_scenario_index != NONE ? tag_get_name(global_scenario_index) : NULL;
-	char const *name = NULL;
 	short map_index;
-	char words[FORGE_NAME_SIZE];
 
 	for (map_index = 0; scenario && map_index < forge_map_count(); map_index++)
 	{
 		if (!_stricmp(scenario, forge_maps[map_index].path))
-			name = T(forge_maps[map_index].name);
+		{
+			snprintf(name, size, "%s", T(forge_maps[map_index].name));
+			return;
+		}
 	}
-	if (!name)
 	{
 		char const *slash = scenario ? strrchr(scenario, '\\') : NULL;
 
-		forge_name_words(slash ? slash + 1 : scenario ? scenario : "", words, sizeof(words));
-		name = words;
+		forge_name_words(slash ? slash + 1 : scenario ? scenario : "", name, size);
 	}
-	snprintf(forge_globals.hud_title, sizeof(forge_globals.hud_title), "%s \xc2\xb7 %s", T("FORGE"), name);
+}
+
+static void forge_hud_title_update(
+	void)
+{
+	char words[FORGE_NAME_SIZE];
+
+	forge_level_name(words, sizeof(words));
+	snprintf(forge_globals.hud_title, sizeof(forge_globals.hud_title), "%s \xc2\xb7 %s", T("FORGE"), words);
 }
 
 /* the monitor's HUD's other lines: the budget, and the object held or
@@ -5171,14 +5186,28 @@ void forge_update(
 	if (forge_globals.game_active && forge_globals.ai_shots_counted)
 		forge_ai_shots_update();
 #endif
-	/* (ALL AI, CLEAR AI, NEW ROUND: a network game's host's only) */
+	/* (ALL AI, CLEAR AI, NEW ROUND in a network game: the host's to make; a
+	client asks it, the host checks and makes it and says what came of it -
+	a host of insider.21 or before takes none: only the host can then) */
 	if (forge_net_client() &&
 		(forge_globals.ai_all_requested || forge_globals.clear_ai_requested || forge_globals.round_requested))
 	{
+		boolean asked = TRUE;
+
+		if (forge_globals.ai_all_requested)
+			asked = forge_net_client_command(_forge_net_command_all_ai, forge_ai_state() == _forge_ai_all_off ? 1 : 0) && asked;
+		if (forge_globals.clear_ai_requested)
+		{
+			asked = forge_net_client_command(forge_globals.clear_ai_requested == _forge_clear_ai_all ?
+				_forge_net_command_clear_all_ai : _forge_net_command_clear_dead_ai, 0) && asked;
+		}
+		if (forge_globals.round_requested)
+			asked = forge_net_client_command(_forge_net_command_new_round, 0) && asked;
 		forge_globals.ai_all_requested = FALSE;
 		forge_globals.clear_ai_requested = _forge_clear_ai_none;
 		forge_globals.round_requested = FALSE;
-		forge_menu_notice("%s", T("Only the host can do that"));
+		if (!asked)
+			forge_menu_notice("%s", T("Only the host can do that"));
 	}
 	if (forge_globals.ai_all_requested)
 	{
@@ -5275,7 +5304,11 @@ void forge_update(
 	forge_homes_update();
 	/* (a network Forge game: the requests and the layout's changes) */
 	forge_net_update();
-	if (forge_globals.game_active && pressed[_gamepad_binary_button_start] && !menu_open && !forge_globals.game_requested)
+	/* (a network game: the game's own Start opens the multiplayer pause,
+	which menu_tags.c makes the Forge menu - opened here too, the game's
+	Start would close it again at once) */
+	if (forge_globals.game_active && pressed[_gamepad_binary_button_start] && !menu_open && !forge_globals.game_requested &&
+		!network_game_is_active())
 	{
 		forge_menu_open_pause();
 		menu_open = forge_menu_open();
@@ -5687,7 +5720,11 @@ boolean forge_command(
 		ALL AI) */
 		if (strcmp(rest, "dead") && strcmp(rest, "all"))
 			return FALSE;
-		forge_ai_clear(!strcmp(rest, "all"));
+		/* (a network game's client: asked of the host, as its menu asks) */
+		if (forge_net_client())
+			forge_clear_ai_request(!strcmp(rest, "all"));
+		else
+			forge_ai_clear(!strcmp(rest, "all"));
 		return TRUE;
 	}
 	if (!strcmp(word, "press") || !strcmp(word, "stick"))
@@ -5846,6 +5883,11 @@ boolean forge_command(
 	}
 	if (!strcmp(word, "allai"))
 	{
+		if (forge_net_client())
+		{
+			forge_ai_all_request();
+			return TRUE;
+		}
 		forge_ai_all_set(!strcmp(rest, "on") ? TRUE : !strcmp(rest, "off") ? FALSE : forge_ai_state() == _forge_ai_all_off);
 		return TRUE;
 	}

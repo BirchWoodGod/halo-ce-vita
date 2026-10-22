@@ -2507,6 +2507,14 @@ static void h3_forge_title_update(struct widget_instance *widget)
 		if (!_stricmp(scenario, forge_map_path(index)))
 			name = T(forge_map_name(index));
 	}
+	/* (a network game's joiner has no solo map name: the level loaded's) */
+	if (!name[0])
+	{
+		static char level[64];
+
+		forge_level_name(level, (short)sizeof(level));
+		name = level;
+	}
 	snprintf(text, sizeof(text), "%s \xc2\xb7 %s", T("FORGE"), name);
 	h3_capitals(text);
 	text_show(widget, text);

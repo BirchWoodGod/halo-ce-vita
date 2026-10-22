@@ -302,6 +302,10 @@ enum
 	_forge_clear_ai_dead,
 	_forge_clear_ai_all,
 };
+/* the loaded level's name as Forge says it (the Forge menu's title) */
+void forge_level_name(
+	char *name,
+	short size);
 void forge_clear_ai_request(
 	boolean all);
 /* (the settings panel's Forge and File Share page, vita_settings.c, of

@@ -2069,6 +2069,8 @@
 "Slow down: the host takes so many edits a second" = "Más despacio: el anfitrión acepta un número de cambios por segundo"
 "It is gone" = "Ya no está"
 "You aren't holding it" = "No lo tienes agarrado"
+"New round: the host starts it" = "Nueva ronda: la inicia el anfitrión"
+"Not now: the host's game is starting a round" = "Ahora no: la partida del anfitrión está iniciando una ronda"
 "Forge plays the multiplayer maps only." = "La Forja solo se juega en los mapas multijugador."
 "Forge is played with Vitas only (WHO CAN JOIN: Vitas)." = "La Forja se juega solo con Vitas (QUIÉN PUEDE UNIRSE: Vitas)."
 "Map variants are played with Vitas only (WHO CAN JOIN: Vitas)." = "Las variantes de mapa se juegan solo con Vitas (QUIÉN PUEDE UNIRSE: Vitas)."

@@ -213,6 +213,11 @@ int forge_net_request_valid(
 		return !(record->flags & FORGE_NET_FLAG_MONITOR) || forge_net_view_valid(&record->transform);
 	case _forge_net_request_sync:
 		return record->flags == 0;
+	case _forge_net_request_command:
+		if (record->flags != 0 || record->aux >= NUMBER_OF_FORGE_NET_COMMANDS)
+			return 0;
+		/* (ALL AI's on or off in value; the others' value none) */
+		return record->aux == _forge_net_command_all_ai ? record->value <= 1 : record->value == 0;
 	default:
 		return 0;
 	}
@@ -607,7 +612,7 @@ char const *forge_net_refusal_name(
 		"none", "budget", "AI budget", "held by another", "not allowed", "outside the map", "cannot be placed",
 		"cannot be copied", "host only", "rate limited", "gone", "the map's scenery", "nothing to undo",
 		"nothing to redo", "not held", "undone", "redone", "undo: gone", "redo: gone", "undo: budget full",
-		"redo: budget full",
+		"redo: budget full", "cleared dead AI", "cleared all AI", "AI set", "new round", "not now",
 	};
 
 	return refusal >= 0 && refusal < NUMBER_OF_FORGE_NET_REFUSALS ? names[refusal] : "?";
@@ -619,6 +624,7 @@ char const *forge_net_op_name(
 	static char const *const requests[] =
 	{
 		"none", "spawn", "grab", "move", "release", "set", "delete", "duplicate", "property", "undo", "monitor", "sync",
+		"command",
 	};
 	static char const *const updates[] =
 	{

@@ -95,6 +95,14 @@ static void fuzz_request(
 	case _forge_net_request_undo:
 	case _forge_net_request_sync:
 		break;
+	case _forge_net_request_command:
+		/* (a known command; ALL AI's on or off, the others' nothing) */
+		if (copy.aux >= NUMBER_OF_FORGE_NET_COMMANDS || copy.flags != 0 ||
+			(copy.aux == _forge_net_command_all_ai ? copy.value > 1 : copy.value != 0))
+		{
+			abort();
+		}
+		break;
 	default:
 		/* (no other op is a request) */
 		abort();

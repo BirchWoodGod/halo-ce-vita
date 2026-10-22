@@ -151,6 +151,8 @@ struct forge_net_actor
 	struct forge_net_sequence sequence;
 	struct forge_net_bucket requests;
 	struct forge_net_bucket spawns;
+	/* (its Forge menu's commands: CLEAR AI, ALL AI, NEW ROUND) */
+	struct forge_net_bucket commands;
 	struct forge_net_drops drops;
 	unsigned long drops_logged;
 	struct forge_net_drops drops_said;
@@ -270,6 +272,9 @@ static struct
 	boolean client_building_any_said;
 	unsigned long client_building_time;
 	char host_title[FORGE_NET_TITLE_SIZE];
+	/* (a client) the host's hello's version: FORGE_NET_HOST_VERSION_COMMANDS
+	and on, it takes the Forge menu's commands */
+	unsigned short host_version;
 	char missing_packs[FORGE_LINE_SIZE];
 	boolean refused_said;
 	/* --- the game */
@@ -745,7 +750,7 @@ static void forge_net_hello_fill(
 
 	csmemset(message, 0, sizeof(*message));
 	message->command = _forge_net_lobby_hello;
-	message->version = FORGE_NET_VERSION;
+	message->version = FORGE_NET_HOST_VERSION;
 	message->session = forge_net.session;
 	message->flags = (in_progress ? FORGE_NET_SESSION_IN_PROGRESS : 0) | (forge_net.host_play ? FORGE_NET_SESSION_PLAY : 0);
 	for (pack = 0; pack < FORGE_PACK_COUNT && message->pack_count < FORGE_NET_MAXIMUM_PACKS; pack++)
@@ -1089,6 +1094,7 @@ void forge_net_client_handle_lobby_message(
 		forge_net.refused_said = FALSE;
 		forge_net.hosting = FALSE;
 		forge_net.client_play = (hello.flags & FORGE_NET_SESSION_PLAY) != 0;
+		forge_net.host_version = hello.version;
 		snprintf(forge_net.host_title, sizeof(forge_net.host_title), "%s", hello.title);
 		forge_globals.packs_session = 0;
 		forge_net.missing_packs[0] = 0;
@@ -1654,6 +1660,81 @@ static void forge_net_count_violation(
 	network_anticheat_violation(actor->machine_index, _anticheat_forge, TRUE, 1.0f);
 }
 
+/* a machine's Forge menu command (CLEAR DEAD AI, CLEAR ALL AI, ALL AI, NEW
+ROUND), checked and made as the host's own menu makes it: in a Forge game
+being played (not while one starts or a round resets), a few a second at
+most; what came of it said back to that machine alone */
+static void forge_net_host_command(
+	struct forge_net_actor *actor,
+	struct forge_net_record const *request,
+	unsigned long now)
+{
+	static char const *const names[NUMBER_OF_FORGE_NET_COMMANDS] =
+	{
+		"clear dead AI", "clear all AI", "all AI", "new round",
+	};
+	short result = _forge_net_refuse_none;
+	uint16_t value = 0;
+
+	if (!forge_net_bucket_take(&actor->commands, now, FORGE_NET_COMMANDS_PER_SECOND, FORGE_NET_COMMANDS_BURST, 1.f))
+	{
+		actor->drops.rate_limited++;
+		forge_net.requests_dropped++;
+		forge_net_refuse(actor, request, _forge_net_refuse_rate, 0, 0);
+		return;
+	}
+	if (!forge_globals.game_active || forge_globals.game_requested || forge_globals.round_pending ||
+		forge_globals.round_resetting || forge_globals.round_requested)
+	{
+		forge_net_refuse(actor, request, _forge_net_refuse_not_now, 0, 0);
+		return;
+	}
+	platform_log("forge net: machine %ld asked: %s", actor->machine_index, names[request->aux]);
+	switch (request->aux)
+	{
+	case _forge_net_command_clear_dead_ai:
+	case _forge_net_command_clear_all_ai:
+	{
+		boolean all = request->aux == _forge_net_command_clear_all_ai;
+
+		/* (as that machine: its own hold of a character let go, its
+		notices its own) */
+		forge_net_act_begin(actor);
+		value = (uint16_t)forge_ai_clear(all);
+		forge_net_act_end(actor);
+		result = all ? _forge_net_refuse_cleared_all : _forge_net_refuse_cleared_dead;
+		break;
+	}
+	case _forge_net_command_all_ai:
+		forge_net_act_begin(actor);
+		forge_ai_all_set(request->value != 0);
+		forge_net_act_end(actor);
+		value = request->value;
+		result = _forge_net_refuse_ai_set;
+		break;
+	case _forge_net_command_new_round:
+		/* (started once the host's own Forge menu is closed: forge_update) */
+		forge_globals.round_requested = TRUE;
+		result = _forge_net_refuse_round;
+		break;
+	}
+	if (result != _forge_net_refuse_none)
+	{
+		/* (what came of it: no refusal, not counted as one) */
+		struct forge_net_record record;
+
+		csmemset(&record, 0, sizeof(record));
+		record.op = _forge_net_update_refuse;
+		record.sequence = request->sequence;
+		record.aux = (uint8_t)result;
+		record.value = value;
+		record.tag = FORGE_NET_NO_TAG;
+		record.player = FORGE_NET_NO_PLAYER;
+		record.object = FORGE_NET_NO_OBJECT;
+		forge_net_direct(actor, &record);
+	}
+}
+
 /* a machine's request, checked and made */
 static void forge_net_host_request(
 	struct forge_net_actor *actor,
@@ -1701,7 +1782,8 @@ static void forge_net_host_request(
 	}
 	if (request.op != _forge_net_request_monitor && request.op != _forge_net_request_sync &&
 		request.op != _forge_net_request_undo && request.op != _forge_net_request_property &&
-		request.op != _forge_net_request_grab && request.op != _forge_net_request_delete)
+		request.op != _forge_net_request_grab && request.op != _forge_net_request_delete &&
+		request.op != _forge_net_request_command)
 	{
 		forge_net_transform_square(&request.transform);
 		if (!forge_net_inside_world(&request.transform))
@@ -1727,6 +1809,9 @@ static void forge_net_host_request(
 		actor->monitor = (request.flags & FORGE_NET_FLAG_MONITOR) != 0;
 		if (actor->monitor)
 			actor->view = request.transform;
+		return;
+	case _forge_net_request_command:
+		forge_net_host_command(actor, &request, now);
 		return;
 	case _forge_net_request_spawn:
 	case _forge_net_request_duplicate:
@@ -2710,6 +2795,28 @@ static void forge_net_client_undo(
 	forge_net_request_send(&record);
 }
 
+/* (forge_update, a client) a Forge menu command asked of the host: FALSE
+if this host does not take them (an older build: the menu says only the
+host can) */
+static boolean forge_net_client_command(
+	short command,
+	uint16_t value)
+{
+	struct forge_net_record record;
+
+	if (!forge_net_client() || forge_net.host_version < FORGE_NET_HOST_VERSION_COMMANDS)
+		return FALSE;
+	forge_net_request_init(&record, _forge_net_request_command);
+	record.aux = (uint8_t)command;
+	record.value = value;
+	forge_net_request_send(&record);
+	platform_log("forge net: asked the host: %s", forge_net_refusal_name(
+		command == _forge_net_command_clear_dead_ai ? _forge_net_refuse_cleared_dead :
+		command == _forge_net_command_clear_all_ai ? _forge_net_refuse_cleared_all :
+		command == _forge_net_command_all_ai ? _forge_net_refuse_ai_set : _forge_net_refuse_round));
+	return TRUE;
+}
+
 /* this machine's tag of a host's palette entry (by group and path; a
 placeable one only if it is one of this machine's palette: its allow
 list), NONE */
@@ -3122,6 +3229,21 @@ static void forge_net_client_update_take(
 		case _forge_net_refuse_redo_gone: forge_menu_notice(T("Can't redo %s: it is gone"), words); break;
 		case _forge_net_refuse_undo_budget: forge_menu_notice(T("Can't undo %s: the budget is full"), words); break;
 		case _forge_net_refuse_redo_budget: forge_menu_notice(T("Can't redo %s: the budget is full"), words); break;
+		case _forge_net_refuse_cleared_dead:
+			if (record->value)
+				forge_menu_notice(T("Cleared %d dead AI"), (int)record->value);
+			else
+				forge_menu_notice("%s", T("No dead AI to clear"));
+			break;
+		case _forge_net_refuse_cleared_all:
+			if (record->value)
+				forge_menu_notice(T("Cleared all AI: %d characters"), (int)record->value);
+			else
+				forge_menu_notice("%s", T("No AI to clear"));
+			break;
+		case _forge_net_refuse_ai_set: forge_menu_notice("%s", record->value ? T("AI: On") : T("AI: Off")); break;
+		case _forge_net_refuse_round: forge_menu_notice("%s", T("New round: the host starts it")); break;
+		case _forge_net_refuse_not_now: forge_menu_notice("%s", T("Not now: the host's game is starting a round")); break;
 		}
 		platform_log("forge net: the host said: %s", forge_net_refusal_name(record->aux));
 		return;

@@ -57,6 +57,14 @@ they do not have is left out, said, and its objects not shown.
 
 /* the protocol's version (the lobby hello's and its answer's) */
 #define FORGE_NET_VERSION 1
+/* the version a host's hello says (its answer's stays FORGE_NET_VERSION,
+which every host takes: a joiner reads any hello of version 1 or more):
+2, the host takes a client's menu commands (_forge_net_request_command:
+CLEAR DEAD AI, CLEAR ALL AI, ALL AI, NEW ROUND); a client sends them only
+to a host of 2 or more - one of 1 (insider.21 and before) would count the
+record as malformed - and says "Only the host can do that" to an older one */
+#define FORGE_NET_HOST_VERSION 2
+#define FORGE_NET_HOST_VERSION_COMMANDS 2
 /* a joiner's capabilities (its answer's bits) */
 #define FORGE_NET_CAPABILITY_FORGE 0x00000001u
 #define FORGE_NET_CAPABILITIES_KNOWN FORGE_NET_CAPABILITY_FORGE
@@ -119,6 +127,10 @@ request; and the ones that make objects (spawn, duplicate) */
 #define FORGE_NET_REQUESTS_BURST 180.f
 #define FORGE_NET_SPAWNS_PER_SECOND 4.f
 #define FORGE_NET_SPAWNS_BURST 12.f
+/* and the Forge menu's commands (CLEAR AI, ALL AI, NEW ROUND): a NEW ROUND
+places the whole layout again */
+#define FORGE_NET_COMMANDS_PER_SECOND 1.f
+#define FORGE_NET_COMMANDS_BURST 3.f
 /* a joiner's sync (palette and layout) at most once in this long */
 #define FORGE_NET_SYNC_MILLISECONDS 5000
 
@@ -184,6 +196,7 @@ enum
 	_forge_net_request_undo,        /* aux: 0 undo, 1 redo */
 	_forge_net_request_monitor,     /* flags MONITOR, position and forward */
 	_forge_net_request_sync,        /* the palette and the layout, please */
+	_forge_net_request_command,     /* aux: _forge_net_command_* (the Forge menu's, made by the host) */
 	FORGE_NET_FIRST_UPDATE = 32,
 	/* updates (host to client) */
 	_forge_net_update_entry = FORGE_NET_FIRST_UPDATE, /* id, object, tag, holder, transform, properties */
@@ -254,7 +267,24 @@ enum
 	_forge_net_refuse_redo_gone,
 	_forge_net_refuse_undo_budget,
 	_forge_net_refuse_redo_budget,
+	/* (what came of a command: sent only to a client that sent one) */
+	_forge_net_refuse_cleared_dead,  /* value: the dead characters cleared */
+	_forge_net_refuse_cleared_all,   /* value: the characters cleared */
+	_forge_net_refuse_ai_set,        /* value: 1 AI on, 0 off */
+	_forge_net_refuse_round,         /* a new round asked (the host starts it) */
+	_forge_net_refuse_not_now,       /* not while the host's game cannot (a round starting) */
 	NUMBER_OF_FORGE_NET_REFUSALS
+};
+
+/* a client's command (the Forge menu's rows a client asks the host for) */
+enum
+{
+	_forge_net_command_clear_dead_ai = 0,
+	_forge_net_command_clear_all_ai,
+	/* (ALL AI: the record's value 1 on, 0 off) */
+	_forge_net_command_all_ai,
+	_forge_net_command_new_round,
+	NUMBER_OF_FORGE_NET_COMMANDS
 };
 
 /* a palette entry's flags */
