@@ -4138,11 +4138,13 @@ static boolean ce_custom_open(void)
 /* (port ce profile: Menu style Halo CE's profile settings, a widget of
 ours on them) the list's description as the Xbox's "plyr prof edit select
 menu upd8" sets it - its words and picture by the focused row - counting the
-Xbox's rows alone; none on MORE OPTIONS (its row: more) */
+Xbox's rows alone; on MORE OPTIONS (its row: more) the panel with the port's
+words (more_help) */
 static void ce_profile_description_update(struct widget_instance *widget)
 {
 	struct widget_instance *list = named(screen_of(widget), "profile_edit_select_list");
-	struct widget_instance *description, *child;
+	struct widget_instance *description, *child, *help;
+	boolean more;
 	short index = 0;
 
 	if (!list || !list->focused_child || !(description = list->parameters.list.extended_description) ||
@@ -4155,12 +4157,15 @@ static void ce_profile_description_update(struct widget_instance *widget)
 		if (!child->name || strcmp(child->name, "more"))
 			index++;
 	}
-	if (list->focused_child->name && !strcmp(list->focused_child->name, "more"))
-	{
-		widget_instance_set_visibility_recursive(description, FALSE);
+	/* (MORE OPTIONS: the panel, its own words in it - more_help -, not the
+	Xbox's picture and words) */
+	more = list->focused_child->name && !strcmp(list->focused_child->name, "more");
+	widget_instance_set_visibility_recursive(description, !more);
+	description->visible = TRUE;
+	if ((help = named(screen_of(widget), "more_help")) != NULL)
+		widget_instance_set_visibility_recursive(help, more);
+	if (more)
 		return;
-	}
-	widget_instance_set_visibility_recursive(description, TRUE);
 	description->child->parameters.text_box.string_list_index = index;
 	description->child->next->animation.current_frame_index = index;
 }
@@ -16534,6 +16539,9 @@ game's) next; FALSE with why if the map cannot be */
 /* ---- Menu style Halo CE's additions (menus/classic: the Xbox screens with
 the port's rows, menu_tags.c classic_patch) */
 
+/* (LOBBY OPTIONS' rows, as OpenCE's Multiplayer screen's) */
+#define CE_LOBBY_ROW_SPACING 33
+
 /* the Xbox's pregame (connected_pregame_screen) of a game this machine
 hosts: the map variant its game is played with, chosen on its LOBBY
 OPTIONS' MAP VARIANT (menus/classic/pregame.xml) among its map's (none
@@ -16645,18 +16653,19 @@ static boolean ce_variant_next(void)
 
 /* (port ce lobby: the pregame's LOBBY OPTIONS, its list) PLAYERS for
 everyone; the host's INVITE FRIENDS (a game hosted online) and MAP VARIANT
-(a map of the lobby's, not a network Forge game), the variant chosen at its
-right; the focused row's help */
+(a map of the lobby's, not a network Forge game), a hidden row's place taken
+by the rows under it; the description's panel: the hosted map's picture and
+name, the map variant played, the focused row's words */
 static void ce_lobby_update(struct widget_instance *list)
 {
 	struct widget_instance *screen = screen_of(list);
-	struct widget_instance *row, *child;
+	struct widget_instance *row, *child, *found;
 	struct network_game_server *server = ce_hosted_server();
-	short map = server ? ce_hosted_map() : NONE;
+	short map = ce_hosted_map();
 	boolean invite = server && internet_play() && !network_game_is_splitscreen_local();
 	boolean variant = server && map != NONE && (!forge_net_hosting() || ce_pregame.hosted);
 	char text[256];
-	short index = 0;
+	short index = 0, shown = 0, base;
 
 	if ((row = named(screen, "op_invite")) != NULL)
 	{
@@ -16668,8 +16677,28 @@ static void ce_lobby_update(struct widget_instance *list)
 		widget_instance_set_visibility_recursive(row, variant);
 		row->disabled = !variant;
 	}
-	text_show(named(screen, "variant_value"), ce_pregame.note[0] ? ce_pregame.note :
-		ce_pregame.title[0] ? ce_pregame.title : T("NONE"));
+	/* (the rows shown one under the other, as the list's first stands) */
+	base = list->child ? list->child->vertical_offset : 0;
+	for (child = list->child; child; child = child->next)
+	{
+		if (child->visible)
+			child->vertical_offset = (short)(base + shown++ * CE_LOBBY_ROW_SPACING);
+	}
+	if ((found = named(screen, "map_picture")) != NULL)
+	{
+		widget_instance_set_visibility_recursive(found, map != NONE);
+		if (map != NONE)
+			found->animation.current_frame_index = map;
+	}
+	text_show(named(screen, "map_name"), map != NONE ? T(forge_map_name(map)) : "");
+	if (variant)
+	{
+		snprintf(text, sizeof(text), "%s:\r\n%s", T("MAP VARIANT"), ce_pregame.note[0] ? ce_pregame.note :
+			ce_pregame.title[0] ? ce_pregame.title : T("NONE"));
+		text_show(named(screen, "variant_value"), text);
+	}
+	else
+		text_show(named(screen, "variant_value"), "");
 	for (child = list->child; child && child != list->focused_child; child = child->next)
 		index++;
 	string_show(named(screen, "lobby_help"), index);

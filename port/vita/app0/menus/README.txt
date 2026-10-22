@@ -45,7 +45,7 @@ Menu style Halo CE's additions (classic/)
 - pregame.xml: the network game's lobby, Y PLAYERS and the right trigger's
   LOBBY OPTIONS (PLAYERS, INVITE FRIENDS, MAP VARIANT).
 - pause.xml (ingame.txt): the multiplayer pause's PLAYERS and PARTY.
-- OpenCE's Multiplayer screen's NEW GAMETYPE EDITOR (multiplayer.xml: the
+- OpenCE's Multiplayer screen's GAMETYPES PLUS (multiplayer.xml: the
   Halo 3 GAME TYPES, Infection's rules too) and Server Setup's BOTS
   (setup.xml) are theirs.
 - No Bungie picture or line of text is added: the new rows' words are the

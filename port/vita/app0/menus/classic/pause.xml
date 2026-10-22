@@ -2,32 +2,40 @@
 <!-- Menu style Halo CE: the Xbox's multiplayer pause (1p_pause_game, a network or local game's
      Start) with the port's rows in its own box: RESUME GAME, PLAYERS (the players' options: add
      friend, mute chat, the host's kick and ban - halo3/players.xml), PARTY (the settings panel's
-     Party page, as the Halo 3 pause's PARTY asks for it) and the Xbox's LEAVE GAME, a little higher
-     in the box to hold them; the screen's middle (where the PC build's pointer starts, which
-     focuses the row under it) between PLAYERS and PARTY -->
+     Party page, as the Halo 3 pause's PARTY asks for it) and the Xbox's LEAVE GAME, spaced as the
+     Xbox's two rows are (35 pixels a row, the same margins), in a box drawn as the Xbox's is,
+     taller for them (classic/pausebox.png); the
+     screen's middle (where the PC build's pointer starts, which focuses the row under it) between
+     PLAYERS and PARTY -->
 <menus>
 	<strings name="ce/pause_items">
 		<string text="PLAYERS"/>
 		<string text="PARTY"/>
 	</strings>
+	<!-- (the box: the port's own, tools/classic_menu_art.py, in the look of the game's pause box,
+	     made taller for four rows) -->
+	<bitmap name="ce/pause/box_art" fit="widget">
+		<frame png="classic/pausebox.png" width="512" height="512"/>
+	</bitmap>
+	<widget name="ce/pause/box" width="226" height="229" bitmap="ce/pause/box_art"/>
 	<widget name="ce/pause/players" extends="ui\shell\multiplayer_game\pause_game\resume_game_button" drop="handlers" string_list="ce/pause_items" string_index="0">
 		<on event="a start" open="h3/players/screen"/>
 	</widget>
 	<widget name="ce/pause/party" extends="ui\shell\multiplayer_game\pause_game\resume_game_button" drop="handlers" string_list="ce/pause_items" string_index="1">
 		<on event="a start" run="port h3 mp pause party"/>
 	</widget>
-	<widget name="ce/pause/list" extends="ui\shell\multiplayer_game\pause_game\mp_pause_list" classic_patch="true" drop="children" height="112">
+	<widget name="ce/pause/list" extends="ui\shell\multiplayer_game\pause_game\mp_pause_list" classic_patch="true" drop="children" height="132">
 		<!-- (RESUME GAME focused as the pause opens: the game's own choice of the first row
 		     falls on a later one when the list has more than two) -->
 		<on event="created" focus="ui\shell\multiplayer_game\pause_game\resume_game_button"/>
 		<child widget="ui\shell\multiplayer_game\pause_game\resume_game_button" x="0" y="0"/>
-		<child widget="ce/pause/players" x="0" y="28"/>
-		<child widget="ce/pause/party" x="0" y="57"/>
-		<child widget="ui\shell\multiplayer_game\pause_game\quit_netgame_button" x="0" y="85"/>
+		<child widget="ce/pause/players" x="0" y="35"/>
+		<child widget="ce/pause/party" x="0" y="70"/>
+		<child widget="ui\shell\multiplayer_game\pause_game\quit_netgame_button" x="0" y="105"/>
 	</widget>
 	<widget name="ce/pause/screen" extends="ui\shell\multiplayer_game\pause_game\1p_pause_game" classic_patch="true" drop="children">
-		<child widget="ui\shell\multiplayer_game\pause_game\pause_dialog_bkd" x="210" y="170"/>
-		<child widget="ui\shell\multiplayer_game\pause_game\mp_pause_list" x="218" y="184"/>
-		<child widget="ui\shell\main_menu\button_key_sm" x="235" y="304"/>
+		<child widget="ce/pause/box" x="206" y="130"/>
+		<child widget="ui\shell\multiplayer_game\pause_game\mp_pause_list" x="218" y="173"/>
+		<child widget="ui\shell\main_menu\button_key_sm" x="235" y="334"/>
 	</widget>
 </menus>

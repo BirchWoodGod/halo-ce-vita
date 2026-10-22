@@ -32,7 +32,7 @@
 		<string text="JOIN BY CODE"/>
 		<string text="CO-OP CAMPAIGN"/>
 		<string text="SPLIT SCREEN"/>
-		<string text="NEW GAMETYPE EDITOR"/>
+		<string text="GAMETYPES PLUS"/>
 	</strings>
 	<strings name="mp_descriptions">
 		<string text="Join a public game on the Internet:\nthe server browser lists them."/>

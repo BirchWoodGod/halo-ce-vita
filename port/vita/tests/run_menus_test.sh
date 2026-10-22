@@ -395,7 +395,7 @@
 #           each opens its screen (the Halo 3 Forge lobby, FRIENDS, FILE SHARE, MOD MANAGER) and B
 #           comes back to the Xbox's main menu; Menu style Halo 3: the map's own list, its main menu
 #           the Halo 3 one
-#   ceplusmp  Menu style Halo CE's Multiplayer (OpenCE's): NEW GAMETYPE EDITOR, the ninth row,
+#   ceplusmp  Menu style Halo CE's Multiplayer (OpenCE's): GAMETYPES PLUS, the ninth row,
 #           opens the Halo 3 GAME TYPES (Infection's rules too), B back; Create Game Internet's
 #           Server Setup (internet play on, TEST-NET brokers) has BOTS: right on it, START GAME:
 #           Bots online set as chosen
@@ -3021,11 +3021,11 @@ PY
 		run ceplusmp_gametypes "$menus_data" 22 "wait:150:3000 down:150:800 a:150:3000 $d $d $d $d $d $d $d $d a:150:4000 b:150:3000" \
 			HALO_SCENE_PACKS=0
 		log=$out/ceplusmp_gametypes/run.log
-		echo "--- ceplusmp (NEW GAMETYPE EDITOR)"
+		echo "--- ceplusmp (GAMETYPES PLUS)"
 		grep -aE "ui: screen|menus: h3 gametypes" "$log" | head -8
 		[ "$(cat "$out/ceplusmp_gametypes/exit")" = 0 ] || fail ceplusmp "gametypes: exit $(cat "$out/ceplusmp_gametypes/exit")"
 		grep -aqiE "assert|exception|halt_and_catch_fire" "$log" && fail ceplusmp "gametypes: an assertion, exception or halt"
-		grep -aq "ui: screen pc.h3.gametypes.screen" "$log" || fail ceplusmp "NEW GAMETYPE EDITOR did not open GAME TYPES"
+		grep -aq "ui: screen pc.h3.gametypes.screen" "$log" || fail ceplusmp "GAMETYPES PLUS did not open GAME TYPES"
 		sed -n '/ui: screen pc.h3.gametypes.screen/,$p' "$log" | grep -aq "ui: screen pc.mp.screen" ||
 			fail ceplusmp "B did not go back to the Multiplayer screen"
 		# (Create Game Internet, the fourth row: Server Setup; down five to BOTS - OFF, the tests' -,
