@@ -363,6 +363,12 @@ static const struct config_setting config_settings[] =
 		"\"classic\" (the game's own). Menu style Halo CE always shows the\n"
 		"game's own. The Vita's settings panel (Game, Menus, Carnage report)\n"
 		"sets it." },
+	{ "menus.scoreboard", _config_string, "\"halo3\"", "HALO_SCOREBOARD", _environment_value, _platform_all,
+		"With the Halo 3 menus, the scores while Back is held in a multiplayer\n"
+		"game: \"halo3\" (Halo 3's scoreboard: port/vita/app0/menus/halo3/\n"
+		"scoreboard.xml) or \"classic\" (the game's own). Menu style Halo CE\n"
+		"always shows the game's own. The Vita's settings panel (Game, Menus,\n"
+		"Scoreboard) sets it." },
 	{ "menus.scenes", _config_boolean, "true", "HALO_MENU_SCENES", _environment_value, _platform_all,
 		"With the Halo 3 menus, a camera of its own behind each lobby (the\n"
 		"campaign, multiplayer and Forge lobbies: their scene= in\n"

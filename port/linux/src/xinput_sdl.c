@@ -741,6 +741,14 @@ static void test_input_gamepad(XINPUT_GAMEPAD *pad)
 	a level) */
 	if (test_pad_at_menu && test_pad.count > 0)
 		return;
+	/* (nor while the Halo 3 scoreboard is open: the steps press it, the
+	scripted player's stick and jumps would move its cursor and choose) */
+	{
+		extern unsigned char menu_functions_scoreboard_is_open(void);
+
+		if (test_pad.count > 0 && menu_functions_scoreboard_is_open())
+			return;
+	}
 	if (test_input_holding_still)
 		return;
 	if (test_input_holding_action)

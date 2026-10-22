@@ -1261,12 +1261,18 @@ static void ui_point_from_window(float window_x, float window_y, short *x, short
 ...": a tap (the pointer there and a left click, as a touch screen's) at
 x,y of the menus' 640x480 that many milliseconds after the menus first
 asked, each said in the log ("test tap: x,y"); the Vita's touch screen
-reaches the menus the same way (vita_controls.c vita_touch_pointer) */
+reaches the menus the same way (vita_controls.c vita_touch_pointer).
+"ms:x,y>x2,y2" is a drag instead: a finger down at x,y moved to x2,y2 over
+TEST_DRAG_MILLISECONDS and lifted there, no tap ("test drag: ...") */
+#define TEST_DRAG_MILLISECONDS 800
 static int test_taps(int menus_active, struct halo_ui_pointer *pointer)
 {
 	static int parsed, count, next;
 	static long times[32];
 	static short xs[32], ys[32];
+	/* (a drag's end; drags[] nonzero for a drag) */
+	static short x2s[32], y2s[32];
+	static unsigned char drags[32];
 	static struct timespec start;
 	struct timespec now;
 	long elapsed;
@@ -1286,8 +1292,19 @@ static int test_taps(int menus_active, struct halo_ui_pointer *pointer)
 			times[count] = ms;
 			xs[count] = (short)x;
 			ys[count] = (short)y;
-			count++;
 			text += used;
+			{
+				int x2, y2, more = 0;
+
+				if (*text == '>' && sscanf(text, ">%d,%d%n", &x2, &y2, &more) == 2 && more)
+				{
+					drags[count] = 1;
+					x2s[count] = (short)x2;
+					y2s[count] = (short)y2;
+					text += more;
+				}
+			}
+			count++;
 		}
 		clock_gettime(CLOCK_MONOTONIC, &start);
 	}
@@ -1296,8 +1313,27 @@ static int test_taps(int menus_active, struct halo_ui_pointer *pointer)
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	elapsed = (long)(now.tv_sec - start.tv_sec) * 1000 + (now.tv_nsec - start.tv_nsec) / 1000000;
 	memset(pointer, 0, sizeof(*pointer));
-	pointer->x = pointer->click_x = next ? xs[next - 1] : -1;
-	pointer->y = pointer->click_y = next ? ys[next - 1] : -1;
+	pointer->x = pointer->click_x = next ? (drags[next - 1] ? x2s[next - 1] : xs[next - 1]) : -1;
+	pointer->y = pointer->click_y = next ? (drags[next - 1] ? y2s[next - 1] : ys[next - 1]) : -1;
+	if (next < count && elapsed >= times[next] && drags[next])
+	{
+		/* (a drag: down, moved along its way, lifted at its end) */
+		static int drag_said;
+		long along = elapsed - times[next];
+
+		if (along < TEST_DRAG_MILLISECONDS)
+		{
+			if (drag_said != next + 1 && (drag_said = next + 1) != 0)
+				platform_log("test drag: %d,%d to %d,%d", (int)xs[next], (int)ys[next], (int)x2s[next], (int)y2s[next]);
+			pointer->x = pointer->click_x = (short)(xs[next] + (x2s[next] - xs[next]) * along / TEST_DRAG_MILLISECONDS);
+			pointer->y = pointer->click_y = (short)(ys[next] + (y2s[next] - ys[next]) * along / TEST_DRAG_MILLISECONDS);
+			pointer->moved = 1;
+			pointer->held = 1;
+			return 1;
+		}
+		next++;
+		return 1;
+	}
 	if (next < count && elapsed >= times[next])
 	{
 		pointer->x = pointer->click_x = xs[next];

@@ -3365,6 +3365,21 @@ static void game_engine_post_rasterize_in_game(
 	}
 
 	fade = PIN(fade, 0.0f, 1.0f);
+#ifdef HALO_LINUX
+	/* port: the Halo 3 scoreboard stands for it while Back is held (Menu
+	style Halo 3, menus.scoreboard: port/linux/game/menu_functions.c "port
+	h3 scoreboard", drawn with the menus over this player's view) */
+	{
+		boolean menu_functions_scoreboard_replaces(short local_player_index);
+
+		if (menu_functions_scoreboard_replaces((short)local_player_index))
+		{
+			fade = 0.0f;
+			/* (drawn, as far as the automated tests count) */
+			game_engine_in_game_score_draws++;
+		}
+	}
+#endif
 	if (fade > 0.0f)
 	{
 		real alpha = linear_to_non_linear_alpha(fade);
@@ -8786,6 +8801,31 @@ long game_engine_postgame_ranking(
 	if (!game_engine || !player_data)
 		return 0;
 	count = populate_statistic_buffer_of(entries, _postgame_statistic_ranking, FALSE, FALSE);
+	for (index = 0; index < count && index < maximum; index++)
+	{
+		player_indices[index] = entries[index].player_index;
+		places[index] = place_get_position(&entries[index]);
+		tied[index] = is_place_tied(&entries[index]);
+	}
+	return index;
+}
+
+/* (port: the Halo 3 scoreboard, carnage_report_read_in_game) the same for
+the game being played: its players still in it (not those who quit), ranked
+and placed among themselves as the in-game score ranks them */
+long game_engine_in_game_ranking(
+	long *player_indices,
+	long *places,
+	boolean *tied,
+	long maximum)
+{
+	struct statistic_buffer entries[MULTIPLAYER_MAXIMUM_PLAYERS];
+	long count;
+	long index;
+
+	if (!game_engine || !player_data)
+		return 0;
+	count = populate_statistic_buffer_of(entries, _postgame_statistic_ranking, FALSE, TRUE);
 	for (index = 0; index < count && index < maximum; index++)
 	{
 		player_indices[index] = entries[index].player_index;

@@ -1,13 +1,15 @@
 # The menus a level's map gets (port/linux/src/menu_files.c halo_menus_load_ingame, built
 # into each level's tags by port/linux/game/menu_tags.c): the Halo 3 pause screens (the
 # campaign's and multiplayer's), Forge's screens over the game (its object browser and
-# menu: port/linux/game/forge.c) and the carnage report at a multiplayer game's end
+# menu: port/linux/game/forge.c), the carnage report at a multiplayer game's end and the
+# scoreboard (Back held in a multiplayer game)
 halo3/pause.xml
 halo3/forge.xml
 halo3/players.xml
 halo3/mppause.xml
 classic/pause.xml
 halo3/carnage.xml
+halo3/scoreboard.xml
 # (the Halo 3 dialog: the game's message boxes and questions)
 halo3/dialog.xml
 halo3/dialog_ingame.xml

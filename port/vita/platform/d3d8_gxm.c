@@ -282,6 +282,7 @@ int halo_ui_pointer_update(int menus_active, struct halo_ui_pointer *pointer)
 	pointer->y = pointer->click_y = y;
 	pointer->moved = (unsigned char)moved;
 	pointer->left_clicks = (unsigned char)tap;
+	pointer->held = (unsigned char)(touch.down != 0);
 	return 1;
 }
 

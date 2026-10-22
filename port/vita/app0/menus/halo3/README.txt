@@ -146,7 +146,8 @@ these screens stand for the Xbox's own, over the same animated Halo ring:
   same for the original menus.
 - players.xml: PLAYERS, Halo 3's roster of the network game this Vita plays
   (Triangle in the game's lobby, the waiting screen; on the carnage report;
-  with the scoreboard up, Back held): each player's name, team and what
+  with the game's own scoreboard up, Back held - with the Halo 3 scoreboard
+  Triangle opens that instead, below -): each player's name, team and what
   friends knows of them. Cross on another machine's player: its options,
   ADD FRIEND (a friend request, no code typed: the two machines exchange
   friend cards over internet play first, only when the other player has
@@ -226,6 +227,40 @@ In each level's map (ingame.txt):
   distributed netcode sends them: every machine shows the same; nothing is
   counted for it but betrayals, which are a teammate's death only now (a
   player's own was counted as one too: game_statistics.c).
+- scoreboard.xml: the SCOREBOARD, Halo 3's, in the place of the game's own
+  scores while Back (the Vita's SELECT) is held in a multiplayer game
+  (menu_functions.c "port h3 scoreboard"; menus.scoreboard "classic" - the
+  settings panel's Game > Menus > Scoreboard Halo CE - or Menu style Halo CE:
+  the game's own): local and split screen, System Link, ad hoc, online, a
+  dedicated server's and a PC host's games, each local player's own in their
+  view (split screen's the smaller scoreboard_split). Held, it is drawn over
+  the game without being open (ui_widget.c ui_widget_port_held_screen_show):
+  the player plays on, no button is taken. It is a compact panel at the top
+  of the screen (about 45% of its width), as Halo 3's: "Players" and "Score"
+  over the rows; a team game's teams each a translucent band of the team's
+  colour with its rank, name and score (the leading team first), its players
+  under it in the same colour; a free for all's players in one translucent
+  list, as the game ranks them. A row: the emblem (the player's colour,
+  their team's in a team game), the name, the tags - the host's crown, the
+  party's mark, the tester's small flame (only where the flame itself shows:
+  its proof checked here), BOT on a bot's, the ping's bars (the latency
+  meter's; the host's table on a joined machine) - and the score; this
+  machine's rows outlined in yellow; the dead and those out of lives dimmed;
+  the score to win and the time left over it, "Hold [Triangle] to activate"
+  under it; no kills, deaths or assists held. All sixteen players are held
+  (eighteen compact rows with a team game's two bands); with more, the leaders
+  and the player's own row and "+N more - Hold [Triangle] to open". Opened it
+  is the same panel a little wider, with kills, deaths and assists, the game
+  type on the map, a small selector row under it (the emblem and name of the
+  player Cross acts on; the D-pad's up and down arrows) and the buttons in one
+  light line. Triangle while it is held (one player on the
+  machine) opens it as a screen: the
+  D-pad, the stick, L and R, a drag on the touch screen scroll it, Cross (a
+  tap) on a player opens their options - MUTE CHAT, ADD FRIEND (VIEW FRIEND
+  for a friend), KICK for the game's host alone (network_anticheat_drop,
+  which refuses any machine not hosting; a dedicated server's players kick no
+  one, its admin does) -, Circle or Back again closes it. Its rows are read a
+  few times a second and its text set only when they change.
 In both (menus.txt and ingame.txt):
 - dialog.xml: the Halo 3 dialog, every message box and question the game
   shows - a title, the text, up to three choices in rows, Cross Select and
@@ -361,8 +396,8 @@ port/vita/tests/run_menus_test.sh h3probe h3classic h3xbox h3broken
 h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create
 h3mptouch h3coop h3coopguide h3scenes h3lobbyscenes h3modelsmany h3profiles h3proftouch h3customize h3models
 h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3friends h3friendspanel
-h3friendsfit h3mppause h3carnage; the packs':
+h3friendsfit h3mppause h3carnage h3scoreboard; the packs':
 port/vita/tests/run_scene_pack_test.sh; Forge's: port/vita/tests/run_forge_test.sh,
 port/vita/tests/run_forge_files_test.sh; between two machines:
-port/vita/tests/run_netns_online_test.sh h3coopmenu h3lan h3adhoc h3online h3mppause carnage netswitch, and friends'
+port/vita/tests/run_netns_online_test.sh h3coopmenu h3lan h3adhoc h3online h3mppause carnage h3scoreboard netswitch, and friends'
 friends friendsdecline friendsblock friendsinvite friendsoffline friendsforged.

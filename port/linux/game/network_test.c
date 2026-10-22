@@ -2054,12 +2054,15 @@ void network_test_update(
 	first half of every interval of a game, as a player looking at the
 	scores does (issue #36: a crash with it open online), and let go
 	outside a game and on its carnage report (where Back leaves for the
-	menus) */
+	menus), nor while a screen of the player's is up (the Halo 3 scoreboard
+	opened, a pause: Back is the screen's then) */
 	if (network_test.scores_interval > 0.0f)
 	{
+		struct widget_instance *ui_widget_port_active_screen(short local_player_index);
 		long interval = MAX(2, (long)(network_test.scores_interval * TICKS_PER_SECOND));
 		boolean hold = game_in_progress() && game_engine_running() && !main_menu_loaded &&
-			!game_engine_force_single_screen() && game_time_get() % interval < interval / 2;
+			!game_engine_force_single_screen() && game_time_get() % interval < interval / 2 &&
+			!ui_widget_port_active_screen(0);
 
 		if (hold != network_test.scores_held)
 		{

@@ -572,7 +572,7 @@ static struct setting settings[] = {
 	/* (the menus: Halo CE's own, or the Halo 3-style ones over the same
 	animated Halo ring - port/vita/app0/menus/halo3, menu_tags.c, which
 	reads it each time a screen opens: live) */
-	PAGE_ROW("Menus", "Menu style, the multiplayer game's carnage report", TAB_GAME, PAGE_MENUS),
+	PAGE_ROW("Menus", "Menu style, the carnage report and scoreboard", TAB_GAME, PAGE_MENUS),
 	{ "Menu style", "HALO_MENU_STYLE", 0, 2, { "classic", "halo3" }, { "Halo CE", "Halo 3" },
 		"Halo 3: the new menus over the Halo ring. Halo CE: the original menus.", 1, PAGE_MENUS },
 	/* (menu_functions.c h3_carnage_wanted, config.toml's menus.carnage_report:
@@ -582,6 +582,12 @@ static struct setting settings[] = {
 	Menu style, as the Game tab is a screen's height) */
 	{ "Carnage report", "HALO_CARNAGE_REPORT", 0, 2, { "classic", "halo3" }, { "Classic", "Halo 3" },
 		"A multiplayer game's end: Halo 3's report, or the original", 1, PAGE_MENUS },
+	/* (menu_functions.c h3_scoreboard_wanted, config.toml's menus.scoreboard:
+	the scores while Back is held in a multiplayer game, Halo 3's scoreboard
+	or the game's own; read each frame: live. Shown with Menu style Halo 3, as
+	Carnage report is - Halo CE always shows the game's own -: setting_shown) */
+	{ "Scoreboard", "HALO_SCOREBOARD", 0, 2, { "classic", "halo3" }, { "Halo CE", "Halo 3" },
+		"Scores in a game: Halo 3's scoreboard, or the original", 1, PAGE_MENUS },
 	/* (Forge and File Share for the original menus - the owner: everything
 	in the overlay -: the Forge page, under Menus (Interface; it was Game's
 	last row, under Updates, insider.21), shown with Menu style Halo CE; the
@@ -1659,7 +1665,8 @@ static int setting_shown(const struct setting *setting)
 	if (setting->action == ACTION_PAGE && setting->opens == PAGE_FORGE)
 		return classic_panel();
 	/* (the Halo 3 menus' report: with Menu style Halo 3) */
-	if (setting->variable && !strcmp(setting->variable, "HALO_CARNAGE_REPORT"))
+	if (setting->variable && (!strcmp(setting->variable, "HALO_CARNAGE_REPORT") ||
+		!strcmp(setting->variable, "HALO_SCOREBOARD")))
 		return !classic_panel();
 	if ((setting->variable && !strcmp(setting->variable, "HALO_ADHOC_ROOM")) || setting->action == ACTION_ADHOC_JOIN)
 		return network_is("adhoc");

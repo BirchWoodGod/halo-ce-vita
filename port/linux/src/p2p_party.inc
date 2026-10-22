@@ -2375,3 +2375,33 @@ unsigned long p2p_party_chat_newest(void)
 	pthread_mutex_unlock(&friends_lock);
 	return newest;
 }
+
+int p2p_party_player_member(int machine, const char *name)
+{
+	int found = 0, index;
+
+	pthread_mutex_lock(&friends_lock);
+	load();
+	if (friends->party.active && friends->party.count > 1 &&
+		!(friends->in_game && machine == friends->game_machine))
+	{
+		/* (another machine's player: their card's key when this machine has
+		it, else the name they gave the party, as a Halo name is cut) */
+		const struct card_machine *record = friends->in_game && machine >= 0 && machine < CARD_MACHINES ?
+			&friends->machines[machine] : NULL;
+
+		for (index = 0; index < friends->party.count && !found; index++)
+		{
+			const struct party_member *member = &friends->party.members[index];
+
+			if (p2p_equal(member->key, friends->key, P2P_KEY_SIZE))
+				continue;
+			if (record && record->has_card)
+				found = p2p_equal(member->key, record->key, P2P_KEY_SIZE);
+			else if (name && name[0] && member->name[0])
+				found = !strncmp(member->name, name, 11) && (strlen(member->name) <= 11 || strlen(name) >= 11);
+		}
+	}
+	pthread_mutex_unlock(&friends_lock);
+	return found;
+}

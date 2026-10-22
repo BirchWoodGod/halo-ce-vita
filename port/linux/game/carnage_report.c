@@ -27,6 +27,7 @@ void platform_log(char const *format, ...);
 struct widget_instance *ui_widget_port_active_screen(short local_player_index);
 /* game_engine.c's (port) */
 long game_engine_postgame_ranking(long *player_indices, long *places, boolean *tied, long maximum);
+long game_engine_in_game_ranking(long *player_indices, long *places, boolean *tied, long maximum);
 boolean game_engine_postgame_team_won(long team_index);
 
 /* ---------- globals */
@@ -116,6 +117,9 @@ static void carnage_player_row(struct carnage_report_row *row, long player_index
 	long type = game_engine ? game_engine->type : NONE;
 
 	memset(row, 0, sizeof(*row));
+	row->player_index = player_index;
+	row->machine = (short)player->network_player_data.machine_index;
+	row->local_player_index = player->local_player_index;
 	row->team = (short)player->team_index;
 	row->color = player->network_player_data.primary_color_index;
 	row->place = place;
@@ -187,7 +191,19 @@ void carnage_report_objective_text(struct carnage_report const *report, struct c
 	snprintf(text, size, "%ld", value);
 }
 
+static boolean carnage_report_read_ranked(struct carnage_report *report, boolean in_game);
+
 boolean carnage_report_read(struct carnage_report *report)
+{
+	return carnage_report_read_ranked(report, FALSE);
+}
+
+boolean carnage_report_read_in_game(struct carnage_report *report)
+{
+	return carnage_report_read_ranked(report, TRUE);
+}
+
+static boolean carnage_report_read_ranked(struct carnage_report *report, boolean in_game)
 {
 	long player_indices[CARNAGE_REPORT_MAXIMUM_ROWS];
 	long places[CARNAGE_REPORT_MAXIMUM_ROWS];
@@ -203,11 +219,12 @@ boolean carnage_report_read(struct carnage_report *report)
 		return FALSE;
 	report->type = game_engine->type;
 	report->teams = game_engine_has_teams();
-	count = game_engine_postgame_ranking(player_indices, places, tied, HALO_PORT_MAXIMUM_NETWORK_PLAYERS);
+	count = in_game ? game_engine_in_game_ranking(player_indices, places, tied, HALO_PORT_MAXIMUM_NETWORK_PLAYERS) :
+		game_engine_postgame_ranking(player_indices, places, tied, HALO_PORT_MAXIMUM_NETWORK_PLAYERS);
 	for (index = 0; index < count; index++)
 	{
 		carnage_player_row(&players[index], player_indices[index], places[index], tied[index]);
-		players[index].won = !tied[index] && places[index] == 0;
+		players[index].won = !in_game && !tied[index] && places[index] == 0;
 	}
 	/* (players placed alike: by name, the same order on every machine) */
 	for (index = 1; index < count; index++)
@@ -253,6 +270,9 @@ boolean carnage_report_read(struct carnage_report *report)
 			boolean present = FALSE;
 
 			memset(entry, 0, sizeof(*entry));
+			entry->player_index = NONE;
+			entry->machine = NONE;
+			entry->local_player_index = NONE;
 			for (index = 0; index < count; index++)
 			{
 				if (players[index].team != team)
@@ -272,7 +292,8 @@ boolean carnage_report_read(struct carnage_report *report)
 			entry->team_row = TRUE;
 			entry->team = (short)team;
 			entry->color = carnage_team_color(team);
-			entry->won = game_engine_postgame_team_won(team);
+			/* (a game being played has no winner yet: its teams by score) */
+			entry->won = !in_game && game_engine_postgame_team_won(team);
 			snprintf(entry->name, sizeof(entry->name), "%s", carnage_team_name(team));
 			score[0] = 0;
 			if (game_engine->format_team_name)

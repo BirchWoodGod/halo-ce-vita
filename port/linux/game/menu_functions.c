@@ -135,6 +135,8 @@ for a gamepad); a test build's HALO_TEST_TEXT_INPUT answers in its place,
 #include "infection.h"
 #include "map_share.h"
 #include "carnage_report.h"
+#include "latency_meter.h"
+#include "game/game.h"
 #include "cutscene/cinematics.h"
 
 #include <math.h>
@@ -166,6 +168,14 @@ boolean transport_network_available(void);
 boolean menu_functions_forge_host(short map_index, char const *variant_file, char *why, int why_size);
 /* menu_tags.c's: a screen of the set by its widget's name (NONE: none) */
 long menu_tags_ingame_screen(char const *name);
+/* (ui_widget.c: a screen held up over a player's view; the pointer) */
+struct widget_instance *ui_widget_port_held_screen_show(short local_player_index, long tag_index, short x, short y);
+void ui_widget_port_held_screen_hide(short local_player_index);
+struct widget_instance *ui_widget_port_held_screen(short local_player_index);
+boolean ui_widget_port_pointer(short *x, short *y, boolean *held);
+void ui_widget_port_pointer_drag(boolean dragging);
+/* (flaming_helmet.c) */
+boolean flaming_helmet_player_shown(long player_index);
 extern int (*halo_test_setting_hook)(const char *variable, const char *value);
 extern volatile unsigned long halo_settings_generation;
 
@@ -397,6 +407,11 @@ enum
 	_function_ce_pregame_init,
 	_function_ce_variant_next,
 	_function_ce_custom,
+	_function_h3_scoreboard_act,
+	_function_h3_scoreboard_option,
+	_function_h3_scoreboard_close,
+	_function_h3_scoreboard_page_up,
+	_function_h3_scoreboard_page_down,
 };
 
 /* in port_game_data_input_names' order */
@@ -461,6 +476,8 @@ enum
 	_input_h3_dialog,
 	_input_ce_lobby,
 	_input_ce_profile,
+	_input_h3_scoreboard,
+	_input_h3_scoreboard_options,
 };
 
 /* what a line of typing is for */
@@ -11991,6 +12008,8 @@ int menu_functions_players_open(boolean main_menu_loaded)
 	return 1;
 }
 
+static boolean h3_scoreboard_takes_triangle(void);
+
 /* Triangle in the game's lobby, on the carnage report, or with the
 scoreboard up (Back held): the PLAYERS screen */
 void menu_functions_players_button(boolean main_menu_loaded)
@@ -12015,6 +12034,13 @@ void menu_functions_players_button(boolean main_menu_loaded)
 		if (active && ((pregame != NONE && active->definition_tag_index == pregame) ||
 			(h3_pregame_tag != NONE && active->definition_tag_index == h3_pregame_tag)))
 			menu_functions_players_open(TRUE);
+	}
+	/* (the Halo 3 scoreboard held: its Triangle opens it, whose rows have
+	the players' options: h3_scoreboard_frame) */
+	else if (!active && !game_engine_showing_postgame() && pad->buttons[_gamepad_binary_button_back] &&
+		h3_scoreboard_takes_triangle())
+	{
+		return;
 	}
 	else if (!active && (game_engine_showing_postgame() || pad->buttons[_gamepad_binary_button_back]))
 		menu_functions_players_open(FALSE);
@@ -12546,6 +12572,1229 @@ static void h3_carnage_frame(boolean main_menu_loaded)
 	}
 	h3_carnage.last_frame = now;
 #endif
+}
+
+/* ---- port h3 scoreboard: the Halo 3 SCOREBOARD (halo3/scoreboard.xml) in
+the place of the game's own scores (game_engine.c
+game_engine_rasterize_in_game_score) while Back is held in a multiplayer
+game, with Menu style Halo 3 and menus.scoreboard (HALO_SCOREBOARD) not
+"classic": every network (local and split screen, System Link, ad hoc,
+online, a dedicated server's or a PC host's), each local player's own in
+their view (split screen's smaller one, scoreboard_split). Held, it is a
+screen held up without being open (ui_widget_port_held_screen_show): the
+player plays on, nothing of the controller is taken, Back let go and it is
+gone. Triangle while it is held (one player on this machine) opens it as a
+screen of the player's own, where the D-pad, the stick, L and R and a drag
+on the touch screen scroll it and Cross on a player opens their options
+(MUTE CHAT, ADD FRIEND or the friend's state, KICK for the game's host: its
+network_anticheat_drop, which refuses any machine not hosting); Circle, or
+Back pressed again, closes it. The rows are the game's own ranking and
+statistics (carnage_report_read_in_game: on a joined machine the host's, as
+the distributed netcode sends them), read a few times a second
+(H3_SCOREBOARD_READ_MILLISECONDS), the widgets' text set again only when
+they or the rows shown changed: nothing is made each frame */
+
+#define H3_SCOREBOARD_SCREEN "h3/scoreboard/screen"
+#define H3_SCOREBOARD_SPLIT_SCREEN "h3/scoreboard_split/screen"
+#define H3_SCOREBOARD_READ_MILLISECONDS 250
+#define H3_SCOREBOARD_MESSAGE_MILLISECONDS 5000
+/* (a drag on the touch screen: how far before it is one, and a row's
+height, as the list's rows are placed) */
+#define H3_SCOREBOARD_DRAG_SLOP 10
+#define H3_SCOREBOARD_ROW_PITCH 15
+/* (the open screen's list, on the menus' 640x480: a drag starts there; the
+panel's left, and the first row's top) */
+#define H3_SCOREBOARD_LIST_LEFT 141
+#define H3_SCOREBOARD_LIST_TOP 36
+#define H3_SCOREBOARD_LIST_RIGHT 499
+#define H3_SCOREBOARD_LIST_BOTTOM 306
+/* (held, the compact panel - 288 of the open panel's 396 - in the middle of
+the screen: the open layout's left part, moved right by this) */
+#define H3_SCOREBOARD_HELD_SHIFT 35
+/* (held: with more players than this, the leaders and the player's own row,
+and how many more) */
+#define H3_SCOREBOARD_HELD_PLAYERS 16
+/* (the views whose rows were last filled: the held ones, a local player
+each, and the open screen) */
+#define H3_SCOREBOARD_VIEWS (MAXIMUM_LOCAL_PLAYERS + 1)
+
+/* the row frames (h3/scoreboard_row) */
+enum
+{
+	_h3_scoreboard_row_plain,
+	_h3_scoreboard_row_cursor,
+	_h3_scoreboard_row_own,
+};
+
+struct h3_scoreboard_row
+{
+	/* a team's band (its score) or a player's row */
+	boolean team_row;
+	short team;
+	/* a team's place (1 the leading team) */
+	short rank;
+	/* the emblem's colour (the game's eighteen; the team's in a team
+	game; NONE) */
+	short color;
+	long player_index;
+	short machine;
+	/* this machine's player (NONE: another machine's) */
+	short local_player_index;
+	boolean bot;
+	boolean party;
+	boolean flame;
+	boolean host;
+	/* dead (respawning) or out of lives: dimmed */
+	boolean dead;
+	/* the ping's bars (0 none known), NONE where no ping is shown (not a
+	network game, a bot) */
+	short ping_bars;
+	char name[48];
+	char score[24];
+	long kills;
+	long deaths;
+	long assists;
+};
+
+/* a list whose rows were filled: what for (the rows read, the first row
+shown, the cursor's row) */
+struct h3_scoreboard_view
+{
+	struct widget_instance *list;
+	long creation_time;
+	unsigned long generation;
+	long offset;
+	long cursor;
+	short local_player_index;
+};
+
+static struct
+{
+	/* the game's rows as last read (H3_SCOREBOARD_READ_MILLISECONDS), and
+	the title and rules over them */
+	struct carnage_report report;
+	struct h3_scoreboard_row rows[CARNAGE_REPORT_MAXIMUM_ROWS];
+	long row_count;
+	long player_count;
+	boolean teams;
+	boolean network;
+	boolean hosting;
+	unsigned long generation;
+	unsigned long read_time;
+	boolean read_once;
+	char title[128];
+	char rules[96];
+	/* (each local player) Back held now, Triangle's last state, its held
+	view shown */
+	boolean back_down[MAXIMUM_LOCAL_PLAYERS];
+	boolean y_down[MAXIMUM_LOCAL_PLAYERS];
+	boolean held[MAXIMUM_LOCAL_PLAYERS];
+	/* the screen's pictures were read (at the game's start, not at the first
+	hold); the set is not in this map */
+	boolean warmed;
+	boolean unavailable;
+	struct h3_scoreboard_view views[H3_SCOREBOARD_VIEWS];
+	/* the open screen: its local player, Back let go since it opened, the
+	view, the player chosen (their player index and name), a page asked */
+	boolean open;
+	short open_local_player;
+	boolean open_back_released;
+	struct browser_view view;
+	short page;
+	long chosen_player;
+	char chosen_name[48];
+	/* the selector's last text (the open screen: set again when it changes) */
+	char selector_key[64];
+	/* a drag on the touch screen: started at, the row chosen then */
+	boolean touching;
+	boolean dragging;
+	short drag_start_y;
+	long drag_start_row;
+	char message[160];
+	unsigned long message_time;
+	boolean message_new;
+	boolean message_shown;
+	/* (what halo.log was last told: the tests read it) */
+	char said_rows[1024];
+	char said_options[160];
+} h3_scoreboard;
+
+static boolean h3_scoreboard_other_person(struct h3_scoreboard_row const *row);
+
+/* (Menu style Halo 3, and menus.scoreboard - HALO_SCOREBOARD - not
+"classic") whether Halo 3's scoreboard stands for the game's own */
+static boolean h3_scoreboard_wanted(void)
+{
+	/* (its variable, live; else config.toml's) */
+	char const *board = getenv("HALO_SCOREBOARD");
+
+	if (!board)
+		board = config_string("menus.scoreboard");
+	return halo_menu_style_halo3() && strcmp(board, "classic") != 0;
+}
+
+/* (tests, never in release builds) HALO_TEST_SCOREBOARD_PARTY and
+HALO_TEST_SCOREBOARD_FLAME: names (commas between them) marked as the
+party's and as wearing the flame, as a party and a checked tester would be;
+HALO_TEST_SCOREBOARD_SPLIT=1 the split screen's view with one player */
+static boolean h3_scoreboard_test_name(char const *variable, char const *name)
+{
+#ifndef HALO_RELEASE
+	char const *names = getenv(variable);
+	size_t length = strlen(name);
+
+	while (names && *names && length)
+	{
+		char const *end = strchr(names, ',');
+		size_t size = end ? (size_t)(end - names) : strlen(names);
+
+		if (size == length && !strncmp(names, name, length))
+			return TRUE;
+		names = end ? end + 1 : NULL;
+	}
+#else
+	(void)variable;
+	(void)name;
+#endif
+	return FALSE;
+}
+
+static boolean h3_scoreboard_test_split(void)
+{
+#ifndef HALO_RELEASE
+	char const *split = getenv("HALO_TEST_SCOREBOARD_SPLIT");
+
+	return split && split[0] == '1';
+#else
+	return FALSE;
+#endif
+}
+
+static boolean h3_scoreboard_split(void)
+{
+	return local_player_count() > 1 || h3_scoreboard_test_split();
+}
+
+static void h3_scoreboard_say(char const *text)
+{
+	snprintf(h3_scoreboard.message, sizeof(h3_scoreboard.message), "%s", text);
+	h3_scoreboard.message_time = system_milliseconds();
+	h3_scoreboard.message_new = TRUE;
+	platform_log("menus: h3 scoreboard: %s", text);
+}
+
+/* the game's rows, the title (the game type on the map) and the rules (the
+score to win, the time left), read again when they are older than
+H3_SCOREBOARD_READ_MILLISECONDS */
+static void h3_scoreboard_read(boolean now)
+{
+	struct carnage_report *report = &h3_scoreboard.report;
+	struct network_game_client *client = global_network_game_client_get();
+	struct network_game *game = network_game_get_game();
+	unsigned long time = system_milliseconds();
+	boolean in_party;
+	long index, teams_seen = 0;
+	char name[64], map[96];
+
+	if (!now && h3_scoreboard.read_once && time - h3_scoreboard.read_time < H3_SCOREBOARD_READ_MILLISECONDS)
+		return;
+	h3_scoreboard.read_once = TRUE;
+	h3_scoreboard.read_time = time;
+	h3_scoreboard.generation++;
+	h3_scoreboard.network = client && !network_game_is_splitscreen_local();
+	h3_scoreboard.hosting = h3_scoreboard.network && global_network_game_server_get() != NULL;
+	in_party = p2p_party_in_party() != 0;
+	if (!carnage_report_read_in_game(report))
+		report->row_count = 0;
+	h3_scoreboard.teams = report->teams;
+	h3_scoreboard.player_count = report->player_count;
+	h3_scoreboard.row_count = 0;
+	for (index = 0; index < report->row_count; index++)
+	{
+		struct carnage_report_row const *source = &report->rows[index];
+		struct h3_scoreboard_row *row = &h3_scoreboard.rows[h3_scoreboard.row_count++];
+		struct player_datum *player;
+
+		memset(row, 0, sizeof(*row));
+		row->team_row = source->team_row;
+		row->team = source->team;
+		if (row->team_row)
+			row->rank = (short)(++teams_seen);
+		row->color = source->color;
+		row->player_index = source->player_index;
+		row->machine = source->machine;
+		row->local_player_index = source->local_player_index;
+		row->ping_bars = NONE;
+		snprintf(row->name, sizeof(row->name), "%s", source->name);
+		snprintf(row->score, sizeof(row->score), "%s", source->score[0] ? source->score : "0");
+		row->kills = source->kills;
+		row->deaths = source->deaths;
+		row->assists = source->assists;
+		if (row->team_row)
+			continue;
+		player = row->player_index != NONE ? player_try_and_get(row->player_index) : NULL;
+		row->bot = bots_player_is_bot(row->player_index) != 0;
+		row->dead = player && (player->unit_index == NONE || game_engine_player_is_out_of_lives(row->player_index));
+		row->flame = flaming_helmet_player_shown(row->player_index) ||
+			h3_scoreboard_test_name("HALO_TEST_SCOREBOARD_FLAME", row->name);
+		if (!row->bot)
+		{
+			/* (this machine's own players are in its party when it is in one;
+			another machine's by their card or name: p2p_party_player_member) */
+			row->party = (row->local_player_index != NONE ? in_party :
+				h3_scoreboard.network && p2p_party_player_member(row->machine, row->name)) ||
+				h3_scoreboard_test_name("HALO_TEST_SCOREBOARD_PARTY", row->name);
+			if (h3_scoreboard.network && latency_meter_shown())
+			{
+				long ping = NONE;
+
+				row->ping_bars = latency_meter_player_bars((short)DATUM_INDEX_TO_ABSOLUTE_INDEX(row->player_index), &ping);
+				/* (the host's players: this machine's on the host; on a joined
+				machine those the host's table times at 0 ms, its own) */
+				row->host = h3_scoreboard.hosting ? row->local_player_index != NONE :
+					row->local_player_index == NONE && ping == 0;
+			}
+			else
+				row->host = h3_scoreboard.hosting && row->local_player_index != NONE;
+		}
+	}
+#ifndef HALO_RELEASE
+	/* (tests) HALO_TEST_SCOREBOARD_EXTRA=N: N more bots' rows at the end (a
+	free for all; the game itself holds sixteen players here): the scoreboard's
+	more-than-sixteen view */
+	if (!h3_scoreboard.teams && getenv("HALO_TEST_SCOREBOARD_EXTRA"))
+	{
+		long extra = MIN(atol(getenv("HALO_TEST_SCOREBOARD_EXTRA")), 40), more;
+
+		for (more = 0; more < extra && h3_scoreboard.row_count < CARNAGE_REPORT_MAXIMUM_ROWS; more++)
+		{
+			struct h3_scoreboard_row *row = &h3_scoreboard.rows[h3_scoreboard.row_count++];
+
+			memset(row, 0, sizeof(*row));
+			row->player_index = NONE;
+			row->machine = NONE;
+			row->local_player_index = NONE;
+			row->color = (short)(more % 18);
+			row->bot = TRUE;
+			row->ping_bars = NONE;
+			snprintf(row->name, sizeof(row->name), "Extra%02ld", more + 1);
+			snprintf(row->score, sizeof(row->score), "0");
+			h3_scoreboard.player_count++;
+		}
+	}
+#endif
+	/* the game type on the map, the score to win, the time left */
+	name[0] = map[0] = 0;
+	if (game)
+	{
+		h3_mp_game_name(game, name, (int)sizeof(name));
+		snprintf(map, sizeof(map), "%s", custom_edition_maps_level_title(game->map.name));
+	}
+	snprintf(h3_scoreboard.title, sizeof(h3_scoreboard.title), name[0] && map[0] ? T("%s on %s") : "%s%s", name, map);
+	h3_capitals(h3_scoreboard.title);
+	h3_scoreboard.rules[0] = 0;
+	if (game && game->variant.universal_variant.score_to_win > 0)
+		snprintf(h3_scoreboard.rules, sizeof(h3_scoreboard.rules), T("TO WIN %ld"),
+			(long)game->variant.universal_variant.score_to_win);
+	if (game_variant_options_get()->time_limit > 0 && game_engine_in_play())
+	{
+		long left = game_variant_options_get()->time_limit * 60L * TICKS_PER_SECOND - game_time_get();
+		char time_text[32], line[64];
+
+		left = MAX(left, 0) / TICKS_PER_SECOND;
+		snprintf(time_text, sizeof(time_text), "%ld:%02ld", left / 60, left % 60);
+		snprintf(line, sizeof(line), T("%s LEFT"), time_text);
+		snprintf(h3_scoreboard.rules + strlen(h3_scoreboard.rules), sizeof(h3_scoreboard.rules) - strlen(h3_scoreboard.rules),
+			"%s%s", h3_scoreboard.rules[0] ? " \xc2\xb7 " : "", line);
+	}
+	/* (said when the rows change: the tests compare the machines') */
+#ifndef HALO_RELEASE
+	{
+		char line[sizeof(h3_scoreboard.said_rows)];
+		size_t used;
+
+		used = (size_t)snprintf(line, sizeof(line), "%ld rows, %s:", h3_scoreboard.row_count,
+			h3_scoreboard.teams ? "teams" : "free for all");
+		for (index = 0; index < h3_scoreboard.row_count && used < sizeof(line) - 1; index++)
+		{
+			struct h3_scoreboard_row const *row = &h3_scoreboard.rows[index];
+
+			if (row->team_row)
+				used += (size_t)snprintf(line + used, sizeof(line) - used, " | team %s %s", row->name, row->score);
+			else
+				used += (size_t)snprintf(line + used, sizeof(line) - used, " | %s %s %ld/%ld/%ld%s%s%s%s%s%s", row->name,
+					row->score, row->kills, row->deaths, row->assists, row->local_player_index != NONE ? " own" : "",
+					row->bot ? " bot" : "", row->host ? " host" : "", row->party ? " party" : "",
+					row->flame ? " flame" : "", row->dead ? " dead" : "");
+		}
+		if (strcmp(line, h3_scoreboard.said_rows))
+		{
+			snprintf(h3_scoreboard.said_rows, sizeof(h3_scoreboard.said_rows), "%s", line);
+			platform_log("menus: h3 scoreboard: %s", line);
+		}
+	}
+#endif
+}
+
+/* the row of the player chosen (-1: gone) */
+static long h3_scoreboard_chosen_row(void)
+{
+	long index;
+
+	for (index = 0; index < h3_scoreboard.row_count; index++)
+	{
+		struct h3_scoreboard_row const *row = &h3_scoreboard.rows[index];
+
+		if (!row->team_row && row->player_index == h3_scoreboard.chosen_player &&
+			!strcmp(row->name, h3_scoreboard.chosen_name))
+		{
+			return index;
+		}
+	}
+	return -1;
+}
+
+static void h3_scoreboard_choose(long index)
+{
+	if (index < 0 || index >= h3_scoreboard.row_count)
+		return;
+	h3_scoreboard.chosen_player = h3_scoreboard.rows[index].team_row ? NONE : h3_scoreboard.rows[index].player_index;
+	snprintf(h3_scoreboard.chosen_name, sizeof(h3_scoreboard.chosen_name), "%s", h3_scoreboard.rows[index].name);
+}
+
+/* the list's view entry (made for a list not seen before: its rows filled
+whole at once) */
+static struct h3_scoreboard_view *h3_scoreboard_view_of(struct widget_instance *list, short local_player_index)
+{
+	struct h3_scoreboard_view *free_view = NULL;
+	long index;
+
+	for (index = 0; index < H3_SCOREBOARD_VIEWS; index++)
+	{
+		struct h3_scoreboard_view *view = &h3_scoreboard.views[index];
+
+		if (view->list == list && view->creation_time == list->creation_time)
+			return view;
+		if (!free_view && (!view->list || view->local_player_index == local_player_index))
+			free_view = view;
+	}
+	if (!free_view)
+		free_view = &h3_scoreboard.views[0];
+	memset(free_view, 0, sizeof(*free_view));
+	free_view->list = list;
+	free_view->creation_time = list->creation_time;
+	free_view->offset = -1;
+	free_view->cursor = -1;
+	free_view->local_player_index = local_player_index;
+	return free_view;
+}
+
+/* the views of a local player's lists forgotten (a screen made again: its
+rows filled whole) */
+static void h3_scoreboard_forget_views(short local_player_index)
+{
+	long index;
+
+	for (index = 0; index < H3_SCOREBOARD_VIEWS; index++)
+		if (h3_scoreboard.views[index].local_player_index == local_player_index)
+			memset(&h3_scoreboard.views[index], 0, sizeof(h3_scoreboard.views[index]));
+}
+
+/* (open) a drag on the touch screen scrolls the rows under the finger: the
+first row shown moved a row for each row's height it went (the choice kept
+on a row shown); TRUE while it drags, *offset the first row */
+static boolean h3_scoreboard_drag(long rows, long *offset)
+{
+	short x, y;
+	boolean held;
+
+	if (!ui_widget_port_pointer(&x, &y, &held) || !held)
+	{
+		h3_scoreboard.touching = FALSE;
+		h3_scoreboard.dragging = FALSE;
+		return FALSE;
+	}
+	if (!h3_scoreboard.touching)
+	{
+		/* (down on the list: a drag may start) */
+		if (x < H3_SCOREBOARD_LIST_LEFT || x >= H3_SCOREBOARD_LIST_RIGHT || y < H3_SCOREBOARD_LIST_TOP ||
+			y >= H3_SCOREBOARD_LIST_BOTTOM)
+		{
+			return FALSE;
+		}
+		h3_scoreboard.touching = TRUE;
+		h3_scoreboard.dragging = FALSE;
+		h3_scoreboard.drag_start_y = y;
+		h3_scoreboard.drag_start_row = h3_scoreboard.view.offset;
+		return FALSE;
+	}
+	if (!h3_scoreboard.dragging)
+	{
+		if (ABS(y - h3_scoreboard.drag_start_y) < H3_SCOREBOARD_DRAG_SLOP)
+			return FALSE;
+		/* (a drag: the finger's moves and lift are its, no highlight or tap) */
+		h3_scoreboard.dragging = TRUE;
+		ui_widget_port_pointer_drag(TRUE);
+		platform_log("menus: h3 scoreboard: a drag on the rows");
+	}
+	*offset = PIN(h3_scoreboard.drag_start_row + (h3_scoreboard.drag_start_y - y) / H3_SCOREBOARD_ROW_PITCH, 0,
+		MAX(0, h3_scoreboard.row_count - rows));
+	return TRUE;
+}
+
+static void h3_scoreboard_show(struct widget_instance *widget, boolean shown)
+{
+	if (widget)
+		widget_instance_set_visibility_recursive(widget, shown);
+}
+
+/* a row's widgets: what shows, its pictures' frames, its text. Held (not
+open, not split screen's) the compact panel's: the narrow band and tint, the
+own row's yellow outline of its own, no kills, deaths or assists */
+static void h3_scoreboard_fill_row(struct widget_instance *child, struct h3_scoreboard_row const *row, boolean split,
+	boolean open, boolean teams)
+{
+	struct widget_instance *found;
+	boolean compact = !open && !split, team = row->team_row, player = !team;
+	char text[32];
+
+	h3_scoreboard_show(named(child, "row_band"), team && !compact);
+	h3_scoreboard_show(named(child, "row_band_n"), team && compact);
+	h3_scoreboard_show(named(child, "row_tint"), player && !compact);
+	h3_scoreboard_show(named(child, "row_tint_n"), player && compact);
+	h3_scoreboard_show(named(child, "row_own_n"), player && compact && row->local_player_index != NONE);
+	h3_scoreboard_show(named(child, "row_rank"), team);
+	h3_scoreboard_show(named(child, "row_team"), team);
+	h3_scoreboard_show(named(child, "row_team_score"), team);
+	h3_scoreboard_show(named(child, "row_emblem"), player);
+	h3_scoreboard_show(named(child, "row_name"), player);
+	h3_scoreboard_show(named(child, "row_score"), player);
+	h3_scoreboard_show(named(child, "row_kills"), player && open);
+	h3_scoreboard_show(named(child, "row_deaths"), player && open);
+	h3_scoreboard_show(named(child, "row_assists"), player && open);
+	h3_scoreboard_show(named(child, "row_host"), player && row->host);
+	h3_scoreboard_show(named(child, "row_party"), player && row->party);
+	h3_scoreboard_show(named(child, "row_flame"), player && row->flame);
+	h3_scoreboard_show(named(child, "row_bot"), player && row->bot);
+	/* (split screen's: the ping's place is BOT's on a bot's row) */
+	h3_scoreboard_show(named(child, "row_ping"), player && row->ping_bars != NONE && !(split && row->bot));
+	child->alpha_modifier = player && row->dead ? 0.45f : 1.0f;
+	if (team)
+	{
+		short frame = (short)PIN(row->team, 0, 7);
+
+		if ((found = named(child, "row_band")) != NULL)
+			found->animation.current_frame_index = frame;
+		if ((found = named(child, "row_band_n")) != NULL)
+			found->animation.current_frame_index = frame;
+		snprintf(text, sizeof(text), "%d", row->rank);
+		text_show(named(child, "row_rank"), text);
+		text_show(named(child, "row_team"), row->name);
+		text_show(named(child, "row_team_score"), row->score);
+		return;
+	}
+	/* (a team game's rows in their team's colour, a free for all's steel) */
+	if ((found = named(child, "row_tint")) != NULL)
+		found->animation.current_frame_index = (short)(teams ? PIN(row->team, 0, 7) : 8);
+	if ((found = named(child, "row_tint_n")) != NULL)
+		found->animation.current_frame_index = (short)(teams ? PIN(row->team, 0, 7) : 8);
+	if ((found = named(child, "row_emblem")) != NULL)
+		found->animation.current_frame_index = (short)(row->color < 0 || row->color >= 18 ? 0 : row->color + 1);
+	if ((found = named(child, "row_ping")) != NULL)
+		found->animation.current_frame_index = (short)PIN(row->ping_bars, 0, 4);
+	text_show(named(child, "row_name"), row->name);
+	text_show(named(child, "row_score"), row->score);
+	snprintf(text, sizeof(text), "%ld", row->kills);
+	text_show(named(child, "row_kills"), text);
+	snprintf(text, sizeof(text), "%ld", row->deaths);
+	text_show(named(child, "row_deaths"), text);
+	snprintf(text, sizeof(text), "%ld", row->assists);
+	text_show(named(child, "row_assists"), text);
+}
+
+/* (the open screen) what was said shown for a while, then gone; its text
+set when it is said (h3_scoreboard_say marks it) */
+static void h3_scoreboard_message_update(struct widget_instance *screen)
+{
+	boolean shown = h3_scoreboard.message[0] &&
+		system_milliseconds() - h3_scoreboard.message_time < H3_SCOREBOARD_MESSAGE_MILLISECONDS;
+	struct widget_instance *message;
+
+	if (h3_scoreboard.message_shown == shown && !h3_scoreboard.message_new)
+		return;
+	message = named(screen, "message");
+	if (message)
+	{
+		if (h3_scoreboard.message_new)
+			text_show(message, h3_scoreboard.message);
+		widget_instance_set_visibility_recursive(message, shown);
+	}
+	h3_scoreboard.message_shown = shown;
+	h3_scoreboard.message_new = FALSE;
+}
+
+/* a widget of the screen put at a place of it (its left and top are 0 in the
+XML: the rows' end is not known there) */
+static void h3_scoreboard_place(struct widget_instance *screen, char const *name, short x, short y)
+{
+	struct widget_instance *widget = named(screen, name);
+
+	if (widget)
+	{
+		widget->horizontal_offset = x;
+		widget->vertical_offset = y;
+	}
+}
+
+/* (the open screen) the selector strip: the player Cross acts on - their
+emblem and name; set again only when they change, or when the rows were */
+static void h3_scoreboard_selector_update(struct widget_instance *screen, boolean force)
+{
+	long chosen = h3_scoreboard_chosen_row();
+	char key[sizeof(h3_scoreboard.selector_key)];
+	struct widget_instance *emblem = named(screen, "selector_emblem");
+
+	snprintf(key, sizeof(key), "%d:%s", chosen >= 0 ? h3_scoreboard.rows[chosen].color : NONE,
+		chosen >= 0 ? h3_scoreboard.rows[chosen].name : "");
+	if (!force && !strcmp(key, h3_scoreboard.selector_key))
+		return;
+	snprintf(h3_scoreboard.selector_key, sizeof(h3_scoreboard.selector_key), "%s", key);
+	text_show(named(screen, "selector_name"), chosen >= 0 ? h3_scoreboard.rows[chosen].name : "");
+	if (emblem)
+	{
+		widget_instance_set_visibility_recursive(emblem, chosen >= 0);
+		if (chosen >= 0)
+			emblem->animation.current_frame_index = (short)(h3_scoreboard.rows[chosen].color < 0 ||
+				h3_scoreboard.rows[chosen].color >= 18 ? 0 : h3_scoreboard.rows[chosen].color + 1);
+	}
+}
+
+/* (port h3 scoreboard: a held view's list or the open screen's, as it is
+drawn) the rows read when due, the rows shown, the cursor's (open), the
+title and rules */
+static void h3_scoreboard_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	short local_player_index = screen ? (short)PIN(screen->local_player_index, 0, MAXIMUM_LOCAL_PLAYERS - 1) : 0;
+	boolean open = screen && screen != ui_widget_port_held_screen(local_player_index);
+	boolean split = list->type != _ui_widget_type_column_list;
+	struct h3_scoreboard_view *view;
+	struct widget_instance *child, *focus = NULL;
+	long rows = 0, cap, index, offset, cursor = -1, own = -1, focused_row = -1, pinned = -1;
+	boolean refill;
+	char text[160];
+
+	h3_scoreboard_read(FALSE);
+	view = h3_scoreboard_view_of(list, local_player_index);
+	for (child = list->child; child; child = child->next)
+	{
+		if (strncmp(child->name, "row_", 4))
+			continue;
+		if (child == list->focused_child)
+			focused_row = rows;
+		rows++;
+	}
+	cap = rows;
+	/* (this local player's own row: its place in view when held) */
+	for (index = 0; index < h3_scoreboard.row_count; index++)
+		if (!h3_scoreboard.rows[index].team_row && h3_scoreboard.rows[index].local_player_index == local_player_index)
+			own = index;
+	if (open)
+	{
+		long chosen = h3_scoreboard_chosen_row(), target;
+		boolean dragged;
+
+		if (view->offset < 0)
+		{
+			/* (opened: the cursor on the player's own row) */
+			browser_view_reset(&h3_scoreboard.view);
+			focused_row = -1;
+			if (chosen < 0)
+				chosen = own >= 0 ? own : 0;
+#ifndef HALO_RELEASE
+			/* (tests) HALO_TEST_SCOREBOARD_CHOOSE=other: the cursor on the
+			first other machine's person */
+			if (getenv("HALO_TEST_SCOREBOARD_CHOOSE") && !strcmp(getenv("HALO_TEST_SCOREBOARD_CHOOSE"), "other"))
+			{
+				for (index = 0; index < h3_scoreboard.row_count; index++)
+					if (h3_scoreboard_other_person(&h3_scoreboard.rows[index]))
+					{
+						chosen = index;
+						break;
+					}
+			}
+#endif
+		}
+		{
+			long dragged_offset = h3_scoreboard.view.offset;
+
+			dragged = h3_scoreboard_drag(rows, &dragged_offset);
+			if (dragged)
+			{
+				/* (the rows moved; the choice on a row still shown) */
+				long current = chosen >= 0 ? chosen : h3_scoreboard.view.offset + MAX(h3_scoreboard.view.row, 0);
+
+				h3_scoreboard.view.offset = (int)dragged_offset;
+				chosen = PIN(current, dragged_offset, MIN(dragged_offset + rows, h3_scoreboard.row_count) - 1);
+			}
+		}
+		target = browser_view_follow(&h3_scoreboard.view, (int)rows, (int)h3_scoreboard.row_count,
+			dragged ? -1 : (int)focused_row, (int)chosen, h3_scoreboard.page);
+		h3_scoreboard.page = 0;
+		if (target >= 0)
+			h3_scoreboard_choose(target);
+		offset = h3_scoreboard.view.offset;
+		cursor = h3_scoreboard.view.row;
+	}
+	else
+	{
+		/* (held: the first rows - the leaders -, the player's own in the last
+		row when it is further down) */
+		offset = 0;
+		if (!split && h3_scoreboard.player_count > H3_SCOREBOARD_HELD_PLAYERS)
+			cap = MIN(rows, H3_SCOREBOARD_HELD_PLAYERS + 1);
+		if (own >= cap)
+			pinned = own;
+	}
+	refill = view->generation != h3_scoreboard.generation || view->offset != offset || view->cursor != pinned;
+	view->generation = h3_scoreboard.generation;
+	view->offset = offset;
+	view->cursor = pinned;
+	for (index = 0, child = list->child; child; child = child->next)
+	{
+		struct h3_scoreboard_row const *row;
+
+		if (strncmp(child->name, "row_", 4))
+			continue;
+		if (offset + index >= h3_scoreboard.row_count || index >= cap)
+		{
+			if (refill)
+			{
+				widget_instance_set_visibility_recursive(child, FALSE);
+				child->disabled = TRUE;
+			}
+			index++;
+			continue;
+		}
+		row = &h3_scoreboard.rows[pinned >= 0 && index == cap - 1 ? pinned : offset + index];
+		/* (the row's widgets set again only when the rows or those shown
+		changed: each frame, only the cursor's) */
+		if (refill)
+		{
+			widget_instance_set_visibility_recursive(child, TRUE);
+			child->disabled = FALSE;
+			h3_scoreboard_fill_row(child, row, split, open, h3_scoreboard.teams);
+		}
+		if (open && index == cursor)
+		{
+			focus = child;
+			child->animation.current_frame_index = _h3_scoreboard_row_cursor;
+		}
+		else
+			/* (held: the own row's outline is the narrow widget's) */
+			child->animation.current_frame_index = !row->team_row && row->local_player_index != NONE &&
+				(open || split) ? _h3_scoreboard_row_own : _h3_scoreboard_row_plain;
+		index++;
+	}
+	if (open && focus && focus != list->focused_child)
+		ui_widget_port_give_focus(list, focus);
+#ifndef HALO_RELEASE
+	/* (the open screen's rows shown and the cursor's, said as they change:
+	the tests read them) */
+	if (open)
+	{
+		static char said[160];
+		char line[160];
+		long chosen = h3_scoreboard_chosen_row();
+
+		snprintf(line, sizeof(line), "rows %ld-%ld of %ld shown, the cursor on %s", offset + 1,
+			MIN(offset + rows, h3_scoreboard.row_count), h3_scoreboard.row_count,
+			chosen >= 0 ? h3_scoreboard.rows[chosen].name : "a team");
+		if (strcmp(line, said))
+		{
+			snprintf(said, sizeof(said), "%s", line);
+			platform_log("menus: h3 scoreboard: %s", line);
+		}
+	}
+#endif
+	if (!screen)
+		return;
+	if (!refill)
+	{
+		/* (between reads, only what was said and the selector, open) */
+		if (open)
+		{
+			h3_scoreboard_message_update(screen);
+			h3_scoreboard_selector_update(screen, FALSE);
+		}
+		return;
+	}
+	{
+		boolean compact = !open && !split;
+		long shown_rows = MAX(0, MIN(h3_scoreboard.row_count - offset, cap)), shown_players = 0, more;
+		short y = (short)(H3_SCOREBOARD_LIST_TOP + shown_rows * H3_SCOREBOARD_ROW_PITCH + 4);
+		short left = H3_SCOREBOARD_LIST_LEFT;
+		boolean truncated = compact && h3_scoreboard.row_count > cap;
+
+		for (index = 0; index < shown_rows; index++)
+			if (!h3_scoreboard.rows[pinned >= 0 && index == cap - 1 ? pinned : offset + index].team_row)
+				shown_players++;
+		more = MAX(0, h3_scoreboard.player_count - shown_players);
+		text_show(named(screen, "title"), h3_scoreboard.title);
+		text_show(named(screen, "rules"), h3_scoreboard.rules);
+		text_show(named(screen, "rules_n"), h3_scoreboard.rules);
+		if (h3_scoreboard.row_count > rows && (open || split))
+		{
+			snprintf(text, sizeof(text), T("%ld-%ld of %ld"), offset + 1, MIN(offset + rows - (pinned >= 0 ? 1 : 0),
+				h3_scoreboard.row_count), h3_scoreboard.row_count);
+			text_show(named(screen, "scroll"), text);
+		}
+		else
+			text_show(named(screen, "scroll"), "");
+		/* (the compact panel's captions and column names; the open one's wider; split
+		screen's own are always shown) */
+		if (!split)
+		{
+			h3_scoreboard_show(named(screen, "caption"), open);
+			h3_scoreboard_show(named(screen, "caption_n"), compact);
+			h3_scoreboard_show(named(screen, "title"), open);
+			h3_scoreboard_show(named(screen, "rules"), open);
+			h3_scoreboard_show(named(screen, "rules_n"), compact);
+			h3_scoreboard_show(named(screen, "header_band"), open);
+			h3_scoreboard_show(named(screen, "header_band_n"), compact);
+			h3_scoreboard_show(named(screen, "header_kills"), open);
+			h3_scoreboard_show(named(screen, "header_deaths"), open);
+			h3_scoreboard_show(named(screen, "header_assists"), open);
+			/* (held: "Hold [Triangle] to activate", or "+N more - Hold [Triangle] to
+			open" when the leaders and the player's own row are all it shows, under the
+			last row; the words' widths, as the small font sets them: the glyph and the
+			rest after the language's words) */
+			snprintf(text, sizeof(text), T("+%ld more - Hold"), more);
+			h3_scoreboard_place(screen, "hold_a", left, y);
+			h3_scoreboard_place(screen, "hold_butn", (short)(left + (short)strlen(T("Hold")) * 7 + 6), y);
+			h3_scoreboard_place(screen, "hold_b", (short)(left + (short)strlen(T("Hold")) * 7 + 24), y);
+			text_show(named(screen, "more_a"), text);
+			h3_scoreboard_place(screen, "more_a", left, y);
+			h3_scoreboard_place(screen, "more_b", (short)(left + (short)strlen(text) * 7 + 24), y);
+			h3_scoreboard_show(named(screen, "hold_a"), compact && !truncated);
+			h3_scoreboard_show(named(screen, "hold_butn"), compact);
+			h3_scoreboard_show(named(screen, "hold_b"), compact && !truncated);
+			h3_scoreboard_show(named(screen, "more_a"), truncated);
+			h3_scoreboard_show(named(screen, "more_b"), truncated);
+			if (truncated)
+				h3_scoreboard_place(screen, "hold_butn", (short)(left + (short)strlen(text) * 7 + 6), y);
+			/* (open: the selector as a small row under the panel, the buttons' line
+			under it, the rows shown and what was said under that) */
+			h3_scoreboard_place(screen, "selector", left + 69, y);
+			h3_scoreboard_place(screen, "selector_emblem", left + 74, y + 1);
+			h3_scoreboard_place(screen, "selector_name", left + 92, y);
+			h3_scoreboard_place(screen, "selector_arrows", left + 270, y + 1);
+			h3_scoreboard_place(screen, "a_butn", left, y + 19);
+			h3_scoreboard_place(screen, "a_label", left + 16, y + 18);
+			h3_scoreboard_place(screen, "dpad_butn", left + 100, y + 19);
+			h3_scoreboard_place(screen, "dpad_label", left + 116, y + 18);
+			h3_scoreboard_place(screen, "b_butn", left + 200, y + 19);
+			h3_scoreboard_place(screen, "b_label", left + 216, y + 18);
+			h3_scoreboard_place(screen, "scroll", left, y + 36);
+			h3_scoreboard_place(screen, "message", left + 96, y + 36);
+			h3_scoreboard_show(named(screen, "selector"), open);
+			h3_scoreboard_show(named(screen, "selector_emblem"), open);
+			h3_scoreboard_show(named(screen, "selector_name"), open);
+			h3_scoreboard_show(named(screen, "selector_arrows"), open);
+			h3_scoreboard_show(named(screen, "a_butn"), open);
+			h3_scoreboard_show(named(screen, "a_label"), open);
+			h3_scoreboard_show(named(screen, "dpad_butn"), open);
+			h3_scoreboard_show(named(screen, "dpad_label"), open);
+			h3_scoreboard_show(named(screen, "b_butn"), open);
+			h3_scoreboard_show(named(screen, "b_label"), open);
+		}
+	}
+	if (open)
+	{
+		/* (a screen made again, or the rows read: what was said set again) */
+		h3_scoreboard.message_new = TRUE;
+		h3_scoreboard_message_update(screen);
+		h3_scoreboard_selector_update(screen, TRUE);
+	}
+	else
+		h3_scoreboard_show(named(screen, "message"), FALSE);
+}
+
+/* (port h3 scoreboard act: Cross on a row) the player chosen, their options
+to open; a team's band opens none */
+static boolean h3_scoreboard_act(struct widget_instance *widget)
+{
+	long index = -1;
+
+	if (widget && !strncmp(widget->name, "row_", 4) && widget->name[4] >= '0' && widget->name[4] <= '9')
+	{
+		long row = atol(widget->name + 4) - 1;
+
+		if (row >= 0 && h3_scoreboard.view.offset + row < h3_scoreboard.row_count)
+			index = h3_scoreboard.view.offset + row;
+	}
+	if (index < 0)
+		index = h3_scoreboard_chosen_row();
+	if (index < 0 || h3_scoreboard.rows[index].team_row)
+		return FALSE;
+	h3_scoreboard_choose(index);
+	h3_scoreboard.said_options[0] = 0;
+	platform_log("menus: h3 scoreboard: options for %s", h3_scoreboard.rows[index].name);
+	return TRUE;
+}
+
+/* another machine's person (not a bot, not this machine's own) */
+static boolean h3_scoreboard_other_person(struct h3_scoreboard_row const *row)
+{
+	return h3_scoreboard.network && !row->team_row && !row->bot && row->local_player_index == NONE;
+}
+
+/* (port h3 scoreboard options) the box's title, words and rows: MUTE CHAT
+and ADD FRIEND for another machine's person, KICK for the game's host */
+static void h3_scoreboard_options_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list), *child;
+	long index = h3_scoreboard_chosen_row();
+	struct h3_scoreboard_row const *row;
+	boolean other, kick;
+	int state = P2P_FRIENDS_PLAYER_NONE;
+	char text[160], said[160];
+
+	if (index < 0)
+		return;
+	row = &h3_scoreboard.rows[index];
+	other = h3_scoreboard_other_person(row);
+	/* (KICK: the host's alone, never a joined machine's - a dedicated
+	server's players kick no one; its admin does) */
+	kick = other && h3_scoreboard.hosting;
+	if (other)
+		state = p2p_friends_player_state(row->machine);
+	text_show(named(screen, "options_title"), row->name);
+	if (row->local_player_index != NONE)
+		snprintf(text, sizeof(text), "%s", T("You, on this PS Vita"));
+	else if (row->bot)
+		snprintf(text, sizeof(text), "%s", T("A bot: it plays on the host's machine"));
+	else if (!h3_scoreboard.network)
+		snprintf(text, sizeof(text), "%s", T("A player of this game"));
+	else
+		snprintf(text, sizeof(text), "%s", h3_players_state_text(state)[0] ? h3_players_state_text(state) :
+			T("Add friend sends a friend request: they accept or decline."));
+	text_show(named(screen, "options_text"), text);
+	for (child = list->child; child; child = child->next)
+	{
+		boolean shown = TRUE;
+
+		if (strstr(child->name, "option_mute"))
+		{
+			shown = other;
+			if (shown)
+				text_show(child, game_chat_name_muted(row->name) ? T("UNMUTE CHAT") : T("MUTE CHAT"));
+		}
+		else if (strstr(child->name, "option_friend"))
+		{
+			shown = other;
+			if (shown)
+				text_show(child, state == P2P_FRIENDS_PLAYER_FRIEND ? T("VIEW FRIEND") : T("ADD FRIEND"));
+		}
+		else if (strstr(child->name, "option_kick"))
+			shown = kick;
+		widget_instance_set_visibility_recursive(child, shown);
+		child->disabled = !shown;
+		child->animation.current_frame_index = child == list->focused_child ? _h3_scoreboard_row_cursor :
+			_h3_scoreboard_row_plain;
+	}
+	snprintf(said, sizeof(said), "%s: back%s%s%s", row->name, other ? ", mute" : "", other ?
+		(state == P2P_FRIENDS_PLAYER_FRIEND ? ", view friend" : ", add friend") : "", kick ? ", kick" : "");
+	if (strcmp(said, h3_scoreboard.said_options))
+	{
+		snprintf(h3_scoreboard.said_options, sizeof(h3_scoreboard.said_options), "%s", said);
+		platform_log("menus: h3 scoreboard: options %s", said);
+	}
+}
+
+/* KICK, as the options' row does: the game's host alone (its
+network_anticheat_drop, which every machine is told of; a joined machine is
+refused here and there) */
+static void h3_scoreboard_kick(struct h3_scoreboard_row const *row)
+{
+	char text[160];
+
+	if (!h3_scoreboard.network || !global_network_game_server_get() || network_game_is_splitscreen_local())
+		snprintf(text, sizeof(text), "%s", T("Only the game's host can kick a player"));
+	else if (!h3_scoreboard_other_person(row) || !network_anticheat_drop(row->machine, _anticheat_drop_kick, NULL))
+		snprintf(text, sizeof(text), "%s", T("That player is not in the game"));
+	else
+		snprintf(text, sizeof(text), T("Kicked %s"), row->name);
+	h3_scoreboard_say(text);
+}
+
+/* (port h3 scoreboard option: a row of the options) */
+static void h3_scoreboard_option(struct widget_instance *widget)
+{
+	long index = h3_scoreboard_chosen_row();
+	struct h3_scoreboard_row const *row;
+	char text[256];
+
+	if (!widget || index < 0)
+		return;
+	row = &h3_scoreboard.rows[index];
+	if (strstr(widget->name, "option_mute"))
+	{
+		if (!h3_scoreboard_other_person(row))
+			return;
+		snprintf(text, sizeof(text), game_chat_mute_name(row->name, !game_chat_name_muted(row->name)) ?
+			T("%s muted: their chat is hidden here") : T("%s unmuted"), row->name);
+		h3_scoreboard_say(text);
+	}
+	else if (strstr(widget->name, "option_friend"))
+	{
+		int state, outcome;
+
+		if (!h3_scoreboard_other_person(row))
+			return;
+		state = p2p_friends_player_state(row->machine);
+		if (state == P2P_FRIENDS_PLAYER_FRIEND)
+		{
+			/* (VIEW FRIEND: what the friends list says of them) */
+			static struct p2p_friend_entry entries[P2P_FRIEND_ENTRIES_MAXIMUM];
+			char id[P2P_FRIEND_ID_SIZE];
+			int count, entry;
+
+			snprintf(text, sizeof(text), T("%s is your friend"), row->name);
+			if (p2p_friends_player_friend_id(row->machine, id))
+			{
+				count = p2p_friends_list(entries, (int)NUMBEROF(entries));
+				for (entry = 0; entry < count; entry++)
+					if (!strcmp(entries[entry].id, id) && entries[entry].activity[0])
+						snprintf(text, sizeof(text), "%s: %s", entries[entry].name, entries[entry].activity);
+			}
+		}
+		else
+		{
+			outcome = p2p_friends_player_ask(row->machine, P2P_FRIENDS_PLAYER_ADD);
+			if (outcome == P2P_FRIENDS_DONE)
+				snprintf(text, sizeof(text), T("Asking %s to be friends..."), row->name);
+			else
+				snprintf(text, sizeof(text), "%s", p2p_friends_outcome_text(outcome));
+		}
+		h3_scoreboard_say(text);
+	}
+	else if (strstr(widget->name, "option_kick"))
+		h3_scoreboard_kick(row);
+}
+
+/* the open screen opened for the local player (Triangle with the scoreboard
+held): 1 if it opened */
+static boolean h3_scoreboard_open(short local_player_index, long tag)
+{
+	ui_widget_port_held_screen_hide(local_player_index);
+	h3_scoreboard.held[local_player_index] = FALSE;
+	h3_scoreboard.chosen_player = NONE;
+	h3_scoreboard.chosen_name[0] = 0;
+	h3_scoreboard.message[0] = 0;
+	h3_scoreboard.page = 0;
+	browser_view_reset(&h3_scoreboard.view);
+	h3_scoreboard_forget_views(local_player_index);
+	if (!ui_widget_load_by_name_or_tag(NULL, tag, NULL, local_player_index, NONE, NONE, NONE))
+	{
+		platform_log("menus: h3 scoreboard: the screen did not open");
+		return FALSE;
+	}
+	h3_scoreboard.open = TRUE;
+	h3_scoreboard.open_local_player = local_player_index;
+	h3_scoreboard.open_back_released = FALSE;
+	platform_log("menus: h3 scoreboard: opened (local player %d)", local_player_index);
+	return TRUE;
+}
+
+/* (each frame, pc_menu_functions_update) each local player's scoreboard
+held up while their Back is (and for every player as the game ends, as the
+game's own shows), gone when it is let go or a screen of theirs opens;
+Triangle while it is held opens it; Back pressed again closes the open
+one */
+static void h3_scoreboard_frame(boolean main_menu_loaded)
+{
+#ifndef HALO_DEDICATED_SERVER
+	boolean in_round = !main_menu_loaded && game_engine_running() && !game_engine_force_single_screen();
+	boolean wanted = in_round && h3_scoreboard_wanted() && !h3_scoreboard.unavailable;
+	short count = in_round ? local_player_count() : 0;
+	long tag = NONE, open_tag = NONE;
+	short index;
+
+	if (!in_round)
+	{
+		/* (the game over with the scoreboard open: closed, for the carnage
+		report and the game's own scores) */
+		if (h3_scoreboard.open && !main_menu_loaded)
+		{
+			struct widget_instance *active = ui_widget_port_active_screen(h3_scoreboard.open_local_player);
+			long screen_tag = menu_tags_ingame_screen(H3_SCOREBOARD_SCREEN);
+			long options_tag = menu_tags_ingame_screen("h3/scoreboard/options");
+
+			if (active && active->definition_tag_index != NONE && (active->definition_tag_index == screen_tag ||
+				active->definition_tag_index == options_tag))
+			{
+				platform_log("menus: h3 scoreboard: the game is over: closed");
+				ui_widgets_close_all_for_local_player(h3_scoreboard.open_local_player);
+			}
+		}
+		if (h3_scoreboard.warmed || h3_scoreboard.unavailable || h3_scoreboard.open)
+		{
+			for (index = 0; index < MAXIMUM_LOCAL_PLAYERS; index++)
+				ui_widget_port_held_screen_hide(index);
+			memset(h3_scoreboard.views, 0, sizeof(h3_scoreboard.views));
+			memset(h3_scoreboard.held, 0, sizeof(h3_scoreboard.held));
+			h3_scoreboard.warmed = FALSE;
+			h3_scoreboard.unavailable = FALSE;
+			h3_scoreboard.open = FALSE;
+			h3_scoreboard.read_once = FALSE;
+			h3_scoreboard.said_rows[0] = 0;
+		}
+		return;
+	}
+	if (wanted)
+	{
+		open_tag = menu_tags_ingame_screen(H3_SCOREBOARD_SCREEN);
+		tag = h3_scoreboard_split() ? menu_tags_ingame_screen(H3_SCOREBOARD_SPLIT_SCREEN) : open_tag;
+		if (tag == NONE)
+		{
+			h3_scoreboard.unavailable = TRUE;
+			platform_log("menus: h3 scoreboard: not in this map's menus: the game's own scores");
+		}
+		else if (!h3_scoreboard.warmed)
+		{
+			/* (its pictures read with the game's start, not at the first hold) */
+			h3_scoreboard.warmed = TRUE;
+			platform_log("menus: h3 scoreboard: ready (%s)", h3_scoreboard_split() ? "split screen's" : "full screen");
+		}
+	}
+	/* (the open screen: gone when it is not the player's screen any more;
+	Back let go, then pressed again, closes it) */
+	if (h3_scoreboard.open)
+	{
+		short player = h3_scoreboard.open_local_player;
+		struct widget_instance *active = ui_widget_port_active_screen(player);
+		struct gamepad_state const *pad = input_has_gamepad(player) ? input_get_gamepad_state(player) : NULL;
+		boolean back = pad && pad->buttons[_gamepad_binary_button_back];
+
+		if (!active)
+		{
+			h3_scoreboard.open = FALSE;
+			h3_scoreboard.touching = h3_scoreboard.dragging = FALSE;
+			ui_widget_port_pointer_drag(FALSE);
+			platform_log("menus: h3 scoreboard: closed");
+		}
+		else if (!back)
+			h3_scoreboard.open_back_released = TRUE;
+		else if (h3_scoreboard.open_back_released && open_tag != NONE && active->definition_tag_index == open_tag)
+		{
+			platform_log("menus: h3 scoreboard: Back again: closed");
+			ui_widget_port_go_back(player);
+		}
+	}
+	for (index = 0; index < MAXIMUM_LOCAL_PLAYERS; index++)
+	{
+		struct gamepad_state const *pad = index < count && input_has_gamepad(index) ? input_get_gamepad_state(index) : NULL;
+		boolean back = pad && pad->buttons[_gamepad_binary_button_back];
+		boolean y = pad && pad->buttons[_gamepad_analog_button_y];
+		boolean y_pressed = y && !h3_scoreboard.y_down[index];
+		boolean show;
+
+		h3_scoreboard.y_down[index] = y;
+		h3_scoreboard.back_down[index] = back;
+		show = wanted && tag != NONE && index < count && (back || !game_engine_in_play()) &&
+			!ui_widget_port_active_screen(index);
+		/* (Triangle while it is held: open, one player on this machine) */
+		if (show && back && y_pressed && count == 1 && !h3_scoreboard_split() && open_tag != NONE &&
+			h3_scoreboard_open(index, open_tag))
+		{
+			continue;
+		}
+		if (show)
+		{
+			boolean split = h3_scoreboard_split();
+			/* (split screen's: in the middle of a view as wide as the screen -
+			two players', the first of three -, at the left of a quarter) */
+			short x = split ? (count <= 2 || (count == 3 && index == 0)) ? 160 : 0 : H3_SCOREBOARD_HELD_SHIFT;
+			short y_offset = split && count == 1 ? 120 : 0;
+
+			if (!h3_scoreboard.held[index])
+				h3_scoreboard_forget_views(index);
+			if (!ui_widget_port_held_screen_show(index, tag, x, y_offset))
+			{
+				h3_scoreboard.unavailable = TRUE;
+				platform_log("menus: h3 scoreboard: the screen could not be held up: the game's own scores");
+				show = FALSE;
+			}
+			else if (!h3_scoreboard.held[index])
+			{
+				h3_scoreboard_read(TRUE);
+				platform_log("menus: h3 scoreboard: held up (local player %d, %s)", index,
+					split ? "split screen's" : "full screen");
+			}
+		}
+		if (!show && h3_scoreboard.held[index])
+			ui_widget_port_held_screen_hide(index);
+		h3_scoreboard.held[index] = show;
+	}
+#ifndef HALO_RELEASE
+	/* (tests) HALO_TEST_SCOREBOARD_KICK=1: with the scoreboard held, the
+	first other machine's person kicked once, as their options' KICK does:
+	a joined machine must be refused */
+	{
+		static boolean kicked;
+		char const *kick = getenv("HALO_TEST_SCOREBOARD_KICK");
+
+		if (!kicked && kick && kick[0] == '1' && h3_scoreboard.held[0])
+		{
+			long row;
+
+			for (row = 0; row < h3_scoreboard.row_count; row++)
+			{
+				if (h3_scoreboard_other_person(&h3_scoreboard.rows[row]))
+				{
+					kicked = TRUE;
+					platform_log("menus: h3 scoreboard: test: KICK %s (%s)", h3_scoreboard.rows[row].name,
+						h3_scoreboard.hosting ? "the host" : "joined");
+					h3_scoreboard_kick(&h3_scoreboard.rows[row]);
+					break;
+				}
+			}
+		}
+	}
+#endif
+#else
+	(void)main_menu_loaded;
+#endif
+}
+
+/* (game_engine.c) whether the Halo 3 scoreboard is up for the local player,
+held or open: the game's own scores are not drawn */
+boolean menu_functions_scoreboard_replaces(short local_player_index)
+{
+	struct widget_instance *active;
+
+	if (local_player_index < 0 || local_player_index >= MAXIMUM_LOCAL_PLAYERS)
+		return FALSE;
+	if (ui_widget_port_held_screen(local_player_index))
+		return TRUE;
+	active = h3_scoreboard.open && h3_scoreboard.open_local_player == local_player_index ?
+		ui_widget_port_active_screen(local_player_index) : NULL;
+	return active != NULL;
+}
+
+/* (xinput_sdl.c, the tests' scripted player) whether the open scoreboard,
+or its options, is up */
+boolean menu_functions_scoreboard_is_open(void)
+{
+	return h3_scoreboard.open;
+}
+
+/* (menu_functions_players_button) whether Triangle with Back held is the
+scoreboard's (it opens it) rather than PLAYERS' */
+static boolean h3_scoreboard_takes_triangle(void)
+{
+	return h3_scoreboard_wanted() && !h3_scoreboard.unavailable;
 }
 
 /* ---------- public code */
@@ -16316,6 +17565,21 @@ boolean pc_menu_event_function_invoke(
 	case _function_h3_dialog_no:
 		h3_dialog_answer(function_index);
 		return TRUE;
+	/* (the Halo 3 scoreboard: halo3/scoreboard.xml) */
+	case _function_h3_scoreboard_act:
+		return h3_scoreboard_act(widget);
+	case _function_h3_scoreboard_option:
+		h3_scoreboard_option(widget);
+		return TRUE;
+	case _function_h3_scoreboard_close:
+		platform_log("menus: h3 scoreboard: Circle: closed");
+		return TRUE;
+	case _function_h3_scoreboard_page_up:
+		h3_scoreboard.page = -1;
+		return TRUE;
+	case _function_h3_scoreboard_page_down:
+		h3_scoreboard.page = 1;
+		return TRUE;
 	case _function_coop_campaign:
 	case _function_unwired:
 	default:
@@ -16471,6 +17735,13 @@ void pc_menu_game_data_function_invoke(
 	case _input_ce_lobby:
 		if (widget->type == _ui_widget_type_column_list)
 			ce_lobby_update(widget);
+		break;
+	case _input_h3_scoreboard:
+		h3_scoreboard_update(widget);
+		break;
+	case _input_h3_scoreboard_options:
+		if (widget->type == _ui_widget_type_column_list)
+			h3_scoreboard_options_update(widget);
 		break;
 	case _input_h3_players:
 		if (widget->type == _ui_widget_type_column_list)
@@ -16913,6 +18184,7 @@ void pc_menu_functions_update(
 	h3_live_update(main_menu_loaded);
 	h3_mp_local_update(main_menu_loaded);
 	h3_carnage_frame(main_menu_loaded);
+	h3_scoreboard_frame(main_menu_loaded);
 	/* (a join the host's map refused: the games browser again once the
 	main menu is up - the Xbox's error over it dismissed -, not the main
 	menu; given up after 30 s) */
