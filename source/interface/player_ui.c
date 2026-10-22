@@ -349,6 +349,15 @@ long player_ui_get_active_player_profile_index(
 	return result;
 }
 
+/* port: the saved game file index of the profile being edited (NONE: none;
+Menu style Halo CE's MORE OPTIONS, menu_functions.c, edits the same one) */
+long player_ui_get_edit_profile_index(
+	void)
+{
+	return saved_game_file_get_type(player_ui_globals.edit_profile_index) == _saved_game_file_type_player_profile ?
+		player_ui_globals.edit_profile_index : NONE;
+}
+
 struct player_profile *player_ui_get_edit_player_profile(
 	void)
 {

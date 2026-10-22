@@ -395,6 +395,7 @@ enum
 	_function_h3_dialog_no,
 	_function_ce_pregame_init,
 	_function_ce_variant_next,
+	_function_ce_custom,
 };
 
 /* in port_game_data_input_names' order */
@@ -3851,8 +3852,12 @@ static struct
 	boolean flame_asked;
 	short help_offset;
 	boolean help_offset_kept;
+	/* (Menu style Halo CE) opened from the Xbox's profile settings (MORE
+	OPTIONS): the profile's editing theirs, never ended here */
+	boolean classic;
 } h3_custom;
 
+static void h3_custom_begin(long profile_index, struct player_profile *profile, char const *name);
 /* (Menu style Halo CE's additions: the Xbox's pregame) */
 static void ce_pregame_initialize(void);
 static boolean ce_variant_next(void);
@@ -4078,7 +4083,16 @@ static boolean h3_profile_edit(short item)
 		h3_profiles.status_item = -2;
 		return FALSE;
 	}
-	h3_custom.index = h3_profiles.indices[item];
+	h3_custom.classic = FALSE;
+	h3_custom_begin(h3_profiles.indices[item], profile, name);
+	return TRUE;
+}
+
+/* the editor on the profile being edited (profile_index, read: profile),
+named name */
+static void h3_custom_begin(long profile_index, struct player_profile *profile, char const *name)
+{
+	h3_custom.index = profile_index;
 	h3_custom.flame_asked = FALSE;
 	h3_custom.status[0] = 0;
 	h3_custom.said[0] = 0;
@@ -4095,6 +4109,28 @@ static boolean h3_profile_edit(short item)
 		profile->controller_settings.button_preset, profile->controller_settings.look_sensitivity,
 		profile->controller_settings.invert_look, profile->controller_settings.flight_stick_aircraft_controls,
 		profile->controller_settings.autocenter, profile->controller_settings.vibration_disabled ? "off" : "on");
+}
+
+/* (Menu style Halo CE: the Xbox's profile settings' MORE OPTIONS, port ce
+custom) the Halo 3 editor on the profile the Xbox's screens edit - its
+model, flaming helmet and the rest -, its edits theirs: Circle saves the
+profile (what the Xbox's rows changed too) and the Xbox's screen goes on
+editing it (h3_custom.classic: the editing not ended) */
+static boolean ce_custom_open(void)
+{
+	long index = player_ui_get_edit_profile_index();
+	struct player_profile *profile = player_ui_get_edit_player_profile();
+	char name[48];
+
+	if (index == NONE || !profile)
+	{
+		platform_log("menus: ce customize: no profile being edited");
+		return FALSE;
+	}
+	h3_profile_name(name, sizeof(name), profile);
+	h3_custom.classic = TRUE;
+	h3_custom_begin(index, profile, name);
+	platform_log("menus: ce customize: MORE OPTIONS for %s (the Xbox's profile settings)", name);
 	return TRUE;
 }
 
@@ -4811,7 +4847,8 @@ static void h3_custom_save(void)
 	}
 	if (!player_ui_edit_profile_is_dirty())
 	{
-		player_ui_end_editing_profile();
+		if (!h3_custom.classic)
+			player_ui_end_editing_profile();
 		platform_log("menus: h3 customize: %s: no changes", name);
 		return;
 	}
@@ -15930,8 +15967,10 @@ boolean pc_menu_event_function_invoke(
 	edit screen left without SAVE CHANGES) */
 	case _function_h3_custom_close:
 		h3_custom_spartan_hide();
-		if (player_ui_get_edit_player_profile())
+		/* (opened from the Xbox's profile settings: theirs to end) */
+		if (player_ui_get_edit_player_profile() && !h3_custom.classic)
 			player_ui_end_editing_profile();
+		h3_custom.classic = FALSE;
 		return TRUE;
 	case _function_forge_map_pick:
 		return h3_forge_map_pick(widget);
@@ -15977,6 +16016,8 @@ boolean pc_menu_event_function_invoke(
 		return TRUE;
 	case _function_ce_variant_next:
 		return ce_variant_next();
+	case _function_ce_custom:
+		return ce_custom_open();
 	case _function_h3_mp_pause_party:
 #ifdef HALO_VITA
 		__atomic_store_n(&halo_settings_panel_request, HALO_SETTINGS_PANEL_PARTY, __ATOMIC_RELEASE);

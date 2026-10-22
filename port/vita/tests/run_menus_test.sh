@@ -399,6 +399,10 @@
 #           opens the Halo 3 GAME TYPES (Infection's rules too), B back; Create Game Internet's
 #           Server Setup (internet play on, TEST-NET brokers) has BOTS: right on it, START GAME:
 #           Bots online set as chosen
+#   ceplusprofile  Menu style Halo CE's SETTINGS (HALO_TEST_PROFILE; skipped without): the
+#           profile, the Xbox's profile settings' MORE OPTIONS (menus/classic/profile.xml) opens the
+#           Halo 3 editor on that profile (model, flaming helmet...), B saves and is back on the
+#           Xbox's profile settings, still editing it; B, B: the main menu
 #   cepluspregame  the Xbox's pregame (Menu style Halo CE, HALO_TEST_PROFILE; skipped without) of a
 #           system link game hosted on Blood Gulch (CREATE GAME SYSTEM LINK, the profile, Y, the map,
 #           the game type) with map variants of it (forge_files_test --write): its line under the
@@ -455,7 +459,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-all_cases="fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendsbackup h3friendspanel h3partyplates h3party h3partyonline browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes h3offline h3offlineend msgboxes ceplusmain ceplusmp cepluspregame cepluspause ceplusforge"
+all_cases="fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendsbackup h3friendspanel h3partyplates h3party h3partyonline browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes h3offline h3offlineend msgboxes ceplusmain ceplusmp ceplusprofile cepluspregame cepluspause ceplusforge"
 # (the PC build's own, asked for by name: not in the default list)
 pc_cases="pctext pcclassic pcnoadhoc"
 cases=${*:-$all_cases}
@@ -3035,6 +3039,25 @@ PY
 		grep -aqiE "assert|exception|halt_and_catch_fire" "$log" && fail ceplusmp "bots: an assertion, exception or halt"
 		grep -aq "ui: screen pc.setup.screen" "$log" || fail ceplusmp "Create Game Internet did not open Server Setup"
 		grep -aq "menus: GAME OPTIONS: Bots online 1" "$log" || fail ceplusmp "Server Setup's BOTS did not set Bots online" ;;
+	ceplusprofile)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "--- ceplusprofile"; echo "SKIP: no HALO_TEST_PROFILE"; continue
+		fi
+		# (SETTINGS, the third row; A on the profile: its settings; down four to MORE OPTIONS, A; B
+		# saves; B, B: the main menu)
+		d="down:150:500"
+		profile_from=$HALO_TEST_PROFILE run ceplusprofile "$menus_data" 30 "wait:150:3000 $d $d a:150:3000 a:150:3000 $d $d $d $d a:150:4000 b:150:3000 b:150:2500 b:150:2500" \
+			HALO_SCENE_PACKS=0
+		log=$out/ceplusprofile/run.log
+		echo "--- ceplusprofile"
+		grep -aE "ui: screen|ce customize|h3 customize: (saved|editing)" "$log" | head -10
+		[ "$(cat "$out/ceplusprofile/exit")" = 0 ] || fail ceplusprofile "exit $(cat "$out/ceplusprofile/exit")"
+		grep -aqiE "assert|exception|halt_and_catch_fire" "$log" && fail ceplusprofile "an assertion, exception or halt"
+		grep -aq "menus: ce customize: MORE OPTIONS for " "$log" || fail ceplusprofile "MORE OPTIONS did not edit the profile"
+		grep -aq "ui: screen pc.h3.custom.screen" "$log" || fail ceplusprofile "MORE OPTIONS did not open the editor"
+		sed -n '/ui: screen pc.h3.custom.screen/,$p' "$log" | grep -aq "ui: screen ui.shell.main_menu.settings_select.player_setup.player_profile_edit.player_profile_edit_screen" ||
+			fail ceplusprofile "B did not go back to the Xbox's profile settings"
+		grep -a "ui: screen" "$log" | tail -1 | grep -q "ui.shell.main_menu.main_menu" || fail ceplusprofile "B, B did not reach the main menu" ;;
 	cepluspregame)
 		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
 			echo "--- cepluspregame"; echo "SKIP: no HALO_TEST_PROFILE"; continue
