@@ -2669,9 +2669,14 @@ static char const *h3_buttons(char const *text)
 		{
 			char const *word = T(playstation[index]);
 			size_t word_length = strlen(word);
-			char after = text[word_length];
+			char after;
 
-			if (!strncmp(text, word, word_length) && !isalpha((unsigned char)after) && !(after & 0x80))
+			/* (the byte after the word is read only when the text holds the word: past a shorter text's
+			end it was a read beyond the string) */
+			if (strncmp(text, word, word_length))
+				continue;
+			after = text[word_length];
+			if (!isalpha((unsigned char)after) && !(after & 0x80))
 			{
 				char const *name = names == keyboard && index < 1 ? T(names[index]) : names[index];
 				int name_length = (int)strlen(name);
@@ -14451,7 +14456,10 @@ static void h3_pregame_update(struct widget_instance *widget)
 	struct network_game *game = network_game_get_game();
 	struct network_game_client *client = global_network_game_client_get();
 	struct network_game_server *server = global_network_game_server_get();
-	boolean cooperative, host = server != NULL, online, waiting, listed = FALSE, password = FALSE;
+	boolean cooperative, host = server != NULL, online, waiting, listed = FALSE;
+	/* (an int: p2p_lobby_hosting_listed writes one - through a boolean's address it wrote four bytes
+	over the locals beside it on every frame of an online host's lobby) */
+	int password = 0;
 	short local_machine = client ? network_game_client_get_local_machine_index() : NONE;
 	short seconds = client ? network_game_client_get_seconds_to_game_start(client) : -1;
 	int reach_state = P2P_LOBBY_BROWSE_OFF, hosting_state = P2P_LOBBY_HOSTING_NONE;

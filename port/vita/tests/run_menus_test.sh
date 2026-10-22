@@ -432,7 +432,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-all_cases="fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendsbackup h3friendspanel h3partyplates h3party h3partyonline browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes h3offline h3offlineend msgboxes"
+all_cases="fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendsbackup h3friendspanel h3partyplates h3party h3partyonline browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3nonet h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes h3offline h3offlineend msgboxes"
 # (the PC build's own, asked for by name: not in the default list)
 pc_cases="pctext pcclassic pcnoadhoc"
 cases=${*:-$all_cases}
@@ -838,6 +838,12 @@ for case in $cases; do
 		sed -n '/ui: screen pc.h3.pregame.screen/,$p' "$log" | grep -a "ui: screen" | sed -n 2p | grep -q "pc.h3.mp.screen" ||
 			fail h3mp "B on the game's lobby did not go back to the multiplayer lobby"
 		grep -aq "ui: screen pc.mp.screen" "$log" && fail h3mp "OpenCE's Multiplayer screen opened with Menu style Halo 3" ;;
+	h3nonet)
+		# (BROWSE GAMES on ONLINE with no network at all, the error dialog opened and dismissed again
+		# and again as Blaze's Vita did, insider.21, Oct 22 2026)
+		run h3nonet "$menus_data" 60 "$h3mppad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:1500 a wait:150:800 a wait:150:1500 a wait:150:800 a wait:150:1500 a wait:150:800 a wait:150:1500 a wait:150:800 b wait:150:1500" \
+			HALO_MENU_STYLE=halo3 $h3net
+		check_h3 h3nonet halo3 ;;
 	h3browser)
 		# (down five to BROWSE GAMES, A: the profile (A joins, A the profile, A): the games
 		# browser; A on the first game - the fullest Vita game, locked -: its password; A: typed,
