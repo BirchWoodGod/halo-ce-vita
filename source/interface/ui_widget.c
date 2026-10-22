@@ -4817,6 +4817,7 @@ void display_error_damaged_media(
 
 #ifdef HALO_LINUX
 boolean pc_menu_functions_live_lobby_after_game(void);
+boolean pc_menu_functions_local_lobby_after_game(void);
 #endif
 
 void network_game_reset_to_pregame_ui(
@@ -4829,6 +4830,10 @@ void network_game_reset_to_pregame_ui(
 		/* port: the bots' playlist's next game: its lobby with the
 		countdown on, not the map choice (port/linux/game/bots_playlist.c) */
 		if (bots_playlist_pregame_ui())
+			return;
+		/* port: Menu style Halo 3, the Halo 3 multiplayer lobby, not split
+		screen's map list (menu_functions.c) */
+		if (!network_game_is_quickstart_local() && pc_menu_functions_local_lobby_after_game())
 			return;
 #endif
 		if (network_game_is_quickstart_local())

@@ -364,6 +364,9 @@
 #            (a local game of it, HALO_NETWORK_TEST saved=: its rules logged, Ghosts alone), Menu
 #            style Halo CE's Xbox screens open it, and screenshots in Spanish and with the
 #            keyboard's icons (HALO_TEST_GAMETYPES_SHOTS: where the screenshots go)
+#   h3offlineend  a local game over (the network test's, ended at 30 s): back in the Halo 3
+#            multiplayer lobby on OFFLINE, not split screen's postgame map list, the game let
+#            go; START GAME there starts a new local game (HALO_TEST_PROFILE; skipped without)
 #   h3offline  the Halo 3 multiplayer lobby on OFFLINE (HALO_TEST_PROFILE's profile; skipped
 #            without): NETWORK OFFLINE, GAME ODDBALL, MAP CHILL OUT, START GAME: split screen's
 #            SELECT PROFILE (A joins, A the profile, A), then the local game started at once with
@@ -420,7 +423,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendsbackup h3friendspanel h3partyplates h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes h3offline msgboxes}
+cases=${*:-fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendsbackup h3friendspanel h3partyplates h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes h3offline h3offlineend msgboxes}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
@@ -2705,6 +2708,31 @@ PY
 			[ -e "$shot" ] && command -v magick > /dev/null && magick "$shot" "${shot%.bmp}.png" && rm -f "$shot"
 		done
 		ls "$gt_shots" | head -40 ;;
+	h3offlineend)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "--- h3offlineend"; echo "SKIP: no HALO_TEST_PROFILE"; continue
+		fi
+		# (a local game - the network test's, Slayer on Chill Out with a bot, ended at 30 s -;
+		# the carnage report goes on to the lobby by itself after 20 s; then START GAME, A joins,
+		# A the profile, A: a new local game from the lobby)
+		profile_from=$HALO_TEST_PROFILE run h3offlineend "$menus_data" 110 \
+			"wait:150:1000 carnage:150:3000 wait:150:30000 @01-lobby:0:300 a:150:3000 a:150:1500 a:150:1500 a:150:1000 level:150:8000" \
+			HALO_MENU_STYLE=halo3 HALO_NETWORK_TEST_PROFILE=1 HALO_NETWORK_TEST_START=3 HALO_TEST_CARNAGE_SECONDS=20 \
+			HALO_NETWORK_TEST=local:chillout:slayer HALO_NETWORK_TEST_END=30 HALO_BOTS=1
+		log=$out/h3offlineend/run.log
+		echo "--- h3offlineend"
+		grep -aE "menus: h3 mp: (the local game|START GAME)|ui: screen pc.h3.(mp|carnage)" "$log" | cut -c1-160 | tail -8
+		[ "$(cat "$out/h3offlineend/exit")" = 0 ] || fail h3offlineend "exit $(cat "$out/h3offlineend/exit")"
+		grep -av "render assertion skipped" "$log" | grep -aqiE "assert|exception|halt_and_catch_fire|segmentation" &&
+			fail h3offlineend "an assertion, exception or crash"
+		grep -aq "menus: h3 mp: the local game over, back to the Halo 3 lobby (OFFLINE)" "$log" ||
+			fail h3offlineend "the local game's end did not go back to the Halo 3 lobby"
+		grep -aq "menus: h3 mp: the local game over: let go" "$log" || fail h3offlineend "the old local game was not let go"
+		grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.split_screen.splitscreen_map_select_postgame_wrapper" "$log" &&
+			fail h3offlineend "split screen's postgame map list opened"
+		grep -aq "menus: h3 mp: the local game starts: Slayer on Battle Creek, 1 player, 1 bot" "$log" ||
+			fail h3offlineend "START GAME in the lobby after the game did not start a new local game"
+		;;
 	h3offline)
 		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
 			echo "--- h3offline"; echo "SKIP: no HALO_TEST_PROFILE"; continue
