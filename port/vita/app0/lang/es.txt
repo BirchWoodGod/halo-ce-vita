@@ -1771,6 +1771,8 @@
 "Choose your profile, then Cross." = "Elige tu perfil y pulsa Cruz."
 "Ready: Cross for the map." = "Listo: Cruz para el mapa."
 "Ready: Cross for the games." = "Listo: Cruz para las partidas."
+"Ready: Cross to start the game." = "Listo: Cruz para empezar la partida."
+"Starting the game..." = "Empezando la partida..."
 "CO-OP LOBBY" = "SALA COOPERATIVA"
 "Starting in %d:%02d" = "Empieza en %d:%02d"
 "Starting..." = "Empezando..."
