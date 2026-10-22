@@ -5778,8 +5778,11 @@ static void network_game_server_fill_bots(
 		}
 		return;
 	}
-	/* (a team game: the teams within one of each other, by bots alone) */
-	if (bots > 0 && network_game_server_fill_teams(server))
+	/* (a team game: the teams within one of each other, by bots alone - a
+	bot joining the smaller team when the fill wants one more, else one
+	leaving the larger: a person who left is made up for by a join, not a
+	bot leaving as well) */
+	if (bots > 0 && bots >= wanted && network_game_server_fill_teams(server))
 	{
 		long team_counts[NUMBER_OF_MULTIPLAYER_TEAMS], bot_team_counts[NUMBER_OF_MULTIPLAYER_TEAMS];
 		long larger;
