@@ -106,8 +106,9 @@
 #               with HALO_TEST_PROFILE's profile, the Halo 3 multiplayer
 #               lobby by the controller: NETWORK OFFLINE, MAP: Blood Gulch
 #               shows its variants (the map itself, then MP Gulch), MP Gulch
-#               chosen, START GAME: split screen's screens, the player joins,
-#               Slayer on Blood Gulch starts with the layout's two objects
+#               chosen, START GAME: split screen's SELECT PROFILE, the player
+#               joins, and Slayer on Blood Gulch starts at once (no map or game
+#               type list) with the layout's two objects
 #               placed, the player the Spartan (no monitor, no Forge menu).
 #               The network side: run_netns_online_test.sh h3variant
 #   aisave      a map variant with the AI's settings (a Flood Elite with its AI
@@ -762,13 +763,13 @@ round_runs() {
 
 # (mpvariant: MULTIPLAYER; NETWORK (A), down two to OFFLINE (past AD HOC), A; MAP (down two, A),
 # Blood Gulch (down nine, A): its variants, down to MP Gulch, A; START GAME
-# (down, A): split screen's SELECT PROFILE, A joins, A the profile, Start;
-# the Xbox's map list (on Blood Gulch, the last used), A; its game type, A;
-# A: the game starts)
+# (down, A): split screen's SELECT PROFILE, A joins, A the profile, Start:
+# the local game starts at once with the lobby's GAME and MAP, no map or
+# game type list)
 mpvariantpad="wait:150:3000 down:150:700 a wait:150:4000 a:150:2000 down:150:500 down:150:500 a:150:2500 down:150:500 down:150:500 a:150:2500"
 mpvariantpad="$mpvariantpad $(for i in 1 2 3 4 5 6 7 8 9; do printf 'down:150:300 '; done)a:150:2500 @00-variants:0:300"
 mpvariantpad="$mpvariantpad down:150:500 a:150:3000 @01-lobby:0:300 down:150:500 a:150:4000 a:150:2000 a:150:2000"
-mpvariantpad="$mpvariantpad start:150:3000 a:150:3000 a:150:3000 a:150:3000 wait:150:15000 @02-game:0:300"
+mpvariantpad="$mpvariantpad start:150:3000 wait:150:15000 @02-game:0:300"
 
 mpvariant_runs() {
 	local store="$out/mpvariant-store"
@@ -1737,7 +1738,10 @@ for c in $cases; do
 		expect "$c" "MP Gulch chosen" "menus: h3 mp: map Blood Gulch, map variant MP Gulch \\(mp_gulch.hmv\\)"
 		expect "$c" "the lobby's MAP row" "menus: h3 mp lobby: NETWORK: OFFLINE, GAME: SLAYER, MAP: BLOOD GULCH - MP GULCH"
 		expect "$c" "START GAME asked for it in the local game" "menus: h3 mp: the map variant MP Gulch is played on Blood Gulch \\(the local game\\)"
-		expect "$c" "split screen's map list" "menus: h3 join: on to split screen's map list"
+		expect "$c" "the local game set up with the lobby's GAME and MAP" "menus: h3 mp: the local game: Slayer on Blood Gulch - MP Gulch \\(the lobby's GAME and MAP\\)"
+		expect "$c" "the local game started at once" "menus: h3 mp: the local game starts: Slayer on Blood Gulch - MP Gulch, 1 player, 0 bots"
+		grep -aE "ui: screen ui.shell.main_menu.multiplayer_type_select.split_screen.(splitscreen_map_select|gametype_select)" "$log" &&
+			fail "$c: the Xbox's split screen map or game type list opened (above)"
 		expect "$c" "the game played it" 'forge: the map variant "MP Gulch" is played on levels.test.bloodgulch.bloodgulch \(placed here\)'
 		expect "$c" "its objects placed" 'forge: map variant "MP Gulch" applied: 2 placed, 0 skipped'
 		state=$(sed -n '/test command at tick 300: forge net$/,/test command at tick/p' "$log" | grep -a "forge net: #")

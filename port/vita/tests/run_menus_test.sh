@@ -364,6 +364,16 @@
 #            (a local game of it, HALO_NETWORK_TEST saved=: its rules logged, Ghosts alone), Menu
 #            style Halo CE's Xbox screens open it, and screenshots in Spanish and with the
 #            keyboard's icons (HALO_TEST_GAMETYPES_SHOTS: where the screenshots go)
+#   h3offline  the Halo 3 multiplayer lobby on OFFLINE (HALO_TEST_PROFILE's profile; skipped
+#            without): NETWORK OFFLINE, GAME ODDBALL, MAP CHILL OUT, START GAME: split screen's
+#            SELECT PROFILE (A joins, A the profile, A), then the local game started at once with
+#            the lobby's GAME and MAP and the settings' offline bot (HALO_BOTS) - none of the
+#            Xbox's split screen map list, game type list or lobby -; in the game the pause says
+#            Oddball on Chill Out. Then a saved game type: Infection copied in GAME TYPES (Vita
+#            Infect), the lobby's GAME on it, Blood Gulch, START GAME: the local game plays
+#            Infection. Then alone (no bots): started (a Vita's build, --linux-net-vita: one
+#            player is enough) or, where a local game needs two, split screen's own lobby after
+#            5 s (HALO_TEST_SHOTS: the pictures)
 #   msgboxes  the Halo 3 dialog (menus/halo3/dialog.xml; the owner, Oct 21 2026: one
 #            Halo 3 look for every message box and prompt) with Menu style Halo 3: on the
 #            main menu error 6 (CONNECTION LOST: Circle closes it), error 31 (DAMAGED FILE:
@@ -410,7 +420,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendsbackup h3friendspanel h3partyplates h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes msgboxes}
+cases=${*:-fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendsbackup h3friendspanel h3partyplates h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes h3offline msgboxes}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
@@ -2700,6 +2710,81 @@ PY
 			[ -e "$shot" ] && command -v magick > /dev/null && magick "$shot" "${shot%.bmp}.png" && rm -f "$shot"
 		done
 		ls "$gt_shots" | head -40 ;;
+	h3offline)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "--- h3offline"; echo "SKIP: no HALO_TEST_PROFILE"; continue
+		fi
+		# (MULTIPLAYER; NETWORK, A: its picker on SYSTEM LINK, down two to OFFLINE (past AD HOC: the
+		# harness is a Vita's, config_adhoc_offered), A; down to GAME, A: its
+		# picker on SLAYER, down seven to ODDBALL, A; down to MAP, A, down six to CHILL OUT, A; down to
+		# START GAME, A: split screen's SELECT PROFILE; A joins, A the profile, A: the game; in it,
+		# Start: the pause)
+		off_d="down:150:500"
+		off_lobby="$h3mppad wait:150:1000 a:150:2000 $off_d $off_d a:150:2500"
+		off_start="@01-lobby:0:300 $off_d a:150:3000 @02-select-profile:0:300 a:150:1500 a:150:1500 @03-ready:0:300 a:150:1000"
+		off_start="$off_start @04-starting:0:300"
+		off_pad="$off_lobby $off_d a:150:2500"
+		for row in $(seq 7); do off_pad="$off_pad down:150:300"; done
+		off_pad="$off_pad a:150:2500 $off_d a:150:2500"
+		for row in $(seq 6); do off_pad="$off_pad down:150:300"; done
+		off_pad="$off_pad a:150:2500 $off_start level:150:6000 @05-game:0:300 start:150:2500 @06-pause:0:300"
+		profile_from=$HALO_TEST_PROFILE run h3offline "$menus_data" 80 "$off_pad" HALO_MENU_STYLE=halo3 HALO_BOTS=1
+		# (a saved game type: Infection copied in GAME TYPES, as h3gametypes_infection does; then the lobby's
+		# GAME up to it - the player's own first, the picker on SLAYER -, MAP Blood Gulch, START GAME)
+		d="down:150:450" w="wait:150:2300"
+		off_inf=""; for row in $(seq 26); do off_inf="$off_inf $d"; done
+		profile_from=$HALO_TEST_PROFILE run h3offline_copy "$menus_data" 60 \
+			"wait:150:3000 down:150:700 a wait:150:6000 $d $d $d $d a $w$off_inf $w a $w $d a wait:150:4000" \
+			HALO_MENU_STYLE=halo3 "HALO_TEST_TEXT_INPUT=Vita Infect"
+		off_pad="$off_lobby $off_d a:150:2500 up:150:500 a:150:2500 $off_d a:150:2500"
+		for row in $(seq 9); do off_pad="$off_pad down:150:300"; done
+		off_pad="$off_pad a:150:2500 $off_start level:150:8000 @05-game:0:300"
+		save_from=$out/h3offline_copy/save run h3offline_infection "$menus_data" 85 "$off_pad" HALO_MENU_STYLE=halo3 HALO_BOTS=3
+		# (alone: the lobby's GAME and MAP as they are - down past them to START GAME -, no bots)
+		profile_from=$HALO_TEST_PROFILE run h3offline_alone "$menus_data" 60 \
+			"$off_lobby $off_d $off_d $off_start wait:150:12000 @05-after:0:300" \
+			HALO_MENU_STYLE=halo3 HALO_BOTS=0
+		for name in h3offline h3offline_infection h3offline_alone; do
+			check_h3 $name halo3
+			log=$out/$name/run.log
+			grep -aE "menus: h3 mp: (START GAME|the local game|network)|menus: h3 mp lobby: NETWORK: OFFLINE|infection: the round|h3 mp pause: " "$log" |
+				cut -c1-200 | tail -8
+			grep -aq "menus: h3 mp: network OFFLINE" "$log" || fail $name "NETWORK did not go OFFLINE"
+			grep -aq "ui: screen pc.h3.join_split.screen" "$log" || fail $name "START GAME did not open split screen's SELECT PROFILE"
+			grep -aE "ui: screen ui.shell.main_menu.multiplayer_type_select.split_screen.(splitscreen_map_select|gametype_select)" "$log" &&
+				fail $name "the Xbox's split screen map or game type list opened (above)"
+		done
+		log=$out/h3offline/run.log
+		grep -aq "menus: h3 mp lobby: NETWORK: OFFLINE, GAME: ODDBALL, MAP: CHILL OUT" "$log" ||
+			fail h3offline "the lobby was not OFFLINE with ODDBALL on CHILL OUT"
+		grep -aq "menus: h3 mp: the local game: Oddball on Chill Out (the lobby's GAME and MAP)" "$log" ||
+			fail h3offline "SELECT PROFILE's Cross did not set up the local game with the lobby's GAME and MAP"
+		grep -aq "menus: h3 mp: the game's rules: oddball, " "$log" || fail h3offline "the local game's rules were not Oddball's"
+		grep -aq "menus: h3 mp: the local game starts: Oddball on Chill Out, 1 player, 1 bot$" "$log" ||
+			fail h3offline "the local game was not started with the player and the bot"
+		grep -aq "menus: the in-game screens: .* added to chillout.map" "$log" || fail h3offline "Chill Out did not load"
+		grep -aq "menus: h3 mp pause: Oddball on Chill Out, free for all, the host, 2 players" "$log" ||
+			fail h3offline "the game played was not Oddball on Chill Out with the player and the bot"
+		grep -a "ui: screen" "$log" | grep -av "pc.h3" && fail h3offline "a screen not of the Halo 3 set opened (above)"
+		log=$out/h3offline_infection/run.log
+		grep -aq "menus: h3 gametypes: Infection copied as Vita Infect." "$out/h3offline_copy/run.log" ||
+			fail h3offline_infection "GAME TYPES did not copy Infection"
+		grep -aq "menus: h3 mp lobby: NETWORK: OFFLINE, GAME: VITA INFECT, MAP: BLOOD GULCH" "$log" ||
+			fail h3offline_infection "the lobby's GAME was not the saved game type on Blood Gulch"
+		grep -aq "menus: h3 mp: the local game starts: Vita Infect on Blood Gulch, 1 player, 3 bots" "$log" ||
+			fail h3offline_infection "the local game of the saved game type was not started"
+		grep -aq "infection: the round begins" "$log" || fail h3offline_infection "the local game did not play Infection"
+		log=$out/h3offline_alone/run.log
+		grep -aq "menus: h3 mp: the local game starts: Slayer on Battle Creek, 1 player, 0 bots" "$log" ||
+			fail h3offline_alone "the local game was not started with the player alone"
+		if grep -aq "menus: h3 mp: the local game did not start in 5 s" "$log"; then
+			grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.split_screen.pregame.splitscreen_pregame_wrapper_normal" "$log" ||
+				fail h3offline_alone "not started alone, split screen's lobby did not open"
+			echo "  (alone: this build's local games need two players: split screen's lobby)"
+		else
+			grep -aq "menus: the in-game screens: .* added to beavercreek.map" "$log" ||
+				fail h3offline_alone "the game alone neither loaded Battle Creek nor fell back to split screen's lobby"
+		fi ;;
 	msgboxes)
 		# (the main menu: each dialog waited for - until/ -, its picture, then answered)
 		dialogs="150:@error 6;350:@error 31;550:@abort 33;750:@say Halo: custom map|The download was damaged.;950:@ask Halo: custom map|Download mygulch (12.3 MB) from the host?;1150:@answer;1200:@ask FRIEND INVITE|Bravo invites you to their game. Join?;1400:@answer"
@@ -2774,7 +2859,7 @@ PY
 		grep -aq "h3 dialog\|pc.h3.dlg" "$log" && fail msgboxes "campaign, Halo CE: a Halo 3 dialog opened"
 		grep -aq "pause menu: restart at checkpoint" "$log" && fail msgboxes "campaign, Halo CE: Circle reverted" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|pause|h3renamed|pausesave|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3lobbyscenes|h3modelsmany|h3friends|h3friendspanel|browserprofile|h3players|browserrows|profilepaths|h3mppause|h3friendsfit|h3hostonline|h3livelobby|h3groups|browserreopen|h3livebrowse|profileio|h3carnage|h3vitapc|h3createwho|h3gametypes|msgboxes]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|pause|h3renamed|pausesave|h3probe|h3classic|h3xbox|h3broken|h3style|h3online|h3touch|h3campaign|h3resume|h3pause|h3mp|h3browser|h3create|h3mptouch|h3coop|h3coopguide|h3scenes|h3characters|h3profiles|h3proftouch|h3customize|h3models|h3nameplate|h3damaged|h3mods|h3modspicker|h3modstouch|h3mpcustom|h3lan|h3adhoc|h3adhoccoop|h3oddrows|h3lobbyscenes|h3modelsmany|h3friends|h3friendspanel|browserprofile|h3players|browserrows|profilepaths|h3mppause|h3friendsfit|h3hostonline|h3livelobby|h3groups|browserreopen|h3livebrowse|profileio|h3carnage|h3vitapc|h3createwho|h3gametypes|h3offline|msgboxes]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"

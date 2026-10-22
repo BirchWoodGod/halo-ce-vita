@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- The Halo 3-style SELECT PROFILE (halo3/join.xml) for split screen's four-way screen too
 (split_screen\4way_profile_select: the multiplayer lobby's START GAME on OFFLINE): the same
-plates and functions, going on to split screen's map list as the Xbox's did. Its plates are its own
-(their Cross opens that list); the rest is join.xml's. -->
+plates and functions; once every player in is ready, Cross starts the local game with the lobby's
+GAME and MAP (menu_functions.c h3_mp_local_start: no map or game type list), or goes on to split
+screen's map list as the Xbox's did when it cannot. Its plates are its own (their Cross opens that
+list then); the rest is join.xml's. -->
 <menus root="h3/join_split/screen" replaces="ui\shell\main_menu\multiplayer_type_select\split_screen\4way_profile_select\4way_start2join_screen">
 	<widget name="h3/join_split/slot_1" width="252" height="120" bitmap="h3/column">
 		<on event="a start" run="port h3 join a" open="ui\shell\main_menu\multiplayer_type_select\split_screen\splitscreen_map_select_wrapper"/>
