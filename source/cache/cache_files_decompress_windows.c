@@ -1530,7 +1530,17 @@ static void cache_copy_initialize_read_data(
 	cache_copy_issue_read_raw(self, &self->header, sizeof(self->header), 0);
 	cache_copy_block_on_raw_read(self);
 
+#ifndef HALO_LINUX
 	cache_file_header_verify(&self->header, "blah", TRUE);
+#else
+	/* port: the header is checked by the copy thread's loop, after this
+	(simple_cache_copy_thread: a bad file fails the copy). A copy stopped
+	as it began - the lobby's map changed (the playlist's first, then the
+	host's), the stop ending the file's reads between pieces - leaves the
+	header unread, all zeros: this check, fatal, was then the copy
+	thread's "'blah' does not appear to be a cache file" (logged as a
+	render assertion skipped, insider.21) */
+#endif
 
 	self->read_bytes_left -= sizeof(self->header);
 	self->current_read_offset = sizeof(self->header);
@@ -1822,8 +1832,13 @@ static unsigned long __stdcall simple_cache_copy_thread(
 			/* port: a header that is not a map's is a bad file, so the copy
 			fails (it ended as if it had worked, and the map was precached
 			again, or, of no size, seemed never to end) */
-			if (!cache_file_header_verify(&self->header, "cache decompressed", TRUE))
+			if (cache_copy_stop_requested())
 			{
+				/* (stopped while its header was read: nothing to check) */
+			}
+			else if (!cache_file_header_verify(&self->header, "cache decompressed", FALSE))
+			{
+				error(_error_silent, "cache copy: the file's header is not a map's: a bad file");
 				cache_copy_set_flag(_copy_bad_file_bit);
 			}
 			else

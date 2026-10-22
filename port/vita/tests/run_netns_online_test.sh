@@ -2854,7 +2854,7 @@ h3live|h3liveleave|h3liveagain)
 		live_pad="$live_pad a wait:150:8000 @live-02-map-changed:0:300 up:150:500 a wait:150:2500 down:150:500 a wait:150:8000"
 		live_pad="$live_pad @live-03-game-changed:0:300 down:150:500 down:150:500 a wait:150:3000 @live-04-countdown:0:300"
 		# (h3liveagain: the game over, the host back in the lobby, START GAME focused: A again)
-		[ $mode = h3liveagain ] && live_pad="$live_pad wait:150:${HALO_TEST_AGAIN_WAIT:-110000} @live-05-lobby-again:0:300 a wait:150:4000 @live-06-second-countdown:0:300"
+		[ $mode = h3liveagain ] && live_pad="$live_pad wait:150:${HALO_TEST_AGAIN_WAIT:-110000} @live-05-lobby-again:0:300 ${HALO_TEST_AGAIN_PAD:-a wait:150:4000 @live-06-second-countdown:0:300}"
 	else
 		live_pad="$live_pad b wait:150:15000 @live-02-host-left:0:300"
 	fi

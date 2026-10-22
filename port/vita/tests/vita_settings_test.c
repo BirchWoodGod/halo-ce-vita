@@ -2009,7 +2009,13 @@ static void test_players_page(void)
 	halo_host_players_count = -1;
 	halo_host_session_bans = 0;
 	press(VITA_BUTTON_CIRCLE);
-	check(strstr(menu, "*Multiplayer") && !strstr(menu, "\n\x03"), "circle: back to Multiplayer");
+	check(page == PAGE_CROSSPLAY && strstr(menu, "\n\x03Multiplayer > Vita and PC\n"),
+		"circle: back to Vita and PC, where the Players row is");
+	check(open_page("Infection") && page == PAGE_INFECTION, "Vita and PC > Infection");
+	press(VITA_BUTTON_CIRCLE);
+	check(page == PAGE_CROSSPLAY, "circle on Infection: back to Vita and PC");
+	press(VITA_BUTTON_CIRCLE);
+	check(strstr(menu, "*Multiplayer") && !strstr(menu, "\n\x03"), "circle again: back to Multiplayer");
 }
 
 /* Multiplayer > Friends > Friend code (p2p_friends_backup.inc, the test's
@@ -2897,8 +2903,9 @@ static void test_forge_page(void)
 	vita_settings_set("HALO_MENU_STYLE", "classic");
 	press(VITA_BUTTON_R);
 	press(VITA_BUTTON_L);
-	check(to_tab("Game") && strstr(menu, "\nShow dev settings\x02  Off >\nForge and File Share\x02  4 variants  >") &&
-		menu_height_fits(), "Menu style Halo CE: Game's last row Forge and File Share, how many map variants; the tab fits");
+	check(to_tab("Game") && strstr(menu, "\nMenus\x02  Halo CE  >\nForge and File Share\x02  4 variants  >") &&
+		menu_height_fits(), "Menu style Halo CE: Forge and File Share under Menus (Interface, not Updates), how many map "
+		"variants; the tab fits");
 	check(open_page("Forge") && strstr(menu, "\n\x03Game > Forge and File Share\n"), "the Forge page");
 	printf("%s\n--\n", menu);
 	check(!strcmp(menu_line(2, line, sizeof(line)), "Map\x02  Blood Gulch") &&
@@ -3280,6 +3287,8 @@ static void test_tab_layouts(void)
 		{ PAGE_MENUS, "Menu style", "HALO_MENU_STYLE", "classic|halo3", 0, "halo3" },
 		/* (shown with Menu style Halo 3) */
 		{ PAGE_MENUS, "Carnage report", "HALO_CARNAGE_REPORT", "classic|halo3", 0, "halo3" },
+		/* (Forge and File Share, shown with Menu style Halo CE: under Menus) */
+		{ TAB_GAME, "Forge and File Share", NULL, NULL, 0, NULL, ACTION_PAGE, PAGE_FORGE },
 		{ TAB_GAME, "Button icons", "HALO_BUTTON_ICONS", "xbox|playstation", 0,
 			VITA_BUTTON_ICONS_DEFAULT ? "playstation" : "xbox" },
 		{ TAB_GAME, "Language", "HALO_LANGUAGE", languages, 0, "auto" },
@@ -3293,8 +3302,6 @@ static void test_tab_layouts(void)
 		{ TAB_GAME, "Check for updates", NULL, NULL, 0, NULL, ACTION_UPDATE_CHECK },
 		{ TAB_GAME, "Update channel", "HALO_UPDATE_CHANNEL", "experimental|stable", 0, channel },
 		{ TAB_GAME, "Show dev settings", "HALO_DEV_SETTINGS", "0|1", 0, "0" },
-		/* (Forge and File Share, shown with Menu style Halo CE) */
-		{ TAB_GAME, "Forge and File Share", NULL, NULL, 0, NULL, ACTION_PAGE, PAGE_FORGE },
 	};
 	static const struct layout_row controls[] = {
 		{ TAB_CONTROLS, "Look sensitivity", "XV_LOOK_SENS", "50|75|100|125|150|200", 0, "100" },
@@ -4296,7 +4303,7 @@ static void test_languages(void)
 	snprintf(running_network, sizeof(running_network), "online");
 	screen = SCREEN_LIST;
 	close_panel();
-	vita_settings_message(T("Host a game"), T("The Vita did not join the ad hoc group. Try again, or another Ad hoc dialog way (Dev tab)."));
+	vita_settings_message(T("Host a game"), T("The Vita did not join the ad hoc group. Try again, or Game > Show dev settings: On, then Dev > Ad hoc dialog."));
 	frame(0);
 	check(menu_visible && menu_lines_fit() && strstr(menu, "Crear una partida"), "Spanish: a message, in lines of 46 characters");
 	printf("%s\n--\n", menu);
@@ -4441,23 +4448,23 @@ static void test_updates(void)
 	/* Check for updates: the first row under Updates, in the background,
 	its answer beside the version under it; the Update channel and Show dev
 	settings under its lines */
-	check(strstr(menu, "\t*Game|") && !strstr(menu, "\n\x03") && to_line("Check for updates") && menu_selected == 10 &&
-		!strcmp(menu_line(9, line, sizeof(line)), "\x08Updates") && !update_requests,
+	check(strstr(menu, "\t*Game|") && !strstr(menu, "\n\x03") && to_line("Check for updates") && menu_selected == 11 &&
+		!strcmp(menu_line(10, line, sizeof(line)), "\x08Updates") && !update_requests,
 		"Game: Check for updates under the Updates heading, nothing asked before the press");
 	check(strstr(menu, "\n\x05" "Asks GitHub for the newest version; again to download it\n") &&
 		strstr(menu, "\n\x06L/R: tabs   Cross: select   Circle: close"), "Check for updates: its help, cross presses it");
-	check(!strcmp(menu_line(11, line, sizeof(line)), "\x04" "Version " HALO_VITA_VERSION) &&
-		!strncmp(menu_line(12, line, sizeof(line)), "Update channel\x02", 15) &&
-		!strncmp(menu_line(13, line, sizeof(line)), "Show dev settings\x02", 18),
+	check(!strcmp(menu_line(12, line, sizeof(line)), "\x04" "Version " HALO_VITA_VERSION) &&
+		!strncmp(menu_line(13, line, sizeof(line)), "Update channel\x02", 15) &&
+		!strncmp(menu_line(14, line, sizeof(line)), "Show dev settings\x02", 18),
 		"no look yet: the version alone under it, then Update channel and Show dev settings (no gap)");
 	press(VITA_BUTTON_UP);
-	check(menu_selected == 8 && !strncmp(menu_line(menu_selected, line, sizeof(line)), "Smooth weapon motion\x02", 21),
+	check(menu_selected == 9 && !strncmp(menu_line(menu_selected, line, sizeof(line)), "Smooth weapon motion\x02", 21),
 		"up from Check for updates: Smooth weapon motion (the Updates heading stepped over)");
 	press(VITA_BUTTON_DOWN);
-	check(menu_selected == 10, "... and down: Check for updates again");
+	check(menu_selected == 11, "... and down: Check for updates again");
 	press(VITA_BUTTON_CROSS);
 	redraw();
-	check(update_requests == 1 && !strcmp(menu_line(11, line, sizeof(line)), "\x04" "Version " HALO_VITA_VERSION " - Checking...") &&
+	check(update_requests == 1 && !strcmp(menu_line(12, line, sizeof(line)), "\x04" "Version " HALO_VITA_VERSION " - Checking...") &&
 		menu_fits() && menu_height_fits(), "pressed: Checking..., beside the version");
 	update_status_value = UPDATE_STATUS_AVAILABLE;
 	snprintf(update_version_value, sizeof(update_version_value), "1.1.0-beta.4");
@@ -4469,13 +4476,15 @@ static void test_updates(void)
 		"an update: under the version, in amber, the new version and where to get it; all of the tab still fits (ten "
 		"rows on the classic panel: Forge and File Share's too)");
 	check(!strstr(menu, "Interface") && !strncmp(menu_line(1, line, sizeof(line)), "Menus\x02", 6) &&
-		!strstr(menu, "\n\x08" "First person\n") && strstr(menu, "\n\x08Updates\n") && menu_selected == 8,
+		!strstr(menu, "\n\x08" "First person\n") && strstr(menu, "\n\x08Updates\n") && menu_selected == 9,
 		"the classic panel, short of room: the first headings, Interface and First person, give way (the tab bar over "
 		"Menu style); Updates stays, Check for updates still chosen");
 	vita_settings_set("HALO_MENU_STYLE", "halo3");
 	redraw();
+	/* (the chosen line is the page's line number: Forge and File Share,
+	the classic panel's under Menus, gone above it, so chosen again) */
 	check(strstr(menu, "\n\x08Interface\nMenus\x02") && strstr(menu, "\n\x08Updates\nCheck for updates\x02") &&
-		menu_selected == 10, "the Halo 3 panel (its rows fitted to its height): every heading kept");
+		to_line("Check for updates") && menu_selected == 10, "the Halo 3 panel (its rows fitted to its height): every heading kept");
 	vita_settings_set("HALO_MENU_STYLE", "classic");
 	redraw();
 	/* (a build with the update key: the next press downloads it) */
@@ -4507,8 +4516,8 @@ static void test_updates(void)
 	update_status_value = UPDATE_STATUS_UP_TO_DATE;
 	snprintf(update_version_value, sizeof(update_version_value), "%s", HALO_VITA_VERSION);
 	redraw();
-	check(!strcmp(menu_line(11, line, sizeof(line)), "\x04" "Version " HALO_VITA_VERSION " - Up to date") &&
-		!strstr(menu, "github.com") && !strncmp(menu_line(12, line, sizeof(line)), "Update channel\x02", 15) && menu_fits(),
+	check(!strcmp(menu_line(12, line, sizeof(line)), "\x04" "Version " HALO_VITA_VERSION " - Up to date") &&
+		!strstr(menu, "github.com") && !strncmp(menu_line(13, line, sizeof(line)), "Update channel\x02", 15) && menu_fits(),
 		"up to date");
 	update_status_value = UPDATE_STATUS_NO_CONNECTION;
 	redraw();
