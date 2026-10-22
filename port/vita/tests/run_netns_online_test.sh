@@ -313,6 +313,19 @@
 #            (not Bravo's friend); the broker sees no name or chat; then Alpha
 #            leaves the party and the longest-standing member (the first to
 #            join) leads on both
+#   partyfollow  the party follows its leader through the Halo 3 lobby (insider.21's
+#            4-Vita session, Oct 21 2026): the leader (Alpha, Menu style Halo 3, its
+#            profile) and two members (Bravo, Charlie, at their main menus, their
+#            profile chosen once) friends; Alpha's lobby on ONLINE, then OFFLINE; its
+#            party made (HALO_TEST_PARTY): the lobby back on ONLINE by itself (a party
+#            plays online), live, and both members in it within PARTY_FOLLOW_BOUND
+#            seconds (8) of its follow; Alpha leaves the lobby (B): both told Alpha
+#            is back in the menus, never "can't be reached online", no error for the
+#            game closed; MULTIPLAYER again: the lobby hosted again (the same
+#            invite) and both members in the new game within the bound; then
+#            Alpha's BROWSE GAMES joins a dedicated server's public game (a
+#            fourth NAT, its port forwarded): both members follow it there
+#            within PARTY_FOLLOW_JOIN_BOUND seconds (15; a new peer reached)
 #   adhoc    online off, ad hoc on: the two machines' only link to each other
 #            is an emulated ad hoc group (HALO_NET_ADHOC_EMULATE)
 #   many     online off, the host and HALO_TEST_JOINERS joiners (3) on one
@@ -754,6 +767,7 @@ seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = swatmixed ] && seconds=${HALO_TEST_SECONDS:-500}
 [ "$mode" = coopstarts ] && seconds=${HALO_TEST_SECONDS:-75}
 [ "$mode" = party ] && seconds=${HALO_TEST_SECONDS:-210}
+[ "$mode" = partyfollow ] && seconds=${HALO_TEST_SECONDS:-210}
 [ "$mode" = friendsbackup ] && seconds=${HALO_TEST_SECONDS:-200}
 # (pickjoin, h3pickjoin: a minute more on the map list than their modes' own)
 [ "$mode" = pickjoin ] && seconds=${HALO_TEST_SECONDS:-230}
@@ -858,10 +872,11 @@ side join 10.10.2 192.168.2
 # (infection: three players, a second joiner unless told otherwise)
 [ "$mode" = infection ] && export HALO_TEST_SECOND_JOINER=${HALO_TEST_SECOND_JOINER:-1}
 { [ "${HALO_TEST_SECOND_JOINER:-0}" = 1 ] || [ "$mode" = badmap ] || [ "$mode" = splitscreen ] || [ "$mode" = party ] ||
+	[ "$mode" = partyfollow ] ||
 	[ "$mode" = friendsbackup ] ||
 	[ "$mode" = h3forgeonline ] || [ "$mode" = vitapc ] || [ "$mode" = vitaonly ]; } &&
 	side join2 10.10.3 192.168.3
-{ [ "$mode" = splitscreen ] || [ "$mode" = vitapc ]; } && side join3 10.10.4 192.168.4
+{ [ "$mode" = splitscreen ] || [ "$mode" = vitapc ] || [ "$mode" = partyfollow ]; } && side join3 10.10.4 192.168.4
 # (lobbytls: the broker's TLS port too, with a certificate from an
 # authority made here, in the test's folder; its plain port misbehaving)
 broker_tls=
@@ -4986,6 +5001,126 @@ party)
 		[ "$two" -ge 20 ] || fail "the $side played Alpha's game for $two s with another player (20 wanted)"
 	done
 	;;
+partyfollow)
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS) or no HALO_TEST_PROFILE"; exit 0
+	fi
+	bound=${PARTY_FOLLOW_BOUND:-8}
+	for name in host joiner joiner2; do
+		mkdir -p "$out/$name/save/u/UDATA/869079979327"
+		cp "$HALO_TEST_PROFILE" "$out/$name/save/u/UDATA/869079979327/blam.sav"
+		[ -r "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" ] &&
+			cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$out/$name/save/u/UDATA/869079979327/"
+	done
+	hc=$out/host.code jc=$out/joiner.code j2c=$out/joiner2.code add=$out/host.add
+	(for i in $(seq 1 90); do [ -s "$jc" ] && [ -s "$j2c" ] && break; sleep 1; done
+		cat "$jc" "$j2c" > "$add.tmp" 2>/dev/null; mv "$add.tmp" "$add") &
+	# (Alpha: MULTIPLAYER, the lobby on SYSTEM LINK; NETWORK, up to ONLINE, A; a while (the
+	# friends made); NETWORK, down three to OFFLINE, A; the party made at 45 s: ONLINE again by
+	# itself, live, the members in; B at 95 s: the lobby left; MULTIPLAYER again at 112 s: hosted
+	# again, the members in again)
+	follow_pad="wait:150:3000 down:150:700 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:8000"
+	follow_pad="$follow_pad a wait:150:2500 down:150:500 down:150:500 down:150:500 a wait:150:73000 b wait:150:15000 a wait:150:40000"
+	# (then down five to BROWSE GAMES, A: the lobby closed, the games browser (the profile chosen
+	# before); A on its first row, the dedicated server's game, a few times)
+	follow_pad="$follow_pad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:12000 a wait:150:3000 a wait:150:3000 a wait:150:40000"
+	# (the dedicated server, behind its own NAT, its port forwarded: public, Blood Gulch)
+	server=${HALO_TEST_SERVER:-$root/build/linux/halo-server}
+	[ -x "$server" ] || { echo "partyfollow needs the dedicated server (ninja linux-server, HALO_TEST_SERVER)"; exit 2; }
+	in_ns "$join3_router" iptables -t nat -A PREROUTING -i w_join3 -p udp --dport 2302 -j DNAT --to-destination 192.168.4.2:2302
+	mkdir -p "$out/server/data"
+	ln -sfn "$(cd "$data" && pwd)/maps" "$out/server/data/maps"
+	printf '%s\n' 'sv_name "Netns Party"' 'sv_maxplayers 8' 'sv_public 1' 'sv_mapcycle_add bloodgulch slayer' \
+		'sv_timelimit 5' 'sv_start_delay 5' 'sv_end_empty 60' 'sv_port 2302' > "$out/server/data/init.txt"
+	mkfifo "$out/server/console"
+	(cd "$out/server" && exec nsenter -t "$join3_machine" -n env HALO_EXIT_AFTER="$seconds" HALO_UPDATE_AUTO=false \
+		HALO_NET_ALLOW_UPNP=false HALO_NET_BROKERS=198.51.100.1:1883 HALO_NET_STUN=198.51.100.1:3478 \
+		HALO_NET_RELAYS=198.51.100.1:47320 HALO_LOG_TIMES=1 taskset -c "$cpu_c" timeout -k 5 $((seconds + 60)) "$server" \
+		-path "$out/server/data" < "$out/server/console" > "$out/server/run.log" 2>&1) &
+	pids="$pids $!"
+	exec {party_console}>"$out/server/console"
+	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
+		HALO_NETWORK_TEST=watch HALO_LOG_TIMES=1 HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:1 HALO_NET_HOST_PUBLIC=false \
+		HALO_NET_LOBBY_NAME=Alpha "HALO_TEST_FRIENDS=code-file=$hc,add-file=$add" \
+		"HALO_TEST_PARTY=invite-at=${HALO_TEST_PARTY_INVITE_AT:-45}" "HALO_TEST_PAD=$follow_pad"; host_pid=$last_pid
+	# (each member: CAMPAIGN, its profile chosen (A), B: the main menu, where it waits; the
+	# party's invite answered, the follow joined by the menus alone)
+	member_pad="wait:150:4000 a wait:150:3000 a wait:150:3000 b wait:150:3000 b wait:150:$((seconds * 1000))"
+	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=watch HALO_LOG_TIMES=1 HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:2 HALO_NET_LOBBY_NAME=Bravo \
+		"HALO_TEST_FRIENDS=code-file=$jc,accept" HALO_TEST_PARTY_ANSWER=accept "HALO_TEST_PAD=$member_pad"; join_pid=$last_pid
+	HALO_TEST_DATA_JOINER2=$menus_data run_copy joiner2 "$join2_machine" "$vita" "$cpu_c" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=watch HALO_LOG_TIMES=1 HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:3 HALO_NET_LOBBY_NAME=Charlie \
+		"HALO_TEST_FRIENDS=code-file=$j2c,accept" HALO_TEST_PARTY_ANSWER=accept "HALO_TEST_PAD=$member_pad"; join2_pid=$last_pid
+	wait $join_pid $join2_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log
+	for side in host joiner joiner2; do
+		echo "--- $side"
+		grep -aE "party: |menus: (in a party|h3 live lobby: (open|closed|.*players)|h3 mp lobby: NETWORK|the host's game closed)|system link: (in another|hosting)|Internet play: already" \
+			"$out/$side/run.log" | grep -av "chat shown" | head -40
+		grep -av "assertion skipped (torn read?)" "$out/$side/run.log" | grep -aqiE "assert|exception|halt_and_catch_fire|segmentation" &&
+			fail "the $side: an assertion, exception or crash"
+	done
+	# (seconds of a log line: its time, HALO_LOG_TIMES's, the second field)
+	at() { grep -a "$2" "$1" | sed -n "${3:-1}p" | awk '{print $2}'; }
+	# (the names: the profiles' once chosen, else the lobby's: not relied on)
+	[ "$(grep -ac "party: .* joined the party" "$hl")" -ge 2 ] || fail "the friends did not join Alpha's party"
+	# (a party plays online: OFFLINE before, ONLINE again once in the party)
+	grep -aq "menus: h3 mp: network OFFLINE" "$hl" || fail "Alpha's lobby was not put on OFFLINE first"
+	grep -aq "menus: in a party (.*): the lobbies' NETWORK is ONLINE (a party plays online)" "$hl" ||
+		fail "the party did not put Alpha's lobby on ONLINE"
+	# (the follows: the first hosting, and the second, after the lobby left)
+	hosted1=$(at "$hl" "party: the party follows this machine: hosting" 1)
+	menus=$(at "$hl" "party: the party follows this machine: back in the menus" 1)
+	hosted2=$(sed -n '/party: the party follows this machine: back in the menus/,$p' "$hl" |
+		grep -a "party: the party follows this machine: hosting" | head -1 | awk '{print $2}')
+	echo "Alpha hosts at ${hosted1:-never}, back in the menus at ${menus:-never}, hosts again at ${hosted2:-never}"
+	[ -n "$hosted1" ] && [ -n "$menus" ] && [ -n "$hosted2" ] || fail "Alpha's follows were not hosting, the menus, hosting again"
+	grep -aq "party: the party follows this machine: in a game no member can reach" "$hl" &&
+		fail "Alpha told the party it was in a game no member can reach (it left its lobby)"
+	in3=$(grep -a "menus: h3 \(live lobby\|pregame\): .*players: [^;]*, [^;]*, [^;]*; 3/" "$hl" | awk '{print $2}' | tr '\n' ' ')
+	first3=; second3=
+	for t in $in3; do
+		[ -z "$first3" ] && [ -n "$hosted1" ] && awk "BEGIN{exit !($t >= $hosted1)}" && first3=$t
+		[ -z "$second3" ] && [ -n "$hosted2" ] && awk "BEGIN{exit !($t >= $hosted2)}" && second3=$t
+	done
+	echo "the party in Alpha's lobby (3 players) at ${first3:-never} and, hosted again, at ${second3:-never}"
+	[ -n "$first3" ] && awk "BEGIN{exit !($first3 - $hosted1 <= $bound)}" ||
+		fail "the members were not in Alpha's lobby within $bound s of its follow (${first3:-never} - $hosted1)"
+	[ -n "$second3" ] && awk "BEGIN{exit !($second3 - $hosted2 <= $bound)}" ||
+		fail "the members were not in Alpha's new game within $bound s of its follow (${second3:-never} - ${hosted2:-never})"
+	for side in joiner joiner2; do
+		log=$out/$side/run.log
+		grep -aq "party: You joined .*'s party" "$log" || fail "the $side did not join the party"
+		[ "$(grep -ac "party: the leader, .*, hosts a game: .*; following" "$log")" -ge 2 ] ||
+			fail "the $side was not told twice to follow Alpha's game"
+		grep -aq "party: .* is back in the menus" "$log" || fail "the $side was not told Alpha is back in the menus"
+		grep -aqi "could.n.t follow\|reached online" "$log" && fail "the $side was told it could not follow"
+		grep -aq "menus: the host's game closed: said for" "$log" && fail "the $side was told the online game closed (an error)"
+		grep -aq "menus: the host's game closed: the party's leader closed it; no error" "$log" ||
+			fail "the $side's game closed by the leader was not taken quietly"
+		[ "$(grep -ac "system link: in another's lobby" "$log")" -ge 2 ] || fail "the $side was not in Alpha's lobby twice"
+	done
+	grep -aqi "could not follow" "$hl" && fail "Alpha heard a member could not follow"
+	# (Alpha joins the dedicated server's game: the members follow it there)
+	joined=$(at "$hl" "party: the party follows this machine: joined a game" 1)
+	echo "Alpha joined the server's game at ${joined:-never}"
+	[ -n "$joined" ] || fail "Alpha did not join the dedicated server's game (its follow: joined a game)"
+	jbound=${PARTY_FOLLOW_JOIN_BOUND:-15}
+	for side in joiner joiner2; do
+		log=$out/$side/run.log
+		grep -aq "party: the leader, .*, joined a game: .*; following" "$log" ||
+			fail "the $side was not told to follow Alpha into the server's game"
+		there=
+		[ -n "$joined" ] && there=$(grep -a "system link: in another's lobby\|system link: in a network game" "$log" |
+			awk -v t="$joined" '$2 >= t {print $2; exit}')
+		echo "the $side in the server's game at ${there:-never}"
+		[ -n "$there" ] && awk "BEGIN{exit !($there - $joined <= $jbound)}" ||
+			fail "the $side was not in the server's game within $jbound s of Alpha's follow"
+	done
+	echo "--- server"; grep -a "joined\|left\|players" "$out/server/run.log" | head -12
+	;;
 friendsplayers|friendsplayersoff|friendsplayersnone)
 	# (no codes typed: the joiner adds the host from the game's players, the two
 	# machines' friend cards exchanged over internet play first)
@@ -5064,7 +5199,7 @@ forge|forge3|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h
 	forge_case
 	;;
 *)
-	echo "usage: $0 code|infection|infectionold|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|carnage|h3live|h3liveleave|h3liveagain|h3liveonline|h3liveinvite|h3liveprivate|h3online|h3onlinelan|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|friendsbackup|party|friendsprivate|friendsprivatepw|forge|forge3|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|h3variant|vitapc|vitaonly|hostfuzz|hostfuzzforge|hostfuzzmap" >&2
+	echo "usage: $0 code|infection|infectionold|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|carnage|h3live|h3liveleave|h3liveagain|h3liveonline|h3liveinvite|h3liveprivate|h3online|h3onlinelan|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|friendsbackup|party|partyfollow|friendsprivate|friendsprivatepw|forge|forge3|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|h3variant|vitapc|vitaonly|hostfuzz|hostfuzzforge|hostfuzzmap" >&2
 	exit 2
 	;;
 esac

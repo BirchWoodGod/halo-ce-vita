@@ -38,7 +38,23 @@ void platform_log(const char *format, ...)
 	va_end(arguments);
 	vita_host_log(line);
 #else
+	/* (test builds: HALO_LOG_TIMES, each line's time - the system's
+	monotonic clock, the same for every copy of a run - after the prefix:
+	run_netns_online_test.sh partyfollow times the party's follows) */
+#ifndef HALO_RELEASE
+	static int log_times = -1;
 
+	if (log_times < 0)
+		log_times = getenv("HALO_LOG_TIMES") != NULL;
+	if (log_times)
+	{
+		struct timespec now;
+
+		clock_gettime(CLOCK_MONOTONIC, &now);
+		fprintf(stderr, "halo-linux: %ld.%03ld ", (long)now.tv_sec, now.tv_nsec / 1000000L);
+	}
+	else
+#endif
 	fputs("halo-linux: ", stderr);
 	va_start(arguments, format);
 	vfprintf(stderr, format, arguments);
