@@ -32,6 +32,7 @@
 		<string text="JOIN BY CODE"/>
 		<string text="CO-OP CAMPAIGN"/>
 		<string text="SPLIT SCREEN"/>
+		<string text="NEW GAMETYPE EDITOR"/>
 	</strings>
 	<strings name="mp_descriptions">
 		<string text="Join a public game on the Internet:\nthe server browser lists them."/>
@@ -42,6 +43,7 @@
 		<string text="Host the campaign for up to three\nothers: pick a level and a\ndifficulty, then press %y-button."/>
 		<string text="Play with several controllers\non this screen."/>
 		<string text="Set all the attributes for your\nmultiplayer gametypes and keep\nthem for future use."/>
+		<string text="Every gametype, Infection's too:\nmake new ones from any base and\nset all of their rules."/>
 	</strings>
 	<strings name="offline">
 		<string text="Internet play is off.\n\nOpen the settings panel (SELECT + DOWN),\nMultiplayer tab, set Connection to Online,\nthen restart the game."/>
@@ -63,6 +65,7 @@
 	<strings name="setup_labels">
 		<string text="VISIBILITY"/>
 		<string text="WHO CAN JOIN"/>
+		<string text="BOTS"/>
 	</strings>
 	<strings name="setup_help">
 		<string text="The name your game is listed under\n(15 characters at most)."/>
@@ -70,6 +73,7 @@
 		<string text="PUBLIC: listed in the games browser.\nPRIVATE: friends, invites and its code join it."/>
 		<string text="A public game asks joiners for it.\nNONE: anyone may join."/>
 		<string text="VITA: PS Vitas only. VITA PC: Vitas and\nHalo CE Vita on PC. EVERYONE: also OpenCE\nplayers on PC."/>
+		<string text="FULL: bots fill every slot but one and\nleave as players join (a party on one team).\nOFF: none. Or the most bots."/>
 		<string text="Next: your profile, then the map and the\ngametype. The lobby shows your game's code."/>
 	</strings>
 	<strings name="code_labels">

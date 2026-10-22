@@ -7140,7 +7140,7 @@ static void join_watch(void)
 /* ---- the Multiplayer screen */
 
 /* (each item's description and picture: by its place in the list) */
-static short const multiplayer_pictures[] = { 0, 1, 0, 0, 1, 0, 1, 2 };
+static short const multiplayer_pictures[] = { 0, 1, 0, 0, 1, 0, 1, 2, 2 };
 
 static void multiplayer_update(struct widget_instance *list)
 {
@@ -7787,6 +7787,15 @@ static void browser_update(struct widget_instance *list)
 						snprintf(text, sizeof(text), "%d+%d", people, entry->bots);
 				}
 			}
+		}
+		/* (Menu style Halo CE's server browser, OpenCE's rows: the people and
+		the bots apart too, "6+5/16", in its narrow column) */
+		else if (entry->bots > 0 && entry->bots <= entry->players)
+		{
+			if (entry->maximum > 0)
+				snprintf(text, sizeof(text), "%d+%d/%d", entry->players - entry->bots, entry->bots, entry->maximum);
+			else
+				snprintf(text, sizeof(text), "%d+%d", entry->players - entry->bots, entry->bots);
 		}
 		row_column(child, "row_players", text);
 #ifndef HALO_RELEASE

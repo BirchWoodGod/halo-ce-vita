@@ -395,6 +395,10 @@
 #           each opens its screen (the Halo 3 Forge lobby, FRIENDS, FILE SHARE, MOD MANAGER) and B
 #           comes back to the Xbox's main menu; Menu style Halo 3: the map's own list, its main menu
 #           the Halo 3 one
+#   ceplusmp  Menu style Halo CE's Multiplayer (OpenCE's): NEW GAMETYPE EDITOR, the ninth row,
+#           opens the Halo 3 GAME TYPES (Infection's rules too), B back; Create Game Internet's
+#           Server Setup (internet play on, TEST-NET brokers) has BOTS: right on it, START GAME:
+#           Bots online set as chosen
 #   cepluspregame  the Xbox's pregame (Menu style Halo CE, HALO_TEST_PROFILE; skipped without) of a
 #           system link game hosted on Blood Gulch (CREATE GAME SYSTEM LINK, the profile, Y, the map,
 #           the game type) with map variants of it (forge_files_test --write): its line under the
@@ -451,7 +455,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-all_cases="fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendsbackup h3friendspanel h3partyplates h3party h3partyonline browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes h3offline h3offlineend msgboxes ceplusmain cepluspregame cepluspause ceplusforge"
+all_cases="fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendsbackup h3friendspanel h3partyplates h3party h3partyonline browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes h3offline h3offlineend msgboxes ceplusmain ceplusmp cepluspregame cepluspause ceplusforge"
 # (the PC build's own, asked for by name: not in the default list)
 pc_cases="pctext pcclassic pcnoadhoc"
 cases=${*:-$all_cases}
@@ -3008,6 +3012,29 @@ PY
 		grep -aqE "menus: Menu style Halo 3: the Xbox screens' [0-9]+ widgets as the map has them" "$log" ||
 			fail ceplusmain "Menu style Halo 3: the Xbox screens kept the port's rows"
 		grep -aq "ui: screen pc.h3.main.screen" "$log" || fail ceplusmain "Menu style Halo 3: not the Halo 3 main menu" ;;
+	ceplusmp)
+		d="down:150:500"
+		run ceplusmp_gametypes "$menus_data" 22 "wait:150:3000 down:150:800 a:150:3000 $d $d $d $d $d $d $d $d a:150:4000 b:150:3000" \
+			HALO_SCENE_PACKS=0
+		log=$out/ceplusmp_gametypes/run.log
+		echo "--- ceplusmp (NEW GAMETYPE EDITOR)"
+		grep -aE "ui: screen|menus: h3 gametypes" "$log" | head -8
+		[ "$(cat "$out/ceplusmp_gametypes/exit")" = 0 ] || fail ceplusmp "gametypes: exit $(cat "$out/ceplusmp_gametypes/exit")"
+		grep -aqiE "assert|exception|halt_and_catch_fire" "$log" && fail ceplusmp "gametypes: an assertion, exception or halt"
+		grep -aq "ui: screen pc.h3.gametypes.screen" "$log" || fail ceplusmp "NEW GAMETYPE EDITOR did not open GAME TYPES"
+		sed -n '/ui: screen pc.h3.gametypes.screen/,$p' "$log" | grep -aq "ui: screen pc.mp.screen" ||
+			fail ceplusmp "B did not go back to the Multiplayer screen"
+		# (Create Game Internet, the fourth row: Server Setup; down five to BOTS - OFF, the tests' -,
+		# right: 1; down, START GAME)
+		run ceplusmp_bots "$menus_data" 26 "wait:150:3000 down:150:800 a:150:3000 $d $d $d a:150:3000 $d $d $d $d $d right:150:800 $d a:150:4000" \
+			$h3net HALO_SCENE_PACKS=0
+		log=$out/ceplusmp_bots/run.log
+		echo "--- ceplusmp (Server Setup's BOTS)"
+		grep -aE "ui: screen|GAME OPTIONS|Server Setup" "$log" | head -8
+		[ "$(cat "$out/ceplusmp_bots/exit")" = 0 ] || fail ceplusmp "bots: exit $(cat "$out/ceplusmp_bots/exit")"
+		grep -aqiE "assert|exception|halt_and_catch_fire" "$log" && fail ceplusmp "bots: an assertion, exception or halt"
+		grep -aq "ui: screen pc.setup.screen" "$log" || fail ceplusmp "Create Game Internet did not open Server Setup"
+		grep -aq "menus: GAME OPTIONS: Bots online 1" "$log" || fail ceplusmp "Server Setup's BOTS did not set Bots online" ;;
 	cepluspregame)
 		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
 			echo "--- cepluspregame"; echo "SKIP: no HALO_TEST_PROFILE"; continue

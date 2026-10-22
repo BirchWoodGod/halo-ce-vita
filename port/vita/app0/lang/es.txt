@@ -2627,6 +2627,8 @@
 
 # ---------- Menu style Halo CE's additions (menus/classic: the Xbox screens with the port's rows)
 "No network: wait for it, or choose\nNETWORK: LOCAL." = "Sin red: espérala, o elige\nRED: LOCAL."
+"NEW GAMETYPE EDITOR" = "NUEVO EDITOR DE TIPOS"
+"Every gametype, Infection's too:\nmake new ones from any base and\nset all of their rules." = "Todos los tipos de juego, también\nInfección: crea nuevos desde cualquier\nbase y ajusta todas sus reglas."
 "LOBBY OPTIONS" = "OPCIONES DEL LOBBY"
 "%y-button PLAYERS   %right-trigger LOBBY OPTIONS" = "%y-button JUGADORES   %right-trigger OPCIONES DEL LOBBY"
 "The players in this game: add one as a\nfriend, mute their chat; the host kicks\nor bans." = "Los jugadores de esta partida: agrega uno\ncomo amigo, silencia su chat; el anfitrión\nexpulsa o veta."
