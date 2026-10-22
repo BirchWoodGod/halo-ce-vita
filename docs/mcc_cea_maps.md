@@ -23,6 +23,99 @@ Warthog, gun turrets, the fuel rod) convert too, for local games:
 [MCC's PC multiplayer maps](#mccs-pc-multiplayer-maps) (branch
 `feat/mcc-pc-maps`).
 
+## The Halo content folder: your own MCC
+
+Players who own Halo: The Master Chief Collection play its own Halo CE
+maps - the ten campaign levels and the nineteen multiplayer maps (the
+Xbox's thirteen and Halo PC's six: Danger Canyon, Death Island,
+Gephyrophobia, Ice Fields, Infinity, Timberland) - from their own files.
+There is no switch: the game looks for the **Halo content folder**, the
+folder of MCC that holds `halo1`, and lists what it finds beside the
+Xbox's levels. Without one it plays the Xbox maps alone, as before.
+
+Where it looks (`port/linux/src/xbox_files.c`), first found wins:
+
+| | |
+| --- | --- |
+| the setting | `paths.content` in config.toml (`HALO_CONTENT_ROOT`); the PS Vita panel's **Multiplayer > Modded maps > Halo content folder** (Found by itself, `ux0:data/mcc`, `uma0:data/mcc`, `imc0:data/mcc`). A `halo1` folder named there stands for the folder holding it. |
+| PS Vita | `ux0:data/haloce-vita/mcc` |
+| PC | every Steam library (`libraryfolders.vdf` of `~/.local/share/Steam`, `~/.steam/steam`, `~/.steam/root`, Flatpak's Steam, and on Windows `Program Files (x86)\Steam`): `steamapps/common/Halo The Master Chief Collection` |
+
+On the PS Vita, copy from MCC's folder on your PC (Steam: right-click
+the game, Manage, Browse local files) to the memory card:
+
+```
+ux0:data/haloce-vita/mcc/
+  halo1/
+    maps/
+      a10.map ... d40.map           the campaign (774 MB)
+      beavercreek.map ... wizard.map the multiplayer maps (about 300 MB)
+      bitmaps.map                   their pixels (186 MB): needed
+```
+
+`ui.map`, `halo1/maps/custom_edition/`, `halo1/sound/`, `prebuild/` and
+the other games' folders are not needed in this version. The Xbox data
+(`ux0:data/haloce-vita/maps`, `default.xbe`) is still needed: the menus,
+fonts and the game's own files are the Xbox's.
+
+The folder is **only read**: every file call that writes, makes, moves or
+deletes refuses a path in it, and `..` stops at its root. Nothing of it
+goes in this repository, the VPK or a map share.
+
+**What it lists** (`port/linux/game/mcc_content.c`): each map file's
+loader is chosen by its own cache header (`'head'` and its version) from
+a small table, game folder to loader: `halo1` (version 13, Halo: CE
+Anniversary) is this build's; `halo2`, `halo3`, `halo3odst`,
+`haloreach` and `halo4` are found and said in debug.txt (`content: ...
+no loader in this build yet`) and get a row and a loader as theirs come.
+Halo CE's maps are listed under names that are the folder's alone:
+
+- the campaign as `mods\mcc_a10` ... `mods\mcc_d40` (MCC's own campaign is
+  the first "mod", key `mcc`; a mods folder mod keyed `mcc` is left out):
+  in the classic campaign list after the ten levels as "The Pillar of
+  Autumn (MCC)" ..., and in the Halo 3 campaign lobby each mission is
+  MCC's where the folder has it, else the Xbox's ("MCC files, on this PS
+  Vita alone. No sound yet." under Ready). Every mission is open (they keep
+  no profile progress). Won, a level goes on to MCC's next one. Played
+  alone, offline; co-op is not hosted for them.
+- the multiplayer maps as `mcc_bloodgulch` ... (level
+  `levels\test\mcc_bloodgulch\mcc_bloodgulch`), first among the custom
+  maps, as "Blood Gulch (MCC)" with the Xbox level's picture: split
+  screen, offline with bots, and hosted or joined over the network.
+
+A `mcc_<stock map>` name is never looked for anywhere but the content
+folder: a maps folder file of that name is not listed nor played, and map
+sharing never sends or takes one (`map_share_name_valid`).
+
+**Saves**: an MCC campaign level saves as the custom campaign maps do
+(Custom Edition and mod campaign maps): Save and Quit writes
+`savegame_custom.bin` beside the profile's `savegame.bin`, which it never
+touches, and the same level started again on the same difficulty resumes
+from it. One slot for all custom campaign maps; no profile progress.
+
+**Network**: a network game on an MCC multiplayer map needs every machine
+to have the same file. The host sends its file's identity (the header's
+checksum and length, as for custom maps: `custom_edition_maps_network_identity`);
+a joiner must have its own content folder with that very file, else it is
+told why and stays out ("The host is playing mcc_bloodgulch from its MCC
+files..." or "...isn't the same as yours (another MCC version?)"). A
+joiner never asks for the map and a host never sends it; a host that
+names no identity for an MCC map is refused. Older builds see an unknown
+custom map and are refused by the host's map sharing. The dedicated
+server never plays them.
+
+**Sound**: silent in this version. MCC keeps every sound of its stock
+maps in FMOD sound banks (`halo1/sound/pc/*.fsb`), not in the maps; the
+log says so once per map (`mcc: 'b30' is MCC's own campaign map: its
+sounds are in MCC's FMOD banks, silent in this version`).
+
+Tests: `port/vita/tests/run_mcc_content_test.sh` (the names, Steam's
+libraryfolders.vdf and the loaders' table with no MCC file; with your
+MCC folder, linked read only: b30 and d40 60 s each, b30 won goes on to
+b40, Blood Gulch with bots, no folder, a maps folder's
+`mcc_bloodgulch.map` left out; SKIP without one). The harness tests
+otherwise run with no content folder (`test_out.sh`).
+
 ## Playing a mod natively
 
 Copy the mod's whole folder (Steam keeps it in

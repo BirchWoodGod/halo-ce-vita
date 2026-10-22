@@ -36,3 +36,10 @@ test_out_done() {
 # a release build ignores it)
 HALO_TEST_PLATFORM=${HALO_TEST_PLATFORM:-vita}
 export HALO_TEST_PLATFORM
+
+# The harness tests play the Xbox maps alone unless a test names a Halo
+# content folder (paths.content, port/linux/game/mcc_content.c): on a PC with
+# Halo: The Master Chief Collection installed the game finds it by itself, and
+# its maps would join the lists the tests walk
+HALO_CONTENT_ROOT=${HALO_CONTENT_ROOT:-/nonexistent/halo-content-folder}
+export HALO_CONTENT_ROOT
