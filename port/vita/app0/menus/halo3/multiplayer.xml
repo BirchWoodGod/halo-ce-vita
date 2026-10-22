@@ -140,7 +140,8 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 
 	<!-- the lobby: NETWORK, GAME and MAP open their pickers; START GAME hosts as the network says
 	(ONLINE, SYSTEM LINK and AD HOC: the System Link screen's profile - not asked again once chosen
-	this run -, then the game hosted with GAME and MAP and its lobby; OFFLINE: split screen's), as
+	this run -, then the game hosted with GAME and MAP and its lobby; OFFLINE: split screen's SELECT
+	PROFILE, then the local game started with GAME and MAP, no map or game type list), as
 	do BROWSE GAMES (the profile, then the
 	games browser, halo3/network.xml: ONLINE the System Link list's games and the online list's in
 	one list, SYSTEM LINK the System Link list's, AD HOC the ad hoc group's) - AD

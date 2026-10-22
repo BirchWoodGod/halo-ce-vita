@@ -119,6 +119,7 @@ for a gamepad); a test build's HALO_TEST_TEXT_INPUT answers in its place,
 #include "game/players.h"
 #include "game/game_engine.h"
 #include "game/game_engine_playlist.h"
+#include "bots.h"
 #include "networking/network_server_manager.h"
 #include "halo_port_limits.h"
 /* (the desktop's button icons: display.button_icons) */
@@ -686,6 +687,22 @@ static void h3_party_players_text(char *text, int size, int maximum)
 for again) */
 static void h3_session_profile_chosen(short plate, long profile_index);
 static void h3_session_forget(void);
+/* (the lobby's START GAME on OFFLINE: the local game) asked: split screen's
+SELECT PROFILE opened by it, its Cross starting the game; since: the game
+set up, waiting for its players (0: none waited for); players_in: since
+when they are in; added: the last ask to add them; started: its start asked
+for, the level about to load */
+static struct
+{
+	boolean asked;
+	boolean started;
+	unsigned long started_time;
+	unsigned long since;
+	unsigned long players_in;
+	unsigned long added;
+} h3_local;
+static boolean h3_mp_local_start(void);
+static void h3_mp_local_update(boolean main_menu_loaded);
 /* (the live lobby, Menu style Halo 3: h3_live) */
 static void h3_live_lobby_show(struct widget_instance *screen);
 static boolean h3_live_follow(void);
@@ -12301,6 +12318,12 @@ static boolean h3_join_a(struct widget_instance *widget, struct event_record *ev
 				return FALSE;
 			}
 		}
+		/* (Menu style Halo 3, the lobby's START GAME on OFFLINE: the local
+		game started with the lobby's GAME and MAP, no map or game type list
+		after this screen, as the network games are hosted; split screen's
+		map list as before when it cannot be: h3_mp_local_start) */
+		if (h3_join.split && halo_menu_style_halo3() && h3_mp_local_start())
+			return FALSE;
 		platform_log("menus: h3 join: on to %s", h3_join.split ? "split screen's map list" : "the games");
 		/* (one player alone, a network game's: not asked again this run) */
 		if (!h3_join.split)
@@ -12418,8 +12441,9 @@ static void h3_join_update(struct widget_instance *widget)
 	else if (ready < in)
 		snprintf(text, sizeof(text), "%s", h3_buttons(T("Choose your profile, then Cross.")));
 	else
-		snprintf(text, sizeof(text), "%s", h3_join.split ? h3_buttons(T("Ready: Cross for the map.")) :
-			h3_buttons(T("Ready: Cross for the games.")));
+		snprintf(text, sizeof(text), "%s", h3_local.since || h3_local.started ? T("Starting the game...") :
+			h3_join.split && h3_local.asked ? h3_buttons(T("Ready: Cross to start the game.")) :
+			h3_join.split ? h3_buttons(T("Ready: Cross for the map.")) : h3_buttons(T("Ready: Cross for the games.")));
 	text_show(named(screen, "next"), text);
 }
 
@@ -12570,6 +12594,191 @@ static boolean h3_mp_host_choices(void)
 		platform_log("menus: h3 mp: the game's rules: %s", rules);
 	}
 	return TRUE;
+}
+
+/* (Menu style Halo 3: split screen's SELECT PROFILE gone on, opened by the
+lobby's START GAME on OFFLINE) the local game set up as split screen's map
+list and game type list set it up (split_screen_game_initialize,
+multiplayer_level_select, multiplayer_profile_set_for_game), with the
+lobby's MAP and GAME - a saved game type of GAME TYPES' too, Infection's;
+the lobby's map variant was asked for by START GAME (h3_mp_variant_play) -
+and started once its players are in (h3_mp_local_update): TRUE; FALSE (no
+map or game type, the map not playable, the game not made), split screen's
+map list and game type list as before */
+static boolean h3_mp_local_start(void)
+{
+	struct game_variant variant;
+	char const *map = h3_mp.map_index != NONE ? h3_map_paths[h3_mp.map_index] : h3_mp.map_other;
+	long variant_index = h3_mp.gametype != NONE ? h3_mp.gametypes[h3_mp.gametype] : NONE;
+	struct network_game_server *server;
+	char directory[256], why[160];
+
+	if (!h3_local.asked)
+		return FALSE;
+	/* (pressed again while it starts) */
+	if (h3_local.since || h3_local.started)
+		return TRUE;
+	if (!map || !map[0] || variant_index == NONE || !(variant_index & 0x80000000))
+	{
+		platform_log("menus: h3 mp: no map or game type chosen: split screen's map list");
+		return FALSE;
+	}
+	if (map_check(map, why, sizeof(why)) != _map_check_playable)
+	{
+		platform_log("menus: h3 mp: %s can't be played: %s: split screen's map list", map, why);
+		return FALSE;
+	}
+	if (!playlist_profile_get(variant_index, &variant))
+	{
+		platform_log("menus: h3 mp: the game type could not be read: split screen's map list");
+		return FALSE;
+	}
+	/* (a new local game, as split screen's map list makes it: its server,
+	taking no one from the network, and this machine's client of it) */
+	dispose_global_network_game_client();
+	dispose_global_network_game_server();
+	network_game_accept_remote_connections(FALSE);
+	game_engine_playlist_initialize();
+	if (!create_global_network_game_server())
+	{
+		dispose_global_network_game_server();
+		platform_log("menus: h3 mp: the local game could not be made: split screen's map list");
+		return FALSE;
+	}
+	game_engine_playlist_begin();
+	game_connection_set(_game_connection_network_server);
+	if (!create_global_network_game_client() || (server = global_network_game_server_get()) == NULL)
+	{
+		dispose_global_network_game_client();
+		dispose_global_network_game_server();
+		platform_log("menus: h3 mp: the local game could not be made: split screen's map list");
+		return FALSE;
+	}
+	main_set_multiplayer_map_name((char *)map);
+	game_engine_override_map_name((char *)map);
+	network_game_server_change_map_name(server, (char *)map);
+	saved_game_file_remember_last_used_multiplayer_map((char *)map);
+	if (saved_game_file_get_path_to_enclosing_directory(variant_index, directory))
+		saved_game_file_remember_last_used_multiplayer_variant_directory(directory);
+	player_ui_set_game_variant(&variant);
+	network_game_server_change_game_variant(server, &variant);
+	h3_local.since = system_milliseconds() ? system_milliseconds() : 1;
+	h3_local.players_in = 0;
+	h3_local.added = 0;
+	platform_log("menus: h3 mp: the local game: %s on %s (the lobby's GAME and MAP), no map or game type list; "
+		"started once its players are in", h3_mp_gametype_name(), h3_mp_map_name());
+	{
+		char rules[512];
+
+		h3_gametype_rules_log(&variant, rules, sizeof(rules));
+		platform_log("menus: h3 mp: the game's rules: %s", rules);
+	}
+	return TRUE;
+}
+
+/* (the local game not started) split screen's own lobby, over the screen
+up, which B goes back to: its A starts the game as before */
+static void h3_mp_local_lobby(void)
+{
+	struct widget_instance *active = NULL;
+	long index;
+
+	for (index = 0; index < 4 && !active; index++)
+		active = ui_widget_port_active_screen((short)index);
+	if (!active || !ui_widget_load_by_name_or_tag(
+		"ui\\shell\\main_menu\\multiplayer_type_select\\split_screen\\pregame\\splitscreen_pregame_wrapper_normal",
+		NONE, NULL, active->local_player_index, active->definition_tag_index, NONE, NONE))
+	{
+		platform_log("menus: h3 mp: split screen's lobby did not open");
+	}
+}
+
+/* (each frame, the main loop) the local game h3_mp_local_start set up: the
+players SELECT PROFILE joined added to it (as split screen's lobby, "net
+splitscreen prejoin players", adds them), the settings' offline bots let in
+(the server adds them in its lobby: network_server_manager.c), and the game
+started at once (as the lobby's A with no countdown); not started in 15 s,
+split screen's own lobby, whose A starts it */
+static void h3_mp_local_update(boolean main_menu_loaded)
+{
+	struct network_game_client *client = global_network_game_client_get();
+	struct network_game *game = NULL;
+	unsigned long now = system_milliseconds();
+	short state = NONE, local_player;
+	long wanted = 0, in = 0, bots, room;
+
+	/* (the level loading: the next START GAME asks again) */
+	if (!main_menu_loaded)
+	{
+		h3_local.asked = FALSE;
+		h3_local.started = FALSE;
+	}
+	/* (asked to start, but the game not begun in 5 s - one player and no
+	bots, where a local game needs two: the desktop builds' - split screen's
+	own lobby, which says what it waits for) */
+	if (h3_local.started && now - h3_local.started_time > 5000)
+	{
+		h3_local.started = FALSE;
+		platform_log("menus: h3 mp: the local game did not start in 5 s: split screen's lobby");
+		h3_mp_local_lobby();
+	}
+	if (!h3_local.since)
+		return;
+	if (!main_menu_loaded || !client || !global_network_game_server_get())
+	{
+		platform_log("menus: h3 mp: the local game: %s", main_menu_loaded ? "its game was closed" : "the level loads");
+		h3_local.since = 0;
+		return;
+	}
+	if (network_game_client_get_state(client, &state) == 2)
+		game = network_game_get_game();
+	for (local_player = 0; game && local_player < 4; local_player++)
+	{
+		long index;
+		boolean player_in = FALSE;
+
+		if (!player_ui_local_player_wants_to_play_multiplayer(local_player))
+			continue;
+		wanted++;
+		for (index = 0; index < (long)NUMBEROF(game->players) && !player_in; index++)
+		{
+			player_in = network_player_is_valid(&game->players[index]) &&
+				network_game_player_is_local(&game->players[index]) &&
+				game->players[index].controller_index == local_player;
+		}
+		if (player_in)
+			in++;
+		else if (now - h3_local.added >= 250 && !network_game_client_add_player(client, local_player))
+			platform_log("menus: h3 mp: the local game: player %d could not be added", local_player + 1);
+	}
+	if (game && wanted && in < wanted && now - h3_local.added >= 250)
+		h3_local.added = now ? now : 1;
+	if (!game || !wanted || in < wanted)
+	{
+		if (now - h3_local.since > 15000)
+		{
+			platform_log("menus: h3 mp: the local game: its players not in after 15 s: split screen's lobby");
+			h3_local.since = 0;
+			h3_mp_local_lobby();
+		}
+		return;
+	}
+	if (!h3_local.players_in)
+		h3_local.players_in = now ? now : 1;
+	/* (the bots the settings ask for, as far as the game has room: a moment
+	for the server to add them) */
+	bots = bots_wanted_count();
+	room = (long)game->maximum_players - in;
+	if (bots > room)
+		bots = room > 0 ? room : 0;
+	if (game->player_count < in + bots && now - h3_local.players_in < 3000)
+		return;
+	platform_log("menus: h3 mp: the local game starts: %s on %s, %ld player%s, %ld bot%s", h3_mp_gametype_name(),
+		h3_mp_map_name(), in, in == 1 ? "" : "s", (long)game->player_count - in, game->player_count - in == 1 ? "" : "s");
+	h3_local.since = 0;
+	h3_local.started = TRUE;
+	h3_local.started_time = now;
+	network_game_client_request_immediate_start();
 }
 
 /* ---- INVITE FRIENDS (halo3/friends.xml h3/invite/screen): L in the live
@@ -15030,11 +15239,18 @@ boolean pc_menu_event_function_invoke(
 		return h3_mp_maps_back();
 	case _function_h3_mp_offline_start:
 	{
-		/* (OFFLINE's START GAME: split screen's own screens next; the
-		lobby's map variant played if the game's map is its) */
+		/* (OFFLINE's START GAME: split screen's SELECT PROFILE next, whose
+		Cross starts the local game with the lobby's GAME and MAP,
+		h3_mp_local_start; the lobby's map variant played if the game's map
+		is its) */
 		char const *map = h3_mp.map_index != NONE ? h3_map_paths[h3_mp.map_index] : h3_mp.map_other;
 
 		h3_mp_variant_play(FALSE, map);
+		h3_local.asked = TRUE;
+		h3_local.started = FALSE;
+		h3_local.since = 0;
+		platform_log("menus: h3 mp: START GAME on OFFLINE: split screen's SELECT PROFILE, then %s on %s",
+			h3_mp_gametype_name(), h3_mp_map_name());
 		return TRUE;
 	}
 	case _function_h3_join_system_link:
@@ -15860,6 +16076,7 @@ void pc_menu_functions_update(
 {
 	h3_dialog_port_update();
 	h3_live_update(main_menu_loaded);
+	h3_mp_local_update(main_menu_loaded);
 	h3_carnage_frame(main_menu_loaded);
 	/* (a join the host's map refused: the games browser again once the
 	main menu is up - the Xbox's error over it dismissed -, not the main
