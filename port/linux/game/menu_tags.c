@@ -2131,14 +2131,35 @@ static byte *png_decode(byte const *data, unsigned long size, long width, long h
 	return pixels;
 }
 
+/* a PNG's path with "{lang}" in it: the language's (lang_current, as the
+menus load: menus/classic's words drawn in each language), else English's
+(en) - the language having none of its own; NULL: the path as written */
+static char const *menu_png_language_path(char const *png, char const *code, char *path, int size)
+{
+	char const *at = strstr(png, "{lang}");
+
+	if (!at)
+		return NULL;
+	snprintf(path, (size_t)size, "%.*s%s%s", (int)(at - png), png, code, at + 6);
+	return path;
+}
+
 static boolean menu_png_frame_load(struct menu_png_frame const *frame)
 {
 	struct bitmap_data *bitmap = frame->bitmap;
 	unsigned long size = 0;
-	byte *data = halo_menus_art_png(frame->png, &size);
+	char path[256];
+	char const *png = menu_png_language_path(frame->png, lang_current(), path, (int)sizeof(path));
+	byte *data = png ? NULL : halo_menus_art_png(frame->png, &size);
 	byte *pixels;
 
-	if (!data)
+	if (png)
+	{
+		data = halo_menus_file_read(png, &size);
+		if (!data)
+			data = halo_menus_file_read(menu_png_language_path(frame->png, "en", path, (int)sizeof(path)), &size);
+	}
+	else if (!data)
 		data = halo_menus_file_read(frame->png, &size);
 	pixels = data && size <= MAXIMUM_PNG_BYTES ? png_decode(data, size, bitmap->width, bitmap->height) : NULL;
 
@@ -2237,9 +2258,16 @@ static void menu_tags_art_preread(void)
 		paths[at++] = menu_tags.string_resources[index].path;
 	plan.string_count = menu_tags.string_resource_count;
 	plan.png_names = paths + at;
+	/* (a language's PNG, "{lang}": read when it loads, the language's then) */
+	plan.png_count = 0;
 	for (index = 0; index < menu_tags.png_frame_count; index++)
-		paths[at++] = menu_tags.png_frames[index].png;
-	plan.png_count = menu_tags.png_frame_count;
+	{
+		if (!strstr(menu_tags.png_frames[index].png, "{lang}"))
+		{
+			paths[at++] = menu_tags.png_frames[index].png;
+			plan.png_count++;
+		}
+	}
 	plan.bitmaps_block_offset = RESOURCE_BITMAP_BITMAPS_OFFSET;
 	plan.bitmap_data_bytes = RESOURCE_BITMAP_DATA_BYTES;
 	plan.pixels_offset_offset = offsetof(struct bitmap_data, pixels_offset);

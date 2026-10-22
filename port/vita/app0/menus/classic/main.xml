@@ -1,41 +1,47 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Menu style Halo CE: the Xbox's main menu with the port's rows (classic_patch: the map's
-     list itself while the style is Halo CE; Halo 3's main menu is menus/halo3/main.xml) -->
+<!-- Menu style Halo CE: the Xbox's main menu with the port's rows (classic_patch: the map's list
+     itself while the style is Halo CE; Halo 3's main menu is menus/halo3/main.xml). CAMPAIGN,
+     MULTIPLAYER and SETTINGS are the game's own rows, as they are; FORGE, FRIENDS, FILE SHARE and MOD
+     MANAGER under them are words drawn in their look (tools/classic_menu_art.py: 256 x 32, frame 0
+     not focused, 1 focused, as the game's column list shows them), in the language chosen
+     (classic/<lang>/, menu_tags.c "{lang}"). The seven 32 pixels apart from the Xbox's first row's
+     place (its three were 36 apart: as little closer as fits above the screen's bottom) -->
 <menus>
-	<strings name="ce/main_items">
-		<string text="FORGE"/>
-		<string text="FRIENDS"/>
-		<string text="FILE SHARE"/>
-		<string text="MOD MANAGER"/>
-		<string text="CAMPAIGN"/>
-		<string text="MULTIPLAYER"/>
-		<string text="SETTINGS"/>
-	</strings>
-	<!-- (one column: the Xbox's three rows - the port's words (as the Xbox's art says them, translated) and
-	     their own events - drawn as the port's are, in the map's large font, so that all seven are
-	     alike, centred, 30 pixels apart; the focused one lit as the game lights a focused row) -->
-	<widget name="ce/main/campaign" extends="ui\shell\main_menu\main_menu_item_load_camp" classic_patch="true" bitmap="none" font="ui\large_ui" color="#FF5AA0E6" align="center" text_y="5" height="30" string_list="ce/main_items" string_index="4"/>
-	<widget name="ce/main/multiplayer" extends="ui\shell\main_menu\main_menu_item_multiplayer" classic_patch="true" bitmap="none" font="ui\large_ui" color="#FF5AA0E6" align="center" text_y="5" height="30" string_list="ce/main_items" string_index="5"/>
-	<widget name="ce/main/settings" extends="ui\shell\main_menu\main_menu_item_settings" classic_patch="true" bitmap="none" font="ui\large_ui" color="#FF5AA0E6" align="center" text_y="5" height="30" string_list="ce/main_items" string_index="6"/>
-	<widget name="ce/main/forge" extends="ui\shell\main_menu\main_menu_item_settings" bitmap="none" font="ui\large_ui" color="#FF5AA0E6" align="center" text_y="5" height="30" string_list="ce/main_items" string_index="0">
+	<bitmap name="ce/main/forge_art">
+		<frame png="classic/{lang}/main_forge_0.png" width="256" height="32"/>
+		<frame png="classic/{lang}/main_forge_1.png" width="256" height="32"/>
+	</bitmap>
+	<bitmap name="ce/main/friends_art">
+		<frame png="classic/{lang}/main_friends_0.png" width="256" height="32"/>
+		<frame png="classic/{lang}/main_friends_1.png" width="256" height="32"/>
+	</bitmap>
+	<bitmap name="ce/main/fileshare_art">
+		<frame png="classic/{lang}/main_fileshare_0.png" width="256" height="32"/>
+		<frame png="classic/{lang}/main_fileshare_1.png" width="256" height="32"/>
+	</bitmap>
+	<bitmap name="ce/main/mods_art">
+		<frame png="classic/{lang}/main_mods_0.png" width="256" height="32"/>
+		<frame png="classic/{lang}/main_mods_1.png" width="256" height="32"/>
+	</bitmap>
+	<widget name="ce/main/forge" extends="ui\shell\main_menu\main_menu_item_settings" bitmap="ce/main/forge_art">
 		<on event="a start" open="h3/forge/lobby"/>
 	</widget>
-	<widget name="ce/main/friends" extends="ui\shell\main_menu\main_menu_item_settings" bitmap="none" font="ui\large_ui" color="#FF5AA0E6" align="center" text_y="5" height="30" string_list="ce/main_items" string_index="1">
+	<widget name="ce/main/friends" extends="ui\shell\main_menu\main_menu_item_settings" bitmap="ce/main/friends_art">
 		<on event="a start" open="h3/friends/screen"/>
 	</widget>
-	<widget name="ce/main/fileshare" extends="ui\shell\main_menu\main_menu_item_settings" bitmap="none" font="ui\large_ui" color="#FF5AA0E6" align="center" text_y="5" height="30" string_list="ce/main_items" string_index="2">
+	<widget name="ce/main/fileshare" extends="ui\shell\main_menu\main_menu_item_settings" bitmap="ce/main/fileshare_art">
 		<on event="a start" run="port fileshare enter" open="h3/fileshare/screen"/>
 	</widget>
-	<widget name="ce/main/mods" extends="ui\shell\main_menu\main_menu_item_settings" bitmap="none" font="ui\large_ui" color="#FF5AA0E6" align="center" text_y="5" height="30" string_list="ce/main_items" string_index="3">
+	<widget name="ce/main/mods" extends="ui\shell\main_menu\main_menu_item_settings" bitmap="ce/main/mods_art">
 		<on event="a start" run="port h3 mods init" open="h3/mods/screen"/>
 	</widget>
 	<widget name="ce/main/list" extends="ui\shell\main_menu\main_menu_select_list" classic_patch="true" drop="children">
-		<child widget="ui\shell\main_menu\main_menu_item_load_camp" x="192" y="226"/>
-		<child widget="ui\shell\main_menu\main_menu_item_multiplayer" x="192" y="256"/>
-		<child widget="ui\shell\main_menu\main_menu_item_settings" x="192" y="286"/>
-		<child widget="ce/main/forge" x="192" y="316"/>
-		<child widget="ce/main/friends" x="192" y="346"/>
-		<child widget="ce/main/fileshare" x="192" y="376"/>
-		<child widget="ce/main/mods" x="192" y="406"/>
+		<child widget="ui\shell\main_menu\main_menu_item_load_camp" x="194" y="247"/>
+		<child widget="ui\shell\main_menu\main_menu_item_multiplayer" x="192" y="279"/>
+		<child widget="ui\shell\main_menu\main_menu_item_settings" x="192" y="311"/>
+		<child widget="ce/main/forge" x="192" y="343"/>
+		<child widget="ce/main/friends" x="192" y="375"/>
+		<child widget="ce/main/fileshare" x="192" y="407"/>
+		<child widget="ce/main/mods" x="192" y="439"/>
 	</widget>
 </menus>
