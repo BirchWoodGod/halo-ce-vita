@@ -95,7 +95,10 @@ static int forge_net_properties_valid(
 	if (record->ai_team >= FORGE_NET_AI_TEAM_COUNT)
 		return 0;
 	/* (a character's settings on a character only) */
-	if (!(record->flags & FORGE_NET_FLAG_AI) && (record->ai_team != 0 || (record->record_flags & 0x02)))
+	if (!(record->flags & FORGE_NET_FLAG_AI) && (record->ai_team != 0 || (record->record_flags & 0x06)))
+		return 0;
+	/* (a character's respawn: after a second or more) */
+	if ((record->record_flags & 0x04) && record->respawn_seconds == 0)
 		return 0;
 	return 1;
 }

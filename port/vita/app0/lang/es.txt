@@ -1443,6 +1443,7 @@
 "RESPAWN: %d S" = "REAPARECE: %d S"
 "RESPAWN" = "REAPARECE"
 "NEVER" = "NUNCA"
+"AI respawn: a character's properties, RESPAWN." = "IA que reaparece: propiedades del personaje, REAPARECE."
 "PLACE AT START" = "AL EMPEZAR"
 "OBJECT PROPERTIES" = "PROPIEDADES"
 "Done" = "Listo"

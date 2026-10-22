@@ -119,7 +119,10 @@ this of square */
 #define FORGE_NET_MAXIMUM_TEAM 7
 #define FORGE_NET_MAXIMUM_RESPAWN_SECONDS 600
 #define FORGE_NET_AI_TEAM_COUNT 6
-#define FORGE_NET_RECORD_FLAGS_KNOWN 0x03
+/* (forge_files.h FORGE_RECORD_*: placed at the start, a character's AI off,
+and its respawn - 0x04, Oct 22 2026: a joiner of insider.21 or before drops
+an entry with it, so a respawning character is not shown to one) */
+#define FORGE_NET_RECORD_FLAGS_KNOWN 0x07
 
 /* rate limits, per machine (records a second, the most at once): every
 request; and the ones that make objects (spawn, duplicate) */

@@ -114,6 +114,14 @@
 #               off, an Elite of the player's team, a Warthog) saved as version
 #               2 (forge_files_test --dump), then started again from the
 #               settings panel's route: its characters' teams and AI as saved
+#   airespawn   a character's RESPAWN (its properties, the owner's of Oct 22 2026): an
+#               Elite's set to 10 s ("forge property respawn" while held: off,
+#               then 10 s), another left off; both killed: 8 s on both dead,
+#               after 10 s the first back alive where it was put (its id, its
+#               actor), the second still dead; saved as version 3 (only the
+#               first respawning: forge_files_test --dump), started again from
+#               it: both placed, the first killed and back 10 s later, the
+#               second killed and not
 #   allai       the Forge menu's ALL AI: an Elite, a grunt, a jackal and a
 #               hunter fight the Spartan; ALL AI (the console's "forge allai",
 #               as the menu's row) turns them all off: for 10 s none moves (a
@@ -240,7 +248,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_forge_test.$$}
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs packnote packcopy smallmap aiteam aioff round aisave allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks lobbycost mpvariant}
+cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs packnote packcopy smallmap aiteam aioff round aisave airespawn allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks lobbycost mpvariant}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
@@ -797,6 +805,20 @@ aisave_runs() {
 		HALO_TEST_FORGE_PACKS=covenant_ai HALO_SAVE_ROOT="$store"
 }
 
+airespawn_runs() {
+	local store="$out/airespawn-store"
+	rm -rf "$store"
+	mkdir -p "$store"
+	local c="$ai_setup;L307:forge property respawn;L308:forge drop;L311:forge spawn elite minor plasma rifle"
+	c="$c;L312:forge distance 4;L314:forge drop;L400:forge ai;L440:forge kill #1;L442:forge kill #2;L460:forge ai"
+	c="$c;L680:forge ai;L800:forge ai;L820:forge save AI Respawn"
+	ai_run airespawn 40 "$c" HALO_SAVE_ROOT="$store"
+	"$out/forge_files_test" --dump "$store/forge/bloodgulch/ai_respawn.hmv" > "$out/airespawn/dump.txt" 2>&1
+	run airespawn-load 40 "" "L400:forge ai;L440:forge kill #1;L442:forge kill #2;L460:forge ai;L800:forge ai" "" \
+		HALO_MENU_STYLE=classic HALO_SYSTEM_LINK_TEST=forge:9:ai_respawn.hmv HALO_TEST_FORGE_PACKS=covenant_ai \
+		HALO_SAVE_ROOT="$store"
+}
+
 # ("forge ai" and "forge where" from tick FIRST to LAST)
 ai_looks() { # FIRST LAST STEP
 	local t w=""
@@ -1081,6 +1103,8 @@ for c in $cases; do
 		round_runs & ;;
 	aisave)
 		aisave_runs & ;;
+	airespawn)
+		airespawn_runs & ;;
 	mpvariant)
 		if [ "$menus_files" = 0 ] || [ ! -r "$packcopy_profile" ]; then
 			echo "SKIP: mpvariant: no Halo PC bitmaps.map and loc.map in $data/maps, or no profile ($packcopy_profile)"
@@ -1322,6 +1346,35 @@ for c in $cases; do
 			"forge: ai 0: Elite Major Plasma Rifle .* alive .* AI team flood, engine team 4, AI off, actor yes"
 		expect aisave-load "the other of the player's team, its AI on" \
 			"forge: ai 1: Elite Minor Plasma Rifle .* alive .* AI team player, engine team 0, AI on, actor yes"
+		continue
+	fi
+	if [ "$c" = airespawn ]; then
+		checked airespawn || continue
+		checked airespawn-load
+		log="$out/airespawn/run.log"
+		ai_at() { # LOG TICK ID: the "forge ai" line of that id at that tick's command
+			sed -n "/test command at tick $2: forge ai\$/,/test command at tick/p" "$1" | grep -a "forge: ai [0-9]*: .*(id $3) "
+		}
+		expect airespawn "RESPAWN: off, then 10 s" "forge: properties: team -1, respawn 10 s, placed at start, AI team default"
+		ai_at "$log" 680 1 | grep -aq " dead " && ai_at "$log" 680 2 | grep -aq " dead " &&
+			echo "  ok: airespawn: 8 s on, both dead" || fail "airespawn: 8 s on, not both dead: $(ai_at "$log" 680 1) / $(ai_at "$log" 680 2)"
+		expect airespawn "after 10 s the first back where it was put" "forge: elite major plasma rifle \(#1\) respawned after 10 s at "
+		ai_at "$log" 800 1 | grep -aq " alive .* actor yes" && echo "  ok: airespawn: the first alive again, its id, its actor" ||
+			fail "airespawn: the first not back alive: $(ai_at "$log" 800 1)"
+		ai_at "$log" 800 2 | grep -aq " dead " && echo "  ok: airespawn: the second (RESPAWN off) still dead" ||
+			fail "airespawn: the second came back: $(ai_at "$log" 800 2)"
+		grep -aq "forge: elite minor plasma rifle (#2) respawned" "$log" && fail "airespawn: the second respawned"
+		if grep -q "^version 3 " "$out/airespawn/dump.txt" &&
+			grep -q "^record [01]: characters.elite.elite major.elite major plasma rifle kind 0 team -1 ai team 0 respawn 10 flags 5 " "$out/airespawn/dump.txt" &&
+			grep -q "^record [01]: characters.elite.elite minor.elite minor plasma rifle kind 0 team -1 ai team 0 respawn 30 flags 1 " "$out/airespawn/dump.txt"; then
+			echo "  ok: airespawn: written as version 3, the first respawning after 10 s, the second not"
+		else
+			fail "airespawn: the file: $(cat "$out/airespawn/dump.txt")"
+		fi
+		log="$out/airespawn-load/run.log"
+		expect airespawn-load "the variant started again" "forge: map variant \"AI Respawn\" applied: 2 placed, 0 skipped"
+		expect airespawn-load "its respawning Elite killed and back after 10 s" "forge: elite major plasma rifle \(#[0-9]+\) respawned after 10 s"
+		grep -aq "forge: elite minor plasma rifle (#[0-9]*) respawned" "$log" && fail "airespawn-load: the Elite with RESPAWN off respawned"
 		continue
 	fi
 	if [ "$c" = allai ]; then

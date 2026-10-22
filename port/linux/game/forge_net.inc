@@ -2149,7 +2149,9 @@ static void forge_net_entry_fill(
 	record->respawn_seconds = (uint16_t)MIN(placed->respawn_seconds, FORGE_FILE_MAXIMUM_RESPAWN_SECONDS);
 	record->ai_team = placed->ai ? (uint8_t)(placed->ai_team % NUMBER_OF_FORGE_AI_TEAMS) : 0;
 	if (!placed->ai)
-		record->record_flags &= (uint8_t)~FORGE_RECORD_AI_OFF;
+		record->record_flags &= (uint8_t)~(FORGE_RECORD_AI_OFF | FORGE_RECORD_AI_RESPAWN);
+	if (!record->respawn_seconds)
+		record->record_flags &= (uint8_t)~FORGE_RECORD_AI_RESPAWN;
 	if (placed->has_home)
 		home = placed->home;
 	else if (forge_object_alive(placed->object_index))

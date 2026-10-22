@@ -512,7 +512,8 @@ static int forge_file_record_check(
 		return 0;
 	}
 	if ((record->game_types & ~FORGE_FILE_GAME_TYPES_MASK) || record->variant > FORGE_FILE_MAXIMUM_VARIANT ||
-		(record->flags & ~(version >= 2 ? FORGE_RECORD_FLAGS_KNOWN : FORGE_RECORD_FLAGS_VERSION_1)))
+		(record->flags & ~(version >= 3 ? FORGE_RECORD_FLAGS_KNOWN : version == 2 ? FORGE_RECORD_FLAGS_VERSION_2 :
+			FORGE_RECORD_FLAGS_VERSION_1)))
 	{
 		return 0;
 	}
@@ -525,6 +526,9 @@ static int forge_file_record_check(
 	{
 		return 0;
 	}
+	/* (version 3's respawn: a character's only, after a second or more) */
+	if ((record->flags & FORGE_RECORD_AI_RESPAWN) && (!character || record->respawn_seconds == 0))
+		return 0;
 	for (index = 0; index < 3; index++)
 	{
 		if (!forge_file_finite(record->position[index]) || !forge_file_finite(record->angles[index]) ||
@@ -553,14 +557,18 @@ int forge_file_layout_version(
 {
 	int index;
 
+	int version = FORGE_FILE_FIRST_VERSION;
+
 	if (layout->version)
 		return layout->version;
 	for (index = 0; index < layout->record_count && index < FORGE_FILE_MAXIMUM_RECORDS; index++)
 	{
+		if (layout->records[index].flags & FORGE_RECORD_AI_RESPAWN)
+			return 3;
 		if (layout->records[index].ai_team || (layout->records[index].flags & FORGE_RECORD_AI_OFF))
-			return 2;
+			version = 2;
 	}
-	return FORGE_FILE_FIRST_VERSION;
+	return version;
 }
 
 int forge_file_layout_check(
@@ -570,6 +578,7 @@ int forge_file_layout_check(
 	int index;
 	int other;
 	int netgame = 0;
+	int respawning = 0;
 	int version;
 
 	if (!layout || !forge_file_meta_terminated(layout))
@@ -618,7 +627,13 @@ int forge_file_layout_check(
 			return _forge_file_bad_record;
 		if (layout->records[index].kind != _forge_record_object)
 			netgame = 1;
+		if (layout->records[index].flags & FORGE_RECORD_AI_RESPAWN)
+			respawning = 1;
 	}
+	/* (version 3 is written only for a respawning character: a version 3
+	file without one is not one this writer made) */
+	if (version >= 3 && !respawning)
+		return _forge_file_bad_version;
 	/* (the flag says whether any record is a netgame's) */
 	if (((layout->flags & FORGE_FILE_FLAG_NETGAME_SPAWNS) != 0) != netgame)
 		return _forge_file_bad_flags;

@@ -12,7 +12,7 @@ A map variant is <name>.hmv ("Halo map variant") in the Forge folder's
 folder of its map (forge_store.h). Binary, little-endian:
 
 	header (64 bytes)
-	  magic "HFRG", version u16 (1 or 2), header size u16 (64), flags u32
+	  magic "HFRG", version u16 (1 to 3), header size u16 (64), flags u32
 	  (bit 0: it has netgame spawns), map name char[32] (the scenario's
 	  short name, bloodgulch), map hash u32 (the cache file's checksum: a
 	  mismatch warns), pack count u16, path count u16, record count u16,
@@ -37,6 +37,14 @@ as ever (that byte and bit must be zero in them); a layout is written as the
 lowest version that holds it (version 1 unless a character has an AI
 setting), so a variant without them stays readable by older builds, and a
 file read writes back as its own version.
+
+Version 3 (Oct 22 2026) adds a character's respawn (flag bit 2,
+FORGE_RECORD_AI_RESPAWN, a character's only): dead, it is placed again where
+the editor put it after its record's respawn time (1 s or more), by the host
+of the game, in Forge and in the variant played. A file of version 2 or 1
+holds none (that bit must be zero in them, whatever its respawn time says:
+every character of an older variant stays dead, as it did); a layout with a
+respawning character is written as version 3, any other as before.
 */
 
 #ifndef __FORGE_FILES_H
@@ -46,7 +54,7 @@ file read writes back as its own version.
 
 #define FORGE_FILE_EXTENSION ".hmv"
 /* the version written when a layout needs it, and the oldest read */
-#define FORGE_FILE_VERSION 2
+#define FORGE_FILE_VERSION 3
 #define FORGE_FILE_FIRST_VERSION 1
 #define FORGE_FILE_HEADER_SIZE 64
 #define FORGE_FILE_MAXIMUM_SIZE 65536
@@ -97,8 +105,12 @@ enum
 	/* (version 2, a character's only) its AI's brain off: it stands as
 	placed, thinks, moves and fights not (the engine's ai_braindead) */
 	FORGE_RECORD_AI_OFF = 1 << 1,
+	/* (version 3, a character's only) dead, it is placed again after its
+	respawn time */
+	FORGE_RECORD_AI_RESPAWN = 1 << 2,
 	FORGE_RECORD_FLAGS_VERSION_1 = FORGE_RECORD_PLACE_AT_START,
-	FORGE_RECORD_FLAGS_KNOWN = FORGE_RECORD_PLACE_AT_START | FORGE_RECORD_AI_OFF,
+	FORGE_RECORD_FLAGS_VERSION_2 = FORGE_RECORD_PLACE_AT_START | FORGE_RECORD_AI_OFF,
+	FORGE_RECORD_FLAGS_KNOWN = FORGE_RECORD_PLACE_AT_START | FORGE_RECORD_AI_OFF | FORGE_RECORD_AI_RESPAWN,
 };
 
 /* (version 2) a character's AI team: whom it fights. The engine's teams

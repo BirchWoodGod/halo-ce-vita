@@ -625,6 +625,9 @@ struct forge_placed
 	long holder;
 	long net_object;
 	boolean networked;
+	/* (a character that respawns: FORGE_RECORD_AI_RESPAWN) the game tick it
+	was first seen dead at, plus one; 0 while alive */
+	long dead_tick;
 };
 
 /* a step of the undo history */
@@ -1480,6 +1483,7 @@ static void forge_placed_add(
 	placed->ai_team = FORGE_AI_TEAM_DEFAULT;
 	placed->holder = NONE;
 	placed->net_object = NONE;
+	placed->dead_tick = 0;
 	placed->id = ++forge_globals.next_id;
 	forge_globals.placed_count++;
 	if (ai)
@@ -3309,6 +3313,8 @@ exact angles (yaw, pitch, roll, forge_angles_from_facing's: the map
 variant keeps all three) and their reset */
 
 static short const forge_respawn_choices[] = { 0, 10, 20, 30, 45, 60, 90, 120, 180 };
+/* a character's: off (never), or its respawn time (the owner's, Oct 22) */
+static short const forge_ai_respawn_choices[] = { 0, 10, 30, 60, 120 };
 
 /* the placed entry of the object held, NULL for none or one of the map's */
 static struct forge_placed *forge_properties_target(
@@ -3338,6 +3344,32 @@ static void forge_property_apply(
 		placed->team = (signed char)(((placed->team + 1 + step + 3) % 3) - 1);
 		break;
 	case _forge_property_respawn:
+		/* (a character's: off, or its respawn time once dead) */
+		if (placed->ai)
+		{
+			short count = (short)NUMBEROF(forge_ai_respawn_choices);
+
+			for (index = 0; index < count - 1; index++)
+			{
+				if ((placed->flags & FORGE_RECORD_AI_RESPAWN) ? forge_ai_respawn_choices[index] >= placed->respawn_seconds :
+					forge_ai_respawn_choices[index] == 0)
+				{
+					break;
+				}
+			}
+			index = (short)((index + step + count) % count);
+			if (forge_ai_respawn_choices[index])
+			{
+				placed->flags |= FORGE_RECORD_AI_RESPAWN;
+				placed->respawn_seconds = (unsigned short)forge_ai_respawn_choices[index];
+			}
+			else
+			{
+				placed->flags &= (unsigned char)~FORGE_RECORD_AI_RESPAWN;
+			}
+			placed->dead_tick = 0;
+			break;
+		}
 		for (index = 0; index < (short)NUMBEROF(forge_respawn_choices) - 1; index++)
 		{
 			if (forge_respawn_choices[index] >= placed->respawn_seconds)
@@ -3416,7 +3448,8 @@ static void forge_property_apply(
 		if (placed->ai)
 		{
 			platform_log("forge: properties: team %d, respawn %d s, %splaced at start, AI team %s (%d), AI %s, %s", placed->team,
-				placed->respawn_seconds, (placed->flags & FORGE_RECORD_PLACE_AT_START) ? "" : "not ",
+				(placed->flags & FORGE_RECORD_AI_RESPAWN) ? placed->respawn_seconds : 0,
+				(placed->flags & FORGE_RECORD_PLACE_AT_START) ? "" : "not ",
 				forge_ai_team_log_names[placed->ai_team % NUMBER_OF_FORGE_AI_TEAMS],
 				forge_ai_team_index(placed->ai_team, placed->object_index), (placed->flags & FORGE_RECORD_AI_OFF) ? "off" : "on",
 				rotation);
@@ -3704,7 +3737,10 @@ static boolean forge_variant_capture(
 		if (placed->ai && group_tag == ACTOR_VARIANT_DEFINITION_TAG)
 			record->ai_team = (unsigned char)(placed->ai_team % NUMBER_OF_FORGE_AI_TEAMS);
 		else
-			record->flags &= (unsigned char)~FORGE_RECORD_AI_OFF;
+			record->flags &= (unsigned char)~(FORGE_RECORD_AI_OFF | FORGE_RECORD_AI_RESPAWN);
+		/* (a character's respawn: version 3, after a second or more) */
+		if ((record->flags & FORGE_RECORD_AI_RESPAWN) && !record->respawn_seconds)
+			record->flags &= (unsigned char)~FORGE_RECORD_AI_RESPAWN;
 		record->position[0] = home.position.x;
 		record->position[1] = home.position.y;
 		record->position[2] = home.position.z;
@@ -3908,7 +3944,7 @@ static void forge_variant_apply(
 			if (!entry->ai)
 			{
 				entry->ai_team = FORGE_AI_TEAM_DEFAULT;
-				entry->flags &= (unsigned char)~FORGE_RECORD_AI_OFF;
+				entry->flags &= (unsigned char)~(FORGE_RECORD_AI_OFF | FORGE_RECORD_AI_RESPAWN);
 			}
 			forge_ai_apply(entry);
 		}
@@ -4742,7 +4778,8 @@ boolean forge_properties_get(
 		return FALSE;
 	forge_object_name(placed->object_index, properties->name, sizeof(properties->name));
 	properties->team = placed->team;
-	properties->respawn_seconds = placed->respawn_seconds;
+	/* (a character's: 0, never, unless it respawns) */
+	properties->respawn_seconds = placed->ai && !(placed->flags & FORGE_RECORD_AI_RESPAWN) ? 0 : placed->respawn_seconds;
 	properties->place_at_start = (placed->flags & FORGE_RECORD_PLACE_AT_START) != 0;
 	{
 		float angles[3];
@@ -5114,6 +5151,91 @@ boolean forge_camera_input(
 	return TRUE;
 }
 
+/* (each update: a local game's, a network game's host's, the Forge game's
+and a map variant's played) the layout's characters that respawn
+(FORGE_RECORD_AI_RESPAWN, the properties' RESPAWN): one seen dead its
+respawn time of game time (a paused game's stands still) is placed again
+where the editor put it, its properties and its id kept (its history's
+steps still name it; a network game's joiners are sent it as any change of
+the layout), its body taken away. Not while anyone holds the body; a
+client never: the host's game does it */
+#define FORGE_TICKS_PER_SECOND 30
+static void forge_ai_respawn_update(
+	void)
+{
+	long now;
+	short index;
+
+	if (!forge_globals.game_active || forge_globals.game_requested || forge_globals.round_pending ||
+		forge_globals.round_resetting || forge_net_client() || !game_in_progress())
+	{
+		return;
+	}
+	now = game_time_get();
+	for (index = 0; index < forge_globals.placed_count && index < FORGE_MAXIMUM_OBJECTS; index++)
+	{
+		struct forge_placed *placed = &forge_globals.placed[index];
+		struct forge_placed kept;
+		long object_index;
+		short refusal;
+
+		if (!placed->ai || !(placed->flags & FORGE_RECORD_AI_RESPAWN) || !placed->has_home || !forge_placed_dead(placed))
+		{
+			placed->dead_tick = 0;
+			continue;
+		}
+		if (!placed->dead_tick)
+		{
+			placed->dead_tick = now + 1;
+			continue;
+		}
+		if (now + 1 - placed->dead_tick < (long)placed->respawn_seconds * FORGE_TICKS_PER_SECOND)
+			continue;
+		if (placed->object_index != NONE && (placed->object_index == forge_globals.held_object_index ||
+			forge_net_holder(placed->object_index, NONE) != NONE))
+		{
+			continue;
+		}
+		kept = *placed;
+		if (forge_object_alive(placed->object_index))
+			object_delete(placed->object_index);
+		forge_placed_remove(index);
+		object_index = forge_place(kept.tag_index, &kept.home.position, &kept.home.forward, &kept.home.up, TRUE, &refusal);
+		if (object_index == NONE || forge_globals.placed_count <= 0 ||
+			forge_globals.placed[forge_globals.placed_count - 1].object_index != object_index)
+		{
+			/* (not placed: the entry kept, its body gone, tried again a
+			respawn time later) */
+			if (forge_globals.placed_count < FORGE_MAXIMUM_OBJECTS)
+			{
+				kept.object_index = NONE;
+				kept.dead_tick = now + 1;
+				forge_globals.placed[forge_globals.placed_count++] = kept;
+				forge_placed_update();
+			}
+			platform_log("forge: %s (#%ld) could not respawn (%d)", forge_tag_leaf(kept.tag_index), kept.id, (int)refusal);
+			index--;
+			continue;
+		}
+		{
+			struct forge_placed *entry = &forge_globals.placed[forge_globals.placed_count - 1];
+
+			entry->id = kept.id;
+			entry->team = kept.team;
+			entry->flags = kept.flags;
+			entry->respawn_seconds = kept.respawn_seconds;
+			entry->ai_team = kept.ai_team;
+			entry->home = kept.home;
+			entry->has_home = TRUE;
+			forge_ai_apply(entry);
+		}
+		platform_log("forge: %s (#%ld) respawned after %d s at %.2f %.2f %.2f", forge_tag_leaf(kept.tag_index), kept.id,
+			(int)kept.respawn_seconds, kept.home.position.x, kept.home.position.y, kept.home.position.z);
+		/* (the entry moved to the end: this index holds the next one) */
+		index--;
+	}
+}
+
 void forge_update(
 	void)
 {
@@ -5151,6 +5273,8 @@ void forge_update(
 		{
 			forge_placed_update();
 			forge_homes_update();
+			/* (its characters that respawn: the game's host's) */
+			forge_ai_respawn_update();
 			forge_net_update();
 		}
 		return;
@@ -5184,6 +5308,7 @@ void forge_update(
 	}
 	if (forge_game_playing)
 		forge_ai_hold();
+	forge_ai_respawn_update();
 #ifndef HALO_RELEASE
 	if (forge_globals.game_active && forge_globals.ai_shots_counted)
 		forge_ai_shots_update();
