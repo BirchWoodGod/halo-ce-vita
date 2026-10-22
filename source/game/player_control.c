@@ -1962,6 +1962,28 @@ void player_control_action_test_note(
 	}
 }
 
+/* port: the reverts there had been when the skip button was last seen up:
+a press skips a cinematic only if the button has been let go since the last
+revert. A cinematic is skipped by reverting to its checkpoint, and a revert
+takes the game back to the cinematic it skips (a10's start checkpoint is its
+opening cinematic's): the press held on - the skip's own, or Cross/A that
+took the pause's REVERT TO CHECKPOINT - skipped it again each tick it was
+held, ~9 reverts for one (both menu styles, insider.20 and .21) */
+static unsigned long player_control_skip_up_reverts;
+
+static boolean player_control_skip_press_new(
+	boolean held)
+{
+	unsigned long reverts = game_state_port_revert_count();
+
+	if (!held)
+	{
+		player_control_skip_up_reverts = reverts;
+		return FALSE;
+	}
+	return player_control_skip_up_reverts == reverts;
+}
+
 static void player_control_action_test_check_reset_input_blob(
 	struct input_blob *input)
 {
@@ -1974,8 +1996,9 @@ static void player_control_action_test_check_reset_input_blob(
 	(network_coop.c). */
 	{
 		const struct gamepad_state *gamepad = input_get_gamepad_state(0);
+		boolean fresh = player_control_skip_press_new(gamepad && gamepad->buttons[_gamepad_binary_button_start]);
 
-		if (gamepad && gamepad->buttons[_gamepad_binary_button_start] == 1 &&
+		if (fresh && gamepad->buttons[_gamepad_binary_button_start] == 1 &&
 			(cinematic_can_be_skipped() || network_coop_skip_offered()))
 		{
 			if (!network_coop_vote_skip())
@@ -1983,7 +2006,8 @@ static void player_control_action_test_check_reset_input_blob(
 		}
 	}
 #else
-	if (input->accept && (cinematic_can_be_skipped() || network_coop_skip_offered()))
+	if (player_control_skip_press_new(input->accept != 0) &&
+		(cinematic_can_be_skipped() || network_coop_skip_offered()))
 	{
 		/* port: in network co-op the players vote to skip (network_coop.c) */
 		if (!network_coop_vote_skip())

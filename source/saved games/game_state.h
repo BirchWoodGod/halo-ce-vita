@@ -43,6 +43,9 @@ boolean game_state_port_saved_game_valid(
 	void);
 void game_state_port_restamp_revert_time(
 	void);
+/* port: how many reverts there have been (player_control.c) */
+unsigned long game_state_port_revert_count(
+	void);
 void game_state_save_to_persistent_storage(
 	void);
 boolean game_state_test_persistent_storage(

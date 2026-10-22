@@ -2781,7 +2781,7 @@ PY
 		fi
 		# (a level from the Halo 3 lobby, its pause: REVERT TO CHECKPOINT, Circle; again, down to
 		# REVERT TO CHECKPOINT, Cross; the pause, RESTART MISSION, Circle; SAVE AND QUIT)
-		profile_from=$HALO_TEST_PROFILE run msgboxes_campaign "$menus_data" 200 "wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:2500 down:150:600 down:150:600 down:150:600 a wait:150:2500 down:150:600 down:150:600 a level:150:25000 start:150:3000 until/h3\\pause down:150:1200 a:150:1500 until/dlg\\revert @revert b:150:1500 until/h3\\pause @pause_again a:150:1500 until/dlg\\revert down:150:800 @revert_yes a:150:8000 start:150:3000 until/h3\\pause down:150:800 down:150:800 a:150:1500 until/dlg\\restart @restart b:150:1500 until/h3\\pause down:150:800 a:150:1000 until/dlg\\savequit @saving wait:150:1000 until/h3\\main:150:3000 @menu" \
+		profile_from=$HALO_TEST_PROFILE run msgboxes_campaign "$menus_data" 200 "wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:2500 down:150:600 down:150:600 down:150:600 a wait:150:2500 down:150:600 down:150:600 a level:150:25000 start:150:3000 until/h3\\pause down:150:1200 a:150:1500 until/dlg\\revert @revert b:150:1500 until/h3\\pause @pause_again a:150:1500 until/dlg\\revert down:150:800 @revert_yes a:1000:8000 start:150:3000 until/h3\\pause down:150:800 down:150:800 a:150:1500 until/dlg\\restart @restart b:150:1500 until/h3\\pause down:150:800 a:150:1000 until/dlg\\savequit @saving wait:150:1000 until/h3\\main:150:3000 @menu" \
 			HALO_MENU_STYLE=halo3 HALO_TEST_COMMANDS="L150:@skip;L300:@skip"
 		log=$out/msgboxes_campaign/run.log
 		echo "--- msgboxes (a level's pause)"
@@ -2792,6 +2792,11 @@ PY
 			fail msgboxes "campaign: REVERT TO CHECKPOINT's question did not open twice"
 		[ "$(grep -ac 'pause menu: restart at checkpoint' "$log")" = 1 ] ||
 			fail msgboxes "campaign: not reverted once (Circle must not, REVERT TO CHECKPOINT must)"
+		# (one revert for REVERT TO CHECKPOINT's Cross, held a second as a hand may: a10's checkpoint is
+		# its opening cinematic's, and the held press skipped it again each tick - ~9 reverts, insider.21)
+		reverts=$(sed -n '/pause menu: restart at checkpoint/,/test pad: start/p' "$log" | grep -ac "game state: reverted to the checkpoint")
+		echo "reverts for REVERT TO CHECKPOINT: $reverts"
+		[ "$reverts" = 1 ] || fail msgboxes "campaign: REVERT TO CHECKPOINT reverted $reverts times (1 wanted)"
 		grep -aq 'menus: h3 dialog: pc.h3.dlg.restart.screen "RESTART MISSION"' "$log" ||
 			fail msgboxes "campaign: RESTART MISSION's question did not open"
 		grep -aq "pause menu: restart level" "$log" && fail msgboxes "campaign: Circle restarted the mission"
