@@ -42,7 +42,7 @@ choice for us.
 | 31 | Host takes client_ready (9), client_identity (18) and hit_reports (11) only over that client's stream. | receive check | **[match]** |
 | 31 | Host sends each client's per-tick datagrams to the source address *and port* that client's datagrams arrive from; answers a LAN game search from a non-standard port directly. | addressing | **[differs]** we always send to the standard client port and drop the source port |
 | 32 | New distributed message kind 90: the host's mouse aim assist policy, sent reliably over the stream. A v32 client defaults to "blocked" until it arrives. | wire: new kind | **[differs]** we neither send nor take it |
-| (no raise) | Text chat, kinds 87/88/89 (host-relayed lines, chat settings). | additive | **[n/a]** dropping them is the defined behaviour of a build without chat |
+| (no raise) | Text chat, kinds 87/88/89 (host-relayed lines, chat settings). | additive | **[match]** since feat/ingame-chat (game_chat.c) |
 | (no raise) | Server-browser ping probes (an ordinary signalling join that is closed after a few tunnel pings); live listings accepted only within one hour of the browser's clock. | host tolerance / listing time | check at runtime (section 9) |
 
 The rest of the 329 commits between 8102e711 and 6ec42856 are local
@@ -427,9 +427,14 @@ For completeness, the observable format:
   chat off. Hosts force chat off while listed in the server browser, and a
   client joined from the browser ignores chat whatever it is told.
 
-**Ours: [n/a]**: we drop 87-89 on the crossplay wire and send none, so PC
-players on our host see chat off. Our own 1.1.1 chat (Bungie group 38/39)
-stays off the crossplay wire.
+**Ours: [match]** since feat/ingame-chat (Oct 21 2026,
+`port/linux/game/game_chat.c`): we send and take 87-89 as above on both
+wires; our host sends 89 (chat allowed, links refused) and relays as
+OpenCE's host does; our client shows an OpenCE host's lines and notices.
+We do not force the chat off for a game listed in the server browser (an
+OpenCE client that joined it from its browser ignores our lines, its own
+rule); each Vita filters what it shows instead (`port/linux/src/chat_filter.c`).
+`run_netns_crossplay_test.sh crosschat` checks it both ways.
 
 ---
 
@@ -515,7 +520,7 @@ bridge can check bytes directly.
 | T9 | Stream-only kinds: datagram copies of kinds 9, 11, 18 sent to our host and to OpenCE's | ignored by both |
 | T10 | Return port: two OpenCE 32 clients in one namespace (the second binds another port) join our host | both receive per-tick state (players spawn and move) |
 | T11 | Keep-alive bytes: capture pregame keep-alives from our host and OpenCE's | 4-byte payload, the two bytes beyond the 16-bit value zero from both |
-| T12 | Chat kinds: OpenCE host sends chat lines and config to our client; our host with an OpenCE client | our client drops 87-89 silently and plays on; the OpenCE client shows chat off |
+| T12 | Chat kinds: OpenCE host sends chat lines and config to our client; our host with an OpenCE client | each shows the other's lines, team lines and notices; links refused both ways (`run_netns_crossplay_test.sh crosschat`) |
 | T13 | Browser probes: an OpenCE 32 client browses while our listed host runs 10 minutes | probe sessions answered and closed, no player slot used, no join-flood refusals for real joins after, host stable |
 | T14 | Listing time: run our host with its clock offset by 59 and 61 minutes (faketime) | listed in the OpenCE browser at 59, absent at 61 |
 | T15 | Flag delete: OpenCE host deletes the CTF flag via its console during a game | our client (release flags) drops the flag from the carrier, no assertion, game continues |

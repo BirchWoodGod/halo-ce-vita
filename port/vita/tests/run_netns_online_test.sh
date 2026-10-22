@@ -313,6 +313,21 @@
 #            (not Bravo's friend); the broker sees no name or chat; then Alpha
 #            leaves the party and the longest-standing member (the first to
 #            join) leads on both
+#   chat     the in-game chat (port/linux/game/game_chat.c) among three machines, each
+#            behind a NAT of its own: party's three (Alpha hosting Team Slayer
+#            on Blood Gulch, Bravo, Charlie, the party's FOLLOW taking them into
+#            it), each machine's scripted lines (HALO_TEST_CHAT) to ALL, TEAM
+#            (heard by the sender's team alone, as each machine logs the teams)
+#            and PARTY (the friends channel, shown over the game), a quick chat
+#            phrase from the wheel's presses and one by number (shown in each
+#            reader's language), a typed line (the keyboard answered by the
+#            test); Bravo mutes Charlie (hidden on Bravo alone); Bravo's chat
+#            filter off, Charlie's on: Alpha's lines with a slur of the list
+#            (made from port/vita/app0/chat/filter.txt at run time, in leet)
+#            shown as sent on Bravo, masked on Charlie, who mutes Alpha after
+#            the third; Bravo's flood (12 at once: the host takes 5 and tells
+#            it), malformed lines (the host drops each and shows none) and a
+#            link (refused before it is sent); the broker sees no line
 #   adhoc    online off, ad hoc on: the two machines' only link to each other
 #            is an emulated ad hoc group (HALO_NET_ADHOC_EMULATE)
 #   many     online off, the host and HALO_TEST_JOINERS joiners (3) on one
@@ -755,6 +770,12 @@ seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = coopstarts ] && seconds=${HALO_TEST_SECONDS:-75}
 [ "$mode" = party ] && seconds=${HALO_TEST_SECONDS:-210}
 [ "$mode" = friendsbackup ] && seconds=${HALO_TEST_SECONDS:-200}
+[ "$mode" = chat ] && seconds=${HALO_TEST_SECONDS:-250}
+# (chat: a team game, long enough for every line)
+if [ "$mode" = chat ]; then
+	HALO_TEST_HOST_GAME=${HALO_TEST_HOST_GAME:-host:bloodgulch:team_slayer}
+	HALO_TEST_SCORE=${HALO_TEST_SCORE:-200}
+fi
 # (pickjoin, h3pickjoin: a minute more on the map list than their modes' own)
 [ "$mode" = pickjoin ] && seconds=${HALO_TEST_SECONDS:-230}
 [ "$mode" = h3pickjoin ] && seconds=${HALO_TEST_SECONDS:-240}
@@ -857,7 +878,7 @@ side host 10.10.1 192.168.1
 side join 10.10.2 192.168.2
 # (infection: three players, a second joiner unless told otherwise)
 [ "$mode" = infection ] && export HALO_TEST_SECOND_JOINER=${HALO_TEST_SECOND_JOINER:-1}
-{ [ "${HALO_TEST_SECOND_JOINER:-0}" = 1 ] || [ "$mode" = badmap ] || [ "$mode" = splitscreen ] || [ "$mode" = party ] ||
+{ [ "${HALO_TEST_SECOND_JOINER:-0}" = 1 ] || [ "$mode" = badmap ] || [ "$mode" = splitscreen ] || [ "$mode" = party ] || [ "$mode" = chat ] ||
 	[ "$mode" = friendsbackup ] ||
 	[ "$mode" = h3forgeonline ] || [ "$mode" = vitapc ] || [ "$mode" = vitaonly ]; } &&
 	side join2 10.10.3 192.168.3
@@ -4986,6 +5007,123 @@ party)
 		[ "$two" -ge 20 ] || fail "the $side played Alpha's game for $two s with another player (20 wanted)"
 	done
 	;;
+chat)
+	# (the in-game chat among the party's three, as in party: Alpha hosts Team
+	# Slayer, Bravo and Charlie follow it into its game; each machine's script
+	# counts from when it is in the game)
+	hc=$out/host.code jc=$out/joiner.code j2c=$out/joiner2.code add=$out/host.add
+	# (a slur of the shipped list, in leet - the script holds none: the
+	# list's first whole word, ROT13'd there, its vowels digits)
+	slur=$(awk '$1 == "whole" { print $2; exit }' "$root/port/vita/app0/chat/filter.txt" | tr 'A-Za-z' 'N-ZA-Mn-za-m')
+	leet=$(printf '%s' "$slur" | sed 's/a/4/; s/e/3/; s/i/1/; s/o/0/')
+	[ -n "$slur" ] || fail "no word in the filter's list"
+	(for i in $(seq 1 60); do [ -s "$jc" ] && [ -s "$j2c" ] && break; sleep 1; done
+		cat "$jc" "$j2c" > "$add.tmp" 2>/dev/null; mv "$add.tmp" "$add") &
+	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env HALO_NET_HOST_PUBLIC=false HALO_NET_LOBBY_NAME=Alpha \
+		HALO_NET_PLAYER_NAME=Alpha "HALO_TEST_FRIENDS=code-file=$hc,add-file=$add" \
+		"HALO_TEST_PARTY=invite-at=${HALO_TEST_PARTY_INVITE_AT:-40}" \
+		"HALO_TEST_CHAT=95:teams;100:all:hello everyone from alpha;104:team:alpha team only;108:party:alpha to the party;112:preset:7;150:all:you $leet;154:all:big $leet there;158:all:$leet again;164:all:alpha after the filter" \
+		${HALO_TEST_HOST_ENV:-}; host_pid=$last_pid
+	run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=join-invite HALO_TEST_INPUT=bot:2 HALO_NET_LOBBY_NAME=Bravo "HALO_TEST_FRIENDS=code-file=$jc,accept" \
+		HALO_TEST_PARTY_ANSWER=accept HALO_CHAT_FILTER=0 HALO_NET_PLAYER_NAME=Bravo "HALO_TEST_PAD=wait:150:$((seconds * 1000))" \
+		"HALO_TEST_CHAT=30:teams;35:all:bravo says hi;39:team:bravo team only;40:mute:Charlie;47:wheel:7:0;60:flood:12;66:malformed;70:all:see www.example.com now"
+	join_pid=$last_pid
+	mkdir -p "$out/shots"
+	run_copy joiner2 "$join2_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_c" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=join-invite HALO_TEST_INPUT=bot:3 HALO_NET_LOBBY_NAME=Charlie "HALO_TEST_FRIENDS=code-file=$j2c,accept" \
+		HALO_TEST_PARTY_ANSWER=accept "HALO_TEST_PAD=wait:150:$((seconds * 1000))" "HALO_TEST_CHAT_TYPED=typed by charlie" \
+		HALO_SCREENSHOT_DIR="$out/shots" HALO_GL_VITA_DISPLAY=1 HALO_NET_PLAYER_NAME=Charlie \
+		"HALO_TEST_CHAT=30:teams;56:all:charlie here;60:team:charlie team only;64:party:charlie to the party;68:type;72:shot:chat-lines;73:open;75:shot:chat-wheel;77:close"
+	join2_pid=$last_pid
+	wait $join_pid $join2_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log j2l=$out/joiner2/run.log
+	for side in host joiner joiner2; do
+		echo "--- $side"; grep -a "chat: \|party: chat" "$out/$side/run.log" | grep -av "$slur\|$leet" | head -60
+	done
+	for side in host joiner joiner2; do
+		grep -aq "system link: in another's lobby\|system link: in a network game\|chat: in a network game (hosting)" \
+			"$out/$side/run.log" || fail "the $side was not in Alpha's game"
+	done
+	# (the teams, each name's, as Alpha saw them when its script asked)
+	teams=$(grep -a "chat: test: teams" -A1 "$hl" | grep -a "chat: teams:" | tail -1)
+	echo "teams: ${teams:-none logged}"
+	team_of() { printf '%s\n' "$teams" | grep -o "$1 t[0-9]*" | head -1 | sed 's/.* t//'; }
+	alpha_team=$(team_of Alpha) bravo_team=$(team_of Bravo) charlie_team=$(team_of Charlie)
+	[ -n "$alpha_team" ] && [ -n "$bravo_team" ] && [ -n "$charlie_team" ] || fail "the teams were not logged"
+	# ALL: every machine shows every line (its own too)
+	for side in host joiner joiner2; do
+		log=$out/$side/run.log
+		grep -aq "chat: shown (all): Alpha: hello everyone from alpha" "$log" || fail "the $side did not show Alpha's line to ALL"
+		grep -aq "chat: shown (all): Bravo: bravo says hi" "$log" || fail "the $side did not show Bravo's line to ALL"
+		# (Bravo has muted Charlie: theirs below)
+		[ $side = joiner ] || grep -aq "chat: shown (all): Charlie: typed by charlie" "$log" ||
+			fail "the $side did not show Charlie's typed line"
+		grep -aq "chat: shown (all): Alpha: Nice shot!" "$log" || fail "the $side did not show Alpha's phrase"
+		grep -aq "chat: shown (all): Bravo: Nice shot!" "$log" || fail "the $side did not show Bravo's phrase from the wheel"
+	done
+	# TEAM: the sender's team alone (and the sender)
+	team_check() { # SENDER SENDER_TEAM TEXT [SKIPPED: a machine that muted the sender]
+		local who side name
+		for side in host:Alpha joiner:Bravo joiner2:Charlie; do
+			name=${side#*:}
+			[ "$name" = "${4:-}" ] && continue
+			who=$(team_of "$name")
+			if [ "$who" = "$2" ]; then
+				grep -aq "chat: shown (team): $1: $3" "$out/${side%%:*}/run.log" ||
+					fail "$name (team $who) did not show $1's team line"
+			else
+				grep -aq "chat: shown (team): $1: $3" "$out/${side%%:*}/run.log" &&
+					fail "$name (team $who) showed $1's team line (team $2)"
+			fi
+		done
+	}
+	team_check Alpha "$alpha_team" "alpha team only"
+	team_check Bravo "$bravo_team" "bravo team only"
+	team_check Charlie "$charlie_team" "charlie team only" Bravo
+	# PARTY: over the friends channel, shown over the game
+	grep -aq "party: chat shown over the game: Alpha: alpha to the party" "$jl" || fail "Bravo did not show Alpha's party line"
+	grep -aq "party: chat shown over the game: Alpha: alpha to the party" "$j2l" || fail "Charlie did not show Alpha's party line"
+	grep -aq "party: chat shown over the game: Charlie[^:]*: charlie to the party" "$hl" ||
+		fail "Alpha did not show Charlie's party line"
+	# the wheel and the keyboard
+	grep -aq "chat: the wheel opened" "$jl" && grep -aq "chat: sent (all): Nice shot!" "$jl" ||
+		fail "Bravo's wheel did not send its phrase"
+	grep -aq "chat: typing: answered by the test" "$j2l" || fail "Charlie's keyboard was not asked"
+	# the mute: Charlie hidden on Bravo alone
+	grep -aq "chat: a line from Charlie hidden: muted here" "$jl" || fail "Bravo did not hide muted Charlie"
+	grep -aq "chat: shown ([a-z]*): Charlie: " "$jl" && fail "Bravo showed a line of muted Charlie's"
+	grep -aq "chat: shown (all): Charlie: charlie here" "$hl" || fail "Alpha did not show Charlie's line"
+	# the filter: off on Bravo (as sent), on on Charlie (masked; Alpha muted after the third)
+	grep -aq "chat: shown (all): Alpha: you $leet" "$jl" || fail "Bravo (filter off) did not show the line as sent"
+	grep -aq "chat: shown (all): Alpha: you \*\** \[filtered\]" "$j2l" || fail "Charlie (filter on) did not mask the line"
+	grep -a "chat: shown (all): Alpha:" "$j2l" | grep -aq "$leet" && fail "Charlie showed the word unmasked"
+	grep -aq "chat: a player muted here by the filter" "$j2l" || fail "Charlie did not mute Alpha after three"
+	grep -aq "chat: a line from Alpha hidden: muted here" "$j2l" || fail "Charlie showed Alpha's line after muting"
+	grep -aq "chat: shown (all): Alpha: alpha after the filter" "$jl" || fail "Bravo did not show Alpha's last line"
+	# the host's limits: the flood, malformed lines, a link
+	floods=$(grep -ac "chat: host: dropped a line from machine [0-9]*: too fast" "$hl")
+	echo "the host dropped $floods lines of Bravo's flood"
+	[ "$floods" -ge 5 ] || fail "the host dropped $floods of a flood of 12 (5 or more wanted)"
+	shown=$(grep -ac "chat: shown (all): Bravo: flood " "$hl")
+	[ "$shown" -le "$((5 + 1))" ] || fail "the host showed $shown lines of the flood"
+	grep -aq "chat: notice: You're sending messages too fast" "$jl" || fail "Bravo was not told it floods"
+	grep -aq "dropped a line from machine [0-9]*: malformed" "$hl" || fail "the host took a malformed line"
+	grep -aq "dropped a line from machine [0-9]*: not that machine's player" "$hl" || fail "the host took a line as another's player"
+	grep -aq "dropped a line from machine [0-9]*: not over its stream" "$hl" || fail "the host took a line over a datagram"
+	grep -aE "chat: shown .*(two at once|cut short|a forged notice|as the host's player|over a datagram|: flags$)" "$out"/*/run.log &&
+		fail "a malformed line was shown"
+	grep -aq "chat: notice: Links aren't allowed in this game" "$jl" || fail "Bravo's link was not refused"
+	grep -aq "www.example.com" "$hl" "$j2l" && fail "a link reached another machine"
+	# (the party's and the game's lines: no name nor line on the broker)
+	grep -aqE "hello everyone|bravo says hi|charlie here|alpha to the party|$leet" "$out/broker.log" &&
+		fail "the broker's log shows a line"
+	for side in joiner joiner2; do
+		two=$(grep -a "network test: tick" "$out/$side/run.log" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+		echo "$side's seconds with two or more players playing: $two"
+		[ "$two" -ge 20 ] || fail "the $side played Alpha's game for $two s with another player (20 wanted)"
+	done
+	;;
 friendsplayers|friendsplayersoff|friendsplayersnone)
 	# (no codes typed: the joiner adds the host from the game's players, the two
 	# machines' friend cards exchanged over internet play first)
@@ -5064,7 +5202,7 @@ forge|forge3|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h
 	forge_case
 	;;
 *)
-	echo "usage: $0 code|infection|infectionold|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|carnage|h3live|h3liveleave|h3liveagain|h3liveonline|h3liveinvite|h3liveprivate|h3online|h3onlinelan|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|friendsbackup|party|friendsprivate|friendsprivatepw|forge|forge3|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|h3variant|vitapc|vitaonly|hostfuzz|hostfuzzforge|hostfuzzmap" >&2
+	echo "usage: $0 code|infection|infectionold|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|carnage|h3live|h3liveleave|h3liveagain|h3liveonline|h3liveinvite|h3liveprivate|h3online|h3onlinelan|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|friendsbackup|party|chat|friendsprivate|friendsprivatepw|forge|forge3|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|h3variant|vitapc|vitaonly|hostfuzz|hostfuzzforge|hostfuzzmap" >&2
 	exit 2
 	;;
 esac

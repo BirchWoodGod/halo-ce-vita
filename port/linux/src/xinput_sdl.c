@@ -37,6 +37,7 @@ drive the controller.
 #include "sdl_platform.h"
 #include "port_config.h"
 #include "pc_text_entry.h"
+#include "../game/game_chat.h"
 #ifndef HALO_NOT_DESKTOP
 #include "../include/halo_button_icons.h"
 #endif
@@ -976,6 +977,41 @@ static void forge_combo_filter(XINPUT_GAMEPAD *pad)
 		pad->wButtons &= (WORD)~XINPUT_GAMEPAD_BACK;
 }
 
+/* ---------- the in-game chat's controls (port/linux/game/game_chat.c) */
+
+#ifndef HALO_VITA
+/* (port 0's read) Back + D-pad left (F1 + Left on the keyboard) opens the
+chat's quick chat wheel in play; while it is open the D-pad, A, B, Y and
+the shoulders and triggers are the chat's, the game getting none of the
+buttons (the sticks stay its own). The Vita's own buttons go to the chat
+in vita_pad.c */
+static void chat_pad_filter(XINPUT_GAMEPAD *pad)
+{
+	unsigned int buttons = 0;
+
+	if (pc_text_entry_active())
+		return;
+	if (pad->wButtons & XINPUT_GAMEPAD_DPAD_UP) buttons |= GAME_CHAT_PAD_UP;
+	if (pad->wButtons & XINPUT_GAMEPAD_DPAD_DOWN) buttons |= GAME_CHAT_PAD_DOWN;
+	if (pad->wButtons & XINPUT_GAMEPAD_DPAD_LEFT) buttons |= GAME_CHAT_PAD_LEFT;
+	if (pad->wButtons & XINPUT_GAMEPAD_DPAD_RIGHT) buttons |= GAME_CHAT_PAD_RIGHT;
+	if ((pad->wButtons & XINPUT_GAMEPAD_BACK) && (pad->wButtons & XINPUT_GAMEPAD_DPAD_LEFT))
+		buttons |= GAME_CHAT_PAD_COMBO;
+	if (pad->bAnalogButtons[XINPUT_GAMEPAD_A] >= 128) buttons |= GAME_CHAT_PAD_ACCEPT;
+	if (pad->bAnalogButtons[XINPUT_GAMEPAD_B] >= 128) buttons |= GAME_CHAT_PAD_BACK;
+	if (pad->bAnalogButtons[XINPUT_GAMEPAD_Y] >= 128) buttons |= GAME_CHAT_PAD_TYPE;
+	if (pad->bAnalogButtons[XINPUT_GAMEPAD_WHITE] >= 128 || pad->bAnalogButtons[XINPUT_GAMEPAD_LEFT_TRIGGER] >= 128)
+		buttons |= GAME_CHAT_PAD_PREVIOUS;
+	if (pad->bAnalogButtons[XINPUT_GAMEPAD_BLACK] >= 128 || pad->bAnalogButtons[XINPUT_GAMEPAD_RIGHT_TRIGGER] >= 128)
+		buttons |= GAME_CHAT_PAD_NEXT;
+	if (game_chat_pad(buttons, (unsigned long)SDL_GetTicks()))
+	{
+		pad->wButtons = 0;
+		memset(pad->bAnalogButtons, 0, sizeof(pad->bAnalogButtons));
+	}
+}
+#endif
+
 /* merges one controller's state into another's: buttons held on either,
 each analog button and stick as far as either pushes it */
 static void merge_gamepad(XINPUT_GAMEPAD *into, const XINPUT_GAMEPAD *from)
@@ -1219,6 +1255,10 @@ DWORD WINAPI XInputGetState(HANDLE device, PXINPUT_STATE state)
 	}
 	if (port == 0)
 		forge_combo_filter(&state->Gamepad);
+#ifndef HALO_VITA
+	if (port == 0)
+		chat_pad_filter(&state->Gamepad);
+#endif
 
 	if (memcmp(&state->Gamepad, &controllers[port].previous, sizeof(state->Gamepad)))
 	{

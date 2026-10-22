@@ -285,6 +285,37 @@ A speed hack of less than a tenth is let be: the host's bounds on how far
 and how fast a client's player moves and fires hold it to the host's time
 anyway.
 
+## The in-game chat
+
+The chat (`port/linux/game/game_chat.c`, its rules `game_chat_protocol.c`)
+is OpenCE's text chat on the wire, on either wire (the Vitas' and the
+crossplay one), as kinds of the distributed messages past this build's own
+(`NUMBER_OF_DISTRIBUTED_MESSAGES`): a build without it drops them as kinds
+it does not know, so the network version is unchanged (18; 29 and 32 on the
+crossplay wire).
+
+- **87, a line up**: a client's player's line to the host, over its stream,
+  count 1, one 68-byte entry: the sender's absolute player index, its flags
+  (bit 0 the team only, bit 1 the vehicle only), 2 pad bytes, 64 bytes of
+  text ended by a NUL (63 characters at most).
+- **88, a line down**: the host's line, the same entry, the sender as the
+  host found it; or a notice (bit 2), its text alone.
+- **89, the host's settings**: a 4-byte entry, its first byte's bit 0 the
+  chat allowed, bit 1 links allowed; to every client as they change and each
+  3 s. A client without them has a host without the chat and sends nothing.
+
+The host takes a line only over a client's stream (never a datagram nor a
+batch), from one of that machine's players, five at once and one each 1.5 s
+after (a notice to a machine that floods, once each 5 s), cleaned (printable
+ASCII, the game's `|` codes and markup out), without a link, never a notice;
+it sends it on only to the machines with a player who hears it (a team's
+line to the team's, a vehicle's to those riding with the sender) and shows
+it if one of its own players does. It never changes a line: what each
+player sees, their machine decides (the slur filter, its mutes, Chat off).
+A client takes the host's lines and settings only over the host's stream.
+Each machine's own lines go out at three at once, one each 2 s, so no host
+drops them.
+
 ## A modified client
 
 With the PC build public, a client is anyone's program: memory edits, or a

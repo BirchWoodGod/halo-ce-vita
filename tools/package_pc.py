@@ -19,7 +19,7 @@ relays.txt beside the executable):
     halo.sh (Linux) or halo.bat (Windows) / README.txt / licenses/
     build/linux/halo (or build/windows/halo.exe and SDL3.dll)
     build/<platform>/brokers.txt, brokers_crossplay.txt, relays.txt
-    port/vita/app0/menus, lang, packs, shaders.pak, brokers*.txt, relays.txt
+    port/vita/app0/menus, lang, packs, chat, shaders.pak, brokers*.txt, relays.txt
     lib/libSDL3.so.0 (Linux; the launcher points LD_LIBRARY_PATH at it)
 
 The PC build plays with the Vitas only when it was configured with
@@ -44,7 +44,7 @@ from typing import Optional
 ROOT = Path(__file__).resolve().parent.parent
 APP0 = ROOT / "port/vita/app0"
 # what goes into port/vita/app0, and what goes beside the executable too
-APP0_ITEMS = ("menus", "lang", "packs", "shaders.pak", "brokers.txt", "brokers_crossplay.txt", "relays.txt")
+APP0_ITEMS = ("menus", "lang", "packs", "chat", "shaders.pak", "brokers.txt", "brokers_crossplay.txt", "relays.txt")
 BESIDE_EXECUTABLE = ("brokers.txt", "brokers_crossplay.txt", "relays.txt")
 # the notices the binaries' libraries ask for (as tools/ci_build.py's dist/)
 LICENSES = {

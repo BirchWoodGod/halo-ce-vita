@@ -76,6 +76,12 @@
 #   damnserver  DamnationCE's dedicated server (its game binary with
 #               HALO_DEDICATED), an OpenCE client and ours, on a LAN and over
 #               the internet (by its invite: it lists only on its game list)
+#   crosschat   the in-game chat with OpenCE's text chat (kinds 87-89): an
+#               OpenCE host and our client, our host for Vitas and PC and an
+#               OpenCE client, each side's lines, team lines, notices, mutes
+#               and links both ways (OpenCE's own chat script on the PC
+#               copies); with XPPC_OPENCE29 our client in an OpenCE 29 game
+#               (before its chat) too
 #   crossmixed  one build, both wires, no setting changed: our Vita host for
 #               Vitas (the legacy wire) and for Vitas and PC (the crossplay
 #               wire, on a LAN and from the browser, tagged VITA+PC), and an
@@ -293,7 +299,7 @@ mode=${1:-}
 
 case $mode in
 pcself|chupaopence|opencelan|opencehost|crosstls|chupahost|chupaserver|damnserver|crossrefuse|crossbig|crossmixed|crosscoop|crossctf) ;;
-pcjoinsvita|pccap|browserboth|crosspassword|crosscoophost|net32) ;;
+pcjoinsvita|pccap|browserboth|crosspassword|crosscoophost|net32|crosschat) ;;
 net29)
 	[ -n "${XPPC_OPENCE29:-}" ] && [ -x "$XPPC_OPENCE29" ] ||
 		{ echo "SKIP (net29): wants XPPC_OPENCE29 (an OpenCE of network version 29's binary: build_pc_crossplay.sh opence ... 8102e711)"; exit 0; } ;;
@@ -1161,6 +1167,121 @@ chupaserver|damnserver)
 	fi
 	run_our_modes
 	echo "--- the brokers' topics"; broker_topics
+	;;
+crosschat)
+	# the in-game chat with OpenCE's text chat (port/linux/game/game_chat.c;
+	# OpenCE's network_chat.c, kinds 87-89, in its builds since Oct 17 2026 -
+	# XPPC_BUILDS's of 32 has it): an OpenCE host on a LAN with our client,
+	# and our host for Vitas and PC (the crossplay wire) with an OpenCE
+	# client, each PC copy running OpenCE's own chat script
+	# (HALO_NETWORK_TEST_CHAT: its lines to everyone, the team and the
+	# vehicle, its host's /mute of its last player for a minute and
+	# /unmute, a link, its chat off and on, its scoreboard's mutes) and each
+	# of ours HALO_TEST_CHAT's lines; each side must show the other's lines
+	# (its debug.txt's "chat: NAME: text", our "chat: shown"), its notices,
+	# and refuse what its rules refuse. With XPPC_OPENCE29 (an OpenCE of 29,
+	# before its chat) our client in its game too: it says the host has no
+	# chat and sends nothing
+	run_seconds=${XPPC_CHAT_SECONDS:-130}
+	mkdir -p "$out/chat"
+	chat_pids=
+	vita_lines="20:teams;24:all:hello opence from the vita;28:team:vita to the team;32:preset:0;36:all:vita link discord.gg/abc;56:all:vita while muted;80:all:vita after the unmute"
+	# (A: OpenCE's host, our client on its LAN)
+	subnet=$((subnet + 1)); n=$subnet; side "$n"
+	run_copy chat/pchost "$side_machine" opence "192.168.$n.2" 198.51.100.1 HALO_NET_ONLINE=false \
+		HALO_NETWORK_TEST=host:bloodgulch:slayer HALO_NETWORK_TEST_START=$start_delay HALO_NETWORK_TEST_SCORE=50 \
+		HALO_NETWORK_TEST_KILL=20 HALO_NETWORK_TEST_CHAT=40 HALO_NETWORK_TEST_NAME=PcHost HALO_NET_LOBBY_NAME=XpChat
+	chat_pids="$chat_pids $last_pid"
+	sleep 6
+	lan_machine "$n" 3
+	run_copy chat/vitaclient "$held" ours "192.168.$n.3" 198.51.100.1 HALO_NET_ONLINE=false HALO_NETWORK_TEST=join \
+		HALO_TEST_INPUT=bot:61 HALO_NET_PLAYER_NAME=VitaJoin "HALO_TEST_CHAT=$vita_lines"
+	chat_pids="$chat_pids $last_pid"
+	# (B: our host for Vitas and PC, OpenCE's client on its LAN)
+	subnet=$((subnet + 1)); m=$subnet; side "$m"
+	run_copy chat/vitahost "$side_machine" ours "192.168.$m.2" 198.51.100.1 HALO_NET_ONLINE=false \
+		HALO_NETWORK_TEST=host:bloodgulch:slayer HALO_NETWORK_TEST_START=10 HALO_NETWORK_TEST_SCORE=50 \
+		HALO_NETWORK_TEST_KILL=20 HALO_NET_HOST_CROSSPLAY=true HALO_NET_PLAYER_NAME=VitaHost HALO_NET_LOBBY_NAME=XpVitaChat \
+		"HALO_TEST_CHAT=30:all:hello pc from the vita host;34:preset:12;38:team:vita host to the team"
+	chat_pids="$chat_pids $last_pid"
+	sleep 8
+	lan_machine "$m" 3
+	run_copy chat/pcclient "$held" opence "192.168.$m.3" 198.51.100.1 HALO_NET_ONLINE=false HALO_NETWORK_TEST=join \
+		HALO_TEST_INPUT=bot:62 HALO_NETWORK_TEST_CHAT=40 HALO_NETWORK_TEST_NAME=PcJoin
+	chat_pids="$chat_pids $last_pid"
+	if [ -n "${opence29:-}" ] && [ -x "$opence29" ]; then
+		# (C: an OpenCE of 29, before its chat: our client says so)
+		subnet=$((subnet + 1)); k=$subnet; side "$k"
+		run_copy chat/pc29host "$side_machine" opence29 "192.168.$k.2" 198.51.100.1 HALO_NET_ONLINE=false \
+			HALO_NETWORK_TEST=host:bloodgulch:slayer HALO_NETWORK_TEST_START=$start_delay HALO_NETWORK_TEST_SCORE=50 \
+			HALO_NETWORK_TEST_KILL=20
+		chat_pids="$chat_pids $last_pid"
+		sleep 6
+		lan_machine "$k" 3
+		run_copy chat/vita29 "$held" ours "192.168.$k.3" 198.51.100.1 HALO_NET_ONLINE=false HALO_NETWORK_TEST=join \
+			HALO_TEST_INPUT=bot:63 HALO_NET_PLAYER_NAME=VitaOld "HALO_TEST_CHAT=25:all:hello old opence"
+		chat_pids="$chat_pids $last_pid"
+	fi
+	wait $chat_pids 2>/dev/null
+	result=pass
+	chat_fail() { echo "  FAIL: $*"; result=$1; }
+	vc=$out/chat/vitaclient/run.log pd=$out/chat/pchost/data/debug.txt
+	vh=$out/chat/vitahost/run.log cd=$out/chat/pcclient/data/debug.txt
+	echo "--- crosschat A: OpenCE's host, our client"
+	grep -a "chat" "$vc" | grep -av "frame-hitch" | head -30 | sed 's/^/  ours: /'
+	grep -a "chat" "$pd" 2>/dev/null | head -24 | sed 's/^/  OpenCE: /'
+	grep -aq "chat: the host's chat: on, links refused" "$vc" || chat_fail host-config "our client had no chat settings from OpenCE's host"
+	grep -aq "chat: shown (all): PcHost: hello everyone from the host, long enough to wrap the column" "$vc" ||
+		chat_fail host-line "our client did not show OpenCE's host's line"
+	grep -aq "chat: shown (team): PcHost: hello team from the host" "$vc" || chat_fail host-team "our client did not show its team line"
+	# (its vehicle line reaches those it seated in its vehicle: our client
+	# only when its seating took it, so said, not required)
+	grep -aq "chat: shown (vehicle): PcHost: hello vehicle from the host" "$vc" &&
+		echo "  our client in OpenCE's host's vehicle: showed its vehicle line"
+	grep -aqE "chat: notice: VitaJoin muted for 1 minute" "$vc" && grep -aq "chat: notice: VitaJoin unmuted" "$vc" ||
+		chat_fail host-notice "our client did not show the host's /mute and /unmute notices"
+	grep -aq "chat: PcHost: hello everyone from the host" "$pd" || chat_fail pc-own "OpenCE's host did not show its own line (its log)"
+	grep -aq "chat: VitaJoin: hello opence from the vita" "$pd" || chat_fail vita-line "OpenCE's host did not show our line"
+	grep -aq "chat (team): VitaJoin: vita to the team" "$pd" || chat_fail vita-team "OpenCE's host did not show our team line"
+	grep -aq "chat: VitaJoin: Need backup!" "$pd" || chat_fail vita-phrase "OpenCE's host did not show our phrase"
+	grep -aq "chat: notice: Links aren't allowed in this game" "$vc" || chat_fail vita-link "our client sent its link"
+	grep -aq "discord.gg/abc" "$pd" && chat_fail vita-link-sent "our link reached OpenCE's host"
+	# (a line of ours while OpenCE's host has us muted: told for how long, its
+	# own words; the moments of its mutes are its script's, so said if met)
+	grep -aqE "chat: notice: You are muted for [0-9]+ more minute" "$vc" &&
+		echo "  our line while muted: OpenCE's host told us for how long"
+	grep -aq "chat: VitaJoin: vita while muted" "$pd" && grep -aq "VitaJoin muted" "$pd" &&
+		[ "$(grep -an "chat: VitaJoin: vita while muted" "$pd" | cut -d: -f1)" -gt "$(grep -an "chat notice: VitaJoin muted for 1 minute" "$pd" | cut -d: -f1)" ] &&
+		[ "$(grep -an "chat: VitaJoin: vita while muted" "$pd" | cut -d: -f1)" -lt "$(grep -an "chat notice: VitaJoin unmuted" "$pd" | head -1 | cut -d: -f1)" ] &&
+		chat_fail mute-ignored "OpenCE's host showed our line while it had us muted"
+	grep -aq "chat: VitaJoin: vita after the unmute" "$pd" || chat_fail after-unmute "OpenCE's host did not show our line after /unmute"
+	echo "--- crosschat B: our host for Vitas and PC, OpenCE's client"
+	grep -a "chat" "$vh" | grep -av "frame-hitch" | head -30 | sed 's/^/  ours: /'
+	grep -a "chat" "$cd" 2>/dev/null | head -24 | sed 's/^/  OpenCE: /'
+	grep -aq "network: the crossplay wire (hosting for Vitas and PC" "$vh" "$out/chat/vitahost/data/debug.txt" 2>/dev/null ||
+		chat_fail host-wire "our host was not on the crossplay wire"
+	grep -aq "chat: VitaHost: hello pc from the vita host" "$cd" || chat_fail our-host-line "OpenCE's client did not show our host's line"
+	grep -aq "chat: VitaHost: GG" "$cd" || chat_fail our-host-phrase "OpenCE's client did not show our host's phrase"
+	grep -aq "chat (team): VitaHost: vita host to the team" "$cd" || chat_fail our-host-team "OpenCE's client did not show our team line"
+	grep -aq "chat: shown (all): PcJoin: hello everyone from a client, long enough to wrap the column" "$vh" ||
+		chat_fail pc-client-line "our host did not show OpenCE's client's line"
+	grep -aq "chat: PcJoin: hello everyone from a client" "$cd" || chat_fail pc-client-echo "OpenCE's client did not get its line back from our host"
+	grep -aq "chat: host: dropped a line from machine [0-9]*: a link" "$vh" || chat_fail pc-link "our host took OpenCE's client's link"
+	grep -aq "chat notice: Links aren't allowed in this game" "$cd" || chat_fail pc-link-notice "OpenCE's client was not told why"
+	grep -aq "discord(dot)gg" "$vh" && chat_fail pc-link-shown "our host showed the link"
+	if [ -d "$out/chat/vita29" ]; then
+		echo "--- crosschat C: OpenCE of 29 (no chat), our client"
+		grep -a "chat" "$out/chat/vita29/run.log" | grep -av "frame-hitch" | head -8 | sed 's/^/  ours: /'
+		grep -aq "chat: notice: This game's host has no chat" "$out/chat/vita29/run.log" ||
+			chat_fail old-host "our client in an OpenCE 29 game did not say its host has no chat"
+		[ "$(grep -ac "network test: tick" "$out/chat/vita29/run.log")" -ge 30 ] || chat_fail old-play "our client did not play the OpenCE 29 game"
+	fi
+	for copy in vitaclient vitahost vita29; do
+		[ -f "$out/chat/$copy/run.log" ] || continue
+		grep -aiE "segmentation fault|sanitizer|SIGSEGV|SIGABRT|crash report" "$out/chat/$copy/run.log" | head -3 | grep -q . && chat_fail crash "our $copy faulted"
+	done
+	echo "--- crosschat: $result"
+	our_results="$our_results crosschat:$result"
 	;;
 crossmixed)
 	# no switch (Oct 19 2026): each game on its own wire, one build of ours

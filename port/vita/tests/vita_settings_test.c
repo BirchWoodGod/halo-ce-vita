@@ -168,6 +168,16 @@ char halo_host_players_names[HALO_HOST_PLAYERS_MAXIMUM][HALO_HOST_PLAYER_NAME_SI
 volatile int halo_host_session_bans;
 volatile int halo_host_player_request;
 volatile int halo_host_player_answer;
+/* (the Chat page's and SELECT + D-pad left's: the in-game chat's side,
+game_chat.c, as it publishes; no network game unless a test says so) */
+volatile int halo_game_chat_active;
+volatile int halo_chat_players_serial;
+volatile int halo_chat_players_count = -1;
+volatile int halo_chat_players_muted[HALO_CHAT_PLAYERS_MAXIMUM];
+volatile int halo_chat_players_local[HALO_CHAT_PLAYERS_MAXIMUM];
+char halo_chat_players_names[HALO_CHAT_PLAYERS_MAXIMUM][HALO_CHAT_PLAYER_NAME_SIZE];
+volatile int halo_chat_mute_request;
+char halo_chat_mute_request_name[HALO_CHAT_PLAYER_NAME_SIZE];
 static const char *const test_forge_maps[3][2] = {
 	{ "Battle Creek", "beavercreek" }, { "Blood Gulch", "bloodgulch" }, { "Chill Out", "chillout" },
 };
@@ -668,9 +678,11 @@ void p2p_friends_backup_cancel(void)
 	backup_state_now = P2P_FRIENDS_BACKUP_IDLE;
 }
 
-/* (the party, p2p_party.h: the test's) */
-/* (room for more than a party holds: the page's check of a party of 12) */
-static struct p2p_party_member test_party[16];
+/* (the party, p2p_party.h: the test's. Room for twelve and more: test_party_page's
+leader warned before a game with too few slots counts a party of twelve,
+which wrote past an array of eight - harmless while what followed it was
+not read, a crash once the Chat page's globals came after it) */
+static struct p2p_party_member test_party[2 * P2P_PARTY_MAXIMUM];
 static int test_party_count, test_party_leading;
 static struct p2p_party_invite test_party_invites[2];
 static int test_party_invite_count;
@@ -2097,6 +2109,75 @@ status, Add a friend (typed with the D-pad), Appear offline and Friends can
 join (saved), each entry with a word of its state, its doing on the help
 line and its buttons in the footer; cross, square and triangle do what the
 footer says, a join going on to Join's steps, a removal asked first */
+/* Multiplayer > Friends > Chat: the in-game chat's rows (Chat, Chat
+filter: on by default, live), its line on the combo, and the game's
+players (published by game_chat.c), Cross muting and unmuting one here */
+static void test_chat_page(void)
+{
+	check(to_tab("Multiplayer") && open_page("Vita and PC"), "Multiplayer > Vita and PC");
+	if (!open_page("Chat"))
+	{
+		check(0, "Vita and PC: the Chat row opens its page");
+		printf("%s\n--\n", menu);
+		return;
+	}
+	check(strstr(menu, "\n\x03Multiplayer > Chat\n") && strstr(menu, "\nChat\x02  On >\n") &&
+		strstr(menu, "\nChat filter\x02  On >\n") && strstr(menu, "\n\x04In play: SELECT + D-pad left, quick chat\n") &&
+		strstr(menu, "\n\x04Mute players: in a network game\n"), "the Chat page: Chat and Chat filter on, the combo, no game");
+	to_line("Chat filter");
+	check(strstr(menu, "On: slurs others type shown as ****; only you see it") != NULL, "Chat filter's help");
+	press(VITA_BUTTON_RIGHT);
+	check(getenv("HALO_CHAT_FILTER") && !strcmp(getenv("HALO_CHAT_FILTER"), "0") &&
+		strstr(menu, "\nChat filter\x02< Off  \n"), "Chat filter off: set");
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_CHAT_FILTER"), "1"), "Chat filter on again");
+	to_line("Chat\x02");
+	press(VITA_BUTTON_RIGHT);
+	check(getenv("HALO_CHAT") && !strcmp(getenv("HALO_CHAT"), "0"), "Chat off: set");
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_CHAT"), "1"), "Chat on again");
+	/* a network game: its players, this Vita's own marked */
+	halo_chat_players_serial += 2;
+	halo_chat_players_count = 3;
+	snprintf(halo_chat_players_names[0], HALO_CHAT_PLAYER_NAME_SIZE, "Alpha");
+	halo_chat_players_local[0] = 1;
+	snprintf(halo_chat_players_names[1], HALO_CHAT_PLAYER_NAME_SIZE, "Bravo");
+	snprintf(halo_chat_players_names[2], HALO_CHAT_PLAYER_NAME_SIZE, "Charlie");
+	halo_chat_players_muted[2] = 1;
+	press(VITA_BUTTON_DOWN);
+	press(VITA_BUTTON_UP);
+	check(strstr(menu, "\nAlpha\x02  You\n") && strstr(menu, "\nBravo\x02  Chat shown\n") &&
+		strstr(menu, "\nCharlie\x02  Muted\n") && strstr(menu, "\n\x04" "Cross mutes a player's chat here\n"),
+		"the game's players: shown, muted, this Vita's");
+	check(menu_fits() && menu_height_fits(), "the Chat page fits");
+	to_line("Bravo");
+	check(strstr(menu, "Cross: mute  Circle: back") != NULL, "a player: mute in the footer");
+	press(VITA_BUTTON_CROSS);
+	check(halo_chat_mute_request == (2 | HALO_CHAT_MUTE_REQUEST_MUTE) && !strcmp(halo_chat_mute_request_name, "Bravo") &&
+		strstr(menu, "Bravo muted: their chat is hidden here"), "cross: Bravo's mute asked of the game");
+	/* (the game takes it, and publishes them again) */
+	halo_chat_mute_request = 0;
+	halo_chat_players_muted[1] = 1;
+	halo_chat_players_serial += 2;
+	clock_us += 6000000;
+	to_line("Charlie");
+	press(VITA_BUTTON_CROSS);
+	check(halo_chat_mute_request == 3 && !strcmp(halo_chat_mute_request_name, "Charlie"), "cross: Charlie unmuted");
+	halo_chat_mute_request = 0;
+	halo_chat_players_muted[2] = 0;
+	halo_chat_players_serial += 2;
+	clock_us += 6000000;
+	to_line("Alpha");
+	press(VITA_BUTTON_CROSS);
+	check(halo_chat_mute_request == 0, "this Vita's own player: never muted");
+	halo_chat_players_serial += 2;
+	halo_chat_players_count = -1;
+	halo_chat_players_muted[1] = 0;
+	halo_chat_players_local[0] = 0;
+	press(VITA_BUTTON_CIRCLE);
+	check(strstr(menu, "*Multiplayer") && !strstr(menu, "\n\x03"), "circle: back to Multiplayer");
+}
+
 static void test_friends_page(void)
 {
 	char line[256], network_before[16];
@@ -2325,6 +2406,14 @@ static void test_party_page(void)
 	press(VITA_BUTTON_SELECT | VITA_BUTTON_LEFT);
 	check(!panel_open, "SELECT + left again: closed");
 	press(0);
+	/* (in play with the in-game chat: the combo is the chat's, the game's,
+	the panel shut) */
+	halo_game_chat_active = 1;
+	check(frame(VITA_BUTTON_SELECT | VITA_BUTTON_LEFT) == 0 && !panel_open,
+		"SELECT + left in a network game: the chat's (to the game), no panel");
+	check(frame(VITA_BUTTON_SELECT | VITA_BUTTON_LEFT) == 0 && !panel_open, "held: still the game's");
+	press(0);
+	halo_game_chat_active = 0;
 	panel_begin();
 	to_tab("Multiplayer");
 	to_line("Friends");
@@ -3293,7 +3382,7 @@ static void test_tab_layouts(void)
 			old |= !strcmp(pages[index].name, "Screen") || !strcmp(pages[index].name, "First person") ||
 				!strcmp(pages[index].name, "Advanced") || !strcmp(pages[index].name, "General") ||
 				!strcmp(pages[index].name, "Graphics") || !strcmp(pages[index].name, "Audio");
-		check(!old && PAGE_GRAPHICS_DETAIL == TAB_COUNT && PAGE_COUNT == TAB_COUNT + 16 &&
+		check(!old && PAGE_GRAPHICS_DETAIL == TAB_COUNT && PAGE_COUNT == TAB_COUNT + 17 &&
 			!strcmp(pages[PAGE_GRAPHICS_DETAIL].name, "Detail") && !strcmp(pages[PAGE_GRAPHICS_PERFORMANCE].name, "Performance") &&
 			!strcmp(pages[PAGE_BUTTONS].name, "Button layout") && !strcmp(pages[PAGE_TOUCH].name, "Touch zones") &&
 			!strcmp(pages[PAGE_GYRO].name, "Gyro settings") && !strcmp(pages[PAGE_PLAY].name, "Play") &&
@@ -3301,9 +3390,10 @@ static void test_tab_layouts(void)
 			!strcmp(pages[PAGE_FORGE].name, "Forge and File Share") && !strcmp(pages[PAGE_MODS].name, "Mod manager") &&
 			!strcmp(pages[PAGE_FRIENDS].name, "Friends") && !strcmp(pages[PAGE_PARTY].name, "Party") &&
 			!strcmp(pages[PAGE_CROSSPLAY].name, "Vita and PC") && !strcmp(pages[PAGE_PLAYERS].name, "Players") &&
-			!strcmp(pages[PAGE_INFECTION].name, "Infection") && !strcmp(pages[PAGE_MENUS].name, "Menus"),
+			!strcmp(pages[PAGE_INFECTION].name, "Infection") && !strcmp(pages[PAGE_MENUS].name, "Menus") &&
+			!strcmp(pages[PAGE_CHAT].name, "Chat"),
 			"the pages rows open: Detail, Performance, Button layout, Touch zones, Gyro settings, Play, Modded maps, Vita and PC, A/B "
-			"switches, Forge and File Share, Mod manager, Friends, Party, Players, Infection, Menus (no Screen, First person or Advanced "
+			"switches, Forge and File Share, Mod manager, Friends, Party, Players, Infection, Menus, Chat (no Screen, First person or Advanced "
 			"page; no General, Graphics or Audio tab)");
 	}
 	{
@@ -3459,7 +3549,8 @@ the Campaign screen) and Online games (now Visibility, by OpenCE's name);
 and the rows added since (Sun rays, Button icons, Map downloads, Max
 players, Visibility, Fourth core helpers, Latency meter, Particles,
 First-person legs, MCC mods, PC map vehicles, Sharp interface, Player model,
-PC mouse aim assist, Carnage report, Field of view; the Play page's two texts) */
+PC mouse aim assist, Carnage report, Field of view, Chat, Chat filter; the Play
+page's two texts) */
 static void test_variables_kept(void)
 {
 	static const char *const variables[] = {
@@ -3487,6 +3578,7 @@ static void test_variables_kept(void)
 		"HALO_INFECTION_ZOMBIES", "HALO_INFECTION_SPEED", "HALO_INFECTION_TIME", "HALO_INFECTION_RESPAWN",
 		"HALO_INFECTION_SHIELDS", "HALO_INFECTION_TOUGH",
 		"HALO_CARNAGE_REPORT", "HALO_FLAMING_HELMET", "HALO_FIELD_OF_VIEW", "HALO_CLOCK_GOVERNOR", "HALO_BATTERY_LOG",
+		"HALO_CHAT", "HALO_CHAT_FILTER",
 	};
 	int index, all = 1, choices = 0;
 
@@ -5508,6 +5600,7 @@ int main(void)
 	test_mod_manager_page();
 	test_friends_page();
 	test_party_page();
+	test_chat_page();
 	test_players_page();
 
 	/* ---------- Dev, behind its switch */

@@ -683,6 +683,8 @@ typedef char screenshot_and_framerate_globals_size_assert[
 #endif
 #ifdef HALO_LINUX
 void network_test_update(boolean main_menu_loaded, real seconds);
+/* port/linux/game/game_chat.c */
+void game_chat_update(void);
 /* the offline bots' playlist (port/linux/game/bots_playlist.c) */
 void bots_playlist_update(int main_menu_loaded, float seconds);
 /* the Vita settings panel's Host a game and Join a game
@@ -5560,6 +5562,9 @@ void main_loop(
 			/* the dedicated server's hosting and commands
 			(port/linux/game/dedicated_server.c); none of the tests' sessions */
 			dedicated_server_update(main_globals.main_menu_scenario_loaded, main_globals.seconds_elapsed);
+			/* the in-game chat's host: its settings sent, its lines relayed
+			(port/linux/game/game_chat.c) */
+			game_chat_update();
 			MAIN_SPLIT(_main_split_input);
 #elif defined(HALO_LINUX)
 			/* automated system link tests (port/linux/game/network_test.c) */
@@ -5567,6 +5572,9 @@ void main_loop(
 			/* the offline bots' playlist (port/linux/game/bots_playlist.c) */
 			bots_playlist_update(main_globals.main_menu_scenario_loaded, main_globals.seconds_elapsed);
 			system_link_shortcut_update(main_globals.main_menu_scenario_loaded);
+			/* the in-game chat (port/linux/game/game_chat.c): the host's
+			settings, the party's lines, a typed line, the panel's mutes */
+			game_chat_update();
 			test_input_main_menu(main_globals.main_menu_scenario_loaded);
 			MAIN_SPLIT(_main_split_input);
 #endif
