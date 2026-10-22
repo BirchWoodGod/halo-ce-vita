@@ -745,7 +745,7 @@ static short const network_game_message_structure_sizes[NUMBER_OF_NETWORK_GAME_M
 	sizeof(message_client_map_download), sizeof(message_server_map_download_answer),
 	sizeof(message_server_map_download_data), sizeof(message_client_forge), sizeof(message_server_forge),
 	sizeof(message_client_game_rules), sizeof(message_server_game_rules),
-	sizeof(message_client_flame), sizeof(message_server_flame),
+	sizeof(message_client_flame), sizeof(message_server_flame), sizeof(message_client_party),
 };
 
 /* port: whether a type's packet definition holds more than its structure

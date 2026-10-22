@@ -362,9 +362,18 @@ players less one, so that a slot is always free:
   a joiner (a party's members joining together too) that finds the game
   full takes a bot's slot at once. A person is never removed or refused
   for a bot. As players leave, bots come back, one every 0.75 s in a game.
-- In team games a bot joins the smaller team, one leaves the larger, and
-  the teams are kept within one of each other by bots alone. In Infection
-  the bots are humans and zombies as the players are.
+- Team games (not Infection): a person joins the team with fewer people
+  (then the one with fewer players), and the bot that leaves for them is of
+  that team. A party's members (1.1.1: the joiner tells the server its
+  party's team token, a hash of the party's id, before it asks for its
+  player) join the team of a member already in. Only bots change teams, and
+  only by one leaving and another joining (a 1.1.0 client learns a player's
+  team as they join, and never again in the game): a bot joins the smaller
+  team, leaves the larger, and the teams are kept within one of each other.
+  A person is never moved. A party bigger than half the game can leave the
+  teams uneven (people are not moved to even them). In Infection the bots
+  are humans and zombies as the players are; free for all just keeps the
+  most players less one.
 - `sv_minplayers` counts people, not bots (with the bots playing an empty
   server, they start its games themselves).
 - Older builds (the public 1.1.0) see every bot as a player. In Infection
@@ -378,6 +387,9 @@ players less one, so that a slot is always free:
   browser's listing carries the bots' count beside the players' (its
   stamp's second byte, which older builds ignore, seeing the total): the
   Halo 3 browser shows "6 players · 5 bots".
+
+`sv_status` shows each team's people and bots in a team game ("teams: red
+2+4, blue 1+5"), and a person's join line their team.
 
 The bots cost the server's CPU while people play (their path searches run
 on a helper thread): `sv_status` shows the players and the bots.
