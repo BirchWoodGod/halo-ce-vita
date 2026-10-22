@@ -76,6 +76,19 @@ enum
 	BACKUP_READY_LIFETIME = 180000,
 };
 
+/* the job's thread's stack, given it explicitly: the Vita's pthread library
+gives a thread made with attributes and no size its minimum, 4 KiB (one made
+with none gets vita_stubs.c's 256 KiB), and Argon2id's hashing (Monocypher
+keeps a block and BLAKE2b's state on the stack; the memory itself is
+malloc'd) took the job past it: insider.21 crashed on the first backup, a
+data abort under extended_hash. The job's deepest chain is about 4.5 KiB on
+the Vita (the insider.21 ELF's frames: backup_thread 1.1 KiB, crypto_argon2
+2.2 KiB, extended_hash 0.6 KiB, blake2b_compress 0.4 KiB), 5 KiB on the
+i686 harness (p2p_friends_test.c measures each job's against the Vita's
+size); 256 KiB as the port's other worker threads (update_notify.c,
+posix_https.c) */
+#define BACKUP_THREAD_STACK_SIZE (256 * 1024)
+
 /* the job: one at a time */
 static pthread_mutex_t backup_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct
@@ -498,6 +511,7 @@ static int backup_start(int operation, const char *name, const char *password, u
 	backup.state = P2P_FRIENDS_BACKUP_WORKING;
 	backup.running = 1;
 	pthread_attr_init(&attributes);
+	pthread_attr_setstacksize(&attributes, BACKUP_THREAD_STACK_SIZE);
 	pthread_attr_setdetachstate(&attributes, PTHREAD_CREATE_DETACHED);
 	started = pthread_create(&thread, &attributes, backup_thread, NULL) == 0;
 	pthread_attr_destroy(&attributes);
