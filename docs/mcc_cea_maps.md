@@ -152,6 +152,24 @@ the maps play silent, as before (`mcc: no sound effects bank`); a bank or
 list that is damaged or of another version is refused, said, and the
 sounds stay silent.
 
+**CELT (dialogue, music, streams; not done)**: every stream of the other
+banks starts with FMOD's CELT frame header (a big-endian `0x17C30DF3`, a
+little-endian payload size, the payload; `fsb5_celt_frame_check`), 512
+samples a frame at 44100 Hz, constant bit rate (370 bytes a mono frame, 464 a
+stereo one; a 6-channel music stream is three stereo layers' frames one after
+another), and every stream's sample count is its frames times 512. That is
+libcelt 0.11.0 (bitstream 0x80000010) in FMOD's framing, with
+`celt_mode_create(44100, 512)` and the decoder's signalling switched off; the
+Opus library's CELT is not bitstream-compatible. libcelt 0.11 is BSD-licensed
+(Xiph.Org/CSIRO; Mumble keeps a copy, mumble-voip/celt-0.11.0), and a build of
+it decodes MCC's dialogue streams cleanly (no frame refused, speech-level RMS)
+at about 500 times real time on a desktop core. The plan is a decoder module
+beside `ogg_sound.c` and a transcoding beside Ogg Vorbis in
+`custom_edition_sounds.c` (decode, take 44.1 kHz mono to the 22 kHz the game
+plays, encode Xbox ADPCM, keep it in the `.sndcache` file), the music through
+the chains of links long Ogg sounds already use; the combined offset space
+will need a window for each bank (the music bank is 957 MB).
+
 Tests: `port/vita/tests/run_mcc_sound_test.sh` (the FSB5 reader and list
 parser on made-up files under AddressSanitizer and UBSan, a fuzz target,
 an audit of your own sound folder, and the harness with sound on: sounds
