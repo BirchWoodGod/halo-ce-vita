@@ -521,6 +521,25 @@ layout (and the pack recipes it needs) in the lobby through the map sharing
 channel (`map_share.c`: rate limits, resume, SHA-256), and each joiner
 validates it as above before the countdown can end.
 
+*Player spawns as built (Oct 22 2026, forge_spawns.inc):* the browser's
+SPAWNING category places Halo 3's RESPAWN POINT and INITIAL SPAWN, each
+with a TEAM (any, red, blue) and a GAME TYPE (all, slayer, CTF, oddball,
+king, race, infection), drawn as the characters' spawn markers are (the
+team's colour; an initial spawn taller, its diamond white) for the monitor
+only, the map's own spawns grey beside them (read only). They count in the
+objects' budget (at most 64), are saved as version 4's player spawn record
+(`_forge_record_player_spawn`, no path: team, game types, flag bit 3 the
+initial spawn; a variant without one stays version 1 to 3), are read as the
+map loads (before anyone spawns), and online are the host's: a joiner's
+place, move, TEAM, GAME TYPE, kind and delete are requests the host checks
+(host version 4; FORGE_NET_FLAG_PLAYER_SPAWN entries to draw). Played, the
+engine's own rating chooses among the layout's points that fit the game
+type and, in a team game, the player's team (players.c player_spawn ->
+forge_spawn_location): a round's first spawn takes the initial spawns, else
+the respawn points; none fitting, the map's own; all blocked, a wait of up
+to 3 s. Left for later: MAP SPAWNS: KEEP/REMOVE (the map's own spawns
+removable per variant, Halo 3's), undo of spawn edits.
+
 ## What the Halo 3 menu kit gives Forge
 
 From part 1 (`2026-10-18-halo3-menus-design.md`):

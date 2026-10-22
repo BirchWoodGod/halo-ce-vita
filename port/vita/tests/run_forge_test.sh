@@ -137,6 +137,25 @@
 #               the Elite respawns there; its RESPAWN changed from the marker
 #               (Square, "forge property respawn": 30 s); saved: its record at
 #               the new place, 30 s; the markers hidden for the Spartan
+#   spawns      player spawn points (forge_spawns.inc, the owner's of Oct 22 2026: "spawn
+#               points as a forge object is important"): in a Forge game of Blood Gulch the
+#               browser by the pad - X, VEHICLES, L back to the last category, SPAWNING
+#               (screenshot), A on RESPAWN POINT: placed and held as its marker (screenshot),
+#               R lets it go; then eight by the console (forge spawnpoint, forge property
+#               team / gametype): red, blue and any respawn points, one for slayer only, one
+#               for CTF only, an initial spawn; their markers drawn in their team's colour
+#               beside the map's own grey ones (screenshot), an initial spawn's properties
+#               window (TEAM, GAME TYPE, SPAWN, YAW; screenshot); the browser's one deleted;
+#               saved as version 4 (forge_files_test --dump: eight player spawn records, each
+#               team, game type and kind as set); none drawn for the Spartan; the variant
+#               started again: the eight read back
+#   spawnplay   the spawn points played (players.c player_spawn, forge_spawns.inc
+#               forge_spawn_location): spawns' variant (made by the console) played offline
+#               with 5 bots (network test local:, HALO_NETWORK_TEST_MAP_VARIANT, a kill every
+#               5 s): Slayer - every spawn at the layout's points, the first at the initial
+#               spawn, never the CTF-only one, the players where they spawned a second in;
+#               Team Slayer - red players never at the blue points nor blue at red; CTF - the
+#               CTF-only point fits, the slayer-only one never
 #   allai       the Forge menu's ALL AI: an Elite, a grunt, a jackal and a
 #               hunter fight the Spartan; ALL AI (the console's "forge allai",
 #               as the menu's row) turns them all off: for 10 s none moves (a
@@ -263,7 +282,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_forge_test.$$}
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs packnote packcopy smallmap aiteam aioff round aisave airespawn aicap aimarker allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks lobbycost mpvariant}
+cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs packnote packcopy smallmap aiteam aioff round aisave airespawn aicap aimarker spawns spawnplay allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks lobbycost mpvariant}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
@@ -846,6 +865,73 @@ aicap_runs() {
 	ai_run aicap 90 "$c" HALO_TEST_FORGE_MAXIMUM_AI=4 HALO_TEST_FORGE_BODY_SECONDS=15
 }
 
+# spawn_points TICK: the console's eight player spawn points of spawns and
+# spawnplay, from TICK, 30 ticks apart, each from above (its place, its kind,
+# its team's steps: 1 red, 2 blue; its game type's: 1 slayer, 2 CTF)
+spawn_points() {
+	local tick=$1 point c=""
+	for point in "55 -95 respawn 1 1" "58 -92 respawn 1 0" "70 -110 respawn 2 0" "73 -107 respawn 2 0" \
+		"65 -100 respawn 0 0" "62 -105 respawn 0 0" "60 -100 initial 0 0" "80 -120 respawn 0 2"; do
+		set -- $point
+		local n=$((tick + 13)) step
+		c="$c;L$tick:forge camera $1 $2 6 0 -89;L$((tick + 12)):forge spawnpoint $3"
+		for step in $(seq 1 "$4"); do c="$c;L$n:forge property team"; n=$((n + 1)); done
+		for step in $(seq 1 "$5"); do c="$c;L$n:forge property gametype"; n=$((n + 1)); done
+		c="$c;L$((n + 3)):forge drop"
+		tick=$((tick + 30))
+	done
+	echo "${c#;}"
+}
+
+# (spawns: X the browser, A VEHICLES, L back round to the last category, SPAWNING; A on
+# RESPAWN POINT: held; R lets it go)
+spawnspad="level:150:2500 wait:150:4000 x:150:1500 a:150:1500 lt:150:1500 @00-browser-spawning:0:300 a:150:1500"
+spawnspad="$spawnspad @01-respawn-point-held:0:300 rt:150:1500"
+
+spawns_runs() {
+	local store="$out/spawns-store"
+	rm -rf "$store"
+	mkdir -p "$store"
+	local c="L700:forge camera 60 -100 6 0 -89;$(spawn_points 720);L980:forge spawns"
+	c="$c;L990:forge camera 82 -124 7 128 -16;L1010:@shot 02-spawn-markers;L1015:forge spawns"
+	c="$c;L1020:forge marker #8;L1025:forge press x;L1045:@shot 03-spawn-properties;L1050:forge closemenus;L1060:forge drop"
+	c="$c;L1070:forge spawndelete #1;L1080:forge spawns;L1090:forge save Spawn Test;L1095:forge camera 60 -100 2.2 130 -12"
+	c="$c;L1105:@shot 04-map-spawns;L1108:forge spawns;L1110:forge off;L1130:forge spawns"
+	run spawns 50 "" "$c" "$spawnspad" HALO_MENU_STYLE=classic HALO_SYSTEM_LINK_TEST=forge:9 HALO_TEST_FORGE_PACKS=none \
+		HALO_SAVE_ROOT="$store" HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1
+	"$out/forge_files_test" --dump "$store/forge/bloodgulch/spawn_test.hmv" > "$out/spawns/dump.txt" 2>&1
+	run spawns-load 30 "" "L400:forge spawns" "" HALO_MENU_STYLE=classic HALO_SYSTEM_LINK_TEST=forge:9:spawn_test.hmv \
+		HALO_TEST_FORGE_PACKS=none HALO_SAVE_ROOT="$store"
+}
+
+# spawn_play NAME GAME: the spawn points' variant played offline with 5 bots (a local
+# game of the network test, in a network namespace of its own as run_bots_test.sh's)
+spawn_play() {
+	local name=$1 game=$2 dir="$out/$1"
+	rm -rf "$dir"
+	mkdir -p "$dir/data" "$dir/shots"
+	ln -sfn "$(cd "$data" && pwd)/maps" "$dir/data/maps"
+	(cd "$dir" && exec unshare -rn sh -c 'ip link set lo up 2> /dev/null; exec "$@"' sh \
+		env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=offscreen HALO_DATA_ROOT="$dir/data" HALO_SAVE_ROOT="$out/spawnplay-store" \
+		HALO_NO_VSYNC=1 HALO_FRAME_CAP=30 HALO_EXIT_AFTER=60 HALO_FULLSCREEN=0 HALO_HIDDEN_WINDOW=1 HALO_NO_AUDIO=1 \
+		HALO_TICK_THREAD=1 HALO_UPDATE_AUTO=false HALO_NET_ONLINE=false HALO_NETWORK_TEST="local:bloodgulch:$game" \
+		HALO_NETWORK_TEST_START=5 HALO_NETWORK_TEST_SCORE=500 HALO_TEST_INPUT=bot:1 HALO_BOTS=5 HALO_BOT_TEAMS=even \
+		HALO_NETWORK_TEST_KILL=5 HALO_NETWORK_TEST_MAP_VARIANT=spawn_test.hmv \
+		timeout -k 5 180 "$binary" > "$dir/run.log" 2>&1)
+	echo $? > "$dir/exit"
+}
+
+spawnplay_runs() {
+	local store="$out/spawnplay-store"
+	rm -rf "$store"
+	mkdir -p "$store"
+	run spawnplay-make 30 "" "L280:forge camera 60 -100 6 0 -89;$(spawn_points 300);L560:forge save Spawn Test" "" \
+		HALO_MENU_STYLE=classic HALO_SYSTEM_LINK_TEST=forge:9 HALO_TEST_FORGE_PACKS=none HALO_SAVE_ROOT="$store"
+	spawn_play spawnplay slayer
+	spawn_play spawnplay-teams team_slayer
+	spawn_play spawnplay-ctf ctf
+}
+
 aimarker_runs() {
 	local store="$out/aimarker-store"
 	rm -rf "$store"
@@ -1151,6 +1237,14 @@ for c in $cases; do
 		aicap_runs & ;;
 	aimarker)
 		aimarker_runs & ;;
+	spawns)
+		if [ "$menus_files" = 0 ]; then
+			echo "SKIP: spawns: no Halo PC bitmaps.map and loc.map in $data/maps"
+			continue
+		fi
+		spawns_runs & ;;
+	spawnplay)
+		spawnplay_runs & ;;
 	mpvariant)
 		if [ "$menus_files" = 0 ] || [ ! -r "$packcopy_profile" ]; then
 			echo "SKIP: mpvariant: no Halo PC bitmaps.map and loc.map in $data/maps, or no profile ($packcopy_profile)"
@@ -1448,6 +1542,90 @@ for c in $cases; do
 			echo "  ok: aicap: the fifth's body gone" || fail "aicap: the fifth's body not taken away"
 		budget_at 2200 | grep -aq "(4 alive, 1 dead)" && echo "  ok: aicap: its character still the layout's (dead, no body)" ||
 			fail "aicap: the fifth left the layout: $(budget_at 2200)"
+		continue
+	fi
+	if [ "$c" = spawns ]; then
+		checked spawns || continue
+		log="$out/spawns/run.log"
+		expect spawns "the browser's SPAWNING" "menus: forge browser: SPAWNING: Respawn Point \\(1 of 2\\)"
+		expect spawns "RESPAWN POINT chosen: placed and held" "forge: placed the respawn point #1 \\(team any, game type all\\)"
+		expect spawns "let go by R" "forge: moved the respawn point #1 "
+		sed -n '/test command at tick 980: forge spawns$/,+10p' "$log" > "$out/spawns/list.txt"
+		for want in "#2 (team red, game type slayer)" "#3 (team red, game type all)" "#4 (team blue, game type all)" \
+			"#5 (team blue, game type all)" "#6 (team any, game type all)" "#7 (team any, game type all)" \
+			"the initial spawn #8 (team any, game type all)" "#9 (team any, game type ctf)"; do
+			grep -aqF "$want" "$out/spawns/list.txt" || fail "spawns: no spawn point $want"
+		done
+		grep -aq "forge: 9 player spawn points (1 initial, 8 respawn)" "$out/spawns/list.txt" &&
+			echo "  ok: spawns: nine placed (red, blue, any; slayer and CTF only; an initial spawn)" ||
+			fail "spawns: $(head -1 "$out/spawns/list.txt")"
+		sed -n '/test command at tick 1015: forge spawns$/,+1p' "$log" | grep -aq "forge: 9 player spawn points .*, [1-9][0-9]* markers drawn" &&
+			echo "  ok: spawns: their markers drawn" ||
+			fail "spawns: markers: $(sed -n '/test command at tick 1015: forge spawns$/,+1p' "$log" | tail -1)"
+		sed -n '/test command at tick 1108: forge spawns$/,+1p' "$log" | grep -aq "forge: 8 player spawn points .*, [1-9][0-9]* markers drawn ([1-9][0-9]* of the map's)" &&
+			echo "  ok: spawns: the map's own spawns drawn grey beside them" ||
+			fail "spawns: the map's markers: $(sed -n '/test command at tick 1108: forge spawns$/,+1p' "$log" | tail -1)"
+		expect spawns "the initial spawn's properties window" "menus: forge properties: Initial Spawn: spawn point, team -1, game type ALL, initial spawn, yaw"
+		expect spawns "the browser's one deleted" "forge: deleted the respawn point #1 "
+		expect spawns "saved" "forge: map variant \"Spawn Test\" saved as bloodgulch/spawn_test.hmv, 8 objects"
+		grep -q "^version 4 " "$out/spawns/dump.txt" && [ "$(grep -c ": a player spawn: " "$out/spawns/dump.txt")" = 8 ] &&
+			grep -q ": a player spawn: respawn, team 0, game types 2$" "$out/spawns/dump.txt" &&
+			grep -q ": a player spawn: respawn, team 1, game types 0$" "$out/spawns/dump.txt" &&
+			grep -q ": a player spawn: initial, team -1, game types 0$" "$out/spawns/dump.txt" &&
+			grep -q ": a player spawn: respawn, team -1, game types 1$" "$out/spawns/dump.txt" &&
+			echo "  ok: spawns: the file: version 4, eight player spawns as set" || fail "spawns: the file: $(cat "$out/spawns/dump.txt")"
+		sed -n '/test command at tick 1130: forge spawns$/,+1p' "$log" | grep -aq "forge: 8 player spawn points .*, 0 markers drawn (0 of the map's)" &&
+			echo "  ok: spawns: the Spartan sees none" || fail "spawns: markers shown to the Spartan"
+		checked spawns-load || continue
+		expect spawns-load "read back as the map loads" "forge: map variant \"Spawn Test\": 8 player spawn points \\(1 initial, 7 respawn\\)"
+		sed -n '/test command at tick 400: forge spawns$/,+9p' "$out/spawns-load/run.log" | grep -aqF "(team red, game type slayer) at 55.0" &&
+			echo "  ok: spawns: the red slayer point where it was put" || fail "spawns-load: the points not as saved"
+		continue
+	fi
+	if [ "$c" = spawnplay ]; then
+		grep -aq 'forge: map variant "Spawn Test" saved as bloodgulch/spawn_test.hmv, 8 objects' "$out/spawnplay-make/run.log" ||
+			{ fail "spawnplay: the variant was not made"; continue; }
+		for r in spawnplay spawnplay-teams spawnplay-ctf; do
+			checked "$r" || continue
+			log="$out/$r/run.log"
+			expect "$r" "the variant's spawn points read" "forge: map variant \"Spawn Test\": 8 player spawn points"
+			[ "$(grep -ac "forge: player [0-9]* (team [0-9]*) spawns at the " "$log")" -ge 10 ] &&
+				echo "  ok: $r: $(grep -ac "spawns at the " "$log") spawns at the layout's points" || fail "$r: few spawns at the layout's points"
+			grep -aq "the map's own spawn" "$log" && fail "$r: a spawn at the map's own: $(grep -a "the map's own spawn" "$log" | head -1)"
+			grep -a "forge: player [0-9]* (team [0-9]*) spawns at the initial spawn #7" "$log" | head -1 | grep -aq "player 0 " &&
+				echo "  ok: $r: the first spawn at the initial spawn" || fail "$r: the first player not at the initial spawn"
+		done
+		log="$out/spawnplay/run.log"
+		[ -f "$log" ] && {
+			grep -a "spawns at the respawn point #8 \|spawns at .*game type ctf" "$log" | head -1 | grep -aq . &&
+				fail "spawnplay: a Slayer spawn at the CTF-only point" || echo "  ok: spawnplay: Slayer never at the CTF-only point"
+			grep -a "spawns at the respawn point" "$log" | grep -avq ", 6 of 8 fitting," &&
+				fail "spawnplay: Slayer's fitting points not 6" || echo "  ok: spawnplay: 6 of 8 fit Slayer (not the CTF-only one, the initial spawn after the first)"
+			# (each player a second in: where it first spawned)
+			ok=1
+			for first in $(grep -a "forge: player [0-9]* (team [0-9]*) spawns at the " "$log" | awk '!seen[$4]++ { print $4 ":" $(NF-2) ":" $(NF-1) }'); do
+				p=${first%%:*}
+				xy=${first#*:}
+				at=$(grep -a "network test: tick 30 " "$log" | head -1 | grep -ao "player $p: ([^)]*)" | tr -d '()' | awk '{ print $3 ":" $4 }')
+				awk -v a="$xy" -v b="$at" 'BEGIN { split(a, p, ":"); split(b, q, ":"); exit !((p[1] - q[1]) ^ 2 + (p[2] - q[2]) ^ 2 < 6.25) }' ||
+					{ ok=0; echo "    player $p spawned at $xy, a second in at $at"; }
+			done
+			[ "$ok" = 1 ] && echo "  ok: spawnplay: each player where it spawned a second in" || fail "spawnplay: players not where they spawned"
+		}
+		log="$out/spawnplay-teams/run.log"
+		[ -f "$log" ] && {
+			grep -aE "forge: player [0-9]* \(team 0\) spawns at .*\(team blue|forge: player [0-9]* \(team 1\) spawns at .*\(team red" "$log" | grep -aq . &&
+				fail "spawnplay-teams: a player at the other team's point" || echo "  ok: spawnplay-teams: red at red or any, blue at blue or any"
+			grep -aq "(team 0) spawns at .*(team red" "$log" && grep -aq "(team 1) spawns at .*(team blue" "$log" &&
+				echo "  ok: spawnplay-teams: each team at its own points" || fail "spawnplay-teams: a team never at its own points"
+		}
+		log="$out/spawnplay-ctf/run.log"
+		[ -f "$log" ] && {
+			grep -aq "spawns at .*(team red, game type slayer)" "$log" && fail "spawnplay-ctf: at the slayer-only point" ||
+				echo "  ok: spawnplay-ctf: never at the slayer-only point"
+			grep -aq "(team 1) spawns at the respawn point .*, 5 of 8 fitting," "$log" && grep -aq "(team 0) spawns at the respawn point .*, 4 of 8 fitting," "$log" &&
+				echo "  ok: spawnplay-ctf: the CTF-only point fits (blue 5, red 4 of 8)" || fail "spawnplay-ctf: the fitting points not as the filters say"
+		}
 		continue
 	fi
 	if [ "$c" = aimarker ]; then
@@ -2092,7 +2270,7 @@ if [ -n "${HALO_TEST_SHOTS:-}" ]; then
 	mkdir -p "$HALO_TEST_SHOTS"
 	for c in $cases variants-save variants-load variants-missing variants-damaged variants-full panel-damaged packs-load \
 		aiteam-player aiteam-covenant aisave-load marinesally aivariant-load blocks-load blocks-drive blocks-shoot \
-		blocks-browser; do
+		blocks-browser spawns-load spawnplay-teams spawnplay-ctf; do
 		for shot in "$out/$c"/shots/*.bmp; do
 			[ -f "$shot" ] && cp "$shot" "$HALO_TEST_SHOTS/$c-$(basename "$shot")"
 		done

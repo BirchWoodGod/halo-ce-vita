@@ -384,12 +384,21 @@ enum
 /* the browser's categories' names (forge.h's order) */
 static char const *const forge_category_names[NUMBER_OF_FORGE_CATEGORIES] =
 {
-	N_("VEHICLES"), N_("WEAPONS"), N_("EQUIPMENT"), N_("SCENERY"), N_("AI"), N_("BLOCKS"),
+	N_("VEHICLES"), N_("WEAPONS"), N_("EQUIPMENT"), N_("SCENERY"), N_("AI"), N_("BLOCKS"), N_("SPAWNING"),
 };
 /* (the log's) */
 static char const *const forge_category_log_names[NUMBER_OF_FORGE_CATEGORIES] =
 {
-	"vehicles", "weapons", "equipment", "scenery", "characters", "blocks",
+	"vehicles", "weapons", "equipment", "scenery", "characters", "blocks", "spawning",
+};
+/* (forge_spawns.inc) the SPAWNING category's items, its kinds' names */
+static char const *const forge_spawn_kind_names[NUMBER_OF_FORGE_SPAWN_KINDS] =
+{
+	N_("Respawn Point"), N_("Initial Spawn"),
+};
+static char const *const forge_spawn_kind_log_names[NUMBER_OF_FORGE_SPAWN_KINDS] =
+{
+	"respawn point", "initial spawn",
 };
 
 /* the lobby's maps: the Xbox's multiplayer maps, in the order of ui.map's
@@ -668,6 +677,26 @@ struct forge_undo
 	struct forge_transform to;
 };
 
+/* (forge_spawns.inc) a player spawn point of the layout: no object, drawn
+as a marker, saved as version 4's player spawn record */
+struct forge_spawn
+{
+	/* its own number this session (the placed objects' numbers' series; a
+	network game's client: the host's) */
+	long id;
+	/* _forge_spawn_* */
+	short kind;
+	/* NONE any, 0 red, 1 blue */
+	signed char team;
+	/* FORGE_FILE_GAME_TYPE_* bits, 0 for all */
+	unsigned short game_types;
+	/* where, facing along the ground */
+	struct forge_transform home;
+};
+
+/* (the players a round's spawns are kept for: absolute indices) */
+#define FORGE_SPAWN_PLAYERS 32
+
 typedef char verify_forge_file_records[FORGE_FILE_MAXIMUM_RECORDS == FORGE_MAXIMUM_OBJECTS ? 1 : -1];
 
 /* ---------- globals */
@@ -864,6 +893,15 @@ static struct
 	long held_marker_id;
 	real_point3d held_marker_position;
 	short markers_drawn;
+	/* (forge_spawns.inc) the layout's player spawn points; the players that
+	spawned this round (a bit each: a round's first spawn takes the initial
+	spawns) and since when each waits for a blocked one */
+	struct forge_spawn spawns[FORGE_MAXIMUM_SPAWNS];
+	short spawn_count;
+	unsigned long spawns_spawned;
+	long spawn_wait_since[FORGE_SPAWN_PLAYERS];
+	/* (the console's forge spawns) the map's own spawns the last frame drew */
+	short map_markers_drawn;
 } forge_globals = { FALSE, "", FALSE, FALSE, 0, NONE, FALSE, NONE, 0.f, { 0.f }, { 0.f }, _forge_speed_normal };
 
 /* ---------- private code */
@@ -888,6 +926,8 @@ static void forge_net_client_undo(boolean redo);
 static boolean forge_net_client_command(short command, uint16_t value);
 static boolean forge_net_client_spawn_move(long id, struct forge_transform const *home);
 static boolean forge_net_client_spawn_property(long id, short property, short step);
+static void forge_net_client_spawn_point(short kind, struct forge_transform const *home);
+static void forge_net_client_spawn_delete(long id);
 /* ---- the characters' spawn markers (forge_markers.inc) */
 static boolean forge_markers_shown(void);
 static long forge_marker_under_crosshair(real *distance);
@@ -896,6 +936,20 @@ static void forge_marker_held_update(void);
 static void forge_marker_drop(void);
 static void forge_marker_home_set(struct forge_placed *placed, struct forge_transform const *home);
 static struct forge_placed *forge_placed_of_id(long id);
+static struct forge_spawn *forge_spawn_of_id(long id);
+static short forge_spawns_of_kind(short kind);
+static void forge_spawn_name(struct forge_spawn const *spawn, char *name, int size);
+static void forge_spawns_clear(void);
+static void forge_spawns_from_layout(struct forge_file_layout const *layout);
+static short forge_spawns_capture(struct forge_file_layout *layout);
+static void forge_spawn_property_apply(struct forge_spawn *spawn, short property, short step, boolean held);
+static void forge_spawn_properties_get(struct forge_spawn const *spawn, struct forge_properties *properties);
+static void forge_spawn_choose(short kind);
+static void forge_spawn_delete(long id);
+static void forge_spawn_log(char const *what, struct forge_spawn const *spawn);
+static struct forge_spawn *forge_spawn_add(long id, short kind, signed char team, unsigned short game_types,
+	struct forge_transform const *home);
+static void forge_spawn_remove(struct forge_spawn *spawn);
 static void forge_net_update(void);
 static void forge_net_map_loaded(void);
 static void forge_net_new_round(void);
@@ -1421,7 +1475,8 @@ static short forge_ai_alive(
 static short forge_objects_counted(
 	void)
 {
-	return (short)(forge_globals.placed_count - forge_globals.ai_dead_count);
+	/* (the player spawn points too: forge_spawns.inc) */
+	return (short)(forge_globals.placed_count - forge_globals.ai_dead_count + forge_globals.spawn_count);
 }
 
 static short forge_ai_dead_only(
@@ -3019,6 +3074,12 @@ static void forge_hud_update(
 				marker = NONE;
 		}
 		placed = marker != NONE ? forge_placed_of_id(marker) : NULL;
+		/* (a player spawn point's: "Initial Spawn, Red") */
+		if (marker != NONE && forge_spawn_of_id(marker))
+		{
+			forge_spawn_name(forge_spawn_of_id(marker), forge_globals.hud_label, sizeof(forge_globals.hud_label));
+			forge_globals.hud_label_held = forge_globals.held_marker_id != 0;
+		}
 		if (placed)
 		{
 			char name[FORGE_NAME_SIZE];
@@ -3456,13 +3517,39 @@ static struct forge_placed *forge_properties_target(
 		NULL;
 }
 
+/* the player spawn point the properties are of (its marker held; a
+machine's request's, the host's), NULL */
+static struct forge_spawn *forge_properties_spawn(
+	void)
+{
+	if (forge_property_target_id)
+		return forge_spawn_of_id(forge_property_target_id);
+	return forge_globals.held_marker_id ? forge_spawn_of_id(forge_globals.held_marker_id) : NULL;
+}
+
 static void forge_property_apply(
 	short property,
 	short step)
 {
 	struct forge_placed *placed = forge_properties_target();
+	struct forge_spawn *spawn = forge_properties_spawn();
 	short index;
 
+	/* (a player spawn point's: forge_spawns.inc; a network game's client asks
+	the host, but for its yaw, which its letting go says) */
+	if (spawn)
+	{
+		boolean held = spawn->id == forge_globals.held_marker_id && !forge_property_target_id;
+
+		if (forge_net_client() && !forge_property_target_id && property != _forge_property_yaw &&
+			property != _forge_property_reset_rotation)
+		{
+			forge_net_client_spawn_property(spawn->id, property, step);
+			return;
+		}
+		forge_spawn_property_apply(spawn, property, step, held);
+		return;
+	}
 	if (!placed)
 		return;
 	/* (a network game's client: the host's, but for its facing, which its
@@ -3615,7 +3702,7 @@ static void forge_properties_open(
 {
 	long screen;
 
-	if (!forge_properties_target())
+	if (!forge_properties_target() && !forge_properties_spawn())
 	{
 		forge_notice("%s", T("Only objects you placed have properties"));
 		return;
@@ -3811,13 +3898,16 @@ static void forge_facing_from_angles(
 }
 
 /* the session's placed objects as a map variant (its paths, its records:
-place, facing and properties); FALSE with why if the map is not one a
-variant may be of. The map's own objects are not in it, as the budget
-does not count them */
+place, facing and properties), and with spawns its player spawn points
+(version 4's records, after the objects': a save's - a new round keeps the
+spawn points as they are, a joiner is given them as entries); FALSE with
+why if the map is not one a variant may be of. The map's own objects are
+not in it, as the budget does not count them */
 static boolean forge_variant_capture(
 	struct forge_file_layout *layout,
 	char const *title,
 	char const *author,
+	boolean spawns,
 	char *why,
 	int why_size)
 {
@@ -3913,11 +4003,14 @@ static boolean forge_variant_capture(
 	that loading the variant brings them) */
 	for (index = 0; index < layout->record_count; index++)
 	{
-		long tag_index = tag_loaded((long)layout->paths[layout->records[index].path_index].group_tag,
-			layout->paths[layout->records[index].path_index].path);
+		long tag_index;
 		char const *owner;
 		short pack;
 
+		if (layout->records[index].path_index >= layout->path_count)
+			continue;
+		tag_index = tag_loaded((long)layout->paths[layout->records[index].path_index].group_tag,
+			layout->paths[layout->records[index].path_index].path);
 		if (tag_index == NONE || (owner = scene_packs_owner(tag_index)) == NULL)
 			continue;
 		for (pack = 0; pack < layout->pack_count; pack++)
@@ -3935,6 +4028,8 @@ static boolean forge_variant_capture(
 			layout->pack_count++;
 		}
 	}
+	if (spawns)
+		skipped = (short)(skipped + forge_spawns_capture(layout));
 	if (skipped)
 		platform_log("forge: %d placed objects left out of the map variant", skipped);
 	snprintf(layout->title, sizeof(layout->title), "%s", title);
@@ -3965,7 +4060,7 @@ static void forge_variant_save(
 	{
 		snprintf(forge_globals.save_status, sizeof(forge_globals.save_status), "%s", T("That name can't be used."));
 	}
-	else if (!forge_variant_capture(&forge_variant_layout, title, author, why, sizeof(why)))
+	else if (!forge_variant_capture(&forge_variant_layout, title, author, TRUE, why, sizeof(why)))
 	{
 		snprintf(forge_globals.save_status, sizeof(forge_globals.save_status), "%s", why);
 	}
@@ -4049,6 +4144,9 @@ static void forge_variant_apply(
 		long object_index;
 		short refusal;
 
+		/* (a player spawn: taken as the map loaded, forge_spawns_from_layout) */
+		if (record->kind == _forge_record_player_spawn && forge_file_layout_version(layout) >= 4)
+			continue;
 		if (record->kind != _forge_record_object)
 		{
 			other_kinds++;
@@ -4942,8 +5040,14 @@ boolean forge_properties_get(
 	struct forge_properties *properties)
 {
 	struct forge_placed *placed = forge_properties_target();
+	struct forge_spawn *spawn = forge_properties_spawn();
 
 	csmemset(properties, 0, sizeof(*properties));
+	if (spawn)
+	{
+		forge_spawn_properties_get(spawn, properties);
+		return TRUE;
+	}
 	if (!placed)
 		return FALSE;
 	forge_object_name(placed->object_index, properties->name, sizeof(properties->name));
@@ -5062,7 +5166,7 @@ void forge_map_resetting(
 	forge_homes_update();
 	for (index = 0; index < forge_globals.placed_count && index < FORGE_MAXIMUM_OBJECTS; index++)
 		characters += forge_globals.placed[index].ai ? 1 : 0;
-	if (!forge_variant_capture(&forge_round_layout, "New Round", NULL, why, sizeof(why)))
+	if (!forge_variant_capture(&forge_round_layout, "New Round", NULL, FALSE, why, sizeof(why)))
 	{
 		platform_log("forge: new round: the layout was not taken: %s", why);
 		csmemset(&forge_round_layout, 0, sizeof(forge_round_layout));
@@ -5094,6 +5198,11 @@ void forge_map_reset(
 	forge_globals.clear_ai_requested = _forge_clear_ai_none;
 	forge_globals.round_requested = FALSE;
 	forge_globals.round_resetting = FALSE;
+	/* (the spawn points kept; a new round's first spawns at its initial
+	spawns again) */
+	forge_globals.spawns_spawned = 0;
+	csmemset(forge_globals.spawn_wait_since, 0, sizeof(forge_globals.spawn_wait_since));
+	forge_globals.held_marker_id = 0;
 	if (forge_globals.active)
 	{
 		/* (the director starts over with the map) */
@@ -5110,6 +5219,7 @@ void forge_map_loaded(
 {
 	/* (every object of the last map is gone, its indices with them) */
 	forge_globals.placed_count = 0;
+	forge_globals.held_marker_id = 0;
 	forge_globals.ai_count = 0;
 	forge_globals.ai_dead_count = 0;
 	forge_globals.held_object_index = NONE;
@@ -5169,6 +5279,11 @@ void forge_map_loaded(
 	forge_globals.game_active = forge_globals.game_requested && scenario_name &&
 		!_stricmp(scenario_name, forge_globals.game_map);
 	forge_game_playing = forge_globals.game_active && !forge_globals.playing;
+	/* (the layout's player spawn points: the map variant's, before anyone
+	spawns - forge_spawns.inc; none of another map's, nor in another game) */
+	forge_spawns_clear();
+	if (forge_globals.game_active && forge_globals.variant_pending)
+		forge_spawns_from_layout(&forge_variant_layout);
 	/* (the session's packs, before the map's objects are placed) */
 	if (forge_globals.game_active)
 		forge_packs_load();
@@ -5224,11 +5339,17 @@ char const *forge_category_name(
 	return category >= 0 && category < NUMBER_OF_FORGE_CATEGORIES ? T(forge_category_names[category]) : "";
 }
 
+/* (the browser's choice of SPAWNING: its kind past the palette's entries) */
+#define FORGE_BROWSER_SPAWN_CHOICE 0x4000
+
 short forge_category_item_count(
 	short category)
 {
 	if (category < 0 || category >= NUMBER_OF_FORGE_CATEGORIES)
 		return 0;
+	/* (SPAWNING: the respawn point and the initial spawn, in a Forge game) */
+	if (category == _forge_category_spawning)
+		return forge_globals.game_active && !forge_globals.playing ? NUMBER_OF_FORGE_SPAWN_KINDS : 0;
 	forge_palette_ready();
 	return forge_globals.palette_counts[category];
 }
@@ -5242,6 +5363,13 @@ boolean forge_category_item(
 
 	if (item_index < 0 || item_index >= forge_category_item_count(category))
 		return FALSE;
+	if (category == _forge_category_spawning)
+	{
+		csmemset(item, 0, sizeof(*item));
+		snprintf(item->name, sizeof(item->name), "%s", T(forge_spawn_kind_names[item_index]));
+		item->placed = forge_spawns_of_kind(item_index);
+		return TRUE;
+	}
 	entry = &forge_globals.palette[forge_globals.palette_first[category] + item_index];
 	csmemcpy(item->name, entry->name, sizeof(item->name));
 	item->placed = forge_placed_of_tag(entry->tag_index);
@@ -5256,7 +5384,8 @@ void forge_browser_choose(
 {
 	if (item_index < 0 || item_index >= forge_category_item_count(category))
 		return;
-	forge_globals.browser_choice = (short)(forge_globals.palette_first[category] + item_index);
+	forge_globals.browser_choice = category == _forge_category_spawning ? (short)(FORGE_BROWSER_SPAWN_CHOICE + item_index) :
+		(short)(forge_globals.palette_first[category] + item_index);
 	forge_globals.browser_chosen = TRUE;
 }
 
@@ -5738,11 +5867,23 @@ void forge_update(
 		short choice = forge_globals.browser_choice;
 
 		forge_globals.browser_chosen = FALSE;
+		if (forge_globals.held_marker_id && ((choice >= 0 && choice < forge_globals.palette_count) ||
+			(choice >= FORGE_BROWSER_SPAWN_CHOICE && choice < FORGE_BROWSER_SPAWN_CHOICE + NUMBER_OF_FORGE_SPAWN_KINDS)))
+		{
+			forge_marker_drop();
+		}
 		if (choice >= 0 && choice < forge_globals.palette_count)
 		{
 			if (object_try_and_get(forge_globals.held_object_index))
 				forge_drop();
 			forge_spawn(forge_globals.palette[choice].tag_index);
+		}
+		/* (SPAWNING: a player spawn point, held as its marker) */
+		else if (choice >= FORGE_BROWSER_SPAWN_CHOICE && choice < FORGE_BROWSER_SPAWN_CHOICE + NUMBER_OF_FORGE_SPAWN_KINDS)
+		{
+			if (object_try_and_get(forge_globals.held_object_index))
+				forge_drop();
+			forge_spawn_choose((short)(choice - FORGE_BROWSER_SPAWN_CHOICE));
 		}
 	}
 	if (!menu_open)
@@ -5805,8 +5946,30 @@ void forge_update(
 					forge_grab(object_index);
 			}
 		}
-		if (pressed[_forge_button_delete] && !forge_globals.held_marker_id)
-			forge_delete(forge_target_object());
+		/* (Y: a player spawn point's marker held, or under the crosshair
+		before what is behind it, deleted; a character's marker never) */
+		if (pressed[_forge_button_delete])
+		{
+			if (forge_globals.held_marker_id)
+			{
+				if (forge_spawn_of_id(forge_globals.held_marker_id))
+					forge_spawn_delete(forge_globals.held_marker_id);
+			}
+			else
+			{
+				real object_distance = FORGE_PICK_RANGE;
+				real marker_distance = FORGE_PICK_RANGE;
+				long object_index = object_try_and_get(forge_globals.held_object_index) ? NONE :
+					forge_object_under_crosshair_at(&object_distance);
+				long marker = object_try_and_get(forge_globals.held_object_index) ? NONE :
+					forge_marker_under_crosshair(&marker_distance);
+
+				if (marker != NONE && forge_spawn_of_id(marker) && marker_distance <= object_distance + FORGE_MARKER_PICK_RADIUS)
+					forge_spawn_delete(marker);
+				else
+					forge_delete(forge_target_object());
+			}
+		}
 		rotating = rotating && object_try_and_get(forge_globals.held_object_index);
 		if (rotating)
 		{
@@ -6311,7 +6474,7 @@ boolean forge_command(
 	/* (tests, the monitor's or the Spartan's: forge_blocks.c) */
 	if (!strcmp(word, "blocks"))
 		return forge_blocks_command(rest);
-	if (!forge_globals.active && strcmp(word, "where") && strcmp(word, "markers"))
+	if (!forge_globals.active && strcmp(word, "where") && strcmp(word, "markers") && strcmp(word, "spawns"))
 	{
 		platform_log("forge: %s: not in monitor mode (\"forge on\")", word);
 		return FALSE;
@@ -6470,7 +6633,7 @@ boolean forge_command(
 	if (!strcmp(word, "property"))
 	{
 		/* ("property team|respawn|start": the held object's stepped) */
-		short property = !strcmp(rest, "team") ? _forge_property_team : !strcmp(rest, "respawn") ? _forge_property_respawn :
+		short property = !strncmp(rest, "team", 4) ? _forge_property_team : !strcmp(rest, "respawn") ? _forge_property_respawn :
 			!strcmp(rest, "start") ? _forge_property_place_at_start : NONE;
 
 		short step = 1;
@@ -6489,9 +6652,15 @@ boolean forge_command(
 			property = _forge_property_roll;
 		else if (!strcmp(rest, "resetrot"))
 			property = _forge_property_reset_rotation;
+		/* (a player spawn point's: "gametype", "kind" - the respawn's and
+		the place at start's rows) */
+		else if (!strncmp(rest, "gametype", 8))
+			property = _forge_property_respawn;
+		else if (!strcmp(rest, "kind"))
+			property = _forge_property_place_at_start;
 		if (strchr(rest, '-'))
 			step = -1;
-		if (property == NONE || !forge_properties_target())
+		if (property == NONE || (!forge_properties_target() && !forge_properties_spawn()))
 			return FALSE;
 		forge_property_apply(property, step);
 		return TRUE;
@@ -6587,10 +6756,14 @@ boolean forge_command(
 		would; "marker": the one under the crosshair; "markers": how many
 		the last frame drew) */
 		real distance = 5.f;
-		long id = rest[0] == '#' ? atol(rest + 1) : forge_marker_under_crosshair(&distance);
+		/* ("#last": the last player spawn point of the layout's: a network
+		game's ids are the host's) */
+		long id = !strcmp(rest, "#last") ? (forge_globals.spawn_count > 0 ? forge_globals.spawns[forge_globals.spawn_count - 1].id :
+			NONE) : rest[0] == '#' ? atol(rest + 1) : forge_marker_under_crosshair(&distance);
 		struct forge_placed *placed = forge_placed_of_id(id);
+		struct forge_spawn *spawn = forge_spawn_of_id(id);
 
-		if (!placed || !placed->ai)
+		if ((!placed || !placed->ai) && !spawn)
 		{
 			platform_log("forge: no spawn marker there");
 			return FALSE;
@@ -6602,12 +6775,13 @@ boolean forge_command(
 			real_point3d position;
 			real_vector3d forward;
 			real_vector3d to_home;
+			real_point3d const *home = spawn ? &spawn->home.position : &placed->home.position;
 
 			if (forge_camera_get(&position, &forward))
 			{
-				to_home.i = placed->home.position.x - position.x;
-				to_home.j = placed->home.position.y - position.y;
-				to_home.k = placed->home.position.z - position.z;
+				to_home.i = home->x - position.x;
+				to_home.j = home->y - position.y;
+				to_home.k = home->z - position.z;
 				distance = magnitude3d(&to_home) - FORGE_MARKER_PICK_RADIUS;
 			}
 		}
@@ -6618,6 +6792,48 @@ boolean forge_command(
 	{
 		platform_log("forge: %d spawn markers drawn, %s held", forge_globals.markers_drawn,
 			forge_globals.held_marker_id ? "one" : "none");
+		return TRUE;
+	}
+	/* (forge_spawns.inc) "spawnpoint respawn|initial": the browser's
+	SPAWNING item placed and held; "spawns": the layout's player spawn
+	points and the markers drawn; "spawndelete #<id>|#last": one deleted, as
+	Y on its marker */
+	if (!strcmp(word, "spawnpoint"))
+	{
+		if (!forge_globals.active)
+			return FALSE;
+		if (forge_globals.held_marker_id)
+			forge_marker_drop();
+		if (object_try_and_get(forge_globals.held_object_index))
+			forge_drop();
+		forge_spawn_choose(!strcmp(rest, "initial") ? _forge_spawn_initial : _forge_spawn_respawn);
+		return TRUE;
+	}
+	/* (tests) "closemenus": the menus over the game closed, as B in them */
+	if (!strcmp(word, "closemenus"))
+	{
+		forge_menus_close_request();
+		return TRUE;
+	}
+	if (!strcmp(word, "spawndelete"))
+	{
+		long id = !strcmp(rest, "#last") ? (forge_globals.spawn_count > 0 ? forge_globals.spawns[forge_globals.spawn_count - 1].id :
+			NONE) : rest[0] == '#' ? atol(rest + 1) : forge_globals.held_marker_id;
+
+		if (!forge_spawn_of_id(id))
+			return FALSE;
+		forge_spawn_delete(id);
+		return TRUE;
+	}
+	if (!strcmp(word, "spawns"))
+	{
+		short index;
+
+		platform_log("forge: %d player spawn points (%d initial, %d respawn), %d markers drawn (%d of the map's), budget %d/%d",
+			forge_globals.spawn_count, forge_spawns_of_kind(_forge_spawn_initial), forge_spawns_of_kind(_forge_spawn_respawn),
+			forge_globals.markers_drawn, forge_globals.map_markers_drawn, forge_objects_counted(), FORGE_MAXIMUM_OBJECTS);
+		for (index = 0; index < forge_globals.spawn_count && index < FORGE_MAXIMUM_SPAWNS; index++)
+			forge_spawn_log("spawns:", &forge_globals.spawns[index]);
 		return TRUE;
 	}
 	if (!strcmp(word, "turn"))
@@ -6742,3 +6958,4 @@ boolean forge_command(
 
 #include "forge_net.inc"
 #include "forge_markers.inc"
+#include "forge_spawns.inc"

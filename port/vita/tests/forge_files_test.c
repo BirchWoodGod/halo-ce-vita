@@ -323,6 +323,9 @@ static void test_writer_refuses(void)
 	layout.records[0].count = 0;
 	CHECK(encode_refused(&layout), "a netgame record without the header's flag is not written");
 	layout.flags = FORGE_FILE_FLAG_NETGAME_SPAWNS;
+	CHECK(encode_refused(&layout), "a player spawn with an object's respawn and flags is not written");
+	layout.records[0].respawn_seconds = 0;
+	layout.records[0].flags = 0;
 	CHECK(!encode_refused(&layout), "a player spawn naming none is written");
 	sample_layout(&layout);
 	layout.records[0].kind = NUMBER_OF_FORGE_RECORD_KINDS;
@@ -588,7 +591,10 @@ static void test_version_2(void)
 	CHECK(encode_refused(&layout), "AI settings in a version 1 layout are not written");
 	sample_layout_2(&layout);
 	layout.version = 4;
-	CHECK(encode_refused(&layout), "version 4 is not written");
+	CHECK(encode_refused(&layout), "version 4 without a player spawn is not written");
+	sample_layout_2(&layout);
+	layout.version = 5;
+	CHECK(encode_refused(&layout), "version 5 is not written");
 	sample_layout_2(&layout);
 	layout.version = 3;
 	CHECK(encode_refused(&layout), "version 3 without a respawning character is not written");
@@ -602,8 +608,11 @@ static void test_version_2(void)
 	layout.records[1].flags |= FORGE_RECORD_AI_OFF;
 	CHECK(encode_refused(&layout), "a boulder's brain is not written");
 	sample_layout_2(&layout);
-	layout.records[5].flags |= 0x08;
+	layout.records[5].flags |= 0x10;
 	CHECK(encode_refused(&layout), "an unknown flag is not written");
+	sample_layout_2(&layout);
+	layout.records[5].flags |= FORGE_RECORD_SPAWN_INITIAL;
+	CHECK(encode_refused(&layout), "an initial spawn's flag on a character is not written");
 	sample_layout_2(&layout);
 	layout.version = 2;
 	layout.records[5].flags |= FORGE_RECORD_AI_RESPAWN;
@@ -638,7 +647,9 @@ static void test_version_2(void)
 	put_u16(work, 4, 3);
 	CHECK(decode(work, good2_size, "bloodgulch") == _forge_file_bad_version, "version 3 without a respawning character: refused");
 	put_u16(work, 4, 4);
-	CHECK(decode(work, good2_size, "bloodgulch") == _forge_file_bad_version, "version 4: refused");
+	CHECK(decode(work, good2_size, "bloodgulch") == _forge_file_bad_version, "version 4 without a player spawn: refused");
+	put_u16(work, 4, 5);
+	CHECK(decode(work, good2_size, "bloodgulch") == _forge_file_bad_version, "version 5: refused");
 	put_u16(work, 4, 0);
 	CHECK(decode(work, good2_size, "bloodgulch") == _forge_file_bad_version, "version 0: refused");
 	memcpy(work, good2, (size_t)good2_size);
@@ -718,6 +729,184 @@ static void test_version_2(void)
 	CHECK(size > good_size, "version 2's file is the sample and two records more");
 }
 
+/* a variant with player spawns (version 4): the sample's objects, a red
+respawn point for CTF, a respawn point of any team for every game type, a
+blue initial spawn for infection */
+static unsigned char good4[FORGE_FILE_MAXIMUM_SIZE];
+static int good4_size;
+
+static void add_spawn(struct forge_file_layout *layout, float x, float y, float yaw, int team, int game_types, int initial)
+{
+	struct forge_file_record *record = &layout->records[layout->record_count++];
+
+	memset(record, 0, sizeof(*record));
+	record->path_index = FORGE_FILE_NO_PATH;
+	record->kind = _forge_record_player_spawn;
+	record->team = (signed char)team;
+	record->position[0] = x;
+	record->position[1] = y;
+	record->position[2] = 1.f;
+	record->angles[0] = yaw;
+	record->game_types = (unsigned short)game_types;
+	record->flags = initial ? FORGE_RECORD_SPAWN_INITIAL : 0;
+	layout->flags |= FORGE_FILE_FLAG_NETGAME_SPAWNS;
+}
+
+static void sample_layout_4(struct forge_file_layout *layout)
+{
+	sample_layout(layout);
+	add_spawn(layout, 90.f, -150.f, 0.5f, 0, FORGE_FILE_GAME_TYPE_CTF, 0);
+	add_spawn(layout, 91.f, -151.f, -2.f, -1, 0, 0);
+	add_spawn(layout, 92.f, -152.f, 3.f, 1, FORGE_FILE_GAME_TYPE_INFECTION, 1);
+}
+
+static void test_version_4(void)
+{
+	struct forge_file_layout layout;
+	int result = -1;
+	int records;
+	int offset;
+
+	sample_layout_4(&layout);
+	CHECK(forge_file_layout_version(&layout) == 4, "player spawns need version 4");
+	good4_size = forge_file_encode(&layout, good4, sizeof(good4), &result);
+	CHECK(good4_size > 0 && result == _forge_file_ok && good4[4] == 4 && good4[5] == 0, "written as version 4");
+	CHECK(decode(good4, good4_size, "bloodgulch") == _forge_file_ok && decoded.version == 4, "read back as version 4");
+	layout.version = 4;
+	CHECK(layouts_equal(&layout, &decoded), "the spawns read back the same");
+	CHECK(decoded.records[5].kind == _forge_record_player_spawn && decoded.records[5].team == 0 &&
+		decoded.records[5].game_types == FORGE_FILE_GAME_TYPE_CTF && !(decoded.records[5].flags & FORGE_RECORD_SPAWN_INITIAL) &&
+		decoded.records[6].team == -1 && decoded.records[6].game_types == 0 &&
+		decoded.records[7].team == 1 && decoded.records[7].game_types == FORGE_FILE_GAME_TYPE_INFECTION &&
+		(decoded.records[7].flags & FORGE_RECORD_SPAWN_INITIAL), "a red CTF respawn point, one for anyone, a blue infection initial spawn");
+	CHECK(decode(good4, good4_size, NULL) == _forge_file_ok && forge_file_encode(&decoded, work, sizeof(work), &result) ==
+		good4_size && !memcmp(work, good4, (size_t)good4_size), "a version 4 file writes back as itself");
+	/* (with a respawning character too: still version 4) */
+	sample_layout_4(&layout);
+	add_path(&layout, GROUP('a', 'c', 't', 'v'), "characters\\elite\\elite major");
+	add_record(&layout, layout.path_count - 1, 96.f, -159.f, 1.f, 1.f);
+	layout.records[layout.record_count - 1].flags |= FORGE_RECORD_AI_RESPAWN;
+	{
+		int written = forge_file_encode(&layout, work, sizeof(work), &result);
+
+		if (written <= 0)
+			printf("  (refused: %s)\n", forge_file_result_name(result));
+		CHECK(forge_file_layout_version(&layout) == 4 && written > 0 && work[4] == 4, "spawns and a respawning character: version 4");
+	}
+	/* (the writer's refusals) */
+	sample_layout_4(&layout);
+	layout.version = 3;
+	CHECK(encode_refused(&layout), "a version 3 layout with spawns but no respawning character is not written");
+	sample_layout_4(&layout);
+	layout.records[5].team = 2;
+	CHECK(encode_refused(&layout), "a spawn of team 2 is not written");
+	sample_layout_4(&layout);
+	layout.records[5].team = -2;
+	CHECK(encode_refused(&layout), "a spawn of team -2 is not written");
+	sample_layout_4(&layout);
+	layout.records[5].game_types = 0x40;
+	CHECK(encode_refused(&layout), "a spawn's unknown game type is not written");
+	sample_layout_4(&layout);
+	layout.records[5].flags = FORGE_RECORD_PLACE_AT_START;
+	CHECK(encode_refused(&layout), "a spawn's object flag is not written");
+	sample_layout_4(&layout);
+	layout.records[5].respawn_seconds = 30;
+	CHECK(encode_refused(&layout), "a spawn's respawn time is not written");
+	sample_layout_4(&layout);
+	layout.records[5].count = 1;
+	CHECK(encode_refused(&layout), "a spawn's count is not written");
+	sample_layout_4(&layout);
+	layout.records[5].ai_team = 1;
+	CHECK(encode_refused(&layout), "a spawn's AI team is not written");
+	sample_layout_4(&layout);
+	layout.records[5].path_index = 0;
+	CHECK(encode_refused(&layout), "a spawn naming a path is not written");
+	sample_layout_4(&layout);
+	layout.records[0].game_types = FORGE_FILE_GAME_TYPE_INFECTION;
+	CHECK(encode_refused(&layout), "infection's bit on an object is not written");
+	sample_layout_4(&layout);
+	layout.flags = 0;
+	CHECK(encode_refused(&layout), "spawns without the netgame flag are not written");
+	sample_layout_4(&layout);
+	layout.records[5].position[1] = 1e30f;
+	CHECK(encode_refused(&layout), "a spawn outside the world is not written");
+	/* (the reader's: each field of a spawn's record, checksum right) */
+	records = good4_size - (FORGE_FILE_RECORD_SIZE * 8) -
+		(int)(strlen(layout.title) + strlen(layout.author) + strlen(layout.description) + strlen(layout.date) + 4);
+	{
+		static struct
+		{
+			int record;
+			int offset;
+			unsigned char value;
+			char const *what;
+		} const cases[] =
+		{
+			{ 5, 3, 2, "team 2" },
+			{ 5, 3, 0xFE, "team -2" },
+			{ 5, 28, 1, "a respawn time" },
+			{ 5, 30, 1, "a count" },
+			{ 5, 31, 0x40, "game type bit 6" },
+			{ 5, 33, 1, "a variant" },
+			{ 5, 34, 0x01, "an object's flag" },
+			{ 5, 34, 0x10, "an unknown flag" },
+			{ 5, 35, 1, "an AI team" },
+			{ 5, 36, 1, "the first reserved byte" },
+			{ 5, 0, 0, "a path" },
+			{ 0, 31, 0x20, "infection's bit on a Warthog" },
+			{ 0, 34, 0x09, "an initial spawn's flag on a Warthog" },
+		};
+		int index;
+
+		for (index = 0; index < (int)(sizeof(cases) / sizeof(cases[0])); index++)
+		{
+			char what[96];
+
+			memcpy(work, good4, (size_t)good4_size);
+			work[records + FORGE_FILE_RECORD_SIZE * cases[index].record + cases[index].offset] = cases[index].value;
+			if (cases[index].offset == 0)
+				work[records + FORGE_FILE_RECORD_SIZE * cases[index].record + 1] = 0;
+			fix_checksum(work, good4_size);
+			snprintf(what, sizeof(what), "version 4: a spawn's %s: refused", cases[index].what);
+			CHECK(decode(work, good4_size, "bloodgulch") == _forge_file_bad_record, what);
+		}
+	}
+	/* (called version 3: its spawns' fields of version 4 refused) */
+	memcpy(work, good4, (size_t)good4_size);
+	put_u16(work, 4, 3);
+	CHECK(decode(work, good4_size, "bloodgulch") != _forge_file_ok, "version 4's spawns in a file called version 3: refused");
+	/* (every bit of the version 4 file flipped: refused, but for the map
+	hash and the spawns' team, game types and initial flag, which have other
+	good values) */
+	for (offset = 0; offset < good4_size; offset++)
+	{
+		int bit;
+		int field = 0;
+		int spawn;
+
+		for (spawn = 5; spawn <= 7; spawn++)
+		{
+			int at = records + FORGE_FILE_RECORD_SIZE * spawn;
+
+			if (offset == at + 3 || offset == at + 31 || offset == at + 34)
+				field = 1;
+		}
+		for (bit = 0; bit < 8; bit++)
+		{
+			int taken;
+
+			memcpy(work, good4, (size_t)good4_size);
+			work[offset] ^= (unsigned char)(1 << bit);
+			taken = decode(work, good4_size, "bloodgulch") == _forge_file_ok;
+			if (taken && !(offset >= 44 && offset < 48) && !field)
+			{
+				printf("  (version 4: byte %d bit %d)\n", offset, bit);
+				CHECK(0, "a flipped bit of a version 4 file was taken");
+			}
+		}
+	}
+}
+
 static void test_names(void)
 {
 	char name[FORGE_FILE_NAME_SIZE];
@@ -785,16 +974,22 @@ static void fuzz(long iterations)
 		}
 		else
 		{
-			/* (the version 1 sample, or the version 2 one) */
-			if (next_random() % 2)
+			/* (the version 1 sample, the version 2 one, or the version 4
+			one with player spawns) */
+			switch (next_random() % 3)
 			{
+			case 0:
 				size = good_size;
 				memcpy(work, good, (size_t)size);
-			}
-			else
-			{
+				break;
+			case 1:
 				size = good2_size;
 				memcpy(work, good2, (size_t)size);
+				break;
+			default:
+				size = good4_size;
+				memcpy(work, good4, (size_t)size);
+				break;
 			}
 			changes = 1 + (int)(next_random() % 6);
 			for (index = 0; index < changes; index++)
@@ -919,11 +1114,14 @@ static int dump(char const *path)
 	{
 		struct forge_file_record const *record = &decoded.records[index];
 
-		printf("record %d: %s kind %d team %d ai team %d respawn %d flags %d at %.2f %.2f %.2f angles %.3f %.3f %.3f\n", index,
-			decoded.paths[record->path_index].path, record->kind, record->team, record->ai_team, record->respawn_seconds,
-			record->flags,
+		printf("record %d: %s kind %d team %d ai team %d respawn %d flags %d at %.2f %.2f %.2f angles %.3f %.3f %.3f\n",
+			index, record->path_index == FORGE_FILE_NO_PATH ? "(none)" : decoded.paths[record->path_index].path, record->kind,
+			record->team, record->ai_team, record->respawn_seconds, record->flags,
 			record->position[0], record->position[1], record->position[2], record->angles[0], record->angles[1],
 			record->angles[2]);
+		if (record->kind == _forge_record_player_spawn)
+			printf("record %d: a player spawn: %s, team %d, game types %d\n", index,
+				(record->flags & FORGE_RECORD_SPAWN_INITIAL) ? "initial" : "respawn", record->team, record->game_types);
 	}
 	return 0;
 }
@@ -942,6 +1140,7 @@ int main(int argc, char **argv)
 	test_writer_refuses();
 	test_reader_refuses();
 	test_version_2();
+	test_version_4();
 	test_names();
 	fuzz(iterations);
 	printf("%d checks, %d failed\n", checks, failures);

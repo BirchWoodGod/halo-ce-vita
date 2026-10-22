@@ -29,6 +29,9 @@ enum
 	FORGE_NAME_SIZE = 64,
 	/* the scene packs Forge offers (forge.c forge_packs) */
 	FORGE_PACK_COUNT = 6,
+	/* the player spawn points of a layout (forge_spawns.inc: the SPAWNING
+	category's), within the objects' budget */
+	FORGE_MAXIMUM_SPAWNS = 64,
 };
 
 /* the object browser's categories, in its order */
@@ -41,13 +44,26 @@ enum
 	_forge_category_characters,
 	/* (the building blocks the game makes: forge_blocks.c) */
 	_forge_category_blocks,
+	/* (the player spawn points, Halo 3's: RESPAWN POINT and INITIAL SPAWN,
+	no tag of the map's: forge_spawns.inc) */
+	_forge_category_spawning,
 	NUMBER_OF_FORGE_CATEGORIES
+};
+
+/* a player spawn point's kind (the SPAWNING category's items, in its order) */
+enum
+{
+	_forge_spawn_respawn = 0,
+	_forge_spawn_initial,
+	NUMBER_OF_FORGE_SPAWN_KINDS
 };
 
 /* an object's properties (the properties window's rows, in its order; a
 character's AI team and brain only for a character): its exact angles
 (yaw, pitch, roll: stepped by rotate mode's snapping, 15 degrees with
-none) and their reset to none */
+none) and their reset to none. A player spawn point's rows are the first
+four: its team (any, red, blue), its game type in the respawn's row, its
+kind (respawn point, initial spawn) in the place at start's, its yaw */
 enum
 {
 	_forge_property_team = 0,
@@ -84,6 +100,11 @@ struct forge_properties
 	short ai_team;
 	char ai_team_name[32];
 	boolean ai_on;
+	/* a player spawn point's (forge_spawns.inc): its kind
+	(_forge_spawn_*) and its game type, named */
+	boolean spawn;
+	short spawn_kind;
+	char game_type_name[32];
 };
 
 /* what the monitor's controls ask of the flying camera this frame */
@@ -479,5 +500,27 @@ long forge_net_client_tag(
 	long host_tag_index);
 boolean forge_net_client_holds(
 	long object_index);
+
+/* ---------- prototypes/FORGE_SPAWNS.INC (in forge.c) */
+
+struct player_starting_location;
+
+/* (players.c, player_spawn: a game's host, a local game) where the player
+spawns in a Forge game or a map variant played that has player spawn
+points of its team and game type: one of them chosen by the engine's own
+rating (game_engine_get_starting_location_rating: the game type's, enemies
+and vehicles near, teammates), the round's initial spawns first for its
+first spawn. _forge_spawn_location_found, filled; _map when none fits (the
+map's own spawns then); _wait when some fit but each is blocked (an enemy
+on it: nothing spawned this tick, the map's after a few seconds) */
+enum
+{
+	_forge_spawn_location_map = 0,
+	_forge_spawn_location_found,
+	_forge_spawn_location_wait,
+};
+short forge_spawn_location(
+	long player_index,
+	struct player_starting_location *location);
 
 #endif

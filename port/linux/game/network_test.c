@@ -2364,6 +2364,20 @@ void network_test_update(
 						if (!forge_net_host_begin(path, variant_file, why, (int)sizeof(why)))
 							platform_log("network test: the Forge game could not be hosted: %s", why);
 					}
+					/* (HALO_NETWORK_TEST_MAP_VARIANT: the game plays that map
+					variant of the map, as the multiplayer lobby's MAP has it:
+					a "host:" game's joiners given its layout, a "local:" one's
+					placed here) */
+					else if (getenv("HALO_NETWORK_TEST_MAP_VARIANT") && getenv("HALO_NETWORK_TEST_MAP_VARIANT")[0])
+					{
+						char why[160];
+						char const *variant_file = getenv("HALO_NETWORK_TEST_MAP_VARIANT");
+						boolean played = network_test.local ? forge_play_local_request(path, variant_file, why, (int)sizeof(why)) :
+							forge_play_host_begin(path, variant_file, why, (int)sizeof(why));
+
+						platform_log("network test: the map variant %s %s%s", variant_file, played ? "is played" :
+							"could not be played: ", played ? "" : why);
+					}
 					else
 					{
 						forge_net_host_end();
