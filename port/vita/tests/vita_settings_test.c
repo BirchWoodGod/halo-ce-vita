@@ -2185,7 +2185,10 @@ static void test_chat_page(void)
 	halo_chat_players_muted[1] = 0;
 	halo_chat_players_local[0] = 0;
 	press(VITA_BUTTON_CIRCLE);
-	check(strstr(menu, "*Multiplayer") && !strstr(menu, "\n\x03"), "circle: back to Multiplayer");
+	check(page == PAGE_CROSSPLAY && strstr(menu, "\n\x03Multiplayer > Vita and PC\n"),
+		"circle: back to Vita and PC, where the Chat row is");
+	press(VITA_BUTTON_CIRCLE);
+	check(strstr(menu, "*Multiplayer") && !strstr(menu, "\n\x03"), "circle again: back to Multiplayer");
 }
 
 static void test_friends_page(void)
@@ -2848,7 +2851,42 @@ static void test_multiplayer_tab(void)
 		!strcmp(getenv("HALO_NET_BLOCK_MOUSE_AIM_ASSIST"), "true"), "PC mouse aim assist Off: HALO_NET_BLOCK_MOUSE_AIM_ASSIST true");
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_NET_BLOCK_MOUSE_AIM_ASSIST"), "false"), "PC mouse aim assist their choice again: false");
+	/* (bots.online: on this page with the other rows of the games hosted
+	online, not on the tab - the tab is a screen's height; while it fills,
+	the bots' skill, vehicles and routes under it, the tab's own rows) */
+	to_line("Online bots");
+	{
+		const char *aim = strstr(menu, "\nPC mouse aim assist\x02"), *bots = strstr(menu, "\nOnline bots\x02  Full >");
+
+		check(aim && bots && aim < bots && !setting_named("HALO_BOTS_ONLINE")->restart &&
+			strstr(menu, "\n  Bot skill\x02") && strstr(menu, "\n  Bot vehicles\x02") &&
+			strstr(menu, "\n  Bot routes\x02") && bots < strstr(menu, "\n  Bot skill\x02") &&
+			!strstr(menu, "Bot teams") && !strstr(menu, "Bot playlist") && menu_fits() && menu_height_fits(),
+			"Online bots: on Vita and PC under PC mouse aim assist, Full as shipped, live; skill, vehicles and "
+			"routes under it; the page fits");
+	}
+	to_line("  Bot skill");
+	{
+		int skill = choice_of("HALO_BOT_SKILL");
+
+		press(skill < 3 ? VITA_BUTTON_RIGHT : VITA_BUTTON_LEFT);
+		check(choice_of("HALO_BOT_SKILL") == (skill < 3 ? skill + 1 : skill - 1) && getenv("HALO_BOT_SKILL"),
+			"Online bots' skill set from this page");
+		press(skill < 3 ? VITA_BUTTON_LEFT : VITA_BUTTON_RIGHT);
+		check(choice_of("HALO_BOT_SKILL") == skill, "the skill as it was again");
+	}
+	to_line("Online bots");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nOnline bots\x02< Off >") && getenv("HALO_BOTS_ONLINE") &&
+		!strcmp(getenv("HALO_BOTS_ONLINE"), "off") && !strstr(menu, "Bot skill") && !strstr(menu, "Bot routes"),
+		"Online bots Off: HALO_BOTS_ONLINE off, the bot rows gone from the page");
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_BOTS_ONLINE"), "full") && strstr(menu, "\n  Bot skill\x02"),
+		"Online bots Full again: full, the bot rows back");
 	press(VITA_BUTTON_CIRCLE);
+	check(strstr(menu, "*Multiplayer") && !strstr(menu, "Online bots") &&
+		(choice_of("HALO_BOTS") != 0 || !strstr(menu, "Bot skill")) && menu_height_fits(),
+		"the Multiplayer tab: no Online bots row, the bot rows only with Bots on; it fits");
 	/* (hosting is never blocked by the wire now: Host a game opens as ever) */
 	{
 		char saved_network[sizeof(running_network)];
@@ -3566,8 +3604,8 @@ the Campaign screen) and Online games (now Visibility, by OpenCE's name);
 and the rows added since (Sun rays, Button icons, Map downloads, Max
 players, Visibility, Fourth core helpers, Latency meter, Particles,
 First-person legs, MCC mods, PC map vehicles, Sharp interface, Player model,
-PC mouse aim assist, Carnage report, Field of view, Chat, Chat filter; the Play
-page's two texts) */
+PC mouse aim assist, Carnage report, Field of view, Chat, Chat filter, Online
+bots; the Play page's two texts) */
 static void test_variables_kept(void)
 {
 	static const char *const variables[] = {
@@ -3595,7 +3633,7 @@ static void test_variables_kept(void)
 		"HALO_INFECTION_ZOMBIES", "HALO_INFECTION_SPEED", "HALO_INFECTION_TIME", "HALO_INFECTION_RESPAWN",
 		"HALO_INFECTION_SHIELDS", "HALO_INFECTION_TOUGH",
 		"HALO_CARNAGE_REPORT", "HALO_FLAMING_HELMET", "HALO_FIELD_OF_VIEW", "HALO_CLOCK_GOVERNOR", "HALO_BATTERY_LOG",
-		"HALO_CHAT", "HALO_CHAT_FILTER",
+		"HALO_CHAT", "HALO_CHAT_FILTER", "HALO_BOTS_ONLINE",
 	};
 	int index, all = 1, choices = 0;
 

@@ -131,7 +131,7 @@ menus need bitmaps.map, loc.map: README" (halo_pc_menus_state).
   network.coop_public: Private unless chosen), which X on the waiting screen
   of co-op hosted online sets (port/linux/game/coop_menu.c). 1.0.3's
   "Online games" row (HALO_NET_LOBBY_PUBLIC) loads as Visibility; 1.0.3's Co-op page variables load as Off.
-- "Online bots" (HALO_BOTS_ONLINE: Full, the default, Off, or 1 to 13 at
+- "Online bots" (on the Vita and PC page; HALO_BOTS_ONLINE: Full, the default, Off, or 1 to 13 at
   most): a game this Vita hosts on the Online connection is filled with bots
   to its most players less one, a bot leaving for each player who joins (a
   party's members on one team; network_server_manager.c's bot fill); the
@@ -764,6 +764,15 @@ static struct setting settings[] = {
 	Vita's own aim assist is the Gyro page's) */
 	{ "PC mouse aim assist", "HALO_NET_BLOCK_MOUSE_AIM_ASSIST", 0, 2, { "false", "true" },
 		{ "Their choice", "Off" }, "Everyone games: Off turns off OpenCE players' mouse aim assist", 0, PAGE_CROSSPLAY },
+	/* (bots.online: the bots a game this Vita hosts Online fills its lobby
+	with, to its most players less one, leaving as players join: Full by
+	default; the Halo 3 GAME OPTIONS' BOTS sets it too. Live. On Vita and PC
+	with the other rows of the games you host online, not on the tab: the
+	Multiplayer tab is a screen's height. Its skill, vehicles and routes are
+	the tab's Bot rows, shown while it fills) */
+	{ "Online bots", "HALO_BOTS_ONLINE", 0, 10, { "full", "off", "1", "2", "3", "5", "7", "9", "11", "13" },
+		{ "Full", "Off", "1", "2", "3", "5", "7", "9", "11", "13" },
+		"Games you host Online: bots fill all but one slot", 0, PAGE_CROSSPLAY },
 	{ "Ad hoc room", "HALO_ADHOC_ROOM", 0, 4, { "1", "2", "3", "4" }, { "1", "2", "3", "4" },
 		"Vitas in the same room play together", 0, TAB_MULTIPLAYER },
 	{ "Join the room", NULL, 0, 0, { NULL }, { NULL }, "Then Multiplayer, System Link (LAN) in the game", 0,
@@ -826,12 +835,6 @@ static struct setting settings[] = {
 	{ "Bots", "HALO_BOTS", 0, 11, { "0", "1", "2", "3", "4", "5", "6", "7", "9", "11", "15" },
 		{ "Off", "1", "2", "3", "4", "5", "6", "7", "9", "11", "15" },
 		"Computer players in Multiplayer > Split Screen", 0, TAB_MULTIPLAYER },
-	/* (bots.online: the bots a game this Vita hosts Online fills its lobby
-	with, to its most players less one, leaving as players join: Full by
-	default; the Halo 3 GAME OPTIONS' BOTS sets it too. Live) */
-	{ "Online bots", "HALO_BOTS_ONLINE", 0, 10, { "full", "off", "1", "2", "3", "5", "7", "9", "11", "13" },
-		{ "Full", "Off", "1", "2", "3", "5", "7", "9", "11", "13" },
-		"Games you host Online: bots fill all but one slot", 0, TAB_MULTIPLAYER },
 	{ "  Bot skill", "HALO_BOT_SKILL", 0, 4, { "easy", "normal", "heroic", "legendary" },
 		{ "Easy", "Normal", "Heroic", "Legendary" }, "How soon bots react, how well they aim", 1, TAB_MULTIPLAYER },
 	{ "  Bot teams", "HALO_BOT_TEAMS", 0, 2, { "even", "against" }, { "Even", "Against you" },
@@ -1673,11 +1676,13 @@ static int setting_shown(const struct setting *setting)
 	/* (the tester's flaming helmet: a listed tester's alone) */
 	if (setting->variable && !strcmp(setting->variable, "HALO_FLAMING_HELMET"))
 		return p2p_flame_listed();
-	/* (skill, vehicles and routes: the offline bots' and Online bots'; teams
-	and the playlist: Split Screen's alone) */
+	/* (skill, vehicles and routes: the offline bots' and Online bots'; on
+	the tab under Bots while there are any, and on Vita and PC under Online
+	bots while it fills (page_lines puts them there): the tab has no room
+	for them with Bots off. Teams and the playlist: Split Screen's alone) */
 	if (setting->variable && (!strcmp(setting->variable, "HALO_BOT_SKILL") ||
 		!strcmp(setting->variable, "HALO_BOT_VEHICLES") || !strcmp(setting->variable, "HALO_BOT_ROUTES")))
-		return choice_of("HALO_BOTS") != 0 || choice_of("HALO_BOTS_ONLINE") != 1;
+		return page == PAGE_CROSSPLAY ? choice_of("HALO_BOTS_ONLINE") != 1 : choice_of("HALO_BOTS") != 0;
 	if (setting->variable && (!strcmp(setting->variable, "HALO_BOT_TEAMS") ||
 		!strcmp(setting->variable, "HALO_BOT_PLAYLIST")))
 		return choice_of("HALO_BOTS") != 0;
@@ -3769,6 +3774,23 @@ static int page_lines(struct line *lines)
 			under Check for updates) */
 			if (settings[index].action == ACTION_UPDATE_CHECK)
 				count += update_lines(lines + count);
+			/* (Vita and PC: the bots' skill, vehicles and routes - the
+			tab's rows, also the Online bots' - under Online bots while it
+			fills, setting_shown) */
+			if (page == PAGE_CROSSPLAY && settings[index].variable &&
+				!strcmp(settings[index].variable, "HALO_BOTS_ONLINE"))
+			{
+				int bot;
+
+				for (bot = 0; bot < SETTING_COUNT; bot++)
+					if (settings[bot].variable && (!strcmp(settings[bot].variable, "HALO_BOT_SKILL") ||
+						!strcmp(settings[bot].variable, "HALO_BOT_VEHICLES") ||
+						!strcmp(settings[bot].variable, "HALO_BOT_ROUTES")) && setting_shown(&settings[bot]))
+					{
+						lines[count].type = LINE_SETTING;
+						lines[count++].index = bot;
+					}
+			}
 		}
 	if (page == PAGE_GYRO)
 	{
