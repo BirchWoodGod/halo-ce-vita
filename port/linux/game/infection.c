@@ -582,6 +582,10 @@ static void infection_arm_zombie(long player_index)
 	}
 	object_placement_data_new(&placement, definition_index, NONE);
 	placement.position = unit->object.position;
+	/* (the zombies' team: a ball of no team is refused by every client,
+	network_objects.c's distributed_client_change_valid - the skull was the
+	host's alone, the zombies' hands empty on every other machine) */
+	placement.owner_team_index = (short)infection_side_team(_infection_side_zombie);
 	weapon_index = object_new(&placement);
 	if (weapon_index == NONE)
 	{
