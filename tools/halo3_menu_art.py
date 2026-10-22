@@ -850,34 +850,67 @@ SCOREBOARD_TEAM_COLOURS = [
 ]
 
 
-def scoreboard_team(colour):
-    # a team's panel header on the scoreboard: a band of the team's colour,
-    # deep enough for white text, lighter at the left, 256x16 (stretched to
-    # the row)
-    rgb = colour
-    light = tuple(min(255, round(c + (255 - c) * .18)) for c in rgb)
-    dark = tuple(round(c * .55) for c in rgb)
-    image = horizontal_gradient((256, 16), [
-        (0.0, light + (240,)),
-        (0.6, rgb + (230,)),
-        (1.0, dark + (210,)),
-    ])
+def scoreboard_band(colour):
+    # a team's band on the scoreboard (Halo 3's: the team's colour, see-through,
+    # its rank, name and score on it): the colour, a little lighter at the
+    # top, three quarters opaque; 128x16, stretched to the row
+    light = tuple(min(255, round(c + (255 - c) * .2)) for c in colour)
+    image = vertical_gradient((128, 16), [(0.0, light + (alpha(.82),)), (1.0, colour + (alpha(.74),))])
     draw = ImageDraw.Draw(image)
-    draw.rectangle([0, 0, 255, 0], fill=(255, 255, 255, alpha(.35)))
-    draw.rectangle([0, 15, 255, 15], fill=(0, 0, 0, alpha(.35)))
+    draw.line([(0, 0), (127, 0)], fill=(255, 255, 255, alpha(.35)))
     return image
 
 
-def scoreboard_self():
-    # this machine's own players' rows on the scoreboard: a pale steel band
-    # across the row, brightest at the left (the cursor's is row_on's orange)
-    image = horizontal_gradient((128, 16), [
-        (0.0, (170, 200, 235, alpha(.42))),
-        (0.7, (150, 180, 220, alpha(.22))),
-        (1.0, (150, 180, 220, alpha(.12))),
-    ])
+def scoreboard_tint(colour):
+    # a player's row under their team's band: the team's colour, more
+    # see-through (the game shows through); a free for all's (colour None) a
+    # dark steel; a thin line between rows
+    if colour is None:
+        top, bottom = (40, 54, 78, alpha(.62)), (26, 36, 56, alpha(.62))
+    else:
+        dark = tuple(round(c * .8) for c in colour)
+        top, bottom = colour + (alpha(.55),), dark + (alpha(.55),)
+    image = vertical_gradient((128, 16), [(0.0, top), (1.0, bottom)])
     draw = ImageDraw.Draw(image)
-    draw.line([(0, 0), (127, 0)], fill=(230, 240, 255, alpha(.4)))
+    draw.line([(0, 15), (127, 15)], fill=(255, 255, 255, alpha(.22)))
+    return image
+
+
+def scoreboard_outline(colour):
+    # this machine's own row (yellow) or the cursor's (white): an outline
+    # round the row, clear inside; 256x16, stretched to the row
+    image = Image.new('RGBA', (256, 16), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([0, 0, 255, 15], outline=colour + (255,))
+    draw.rectangle([1, 1, 254, 14], outline=colour + (alpha(.4),))
+    return image
+
+
+def scoreboard_clear():
+    # the scoreboard's row with no outline: clear, 256x16
+    return Image.new('RGBA', (256, 16), (0, 0, 0, 0))
+
+
+def scoreboard_emblem(colour):
+    # a player's emblem on the scoreboard (the nameplate's emblem square,
+    # lobby nameplates' own: the colour itself with a light rim, a small ring
+    # of our own in it; colour None: the default green's), 16x16
+    rgb = colour or (169, 197, 58)
+    light = tuple(min(255, round(c + (255 - c) * .55)) for c in rgb)
+    image = Image.new('RGBA', (16, 16), rgb + (255,))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([0, 0, 15, 15], outline=(255, 255, 255, alpha(.55)))
+    draw.ellipse([4, 4, 11, 11], outline=light + (255,), width=2)
+    draw.point([(7, 7), (8, 8), (7, 8), (8, 7)], fill=light + (255,))
+    return image
+
+
+def scoreboard_selector():
+    # the open scoreboard's player selector (the player its options act
+    # on): a dark plate, a light rim; 256x16
+    image = vertical_gradient((256, 16), [(0.0, (30, 40, 58, alpha(.88))), (1.0, (14, 20, 32, alpha(.88)))])
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([0, 0, 255, 15], outline=(200, 214, 230, alpha(.6)))
     return image
 
 
@@ -1018,7 +1051,12 @@ ART = {
     'arrow_right.png': lambda: arrow('right'),
     'swatch_random.png': lambda: swatch(None),
     'carnage_won.png': carnage_won,
-    'scoreboard_self.png': scoreboard_self,
+    'scoreboard_clear.png': scoreboard_clear,
+    'scoreboard_own.png': lambda: scoreboard_outline((255, 214, 40)),
+    'scoreboard_cursor.png': lambda: scoreboard_outline((240, 246, 252)),
+    'scoreboard_selector.png': scoreboard_selector,
+    'scoreboard_tint_ffa.png': lambda: scoreboard_tint(None),
+    'scoreboard_emblem.png': lambda: scoreboard_emblem(None),
     'scoreboard_host.png': scoreboard_host,
     'scoreboard_party.png': scoreboard_party,
     'scoreboard_flame.png': scoreboard_flame,
@@ -1027,10 +1065,12 @@ ART = {
 for _bars in range(5):
     ART['scoreboard_ping_%d.png' % _bars] = (lambda bars: lambda: scoreboard_ping(bars))(_bars)
 for _index, _colour in enumerate(SCOREBOARD_TEAM_COLOURS):
-    ART['scoreboard_team_%d.png' % _index] = (lambda colour: lambda: scoreboard_team(colour))(_colour)
+    ART['scoreboard_band_%d.png' % _index] = (lambda colour: lambda: scoreboard_band(colour))(_colour)
+    ART['scoreboard_tint_%d.png' % _index] = (lambda colour: lambda: scoreboard_tint(colour))(_colour)
 for _index, _colour in enumerate(PLAYER_COLOURS):
     ART['swatch_%02d.png' % _index] = (lambda colour: lambda: swatch(colour))(_colour)
     ART['nameplate_%02d.png' % _index] = (lambda colour: lambda: nameplate_colour(colour))(_colour)
+    ART['scoreboard_emblem_%02d.png' % _index] = (lambda colour: lambda: scoreboard_emblem(((colour >> 16) & 0xFF, (colour >> 8) & 0xFF, colour & 0xFF)))(_colour)
 
 
 def main(folder):

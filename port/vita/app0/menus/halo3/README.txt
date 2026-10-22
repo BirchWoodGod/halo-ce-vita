@@ -235,17 +235,24 @@ In each level's map (ingame.txt):
   dedicated server's and a PC host's games, each local player's own in their
   view (split screen's the smaller scoreboard_split). Held, it is drawn over
   the game without being open (ui_widget.c ui_widget_port_held_screen_show):
-  the player plays on, no button is taken. The game type on the map, the
-  score to win and the time left; a team game's teams each under a band of
-  its colour with its score (the leading team first), a free for all's
-  players in one list, as the game ranks them; each player's nameplate in
-  their colour (their team's), name, score, kills, deaths, assists and the
-  ping's bars (the latency meter's; the host's table on a joined machine),
-  this machine's rows lit, the host's crown, the party's mark, the tester's
-  small flame (only where the flame itself shows: its proof checked here),
-  BOT on a bot's; the dead and those out of lives dimmed; held with more
-  players than rows, the leaders and the player's own row last. Triangle
-  while it is held (one player on the machine) opens it as a screen: the
+  the player plays on, no button is taken. It is a compact panel at the top
+  of the screen (about 45% of its width), as Halo 3's: "Players" and "Score"
+  over the rows; a team game's teams each a translucent band of the team's
+  colour with its rank, name and score (the leading team first), its players
+  under it in the same colour; a free for all's players in one translucent
+  list, as the game ranks them. A row: the emblem (the player's colour,
+  their team's in a team game), the name, the tags - the host's crown, the
+  party's mark, the tester's small flame (only where the flame itself shows:
+  its proof checked here), BOT on a bot's, the ping's bars (the latency
+  meter's; the host's table on a joined machine) - and the score; this
+  machine's rows outlined in yellow; the dead and those out of lives dimmed;
+  the score to win and the time left over it, "Hold [Triangle] to activate"
+  under it; no kills, deaths or assists held. Held with more players than
+  rows, the leaders and the player's own row last. Opened it is wider, with
+  kills, deaths and assists, the game type on the map, and a selector strip
+  under the rows (the emblem and name of the player Cross acts on; the
+  D-pad's up and down arrows). Triangle while it is held (one player on the
+  machine) opens it as a screen: the
   D-pad, the stick, L and R, a drag on the touch screen scroll it, Cross (a
   tap) on a player opens their options - MUTE CHAT, ADD FRIEND (VIEW FRIEND
   for a friend), KICK for the game's host alone (network_anticheat_drop,

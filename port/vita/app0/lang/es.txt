@@ -2629,6 +2629,8 @@
 
 # ---------- the Halo 3 SCOREBOARD (halo3/scoreboard.xml, menu_functions.c "port h3 scoreboard"):
 # its columns' names are one or two letters (K: kills, D: deaths, A: assists)
+"Score" = "Puntos"
+"to activate" = "para activar"
 "K" = "B"
 "D" = "M"
 "PING" = "PING"

@@ -12504,12 +12504,16 @@ they or the rows shown changed: nothing is made each frame */
 /* (a drag on the touch screen: how far before it is one, and a row's
 height, as the list's rows are placed) */
 #define H3_SCOREBOARD_DRAG_SLOP 10
-#define H3_SCOREBOARD_ROW_PITCH 21
-/* (the open screen's list, on the menus' 640x480: a drag starts there) */
-#define H3_SCOREBOARD_LIST_LEFT 40
-#define H3_SCOREBOARD_LIST_TOP 80
-#define H3_SCOREBOARD_LIST_RIGHT 600
-#define H3_SCOREBOARD_LIST_BOTTOM 412
+#define H3_SCOREBOARD_ROW_PITCH 18
+/* (the open screen's list, on the menus' 640x480: a drag starts there; the
+panel's left, and the first row's top) */
+#define H3_SCOREBOARD_LIST_LEFT 122
+#define H3_SCOREBOARD_LIST_TOP 66
+#define H3_SCOREBOARD_LIST_RIGHT 518
+#define H3_SCOREBOARD_LIST_BOTTOM 336
+/* (held, the compact panel - 288 of the open panel's 396 - in the middle of
+the screen: the open layout's left part, moved right by this) */
+#define H3_SCOREBOARD_HELD_SHIFT 54
 /* (the views whose rows were last filled: the held ones, a local player
 each, and the open screen) */
 #define H3_SCOREBOARD_VIEWS (MAXIMUM_LOCAL_PLAYERS + 1)
@@ -12527,7 +12531,9 @@ struct h3_scoreboard_row
 	/* a team's band (its score) or a player's row */
 	boolean team_row;
 	short team;
-	/* the nameplate's colour (the game's eighteen; the team's in a team
+	/* a team's place (1 the leading team) */
+	short rank;
+	/* the emblem's colour (the game's eighteen; the team's in a team
 	game; NONE) */
 	short color;
 	long player_index;
@@ -12597,6 +12603,8 @@ static struct
 	short page;
 	long chosen_player;
 	char chosen_name[48];
+	/* the selector's last text (the open screen: set again when it changes) */
+	char selector_key[64];
 	/* a drag on the touch screen: started at, the row chosen then */
 	boolean touching;
 	boolean dragging;
@@ -12685,7 +12693,7 @@ static void h3_scoreboard_read(boolean now)
 	struct network_game *game = network_game_get_game();
 	unsigned long time = system_milliseconds();
 	boolean in_party;
-	long index;
+	long index, teams_seen = 0;
 	char name[64], map[96];
 
 	if (!now && h3_scoreboard.read_once && time - h3_scoreboard.read_time < H3_SCOREBOARD_READ_MILLISECONDS)
@@ -12710,6 +12718,8 @@ static void h3_scoreboard_read(boolean now)
 		memset(row, 0, sizeof(*row));
 		row->team_row = source->team_row;
 		row->team = source->team;
+		if (row->team_row)
+			row->rank = (short)(++teams_seen);
 		row->color = source->color;
 		row->player_index = source->player_index;
 		row->machine = source->machine;
@@ -12913,39 +12923,61 @@ static void h3_scoreboard_show(struct widget_instance *widget, boolean shown)
 		widget_instance_set_visibility_recursive(widget, shown);
 }
 
-/* a row's widgets: what shows, its pictures' frames, its text */
-static void h3_scoreboard_fill_row(struct widget_instance *child, struct h3_scoreboard_row const *row, boolean split)
+/* a row's widgets: what shows, its pictures' frames, its text. Held (not
+open, not split screen's) the compact panel's: the narrow band and tint, the
+own row's yellow outline of its own, no kills, deaths or assists */
+static void h3_scoreboard_fill_row(struct widget_instance *child, struct h3_scoreboard_row const *row, boolean split,
+	boolean open, boolean teams)
 {
 	struct widget_instance *found;
+	boolean compact = !open && !split, team = row->team_row, player = !team;
 	char text[32];
 
-	h3_scoreboard_show(named(child, "row_team"), row->team_row);
-	h3_scoreboard_show(named(child, "row_team_score"), row->team_row);
-	h3_scoreboard_show(named(child, "row_plate"), !row->team_row);
-	h3_scoreboard_show(named(child, "row_score"), !row->team_row);
-	h3_scoreboard_show(named(child, "row_kills"), !row->team_row);
-	h3_scoreboard_show(named(child, "row_deaths"), !row->team_row);
-	h3_scoreboard_show(named(child, "row_assists"), !row->team_row);
-	h3_scoreboard_show(named(child, "row_host"), !row->team_row && row->host);
-	h3_scoreboard_show(named(child, "row_party"), !row->team_row && row->party);
-	h3_scoreboard_show(named(child, "row_flame"), !row->team_row && row->flame);
-	h3_scoreboard_show(named(child, "row_bot"), !row->team_row && row->bot);
+	h3_scoreboard_show(named(child, "row_band"), team && !compact);
+	h3_scoreboard_show(named(child, "row_band_n"), team && compact);
+	h3_scoreboard_show(named(child, "row_tint"), player && !compact);
+	h3_scoreboard_show(named(child, "row_tint_n"), player && compact);
+	h3_scoreboard_show(named(child, "row_own_n"), player && compact && row->local_player_index != NONE);
+	h3_scoreboard_show(named(child, "row_rank"), team);
+	h3_scoreboard_show(named(child, "row_team"), team);
+	h3_scoreboard_show(named(child, "row_team_score"), team);
+	h3_scoreboard_show(named(child, "row_emblem"), player);
+	h3_scoreboard_show(named(child, "row_name"), player);
+	h3_scoreboard_show(named(child, "row_score"), player);
+	h3_scoreboard_show(named(child, "row_kills"), player && open);
+	h3_scoreboard_show(named(child, "row_deaths"), player && open);
+	h3_scoreboard_show(named(child, "row_assists"), player && open);
+	h3_scoreboard_show(named(child, "row_host"), player && row->host);
+	h3_scoreboard_show(named(child, "row_party"), player && row->party);
+	h3_scoreboard_show(named(child, "row_flame"), player && row->flame);
+	h3_scoreboard_show(named(child, "row_bot"), player && row->bot);
 	/* (split screen's: the ping's place is BOT's on a bot's row) */
-	h3_scoreboard_show(named(child, "row_ping"), !row->team_row && row->ping_bars != NONE && !(split && row->bot));
-	child->alpha_modifier = !row->team_row && row->dead ? 0.45f : 1.0f;
-	if (row->team_row)
+	h3_scoreboard_show(named(child, "row_ping"), player && row->ping_bars != NONE && !(split && row->bot));
+	child->alpha_modifier = player && row->dead ? 0.45f : 1.0f;
+	if (team)
 	{
-		if ((found = named(child, "row_team")) != NULL)
-			found->animation.current_frame_index = (short)PIN(row->team, 0, 7);
+		short frame = (short)PIN(row->team, 0, 7);
+
+		if ((found = named(child, "row_band")) != NULL)
+			found->animation.current_frame_index = frame;
+		if ((found = named(child, "row_band_n")) != NULL)
+			found->animation.current_frame_index = frame;
+		snprintf(text, sizeof(text), "%d", row->rank);
+		text_show(named(child, "row_rank"), text);
 		text_show(named(child, "row_team"), row->name);
 		text_show(named(child, "row_team_score"), row->score);
 		return;
 	}
-	if ((found = named(child, "row_plate")) != NULL)
+	/* (a team game's rows in their team's colour, a free for all's steel) */
+	if ((found = named(child, "row_tint")) != NULL)
+		found->animation.current_frame_index = (short)(teams ? PIN(row->team, 0, 7) : 8);
+	if ((found = named(child, "row_tint_n")) != NULL)
+		found->animation.current_frame_index = (short)(teams ? PIN(row->team, 0, 7) : 8);
+	if ((found = named(child, "row_emblem")) != NULL)
 		found->animation.current_frame_index = (short)(row->color < 0 || row->color >= 18 ? 0 : row->color + 1);
 	if ((found = named(child, "row_ping")) != NULL)
 		found->animation.current_frame_index = (short)PIN(row->ping_bars, 0, 4);
-	text_show(named(child, "row_plate"), row->name);
+	text_show(named(child, "row_name"), row->name);
 	text_show(named(child, "row_score"), row->score);
 	snprintf(text, sizeof(text), "%ld", row->kills);
 	text_show(named(child, "row_kills"), text);
@@ -12974,6 +13006,29 @@ static void h3_scoreboard_message_update(struct widget_instance *screen)
 	}
 	h3_scoreboard.message_shown = shown;
 	h3_scoreboard.message_new = FALSE;
+}
+
+/* (the open screen) the selector strip: the player Cross acts on - their
+emblem and name; set again only when they change, or when the rows were */
+static void h3_scoreboard_selector_update(struct widget_instance *screen, boolean force)
+{
+	long chosen = h3_scoreboard_chosen_row();
+	char key[sizeof(h3_scoreboard.selector_key)];
+	struct widget_instance *emblem = named(screen, "selector_emblem");
+
+	snprintf(key, sizeof(key), "%d:%s", chosen >= 0 ? h3_scoreboard.rows[chosen].color : NONE,
+		chosen >= 0 ? h3_scoreboard.rows[chosen].name : "");
+	if (!force && !strcmp(key, h3_scoreboard.selector_key))
+		return;
+	snprintf(h3_scoreboard.selector_key, sizeof(h3_scoreboard.selector_key), "%s", key);
+	text_show(named(screen, "selector_name"), chosen >= 0 ? h3_scoreboard.rows[chosen].name : "");
+	if (emblem)
+	{
+		widget_instance_set_visibility_recursive(emblem, chosen >= 0);
+		if (chosen >= 0)
+			emblem->animation.current_frame_index = (short)(h3_scoreboard.rows[chosen].color < 0 ||
+				h3_scoreboard.rows[chosen].color >= 18 ? 0 : h3_scoreboard.rows[chosen].color + 1);
+	}
 }
 
 /* (port h3 scoreboard: a held view's list or the open screen's, as it is
@@ -13087,7 +13142,7 @@ static void h3_scoreboard_update(struct widget_instance *list)
 		{
 			widget_instance_set_visibility_recursive(child, TRUE);
 			child->disabled = FALSE;
-			h3_scoreboard_fill_row(child, row, split);
+			h3_scoreboard_fill_row(child, row, split, open, h3_scoreboard.teams);
 		}
 		if (open && index == cursor)
 		{
@@ -13095,8 +13150,9 @@ static void h3_scoreboard_update(struct widget_instance *list)
 			child->animation.current_frame_index = _h3_scoreboard_row_cursor;
 		}
 		else
-			child->animation.current_frame_index = !row->team_row && row->local_player_index != NONE ?
-				_h3_scoreboard_row_own : _h3_scoreboard_row_plain;
+			/* (held: the own row's outline is the narrow widget's) */
+			child->animation.current_frame_index = !row->team_row && row->local_player_index != NONE &&
+				(open || split) ? _h3_scoreboard_row_own : _h3_scoreboard_row_plain;
 		index++;
 	}
 	if (open && focus && focus != list->focused_child)
@@ -13124,15 +13180,24 @@ static void h3_scoreboard_update(struct widget_instance *list)
 		return;
 	if (!refill)
 	{
-		/* (between reads, only what was said, open) */
+		/* (between reads, only what was said and the selector, open) */
 		if (open)
+		{
 			h3_scoreboard_message_update(screen);
+			h3_scoreboard_selector_update(screen, FALSE);
+		}
 		return;
 	}
 	{
+		boolean compact = !open && !split;
+		long shown_rows = MIN(h3_scoreboard.row_count, rows);
+		short y = (short)(H3_SCOREBOARD_LIST_TOP + shown_rows * H3_SCOREBOARD_ROW_PITCH + 5);
+		struct widget_instance *hold;
+
 		text_show(named(screen, "title"), h3_scoreboard.title);
 		text_show(named(screen, "rules"), h3_scoreboard.rules);
-		if (h3_scoreboard.row_count > rows)
+		text_show(named(screen, "rules_n"), h3_scoreboard.rules);
+		if (h3_scoreboard.row_count > rows && (open || split))
 		{
 			snprintf(text, sizeof(text), T("%ld-%ld of %ld"), offset + 1, MIN(offset + rows - (pinned >= 0 ? 1 : 0),
 				h3_scoreboard.row_count), h3_scoreboard.row_count);
@@ -13140,29 +13205,65 @@ static void h3_scoreboard_update(struct widget_instance *list)
 		}
 		else
 			text_show(named(screen, "scroll"), "");
-	}
-	/* (no ping out of a network game) */
-	h3_scoreboard_show(named(screen, "header_ping"), h3_scoreboard.network && latency_meter_shown());
-	/* (held: Triangle opens it, one player on this machine; open: the
-	buttons' strip) */
-	{
-		boolean hint = !open && !h3_scoreboard_split();
+		/* (the compact panel's captions and column names; the open one's wider; split
+		screen's own are always shown) */
+		if (!split)
+		{
+			h3_scoreboard_show(named(screen, "caption"), open);
+			h3_scoreboard_show(named(screen, "caption_n"), compact);
+			h3_scoreboard_show(named(screen, "title"), open);
+			h3_scoreboard_show(named(screen, "rules"), open);
+			h3_scoreboard_show(named(screen, "rules_n"), compact);
+			h3_scoreboard_show(named(screen, "header_band"), open);
+			h3_scoreboard_show(named(screen, "header_band_n"), compact);
+			h3_scoreboard_show(named(screen, "header_kills"), open);
+			h3_scoreboard_show(named(screen, "header_deaths"), open);
+			h3_scoreboard_show(named(screen, "header_assists"), open);
+			/* (held: "Hold [Triangle] to activate" under the last row, one player
+			on this machine; open: the selector and the buttons' strip) */
+			/* (the words' widths, as the small font sets them: the glyph and the
+			rest after the language's "Hold") */
+			if ((hold = named(screen, "hold_a")) != NULL)
+			{
+				hold->horizontal_offset = H3_SCOREBOARD_LIST_LEFT;
+				hold->vertical_offset = y;
+			}
+			if ((hold = named(screen, "hold_butn")) != NULL)
+			{
+				hold->horizontal_offset = (short)(H3_SCOREBOARD_LIST_LEFT + (short)strlen(T("Hold")) * 7 + 6);
+				hold->vertical_offset = y;
+			}
+			if ((hold = named(screen, "hold_b")) != NULL)
+			{
+				hold->horizontal_offset = (short)(H3_SCOREBOARD_LIST_LEFT + (short)strlen(T("Hold")) * 7 + 28);
+				hold->vertical_offset = y;
+			}
+			{
+				boolean hint = compact && !h3_scoreboard_split();
 
-		h3_scoreboard_show(named(screen, "hint_butn"), hint);
-		h3_scoreboard_show(named(screen, "hint"), hint);
-		h3_scoreboard_show(named(screen, "buttons"), open);
-		h3_scoreboard_show(named(screen, "a_butn"), open);
-		h3_scoreboard_show(named(screen, "a_label"), open);
-		h3_scoreboard_show(named(screen, "dpad_butn"), open);
-		h3_scoreboard_show(named(screen, "dpad_label"), open);
-		h3_scoreboard_show(named(screen, "b_butn"), open);
-		h3_scoreboard_show(named(screen, "b_label"), open);
+				h3_scoreboard_show(named(screen, "hold_a"), hint);
+				h3_scoreboard_show(named(screen, "hold_butn"), hint);
+				h3_scoreboard_show(named(screen, "hold_b"), hint);
+			}
+			h3_scoreboard_show(named(screen, "selector"), open);
+			h3_scoreboard_show(named(screen, "selector_emblem"), open);
+			h3_scoreboard_show(named(screen, "selector_name"), open);
+			h3_scoreboard_show(named(screen, "selector_arrows"), open);
+			h3_scoreboard_show(named(screen, "buttons"), open);
+			h3_scoreboard_show(named(screen, "a_butn"), open);
+			h3_scoreboard_show(named(screen, "a_label"), open);
+			h3_scoreboard_show(named(screen, "dpad_butn"), open);
+			h3_scoreboard_show(named(screen, "dpad_label"), open);
+			h3_scoreboard_show(named(screen, "b_butn"), open);
+			h3_scoreboard_show(named(screen, "b_label"), open);
+		}
 	}
 	if (open)
 	{
 		/* (a screen made again, or the rows read: what was said set again) */
 		h3_scoreboard.message_new = TRUE;
 		h3_scoreboard_message_update(screen);
+		h3_scoreboard_selector_update(screen, TRUE);
 	}
 	else
 		h3_scoreboard_show(named(screen, "message"), FALSE);
@@ -13463,7 +13564,7 @@ static void h3_scoreboard_frame(boolean main_menu_loaded)
 			boolean split = h3_scoreboard_split();
 			/* (split screen's: in the middle of a view as wide as the screen -
 			two players', the first of three -, at the left of a quarter) */
-			short x = split && (count <= 2 || (count == 3 && index == 0)) ? 160 : 0;
+			short x = split ? (count <= 2 || (count == 3 && index == 0)) ? 160 : 0 : H3_SCOREBOARD_HELD_SHIFT;
 			short y_offset = split && count == 1 ? 120 : 0;
 
 			if (!h3_scoreboard.held[index])
