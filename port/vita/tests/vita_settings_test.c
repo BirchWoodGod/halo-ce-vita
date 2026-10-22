@@ -699,6 +699,10 @@ int p2p_party_leading(void)
 {
 	return test_party_leading;
 }
+int p2p_party_in_party(void)
+{
+	return test_party_count > 1;
+}
 int p2p_party_friend_state(const char *friend_id)
 {
 	int index;
@@ -2565,6 +2569,12 @@ static void test_multiplayer_tab(void)
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(getenv("HALO_VITA_NETWORK"), "online") && strstr(menu_line(menu_selected, line, sizeof(line)), "< Online  "),
 		"Connection: Online is the last");
+	/* (in a party: Online alone, said why) */
+	test_party_count = 3;
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_VITA_NETWORK"), "online") && strstr(menu, "In a party: Online only (leave the party first)"),
+		"Connection in a party: Ad hoc refused, Online kept, the notice says why");
+	test_party_count = 0;
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_VITA_NETWORK"), "adhoc") && !strstr(menu, "Restart the game") && !restart_pending,
 		"Connection: Ad hoc asks for no restart (the game switches live)");

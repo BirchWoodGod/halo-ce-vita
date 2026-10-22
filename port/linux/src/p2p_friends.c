@@ -609,6 +609,13 @@ struct party_state
 	unsigned long follow_heard_time;
 	unsigned long follow_done;
 	int follow_result;
+	/* (the leader) since when in a game no member reaches (0: not) */
+	unsigned long unreachable_since;
+	/* (a member) the invite hash of the game the leader hosts (its key's:
+	the same each time it hosts), and of the game this machine joined last:
+	that game closed, its host the leader, no error (p2p_party_host_left_quiet) */
+	unsigned char leader_game_hash[P2P_KEY_HASH_SIZE];
+	unsigned char joined_hash[P2P_KEY_HASH_SIZE];
 	/* the party presence sent to friends: its size and leader, when */
 	int presence_size;
 	unsigned char presence_leader[P2P_KEY_SIZE];

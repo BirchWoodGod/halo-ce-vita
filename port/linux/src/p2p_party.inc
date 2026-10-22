@@ -55,7 +55,10 @@ enum
 	PARTY_FOLLOW_HAS_INVITE = 2,
 	PARTY_FOLLOW_LOCKED = 4,
 	PARTY_FOLLOW_UNREACHABLE = 8,
-	PARTY_FOLLOW_FLAGS = 15,
+	/* the leader back at the menus from a game (nothing to join; never with
+	another flag; an older build drops it as malformed) */
+	PARTY_FOLLOW_MENUS = 16,
+	PARTY_FOLLOW_FLAGS = 31,
 
 	PARTY_LEAVE_LEFT = 0,
 	PARTY_LEAVE_REMOVED = 1,
@@ -72,6 +75,11 @@ enum
 	PARTY_INVITE_INTERVAL = 10000,
 	PARTY_INVITE_HEARD_INTERVAL = 5000,
 	PARTY_FOLLOW_LIFETIME = 600000,
+	/* the leader in a game no member reaches (system link, a game being
+	closed): said once it has lasted this long, never for the moment the
+	game's client outlives the hosted game it closed (insider.21: members
+	told "can't be reached online" each time the leader left the lobby) */
+	PARTY_UNREACHABLE_SETTLE = 3000,
 	PARTY_PRESENCE_INTERVAL = 60000,
 	PARTY_PRESENCE_TIMEOUT = 150000,
 	/* a member's chat taken: a few at once, one more each interval; this
@@ -236,7 +244,9 @@ int p2p_party_chat_clean(char *destination, int size, const char *source)
 	return length;
 }
 
-/* a party message's replay: 1 new (taken), 0 seen */
+/* a party message's replay: 1 new (taken), 0 a copy of one taken (the same
+message through another broker: every message goes out on each), -1 older
+than those kept (a replay) */
 static int party_replay_check(const unsigned char *key, unsigned long long epoch, unsigned long counter)
 {
 	struct party_seen *seen = NULL, *oldest = &friends->party_seen[0];
@@ -264,7 +274,7 @@ static int party_replay_check(const unsigned char *key, unsigned long long epoch
 	}
 	seen->time = now_stamp();
 	if (epoch < seen->epoch)
-		return 0;
+		return -1;
 	if (epoch > seen->epoch)
 	{
 		seen->epoch = epoch;
@@ -280,7 +290,9 @@ static int party_replay_check(const unsigned char *key, unsigned long long epoch
 		seen->counter = counter;
 		return 1;
 	}
-	if (seen->counter - counter >= REPLAY_WINDOW || seen->window >> (seen->counter - counter) & 1)
+	if (seen->counter - counter >= REPLAY_WINDOW)
+		return -1;
+	if (seen->window >> (seen->counter - counter) & 1)
 		return 0;
 	seen->window |= 1ULL << (seen->counter - counter);
 	return 1;
@@ -439,7 +451,8 @@ static int party_body_decode(struct message *message, const unsigned char *bytes
 		offset += 5;
 		if ((message->party_value & ~PARTY_FOLLOW_FLAGS) ||
 			((message->party_value & PARTY_FOLLOW_HAS_INVITE) &&
-			(message->party_value & (PARTY_FOLLOW_LOCKED | PARTY_FOLLOW_UNREACHABLE))))
+			(message->party_value & (PARTY_FOLLOW_LOCKED | PARTY_FOLLOW_UNREACHABLE))) ||
+			((message->party_value & PARTY_FOLLOW_MENUS) && message->party_value != PARTY_FOLLOW_MENUS))
 		{
 			return 0;
 		}
@@ -602,6 +615,12 @@ static void party_send_follow(void)
 	message.party_serial = friends->party.follow_serial;
 	message.party_value = friends->party.follow_flags;
 	message.game.state = activity->state ? activity->state : P2P_FRIEND_STATE_MULTIPLAYER;
+	/* (a game to join while the activity still says the menus - the game's
+	activity comes each second: a member told "hosts a game: In the menus") */
+	if ((message.party_value & PARTY_FOLLOW_HAS_INVITE) && message.game.state == P2P_FRIEND_STATE_MENUS)
+		message.game.state = P2P_FRIEND_STATE_MULTIPLAYER;
+	if (message.party_value & PARTY_FOLLOW_MENUS)
+		message.game.state = P2P_FRIEND_STATE_MENUS;
 	message.game.engine = activity->engine & 15;
 	message.game.difficulty = activity->difficulty;
 	message.game.players = activity->players;
@@ -1114,8 +1133,15 @@ static int party_follow_precheck(const struct message *message)
 		return P2P_PARTY_FOLLOW_UNREACHABLE;
 	if (!game_wire_joinable(message->game.version, message->game.wire))
 		return P2P_PARTY_FOLLOW_VERSION;
-	if (friends->host.joined && p2p_equal(friends->host.joined_hash, message->game.invite_hash, P2P_KEY_HASH_SIZE))
+	/* (there: in that game now - its host's peer still connected from a
+	game it closed is not: insider.21, a member at the menus told "there
+	already" when the leader hosted again on the same invite, never
+	joining) */
+	if (friends->host.joined && friends->in_game && !friends->game_hosting &&
+		p2p_equal(friends->host.joined_hash, message->game.invite_hash, P2P_KEY_HASH_SIZE))
+	{
 		return P2P_PARTY_FOLLOW_THERE;
+	}
 	if (message->game.maximum && message->game.players >= message->game.maximum)
 		return P2P_PARTY_FOLLOW_FULL;
 	return P2P_PARTY_FOLLOW_NONE;
@@ -1123,6 +1149,7 @@ static int party_follow_precheck(const struct message *message)
 
 static void party_follow_heard(const unsigned char *sender, const struct message *message)
 {
+	unsigned long previous = friends->party.follow_heard;
 	int result;
 
 	if (!friends->party.active || !p2p_equal(friends->party.id, message->party_id, PARTY_ID_LENGTH) ||
@@ -1139,6 +1166,27 @@ static void party_follow_heard(const unsigned char *sender, const struct message
 	/* (the leader on this project's PC build, as it says: the lists) */
 	friends->party.members[friends->party.leader].pc = message->game.sender_pc;
 	friends->party.follow_heard_time = now_stamp();
+	/* (the leader back at the menus: nothing to join, nothing wrong) */
+	if (message->party_value & PARTY_FOLLOW_MENUS)
+	{
+		char name[P2P_PARTY_NAME_SIZE];
+
+		friends->party.follow_pending = 0;
+		friends->party.follow_done = message->party_serial;
+		friends->party.follow_result = P2P_PARTY_FOLLOW_NONE;
+		friends->party.status_due = 1;
+		/* (a member new to the party heard no game before: nothing said) */
+		if (previous)
+		{
+			party_name_of(sender, "", name, sizeof(name));
+			party_notice(T("%s is back in the menus"), name);
+		}
+		else
+			platform_log("party: the leader is in the menus");
+		return;
+	}
+	if ((message->party_value & PARTY_FOLLOW_HOSTING) && (message->party_value & PARTY_FOLLOW_HAS_INVITE))
+		memcpy(friends->party.leader_game_hash, message->game.invite_hash, P2P_KEY_HASH_SIZE);
 	result = party_follow_precheck(message);
 	{
 		char activity[P2P_FRIEND_ACTIVITY_SIZE], name[P2P_PARTY_NAME_SIZE];
@@ -1218,12 +1266,18 @@ static void party_pair_heard(struct friend_record *record, struct party_member *
 	}
 	/* (an invite: never older than the friend's run last seen, kept over
 	restarts) */
-	if (!party_replay_check(sender, message->epoch, message->counter) ||
-		(message->type == TYPE_PARTY_INVITE && message->epoch < record->epoch))
 	{
-		friends->dropped_replays++;
-		platform_log("party: dropped a replayed party message");
-		return;
+		int fresh = party_replay_check(sender, message->epoch, message->counter);
+
+		if (fresh <= 0 || (message->type == TYPE_PARTY_INVITE && message->epoch < record->epoch))
+		{
+			/* (a copy through another broker: counted, not logged - insider.21
+			logged ~15 a minute in a party; an older one is a replay) */
+			friends->dropped_replays++;
+			if (fresh != 0)
+				platform_log("party: dropped a replayed party message");
+			return;
+		}
 	}
 	if (message->type != TYPE_PARTY_INVITE && message->type != TYPE_PARTY_ANSWER &&
 		message->type != TYPE_PARTY_PRESENCE && message->type != TYPE_PARTY_ROSTER)
@@ -1490,6 +1544,9 @@ static void party_update(void)
 		}
 	if (friends->appear_offline)
 		return;
+	/* (a member) the game this machine is in, joined (p2p_party_host_left_quiet) */
+	if (friends->party.active && friends->host.joined && friends->in_game && !friends->game_hosting)
+		memcpy(friends->party.joined_hash, friends->host.joined_hash, P2P_KEY_HASH_SIZE);
 	if (friends->party.active)
 	{
 		/* members not heard from of late, or a friend's offline presence:
@@ -1522,6 +1579,7 @@ static void party_update(void)
 	{
 		const struct p2p_friends_host *host = &friends->host;
 		const unsigned char *hash = NULL, *token = NULL;
+		int settling = 0;
 
 		/* the roster: on a change, and now and then */
 		if (friends->party.count > 1 && (!friends->party.roster_time ||
@@ -1531,7 +1589,9 @@ static void party_update(void)
 		}
 		/* the follow: hosting (its own invite, never with a password),
 		joined another's game through internet play (that game's, never a
-		locked game's), or in a game no member reaches */
+		locked game's), in a game no member reaches (once it has lasted:
+		PARTY_UNREACHABLE_SETTLE), or back at the menus from one of those
+		(the members told, nothing to join) */
 		flags = 0;
 		if (host->hosting)
 		{
@@ -1546,8 +1606,21 @@ static void party_update(void)
 			token = host->joined_token;
 		}
 		else if (friends->in_game)
-			flags = PARTY_FOLLOW_UNREACHABLE;
-		if (flags)
+		{
+			if (!friends->party.unreachable_since)
+				friends->party.unreachable_since = now_stamp();
+			if (elapsed(friends->party.unreachable_since, PARTY_UNREACHABLE_SETTLE))
+				flags = PARTY_FOLLOW_UNREACHABLE;
+			else
+				settling = 1;
+		}
+		else if (friends->party.follow_active)
+			flags = PARTY_FOLLOW_MENUS;
+		if (!friends->in_game || host->hosting || (flags != PARTY_FOLLOW_UNREACHABLE && !settling))
+			friends->party.unreachable_since = 0;
+		if (settling)
+			;
+		else if (flags)
 		{
 			int changed = !friends->party.follow_active || flags != friends->party.follow_flags ||
 				(hash && (!p2p_equal(hash, friends->party.follow_hash, P2P_KEY_HASH_SIZE) ||
@@ -1567,7 +1640,8 @@ static void party_update(void)
 				}
 				friends->party.follow_time = 0;
 				platform_log("party: the party follows this machine: %s%s", flags & PARTY_FOLLOW_HOSTING ? "hosting" :
-					flags & PARTY_FOLLOW_UNREACHABLE ? "in a game no member can reach" : "joined a game",
+					flags & PARTY_FOLLOW_UNREACHABLE ? "in a game no member can reach" : flags & PARTY_FOLLOW_MENUS ?
+					"back in the menus (nothing to join)" : "joined a game",
 					flags & PARTY_FOLLOW_LOCKED ? " (a password: not passed on)" : "");
 			}
 			if (friends->party.count > 1 && (!friends->party.follow_time ||
@@ -1891,6 +1965,29 @@ int p2p_party_status(char *text, int size)
 	}
 	pthread_mutex_unlock(&friends_lock);
 	return count > 1 ? count : 0;
+}
+
+int p2p_party_in_party(void)
+{
+	int in_party;
+
+	pthread_mutex_lock(&friends_lock);
+	in_party = friends->party.active && (friends->party.count > 1 || friends->party.sent_count > 0);
+	pthread_mutex_unlock(&friends_lock);
+	return in_party;
+}
+
+int p2p_party_host_left_quiet(void)
+{
+	static const unsigned char zero[P2P_KEY_HASH_SIZE];
+	int quiet;
+
+	pthread_mutex_lock(&friends_lock);
+	quiet = friends->party.active && friends->party.count > 1 && !party_leading_now() &&
+		!p2p_equal(friends->party.leader_game_hash, zero, P2P_KEY_HASH_SIZE) &&
+		p2p_equal(friends->party.leader_game_hash, friends->party.joined_hash, P2P_KEY_HASH_SIZE);
+	pthread_mutex_unlock(&friends_lock);
+	return quiet;
 }
 
 int p2p_party_leading(void)

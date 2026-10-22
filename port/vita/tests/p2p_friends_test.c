@@ -115,10 +115,13 @@ const char *config_string(const char *name)
 	return !strcmp(name, "network.lobby_name") ? lobby_name_setting : "";
 }
 static int quiet;
+static int replay_logs;
 void platform_log(const char *format, ...)
 {
 	va_list arguments;
 
+	if (strstr(format, "dropped a replayed party message"))
+		replay_logs++;
 	if (quiet)
 		return;
 	va_start(arguments, format);
@@ -1410,6 +1413,18 @@ static void party_last_line(int machine, struct p2p_party_chat_line *line)
 		*line = lines[count - 1];
 }
 
+static int party_notices_with(int machine, const char *text)
+{
+	struct p2p_party_chat_line lines[P2P_PARTY_CHAT_LINES];
+	int count, index, found = 0;
+
+	use(machine);
+	count = p2p_party_chat_lines(lines, P2P_PARTY_CHAT_LINES, 0);
+	for (index = 0; index < count; index++)
+		found += lines[index].notice && strstr(lines[index].text, text) != NULL;
+	return found;
+}
+
 static int party_lines_from(int machine, const char *text)
 {
 	struct p2p_party_chat_line lines[P2P_PARTY_CHAT_LINES];
@@ -1673,6 +1688,9 @@ static void test_party(void)
 	hosts[0].joined_locked = 0;
 	hosts[0].joined_hash[0] ^= 1;
 	hosts[1].joined_hash[0] = hosts[0].joined_hash[0];
+	/* (there: in its game - machine 2 of it) */
+	use(1);
+	p2p_friends_set_game(2, 0, NULL, 0);
 	party_pass(4);
 	use(1);
 	check(!p2p_party_follow_pending(NULL) && machines[1].party.follow_result == P2P_PARTY_FOLLOW_THERE,
@@ -1685,8 +1703,104 @@ static void test_party(void)
 	check(!p2p_party_follow_pending(NULL), "a map missing: the follow given up, the party told");
 	hosts[0].joined = 0;
 	hosts[1].joined = 0;
+	use(1);
+	p2p_friends_set_game(-1, 0, NULL, 0);
 	use(0);
 	p2p_friends_set_game(-1, 0, NULL, 0);
+	/* (insider.21) the leader back at the menus: the members told so, no
+	error, nothing to join */
+	party_pass(4);
+	use(1);
+	check(!p2p_party_follow_pending(NULL) && machines[1].party.follow_result == P2P_PARTY_FOLLOW_NONE &&
+		party_notices_with(1, "Alpha is back in the menus") == 1, "the leader back at the menus: Bravo told, no error");
+	use(2);
+	check(!p2p_party_follow_pending(NULL) && machines[2].party.follow_result == P2P_PARTY_FOLLOW_NONE &&
+		party_notices_with(2, "Alpha is back in the menus") == 1 && party_notices_with(2, "reached online") == 0,
+		"... Charlie told too, never \"can't be reached online\"");
+	party_pass(64);
+	check(party_notices_with(1, "Alpha is back in the menus") == 1, "the menus said once (the follow sent again, not taken again)");
+	/* the leader hosts, Bravo follows into it (machine 1 of it), then the
+	leader leaves its lobby: its game's client outlives its hosting a moment
+	(insider.21: "in a game no member can reach" sent then) */
+	hosts[0].hosting = 1;
+	hosts[0].locked = 0;
+	use(0);
+	p2p_friends_set_game(0, 1, NULL, 0);
+	party_pass(4);
+	use(1);
+	check(p2p_party_follow_pending(&follow) && follow.hosting, "the leader hosts: Bravo told to follow");
+	join_count = 0;
+	check(p2p_party_follow_join(follow.serial) == P2P_PARTY_FOLLOW_JOINING && join_count == 1, "Bravo follows");
+	hosts[1].joined = 1;
+	memcpy(hosts[1].joined_hash, hosts[0].key_hash, P2P_KEY_HASH_SIZE);
+	memcpy(hosts[1].joined_token, hosts[0].token, P2P_TOKEN_SIZE);
+	use(1);
+	p2p_friends_set_game(1, 0, NULL, 0);
+	use(2);
+	p2p_party_follow_result(machines[2].party.follow_heard, P2P_PARTY_FOLLOW_WAITING);
+	party_pass(2);
+	use(1);
+	before = (int)machines[0].party.follow_serial;
+	hosts[0].hosting = 0;
+	party_pass(4);
+	check(machines[0].party.follow_flags != PARTY_FOLLOW_UNREACHABLE && (int)machines[0].party.follow_serial == before,
+		"the leader's lobby closed, its client a moment longer: no \"no member can reach\" follow");
+	use(1);
+	check(p2p_party_host_left_quiet(), "Bravo, in the leader's game as it closed: no error (the party follows the leader)");
+	use(0);
+	p2p_friends_set_game(-1, 0, NULL, 0);
+	party_pass(4);
+	check(machines[0].party.follow_flags == PARTY_FOLLOW_MENUS, "then the leader at the menus: the members told so");
+	use(1);
+	p2p_friends_set_game(-1, 0, NULL, 0);
+	use(2);
+	check(party_notices_with(2, "reached online") == 0 && party_notices_with(2, "Alpha is back in the menus") == 2,
+		"Charlie: back in the menus again, never \"can't be reached\"");
+	/* the leader hosts again, on the same invite (its key's): Bravo, at the
+	menus with its peer still connected, follows the new game (insider.21:
+	"there already", never joined) */
+	hosts[0].hosting = 1;
+	use(0);
+	p2p_friends_set_game(0, 1, NULL, 0);
+	party_pass(4);
+	use(1);
+	check(p2p_party_follow_pending(&follow) && follow.hosting && machines[1].party.follow_result != P2P_PARTY_FOLLOW_THERE,
+		"the leader hosts again: Bravo (at the menus, the host's peer kept) follows the new game");
+	join_count = 0;
+	check(p2p_party_follow_join(follow.serial) == P2P_PARTY_FOLLOW_JOINING && join_count == 1 &&
+		!strcmp(joined_link, expected), "... through its invite's join");
+	/* a game no member reaches (system link), once it has lasted */
+	hosts[0].hosting = 0;
+	hosts[1].joined = 0;
+	use(0);
+	p2p_friends_set_game(0, 1, NULL, 0);
+	party_pass(10);
+	check(machines[0].party.follow_flags == PARTY_FOLLOW_UNREACHABLE, "a game no member reaches, lasting: said");
+	use(2);
+	check(machines[2].party.follow_result == P2P_PARTY_FOLLOW_UNREACHABLE, "... Charlie told why it can't follow");
+	use(0);
+	p2p_friends_set_game(-1, 0, NULL, 0);
+	party_pass(4);
+	/* the same message through a second broker: dropped, counted, not logged */
+	{
+		int at, handed = 0;
+
+		replay_logs = 0;
+		reset_drops(1);
+		use(0);
+		check(p2p_party_chat_send("twice") == P2P_PARTY_DONE, "Alpha says something");
+		use(0);
+		p2p_friends_update(&hosts[0]);
+		broker();
+		for (at = 0; at < carried_count; at++)
+			if (carried[at].from == 0 && !strcmp(carried[at].topic, machines[1].mailbox_topic))
+				handed = at;
+		hand(1, carried[handed].topic, carried[handed].payload, carried[handed].size);
+		use(1);
+		p2p_friends_update(&hosts[1]);
+		check(party_lines_from(1, "twice") == 1 && machines[1].dropped_replays + machines[1].total_replays >= 1 &&
+			replay_logs == 0, "a copy through another broker: dropped and counted, not logged");
+	}
 
 	/* leave, hand-off, kick */
 	use(2);

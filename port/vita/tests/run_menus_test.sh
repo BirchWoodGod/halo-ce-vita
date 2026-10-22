@@ -410,7 +410,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendsbackup h3friendspanel h3partyplates h3party browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes msgboxes}
+cases=${*:-fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendsbackup h3friendspanel h3partyplates h3party h3partyonline browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes msgboxes}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
@@ -2425,6 +2425,28 @@ PY
 		[ "$(grep -ac "ui: screen pc.h3.friends.screen" "$log")" -ge 2 ] ||
 			fail h3friendspanel "Triangle did not open FRIENDS from both lobbies"
 		grep -aq "ui: screen pc.h3.forge.lobby" "$log" || fail h3friendspanel "the Forge lobby did not open" ;;
+	h3partyonline)
+		# (a party plays online, the owner, Oct 21 2026: in a party (HALO_TEST_IN_PARTY, as in
+		# one) MULTIPLAYER's lobby opens on ONLINE whatever the connection was (Same Wi-Fi here:
+		# internet play started, its brokers TEST-NET addresses); NETWORK, down to SYSTEM LINK, A:
+		# refused, said why, the lobby still ONLINE; A closes the message)
+		run h3partyonline "$menus_data" 30 "$h3mppad wait:150:3000 a wait:150:3000 down:150:600 a wait:150:3000 a wait:150:3000" \
+			HALO_MENU_STYLE=halo3 HALO_TEST_IN_PARTY=1 $h3net HALO_NET_ONLINE=false HALO_VITA_NETWORK=wifi
+		check_h3 h3partyonline halo3
+		log=$out/h3partyonline/run.log
+		grep -a "menus: in a party\|menus: h3 mp lobby: NETWORK\|menus: h3 mp: network\|network: switching" "$log" | head -8
+		grep -aq "menus: in a party (.*): the lobbies' NETWORK is ONLINE (a party plays online)" "$log" ||
+			fail h3partyonline "in a party the lobbies were not put on ONLINE"
+		grep -aq "network: switching from Same Wi-Fi to Online" "$log" || fail h3partyonline "in a party internet play did not start"
+		grep -aq "menus: h3 mp lobby: NETWORK: ONLINE" "$log" || fail h3partyonline "in a party the lobby did not show ONLINE"
+		grep -aq "menus: h3 mp lobby: NETWORK: SYSTEM LINK\|menus: h3 mp lobby: NETWORK: OFFLINE" "$log" &&
+			fail h3partyonline "in a party the lobby showed another NETWORK"
+		grep -aq "menus: in a party: another NETWORK than ONLINE refused (a party plays online)" "$log" ||
+			fail h3partyonline "SYSTEM LINK in a party was not refused"
+		grep -aq "menus: h3 mp: network SYSTEM LINK\|network: switching from Online to Same Wi-Fi" "$log" &&
+			fail h3partyonline "SYSTEM LINK was chosen in a party"
+		grep -aq "PARTY: You.re in a party, and a party plays online: the NETWORK stays ONLINE" "$log" ||
+			fail h3partyonline "the player was not told why" ;;
 	h3partyplates)
 		# (the plates' clock starts at the main menu's first frame: Bravo, the leader, from 4 s
 		# to 26 s, Charlie from 7 s to 17 s; alone at 2 s, the three at 10 s; MULTIPLAYER at about

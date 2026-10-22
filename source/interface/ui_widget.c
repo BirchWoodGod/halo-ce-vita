@@ -1962,6 +1962,19 @@ boolean filesystem_check_thread_is_active(
 void display_error_when_main_menu_loaded(
 	short error_code)
 {
+#ifdef HALO_LINUX
+	/* (port: the host's game closed by the party's leader - back in the
+	menus, or hosting again -, its members following: no error, the party
+	says where the leader went; insider.21, "disconnected" each time the
+	leader left the lobby) */
+	if (error_code == _error_network_server_shut_down)
+	{
+		boolean pc_menu_functions_host_left_quiet(void);
+
+		if (pc_menu_functions_host_left_quiet())
+			return;
+	}
+#endif
 	if (widget_globals.main_menu_deferred_error_code == NONE)
 	{
 		widget_globals.main_menu_deferred_error_code = error_code;

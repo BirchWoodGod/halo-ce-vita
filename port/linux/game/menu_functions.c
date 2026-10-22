@@ -1154,6 +1154,9 @@ enum
 };
 
 static boolean internet_play(void);
+/* (a party plays online: below, with the live lobby) */
+static boolean h3_party_online(char const *why);
+static boolean h3_party_refuses(boolean online);
 
 static struct
 {
@@ -1508,6 +1511,10 @@ static boolean h3_campaign_network_set(struct widget_instance *widget)
 {
 	short network = (short)PIN(h3_child_index(widget), 0, NUMBER_OF_H3_CAMPAIGN_NETWORKS - 1);
 
+	/* (in a party: no SYSTEM LINK or AD HOC co-op, which would leave
+	internet play and the party with it; LOCAL is this machine's alone) */
+	if (h3_party_refuses(network == _h3_campaign_online || network == _h3_campaign_local))
+		return TRUE;
 	/* (a co-op network is the connection: switched live) */
 	if (network != _h3_campaign_local)
 	{
@@ -3044,6 +3051,7 @@ static void h3_mp_lobby_update(struct widget_instance *widget)
 		h3_mp_initialize();
 	/* (the connection's networks follow it: the settings panel's change
 	shows) */
+	h3_party_online("the multiplayer lobby");
 	if (h3_mp.network != _h3_network_offline)
 		h3_mp.network = h3_mp_network_of_connection();
 	if (named(screen, "network_row"))
@@ -3434,6 +3442,10 @@ static boolean h3_mp_network_set(struct widget_instance *widget)
 	the Forge lobby's own NETWORK) */
 	short *lobby_network = h3_forge.lobby_last ? &h3_forge.network : &h3_mp.network;
 
+	/* (in a party: ONLINE alone - a party plays online; the owner, Oct 21
+	2026) */
+	if (h3_party_refuses(network == _h3_network_online))
+		return TRUE;
 	/* (a live lobby's game closed first: the connection switches only
 	with no network game, and the lobby opens again on the new one) */
 	if (network != *lobby_network)
@@ -13022,6 +13034,7 @@ static void h3_forge_lobby_network_update(struct widget_instance *screen)
 		h3_forge.network_set = TRUE;
 		h3_forge.network = _h3_network_offline;
 	}
+	h3_party_online("the Forge lobby");
 	if (h3_forge.network != _h3_network_offline)
 		h3_forge.network = h3_mp_network_of_connection();
 	local = h3_forge.network == _h3_network_offline;
@@ -13718,6 +13731,93 @@ boolean pc_menu_functions_live_lobby_after_game(void)
 	again, never a server of its own; else the lobby's update closes it,
 	its joiners told, as any game it cannot go on with) */
 	h3_live_keep();
+	return TRUE;
+}
+
+/* ---- a party plays online (the owner, Oct 21 2026: a party only works
+online, so while this machine is in one the Halo 3 lobbies' NETWORK is
+ONLINE, for its leader and every member: joining or making a party puts the
+multiplayer and Forge lobbies on ONLINE (and the connection, internet play
+started if it was not); OFFLINE (LOCAL), SYSTEM LINK and AD HOC chosen
+there say why and change nothing; the settings panel's Connection the same,
+vita_settings.c). The campaign lobby's LOCAL stays (a game of this machine's
+alone); its SYSTEM LINK and AD HOC CO-OP are refused. */
+
+/* whether this machine is in a party ((test builds) HALO_TEST_IN_PARTY: as
+in one, run_menus_test.sh h3partyonline) */
+static boolean h3_in_party(void)
+{
+#ifndef HALO_RELEASE
+	if (getenv("HALO_TEST_IN_PARTY"))
+		return TRUE;
+#endif
+	return p2p_party_in_party() != 0;
+}
+
+/* (in a party) the lobbies on ONLINE: TRUE if anything changed (said once,
+why) */
+static boolean h3_party_online(char const *why)
+{
+	boolean changed = FALSE;
+
+	if (!h3_in_party())
+		return FALSE;
+	if (h3_mp.network != _h3_network_online)
+	{
+		h3_mp.network = _h3_network_online;
+		changed = TRUE;
+	}
+	if (h3_forge.network_set && h3_forge.network != _h3_network_online)
+	{
+		h3_forge.network = _h3_network_online;
+		changed = TRUE;
+	}
+	if (h3_campaign.network == _h3_campaign_system_link || h3_campaign.network == _h3_campaign_adhoc)
+	{
+		h3_campaign.network = _h3_campaign_online;
+		changed = TRUE;
+	}
+	if (network_connection_wanted() != NETWORK_CONNECTION_ONLINE)
+	{
+		network_connection_choose(NETWORK_CONNECTION_ONLINE);
+		changed = TRUE;
+	}
+	if (!changed)
+		return FALSE;
+	/* (a live lobby on another network: closed, open again on ONLINE) */
+	if (h3_live.live && h3_live.network != _h3_network_online)
+		h3_live_close("the party plays online");
+	platform_log("menus: in a party (%s): the lobbies' NETWORK is ONLINE (a party plays online)", why);
+	return TRUE;
+}
+
+/* (in a party) another network than ONLINE chosen: said why, nothing
+changed (TRUE) */
+static boolean h3_party_refuses(boolean online)
+{
+	if (online || !h3_in_party())
+		return FALSE;
+	platform_log("menus: in a party: another NETWORK than ONLINE refused (a party plays online)");
+	platform_show_message(T("PARTY"), T("You're in a party, and a party plays online: the NETWORK stays ONLINE. To "
+		"play on another network, leave the party first (PARTY, or the settings panel's Party page)."));
+	return TRUE;
+}
+
+/* (friends_game.c, each frame at the menus) joined or made a party: the
+lobbies on ONLINE */
+void menu_functions_party_online(void)
+{
+	h3_party_online("joined or made");
+}
+
+/* (display_error_when_main_menu_loaded, the host's game closed) TRUE: the
+host was the party's leader, this machine a member - nothing said, the
+party follows the leader (p2p_party_host_left_quiet) */
+boolean pc_menu_functions_host_left_quiet(void)
+{
+	if (!p2p_party_host_left_quiet())
+		return FALSE;
+	platform_log("menus: the host's game closed: the party's leader closed it; no error (the party follows the leader)");
 	return TRUE;
 }
 

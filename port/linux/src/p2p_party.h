@@ -150,6 +150,12 @@ none) */
 int p2p_party_status(char *text, int size);
 /* whether this machine leads a party (of two or more) */
 int p2p_party_leading(void);
+/* whether this machine is in a party (of two or more, or its invites out):
+a party plays online, the lobbies' NETWORK ONLINE (menu_functions.c) */
+int p2p_party_in_party(void);
+/* (a member) whether the game whose host just closed it was the party
+leader's: the members follow the leader, no error said */
+int p2p_party_host_left_quiet(void);
 
 /* invites a friend (by their entry's id, p2p_friends.h): a party is made
 with this machine its leader if there is none */
