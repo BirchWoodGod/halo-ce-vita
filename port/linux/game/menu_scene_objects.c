@@ -1190,6 +1190,20 @@ static boolean packs_textures_wait(unsigned long long *since, boolean preview)
 	return FALSE;
 }
 
+/* a frame's parts of the update (menu_scene_objects_update's line): the
+packs asked for (scene_packs_want), their textures' reads begun and looked
+at (packs_textures_wait), the preview's update. The game thread's time in
+them opening MULTIPLAYER on the Vita (228, 148, 113 ... ms a frame for 0.7 s,
+the thread mostly not running: insider.20 and .21 logs) is not the harness's,
+so the line says which part waited */
+static struct
+{
+	unsigned long long want_us;
+	unsigned long long textures_us;
+	unsigned long long preview_us;
+} scene_update_parts;
+extern volatile unsigned long halo_texture_cache_loads, halo_texture_cache_evictions;
+
 /* the scene made: every pack it names loaded (FALSE: not yet, or never,
 refused) */
 static void scene_make(void)
@@ -1205,8 +1219,10 @@ static void scene_make(void)
 
 		if (!object->wanted)
 			continue;
+		started = vita_host_time_us();
 		pack_state = scene_packs_want(object->pack);
 		weapon_state = object->weapon_tag[0] ? scene_packs_want(object->weapon_pack) : _scene_pack_state_loaded;
+		scene_update_parts.want_us += vita_host_time_us() - started;
 		if (pack_state == _scene_pack_state_failed || pack_state == _scene_pack_state_none ||
 			weapon_state == _scene_pack_state_failed || weapon_state == _scene_pack_state_none)
 		{
@@ -1227,8 +1243,13 @@ static void scene_make(void)
 		return;
 	}
 	/* (their textures first: read meanwhile, none waited for) */
+	started = vita_host_time_us();
 	if (!packs_textures_wait(&menu_scene_objects.scene_textures_since, FALSE))
+	{
+		scene_update_parts.textures_us += vita_host_time_us() - started;
 		return;
+	}
+	scene_update_parts.textures_us += vita_host_time_us() - started;
 	/* (all at once, the vehicles before who sits in them: the entries'
 	order) */
 	started = vita_host_time_us();
@@ -1511,18 +1532,25 @@ void menu_scene_objects_want(
 
 static void menu_scene_objects_update_internal(void);
 
+
 void menu_scene_objects_update(
 	void)
 {
 	unsigned long long started = vita_host_time_us();
 	unsigned long long spent;
+	unsigned long loads = halo_texture_cache_loads, evictions = halo_texture_cache_evictions;
 
+	memset(&scene_update_parts, 0, sizeof(scene_update_parts));
 	menu_scene_objects_update_internal();
 	spent = vita_host_time_us() - started;
 	/* (the game thread's time making, holding and letting go the scenes'
 	objects, logged once it is a frame's hitch) */
 	if (spent >= 16000ull)
-		platform_log("scene packs: game thread: the menus' scene objects took %.1f ms", (double)spent / 1000.0);
+		platform_log("scene packs: game thread: the menus' scene objects took %.1f ms (packs asked for %.1f, textures "
+			"begun and looked at %.1f: %lu reads begun, %lu evicted; the preview %.1f)", (double)spent / 1000.0,
+			(double)scene_update_parts.want_us / 1000.0, (double)scene_update_parts.textures_us / 1000.0,
+			halo_texture_cache_loads - loads, halo_texture_cache_evictions - evictions,
+			(double)scene_update_parts.preview_us / 1000.0);
 }
 
 static void menu_scene_objects_update_internal(
@@ -1602,7 +1630,12 @@ static void menu_scene_objects_update_internal(
 	before is none until it is over: menu_scene_objects_settled) */
 	else if (!menu_scene_objects.refused && halo_main_menu_idle())
 		scene_make();
-	preview_update();
+	{
+		unsigned long long started = vita_host_time_us();
+
+		preview_update();
+		scene_update_parts.preview_us += vita_host_time_us() - started;
+	}
 	/* (object_lights.c's quick way out: none made, none asked about) */
 	menu_scene_objects.made_count = 0;
 	for (index = 0; index < NUMBER_OF_MENU_SCENE_SLOTS; index++)

@@ -1112,6 +1112,21 @@ static boolean saved_game_files_last_used_get(
 	return TRUE;
 }
 
+/* TRUE: the file holds text already, as read or written this run (the
+Halo 3 lobby remembered its map and game type each time it went live or
+hosted: four file calls and two writes to the memory card on the game
+thread, 20 ms each on the Vita, to write what was there) */
+static boolean saved_game_files_last_used_same(
+	char const *path,
+	char const *text)
+{
+	char held[MAXIMUM_FILENAME_LENGTH+1];
+	boolean success = FALSE;
+
+	return text && saved_game_files_last_used_get(path, held, &success) && success &&
+		!strncmp(held, text, MAXIMUM_FILENAME_LENGTH);
+}
+
 /* (text NULL: forgotten, read again next time) */
 static void saved_game_files_last_used_set(
 	char const *path,
@@ -1223,6 +1238,19 @@ void saved_game_file_remember_last_used_multiplayer_variant_directory(
 		"c:\\halo\\SOURCE\\saved games\\saved_game_files.c",
 		1102,
 		directory_path);
+#ifdef HALO_LINUX
+	{
+		/* (the file read once a run if it was not: a read is cheaper than
+		the write) */
+		char held[MAXIMUM_FILENAME_LENGTH+1];
+
+		saved_game_file_retrieve_last_used_multiplayer_variant_directory(held);
+		if (saved_game_files_last_used_same("z:\\lastmpvr.txt", directory_path))
+		{
+			return;
+		}
+	}
+#endif
 
 	if (file_reference_create_from_path(&file, "z:\\lastmpvr.txt", FALSE) &&
 		file_create(&file) &&
@@ -1308,6 +1336,17 @@ void saved_game_file_remember_last_used_multiplayer_map(
 		map_name);
 	csmemset(name, 0, sizeof(name));
 	csstrncpy(name, map_name, sizeof(name) - 1);
+#ifdef HALO_LINUX
+	{
+		char held[MAXIMUM_FILENAME_LENGTH+1];
+
+		saved_game_file_retrieve_last_used_multiplayer_map(held);
+		if (saved_game_files_last_used_same("z:\\lastmpmp.txt", name))
+		{
+			return;
+		}
+	}
+#endif
 
 	if (file_reference_create_from_path(&file, "z:\\lastmpmp.txt", FALSE) &&
 		file_create(&file) &&
