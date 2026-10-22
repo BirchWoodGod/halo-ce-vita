@@ -481,6 +481,14 @@ void friends_game_update(boolean main_menu_loaded)
 	}
 	friends_game_invites(main_menu_loaded);
 	friends_game_party_invites(main_menu_loaded);
+	/* (in a party: the lobbies' NETWORK ONLINE, a party plays online:
+	menu_functions.c) */
+	if (main_menu_loaded)
+	{
+		extern void menu_functions_party_online(void);
+
+		menu_functions_party_online();
+	}
 	friends_game_party_follow(main_menu_loaded);
 	menu_functions_players_button(main_menu_loaded);
 	friends_game_players_test(main_menu_loaded);

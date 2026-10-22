@@ -3776,7 +3776,22 @@ static int join_invite(const char *text, int public, int crossplay)
 	peer = find_peer(host);
 	if (peer && peer->connected)
 	{
-		platform_log("Internet play: already connected to that invite's host");
+		/* (reached already - its peer kept from a game before, as a party's
+		members are when the leader hosts again: its game joined by itself
+		once listed, as a host just reached; insider.21 waited for a press,
+		the follow taking 11 to 22 s) */
+		memcpy(p2p.join_host, host, sizeof(host));
+		memcpy(p2p.join_host_hash, hash, sizeof(hash));
+		memcpy(p2p.join_token, token, sizeof(token));
+		if (p2p.joining)
+		{
+			p2p.joining = 0;
+			p2p_signal_stop_joining();
+		}
+		p2p.join_requested = 0;
+		p2p.join_reached = 1;
+		p2p.join_reached_time = p2p_now();
+		platform_log("Internet play: already connected to that invite's host: its game joined once listed");
 		return 1;
 	}
 	if ((p2p.joining || p2p.join_requested) && !memcmp(hash, p2p.join_host_hash, sizeof(hash)) &&

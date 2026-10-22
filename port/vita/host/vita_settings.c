@@ -5451,6 +5451,14 @@ static void change(struct setting *setting, int step)
 	is changed) */
 	if (strcmp(setting->variable, "HALO_PROFILE") == 0 && choice == PROFILE_CUSTOM)
 		return;
+	/* (in a party: Online alone - a party plays online, as the Halo 3
+	lobbies' NETWORK; the owner, Oct 21 2026) */
+	if (strcmp(setting->variable, "HALO_VITA_NETWORK") == 0 && strcmp(setting->values[choice], "online") != 0 &&
+		p2p_party_in_party())
+	{
+		set_notice("%s", T("In a party: Online only (leave the party first)"));
+		return;
+	}
 	setting->choice = choice;
 	apply_value(setting);
 	if (strcmp(setting->variable, "HALO_PLAYER_MODEL") == 0)
