@@ -169,6 +169,36 @@ symbols in this file:
 #include "rasterizer_xbox_draw_primitives.h"
 #include "rasterizer_xbox_internal.h"
 
+/* ---------- port: far-reaching texture coordinates */
+
+/* (port, d3d8_gxm.c; nothing on the PC) how many of a stage's texels one
+unit of the vertices' texture coordinates spans in the draws that follow
+(0: as a plain texture). a30's ground repeats its detail maps 240 and
+300 times across one base map (61 440 to 153 600 texels a unit), its
+cliffs their micro detail map over base coordinates up to 5 (61 440 a
+unit); on the Vita both drew coarse blocks and streaks of texels where the
+PC filters them smoothly (Blood Gulch's ground, 30 720 at most, draws
+fine), as if the fraction of so large a coordinate were lost before the
+texture unit. The Vita's device takes such a stage's coordinate back near
+zero in its program. */
+void halo_d3d_texcoord_extent(long stage, float texels_per_unit);
+
+static float environment_texcoord_extent(real scale_u, real scale_v, union point2d const *size)
+{
+	real u = (scale_u < 0.0f ? -scale_u : scale_u) * (size ? size->x : 0);
+	real v = (scale_v < 0.0f ? -scale_v : scale_v) * (size ? size->y : 0);
+
+	return u > v ? u : v;
+}
+
+static void environment_texcoord_extents_clear(void)
+{
+	long stage;
+
+	for (stage = 0; stage < 4; stage++)
+		halo_d3d_texcoord_extent(stage, 0.0f);
+}
+
 /* ---------- constants */
 
 enum
@@ -785,6 +815,11 @@ void _rasterizer_environment_lightmap_draw(
 		real primary_value;
 		real secondary_value;
 		real plasma_value;
+		/* port: halo_d3d_texcoord_extent's */
+		union point2d const *bump_map_size;
+		union point2d const *illumination_map_size;
+		float bump_extent = 0.0f;
+		float illumination_extent = 0.0f;
 
 		match_assert(
 			"c:\\halo\\SOURCE\\rasterizer\\xbox\\rasterizer_xbox_environment.c",
@@ -808,7 +843,7 @@ void _rasterizer_environment_lightmap_draw(
 				shader_environment->environment.flags,
 				_shader_environment_alpha_tested_bit) &&
 				rasterizer_debug_options.alpha_testing_enabled);
-		rasterizer_set_texture(
+		bump_map_size = rasterizer_set_texture(
 			0,
 			0,
 			3,
@@ -825,7 +860,7 @@ void _rasterizer_environment_lightmap_draw(
 		IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_MIPFILTER, D3DTEXF_LINEAR);
 
 		illumination = &shader_environment->environment.self_illumination;
-		rasterizer_set_texture(1, 0, 0, illumination->map.index, bitmap_index);
+		illumination_map_size = rasterizer_set_texture(1, 0, 0, illumination->map.index, bitmap_index);
 		IDirect3DDevice8_SetTextureStageState(global_d3d_device, 1, D3DTSS_ADDRESSU, D3DTADDRESS_WRAP);
 		IDirect3DDevice8_SetTextureStageState(global_d3d_device, 1, D3DTSS_ADDRESSV, D3DTADDRESS_WRAP);
 		IDirect3DDevice8_SetTextureStageState(global_d3d_device, 1, D3DTSS_MAGFILTER, D3DTEXF_LINEAR);
@@ -867,6 +902,10 @@ void _rasterizer_environment_lightmap_draw(
 				&texture_transform_constants[1].l,
 				&texture_transform_constants[2].l);
 			IDirect3DDevice8_SetVertexShaderConstant(global_d3d_device, -84, texture_transform_constants, 3);
+			bump_extent = environment_texcoord_extent(texture_transform_constants[0].i,
+				texture_transform_constants[0].j, bump_map_size);
+			illumination_extent = environment_texcoord_extent(texture_transform_constants[0].k,
+				texture_transform_constants[0].k, illumination_map_size);
 		}
 
 		if (illumination->map.index == NONE)
@@ -1066,12 +1105,16 @@ void _rasterizer_environment_lightmap_draw(
 		}
 		rasterizer_set_pixel_shader(&pixel_shader);
 
+		/* port: the bump and self-illumination maps' coordinates */
+		halo_d3d_texcoord_extent(0, bump_extent);
+		halo_d3d_texcoord_extent(1, illumination_extent);
 		rasterizer_draw_dynamic_triangles_static_vertices2(
 			dynamic_triangle_buffer_index,
 			first_triangle_index,
 			triangle_count,
 			vertex_buffer,
 			vertex_buffer + !rasterizer_environment_globals.lightmap_missing);
+		environment_texcoord_extents_clear();
 		if (rasterizer_debug_options.statistics_mode == _rasterizer_statistics_mode_enabled)
 		{
 			rasterizer_frame_statistics.lightmap_dynamic_draw_count++;
@@ -1878,11 +1921,19 @@ void _rasterizer_environment_diffuse_texture_draw(
 			}
 			rasterizer_set_pixel_shader(&pixel_shader);
 
+			/* port: the detail maps' coordinates (texture_transform_constants) */
+			halo_d3d_texcoord_extent(1, environment_texcoord_extent(texture_transform_constants[0].i,
+				texture_transform_constants[0].j, &primary_detail_map_size));
+			halo_d3d_texcoord_extent(2, environment_texcoord_extent(texture_transform_constants[0].k,
+				texture_transform_constants[0].l, &secondary_detail_map_size));
+			halo_d3d_texcoord_extent(3, environment_texcoord_extent(texture_transform_constants[1].k,
+				texture_transform_constants[2].k, &micro_detail_map_size));
 			rasterizer_draw_dynamic_triangles_static_vertices(
 				dynamic_triangle_buffer_index,
 				first_triangle_index,
 				triangle_count,
 				vertex_buffer);
+			environment_texcoord_extents_clear();
 			if (rasterizer_debug_options.statistics_mode == _rasterizer_statistics_mode_enabled)
 			{
 				rasterizer_frame_statistics.diffuse_texture_dynamic_draw_count++;

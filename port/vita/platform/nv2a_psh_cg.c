@@ -394,7 +394,17 @@ static void sample(struct xgpu_text *text, const struct nv2a_pixel_shader_key *k
 		/* (mode 3 of HALO_SIMPLE_FRAG_MODE: the varying itself as the
 		coordinate, so the fetch does not depend on fragment arithmetic:
 		the SGX prefetches such reads) */
-		if ((key->pad == 3 || (key->raw_coordinates & (1U << stage))) && strncmp(coordinates, "float4(xT", 9) == 0)
+		if ((key->wrapped_coordinates & (1U << stage)) && (key->raw_coordinates & (1U << stage)) && !border &&
+			strncmp(coordinates, "float4(xT", 9) == 0)
+		{
+			/* (far-reaching coordinates, d3d8_gxm.c halo_d3d_texcoord_extent:
+			the fraction of the varying, a whole number of the wrapped
+			texture's repeats less, fetched with the varying's own
+			derivatives - the mip level does not see the wrap) */
+			xgpu_text_append(text, "tex2D(tex%d, xT%d.xy - floor(xT%d.xy), ddx(xT%d.xy), ddy(xT%d.xy))", stage, stage,
+				stage, stage, stage);
+		}
+		else if ((key->pad == 3 || (key->raw_coordinates & (1U << stage))) && strncmp(coordinates, "float4(xT", 9) == 0)
 		{
 			snprintf(inside, sizeof(inside), "xT%d.xy", stage);
 			if (border)
