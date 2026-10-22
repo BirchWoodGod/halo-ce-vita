@@ -1770,7 +1770,12 @@ h3pcjoin)
 	#            OpenCE game, A: that one joined, and played (the owner's: the Vita game's lobby
 	#            did not open, the widgets' memory full - 16 KB, the Xbox's -, so the browser
 	#            stayed with its client in that lobby and the PC game picked next was never
-	#            joined; HALO_TEST_WIDGET_POOL_BYTES=14000 in XPPC_OUR_ENV shows it again)
+	#            joined; HALO_TEST_WIDGET_POOL_BYTES=14000 in XPPC_OUR_ENV shows it again; one down
+	#            from the Vita game, the PC group's header passed over: two downs wrapped back to
+	#            the Vita game since the groups' headers)
+	#   mixed    the Vita game and the OpenCE one listed together (VITA GAMES, PC GAMES), the OpenCE
+	#            one picked first with one down from the Vita game (BlazeRed, insider.21: on "Vita
+	#            and PC" a click on a PC lobby only refreshed the list): joined once, and played
 	# Neither may fill the widgets' memory
 	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 	h3join() { # h3join NAME VITA_HOST(0, 1) PAD_AFTER_THE_BROWSER
@@ -1812,9 +1817,9 @@ h3pcjoin)
 			result=no-games-browser
 		elif [ -z "$pc" ] || ! grep -aqF "menus: joining the public game $pc" "$clientlog"; then
 			result=pc-not-picked
-		elif [ "$vita_host" = 0 ] && [ "${joins:-0}" != 1 ]; then
+		elif { [ "$vita_host" = 0 ] || [ "${mixed_pick:-0}" = 1 ]; } && [ "${joins:-0}" != 1 ]; then
 			result=joined-$joins-times
-		elif [ "$vita_host" = 1 ] && ! grep -aq "menus: joining the public game XpVita" "$clientlog"; then
+		elif [ "$vita_host" = 1 ] && [ "${mixed_pick:-0}" != 1 ] && ! grep -aq "menus: joining the public game XpVita" "$clientlog"; then
 			result=vita-not-picked
 		elif grep -aq "memory: the widget_memory_pool is full" "$clientlog"; then
 			result=widget-memory-full
@@ -1873,9 +1878,12 @@ h3pcjoin)
 		cat "$out/$name"/*/run.log 2>/dev/null | grep -aqE "egmentation fault|SIGSEGV|SIGABRT|EXCEPTION halt" && result=crash
 		our_results="$our_results $name:$result"
 	}
-	h3join h3pcjoin-direct 0 "a:150:50 a wait:150:40000"
-	h3join h3pcjoin-aftervita 1 "a wait:150:10000 b wait:150:5000 down:150:800 down:150:800 a wait:150:40000"
-	h3mapjoin h3pcjoin-mapmissing
+	# (XPPC_H3JOIN_ONLY: the cases to run, by their last word, direct aftervita mixed mapmissing)
+	h3want() { case " ${XPPC_H3JOIN_ONLY:-direct aftervita mixed mapmissing} " in *" $1 "*) return 0 ;; esac; return 1; }
+	h3want direct && h3join h3pcjoin-direct 0 "a:150:50 a wait:150:40000"
+	h3want aftervita && h3join h3pcjoin-aftervita 1 "a wait:150:10000 b wait:150:5000 down:150:800 a wait:150:40000"
+	h3want mixed && mixed_pick=1 h3join h3pcjoin-mixed 1 "${XPPC_H3JOIN_MIXED_PAD:-down:150:500 a wait:150:40000}"
+	h3want mapmissing && h3mapjoin h3pcjoin-mapmissing
 	;;
 crosscoophost)
 	# co-op hosted by our Vita for Vitas and PC (T15: PC clients in a Vita's
