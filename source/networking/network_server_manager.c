@@ -5615,7 +5615,12 @@ static void network_game_server_dedicated_bots(
 			network_event("bots: failed to send updated game settings to clients");
 	}
 	people = network_game_server_dedicated_people(server);
-	if (dedicated_server_bots_fill() && people > 0 && server->game.variant.game_engine_index != 0)
+	/* (a lobby whose game is not set yet - its first second, the server's
+	next game of the cycle to come - has the bots it had: none leave and
+	come back each game) */
+	if (dedicated_server_bots_fill() && people > 0 && server->game.variant.game_engine_index == 0)
+		return;
+	if (dedicated_server_bots_fill() && people > 0)
 		wanted = PIN((long)server->game.maximum_players - 1 - people, 0, BOTS_MAXIMUM);
 	if (bots > wanted)
 	{
