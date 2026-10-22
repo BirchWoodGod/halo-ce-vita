@@ -129,6 +129,7 @@ for a gamepad); a test build's HALO_TEST_TEXT_INPUT answers in its place,
 #endif
 #include "input/input.h"
 #include "coop_menu.h"
+#include "infection.h"
 #include "map_share.h"
 #include "carnage_report.h"
 #include "cutscene/cinematics.h"
@@ -1110,8 +1111,11 @@ static void h3_adhoc_joining_update(struct widget_instance *widget)
 	else
 	{
 		failed = TRUE;
+		/* (Ad hoc dialog is a Dev row, the tab hidden until Show dev
+		settings is on: both named) */
 		snprintf(text, sizeof(text), "%s", T("The PS Vita did not join the ad hoc group.\n"
-			"Press A to try again, or choose another\nAd hoc dialog way (settings panel, Dev tab)."));
+			"Press A to try again. Or, in the settings\npanel, Game > Show dev settings: On, then\n"
+			"Dev > Ad hoc dialog: another way."));
 	}
 	text_show(named(screen, "adhoc_text"), text);
 	/* (A, Try again: after a failure only) */
@@ -3432,8 +3436,8 @@ static boolean h3_mp_map_set(struct widget_instance *widget)
 
 /* (port h3 network status: the lobbies' line under NETWORK) the connection's
 status - Online, Connecting..., Same Wi-Fi, Ad hoc, No Wi-Fi, or why Online
-failed (network_connection_status) - as Halo 3's Xbox LIVE indicator; none
-for OFFLINE and LOCAL, which use no connection */
+failed (network_connection_status) - as Halo 3's Xbox LIVE indicator; for
+OFFLINE and LOCAL, which use no connection, that it is this PS Vita alone */
 static void h3_network_status_update(struct widget_instance *widget)
 {
 	struct widget_instance *screen = screen_of(widget);
@@ -3443,6 +3447,11 @@ static void h3_network_status_update(struct widget_instance *widget)
 	text[0] = 0;
 	if (campaign ? h3_campaign.network != _h3_campaign_local : h3_mp.network != _h3_network_offline)
 		network_connection_status(text, (int)sizeof(text));
+	else
+	{
+		/* (no connection: said, not an empty line under NETWORK) */
+		snprintf(text, sizeof(text), "%s", T("On this PS Vita only"));
+	}
 	text_show(widget, text);
 }
 
@@ -4841,7 +4850,33 @@ enum
 	_h3_gametype_trait_without_ball,
 	_h3_gametype_moving_hill,
 	_h3_gametype_race_type,
+	/* (Infection's: this machine's settings, not the variant's - the
+	settings panel's Infection page, infection.c's infection.* -, so the
+	rules log and the dirty check leave them out) */
+	_h3_gametype_first_zombies,
+	_h3_gametype_zombie_speed,
+	_h3_gametype_round_time,
+	_h3_gametype_zombie_respawn,
+	_h3_gametype_zombie_shields,
+	_h3_gametype_tough_zombies,
 	NUMBER_OF_H3_GAMETYPE_SETTINGS
+};
+
+/* Infection's settings: their variables, as the settings panel's
+Infection page sets them, and their values (its rows') */
+static struct
+{
+	char const *variable;
+	short count;
+	long values[9];
+} const h3_gametype_infection_settings[] =
+{
+	{ "HALO_INFECTION_ZOMBIES", 6, { 4, 6, 8, 10, 12, 16 } },
+	{ "HALO_INFECTION_SPEED", 6, { 100, 110, 115, 125, 135, 150 } },
+	{ "HALO_INFECTION_TIME", 9, { 0, 3, 5, 6, 8, 10, 15, 20, 30 } },
+	{ "HALO_INFECTION_RESPAWN", 5, { 3, 5, 8, 10, 15 } },
+	{ "HALO_INFECTION_SHIELDS", 2, { 0, 1 } },
+	{ "HALO_INFECTION_TOUGH", 2, { 0, 1 } },
 };
 
 /* what a pending open is */
@@ -4970,10 +5005,20 @@ static char const *h3_gametype_engine_key(long engine)
 	}
 }
 
-/* the settings of a group, for a game (count) */
-static int h3_gametype_group_settings(short group, long engine, short *settings)
+/* the settings of a group, for a game (count); INFECTION: an Infection
+game type's (its own group, Infection's settings, in Slayer's place) */
+static int h3_gametype_group_settings_of(short group, long engine, boolean infection, short *settings)
 {
 	int count = 0;
+
+	if (group == _h3_gametype_rules && infection)
+	{
+		short setting;
+
+		for (setting = _h3_gametype_first_zombies; setting <= _h3_gametype_tough_zombies; setting++)
+			settings[count++] = setting;
+		return count;
+	}
 
 	switch (group)
 	{
@@ -5040,8 +5085,16 @@ static int h3_gametype_group_settings(short group, long engine, short *settings)
 	return count;
 }
 
-static char const *h3_gametype_group_name(short group, long engine)
+/* the settings of a group, for a game type */
+static int h3_gametype_group_settings(short group, struct game_variant const *variant, short *settings)
 {
+	return h3_gametype_group_settings_of(group, variant->game_engine_index, infection_variant(variant), settings);
+}
+
+static char const *h3_gametype_group_name(short group, struct game_variant const *variant)
+{
+	long engine = variant->game_engine_index;
+
 	static char const *const names[NUMBER_OF_H3_GAMETYPE_GROUPS] =
 	{
 		N_("GENERAL SETTINGS"), N_("RESPAWN SETTINGS"), N_("PLAYER SETTINGS"), N_("WEAPONS AND VEHICLES"),
@@ -5050,6 +5103,8 @@ static char const *h3_gametype_group_name(short group, long engine)
 
 	if (group != _h3_gametype_rules)
 		return T(names[PIN(group, 0, NUMBER_OF_H3_GAMETYPE_GROUPS - 1)]);
+	if (infection_variant(variant))
+		return T("INFECTION SETTINGS");
 	switch (engine)
 	{
 	case game_engine_ctf:
@@ -5066,8 +5121,10 @@ static char const *h3_gametype_group_name(short group, long engine)
 }
 
 /* a group's note: what a game type holds none of, and where it is set */
-static char const *h3_gametype_group_note(short group)
+static char const *h3_gametype_group_note(short group, struct game_variant const *variant)
 {
+	if (group == _h3_gametype_rules && infection_variant(variant))
+		return T("This PS Vita's, for every Infection game it hosts: changed\nat once, as on the settings panel's Infection page.");
 	switch (group)
 	{
 	case _h3_gametype_general:
@@ -5092,6 +5149,8 @@ static char const *h3_gametype_setting_label(short setting, long engine)
 		N_("KILL PENALTY"), N_("KILL IN ORDER"), N_("ASSAULT"), N_("SINGLE FLAG"), N_("FLAG MUST RESET"),
 		N_("FLAG AT HOME TO SCORE"), N_("BALL TYPE"), N_("NUMBER OF BALLS"), N_("RANDOM START"),
 		N_("SPEED WITH BALL"), N_("TRAIT WITH BALL"), N_("TRAIT WITHOUT BALL"), N_("MOVING HILL"), N_("RACE TYPE"),
+		N_("FIRST ZOMBIES"), N_("ZOMBIE SPEED"), N_("ROUND TIME"), N_("ZOMBIE RESPAWN"), N_("ZOMBIE SHIELDS"),
+		N_("TOUGH ZOMBIES"),
 	};
 
 	if (setting == _h3_gametype_score)
@@ -5148,6 +5207,13 @@ static char const *h3_gametype_setting_help(short setting, struct game_variant c
 		N_("What players without the ball get."),
 		N_("The hill moves to another place every minute."),
 		N_("NORMAL: the checkpoints in order. ANY ORDER: all of\nthem, any order. RALLY: one at a time, where shown."),
+		/* (the settings panel's Infection rows' help) */
+		N_("Zombies at the start, chosen at random (one at least)"),
+		N_("How fast zombies run; humans run at 100"),
+		N_("The humans still alive then win"),
+		N_("How soon a dead zombie comes back"),
+		N_("Off: zombies have their body alone"),
+		N_("On: zombies take half the damage"),
 	};
 
 	if (setting == _h3_gametype_score)
@@ -5187,6 +5253,14 @@ static int h3_gametype_values(short setting, struct game_variant const *variant,
 	long const *list = NULL;
 	int count = 0, index;
 
+	if (setting >= _h3_gametype_first_zombies && setting <= _h3_gametype_tough_zombies)
+	{
+		list = h3_gametype_infection_settings[setting - _h3_gametype_first_zombies].values;
+		count = h3_gametype_infection_settings[setting - _h3_gametype_first_zombies].count;
+		for (index = 0; index < count; index++)
+			values[index] = list[index];
+		return count;
+	}
 	switch (setting)
 	{
 	case _h3_gametype_score:
@@ -5280,6 +5354,21 @@ static long h3_gametype_get(short setting, struct game_variant const *variant)
 	struct universal_variant const *universal = &variant->universal_variant;
 	union game_engine_variant const *engine = &variant->game_engine_variant;
 
+	if (setting >= _h3_gametype_first_zombies && setting <= _h3_gametype_tough_zombies)
+	{
+		struct infection_settings infection;
+
+		infection_settings_configured(&infection);
+		switch (setting)
+		{
+		case _h3_gametype_first_zombies: return infection.players_per_first_zombie;
+		case _h3_gametype_zombie_speed: return infection.zombie_speed_percent;
+		case _h3_gametype_round_time: return infection.time_limit_minutes;
+		case _h3_gametype_zombie_respawn: return infection.zombie_respawn_seconds;
+		case _h3_gametype_zombie_shields: return infection.zombie_shields != FALSE;
+		default: return infection.zombie_tough != FALSE;
+		}
+	}
 	switch (setting)
 	{
 	case _h3_gametype_score: return universal->score_to_win;
@@ -5327,6 +5416,15 @@ static void h3_gametype_set(short setting, struct game_variant *variant, long va
 	struct universal_variant *universal = &variant->universal_variant;
 	union game_engine_variant *engine = &variant->game_engine_variant;
 
+	/* (Infection's: this machine's, set as the settings panel sets them) */
+	if (setting >= _h3_gametype_first_zombies && setting <= _h3_gametype_tough_zombies)
+	{
+		char text[16];
+
+		snprintf(text, sizeof(text), "%ld", value);
+		setting_set(h3_gametype_infection_settings[setting - _h3_gametype_first_zombies].variable, text);
+		return;
+	}
 	switch (setting)
 	{
 	case _h3_gametype_score: universal->score_to_win = value; break;
@@ -5448,6 +5546,21 @@ static void h3_gametype_value_text(short setting, struct game_variant const *var
 	case _h3_gametype_ball_count:
 		snprintf(text, size, "%d", (int)value);
 		break;
+	case _h3_gametype_first_zombies:
+		snprintf(text, size, T("1 PER %d PLAYERS"), (int)value);
+		break;
+	case _h3_gametype_zombie_speed:
+		snprintf(text, size, "%d%%", (int)value);
+		break;
+	case _h3_gametype_round_time:
+		if (value <= 0)
+			snprintf(text, size, "%s", T("NO LIMIT"));
+		else
+			snprintf(text, size, T("%d MIN"), (int)value);
+		break;
+	case _h3_gametype_zombie_respawn:
+		snprintf(text, size, T("%d SECONDS"), (int)value);
+		break;
 	default:
 		snprintf(text, size, "%s", value ? T("ON") : T("OFF"));
 		break;
@@ -5506,7 +5619,8 @@ static void h3_gametype_rules_log(struct game_variant const *variant, char *text
 	for (group = 0; group < NUMBER_OF_H3_GAMETYPE_GROUPS; group++)
 	{
 		short settings[H3_GAMETYPE_OPTION_ROWS];
-		int count = h3_gametype_group_settings(group, variant->game_engine_index, settings), index;
+		/* (the variant's own: Infection's group is this machine's) */
+		int count = h3_gametype_group_settings_of(group, variant->game_engine_index, FALSE, settings), index;
 
 		for (index = 0; index < count && length > 0 && length < size; index++)
 		{
@@ -6201,7 +6315,7 @@ static boolean h3_gametype_change(struct widget_instance *widget, int step)
 	if (!strncmp(widget->name, "op_", 3) && widget->name[3] >= '1' && widget->name[3] <= '9')
 	{
 		short settings[H3_GAMETYPE_OPTION_ROWS];
-		int count = h3_gametype_group_settings(h3_gametypes.group, variant->game_engine_index, settings);
+		int count = h3_gametype_group_settings(h3_gametypes.group, variant, settings);
 		int row = widget->name[3] - '1';
 
 		if (row >= count)
@@ -6490,7 +6604,7 @@ static void h3_gametype_editor_update(struct widget_instance *list)
 			snprintf(text, sizeof(text), "%s", h3_gametype_kind_name(variant));
 		}
 		else if (row - 2 < NUMBER_OF_H3_GAMETYPE_GROUPS)
-			text_show(named(item, "label"), h3_gametype_group_name((short)(row - 2), variant->game_engine_index));
+			text_show(named(item, "label"), h3_gametype_group_name((short)(row - 2), variant));
 		text_show(named(item, "value"), text);
 		h3_gametype_row_focus(item, has_focus, row == 1);
 	}
@@ -6540,7 +6654,7 @@ static void h3_gametype_options_update(struct widget_instance *list)
 	struct widget_instance *screen = screen_of(list);
 	struct game_variant *variant = &h3_gametypes.current;
 	short settings[H3_GAMETYPE_OPTION_ROWS];
-	int count = h3_gametype_group_settings(h3_gametypes.group, variant->game_engine_index, settings);
+	int count = h3_gametype_group_settings(h3_gametypes.group, variant, settings);
 	struct widget_instance *child;
 	short index, focused = 0;
 	char text[96], name[48];
@@ -6564,12 +6678,12 @@ static void h3_gametype_options_update(struct widget_instance *list)
 		text_show(named(child, "value"), text);
 		h3_gametype_row_focus(child, has_focus, h3_gametype_values(settings[index], variant, values) > 1);
 	}
-	text_show(named(screen, "title"), h3_gametype_group_name(h3_gametypes.group, variant->game_engine_index));
+	text_show(named(screen, "title"), h3_gametype_group_name(h3_gametypes.group, variant));
 	h3_gametype_name(name, sizeof(name), variant);
 	snprintf(text, sizeof(text), "%s \xc2\xb7 %s", name, h3_gametype_kind_name(variant));
 	text_show(named(screen, "subtitle"), text);
 	text_show(named(screen, "help"), count > 0 ? h3_gametype_setting_help(settings[focused], variant) : "");
-	text_show(named(screen, "note"), h3_gametype_group_note(h3_gametypes.group));
+	text_show(named(screen, "note"), h3_gametype_group_note(h3_gametypes.group, variant));
 }
 
 /* (the main loop) what the GAME TYPES screens asked for once back on the
@@ -9202,6 +9316,20 @@ static void h3_mods_update(struct widget_instance *list)
 		text_show(named(screen, "detail_check"), "");
 		text_show(named(screen, "detail_needs"), "");
 		text_show(named(screen, "detail_source"), "");
+		text_show(named(screen, "toggle"), "");
+	}
+	/* (Cross, Triangle and Square act on the chosen one: not shown with
+	none - an empty list's Cross had a glyph and no label, insider.21) */
+	{
+		static char const *const hints[] = { "a_butn", "toggle", "y_butn", "details_label", "x_butn", "delete_label" };
+		struct widget_instance *hint;
+		int hint_index;
+
+		for (hint_index = 0; hint_index < (int)NUMBEROF(hints); hint_index++)
+		{
+			if ((hint = named(screen, hints[hint_index])) != NULL)
+				widget_instance_set_visibility_recursive(hint, chosen != NULL);
+		}
 	}
 	text_show(named(screen, "mods_message"), mod_manager_count() ? "" :
 		T("No custom maps or mods yet. Copy maps to ux0:data/haloce-vita/maps,\nmods to ux0:data/haloce-vita/mods."));
@@ -11301,7 +11429,7 @@ static boolean h3_players_hosting(void)
 static void h3_players_update(struct widget_instance *list)
 {
 	struct widget_instance *screen = screen_of(list);
-	struct widget_instance *child, *focused = list->focused_child, *focus = NULL;
+	struct widget_instance *child, *focused = list->focused_child, *focus = NULL, *found;
 	long index, focused_row = NONE, target;
 	char text[192], status[96];
 
@@ -11361,6 +11489,16 @@ static void h3_players_update(struct widget_instance *list)
 		snprintf(h3_players.chosen_name, sizeof(h3_players.chosen_name), "%s", h3_players.players[target].name);
 	}
 	index = h3_players_chosen_index();
+	/* (Cross's Options: none for this PS Vita's own players, so not shown
+	on their rows) */
+	{
+		boolean options = index >= 0 && h3_players.players[index].machine != h3_players.own_machine;
+
+		if ((found = named(screen, "a_butn")) != NULL)
+			widget_instance_set_visibility_recursive(found, options);
+		if ((found = named(screen, "a_label")) != NULL)
+			widget_instance_set_visibility_recursive(found, options);
+	}
 	if (index >= 0)
 	{
 		struct h3_player const *player = &h3_players.players[index];
@@ -11403,9 +11541,11 @@ static boolean h3_players_act(struct widget_instance *widget)
 	index = h3_players_chosen_index();
 	if (index < 0)
 		return FALSE;
+	/* (this PS Vita's own: no options - the detail says whose it is, and
+	Cross's hint is not shown on its row) */
 	if (h3_players.players[index].machine == h3_players.own_machine)
 	{
-		h3_players_message(T("A player of this PS Vita"));
+		platform_log("menus: h3 players: no options for %s, a player of this PS Vita", h3_players.players[index].name);
 		return FALSE;
 	}
 	platform_log("menus: h3 players: options for %s (machine %d)", h3_players.players[index].name,
@@ -13789,6 +13929,7 @@ static void h3_pregame_update(struct widget_instance *widget)
 	boolean cooperative, host = server != NULL, online, waiting, listed = FALSE, password = FALSE;
 	short local_machine = client ? network_game_client_get_local_machine_index() : NONE;
 	short seconds = client ? network_game_client_get_seconds_to_game_start(client) : -1;
+	int reach_state = P2P_LOBBY_BROWSE_OFF, hosting_state = P2P_LOBBY_HOSTING_NONE;
 	char text[192], code[32], line[384];
 	wchar_t wide[64];
 	long index, row = 0;
@@ -13802,7 +13943,19 @@ static void h3_pregame_update(struct widget_instance *widget)
 	if (host && online)
 		p2p_hosting_code(code, (int)sizeof(code));
 	if (host && online)
+	{
+		char reach[160];
+
 		listed = p2p_lobby_hosting_listed(&password) != 0;
+		/* (the host's, online: its code and PUBLIC/PRIVATE only once the
+		brokers have it - its code is looked up there, its listing held
+		there -: Connecting... before, why after none answered; insider.21
+		showed both while still connecting) */
+		reach_state = p2p_lobby_brokers_status(reach, (int)sizeof(reach));
+		hosting_state = p2p_lobby_hosting_status(reach, (int)sizeof(reach));
+		if (reach_state != P2P_LOBBY_BROWSE_EMPTY || hosting_state == P2P_LOBBY_HOSTING_UNREACHABLE)
+			code[0] = 0;
+	}
 	text_show(named(screen, "title"), cooperative ? T("CO-OP LOBBY") : T("MULTIPLAYER LOBBY"));
 	/* (what the lobby waits for, or its countdown) */
 	if (seconds > 0)
@@ -13906,6 +14059,12 @@ static void h3_pregame_update(struct widget_instance *widget)
 		text_show(named(screen, "code_label"), T("CODE: others join with it"));
 		text_show(named(screen, "code"), code);
 	}
+	else if (host && online)
+	{
+		/* (its code not given out yet: the brokers not reached) */
+		text_show(named(screen, "code_label"), T("NETWORK"));
+		text_show(named(screen, "code"), T("ONLINE"));
+	}
 	else if (online)
 	{
 		text_show(named(screen, "code_label"), T("NETWORK"));
@@ -13923,10 +14082,28 @@ static void h3_pregame_update(struct widget_instance *widget)
 	Square does: co-op's choice while it waits, coop_menu.c) */
 	if (host && online)
 	{
-		snprintf(text, sizeof(text), "%s", listed ? (password ? T("PUBLIC: listed in the server browser,\nwith a password.") :
-			T("PUBLIC: listed in the server browser.")) : T("PRIVATE: joined by its code."));
+		char const *state = listed ? "public" : "private";
+
+		if (reach_state == P2P_LOBBY_BROWSE_UNREACHABLE || hosting_state == P2P_LOBBY_HOSTING_UNREACHABLE)
+		{
+			snprintf(text, sizeof(text), "%s", T("Not listed: can't reach the online game list"));
+			state = "not reached";
+		}
+		else if (reach_state != P2P_LOBBY_BROWSE_EMPTY)
+		{
+			snprintf(text, sizeof(text), "%s", T("Connecting..."));
+			state = "connecting";
+		}
+		else if (listed && hosting_state != P2P_LOBBY_HOSTING_LISTED)
+		{
+			snprintf(text, sizeof(text), "%s", T("Getting listed..."));
+			state = "getting listed";
+		}
+		else
+			snprintf(text, sizeof(text), "%s", listed ? (password ? T("PUBLIC: listed in the server browser,\nwith a password.") :
+				T("PUBLIC: listed in the server browser.")) : T("PRIVATE: joined by its code."));
 		text_show(named(screen, "visibility"), text);
-		snprintf(line + strlen(line), sizeof(line) - strlen(line), "; %s", listed ? "public" : "private");
+		snprintf(line + strlen(line), sizeof(line) - strlen(line), "; %s", state);
 	}
 	else
 		text_show(named(screen, "visibility"), host ? "" : T("The host chooses the map and starts."));
@@ -13957,7 +14134,7 @@ static void h3_pregame_update(struct widget_instance *widget)
 			char invite[96];
 
 			text[0] = 0;
-			if (host && online && network_wire_crossplay() && p2p_hosting_invite(invite, (int)sizeof(invite)) &&
+			if (host && online && code[0] && network_wire_crossplay() && p2p_hosting_invite(invite, (int)sizeof(invite)) &&
 				strlen(invite) > 38)
 			{
 				snprintf(text, sizeof(text), "%s\n%.38s\n%s", T("PC players (OpenCE) join with:"), invite, invite + 38);

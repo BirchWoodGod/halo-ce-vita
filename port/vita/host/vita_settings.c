@@ -565,6 +565,11 @@ static struct setting settings[] = {
 	Menu style, as the Game tab is a screen's height) */
 	{ "Carnage report", "HALO_CARNAGE_REPORT", 0, 2, { "classic", "halo3" }, { "Classic", "Halo 3" },
 		"A multiplayer game's end: Halo 3's report, or the original", 1, PAGE_MENUS },
+	/* (Forge and File Share for the original menus - the owner: everything
+	in the overlay -: the Forge page, under Menus (Interface; it was Game's
+	last row, under Updates, insider.21), shown with Menu style Halo CE; the
+	Halo 3 main menu has FORGE and FILE SHARE: setting_shown) */
+	PAGE_ROW("Forge and File Share", "Forge a map; your map variants (File Share)", TAB_GAME, PAGE_FORGE),
 	/* (the game's button icons: the Xbox's, or the Vita button each is on,
 	in the menus and in play: vita_controls.h; not part of the layout,
 	which Reset controls and the page's summary leave out) */
@@ -618,10 +623,6 @@ static struct setting settings[] = {
 		"Experimental: betas too. Stable: releases only", 1, TAB_GAME },
 	{ "Show dev settings", "HALO_DEV_SETTINGS", 0, 2, { "0", "1" }, { "Off", "On" },
 		"The Dev tab: switches for testers, Save report", 0, TAB_GAME },
-	/* (Forge and File Share for the original menus - the owner: everything
-	in the overlay -: the Forge page, Game's last row, shown with Menu style
-	Halo CE; the Halo 3 main menu has FORGE and FILE SHARE: setting_shown) */
-	PAGE_ROW("Forge and File Share", "Forge a map; your map variants (File Share)", TAB_GAME, PAGE_FORGE),
 	{ "Sound voices", "HALO_SOUND_CHANNELS", 1, 4, { "16", "24", "32", "0" },
 		{ "16", "24", "32", "Original" }, "Fewer is faster; the AI then differs (after a restart)", 3, TAB_AUDIO },
 	{ "Sound occlusion", "HALO_SOUND_OBSTRUCTION_TICKS", 0, 3, { "1", "3", "6" },
@@ -932,6 +933,22 @@ static struct setting settings[] = {
 };
 
 #define SETTING_COUNT ((int)(sizeof(settings) / sizeof(settings[0])))
+
+/* the page or tab a page's row is on (its own tab for a tab, or a page no
+row opens) */
+static int page_parent(int opened)
+{
+	int index;
+
+	if (opened < TAB_COUNT)
+		return opened;
+	for (index = 0; index < (int)(sizeof(settings) / sizeof(settings[0])); index++)
+	{
+		if (settings[index].action == ACTION_PAGE && settings[index].opens == opened)
+			return settings[index].page;
+	}
+	return TAB_GAME;
+}
 
 /* each row's choice as shipped (Reset controls), kept before anything is
 loaded */
@@ -6903,7 +6920,7 @@ int vita_settings_input(const struct vita_host_pad *pad)
 		}
 		else
 			vita_settings_message(guide_title(adhoc_pending),
-				T("The Vita did not join the ad hoc group. Try again, or another Ad hoc dialog way (Dev tab)."));
+				T("The Vita did not join the ad hoc group. Try again, or Game > Show dev settings: On, then Dev > Ad hoc dialog."));
 		adhoc_pending = 0;
 	}
 	guide_poll(now);
@@ -7126,13 +7143,18 @@ int vita_settings_input(const struct vita_host_pad *pad)
 	}
 	if (pressed & VITA_BUTTON_CIRCLE)
 	{
-		/* (a page a row opened: back to its tab, on that row; the Mod
-		manager back to Modded maps) */
-		if (page == PAGE_MODS)
+		/* (a page a row opened: back to where that row is, on it - its
+		tab, or the page it is on: the Mod manager to Modded maps, Players
+		and Infection to Vita and PC. Party is the tab's: SELECT + left and
+		the multiplayer pause open it at once, "Multiplayer > Party") */
+		int parent = page == PAGE_PARTY ? tab : page_parent(page);
+
+		if (parent >= TAB_COUNT)
 		{
-			page = PAGE_MAPS;
+			page = parent;
 			notice[0] = 0;
-			maps_scan();
+			if (page == PAGE_MAPS)
+				maps_scan();
 			show();
 		}
 		else if (page != tab)

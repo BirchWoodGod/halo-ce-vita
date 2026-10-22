@@ -17,8 +17,12 @@ will have, as when it starts with the game):
   same p2p_initialize) and the brokers reached (p2p_lobby_reach_brokers):
   Connecting... until a broker that carries the server browser is ready,
   then Online. None reached (p2p_lobby_brokers_status: every broker failed
-  every way, after its time to reach them), it says why, and the setting
-  goes back to Same Wi-Fi.
+  every way, after its time to reach them), the status line says so, short
+  ("Can't reach the online servers"), and the connection stays Online: the
+  brokers are tried again (p2p_signal.c) and it is Online once one answers.
+  (It went back to Same Wi-Fi before, the lobby's NETWORK with it, which
+  left a lobby on ONLINE saying internet play was off and its BROWSE GAMES
+  on the System Link list, insider.21.)
 - Same Wi-Fi: internet play stopped (p2p_shutdown: its thread, sockets,
   peers and broker connections gone, a public listing taken down).
 - Ad hoc: network.adhoc on (this machine's address ad hoc play's stand-in,
@@ -83,6 +87,8 @@ static struct
 	short running;
 	/* Online: connecting (no broker reached yet), or ready */
 	boolean connecting;
+	/* Online: no broker reachable (tried again; Online once one is) */
+	boolean unreachable;
 	/* the last failure said, and until when */
 	char why[128];
 	unsigned long why_until;
@@ -135,7 +141,7 @@ static void connection_publish(void)
 		phase = HALO_NETWORK_PHASE_CONNECTING;
 	if (network_connection_wanted() != connection.running)
 		phase = HALO_NETWORK_PHASE_WAITING;
-	if (failure_said())
+	if (failure_said() || (connection.running == NETWORK_CONNECTION_ONLINE && connection.unreachable))
 		phase = HALO_NETWORK_PHASE_FAILED;
 	__atomic_store_n(&halo_network_phase, phase, __ATOMIC_RELEASE);
 	__atomic_store_n(&halo_network_connection, connection.running, __ATOMIC_RELEASE);
@@ -187,6 +193,7 @@ static void connection_switch(short to)
 	network_wire_reset();
 	connection.running = to;
 	connection.connecting = FALSE;
+	connection.unreachable = FALSE;
 	if (to != NETWORK_CONNECTION_WIFI)
 	{
 		xnet_internet_play_start();
@@ -211,28 +218,27 @@ static void connection_switch(short to)
 	platform_log("network: %s", connection_name(to));
 }
 
-/* (Online, connecting) a broker reached: Online; none reachable: why, and
-back to Same Wi-Fi */
+/* (Online, connecting or unreachable) a broker reached: Online; none
+reachable: said, Online kept (its brokers tried again) */
 static void connection_watch_online(void)
 {
 	char text[128];
 	int state;
 
-	if (connection.running != NETWORK_CONNECTION_ONLINE || !connection.connecting)
+	if (connection.running != NETWORK_CONNECTION_ONLINE || (!connection.connecting && !connection.unreachable))
 		return;
 	state = p2p_lobby_brokers_status(text, (int)sizeof(text));
 	if (state == P2P_LOBBY_BROWSE_EMPTY)
 	{
 		connection.connecting = FALSE;
+		connection.unreachable = FALSE;
 		platform_log("network: Online (a broker reached)");
 	}
-	else if (state == P2P_LOBBY_BROWSE_UNREACHABLE)
+	else if (state == P2P_LOBBY_BROWSE_UNREACHABLE && connection.connecting)
 	{
 		connection.connecting = FALSE;
-		snprintf(connection.why, sizeof(connection.why), "%s", text);
-		connection.why_until = system_milliseconds() + NETWORK_FAILURE_SAID_MILLISECONDS;
-		platform_log("network: Online failed (%s); back to Same Wi-Fi", text);
-		network_connection_choose(NETWORK_CONNECTION_WIFI);
+		connection.unreachable = TRUE;
+		platform_log("network: Online failed (%s); Online kept, its brokers tried again", text);
 	}
 }
 
@@ -363,8 +369,12 @@ int network_connection_status(char *text, int size)
 	}
 	else if (connection.running == NETWORK_CONNECTION_ONLINE)
 	{
-		snprintf(text, (size_t)size, "%s", connection.connecting ? T("Connecting...") : T("Online"));
-		if (connection.connecting)
+		/* (short: the lobbies' line under NETWORK is narrow) */
+		snprintf(text, (size_t)size, "%s", connection.unreachable ? T("Can't reach the online servers") :
+			connection.connecting ? T("Connecting...") : T("Online"));
+		if (connection.unreachable)
+			status = NETWORK_STATUS_FAILED;
+		else if (connection.connecting)
 			status = NETWORK_STATUS_SWITCHING;
 	}
 	else
