@@ -525,7 +525,8 @@ validates it as above before the countdown can end.
 SPAWNING category places Halo 3's RESPAWN POINT and INITIAL SPAWN, each
 with a TEAM (any, red, blue) and a GAME TYPE (all, slayer, CTF, oddball,
 king, race, infection), drawn as the characters' spawn markers are (the
-team's colour; an initial spawn taller, its diamond white) for the monitor
+team's colour, flat on the ground: a ring and a chevron where it faces; an
+initial spawn a second ring and a filled centre) for the monitor
 only, the map's own spawns grey beside them (read only). They count in the
 objects' budget (at most 64), are saved as version 4's player spawn record
 (`_forge_record_player_spawn`, no path: team, game types, flag bit 3 the

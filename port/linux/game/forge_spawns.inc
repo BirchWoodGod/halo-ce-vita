@@ -11,8 +11,8 @@ important".
 
 A spawn point is no object of the map's: it is drawn as the characters'
 spawn markers are (forge_markers.inc: the see-through marker in its team's
-colour, a taller one with a white diamond for an initial spawn, the arrow
-where the player faces), for the monitor only, never for the Spartan or in
+colour, flat on the ground: a ring, a chevron where the player faces, an
+initial spawn's a second ring and a filled centre), for the monitor only, never for the Spartan or in
 a map variant played; taken (R), carried and let go like a character's
 marker, its properties opened from it (Square while holding it: TEAM, GAME
 TYPE, the kind, YAW), deleted with Y (held or under the crosshair). It

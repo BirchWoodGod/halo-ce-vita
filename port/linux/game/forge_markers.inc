@@ -22,19 +22,21 @@ a map variant played.
 
 struct forge_marker and forge_marker_draw are every kind's: a character's
 spawn, a player spawn point of the layout (forge_spawns.inc: its team's
-colour, an initial spawn's taller with a white diamond; taken, carried,
+colour, an initial spawn's with a second ring and a filled centre; taken, carried,
 deleted and its properties opened as a character's marker is) and the map's
 own player spawns (grey, fainter, read only).
 */
 
 /* ---------- constants */
 
-/* the marker: its disc and pillar (world units); where the crosshair takes
-it, forge.c's FORGE_MARKER_PICK_RADIUS */
-#define FORGE_MARKER_DISC_RADIUS 0.22f
-#define FORGE_MARKER_PILLAR_RADIUS 0.045f
-#define FORGE_MARKER_HEIGHT 0.55f
-#define FORGE_MARKER_SIDES 10
+/* the marker, flat on the ground: its ring's outer and inner radii, how far
+over the ground, the height its pick and its culling take (world units);
+where the crosshair takes it, forge.c's FORGE_MARKER_PICK_RADIUS */
+#define FORGE_MARKER_DISC_RADIUS 0.42f
+#define FORGE_MARKER_RING_INNER 0.33f
+#define FORGE_MARKER_LIFT 0.07f
+#define FORGE_MARKER_HEIGHT 0.2f
+#define FORGE_MARKER_SIDES 14
 /* a marker let go stands this far over the ground under it */
 #define FORGE_MARKER_CLEARANCE 0.25f
 /* the most drawn a frame (a triangle budget: each is some 70), and the most
@@ -43,9 +45,9 @@ of them the map's own spawns */
 #define FORGE_MARKER_MOST_MAP_DRAWN 32
 /* the map's own spawns drawn this near the camera at most (world units) */
 #define FORGE_SPAWN_MAP_DRAW_DISTANCE 60.f
-/* an initial spawn's marker: taller */
-#define FORGE_MARKER_INITIAL_HEIGHT 0.8f
-#define FORGE_MARKER_TRIANGLES 80
+/* (the pick's and culling's height of an initial spawn's: the same, flat) */
+#define FORGE_MARKER_INITIAL_HEIGHT FORGE_MARKER_HEIGHT
+#define FORGE_MARKER_TRIANGLES 96
 
 enum
 {
@@ -70,7 +72,7 @@ struct forge_marker
 	real blue;
 	/* under the crosshair, or held: brighter */
 	boolean lit;
-	/* (a player spawn) an initial spawn: taller, its diamond white */
+	/* (a player spawn) an initial spawn: a second ring, a filled centre */
 	boolean initial;
 };
 
@@ -154,23 +156,56 @@ static void forge_marker_triangle(
 
 /* ---------- public code (forge.c's) */
 
-/* a marker drawn in the 3D (render.c's hook, after the objects): a disc on
-the ground, an arrow on it where it faces, a pillar and a diamond over it;
-blended, the walls in front hiding it */
+/* a ring's quads, flat, from radius inner to outer */
+static void forge_marker_ring(
+	struct forge_net_orb_vertex *vertices,
+	long *count,
+	real_point3d const *center,
+	real inner,
+	real outer,
+	unsigned long color)
+{
+	short side;
+
+	for (side = 0; side < FORGE_MARKER_SIDES; side++)
+	{
+		real angle0 = (real)side * (real)(2.0 * 3.14159265358979) / (real)FORGE_MARKER_SIDES;
+		real angle1 = (real)(side + 1) * (real)(2.0 * 3.14159265358979) / (real)FORGE_MARKER_SIDES;
+		real_point3d in0 = *center, in1 = *center, out0 = *center, out1 = *center;
+
+		in0.x += cosf(angle0) * inner;
+		in0.y += sinf(angle0) * inner;
+		in1.x += cosf(angle1) * inner;
+		in1.y += sinf(angle1) * inner;
+		out0.x += cosf(angle0) * outer;
+		out0.y += sinf(angle0) * outer;
+		out1.x += cosf(angle1) * outer;
+		out1.y += sinf(angle1) * outer;
+		if (inner <= 0.f)
+		{
+			forge_marker_triangle(vertices, count, center, &out0, &out1, color);
+			continue;
+		}
+		forge_marker_triangle(vertices, count, &in0, &out0, &out1, color);
+		forge_marker_triangle(vertices, count, &in0, &out1, &in1, color);
+	}
+}
+
+/* a marker drawn in the 3D (render.c's hook, after the objects), flat on
+the ground as Halo 3's (the owner, Oct 22 2026: no shaft standing up): a
+ring in its colour over a faint disc, a chevron on it pointing where it
+faces; an initial spawn's a second ring inside and a filled centre;
+blended, a little over the ground under it, the walls in front hiding it */
 static void forge_marker_draw(
 	struct forge_marker const *marker)
 {
 	static struct forge_net_orb_vertex vertices[FORGE_MARKER_TRIANGLES * 3];
-	real alpha = marker->lit ? 0.85f : marker->kind == _forge_marker_map_spawn ? 0.35f : 0.55f;
-	real height = marker->initial ? FORGE_MARKER_INITIAL_HEIGHT : FORGE_MARKER_HEIGHT;
-	struct forge_marker white;
+	real alpha = marker->lit ? 0.9f : marker->kind == _forge_marker_map_spawn ? 0.4f : 0.7f;
 	real_vector3d forward = marker->forward;
 	real_vector3d left;
 	real_point3d center = marker->position;
-	real_point3d top;
 	long count = 0;
 	long buffer;
-	short side;
 
 	forward.k = 0.f;
 	if (normalize3d(&forward) == 0.f)
@@ -178,84 +213,59 @@ static void forge_marker_draw(
 	left.i = -forward.j;
 	left.j = forward.i;
 	left.k = 0.f;
-	center.z += 0.02f;
-	top = center;
-	top.z += height;
-	/* (an initial spawn's diamond: white) */
-	white = *marker;
-	if (marker->initial)
-		white.red = white.green = white.blue = 1.f;
-	for (side = 0; side < FORGE_MARKER_SIDES; side++)
+	/* (on the ground under it: a spawn point stands its clearance over it,
+	a character's home where its unit stood) */
 	{
-		real angle0 = (real)side * (real)(2.0 * 3.14159265358979) / (real)FORGE_MARKER_SIDES;
-		real angle1 = (real)(side + 1) * (real)(2.0 * 3.14159265358979) / (real)FORGE_MARKER_SIDES;
-		real_point3d disc0, disc1, low0, low1, high0, high1;
+		real_vector3d down;
+		real_point3d from = center;
+		struct collision_result collision;
 
-		disc0.x = center.x + cosf(angle0) * FORGE_MARKER_DISC_RADIUS;
-		disc0.y = center.y + sinf(angle0) * FORGE_MARKER_DISC_RADIUS;
-		disc0.z = center.z;
-		disc1.x = center.x + cosf(angle1) * FORGE_MARKER_DISC_RADIUS;
-		disc1.y = center.y + sinf(angle1) * FORGE_MARKER_DISC_RADIUS;
-		disc1.z = center.z;
-		/* (the disc) */
-		forge_marker_triangle(vertices, &count, &center, &disc0, &disc1, forge_marker_pixel(marker, 0.7f, alpha * 0.8f));
-		/* (the pillar) */
-		low0.x = center.x + cosf(angle0) * FORGE_MARKER_PILLAR_RADIUS;
-		low0.y = center.y + sinf(angle0) * FORGE_MARKER_PILLAR_RADIUS;
-		low0.z = center.z;
-		low1.x = center.x + cosf(angle1) * FORGE_MARKER_PILLAR_RADIUS;
-		low1.y = center.y + sinf(angle1) * FORGE_MARKER_PILLAR_RADIUS;
-		low1.z = center.z;
-		high0 = low0;
-		high0.z = top.z;
-		high1 = low1;
-		high1.z = top.z;
-		forge_marker_triangle(vertices, &count, &low0, &low1, &high1,
-			forge_marker_pixel(marker, 0.65f + 0.35f * (real)fabsf(cosf(angle0)), alpha));
-		forge_marker_triangle(vertices, &count, &low0, &high1, &high0,
-			forge_marker_pixel(marker, 0.65f + 0.35f * (real)fabsf(cosf(angle0)), alpha));
-	}
-	/* (the arrow on the disc: where the character faces) */
-	{
-		real_point3d tip, back_left, back_right;
-
-		tip.x = center.x + forward.i * FORGE_MARKER_DISC_RADIUS * 1.7f;
-		tip.y = center.y + forward.j * FORGE_MARKER_DISC_RADIUS * 1.7f;
-		tip.z = center.z + 0.01f;
-		back_left.x = center.x + left.i * FORGE_MARKER_DISC_RADIUS * 0.6f;
-		back_left.y = center.y + left.j * FORGE_MARKER_DISC_RADIUS * 0.6f;
-		back_left.z = tip.z;
-		back_right.x = center.x - left.i * FORGE_MARKER_DISC_RADIUS * 0.6f;
-		back_right.y = center.y - left.j * FORGE_MARKER_DISC_RADIUS * 0.6f;
-		back_right.z = tip.z;
-		forge_marker_triangle(vertices, &count, &tip, &back_left, &back_right, forge_marker_pixel(marker, 1.f, alpha));
-	}
-	/* (the diamond over it) */
-	{
-		real_point3d up_point = top, down_point = top, around[4];
-		short corner;
-
-		up_point.z += 0.12f;
-		down_point.z -= 0.08f;
-		for (corner = 0; corner < 4; corner++)
+		from.z += 0.1f;
+		down.i = 0.f;
+		down.j = 0.f;
+		down.k = -(FORGE_MARKER_CLEARANCE + 1.f);
+		if (collision_test_vector(FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit), &from,
+			&down, NONE, &collision))
 		{
-			real angle = (real)corner * (real)(3.14159265358979 / 2.0);
-			real_vector3d direction;
-
-			direction.i = forward.i * cosf(angle) + left.i * sinf(angle);
-			direction.j = forward.j * cosf(angle) + left.j * sinf(angle);
-			around[corner] = top;
-			around[corner].x += direction.i * 0.09f;
-			around[corner].y += direction.j * 0.09f;
+			center.z = from.z + down.k * collision.t;
 		}
-		for (corner = 0; corner < 4; corner++)
-		{
-			short next = (short)((corner + 1) % 4);
+	}
+	center.z += FORGE_MARKER_LIFT;
+	/* (the faint disc, the ring) */
+	forge_marker_ring(vertices, &count, &center, 0.f, FORGE_MARKER_RING_INNER, forge_marker_pixel(marker, 0.8f, alpha * 0.35f));
+	forge_marker_ring(vertices, &count, &center, FORGE_MARKER_RING_INNER, FORGE_MARKER_DISC_RADIUS,
+		forge_marker_pixel(marker, 1.f, alpha));
+	/* (an initial spawn's: a second ring and a filled centre) */
+	if (marker->initial)
+	{
+		forge_marker_ring(vertices, &count, &center, FORGE_MARKER_DISC_RADIUS * 0.5f, FORGE_MARKER_DISC_RADIUS * 0.62f,
+			forge_marker_pixel(marker, 1.f, alpha));
+		forge_marker_ring(vertices, &count, &center, 0.f, FORGE_MARKER_DISC_RADIUS * 0.22f, forge_marker_pixel(marker, 1.f, alpha));
+	}
+	/* (the chevron: two flat arms meeting at its tip, past the ring where
+	it faces) */
+	{
+		real tip_out = FORGE_MARKER_DISC_RADIUS * 1.45f;
+		real arm_back = FORGE_MARKER_DISC_RADIUS * 0.75f;
+		real arm_side = FORGE_MARKER_DISC_RADIUS * 0.55f;
+		real thick = FORGE_MARKER_DISC_RADIUS * 0.28f;
+		short arm;
 
-			forge_marker_triangle(vertices, &count, &up_point, &around[corner], &around[next],
-				forge_marker_pixel(&white, corner % 2 ? 1.f : 0.8f, alpha));
-			forge_marker_triangle(vertices, &count, &down_point, &around[next], &around[corner],
-				forge_marker_pixel(&white, corner % 2 ? 0.6f : 0.5f, alpha));
+		for (arm = -1; arm <= 1; arm += 2)
+		{
+			real_point3d tip = center, tip_in = center, end = center, end_in = center;
+
+			tip.x += forward.i * tip_out;
+			tip.y += forward.j * tip_out;
+			tip_in.x += forward.i * (tip_out - thick);
+			tip_in.y += forward.j * (tip_out - thick);
+			end.x += forward.i * arm_back + left.i * arm_side * arm;
+			end.y += forward.j * arm_back + left.j * arm_side * arm;
+			end_in.x += forward.i * (arm_back - thick) + left.i * arm_side * arm;
+			end_in.y += forward.j * (arm_back - thick) + left.j * arm_side * arm;
+			tip.z = tip_in.z = end.z = end_in.z = center.z + 0.005f;
+			forge_marker_triangle(vertices, &count, &tip, &end, &end_in, forge_marker_pixel(marker, 1.f, alpha));
+			forge_marker_triangle(vertices, &count, &tip, &end_in, &tip_in, forge_marker_pixel(marker, 1.f, alpha));
 		}
 	}
 	if (count < 3)

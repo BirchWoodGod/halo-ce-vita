@@ -318,8 +318,8 @@ enum
 #define FORGE_CAMERA_LOOK_RATE 2.5f
 #define FORGE_PICK_RANGE 60.f
 /* (forge_markers.inc) where the crosshair takes a spawn marker: a sphere at
-its pillar's middle */
-#define FORGE_MARKER_PICK_RADIUS 0.32f
+just over its ring */
+#define FORGE_MARKER_PICK_RADIUS 0.45f
 #define FORGE_PUSH_RATE 3.f
 #define FORGE_WHEEL_PUSH 0.5f
 #define FORGE_MOUSE_TURN 1.f
