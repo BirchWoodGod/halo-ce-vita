@@ -336,9 +336,15 @@ its trigger a blow, never dropped; no grenades, no pickups), run at 115%
 (`infection.zombie_respawn`) and are green on the red team; humans are
 the blue team. The zombies win when no human is left; the humans still
 alive win after six minutes (`infection.time_limit`). No vehicles. The
-server decides every side and sends it to the players; a build older than
-1.1.1 is refused from an Infection game (it cannot play it), and plays the
-server's other games as before. `sv_mapcycle_add prisoner infection`.
+server decides every side and sends it to the players. A build without
+Infection (the public 1.1.0, insiders before 21) is not refused: it plays
+the server's Infection as the Team Slayer it knows. The server decides every
+side, death, spawn and weapon; such a player sees the zombies with the skull
+(and is given it, once infected), in their colours and at their speed, and
+the game's end as the server has it; its own scoreboard keeps the teams the
+players joined with and shows no Infection text. It is sent Slayer's part of
+the game type's state alone (`infection_net.c`). A Vita hosting Infection
+refuses it, as before. `sv_mapcycle_add prisoner infection`.
 
 ### Bots
 
