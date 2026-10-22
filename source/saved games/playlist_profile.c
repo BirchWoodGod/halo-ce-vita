@@ -490,6 +490,42 @@ void playlist_profile_save(
 
 /* ---------- private code */
 
+#ifdef HALO_LINUX
+/* port: whether a game type of the game's own is on disk already as it
+would be written (the same bytes): it is not written again. The Xbox
+remade all 27 on its utility drive at every start; on the Vita's memory
+card that is 27 folders emptied and 27 files written, seconds of writes the
+saved game files' mutex is held for (playlist_profiles_enumerate_available_
+to_local_player_index), and the game's first frames, the intro movie's,
+waited for them (insider.21) */
+static boolean playlist_profile_default_file_same(
+	const char *path,
+	const byte *block,
+	unsigned long size)
+{
+	static byte existing[SAVED_GAME_FILE_BLOCK_SIZE];
+	struct file_reference file;
+	boolean same = FALSE;
+
+	if (size > sizeof(existing) ||
+		!file_reference_create_from_path(&file, path, FALSE) ||
+		!file_exists(&file) ||
+		!file_open(&file, FLAG(_permission_read_bit)))
+	{
+		return FALSE;
+	}
+	if (file_get_eof(&file) == size &&
+		file_read(&file, size, existing) &&
+		!csmemcmp(existing, block, size))
+	{
+		same = TRUE;
+	}
+	file_close(&file);
+
+	return same;
+}
+#endif
+
 static void playlist_profile_create_default_profiles_on_disk(
 	void)
 {
@@ -518,7 +554,14 @@ static void playlist_profile_create_default_profiles_on_disk(
 
 			_snprintf(path, MAXIMUM_FILENAME_LENGTH, "z:\\saved\\playlists\\default_playlist\\%02d", profile_index);
 			path[MAXIMUM_FILENAME_LENGTH] = 0;
+#ifdef HALO_LINUX
+			/* (port: the folder emptied below only when the file is written;
+			the block whole, its bytes past the checksum zero rather than the
+			stack's, so that the same game type is the same file) */
+			csmemset(block, 0, sizeof(block));
+#else
 			directory_create_or_delete_contents(path);
+#endif
 			csstrncat(path, "\\blam.lst", MAXIMUM_FILENAME_LENGTH);
 			path[MAXIMUM_FILENAME_LENGTH] = 0;
 
@@ -541,7 +584,24 @@ static void playlist_profile_create_default_profiles_on_disk(
 				PLAYLIST_PROFILE_CHECKSUM_DATA_SIZE,
 				(XCALCSIG_SIGNATURE *)(block + PLAYLIST_PROFILE_CHECKSUM_DATA_SIZE));
 
+#ifdef HALO_LINUX
+			if (playlist_profile_default_file_same(path, block, sizeof(block)))
+			{
+				file_written = TRUE;
+			}
+			else
+			{
+				char directory[MAXIMUM_FILENAME_LENGTH+1];
+
+				_snprintf(directory, MAXIMUM_FILENAME_LENGTH, "z:\\saved\\playlists\\default_playlist\\%02d", profile_index);
+				directory[MAXIMUM_FILENAME_LENGTH] = 0;
+				directory_create_or_delete_contents(directory);
+			}
+			if (!file_written &&
+				file_reference_create_from_path(&file, path, FALSE) &&
+#else
 			if (file_reference_create_from_path(&file, path, FALSE) &&
+#endif
 				file_create(&file) &&
 				file_open(&file, FLAG(_permission_write_bit)) &&
 				file_set_position(&file, 0))
