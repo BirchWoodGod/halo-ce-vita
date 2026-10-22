@@ -655,6 +655,24 @@
 #            every joiner logs the game's end; an old joiner is taken as
 #            Team Slayer, sent Slayer's state (its scores, the end), and
 #            plays on as a zombie once infected (the skull in its hands)
+#   dedicatedcompat (also dedicated_compat) the s8 question: can the public
+#            1.1.0 build play the dedicated server's Infection the bots fill?
+#            The server (sv_bots_fill 1, sv_maxplayers HALO_TEST_BOTS_MAX, 16,
+#            HALO_TEST_COMPAT_CYCLE, "prisoner infection"; games split by ';')
+#            takes one 1.1.0 client (HALO_TEST_COMPAT_V110, default
+#            ../wt-v110client's build) and one insider.21 client
+#            (HALO_TEST_COMPAT_NEW, ../wt-i21client's) by its code; both play
+#            a round. netns_compat_check.py then checks, one line each: both
+#            joined, no one refused, the bots keep the game at most-1 with a
+#            slot free, the round ends with a winner (each client its end, the
+#            insider's winner the server's), no crash, assertion, dashboard or
+#            lost connection anywhere, the 1.1.0 client sees the players and
+#            bots, its own player killed by a zombie moves to the zombies'
+#            team on its side and holds the skull alone, every player the
+#            server turned is a zombie on each client, and the two clients
+#            agree on every team second by second. A run where the 1.1.0
+#            player is never infected says NOT RUN and fails (run again;
+#            HALO_TEST_COMPAT_LENIENT=1 warns instead). README_dedicated_compat.md
 #   partyserver a party joins a server the bots fill: the dedicated server
 #            (sv_bots_fill 1, sv_maxplayers HALO_TEST_PARTY_MAX, 4: Slayer on
 #            Chill Out) and Alpha, who joins it by its code and is friends with
@@ -729,6 +747,7 @@ if [ "${HALO_NETNS_INSIDE:-}" != 1 ]; then
 fi
 
 mode=${1:-code}
+[ "$mode" = dedicated_compat ] && mode=dedicatedcompat
 # (latency: a home connection's delay unless one is given)
 [ "$mode" = latency ] && [ -z "${HALO_TEST_NETEM:-}${HALO_TEST_NETEM_HOST:-}${HALO_TEST_NETEM_JOIN:-}" ] &&
 	export HALO_TEST_NETEM="delay 40ms"
@@ -762,6 +781,7 @@ seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = dedicatedfill ] && seconds=${HALO_TEST_SECONDS:-150}
 [ "$mode" = dedicatedbots ] && seconds=${HALO_TEST_SECONDS:-330}
 [ "$mode" = partyserver ] && seconds=${HALO_TEST_SECONDS:-200}
+[ "$mode" = dedicatedcompat ] && seconds=${HALO_TEST_SECONDS:-300}
 [ "$mode" = dedicatedcoop ] && seconds=${HALO_TEST_SECONDS:-200}
 [ "$mode" = dedicatedmulti ] && seconds=${HALO_TEST_SECONDS:-220}
 [ "$mode" = dedicatedfullcache ] && seconds=${HALO_TEST_SECONDS:-200}
@@ -3414,7 +3434,7 @@ solo)
 	echo "seconds of solo game logged: $ticks"
 	[ "$ticks" -ge 30 ] || fail "the solo game ran $ticks s"
 	;;
-dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedbots|partyserver|dedicatedcoop|dedicatedmulti|dedicatedfullcache|dedicatedreload|scoreboard|pings|pingsmixed|mapmid|mapmidmixed|swat|swatmixed)
+dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedbots|dedicatedcompat|partyserver|dedicatedcoop|dedicatedmulti|dedicatedfullcache|dedicatedreload|scoreboard|pings|pingsmixed|mapmid|mapmidmixed|swat|swatmixed)
 	server=${HALO_TEST_SERVER:-$root/build/linux/halo-server}
 	if [ "$mode" = swatmixed ]; then
 		vita_old=${HALO_TEST_VITA_OLD:-}
@@ -3669,6 +3689,11 @@ sv_end_empty 20
 sv_port 2302
 INIT
 	fi
+	# (dedicatedcompat: netns_dedicated_compat.sh's)
+	if [ "$mode" = dedicatedcompat ]; then
+		. "$here/netns_dedicated_compat.sh"
+		dedicated_compat_init "$out/server/data/init.txt"
+	fi
 	if [ "$mode" = partyserver ]; then
 		cat > "$out/server/data/init.txt" <<INIT
 sv_name "Netns Party Bots"
@@ -3842,6 +3867,9 @@ if seconds < 40 or not over or (turned and skull_seconds < 3):
     sys.exit(1)
 OLD
 		fi
+		;;
+	dedicatedcompat)
+		dedicated_compat_run
 		;;
 	dedicatedfill)
 		# five machines of one home - the joiners' LAN behind one NAT: one
@@ -5270,7 +5298,7 @@ forge|forge3|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h
 	forge_case
 	;;
 *)
-	echo "usage: $0 code|infection|infectionold|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|carnage|h3live|h3liveleave|h3liveagain|h3liveonline|h3liveinvite|h3liveprivate|h3online|h3onlinelan|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedbots|partyserver|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|friendsbackup|party|friendsprivate|friendsprivatepw|forge|forge3|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|h3variant|vitapc|vitaonly|hostfuzz|hostfuzzforge|hostfuzzmap" >&2
+	echo "usage: $0 code|infection|infectionold|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|carnage|h3live|h3liveleave|h3liveagain|h3liveonline|h3liveinvite|h3liveprivate|h3online|h3onlinelan|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedbots|dedicatedcompat|partyserver|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|friendsbackup|party|friendsprivate|friendsprivatepw|forge|forge3|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|h3variant|vitapc|vitaonly|hostfuzz|hostfuzzforge|hostfuzzmap" >&2
 	exit 2
 	;;
 esac
