@@ -220,6 +220,8 @@ Each logs what it did ("forge: ...").
 #include "physics/collisions.h"
 #include "cache/physical_memory_map.h"
 #include "rasterizer/rasterizer.h"
+#include "rasterizer/rasterizer_geometry.h"
+#include "rasterizer/xbox/rasterizer_xbox_draw_primitives.h"
 #include "render/render.h"
 #include "scenario/scenario.h"
 #include "scenario/scenario_definitions.h"
@@ -5485,8 +5487,14 @@ void forge_draw(
 	short label_height;
 	short crosshair_height;
 
-	if (!forge_globals.active || local_player_index != forge_globals.local_player_index || forge_globals.hud_hidden)
+	/* (the Spartan's in a network Forge game: the other monitors' names
+	alone, over their balls) */
+	if ((!forge_globals.active && !(forge_globals.game_active && !forge_globals.playing &&
+			(forge_net_host() || forge_net_client()))) ||
+		local_player_index != forge_globals.local_player_index || forge_globals.hud_hidden)
+	{
 		return;
+	}
 	/* (the Halo 3 menus' fonts when the map has them, else the HUD's) */
 	font_index = forge_globals.hud_font_looked_up ? forge_globals.hud_font_index : NONE;
 	label_font_index = forge_globals.hud_font_looked_up ? forge_globals.hud_label_font_index : NONE;
@@ -5503,6 +5511,11 @@ void forge_draw(
 	label_height = forge_font_height(label_font_index);
 	crosshair_height = forge_font_height(crosshair_font_index);
 	window = render.camera.window_bounds;
+	if (!forge_globals.active)
+	{
+		forge_net_draw_monitors(font_index, height);
+		return;
+	}
 
 	/* the map and the budget, top left */
 	bounds = window;

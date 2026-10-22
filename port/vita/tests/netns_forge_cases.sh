@@ -61,6 +61,15 @@
 #              on either), the host's layout placed as it starts and given to the joiner as
 #              network Forge gives it (its Warthog the netcode's, its boulder the joiner's own
 #              copy): both objects there on both machines, the two players play
+#   forgemp    the Forge menu and the monitors of a network Forge game (insider.21, Oct 22:
+#              "The forge pause menu isn't working", "no floating orbs for others in forge,
+#              no forge ball"): a host and two joiners on its LAN, the Halo PC files on all,
+#              the first joiner on Menu style Halo 3, the second Halo CE. The host places
+#              three Elites and kills two; each joiner's Start opens the Forge menu (never
+#              the Xbox's multiplayer pause, the game not paused) and its CLEAR DEAD AI asks
+#              the host, which clears them (two, then the third killed after) and says so
+#              back; every machine has the others' monitors where they fly and the first
+#              joiner draws both balls in its view (HALO_TEST_SHOTS: its screenshot)
 #   forgepanel the settings panel's Forge page, Network on (Menu style Halo CE: the
 #              classic menus' route), asked by HALO_SYSTEM_LINK_TEST=forgenet:9: the
 #              System Link screen's profile, then a network Forge game of Blood Gulch
@@ -407,6 +416,79 @@ forge_case() {
 		two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
 		echo "joiner's seconds with two players playing: $two"
 		[ "$two" -ge 15 ] || fail "the joiner played the host's game for $two s with two players (15 wanted)"
+		;;
+	forgemp)
+		local menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+		if [ ! -r "$menus_data/maps/bitmaps.map" ]; then
+			echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS)"; return 0
+		fi
+		forge_lan_machine lan2 192.168.1.4
+		hl2=$out/joiner2/run.log
+		# (three Elites, two killed; the third killed once the first joiner has cleared)
+		host_cmds="L150:forge camera 60 -100 1.6 130 0;L160:forge spawn elite major;L165:forge distance 6;L170:forge drop"
+		host_cmds="$host_cmds;L180:forge spawn elite major;L185:forge distance 8;L190:forge drop"
+		host_cmds="$host_cmds;L200:forge spawn elite major;L205:forge distance 10;L210:forge drop"
+		host_cmds="$host_cmds;L260:forge kill #1;L270:forge kill #2;L300:forge budget;L1150:forge kill #3;L1200:forge budget"
+		host_cmds="$host_cmds;L1900:forge net;L1910:forge budget"
+		# (each joiner a monitor: the first looking at where the second and the host fly)
+		join_cmds="L150:forge camera 50 -90 3 315 -8;L1850:forge net;L1880:@shot forgemp-joiner-sees-monitors;L1900:forge budget"
+		join2_cmds="L150:forge camera 53 -93 3 135 -8;L1850:forge net;L1880:@shot forgemp-joiner2;L1900:forge budget"
+		# (Start: the Forge menu; down seven to CLEAR DEAD AI, A; B closes it)
+		local menu_pad="start:150:3000 @MENU-open:0:300 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500"
+		menu_pad="$menu_pad down:150:500 down:150:500 a:150:3000 @MENU-cleared:0:300 b:150:2000"
+		HALO_TEST_DATA_HOST=$menus_data forge_host "$host_cmds" HALO_UI_LOG=1 $(forge_shots mpforge-shots/forgemp-host)
+		sleep 5
+		HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join \
+			HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 "HALO_TEST_COMMANDS=$join_cmds" \
+			"HALO_TEST_PAD=level wait:150:22000 ${menu_pad//MENU/forgemp-joiner-menu}" $(forge_shots mpforge-shots/forgemp-joiner)
+		join_pid=$last_pid
+		HALO_TEST_DATA_JOINER2=$menus_data run_copy joiner2 "$lan2" "$vita" "$cpu_c" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join \
+			HALO_UI_LOG=1 HALO_MENU_STYLE=classic "HALO_TEST_COMMANDS=$join2_cmds" \
+			"HALO_TEST_PAD=level wait:150:44000 ${menu_pad//MENU/forgemp-joiner2-menu}" $(forge_shots mpforge-shots/forgemp-joiner2)
+		join2_pid=$last_pid
+		wait $join_pid $join2_pid $host_pid 2>/dev/null
+		forge_check_clean "$hl" "$jl" "$hl2"
+		echo "--- host"; grep -aE "forge net: (machine [0-9]+ (plays|asked)|player)|forge: (cleared|killed|budget)" "$hl" | head -30
+		echo "--- joiner (Halo 3 menus)"; grep -aE "ui: screen|menus: (the Forge menu|forge:)|forge net: (asked|the host said|player)" "$jl" | head -20
+		echo "--- joiner 2 (Halo CE menus)"; grep -aE "ui: screen|menus: (the Forge menu|forge:)|forge net: (asked|the host said|player)" "$hl2" | head -20
+		grep -aq "forge net: machine 1 plays the Forge game" "$hl" || fail "the first joiner did not play the Forge game"
+		grep -aq "forge net: machine 2 plays the Forge game" "$hl" || fail "the second joiner did not play the Forge game"
+		local log who
+		for log in "$jl" "$hl2"; do
+			who=$(basename "$(dirname "$log")")
+			# (Start: the Forge menu for the multiplayer pause, never the Xbox's own)
+			grep -aq 'menus: the Forge menu for ui\\shell\\multiplayer_game\\pause_game\\1p_pause_game' "$log" ||
+				fail "$who: Start did not open the Forge menu"
+			grep -aq "ui: screen pc.h3.forge.pause.screen" "$log" || fail "$who: the Forge menu's screen was not opened"
+			grep -aq "ui: screen ui.shell.multiplayer_game.pause_game" "$log" && fail "$who: the Xbox's multiplayer pause opened"
+			grep -aq "menus: forge: clear dead AI" "$log" || fail "$who: CLEAR DEAD AI was not chosen"
+			grep -aq "forge net: asked the host: cleared dead AI" "$log" || fail "$who: CLEAR DEAD AI was not asked of the host"
+			grep -aq "forge net: the host said: cleared dead AI" "$log" || fail "$who: the host did not answer CLEAR DEAD AI"
+			grep -aq "Only the host can do that" "$log" && fail "$who: told only the host can"
+		done
+		# (the host made them: two dead, then the third)
+		# (the machines' numbers are the order they joined in: each joiner's machine by its log)
+		local asked
+		asked=$(grep -a "forge net: machine [0-9]* asked: clear dead AI" "$hl" | sed 's/.*machine \([0-9]*\) asked.*/\1/' | tr '\n' ' ')
+		echo "CLEAR DEAD AI asked by machines: $asked"
+		[ "$(echo $asked | wc -w)" = 2 ] && [ "${asked%% *}" != "$(echo $asked | cut -d' ' -f2)" ] ||
+			fail "the host did not take both joiners' CLEAR DEAD AI"
+		[ "$(grep -a -A1 "forge net: machine [0-9]* asked: clear dead AI" "$hl" | grep -a "forge: cleared" |
+			sed 's/.*cleared \([0-9]*\) dead.*/\1/' | tr '\n' ' ')" = "2 1 " ] ||
+			fail "the joiners' CLEAR DEAD AI did not clear the two dead Elites, then the third"
+		for log in "$hl" "$jl" "$hl2"; do
+			grep -aq "forge: budget 0/[0-9]* objects, 0/[0-9]* AI (0 alive, 0 dead)" "$log" ||
+				fail "$(basename "$(dirname "$log")"): the cleared Elites are still in its layout"
+		done
+		# (the monitors: each machine has the two others' where they fly; the first joiner, looking
+		# at them, draws both balls)
+		for log in "$hl" "$jl" "$hl2"; do
+			who=$(basename "$(dirname "$log")")
+			[ "$(sed -n '/test command at tick 1850: forge net$\|test command at tick 1900: forge net$/,$p' "$log" |
+				grep -ac "forge net: player [0-9] (.*): monitor at ")" -ge 2 ] || fail "$who: did not have both other monitors"
+		done
+		[ "$(sed -n '/test command at tick 1850: forge net$/,$p' "$jl" | grep -ac "forge net: player [0-9] (.*): monitor at .*; ball drawn")" -ge 2 ] ||
+			fail "the first joiner did not draw both other monitors' balls"
 		;;
 	h3forgeonline)
 		local menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}

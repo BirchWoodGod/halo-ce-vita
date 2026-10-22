@@ -1866,12 +1866,27 @@ the host saves its map variant, a joiner a copy; undo per player.
   record's id, object and holder, the end; then the changes.
 - **Monitors**: each machine's monitor flies its own camera and tells the host
   where five times a second; the host tells everyone; others' monitors are drawn
-  as "( O )" and the player's name, their units hidden (and unhurt on the host).
+  in the world as a ball with Halo 3's monitor's eye, facing where each looks and
+  eased between updates (`forge_render_world`: the game's debug-geometry vertex
+  and pixel shaders, this machine's alone, no object), the player's name over it
+  on the HUD, for a Spartan too; their units hidden (and unhurt on the host).
+  insider.21 drew only a "( O )" on the HUD, to a monitor alone: testers saw no
+  one's monitor.
+- **The Forge menu** in a network game: Start opens the game's multiplayer
+  pause, which `menu_tags.c` makes the Forge menu (host and joiners, either
+  Menu style); it never pauses the game. insider.21 opened the Xbox's pause in
+  its place (forge.c's own was closed by it). CLEAR DEAD AI, CLEAR ALL AI, ALL
+  AI and NEW ROUND on a joiner are a request (`_forge_net_request_command`) the
+  host checks (a Forge game played, no round starting, a command a second) and
+  makes as its own menu does, saying back what came of it; the host's hello
+  says version 2 for it, and a joiner says "Only the host can do that" to an
+  older host, which would count the record as malformed.
   An object a client holds is moved by it and its moves sent fifteen times a
   second; the netcode leaves its place to that client meanwhile.
 - **NEW ROUND** online is a round of its own (the engine's map reset is a local
   game's): every hold let go, the layout's objects placed again where the editor
-  put them. Host only, as CLEAR AI and ALL AI; a client's menu says so.
+  put them. Made by the host, as CLEAR AI and ALL AI; a client's menu asks the
+  host (below, the Forge menu).
 - **Lobby**: the Forge lobby's NETWORK row (LOCAL by default; SYSTEM LINK,
   ONLINE, AD HOC) makes it live as the multiplayer lobby: its game hosted at
   once, its players listed (n/8), START FORGE takes everyone in. The owner (Oct
@@ -1895,8 +1910,8 @@ the host saves its map variant, a joiner a copy; undo per player.
   third machine's public browse finds nothing -, a friend in by INVITE
   FRIENDS, then the third by the code, into the game in progress);
   `run_net_fuzz_test.sh` target `forge` (checks and libFuzzer).
-- **Open**: the map's own scenery is not editable online; Halo 3's monitor
-  model is a text marker; a host changing its packs after a joiner answered is
+- **Open**: the map's own scenery is not editable online; the monitor is a
+  drawn ball, not Halo 3's monitor model; a host changing its packs after a joiner answered is
   not told to it again; a joiner that came some other way than the lobby's
   (a LAN or ad hoc browse) is not told apart: online there is no other way in.
 

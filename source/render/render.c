@@ -651,6 +651,14 @@ static void render_window(
 		RENDER_PHASE_END(13, "fog");
 		RENDER_PHASE_BEGIN_ID(34, "post_objects");
 		game_engine_post_rasterize_objects();
+#ifdef HALO_LINUX
+		{
+			/* port: the other players' Forge monitors (forge_net.inc) */
+			extern void forge_render_world(void);
+
+			forge_render_world();
+		}
+#endif
 		RENDER_PHASE_END(34, "post_objects");
 		RENDER_PHASE_BEGIN_ID(14, "weather");
 		if (RENDER_EFFECTS_AT_LEAST(1))

@@ -3550,51 +3550,278 @@ static void forge_net_new_round(
 		forge_globals.placed_count);
 }
 
-/* (forge_draw) the other players' monitors: where each is, its name */
+/* another player's monitor as this machine knows it: whether that player
+flies one (the host from its machine's requests, a client from the host's
+updates), where it is and faces */
+static boolean forge_net_monitor_view(
+	short index,
+	struct forge_net_transform *view)
+{
+	if (index < 0 || index >= FORGE_NET_PLAYERS || index == forge_net_local_player() || !distributed_player(index))
+		return FALSE;
+	if (forge_net_host())
+	{
+		short slot;
+
+		for (slot = 0; slot < FORGE_NET_ACTORS; slot++)
+		{
+			struct forge_net_actor *actor = &forge_net.actors[slot];
+
+			if (actor->used && actor->monitor && forge_net_machine_player(actor->machine_index) == index)
+			{
+				*view = actor->view;
+				return TRUE;
+			}
+		}
+		return FALSE;
+	}
+	if (forge_net_client() && forge_net.monitors[index].monitor)
+	{
+		*view = forge_net.monitors[index].view;
+		return TRUE;
+	}
+	return FALSE;
+}
+
+/* ---- the other players' monitors in the world (insider.21: "no floating
+orbs for others in forge, no forge ball" - each was a "( O )" on the HUD
+alone, and only to a player who was a monitor too): a ball with Halo 3's
+monitor's eye, where each flies and facing where it looks, drawn in the 3D
+(the walls in front of it hide it) for monitor and Spartan alike, its
+player's name over it on the HUD. Its place comes five times a second, so
+the ball eases to it. Drawn as the game's debug geometry is (a colour a
+vertex, no texture: the same vertex and pixel shaders on every platform),
+on this machine alone: no object, nothing networked, nothing the host
+checks */
+
+#define FORGE_NET_ORB_RADIUS 0.15f
+#define FORGE_NET_ORB_SEGMENTS 14
+/* the rings' angles from the eye (degrees): the eye, its dark rim, a light
+band, then the shell */
+static float const forge_net_orb_rings[] = { 0.f, 15.f, 19.f, 28.f, 31.f, 40.f, 58.f, 76.f, 94.f, 112.f, 130.f, 148.f, 166.f, 180.f };
+#define FORGE_NET_ORB_RINGS ((short)(sizeof(forge_net_orb_rings) / sizeof(forge_net_orb_rings[0])))
+#define FORGE_NET_ORB_TRIANGLES (FORGE_NET_ORB_SEGMENTS * 2 * (FORGE_NET_ORB_RINGS - 2))
+
+static struct
+{
+	boolean shown;
+	real_point3d position;
+	real_vector3d forward;
+	unsigned long time;
+	/* (when it was last in a view and drawn: the tests' log) */
+	unsigned long drawn;
+} forge_net_orbs[FORGE_NET_PLAYERS];
+
+/* (the debug vertex: rasterizer_debug.c's) */
+struct forge_net_orb_vertex
+{
+	real_point3d point;
+	unsigned long color;
+};
+
+static unsigned long forge_net_orb_pixel(
+	float red,
+	float green,
+	float blue)
+{
+	unsigned long r = (unsigned long)(PIN(red, 0.f, 1.f) * 255.f + 0.5f);
+	unsigned long g = (unsigned long)(PIN(green, 0.f, 1.f) * 255.f + 0.5f);
+	unsigned long b = (unsigned long)(PIN(blue, 0.f, 1.f) * 255.f + 0.5f);
+
+	return 0xFF000000UL | (r << 16) | (g << 8) | b;
+}
+
+/* a point of the ball (ring, segment) and its colour: lit from above, the
+eye glowing (no light on it) */
+static void forge_net_orb_point(
+	real_point3d const *center,
+	real_vector3d const *forward,
+	real_vector3d const *left,
+	real_vector3d const *up,
+	short ring,
+	short segment,
+	struct forge_net_orb_vertex *vertex)
+{
+	static real_vector3d const light = { 0.30f, 0.20f, 0.93f };
+	float polar = forge_net_orb_rings[ring] * (float)(3.14159265358979 / 180.0);
+	float around = (float)segment * (float)(2.0 * 3.14159265358979) / (float)FORGE_NET_ORB_SEGMENTS;
+	float along = cosf(polar);
+	float out = sinf(polar);
+	real_vector3d normal;
+	float lit;
+
+	normal.i = forward->i * along + (left->i * cosf(around) + up->i * sinf(around)) * out;
+	normal.j = forward->j * along + (left->j * cosf(around) + up->j * sinf(around)) * out;
+	normal.k = forward->k * along + (left->k * cosf(around) + up->k * sinf(around)) * out;
+	vertex->point.x = center->x + normal.i * FORGE_NET_ORB_RADIUS;
+	vertex->point.y = center->y + normal.j * FORGE_NET_ORB_RADIUS;
+	vertex->point.z = center->z + normal.k * FORGE_NET_ORB_RADIUS;
+	lit = 0.42f + 0.58f * MAX(0.f, (float)dot_product3d(&normal, &light));
+	switch (ring)
+	{
+	case 0: vertex->color = forge_net_orb_pixel(0.80f, 0.97f, 1.f); break;
+	case 1: vertex->color = forge_net_orb_pixel(0.30f, 0.75f, 1.f); break;
+	case 2:
+	case 3: vertex->color = forge_net_orb_pixel(0.06f * lit, 0.07f * lit, 0.09f * lit); break;
+	case 4: vertex->color = forge_net_orb_pixel(0.86f * lit, 0.89f * lit, 0.92f * lit); break;
+	default: vertex->color = forge_net_orb_pixel(0.52f * lit, 0.56f * lit, 0.62f * lit); break;
+	}
+}
+
+/* (render.c, each player's window, after the objects) the balls */
+void forge_render_world(
+	void)
+{
+	static struct forge_net_orb_vertex vertices[FORGE_NET_ORB_TRIANGLES * 3];
+	unsigned long now = system_milliseconds();
+	short index;
+
+	if (!forge_globals.game_active || forge_globals.playing || (!forge_net_host() && !forge_net_client()))
+		return;
+	for (index = 0; index < FORGE_NET_PLAYERS; index++)
+	{
+		struct forge_net_transform view;
+		real_point3d target;
+		real_vector3d forward;
+		real_vector3d left;
+		real_vector3d up;
+		real_vector3d world_up = { 0.f, 0.f, 1.f };
+		real_vector3d to_orb;
+		long count = 0;
+		long buffer;
+		short ring;
+		short segment;
+		float step;
+
+		if (!forge_net_monitor_view(index, &view))
+		{
+			forge_net_orbs[index].shown = FALSE;
+			continue;
+		}
+		target.x = view.position[0];
+		target.y = view.position[1];
+		target.z = view.position[2];
+		forward.i = view.forward[0];
+		forward.j = view.forward[1];
+		forward.k = view.forward[2];
+		/* (eased to where it is: snapped there when new or far) */
+		if (!forge_net_orbs[index].shown || distance_squared3d(&forge_net_orbs[index].position, &target) > 25.f)
+		{
+			forge_net_orbs[index].shown = TRUE;
+			forge_net_orbs[index].position = target;
+			forge_net_orbs[index].forward = forward;
+		}
+		else
+		{
+			step = PIN((float)(now - forge_net_orbs[index].time) / 120.f, 0.f, 1.f);
+			forge_net_orbs[index].position.x += (target.x - forge_net_orbs[index].position.x) * step;
+			forge_net_orbs[index].position.y += (target.y - forge_net_orbs[index].position.y) * step;
+			forge_net_orbs[index].position.z += (target.z - forge_net_orbs[index].position.z) * step;
+			forge_net_orbs[index].forward.i += (forward.i - forge_net_orbs[index].forward.i) * step;
+			forge_net_orbs[index].forward.j += (forward.j - forge_net_orbs[index].forward.j) * step;
+			forge_net_orbs[index].forward.k += (forward.k - forge_net_orbs[index].forward.k) * step;
+		}
+		forge_net_orbs[index].time = now;
+		forward = forge_net_orbs[index].forward;
+		if (normalize3d(&forward) == 0.f)
+			continue;
+		/* (not behind the camera, nor out of its frustum) */
+		to_orb.i = forge_net_orbs[index].position.x - render.camera.position.x;
+		to_orb.j = forge_net_orbs[index].position.y - render.camera.position.y;
+		to_orb.k = forge_net_orbs[index].position.z - render.camera.position.z;
+		if (dot_product3d(&to_orb, &render.camera.forward) < -FORGE_NET_ORB_RADIUS ||
+			!render_frustum_sphere_visible(&render.frustum, &forge_net_orbs[index].position, FORGE_NET_ORB_RADIUS))
+		{
+			continue;
+		}
+		/* (its frame: the eye forward, up as near the world's as can be) */
+		if (fabsf(forward.k) > 0.98f)
+		{
+			world_up.i = 1.f;
+			world_up.k = 0.f;
+		}
+		cross_product3d(&world_up, &forward, &left);
+		normalize3d(&left);
+		cross_product3d(&forward, &left, &up);
+		for (ring = 0; ring + 1 < FORGE_NET_ORB_RINGS; ring++)
+		{
+			for (segment = 0; segment < FORGE_NET_ORB_SEGMENTS; segment++)
+			{
+				short next = (short)((segment + 1) % FORGE_NET_ORB_SEGMENTS);
+				struct forge_net_orb_vertex a, b, c, d;
+
+				forge_net_orb_point(&forge_net_orbs[index].position, &forward, &left, &up, ring, segment, &a);
+				forge_net_orb_point(&forge_net_orbs[index].position, &forward, &left, &up, ring, next, &b);
+				forge_net_orb_point(&forge_net_orbs[index].position, &forward, &left, &up, (short)(ring + 1), segment, &c);
+				forge_net_orb_point(&forge_net_orbs[index].position, &forward, &left, &up, (short)(ring + 1), next, &d);
+				/* (the eye's middle and the back: one triangle a segment) */
+				if (ring > 0 && count + 3 <= FORGE_NET_ORB_TRIANGLES * 3)
+				{
+					vertices[count++] = a;
+					vertices[count++] = b;
+					vertices[count++] = c;
+				}
+				if (ring + 2 < FORGE_NET_ORB_RINGS && count + 3 <= FORGE_NET_ORB_TRIANGLES * 3)
+				{
+					vertices[count++] = b;
+					vertices[count++] = d;
+					vertices[count++] = c;
+				}
+			}
+		}
+		if (count < 3)
+			continue;
+		buffer = rasterizer_dynamic_vertices_new(_rasterizer_vertex_type_debug, count);
+		if (buffer == NONE)
+			continue;
+		{
+			void *locked;
+
+			rasterizer_globals.current_lock_operation = _rasterizer_lock_debug;
+			locked = rasterizer_dynamic_vertices_lock(buffer);
+			if (locked)
+			{
+				csmemcpy(locked, vertices, (size_t)count * sizeof(vertices[0]));
+				rasterizer_dynamic_vertices_unlock(buffer);
+				rasterizer_debug_drawing_begin(TRUE);
+				rasterizer_draw_dynamic_vertices(0, count / 3, buffer, 3);
+				rasterizer_debug_drawing_end();
+				forge_net_orbs[index].drawn = now | 1;
+			}
+			rasterizer_globals.current_lock_operation = _rasterizer_lock_none;
+		}
+		rasterizer_dynamic_vertices_delete(buffer);
+	}
+}
+
+/* (forge_draw) the other players' monitors' names, over each ball */
 static void forge_net_draw_monitors(
 	long font_index,
 	short height)
 {
 	short index;
-	short local = forge_net_local_player();
 
 	if (!forge_net_host() && !forge_net_client())
 		return;
 	for (index = 0; index < FORGE_NET_PLAYERS; index++)
 	{
 		struct forge_net_transform view;
-		boolean monitor = FALSE;
 		real_point3d position;
 		real_point2d screen;
 		real_vector3d to_monitor;
 
-		if (index == local || !distributed_player(index))
+		if (!forge_net_monitor_view(index, &view))
 			continue;
-		if (forge_net_host())
+		/* (the ball's eased place, its name a little above it) */
+		if (forge_net_orbs[index].shown)
+			position = forge_net_orbs[index].position;
+		else
 		{
-			short slot;
-
-			for (slot = 0; slot < FORGE_NET_ACTORS; slot++)
-			{
-				struct forge_net_actor *actor = &forge_net.actors[slot];
-
-				if (actor->used && actor->monitor && forge_net_machine_player(actor->machine_index) == index)
-				{
-					monitor = TRUE;
-					view = actor->view;
-				}
-			}
+			position.x = view.position[0];
+			position.y = view.position[1];
+			position.z = view.position[2];
 		}
-		else if (forge_net.monitors[index].monitor)
-		{
-			monitor = TRUE;
-			view = forge_net.monitors[index].view;
-		}
-		if (!monitor)
-			continue;
-		position.x = view.position[0];
-		position.y = view.position[1];
-		position.z = view.position[2];
+		position.z += FORGE_NET_ORB_RADIUS * 1.6f;
 		to_monitor.i = position.x - render.camera.position.x;
 		to_monitor.j = position.y - render.camera.position.y;
 		to_monitor.k = position.z - render.camera.position.z;
@@ -3612,9 +3839,6 @@ static void forge_net_draw_monitors(
 			bounds.x1 = (short)(x + 120);
 			bounds.y0 = (short)(y - height);
 			bounds.y1 = y;
-			forge_draw_line(font_index, &bounds, 2, 0.47f, 0.84f, 1.f, "( O )");
-			bounds.y0 = y;
-			bounds.y1 = (short)(y + height);
 			forge_draw_line(font_index, &bounds, 2, 0.95f, 0.62f, 0.30f, name);
 		}
 	}
@@ -3830,6 +4054,19 @@ static void forge_net_log_state(
 			platform_log("forge net: player %d (%s): %s", index, name,
 				index == forge_net_local_player() ? (forge_globals.active ? "monitor" : "Spartan") :
 				forge_net.monitors[index].monitor ? "monitor" : "Spartan");
+		}
+		/* (another's monitor: where this machine has it, and its ball) */
+		{
+			struct forge_net_transform view;
+
+			if (forge_net_monitor_view(index, &view))
+			{
+				platform_log("forge net: player %d (%s): monitor at %.2f %.2f %.2f facing %.2f %.2f %.2f; ball %s at %.2f %.2f %.2f",
+					index, name, view.position[0], view.position[1], view.position[2], view.forward[0], view.forward[1],
+					view.forward[2], forge_net_orbs[index].drawn && system_milliseconds() - forge_net_orbs[index].drawn < 1000 ?
+					"drawn" : "not in view", forge_net_orbs[index].position.x,
+					forge_net_orbs[index].position.y, forge_net_orbs[index].position.z);
+			}
 		}
 	}
 }
