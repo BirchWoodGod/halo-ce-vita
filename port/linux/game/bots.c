@@ -5198,7 +5198,9 @@ static void bots_bot_fight(struct bots_bot *bot, struct bots_tick *tick)
 		now - bot->target_first_seen_tick >= reaction_ticks)
 	{
 		tick->flags |= FLAG(_unit_control_throw_grenade_bit);
-		if (tick->unit->unit.grenade_counts[(long)tick->unit->unit.current_grenade_index] <= 0)
+		/* (no grenade readied: NONE, -1, not an index) */
+		if (tick->unit->unit.current_grenade_index < 0 || tick->unit->unit.current_grenade_index > 1 ||
+			tick->unit->unit.grenade_counts[(long)tick->unit->unit.current_grenade_index] <= 0)
 			tick->action->desired_grenade_index = tick->unit->unit.grenade_counts[0] > 0 ? 0 : 1;
 		bot->grenade_tick = now + TICKS_PER_SECOND * 4;
 	}
