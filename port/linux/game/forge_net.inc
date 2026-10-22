@@ -85,6 +85,11 @@ void platform_show_message(char const *title, char const *text);
 
 /* ---------- constants */
 
+/* (the other monitors as 343 Guilty Spark: forge_net_monitor_models_update)
+the scene pack and its biped */
+#define FORGE_NET_MONITOR_PACK "menu_monitor"
+#define FORGE_NET_MONITOR_TAG "characters\\monitor\\monitor"
+
 enum
 {
 	/* the records, palette entries and layout pieces a message holds */
@@ -281,7 +286,7 @@ static struct
 	/* the host: the remote machines, what it sent last, its palette (tags
 	in a stable order: the browser's, then the packs' netcode tags) */
 	struct forge_net_actor actors[FORGE_NET_ACTORS];
-	struct forge_net_shadow shadow[FORGE_MAXIMUM_OBJECTS];
+	struct forge_net_shadow shadow[FORGE_MAXIMUM_OBJECTS + FORGE_MAXIMUM_SPAWNS];
 	short shadow_count;
 	long net_tags[FORGE_NET_MAXIMUM_PALETTE];
 	unsigned char net_flags[FORGE_NET_MAXIMUM_PALETTE];
@@ -1248,6 +1253,9 @@ void forge_net_frame(
 					scene_packs_prebuild(forge_packs[index].name);
 			}
 			forge_blocks_prebuild(map_name);
+			/* (343 Guilty Spark, the other monitors': forge_net_monitor_models_update) */
+			if (scene_packs_recipe_available(FORGE_NET_MONITOR_PACK, NULL, 0))
+				scene_packs_prebuild(FORGE_NET_MONITOR_PACK);
 			platform_log("forge net: the host's packs and %s's blocks prebuilt in its lobby", map_name);
 		}
 	}
@@ -1814,6 +1822,32 @@ static void forge_net_host_request(
 		forge_net_host_command(actor, &request, now);
 		return;
 	case _forge_net_request_spawn:
+		/* (a player spawn point: within the budget and the most of them; its
+		place inside the world, checked above; its team any and its game
+		types all, as the host's own browser makes one) */
+		if (request.flags & FORGE_NET_FLAG_PLAYER_SPAWN)
+		{
+			struct forge_transform home;
+			struct forge_spawn *spawn;
+
+			if (forge_objects_counted() >= FORGE_MAXIMUM_OBJECTS || forge_globals.spawn_count >= FORGE_MAXIMUM_SPAWNS)
+			{
+				forge_net_refuse(actor, &request, _forge_net_refuse_budget, FORGE_MAXIMUM_OBJECTS, 0);
+				return;
+			}
+			forge_net_transform_to(&request.transform, &home.position, &home.forward, &home.up);
+			spawn = forge_spawn_add(0, request.aux, NONE, 0, &home);
+			if (!spawn)
+			{
+				forge_net_refuse(actor, &request, _forge_net_refuse_cannot_place, 0, 0);
+				return;
+			}
+			platform_log("forge net: machine %ld placed the %s #%ld", actor->machine_index,
+				forge_spawn_kind_log_names[spawn->kind], spawn->id);
+			forge_spawn_log("placed", spawn);
+			return;
+		}
+		/* (fall through) */
 	case _forge_net_request_duplicate:
 	{
 		long tag_index = NONE;
@@ -1988,7 +2022,22 @@ static void forge_net_host_request(
 		if (request.flags & FORGE_NET_FLAG_SPAWN)
 		{
 			struct forge_placed *placed = forge_placed_of_id((long)request.id);
+			struct forge_spawn *spawn = forge_spawn_of_id((long)request.id);
 			struct forge_transform home;
+
+			/* (a player spawn point's: there, upright) */
+			if (spawn)
+			{
+				forge_net_transform_to(&request.transform, &home.position, &home.forward, &home.up);
+				home.forward.k = 0.f;
+				if (normalize3d(&home.forward) < 0.0001f)
+					home.forward = *global_forward3d;
+				home.up = *global_up3d;
+				spawn->home = home;
+				platform_log("forge net: machine %ld moved the spawn point #%ld", actor->machine_index, spawn->id);
+				forge_spawn_log("moved", spawn);
+				return;
+			}
 
 			if (!placed || !placed->ai)
 			{
@@ -2040,6 +2089,21 @@ static void forge_net_host_request(
 		struct forge_placed *placed;
 		long id;
 
+		/* (a player spawn point's, by its id) */
+		if (request.flags & FORGE_NET_FLAG_SPAWN)
+		{
+			struct forge_spawn *spawn = forge_spawn_of_id((long)request.id);
+
+			if (!spawn)
+			{
+				forge_net_refuse(actor, &request, _forge_net_refuse_gone, 0, 0);
+				return;
+			}
+			platform_log("forge net: machine %ld deleted the spawn point #%ld", actor->machine_index, spawn->id);
+			forge_spawn_log("deleted", spawn);
+			forge_spawn_remove(spawn);
+			return;
+		}
 		if ((object_index = forge_net_request_object(actor, &request)) == NONE)
 			return;
 		holder = forge_net_holder(object_index, actor->machine_index);
@@ -2064,6 +2128,18 @@ static void forge_net_host_request(
 		marker's move's) */
 		if (request.flags & FORGE_NET_FLAG_SPAWN)
 		{
+			struct forge_spawn *spawn = forge_spawn_of_id((long)request.id);
+
+			/* (a player spawn point's: the host's own steps, its yaw the
+			marker's move's) */
+			if (spawn)
+			{
+				if (request.aux >= _forge_property_yaw && request.aux <= _forge_property_reset_rotation)
+					return;
+				forge_spawn_property_apply(spawn, request.aux, request.step, FALSE);
+				platform_log("forge net: machine %ld changed the spawn point #%ld", actor->machine_index, spawn->id);
+				return;
+			}
 			placed = forge_placed_of_id((long)request.id);
 			if (!placed || !placed->ai)
 			{
@@ -2215,6 +2291,72 @@ static void forge_net_entry_fill(
 	forge_net_transform_from(&record->transform, &home.position, &home.forward, &home.up);
 }
 
+/* a player spawn point as an entry */
+static void forge_net_spawn_entry_fill(
+	struct forge_spawn const *spawn,
+	struct forge_net_record *record)
+{
+	csmemset(record, 0, sizeof(*record));
+	record->op = _forge_net_update_entry;
+	record->flags = FORGE_NET_FLAG_PLAYER_SPAWN;
+	record->id = (uint32_t)spawn->id;
+	record->tag = FORGE_NET_NO_TAG;
+	record->object = FORGE_NET_NO_OBJECT;
+	record->player = FORGE_NET_NO_PLAYER;
+	record->team = (int8_t)(spawn->team == 0 || spawn->team == 1 ? spawn->team : -1);
+	record->record_flags = spawn->kind == _forge_spawn_initial ? FORGE_NET_SPAWN_INITIAL : 0;
+	record->value = (uint16_t)(spawn->game_types & FORGE_NET_SPAWN_GAME_TYPES_MASK);
+	forge_net_transform_from(&record->transform, &spawn->home.position, &spawn->home.forward, global_up3d);
+}
+
+/* a shadow's entry sent if it is new or changed (home_only: only where it
+is changed, sent at most every FORGE_NET_ENTRY_MILLISECONDS) */
+static void forge_net_shadow_entry(
+	long id,
+	struct forge_net_record *entry,
+	unsigned long now)
+{
+	struct forge_net_shadow *shadow = NULL;
+	short at;
+
+	for (at = 0; at < forge_net.shadow_count; at++)
+	{
+		if (forge_net.shadow[at].id == id)
+		{
+			shadow = &forge_net.shadow[at];
+			break;
+		}
+	}
+	if (!shadow)
+	{
+		if (forge_net.shadow_count >= (short)NUMBEROF(forge_net.shadow))
+			return;
+		shadow = &forge_net.shadow[forge_net.shadow_count++];
+		csmemset(shadow, 0, sizeof(*shadow));
+		shadow->id = id;
+		shadow->entry.op = _forge_net_op_none;
+	}
+	shadow->seen = TRUE;
+	{
+		struct forge_net_record before = shadow->entry;
+		boolean home_only;
+
+		before.sequence = entry->sequence = 0;
+		home_only = before.op == entry->op && before.object == entry->object && before.tag == entry->tag &&
+			before.player == entry->player && before.flags == entry->flags && before.team == entry->team &&
+			before.record_flags == entry->record_flags && before.respawn_seconds == entry->respawn_seconds &&
+			before.ai_team == entry->ai_team && before.value == entry->value;
+		if (!home_only || (!forge_net_transforms_near(&before.transform, &entry->transform) &&
+			now - shadow->entry_time >= FORGE_NET_ENTRY_MILLISECONDS))
+		{
+			entry->sequence = ++forge_net.sequence;
+			forge_net_outgoing_add(&forge_net.broadcast, entry);
+			shadow->entry = *entry;
+			shadow->entry_time = now;
+		}
+	}
+}
+
 /* (each frame, the host) the layout compared with what was sent: each new
 or changed entry, each removal and where each object the netcode does not
 move is, to every client */
@@ -2248,7 +2390,7 @@ static void forge_net_host_broadcast(
 		}
 		if (!shadow)
 		{
-			if (forge_net.shadow_count >= FORGE_MAXIMUM_OBJECTS)
+			if (forge_net.shadow_count >= (short)NUMBEROF(forge_net.shadow))
 				continue;
 			shadow = &forge_net.shadow[forge_net.shadow_count++];
 			csmemset(shadow, 0, sizeof(*shadow));
@@ -2300,6 +2442,16 @@ static void forge_net_host_broadcast(
 				shadow->transform_time = now;
 			}
 		}
+	}
+	/* (the player spawn points, to draw: a Forge game's, not a map variant
+	played) */
+	for (index = 0; !forge_net.host_play && index < forge_globals.spawn_count && index < FORGE_MAXIMUM_SPAWNS; index++)
+	{
+		struct forge_net_record entry;
+
+		forge_net_spawn_entry_fill(&forge_globals.spawns[index], &entry);
+		if (forge_net_update_valid(&entry, forge_net.net_count))
+			forge_net_shadow_entry(forge_globals.spawns[index].id, &entry, now);
 	}
 	for (index = 0; index < forge_net.shadow_count;)
 	{
@@ -2388,7 +2540,7 @@ static void forge_net_host_sync(
 	forge_net_palette_send(actor->machine_index, 0, forge_net.net_count);
 	csmemset(linked, 0, sizeof(linked));
 	csmemset(forge_net_capture_placed, 0xFF, sizeof(forge_net_capture_placed));
-	if (forge_variant_capture(&layout, forge_globals.variant_title[0] ? forge_globals.variant_title : "Forge", NULL, why,
+	if (forge_variant_capture(&layout, forge_globals.variant_title[0] ? forge_globals.variant_title : "Forge", NULL, FALSE, why,
 		sizeof(why)))
 	{
 		size = forge_file_encode(&layout, bytes, (int)sizeof(bytes), &result);
@@ -2440,6 +2592,16 @@ static void forge_net_host_sync(
 		if (linked[index] || forge_net_tag_entry(forge_globals.placed[index].tag_index) == NONE)
 			continue;
 		forge_net_entry_fill(&forge_globals.placed[index], &record);
+		if (forge_net_update_valid(&record, forge_net.net_count))
+		{
+			record.sequence = ++forge_net.sequence;
+			forge_net_outgoing_add(&forge_net.direct, &record);
+		}
+	}
+	/* (the player spawn points: entries, taken before the end of the sync) */
+	for (index = 0; !forge_net.host_play && index < forge_globals.spawn_count && index < FORGE_MAXIMUM_SPAWNS; index++)
+	{
+		forge_net_spawn_entry_fill(&forge_globals.spawns[index], &record);
 		if (forge_net_update_valid(&record, forge_net.net_count))
 		{
 			record.sequence = ++forge_net.sequence;
@@ -2856,7 +3018,8 @@ static boolean forge_net_client_spawn_move(
 {
 	struct forge_net_record record;
 
-	if (!forge_net_client() || forge_net.host_version < FORGE_NET_HOST_VERSION_SPAWNS)
+	if (!forge_net_client() || forge_net.host_version < (forge_spawn_of_id(id) ? FORGE_NET_HOST_VERSION_PLAYER_SPAWNS :
+		FORGE_NET_HOST_VERSION_SPAWNS))
 	{
 		forge_notice("%s", T("The host's game can't move spawn markers"));
 		return FALSE;
@@ -2878,7 +3041,8 @@ static boolean forge_net_client_spawn_property(
 {
 	struct forge_net_record record;
 
-	if (!forge_net_client() || forge_net.host_version < FORGE_NET_HOST_VERSION_SPAWNS)
+	if (!forge_net_client() || forge_net.host_version < (forge_spawn_of_id(id) ? FORGE_NET_HOST_VERSION_PLAYER_SPAWNS :
+		FORGE_NET_HOST_VERSION_SPAWNS))
 	{
 		forge_notice("%s", T("The host's game can't move spawn markers"));
 		return FALSE;
@@ -2890,6 +3054,47 @@ static boolean forge_net_client_spawn_property(
 	record.step = (int8_t)(step < 0 ? -1 : 1);
 	forge_net_request_send(&record);
 	return TRUE;
+}
+
+/* (forge_spawns.inc, a client) a player spawn point placed (where the
+monitor's browser put it: the host places it there, then it is taken as any
+marker is) or deleted: asked of a host of FORGE_NET_HOST_VERSION_PLAYER_
+SPAWNS (an older one has no spawn points: said) */
+static void forge_net_client_spawn_point(
+	short kind,
+	struct forge_transform const *home)
+{
+	struct forge_net_record record;
+
+	if (!forge_net_client() || forge_net.host_version < FORGE_NET_HOST_VERSION_PLAYER_SPAWNS)
+	{
+		forge_notice("%s", T("The host's game has no spawn points"));
+		return;
+	}
+	forge_net_request_init(&record, _forge_net_request_spawn);
+	record.flags = FORGE_NET_FLAG_PLAYER_SPAWN;
+	record.aux = (uint8_t)(kind == _forge_spawn_initial ? _forge_spawn_initial : _forge_spawn_respawn);
+	forge_net_transform_from(&record.transform, &home->position, &home->forward, &home->up);
+	forge_net_request_send(&record);
+	platform_log("forge net: asked the host for a spawn point (%s) at %.2f %.2f %.2f", forge_spawn_kind_log_names[record.aux],
+		home->position.x, home->position.y, home->position.z);
+}
+
+static void forge_net_client_spawn_delete(
+	long id)
+{
+	struct forge_net_record record;
+
+	if (!forge_net_client() || forge_net.host_version < FORGE_NET_HOST_VERSION_PLAYER_SPAWNS)
+	{
+		forge_notice("%s", T("The host's game has no spawn points"));
+		return;
+	}
+	forge_net_request_init(&record, _forge_net_request_delete);
+	record.flags = FORGE_NET_FLAG_SPAWN;
+	record.id = (uint32_t)id;
+	forge_net_request_send(&record);
+	platform_log("forge net: asked the host to delete the spawn point #%ld", id);
 }
 
 /* (forge_update, a client) a Forge menu command asked of the host: FALSE
@@ -3069,6 +3274,7 @@ static void forge_net_mirror_clear(
 	forge_globals.placed_count = 0;
 	forge_globals.ai_count = 0;
 	forge_globals.ai_dead_count = 0;
+	forge_globals.spawn_count = 0;
 }
 
 /* an entry or link taken into the mirror (tag: this machine's, NONE) */
@@ -3156,6 +3362,33 @@ static void forge_net_client_update_take(
 	switch (record->op)
 	{
 	case _forge_net_update_entry:
+		/* (a player spawn point: the host's, drawn here; a sync's come before
+		its end) */
+		if (record->flags & FORGE_NET_FLAG_PLAYER_SPAWN)
+		{
+			struct forge_spawn *spawn = forge_spawn_of_id((long)record->id);
+			struct forge_transform home;
+			short kind = (record->record_flags & FORGE_NET_SPAWN_INITIAL) ? _forge_spawn_initial : _forge_spawn_respawn;
+
+			forge_net_transform_to(&record->transform, &home.position, &home.forward, &home.up);
+			if (!spawn)
+				spawn = forge_spawn_add((long)record->id, kind, record->team, record->value, &home);
+			if (!spawn)
+				return;
+			spawn->kind = kind;
+			spawn->team = (signed char)(record->team == 0 || record->team == 1 ? record->team : NONE);
+			spawn->game_types = (unsigned short)(record->value & FORGE_FILE_SPAWN_GAME_TYPES_MASK);
+			/* (the one held here: where the host has it once let go) */
+			if (spawn->id != forge_globals.held_marker_id)
+			{
+				spawn->home = home;
+				spawn->home.forward.k = 0.f;
+				if (normalize3d(&spawn->home.forward) < 0.0001f)
+					spawn->home.forward = *global_forward3d;
+				spawn->home.up = *global_up3d;
+			}
+			return;
+		}
 		if (!forge_net.synced || !forge_net.host_palette_known[record->tag])
 			return;
 		forge_net_mirror_take(record, forge_net.host_tags[record->tag], &record->transform);
@@ -3216,7 +3449,14 @@ static void forge_net_client_update_take(
 	case _forge_net_update_remove:
 	{
 		struct forge_placed *placed;
+		struct forge_spawn *spawn = forge_spawn_of_id((long)record->id);
 
+		/* (a player spawn point) */
+		if (spawn)
+		{
+			forge_spawn_remove(spawn);
+			return;
+		}
 		if (!forge_net.synced || (placed = forge_net_mirror((long)record->id)) == NULL)
 			return;
 		if (placed->object_index == forge_globals.held_object_index)
@@ -3544,6 +3784,7 @@ static void forge_net_update(
 		forge_net_host_update();
 	else if (forge_net_client())
 		forge_net_client_frame();
+	forge_net_monitor_models_update();
 }
 
 /* (network_objects.c) whether this client holds the object: its place is
@@ -3614,7 +3855,7 @@ static void forge_net_new_round(
 	if (object_try_and_get(forge_globals.held_object_index))
 		forge_drop();
 	forge_globals.held_object_index = NONE;
-	if (!forge_variant_capture(layout, forge_globals.variant_title[0] ? forge_globals.variant_title : "Forge", NULL, why,
+	if (!forge_variant_capture(layout, forge_globals.variant_title[0] ? forge_globals.variant_title : "Forge", NULL, FALSE, why,
 		sizeof(why)))
 	{
 		platform_log("forge net: the new round's layout could not be taken: %s", why);
@@ -3707,6 +3948,9 @@ static struct
 	unsigned long time;
 	/* (when it was last in a view and drawn: the tests' log) */
 	unsigned long drawn;
+	/* (forge_net_monitor_models_update) the Monitor's model shown in its
+	place: a local object of this machine's, NONE */
+	long model;
 } forge_net_orbs[FORGE_NET_PLAYERS];
 
 /* (the debug vertex: rasterizer_debug.c's) */
@@ -3822,6 +4066,19 @@ static void forge_net_render_monitors(
 		forward = forge_net_orbs[index].forward;
 		if (normalize3d(&forward) == 0.f)
 			continue;
+		/* (343 Guilty Spark himself in its place: no ball) */
+		if (forge_net_orbs[index].model != NONE && object_try_and_get(forge_net_orbs[index].model))
+		{
+			to_orb.i = forge_net_orbs[index].position.x - render.camera.position.x;
+			to_orb.j = forge_net_orbs[index].position.y - render.camera.position.y;
+			to_orb.k = forge_net_orbs[index].position.z - render.camera.position.z;
+			if (dot_product3d(&to_orb, &render.camera.forward) >= 0.f &&
+				render_frustum_sphere_visible(&render.frustum, &forge_net_orbs[index].position, FORGE_NET_ORB_RADIUS))
+			{
+				forge_net_orbs[index].drawn = now | 1;
+			}
+			continue;
+		}
 		/* (not behind the camera, nor out of its frustum) */
 		to_orb.i = forge_net_orbs[index].position.x - render.camera.position.x;
 		to_orb.j = forge_net_orbs[index].position.y - render.camera.position.y;
@@ -3888,6 +4145,154 @@ static void forge_net_render_monitors(
 			rasterizer_globals.current_lock_operation = _rasterizer_lock_none;
 		}
 		rasterizer_dynamic_vertices_delete(buffer);
+	}
+}
+
+/* ---- the other players' monitors as 343 Guilty Spark (the owner, Oct 22
+2026): the campaign's Monitor, the menu_monitor scene pack's (the Halo 3
+menus' Forge lobby has him: built from the player's own c20, c10, c40 or
+d40), wanted with a network Forge game's map and loaded when built. Each
+other player flying the monitor is one of him in its place (the ball's,
+eased the same), turned where it looks, its name over him (forge_draw);
+none for a Spartan (its own unit shown). A local object of this machine's
+alone: never the netcode's (forge_net_local_object: network_objects.c
+neither sends nor deletes it), no collisions, unhurt, never picked by the
+crosshair; deleted when its player is a Spartan again, leaves, or the map
+goes. Without the pack (no campaign map, the packs off, no room): the ball,
+as before */
+
+
+/* (forge_map_loaded, a network Forge game's map, after its packs) the
+Monitor's pack loaded, as Forge's own are (prebuilt in the lobbies - the
+Forge lobby's, a joiner's of the host's, the Halo 3 menus' -; built now if
+it is not, once: 84 KB of the tag cache); none when its source maps are
+not there (the ball then) */
+static void forge_net_monitor_pack_want(
+	void)
+{
+	short index;
+
+	for (index = 0; index < FORGE_NET_PLAYERS; index++)
+		forge_net_orbs[index].model = NONE;
+	if (!forge_globals.game_active || forge_globals.playing || (!forge_net_hosting() && !forge_net_client_session()))
+		return;
+	{
+		char why[SCENE_PACK_WHY_SIZE];
+		boolean loaded = scene_packs_recipe_available(FORGE_NET_MONITOR_PACK, why, sizeof(why)) &&
+			scene_packs_load_now(FORGE_NET_MONITOR_PACK);
+
+		if (!loaded && !why[0])
+			scene_packs_status(FORGE_NET_MONITOR_PACK, NULL, why, sizeof(why));
+		platform_log("forge net: the other monitors are %s%s%s", loaded ? "343 Guilty Spark (menu_monitor loaded)" : "balls",
+			loaded ? "" : ": ", loaded ? "" : why[0] ? why : "menu_monitor not loaded");
+	}
+}
+
+/* whether an object is one of this machine's Monitors (local: never the
+netcode's) */
+boolean forge_net_local_object(
+	long object_index)
+{
+	short index;
+
+	if (object_index == NONE)
+		return FALSE;
+	for (index = 0; index < FORGE_NET_PLAYERS; index++)
+	{
+		if (forge_net_orbs[index].model == object_index)
+			return TRUE;
+	}
+	return FALSE;
+}
+
+static void forge_net_monitor_model_delete(
+	short index)
+{
+	if (forge_net_orbs[index].model != NONE && object_try_and_get(forge_net_orbs[index].model))
+		object_delete(forge_net_orbs[index].model);
+	forge_net_orbs[index].model = NONE;
+}
+
+/* (forge_net_update, each frame before the tick) each other monitor's
+Monitor made, held where its ball is, or deleted */
+static void forge_net_monitor_models_update(
+	void)
+{
+	long tag_index = NONE;
+	short index;
+
+	if (forge_globals.game_active && !forge_globals.playing && (forge_net_host() || forge_net_client()))
+		tag_index = scene_packs_tag(FORGE_NET_MONITOR_PACK, BIPED_DEFINITION_TAG, FORGE_NET_MONITOR_TAG);
+	for (index = 0; index < FORGE_NET_PLAYERS; index++)
+	{
+		struct forge_net_transform view;
+		struct object_datum *object;
+		struct unit_datum *unit;
+		real_vector3d forward;
+		real_vector3d facing;
+		real_point3d position;
+		boolean wanted = tag_index != NONE && forge_net_orbs[index].shown && forge_net_monitor_view(index, &view);
+
+		object = forge_net_orbs[index].model != NONE ? object_try_and_get(forge_net_orbs[index].model) : NULL;
+		if (forge_net_orbs[index].model != NONE && (!wanted || !object || object->definition_index != tag_index))
+		{
+			forge_net_monitor_model_delete(index);
+			object = NULL;
+		}
+		if (!wanted)
+			continue;
+		position = forge_net_orbs[index].position;
+		forward = forge_net_orbs[index].forward;
+		if (normalize3d(&forward) < 0.0001f)
+			forward = *global_forward3d;
+		/* (upright, turned where it looks along the ground; his eye looks
+		where the player does) */
+		facing = forward;
+		facing.k = 0.f;
+		if (normalize3d(&facing) < 0.0001f)
+			facing = *global_forward3d;
+		if (!object)
+		{
+			struct object_placement_data placement;
+			char name[48];
+
+			object_placement_data_new(&placement, tag_index, NONE);
+			SET_FLAG(placement.flags, _new_object_never_automatically_delete_bit, TRUE);
+			placement.position = position;
+			placement.forward = facing;
+			placement.up = *global_up3d;
+			forge_net_orbs[index].model = object_new(&placement);
+			object = forge_net_orbs[index].model != NONE ? object_try_and_get(forge_net_orbs[index].model) : NULL;
+			if (!object)
+			{
+				forge_net_orbs[index].model = NONE;
+				continue;
+			}
+			object_scripting_set_collideable(forge_net_orbs[index].model, FALSE);
+			SET_FLAG(object->object.damage_flags, _object_cannot_take_damage_bit, TRUE);
+			SET_FLAG(object->object.flags, _object_shadowless_bit, TRUE);
+			forge_net_player_name(index, name, sizeof(name));
+			platform_log("forge net: player %d (%s)'s monitor shown as 343 Guilty Spark (object %lx)", index, name,
+				(unsigned long)forge_net_orbs[index].model);
+		}
+		if (distance_squared3d(&object->object.position, &position) > 0.0001f ||
+			dot_product3d(&object->object.forward, &facing) < 0.9999f)
+		{
+			object_set_position(forge_net_orbs[index].model, &position, &facing, global_up3d);
+		}
+		object->object.translational_velocity = *global_zero_vector3d;
+		object->object.angular_velocity = *global_zero_vector3d;
+		unit = unit_try_and_get(forge_net_orbs[index].model);
+		if (unit)
+		{
+			unit->unit.desired_facing_vector = facing;
+			unit->unit.desired_aiming_vector = forward;
+			unit->unit.aiming_vector = forward;
+			unit->unit.desired_looking_vector = forward;
+			unit->unit.looking_vector = forward;
+			unit->unit.aiming_velocity = *global_zero_vector3d;
+			unit->unit.looking_velocity = *global_zero_vector3d;
+		}
 	}
 }
 
@@ -4101,9 +4506,10 @@ static void forge_net_log_state(
 	}
 #endif
 
-	platform_log("forge net: %s, %d objects, %d palette tags, %ld requests taken, %ld refused, %ld dropped; %ld updates taken, "
-		"%ld dropped; synced %s, monitor %s", forge_net_host() ? "host" : forge_net_client() ? "client" : "not in a network game",
-		forge_globals.placed_count, forge_net_host() ? forge_net.net_count : forge_net.host_palette_count,
+	platform_log("forge net: %s, %d objects, %d spawn points, %d palette tags, %ld requests taken, %ld refused, %ld dropped; "
+		"%ld updates taken, %ld dropped; synced %s, monitor %s",
+		forge_net_host() ? "host" : forge_net_client() ? "client" : "not in a network game",
+		forge_globals.placed_count, forge_globals.spawn_count, forge_net_host() ? forge_net.net_count : forge_net.host_palette_count,
 		forge_net.requests_taken, forge_net.requests_refused, forge_net.requests_dropped, forge_net.updates_taken,
 		forge_net.updates_dropped, forge_net.synced ? "yes" : "no", forge_globals.active ? "on" : "off");
 	for (index = 0; index < forge_globals.placed_count; index++)
@@ -4161,7 +4567,7 @@ static void forge_net_log_state(
 				platform_log("forge net: player %d (%s): monitor at %.2f %.2f %.2f facing %.2f %.2f %.2f; ball %s at %.2f %.2f %.2f",
 					index, name, view.position[0], view.position[1], view.position[2], view.forward[0], view.forward[1],
 					view.forward[2], forge_net_orbs[index].drawn && system_milliseconds() - forge_net_orbs[index].drawn < 1000 ?
-					"drawn" : "not in view", forge_net_orbs[index].position.x,
+					(forge_net_orbs[index].model != NONE ? "drawn (343 Guilty Spark)" : "drawn") : "not in view", forge_net_orbs[index].position.x,
 					forge_net_orbs[index].position.y, forge_net_orbs[index].position.z);
 			}
 		}

@@ -60,7 +60,10 @@
 #              LAN joins from BROWSE GAMES; START GAME: a Slayer game, not Forge (no monitor
 #              on either), the host's layout placed as it starts and given to the joiner as
 #              network Forge gives it (its Warthog the netcode's, its boulder the joiner's own
-#              copy): both objects there on both machines, the two players play
+#              copy): both objects there on both machines, the two players play. The
+#              variant has player spawn points too (forge_spawns.inc: an initial spawn and two
+#              respawn points, version 4): the host spawns both players at them (the joiner's
+#              too, as the host makes every unit)
 #   forgemp    the Forge menu and the monitors of a network Forge game (insider.21, Oct 22:
 #              "The forge pause menu isn't working", "no floating orbs for others in forge,
 #              no forge ball"): a host and two joiners on its LAN, the Halo PC files on all,
@@ -69,11 +72,17 @@
 #              the Xbox's multiplayer pause, the game not paused) and its CLEAR DEAD AI asks
 #              the host, which clears them (two, then the third killed after) and says so
 #              back; every machine has the others' monitors where they fly and the first
-#              joiner draws both balls in its view (HALO_TEST_SHOTS: its screenshot). Then the
+#              joiner draws both in its view (HALO_TEST_SHOTS: its screenshot) - as 343 Guilty Spark
+#              (the menu_monitor pack, from c20) where the campaign maps are, else balls. Then the
 #              host places a fourth and kills it, the second joiner moves its spawn marker (made
 #              by the host), and the first joiner's NEW ROUND (Grunt pirate:
 #              no way to respawn the AI) is made by the host, the Elite back alive; neither
-#              joiner has a map variant in its store (none saved)
+#              joiner has a map variant in its store (none saved). Player spawn points
+#              (forge_spawns.inc): the first joiner places an INITIAL SPAWN (the browser's
+#              SPAWNING, asked of the host, placed there), takes its marker, makes it red
+#              (asked) and carries it off (asked: the host moves it); the host and the second
+#              joiner have it, red, where it was let go; the first joiner deletes it (asked),
+#              gone on all three
 #   forgepanel the settings panel's Forge page, Network on (Menu style Halo CE: the
 #              classic menus' route), asked by HALO_SYSTEM_LINK_TEST=forgenet:9: the
 #              System Link screen's profile, then a network Forge game of Blood Gulch
@@ -360,14 +369,18 @@ forge_case() {
 		# (the map variant saved first, in a local Forge game of Blood Gulch, into the host's save)
 		local all_seconds=$seconds save_cmds copy_data_hostsave=$menus_data
 		save_cmds="L200:forge camera 60 -100 1.6 130 0;L202:forge spawn warthog;L203:forge distance 8;L204:forge drop"
-		save_cmds="$save_cmds;L210:forge spawn boulder;L211:forge distance 5;L212:forge drop;L230:forge save MP Gulch"
+		save_cmds="$save_cmds;L210:forge spawn boulder;L211:forge distance 5;L212:forge drop"
+		# (its player spawn points: an initial spawn, two respawn points)
+		save_cmds="$save_cmds;L220:forge camera 60 -100 6 0 -89;L232:forge spawnpoint initial;L236:forge drop"
+		save_cmds="$save_cmds;L240:forge camera 66 -100 6 0 -89;L252:forge spawnpoint respawn;L256:forge drop"
+		save_cmds="$save_cmds;L260:forge camera 60 -106 6 0 -89;L272:forge spawnpoint respawn;L276:forge drop;L290:forge save MP Gulch"
 		seconds=30
 		HALO_TEST_DATA_HOST=$menus_data run_copy hostsave "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
 			HALO_MENU_STYLE=classic HALO_SYSTEM_LINK_TEST=forge:9 HALO_TEST_FORGE_PACKS=none \
 			HALO_SAVE_ROOT="$out/host/save" "HALO_TEST_COMMANDS=$save_cmds"
 		wait $last_pid 2>/dev/null
 		seconds=$all_seconds
-		grep -aq 'forge: map variant "MP Gulch" saved as bloodgulch/mp_gulch.hmv, 2 objects' "$out/hostsave/run.log" ||
+		grep -aq 'forge: map variant "MP Gulch" saved as bloodgulch/mp_gulch.hmv, 5 objects' "$out/hostsave/run.log" ||
 			{ fail "the map variant was not saved in Forge"; grep -a "forge:" "$out/hostsave/run.log" | tail -5; return 0; }
 		# (the host: MULTIPLAYER, the lobby live on SYSTEM LINK; MAP (down two, A), Blood Gulch (down
 		# nine, A): its variants, down to MP Gulch, A; a while for the joiner; START GAME (down, A))
@@ -402,6 +415,13 @@ forge_case() {
 		grep -aq "forge net: the host's game is a Forge game (session [0-9a-f]*, map variant MP Gulch)" "$jl" ||
 			fail "the joiner was not told of the map variant"
 		grep -aq 'forge: map variant "MP Gulch" applied: 2 placed' "$hl" || fail "the host did not place the map variant's objects"
+		# (its player spawn points: read as the map loaded, both players spawned at them by the host)
+		grep -aq 'forge: map variant "MP Gulch": 3 player spawn points (1 initial, 2 respawn)' "$hl" ||
+			fail "the host did not read the map variant's spawn points"
+		echo "--- spawns"; grep -a "forge: player [0-9]* (team [0-9]*) spawns at the " "$hl" | head -6
+		[ "$(grep -a "forge: player [0-9]* (team [0-9]*) spawns at the " "$hl" | awk '{ print $4 }' | sort -u | wc -l)" -ge 2 ] ||
+			fail "the host did not spawn both players at the variant's spawn points"
+		grep -aq "the map's own spawn" "$hl" && fail "a player at the map's own spawn: $(grep -a "the map's own spawn" "$hl" | head -1)"
 		grep -aq "forge: the map variant \"MP Gulch\" is played on levels.test.bloodgulch.bloodgulch (the host's layout)" "$jl" ||
 			fail "the joiner did not play the host's map variant"
 		grep -aq "forge: monitor mode" "$hl" "$jl" && fail "a monitor in the map variant's game (it is not Forge)"
@@ -435,14 +455,19 @@ forge_case() {
 		host_cmds="$host_cmds;L260:forge kill #1;L270:forge kill #2;L300:forge budget;L1150:forge kill #3;L1750:forge budget"
 		# (a fourth, killed: NEW ROUND, the first joiner's, brings it back)
 		host_cmds="$host_cmds;L1780:forge spawn elite major;L1785:forge distance 6;L1790:forge drop;L1830:forge kill #4"
-		host_cmds="$host_cmds;L1900:forge net;L2440:forge net;L2450:forge budget"
+		host_cmds="$host_cmds;L1900:forge net;L2300:forge spawns;L2420:forge spawns;L2440:forge net;L2450:forge budget"
 		# (each joiner a monitor: the first looking at where the second and the host fly)
 		join_cmds="L150:forge camera 50 -90 3 315 -8;L1750:forge budget;L1850:forge net;L1880:@shot forgemp-joiner-sees-monitors"
+		# (a player spawn point: placed, made red, carried off and let go, all made by the host; then
+		# deleted)
+		join_cmds="$join_cmds;L2150:forge camera 55 -95 6 0 -89;L2165:forge spawnpoint initial;L2200:forge spawns"
+		join_cmds="$join_cmds;L2210:forge marker #last;L2215:forge property team;L2220:forge camera 58 -95 6 0 -89"
+		join_cmds="$join_cmds;L2240:forge drop;L2290:forge spawns;L2350:forge spawndelete #last;L2400:forge spawns"
 		join2_cmds="L150:forge camera 53 -93 3 135 -8;L1750:forge budget;L1850:forge net;L1880:@shot forgemp-joiner2"
 		# (the second joiner takes the fourth Elite's spawn marker, carries it off and lets it go: asked
 		# of the host, which moves where it is placed again)
 		join2_cmds="$join2_cmds;L1950:forge marker #4;L1952:forge markers;L1960:forge camera 50 -95 3 135 -8;L1970:forge distance 5"
-		join2_cmds="$join2_cmds;L1980:forge drop"
+		join2_cmds="$join2_cmds;L1980:forge drop;L2300:forge spawns;L2420:forge spawns"
 		# (Start: the Forge menu; down seven to CLEAR DEAD AI, A; B closes it)
 		local menu_pad="start:150:3000 @MENU-open:0:300 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500"
 		menu_pad="$menu_pad down:150:500 down:150:500 a:150:3000 @MENU-cleared:0:300 b:150:2000"
@@ -510,6 +535,26 @@ forge_case() {
 		grep -aq "forge net: asked the host to move the spawn marker of #4" "$hl2" || fail "the second joiner did not ask the host"
 		grep -aq "forge net: machine [0-9]* moved the spawn marker of #4" "$hl" || fail "the host did not take the marker's move"
 		grep -aq "forge: the spawn marker of .* (#4) moved to" "$hl" || fail "the host did not move the Elite's spawn"
+		# (the first joiner's player spawn point: placed, made red, moved and deleted, each by the host)
+		grep -aq "forge net: asked the host for a spawn point (initial spawn) at " "$jl" || fail "the joiner did not ask for a spawn point"
+		grep -aq "forge net: machine [0-9]* placed the initial spawn #" "$hl" || fail "the host did not place the joiner's spawn point"
+		sed -n '/test command at tick 2200: forge spawns$/,+2p' "$jl" | grep -aq "forge: 1 player spawn points (1 initial" ||
+			fail "the joiner was not given its spawn point"
+		grep -aq "forge: grabbed the initial spawn #" "$jl" || fail "the joiner did not take the spawn point's marker"
+		grep -aq "forge net: machine [0-9]* changed the spawn point #" "$hl" || fail "the host did not take the joiner's TEAM"
+		grep -aq "forge net: machine [0-9]* moved the spawn point #" "$hl" || fail "the host did not take the spawn point's move"
+		local where
+		for log in "$hl" "$hl2"; do
+			where=$(sed -n '/test command at tick 2300: forge spawns$/,+2p' "$log" | grep -a "forge: spawns: the initial spawn #")
+			echo "$(basename "$(dirname "$log")") at 2300: $where"
+			echo "$where" | grep -aq "(team red, game type all) at 5[78]\.[0-9]* -9[45]\." ||
+				fail "$(basename "$(dirname "$log")"): the joiner's spawn point not red where it was let go"
+		done
+		grep -aq "forge net: machine [0-9]* deleted the spawn point #" "$hl" || fail "the host did not take the spawn point's delete"
+		for log in "$hl" "$jl" "$hl2"; do
+			sed -n '/test command at tick 24[02]0: forge spawns$/,+1p' "$log" | grep -aq "forge: 0 player spawn points" ||
+				fail "$(basename "$(dirname "$log")"): the deleted spawn point is still there"
+		done
 		# (LadyCassie, insider.21: the layout stayed after leaving and starting again - a joiner keeps
 		# nothing of the host's layout in its own store: none saved on either joiner)
 		for log in "$jl" "$hl2"; do
@@ -525,6 +570,16 @@ forge_case() {
 		done
 		[ "$(sed -n '/test command at tick 1850: forge net$/,$p' "$jl" | grep -ac "forge net: player [0-9] (.*): monitor at .*; ball drawn")" -ge 2 ] ||
 			fail "the first joiner did not draw both other monitors' balls"
+		# (the other monitors as 343 Guilty Spark, the menu_monitor pack's, when its campaign maps are
+		# there: a local object on each machine, never the netcode's)
+		if [ -r "$menus_data/maps/c20.map" ]; then
+			for log in "$hl" "$jl" "$hl2"; do
+				who=$(basename "$(dirname "$log")")
+				grep -aq "forge net: the other monitors are 343 Guilty Spark (menu_monitor loaded)" "$log" ||
+					fail "$who: the Monitor's pack not loaded: $(grep -a "forge net: the other monitors are" "$log" | head -1)"
+				grep -aq "'s monitor shown as 343 Guilty Spark" "$log" || fail "$who: no other monitor shown as 343 Guilty Spark"
+			done
+		fi
 		;;
 	h3forgeonline)
 		local menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}

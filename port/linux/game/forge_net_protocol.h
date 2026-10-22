@@ -63,12 +63,20 @@ which every host takes: a joiner reads any hello of version 1 or more):
 CLEAR DEAD AI, CLEAR ALL AI, ALL AI, NEW ROUND); a client sends them only
 to a host of 2 or more - one of 1 (insider.21 and before) would count the
 record as malformed - and says "Only the host can do that" to an older one */
-#define FORGE_NET_HOST_VERSION 3
+#define FORGE_NET_HOST_VERSION 4
 #define FORGE_NET_HOST_VERSION_COMMANDS 2
 /* 3: it takes a spawn marker's move and its character's properties
 (_forge_net_request_set and _forge_net_request_property with
 FORGE_NET_FLAG_SPAWN): a client asks them only of a host of 3 or more */
 #define FORGE_NET_HOST_VERSION_SPAWNS 3
+/* 4: player spawn points (forge_spawns.inc): the host sends them as entries
+(FORGE_NET_FLAG_PLAYER_SPAWN) and takes a client's spawn of one
+(_forge_net_request_spawn with FORGE_NET_FLAG_PLAYER_SPAWN), its move and
+its properties (set, property with FORGE_NET_FLAG_SPAWN and its id) and its
+delete (_forge_net_request_delete with FORGE_NET_FLAG_SPAWN); a client asks
+them only of a host of 4 or more. An older joiner drops the entries (an
+unknown flag): it shows none */
+#define FORGE_NET_HOST_VERSION_PLAYER_SPAWNS 4
 /* a joiner's capabilities (its answer's bits) */
 #define FORGE_NET_CAPABILITY_FORGE 0x00000001u
 #define FORGE_NET_CAPABILITIES_KNOWN FORGE_NET_CAPABILITY_FORGE
@@ -240,8 +248,19 @@ enum
 	request its spawn marker's: set moves its home (where it is placed
 	again), property changes it from its marker - not its object */
 	FORGE_NET_FLAG_SPAWN = 1 << 5,
-	FORGE_NET_FLAGS_KNOWN = 0x3F,
+	/* (spawn, entry) a player spawn point: no tag, no object; a spawn's
+	aux its kind (0 respawn point, 1 initial spawn); an entry's team (-1
+	any, 0 red, 1 blue), record flags FORGE_NET_SPAWN_INITIAL alone, value
+	its game types (forge_files.h FORGE_FILE_GAME_TYPE_* bits, 0 all) */
+	FORGE_NET_FLAG_PLAYER_SPAWN = 1 << 6,
+	FORGE_NET_FLAGS_KNOWN = 0x7F,
 };
+
+/* (a player spawn point's entry: forge_files.h FORGE_RECORD_SPAWN_INITIAL,
+FORGE_FILE_SPAWN_GAME_TYPES_MASK) */
+#define FORGE_NET_SPAWN_INITIAL 0x08
+#define FORGE_NET_SPAWN_GAME_TYPES_MASK 0x3F
+#define FORGE_NET_SPAWN_KINDS 2
 
 /* how a grant came */
 enum

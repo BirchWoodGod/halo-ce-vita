@@ -1481,6 +1481,22 @@ static void player_spawn(
 		/* port: a network co-op respawn starts behind its teammate
 		(players_coop_spawn_location) */
 		starting_location = players_coop_spawn_location(&spawn_location);
+#ifdef HALO_LINUX
+		/* port: a Forge game's or a map variant's player spawn points
+		(port/linux/game/forge_spawns.inc): one of them, else the map's own,
+		or (each that fits blocked) none this tick */
+		if (!starting_location)
+		{
+			extern short forge_spawn_location(long player_index, struct player_starting_location *location);
+			short forge_spawn = forge_spawn_location(player_index, &spawn_location);
+
+			/* (forge.h: 1 _forge_spawn_location_found, 2 _wait) */
+			if (forge_spawn == 1)
+				starting_location = &spawn_location;
+			else if (forge_spawn == 2)
+				starting_location_index = NONE;
+		}
+#endif
 		if (!starting_location && starting_location_index != NONE)
 			starting_location = player_get_starting_location(starting_location_index);
 		if (starting_location)

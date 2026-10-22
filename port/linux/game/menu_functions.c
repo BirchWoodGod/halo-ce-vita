@@ -2627,8 +2627,10 @@ static void h3_forge_controls_update(struct widget_instance *widget)
 		"Rotate: hold right button + mouse; + left: roll.\nDistance: wheel, or W S. Snap: right button + Q.\n"
 		"Upright: X. Speed: Q.\nSpartan: Tab, or F1 + Z.");
 #endif
-	/* (and a character's RESPAWN, Oct 22 2026: dead, it comes back) */
-	snprintf(text, sizeof(text), "%s\n%s", controls, T("AI respawn: a character's properties, RESPAWN."));
+	/* (and a character's RESPAWN, Oct 22 2026: dead, it comes back; the
+	player spawn points, the browser's SPAWNING) */
+	snprintf(text, sizeof(text), "%s\n%s\n%s", controls, T("AI respawn: a character's properties, RESPAWN."),
+		T("Spawn points: Objects, SPAWNING. Held: team, game type."));
 	text_show(widget, text);
 }
 
@@ -8861,6 +8863,38 @@ static void h3_forge_properties_update(struct widget_instance *list)
 	text_show(named(screen, "name"), properties.name);
 	for (row = 0, child = list->child; child; child = child->next, row++)
 	{
+		/* (a player spawn point's four rows: its team, game type, kind and
+		yaw - forge_spawns.inc) */
+		if (properties.spawn)
+		{
+			boolean shown = row <= _forge_property_yaw;
+
+			switch (row)
+			{
+			case _forge_property_team:
+				snprintf(text, sizeof(text), "%s: %s", T("TEAM"), properties.team == 0 ? T("RED") : properties.team == 1 ?
+					T("BLUE") : T("ANY"));
+				break;
+			case _forge_property_respawn:
+				snprintf(text, sizeof(text), "%s: %s", T("GAME TYPE"), properties.game_type_name);
+				break;
+			case _forge_property_place_at_start:
+				snprintf(text, sizeof(text), "%s: %s", T("SPAWN"), properties.spawn_kind == _forge_spawn_initial ?
+					T("INITIAL SPAWN") : T("RESPAWN POINT"));
+				break;
+			case _forge_property_yaw:
+				snprintf(text, sizeof(text), "%s: %d\xc2\xb0", T("YAW"), properties.yaw);
+				break;
+			default:
+				text[0] = 0;
+				break;
+			}
+			widget_instance_set_visibility_recursive(child, shown);
+			child->disabled = !shown;
+			text_show(child, text);
+			child->animation.current_frame_index = child == list->focused_child ? 1 : 0;
+			continue;
+		}
 		switch (row)
 		{
 		case _forge_property_team:
@@ -8895,16 +8929,26 @@ static void h3_forge_properties_update(struct widget_instance *list)
 			snprintf(text, sizeof(text), "%s: %s", T("AI"), properties.ai_on ? T("ON") : T("OFF"));
 			break;
 		}
-		/* (a character's own rows: hidden for any other object) */
+		/* (a character's own rows: hidden for any other object; the rest
+		shown again after a spawn point's) */
 		if (row >= _forge_property_ai_team)
 		{
 			widget_instance_set_visibility_recursive(child, properties.ai);
 			child->disabled = !properties.ai;
 		}
+		else if (child->disabled)
+		{
+			widget_instance_set_visibility_recursive(child, TRUE);
+			child->disabled = FALSE;
+		}
 		text_show(child, text);
 		child->animation.current_frame_index = child == list->focused_child ? 1 : 0;
 	}
-	if (properties.ai)
+	if (properties.spawn)
+		snprintf(text, sizeof(text), "%s: spawn point, team %d, game type %s, %s, yaw %d", properties.name, properties.team,
+			properties.game_type_name, properties.spawn_kind == _forge_spawn_initial ? "initial spawn" : "respawn point",
+			properties.yaw);
+	else if (properties.ai)
 		snprintf(text, sizeof(text), "%s: team %d, respawn %d, %s, yaw %d pitch %d roll %d, AI team %d, AI %s", properties.name,
 			properties.team, properties.respawn_seconds, properties.place_at_start ? "at start" : "not at start", properties.yaw,
 			properties.pitch, properties.roll, properties.ai_team, properties.ai_on ? "on" : "off");

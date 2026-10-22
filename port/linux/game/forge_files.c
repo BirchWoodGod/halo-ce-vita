@@ -489,6 +489,7 @@ static int forge_file_record_check(
 {
 	int index;
 	int character;
+	int spawn;
 
 	if (record->kind >= NUMBER_OF_FORGE_RECORD_KINDS)
 		return 0;
@@ -511,9 +512,20 @@ static int forge_file_record_check(
 	{
 		return 0;
 	}
-	if ((record->game_types & ~FORGE_FILE_GAME_TYPES_MASK) || record->variant > FORGE_FILE_MAXIMUM_VARIANT ||
-		(record->flags & ~(version >= 3 ? FORGE_RECORD_FLAGS_KNOWN : version == 2 ? FORGE_RECORD_FLAGS_VERSION_2 :
-			FORGE_RECORD_FLAGS_VERSION_1)))
+	/* (version 4's player spawn: its team any, red or blue, its game types
+	infection's too, an initial spawn's flag alone, nothing else of an
+	object's) */
+	spawn = version >= 4 && record->kind == _forge_record_player_spawn;
+	if (spawn && (record->team > FORGE_FILE_MAXIMUM_SPAWN_TEAM || record->respawn_seconds || record->count ||
+		record->variant || record->ai_team || (record->flags & ~FORGE_RECORD_SPAWN_INITIAL) ||
+		(record->game_types & ~FORGE_FILE_SPAWN_GAME_TYPES_MASK)))
+	{
+		return 0;
+	}
+	if ((!spawn && (record->game_types & ~FORGE_FILE_GAME_TYPES_MASK)) || record->variant > FORGE_FILE_MAXIMUM_VARIANT ||
+		(record->flags & ~(version >= 4 ? FORGE_RECORD_FLAGS_KNOWN : version == 3 ? FORGE_RECORD_FLAGS_VERSION_3 :
+			version == 2 ? FORGE_RECORD_FLAGS_VERSION_2 : FORGE_RECORD_FLAGS_VERSION_1)) ||
+		(!spawn && (record->flags & FORGE_RECORD_SPAWN_INITIAL)))
 	{
 		return 0;
 	}
@@ -563,6 +575,11 @@ int forge_file_layout_version(
 		return layout->version;
 	for (index = 0; index < layout->record_count && index < FORGE_FILE_MAXIMUM_RECORDS; index++)
 	{
+		if (layout->records[index].kind == _forge_record_player_spawn)
+			return 4;
+	}
+	for (index = 0; index < layout->record_count && index < FORGE_FILE_MAXIMUM_RECORDS; index++)
+	{
 		if (layout->records[index].flags & FORGE_RECORD_AI_RESPAWN)
 			return 3;
 		if (layout->records[index].ai_team || (layout->records[index].flags & FORGE_RECORD_AI_OFF))
@@ -579,6 +596,7 @@ int forge_file_layout_check(
 	int other;
 	int netgame = 0;
 	int respawning = 0;
+	int player_spawns = 0;
 	int version;
 
 	if (!layout || !forge_file_meta_terminated(layout))
@@ -629,10 +647,13 @@ int forge_file_layout_check(
 			netgame = 1;
 		if (layout->records[index].flags & FORGE_RECORD_AI_RESPAWN)
 			respawning = 1;
+		if (layout->records[index].kind == _forge_record_player_spawn)
+			player_spawns = 1;
 	}
-	/* (version 3 is written only for a respawning character: a version 3
-	file without one is not one this writer made) */
-	if (version >= 3 && !respawning)
+	/* (version 3 is written only for a respawning character, version 4 only
+	for a player spawn: a file of either without one is not one this writer
+	made) */
+	if ((version == 3 && !respawning) || (version >= 4 && !player_spawns))
 		return _forge_file_bad_version;
 	/* (the flag says whether any record is a netgame's) */
 	if (((layout->flags & FORGE_FILE_FLAG_NETGAME_SPAWNS) != 0) != netgame)

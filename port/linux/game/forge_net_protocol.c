@@ -185,13 +185,27 @@ int forge_net_request_valid(
 	switch (record->op)
 	{
 	case _forge_net_request_spawn:
+		/* (a player spawn point: no tag, its kind, nothing held) */
+		if (record->flags & FORGE_NET_FLAG_PLAYER_SPAWN)
+		{
+			if (record->flags != FORGE_NET_FLAG_PLAYER_SPAWN || record->tag != FORGE_NET_NO_TAG ||
+				record->aux >= FORGE_NET_SPAWN_KINDS)
+			{
+				return 0;
+			}
+			return forge_net_transform_valid(&record->transform);
+		}
 		if (record->tag == FORGE_NET_NO_TAG || (int)record->tag >= palette_count)
 			return 0;
 		if (record->flags & ~FORGE_NET_FLAG_HOLD)
 			return 0;
 		return forge_net_transform_valid(&record->transform);
 	case _forge_net_request_grab:
+		return (record->flags & ~FORGE_NET_FLAG_MAP_OBJECT) == 0;
 	case _forge_net_request_delete:
+		/* (a player spawn point's, by its id) */
+		if (record->flags & FORGE_NET_FLAG_SPAWN)
+			return record->flags == FORGE_NET_FLAG_SPAWN && record->id != 0;
 		return (record->flags & ~FORGE_NET_FLAG_MAP_OBJECT) == 0;
 	case _forge_net_request_move:
 	case _forge_net_request_release:
@@ -249,6 +263,19 @@ int forge_net_update_valid(
 	switch (record->op)
 	{
 	case _forge_net_update_entry:
+		/* (a player spawn point: no tag or object, its team any, red or blue,
+		its game types, an initial spawn's flag alone) */
+		if (record->flags & FORGE_NET_FLAG_PLAYER_SPAWN)
+		{
+			if (record->flags != FORGE_NET_FLAG_PLAYER_SPAWN || record->id == 0 || record->tag != FORGE_NET_NO_TAG ||
+				record->object != FORGE_NET_NO_OBJECT || record->team < -1 || record->team > 1 ||
+				(record->record_flags & ~FORGE_NET_SPAWN_INITIAL) || record->respawn_seconds || record->ai_team ||
+				(record->value & ~FORGE_NET_SPAWN_GAME_TYPES_MASK))
+			{
+				return 0;
+			}
+			return forge_net_transform_valid(&record->transform);
+		}
 		if (record->id == 0 || record->tag == FORGE_NET_NO_TAG || (int)record->tag >= palette_count)
 			return 0;
 		if (record->flags & ~(FORGE_NET_FLAG_AI | FORGE_NET_FLAG_NETWORKED))

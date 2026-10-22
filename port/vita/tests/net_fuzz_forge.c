@@ -69,8 +69,17 @@ static void fuzz_request(
 	switch (copy.op)
 	{
 	case _forge_net_request_spawn:
-		if (copy.tag >= palette_count)
+		/* (a player spawn point: no tag, a kind, nothing else; else a tag of
+		the palette) */
+		if (copy.flags & FORGE_NET_FLAG_PLAYER_SPAWN)
+		{
+			if (copy.flags != FORGE_NET_FLAG_PLAYER_SPAWN || copy.tag != FORGE_NET_NO_TAG || copy.aux >= FORGE_NET_SPAWN_KINDS)
+				abort();
+		}
+		else if (copy.tag >= palette_count)
+		{
 			abort();
+		}
 		/* (fall through: a transform) */
 	case _forge_net_request_move:
 	case _forge_net_request_release:
@@ -90,8 +99,12 @@ static void fuzz_request(
 		if ((copy.flags & FORGE_NET_FLAG_MONITOR) && !forge_transform_sane(&copy.transform, 0))
 			abort();
 		break;
-	case _forge_net_request_grab:
 	case _forge_net_request_delete:
+		/* (a spawn point's: by an id, nothing else) */
+		if ((copy.flags & FORGE_NET_FLAG_SPAWN) && (copy.flags != FORGE_NET_FLAG_SPAWN || copy.id == 0))
+			abort();
+		break;
+	case _forge_net_request_grab:
 	case _forge_net_request_undo:
 	case _forge_net_request_sync:
 		break;
@@ -123,8 +136,22 @@ static void fuzz_update(
 	{
 		abort();
 	}
-	if (record->op == _forge_net_update_entry && record->tag >= palette_count)
+	/* (a player spawn point's entry: no tag or object, team any, red or
+	blue, its game types' bits, an initial spawn's flag alone) */
+	if (record->op == _forge_net_update_entry && (record->flags & FORGE_NET_FLAG_PLAYER_SPAWN))
+	{
+		if (record->flags != FORGE_NET_FLAG_PLAYER_SPAWN || record->tag != FORGE_NET_NO_TAG ||
+			record->object != FORGE_NET_NO_OBJECT || record->team < -1 || record->team > 1 ||
+			(record->record_flags & ~FORGE_NET_SPAWN_INITIAL) || (record->value & ~FORGE_NET_SPAWN_GAME_TYPES_MASK) ||
+			record->id == 0)
+		{
+			abort();
+		}
+	}
+	else if (record->op == _forge_net_update_entry && record->tag >= palette_count)
+	{
 		abort();
+	}
 	if (record->op == _forge_net_update_refuse && (record->aux == 0 || record->aux >= NUMBER_OF_FORGE_NET_REFUSALS))
 		abort();
 	forge_net_refusal_name(record->aux);
@@ -368,6 +395,19 @@ static void seed_write(
 		record.flags = FORGE_NET_FLAG_NETWORKED;
 		memcpy(with_count + 1, &record, sizeof(record));
 		SEED_ADD(1, with_count, (int)sizeof(with_count));
+		/* (a player spawn point's request and entry) */
+		record_init(&record, _forge_net_request_spawn);
+		record.flags = FORGE_NET_FLAG_PLAYER_SPAWN;
+		record.aux = 1;
+		memcpy(with_count + 1, &record, sizeof(record));
+		SEED_ADD(0, with_count, (int)sizeof(with_count));
+		record_init(&record, _forge_net_update_entry);
+		record.id = 9;
+		record.flags = FORGE_NET_FLAG_PLAYER_SPAWN;
+		record.team = 0;
+		record.value = 0x02;
+		memcpy(with_count + 1, &record, sizeof(record));
+		SEED_ADD(1, with_count, (int)sizeof(with_count));
 	}
 	memset(&entry, 0, sizeof(entry));
 	entry.total = 4;
@@ -470,6 +510,38 @@ int net_fuzz_checks(void)
 	record_init(&record, _forge_net_request_grab);
 	record.flags = 0x80;
 	CHECK(!forge_net_request_valid(&record, 10), "a grab with unknown flags refused");
+	/* (a player spawn point's requests: host version 4) */
+	record_init(&record, _forge_net_request_spawn);
+	record.flags = FORGE_NET_FLAG_PLAYER_SPAWN;
+	record.aux = 1;
+	CHECK(forge_net_request_valid(&record, 0), "a player spawn point's spawn taken (no tag, initial)");
+	record.aux = FORGE_NET_SPAWN_KINDS;
+	CHECK(!forge_net_request_valid(&record, 0), "a player spawn point of kind 2 refused");
+	record.aux = 0;
+	record.tag = 1;
+	CHECK(!forge_net_request_valid(&record, 10), "a player spawn point naming a tag refused");
+	record.tag = FORGE_NET_NO_TAG;
+	record.flags |= FORGE_NET_FLAG_HOLD;
+	CHECK(!forge_net_request_valid(&record, 10), "a player spawn point held refused");
+	record.flags = FORGE_NET_FLAG_PLAYER_SPAWN | FORGE_NET_FLAG_MAP_OBJECT;
+	CHECK(!forge_net_request_valid(&record, 10), "a player spawn point of a map object refused");
+	record.flags = FORGE_NET_FLAG_PLAYER_SPAWN;
+	record.transform.position[0] = -5001.f;
+	CHECK(!forge_net_request_valid(&record, 10), "a player spawn point past the world's bounds refused");
+	good_transform(&record.transform);
+	memcpy(&record.transform.forward[1], &nan_bits, 4);
+	CHECK(!forge_net_request_valid(&record, 10), "a player spawn point facing a NaN refused");
+	record_init(&record, _forge_net_request_delete);
+	record.flags = FORGE_NET_FLAG_SPAWN;
+	record.id = 9;
+	CHECK(forge_net_request_valid(&record, 0), "a spawn point's delete taken");
+	record.id = 0;
+	CHECK(!forge_net_request_valid(&record, 0), "a spawn point's delete of id 0 refused");
+	record.id = 9;
+	record.flags = FORGE_NET_FLAG_SPAWN | FORGE_NET_FLAG_MAP_OBJECT;
+	CHECK(!forge_net_request_valid(&record, 0), "a spawn point's delete of a map object refused");
+	record.flags = FORGE_NET_FLAG_PLAYER_SPAWN;
+	CHECK(!forge_net_request_valid(&record, 0), "a delete with the spawn's flag refused");
 
 	/* updates */
 	record_init(&record, _forge_net_update_entry);
@@ -513,6 +585,44 @@ int net_fuzz_checks(void)
 	CHECK(forge_net_update_valid(&record, 0), "a map object's grant taken");
 	record_init(&record, _forge_net_request_spawn);
 	CHECK(!forge_net_update_valid(&record, 10), "a request sent as an update refused");
+	/* (a player spawn point's entry) */
+	record_init(&record, _forge_net_update_entry);
+	record.id = 12;
+	record.flags = FORGE_NET_FLAG_PLAYER_SPAWN;
+	record.team = 1;
+	record.record_flags = FORGE_NET_SPAWN_INITIAL;
+	record.value = 0x22;
+	CHECK(forge_net_update_valid(&record, 0), "a player spawn point's entry taken (blue, initial, CTF and infection)");
+	record.team = 2;
+	CHECK(!forge_net_update_valid(&record, 0), "a player spawn point of team 2 refused");
+	record.team = -1;
+	record.value = 0x40;
+	CHECK(!forge_net_update_valid(&record, 0), "a player spawn point's unknown game type refused");
+	record.value = 0;
+	record.record_flags = FORGE_NET_SPAWN_INITIAL | 0x01;
+	CHECK(!forge_net_update_valid(&record, 0), "a player spawn point placed at start refused");
+	record.record_flags = 0;
+	record.tag = 0;
+	CHECK(!forge_net_update_valid(&record, 10), "a player spawn point's entry naming a tag refused");
+	record.tag = FORGE_NET_NO_TAG;
+	record.object = 0x10002;
+	CHECK(!forge_net_update_valid(&record, 10), "a player spawn point's entry naming an object refused");
+	record.object = FORGE_NET_NO_OBJECT;
+	record.respawn_seconds = 30;
+	CHECK(!forge_net_update_valid(&record, 10), "a player spawn point's respawn time refused");
+	record.respawn_seconds = 0;
+	record.flags |= FORGE_NET_FLAG_AI;
+	CHECK(!forge_net_update_valid(&record, 10), "a player spawn point that is a character refused");
+	record.flags = FORGE_NET_FLAG_PLAYER_SPAWN;
+	record.id = 0;
+	CHECK(!forge_net_update_valid(&record, 10), "a player spawn point of id 0 refused");
+	record.id = 12;
+	record.transform.up[2] = 0.f;
+	CHECK(!forge_net_update_valid(&record, 10), "a player spawn point's entry with no up refused");
+	record_init(&record, _forge_net_update_link);
+	record.id = 12;
+	record.flags = FORGE_NET_FLAG_PLAYER_SPAWN;
+	CHECK(!forge_net_update_valid(&record, 10), "a player spawn point's link refused (entries only)");
 
 	/* palette entries */
 	memset(&entry, 0, sizeof(entry));

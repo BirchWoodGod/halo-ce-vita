@@ -45,6 +45,18 @@ of the game, in Forge and in the variant played. A file of version 2 or 1
 holds none (that bit must be zero in them, whatever its respawn time says:
 every character of an older variant stays dead, as it did); a layout with a
 respawning character is written as version 3, any other as before.
+
+Version 4 (Oct 22 2026) gives meaning to the player spawn record
+(_forge_record_player_spawn, no path: the Forge palette's SPAWNING, Halo 3's
+Respawn Point and Initial Spawn): its place and yaw, its team (-1 any, 0 red,
+1 blue), its game types (FORGE_FILE_GAME_TYPE_* bits, 0 for all; infection's
+bit only here) and flag bit 3, FORGE_RECORD_SPAWN_INITIAL (an initial spawn:
+a round's first; else a respawn point); respawn, count, variant and AI team
+zero. A layout with a player spawn is written as version 4 (whatever else it
+holds), any other as before, so a variant without spawn points stays readable
+by older builds; a version 4 file has one at least. The game reads player
+spawns of a version 4 file only (an older file's, never written by a build,
+are skipped as ever).
 */
 
 #ifndef __FORGE_FILES_H
@@ -54,7 +66,7 @@ respawning character is written as version 3, any other as before.
 
 #define FORGE_FILE_EXTENSION ".hmv"
 /* the version written when a layout needs it, and the oldest read */
-#define FORGE_FILE_VERSION 3
+#define FORGE_FILE_VERSION 4
 #define FORGE_FILE_FIRST_VERSION 1
 #define FORGE_FILE_HEADER_SIZE 64
 #define FORGE_FILE_MAXIMUM_SIZE 65536
@@ -85,8 +97,18 @@ respawning character is written as version 3, any other as before.
 #define FORGE_FILE_MAXIMUM_COUNT 16
 #define FORGE_FILE_MAXIMUM_TEAM 7
 #define FORGE_FILE_MAXIMUM_VARIANT 15
-/* the game types (ctf, slayer, oddball, king of the hill, race) */
+/* the game types (ctf, slayer, oddball, king of the hill, race; version 4's
+player spawns: infection too), a bit each in the engine's order */
 #define FORGE_FILE_GAME_TYPES_MASK 0x1F
+#define FORGE_FILE_GAME_TYPE_CTF (1 << 0)
+#define FORGE_FILE_GAME_TYPE_SLAYER (1 << 1)
+#define FORGE_FILE_GAME_TYPE_ODDBALL (1 << 2)
+#define FORGE_FILE_GAME_TYPE_KING (1 << 3)
+#define FORGE_FILE_GAME_TYPE_RACE (1 << 4)
+#define FORGE_FILE_GAME_TYPE_INFECTION (1 << 5)
+#define FORGE_FILE_SPAWN_GAME_TYPES_MASK 0x3F
+/* a player spawn's teams: any (-1), red, blue */
+#define FORGE_FILE_MAXIMUM_SPAWN_TEAM 1
 /* a record's path index when its kind names no object */
 #define FORGE_FILE_NO_PATH 0xFFFF
 
@@ -108,9 +130,13 @@ enum
 	/* (version 3, a character's only) dead, it is placed again after its
 	respawn time */
 	FORGE_RECORD_AI_RESPAWN = 1 << 2,
+	/* (version 4, a player spawn's only) an initial spawn (a round's first
+	spawns), else a respawn point */
+	FORGE_RECORD_SPAWN_INITIAL = 1 << 3,
 	FORGE_RECORD_FLAGS_VERSION_1 = FORGE_RECORD_PLACE_AT_START,
 	FORGE_RECORD_FLAGS_VERSION_2 = FORGE_RECORD_PLACE_AT_START | FORGE_RECORD_AI_OFF,
-	FORGE_RECORD_FLAGS_KNOWN = FORGE_RECORD_PLACE_AT_START | FORGE_RECORD_AI_OFF | FORGE_RECORD_AI_RESPAWN,
+	FORGE_RECORD_FLAGS_VERSION_3 = FORGE_RECORD_PLACE_AT_START | FORGE_RECORD_AI_OFF | FORGE_RECORD_AI_RESPAWN,
+	FORGE_RECORD_FLAGS_KNOWN = FORGE_RECORD_FLAGS_VERSION_3 | FORGE_RECORD_SPAWN_INITIAL,
 };
 
 /* (version 2) a character's AI team: whom it fights. The engine's teams
@@ -260,8 +286,9 @@ int forge_file_layout_check(
 	struct forge_file_layout const *layout,
 	char const *expected_map);
 
-/* the version a layout is written as: its own when set (1 or 2), else the
-lowest that holds it (2 when a record has an AI setting) */
+/* the version a layout is written as: its own when set, else the lowest
+that holds it (4 with a player spawn, 3 with a respawning character, 2 when
+a record has an AI setting) */
 int forge_file_layout_version(
 	struct forge_file_layout const *layout);
 
