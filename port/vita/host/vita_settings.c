@@ -201,6 +201,12 @@ mods folder has a folder in it) lets the Campaign's level list offer a
 Halo: The Master Chief Collection mod's Halo: CE Anniversary maps from
 ux0:data/haloce-vita/mods, played alone and offline
 (port/linux/game/custom_edition_mods.c, docs/mcc_cea_maps.md).
+"Halo CE content" (HALO_CONTENT: Xbox files, the default, or MCC files):
+MCC files also offers the stock maps of the player's own Halo: The Master
+Chief Collection halo1 folder, copied to ux0:data/haloce-vita/mcc/halo1,
+as "(MCC)" levels: the campaign's after its ten levels (the Halo 3
+campaign lobby's missions become MCC's), the multiplayer maps first among
+the custom maps (port/linux/game/mcc_content.c, docs/mcc_cea_maps.md).
 "PC map vehicles" (HALO_PC_MAP_VEHICLES, shown while PC maps is on): a
 Custom Edition map's vehicles in a game of this Vita's alone (split screen,
 offline, with or without bots; never a network game's): Xbox, the default,
@@ -922,6 +928,12 @@ static struct setting settings[] = {
 	PAGE_ROW("Mod manager", "Custom maps and MCC mods: check, on, off, delete", PAGE_MAPS, PAGE_MODS),
 	{ "PC maps", "HALO_CUSTOM_EDITION", 0, 2, { "0", "1" }, { "Off", "On" },
 		"Experimental: Custom Edition maps in the map list", 0, PAGE_MAPS },
+	/* (Halo CE content, port/linux/game/mcc_content.c: Xbox files alone, or
+	also the stock maps of the player's own MCC halo1 folder copied to
+	ux0:data/haloce-vita/mcc/halo1, as "(MCC)" levels; live, the lists
+	looking again as they open) */
+	{ "Halo CE content", "HALO_CONTENT", 0, 2, { "xbox", "mcc" }, { "Xbox files", "MCC files" },
+		"MCC: also the maps of ux0:data/haloce-vita/mcc/halo1 (no sound yet)", 0, PAGE_MAPS },
 	/* (a mod's Halo: CE Anniversary maps in ux0:data/haloce-vita/mods,
 	offered after the campaign's levels and played alone, offline:
 	port/linux/game/custom_edition_mods.c; off by default, and shown only
