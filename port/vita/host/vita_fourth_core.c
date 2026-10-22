@@ -176,6 +176,22 @@ int vita_host_fourth_core_join(const char *role, int level)
 	return vita_host_fourth_core_move(role);
 }
 
+/* the calling thread, on the fourth core, off it to cores 0-2 (aside) or
+back (not): 1 when its mask changed. The sound mixer while the loading
+screen's chant plays (dsound_sdl.c): a map's load keeps the fourth core
+busy (the cache file thread at 77-86% of it in insider.20 and .21 testers'
+logs at All async, cores 0-2 under 20%), and the chant's mixes came late
+there - crackle; nothing played during loads before insider.21 */
+int vita_host_fourth_core_step_aside(int aside)
+{
+	SceUID self = sceKernelGetThreadId();
+	int mask = aside ? 0x70000 : FOURTH_CORE_MASK;
+
+	if (sceKernelGetThreadCpuAffinityMask(self) == mask)
+		return 0;
+	return sceKernelChangeThreadCpuAffinityMask(self, mask) >= 0;
+}
+
 /* with each frame-timing line: the watched threads' run time a frame, and
 the cores' busy shares, since the last */
 void vita_host_thread_times_report(unsigned long frames)

@@ -1120,8 +1120,62 @@ void vita_host_pin_current_thread(int core) __attribute__((weak));
 #ifdef HALO_VITA
 int vita_host_fourth_core_move(const char *role);
 int vita_host_fourth_core_join(const char *role, int level);
+int vita_host_fourth_core_step_aside(int aside);
 void vita_host_thread_watch(const char *role);
 #endif
+
+/* the mixer moved to the fourth core (audio_callback) */
+static int mixer_on_fourth_core;
+
+/* The loading screen's chant (DirectSound buffers, mix_buffers) on the
+mixer's thread: while it plays, a mixer on the Vita's fourth core steps
+aside to cores 0-2 - a map's load keeps the fourth core busy (the cache file
+thread at 77-86% of it at Fourth core helpers All async, insider.20 and .21
+testers' logs, while cores 0-2 idle under 20%) and the chant crackled
+there: its mixes came late. Nothing played during a load before insider.21,
+so late mixes were silent. When it stops, halo.log says how late the
+device's calls came meanwhile */
+static struct
+{
+	/* playing now (mix_buffers), and as the mixer last saw it */
+	volatile int heard;
+	int was_heard;
+	int aside;
+	unsigned long long started_us;
+	unsigned long long longest_gap_us;
+	unsigned long late;
+	unsigned long mixes;
+} chant;
+
+static void chant_update(void)
+{
+	int heard = chant.heard;
+
+	if (heard)
+		chant.mixes++;
+	if (heard == chant.was_heard)
+		return;
+	chant.was_heard = heard;
+#ifdef HALO_VITA
+	if (mixer_on_fourth_core && heard != chant.aside)
+	{
+		vita_host_fourth_core_step_aside(heard);
+		chant.aside = heard;
+	}
+#endif
+	if (heard)
+	{
+		chant.started_us = statistics_now();
+		chant.longest_gap_us = 0;
+		chant.late = 0;
+		chant.mixes = 0;
+		return;
+	}
+	platform_log("sound mixer: the loading screen's chant played %.1f s (%lu mixes%s): device calls over 25 ms apart %lu, "
+		"longest gap %.1f ms", (double)(statistics_now() - chant.started_us) / 1.0e6, chant.mixes,
+		mixer_on_fourth_core ? ", the mixer off the fourth core meanwhile" : "", chant.late,
+		(double)chant.longest_gap_us / 1000.0);
+}
 
 static void SDLCALL audio_callback(void *userdata, SDL_AudioStream *stream, int additional_amount, int total_amount)
 {
@@ -1154,9 +1208,9 @@ static void SDLCALL audio_callback(void *userdata, SDL_AudioStream *stream, int 
 				vita_host_pin_current_thread(core);
 #ifdef HALO_VITA
 			if (core == 3)
-				vita_host_fourth_core_move("sound mixer");
+				mixer_on_fourth_core = vita_host_fourth_core_move("sound mixer") == 3;
 			else if (!setting)
-				vita_host_fourth_core_join("sound mixer", 1);
+				mixer_on_fourth_core = vita_host_fourth_core_join("sound mixer", 1) == 3;
 			else
 				vita_host_thread_watch("sound mixer");
 #endif
@@ -1174,6 +1228,13 @@ static void SDLCALL audio_callback(void *userdata, SDL_AudioStream *stream, int 
 				statistics_callback_gap_us = gap;
 			if (gap > 25000)
 				statistics_callbacks_late++;
+			if (chant.heard)
+			{
+				if (gap > chant.longest_gap_us)
+					chant.longest_gap_us = gap;
+				if (gap > 25000)
+					chant.late++;
+			}
 		}
 		previous_call = now;
 	}
@@ -1189,6 +1250,7 @@ static void SDLCALL audio_callback(void *userdata, SDL_AudioStream *stream, int 
 		SDL_PutAudioStreamData(stream, buffer, (int)(frames * OUTPUT_CHANNELS * sizeof(float)));
 		additional_amount -= (int)(frames * OUTPUT_CHANNELS * sizeof(float));
 	}
+	chant_update();
 }
 
 /* without a device, drain voices in real time */
@@ -1848,6 +1910,7 @@ static struct sdl_buffer *buffers;
 static void mix_buffers(float *output, unsigned long frames)
 {
 	struct sdl_buffer *buffer;
+	int heard = 0;
 
 	for (buffer = buffers; buffer; buffer = buffer->next)
 	{
@@ -1864,6 +1927,7 @@ static void mix_buffers(float *output, unsigned long frames)
 		pthread_mutex_unlock(&parameter_lock);
 		if (!playing || !buffer->samples || buffer->frames < 2 || step <= 0.0)
 			continue;
+		heard = 1;
 		current = buffer->current_volume;
 		increment = (volume - current) / (float)frames;
 		for (frame = 0; frame < frames; frame++)
@@ -1893,6 +1957,7 @@ static void mix_buffers(float *output, unsigned long frames)
 		}
 		buffer->current_volume = volume;
 	}
+	chant.heard = heard;
 }
 
 HRESULT WINAPI DirectSoundCreateBuffer(LPCDSBUFFERDESC description, LPDIRECTSOUNDBUFFER *result)
