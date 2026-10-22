@@ -3776,6 +3776,12 @@ boolean server_has_enough_machines(
 	}
 
 	has_enough_machines = machine_count >= minimum_machine_count;
+#ifdef HALO_DEDICATED_SERVER
+	/* (port) bots playing an empty server (sv_bots_when_empty): its own
+	machine's game is enough */
+	if (dedicated_server_bots_when_empty() && network_game_server_dedicated_bot_count() > 0)
+		has_enough_machines = TRUE;
+#endif
 
 	return has_enough_machines;
 }
@@ -3791,7 +3797,10 @@ static long server_minimum_players(
 #endif
 #ifdef HALO_DEDICATED_SERVER
 	/* (port) the operator's sv_minplayers (1 by default), people: the
-bots (sv_bots_fill) not counted */
+	bots (sv_bots_fill) not counted; bots playing an empty server
+	(sv_bots_when_empty) start its games themselves */
+	if (dedicated_server_bots_when_empty())
+		return 1;
 	return dedicated_server_minimum_players() + network_game_server_dedicated_bot_count();
 #endif
 	return server->game.minimum_players;
@@ -4041,7 +4050,8 @@ boolean network_game_server_game_can_start(
 
 #ifdef HALO_DEDICATED_SERVER
 	return server->state == 0 &&
-		server->game.player_count >= dedicated_server_minimum_players() + network_game_server_dedicated_bot_count();
+		server->game.player_count >= (dedicated_server_bots_when_empty() ? 1 :
+			dedicated_server_minimum_players() + network_game_server_dedicated_bot_count());
 #endif
 	return server->state == 0 &&
 		server->game.player_count >= server->game.minimum_players;
@@ -5327,8 +5337,9 @@ the game in progress as a player of a machine that joins or quits does
 (_message_server_add_player_ingame, _message_server_remove_player_ingame),
 so every build, 1.1.0's too, sees bots as other players.
 
-- No bots while nobody is in (no client machine): an empty server stays
-  empty, idle and listed as empty.
+- While nobody is in, the bots play on alone (sv_bots_when_empty, the
+  default: the server never looks empty); with it 0, none, and an empty
+  server stays empty, idle and listed as empty.
 - People first: each client machine counts as its players, one at least
   (one joined and not yet added), so a bot leaves as a machine joins, before
   its player asks for its slot; and a joining machine or player that finds
@@ -5618,9 +5629,12 @@ static void network_game_server_dedicated_bots(
 	/* (a lobby whose game is not set yet - its first second, the server's
 	next game of the cycle to come - has the bots it had: none leave and
 	come back each game) */
-	if (dedicated_server_bots_fill() && people > 0 && server->game.variant.game_engine_index == 0)
+	if (dedicated_server_bots_fill() && (people > 0 || dedicated_server_bots_when_empty()) &&
+		server->game.variant.game_engine_index == 0)
+	{
 		return;
-	if (dedicated_server_bots_fill() && people > 0)
+	}
+	if (dedicated_server_bots_fill() && (people > 0 || dedicated_server_bots_when_empty()))
 		wanted = PIN((long)server->game.maximum_players - 1 - people, 0, BOTS_MAXIMUM);
 	if (bots > wanted)
 	{

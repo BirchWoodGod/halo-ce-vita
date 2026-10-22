@@ -184,6 +184,10 @@ static struct
 	/* sv_bots_fill: bots fill the game to its most players less one while
 	anyone is in (network_server_manager.c) */
 	boolean bots_fill;
+	/* sv_bots_when_empty: ... and while nobody is in (the server plays its
+	cycle with bots alone, one slot free all the time: it never looks
+	empty); 0, only while people are in */
+	boolean bots_when_empty;
 	struct join_address joins[MAXIMUM_JOIN_ADDRESSES];
 } dedicated =
 {
@@ -191,6 +195,7 @@ static struct
 	.start_delay = 10,
 	.postgame_seconds_setting = 10,
 	.end_empty_seconds = 30,
+	.bots_when_empty = TRUE,
 };
 
 static void unquoted(char *destination, long size, char const *text);
@@ -593,8 +598,9 @@ static void command_help(
 		"                                   or the map's own (the default); from the next game",
 		"  sv_coop <level> [difficulty 0-3] co-op on a campaign level (a10...) instead of the cycle",
 		"  sv_map_download <0|1>            joiners may download the cycle's custom maps (0)",
-		"  sv_bots_fill <0|1>               bots fill the game to its most players less one while anyone",
-		"                                   is in, and leave as players join (0)",
+		"  sv_bots_fill <0|1>               bots fill the game to its most players less one, a slot always",
+		"                                   free, and leave as players join (0)",
+		"  sv_bots_when_empty <0|1>         the bots play while nobody is in too (1), or only with people (0)",
 		"  sv_bots_skill <easy|normal|heroic|legendary> the bots' skill (normal)",
 		"  sv_port <port>                   internet play's UDP port (init.txt only; -port)",
 		"  sv_game_port <port>              the game's ports on this machine, <port> and the next",
@@ -1311,7 +1317,16 @@ static void command(
 		if (integer_argument(name, argument, 0, 1, &value))
 		{
 			dedicated.bots_fill = (boolean)value;
-			say(value ? "bots fill the game to its most players less one while anyone is in" : "no bots");
+			say(value ? "bots fill the game to its most players less one" : "no bots");
+		}
+	}
+	else if (!csstrcmp(name, "sv_bots_when_empty"))
+	{
+		if (integer_argument(name, argument, 0, 1, &value))
+		{
+			dedicated.bots_when_empty = (boolean)value;
+			say(value ? "the bots play while nobody is in too (the server never looks empty)" :
+				"the bots play only while people are in");
 		}
 	}
 	else if (!csstrcmp(name, "sv_bots_skill"))
@@ -1476,6 +1491,12 @@ boolean dedicated_server_bots_fill(
 	void)
 {
 	return dedicated.bots_fill && !dedicated.coop;
+}
+
+boolean dedicated_server_bots_when_empty(
+	void)
+{
+	return dedicated_server_bots_fill() && dedicated.bots_when_empty;
 }
 
 long dedicated_server_frame_cap(
@@ -1685,7 +1706,9 @@ void dedicated_server_update(
 		dedicated.game_seconds += seconds;
 		if (dedicated.time_limit_minutes > 0 && dedicated.game_seconds >= (real)(dedicated.time_limit_minutes * 60))
 			end_game("the time limit", FALSE);
-		if (network_game_server_dedicated_machine_count() == 0)
+		/* (the bots playing an empty server's games, sv_bots_when_empty: it
+		goes on, its cycle with them) */
+		if (network_game_server_dedicated_machine_count() == 0 && !dedicated_server_bots_when_empty())
 		{
 			dedicated.empty_seconds += seconds;
 			if (dedicated.end_empty_seconds > 0 && dedicated.empty_seconds >= (real)dedicated.end_empty_seconds)

@@ -3775,6 +3775,16 @@ INIT
 		most=${HALO_TEST_BOTS_MAX:-16}
 		old=${HALO_TEST_VITA_OLD:-}
 		join_pids= names="joiner joiner2 joiner3"
+		# (the empty server: its bots play (sv_bots_when_empty), and the server
+		# browser lists it one short of full - a copy that browses alone, never
+		# joining: its join file never made)
+		side d0 10.10.20 192.168.20
+		run_copy browser "$d0_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-public \
+			"HALO_NETWORK_TEST_PUBLIC_NAME=Netns Bots" HALO_NETWORK_TEST_JOIN_FILE=never-made HALO_EXIT_AFTER=40
+		sleep 45
+		grep -a 'network test: the public games list "Netns Bots"' "$out/browser/run.log" | head -1
+		grep -aqE "network test: the public games list \"Netns Bots\".*$((most - 1)) of $most: 0 players, $((most - 1)) bots" \
+			"$out/browser/run.log" || fail "the empty server was not listed one short of full with bots alone"
 		run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$code \
 			HALO_NET_PLAYER_NAME=Vita1 HALO_EXIT_AFTER=$((seconds - 10)) HALO_TEST_INPUT=bot:2 HALO_NETWORK_TEST_SHOOT=2
 		join_pids="$join_pids $last_pid"

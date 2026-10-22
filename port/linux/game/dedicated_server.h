@@ -35,6 +35,9 @@ long dedicated_server_frame_cap(void);
 /* (network_server_manager.c) bots fill the game to its most players less
 one (sv_bots_fill) */
 boolean dedicated_server_bots_fill(void);
+/* ... and while nobody is in (sv_bots_when_empty, 1 by default): the server
+plays its cycle with bots alone */
+boolean dedicated_server_bots_when_empty(void);
 
 /* (network_server_manager.c, for the server) the remote machines joined to
 the game, and the players of the remote machines */
