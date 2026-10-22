@@ -24,7 +24,7 @@
 #               model and its prompt read "<need a string entry here>")
 #   b30         the beach: the console's monitor; AI characters (each given
 #               a free actor, ai_attach_free) and a Ghost; the characters'
-#               budget (32): 34 marines asked for, 32 placed, refused after
+#               budget (32 alive): 34 marines asked for, refused past 32 alive
 #   off         no Forge: a multiplayer game of Blood Gulch, D-pad up
 #               (zoom) and Square pressed: no "forge:" line at all
 #   files       the map variant files' writer, validator and names, and the
@@ -1976,7 +1976,8 @@ for c in $cases; do
 		expect "$c" "an Elite given a free actor" "forge: elite special given a free actor \\([0-9a-f]{8}\\)"
 		expect "$c" "a Ghost spawned" "forge: spawned Ghost \\(ghost, vehicles\\)"
 		expect "$c" "the AI budget refused past 32" "forge: AI budget full: 32 characters"
-		expect "$c" "32 characters at most" "forge: budget [0-9]+/256 objects, 32/32 AI"
+		# (32 alive: the dead count not, Oct 22 2026 - one a fall killed leaves room)
+		expect "$c" "32 characters alive at most" "forge: budget [0-9]+/256 objects, [0-9]+/32 AI \\(32 alive"
 		if grep -aq "given a free actor (ffffffff)" "$log"; then
 			fail "$c: a character got no actor"
 		fi ;;
