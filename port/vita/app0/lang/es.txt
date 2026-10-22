@@ -2631,6 +2631,8 @@
 # its columns' names are one or two letters (K: kills, D: deaths, A: assists)
 "Score" = "Puntos"
 "to activate" = "para activar"
+"to open" = "para abrir"
+"+%ld more - Hold" = "+%ld más - Mantener"
 "K" = "B"
 "D" = "M"
 "PING" = "PING"

@@ -247,11 +247,13 @@ In each level's map (ingame.txt):
   meter's; the host's table on a joined machine) - and the score; this
   machine's rows outlined in yellow; the dead and those out of lives dimmed;
   the score to win and the time left over it, "Hold [Triangle] to activate"
-  under it; no kills, deaths or assists held. Held with more players than
-  rows, the leaders and the player's own row last. Opened it is wider, with
-  kills, deaths and assists, the game type on the map, and a selector strip
-  under the rows (the emblem and name of the player Cross acts on; the
-  D-pad's up and down arrows). Triangle while it is held (one player on the
+  under it; no kills, deaths or assists held. All sixteen players are held
+  (eighteen compact rows with a team game's two bands); with more, the leaders
+  and the player's own row and "+N more - Hold [Triangle] to open". Opened it
+  is the same panel a little wider, with kills, deaths and assists, the game
+  type on the map, a small selector row under it (the emblem and name of the
+  player Cross acts on; the D-pad's up and down arrows) and the buttons in one
+  light line. Triangle while it is held (one player on the
   machine) opens it as a screen: the
   D-pad, the stick, L and R, a drag on the touch screen scroll it, Cross (a
   tap) on a player opens their options - MUTE CHAT, ADD FRIEND (VIEW FRIEND

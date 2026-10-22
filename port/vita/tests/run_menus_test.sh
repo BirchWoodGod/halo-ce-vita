@@ -242,7 +242,7 @@
 #            bots, Back held: held up over the game (not open: no screen of the player's, the game
 #            goes on), its rows the game's ranking (scores never rising down the list), sixteen
 #            players, fifteen BOT, this machine's marked; Triangle while held opens it, the D-pad down
-#            through it scrolls (rows 1-15, then 2-16 of 16), Cross on a bot's row its options (BACK
+#            through it scrolls (rows 1-18, then 2-19 of 24), Cross on a bot's row its options (BACK
 #            alone), Circle back, Circle closes. Team Slayer with seven bots: the two teams' bands,
 #            the leading team first, each team's players under its band, the party's and the flame's
 #            marks (HALO_TEST_SCOREBOARD_PARTY/_FLAME), Cross on the player's own row its options
@@ -2362,32 +2362,36 @@ PY
 		sb_name=$(profile_fields "$HALO_TEST_PROFILE" | cut -d'|' -f1 | cut -c1-11)
 		# (in the game: Back held, its frame; Triangle with it, Back let go: open; down sixteen, its
 		# frame; Cross: the options, their frame; Circle back; Circle closes)
-		downs=$(for i in $(seq 1 16); do printf 'down:150:300 '; done)
-		sb_pad="wait:150:32000 back:800:0 @scoreboard_ffa+back:1500:0 back+y:150:0 back:300:1500 @scoreboard_open:150:500 $downs@scoreboard_scrolled:150:800 a:150:1500 @scoreboard_options:150:800 b:150:1000 b:150:2000"
+		downs=$(for i in $(seq 1 7); do printf 'down:150:300 '; done)
+		downs2=$(for i in $(seq 1 14); do printf 'down:150:300 '; done)
+		sb_pad="wait:150:32000 back:800:0 @scoreboard_ffa+back:1500:0 back+y:150:0 back:300:1500 @scoreboard_open:150:500 $downs@scoreboard_scrolled:150:800 ${downs2}a:150:1500 @scoreboard_options:150:800 b:150:1000 b:150:2000"
 		profile_from=$HALO_TEST_PROFILE run h3scoreboard "$menus_data" 75 "$sb_pad" $sb_env \
-			HALO_NETWORK_TEST=local:bloodgulch:slayer HALO_BOTS=15
+			HALO_NETWORK_TEST=local:bloodgulch:slayer HALO_BOTS=15 HALO_TEST_SCOREBOARD_EXTRA=8
 		# (Team Slayer: held, its frame; open - the cursor starts on the player's own row -, Cross:
 		# its options; Circle back, Circle closes)
 		profile_from=$HALO_TEST_PROFILE run h3scoreboard_team "$menus_data" 60 \
-			"wait:150:32000 back:800:0 @scoreboard_team+back:1500:0 back+y:150:0 back:300:1500 a:150:1500 b:150:1000 b:150:1500" \
-			$sb_env HALO_NETWORK_TEST=local:bloodgulch:team_slayer HALO_BOTS=7 HALO_TEST_SCOREBOARD_PARTY=$sb_name \
+			"wait:150:32000 back:800:0 @scoreboard_team+back:1500:0 back+y:150:0 back:300:1500 @scoreboard_open_team:150:500 a:150:1500 b:150:1000 b:150:1500" \
+			$sb_env HALO_NETWORK_TEST=local:bloodgulch:team_slayer HALO_BOTS=15 HALO_TEST_SCOREBOARD_PARTY=$sb_name \
 			HALO_TEST_SCOREBOARD_FLAME=$sb_name
 		# (touch: open, then a drag up, a drag down and a tap on the third row: its options)
+		# (sixteen players, a free for all: all of them held)
+		profile_from=$HALO_TEST_PROFILE run h3scoreboard_16 "$menus_data" 50 "wait:150:32000 back:800:0 @scoreboard_16ffa+back:1500:0" \
+			$sb_env HALO_NETWORK_TEST=local:bloodgulch:slayer HALO_BOTS=15
 		profile_from=$HALO_TEST_PROFILE run h3scoreboard_touch "$menus_data" 75 "wait:150:32000 back:800:0 back+y:150:0 back:300:30000" \
-			$sb_env HALO_NETWORK_TEST=local:bloodgulch:slayer HALO_BOTS=15 \
+			$sb_env HALO_NETWORK_TEST=local:bloodgulch:slayer HALO_BOTS=15 HALO_TEST_SCOREBOARD_EXTRA=8 \
 			"HALO_TEST_TAPS=50000:320,380>320,150 54000:320,150>320,380 59000:200,135"
 		profile_from=$HALO_TEST_PROFILE run h3scoreboard_split "$menus_data" 50 "wait:150:32000 back:800:0 @scoreboard_split+back:1500:0" \
 			$sb_env HALO_NETWORK_TEST=local:bloodgulch:slayer HALO_BOTS=13 HALO_TEST_SCOREBOARD_SPLIT=1
 		profile_from=$HALO_TEST_PROFILE run h3scoreboard_es "$menus_data" 50 \
 			"wait:150:32000 back:800:0 @scoreboard_es+back:1500:0 back+y:150:0 back:300:1500 a:150:1500 @scoreboard_es_options:150:800 b:150:1000 b:150:1500" \
 			$sb_env HALO_LANGUAGE=es "HALO_TEST_LANG_DIR=$root/port/vita/app0/lang" HALO_BUTTON_ICONS=playstation \
-			HALO_NETWORK_TEST=local:bloodgulch:team_slayer HALO_BOTS=7
+			HALO_NETWORK_TEST=local:bloodgulch:team_slayer HALO_BOTS=15
 		# (the original: Scoreboard Halo CE, and Menu style Halo CE; the tests' Back held every 4 s)
 		profile_from=$HALO_TEST_PROFILE run h3scoreboard_classic "$menus_data" 50 "wait:150:1000" $sb_env HALO_SCOREBOARD=classic \
 			HALO_NETWORK_TEST=local:bloodgulch:slayer HALO_BOTS=3 HALO_NETWORK_TEST_SCORES=4
 		profile_from=$HALO_TEST_PROFILE run h3scoreboard_ce "$menus_data" 50 "wait:150:1000" $sb_env HALO_MENU_STYLE=classic \
 			HALO_NETWORK_TEST=local:bloodgulch:slayer HALO_BOTS=3 HALO_NETWORK_TEST_SCORES=4
-		for name in h3scoreboard h3scoreboard_team h3scoreboard_touch h3scoreboard_split h3scoreboard_es h3scoreboard_classic h3scoreboard_ce; do
+		for name in h3scoreboard h3scoreboard_team h3scoreboard_16 h3scoreboard_touch h3scoreboard_split h3scoreboard_es h3scoreboard_classic h3scoreboard_ce; do
 			log=$out/$name/run.log
 			echo "--- $name"
 			grep -aE "menus: h3 scoreboard: (held|opened|options|rows [0-9]|a drag|Circle|closed)|test (tap|drag)" "$log" | head -12
@@ -2451,12 +2455,12 @@ PY
 			fail h3scoreboard "held, the scoreboard opened as a screen (it takes no controller)"
 		ticks=$(sed -n '/menus: h3 scoreboard: held up/,/test pad: back+y/p' "$log" | grep -ac "network test: tick")
 		[ "$ticks" -ge 1 ] || fail h3scoreboard "the game did not go on under the held scoreboard ($ticks ticks said)"
-		sb_check h3scoreboard 16 free || fail h3scoreboard "the free for all's rows: $(sb_check h3scoreboard 16 free)"
+		sb_check h3scoreboard 24 free || fail h3scoreboard "the free for all's rows: $(sb_check h3scoreboard 24 free)"
 		grep -aq "menus: h3 scoreboard: opened (local player 0)" "$log" && grep -aq "ui: screen pc.h3.scoreboard.screen" "$log" ||
 			fail h3scoreboard "Triangle with Back held did not open the scoreboard"
 		grep -aq "menus: the PLAYERS screen opened" "$log" && fail h3scoreboard "Triangle opened PLAYERS, not the scoreboard"
-		grep -aq "menus: h3 scoreboard: rows 1-15 of 16 shown" "$log" && grep -aq "menus: h3 scoreboard: rows 2-16 of 16 shown" "$log" ||
-			fail h3scoreboard "the D-pad did not scroll the sixteen rows"
+		grep -aq "menus: h3 scoreboard: rows 1-18 of 24 shown" "$log" && grep -aq "menus: h3 scoreboard: rows 2-19 of 24 shown" "$log" ||
+			fail h3scoreboard "the D-pad did not scroll the twenty-four rows"
 		grep -aqE "menus: h3 scoreboard: options for [A-Za-z]+" "$log" && grep -aq "ui: screen pc.h3.scoreboard.options" "$log" ||
 			fail h3scoreboard "Cross on a row did not open its options"
 		grep -aE "menus: h3 scoreboard: options [A-Za-z]+: back$" "$log" > /dev/null ||
@@ -2464,14 +2468,15 @@ PY
 		grep -aq "menus: h3 scoreboard: Circle: closed" "$log" && grep -aq "menus: h3 scoreboard: closed" "$log" ||
 			fail h3scoreboard "Circle did not close the scoreboard"
 		log=$out/h3scoreboard_team/run.log
-		sb_check h3scoreboard_team 10 teams || fail h3scoreboard "the team game's rows: $(sb_check h3scoreboard_team 10 teams)"
+		sb_check h3scoreboard_team 18 teams || fail h3scoreboard "the team game's rows: $(sb_check h3scoreboard_team 18 teams)"
+		sb_check h3scoreboard_16 16 free || fail h3scoreboard "the sixteen: $(sb_check h3scoreboard_16 16 free)"
 		grep -aq "menus: h3 scoreboard: options $sb_name: back$" "$log" ||
 			fail h3scoreboard "the player's own options were not BACK alone ($sb_name)"
 		log=$out/h3scoreboard_touch/run.log
 		[ "$(grep -ac "menus: h3 scoreboard: a drag on the rows" "$log")" -ge 2 ] ||
 			fail h3scoreboard "the touch screen's drags were not taken as drags"
-		sed -n '/test drag: 320,150 to 320,380/,$p' "$log" | grep -aq "menus: h3 scoreboard: rows 1-15 of 16 shown" &&
-			grep -aq "menus: h3 scoreboard: rows 2-16 of 16 shown" "$log" || fail h3scoreboard "the drags did not scroll the rows"
+		sed -n '/test drag: 320,150 to 320,380/,$p' "$log" | grep -aq "menus: h3 scoreboard: rows 1-18 of 24 shown" &&
+			grep -aq "menus: h3 scoreboard: rows 7-24 of 24 shown" "$log" || fail h3scoreboard "the drags did not scroll the rows"
 		sed -n '/test tap: 200,135/,$p' "$log" | grep -aqE "menus: h3 scoreboard: options for " ||
 			fail h3scoreboard "a tap on a row did not open its options"
 		grep -aq "menus: h3 scoreboard: held up (local player 0, split screen's)" "$out/h3scoreboard_split/run.log" ||
