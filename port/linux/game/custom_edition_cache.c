@@ -55,6 +55,7 @@ each one, and their vertices read from the file as they load
 #include "../src/lang.h"
 #include "custom_edition_mods.h"
 #include "mcc_content.h"
+#include "mcc_sound.h"
 #include "tag_relocate.h"
 #include "load_profile.h"
 
@@ -1125,6 +1126,7 @@ static boolean custom_edition_cache_tags_convert(
 {
 	uint32_t loaded_bytes = report->tag_data_bytes + report->resource_tag_bytes;
 	struct custom_edition_conversion_report conversion;
+	struct custom_edition_cache_globals *globals = &custom_edition_cache_globals;
 	enum cache_file_status status;
 
 	custom_edition_cache_combine_resource_offsets(
@@ -1132,7 +1134,34 @@ static boolean custom_edition_cache_tags_convert(
 		loaded_bytes,
 		COMBINED_BITMAPS_OFFSET,
 		COMBINED_SOUNDS_OFFSET);
-	status = custom_edition_cache_convert(tag_cache, loaded_bytes, report->identity.name, &conversion);
+	{
+		/* (port) the sound effects of MCC's own maps, from its FSB bank
+		(mcc_sound.h): its streams asked for as each sound tag is converted */
+		struct mcc_sound_source mcc_sounds;
+		char reason[160];
+		boolean mcc_sounds_open = FALSE;
+
+		if (globals->map_from_mcc && globals->resource_files[_resource_map_sounds].opened)
+		{
+			mcc_sounds_open = mcc_sound_open(
+				&mcc_sounds,
+				COMBINED_SOUNDS_OFFSET,
+				globals->resource_files[_resource_map_sounds].source.size,
+				reason,
+				sizeof(reason));
+			if (mcc_sounds_open)
+				custom_edition_cache_convert_mcc_sounds(&mcc_sounds);
+			else
+				error(_error_silent, "mcc sound: the sound effects are silent: %s", reason);
+		}
+		status = custom_edition_cache_convert(tag_cache, loaded_bytes, report->identity.name, &conversion);
+		if (mcc_sounds_open)
+		{
+			custom_edition_cache_convert_mcc_sounds(NULL);
+			mcc_sound_log(&conversion);
+			mcc_sound_close();
+		}
+	}
 	custom_edition_load_progress_set(0.48f);
 	if (status != _cache_file_status_ok)
 	{
@@ -2203,9 +2232,10 @@ static struct cache_file_tag_header *custom_edition_cache_tags_load_private(
 	globals->map_mcc_stem[sizeof(globals->map_mcc_stem) - 1] = 0;
 	if (globals->map_from_mcc)
 	{
-		/* (MCC keeps every sound of its stock maps in
-		FMOD banks, sound\pc\*.fsb, which this build does not read yet) */
-		error(_error_silent, "mcc: '%s' is MCC's own %s map: its sounds are in MCC's FMOD banks, silent in this version",
+		/* (MCC keeps every sound of its stock maps in FMOD banks,
+		sound\pc\*.fsb: the sound effects (IMA ADPCM) play from their bank,
+		mcc_sound.h; the CELT banks' dialogue and music do not yet) */
+		error(_error_silent, "mcc: '%s' is MCC's own %s map: its sounds are in MCC's FMOD banks, the sound effects played from sounds_adpcm.fsb and the dialogue and music silent in this version",
 			mcc_stem, mcc_kind == _mcc_content_campaign ? "campaign" : "multiplayer");
 	}
 	globals->map_header_crc = cache_file_crc32_update(0, header, CACHE_FILE_HEADER_BYTES);
@@ -2235,6 +2265,21 @@ static struct cache_file_tag_header *custom_edition_cache_tags_load_private(
 	{
 		char resource_path[MAP_PATH_SIZE];
 
+		if (mcc_cea && globals->map_from_mcc && type == _resource_map_sounds)
+		{
+			/* (port: MCC's own maps have no sounds.map; the sounds slot of
+			the combined offset space is its sound effects' FSB bank, whose
+			IMA ADPCM streams the permutations are pointed at: mcc_sound.h) */
+			snprintf(resource_path, sizeof(resource_path), "%s%s", MCC_SOUND_DIRECTORY, MCC_SOUND_ADPCM_BANK);
+			if (!file_path_exists(resource_path) || !custom_edition_file_open(&globals->resource_files[type], resource_path))
+			{
+				error(_error_silent, "mcc: no sound effects bank '%s': every sound of the map is silent", resource_path);
+				continue;
+			}
+			csstrncpy(globals->resource_paths[type], resource_path, sizeof(globals->resource_paths[type]) - 1);
+			globals->resource_paths[type][sizeof(globals->resource_paths[type]) - 1] = 0;
+			continue;
+		}
 		if (mcc_cea)
 		{
 			char const *folder_end = strrchr(path, '\\');

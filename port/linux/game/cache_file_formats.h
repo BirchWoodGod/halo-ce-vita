@@ -494,6 +494,19 @@ one makes its sound unplayable (sound_prepare). */
 /* what custom_edition_cache_convert changed */
 struct custom_edition_conversion_report
 {
+	/* (port) of MCC's own maps' sounds, given their streams of MCC's FSB
+	banks (mcc_sound_source; mcc_sound.h): sounds and permutations made
+	playable, sounds whose permutations did not match the bank's streams or
+	were of another rate or channels than their streams (left silent), sounds
+	the lists name in a bank of CELT streams (dialogue, music: not played
+	yet), and sounds no list names */
+	int32_t mcc_sounds_mapped;
+	int32_t mcc_sound_permutations_mapped;
+	int32_t mcc_sounds_mismatched;
+	int32_t mcc_sounds_in_celt_banks;
+	int32_t mcc_sounds_unlisted;
+	int32_t mcc_sound_permutations_unmapped;
+	uint64_t mcc_sound_adpcm_bytes;
 	/* shaders whose type this build numbers differently, and transparent
 	chicago extended shaders made transparent chicago ones */
 	int32_t shaders_retyped;
@@ -712,6 +725,46 @@ enum cache_file_status custom_edition_cache_convert(
 	uint32_t loaded_bytes,
 	char const *map_name,
 	struct custom_edition_conversion_report *report);
+
+/* (port) One stream of an MCC FSB bank, as custom_edition_cache_convert
+needs it of a sound's permutation: its bytes in the bank's file, and what it
+holds (IMA ADPCM, which is Halo's Xbox ADPCM, so it is played as it lies). */
+struct mcc_sound_stream
+{
+	uint32_t offset;
+	uint32_t bytes;
+	uint32_t samples;
+	uint32_t rate;
+	uint8_t channels;
+	/* the name's "_<pitch range>_<permutation>" numbers, -1 for none */
+	int32_t name_range;
+	int32_t name_permutation;
+	/* its name ("<permutation>_<pitch range>_<permutation number>"), NULL if unknown */
+	char const *name;
+};
+
+/* What MCC's sound lists and FSB banks say about the sounds of its own maps
+(mcc_sound.c), which custom_edition_cache_convert asks for each sound tag
+of such a map. `find` gives the streams (the bank's first and how many,
+consecutive) of the sound tag `path`: 1 when the ADPCM bank has them, else
+0 with `*elsewhere` 1 when another bank (CELT) does and 0 when no list
+names it. `stream` gives stream `index`. The bank's file is the sounds slot
+of the combined offset space, which starts at `combined_offset`, `bank_bytes`
+long. `trace`, when not NULL, is told a line for each sound
+(HALO_MCC_SOUND_TRACE). */
+struct mcc_sound_source
+{
+	void *context;
+	int (*find)(void *context, char const *path, uint32_t *first, uint32_t *count, int *elsewhere);
+	int (*stream)(void *context, uint32_t index, struct mcc_sound_stream *stream);
+	void (*trace)(void *context, char const *line);
+	uint32_t combined_offset;
+	uint32_t bank_bytes;
+};
+
+/* Sets (NULL: none) the source custom_edition_cache_convert gives the sounds
+of an MCC map their samples from; it keeps the pointer until it is cleared. */
+void custom_edition_cache_convert_mcc_sounds(struct mcc_sound_source const *source);
 
 /* the name of a Halo PC behaviour, as Chimera's map list names it */
 char const *custom_edition_behaviour_name(

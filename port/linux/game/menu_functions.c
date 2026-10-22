@@ -1518,7 +1518,7 @@ static void h3_campaign_update(struct widget_instance *widget)
 	else if (h3_campaign.network == _h3_campaign_adhoc)
 		snprintf(text, sizeof(text), "%s", T("Co-op with the PS Vitas near you."));
 	else if (h3_mcc_level(h3_campaign.level))
-		snprintf(text, sizeof(text), "%s", T("MCC files, on this PS Vita alone. No sound yet."));
+		snprintf(text, sizeof(text), "%s", T("MCC files, on this PS Vita alone. Sound effects only for now."));
 	else
 		snprintf(text, sizeof(text), "%s", T("This party is local to this PS Vita."));
 	/* (the mission's level cannot be played: why; START GAME then says it

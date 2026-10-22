@@ -29,7 +29,9 @@ A name of these (MCC_CONTENT_NAME_PREFIX and a stock map's name) is the
 content folder's alone: it is only ever looked for there, never in the maps
 folder, and map sharing neither sends nor takes one. The folder is read,
 never written (xbox_files.c refuses every write there). Halo CE's sounds are
-in FMOD banks, not in its maps: silent in this version.
+in FMOD banks, not in its maps: the sound effects play from the IMA ADPCM
+bank (mcc_sound.h), the dialogue and music (CELT banks) are silent in this
+version.
 
 This unit is plain C (the names, lists and the loaders' table alone), for
 port/vita/tests/mcc_content_test.c.

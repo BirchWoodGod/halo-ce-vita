@@ -700,7 +700,7 @@ static void mcc_mod_add(
 		map->mod_index = mod_index;
 		map->order = (short)level;
 		snprintf(map->title, sizeof(map->title), "%s (MCC)", mcc_content_title(stem));
-		csstrncpy(map->description, T("Your MCC files' own level. No sound yet: MCC keeps it in sound banks this version doesn't read."),
+		csstrncpy(map->description, T("Your MCC files' own level. Sound effects only for now: the dialogue and music are in sound banks this version doesn't read."),
 			sizeof(map->description) - 1);
 	}
 	error(_error_silent, "mcc: %d campaign maps of the Halo content folder's halo1 (%d of the ten missing)", mod->maps_valid, missing);

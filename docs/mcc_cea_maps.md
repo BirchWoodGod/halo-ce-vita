@@ -51,10 +51,16 @@ ux0:data/haloce-vita/mcc/
       a10.map ... d40.map           the campaign (774 MB)
       beavercreek.map ... wizard.map the multiplayer maps (about 300 MB)
       bitmaps.map                   their pixels (186 MB): needed
+    sound/pc/
+      sounds_adpcm.fsb              the sound effects (88 MB): needed for them
+      lst/sounds_adpcm.lst.bin      which sounds they are (45 KB): needed for them
+      lst/sounds_dialogs.lst.bin, sounds_music.lst.bin,
+      lst/sounds_stream.lst.bin, sounds_debug.lst.bin
+                                    (186 KB; only to count what is still silent)
 ```
 
-`ui.map`, `halo1/maps/custom_edition/`, `halo1/sound/`, `prebuild/` and
-the other games' folders are not needed in this version. The Xbox data
+`ui.map`, `halo1/maps/custom_edition/`, the rest of `halo1/sound/`,
+`prebuild/` and the other games' folders are not needed in this version. The Xbox data
 (`ux0:data/haloce-vita/maps`, `default.xbe`) is still needed: the menus,
 fonts and the game's own files are the Xbox's.
 
@@ -75,7 +81,7 @@ Halo CE's maps are listed under names that are the folder's alone:
   in the classic campaign list after the ten levels as "The Pillar of
   Autumn (MCC)" ..., and in the Halo 3 campaign lobby each mission is
   MCC's where the folder has it, else the Xbox's ("MCC files, on this PS
-  Vita alone. No sound yet." under Ready). Every mission is open (they keep
+  Vita alone. Sound effects only for now." under Ready). Every mission is open (they keep
   no profile progress). Won, a level goes on to MCC's next one. Played
   alone, offline; co-op is not hosted for them.
 - the multiplayer maps as `mcc_bloodgulch` ... (level
@@ -104,10 +110,53 @@ names no identity for an MCC map is refused. Older builds see an unknown
 custom map and are refused by the host's map sharing. The dedicated
 server never plays them.
 
-**Sound**: silent in this version. MCC keeps every sound of its stock
-maps in FMOD sound banks (`halo1/sound/pc/*.fsb`), not in the maps; the
-log says so once per map (`mcc: 'b30' is MCC's own campaign map: its
-sounds are in MCC's FMOD banks, silent in this version`).
+**Sound** (`port/linux/game/mcc_sound.c`, `port/linux/src/fsb5.c`,
+`mcc_sound_list.c`): MCC keeps every sound of its stock maps in FMOD
+banks (`halo1/sound/pc/*.fsb`, FSB5), not in the maps, and says which
+streams of a bank each sound tag is in lists (`lst/sounds_*.lst.bin`).
+The maps name the Anniversary sounds (`sound\sfx\...`; most of their
+streams are CELT, in `sounds_debug.fsb`) and the classic ones of the same
+names (`sound\old_sfx\...`, which MCC plays in its classic mode) are IMA
+ADPCM in `sounds_adpcm.fsb`: this build plays those, for each sound the
+map names that the ADPCM bank has under `old_sfx`. IMA ADPCM in an FSB is
+the Xbox's own layout (36 bytes a channel for 64 samples, a stereo
+sound's channels' 4-byte groups interleaved), the format of Halo's own
+sound tags, so each permutation is pointed at its stream in the bank (the
+sounds slot of the combined offset space is the bank, as `sounds.map` is
+for a Custom Edition map) and read by the sound cache as it lies: nothing is decoded
+or kept in a cache file (a Custom Edition map's Ogg Vorbis sounds are,
+`custom_edition_sounds.c`; CELT will be). The sound's rate, channels and
+compression come from its streams, its pitch ranges, gains, classes and
+permutations' order from the tag.
+
+The lists: version 1, a count, then for each sound its tag path (a length
+with its zero, the path, backslashes, no extension), the bank's first stream
+and how many (consecutive, a pitch range after another), all little-endian
+32-bit (`mcc_sound_list.h`). A sound with several pitch ranges is one
+record with its path alone, or a record to each range named
+`<path>\<pitch range>` (a vehicle's engine). A stream is named
+`<permutation>_<pitch range>_<number in the record>`; a sound is mapped
+only when its number of permutations, the tag's permutations' names and
+these numbers all agree with its streams (else it stays silent and is
+counted), and its streams are of one rate (22050 or 44100 Hz) and channel
+count and fit the sound cache.
+
+Still silent: everything in the CELT banks: dialogue
+(`sounds_dialogs.fsb` and the other languages'), music, streamed ambience
+and foley (`sounds_music.fsb`, `sounds_stream.fsb`), and the few
+Anniversary-only sound effects the ADPCM bank has no classic twin of. One
+line says what each map got (`mcc sound: 468 of the map's 1438 sounds
+play from sounds_adpcm.fsb ...; still silent: 970 in the CELT banks ...`),
+and `HALO_MCC_SOUND_TRACE=1` logs each sound. Without the sound folder
+the maps play silent, as before (`mcc: no sound effects bank`); a bank or
+list that is damaged or of another version is refused, said, and the
+sounds stay silent.
+
+Tests: `port/vita/tests/run_mcc_sound_test.sh` (the FSB5 reader and list
+parser on made-up files under AddressSanitizer and UBSan, a fuzz target,
+an audit of your own sound folder, and the harness with sound on: sounds
+played by name, each checked against its stream decoded independently
+(`mcc_sound_check.py`), the mixer's output heard).
 
 Tests: `port/vita/tests/run_mcc_content_test.sh` (the names, Steam's
 libraryfolders.vdf and the loaders' table with no MCC file; with your
