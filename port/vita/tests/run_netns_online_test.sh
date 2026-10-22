@@ -2770,8 +2770,8 @@ h3liveprivate)
 	# (the live lobby private by default, insider.15: the host - its profile, Menu style Halo 3,
 	# Visibility Public as shipped - and the joiner friends (codes through files); the host's
 	# lobby on ONLINE: live, not listed; the friend joins it from presence (no code); Square: GAME
-	# OPTIONS, down seven to START GAME (VISIBILITY PUBLIC, the setting's), A: the lobby listed,
-	# the game's lobby and its countdown, the game)
+	# OPTIONS, down eight to START GAME (past WHO CAN JOIN and BOTS; VISIBILITY PUBLIC, the
+	# setting's), A: the lobby listed, the game's lobby and its countdown, the game)
 	hc=$out/host.code jc=$out/joiner.code
 	mkdir -p "$out/host/save/u/UDATA/869079979327"
 	cp "$HALO_TEST_PROFILE" "$out/host/save/u/UDATA/869079979327/blam.sav"
@@ -2779,7 +2779,7 @@ h3liveprivate)
 		cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$out/host/save/u/UDATA/869079979327/"
 	private_pad="wait:150:3000 down:150:700 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:${HALO_TEST_PRIVATE_WAIT:-60000}"
 	private_pad="$private_pad x wait:150:4000"
-	for row in $(seq 1 7); do private_pad="$private_pad down:150:400"; done
+	for row in $(seq 1 8); do private_pad="$private_pad down:150:400"; done
 	private_pad="$private_pad a wait:150:5000"
 	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
 		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:1 HALO_NET_HOST_PUBLIC=true \
