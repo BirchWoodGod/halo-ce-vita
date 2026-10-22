@@ -951,6 +951,8 @@ static struct forge_spawn *forge_spawn_add(long id, short kind, signed char team
 	struct forge_transform const *home);
 static void forge_spawn_remove(struct forge_spawn *spawn);
 static void forge_net_update(void);
+static void forge_net_monitor_pack_want(void);
+static void forge_net_monitor_models_update(void);
 static void forge_net_map_loaded(void);
 static void forge_net_new_round(void);
 static void forge_net_draw_monitors(long font_index, short height);
@@ -2172,7 +2174,8 @@ static long forge_object_under_crosshair_at(
 		{
 			long hit = object_get_ultimate_parent(collision.object_index);
 
-			if (!forge_object_is_players(hit) && hit != forge_globals.held_object_index)
+			/* (never another monitor's 343 Guilty Spark: this machine's own) */
+			if (!forge_object_is_players(hit) && hit != forge_globals.held_object_index && !forge_net_local_object(hit))
 				nearest_index = hit;
 		}
 	}
@@ -4967,6 +4970,12 @@ void forge_packs_prebuild(
 				scene_packs_state_name(scene_packs_prebuild(forge_packs[pack].name)));
 		}
 	}
+	/* (343 Guilty Spark, a network game's other monitors: forge_net.inc) */
+	if (scene_packs_status("menu_monitor", NULL, NULL, 0) == _scene_pack_state_none &&
+		scene_packs_recipe_available("menu_monitor", NULL, 0))
+	{
+		platform_log("forge: packs: menu_monitor wanted for the lobby: %s", scene_packs_state_name(scene_packs_prebuild("menu_monitor")));
+	}
 }
 
 boolean forge_packs_building(
@@ -5284,9 +5293,11 @@ void forge_map_loaded(
 	forge_spawns_clear();
 	if (forge_globals.game_active && forge_globals.variant_pending)
 		forge_spawns_from_layout(&forge_variant_layout);
-	/* (the session's packs, before the map's objects are placed) */
+	/* (the session's packs, before the map's objects are placed; a network
+	Forge game's the Monitor's after them, for the other monitors) */
 	if (forge_globals.game_active)
 		forge_packs_load();
+	forge_net_monitor_pack_want();
 	/* (a network Forge game's host keeps its request between games: its
 	lobby's next START FORGE plays it again) */
 	if (!forge_globals.game_active && !forge_net_hosting())

@@ -72,7 +72,8 @@
 #              the Xbox's multiplayer pause, the game not paused) and its CLEAR DEAD AI asks
 #              the host, which clears them (two, then the third killed after) and says so
 #              back; every machine has the others' monitors where they fly and the first
-#              joiner draws both balls in its view (HALO_TEST_SHOTS: its screenshot). Then the
+#              joiner draws both in its view (HALO_TEST_SHOTS: its screenshot) - as 343 Guilty Spark
+#              (the menu_monitor pack, from c20) where the campaign maps are, else balls. Then the
 #              host places a fourth and kills it, the second joiner moves its spawn marker (made
 #              by the host), and the first joiner's NEW ROUND (Grunt pirate:
 #              no way to respawn the AI) is made by the host, the Elite back alive; neither
@@ -569,6 +570,16 @@ forge_case() {
 		done
 		[ "$(sed -n '/test command at tick 1850: forge net$/,$p' "$jl" | grep -ac "forge net: player [0-9] (.*): monitor at .*; ball drawn")" -ge 2 ] ||
 			fail "the first joiner did not draw both other monitors' balls"
+		# (the other monitors as 343 Guilty Spark, the menu_monitor pack's, when its campaign maps are
+		# there: a local object on each machine, never the netcode's)
+		if [ -r "$menus_data/maps/c20.map" ]; then
+			for log in "$hl" "$jl" "$hl2"; do
+				who=$(basename "$(dirname "$log")")
+				grep -aq "forge net: the other monitors are 343 Guilty Spark (menu_monitor loaded)" "$log" ||
+					fail "$who: the Monitor's pack not loaded: $(grep -a "forge net: the other monitors are" "$log" | head -1)"
+				grep -aq "'s monitor shown as 343 Guilty Spark" "$log" || fail "$who: no other monitor shown as 343 Guilty Spark"
+			done
+		fi
 		;;
 	h3forgeonline)
 		local menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}

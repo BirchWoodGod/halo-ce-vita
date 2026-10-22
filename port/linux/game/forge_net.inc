@@ -85,6 +85,11 @@ void platform_show_message(char const *title, char const *text);
 
 /* ---------- constants */
 
+/* (the other monitors as 343 Guilty Spark: forge_net_monitor_models_update)
+the scene pack and its biped */
+#define FORGE_NET_MONITOR_PACK "menu_monitor"
+#define FORGE_NET_MONITOR_TAG "characters\\monitor\\monitor"
+
 enum
 {
 	/* the records, palette entries and layout pieces a message holds */
@@ -1248,6 +1253,9 @@ void forge_net_frame(
 					scene_packs_prebuild(forge_packs[index].name);
 			}
 			forge_blocks_prebuild(map_name);
+			/* (343 Guilty Spark, the other monitors': forge_net_monitor_models_update) */
+			if (scene_packs_recipe_available(FORGE_NET_MONITOR_PACK, NULL, 0))
+				scene_packs_prebuild(FORGE_NET_MONITOR_PACK);
 			platform_log("forge net: the host's packs and %s's blocks prebuilt in its lobby", map_name);
 		}
 	}
@@ -3776,6 +3784,7 @@ static void forge_net_update(
 		forge_net_host_update();
 	else if (forge_net_client())
 		forge_net_client_frame();
+	forge_net_monitor_models_update();
 }
 
 /* (network_objects.c) whether this client holds the object: its place is
@@ -3939,6 +3948,9 @@ static struct
 	unsigned long time;
 	/* (when it was last in a view and drawn: the tests' log) */
 	unsigned long drawn;
+	/* (forge_net_monitor_models_update) the Monitor's model shown in its
+	place: a local object of this machine's, NONE */
+	long model;
 } forge_net_orbs[FORGE_NET_PLAYERS];
 
 /* (the debug vertex: rasterizer_debug.c's) */
@@ -4054,6 +4066,19 @@ static void forge_net_render_monitors(
 		forward = forge_net_orbs[index].forward;
 		if (normalize3d(&forward) == 0.f)
 			continue;
+		/* (343 Guilty Spark himself in its place: no ball) */
+		if (forge_net_orbs[index].model != NONE && object_try_and_get(forge_net_orbs[index].model))
+		{
+			to_orb.i = forge_net_orbs[index].position.x - render.camera.position.x;
+			to_orb.j = forge_net_orbs[index].position.y - render.camera.position.y;
+			to_orb.k = forge_net_orbs[index].position.z - render.camera.position.z;
+			if (dot_product3d(&to_orb, &render.camera.forward) >= 0.f &&
+				render_frustum_sphere_visible(&render.frustum, &forge_net_orbs[index].position, FORGE_NET_ORB_RADIUS))
+			{
+				forge_net_orbs[index].drawn = now | 1;
+			}
+			continue;
+		}
 		/* (not behind the camera, nor out of its frustum) */
 		to_orb.i = forge_net_orbs[index].position.x - render.camera.position.x;
 		to_orb.j = forge_net_orbs[index].position.y - render.camera.position.y;
@@ -4120,6 +4145,154 @@ static void forge_net_render_monitors(
 			rasterizer_globals.current_lock_operation = _rasterizer_lock_none;
 		}
 		rasterizer_dynamic_vertices_delete(buffer);
+	}
+}
+
+/* ---- the other players' monitors as 343 Guilty Spark (the owner, Oct 22
+2026): the campaign's Monitor, the menu_monitor scene pack's (the Halo 3
+menus' Forge lobby has him: built from the player's own c20, c10, c40 or
+d40), wanted with a network Forge game's map and loaded when built. Each
+other player flying the monitor is one of him in its place (the ball's,
+eased the same), turned where it looks, its name over him (forge_draw);
+none for a Spartan (its own unit shown). A local object of this machine's
+alone: never the netcode's (forge_net_local_object: network_objects.c
+neither sends nor deletes it), no collisions, unhurt, never picked by the
+crosshair; deleted when its player is a Spartan again, leaves, or the map
+goes. Without the pack (no campaign map, the packs off, no room): the ball,
+as before */
+
+
+/* (forge_map_loaded, a network Forge game's map, after its packs) the
+Monitor's pack loaded, as Forge's own are (prebuilt in the lobbies - the
+Forge lobby's, a joiner's of the host's, the Halo 3 menus' -; built now if
+it is not, once: 84 KB of the tag cache); none when its source maps are
+not there (the ball then) */
+static void forge_net_monitor_pack_want(
+	void)
+{
+	short index;
+
+	for (index = 0; index < FORGE_NET_PLAYERS; index++)
+		forge_net_orbs[index].model = NONE;
+	if (!forge_globals.game_active || forge_globals.playing || (!forge_net_hosting() && !forge_net_client_session()))
+		return;
+	{
+		char why[SCENE_PACK_WHY_SIZE];
+		boolean loaded = scene_packs_recipe_available(FORGE_NET_MONITOR_PACK, why, sizeof(why)) &&
+			scene_packs_load_now(FORGE_NET_MONITOR_PACK);
+
+		if (!loaded && !why[0])
+			scene_packs_status(FORGE_NET_MONITOR_PACK, NULL, why, sizeof(why));
+		platform_log("forge net: the other monitors are %s%s%s", loaded ? "343 Guilty Spark (menu_monitor loaded)" : "balls",
+			loaded ? "" : ": ", loaded ? "" : why[0] ? why : "menu_monitor not loaded");
+	}
+}
+
+/* whether an object is one of this machine's Monitors (local: never the
+netcode's) */
+boolean forge_net_local_object(
+	long object_index)
+{
+	short index;
+
+	if (object_index == NONE)
+		return FALSE;
+	for (index = 0; index < FORGE_NET_PLAYERS; index++)
+	{
+		if (forge_net_orbs[index].model == object_index)
+			return TRUE;
+	}
+	return FALSE;
+}
+
+static void forge_net_monitor_model_delete(
+	short index)
+{
+	if (forge_net_orbs[index].model != NONE && object_try_and_get(forge_net_orbs[index].model))
+		object_delete(forge_net_orbs[index].model);
+	forge_net_orbs[index].model = NONE;
+}
+
+/* (forge_net_update, each frame before the tick) each other monitor's
+Monitor made, held where its ball is, or deleted */
+static void forge_net_monitor_models_update(
+	void)
+{
+	long tag_index = NONE;
+	short index;
+
+	if (forge_globals.game_active && !forge_globals.playing && (forge_net_host() || forge_net_client()))
+		tag_index = scene_packs_tag(FORGE_NET_MONITOR_PACK, BIPED_DEFINITION_TAG, FORGE_NET_MONITOR_TAG);
+	for (index = 0; index < FORGE_NET_PLAYERS; index++)
+	{
+		struct forge_net_transform view;
+		struct object_datum *object;
+		struct unit_datum *unit;
+		real_vector3d forward;
+		real_vector3d facing;
+		real_point3d position;
+		boolean wanted = tag_index != NONE && forge_net_orbs[index].shown && forge_net_monitor_view(index, &view);
+
+		object = forge_net_orbs[index].model != NONE ? object_try_and_get(forge_net_orbs[index].model) : NULL;
+		if (forge_net_orbs[index].model != NONE && (!wanted || !object || object->definition_index != tag_index))
+		{
+			forge_net_monitor_model_delete(index);
+			object = NULL;
+		}
+		if (!wanted)
+			continue;
+		position = forge_net_orbs[index].position;
+		forward = forge_net_orbs[index].forward;
+		if (normalize3d(&forward) < 0.0001f)
+			forward = *global_forward3d;
+		/* (upright, turned where it looks along the ground; his eye looks
+		where the player does) */
+		facing = forward;
+		facing.k = 0.f;
+		if (normalize3d(&facing) < 0.0001f)
+			facing = *global_forward3d;
+		if (!object)
+		{
+			struct object_placement_data placement;
+			char name[48];
+
+			object_placement_data_new(&placement, tag_index, NONE);
+			SET_FLAG(placement.flags, _new_object_never_automatically_delete_bit, TRUE);
+			placement.position = position;
+			placement.forward = facing;
+			placement.up = *global_up3d;
+			forge_net_orbs[index].model = object_new(&placement);
+			object = forge_net_orbs[index].model != NONE ? object_try_and_get(forge_net_orbs[index].model) : NULL;
+			if (!object)
+			{
+				forge_net_orbs[index].model = NONE;
+				continue;
+			}
+			object_scripting_set_collideable(forge_net_orbs[index].model, FALSE);
+			SET_FLAG(object->object.damage_flags, _object_cannot_take_damage_bit, TRUE);
+			SET_FLAG(object->object.flags, _object_shadowless_bit, TRUE);
+			forge_net_player_name(index, name, sizeof(name));
+			platform_log("forge net: player %d (%s)'s monitor shown as 343 Guilty Spark (object %lx)", index, name,
+				(unsigned long)forge_net_orbs[index].model);
+		}
+		if (distance_squared3d(&object->object.position, &position) > 0.0001f ||
+			dot_product3d(&object->object.forward, &facing) < 0.9999f)
+		{
+			object_set_position(forge_net_orbs[index].model, &position, &facing, global_up3d);
+		}
+		object->object.translational_velocity = *global_zero_vector3d;
+		object->object.angular_velocity = *global_zero_vector3d;
+		unit = unit_try_and_get(forge_net_orbs[index].model);
+		if (unit)
+		{
+			unit->unit.desired_facing_vector = facing;
+			unit->unit.desired_aiming_vector = forward;
+			unit->unit.aiming_vector = forward;
+			unit->unit.desired_looking_vector = forward;
+			unit->unit.looking_vector = forward;
+			unit->unit.aiming_velocity = *global_zero_vector3d;
+			unit->unit.looking_velocity = *global_zero_vector3d;
+		}
 	}
 }
 
@@ -4394,7 +4567,7 @@ static void forge_net_log_state(
 				platform_log("forge net: player %d (%s): monitor at %.2f %.2f %.2f facing %.2f %.2f %.2f; ball %s at %.2f %.2f %.2f",
 					index, name, view.position[0], view.position[1], view.position[2], view.forward[0], view.forward[1],
 					view.forward[2], forge_net_orbs[index].drawn && system_milliseconds() - forge_net_orbs[index].drawn < 1000 ?
-					"drawn" : "not in view", forge_net_orbs[index].position.x,
+					(forge_net_orbs[index].model != NONE ? "drawn (343 Guilty Spark)" : "drawn") : "not in view", forge_net_orbs[index].position.x,
 					forge_net_orbs[index].position.y, forge_net_orbs[index].position.z);
 			}
 		}

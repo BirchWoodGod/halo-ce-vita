@@ -498,6 +498,10 @@ pack's tags by path), NONE when this machine has no such tag; and whether
 it holds the object (its place its own while held) */
 long forge_net_client_tag(
 	long host_tag_index);
+/* (network_objects.c, forge.c) whether an object is this machine's own
+343 Guilty Spark shown for another player's monitor: never the netcode's */
+boolean forge_net_local_object(
+	long object_index);
 boolean forge_net_client_holds(
 	long object_index);
 

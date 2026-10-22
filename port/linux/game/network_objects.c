@@ -588,9 +588,11 @@ static boolean distributed_object_networked(
 {
 	struct object_header_datum *header = object_header_try_and_get(object_index);
 
+	/* (not a Forge game's 343 Guilty Spark for another player's monitor: a
+	machine's own, forge_net.inc) */
 	return header && header->datum && TEST_FLAG(NETWORKED_OBJECT_TYPES, header->type) &&
 		!TEST_FLAG(header->flags, _object_header_being_deleted_bit) &&
-		DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index) < MAXIMUM_TRACKED_OBJECTS;
+		DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index) < MAXIMUM_TRACKED_OBJECTS && !forge_net_local_object(object_index);
 }
 
 boolean network_objects_client_has(
