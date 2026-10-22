@@ -1059,6 +1059,8 @@ static boolean custom_edition_cache_tags_validate(
 	}
 	if (globals->resource_files[_resource_map_sounds].opened)
 	{
+		/* (port: or the Halo content folder's halo1\maps\custom_edition) */
+		platform_halo_pc_resource_map(directory, type_name, path, MAP_PATH_SIZE);
 		ranges[range_count].offset = COMBINED_SOUNDS_OFFSET;
 		ranges[range_count++].size = globals->resource_files[_resource_map_sounds].source.size;
 	}

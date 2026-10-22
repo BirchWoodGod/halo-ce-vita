@@ -59,6 +59,7 @@ is let go in scenario_tags_unload, before the next map's tags load.
 /* the platform layer's (port/linux/src) */
 void platform_log(char const *format, ...);
 void platform_heap_usage(unsigned long *in_use, unsigned long *capacity);
+int platform_halo_pc_resource_map(const char *maps_directory, const char *name, char *path, unsigned long path_size);
 void platform_contiguous_usage(unsigned long *used, unsigned long *free_bytes);
 unsigned long long vita_host_time_us(void);
 
@@ -1617,7 +1618,8 @@ static boolean menu_resource_open(struct menu_resource_file *file, char const *n
 	enum cache_file_status status;
 
 	memset(file, 0, sizeof(*file));
-	snprintf(path, sizeof(path), "%s%s.map", cache_files_map_directory(), name);
+	/* (the maps folder's, else the Halo content folder's custom_edition one) */
+	platform_halo_pc_resource_map(cache_files_map_directory(), name, path, sizeof(path));
 	file->handle = CreateFileA(path, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
 	if (file->handle == INVALID_HANDLE_VALUE)
 		return FALSE;
@@ -2096,7 +2098,8 @@ static void menu_tags_art_preread(void)
 	free(paths);
 }
 
-/* whether the maps folder has a bitmaps.map and a loc.map (a quick look:
+/* whether the maps folder (or the Halo content folder's custom_edition) has a
+bitmaps.map and a loc.map (a quick look:
 no file opened) */
 static boolean menu_resource_files_present(void)
 {
@@ -2108,7 +2111,7 @@ static boolean menu_resource_files_present(void)
 		char path[300];
 		DWORD attributes;
 
-		snprintf(path, sizeof(path), "%s%s.map", cache_files_map_directory(), names[index]);
+		platform_halo_pc_resource_map(cache_files_map_directory(), names[index], path, sizeof(path));
 		attributes = GetFileAttributesA(path);
 		if (attributes == (DWORD)-1 || (attributes & FILE_ATTRIBUTE_DIRECTORY))
 			return FALSE;

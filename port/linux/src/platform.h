@@ -174,6 +174,10 @@ int platform_mcc_root(char *out, unsigned long out_size);
 void platform_mcc_root_forget(void);
 int platform_host_path_is_mcc(const char *host_path);
 int platform_xbox_path_write_refused(const char *xbox_path);
+/* (port) The Halo PC resource map <name>.map (bitmaps, loc, sounds): the maps
+folder's, else the Halo content folder's halo1\maps\custom_edition\; its
+Xbox-style path into `path`, TRUE when a file is there (xbox_files.c) */
+int platform_halo_pc_resource_map(const char *maps_directory, const char *name, char *path, unsigned long path_size);
 /* A Custom Edition map's tag cache of `bytes`: the window above when it is
 reserved, else memory of its own (the Vita, which cannot have the window),
 whose tags are then moved there (custom_edition_cache.c); NULL when there is
