@@ -823,7 +823,7 @@ for case in $cases; do
 		# (Square: GAME OPTIONS (Create Game); GAME TYPE, A: the picker, down, A: SLAYER PRO; down two
 		# to NAME, A: typed; down five to BOTS (past WHO CAN JOIN), right: OFF; down to START GAME, A)
 		run h3create "$menus_data" 50 "$h3mppad x wait:150:4000 a wait:150:3000 down:150:600 a wait:150:4000 down:150:500 down:150:500 a wait:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 right:150:800 down:150:500 a wait:150:5000" \
-			HALO_MENU_STYLE=halo3 $h3net "HALO_TEST_TEXT_INPUT=Vita Night"
+			HALO_MENU_STYLE=halo3 $h3net "HALO_TEST_TEXT_INPUT=Vita Night" HALO_BOTS_ONLINE=full
 		check_h3 h3create halo3
 		log=$out/h3create/run.log
 		grep -aq "ui: screen pc.h3.setup.screen" "$log" || fail h3create "Square did not open GAME OPTIONS (Create Game)"
