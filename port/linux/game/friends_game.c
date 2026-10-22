@@ -72,6 +72,8 @@ unsigned long system_milliseconds(void);
 void platform_ask_question(char const *title, char const *text);
 int platform_question_answer(void);
 int platform_question_asking(void);
+/* menu_functions.c's: the profile the menus' nameplate shows (NONE: none) */
+long menus_player_profile_index(void);
 /* menu_functions.c's: the System Link screen opened at the next frame, as
 JOIN WITH CODE opens it */
 void menu_functions_open_system_link(void);
@@ -166,9 +168,15 @@ static void friends_game_activity(boolean main_menu_loaded)
 		}
 	}
 	p2p_friends_set_activity(state, map, gametype, engine, difficulty, pc_map, players, maximum);
-	/* (the name: the first profile's) */
+	/* (the name: the first local player's profile's; at the menus, where
+there is no active profile until a game or SELECT PROFILE - the testers'
+insider.21 logs' nameplates say none - the one the nameplate shows: the one
+chosen, else the last used, else the first, menus_player_profile_index.
+With none, p2p_friends' stand-in) */
 	name[0] = 0;
 	profile_index = player_ui_get_active_player_profile_index(0);
+	if (profile_index == NONE)
+		profile_index = menus_player_profile_index();
 	if (profile_index != NONE)
 	{
 		struct player_profile profile;

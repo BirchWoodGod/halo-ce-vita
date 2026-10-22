@@ -110,8 +110,11 @@ int config_boolean(const char *name)
 	return 0;
 }
 static const char *lobby_name_setting = "";
+static const char *player_name_setting = "";
 const char *config_string(const char *name)
 {
+	if (!strcmp(name, "network.player_name"))
+		return player_name_setting;
 	return !strcmp(name, "network.lobby_name") ? lobby_name_setting : "";
 }
 static int quiet;
@@ -1147,6 +1150,59 @@ static void test_cards(void)
 	game_pass(6);
 	use(1);
 	check(p2p_friends_player_state(2) == P2P_FRIENDS_PLAYER_FRIEND, "Bravo and Charlie friends");
+	/* a friend's card renames them on the list: Bravo knew Charlie by a
+	game's name (Grunt pirate on the owner's list as "Bloodgulch ctf",
+	insider.21); Charlie's card, asked again, says Charlie */
+	{
+		struct friend_record *record = find_friend(machines[2].key);
+
+		check(record != NULL, "Bravo's list has Charlie");
+		if (record)
+			snprintf(record->name, sizeof(record->name), "%s", "Bloodgulch ctf");
+		machines[1].machines[2].has_card = 0;
+		machines[1].machines[2].asking = 0;
+		machines[1].machines[2].asked_time = 0;
+		check(p2p_friends_player_ask(2, P2P_FRIENDS_PLAYER_ADD) == P2P_FRIENDS_DONE, "Bravo asks Charlie's card again");
+		game_pass(6);
+		use(1);
+		record = find_friend(machines[2].key);
+		check(record && !strcmp(record->name, "Charlie"), "Charlie's card renamed them on Bravo's list");
+		/* never back to the stand-in: a card saying "Player" leaves the name */
+		use(2);
+		p2p_friends_set_name("");
+		use(1);
+		machines[1].machines[2].has_card = 0;
+		machines[1].machines[2].asking = 0;
+		machines[1].machines[2].asked_time = 0;
+		check(p2p_friends_player_ask(2, P2P_FRIENDS_PLAYER_ADD) == P2P_FRIENDS_DONE, "Bravo asks once more");
+		game_pass(6);
+		use(1);
+		record = find_friend(machines[2].key);
+		check(record && !strcmp(record->name, "Charlie"), "a card with no name of the player's left Charlie's name");
+		use(2);
+		p2p_friends_set_name("Charlie");
+	}
+	/* the name a machine with no profile name gives (friend requests, cards,
+	party plates): the Vita's user name, else "Player" - never the lobby's,
+	a game's name */
+	{
+		char name[P2P_FRIEND_NAME_SIZE];
+
+		use(2);
+		p2p_friends_set_name("");
+		lobby_name_setting = "Bloodgulch ctf";
+		own_name(name);
+		check(!strcmp(name, "Player"), "no profile name and no user name: Player, not the lobby's name");
+		player_name_setting = "GruntVita";
+		own_name(name);
+		check(!strcmp(name, "GruntVita"), "no profile name: the Vita's user name");
+		p2p_friends_set_name("Charlie");
+		own_name(name);
+		check(!strcmp(name, "Charlie"), "the profile's name first");
+		lobby_name_setting = "";
+		player_name_setting = "";
+		use(1);
+	}
 	/* appearing offline (or friends off): no answer, nothing of the player's sent */
 	use(0);
 	machines[0].test_appeared_offline = 1;

@@ -859,6 +859,15 @@ static void h3_nameplate_read(void)
 	}
 }
 
+/* (friends_game.c) the profile the nameplate shows: the active one, else
+the one chosen, else the last used, else the first; NONE without one. Read
+again at most every H3_NAMEPLATE_READ_MILLISECONDS, as the nameplate */
+long menus_player_profile_index(void)
+{
+	h3_nameplate_read();
+	return h3_plate.shown;
+}
+
 /* the name the nameplate shows: its profile's; with none (a first start),
 the player's name (network.player_name: on the Vita its user name), else
 "Player". Not the game's "get active plyr profile name", which asserts

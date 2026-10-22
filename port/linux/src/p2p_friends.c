@@ -2293,11 +2293,14 @@ static void message_start(struct message *message, int type, const unsigned char
 }
 
 /* the player's name as friends see it: the profile's (the game's
-network name), else the Vita's */
+network name), else the Vita's user name (network.player_name, as a network
+game names a player with no profile), else "Player". Never the lobby's name
+(network.lobby_name): that is a game's name, and Grunt pirate's own party
+plate and friend card said "bloodgulch ctf", his game's (insider.21) */
 static void own_name(char *name)
 {
-	const char *lobby = config_string("network.lobby_name");
-	const char *chosen = friends->name[0] ? friends->name : lobby && lobby[0] ? lobby : "Player";
+	const char *user = config_string("network.player_name");
+	const char *chosen = friends->name[0] ? friends->name : user && user[0] ? user : "Player";
 
 	if (!clean_text(name, NAME_LENGTH, (const unsigned char *)chosen, (int)strlen(chosen), 1))
 		snprintf(name, P2P_FRIEND_NAME_SIZE, "Player");
@@ -3835,6 +3838,19 @@ static void card_heard(const struct card_packet *packet)
 		memcpy(machine->key, key, P2P_KEY_SIZE);
 		snprintf(machine->name, sizeof(machine->name), "%s", name);
 		platform_log("friends: %s (machine %d) answered with their friend card", name, from);
+		{
+			/* a friend's card names them as they are now: the list's name
+			follows it (a name kept from a request or a stand-in, "Player"
+			or a game's name, until then), but never back to the stand-in */
+			struct friend_record *record = find_friend(key);
+
+			if (record && name[0] && strcmp(name, "Player") && strcmp(record->name, name))
+			{
+				platform_log("friends: %s is now %s (their friend card)", record->name, name);
+				snprintf(record->name, sizeof(record->name), "%s", name);
+				friends->dirty = 1;
+			}
+		}
 		friends->card_action = machine->intent;
 		memcpy(friends->card_action_key, key, P2P_KEY_SIZE);
 		snprintf(friends->card_action_name, sizeof(friends->card_action_name), "%s", name);
@@ -5327,6 +5343,8 @@ void p2p_friends_set_name(const char *name)
 	{
 		memcpy(friends->name, cleaned, sizeof(cleaned));
 		friends->activity_changed = 1;
+		platform_log("friends: this machine's player is %s to friends%s", cleaned[0] ? cleaned : "unnamed",
+			cleaned[0] ? "" : " (no profile: the Vita's user name or Player in requests and cards)");
 	}
 	pthread_mutex_unlock(&friends_lock);
 }
