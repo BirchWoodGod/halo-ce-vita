@@ -38,15 +38,37 @@ of internet play. Checked:
   flipped byte, a newer version (the file's and its contents'), what a file
   may ask of the key, names and passwords refused, the identity replaced
   kept, the code alone restored, the same identity restored on its own
-  machine (a newer run), a save of the old list waiting not written.
+  machine (a newer run), a save of the old list waiting not written; each
+  job's thread made as the Vita sizes it (4 KiB for attributes with no
+  size) and the most of its stack it used measured: four times that fits.
 
 Prints PASS or the failures. run_p2p_friends_test.sh builds it (with ASan
 and UBSan too).
 */
 
+/* (the threads p2p_friends.c starts made with the stacks the Vita gives:
+vita_pthread_create, below) */
+#include <errno.h>
+#include <pthread.h>
+static int vita_pthread_attr_init(pthread_attr_t *attributes);
+static int vita_pthread_attr_setstacksize(pthread_attr_t *attributes, size_t size);
+static int vita_pthread_attr_destroy(pthread_attr_t *attributes);
+static int vita_pthread_create(pthread_t *thread, const pthread_attr_t *attributes, void *(*function)(void *),
+	void *argument);
+#define pthread_attr_init vita_pthread_attr_init
+#define pthread_attr_setstacksize vita_pthread_attr_setstacksize
+#define pthread_attr_destroy vita_pthread_attr_destroy
+#define pthread_create vita_pthread_create
+
 /* (the files in the test's folders, not ux0:) */
 #define P2P_FRIENDS_TEST
 #include "../../linux/src/p2p_friends.c"
+
+#undef pthread_attr_init
+#undef pthread_attr_setstacksize
+#undef pthread_attr_destroy
+#undef pthread_create
+
 /* (the wires: which a friend's game is joined on, network_wire.h; this
 machine's platform each test machine's own, below) */
 #define network_wire_this_platform network_wire_this_platform_built
@@ -2785,6 +2807,228 @@ static void test_flame(void)
 }
 #endif
 
+/* ---------- the Vita's thread stacks, for the threads p2p_friends.c starts
+(the backup's job): the SDK's pthread library (vitasdk's pthread-embedded,
+libpthread.a's pthread_create and pte_osThreadCreate) gives a thread made
+with no attributes the stack _pthread_stack_default_user names (256 KiB,
+vita_stubs.c), and one made with attributes the size they were given, none
+given (0) taken as its minimum, 4 KiB. insider.21's backup job was made with
+attributes and no size: Argon2id's hashing overflowed its 4 KiB the first
+time a tester backed up (Oct 22 2026, a data abort in memset under
+extended_hash). Here each such thread runs on a stack of the test's, painted
+before it starts, the most of it the job used measured when it ends; the
+Vita's stack for it must be four times that or more (the Vita build's frames
+are not this build's: its own chain for the job, from the insider.21 ELF,
+was about 4.5 KiB) */
+
+enum
+{
+	VITA_STACK_DEFAULT_USER = 256 * 1024,
+	VITA_STACK_MINIMUM = 4096,
+	VITA_STACK_TEST_SIZE = 512 * 1024,
+	VITA_STACK_PAINT = 0xA5,
+	VITA_STACK_HEADROOM = 4,
+	VITA_STACK_RECORDS = 64,
+};
+
+static pthread_mutex_t vita_stack_lock = PTHREAD_MUTEX_INITIALIZER;
+/* (the sizes attributes were given, as the Vita's library keeps them) */
+static struct
+{
+	const pthread_attr_t *attributes;
+	size_t size;
+} vita_attributes[8];
+struct vita_thread_start
+{
+	void *(*function)(void *);
+	void *argument;
+	unsigned char *stack;
+	size_t vita_size;
+};
+/* (each job's: its operation and flags, the Vita's stack, the most used) */
+static struct
+{
+	int operation, flags;
+	size_t vita_size, used;
+} vita_stack_records[VITA_STACK_RECORDS];
+static int vita_stack_record_count;
+/* (the test's stacks, kept: a detached thread is still on its own as it
+ends) */
+static unsigned char *vita_stacks[VITA_STACK_RECORDS];
+static int vita_stack_count;
+
+static int vita_pthread_attr_init(pthread_attr_t *attributes)
+{
+	int index, result = pthread_attr_init(attributes);
+
+	pthread_mutex_lock(&vita_stack_lock);
+	for (index = 0; index < (int)(sizeof(vita_attributes) / sizeof(vita_attributes[0])); index++)
+		if (vita_attributes[index].attributes == attributes || !vita_attributes[index].attributes)
+		{
+			vita_attributes[index].attributes = attributes;
+			vita_attributes[index].size = 0;
+			break;
+		}
+	pthread_mutex_unlock(&vita_stack_lock);
+	return result;
+}
+
+static int vita_pthread_attr_setstacksize(pthread_attr_t *attributes, size_t size)
+{
+	int index;
+
+	pthread_mutex_lock(&vita_stack_lock);
+	for (index = 0; index < (int)(sizeof(vita_attributes) / sizeof(vita_attributes[0])); index++)
+		if (vita_attributes[index].attributes == attributes)
+			vita_attributes[index].size = size;
+	pthread_mutex_unlock(&vita_stack_lock);
+	return pthread_attr_setstacksize(attributes, size);
+}
+
+static int vita_pthread_attr_destroy(pthread_attr_t *attributes)
+{
+	int index;
+
+	pthread_mutex_lock(&vita_stack_lock);
+	for (index = 0; index < (int)(sizeof(vita_attributes) / sizeof(vita_attributes[0])); index++)
+		if (vita_attributes[index].attributes == attributes)
+			vita_attributes[index].attributes = NULL;
+	pthread_mutex_unlock(&vita_stack_lock);
+	return pthread_attr_destroy(attributes);
+}
+
+/* (the stack's lowest byte the thread wrote: its paint read, unchecked) */
+__attribute__((no_sanitize_address, noinline)) static size_t vita_stack_untouched(const unsigned char *stack,
+	size_t size)
+{
+	const volatile unsigned char *bytes = stack;
+	size_t index = 0;
+
+	while (index < size && bytes[index] == VITA_STACK_PAINT)
+		index++;
+	return index;
+}
+
+static void *vita_thread_trampoline(void *argument)
+{
+	struct vita_thread_start start = *(struct vita_thread_start *)argument;
+	unsigned char *top = __builtin_frame_address(0);
+	int operation = backup.operation, flags = backup.flags;
+	void *result;
+	size_t untouched;
+
+	free(argument);
+	result = start.function(start.argument);
+	untouched = vita_stack_untouched(start.stack, VITA_STACK_TEST_SIZE);
+	pthread_mutex_lock(&vita_stack_lock);
+	if (vita_stack_record_count < VITA_STACK_RECORDS)
+	{
+		vita_stack_records[vita_stack_record_count].operation = operation;
+		vita_stack_records[vita_stack_record_count].flags = flags;
+		vita_stack_records[vita_stack_record_count].vita_size = start.vita_size;
+		vita_stack_records[vita_stack_record_count].used = (size_t)(top - (start.stack + untouched));
+		vita_stack_record_count++;
+	}
+	pthread_mutex_unlock(&vita_stack_lock);
+	return result;
+}
+
+static int vita_pthread_create(pthread_t *thread, const pthread_attr_t *attributes, void *(*function)(void *),
+	void *argument)
+{
+	struct vita_thread_start *start = malloc(sizeof(*start));
+	pthread_attr_t made;
+	void *stack = NULL;
+	int index, detached = PTHREAD_CREATE_JOINABLE, result;
+
+	if (!start || vita_stack_count >= VITA_STACK_RECORDS || posix_memalign(&stack, 4096, VITA_STACK_TEST_SIZE))
+	{
+		free(start);
+		return EAGAIN;
+	}
+	/* (no attributes: the default; attributes: their size, or the
+	minimum) */
+	start->vita_size = VITA_STACK_DEFAULT_USER;
+	if (attributes)
+	{
+		start->vita_size = 0;
+		pthread_mutex_lock(&vita_stack_lock);
+		for (index = 0; index < (int)(sizeof(vita_attributes) / sizeof(vita_attributes[0])); index++)
+			if (vita_attributes[index].attributes == attributes)
+				start->vita_size = vita_attributes[index].size;
+		pthread_mutex_unlock(&vita_stack_lock);
+		if (start->vita_size < VITA_STACK_MINIMUM)
+			start->vita_size = VITA_STACK_MINIMUM;
+		pthread_attr_getdetachstate(attributes, &detached);
+	}
+	start->function = function;
+	start->argument = argument;
+	start->stack = stack;
+	memset(stack, VITA_STACK_PAINT, VITA_STACK_TEST_SIZE);
+	vita_stacks[vita_stack_count++] = stack;
+	pthread_attr_init(&made);
+	pthread_attr_setdetachstate(&made, detached);
+	pthread_attr_setstack(&made, stack, VITA_STACK_TEST_SIZE);
+	result = pthread_create(thread, &made, vita_thread_trampoline, start);
+	pthread_attr_destroy(&made);
+	if (result)
+		free(start);
+	return result;
+}
+
+/* every backup job's thread so far fit the stack the Vita gives it, with
+room to spare; a backup with the list, the code alone, and a restore among
+them */
+static void vita_stack_check(void)
+{
+	int index, with_list = 0, code_alone = 0, restores = 0, fits = 1, done = 0;
+	size_t most = 0, most_vita = 0;
+
+	/* (the last job's thread measures as it ends, after its outcome) */
+	for (index = 0; index < 5000; index++)
+	{
+		pthread_mutex_lock(&vita_stack_lock);
+		done = vita_stack_record_count == vita_stack_count;
+		pthread_mutex_unlock(&vita_stack_lock);
+		if (done)
+			break;
+		usleep(1000);
+	}
+	pthread_mutex_lock(&vita_stack_lock);
+	for (index = 0; index < vita_stack_record_count; index++)
+	{
+		size_t used = vita_stack_records[index].used, vita_size = vita_stack_records[index].vita_size;
+		int operation = vita_stack_records[index].operation;
+
+		if (operation == BACKUP_EXPORT && (vita_stack_records[index].flags & BACKUP_FLAG_LIST))
+			with_list++;
+		else if (operation == BACKUP_EXPORT)
+			code_alone++;
+		else if (operation == BACKUP_RESTORE)
+			restores++;
+		if (used * VITA_STACK_HEADROOM > vita_size)
+		{
+			if (fits)
+				printf("  (a backup job's thread (%s) used %lu bytes of its stack; the Vita gives it %lu)\n",
+					operation == BACKUP_EXPORT ? "a backup" : "a restore", (unsigned long)used,
+					(unsigned long)vita_size);
+			fits = 0;
+		}
+	}
+	for (index = 0; index < vita_stack_record_count; index++)
+		if (vita_stack_records[index].used > most)
+		{
+			most = vita_stack_records[index].used;
+			most_vita = vita_stack_records[index].vita_size;
+		}
+	printf("  backup: %d jobs; the most stack one used: %lu bytes, of the Vita's %lu\n", vita_stack_record_count,
+		(unsigned long)most, (unsigned long)most_vita);
+	pthread_mutex_unlock(&vita_stack_lock);
+	check(done && with_list && code_alone && restores,
+		"backup: a backup with the list, the code alone and a restore measured");
+	check(fits, "backup: each job's thread fits the stack the Vita gives it, four times over");
+}
+
 /* ---------- the friend identity's backup (p2p_friends_backup.inc) */
 
 static char backup_said[PATH_SIZE + 64];
@@ -3241,6 +3485,7 @@ static void test_backup(void)
 	check(p2p_friends_backup_confirm() == P2P_FRIENDS_BACKUP_RESTORED, "backup: the code alone restored");
 	code_of(5, current);
 	check(!strcmp(current, code_a) && machines[5].friend_count == 0, "backup: Echo's code, no friends");
+	vita_stack_check();
 	free(file);
 	free(plain);
 }

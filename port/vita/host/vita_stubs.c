@@ -29,7 +29,11 @@ NULL, ...)): the SDK's pthread library takes this in place of its 32 KB
 minimum. Internet play's threads (p2p.c's, which keeps two 754-socket
 lists on its stack and selects over up to 128 sockets, its UPnP thread,
 and ad hoc play's two in p2p_adhoc.c) were made for desktops' megabytes;
-xbox_kernel.c gives the game's own threads theirs explicitly */
+xbox_kernel.c gives the game's own threads theirs explicitly. One made with
+attributes takes their size alone, and with none set (0) gets the library's
+4 KiB minimum, not this: every pthread_attr_init before a pthread_create
+needs its pthread_attr_setstacksize (the friend code backup's thread had
+none in insider.21, and Argon2id overflowed it) */
 unsigned int _pthread_stack_default_user = 256 * 1024;
 
 void posix_random_bytes(void *buffer, posix_ulong size)
