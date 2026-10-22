@@ -159,6 +159,14 @@ static const struct config_setting config_settings[] =
 		"Anniversary maps in the data folder's mods folder are offered after the\n"
 		"campaign's levels and played alone, offline (docs/mcc_cea_maps.md). Needs\n"
 		"game.custom_edition. Never on any network." },
+	/* (port/linux/game/mcc_content.c, docs/mcc_cea_maps.md; the Vita's
+	settings panel's Halo CE content row, Multiplayer > Modded maps. Live) */
+	{ "game.content", _config_string, "\"xbox\"", "HALO_CONTENT", _environment_value, _platform_all,
+		"Halo CE content: \"xbox\" (the Xbox maps alone, as always) or \"mcc\": also\n"
+		"the campaign and multiplayer maps of your own Halo: The Master Chief\n"
+		"Collection's halo1 folder (paths.mcc), listed as \"(MCC)\" levels. Read\n"
+		"only; their sounds are silent in this version. Network games with an MCC\n"
+		"map need every player to have the same MCC file." },
 	{ "game.pc_map_vehicles", _config_string, "\"xbox\"", "HALO_PC_MAP_VEHICLES", _environment_value, _platform_all,
 		"A Custom Edition map's vehicles in a game of this machine's alone (split\n"
 		"screen or offline, with or without bots): \"xbox\" the Warthogs, Ghosts and\n"
@@ -179,6 +187,11 @@ static const struct config_setting config_settings[] =
 	{ "paths.saves", _config_string, "\"\"", "HALO_SAVE_ROOT", _environment_value, _platform_desktop,
 		"Where saved games and profiles go; empty for the usual place\n"
 		"(~/.local/share/halo-linux, or %APPDATA%\\halo on Windows)." },
+	{ "paths.mcc", _config_string, "\"\"", "HALO_MCC_ROOT", _environment_value, _platform_all,
+		"Your Halo: The Master Chief Collection's halo1 folder (the one holding\n"
+		"maps/bitmaps.map), for game.content = \"mcc\"; empty looks in Steam's\n"
+		"libraries (and on the PS Vita in ux0:data/haloce-vita/mcc/halo1). Only\n"
+		"read, never written." },
 
 	{ "network.address", _config_string, "\"\"", "HALO_NET_ADDRESS", _environment_value, _platform_all,
 		"This machine's IPv4 address for system link, for a machine on several\n"

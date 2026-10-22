@@ -157,6 +157,22 @@ int halo_custom_edition_enabled(void);
 /* Whether a mod's Halo: CE Anniversary maps in the mods folder may be listed
 and played, offline (HALO_MCC_MODS, experimental; needs PC maps on). */
 int halo_mcc_mods_enabled(void);
+/* (port) Whether Halo CE content is MCC files (game.content = "mcc",
+HALO_CONTENT): the campaign and multiplayer maps of the player's Halo: The
+Master Chief Collection's halo1 folder are listed and played too
+(port/linux/game/mcc_content.c). Read every time (the Vita's panel sets the
+variable). Never on the dedicated server. */
+int halo_mcc_content_enabled(void);
+/* (port) MCC's halo1 folder (xbox_files.c: paths.mcc, the Vita's data
+root's mcc/halo1, Steam's libraries), which the game names d:\mcc\: its host
+path into `out` (`out_size` bytes; empty when none) and TRUE when found;
+looked for once, and again after platform_mcc_root_forget when none was.
+platform_xbox_path_write_refused: TRUE (and the error set, logged) for an
+Xbox path in it, which nothing may write, make, move or delete. */
+int platform_mcc_root(char *out, unsigned long out_size);
+void platform_mcc_root_forget(void);
+int platform_host_path_is_mcc(const char *host_path);
+int platform_xbox_path_write_refused(const char *xbox_path);
 /* A Custom Edition map's tag cache of `bytes`: the window above when it is
 reserved, else memory of its own (the Vita, which cannot have the window),
 whose tags are then moved there (custom_edition_cache.c); NULL when there is
