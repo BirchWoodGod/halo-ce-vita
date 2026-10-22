@@ -10,13 +10,19 @@
 	<widget name="ce/profile/more" extends="ui\shell\main_menu\settings_select\player_setup\player_profile_edit\color_profile_item" drop="handlers" string_list="ce/profile_items" string_index="0">
 		<on event="a start" run="port ce custom" open="h3/custom/screen"/>
 	</widget>
-	<widget name="ce/profile/list" extends="ui\shell\main_menu\settings_select\player_setup\player_profile_edit\profile_edit_select_list" classic_patch="true" drop="children">
+	<widget name="ce/profile/list" extends="ui\shell\main_menu\settings_select\player_setup\player_profile_edit\profile_edit_select_list" classic_patch="true" drop="children inputs">
 		<child widget="ui\shell\main_menu\settings_select\player_setup\player_profile_edit\name_profile_item"/>
 		<child widget="ui\shell\main_menu\settings_select\player_setup\player_profile_edit\controller_setup_profile_item"/>
 		<child widget="ui\shell\main_menu\settings_select\player_setup\player_profile_edit\advanced_controls_profile_item"/>
 		<child widget="ui\shell\main_menu\settings_select\player_setup\player_profile_edit\color_profile_item"/>
 		<child widget="ce/profile/more" x="0" y="33"/>
 		<child widget="ui\shell\main_menu\settings_select\player_setup\player_profile_edit\save_changes_profile_item" x="0" y="55"/>
+	</widget>
+	<!-- (the list's description, the Xbox's picture and words for its own rows, none for MORE
+	     OPTIONS: the map's "plyr prof edit select menu upd8" counts the rows, and would show the
+	     next one's for each after it - a widget of ours runs it, port ce profile) -->
+	<widget name="ce/profile/description" width="0" height="0">
+		<data input="port ce profile"/>
 	</widget>
 	<widget name="ce/profile/screen" extends="ui\shell\main_menu\settings_select\player_setup\player_profile_edit\player_profile_edit_screen" classic_patch="true" drop="children">
 		<child widget="ui\shell\main_menu\settings_select\player_setup\player_profile_edit\header_profile_settings"/>
@@ -27,5 +33,6 @@
 		<child widget="ui\shell\main_menu\a_butn" x="471" y="414"/>
 		<child widget="ui\shell\main_menu\=accept" x="492" y="414"/>
 		<child widget="ui\shell\main_menu\blueline" x="64" y="253"/>
+		<child widget="ce/profile/description"/>
 	</widget>
 </menus>

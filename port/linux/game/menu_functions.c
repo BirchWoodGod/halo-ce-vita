@@ -459,6 +459,7 @@ enum
 	_input_h3_carnage,
 	_input_h3_dialog,
 	_input_ce_lobby,
+	_input_ce_profile,
 };
 
 /* what a line of typing is for */
@@ -4132,6 +4133,36 @@ static boolean ce_custom_open(void)
 	h3_custom_begin(index, profile, name);
 	platform_log("menus: ce customize: MORE OPTIONS for %s (the Xbox's profile settings)", name);
 	return TRUE;
+}
+
+/* (port ce profile: Menu style Halo CE's profile settings, a widget of
+ours on them) the list's description as the Xbox's "plyr prof edit select
+menu upd8" sets it - its words and picture by the focused row - counting the
+Xbox's rows alone; none on MORE OPTIONS (its row: more) */
+static void ce_profile_description_update(struct widget_instance *widget)
+{
+	struct widget_instance *list = named(screen_of(widget), "profile_edit_select_list");
+	struct widget_instance *description, *child;
+	short index = 0;
+
+	if (!list || !list->focused_child || !(description = list->parameters.list.extended_description) ||
+		!description->child || !description->child->next)
+	{
+		return;
+	}
+	for (child = list->child; child && child != list->focused_child; child = child->next)
+	{
+		if (!child->name || strcmp(child->name, "more"))
+			index++;
+	}
+	if (list->focused_child->name && !strcmp(list->focused_child->name, "more"))
+	{
+		widget_instance_set_visibility_recursive(description, FALSE);
+		return;
+	}
+	widget_instance_set_visibility_recursive(description, TRUE);
+	description->child->parameters.text_box.string_list_index = index;
+	description->child->next->animation.current_frame_index = index;
 }
 
 /* (CREATE NEW PROFILE, Triangle) its name asked for */
@@ -16417,6 +16448,9 @@ void pc_menu_game_data_function_invoke(
 		break;
 	case _input_h3_dialog:
 		h3_dialog_update(widget);
+		break;
+	case _input_ce_profile:
+		ce_profile_description_update(widget);
 		break;
 	case _input_ce_lobby:
 		if (widget->type == _ui_widget_type_column_list)

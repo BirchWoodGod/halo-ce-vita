@@ -450,7 +450,7 @@ static char const *const port_game_data_input_names[] =
 	"port h3 gametype editor", "port h3 gametype options",
 	"port h3 carnage",
 	"port h3 dialog",
-	"port ce lobby",
+	"port ce lobby", "port ce profile",
 };
 
 static struct
