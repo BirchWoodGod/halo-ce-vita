@@ -395,6 +395,20 @@
 #           each opens its screen (the Halo 3 Forge lobby, FRIENDS, FILE SHARE, MOD MANAGER) and B
 #           comes back to the Xbox's main menu; Menu style Halo 3: the map's own list, its main menu
 #           the Halo 3 one
+#   cepluspregame  the Xbox's pregame (Menu style Halo CE, HALO_TEST_PROFILE; skipped without) of a
+#           system link game hosted on Blood Gulch (CREATE GAME SYSTEM LINK, the profile, Y, the map,
+#           the game type) with map variants of it (forge_files_test --write): its line under the
+#           Xbox's buttons; the right trigger opens LOBBY OPTIONS (menus/classic/pregame.xml), no
+#           INVITE FRIENDS on system link; MAP VARIANT steps through the map's variants (hosted, the
+#           joiners asked to play it); PLAYERS opens the players' screen, B back to LOBBY OPTIONS,
+#           B to the pregame
+#   cepluspause  the Xbox's multiplayer pause with the port's rows (menus/classic/pause.xml, a local
+#           Team Slayer game on Blood Gulch; HALO_TEST_PROFILE, skipped without): RESUME GAME focused,
+#           PLAYERS opens the players' screen, B; PARTY asks for the settings panel's Party page;
+#           RESUME GAME closes it, the game going on
+#   ceplusforge  FORGE on Menu style Halo CE's main menu (HALO_TEST_PROFILE; skipped without): the
+#           Forge lobby's NETWORK on SYSTEM LINK, START FORGE: the profile, the network Forge game
+#           hosted and the Xbox's pregame (no live lobby with the Xbox's menus)
 #   pause   Campaign from the main menu (a new profile, Normal), the level's
 #           pause menu, Quit to Main Menu: a game map's widget runs its
 #           function and is back at the main menu, and asked about deleting
@@ -437,7 +451,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-all_cases="fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendsbackup h3friendspanel h3partyplates h3party h3partyonline browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes h3offline h3offlineend msgboxes ceplusmain"
+all_cases="fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendsbackup h3friendspanel h3partyplates h3party h3partyonline browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes h3offline h3offlineend msgboxes ceplusmain cepluspregame cepluspause ceplusforge"
 # (the PC build's own, asked for by name: not in the default list)
 pc_cases="pctext pcclassic pcnoadhoc"
 cases=${*:-$all_cases}
@@ -2994,6 +3008,91 @@ PY
 		grep -aqE "menus: Menu style Halo 3: the Xbox screens' [0-9]+ widgets as the map has them" "$log" ||
 			fail ceplusmain "Menu style Halo 3: the Xbox screens kept the port's rows"
 		grep -aq "ui: screen pc.h3.main.screen" "$log" || fail ceplusmain "Menu style Halo 3: not the Halo 3 main menu" ;;
+	cepluspregame)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "--- cepluspregame"; echo "SKIP: no HALO_TEST_PROFILE"; continue
+		fi
+		# (the test's map variants of Blood Gulch: forge_files_test --write, as run_forge_test.sh's)
+		if ! ${CC:-cc} -O1 -D_GNU_SOURCE -I"$root/port/linux/game" -o "$out/forge_files_test" "$here/forge_files_test.c" \
+			"$root/port/linux/game/forge_files.c" 2> "$out/forge_files_test.log"; then
+			fail cepluspregame "forge_files_test did not build ($out/forge_files_test.log)"; continue
+		fi
+		mkdir -p "$out/cepluspregame-save/u/UDATA/869079979327" "$out/cepluspregame-save/forge/bloodgulch"
+		cp "$HALO_TEST_PROFILE" "$out/cepluspregame-save/u/UDATA/869079979327/blam.sav"
+		[ -r "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" ] &&
+			cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$out/cepluspregame-save/u/UDATA/869079979327/"
+		"$out/forge_files_test" --write "$out/cepluspregame-save/forge/bloodgulch" > /dev/null
+		# (MULTIPLAYER, CREATE GAME SYSTEM LINK - the fifth row -, the profile; Y creates; right nine
+		# times to Blood Gulch, A, the game type, A; the pregame: the right trigger, down to MAP
+		# VARIANT, A twice, up to PLAYERS, A; B, B)
+		d="down:150:500"
+		r=""; for i in $(seq 9); do r="$r right:150:400"; done
+		save_from="$out/cepluspregame-save" run cepluspregame "$menus_data" 75 "wait:150:3000 down:150:800 a:150:3000 $d $d $d $d a:150:4000 a:150:2500 a:150:2500 a:150:4000 y:150:4000$r a:150:3000 a:150:3000 a:150:4000 rt:150:3000 $d a:150:2000 a:150:2000 up:150:1000 a:150:3000 b:150:2500 b:150:3000" \
+			HALO_NET_ONLINE=false HALO_SCENE_PACKS=0
+		log=$out/cepluspregame/run.log
+		echo "--- cepluspregame"
+		grep -aE "ui: screen|ce lobby|ce pregame|forge net: hosting" "$log" | tail -14
+		[ "$(cat "$out/cepluspregame/exit")" = 0 ] || fail cepluspregame "exit $(cat "$out/cepluspregame/exit")"
+		grep -aqiE "assert|exception|halt_and_catch_fire" "$log" && fail cepluspregame "an assertion, exception or halt"
+		grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected.pregame.connected_pregame_screen" "$log" ||
+			fail cepluspregame "the Xbox's pregame did not open"
+		grep -aq "ui: screen pc.ce.lobby.screen" "$log" || fail cepluspregame "the right trigger did not open LOBBY OPTIONS"
+		grep -aq "menus: ce lobby options: PLAYERS, MAP VARIANT NONE" "$log" ||
+			fail cepluspregame "LOBBY OPTIONS did not offer PLAYERS and MAP VARIANT (and no INVITE FRIENDS on system link)"
+		[ "$(grep -ac "menus: ce pregame: the map variant .* is played on Blood Gulch" "$log")" -ge 2 ] ||
+			fail cepluspregame "MAP VARIANT did not step through Blood Gulch's variants"
+		grep -aq "forge net: hosting a game of a map variant of levels.test.bloodgulch.bloodgulch" "$log" ||
+			fail cepluspregame "the map variant was not hosted (the joiners asked to play it)"
+		sed -n '/ui: screen pc.ce.lobby.screen/,$p' "$log" | grep -aq "ui: screen pc.h3.players.screen" ||
+			fail cepluspregame "PLAYERS did not open the players' screen"
+		grep -a "ui: screen" "$log" | tail -1 | grep -q "connected_pregame_screen" ||
+			fail cepluspregame "B, B did not go back to the pregame" ;;
+	cepluspause)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "--- cepluspause"; echo "SKIP: no HALO_TEST_PROFILE"; continue
+		fi
+		# (Start, down to PLAYERS, A, B - back on PLAYERS, as the game keeps a screen's row -; down
+		# to PARTY, A; up twice, A: RESUME GAME)
+		pause_env="HALO_NETWORK_TEST=local:bloodgulch:team_slayer HALO_NETWORK_TEST_PROFILE=1 HALO_NETWORK_TEST_START=3 HALO_BOTS=1"
+		profile_from=$HALO_TEST_PROFILE run cepluspause "$menus_data" 55 "wait:150:32000 start:150:3000 down:150:1200 a:150:3000 b:150:2500 down:150:1200 a:150:2000 up:150:1000 up:150:1000 a:150:3000" \
+			$pause_env
+		log=$out/cepluspause/run.log
+		echo "--- cepluspause"
+		grep -aE "ui: screen|Party page|h3 players: [0-9]+ players" "$log" | tail -8
+		[ "$(cat "$out/cepluspause/exit")" = 0 ] || fail cepluspause "exit $(cat "$out/cepluspause/exit")"
+		grep -aqiE "assert|exception|halt_and_catch_fire" "$log" && fail cepluspause "an assertion, exception or halt"
+		grep -aqE "menus: Menu style Halo CE: the Xbox screens' [0-9]+ widgets with the port's rows" <(sed -n '/new map: loading/,$p' "$log") ||
+			fail cepluspause "the level's Xbox pause was not given the port's rows"
+		grep -aq "ui: screen ui.shell.multiplayer_game.pause_game.1p_pause_game" "$log" || fail cepluspause "Start did not open the Xbox's pause"
+		sed -n '/ui: screen ui.shell.multiplayer_game.pause_game.1p_pause_game/,$p' "$log" | grep -aq "ui: screen pc.h3.players.screen" ||
+			fail cepluspause "PLAYERS did not open the players' screen"
+		sed -n '/ui: screen pc.h3.players.screen/,$p' "$log" | grep -aq "ui: screen ui.shell.multiplayer_game.pause_game.1p_pause_game" ||
+			fail cepluspause "B did not go back to the pause"
+		grep -aq "menus: h3 mp pause: the Party page asked for" "$log" || fail cepluspause "PARTY did not ask for the Party page"
+		grep -aq "requesting a player removal" "$out/cepluspause/data/debug.txt" 2>/dev/null &&
+			fail cepluspause "a row left the game"
+		grep -aq "ui: screen ui.shell.main_menu.main_menu" <(sed -n '/ui: screen ui.shell.multiplayer_game.pause_game.1p_pause_game/,$p' "$log") &&
+			fail cepluspause "the game was left" ;;
+	ceplusforge)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "--- ceplusforge"; echo "SKIP: no HALO_TEST_PROFILE"; continue
+		fi
+		# (FORGE, the fourth row; up to NETWORK, A, down past LOCAL - the picker goes round - to
+		# ONLINE, down to SYSTEM LINK, A; down three to START FORGE, A: the profile, A, A)
+		d="down:150:600"
+		profile_from=$HALO_TEST_PROFILE run ceplusforge "$menus_data" 45 "wait:150:3000 $d $d $d a:150:4000 up:150:600 a:150:2500 $d $d a:150:3000 $d $d $d a:150:4000 a:150:2500 a:150:2500 a:150:6000" \
+			HALO_NET_ONLINE=false
+		log=$out/ceplusforge/run.log
+		echo "--- ceplusforge"
+		grep -aE "ui: screen|forge lobby: (network|START)|forge net: hosting|network Forge" "$log" | tail -10
+		[ "$(cat "$out/ceplusforge/exit")" = 0 ] || fail ceplusforge "exit $(cat "$out/ceplusforge/exit")"
+		grep -aqiE "assert|exception|halt_and_catch_fire" "$log" && fail ceplusforge "an assertion, exception or halt"
+		grep -aq "menus: forge lobby: network SYSTEM LINK" "$log" || fail ceplusforge "NETWORK did not choose SYSTEM LINK"
+		grep -aq "menus: forge lobby: START FORGE (Halo CE menus): the profile, then the game hosted on" "$log" ||
+			fail ceplusforge "START FORGE on a network did not host from the Xbox's menus"
+		grep -aq "forge net: hosting a Forge game of" "$log" || fail ceplusforge "the network Forge game was not hosted"
+		grep -a "ui: screen" "$log" | tail -1 | grep -q "connected_pregame_screen" ||
+			fail ceplusforge "the Xbox's pregame did not open" ;;
 	*)
 		echo "usage: $0 [$(echo $all_cases $pc_cases | tr ' ' '|')]..." >&2; exit 2 ;;
 	esac
