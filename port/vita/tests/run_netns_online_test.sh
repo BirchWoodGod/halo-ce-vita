@@ -5388,15 +5388,15 @@ party)
 	hc=$out/host.code jc=$out/joiner.code j2c=$out/joiner2.code add=$out/host.add
 	(for i in $(seq 1 60); do [ -s "$jc" ] && [ -s "$j2c" ] && break; sleep 1; done
 		cat "$jc" "$j2c" > "$add.tmp" 2>/dev/null; mv "$add.tmp" "$add") &
-	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env HALO_NET_HOST_PUBLIC=false HALO_NET_LOBBY_NAME=Alpha \
+	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env HALO_NET_HOST_PUBLIC=false HALO_NET_LOBBY_NAME=Alpha HALO_NET_PLAYER_NAME=Alpha \
 		"HALO_TEST_FRIENDS=code-file=$hc,add-file=$add" \
 		"HALO_TEST_PARTY=invite-at=${HALO_TEST_PARTY_INVITE_AT:-40},chat-at=${HALO_TEST_PARTY_CHAT_AT:-110}:hello party |%^,leave-at=${HALO_TEST_PARTY_LEAVE_AT:-170}" \
 		${HALO_TEST_HOST_ENV:-}; host_pid=$last_pid
 	run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
-		HALO_NETWORK_TEST=join-invite HALO_TEST_INPUT=bot:2 HALO_NET_LOBBY_NAME=Bravo "HALO_TEST_FRIENDS=code-file=$jc,accept" \
+		HALO_NETWORK_TEST=join-invite HALO_TEST_INPUT=bot:2 HALO_NET_LOBBY_NAME=Bravo HALO_NET_PLAYER_NAME=Bravo "HALO_TEST_FRIENDS=code-file=$jc,accept" \
 		HALO_TEST_PARTY_ANSWER=accept "HALO_TEST_PAD=wait:150:$((seconds * 1000))"; join_pid=$last_pid
 	run_copy joiner2 "$join2_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_c" HALO_NET_ONLINE=true \
-		HALO_NETWORK_TEST=join-invite HALO_TEST_INPUT=bot:3 HALO_NET_LOBBY_NAME=Charlie "HALO_TEST_FRIENDS=code-file=$j2c,accept" \
+		HALO_NETWORK_TEST=join-invite HALO_TEST_INPUT=bot:3 HALO_NET_LOBBY_NAME=Charlie HALO_NET_PLAYER_NAME=Charlie "HALO_TEST_FRIENDS=code-file=$j2c,accept" \
 		"HALO_TEST_PARTY=chat-at=${HALO_TEST_PARTY_CHAT2_AT:-125}:gg" \
 		HALO_TEST_PARTY_ANSWER=accept "HALO_TEST_PAD=wait:150:$((seconds * 1000))"; join2_pid=$last_pid
 	wait $join_pid $join2_pid $host_pid 2>/dev/null
