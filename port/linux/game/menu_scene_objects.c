@@ -1252,6 +1252,66 @@ static void scene_make(void)
 		(double)(menu_scene_objects.made_at - started) / 1000.0);
 }
 
+/* the scene just made with the main menu's ticks stopped (a network game's
+lobby): the map's objects updated as ticks would update them, their poses taken,
+until every pose asked for is taken (or given up) and a second's ticks more
+- weapons readied, the animations started and blended in -, at most
+MENU_SCENE_SETTLE_STEPS */
+void flags_port_update_object(long object_index, real delta); /* (flags.c) */
+
+enum { MENU_SCENE_SETTLE_STEPS = 120, MENU_SCENE_SETTLE_POSED_STEPS = 30 };
+
+static void scene_settle(void)
+{
+	short step, index;
+	short posed_steps = 0;
+
+	for (step = 0; step < MENU_SCENE_SETTLE_STEPS && posed_steps < MENU_SCENE_SETTLE_POSED_STEPS; step++)
+	{
+		boolean posed = TRUE;
+
+		/* (the map's objects updated as a tick updates them: objects_update,
+		whose second pass finishes the objects just made - one object's
+		update alone left a held weapon hanging from the hand, the flag and
+		the rocket launcher pointing at the ground) */
+		objects_update();
+		for (index = 0; index < MAXIMUM_MENU_SCENE_OBJECTS; index++)
+		{
+			struct menu_scene_object *object = &menu_scene_objects.slots[index];
+
+			/* (a flag held: its cloth flown a tick's worth) */
+			if (object->wanted && object->weapon_index != NONE && object_try_and_get(object->weapon_index))
+				flags_port_update_object(object->weapon_index, 1.f / 30.f);
+		}
+		for (index = 0; index < MAXIMUM_MENU_SCENE_OBJECTS; index++)
+		{
+			struct menu_scene_object *object = &menu_scene_objects.slots[index];
+
+			if (!object->wanted)
+				continue;
+			if (!slot_object_valid(object) || !object_hold(object, index))
+			{
+				platform_log("menus: h3 scene objects: %s: an object gone as it was settled", menu_scene_objects.screen);
+				return;
+			}
+			if (object->animation[0] && !object->animation_started && !object->animation_given_up)
+				posed = FALSE;
+			/* (and its weapon readied: the flag held up, not hung at its feet) */
+			{
+				struct unit_datum *unit = unit_try_and_get(object->object_index);
+
+				if (unit && object->weapon_index != NONE && unit->unit.current_weapon_index == NONE)
+					posed = FALSE;
+			}
+		}
+		/* (once posed, a second's ticks more: the weapons readied in their hands and the poses blended
+		in, as the first lobby's ticks take them) */
+		posed_steps = posed ? posed_steps + 1 : 0;
+	}
+	platform_log("menus: h3 scene objects: %s: settled without the main menu's ticks in %d updates (a network game's lobby)%s",
+		menu_scene_objects.screen, step, posed_steps < MENU_SCENE_SETTLE_POSED_STEPS ? ", not every pose taken" : "");
+}
+
 /* "<point> [x y z yaw pitch]": the camera it names (its point's own place
 when it gives none) */
 static boolean camera_parse(char const *text, struct menu_scene_camera *camera)
@@ -1597,11 +1657,20 @@ static void menu_scene_objects_update_internal(
 				menu_scene_objects.most_particles = particle_data->actual_count;
 		}
 	}
-	/* (made only with the main menu's ticks running: a network game's lobby
-	stops them - no weapon readied, no pose taken - so a scene not made
-	before is none until it is over: menu_scene_objects_settled) */
+	/* (made with the main menu's ticks running; a network game's lobby
+	stops them - no weapon readied, no pose taken -: a scene not made before
+	it, as the live lobby a game's carnage report goes back to on a new load
+	of ui.map, is made there and settled by hand, its objects updated as
+	ticks would (insider.21: the multiplayer lobby's three Spartans gone
+	after a game)) */
 	else if (!menu_scene_objects.refused && halo_main_menu_idle())
 		scene_make();
+	else if (!menu_scene_objects.refused)
+	{
+		scene_make();
+		if (menu_scene_objects.made)
+			scene_settle();
+	}
 	preview_update();
 	/* (object_lights.c's quick way out: none made, none asked about) */
 	menu_scene_objects.made_count = 0;

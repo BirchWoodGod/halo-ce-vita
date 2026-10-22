@@ -2828,6 +2828,16 @@ h3live|h3liveleave|h3liveagain)
 				fail "the host did not come back to the live lobby after the game"
 			sed -n '/the game over, back to the lobby/,$p' "$hl" | grep -aq "menus: h3 live lobby: its game kept, live on SYSTEM LINK" ||
 				fail "the lobby did not take its game back, live"
+			# (the lobby's scene again after the game: its three Spartans made on the new load of ui.map,
+			# posed without the main menu's ticks - insider.21: gone after the carnage report)
+			after=$(awk 'f && /START GAME: the game.s lobby/ { exit } /the game over, back to the lobby/ { f = 1 } f' "$hl")
+			echo "$after" | grep -aE "h3 scene objects?|animation " | head -8
+			echo "$after" | grep -aq "menus: h3 scene objects: h3/mp/screen: made in" ||
+				fail "the lobby's Spartans were not made again after the game"
+			[ "$(echo "$after" | grep -ac "menus: h3 scene object [0-2]: characters.cyborg_mp.cyborg_mp (menu_multiplayer) at")" = 3 ] ||
+				fail "the lobby did not have its three Spartans after the game"
+			[ "$(echo "$after" | grep -acE "menus: h3 scene object [0-2]: animation (stand missile airborne|crouch rifle idle)")" = 2 ] ||
+				fail "the lobby's Spartans were not posed after the game (rocket jump, crouching sniper)"
 			grep -aq "ui: screen .*connected_map_select" "$hl" && fail "the host was shown the Xbox's map choice"
 			sed -n '/the game over, back to the lobby/,$p' "$hl" | grep -aqE "menus: h3 live lobby: [^;]+; players: [^;]+, [^;]+; 2/" ||
 				fail "the joiner was not in the lobby after the game"
