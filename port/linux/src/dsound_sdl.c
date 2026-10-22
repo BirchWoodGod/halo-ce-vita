@@ -1120,8 +1120,95 @@ void vita_host_pin_current_thread(int core) __attribute__((weak));
 #ifdef HALO_VITA
 int vita_host_fourth_core_move(const char *role);
 int vita_host_fourth_core_join(const char *role, int level);
+int vita_host_fourth_core_step_aside(int aside);
 void vita_host_thread_watch(const char *role);
 #endif
+
+/* the mixer moved to the fourth core (audio_callback) */
+static int mixer_on_fourth_core;
+
+/* The mixer late on the fourth core: off it for the rest of the run.
+xal's insider.21 log (Oct 22, All async): with the fourth core busy - the
+helpers at 11-15 ms a frame, the core 48-56% busy, after a network game and
+at the menus - the device's calls came up to 50 ms apart, 47 and 49 of them
+over 25 ms in ten seconds, and the menus' music crackled; with the core
+under 40% busy, none. The mixer is the game's highest priority thread, but
+the system's own work shares the fourth core. Two calls over 25 ms apart
+within a second move it to cores 0-2, where it preempts a game thread for
+well under a millisecond a mix (Audio's 0.5-0.9 ms); HALO_AUDIO_CORE=3
+keeps it there whatever happens */
+static int mixer_fourth_core_left;
+static int mixer_fourth_core_forced;
+
+static void mixer_fourth_core_late(unsigned long long now, unsigned long long gap)
+{
+	static unsigned long long last_late;
+
+	if (!mixer_on_fourth_core || mixer_fourth_core_left || mixer_fourth_core_forced)
+		return;
+	if (last_late && now - last_late < 1000000ull)
+	{
+#ifdef HALO_VITA
+		if (vita_host_fourth_core_step_aside(1) >= 0)
+#endif
+		{
+			mixer_fourth_core_left = 1;
+			platform_log("sound mixer: the device's calls came late on the fourth core (%.1f ms apart, twice in a second): "
+				"the mixer on cores 0-2 from now on", (double)gap / 1000.0);
+		}
+	}
+	last_late = now;
+}
+
+/* The loading screen's chant (DirectSound buffers, mix_buffers) on the
+mixer's thread: while it plays, a mixer on the Vita's fourth core steps
+aside to cores 0-2 - a map's load keeps the fourth core busy (the cache file
+thread at 77-86% of it at Fourth core helpers All async, insider.20 and .21
+testers' logs, while cores 0-2 idle under 20%) and the chant crackled
+there: its mixes came late. Nothing played during a load before insider.21,
+so late mixes were silent. When it stops, halo.log says how late the
+device's calls came meanwhile */
+static struct
+{
+	/* playing now (mix_buffers), and as the mixer last saw it */
+	volatile int heard;
+	int was_heard;
+	int aside;
+	unsigned long long started_us;
+	unsigned long long longest_gap_us;
+	unsigned long late;
+	unsigned long mixes;
+} chant;
+
+static void chant_update(void)
+{
+	int heard = chant.heard;
+
+	if (heard)
+		chant.mixes++;
+	if (heard == chant.was_heard)
+		return;
+	chant.was_heard = heard;
+#ifdef HALO_VITA
+	if (mixer_on_fourth_core && !mixer_fourth_core_left && heard != chant.aside)
+	{
+		vita_host_fourth_core_step_aside(heard);
+		chant.aside = heard;
+	}
+#endif
+	if (heard)
+	{
+		chant.started_us = statistics_now();
+		chant.longest_gap_us = 0;
+		chant.late = 0;
+		chant.mixes = 0;
+		return;
+	}
+	platform_log("sound mixer: the loading screen's chant played %.1f s (%lu mixes%s): device calls over 25 ms apart %lu, "
+		"longest gap %.1f ms", (double)(statistics_now() - chant.started_us) / 1.0e6, chant.mixes,
+		mixer_on_fourth_core ? ", the mixer off the fourth core meanwhile" : "", chant.late,
+		(double)chant.longest_gap_us / 1000.0);
+}
 
 static void SDLCALL audio_callback(void *userdata, SDL_AudioStream *stream, int additional_amount, int total_amount)
 {
@@ -1154,9 +1241,12 @@ static void SDLCALL audio_callback(void *userdata, SDL_AudioStream *stream, int 
 				vita_host_pin_current_thread(core);
 #ifdef HALO_VITA
 			if (core == 3)
-				vita_host_fourth_core_move("sound mixer");
+			{
+				mixer_on_fourth_core = vita_host_fourth_core_move("sound mixer") == 3;
+				mixer_fourth_core_forced = 1;
+			}
 			else if (!setting)
-				vita_host_fourth_core_join("sound mixer", 1);
+				mixer_on_fourth_core = vita_host_fourth_core_join("sound mixer", 1) == 3;
 			else
 				vita_host_thread_watch("sound mixer");
 #endif
@@ -1174,6 +1264,15 @@ static void SDLCALL audio_callback(void *userdata, SDL_AudioStream *stream, int 
 				statistics_callback_gap_us = gap;
 			if (gap > 25000)
 				statistics_callbacks_late++;
+			if (gap > 25000)
+				mixer_fourth_core_late(now, gap);
+			if (chant.heard)
+			{
+				if (gap > chant.longest_gap_us)
+					chant.longest_gap_us = gap;
+				if (gap > 25000)
+					chant.late++;
+			}
 		}
 		previous_call = now;
 	}
@@ -1189,6 +1288,7 @@ static void SDLCALL audio_callback(void *userdata, SDL_AudioStream *stream, int 
 		SDL_PutAudioStreamData(stream, buffer, (int)(frames * OUTPUT_CHANNELS * sizeof(float)));
 		additional_amount -= (int)(frames * OUTPUT_CHANNELS * sizeof(float));
 	}
+	chant_update();
 }
 
 /* without a device, drain voices in real time */
@@ -1848,6 +1948,7 @@ static struct sdl_buffer *buffers;
 static void mix_buffers(float *output, unsigned long frames)
 {
 	struct sdl_buffer *buffer;
+	int heard = 0;
 
 	for (buffer = buffers; buffer; buffer = buffer->next)
 	{
@@ -1864,6 +1965,7 @@ static void mix_buffers(float *output, unsigned long frames)
 		pthread_mutex_unlock(&parameter_lock);
 		if (!playing || !buffer->samples || buffer->frames < 2 || step <= 0.0)
 			continue;
+		heard = 1;
 		current = buffer->current_volume;
 		increment = (volume - current) / (float)frames;
 		for (frame = 0; frame < frames; frame++)
@@ -1893,6 +1995,7 @@ static void mix_buffers(float *output, unsigned long frames)
 		}
 		buffer->current_volume = volume;
 	}
+	chant.heard = heard;
 }
 
 HRESULT WINAPI DirectSoundCreateBuffer(LPCDSBUFFERDESC description, LPDIRECTSOUNDBUFFER *result)
