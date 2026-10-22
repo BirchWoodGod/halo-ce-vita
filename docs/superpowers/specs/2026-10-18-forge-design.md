@@ -1872,6 +1872,16 @@ the host saves its map variant, a joiner a copy; undo per player.
   on the HUD, for a Spartan too; their units hidden (and unhurt on the host).
   insider.21 drew only a "( O )" on the HUD, to a monitor alone: testers saw no
   one's monitor.
+- **The characters' lives** (the owner, Oct 22 2026): only the living count
+  (the AI's 32, the objects' budget, the HUD); a dead character stays the
+  layout's (a new round brings it back, a saved variant keeps it), its body
+  taken away 45 s after death or past 32 bodies (the engine takes a
+  multiplayer map's own away sooner). Its properties' RESPAWN (NEVER, 10, 30,
+  60, 120 S; map variant version 3, older ones load with none) places it
+  again where the editor put it; past 32 alive it waits for room ("AI 32/32,
+  4 waiting"), as do a new round's and a variant's extra characters. The
+  host (or a local game) does it all, in Forge and in a variant played
+  (`forge_ai_life_update`).
 - **The Forge menu** in a network game: Start opens the game's multiplayer
   pause, which `menu_tags.c` makes the Forge menu (host and joiners, either
   Menu style); it never pauses the game. insider.21 opened the Xbox's pause in

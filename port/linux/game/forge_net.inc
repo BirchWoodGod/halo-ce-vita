@@ -1891,7 +1891,7 @@ static void forge_net_host_request(
 			if (refusal == _forge_place_budget)
 				forge_net_refuse(actor, &request, _forge_net_refuse_budget, FORGE_MAXIMUM_OBJECTS, 0);
 			else if (refusal == _forge_place_ai_budget)
-				forge_net_refuse(actor, &request, _forge_net_refuse_ai_budget, FORGE_MAXIMUM_AI, forge_globals.ai_dead_count);
+				forge_net_refuse(actor, &request, _forge_net_refuse_ai_budget, FORGE_MAXIMUM_AI, 0);
 			else
 				forge_net_refuse(actor, &request, _forge_net_refuse_cannot_place, 0, 0);
 			return;
