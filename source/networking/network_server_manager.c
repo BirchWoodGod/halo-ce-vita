@@ -3763,6 +3763,10 @@ boolean server_has_a_player_on_each_machine(
 	return TRUE;
 }
 
+#if defined(HALO_LINUX) && !defined(HALO_DEDICATED_SERVER)
+static long network_game_server_fill_people(struct network_game_server *server);
+#endif
+
 boolean server_has_enough_machines(
 	struct network_game_server *server)
 {
@@ -3786,6 +3790,16 @@ boolean server_has_enough_machines(
 	}
 
 	has_enough_machines = machine_count >= minimum_machine_count;
+#if defined(HALO_LINUX) && !defined(HALO_DEDICATED_SERVER)
+	/* (port) a player-hosted online game its bots (Bots online) fill: the
+	host's own machine is enough, the bots being players of machines that
+	are not connections; never with nobody in it */
+	if (!has_enough_machines && machine_count >= 1 && network_game_server_dedicated_bot_count() > 0 &&
+		network_game_server_fill_people(server) > 0)
+	{
+		has_enough_machines = TRUE;
+	}
+#endif
 #ifdef HALO_DEDICATED_SERVER
 	/* (port) bots playing an empty server (sv_bots_when_empty): its own
 	machine's game is enough */
@@ -4677,6 +4691,11 @@ void network_game_server_update_countdown(
 				{
 					if (network_game_should_accept_remote_connections() == FALSE ||
 						network_game_server_get_client_machine_count(server) > 1
+#if defined(HALO_LINUX) && !defined(HALO_DEDICATED_SERVER)
+						/* (port) the host's online bots fill its game: no other
+						machine needed */
+						|| (network_game_server_dedicated_bot_count() > 0 && network_game_server_fill_people(server) > 0)
+#endif
 #ifdef HALO_DEDICATED_SERVER
 						/* (port) bots playing an empty server
 						(sv_bots_when_empty): no other machine needed */

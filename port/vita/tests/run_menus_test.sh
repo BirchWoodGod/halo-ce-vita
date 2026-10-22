@@ -432,7 +432,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-all_cases="fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendsbackup h3friendspanel h3partyplates h3party h3partyonline browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes h3offline h3offlineend msgboxes"
+all_cases="fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendsbackup h3friendspanel h3partyplates h3party h3partyonline browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3hostbots h3livelobby h3groups browserreopen h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes h3offline h3offlineend msgboxes"
 # (the PC build's own, asked for by name: not in the default list)
 pc_cases="pctext pcclassic pcnoadhoc"
 cases=${*:-$all_cases}
@@ -954,6 +954,34 @@ for case in $cases; do
 			fail h3hostonline "Menu style Halo CE's CREATE GAME INTERNET did not open OpenCE's Server Setup"
 		[ -n "${HALO_TEST_SHOTS:-}" ] && mkdir -p "$HALO_TEST_SHOTS/h3hostonline" &&
 			cp "$out"/h3hostonline_shots/0*.bmp "$HALO_TEST_SHOTS/h3hostonline/" 2>/dev/null ;;
+	h3hostbots)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "--- h3hostbots"; echo "SKIP: no HALO_TEST_PROFILE"; continue
+		fi
+		# (insider.22, LadyCassie: a host online with Bots online filling its lobby sat on "Waiting for
+		# other players" and could not start - the bots are players of machines of their own, and the
+		# lobby counted machines. The h3hostonline route to the game's lobby, Bots online full and 3:
+		# the bots join, the lobby says Ready (never Waiting for other players), and Cross, the host
+		# alone, starts the countdown and then the game)
+		hostbots_pad="$h3mppad down:150:500 down:150:500 a wait:150:2500"
+		for row in $(seq 1 9); do hostbots_pad="$hostbots_pad down:150:300"; done
+		hostbots_pad="$hostbots_pad a wait:150:2500 down:150:500 a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:12000"
+		hostbots_pad="$hostbots_pad a wait:150:32000"
+		for bots in full 3; do
+			profile_from=$HALO_TEST_PROFILE run h3hostbots_$bots "$menus_data" 90 "$hostbots_pad" HALO_MENU_STYLE=halo3 $h3net \
+				HALO_NET_HOST_PUBLIC=true HALO_BOTS_ONLINE=$bots
+			check_h3 h3hostbots_$bots halo3
+			log=$out/h3hostbots_$bots/run.log
+			grep -aE "server: bots: a bot joined|menus: h3 pregame: |countdown|menus: h3 live lobby: its game started" "$log" | tail -8 | cut -c1-200
+			grep -aq "ui: screen pc.h3.pregame.screen" "$log" || fail h3hostbots_$bots "the game's lobby did not open"
+			grep -aq "server: bots: a bot joined" "$log" || fail h3hostbots_$bots "no bot joined the host's lobby"
+			# (before the first bot joins the host is alone, and the lobby says so)
+			sed -n '/server: bots: a bot joined/,$p' "$log" | grep -aq "menus: h3 pregame: Waiting for other players" &&
+				fail h3hostbots_$bots "the lobby waited for other players with the host's bots in"
+			grep -aqE "menus: h3 pregame: (Ready: |Starting)" "$log" || fail h3hostbots_$bots "the lobby was never ready for the host to start"
+			grep -aq "all machines have successfully loaded" "$out/h3hostbots_$bots/data/debug.txt" ||
+				fail h3hostbots_$bots "the host alone with its bots did not start the game"
+		done ;;
 	h3livelobby)
 		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
 			echo "--- h3livelobby"; echo "SKIP: no HALO_TEST_PROFILE"; continue
