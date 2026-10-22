@@ -4666,7 +4666,13 @@ void network_game_server_update_countdown(
 				else
 				{
 					if (network_game_should_accept_remote_connections() == FALSE ||
-						network_game_server_get_client_machine_count(server) > 1)
+						network_game_server_get_client_machine_count(server) > 1
+#ifdef HALO_DEDICATED_SERVER
+						/* (port) bots playing an empty server
+						(sv_bots_when_empty): no other machine needed */
+						|| (dedicated_server_bots_when_empty() && network_game_server_dedicated_bot_count() > 0)
+#endif
+						)
 					{
 						unsigned long countdown;
 
