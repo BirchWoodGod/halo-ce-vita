@@ -622,7 +622,24 @@ void network_game_reset_for_next_round(
 		csmemset(&game->local_data, 0, sizeof(game->local_data));
 	}
 
+#ifdef HALO_LINUX
+	/* port: the round's clock ends with it - but not the main menu's: with
+	ui.map loaded just now (above, or by the host's own client a moment
+	before the server's reset) the clock is ui.map's, and stopping it left
+	the menus with no ticks, no scripts (ring_loop) and no world drawn
+	(game_in_progress): the lobby and then the main menu over the fog's
+	colour alone, after a game whose carnage report went back to the Halo 3
+	live lobby (insider.21). ui.map's clock stands still anyway while the
+	network game holds it (game_time_update: the host ticks only in a game) */
+	{
+		int halo_main_menu_loaded(void);
+
+		if (!halo_main_menu_loaded())
+			game_time_end();
+	}
+#else
 	game_time_end();
+#endif
 	return;
 }
 

@@ -1597,6 +1597,12 @@ static struct
 	boolean ring_asleep;
 	/* where the ring's flight was left, in the settings point */
 	boolean ring_kept;
+	/* the main menu's ring flown on this load of ui.map (the camera is the
+	ring's then; not before it: a lobby opened as ui.map loads - the live
+	lobby after a game's carnage report - has the last map's camera, or
+	none, which kept and cut back to left the main menu in the void,
+	insider.21) */
+	boolean ring_flown;
 } h3_scenes;
 
 static void h3_scene_keep_ring(void);
@@ -1909,6 +1915,7 @@ void menu_functions_scenes_update(void)
 			main_request_host_command_from("(wake ring_loop)", "menu scene");
 		}
 		h3_scenes.ring_asleep = FALSE;
+		h3_scenes.ring_flown = TRUE;
 		menu_scene_objects_want(h3_scenes.screen, NULL, FALSE, 0.f, 0.f, 0.f, 0.f, 0.f);
 		platform_log("menus: h3 scene: %s: the ring's own flight", h3_scenes.screen);
 		return;
@@ -1965,6 +1972,20 @@ static void h3_scene_keep_ring(void)
 	h3_scenes.ring_kept = FALSE;
 	if (!point || !camera)
 		return;
+	/* (only the ring's own camera: flown on this map, in range, looking
+	somewhere; else nothing kept, and the main menu wakes the ring's flight
+	from the lobby's camera) */
+	if (!h3_scenes.ring_flown || !(camera->position.x > -5000.f && camera->position.x < 5000.f) ||
+		!(camera->position.y > -5000.f && camera->position.y < 5000.f) ||
+		!(camera->position.z > -5000.f && camera->position.z < 5000.f) ||
+		!(camera->forward.i * camera->forward.i + camera->forward.j * camera->forward.j +
+			camera->forward.k * camera->forward.k > 0.01f))
+	{
+		platform_log("menus: h3 scene: the ring's camera not kept (%s: %.2f %.2f %.2f)", h3_scenes.ring_flown ?
+			"out of range" : "the ring not flown on this map yet", camera->position.x, camera->position.y,
+			camera->position.z);
+		return;
+	}
 	horizontal = (real)sqrt(camera->forward.i * camera->forward.i + camera->forward.j * camera->forward.j);
 	point->position = camera->position;
 	point->orientation.yaw = (real)atan2(camera->forward.j, camera->forward.i);
@@ -15946,8 +15967,11 @@ void pc_menu_functions_update(
 		menu_functions.browse_lan_pending = FALSE;
 		h3_adhoc.open_then = FALSE;
 		h3_adhoc.then = _h3_adhoc_then_none;
-		/* (ui.map's scripts start again with it: ring_loop awake) */
+		/* (ui.map's scripts start again with it: ring_loop awake; its
+		settings point read again, nothing kept in it, the ring not flown) */
 		h3_scenes.ring_asleep = FALSE;
+		h3_scenes.ring_kept = FALSE;
+		h3_scenes.ring_flown = FALSE;
 		return;
 	}
 	if (menu_functions.open_password)
