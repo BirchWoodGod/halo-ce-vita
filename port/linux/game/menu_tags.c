@@ -1285,11 +1285,7 @@ static void *widget_extend(struct halo_menu_widget const *source, struct menu_wi
 	struct menu_widget_definition *definition;
 
 	if (tag_index == NONE || !(map = tag_get(UI_WIDGET_DEFINITION_TAG, tag_index)))
-	{
-		platform_log("menus: %s:%ld: this map has no %s for %s to extend", source->file, source->line,
-			source->extends, source->name);
 		return built;
-	}
 	definition = allocate(sizeof(*definition));
 	if (!definition)
 		return built;
@@ -1366,6 +1362,16 @@ static void *widget_build(long widget_index)
 		return NULL;
 	strncpy(definition->name, leaf, sizeof(definition->name) - 1);
 	definition->type = _widget_type_container;
+	/* (extends= a widget this map has not - a level's map of another kind:
+	the multiplayer pause's rows on a campaign map -: an empty widget, its
+	children, events and inputs not looked for, and nothing stands for the
+	map's; said once, the set still added) */
+	if (source->extends && tag_loaded(UI_WIDGET_DEFINITION_TAG, source->extends) == NONE)
+	{
+		platform_log("menus: %s:%ld: this map has no %s for %s to extend: left out here", source->file, source->line,
+			source->extends, source->name);
+		return definition;
+	}
 	if (source->type)
 	{
 		long type = name_index(source->type, widget_type_names, NUMBEROF(widget_type_names));
