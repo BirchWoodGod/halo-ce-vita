@@ -1570,6 +1570,14 @@ long scenario_tags_load(
 			them, and its Ogg Vorbis sounds' sound cache file opened on the
 			decoding thread: custom_edition_sounds.c) */
 			custom_edition_sounds_map_loaded();
+			/* (port: MCC's own ui.map as the menus' map: the PC menus' XML
+			screens are built into its tags as an Xbox ui.map's are) */
+			if (!csstrcasecmp(stripped_scenario_name, "ui"))
+			{
+				extern void menu_tags_loaded(char const *map_name);
+
+				menu_tags_loaded(stripped_scenario_name);
+			}
 		}
 		else
 		{

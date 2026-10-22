@@ -2633,6 +2633,20 @@ static void main_won_map_private(
 void main_set_map_name(
 	char const *map_name)
 {
+#ifdef HALO_LINUX
+	/* port: a campaign level of the Xbox's the machine has no map for, in the
+	Halo content folder (MCC's), as the classic menus' level lists and the
+	new campaign name them (custom_edition_cache.c) */
+	{
+		extern boolean custom_edition_cache_campaign_level_translate(char const *level_name, char *out, long out_size);
+		char translated[64];
+
+		if (map_name && custom_edition_cache_campaign_level_translate(map_name, translated, sizeof(translated)))
+		{
+			map_name = translated;
+		}
+	}
+#endif
 	main_globals.want_to_be_at_main_menu = FALSE;
 	csstrncpy(main_globals.soloplayer_map_name, map_name, NUMBEROF(main_globals.soloplayer_map_name) - 1);
 	main_globals.soloplayer_map_name[NUMBEROF(main_globals.soloplayer_map_name) - 1] = 0;
