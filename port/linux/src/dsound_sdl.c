@@ -1127,6 +1127,39 @@ void vita_host_thread_watch(const char *role);
 /* the mixer moved to the fourth core (audio_callback) */
 static int mixer_on_fourth_core;
 
+/* The mixer late on the fourth core: off it for the rest of the run.
+xal's insider.21 log (Oct 22, All async): with the fourth core busy - the
+helpers at 11-15 ms a frame, the core 48-56% busy, after a network game and
+at the menus - the device's calls came up to 50 ms apart, 47 and 49 of them
+over 25 ms in ten seconds, and the menus' music crackled; with the core
+under 40% busy, none. The mixer is the game's highest priority thread, but
+the system's own work shares the fourth core. Two calls over 25 ms apart
+within a second move it to cores 0-2, where it preempts a game thread for
+well under a millisecond a mix (Audio's 0.5-0.9 ms); HALO_AUDIO_CORE=3
+keeps it there whatever happens */
+static int mixer_fourth_core_left;
+static int mixer_fourth_core_forced;
+
+static void mixer_fourth_core_late(unsigned long long now, unsigned long long gap)
+{
+	static unsigned long long last_late;
+
+	if (!mixer_on_fourth_core || mixer_fourth_core_left || mixer_fourth_core_forced)
+		return;
+	if (last_late && now - last_late < 1000000ull)
+	{
+#ifdef HALO_VITA
+		if (vita_host_fourth_core_step_aside(1) >= 0)
+#endif
+		{
+			mixer_fourth_core_left = 1;
+			platform_log("sound mixer: the device's calls came late on the fourth core (%.1f ms apart, twice in a second): "
+				"the mixer on cores 0-2 from now on", (double)gap / 1000.0);
+		}
+	}
+	last_late = now;
+}
+
 /* The loading screen's chant (DirectSound buffers, mix_buffers) on the
 mixer's thread: while it plays, a mixer on the Vita's fourth core steps
 aside to cores 0-2 - a map's load keeps the fourth core busy (the cache file
@@ -1157,7 +1190,7 @@ static void chant_update(void)
 		return;
 	chant.was_heard = heard;
 #ifdef HALO_VITA
-	if (mixer_on_fourth_core && heard != chant.aside)
+	if (mixer_on_fourth_core && !mixer_fourth_core_left && heard != chant.aside)
 	{
 		vita_host_fourth_core_step_aside(heard);
 		chant.aside = heard;
@@ -1208,7 +1241,10 @@ static void SDLCALL audio_callback(void *userdata, SDL_AudioStream *stream, int 
 				vita_host_pin_current_thread(core);
 #ifdef HALO_VITA
 			if (core == 3)
+			{
 				mixer_on_fourth_core = vita_host_fourth_core_move("sound mixer") == 3;
+				mixer_fourth_core_forced = 1;
+			}
 			else if (!setting)
 				mixer_on_fourth_core = vita_host_fourth_core_join("sound mixer", 1) == 3;
 			else
@@ -1228,6 +1264,8 @@ static void SDLCALL audio_callback(void *userdata, SDL_AudioStream *stream, int 
 				statistics_callback_gap_us = gap;
 			if (gap > 25000)
 				statistics_callbacks_late++;
+			if (gap > 25000)
+				mixer_fourth_core_late(now, gap);
 			if (chant.heard)
 			{
 				if (gap > chant.longest_gap_us)
