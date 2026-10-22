@@ -131,6 +131,12 @@ menus need bitmaps.map, loc.map: README" (halo_pc_menus_state).
   network.coop_public: Private unless chosen), which X on the waiting screen
   of co-op hosted online sets (port/linux/game/coop_menu.c). 1.0.3's
   "Online games" row (HALO_NET_LOBBY_PUBLIC) loads as Visibility; 1.0.3's Co-op page variables load as Off.
+- "Online bots" (HALO_BOTS_ONLINE: Full, the default, Off, or 1 to 13 at
+  most): a game this Vita hosts on the Online connection is filled with bots
+  to its most players less one, a bot leaving for each player who joins (a
+  party's members on one team; network_server_manager.c's bot fill); the
+  Halo 3 GAME OPTIONS' BOTS sets it too. Never in Same Wi-Fi, ad hoc or
+  Split Screen games.
 - "Bots" (HALO_BOTS, Off or 1 to 15): computer players in the game's
   Multiplayer > Split Screen games (port/linux/game/bots.c), who join its
   lobby; with any, "Bot skill" (HALO_BOT_SKILL: Easy, Normal, Heroic,
@@ -819,6 +825,12 @@ static struct setting settings[] = {
 	{ "Bots", "HALO_BOTS", 0, 11, { "0", "1", "2", "3", "4", "5", "6", "7", "9", "11", "15" },
 		{ "Off", "1", "2", "3", "4", "5", "6", "7", "9", "11", "15" },
 		"Computer players in Multiplayer > Split Screen", 0, TAB_MULTIPLAYER },
+	/* (bots.online: the bots a game this Vita hosts Online fills its lobby
+	with, to its most players less one, leaving as players join: Full by
+	default; the Halo 3 GAME OPTIONS' BOTS sets it too. Live) */
+	{ "Online bots", "HALO_BOTS_ONLINE", 0, 10, { "full", "off", "1", "2", "3", "5", "7", "9", "11", "13" },
+		{ "Full", "Off", "1", "2", "3", "5", "7", "9", "11", "13" },
+		"Games you host Online: bots fill all but one slot", 0, TAB_MULTIPLAYER },
 	{ "  Bot skill", "HALO_BOT_SKILL", 0, 4, { "easy", "normal", "heroic", "legendary" },
 		{ "Easy", "Normal", "Heroic", "Legendary" }, "How soon bots react, how well they aim", 1, TAB_MULTIPLAYER },
 	{ "  Bot teams", "HALO_BOT_TEAMS", 0, 2, { "even", "against" }, { "Even", "Against you" },
@@ -1644,8 +1656,12 @@ static int setting_shown(const struct setting *setting)
 	/* (the tester's flaming helmet: a listed tester's alone) */
 	if (setting->variable && !strcmp(setting->variable, "HALO_FLAMING_HELMET"))
 		return p2p_flame_listed();
-	if (setting->variable && (!strcmp(setting->variable, "HALO_BOT_SKILL") || !strcmp(setting->variable, "HALO_BOT_TEAMS") ||
-		!strcmp(setting->variable, "HALO_BOT_VEHICLES") || !strcmp(setting->variable, "HALO_BOT_ROUTES") ||
+	/* (skill, vehicles and routes: the offline bots' and Online bots'; teams
+	and the playlist: Split Screen's alone) */
+	if (setting->variable && (!strcmp(setting->variable, "HALO_BOT_SKILL") ||
+		!strcmp(setting->variable, "HALO_BOT_VEHICLES") || !strcmp(setting->variable, "HALO_BOT_ROUTES")))
+		return choice_of("HALO_BOTS") != 0 || choice_of("HALO_BOTS_ONLINE") != 1;
+	if (setting->variable && (!strcmp(setting->variable, "HALO_BOT_TEAMS") ||
 		!strcmp(setting->variable, "HALO_BOT_PLAYLIST")))
 		return choice_of("HALO_BOTS") != 0;
 	/* (a code typed in: online, on a Vita whose game has not got the PC

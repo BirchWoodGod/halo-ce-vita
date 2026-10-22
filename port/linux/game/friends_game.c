@@ -479,6 +479,13 @@ void friends_game_update(boolean main_menu_loaded)
 
 		flame_net_update();
 	}
+	/* (a party formed or changed while in a game: its team token told to
+	the host again, party_net.c) */
+	{
+		void party_net_update(void);
+
+		party_net_update();
+	}
 	friends_game_invites(main_menu_loaded);
 	friends_game_party_invites(main_menu_loaded);
 	/* (in a party: the lobbies' NETWORK ONLINE, a party plays online:

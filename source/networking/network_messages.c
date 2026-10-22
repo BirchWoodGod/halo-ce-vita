@@ -185,6 +185,7 @@ symbols in this file:
 #include "forge_net_protocol.h"
 #include "infection_net.h"
 #include "flame_net.h"
+#include "party_net.h"
 
 /* cseries_windows.c's */
 unsigned long system_milliseconds(void);
@@ -290,6 +291,8 @@ struct network_game_message_packet_definitions
 	struct data_packet_definition client_flame;
 	struct data_packet_field server_flame_fields[3];
 	struct data_packet_definition server_flame;
+	struct data_packet_field client_party_fields[3];
+	struct data_packet_definition client_party;
 	struct data_packet_entry packets[NUMBER_OF_NETWORK_GAME_MESSAGE_TYPES];
 	struct data_packet_group_definition group;
 };
@@ -359,6 +362,9 @@ DEFINE_NETWORK_GAME_MESSAGE(message_server_game_rules, sizeof(struct game_rules_
 flame_net_message, both ways) */
 DEFINE_NETWORK_GAME_MESSAGE(message_client_flame, sizeof(struct flame_net_message));
 DEFINE_NETWORK_GAME_MESSAGE(message_server_flame, sizeof(struct flame_net_message));
+/* (port) a joiner's party's team token (port/linux/game/party_net.h:
+struct party_net_message) */
+DEFINE_NETWORK_GAME_MESSAGE(message_client_party, sizeof(struct party_net_message));
 
 #undef DEFINE_NETWORK_GAME_MESSAGE
 
@@ -647,6 +653,12 @@ static struct network_game_message_packet_definitions data_0030aa68 =
 	},
 	NETWORK_GAME_MESSAGE_DEFINITION(server_flame, "message_server_flame_packet", message_server_flame),
 	{
+		DATA_PACKET_FIELD(_data_packet_field_shorts, 2),
+		DATA_PACKET_FIELD(_data_packet_field_bytes, PARTY_NET_TOKEN_BYTES),
+		DATA_PACKET_FIELD_END,
+	},
+	NETWORK_GAME_MESSAGE_DEFINITION(client_party, "message_client_party_packet", message_client_party),
+	{
 		{ 0, 0, &data_0030aa68.client_broadcast_game_search },
 		{ 0, 0, &data_0030aa68.client_ping },
 		{ 1, 0, &data_0030aa68.server_game_advertise },
@@ -691,6 +703,7 @@ static struct network_game_message_packet_definitions data_0030aa68 =
 		{ 2, 0, &data_0030aa68.server_game_rules },
 		{ 3, 0, &data_0030aa68.client_flame },
 		{ 2, 0, &data_0030aa68.server_flame },
+		{ 3, 0, &data_0030aa68.client_party },
 	},
 	{
 		"network_game_messages_group",
@@ -732,7 +745,7 @@ static short const network_game_message_structure_sizes[NUMBER_OF_NETWORK_GAME_M
 	sizeof(message_client_map_download), sizeof(message_server_map_download_answer),
 	sizeof(message_server_map_download_data), sizeof(message_client_forge), sizeof(message_server_forge),
 	sizeof(message_client_game_rules), sizeof(message_server_game_rules),
-	sizeof(message_client_flame), sizeof(message_server_flame),
+	sizeof(message_client_flame), sizeof(message_server_flame), sizeof(message_client_party),
 };
 
 /* port: whether a type's packet definition holds more than its structure
@@ -1012,6 +1025,9 @@ void *create_network_game_message(
 
 	case _message_server_flame:
 		match_assert(__FILE__, __LINE__, message_struct_size==sizeof(message_server_flame));
+		break;
+	case _message_client_party:
+		match_assert(__FILE__, __LINE__, message_struct_size==sizeof(message_client_party));
 		break;
 	default:
 #line 213 "c:\\halo\\SOURCE\\networking\\network_messages.c"

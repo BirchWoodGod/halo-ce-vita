@@ -287,6 +287,9 @@
 # lines that say why; the brokers' topics (hceu: OpenCE's, hcev: ours) are
 # listed for the internet modes.
 set -u
+# (Bots online, bots.online: full by default, which fills a game hosted
+# online with bots; off here unless a run asks: run_netns_online_test.sh hostbots)
+export HALO_BOTS_ONLINE=${HALO_BOTS_ONLINE:-off}
 # (a sanitizer build's stack trace runs llvm-symbolizer, which asks the
 # debuginfod servers DEBUGINFOD_URLS names: a name lookup the leak check
 # rightly fails; the copies symbolize from their own debug information)

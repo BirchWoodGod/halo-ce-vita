@@ -25,8 +25,16 @@ false details:
 	32 and 24 characters of printable ASCII), the score to win (2), a co-op
 	game's difficulty (1: 0 to 3), the players' names (a count, at most
 	LISTED_PLAYERS, then each as a length byte and up to
-	LISTED_PLAYER_NAME_SIZE characters), a stamp (8, reserved: zero), and
-	the signature (64) of SIGNATURE_LABEL and all before it.
+	LISTED_PLAYER_NAME_SIZE characters), a stamp (8: this project's marks,
+	NETWORK_WIRE_STAMP_*; then the players of the count who are a dedicated
+	server's bots, sv_bots_fill; the rest zero), and the signature (64) of
+	SIGNATURE_LABEL and all before it.
+
+The stamp was reserved (zero) in OpenCE's format and in this project's
+first builds, which read none of it: the bots' count in its second byte
+(sv_bots_fill) is one more mark they ignore, seeing the players' count alone
+(bots and people); a browser that reads it shows the people and the bots
+apart ("6 players, 5 bots": p2p_lobby_entry's bots).
 
 The Vita's listings are OpenCE's (format 1) with the score, the difficulty
 and the players' names added (format 2), on the Vitas' own topics
@@ -266,6 +274,8 @@ struct listing
 	char players[LISTED_PLAYERS][LISTED_PLAYER_NAME_SIZE + 1];
 	/* the stamp's first byte: this project's marks (NETWORK_WIRE_STAMP_*) */
 	int stamp;
+	/* (the stamp's second byte) the players who are bots */
+	int bots;
 	/* the signed part's size */
 	int signed_size;
 };
@@ -340,6 +350,8 @@ static struct
 	int listed_player_count;
 	char players[LISTED_PLAYERS][LISTED_PLAYER_NAME_SIZE + 1];
 	int player_count, maximum_player_count;
+	/* of the players, the dedicated server's bots (p2p_set_game_bot_count) */
+	int bot_count;
 	/* the password's key (p2p_lobby_set_password), if it has one; while a
 	new password's is worked out (password_pending), the game is not listed */
 	int has_password;
@@ -631,6 +643,10 @@ static int listing_make(unsigned char *bytes, int flags)
 		size += put_text(bytes + size, lobby.players[index], LISTED_PLAYER_NAME_SIZE);
 	memset(bytes + size, 0, STAMP_SIZE);
 	bytes[size] = listing_stamp(0);
+	/* (the players who are bots: none in a tombstone) */
+	if (!(flags & _listing_closed))
+		bytes[size + 1] = (unsigned char)(lobby.bot_count < 0 ? 0 : lobby.bot_count > lobby.player_count ?
+			(lobby.player_count > 255 ? 255 : lobby.player_count) : lobby.bot_count);
 	size += STAMP_SIZE;
 	memcpy(data, signature_label, sizeof(signature_label) - 1);
 	memcpy(data + sizeof(signature_label) - 1, bytes, (size_t)size);
@@ -731,6 +747,8 @@ static int p2p_lobby_listing_read(int crossplay, const unsigned char *bytes, int
 	if (offset + STAMP_SIZE > size)
 		return 0;
 	listing->stamp = bytes[offset];
+	/* (no more bots than players) */
+	listing->bots = bytes[offset + 1] > listing->player_count ? listing->player_count : bytes[offset + 1];
 	offset += STAMP_SIZE;
 	if (offset + P2P_SIGNATURE_SIZE != size)
 		return 0;
@@ -1490,6 +1508,7 @@ static void listing_take(const struct queued *queued, const struct listing *list
 	memcpy(shown->map, listing->map, sizeof(shown->map));
 	memcpy(shown->gametype, listing->gametype, sizeof(shown->gametype));
 	shown->player_count = (unsigned char)listing->player_count;
+	shown->bot_count = (unsigned char)(listing->crossplay ? 0 : listing->bots);
 	shown->maximum_player_count = (unsigned char)listing->maximum_player_count;
 	shown->engine_type = (unsigned char)listing->engine_type;
 	shown->open = (listing->flags & _listing_open) != 0;
@@ -2126,6 +2145,20 @@ void p2p_set_game_listing(const char *name, const char *map, const char *gametyp
 	pthread_mutex_unlock(&p2p_lock);
 }
 
+void p2p_set_game_bot_count(int count)
+{
+	count = count < 0 ? 0 : count > 255 ? 255 : count;
+	/* (only the game's server writes it: unchanged, it need not wait for
+	the lock) */
+	if (count == lobby.bot_count)
+		return;
+	pthread_mutex_lock(&p2p_lock);
+	lobby.bot_count = count;
+	if (lobby.listed)
+		republish_soon(0);
+	pthread_mutex_unlock(&p2p_lock);
+}
+
 void p2p_set_game_listing_details(int score_limit, int coop_difficulty, int pc_map, const char *player_names)
 {
 	char players[LISTED_PLAYERS][LISTED_PLAYER_NAME_SIZE + 1];
@@ -2458,6 +2491,7 @@ static void entry_from_listing(const struct p2p_listing *listing, struct p2p_lob
 			listing->engine_type < (int)(sizeof(engines) / sizeof(engines[0])) ? engines[listing->engine_type] : "");
 	}
 	entry->players = listing->player_count;
+	entry->bots = listing->bot_count > listing->player_count ? listing->player_count : listing->bot_count;
 	entry->maximum = listing->maximum_player_count;
 	entry->score_limit = listing->score_limit;
 	entry->compatible = 1;
@@ -2517,6 +2551,13 @@ static void entry_from_listing(const struct p2p_listing *listing, struct p2p_lob
 		snprintf(entry->rules + length, sizeof(entry->rules) - (size_t)length, "%s", T(" (DEDICATED)"));
 	/* the Players line: "5 of 16: name, name... +3 more" (the names that
 fit, with room left for the end) */
+	if (entry->bots > 0)
+	{
+		length = snprintf(entry->players_line, sizeof(entry->players_line), T("%d of %d: %d players, %d bots"),
+			entry->players, entry->maximum, entry->players - entry->bots, entry->bots);
+		length = length < (int)sizeof(entry->players_line) ? length : (int)sizeof(entry->players_line) - 1;
+		return;
+	}
 	length = snprintf(entry->players_line, sizeof(entry->players_line), T("%d of %d"), entry->players, entry->maximum);
 	for (index = 0; index < listing->listed_player_count; index++)
 	{

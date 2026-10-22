@@ -243,6 +243,9 @@ These commands work in `init.txt` and on the console. The names are
 | `sv_starting_weapons <generic\|map>` | The players' first weapons in every gametype: `generic`, an assault rifle and a pistol; `map` (the default), the gametype's own (most maps' own: see "Starting weapons"). From the next game. |
 | `sv_end_empty <seconds>` | A game that nobody is in ends after this (default 30; 0: never). |
 | `sv_coop <level> [difficulty]` | Co-op on a campaign level (`a10`, `a30`...; difficulty 0 to 3, default 1) instead of the cycle; the server runs the AI and the scripts. `init.txt` only. |
+| `sv_bots_fill <0\|1>` | 1: bots fill the game to its most players less one, so a slot is always free, and leave as players join (see "Bots"). 0 (the default): no bots. |
+| `sv_bots_when_empty <0\|1>` | With `sv_bots_fill 1`: 1 (the default), the bots play while nobody is in too (the server plays its cycle with them and never looks empty); 0, only while people are in. |
+| `sv_bots_skill <easy\|normal\|heroic\|legendary>` | The bots' skill (default normal). |
 | `sv_map_download <0\|1>` | 1: Vitas without a custom map of the cycle may download it from the server, in the lobby or before they join a game in progress (then at most 256 KB/s for all of them together: `HALO_MAP_SHARE_INGAME_RATE_KB` in the server's environment changes it). 0 (the default): no downloads. |
 | `sv_port <port>` | Internet play's UDP port (default 2302). `init.txt` only. |
 | `sv_game_port <port>` | The game's own ports on this machine: this one (the host's) and the next (its client's). The default is 5150 for `sv_port` 2302, 5152 for 2303, 5154 for 2304 and so on up to 2401 (5150 past that), so servers on 2302, 2303... never take each other's. Only a server on 5150 is found on its LAN (see "Several servers on one VPS"). Not 5149 or 5151. `init.txt` only. |
@@ -334,9 +337,62 @@ its trigger a blow, never dropped; no grenades, no pickups), run at 115%
 (`infection.zombie_respawn`) and are green on the red team; humans are
 the blue team. The zombies win when no human is left; the humans still
 alive win after six minutes (`infection.time_limit`). No vehicles. The
-server decides every side and sends it to the players; a build older than
-1.1.1 is refused from an Infection game (it cannot play it), and plays the
-server's other games as before. `sv_mapcycle_add prisoner infection`.
+server decides every side and sends it to the players. A build without
+Infection (the public 1.1.0, insiders before 21) is not refused: it plays
+the server's Infection as the Team Slayer it knows. The server decides every
+side, death, spawn and weapon; such a player sees the zombies with the skull
+(and is given it, once infected), in their colours and at their speed, and
+the game's end as the server has it; its own scoreboard keeps the teams the
+players joined with and shows no Infection text. It is sent Slayer's part of
+the game type's state alone (`infection_net.c`). A Vita hosting Infection
+refuses it, as before. `sv_mapcycle_add prisoner infection`.
+
+### Bots
+
+`sv_bots_fill 1` fills the game with bots (the game's offline bots,
+`port/linux/game/bots.c`, played by the server alone) up to its most
+players less one, so that a slot is always free:
+
+- While nobody is in, the bots play the cycle alone (`sv_bots_when_empty
+  1`, the default): the server is listed one short of full ("15 of 16: 0
+  players, 15 bots") and never ends a game for being empty. With
+  `sv_bots_when_empty 0` an empty server has no bots, stays idle and is
+  listed with no players.
+- A player joining takes the free slot and a bot leaves to free another;
+  a joiner (a party's members joining together too) that finds the game
+  full takes a bot's slot at once. A person is never removed or refused
+  for a bot. As players leave, bots come back, one every 0.75 s in a game.
+- Team games (not Infection): a person joins the team with fewer people
+  (then the one with fewer players), and the bot that leaves for them is of
+  that team. A party's members (1.1.1: the joiner tells the server its
+  party's team token, a hash of the party's id, before it asks for its
+  player) join the team of a member already in. Only bots change teams, and
+  only by one leaving and another joining (a 1.1.0 client learns a player's
+  team as they join, and never again in the game): a bot joins the smaller
+  team, leaves the larger, and the teams are kept within one of each other.
+  A person is never moved. A party bigger than half the game can leave the
+  teams uneven (people are not moved to even them). In Infection the bots
+  are humans and zombies as the players are; free for all just keeps the
+  most players less one.
+- `sv_minplayers` counts people, not bots (with the bots playing an empty
+  server, they start its games themselves).
+- Older builds (the public 1.1.0) see every bot as a player. In Infection
+  they play as Team Slayer (above); one thing they cannot be told is a team
+  changed in the round (no message of theirs carries it): a 1.1.0 player
+  keeps, on its own screen, every player's team as it was when they joined
+  (its scoreboard, its friend and foe markers), while the bodies, the skull
+  and the damage are the server's.
+- Every build sees the bots as players (they join and leave as players of
+  machines that join and quit: nothing new on the wire). The server
+  browser's listing carries the bots' count beside the players' (its
+  stamp's second byte, which older builds ignore, seeing the total): the
+  Halo 3 browser shows "6 players · 5 bots".
+
+`sv_status` shows each team's people and bots in a team game ("teams: red
+2+4, blue 1+5"), and a person's join line their team.
+
+The bots cost the server's CPU while people play (their path searches run
+on a helper thread): `sv_status` shows the players and the bots.
 
 ### Starting weapons
 

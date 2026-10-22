@@ -32,6 +32,9 @@
 # Needs unprivileged user namespaces (unshare -rn), ip, python3, and clang
 # that targets i686 (the generator: as run_p2p_lobby_test.sh builds it).
 set -u
+# (Bots online, bots.online: full by default, which fills a game hosted
+# online with bots; off here unless a run asks: run_netns_online_test.sh hostbots)
+export HALO_BOTS_ONLINE=${HALO_BOTS_ONLINE:-off}
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 binary=$(readlink -f "${HALO_TEST_VITA:-$root/build/linux/halo}")

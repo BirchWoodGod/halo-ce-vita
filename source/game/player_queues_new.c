@@ -1162,6 +1162,26 @@ struct player_action const *update_server_update_actions(
 	return update->update.actions;
 }
 
+/* port: (the dedicated server's bots, port/linux/game/bots.c) the action a
+bot played at the update its host's last tick ran, in place of its queue's
+idle one: what the host relays of that player (network_distributed.c) is
+what its tick ran */
+void update_server_set_ticked_action(
+	short player_index,
+	struct player_action const *action)
+{
+	long update_number = update_server_ticked_update_number();
+	struct update *update = update_server_globals.initialized && update_number != NONE ?
+		update_server_get_update(update_number) : NULL;
+
+	if (!update || update->update_number != update_number || player_index < 0 ||
+		player_index >= update->update.action_count || player_index >= MAXIMUM_NUMBER_OF_PLAYERS)
+	{
+		return;
+	}
+	update->update.actions[player_index] = *action;
+}
+
 void update_client_handle_relayed_action(
 	short player_index,
 	long update_number,

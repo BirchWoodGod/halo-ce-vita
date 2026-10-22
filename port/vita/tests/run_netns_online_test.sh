@@ -667,6 +667,60 @@
 #            beta.2/beta.1: no change on their side) as the first and third
 #            joiners: they must play every game with the others and see in
 #            their players' lines what the new ones see (they have no census)
+#   dedicatedbots the dedicated server's bots (sv_bots_fill 1, DEDICATED_SERVER.md)
+#            in its Infection (HALO_TEST_BOTS_GAME, prisoner infection;
+#            sv_maxplayers HALO_TEST_BOTS_MAX, 16): bots fill the game to its
+#            most players less one while anyone is in. A Vita joins by the
+#            code (the lobby), a second - HALO_TEST_VITA_OLD when given (the
+#            public 1.1.0's build: it plays the server's Infection as Team
+#            Slayer, never refused) - joins the game in progress 25 s later,
+#            and a third from the server browser 25 s after, which must list
+#            the bots apart ("N of M: P players, B bots"), and leaves early.
+#            The server's sv_status every 5 s: once settled, the game always
+#            one slot short of full (people + bots = most - 1), never a
+#            person refused, the bots back as the third leaves; each joiner
+#            plays with the others; the round begins and ends (infection:),
+#            every joiner logs the game's end; an old joiner is taken as
+#            Team Slayer, sent Slayer's state (its scores, the end), and
+#            plays on as a zombie once infected (the skull in its hands)
+#   dedicatedcompat (also dedicated_compat) the s8 question: can the public
+#            1.1.0 build play the dedicated server's Infection the bots fill?
+#            The server (sv_bots_fill 1, sv_maxplayers HALO_TEST_BOTS_MAX, 16,
+#            HALO_TEST_COMPAT_CYCLE, "prisoner infection"; games split by ';')
+#            takes one 1.1.0 client (HALO_TEST_COMPAT_V110, default
+#            ../wt-v110client's build) and one insider.21 client
+#            (HALO_TEST_COMPAT_NEW, ../wt-i21client's) by its code; both play
+#            a round. netns_compat_check.py then checks, one line each: both
+#            joined, no one refused, the bots keep the game at most-1 with a
+#            slot free, the round ends with a winner (each client its end, the
+#            insider's winner the server's), no crash, assertion, dashboard or
+#            lost connection anywhere, the 1.1.0 client sees the players and
+#            bots, its own player killed by a zombie moves to the zombies'
+#            team on its side and holds the skull alone, every player the
+#            server turned is a zombie on each client, and the two clients
+#            agree on every team second by second. A run where the 1.1.0
+#            player is never infected says NOT RUN and fails (run again;
+#            HALO_TEST_COMPAT_LENIENT=1 warns instead). README_dedicated_compat.md
+#   hostbots a 1.1.1 host online fills its lobby with bots (bots.online, Bots
+#            online: full by default, which every other mode here turns off):
+#            Alpha hosts Team Slayer on Prisoner (HALO_TEST_HOST_GAME) for
+#            HALO_TEST_HOSTBOTS_MAX (16), public; a browsing copy must list it
+#            one short of full with bots ("15 of 16: 1 players, 14 bots");
+#            the public 1.1.0 build (HALO_TEST_VITA_OLD, ../wt-v110client's)
+#            joins by the code, then Bravo, who invites Charlie to a party and
+#            Charlie follows: each takes a bot's slot (a bot of the team they
+#            join), Bravo and Charlie on one team, the teams within one, the
+#            game one short of full; the 1.1.0 player plays with the others
+#            and sees every team as the host has it
+#   (lan, adhoc, h3lan, h3adhoc: the host has Bots online on and must fill
+#            nothing: no bot off the Online connection)
+#   partyserver a party joins a server the bots fill: the dedicated server
+#            (sv_bots_fill 1, sv_maxplayers HALO_TEST_PARTY_MAX, 4: Slayer on
+#            Chill Out) and Alpha, who joins it by its code and is friends with
+#            Bravo and Charlie; Alpha invites both to a party, and its FOLLOW
+#            takes them into the server's game through its invite: the game
+#            has one free slot and two bots, and both members must get in at
+#            once (bots leaving for them, nobody refused as full) and play
 #
 #   HALO_TEST_SERVER the dedicated server (build/linux/halo-server of this tree)
 #   HALO_TEST_SYMMETRIC_NAT=all|joiners  every router's NAT a symmetric one
@@ -734,6 +788,7 @@ if [ "${HALO_NETNS_INSIDE:-}" != 1 ]; then
 fi
 
 mode=${1:-code}
+[ "$mode" = dedicated_compat ] && mode=dedicatedcompat
 # (latency: a home connection's delay unless one is given)
 [ "$mode" = latency ] && [ -z "${HALO_TEST_NETEM:-}${HALO_TEST_NETEM_HOST:-}${HALO_TEST_NETEM_JOIN:-}" ] &&
 	export HALO_TEST_NETEM="delay 40ms"
@@ -765,6 +820,13 @@ seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = dedicatedpc ] && seconds=${HALO_TEST_SECONDS:-120}
 [ "$mode" = dedicatedban ] && seconds=${HALO_TEST_SECONDS:-150}
 [ "$mode" = dedicatedfill ] && seconds=${HALO_TEST_SECONDS:-150}
+[ "$mode" = dedicatedbots ] && seconds=${HALO_TEST_SECONDS:-330}
+[ "$mode" = partyserver ] && seconds=${HALO_TEST_SECONDS:-200}
+[ "$mode" = hostbots ] && seconds=${HALO_TEST_SECONDS:-240}
+# (lan, adhoc, h3lan, h3adhoc: the host's Bots online on, as the default is,
+# which must fill nothing off the Online connection: checked at the end)
+case $mode in lan|adhoc|h3lan|h3adhoc) export HALO_TEST_ENV_host="HALO_BOTS_ONLINE=full ${HALO_TEST_ENV_host:-}" ;; esac
+[ "$mode" = dedicatedcompat ] && seconds=${HALO_TEST_SECONDS:-300}
 [ "$mode" = dedicatedcoop ] && seconds=${HALO_TEST_SECONDS:-200}
 [ "$mode" = dedicatedmulti ] && seconds=${HALO_TEST_SECONDS:-220}
 [ "$mode" = dedicatedfullcache ] && seconds=${HALO_TEST_SECONDS:-200}
@@ -894,6 +956,8 @@ side join 10.10.2 192.168.2
 [ "$mode" = infection ] && export HALO_TEST_SECOND_JOINER=${HALO_TEST_SECOND_JOINER:-1}
 { [ "${HALO_TEST_SECOND_JOINER:-0}" = 1 ] || [ "$mode" = badmap ] || [ "$mode" = splitscreen ] || [ "$mode" = party ] || [ "$mode" = chat ] ||
 	[ "$mode" = partyfollow ] ||
+	[ "$mode" = partyserver ] ||
+	[ "$mode" = hostbots ] ||
 	[ "$mode" = friendsbackup ] ||
 	[ "$mode" = h3forgeonline ] || [ "$mode" = vitapc ] || [ "$mode" = vitaonly ]; } &&
 	side join2 10.10.3 192.168.3
@@ -957,6 +1021,7 @@ run_copy() { # run_copy NAME NETNS_PID BINARY CPUS [ENV...]
 		HALO_EXIT_AFTER="$seconds" HALO_FULLSCREEN=0 HALO_HIDDEN_WINDOW=1 HALO_NO_AUDIO=1 HALO_TICK_THREAD=1 \
 		HALO_UPDATE_AUTO=false HALO_DISCORD_APPLICATION= HALO_NET_ALLOW_UPNP=false HALO_MENU_STYLE=classic \
 		HALO_NET_BROKERS=198.51.100.1:1883 HALO_NET_STUN=198.51.100.1:3478 HALO_NET_RELAYS=198.51.100.1:47320 \
+		HALO_BOTS_ONLINE=off \
 		"$@" ${HALO_TEST_ENV:-} \
 		$([ "$name" = joiner ] || [ "$name" = joiner2 ] && echo "${HALO_TEST_JOIN_ENV:-}") \
 		$([ "$name" = joiner2 ] && echo "${HALO_TEST_JOIN2_ENV:-}") \
@@ -3107,13 +3172,13 @@ h3online|h3pickjoin|h3onlinelan)
 		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS)"; exit 0
 	fi
 	# (MULTIPLAYER: the lobby on SYSTEM LINK; NETWORK, up to ONLINE, A: online, live; a while for
-	# the broker; Square: GAME OPTIONS (Create Game); down two to NAME, A: typed; down five to
-	# START GAME (past WHO CAN JOIN), A: the profile (A joins, A the profile, A): the game's lobby (h3pickjoin: a
+	# the broker; Square: GAME OPTIONS (Create Game); down two to NAME, A: typed; down six to
+	# START GAME (past WHO CAN JOIN and BOTS), A: the profile (A joins, A the profile, A): the game's lobby (h3pickjoin: a
 	# minute there); a while for the joiner, then A starts the game, a few times)
 	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
 		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:1 HALO_NET_HOST_PUBLIC=true \
 		HALO_TEST_TEXT_INPUT=NetHost \
-		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:10000 x wait:150:4000 down:150:500 down:150:500 a wait:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:4000 a wait:150:2000 a wait:150:2000 a wait:150:$pick wait:150:4000 wait:150:${HALO_TEST_H3ONLINE_WAIT:-45000} a wait:150:5000 a wait:150:5000 a" \
+		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:10000 x wait:150:4000 down:150:500 down:150:500 a wait:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:4000 a wait:150:2000 a wait:150:2000 a wait:150:$pick wait:150:4000 wait:150:${HALO_TEST_H3ONLINE_WAIT:-45000} a wait:150:5000 a wait:150:5000 a" \
 		; host_pid=$last_pid
 	sleep 25
 	# (MULTIPLAYER: the lobby on SYSTEM LINK; NETWORK, up to ONLINE, A; a while for the broker;
@@ -3424,7 +3489,7 @@ solo)
 	echo "seconds of solo game logged: $ticks"
 	[ "$ticks" -ge 30 ] || fail "the solo game ran $ticks s"
 	;;
-dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedcoop|dedicatedmulti|dedicatedfullcache|dedicatedreload|scoreboard|pings|pingsmixed|mapmid|mapmidmixed|swat|swatmixed)
+dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedbots|dedicatedcompat|partyserver|dedicatedcoop|dedicatedmulti|dedicatedfullcache|dedicatedreload|scoreboard|pings|pingsmixed|mapmid|mapmidmixed|swat|swatmixed)
 	server=${HALO_TEST_SERVER:-$root/build/linux/halo-server}
 	if [ "$mode" = swatmixed ]; then
 		vita_old=${HALO_TEST_VITA_OLD:-}
@@ -3663,6 +3728,41 @@ sv_end_empty 20
 sv_port 2302
 INIT
 	fi
+	# (dedicatedbots: Infection, the bots filling it)
+	if [ "$mode" = dedicatedbots ]; then
+		bots_game=${HALO_TEST_BOTS_GAME:-prisoner infection}
+		cat > "$out/server/data/init.txt" <<INIT
+sv_name "Netns Bots"
+sv_maxplayers ${HALO_TEST_BOTS_MAX:-16}
+sv_public 1
+sv_bots_fill 1
+sv_mapcycle_add $bots_game
+sv_timelimit ${HALO_TEST_BOTS_MINUTES:-3}
+sv_start_delay 5
+sv_postgame 5
+sv_end_empty 20
+sv_port 2302
+INIT
+	fi
+	# (dedicatedcompat: netns_dedicated_compat.sh's)
+	if [ "$mode" = dedicatedcompat ]; then
+		. "$here/netns_dedicated_compat.sh"
+		dedicated_compat_init "$out/server/data/init.txt"
+	fi
+	if [ "$mode" = partyserver ]; then
+		cat > "$out/server/data/init.txt" <<INIT
+sv_name "Netns Party Bots"
+sv_maxplayers ${HALO_TEST_PARTY_MAX:-4}
+sv_public 1
+sv_bots_fill 1
+sv_mapcycle_add ${HALO_TEST_PARTY_GAME:-chillout slayer}
+sv_timelimit 5
+sv_start_delay 5
+sv_postgame 5
+sv_end_empty 20
+sv_port 2302
+INIT
+	fi
 	[ "${HALO_TEST_SERVER_PUBLIC:-0}" = 1 ] && echo "sv_public_address 10.10.1.2:2302" >> "$out/server/data/init.txt"
 	# (HALO_TEST_SERVER_INIT: another init.txt, e.g. one map for measuring)
 	[ -n "${HALO_TEST_SERVER_INIT:-}" ] && cp "$HALO_TEST_SERVER_INIT" "$out/server/data/init.txt"
@@ -3673,6 +3773,214 @@ INIT
 	fi
 	sl=$out/server/run.log sd=$out/server/data/debug.txt
 	case $mode in
+	partyserver)
+		# (Alpha in the host's place: a joiner of the server, on a machine of
+		# its own; Bravo and Charlie its friends, following its party)
+		side alpha 10.10.24 192.168.24
+		ac=$out/alpha.code jc=$out/joiner.code j2c=$out/joiner2.code add=$out/alpha.add
+		(for i in $(seq 1 60); do [ -s "$jc" ] && [ -s "$j2c" ] && break; sleep 1; done
+			cat "$jc" "$j2c" > "$add.tmp" 2>/dev/null; mv "$add.tmp" "$add") &
+		run_copy alpha "$alpha_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$code \
+			HALO_TEST_INPUT=bot:1 HALO_NET_LOBBY_NAME=Alpha HALO_NET_PLAYER_NAME=Alpha "HALO_TEST_FRIENDS=code-file=$ac,add-file=$add" \
+			"HALO_TEST_PARTY=invite-at=${HALO_TEST_PARTY_INVITE_AT:-40}" HALO_EXIT_AFTER=$((seconds - 10)); alpha_pid=$last_pid
+		run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true \
+			HALO_NETWORK_TEST=join-invite HALO_TEST_INPUT=bot:2 HALO_NET_LOBBY_NAME=Bravo HALO_NET_PLAYER_NAME=Bravo \
+			"HALO_TEST_FRIENDS=code-file=$jc,accept" HALO_TEST_PARTY_ANSWER=accept HALO_EXIT_AFTER=$((seconds - 10)) \
+			"HALO_TEST_PAD=wait:150:$((seconds * 1000))"; join_pid=$last_pid
+		run_copy joiner2 "$join2_machine" "$vita" "$cpu_c" HALO_NET_ONLINE=true \
+			HALO_NETWORK_TEST=join-invite HALO_TEST_INPUT=bot:3 HALO_NET_LOBBY_NAME=Charlie HALO_NET_PLAYER_NAME=Charlie \
+			"HALO_TEST_FRIENDS=code-file=$j2c,accept" HALO_TEST_PARTY_ANSWER=accept HALO_EXIT_AFTER=$((seconds - 10)) \
+			"HALO_TEST_PAD=wait:150:$((seconds * 1000))"; join2_pid=$last_pid
+		(
+			for i in $(seq 1 $(((seconds - 20) / 5))); do
+				sleep 5
+				echo sv_status >&"$console_fd" 2>/dev/null || exit 0
+				[ $((i % 6)) = 0 ] && { echo sv_players >&"$console_fd" 2>/dev/null || exit 0; }
+			done
+		) & status_pid=$!; pids="$pids $status_pid"
+		wait $join_pid $join2_pid $alpha_pid 2>/dev/null
+		kill "$status_pid" 2>/dev/null; wait "$status_pid" 2>/dev/null
+		kill -TERM "$server_pid" 2>/dev/null; wait "$server_pid" 2>/dev/null
+		echo "--- server"
+		grep -aE "^server: (the game|player #[0-9]+ (Alpha|Bravo|Charlie) (joined|left)|bots:)" "$sl" | head -30
+		grep -aE "^server: .* of [0-9]+ players \(" "$sl" | uniq -c | head -20
+		for side in alpha joiner joiner2; do
+			echo "--- $side"; grep -a "party:" "$out/$side/run.log" | head -12
+		done
+		grep -aq "game is full\|its address has its share" "$sl" "$sd" && fail "the server refused a party member"
+		for side in joiner joiner2; do
+			log=$out/$side/run.log
+			grep -aq "party: following Alpha: joining" "$log" || fail "the $side did not follow Alpha"
+			grep -aq "system link: in another's lobby\|system link: in a network game" "$log" ||
+				fail "the $side did not get into the server's game"
+		done
+		for name in Alpha Bravo Charlie; do
+			grep -aq "^server: player #[0-9]* $name joined" "$sl" || fail "$name never joined the server's game"
+		done
+		grep -aqE "server: bots: a bot left \((room for a player|a player's slot)" "$sl" || fail "no bot left for the party"
+		for side in alpha joiner joiner2; do
+			n=$(grep -a "network test: tick" "$out/$side/run.log" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+			echo "$side's seconds playing with another player: $n"
+			[ "$n" -ge 20 ] || fail "the $side played the server's game for $n s with another player (20 wanted)"
+		done
+		party_most=${HALO_TEST_PARTY_MAX:-4}
+		party_game=${HALO_TEST_PARTY_GAME:-chillout slayer}
+		party_type=${party_game#* }
+		# (three people and the bots: one slot free, the party in)
+		grep -aqE "^server: $party_type on ${party_game%% *}, $((party_most - 1)) of $party_most players \(($((party_most - 4))) bots" "$sl" ||
+			fail "the server never had the three of the party and the bots one short of full"
+		# (a team game: the party on one team, the bots that left for it of that
+		# team, the teams within one of each other once they are in)
+		case $party_type in
+		team_*|ctf|btb)
+			python3 - "$sl" "$party_most" <<'TEAMS' || fail "the party's team balance"
+import re, sys
+lines = open(sys.argv[1], errors="replace").read().splitlines()
+most = int(sys.argv[2])
+team = {}
+for l in lines:
+    m = re.search(r"^server: player #\d+ (Alpha|Bravo|Charlie) joined from \S+ \(team (\d)\)", l)
+    if m:
+        team[m.group(1)] = int(m.group(2))
+    m = re.search(r"^server: #\d+\s+(Alpha|Bravo|Charlie)\s+team (\d)\s+machine", l)
+    if m:
+        team[m.group(1)] = int(m.group(2))
+print("the party's teams on the server: %s" % team)
+bad = len(team) != 3 or len(set(team.values())) != 1
+party = list(team.values())[0] if team else None
+# (the bots that left once the members came, for them: of the party's team)
+first = next((i for i, l in enumerate(lines) if re.search(r"^server: player #\d+ (Bravo|Charlie) joined", l)), len(lines))
+left = [re.search(r"a bot left \((room for a player|a player's slot); team (\d)\)", l) for l in lines[first:]]
+left = [int(m.group(2)) for m in left if m]
+print("bots that left for the members, their teams: %s" % left)
+if not left or any(t != party for t in left[:2]):
+    bad = True
+sizes = []
+for l in lines[first:]:
+    m = re.search(r"^server: teams: red (\d+)\+(\d+), blue (\d+)\+(\d+)", l)
+    if m:
+        p0, b0, p1, b1 = map(int, m.groups())
+        if p0 + p1 == 3 and p0 + b0 + p1 + b1 == most - 1:
+            sizes.append((p0, b0, p1, b1))
+print("teams once the party is in (people+bots each): %s" % sorted(set(sizes)))
+if len(sizes) < 3 or any(abs((s[0] + s[1]) - (s[2] + s[3])) > 1 for s in sizes) or \
+        any(not (s[0] == 3 or s[2] == 3) for s in sizes):
+    bad = True
+sys.exit(1 if bad else 0)
+TEAMS
+			;;
+		esac
+		;;
+	dedicatedbots)
+		most=${HALO_TEST_BOTS_MAX:-16}
+		old=${HALO_TEST_VITA_OLD:-}
+		join_pids= names="joiner joiner2 joiner3"
+		# (the empty server: its bots play (sv_bots_when_empty), and the server
+		# browser lists it one short of full - a copy that browses alone, never
+		# joining: its join file never made)
+		side d0 10.10.20 192.168.20
+		run_copy browser "$d0_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-public \
+			"HALO_NETWORK_TEST_PUBLIC_NAME=Netns Bots" HALO_NETWORK_TEST_JOIN_FILE=never-made HALO_EXIT_AFTER=40
+		sleep 45
+		grep -a 'network test: the public games list "Netns Bots"' "$out/browser/run.log" | head -1
+		grep -aqE "network test: the public games list \"Netns Bots\".*$((most - 1)) of $most: 0 players, $((most - 1)) bots" \
+			"$out/browser/run.log" || fail "the empty server was not listed one short of full with bots alone"
+		run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$code \
+			HALO_NET_PLAYER_NAME=Vita1 HALO_EXIT_AFTER=$((seconds - 10)) HALO_TEST_INPUT=bot:2 HALO_NETWORK_TEST_SHOOT=2
+		join_pids="$join_pids $last_pid"
+		# (the server's sv_status every 5 s from now, its sv_items every 20 s)
+		(
+			for i in $(seq 1 $(((seconds - 20) / 5))); do
+				sleep 5
+				echo sv_status >&"$console_fd" 2>/dev/null || exit 0
+				[ $((i % 4)) = 0 ] && { echo sv_items >&"$console_fd" 2>/dev/null || exit 0; }
+			done
+		) & status_pid=$!; pids="$pids $status_pid"
+		sleep 25
+		side d2 10.10.22 192.168.22
+		run_copy joiner2 "$d2_machine" "${old:-$vita}" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$code \
+			HALO_NET_PLAYER_NAME=Vita2 HALO_EXIT_AFTER=$((seconds - 35)) HALO_TEST_INPUT=bot:3 HALO_NETWORK_TEST_SHOOT=2
+		join_pids="$join_pids $last_pid"
+		sleep 25
+		side d3 10.10.23 192.168.23
+		run_copy joiner3 "$d3_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-public \
+			"HALO_NETWORK_TEST_PUBLIC_NAME=Netns Bots" HALO_NET_PLAYER_NAME=Vita3 HALO_EXIT_AFTER=110 HALO_TEST_INPUT=bot:4
+		join_pids="$join_pids $last_pid"
+		sleep 60
+		console sv_players
+		wait $join_pids 2>/dev/null
+		kill "$status_pid" 2>/dev/null; wait "$status_pid" 2>/dev/null
+		kill -TERM "$server_pid" 2>/dev/null; wait "$server_pid" 2>/dev/null
+		echo "--- server"
+		grep -aE "^server: (the next game|the game|player #[0-9]+ Vita[0-9] (joined|left)|bots:)|game rules net|infection: (the round|.* is a zombie)" "$sl" | head -60
+		grep -aE "^server: .* of [0-9]+ players \(" "$sl" | uniq -c | head -40
+		grep -aq "refused from the Infection game\|game is full\|its address has its share" "$sl" "$sd" && fail "the server refused a person"
+		grep -aq "server: bots: a bot joined" "$sl" || fail "no bot joined"
+		grep -aqE "server: bots: a bot left \((a player's slot|room for a player)" "$sl" || fail "no bot left for a person"
+		# (once settled - 20 s after each person came or went - every count one
+		# short of the most: people + bots = most - 1, people never refused)
+		python3 - "$sl" "$most" <<'CHECK' || fail "the bots did not keep the game one slot short of full"
+import re, sys
+log, most = sys.argv[1], int(sys.argv[2])
+lines = open(log, errors="replace").read().splitlines()
+status = []
+for line in lines:
+    m = re.match(r"server: \S+ on \S+, (\d+) of (\d+) players \((\d+) bots", line)
+    if m:
+        status.append((int(m.group(1)), int(m.group(3))))
+settled = [s for s in status if s[0] > s[1]]
+full = [s for s in settled if s[0] == most - 1]
+print("sv_status in a game with people: %d; one short of full: %d; counts (players, bots): %s" % (
+    len(settled), len(full), sorted(set(settled))))
+over = [s for s in settled if s[0] > most - 1 and s[1] > 0]
+if over:
+    print("full with bots in it: %s" % over); sys.exit(1)
+if len(settled) < 10 or len(full) < len(settled) * 0.7:
+    sys.exit(1)
+CHECK
+		grep -aq "infection: the round begins" "$sl" || fail "the server's round never began"
+		grep -aq "infection: the round is over" "$sl" || fail "the server's round never ended"
+		for name in $names; do
+			n=$(grep -a "network test: tick" "$out/$name/run.log" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+			echo "$name's seconds playing with another player: $n"
+			[ "$n" -ge 40 ] || fail "$name played the server's game with another player for $n s (40 wanted)"
+			grep -aq "XLaunchNewImage" "$out/$name/run.log" && fail "$name went to the dashboard"
+		done
+		grep -a 'network test: the public games list "Netns Bots"' "$out/joiner3/run.log" | head -2
+		grep -aqE 'network test: the public games list "Netns Bots" \[dedicated\].*[0-9]+ of [0-9]+: [0-9]+ players, [0-9]+ bots' \
+			"$out/joiner3/run.log" || fail "the server browser did not list the bots apart"
+		if [ -n "$old" ]; then
+			grep -aq "game rules net: machine [0-9]* did not answer in [0-9]* ms (a build without Infection): it plays the Infection game as Team Slayer" "$sl" ||
+				fail "the server did not take the old joiner as Team Slayer"
+			grep -aq "infection: Vita2 is a zombie" "$sl" || echo "(Vita2, the old joiner, was never infected this run)"
+			# (its own player, as it has it: the skull in its hands once a zombie)
+			python3 - "$out/joiner2/run.log" "$sl" <<'OLD' || fail "the old joiner did not play on as a zombie"
+import re, sys
+log, server = sys.argv[1], sys.argv[2]
+turned = any("infection: Vita2 is a zombie" in l for l in open(server, errors="replace"))
+local = None; skull_seconds = 0; seconds = 0; over = False
+for line in open(log, errors="replace"):
+    m = re.search(r"network test: tick (\d+)(.*)\| (playing|game over) to .*\| local (-?\d+)", line)
+    if not m:
+        continue
+    seconds += 1
+    over |= m.group(3) == "game over"
+    local = m.group(4)
+    pm = re.search(r" player %s: (.*?)(?= player \d+:| \| |$)" % local, m.group(2))
+    if pm and re.search(r" w.* [0-9a-f]+:\d+", pm.group(1)):
+        weapons = re.findall(r" ([0-9a-f]+):\d+", pm.group(1).split(" w", 1)[1])
+        if len(weapons) == 1 and turned:
+            skull_seconds += 1
+print("old joiner: %d s logged, %d s holding one weapon after being infected, the game's end seen: %s" % (
+    seconds, skull_seconds, over))
+if seconds < 40 or not over or (turned and skull_seconds < 3):
+    sys.exit(1)
+OLD
+		fi
+		;;
+	dedicatedcompat)
+		dedicated_compat_run
+		;;
 	dedicatedfill)
 		# five machines of one home - the joiners' LAN behind one NAT: one
 		# real address, a stand-in of its own each (a run of the game an
@@ -4958,6 +5266,119 @@ friendsbackup)
 	grep -aqF -- "$password" "$out/joiner2/save/bravo-code.hfb" && fail "the backup holds its password"
 	grep -a "retained" "$out/broker.log" | grep -aq "/f1/" && fail "the broker kept a friends' message"
 	;;
+hostbots)
+	most=${HALO_TEST_HOSTBOTS_MAX:-16}
+	old=${HALO_TEST_VITA_OLD:-$root/../wt-v110client/build/linux/halo}
+	[ -x "$old" ] || { echo "hostbots: no 1.1.0 build at $old (HALO_TEST_VITA_OLD)"; exit 2; }
+	jc=$out/joiner.code j2c=$out/joiner2.code add=$out/joiner.add
+	(for i in $(seq 1 90); do [ -s "$j2c" ] && break; sleep 1; done
+		cat "$j2c" > "$add.tmp" 2>/dev/null; mv "$add.tmp" "$add") &
+	run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=${HALO_TEST_HOST_GAME:-host:prisoner:team_slayer} \
+		HALO_NETWORK_TEST_START=${HALO_TEST_HOSTBOTS_START:-80} HALO_NETWORK_TEST_SCORE=${HALO_TEST_SCORE:-250} \
+		HALO_TEST_INPUT=bot:1 HALO_NET_HOST_PUBLIC=true HALO_NET_LOBBY_NAME=Alpha HALO_NET_PLAYER_NAME=Alpha \
+		HALO_NET_MAX_PLAYERS=$most HALO_BOTS_ONLINE=${HALO_TEST_BOTS_ONLINE:-full} HALO_BOT_SKILL=easy; host_pid=$last_pid
+	code=$(wait_code)
+	echo "the host's code: ${code:-none}"
+	[ -n "$code" ] || { fail "the host showed no code"; }
+	# (a copy that browses alone, never joining: its join file never made)
+	side d0 10.10.20 192.168.20
+	run_copy browser "$d0_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-public \
+		"HALO_NETWORK_TEST_PUBLIC_NAME=Alpha" HALO_NETWORK_TEST_JOIN_FILE=never-made HALO_EXIT_AFTER=40
+	sleep 20
+	side d2 10.10.22 192.168.22
+	run_copy old "$d2_machine" "$old" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$code \
+		HALO_NET_PLAYER_NAME=Old110 HALO_NET_LOBBY_NAME=Old110 HALO_EXIT_AFTER=$((seconds - 10)) HALO_TEST_INPUT=bot:2 \
+		HALO_NETWORK_TEST_SHOOT=2; old_pid=$last_pid
+	sleep 15
+	# (Bravo joins by the code and invites Charlie to its party; Charlie follows)
+	run_copy joiner "$join_machine" "$vita" "$cpu_c" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$code \
+		HALO_TEST_INPUT=bot:3 HALO_NET_LOBBY_NAME=Bravo HALO_NET_PLAYER_NAME=Bravo \
+		"HALO_TEST_FRIENDS=code-file=$jc,add-file=$add" "HALO_TEST_PARTY=invite-at=${HALO_TEST_PARTY_INVITE_AT:-35}" \
+		HALO_EXIT_AFTER=$((seconds - 25)); join_pid=$last_pid
+	run_copy joiner2 "$join2_machine" "$vita" "$cpu_c" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-invite \
+		HALO_TEST_INPUT=bot:4 HALO_NET_LOBBY_NAME=Charlie HALO_NET_PLAYER_NAME=Charlie \
+		"HALO_TEST_FRIENDS=code-file=$j2c,accept" HALO_TEST_PARTY_ANSWER=accept HALO_EXIT_AFTER=$((seconds - 25)) \
+		"HALO_TEST_PAD=wait:150:$((seconds * 1000))"; join2_pid=$last_pid
+	wait $old_pid $join_pid $join2_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log
+	echo "--- host"
+	grep -aE "server: bots:|party net:" "$hl" "$out/host/data/debug.txt" | sed 's/^[^:]*://' | head -40
+	grep -a 'network test: the public games list "Alpha"' "$out/browser/run.log" | head -2
+	grep -aqE "network test: the public games list \"Alpha\".*$((most - 1)) of $most: 1 players, $((most - 2)) bots" \
+		"$out/browser/run.log" || fail "the host's game was not listed one short of full with its bots apart"
+	n=$(grep -ac "server: bots: a bot joined" "$hl")
+	echo "bots joined on the host: $n"
+	[ "$n" -ge $((most - 2)) ] || fail "the host filled its lobby with $n bots ($((most - 2)) wanted)"
+	grep -aqE "server: bots: a bot left \((room for a player|a player's slot)" "$hl" || fail "no bot left for a joiner"
+	grep -aq "party: following Bravo: joining" "$out/joiner2/run.log" || fail "Charlie did not follow Bravo"
+	python3 - "$here" "$hl" "$out/old/run.log" "$most" <<'HOSTBOTS' || fail "the host's bots, teams or the 1.1.0 joiner's view"
+import re, sys
+sys.path.insert(0, sys.argv[1])
+from netns_compat_check import parse_ticks, read, games_of, quitters
+host, old, most = parse_ticks(read(sys.argv[2])), parse_ticks(read(sys.argv[3])), int(sys.argv[4])
+bad = False
+def people_of(players, names):
+    return {names.get(n, n): v[0] for n, v in players.items()}
+# (players who left - bots that left for people in play - stay on Halo's
+# scores, dead to the game's end: not counted)
+gone = quitters(host)
+playing = []
+for game, t in zip(games_of(host), host):
+    if t[1] == "playing":
+        playing.append((t[0], t[1], t[2], {n: v for n, v in t[3].items() if (game, n) not in gone}, t[4]))
+everyone = []
+for tick, state, local, players, names in playing:
+    named = people_of(players, names)
+    if all(p in named for p in ("Alpha", "Old110", "Bravo", "Charlie")):
+        everyone.append((tick, players, named))
+print("host seconds playing: %d; with Alpha, Old110, Bravo and Charlie in: %d" % (len(playing), len(everyone)))
+if len(everyone) < 20:
+    print("the four were never in together long enough"); bad = True
+counts = [len(p) for _, p, _ in everyone]
+short = [c for c in counts if c == most - 1]
+full = [c for c in counts if c >= most]
+print("players then: %s; one short of full %d of %d s, full %d s" % (sorted(set(counts)), len(short), len(counts), len(full)))
+if everyone and (len(short) < 0.7 * len(counts) or len(full) > 3):
+    bad = True
+apart = [t for t, _, named in everyone if named["Bravo"] != named["Charlie"]]
+print("Bravo and Charlie on one team: %s (apart %d s)" % (not apart, len(apart)))
+if apart:
+    bad = True
+uneven = [t for t, p, _ in everyone if len(p) >= most - 1 and abs(sum(1 for v in p.values() if v[0] == 0) - sum(1 for v in p.values() if v[0] == 1)) > 1]
+print("full seconds with the teams more than one apart: %d" % len(uneven))
+if len(uneven) > max(2, len(everyone) // 10):
+    bad = True
+# (the 1.1.0 joiner: played with the others, saw them all, and every team as the host has it)
+oplaying = [t for t in old if t[1] == "playing" and len(t[3]) >= 2]
+seen = max([len(t[3]) for t in old], default=0)
+print("the 1.1.0 joiner: %d s playing with others, at most %d players seen" % (len(oplaying), seen))
+if len(oplaying) < 40 or seen < most - 1:
+    bad = True
+hosts = {t[0]: t[3] for t in playing}
+keys = sorted(hosts)
+import bisect
+agree = samples = 0
+for tick, state, _, players, _ in old:
+    if state != "playing" or not keys:
+        continue
+    i = bisect.bisect_left(keys, tick)
+    near = min(keys[max(0, i - 1):i + 1], key=lambda k: abs(k - tick))
+    if abs(near - tick) > 15:
+        continue
+    for n, v in players.items():
+        if n in hosts[near]:
+            samples += 1
+            agree += hosts[near][n][0] == v[0]
+print("the 1.1.0 joiner's teams as the host's: %d of %d player-seconds" % (agree, samples))
+if samples < 100 or agree < 0.98 * samples:
+    bad = True
+sys.exit(1 if bad else 0)
+HOSTBOTS
+	for side in host old joiner joiner2; do
+		grep -aq "XLaunchNewImage" "$out/$side/run.log" && fail "$side went to the dashboard"
+	done
+	;;
 party)
 	# (the party, p2p_party.h: Alpha (the host) friends with Bravo (joiner) and Charlie
 	# (joiner2), its game private (no one joins it from presence or the browser); Alpha invites
@@ -5337,7 +5758,7 @@ forge|forge3|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h
 	forge_case
 	;;
 *)
-	echo "usage: $0 code|infection|infectionold|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|carnage|h3live|h3liveleave|h3liveagain|h3liveonline|h3liveinvite|h3liveprivate|h3online|h3onlinelan|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|friendsbackup|party|partyfollow|chat|friendsprivate|friendsprivatepw|forge|forge3|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|h3variant|vitapc|vitaonly|hostfuzz|hostfuzzforge|hostfuzzmap" >&2
+	echo "usage: $0 code|infection|infectionold|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|carnage|h3live|h3liveleave|h3liveagain|h3liveonline|h3liveinvite|h3liveprivate|h3online|h3onlinelan|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedbots|dedicatedcompat|partyserver|hostbots|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|friendsbackup|party|partyfollow|chat|friendsprivate|friendsprivatepw|forge|forge3|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|h3variant|vitapc|vitaonly|hostfuzz|hostfuzzforge|hostfuzzmap" >&2
 	exit 2
 	;;
 esac
@@ -5353,6 +5774,16 @@ if [ "$mode" != relay ]; then
 			fail "$(basename "$(dirname "$log")") went through the relay although a direct path was there"
 	done
 fi
+# (lan, adhoc, h3lan, h3adhoc: Bots online on, and no bot off the Online connection)
+case $mode in
+lan|adhoc|h3lan|h3adhoc)
+	if grep -aq "server: bots: a bot joined\|the game is filled with bots" "$out/host/run.log"; then
+		fail "the host filled its $mode game with bots (Bots online is for the Online connection alone)"
+	else
+		echo "no bots in the host's $mode game (Bots online on: Online alone)"
+	fi
+	;;
+esac
 grep -aiE "segmentation|assert|crash|fatal" "$out"/*/run.log | grep -v "assertions" | head -5
 [ $status = 0 ] && echo "PASS ($mode)"
 echo "logs in $out"

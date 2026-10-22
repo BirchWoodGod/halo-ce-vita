@@ -266,6 +266,8 @@ symbols in this file:
 #include "map_share.h"
 #include "forge.h"
 #include "infection_net.h"
+#include "party_net.h"
+#include "dedicated_server.h"
 #include "network_game_record.h"
 #include "network_wire.h"
 #include "main/main.h"
@@ -1444,6 +1446,22 @@ boolean network_game_server_handle_client_message(
 								message_buffer_size);
 							break;
 
+						/* port: a joiner's party's team token (party_net.h),
+						from a machine joined to the game (checked above);
+						never on the crossplay wire */
+						case _message_client_party:
+							if (network_wire_crossplay())
+							{
+								network_event("ignoring a party message on the crossplay wire");
+								break;
+							}
+							party_net_server_handle_message(
+								server,
+								machine,
+								message,
+								message_buffer_size);
+							break;
+
 						case _message_client_forge:
 							if (network_wire_crossplay())
 							{
@@ -2062,6 +2080,16 @@ static boolean network_game_server_handle_message_client_join_game_request(
 		return TRUE;
 	}
 #endif
+#ifdef HALO_LINUX
+	/* port: a game the host's bots fill (a dedicated server's sv_bots_fill,
+	a host's Bots online) has room for a machine joining: a bot's slot, if it
+	has no other */
+	if (!network_game_server_client_machine_is_joined_to_game(server, server_client_machine))
+	{
+		network_game_server_port_bots_make_room(server);
+		late_join = network_game_server_accepts_late_joins(server);
+	}
+#endif
 	if (network_game_server_get_state(server, NULL) == _network_game_server_state_pregame || late_join)
 	{
 		struct message_client_join_game_request join_game_request;
@@ -2157,6 +2185,9 @@ static boolean network_game_server_handle_message_client_join_game_request(
 						if (late_join && client_machine)
 							csmemcpy(client_machine->name, machine_name, sizeof(client_machine->name));
 
+						/* (port: a party token of the machine that had this
+						index before forgotten: party_net.h) */
+						party_net_server_machine_joined(machine_index);
 						acceptance.machine_index = (short)machine_index;
 						acceptance.random_seed = network_game_get_random_seed();
 						reply = create_network_game_message(

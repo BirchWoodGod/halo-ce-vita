@@ -84,6 +84,7 @@ machine (their datum identifiers need not be).
 #include "forge_net_protocol.h"
 #include "dedicated_server.h"
 #include "latency_meter.h"
+#include "infection_net.h"
 #include "../src/p2p.h"
 
 #include <limits.h>
@@ -4026,14 +4027,19 @@ static void distributed_send_game_state(
 		byte data[MAXIMUM_GAME_STATE_SIZE];
 	} message;
 	long size = game_engine_write_network_state(message.data, sizeof(message.data));
+	/* (Infection's part, after Slayer's: infection.c) */
+	long tail = infection_active() ? infection_network_state_size() : 0;
 	unsigned long checksum;
 
 	if (size <= 0)
 		return;
+	if (tail > 0 && size <= tail)
+		tail = 0;
 	if (machine_index != NONE)
 	{
 		distributed_send_to_machine_reliably(machine_index, &message, _distributed_message_game_state, 0,
-			(word)(sizeof(message.header) + size));
+			(word)(sizeof(message.header) + (tail && !game_rules_net_machine_plays_infection(machine_index) ?
+				size - tail : size)));
 		return;
 	}
 	checksum = distributed_checksum(message.data, size);
@@ -4049,6 +4055,25 @@ static void distributed_send_game_state(
 		csmemcpy(&distributed_game_state_postgame, message.data, sizeof(long));
 	distributed_game_state_checksum = checksum;
 	distributed_game_state_time = game_time_get();
+	/* port: a dedicated server's Infection played by builds without it
+	(infection_net.c: the dedicated server takes them, as Team Slayer):
+	those are sent Slayer's part alone, which is all they read (they refuse
+	a state of another size, and with it the scores and the game's end);
+	the others the whole. Every other game, every machine the same */
+	if (tail)
+	{
+		long machine_indices[HALO_PORT_MAXIMUM_NETWORK_MACHINES];
+		short machine_count = distributed_client_machines(machine_indices, HALO_PORT_MAXIMUM_NETWORK_MACHINES);
+		short index;
+
+		for (index = 0; index < machine_count; index++)
+		{
+			distributed_send_to_machine_reliably(machine_indices[index], &message, _distributed_message_game_state, 0,
+				(word)(sizeof(message.header) + (game_rules_net_machine_plays_infection(machine_indices[index]) ?
+					size : size - tail)));
+		}
+		return;
+	}
 	distributed_send(&message, _distributed_message_game_state, 0, (word)(sizeof(message.header) + size),
 		_distributed_to_clients_reliably);
 }

@@ -48,6 +48,7 @@ server browser, or on its LAN. Called from the main loop every frame
 #include "tag_files/tag_files.h"
 #include "custom_edition_maps.h"
 #include "dedicated_server.h"
+#include "bots.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -180,6 +181,13 @@ static struct
 	/* sv_starting_weapons generic: every gametype's players start with the
 	generic weapons (an assault rifle and a pistol), never the map's own */
 	boolean generic_starting_weapons;
+	/* sv_bots_fill: bots fill the game to its most players less one while
+	anyone is in (network_server_manager.c) */
+	boolean bots_fill;
+	/* sv_bots_when_empty: ... and while nobody is in (the server plays its
+	cycle with bots alone, one slot free all the time: it never looks
+	empty); 0, only while people are in */
+	boolean bots_when_empty;
 	struct join_address joins[MAXIMUM_JOIN_ADDRESSES];
 } dedicated =
 {
@@ -187,6 +195,7 @@ static struct
 	.start_delay = 10,
 	.postgame_seconds_setting = 10,
 	.end_empty_seconds = 30,
+	.bots_when_empty = TRUE,
 };
 
 static void unquoted(char *destination, long size, char const *text);
@@ -541,13 +550,19 @@ static void note_players(
 		{
 			if (dedicated.seen_names[index][0])
 				say("player #%ld %s left", index, dedicated.seen_names[index]);
-			if (name[0])
+			if (name[0] && bots_machine_is_bot(game->players[index].machine_index))
+				say("player #%ld %s joined (a bot)", index, name);
+			else if (name[0])
 			{
 				char address[32];
 
 				address_text(real_address(network_game_server_machine_address(game->players[index].machine_index)),
 					address, sizeof(address));
-				say("player #%ld %s joined from %s", index, name, address);
+				if (game->variant.universal_variant.teams)
+					say("player #%ld %s joined from %s (team %d)", index, name, address,
+						(int)game->players[index].team_index);
+				else
+					say("player #%ld %s joined from %s", index, name, address);
 			}
 			csstrcpy(dedicated.seen_names[index], name);
 		}
@@ -587,6 +602,10 @@ static void command_help(
 		"                                   or the map's own (the default); from the next game",
 		"  sv_coop <level> [difficulty 0-3] co-op on a campaign level (a10...) instead of the cycle",
 		"  sv_map_download <0|1>            joiners may download the cycle's custom maps (0)",
+		"  sv_bots_fill <0|1>               bots fill the game to its most players less one, a slot always",
+		"                                   free, and leave as players join (0)",
+		"  sv_bots_when_empty <0|1>         the bots play while nobody is in too (1), or only with people (0)",
+		"  sv_bots_skill <easy|normal|heroic|legendary> the bots' skill (normal)",
 		"  sv_port <port>                   internet play's UDP port (init.txt only; -port)",
 		"  sv_game_port <port>              the game's ports on this machine, <port> and the next",
 		"                                   (init.txt only; -gameport; default 5150 for sv_port 2302,",
@@ -640,9 +659,30 @@ static void command_status(
 		say("code %s; %s%s", dedicated.code, config_boolean("network.host_public") ? "public" : "private (by code only)",
 			config_string("network.lobby_password")[0] ? ", with a password" : "");
 	if (game)
-		say("%s on %s, %ld of %d players", dedicated.coop ? "co-op" : dedicated.playing.gametype,
-			dedicated.coop ? config_string("network.coop_level") : dedicated.playing.map, player_count(),
-			(int)game->maximum_players);
+		say("%s on %s, %ld of %d players (%ld bots; sv_bots_fill %d)", dedicated.coop ? "co-op" :
+			dedicated.playing.gametype, dedicated.coop ? config_string("network.coop_level") : dedicated.playing.map,
+			player_count(), (int)game->maximum_players, network_game_server_dedicated_bot_count(),
+			dedicated.bots_fill ? 1 : 0);
+	/* (a team game: each team's people and bots, "teams: red 2+4, blue
+	1+5") */
+	if (game && game->variant.universal_variant.teams)
+	{
+		long people[2] = { 0, 0 }, bots[2] = { 0, 0 };
+		long index;
+
+		for (index = 0; index < HALO_PORT_MAXIMUM_NETWORK_PLAYERS; index++)
+		{
+			struct network_player const *player = &game->players[index];
+
+			if (!network_player_is_valid(player) || player->team_index < 0 || player->team_index > 1)
+				continue;
+			if (bots_machine_is_bot(player->machine_index))
+				bots[player->team_index]++;
+			else
+				people[player->team_index]++;
+		}
+		say("teams: red %ld+%ld, blue %ld+%ld (people+bots)", people[0], bots[0], people[1], bots[1]);
+	}
 }
 
 static void command_players(
@@ -662,6 +702,12 @@ static void command_players(
 		if (!network_player_is_valid(player))
 			continue;
 		player_name(player, name, sizeof(name));
+		if (bots_machine_is_bot(player->machine_index))
+		{
+			say("#%-3ld %-12s team %d  a bot", index, name, (int)player->team_index);
+			count++;
+			continue;
+		}
 		address_text(real_address(network_game_server_machine_address(player->machine_index)), address,
 			sizeof(address));
 		hardware_id = network_game_server_machine_hardware_id(player->machine_index);
@@ -1290,6 +1336,41 @@ static void command(
 			say("co-op on %s, difficulty %s (the host runs the AI and the scripts)", argument, difficulty);
 		}
 	}
+	else if (!csstrcmp(name, "sv_bots_fill") || !csstrcmp(name, "sv_bots"))
+	{
+		if (integer_argument(name, argument, 0, 1, &value))
+		{
+			dedicated.bots_fill = (boolean)value;
+			say(value ? "bots fill the game to its most players less one" : "no bots");
+		}
+	}
+	else if (!csstrcmp(name, "sv_bots_when_empty"))
+	{
+		if (integer_argument(name, argument, 0, 1, &value))
+		{
+			dedicated.bots_when_empty = (boolean)value;
+			say(value ? "the bots play while nobody is in too (the server never looks empty)" :
+				"the bots play only while people are in");
+		}
+	}
+	else if (!csstrcmp(name, "sv_bots_skill"))
+	{
+		static char const *const skills[] = { "easy", "normal", "heroic", "legendary" };
+		long skill;
+
+		if (argument)
+			lowercase(words[1]);
+		for (skill = 0; argument && skill < (long)NUMBEROF(skills); skill++)
+			if (!csstrcmp(argument, skills[skill]))
+				break;
+		if (!argument || skill >= (long)NUMBEROF(skills))
+			say("sv_bots_skill: easy, normal, heroic or legendary");
+		else
+		{
+			config_set_override("bots.skill", skills[skill]);
+			say("the bots' skill: %s", skills[skill]);
+		}
+	}
 	else if (!csstrcmp(name, "sv_map_download"))
 	{
 		if (integer_argument(name, argument, 0, 1, &value))
@@ -1428,6 +1509,18 @@ short dedicated_server_sole_weapon(
 	void)
 {
 	return dedicated.coop ? (short)_game_engine_sole_weapon_none : dedicated.sole_weapon;
+}
+
+boolean dedicated_server_bots_fill(
+	void)
+{
+	return dedicated.bots_fill && !dedicated.coop;
+}
+
+boolean dedicated_server_bots_when_empty(
+	void)
+{
+	return dedicated_server_bots_fill() && dedicated.bots_when_empty;
 }
 
 long dedicated_server_frame_cap(
@@ -1637,7 +1730,9 @@ void dedicated_server_update(
 		dedicated.game_seconds += seconds;
 		if (dedicated.time_limit_minutes > 0 && dedicated.game_seconds >= (real)(dedicated.time_limit_minutes * 60))
 			end_game("the time limit", FALSE);
-		if (network_game_server_dedicated_machine_count() == 0)
+		/* (the bots playing an empty server's games, sv_bots_when_empty: it
+		goes on, its cycle with them) */
+		if (network_game_server_dedicated_machine_count() == 0 && !dedicated_server_bots_when_empty())
 		{
 			dedicated.empty_seconds += seconds;
 			if (dedicated.end_empty_seconds > 0 && dedicated.empty_seconds >= (real)dedicated.end_empty_seconds)

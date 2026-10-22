@@ -167,10 +167,13 @@ partner and the two bots nearest it escort it.
 The simulation: a bot decides from the game state at the tick and its own
 random numbers (seeded per bot and game), so the bots do the same in two
 runs of the same input (HALO_TICK_HASH's fixed ticks). Nothing of a bot is in
-the game state: multiplayer games are never saved. Bots are in local games
-only, which no other machine sees: no message of the network protocol
-changes (an internet or system link game with bots would need its clients
-told which players are bots: a later network version).
+the game state: multiplayer games are never saved. Bots are in local games,
+which no other machine sees, and (port) in the dedicated server's games
+(sv_bots_fill: network_server_manager.c), where the host alone runs them
+and its clients see players of machines of their own, driven by the input
+the host relays (update_server_set_ticked_action: what each bot played
+that tick) and the units it sends, as any remote player: no message of the
+network protocol changes, and every build, 1.1.0's too, plays with them.
 
 The path searches - the part a bot's tick spends most of its time in - run
 on a helper thread of their own where there is one to spare (the Vita's
@@ -211,6 +214,7 @@ and left, the defenders' posts. The map's teleporters are logged once.
 #include "structures/structure_bsp_definitions.h"
 #include "physics/collision_bsp_definitions.h"
 #include "networking/network_game_globals.h"
+#include "game/player_queues_new.h"
 #include "ai/path.h"
 #include "devices/devices.h"
 #include "devices/device_definitions.h"
@@ -221,6 +225,7 @@ and left, the defenders' posts. The map's teleporters are logged once.
 #include "bots.h"
 #include "bots_tactics.h"
 #include "infection.h"
+#include "network_connection.h"
 
 #include <math.h>
 #include <pthread.h>
@@ -997,6 +1002,22 @@ short bots_skill(void)
 	if (name[0] >= '0' && name[0] <= '3' && !name[1])
 		return (short)(name[0] - '0');
 	return _bots_skill_normal;
+}
+
+long bots_online_fill(void)
+{
+	char const *value = bots_setting_string("HALO_BOTS_ONLINE", "bots.online");
+	long count;
+
+	/* (Online alone: not Same Wi-Fi, System Link or ad hoc) */
+	if (network_connection_running() != NETWORK_CONNECTION_ONLINE)
+		return 0;
+	if (!strcmp(value, "full"))
+		return BOTS_MAXIMUM;
+	if (!strcmp(value, "off"))
+		return 0;
+	count = atol(value);
+	return count < 0 ? 0 : count > BOTS_MAXIMUM ? BOTS_MAXIMUM : count;
 }
 
 short bots_teams(void)
@@ -5177,7 +5198,9 @@ static void bots_bot_fight(struct bots_bot *bot, struct bots_tick *tick)
 		now - bot->target_first_seen_tick >= reaction_ticks)
 	{
 		tick->flags |= FLAG(_unit_control_throw_grenade_bit);
-		if (tick->unit->unit.grenade_counts[(long)tick->unit->unit.current_grenade_index] <= 0)
+		/* (no grenade readied: NONE, -1, not an index) */
+		if (tick->unit->unit.current_grenade_index < 0 || tick->unit->unit.current_grenade_index > 1 ||
+			tick->unit->unit.grenade_counts[(long)tick->unit->unit.current_grenade_index] <= 0)
 			tick->action->desired_grenade_index = tick->unit->unit.grenade_counts[0] > 0 ? 0 : 1;
 		bot->grenade_tick = now + TICKS_PER_SECOND * 4;
 	}
@@ -6914,6 +6937,16 @@ static void bots_report(void)
 	}
 }
 
+/* where bots play: a local (split screen) game's, and a network game's
+host's - the dedicated server's (port/linux/game/dedicated_server.c,
+sv_bots_fill) or a 1.1.1 host's online (bots.online): the host alone runs
+them (network_server_manager.c's bot fill); its clients see players driven
+by the input and the units the host sends, as any other machine's */
+static boolean bots_play_here(void)
+{
+	return network_game_is_splitscreen_local() || global_network_game_server_get() != NULL;
+}
+
 void bots_update_actions(struct player_action *actions)
 {
 	struct data_iterator iterator;
@@ -6921,7 +6954,7 @@ void bots_update_actions(struct player_action *actions)
 	unsigned long long started;
 	long count = 0;
 
-	if (!game_engine_running() || !network_game_is_splitscreen_local())
+	if (!game_engine_running() || !bots_play_here())
 		return;
 	started = vita_host_time_us();
 	bots_profile_enabled();
@@ -6958,7 +6991,13 @@ void bots_update_actions(struct player_action *actions)
 		if (bot->player_index != iterator.datum_index)
 			bots_bot_reset(bot, iterator.datum_index, bot_index);
 		if (absolute_index >= 0 && absolute_index < HALO_PORT_MAXIMUM_NETWORK_PLAYERS)
+		{
 			bots_bot_update(bot, bot_index, &actions[absolute_index]);
+			/* (a network game host's bots: what its clients are sent of them
+			is what they played, network_distributed.c) */
+			if (!network_game_is_splitscreen_local())
+				update_server_set_ticked_action((short)absolute_index, &actions[absolute_index]);
+		}
 		count++;
 	}
 	bots_ground_memo.active = FALSE;

@@ -2000,6 +2000,31 @@ int p2p_party_leading(void)
 	return leading;
 }
 
+int p2p_party_team_token(unsigned char *token, int size)
+{
+	static const char label[] = "halo-ce-vita party team token 1";
+	unsigned char data[sizeof(label) - 1 + PARTY_ID_LENGTH];
+	unsigned char digest[P2P_SHA256_SIZE];
+	int in_party;
+
+	if (!token || size <= 0)
+		return 0;
+	pthread_mutex_lock(&friends_lock);
+	load();
+	in_party = friends->party.active && friends->party.count >= 2;
+	if (in_party)
+	{
+		memcpy(data, label, sizeof(label) - 1);
+		memcpy(data + sizeof(label) - 1, friends->party.id, PARTY_ID_LENGTH);
+	}
+	pthread_mutex_unlock(&friends_lock);
+	if (!in_party)
+		return 0;
+	p2p_sha256(data, (int)sizeof(data), digest);
+	memcpy(token, digest, (size_t)(size < P2P_SHA256_SIZE ? size : P2P_SHA256_SIZE));
+	return 1;
+}
+
 const char *p2p_party_outcome_text(int outcome)
 {
 	switch (outcome)

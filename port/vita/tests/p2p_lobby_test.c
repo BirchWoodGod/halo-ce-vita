@@ -487,6 +487,42 @@ static void lobby_checks(void)
 		pthread_mutex_unlock(&p2p_lock);
 		hear(bytes, size, 0, NULL);
 		check(p2p_lobby_entry(0, &entry) && entry.marks == 0 && !strcmp(entry.badge, "VITA"), "a Vita's game again: VITA");
+		/* a dedicated server's bots (sv_bots_fill): their count in the
+		stamp's second byte, which older builds never read (they see the
+		players' count, the bots in it); the entry has the people and the
+		bots apart. No more bots than players; none, the stamp as before */
+		p2p_set_game_bot_count(2);
+		pthread_mutex_lock(&p2p_lock);
+		size = listing_make(bytes, _listing_open | _listing_has_teams);
+		pthread_mutex_unlock(&p2p_lock);
+		check(bytes[size - P2P_SIGNATURE_SIZE - 8] == 0 && bytes[size - P2P_SIGNATURE_SIZE - 7] == 2,
+			"the bots' count: the stamp's second byte, signed with the rest");
+		hear(bytes, size, 0, NULL);
+		check(p2p_lobby_entry(0, &entry) && entry.players == 3 && entry.bots == 2 &&
+			!strcmp(entry.players_line, "3 of 16: 1 players, 2 bots"), "the entry's people and bots apart");
+		check(games(&listing) == 1 && listing.player_count == 3 && listing.bot_count == 2, "the listing's bots");
+		p2p_set_game_bot_count(9);
+		pthread_mutex_lock(&p2p_lock);
+		size = listing_make(bytes, _listing_open | _listing_has_teams);
+		pthread_mutex_unlock(&p2p_lock);
+		check(bytes[size - P2P_SIGNATURE_SIZE - 7] == 3, "no more bots listed than players");
+		{
+			unsigned char odd[P2P_MAXIMUM_LISTING_SIZE];
+			struct listing read;
+
+			memcpy(odd, bytes, (size_t)size);
+			odd[size - P2P_SIGNATURE_SIZE - 7] = 200;
+			check(p2p_lobby_listing_read(0, odd, size, &read) && read.bots == 3,
+				"a listing that says more bots than players: as many as its players");
+		}
+		p2p_set_game_bot_count(0);
+		pthread_mutex_lock(&p2p_lock);
+		size = listing_make(bytes, _listing_open | _listing_has_teams);
+		pthread_mutex_unlock(&p2p_lock);
+		check(bytes[size - P2P_SIGNATURE_SIZE - 7] == 0, "no bots: the stamp as an older build's");
+		hear(bytes, size, 0, NULL);
+		check(p2p_lobby_entry(0, &entry) && entry.bots == 0 && !strcmp(entry.players_line, "3 of 16: alpha, bravo, charlie"),
+			"no bots: the Players line as before");
 	}
 	/* joining it: its invite, at once */
 	check(p2p_lobby_join(id, NULL) && p2p_lobby_join_state() == P2P_LOBBY_JOIN_JOINING &&

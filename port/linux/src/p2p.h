@@ -121,6 +121,9 @@ const char *p2p_take_clipboard_text(void);
 are shown). The game's server calls it as they change (calling it with the
 same counts again costs little) */
 void p2p_set_game_player_counts(int count, int maximum);
+/* (the dedicated server) of those players, the bots (its listing says so:
+p2p_lobby.c) */
+void p2p_set_game_bot_count(int count);
 
 /* whether the game's server takes other machines (the game's
 network_game_accept_remote_connections, which it sets before it makes its
@@ -249,6 +252,9 @@ struct p2p_lobby_entry
 	/* "5 of 16: name, name... +3 more" */
 	char players_line[P2P_LOBBY_PLAYERS_SIZE];
 	int players, maximum, score_limit;
+	/* of the players, a dedicated server's bots (sv_bots_fill; 0 from a
+	host or build that does not say) */
+	int bots;
 	/* (always: games of another network version are not listed) */
 	int compatible;
 	/* this machine's own game */

@@ -389,6 +389,13 @@ static const struct config_setting config_settings[] =
 		"0 to 15 join its lobby with the players, as far as the game has room.\n"
 		"Not in system link or internet games. The Vita's settings panel\n"
 		"(Multiplayer, Bots) sets it." },
+	{ "bots.online", _config_string, "\"full\"", "HALO_BOTS_ONLINE", _environment_value, _platform_all,
+		"A multiplayer game this machine hosts Online (Internet, not Same\n"
+		"Wi-Fi, System Link or ad hoc) is filled with bots up to its most players\n"
+		"less one, so a slot is always free; a bot leaves for each player who\n"
+		"joins (a party's members on one team): \"full\" (the default), \"off\",\n"
+		"or the most bots (1 to 15). The Vita's settings panel (Multiplayer,\n"
+		"Online bots) and the Halo 3 lobby's GAME OPTIONS set it." },
 	{ "bots.skill", _config_string, "\"normal\"", "HALO_BOT_SKILL", _environment_value, _platform_all,
 		"How well the bots play: \"easy\", \"normal\", \"heroic\" or \"legendary\"\n"
 		"(how soon they react, how well they aim, how far they see)." },

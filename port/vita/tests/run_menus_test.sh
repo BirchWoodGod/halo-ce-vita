@@ -412,6 +412,9 @@
 #                         60 frames, in <folder>/<case>); none by default
 #   HALO_TEST_OUT         where the logs go (deleted after a pass when the test made it; HALO_TEST_KEEP=1 keeps them)
 set -u
+# (Bots online, bots.online: full by default, which fills a game hosted
+# online with bots; off here unless a run asks: run_netns_online_test.sh hostbots)
+export HALO_BOTS_ONLINE=${HALO_BOTS_ONLINE:-off}
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 binary=$(readlink -f "${HALO_TEST_VITA:-$root/build/linux/halo}")
@@ -828,15 +831,16 @@ for case in $cases; do
 			fail h3browser "OpenCE's browser or password screen opened with Menu style Halo 3" ;;
 	h3create)
 		# (Square: GAME OPTIONS (Create Game); GAME TYPE, A: the picker, down, A: SLAYER PRO; down two
-		# to NAME, A: typed; down five to START GAME (past WHO CAN JOIN), A)
-		run h3create "$menus_data" 50 "$h3mppad x wait:150:4000 a wait:150:3000 down:150:600 a wait:150:4000 down:150:500 down:150:500 a wait:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:5000" \
-			HALO_MENU_STYLE=halo3 $h3net "HALO_TEST_TEXT_INPUT=Vita Night"
+		# to NAME, A: typed; down five to BOTS (past WHO CAN JOIN), right: OFF; down to START GAME, A)
+		run h3create "$menus_data" 50 "$h3mppad x wait:150:4000 a wait:150:3000 down:150:600 a wait:150:4000 down:150:500 down:150:500 a wait:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 right:150:800 down:150:500 a wait:150:5000" \
+			HALO_MENU_STYLE=halo3 $h3net "HALO_TEST_TEXT_INPUT=Vita Night" HALO_BOTS_ONLINE=full
 		check_h3 h3create halo3
 		log=$out/h3create/run.log
 		grep -aq "ui: screen pc.h3.setup.screen" "$log" || fail h3create "Square did not open GAME OPTIONS (Create Game)"
 		grep -aq "menus: h3 mp: game type Slayer Pro" "$log" || fail h3create "the GAME TYPE picker did not set the game type"
 		grep -aq "menus: Server Setup: Vita Night, 16 players, public, Vitas; the profile, then the game's lobby" "$log" ||
 			fail h3create "START GAME did not set up the game as Server Setup does"
+		grep -aq "menus: GAME OPTIONS: Bots online off" "$log" || fail h3create "BOTS (right: OFF) did not set Bots online off"
 		grep -aqE "ui: screen (ui.shell.main_menu.multiplayer_type_select.connected.4way_profile_select.4way_start2join_screen|pc.h3.join.screen)" "$log" ||
 			fail h3create "START GAME did not open the profile" ;;
 	h3vitapc)
@@ -861,13 +865,13 @@ for case in $cases; do
 	h3createwho)
 		# (WHO CAN JOIN, the owner, Oct 20 2026: VITA, VITA PC, EVERYONE on a Vita; on the PC build
 		# VITA PC and EVERYONE alone (strings_pc), VITA PC its default. GAME OPTIONS: down six to
-		# WHO CAN JOIN, then right N times, down, A: START GAME. A Vita's right once: VITA PC; the
+		# WHO CAN JOIN, then right N times, down twice (past BOTS), A: START GAME. A Vita's right once: VITA PC; the
 		# PC build's: EVERYONE; the PC build's none: VITA PC)
 		for spec in "vita 1" "pc 1" "pc 0" "vita 0"; do
 			set -- $spec
 			who_pad="$h3mppad x wait:150:4000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500"
 			[ "$2" = 1 ] && who_pad="$who_pad right:150:800"
-			who_pad="$who_pad down:150:500 a wait:150:5000"
+			who_pad="$who_pad down:150:500 down:150:500 a wait:150:5000"
 			run h3createwho_$1_$2 "$menus_data" 36 "$who_pad" HALO_MENU_STYLE=halo3 $h3net "HALO_TEST_PLATFORM=$1"
 			check_h3 h3createwho_$1_$2 halo3
 		done

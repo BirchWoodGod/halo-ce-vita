@@ -613,6 +613,8 @@ static struct
 	boolean held_private;
 	/* (WHO CAN JOIN: NETWORK_AUDIENCE_*) */
 	short held_audience;
+	/* (BOTS: the spinner's index, setup_bots_values) */
+	short held_bots;
 	/* to be opened from the main loop: the System Link screen, the password
 	screen */
 	boolean open_system_link;
@@ -7591,6 +7593,29 @@ static void browser_update(struct widget_instance *list)
 			snprintf(text, sizeof(text), "%d", entry->players);
 		else
 			snprintf(text, sizeof(text), "-");
+		/* (a dedicated server's bots, in the Halo 3 rows: the people and the
+		bots apart, as long a way of saying so as fits - "6 players · 5 bots",
+		"6 · 5 bots", "6+5/16"; the classic rows the total) */
+		if (entry->bots > 0 && named(child, "row_badge"))
+		{
+			int people = entry->players - entry->bots;
+			char players_text[24], bots_text[24];
+
+			snprintf(players_text, sizeof(players_text), T("%d players"), people);
+			snprintf(bots_text, sizeof(bots_text), T("%d bots"), entry->bots);
+			snprintf(text, sizeof(text), "%s \xc2\xb7 %s", players_text, bots_text);
+			if (row_column(child, "row_players", text))
+			{
+				snprintf(text, sizeof(text), "%d \xc2\xb7 %s", people, bots_text);
+				if (row_column(child, "row_players", text))
+				{
+					if (entry->maximum > 0)
+						snprintf(text, sizeof(text), "%d+%d/%d", people, entry->bots, entry->maximum);
+					else
+						snprintf(text, sizeof(text), "%d+%d", people, entry->bots);
+				}
+			}
+		}
 		row_column(child, "row_players", text);
 #ifndef HALO_RELEASE
 		/* (the tests': each row as shown, said as it changes) */
@@ -7801,7 +7826,7 @@ static boolean browser_join(struct widget_instance *widget, boolean *widget_dele
 	{
 		char warning[192];
 
-		if (p2p_party_join_warning(entry->players, entry->maximum, warning, sizeof(warning)) &&
+		if (p2p_party_join_warning(entry->players - entry->bots, entry->maximum, warning, sizeof(warning)) &&
 			!party_warning_confirmed(entry->id))
 		{
 			snprintf(menu_functions.status, sizeof(menu_functions.status), "%s %s", warning, h3_buttons(T("Cross again: join anyway.")));
@@ -7884,6 +7909,26 @@ static void password_update(struct widget_instance *list)
 
 /* ---- Server Setup */
 
+/* (the Halo 3 GAME OPTIONS' BOTS: Bots online, bots.online - the bots a game
+hosted online fills its lobby with, network_server_manager.c - its
+spinner's strings' order) */
+static char const *const setup_bots_values[] = { "full", "off", "1", "2", "3", "5", "7", "9", "11", "13" };
+
+static short setup_bots_index(void)
+{
+	char const *value = setting_get("HALO_BOTS_ONLINE", "full");
+	short index;
+
+	if (!strcmp(value, "0"))
+		return 1;
+	for (index = 0; index < (short)NUMBEROF(setup_bots_values); index++)
+	{
+		if (!strcmp(value, setup_bots_values[index]))
+			return index;
+	}
+	return 0;
+}
+
 static struct widget_instance *spinner_of(struct widget_instance *screen, char const *row)
 {
 	struct widget_instance *found = named(screen, row);
@@ -7908,11 +7953,14 @@ static void setup_initialize(struct widget_instance *widget)
 	menu_functions.create_pending = FALSE;
 	/* (back from the Halo 3 Create Game's GAME TYPE or MAP picker: what it
 	showed, the name and password typed kept; else the settings') */
+	short bots = setup_bots_index();
+
 	if (menu_functions.setup_held)
 	{
 		maximum = menu_functions.held_maximum;
 		private_game = menu_functions.held_private;
 		audience = menu_functions.held_audience;
+		bots = menu_functions.held_bots;
 	}
 	else
 	{
@@ -7935,6 +7983,10 @@ static void setup_initialize(struct widget_instance *widget)
 	if (spinner)
 		spinner->parameters.list.selected_index = (short)(PIN(audience, network_wire_audience_first(),
 			NUMBER_OF_NETWORK_AUDIENCES - 1) - network_wire_audience_first());
+	/* (BOTS: FULL, OFF, then the most bots) */
+	spinner = spinner_of(screen, "op_bots");
+	if (spinner)
+		spinner->parameters.list.selected_index = (short)PIN(bots, 0, (short)NUMBEROF(setup_bots_values) - 1);
 }
 
 /* (port h3 setup hold) the Halo 3 Create Game's GAME TYPE or MAP picker
@@ -7950,6 +8002,8 @@ static void setup_hold(struct widget_instance *widget)
 	spinner = spinner_of(screen, "op_who");
 	menu_functions.held_audience = (short)(spinner ? spinner->parameters.list.selected_index +
 		network_wire_audience_first() : network_wire_audience_default());
+	spinner = spinner_of(screen, "op_bots");
+	menu_functions.held_bots = spinner ? spinner->parameters.list.selected_index : setup_bots_index();
 	menu_functions.setup_held = TRUE;
 }
 
@@ -8006,6 +8060,18 @@ static boolean setup_start(struct widget_instance *widget)
 		if (who)
 			setting_set("HALO_NET_WHO_CAN_JOIN", network_wire_audience_value(PIN(who->parameters.list.selected_index +
 				network_wire_audience_first(), network_wire_audience_first(), NUMBER_OF_NETWORK_AUDIENCES - 1)));
+	}
+	/* (BOTS: Bots online, live - a lobby hosted now fills or empties as
+	it changes, network_server_manager.c) */
+	{
+		struct widget_instance *bots = spinner_of(screen, "op_bots");
+
+		if (bots)
+		{
+			setting_set("HALO_BOTS_ONLINE", setup_bots_values[PIN(bots->parameters.list.selected_index, 0,
+				(short)NUMBEROF(setup_bots_values) - 1)]);
+			platform_log("menus: GAME OPTIONS: Bots online %s", setting_get("HALO_BOTS_ONLINE", "full"));
+		}
 	}
 	/* (a live lobby's game hosted for others than WHO CAN JOIN says now: a
 	game's wire is its own for its life (network_wire.h), so it closes, its
