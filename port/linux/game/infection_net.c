@@ -8,6 +8,15 @@ play it as Team Slayer without the zombies' sides) from that game alone.
 The host's own machine, a local game's bots and a split screen game are
 never asked; a game of another type asks no one, and a machine asked once
 is not asked again while it stays.
+
+A dedicated server refuses no one (port/linux/DEDICATED_SERVER.md: the
+official servers' Infection is played by every build): a machine that does
+not answer, or answers without Infection, plays its Infection as the Team
+Slayer it knows - the host decides every side, death and spawn, and its
+units come with their side's team and colours; the game type's state it is
+sent is Slayer's part alone, the only one it reads
+(game_rules_net_machine_plays_infection, network_distributed.c). A machine
+hosting from the menus refuses it as before.
 */
 
 #include "cseries.h"
@@ -43,6 +52,8 @@ static struct
 		boolean known;
 		boolean answered;
 		boolean refused;
+		/* (the dedicated server) taken without Infection, as Team Slayer */
+		boolean legacy;
 		long machine_index;
 		unsigned long joined_time;
 		unsigned long hello_time;
@@ -146,10 +157,19 @@ void game_rules_net_frame(
 			game_rules_net.machines[machine_index].machine_index = machine_index;
 			game_rules_net.machines[machine_index].joined_time = now;
 		}
-		if (game_rules_net.machines[machine_index].answered || game_rules_net.machines[machine_index].refused)
+		if (game_rules_net.machines[machine_index].answered || game_rules_net.machines[machine_index].refused ||
+			game_rules_net.machines[machine_index].legacy)
+		{
 			continue;
+		}
 		if (now - game_rules_net.machines[machine_index].joined_time >= GAME_RULES_HELLO_MILLISECONDS)
 		{
+#ifdef HALO_DEDICATED_SERVER
+			platform_log("game rules net: machine %ld did not answer in %d ms (a build without Infection): it plays "
+				"the Infection game as Team Slayer", machine_index, GAME_RULES_HELLO_MILLISECONDS);
+			game_rules_net.machines[machine_index].legacy = TRUE;
+			continue;
+#endif
 			platform_log("game rules net: machine %ld did not answer in %d ms (a build without Infection): "
 				"refused from the Infection game", machine_index, GAME_RULES_HELLO_MILLISECONDS);
 			game_rules_net.machines[machine_index].refused = TRUE;
@@ -250,6 +270,12 @@ void game_rules_net_server_handle_message(
 	}
 	if ((answer.rules & game_rules_net.rules) != game_rules_net.rules)
 	{
+#ifdef HALO_DEDICATED_SERVER
+		platform_log("game rules net: machine %ld plays rules %x, not the game's %x: it plays the Infection game as "
+			"Team Slayer", machine_index, (unsigned)answer.rules, (unsigned)game_rules_net.rules);
+		game_rules_net.machines[machine_index].legacy = TRUE;
+		return;
+#endif
 		platform_log("game rules net: machine %ld plays rules %x, not the game's %x: refused from it", machine_index,
 			(unsigned)answer.rules, (unsigned)game_rules_net.rules);
 		game_rules_net.machines[machine_index].refused = TRUE;
@@ -258,4 +284,11 @@ void game_rules_net_server_handle_message(
 	}
 	game_rules_net.machines[machine_index].answered = TRUE;
 	platform_log("game rules net: machine %ld plays Infection", machine_index);
+}
+
+int game_rules_net_machine_plays_infection(
+	long machine_index)
+{
+	return game_rules_net.hosting && VALID_INDEX(machine_index, HALO_PORT_MAXIMUM_NETWORK_MACHINES) &&
+		game_rules_net.machines[machine_index].known && game_rules_net.machines[machine_index].answered;
 }

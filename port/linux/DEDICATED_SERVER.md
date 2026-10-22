@@ -243,6 +243,8 @@ These commands work in `init.txt` and on the console. The names are
 | `sv_starting_weapons <generic\|map>` | The players' first weapons in every gametype: `generic`, an assault rifle and a pistol; `map` (the default), the gametype's own (most maps' own: see "Starting weapons"). From the next game. |
 | `sv_end_empty <seconds>` | A game that nobody is in ends after this (default 30; 0: never). |
 | `sv_coop <level> [difficulty]` | Co-op on a campaign level (`a10`, `a30`...; difficulty 0 to 3, default 1) instead of the cycle; the server runs the AI and the scripts. `init.txt` only. |
+| `sv_bots_fill <0\|1>` | 1: bots fill the game to its most players less one while anyone is in, so a slot is always free, and leave as players join (see "Bots"). 0 (the default): no bots. |
+| `sv_bots_skill <easy\|normal\|heroic\|legendary>` | The bots' skill (default normal). |
 | `sv_map_download <0\|1>` | 1: Vitas without a custom map of the cycle may download it from the server, in the lobby or before they join a game in progress (then at most 256 KB/s for all of them together: `HALO_MAP_SHARE_INGAME_RATE_KB` in the server's environment changes it). 0 (the default): no downloads. |
 | `sv_port <port>` | Internet play's UDP port (default 2302). `init.txt` only. |
 | `sv_game_port <port>` | The game's own ports on this machine: this one (the host's) and the next (its client's). The default is 5150 for `sv_port` 2302, 5152 for 2303, 5154 for 2304 and so on up to 2401 (5150 past that), so servers on 2302, 2303... never take each other's. Only a server on 5150 is found on its LAN (see "Several servers on one VPS"). Not 5149 or 5151. `init.txt` only. |
@@ -337,6 +339,31 @@ alive win after six minutes (`infection.time_limit`). No vehicles. The
 server decides every side and sends it to the players; a build older than
 1.1.1 is refused from an Infection game (it cannot play it), and plays the
 server's other games as before. `sv_mapcycle_add prisoner infection`.
+
+### Bots
+
+`sv_bots_fill 1` fills the game with bots (the game's offline bots,
+`port/linux/game/bots.c`, played by the server alone) up to its most
+players less one, so that a slot is always free:
+
+- No bots while nobody is in: an empty server stays empty, idle, and
+  listed with no players.
+- A player joining takes the free slot and a bot leaves to free another;
+  a joiner (a party's members joining together too) that finds the game
+  full takes a bot's slot at once. A person is never removed or refused
+  for a bot. As players leave, bots come back, one every 0.75 s in a game.
+- In team games a bot joins the smaller team, one leaves the larger, and
+  the teams are kept within one of each other by bots alone. In Infection
+  the bots are humans and zombies as the players are.
+- `sv_minplayers` counts people, not bots.
+- Every build sees the bots as players (they join and leave as players of
+  machines that join and quit: nothing new on the wire). The server
+  browser's listing carries the bots' count beside the players' (its
+  stamp's second byte, which older builds ignore, seeing the total): the
+  Halo 3 browser shows "6 players · 5 bots".
+
+The bots cost the server's CPU while people play (their path searches run
+on a helper thread): `sv_status` shows the players and the bots.
 
 ### Starting weapons
 

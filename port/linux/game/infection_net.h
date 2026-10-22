@@ -69,6 +69,11 @@ void game_rules_net_server_handle_message(
 	struct network_game_server_client_machine *machine,
 	unsigned short *message,
 	short message_size);
+/* (the host, network_distributed.c) whether the machine (the game's index)
+said it plays Infection: the game type's state it is sent is the whole, else
+Slayer's part alone (a dedicated server's machine of a build without it) */
+int game_rules_net_machine_plays_infection(
+	long machine_index);
 /* (tests: HALO_GAME_RULES_NET=0 makes a machine one that does not answer,
 as an older build) */
 

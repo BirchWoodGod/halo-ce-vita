@@ -7555,6 +7555,29 @@ static void browser_update(struct widget_instance *list)
 			snprintf(text, sizeof(text), "%d", entry->players);
 		else
 			snprintf(text, sizeof(text), "-");
+		/* (a dedicated server's bots, in the Halo 3 rows: the people and the
+		bots apart, as long a way of saying so as fits - "6 players · 5 bots",
+		"6 · 5 bots", "6+5/16"; the classic rows the total) */
+		if (entry->bots > 0 && named(child, "row_badge"))
+		{
+			int people = entry->players - entry->bots;
+			char players_text[24], bots_text[24];
+
+			snprintf(players_text, sizeof(players_text), T("%d players"), people);
+			snprintf(bots_text, sizeof(bots_text), T("%d bots"), entry->bots);
+			snprintf(text, sizeof(text), "%s \xc2\xb7 %s", players_text, bots_text);
+			if (row_column(child, "row_players", text))
+			{
+				snprintf(text, sizeof(text), "%d \xc2\xb7 %s", people, bots_text);
+				if (row_column(child, "row_players", text))
+				{
+					if (entry->maximum > 0)
+						snprintf(text, sizeof(text), "%d+%d/%d", people, entry->bots, entry->maximum);
+					else
+						snprintf(text, sizeof(text), "%d+%d", people, entry->bots);
+				}
+			}
+		}
 		row_column(child, "row_players", text);
 #ifndef HALO_RELEASE
 		/* (the tests': each row as shown, said as it changes) */
@@ -7765,7 +7788,7 @@ static boolean browser_join(struct widget_instance *widget, boolean *widget_dele
 	{
 		char warning[192];
 
-		if (p2p_party_join_warning(entry->players, entry->maximum, warning, sizeof(warning)) &&
+		if (p2p_party_join_warning(entry->players - entry->bots, entry->maximum, warning, sizeof(warning)) &&
 			!party_warning_confirmed(entry->id))
 		{
 			snprintf(menu_functions.status, sizeof(menu_functions.status), "%s %s", warning, h3_buttons(T("Cross again: join anyway.")));

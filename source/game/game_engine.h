@@ -792,6 +792,18 @@ struct game_engine *infection_engine_get(
 /* whether the game played is Infection, and a player's side in it */
 boolean infection_active(
 	void);
+/* (a host) the team a player added to an Infection game now plays on: the
+humans' in the lobby, the zombies' once the round has its zombies (a joiner
+of the round under way is one) */
+long infection_network_join_team(
+	boolean in_game);
+/* (the dedicated server's bots) whether the player of that absolute index
+is a zombie; the humans and zombies in the game (0 and 0 when not Infection) */
+boolean infection_absolute_player_is_zombie(
+	long absolute_index);
+void infection_side_counts(
+	long *humans,
+	long *zombies);
 boolean infection_player_is_zombie(
 	long player_index);
 /* game_engine.c's hooks */

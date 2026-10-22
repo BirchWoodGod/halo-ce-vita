@@ -266,6 +266,7 @@ symbols in this file:
 #include "map_share.h"
 #include "forge.h"
 #include "infection_net.h"
+#include "dedicated_server.h"
 #include "network_game_record.h"
 #include "network_wire.h"
 #include "main/main.h"
@@ -2060,6 +2061,15 @@ static boolean network_game_server_handle_message_client_join_game_request(
 		network_game_server_hold_join(server, server_client_machine, message, message_size))
 	{
 		return TRUE;
+	}
+#endif
+#ifdef HALO_DEDICATED_SERVER
+	/* port: a game the server's bots fill (sv_bots_fill) has room for a
+	machine joining: a bot's slot, if it has no other */
+	if (!network_game_server_client_machine_is_joined_to_game(server, server_client_machine))
+	{
+		network_game_server_port_bots_make_room(server);
+		late_join = network_game_server_accepts_late_joins(server);
 	}
 #endif
 	if (network_game_server_get_state(server, NULL) == _network_game_server_state_pregame || late_join)

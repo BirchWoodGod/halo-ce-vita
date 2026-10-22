@@ -32,10 +32,19 @@ weapon made that one */
 short dedicated_server_sole_weapon(void);
 /* (main.c) frames a second: fewer while no one is connected */
 long dedicated_server_frame_cap(void);
+/* (network_server_manager.c) bots fill the game to its most players less
+one (sv_bots_fill) */
+boolean dedicated_server_bots_fill(void);
 
 /* (network_server_manager.c, for the server) the remote machines joined to
 the game, and the players of the remote machines */
 long network_game_server_dedicated_machine_count(void);
+/* the bots in the game (sv_bots_fill) */
+long network_game_server_dedicated_bot_count(void);
+/* (a machine joining, a player being added, the game full) a bot's slot
+taken: TRUE if the game has a free slot now */
+struct network_game_server;
+boolean network_game_server_port_bots_make_room(struct network_game_server *server);
 /* drops the machine of the player at that index of the game's player list
 (and bans it: its line in bans.txt); FALSE (said) if there is none */
 boolean network_game_server_dedicated_drop_player(long player_index, boolean ban);

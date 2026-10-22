@@ -46,6 +46,7 @@ they take it. A client's own word decides nothing.
 #include "units/units.h"
 
 #include "infection.h"
+#include "bots.h"
 #include "../src/lang.h"
 
 #include <stdlib.h>
@@ -257,6 +258,33 @@ boolean infection_player_is_zombie(
 static long infection_side_team(short side)
 {
 	return side == _infection_side_zombie ? 0 : 1;
+}
+
+static void infection_count(long *humans, long *zombies);
+
+boolean infection_absolute_player_is_zombie(
+	long absolute_index)
+{
+	return infection_active() && absolute_index >= 0 && absolute_index < INFECTION_MAXIMUM_PLAYERS &&
+		infection_globals.sides[absolute_index] == _infection_side_zombie;
+}
+
+void infection_side_counts(
+	long *humans,
+	long *zombies)
+{
+	*humans = *zombies = 0;
+	if (infection_active())
+		infection_count(humans, zombies);
+}
+
+long infection_network_join_team(
+	boolean in_game)
+{
+	boolean zombie = in_game && infection_active() && infection_globals.round == _infection_round_active &&
+		infection_globals.had_zombies;
+
+	return infection_side_team(zombie ? _infection_side_zombie : _infection_side_human);
 }
 
 /* the side into the player's team (the game's, its unit's) */
@@ -595,11 +623,14 @@ static void infection_player_added(long player_index)
 		return;
 	/* (a slot a player who quit had: forgotten) */
 	infection_set_side(player_index, _infection_side_none);
-	/* (one joining the round under way: a zombie, as Halo 3's) */
+	/* (one joining the round under way: a zombie, as Halo 3's; port: but
+	for a dedicated server's bot, which fills a slot a player left and joins
+	as a human - bots joining as zombies would end the round at once:
+	network_server_manager.c's sv_bots_fill) */
 	if (infection_globals.round == _infection_round_active)
 	{
 		infection_set_side(player_index, _infection_side_human);
-		if (infection_globals.had_zombies)
+		if (infection_globals.had_zombies && !bots_player_is_bot(player_index))
 			infection_turn(player_index, "joined the game in progress");
 	}
 }

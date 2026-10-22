@@ -388,6 +388,8 @@ struct p2p_listing
 	char map[P2P_LISTING_MAP_SIZE + 1];
 	char gametype[P2P_LISTING_GAMETYPE_SIZE + 1];
 	unsigned char player_count, maximum_player_count, engine_type;
+	/* of the players, a dedicated server's bots (its listing's stamp) */
+	unsigned char bot_count;
 	unsigned char open, in_progress, has_teams, pc_map, coop;
 	/* a dedicated server's (no player of its own) */
 	unsigned char dedicated;
