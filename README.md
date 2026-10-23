@@ -811,4 +811,6 @@ executable and other game content belong to their owners and are not
 included.
 
 This project is not affiliated with or endorsed by Microsoft or Bungie,
-and it contains no game assets.
+and it contains no game assets. See [LEGAL.md](LEGAL.md) for the project's
+research purpose, copyright notice and how rights holders can send a
+takedown request.
