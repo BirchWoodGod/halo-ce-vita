@@ -5,6 +5,12 @@ game-preservation project focused on studying software compatibility,
 reverse engineering, and the technical feasibility of running Halo: Combat
 Evolved on the PlayStation Vita.
 
+The project also covers PC builds of the same engine and work on running
+content from other Halo games (such as Halo 2 from Halo: The Master Chief
+Collection). That content is read at run time from the user's own copy of the
+game and is never included in the project; everything on this page applies to
+it in the same way.
+
 This project is not affiliated with, endorsed by, or sponsored by Microsoft,
 Xbox, or Bungie.
 
