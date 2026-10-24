@@ -2587,7 +2587,7 @@ PY
 			$carnage_env HALO_NETWORK_TEST=local:chillout:slayer HALO_NETWORK_TEST_END=30 HALO_BOTS=3
 		# (Menu style Halo CE with Halo 3's report chosen for it: menus.classic_carnage_report halo3)
 		profile_from=$HALO_TEST_PROFILE run h3carnage_ce_h3 "$menus_data" 90 "$carnage_pad" HALO_MENU_STYLE=classic \
-			HALO_CLASSIC_CARNAGE_REPORT=halo3 $carnage_env HALO_NETWORK_TEST=local:chillout:slayer HALO_NETWORK_TEST_SCORE=3 HALO_BOTS=3
+			HALO_CLASSIC_CARNAGE_REPORT=halo3 $carnage_env HALO_NETWORK_TEST=local:chillout:slayer HALO_NETWORK_TEST_END=30 HALO_BOTS=3
 		for name in h3carnage h3carnage_team h3carnage_ctf h3carnage_oddball h3carnage_classic h3carnage_ce h3carnage_ce_h3; do
 			log=$out/$name/run.log
 			echo "--- $name"
