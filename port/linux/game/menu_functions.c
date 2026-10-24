@@ -19557,9 +19557,99 @@ static void h3_adhoc_go_on(void)
 
 /* (each frame, the main loop) the screens the functions asked for, opened
 outside the widgets' own events */
+/* ---- the Menu style changed (the settings panel's Game, Menus, Menu style;
+config.toml's menus.style): live - at the main menu, the menus closed and
+the main menu opened again, in the new style (menu_tags.c reads the style
+as each screen opens; the live backdrop comes or goes with it,
+menu_backdrop.c; a lobby's characters let go with the scenes). A lobby's
+network game is closed first (the party kept). In a game (no main menu) it
+takes at the next main menu, as before. HALO_TEST_MENU_STYLE_SWITCH
+("<ms>:<style>,...", never a release): the tests' changes, that long after
+the main menu is first up */
+static struct
+{
+	char style[16];
+	boolean known;
+	unsigned long first_up;
+	int test_next;
+} menu_style_watch;
+
+void ui_widgets_close_all(void);
+
+static void menu_style_current(char *style, int size)
+{
+	char const *value = getenv("HALO_MENU_STYLE");
+
+	snprintf(style, (size_t)size, "%s", !halo_menu_style_halo3() ? "classic" : value && !strcmp(value, "online") ?
+		"online" : "halo3");
+}
+
+static void menu_style_update(boolean main_menu_loaded)
+{
+	char style[16];
+	long main_menu;
+
+	if (!main_menu_loaded)
+		return;
+#ifndef HALO_RELEASE
+	{
+		char const *switches = getenv("HALO_TEST_MENU_STYLE_SWITCH");
+
+		if (!menu_style_watch.first_up)
+			menu_style_watch.first_up = system_milliseconds();
+		if (switches)
+		{
+			char const *cursor = switches;
+			int index = 0;
+
+			while (cursor && *cursor)
+			{
+				unsigned long at = strtoul(cursor, NULL, 10);
+				char const *colon = strchr(cursor, ':'), *comma = strchr(cursor, ',');
+				char value[16];
+
+				if (!colon)
+					break;
+				snprintf(value, sizeof(value), "%.*s", (int)(comma ? comma - colon - 1 : (long)strlen(colon + 1)), colon + 1);
+				if (index == menu_style_watch.test_next && system_milliseconds() - menu_style_watch.first_up >= at)
+				{
+					setenv("HALO_MENU_STYLE", value, 1);
+					menu_style_watch.test_next++;
+					platform_log("menus: test: Menu style %s", value);
+					break;
+				}
+				index++;
+				cursor = comma ? comma + 1 : NULL;
+			}
+		}
+	}
+#endif
+	menu_style_current(style, (int)sizeof(style));
+	if (!menu_style_watch.known)
+	{
+		menu_style_watch.known = TRUE;
+		snprintf(menu_style_watch.style, sizeof(menu_style_watch.style), "%s", style);
+		return;
+	}
+	if (!strcmp(style, menu_style_watch.style))
+		return;
+	platform_log("menus: Menu style %s -> %s: the main menu again, in it", menu_style_watch.style, style);
+	snprintf(menu_style_watch.style, sizeof(menu_style_watch.style), "%s", style);
+	/* (a lobby's game closed first; the lobby's characters let go) */
+	h3_live_close("the menu style changed");
+	menu_scene_objects_want(NULL, NULL, FALSE, 0.f, 0.f, 0.f, 0.f, 0.f);
+	main_menu = tag_loaded(UI_WIDGET_DEFINITION_TAG, "ui\\shell\\main_menu\\main_menu");
+	if (main_menu == NONE)
+		return;
+	ui_widgets_close_all();
+	if (!ui_widget_load_by_name_or_tag(NULL, main_menu, NULL, NONE, NONE, NONE, NONE))
+		platform_log("menus: Menu style changed: the main menu did not open");
+}
+
 void pc_menu_functions_update(
 	boolean main_menu_loaded)
 {
+	menu_style_update(main_menu_loaded);
 	h3_dialog_port_update();
 	h3_live_update(main_menu_loaded);
 	h3_mp_local_update(main_menu_loaded);
