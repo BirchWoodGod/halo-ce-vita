@@ -426,6 +426,9 @@ enum
 	_function_online_switch_multiplayer,
 	_function_online_switch_forge,
 	_function_online_switch_campaign,
+	/* (Menu style Online: CAMPAIGN with the current profile, no SELECT
+	PROFILE) */
+	_function_h3_profile_current,
 };
 
 /* in port_game_data_input_names' order */
@@ -4457,6 +4460,64 @@ static boolean h3_profile_play(short item, short controller_index)
 	h3_nameplate_changed(profile_index);
 	h3_session_profile_chosen((short)(controller_index != NONE ? controller_index : 0), profile_index);
 	platform_log("menus: h3 profiles: chose %s (campaign)", name);
+	return TRUE;
+}
+
+/* the current profile - the one the nameplate and CUSTOMIZATION show: the
+first player's active one, else the one chosen or saved this session, the
+last used, the first there is - or, with none at all, a new one named
+"Player" (as CREATE NEW PROFILE makes one); NONE if there is none and none
+could be made */
+static long h3_profile_current(short controller_index)
+{
+	char status[96];
+	wchar_t name[MAXIMUM_PLAYER_PROFILE_NAME_LENGTH];
+	struct player_profile profile;
+	long profile_index;
+	short attempt;
+
+	h3_plate.changed = TRUE;
+	h3_nameplate_read();
+	profile_index = h3_plate.shown;
+	if (profile_index != NONE && player_profile_get(profile_index, &profile))
+		return profile_index;
+	for (attempt = 1; attempt <= 9; attempt++)
+	{
+		char typed[16];
+
+		snprintf(typed, sizeof(typed), attempt == 1 ? "Player" : "Player %d", attempt);
+		if (!h3_profile_name_check(typed, name, NULL, status, sizeof(status)))
+			continue;
+		profile_index = player_profile_new(controller_index != NONE ? controller_index : 0, name);
+		if (profile_index == NONE)
+			break;
+		platform_log("menus: h3 profiles: no profile: created %s", typed);
+		h3_nameplate_changed(profile_index);
+		return profile_index;
+	}
+	platform_log("menus: h3 profiles: no profile, and none could be made");
+	return NONE;
+}
+
+/* (CAMPAIGN, Menu style Online: SELECT PROFILE only in CUSTOMIZATION) the
+current profile played as SELECT PROFILE's Cross plays one (h3_profile_play:
+the campaign's controller, the active profile, the session's); FALSE: none
+(SELECT PROFILE then, as before) */
+static boolean h3_profile_play_current(short controller_index)
+{
+	struct player_profile profile;
+	long profile_index = h3_profile_current(controller_index);
+	char name[48];
+
+	if (profile_index == NONE || !player_profile_get(profile_index, &profile))
+		return FALSE;
+	player_ui_reset_single_player_local_player_controllers();
+	player_ui_set_single_player_local_player_controller(0, (short)(controller_index != NONE ? controller_index : 0));
+	player_ui_set_active_player_profile(0, profile_index, &profile);
+	h3_nameplate_changed(profile_index);
+	h3_session_profile_chosen((short)(controller_index != NONE ? controller_index : 0), profile_index);
+	h3_profile_name(name, sizeof(name), &profile);
+	platform_log("menus: h3 profiles: %s (current) plays the campaign: no SELECT PROFILE", name);
 	return TRUE;
 }
 
@@ -14920,6 +14981,16 @@ static boolean h3_session_profile_join(void)
 	long entry = NONE;
 	short index;
 
+	/* (Menu style Online: SELECT PROFILE only in CUSTOMIZATION - none chosen
+	this run, the current one, the first controller's) */
+	if (h3_session.profile == NONE && halo_menu_style_online())
+	{
+		long current = h3_profile_current(0);
+
+		if (current != NONE)
+			h3_session_profile_chosen(0, current);
+		plate = h3_session.plate;
+	}
 	if (h3_session.profile == NONE || plate < 0 || plate >= H3_JOIN_PLATES)
 		return FALSE;
 	player_profiles_enumerate_available_to_local_player_index(plate, &count, entries, TRUE);
@@ -18361,8 +18432,12 @@ boolean pc_menu_event_function_invoke(
 		online_menus.switch_to = function_index == _function_online_switch_multiplayer ?
 			"ui\\shell\\main_menu\\multiplayer_type_select\\multiplayer_type_select_screen" :
 			function_index == _function_online_switch_forge ? "pc\\h3\\forge\\lobby" :
+			h3_profile_play_current(event ? event->controller_index : NONE) ?
+			"ui\\shell\\main_menu\\solo_level_select\\solo_level_select_screen" :
 			"ui\\shell\\main_menu\\load_campaign_player_profile";
 		return TRUE;
+	case _function_h3_profile_current:
+		return h3_profile_play_current(event ? event->controller_index : NONE);
 	case _function_online_exit:
 		platform_log("menus: online EXIT: the game closes");
 		exit(EXIT_SUCCESS);

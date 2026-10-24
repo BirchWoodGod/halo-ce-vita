@@ -65,7 +65,10 @@ the fonts). The left of the list sits in the wide screen's margin (x below 0 of 
 		<on event="a start" open="h3/forge/lobby"/>
 	</widget>
 	<widget name="online/main/campaign" type="text" width="226" height="18" bitmap="online/item" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/main_items" string_index="3">
-		<on event="a start" open="ui\shell\main_menu\load_campaign_player_profile" label="load_campaign"/>
+		<!-- (SELECT PROFILE only in CUSTOMIZATION, owner: the current profile - CUSTOMIZATION's, the
+		nameplate's; a new one when there is none - straight into the campaign lobby; SELECT PROFILE
+		only when none can be had) -->
+		<on event="a start" run="port h3 profile current" open="ui\shell\main_menu\solo_level_select\solo_level_select_screen" otherwise="ui\shell\main_menu\load_campaign_player_profile" label="load_campaign"/>
 	</widget>
 	<widget name="online/main/customization" type="text" width="226" height="18" bitmap="online/item" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/main_items" string_index="4">
 		<on event="a start" open="ui\shell\main_menu\settings_select\player_setup\player_profile_select_screen" label="settings"/>
