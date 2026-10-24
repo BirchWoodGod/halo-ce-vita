@@ -1295,8 +1295,18 @@ spaces:
 	clip:TEXT     the clipboard's text (%XX as text:)
 	wait:MS       a pause
 	@NAME         the next frame saved as NAME.bmp (HALO_SCREENSHOT_DIR)
+	until/TEXT    waits for a screen whose name has TEXT in it
+	asking        waits for the menus to ask for a key to bind
+	hold:NAME:MS  a key, mouse button ("Mouse%20Right") or wheel notch
+	              ("Wheel%20Up") held for MS milliseconds
 halo.log says each step as it is taken ("test keys: ..."). */
 #define TEST_KEYS_PAUSE_MS 250
+
+#ifndef HALO_NOT_DESKTOP
+/* (below: the menus' asking for a key, the tests' holds) */
+static int binding_capture_state;
+BOOL platform_test_input_hold(const char *name, int milliseconds);
+#endif
 
 BOOL platform_test_key(const char *name);
 
@@ -1350,6 +1360,20 @@ static void test_keys(void)
 			return;
 		if (!strcmp(step, "closed") && pc_text_entry_active())
 			return;
+#ifndef HALO_NOT_DESKTOP
+		/* ("until/TEXT": until the screen open is one whose name has TEXT in
+		it, as HALO_TEST_PAD's; "asking": until the menus ask for a key to
+		bind, controls_menu.c) */
+		if (!strncmp(step, "until/", 6))
+		{
+			char const *ui_widget_port_active_screen_name(void);
+
+			if (!strstr(ui_widget_port_active_screen_name(), step + 6))
+				return;
+		}
+		if (!strcmp(step, "asking") && binding_capture_state != 1)
+			return;
+#endif
 		platform_log("test keys: %s", step);
 		at = now + TEST_KEYS_PAUSE_MS;
 		if (!strncmp(step, "text:", 5))
@@ -1374,6 +1398,20 @@ static void test_keys(void)
 		}
 		else if (!strncmp(step, "wait:", 5))
 			at = now + (Uint64)atoi(step + 5);
+#ifndef HALO_NOT_DESKTOP
+		/* ("hold:NAME:MS": a key, mouse button or wheel notch held that
+		long: "hold:Mouse%20Right:200", %20 a space) */
+		else if (!strncmp(step, "hold:", 5))
+		{
+			char name[64];
+			char const *colon = strrchr(step + 5, ':');
+
+			test_keys_decode(name, sizeof(name), step + 5);
+			if (colon && strrchr(name, ':'))
+				*strrchr(name, ':') = 0;
+			platform_test_input_hold(name, colon ? atoi(colon + 1) : 150);
+		}
+#endif
 		else if (step[0] == '@' && step[1])
 		{
 			extern char halo_screenshot_name[64];

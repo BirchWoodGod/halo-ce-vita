@@ -10,7 +10,12 @@
 # Then a game whose config.toml rebinds the grenade to V: V throws, G does not.
 # Each run must exit by itself with no assertion or exception.
 #
-#   run_pc_controls_test.sh [defaults|rebound]
+# Then the menus' KEYBOARD & MOUSE page in both menu styles (page: Halo 3's,
+# page_classic: Halo CE's): keys and a mouse button bound through it (the
+# keys pushed as the real ones arrive: HALO_TEST_KEYS), a conflict swapped
+# and said, the mouse's sensitivity stepped, Y's defaults.
+#
+#   run_pc_controls_test.sh [defaults|rebound|page|page_classic]
 #   HALO_TEST_VITA        the harness (default build/linux/halo of this tree)
 #   HALO_TEST_DATA_MENUS  a folder with the game's maps folder (bloodgulch.map)
 #   HALO_TEST_PROFILE     a blam.sav (needed: the game is played with it)
@@ -23,7 +28,7 @@ data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_pc_controls_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-defaults rebound}
+cases=${*:-defaults rebound page page_classic}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
 
@@ -73,6 +78,26 @@ run() {
 		HALO_MENUS_FOLDER="$root/port/vita/app0/menus/" HALO_UI_LOG=1 HALO_TEST_COMMANDS="$commands" \
 		HALO_TEST_CONFIG="$dir/config.toml" HALO_TEST_ACTION_LOG=1 HALO_MENU_STYLE=halo3 HALO_NETWORK_TEST=local:bloodgulch:team_slayer \
 		HALO_NETWORK_TEST_PROFILE=1 HALO_NETWORK_TEST_START=3 HALO_BOTS=1 \
+		"$@" timeout -k 5 $((seconds + 120)) "$binary" > "$dir/run.log" 2>&1)
+	echo $? > "$dir/exit"
+	rm -rf "$dir/save"
+}
+
+# run_menus NAME SECONDS PAD KEYS [VAR=value...]: the menus, no game (HALO_TEST_PAD's presses, HALO_TEST_KEYS' keys)
+run_menus() {
+	local name=$1 seconds=$2 pad=$3 keys=$4 dir="$out/$1"
+	shift 4
+	rm -rf "$dir"
+	mkdir -p "$dir/data" "$dir/save/u/UDATA/869079979327"
+	ln -sfn "$(cd "$data" && pwd)/maps" "$dir/data/maps"
+	cp "$HALO_TEST_PROFILE" "$dir/save/u/UDATA/869079979327/blam.sav"
+	[ -r "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" ] &&
+		cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$dir/save/u/UDATA/869079979327/"
+	(cd "$dir" && exec env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=offscreen HALO_DATA_ROOT="$dir/data" \
+		HALO_SAVE_ROOT="$dir/save" HALO_NO_VSYNC=1 HALO_FRAME_CAP=30 HALO_EXIT_AFTER="$seconds" HALO_FULLSCREEN=0 \
+		HALO_HIDDEN_WINDOW=1 HALO_NO_AUDIO=1 HALO_UPDATE_AUTO=false HALO_NET_ONLINE=false \
+		HALO_MENUS_FOLDER="$root/port/vita/app0/menus/" HALO_UI_LOG=1 HALO_TEST_CONFIG="$dir/config.toml" \
+		"HALO_TEST_PAD=$pad" "HALO_TEST_KEYS=$keys" \
 		"$@" timeout -k 5 $((seconds + 120)) "$binary" > "$dir/run.log" 2>&1)
 	echo $? > "$dir/exit"
 	rm -rf "$dir/save"
@@ -141,6 +166,36 @@ for case in $cases; do
 			fail "rebound: the earlier defaults were not migrated"
 		[ -z "$(fired "$log" X)" ] && fired "$log" H | grep -qx switch_grenade &&
 			echo "PASS: rebound: H switches grenades, X no longer" || fail "rebound: X/H after the migration" ;;
+	page|page_classic)
+		# (the KEYBOARD & MOUSE page: WEAPONS, THROW GRENADE bound to V, then
+		# to F - MELEE's, swapped: MELEE has V -, then to the right mouse
+		# button - ZOOM's -; MOUSE: the sensitivity up a step; Y: the MCC
+		# defaults again)
+		d="down:150:500"
+		if [ $case = page ]; then
+			style=halo3
+			# (CUSTOMIZATION, the profile, the editor's KEYBOARD & MOUSE)
+			to_page="wait:150:6000 down:150:600 down:150:600 down:150:600 down:150:600 down:150:600 a:150:3000 a:150:3000 $d $d $d $d $d $d $d $d $d $d a:150:3000"
+		else
+			style=classic
+			# (SETTINGS, the profile, KEYBOARD & MOUSE)
+			to_page="wait:150:6000 down:150:800 down:150:800 a:150:3000 a:150:3000 $d $d $d $d $d a:150:3000"
+		fi
+		config_text= run_menus $case 70 "$to_page right:150:800 $d $d $d a:150:4000 a:150:4000 a:150:4000 up:150:500 up:150:500 up:150:500 right:150:600 right:150:600 $d right:150:800 y:150:2000" \
+			"asking wait:300 key:V asking wait:300 key:F asking wait:300 hold:Mouse%20Right:200" HALO_MENU_STYLE=$style
+		ended $case
+		log="$out/$case/run.log"
+		grep -aq "menus: keys: KEYBOARD & MOUSE opened" "$log" || fail "$case: the page did not open"
+		grep -aq 'controls.keyboard.throw_grenade = "V"' "$log" && echo "PASS: $case: V bound to THROW GRENADE" ||
+			fail "$case: V was not bound"
+		grep -aq "F was MELEE's: it has V, MOUSE 4 now." "$log" && grep -aq 'controls.keyboard.melee = "V, Mouse 4"' "$log" &&
+			echo "PASS: $case: F swapped from MELEE, said" || fail "$case: the conflict was not swapped and said"
+		grep -aq "RIGHT MOUSE was ZOOM's" "$log" && grep -aq 'controls.keyboard.throw_grenade = "Mouse Right"' "$log" &&
+			echo "PASS: $case: a mouse button bound" || fail "$case: the right mouse button was not bound"
+		grep -aq "controls: MOUSE SENSITIVITY 1.05" "$log" && grep -aq "mouse_sensitivity = 1.050" "$out/$case/config.toml" &&
+			echo "PASS: $case: the sensitivity stepped and kept" || fail "$case: the sensitivity"
+		grep -aq 'throw_grenade = "G"' "$out/$case/config.toml" && grep -aq 'melee = "F, Mouse 4"' "$out/$case/config.toml" &&
+			echo "PASS: $case: Y put the MCC defaults back" || fail "$case: the defaults were not put back" ;;
 	*)
 		echo "unknown case $case"; status=1 ;;
 	esac

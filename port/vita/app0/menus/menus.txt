@@ -7,10 +7,12 @@ halo3/main.xml
 classic/main.xml
 classic/pregame.xml
 classic/profile.xml
+classic/keys.xml
 halo3/campaign.xml
 halo3/profiles.xml
 halo3/profiles_coop.xml
 halo3/customize.xml
+halo3/keys.xml
 halo3/forge_lobby.xml
 halo3/fileshare.xml
 halo3/multiplayer.xml

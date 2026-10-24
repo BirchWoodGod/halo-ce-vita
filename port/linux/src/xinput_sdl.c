@@ -485,6 +485,65 @@ int halo_key_bindings_reset(void)
 	return halo_key_bindings_write(&defaults);
 }
 
+/* an input as the menus show it: a key with a character of its own as the
+keyboard's layout prints it (config.toml names a key by where it sits on a
+US keyboard, so W A S D stay under the fingers on any layout; "Z" shows Y
+on a German keyboard), Latin-1 at most (the menus' fonts); others by their
+names in capitals ("LEFT CTRL", "LEFT MOUSE", "WHEEL UP") */
+void halo_bind_input_shown(int input, char *shown, size_t size)
+{
+	static const struct
+	{
+		int input;
+		const char *name;
+	} mouse[] =
+	{
+		{ HALO_BIND_MOUSE + SDL_BUTTON_LEFT, "LEFT MOUSE" }, { HALO_BIND_MOUSE + SDL_BUTTON_RIGHT, "RIGHT MOUSE" },
+		{ HALO_BIND_MOUSE + SDL_BUTTON_MIDDLE, "MIDDLE MOUSE" }, { HALO_BIND_WHEEL, "WHEEL" },
+		{ HALO_BIND_WHEEL_UP, "WHEEL UP" }, { HALO_BIND_WHEEL_DOWN, "WHEEL DOWN" },
+	};
+	char name[64];
+	size_t index;
+
+	if (!size)
+		return;
+	for (index = 0; index < sizeof(mouse) / sizeof(mouse[0]); index++)
+	{
+		if (mouse[index].input == input)
+		{
+			snprintf(shown, size, "%s", mouse[index].name);
+			return;
+		}
+	}
+#if !defined(HALO_VITA) && !defined(HALO_ANDROID)
+	if (input > 0 && input < SDL_SCANCODE_COUNT)
+	{
+		SDL_Keycode key = SDL_GetKeyFromScancode((SDL_Scancode)input, SDL_KMOD_NONE, true);
+
+		if (key > ' ' && key < 0x7f)
+		{
+			snprintf(shown, size, "%c", key >= 'a' && key <= 'z' ? (char)(key - 'a' + 'A') : (char)key);
+			return;
+		}
+		if (key >= 0xa1 && key <= 0xff && size >= 3)
+		{
+			/* (UTF-8, the small letters made capitals but for sharp s and y
+			with diaeresis) */
+			if (key >= 0xe0 && key <= 0xfe && key != 0xf7)
+				key -= 0x20;
+			shown[0] = (char)(0xc0 | (key >> 6));
+			shown[1] = (char)(0x80 | (key & 0x3f));
+			shown[2] = 0;
+			return;
+		}
+	}
+#endif
+	halo_bind_input_name(input, name, sizeof(name));
+	for (index = 0; name[index]; index++)
+		name[index] = (char)(name[index] >= 'a' && name[index] <= 'z' ? name[index] - 'a' + 'A' : name[index]);
+	snprintf(shown, size, "%s", name);
+}
+
 /* ---------- the keys' parts */
 
 /* each input's part since it went down: 0 up, 1 the menus', 2 play's */
@@ -610,6 +669,27 @@ static void keyboard_play(XINPUT_GAMEPAD *pad)
 	if ((held & (1UL << HALO_BIND_BOOST)) && h2_vehicle_boost_local_driving())
 		press_game_button(pad, input_abstraction_port_control_button(0, GAME_CONTROL_CROUCH));
 
+	/* Forge's monitor keeps its own keys, as its help says them (menu_functions.c
+	h3_forge_controls_update): the right button holds its left trigger (rotate,
+	distance, snap) - not the zoom, which the monitor has none of -, X its
+	black button (upright) */
+	{
+		extern int forge_monitor_flying;
+
+		if (forge_monitor_flying)
+		{
+			if (input_down(HALO_BIND_MOUSE + SDL_BUTTON_RIGHT, 2))
+			{
+				int zoom_button = input_abstraction_port_control_button(0, GAME_CONTROL_ZOOM);
+
+				pad->bAnalogButtons[XINPUT_GAMEPAD_LEFT_TRIGGER] = 0xff;
+				if (zoom_button >= 8 && zoom_button < 16)
+					pad->wButtons &= (WORD)~digital_buttons[zoom_button - 8];
+			}
+			if (input_down(SDL_SCANCODE_X, 2))
+				pad->bAnalogButtons[XINPUT_GAMEPAD_BLACK] = 0xff;
+		}
+	}
 	if (play_fixed_key(SDL_SCANCODE_ESCAPE)) pad->wButtons |= XINPUT_GAMEPAD_START;
 	if (play_fixed_key(SDL_SCANCODE_F1)) pad->wButtons |= XINPUT_GAMEPAD_BACK;
 	if (play_fixed_key(SDL_SCANCODE_UP)) pad->wButtons |= XINPUT_GAMEPAD_DPAD_UP;

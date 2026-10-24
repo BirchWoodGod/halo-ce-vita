@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Menu style Halo CE: KEYBOARD & MOUSE, the PC's keyboard and mouse bindings and the mouse's
+     settings (port/linux/game/controls_menu.c, "port keys ...", the functions behind each style's
+     page; port/linux/include/halo_key_bindings.h, config.toml's [controls.keyboard]), opened from
+     the profile's settings (profile.xml's KEYBOARD & MOUSE row, hidden on the PS Vita). In Halo
+     PC's look, as its CONTROLS SETTINGS screen and OpenCE's Server Setup (setup.xml): the player's
+     Halo PC heading (bitmaps.map's header_profile_controls_settings), rows on its option
+     backgrounds with the action in blue capitals at the left and its two keys beside it, the
+     chosen key between > <; SHOW picks the rows (left and right); A binds (the next key or mouse
+     button: Escape cancels, Delete clears), X clears, Y the MCC defaults. The layout follows
+     ChupathingyCE's Controls Setup (GPL-3.0); no picture of it is ours to ship: every one is the
+     player's (art.xml). -->
+<menus>
+	<bitmap name="ce/keys/header_art" resource="ui\shell\main_menu\settings_select\player_setup\player_profile_edit\controls_setup\header_profile_controls_settings"/>
+	<strings name="ce/keys_text">
+		<string text="SHOW:"/>
+		<string text="RESET TO MCC DEFAULTS"/>
+		<string text="KEYBOARD &amp; MOUSE"/>
+		<string text="FIRST KEY"/>
+		<string text="SECOND KEY"/>
+	</strings>
+	<widget name="ce/keys/header" left="35" top="11" width="605" height="59" bitmap="ce/keys/header_art"/>
+	<widget name="ce/keys/label" type="text" width="200" height="22" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4"/>
+	<widget name="ce/keys/key1" type="text" left="200" width="152" height="22" font="ui\small_ui" color="#FF2896FF" align="center" text_y="5" text_flags="no_focus_test"/>
+	<widget name="ce/keys/key2" type="text" left="356" width="152" height="22" font="ui\small_ui" color="#FF2896FF" align="center" text_y="5" text_flags="no_focus_test"/>
+	<widget name="ce/keys/op_row1" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="#FF2896FF">
+		<on event="a start" run="port keys accept"/>
+		<on event="left" run="port keys left"/>
+		<on event="right" run="port keys right"/>
+		<child widget="ce/keys/label"/>
+		<child widget="ce/keys/key1"/>
+		<child widget="ce/keys/key2"/>
+	</widget>
+	<widget name="ce/keys/op_row2" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="#FF2896FF">
+		<on event="a start" run="port keys accept"/>
+		<on event="left" run="port keys left"/>
+		<on event="right" run="port keys right"/>
+		<child widget="ce/keys/label"/>
+		<child widget="ce/keys/key1"/>
+		<child widget="ce/keys/key2"/>
+	</widget>
+	<widget name="ce/keys/op_row3" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="#FF2896FF">
+		<on event="a start" run="port keys accept"/>
+		<on event="left" run="port keys left"/>
+		<on event="right" run="port keys right"/>
+		<child widget="ce/keys/label"/>
+		<child widget="ce/keys/key1"/>
+		<child widget="ce/keys/key2"/>
+	</widget>
+	<widget name="ce/keys/op_row4" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="#FF2896FF">
+		<on event="a start" run="port keys accept"/>
+		<on event="left" run="port keys left"/>
+		<on event="right" run="port keys right"/>
+		<child widget="ce/keys/label"/>
+		<child widget="ce/keys/key1"/>
+		<child widget="ce/keys/key2"/>
+	</widget>
+	<widget name="ce/keys/op_row5" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="#FF2896FF">
+		<on event="a start" run="port keys accept"/>
+		<on event="left" run="port keys left"/>
+		<on event="right" run="port keys right"/>
+		<child widget="ce/keys/label"/>
+		<child widget="ce/keys/key1"/>
+		<child widget="ce/keys/key2"/>
+	</widget>
+	<widget name="ce/keys/op_row6" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="#FF2896FF">
+		<on event="a start" run="port keys accept"/>
+		<on event="left" run="port keys left"/>
+		<on event="right" run="port keys right"/>
+		<child widget="ce/keys/label"/>
+		<child widget="ce/keys/key1"/>
+		<child widget="ce/keys/key2"/>
+	</widget>
+	<widget name="ce/keys/op_row7" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="#FF2896FF">
+		<on event="a start" run="port keys accept"/>
+		<on event="left" run="port keys left"/>
+		<on event="right" run="port keys right"/>
+		<child widget="ce/keys/label"/>
+		<child widget="ce/keys/key1"/>
+		<child widget="ce/keys/key2"/>
+	</widget>
+	<!-- SHOW: its value between Halo PC's small arrows -->
+	<widget name="ce/keys/group_label" type="text" width="200" height="22" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4" string_list="ce/keys_text" string_index="0"/>
+	<widget name="ce/keys/value" type="text" left="200" width="308" height="22" font="ui\large_ui" color="#FF2896FF" align="center" text_y="4" text_flags="no_focus_test"/>
+	<widget name="ce/keys/arrow_left" left="210" top="8" width="6" height="12" bitmap="arrow_sm_left"/>
+	<widget name="ce/keys/arrow_right" left="494" top="8" width="6" height="12" bitmap="arrow_sm_right"/>
+	<widget name="ce/keys/op_group" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="#FF2896FF">
+		<on event="a start right" run="port keys right"/>
+		<on event="left" run="port keys left"/>
+		<child widget="ce/keys/group_label"/>
+		<child widget="ce/keys/value"/>
+		<child widget="ce/keys/arrow_left"/>
+		<child widget="ce/keys/arrow_right"/>
+	</widget>
+	<widget name="ce/keys/op_reset" type="text" left="192" top="0" width="256" height="24" bitmap="text_button_background" string_list="ce/keys_text" string_index="1" font="ui\small_ui" color="#FFFFFFFF" align="center" text_y="2">
+		<on event="a start" run="port keys reset"/>
+	</widget>
+	<widget name="ce/keys/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port keys"/>
+		<child widget="ce/keys/op_group" x="54" y="73"/>
+		<child widget="ce/keys/op_row1" x="54" y="111"/>
+		<child widget="ce/keys/op_row2" x="54" y="135"/>
+		<child widget="ce/keys/op_row3" x="54" y="159"/>
+		<child widget="ce/keys/op_row4" x="54" y="183"/>
+		<child widget="ce/keys/op_row5" x="54" y="207"/>
+		<child widget="ce/keys/op_row6" x="54" y="231"/>
+		<child widget="ce/keys/op_row7" x="54" y="255"/>
+		<child widget="ce/keys/op_reset" y="290"/>
+	</widget>
+	<widget name="ce/keys/first" type="text" left="254" top="99" width="152" height="14" font="ui\small_ui" color="#FF8CC4FF" align="center" string_list="ce/keys_text" string_index="3"/>
+	<widget name="ce/keys/second" type="text" left="410" top="99" width="152" height="14" font="ui\small_ui" color="#FF8CC4FF" align="center" string_list="ce/keys_text" string_index="4"/>
+	<widget name="ce/keys/keys_status" type="text" left="68" top="322" width="520" height="40" font="ui\small_ui" color="#FFE5E500"/>
+	<widget name="ce/keys/keys_help" type="text" left="68" top="358" width="520" height="54" font="ui\large_ui" color="#FFFFFFFF"/>
+	<widget name="ce/keys/screen" flags="pass_unhandled_to_focused_child" bitmap="gradient">
+		<on event="created" run="port keys init"/>
+		<on event="deleted" run="port keys close"/>
+		<on event="b back" run="port keys back" back="true"/>
+		<on event="x" run="port keys clear"/>
+		<on event="y" run="port keys reset"/>
+		<child widget="ce/keys/header"/>
+		<child widget="ce/keys/first"/>
+		<child widget="ce/keys/second"/>
+		<child widget="ce/keys/list"/>
+		<child widget="ce/keys/keys_status"/>
+		<child widget="ce/keys/keys_help"/>
+		<child widget="ui\shell\main_menu\button_key"/>
+	</widget>
+</menus>

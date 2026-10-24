@@ -27,6 +27,7 @@ folder's own (tools/halo3_menu_art.py). -->
 		<string text="VIBRATION"/>
 		<string text="MODEL"/>
 		<string text="FLAMING HELMET"/>
+		<string text="KEYBOARD &amp; MOUSE"/>
 	</strings>
 	<!-- (the rows' help, in their order: menu_functions.c h3_custom_update) -->
 	<strings name="h3/custom_help">
@@ -41,6 +42,7 @@ folder's own (tools/halo3_menu_art.py). -->
 		<string text="The view levels itself as you move."/>
 		<string text="For a controller that vibrates (on a PC). The\nPS Vita has no vibration motor."/>
 		<string text="Testers: your blue flame. Everyone else's game\nchecks your signed proof before showing it."/>
+		<string text="This PC's keys and mouse buttons for each action,\nthe mouse's sensitivity and the rest (every profile)."/>
 	</strings>
 
 	<!-- the profiles first: SELECT PROFILE's screen, titled CUSTOMIZATION; a profile's Cross opens
@@ -191,6 +193,14 @@ folder's own (tools/halo3_menu_art.py). -->
 		<child widget="h3/custom/arrow_left"/>
 		<child widget="h3/custom/arrow_right"/>
 	</widget>
+	<!-- (KEYBOARD & MOUSE: the PC's keys, halo3/keys.xml; port keys entry hides it, and moves the
+	rows after it up, where there are none - the PS Vita) -->
+	<widget name="h3/custom/keys_label" type="text" left="0" top="0" width="336" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/custom_labels" string_index="11"/>
+	<widget name="h3/custom/op_keys" width="336" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<data input="port keys entry"/>
+		<on event="a start" open="h3/keys/screen"/>
+		<child widget="h3/custom/keys_label"/>
+	</widget>
 	<widget name="h3/custom/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<data input="port h3 custom"/>
 		<child widget="h3/custom/op_name" x="52" y="102"/>
@@ -203,7 +213,8 @@ folder's own (tools/halo3_menu_art.py). -->
 		<child widget="h3/custom/op_flight" x="52" y="242"/>
 		<child widget="h3/custom/op_autocenter" x="52" y="262"/>
 		<child widget="h3/custom/op_vibration" x="52" y="282"/>
-		<child widget="h3/custom/op_flame" x="52" y="302"/>
+		<child widget="h3/custom/op_keys" x="52" y="302"/>
+		<child widget="h3/custom/op_flame" x="52" y="322"/>
 	</widget>
 
 	<!-- THE SPARTAN PREVIEW: at the right, in the editor panel's window (h3/custom/panel), the
