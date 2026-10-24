@@ -19,6 +19,7 @@ matched case-insensitively, like the Xbox's FATX volumes.
 
 #include <ctype.h>
 #include <errno.h>
+#include <stdarg.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <sched.h>
@@ -30,6 +31,7 @@ matched case-insensitively, like the Xbox's FATX volumes.
 #ifdef HALO_VITA
 #include "vita_host.h"
 #endif
+#include "lang.h"
 #include "load_profile.h"
 #include "mcc_paths.h"
 
@@ -274,6 +276,10 @@ static void trim_separators(char *path)
 		path[strlen(path) - 1] = '\0';
 }
 
+#ifndef HALO_NOT_DESKTOP
+static int mcc_available_at_start(char *found);
+#endif
+
 const char *platform_data_root(void)
 {
 	static char root[MAX_PATH];
@@ -334,14 +340,34 @@ const char *platform_data_root(void)
 				}
 			}
 #ifndef HALO_NOT_DESKTOP
-			if (!has_maps(root) && executable_directory[0] && platform_offer_game_data(executable_directory) &&
-				has_maps(executable_directory))
+			if (!has_maps(root) && executable_directory[0])
 			{
-				snprintf(root, sizeof(root), "%s", executable_directory);
+				char mcc[MAX_PATH];
+
+				/* (no Xbox maps folder, but the player's Halo MCC: its
+				Halo CE files alone, no disc image asked for; the folder
+				next to the executable keeps the log, and an empty maps
+				folder there, which the game's start asks for) */
+				if (mcc_available_at_start(mcc))
+				{
+					char maps[MAX_PATH + 8];
+
+					platform_log("no maps/ folder: Halo MCC is at %s, the game plays its Halo CE files (no Xbox disc "
+						"image needed)", mcc);
+					snprintf(root, sizeof(root), "%s", executable_directory);
+					snprintf(maps, sizeof(maps), "%s/maps", executable_directory);
+					if (!has_maps(root) && posix_make_directory(maps) == 0)
+						platform_log("made an empty %s for the game's start (the maps are MCC's)", maps);
+				}
+				else if (platform_offer_game_data(executable_directory) && has_maps(executable_directory))
+				{
+					snprintf(root, sizeof(root), "%s", executable_directory);
+				}
 			}
 #endif
 			if (!has_maps(root))
-				platform_log("no maps/ folder found; set paths.data in config.toml to the folder that holds maps/");
+				platform_log("no maps/ folder found; set paths.data in config.toml to the folder that holds maps/, "
+					"or paths.content to Halo MCC's folder");
 		}
 		trim_separators(root);
 		platform_log("data root: %s (the game's log: debug.txt there)", root);
@@ -405,22 +431,43 @@ const char *platform_save_root(void)
 
 The Halo content folder (port/linux/game/mcc_content.c) is the player's own
 Halo: The Master Chief Collection folder, the one holding halo1 (halo2,
-halo3 ... beside it), which the game names d:\mcc\: paths.content
-(HALO_CONTENT_ROOT, the settings panel's, read anew when it changes; a
-halo1 folder named there stands for the folder holding it), else on the
-PS Vita the data root's mcc, else the first Steam library with MCC's
-folder (mcc_paths.c: each Steam's libraryfolders.vdf, and the Steam folder
-itself). It is the folder when it holds a game folder with maps in it (for
-now halo1). Looked for once, again when the setting changes or after
-platform_mcc_root_forget when none was found. Nothing in it is ever
-written: every call here that writes, makes, moves or deletes a file or
-folder refuses a path in it (platform_host_path_is_mcc). */
+halo3 ... beside it), which the game names d:\mcc\. Where it is, first
+found first taken (docs/mcc_cea_maps.md, "Where it looks"):
+1. paths.content (HALO_CONTENT_ROOT, the settings panel's, read anew when
+   it changes): "auto" or "" (the default) looks for it as below; "none"
+   (or "off") has none; a folder is taken (MCC's folder, its halo1,
+   halo1/maps or halo1/maps/custom_edition, or a Steam library holding
+   it). On a PC a folder named there that is gone, or holds no Halo CE map
+   of MCC's, is said in the log and MCC is looked for as with "auto"; the
+   PS Vita keeps it as it is (none found).
+2. the data root's mcc (the PS Vita's ux0:data/haloce-vita/mcc).
+3. (PC) Steam's libraries: on Linux the native Steam's, ~/.steam/steam's,
+   ~/.steam/root's, the Flatpak's and the Snap's folders, each with the
+   libraries its libraryfolders.vdf names; on Windows the folders the
+   registry, Program Files and each fixed drive say (win32_mcc.c), then
+   Steam's uninstall entry of MCC and the Xbox app's XboxGames folders.
+   The first MCC folder whose halo1/maps holds a stock map with MCC's
+   header (mcc_paths.c) is taken.
+It is only read: every call here that writes, makes, moves or deletes a
+file or folder refuses a path in it (platform_host_path_is_mcc). Looked
+for once, again when the setting changes or after platform_mcc_root_forget
+when none was found.
+
+The Xbox maps folder and the Halo content folder are not either/or: with
+both, the maps folder's files come first where both have one (its ui.map
+for the menus, mcc_content_menu_source_choose; its bitmaps.map, loc.map
+and sounds.map, platform_halo_pc_resource_map) and MCC's levels join the
+lists. A PC with no maps folder but MCC found starts with MCC's alone,
+without asking for an Xbox disc image (platform_data_root). */
 
 static pthread_mutex_t mcc_root_lock = PTHREAD_MUTEX_INITIALIZER;
 static char mcc_root[MAX_PATH];
 /* 0 not looked for, 1 found, -1 not found; and the setting it was found for */
 static int mcc_root_state;
 static char mcc_root_setting[MAX_PATH];
+/* (PC) whether the search found nothing with the setting "auto" (the main
+menu says so: platform_mcc_menu_notice) */
+static int mcc_root_missing;
 
 /* whether `path` is a content folder: a game folder of it has maps */
 static int mcc_root_valid(const char *path)
@@ -440,37 +487,6 @@ static int mcc_root_try(const char *path)
 	return 1;
 }
 
-#ifndef HALO_NOT_DESKTOP
-/* MCC's folder in a Steam folder's libraries, or in the folder itself */
-static int mcc_root_try_steam(const char *steam)
-{
-	char path[MCC_PATHS_BYTES + 64];
-	char halo1[MCC_PATHS_BYTES + 96];
-	static char folders[MCC_PATHS_MAXIMUM_LIBRARIES][MCC_PATHS_BYTES];
-	int count = 0, index;
-	FILE *stream;
-
-	if (!steam || !steam[0])
-		return 0;
-	snprintf(path, sizeof(path), "%s/steamapps/libraryfolders.vdf", steam);
-	stream = fopen(path, "rb");
-	if (stream)
-	{
-		static char text[65536];
-		size_t size = fread(text, 1, sizeof(text), stream);
-
-		fclose(stream);
-		count = mcc_paths_library_folders(text, (unsigned long)size, folders, MCC_PATHS_MAXIMUM_LIBRARIES);
-	}
-	for (index = 0; index <= count; index++)
-	{
-		if (mcc_paths_mcc(index < count ? folders[index] : steam, halo1, sizeof(halo1)) && mcc_root_try(halo1))
-			return 1;
-	}
-	return 0;
-}
-#endif
-
 static const char *mcc_root_setting_now(void)
 {
 	const char *setting = getenv("HALO_CONTENT_ROOT");
@@ -481,17 +497,77 @@ static const char *mcc_root_setting_now(void)
 	return setting && strcasecmp(setting, "auto") ? setting : "";
 }
 
+/* the setting "none" or "off": no content folder, none looked for */
+static int mcc_setting_none(const char *setting)
+{
+	return setting && (!strcasecmp(setting, "none") || !strcasecmp(setting, "off"));
+}
+
+#ifndef HALO_NOT_DESKTOP
+static void mcc_search_log(const char *format, ...)
+{
+	char line[1024];
+	va_list arguments;
+
+	va_start(arguments, format);
+	vsnprintf(line, sizeof(line), format, arguments);
+	va_end(arguments);
+	platform_log("%s", line);
+}
+
+/* (PC) MCC's folder where Steam and Windows keep it (mcc_paths.c), into
+`out` (MAX_PATH); nothing of the game's state is used, so that
+platform_data_root may ask it too */
+static int mcc_search_installed(char *out, int quiet)
+{
+	static char steams[MCC_PATHS_MAXIMUM_PLACES][MCC_PATHS_BYTES];
+	static char roots[MCC_PATHS_MAXIMUM_PLACES][MCC_PATHS_BYTES];
+	char found[MCC_PATHS_BYTES];
+	int steam_count = 0, root_count = 0;
+
+#ifdef _WIN32
+	mcc_paths_windows_places(steams, &steam_count, roots, &root_count, MCC_PATHS_MAXIMUM_PLACES);
+#else
+	steam_count = mcc_paths_linux_steam_folders(getenv("HOME"), steams, MCC_PATHS_MAXIMUM_PLACES);
+#endif
+	if (!mcc_paths_search(steams, steam_count, roots, root_count, found, quiet ? NULL : mcc_search_log))
+		return 0;
+	snprintf(out, MAX_PATH, "%s", found);
+	return 1;
+}
+#endif
+
 static void mcc_root_find(void)
 {
 	const char *setting = mcc_root_setting_now();
 	char path[MAX_PATH];
 
 	mcc_root[0] = 0;
+	mcc_root_missing = 0;
 	snprintf(mcc_root_setting, sizeof(mcc_root_setting), "%s", setting ? setting : "");
+	if (mcc_setting_none(setting))
+	{
+		mcc_root_state = -1;
+		platform_log("content: no Halo content folder (paths.content is \"%s\"): the Xbox maps alone", setting);
+		return;
+	}
 	if (setting && *setting)
 	{
 		const char *slash;
 
+#ifndef HALO_NOT_DESKTOP
+		/* (a PC: MCC's folder, its halo1, maps or custom_edition, or a
+		Steam library; one gone or not MCC's, the search instead) */
+		if (mcc_paths_root_of(setting, path, sizeof(path)) && mcc_root_try(path))
+		{
+			mcc_root_state = 1;
+			platform_log("content: the Halo content folder (paths.content): %s", mcc_root);
+			return;
+		}
+		platform_log("content: paths.content is %s, but no Halo MCC folder is there (gone, or no halo1/maps with "
+			"MCC's maps): looking for MCC by itself", setting);
+		goto search;
+#endif
 		/* (the player's: taken as it is, found or not; its halo1 folder
 		named, the folder holding it) */
 		snprintf(mcc_root, sizeof(mcc_root), "%s", setting);
@@ -504,39 +580,27 @@ static void mcc_root_find(void)
 			mcc_root_state > 0 ? "" : " (no halo1/maps there)");
 		return;
 	}
+#ifndef HALO_NOT_DESKTOP
+search:
+#endif
 	snprintf(path, sizeof(path), "%s/mcc", platform_data_root());
 	if (mcc_root_try(path))
 		goto found;
 #ifndef HALO_NOT_DESKTOP
-	{
-		const char *home = getenv("HOME");
-		static const char *const steam_folders[] =
-		{
-			".local/share/Steam", ".steam/steam", ".steam/root", ".var/app/com.valvesoftware.Steam/.local/share/Steam",
-		};
-		unsigned index;
-
-		for (index = 0; home && *home && index < sizeof(steam_folders) / sizeof(steam_folders[0]); index++)
-		{
-			snprintf(path, sizeof(path), "%s/%s", home, steam_folders[index]);
-			if (mcc_root_try_steam(path))
-				goto found;
-		}
+	if (mcc_search_installed(path, 0) && mcc_root_try(path))
+		goto found;
+	mcc_root_missing = 1;
+	platform_log("content: Halo MCC not found (paths.content; %s/mcc; Steam's libraries%s): the Xbox maps alone. "
+		"Set paths.content in config.toml to MCC's folder (the one with halo1 in it), or \"none\" not to look",
+		platform_data_root(),
 #ifdef _WIN32
-		{
-			const char *program_files = getenv("ProgramFiles(x86)");
-
-			if (program_files && *program_files)
-			{
-				snprintf(path, sizeof(path), "%s/Steam", program_files);
-				if (mcc_root_try_steam(path))
-					goto found;
-			}
-			if (mcc_root_try_steam("C:/Program Files (x86)/Steam") || mcc_root_try_steam("C:/Program Files/Steam"))
-				goto found;
-		}
+		", the registry, the Xbox app's XboxGames"
+#else
+		""
 #endif
-	}
+		);
+	mcc_root_state = -1;
+	return;
 #endif
 	mcc_root_state = -1;
 	platform_log("content: no Halo content folder (paths.content; %s/mcc; Steam's libraries): the Xbox maps alone",
@@ -545,6 +609,41 @@ static void mcc_root_find(void)
 found:
 	mcc_root_state = 1;
 	platform_log("content: the Halo content folder: %s", mcc_root);
+}
+
+/* (PC) whether a start with no maps folder may go on with MCC's files
+alone (platform_data_root): the setting's folder, or one found */
+#ifndef HALO_NOT_DESKTOP
+static int mcc_available_at_start(char *found)
+{
+	const char *setting = mcc_root_setting_now();
+
+	if (mcc_setting_none(setting))
+		return 0;
+	if (setting && *setting && mcc_paths_root_of(setting, found, MAX_PATH))
+		return 1;
+	return mcc_search_installed(found, 1);
+}
+#endif
+
+const char *platform_mcc_menu_notice(int short_form)
+{
+#ifndef HALO_NOT_DESKTOP
+	int missing;
+
+	if (!platform_mcc_root(NULL, 0))
+	{
+		pthread_mutex_lock(&mcc_root_lock);
+		missing = mcc_root_missing;
+		pthread_mutex_unlock(&mcc_root_lock);
+		if (missing)
+			return short_form ? T("Halo MCC not found") :
+				T("Halo MCC not found: set its folder in\nconfig.toml, paths.content (\"none\": don't look)");
+	}
+#else
+	(void)short_form;
+#endif
+	return NULL;
 }
 
 int platform_mcc_root(char *out, unsigned long out_size)

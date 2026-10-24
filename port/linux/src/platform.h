@@ -172,6 +172,11 @@ platform_xbox_path_write_refused: TRUE (and the error set, logged) for an
 Xbox path in it, which nothing may write, make, move or delete. */
 int platform_mcc_root(char *out, unsigned long out_size);
 void platform_mcc_root_forget(void);
+/* (port, PC) What the main menu says when paths.content is "auto" and no
+Halo MCC was found ("Halo MCC not found: set its folder in config.toml
+..."; `short_form` the build number corner's few words), translated; NULL
+when found, set otherwise, or on the PS Vita. */
+const char *platform_mcc_menu_notice(int short_form);
 int platform_host_path_is_mcc(const char *host_path);
 int platform_xbox_path_write_refused(const char *xbox_path);
 /* (port) The Halo PC resource map <name>.map (bitmaps, loc, sounds): the maps

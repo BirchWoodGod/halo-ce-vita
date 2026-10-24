@@ -4,7 +4,10 @@ MCC_CONTENT_TEST.C
 Halo CE content: MCC files, without any MCC file (run_mcc_content_test.sh):
 the names that are MCC's own maps (port/linux/game/mcc_content.c) and the
 halo1 folder of Steam's libraries (port/linux/src/mcc_paths.c), on made-up
-libraryfolders.vdf texts, malformed and cut short ones among them.
+libraryfolders.vdf texts, malformed and cut short ones among them; and the
+PC's search for MCC (mcc_paths_search, mcc_paths_root_of) on made-up Steam
+folders in a temporary folder of its own: a second library, the Flatpak's
+Steam, a link to Steam, a map without MCC's header, a gone folder.
 */
 
 #include "mcc_content.h"
@@ -13,6 +16,8 @@ libraryfolders.vdf texts, malformed and cut short ones among them.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 static int checks, failures;
 
@@ -199,12 +204,177 @@ static void test_menu_source(void)
 	CHECK(mcc_content_stem_kind("ui") == _mcc_content_none);
 }
 
+/* ---------- the PC's search, on made-up Steam folders */
+
+static char search_top[256];
+static int search_said;
+
+static void search_log(const char *format, ...)
+{
+	(void)format;
+	search_said++;
+}
+
+/* every folder along `path` (under search_top) made */
+static void folders_make(const char *path)
+{
+	char partial[1024];
+	unsigned long index;
+
+	snprintf(partial, sizeof(partial), "%s", path);
+	for (index = 1; partial[index]; index++)
+	{
+		if (partial[index] == '/')
+		{
+			partial[index] = 0;
+			mkdir(partial, 0755);
+			partial[index] = '/';
+		}
+	}
+	mkdir(partial, 0755);
+}
+
+/* a file at search_top/`relative`, its folders made; `version` 0: a text file */
+static void file_make(const char *relative, unsigned long version, const char *text)
+{
+	char path[1024];
+	char *slash;
+	FILE *stream;
+
+	snprintf(path, sizeof(path), "%s/%s", search_top, relative);
+	slash = strrchr(path, '/');
+	*slash = 0;
+	folders_make(path);
+	*slash = '/';
+	stream = fopen(path, "wb");
+	if (!stream)
+		return;
+	if (version)
+	{
+		unsigned char header[16] = { 'd', 'a', 'e', 'h' };
+
+		header[4] = (unsigned char)version;
+		fwrite(header, 1, sizeof(header), stream);
+	}
+	else
+		fputs(text, stream);
+	fclose(stream);
+}
+
+static int ends_with(const char *text, const char *end)
+{
+	unsigned long length = strlen(text), end_length = strlen(end);
+
+	return length >= end_length && !strcmp(text + length - end_length, end);
+}
+
+static void test_search(void)
+{
+	char steams[MCC_PATHS_MAXIMUM_PLACES][MCC_PATHS_BYTES];
+	char roots[2][MCC_PATHS_BYTES];
+	char found[MCC_PATHS_BYTES];
+	char home[512], path[1024], vdf[2048];
+	int count;
+
+	snprintf(search_top, sizeof(search_top), "%s/mcc_paths_test.XXXXXX", getenv("TMPDIR") ? getenv("TMPDIR") : "/tmp");
+	if (!mkdtemp(search_top))
+	{
+		CHECK(!"mkdtemp");
+		return;
+	}
+	snprintf(home, sizeof(home), "%s/home", search_top);
+
+	/* (the Steam folders of a Linux desktop, in their order) */
+	count = mcc_paths_linux_steam_folders(home, steams, MCC_PATHS_MAXIMUM_PLACES);
+	CHECK(count == 5 && ends_with(steams[0], "/home/.local/share/Steam") && ends_with(steams[1], "/home/.steam/steam") &&
+		ends_with(steams[2], "/home/.steam/root") &&
+		ends_with(steams[3], "/home/.var/app/com.valvesoftware.Steam/.local/share/Steam") &&
+		ends_with(steams[4], "/home/snap/steam/common/.local/share/Steam"));
+	CHECK(mcc_paths_linux_steam_folders("", steams, 4) == 0 && mcc_paths_linux_steam_folders(NULL, steams, 4) == 0);
+	CHECK(mcc_paths_linux_steam_folders("/h", steams, 2) == 2);
+
+	/* (no Steam at all: nothing, and nothing said found) */
+	count = mcc_paths_linux_steam_folders(home, steams, MCC_PATHS_MAXIMUM_PLACES);
+	CHECK(!mcc_paths_search(steams, count, NULL, 0, found, search_log) && !found[0]);
+
+	/* (Steam with MCC in a second library, its libraryfolders.vdf naming
+	the Steam folder first, which has no MCC) */
+	snprintf(vdf, sizeof(vdf), "\"libraryfolders\"\n{\n\t\"0\"\n\t{\n\t\t\"path\"\t\t\"%s/.local/share/Steam\"\n\t}\n"
+		"\t\"1\"\n\t{\n\t\t\"path\"\t\t\"%s/lib2\"\n\t\t\"apps\"\n\t\t{\n\t\t\t\"976730\"\t\t\"1\"\n\t\t}\n\t}\n}\n",
+		home, search_top);
+	file_make("home/.local/share/Steam/steamapps/libraryfolders.vdf", 0, vdf);
+	file_make("home/.local/share/Steam/steamapps/common/Other Game/x.txt", 0, "x");
+	file_make("lib2/steamapps/common/" MCC_PATHS_FOLDER_NAME "/halo1/maps/bloodgulch.map", 13, NULL);
+	search_said = 0;
+	CHECK(mcc_paths_search(steams, count, NULL, 0, found, search_log) &&
+		ends_with(found, "/lib2/steamapps/common/" MCC_PATHS_FOLDER_NAME) && search_said > 0);
+	CHECK(mcc_paths_search_steam(steams[0], found, NULL) && ends_with(found, "/lib2/steamapps/common/" MCC_PATHS_FOLDER_NAME));
+	/* (~/.steam/steam a link to it: looked at once, the same found) */
+	snprintf(path, sizeof(path), "%s/.steam", home);
+	folders_make(path);
+	snprintf(path, sizeof(path), "%s/.steam/steam", home);
+	CHECK(symlink("../.local/share/Steam", path) == 0);
+	CHECK(mcc_paths_search(steams, count, NULL, 0, found, NULL) && ends_with(found, "/lib2/steamapps/common/" MCC_PATHS_FOLDER_NAME));
+
+	/* (a map without MCC's header - Halo PC's version 7 - is not MCC's: the
+	next one is taken, here the Flatpak's Steam's own library) */
+	file_make("lib2/steamapps/common/" MCC_PATHS_FOLDER_NAME "/halo1/maps/bloodgulch.map", 7, NULL);
+	CHECK(!mcc_paths_halo1_valid(search_top, NULL));
+	snprintf(path, sizeof(path), "%s/lib2/steamapps/common/" MCC_PATHS_FOLDER_NAME, search_top);
+	CHECK(!mcc_paths_halo1_valid(path, NULL));
+	CHECK(!mcc_paths_search(steams, count, NULL, 0, found, NULL));
+	file_make("home/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/" MCC_PATHS_FOLDER_NAME
+		"/halo1/maps/a10.map", 13, NULL);
+	search_said = 0;
+	CHECK(mcc_paths_search(steams, count, NULL, 0, found, search_log) &&
+		ends_with(found, "/home/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/" MCC_PATHS_FOLDER_NAME));
+	/* (said: the map that was not MCC's, the one found) */
+	CHECK(search_said >= 2);
+	/* (a valid header later in the list counts: a10's, bloodgulch's not) */
+	CHECK(mcc_paths_halo1_valid(found, path) && ends_with(path, "/halo1/maps/a10.map"));
+
+	/* (MCC found otherwise, as Windows' uninstall entry says: after the
+	Steam folders, when they have none) */
+	file_make("other/MCC/halo1/maps/c10.map", 13, NULL);
+	snprintf(roots[0], MCC_PATHS_BYTES, "%s/gone", search_top);
+	snprintf(roots[1], MCC_PATHS_BYTES, "%s/other/MCC/", search_top);
+	CHECK(mcc_paths_search(steams, 1, roots, 2, found, NULL) && ends_with(found, "/other/MCC"));
+	CHECK(mcc_paths_search(steams, count, roots, 2, found, NULL) && ends_with(found, "/Steam/steamapps/common/" MCC_PATHS_FOLDER_NAME));
+
+	/* (paths.content: MCC's folder, its halo1, maps, custom_edition, a
+	Steam library, its steamapps, its common; a gone folder none) */
+	snprintf(path, sizeof(path), "%s/other/MCC", search_top);
+	CHECK(mcc_paths_root_of(path, found, sizeof(found)) && !strcmp(found, path));
+	snprintf(path, sizeof(path), "%s/other/MCC/halo1/", search_top);
+	CHECK(mcc_paths_root_of(path, found, sizeof(found)) && ends_with(found, "/other/MCC"));
+	snprintf(path, sizeof(path), "%s/other/MCC/halo1/maps", search_top);
+	CHECK(mcc_paths_root_of(path, found, sizeof(found)) && ends_with(found, "/other/MCC"));
+	snprintf(path, sizeof(path), "%s/other/MCC/halo1/maps/custom_edition", search_top);
+	CHECK(mcc_paths_root_of(path, found, sizeof(found)) && ends_with(found, "/other/MCC"));
+	snprintf(path, sizeof(path), "%s/home/.var/app/com.valvesoftware.Steam/.local/share/Steam", search_top);
+	CHECK(mcc_paths_root_of(path, found, sizeof(found)) && ends_with(found, "/steamapps/common/" MCC_PATHS_FOLDER_NAME));
+	snprintf(path, sizeof(path), "%s/home/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps", search_top);
+	CHECK(mcc_paths_root_of(path, found, sizeof(found)) && ends_with(found, "/steamapps/common/" MCC_PATHS_FOLDER_NAME));
+	snprintf(path, sizeof(path), "%s/home/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common", search_top);
+	CHECK(mcc_paths_root_of(path, found, sizeof(found)) && ends_with(found, "/steamapps/common/" MCC_PATHS_FOLDER_NAME));
+	snprintf(path, sizeof(path), "%s/gone/halo1/maps", search_top);
+	CHECK(!mcc_paths_root_of(path, found, sizeof(found)));
+	CHECK(!mcc_paths_root_of("", found, sizeof(found)) && !mcc_paths_root_of(NULL, found, sizeof(found)));
+	snprintf(path, sizeof(path), "%s/lib2", search_top);
+	CHECK(!mcc_paths_root_of(path, found, sizeof(found)));
+
+	/* (the temporary folder, this test's alone) */
+	snprintf(path, sizeof(path), "rm -rf '%s'", search_top);
+	CHECK(system(path) == 0);
+}
+
 int main(void)
 {
 	test_names();
 	test_menu_source();
 	test_loaders();
 	test_library_folders();
+	test_search();
 	printf("mcc_content_test: %d/%d checks passed\n", checks - failures, checks);
 	return failures != 0;
 }
