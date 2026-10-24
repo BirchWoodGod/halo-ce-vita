@@ -114,6 +114,7 @@ left, a cool rim from behind, a soft ambient.
 #include "units/unit_definitions.h"
 #include "units/biped_definitions.h"
 #include "items/weapon_definitions.h"
+#include "items/items.h"
 #include "models/model_animation_definitions.h"
 #include "interface/player_ui.h"
 #include "saved games/player_profile.h"
@@ -1357,6 +1358,20 @@ static boolean object_hold(struct menu_scene_object *object, short slot)
 		datum->object.translational_velocity.i = datum->object.translational_velocity.j =
 			datum->object.translational_velocity.k = 0.f;
 		datum->object.angular_velocity.i = datum->object.angular_velocity.j = datum->object.angular_velocity.k = 0.f;
+		/* (a weapon or a powerup standing alone - the Forge lobby's sniper
+		rifle leaning on the Warthog, the camouflage on the ground -: at rest,
+		its spin gone, so that the tick's item physics leaves it where it
+		stands - it fell and turned a little each tick, and was put back each
+		frame: it shook) */
+		{
+			struct item_datum *item = item_try_and_get(object->object_index);
+
+			if (item)
+			{
+				SET_FLAG(item->object.flags, _object_at_rest_bit, TRUE);
+				item->item.flags &= ~FLAG(_item_has_nonzero_angular_velocity_bit);
+			}
+		}
 	}
 	if (unit)
 	{
