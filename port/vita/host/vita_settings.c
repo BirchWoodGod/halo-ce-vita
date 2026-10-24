@@ -582,7 +582,9 @@ static struct setting settings[] = {
 	animated Halo ring - port/vita/app0/menus/halo3, menu_tags.c, which
 	reads it each time a screen opens: live) */
 	PAGE_ROW("Menus", "Menu style, the carnage report and scoreboard", TAB_GAME, PAGE_MENUS),
-	{ "Menu style", "HALO_MENU_STYLE", 0, 2, { "classic", "halo3" }, { "Halo CE", "Halo 3" },
+	/* (Online: the Halo 3 menus' flows in the online set's look,
+	port/vita/app0/menus/online - a prototype, menu_tags.c menu_tags_online) */
+	{ "Menu style", "HALO_MENU_STYLE", 0, 3, { "classic", "halo3", "online" }, { "Halo CE", "Halo 3", "Online" },
 		"Halo 3: the new menus over the Halo ring. Halo CE: the original menus.", 1, PAGE_MENUS },
 	/* (menu_functions.c h3_carnage_wanted, config.toml's menus.carnage_report:
 	a multiplayer game's end, Halo 3's CARNAGE REPORT or the game's own;
@@ -4632,6 +4634,14 @@ static int classic_panel_fits(const char *text)
 	return last + 22 <= 468;
 }
 
+/* Menu style Online: its panel (vita_gxm.c online_panel) */
+static int online_panel_style(void)
+{
+	const struct setting *style = setting_named("HALO_MENU_STYLE");
+
+	return style && !strcmp(style->values[style->choice], "online");
+}
+
 /* the Halo CE menus chosen (Menu style): the classic panel draws the
 settings (vita_gxm.c, halo_menu_style_halo3) */
 static int classic_panel(void)
@@ -4832,6 +4842,11 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 				/* (a row that applies after a restart: marked *) */
 				length += snprintf(text + length, (size_t)(size - length), "\n%s%s\x02%c %s %c", setting_label(setting),
 					setting->restart ? "*" : "", before ? '<' : ' ', setting_value_name(setting), after ? '>' : ' ');
+				/* (Menu style Online: where the choice stands among them,
+				'\x0b' choice/last, for its panel's slider: vita_gxm.c
+				online_panel; the other panels never see it) */
+				if (online_panel_style() && last > 0)
+					length += snprintf(text + length, (size_t)(size - length), "\x0b%d/%d", setting->choice, last);
 				/* (the choices this build does not offer, greyed out after a
 				'\x07', after the arrow's place: vita_gxm.c menu_row) */
 				for (choice = 0; choice <= last && length < size; choice++)

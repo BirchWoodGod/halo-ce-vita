@@ -1151,6 +1151,15 @@ int halo_menu_style_halo3(void)
 	return !style || strcmp(style, "classic") != 0;
 }
 
+/* (Menu style Online: the Halo 3 set's flows, menus/online's screens in
+place of those it has, menu_tags.c menu_tags_online) */
+int halo_menu_style_online(void)
+{
+	char const *style = getenv("HALO_MENU_STYLE");
+
+	return style && strcmp(style, "online") == 0;
+}
+
 struct halo_menus const *halo_menus_load(void)
 {
 	struct halo_menus const *result;

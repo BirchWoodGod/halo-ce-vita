@@ -1,0 +1,424 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Menu style Online (a preview): the multiplayer lobby and its pickers (SELECT NETWORK, SELECT MAP,
+SELECT GAME TYPE). They open in place of the Halo 3 lobby's (h3/mp/screen and the others:
+menu_tags.c menu_tags_online) and are the same widgets - every row, handler and data input of
+halo3/multiplayer.xml, the same names (made from it by a script) - laid out the online way: the
+title over a see-through navy column at the left (the rows, the network's status, Ready, the map's
+picture and "<game> on <map>", the buttons at its foot), the players, the party and the friends at
+the wide screen's right; the pickers a band with the title, the list at the left on the orange bar
+and the map's picture and description in a card at the right. The art is this folder's own
+(tools/online_menu_art.py) and the Halo 3 set's. -->
+<menus>
+	<bitmap name="online/panel">
+		<frame png="online/panel.png" width="64" height="64" />
+	</bitmap>
+	<bitmap name="online/card">
+		<frame png="online/card.png" width="64" height="64" />
+	</bitmap>
+	<widget name="online/mp/network_row" type="text" width="292" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2">
+		<on event="a" open="online/network/screen" />
+	</widget>
+	<widget name="online/mp/game_row" type="text" width="292" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2">
+		<on event="a" open="online/gametype/screen" />
+	</widget>
+	<widget name="online/mp/map_row" type="text" width="292" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2">
+		<on event="a" open="online/map/screen" />
+	</widget>
+	<widget name="online/mp/start_online" type="text" width="292" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="h3/mp_text" string_index="1">
+		<on event="a start" run="port h3 host online" />
+		<on event="a start" run="port mp require online" open="ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen" otherwise="h3/mp/offline" />
+	</widget>
+	<widget name="online/mp/start_link" type="text" width="292" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="h3/mp_text" string_index="1">
+		<on event="a start" run="port h3 host system link" />
+		<on event="a start" run="error if no network connection" open="ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen" />
+	</widget>
+	<widget name="online/mp/start_adhoc" type="text" width="292" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="h3/mp_text" string_index="1">
+		<on event="a start" run="port h3 adhoc host" otherwise="h3/adhoc/joining" />
+		<on event="a start" run="error if no network connection" open="ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen" />
+	</widget>
+	<widget name="online/mp/start_offline" type="text" width="292" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="h3/mp_text" string_index="1">
+		<on event="a start" run="port h3 mp offline start" open="ui\shell\main_menu\multiplayer_type_select\split_screen\4way_profile_select\4way_start2join_screen" />
+	</widget>
+	<widget name="online/mp/edit_row" type="text" width="292" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="h3/mp_text" string_index="4">
+		<on event="a start" open="ui\shell\main_menu\settings_select\multiplayer_setup\playlist_select\gametype_select_screen" />
+	</widget>
+	<widget name="online/mp/browse_online" type="text" width="292" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="h3/mp_text" string_index="2">
+		<on event="a start" run="port h3 browse system link" />
+		<on event="a start" run="error if no network connection" open="ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen" />
+	</widget>
+	<widget name="online/mp/browse_link" type="text" width="292" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="h3/mp_text" string_index="2">
+		<on event="a start" run="port h3 browse system link" />
+		<on event="a start" run="error if no network connection" open="ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen" />
+	</widget>
+	<widget name="online/mp/browse_adhoc" type="text" width="292" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="h3/mp_text" string_index="2">
+		<on event="a start" run="port h3 adhoc browse" otherwise="h3/adhoc/joining" />
+		<on event="a start" run="error if no network connection" open="ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen" />
+	</widget>
+	<widget name="online/mp/code_row" type="text" width="292" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="h3/mp_text" string_index="3">
+		<on event="a start" run="port mp require online" open="h3/code/screen" otherwise="h3/mp/offline" />
+	</widget>
+	<widget name="online/mp/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<on event="y" open="h3/friends/screen" />
+		<on event="x" run="port h3 game options" />
+		<on event="left_trigger" run="port h3 invite ask" open="h3/invite/screen" />
+		<child widget="online/mp/network_row" x="0" y="0" />
+		<child widget="online/mp/game_row" x="0" y="36" />
+		<child widget="online/mp/map_row" x="0" y="55" />
+		<child widget="online/mp/start_online" x="0" y="80" />
+		<child widget="online/mp/start_link" x="0" y="80" />
+		<child widget="online/mp/start_adhoc" x="0" y="80" />
+		<child widget="online/mp/start_offline" x="0" y="80" />
+		<child widget="online/mp/edit_row" x="0" y="99" />
+		<child widget="online/mp/browse_online" x="0" y="118" />
+		<child widget="online/mp/browse_link" x="0" y="118" />
+		<child widget="online/mp/browse_adhoc" x="0" y="118" />
+		<child widget="online/mp/code_row" x="0" y="137" />
+	</widget>
+	<widget name="online/mp/network_status" type="text" left="-48" top="74" width="280" height="14" font="h3/font_small" color="#FF9FB6CC">
+		<data input="port h3 network status" />
+	</widget>
+	<widget name="online/mp/panel" left="-66" top="50" width="304" height="398" bitmap="online/panel" />
+	<widget name="online/mp/band" left="-66" top="228" width="304" height="2" bitmap="online/rule" />
+	<widget name="online/mp/title" type="text" left="-62" top="12" width="400" height="34" font="online/font_header" color="#FFF2F6FA" text_y="1" string_list="h3/mp_text" string_index="0" />
+	<widget name="online/mp/ready" type="text" left="-56" top="234" width="290" height="18" font="h3/font_item" color="#FFE6ECF2" text_y="1" />
+	<widget name="online/mp/ready_sub" type="text" left="-56" top="252" width="290" height="34" font="h3/font_small" color="#FF9FB6CC" text_y="1" />
+	<widget name="online/mp/map_picture" left="-56" top="290" width="140" height="114" bitmap="ui\shell\bitmaps\mp_map_grafix" />
+	<widget name="online/mp/caption" type="text" left="-56" top="418" width="290" height="24" font="h3/font_item" color="#FFEEF2F6" text_y="1" />
+	<widget name="online/mp/foot" left="-66" top="448" width="304" height="26" bitmap="online/footer" />
+	<widget name="online/mp/a_butn" left="-56" top="453" width="16" height="16" bitmap="h3/glyph_cross" />
+	<widget name="online/mp/select" type="text" left="-36" top="452" width="60" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/campaign_text" string_index="5" />
+	<widget name="online/mp/b_butn" left="24" top="453" width="16" height="16" bitmap="h3/glyph_circle" />
+	<widget name="online/mp/back" type="text" left="44" top="452" width="54" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/main_items" string_index="10" />
+	<widget name="online/mp/x_butn" left="98" top="453" width="16" height="16" bitmap="h3/glyph_square" />
+	<widget name="online/mp/options" type="text" left="118" top="452" width="60" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/mp_text" string_index="28" />
+	<widget name="online/mp/players" type="text" left="470" top="14" width="270" height="16" font="h3/font_small" color="#FFEEF2F6" />
+	<widget name="online/mp/l_butn" left="600" top="452" width="16" height="16" bitmap="h3/glyph_l" />
+	<widget name="online/mp/invite" type="text" left="620" top="451" width="112" height="18" font="h3/font_small" color="#FFEEF2F6" text_y="2" string_list="h3/mp_text" string_index="29" />
+	<widget name="online/lobby/friends/lobby_panel">
+		<data input="port h3 friends panel" />
+		<child widget="online/lobby/friends/lobby_title" />
+		<child widget="online/lobby/friends/lobby_count" />
+		<child widget="online/lobby/friends/lobby_rule" />
+		<child widget="online/lobby/friends/lobby_status" />
+		<child widget="online/lobby/friends/lobby_name_1" />
+		<child widget="online/lobby/friends/lobby_state_1" />
+		<child widget="online/lobby/friends/lobby_name_2" />
+		<child widget="online/lobby/friends/lobby_state_2" />
+		<child widget="online/lobby/friends/lobby_name_3" />
+		<child widget="online/lobby/friends/lobby_state_3" />
+		<child widget="online/lobby/friends/lobby_name_4" />
+		<child widget="online/lobby/friends/lobby_state_4" />
+		<child widget="online/lobby/friends/lobby_name_5" />
+		<child widget="online/lobby/friends/lobby_state_5" />
+		<child widget="online/lobby/friends/lobby_y_butn" />
+		<child widget="online/lobby/friends/lobby_hint" />
+	</widget>
+	<widget name="online/lobby/friends/lobby_title" type="text" left="480" top="300" width="120" height="16" font="h3/font_small" color="#FF9FB6CC" text_y="1" string_list="h3/friends_text" string_index="0" />
+	<widget name="online/lobby/friends/lobby_count" type="text" left="600" top="300" width="132" height="16" align="right" font="h3/font_small" color="#FF9FB6CC" text_y="1" />
+	<widget name="online/lobby/friends/lobby_rule" left="480" top="318" width="252" height="2" bitmap="h3/rule" />
+	<widget name="online/lobby/friends/lobby_status" type="text" left="480" top="322" width="252" height="34" font="h3/font_small" color="#FFC5D0DD" text_y="1" />
+	<widget name="online/lobby/friends/lobby_name_1" type="text" left="480" top="322" width="108" height="16" font="h3/font_small" color="#FFEEF2F6" text_y="1" />
+	<widget name="online/lobby/friends/lobby_state_1" type="text" left="590" top="322" width="142" height="16" font="h3/font_small" color="#FFC5D0DD" text_y="1" />
+	<widget name="online/lobby/friends/lobby_name_2" type="text" left="480" top="338" width="108" height="16" font="h3/font_small" color="#FFEEF2F6" text_y="1" />
+	<widget name="online/lobby/friends/lobby_state_2" type="text" left="590" top="338" width="142" height="16" font="h3/font_small" color="#FFC5D0DD" text_y="1" />
+	<widget name="online/lobby/friends/lobby_name_3" type="text" left="480" top="354" width="108" height="16" font="h3/font_small" color="#FFEEF2F6" text_y="1" />
+	<widget name="online/lobby/friends/lobby_state_3" type="text" left="590" top="354" width="142" height="16" font="h3/font_small" color="#FFC5D0DD" text_y="1" />
+	<widget name="online/lobby/friends/lobby_name_4" type="text" left="480" top="370" width="108" height="16" font="h3/font_small" color="#FFEEF2F6" text_y="1" />
+	<widget name="online/lobby/friends/lobby_state_4" type="text" left="590" top="370" width="142" height="16" font="h3/font_small" color="#FFC5D0DD" text_y="1" />
+	<widget name="online/lobby/friends/lobby_name_5" type="text" left="480" top="386" width="108" height="16" font="h3/font_small" color="#FFEEF2F6" text_y="1" />
+	<widget name="online/lobby/friends/lobby_state_5" type="text" left="590" top="386" width="142" height="16" font="h3/font_small" color="#FFC5D0DD" text_y="1" />
+	<widget name="online/lobby/friends/lobby_y_butn" left="480" top="410" width="16" height="16" bitmap="h3/glyph_triangle" />
+	<widget name="online/lobby/friends/lobby_hint" type="text" left="500" top="409" width="232" height="18" font="h3/font_small" color="#FFEEF2F6" text_y="2" string_list="h3/friends_text" string_index="6" />
+	<widget name="online/lobby/main/nameplate" type="text" left="480" top="38" width="256" height="16" bitmap="h3/nameplate" font="h3/font_small" color="#FF10220A" text_x="22" text_y="0">
+		<data input="port h3 nameplate" />
+	</widget>
+	<widget name="online/lobby/main/party_plates">
+		<data input="port h3 party plates" />
+		<child widget="online/lobby/main/party_self_tag" />
+		<child widget="online/lobby/main/party_plate_1" />
+		<child widget="online/lobby/main/party_plate_2" />
+		<child widget="online/lobby/main/party_plate_3" />
+		<child widget="online/lobby/main/party_plate_4" />
+		<child widget="online/lobby/main/party_plate_5" />
+		<child widget="online/lobby/main/party_plate_6" />
+		<child widget="online/lobby/main/party_plate_7" />
+	</widget>
+	<widget name="online/lobby/main/party_self_tag" type="text" left="648" top="38" width="84" height="16" font="h3/font_small" color="#FF10220A" align="right" />
+	<widget name="online/lobby/main/party_plate_1" left="480" top="56" width="256" height="16" bitmap="h3/nameplate">
+		<child widget="online/lobby/main/party_name_1" />
+		<child widget="online/lobby/main/party_tag_1" />
+	</widget>
+	<widget name="online/lobby/main/party_name_1" type="text" left="502" top="56" width="146" height="16" font="h3/font_small" color="#FF10220A" />
+	<widget name="online/lobby/main/party_tag_1" type="text" left="648" top="56" width="84" height="16" font="h3/font_small" color="#FF10220A" align="right" />
+	<widget name="online/lobby/main/party_plate_2" left="480" top="74" width="256" height="16" bitmap="h3/nameplate">
+		<child widget="online/lobby/main/party_name_2" />
+		<child widget="online/lobby/main/party_tag_2" />
+	</widget>
+	<widget name="online/lobby/main/party_name_2" type="text" left="502" top="74" width="146" height="16" font="h3/font_small" color="#FF10220A" />
+	<widget name="online/lobby/main/party_tag_2" type="text" left="648" top="74" width="84" height="16" font="h3/font_small" color="#FF10220A" align="right" />
+	<widget name="online/lobby/main/party_plate_3" left="480" top="92" width="256" height="16" bitmap="h3/nameplate">
+		<child widget="online/lobby/main/party_name_3" />
+		<child widget="online/lobby/main/party_tag_3" />
+	</widget>
+	<widget name="online/lobby/main/party_name_3" type="text" left="502" top="92" width="146" height="16" font="h3/font_small" color="#FF10220A" />
+	<widget name="online/lobby/main/party_tag_3" type="text" left="648" top="92" width="84" height="16" font="h3/font_small" color="#FF10220A" align="right" />
+	<widget name="online/lobby/main/party_plate_4" left="480" top="110" width="256" height="16" bitmap="h3/nameplate">
+		<child widget="online/lobby/main/party_name_4" />
+		<child widget="online/lobby/main/party_tag_4" />
+	</widget>
+	<widget name="online/lobby/main/party_name_4" type="text" left="502" top="110" width="146" height="16" font="h3/font_small" color="#FF10220A" />
+	<widget name="online/lobby/main/party_tag_4" type="text" left="648" top="110" width="84" height="16" font="h3/font_small" color="#FF10220A" align="right" />
+	<widget name="online/lobby/main/party_plate_5" left="480" top="128" width="256" height="16" bitmap="h3/nameplate">
+		<child widget="online/lobby/main/party_name_5" />
+		<child widget="online/lobby/main/party_tag_5" />
+	</widget>
+	<widget name="online/lobby/main/party_name_5" type="text" left="502" top="128" width="146" height="16" font="h3/font_small" color="#FF10220A" />
+	<widget name="online/lobby/main/party_tag_5" type="text" left="648" top="128" width="84" height="16" font="h3/font_small" color="#FF10220A" align="right" />
+	<widget name="online/lobby/main/party_plate_6" left="480" top="146" width="256" height="16" bitmap="h3/nameplate">
+		<child widget="online/lobby/main/party_name_6" />
+		<child widget="online/lobby/main/party_tag_6" />
+	</widget>
+	<widget name="online/lobby/main/party_name_6" type="text" left="502" top="146" width="146" height="16" font="h3/font_small" color="#FF10220A" />
+	<widget name="online/lobby/main/party_tag_6" type="text" left="648" top="146" width="84" height="16" font="h3/font_small" color="#FF10220A" align="right" />
+	<widget name="online/lobby/main/party_plate_7" left="480" top="164" width="256" height="16" bitmap="h3/nameplate">
+		<child widget="online/lobby/main/party_name_7" />
+		<child widget="online/lobby/main/party_tag_7" />
+	</widget>
+	<widget name="online/lobby/main/party_name_7" type="text" left="502" top="164" width="146" height="16" font="h3/font_small" color="#FF10220A" />
+	<widget name="online/lobby/main/party_tag_7" type="text" left="648" top="164" width="84" height="16" font="h3/font_small" color="#FF10220A" align="right" />
+	<widget name="online/mp/screen" flags="pass_unhandled_to_focused_child" scene="multiplayer -40 -1.8 15.5 0 0 0 55" scene_object="menu_multiplayer:cyborg_mp 2.3 0.1 -0.2 45 pitch=-10 color=0 weapon=rocket_launcher anim=airborne frame=20;    menu_multiplayer:cyborg_mp 3.2 0.75 -0.76 0 color=0 weapon=flag;    menu_multiplayer:cyborg_mp 2.3 0.98 -0.66 -40 color=0 weapon=sniper_rifle anim=idle stance=crouch">
+		<on event="created" run="mp type menu initialize" />
+		<on event="created" run="port mp screen init" />
+		<on event="created" run="port h3 mp init" />
+		<on event="created" run="port h3 scene" />
+		<on event="b back" run="port h3 live leave" />
+		<on event="b back" back="true" />
+		<data input="port h3 mp lobby" />
+		<child widget="online/main/haze" />
+		<child widget="online/mp/panel" />
+		<child widget="online/mp/band" />
+		<child widget="online/mp/foot" />
+		<child widget="online/mp/title" />
+		<child widget="online/mp/ready" />
+		<child widget="online/mp/ready_sub" />
+		<child widget="online/mp/map_picture" />
+		<child widget="online/mp/caption" />
+		<child widget="online/mp/a_butn" />
+		<child widget="online/mp/select" />
+		<child widget="online/mp/b_butn" />
+		<child widget="online/mp/back" />
+		<child widget="online/mp/x_butn" />
+		<child widget="online/mp/options" />
+		<child widget="online/mp/players" />
+		<child widget="online/lobby/friends/lobby_panel" />
+		<child widget="online/mp/l_butn" />
+		<child widget="online/mp/invite" />
+		<child widget="online/mp/network_status" />
+		<child widget="online/lobby/main/nameplate" />
+		<child widget="online/lobby/main/party_plates" />
+		<child widget="h3/pregame/row_1" x="480" y="38" />
+		<child widget="h3/pregame/row_2" x="480" y="56" />
+		<child widget="h3/pregame/row_3" x="480" y="74" />
+		<child widget="h3/pregame/row_4" x="480" y="92" />
+		<child widget="h3/pregame/row_5" x="480" y="110" />
+		<child widget="h3/pregame/row_6" x="480" y="128" />
+		<child widget="h3/pregame/row_7" x="480" y="146" />
+		<child widget="h3/pregame/row_8" x="480" y="164" />
+		<child widget="online/mp/list" x="-60" y="54" />
+	</widget>
+	<widget name="online/pick/header" left="0" top="0" width="640" height="64" bitmap="online/header" />
+	<widget name="online/pick/panel" left="-48" top="72" width="330" height="370" bitmap="online/panel" />
+	<widget name="online/pick/card" left="318" top="72" width="290" height="300" bitmap="online/card" />
+	<widget name="online/pick/foot" left="0" top="446" width="640" height="34" bitmap="online/footer" />
+	<widget name="online/pick/a_butn" left="-40" top="455" width="16" height="16" bitmap="h3/glyph_cross" />
+	<widget name="online/pick/select" type="text" left="-20" top="454" width="70" height="18" font="h3/font_item" color="#FFF0F4F8" text_y="1" string_list="h3/campaign_text" string_index="5" />
+	<widget name="online/pick/b_butn" left="50" top="455" width="16" height="16" bitmap="h3/glyph_circle" />
+	<widget name="online/pick/back" type="text" left="70" top="454" width="70" height="18" font="h3/font_item" color="#FFF0F4F8" text_y="1" string_list="h3/main_items" string_index="10" />
+	<widget name="online/network/item_0" type="text" width="310" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="h3/networks" string_index="0">
+		<on event="a" run="port h3 network set" back="true" />
+	</widget>
+	<widget name="online/network/item_1" type="text" width="310" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="h3/networks" string_index="1">
+		<on event="a" run="port h3 network set" back="true" />
+	</widget>
+	<widget name="online/network/item_2" type="text" width="310" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="h3/networks" string_index="2">
+		<on event="a" run="port h3 network set" back="true" />
+	</widget>
+	<widget name="online/network/item_3" type="text" width="310" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="h3/networks" string_index="3">
+		<on event="a" run="port h3 network set" back="true" />
+	</widget>
+	<widget name="online/network/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<on event="created" run="port h3 network focus" />
+		<data input="port h3 networks" />
+		<child widget="online/network/item_0" y="0" />
+		<child widget="online/network/item_1" y="19" />
+		<child widget="online/network/item_2" y="38" />
+		<child widget="online/network/item_3" y="57" />
+	</widget>
+	<widget name="online/network/title" type="text" left="-40" top="14" width="400" height="34" font="online/font_header" color="#FFF2F6FA" text_y="1" string_list="h3/mp_text" string_index="5" />
+	<widget name="online/network/network_text" type="text" left="330" top="84" width="266" height="190" font="h3/font_small" color="#FFCFD9E3" string_list="h3/network_text" />
+	<widget name="online/network/screen" flags="pass_unhandled_to_focused_child">
+		<on event="b back" back="true" />
+		<child widget="online/main/haze" />
+		<child widget="online/pick/header" />
+		<child widget="online/pick/card" />
+		<child widget="online/pick/foot" />
+		<child widget="online/pick/panel" />
+		<child widget="online/network/title" />
+		<child widget="online/network/network_text" />
+		<child widget="online/pick/a_butn" />
+		<child widget="online/pick/select" />
+		<child widget="online/pick/b_butn" />
+		<child widget="online/pick/back" />
+		<child widget="online/network/list" x="-40" y="80" />
+	</widget>
+	<widget name="online/map/item_0" type="text" width="310" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2">
+		<on event="a" run="port h3 map set" back="true" />
+	</widget>
+	<widget name="online/map/item_1" type="text" width="310" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2">
+		<on event="a" run="port h3 map set" back="true" />
+	</widget>
+	<widget name="online/map/item_2" type="text" width="310" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2">
+		<on event="a" run="port h3 map set" back="true" />
+	</widget>
+	<widget name="online/map/item_3" type="text" width="310" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2">
+		<on event="a" run="port h3 map set" back="true" />
+	</widget>
+	<widget name="online/map/item_4" type="text" width="310" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2">
+		<on event="a" run="port h3 map set" back="true" />
+	</widget>
+	<widget name="online/map/item_5" type="text" width="310" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2">
+		<on event="a" run="port h3 map set" back="true" />
+	</widget>
+	<widget name="online/map/item_6" type="text" width="310" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2">
+		<on event="a" run="port h3 map set" back="true" />
+	</widget>
+	<widget name="online/map/item_7" type="text" width="310" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2">
+		<on event="a" run="port h3 map set" back="true" />
+	</widget>
+	<widget name="online/map/item_8" type="text" width="310" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2">
+		<on event="a" run="port h3 map set" back="true" />
+	</widget>
+	<widget name="online/map/item_9" type="text" width="310" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2">
+		<on event="a" run="port h3 map set" back="true" />
+	</widget>
+	<widget name="online/map/item_10" type="text" width="310" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2">
+		<on event="a" run="port h3 map set" back="true" />
+	</widget>
+	<widget name="online/map/item_11" type="text" width="310" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2">
+		<on event="a" run="port h3 map set" back="true" />
+	</widget>
+	<widget name="online/map/item_12" type="text" width="310" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2">
+		<on event="a" run="port h3 map set" back="true" />
+	</widget>
+	<widget name="online/map/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<on event="created" run="port h3 map focus" />
+		<on event="left_trigger" run="port h3 map page up" />
+		<on event="right_trigger" run="port h3 map page down" />
+		<data input="port h3 maps" />
+		<child widget="online/map/item_0" y="0" />
+		<child widget="online/map/item_1" y="19" />
+		<child widget="online/map/item_2" y="38" />
+		<child widget="online/map/item_3" y="57" />
+		<child widget="online/map/item_4" y="76" />
+		<child widget="online/map/item_5" y="95" />
+		<child widget="online/map/item_6" y="114" />
+		<child widget="online/map/item_7" y="133" />
+		<child widget="online/map/item_8" y="152" />
+		<child widget="online/map/item_9" y="171" />
+		<child widget="online/map/item_10" y="190" />
+		<child widget="online/map/item_11" y="209" />
+		<child widget="online/map/item_12" y="228" />
+	</widget>
+	<widget name="online/map/title" type="text" left="-40" top="14" width="400" height="34" font="online/font_header" color="#FFF2F6FA" text_y="1" string_list="h3/mp_text" string_index="6" />
+	<widget name="online/map/map_picture" left="330" top="84" width="140" height="114" bitmap="ui\shell\bitmaps\mp_map_grafix" />
+	<widget name="online/map/map_text" type="text" left="330" top="208" width="266" height="190" font="h3/font_small" color="#FFCFD9E3" string_list="ui\shell\main_menu\multiplayer_type_select\mp_map_select\map_data" />
+	<widget name="online/map/map_why" type="text" left="330" top="208" width="266" height="190" font="h3/font_small" color="#FFCFD9E3" />
+	<widget name="online/map/screen" flags="pass_unhandled_to_focused_child">
+		<on event="b back" run="port h3 maps back" back="true" />
+		<child widget="online/main/haze" />
+		<child widget="online/pick/header" />
+		<child widget="online/pick/card" />
+		<child widget="online/pick/foot" />
+		<child widget="online/pick/panel" />
+		<child widget="online/map/title" />
+		<child widget="online/map/map_picture" />
+		<child widget="online/map/map_text" />
+		<child widget="online/map/map_why" />
+		<child widget="online/pick/a_butn" />
+		<child widget="online/pick/select" />
+		<child widget="online/pick/b_butn" />
+		<child widget="online/pick/back" />
+		<child widget="online/map/list" x="-40" y="80" />
+	</widget>
+	<widget name="online/gametype/item_1" type="text" width="310" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2">
+		<on event="a" run="port h3 gametype set" back="true" />
+	</widget>
+	<widget name="online/gametype/item_2" type="text" width="310" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2">
+		<on event="a" run="port h3 gametype set" back="true" />
+	</widget>
+	<widget name="online/gametype/item_3" type="text" width="310" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2">
+		<on event="a" run="port h3 gametype set" back="true" />
+	</widget>
+	<widget name="online/gametype/item_4" type="text" width="310" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2">
+		<on event="a" run="port h3 gametype set" back="true" />
+	</widget>
+	<widget name="online/gametype/item_5" type="text" width="310" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2">
+		<on event="a" run="port h3 gametype set" back="true" />
+	</widget>
+	<widget name="online/gametype/item_6" type="text" width="310" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2">
+		<on event="a" run="port h3 gametype set" back="true" />
+	</widget>
+	<widget name="online/gametype/item_7" type="text" width="310" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2">
+		<on event="a" run="port h3 gametype set" back="true" />
+	</widget>
+	<widget name="online/gametype/item_8" type="text" width="310" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2">
+		<on event="a" run="port h3 gametype set" back="true" />
+	</widget>
+	<widget name="online/gametype/item_9" type="text" width="310" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2">
+		<on event="a" run="port h3 gametype set" back="true" />
+	</widget>
+	<widget name="online/gametype/item_10" type="text" width="310" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2">
+		<on event="a" run="port h3 gametype set" back="true" />
+	</widget>
+	<widget name="online/gametype/item_11" type="text" width="310" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2">
+		<on event="a" run="port h3 gametype set" back="true" />
+	</widget>
+	<widget name="online/gametype/item_12" type="text" width="310" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2">
+		<on event="a" run="port h3 gametype set" back="true" />
+	</widget>
+	<widget name="online/gametype/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<on event="created" run="port h3 gametype focus" />
+		<on event="left_trigger" run="port h3 gametype page up" />
+		<on event="right_trigger" run="port h3 gametype page down" />
+		<data input="port h3 gametypes" />
+		<child widget="online/gametype/item_1" y="0" />
+		<child widget="online/gametype/item_2" y="19" />
+		<child widget="online/gametype/item_3" y="38" />
+		<child widget="online/gametype/item_4" y="57" />
+		<child widget="online/gametype/item_5" y="76" />
+		<child widget="online/gametype/item_6" y="95" />
+		<child widget="online/gametype/item_7" y="114" />
+		<child widget="online/gametype/item_8" y="133" />
+		<child widget="online/gametype/item_9" y="152" />
+		<child widget="online/gametype/item_10" y="171" />
+		<child widget="online/gametype/item_11" y="190" />
+		<child widget="online/gametype/item_12" y="209" />
+	</widget>
+	<widget name="online/gametype/title" type="text" left="-40" top="14" width="400" height="34" font="online/font_header" color="#FFF2F6FA" text_y="1" string_list="h3/mp_text" string_index="7" />
+	<widget name="online/gametype/gametype_text" type="text" left="330" top="84" width="266" height="190" font="h3/font_small" color="#FFCFD9E3" string_list="h3/mp_text" string_index="27" />
+	<widget name="online/gametype/screen" flags="pass_unhandled_to_focused_child">
+		<on event="b back" back="true" />
+		<child widget="online/main/haze" />
+		<child widget="online/pick/header" />
+		<child widget="online/pick/card" />
+		<child widget="online/pick/foot" />
+		<child widget="online/pick/panel" />
+		<child widget="online/gametype/title" />
+		<child widget="online/gametype/gametype_text" />
+		<child widget="online/pick/a_butn" />
+		<child widget="online/pick/select" />
+		<child widget="online/pick/b_butn" />
+		<child widget="online/pick/back" />
+		<child widget="online/gametype/list" x="-40" y="80" />
+	</widget>
+</menus>

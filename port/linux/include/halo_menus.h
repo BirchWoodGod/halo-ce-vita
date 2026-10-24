@@ -207,6 +207,10 @@ struct halo_menus const *halo_menus_load(void);
 screens (menus/halo3), 0 for Halo CE's own; read again each call, so a
 change in the settings panel takes at the next screen */
 int halo_menu_style_halo3(void);
+/* 1 for Menu style Online (HALO_MENU_STYLE "online"): the Halo 3 set's flows
+(halo_menu_style_halo3 is 1 for it too), with menus/online's screens - an
+online/<name> widget opens in place of h3/<name> - for those it has */
+int halo_menu_style_online(void);
 /* the same begun on a thread of its own (once), which halo_menus_load waits
 for */
 void halo_menus_preload(void);

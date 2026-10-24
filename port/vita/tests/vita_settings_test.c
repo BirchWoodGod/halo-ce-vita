@@ -3322,7 +3322,7 @@ static void test_tab_layouts(void)
 	const struct layout_row game[] = {
 		/* (Halo 3's menus as shipped from 1.1.1: the owner's) */
 		{ TAB_GAME, "Menus", NULL, NULL, 0, NULL, ACTION_PAGE, PAGE_MENUS },
-		{ PAGE_MENUS, "Menu style", "HALO_MENU_STYLE", "classic|halo3", 0, "halo3" },
+		{ PAGE_MENUS, "Menu style", "HALO_MENU_STYLE", "classic|halo3|online", 0, "halo3" },
 		/* (shown with Menu style Halo 3) */
 		{ PAGE_MENUS, "Carnage report", "HALO_CARNAGE_REPORT", "classic|halo3", 0, "halo3" },
 		{ PAGE_MENUS, "Scoreboard", "HALO_SCOREBOARD", "classic|halo3", 0, "halo3" },
@@ -4632,7 +4632,7 @@ static void test_menu_style_row(void)
 	check(open_page("Menus") && strstr(menu, "\n\x03Game > Menus\n") && to_line("Menu style") &&
 		strstr(menu, "\n\x05" "Halo 3: the new menus over the Halo ring. Halo CE: the original menus.\n") && menu_fits() &&
 		menu_height_fits(), "Menu style: the Menus page's first row, and its help");
-	check(!strcmp(getenv("HALO_MENU_STYLE"), "halo3") && strstr(menu, "\nMenu style\x02< Halo 3  "),
+	check(!strcmp(getenv("HALO_MENU_STYLE"), "halo3") && strstr(menu, "\nMenu style\x02< Halo 3 >"),
 		"Menu style: Halo 3 (no settings.txt naming it), in the environment");
 	generation = halo_settings_generation;
 	restart_pending = 0;
@@ -4647,7 +4647,7 @@ static void test_menu_style_row(void)
 	vita_settings_load();
 	check(!strcmp(getenv("HALO_MENU_STYLE"), "classic") && style->choice == 0, "Menu style Halo CE: read back from settings.txt");
 	press(VITA_BUTTON_RIGHT);
-	check(!strcmp(getenv("HALO_MENU_STYLE"), "halo3") && strstr(menu, "\nMenu style\x02< Halo 3  ") &&
+	check(!strcmp(getenv("HALO_MENU_STYLE"), "halo3") && strstr(menu, "\nMenu style\x02< Halo 3 >") &&
 		strstr(file_text(SETTINGS_FILE), "HALO_MENU_STYLE=halo3\n"), "Menu style back to Halo 3, saved");
 	press(VITA_BUTTON_CIRCLE);
 	check(menu_visible && strstr(menu, "\nMenus\x02  Halo 3  >\n"), "Circle: back to Game, Menus saying Halo 3");
@@ -4668,7 +4668,7 @@ static void test_carnage_report_row(void)
 		!strcmp(report->values[shipped_choice[report - settings]], "halo3"), "Carnage report: Halo 3 as shipped");
 	open_panel();
 	to_tab("Game");
-	check(open_page("Menus") && !strcmp(menu_line(2, line, sizeof(line)), "Menu style\x02< Halo 3  ") &&
+	check(open_page("Menus") && !strcmp(menu_line(2, line, sizeof(line)), "Menu style\x02< Halo 3 >") &&
 		!strcmp(menu_line(3, line, sizeof(line)), "Carnage report\x02< Halo 3  ") &&
 		!strcmp(menu_line(4, line, sizeof(line)), "Scoreboard\x02< Halo 3  ") && menu_rows() == 3 && menu_fits() &&
 		menu_height_fits(), "Game > Menus: Menu style, then Carnage report and Scoreboard (Halo 3)");

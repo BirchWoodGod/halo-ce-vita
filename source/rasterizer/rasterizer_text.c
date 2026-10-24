@@ -79,6 +79,18 @@ symbols in this file:
 /* ---------- constants */
 
 #ifdef HALO_LINUX
+/* the leftmost x a string's clip may reach: 0 (the centered 640 columns'
+left), or with Menu style Online the wide screen's left edge, where its
+menus' text sits (ui_widget.c widens their clip) */
+static short rasterizer_text_left_limit(void)
+{
+	extern int halo_menu_style_online(void);
+
+	return halo_menu_style_online() && halo_screen_width() > 640 ? (short)(-(halo_screen_width() - 640) / 2) : 0;
+}
+#endif
+
+#ifdef HALO_LINUX
 /* port: the glyph cache four times the Xbox's. A screen of many different
 strings in the Halo PC fonts (OpenCE's server browser, Menu style Halo CE:
 the owner's photo of insider.10, Oct 18 2026) has more glyphs than 128 by
@@ -418,7 +430,13 @@ rasterizer_draw_string(
 			{
 				set_rectangle2d(
 					&viewport_bounds,
+#ifdef HALO_LINUX
+					/* (Menu style Online: its menus' text reaches into the
+					wide screen's left margin, x below 0: ui_widget.c) */
+					FLOOR(clip->x0, rasterizer_text_left_limit()),
+#else
 					FLOOR(clip->x0, 0),
+#endif
 					FLOOR(clip->y0, 0),
 					MIN(render.camera.viewport_bounds.x1 - render.camera.viewport_bounds.x0, clip->x1),
 					MIN(render.camera.viewport_bounds.y1 - render.camera.viewport_bounds.y0, clip->y1));
@@ -501,7 +519,13 @@ rasterizer_draw_unicode_string(
 			{
 				set_rectangle2d(
 					&viewport_bounds,
+#ifdef HALO_LINUX
+					/* (Menu style Online: its menus' text reaches into the
+					wide screen's left margin, x below 0: ui_widget.c) */
+					FLOOR(clip->x0, rasterizer_text_left_limit()),
+#else
 					FLOOR(clip->x0, 0),
+#endif
 					FLOOR(clip->y0, 0),
 					MIN(render.camera.viewport_bounds.x1 - render.camera.viewport_bounds.x0, clip->x1),
 					MIN(render.camera.viewport_bounds.y1 - render.camera.viewport_bounds.y0, clip->y1));

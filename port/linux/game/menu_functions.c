@@ -146,6 +146,8 @@ for a gamepad); a test build's HALO_TEST_TEXT_INPUT answers in its place,
 #include <stdlib.h>
 #include <string.h>
 
+#include "../../vita/include/vita_version.h"
+
 /* the platform layer's */
 void platform_log(char const *format, ...);
 int setenv(const char *name, const char *value, int overwrite);
@@ -412,6 +414,11 @@ enum
 	_function_h3_scoreboard_close,
 	_function_h3_scoreboard_page_up,
 	_function_h3_scoreboard_page_down,
+	/* (Menu style Online: CUSTOMIZATION's tabs, menus/online/customize.xml) */
+	_function_online_custom_tab_next,
+	_function_online_custom_tab_previous,
+	/* (Menu style Online: the main menu's EXIT, after its question) */
+	_function_online_exit,
 };
 
 /* in port_game_data_input_names' order */
@@ -478,6 +485,9 @@ enum
 	_input_ce_profile,
 	_input_h3_scoreboard,
 	_input_h3_scoreboard_options,
+	/* (Menu style Online: the main menu's version, CUSTOMIZATION's tabs) */
+	_input_online_version,
+	_input_online_custom,
 };
 
 /* what a line of typing is for */
@@ -4765,6 +4775,18 @@ window, so the flaming helmet's flame rises inside the window rather than
 behind the panel above it - the helmet sat a few pixels under the window's
 top; kept whether the flame is on or off, so it never jumps) */
 #define H3_CUSTOM_SPARTAN_FLAME_PLACEMENT "1.75 0.645 -0.33 20"
+/* (Menu style Online: large at the right, as the online CUSTOMIZATION's,
+no window around it; online/customize.xml's camera) */
+#define ONLINE_CUSTOM_SPARTAN_PLACEMENT "1.25 0.62 -0.42 25"
+
+/* (debug: HALO_ONLINE_SPARTAN_PLACEMENT="<distance> <right> <up> <facing>"
+in its place, to try others) */
+static char const *online_custom_spartan_placement(void)
+{
+	char const *placement = getenv("HALO_ONLINE_SPARTAN_PLACEMENT");
+
+	return placement && *placement ? placement : ONLINE_CUSTOM_SPARTAN_PLACEMENT;
+}
 
 static void h3_custom_spartan_preview(struct widget_instance *screen, short color)
 {
@@ -4779,8 +4801,8 @@ static void h3_custom_spartan_preview(struct widget_instance *screen, short colo
 	if (!h3_custom.preview_asked)
 	{
 		if (h3_scenes_enabled() && (scene = h3_scene_of(screen, name, sizeof(name), NULL)) != NULL &&
-			menu_scene_spartan_show(scene, h3_custom.flame_listed ? H3_CUSTOM_SPARTAN_FLAME_PLACEMENT :
-				H3_CUSTOM_SPARTAN_PLACEMENT, shown_color))
+			menu_scene_spartan_show(scene, halo_menu_style_online() ? online_custom_spartan_placement() :
+				h3_custom.flame_listed ? H3_CUSTOM_SPARTAN_FLAME_PLACEMENT : H3_CUSTOM_SPARTAN_PLACEMENT, shown_color))
 		{
 			h3_custom.preview_asked = TRUE;
 			h3_custom.preview_color = shown_color;
@@ -5005,6 +5027,241 @@ static void h3_custom_save(void)
 		saved.controller_settings.button_preset, saved.controller_settings.look_sensitivity,
 		saved.controller_settings.invert_look, saved.controller_settings.flight_stick_aircraft_controls,
 		saved.controller_settings.autocenter, saved.controller_settings.vibration_disabled ? "off" : "on");
+}
+
+
+/* ---- Menu style Online's CUSTOMIZATION (menus/online/customize.xml): the
+Halo 3 editor's rows (h3_custom_update and h3_custom_change still read and
+change them) in one list, shown a tab at a time - ARMORY (name, model, the
+tester's flaming helmet, and the armor pieces Halo CE has no models for,
+greyed: "not yet"), COLORS (the primary colour, with the game's eighteen in a
+grid and its hex; the other colours greyed) and CONTROLS (the profile's
+controller settings) -, L and R (the triggers) changing the tab. The rows of
+the other tabs are hidden and passed over; the tab's are stacked from the
+list's top. */
+#define ONLINE_CUSTOM_ROW_HEIGHT 19
+#define ONLINE_CUSTOM_TABS 3
+#define ONLINE_CUSTOM_GRID_COLUMNS 3
+#define ONLINE_CUSTOM_GRID_WIDTH 34
+#define ONLINE_CUSTOM_GRID_HEIGHT 18
+
+static struct
+{
+	struct widget_instance *list;
+	short tab;
+	short shown_tab;
+	short help_row;
+} online_custom;
+
+static struct
+{
+	char const *row;
+	short tab;
+	/* (a row the port cannot do yet: greyed, its words why) */
+	char const *not_yet;
+	/* (the heading over the help) */
+	char const *label;
+} const online_custom_rows[] =
+{
+	{ "op_name", 0, NULL, N_("PLAYER NAME") },
+	{ "na_tag", 0, N_("A service tag beside your name. Not in this version yet."), N_("SERVICE TAG") },
+	{ "op_model", 0, NULL, N_("MODEL") },
+	{ "na_helmet", 0, N_("Helmets need armor models Halo CE does not have.\nNot in this version yet: MODEL picks who you\nplay as."), N_("HELMET") },
+	{ "na_rshoulder", 0, N_("Shoulder pieces need armor models Halo CE does\nnot have. Not in this version yet."), N_("RIGHT SHOULDER") },
+	{ "na_lshoulder", 0, N_("Shoulder pieces need armor models Halo CE does\nnot have. Not in this version yet."), N_("LEFT SHOULDER") },
+	{ "na_chest", 0, N_("Chest pieces need armor models Halo CE does not\nhave. Not in this version yet."), N_("CHEST") },
+	{ "op_flame", 0, NULL, N_("FLAMING HELMET") },
+	{ "op_color", 1, NULL, N_("ARMOR PRIMARY") },
+	{ "na_secondary", 1, N_("Halo CE armor takes one colour: the primary.\nNot in this version yet."), N_("ARMOR SECONDARY") },
+	{ "na_visor", 1, N_("The visor's tint. Not in this version yet."), N_("ARMOR VISOR") },
+	{ "na_lights", 1, N_("The armor's lights. Not in this version yet."), N_("ARMOR LIGHTS") },
+	{ "op_stick", 2, NULL, N_("STICK LAYOUT") },
+	{ "op_buttons", 2, NULL, N_("BUTTON LAYOUT") },
+	{ "op_look", 2, NULL, N_("LOOK SENSITIVITY") },
+	{ "op_invert", 2, NULL, N_("INVERT LOOK") },
+	{ "op_flight", 2, NULL, N_("INVERT FLIGHT") },
+	{ "op_autocenter", 2, NULL, N_("AUTO-CENTER") },
+	{ "op_vibration", 2, NULL, N_("VIBRATION") },
+};
+
+/* (the game's colours, profile_color_table's, as tools/halo3_menu_art.py
+draws them: the COLORS tab's hex) */
+static unsigned long const online_custom_colours[H3_SWATCH_FRAMES - 1] =
+{
+	0xFFFFFF, 0x000000, 0xFE0000, 0x0201E3, 0x707E71, 0xFFFF01, 0x00FF01, 0xFF56B9, 0xAB10F4,
+	0x01FFFF, 0x6493ED, 0xFF7F00, 0x1ECC91, 0x006401, 0x603814, 0xC69C6C, 0x9D0B0E, 0xF5999E,
+};
+
+static short online_custom_row_index(char const *name)
+{
+	short index;
+
+	for (index = 0; name && index < (short)NUMBEROF(online_custom_rows); index++)
+	{
+		if (!strcmp(name, online_custom_rows[index].row))
+			return index;
+	}
+	return NONE;
+}
+
+/* (Menu style Online) the title screen ("press to continue", online/title.xml)
+over the main menu the first time it is up this run, opened from the
+frame's update (pc_menu_functions_update), not from a widget's */
+static struct
+{
+	boolean title_done;
+	boolean title_pending;
+} online_menus;
+
+/* (port online version: the main menu's) the version, the title screen
+asked for the first time, EXIT hidden on the PS Vita (it closes from the
+system's menu) */
+static void online_main_update(struct widget_instance *widget)
+{
+	struct widget_instance *found;
+
+	text_show(widget, "HALO CE VITA " HALO_VITA_VERSION_SHOWN);
+	if (!online_menus.title_done)
+	{
+		online_menus.title_done = TRUE;
+		online_menus.title_pending = !getenv("HALO_ONLINE_NO_TITLE");
+	}
+#if defined(HALO_VITA) || defined(HALO_ANDROID)
+	if ((found = named(screen_of(widget), "exit")) != NULL)
+	{
+		widget_instance_set_visibility_recursive(found, FALSE);
+		found->disabled = TRUE;
+	}
+#else
+	(void)found;
+#endif
+}
+
+static void online_menus_update(void)
+{
+	if (online_menus.title_pending)
+	{
+		long title = tag_loaded(UI_WIDGET_DEFINITION_TAG, "pc\\online\\title\\screen");
+		struct widget_instance *active = NULL;
+		long index;
+
+		online_menus.title_pending = FALSE;
+		for (index = 0; index < 4 && !active; index++)
+			active = ui_widget_port_active_screen((short)index);
+		if (title != NONE && active && halo_menu_style_online())
+		{
+			platform_log("menus: online title screen");
+			ui_widget_load_by_name_or_tag(NULL, title, NULL, active->local_player_index, active->definition_tag_index,
+				NONE, NONE);
+		}
+	}
+}
+
+/* (port online custom tab next and previous: R and L) */
+static void online_custom_tab_step(int step)
+{
+	online_custom.tab = (short)(((online_custom.tab + step) % ONLINE_CUSTOM_TABS + ONLINE_CUSTOM_TABS) %
+		ONLINE_CUSTOM_TABS);
+	platform_log("menus: online customize: tab %d", online_custom.tab);
+}
+
+/* (port online custom: the editor's list, after port h3 custom) */
+static void online_custom_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct player_profile *profile = player_ui_get_edit_player_profile();
+	struct widget_instance *child, *first = NULL, *found;
+	short slot = 0, focused_row = NONE, index;
+	char text[64];
+
+	if (list != online_custom.list)
+	{
+		/* (the editor opened again: its first tab) */
+		online_custom.list = list;
+		online_custom.tab = 0;
+		online_custom.shown_tab = NONE;
+	}
+	for (child = list->child; child; child = child->next)
+	{
+		short row = online_custom_row_index(child->name);
+		boolean shown = row != NONE && online_custom_rows[row].tab == online_custom.tab;
+
+		if (row != NONE && !strcmp(child->name, "op_flame"))
+			shown = shown && h3_custom.flame_listed;
+		widget_instance_set_visibility_recursive(child, shown);
+		child->disabled = !shown;
+		if (!shown)
+			continue;
+		child->vertical_offset = (short)(slot++ * ONLINE_CUSTOM_ROW_HEIGHT);
+		if (!first)
+			first = child;
+		if (child == list->focused_child)
+			focused_row = row;
+		if (online_custom_rows[row].not_yet)
+		{
+			text_show(named(child, "value"), T("NOT YET"));
+			child->animation.current_frame_index = child == list->focused_child ? 1 : 0;
+		}
+	}
+	/* (a new tab: its first row) */
+	if (online_custom.shown_tab != online_custom.tab || focused_row == NONE)
+	{
+		online_custom.shown_tab = online_custom.tab;
+		if (first && first != list->focused_child)
+			ui_widget_port_give_focus(list, first);
+		focused_row = first ? online_custom_row_index(first->name) : NONE;
+	}
+	for (index = 0; index < ONLINE_CUSTOM_TABS; index++)
+	{
+		snprintf(text, sizeof(text), "tab_%d", index);
+		if ((found = named(screen, text)) != NULL)
+			found->animation.current_frame_index = index == online_custom.tab ? 1 : 0;
+	}
+	/* (the help: the Halo 3 editor's for its rows, the "not yet" words for
+	the greyed ones) */
+	if (focused_row != NONE)
+	{
+		char const *not_yet = online_custom_rows[focused_row].not_yet;
+
+		if ((found = named(screen, "custom_help")) != NULL)
+			widget_instance_set_visibility_recursive(found, !not_yet);
+		if ((found = named(screen, "na_help")) != NULL)
+		{
+			widget_instance_set_visibility_recursive(found, not_yet != NULL);
+			if (not_yet)
+				text_show(found, T(not_yet));
+		}
+		if (focused_row != online_custom.help_row)
+		{
+			online_custom.help_row = focused_row;
+			platform_log("menus: online customize: row %s", online_custom_rows[focused_row].row);
+		}
+	}
+	/* (COLORS: the grid, its chosen colour framed, and the colour's hex) */
+	if ((found = named(screen, "grid")) != NULL)
+		widget_instance_set_visibility_recursive(found, online_custom.tab == 1);
+	if (profile)
+	{
+		short frame = h3_swatch_frame(profile->primary_color_index);
+
+		if ((found = named(screen, "grid_select")) != NULL)
+		{
+			found->horizontal_offset = (short)((frame % ONLINE_CUSTOM_GRID_COLUMNS) * ONLINE_CUSTOM_GRID_WIDTH);
+			found->vertical_offset = (short)((frame / ONLINE_CUSTOM_GRID_COLUMNS) * ONLINE_CUSTOM_GRID_HEIGHT);
+		}
+		if (frame > 0)
+			snprintf(text, sizeof(text), "#%06lX", online_custom_colours[frame - 1]);
+		else
+			snprintf(text, sizeof(text), "%s", T("RANDOM"));
+		text_show(named(screen, "hex"), text);
+		/* (the heading over the help: the colour's name on COLORS, else the
+		row's) */
+		if (online_custom.tab == 1)
+			snprintf(text, sizeof(text), "%s", T(h3_color_names[frame]));
+		else
+			snprintf(text, sizeof(text), "%s", focused_row != NONE ? T(online_custom_rows[focused_row].label) : "");
+		text_show(named(screen, "colour_name"), text);
+	}
 }
 
 static boolean typing_available(void);
@@ -17667,6 +17924,16 @@ boolean pc_menu_event_function_invoke(
 	case _function_h3_scoreboard_page_down:
 		h3_scoreboard.page = 1;
 		return TRUE;
+	case _function_online_custom_tab_next:
+		online_custom_tab_step(1);
+		return TRUE;
+	case _function_online_custom_tab_previous:
+		online_custom_tab_step(-1);
+		return TRUE;
+	case _function_online_exit:
+		platform_log("menus: online EXIT: the game closes");
+		exit(EXIT_SUCCESS);
+		return TRUE;
 	case _function_coop_campaign:
 	case _function_unwired:
 	default:
@@ -17829,6 +18096,13 @@ void pc_menu_game_data_function_invoke(
 	case _input_h3_scoreboard_options:
 		if (widget->type == _ui_widget_type_column_list)
 			h3_scoreboard_options_update(widget);
+		break;
+	case _input_online_version:
+		online_main_update(widget);
+		break;
+	case _input_online_custom:
+		if (widget->type == _ui_widget_type_column_list)
+			online_custom_update(widget);
 		break;
 	case _input_h3_players:
 		if (widget->type == _ui_widget_type_column_list)
@@ -18381,6 +18655,7 @@ while it closes: browser dispose) */
 		}
 		menu_functions.open_password = FALSE;
 	}
+	online_menus_update();
 	/* (a profile made on the Halo 3 profile screen: the screen choosing it
 	opens, the campaign's level select - the Halo 3 lobby - or the editor,
 	with the profile screen behind it) */

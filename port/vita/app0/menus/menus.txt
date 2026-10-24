@@ -26,3 +26,8 @@ halo3/join_split.xml
 halo3/pregame.xml
 halo3/dialog.xml
 halo3/dialog_ui.xml
+# Menu style Online (a preview: menus/online, menu_tags.c menu_tags_online)
+online/main.xml
+online/customize.xml
+online/title.xml
+online/multiplayer.xml

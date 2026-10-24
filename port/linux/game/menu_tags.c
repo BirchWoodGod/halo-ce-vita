@@ -127,6 +127,9 @@ their pickers...) */
 #define MAXIMUM_H3_SCREENS 64
 /* the Xbox screens' widgets Menu style Halo CE adds rows to (classic_patch=) */
 #define MAXIMUM_CLASSIC_PATCHES 32
+/* (Menu style Online: the menus/online widgets that stand for a Halo 3 set's
+widget of the same name under h3/) */
+#define MAXIMUM_ONLINE_SCREENS 128
 
 /* the layout of a bitmap tag and a string list tag held by a Custom Edition
 resource map (the item is the whole tag, its addresses counting from the
@@ -425,6 +428,7 @@ static char const *const port_function_names[] =
 	"port ce pregame init", "port ce variant next", "port ce custom",
 	"port h3 scoreboard act", "port h3 scoreboard option", "port h3 scoreboard close", "port h3 scoreboard page up",
 	"port h3 scoreboard page down",
+	"port online custom tab next", "port online custom tab previous", "port online exit",
 };
 
 /* the port's game data functions (menu_functions.c), from
@@ -455,6 +459,7 @@ static char const *const port_game_data_input_names[] =
 	"port h3 dialog",
 	"port ce lobby", "port ce profile",
 	"port h3 scoreboard", "port h3 scoreboard options",
+	"port online version", "port online custom",
 };
 
 static struct
@@ -498,6 +503,13 @@ static struct
 	void *classic_original[MAXIMUM_CLASSIC_PATCHES];
 	void *classic_patched[MAXIMUM_CLASSIC_PATCHES];
 	int classic_applied;
+	/* Menu style Online (menus/online): each Halo 3 widget that has an
+	online/ widget of the same name, and that widget, which opens in its
+	place - the Halo 3 set's flows and functions, the online set's look */
+	long online_count;
+	long online_from[MAXIMUM_ONLINE_SCREENS];
+	long online_to[MAXIMUM_ONLINE_SCREENS];
+	boolean online_said[MAXIMUM_ONLINE_SCREENS];
 } menu_tags;
 
 /* the build under way */
@@ -2595,6 +2607,34 @@ void menu_tags_loaded(
 		menu_tags.h3_replaces[menu_tags.h3_count] = screen->replaces;
 		menu_tags.h3_count++;
 	}
+	/* (the online set: an online/<name> widget stands for h3/<name>, when
+	Menu style is Online, as it opens: menu_tags_online) */
+	menu_tags.online_count = 0;
+	for (index = 0; index < widget_count; index++)
+	{
+		char const *name = menus->widgets[index].name;
+		char h3_name[160];
+		long h3_widget;
+
+		if (!name || strncmp(name, "online/", 7))
+			continue;
+		snprintf(h3_name, sizeof(h3_name), "h3/%s", name + 7);
+		if ((h3_widget = widget_named(h3_name)) == NONE)
+			continue;
+		if (menu_tags.online_count == MAXIMUM_ONLINE_SCREENS)
+		{
+			problem(menus->widgets[index].file, menus->widgets[index].line, "too many online widgets stand for "
+				"Halo 3 ones", name);
+			break;
+		}
+		menu_tags.online_said[menu_tags.online_count] = FALSE;
+		menu_tags.online_from[menu_tags.online_count] = build.widget_tags[h3_widget];
+		menu_tags.online_to[menu_tags.online_count] = build.widget_tags[index];
+		menu_tags.online_count++;
+	}
+	if (menu_tags.online_count)
+		platform_log("menus: online set: %ld widgets stand for Halo 3 ones (Menu style %s)", menu_tags.online_count,
+			halo_menu_style_online() ? "Online" : "not Online");
 	/* (debug: HALO_MENUS_DUMP_TAGS=<path>;<path>...: those screens of the
 	map's dumped as it loads, as HALO_MENUS_DUMP dumps one as it opens) */
 	if (getenv("HALO_MENUS_DUMP_TAGS"))
@@ -2748,6 +2788,33 @@ boolean menu_tags_bitmap_fits_widget(
 	return FALSE;
 }
 
+/* (Menu style Online) the online set's widget for a Halo 3 one, when it has
+one; else the tag itself. Read each time, as the Menu style is */
+static long menu_tags_online(
+	long tag_index)
+{
+	long index;
+
+	if (tag_index == NONE || !menu_tags.online_count || !halo_menu_style_online())
+		return tag_index;
+	for (index = 0; index < menu_tags.online_count; index++)
+	{
+		if (menu_tags.online_from[index] == tag_index)
+		{
+			/* (said once a load: the flows ask for their screens by name
+			every frame) */
+			if (!menu_tags.online_said[index])
+			{
+				menu_tags.online_said[index] = TRUE;
+				platform_log("menus: online screen %s for %s", tag_get_name(menu_tags.online_to[index]),
+					tag_get_name(tag_index));
+			}
+			return menu_tags.online_to[index];
+		}
+	}
+	return tag_index;
+}
+
 /* (ui_widget_load_by_name_or_tag) a screen the game opens: ours in place of
 the Xbox's Multiplayer screen (the Halo PC pictures and text read the first
 time), and those menu_functions.c's flows replace; else the tag itself */
@@ -2814,7 +2881,7 @@ long menu_tags_screen(
 				return tag_index;
 			}
 			platform_log("menus: Halo 3 screen %s for %s", menu_tags.h3_root[index], menu_tags.h3_replaces[index]);
-			return menu_tags.h3_to[index];
+			return menu_tags_online(menu_tags.h3_to[index]);
 		}
 	}
 	/* (a level's map has no Multiplayer screen: NONE) */
@@ -2840,9 +2907,9 @@ long menu_tags_screen(
 
 		if (replaced != tag_index && replaced != NONE && halo_menu_style_halo3())
 			return menu_tags_screen(replaced);
-		return replaced;
+		return menu_tags_online(replaced);
 	}
-	return tag_index;
+	return menu_tags_online(tag_index);
 }
 
 /* (forge.c) a screen of the set built into the loaded map, by its widget's
@@ -2870,7 +2937,7 @@ long menu_tags_ingame_screen(
 		return NONE;
 	if (!menu_tags.art)
 		menu_tags.art = menu_tags_art_load() ? 1 : -1;
-	return menu_tags.art > 0 ? tag_index : NONE;
+	return menu_tags.art > 0 ? menu_tags_online(tag_index) : NONE;
 }
 
 boolean pc_menu_tag(
