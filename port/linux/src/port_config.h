@@ -32,6 +32,16 @@ int config_file_write(const char *path, const char *text, size_t size);
 /* sets a boolean setting, and writes it into config.toml (only its line
 changes); 1 on success */
 int config_write_boolean(const char *name, int value);
+/* the same for a string setting (written as a TOML string, escaped) and a
+real one; each write also bumps halo_settings_generation, so the readers
+that keep a setting read it again */
+int config_write_string(const char *name, const char *value);
+int config_write_real(const char *name, double value);
+/* a setting's default as text (a string's without its quotes); 1 if the
+setting exists */
+int config_default_text_of(const char *name, char *text, size_t size);
+/* bumped whenever a setting changes mid-game (port_config.c) */
+extern volatile unsigned long halo_settings_generation;
 /* sets a setting for this run only (the file is left alone), from text as
 its environment variable would; 1 if the setting exists */
 int config_set_override(const char *name, const char *text);

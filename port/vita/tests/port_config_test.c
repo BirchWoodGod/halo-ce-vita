@@ -388,6 +388,50 @@ static void test_hand(void)
 	check(!log_has("config.toml:"), "read back without an error");
 }
 
+/* the keyboard's bindings: a section of a section ([controls.keyboard]),
+string and real writes, a hand-made section completed */
+static void test_keyboard(void)
+{
+#ifndef HALO_NOT_DESKTOP
+	char *text;
+	char default_text[64];
+
+	printf("--- keyboard\n");
+	write_whole(config_file,
+		"[input]\n"
+		"mouse_sensitivity = 2.5\n"
+		"\n"
+		"[controls.keyboard]\n"
+		"melee = \"V\"\n"
+		"bogus = \"X\"\n");
+	restart();
+	check(!strcmp(config_string("controls.keyboard.melee"), "V"), "a binding of a hand-made [controls.keyboard] read");
+	check(!strcmp(config_string("controls.keyboard.throw_grenade"), "G"), "a binding not there: its default");
+	check(log_has("unknown setting controls.keyboard.bogus"), "an unknown binding said, with its section");
+	check(!log_has("unknown setting controls.keyboard.melee"), "a known binding not said");
+	file_reads_whole("the bindings new in this version added into [controls.keyboard]");
+	text = read_whole(config_file, NULL);
+	check(text && strstr(text, "[controls.keyboard]") != NULL &&
+		strstr(strstr(text, "[controls.keyboard]") + 1, "[controls.keyboard]") == NULL, "[controls.keyboard] there once");
+	check(text && strstr(text, "melee = \"V\"") != NULL, "the player's binding kept as it was");
+	free(text);
+	check(config_write_string("controls.keyboard.zoom", "\\, Mouse \"5\"") == 1, "a binding with a backslash and quotes written");
+	check(config_write_string("controls.keyboard.melee", "F") == 1, "a binding changed");
+	check(config_write_real("input.mouse_sensitivity", 1.25) == 1, "the mouse's sensitivity written");
+	file_reads_whole("after the bindings were written");
+	check(!strcmp(config_string("controls.keyboard.melee"), "F"), "the binding written is the binding now");
+	restart();
+	check(!strcmp(config_string("controls.keyboard.zoom"), "\\, Mouse \"5\""), "the escaped binding read back");
+	check(!strcmp(config_string("controls.keyboard.melee"), "F"), "the binding read back");
+	check(config_real("input.mouse_sensitivity") == 1.25, "the sensitivity read back");
+	check(config_default_text_of("controls.keyboard.switch_grenade", default_text, sizeof(default_text)) &&
+		!strcmp(default_text, "H, Mouse Middle"), "a binding's default");
+	check(config_default_text_of("input.raw_mouse", default_text, sizeof(default_text)) && !strcmp(default_text, "true"),
+		"a boolean's default");
+	check(!config_default_text_of("controls.keyboard.nope", default_text, sizeof(default_text)), "no such default");
+#endif
+}
+
 static void test_110(void)
 {
 	char *original, *broken;
@@ -526,6 +570,7 @@ int main(int argc, char **argv)
 	test_defaults();
 	test_writes();
 	test_hand();
+	test_keyboard();
 	test_110();
 	test_salvage();
 	test_gone();

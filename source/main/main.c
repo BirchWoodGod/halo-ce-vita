@@ -4791,6 +4791,24 @@ static void main_test_commands_update(
 
 			platform_test_key(commands[index].command + 5);
 		}
+		/* (@hold NAME MS: a key, mouse button or wheel notch held for MS
+		milliseconds - "Mouse Left 300", "G 200" -, the keyboard and mouse's
+		bindings: run_pc_controls_test.sh; the desktop's) */
+#ifndef HALO_ANDROID
+		else if (!strncmp(commands[index].command, "@hold ", 6))
+		{
+			int platform_test_input_hold(char const *name, int milliseconds);
+			char name[64];
+			char const *last = strrchr(commands[index].command + 6, ' ');
+
+			if (last)
+			{
+				snprintf(name, sizeof(name), "%.*s", (int)(last - (commands[index].command + 6)),
+					commands[index].command + 6);
+				platform_test_input_hold(name, atoi(last + 1));
+			}
+		}
+#endif
 #endif
 		else if (!strcmp(commands[index].command, "@seat"))
 		{

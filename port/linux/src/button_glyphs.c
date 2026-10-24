@@ -8,9 +8,9 @@ icons (HALO_BUTTON_GLYPHS): display.button_icons (HALO_BUTTON_ICONS) is
 last, a gamepad's buttons once it is - an Xbox pad's or, per SDL's gamepad
 type, a PlayStation's), "keyboard", "xbox" or "playstation".
 
-- The keyboard's: each button's key or mouse button in xinput_sdl.c's
-  layout (keyboard_gamepad), the menus' (the mouse being the pointer there)
-  or play's.
+- The keyboard's: each button's key or mouse button, the menus' fixed one
+  (xinput_sdl.c keyboard_menus; the mouse being the pointer there) or, in
+  play, the player's binding of the action the button is (play_key).
 - The PlayStation's: the Vita button its Xbox button is on in the Vita's
   shipped layout - the menus' fixed one (A Cross, B Circle, X Square, Y
   Triangle, the triggers L and R, the D-pad, Start, Back Select) or play's
@@ -25,6 +25,7 @@ type, a PlayStation's), "keyboard", "xbox" or "playstation".
 
 #include "../../vita/include/vita_controls.h"
 #include "../include/halo_button_icons.h"
+#include "../include/halo_key_bindings.h"
 #include "port_config.h"
 
 #include <stdlib.h>
@@ -46,28 +47,113 @@ static const signed char play_glyphs[16] = {
 	VITA_GLYPH_SELECT, VITA_GLYPH_DOWN, VITA_GLYPH_UP,
 };
 
-/* the key shown for each button (and the sticks, 16 and 17), the first of
-those xinput_sdl.c keyboard_gamepad puts on it: in play the mouse's
-buttons fire, throw and zoom; in the menus they are the pointer's, so the
-keys (Enter accepts, Escape backs out - Backspace too -, Space is Start, G
-the left trigger; the right trigger has none). Change these with keyboard_gamepad and README.md's
-Controls table */
-static const signed char play_keys[18] = {
-	HALO_KEY_SPACE, HALO_KEY_F, HALO_KEY_E, HALO_KEY_TAB, HALO_KEY_X, HALO_KEY_Q,
-	HALO_KEY_RMB, HALO_KEY_LMB, HALO_KEY_UP, HALO_KEY_DOWN, HALO_KEY_LEFT, HALO_KEY_RIGHT, HALO_KEY_ESC,
-	HALO_KEY_F1, HALO_KEY_CTRL, HALO_KEY_MMB, HALO_KEY_WASD, HALO_KEY_MOUSE,
-};
+/* the key shown for each button (and the sticks, 16 and 17). In the menus
+xinput_sdl.c's fixed keys (the mouse being the pointer there: Enter accepts,
+Escape backs out - Backspace too -, Space is Start, G the left trigger; the
+right trigger has none). In play the player's bindings
+(halo_key_bindings.h): the button's game control (the profile's button
+layout: input_abstraction_port_control_button) is an action's, whose first
+key with a keycap is shown (none: the Xbox's icon); Start is Escape, Back the
+scoreboard's key, the D-pad the arrows, the sticks W A S D and the mouse.
+Change these with keyboard_menus and README.md's Controls table */
 static const signed char menu_keys[18] = {
 	HALO_KEY_ENTER, HALO_KEY_ESC, HALO_KEY_E, HALO_KEY_TAB, HALO_KEY_X, HALO_KEY_Q,
 	HALO_KEY_G, -1, HALO_KEY_UP, HALO_KEY_DOWN, HALO_KEY_LEFT, HALO_KEY_RIGHT, HALO_KEY_SPACE,
 	HALO_KEY_F1, HALO_KEY_CTRL, HALO_KEY_Z, HALO_KEY_WASD, -1,
 };
 
+/* source/input/input_abstraction.c */
+short input_abstraction_port_control_button(short controller_index, short control_index);
+
+/* the keycap (a halo_key) an input is drawn with, -1 for one with none:
+SDL's scancodes (the USB HID usage numbers) and the mouse's */
+int halo_key_of_input(int input)
+{
+	static const struct
+	{
+		short input;
+		signed char key;
+	} keys[] =
+	{
+		{ 44, HALO_KEY_SPACE }, { 40, HALO_KEY_ENTER }, { 88, HALO_KEY_ENTER }, { 41, HALO_KEY_ESC },
+		{ 43, HALO_KEY_TAB }, { 42, HALO_KEY_BACKSPACE }, { 76, HALO_KEY_DELETE }, { 224, HALO_KEY_CTRL },
+		{ 228, HALO_KEY_CTRL }, { 225, HALO_KEY_SHIFT }, { 229, HALO_KEY_SHIFT }, { 58, HALO_KEY_F1 },
+		{ 82, HALO_KEY_UP }, { 81, HALO_KEY_DOWN }, { 80, HALO_KEY_LEFT }, { 79, HALO_KEY_RIGHT },
+		{ 8, HALO_KEY_E }, { 9, HALO_KEY_F }, { 21, HALO_KEY_R }, { 20, HALO_KEY_Q }, { 27, HALO_KEY_X },
+		{ 10, HALO_KEY_G }, { 6, HALO_KEY_C }, { 29, HALO_KEY_Z }, { 26, HALO_KEY_W }, { 4, HALO_KEY_A },
+		{ 22, HALO_KEY_S }, { 7, HALO_KEY_D }, { 11, HALO_KEY_H }, { 25, HALO_KEY_V }, { 23, HALO_KEY_T },
+		{ 5, HALO_KEY_B }, { 30, HALO_KEY_N1 }, { 31, HALO_KEY_N2 }, { 32, HALO_KEY_N3 },
+		{ HALO_BIND_MOUSE + 1, HALO_KEY_LMB }, { HALO_BIND_MOUSE + 2, HALO_KEY_MMB }, { HALO_BIND_MOUSE + 3, HALO_KEY_RMB },
+		{ HALO_BIND_MOUSE + 4, HALO_KEY_MOUSE4 }, { HALO_BIND_WHEEL, HALO_KEY_WHEEL }, { HALO_BIND_WHEEL_UP, HALO_KEY_WHEEL },
+		{ HALO_BIND_WHEEL_DOWN, HALO_KEY_WHEEL },
+	};
+	size_t index;
+
+	for (index = 0; index < sizeof(keys) / sizeof(keys[0]); index++)
+	{
+		if (keys[index].input == input)
+			return keys[index].key;
+	}
+	return -1;
+}
+
+/* an action's first input with a keycap, -1 for none */
+static int action_key(int action)
+{
+	const struct halo_bindings *bindings = halo_key_bindings();
+	int slot;
+
+	for (slot = 0; slot < HALO_BIND_SLOTS; slot++)
+	{
+		int key = halo_key_of_input(bindings->inputs[action][slot]);
+
+		if (key >= 0)
+			return key;
+	}
+	return -1;
+}
+
+/* the game's controls' actions (input_abstraction.c's _game_control_*:
+jump, switch grenades, action, switch weapons, melee, flashlight, grenade,
+fire, start, back, crouch, zoom) */
+static const signed char control_actions[12] = {
+	HALO_BIND_JUMP, HALO_BIND_SWITCH_GRENADE, HALO_BIND_ACTION, HALO_BIND_SWITCH_WEAPON, HALO_BIND_MELEE,
+	HALO_BIND_FLASHLIGHT, HALO_BIND_THROW_GRENADE, HALO_BIND_FIRE, -1, -1, HALO_BIND_CROUCH, HALO_BIND_ZOOM,
+};
+
+static int play_key(int gamepad_button)
+{
+	short control;
+
+	switch (gamepad_button)
+	{
+	case 8: return HALO_KEY_UP;
+	case 9: return HALO_KEY_DOWN;
+	case 10: return HALO_KEY_LEFT;
+	case 11: return HALO_KEY_RIGHT;
+	case 12: return HALO_KEY_ESC;
+	case 13:
+	{
+		int key = action_key(HALO_BIND_SCOREBOARD);
+
+		return key >= 0 ? key : HALO_KEY_F1;
+	}
+	case 16: return HALO_KEY_WASD;
+	case 17: return HALO_KEY_MOUSE;
+	}
+	for (control = 0; control < 12; control++)
+	{
+		if (control_actions[control] >= 0 && input_abstraction_port_control_button(0, control) == gamepad_button)
+			return action_key(control_actions[control]);
+	}
+	return -1;
+}
+
 int halo_keyboard_button_key(int gamepad_button, int menus)
 {
 	if (gamepad_button < 0 || gamepad_button >= 18)
 		return -1;
-	return menus ? menu_keys[gamepad_button] : play_keys[gamepad_button];
+	return menus ? menu_keys[gamepad_button] : play_key(gamepad_button);
 }
 
 int halo_button_icons_shown(void)

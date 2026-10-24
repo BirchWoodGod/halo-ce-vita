@@ -1214,6 +1214,83 @@ void player_control_new_unit(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* port: (get_local_player_input_blob) the keyboard's action key held with
+nothing to act on, this tick */
+static boolean player_control_keyboard_action_only[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
+
+#if !defined(HALO_RELEASE) && !defined(HALO_VITA)
+/* (tests only) HALO_TEST_ACTION_LOG=1: the first local player's actions
+as the game takes them, each logged as it starts ("action: fire"): what
+each key of the keyboard does in play (run_pc_controls_test.sh) */
+static void player_control_test_action_log(
+	short local_player_index,
+	struct input_blob const *input,
+	boolean action_only)
+{
+	static struct
+	{
+		unsigned long flag;
+		boolean player_flag;
+		char const *name;
+	} const actions[] =
+	{
+		{ FLAG(_unit_control_weapon_primary_trigger_bit), FALSE, "fire" },
+		{ FLAG(_unit_control_throw_grenade_bit), FALSE, "throw_grenade" },
+		{ FLAG(_player_control_input_zoom_bit), TRUE, "zoom" },
+		{ FLAG(_unit_control_use_equipment_bit), FALSE, "melee" },
+		{ FLAG(_unit_control_action_bit), FALSE, "action" },
+		{ FLAG(_unit_control_weapon_reload_bit), FALSE, "reload" },
+		{ FLAG(_unit_control_jump_bit), FALSE, "jump" },
+		{ FLAG(_unit_control_crouch_modifier_bit), FALSE, "crouch" },
+		{ FLAG(_unit_control_integrated_light_bit), FALSE, "flashlight" },
+		{ FLAG(_player_control_rotate_weapons_bit), TRUE, "switch_weapon" },
+		{ FLAG(_player_control_rotate_grenades_bit), TRUE, "switch_grenade" },
+	};
+	static unsigned long last_unit, last_player;
+	static short last_move;
+	static int checked, wanted;
+	short move = 0, index;
+
+	if (!checked)
+	{
+		char const *setting = getenv("HALO_TEST_ACTION_LOG");
+
+		checked = 1;
+		wanted = setting && atoi(setting);
+	}
+	if (!wanted || local_player_index != 0)
+		return;
+	for (index = 0; index < (short)NUMBEROF(actions); index++)
+	{
+		unsigned long now = actions[index].player_flag ? input->player_control_flags :
+			input->unit_control_flags | (action_only ? FLAG(_unit_control_action_bit) : 0);
+		unsigned long last = actions[index].player_flag ? last_player : last_unit;
+
+		if ((now & actions[index].flag) && !(last & actions[index].flag))
+		{
+			platform_log("action: %s%s", actions[index].name,
+				action_only && actions[index].flag == FLAG(_unit_control_action_bit) && !actions[index].player_flag ?
+				" (nothing to act on: no reload)" : "");
+		}
+	}
+	if (input->throttle.i > 0.5f) move = 1;
+	else if (input->throttle.i < -0.5f) move = 2;
+	else if (input->throttle.j > 0.5f) move = 3;
+	else if (input->throttle.j < -0.5f) move = 4;
+	if (move && move != last_move)
+	{
+		static char const *const moves[] = { "", "move_forward", "move_backward", "strafe_left", "strafe_right" };
+
+		platform_log("action: %s", moves[move]);
+	}
+	last_move = move;
+	last_unit = input->unit_control_flags | (action_only ? FLAG(_unit_control_action_bit) : 0);
+	last_player = input->player_control_flags;
+}
+#endif
+#endif
+
 static void get_local_player_input_blob(
 	short local_player_index,
 	real time_delta_sec,
@@ -1222,6 +1299,9 @@ static void get_local_player_input_blob(
 	long player_index = local_player_get_player_index(local_player_index);
 
 	player_action_clear(input);
+#ifdef HALO_LINUX
+	player_control_keyboard_action_only[local_player_index] = FALSE;
+#endif
 #ifdef HALO_LINUX
 	/* port: (player_control_unassisted) none unless its pad says so */
 	player_control_unassisted[local_player_index] = FALSE;
@@ -1589,9 +1669,19 @@ static void get_local_player_input_blob(
 				{
 					struct biped_datum *biped = biped_try_and_get(player->unit_index);
 
+#ifdef HALO_LINUX
+					/* port: the keyboard's crouch key crouches while walking too,
+					as Halo PC's: its keys always push the stick all the way, past
+					where the controller's crouch stops counting
+					(port/linux/src/xinput_sdl.c) */
+					extern int halo_keyboard_crouch_held(short gamepad_index);
+#endif
 					if (biped &&
 						(controls_enable_crouch ||
 						TEST_FLAG(biped->biped.flags, _biped_airborne_bit) ||
+#ifdef HALO_LINUX
+						halo_keyboard_crouch_held(gamepad_index) ||
+#endif
 						magnitude_squared2d(&input->throttle) < 0.98f * 0.98f))
 					{
 						SET_FLAG(
@@ -1623,6 +1713,32 @@ static void get_local_player_input_blob(
 					input->unit_control_flags,
 					_unit_control_action_bit,
 					effective_buttons[_button_action_reload]);
+#ifdef HALO_LINUX
+				{
+					/* port: the keyboard's RELOAD and ACTION apart, as on Halo PC
+					(port/linux/include/halo_key_bindings.h): its reload key
+					reloads, and its action key acts, never reloading when there is
+					nothing to act on (the controller's X falls back to reloading:
+					players.c). The action is still the scripts' to see (the
+					tutorial's "press the action"): it is taken off after they
+					have (player_control_keyboard_action_only, below) */
+					extern int halo_keyboard_reload_held(short gamepad_index);
+					extern int halo_keyboard_action_held(short gamepad_index);
+
+					if (!TEST_FLAG(control->inhibited_button_bit_vector, _button_action_reload) &&
+						halo_keyboard_reload_held(gamepad_index))
+					{
+						SET_FLAG(input->unit_control_flags, _unit_control_weapon_reload_bit, TRUE);
+					}
+					if (TEST_FLAG(input->unit_control_flags, _unit_control_action_bit) &&
+						halo_keyboard_action_held(gamepad_index) && player->unit_index != NONE &&
+						player->action_result == _player_action_result_reload &&
+						unit_get(player->unit_index)->object.parent_object_index == NONE)
+					{
+						player_control_keyboard_action_only[local_player_index] = TRUE;
+					}
+				}
+#endif
 				SET_FLAG(
 					input->unit_control_flags,
 					_unit_control_swap_weapons_bit,
@@ -1766,6 +1882,15 @@ static void get_local_player_input_blob(
 	}
 
 	player_control_action_test_check_reset_input_blob(input);
+#ifdef HALO_LINUX
+	/* port: (the keyboard's action key with nothing to act on) the scripts
+	have seen it; the unit is not to reload for it */
+	if (player_control_keyboard_action_only[local_player_index])
+		SET_FLAG(input->unit_control_flags, _unit_control_action_bit, FALSE);
+#if !defined(HALO_RELEASE) && !defined(HALO_VITA)
+	player_control_test_action_log(local_player_index, input, player_control_keyboard_action_only[local_player_index]);
+#endif
+#endif
 	match_assert_valid_real(
 		"c:\\halo\\SOURCE\\game\\player_control.c",
 		0x2B6,

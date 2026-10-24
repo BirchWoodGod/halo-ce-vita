@@ -143,6 +143,55 @@ static const struct config_setting config_settings[] =
 		"How far the view turns for the mouse's movement." },
 	{ "input.invert_mouse", _config_boolean, "false", "HALO_MOUSE_INVERT", _environment_set_is_true, _platform_desktop,
 		"Moving the mouse forward looks down." },
+	/* (xinput_sdl.c; the menus' KEYBOARD & MOUSE page sets it, live) */
+	{ "input.raw_mouse", _config_boolean, "true", "HALO_MOUSE_RAW", _environment_value, _platform_desktop,
+		"Aim with the mouse's own motion (raw input), without the system's\n"
+		"pointer speed and acceleration; false uses them, as the desktop does." },
+
+	/* the keyboard and mouse's bindings (port/linux/include/
+	halo_key_bindings.h: key_bindings.c's defaults are these, Halo MCC's, and
+	run_key_bindings_test.sh checks they agree; the menus' KEYBOARD & MOUSE
+	page writes them; read again when written) */
+	{ "controls.keyboard.move_forward", _config_string, "\"W\"", "HALO_KEY_MOVE_FORWARD", _environment_value,
+		_platform_desktop,
+		"Each action's keys, mouse buttons (\"Mouse Left\", \"Mouse 4\") or wheel\n"
+		"(\"Wheel\", \"Wheel Up\"), several separated by commas, named by where\n"
+		"the key is on a US keyboard (SDL's names); \"\" for none. KEYBOARD &\n"
+		"MOUSE in the menus changes them. Escape always pauses.\n"
+		"Walk forward." },
+	{ "controls.keyboard.move_backward", _config_string, "\"S\"", "HALO_KEY_MOVE_BACKWARD", _environment_value,
+		_platform_desktop, "Walk backward." },
+	{ "controls.keyboard.strafe_left", _config_string, "\"A\"", "HALO_KEY_STRAFE_LEFT", _environment_value,
+		_platform_desktop, "Step left." },
+	{ "controls.keyboard.strafe_right", _config_string, "\"D\"", "HALO_KEY_STRAFE_RIGHT", _environment_value,
+		_platform_desktop, "Step right." },
+	{ "controls.keyboard.jump", _config_string, "\"Space\"", "HALO_KEY_JUMP", _environment_value, _platform_desktop,
+		"Jump." },
+	{ "controls.keyboard.crouch", _config_string, "\"Left Ctrl, C\"", "HALO_KEY_CROUCH", _environment_value,
+		_platform_desktop, "Crouch, held (walking too)." },
+	{ "controls.keyboard.boost", _config_string, "\"Left Shift\"", "HALO_KEY_BOOST", _environment_value,
+		_platform_desktop, "Boost the Halo 2 vehicle you drive (Halo 2 PC's Shift)." },
+	{ "controls.keyboard.fire", _config_string, "\"Mouse Left\"", "HALO_KEY_FIRE", _environment_value,
+		_platform_desktop, "Fire." },
+	{ "controls.keyboard.zoom", _config_string, "\"Mouse Right, Z\"", "HALO_KEY_ZOOM", _environment_value,
+		_platform_desktop, "Zoom a scoped weapon." },
+	{ "controls.keyboard.throw_grenade", _config_string, "\"G\"", "HALO_KEY_THROW_GRENADE", _environment_value,
+		_platform_desktop, "Throw a grenade." },
+	{ "controls.keyboard.melee", _config_string, "\"F, Mouse 4\"", "HALO_KEY_MELEE", _environment_value,
+		_platform_desktop, "Melee." },
+	{ "controls.keyboard.reload", _config_string, "\"R\"", "HALO_KEY_RELOAD", _environment_value, _platform_desktop,
+		"Reload." },
+	{ "controls.keyboard.switch_weapon", _config_string, "\"Tab, Wheel\"", "HALO_KEY_SWITCH_WEAPON", _environment_value,
+		_platform_desktop, "Switch weapons." },
+	{ "controls.keyboard.switch_grenade", _config_string, "\"H, Mouse Middle\"", "HALO_KEY_SWITCH_GRENADE",
+		_environment_value, _platform_desktop, "Switch grenades." },
+	{ "controls.keyboard.action", _config_string, "\"E\"", "HALO_KEY_ACTION", _environment_value, _platform_desktop,
+		"The action: get in or out of a vehicle, pick up (held: swap weapons),\n"
+		"press a switch. It never reloads (reload does), as on Halo PC." },
+	{ "controls.keyboard.flashlight", _config_string, "\"Q\"", "HALO_KEY_FLASHLIGHT", _environment_value,
+		_platform_desktop, "The flashlight." },
+	{ "controls.keyboard.scoreboard", _config_string, "\"Backspace\"", "HALO_KEY_SCOREBOARD", _environment_value,
+		_platform_desktop, "Show the scores, held." },
 
 	{ "game.console_log", _config_string, "\"important\"", "HALO_CONSOLE_LOG", _environment_value, _platform_all,
 		"What the game's console shows on screen of what it logs: \"important\"\n"
@@ -708,6 +757,17 @@ static void config_path(char *path, size_t size)
 #else
 	/* the executable's folder, with its separator */
 	const char *base = SDL_GetBasePath();
+#ifndef HALO_RELEASE
+	/* (tests only) HALO_TEST_CONFIG: a config.toml of the test's own, not
+	the one beside the harness (run_pc_controls_test.sh) */
+	const char *test = getenv("HALO_TEST_CONFIG");
+
+	if (test && *test)
+	{
+		snprintf(path, size, "%s", test);
+		return;
+	}
+#endif
 
 	snprintf(path, size, "%sconfig.toml", base ? base : "");
 #endif
@@ -902,7 +962,7 @@ static char *config_copy(const char *text, size_t length)
 default */
 static void config_append_setting(struct config_text *text, const struct config_setting *setting)
 {
-	const char *dot = strchr(setting->name, '.');
+	const char *dot = strrchr(setting->name, '.');
 	const char *line;
 	char buffer[256];
 
@@ -938,13 +998,16 @@ static void config_append_setting(struct config_text *text, const struct config_
 }
 
 /* whether the setting other is in name's section ("network" of
-"network.online") */
+"network.online"; a section is all before the last dot) */
 static int config_same_section(const char *name, const char *other)
 {
-	const char *dot = strchr(name, '.');
+	const char *dot = strrchr(name, '.');
+	const char *other_dot = strrchr(other, '.');
 	size_t length = dot ? (size_t)(dot - name) : strlen(name);
 
-	return !strncmp(name, other, length) && other[length] == '.';
+	/* (the section is all before the last dot: "controls.keyboard" of
+	"controls.keyboard.fire", which is not "controls"'s) */
+	return other_dot && (size_t)(other_dot - other) == length && !strncmp(name, other, length);
 }
 
 /* the file with every setting of this build at its default: each section
@@ -974,7 +1037,7 @@ static char *config_default_text(void)
 	for (index = 0; index < NUMBER_OF_CONFIG_SETTINGS; index++)
 	{
 		const struct config_setting *setting = &config_settings[index];
-		const char *dot = strchr(setting->name, '.');
+		const char *dot = strrchr(setting->name, '.');
 		char buffer[64];
 		size_t other;
 
@@ -1074,11 +1137,11 @@ static char *config_add_missing(const char *text, toml_datum_t table)
 	for (index = 0; index < NUMBER_OF_CONFIG_SETTINGS; index++)
 	{
 		const struct config_setting *setting = &config_settings[index];
-		const char *dot = strchr(setting->name, '.');
+		const char *dot = strrchr(setting->name, '.');
 		const char *current = result ? result : text;
 		struct config_text block = { NULL, 0, 0 };
 		struct config_text updated = { NULL, 0, 0 };
-		char section[40], header[48];
+		char section[64], header[72];
 		const char *line;
 		const char *insert = NULL;
 
@@ -1091,7 +1154,7 @@ static char *config_add_missing(const char *text, toml_datum_t table)
 		{
 			const char *start = line;
 			size_t length = strcspn(line, "\n");
-			char name[40];
+			char name[64];
 			int opens = config_line_section(line, line + length, name, sizeof(name));
 
 			while (*start == ' ' || *start == '\t')
@@ -1146,7 +1209,7 @@ line added after the section's last (a new section at the end when there
 is none). NULL when out of memory or name is no "section.key" */
 static char *config_text_set(const char *text, const char *name, const char *value)
 {
-	const char *dot = strchr(name, '.');
+	const char *dot = strrchr(name, '.');
 	char section[64], current[64], line_text[1024];
 	struct config_text out = { NULL, 0, 0 };
 	const char *line;
@@ -1221,7 +1284,7 @@ was kept beside it as config.toml.broken. */
 it, the first), or NULL */
 static char *config_text_value(const char *text, const char *name)
 {
-	const char *dot = strchr(name, '.');
+	const char *dot = strrchr(name, '.');
 	char section[64], current[64];
 	const char *line;
 	int in_section = 0, any_section = 0;
@@ -1548,30 +1611,31 @@ static long config_setting_index(const char *name)
 	return -1;
 }
 
-/* keys in the file that are no setting, likely misspelt */
-static void config_report_unknown_keys(toml_datum_t table)
+/* keys in the file that are no setting, likely misspelt; a table in a
+section ([controls.keyboard] in [controls]) looked into with its name */
+static void config_report_unknown_table(toml_datum_t table, const char *prefix)
 {
-	int section_index;
+	int key_index;
 
-	for (section_index = 0; section_index < table.u.tab.size; section_index++)
+	for (key_index = 0; key_index < table.u.tab.size; key_index++)
 	{
-		toml_datum_t section = table.u.tab.value[section_index];
-		int key_index;
+		toml_datum_t value = table.u.tab.value[key_index];
+		char name[128];
 
-		if (section.type != TOML_TABLE)
+		snprintf(name, sizeof(name), "%s%s%s", prefix, *prefix ? "." : "", table.u.tab.key[key_index]);
+		if (value.type == TOML_TABLE && config_setting_index(name) < 0)
 		{
-			platform_log("config.toml line %d: unknown setting %s", section.lineno, table.u.tab.key[section_index]);
+			config_report_unknown_table(value, name);
 			continue;
 		}
-		for (key_index = 0; key_index < section.u.tab.size; key_index++)
-		{
-			char name[128];
-
-			snprintf(name, sizeof(name), "%s.%s", table.u.tab.key[section_index], section.u.tab.key[key_index]);
-			if (config_setting_index(name) < 0)
-				platform_log("config.toml line %d: unknown setting %s", section.u.tab.value[key_index].lineno, name);
-		}
+		if (!*prefix || config_setting_index(name) < 0)
+			platform_log("config.toml line %d: unknown setting %s", value.lineno, name);
 	}
+}
+
+static void config_report_unknown_keys(toml_datum_t table)
+{
+	config_report_unknown_table(table, "");
 }
 
 static void config_load(void)
@@ -1706,9 +1770,11 @@ static const struct config_value *config_value(const char *name, enum config_typ
 
 /* ---------- writing a setting */
 
-/* sets a boolean setting, for now and in config.toml: its line there is
-changed (or added), the rest of the file kept as it is */
-int config_write_boolean(const char *name, int value)
+/* sets a setting, for now (from value_text, as the environment variable
+would give it) and in config.toml (toml, the value as the file writes it):
+its line there is changed (or added), the rest of the file kept as it is.
+The readers that keep a setting are told (halo_settings_generation) */
+static int config_write_value(const char *name, enum config_type type, const char *value_text, const char *toml)
 {
 	long index = config_setting_index(name);
 	char path[1024], error[200];
@@ -1716,12 +1782,23 @@ int config_write_boolean(const char *name, int value)
 	char *text, *updated = NULL;
 	int succeeded = 0;
 
-	if (index < 0 || config_settings[index].type != _config_boolean || !strchr(name, '.'))
+	if (index < 0 || config_settings[index].type != type || !strchr(name, '.'))
 		return 0;
 	/* (the file read first, as the other settings are) */
-	config_boolean(name);
+	config_value(name, type);
 	pthread_mutex_lock(&config_lock);
-	config_values[index].boolean = value != 0;
+	if (type == _config_string)
+	{
+		/* (the old text kept, not freed: another thread may be reading it,
+		as config_set_override's) */
+		char *copy = strdup(value_text);
+
+		if (copy)
+			config_values[index].string = copy;
+	}
+	else
+		config_set_from_text(&config_values[index], type, value_text);
+	halo_settings_generation++;
 	config_path(path, sizeof(path));
 	text = config_read_file(path, &size);
 	/* (a file gone since the start is written whole again; one there that
@@ -1729,7 +1806,7 @@ int config_write_boolean(const char *name, int value)
 	if (!text && !config_file_exists(path))
 		text = config_default_text();
 	if (text)
-		updated = config_text_set(text, name, value ? "true" : "false");
+		updated = config_text_set(text, name, toml);
 	if (!updated)
 		platform_log("settings: cannot write %s to %s", name, path);
 	/* (never a file that does not read back) */
@@ -1741,6 +1818,64 @@ int config_write_boolean(const char *name, int value)
 	free(updated);
 	free(text);
 	return succeeded;
+}
+
+/* sets a boolean setting, for now and in config.toml: its line there is
+changed (or added), the rest of the file kept as it is */
+int config_write_boolean(const char *name, int value)
+{
+	return config_write_value(name, _config_boolean, value ? "true" : "false", value ? "true" : "false");
+}
+
+/* a string setting, likewise: written as a TOML basic string, its quotes
+and backslashes escaped and anything below a space left out */
+int config_write_string(const char *name, const char *value)
+{
+	char toml[512], clean[256];
+	size_t length = 0, clean_length = 0;
+
+	toml[length++] = '"';
+	for (; value && *value && length + 3 < sizeof(toml) && clean_length + 1 < sizeof(clean); value++)
+	{
+		if ((unsigned char)*value < 0x20 || *value == 0x7f)
+			continue;
+		if (*value == '"' || *value == '\\')
+			toml[length++] = '\\';
+		toml[length++] = *value;
+		clean[clean_length++] = *value;
+	}
+	toml[length++] = '"';
+	toml[length] = 0;
+	clean[clean_length] = 0;
+	return config_write_value(name, _config_string, clean, toml);
+}
+
+/* a real setting, likewise ("1.25") */
+int config_write_real(const char *name, double value)
+{
+	char text[64];
+
+	snprintf(text, sizeof(text), "%.3f", value);
+	return config_write_value(name, _config_real, text, text);
+}
+
+/* a setting's default as text (a string's without its quotes), 1 if the
+setting exists */
+int config_default_text_of(const char *name, char *text, size_t size)
+{
+	long index = config_setting_index(name);
+	const char *value;
+	size_t length;
+
+	if (index < 0 || !size)
+		return 0;
+	value = config_settings[index].default_value;
+	length = strlen(value);
+	if (config_settings[index].type == _config_string && length >= 2)
+		snprintf(text, size, "%.*s", (int)(length - 2), value + 1);
+	else
+		snprintf(text, size, "%s", value);
+	return 1;
 }
 
 /* sets a setting for this run only, from text as its environment variable
