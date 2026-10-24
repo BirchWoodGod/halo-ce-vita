@@ -1203,6 +1203,7 @@
 "Play with the PS Vitas on your Wi-Fi\nnetwork, as the Xbox's System Link (the\nsettings panel's Connection: Same\nWi-Fi)." = "Juega con las PS Vita de tu red Wi-Fi,\ncomo el System Link de Xbox (Conexión:\nMisma Wi-Fi en el panel de ajustes)."
 "Play with the PS Vitas near you, with no\nrouter: choosing it opens the system's\nad hoc dialog (the settings panel's\nConnection: Ad hoc)." = "Juega con las PS Vita cercanas, sin\nrouter: al elegirlo se abre el diálogo\nad hoc del sistema (Conexión: Ad hoc en\nel panel de ajustes)."
 "Play on this PS Vita alone: split screen,\nwith several controllers." = "Juega solo en esta PS Vita: pantalla\ndividida, con varios mandos."
+"Forge on this PS Vita alone: no one else\njoins; START FORGE builds right away." = "Forja solo en esta PS Vita: nadie más\nse une; EMPEZAR FORJA construye ya."
 "The game type your game starts with. Your\nown are made in EDIT GAME TYPES, on the lobby." = "El tipo de juego con el que empieza tu partida.\nLos tuyos se crean en EDITAR TIPOS DE JUEGO."
 "BATTLE CREEK" = "BATTLE CREEK"
 "SIDEWINDER" = "SIDEWINDER"

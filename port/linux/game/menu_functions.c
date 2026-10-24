@@ -17677,6 +17677,16 @@ void pc_menu_game_data_function_invoke(
 		/* (AD HOC: the PS Vitas' own, none on a PC) */
 		h3_pick_update(widget, NUMBER_OF_H3_NETWORKS, config_adhoc_offered() ? NONE : _h3_network_adhoc, "network_picture",
 			"network_text");
+		/* (the Forge lobby's NETWORK picker: OFFLINE is Forge alone on this Vita, not the
+		multiplayer lobby's split screen - the list's extra words) */
+		if (h3_forge.lobby_last)
+		{
+			struct widget_instance *words = named(screen_of(widget), "network_text");
+
+			if (words && words->type == _ui_widget_type_text_box &&
+				words->parameters.text_box.string_list_index == _h3_network_offline)
+				string_show(words, NUMBER_OF_H3_NETWORKS);
+		}
 		break;
 	case _input_h3_maps:
 		if (widget->type == _ui_widget_type_column_list)
