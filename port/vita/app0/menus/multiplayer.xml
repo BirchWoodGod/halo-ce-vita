@@ -66,6 +66,7 @@
 	</widget>
 	<widget name="mp/offline_text" type="text" left="68" top="110" width="520" height="200" string_list="offline" font="ui\large_ui" color="#FFFFFFFF"/>
 	<widget name="mp/offline" flags="pass_unhandled_to_focused_child" bitmap="gradient">
+		<on event="a start" run="port settings panel multiplayer"/>
 		<child widget="mp/header"/>
 		<child widget="mp/offline_text"/>
 		<child widget="ui\shell\main_menu\button_key"/>

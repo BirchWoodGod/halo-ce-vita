@@ -385,7 +385,7 @@ static char const *const port_function_names[] =
 	"port h3 browse system link", "port h3 map set", "port h3 map focus", "port h3 gametype set",
 	"port h3 gametype focus", "port h3 gametype page up", "port h3 gametype page down", "port h3 setup hold",
 	"port h3 campaign network set", "port h3 campaign network focus", "port h3 campaign host",
-	"port h3 campaign focus", "port h3 scene", "port settings panel",
+	"port h3 campaign focus", "port h3 scene", "port settings panel", "port settings panel multiplayer",
 	"port h3 profiles campaign", "port h3 profiles customize", "port h3 profile play", "port h3 profile edit",
 	"port h3 profile create", "port h3 profile delete ask", "port h3 profile delete", "port h3 profile page up",
 	"port h3 profile page down", "port h3 custom next", "port h3 custom previous", "port h3 custom save",
@@ -3021,6 +3021,16 @@ boolean pc_menu_tag(
 {
 	return menu_tags.loaded && tag_index != NONE &&
 		DATUM_INDEX_TO_ABSOLUTE_INDEX(tag_index) >= menu_tags.original_count;
+}
+
+/* (Menu style Halo CE: Start on the main menu opens the settings panel, as Halo 3's does -
+the Xbox's list is the map's widget, which runs no port function but this one, which opens a
+panel and changes nothing: menu_functions.c's "port settings panel") */
+boolean pc_menu_function_is_settings_panel(
+	long function_index)
+{
+	return function_index >= 0 && function_index < (long)NUMBEROF(port_function_names) &&
+		!strcmp(port_function_names[function_index], "port settings panel");
 }
 
 char const *pc_menu_function_name(

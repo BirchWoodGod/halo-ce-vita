@@ -376,15 +376,25 @@ static const struct config_setting config_settings[] =
 	{ "menus.carnage_report", _config_string, "\"halo3\"", "HALO_CARNAGE_REPORT", _environment_value, _platform_all,
 		"With the Halo 3 menus, the report at a multiplayer game's end: \"halo3\"\n"
 		"(Halo 3's CARNAGE REPORT: port/vita/app0/menus/halo3/carnage.xml) or\n"
-		"\"classic\" (the game's own). Menu style Halo CE always shows the\n"
-		"game's own. The Vita's settings panel (Game, Menus, Carnage report)\n"
-		"sets it." },
+		"\"classic\" (the game's own). Menu style Halo CE has its own\n"
+		"menus.classic_carnage_report. The Vita's settings panel (Game, Menus,\n"
+		"Carnage report) sets it." },
 	{ "menus.scoreboard", _config_string, "\"halo3\"", "HALO_SCOREBOARD", _environment_value, _platform_all,
 		"With the Halo 3 menus, the scores while Back is held in a multiplayer\n"
 		"game: \"halo3\" (Halo 3's scoreboard: port/vita/app0/menus/halo3/\n"
-		"scoreboard.xml) or \"classic\" (the game's own). Menu style Halo CE\n"
-		"always shows the game's own. The Vita's settings panel (Game, Menus,\n"
-		"Scoreboard) sets it." },
+		"scoreboard.xml) or \"classic\" (the game's own). Menu style Halo CE has\n"
+		"its own menus.classic_scoreboard. The Vita's settings panel (Game,\n"
+		"Menus, Scoreboard) sets it." },
+	{ "menus.classic_carnage_report", _config_string, "\"classic\"", "HALO_CLASSIC_CARNAGE_REPORT", _environment_value, _platform_all,
+		"With Menu style Halo CE, the report at a multiplayer game's end:\n"
+		"\"classic\" (the game's own, the default) or \"halo3\" (Halo 3's\n"
+		"CARNAGE REPORT, as menus.carnage_report with the Halo 3 menus). The\n"
+		"Vita's settings panel (Game, Menus, Carnage report) sets it." },
+	{ "menus.classic_scoreboard", _config_string, "\"classic\"", "HALO_CLASSIC_SCOREBOARD", _environment_value, _platform_all,
+		"With Menu style Halo CE, the scores while Back is held in a\n"
+		"multiplayer game: \"classic\" (the game's own, the default) or \"halo3\"\n"
+		"(Halo 3's scoreboard, with its player options: mute, add friend,\n"
+		"kick). The Vita's settings panel (Game, Menus, Scoreboard) sets it." },
 	{ "menus.scenes", _config_boolean, "true", "HALO_MENU_SCENES", _environment_value, _platform_all,
 		"With the Halo 3 menus, a camera of its own behind each lobby (the\n"
 		"campaign, multiplayer and Forge lobbies: their scene= in\n"

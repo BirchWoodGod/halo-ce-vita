@@ -277,6 +277,7 @@ enum
 	_function_h3_campaign_focus,
 	_function_h3_scene,
 	_function_settings_panel,
+	_function_settings_panel_multiplayer,
 	_function_h3_profiles_campaign,
 	_function_h3_profiles_customize,
 	_function_h3_profile_play,
@@ -5390,6 +5391,12 @@ static void h3_custom_save(void)
 		platform_log("menus: h3 customize: %s could not be saved", name);
 		return;
 	}
+	/* (opened from the Xbox's profile settings: player_ui_save_profile ends the
+	editing, which those screens still need - their B read it and closed the
+	screen, "no saved game file is being edited" -; the saved profile taken up
+	again, nothing changed in it yet) */
+	if (h3_custom.classic)
+		player_ui_begin_editing_profile(h3_custom.index);
 	if (h3_profile_same(player_ui_get_active_player_profile_index(0), h3_custom.index))
 		player_ui_set_active_player_profile(0, player_ui_get_active_player_profile_index(0), &saved);
 	h3_profiles.focus_index = h3_custom.index;
@@ -8455,6 +8462,9 @@ static void browser_test_games(void)
 		snprintf(entry->gametype, sizeof(entry->gametype), "%s", gametypes[index % 4]);
 		entry->players = (int)(index * 7 % 16);
 		entry->maximum = 16;
+		/* (HALO_TEST_BROWSER_BOTS=N: N of each game's players are bots, as a dedicated server's listing says) */
+		if (getenv("HALO_TEST_BROWSER_BOTS") && atoi(getenv("HALO_TEST_BROWSER_BOTS")) > 0)
+			entry->bots = MIN(atoi(getenv("HALO_TEST_BROWSER_BOTS")), entry->players);
 		entry->open = entry->compatible = 1;
 		snprintf(entry->tag, sizeof(entry->tag), "%s", crossplay_guard_tag(CROSSPLAY_PLATFORM_VITA));
 		snprintf(entry->badge, sizeof(entry->badge), "%s", entry->tag);
@@ -9170,10 +9180,19 @@ static void browser_update(struct widget_instance *list)
 		the bots apart too, "6+5/16", in its narrow column) */
 		else if (entry->bots > 0 && entry->bots <= entry->players)
 		{
-			if (entry->maximum > 0)
-				snprintf(text, sizeof(text), "%d+%d/%d", entry->players - entry->bots, entry->bots, entry->maximum);
-			else
-				snprintf(text, sizeof(text), "%d+%d", entry->players - entry->bots, entry->bots);
+			char bots_text[24];
+
+			/* (said as "6+5 bots" while that fits the column, else "6+5/16": the Players line under
+			the list names them both) */
+			snprintf(bots_text, sizeof(bots_text), T("%d bots"), entry->bots);
+			snprintf(text, sizeof(text), "%d+%s", entry->players - entry->bots, bots_text);
+			if (row_column(child, "row_players", text))
+			{
+				if (entry->maximum > 0)
+					snprintf(text, sizeof(text), "%d+%d/%d", entry->players - entry->bots, entry->bots, entry->maximum);
+				else
+					snprintf(text, sizeof(text), "%d+%d", entry->players - entry->bots, entry->bots);
+			}
 		}
 		row_column(child, "row_players", text);
 #ifndef HALO_RELEASE
@@ -13431,11 +13450,21 @@ static long h3_carnage_continue_seconds(void)
 static boolean h3_carnage_wanted(void)
 {
 	/* (its variable, live; else config.toml's) */
-	char const *report = getenv("HALO_CARNAGE_REPORT");
+	char const *report;
 
+	/* (Menu style Halo CE: the game's own unless menus.classic_carnage_report -
+	HALO_CLASSIC_CARNAGE_REPORT - is "halo3") */
+	if (!halo_menu_style_halo3())
+	{
+		report = getenv("HALO_CLASSIC_CARNAGE_REPORT");
+		if (!report)
+			report = config_string("menus.classic_carnage_report");
+		return !strcmp(report, "halo3");
+	}
+	report = getenv("HALO_CARNAGE_REPORT");
 	if (!report)
 		report = config_string("menus.carnage_report");
-	return halo_menu_style_halo3() && strcmp(report, "classic") != 0;
+	return strcmp(report, "classic") != 0;
 }
 
 /* this machine's network game, not split screen's (PLAYERS, LEAVE) */
@@ -13784,7 +13813,7 @@ static void h3_carnage_frame(boolean main_menu_loaded)
 		h3_carnage.end_said = TRUE;
 		platform_log("menus: h3 carnage: the game is over: %s", h3_carnage_wanted() ? "the Halo 3 carnage report" :
 			halo_menu_style_halo3() ? "the game's own report (menus.carnage_report classic)" :
-			"the game's own report (Menu style Halo CE)");
+			"the game's own report (Menu style Halo CE, menus.classic_carnage_report classic)");
 	}
 	if (h3_carnage.leave_pending)
 	{
@@ -14009,11 +14038,21 @@ static boolean h3_scoreboard_other_person(struct h3_scoreboard_row const *row);
 static boolean h3_scoreboard_wanted(void)
 {
 	/* (its variable, live; else config.toml's) */
-	char const *board = getenv("HALO_SCOREBOARD");
+	char const *board;
 
+	/* (Menu style Halo CE: the game's own unless menus.classic_scoreboard -
+	HALO_CLASSIC_SCOREBOARD - is "halo3") */
+	if (!halo_menu_style_halo3())
+	{
+		board = getenv("HALO_CLASSIC_SCOREBOARD");
+		if (!board)
+			board = config_string("menus.classic_scoreboard");
+		return !strcmp(board, "halo3");
+	}
+	board = getenv("HALO_SCOREBOARD");
 	if (!board)
 		board = config_string("menus.scoreboard");
-	return halo_menu_style_halo3() && strcmp(board, "classic") != 0;
+	return strcmp(board, "classic") != 0;
 }
 
 /* (tests, never in release builds) HALO_TEST_SCOREBOARD_PARTY and
@@ -18636,6 +18675,17 @@ boolean pc_menu_event_function_invoke(
 		platform_log("menus: the settings panel asked for (none on this build)");
 		return TRUE;
 #endif
+	/* (the classic Multiplayer screens that say internet play is off: A opens the panel at
+	its Multiplayer tab, where Connection is; the handler fails, as above) */
+	case _function_settings_panel_multiplayer:
+#ifdef HALO_VITA
+		__atomic_store_n(&halo_settings_panel_request, HALO_SETTINGS_PANEL_MULTIPLAYER, __ATOMIC_RELEASE);
+		platform_log("menus: the settings panel's Multiplayer tab asked for");
+		return FALSE;
+#else
+		platform_log("menus: the settings panel's Multiplayer tab asked for (none on this build)");
+		return TRUE;
+#endif
 	case _function_h3_campaign_init:
 		h3_campaign_initialize();
 		return TRUE;
@@ -19535,6 +19585,16 @@ void pc_menu_game_data_function_invoke(
 		/* (AD HOC: the PS Vitas' own, none on a PC) */
 		h3_pick_update(widget, NUMBER_OF_H3_NETWORKS, config_adhoc_offered() ? NONE : _h3_network_adhoc, "network_picture",
 			"network_text");
+		/* (the Forge lobby's NETWORK picker: OFFLINE is Forge alone on this Vita, not the
+		multiplayer lobby's split screen - the list's extra words) */
+		if (h3_forge.lobby_last)
+		{
+			struct widget_instance *words = named(screen_of(widget), "network_text");
+
+			if (words && words->type == _ui_widget_type_text_box &&
+				words->parameters.text_box.string_list_index == _h3_network_offline)
+				string_show(words, NUMBER_OF_H3_NETWORKS);
+		}
 		break;
 	case _input_h3_maps:
 		if (widget->type == _ui_widget_type_column_list)
@@ -19882,6 +19942,24 @@ static void ce_lobby_update(struct widget_instance *list)
 	}
 	else
 		text_show(named(screen, "variant_value"), "");
+	/* (a game hosted online: its code and PUBLIC or PRIVATE, in the panel under the
+	words: its code only once the brokers have it, as the Halo 3 lobby's) */
+	text[0] = 0;
+	if (server && config_boolean("network.online") && p2p_running())
+	{
+		char code[32], reach[160];
+		int password = 0;
+
+		code[0] = 0;
+		p2p_hosting_code(code, (int)sizeof(code));
+		if (p2p_lobby_brokers_status(reach, (int)sizeof(reach)) != P2P_LOBBY_BROWSE_EMPTY ||
+			p2p_lobby_hosting_status(reach, (int)sizeof(reach)) == P2P_LOBBY_HOSTING_UNREACHABLE)
+			code[0] = 0;
+		if (code[0])
+			snprintf(text, sizeof(text), "%s %s  %s", T("CODE:"), code,
+				p2p_lobby_hosting_listed(&password) ? T("PUBLIC") : T("PRIVATE"));
+	}
+	text_show(named(screen, "code_value"), text);
 	for (child = list->child; child && child != list->focused_child; child = child->next)
 		index++;
 	string_show(named(screen, "lobby_help"), index);

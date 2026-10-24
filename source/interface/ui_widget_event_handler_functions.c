@@ -3821,6 +3821,7 @@ static boolean ui_widget_function_denied(
 {
 	extern boolean pc_menu_tag(long tag_index);
 	extern boolean main_menu_is_active(void);
+	extern boolean pc_menu_function_is_settings_panel(long function_index);
 	static short const main_menu_functions[] =
 	{
 		41, /* mp profile change name */
@@ -3836,6 +3837,12 @@ static boolean ui_widget_function_denied(
 
 	if (pc_menu_tag(widget->definition_tag_index))
 		return FALSE;
+	/* (Start on Menu style Halo CE's main menu, the map's list: the settings panel opens) */
+	if (function_index >= 256 && function_index < 0x8000 && main_menu_is_active() &&
+		pc_menu_function_is_settings_panel(function_index - 256))
+	{
+		return FALSE;
+	}
 	if (function_index >= 256 && function_index < 0x8000)
 	{
 		denied = TRUE;

@@ -104,6 +104,7 @@ The map pictures and descriptions are ui.map's own; the rest this folder's art
 		<string text="Play with the PS Vitas on your Wi-Fi\nnetwork, as the Xbox's System Link (the\nsettings panel's Connection: Same\nWi-Fi)."/>
 		<string text="Play with the PS Vitas near you, with no\nrouter: choosing it opens the system's\nad hoc dialog (the settings panel's\nConnection: Ad hoc)."/>
 		<string text="Play on this PS Vita alone: split screen,\nwith several controllers."/>
+		<string text="Forge on this PS Vita alone: no one else\njoins; START FORGE builds right away."/>
 	</strings>
 	<strings name="h3/maps">
 		<string text="BATTLE CREEK"/>

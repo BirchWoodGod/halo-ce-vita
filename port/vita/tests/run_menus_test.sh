@@ -2452,7 +2452,10 @@ PY
 			HALO_NETWORK_TEST=local:bloodgulch:slayer HALO_BOTS=3 HALO_NETWORK_TEST_SCORES=4
 		profile_from=$HALO_TEST_PROFILE run h3scoreboard_ce "$menus_data" 50 "wait:150:1000" $sb_env HALO_MENU_STYLE=classic \
 			HALO_NETWORK_TEST=local:bloodgulch:slayer HALO_BOTS=3 HALO_NETWORK_TEST_SCORES=4
-		for name in h3scoreboard h3scoreboard_team h3scoreboard_16 h3scoreboard_touch h3scoreboard_split h3scoreboard_es h3scoreboard_classic h3scoreboard_ce; do
+		# (Menu style Halo CE with Halo 3's chosen for it: menus.classic_scoreboard halo3)
+		profile_from=$HALO_TEST_PROFILE run h3scoreboard_ce_h3 "$menus_data" 50 "wait:150:1000" $sb_env HALO_MENU_STYLE=classic \
+			HALO_CLASSIC_SCOREBOARD=halo3 HALO_NETWORK_TEST=local:bloodgulch:slayer HALO_BOTS=3 HALO_NETWORK_TEST_SCORES=4
+		for name in h3scoreboard h3scoreboard_team h3scoreboard_16 h3scoreboard_touch h3scoreboard_split h3scoreboard_es h3scoreboard_classic h3scoreboard_ce h3scoreboard_ce_h3; do
 			log=$out/$name/run.log
 			echo "--- $name"
 			grep -aE "menus: h3 scoreboard: (held|opened|options|rows [0-9]|a drag|Circle|closed)|test (tap|drag)" "$log" | head -12
@@ -2551,6 +2554,8 @@ PY
 			drawn=$(sed -n 's/.*network test: scoreboard held ([0-9]*; drawn in \([0-9]*\) frames so far).*/\1/p' "$log" | tail -1)
 			[ "${drawn:-0}" -gt 0 ] || fail h3scoreboard "$name: the game's own scores were never drawn"
 		done
+		grep -aq "menus: h3 scoreboard: held up" "$out/h3scoreboard_ce_h3/run.log" ||
+			fail h3scoreboard "Menu style Halo CE with menus.classic_scoreboard halo3: Halo 3's scoreboard was not held up"
 		if [ $gxm_null = 1 ]; then
 			echo "SKIP (h3scoreboard): the frames saved (a gxm-null harness: the GL build's check)"
 		else
@@ -2580,7 +2585,10 @@ PY
 			HALO_CARNAGE_REPORT=classic $carnage_env HALO_NETWORK_TEST=local:chillout:slayer HALO_NETWORK_TEST_END=30 HALO_BOTS=3
 		profile_from=$HALO_TEST_PROFILE run h3carnage_ce "$menus_data" 90 "wait:150:1000" HALO_MENU_STYLE=classic \
 			$carnage_env HALO_NETWORK_TEST=local:chillout:slayer HALO_NETWORK_TEST_END=30 HALO_BOTS=3
-		for name in h3carnage h3carnage_team h3carnage_ctf h3carnage_oddball h3carnage_classic h3carnage_ce; do
+		# (Menu style Halo CE with Halo 3's report chosen for it: menus.classic_carnage_report halo3)
+		profile_from=$HALO_TEST_PROFILE run h3carnage_ce_h3 "$menus_data" 90 "$carnage_pad" HALO_MENU_STYLE=classic \
+			HALO_CLASSIC_CARNAGE_REPORT=halo3 $carnage_env HALO_NETWORK_TEST=local:chillout:slayer HALO_NETWORK_TEST_SCORE=3 HALO_BOTS=3
+		for name in h3carnage h3carnage_team h3carnage_ctf h3carnage_oddball h3carnage_classic h3carnage_ce h3carnage_ce_h3; do
 			log=$out/$name/run.log
 			echo "--- $name"
 			grep -aE "carnage: |menus: h3 carnage" "$log" | head -14
@@ -2678,6 +2686,8 @@ PY
 			fail h3carnage "Oddball's report was not a free for all game's"
 		grep -aqE "carnage: row 1: .* score [0-9]+:[0-9][0-9] kills" "$out/h3carnage_oddball/run.log" ||
 			fail h3carnage "Oddball's score was not a time"
+		grep -aq "menus: h3 carnage: the carnage report opened" "$out/h3carnage_ce_h3/run.log" ||
+			fail h3carnage "Menu style Halo CE with menus.classic_carnage_report halo3: the Halo 3 report did not open"
 		for name in h3carnage_classic h3carnage_ce; do
 			log=$out/$name/run.log
 			grep -aq "menus: h3 carnage: the game is over: the game's own report" "$log" ||
@@ -3208,6 +3218,26 @@ PY
 			sed -n "/ui: screen $3/,\$p" "$log" | grep -aq "ui: screen ui.shell.main_menu.main_menu" ||
 				fail ceplusmain "$2: B did not go back to the Xbox's main menu"
 		done
+		# (Start on the main menu, on CAMPAIGN and on a row of the port's: the settings panel asked for,
+		# as Halo 3's main menu does - on a build with one -, no screen opened)
+		run ceplusmain_start "$menus_data" 15 "wait:150:3000 start:150:1500 down:150:500 down:150:500 down:150:500 start:150:1500" HALO_SCENE_PACKS=0
+		log=$out/ceplusmain_start/run.log
+		echo "--- ceplusmain (Start)"
+		grep -aE "ui: screen|settings panel" "$log" | head -6
+		[ "$(cat "$out/ceplusmain_start/exit")" = 0 ] || fail ceplusmain "start: exit $(cat "$out/ceplusmain_start/exit")"
+		[ "$(grep -ac 'menus: the settings panel asked for' "$log")" = 2 ] || fail ceplusmain "start: Start did not ask for the settings panel twice"
+		[ "$(grep -ac 'ui: screen' "$log")" = 1 ] || fail ceplusmain "start: Start opened a screen"
+		grep -aq "may not run event handler function" "$out/ceplusmain_start/data/debug.txt" && fail ceplusmain "start: the main menu's Start was refused"
+		# (MULTIPLAYER, the first row with internet play off: the screen that says so; A asks for the
+		# settings panel's Multiplayer tab, as its footer's A=SELECT promises)
+		run ceplusmain_offline "$menus_data" 15 "wait:150:3000 down:150:800 a:150:3000 a:150:3000 a:150:1500" HALO_SCENE_PACKS=0
+		log=$out/ceplusmain_offline/run.log
+		echo "--- ceplusmain (offline Multiplayer screen's A)"
+		grep -aE "ui: screen|settings panel" "$log" | head -6
+		[ "$(cat "$out/ceplusmain_offline/exit")" = 0 ] || fail ceplusmain "offline: exit $(cat "$out/ceplusmain_offline/exit")"
+		grep -aq "ui: screen pc.mp.offline" "$log" || fail ceplusmain "offline: the screen did not say internet play is off"
+		grep -aq "menus: the settings panel's Multiplayer tab asked for" "$log" ||
+			fail ceplusmain "offline: A did not ask for the settings panel's Multiplayer tab"
 		# (Menu style Halo 3: the map's own list, the Halo 3 main menu, none of the port's rows)
 		run ceplusmain_h3 "$menus_data" 15 "wait:150:3000" HALO_MENU_STYLE=halo3
 		log=$out/ceplusmain_h3/run.log
@@ -3255,7 +3285,22 @@ PY
 		grep -aq "ui: screen pc.h3.custom.screen" "$log" || fail ceplusprofile "MORE OPTIONS did not open the editor"
 		sed -n '/ui: screen pc.h3.custom.screen/,$p' "$log" | grep -aq "ui: screen ui.shell.main_menu.settings_select.player_setup.player_profile_edit.player_profile_edit_screen" ||
 			fail ceplusprofile "B did not go back to the Xbox's profile settings"
-		grep -a "ui: screen" "$log" | tail -1 | grep -q "ui.shell.main_menu.main_menu" || fail ceplusprofile "B, B did not reach the main menu" ;;
+		grep -a "ui: screen" "$log" | tail -1 | grep -q "ui.shell.main_menu.main_menu" || fail ceplusprofile "B, B did not reach the main menu"
+		# (CHANGE COLOR first - the fourth row, A, then B -, then down to MORE OPTIONS, A, B: the editor
+		# saves the colour's edit, which ended the Xbox's editing and made its B close the screen -
+		# "no saved game file is being edited" -; the Xbox's profile settings must still be there, with
+		# SAVE CHANGES not asking for a profile)
+		profile_from=$HALO_TEST_PROFILE run ceplusprofile_color "$menus_data" 34 "wait:150:3000 $d $d a:150:3000 a:150:3000 $d $d $d a:150:3000 b:150:3000 $d a:150:4000 b:150:3500 wait:150:2000 b:150:2500 b:150:2500" \
+			HALO_SCENE_PACKS=0
+		log=$out/ceplusprofile_color/run.log
+		echo "--- ceplusprofile (CHANGE COLOR, then MORE OPTIONS)"
+		grep -aE "ui: screen|ce customize|h3 customize: (saved|editing)" "$log" | head -14
+		[ "$(cat "$out/ceplusprofile_color/exit")" = 0 ] || fail ceplusprofile "color: exit $(cat "$out/ceplusprofile_color/exit")"
+		grep -aq "menus: ce customize: MORE OPTIONS for " "$log" || fail ceplusprofile "color: MORE OPTIONS did not edit the profile"
+		sed -n '/ui: screen pc.h3.custom.screen/,/test pad: wait/p' "$log" | grep -a "ui: screen" | sed -n 2p | grep -aq "player_profile_edit_screen" ||
+			fail ceplusprofile "color: B did not go back to the Xbox's profile settings"
+		sed -n '/ui: screen pc.h3.custom.screen/,/test pad: wait/p' "$log" | grep -aq "player_profile_select_screen" &&
+			fail ceplusprofile "color: the profile settings closed themselves (no profile being edited)" ;;
 	cepluspregame)
 		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
 			echo "--- cepluspregame"; echo "SKIP: no HALO_TEST_PROFILE"; continue
