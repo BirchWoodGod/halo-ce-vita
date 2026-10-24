@@ -1436,8 +1436,10 @@ static unsigned long blob_alloc(struct build_state *state, unsigned long size)
 		unsigned long capacity = state->blob_capacity ? state->blob_capacity : 256 * 1024;
 		unsigned char *grown;
 
+		/* (doubling to 4 MB, then a quarter more: a backdrop's 8.7 MB of tags
+		takes 11 MB of the memory window as it is built, not 16) */
 		while (capacity < end)
-			capacity *= 2;
+			capacity = capacity < 4 * 1024 * 1024 ? capacity * 2 : capacity + capacity / 4;
 		if (capacity > SCENE_PACK_MAXIMUM_TAG_BYTES)
 			capacity = SCENE_PACK_MAXIMUM_TAG_BYTES;
 		grown = scene_pack_big_alloc ? scene_pack_big_alloc(capacity) : NULL;
