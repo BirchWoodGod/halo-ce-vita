@@ -14,8 +14,10 @@ tools/fonts/OFL.txt). The same bytes each run.
   game's column list shows by focus. In English they are only the fallback:
   the game makes them of the player's ui.map's own letters as the menus load
   (port/linux/game/menu_words.c).
-- <lang>/header_lobby_options.png: LOBBY OPTIONS's heading in the look of the
-  Multiplayer screens' (512 x 64 at 35,11: blue capitals 23 pixels high).
+- <lang>/header_lobby_options.png, header_file_share.png,
+  header_mod_manager.png: LOBBY OPTIONS's, FILE SHARE's and MOD MANAGER's
+  headings in the look of the Multiplayer screens' (512 x 64 at 35,11: blue
+  capitals 23 pixels high).
 - In English (en/) and in each language of port/vita/app0/lang (es/), the
   words its file gives them; menu_tags.c picks the language's ({lang}).
 
@@ -35,7 +37,9 @@ ROWS = (('forge', 'FORGE'), ('friends', 'FRIENDS'), ('fileshare', 'FILE SHARE'),
 HEADINGS = (('header_lobby_options', 'LOBBY OPTIONS'),
             # (Classic+'s screens for the port's features: classic/forge.xml, customize.xml)
             ('header_forge', 'FORGE'), ('header_extra_objects', 'EXTRA OBJECTS'),
-            ('header_customization', 'CUSTOMIZATION'))
+            ('header_customization', 'CUSTOMIZATION'),
+            # (classic/fileshare.xml, mods.xml)
+            ('header_file_share', 'FILE SHARE'), ('header_mod_manager', 'MOD MANAGER'))
 
 # (the widget it is drawn into, fit="widget": 226 x 229; the PNG a power of
 # two, so drawn at that scale and stretched back by the game)

@@ -30,10 +30,10 @@
 		<on event="a start" open="h3/friends/screen"/>
 	</widget>
 	<widget name="ce/main/fileshare" extends="ui\shell\main_menu\main_menu_item_settings" bitmap="ce/main/fileshare_art">
-		<on event="a start" run="port fileshare enter" open="h3/fileshare/screen"/>
+		<on event="a start" run="port fileshare enter" open="ce/fileshare/screen"/>
 	</widget>
 	<widget name="ce/main/mods" extends="ui\shell\main_menu\main_menu_item_settings" bitmap="ce/main/mods_art">
-		<on event="a start" run="port h3 mods init" open="h3/mods/screen"/>
+		<on event="a start" run="port h3 mods init" open="ce/mods/screen"/>
 	</widget>
 	<widget name="ce/main/list" extends="ui\shell\main_menu\main_menu_select_list" classic_patch="true" drop="children">
 		<on event="start" run="port settings panel"/>

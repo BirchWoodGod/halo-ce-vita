@@ -39,7 +39,13 @@ Menu style Halo CE's additions (classic/)
   its name, history and look and the Halo 3 menus are as they were.
 - main.xml: the main menu's FORGE, FRIENDS (its PARTY row; the friend code
   and its backup), FILE SHARE and MOD MANAGER under SETTINGS, each opening the
-  port's screen (halo3/forge_lobby.xml, friends.xml, fileshare.xml, mods.xml).
+  port's screen (halo3/forge_lobby.xml, friends.xml; classic/fileshare.xml,
+  mods.xml).
+- fileshare.xml, mods.xml: the main menu's FILE SHARE and MOD MANAGER in
+  the look of the Xbox's list screens (ui.map's gradient, list_item_bkd,
+  list_field, alert_bkd, large_ui and small_ui; the headings drawn by
+  tools/classic_menu_art.py), with Halo 3's File Share's and Mod Manager's
+  functions (halo3/fileshare.xml, mods.xml: the same widgets' last names).
 - profile.xml: SETTINGS' profile settings' MORE OPTIONS (the player model,
   the flaming helmet and the rest: halo3/customize.xml's editor).
 - pregame.xml: the network game's lobby, Y PLAYERS and the right trigger's

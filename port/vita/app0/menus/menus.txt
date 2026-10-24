@@ -8,6 +8,8 @@ classic/main.xml
 classic/pregame.xml
 classic/profile.xml
 classic/keys.xml
+classic/fileshare.xml
+classic/mods.xml
 halo3/campaign.xml
 halo3/profiles.xml
 halo3/profiles_coop.xml

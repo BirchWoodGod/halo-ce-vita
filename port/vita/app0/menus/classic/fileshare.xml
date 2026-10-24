@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Menu style Halo CE: FILE SHARE (the main menu's FILE SHARE row, classic/main.xml) in the look of
+     the Xbox's own list screens (the profile settings, Found Games): ui.map's gradient, the heading
+     at 35,11 (words drawn in the look of the game's headings: tools/classic_menu_art.py,
+     classic/<lang>/), the rows at the left on ui.map's list_item_bkd in its large_ui font, the
+     chosen one's description in ui.map's list_field at the right (its map's picture: ui.map's
+     mp_map_grafix), the button key under them. Every function is Halo 3's File Share's
+     (halo3/fileshare.xml, menu_functions.c's port fileshare: the widgets found by their last name -
+     row_<n>'s row_name and row_map, kind, count, picture, info_name, info_text, status, open,
+     rename, delete); only the look is this file's. No picture or line of text of Bungie's here: the
+     pictures and fonts are the player's ui.map's, read as the menus load -->
+<menus>
+	<bitmap name="ce/fileshare/header_art">
+		<frame png="classic/{lang}/header_file_share.png" width="512" height="64"/>
+	</bitmap>
+	<strings name="ce/fileshare_text">
+		<string text="%a-button OPEN IN FORGE"/>
+		<string text="%x-button RENAME"/>
+		<string text="%y-button DELETE"/>
+		<string text="%b-button BACK"/>
+		<string text="KIND"/>
+		<string text="DELETE MAP VARIANT?"/>
+		<string text="%a-button DELETE   %b-button CANCEL"/>
+	</strings>
+
+	<!-- the rows: twelve (VARIANT_ROWS), each the name and its map, the focused one's frame of
+	     list_item_bkd lit (port fileshare) -->
+	<widget name="ce/fileshare/row_name" type="text" left="10" top="0" width="122" height="25" font="ui\large_ui" color="#FF2896FF" text_y="2" text_flags="no_focus_test"/>
+	<widget name="ce/fileshare/row_map" type="text" left="134" top="0" width="92" height="25" align="right" font="ui\small_ui" color="#FF1F6FBF" text_y="5" text_flags="no_focus_test"/>
+	<widget name="ce/fileshare/row_0" width="232" height="25" bitmap="ui\shell\bitmaps\list_item_bkd_top">
+		<on event="a" run="port fileshare open" open="h3/forge/lobby"/>
+		<child widget="ce/fileshare/row_name"/>
+		<child widget="ce/fileshare/row_map"/>
+	</widget>
+	<widget name="ce/fileshare/row_1" width="232" height="25" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a" run="port fileshare open" open="h3/forge/lobby"/>
+		<child widget="ce/fileshare/row_name"/>
+		<child widget="ce/fileshare/row_map"/>
+	</widget>
+	<widget name="ce/fileshare/row_2" width="232" height="25" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a" run="port fileshare open" open="h3/forge/lobby"/>
+		<child widget="ce/fileshare/row_name"/>
+		<child widget="ce/fileshare/row_map"/>
+	</widget>
+	<widget name="ce/fileshare/row_3" width="232" height="25" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a" run="port fileshare open" open="h3/forge/lobby"/>
+		<child widget="ce/fileshare/row_name"/>
+		<child widget="ce/fileshare/row_map"/>
+	</widget>
+	<widget name="ce/fileshare/row_4" width="232" height="25" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a" run="port fileshare open" open="h3/forge/lobby"/>
+		<child widget="ce/fileshare/row_name"/>
+		<child widget="ce/fileshare/row_map"/>
+	</widget>
+	<widget name="ce/fileshare/row_5" width="232" height="25" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a" run="port fileshare open" open="h3/forge/lobby"/>
+		<child widget="ce/fileshare/row_name"/>
+		<child widget="ce/fileshare/row_map"/>
+	</widget>
+	<widget name="ce/fileshare/row_6" width="232" height="25" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a" run="port fileshare open" open="h3/forge/lobby"/>
+		<child widget="ce/fileshare/row_name"/>
+		<child widget="ce/fileshare/row_map"/>
+	</widget>
+	<widget name="ce/fileshare/row_7" width="232" height="25" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a" run="port fileshare open" open="h3/forge/lobby"/>
+		<child widget="ce/fileshare/row_name"/>
+		<child widget="ce/fileshare/row_map"/>
+	</widget>
+	<widget name="ce/fileshare/row_8" width="232" height="25" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a" run="port fileshare open" open="h3/forge/lobby"/>
+		<child widget="ce/fileshare/row_name"/>
+		<child widget="ce/fileshare/row_map"/>
+	</widget>
+	<widget name="ce/fileshare/row_9" width="232" height="25" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a" run="port fileshare open" open="h3/forge/lobby"/>
+		<child widget="ce/fileshare/row_name"/>
+		<child widget="ce/fileshare/row_map"/>
+	</widget>
+	<widget name="ce/fileshare/row_10" width="232" height="25" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a" run="port fileshare open" open="h3/forge/lobby"/>
+		<child widget="ce/fileshare/row_name"/>
+		<child widget="ce/fileshare/row_map"/>
+	</widget>
+	<widget name="ce/fileshare/row_11" width="232" height="25" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a" run="port fileshare open" open="h3/forge/lobby"/>
+		<child widget="ce/fileshare/row_name"/>
+		<child widget="ce/fileshare/row_map"/>
+	</widget>
+	<widget name="ce/fileshare/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<on event="created" run="port fileshare focus"/>
+		<on event="left_trigger" run="port fileshare page up"/>
+		<on event="right_trigger" run="port fileshare page down"/>
+		<on event="left" run="port fileshare kind"/>
+		<on event="right" run="port fileshare kind"/>
+		<on event="x" run="port fileshare rename"/>
+		<on event="y" open="ce/fileshare/delete/screen" run="port fileshare ask delete"/>
+		<data input="port fileshare"/>
+		<child widget="ce/fileshare/row_0" x="0" y="0"/>
+		<child widget="ce/fileshare/row_1" x="0" y="26"/>
+		<child widget="ce/fileshare/row_2" x="0" y="52"/>
+		<child widget="ce/fileshare/row_3" x="0" y="78"/>
+		<child widget="ce/fileshare/row_4" x="0" y="104"/>
+		<child widget="ce/fileshare/row_5" x="0" y="130"/>
+		<child widget="ce/fileshare/row_6" x="0" y="156"/>
+		<child widget="ce/fileshare/row_7" x="0" y="182"/>
+		<child widget="ce/fileshare/row_8" x="0" y="208"/>
+		<child widget="ce/fileshare/row_9" x="0" y="234"/>
+		<child widget="ce/fileshare/row_10" x="0" y="260"/>
+		<child widget="ce/fileshare/row_11" x="0" y="286"/>
+	</widget>
+
+	<!-- the heading, the kind and the count under it -->
+	<widget name="ce/fileshare/header" left="35" top="11" width="512" height="64" bitmap="ce/fileshare/header_art"/>
+	<widget name="ce/fileshare/kind" type="text" left="51" top="70" width="232" height="18" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="ce/fileshare/count" type="text" left="380" top="54" width="210" height="18" align="right" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<!-- the description: its map's picture, its name, its details, what the last action came to -->
+	<widget name="ce/fileshare/picture" left="290" top="92" width="140" height="114" bitmap="h3/mp_maps"/>
+	<widget name="ce/fileshare/info_name" type="text" left="290" top="214" width="300" height="24" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="ce/fileshare/info_text" type="text" left="290" top="240" width="300" height="100" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="ce/fileshare/status" type="text" left="290" top="344" width="300" height="50" font="ui\small_ui" color="#FFCCCCCC" text_flags="no_focus_test"/>
+	<widget name="ce/fileshare/description" left="275" top="88" width="320" height="312" bitmap="ui\shell\bitmaps\list_field">
+		<child widget="ce/fileshare/picture"/>
+		<child widget="ce/fileshare/info_name"/>
+		<child widget="ce/fileshare/info_text"/>
+		<child widget="ce/fileshare/status"/>
+	</widget>
+	<widget name="ce/fileshare/blueline" left="51" top="88" width="232" height="2" bitmap="ui\shell\bitmaps\blue"/>
+	<!-- the button key (the map variants' actions hidden with game variants: open, rename,
+	     delete) -->
+	<widget name="ce/fileshare/open" type="text" left="40" top="414" width="170" height="24" font="ui\large_ui" color="#FF2896FF" string_list="ce/fileshare_text" string_index="0" text_flags="no_focus_test"/>
+	<widget name="ce/fileshare/rename" type="text" left="214" top="414" width="104" height="24" font="ui\large_ui" color="#FF2896FF" string_list="ce/fileshare_text" string_index="1" text_flags="no_focus_test"/>
+	<widget name="ce/fileshare/delete" type="text" left="320" top="414" width="104" height="24" font="ui\large_ui" color="#FF2896FF" string_list="ce/fileshare_text" string_index="2" text_flags="no_focus_test"/>
+	<widget name="ce/fileshare/back" type="text" left="426" top="414" width="86" height="24" font="ui\large_ui" color="#FF2896FF" string_list="ce/fileshare_text" string_index="3" text_flags="no_focus_test"/>
+	<widget name="ce/fileshare/kind_left" left="514" top="418" width="12" height="16" bitmap="ui\shell\bitmaps\arrow_sm_left"/>
+	<widget name="ce/fileshare/kind_right" left="528" top="418" width="12" height="16" bitmap="ui\shell\bitmaps\arrow_sm_right"/>
+	<widget name="ce/fileshare/kind_label" type="text" left="544" top="414" width="66" height="24" font="ui\large_ui" color="#FF2896FF" string_list="ce/fileshare_text" string_index="4" text_flags="no_focus_test"/>
+	<widget name="ce/fileshare/screen" flags="pass_unhandled_to_focused_child" bitmap="ui\shell\bitmaps\gradient">
+		<on event="created" run="port fileshare init"/>
+		<on event="b back" back="true"/>
+		<child widget="ce/fileshare/header"/>
+		<child widget="ce/fileshare/kind"/>
+		<child widget="ce/fileshare/count"/>
+		<child widget="ce/fileshare/blueline"/>
+		<child widget="ce/fileshare/description"/>
+		<child widget="ce/fileshare/open"/>
+		<child widget="ce/fileshare/rename"/>
+		<child widget="ce/fileshare/delete"/>
+		<child widget="ce/fileshare/back"/>
+		<child widget="ce/fileshare/kind_left"/>
+		<child widget="ce/fileshare/kind_right"/>
+		<child widget="ce/fileshare/kind_label"/>
+		<child widget="ce/fileshare/list" x="51" y="96"/>
+	</widget>
+
+	<!-- deleting, asked first: the Xbox's question (ui.map's confirm_delete_gametype: the grey over
+	     the screen, alert_bkd's box, its large_ui words), its words written by port fileshare
+	     question -->
+	<widget name="ce/fileshare/delete/title" type="text" left="56" top="160" width="528" height="24" font="ui\large_ui" color="#FF2896FF" string_list="ce/fileshare_text" string_index="5" text_flags="no_focus_test"/>
+	<widget name="ce/fileshare/delete/text" type="text" left="56" top="192" width="528" height="90" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test">
+		<data input="port fileshare question"/>
+	</widget>
+	<widget name="ce/fileshare/delete/keys" type="text" left="56" top="290" width="528" height="24" font="ui\small_ui" color="#FF2896FF" string_list="ce/fileshare_text" string_index="6" text_flags="no_focus_test"/>
+	<widget name="ce/fileshare/delete/box" left="40" top="150" width="560" height="170" bitmap="ui\shell\bitmaps\alert_bkd">
+		<child widget="ce/fileshare/delete/title"/>
+		<child widget="ce/fileshare/delete/text"/>
+		<child widget="ce/fileshare/delete/keys"/>
+	</widget>
+	<widget name="ce/fileshare/delete/screen" flags="pass_unhandled_to_focused_child" bitmap="ui\shell\bitmaps\semi_transparent_grey">
+		<on event="a" run="port fileshare delete" back="true"/>
+		<on event="b back" back="true"/>
+		<child widget="ce/fileshare/delete/box"/>
+	</widget>
+</menus>

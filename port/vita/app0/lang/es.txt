@@ -1414,6 +1414,17 @@
 "Kind" = "Tipo"
 "DELETE MAP VARIANT?" = "¿BORRAR LA VARIANTE?"
 
+# ---------- Menu style Halo CE's FILE SHARE and MOD MANAGER (menus/classic/fileshare.xml, mods.xml)
+"%a-button OPEN IN FORGE" = "%a-button ABRIR EN FORJA"
+"%x-button RENAME" = "%x-button RENOMBRAR"
+"%y-button DELETE" = "%y-button BORRAR"
+"%b-button BACK" = "%b-button VOLVER"
+"KIND" = "TIPO"
+"%a-button DELETE   %b-button CANCEL" = "%a-button BORRAR   %b-button CANCELAR"
+"%y-button DETAILS" = "%y-button DETALLES"
+"%x-button DELETE" = "%x-button BORRAR"
+"DELETE?" = "¿BORRAR?"
+
 # ---------- Forge's undo, snapping and object properties (forge.c, menu_functions.c, halo3/forge.xml)
 "Place %s" = "Colocar %s"
 "Delete %s" = "Borrar %s"

@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Menu style Halo CE: MOD MANAGER (the main menu's MOD MANAGER row, classic/main.xml) in the look
+     of the Xbox's own list screens: ui.map's gradient, the heading at 35,11 (words drawn in the look
+     of the game's headings: tools/classic_menu_art.py, classic/<lang>/), the rows across the screen
+     on ui.map's list_item_bkd (name, type, size, ON / OFF / FAILED) as the Xbox's Found Games, the
+     chosen one's facts under them, the button key at the foot; Triangle's details on the gradient,
+     Square's question in ui.map's alert_bkd over its semi_transparent_grey (the Xbox's own
+     questions' look: Cross deletes, Circle keeps it). Every function is Halo 3's MOD MANAGER's (halo3/mods.xml, menu_functions.c's
+     port h3 mods: the widgets found by their last name - row_<n>'s row_name, row_kind, row_size and
+     row_state, mods_status, mods_message, detail_*, toggle, details_title, details_text,
+     confirm_text, the button key's a_butn, y_butn, x_butn, details_label, delete_label); only the
+     look is this file's. No picture or line of text of Bungie's here: the pictures and fonts are
+     the player's ui.map's, read as the menus load -->
+<menus>
+	<bitmap name="ce/mods/header_art">
+		<frame png="classic/{lang}/header_mod_manager.png" width="512" height="64"/>
+	</bitmap>
+	<strings name="ce/mods_text">
+		<string text="Works in"/>
+		<string text="Check"/>
+		<string text="Needs"/>
+		<string text="From"/>
+		<string text="%y-button DETAILS"/>
+		<string text="%x-button DELETE"/>
+		<string text="%b-button BACK"/>
+		<string text="DELETE?"/>
+		<string text="%a-button DELETE   %b-button CANCEL"/>
+		<string text="Off: kept on the memory card, but in no map list. Map variants are in FILE SHARE."/>
+	</strings>
+
+	<!-- the rows: ten (H3_MODS_ROWS), the focused one's frame of list_item_bkd lit (port h3 mods) -->
+	<widget name="ce/mods/row_name" type="text" left="10" top="0" width="260" height="22" font="ui\large_ui" color="#FF2896FF" text_y="2" text_flags="no_focus_test"/>
+	<widget name="ce/mods/row_kind" type="text" left="290" top="0" width="110" height="22" font="ui\small_ui" color="#FF1F6FBF" text_y="4" text_flags="no_focus_test"/>
+	<widget name="ce/mods/row_size" type="text" left="400" top="0" width="70" height="22" align="right" font="ui\small_ui" color="#FF1F6FBF" text_y="4" text_flags="no_focus_test"/>
+	<widget name="ce/mods/row_state" type="text" left="490" top="0" width="70" height="22" font="ui\small_ui" color="#FF2896FF" text_y="4" text_flags="no_focus_test"/>
+	<widget name="ce/mods/row_1" width="568" height="22" bitmap="ui\shell\bitmaps\list_item_bkd_top">
+		<on event="a start" run="port h3 mods toggle"/>
+		<child widget="ce/mods/row_name"/>
+		<child widget="ce/mods/row_kind"/>
+		<child widget="ce/mods/row_size"/>
+		<child widget="ce/mods/row_state"/>
+	</widget>
+	<widget name="ce/mods/row_2" width="568" height="22" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a start" run="port h3 mods toggle"/>
+		<child widget="ce/mods/row_name"/>
+		<child widget="ce/mods/row_kind"/>
+		<child widget="ce/mods/row_size"/>
+		<child widget="ce/mods/row_state"/>
+	</widget>
+	<widget name="ce/mods/row_3" width="568" height="22" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a start" run="port h3 mods toggle"/>
+		<child widget="ce/mods/row_name"/>
+		<child widget="ce/mods/row_kind"/>
+		<child widget="ce/mods/row_size"/>
+		<child widget="ce/mods/row_state"/>
+	</widget>
+	<widget name="ce/mods/row_4" width="568" height="22" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a start" run="port h3 mods toggle"/>
+		<child widget="ce/mods/row_name"/>
+		<child widget="ce/mods/row_kind"/>
+		<child widget="ce/mods/row_size"/>
+		<child widget="ce/mods/row_state"/>
+	</widget>
+	<widget name="ce/mods/row_5" width="568" height="22" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a start" run="port h3 mods toggle"/>
+		<child widget="ce/mods/row_name"/>
+		<child widget="ce/mods/row_kind"/>
+		<child widget="ce/mods/row_size"/>
+		<child widget="ce/mods/row_state"/>
+	</widget>
+	<widget name="ce/mods/row_6" width="568" height="22" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a start" run="port h3 mods toggle"/>
+		<child widget="ce/mods/row_name"/>
+		<child widget="ce/mods/row_kind"/>
+		<child widget="ce/mods/row_size"/>
+		<child widget="ce/mods/row_state"/>
+	</widget>
+	<widget name="ce/mods/row_7" width="568" height="22" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a start" run="port h3 mods toggle"/>
+		<child widget="ce/mods/row_name"/>
+		<child widget="ce/mods/row_kind"/>
+		<child widget="ce/mods/row_size"/>
+		<child widget="ce/mods/row_state"/>
+	</widget>
+	<widget name="ce/mods/row_8" width="568" height="22" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a start" run="port h3 mods toggle"/>
+		<child widget="ce/mods/row_name"/>
+		<child widget="ce/mods/row_kind"/>
+		<child widget="ce/mods/row_size"/>
+		<child widget="ce/mods/row_state"/>
+	</widget>
+	<widget name="ce/mods/row_9" width="568" height="22" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a start" run="port h3 mods toggle"/>
+		<child widget="ce/mods/row_name"/>
+		<child widget="ce/mods/row_kind"/>
+		<child widget="ce/mods/row_size"/>
+		<child widget="ce/mods/row_state"/>
+	</widget>
+	<widget name="ce/mods/row_10" width="568" height="22" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a start" run="port h3 mods toggle"/>
+		<child widget="ce/mods/row_name"/>
+		<child widget="ce/mods/row_kind"/>
+		<child widget="ce/mods/row_size"/>
+		<child widget="ce/mods/row_state"/>
+	</widget>
+	<widget name="ce/mods/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port h3 mods"/>
+		<on event="y" run="port h3 mods details" open="ce/mods/details"/>
+		<on event="x" run="port h3 mods delete ask" open="ce/mods/confirm"/>
+		<on event="left_trigger" run="port h3 mods page up"/>
+		<on event="right_trigger" run="port h3 mods page down"/>
+		<child widget="ce/mods/row_1" x="0" y="0"/>
+		<child widget="ce/mods/row_2" x="0" y="23"/>
+		<child widget="ce/mods/row_3" x="0" y="46"/>
+		<child widget="ce/mods/row_4" x="0" y="69"/>
+		<child widget="ce/mods/row_5" x="0" y="92"/>
+		<child widget="ce/mods/row_6" x="0" y="115"/>
+		<child widget="ce/mods/row_7" x="0" y="138"/>
+		<child widget="ce/mods/row_8" x="0" y="161"/>
+		<child widget="ce/mods/row_9" x="0" y="184"/>
+		<child widget="ce/mods/row_10" x="0" y="207"/>
+	</widget>
+
+	<!-- the heading, the totals under it -->
+	<widget name="ce/mods/header" left="35" top="11" width="512" height="64" bitmap="ce/mods/header_art"/>
+	<widget name="ce/mods/mods_status" type="text" left="36" top="70" width="568" height="18" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="ce/mods/blueline" left="36" top="88" width="568" height="2" bitmap="ui\shell\bitmaps\blue"/>
+	<widget name="ce/mods/mods_message" type="text" left="36" top="160" width="568" height="80" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<!-- the chosen one's facts -->
+	<widget name="ce/mods/label_modes" type="text" left="36" top="328" width="84" height="16" font="ui\small_ui" color="#FF2896FF" string_list="ce/mods_text" string_index="0" text_flags="no_focus_test"/>
+	<widget name="ce/mods/detail_modes" type="text" left="124" top="328" width="480" height="16" font="ui\small_ui" color="#FFCCCCCC" text_flags="no_focus_test"/>
+	<widget name="ce/mods/label_check" type="text" left="36" top="343" width="84" height="16" font="ui\small_ui" color="#FF2896FF" string_list="ce/mods_text" string_index="1" text_flags="no_focus_test"/>
+	<widget name="ce/mods/detail_check" type="text" left="124" top="343" width="480" height="16" font="ui\small_ui" color="#FFCCCCCC" text_flags="no_focus_test"/>
+	<widget name="ce/mods/label_needs" type="text" left="36" top="358" width="84" height="16" font="ui\small_ui" color="#FF2896FF" string_list="ce/mods_text" string_index="2" text_flags="no_focus_test"/>
+	<widget name="ce/mods/detail_needs" type="text" left="124" top="358" width="480" height="16" font="ui\small_ui" color="#FFCCCCCC" text_flags="no_focus_test"/>
+	<widget name="ce/mods/label_source" type="text" left="36" top="373" width="84" height="16" font="ui\small_ui" color="#FF2896FF" string_list="ce/mods_text" string_index="3" text_flags="no_focus_test"/>
+	<widget name="ce/mods/detail_source" type="text" left="124" top="373" width="480" height="16" font="ui\small_ui" color="#FFCCCCCC" text_flags="no_focus_test"/>
+	<widget name="ce/mods/note" type="text" left="36" top="390" width="568" height="16" font="ui\small_ui" color="#FF1F6FBF" string_list="ce/mods_text" string_index="9" text_flags="no_focus_test"/>
+	<!-- the button key: the toggle's words written by port h3 mods (Turn on / Turn off), the A
+	     button's picture beside them; Cross, Triangle and Square hidden with none chosen -->
+	<widget name="ce/mods/a_butn" left="40" top="414" width="21" height="26" bitmap="ui\shell\bitmaps\a_butn"/>
+	<widget name="ce/mods/toggle" type="text" left="62" top="414" width="120" height="24" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="ce/mods/y_butn" width="0" height="0"/>
+	<widget name="ce/mods/details_label" type="text" left="186" top="414" width="130" height="24" font="ui\large_ui" color="#FF2896FF" string_list="ce/mods_text" string_index="4" text_flags="no_focus_test"/>
+	<widget name="ce/mods/x_butn" width="0" height="0"/>
+	<widget name="ce/mods/delete_label" type="text" left="320" top="414" width="120" height="24" font="ui\large_ui" color="#FF2896FF" string_list="ce/mods_text" string_index="5" text_flags="no_focus_test"/>
+	<widget name="ce/mods/back" type="text" left="500" top="414" width="104" height="24" font="ui\large_ui" color="#FF2896FF" string_list="ce/mods_text" string_index="6" text_flags="no_focus_test"/>
+	<widget name="ce/mods/screen" flags="pass_unhandled_to_focused_child" bitmap="ui\shell\bitmaps\gradient">
+		<on event="b back" back="true"/>
+		<child widget="ce/mods/header"/>
+		<child widget="ce/mods/mods_status"/>
+		<child widget="ce/mods/blueline"/>
+		<child widget="ce/mods/label_modes"/>
+		<child widget="ce/mods/detail_modes"/>
+		<child widget="ce/mods/label_check"/>
+		<child widget="ce/mods/detail_check"/>
+		<child widget="ce/mods/label_needs"/>
+		<child widget="ce/mods/detail_needs"/>
+		<child widget="ce/mods/label_source"/>
+		<child widget="ce/mods/detail_source"/>
+		<child widget="ce/mods/mods_message"/>
+		<child widget="ce/mods/note"/>
+		<child widget="ce/mods/a_butn"/>
+		<child widget="ce/mods/toggle"/>
+		<child widget="ce/mods/y_butn"/>
+		<child widget="ce/mods/details_label"/>
+		<child widget="ce/mods/x_butn"/>
+		<child widget="ce/mods/delete_label"/>
+		<child widget="ce/mods/back"/>
+		<child widget="ce/mods/list" x="36" y="96"/>
+	</widget>
+
+	<!-- the details (Triangle): every fact of the chosen one, on the gradient (a text box does not
+	     wrap: the full width) -->
+	<widget name="ce/mods/details_title" type="text" left="51" top="74" width="540" height="24" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="ce/mods/details_text" type="text" left="51" top="104" width="540" height="290" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="ce/mods/details_blueline" left="51" top="98" width="540" height="2" bitmap="ui\shell\bitmaps\blue"/>
+	<widget name="ce/mods/details_back" type="text" left="500" top="414" width="104" height="24" font="ui\large_ui" color="#FF2896FF" string_list="ce/mods_text" string_index="6" text_flags="no_focus_test"/>
+	<widget name="ce/mods/details" flags="pass_unhandled_to_focused_child" bitmap="ui\shell\bitmaps\gradient">
+		<on event="b back a" back="true"/>
+		<data input="port h3 mods details"/>
+		<child widget="ce/mods/header"/>
+		<child widget="ce/mods/details_title"/>
+		<child widget="ce/mods/details_blueline"/>
+		<child widget="ce/mods/details_text"/>
+		<child widget="ce/mods/details_back"/>
+	</widget>
+
+	<!-- the question before a delete (Square): the Xbox's question's look (ui.map's alert_bkd over
+	     semi_transparent_grey), Cross deletes, Circle keeps it (Halo 3's asks with two rows) -->
+	<widget name="ce/mods/confirm_title" type="text" left="56" top="158" width="528" height="24" font="ui\large_ui" color="#FF2896FF" string_list="ce/mods_text" string_index="7" text_flags="no_focus_test"/>
+	<widget name="ce/mods/confirm_text" type="text" left="56" top="190" width="528" height="90" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="ce/mods/confirm_keys" type="text" left="56" top="288" width="528" height="24" font="ui\small_ui" color="#FF2896FF" string_list="ce/mods_text" string_index="8" text_flags="no_focus_test"/>
+	<widget name="ce/mods/confirm_box" left="40" top="150" width="560" height="170" bitmap="ui\shell\bitmaps\alert_bkd">
+		<child widget="ce/mods/confirm_title"/>
+		<child widget="ce/mods/confirm_text"/>
+		<child widget="ce/mods/confirm_keys"/>
+	</widget>
+	<widget name="ce/mods/confirm" flags="pass_unhandled_to_focused_child" bitmap="ui\shell\bitmaps\semi_transparent_grey">
+		<on event="a" run="port h3 mods delete" back="true"/>
+		<on event="b back" back="true"/>
+		<data input="port h3 mods confirm"/>
+		<child widget="ce/mods/confirm_box"/>
+	</widget>
+</menus>
