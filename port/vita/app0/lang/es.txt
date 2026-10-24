@@ -2829,3 +2829,4 @@
 # ---------- the PC finding Halo MCC by itself (port/linux/src/xbox_files.c: the main menu's notice)
 "Halo MCC not found" = "Halo MCC no encontrado"
 "Halo MCC not found: set its folder in\nconfig.toml, paths.content (\"none\": don't look)" = "No se encontró Halo MCC: pon su carpeta en\nconfig.toml, paths.content (\"none\": no buscar)"
+"%s - D-PAD PICKS, CROSS DONE" = "%s - LA CRUCETA ELIGE, CRUZ TERMINA"
