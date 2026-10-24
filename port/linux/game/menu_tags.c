@@ -2877,6 +2877,16 @@ boolean pc_menu_tag(
 		DATUM_INDEX_TO_ABSOLUTE_INDEX(tag_index) >= menu_tags.original_count;
 }
 
+/* (Menu style Halo CE: Start on the main menu opens the settings panel, as Halo 3's does -
+the Xbox's list is the map's widget, which runs no port function but this one, which opens a
+panel and changes nothing: menu_functions.c's "port settings panel") */
+boolean pc_menu_function_is_settings_panel(
+	long function_index)
+{
+	return function_index >= 0 && function_index < (long)NUMBEROF(port_function_names) &&
+		!strcmp(port_function_names[function_index], "port settings panel");
+}
+
 char const *pc_menu_function_name(
 	long function_index)
 {

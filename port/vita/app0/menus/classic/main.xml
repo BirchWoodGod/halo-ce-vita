@@ -36,6 +36,7 @@
 		<on event="a start" run="port h3 mods init" open="h3/mods/screen"/>
 	</widget>
 	<widget name="ce/main/list" extends="ui\shell\main_menu\main_menu_select_list" classic_patch="true" drop="children">
+		<on event="start" run="port settings panel"/>
 		<child widget="ui\shell\main_menu\main_menu_item_load_camp" x="194" y="247"/>
 		<child widget="ui\shell\main_menu\main_menu_item_multiplayer" x="192" y="279"/>
 		<child widget="ui\shell\main_menu\main_menu_item_settings" x="192" y="311"/>

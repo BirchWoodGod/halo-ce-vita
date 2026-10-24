@@ -3208,6 +3208,16 @@ PY
 			sed -n "/ui: screen $3/,\$p" "$log" | grep -aq "ui: screen ui.shell.main_menu.main_menu" ||
 				fail ceplusmain "$2: B did not go back to the Xbox's main menu"
 		done
+		# (Start on the main menu, on CAMPAIGN and on a row of the port's: the settings panel asked for,
+		# as Halo 3's main menu does - on a build with one -, no screen opened)
+		run ceplusmain_start "$menus_data" 15 "wait:150:3000 start:150:1500 down:150:500 down:150:500 down:150:500 start:150:1500" HALO_SCENE_PACKS=0
+		log=$out/ceplusmain_start/run.log
+		echo "--- ceplusmain (Start)"
+		grep -aE "ui: screen|settings panel" "$log" | head -6
+		[ "$(cat "$out/ceplusmain_start/exit")" = 0 ] || fail ceplusmain "start: exit $(cat "$out/ceplusmain_start/exit")"
+		[ "$(grep -ac 'menus: the settings panel asked for' "$log")" = 2 ] || fail ceplusmain "start: Start did not ask for the settings panel twice"
+		[ "$(grep -ac 'ui: screen' "$log")" = 1 ] || fail ceplusmain "start: Start opened a screen"
+		grep -aq "may not run event handler function" "$out/ceplusmain_start/data/debug.txt" && fail ceplusmain "start: the main menu's Start was refused"
 		# (Menu style Halo 3: the map's own list, the Halo 3 main menu, none of the port's rows)
 		run ceplusmain_h3 "$menus_data" 15 "wait:150:3000" HALO_MENU_STYLE=halo3
 		log=$out/ceplusmain_h3/run.log
