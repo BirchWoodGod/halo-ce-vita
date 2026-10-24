@@ -584,6 +584,7 @@ static boolean pack_current(struct scene_pack_slot *slot)
 }
 
 static void stamp_remove(struct scene_pack_slot const *slot);
+static void stamp_write(struct scene_pack_slot const *slot);
 
 /* (the worker; or the caller of scene_packs_load_now) a build's end, for
 a slot: logged, and the pack built checked as any (pack_current) */
@@ -610,6 +611,11 @@ static boolean pack_built(struct scene_pack_slot *slot, struct scene_pack_build_
 		platform_log("scene packs: %s: the pack built cannot be opened: %s", slot->name, slot->why);
 		return FALSE;
 	}
+	/* (its data's CRC was made from the bytes as the build wrote them, the
+	header's says it: its record kept now, its load not reading its data
+	whole again - 30 MB, 9 s on the Vita for the menus' backdrop; its tags
+	are checked at its load as ever) */
+	stamp_write(slot);
 	return TRUE;
 }
 

@@ -142,6 +142,8 @@ static struct
 	(pending), or why it cannot come (failed: failure) */
 	boolean pending;
 	boolean test_off;
+	/* (its build's) the progress shown */
+	long progress_shown;
 	char failure[160];
 	/* the main menu at rest since */
 	unsigned long long rest_since;
@@ -475,8 +477,14 @@ void menu_backdrop_pending_draw(void)
 		long progress = -1;
 		short state = menu_backdrop.wanted ? scene_packs_status(MENU_BACKDROP_PACK, &progress, NULL, 0) : 0;
 
+		/* (built now: its build's progress, never going back; then, read and
+		checked after its build, 99% until it is up) */
 		if (menu_backdrop.wanted && state == _scene_pack_state_building && progress >= 0 && progress <= 100)
-			snprintf(line, sizeof(line), T("Preparing the live background... %ld%%"), progress);
+			menu_backdrop.progress_shown = MAX(menu_backdrop.progress_shown, PIN(progress, 1, 99));
+		else if (menu_backdrop.wanted && menu_backdrop.progress_shown && state != _scene_pack_state_failed)
+			menu_backdrop.progress_shown = 99;
+		if (menu_backdrop.progress_shown)
+			snprintf(line, sizeof(line), T("Preparing the live background... %ld%%"), menu_backdrop.progress_shown);
 		else
 		{
 			static char const *const dots[] = { ".", "..", "..." };

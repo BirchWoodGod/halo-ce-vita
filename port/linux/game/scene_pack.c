@@ -13,7 +13,10 @@ wants) twice: once to the end of its tag data, which it walks there, then
 from the start again for the bitmaps' pixels and sounds' samples the pack's
 tags name, in the file's order - one read for several recipes' packs at
 once (scene_pack_build_many: the tag data once, the union of their pieces
-once). From the tag data:
+once). A compressed map's later reads begin at the inflate's place before
+what they want (struct source_point, made as the first read goes by and kept
+in t:\packs\<map>.zidx for the next build from that map), not at its start
+again. From the tag data:
 - the recipe's tags, then every tag they need (every reference the tag
   layouts know, tag_relocate.c's, and every tag index the tag schemas know,
   tag_schema*.c), but for the groups and tags the recipe strips, whose
@@ -135,16 +138,27 @@ enum
 	SCENARIO_SCENERY_SIZE = 0x48,
 	SCENARIO_OBJECT_NAME_INDEX = 2,
 
-	/* the reads' and writes' bounce (and the inflate's input) */
+	/* the reads' and writes' bounce */
 	BOUNCE_SIZE = 64 * 1024,
+	/* (a compressed map's) the inflate's input, read from the card in
+	pieces this large, and the C library's buffer of the map's file */
+	INPUT_SIZE = 256 * 1024,
+	/* (a compressed map's) the inflate's places to come back to (zlib's
+	examples/zran.c): at most this many, each its window of the inflated
+	bytes before it, made as the first read goes by - the later reads (the
+	structure bsp, the pixels and samples) begin at the one before what they
+	want, not at the map's start again */
+	SOURCE_POINTS = 64,
+	SOURCE_POINT_WINDOW = 32 * 1024,
+	SOURCE_POINT_SPAN_MINIMUM = 1024 * 1024,
 
 	/* a shared build's progress (scene_pack_build_many): the tag data's
 	read to 40, the packs' tags made from it to 49 (each pack its share,
 	in steps: on the Vita a pack of hundreds of tags takes seconds), the
 	pixels' and samples' read from 50 to 99 */
-	BUILD_PROGRESS_TAGS_READ = 40,
-	BUILD_PROGRESS_TAGS_MADE = 49,
-	BUILD_PROGRESS_DATA = 50,
+	BUILD_PROGRESS_TAGS_READ = 70,
+	BUILD_PROGRESS_TAGS_MADE = 79,
+	BUILD_PROGRESS_DATA = 80,
 	BUILD_PROGRESS_JOB_STEPS = 4,
 
 	/* the header's fields */
@@ -266,6 +280,16 @@ struct build_range_fixup
 	long delta;
 };
 
+/* (a compressed map's) a place the inflate can begin again: its inflated
+offset, the compressed byte it is at (and its bit), the window before it */
+struct source_point
+{
+	unsigned long out;
+	unsigned long in;
+	int bits;
+	unsigned char *window;
+};
+
 /* the source map, read in order (inflated, if it is compressed) */
 struct source_reader
 {
@@ -296,6 +320,21 @@ struct source_reader
 	boolean using_copy;
 	unsigned long copy_token;
 	unsigned char map_header[CACHE_FILE_HEADER_SIZE];
+	/* (compressed) the file's offset after its last read; the places to
+	begin again (their windows in one block: scene_pack_big_alloc's or the C
+	heap's), made every span bytes of the inflated file */
+	unsigned long input_offset;
+	struct source_point points[SOURCE_POINTS];
+	short point_count;
+	unsigned long point_span;
+	unsigned char *windows;
+	boolean windows_big;
+	boolean raw;
+	/* (the build's measure) bytes inflated, and the times it began again */
+	unsigned long long inflated_bytes;
+	long jumps;
+	/* (the places read from its file: t:\packs\<map>.zidx) */
+	short points_loaded;
 };
 
 struct build_state
@@ -1218,27 +1257,229 @@ static void source_close(struct source_reader *reader)
 		free(reader->input);
 	if (reader->bounce)
 		free(reader->bounce);
+	if (reader->windows)
+	{
+		if (reader->windows_big)
+			scene_pack_big_free(reader->windows, (unsigned long)SOURCE_POINTS * SOURCE_POINT_WINDOW);
+		else
+			free(reader->windows);
+	}
 	memset(reader, 0, sizeof(*reader));
 }
 
-/* from the start of the map's data again (after its header) */
+/* (compressed) the inflate begun again at point (NULL: the map's start) */
+static boolean source_restart(struct source_reader *reader, struct source_point const *point)
+{
+	unsigned long in = point ? point->in - (point->bits ? 1 : 0) : CACHE_FILE_HEADER_SIZE;
+
+	if (fseek(reader->file, (long)in, SEEK_SET))
+		return FALSE;
+	reader->input_offset = in;
+	reader->ended = FALSE;
+	if (reader->stream_open)
+		inflateEnd(&reader->stream);
+	memset(&reader->stream, 0, sizeof(reader->stream));
+	reader->stream.zalloc = zlib_allocate;
+	reader->stream.zfree = zlib_free;
+	/* (from a point: raw deflate, its window given, its bit primed) */
+	reader->raw = point != NULL;
+	reader->stream_open = (point ? inflateInit2(&reader->stream, -15) : inflateInit(&reader->stream)) == Z_OK;
+	if (!reader->stream_open)
+		return FALSE;
+	reader->position = point ? point->out : CACHE_FILE_HEADER_SIZE;
+	if (point)
+	{
+		if (point->bits)
+		{
+			int byte = fgetc(reader->file);
+
+			if (byte == EOF || inflatePrime(&reader->stream, point->bits, byte >> (8 - point->bits)) != Z_OK)
+				return FALSE;
+			reader->input_offset++;
+		}
+		if (inflateSetDictionary(&reader->stream, point->window, SOURCE_POINT_WINDOW) != Z_OK)
+			return FALSE;
+		reader->jumps++;
+	}
+	return TRUE;
+}
+
+/* from the start of the map's data again (after its header); (compressed,
+with places to begin again) nothing: each read begins at the place before
+it */
 static boolean source_rewind(struct source_reader *reader)
 {
+	if (reader->compressed)
+	{
+		if (reader->point_count)
+			return TRUE;
+		return source_restart(reader, NULL);
+	}
 	if (fseek(reader->file, CACHE_FILE_HEADER_SIZE, SEEK_SET))
 		return FALSE;
 	reader->position = CACHE_FILE_HEADER_SIZE;
 	reader->ended = FALSE;
-	if (reader->compressed)
-	{
-		if (reader->stream_open)
-			inflateEnd(&reader->stream);
-		memset(&reader->stream, 0, sizeof(reader->stream));
-		reader->stream.zalloc = zlib_allocate;
-		reader->stream.zfree = zlib_free;
-		reader->stream_open = inflateInit(&reader->stream) == Z_OK;
-		return reader->stream_open;
-	}
 	return TRUE;
+}
+
+/* ---------- a compressed map's places kept (t:\packs\<map>.zidx)
+
+A compressed map's places to begin again (struct source_point), kept beside
+the packs once a build has made them: a later build from that map (another
+pack, or the same one built again for a newer recipe or builder) begins at
+the place before the tag data at the map's end, and before each bsp, pixel
+and sample it wants, not at the map's start - its read a few tens of MB, not
+the whole map's 200 inflated. The file: "HCEVZIDX", its version, the map's
+header (0x800 bytes, byte for byte: another map or version of it has another),
+the span, the count, each point's out, in and bits, then their windows, then
+a CRC of all before it. Anything that does not fit is no file: the map read
+from its start, as before. */
+
+enum
+{
+	SOURCE_INDEX_VERSION = 1,
+	SOURCE_INDEX_FIXED = 8 + 4 + CACHE_FILE_HEADER_SIZE + 4 + 4
+};
+
+static void source_index_path(char *path, long path_size, char const *pack_path, char const *map)
+{
+	char const *slash = NULL;
+	char const *cursor;
+	long length;
+
+	for (cursor = pack_path; *cursor; cursor++)
+	{
+		if (*cursor == '\\' || *cursor == '/')
+			slash = cursor;
+	}
+	length = slash ? (long)(slash - pack_path + 1) : 0;
+	snprintf(path, (size_t)path_size, "%.*s%s.zidx", (int)length, pack_path, map);
+}
+
+static void source_index_load(struct source_reader *reader, char const *path, unsigned char const *header)
+{
+	unsigned char fixed[SOURCE_INDEX_FIXED];
+	unsigned char entry[12];
+	unsigned long crc, count, span, stored, index;
+	struct source_point points[SOURCE_POINTS];
+	FILE *file;
+	boolean good = FALSE;
+
+	if (!reader->compressed || !reader->windows || reader->point_count)
+		return;
+	file = fopen(path, "rb");
+	if (!file)
+		return;
+	if (fread(fixed, 1, sizeof(fixed), file) == sizeof(fixed) && !memcmp(fixed, "HCEVZIDX", 8) &&
+		read_u32(fixed + 8) == SOURCE_INDEX_VERSION && !memcmp(fixed + 12, header, CACHE_FILE_HEADER_SIZE))
+	{
+		span = read_u32(fixed + 12 + CACHE_FILE_HEADER_SIZE);
+		count = read_u32(fixed + 16 + CACHE_FILE_HEADER_SIZE);
+		crc = crc_bytes(0, fixed, sizeof(fixed));
+		good = span >= SOURCE_POINT_SPAN_MINIMUM && count > 0 && count <= SOURCE_POINTS;
+		for (index = 0; good && index < count; index++)
+		{
+			good = fread(entry, 1, sizeof(entry), file) == sizeof(entry);
+			if (!good)
+				break;
+			crc = crc_bytes(crc, entry, sizeof(entry));
+			points[index].out = read_u32(entry);
+			points[index].in = read_u32(entry + 4);
+			points[index].bits = (int)read_u32(entry + 8);
+			points[index].window = reader->windows + index * SOURCE_POINT_WINDOW;
+			/* (in order, in the file, inside the inflated map) */
+			good = points[index].out >= SOURCE_POINT_WINDOW && points[index].out < reader->file_length &&
+				points[index].in > CACHE_FILE_HEADER_SIZE && points[index].bits >= 0 && points[index].bits <= 7 &&
+				(!index || (points[index].out > points[index - 1].out && points[index].in > points[index - 1].in));
+		}
+		if (good)
+		{
+			good = fread(reader->windows, 1, count * SOURCE_POINT_WINDOW, file) == count * SOURCE_POINT_WINDOW;
+			if (good)
+				crc = crc_bytes(crc, reader->windows, count * SOURCE_POINT_WINDOW);
+			good = good && fread(entry, 1, 4, file) == 4 && read_u32(entry) == crc;
+		}
+		if (good)
+		{
+			memcpy(reader->points, points, count * sizeof(points[0]));
+			reader->point_count = (short)count;
+			reader->point_span = span;
+			reader->points_loaded = (short)count;
+		}
+	}
+	fclose(file);
+}
+
+static void source_index_save(struct source_reader const *reader, char const *path, unsigned char const *header)
+{
+	unsigned char fixed[SOURCE_INDEX_FIXED];
+	unsigned char entry[12];
+	char temporary[512];
+	unsigned long crc;
+	short index;
+	FILE *file;
+	boolean good;
+
+	if (!reader->compressed || reader->point_count <= reader->points_loaded)
+		return;
+	snprintf(temporary, sizeof(temporary), "%s.tmp", path);
+	file = fopen(temporary, "wb");
+	if (!file)
+		return;
+	memcpy(fixed, "HCEVZIDX", 8);
+	write_u32(fixed + 8, SOURCE_INDEX_VERSION);
+	memcpy(fixed + 12, header, CACHE_FILE_HEADER_SIZE);
+	write_u32(fixed + 12 + CACHE_FILE_HEADER_SIZE, reader->point_span);
+	write_u32(fixed + 16 + CACHE_FILE_HEADER_SIZE, (unsigned long)reader->point_count);
+	crc = crc_bytes(0, fixed, sizeof(fixed));
+	good = fwrite(fixed, 1, sizeof(fixed), file) == sizeof(fixed);
+	for (index = 0; good && index < reader->point_count; index++)
+	{
+		write_u32(entry, reader->points[index].out);
+		write_u32(entry + 4, reader->points[index].in);
+		write_u32(entry + 8, (unsigned long)reader->points[index].bits);
+		crc = crc_bytes(crc, entry, sizeof(entry));
+		good = fwrite(entry, 1, sizeof(entry), file) == sizeof(entry);
+	}
+	for (index = 0; good && index < reader->point_count; index++)
+	{
+		crc = crc_bytes(crc, reader->points[index].window, SOURCE_POINT_WINDOW);
+		good = fwrite(reader->points[index].window, 1, SOURCE_POINT_WINDOW, file) == SOURCE_POINT_WINDOW;
+	}
+	write_u32(entry, crc);
+	good = good && fwrite(entry, 1, 4, file) == 4;
+	good = !fclose(file) && good;
+	if (good)
+	{
+		io_done((unsigned long)SOURCE_INDEX_FIXED + (unsigned long)reader->point_count * (12 + SOURCE_POINT_WINDOW));
+		remove(path);
+		good = !rename(temporary, path);
+	}
+	if (!good)
+		remove(temporary);
+}
+
+/* (compressed, the inflate at the end of a deflate block) a place to begin
+again kept, every span bytes */
+static void source_point_add(struct source_reader *reader)
+{
+	struct source_point *point;
+	uInt length = SOURCE_POINT_WINDOW;
+
+	if (!reader->windows || reader->point_count >= SOURCE_POINTS || reader->position < SOURCE_POINT_WINDOW ||
+		(reader->point_count && reader->position < reader->points[reader->point_count - 1].out + reader->point_span) ||
+		(!reader->point_count && reader->position < reader->point_span))
+	{
+		return;
+	}
+	point = &reader->points[reader->point_count];
+	point->window = reader->windows + (unsigned long)reader->point_count * SOURCE_POINT_WINDOW;
+	if (inflateGetDictionary(&reader->stream, point->window, &length) != Z_OK || length != SOURCE_POINT_WINDOW)
+		return;
+	point->out = reader->position;
+	point->in = reader->input_offset - reader->stream.avail_in;
+	point->bits = reader->stream.data_type & 7;
+	reader->point_count++;
 }
 
 /* (read from a copy) whether it is still the map's: its header, and its
@@ -1267,8 +1508,10 @@ static boolean source_open(struct source_reader *reader, char const *path, char 
 	reader->file = fopen(path, "rb");
 	if (!reader->file)
 		return FALSE;
+	/* (the card takes few large reads better than many small) */
+	setvbuf(reader->file, NULL, _IOFBF, INPUT_SIZE);
 	size = file_size_get(reader->file);
-	reader->input = malloc(BOUNCE_SIZE);
+	reader->input = malloc(INPUT_SIZE);
 	reader->bounce = malloc(BOUNCE_SIZE);
 	if (size < CACHE_FILE_HEADER_SIZE || !reader->input || !reader->bounce ||
 		fread(header, 1, CACHE_FILE_HEADER_SIZE, reader->file) != CACHE_FILE_HEADER_SIZE ||
@@ -1295,7 +1538,17 @@ static boolean source_open(struct source_reader *reader, char const *path, char 
 			memcpy(reader->map_header, header, CACHE_FILE_HEADER_SIZE);
 		}
 	}
-	if (!source_rewind(reader))
+	if (reader->compressed)
+	{
+		unsigned long windows_size = (unsigned long)SOURCE_POINTS * SOURCE_POINT_WINDOW;
+
+		reader->point_span = MAX(SOURCE_POINT_SPAN_MINIMUM, reader->file_length / SOURCE_POINTS + 1);
+		reader->windows = scene_pack_big_alloc ? scene_pack_big_alloc(windows_size) : NULL;
+		reader->windows_big = reader->windows != NULL;
+		if (!reader->windows)
+			reader->windows = malloc(windows_size);
+	}
+	if (reader->compressed ? !source_restart(reader, NULL) : !source_rewind(reader))
 	{
 		source_close(reader);
 		return FALSE;
@@ -1308,7 +1561,28 @@ last read ended, to buffer (NULL: passed over) */
 static boolean source_read(struct source_reader *reader, unsigned long offset, unsigned long size,
 	unsigned char *buffer)
 {
-	if (offset < reader->position || offset > reader->file_length || size > reader->file_length - offset)
+	if (offset > reader->file_length || size > reader->file_length - offset)
+		return FALSE;
+	/* (compressed: begun again at the place before offset, if it is behind
+	the inflate or far enough ahead; behind and no place before it, at the
+	map's start) */
+	if (reader->compressed && (offset < reader->position || offset - reader->position > reader->point_span))
+	{
+		short index = reader->point_count;
+
+		while (index > 0 && reader->points[index - 1].out > offset)
+			index--;
+		if (index > 0 && (offset < reader->position || reader->points[index - 1].out > reader->position))
+		{
+			if (!source_restart(reader, &reader->points[index - 1]))
+				return FALSE;
+		}
+		else if (offset < reader->position && !source_restart(reader, NULL))
+		{
+			return FALSE;
+		}
+	}
+	if (offset < reader->position)
 		return FALSE;
 	if (!reader->compressed)
 	{
@@ -1349,27 +1623,39 @@ static boolean source_read(struct source_reader *reader, unsigned long offset, u
 			want = want > BOUNCE_SIZE ? BOUNCE_SIZE : want;
 		if (!reader->stream.avail_in)
 		{
-			size_t read = fread(reader->input, 1, BOUNCE_SIZE, reader->file);
+			size_t read = fread(reader->input, 1, INPUT_SIZE, reader->file);
 
 			if (!read)
 				return FALSE;
+			reader->input_offset += (unsigned long)read;
 			io_done_source((unsigned long)read);
 			reader->stream.next_in = reader->input;
 			reader->stream.avail_in = (uInt)read;
 		}
 		reader->stream.next_out = out;
 		reader->stream.avail_out = (uInt)want;
-		result = inflate(&reader->stream, Z_NO_FLUSH);
+		/* (Z_BLOCK: stopped at each deflate block's end, a place to begin
+		again kept there now and then) */
+		result = inflate(&reader->stream, Z_BLOCK);
 		if (result == Z_STREAM_END)
 			reader->ended = TRUE;
 		else if (result != Z_OK && result != Z_BUF_ERROR)
 			return FALSE;
 		reader->position += want - reader->stream.avail_out;
 		reader->read_bytes += want - reader->stream.avail_out;
+		reader->inflated_bytes += want - reader->stream.avail_out;
+		if ((reader->stream.data_type & 128) && !(reader->stream.data_type & 64))
+			source_point_add(reader);
+		if (!skipping && buffer)
+			reader->phase_read += want - reader->stream.avail_out;
 		if (reader->progress_length)
 			progress_set(reader->progress_results, reader->progress_count, reader->progress_base +
 				(long)((unsigned long long)MIN(reader->position, reader->progress_length) *
 					(unsigned long long)reader->progress_span / reader->progress_length));
+		else if (reader->phase_total)
+			progress_set(reader->progress_results, reader->progress_count, reader->progress_base +
+				(long)(MIN(reader->phase_read, reader->phase_total) * (unsigned long long)reader->progress_span /
+					reader->phase_total));
 		if (result == Z_BUF_ERROR && reader->stream.avail_out == want && reader->stream.avail_in)
 			return FALSE;
 	}
@@ -3742,6 +4028,7 @@ static boolean build_many_once(
 	unsigned long long started = vita_host_time_us();
 	unsigned long long source_hash = 0;
 	char path[512];
+	char index_path[512];
 	unsigned char *tags = NULL;
 	unsigned long tags_size = 0;
 	struct build_range *unions = NULL;
@@ -3797,6 +4084,10 @@ static boolean build_many_once(
 	map_path(path, sizeof(path), maps_directory, map);
 	if (!source_open(&reader, path, map, header, cancel, try_copy))
 		failure = "the map cannot be read";
+	/* (compressed: the places kept from an earlier build's read of it) */
+	source_index_path(index_path, sizeof(index_path), pack_paths[0], map);
+	if (!failure)
+		source_index_load(&reader, index_path, header);
 	/* (the read of the tag data 0 to 40, each pack's tags made from it to
 	49, the pixels' and samples' read 50 to 99) */
 	reader.progress_results = results;
@@ -3827,6 +4118,10 @@ static boolean build_many_once(
 			failure = cancel && *cancel ? "it was stopped" : "the map's tag data cannot be read";
 		else if (!source_copy_unchanged(&reader))
 			*copy_changed = TRUE, failure = "the map's copy changed as it was read";
+		/* (a backdrop's structure bsp read next: no progress of its own, the
+		tags' making's steps around it) */
+		reader.phase_total = 0;
+		reader.progress_length = 0;
 	}
 	for (job_index = 0; job_index < count; job_index++)
 	{
@@ -3999,6 +4294,9 @@ static boolean build_many_once(
 			reader.phase_total = union_bytes;
 			/* (inflated, the read ends at the last piece's end) */
 			reader.progress_length = merged ? unions[merged - 1].source + unions[merged - 1].size : 0;
+			/* (begun again near each piece: the pieces' bytes are the measure) */
+			if (reader.point_count)
+				reader.progress_length = 0;
 			if (!source_rewind(&reader))
 				failure = "the map cannot be read again";
 		}
@@ -4097,6 +4395,14 @@ static boolean build_many_once(
 			all = FALSE;
 		if (job->pieces)
 			free(job->pieces);
+	}
+	if (reader.compressed)
+	{
+		platform_log("scene packs: %s: %.1f MB inflated, begun again %ld times at %d of its places (every %lu KB, %d of "
+			"them kept from before)", map, (double)reader.inflated_bytes / (1024.0 * 1024.0), reader.jumps,
+			reader.point_count, reader.point_span / 1024, reader.points_loaded);
+		if (!(cancel && *cancel))
+			source_index_save(&reader, index_path, header);
 	}
 	if (unions)
 		free(unions);
