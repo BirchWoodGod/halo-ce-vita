@@ -8,10 +8,10 @@ picture and "<game> on <map>", the buttons at its foot), the players, the party 
 the wide screen's right; the pickers a band with the title, the list at the left on the orange bar
 and the map's picture and description in a card at the right. The art is this folder's own
 (tools/online_menu_art.py) and the Halo 3 set's. 
-	With the live a30 backdrop (backdrop=, menu_backdrop.c): spot B, pitched down 12 degrees so the group
-	clears the player bar and FRIENDS, and backdrop_object= the same three in the same layout (scaled
-	1.6 from the camera), standing on the platform (ground=: the floor found below them; the jumper his
-	original 0.56 above it), the flag carrier on the right third's line (owner) -->
+	With the live a30 backdrop (backdrop=, menu_backdrop.c): spot B moved a little left, between the
+	platform's cover, and backdrop_object= the same three at fixed points of a30 (at= yaw=), standing on
+	the platform (ground=: the floor found below them; the jumper his original 0.56 above it), spaced
+	out, the flag carrier on the right third's line, clear of the player bar and FRIENDS (owner) -->
 <menus>
 	<bitmap name="online/panel">
 		<frame png="online/panel.png" width="4" height="256" />
@@ -274,7 +274,7 @@ and the map's picture and description in a card at the right. The art is this fo
 	</widget>
 	<widget name="online/lobby/main/server_3_name" type="text" left="486" top="116" width="196" height="16" font="online/font_small" color="#FFEEF2F6" text_x="22" text_y="1" />
 	<widget name="online/lobby/main/server_3_count" type="text" left="682" top="116" width="56" height="16" font="online/font_small" color="#FFDDE6F0" align="right" text_y="1" />
-	<widget name="online/mp/screen" flags="pass_unhandled_to_focused_child" scene="multiplayer -40 -1.8 15.5 0 0 0 55" backdrop="multiplayer 2.444 52.348 64.616 -35.47 -12 0 70" backdrop_object="menu_multiplayer:cyborg_mp 2.74 0.45 -0.24 45 pitch=-10 color=0 weapon=rocket_launcher anim=airborne frame=20 ground=0.56; menu_multiplayer:cyborg_mp 3.81 1.22 -0.90 0 color=0 weapon=flag ground=0 level=1; menu_multiplayer:cyborg_mp 2.74 1.49 -0.79 -40 color=0 weapon=sniper_rifle anim=idle stance=crouch ground=0 level=1" scene_object="menu_multiplayer:cyborg_mp 2.3 0.1 -0.2 45 pitch=-10 color=0 weapon=rocket_launcher anim=airborne frame=20;    menu_multiplayer:cyborg_mp 3.2 0.75 -0.76 0 color=0 weapon=flag;    menu_multiplayer:cyborg_mp 2.3 0.98 -0.66 -40 color=0 weapon=sniper_rifle anim=idle stance=crouch">
+	<widget name="online/mp/screen" flags="pass_unhandled_to_focused_child" scene="multiplayer -40 -1.8 15.5 0 0 0 55" backdrop="multiplayer 2.879 52.959 64.616 -36.4 -10.5 0 70" backdrop_object="menu_multiplayer:cyborg_mp at=4.33,51.70,64.2 yaw=-170.5 pitch=-10 color=0 weapon=rocket_launcher anim=airborne frame=20 ground=0.56; menu_multiplayer:cyborg_mp at=4.54,50.39,64.2 yaw=144.5 color=0 weapon=flag ground=0; menu_multiplayer:cyborg_mp at=3.98,50.11,64.2 yaw=104.5 color=0 weapon=sniper_rifle anim=idle stance=crouch ground=0" scene_object="menu_multiplayer:cyborg_mp 2.3 0.1 -0.2 45 pitch=-10 color=0 weapon=rocket_launcher anim=airborne frame=20;    menu_multiplayer:cyborg_mp 3.2 0.75 -0.76 0 color=0 weapon=flag;    menu_multiplayer:cyborg_mp 2.3 0.98 -0.66 -40 color=0 weapon=sniper_rifle anim=idle stance=crouch">
 		<on event="created" run="mp type menu initialize" />
 		<on event="created" run="port mp screen init" />
 		<on event="created" run="port h3 mp init" />
