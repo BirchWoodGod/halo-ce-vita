@@ -7,7 +7,8 @@ Windows, Linux and macOS; `HaloCEVitaInstaller.exe` is the same tool as one
 Windows program, with ffmpeg inside it.
 
 **No game data comes with it.** Every step reads your own files: your Xbox
-disc image, your Halo PC files.
+disc image or your own Halo: The Master Chief Collection, your Halo PC
+files.
 
 ## Running it
 
@@ -45,19 +46,54 @@ Halo CE Vita files/
     default.xbe          -> ux0:data/haloce-vita/default.xbe
     maps/*.map           -> ux0:data/haloce-vita/maps/
     movies/*.mp4         -> ux0:data/haloce-vita/movies/
+    mcc/halo1/...        -> ux0:data/haloce-vita/mcc/halo1/...   (from MCC, step 1)
 ```
 
 Custom maps you put in that `maps` folder yourself are copied too.
 
 ## The steps
 
-1. **Xbox game files.** Choose your Xbox Halo disc image (`.iso`, `.xiso`:
-   an XISO made by extract-xiso, or a full disc image) or an already
-   unpacked game folder. The `maps` folder and `default.xbe` are taken out.
-   The disc image is read by the tool itself (a small XDVDFS reader): no
-   extract-xiso needed. It checks that the campaign maps and the menu
-   (`ui.map`, `a10.map` ... `d40.map`) and `default.xbe` are there, so the PC
-   version's maps are not taken by mistake.
+1. **Game files**, one of two ways (run the step again with the other to
+   have both):
+   - **Your Xbox game.** Choose your Xbox Halo disc image (`.iso`, `.xiso`:
+     an XISO made by extract-xiso, or a full disc image) or an already
+     unpacked game folder. The `maps` folder and `default.xbe` are taken out.
+     The disc image is read by the tool itself (a small XDVDFS reader): no
+     extract-xiso needed. It checks that the campaign maps and the menu
+     (`ui.map`, `a10.map` ... `d40.map`) and `default.xbe` are there, so the
+     PC version's maps are not taken by mistake.
+   - **Halo: The Master Chief Collection on Steam**, for the builds that
+     play MCC's own Halo CE maps (1.1.1-insider.25 and later; see
+     [docs/mcc_cea_maps.md](../../docs/mcc_cea_maps.md)). The tool finds
+     MCC's folder by itself (Steam's `libraryfolders.vdf` and, on Windows,
+     the registry: Steam's folder and MCC's Steam uninstall entry; also the
+     Xbox app's `XboxGames` folders), or choose it with Choose folder...
+     (Steam: right-click the game, Manage, Browse local files; its `halo1`
+     folder or a Steam library works too). It copies exactly what the game
+     reads, about 1.4 GB, to `ux0:data/haloce-vita/mcc/`:
+
+     ```
+     mcc/halo1/maps/a10.map ... d40.map         the campaign
+     mcc/halo1/maps/beavercreek.map ...         the 19 multiplayer maps
+     mcc/halo1/maps/bitmaps.map                 their pixels (MCC's own, 186 MB)
+     mcc/halo1/maps/ui.map                      MCC's menus (used only with no Xbox ui.map)
+     mcc/halo1/maps/custom_edition/             Halo PC's bitmaps.map, loc.map, sounds.map
+     mcc/halo1/sound/pc/sounds_adpcm.fsb        the classic sound effects (88 MB)
+     mcc/halo1/sound/pc/lst/sounds_*.lst.bin    which sounds they are (the adpcm list is
+                                                needed; the others only count what is silent)
+     ```
+
+     Nothing else of MCC (its dialogue and music banks, the other games) is
+     copied. Each file's header is checked (cache version 13, FSB5, the
+     lists' version), before and after copying; the campaign and
+     `bitmaps.map` must be there, or nothing is copied. Nothing of MCC goes
+     to the `maps` folder.
+
+     **Halo 2 files (off by default).** A check box under MCC also copies
+     `zanzibar.map`, `shared.map`, `textures.dat`, `sounds_neutral.dat` and
+     `sounds_en.dat` from MCC's `halo2/h2_maps_win64_dx11` to the `maps`
+     folder (about 1.6 GB more), for the Halo 2 test builds only. Those
+     builds are not public yet: leave it off unless you test them.
 2. **Movies (optional).** The disc's Bink movies (`bink/*.bik`) are
    converted with ffmpeg to H.264 MP4s, 640 wide, as the README's Movies
    section does. Both choices are H.264 Constrained Baseline with no
@@ -139,6 +175,7 @@ tray; no game artwork).
 
 ```
 python3 halo_ce_vita_installer.py [--out FOLDER] xbox "Halo.iso"
+python3 halo_ce_vita_installer.py [--out FOLDER] mcc [FOLDER] [--halo2]
 python3 halo_ce_vita_installer.py [--out FOLDER] movies "Halo.iso" [--quality better] [--ffmpeg PATH]
 python3 halo_ce_vita_installer.py [--out FOLDER] pc-files --mcc [FOLDER]
 python3 halo_ce_vita_installer.py [--out FOLDER] pc-files --installer "any name.exe"
@@ -164,6 +201,8 @@ it prints nothing; `selftest --report FILE` writes its results to a file.)
   checksums are verified.
 - FTP commands are built from checked names only (no line breaks reach the
   Vita), and the data connection goes only to the Vita's own address.
+- MCC's folder is only read: the tool copies the files it names (fixed
+  names, never a name read from MCC), into the output folder.
 - No shell is used to run anything; ffmpeg is run with an argument list.
 - The Windows build downloads ffmpeg from one fixed address and refuses it
   unless its SHA-256 matches (`build_windows.py`).
@@ -175,7 +214,8 @@ python3 -m pip install -r requirements-dev.txt
 python3 -m pytest tests
 ```
 
-The tests build everything they read: a small XDVDFS image, an LZX
+The tests build everything they read: a stand-in MCC folder (made-up
+files with MCC's headers; Windows' registry mocked), a small XDVDFS image, an LZX
 compressor (the decoder's other half) and cabinets, a Windows program with a
 cabinet in its resources, fake resource maps, a stand-in ffmpeg, and a local
 FTP server that answers like VitaShell (its LIST format, no NLST, no SIZE, a

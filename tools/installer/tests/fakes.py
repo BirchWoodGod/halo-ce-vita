@@ -119,6 +119,42 @@ def xbox_tree(extra_maps=None, bink=True):
     return tree
 
 
+def make_mcc(root, halo2=False, sound=True, custom_edition=True, extra=True):
+    """A small stand-in for Halo: The Master Chief Collection's folder: its
+    halo1 maps (cache headers 'daeh', version 13), MCC's bitmaps.map (a
+    resource map), custom_edition's three, the sound bank (FSB5) and lists
+    (version 1), and what the tool must leave (other banks, other games).
+    Returns {relative path: bytes}."""
+    import halo_ce_vita_installer as hcv
+    files = {}
+    maps = "halo1/maps/"
+    for stem in hcv.MCC_CAMPAIGN_MAPS + hcv.MCC_MULTIPLAYER_MAPS + ("ui",):
+        files[maps + stem + ".map"] = b"daeh" + struct.pack("<I", 13) + stem.encode() * 40
+    files[maps + "bitmaps.map"] = fake_resource_map(1, 2048, seed=7)
+    if custom_edition:
+        for name, kind in hcv.PC_RESOURCE_MAPS:
+            files[maps + "custom_edition/" + name] = fake_resource_map(kind, 4096, seed=kind)
+    if sound:
+        files["halo1/sound/pc/sounds_adpcm.fsb"] = b"FSB5" + b"\1" * 3000
+        for name in hcv.MCC_SOUND_LISTS:
+            files["halo1/sound/pc/lst/" + name] = struct.pack("<II", 1, 0)
+    if extra:
+        files["halo1/sound/pc/sounds_music.fsb"] = b"FSB5" + b"\2" * 5000      # not needed
+        files["halo1/sound/pc/lst/tags_params.ps"] = b"ps"                     # not needed
+        files["halo3/maps/guardian.map"] = b"daeh" + struct.pack("<I", 13)     # another game
+        files["mcclauncher.exe"] = b"MZ"
+    if halo2:
+        for name in hcv.H2_FILES:
+            data = (b"daeh" + struct.pack("<I", 13) if name.endswith(".map") else b"\1\0\0\0") + name.encode() * 30
+            files["halo2/h2_maps_win64_dx11/" + name] = data
+    for relative, data in files.items():
+        path = os.path.join(root, *relative.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as file:
+            file.write(data)
+    return files
+
+
 # ---------------------------------------------------------------------------
 # LZX, the compressing side
 

@@ -141,9 +141,10 @@ Prefer a video? The [install tutorial](https://youtu.be/x46zLnwlRUU) walks throu
 
 Download **`HaloCEVitaInstaller.exe`** from the
 [releases](https://github.com/BirchWoodGod/halo-ce-vita/releases) and run it.
-It takes the game files from your disc image, converts the movies, gets the
-Halo PC files, and copies everything plus the VPK to the Vita over
-VitaShell's FTP. Then install that VPK from `ux0:data/` with VitaShell.
+It takes the game files from your disc image (or, for the builds that play
+MCC's maps, from your own Halo: The Master Chief Collection on Steam),
+converts the movies, gets the Halo PC files, and copies everything plus the
+VPK to the Vita over VitaShell's FTP. Then install that VPK from `ux0:data/` with VitaShell.
 
 The tool isn't signed: if Windows says "Windows protected your PC", click
 **More info**, then **Run anyway**. Details:
