@@ -16243,7 +16243,11 @@ static void h3_forge_lobby_network_update(struct widget_instance *screen)
 	/* (not live: the network's words; live: the game's, h3_live) */
 	if (!h3_live_forge_live())
 	{
-		h3_party_players_text(text, (int)sizeof(text), 0);
+		/* (a network's: "1 Player (8 max)", network.max_players as a network
+		Forge game takes it - 8 at most -, HOST SETTINGS' MAX PLAYERS) */
+		int maximum = (int)atol(setting_get("HALO_NET_MAX_PLAYERS", "16"));
+
+		h3_party_players_text(text, (int)sizeof(text), local ? 0 : MIN(maximum < 2 ? 16 : maximum, 8));
 		text_show(named(screen, "players"), text);
 		text_show(named(screen, "ready"), T("Ready"));
 		text_show(named(screen, "ready_sub"), local ? T("This party is local to this PS Vita.") :
