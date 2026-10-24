@@ -2135,6 +2135,12 @@ boolean network_game_client_add_player(
 
 			player.icon_index = player_cosmetics_icon_encode(flame, color,
 				player_cosmetics_profile_visor(player_ui_get_active_player_profile_index(local_player_index)));
+			if (player.icon_index != NONE && player.icon_index != NETWORK_PLAYER_FLAME_CLAIM)
+			{
+				platform_log("cosmetics: player %d sent with colour %d, visor %d (0x%04X)", local_player_index,
+					player_cosmetics_icon_color(player.icon_index), player_cosmetics_icon_visor(player.icon_index),
+					(unsigned short)player.icon_index);
+			}
 		}
 	}
 	player.team_index = NONE;

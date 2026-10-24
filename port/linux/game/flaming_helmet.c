@@ -380,7 +380,15 @@ main_test_camera, TRUE; FALSE with no such player */
 boolean flaming_helmet_test_camera(char *line, int size, float distance, float angle)
 {
 	long player_index;
+	/* (tests, not in release builds: HALO_TEST_FLAMECAM_REMOTE=1 looks at
+	another machine's player instead - the cosmetics' screenshots,
+	player_cosmetics.c) */
+	short wanted = 0;
 
+#ifndef HALO_RELEASE
+	if (getenv("HALO_TEST_FLAMECAM_REMOTE") && getenv("HALO_TEST_FLAMECAM_REMOTE")[0] == '1')
+		wanted = NONE;
+#endif
 	if (!player_data)
 		return FALSE;
 	for (player_index = data_next_index(player_data, NONE); player_index != NONE;
@@ -392,7 +400,7 @@ boolean flaming_helmet_test_camera(char *line, int size, float distance, float a
 		real_point3d head;
 		real facing, yaw, cosine_value, sine_value;
 
-		if (player->local_player_index != 0 || player->unit_index == NONE || !flame_head(player->unit_index, &frame))
+		if (player->local_player_index != wanted || player->unit_index == NONE || !flame_head(player->unit_index, &frame))
 			continue;
 		head = frame.position;
 		object = object_get(player->unit_index);
