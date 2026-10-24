@@ -1320,9 +1320,15 @@ static int command_build_many(char const *maps, char const *map, char const *out
 	return built && !failures ? 0 : 1;
 }
 
+void tag_validate_pack_allow_structure(int allowed);
+
 int main(int argc, char **argv)
 {
 	setvbuf(stdout, NULL, _IOLBF, 0);
+	/* SCENE_PACK_TEST_BACKDROP=1: the packs may hold a structure bsp and a
+	scenario, as the menus' backdrop's (menu_backdrop.txt) */
+	if (getenv("SCENE_PACK_TEST_BACKDROP"))
+		tag_validate_pack_allow_structure(1);
 	if (argc == 5 && !strcmp(argv[1], "build"))
 		return command_build(argv[2], argv[3], argv[4]);
 	if (argc >= 6 && !strcmp(argv[1], "buildmany"))

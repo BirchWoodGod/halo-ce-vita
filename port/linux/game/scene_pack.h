@@ -57,6 +57,9 @@ enum
 	/* (the builder's own: a pack of another builder's is made again) */
 	SCENE_PACK_BUILDER_VERSION = 2,
 	SCENE_PACK_HEADER_SIZE = 128,
+	/* (a backdrop's: its structure bsp and scenario taken as this version
+	of the builder takes them; another is a pack made again) */
+	SCENE_PACK_BACKDROP_VERSION = 1,
 
 	/* a recipe's most lines' worth */
 	SCENE_PACK_MAXIMUM_RECIPE_BYTES = 8 * 1024,
@@ -71,8 +74,10 @@ enum
 	SCENE_PACK_NAME_SIZE = 32,
 	SCENE_PACK_TAG_PATH_SIZE = 256,
 	SCENE_PACK_MAXIMUM_TAGS = 2048,
-	SCENE_PACK_MAXIMUM_TAG_BYTES = 8 * 1024 * 1024,
-	SCENE_PACK_MAXIMUM_DATA_BYTES = 64 * 1024 * 1024,
+	/* (a menu backdrop's pack holds a structure bsp: 16 MB of tags, the
+	bsp's textures and lightmaps in its data) */
+	SCENE_PACK_MAXIMUM_TAG_BYTES = 16 * 1024 * 1024,
+	SCENE_PACK_MAXIMUM_DATA_BYTES = 128 * 1024 * 1024,
 	SCENE_PACK_MAXIMUM_BUFFERS = 8192,
 
 	/* a reason's room (scene_pack_build, scene_pack_open...) */
@@ -142,6 +147,13 @@ struct scene_pack_recipe_tune
 	                             fly) once the pack is built; a tag that is
 	                             not what the tuning expects is left as it
 	                             is (said in the log)
+	backdrop                     (the menus' live backdrop: menu_backdrop.c)
+	                             its tag lines may name the source's
+	                             structure bsp (sbsp: read from the map's
+	                             bsp section, its vertices with it) and its
+	                             scenario (scnr: a copy of it with its skies,
+	                             scenery and their palette, its detail
+	                             objects' palette and nothing else)
 	blocks                       Forge's building blocks, made by the
 	                             game (scene_pack_blocks.c: their
 	                             scenery, models, collision models and
@@ -191,6 +203,9 @@ struct scene_pack_recipe
 	} keeps[SCENE_PACK_MAXIMUM_KEEPS];
 	/* (a blocks line) Forge's building blocks made into it */
 	boolean blocks;
+	/* (a backdrop line: the menus' backdrop, menu_backdrop.c) a structure
+	bsp and a scenario's copy may be its tags */
+	boolean backdrop;
 };
 
 /* what a pack file's header says, once checked (scene_pack_open) */
@@ -422,6 +437,20 @@ void scene_pack_rebase(
 	long first_index,
 	long first_salt,
 	long file_delta);
+
+/* (the packs' worker, scene_packs.c, while it builds the menus' backdrop)
+where a pack build's big blob (its tags, up to 16 MB) comes from: NULL the C heap; the
+alloc may give NULL (then the C heap). Zeroed memory is not assumed.
+Thread-local: only that thread's builds use them. */
+extern __thread void *(*scene_pack_big_alloc)(unsigned long size);
+extern __thread void (*scene_pack_big_free)(void *data, unsigned long size);
+/* (the packs' worker, scene_packs.c) where a build's copy of its source
+map's tag data comes from when the scratch it was given is too small for it
+(the menus' backdrop loaded beside the menus takes 8.7 MB of the tag cache's
+free room, which a campaign map's 15 MB of tag data then no longer fits):
+NULL the C heap; the alloc may give NULL (then the C heap). Thread-local */
+extern __thread void *(*scene_pack_scratch_alloc)(unsigned long size);
+extern __thread void (*scene_pack_scratch_free)(void *data, unsigned long size);
 
 /* a pack given its tag indices once (scene_pack_rebase, its first tag at
 old_first_index) given others: first_index, first_salt, and its file

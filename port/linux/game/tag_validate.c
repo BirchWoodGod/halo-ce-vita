@@ -1196,6 +1196,11 @@ static boolean schemas_fit(
 }
 
 /* a tag of the table through a pass of its group's schema, if it has one */
+/* (port) whether a pack may hold a structure bsp and a scenario: the menus'
+backdrop's (menu_backdrop.c, scene_pack.c's backdrop recipes; set only
+around its pack's check: tag_validate_pack_allow_structure) */
+static boolean tag_validate_pack_structure_allowed;
+
 static void validate_instance(
 	struct tag_validation *validation,
 	struct tag_validate_instance *instance,
@@ -1314,8 +1319,9 @@ static boolean validate_tag_table(
 			instance->parent_group_tags[0] = parent_group_tags[0];
 			instance->parent_group_tags[1] = parent_group_tags[1];
 		}
-		/* (a structure bsp's root is where it loads, set as it does) */
-		if (instance->group_tag == STRUCTURE_BSP_GROUP_TAG)
+		/* (a structure bsp's root is where it loads, set as it does; but a
+		menu backdrop pack's, which is in the pack: checked as its tags are) */
+		if (instance->group_tag == STRUCTURE_BSP_GROUP_TAG && !tag_validate_pack_structure_allowed)
 		{
 			instance->base_address = NULL;
 			continue;
@@ -1660,6 +1666,12 @@ static boolean tag_validate_structure_bsp_unlocked(
 	return result;
 }
 
+void tag_validate_pack_allow_structure(
+	boolean allowed)
+{
+	tag_validate_pack_structure_allowed = allowed;
+}
+
 /* (port) a scene pack's tags (port/linux/game/scene_pack.c): laid out as a
 map's tag data, moved to where they are (tag_relocate.c), checked as a map's
 are with the pack as the region, its pixels and samples in its own file
@@ -1707,7 +1719,8 @@ static boolean validate_pack_tags_in(
 		char text[5];
 
 		validation.tag_index = header->instances[absolute_index].tag_index;
-		if (!group || !group->definition || group_tag == 'scnr' || group_tag == STRUCTURE_BSP_GROUP_TAG ||
+		if (!group || !group->definition ||
+			((group_tag == 'scnr' || group_tag == STRUCTURE_BSP_GROUP_TAG) && !tag_validate_pack_structure_allowed) ||
 			group_tag == 'matg')
 		{
 			tag_validate_refuse(&validation, "has a tag of the group '%s', which a pack may not have",

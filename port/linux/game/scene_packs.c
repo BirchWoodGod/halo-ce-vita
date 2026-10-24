@@ -687,6 +687,39 @@ ready, or failed (its why). only_first: the first slot's group alone, the
 others left needing it (*left: how many). shared: a map the most others
 also name chosen first (a prebuild's: one read for them all), else the
 first slot's own choice (a pack wanted now: no larger read for it) */
+/* (the menus' backdrop's build) a big buffer - its source map's tag data,
+its structure bsp, the pack it makes - in the memory window (the physical
+memory the game's caches come from), which has room at the main menu, not
+the C heap the system's libraries share, which on the Vita has not: NULL
+(then the C heap) for a small one or when the window has no room */
+enum
+{
+	PACK_WINDOW_MINIMUM = 256 * 1024,
+	PACK_WINDOW_PAGE = 4096
+};
+
+void *platform_contiguous_alloc(unsigned long size, unsigned long alignment, unsigned long physical_address, DWORD protect);
+void platform_contiguous_free(void *address);
+BOOL platform_is_contiguous(const void *address);
+
+static void *pack_window_alloc(unsigned long size)
+{
+	if (size < PACK_WINDOW_MINIMUM)
+		return NULL;
+	size = (size + PACK_WINDOW_PAGE - 1) & ~(unsigned long)(PACK_WINDOW_PAGE - 1);
+	/* (0xFFFFFFFF: anywhere; 4: PAGE_READWRITE) */
+	return platform_contiguous_alloc(size, PACK_WINDOW_PAGE, 0xFFFFFFFFUL, 4);
+}
+
+static void pack_window_free(void *data, unsigned long size)
+{
+	(void)size;
+	if (data && platform_is_contiguous(data))
+		platform_contiguous_free(data);
+	else
+		free(data);
+}
+
 static void packs_prepare(struct scene_pack_slot **slots, short count, unsigned char *scratch, unsigned long scratch_size,
 	boolean only_first, boolean shared, short *left)
 {
@@ -772,8 +805,27 @@ static void packs_prepare(struct scene_pack_slot **slots, short count, unsigned 
 				need[index] = NULL;
 			}
 		}
+		/* (the menus' backdrop's build - its structure bsp and the pack it
+		makes, 10 MB and more - in the memory window, which has room at the
+		main menu, not the C heap, which on the Vita has not) */
+		for (index = 0; index < group_count && !recipes[index]->backdrop; index++)
+			;
+		if (index < group_count)
+		{
+			scene_pack_big_alloc = pack_window_alloc;
+			scene_pack_big_free = pack_window_free;
+		}
+		/* (a source map's tag data larger than the tag cache's free room -
+the menus' backdrop loaded beside the menus takes 8.7 MB of it - read into
+the memory window, not the C heap) */
+		scene_pack_scratch_alloc = pack_window_alloc;
+		scene_pack_scratch_free = pack_window_free;
 		built = scene_pack_build_many(recipes, group_count, map, cache_files_map_directory(), paths, scratch, scratch_size,
 			&scene_packs.cancel, scene_packs_build_results);
+		scene_pack_scratch_alloc = NULL;
+		scene_pack_scratch_free = NULL;
+		scene_pack_big_alloc = NULL;
+		scene_pack_big_free = NULL;
 		(void)built;
 		for (index = 0; index < group_count; index++)
 		{
@@ -940,7 +992,7 @@ static void pack_stage(struct scene_pack_slot *slot, unsigned char *room, unsign
 	unsigned long long started = vita_host_time_us();
 	FILE *file;
 	long count;
-	boolean data_checked;
+	boolean data_checked, loaded;
 
 	slot->full = slot->refused = FALSE;
 	file = fopen(slot->path, "rb");
@@ -971,7 +1023,12 @@ static void pack_stage(struct scene_pack_slot *slot, unsigned char *room, unsign
 		return;
 	}
 	data_checked = stamp_valid(slot);
-	if (!scene_pack_load_file_checked(file, &slot->info, room, data_checked, slot->why, sizeof(slot->why)))
+	/* (the menus' backdrop's holds a structure bsp and a scenario's copy:
+	menu_backdrop.c) */
+	tag_validate_pack_allow_structure(slot->recipe->backdrop);
+	loaded = scene_pack_load_file_checked(file, &slot->info, room, data_checked, slot->why, sizeof(slot->why));
+	tag_validate_pack_allow_structure(FALSE);
+	if (!loaded)
 	{
 		fclose(file);
 		csmemset(room, 0xCD, slot->info.tags_size);
