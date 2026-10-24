@@ -84,6 +84,9 @@ unsigned long scene_packs_map_epoch(void);
 void halo_tick_wait_for_render(void);
 int menu_functions_prebuild_settled(void);
 void menu_functions_scenes_refresh(void);
+/* (sound_classes.c: no header says it - an undeclared call passed the gain
+as a double, read as 0: the music went silent) */
+void sound_class_set_gain(char const *name, real gain, short interpolation_ticks);
 
 /* ---------- constants */
 

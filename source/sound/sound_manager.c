@@ -3054,6 +3054,25 @@ static void update_channel_for_looping_sound(
 			definition->one_gain_modifier,
 			scale) *
 		sound->source.gain * fade;
+#ifdef HALO_LINUX
+	/* (debug) HALO_SOUND_TRACE=2: each looping sound's gain and what makes
+	it, once a second */
+	{
+		static int trace = -1;
+		static unsigned long said_at;
+
+		if (trace < 0)
+			trace = getenv("HALO_SOUND_TRACE") ? atoi(getenv("HALO_SOUND_TRACE")) : 0;
+		if (trace >= 2 && system_milliseconds() - said_at > 1000)
+		{
+			said_at = system_milliseconds();
+			platform_log("sound trace: loop %s class %d gain %.3f (class %.3f, nondialog %.3f, track %.3f, source %.3f, "
+				"fade %.3f, spatialization %d)", tag_get_name(sound->definition_index), definition->sound_class,
+				properties.gain, sound_class_get_gain(definition->sound_class), sound_manager_globals.nondialog_gain,
+				track->gain, sound->source.gain, fade, sound->source.spatialization_mode);
+		}
+	}
+#endif
 
 	if (sound->playing_channel_index == NONE)
 	{
