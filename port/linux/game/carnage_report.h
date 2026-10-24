@@ -42,6 +42,8 @@ struct carnage_report_row
 	boolean local;
 	boolean quit;
 	boolean won;
+	/* the player's (NONE: a team's row) */
+	long player_index;
 	/* UTF-8 */
 	char name[48];
 	/* the score as the game type shows it ("12", "1:05"), and its value
