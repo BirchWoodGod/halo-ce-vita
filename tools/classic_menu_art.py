@@ -32,7 +32,10 @@ FONT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fonts', 'SairaS
 LANG = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'port', 'vita', 'app0', 'lang')
 # the main menu's rows (their files' names) and the heading, in English
 ROWS = (('forge', 'FORGE'), ('friends', 'FRIENDS'), ('fileshare', 'FILE SHARE'), ('mods', 'MOD MANAGER'))
-HEADINGS = (('header_lobby_options', 'LOBBY OPTIONS'),)
+HEADINGS = (('header_lobby_options', 'LOBBY OPTIONS'),
+            # (Classic+'s screens for the port's features: classic/forge.xml, customize.xml)
+            ('header_forge', 'FORGE'), ('header_extra_objects', 'EXTRA OBJECTS'),
+            ('header_customization', 'CUSTOMIZATION'))
 
 # (the widget it is drawn into, fit="widget": 226 x 229; the PNG a power of
 # two, so drawn at that scale and stretched back by the game)

@@ -522,6 +522,13 @@ static struct
 	long online_from[MAXIMUM_ONLINE_SCREENS];
 	long online_to[MAXIMUM_ONLINE_SCREENS];
 	boolean online_said[MAXIMUM_ONLINE_SCREENS];
+	/* (Menu style Classic+: a cp/<name> widget stands for h3/<name> - the
+	port's screens in the Xbox menus' look, menus/classic -, as the online
+	set's do for ElDewrito: menu_tags_online) */
+	long classic_set_count;
+	long classic_set_from[MAXIMUM_ONLINE_SCREENS];
+	long classic_set_to[MAXIMUM_ONLINE_SCREENS];
+	boolean classic_set_said[MAXIMUM_ONLINE_SCREENS];
 } menu_tags;
 
 /* the build under way */
@@ -2753,6 +2760,34 @@ void menu_tags_loaded(
 		menu_tags.online_to[menu_tags.online_count] = build.widget_tags[index];
 		menu_tags.online_count++;
 	}
+	/* (the classic set: a cp/<name> widget stands for h3/<name> while Menu
+	style is Classic+ - menus/classic's screens for the port's features) */
+	menu_tags.classic_set_count = 0;
+	for (index = 0; index < widget_count; index++)
+	{
+		char const *name = menus->widgets[index].name;
+		char h3_name[160];
+		long h3_widget;
+
+		if (!name || strncmp(name, "cp/", 3))
+			continue;
+		snprintf(h3_name, sizeof(h3_name), "h3/%s", name + 3);
+		if ((h3_widget = widget_named(h3_name)) == NONE)
+			continue;
+		if (menu_tags.classic_set_count == MAXIMUM_ONLINE_SCREENS)
+		{
+			problem(menus->widgets[index].file, menus->widgets[index].line, "too many classic widgets stand for "
+				"Halo 3 ones", name);
+			break;
+		}
+		menu_tags.classic_set_said[menu_tags.classic_set_count] = FALSE;
+		menu_tags.classic_set_from[menu_tags.classic_set_count] = build.widget_tags[h3_widget];
+		menu_tags.classic_set_to[menu_tags.classic_set_count] = build.widget_tags[index];
+		menu_tags.classic_set_count++;
+	}
+	if (menu_tags.classic_set_count)
+		platform_log("menus: classic set: %ld widgets stand for Halo 3 ones (Menu style %s)",
+			menu_tags.classic_set_count, halo_menu_style_classic_plus() ? "Classic+" : "not Classic+");
 	if (menu_tags.online_count)
 		platform_log("menus: online set: %ld widgets stand for Halo 3 ones (Menu style %s)", menu_tags.online_count,
 			halo_menu_style_online() ? "Online" : "not Online");
@@ -2916,6 +2951,23 @@ static long menu_tags_online(
 {
 	long index;
 
+	/* (Menu style Classic+: the classic set's, for the screens it has) */
+	if (tag_index != NONE && menu_tags.classic_set_count && halo_menu_style_classic_plus())
+	{
+		for (index = 0; index < menu_tags.classic_set_count; index++)
+		{
+			if (menu_tags.classic_set_from[index] != tag_index)
+				continue;
+			if (!menu_tags.classic_set_said[index])
+			{
+				menu_tags.classic_set_said[index] = TRUE;
+				platform_log("menus: classic screen %s for %s", tag_get_name(menu_tags.classic_set_to[index]),
+					tag_get_name(tag_index));
+			}
+			return menu_tags.classic_set_to[index];
+		}
+		return tag_index;
+	}
 	if (tag_index == NONE || !menu_tags.online_count || !halo_menu_style_online())
 		return tag_index;
 	for (index = 0; index < menu_tags.online_count; index++)

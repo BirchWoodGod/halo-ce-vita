@@ -59,3 +59,15 @@ Menu style Halo CE's additions (classic/)
   <frame png=...> is the language chosen's, English's when it has none), and
   the multiplayer pause's box (classic/pausebox.png); the other pictures are
   the map's own or the player's Halo PC data's, as above.
+
+Menu style Classic+'s screens for the port's features (classic/forge.xml, ...)
+- A widget named cp/<name> stands for the Halo 3 set's h3/<name> while Menu
+  style is Classic+ (menu_tags.c menu_tags_online, as online/<name> does for
+  ElDewrito): the same rows, found by their names by menu_functions.c's
+  functions, laid out as the Xbox's Multiplayer screen and OpenCE's - the
+  heading, the rows at the left in ui.map's large font, the description's
+  panel at the right, the button key. The pictures and fonts are the
+  player's (ui.map, Halo PC's bitmaps.map: art.xml); the headings are the
+  port's words drawn in the game's look (tools/classic_menu_art.py).
+- Menu style Classic (HALO_MENU_STYLE=original) shows none of this: the
+  Xbox menus as they shipped; the settings panel has the port's features.

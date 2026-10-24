@@ -28,6 +28,9 @@ halo3/join_split.xml
 halo3/pregame.xml
 halo3/dialog.xml
 halo3/dialog_ui.xml
+# Menu style Classic+: the port's screens in the original menus' look (a cp/<name> widget stands
+# for h3/<name>: menu_tags.c menu_tags_online)
+classic/forge.xml
 # Menu style Online (a preview: menus/online, menu_tags.c menu_tags_online)
 online/main.xml
 online/customize.xml
