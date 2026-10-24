@@ -369,7 +369,7 @@ static const struct config_setting config_settings[] =
 	{ "menus.style", _config_string, "\"halo3\"", "HALO_MENU_STYLE", _environment_value, _platform_all,
 		"The menus: \"classic\" (Halo CE's own), \"halo3\" (Halo 3-style screens\n"
 		"over the same animated Halo ring: port/vita/app0/menus/halo3) or \"online\"\n"
-		"(a preview: the Halo 3 screens' flows, port/vita/app0/menus/online's look\n"
+		"(shown as ElDewrito: the Halo 3 screens' flows, port/vita/app0/menus/online's look\n"
 		"for the screens it has). Read each\n"
 		"time a screen opens. The Vita's settings panel (Game, Menus, Menu\n"
 		"style) sets it." },
@@ -391,7 +391,7 @@ static const struct config_setting config_settings[] =
 		"port/vita/app0/menus/halo3), the main menu the ring's own flight;\n"
 		"false keeps the ring's flight behind every screen." },
 	{ "menus.backdrop", _config_boolean, "true", "HALO_MENU_BACKDROP", _environment_value, _platform_all,
-		"With Menu style Online, the campaign level Halo (a30) behind the menus,\n"
+		"With Menu style ElDewrito (\"online\"), the campaign level Halo (a30) behind the menus,\n"
 		"a still camera at a spot of it for each screen (port/linux/game/\n"
 		"menu_backdrop.c), made once from the player's own a30.map into\n"
 		"t:\\packs; false (or no a30.map) keeps the ring. The Vita's settings\n"

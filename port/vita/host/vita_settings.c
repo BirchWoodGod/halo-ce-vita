@@ -584,8 +584,8 @@ static struct setting settings[] = {
 	PAGE_ROW("Menus", "Menu style, the carnage report and scoreboard", TAB_GAME, PAGE_MENUS),
 	/* (Online: the Halo 3 menus' flows in the online set's look,
 	port/vita/app0/menus/online - a prototype, menu_tags.c menu_tags_online) */
-	{ "Menu style", "HALO_MENU_STYLE", 0, 3, { "classic", "halo3", "online" }, { "Halo CE", "Halo 3", "Online" },
-		"Halo 3: the new menus over the Halo ring. Halo CE: the original menus.", 1, PAGE_MENUS },
+	{ "Menu style", "HALO_MENU_STYLE", 0, 3, { "classic", "halo3", "online" }, { "Halo CE", "Halo 3", "ElDewrito" },
+		"ElDewrito: Halo Online-style menus. Halo 3: over the ring. Halo CE: the original.", 1, PAGE_MENUS },
 	/* (menu_functions.c h3_carnage_wanted, config.toml's menus.carnage_report:
 	a multiplayer game's end, Halo 3's CARNAGE REPORT or the game's own;
 	read when the scores come up: live. Shown with Menu style Halo 3 - Halo
@@ -604,7 +604,7 @@ static struct setting settings[] = {
 	the ring. Read each frame at the main menu: live. Shown with Menu style
 	Online: setting_shown) */
 	{ "Live backdrop", "HALO_MENU_BACKDROP", 0, 2, { "0", "1" }, { "Off", "On" },
-		"Online menus: the level Halo behind them (your a30.map), or the ring", 1, PAGE_MENUS },
+		"ElDewrito menus: the level Halo behind them (your a30.map), or the ring", 1, PAGE_MENUS },
 	/* (Forge and File Share for the original menus - the owner: everything
 	in the overlay -: the Forge page, under Menus (Interface; it was Game's
 	last row, under Updates, insider.21), shown with Menu style Halo CE; the
@@ -4902,7 +4902,7 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 			/* (the game's Multiplayer menu without OpenCE's screens) */
 			if (halo_pc_menus_state < 0 && length < size)
 				length += snprintf(text + length, (size_t)(size - length), "\n\x04%s",
-					T("Online menus need bitmaps.map, loc.map: README"));
+					T("ElDewrito menus need bitmaps.map, loc.map: README"));
 		}
 		game_line(status, sizeof(status));
 		if (length < size)
