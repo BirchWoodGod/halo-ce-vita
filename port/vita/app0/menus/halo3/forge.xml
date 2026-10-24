@@ -5,8 +5,8 @@ pause screen (ingame.txt; its fonts and pictures are halo3/pause.xml's, the same
   window at the right over the running game, which it does not pause, as Halo 3's does not: the
   title strip with the budget, the crumb (OBJECTS > VEHICLES), the list with the orange bar and the
   count placed, the pane on the one chosen, the button strip. The categories first, A opens one, L
-  and R step through them, A on an object places it in the monitor's hand, B goes back, Square
-  closes it;
+  and R step through them, A on an object places it in the monitor's hand, B goes back one level
+  (closing it from the categories), Square closes it;
 - the Forge menu, Start in a Forge game (menu_tags.c opens it for the level's pause screen): resume,
   the monitor or the Spartan, save the map variant (its name typed on the system's keyboard: port
   forge save), undo and redo (forge.c's history), snapping on or off, every placed character's AI
@@ -122,8 +122,6 @@ The art is this folder's own (tools/halo3_menu_art.py). -->
 	</widget>
 	<widget name="h3/forge/browser/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<data input="port forge browser"/>
-		<on event="b" run="port forge browser back"/>
-		<on event="x" run="port forge browser back"/>
 		<on event="left_trigger left" run="port forge browser previous"/>
 		<on event="right_trigger right" run="port forge browser next"/>
 		<child widget="h3/forge/browser/row_0" x="0" y="0"/>
@@ -158,6 +156,11 @@ The art is this folder's own (tools/halo3_menu_art.py). -->
 	<widget name="h3/forge/browser/category" type="text" left="546" top="434" width="76" height="18" font="h3/font_item" color="#FFECECEC" text_y="1" string_list="h3/forge_menu" string_index="3"/>
 	<widget name="h3/forge/browser/screen" flags="pass_unhandled_to_focused_child">
 		<on event="created" run="port forge browser init"/>
+		<!-- (B on the screen itself: a screen with no B of its own is closed by B,
+		before its list sees it. B one level back - a category to the categories,
+		them closed -; Square, which opens the browser, closes it) -->
+		<on event="b" run="port forge browser back"/>
+		<on event="x" run="port forge close"/>
 		<child widget="h3/forge/browser/panel"/>
 		<child widget="h3/forge/browser/strip"/>
 		<child widget="h3/forge/browser/title"/>
