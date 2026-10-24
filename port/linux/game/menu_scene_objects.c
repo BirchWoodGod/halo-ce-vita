@@ -42,6 +42,9 @@ to the picture's left). The options, each <name>=<value>:
 	                   positive turning to +y, as a camera's yaw), upright in
 	                   the world (as level=1); pitch= and roll= then lean it
 	                   from there (a Warthog's spot saved in the level)
+	bob=<a>,<s>        (with at=) hovering: up and down a units on a sine of
+	                   s seconds, its heading swaying 2 degrees the while, on
+	                   the host's clock (each frame, the ticks stopped or not)
 	slope=<l>,<w>      (with at= and ground=) a vehicle on uneven ground: the
 	                   ground found under its front and back (l units along
 	                   it) and its sides (w across), its nose and side leaned
@@ -222,6 +225,10 @@ struct menu_scene_object
 	ground under its four sides (0: not) */
 	real slope_length;
 	real slope_width;
+	/* (bob=<amplitude>,<seconds>) a hover's rise and fall (world units), a
+	sine of that period on the host clock, and a sway of its heading */
+	real bob_amplitude;
+	real bob_period;
 	/* (at= yaw=) at that point of the world, its front along that heading
 	(radians) */
 	boolean world;
@@ -443,6 +450,19 @@ static boolean option_parse(char const *word, struct menu_scene_object *object)
 		object->world_yaw = number * MENU_SCENE_DEGREES;
 		return TRUE;
 	}
+	if (!strcmp(name, "bob"))
+	{
+		float amplitude, period;
+
+		if (sscanf(value, "%f,%f%n", &amplitude, &period, &used) != 2 || value[used] ||
+			!(amplitude > 0.f && amplitude < 1.f) || !(period >= 0.5f && period <= 30.f))
+		{
+			return FALSE;
+		}
+		object->bob_amplitude = amplitude;
+		object->bob_period = period;
+		return TRUE;
+	}
 	if (!strcmp(name, "slope"))
 	{
 		float length, width;
@@ -535,6 +555,7 @@ static boolean entry_parse(char *text, struct menu_scene_object *object, short e
 	object->grounded = FALSE;
 	object->ground_offset = 0.f;
 	object->slope_length = object->slope_width = 0.f;
+	object->bob_amplitude = object->bob_period = 0.f;
 	object->world = FALSE;
 	object->world_yaw = 0.f;
 	object->color_index = MENU_SCENE_COLOR_OWN;
@@ -793,6 +814,19 @@ static void object_place(struct menu_scene_object const *object, real_point3d *p
 				up->j = u.j * c - right.j * s;
 				up->k = u.k * c - right.k * s;
 			}
+		}
+		/* (bob=: the hover's rise and fall, and its heading's sway) */
+		if (object->bob_period > 0.f)
+		{
+			double seconds = (double)vita_host_time_us() / 1000000.0;
+			double phase = 2.0 * 3.14159265358979 * seconds / object->bob_period;
+			real sway = (real)(2.0 * 3.14159265358979 / 180.0 * sin(phase * 0.73));
+			real c = (real)cos(sway), s = (real)sin(sway);
+			real_vector3d f = *forward;
+
+			position->z += object->bob_amplitude * (real)sin(phase);
+			forward->i = f.i * c - f.j * s;
+			forward->j = f.i * s + f.j * c;
 		}
 	}
 	if (object->pitch != 0.f)
@@ -1314,7 +1348,7 @@ static boolean object_hold(struct menu_scene_object *object, short slot)
 		object_place(object, &position, &forward, &up);
 		/* (put back only when it has moved: a flying biped stays where it is,
 		and placing an object finds its clusters again, each time) */
-		if (distance_squared3d(&datum->object.position, &position) > 0.0001f ||
+		if (object->bob_period > 0.f || distance_squared3d(&datum->object.position, &position) > 0.0001f ||
 			dot_product3d(&datum->object.forward, &forward) < 0.9999f ||
 			dot_product3d(&datum->object.up, &up) < 0.9999f)
 		{
@@ -1789,6 +1823,8 @@ void menu_scene_objects_want(
 		object->ground_offset = parsed[index].ground_offset;
 		object->slope_length = parsed[index].slope_length;
 		object->slope_width = parsed[index].slope_width;
+		object->bob_amplitude = parsed[index].bob_amplitude;
+		object->bob_period = parsed[index].bob_period;
 		object->world = parsed[index].world;
 		object->world_position = parsed[index].world_position;
 		object->world_yaw = parsed[index].world_yaw;
