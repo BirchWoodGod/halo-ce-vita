@@ -36,6 +36,15 @@ to the picture's left). The options, each <name>=<value>:
 	                   seat of that label, or whose label ends in -<label>
 	                   (driver, gunner, passenger: W-driver, W-gunner,
 	                   W-passenger); the place is its seat's, none is given
+	at=<x>,<y>,<z> yaw=<degrees>  in place of the four numbers: standing at
+	                   that point of the world (world units, as a camera
+	                   save's), its front along that heading (0: along +x,
+	                   positive turning to +y, as a camera's yaw), upright in
+	                   the world (as level=1); pitch= and roll= then lean it
+	                   from there (a Warthog's spot saved in the level)
+	level=1            stood upright in the world, not in the picture: a
+	                   camera pitched up then looks up at it, its underside
+	                   showing (a Warthog jumping over the camera)
 	look=<entry>       turned to that entry, its head (and a flying biped's
 	                   whole body) looking at it
 	suspension=<0..1>  a vehicle's wheels: 0 (the default) hanging all the
@@ -195,6 +204,13 @@ struct menu_scene_object
 	/* looking at that entry (NONE: the camera) */
 	short look_entry;
 	real suspension;
+	/* (level=1) upright in the world, not in the picture */
+	boolean level;
+	/* (at= yaw=) at that point of the world, its front along that heading
+	(radians) */
+	boolean world;
+	real_point3d world_position;
+	real world_yaw;
 	struct menu_scene_camera camera;
 
 	/* (the update's) what was made, the map it was made on, its colour */
@@ -389,6 +405,35 @@ static boolean option_parse(char const *word, struct menu_scene_object *object)
 			return FALSE;
 		return TRUE;
 	}
+	if (!strcmp(name, "at"))
+	{
+		float x, y, z;
+
+		if (sscanf(value, "%f,%f,%f%n", &x, &y, &z, &used) != 3 || value[used] || !real_in_range(x, 5000.f) ||
+			!real_in_range(y, 5000.f) || !real_in_range(z, 5000.f))
+		{
+			return FALSE;
+		}
+		object->world = TRUE;
+		object->world_position.x = x;
+		object->world_position.y = y;
+		object->world_position.z = z;
+		return TRUE;
+	}
+	if (!strcmp(name, "yaw"))
+	{
+		if (sscanf(value, "%f%n", &number, &used) != 1 || value[used] || !real_in_range(number, 720.f))
+			return FALSE;
+		object->world_yaw = number * MENU_SCENE_DEGREES;
+		return TRUE;
+	}
+	if (!strcmp(name, "level"))
+	{
+		if (strcmp(value, "0") && strcmp(value, "1"))
+			return FALSE;
+		object->level = !strcmp(value, "1");
+		return TRUE;
+	}
 	if (!strcmp(name, "frame") || !strcmp(name, "in") || !strcmp(name, "look"))
 	{
 		int integer;
@@ -449,6 +494,9 @@ static boolean entry_parse(char *text, struct menu_scene_object *object, short e
 	object->distance = object->right = object->up = object->facing = 0.f;
 	object->pitch = object->roll = 0.f;
 	object->suspension = 0.f;
+	object->level = FALSE;
+	object->world = FALSE;
+	object->world_yaw = 0.f;
 	object->color_index = MENU_SCENE_COLOR_OWN;
 	object->weapon_pack[0] = object->weapon_tag[0] = 0;
 	object->animation[0] = 0;
@@ -475,8 +523,13 @@ static boolean entry_parse(char *text, struct menu_scene_object *object, short e
 		if (!option_parse(word, object))
 			return FALSE;
 	}
-	/* (a place given whole, or none for a seated one) */
-	if (placement_count == 4)
+	/* (a place given whole, at= in the world, or none for a seated one) */
+	if (object->world)
+	{
+		if (placement_count || object->vehicle_entry != NONE)
+			return FALSE;
+	}
+	else if (placement_count == 4)
 	{
 		object->distance = placement[0];
 		object->right = placement[1];
@@ -538,6 +591,11 @@ static void entry_position(struct menu_scene_object const *object, real_point3d 
 	struct menu_scene_frame frame;
 	real scale = object->scale > 1.f ? object->scale : 1.f;
 
+	if (object->world)
+	{
+		*position = object->world_position;
+		return;
+	}
 	camera_frame(&object->camera, &frame);
 	position->x = object->camera.position.x + (frame.view.i * object->distance + frame.right.i * object->right +
 		frame.up.i * object->up) * scale;
@@ -562,6 +620,22 @@ static void object_place(struct menu_scene_object const *object, real_point3d *p
 
 	camera_frame(&object->camera, &frame);
 	entry_position(object, position);
+	/* (level=1: the world's up its up, the view level: upright in the
+	world, a pitched camera looking up or down at it) */
+	if (object->level)
+	{
+		real length;
+
+		frame.view.k = 0.f;
+		length = (real)sqrt(frame.view.i * frame.view.i + frame.view.j * frame.view.j);
+		if (length > 0.0001f)
+		{
+			frame.view.i /= length;
+			frame.view.j /= length;
+		}
+		frame.up.i = frame.up.j = 0.f;
+		frame.up.k = 1.f;
+	}
 	/* (back toward the camera; or toward what it looks at, level in the
 	picture) */
 	base.i = -frame.view.i;
@@ -589,6 +663,15 @@ static void object_place(struct menu_scene_object const *object, real_point3d *p
 	forward->j = base.j * cosine - right.j * sine;
 	forward->k = base.k * cosine - right.k * sine;
 	*up = frame.up;
+	/* (at= yaw=: along its heading, upright in the world) */
+	if (object->world)
+	{
+		forward->i = (real)cos(object->world_yaw);
+		forward->j = (real)sin(object->world_yaw);
+		forward->k = 0.f;
+		up->i = up->j = 0.f;
+		up->k = 1.f;
+	}
 	if (object->pitch != 0.f)
 	{
 		real angle = object->pitch * MENU_SCENE_DEGREES;
@@ -1578,6 +1661,10 @@ void menu_scene_objects_want(
 		snprintf(object->seat, sizeof(object->seat), "%s", parsed[index].seat);
 		object->look_entry = parsed[index].look_entry;
 		object->suspension = parsed[index].suspension;
+		object->level = parsed[index].level;
+		object->world = parsed[index].world;
+		object->world_position = parsed[index].world_position;
+		object->world_yaw = parsed[index].world_yaw;
 		object->camera = camera;
 		object->scale = 1.f;
 		object->wanted = TRUE;
@@ -1733,6 +1820,8 @@ int menu_scene_spartan_show(
 		menu_scene_objects.preview_pack : MENU_SCENE_PREVIEW_PACK);
 	object->tag[0] = 0;
 	object->pitch = object->roll = 0.f;
+	object->level = FALSE;
+	object->world = FALSE;
 	object->weapon_pack[0] = object->weapon_tag[0] = 0;
 	object->animation[0] = 0;
 	object->vehicle_entry = object->look_entry = NONE;
