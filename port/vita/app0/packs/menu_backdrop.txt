@@ -4,16 +4,17 @@
 # lakeshore), its night skies, its scenery (the trees and rocks) and its
 # grass, and its ambience: the bsp's background sounds and sound environments (each cluster's night:
 # wind, insects, birds) and its sound scenery (the waterfall, the water) -
-# none of its AI, scripts, weapons or vehicles. A still camera needs no effect
-# or damage: those are left out.
+# none of its AI, scripts, weapons or vehicles. Its scenery's own looping
+# effects come with it (their effects, particles and particle systems): the
+# crashed lifepods' lingering smoke, the debris' smoulder, the waterfalls'
+# spray, run where the menus' camera is (players.c's potentially visible
+# clusters: every one of the backdrop's bsp). Contrails, damage, decals,
+# projectiles and the rest are left out.
 pack menu_backdrop
 map a30
 backdrop
 tag scnr levels\a30\a30
 tag sbsp levels\a30\a30_a
-strip effe
-strip part
-strip pctl
 strip cont
 strip jpt!
 strip deca
