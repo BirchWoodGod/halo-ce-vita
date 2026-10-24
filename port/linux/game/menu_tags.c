@@ -1837,8 +1837,7 @@ static void classic_patches_apply(void)
 			instances[absolute].base_address = classic ? menu_tags.classic_patched[index] : menu_tags.classic_original[index];
 	}
 	menu_tags.classic_applied = classic ? 1 : -1;
-	platform_log("menus: Menu style %s: the Xbox screens' %ld widgets %s", classic ? "Classic+" :
-		halo_menu_style_original() ? "Classic" : "Halo 3/ElDewrito",
+	platform_log("menus: Menu style %s: the Xbox screens' %ld widgets %s", classic ? "Halo CE" : "Halo 3",
 		menu_tags.classic_count, classic ? "with the port's rows" : "as the map has them");
 }
 

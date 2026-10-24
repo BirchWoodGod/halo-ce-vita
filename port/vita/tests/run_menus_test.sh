@@ -429,6 +429,9 @@
 #           Team Slayer game on Blood Gulch; HALO_TEST_PROFILE, skipped without): RESUME GAME focused,
 #           PLAYERS opens the players' screen, B; PARTY asks for the settings panel's Party page;
 #           RESUME GAME closes it, the game going on
+#   ceoriginal  Menu style Classic (HALO_MENU_STYLE=original): the Xbox's main menu as it
+#           shipped (no row of the port's: the map's own list), MULTIPLAYER the Xbox's own screen
+#           (not OpenCE's), B back
 #   ceplusforge  FORGE on Menu style Halo CE's main menu (HALO_TEST_PROFILE; skipped without): the
 #           Forge lobby's NETWORK on SYSTEM LINK, START FORGE: the profile, the network Forge game
 #           hosted and the Xbox's pregame (no live lobby with the Xbox's menus)
@@ -3201,7 +3204,7 @@ PY
 		# (the main menu's rows under SETTINGS: down three to FORGE, four to FRIENDS, five to FILE
 		# SHARE, six to MOD MANAGER; A, then B back)
 		d="down:150:500"
-		for row in "3 forge pc.h3.forge.lobby" "4 friends pc.h3.friends.screen" "5 fileshare pc.h3.fileshare.screen" \
+		for row in "3 forge pc.cp.forge.lobby" "4 friends pc.h3.friends.screen" "5 fileshare pc.h3.fileshare.screen" \
 			"6 mods pc.h3.mods.screen"; do
 			set -- $row
 			downs=""
@@ -3244,6 +3247,19 @@ PY
 		grep -aqE "menus: Menu style Halo 3: the Xbox screens' [0-9]+ widgets as the map has them" "$log" ||
 			fail ceplusmain "Menu style Halo 3: the Xbox screens kept the port's rows"
 		grep -aq "ui: screen pc.h3.main.screen" "$log" || fail ceplusmain "Menu style Halo 3: not the Halo 3 main menu" ;;
+	ceoriginal)
+		run ceoriginal "$menus_data" 18 "wait:150:3000 down:150:800 a:150:3000 b:150:3000" HALO_SCENE_PACKS=0 HALO_MENU_STYLE=original
+		log=$out/ceoriginal/run.log
+		echo "--- ceoriginal"
+		grep -aE "ui: screen|menus: Menu style" "$log" | head -6
+		[ "$(cat "$out/ceoriginal/exit")" = 0 ] || fail ceoriginal "exit $(cat "$out/ceoriginal/exit")"
+		grep -aqiE "assert|exception|halt_and_catch_fire" "$log" && fail ceoriginal "an assertion, exception or halt"
+		grep -aqE "menus: Menu style Halo CE: the Xbox screens' [0-9]+ widgets with the port's rows" "$log" &&
+			fail ceoriginal "Classic's Xbox screens were given the port's rows"
+		grep -aq "ui: screen ui.shell.main_menu.main_menu" "$log" || fail ceoriginal "the Xbox's main menu did not open"
+		grep -aq "ui: screen pc.mp.screen" "$log" && fail ceoriginal "MULTIPLAYER opened OpenCE's screen"
+		grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select" "$log" ||
+			fail ceoriginal "MULTIPLAYER did not open the Xbox's Multiplayer screen" ;;
 	ceplusmp)
 		d="down:150:500"
 		run ceplusmp_gametypes "$menus_data" 22 "wait:150:3000 down:150:800 a:150:3000 $d $d $d $d $d $d $d $d a:150:4000 b:150:3000" \
@@ -3282,8 +3298,8 @@ PY
 		[ "$(cat "$out/ceplusprofile/exit")" = 0 ] || fail ceplusprofile "exit $(cat "$out/ceplusprofile/exit")"
 		grep -aqiE "assert|exception|halt_and_catch_fire" "$log" && fail ceplusprofile "an assertion, exception or halt"
 		grep -aq "menus: ce customize: MORE OPTIONS for " "$log" || fail ceplusprofile "MORE OPTIONS did not edit the profile"
-		grep -aq "ui: screen pc.h3.custom.screen" "$log" || fail ceplusprofile "MORE OPTIONS did not open the editor"
-		sed -n '/ui: screen pc.h3.custom.screen/,$p' "$log" | grep -aq "ui: screen ui.shell.main_menu.settings_select.player_setup.player_profile_edit.player_profile_edit_screen" ||
+		grep -aq "ui: screen pc.cp.custom.screen" "$log" || fail ceplusprofile "MORE OPTIONS did not open the editor"
+		sed -n '/ui: screen pc.cp.custom.screen/,$p' "$log" | grep -aq "ui: screen ui.shell.main_menu.settings_select.player_setup.player_profile_edit.player_profile_edit_screen" ||
 			fail ceplusprofile "B did not go back to the Xbox's profile settings"
 		grep -a "ui: screen" "$log" | tail -1 | grep -q "ui.shell.main_menu.main_menu" || fail ceplusprofile "B, B did not reach the main menu"
 		# (CHANGE COLOR first - the fourth row, A, then B -, then down to MORE OPTIONS, A, B: the editor
@@ -3297,9 +3313,9 @@ PY
 		grep -aE "ui: screen|ce customize|h3 customize: (saved|editing)" "$log" | head -14
 		[ "$(cat "$out/ceplusprofile_color/exit")" = 0 ] || fail ceplusprofile "color: exit $(cat "$out/ceplusprofile_color/exit")"
 		grep -aq "menus: ce customize: MORE OPTIONS for " "$log" || fail ceplusprofile "color: MORE OPTIONS did not edit the profile"
-		sed -n '/ui: screen pc.h3.custom.screen/,/test pad: wait/p' "$log" | grep -a "ui: screen" | sed -n 2p | grep -aq "player_profile_edit_screen" ||
+		sed -n '/ui: screen pc.cp.custom.screen/,/test pad: wait/p' "$log" | grep -a "ui: screen" | sed -n 2p | grep -aq "player_profile_edit_screen" ||
 			fail ceplusprofile "color: B did not go back to the Xbox's profile settings"
-		sed -n '/ui: screen pc.h3.custom.screen/,/test pad: wait/p' "$log" | grep -aq "player_profile_select_screen" &&
+		sed -n '/ui: screen pc.cp.custom.screen/,/test pad: wait/p' "$log" | grep -aq "player_profile_select_screen" &&
 			fail ceplusprofile "color: the profile settings closed themselves (no profile being edited)" ;;
 	cepluspregame)
 		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
