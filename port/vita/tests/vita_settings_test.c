@@ -3326,6 +3326,8 @@ static void test_tab_layouts(void)
 		/* (shown with Menu style Halo 3) */
 		{ PAGE_MENUS, "Carnage report", "HALO_CARNAGE_REPORT", "classic|halo3", 0, "halo3" },
 		{ PAGE_MENUS, "Scoreboard", "HALO_SCOREBOARD", "classic|halo3", 0, "halo3" },
+		/* (shown with Menu style Online) */
+		{ PAGE_MENUS, "Live backdrop", "HALO_MENU_BACKDROP", "0|1", 0, "1" },
 		/* (Forge and File Share, shown with Menu style Halo CE: under Menus) */
 		{ TAB_GAME, "Forge and File Share", NULL, NULL, 0, NULL, ACTION_PAGE, PAGE_FORGE },
 		{ TAB_GAME, "Button icons", "HALO_BUTTON_ICONS", "xbox|playstation", 0,
@@ -3634,7 +3636,7 @@ static void test_variables_kept(void)
 		"HALO_INFECTION_ZOMBIES", "HALO_INFECTION_SPEED", "HALO_INFECTION_TIME", "HALO_INFECTION_RESPAWN",
 		"HALO_INFECTION_SHIELDS", "HALO_INFECTION_TOUGH",
 		"HALO_CARNAGE_REPORT", "HALO_FLAMING_HELMET", "HALO_FIELD_OF_VIEW", "HALO_CLOCK_GOVERNOR", "HALO_BATTERY_LOG",
-		"HALO_CHAT", "HALO_CHAT_FILTER", "HALO_BOTS_ONLINE", "HALO_SCOREBOARD",
+		"HALO_CHAT", "HALO_CHAT_FILTER", "HALO_BOTS_ONLINE", "HALO_SCOREBOARD", "HALO_MENU_BACKDROP",
 	};
 	int index, all = 1, choices = 0;
 

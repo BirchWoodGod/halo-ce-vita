@@ -87,6 +87,8 @@
 "A multiplayer game's end: Halo 3's report, or the original" = "Fin de una partida multijugador: el informe de Halo 3 o el original"
 "Scoreboard" = "Marcador"
 "Scores in a game: Halo 3's scoreboard, or the original" = "Puntuaciones en partida: el marcador de Halo 3 o el original"
+"Live backdrop" = "Fondo en vivo"
+"Online menus: the level Halo behind them (your a30.map), or the ring" = "Menús Online: el nivel Halo detrás (tu a30.map), o el anillo"
 "First-person legs, smooth weapon motion" = "Piernas visibles, movimiento del arma"
 "Models, shadows, lights, effects, particles" = "Modelos, sombras, luces, efectos, partículas"
 "Update rates, AI think rate, fourth core helpers" = "Frecuencias, ritmo de la IA, cuarto núcleo"

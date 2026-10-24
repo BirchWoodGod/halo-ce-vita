@@ -599,6 +599,12 @@ static struct setting settings[] = {
 	Carnage report is - Halo CE always shows the game's own -: setting_shown) */
 	{ "Scoreboard", "HALO_SCOREBOARD", 0, 2, { "classic", "halo3" }, { "Halo CE", "Halo 3" },
 		"Scores in a game: Halo 3's scoreboard, or the original", 1, PAGE_MENUS },
+	/* (menu_backdrop.c, config.toml's menus.backdrop: the campaign level
+	Halo behind the Online menus, made once from the player's a30.map; Off,
+	the ring. Read each frame at the main menu: live. Shown with Menu style
+	Online: setting_shown) */
+	{ "Live backdrop", "HALO_MENU_BACKDROP", 0, 2, { "0", "1" }, { "Off", "On" },
+		"Online menus: the level Halo behind them (your a30.map), or the ring", 1, PAGE_MENUS },
 	/* (Forge and File Share for the original menus - the owner: everything
 	in the overlay -: the Forge page, under Menus (Interface; it was Game's
 	last row, under Updates, insider.21), shown with Menu style Halo CE; the
@@ -1679,6 +1685,7 @@ Online (network_is), its password while the game is public too; Dynamic
 minimum while Render resolution is Dynamic (each keeps its value
 meanwhile) */
 static int classic_panel(void);
+static int online_panel_style(void);
 
 static int setting_shown(const struct setting *setting)
 {
@@ -1690,6 +1697,9 @@ static int setting_shown(const struct setting *setting)
 	if (setting->variable && (!strcmp(setting->variable, "HALO_CARNAGE_REPORT") ||
 		!strcmp(setting->variable, "HALO_SCOREBOARD")))
 		return !classic_panel();
+	/* (the live backdrop: the Online menus') */
+	if (setting->variable && !strcmp(setting->variable, "HALO_MENU_BACKDROP"))
+		return online_panel_style();
 	if ((setting->variable && !strcmp(setting->variable, "HALO_ADHOC_ROOM")) || setting->action == ACTION_ADHOC_JOIN)
 		return network_is("adhoc");
 	if (setting->action == ACTION_PAGE && setting->opens == PAGE_CROSSPLAY)
