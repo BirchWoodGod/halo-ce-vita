@@ -5275,9 +5275,11 @@ static void h3_custom_update(struct widget_instance *list)
 			h3_custom.help_offset_kept = TRUE;
 			h3_custom.help_offset = found->vertical_offset;
 		}
-		/* (and a row lower for KEYBOARD & MOUSE, a PC's: controls_menu.c) */
+		/* (and a row lower for KEYBOARD & MOUSE, a PC's, in the Halo 3 editor:
+		controls_menu.c; Menu style Online's stacks its rows - its PROFILE
+		tab's pr_1 - and keeps its help where it is) */
 		found->vertical_offset = (short)(h3_custom.help_offset + (h3_custom.flame_listed ? 18 : 0) +
-			(controls_menu_available() ? 20 : 0));
+			(controls_menu_available() && !named(list, "pr_1") ? 20 : 0));
 	}
 	for (row = 0; row < NUMBER_OF_H3_CUSTOM_ROWS; row++)
 	{
@@ -5485,6 +5487,9 @@ static struct
 	{ "op_flight", 3, NULL, N_("INVERT FLIGHT") },
 	{ "op_autocenter", 3, NULL, N_("AUTO-CENTER") },
 	{ "op_vibration", 3, NULL, N_("VIBRATION") },
+	/* (a PC's: the keyboard and mouse's page, controls_menu.c; none on the
+	Vita) */
+	{ "op_keys", 3, NULL, N_("KEYBOARD & MOUSE") },
 };
 
 /* (the game's colours, profile_color_table's, as tools/halo3_menu_art.py
@@ -5916,6 +5921,9 @@ static void online_custom_update(struct widget_instance *list)
 
 		if (row != NONE && !strcmp(child->name, "op_flame"))
 			shown = shown && h3_custom.flame_listed;
+		/* (KEYBOARD & MOUSE: a PC's, controls_menu.c) */
+		if (row != NONE && !strcmp(child->name, "op_keys"))
+			shown = shown && controls_menu_available();
 		if (shown && !strncmp(child->name, "pr_", 3))
 			shown = online_profile_row_show(child);
 		widget_instance_set_visibility_recursive(child, shown);
