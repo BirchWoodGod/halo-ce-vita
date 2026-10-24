@@ -4,7 +4,10 @@
 
     python3 tools/online_menu_lobby.py port/vita/app0/menus/halo3/multiplayer.xml port/vita/app0/menus/online/multiplayer.xml
 """
-import copy, re, sys
+import copy
+import os
+import re
+import sys
 import xml.etree.ElementTree as ET
 src, out = sys.argv[1], sys.argv[2]
 tree = ET.parse(src)
@@ -128,6 +131,10 @@ for c in list(screen.findall('child')):
 idx = [i for i, c in enumerate(screen) if c.tag == 'child'][0]
 for i, w in enumerate(['online/mp/panel', 'online/mp/band', 'online/mp/foot']):
     screen.insert(idx + 1 + i, el('child', widget=w))
+# (the main menu's - online/main.xml - the same moved right: its players, nameplate, party and
+# live servers)
+for w in ('h3/main/players', 'h3/main/servers'):
+    copy_tree(w, SHIFT, MADE)
 for w in MADE.values():
     add(w)
 add(screen)
@@ -261,4 +268,7 @@ and the map's picture and description in a card at the right. The art is this fo
 (tools/online_menu_art.py) and the Halo 3 set's. -->
 '''
 open(out, 'w').write(head + body + '\n')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from online_menu_finish import finish  # noqa: E402
+finish(out)
 print(len(items), 'widgets')

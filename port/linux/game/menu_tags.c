@@ -1162,10 +1162,69 @@ static short read_short(byte const *data)
 	return (short)(data[0] | (data[1] << 8));
 }
 
+/* (a <font sharp=...>) the variant for the display's pixels per unit: the
+least of those at or above it (a few hundredths below counts), else the
+greatest; its scale times 1000 (0: none, the file itself) */
+static char const *font_sharp_variant(struct halo_menu_font const *source, char *path, int size, long *scale)
+{
+	char const *at = source->sharp;
+	float wanted = halo_ui_pixel_scale(), best = 0.0f, largest = 0.0f;
+	char largest_path[128] = "";
+
+	*scale = 0;
+	path[0] = 0;
+	/* (debug: HALO_SHARP_FONTS=0, the 640x480 fonts scaled up, as before) */
+	if (!at || wanted < 1.05f || (getenv("HALO_SHARP_FONTS") && !strcmp(getenv("HALO_SHARP_FONTS"), "0")))
+		return NULL;
+	while (*at)
+	{
+		char item[160];
+		size_t length;
+		char *colon;
+		float value;
+
+		at += strspn(at, " \t\r\n");
+		length = strcspn(at, " \t\r\n");
+		if (!length)
+			break;
+		snprintf(item, sizeof(item), "%.*s", (int)length, at);
+		at += length;
+		colon = strchr(item, ':');
+		if (!colon)
+			continue;
+		*colon = 0;
+		value = (float)atof(item);
+		if (value <= 1.0f)
+			continue;
+		if (value >= wanted - 0.03f && (!best || value < best))
+		{
+			best = value;
+			snprintf(path, size, "%s", colon + 1);
+		}
+		if (value > largest)
+		{
+			largest = value;
+			snprintf(largest_path, sizeof(largest_path), "%s", colon + 1);
+		}
+	}
+	if (!best && largest)
+	{
+		best = largest;
+		snprintf(path, size, "%s", largest_path);
+	}
+	if (!best)
+		return NULL;
+	*scale = (long)(best * 1000.0f + 0.5f);
+	return path;
+}
+
 static void *font_build(struct halo_menu_font const *source)
 {
 	unsigned long size = 0;
-	byte *data = halo_menus_file_read(source->path, &size);
+	char sharp_path[128];
+	long sharp_scale = 0;
+	char const *path = font_sharp_variant(source, sharp_path, sizeof(sharp_path), &sharp_scale);
+	byte *data = halo_menus_file_read(path ? path : source->path, &size);
 	struct font_header *font = NULL;
 	struct font_character_table *table;
 	short *indices;
@@ -1203,6 +1262,14 @@ static void *font_build(struct halo_menu_font const *source)
 		return font;
 	}
 	memset(font, 0, sizeof(*font));
+	/* (a sharp variant: its texels per unit, draw_string.c) */
+	if (sharp_scale)
+	{
+		font->pad[0] = 0x53485250L;
+		font->pad[1] = sharp_scale;
+		platform_log("menus: font %s drawn sharp: %s, %.3f texels a unit (the display %.3f pixels a unit)",
+			source->name, path, sharp_scale / 1000.0, halo_ui_pixel_scale());
+	}
 	font->ascending_height = read_short(data + 6);
 	font->descending_height = read_short(data + 8);
 	font->leading_height = read_short(data + 10);

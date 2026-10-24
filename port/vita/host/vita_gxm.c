@@ -49,6 +49,7 @@ each frame's presentation.
 /* Menu style (port/linux/src/menu_files.c, halo_menus.h) */
 int halo_menu_style_halo3(void);
 int halo_menu_style_online(void);
+int halo_main_menu_loaded(void);
 #include "vita_shader_cache.h"
 #include "vita_shader_generator_id.h"
 #include "lang.h"
@@ -6080,6 +6081,11 @@ static int interface_full_scale(const struct target *source)
 
 		split_anyway = setting && atoi(setting) != 0;
 	}
+	/* (Menu style Online's menus: split at 100% too, their text and lines
+	drawn at the display's pixels - its sharp fonts, menu_tags.c - not scaled
+	up with the picture; in play as ever) */
+	if (halo_menu_style_online() && halo_main_menu_loaded())
+		return 0;
 	return !split_anyway && source->scale_x <= 0.0f && source->scale_y <= 0.0f;
 }
 

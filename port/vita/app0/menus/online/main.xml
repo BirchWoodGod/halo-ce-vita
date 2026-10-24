@@ -11,23 +11,33 @@ is this folder's own (tools/online_menu_art.py) and the Halo 3 set's (the title,
 the fonts). The left of the list sits in the wide screen's margin (x below 0 of the 640 columns:
 16:10 and wider). -->
 <menus>
-	<font name="online/font_header" file="online/font_header.bin"/>
-	<font name="online/font_tab" file="online/font_tab.bin"/>
+	<!-- the online set's fonts (tools/online_menu_art.py, Saira Semi Condensed, SIL OFL), each also
+	drawn at the displays' pixels per unit: the one for this display is chosen and its text drawn
+	texel for pixel (sharp=: menu_tags.c font_build, draw_string.c) -->
+	<font name="online/font_header" file="online/font_header.bin" sharp="1.133:online/font_header_1133.bin 1.5:online/font_header_1500.bin 2.25:online/font_header_2250.bin 3:online/font_header_3000.bin"/>
+	<font name="online/font_title" file="online/font_title.bin" sharp="1.133:online/font_title_1133.bin 1.5:online/font_title_1500.bin 2.25:online/font_title_2250.bin 3:online/font_title_3000.bin"/>
+	<font name="online/font_item" file="online/font_item.bin" sharp="1.133:online/font_item_1133.bin 1.5:online/font_item_1500.bin 2.25:online/font_item_2250.bin 3:online/font_item_3000.bin"/>
+	<font name="online/font_small" file="online/font_small.bin" sharp="1.133:online/font_small_1133.bin 1.5:online/font_small_1500.bin 2.25:online/font_small_2250.bin 3:online/font_small_3000.bin"/>
+	<font name="online/font_tab" file="online/font_tab.bin" sharp="1.133:online/font_tab_1133.bin 1.5:online/font_tab_1500.bin 2.25:online/font_tab_2250.bin 3:online/font_tab_3000.bin"/>
 	<bitmap name="online/haze">
-		<frame png="online/haze.png" width="64" height="64"/>
+		<frame png="online/haze.png" width="256" height="128"/>
 	</bitmap>
 	<bitmap name="online/main_panel">
-		<frame png="online/main_panel.png" width="64" height="64"/>
+		<frame png="online/main_panel.png" width="4" height="256"/>
 	</bitmap>
 	<bitmap name="online/footer">
-		<frame png="online/footer.png" width="64" height="16"/>
+		<frame png="online/footer.png" width="4" height="4"/>
 	</bitmap>
 	<bitmap name="online/item">
-		<frame png="online/item_off.png" width="128" height="16"/>
-		<frame png="online/item_on.png" width="128" height="16"/>
+		<frame png="online/item_off.png" width="4" height="4"/>
+		<frame png="online/item_on.png" width="512" height="64"/>
+	</bitmap>
+	<!-- (the title: the owner's HALO CE VITA logo at 1024x256, drawn whole into its widget) -->
+	<bitmap name="online/title" fit="widget">
+		<frame png="online/title.png" width="1024" height="256"/>
 	</bitmap>
 	<bitmap name="online/rule">
-		<frame png="online/rule.png" width="128" height="2"/>
+		<frame png="online/rule.png" width="4" height="4"/>
 	</bitmap>
 	<strings name="online/main_items">
 		<string text="SERVER BROWSER"/>
@@ -44,33 +54,33 @@ the fonts). The left of the list sits in the wide screen's margin (x below 0 of 
 
 	<!-- the items: each opens what the Halo 3 main menu's does (main.xml), SERVER BROWSER what the
 	multiplayer lobby's BROWSE GAMES does (the profile once a run, then the games browser) -->
-	<widget name="online/main/browse" type="text" width="226" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/main_items" string_index="0">
+	<widget name="online/main/browse" type="text" width="226" height="18" bitmap="online/item" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/main_items" string_index="0">
 		<on event="a start" run="port h3 browse system link"/>
 		<on event="a start" run="error if no network connection" open="ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen"/>
 	</widget>
-	<widget name="online/main/multiplayer" type="text" width="226" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/main_items" string_index="1">
+	<widget name="online/main/multiplayer" type="text" width="226" height="18" bitmap="online/item" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/main_items" string_index="1">
 		<on event="a start" open="ui\shell\main_menu\multiplayer_type_select\multiplayer_type_select_screen" label="multiplayer"/>
 	</widget>
-	<widget name="online/main/forge" type="text" width="226" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/main_items" string_index="2">
+	<widget name="online/main/forge" type="text" width="226" height="18" bitmap="online/item" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/main_items" string_index="2">
 		<on event="a start" open="h3/forge/lobby"/>
 	</widget>
-	<widget name="online/main/campaign" type="text" width="226" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/main_items" string_index="3">
+	<widget name="online/main/campaign" type="text" width="226" height="18" bitmap="online/item" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/main_items" string_index="3">
 		<on event="a start" open="ui\shell\main_menu\load_campaign_player_profile" label="load_campaign"/>
 	</widget>
-	<widget name="online/main/customization" type="text" width="226" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/main_items" string_index="4">
+	<widget name="online/main/customization" type="text" width="226" height="18" bitmap="online/item" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/main_items" string_index="4">
 		<on event="a start" open="ui\shell\main_menu\settings_select\player_setup\player_profile_select_screen" label="settings"/>
 	</widget>
-	<widget name="online/main/friends" type="text" width="226" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/main_items" string_index="5">
+	<widget name="online/main/friends" type="text" width="226" height="18" bitmap="online/item" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/main_items" string_index="5">
 		<on event="a start" open="h3/friends/screen"/>
 	</widget>
-	<widget name="online/main/fileshare" type="text" width="226" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/main_items" string_index="6">
+	<widget name="online/main/fileshare" type="text" width="226" height="18" bitmap="online/item" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/main_items" string_index="6">
 		<on event="a start" run="port fileshare enter" open="h3/fileshare/screen"/>
 	</widget>
-	<widget name="online/main/mods" type="text" width="226" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/main_items" string_index="7">
+	<widget name="online/main/mods" type="text" width="226" height="18" bitmap="online/item" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/main_items" string_index="7">
 		<on event="a start" run="port h3 mods init" open="h3/mods/screen"/>
 	</widget>
 	<!-- (EXIT: the desktop's; hidden on the PS Vita, online_main_update) -->
-	<widget name="online/main/exit" type="text" width="226" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/main_items" string_index="9">
+	<widget name="online/main/exit" type="text" width="226" height="18" bitmap="online/item" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/main_items" string_index="9">
 		<on event="a start" open="online/exit/screen"/>
 	</widget>
 	<widget name="online/main/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
@@ -86,17 +96,17 @@ the fonts). The left of the list sits in the wide screen's margin (x below 0 of 
 	</widget>
 
 	<widget name="online/main/haze" left="0" top="0" width="640" height="480" bitmap="online/haze"/>
-	<widget name="online/main/panel" left="-66" top="251" width="234" height="221" bitmap="online/main_panel"/>
-	<widget name="online/main/version" type="text" left="-62" top="429" width="222" height="14" align="right" font="h3/font_small" color="#FF8EA2BC">
+	<widget name="online/main/panel" left="-64" top="251" width="226" height="221" bitmap="online/main_panel"/>
+	<widget name="online/main/version" type="text" left="-62" top="429" width="222" height="14" align="right" font="online/font_small" color="#FF8EA2BC">
 		<data input="port online version"/>
 	</widget>
-	<widget name="online/main/foot" left="-66" top="446" width="234" height="26" bitmap="online/footer"/>
-	<widget name="online/main/rule" left="-66" top="446" width="234" height="2" bitmap="online/rule"/>
+	<widget name="online/main/foot" left="-64" top="446" width="226" height="26" bitmap="online/footer"/>
+	<widget name="online/main/rule" left="-64" top="446" width="226" height="1" bitmap="online/rule"/>
 	<widget name="online/main/start_butn" left="-58" top="451" width="16" height="16" bitmap="h3/glyph_start"/>
-	<widget name="online/main/settings" type="text" left="-38" top="450" width="150" height="18" font="h3/font_item" color="#FFF0F4F8" text_y="1" string_list="online/main_items" string_index="8"/>
+	<widget name="online/main/settings" type="text" left="-38" top="450" width="150" height="18" font="online/font_item" color="#FFF0F4F8" text_y="1" string_list="online/main_items" string_index="8"/>
 	<!-- (the title large at the right, as the online menu has its logo: the owner's HALO CE VITA
 	logo, main.xml's h3/title, drawn whole into the widget) -->
-	<widget name="online/main/title" left="300" top="318" width="400" height="100" bitmap="h3/title"/>
+	<widget name="online/main/title" left="300" top="318" width="400" height="100" bitmap="online/title"/>
 
 	<!-- (scene="ring": as the Halo 3 main menu, the ring's own flight behind) -->
 	<widget name="online/main/screen" flags="pass_unhandled_to_focused_child" scene="ring">
@@ -114,10 +124,10 @@ the fonts). The left of the list sits in the wide screen's margin (x below 0 of 
 		<child widget="online/main/start_butn"/>
 		<child widget="online/main/settings"/>
 		<child widget="online/main/title"/>
-		<child widget="h3/main/players"/>
-		<child widget="h3/main/nameplate"/>
-		<child widget="h3/main/party_plates"/>
-		<child widget="h3/main/servers"/>
-		<child widget="online/main/list" x="-64" y="253"/>
+		<child widget="online/lobby/main/players"/>
+		<child widget="online/lobby/main/nameplate"/>
+		<child widget="online/lobby/main/party_plates"/>
+		<child widget="online/lobby/main/servers"/>
+		<child widget="online/main/list" x="-64" y="252"/>
 	</widget>
 </menus>

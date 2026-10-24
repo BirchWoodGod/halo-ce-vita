@@ -79,6 +79,10 @@ symbols in this file:
 /* ---------- constants */
 
 #ifdef HALO_LINUX
+/* (draw_string.c) the units a glyph's texel is while a sharp font's string
+is laid out; 1 otherwise */
+extern real draw_string_texel_size;
+
 /* the leftmost x a string's clip may reach: 0 (the centered 640 columns'
 left), or with Menu style Online the wide screen's left edge, where its
 menus' text sits (ui_widget.c widens their clip) */
@@ -365,6 +369,19 @@ rasterizer_draw_character(
 		vertices[1].position.x = vertices[2].position.x = (real)(x0 + dx);
 		vertices[0].position.y = vertices[1].position.y = (real)y0;
 		vertices[2].position.y = vertices[3].position.y = (real)(y0 + dy);
+#ifdef HALO_LINUX
+		/* (a sharp font's string, laid out at its texels: draw_string.c) */
+		if (draw_string_texel_size != 1.0f)
+		{
+			short vertex;
+
+			for (vertex = 0; vertex < NUMBER_OF_VERTICES_PER_QUADRILATERAL; vertex++)
+			{
+				vertices[vertex].position.x *= draw_string_texel_size;
+				vertices[vertex].position.y *= draw_string_texel_size;
+			}
+		}
+#endif
 
 		vertices[0].texture_coordinates.x = vertices[3].texture_coordinates.x = (real)u0;
 		vertices[1].texture_coordinates.x = vertices[2].texture_coordinates.x = (real)(u0 + dx);
@@ -602,6 +619,20 @@ rasterizer_draw_character_with_dropshadow(
 			vertices[1].position.x = vertices[2].position.x = right + x_offset;
 			vertices[0].position.y = vertices[1].position.y = top + y_offset;
 			vertices[2].position.y = vertices[3].position.y = bottom + y_offset;
+#ifdef HALO_LINUX
+			/* (a sharp font's string, laid out at its texels: draw_string.c;
+			its shadow a texel down and right, a pixel) */
+			if (draw_string_texel_size != 1.0f)
+			{
+				short vertex;
+
+				for (vertex = 0; vertex < NUMBER_OF_VERTICES_PER_QUADRILATERAL; vertex++)
+				{
+					vertices[vertex].position.x *= draw_string_texel_size;
+					vertices[vertex].position.y *= draw_string_texel_size;
+				}
+			}
+#endif
 
 			vertices[0].texture_coordinates.x = vertices[3].texture_coordinates.x = (real)u0;
 			vertices[1].texture_coordinates.x = vertices[2].texture_coordinates.x = (real)(u0 + dx);

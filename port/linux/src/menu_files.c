@@ -461,7 +461,7 @@ static void read_font(struct reader *reader, const XML_Char **attributes)
 {
 	struct halo_menus *menus = &reader->menus;
 	struct halo_menu_font font;
-	struct attribute table[] = { { "name", &font.name }, { "file", &font.path } };
+	struct attribute table[] = { { "name", &font.name }, { "file", &font.path }, { "sharp", &font.sharp } };
 
 	memset(&font, 0, sizeof(font));
 	font.file = reader->file;

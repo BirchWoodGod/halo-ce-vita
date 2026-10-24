@@ -3,6 +3,7 @@
 
     python3 tools/online_menu_customize.py port/vita/app0/menus/online/customize.xml
 """
+import os
 import sys
 out = sys.argv[1]
 LABELS = ["PLAYER NAME", "SERVICE TAG", "MODEL", "HELMET", "RIGHT SHOULDER", "LEFT SHOULDER", "CHEST",
@@ -26,6 +27,10 @@ chosen one framed and its hex), the other colours greyed; CONTROLS: the profile'
 settings. The tabs' rows: menu_functions.c online_custom_update. Circle saves, as the Halo 3
 editor's. The art is this folder's own (tools/online_menu_art.py) and the Halo 3 set's. -->
 <menus>
+	<bitmap name="online/haze_light">
+		<frame png="online/haze_light.png" width="128" height="4"/>
+	</bitmap>
+	<widget name="online/custom/haze" left="0" top="0" width="640" height="480" bitmap="online/haze_light"/>
 	<bitmap name="online/header">
 		<frame png="online/header.png" width="64" height="64"/>
 	</bitmap>
@@ -191,7 +196,7 @@ w('''
 		<on event="created" run="port h3 scene"/>
 		<on event="b back" run="port h3 custom save" back="true"/>
 		<on event="deleted" run="port h3 custom close"/>
-		<child widget="online/main/haze"/>
+		<child widget="online/custom/haze"/>
 		<child widget="online/custom/header"/>
 		<child widget="online/custom/title"/>''')
 for i in range(3):
@@ -217,3 +222,6 @@ w('''		<child widget="online/custom/profile_name"/>
 	</widget>
 </menus>''' % X)
 open(out, 'w').write('\n'.join(L) + '\n')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from online_menu_finish import finish  # noqa: E402
+finish(out)

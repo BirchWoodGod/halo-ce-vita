@@ -86,6 +86,13 @@ long halo_screen_width(void)
 	return screen_width;
 }
 
+/* the display's pixels per unit of the 640x480 interface: 544 lines for
+480 (vita_gxm.c draws the interface at the display's resolution) */
+float halo_ui_pixel_scale(void)
+{
+	return 544.0f / 480.0f;
+}
+
 void halo_screen_ui_offset(unsigned char centered)
 {
 	ui_offset = centered ? (halo_screen_width() - 640) / 2 : 0;

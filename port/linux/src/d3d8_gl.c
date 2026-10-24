@@ -190,6 +190,16 @@ long halo_screen_width(void)
 	return screen_width;
 }
 
+/* the display's pixels per unit of the 640x480 interface (the Vita
+preview's: the Vita's display, 544 lines for 480) */
+float halo_ui_pixel_scale(void)
+{
+	halo_screen_width();
+	if (vita_preview_enabled())
+		return (float)VITA_DISPLAY_HEIGHT / (float)SCREEN_HEIGHT;
+	return screen_scale[1];
+}
+
 void halo_screen_ui_offset(unsigned char centered)
 {
 	ui_offset = centered ? (halo_screen_width() - 640) / 2 : 0;
@@ -3641,7 +3651,11 @@ void halo_d3d_interface_begin(void)
 		vgxm_interface_begin) */
 		const char *setting = getenv("HALO_SHARP_UI_FULL");
 
-		if (vita_preview_scale >= 1.0f && !(setting && atoi(setting) != 0))
+		extern int halo_menu_style_online(void);
+		extern int halo_main_menu_loaded(void);
+
+		if (vita_preview_scale >= 1.0f && !(setting && atoi(setting) != 0) &&
+			!(halo_menu_style_online() && halo_main_menu_loaded()))
 			return;
 	}
 	back_buffer = render_target_get(&device.back_buffer);

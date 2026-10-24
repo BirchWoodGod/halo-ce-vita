@@ -156,6 +156,10 @@ places, and their 8-bit pixels), made a font tag of the game's
 struct halo_menu_font
 {
 	char const *name, *path;
+	/* (port) sharp="<pixels per unit>:<file> ...": the same font drawn at
+	more texels per unit, one chosen for the display (menu_tags.c
+	font_build; the text drawn texel for pixel: draw_string.c); NULL none */
+	char const *sharp;
 	char const *file;
 	long line;
 };
@@ -211,6 +215,9 @@ int halo_menu_style_halo3(void);
 (halo_menu_style_halo3 is 1 for it too), with menus/online's screens - an
 online/<name> widget opens in place of h3/<name> - for those it has */
 int halo_menu_style_online(void);
+/* (the renderer: d3d8_gl.c, d3d8_gxm.c) the display's pixels per unit of the
+640x480 interface, where the menus are drawn (the Vita's 960x544: 1.13) */
+float halo_ui_pixel_scale(void);
 /* the same begun on a thread of its own (once), which halo_menus_load waits
 for */
 void halo_menus_preload(void);

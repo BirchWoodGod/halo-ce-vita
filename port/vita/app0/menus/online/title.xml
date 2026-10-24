@@ -12,7 +12,7 @@ set's title and glyphs). -->
 		<frame png="halo3/dim.png" width="64" height="64"/>
 	</bitmap>
 	<bitmap name="online/band">
-		<frame png="online/header.png" width="64" height="64"/>
+		<frame png="online/header.png" width="4" height="256"/>
 	</bitmap>
 	<strings name="online/title_text">
 		<string text="Menu controls"/>
@@ -29,18 +29,18 @@ set's title and glyphs). -->
 	</strings>
 
 	<widget name="online/title/haze" left="0" top="0" width="640" height="480" bitmap="online/dim"/>
-	<widget name="online/title/controls" type="text" left="-90" top="16" width="200" height="16" font="h3/font_small" color="#FFDCE4EE" string_list="online/title_text" string_index="0"/>
+	<widget name="online/title/controls" type="text" left="-90" top="16" width="200" height="16" font="online/font_small" color="#FFDCE4EE" string_list="online/title_text" string_index="0"/>
 	<widget name="online/title/dpad" left="-90" top="36" width="16" height="16" bitmap="h3/glyph_dpad_lr"/>
-	<widget name="online/title/move" type="text" left="-70" top="36" width="50" height="16" font="h3/font_small" color="#FFDCE4EE" text_y="1" string_list="online/title_text" string_index="1"/>
+	<widget name="online/title/move" type="text" left="-70" top="36" width="50" height="16" font="online/font_small" color="#FFDCE4EE" text_y="1" string_list="online/title_text" string_index="1"/>
 	<widget name="online/title/a_butn" left="-30" top="36" width="16" height="16" bitmap="h3/glyph_cross"/>
-	<widget name="online/title/select" type="text" left="-10" top="36" width="50" height="16" font="h3/font_small" color="#FFDCE4EE" text_y="1" string_list="online/title_text" string_index="2"/>
+	<widget name="online/title/select" type="text" left="-10" top="36" width="50" height="16" font="online/font_small" color="#FFDCE4EE" text_y="1" string_list="online/title_text" string_index="2"/>
 	<widget name="online/title/b_butn" left="34" top="36" width="16" height="16" bitmap="h3/glyph_circle"/>
-	<widget name="online/title/back" type="text" left="54" top="36" width="50" height="16" font="h3/font_small" color="#FFDCE4EE" text_y="1" string_list="online/title_text" string_index="3"/>
-	<widget name="online/title/logo" left="130" top="150" width="380" height="95" bitmap="h3/title"/>
-	<widget name="online/title/press" type="text" left="200" top="300" width="96" height="20" align="right" font="h3/font_item" color="#FFF0F4F8" text_y="1" string_list="online/title_text" string_index="4"/>
+	<widget name="online/title/back" type="text" left="54" top="36" width="50" height="16" font="online/font_small" color="#FFDCE4EE" text_y="1" string_list="online/title_text" string_index="3"/>
+	<widget name="online/title/logo" left="130" top="150" width="380" height="95" bitmap="online/title"/>
+	<widget name="online/title/press" type="text" left="200" top="300" width="96" height="20" align="right" font="online/font_item" color="#FFF0F4F8" text_y="1" string_list="online/title_text" string_index="4"/>
 	<widget name="online/title/press_butn" left="301" top="301" width="16" height="16" bitmap="h3/glyph_cross"/>
-	<widget name="online/title/continue" type="text" left="322" top="300" width="140" height="20" font="h3/font_item" color="#FFF0F4F8" text_y="1" string_list="online/title_text" string_index="5"/>
-	<widget name="online/title/legal" type="text" left="-90" top="452" width="700" height="14" font="h3/font_small" color="#FF7C8CA2" string_list="online/title_text" string_index="6"/>
+	<widget name="online/title/continue" type="text" left="322" top="300" width="140" height="20" font="online/font_item" color="#FFF0F4F8" text_y="1" string_list="online/title_text" string_index="5"/>
+	<widget name="online/title/legal" type="text" left="-90" top="452" width="700" height="14" font="online/font_small" color="#FF7C8CA2" string_list="online/title_text" string_index="6"/>
 	<widget name="online/title/screen" flags="pass_unhandled_to_focused_child" scene="ring">
 		<on event="a start" back="true"/>
 		<on event="b back" back="true"/>
@@ -63,12 +63,12 @@ set's title and glyphs). -->
 	Circle go back -->
 	<widget name="online/exit/band" left="0" top="250" width="640" height="94" bitmap="online/band"/>
 	<widget name="online/exit/rule" left="0" top="322" width="640" height="2" bitmap="online/rule"/>
-	<widget name="online/exit/title" type="text" left="40" top="260" width="300" height="28" font="h3/font_title" color="#FFF2F6FA" string_list="online/title_text" string_index="7"/>
-	<widget name="online/exit/text" type="text" left="40" top="294" width="500" height="18" font="h3/font_small" color="#FFC4D2E2" string_list="online/title_text" string_index="8"/>
-	<widget name="online/exit/yes" type="text" width="70" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="online/title_text" string_index="9">
+	<widget name="online/exit/title" type="text" left="40" top="260" width="300" height="28" font="online/font_title" color="#FFF2F6FA" string_list="online/title_text" string_index="7"/>
+	<widget name="online/exit/text" type="text" left="40" top="294" width="500" height="18" font="online/font_small" color="#FFC4D2E2" string_list="online/title_text" string_index="8"/>
+	<widget name="online/exit/yes" type="text" width="70" height="18" bitmap="online/item" font="online/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="online/title_text" string_index="9">
 		<on event="a start" run="port online exit"/>
 	</widget>
-	<widget name="online/exit/no" type="text" width="70" height="18" bitmap="online/item" font="h3/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="online/title_text" string_index="10">
+	<widget name="online/exit/no" type="text" width="70" height="18" bitmap="online/item" font="online/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="online/title_text" string_index="10">
 		<on event="a start" back="true"/>
 	</widget>
 	<widget name="online/exit/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">

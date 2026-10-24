@@ -9,6 +9,7 @@ the middle with its header band. The in-game set (ingame.txt) opens them in plac
     python3 tools/online_menu_forge.py port/vita/app0/menus/halo3/forge.xml port/vita/app0/menus/online/forge.xml
 """
 import copy
+import os
 import sys
 import xml.etree.ElementTree as ET
 
@@ -60,6 +61,11 @@ def el(tag, **attrs):
 
 
 root = el('menus')
+# (the online set's fonts, as main.xml has them: the in-game set is built apart)
+for font in ('font_header', 'font_title', 'font_item', 'font_small', 'font_tab'):
+    root.append(el('font', name='online/' + font, file='online/%s.bin' % font,
+                   sharp=' '.join('%s:online/%s_%04d.bin' % (scale, font, round(float(scale) * 1000))
+                                  for scale in ('1.133', '1.5', '2.25', '3'))))
 for name, png, w, h in (('online/f_panel', 'panel', 64, 64), ('online/f_foot', 'footer', 64, 16),
                         ('online/f_rule', 'rule', 128, 2), ('online/f_header', 'header', 64, 64)):
     b = el('bitmap', name=name)
@@ -84,4 +90,7 @@ ET.indent(root, '\t')
 head = ('<?xml version="1.0" encoding="UTF-8"?>\n<!-- Menu style Online (a preview): Forge\'s object browser and '
         'Forge menu over the game, made from halo3/forge.xml by tools/online_menu_forge.py (see there). -->\n')
 open(out, 'w').write(head + ET.tostring(root, encoding='unicode') + '\n')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from online_menu_finish import finish  # noqa: E402
+finish(out)
 print(len(made), 'widgets')
