@@ -69,6 +69,9 @@ map loaded (a game started) lets it go with ui.map's tags
 
 #include "halo_menus.h"
 #include "scene_packs.h"
+#include "text/draw_string.h"
+#include "rasterizer/rasterizer.h"
+#include "../src/lang.h"
 
 #include <xtl.h>
 #include <stdio.h>
@@ -133,6 +136,13 @@ static struct
 	/* the pack wanted, given up (and why, said once) */
 	boolean wanted;
 	boolean failed;
+	/* (insider.25, the owner: the background chosen is the one shown) the
+	live background chosen and not up yet: the menus over a plain dark
+	screen, never the ring, with what it waits for - its build or read
+	(pending), or why it cannot come (failed: failure) */
+	boolean pending;
+	boolean test_off;
+	char failure[160];
 	/* the main menu at rest since */
 	unsigned long long rest_since;
 	/* its bsp the game's now, ui.map's scenario's blocks the pack's */
@@ -178,7 +188,8 @@ static boolean menu_backdrop_scenes_enabled(void)
 static void menu_backdrop_fail(char const *why)
 {
 	menu_backdrop.failed = TRUE;
-	platform_log("menu backdrop: ui.map's own ring stays: %s", why);
+	snprintf(menu_backdrop.failure, sizeof(menu_backdrop.failure), "%s", why ? why : "");
+	platform_log("menu backdrop: the live background cannot come (the menus over a dark screen): %s", why);
 }
 
 /* the bsp's lightmaps' vertex buffers (the pack's index buffers: scene_pack.c)
@@ -435,6 +446,59 @@ int menu_backdrop_active(void)
 	return menu_backdrop.active;
 }
 
+/* (render.c, under the menus) the live background chosen and not up: a
+plain dark screen in place of the ring, and a line saying what it waits for
+- "Preparing the live background... N%" while its pack is built or read -
+or why it cannot come */
+void menu_backdrop_pending_draw(void)
+{
+	void draw_quad(rectangle2d *rectangle, pixel32 color);
+	rectangle2d bounds;
+	long font_index;
+	char line[200];
+	unsigned short text[200];
+	real_argb_color color;
+
+	if (!menu_backdrop.pending || !halo_main_menu_loaded())
+		return;
+	bounds.x0 = bounds.y0 = -2048;
+	bounds.x1 = bounds.y1 = 4096;
+	draw_quad(&bounds, (pixel32)0xFF05070A);
+	if (menu_backdrop.failed)
+	{
+		snprintf(line, sizeof(line), "%s", strstr(menu_backdrop.failure, "a30") ?
+			T("The live background needs a30.map: Settings > Game > Menus") :
+			T("The live background could not be made: Settings > Game > Menus"));
+	}
+	else
+	{
+		long progress = -1;
+		short state = menu_backdrop.wanted ? scene_packs_status(MENU_BACKDROP_PACK, &progress, NULL, 0) : 0;
+
+		if (menu_backdrop.wanted && state == _scene_pack_state_building && progress >= 0 && progress <= 100)
+			snprintf(line, sizeof(line), T("Preparing the live background... %ld%%"), progress);
+		else
+		{
+			static char const *const dots[] = { ".", "..", "..." };
+
+			snprintf(line, sizeof(line), "%s%s", T("Preparing the live background"),
+				dots[(vita_host_time_us() / 400000ull) % 3]);
+		}
+	}
+	font_index = tag_loaded('font', "pc\\h3\\font_small");
+	if (font_index == NONE)
+		return;
+	color.alpha = 0.8f;
+	color.red = color.green = color.blue = 0.85f;
+	bounds.x0 = 0;
+	bounds.x1 = 640;
+	bounds.y0 = 440;
+	bounds.y1 = 470;
+	draw_string_set_draw_mode(font_index, NONE, 2, 0, &color);
+	halo_menus_utf16(line, text, (long)(sizeof(text) / sizeof(text[0])));
+	rasterizer_draw_unicode_string(&bounds, NULL, NULL, 0, (wchar_t const *)text);
+}
+
 /* (main.c, the top of the main loop, before the menus' scenes) */
 void menu_backdrop_update(void)
 {
@@ -450,6 +514,7 @@ void menu_backdrop_update(void)
 	}
 	wanted_here = halo_main_menu_loaded() && halo_menu_style_online() && menu_backdrop_scenes_enabled() &&
 		menu_backdrop_enabled();
+	menu_backdrop.pending = wanted_here && !menu_backdrop.active && !menu_backdrop.test_off;
 	if (!wanted_here)
 	{
 		if (menu_backdrop.active && halo_main_menu_loaded())
@@ -468,6 +533,7 @@ it go; the ring's flight back) */
 	{
 		menu_backdrop_deactivate("HALO_MENU_BACKDROP_TEST_OFF");
 		menu_backdrop.failed = TRUE;
+		menu_backdrop.test_off = TRUE;
 		return;
 	}
 	if (menu_backdrop.active || menu_backdrop.failed)

@@ -723,6 +723,13 @@ static void render_window(
 #ifdef HALO_LINUX
 		RENDER_PHASE_BEGIN_ID(22, "ui_widgets");
 		halo_screen_ui_offset(TRUE);
+		/* port: the live background chosen and not up yet: a dark screen
+		under the menus, never the ring (port/linux/game/menu_backdrop.c) */
+		{
+			extern void menu_backdrop_pending_draw(void);
+
+			menu_backdrop_pending_draw();
+		}
 		render_ui_widgets(local_player_index, &rasterizer_camera->viewport_bounds);
 		halo_screen_ui_offset(FALSE);
 		RENDER_PHASE_END(22, "ui_widgets");

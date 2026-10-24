@@ -1855,6 +1855,8 @@ static int menu_resource_read(void *context, uint32_t offset, uint32_t size, voi
 	return done == size;
 }
 
+void platform_show_message(char const *title, char const *message);
+
 /* the maps folder's <name>.map, a Custom Edition resource map of the type */
 static boolean menu_resource_open(struct menu_resource_file *file, char const *name, enum resource_map_type type,
 	boolean index)
@@ -1899,6 +1901,23 @@ static boolean menu_resource_open(struct menu_resource_file *file, char const *n
 	if (status != _cache_file_status_ok)
 	{
 		platform_log("menus: %s: %s", path, cache_file_status_describe(status));
+		/* (a file the player must copy again: said on the screen once, not
+		only in the log - the menus fall back to the game's own screens) */
+		if (status == _cache_file_status_bad_resource_map_header || status == _cache_file_status_wrong_resource_map_type ||
+			status == _cache_file_status_file_too_small)
+		{
+			static boolean said;
+
+			if (!said)
+			{
+				char text[300];
+
+				said = TRUE;
+				snprintf(text, sizeof(text), T("%s.map in your maps folder is damaged: copy it again from your Halo "
+					"files. Until then the game's own menus are shown."), name);
+				platform_show_message(T("Halo PC files"), text);
+			}
+		}
 		CloseHandle(file->handle);
 		file->opened = FALSE;
 		return FALSE;
@@ -2337,6 +2356,17 @@ static boolean menu_tags_art_load(void)
 		((long)heap_after - (long)heap_before) / 1024, ((long)window_after - (long)window_before) / 1024,
 		window_free / 1024);
 	return success;
+}
+
+/* menu_tags_art_load, and once more if it fails - its reads then made
+anew, the read-ahead's let go (insider.25: one bad read dropped the whole
+Halo 3 set for the run) */
+static boolean menu_tags_art_load_retried(void)
+{
+	if (menu_tags_art_load())
+		return TRUE;
+	platform_log("menus: the Halo PC pictures and text could not be read: read again, without the read-ahead");
+	return menu_tags_art_load();
 }
 
 /* the reads menu_tags_art_load will make, begun on a thread of their own
@@ -2947,7 +2977,7 @@ long menu_tags_screen(
 			if (forge_game_active() && !strcmp(menu_tags.h3_root[index], H3_MULTIPLAYER_PAUSE_SCREEN))
 				return tag_index;
 			if (!menu_tags.art)
-				menu_tags.art = menu_tags_art_load() ? 1 : -1;
+				menu_tags.art = menu_tags_art_load_retried() ? 1 : -1;
 			if (menu_tags.art < 0)
 			{
 				if (!menu_tags.h3_left_out_said)
@@ -2967,7 +2997,7 @@ long menu_tags_screen(
 	{
 		if (!menu_tags.art)
 		{
-			menu_tags.art = menu_tags_art_load() ? 1 : -1;
+			menu_tags.art = menu_tags_art_load_retried() ? 1 : -1;
 			if (menu_tags.art < 0)
 			{
 				halo_pc_menus_state = -1;
@@ -3014,7 +3044,7 @@ long menu_tags_ingame_screen(
 	if (tag_index == NONE || !pc_menu_tag(tag_index))
 		return NONE;
 	if (!menu_tags.art)
-		menu_tags.art = menu_tags_art_load() ? 1 : -1;
+		menu_tags.art = menu_tags_art_load_retried() ? 1 : -1;
 	return menu_tags.art > 0 ? menu_tags_online(tag_index) : NONE;
 }
 

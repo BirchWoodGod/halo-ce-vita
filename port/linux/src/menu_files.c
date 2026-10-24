@@ -1157,8 +1157,14 @@ place of those it has, menu_tags.c menu_tags_online) */
 int halo_menu_style_online(void)
 {
 	char const *style = getenv("HALO_MENU_STYLE");
+	char const *halo3 = getenv("HALO_MENU_HALO3");
 
-	return style && strcmp(style, "online") == 0;
+	/* (ElDewrito replaced the Halo 3 style, insider.25: the default; the
+	Halo 3 set's own look only as HALO_MENU_STYLE=halo3 says outright - a
+	test's - or HALO_MENU_HALO3=1 over any other) */
+	if (halo3 && atoi(halo3))
+		return 0;
+	return !style || strcmp(style, "online") == 0;
 }
 
 struct halo_menus const *halo_menus_load(void)

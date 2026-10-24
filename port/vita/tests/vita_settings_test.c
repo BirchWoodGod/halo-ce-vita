@@ -65,6 +65,9 @@ static int test_pthread_cond_timedwait(pthread_cond_t *condition, pthread_mutex_
 #define rename test_rename
 #define pthread_cond_wait test_pthread_cond_wait
 #define pthread_cond_timedwait test_pthread_cond_timedwait
+/* (the shipped Menu style row offers Halo CE and ElDewrito; the checks below
+were written for the Halo 3 panel, kept as a hidden style) */
+#define VITA_SETTINGS_TEST_HALO3_STYLE
 #include "../host/vita_settings.c"
 #undef rename
 #undef pthread_cond_wait
@@ -3327,7 +3330,7 @@ static void test_tab_layouts(void)
 		{ PAGE_MENUS, "Carnage report", "HALO_CARNAGE_REPORT", "classic|halo3", 0, "halo3" },
 		{ PAGE_MENUS, "Scoreboard", "HALO_SCOREBOARD", "classic|halo3", 0, "halo3" },
 		/* (shown with Menu style Online) */
-		{ PAGE_MENUS, "Live backdrop", "HALO_MENU_BACKDROP", "0|1", 0, "1" },
+		{ PAGE_MENUS, "Menu background", "HALO_MENU_BACKDROP", "0|1", 0, "1" },
 		/* (shown with Menu style Halo CE: the original by default) */
 		{ PAGE_MENUS, "Carnage report", "HALO_CLASSIC_CARNAGE_REPORT", "classic|halo3", 0, "classic" },
 		{ PAGE_MENUS, "Scoreboard", "HALO_CLASSIC_SCOREBOARD", "classic|halo3", 0, "classic" },
@@ -3389,7 +3392,7 @@ static void test_tab_layouts(void)
 	};
 	static const struct layout_row sound[] = {
 		/* (shown with Menu style ElDewrito) */
-		{ TAB_AUDIO, "Menu music", "HALO_MENU_MUSIC", "100|70|50|25|0", 0, "50" },
+		{ TAB_AUDIO, "Menu music", "HALO_MENU_MUSIC", "100|70|50|40|30|20|0", 0, "30" },
 		{ TAB_AUDIO, "Sound voices", "HALO_SOUND_CHANNELS", "16|24|32|0", 1, "0" },
 		{ TAB_AUDIO, "Sound occlusion", "HALO_SOUND_OBSTRUCTION_TICKS", "1|3|6", 0, "3" },
 		{ TAB_AUDIO, "Sound updates", "HALO_SOUND_MANAGER_DIVISOR", "1|2|3", 0, "2" },
@@ -4677,15 +4680,15 @@ static void test_carnage_report_row(void)
 	open_panel();
 	to_tab("Game");
 	check(open_page("Menus") && !strcmp(menu_line(2, line, sizeof(line)), "Menu style\x02< Halo 3 >") &&
-		!strcmp(menu_line(3, line, sizeof(line)), "Carnage report\x02< Halo 3  ") &&
-		!strcmp(menu_line(4, line, sizeof(line)), "Scoreboard\x02< Halo 3  ") && menu_rows() == 3 && menu_fits() &&
+		!strcmp(menu_line(3, line, sizeof(line)), "Carnage report\x02< ElDewrito  ") &&
+		!strcmp(menu_line(4, line, sizeof(line)), "Scoreboard\x02< ElDewrito  ") && menu_rows() == 3 && menu_fits() &&
 		menu_height_fits(), "Game > Menus: Menu style, then Carnage report and Scoreboard (Halo 3)");
 	check(to_line("Carnage report") &&
-		strstr(menu, "\n\x05" "A multiplayer game's end: Halo 3's report, or the original\n"), "Carnage report: its help");
+		strstr(menu, "\n\x05" "A multiplayer game's end: ElDewrito's report, or the original\n"), "Carnage report: its help");
 	press(VITA_BUTTON_LEFT);
 	check(getenv("HALO_CARNAGE_REPORT") && !strcmp(getenv("HALO_CARNAGE_REPORT"), "classic") &&
 		strstr(file_text(SETTINGS_FILE), "HALO_CARNAGE_REPORT=classic\n") &&
-		strstr(menu, "\nCarnage report\x02  Classic >") && !strstr(menu, "Carnage report*") && !restart_pending,
+		strstr(menu, "\nCarnage report\x02  Original >") && !strstr(menu, "Carnage report*") && !restart_pending,
 		"Carnage report Classic: in the environment and settings.txt at once, no restart");
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(getenv("HALO_CARNAGE_REPORT"), "halo3") && strstr(file_text(SETTINGS_FILE), "HALO_CARNAGE_REPORT=halo3\n"),
@@ -4693,10 +4696,10 @@ static void test_carnage_report_row(void)
 	to_line("Menu style");
 	press(VITA_BUTTON_LEFT);
 	/* (Halo CE: its own two rows, the original by default; Halo 3's an option) */
-	check(strstr(menu, "\nCarnage report\x02  Classic >") && strstr(menu, "\nScoreboard\x02  Halo CE >") &&
+	check(strstr(menu, "\nCarnage report\x02  Original >") && strstr(menu, "\nScoreboard\x02  Original >") &&
 		menu_rows() == 3 && !strcmp(getenv("HALO_MENU_STYLE"), "classic") && menu_fits(),
 		"Menu style Halo CE: Carnage report and Scoreboard rows, the original (Classic, Halo CE) as shipped");
-	check(to_line("Carnage report") && strstr(menu, "\n\x05" "A multiplayer game's end: the original, or Halo 3's report\n"),
+	check(to_line("Carnage report") && strstr(menu, "\n\x05" "A multiplayer game's end: the original, or ElDewrito's report\n"),
 		"Halo CE's Carnage report: its help");
 	press(VITA_BUTTON_RIGHT);
 	check(getenv("HALO_CLASSIC_CARNAGE_REPORT") && !strcmp(getenv("HALO_CLASSIC_CARNAGE_REPORT"), "halo3") &&
@@ -4706,7 +4709,7 @@ static void test_carnage_report_row(void)
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_CLASSIC_CARNAGE_REPORT"), "classic") && strstr(file_text(SETTINGS_FILE), "HALO_CLASSIC_CARNAGE_REPORT=classic\n"),
 		"Halo CE's Carnage report back to Classic, saved");
-	check(to_line("Scoreboard") && strstr(menu, "\n\x05" "Scores in a game: the original, or Halo 3's with player options\n"),
+	check(to_line("Scoreboard") && strstr(menu, "\n\x05" "Scores in a game: the original, or ElDewrito's with player options\n"),
 		"Halo CE's Scoreboard: its help");
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(getenv("HALO_CLASSIC_SCOREBOARD"), "halo3") && strstr(file_text(SETTINGS_FILE), "HALO_CLASSIC_SCOREBOARD=halo3\n"),
@@ -4714,7 +4717,7 @@ static void test_carnage_report_row(void)
 	press(VITA_BUTTON_LEFT);
 	to_line("Menu style");
 	press(VITA_BUTTON_RIGHT);
-	check(strstr(menu, "\nCarnage report\x02< Halo 3  \n") && strstr(menu, "\nScoreboard\x02< Halo 3  \n") &&
+	check(strstr(menu, "\nCarnage report\x02< ElDewrito  \n") && strstr(menu, "\nScoreboard\x02< ElDewrito  \n") &&
 		!strcmp(getenv("HALO_MENU_STYLE"), "halo3"), "Menu style Halo 3 again: Carnage report and Scoreboard back");
 	press(VITA_BUTTON_CIRCLE);
 	press(VITA_BUTTON_CIRCLE);
@@ -4734,14 +4737,14 @@ static void test_scoreboard_row(void)
 		!strcmp(board->values[shipped_choice[board - settings]], "halo3"), "Scoreboard: Halo 3 as shipped");
 	open_panel();
 	to_tab("Game");
-	check(open_page("Menus") && !strcmp(menu_line(4, line, sizeof(line)), "Scoreboard\x02< Halo 3  ") && menu_fits() &&
+	check(open_page("Menus") && !strcmp(menu_line(4, line, sizeof(line)), "Scoreboard\x02< ElDewrito  ") && menu_fits() &&
 		menu_height_fits(), "Game > Menus: Scoreboard (Halo 3), under Carnage report");
 	check(to_line("Scoreboard") &&
-		strstr(menu, "\n\x05" "Scores in a game: Halo 3's scoreboard, or the original\n"), "Scoreboard: its help");
+		strstr(menu, "\n\x05" "Scores in a game: ElDewrito's scoreboard, or the original\n"), "Scoreboard: its help");
 	press(VITA_BUTTON_LEFT);
 	check(getenv("HALO_SCOREBOARD") && !strcmp(getenv("HALO_SCOREBOARD"), "classic") &&
 		strstr(file_text(SETTINGS_FILE), "HALO_SCOREBOARD=classic\n") &&
-		strstr(menu, "\nScoreboard\x02  Halo CE >") && !strstr(menu, "Scoreboard*") && !restart_pending,
+		strstr(menu, "\nScoreboard\x02  Original >") && !strstr(menu, "Scoreboard*") && !restart_pending,
 		"Scoreboard Halo CE: in the environment and settings.txt at once, no restart");
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(getenv("HALO_SCOREBOARD"), "halo3") && strstr(file_text(SETTINGS_FILE), "HALO_SCOREBOARD=halo3\n"),

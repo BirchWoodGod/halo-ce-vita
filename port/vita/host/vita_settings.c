@@ -582,28 +582,38 @@ static struct setting settings[] = {
 	animated Halo ring - port/vita/app0/menus/halo3, menu_tags.c, which
 	reads it each time a screen opens: live) */
 	PAGE_ROW("Menus", "Menu style, the carnage report and scoreboard", TAB_GAME, PAGE_MENUS),
-	/* (Online: the Halo 3 menus' flows in the online set's look,
-	port/vita/app0/menus/online - a prototype, menu_tags.c menu_tags_online) */
+	/* (ElDewrito, "online": the Halo 3 menus' flows in the online set's look,
+	port/vita/app0/menus/online, menu_tags.c menu_tags_online - in place of
+	the Halo 3 style since insider.25 (the owner): a saved "halo3" is
+	ElDewrito (find_choice); HALO_MENU_HALO3=1 in env.txt still shows the
+	Halo 3 set for a test (menu_files.c)) */
+#ifndef VITA_SETTINGS_TEST_HALO3_STYLE
+	{ "Menu style", "HALO_MENU_STYLE", 0, 2, { "classic", "online" }, { "Halo CE", "ElDewrito" },
+		"ElDewrito: Halo Online-style menus. Halo CE: the original.", 1, PAGE_MENUS },
+#else
+	/* (vita_settings_test.c: the panel's every page as the hidden Halo 3
+	style lays it out - its checks were written for it) */
 	{ "Menu style", "HALO_MENU_STYLE", 0, 3, { "classic", "halo3", "online" }, { "Halo CE", "Halo 3", "ElDewrito" },
 		"ElDewrito: Halo Online style. Halo 3: the ring. Halo CE: the original.", 1, PAGE_MENUS },
+#endif
 	/* (menu_functions.c h3_carnage_wanted, config.toml's menus.carnage_report:
 	a multiplayer game's end, Halo 3's CARNAGE REPORT or the game's own;
 	read when the scores come up: live. Shown with Menu style Halo 3 - Halo
 	CE has its own two below -: setting_shown. On this page, with
 	Menu style, as the Game tab is a screen's height) */
-	{ "Carnage report", "HALO_CARNAGE_REPORT", 0, 2, { "classic", "halo3" }, { "Classic", "Halo 3" },
-		"A multiplayer game's end: Halo 3's report, or the original", 1, PAGE_MENUS },
+	{ "Carnage report", "HALO_CARNAGE_REPORT", 0, 2, { "classic", "halo3" }, { "Original", "ElDewrito" },
+		"A multiplayer game's end: ElDewrito's report, or the original", 1, PAGE_MENUS },
 	/* (menu_functions.c h3_scoreboard_wanted, config.toml's menus.scoreboard:
 	the scores while Back is held in a multiplayer game, Halo 3's scoreboard
 	or the game's own; read each frame: live. Shown with Menu style Halo 3, as
 	Carnage report is - Halo CE has its own two below -: setting_shown) */
-	{ "Scoreboard", "HALO_SCOREBOARD", 0, 2, { "classic", "halo3" }, { "Halo CE", "Halo 3" },
-		"Scores in a game: Halo 3's scoreboard, or the original", 1, PAGE_MENUS },
+	{ "Scoreboard", "HALO_SCOREBOARD", 0, 2, { "classic", "halo3" }, { "Original", "ElDewrito" },
+		"Scores in a game: ElDewrito's scoreboard, or the original", 1, PAGE_MENUS },
 	/* (menu_backdrop.c, config.toml's menus.backdrop: the campaign level
 	Halo behind the Online menus, made once from the player's a30.map; Off,
 	the ring. Read each frame at the main menu: live. Shown with Menu style
 	Online: setting_shown) */
-	{ "Live backdrop", "HALO_MENU_BACKDROP", 0, 2, { "0", "1" }, { "Off", "On" },
+	{ "Menu background", "HALO_MENU_BACKDROP", 0, 2, { "0", "1" }, { "Ring", "Halo (live)" },
 		"ElDewrito menus: the level Halo behind them (your a30.map), or the ring", 1, PAGE_MENUS },
 	/* (the same two for Menu style Halo CE - the owner, Oct 24: the original
 	scores and report by default, Halo 3's as an option, so that the report's
@@ -611,10 +621,10 @@ static struct setting settings[] = {
 	reachable from the original menus too - menu_functions.c h3_carnage_wanted,
 	h3_scoreboard_wanted; menus.classic_carnage_report, menus.classic_scoreboard.
 	Shown with Menu style Halo CE: setting_shown. Live) */
-	{ "Carnage report", "HALO_CLASSIC_CARNAGE_REPORT", 0, 2, { "classic", "halo3" }, { "Classic", "Halo 3" },
-		"A multiplayer game's end: the original, or Halo 3's report", 0, PAGE_MENUS },
-	{ "Scoreboard", "HALO_CLASSIC_SCOREBOARD", 0, 2, { "classic", "halo3" }, { "Halo CE", "Halo 3" },
-		"Scores in a game: the original, or Halo 3's with player options", 0, PAGE_MENUS },
+	{ "Carnage report", "HALO_CLASSIC_CARNAGE_REPORT", 0, 2, { "classic", "halo3" }, { "Original", "ElDewrito" },
+		"A multiplayer game's end: the original, or ElDewrito's report", 0, PAGE_MENUS },
+	{ "Scoreboard", "HALO_CLASSIC_SCOREBOARD", 0, 2, { "classic", "halo3" }, { "Original", "ElDewrito" },
+		"Scores in a game: the original, or ElDewrito's with player options", 0, PAGE_MENUS },
 	/* (Forge and File Share for the original menus - the owner: everything
 	in the overlay -: the Forge page, under Menus (Interface; it was Game's
 	last row, under Updates, insider.21), shown with Menu style Halo CE; the
@@ -1488,6 +1498,9 @@ static int find_choice(const struct setting *setting, const char *value)
 	for (index = 0; index < setting->count; index++)
 		if (strcmp(setting->values[index], value) == 0)
 			return index;
+	/* (Menu style Halo 3, saved by an older build: ElDewrito replaced it) */
+	if (setting->variable && !strcmp(setting->variable, "HALO_MENU_STYLE") && !strcmp(value, "halo3"))
+		return find_choice(setting, "online");
 	/* (a value not on the list, from env.txt: the nearest by number) */
 	{
 		double wanted = atof(value), best_distance = 1e30;
