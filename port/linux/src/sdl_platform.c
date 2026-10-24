@@ -387,7 +387,10 @@ BOOL platform_offer_game_data(const char *destination)
 		"Halo's game data (its maps folder) was not found.\n\n"
 		"Extract the maps folder from an Xbox disc image (.iso) of Halo: Combat Evolved? "
 		"It is copied to %s/maps (about 2 GB).\n\n"
-		"(Or put the maps folder there yourself, or set paths.data in config.toml.)",
+		"(Or put the maps folder there yourself, or set paths.data in config.toml.)\n\n"
+		"Halo: The Master Chief Collection was not found either: with it installed (Steam), the game plays "
+		"its Halo CE files and asks for no disc. If it is installed elsewhere, set paths.content in "
+		"config.toml to its folder (the one with halo1 in it).",
 		destination);
 	for (;;)
 	{

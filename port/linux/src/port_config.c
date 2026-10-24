@@ -181,12 +181,16 @@ static const struct config_setting config_settings[] =
 		"(~/.local/share/halo-linux, or %APPDATA%\\halo on Windows)." },
 	/* (port/linux/game/mcc_content.c, docs/mcc_cea_maps.md; the Vita's
 	settings panel's Halo content folder, Multiplayer > Modded maps) */
-	{ "paths.content", _config_string, "\"\"", "HALO_CONTENT_ROOT", _environment_value, _platform_all,
-		"The Halo content folder: your own Halo: The Master Chief Collection's\n"
-		"folder (the one holding halo1), whose maps are listed with the others\n"
-		"and played, each by the loader its file needs; empty finds it (Steam's\n"
-		"libraries; on the PS Vita ux0:data/haloce-vita/mcc). Without one, the\n"
-		"Xbox maps alone. Only read, never written." },
+	{ "paths.content", _config_string, "\"auto\"", "HALO_CONTENT_ROOT", _environment_value, _platform_all,
+		"The Halo MCC folder (the Halo content folder): your own Halo: The Master\n"
+		"Chief Collection's folder (the one holding halo1), whose maps are listed\n"
+		"with the others and played; you need no Xbox files with it. \"auto\" (or\n"
+		"empty) finds it: Steam's libraries (on Linux also Flatpak's and Snap's\n"
+		"Steam; on Windows the registry and the Xbox app's XboxGames folders), on\n"
+		"the PS Vita ux0:data/haloce-vita/mcc. A folder: MCC's, its halo1 or\n"
+		"halo1/maps, or a Steam library (on a PC a folder that is gone is looked\n"
+		"for as with \"auto\"). \"none\": no MCC, the Xbox maps alone. The log\n"
+		"says what was found. Only read, never written." },
 
 	{ "paths.menu_source", _config_string, "\"\"", "HALO_MENU_SOURCE", _environment_value, _platform_all,
 		"Where the menus' map (ui.map) comes from: empty or \"auto\" uses the Xbox's\n"

@@ -521,6 +521,7 @@ enum
 	_input_online_lobby,
 	/* (Menu style Online: HOST SETTINGS' rows) */
 	_input_online_host,
+	_input_h3_content_notice,
 };
 
 /* what a line of typing is for */
@@ -19925,6 +19926,15 @@ void pc_menu_game_data_function_invoke(
 	case _input_online_host:
 		online_host_update(widget);
 		break;
+	case _input_h3_content_notice:
+	{
+		/* (the Halo 3 main menu's, PC: Halo MCC looked for and not found,
+		port/linux/src/xbox_files.c; empty otherwise and on the PS Vita) */
+		const char *platform_mcc_menu_notice(int short_form);
+
+		text_show(widget, platform_mcc_menu_notice(FALSE));
+		break;
+	}
 	case _input_h3_players:
 		if (widget->type == _ui_widget_type_column_list)
 			h3_players_update(widget);

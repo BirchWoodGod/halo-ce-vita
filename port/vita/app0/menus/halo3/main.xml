@@ -130,6 +130,12 @@ art is this folder's own (tools/halo3_menu_art.py). -->
 	16:9 screen -, its top level with the column's first row; under the nameplates and the live
 	servers) -->
 	<widget name="h3/main/title" left="289" top="255" width="340" height="85" bitmap="h3/title"/>
+	<!-- (PC: "Halo MCC not found ..." when the game looked for the player's Halo: The Master Chief
+	Collection and found none, port h3 content notice, xbox_files.c; empty when found, set, and on
+	the PS Vita) -->
+	<widget name="h3/main/content_notice" type="text" left="289" top="440" width="340" height="34" font="h3/font_small" color="#FFC5D0DD" text_x="0" text_y="0">
+		<data input="port h3 content notice"/>
+	</widget>
 	<!-- ("1 Player", "3 Players": the player and the party's members, said by port h3 party plates) -->
 	<widget name="h3/main/players" type="text" left="380" top="20" width="200" height="16" font="h3/font_small" color="#FFEEF2F6" text_x="0" text_y="0"/>
 	<widget name="h3/main/nameplate" type="text" left="380" top="38" width="256" height="16" bitmap="h3/nameplate" font="h3/font_small" color="#FF10220A" text_x="22" text_y="0">
@@ -271,6 +277,7 @@ art is this folder's own (tools/halo3_menu_art.py). -->
 		<child widget="h3/main/start_butn"/>
 		<child widget="h3/main/settings"/>
 		<child widget="h3/main/title"/>
+		<child widget="h3/main/content_notice"/>
 		<child widget="h3/main/players"/>
 		<child widget="h3/main/nameplate"/>
 		<child widget="h3/main/party_plates"/>

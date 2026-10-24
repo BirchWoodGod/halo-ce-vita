@@ -2773,3 +2773,7 @@
 "A multiplayer game's end: ElDewrito's report, or the original" = "Fin de una partida multijugador: el informe de ElDewrito o el original"
 "Scores in a game: ElDewrito's scoreboard, or the original" = "Puntuaciones en partida: el marcador de ElDewrito o el original"
 "ElDewrito: Halo Online-style menus. Halo CE: the original." = "ElDewrito: menús al estilo de Halo Online. Halo CE: los originales."
+
+# ---------- the PC finding Halo MCC by itself (port/linux/src/xbox_files.c: the main menu's notice)
+"Halo MCC not found" = "Halo MCC no encontrado"
+"Halo MCC not found: set its folder in\nconfig.toml, paths.content (\"none\": don't look)" = "No se encontró Halo MCC: pon su carpeta en\nconfig.toml, paths.content (\"none\": no buscar)"

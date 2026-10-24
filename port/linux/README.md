@@ -49,8 +49,57 @@ sequence:
 4. `assets/` in the current folder, and `assets/` in the repository that
    contains the executable.
 
-If the game finds no data, it asks for an Xbox disc image (`.xiso` or
-`.iso`). This occurs at the first start:
+### Halo: The Master Chief Collection
+
+You do not need an install tool for MCC. At each start the game finds the
+Halo content folder: the folder of your own Halo: The Master Chief
+Collection that contains `halo1`. The game only reads this folder. It
+does not copy or change MCC's files. The game looks in this sequence and
+uses the first folder that it finds:
+
+1. `paths.content` in `config.toml` (`HALO_CONTENT_ROOT`). `"auto"` (the
+   default) or empty: continue with step 2. `"none"`: no MCC. A folder:
+   MCC's folder, its `halo1` or `halo1/maps` folder, or a Steam library
+   that contains MCC. If the folder is gone, or it contains no Halo CE map
+   of MCC, the log tells you and the game continues with step 2.
+2. `mcc/` in the data root.
+3. Steam's libraries. On Linux, in `~/.local/share/Steam`, `~/.steam/steam`,
+   `~/.steam/root`, `~/.var/app/com.valvesoftware.Steam/.local/share/Steam`
+   (Flatpak) and `~/snap/steam/common/.local/share/Steam` (Snap): each
+   library that `steamapps/libraryfolders.vdf` (or
+   `config/libraryfolders.vdf`) lists, then the Steam folder itself. On
+   Windows: the Steam folder of the registry (`HKCU\Software\Valve\Steam`
+   `SteamPath`, `HKLM\SOFTWARE\WOW6432Node\Valve\Steam` and
+   `HKLM\SOFTWARE\Valve\Steam` `InstallPath`), `Steam` in Program Files,
+   `SteamLibrary`, `Steam` and `Games\Steam` on each fixed drive, then the
+   uninstall entry `Steam App 976730` (`InstallLocation`) and the Xbox
+   app's `<drive>:\XboxGames\Halo The Master Chief Collection\Content`.
+   In each library: `steamapps/common/Halo The Master Chief Collection`.
+
+A folder is MCC's only if `halo1/maps` contains a Halo CE stock map
+(`bloodgulch.map`, `a10.map` and the others) with MCC's cache header
+(`head`, version 13). The log (`content:` lines) shows each library that
+the game examined and the folder that it found.
+
+If the game finds MCC but no `maps/` folder, it does not ask for a disc
+image. It uses the folder of the executable as the data root, and makes an
+empty `maps/` folder there. The menus then come from MCC's `ui.map`, and
+the Halo PC files from MCC's `halo1/maps/custom_edition`.
+
+If the game finds no MCC (with `"auto"`), the log tells you, and the main
+menu shows "Halo MCC not found" (the Halo 3 menu: below the title; the
+original menu: in the corner, in turn with the version).
+
+The Xbox `maps/` folder and MCC can be used together. Priority, from first
+to last: the settings in `config.toml` (`paths.data`, `paths.content`,
+`paths.menu_source`), then the files of the Xbox `maps/` folder (`ui.map`
+for the menus, the Halo PC files), then the files of MCC. MCC's levels are
+always added to the lists. Refer to `docs/mcc_cea_maps.md`.
+
+### No game data
+
+If the game finds no data and no MCC, it asks for an Xbox disc image
+(`.xiso` or `.iso`). This occurs at the first start:
 
 - Select "No" to stop the game.
 - Select "Yes" to open a file picker. Select the disc image. The game copies
@@ -210,6 +259,7 @@ the setting for one start of the game. It has priority over the file.
 | `game.language` | `""` | `HALO_LANGUAGE` | The language of the menus: `ja`, `de`, `fr`, `es` or `it`. Empty: English. |
 | `paths.data` | `""` | `HALO_DATA_ROOT` | The data root. Refer to "Start the game". |
 | `paths.saves` | `""` | `HALO_SAVE_ROOT` | The save root. Refer to "Files and folders". |
+| `paths.content` | `"auto"` | `HALO_CONTENT_ROOT` | The Halo MCC folder. `"auto"`: the game finds it. `"none"`: no MCC. A folder: that folder. Refer to "Halo: The Master Chief Collection". |
 | `network.netcode` | `"distributed"` | `HALO_NETCODE` | Each machine moves its own player at once, and the host makes the decisions (refer to `NETCODE.md`). The only netcode network version 9 plays; kept so older settings files load. |
 | `network.address` | `""` | `HALO_NET_ADDRESS` | The IPv4 address of this machine for system link. Refer to "Play on one computer". |
 | `network.broadcast` | `""` | `HALO_NET_BROADCAST` | IPv4 addresses, with commas between them, that get the broadcasts of the game. Empty: 255.255.255.255. |

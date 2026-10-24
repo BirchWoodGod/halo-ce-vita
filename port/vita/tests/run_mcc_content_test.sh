@@ -21,9 +21,8 @@
 #      mp        mcc_bloodgulch, an offline game with HALO_TEST_MCC_BOTS (6)
 #                bots (the network test's local: game, in a namespace with no
 #                network), HALO_TEST_MCC_MP_SECONDS (60): the bots must score
-#      xbox      no content folder (HALO_CONTENT_ROOT a folder without halo1):
-#                the Xbox maps alone, mods\mcc_b30 does not load, no MCC map
-#                is listed
+#      xbox      no content folder (HALO_CONTENT_ROOT=none): the Xbox maps
+#                alone, mods\mcc_b30 does not load, no MCC map is listed
 #      shadow    a file of the maps folder named mcc_bloodgulch.map (an Xbox
 #                map) is never listed nor played for MCC's name
 #   HALO_TEST_SHOTS: a folder for the runs' frames (every 60 frames; the GL
@@ -50,7 +49,21 @@
 #      campaign   CAMPAIGN, a new profile, the difficulty, with no Xbox map:
 #                 MCC's a10 starts (mods\mcc_a10)
 #
-#   run_mcc_content_test.sh [unit|harness|menu]   (default all)
+# 4. auto: the PC finding the player's MCC by itself (paths.content "auto"),
+#    HOME a folder of the test's with a made-up Steam: its libraryfolders.vdf
+#    names a second library whose steamapps/common/Halo The Master Chief
+#    Collection is a link to the real one (read only, never copied):
+#      autobg     no Xbox file, no data folder set (a copy of the harness in a
+#                 folder of its own, as a player's unpacked PC build): MCC
+#                 found in the second library, no disc image asked for,
+#                 mcc_bloodgulch offline with bots HALO_TEST_MCC_MP_SECONDS
+#                 (60): the bots must score, no assertion
+#      autogone   paths.content a folder that is gone, the Xbox maps there:
+#                 said, and MCC found by itself
+#      autonone   no Steam in HOME: "Halo MCC not found" said (the main
+#                 menu's notice), the Xbox maps alone
+#
+#   run_mcc_content_test.sh [unit|harness|menu|auto]   (default all)
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
@@ -66,7 +79,7 @@ test_out_begin "$out"
 mkdir -p "$out"
 status=0
 fail() { echo "FAIL: $1"; status=1; }
-parts=${*:-unit harness menu}
+parts=${*:-unit harness menu auto}
 
 case " $parts " in *" unit "*)
 	cc=${CC:-gcc}
@@ -171,10 +184,9 @@ case " $parts " in *" harness "*)
 		fi
 
 		# xbox: no content folder, the Xbox maps alone
-		mkdir -p "$out/none"
-		content_root="$out/none" init_line='map_name mods\mcc_b30' run xbox 25 HALO_TICK_THREAD=0
+		content_root=none init_line='map_name mods\mcc_b30' run xbox 25 HALO_TICK_THREAD=0
 		if grep -aq "memory: loaded mods" "$out/xbox/run.log" || grep -aq "^.*mcc: [0-9]* .* maps" "$out/xbox/data/debug.txt" ||
-			! grep -aq "content: the Halo content folder (paths.content): .*(no halo1/maps there)" "$out/xbox/run.log"; then
+			! grep -aq "content: no Halo content folder (paths.content is \"none\")" "$out/xbox/run.log"; then
 			fail "no content folder: an MCC map was listed or loaded ($out/xbox)"
 		else
 			echo "no content folder: the Xbox maps alone, mods\\mcc_b30 not loaded"
@@ -347,6 +359,103 @@ PY
 			fail "campaign: CAMPAIGN, the difficulty did not start MCC's a10 with no Xbox map ($out/campaign)"
 		else
 			echo "campaign: CAMPAIGN, a new profile, the difficulty: MCC's a10 started (mods\\mcc_a10), no Xbox map"
+		fi
+	fi
+	;;
+esac
+
+case " $parts " in *" auto "*)
+	mcc_folder=$(cd "$mcc/.." 2> /dev/null && pwd)
+	if [ ! -x "$binary" ]; then
+		echo "SKIP (auto): no harness at $binary (HALO_TEST_VITA)"
+	elif [ ! -r "$mcc/maps/bloodgulch.map" ] || [ ! -r "$mcc/maps/ui.map" ]; then
+		echo "SKIP (auto): no MCC halo1 folder with maps/bloodgulch.map and maps/ui.map at $mcc (HALO_TEST_MCC_ROOT)"
+	else
+		# (the made-up Steam: the Steam folder's own library has no MCC, the
+		# second one a link to the real MCC folder)
+		home="$out/auto_home"
+		mkdir -p "$home/.local/share/Steam/steamapps/common" "$out/auto_lib2/steamapps/common" "$out/auto_empty_home"
+		printf '"libraryfolders"\n{\n\t"0"\n\t{\n\t\t"path"\t\t"%s"\n\t}\n\t"1"\n\t{\n\t\t"path"\t\t"%s"\n\t\t"apps"\n\t\t{\n\t\t\t"976730"\t\t"1"\n\t\t}\n\t}\n}\n' \
+			"$home/.local/share/Steam" "$out/auto_lib2" > "$home/.local/share/Steam/steamapps/libraryfolders.vdf"
+		ln -sfn "$mcc_folder" "$out/auto_lib2/steamapps/common/Halo The Master Chief Collection"
+		found_root="$out/auto_lib2/steamapps/common/Halo The Master Chief Collection"
+		# (a copy of the harness in a folder of its own, where the PC build
+		# keeps its config.toml and, with no maps folder, its log)
+		mkdir -p "$out/auto_bin"
+		cp "$binary" "$out/auto_bin/halo"
+		# arun NAME SECONDS HOME XBOX(yes|no) [VAR=value...]: the harness with
+		# paths.content unset unless given, HOME the made-up one
+		arun() {
+			local name=$1 run_seconds=$2 run_home=$3 xbox=$4 dir="$out/$1"
+			shift 4
+			rm -rf "$dir"
+			mkdir -p "$dir/run" "$dir/save"
+			local data=()
+			if [ "$xbox" = yes ]; then
+				mkdir -p "$dir/data/maps"
+				for file in "$(cd "$data_folder" && pwd)"/maps/*.map; do
+					ln -sfn "$file" "$dir/data/maps/"
+				done
+				data=("HALO_DATA_ROOT=$dir/data")
+			fi
+			rm -f "$out/auto_bin/debug.txt"
+			(cd "$dir/run" && exec unshare -rn sh -c 'ip link set lo up 2> /dev/null; exec "$@"' sh \
+				env -u HALO_CONTENT_ROOT -u HALO_DATA_ROOT HOME="$run_home" SDL_AUDIODRIVER=dummy \
+				SDL_VIDEODRIVER=offscreen HALO_SAVE_ROOT="$dir/save" HALO_NO_VSYNC=1 HALO_FRAME_CAP=30 \
+				HALO_EXIT_AFTER="$run_seconds" HALO_FULLSCREEN=0 HALO_HIDDEN_WINDOW=1 HALO_NO_AUDIO=1 \
+				HALO_UPDATE_AUTO=false HALO_NET_ONLINE=false HALO_FRAME_TIMING=300 "${data[@]}" "$@" \
+				timeout -k 5 $((run_seconds + 120)) "$out/auto_bin/halo" > "$dir/run.log" 2>&1)
+			local code=$?
+			[ "$code" = 0 ] || fail "$name: the harness exited with $code ($dir/run.log)"
+			[ -f "$out/auto_bin/debug.txt" ] && mv "$out/auto_bin/debug.txt" "$dir/debug.txt"
+			[ -f "$dir/data/debug.txt" ] && mv "$dir/data/debug.txt" "$dir/debug.txt"
+			if cat "$dir/run.log" "$dir/debug.txt" 2>/dev/null | grep -av "render assertion skipped" |
+				grep -aqE "ASSERT|assertion|EXCEPTION|halt_and_catch_fire"; then
+				fail "$name: an assertion or exception ($dir)"
+			fi
+		}
+		data_folder=$data
+
+		# autobg: no Xbox file, MCC found by itself; Blood Gulch with bots
+		arun autobg "$mp_seconds" "$home" no HALO_TICK_THREAD=1 \
+			HALO_NETWORK_TEST="local:mcc_bloodgulch:slayer" HALO_NETWORK_TEST_START=5 HALO_NETWORK_TEST_SCORE=500 \
+			HALO_TEST_INPUT=bot:1 HALO_BOTS="${HALO_TEST_MCC_BOTS:-6}"
+		log="$out/autobg/run.log"
+		kills=$(grep -a "network test: tick" "$log" | tail -1 | grep -aoE " k[0-9]+" | tr -d ' k' | awk '{s+=$1} END {print s+0}')
+		if ! grep -aqF "content: Halo MCC found (Steam library $out/auto_lib2): $found_root" "$log" ||
+			! grep -aqF "no maps/ folder: Halo MCC is at $found_root" "$log" ||
+			! grep -aqF "content: the Halo content folder: $found_root" "$log"; then
+			fail "autobg: MCC was not found by itself in the second Steam library ($out/autobg)"
+		elif grep -aq "no game data: quitting" "$log"; then
+			fail "autobg: the Xbox disc image was asked for ($out/autobg)"
+		elif ! grep -aq "custom edition: loading 'd:\\\\mcc\\\\halo1\\\\maps\\\\bloodgulch.map'" "$out/autobg/debug.txt"; then
+			fail "autobg: MCC's bloodgulch was not loaded ($out/autobg)"
+		elif [ "${kills:-0}" -lt 1 ]; then
+			fail "autobg: no kill in $mp_seconds s ($out/autobg)"
+		else
+			echo "autobg: MCC found by itself (second Steam library), no Xbox file: mcc_bloodgulch $mp_seconds s," \
+				"$(grep -ac 'network test: player [0-9]* is named' "$log") players, kills $kills"
+		fi
+
+		# autogone: paths.content gone, the Xbox maps there: MCC found anyway
+		arun autogone 20 "$home" yes HALO_CONTENT_ROOT="$out/gone_mcc" HALO_TICK_THREAD=1
+		log="$out/autogone/run.log"
+		if ! grep -aqF "content: paths.content is $out/gone_mcc, but no Halo MCC folder is there" "$log" ||
+			! grep -aqF "content: the Halo content folder: $found_root" "$log"; then
+			fail "autogone: a gone paths.content did not fall back to MCC found by itself ($out/autogone)"
+		else
+			echo "autogone: paths.content gone: said, MCC found by itself"
+		fi
+
+		# autonone: no Steam: said, the Xbox maps alone
+		arun autonone 20 "$out/auto_empty_home" yes HALO_TICK_THREAD=1 HALO_MENU_STYLE=halo3
+		log="$out/autonone/run.log"
+		if ! grep -aq "content: Halo MCC not found (paths.content; " "$log" ||
+			grep -aq "content: the Halo content folder: " "$log" ||
+			! grep -aq "memory: loaded levels.ui.ui" "$log"; then
+			fail "autonone: no MCC was not said, or the menus did not come up ($out/autonone)"
+		else
+			echo "autonone: no Steam: \"Halo MCC not found\" said, the Xbox maps' menus up"
 		fi
 	fi
 	;;
