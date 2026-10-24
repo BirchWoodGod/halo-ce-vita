@@ -1804,6 +1804,20 @@ static struct
 	unsigned long long fade_until;
 	short fade_phase;
 	unsigned long long fade_start;
+	/* a screen opened at black (menu_functions_screen_open_deferred): what
+	to open, and its scene then put in at once (the fade in after) */
+	boolean open_pending;
+	long open_tag;
+	short open_local_player;
+	long open_invoking_tag;
+	long open_focus_parent_tag;
+	short open_focus_index;
+	boolean open_back;
+	boolean opening;
+	boolean cut_next;
+	/* (opened at black: held black until its scene is made, then in) */
+	boolean loading;
+	unsigned long long loading_since;
 } h3_scenes;
 
 static void h3_scene_keep_ring(void);
@@ -2193,11 +2207,20 @@ old camera behind), the new camera put in, then in over
 H3_SCENE_FADE_IN_US - each frame's black a full-screen quad over
 everything (menu_functions_fade_draw, interface.c's overlays: draw_quad,
 the letterbox's, no shader of its own), eased, at the frame rate, not the
-ticks'. The new screen's menus are there from the start (the screen is
-opened before its scene is asked for) and take the pad all the while.
-HALO_MENU_FADE=0: cut at once, as before */
+ticks'. A screen opened from the menus whose camera is elsewhere is not
+opened at once (menu_functions_screen_open_deferred, B's too): the old
+screen stays and fades out, the new one is opened at black, its scene put
+in and made (packs, textures, poses: menu_scene_objects_ready), black held
+till then, and only then faded in; the pad is let go meanwhile. HALO_MENU_FADE=0: cut at once, as before */
 #define H3_SCENE_FADE_OUT_US 250000ULL
 #define H3_SCENE_FADE_IN_US 350000ULL
+/* (a screen opened at black: black held at least this long - a frame or
+two drawn with it, the camera cut -, and at most this long for its scene) */
+#define H3_SCENE_LOAD_LEAST_US 60000ULL
+#define H3_SCENE_LOAD_MOST_US 6000000ULL
+int menu_scene_objects_ready(void);
+void ui_widget_port_focus_child_by_index(long focused_child_parent_widget_tag, struct widget_instance *widget,
+	short focused_child_index);
 
 enum
 {
@@ -2235,6 +2258,99 @@ static boolean h3_scene_moves_backdrop(void)
 }
 
 static void h3_scene_apply(void);
+real menu_functions_fade_alpha(void);
+
+/* (ui_widget.c, a screen about to open) a screen whose live backdrop's
+camera is elsewhere than the one shown: not opened now - the old screen
+stays and fades to black, and it opens at black (menu_functions_scenes_update),
+its camera put in then, and fades in: no frame of it before the black.
+One at a time: another asked for meanwhile is let go (no double opens). TRUE
+when it waits */
+int menu_functions_screen_open_deferred(long tag_index, short local_player_index, long invoking_widget_tag,
+	long focused_child_parent_widget_tag, short focused_child_index);
+
+/* (ui_widget.c, B: back to the screen behind) the same, the screen behind
+opened at black with the focus it had */
+int menu_functions_screen_back_deferred(long tag_index, short local_player_index, long focused_child_parent_widget_tag,
+	short focused_child_index)
+{
+	if (!menu_functions_screen_open_deferred(tag_index, local_player_index, NONE, focused_child_parent_widget_tag,
+		focused_child_index))
+	{
+		return FALSE;
+	}
+	h3_scenes.open_back = TRUE;
+	return TRUE;
+}
+
+/* (ui_widget.c's events) the pad let go while a screen opens at black */
+int menu_functions_fade_input_held(void)
+{
+	return h3_scenes.open_pending || h3_scenes.loading;
+}
+
+int menu_functions_screen_open_deferred(long tag_index, short local_player_index, long invoking_widget_tag,
+	long focused_child_parent_widget_tag, short focused_child_index)
+{
+	struct halo_menus const *menus;
+	char const *tag_name, *backdrop = NULL;
+	char point[32];
+	float values[7];
+	int count, used = 0;
+	long index;
+
+	if (h3_scenes.opening || !halo_menu_style_halo3() || !menu_backdrop_active() || !halo_main_menu_loaded() ||
+		!h3_scene_fade_enabled())
+	{
+		return FALSE;
+	}
+	if (h3_scenes.open_pending)
+		return TRUE;
+	if (!h3_scenes.shown_valid || !(menus = halo_menus_load()) ||
+		!(tag_name = tag_get_name(tag_index)) || strncmp(tag_name, "pc\\", 3))
+	{
+		return FALSE;
+	}
+	tag_name += 3;
+	for (index = 0; index < menus->widget_count && !backdrop; index++)
+	{
+		struct halo_menu_widget const *widget = &menus->widgets[index];
+		char const *a = widget->name, *b = tag_name;
+
+		if (!widget->backdrop || !a)
+			continue;
+		while (*a && *b && (*a == *b || (*a == '/' && *b == '\\')))
+			a++, b++;
+		if (!*a && !*b)
+			backdrop = widget->backdrop;
+	}
+	if (!backdrop || sscanf(backdrop, "%31s%n", point, &used) != 1)
+		return FALSE;
+	count = sscanf(backdrop + used, "%f %f %f %f %f %f %f", &values[0], &values[1], &values[2], &values[3], &values[4],
+		&values[5], &values[6]);
+	if (count >= 5 && !strcmp(point, h3_scenes.shown_point) && values[0] == h3_scenes.shown_camera[0] &&
+		values[1] == h3_scenes.shown_camera[1] && values[2] == h3_scenes.shown_camera[2] &&
+		values[3] == h3_scenes.shown_camera[3] && values[4] == h3_scenes.shown_camera[4])
+	{
+		return FALSE;
+	}
+	h3_scenes.open_pending = TRUE;
+	h3_scenes.open_back = FALSE;
+	h3_scenes.open_tag = tag_index;
+	h3_scenes.open_local_player = local_player_index;
+	h3_scenes.open_invoking_tag = invoking_widget_tag;
+	h3_scenes.open_focus_parent_tag = focused_child_parent_widget_tag;
+	h3_scenes.open_focus_index = focused_child_index;
+	{
+		real black = menu_functions_fade_alpha();
+
+		h3_scenes.fade_phase = _h3_scene_fade_out;
+		h3_scenes.fade_start = vita_host_time_us() - (unsigned long long)(black * (real)H3_SCENE_FADE_OUT_US);
+		h3_scenes.fade_until = h3_scenes.fade_start + H3_SCENE_FADE_OUT_US;
+	}
+	platform_log("menus: h3 scene: %s opens at black (the old screen fading out)", tag_get_name(tag_index));
+	return TRUE;
+}
 
 /* how black the screen is now, 0 to 1 (eased: smoothstep) */
 real menu_functions_fade_alpha(void)
@@ -2249,6 +2365,8 @@ real menu_functions_fade_alpha(void)
 		h3_scenes.fade_phase = _h3_scene_fade_none;
 		return 0.f;
 	}
+	if (h3_scenes.fade_phase == _h3_scene_fade_out && h3_scenes.loading)
+		return 1.f;
 	if (h3_scenes.fade_phase == _h3_scene_fade_out)
 	{
 		amount = now <= h3_scenes.fade_start ? 0.f : (real)(now - h3_scenes.fade_start) / (real)H3_SCENE_FADE_OUT_US;
@@ -2303,6 +2421,72 @@ void menu_functions_scenes_update(void)
 		platform_log("menus: h3 scene: the scenes are off now: the ring's own flight");
 	}
 	taken = __atomic_exchange_n(&h3_scenes.pending, 0, __ATOMIC_ACQUIRE);
+	/* (a screen to open at black: the old one faded out under it, now
+	opened - its scene then put in at once and faded in) */
+	if (h3_scenes.open_pending)
+	{
+		if (!halo_main_menu_loaded())
+		{
+			h3_scenes.open_pending = FALSE;
+			h3_scenes.loading = FALSE;
+			h3_scenes.fade_phase = _h3_scene_fade_none;
+			return;
+		}
+		if (vita_host_time_us() < h3_scenes.fade_until)
+			return;
+		struct widget_instance *opened;
+
+		h3_scenes.open_pending = FALSE;
+		h3_scenes.cut_next = TRUE;
+		h3_scenes.opening = TRUE;
+		opened = ui_widget_load_by_name_or_tag(NULL, h3_scenes.open_tag, NULL, h3_scenes.open_local_player,
+			h3_scenes.open_invoking_tag, h3_scenes.open_back ? NONE : h3_scenes.open_focus_parent_tag,
+			h3_scenes.open_back ? NONE : h3_scenes.open_focus_index);
+		if (!opened)
+			platform_log("menus: h3 scene: the screen faded to did not open");
+		else if (h3_scenes.open_back)
+		{
+			platform_log("menus: h3 scene: back, focus %d of %s", h3_scenes.open_focus_index,
+				h3_scenes.open_focus_parent_tag != NONE ? tag_get_name(h3_scenes.open_focus_parent_tag) : "none");
+			ui_widget_port_focus_child_by_index(h3_scenes.open_focus_parent_tag, opened, h3_scenes.open_focus_index);
+		}
+		h3_scenes.opening = FALSE;
+		/* (its scene, asked for as it was made: at once; black held while
+		it is made - packs, textures, poses -, then the fade in) */
+		taken = __atomic_exchange_n(&h3_scenes.pending, 0, __ATOMIC_ACQUIRE) || taken;
+		if (taken)
+		{
+			h3_scene_apply();
+			h3_scenes.cut_next = FALSE;
+		}
+		h3_scenes.loading = TRUE;
+		h3_scenes.loading_since = vita_host_time_us();
+		return;
+	}
+	/* (black held till the screen opened at black has its scene made) */
+	if (h3_scenes.loading)
+	{
+		unsigned long long now = vita_host_time_us();
+
+		if (taken || h3_scenes.cut_next)
+		{
+			h3_scenes.cut_next = FALSE;
+			h3_scene_apply();
+			h3_scenes.loading_since = now;
+			return;
+		}
+		if (halo_main_menu_loaded() && now - h3_scenes.loading_since < H3_SCENE_LOAD_MOST_US &&
+			(now - h3_scenes.loading_since < H3_SCENE_LOAD_LEAST_US || !menu_scene_objects_ready()))
+		{
+			return;
+		}
+		platform_log("menus: h3 scene: %s ready at black after %.1f ms, fading in", h3_scenes.screen,
+			(double)(now - h3_scenes.loading_since) / 1000.0);
+		h3_scenes.loading = FALSE;
+		h3_scenes.fade_phase = _h3_scene_fade_in;
+		h3_scenes.fade_start = now;
+		return;
+	}
 	/* (fading out: the new camera put in once black - the latest screen's,
 	one asked for meanwhile replacing it -, then faded in) */
 	if (h3_scenes.fade_held)
@@ -2329,6 +2513,12 @@ void menu_functions_scenes_update(void)
 	if (!halo_main_menu_loaded())
 	{
 		h3_scenes.shown_valid = FALSE;
+		return;
+	}
+	if (h3_scenes.cut_next)
+	{
+		h3_scenes.cut_next = FALSE;
+		h3_scene_apply();
 		return;
 	}
 	if (h3_scene_moves_backdrop())

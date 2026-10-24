@@ -2121,6 +2121,42 @@ int menu_scene_objects_settled(
 	return TRUE;
 }
 
+/* (menu_functions.c, a screen opened at black) its scene made and posed:
+every pack in, the objects made, each pose taken or given up */
+int menu_scene_objects_ready(
+	void)
+{
+	short index;
+	boolean wanted = FALSE;
+
+	if (!menu_scene_objects_initialized || menu_scene_objects.refused || !halo_menu_style_halo3())
+		return TRUE;
+	/* (the preview - Customization's Spartan -, wanted: made) */
+	{
+		struct menu_scene_object const *preview = &menu_scene_objects.slots[MENU_SCENE_PREVIEW];
+
+		if (preview->wanted && !preview->refused && !slot_object_valid(preview))
+			return FALSE;
+	}
+	for (index = 0; index < MAXIMUM_MENU_SCENE_OBJECTS; index++)
+		wanted |= menu_scene_objects.slots[index].wanted;
+	if (!wanted)
+		return TRUE;
+	if (!menu_scene_objects.made)
+		return FALSE;
+	for (index = 0; index < MAXIMUM_MENU_SCENE_OBJECTS; index++)
+	{
+		struct menu_scene_object const *object = &menu_scene_objects.slots[index];
+
+		if (object->wanted && object->animation[0] && !object->animation_started && !object->animation_given_up &&
+			unit_try_and_get(object->object_index))
+		{
+			return FALSE;
+		}
+	}
+	return TRUE;
+}
+
 boolean menu_scene_objects_posed(
 	long unit_index)
 {

@@ -3419,6 +3419,22 @@ static void widget_instance_go_back_to_previous(
 	{
 		previous_widget_tag = NONE;
 	}
+#ifdef HALO_LINUX
+	/* port: back to a screen whose live backdrop's camera is elsewhere: this
+	one stays and fades to black, the one behind opened then
+	(menu_functions.c) */
+	{
+		extern int menu_functions_screen_back_deferred(long tag_index, short local_player_index,
+			long focused_child_parent_widget_tag, short focused_child_index);
+
+		if (previous_widget_tag != NONE && widget_instance_get_topmost_parent(widget) == widget_globals.active_widgets[widget_stack] &&
+			menu_functions_screen_back_deferred(previous_widget_tag, previous_local_player_index,
+				data.focused_child_parent_widget_tag, data.focused_child_index))
+		{
+			return;
+		}
+	}
+#endif
 	ui_widget_delete(widget_instance_get_topmost_parent(widget));
 	if (previous_widget_tag != NONE)
 	{
@@ -4085,6 +4101,19 @@ struct widget_instance *ui_widget_load_by_name_or_tag(
 		extern long menu_tags_screen(long tag_index);
 
 		tag_index = menu_tags_screen(tag_index);
+		/* port: a screen whose live backdrop's camera is elsewhere opened
+		once the old one has faded to black (menu_functions.c): nothing
+		opens now, the old screen stays and fades */
+		{
+			extern int menu_functions_screen_open_deferred(long tag_index, short local_player_index,
+				long invoking_widget_tag, long focused_child_parent_widget_tag, short focused_child_index);
+
+			if (tag_index != NONE && menu_functions_screen_open_deferred(tag_index, local_player_index, invoking_widget_tag,
+				focused_child_parent_widget_tag, focused_child_index))
+			{
+				return NULL;
+			}
+		}
 	}
 #endif
 	if (tag_index != NONE)
@@ -8145,6 +8174,20 @@ void process_ui_widgets(
 				ui_widget_definition_get(widget->definition_tag_index);
 			struct event_record event = {0};
 
+#ifdef HALO_LINUX
+			/* port: a screen opening at black (menu_functions.c's fade):
+			the pad's presses meanwhile let go, none taken twice */
+			{
+				extern int menu_functions_fade_input_held(void);
+
+				if (menu_functions_fade_input_held())
+				{
+					while (get_next_event(&event, widget->local_player_index))
+						;
+					memset(&event, 0, sizeof(event));
+				}
+			}
+#endif
 			if (widget_globals.processing_inhibited ||
 				!get_next_event(&event, widget->local_player_index))
 			{
@@ -8213,3 +8256,13 @@ void process_ui_widgets(
 
 	return;
 }
+
+#ifdef HALO_LINUX
+/* port (menu_functions.c, a screen opened at black going back): the focus
+the screen behind had */
+void ui_widget_port_focus_child_by_index(long focused_child_parent_widget_tag, struct widget_instance *widget,
+	short focused_child_index)
+{
+	widget_instance_set_focused_child_by_index(focused_child_parent_widget_tag, widget, focused_child_index);
+}
+#endif
