@@ -36,9 +36,9 @@ network does not use are left out, the others close up. -->
 		<child widget="online/host/network_label"/>
 		<child widget="online/host/value"/>
 	</widget>
-	<!-- (the campaign's: the co-op networks, halo3/campaign.xml's picker) -->
+	<!-- (the campaign's: the co-op networks, campaign.xml's picker) -->
 	<widget name="online/host/op_campnet" width="480" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
-		<on event="a start" open="h3/campnet/screen"/>
+		<on event="a start" open="online/campnet/screen"/>
 		<child widget="online/host/network_label"/>
 		<child widget="online/host/value"/>
 	</widget>
