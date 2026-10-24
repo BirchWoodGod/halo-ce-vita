@@ -43,6 +43,7 @@ whose flame is drawn, for the tests.
 #include "objects/objects.h"
 #include "units/units.h"
 #include "game/players.h"
+#include "player_cosmetics.h"
 #include "effects/particles.h"
 #include "tag_files/tag_files.h"
 #include "tag_files/tag_groups.h"
@@ -281,7 +282,7 @@ boolean flaming_helmet_player_shown(long player_index)
 	if (player->local_player_index == 0)
 		return flaming_helmet.wearing;
 	if (player->local_player_index != NONE ||
-		player->network_player_data.icon_index != NETWORK_PLAYER_FLAME_CLAIM)
+		!player_cosmetics_icon_flame(player->network_player_data.icon_index))
 	{
 		return FALSE;
 	}
@@ -341,7 +342,7 @@ void flaming_helmet_tick(void)
 				continue;
 			local_player_index = 0;
 		}
-		else if (player->local_player_index != NONE || network->icon_index != NETWORK_PLAYER_FLAME_CLAIM ||
+		else if (player->local_player_index != NONE || !player_cosmetics_icon_flame(network->icon_index) ||
 			!flame_verified(network->machine_index))
 		{
 			continue;

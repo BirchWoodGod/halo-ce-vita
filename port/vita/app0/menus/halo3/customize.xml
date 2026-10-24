@@ -32,7 +32,7 @@ folder's own (tools/halo3_menu_art.py). -->
 	<!-- (the rows' help, in their order: menu_functions.c h3_custom_update) -->
 	<strings name="h3/custom_help">
 		<string text="The name your profile goes by, in the campaign\nand in multiplayer games. Cross types it."/>
-		<string text="Your armor's color in multiplayer games. RANDOM:\nthe host gives you one nobody else has."/>
+		<string text="Your armor's color in multiplayer games. RANDOM:\nthe host gives you one nobody else has. Other\ngames see the nearest of the first eighteen."/>
 		<string text="Who you play as offline (multiplayer, bots, Forge):\nthe Spartan, or a player model from one of your\nHalo Custom Edition maps. Online: the Spartan."/>
 		<string text="STANDARD: move with the left stick, look with\nthe right. SOUTHPAW swaps them. LEGACY: move\nand turn with the left, strafe and look with the right."/>
 		<string text="What the game's buttons do. The settings panel's\nButton layout picks which PS Vita button each\nof them is on: the two add up."/>
@@ -42,6 +42,8 @@ folder's own (tools/halo3_menu_art.py). -->
 		<string text="The view levels itself as you move."/>
 		<string text="For a controller that vibrates (on a PC). The\nPS Vita has no vibration motor."/>
 		<string text="Testers: your blue flame. Everyone else's game\nchecks your signed proof before showing it."/>
+		<!-- (ARMOR VISOR's, then KEYBOARD & MOUSE's: after the rows', menu_functions.c) -->
+		<string text="Your visor's color. Players on this game's PS Vita\nand PC builds see it; other games show the gold."/>
 		<string text="This PC's keys and mouse buttons for each action,\nthe mouse's sensitivity and the rest (every profile)."/>
 	</strings>
 

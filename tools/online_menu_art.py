@@ -294,6 +294,36 @@ for _index, _colour in enumerate(PLAYER_COLOURS):
     ART['colour_%02d.png' % _index] = (lambda colour: lambda: colour_tile(colour))(_colour)
     ART['plate_%02d.png' % _index] = (lambda colour: lambda: plate(colour))(_colour)
 
+# the platform's own armour colours after the game's eighteen and its visor
+# colours (port/linux/game/player_cosmetics.c's tables: keep them alike)
+EXTENDED_COLOURS = [
+    0x4A5560, 0x8A96A0, 0x2B2D30, 0xC0C4C8, 0x1B2A5C, 0x2E2A7A, 0x6FB7E8, 0xBFE6F2,
+    0x0F5E5E, 0x8FE3B5, 0x3E5B2A, 0x5B6324, 0x9BD13A, 0xD8C79A, 0xC9A43A, 0xE0A21A,
+    0xA4441C, 0x4A3020, 0xB0182A, 0x5E1224, 0xD46A8C, 0x5E2A62, 0x6A3FB8, 0xA897D8,
+]
+# (the first is the stock gold visor, drawn as the swatch's own gold)
+VISOR_COLOURS = [
+    0xD4A640, 0xC8D0D8, 0x3A78FF, 0x40E070, 0xFF3030, 0xA050FF, 0x101010, 0xFF8A20,
+    0x30E0E0, 0xFF60B0, 0xF0F0F0, 0xE8D040,
+]
+
+
+def visor_tile(colour):
+    # a visor's swatch: its colour, lighter along a diagonal band (a glint)
+    width, height = 64, 32
+    rgb = ((colour >> 16) & 0xFF, (colour >> 8) & 0xFF, colour & 0xFF)
+    image = Image.new('RGBA', (width, height), rgb + (255,))
+    draw = ImageDraw.Draw(image)
+    light = tuple(min(255, value + 70) for value in rgb) + (255,)
+    draw.polygon([(20, 0), (34, 0), (18, height), (4, height)], fill=light)
+    return image
+
+
+for _index, _colour in enumerate(EXTENDED_COLOURS):
+    ART['colour_%02d.png' % (len(PLAYER_COLOURS) + _index)] = (lambda colour: lambda: colour_tile(colour))(_colour)
+for _index, _colour in enumerate(VISOR_COLOURS):
+    ART['visor_%02d.png' % _index] = (lambda colour: lambda: visor_tile(colour))(_colour)
+
 # the fonts: (face, size in units, tracking in units); each also drawn at the
 # displays' pixels per unit (file_<scale>.bin: <font sharp=...> lists them)
 FONTS = {

@@ -406,6 +406,7 @@ symbols in this file:
 #include "map_share.h"
 #include "party_net.h"
 #include "net_fuzz_twin.h"
+#include "player_cosmetics.h"
 /* (port/linux/src/lang.h, through the -iquote port/linux/game path) */
 #include "../src/lang.h"
 void platform_show_message(char const *title, char const *message);
@@ -2120,7 +2121,21 @@ boolean network_game_client_add_player(
 	{
 		extern boolean friends_game_flame_claim(short local_player_index);
 
-		player.icon_index = friends_game_flame_claim(local_player_index) ? NETWORK_PLAYER_FLAME_CLAIM : NONE;
+		boolean flame = friends_game_flame_claim(local_player_index);
+
+		player.icon_index = flame ? NETWORK_PLAYER_FLAME_CLAIM : NONE;
+		/* port: the platform's cosmetics (player_cosmetics.h), between this
+		project's builds alone: the record's colour the nearest of the
+		eighteen, the extended colour and the visor in icon_index; on the
+		crossplay wire nothing more (the nearest colour, the stock visor) */
+		if (!network_wire_crossplay())
+		{
+			short color = player_cosmetics_profile_color(player_ui_get_active_player_profile_index(local_player_index),
+				profile.primary_color_index);
+
+			player.icon_index = player_cosmetics_icon_encode(flame, color,
+				player_cosmetics_profile_visor(player_ui_get_active_player_profile_index(local_player_index)));
+		}
 	}
 	player.team_index = NONE;
 	player.player_list_index = NONE;

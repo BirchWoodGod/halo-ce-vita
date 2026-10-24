@@ -6,8 +6,9 @@ CUSTOMIZATION and its tabs - ARMORY, COLORS, CONTROLS, L and R change them -, th
 left with the orange bar, their values beside them, the help under them, the profile's Spartan
 large at the right, the buttons at the foot. ARMORY: PLAYER NAME, MODEL (the Spartan or a Custom
 Edition player model), the tester's FLAMING HELMET, and the armor pieces Halo CE has no models
-for greyed ("not yet"); COLORS: ARMOR PRIMARY (the game's eighteen colours, in a grid with the
-chosen one framed and its hex), the other colours greyed; CONTROLS: the profile's controller
+for greyed ("not yet"); COLORS: ARMOR PRIMARY (the game's eighteen colours and the platform's own,
+in a grid with the chosen one framed and its hex), ARMOR VISOR (the visor's colours, a
+grid of their own), the other colours greyed; CONTROLS: the profile's controller
 settings. The tabs' rows: menu_functions.c online_custom_update. Circle saves, as the Halo 3
 editor's. The art is this folder's own (tools/online_menu_art.py) and the Halo 3 set's. -->
 <menus>
@@ -88,6 +89,114 @@ editor's. The art is this folder's own (tools/online_menu_art.py) and the Halo 3
 	</bitmap>
 	<bitmap name="online/colour_17">
 		<frame png="online/colour_17.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_18">
+		<frame png="online/colour_18.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_19">
+		<frame png="online/colour_19.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_20">
+		<frame png="online/colour_20.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_21">
+		<frame png="online/colour_21.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_22">
+		<frame png="online/colour_22.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_23">
+		<frame png="online/colour_23.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_24">
+		<frame png="online/colour_24.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_25">
+		<frame png="online/colour_25.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_26">
+		<frame png="online/colour_26.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_27">
+		<frame png="online/colour_27.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_28">
+		<frame png="online/colour_28.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_29">
+		<frame png="online/colour_29.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_30">
+		<frame png="online/colour_30.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_31">
+		<frame png="online/colour_31.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_32">
+		<frame png="online/colour_32.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_33">
+		<frame png="online/colour_33.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_34">
+		<frame png="online/colour_34.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_35">
+		<frame png="online/colour_35.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_36">
+		<frame png="online/colour_36.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_37">
+		<frame png="online/colour_37.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_38">
+		<frame png="online/colour_38.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_39">
+		<frame png="online/colour_39.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_40">
+		<frame png="online/colour_40.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_41">
+		<frame png="online/colour_41.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/visor_00">
+		<frame png="online/visor_00.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/visor_01">
+		<frame png="online/visor_01.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/visor_02">
+		<frame png="online/visor_02.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/visor_03">
+		<frame png="online/visor_03.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/visor_04">
+		<frame png="online/visor_04.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/visor_05">
+		<frame png="online/visor_05.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/visor_06">
+		<frame png="online/visor_06.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/visor_07">
+		<frame png="online/visor_07.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/visor_08">
+		<frame png="online/visor_08.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/visor_09">
+		<frame png="online/visor_09.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/visor_10">
+		<frame png="online/visor_10.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/visor_11">
+		<frame png="online/visor_11.png" width="64" height="32"/>
 	</bitmap>
 	<strings name="online/custom_labels">
 		<string text="PLAYER NAME"/>
@@ -181,7 +290,7 @@ editor's. The art is this folder's own (tools/online_menu_art.py) and the Halo 3
 	</widget>
 	<widget name="online/custom/op_color_label" type="text" left="0" top="0" width="150" height="18" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/custom_labels" string_index="8"/>
 	<widget name="online/custom/op_color" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
-		<!-- (Cross: the grid picked in - up and down a row of three -, again done) -->
+		<!-- (Cross: the grid picked in - up and down a row of six -, again done) -->
 		<on event="a" run="port online custom grid"/>
 		<on event="right stick_right" run="port h3 custom next"/>
 		<on event="left stick_left" run="port h3 custom previous"/>
@@ -195,10 +304,16 @@ editor's. The art is this folder's own (tools/online_menu_art.py) and the Halo 3
 		<child widget="online/custom/na_secondary_label"/>
 		<child widget="online/custom/na/value"/>
 	</widget>
-	<widget name="online/custom/na_visor_label" type="text" left="0" top="0" width="150" height="18" font="online/font_item" color="#FF7E8EA4" text_x="7" text_y="2" string_list="online/custom_labels" string_index="10"/>
-	<widget name="online/custom/na_visor" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/row_dim">
-		<child widget="online/custom/na_visor_label"/>
-		<child widget="online/custom/na/value"/>
+	<widget name="online/custom/op_visor_label" type="text" left="0" top="0" width="150" height="18" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/custom_labels" string_index="10"/>
+	<widget name="online/custom/op_visor" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<!-- (Cross: the visors' grid picked in, again done) -->
+		<on event="a" run="port online custom grid"/>
+		<on event="right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="online/custom/op_visor_label"/>
+		<child widget="online/custom/value"/>
+		<child widget="online/custom/arrow_left"/>
+		<child widget="online/custom/arrow_right"/>
 	</widget>
 	<widget name="online/custom/na_lights_label" type="text" left="0" top="0" width="150" height="18" font="online/font_item" color="#FF7E8EA4" text_x="7" text_y="2" string_list="online/custom_labels" string_index="11"/>
 	<widget name="online/custom/na_lights" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/row_dim">
@@ -350,7 +465,7 @@ editor's. The art is this folder's own (tools/online_menu_art.py) and the Halo 3
 		<child widget="online/custom/op_flame" x="0" y="0"/>
 		<child widget="online/custom/op_color" x="0" y="0"/>
 		<child widget="online/custom/na_secondary" x="0" y="0"/>
-		<child widget="online/custom/na_visor" x="0" y="0"/>
+		<child widget="online/custom/op_visor" x="0" y="0"/>
 		<child widget="online/custom/na_lights" x="0" y="0"/>
 		<child widget="online/custom/op_stick" x="0" y="0"/>
 		<child widget="online/custom/op_buttons" x="0" y="0"/>
@@ -385,29 +500,66 @@ editor's. The art is this folder's own (tools/online_menu_art.py) and the Halo 3
 	<widget name="online/custom/preview_name" type="text" left="460" top="453" width="270" height="16" align="right" font="online/font_small" color="#FF9FB6CC"/>
 
 	<!-- COLORS: the hex of the chosen colour in its box, then the grid (RANDOM, then the game's
-	eighteen in its order), the chosen one framed (online_custom_update moves the frame) -->
+	eighteen in its order, then the platform's: player_cosmetics.c), the visors' under it, the chosen one framed (online_custom_update moves the frame) -->
 	<widget name="online/custom/hex_box" left="248" top="92" width="100" height="16" bitmap="online/box"/>
 	<widget name="online/custom/hex" type="text" left="248" top="92" width="100" height="16" align="center" font="online/font_small" color="#FFF0F4F8" text_y="1"/>
-	<widget name="online/custom/cell_0" left="248" top="112" width="32" height="16" bitmap="online/colour_random"/>
-	<widget name="online/custom/cell_1" left="282" top="112" width="32" height="16" bitmap="online/colour_00"/>
-	<widget name="online/custom/cell_2" left="316" top="112" width="32" height="16" bitmap="online/colour_01"/>
-	<widget name="online/custom/cell_3" left="248" top="130" width="32" height="16" bitmap="online/colour_02"/>
-	<widget name="online/custom/cell_4" left="282" top="130" width="32" height="16" bitmap="online/colour_03"/>
-	<widget name="online/custom/cell_5" left="316" top="130" width="32" height="16" bitmap="online/colour_04"/>
-	<widget name="online/custom/cell_6" left="248" top="148" width="32" height="16" bitmap="online/colour_05"/>
-	<widget name="online/custom/cell_7" left="282" top="148" width="32" height="16" bitmap="online/colour_06"/>
-	<widget name="online/custom/cell_8" left="316" top="148" width="32" height="16" bitmap="online/colour_07"/>
-	<widget name="online/custom/cell_9" left="248" top="166" width="32" height="16" bitmap="online/colour_08"/>
-	<widget name="online/custom/cell_10" left="282" top="166" width="32" height="16" bitmap="online/colour_09"/>
-	<widget name="online/custom/cell_11" left="316" top="166" width="32" height="16" bitmap="online/colour_10"/>
-	<widget name="online/custom/cell_12" left="248" top="184" width="32" height="16" bitmap="online/colour_11"/>
-	<widget name="online/custom/cell_13" left="282" top="184" width="32" height="16" bitmap="online/colour_12"/>
-	<widget name="online/custom/cell_14" left="316" top="184" width="32" height="16" bitmap="online/colour_13"/>
-	<widget name="online/custom/cell_15" left="248" top="202" width="32" height="16" bitmap="online/colour_14"/>
-	<widget name="online/custom/cell_16" left="282" top="202" width="32" height="16" bitmap="online/colour_15"/>
-	<widget name="online/custom/cell_17" left="316" top="202" width="32" height="16" bitmap="online/colour_16"/>
-	<widget name="online/custom/cell_18" left="248" top="220" width="32" height="16" bitmap="online/colour_17"/>
-	<widget name="online/custom/grid_select" left="248" top="112" width="32" height="16" bitmap="online/select_frame"/>
+	<widget name="online/custom/cell_0" left="248" top="112" width="24" height="14" bitmap="online/colour_random"/>
+	<widget name="online/custom/cell_1" left="274" top="112" width="24" height="14" bitmap="online/colour_00"/>
+	<widget name="online/custom/cell_2" left="300" top="112" width="24" height="14" bitmap="online/colour_01"/>
+	<widget name="online/custom/cell_3" left="326" top="112" width="24" height="14" bitmap="online/colour_02"/>
+	<widget name="online/custom/cell_4" left="352" top="112" width="24" height="14" bitmap="online/colour_03"/>
+	<widget name="online/custom/cell_5" left="378" top="112" width="24" height="14" bitmap="online/colour_04"/>
+	<widget name="online/custom/cell_6" left="248" top="128" width="24" height="14" bitmap="online/colour_05"/>
+	<widget name="online/custom/cell_7" left="274" top="128" width="24" height="14" bitmap="online/colour_06"/>
+	<widget name="online/custom/cell_8" left="300" top="128" width="24" height="14" bitmap="online/colour_07"/>
+	<widget name="online/custom/cell_9" left="326" top="128" width="24" height="14" bitmap="online/colour_08"/>
+	<widget name="online/custom/cell_10" left="352" top="128" width="24" height="14" bitmap="online/colour_09"/>
+	<widget name="online/custom/cell_11" left="378" top="128" width="24" height="14" bitmap="online/colour_10"/>
+	<widget name="online/custom/cell_12" left="248" top="144" width="24" height="14" bitmap="online/colour_11"/>
+	<widget name="online/custom/cell_13" left="274" top="144" width="24" height="14" bitmap="online/colour_12"/>
+	<widget name="online/custom/cell_14" left="300" top="144" width="24" height="14" bitmap="online/colour_13"/>
+	<widget name="online/custom/cell_15" left="326" top="144" width="24" height="14" bitmap="online/colour_14"/>
+	<widget name="online/custom/cell_16" left="352" top="144" width="24" height="14" bitmap="online/colour_15"/>
+	<widget name="online/custom/cell_17" left="378" top="144" width="24" height="14" bitmap="online/colour_16"/>
+	<widget name="online/custom/cell_18" left="248" top="160" width="24" height="14" bitmap="online/colour_17"/>
+	<widget name="online/custom/cell_19" left="274" top="160" width="24" height="14" bitmap="online/colour_18"/>
+	<widget name="online/custom/cell_20" left="300" top="160" width="24" height="14" bitmap="online/colour_19"/>
+	<widget name="online/custom/cell_21" left="326" top="160" width="24" height="14" bitmap="online/colour_20"/>
+	<widget name="online/custom/cell_22" left="352" top="160" width="24" height="14" bitmap="online/colour_21"/>
+	<widget name="online/custom/cell_23" left="378" top="160" width="24" height="14" bitmap="online/colour_22"/>
+	<widget name="online/custom/cell_24" left="248" top="176" width="24" height="14" bitmap="online/colour_23"/>
+	<widget name="online/custom/cell_25" left="274" top="176" width="24" height="14" bitmap="online/colour_24"/>
+	<widget name="online/custom/cell_26" left="300" top="176" width="24" height="14" bitmap="online/colour_25"/>
+	<widget name="online/custom/cell_27" left="326" top="176" width="24" height="14" bitmap="online/colour_26"/>
+	<widget name="online/custom/cell_28" left="352" top="176" width="24" height="14" bitmap="online/colour_27"/>
+	<widget name="online/custom/cell_29" left="378" top="176" width="24" height="14" bitmap="online/colour_28"/>
+	<widget name="online/custom/cell_30" left="248" top="192" width="24" height="14" bitmap="online/colour_29"/>
+	<widget name="online/custom/cell_31" left="274" top="192" width="24" height="14" bitmap="online/colour_30"/>
+	<widget name="online/custom/cell_32" left="300" top="192" width="24" height="14" bitmap="online/colour_31"/>
+	<widget name="online/custom/cell_33" left="326" top="192" width="24" height="14" bitmap="online/colour_32"/>
+	<widget name="online/custom/cell_34" left="352" top="192" width="24" height="14" bitmap="online/colour_33"/>
+	<widget name="online/custom/cell_35" left="378" top="192" width="24" height="14" bitmap="online/colour_34"/>
+	<widget name="online/custom/cell_36" left="248" top="208" width="24" height="14" bitmap="online/colour_35"/>
+	<widget name="online/custom/cell_37" left="274" top="208" width="24" height="14" bitmap="online/colour_36"/>
+	<widget name="online/custom/cell_38" left="300" top="208" width="24" height="14" bitmap="online/colour_37"/>
+	<widget name="online/custom/cell_39" left="326" top="208" width="24" height="14" bitmap="online/colour_38"/>
+	<widget name="online/custom/cell_40" left="352" top="208" width="24" height="14" bitmap="online/colour_39"/>
+	<widget name="online/custom/cell_41" left="378" top="208" width="24" height="14" bitmap="online/colour_40"/>
+	<widget name="online/custom/cell_42" left="248" top="224" width="24" height="14" bitmap="online/colour_41"/>
+	<widget name="online/custom/grid_select" left="248" top="112" width="24" height="14" bitmap="online/select_frame"/>
+	<widget name="online/custom/vcell_0" left="248" top="250" width="24" height="14" bitmap="online/visor_00"/>
+	<widget name="online/custom/vcell_1" left="274" top="250" width="24" height="14" bitmap="online/visor_01"/>
+	<widget name="online/custom/vcell_2" left="300" top="250" width="24" height="14" bitmap="online/visor_02"/>
+	<widget name="online/custom/vcell_3" left="326" top="250" width="24" height="14" bitmap="online/visor_03"/>
+	<widget name="online/custom/vcell_4" left="352" top="250" width="24" height="14" bitmap="online/visor_04"/>
+	<widget name="online/custom/vcell_5" left="378" top="250" width="24" height="14" bitmap="online/visor_05"/>
+	<widget name="online/custom/vcell_6" left="248" top="266" width="24" height="14" bitmap="online/visor_06"/>
+	<widget name="online/custom/vcell_7" left="274" top="266" width="24" height="14" bitmap="online/visor_07"/>
+	<widget name="online/custom/vcell_8" left="300" top="266" width="24" height="14" bitmap="online/visor_08"/>
+	<widget name="online/custom/vcell_9" left="326" top="266" width="24" height="14" bitmap="online/visor_09"/>
+	<widget name="online/custom/vcell_10" left="352" top="266" width="24" height="14" bitmap="online/visor_10"/>
+	<widget name="online/custom/vcell_11" left="378" top="266" width="24" height="14" bitmap="online/visor_11"/>
+	<widget name="online/custom/visor_select" left="248" top="250" width="24" height="14" bitmap="online/select_frame"/>
 	<widget name="online/custom/grid">
 		<child widget="online/custom/hex_box"/>
 		<child widget="online/custom/hex"/>
@@ -430,7 +582,44 @@ editor's. The art is this folder's own (tools/online_menu_art.py) and the Halo 3
 		<child widget="online/custom/cell_16"/>
 		<child widget="online/custom/cell_17"/>
 		<child widget="online/custom/cell_18"/>
+		<child widget="online/custom/cell_19"/>
+		<child widget="online/custom/cell_20"/>
+		<child widget="online/custom/cell_21"/>
+		<child widget="online/custom/cell_22"/>
+		<child widget="online/custom/cell_23"/>
+		<child widget="online/custom/cell_24"/>
+		<child widget="online/custom/cell_25"/>
+		<child widget="online/custom/cell_26"/>
+		<child widget="online/custom/cell_27"/>
+		<child widget="online/custom/cell_28"/>
+		<child widget="online/custom/cell_29"/>
+		<child widget="online/custom/cell_30"/>
+		<child widget="online/custom/cell_31"/>
+		<child widget="online/custom/cell_32"/>
+		<child widget="online/custom/cell_33"/>
+		<child widget="online/custom/cell_34"/>
+		<child widget="online/custom/cell_35"/>
+		<child widget="online/custom/cell_36"/>
+		<child widget="online/custom/cell_37"/>
+		<child widget="online/custom/cell_38"/>
+		<child widget="online/custom/cell_39"/>
+		<child widget="online/custom/cell_40"/>
+		<child widget="online/custom/cell_41"/>
+		<child widget="online/custom/cell_42"/>
 		<child widget="online/custom/grid_select"/>
+		<child widget="online/custom/vcell_0"/>
+		<child widget="online/custom/vcell_1"/>
+		<child widget="online/custom/vcell_2"/>
+		<child widget="online/custom/vcell_3"/>
+		<child widget="online/custom/vcell_4"/>
+		<child widget="online/custom/vcell_5"/>
+		<child widget="online/custom/vcell_6"/>
+		<child widget="online/custom/vcell_7"/>
+		<child widget="online/custom/vcell_8"/>
+		<child widget="online/custom/vcell_9"/>
+		<child widget="online/custom/vcell_10"/>
+		<child widget="online/custom/vcell_11"/>
+		<child widget="online/custom/visor_select"/>
 	</widget>
 
 	<!-- the foot: Circle closes (and saves), Cross changes, L and R the tabs -->

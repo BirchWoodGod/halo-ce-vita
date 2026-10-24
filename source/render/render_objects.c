@@ -419,6 +419,7 @@ struct render_lighting *object_get_cached_render_lighting(
 in the frames fine_profile.h picks (HALO_PROFILE_SAMPLE) */
 #include <stdlib.h>
 #include "fine_profile.h"
+#include "player_cosmetics.h"
 void platform_log(const char *format, ...);
 void halo_render_model_profile_report(unsigned long frames);
 enum
@@ -1153,6 +1154,10 @@ static void render_object_list(
 					}
 					if (big_enough && OBJECTS_PROFILE_ON())
 						objects_profile_models++;
+#ifdef HALO_LINUX
+					/* (the platform's visor colour: player_cosmetics.h) */
+					player_cosmetics_render_object_begin(object_index);
+#endif
 					if (big_enough)
 					render_model(
 						definition->object.model.index,
@@ -1177,6 +1182,9 @@ static void render_object_list(
 						object_index,
 						object->object.forced_shader_permutation_index,
 						data->no_planar_fog ? FLAG(_render_model_no_planar_fog_bit) : 0);
+#ifdef HALO_LINUX
+					player_cosmetics_render_object_end();
+#endif
 					OBJECTS_PROFILE_ADD(_objects_profile_models, model_before);
 #ifdef HALO_LINUX
 					if (big_enough && legs)

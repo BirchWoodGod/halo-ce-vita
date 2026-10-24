@@ -133,6 +133,7 @@ left, a cool rim from behind, a soft ambient.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "player_cosmetics.h"
 
 void platform_log(char const *format, ...);
 unsigned long long vita_host_time_us(void);
@@ -154,7 +155,8 @@ enum
 	MENU_SCENE_PREVIEW = MAXIMUM_MENU_SCENE_OBJECTS,
 	NUMBER_OF_MENU_SCENE_SLOTS,
 	/* Halo CE's multiplayer colours (player_profile.c) */
-	NUMBER_OF_MENU_SCENE_COLORS = 18,
+	/* (the game's eighteen and the platform's: player_cosmetics.h) */
+	NUMBER_OF_MENU_SCENE_COLORS = PLAYER_COSMETICS_COLORS,
 	/* color=: the object's own colours, the profile's */
 	MENU_SCENE_COLOR_OWN = -1,
 	MENU_SCENE_COLOR_PROFILE = -2,
@@ -624,7 +626,7 @@ static short color_index_of(struct menu_scene_object const *object)
 	if (profile_index != NONE && player_profile_get(profile_index, &profile) && profile.primary_color_index >= 0 &&
 		profile.primary_color_index < NUMBER_OF_MENU_SCENE_COLORS)
 	{
-		return profile.primary_color_index;
+		return player_cosmetics_profile_color(profile_index, profile.primary_color_index);
 	}
 	/* (no profile yet: Halo's own default, white) */
 	return 0;

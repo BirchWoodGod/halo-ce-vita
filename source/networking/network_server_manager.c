@@ -481,6 +481,7 @@ symbols in this file:
 #include "party_net.h"
 #include "network_wire.h"
 #include "net_fuzz_twin.h"
+#include "player_cosmetics.h"
 #endif
 
 #include "cache/cache_files.h"
@@ -2733,10 +2734,12 @@ void network_game_server_flame_claim(
 	/* (the tests' modified host claims it for everyone: p2p_flame.inc) */
 	extern int p2p_flame_forging_host(void);
 
-	if (player->icon_index != NETWORK_PLAYER_FLAME_CLAIM)
-		player->icon_index = NONE;
+	/* (the flame's claim, or the platform's cosmetics with it:
+	player_cosmetics.h; anything else NONE) */
+	player->icon_index = player_cosmetics_icon_clean(player->icon_index);
 	if (p2p_flame_forging_host())
-		player->icon_index = NETWORK_PLAYER_FLAME_CLAIM;
+		player->icon_index = player_cosmetics_icon_encode(TRUE, player_cosmetics_icon_color(player->icon_index),
+			player_cosmetics_icon_visor(player->icon_index));
 }
 
 boolean network_game_server_add_player_to_game(

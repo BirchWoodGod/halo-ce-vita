@@ -148,6 +148,7 @@ for a gamepad); a test build's HALO_TEST_TEXT_INPUT answers in its place,
 #include <string.h>
 
 #include "../../vita/include/vita_version.h"
+#include "player_cosmetics.h"
 
 /* the platform layer's */
 void platform_log(char const *format, ...);
@@ -4409,13 +4410,16 @@ enum
 	/* (port: the tester's flaming helmet, a listed tester's alone:
 	port/linux/src/p2p_flame.inc; player.flaming_helmet, not the profile's) */
 	_h3_custom_flame,
+	/* (port: the platform's visor colour, player_cosmetics.h: Menu style
+	Online's COLORS and the settings panel) */
+	_h3_custom_visor,
 	NUMBER_OF_H3_CUSTOM_ROWS
 };
 
 static char const *const h3_custom_rows[NUMBER_OF_H3_CUSTOM_ROWS] =
 {
 	"op_name", "op_color", "op_model", "op_stick", "op_buttons", "op_look", "op_invert", "op_flight", "op_autocenter",
-	"op_vibration", "op_flame",
+	"op_vibration", "op_flame", "op_visor",
 };
 /* (the game's colours, in its order: player_profile.c profile_color_table) */
 static char const *const h3_color_names[H3_SWATCH_FRAMES] =
@@ -4504,7 +4508,35 @@ static struct
 	/* (Menu style Halo CE) opened from the Xbox's profile settings (MORE
 	OPTIONS): the profile's editing theirs, never ended here */
 	boolean classic;
+	/* (port) the armour colour chosen (player_cosmetics.h's: the game's
+	eighteen, then the platform's; NONE random) and the visor (0 the stock
+	gold), and the profile's when it opened (saved with Circle when they
+	differ: the profile's file's extension) */
+	short color;
+	short color_saved;
+	short visor;
+	short visor_saved;
 } h3_custom;
+
+/* (port) the editor's colour set: the profile's record takes its nearest of
+the eighteen (what every other build reads) */
+static void h3_custom_set_color(struct player_profile *profile, short color)
+{
+	h3_custom.color = color >= 0 && color < PLAYER_COSMETICS_COLORS ? color : NONE;
+	profile->primary_color_index = h3_custom.color == NONE ? NONE : player_cosmetics_nearest_classic(h3_custom.color);
+}
+
+/* (port) the editor's colour, kept with the profile's record: another
+screen (the Xbox's colour list) that changed the record wins */
+static short h3_custom_color_of(struct player_profile const *profile)
+{
+	if (h3_custom.color == NONE ? profile->primary_color_index != NONE :
+		player_cosmetics_nearest_classic(h3_custom.color) != profile->primary_color_index)
+	{
+		h3_custom.color = profile->primary_color_index;
+	}
+	return h3_custom.color;
+}
 
 static void h3_custom_begin(long profile_index, struct player_profile *profile, char const *name);
 /* (Menu style Halo CE's additions: the Xbox's pregame) */
@@ -4809,6 +4841,9 @@ static void h3_custom_begin(long profile_index, struct player_profile *profile, 
 	player_models_scan(TRUE);
 	h3_custom.model = h3_custom.model_saved = player_models_profile_choice(h3_custom.index);
 	h3_custom.model_said[0] = 0;
+	h3_custom.color = h3_custom.color_saved = player_cosmetics_profile_color(profile_index, profile->primary_color_index);
+	h3_custom.visor = h3_custom.visor_saved = player_cosmetics_profile_visor(profile_index);
+	player_cosmetics_preview_visor(h3_custom.visor);
 	platform_log("menus: h3 customize: %d player models in the maps folder's Custom Edition maps; this profile's: %d",
 		player_models_count(), h3_custom.model);
 	platform_log("menus: h3 customize: editing %s: color %d, stick %d, buttons %d, look %d, invert %d, flight %d, "
@@ -5225,7 +5260,10 @@ static void h3_custom_value(short row, struct player_profile const *profile, cha
 		h3_profile_name(text, size, profile);
 		break;
 	case _h3_custom_color:
-		snprintf(text, size, "%s", T(h3_color_names[h3_swatch_frame(profile->primary_color_index)]));
+		snprintf(text, size, "%s", T(player_cosmetics_color_name(h3_custom_color_of(profile))));
+		break;
+	case _h3_custom_visor:
+		snprintf(text, size, "%s", T(player_cosmetics_visor_name(h3_custom.visor)));
 		break;
 	case _h3_custom_model:
 	{
@@ -5307,11 +5345,12 @@ static boolean h3_custom_change(struct widget_instance *widget, int step)
 		typing_begin(_typing_profile_name, T("Player name"), text, MAXIMUM_PLAYER_PROFILE_NAME_LENGTH - 1, FALSE);
 		return TRUE;
 	case _h3_custom_color:
-		/* (none, then the game's colours: frame - 1) */
-		profile->primary_color_index = (short)(h3_custom_step(h3_swatch_frame(profile->primary_color_index),
-			H3_SWATCH_FRAMES, step) - 1);
-		if (profile->primary_color_index < 0)
-			profile->primary_color_index = NONE;
+		/* (none, then the game's colours, then the platform's: frame - 1) */
+		h3_custom_set_color(profile, (short)(h3_custom_step(h3_custom_color_of(profile) + 1, PLAYER_COSMETICS_COLORS + 1,
+			step) - 1));
+		break;
+	case _h3_custom_visor:
+		h3_custom.visor = (short)h3_custom_step(h3_custom.visor, PLAYER_COSMETICS_VISORS, step);
 		break;
 	case _h3_custom_model:
 		/* (the Spartan, then each model found: index + 1) */
@@ -5528,7 +5567,8 @@ static void h3_custom_update(struct widget_instance *list)
 		found->animation.current_frame_index = h3_swatch_frame(profile->primary_color_index);
 	if ((found = named(screen, "preview_swatch")) != NULL)
 		found->animation.current_frame_index = h3_swatch_frame(profile->primary_color_index);
-	h3_custom_spartan_preview(screen, profile->primary_color_index);
+	h3_custom_spartan_preview(screen, h3_custom_color_of(profile));
+	player_cosmetics_preview_visor(h3_custom.visor);
 	/* (under the preview: the colour's name, or how the model's pack is
 	coming: built the first time, or why it cannot be) */
 	{
@@ -5540,7 +5580,7 @@ static void h3_custom_update(struct widget_instance *list)
 		/* (Menu style Online: the colour's name is COLORS' heading; the
 		corner says only how a model's pack is coming) */
 		snprintf(line, sizeof(line), "%s", halo_menu_style_online() ? "" :
-			T(h3_color_names[h3_swatch_frame(profile->primary_color_index)]));
+			T(player_cosmetics_color_name(h3_custom_color_of(profile))));
 		if (player_models_get(h3_custom.model, &model))
 		{
 			if (state == _scene_pack_state_building)
@@ -5611,6 +5651,17 @@ static void h3_custom_save(void)
 		if (kept)
 			h3_custom.model_saved = h3_custom.model;
 	}
+	/* (port: the platform's colour and visor, in the profile file's
+	extension: player_cosmetics.h) */
+	h3_custom_color_of(&saved);
+	if (h3_custom.color != h3_custom.color_saved || h3_custom.visor != h3_custom.visor_saved)
+	{
+		if (player_cosmetics_profile_save(h3_custom.index, h3_custom.color, h3_custom.visor))
+		{
+			h3_custom.color_saved = h3_custom.color;
+			h3_custom.visor_saved = h3_custom.visor;
+		}
+	}
 	if (!player_ui_edit_profile_is_dirty())
 	{
 		if (!h3_custom.classic)
@@ -5663,9 +5714,12 @@ enum
 };
 /* (PROFILE's rows: the first profiles, then CREATE NEW PROFILE) */
 #define ONLINE_CUSTOM_PROFILE_ROWS 8
-#define ONLINE_CUSTOM_GRID_COLUMNS 3
-#define ONLINE_CUSTOM_GRID_WIDTH 34
-#define ONLINE_CUSTOM_GRID_HEIGHT 18
+/* (the grids: the colours' - RANDOM, the game's eighteen, the platform's
+(player_cosmetics.h) - and the visors', six to a row) */
+#define ONLINE_CUSTOM_GRID_COLUMNS 6
+#define ONLINE_CUSTOM_GRID_WIDTH 26
+#define ONLINE_CUSTOM_GRID_HEIGHT 16
+#define ONLINE_CUSTOM_GRID_CELLS (PLAYER_COSMETICS_COLORS + 1)
 
 static struct
 {
@@ -5676,10 +5730,18 @@ static struct
 	/* (PROFILE's delete question up: the editor it replaced keeps editing,
 	and comes back on PROFILE) */
 	boolean deleting;
-	/* (COLORS: Cross on ARMOR PRIMARY) picking in the grid: left and right
-	a colour, up and down a row of three, Cross again done */
-	boolean grid;
+	/* (COLORS: Cross on ARMOR PRIMARY or ARMOR VISOR) picking in its grid
+(_online_custom_grid_*): left and right a colour, up and down a row,
+Cross again done */
+	short grid;
 } online_custom;
+
+enum
+{
+	_online_custom_grid_none,
+	_online_custom_grid_colors,
+	_online_custom_grid_visors,
+};
 
 static struct
 {
@@ -5710,7 +5772,7 @@ static struct
 	{ "op_flame", 1, NULL, N_("FLAMING HELMET") },
 	{ "op_color", 2, NULL, N_("ARMOR PRIMARY") },
 	{ "na_secondary", 2, N_("Halo CE armor takes one colour: the primary.\nNot in this version yet."), N_("ARMOR SECONDARY") },
-	{ "na_visor", 2, N_("The visor's tint. Not in this version yet."), N_("ARMOR VISOR") },
+	{ "op_visor", 2, NULL, N_("ARMOR VISOR") },
 	{ "na_lights", 2, N_("The armor's lights. Not in this version yet."), N_("ARMOR LIGHTS") },
 	{ "op_stick", 3, NULL, N_("STICK LAYOUT") },
 	{ "op_buttons", 3, NULL, N_("BUTTON LAYOUT") },
@@ -6179,21 +6241,30 @@ static void online_custom_update(struct widget_instance *list)
 			child->animation.current_frame_index = child == list->focused_child ? 1 : 0;
 		}
 	}
-	/* (the colour grid: up and down a row of three - the list stepped to
-	the row under or the last; the focus back on ARMOR PRIMARY) */
+	/* (a grid picked in: up and down a row - the list stepped to the row
+under or above; the focus back on the grid's row) */
 	if (online_custom.tab != _online_custom_tab_colors)
-		online_custom.grid = FALSE;
-	else if (online_custom.grid && profile && list->focused_child && strcmp(list->focused_child->name, "op_color"))
+		online_custom.grid = _online_custom_grid_none;
+	else if (online_custom.grid && profile && list->focused_child)
 	{
-		short frame = h3_swatch_frame(profile->primary_color_index);
-		short step = !strcmp(list->focused_child->name, "na_secondary") ? ONLINE_CUSTOM_GRID_COLUMNS :
-			-ONLINE_CUSTOM_GRID_COLUMNS;
+		boolean visors = online_custom.grid == _online_custom_grid_visors;
+		char const *grid_row = visors ? "op_visor" : "op_color";
+		short focused = online_custom_row_index(list->focused_child->name);
 
-		frame = (short)PIN(frame + step, 0, H3_SWATCH_FRAMES - 1);
-		profile->primary_color_index = (short)(frame ? frame - 1 : NONE);
-		if ((found = named(list, "op_color")) != NULL)
-			ui_widget_port_give_focus(list, found);
-		focused_row = online_custom_row_index("op_color");
+		if (strcmp(list->focused_child->name, grid_row) && focused != NONE)
+		{
+			short step = focused > online_custom_row_index(grid_row) ? ONLINE_CUSTOM_GRID_COLUMNS :
+				-ONLINE_CUSTOM_GRID_COLUMNS;
+
+			if (visors)
+				h3_custom.visor = (short)PIN(h3_custom.visor + step, 0, PLAYER_COSMETICS_VISORS - 1);
+			else
+				h3_custom_set_color(profile, (short)(PIN(h3_custom_color_of(profile) + 1 + step, 0,
+					ONLINE_CUSTOM_GRID_CELLS - 1) - 1));
+			if ((found = named(list, grid_row)) != NULL)
+				ui_widget_port_give_focus(list, found);
+			focused_row = online_custom_row_index(grid_row);
+		}
 	}
 	/* (a new tab: its first row) */
 	if (online_custom.shown_tab != online_custom.tab || focused_row == NONE)
@@ -6245,28 +6316,38 @@ static void online_custom_update(struct widget_instance *list)
 		online_profile_card(screen, focused_row);
 		return;
 	}
-	/* (COLORS: the grid, its chosen colour framed, and the colour's hex) */
+	/* (COLORS: the grids, their chosen colour and visor framed, and the
+	colour's hex) */
 	if ((found = named(screen, "grid")) != NULL)
 		widget_instance_set_visibility_recursive(found, online_custom.tab == _online_custom_tab_colors);
 	if (profile)
 	{
-		short frame = h3_swatch_frame(profile->primary_color_index);
+		short color = h3_custom_color_of(profile);
+		short frame = (short)(color + 1);
+		boolean visor_row = focused_row != NONE && !strcmp(online_custom_rows[focused_row].row, "op_visor");
 
 		if ((found = named(screen, "grid_select")) != NULL)
 		{
 			found->horizontal_offset = (short)((frame % ONLINE_CUSTOM_GRID_COLUMNS) * ONLINE_CUSTOM_GRID_WIDTH);
 			found->vertical_offset = (short)((frame / ONLINE_CUSTOM_GRID_COLUMNS) * ONLINE_CUSTOM_GRID_HEIGHT);
 		}
-		if (frame > 0)
-			snprintf(text, sizeof(text), "#%06lX", online_custom_colours[frame - 1]);
+		if ((found = named(screen, "visor_select")) != NULL)
+		{
+			found->horizontal_offset = (short)((h3_custom.visor % ONLINE_CUSTOM_GRID_COLUMNS) * ONLINE_CUSTOM_GRID_WIDTH);
+			found->vertical_offset = (short)((h3_custom.visor / ONLINE_CUSTOM_GRID_COLUMNS) * ONLINE_CUSTOM_GRID_HEIGHT);
+		}
+		if (visor_row)
+			snprintf(text, sizeof(text), "#%06lX", player_cosmetics_visor_rgb(h3_custom.visor));
+		else if (frame > 0)
+			snprintf(text, sizeof(text), "#%06lX", player_cosmetics_color_rgb(color));
 		else
 			snprintf(text, sizeof(text), "%s", T("RANDOM"));
 		text_show(named(screen, "hex"), text);
-		/* (the heading over the help: the colour's name on COLORS, else the
-		row's) */
+		/* (the heading over the help: the colour's or visor's name on
+		COLORS, else the row's) */
 		if (online_custom.tab == _online_custom_tab_colors)
 			snprintf(text, sizeof(text), online_custom.grid ? T("%s - D-PAD PICKS, CROSS DONE") : "%s",
-				T(h3_color_names[frame]));
+				visor_row ? T(player_cosmetics_visor_name(h3_custom.visor)) : T(player_cosmetics_color_name(color)));
 		else
 			snprintf(text, sizeof(text), "%s", focused_row != NONE ? T(online_custom_rows[focused_row].label) : "");
 		text_show(named(screen, "colour_name"), text);
@@ -19426,6 +19507,7 @@ boolean pc_menu_event_function_invoke(
 		if (online_custom.deleting)
 			return TRUE;
 		h3_custom_spartan_hide();
+		player_cosmetics_preview_visor(NONE);
 		/* (opened from the Xbox's profile settings: theirs to end) */
 		if (player_ui_get_edit_player_profile() && !h3_custom.classic)
 			player_ui_end_editing_profile();
@@ -19795,8 +19877,10 @@ boolean pc_menu_event_function_invoke(
 		online_browser_network_step(function_index == _function_online_browser_network_next ? 1 : -1);
 		return TRUE;
 	case _function_online_custom_grid:
-		online_custom.grid = !online_custom.grid;
-		platform_log("menus: online customize: the colour grid %s", online_custom.grid ? "picked in" : "left");
+		online_custom.grid = online_custom.grid ? _online_custom_grid_none :
+			widget && !strcmp(widget->name, "op_visor") ? _online_custom_grid_visors : _online_custom_grid_colors;
+		platform_log("menus: online customize: the %s grid %s", online_custom.grid == _online_custom_grid_visors ?
+			"visor" : "colour", online_custom.grid ? "picked in" : "left");
 		return TRUE;
 	case _function_online_browser_filter_next:
 	case _function_online_browser_filter_previous:
@@ -20525,7 +20609,8 @@ int menu_functions_mouse_kind(struct widget_instance *widget)
 	if (mouse_on_screen(widget, "pc\\online\\custom\\screen"))
 	{
 		if (mouse_number_after(name, "tab_label_") != NONE || mouse_number_after(name, "tab_") != NONE ||
-			(mouse_number_after(name, "cell_") != NONE && online_custom.tab == _online_custom_tab_colors) ||
+			((mouse_number_after(name, "cell_") != NONE || mouse_number_after(name, "vcell_") != NONE) &&
+				online_custom.tab == _online_custom_tab_colors) ||
 			!strcmp(name, "l_butn") || !strcmp(name, "r_butn"))
 		{
 			return 1;
@@ -20557,11 +20642,17 @@ void menu_functions_mouse_click(struct widget_instance *widget)
 			online_custom_tab_step(number - online_custom.tab);
 		else if (!strcmp(name, "l_butn") || !strcmp(name, "r_butn"))
 			online_custom_tab_step(!strcmp(name, "l_butn") ? -1 : 1);
-		else if ((number = mouse_number_after(name, "cell_")) != NONE && profile && number < H3_SWATCH_FRAMES)
+		else if ((number = mouse_number_after(name, "cell_")) != NONE && profile && number < ONLINE_CUSTOM_GRID_CELLS)
 		{
-			/* (a colour of the grid: cell_0 RANDOM, then the game's) */
-			profile->primary_color_index = (short)(number ? number - 1 : NONE);
-			platform_log("menus: online customize: colour %d from the grid", profile->primary_color_index);
+			/* (a colour of the grid: cell_0 RANDOM, then the game's, then
+			the platform's) */
+			h3_custom_set_color(profile, (short)(number - 1));
+			platform_log("menus: online customize: colour %d from the grid", h3_custom.color);
+		}
+		else if ((number = mouse_number_after(name, "vcell_")) != NONE && profile && number < PLAYER_COSMETICS_VISORS)
+		{
+			h3_custom.visor = number;
+			platform_log("menus: online customize: visor %d from the grid", h3_custom.visor);
 		}
 		return;
 	}

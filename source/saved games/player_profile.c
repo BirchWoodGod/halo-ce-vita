@@ -243,6 +243,17 @@ static struct
 	int lock;
 } player_profile_cache;
 
+/* (port: the cosmetics' extension held: player_profile_extension_get) */
+#define PLAYER_PROFILE_EXTENSION_CACHE_SIZE 16
+
+static struct
+{
+	long indices[PLAYER_PROFILE_EXTENSION_CACHE_SIZE];
+	byte values[PLAYER_PROFILE_EXTENSION_CACHE_SIZE][2];
+	long count;
+	long next;
+} player_profile_extension_cache;
+
 static void player_profile_cache_lock(
 	void)
 {
@@ -263,6 +274,8 @@ void player_profile_cache_forget(
 	player_profile_cache_lock();
 	player_profile_cache.count = 0;
 	player_profile_cache.next = 0;
+	player_profile_extension_cache.count = 0;
+	player_profile_extension_cache.next = 0;
 	player_profile_cache_unlock();
 }
 
@@ -317,6 +330,159 @@ static void player_profile_cache_set(
 	player_profile_cache.indices[i] = player_profile_index;
 	csmemcpy(&player_profile_cache.profiles[i], profile, sizeof(struct player_profile));
 	player_profile_cache_unlock();
+}
+
+/* port: the platform's cosmetics (port/linux/game/player_cosmetics.h) in
+the profile's file: the block's bytes after the stock checksum, which the
+game never read and wrote as zeros - a mark, a version, the extended armour
+colour (its index + 1, 0 none), the visor (0 the stock gold) and a check
+byte. A build without them reads the stock profile (in the nearest of the
+eighteen colours) and writes them away. Held in memory beside the
+profiles (any index: a read that found none holds zeros) */
+#define PLAYER_PROFILE_EXTENSION_MARK "HCVX"
+#define PLAYER_PROFILE_EXTENSION_VERSION 1
+#define PLAYER_PROFILE_EXTENSION_SIZE 8
+
+/* (the write thread's: the extension written with the request's profile) */
+static byte player_profile_write_extension[2];
+
+static void player_profile_extension_store(
+	long player_profile_index,
+	byte color_plus_one,
+	byte visor)
+{
+	long i;
+
+	player_profile_cache_lock();
+	for (i = 0; i < player_profile_extension_cache.count &&
+		player_profile_extension_cache.indices[i] != player_profile_index; i++)
+	{
+	}
+	if (i == player_profile_extension_cache.count)
+	{
+		if (player_profile_extension_cache.count < PLAYER_PROFILE_EXTENSION_CACHE_SIZE)
+		{
+			player_profile_extension_cache.count++;
+		}
+		else
+		{
+			i = player_profile_extension_cache.next;
+			player_profile_extension_cache.next = (player_profile_extension_cache.next + 1) %
+				PLAYER_PROFILE_EXTENSION_CACHE_SIZE;
+		}
+	}
+	player_profile_extension_cache.indices[i] = player_profile_index;
+	player_profile_extension_cache.values[i][0] = color_plus_one;
+	player_profile_extension_cache.values[i][1] = visor;
+	player_profile_cache_unlock();
+}
+
+static boolean player_profile_extension_cached(
+	long player_profile_index,
+	byte *color_plus_one,
+	byte *visor)
+{
+	boolean found = FALSE;
+	long i;
+
+	player_profile_cache_lock();
+	for (i = 0; i < player_profile_extension_cache.count; i++)
+	{
+		if (player_profile_extension_cache.indices[i] == player_profile_index)
+		{
+			*color_plus_one = player_profile_extension_cache.values[i][0];
+			*visor = player_profile_extension_cache.values[i][1];
+			found = TRUE;
+			break;
+		}
+	}
+	player_profile_cache_unlock();
+
+	return found;
+}
+
+static byte player_profile_extension_check(
+	byte const *extension)
+{
+	return (byte)(0x5A ^ extension[4] ^ (extension[5] * 3) ^ (extension[6] * 7));
+}
+
+/* (a file's block) its extension, or zeros */
+static void player_profile_extension_parse(
+	byte const *block,
+	byte *color_plus_one,
+	byte *visor)
+{
+	byte const *extension = block + sizeof(struct player_profile) + sizeof(XCALCSIG_SIGNATURE);
+
+	*color_plus_one = 0;
+	*visor = 0;
+	if (!csmemcmp(extension, PLAYER_PROFILE_EXTENSION_MARK, 4) &&
+		extension[4] == PLAYER_PROFILE_EXTENSION_VERSION &&
+		extension[7] == player_profile_extension_check(extension))
+	{
+		*color_plus_one = extension[5];
+		*visor = extension[6];
+	}
+}
+
+static void player_profile_extension_build(
+	byte *block,
+	byte const *values)
+{
+	byte *extension = block + sizeof(struct player_profile) + sizeof(XCALCSIG_SIGNATURE);
+
+	if (!values[0] && !values[1])
+	{
+		return;
+	}
+	csmemcpy(extension, PLAYER_PROFILE_EXTENSION_MARK, 4);
+	extension[4] = PLAYER_PROFILE_EXTENSION_VERSION;
+	extension[5] = values[0];
+	extension[6] = values[1];
+	extension[7] = player_profile_extension_check(extension);
+}
+
+boolean player_profile_extension_get(
+	long player_profile_index,
+	byte *color_plus_one,
+	byte *visor)
+{
+	struct player_profile profile;
+
+	*color_plus_one = 0;
+	*visor = 0;
+	if (player_profile_index == NONE)
+	{
+		return FALSE;
+	}
+	if (player_profile_extension_cached(player_profile_index, color_plus_one, visor))
+	{
+		return TRUE;
+	}
+	/* (read from its file: player_profile_read holds what it found) */
+	if (!player_profile_read(player_profile_index, &profile))
+	{
+		player_profile_extension_store(player_profile_index, 0, 0);
+		return FALSE;
+	}
+	return player_profile_extension_cached(player_profile_index, color_plus_one, visor);
+}
+
+boolean player_profile_extension_set(
+	long player_profile_index,
+	byte color_plus_one,
+	byte visor)
+{
+	struct player_profile profile;
+
+	if (player_profile_index == NONE || !player_profile_get(player_profile_index, &profile))
+	{
+		return FALSE;
+	}
+	player_profile_extension_store(player_profile_index, color_plus_one, visor);
+	player_profile_write(player_profile_index, &profile);
+	return TRUE;
 }
 #endif
 
@@ -431,10 +597,23 @@ real_rgb_color player_profile_get_rgb_color(
 	long color;
 	real_rgb_color rgb_color;
 
+#ifdef HALO_LINUX
+	/* port: the platform's colours after the eighteen
+	(port/linux/game/player_cosmetics.h) */
+	if (color_index >= NUMBER_OF_AVAILABLE_PRIMARY_COLORS)
+	{
+		unsigned long player_cosmetics_color_rgb(short color);
+
+		color = (long)player_cosmetics_color_rgb((short)color_index);
+	}
+	else
+#endif
+	{
 	color_index = color_index < NUMBER_OF_AVAILABLE_PRIMARY_COLORS - 1 ?
 		color_index : NUMBER_OF_AVAILABLE_PRIMARY_COLORS - 1;
 	color_index = color_index < 0 ? 0 : color_index;
 	color = profile_color_table[color_index];
+	}
 
 	rgb_color.red = ((color >> 16) & 0xFF) / 255.f;
 	rgb_color.green = ((color >> 8) & 0xFF) / 255.f;
@@ -862,6 +1041,14 @@ static boolean player_profile_read(
 					if (!csmemcmp(&checksum, block+sizeof(struct player_profile), sizeof(checksum)))
 					{
 						csmemcpy(profile, block, sizeof(struct player_profile));
+#ifdef HALO_LINUX
+						{
+							byte color_plus_one, visor;
+
+							player_profile_extension_parse(block, &color_plus_one, &visor);
+							player_profile_extension_store(player_profile_index, color_plus_one, visor);
+						}
+#endif
 					}
 					else
 					{
@@ -968,6 +1155,7 @@ static unsigned long __stdcall player_profile_write_thread_proc(
 		csmemcpy(&block.profile, profile, sizeof(struct player_profile));
 		saved_game_file_generate_checksum(&block.profile, sizeof(block.profile),
 			&block.checksum);
+		player_profile_extension_build((byte *)&block, player_profile_write_extension);
 		if (!saved_game_file_write_block(player_profile_index, &block, sizeof(block.profile)))
 		{
 			error(_error_silent, "failed to write player profile to file (the file before it kept)");
@@ -1174,6 +1362,12 @@ static void player_profile_write(
 		player_profile_globals.thread = NULL;
 	}
 
+#ifdef HALO_LINUX
+	/* port: the cosmetics written with it (read from the file first when
+	not held: the write must not lose them) */
+	player_profile_extension_get(player_profile_index, &player_profile_write_extension[0],
+		&player_profile_write_extension[1]);
+#endif
 	player_profile_globals.write_request.player_profile_index = player_profile_index;
 	csmemcpy(
 		&player_profile_globals.write_request.profile,

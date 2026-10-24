@@ -127,6 +127,7 @@ and render states, the shader choice and constant arithmetic, the constant
 uploads, the state before the draw, and the draw itself (models.c reports
 it with render_model's split), in the frames fine_profile.h picks */
 #include "fine_profile.h"
+#include "player_cosmetics.h"
 void platform_log(const char *format, ...);
 static int model_part_profile_on = -1;
 static unsigned long long model_part_profile_us[5];
@@ -2403,6 +2404,25 @@ void _rasterizer_model_draw(
 					shader_model->model.parallel_tint_color.blue*
 					local_parameters->lighting.reflection_tint_color.blue;
 
+#ifdef HALO_LINUX
+				/* port: the platform's visor colour (player_cosmetics.h): the
+				stock cyborg visor's gold is its reflection's tint, a constant
+				of the stock shader - the same program, another colour */
+				{
+					real_rgb_color visor;
+
+					if (player_cosmetics_visor_tint(shader_model, shader_model->model.reflection_cube_map.index,
+						shader_model->model.base_map.index, &visor))
+					{
+						perpendicular.red = visor.red * local_parameters->lighting.reflection_tint_color.red;
+						perpendicular.green = visor.green * local_parameters->lighting.reflection_tint_color.green;
+						perpendicular.blue = visor.blue * local_parameters->lighting.reflection_tint_color.blue;
+						parallel.red = perpendicular.red;
+						parallel.green = perpendicular.green;
+						parallel.blue = perpendicular.blue;
+					}
+				}
+#endif
 				vertex_constants[0].n[0] = shader_model->model.detail_map_scale;
 				vertex_constants[0].n[1] = shader_model->model.detail_map_scale*
 					shader_model->model.detail_map_v_scale;

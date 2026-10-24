@@ -41,6 +41,7 @@ other machine's player, as its options' ADD FRIEND does.
 #include "game/game.h"
 #include "game/game_engine.h"
 #include "game/players.h"
+#include "player_cosmetics.h"
 #include "interface/player_ui.h"
 #include "main/main.h"
 #include "networking/network_client_manager.h"
@@ -297,7 +298,7 @@ static void friends_game_flame_players(struct network_game_client *client)
 		if (!network_player_is_valid(player) || machine < 0 || machine >= HALO_PORT_MAXIMUM_NETWORK_MACHINES)
 			continue;
 		present[machine] = 1;
-		if (machine == own && (!own_found || player->icon_index == NETWORK_PLAYER_FLAME_CLAIM))
+		if (machine == own && (!own_found || player_cosmetics_icon_flame(player->icon_index)))
 		{
 			own_found = 1;
 			for (unit = 0; unit < FLAME_PLAYER_NAME_LENGTH && player->name[unit]; unit++)
@@ -305,7 +306,7 @@ static void friends_game_flame_players(struct network_game_client *client)
 			for (; unit < FLAME_PLAYER_NAME_LENGTH; unit++)
 				own_name[unit] = 0;
 		}
-		if (player->icon_index != NETWORK_PLAYER_FLAME_CLAIM || claims[machine])
+		if (!player_cosmetics_icon_flame(player->icon_index) || claims[machine])
 			continue;
 		claims[machine] = 1;
 		for (unit = 0; unit < FLAME_PLAYER_NAME_LENGTH && player->name[unit]; unit++)

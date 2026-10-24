@@ -601,6 +601,7 @@ real_argb_color *hud_get_text_color(real_argb_color *color);
 #ifdef HALO_LINUX
 #include "latency_meter.h"
 #include "infection.h" /* port: port/linux/game/infection.c */
+#include "player_cosmetics.h" /* port: port/linux/game/player_cosmetics.c */
 #endif
 #include "../../port/linux/src/lang.h" /* port: port/linux/src/lang.c */
 
@@ -6343,6 +6344,16 @@ real_rgb_color *game_engine_player_get_change_color(
 	{
 		long color_index = player->network_player_data.primary_color_index;
 
+#ifdef HALO_LINUX
+		/* port: the platform's colours (player_cosmetics.h): this machine's
+		players their profiles', the others' what their machines sent */
+		{
+			short extended = player_cosmetics_player_color(player_index);
+
+			if (extended != NONE)
+				color_index = extended;
+		}
+#endif
 		if (debug_player_color != NONE)
 			color_index = debug_player_color;
 
