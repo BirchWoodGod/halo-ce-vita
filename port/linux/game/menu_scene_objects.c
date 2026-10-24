@@ -42,6 +42,10 @@ to the picture's left). The options, each <name>=<value>:
 	                   positive turning to +y, as a camera's yaw), upright in
 	                   the world (as level=1); pitch= and roll= then lean it
 	                   from there (a Warthog's spot saved in the level)
+	ground=<offset>    stood on the level's ground under its place (the
+	                   structure found straight below it, or above it by up
+	                   to 2 units), its origin that many units above it: a
+	                   lobby's characters on the live backdrop's floor
 	level=1            stood upright in the world, not in the picture: a
 	                   camera pitched up then looks up at it, its underside
 	                   showing (a Warthog jumping over the camera)
@@ -111,6 +115,7 @@ left, a cool rim from behind, a soft ambient.
 #include "tag_files/tag_groups.h"
 #include "memory/data.h"
 #include "render/render.h"
+#include "physics/collisions.h"
 
 #include "halo_menus.h"
 #include "scene_packs.h"
@@ -206,6 +211,9 @@ struct menu_scene_object
 	real suspension;
 	/* (level=1) upright in the world, not in the picture */
 	boolean level;
+	/* (ground=) stood on the structure below, its origin so high above it */
+	boolean grounded;
+	real ground_offset;
 	/* (at= yaw=) at that point of the world, its front along that heading
 	(radians) */
 	boolean world;
@@ -427,6 +435,14 @@ static boolean option_parse(char const *word, struct menu_scene_object *object)
 		object->world_yaw = number * MENU_SCENE_DEGREES;
 		return TRUE;
 	}
+	if (!strcmp(name, "ground"))
+	{
+		if (sscanf(value, "%f%n", &number, &used) != 1 || value[used] || !real_in_range(number, 10.f))
+			return FALSE;
+		object->grounded = TRUE;
+		object->ground_offset = number;
+		return TRUE;
+	}
 	if (!strcmp(name, "level"))
 	{
 		if (strcmp(value, "0") && strcmp(value, "1"))
@@ -495,6 +511,8 @@ static boolean entry_parse(char *text, struct menu_scene_object *object, short e
 	object->pitch = object->roll = 0.f;
 	object->suspension = 0.f;
 	object->level = FALSE;
+	object->grounded = FALSE;
+	object->ground_offset = 0.f;
 	object->world = FALSE;
 	object->world_yaw = 0.f;
 	object->color_index = MENU_SCENE_COLOR_OWN;
@@ -592,17 +610,31 @@ static void entry_position(struct menu_scene_object const *object, real_point3d 
 	real scale = object->scale > 1.f ? object->scale : 1.f;
 
 	if (object->world)
-	{
 		*position = object->world_position;
-		return;
+	else
+	{
+		camera_frame(&object->camera, &frame);
+		position->x = object->camera.position.x + (frame.view.i * object->distance + frame.right.i * object->right +
+			frame.up.i * object->up) * scale;
+		position->y = object->camera.position.y + (frame.view.j * object->distance + frame.right.j * object->right +
+			frame.up.j * object->up) * scale;
+		position->z = object->camera.position.z + (frame.view.k * object->distance + frame.right.k * object->right +
+			frame.up.k * object->up) * scale;
 	}
-	camera_frame(&object->camera, &frame);
-	position->x = object->camera.position.x + (frame.view.i * object->distance + frame.right.i * object->right +
-		frame.up.i * object->up) * scale;
-	position->y = object->camera.position.y + (frame.view.j * object->distance + frame.right.j * object->right +
-		frame.up.j * object->up) * scale;
-	position->z = object->camera.position.z + (frame.view.k * object->distance + frame.right.k * object->right +
-		frame.up.k * object->up) * scale;
+	/* (ground=: on the structure straight below, from 2 units above) */
+	if (object->grounded)
+	{
+		struct collision_result collision;
+		real_point3d start = *position;
+		real_vector3d down = { 0.f, 0.f, -12.f };
+
+		start.z += 2.f;
+		if (collision_test_vector(FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit),
+			&start, &down, NONE, &collision))
+		{
+			position->z = collision.point.z + object->ground_offset;
+		}
+	}
 }
 
 /* where the object stands, and its facing: toward the camera (or the entry
@@ -1662,6 +1694,8 @@ void menu_scene_objects_want(
 		object->look_entry = parsed[index].look_entry;
 		object->suspension = parsed[index].suspension;
 		object->level = parsed[index].level;
+		object->grounded = parsed[index].grounded;
+		object->ground_offset = parsed[index].ground_offset;
 		object->world = parsed[index].world;
 		object->world_position = parsed[index].world_position;
 		object->world_yaw = parsed[index].world_yaw;
@@ -1821,6 +1855,7 @@ int menu_scene_spartan_show(
 	object->tag[0] = 0;
 	object->pitch = object->roll = 0.f;
 	object->level = FALSE;
+	object->grounded = FALSE;
 	object->world = FALSE;
 	object->weapon_pack[0] = object->weapon_tag[0] = 0;
 	object->animation[0] = 0;
