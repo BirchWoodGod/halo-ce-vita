@@ -126,9 +126,9 @@ and the map's picture and description in a card at the right. The art is this fo
 		<on event="x" run="port h3 game options" />
 		<on event="left_trigger" run="port h3 invite ask" open="h3/invite/screen" />
 		<data input="port online switch" />
-		<child widget="online/mp/switch_0" x="168" y="0" />
-		<child widget="online/mp/switch_1" x="168" y="19" />
-		<child widget="online/mp/switch_2" x="168" y="38" />
+		<child widget="online/mp/switch_2" x="168" y="0" />
+		<child widget="online/mp/switch_0" x="168" y="19" />
+		<child widget="online/mp/switch_1" x="168" y="38" />
 		<child widget="online/mp/switch_row" x="0" y="0" />
 		<child widget="online/mp/network_row" x="0" y="19" />
 		<child widget="online/mp/game_row" x="0" y="38" />
@@ -563,9 +563,9 @@ and the map's picture and description in a card at the right. The art is this fo
 		<on event="y" open="h3/friends/screen" />
 		<on event="left_trigger" run="port h3 invite ask" open="h3/invite/screen" />
 		<data input="port online switch" />
-		<child widget="online/forge/switch_0" x="168" y="0" />
-		<child widget="online/forge/switch_1" x="168" y="19" />
-		<child widget="online/forge/switch_2" x="168" y="38" />
+		<child widget="online/forge/switch_2" x="168" y="0" />
+		<child widget="online/forge/switch_0" x="168" y="19" />
+		<child widget="online/forge/switch_1" x="168" y="38" />
 		<child widget="online/forge/switch_row" x="0" y="0" />
 		<child widget="online/forge/network_row" x="0" y="19" />
 		<child widget="online/forge/map_row" x="0" y="38" />
