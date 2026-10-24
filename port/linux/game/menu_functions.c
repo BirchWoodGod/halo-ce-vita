@@ -429,6 +429,9 @@ enum
 	/* (Menu style Online: CAMPAIGN with the current profile, no SELECT
 	PROFILE) */
 	_function_h3_profile_current,
+	/* (Menu style Online: CUSTOMIZATION's PROFILE tab) */
+	_function_online_profile_choose,
+	_function_online_profile_delete_ask,
 };
 
 /* in port_game_data_input_names' order */
@@ -5287,7 +5290,10 @@ static void h3_custom_update(struct widget_instance *list)
 		long progress = 0;
 		short state = menu_scene_spartan_state(&progress, why, sizeof(why));
 
-		snprintf(line, sizeof(line), "%s", T(h3_color_names[h3_swatch_frame(profile->primary_color_index)]));
+		/* (Menu style Online: the colour's name is COLORS' heading; the
+		corner says only how a model's pack is coming) */
+		snprintf(line, sizeof(line), "%s", halo_menu_style_online() ? "" :
+			T(h3_color_names[h3_swatch_frame(profile->primary_color_index)]));
 		if (player_models_get(h3_custom.model, &model))
 		{
 			if (state == _scene_pack_state_building)
@@ -5391,7 +5397,17 @@ controller settings) -, L and R (the triggers) changing the tab. The rows of
 the other tabs are hidden and passed over; the tab's are stacked from the
 list's top. */
 #define ONLINE_CUSTOM_ROW_HEIGHT 19
-#define ONLINE_CUSTOM_TABS 3
+#define ONLINE_CUSTOM_TABS 4
+/* (the tabs: PROFILE, ARMORY - the one it opens on -, COLORS, CONTROLS) */
+enum
+{
+	_online_custom_tab_profile,
+	_online_custom_tab_armory,
+	_online_custom_tab_colors,
+	_online_custom_tab_controls,
+};
+/* (PROFILE's rows: the first profiles, then CREATE NEW PROFILE) */
+#define ONLINE_CUSTOM_PROFILE_ROWS 8
 #define ONLINE_CUSTOM_GRID_COLUMNS 3
 #define ONLINE_CUSTOM_GRID_WIDTH 34
 #define ONLINE_CUSTOM_GRID_HEIGHT 18
@@ -5402,6 +5418,9 @@ static struct
 	short tab;
 	short shown_tab;
 	short help_row;
+	/* (PROFILE's delete question up: the editor it replaced keeps editing,
+	and comes back on PROFILE) */
+	boolean deleting;
 } online_custom;
 
 static struct
@@ -5414,25 +5433,34 @@ static struct
 	char const *label;
 } const online_custom_rows[] =
 {
-	{ "op_name", 0, NULL, N_("PLAYER NAME") },
-	{ "na_tag", 0, N_("A service tag beside your name. Not in this version yet."), N_("SERVICE TAG") },
-	{ "op_model", 0, NULL, N_("MODEL") },
-	{ "na_helmet", 0, N_("Helmets need armor models Halo CE does not have.\nNot in this version yet: MODEL picks who you\nplay as."), N_("HELMET") },
-	{ "na_rshoulder", 0, N_("Shoulder pieces need armor models Halo CE does\nnot have. Not in this version yet."), N_("RIGHT SHOULDER") },
-	{ "na_lshoulder", 0, N_("Shoulder pieces need armor models Halo CE does\nnot have. Not in this version yet."), N_("LEFT SHOULDER") },
-	{ "na_chest", 0, N_("Chest pieces need armor models Halo CE does not\nhave. Not in this version yet."), N_("CHEST") },
-	{ "op_flame", 0, NULL, N_("FLAMING HELMET") },
-	{ "op_color", 1, NULL, N_("ARMOR PRIMARY") },
-	{ "na_secondary", 1, N_("Halo CE armor takes one colour: the primary.\nNot in this version yet."), N_("ARMOR SECONDARY") },
-	{ "na_visor", 1, N_("The visor's tint. Not in this version yet."), N_("ARMOR VISOR") },
-	{ "na_lights", 1, N_("The armor's lights. Not in this version yet."), N_("ARMOR LIGHTS") },
-	{ "op_stick", 2, NULL, N_("STICK LAYOUT") },
-	{ "op_buttons", 2, NULL, N_("BUTTON LAYOUT") },
-	{ "op_look", 2, NULL, N_("LOOK SENSITIVITY") },
-	{ "op_invert", 2, NULL, N_("INVERT LOOK") },
-	{ "op_flight", 2, NULL, N_("INVERT FLIGHT") },
-	{ "op_autocenter", 2, NULL, N_("AUTO-CENTER") },
-	{ "op_vibration", 2, NULL, N_("VIBRATION") },
+	{ "pr_1", 0, NULL, N_("PROFILE") },
+	{ "pr_2", 0, NULL, N_("PROFILE") },
+	{ "pr_3", 0, NULL, N_("PROFILE") },
+	{ "pr_4", 0, NULL, N_("PROFILE") },
+	{ "pr_5", 0, NULL, N_("PROFILE") },
+	{ "pr_6", 0, NULL, N_("PROFILE") },
+	{ "pr_7", 0, NULL, N_("PROFILE") },
+	{ "pr_8", 0, NULL, N_("PROFILE") },
+	{ "pr_new", 0, NULL, N_("CREATE NEW PROFILE") },
+	{ "op_name", 1, NULL, N_("PLAYER NAME") },
+	{ "na_tag", 1, N_("A service tag beside your name. Not in this version yet."), N_("SERVICE TAG") },
+	{ "op_model", 1, NULL, N_("MODEL") },
+	{ "na_helmet", 1, N_("Helmets need armor models Halo CE does not have.\nNot in this version yet: MODEL picks who you\nplay as."), N_("HELMET") },
+	{ "na_rshoulder", 1, N_("Shoulder pieces need armor models Halo CE does\nnot have. Not in this version yet."), N_("RIGHT SHOULDER") },
+	{ "na_lshoulder", 1, N_("Shoulder pieces need armor models Halo CE does\nnot have. Not in this version yet."), N_("LEFT SHOULDER") },
+	{ "na_chest", 1, N_("Chest pieces need armor models Halo CE does not\nhave. Not in this version yet."), N_("CHEST") },
+	{ "op_flame", 1, NULL, N_("FLAMING HELMET") },
+	{ "op_color", 2, NULL, N_("ARMOR PRIMARY") },
+	{ "na_secondary", 2, N_("Halo CE armor takes one colour: the primary.\nNot in this version yet."), N_("ARMOR SECONDARY") },
+	{ "na_visor", 2, N_("The visor's tint. Not in this version yet."), N_("ARMOR VISOR") },
+	{ "na_lights", 2, N_("The armor's lights. Not in this version yet."), N_("ARMOR LIGHTS") },
+	{ "op_stick", 3, NULL, N_("STICK LAYOUT") },
+	{ "op_buttons", 3, NULL, N_("BUTTON LAYOUT") },
+	{ "op_look", 3, NULL, N_("LOOK SENSITIVITY") },
+	{ "op_invert", 3, NULL, N_("INVERT LOOK") },
+	{ "op_flight", 3, NULL, N_("INVERT FLIGHT") },
+	{ "op_autocenter", 3, NULL, N_("AUTO-CENTER") },
+	{ "op_vibration", 3, NULL, N_("VIBRATION") },
 };
 
 /* (the game's colours, profile_color_table's, as tools/halo3_menu_art.py
@@ -5620,6 +5648,215 @@ static void online_custom_tab_step(int step)
 	platform_log("menus: online customize: tab %d", online_custom.tab);
 }
 
+/* ---- CUSTOMIZATION's PROFILE tab (Menu style Online): the profiles - the
+one edited marked CURRENT -, CREATE NEW PROFILE; Cross switches to one (the
+edits saved first, as Circle saves them; then it is the profile played, as
+SELECT PROFILE's Cross makes it: the nameplate, the Spartan, the campaign's
+and the games'), Square deletes one (the question, profiles.xml's; never the
+one edited), Triangle makes one (its name typed) and switches to it. Its
+card - level, difficulty, controls - in the help's place. CUSTOMIZATION
+opens on the current profile (pc_menu_functions_profile_skip), no SELECT
+PROFILE before it. */
+
+static boolean h3_profile_play_current(short controller_index);
+
+/* the profile played now: the one the editor edits */
+static void online_profile_make_current(long profile_index)
+{
+	struct player_profile profile;
+
+	if (profile_index == NONE || !player_profile_get(profile_index, &profile))
+		return;
+	player_ui_set_active_player_profile(0, profile_index, &profile);
+	h3_nameplate_changed(profile_index);
+	h3_session_profile_chosen(0, profile_index);
+}
+
+/* the PROFILE row's item (pr_<n>: n-1; pr_new: the count), NONE for none */
+static short online_profile_item(struct widget_instance *widget)
+{
+	if (!widget || !widget->name || strncmp(widget->name, "pr_", 3))
+		return NONE;
+	if (!strcmp(widget->name, "pr_new"))
+		return h3_profiles.count;
+	return (short)(atoi(widget->name + 3) - 1);
+}
+
+/* (CUSTOMIZATION opening, Menu style Online) the current profile edited -
+made if there is none -: FALSE when none can be (SELECT PROFILE then) */
+static boolean online_custom_begin_current(void)
+{
+	long current;
+	short index;
+
+	online_custom.deleting = FALSE;
+	if (!h3_profile_play_current(NONE))
+		return FALSE;
+	current = player_ui_get_active_player_profile_index(0);
+	h3_profiles_initialize(_h3_profiles_customize);
+	for (index = 0; index < h3_profiles.count; index++)
+	{
+		if (h3_profile_same(h3_profiles.indices[index], current))
+		{
+			if (!h3_profile_edit(index))
+				return FALSE;
+			online_custom.list = NULL;
+			platform_log("menus: online customize: opened on the current profile, no SELECT PROFILE");
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
+/* (Cross on a profile) switched to it */
+static boolean online_profile_choose(struct widget_instance *widget)
+{
+	short item = online_profile_item(widget);
+	char name[48];
+
+	if (item < 0 || item >= h3_profiles.count)
+		return FALSE;
+	if (h3_profile_same(h3_profiles.indices[item], h3_custom.index))
+		return TRUE;
+	h3_custom_save();
+	h3_custom_spartan_hide();
+	if (!h3_profile_edit(item))
+	{
+		snprintf(h3_custom.status, sizeof(h3_custom.status), "%s", h3_profiles.status);
+		return FALSE;
+	}
+	online_profile_make_current(h3_profiles.indices[item]);
+	h3_profile_name(name, sizeof(name), &h3_profiles.profiles[item]);
+	platform_log("menus: online customize: switched to %s", name);
+	h3_profiles.read = FALSE;
+	return TRUE;
+}
+
+/* (Square on a profile) the question asked: not of the one edited */
+static boolean online_profile_delete_ask(struct widget_instance *list)
+{
+	short item = online_profile_item(list ? list->focused_child : NULL);
+
+	if (online_custom.tab != _online_custom_tab_profile || item < 0 || item >= h3_profiles.count)
+		return FALSE;
+	if (h3_profile_same(h3_profiles.indices[item], h3_custom.index))
+	{
+		snprintf(h3_custom.status, sizeof(h3_custom.status), "%s",
+			T("This is the profile you are using.\nSwitch to another to delete it."));
+		return FALSE;
+	}
+	h3_custom.status[0] = 0;
+	h3_profiles.cursor = item;
+	if (!h3_profile_delete_ask())
+		return FALSE;
+	online_custom.deleting = TRUE;
+	return TRUE;
+}
+
+/* (PROFILE's frame) the list read again when it changed; a new profile's
+name typed: the edits saved, the profile made, switched to */
+static void online_profile_tab_update(void)
+{
+	char text[64];
+
+	if (typing_done(_typing_profile_new, text, sizeof(text)))
+	{
+		h3_custom_save();
+		h3_custom_spartan_hide();
+		h3_profiles.mode = _h3_profiles_customize;
+		h3_profile_create(text);
+		h3_profiles.open_pending = FALSE;
+		if (player_ui_get_edit_player_profile())
+			online_profile_make_current(h3_custom.index);
+		else
+			snprintf(h3_custom.status, sizeof(h3_custom.status), "%s", h3_profiles.status);
+		h3_profiles.read = FALSE;
+	}
+	if (!h3_profiles.read)
+	{
+		h3_profiles.mode = _h3_profiles_customize;
+		h3_profiles_read();
+	}
+}
+
+/* a PROFILE row shown (a profile there is, or CREATE NEW PROFILE), its name
+and its note */
+static boolean online_profile_row_show(struct widget_instance *row)
+{
+	short item = online_profile_item(row);
+	char text[64];
+
+	/* (pr_<n> a profile there is; pr_new CREATE NEW PROFILE) */
+	if (item == NONE || (strcmp(row->name, "pr_new") && (item >= h3_profiles.count || item >= ONLINE_CUSTOM_PROFILE_ROWS)))
+		return FALSE;
+	if (item == h3_profiles.count)
+		snprintf(text, sizeof(text), "%s", T("CREATE NEW PROFILE"));
+	else
+	{
+		h3_profile_name(text, sizeof(text), &h3_profiles.profiles[item]);
+		h3_capitals(text);
+	}
+	text_show(named(row, "pr_label"), text);
+	text_show(named(row, "pr_value"), item == h3_profiles.count ? "" :
+		h3_profile_same(h3_profiles.indices[item], h3_custom.index) ? T("CURRENT") :
+		h3_profiles.damaged[item] ? T("DAMAGED") : "");
+	return TRUE;
+}
+
+/* (PROFILE) the focused profile's card in the help's place: its level, its
+difficulty, its controls */
+static void online_profile_card(struct widget_instance *screen, short focused_row)
+{
+	struct widget_instance *found;
+	struct widget_instance *focused = online_custom.list ? online_custom.list->focused_child : NULL;
+	short item = online_profile_item(focused);
+	char heading[64], text[384];
+
+	(void)focused_row;
+	if ((found = named(screen, "grid")) != NULL)
+		widget_instance_set_visibility_recursive(found, FALSE);
+	if ((found = named(screen, "custom_help")) != NULL)
+		widget_instance_set_visibility_recursive(found, FALSE);
+	heading[0] = text[0] = 0;
+	if (item >= 0 && item < h3_profiles.count)
+	{
+		struct player_profile *profile = &h3_profiles.profiles[item];
+		short level, difficulty;
+		char level_name[64], controls[96];
+
+		h3_profile_name(heading, sizeof(heading), profile);
+		h3_capitals(heading);
+		if (h3_profiles.damaged[item])
+			snprintf(text, sizeof(text), "%s", T("This profile's file is damaged: it can't be\nloaded or played. Delete it, or make a new one."));
+		else
+		{
+			player_profile_get_highest_completed_solo_level(profile, &level, &difficulty);
+			level = (short)MIN(level + 1, NUMBER_OF_SINGLE_PLAYER_LEVELS - 1);
+			snprintf(level_name, sizeof(level_name), "%s", T(h3_level_names[PIN(level, 0, NUMBER_OF_SINGLE_PLAYER_LEVELS - 1)]));
+			h3_capitals(level_name);
+			snprintf(controls, sizeof(controls), "%s%s%s",
+				T(h3_stick_names[PIN(profile->controller_settings.joystick_preset, 0, NUMBER_OF_JOYSTICK_PRESETS - 1)]),
+				profile->controller_settings.invert_look ? ", " : "",
+				profile->controller_settings.invert_look ? T("INVERTED") : "");
+			snprintf(text, sizeof(text), "%s: %s\n%s: %s\n%s: %s\n%s", T("CURRENT LEVEL"), level_name, T("DIFFICULTY"),
+				T(h3_difficulty_names[PIN(difficulty, 0, 3)]), T("CONTROLS"), controls,
+				h3_profile_same(h3_profiles.indices[item], h3_custom.index) ? T("The profile you are using.") :
+				T("Cross: use this profile. Square: delete it."));
+		}
+	}
+	else
+	{
+		snprintf(heading, sizeof(heading), "%s", T("NEW PROFILE"));
+		snprintf(text, sizeof(text), "%s", T("Make a profile of your own: type its name.\nYou switch to it once it is made."));
+	}
+	text_show(named(screen, "colour_name"), heading);
+	if ((found = named(screen, "na_help")) != NULL)
+	{
+		widget_instance_set_visibility_recursive(found, TRUE);
+		text_show(found, text);
+	}
+}
+
 /* (port online custom: the editor's list, after port h3 custom) */
 static void online_custom_update(struct widget_instance *list)
 {
@@ -5633,9 +5870,20 @@ static void online_custom_update(struct widget_instance *list)
 	{
 		/* (the editor opened again: its first tab) */
 		online_custom.list = list;
-		online_custom.tab = 0;
+		online_custom.tab = online_custom.deleting ? _online_custom_tab_profile : _online_custom_tab_armory;
 		online_custom.shown_tab = NONE;
+		/* (back from the delete question: the Spartan asked for again) */
+		if (online_custom.deleting)
+		{
+			online_custom.deleting = FALSE;
+			h3_custom.preview_asked = FALSE;
+			h3_custom.preview_shown = FALSE;
+			h3_profiles.read = FALSE;
+		}
 	}
+	/* (PROFILE: the profiles read, a new one's name typed) */
+	if (online_custom.tab == _online_custom_tab_profile)
+		online_profile_tab_update();
 	for (child = list->child; child; child = child->next)
 	{
 		short row = online_custom_row_index(child->name);
@@ -5643,6 +5891,8 @@ static void online_custom_update(struct widget_instance *list)
 
 		if (row != NONE && !strcmp(child->name, "op_flame"))
 			shown = shown && h3_custom.flame_listed;
+		if (shown && !strncmp(child->name, "pr_", 3))
+			shown = online_profile_row_show(child);
 		widget_instance_set_visibility_recursive(child, shown);
 		child->disabled = !shown;
 		if (!shown)
@@ -5698,9 +5948,25 @@ static void online_custom_update(struct widget_instance *list)
 			platform_log("menus: online customize: row %s", online_custom_rows[focused_row].row);
 		}
 	}
+	/* (PROFILE's buttons in the foot: Square deletes, Triangle makes one) */
+	{
+		static char const *const profile_foot[] = { "x_butn", "delete", "y_butn", "new" };
+
+		for (index = 0; index < (short)NUMBEROF(profile_foot); index++)
+		{
+			if ((found = named(screen, profile_foot[index])) != NULL)
+				widget_instance_set_visibility_recursive(found, online_custom.tab == _online_custom_tab_profile);
+		}
+	}
+	/* (PROFILE: the focused profile's card in the help's place) */
+	if (online_custom.tab == _online_custom_tab_profile && focused_row != NONE)
+	{
+		online_profile_card(screen, focused_row);
+		return;
+	}
 	/* (COLORS: the grid, its chosen colour framed, and the colour's hex) */
 	if ((found = named(screen, "grid")) != NULL)
-		widget_instance_set_visibility_recursive(found, online_custom.tab == 1);
+		widget_instance_set_visibility_recursive(found, online_custom.tab == _online_custom_tab_colors);
 	if (profile)
 	{
 		short frame = h3_swatch_frame(profile->primary_color_index);
@@ -5717,7 +5983,7 @@ static void online_custom_update(struct widget_instance *list)
 		text_show(named(screen, "hex"), text);
 		/* (the heading over the help: the colour's name on COLORS, else the
 		row's) */
-		if (online_custom.tab == 1)
+		if (online_custom.tab == _online_custom_tab_colors)
 			snprintf(text, sizeof(text), "%s", T(h3_color_names[frame]));
 		else
 			snprintf(text, sizeof(text), "%s", focused_row != NONE ? T(online_custom_rows[focused_row].label) : "");
@@ -18077,6 +18343,10 @@ boolean pc_menu_event_function_invoke(
 	/* (the editor gone without its Circle: nothing saved, as the Xbox's
 	edit screen left without SAVE CHANGES) */
 	case _function_h3_custom_close:
+		/* (Online's PROFILE tab: the delete question over it, the editing
+		kept for its return) */
+		if (online_custom.deleting)
+			return TRUE;
 		h3_custom_spartan_hide();
 		/* (opened from the Xbox's profile settings: theirs to end) */
 		if (player_ui_get_edit_player_profile() && !h3_custom.classic)
@@ -18438,6 +18708,10 @@ boolean pc_menu_event_function_invoke(
 		return TRUE;
 	case _function_h3_profile_current:
 		return h3_profile_play_current(event ? event->controller_index : NONE);
+	case _function_online_profile_choose:
+		return online_profile_choose(widget);
+	case _function_online_profile_delete_ask:
+		return online_profile_delete_ask(widget);
 	case _function_online_exit:
 		platform_log("menus: online EXIT: the game closes");
 		exit(EXIT_SUCCESS);
@@ -18989,6 +19263,19 @@ long pc_menu_functions_profile_skip(
 {
 	long list;
 
+	/* (Menu style Online: CUSTOMIZATION opens on the current profile, its
+	PROFILE tab for the others - no SELECT PROFILE before it -; SELECT
+	PROFILE only when no profile can be had) */
+	if (tag_index != NONE && halo_menu_style_online() &&
+		tag_index == tag_loaded(UI_WIDGET_DEFINITION_TAG,
+			"ui\\shell\\main_menu\\settings_select\\player_setup\\player_profile_select_screen"))
+	{
+		long editor = tag_loaded(UI_WIDGET_DEFINITION_TAG, "pc\\h3\\custom\\screen");
+
+		if (editor != NONE && online_custom_begin_current())
+			return editor;
+		return tag_index;
+	}
 	if (tag_index == NONE || tag_index != tag_loaded(UI_WIDGET_DEFINITION_TAG, profiles_screen))
 		return tag_index;
 	/* (START GAME on a live lobby: its game's lobby, the player in it

@@ -118,6 +118,9 @@ editor's. The art is this folder's own (tools/online_menu_art.py) and the Halo 3
 		<string text="Close"/>
 		<string text="Change"/>
 		<string text="Tabs"/>
+		<string text="PROFILE"/>
+		<string text="Delete"/>
+		<string text="New Profile"/>
 	</strings>
 
 	<!-- the rows: a label, the value beside it (the focused row's arrows), as the Halo 3 editor's
@@ -262,11 +265,71 @@ editor's. The art is this folder's own (tools/online_menu_art.py) and the Halo 3
 		<child widget="online/custom/arrow_left"/>
 		<child widget="online/custom/arrow_right"/>
 	</widget>
+	<!-- PROFILE's rows (menu_functions.c online_profile_*): a profile's name (pr_label, set as it
+	shows) and CURRENT beside the one edited; CREATE NEW PROFILE last -->
+	<widget name="online/custom/pr_label" type="text" left="0" top="0" width="190" height="18" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" text_flags="no_focus_test"/>
+	<widget name="online/custom/pr_value" type="text" left="190" top="0" width="100" height="18" align="right" font="online/font_small" color="#FFAFC4DE" text_y="3" text_flags="no_focus_test"/>
+	<widget name="online/custom/pr_1" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a start" run="port online profile choose"/>
+		<child widget="online/custom/pr_label"/>
+		<child widget="online/custom/pr_value"/>
+	</widget>
+	<widget name="online/custom/pr_2" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a start" run="port online profile choose"/>
+		<child widget="online/custom/pr_label"/>
+		<child widget="online/custom/pr_value"/>
+	</widget>
+	<widget name="online/custom/pr_3" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a start" run="port online profile choose"/>
+		<child widget="online/custom/pr_label"/>
+		<child widget="online/custom/pr_value"/>
+	</widget>
+	<widget name="online/custom/pr_4" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a start" run="port online profile choose"/>
+		<child widget="online/custom/pr_label"/>
+		<child widget="online/custom/pr_value"/>
+	</widget>
+	<widget name="online/custom/pr_5" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a start" run="port online profile choose"/>
+		<child widget="online/custom/pr_label"/>
+		<child widget="online/custom/pr_value"/>
+	</widget>
+	<widget name="online/custom/pr_6" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a start" run="port online profile choose"/>
+		<child widget="online/custom/pr_label"/>
+		<child widget="online/custom/pr_value"/>
+	</widget>
+	<widget name="online/custom/pr_7" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a start" run="port online profile choose"/>
+		<child widget="online/custom/pr_label"/>
+		<child widget="online/custom/pr_value"/>
+	</widget>
+	<widget name="online/custom/pr_8" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a start" run="port online profile choose"/>
+		<child widget="online/custom/pr_label"/>
+		<child widget="online/custom/pr_value"/>
+	</widget>
+	<widget name="online/custom/pr_new" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a start" run="port h3 profile create"/>
+		<child widget="online/custom/pr_label"/>
+		<child widget="online/custom/pr_value"/>
+	</widget>
 	<widget name="online/custom/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<data input="port h3 custom"/>
 		<data input="port online custom"/>
 		<on event="left_trigger" run="port online custom tab previous"/>
 		<on event="right_trigger" run="port online custom tab next"/>
+		<on event="x" run="port online profile delete ask" open="h3/profdel/screen"/>
+		<on event="y" run="port h3 profile create"/>
+		<child widget="online/custom/pr_1" x="0" y="0"/>
+		<child widget="online/custom/pr_2" x="0" y="0"/>
+		<child widget="online/custom/pr_3" x="0" y="0"/>
+		<child widget="online/custom/pr_4" x="0" y="0"/>
+		<child widget="online/custom/pr_5" x="0" y="0"/>
+		<child widget="online/custom/pr_6" x="0" y="0"/>
+		<child widget="online/custom/pr_7" x="0" y="0"/>
+		<child widget="online/custom/pr_8" x="0" y="0"/>
+		<child widget="online/custom/pr_new" x="0" y="0"/>
 		<child widget="online/custom/op_name" x="0" y="0"/>
 		<child widget="online/custom/na_tag" x="0" y="0"/>
 		<child widget="online/custom/op_model" x="0" y="0"/>
@@ -292,11 +355,13 @@ editor's. The art is this folder's own (tools/online_menu_art.py) and the Halo 3
 	<widget name="online/custom/header" left="0" top="0" width="640" height="80" bitmap="online/header"/>
 	<widget name="online/custom/title" type="text" left="-70" top="12" width="400" height="34" font="online/font_header" color="#FFF2F6FA" string_list="online/custom_text" string_index="0"/>
 	<widget name="online/custom/tab_0" left="-78" top="52" width="118" height="24" bitmap="online/tab"/>
-	<widget name="online/custom/tab_label_0" type="text" left="-70" top="52" width="100" height="24" font="online/font_tab" color="#FFE8EEF6" text_y="4" string_list="online/custom_text" string_index="1"/>
+	<widget name="online/custom/tab_label_0" type="text" left="-70" top="52" width="100" height="24" font="online/font_tab" color="#FFE8EEF6" text_y="4" string_list="online/custom_text" string_index="7"/>
 	<widget name="online/custom/tab_1" left="40" top="52" width="118" height="24" bitmap="online/tab"/>
-	<widget name="online/custom/tab_label_1" type="text" left="48" top="52" width="100" height="24" font="online/font_tab" color="#FFE8EEF6" text_y="4" string_list="online/custom_text" string_index="2"/>
+	<widget name="online/custom/tab_label_1" type="text" left="48" top="52" width="100" height="24" font="online/font_tab" color="#FFE8EEF6" text_y="4" string_list="online/custom_text" string_index="1"/>
 	<widget name="online/custom/tab_2" left="158" top="52" width="118" height="24" bitmap="online/tab"/>
-	<widget name="online/custom/tab_label_2" type="text" left="166" top="52" width="100" height="24" font="online/font_tab" color="#FFE8EEF6" text_y="4" string_list="online/custom_text" string_index="3"/>
+	<widget name="online/custom/tab_label_2" type="text" left="166" top="52" width="100" height="24" font="online/font_tab" color="#FFE8EEF6" text_y="4" string_list="online/custom_text" string_index="2"/>
+	<widget name="online/custom/tab_3" left="276" top="52" width="118" height="24" bitmap="online/tab"/>
+	<widget name="online/custom/tab_label_3" type="text" left="284" top="52" width="100" height="24" font="online/font_tab" color="#FFE8EEF6" text_y="4" string_list="online/custom_text" string_index="3"/>
 	<widget name="online/custom/profile_name" type="text" left="290" top="57" width="190" height="16" align="right" font="online/font_small" color="#FF9FB6CC"/>
 
 	<!-- under the rows: a rule, the colour's name, the row's help, the editor's word (a name
@@ -366,6 +431,10 @@ editor's. The art is this folder's own (tools/online_menu_art.py) and the Halo 3
 	<widget name="online/custom/l_butn" left="102" top="452" width="16" height="16" bitmap="h3/glyph_l"/>
 	<widget name="online/custom/r_butn" left="120" top="452" width="16" height="16" bitmap="h3/glyph_r"/>
 	<widget name="online/custom/tabs" type="text" left="140" top="451" width="60" height="18" font="online/font_item" color="#FFF0F4F8" text_y="1" string_list="online/custom_text" string_index="6"/>
+	<widget name="online/custom/x_butn" left="200" top="452" width="16" height="16" bitmap="h3/glyph_square"/>
+	<widget name="online/custom/delete" type="text" left="220" top="451" width="60" height="18" font="online/font_item" color="#FFF0F4F8" text_y="1" string_list="online/custom_text" string_index="8"/>
+	<widget name="online/custom/y_butn" left="282" top="452" width="16" height="16" bitmap="h3/glyph_triangle"/>
+	<widget name="online/custom/new" type="text" left="302" top="451" width="110" height="18" font="online/font_item" color="#FFF0F4F8" text_y="1" string_list="online/custom_text" string_index="9"/>
 
 	<!-- the profiles first (the Halo 3 SELECT PROFILE's widgets, profiles.xml), under the header
 	band: CUSTOMIZATION, the line saying to choose one -->
@@ -421,6 +490,8 @@ editor's. The art is this folder's own (tools/online_menu_art.py) and the Halo 3
 		<child widget="online/custom/tab_label_1"/>
 		<child widget="online/custom/tab_2"/>
 		<child widget="online/custom/tab_label_2"/>
+		<child widget="online/custom/tab_3"/>
+		<child widget="online/custom/tab_label_3"/>
 		<child widget="online/custom/profile_name"/>
 		<child widget="online/custom/rule"/>
 		<child widget="online/custom/colour_name"/>
@@ -437,6 +508,10 @@ editor's. The art is this folder's own (tools/online_menu_art.py) and the Halo 3
 		<child widget="online/custom/l_butn"/>
 		<child widget="online/custom/r_butn"/>
 		<child widget="online/custom/tabs"/>
+		<child widget="online/custom/x_butn"/>
+		<child widget="online/custom/delete"/>
+		<child widget="online/custom/y_butn"/>
+		<child widget="online/custom/new"/>
 		<child widget="online/custom/list" x="-70" y="92"/>
 	</widget>
 </menus>

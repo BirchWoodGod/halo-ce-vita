@@ -432,6 +432,7 @@ static char const *const port_function_names[] =
 	"port online switch open", "port online switch close", "port online lobby leave",
 	"port online switch multiplayer", "port online switch forge", "port online switch campaign",
 	"port h3 profile current",
+	"port online profile choose", "port online profile delete ask",
 };
 
 /* the port's game data functions (menu_functions.c), from
