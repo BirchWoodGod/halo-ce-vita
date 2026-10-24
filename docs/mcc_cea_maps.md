@@ -51,6 +51,11 @@ ux0:data/haloce-vita/mcc/
       a10.map ... d40.map           the campaign (774 MB)
       beavercreek.map ... wizard.map the multiplayer maps (about 300 MB)
       bitmaps.map                   their pixels (186 MB): needed
+      ui.map                        MCC's menus (14 MB): only with no Xbox ui.map
+                                    (see "No Xbox files" below)
+      custom_edition/               Halo PC's own bitmaps.map, loc.map and
+        bitmaps.map loc.map sounds.map   sounds.map, which the Halo 3 menus
+                                    and OpenCE's screens read
     sound/pc/
       sounds_adpcm.fsb              the sound effects (88 MB): needed for them
       lst/sounds_adpcm.lst.bin      which sounds they are (45 KB): needed for them
@@ -59,10 +64,57 @@ ux0:data/haloce-vita/mcc/
                                     (186 KB; only to count what is still silent)
 ```
 
-`ui.map`, `halo1/maps/custom_edition/`, the rest of `halo1/sound/`,
-`prebuild/` and the other games' folders are not needed in this version. The Xbox data
-(`ux0:data/haloce-vita/maps`, `default.xbe`) is still needed: the menus,
-fonts and the game's own files are the Xbox's.
+The rest of `halo1/sound/`, `prebuild/` and the other games' folders are
+not needed in this version. The Xbox install's `ui.map` (the menus) is no
+longer needed when this folder has `ui.map` ("No Xbox files" below).
+
+**Halo PC files (October 22 2026)**: the Halo 3 menus and OpenCE's screens
+read Halo PC's own `bitmaps.map` and `loc.map` (art and text; Custom
+Edition's `sounds.map` is for its maps). Players used to put them in the
+maps folder. Now the game takes the maps folder's `<name>.map` when it is
+there (as before) and, when it is not, the content folder's
+`halo1/maps/custom_edition/<name>.map` (said once in halo.log:
+`content: Halo PC file bitmaps.map: not in the maps folder ...`). Mind that
+`halo1/maps/bitmaps.map` (MCC's own maps' pixels) is a different file with
+the same name; it is never used as a Halo PC file. The same lookup serves
+Custom Edition maps' resource maps (`platform_halo_pc_resource_map`).
+
+**No Xbox files (October 22 2026)**: the Xbox install's only part the game
+needs is its `ui.map`, the menus' map. MCC's own `halo1/maps/ui.map` (a
+version 13 cache of Halo PC's menus, 1431 tags; it is the Halo PC / Custom
+Edition UI, not MCC's Scaleform one) is the menus' map when:
+
+| `paths.menu_source` (`HALO_MENU_SOURCE`) | the menus' map |
+| --- | --- |
+| empty or `auto` (default) | the Xbox's `ui.map` when the maps folder has it, else MCC's |
+| `xbox` | the Xbox's only |
+| `mcc` | MCC's, when the content folder has it, even with the Xbox's there |
+
+So an Xbox player keeps the Xbox's menus, whatever else is installed; a
+player with only MCC gets the classic menu (CAMPAIGN, MULTIPLAYER, PROFILES,
+SETTINGS, CREDITS, QUIT) from MCC's file, and `menu_tags_loaded` runs on it as
+on the Xbox's. The choice is logged (`menus: the menu map is MCC's
+halo1\maps\ui.map (no Xbox ui.map in the maps folder)`). What does not work
+with MCC's menu file yet:
+
+- Halo PC's own event handler functions (numbered from 102, past the Xbox's)
+  are mapped only for two: QUIT's OK (107) and the difficulty rows (169: the
+  difficulty, then the campaign starts). Any other cancels its action, is
+  logged once for its widget (`menus: MCC's ui.map: widget '...' ran function
+  137, one of Halo PC's own that this build has no mapping for yet`; `HALO_UI_LOG=2`
+  logs every handler that runs) and the player is told "This menu isn't
+  supported with MCC's menu file yet."; the menu stays as it was. SETTINGS
+  (137), and most of what is behind MULTIPLAYER and PROFILES, are among them.
+  Halo PC's 49 menu game data inputs past the Xbox's 41 run none.
+- Nineteen of the Xbox screens the Halo 3 and OpenCE overlay names
+  (`multiplayer.xml`) are not in MCC's `ui.map` (error screens, the 4-way
+  profile screens, the pregame and server list): the Halo 3 style falls back
+  to the classic menu there.
+- With no Xbox maps, the classic menu's level lists and the new campaign name
+  the Xbox's levels (`levels\a10\a10`): `main_set_map_name` takes those that
+  the maps folder lacks and the content folder has as MCC's
+  (`mods\mcc_a10`), so CAMPAIGN, a new profile and a difficulty start MCC's
+  Pillar of Autumn; the lists themselves still show the Xbox's names.
 
 The folder is **only read**: every file call that writes, makes, moves or
 deletes refuses a path in it, and `..` stops at its root. Nothing of it
@@ -180,8 +232,11 @@ Tests: `port/vita/tests/run_mcc_content_test.sh` (the names, Steam's
 libraryfolders.vdf and the loaders' table with no MCC file; with your
 MCC folder, linked read only: b30 and d40 60 s each, b30 won goes on to
 b40, Blood Gulch with bots, no folder, a maps folder's
-`mcc_bloodgulch.map` left out; SKIP without one). The harness tests
-otherwise run with no content folder (`test_out.sh`).
+`mcc_bloodgulch.map` left out; SKIP without one) and, in its `menu` part,
+the Halo PC files from `custom_edition`, which `ui.map` is the menus', MCC's
+menus with no Xbox file at all (six rows, the unsupported-function message,
+b30 and a10 started from them). The harness tests otherwise run with no
+content folder (`test_out.sh`).
 
 ## Playing a mod natively
 

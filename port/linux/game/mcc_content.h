@@ -60,6 +60,19 @@ enum mcc_content_kind
 	_mcc_content_none,
 	_mcc_content_campaign,
 	_mcc_content_multiplayer,
+	/* MCC's own ui.map (halo1\maps\ui.map: Halo PC's menu map, a version 13
+	cache), the menus' map when the Xbox's is not there (or paths.menu_source
+	says "mcc"): only ever asked for by the bare name "ui", and only once
+	mcc_content_menu_source_choose chose it */
+	_mcc_content_menu,
+};
+
+/* the menu map's sources, and what paths.menu_source ("", "auto", "xbox",
+"mcc") and the files there choose */
+enum mcc_content_menu_source
+{
+	_mcc_content_menu_source_xbox,
+	_mcc_content_menu_source_mcc,
 };
 
 /* the loaders of the content folder's map files (content_library_games) */
@@ -106,7 +119,20 @@ name in lower case into `stem` (MCC_CONTENT_STEM_BYTES), and its kind; else
 _mcc_content_none (and `stem` empty). */
 int mcc_content_name_stem(char const *name, char *stem);
 
-/* `stem`'s file in MCC's maps folder (d:\mcc\maps\<stem>.map) into `path`
+/* Which map file the menus (the bare map name "ui") are read from:
+`setting` is paths.menu_source (NULL, "", "auto": the Xbox's ui.map when
+there is one, else MCC's; "xbox": the Xbox's alone; "mcc": MCC's when it is
+there, else the Xbox's), `xbox_ui` and `mcc_ui` whether each file is there
+(MCC's only counts with the Halo content folder). When neither is there
+the answer is the Xbox's (the error the missing file always gave).
+`reason` (may be NULL) gets one short phrase for the log. */
+int mcc_content_menu_source_choose(char const *setting, int xbox_ui, int mcc_ui, char const **reason);
+
+/* Whether `name` (any path, any case) is the bare name of the menus' map,
+"ui". */
+int mcc_content_name_is_menu(char const *name);
+
+/* `stem`'s file in MCC's maps folder (d:\mcc\maps\<stem>.map; "ui" is _mcc_content_menu's) into `path`
 (`path_size` bytes): FALSE for a name not of a stock map, or too long. */
 int mcc_content_map_path(char const *stem, char *path, unsigned long path_size);
 

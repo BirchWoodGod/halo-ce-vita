@@ -3887,6 +3887,70 @@ static void ui_widget_function_test(
 #endif
 #endif
 
+#ifdef HALO_LINUX
+/* port: Halo PC's own event handler functions, which MCC's ui.map (the menus'
+map when there is no Xbox ui.map: custom_edition_cache.c) names by numbers
+from 102, past the Xbox's. Only the ones the main entries need are mapped to
+the port's own as yet, found by what MCC's widgets with them do (the log of
+HALO_UI_LOG=2 names each handler that runs); any other fails, is logged and
+is told to the player (custom_edition_cache_menu_handler_failed). */
+enum
+{
+	PC_FUNCTION_QUIT_GAME = 107,
+	PC_FUNCTION_DIFFICULTY_START = 169
+};
+
+/* the QUIT screen's OK */
+static boolean pc_function_quit_game(
+	struct widget_instance *widget,
+	struct event_record *event,
+	boolean *widget_deleted)
+{
+	return exit_to_xbox_dashboard(widget, event, widget_deleted);
+}
+
+/* a difficulty item (the list's rows, in the order of the difficulties):
+that difficulty chosen, as the Xbox's list does (set difficulty, then
+switch from the main menu to the campaign, the map named already) */
+static boolean pc_function_difficulty_start(
+	struct widget_instance *widget,
+	struct event_record *event,
+	boolean *widget_deleted)
+{
+	int index = widget_instance_get_child_index_from_parent(widget);
+
+	if (index < 0 || index >= 4)
+		return FALSE;
+	main_set_difficulty(index);
+	ui_play_audio_feedback_sound(2);
+	return switch_from_main_menu_to_single_player(widget, event, widget_deleted);
+}
+
+/* whether `function_index` is mapped (and run into `result`) */
+static boolean pc_function_invoke(
+	struct widget_instance *widget,
+	struct event_record *event,
+	word function_index,
+	boolean *widget_deleted,
+	boolean *result)
+{
+	extern boolean main_menu_is_active(void);
+
+	if (!main_menu_is_active())
+		return FALSE;
+	switch (function_index)
+	{
+	case PC_FUNCTION_QUIT_GAME:
+		*result = pc_function_quit_game(widget, event, widget_deleted);
+		return TRUE;
+	case PC_FUNCTION_DIFFICULTY_START:
+		*result = pc_function_difficulty_start(widget, event, widget_deleted);
+		return TRUE;
+	}
+	return FALSE;
+}
+#endif
+
 boolean ui_widget_event_handler_function_invoke(
 	struct widget_instance *widget,
 	struct event_record *event,
@@ -3916,6 +3980,15 @@ boolean ui_widget_event_handler_function_invoke(
 			long function_index, boolean *widget_deleted);
 
 		return pc_menu_event_function_invoke(widget, event, function_index - 256, widget_deleted);
+	}
+#endif
+#ifdef HALO_LINUX
+	if (function_index >= 102 && function_index < 256)
+	{
+		boolean mapped_result = FALSE;
+
+		if (pc_function_invoke(widget, event, function_index, widget_deleted, &mapped_result))
+			return mapped_result;
 	}
 #endif
 	if ((short)function_index >= 0 && function_index < 102)

@@ -174,11 +174,70 @@ int mcc_content_name_stem(char const *name, char *stem)
 	return map->kind;
 }
 
+static int menu_stem(char const *stem)
+{
+	return stem && same_name(stem, "ui");
+}
+
+int mcc_content_name_is_menu(char const *name)
+{
+	char const *last = name;
+	char const *cursor;
+
+	if (!name)
+		return 0;
+	for (cursor = name; *cursor; cursor++)
+	{
+		if (*cursor == '\\' || *cursor == '/')
+			last = cursor + 1;
+	}
+	return menu_stem(last);
+}
+
+int mcc_content_menu_source_choose(char const *setting, int xbox_ui, int mcc_ui, char const **reason)
+{
+	char const *why = "the Xbox's ui.map";
+	int source = _mcc_content_menu_source_xbox;
+
+	if (!setting)
+		setting = "";
+	if (same_name(setting, "xbox"))
+		why = xbox_ui ? "paths.menu_source is xbox" : "paths.menu_source is xbox, but there is no ui.map in the maps folder";
+	else if (same_name(setting, "mcc"))
+	{
+		if (mcc_ui)
+		{
+			source = _mcc_content_menu_source_mcc;
+			why = "paths.menu_source is mcc";
+		}
+		else
+			why = xbox_ui ? "paths.menu_source is mcc, but the Halo content folder has no halo1\\maps\\ui.map" :
+				"no ui.map anywhere";
+	}
+	else if (xbox_ui)
+		why = "the Xbox's ui.map, which comes first";
+	else if (mcc_ui)
+	{
+		source = _mcc_content_menu_source_mcc;
+		why = "no Xbox ui.map in the maps folder";
+	}
+	else
+		why = "no ui.map anywhere";
+	if (reason)
+		*reason = why;
+	return source;
+}
+
 int mcc_content_map_path(char const *stem, char *path, unsigned long path_size)
 {
 	struct mcc_content_map const *map = mcc_content_map_find(stem);
 	int written;
 
+	if (menu_stem(stem) && path && path_size)
+	{
+		written = snprintf(path, path_size, "%sui.map", MCC_CONTENT_MAPS_DIRECTORY);
+		return written > 0 && (unsigned long)written < path_size;
+	}
 	if (!map || !path || !path_size)
 		return 0;
 	written = snprintf(path, path_size, "%s%s.map", MCC_CONTENT_MAPS_DIRECTORY, map->stem);
