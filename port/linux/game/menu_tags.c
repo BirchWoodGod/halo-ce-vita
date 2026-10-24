@@ -2158,7 +2158,9 @@ static byte *png_decode(byte const *data, unsigned long size, long width, long h
 	}
 	if (!ended || !channels || !idat)
 	{
-		free(idat);
+		/* (none read: no free - the debug allocator's free asserts on NULL) */
+		if (idat)
+			free(idat);
 		return NULL;
 	}
 	row_bytes = width * channels;
