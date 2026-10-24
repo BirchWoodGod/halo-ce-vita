@@ -4916,6 +4916,12 @@ static void h3_custom_save(void)
 		platform_log("menus: h3 customize: %s could not be saved", name);
 		return;
 	}
+	/* (opened from the Xbox's profile settings: player_ui_save_profile ends the
+	editing, which those screens still need - their B read it and closed the
+	screen, "no saved game file is being edited" -; the saved profile taken up
+	again, nothing changed in it yet) */
+	if (h3_custom.classic)
+		player_ui_begin_editing_profile(h3_custom.index);
 	if (h3_profile_same(player_ui_get_active_player_profile_index(0), h3_custom.index))
 		player_ui_set_active_player_profile(0, player_ui_get_active_player_profile_index(0), &saved);
 	h3_profiles.focus_index = h3_custom.index;

@@ -3255,7 +3255,22 @@ PY
 		grep -aq "ui: screen pc.h3.custom.screen" "$log" || fail ceplusprofile "MORE OPTIONS did not open the editor"
 		sed -n '/ui: screen pc.h3.custom.screen/,$p' "$log" | grep -aq "ui: screen ui.shell.main_menu.settings_select.player_setup.player_profile_edit.player_profile_edit_screen" ||
 			fail ceplusprofile "B did not go back to the Xbox's profile settings"
-		grep -a "ui: screen" "$log" | tail -1 | grep -q "ui.shell.main_menu.main_menu" || fail ceplusprofile "B, B did not reach the main menu" ;;
+		grep -a "ui: screen" "$log" | tail -1 | grep -q "ui.shell.main_menu.main_menu" || fail ceplusprofile "B, B did not reach the main menu"
+		# (CHANGE COLOR first - the fourth row, A, then B -, then down to MORE OPTIONS, A, B: the editor
+		# saves the colour's edit, which ended the Xbox's editing and made its B close the screen -
+		# "no saved game file is being edited" -; the Xbox's profile settings must still be there, with
+		# SAVE CHANGES not asking for a profile)
+		profile_from=$HALO_TEST_PROFILE run ceplusprofile_color "$menus_data" 34 "wait:150:3000 $d $d a:150:3000 a:150:3000 $d $d $d a:150:3000 b:150:3000 $d a:150:4000 b:150:3500 wait:150:2000 b:150:2500 b:150:2500" \
+			HALO_SCENE_PACKS=0
+		log=$out/ceplusprofile_color/run.log
+		echo "--- ceplusprofile (CHANGE COLOR, then MORE OPTIONS)"
+		grep -aE "ui: screen|ce customize|h3 customize: (saved|editing)" "$log" | head -14
+		[ "$(cat "$out/ceplusprofile_color/exit")" = 0 ] || fail ceplusprofile "color: exit $(cat "$out/ceplusprofile_color/exit")"
+		grep -aq "menus: ce customize: MORE OPTIONS for " "$log" || fail ceplusprofile "color: MORE OPTIONS did not edit the profile"
+		sed -n '/ui: screen pc.h3.custom.screen/,/test pad: wait/p' "$log" | grep -a "ui: screen" | sed -n 2p | grep -aq "player_profile_edit_screen" ||
+			fail ceplusprofile "color: B did not go back to the Xbox's profile settings"
+		sed -n '/ui: screen pc.h3.custom.screen/,/test pad: wait/p' "$log" | grep -aq "player_profile_select_screen" &&
+			fail ceplusprofile "color: the profile settings closed themselves (no profile being edited)" ;;
 	cepluspregame)
 		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
 			echo "--- cepluspregame"; echo "SKIP: no HALO_TEST_PROFILE"; continue
