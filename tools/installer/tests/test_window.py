@@ -105,24 +105,21 @@ def test_pages_and_a_step(root, tmp_path, monkeypatch):
 
 def test_mcc_through_the_window(root, tmp_path, monkeypatch):
     """Step 1's other way: MCC's folder (found by itself, mocked), its files
-    copied, the step done, the Done page's row; the Halo 2 files only with
-    their check box."""
+    copied, the step done, the Done page's row."""
     from tkinter import messagebox
     errors = []
     monkeypatch.setattr(messagebox, "showerror", lambda title, text, **options: errors.append(text))
     mcc = tmp_path / "Halo The Master Chief Collection"
-    fakes.make_mcc(str(mcc), halo2=True)
+    fakes.make_mcc(str(mcc))
     monkeypatch.setattr(hcv, "find_mcc_folders", lambda: [str(mcc)])
     out = tmp_path / "out"
     window = hcv.InstallerWindow(root, str(out))
     assert window.mcc_root.get() == str(mcc) and window.game_mode.get() == "xbox"
-    assert window.mcc_halo2.get() is False
     window.show(1)
     root.update()
     texts = [widget.cget("text") for widget in all_widgets(window.body)
              if widget.winfo_class() in ("TRadiobutton", "TCheckbutton")]
     assert any("Master Chief Collection" in text for text in texts)
-    assert any("Halo 2" in text and "test builds" in text for text in texts)
     window.game_mode.set("mcc")
     window.start(window.do_game)
     assert pump(root, lambda: not window.worker.is_alive() and window.messages.empty())
@@ -133,14 +130,6 @@ def test_mcc_through_the_window(root, tmp_path, monkeypatch):
     assert "MCC files ready" in window.notice_text()
     rows = {what: (done, how) for done, what, how in window.done_summary()}
     assert rows["MCC files"][0] is True and "29 Halo CE maps" in rows["MCC files"][1]
-    assert "Halo 2 files (test builds)" not in rows
-    window.mcc_halo2.set(True)
-    window.start(window.do_game)
-    assert pump(root, lambda: not window.worker.is_alive() and window.messages.empty())
-    pump(root, lambda: False, 0.3)
-    assert sorted(os.listdir(out / "maps")) == sorted(hcv.H2_FILES)
-    rows = {what: (done, how) for done, what, how in window.done_summary()}
-    assert rows["Halo 2 files (test builds)"][0] is True
     for page in range(len(window.STEPS)):
         window.show(page)
         root.update()

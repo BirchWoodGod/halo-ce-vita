@@ -88,11 +88,6 @@ Custom maps you put in that `maps` folder yourself are copied too.
      `bitmaps.map` must be there, or nothing is copied. Nothing of MCC goes
      to the `maps` folder.
 
-     **Halo 2 files (off by default).** A check box under MCC also copies
-     `zanzibar.map`, `shared.map`, `textures.dat`, `sounds_neutral.dat` and
-     `sounds_en.dat` from MCC's `halo2/h2_maps_win64_dx11` to the `maps`
-     folder (about 1.6 GB more), for the Halo 2 test builds only. Those
-     builds are not public yet: leave it off unless you test them.
 2. **Movies (optional).** The disc's Bink movies (`bink/*.bik`) are
    converted with ffmpeg to H.264 MP4s, 640 wide, as the README's Movies
    section does. Both choices are H.264 Constrained Baseline with no
@@ -186,7 +181,7 @@ tray; no game artwork).
 
 ```
 python3 halo_ce_vita_installer.py [--out FOLDER] xbox "Halo.iso"
-python3 halo_ce_vita_installer.py [--out FOLDER] mcc [FOLDER] [--halo2]
+python3 halo_ce_vita_installer.py [--out FOLDER] mcc [FOLDER]
 python3 halo_ce_vita_installer.py [--out FOLDER] movies "Halo.iso" [--quality better] [--ffmpeg PATH]
 python3 halo_ce_vita_installer.py [--out FOLDER] pc-files --mcc [FOLDER]
 python3 halo_ce_vita_installer.py [--out FOLDER] pc-files --installer "any name.exe"

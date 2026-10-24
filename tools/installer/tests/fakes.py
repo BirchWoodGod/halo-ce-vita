@@ -119,7 +119,7 @@ def xbox_tree(extra_maps=None, bink=True):
     return tree
 
 
-def make_mcc(root, halo2=False, sound=True, custom_edition=True, extra=True):
+def make_mcc(root, sound=True, custom_edition=True, extra=True):
     """A small stand-in for Halo: The Master Chief Collection's folder: its
     halo1 maps (cache headers 'daeh', version 13), MCC's bitmaps.map (a
     resource map), custom_edition's three, the sound bank (FSB5) and lists
@@ -143,10 +143,6 @@ def make_mcc(root, halo2=False, sound=True, custom_edition=True, extra=True):
         files["halo1/sound/pc/lst/tags_params.ps"] = b"ps"                     # not needed
         files["halo3/maps/guardian.map"] = b"daeh" + struct.pack("<I", 13)     # another game
         files["mcclauncher.exe"] = b"MZ"
-    if halo2:
-        for name in hcv.H2_FILES:
-            data = (b"daeh" + struct.pack("<I", 13) if name.endswith(".map") else b"\1\0\0\0") + name.encode() * 30
-            files["halo2/h2_maps_win64_dx11/" + name] = data
     for relative, data in files.items():
         path = os.path.join(root, *relative.split("/"))
         os.makedirs(os.path.dirname(path), exist_ok=True)

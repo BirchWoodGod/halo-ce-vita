@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Step 1's other way: the Halo CE content of the player's own Halo: The
 Master Chief Collection, found (Steam's libraries, Windows' registry, mocked
-here), copied as the game reads it (ux0:data/haloce-vita/mcc/...), and the
-Halo 2 test builds' files only when asked. Every MCC file here is made up
-(fakes.make_mcc)."""
+here), copied as the game reads it (ux0:data/haloce-vita/mcc/...), and nothing
+of the other games. Every MCC file here is made up (fakes.make_mcc)."""
 
 import os
 import sys
@@ -139,27 +138,16 @@ def test_install_mcc_files(tmp_path):
     assert all("already there" in line for line in log)
 
 
-def test_install_mcc_halo2_only_when_asked(tmp_path):
-    root, files = mcc_folder(tmp_path, halo2=True)
+def test_install_mcc_nothing_to_the_maps_folder(tmp_path):
+    root, files = mcc_folder(tmp_path)
     out = tmp_path / "out"
     hcv.install_mcc_files(str(root), str(out), log=lambda message: None)
     assert not (out / "maps").exists()
-    hcv.install_mcc_files(str(root), str(out), halo2=True, log=lambda message: None)
-    assert sorted(os.listdir(out / "maps")) == sorted(hcv.H2_FILES)
-    places = {(item.folder, item.name) for item in hcv.staged_uploads(str(out))}
-    for name in hcv.H2_FILES:
-        assert ("ux0:data/haloce-vita/maps", name) in places
-    # (another .dat in the maps folder is not copied)
+    # (a .dat in the maps folder is not copied to the Vita)
+    (out / "maps").mkdir()
     (out / "maps" / "other.dat").write_bytes(b"x")
     assert ("ux0:data/haloce-vita/maps", "other.dat") not in {
         (item.folder, item.name) for item in hcv.staged_uploads(str(out))}
-
-
-def test_install_mcc_halo2_missing(tmp_path):
-    root, _ = mcc_folder(tmp_path)
-    with pytest.raises(hcv.InstallerError, match="zanzibar.map"):
-        hcv.install_mcc_files(str(root), str(tmp_path / "out"), halo2=True, log=lambda message: None)
-    assert not (tmp_path / "out" / "mcc").exists()  # nothing copied
 
 
 def test_install_mcc_refuses_a_bad_folder(tmp_path):
@@ -198,12 +186,12 @@ def test_install_mcc_stopped_leaves_no_part_file(tmp_path):
 
 
 def test_mcc_command_line(tmp_path, monkeypatch):
-    root, _ = mcc_folder(tmp_path, halo2=True)
+    root, _ = mcc_folder(tmp_path)
     out = str(tmp_path / "out")
     monkeypatch.setattr(hcv, "find_mcc_folders", lambda: [str(root)])
     assert hcv.main(["--out", out, "mcc"]) == 0
     assert hcv.mcc_staged(out) and not os.path.exists(os.path.join(out, "maps"))
-    assert hcv.main(["--out", out, "mcc", str(root), "--halo2"]) == 0
-    assert sorted(os.listdir(os.path.join(out, "maps"))) == sorted(hcv.H2_FILES)
+    assert hcv.main(["--out", out, "mcc", str(root)]) == 0
+    assert not os.path.exists(os.path.join(out, "maps"))
     monkeypatch.setattr(hcv, "find_mcc_folders", lambda: [])
     assert hcv.main(["--out", out, "mcc"]) == 1
