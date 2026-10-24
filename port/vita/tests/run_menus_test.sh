@@ -3228,6 +3228,16 @@ PY
 		[ "$(grep -ac 'menus: the settings panel asked for' "$log")" = 2 ] || fail ceplusmain "start: Start did not ask for the settings panel twice"
 		[ "$(grep -ac 'ui: screen' "$log")" = 1 ] || fail ceplusmain "start: Start opened a screen"
 		grep -aq "may not run event handler function" "$out/ceplusmain_start/data/debug.txt" && fail ceplusmain "start: the main menu's Start was refused"
+		# (MULTIPLAYER, the first row with internet play off: the screen that says so; A asks for the
+		# settings panel's Multiplayer tab, as its footer's A=SELECT promises)
+		run ceplusmain_offline "$menus_data" 15 "wait:150:3000 down:150:800 a:150:3000 a:150:3000 a:150:1500" HALO_SCENE_PACKS=0
+		log=$out/ceplusmain_offline/run.log
+		echo "--- ceplusmain (offline Multiplayer screen's A)"
+		grep -aE "ui: screen|settings panel" "$log" | head -6
+		[ "$(cat "$out/ceplusmain_offline/exit")" = 0 ] || fail ceplusmain "offline: exit $(cat "$out/ceplusmain_offline/exit")"
+		grep -aq "ui: screen pc.mp.offline" "$log" || fail ceplusmain "offline: the screen did not say internet play is off"
+		grep -aq "menus: the settings panel's Multiplayer tab asked for" "$log" ||
+			fail ceplusmain "offline: A did not ask for the settings panel's Multiplayer tab"
 		# (Menu style Halo 3: the map's own list, the Halo 3 main menu, none of the port's rows)
 		run ceplusmain_h3 "$menus_data" 15 "wait:150:3000" HALO_MENU_STYLE=halo3
 		log=$out/ceplusmain_h3/run.log

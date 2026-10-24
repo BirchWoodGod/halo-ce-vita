@@ -381,7 +381,7 @@ static char const *const port_function_names[] =
 	"port h3 browse system link", "port h3 map set", "port h3 map focus", "port h3 gametype set",
 	"port h3 gametype focus", "port h3 gametype page up", "port h3 gametype page down", "port h3 setup hold",
 	"port h3 campaign network set", "port h3 campaign network focus", "port h3 campaign host",
-	"port h3 campaign focus", "port h3 scene", "port settings panel",
+	"port h3 campaign focus", "port h3 scene", "port settings panel", "port settings panel multiplayer",
 	"port h3 profiles campaign", "port h3 profiles customize", "port h3 profile play", "port h3 profile edit",
 	"port h3 profile create", "port h3 profile delete ask", "port h3 profile delete", "port h3 profile page up",
 	"port h3 profile page down", "port h3 custom next", "port h3 custom previous", "port h3 custom save",

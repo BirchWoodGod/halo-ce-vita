@@ -275,6 +275,7 @@ enum
 	_function_h3_campaign_focus,
 	_function_h3_scene,
 	_function_settings_panel,
+	_function_settings_panel_multiplayer,
 	_function_h3_profiles_campaign,
 	_function_h3_profiles_customize,
 	_function_h3_profile_play,
@@ -16863,6 +16864,17 @@ boolean pc_menu_event_function_invoke(
 		return FALSE;
 #else
 		platform_log("menus: the settings panel asked for (none on this build)");
+		return TRUE;
+#endif
+	/* (the classic Multiplayer screens that say internet play is off: A opens the panel at
+	its Multiplayer tab, where Connection is; the handler fails, as above) */
+	case _function_settings_panel_multiplayer:
+#ifdef HALO_VITA
+		__atomic_store_n(&halo_settings_panel_request, HALO_SETTINGS_PANEL_MULTIPLAYER, __ATOMIC_RELEASE);
+		platform_log("menus: the settings panel's Multiplayer tab asked for");
+		return FALSE;
+#else
+		platform_log("menus: the settings panel's Multiplayer tab asked for (none on this build)");
 		return TRUE;
 #endif
 	case _function_h3_campaign_init:

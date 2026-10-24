@@ -7198,6 +7198,14 @@ int vita_settings_input(const struct vita_host_pad *pad)
 				notice[0] = 0;
 				vita_host_log("settings: party: the Party page (the multiplayer pause's PARTY)");
 			}
+			else if (request == HALO_SETTINGS_PANEL_MULTIPLAYER)
+			{
+				tab = TAB_MULTIPLAYER;
+				page = TAB_MULTIPLAYER;
+				screen = SCREEN_LIST;
+				notice[0] = 0;
+				vita_host_log("settings: the Multiplayer tab (the offline Multiplayer screen's A)");
+			}
 			panel_begin();
 			return 1;
 		}
