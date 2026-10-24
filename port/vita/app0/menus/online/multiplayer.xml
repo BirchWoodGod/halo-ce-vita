@@ -110,18 +110,6 @@ and the map's picture and description in a card at the right. The art is this fo
 	<widget name="online/mp/edit_row" type="text" width="344" height="18" bitmap="online/item" font="online/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="online/lobby_text" string_index="2">
 		<on event="a start" open="ui\shell\main_menu\settings_select\multiplayer_setup\playlist_select\gametype_select_screen" />
 	</widget>
-	<widget name="online/mp/browse_online" type="text" width="344" height="18" bitmap="online/item" font="online/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="h3/mp_text" string_index="2">
-		<on event="a start" run="port h3 browse system link" />
-		<on event="a start" run="error if no network connection" open="ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen" />
-	</widget>
-	<widget name="online/mp/browse_link" type="text" width="344" height="18" bitmap="online/item" font="online/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="h3/mp_text" string_index="2">
-		<on event="a start" run="port h3 browse system link" />
-		<on event="a start" run="error if no network connection" open="ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen" />
-	</widget>
-	<widget name="online/mp/browse_adhoc" type="text" width="344" height="18" bitmap="online/item" font="online/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="h3/mp_text" string_index="2">
-		<on event="a start" run="port h3 adhoc browse" otherwise="h3/adhoc/joining" />
-		<on event="a start" run="error if no network connection" open="ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen" />
-	</widget>
 	<widget name="online/mp/code_row" type="text" width="344" height="18" bitmap="online/item" font="online/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="h3/mp_text" string_index="3">
 		<on event="a start" run="port mp require online" open="h3/code/screen" otherwise="h3/mp/offline" />
 	</widget>
@@ -142,10 +130,8 @@ and the map's picture and description in a card at the right. The art is this fo
 		<child widget="online/mp/start_adhoc" x="0" y="81" />
 		<child widget="online/mp/start_offline" x="0" y="81" />
 		<child widget="online/mp/edit_row" x="0" y="100" />
-		<child widget="online/mp/browse_online" x="0" y="119" />
-		<child widget="online/mp/browse_link" x="0" y="119" />
-		<child widget="online/mp/browse_adhoc" x="0" y="119" />
-		<child widget="online/mp/code_row" x="0" y="138" />
+		<!-- (no BROWSE GAMES: the main menu's SERVER BROWSER, owner) -->
+		<child widget="online/mp/code_row" x="0" y="119" />
 	</widget>
 	<widget name="online/mp/panel" left="-54" top="62" width="344" height="386" bitmap="online/panel" />
 	<widget name="online/mp/band" left="-54" top="225" width="344" height="1" bitmap="online/rule" />
