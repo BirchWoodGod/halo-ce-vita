@@ -31,3 +31,4 @@ online/main.xml
 online/customize.xml
 online/title.xml
 online/multiplayer.xml
+online/campaign.xml

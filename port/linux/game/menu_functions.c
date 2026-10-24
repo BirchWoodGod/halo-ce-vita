@@ -5602,9 +5602,10 @@ static void online_switch_update(struct widget_instance *list)
 	}
 	if (online_switch.open && focused == NONE && first)
 	{
-		/* (opened: on the lobby it is, MULTIPLAYER or FORGE) */
+		/* (opened: on the lobby it is, MULTIPLAYER, FORGE or CAMPAIGN) */
 		char const *screen_name = tag_get_name(screen->definition_tag_index);
-		short current = screen_name && strstr(screen_name, "\\forge\\") ? 1 : 0;
+		short current = screen_name && strstr(screen_name, "\\forge\\") ? 1 :
+			screen_name && strstr(screen_name, "\\campaign\\") ? 2 : 0;
 
 		snprintf(name, sizeof(name), "switch_%d", current);
 		focus = named(list, name);
