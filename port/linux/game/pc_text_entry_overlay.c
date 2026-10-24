@@ -36,6 +36,9 @@ interface.c's overlays call pc_text_entry_overlay_draw each frame, last.
 
 #include "pc_text_entry_overlay.h"
 
+int halo_menu_style_online(void);
+long halo_screen_width(void);
+
 #include <string.h>
 
 unsigned long system_milliseconds(void);
@@ -384,8 +387,36 @@ void pc_text_entry_overlay_draw(
 	panel.x1 = (short)(left + PANEL_WIDTH);
 	panel.y0 = top;
 	panel.y1 = (short)(top + height);
-	draw_quad(&panel, COLOR_PANEL);
-	frame_rectangle(&panel, COLOR_PANEL_EDGE);
+	/* (Menu style ElDewrito: a band the screen's whole width, as its
+	screens' header and foot are, the box's contents in its middle) */
+	if (halo_menu_style_online())
+	{
+		rectangle2d band = panel;
+		/* (the screen's own edges: the overlays draw in the 640 columns,
+		centered on a wider screen) */
+		short extra = (short)((halo_screen_width() - 640) / 2);
+
+		bounds.x0 = (short)(bounds.x0 - extra);
+		bounds.x1 = (short)(bounds.x1 + extra);
+		draw_quad(&bounds, COLOR_DIM);
+
+		band.x0 = bounds.x0;
+		band.x1 = bounds.x1;
+		band.y0 = (short)(panel.y0 - 10);
+		band.y1 = (short)(panel.y1 + 10);
+		draw_quad(&band, COLOR_PANEL);
+		rule = band;
+		rule.y1 = (short)(rule.y0 + 2);
+		draw_quad(&rule, COLOR_PANEL_EDGE);
+		rule.y0 = (short)(band.y1 - 2);
+		rule.y1 = band.y1;
+		draw_quad(&rule, COLOR_PANEL_EDGE);
+	}
+	else
+	{
+		draw_quad(&panel, COLOR_PANEL);
+		frame_rectangle(&panel, COLOR_PANEL_EDGE);
+	}
 
 	/* the title and the count */
 	where.x0 = (short)(panel.x0 + PANEL_MARGIN);
@@ -402,8 +433,8 @@ void pc_text_entry_overlay_draw(
 	where.y1 = (short)(where.y0 + font_height(small_font) + 4);
 	draw_text(small_font, 1, view.refused_ms && now - view.refused_ms < REFUSED_FLASH_MS ? &color_refused :
 		&color_dim_text, &where, text);
-	rule.x0 = panel.x0;
-	rule.x1 = panel.x1;
+	rule.x0 = halo_menu_style_online() ? bounds.x0 : panel.x0;
+	rule.x1 = halo_menu_style_online() ? bounds.x1 : panel.x1;
 	rule.y0 = (short)(panel.y0 + 44);
 	rule.y1 = (short)(rule.y0 + 2);
 	draw_quad(&rule, COLOR_RULE);
@@ -426,11 +457,14 @@ void pc_text_entry_overlay_draw(
 	}
 
 	/* the strip of the buttons that work */
-	strip.x0 = (short)(panel.x0 + 1);
-	strip.x1 = (short)(panel.x1 - 1);
+	strip.x0 = (short)(halo_menu_style_online() ? bounds.x0 : panel.x0 + 1);
+	strip.x1 = (short)(halo_menu_style_online() ? bounds.x1 : panel.x1 - 1);
 	strip.y1 = (short)(panel.y1 - 1);
 	strip.y0 = (short)(strip.y1 - STRIP_HEIGHT);
 	draw_quad(&strip, COLOR_STRIP);
+	/* (its hints where the box's contents are) */
+	strip.x0 = (short)(panel.x0 + 1);
+	strip.x1 = (short)(panel.x1 - 1);
 	draw_hints(&view, &strip, small_font);
 }
 
