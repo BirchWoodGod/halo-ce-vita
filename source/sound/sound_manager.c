@@ -3054,6 +3054,25 @@ static void update_channel_for_looping_sound(
 			definition->one_gain_modifier,
 			scale) *
 		sound->source.gain * fade;
+#ifdef HALO_LINUX
+	/* (debug) HALO_SOUND_TRACE=2: each looping sound's gain and what makes
+	it, once a second */
+	{
+		static int trace = -1;
+		static unsigned long said_at;
+
+		if (trace < 0)
+			trace = getenv("HALO_SOUND_TRACE") ? atoi(getenv("HALO_SOUND_TRACE")) : 0;
+		if (trace >= 2 && system_milliseconds() - said_at > 1000)
+		{
+			said_at = system_milliseconds();
+			platform_log("sound trace: loop %s class %d gain %.3f (class %.3f, nondialog %.3f, track %.3f, source %.3f, "
+				"fade %.3f, spatialization %d)", tag_get_name(sound->definition_index), definition->sound_class,
+				properties.gain, sound_class_get_gain(definition->sound_class), sound_manager_globals.nondialog_gain,
+				track->gain, sound->source.gain, fade, sound->source.spatialization_mode);
+		}
+	}
+#endif
 
 	if (sound->playing_channel_index == NONE)
 	{
@@ -4106,6 +4125,10 @@ void sound_idle(
 	return;
 }
 
+#ifdef HALO_LINUX
+int menu_backdrop_active(void);
+#endif
+
 static void refresh_listener(
 	void)
 {
@@ -4124,7 +4147,14 @@ static void refresh_listener(
 	{
 		listener = listener_get(local_player_index);
 
-		if (local_player_get_player_index(local_player_index) != NONE)
+		if (local_player_get_player_index(local_player_index) != NONE
+#ifdef HALO_LINUX
+			/* port: the main menu's live backdrop (port/linux/game/
+			menu_backdrop.c): its camera the first listener, no player
+			there, so that the level's ambience is heard where it looks */
+			|| (local_player_index == 0 && menu_backdrop_active())
+#endif
+			)
 		{
 			struct observer_result const *camera =
 				observer_get_camera(local_player_index);

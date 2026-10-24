@@ -626,6 +626,13 @@ void scenario_tags_unload(
 	sound_cache_close();
 	texture_cache_close();
 #ifdef HALO_LINUX
+	/* port: the menus' live backdrop let go, ui.map's scenario as it was,
+	before the packs it was of (port/linux/game/menu_backdrop.c) */
+	{
+		extern void menu_backdrop_unloaded(void);
+
+		menu_backdrop_unloaded();
+	}
 	/* port: the scene packs loaded beside the map go, their table before
 	them back (port/linux/game/scene_packs.c), before the menus' */
 	{
@@ -1570,6 +1577,14 @@ long scenario_tags_load(
 			them, and its Ogg Vorbis sounds' sound cache file opened on the
 			decoding thread: custom_edition_sounds.c) */
 			custom_edition_sounds_map_loaded();
+			/* (port: MCC's own ui.map as the menus' map: the PC menus' XML
+			screens are built into its tags as an Xbox ui.map's are) */
+			if (!csstrcasecmp(stripped_scenario_name, "ui"))
+			{
+				extern void menu_tags_loaded(char const *map_name);
+
+				menu_tags_loaded(stripped_scenario_name);
+			}
 		}
 		else
 		{
@@ -1759,6 +1774,22 @@ boolean scenario_structure_bsp_load(
 #endif
 	/* port: the bsp's header, once read and checked */
 	struct cache_file_structure_bsp_header *structure_bsp_header;
+
+#ifdef HALO_LINUX
+	/* port: the menus' live backdrop's bsp (port/linux/game/menu_backdrop.c),
+	a scene pack's: nothing read, its header the backdrop's */
+	{
+		extern int menu_backdrop_structure_bsp_load(struct scenario_structure_bsp_reference const *reference,
+			void **header);
+		void *backdrop_header = NULL;
+
+		if (menu_backdrop_structure_bsp_load(reference, &backdrop_header))
+		{
+			cache_file_globals.structure_bsp_header = backdrop_header;
+			return backdrop_header != NULL;
+		}
+	}
+#endif
 
 	/* port (from OpenCE, MrBruh's "Harden map and network input"): the tag
 	data's size was checked as the map loaded (cache_file_header_verify);
@@ -2021,6 +2052,19 @@ void scenario_structure_bsp_unload(
 	if (custom_edition_cache_tags_loaded())
 	{
 		custom_edition_structure_bsp_unload();
+	}
+#endif
+#ifdef HALO_LINUX
+	/* port: the menus' live backdrop's bsp keeps its root: its pack's
+	(port/linux/game/menu_backdrop.c) */
+	{
+		extern int menu_backdrop_structure_bsp_is(struct scenario_structure_bsp_reference const *reference);
+
+		if (menu_backdrop_structure_bsp_is(reference))
+		{
+			cache_file_globals.structure_bsp_header = NULL;
+			return;
+		}
 	}
 #endif
 	tag_instance = cache_get_tag_instance(reference->structure_bsp.index);

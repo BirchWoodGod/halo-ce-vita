@@ -119,7 +119,13 @@ loaded map already (its pack would bring none of its objects) */
 boolean scene_packs_recipe_covered(
 	char const *name);
 
-/* the same, loaded before this returns if it can be at all (built now if
+/* whether a wanted pack is built already, its file a current one (its
+recipe, builder and source map as they are): loading it takes no build,
+which takes a Vita minutes. FALSE if it was not wanted */
+boolean scene_packs_file_current(
+	char const *name);
+
+/* the pack wanted (scene_packs_want), loaded before this returns if it can be at all (built now if
 it must be, which takes a while): TRUE if it is loaded */
 boolean scene_packs_load_now(
 	char const *name);

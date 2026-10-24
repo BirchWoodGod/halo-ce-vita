@@ -1,0 +1,261 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Menu style ElDewrito (online): the SERVER BROWSER, Halo Online's way (our own art and layout): the
+title large at the top left, the count at the right; the networks as tabs - ONLINE, SYSTEM LINK, AD HOC,
+L and R change them (the connection itself, as HOST SETTINGS and the settings panel's Connection set
+it: menu_functions.c online_browser_network_step) -; under them, on ONLINE, the filters - ALL, VITA, PC,
+SERVERS (dedicated servers), BOTS (games with bots) -, the D-pad's left and right; the columns' header,
+the games (the LAN browser's rows, h3/lan: the System Link list's and, Online, the public games), and at
+the right the chosen game's card - its map's picture, its name, what it plays, its players and rules -;
+the hints at the foot. It stands for h3/lan/screen (menu_tags.c: online/ for h3/) with the same
+functions ("port h3 lan ...", "port browser ..."). -->
+<menus>
+	<strings name="online/browser_text">
+		<string text="SERVER BROWSER"/>
+		<string text="ONLINE"/>
+		<string text="SYSTEM LINK"/>
+		<string text="AD HOC"/>
+		<string text="ALL"/>
+		<string text="VITA"/>
+		<string text="PC"/>
+		<string text="SERVERS"/>
+		<string text="BOTS"/>
+		<string text="NAME"/>
+		<string text="GAME TYPE"/>
+		<string text="MAP"/>
+		<string text="PLAYERS"/>
+		<string text="Join"/>
+		<string text="Refresh"/>
+		<string text="Sort"/>
+		<string text="Network"/>
+		<string text="Filter"/>
+		<string text="Back"/>
+		<string text="RULES"/>
+	</strings>
+	<widget name="online/lan/haze" left="-80" top="0" width="800" height="480" bitmap="online/haze_light"/>
+	<widget name="online/lan/title" type="text" left="-60" top="10" width="400" height="34" font="online/font_header" color="#FFF2F6FA" string_list="online/browser_text" string_index="0"/>
+	<widget name="online/lan/browser_status" type="text" left="320" top="24" width="390" height="18" align="right" font="online/font_small" color="#FFC4D2E2" text_y="1"/>
+	<widget name="online/lan/net_tab_0" left="-68" top="52" width="118" height="24" bitmap="online/tab"/>
+	<widget name="online/lan/net_label_0" type="text" left="-60" top="52" width="104" height="24" font="online/font_tab" color="#FFE8EEF6" text_y="4" string_list="online/browser_text" string_index="1"/>
+	<widget name="online/lan/net_tab_1" left="50" top="52" width="118" height="24" bitmap="online/tab"/>
+	<widget name="online/lan/net_label_1" type="text" left="58" top="52" width="104" height="24" font="online/font_tab" color="#FFE8EEF6" text_y="4" string_list="online/browser_text" string_index="2"/>
+	<widget name="online/lan/net_tab_2" left="168" top="52" width="118" height="24" bitmap="online/tab"/>
+	<widget name="online/lan/net_label_2" type="text" left="176" top="52" width="104" height="24" font="online/font_tab" color="#FFE8EEF6" text_y="4" string_list="online/browser_text" string_index="3"/>
+	<widget name="online/lan/filter_0" type="text" left="-60" top="82" width="52" height="16" font="online/font_small" color="#FFC4D2E2" text_x="6" text_y="1" string_list="online/browser_text" string_index="4"/>
+	<widget name="online/lan/filter_1" type="text" left="-2" top="82" width="56" height="16" font="online/font_small" color="#FFC4D2E2" text_x="6" text_y="1" string_list="online/browser_text" string_index="5"/>
+	<widget name="online/lan/filter_2" type="text" left="60" top="82" width="44" height="16" font="online/font_small" color="#FFC4D2E2" text_x="6" text_y="1" string_list="online/browser_text" string_index="6"/>
+	<widget name="online/lan/filter_3" type="text" left="110" top="82" width="80" height="16" font="online/font_small" color="#FFC4D2E2" text_x="6" text_y="1" string_list="online/browser_text" string_index="7"/>
+	<widget name="online/lan/filter_4" type="text" left="196" top="82" width="56" height="16" font="online/font_small" color="#FFC4D2E2" text_x="6" text_y="1" string_list="online/browser_text" string_index="8"/>
+	<widget name="online/lan/filter_bar_0" left="-60" top="81" width="52" height="18" bitmap="online/tab"/>
+	<widget name="online/lan/filter_bar_1" left="-2" top="81" width="56" height="18" bitmap="online/tab"/>
+	<widget name="online/lan/filter_bar_2" left="60" top="81" width="44" height="18" bitmap="online/tab"/>
+	<widget name="online/lan/filter_bar_3" left="110" top="81" width="80" height="18" bitmap="online/tab"/>
+	<widget name="online/lan/filter_bar_4" left="196" top="81" width="56" height="18" bitmap="online/tab"/>
+	<widget name="online/lan/band" left="-60" top="102" width="480" height="20" bitmap="online/backing"/>
+	<widget name="online/lan/header_name" type="text" left="-2" top="104" width="150" height="16" font="online/font_small" color="#FF9FB6CC" string_list="online/browser_text" string_index="9"/>
+	<widget name="online/lan/header_game" type="text" left="150" top="104" width="80" height="16" font="online/font_small" color="#FF9FB6CC" string_list="online/browser_text" string_index="10"/>
+	<widget name="online/lan/header_map" type="text" left="232" top="104" width="110" height="16" font="online/font_small" color="#FF9FB6CC" string_list="online/browser_text" string_index="11"/>
+	<widget name="online/lan/header_players" type="text" left="344" top="104" width="70" height="16" align="right" font="online/font_small" color="#FF9FB6CC" string_list="online/browser_text" string_index="12"/>
+	<widget name="online/lan/row_badge" left="4" top="1" width="52" height="16" bitmap="h3/badge"/>
+	<widget name="online/lan/row_name" type="text" left="58" top="0" width="150" height="18" font="online/font_item" color="#FFF0F4F8" text_y="2"/>
+	<widget name="online/lan/row_game" type="text" left="210" top="0" width="80" height="18" font="online/font_small" color="#FFC4D2E2" text_y="3"/>
+	<widget name="online/lan/row_map" type="text" left="292" top="0" width="110" height="18" font="online/font_small" color="#FFC4D2E2" text_y="3"/>
+	<widget name="online/lan/row_players" type="text" left="404" top="0" width="70" height="18" align="right" font="online/font_small" color="#FFC4D2E2" text_y="3"/>
+	<widget name="online/lan/row_1" width="480" height="18" bitmap="online/item">
+		<on event="a start" run="port browser join"/>
+		<child widget="online/lan/row_badge"/>
+		<child widget="online/lan/row_name"/>
+		<child widget="online/lan/row_game"/>
+		<child widget="online/lan/row_map"/>
+		<child widget="online/lan/row_players"/>
+	</widget>
+	<widget name="online/lan/row_2" width="480" height="18" bitmap="online/item">
+		<on event="a start" run="port browser join"/>
+		<child widget="online/lan/row_badge"/>
+		<child widget="online/lan/row_name"/>
+		<child widget="online/lan/row_game"/>
+		<child widget="online/lan/row_map"/>
+		<child widget="online/lan/row_players"/>
+	</widget>
+	<widget name="online/lan/row_3" width="480" height="18" bitmap="online/item">
+		<on event="a start" run="port browser join"/>
+		<child widget="online/lan/row_badge"/>
+		<child widget="online/lan/row_name"/>
+		<child widget="online/lan/row_game"/>
+		<child widget="online/lan/row_map"/>
+		<child widget="online/lan/row_players"/>
+	</widget>
+	<widget name="online/lan/row_4" width="480" height="18" bitmap="online/item">
+		<on event="a start" run="port browser join"/>
+		<child widget="online/lan/row_badge"/>
+		<child widget="online/lan/row_name"/>
+		<child widget="online/lan/row_game"/>
+		<child widget="online/lan/row_map"/>
+		<child widget="online/lan/row_players"/>
+	</widget>
+	<widget name="online/lan/row_5" width="480" height="18" bitmap="online/item">
+		<on event="a start" run="port browser join"/>
+		<child widget="online/lan/row_badge"/>
+		<child widget="online/lan/row_name"/>
+		<child widget="online/lan/row_game"/>
+		<child widget="online/lan/row_map"/>
+		<child widget="online/lan/row_players"/>
+	</widget>
+	<widget name="online/lan/row_6" width="480" height="18" bitmap="online/item">
+		<on event="a start" run="port browser join"/>
+		<child widget="online/lan/row_badge"/>
+		<child widget="online/lan/row_name"/>
+		<child widget="online/lan/row_game"/>
+		<child widget="online/lan/row_map"/>
+		<child widget="online/lan/row_players"/>
+	</widget>
+	<widget name="online/lan/row_7" width="480" height="18" bitmap="online/item">
+		<on event="a start" run="port browser join"/>
+		<child widget="online/lan/row_badge"/>
+		<child widget="online/lan/row_name"/>
+		<child widget="online/lan/row_game"/>
+		<child widget="online/lan/row_map"/>
+		<child widget="online/lan/row_players"/>
+	</widget>
+	<widget name="online/lan/row_8" width="480" height="18" bitmap="online/item">
+		<on event="a start" run="port browser join"/>
+		<child widget="online/lan/row_badge"/>
+		<child widget="online/lan/row_name"/>
+		<child widget="online/lan/row_game"/>
+		<child widget="online/lan/row_map"/>
+		<child widget="online/lan/row_players"/>
+	</widget>
+	<widget name="online/lan/row_9" width="480" height="18" bitmap="online/item">
+		<on event="a start" run="port browser join"/>
+		<child widget="online/lan/row_badge"/>
+		<child widget="online/lan/row_name"/>
+		<child widget="online/lan/row_game"/>
+		<child widget="online/lan/row_map"/>
+		<child widget="online/lan/row_players"/>
+	</widget>
+	<widget name="online/lan/row_10" width="480" height="18" bitmap="online/item">
+		<on event="a start" run="port browser join"/>
+		<child widget="online/lan/row_badge"/>
+		<child widget="online/lan/row_name"/>
+		<child widget="online/lan/row_game"/>
+		<child widget="online/lan/row_map"/>
+		<child widget="online/lan/row_players"/>
+	</widget>
+	<widget name="online/lan/row_11" width="480" height="18" bitmap="online/item">
+		<on event="a start" run="port browser join"/>
+		<child widget="online/lan/row_badge"/>
+		<child widget="online/lan/row_name"/>
+		<child widget="online/lan/row_game"/>
+		<child widget="online/lan/row_map"/>
+		<child widget="online/lan/row_players"/>
+	</widget>
+	<widget name="online/lan/row_12" width="480" height="18" bitmap="online/item">
+		<on event="a start" run="port browser join"/>
+		<child widget="online/lan/row_badge"/>
+		<child widget="online/lan/row_name"/>
+		<child widget="online/lan/row_game"/>
+		<child widget="online/lan/row_map"/>
+		<child widget="online/lan/row_players"/>
+	</widget>
+	<widget name="online/lan/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port browser update"/>
+		<on event="x" run="port h3 lan refresh"/>
+		<on event="x" run="initialize net game server list"/>
+		<on event="y" run="port browser sort"/>
+		<on event="left_trigger" run="port online browser network previous"/>
+		<on event="right_trigger" run="port online browser network next"/>
+		<on event="left stick_left" run="port online browser filter previous"/>
+		<on event="right stick_right" run="port online browser filter next"/>
+		<on event="deleted" run="dispose net game server list"/>
+		<child widget="online/lan/row_1" x="-60" y="124"/>
+		<child widget="online/lan/row_2" x="-60" y="143"/>
+		<child widget="online/lan/row_3" x="-60" y="162"/>
+		<child widget="online/lan/row_4" x="-60" y="181"/>
+		<child widget="online/lan/row_5" x="-60" y="200"/>
+		<child widget="online/lan/row_6" x="-60" y="219"/>
+		<child widget="online/lan/row_7" x="-60" y="238"/>
+		<child widget="online/lan/row_8" x="-60" y="257"/>
+		<child widget="online/lan/row_9" x="-60" y="276"/>
+		<child widget="online/lan/row_10" x="-60" y="295"/>
+		<child widget="online/lan/row_11" x="-60" y="314"/>
+		<child widget="online/lan/row_12" x="-60" y="333"/>
+	</widget>
+	<widget name="online/lan/browser_message" type="text" left="-60" top="220" width="480" height="40" align="center" font="online/font_item" color="#FFF0B070" text_y="2"/>
+	<!-- the chosen game's card -->
+	<widget name="online/lan/card" left="430" top="102" width="280" height="330" bitmap="online/panel"/>
+	<widget name="online/lan/map_picture" left="440" top="110" width="140" height="114" bitmap="ui\shell\bitmaps\mp_map_grafix"/>
+	<widget name="online/lan/card_name" type="text" left="440" top="230" width="262" height="20" font="online/font_item" color="#FFF2F6FA" text_y="1"/>
+	<widget name="online/lan/card_info" type="text" left="440" top="250" width="262" height="34" font="online/font_small" color="#FFC4D2E2" text_y="1"/>
+	<widget name="online/lan/ticker_players_label" type="text" left="440" top="290" width="262" height="16" font="online/font_small" color="#FF9FB6CC" string_list="online/browser_text" string_index="12"/>
+	<widget name="online/lan/ticker_players_value" type="text" left="440" top="306" width="262" height="50" font="online/font_small" color="#FFDDE6F0"/>
+	<widget name="online/lan/ticker_rules_label" type="text" left="440" top="358" width="262" height="16" font="online/font_small" color="#FF9FB6CC" string_list="online/browser_text" string_index="19"/>
+	<widget name="online/lan/ticker_rules_value" type="text" left="440" top="374" width="262" height="50" font="online/font_small" color="#FFDDE6F0"/>
+	<!-- the foot -->
+	<widget name="online/lan/foot" left="0" top="446" width="640" height="34" bitmap="online/footer"/>
+	<widget name="online/lan/a_butn" left="-60" top="452" width="16" height="16" bitmap="h3/glyph_cross"/>
+	<widget name="online/lan/join" type="text" left="-40" top="451" width="60" height="18" font="online/font_item" color="#FFF0F4F8" text_y="1" string_list="online/browser_text" string_index="13"/>
+	<widget name="online/lan/x_butn" left="20" top="452" width="16" height="16" bitmap="h3/glyph_square"/>
+	<widget name="online/lan/refresh" type="text" left="40" top="451" width="70" height="18" font="online/font_item" color="#FFF0F4F8" text_y="1" string_list="online/browser_text" string_index="14"/>
+	<widget name="online/lan/y_butn" left="114" top="452" width="16" height="16" bitmap="h3/glyph_triangle"/>
+	<widget name="online/lan/sort" type="text" left="134" top="451" width="60" height="18" font="online/font_item" color="#FFF0F4F8" text_y="1" string_list="online/browser_text" string_index="15"/>
+	<widget name="online/lan/l_butn" left="196" top="452" width="16" height="16" bitmap="h3/glyph_l"/>
+	<widget name="online/lan/r_butn" left="214" top="452" width="16" height="16" bitmap="h3/glyph_r"/>
+	<widget name="online/lan/network" type="text" left="234" top="451" width="80" height="18" font="online/font_item" color="#FFF0F4F8" text_y="1" string_list="online/browser_text" string_index="16"/>
+	<widget name="online/lan/filter_butn" left="318" top="452" width="16" height="16" bitmap="h3/glyph_dpad_lr"/>
+	<widget name="online/lan/filter_hint" type="text" left="338" top="451" width="60" height="18" font="online/font_item" color="#FFF0F4F8" text_y="1" string_list="online/browser_text" string_index="17"/>
+	<widget name="online/lan/b_butn" left="400" top="452" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="online/lan/back" type="text" left="420" top="451" width="60" height="18" font="online/font_item" color="#FFF0F4F8" text_y="1" string_list="online/browser_text" string_index="18"/>
+	<widget name="online/lan/screen" flags="pass_unhandled_to_focused_child">
+		<on event="created" run="port h3 lan init"/>
+		<on event="created" run="initialize net game server list"/>
+		<on event="deleted" run="port h3 lan dispose"/>
+		<child widget="online/lan/haze"/>
+		<child widget="online/custom/header"/>
+		<child widget="online/lan/title"/>
+		<child widget="online/lan/browser_status"/>
+		<child widget="online/lan/net_tab_0"/>
+		<child widget="online/lan/net_label_0"/>
+		<child widget="online/lan/net_tab_1"/>
+		<child widget="online/lan/net_label_1"/>
+		<child widget="online/lan/net_tab_2"/>
+		<child widget="online/lan/net_label_2"/>
+		<child widget="online/lan/filter_bar_0"/>
+		<child widget="online/lan/filter_bar_1"/>
+		<child widget="online/lan/filter_bar_2"/>
+		<child widget="online/lan/filter_bar_3"/>
+		<child widget="online/lan/filter_bar_4"/>
+		<child widget="online/lan/filter_0"/>
+		<child widget="online/lan/filter_1"/>
+		<child widget="online/lan/filter_2"/>
+		<child widget="online/lan/filter_3"/>
+		<child widget="online/lan/filter_4"/>
+		<child widget="online/lan/band"/>
+		<child widget="online/lan/header_name"/>
+		<child widget="online/lan/header_game"/>
+		<child widget="online/lan/header_map"/>
+		<child widget="online/lan/header_players"/>
+		<child widget="online/lan/card"/>
+		<child widget="online/lan/map_picture"/>
+		<child widget="online/lan/card_name"/>
+		<child widget="online/lan/card_info"/>
+		<child widget="online/lan/ticker_players_label"/>
+		<child widget="online/lan/ticker_players_value"/>
+		<child widget="online/lan/ticker_rules_label"/>
+		<child widget="online/lan/ticker_rules_value"/>
+		<child widget="online/lan/browser_message"/>
+		<child widget="online/lan/foot"/>
+		<child widget="online/lan/a_butn"/>
+		<child widget="online/lan/join"/>
+		<child widget="online/lan/x_butn"/>
+		<child widget="online/lan/refresh"/>
+		<child widget="online/lan/y_butn"/>
+		<child widget="online/lan/sort"/>
+		<child widget="online/lan/l_butn"/>
+		<child widget="online/lan/r_butn"/>
+		<child widget="online/lan/network"/>
+		<child widget="online/lan/filter_butn"/>
+		<child widget="online/lan/filter_hint"/>
+		<child widget="online/lan/b_butn"/>
+		<child widget="online/lan/back"/>
+		<child widget="online/lan/list"/>
+	</widget>
+</menus>

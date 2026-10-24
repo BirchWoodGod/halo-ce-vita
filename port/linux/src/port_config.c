@@ -228,7 +228,21 @@ static const struct config_setting config_settings[] =
 	{ "paths.saves", _config_string, "\"\"", "HALO_SAVE_ROOT", _environment_value, _platform_desktop,
 		"Where saved games and profiles go; empty for the usual place\n"
 		"(~/.local/share/halo-linux, or %APPDATA%\\halo on Windows)." },
+	/* (port/linux/game/mcc_content.c, docs/mcc_cea_maps.md; the Vita's
+	settings panel's Halo content folder, Multiplayer > Modded maps) */
+	{ "paths.content", _config_string, "\"\"", "HALO_CONTENT_ROOT", _environment_value, _platform_all,
+		"The Halo content folder: your own Halo: The Master Chief Collection's\n"
+		"folder (the one holding halo1), whose maps are listed with the others\n"
+		"and played, each by the loader its file needs; empty finds it (Steam's\n"
+		"libraries; on the PS Vita ux0:data/haloce-vita/mcc). Without one, the\n"
+		"Xbox maps alone. Only read, never written." },
 
+	{ "paths.menu_source", _config_string, "\"\"", "HALO_MENU_SOURCE", _environment_value, _platform_all,
+		"Where the menus' map (ui.map) comes from: empty or \"auto\" uses the Xbox's\n"
+		"ui.map in the maps folder when there is one, else MCC's own\n"
+		"halo1/maps/ui.map from the Halo content folder (paths.content); \"xbox\"\n"
+		"only the Xbox's; \"mcc\" MCC's even when the Xbox's is there. MCC's menu\n"
+		"file is Halo PC's menus: some menu screens are not supported with it yet." },
 	{ "network.address", _config_string, "\"\"", "HALO_NET_ADDRESS", _environment_value, _platform_all,
 		"This machine's IPv4 address for system link, for a machine on several\n"
 		"networks; empty chooses one." },
@@ -402,8 +416,10 @@ static const struct config_setting config_settings[] =
 		"network.coop_players. The Vita's settings panel (Multiplayer, Play,\n"
 		"Max players) sets it." },
 	{ "menus.style", _config_string, "\"halo3\"", "HALO_MENU_STYLE", _environment_value, _platform_all,
-		"The menus: \"classic\" (Halo CE's own) or \"halo3\" (Halo 3-style screens\n"
-		"over the same animated Halo ring: port/vita/app0/menus/halo3). Read each\n"
+		"The menus: \"classic\" (Halo CE's own), \"halo3\" (Halo 3-style screens\n"
+		"over the same animated Halo ring: port/vita/app0/menus/halo3) or \"online\"\n"
+		"(shown as ElDewrito: the Halo 3 screens' flows, port/vita/app0/menus/online's look\n"
+		"for the screens it has). Read each\n"
 		"time a screen opens. The Vita's settings panel (Game, Menus, Menu\n"
 		"style) sets it." },
 	{ "menus.carnage_report", _config_string, "\"halo3\"", "HALO_CARNAGE_REPORT", _environment_value, _platform_all,
@@ -423,6 +439,17 @@ static const struct config_setting config_settings[] =
 		"campaign, multiplayer and Forge lobbies: their scene= in\n"
 		"port/vita/app0/menus/halo3), the main menu the ring's own flight;\n"
 		"false keeps the ring's flight behind every screen." },
+	{ "menus.backdrop", _config_boolean, "true", "HALO_MENU_BACKDROP", _environment_value, _platform_all,
+		"With Menu style ElDewrito (\"online\"), the campaign level Halo (a30) behind the menus,\n"
+		"a still camera at a spot of it for each screen (port/linux/game/\n"
+		"menu_backdrop.c), made once from the player's own a30.map into\n"
+		"t:\\packs; false (or no a30.map) keeps the ring. The Vita's settings\n"
+		"panel (Game, Menus, Live backdrop) sets it." },
+	{ "menus.backdrop_music", _config_string, "\"50\"", "HALO_MENU_MUSIC", _environment_value, _platform_all,
+		"With the live backdrop behind the menus (ElDewrito), the menu music's\n"
+		"level in percent (100, 70, 50, 25, 0), so that the level's own ambience -\n"
+		"its wind, birds, insects, the waterfall - comes through under it. The\n"
+		"Vita's settings panel (Sound, Menu music) sets it." },
 	{ "infection.players_per_zombie", _config_integer, "8", "HALO_INFECTION_ZOMBIES", _environment_value, _platform_all,
 		"Infection (port/linux/game/infection.c), the game's own Infection game\n"
 		"type as this machine hosts it: one first zombie for each this many\n"

@@ -3479,6 +3479,24 @@ static void event_handler_dispatch(
 	boolean close_current = FALSE;
 	boolean close_all = FALSE;
 
+#ifdef HALO_LINUX
+	/* (port, debug) HALO_UI_LOG=2: each handler that runs, with its function
+	and flags, to map another menu map's functions to this build's */
+	{
+		static int log_handlers = -1;
+
+		if (log_handlers < 0)
+			log_handlers = getenv("HALO_UI_LOG") ? atoi(getenv("HALO_UI_LOG")) : 0;
+		if (log_handlers >= 2)
+		{
+			void platform_log(const char *format, ...);
+
+			platform_log("ui: handler of %s: event %ld, function %ld%s, flags 0x%lX", tag_get_name(widget->definition_tag_index),
+				(long)handler->event_type, (long)handler->function,
+				TEST_FLAG(handler->flags, _event_handler_run_function_bit) ? "" : " (not run)", (unsigned long)handler->flags);
+		}
+	}
+#endif
 	if (TEST_FLAG(handler->flags, _event_handler_run_scenario_script_bit) &&
 		handler->script[0])
 	{
@@ -3494,6 +3512,16 @@ static void event_handler_dispatch(
 			&widget_deleted))
 	{
 		error(_error_silent, "event handler function failed");
+#ifdef HALO_LINUX
+		/* port: with MCC's own ui.map as the menus' map, a function of Halo
+		PC's own, which this build has none of, is said and told to the
+		player (port/linux/game/custom_edition_cache.c) */
+		{
+			extern void custom_edition_cache_menu_handler_failed(long definition_tag_index, long function_index);
+
+			custom_edition_cache_menu_handler_failed(widget->definition_tag_index, handler->function);
+		}
+#endif
 		function_failed = TRUE;
 	}
 	else
@@ -5746,6 +5774,16 @@ static void widget_instance_render_text_box(
 	{
 		color = get_ui_argb_white();
 		color_alpha = definition->text_color.alpha;
+#ifdef HALO_LINUX
+		/* (Menu style Online: the focused row's text white on its orange
+		bar, not the game's highlight tint) */
+		{
+			extern int halo_menu_style_online(void);
+
+			if (halo_menu_style_online())
+				color.red = color.green = color.blue = 1.0f;
+		}
+#endif
 	}
 	else
 	{
@@ -6925,6 +6963,30 @@ void render_ui_widgets(
 				offset.x = 0;
 				offset.y = 0;
 #ifdef HALO_LINUX
+				/* (Menu style Online: its screens reach into the wide
+				screen's margins, around the centered 640 columns: their
+				clip the whole screen, as the fade to black's) */
+				{
+					extern int halo_menu_style_online(void);
+					extern boolean pc_menu_tag(long tag_index);
+					void platform_log(char const *format, ...);
+
+					static short said_x1 = -1;
+
+					if (halo_menu_style_online() && bounds.x0 == 0 && halo_screen_width() > 640 &&
+						pc_menu_tag(widget_globals.active_widgets[widget_index]->definition_tag_index))
+					{
+						if (said_x1 != bounds.x1)
+						{
+							said_x1 = bounds.x1;
+							platform_log("ui: online menus' clip widened from 0-%d (screen %d)", (int)bounds.x1,
+								(int)halo_screen_width());
+						}
+						bounds.x0 = (short)(-(halo_screen_width() - 640) / 2);
+						if (bounds.x1 < 640 + (halo_screen_width() - 640) / 2)
+							bounds.x1 = (short)(640 + (halo_screen_width() - 640) / 2);
+					}
+				}
 				/* the mouse drives the first player's menus */
 				ui_mouse_noting_targets = widget->local_player_index == NONE ||
 					widget->local_player_index == 0;

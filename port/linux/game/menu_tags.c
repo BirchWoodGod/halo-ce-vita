@@ -60,6 +60,7 @@ is let go in scenario_tags_unload, before the next map's tags load.
 /* the platform layer's (port/linux/src) */
 void platform_log(char const *format, ...);
 void platform_heap_usage(unsigned long *in_use, unsigned long *capacity);
+int platform_halo_pc_resource_map(const char *maps_directory, const char *name, char *path, unsigned long path_size);
 void platform_contiguous_usage(unsigned long *used, unsigned long *free_bytes);
 unsigned long long vita_host_time_us(void);
 
@@ -127,6 +128,9 @@ their pickers...) */
 #define MAXIMUM_H3_SCREENS 64
 /* the Xbox screens' widgets Menu style Halo CE adds rows to (classic_patch=) */
 #define MAXIMUM_CLASSIC_PATCHES 32
+/* (Menu style Online: the menus/online widgets that stand for a Halo 3 set's
+widget of the same name under h3/) */
+#define MAXIMUM_ONLINE_SCREENS 512
 
 /* the layout of a bitmap tag and a string list tag held by a Custom Edition
 resource map (the item is the whole tag, its addresses counting from the
@@ -425,6 +429,15 @@ static char const *const port_function_names[] =
 	"port ce pregame init", "port ce variant next", "port ce custom",
 	"port h3 scoreboard act", "port h3 scoreboard option", "port h3 scoreboard close", "port h3 scoreboard page up",
 	"port h3 scoreboard page down",
+	"port online custom tab next", "port online custom tab previous", "port online exit",
+	"port online switch open", "port online switch close", "port online lobby leave",
+	"port online switch multiplayer", "port online switch forge", "port online switch campaign",
+	"port h3 profile current",
+	"port online profile choose", "port online profile delete ask",
+	"port online browser network next", "port online browser network previous",
+	"port online browser filter next", "port online browser filter previous",
+	"port host multiplayer", "port host forge", "port host campaign", "port host next", "port host previous",
+	"port host edit",
 };
 
 /* the port's game data functions (menu_functions.c), from
@@ -455,6 +468,8 @@ static char const *const port_game_data_input_names[] =
 	"port h3 dialog",
 	"port ce lobby", "port ce profile",
 	"port h3 scoreboard", "port h3 scoreboard options",
+	"port online version", "port online custom", "port online switch", "port online lobby",
+	"port host",
 };
 
 static struct
@@ -498,6 +513,13 @@ static struct
 	void *classic_original[MAXIMUM_CLASSIC_PATCHES];
 	void *classic_patched[MAXIMUM_CLASSIC_PATCHES];
 	int classic_applied;
+	/* Menu style Online (menus/online): each Halo 3 widget that has an
+	online/ widget of the same name, and that widget, which opens in its
+	place - the Halo 3 set's flows and functions, the online set's look */
+	long online_count;
+	long online_from[MAXIMUM_ONLINE_SCREENS];
+	long online_to[MAXIMUM_ONLINE_SCREENS];
+	boolean online_said[MAXIMUM_ONLINE_SCREENS];
 } menu_tags;
 
 /* the build under way */
@@ -1157,10 +1179,69 @@ static short read_short(byte const *data)
 	return (short)(data[0] | (data[1] << 8));
 }
 
+/* (a <font sharp=...>) the variant for the display's pixels per unit: the
+least of those at or above it (a few hundredths below counts), else the
+greatest; its scale times 1000 (0: none, the file itself) */
+static char const *font_sharp_variant(struct halo_menu_font const *source, char *path, int size, long *scale)
+{
+	char const *at = source->sharp;
+	float wanted = halo_ui_pixel_scale(), best = 0.0f, largest = 0.0f;
+	char largest_path[128] = "";
+
+	*scale = 0;
+	path[0] = 0;
+	/* (debug: HALO_SHARP_FONTS=0, the 640x480 fonts scaled up, as before) */
+	if (!at || wanted < 1.05f || (getenv("HALO_SHARP_FONTS") && !strcmp(getenv("HALO_SHARP_FONTS"), "0")))
+		return NULL;
+	while (*at)
+	{
+		char item[160];
+		size_t length;
+		char *colon;
+		float value;
+
+		at += strspn(at, " \t\r\n");
+		length = strcspn(at, " \t\r\n");
+		if (!length)
+			break;
+		snprintf(item, sizeof(item), "%.*s", (int)length, at);
+		at += length;
+		colon = strchr(item, ':');
+		if (!colon)
+			continue;
+		*colon = 0;
+		value = (float)atof(item);
+		if (value <= 1.0f)
+			continue;
+		if (value >= wanted - 0.03f && (!best || value < best))
+		{
+			best = value;
+			snprintf(path, size, "%s", colon + 1);
+		}
+		if (value > largest)
+		{
+			largest = value;
+			snprintf(largest_path, sizeof(largest_path), "%s", colon + 1);
+		}
+	}
+	if (!best && largest)
+	{
+		best = largest;
+		snprintf(path, size, "%s", largest_path);
+	}
+	if (!best)
+		return NULL;
+	*scale = (long)(best * 1000.0f + 0.5f);
+	return path;
+}
+
 static void *font_build(struct halo_menu_font const *source)
 {
 	unsigned long size = 0;
-	byte *data = halo_menus_file_read(source->path, &size);
+	char sharp_path[128];
+	long sharp_scale = 0;
+	char const *path = font_sharp_variant(source, sharp_path, sizeof(sharp_path), &sharp_scale);
+	byte *data = halo_menus_file_read(path ? path : source->path, &size);
 	struct font_header *font = NULL;
 	struct font_character_table *table;
 	short *indices;
@@ -1198,6 +1279,14 @@ static void *font_build(struct halo_menu_font const *source)
 		return font;
 	}
 	memset(font, 0, sizeof(*font));
+	/* (a sharp variant: its texels per unit, draw_string.c) */
+	if (sharp_scale)
+	{
+		font->pad[0] = 0x53485250L;
+		font->pad[1] = sharp_scale;
+		platform_log("menus: font %s drawn sharp: %s, %.3f texels a unit (the display %.3f pixels a unit)",
+			source->name, path, sharp_scale / 1000.0, halo_ui_pixel_scale());
+	}
 	font->ascending_height = read_short(data + 6);
 	font->descending_height = read_short(data + 8);
 	font->leading_height = read_short(data + 10);
@@ -1783,7 +1872,8 @@ static boolean menu_resource_open(struct menu_resource_file *file, char const *n
 	enum cache_file_status status;
 
 	memset(file, 0, sizeof(*file));
-	snprintf(path, sizeof(path), "%s%s.map", cache_files_map_directory(), name);
+	/* (the maps folder's, else the Halo content folder's custom_edition one) */
+	platform_halo_pc_resource_map(cache_files_map_directory(), name, path, sizeof(path));
 	file->handle = CreateFileA(path, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
 	if (file->handle == INVALID_HANDLE_VALUE)
 		return FALSE;
@@ -2301,7 +2391,8 @@ static void menu_tags_art_preread(void)
 	free(paths);
 }
 
-/* whether the maps folder has a bitmaps.map and a loc.map (a quick look:
+/* whether the maps folder (or the Halo content folder's custom_edition) has a
+bitmaps.map and a loc.map (a quick look:
 no file opened) */
 static boolean menu_resource_files_present(void)
 {
@@ -2313,7 +2404,7 @@ static boolean menu_resource_files_present(void)
 		char path[300];
 		DWORD attributes;
 
-		snprintf(path, sizeof(path), "%s%s.map", cache_files_map_directory(), names[index]);
+		platform_halo_pc_resource_map(cache_files_map_directory(), names[index], path, sizeof(path));
 		attributes = GetFileAttributesA(path);
 		if (attributes == (DWORD)-1 || (attributes & FILE_ATTRIBUTE_DIRECTORY))
 			return FALSE;
@@ -2600,6 +2691,34 @@ void menu_tags_loaded(
 		menu_tags.h3_replaces[menu_tags.h3_count] = screen->replaces;
 		menu_tags.h3_count++;
 	}
+	/* (the online set: an online/<name> widget stands for h3/<name>, when
+	Menu style is Online, as it opens: menu_tags_online) */
+	menu_tags.online_count = 0;
+	for (index = 0; index < widget_count; index++)
+	{
+		char const *name = menus->widgets[index].name;
+		char h3_name[160];
+		long h3_widget;
+
+		if (!name || strncmp(name, "online/", 7))
+			continue;
+		snprintf(h3_name, sizeof(h3_name), "h3/%s", name + 7);
+		if ((h3_widget = widget_named(h3_name)) == NONE)
+			continue;
+		if (menu_tags.online_count == MAXIMUM_ONLINE_SCREENS)
+		{
+			problem(menus->widgets[index].file, menus->widgets[index].line, "too many online widgets stand for "
+				"Halo 3 ones", name);
+			break;
+		}
+		menu_tags.online_said[menu_tags.online_count] = FALSE;
+		menu_tags.online_from[menu_tags.online_count] = build.widget_tags[h3_widget];
+		menu_tags.online_to[menu_tags.online_count] = build.widget_tags[index];
+		menu_tags.online_count++;
+	}
+	if (menu_tags.online_count)
+		platform_log("menus: online set: %ld widgets stand for Halo 3 ones (Menu style %s)", menu_tags.online_count,
+			halo_menu_style_online() ? "Online" : "not Online");
 	/* (debug: HALO_MENUS_DUMP_TAGS=<path>;<path>...: those screens of the
 	map's dumped as it loads, as HALO_MENUS_DUMP dumps one as it opens) */
 	if (getenv("HALO_MENUS_DUMP_TAGS"))
@@ -2753,6 +2872,33 @@ boolean menu_tags_bitmap_fits_widget(
 	return FALSE;
 }
 
+/* (Menu style Online) the online set's widget for a Halo 3 one, when it has
+one; else the tag itself. Read each time, as the Menu style is */
+static long menu_tags_online(
+	long tag_index)
+{
+	long index;
+
+	if (tag_index == NONE || !menu_tags.online_count || !halo_menu_style_online())
+		return tag_index;
+	for (index = 0; index < menu_tags.online_count; index++)
+	{
+		if (menu_tags.online_from[index] == tag_index)
+		{
+			/* (said once a load: the flows ask for their screens by name
+			every frame) */
+			if (!menu_tags.online_said[index])
+			{
+				menu_tags.online_said[index] = TRUE;
+				platform_log("menus: online screen %s for %s", tag_get_name(menu_tags.online_to[index]),
+					tag_get_name(tag_index));
+			}
+			return menu_tags.online_to[index];
+		}
+	}
+	return tag_index;
+}
+
 /* (ui_widget_load_by_name_or_tag) a screen the game opens: ours in place of
 the Xbox's Multiplayer screen (the Halo PC pictures and text read the first
 time), and those menu_functions.c's flows replace; else the tag itself */
@@ -2819,7 +2965,7 @@ long menu_tags_screen(
 				return tag_index;
 			}
 			platform_log("menus: Halo 3 screen %s for %s", menu_tags.h3_root[index], menu_tags.h3_replaces[index]);
-			return menu_tags.h3_to[index];
+			return menu_tags_online(menu_tags.h3_to[index]);
 		}
 	}
 	/* (a level's map has no Multiplayer screen: NONE) */
@@ -2845,9 +2991,9 @@ long menu_tags_screen(
 
 		if (replaced != tag_index && replaced != NONE && halo_menu_style_halo3())
 			return menu_tags_screen(replaced);
-		return replaced;
+		return menu_tags_online(replaced);
 	}
-	return tag_index;
+	return menu_tags_online(tag_index);
 }
 
 /* (forge.c) a screen of the set built into the loaded map, by its widget's
@@ -2875,7 +3021,7 @@ long menu_tags_ingame_screen(
 		return NONE;
 	if (!menu_tags.art)
 		menu_tags.art = menu_tags_art_load() ? 1 : -1;
-	return menu_tags.art > 0 ? tag_index : NONE;
+	return menu_tags.art > 0 ? menu_tags_online(tag_index) : NONE;
 }
 
 boolean pc_menu_tag(

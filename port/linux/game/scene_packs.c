@@ -547,34 +547,40 @@ static unsigned char *tag_cache_room(unsigned char **room_end)
 /* the slot's pack file checked against its recipe and source map now (its
 header, scene_pack_open; its source map, the one it was built from, still
 one of the recipe's and of the same identity): TRUE if it may be loaded */
-static boolean pack_current(struct scene_pack_slot *slot)
+static boolean pack_current_into(struct scene_pack_slot const *slot, struct scene_pack_info *info, char *why,
+	long why_size)
 {
 	unsigned long long source_hash;
 	char map[SCENE_PACK_NAME_SIZE];
 
-	if (!scene_pack_open(slot->path, &slot->info, slot->why, sizeof(slot->why)))
+	if (!scene_pack_open(slot->path, info, why, why_size))
 		return FALSE;
-	if (slot->info.recipe_hash != slot->recipe->hash || slot->info.builder_version != SCENE_PACK_BUILDER_VERSION)
+	if (info->recipe_hash != slot->recipe->hash || info->builder_version != SCENE_PACK_BUILDER_VERSION)
 	{
-		snprintf(slot->why, sizeof(slot->why), "its recipe or builder changed");
+		snprintf(why, (size_t)why_size, "its recipe or builder changed");
 		return FALSE;
 	}
 	/* (an Xbox map's: any of the recipe's maps it was built from, as it was;
 	a Custom Edition map's: the first there of the identity it gives) */
 	if (slot->recipe->custom_edition_map_count ?
 		(!scene_pack_source_check(slot->recipe, cache_files_map_directory(), map, sizeof(map), &source_hash, NULL, 0) ||
-			strcmp(map, slot->info.source_map)) :
-		!scene_pack_source_identity(slot->recipe, cache_files_map_directory(), slot->info.source_map, &source_hash))
+			strcmp(map, info->source_map)) :
+		!scene_pack_source_identity(slot->recipe, cache_files_map_directory(), info->source_map, &source_hash))
 	{
-		snprintf(slot->why, sizeof(slot->why), "its source map changed");
+		snprintf(why, (size_t)why_size, "its source map changed");
 		return FALSE;
 	}
-	if (source_hash != slot->info.source_hash)
+	if (source_hash != info->source_hash)
 	{
-		snprintf(slot->why, sizeof(slot->why), "its source map changed");
+		snprintf(why, (size_t)why_size, "its source map changed");
 		return FALSE;
 	}
 	return TRUE;
+}
+
+static boolean pack_current(struct scene_pack_slot *slot)
+{
+	return pack_current_into(slot, &slot->info, slot->why, sizeof(slot->why));
 }
 
 static void stamp_remove(struct scene_pack_slot const *slot);
@@ -681,6 +687,39 @@ ready, or failed (its why). only_first: the first slot's group alone, the
 others left needing it (*left: how many). shared: a map the most others
 also name chosen first (a prebuild's: one read for them all), else the
 first slot's own choice (a pack wanted now: no larger read for it) */
+/* (the menus' backdrop's build) a big buffer - its source map's tag data,
+its structure bsp, the pack it makes - in the memory window (the physical
+memory the game's caches come from), which has room at the main menu, not
+the C heap the system's libraries share, which on the Vita has not: NULL
+(then the C heap) for a small one or when the window has no room */
+enum
+{
+	PACK_WINDOW_MINIMUM = 256 * 1024,
+	PACK_WINDOW_PAGE = 4096
+};
+
+void *platform_contiguous_alloc(unsigned long size, unsigned long alignment, unsigned long physical_address, DWORD protect);
+void platform_contiguous_free(void *address);
+BOOL platform_is_contiguous(const void *address);
+
+static void *pack_window_alloc(unsigned long size)
+{
+	if (size < PACK_WINDOW_MINIMUM)
+		return NULL;
+	size = (size + PACK_WINDOW_PAGE - 1) & ~(unsigned long)(PACK_WINDOW_PAGE - 1);
+	/* (0xFFFFFFFF: anywhere; 4: PAGE_READWRITE) */
+	return platform_contiguous_alloc(size, PACK_WINDOW_PAGE, 0xFFFFFFFFUL, 4);
+}
+
+static void pack_window_free(void *data, unsigned long size)
+{
+	(void)size;
+	if (data && platform_is_contiguous(data))
+		platform_contiguous_free(data);
+	else
+		free(data);
+}
+
 static void packs_prepare(struct scene_pack_slot **slots, short count, unsigned char *scratch, unsigned long scratch_size,
 	boolean only_first, boolean shared, short *left)
 {
@@ -766,8 +805,27 @@ static void packs_prepare(struct scene_pack_slot **slots, short count, unsigned 
 				need[index] = NULL;
 			}
 		}
+		/* (the menus' backdrop's build - its structure bsp and the pack it
+		makes, 10 MB and more - in the memory window, which has room at the
+		main menu, not the C heap, which on the Vita has not) */
+		for (index = 0; index < group_count && !recipes[index]->backdrop; index++)
+			;
+		if (index < group_count)
+		{
+			scene_pack_big_alloc = pack_window_alloc;
+			scene_pack_big_free = pack_window_free;
+		}
+		/* (a source map's tag data larger than the tag cache's free room -
+the menus' backdrop loaded beside the menus takes 8.7 MB of it - read into
+the memory window, not the C heap) */
+		scene_pack_scratch_alloc = pack_window_alloc;
+		scene_pack_scratch_free = pack_window_free;
 		built = scene_pack_build_many(recipes, group_count, map, cache_files_map_directory(), paths, scratch, scratch_size,
 			&scene_packs.cancel, scene_packs_build_results);
+		scene_pack_scratch_alloc = NULL;
+		scene_pack_scratch_free = NULL;
+		scene_pack_big_alloc = NULL;
+		scene_pack_big_free = NULL;
 		(void)built;
 		for (index = 0; index < group_count; index++)
 		{
@@ -934,7 +992,7 @@ static void pack_stage(struct scene_pack_slot *slot, unsigned char *room, unsign
 	unsigned long long started = vita_host_time_us();
 	FILE *file;
 	long count;
-	boolean data_checked;
+	boolean data_checked, loaded;
 
 	slot->full = slot->refused = FALSE;
 	file = fopen(slot->path, "rb");
@@ -965,7 +1023,12 @@ static void pack_stage(struct scene_pack_slot *slot, unsigned char *room, unsign
 		return;
 	}
 	data_checked = stamp_valid(slot);
-	if (!scene_pack_load_file_checked(file, &slot->info, room, data_checked, slot->why, sizeof(slot->why)))
+	/* (the menus' backdrop's holds a structure bsp and a scenario's copy:
+	menu_backdrop.c) */
+	tag_validate_pack_allow_structure(slot->recipe->backdrop);
+	loaded = scene_pack_load_file_checked(file, &slot->info, room, data_checked, slot->why, sizeof(slot->why));
+	tag_validate_pack_allow_structure(FALSE);
+	if (!loaded)
 	{
 		fclose(file);
 		csmemset(room, 0xCD, slot->info.tags_size);
@@ -1863,6 +1926,24 @@ boolean scene_packs_recipe_covered(
 	if (recipe)
 		free(recipe);
 	return covered;
+}
+
+boolean scene_packs_file_current(
+	char const *name)
+{
+	struct scene_pack_slot *slot = name ? slot_find(name) : NULL;
+	struct scene_pack_info info;
+	char why[SCENE_PACK_WHY_SIZE];
+	short state;
+
+	if (!slot)
+		return FALSE;
+	state = state_get(slot);
+	if (state == _scene_pack_state_ready || state == _scene_pack_state_loaded)
+		return TRUE;
+	/* (the slot's own fields are the worker's while it checks or builds the
+	pack: its file read here into locals, and the recipe, read only) */
+	return pack_current_into(slot, &info, why, sizeof(why));
 }
 
 boolean scene_packs_load_now(

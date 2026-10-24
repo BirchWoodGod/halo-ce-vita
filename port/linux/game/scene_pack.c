@@ -104,6 +104,37 @@ enum
 	/* the pack's tags' salts before they are the game's (scene_pack_rebase) */
 	PACK_FIRST_SALT = 0x1000,
 
+	/* (a backdrop's) a structure bsp's header (cache_files.c's struct
+	cache_file_structure_bsp_header: its root, its vertex buffers, its
+	lightmaps' vertex buffers, a signature), a material's (structure_material:
+	its vertices' type and count, their buffer's header; the same for its
+	lightmap vertices), a scenario's blocks it keeps (scenario_definitions.h)
+	and a scenario object's (scenario_object_datum: its name's index) */
+	BSP_HEADER_SIZE = 24,
+	BSP_HEADER_SIGNATURE = 'sbsp',
+	BSP_MATERIAL_SIZE = 0x100,
+	BSP_MATERIAL_VERTEX_TYPE = 0xB0,
+	BSP_MATERIAL_VERTEX_COUNT = 0xB4,
+	BSP_MATERIAL_VERTEX_HARDWARE = 0xC0,
+	BSP_MATERIAL_LIGHTMAP_VERTEX_TYPE = 0xC4,
+	BSP_MATERIAL_LIGHTMAP_VERTEX_COUNT = 0xC8,
+	BSP_MATERIAL_LIGHTMAP_VERTEX_HARDWARE = 0xD4,
+	BSP_MAXIMUM_MATERIAL_VERTICES = 0x10000,
+	SCENARIO_ROOT_SIZE = 0x5B0,
+	SCENARIO_SKIES = 0x30,
+	SCENARIO_SCENERY = 0x210,
+	SCENARIO_SCENERY_PALETTE = 0x21C,
+	SCENARIO_DETAIL_OBJECT_PALETTE = 0x3C0,
+	/* (object_types.c's sound_scenery_data_definition: its block, palette
+	and element) */
+	SCENARIO_SOUND_SCENERY = 0x2DC,
+	SCENARIO_SOUND_SCENERY_PALETTE = 0x2E8,
+	SCENARIO_SOUND_SCENERY_SIZE = 0x28,
+	SCENARIO_STRUCTURE_BSPS = 0x5A4,
+	SCENARIO_BSP_REFERENCE_SIZE = 0x20,
+	SCENARIO_SCENERY_SIZE = 0x48,
+	SCENARIO_OBJECT_NAME_INDEX = 2,
+
 	/* the reads' and writes' bounce (and the inflate's input) */
 	BOUNCE_SIZE = 64 * 1024,
 
@@ -301,6 +332,8 @@ struct build_state
 	unsigned char *blob;
 	unsigned long blob_size;
 	unsigned long blob_capacity;
+	boolean blob_big;   /* (scene_pack_big_alloc's) */
+	void (*blob_free)(void *data, unsigned long size);   /* (its own: the hook's when it was made) */
 
 	struct build_extent *extents;
 	long extent_count;
@@ -322,6 +355,20 @@ struct build_state
 	long range_fixup_capacity;
 
 	unsigned short model_part_layout;
+	/* (a backdrop's: scene_pack_backdrop_prepare) the structure bsp it
+	holds, read from the source's bsp section to bsp (bsp_size bytes, at
+	its Xbox address bsp_address), its tag (the source's index), its
+	header's buffers, and its materials' layout; the source's scenario */
+	unsigned char *bsp;
+	unsigned long bsp_address;
+	unsigned long bsp_size;
+	long bsp_tag;
+	unsigned long bsp_vertex_buffers;
+	long bsp_vertex_buffer_count;
+	unsigned long bsp_lightmap_buffers;
+	long bsp_lightmap_buffer_count;
+	unsigned short bsp_material_layout;
+	long scenario_tag;
 	long walked;
 	boolean failed;
 	int volatile const *cancel;
@@ -653,7 +700,7 @@ boolean scene_pack_recipe_parse(
 	end = text + length;
 	while (recipe_line(&cursor, end, line, sizeof(line)))
 	{
-		char word[8];
+		char word[16];
 		char const *rest;
 		long word_length;
 
@@ -735,6 +782,11 @@ boolean scene_pack_recipe_parse(
 		else if (!strcmp(word, "blocks") && !*rest)
 		{
 			recipe->blocks = TRUE;
+		}
+		/* (the menus' backdrop: menu_backdrop.c) */
+		else if (!strcmp(word, "backdrop") && !*rest)
+		{
+			recipe->backdrop = TRUE;
 		}
 		else if (!strcmp(word, "unit") && !strcmp(rest, "multiplayer") && recipe->root_count < SCENE_PACK_MAXIMUM_ROOTS)
 		{
@@ -929,6 +981,13 @@ boolean scene_pack_recipe_parse(
 		}
 		hash = fnv_bytes(hash, "|", 1);
 		hash = fnv_bytes(hash, recipe->keeps[index].animation, strlen(recipe->keeps[index].animation) + 1);
+	}
+	if (recipe->backdrop)
+	{
+		char backdrop[16];
+
+		snprintf(backdrop, sizeof(backdrop), "d%d", SCENE_PACK_BACKDROP_VERSION);
+		hash = fnv_bytes(hash, backdrop, strlen(backdrop) + 1);
 	}
 	/* (the blocks' generator's version: blocks made otherwise are a pack
 	made again) */
@@ -1349,6 +1408,24 @@ static void build_fail(struct build_state *state, char const *format, char const
 }
 
 /* the pack's tag data grown by size bytes (4-aligned, zeroed): their offset */
+/* (thread-local: set by the packs' worker around one build of its own,
+scene_packs.c - the menus' backdrop's - while other threads build theirs) */
+__thread void *(*scene_pack_big_alloc)(unsigned long size);
+__thread void (*scene_pack_big_free)(void *data, unsigned long size);
+__thread void *(*scene_pack_scratch_alloc)(unsigned long size);
+__thread void (*scene_pack_scratch_free)(void *data, unsigned long size);
+
+/* the blob let go, where it came from */
+static void blob_release(struct build_state *state)
+{
+	if (state->blob && state->blob_big && state->blob_free)
+		state->blob_free(state->blob, state->blob_capacity);
+	else if (state->blob)
+		free(state->blob);
+	state->blob = NULL;
+	state->blob_big = FALSE;
+}
+
 static unsigned long blob_alloc(struct build_state *state, unsigned long size)
 {
 	unsigned long offset = (state->blob_size + 3) & ~3UL;
@@ -1364,11 +1441,32 @@ static unsigned long blob_alloc(struct build_state *state, unsigned long size)
 		unsigned long capacity = state->blob_capacity ? state->blob_capacity : 256 * 1024;
 		unsigned char *grown;
 
+		/* (doubling to 4 MB, then a quarter more: a backdrop's 8.7 MB of tags
+		takes 11 MB of the memory window as it is built, not 16) */
 		while (capacity < end)
-			capacity *= 2;
+			capacity = capacity < 4 * 1024 * 1024 ? capacity * 2 : capacity + capacity / 4;
 		if (capacity > SCENE_PACK_MAXIMUM_TAG_BYTES)
 			capacity = SCENE_PACK_MAXIMUM_TAG_BYTES;
-		grown = realloc(state->blob, capacity);
+		grown = scene_pack_big_alloc ? scene_pack_big_alloc(capacity) : NULL;
+		if (grown)
+		{
+			if (state->blob)
+				memcpy(grown, state->blob, state->blob_capacity);
+			blob_release(state);
+			state->blob_big = TRUE;
+			state->blob_free = scene_pack_big_free;
+		}
+		else if (state->blob_big)
+		{
+			grown = malloc(capacity);
+			if (grown)
+			{
+				memcpy(grown, state->blob, state->blob_capacity);
+				blob_release(state);
+			}
+		}
+		else
+			grown = realloc(state->blob, capacity);
 		if (!grown)
 		{
 			build_fail(state, "there is no memory for the pack%s", NULL);
@@ -1391,6 +1489,16 @@ static unsigned char *source_at(struct build_state const *state, unsigned long a
 	/* (the blocks' tags, at addresses of their own) */
 	if (state->blocks && address >= SCENE_PACK_BLOCKS_ADDRESS)
 		return scene_pack_blocks_at(state->blocks, address, size);
+	/* (a backdrop's structure bsp, at its own: past the tag data's, where
+	the Xbox loads a bsp) */
+	if (state->bsp && address >= state->bsp_address)
+	{
+		unsigned long bsp_offset = address - state->bsp_address;
+
+		if (bsp_offset > state->bsp_size || size > state->bsp_size - bsp_offset)
+			return NULL;
+		return state->bsp + bsp_offset;
+	}
 
 	if (address < state->source_address || offset > state->tags_size || size > state->tags_size - offset)
 		return NULL;
@@ -1498,7 +1606,13 @@ static long pack_tag_add(struct build_state *state, long index)
 		return NONE;
 	}
 	group = schema_group_get(group_tag);
-	if (!group || !group->definition || halo_tag_layout_root(group_tag) == HALO_TAG_LAYOUT_UNKNOWN ||
+	/* (a backdrop's own structure bsp and scenario, which it read and
+	trimmed: scene_pack_backdrop_prepare; no other) */
+	if (state->recipe->backdrop && ((group_tag == 'sbsp' && index == state->bsp_tag && state->bsp) ||
+		(group_tag == 'scnr' && index == state->scenario_tag)))
+	{
+	}
+	else if (!group || !group->definition || halo_tag_layout_root(group_tag) == HALO_TAG_LAYOUT_UNKNOWN ||
 		group_tag == 'scnr' || group_tag == 'sbsp' || group_tag == 'matg')
 	{
 		/* (a group a pack cannot hold: as if stripped) */
@@ -1518,6 +1632,10 @@ static long pack_tag_add(struct build_state *state, long index)
 	tag->parent_group_tags[0] = group->parent_group_tags[0];
 	tag->parent_group_tags[1] = group->parent_group_tags[1];
 	tag->source_base = read_u32(instance + 20);
+	/* (a structure bsp's root is where its header says: a map's table has
+	none for it) */
+	if (group_tag == 'sbsp')
+		tag->source_base = read_u32(state->bsp);
 	tag->root_size = (unsigned long)group->definition->size;
 	tag->name = state->custom_edition ? scene_pack_ce_tag_name(state->custom_edition, index, name) : name;
 	if (!source_at(state, tag->source_base, tag->root_size))
@@ -1961,6 +2079,128 @@ static void model_part_buffers(struct build_state *state, unsigned long source, 
 	}
 }
 
+/* (a backdrop's) a structure bsp material's layout (its buffers' pointers
+at 0xC0 and 0xD4), found once among a bsp's: HALO_TAG_LAYOUT_NONE if none */
+static unsigned short bsp_material_layout_find(unsigned short layout, short depth)
+{
+	long count = halo_tag_layout_field_count(layout);
+	long index;
+
+	if (depth > 8)
+		return HALO_TAG_LAYOUT_NONE;
+	for (index = 0; index < count; index++)
+	{
+		struct halo_tag_layout_field field;
+
+		if (!halo_tag_layout_field(layout, index, &field) || field.child == HALO_TAG_LAYOUT_NONE ||
+			(field.kind != HALO_TAG_LAYOUT_FIELD_BLOCK && field.kind != HALO_TAG_LAYOUT_FIELD_STRUCT))
+		{
+			continue;
+		}
+		if (field.kind == HALO_TAG_LAYOUT_FIELD_BLOCK && field.child_size == BSP_MATERIAL_SIZE)
+		{
+			long child_count = halo_tag_layout_field_count(field.child);
+			long child_index;
+			short pointers = 0;
+
+			for (child_index = 0; child_index < child_count; child_index++)
+			{
+				struct halo_tag_layout_field child;
+
+				if (halo_tag_layout_field(field.child, child_index, &child) && child.kind == HALO_TAG_LAYOUT_FIELD_POINTER &&
+					(child.offset == BSP_MATERIAL_VERTEX_HARDWARE || child.offset == BSP_MATERIAL_LIGHTMAP_VERTEX_HARDWARE))
+				{
+					pointers++;
+				}
+			}
+			if (pointers == 2)
+				return field.child;
+		}
+		{
+			unsigned short found = bsp_material_layout_find(field.child, depth + 1);
+
+			if (found != HALO_TAG_LAYOUT_NONE)
+				return found;
+		}
+	}
+	return HALO_TAG_LAYOUT_NONE;
+}
+
+/* (a backdrop's) one of a structure bsp material's buffers (its vertices,
+or its lightmap's: which the pack keeps as an index buffer, as the game's
+checks call a bsp's lightmap vertex buffers, tag_validate.c; menu_backdrop.c
+registers them as the vertex buffers they are): copied with it, its pointer
+to it made the pack's once it has a place */
+static void bsp_material_buffer(struct build_state *state, unsigned long source, unsigned long offset,
+	unsigned long type_at, unsigned long count_at, unsigned long hardware_at, boolean lightmap)
+{
+	/* (the environment's vertex types' sizes: uncompressed, compressed, then
+	their lightmaps': tag_schema_collision.c's) */
+	static unsigned long const sizes[4] = { 0x38, 0x20, 0x14, 0x8 };
+	unsigned char *material = source_at(state, source, BSP_MATERIAL_SIZE);
+	unsigned long array = lightmap ? state->bsp_lightmap_buffers : state->bsp_vertex_buffers;
+	long array_count = lightmap ? state->bsp_lightmap_buffer_count : state->bsp_vertex_buffer_count;
+	unsigned long header, data, size;
+	short type;
+	long count, buffer;
+	unsigned char *bytes;
+
+	if (!material || !(header = read_u32(material + hardware_at)))
+		return;
+	type = read_s16(material + type_at);
+	count = (long)read_u32(material + count_at);
+	if (header < array || (header - array) % BUFFER_HEADER_SIZE ||
+		(header - array) / BUFFER_HEADER_SIZE >= (unsigned long)array_count ||
+		!(bytes = source_at(state, header, BUFFER_HEADER_SIZE)) ||
+		type < (lightmap ? 2 : 0) || type > (lightmap ? 3 : 1) || count < 0 || count > BSP_MAXIMUM_MATERIAL_VERTICES)
+	{
+		build_fail(state, "the source map's structure bsp has a material's buffer not of its own%s", NULL);
+		return;
+	}
+	data = read_u32(bytes + 4);
+	/* (a material of no lightmap has a buffer of no lightmap vertices: a
+	word of it kept, its data somewhere) */
+	size = count ? (unsigned long)count * sizes[type] : 4;
+	if (!source_at(state, data, size))
+	{
+		build_fail(state, "the source map's structure bsp has a material's vertices outside it%s", NULL);
+		return;
+	}
+	for (buffer = 0; buffer < state->buffer_count; buffer++)
+	{
+		if (state->buffers[buffer].source_header == header && state->buffers[buffer].index == lightmap)
+			break;
+	}
+	if (buffer == state->buffer_count)
+	{
+		if (!grow((void **)&state->buffers, &state->buffer_capacity, state->buffer_count, sizeof(struct build_buffer),
+			SCENE_PACK_MAXIMUM_BUFFERS))
+		{
+			build_fail(state, "the pack would have more buffers than a pack may%s", NULL);
+			return;
+		}
+		memset(&state->buffers[state->buffer_count], 0, sizeof(struct build_buffer));
+		state->buffers[state->buffer_count].source_header = header;
+		state->buffers[state->buffer_count].source_data = data;
+		state->buffers[state->buffer_count].size = size;
+		state->buffers[state->buffer_count].index = lightmap;
+		state->buffer_count++;
+	}
+	else if (size > state->buffers[buffer].size)
+	{
+		state->buffers[buffer].size = size;
+	}
+	buffer_fixup(state, offset + hardware_at, buffer, FALSE);
+}
+
+static void bsp_material_buffers(struct build_state *state, unsigned long source, unsigned long offset)
+{
+	bsp_material_buffer(state, source, offset, BSP_MATERIAL_VERTEX_TYPE, BSP_MATERIAL_VERTEX_COUNT,
+		BSP_MATERIAL_VERTEX_HARDWARE, FALSE);
+	bsp_material_buffer(state, source, offset, BSP_MATERIAL_LIGHTMAP_VERTEX_TYPE, BSP_MATERIAL_LIGHTMAP_VERTEX_COUNT,
+		BSP_MATERIAL_LIGHTMAP_VERTEX_HARDWARE, TRUE);
+}
+
 /* a tag reference's or tag index's source tag index made the pack's (NONE
 for a tag not in it) */
 static unsigned long pack_tag_index(struct build_state const *state, unsigned long source_tag_index)
@@ -2137,6 +2377,8 @@ static boolean layout_copy(struct build_state *state, unsigned short layout, uns
 	}
 	if (layout == state->model_part_layout && !state->failed)
 		model_part_buffers(state, source, offset);
+	if (state->bsp && layout == state->bsp_material_layout && !state->failed)
+		bsp_material_buffers(state, source, offset);
 	return !state->failed;
 }
 
@@ -2536,6 +2778,160 @@ static long source_find(struct build_state const *state, struct scene_pack_recip
 	return NONE;
 }
 
+/* ---------- (a backdrop's) its structure bsp and scenario */
+
+/* the source's scenario (its tag index's tag, a scenario): its index, its
+root (NULL: none) */
+static unsigned char *backdrop_scenario(struct build_state *state, long *index)
+{
+	long scenario = source_tag(state, (long)read_u32(state->tags + 4));
+	unsigned char *instance = source_instance(state, scenario);
+
+	*index = NONE;
+	if (scenario == NONE || !instance || read_u32(instance) != 'scnr')
+		return NULL;
+	*index = scenario;
+	return source_at(state, read_u32(instance + 20), SCENARIO_ROOT_SIZE);
+}
+
+/* the structure bsp the recipe holds (its one sbsp tag line): its place in
+the map's file and where the Xbox loads it, from the scenario's reference
+to it; FALSE (and the build failed) if the source has none */
+static boolean backdrop_bsp_range(struct build_state *state, unsigned long file_length, unsigned long *file_offset,
+	unsigned long *size, unsigned long *address)
+{
+	struct scene_pack_recipe const *recipe = state->recipe;
+	unsigned char *scenario, *block;
+	long scenario_index, bsp = NONE;
+	short root;
+
+	for (root = 0; root < recipe->root_count; root++)
+	{
+		if (recipe->roots[root].group_tag == 'sbsp')
+			break;
+	}
+	scenario = backdrop_scenario(state, &scenario_index);
+	if (root == recipe->root_count || !scenario)
+	{
+		build_fail(state, "the backdrop has no structure bsp or the map no scenario%s", NULL);
+		return FALSE;
+	}
+	bsp = source_find(state, &recipe->roots[root]);
+	block = scenario + SCENARIO_STRUCTURE_BSPS;
+	if (bsp != NONE)
+	{
+		long count = (long)read_u32(block);
+		unsigned char *references = count > 0 && count <= 32 ?
+			source_at(state, read_u32(block + 4), (unsigned long)count * SCENARIO_BSP_REFERENCE_SIZE) : NULL;
+		long index;
+
+		for (index = 0; references && index < count; index++)
+		{
+			unsigned char *reference = references + index * SCENARIO_BSP_REFERENCE_SIZE;
+
+			if (source_tag(state, (long)read_u32(reference + 16 + 12)) != bsp)
+				continue;
+			*file_offset = read_u32(reference);
+			*size = read_u32(reference + 4);
+			*address = read_u32(reference + 8);
+			/* (in the file, after its header, and where the Xbox loads a bsp:
+			in the tag cache past the tag data, which it ends) */
+			if (*file_offset < CACHE_FILE_HEADER_SIZE || *size < BSP_HEADER_SIZE || *file_offset > file_length ||
+				*size > file_length - *file_offset || *size > XBOX_TAG_CACHE_SIZE - state->tags_size ||
+				*address < state->source_address + state->tags_size ||
+				*address > state->source_address + XBOX_TAG_CACHE_SIZE - *size)
+			{
+				build_fail(state, "the source map's structure bsp is not where a bsp is%s", NULL);
+				return FALSE;
+			}
+			state->bsp_tag = bsp;
+			return TRUE;
+		}
+	}
+	build_fail(state, "the map has no structure bsp %s it can take", recipe->roots[root].path);
+	return FALSE;
+}
+
+/* the structure bsp read (size bytes at bsp, loaded at address): its
+header checked, and the scenario trimmed to what the backdrop takes of it -
+its skies, its scenery and their palette, its detail objects' palette, every
+other block, data and reference of it none (in the source's tag data the
+build read, which no other pack holds) - and its scenery named none (the
+pack has no names) */
+static void backdrop_prepare(struct build_state *state, unsigned char *bsp, unsigned long size, unsigned long address)
+{
+	static unsigned long const kept_blocks[] =
+	{
+		SCENARIO_SKIES, SCENARIO_SCENERY, SCENARIO_SCENERY_PALETTE, SCENARIO_DETAIL_OBJECT_PALETTE,
+		SCENARIO_SOUND_SCENERY, SCENARIO_SOUND_SCENERY_PALETTE
+	};
+	static unsigned long const references[] = { 0x00, 0x10, 0x20, 0x574, 0x584, 0x594 };
+	unsigned char trimmed[SCENARIO_ROOT_SIZE];
+	unsigned char *scenario;
+	short index;
+
+	state->bsp = bsp;
+	state->bsp_size = size;
+	state->bsp_address = address;
+	state->bsp_vertex_buffer_count = (long)read_u32(bsp + 4);
+	state->bsp_vertex_buffers = read_u32(bsp + 8);
+	state->bsp_lightmap_buffer_count = (long)read_u32(bsp + 12);
+	state->bsp_lightmap_buffers = read_u32(bsp + 16);
+	if (read_u32(bsp + 20) != BSP_HEADER_SIGNATURE || !source_at(state, read_u32(bsp), 4) ||
+		state->bsp_vertex_buffer_count < 0 || state->bsp_vertex_buffer_count > 0x10000 ||
+		state->bsp_lightmap_buffer_count < 0 || state->bsp_lightmap_buffer_count > 0x10000 ||
+		(state->bsp_vertex_buffer_count && !source_at(state, state->bsp_vertex_buffers,
+			(unsigned long)state->bsp_vertex_buffer_count * BUFFER_HEADER_SIZE)) ||
+		(state->bsp_lightmap_buffer_count && !source_at(state, state->bsp_lightmap_buffers,
+			(unsigned long)state->bsp_lightmap_buffer_count * BUFFER_HEADER_SIZE)))
+	{
+		build_fail(state, "the source map's structure bsp has a damaged header%s", NULL);
+		return;
+	}
+	state->bsp_material_layout = bsp_material_layout_find(halo_tag_layout_root('sbsp'), 0);
+	scenario = backdrop_scenario(state, &state->scenario_tag);
+	if (!scenario || state->bsp_material_layout == HALO_TAG_LAYOUT_NONE)
+	{
+		build_fail(state, "the map has no scenario the backdrop can take%s", NULL);
+		return;
+	}
+	memset(trimmed, 0, sizeof(trimmed));
+	for (index = 0; index < (short)NUMBEROF(kept_blocks); index++)
+		memcpy(trimmed + kept_blocks[index], scenario + kept_blocks[index], 12);
+	for (index = 0; index < (short)NUMBEROF(references); index++)
+	{
+		memcpy(trimmed + references[index], scenario + references[index], 4);
+		write_u32(trimmed + references[index] + 12, (unsigned long)NONE);
+	}
+	memcpy(scenario, trimmed, sizeof(trimmed));
+	{
+		long count = (long)read_u32(scenario + SCENARIO_SCENERY);
+		unsigned char *scenery = count > 0 && count <= 0x8000 ?
+			source_at(state, read_u32(scenario + SCENARIO_SCENERY + 4), (unsigned long)count * SCENARIO_SCENERY_SIZE) : NULL;
+		long element;
+
+		for (element = 0; scenery && element < count; element++)
+		{
+			scenery[element * SCENARIO_SCENERY_SIZE + SCENARIO_OBJECT_NAME_INDEX] = 0xFF;
+			scenery[element * SCENARIO_SCENERY_SIZE + SCENARIO_OBJECT_NAME_INDEX + 1] = 0xFF;
+		}
+	}
+	/* (its sound scenery - the waterfall's, the water's - named none too) */
+	{
+		long count = (long)read_u32(scenario + SCENARIO_SOUND_SCENERY);
+		unsigned char *sounds = count > 0 && count <= 0x8000 ?
+			source_at(state, read_u32(scenario + SCENARIO_SOUND_SCENERY + 4),
+				(unsigned long)count * SCENARIO_SOUND_SCENERY_SIZE) : NULL;
+		long element;
+
+		for (element = 0; sounds && element < count; element++)
+		{
+			sounds[element * SCENARIO_SOUND_SCENERY_SIZE + SCENARIO_OBJECT_NAME_INDEX] = 0xFF;
+			sounds[element * SCENARIO_SOUND_SCENERY_SIZE + SCENARIO_OBJECT_NAME_INDEX + 1] = 0xFF;
+		}
+	}
+}
+
 static void build_state_free(struct build_state *state, void *scratch)
 {
 	if (state->tags && state->tags != scratch)
@@ -2544,8 +2940,7 @@ static void build_state_free(struct build_state *state, void *scratch)
 		free(state->pack_index);
 	if (state->pack_tags)
 		free(state->pack_tags);
-	if (state->blob)
-		free(state->blob);
+	blob_release(state);
 	if (state->extents)
 		free(state->extents);
 	if (state->buffers)
@@ -3350,6 +3745,14 @@ static boolean build_many_once(
 	unsigned char *tags = NULL;
 	unsigned long tags_size = 0;
 	struct build_range *unions = NULL;
+	/* (the tag data's copy, when it is not in the scratch: the scratch
+	hook's, scene_pack_scratch_alloc, or the C heap's) */
+	void (*tags_scratch_free)(void *data, unsigned long size) = NULL;
+	unsigned long tags_scratch_size = 0;
+	/* (a backdrop's structure bsp, read for its build alone) */
+	unsigned char *bsp_bytes = NULL;
+	unsigned long bsp_bytes_size = 0;
+	boolean bsp_big = FALSE;
 	long union_count = 0;
 	unsigned long long union_bytes = 0;
 	boolean all = TRUE;
@@ -3406,7 +3809,16 @@ static boolean build_many_once(
 	if (!failure)
 	{
 		tags_size = read_u32(header + 20);
-		tags = scratch && scratch_size >= tags_size ? scratch : malloc(tags_size);
+		tags = scratch && scratch_size >= tags_size ? scratch : NULL;
+		if (!tags && scene_pack_scratch_alloc && (tags = scene_pack_scratch_alloc(tags_size)) != NULL)
+		{
+			tags_scratch_free = scene_pack_scratch_free;
+			tags_scratch_size = tags_size;
+			platform_log("scene packs: %s's %lu KB of tag data read beside the tag cache (its free room %lu KB)", map,
+				tags_size / 1024, scratch ? scratch_size / 1024 : 0);
+		}
+		if (!tags)
+			tags = malloc(tags_size);
 		reader.phase_total = tags_size;
 		reader.progress_length = read_u32(header + 16) + tags_size;
 		if (!tags)
@@ -3462,6 +3874,28 @@ static boolean build_many_once(
 				platform_log("scene packs: %s: the blocks' walls of %s, floors of %s", state->recipe->name, walls, floors);
 			}
 		}
+		/* (a backdrop's structure bsp: its bytes read from the map's start,
+		where its bsps are, then its scenario trimmed) */
+		state->bsp_tag = state->scenario_tag = NONE;
+		if (!state->failed && state->recipe->backdrop)
+		{
+			unsigned long bsp_offset = 0, bsp_size = 0, bsp_address = 0;
+
+			if (backdrop_bsp_range(state, reader.file_length, &bsp_offset, &bsp_size, &bsp_address))
+			{
+				bsp_bytes = scene_pack_big_alloc ? scene_pack_big_alloc(bsp_size) : NULL;
+				bsp_big = bsp_bytes != NULL;
+				if (!bsp_bytes)
+					bsp_bytes = malloc(bsp_size);
+				bsp_bytes_size = bsp_size;
+				if (!bsp_bytes)
+					build_fail(state, "there is no memory for the structure bsp%s", NULL);
+				else if (!source_rewind(&reader) || !source_read(&reader, bsp_offset, bsp_size, bsp_bytes))
+					build_fail(state, "%s", cancel && *cancel ? "it was stopped" : "the map's structure bsp cannot be read");
+				else
+					backdrop_prepare(state, bsp_bytes, bsp_size, bsp_address);
+			}
+		}
 		build_job_progress(results, count, job_index, 1);
 		if (!state->failed)
 		{
@@ -3502,6 +3936,15 @@ static boolean build_many_once(
 		}
 		/* (its working memory let go before the next one's) */
 		build_state_release(state);
+		state->bsp = NULL;
+		if (bsp_bytes)
+		{
+			if (bsp_big)
+				scene_pack_big_free(bsp_bytes, bsp_bytes_size);
+			else
+				free(bsp_bytes);
+			bsp_bytes = NULL;
+		}
 	}
 
 	/* the pixels and samples, every pack's, in the source's order (the
@@ -3658,7 +4101,12 @@ static boolean build_many_once(
 	if (unions)
 		free(unions);
 	if (tags && tags != scratch)
-		free(tags);
+	{
+		if (tags_scratch_free)
+			tags_scratch_free(tags, tags_scratch_size);
+		else
+			free(tags);
+	}
 	source_close(&reader);
 	free(jobs);
 	return all;

@@ -989,7 +989,11 @@ static void draw_unicode_string_partial(
 	return;
 }
 
+#ifdef HALO_LINUX
+static void draw_string_layout(
+#else
 void draw_string(
+#endif
 	draw_character_proc draw_character,
 	rectangle2d const *bounds,
 	point2d *cursor_reference,
@@ -1187,7 +1191,11 @@ void draw_string(
 	return;
 }
 
+#ifdef HALO_LINUX
+static void draw_unicode_string_layout(
+#else
 void draw_unicode_string(
+#endif
 	draw_character_proc draw_character,
 	rectangle2d const *bounds,
 	point2d *cursor_reference,
@@ -1385,6 +1393,150 @@ void draw_unicode_string(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* ---- (port) sharp fonts. A font of the menus' own may hold its glyphs at
+more texels than the 640x480 interface's units (menu_tags.c font_build: a
+<font sharp=...> variant drawn at the display's pixels per unit, its header's
+pad[0] DRAW_STRING_SHARP_FONT and pad[1] the texels per unit times 1000).
+A string of one is laid out at that scale - its bounds, clip, cursor, indents
+and tab stops multiplied, every metric of the font already so - and its
+characters drawn at their texels' size over it (draw_string_texel_size, the
+units a texel is while it is laid out: rasterizer_text.c), so each texel
+lands on a pixel of the display instead of being scaled up. What it measures
+(the cursor, draw_*_compute_bounds) is given back in units. */
+#define DRAW_STRING_SHARP_FONT 0x53485250L
+real draw_string_texel_size = 1.0f;
+static long draw_string_last_scale;
+
+static long sharp_font_scale(
+	void)
+{
+	struct font_header *font;
+
+	if (font_drawing_globals.current_font_index == NONE)
+		return 0;
+	font = styled_font_get(font_drawing_globals.current_font_index, font_drawing_globals.current_style);
+	return font && font->pad[0] == DRAW_STRING_SHARP_FONT && font->pad[1] > 1000 ? font->pad[1] : 0;
+}
+
+static short sharp_up(short value, long scale)
+{
+	return (short)((value * scale + (value >= 0 ? 500 : -500)) / 1000);
+}
+
+static short sharp_down(short value, long scale)
+{
+	return (short)(((long)value * 1000 + (value >= 0 ? scale / 2 : -scale / 2)) / scale);
+}
+
+static void sharp_rectangle(rectangle2d *rectangle, long scale)
+{
+	rectangle->x0 = sharp_up(rectangle->x0, scale);
+	rectangle->y0 = sharp_up(rectangle->y0, scale);
+	rectangle->x1 = sharp_up(rectangle->x1, scale);
+	rectangle->y1 = sharp_up(rectangle->y1, scale);
+}
+
+struct sharp_state
+{
+	long scale;
+	real texel_size;
+	short initial_indent, paragraph_indent;
+	short tab_stops[MAXIMUM_NUMBER_OF_TAB_STOPS];
+	rectangle2d bounds, clip;
+	point2d cursor;
+};
+
+static void sharp_begin(struct sharp_state *sharp, rectangle2d const **bounds, rectangle2d const **clip,
+	point2d **cursor, short *height_adjust)
+{
+	short index;
+
+	sharp->scale = sharp_font_scale();
+	draw_string_last_scale = sharp->scale;
+	if (!sharp->scale)
+		return;
+	sharp->texel_size = draw_string_texel_size;
+	draw_string_texel_size = 1000.0f / (real)sharp->scale;
+	sharp->initial_indent = font_drawing_globals.initial_indent;
+	sharp->paragraph_indent = font_drawing_globals.paragraph_indent;
+	font_drawing_globals.initial_indent = sharp_up(sharp->initial_indent, sharp->scale);
+	font_drawing_globals.paragraph_indent = sharp_up(sharp->paragraph_indent, sharp->scale);
+	for (index = 0; index < font_drawing_globals.tab_stop_count && index < MAXIMUM_NUMBER_OF_TAB_STOPS; index++)
+	{
+		sharp->tab_stops[index] = font_drawing_globals.tab_stops[index];
+		font_drawing_globals.tab_stops[index] = sharp_up(sharp->tab_stops[index], sharp->scale);
+	}
+	sharp->bounds = **bounds;
+	sharp_rectangle(&sharp->bounds, sharp->scale);
+	*bounds = &sharp->bounds;
+	if (*clip)
+	{
+		sharp->clip = **clip;
+		sharp_rectangle(&sharp->clip, sharp->scale);
+		*clip = &sharp->clip;
+	}
+	if (*cursor)
+	{
+		sharp->cursor.x = sharp_up((*cursor)->x, sharp->scale);
+		sharp->cursor.y = sharp_up((*cursor)->y, sharp->scale);
+	}
+	*height_adjust = sharp_up(*height_adjust, sharp->scale);
+}
+
+static void sharp_end(struct sharp_state *sharp, point2d *cursor)
+{
+	short index;
+
+	if (!sharp->scale)
+		return;
+	draw_string_texel_size = sharp->texel_size;
+	font_drawing_globals.initial_indent = sharp->initial_indent;
+	font_drawing_globals.paragraph_indent = sharp->paragraph_indent;
+	for (index = 0; index < font_drawing_globals.tab_stop_count && index < MAXIMUM_NUMBER_OF_TAB_STOPS; index++)
+		font_drawing_globals.tab_stops[index] = sharp->tab_stops[index];
+	if (cursor)
+	{
+		cursor->x = sharp_down(sharp->cursor.x, sharp->scale);
+		cursor->y = sharp_down(sharp->cursor.y, sharp->scale);
+	}
+}
+
+void draw_string(
+	draw_character_proc draw_character,
+	rectangle2d const *bounds,
+	point2d *cursor_reference,
+	rectangle2d const *clip,
+	short height_adjust,
+	char const *string)
+{
+	struct sharp_state sharp;
+	point2d *cursor = cursor_reference;
+
+	sharp_begin(&sharp, &bounds, &clip, &cursor, &height_adjust);
+	draw_string_layout(draw_character, bounds, sharp.scale && cursor ? &sharp.cursor : cursor, clip, height_adjust,
+		string);
+	sharp_end(&sharp, cursor);
+}
+
+void draw_unicode_string(
+	draw_character_proc draw_character,
+	rectangle2d const *bounds,
+	point2d *cursor_reference,
+	rectangle2d const *clip,
+	short height_adjust,
+	wchar_t const *string)
+{
+	struct sharp_state sharp;
+	point2d *cursor = cursor_reference;
+
+	sharp_begin(&sharp, &bounds, &clip, &cursor, &height_adjust);
+	draw_unicode_string_layout(draw_character, bounds, sharp.scale && cursor ? &sharp.cursor : cursor, clip,
+		height_adjust, string);
+	sharp_end(&sharp, cursor);
+}
+#endif
+
 void draw_string_compute_bounds(
 	rectangle2d const *bounds,
 	char const *string,
@@ -1409,6 +1561,21 @@ void draw_string_compute_bounds(
 		cursor.y - text_bounds_globals.last_font_header->ascending_height);
 	cursor_bounds->y1 = (short)(
 		text_bounds_globals.last_font_header->descending_height + cursor.y);
+#ifdef HALO_LINUX
+	/* (a sharp font's: its heights and the characters' box in units) */
+	if (draw_string_last_scale)
+	{
+		cursor_bounds->y0 = (short)(cursor.y -
+			sharp_down(text_bounds_globals.last_font_header->ascending_height, draw_string_last_scale));
+		cursor_bounds->y1 = (short)(cursor.y +
+			sharp_down(text_bounds_globals.last_font_header->descending_height, draw_string_last_scale));
+		if (text_bounds_globals.bounds.x0 <= text_bounds_globals.bounds.x1)
+		{
+			text_bounds_globals.bounds.x0 = sharp_down(text_bounds_globals.bounds.x0, draw_string_last_scale);
+			text_bounds_globals.bounds.x1 = sharp_down(text_bounds_globals.bounds.x1, draw_string_last_scale);
+		}
+	}
+#endif
 
 	text_bounds->x0 = text_bounds_globals.bounds.x0;
 	text_bounds->y0 = bounds->y0;
@@ -1442,6 +1609,21 @@ void draw_unicode_string_compute_bounds(
 		cursor.y - text_bounds_globals.last_font_header->ascending_height);
 	cursor_bounds->y1 = (short)(
 		text_bounds_globals.last_font_header->descending_height + cursor.y);
+#ifdef HALO_LINUX
+	/* (a sharp font's: its heights and the characters' box in units) */
+	if (draw_string_last_scale)
+	{
+		cursor_bounds->y0 = (short)(cursor.y -
+			sharp_down(text_bounds_globals.last_font_header->ascending_height, draw_string_last_scale));
+		cursor_bounds->y1 = (short)(cursor.y +
+			sharp_down(text_bounds_globals.last_font_header->descending_height, draw_string_last_scale));
+		if (text_bounds_globals.bounds.x0 <= text_bounds_globals.bounds.x1)
+		{
+			text_bounds_globals.bounds.x0 = sharp_down(text_bounds_globals.bounds.x0, draw_string_last_scale);
+			text_bounds_globals.bounds.x1 = sharp_down(text_bounds_globals.bounds.x1, draw_string_last_scale);
+		}
+	}
+#endif
 
 	text_bounds->x0 = text_bounds_globals.bounds.x0;
 	text_bounds->y0 = bounds->y0;

@@ -75,6 +75,14 @@ int halo_custom_edition_enabled(void);
 /* whether the mods folder's Halo: CE Anniversary maps may be listed and
 played (HALO_MCC_MODS: port/linux/src/xbox_memory.c) */
 int halo_mcc_mods_enabled(void);
+/* (port) the Halo content folder (d:\mcc\, paths.content) and whether it
+holds Halo CE maps: platform.h */
+int halo_content_library_found(void);
+int platform_mcc_root(char *out, unsigned long out_size);
+void platform_mcc_root_forget(void);
+/* (port) the Halo PC resource map <name>.map: the maps folder's, else the content
+folder's halo1 maps custom_edition one (xbox_files.c) */
+int platform_halo_pc_resource_map(const char *maps_directory, const char *name, char *path, unsigned long path_size);
 void *halo_custom_edition_tag_cache_acquire(unsigned long bytes);
 void halo_custom_edition_tag_cache_release(void);
 /* zeroed memory blocks of their own for a Custom Edition map's converted

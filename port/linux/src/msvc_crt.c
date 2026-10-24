@@ -612,10 +612,19 @@ static const char *translated(const char *path, char *buffer, size_t size)
 	return buffer;
 }
 
+/* (port) a mode that writes: MCC's folder is only read
+(platform_xbox_path_write_refused) */
+static int mode_writes(const char *mode)
+{
+	return mode && (strchr(mode, 'w') || strchr(mode, 'a') || strchr(mode, '+'));
+}
+
 FILE *halo_linux_fopen(const char *path, const char *mode)
 {
 	char host_path[1024];
 
+	if (mode_writes(mode) && platform_xbox_path_write_refused(path))
+		return NULL;
 	return fopen(translated(path, host_path, sizeof(host_path)), mode);
 }
 
@@ -623,6 +632,8 @@ FILE *halo_linux_freopen(const char *path, const char *mode, FILE *stream)
 {
 	char host_path[1024];
 
+	if (path && mode_writes(mode) && platform_xbox_path_write_refused(path))
+		return NULL;
 	return freopen(path ? translated(path, host_path, sizeof(host_path)) : NULL, mode, stream);
 }
 
@@ -630,6 +641,8 @@ int halo_linux_remove(const char *path)
 {
 	char host_path[1024];
 
+	if (platform_xbox_path_write_refused(path))
+		return -1;
 	return remove(translated(path, host_path, sizeof(host_path)));
 }
 
@@ -637,6 +650,8 @@ int halo_linux_rename(const char *old_path, const char *new_path)
 {
 	char host_old_path[1024], host_new_path[1024];
 
+	if (platform_xbox_path_write_refused(old_path) || platform_xbox_path_write_refused(new_path))
+		return -1;
 	return rename(translated(old_path, host_old_path, sizeof(host_old_path)),
 		translated(new_path, host_new_path, sizeof(host_new_path)));
 }
@@ -654,6 +669,8 @@ int halo_linux_open(const char *path, int flags, ...)
 		mode = va_arg(arguments, int);
 		va_end(arguments);
 	}
+	if ((flags & (O_WRONLY | O_RDWR | O_CREAT | O_TRUNC)) && platform_xbox_path_write_refused(path))
+		return -1;
 	return open(translated(path, host_path, sizeof(host_path)), flags | O_CLOEXEC, mode ? mode : 0644);
 }
 
@@ -661,6 +678,8 @@ int _mkdir(const char *path)
 {
 	char host_path[1024];
 
+	if (platform_xbox_path_write_refused(path))
+		return -1;
 	return posix_make_directory(translated(path, host_path, sizeof(host_path)));
 }
 
@@ -668,6 +687,8 @@ int _rmdir(const char *path)
 {
 	char host_path[1024];
 
+	if (platform_xbox_path_write_refused(path))
+		return -1;
 	return rmdir(translated(path, host_path, sizeof(host_path)));
 }
 

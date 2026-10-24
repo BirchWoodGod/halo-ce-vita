@@ -13,3 +13,5 @@ halo3/scoreboard.xml
 # (the Halo 3 dialog: the game's message boxes and questions)
 halo3/dialog.xml
 halo3/dialog_ingame.xml
+# (Menu style Online: Forge's screens in the online look)
+online/forge.xml

@@ -36,6 +36,26 @@ to the picture's left). The options, each <name>=<value>:
 	                   seat of that label, or whose label ends in -<label>
 	                   (driver, gunner, passenger: W-driver, W-gunner,
 	                   W-passenger); the place is its seat's, none is given
+	at=<x>,<y>,<z> yaw=<degrees>  in place of the four numbers: standing at
+	                   that point of the world (world units, as a camera
+	                   save's), its front along that heading (0: along +x,
+	                   positive turning to +y, as a camera's yaw), upright in
+	                   the world (as level=1); pitch= and roll= then lean it
+	                   from there (a Warthog's spot saved in the level)
+	bob=<a>,<s>        (with at=) hovering: up and down a units on a sine of
+	                   s seconds, its heading swaying 2 degrees the while, on
+	                   the host's clock (each frame, the ticks stopped or not)
+	slope=<l>,<w>      (with at= and ground=) a vehicle on uneven ground: the
+	                   ground found under its front and back (l units along
+	                   it) and its sides (w across), its nose and side leaned
+	                   to it and its middle ground= above their mean
+	ground=<offset>    stood on the level's ground under its place (the
+	                   structure found straight below it, or above it by up
+	                   to 2 units), its origin that many units above it: a
+	                   lobby's characters on the live backdrop's floor
+	level=1            stood upright in the world, not in the picture: a
+	                   camera pitched up then looks up at it, its underside
+	                   showing (a Warthog jumping over the camera)
 	look=<entry>       turned to that entry, its head (and a flying biped's
 	                   whole body) looking at it
 	suspension=<0..1>  a vehicle's wheels: 0 (the default) hanging all the
@@ -94,6 +114,7 @@ left, a cool rim from behind, a soft ambient.
 #include "units/unit_definitions.h"
 #include "units/biped_definitions.h"
 #include "items/weapon_definitions.h"
+#include "items/items.h"
 #include "models/model_animation_definitions.h"
 #include "interface/player_ui.h"
 #include "saved games/player_profile.h"
@@ -102,6 +123,7 @@ left, a cool rim from behind, a soft ambient.
 #include "tag_files/tag_groups.h"
 #include "memory/data.h"
 #include "render/render.h"
+#include "physics/collisions.h"
 
 #include "halo_menus.h"
 #include "scene_packs.h"
@@ -195,6 +217,24 @@ struct menu_scene_object
 	/* looking at that entry (NONE: the camera) */
 	short look_entry;
 	real suspension;
+	/* (level=1) upright in the world, not in the picture */
+	boolean level;
+	/* (ground=) stood on the structure below, its origin so high above it */
+	boolean grounded;
+	real ground_offset;
+	/* (slope=<half length>,<half width>, with at= and ground=) leaned to the
+	ground under its four sides (0: not) */
+	real slope_length;
+	real slope_width;
+	/* (bob=<amplitude>,<seconds>) a hover's rise and fall (world units), a
+	sine of that period on the host clock, and a sway of its heading */
+	real bob_amplitude;
+	real bob_period;
+	/* (at= yaw=) at that point of the world, its front along that heading
+	(radians) */
+	boolean world;
+	real_point3d world_position;
+	real world_yaw;
 	struct menu_scene_camera camera;
 
 	/* (the update's) what was made, the map it was made on, its colour */
@@ -389,6 +429,69 @@ static boolean option_parse(char const *word, struct menu_scene_object *object)
 			return FALSE;
 		return TRUE;
 	}
+	if (!strcmp(name, "at"))
+	{
+		float x, y, z;
+
+		if (sscanf(value, "%f,%f,%f%n", &x, &y, &z, &used) != 3 || value[used] || !real_in_range(x, 5000.f) ||
+			!real_in_range(y, 5000.f) || !real_in_range(z, 5000.f))
+		{
+			return FALSE;
+		}
+		object->world = TRUE;
+		object->world_position.x = x;
+		object->world_position.y = y;
+		object->world_position.z = z;
+		return TRUE;
+	}
+	if (!strcmp(name, "yaw"))
+	{
+		if (sscanf(value, "%f%n", &number, &used) != 1 || value[used] || !real_in_range(number, 720.f))
+			return FALSE;
+		object->world_yaw = number * MENU_SCENE_DEGREES;
+		return TRUE;
+	}
+	if (!strcmp(name, "bob"))
+	{
+		float amplitude, period;
+
+		if (sscanf(value, "%f,%f%n", &amplitude, &period, &used) != 2 || value[used] ||
+			!(amplitude > 0.f && amplitude < 1.f) || !(period >= 0.5f && period <= 30.f))
+		{
+			return FALSE;
+		}
+		object->bob_amplitude = amplitude;
+		object->bob_period = period;
+		return TRUE;
+	}
+	if (!strcmp(name, "slope"))
+	{
+		float length, width;
+
+		if (sscanf(value, "%f,%f%n", &length, &width, &used) != 2 || value[used] || !(length > 0.f && length < 5.f) ||
+			!(width > 0.f && width < 5.f))
+		{
+			return FALSE;
+		}
+		object->slope_length = length;
+		object->slope_width = width;
+		return TRUE;
+	}
+	if (!strcmp(name, "ground"))
+	{
+		if (sscanf(value, "%f%n", &number, &used) != 1 || value[used] || !real_in_range(number, 10.f))
+			return FALSE;
+		object->grounded = TRUE;
+		object->ground_offset = number;
+		return TRUE;
+	}
+	if (!strcmp(name, "level"))
+	{
+		if (strcmp(value, "0") && strcmp(value, "1"))
+			return FALSE;
+		object->level = !strcmp(value, "1");
+		return TRUE;
+	}
 	if (!strcmp(name, "frame") || !strcmp(name, "in") || !strcmp(name, "look"))
 	{
 		int integer;
@@ -449,6 +552,13 @@ static boolean entry_parse(char *text, struct menu_scene_object *object, short e
 	object->distance = object->right = object->up = object->facing = 0.f;
 	object->pitch = object->roll = 0.f;
 	object->suspension = 0.f;
+	object->level = FALSE;
+	object->grounded = FALSE;
+	object->ground_offset = 0.f;
+	object->slope_length = object->slope_width = 0.f;
+	object->bob_amplitude = object->bob_period = 0.f;
+	object->world = FALSE;
+	object->world_yaw = 0.f;
 	object->color_index = MENU_SCENE_COLOR_OWN;
 	object->weapon_pack[0] = object->weapon_tag[0] = 0;
 	object->animation[0] = 0;
@@ -475,8 +585,13 @@ static boolean entry_parse(char *text, struct menu_scene_object *object, short e
 		if (!option_parse(word, object))
 			return FALSE;
 	}
-	/* (a place given whole, or none for a seated one) */
-	if (placement_count == 4)
+	/* (a place given whole, at= in the world, or none for a seated one) */
+	if (object->world)
+	{
+		if (placement_count || object->vehicle_entry != NONE)
+			return FALSE;
+	}
+	else if (placement_count == 4)
 	{
 		object->distance = placement[0];
 		object->right = placement[1];
@@ -538,13 +653,32 @@ static void entry_position(struct menu_scene_object const *object, real_point3d 
 	struct menu_scene_frame frame;
 	real scale = object->scale > 1.f ? object->scale : 1.f;
 
-	camera_frame(&object->camera, &frame);
-	position->x = object->camera.position.x + (frame.view.i * object->distance + frame.right.i * object->right +
-		frame.up.i * object->up) * scale;
-	position->y = object->camera.position.y + (frame.view.j * object->distance + frame.right.j * object->right +
-		frame.up.j * object->up) * scale;
-	position->z = object->camera.position.z + (frame.view.k * object->distance + frame.right.k * object->right +
-		frame.up.k * object->up) * scale;
+	if (object->world)
+		*position = object->world_position;
+	else
+	{
+		camera_frame(&object->camera, &frame);
+		position->x = object->camera.position.x + (frame.view.i * object->distance + frame.right.i * object->right +
+			frame.up.i * object->up) * scale;
+		position->y = object->camera.position.y + (frame.view.j * object->distance + frame.right.j * object->right +
+			frame.up.j * object->up) * scale;
+		position->z = object->camera.position.z + (frame.view.k * object->distance + frame.right.k * object->right +
+			frame.up.k * object->up) * scale;
+	}
+	/* (ground=: on the structure straight below, from 2 units above) */
+	if (object->grounded)
+	{
+		struct collision_result collision;
+		real_point3d start = *position;
+		real_vector3d down = { 0.f, 0.f, -12.f };
+
+		start.z += 2.f;
+		if (collision_test_vector(FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit),
+			&start, &down, NONE, &collision))
+		{
+			position->z = collision.point.z + object->ground_offset;
+		}
+	}
 }
 
 /* where the object stands, and its facing: toward the camera (or the entry
@@ -562,6 +696,22 @@ static void object_place(struct menu_scene_object const *object, real_point3d *p
 
 	camera_frame(&object->camera, &frame);
 	entry_position(object, position);
+	/* (level=1: the world's up its up, the view level: upright in the
+	world, a pitched camera looking up or down at it) */
+	if (object->level)
+	{
+		real length;
+
+		frame.view.k = 0.f;
+		length = (real)sqrt(frame.view.i * frame.view.i + frame.view.j * frame.view.j);
+		if (length > 0.0001f)
+		{
+			frame.view.i /= length;
+			frame.view.j /= length;
+		}
+		frame.up.i = frame.up.j = 0.f;
+		frame.up.k = 1.f;
+	}
 	/* (back toward the camera; or toward what it looks at, level in the
 	picture) */
 	base.i = -frame.view.i;
@@ -589,6 +739,97 @@ static void object_place(struct menu_scene_object const *object, real_point3d *p
 	forward->j = base.j * cosine - right.j * sine;
 	forward->k = base.k * cosine - right.k * sine;
 	*up = frame.up;
+	/* (at= yaw=: along its heading, upright in the world; with look=, its
+	front to what it looks at, level) */
+	if (object->world)
+	{
+		forward->i = (real)cos(object->world_yaw);
+		forward->j = (real)sin(object->world_yaw);
+		forward->k = 0.f;
+		up->i = up->j = 0.f;
+		up->k = 1.f;
+		if (object->look_entry != NONE)
+		{
+			real_point3d target;
+			real length;
+
+			entry_position(&menu_scene_objects.slots[object->look_entry], &target);
+			length = (real)sqrt((target.x - position->x) * (target.x - position->x) +
+				(target.y - position->y) * (target.y - position->y));
+			if (length > 0.0001f)
+			{
+				forward->i = (target.x - position->x) / length;
+				forward->j = (target.y - position->y) / length;
+			}
+		}
+		/* (slope=: a vehicle's four wheels on the ground: the ground under
+		its front and back, left and right, its nose and side leaned to it
+		and its middle that high) */
+		if (object->slope_length > 0.f)
+		{
+			real_point3d probe;
+			real heights[4];
+			real_vector3d left = { -forward->j, forward->i, 0.f };
+			short index;
+			boolean found = TRUE;
+
+			for (index = 0; index < 4; index++)
+			{
+				struct collision_result collision;
+				real_vector3d down = { 0.f, 0.f, -12.f };
+				real along = index == 0 ? object->slope_length : index == 1 ? -object->slope_length : 0.f;
+				real side = index == 2 ? object->slope_width : index == 3 ? -object->slope_width : 0.f;
+
+				probe.x = position->x + forward->i * along + left.i * side;
+				probe.y = position->y + forward->j * along + left.j * side;
+				probe.z = object->world_position.z + 2.f;
+				if (!collision_test_vector(FLAG(_collision_test_structure_bit) |
+					FLAG(_collision_test_front_facing_surfaces_bit), &probe, &down, NONE, &collision))
+				{
+					found = FALSE;
+					break;
+				}
+				heights[index] = collision.point.z;
+			}
+			if (found)
+			{
+				real pitch = (real)atan2(heights[0] - heights[1], 2.f * object->slope_length);
+				real roll = (real)atan2(heights[3] - heights[2], 2.f * object->slope_width);
+				real c, s;
+				real_vector3d f = *forward, u = *up, right;
+
+				position->z = (heights[0] + heights[1] + heights[2] + heights[3]) * 0.25f + object->ground_offset;
+				c = (real)cos(pitch);
+				s = (real)sin(pitch);
+				forward->i = f.i * c + u.i * s;
+				forward->j = f.j * c + u.j * s;
+				forward->k = f.k * c + u.k * s;
+				up->i = u.i * c - f.i * s;
+				up->j = u.j * c - f.j * s;
+				up->k = u.k * c - f.k * s;
+				u = *up;
+				cross_product3d(forward, &u, &right);
+				c = (real)cos(roll);
+				s = (real)sin(roll);
+				up->i = u.i * c - right.i * s;
+				up->j = u.j * c - right.j * s;
+				up->k = u.k * c - right.k * s;
+			}
+		}
+		/* (bob=: the hover's rise and fall, and its heading's sway) */
+		if (object->bob_period > 0.f)
+		{
+			double seconds = (double)vita_host_time_us() / 1000000.0;
+			double phase = 2.0 * 3.14159265358979 * seconds / object->bob_period;
+			real sway = (real)(2.0 * 3.14159265358979 / 180.0 * sin(phase * 0.73));
+			real c = (real)cos(sway), s = (real)sin(sway);
+			real_vector3d f = *forward;
+
+			position->z += object->bob_amplitude * (real)sin(phase);
+			forward->i = f.i * c - f.j * s;
+			forward->j = f.i * s + f.j * c;
+		}
+	}
 	if (object->pitch != 0.f)
 	{
 		real angle = object->pitch * MENU_SCENE_DEGREES;
@@ -1108,7 +1349,7 @@ static boolean object_hold(struct menu_scene_object *object, short slot)
 		object_place(object, &position, &forward, &up);
 		/* (put back only when it has moved: a flying biped stays where it is,
 		and placing an object finds its clusters again, each time) */
-		if (distance_squared3d(&datum->object.position, &position) > 0.0001f ||
+		if (object->bob_period > 0.f || distance_squared3d(&datum->object.position, &position) > 0.0001f ||
 			dot_product3d(&datum->object.forward, &forward) < 0.9999f ||
 			dot_product3d(&datum->object.up, &up) < 0.9999f)
 		{
@@ -1117,6 +1358,20 @@ static boolean object_hold(struct menu_scene_object *object, short slot)
 		datum->object.translational_velocity.i = datum->object.translational_velocity.j =
 			datum->object.translational_velocity.k = 0.f;
 		datum->object.angular_velocity.i = datum->object.angular_velocity.j = datum->object.angular_velocity.k = 0.f;
+		/* (a weapon or a powerup standing alone - the Forge lobby's sniper
+		rifle leaning on the Warthog, the camouflage on the ground -: at rest,
+		its spin gone, so that the tick's item physics leaves it where it
+		stands - it fell and turned a little each tick, and was put back each
+		frame: it shook) */
+		{
+			struct item_datum *item = item_try_and_get(object->object_index);
+
+			if (item)
+			{
+				SET_FLAG(item->object.flags, _object_at_rest_bit, TRUE);
+				item->item.flags &= ~FLAG(_item_has_nonzero_angular_velocity_bit);
+			}
+		}
 	}
 	if (unit)
 	{
@@ -1578,6 +1833,16 @@ void menu_scene_objects_want(
 		snprintf(object->seat, sizeof(object->seat), "%s", parsed[index].seat);
 		object->look_entry = parsed[index].look_entry;
 		object->suspension = parsed[index].suspension;
+		object->level = parsed[index].level;
+		object->grounded = parsed[index].grounded;
+		object->ground_offset = parsed[index].ground_offset;
+		object->slope_length = parsed[index].slope_length;
+		object->slope_width = parsed[index].slope_width;
+		object->bob_amplitude = parsed[index].bob_amplitude;
+		object->bob_period = parsed[index].bob_period;
+		object->world = parsed[index].world;
+		object->world_position = parsed[index].world_position;
+		object->world_yaw = parsed[index].world_yaw;
 		object->camera = camera;
 		object->scale = 1.f;
 		object->wanted = TRUE;
@@ -1733,6 +1998,9 @@ int menu_scene_spartan_show(
 		menu_scene_objects.preview_pack : MENU_SCENE_PREVIEW_PACK);
 	object->tag[0] = 0;
 	object->pitch = object->roll = 0.f;
+	object->level = FALSE;
+	object->grounded = FALSE;
+	object->world = FALSE;
 	object->weapon_pack[0] = object->weapon_tag[0] = 0;
 	object->animation[0] = 0;
 	object->vehicle_entry = object->look_entry = NONE;

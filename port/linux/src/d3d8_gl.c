@@ -135,6 +135,25 @@ static void vita_preview_picture(long width, int *left, int *top, int *picture_w
 	*top = (VITA_DISPLAY_HEIGHT - *picture_height) / 2;
 }
 
+/* (Menu style ElDewrito, port/linux/game: its screens laid out over 800
+columns - the 640 in the middle and 80 on each side, as a 16:9 display has
+them -) the narrowest the menus are drawn while they are up: a display
+narrower than that (4:3: 640) draws them that wide, letterboxed, so that
+nothing of them is off its edges; 640 otherwise */
+int halo_menus_minimum_width(void);
+
+static void screen_mode_minimum(long *width, float scale[2], long display_width, long display_height)
+{
+	long minimum = halo_menus_minimum_width();
+
+	if (*width >= minimum || display_width <= 0 || display_height <= 0)
+		return;
+	*width = minimum & ~1L;
+	scale[0] = (float)display_width / (float)*width;
+	scale[1] = (float)display_height / (float)SCREEN_HEIGHT;
+	scale[0] = scale[1] = scale[0] < scale[1] ? scale[0] : scale[1];
+}
+
 static void screen_mode_choose(long *width, float scale[2])
 {
 	if (vita_preview_enabled())
@@ -175,6 +194,7 @@ static void screen_mode_choose(long *width, float scale[2])
 		keeps its shape and the display blit letterboxes it */
 		if (*width != wanted && *width != (wanted & ~1L))
 			scale[0] = scale[1] = scale[0] < scale[1] ? scale[0] : scale[1];
+		screen_mode_minimum(width, scale, display_width, display_height);
 	}
 #endif
 }
@@ -188,6 +208,16 @@ long halo_screen_width(void)
 			screen_width * screen_scale[0], SCREEN_HEIGHT * screen_scale[1]);
 	}
 	return screen_width;
+}
+
+/* the display's pixels per unit of the 640x480 interface (the Vita
+preview's: the Vita's display, 544 lines for 480) */
+float halo_ui_pixel_scale(void)
+{
+	halo_screen_width();
+	if (vita_preview_enabled())
+		return (float)VITA_DISPLAY_HEIGHT / (float)SCREEN_HEIGHT;
+	return screen_scale[1];
 }
 
 void halo_screen_ui_offset(unsigned char centered)
@@ -3641,7 +3671,11 @@ void halo_d3d_interface_begin(void)
 		vgxm_interface_begin) */
 		const char *setting = getenv("HALO_SHARP_UI_FULL");
 
-		if (vita_preview_scale >= 1.0f && !(setting && atoi(setting) != 0))
+		extern int halo_menu_style_online(void);
+		extern int halo_main_menu_loaded(void);
+
+		if (vita_preview_scale >= 1.0f && !(setting && atoi(setting) != 0) &&
+			!(halo_menu_style_online() && halo_main_menu_loaded()))
 			return;
 	}
 	back_buffer = render_target_get(&device.back_buffer);

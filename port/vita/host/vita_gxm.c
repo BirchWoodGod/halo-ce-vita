@@ -48,6 +48,8 @@ each frame's presentation.
 
 /* Menu style (port/linux/src/menu_files.c, halo_menus.h) */
 int halo_menu_style_halo3(void);
+int halo_menu_style_online(void);
+int halo_main_menu_loaded(void);
 #include "vita_shader_cache.h"
 #include "vita_shader_generator_id.h"
 #include "lang.h"
@@ -415,6 +417,8 @@ static struct
 	volatile int menu_index, menu_visible, menu_selected;
 	/* (Menu style Halo 3, read on the game's thread as the text is set) */
 	volatile int menu_halo3;
+	/* (Menu style Online: its panel, online_panel) */
+	volatile int menu_online;
 	/* the frame's scale to the display (HALO_UPSCALE_FILTER): 0 smooth
 	(bilinear), 1 sharp (nearest), both at the display's height; and the
 	picture's rectangle on the display, the rest black (vgxm_present) */
@@ -4406,6 +4410,7 @@ void vgxm_menu_set(const char *text, int selected)
 		gxm.menu_text[next][sizeof(gxm.menu_text[next]) - 1] = 0;
 		gxm.menu_selected = selected;
 		gxm.menu_halo3 = halo_menu_style_halo3();
+		gxm.menu_online = halo_menu_style_online();
 		__atomic_store_n(&gxm.menu_index, next, __ATOMIC_RELEASE);
 		gxm.menu_visible = 1;
 	}
@@ -5190,6 +5195,198 @@ static unsigned int h3_panel(struct overlay_vertex *vertices, unsigned int count
 	return count;
 }
 
+/* ---- Menu style Online's settings panel: the online look's SETTINGS
+screen - its title in a dark band across the top, the tabs under it (GAME,
+CONTROLS, VIDEO, SOUND, MULTIPLAYER, DEV: the panel's own), the rows in one
+see-through navy column with the headings centred over them, each value in
+a column of its own and, for a value stepped through a range, a slider
+('\x0b' choice/last after it: vita_settings.c), the chosen row on the
+orange bar, its help under the column, the buttons in the strip at the
+foot. The same lines as h3_panel draws (menu_build's), the same rows and
+actions: only the look. */
+#define ONLINE_LEFT 132.0f
+#define ONLINE_RIGHT (DISPLAY_WIDTH - 132.0f)
+#define ONLINE_TITLE_TOP 26.0f
+#define ONLINE_TITLE_HEIGHT 44.0f
+#define ONLINE_TABS_TOP 70.0f
+#define ONLINE_BODY_TOP 102.0f
+#define ONLINE_BODY_END 456.0f
+#define ONLINE_FOOT_TOP 470.0f
+#define ONLINE_FOOT_HEIGHT 36.0f
+#define ONLINE_DIM 0xB0100804u
+#define ONLINE_BAND 0xE8180C06u
+#define ONLINE_BODY_TOP_COLOR 0xC8582E1Au
+#define ONLINE_BODY_BOTTOM_COLOR 0xD0381C0Eu
+#define ONLINE_BAR 0xF03E6CBAu
+#define ONLINE_BAR_FADED 0xC0305496u
+#define ONLINE_LABEL 0xFFE6DDD4u
+#define ONLINE_VALUE 0xFFEFE9E2u
+#define ONLINE_TAB 0xFF9C8C7Cu
+#define ONLINE_HEADING 0xFFE8D2BCu
+#define ONLINE_TRACK 0x80D2B49Au
+#define ONLINE_KNOB 0xFFF8F0E8u
+
+static unsigned int online_tabs(struct overlay_vertex *vertices, unsigned int count, float y, const char *tabs)
+{
+	const float cap = h3_capital(&h3.item), baseline = y + cap + 4.0f;
+	float x = ONLINE_LEFT + 4.0f;
+	char name[64];
+
+	while (*tabs)
+	{
+		size_t length = strcspn(tabs, "|"), shown = *tabs == '*', name_length = length - shown;
+
+		if (name_length > sizeof(name) - 1)
+			name_length = sizeof(name) - 1;
+		memcpy(name, tabs + shown, name_length);
+		name[name_length] = 0;
+		x += h3_text(&h3.item, x, baseline, shown ? H3_TAB_SHOWN : ONLINE_TAB, name, 1) + 16.0f;
+		tabs += length;
+		if (*tabs == '|')
+			tabs++;
+	}
+	/* (L and R change them, as the online screen's bumpers) */
+	x += 6.0f;
+	x += h3_key(vertices, &count, x, baseline, "L") + 4.0f;
+	h3_key(vertices, &count, x, baseline, "R");
+	return count;
+}
+
+static unsigned int online_panel(struct overlay_vertex *vertices, unsigned int count, const char **lines,
+	int line_count)
+{
+	const float width = ONLINE_RIGHT - ONLINE_LEFT, value_x = ONLINE_LEFT + width * 0.54f;
+	const float small_cap = h3_capital(&h3.small), item_cap = h3_capital(&h3.item);
+	const char *help = NULL, *footer = NULL;
+	float y, row_height, units = 0.0f;
+	int index;
+
+	count = overlay_rect(vertices, count, 0.0f, 0.0f, DISPLAY_WIDTH, DISPLAY_HEIGHT, ONLINE_DIM);
+	/* (the title's band, the tabs' under it) */
+	count = overlay_rect(vertices, count, 0.0f, ONLINE_TITLE_TOP, DISPLAY_WIDTH, ONLINE_TITLE_HEIGHT, ONLINE_BAND);
+	h3_text(&h3.title, ONLINE_LEFT, ONLINE_TITLE_TOP + (ONLINE_TITLE_HEIGHT + h3_capital(&h3.title)) / 2.0f,
+		H3_TITLE, T("Settings"), 1);
+	count = h3_rect(vertices, count, 0.0f, ONLINE_TABS_TOP, DISPLAY_WIDTH, ONLINE_BODY_END - ONLINE_TABS_TOP,
+		ONLINE_BODY_TOP_COLOR, ONLINE_BODY_TOP_COLOR, ONLINE_BODY_BOTTOM_COLOR, ONLINE_BODY_BOTTOM_COLOR);
+	count = online_tabs(vertices, count, ONLINE_TABS_TOP, lines[0] + 1);
+	count = overlay_rect(vertices, count, ONLINE_LEFT, ONLINE_BODY_TOP - 6.0f, width, 1.0f, H3_RULE);
+	/* (the rows' height: as many as fit, 20 to 26 pixels) */
+	y = ONLINE_BODY_TOP;
+	for (index = 1; index < line_count; index++)
+	{
+		char mark = lines[index][0];
+
+		if (mark == '\x03' || mark == '\x08')
+			y += 22.0f;
+		else if (!mark)
+			units += 0.4f;
+		else if (mark == '\x05')
+			help = lines[index] + 1;
+		else if (mark == '\x06')
+			footer = lines[index] + 1;
+		else
+			units += 1.0f;
+	}
+	row_height = units > 0.0f ? (ONLINE_BODY_END - 40.0f - y) / units : 26.0f;
+	if (row_height > 26.0f)
+		row_height = 26.0f;
+	if (row_height < 18.0f)
+		row_height = 18.0f;
+	y = ONLINE_BODY_TOP;
+	for (index = 1; index < line_count && y < ONLINE_BODY_END - 30.0f; index++)
+	{
+		const char *line = lines[index];
+		int chosen = index == gxm.menu_selected;
+		const float baseline = y + (row_height - 2.0f + small_cap) / 2.0f;
+
+		if (line[0] == '\x05' || line[0] == '\x06')
+			continue;
+		if (line[0] == '\x03' || line[0] == '\x08')
+		{
+			/* (a page's title and the headings: centred, as the online
+			screen's sections) */
+			const struct overlay_face *face = line[0] == '\x08' ? &h3.item : &h3.small;
+
+			h3_text(face, ONLINE_LEFT + (width - overlay_face_width(face, line + 1, 1)) / 2.0f,
+				y + 2.0f + (line[0] == '\x08' ? item_cap : small_cap), ONLINE_HEADING, line + 1, 1);
+			y += 22.0f;
+			continue;
+		}
+		if (!line[0])
+		{
+			y += row_height * 0.4f;
+			continue;
+		}
+		if (chosen)
+			count = h3_rect(vertices, count, ONLINE_LEFT, y, width, row_height - 2.0f, ONLINE_BAR, ONLINE_BAR_FADED,
+				ONLINE_BAR, ONLINE_BAR_FADED);
+		if (line[0] == '\x04')
+			h3_text(&h3.small, ONLINE_LEFT + 16.0f, baseline, H3_VALUE_CHOSEN, line + 1, 0);
+		else if (line[0] == '!')
+			h3_text(&h3.small, ONLINE_LEFT + 16.0f, baseline, MENU_WARNING, line + 1, 0);
+		else
+		{
+			const char *split = strchr(line, '\x02');
+			const char *range = split ? strchr(split, '\x0b') : NULL;
+			char label[64], value[96];
+			size_t length = split ? (size_t)(split - line) : strlen(line);
+			int left = 0, right = 0, choice = 0, last = 0;
+			float x = value_x;
+
+			if (length > sizeof(label) - 1)
+				length = sizeof(label) - 1;
+			memcpy(label, line, length);
+			label[length] = 0;
+			value[0] = 0;
+			if (split)
+			{
+				char raw[160];
+				size_t raw_length = range ? (size_t)(range - split - 1) : strlen(split + 1);
+
+				if (raw_length > sizeof(raw) - 1)
+					raw_length = sizeof(raw) - 1;
+				memcpy(raw, split + 1, raw_length);
+				raw[raw_length] = 0;
+				h3_value(value, sizeof(value), raw, &left, &right);
+			}
+			if (range && sscanf(range + 1, "%d/%d", &choice, &last) != 2)
+				last = 0;
+			h3_text(&h3.small, ONLINE_LEFT + 16.0f, baseline, ONLINE_LABEL, label, 1);
+			if (chosen && left)
+				h3_text(&h3.small, x - 12.0f, baseline, H3_ARROW, "<", 0);
+			h3_text(&h3.small, x, baseline, ONLINE_VALUE, value, 1);
+			/* (a value of a range of numbers: its slider, the knob where
+			the choice stands) */
+			if (last >= 3 && value[0] >= '0' && value[0] <= '9')
+			{
+				const float value_end = value_x + overlay_face_width(&h3.small, value, 1) + 16.0f;
+				const float track_x = value_end > value_x + 60.0f ? value_end : value_x + 60.0f;
+				const float track_width = ONLINE_RIGHT - 34.0f - track_x;
+				const float knob = track_x + track_width * (float)choice / (float)last;
+
+				count = overlay_rect(vertices, count, track_x, y + row_height / 2.0f - 1.0f, track_width, 1.0f,
+					ONLINE_TRACK);
+				count = overlay_rect(vertices, count, knob - 1.5f, y + row_height / 2.0f - 5.0f, 3.0f, 9.0f,
+					ONLINE_KNOB);
+			}
+			if (chosen && right)
+				h3_text(&h3.small, ONLINE_RIGHT - 22.0f, baseline, H3_ARROW, ">", 0);
+		}
+		y += row_height;
+	}
+	/* (the chosen row's help, under the column) */
+	if (help && help[0])
+	{
+		count = overlay_rect(vertices, count, ONLINE_LEFT, ONLINE_BODY_END - 36.0f, width, 1.0f, H3_RULE);
+		h3_wrapped(&h3.small, ONLINE_LEFT + 16.0f, ONLINE_BODY_END - 30.0f + small_cap, width - 32.0f,
+			small_cap + 7.0f, H3_HELP, help);
+	}
+	count = overlay_rect(vertices, count, 0.0f, ONLINE_FOOT_TOP, DISPLAY_WIDTH, ONLINE_FOOT_HEIGHT, H3_STRIP);
+	if (footer)
+		count = h3_buttons(vertices, count, ONLINE_LEFT, ONLINE_FOOT_TOP, ONLINE_FOOT_HEIGHT, footer);
+	return count;
+}
+
 /* the panel without a tab bar (a message, a question, the guide, a screen an
 action opens): Halo 3's dialog, a band across the screen, its title in a
 strip above, its lines (the chosen one on the orange bar) and its buttons
@@ -5335,6 +5532,8 @@ static unsigned int menu_build(struct overlay_vertex *vertices, unsigned int cou
 	}
 	if (line_count < 2)
 		return count;
+	if (gxm.menu_online && h3_ready() && lines[0][0] == '\t' && !diagram)
+		return online_panel(vertices, count, lines, line_count);
 	if (gxm.menu_halo3 && h3_ready())
 		return lines[0][0] == '\t' ? h3_panel(vertices, count, limit, lines, line_count, diagram) :
 			h3_dialog(vertices, count, lines, line_count);
@@ -5882,6 +6081,11 @@ static int interface_full_scale(const struct target *source)
 
 		split_anyway = setting && atoi(setting) != 0;
 	}
+	/* (Menu style Online's menus: split at 100% too, their text and lines
+	drawn at the display's pixels - its sharp fonts, menu_tags.c - not scaled
+	up with the picture; in play as ever) */
+	if (halo_menu_style_online() && halo_main_menu_loaded())
+		return 0;
 	return !split_anyway && source->scale_x <= 0.0f && source->scale_y <= 0.0f;
 }
 

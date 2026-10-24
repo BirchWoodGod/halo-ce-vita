@@ -1,0 +1,32 @@
+# The Forge lobby's scene in the Online menus (menus/online/multiplayer.xml's
+# online/forge/lobby backdrop_object=, port/linux/game/menu_scene_objects.c):
+# the active camouflage powerup resting on the ground by the Warthog, from the
+# player's own multiplayer maps (the Warthog is menu_campaign's, the Monitor
+# menu_monitor's, the sniper rifle menu_multiplayer's). What a still scene does
+# not need is left out: sounds, effects, damage, the HUD.
+pack menu_forge
+map bloodgulch sidewinder damnation hangemhigh boardingaction chillout ratrace prisoner longest beavercreek carousel wizard putput
+tag eqip powerups\active camouflage
+strip snd!
+strip lsnd
+strip effe
+strip part
+strip pctl
+strip cont
+strip deca
+strip jpt!
+strip ligh
+strip lens
+strip glw!
+strip udlg
+strip foot
+strip wphi
+strip unhi
+strip hud#
+strip trak
+strip mgs2
+strip spla
+strip proj
+strip weap
+strip bipd
+strip vehi

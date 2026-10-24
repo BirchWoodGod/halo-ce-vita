@@ -567,7 +567,9 @@ int p2p_flame_listed(void)
 	pthread_mutex_lock(&friends_lock);
 	listed = flame_own_listed();
 	pthread_mutex_unlock(&friends_lock);
-	return listed;
+	/* (tests and screenshots, never a release: HALO_TEST_FLAME_LISTED=1
+	shows the tester's rows as if listed) */
+	return listed || flame_test_setting("HALO_TEST_FLAME_LISTED");
 }
 
 int p2p_flame_wearing(void)

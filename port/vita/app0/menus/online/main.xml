@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Menu style Online (a preview): the main menu. It opens in place of the Halo 3 main menu
+(h3/main/screen: menu_tags.c menu_tags_online, an online/<name> widget for h3/<name>) and does
+what that one does, laid out the online way: the list low at the left in a see-through navy block
+with the orange bar, the version and the Settings button at its foot, the title large at the
+right over the live scene, a deeper blue cast over it. Every item of the Halo 3 main menu is here:
+SERVER BROWSER (the games browser, as the lobby's BROWSE GAMES), CAMPAIGN, HOST MULTIPLAYER (the
+multiplayer lobby), HOST FORGE (the Forge lobby), CUSTOMIZATION, FRIENDS, FILE SHARE, MOD MANAGER;
+Start the settings panel; the party's nameplates and the live servers at the top right. The art
+is this folder's own (tools/online_menu_art.py) and the Halo 3 set's (the title, the glyphs,
+the fonts). The left of the list sits in the wide screen's margin (x below 0 of the 640 columns:
+16:10 and wider). -->
+<menus>
+	<!-- the online set's fonts (tools/online_menu_art.py, Saira Semi Condensed, SIL OFL), each also
+	drawn at the displays' pixels per unit: the one for this display is chosen and its text drawn
+	texel for pixel (sharp=: menu_tags.c font_build, draw_string.c) -->
+	<font name="online/font_header" file="online/font_header.bin" sharp="1.133:online/font_header_1133.bin 1.5:online/font_header_1500.bin 2.25:online/font_header_2250.bin 3:online/font_header_3000.bin"/>
+	<font name="online/font_title" file="online/font_title.bin" sharp="1.133:online/font_title_1133.bin 1.5:online/font_title_1500.bin 2.25:online/font_title_2250.bin 3:online/font_title_3000.bin"/>
+	<font name="online/font_item" file="online/font_item.bin" sharp="1.133:online/font_item_1133.bin 1.5:online/font_item_1500.bin 2.25:online/font_item_2250.bin 3:online/font_item_3000.bin"/>
+	<font name="online/font_small" file="online/font_small.bin" sharp="1.133:online/font_small_1133.bin 1.5:online/font_small_1500.bin 2.25:online/font_small_2250.bin 3:online/font_small_3000.bin"/>
+	<font name="online/font_tab" file="online/font_tab.bin" sharp="1.133:online/font_tab_1133.bin 1.5:online/font_tab_1500.bin 2.25:online/font_tab_2250.bin 3:online/font_tab_3000.bin"/>
+	<bitmap name="online/haze">
+		<frame png="online/haze.png" width="256" height="128"/>
+	</bitmap>
+	<bitmap name="online/main_panel">
+		<frame png="online/main_panel.png" width="4" height="256"/>
+	</bitmap>
+	<bitmap name="online/footer">
+		<frame png="online/footer.png" width="4" height="4"/>
+	</bitmap>
+	<bitmap name="online/item">
+		<frame png="online/item_off.png" width="4" height="4"/>
+		<frame png="online/item_on.png" width="512" height="64"/>
+	</bitmap>
+	<!-- (the title: the owner's HALO CE VITA logo at 1024x256, drawn whole into its widget) -->
+	<bitmap name="online/title" fit="widget">
+		<frame png="online/title.png" width="1024" height="256"/>
+	</bitmap>
+	<bitmap name="online/rule">
+		<frame png="online/rule.png" width="4" height="4"/>
+	</bitmap>
+	<strings name="online/main_items">
+		<string text="SERVER BROWSER"/>
+		<string text="HOST MULTIPLAYER"/>
+		<string text="HOST FORGE"/>
+		<string text="CAMPAIGN"/>
+		<string text="CUSTOMIZATION"/>
+		<string text="FRIENDS"/>
+		<string text="FILE SHARE"/>
+		<string text="MOD MANAGER"/>
+		<string text="Settings"/>
+		<string text="EXIT"/>
+	</strings>
+
+	<!-- the items: each opens what the Halo 3 main menu's does (main.xml), SERVER BROWSER what the
+	multiplayer lobby's BROWSE GAMES does (the profile once a run, then the games browser) -->
+	<widget name="online/main/browse" type="text" width="226" height="18" bitmap="online/item" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/main_items" string_index="0">
+		<on event="a start" run="port h3 browse system link"/>
+		<on event="a start" run="error if no network connection" open="ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen"/>
+	</widget>
+	<widget name="online/main/multiplayer" type="text" width="226" height="18" bitmap="online/item" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/main_items" string_index="1">
+		<on event="a start" open="ui\shell\main_menu\multiplayer_type_select\multiplayer_type_select_screen" label="multiplayer"/>
+	</widget>
+	<widget name="online/main/forge" type="text" width="226" height="18" bitmap="online/item" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/main_items" string_index="2">
+		<on event="a start" open="h3/forge/lobby"/>
+	</widget>
+	<widget name="online/main/campaign" type="text" width="226" height="18" bitmap="online/item" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/main_items" string_index="3">
+		<!-- (SELECT PROFILE only in CUSTOMIZATION, owner: the current profile - CUSTOMIZATION's, the
+		nameplate's; a new one when there is none - straight into the campaign lobby; SELECT PROFILE
+		only when none can be had) -->
+		<on event="a start" run="port h3 profile current" open="ui\shell\main_menu\solo_level_select\solo_level_select_screen" otherwise="ui\shell\main_menu\load_campaign_player_profile" label="load_campaign"/>
+	</widget>
+	<widget name="online/main/customization" type="text" width="226" height="18" bitmap="online/item" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/main_items" string_index="4">
+		<on event="a start" open="ui\shell\main_menu\settings_select\player_setup\player_profile_select_screen" label="settings"/>
+	</widget>
+	<widget name="online/main/friends" type="text" width="226" height="18" bitmap="online/item" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/main_items" string_index="5">
+		<on event="a start" open="h3/friends/screen"/>
+	</widget>
+	<widget name="online/main/fileshare" type="text" width="226" height="18" bitmap="online/item" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/main_items" string_index="6">
+		<on event="a start" run="port fileshare enter" open="h3/fileshare/screen"/>
+	</widget>
+	<widget name="online/main/mods" type="text" width="226" height="18" bitmap="online/item" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/main_items" string_index="7">
+		<on event="a start" run="port h3 mods init" open="h3/mods/screen"/>
+	</widget>
+	<!-- (EXIT: the desktop's; hidden on the PS Vita, online_main_update) -->
+	<widget name="online/main/exit" type="text" width="226" height="18" bitmap="online/item" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/main_items" string_index="9">
+		<on event="a start" open="online/exit/screen"/>
+	</widget>
+	<widget name="online/main/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<child widget="online/main/browse" x="0" y="0"/>
+		<child widget="online/main/campaign" x="0" y="19"/>
+		<child widget="online/main/multiplayer" x="0" y="38"/>
+		<child widget="online/main/forge" x="0" y="57"/>
+		<child widget="online/main/customization" x="0" y="76"/>
+		<child widget="online/main/friends" x="0" y="95"/>
+		<child widget="online/main/fileshare" x="0" y="114"/>
+		<child widget="online/main/mods" x="0" y="133"/>
+		<child widget="online/main/exit" x="0" y="152"/>
+	</widget>
+
+	<widget name="online/main/haze" left="0" top="0" width="640" height="480" bitmap="online/haze"/>
+	<widget name="online/main/panel" left="-64" top="251" width="226" height="221" bitmap="online/main_panel"/>
+	<widget name="online/main/version" type="text" left="-62" top="429" width="222" height="14" align="right" font="online/font_small" color="#FF8EA2BC">
+		<data input="port online version"/>
+	</widget>
+	<widget name="online/main/foot" left="-64" top="446" width="226" height="26" bitmap="online/footer"/>
+	<widget name="online/main/rule" left="-64" top="446" width="226" height="1" bitmap="online/rule"/>
+	<widget name="online/main/start_butn" left="-58" top="451" width="16" height="16" bitmap="h3/glyph_start"/>
+	<widget name="online/main/settings" type="text" left="-38" top="450" width="150" height="18" font="online/font_item" color="#FFF0F4F8" text_y="1" string_list="online/main_items" string_index="8"/>
+	<!-- (the title large at the right, as the online menu has its logo: the owner's HALO CE VITA
+	logo, main.xml's h3/title, drawn whole into the widget) -->
+	<widget name="online/main/title" left="300" top="318" width="400" height="100" bitmap="online/title"/>
+
+	<!-- (scene="ring": as the Halo 3 main menu, the ring's own flight behind) -->
+	<widget name="online/main/screen" flags="pass_unhandled_to_focused_child" scene="ring"
+		backdrop="load_campaign -46.0 25.5 69.0 34 6 0 70">
+		<on event="created" run="main menu intialize" label="ring_loop"/>
+		<on event="created" run="port h3 servers on"/>
+		<on event="created" run="port h3 scene"/>
+		<on event="deleted" run="port h3 servers off"/>
+		<on event="b back" run="NULL"/>
+		<on event="start" run="port settings panel" open="ui\shell\main_menu\settings_select\player_setup\player_profile_select_screen" label="settings"/>
+		<child widget="online/main/haze"/>
+		<child widget="online/main/panel"/>
+		<child widget="online/main/version"/>
+		<child widget="online/main/foot"/>
+		<child widget="online/main/rule"/>
+		<child widget="online/main/start_butn"/>
+		<child widget="online/main/settings"/>
+		<child widget="online/main/title"/>
+		<child widget="online/lobby/main/players"/>
+		<child widget="online/lobby/main/nameplate"/>
+		<child widget="online/lobby/main/party_plates"/>
+		<child widget="online/lobby/main/servers"/>
+		<child widget="online/main/list" x="-64" y="252"/>
+	</widget>
+</menus>

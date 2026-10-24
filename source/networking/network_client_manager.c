@@ -397,6 +397,7 @@ symbols in this file:
 #include "tag_files/tag_files.h"
 #include "custom_edition_maps.h"
 #include "custom_edition_cache.h" /* port: custom_edition_level_name */
+#include "mcc_content.h" /* port: MCC's own maps */
 #include "network_wire.h"
 #include "crossplay_maps.h"
 #include "network_game_record.h"
@@ -1476,6 +1477,12 @@ enum network_game_client_map_check
 	/* crossplay: a PC host's map this machine does not play (why: the
 	check's crossplay verdict, crossplay_maps.h) */
 	_network_game_client_map_crossplay_refused,
+	/* (port) one of MCC's own maps (mcc_content.h) that this machine does
+	not have (no Halo content folder, or no such file in it), or whose file
+	is not the host's (another MCC version), or a host that does not say
+	which it plays: never downloaded */
+	_network_game_client_map_mcc_missing,
+	_network_game_client_map_mcc_different,
 };
 
 static short network_game_client_map_check(
@@ -1512,6 +1519,19 @@ static short network_game_client_map_check(
 		if (!cache_files_map_plays_multiplayer(map->name, build))
 			return _network_game_client_map_build_unsupported;
 		return _network_game_client_map_playable;
+	}
+	/* port: one of MCC's own maps (the Halo content folder,
+	mcc_content.h): this machine's own MCC file, the same as the host's
+	(its identity, as a custom map's, and one the host must give); never
+	asked of the host, which shares none */
+	{
+		char mcc_stem[MCC_CONTENT_STEM_BYTES];
+
+		if (mcc_content_name_stem(map->name, mcc_stem) != _mcc_content_none && !global_network_game_server_get())
+		{
+			if (!map->version || !custom_edition_maps_host_copy_matches(map->name, (unsigned long)map->version, &missing))
+				return map->version && missing ? _network_game_client_map_mcc_missing : _network_game_client_map_mcc_different;
+		}
 	}
 	/* 1. the build */
 	if (!cache_files_map_plays_multiplayer(map->name, build))
@@ -1565,6 +1585,16 @@ static void network_game_client_map_refusal_show(
 	case _network_game_client_map_custom_different:
 		length = snprintf(message, sizeof(message),
 			T("The host's custom map %s isn't the same as yours. Copy the host's map to your maps folder."), name);
+		break;
+	case _network_game_client_map_mcc_missing:
+		length = snprintf(message, sizeof(message),
+			T("The host is playing %s from its MCC files. To join, set the Halo content folder (Multiplayer > Modded "
+			"maps) to your own copy of Halo: The Master Chief Collection's folder."), name);
+		break;
+	case _network_game_client_map_mcc_different:
+		length = snprintf(message, sizeof(message),
+			T("The host's %s from its MCC files isn't the same as yours (another MCC version?). MCC maps are never "
+			"downloaded."), name);
 		break;
 	case _network_game_client_map_custom_needs_pc_maps:
 		length = snprintf(message, sizeof(message),

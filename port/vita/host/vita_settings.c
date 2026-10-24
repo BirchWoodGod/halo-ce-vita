@@ -201,6 +201,15 @@ mods folder has a folder in it) lets the Campaign's level list offer a
 Halo: The Master Chief Collection mod's Halo: CE Anniversary maps from
 ux0:data/haloce-vita/mods, played alone and offline
 (port/linux/game/custom_edition_mods.c, docs/mcc_cea_maps.md).
+"Halo content folder" (HALO_CONTENT_ROOT): where the player's own Halo: The
+Master Chief Collection folder is (halo1 in it): Found by itself, the
+default, ux0:data/haloce-vita/mcc, or ux0:, uma0: or imc0:data/mcc. Its
+maps are listed with the others, as "(MCC)" levels (the campaign's after
+its ten levels, the Halo 3 campaign lobby's missions MCC's where it has
+them, the multiplayer maps first among the custom maps); there is no
+switch, and without one the Xbox maps alone. The page's lines say where
+the content is read from and what of it is played
+(port/linux/game/mcc_content.c, docs/mcc_cea_maps.md).
 "PC map vehicles" (HALO_PC_MAP_VEHICLES, shown while PC maps is on): a
 Custom Edition map's vehicles in a game of this Vita's alone (split screen,
 offline, with or without bots; never a network game's): Xbox, the default,
@@ -573,8 +582,10 @@ static struct setting settings[] = {
 	animated Halo ring - port/vita/app0/menus/halo3, menu_tags.c, which
 	reads it each time a screen opens: live) */
 	PAGE_ROW("Menus", "Menu style, the carnage report and scoreboard", TAB_GAME, PAGE_MENUS),
-	{ "Menu style", "HALO_MENU_STYLE", 0, 2, { "classic", "halo3" }, { "Halo CE", "Halo 3" },
-		"Halo 3: the new menus over the Halo ring. Halo CE: the original menus.", 1, PAGE_MENUS },
+	/* (Online: the Halo 3 menus' flows in the online set's look,
+	port/vita/app0/menus/online - a prototype, menu_tags.c menu_tags_online) */
+	{ "Menu style", "HALO_MENU_STYLE", 0, 3, { "classic", "halo3", "online" }, { "Halo CE", "Halo 3", "ElDewrito" },
+		"ElDewrito: Halo Online style. Halo 3: the ring. Halo CE: the original.", 1, PAGE_MENUS },
 	/* (menu_functions.c h3_carnage_wanted, config.toml's menus.carnage_report:
 	a multiplayer game's end, Halo 3's CARNAGE REPORT or the game's own;
 	read when the scores come up: live. Shown with Menu style Halo 3 - Halo
@@ -588,6 +599,12 @@ static struct setting settings[] = {
 	Carnage report is - Halo CE always shows the game's own -: setting_shown) */
 	{ "Scoreboard", "HALO_SCOREBOARD", 0, 2, { "classic", "halo3" }, { "Halo CE", "Halo 3" },
 		"Scores in a game: Halo 3's scoreboard, or the original", 1, PAGE_MENUS },
+	/* (menu_backdrop.c, config.toml's menus.backdrop: the campaign level
+	Halo behind the Online menus, made once from the player's a30.map; Off,
+	the ring. Read each frame at the main menu: live. Shown with Menu style
+	Online: setting_shown) */
+	{ "Live backdrop", "HALO_MENU_BACKDROP", 0, 2, { "0", "1" }, { "Off", "On" },
+		"ElDewrito menus: the level Halo behind them (your a30.map), or the ring", 1, PAGE_MENUS },
 	/* (Forge and File Share for the original menus - the owner: everything
 	in the overlay -: the Forge page, under Menus (Interface; it was Game's
 	last row, under Updates, insider.21), shown with Menu style Halo CE; the
@@ -646,6 +663,11 @@ static struct setting settings[] = {
 		"Experimental: betas too. Stable: releases only", 1, TAB_GAME },
 	{ "Show dev settings", "HALO_DEV_SETTINGS", 0, 2, { "0", "1" }, { "Off", "On" },
 		"The Dev tab: switches for testers, Save report", 0, TAB_GAME },
+	/* (menu_backdrop.c, config.toml's menus.backdrop_music: the menu music's
+	level under the live backdrop - the level's ambience under it -; read
+	each frame: live. Shown with Menu style ElDewrito: setting_shown) */
+	{ "Menu music", "HALO_MENU_MUSIC", 0, 5, { "100", "70", "50", "25", "0" }, { "100%", "70%", "50%", "25%", "Off" },
+		"Under the ElDewrito menus' live backdrop: the level's ambience comes through", 2, TAB_AUDIO },
 	{ "Sound voices", "HALO_SOUND_CHANNELS", 1, 4, { "16", "24", "32", "0" },
 		{ "16", "24", "32", "Original" }, "Fewer is faster; the AI then differs (after a restart)", 3, TAB_AUDIO },
 	{ "Sound occlusion", "HALO_SOUND_OBSTRUCTION_TICKS", 0, 3, { "1", "3", "6" },
@@ -928,6 +950,13 @@ static struct setting settings[] = {
 	PAGE_ROW("Mod manager", "Custom maps and MCC mods: check, on, off, delete", PAGE_MAPS, PAGE_MODS),
 	{ "PC maps", "HALO_CUSTOM_EDITION", 0, 2, { "0", "1" }, { "Off", "On" },
 		"Experimental: Custom Edition maps in the map list", 0, PAGE_MAPS },
+	/* (the Halo content folder, port/linux/game/mcc_content.c: the
+	player's own MCC folder, halo1 in it, its maps listed with the others;
+	found by itself in ux0:data/haloce-vita/mcc, or one of these. No
+	switch: the page's lines say where the content is read from) */
+	{ "Halo content folder", "HALO_CONTENT_ROOT", 0, 4, { "auto", "ux0:data/mcc", "uma0:data/mcc", "imc0:data/mcc" },
+		{ "Found by itself", "ux0:data/mcc", "uma0:data/mcc", "imc0:data/mcc" },
+		"Your MCC folder with halo1 in it; only read. Default: haloce-vita/mcc", 0, PAGE_MAPS },
 	/* (a mod's Halo: CE Anniversary maps in ux0:data/haloce-vita/mods,
 	offered after the campaign's levels and played alone, offline:
 	port/linux/game/custom_edition_mods.c; off by default, and shown only
@@ -1229,6 +1258,10 @@ static int maps_installer_state;
 /* whether the mods folder (DATA_DIRECTORY/mods) has a folder in it: the
 MCC mods row is shown then */
 static int maps_mods_present;
+/* (the Halo content folder: where it is read from, and Halo CE's maps in it,
+-1 for no such folder) */
+static char maps_content_folder[64];
+static int maps_content_halo1;
 static char maps_installer[64];
 /* the maps turned off: their names, commas between (HALO_MAPS_DISABLED) */
 static char maps_disabled[1024];
@@ -1657,6 +1690,7 @@ Online (network_is), its password while the game is public too; Dynamic
 minimum while Render resolution is Dynamic (each keeps its value
 meanwhile) */
 static int classic_panel(void);
+static int online_panel_style(void);
 
 static int setting_shown(const struct setting *setting)
 {
@@ -1668,6 +1702,12 @@ static int setting_shown(const struct setting *setting)
 	if (setting->variable && (!strcmp(setting->variable, "HALO_CARNAGE_REPORT") ||
 		!strcmp(setting->variable, "HALO_SCOREBOARD")))
 		return !classic_panel();
+	/* (the live backdrop: the Online menus') */
+	if (setting->variable && !strcmp(setting->variable, "HALO_MENU_BACKDROP"))
+		return online_panel_style();
+	/* (the menu music's level under the live backdrop: ElDewrito's) */
+	if (setting->variable && !strcmp(setting->variable, "HALO_MENU_MUSIC"))
+		return online_panel_style();
 	if ((setting->variable && !strcmp(setting->variable, "HALO_ADHOC_ROOM")) || setting->action == ACTION_ADHOC_JOIN)
 		return network_is("adhoc");
 	if (setting->action == ACTION_PAGE && setting->opens == PAGE_CROSSPLAY)
@@ -2881,6 +2921,33 @@ static void maps_scan(void)
 	if (map_scroll >= map_count)
 		map_scroll = 0;
 	maps_installer_state = maps_missing[0] ? vita_ce_installer_state(maps_installer, sizeof(maps_installer)) : 0;
+	{
+		/* (the Halo content folder, as the game finds it on the Vita:
+		port/linux/src/xbox_files.c) */
+		const struct setting *content = setting_named("HALO_CONTENT_ROOT");
+		const char *chosen = content ? content->values[content->choice] : NULL;
+		char halo1[96];
+		DIR *maps_folder;
+
+		snprintf(maps_content_folder, sizeof(maps_content_folder), "%s",
+			chosen && *chosen && strcmp(chosen, "auto") ? chosen : DATA_DIRECTORY "/mcc");
+		snprintf(halo1, sizeof(halo1), "%s/halo1/maps", maps_content_folder);
+		maps_content_halo1 = -1;
+		maps_folder = opendir(halo1);
+		if (maps_folder)
+		{
+			maps_content_halo1 = 0;
+			while ((entry = readdir(maps_folder)) != NULL)
+			{
+				size_t length = strlen(entry->d_name);
+
+				if (length > 4 && !strcasecmp(entry->d_name + length - 4, ".map") &&
+					strcasecmp(entry->d_name, "bitmaps.map") && strcasecmp(entry->d_name, "ui.map"))
+					maps_content_halo1++;
+			}
+			closedir(maps_folder);
+		}
+	}
 	maps_mods_present = 0;
 	folder = opendir(DATA_DIRECTORY "/mods");
 	while (folder && !maps_mods_present && (entry = readdir(folder)) != NULL)
@@ -3830,6 +3897,17 @@ static int page_lines(struct line *lines)
 					T("(halocesetup*.exe) to ux0:data/haloce-vita"));
 			}
 		}
+		/* (where the content is read from: the Halo content folder, or the
+		Xbox maps alone) */
+		lines[count].type = LINE_INFO;
+		if (maps_content_halo1 > 0)
+		{
+			snprintf(lines[count++].text, sizeof(lines[0].text), T("Content: %.30s"), maps_content_folder);
+			lines[count].type = LINE_INFO;
+			snprintf(lines[count++].text, sizeof(lines[0].text), T("Halo CE: %d MCC maps (no sound yet)"), maps_content_halo1);
+		}
+		else
+			snprintf(lines[count++].text, sizeof(lines[0].text), "%s", T("Content: the Xbox maps (no MCC folder)"));
 		if (!map_count)
 		{
 			lines[count].type = LINE_INFO;
@@ -4574,6 +4652,14 @@ static int classic_panel_fits(const char *text)
 	return last + 22 <= 468;
 }
 
+/* Menu style Online: its panel (vita_gxm.c online_panel) */
+static int online_panel_style(void)
+{
+	const struct setting *style = setting_named("HALO_MENU_STYLE");
+
+	return style && !strcmp(style->values[style->choice], "online");
+}
+
 /* the Halo CE menus chosen (Menu style): the classic panel draws the
 settings (vita_gxm.c, halo_menu_style_halo3) */
 static int classic_panel(void)
@@ -4774,6 +4860,11 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 				/* (a row that applies after a restart: marked *) */
 				length += snprintf(text + length, (size_t)(size - length), "\n%s%s\x02%c %s %c", setting_label(setting),
 					setting->restart ? "*" : "", before ? '<' : ' ', setting_value_name(setting), after ? '>' : ' ');
+				/* (Menu style Online: where the choice stands among them,
+				'\x0b' choice/last, for its panel's slider: vita_gxm.c
+				online_panel; the other panels never see it) */
+				if (online_panel_style() && last > 0)
+					length += snprintf(text + length, (size_t)(size - length), "\x0b%d/%d", setting->choice, last);
 				/* (the choices this build does not offer, greyed out after a
 				'\x07', after the arrow's place: vita_gxm.c menu_row) */
 				for (choice = 0; choice <= last && length < size; choice++)

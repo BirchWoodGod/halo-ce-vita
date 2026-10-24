@@ -2633,6 +2633,20 @@ static void main_won_map_private(
 void main_set_map_name(
 	char const *map_name)
 {
+#ifdef HALO_LINUX
+	/* port: a campaign level of the Xbox's the machine has no map for, in the
+	Halo content folder (MCC's), as the classic menus' level lists and the
+	new campaign name them (custom_edition_cache.c) */
+	{
+		extern boolean custom_edition_cache_campaign_level_translate(char const *level_name, char *out, long out_size);
+		char translated[64];
+
+		if (map_name && custom_edition_cache_campaign_level_translate(map_name, translated, sizeof(translated)))
+		{
+			map_name = translated;
+		}
+	}
+#endif
 	main_globals.want_to_be_at_main_menu = FALSE;
 	csstrncpy(main_globals.soloplayer_map_name, map_name, NUMBEROF(main_globals.soloplayer_map_name) - 1);
 	main_globals.soloplayer_map_name[NUMBEROF(main_globals.soloplayer_map_name) - 1] = 0;
@@ -4982,8 +4996,19 @@ static void main_test_commands_update(
 			struct tag_iterator iterator;
 			long tag_index;
 
-			name[0] = '\0';
-			sscanf(commands[index].command + 7, "%127s %ld", name, &wanted);
+			/* (the name is all of it but a trailing number, so a name with
+			spaces ("sound\sfx\weapons\assault rifle\fire") can be named) */
+			strncpy(name, commands[index].command + 7, sizeof(name) - 1);
+			name[sizeof(name) - 1] = '\0';
+			{
+				char *last_space = strrchr(name, ' ');
+				char *end;
+
+				if (last_space && last_space[1] && (wanted = strtol(last_space + 1, &end, 10), !*end))
+					*last_space = '\0';
+				else
+					wanted = 0;
+			}
 			tag_iterator_new(&iterator, 'snd!');
 			while ((tag_index = tag_iterator_next(&iterator)) != NONE)
 			{
@@ -5417,6 +5442,14 @@ void main_loop(
 	{
 #ifdef HALO_LINUX
 		main_test_commands_update();
+		{
+			/* (the Online menus' live backdrop - a30's bsp, a scene pack's -
+			switched to or from here, between frames, before the menus'
+			cameras: menu_backdrop.c) */
+			void menu_backdrop_update(void);
+
+			menu_backdrop_update();
+		}
 		{
 			/* (the Halo 3 menus' camera behind the screen opened, its
 			point written here, between frames: menu_functions.c) */

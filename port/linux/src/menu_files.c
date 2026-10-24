@@ -461,7 +461,7 @@ static void read_font(struct reader *reader, const XML_Char **attributes)
 {
 	struct halo_menus *menus = &reader->menus;
 	struct halo_menu_font font;
-	struct attribute table[] = { { "name", &font.name }, { "file", &font.path } };
+	struct attribute table[] = { { "name", &font.name }, { "file", &font.path }, { "sharp", &font.sharp } };
 
 	memset(&font, 0, sizeof(font));
 	font.file = reader->file;
@@ -647,6 +647,7 @@ static void read_widget(struct reader *reader, const XML_Char **attributes, long
 		{ "header_bitmap", &widget.header_bitmap }, { "footer_bitmap", &widget.footer_bitmap },
 		{ "header_bounds", &widget.header_bounds }, { "footer_bounds", &widget.footer_bounds },
 		{ "scene", &widget.scene }, { "scene_object", &widget.scene_object },
+		{ "backdrop", &widget.backdrop }, { "backdrop_object", &widget.backdrop_object },
 		{ "child_controller", &child_controller }, { "strings_pc", &strings_pc },
 		{ "extends", &widget.extends }, { "drop", &widget.drop }, { "classic_patch", &widget.classic_patch },
 		{ "x", NULL, &widget.x }, { "y", NULL, &widget.y }, { "left", NULL, &widget.left },
@@ -1151,6 +1152,15 @@ int halo_menu_style_halo3(void)
 	return !style || strcmp(style, "classic") != 0;
 }
 
+/* (Menu style Online: the Halo 3 set's flows, menus/online's screens in
+place of those it has, menu_tags.c menu_tags_online) */
+int halo_menu_style_online(void)
+{
+	char const *style = getenv("HALO_MENU_STYLE");
+
+	return style && strcmp(style, "online") == 0;
+}
+
 struct halo_menus const *halo_menus_load(void)
 {
 	struct halo_menus const *result;
@@ -1276,7 +1286,8 @@ static int art_file_open(struct art_file *file, char const *name, int type)
 	DWORD size;
 
 	memset(file, 0, sizeof(*file));
-	snprintf(path, sizeof(path), "%s%s.map", art.plan.map_directory, name);
+	/* (the maps folder's, else the Halo content folder's custom_edition one) */
+	platform_halo_pc_resource_map(art.plan.map_directory, name, path, sizeof(path));
 	file->handle = CreateFileA(path, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
 	if (file->handle == INVALID_HANDLE_VALUE)
 		return 0;

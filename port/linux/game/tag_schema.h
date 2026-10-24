@@ -332,6 +332,11 @@ boolean tag_validate_custom_edition_tags_isolated(
 	char const *map_name,
 	long *corrections);
 
+/* (port) the next packs checked may hold a structure bsp and a scenario
+(the menus' backdrop's: menu_backdrop.c) */
+void tag_validate_pack_allow_structure(
+	boolean allowed);
+
 /* (port) a scene pack's tags (port/linux/game/scene_pack.c): size bytes at
 tag_header laid out as a map's tag data, moved to where they are, their
 pixels and samples at file_offset..file_offset + file_size of the pack's

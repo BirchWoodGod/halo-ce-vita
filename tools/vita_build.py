@@ -423,6 +423,11 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
     # (the desktop build's own pictures, never read on the Vita: its keyboard
     # and Xbox button icons, port/linux/include/halo_button_icons.h)
     desktop_only = {Path("menus/halo3/key_atlas.png"), Path("menus/halo3/xbox_atlas.png")}
+    # (and the Online menus' fonts for the desktop's displays: the Vita draws the 1.133 ones,
+    # tools/online_menu_art.py)
+    desktop_only |= {Path("menus/online") / f"{font}_{scale}.bin"
+                     for font in ("font_header", "font_title", "font_item", "font_small", "font_tab")
+                     for scale in ("1500", "2250", "3000")}
     for asset in sorted((VITA_DIR / "app0").rglob("*")) if (VITA_DIR / "app0").is_dir() else []:
         if asset.is_file() and asset.relative_to(VITA_DIR / "app0") not in desktop_only:
             source = asset

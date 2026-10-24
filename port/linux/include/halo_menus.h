@@ -141,6 +141,13 @@ struct halo_menu_widget
 	the port adds; still the map's widget, it runs none of the port's
 	functions (ui_widget_function_denied): those go on widgets of ours */
 	char const *extends, *drop, *classic_patch;
+	/* (an Online screen) its camera when the live backdrop is behind the
+	menus (menu_backdrop.c): backdrop="<ui.map's camera point> x y z yaw
+	pitch [ticks [fov]]" in the backdrop level's world, as scene= says it;
+	and who stands there then, backdrop_object= as scene_object= (none
+	yet: the lobbies' characters are for later) */
+	char const *backdrop;
+	char const *backdrop_object;
 	long x, y, left, top, width, height, text_x, text_y, auto_close, auto_close_fade, string_index;
 	long has_width, has_height;
 	/* indices in their arrays, or HALO_MENU_NONE */
@@ -156,6 +163,10 @@ places, and their 8-bit pixels), made a font tag of the game's
 struct halo_menu_font
 {
 	char const *name, *path;
+	/* (port) sharp="<pixels per unit>:<file> ...": the same font drawn at
+	more texels per unit, one chosen for the display (menu_tags.c
+	font_build; the text drawn texel for pixel: draw_string.c); NULL none */
+	char const *sharp;
 	char const *file;
 	long line;
 };
@@ -207,6 +218,13 @@ struct halo_menus const *halo_menus_load(void);
 screens (menus/halo3), 0 for Halo CE's own; read again each call, so a
 change in the settings panel takes at the next screen */
 int halo_menu_style_halo3(void);
+/* 1 for Menu style Online (HALO_MENU_STYLE "online"): the Halo 3 set's flows
+(halo_menu_style_halo3 is 1 for it too), with menus/online's screens - an
+online/<name> widget opens in place of h3/<name> - for those it has */
+int halo_menu_style_online(void);
+/* (the renderer: d3d8_gl.c, d3d8_gxm.c) the display's pixels per unit of the
+640x480 interface, where the menus are drawn (the Vita's 960x544: 1.13) */
+float halo_ui_pixel_scale(void);
 /* the same begun on a thread of its own (once), which halo_menus_load waits
 for */
 void halo_menus_preload(void);

@@ -144,8 +144,19 @@ ui.map's own, the rest this folder's art. -->
 	(scene_object=, menu_scene_objects.c; the menu_campaign pack, app0:packs) the Master Chief at
 	the wheel of a Warthog caught mid-jump - its nose up, its wheels hanging, held still: no dust -,
 	a Marine on its gun and one beside him; seen from its left, banked to its left so that the
-	Chief at the wheel shows) -->
+	Chief at the wheel shows. With the live a30 backdrop (Online menus: backdrop=, menu_backdrop.c)
+	the camera is down in the ravine below the owner's spot E, looking up at its edge, and
+	backdrop_object= puts the same Warthog in front of it, closer to the ledge, just launched off it
+	and diving nose down 25 degrees into the ravine (level=1: upright in the world, the camera
+	looking up at it), rolled 28 degrees onto its left side so that its cabin opens to the camera -
+	the Chief at the wheel, the Marine beside him and the gunner -, on the right third's line with
+	the cabin on the upper third's (owner)) -->
 	<widget name="h3/campaign/screen" flags="pass_unhandled_to_focused_child" scene="load_campaign -15 5 0 -20 25 0 50"
+		backdrop="load_campaign -54.0 -47.0 47.2 102 18 0 70"
+		backdrop_object="menu_campaign:warthog 3.6 0.85 0.0 268 pitch=-25 roll=28 level=1;
+			menu_campaign:cyborg in=1 seat=driver;
+			menu_campaign:marine_armored in=1 seat=gunner;
+			menu_campaign:marine_armored in=1 seat=passenger weapon=assault_rifle"
 		scene_object="menu_campaign:warthog 4.2 0.82 -0.42 268 pitch=22 roll=14;
 			menu_campaign:cyborg in=1 seat=driver;
 			menu_campaign:marine_armored in=1 seat=gunner;

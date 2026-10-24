@@ -275,6 +275,12 @@ static struct
 	short client_pack_count;
 	uint32_t client_building_said;
 	boolean client_building_any_said;
+	/* (this machine's own build of the host's packs, for its lobby's
+	screen: whether any is under way, and how far all are - a build never
+	goes back) */
+	boolean client_building_now;
+	short client_building_percent;
+	short client_building_logged;
 	unsigned long client_building_time;
 	char host_title[FORGE_NET_TITLE_SIZE];
 	/* (a client) the host's hello's version: FORGE_NET_HOST_VERSION_COMMANDS
@@ -1012,6 +1018,12 @@ boolean forge_net_server_holds_start(
 		*percent = 0;
 	if (!forge_net.hosting || !server)
 		return FALSE;
+#ifndef HALO_RELEASE
+	/* (tests: the host starts without waiting, as one does once a joiner's
+	build has held it FORGE_NET_BUILDING_MAXIMUM_MILLISECONDS) */
+	if (getenv("HALO_TEST_FORGE_NO_HOLD"))
+		return FALSE;
+#endif
 	for (slot = 0; slot < FORGE_NET_MAXIMUM_MACHINES; slot++)
 	{
 		if (!forge_net.machines[slot].known || forge_net.machines[slot].refused || !forge_net.machines[slot].answered ||
@@ -1116,6 +1128,9 @@ void forge_net_client_handle_lobby_message(
 	forge_net.missing_packs[0] = 0;
 	forge_net.client_pack_count = (short)hello.pack_count;
 	forge_net.client_building_any_said = FALSE;
+	forge_net.client_building_now = FALSE;
+	forge_net.client_building_percent = 0;
+	forge_net.client_building_logged = -1;
 	for (index = 0; index < FORGE_NET_MAXIMUM_PACKS; index++)
 		forge_net.client_pack_of[index] = NONE;
 	for (index = 0; index < hello.pack_count; index++)
@@ -1169,7 +1184,7 @@ static void forge_net_client_building_update(
 	struct forge_net_lobby_message building;
 	unsigned long now = system_milliseconds();
 	long done_sum = 0;
-	short index, count = 0;
+	short index, count = 0, finished = 0;
 
 	if (!client)
 		return;
@@ -1194,8 +1209,23 @@ static void forge_net_client_building_update(
 			done_sum += PIN(done, 0, 100);
 			count++;
 		}
+		else if (state == _scene_pack_state_ready || state == _scene_pack_state_loaded)
+			finished++;
 	}
-	building.flags = count ? (uint32_t)(done_sum / count) : 100;
+	/* (how far all of them are, not the average of those under way: that
+	fell back to 0% as each pack finished and the next began, and a build
+	of minutes on a Vita seemed to start over again and again) */
+	building.flags = count ? (uint32_t)((done_sum + 100L * finished) / (count + finished)) : 100;
+	if (count && (short)building.flags < forge_net.client_building_percent)
+		building.flags = (uint32_t)forge_net.client_building_percent;
+	forge_net.client_building_now = count != 0;
+	forge_net.client_building_percent = count ? (short)building.flags : 0;
+	if (count && (long)building.flags / 10 != forge_net.client_building_logged)
+	{
+		forge_net.client_building_logged = (short)(building.flags / 10);
+		platform_log("forge net: this machine builds the host's packs: %d%% of %d", (int)building.flags,
+			(int)(count + finished));
+	}
 	if (forge_net.client_building_any_said && building.packs_ready == forge_net.client_building_said &&
 		(!building.packs_ready || now - forge_net.client_building_time < FORGE_NET_BUILDING_MILLISECONDS))
 	{
@@ -1221,6 +1251,21 @@ static void forge_net_client_building_update(
 	forge_net.client_building_said = building.packs_ready;
 	forge_net.client_building_any_said = TRUE;
 	forge_net.client_building_time = now;
+}
+
+/* (the joiner's lobby screen) whether this machine is still building the
+host's packs, and how far (0 to 100): the screen says so, not only the
+host's, which holds the game's start for it */
+boolean forge_net_client_building_status(
+	short *percent)
+{
+	if (percent)
+		*percent = 0;
+	if (!forge_net.client_session || !forge_net.client_building_now)
+		return FALSE;
+	if (percent)
+		*percent = forge_net.client_building_percent;
+	return TRUE;
 }
 
 /* (main.c, each frame) the lobby: the host's hellos; a joiner's session
@@ -4178,8 +4223,22 @@ static void forge_net_monitor_pack_want(
 		return;
 	{
 		char why[SCENE_PACK_WHY_SIZE];
-		boolean loaded = scene_packs_recipe_available(FORGE_NET_MONITOR_PACK, why, sizeof(why)) &&
-			scene_packs_load_now(FORGE_NET_MONITOR_PACK);
+		boolean available = scene_packs_recipe_available(FORGE_NET_MONITOR_PACK, why, sizeof(why));
+		boolean loaded;
+
+		/* (a joiner builds none as the map loads, as forge.c's packs: the
+		build reads a campaign map whole, a Vita's half a minute, past the
+		host's wait for the loads) */
+		if (available && !forge_net_hosting())
+		{
+			scene_packs_prebuild(FORGE_NET_MONITOR_PACK);
+			if (!scene_packs_file_current(FORGE_NET_MONITOR_PACK))
+			{
+				available = FALSE;
+				snprintf(why, sizeof(why), "not built here yet");
+			}
+		}
+		loaded = available && scene_packs_load_now(FORGE_NET_MONITOR_PACK);
 
 		if (!loaded && !why[0])
 			scene_packs_status(FORGE_NET_MONITOR_PACK, NULL, why, sizeof(why));
