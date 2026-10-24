@@ -435,6 +435,8 @@ static char const *const port_function_names[] =
 	"port online profile choose", "port online profile delete ask",
 	"port online browser network next", "port online browser network previous",
 	"port online browser filter next", "port online browser filter previous",
+	"port host multiplayer", "port host forge", "port host campaign", "port host next", "port host previous",
+	"port host edit",
 };
 
 /* the port's game data functions (menu_functions.c), from
@@ -466,6 +468,7 @@ static char const *const port_game_data_input_names[] =
 	"port ce lobby", "port ce profile",
 	"port h3 scoreboard", "port h3 scoreboard options",
 	"port online version", "port online custom", "port online switch", "port online lobby",
+	"port host",
 };
 
 static struct

@@ -79,7 +79,7 @@ and the map's picture and description in a card at the right. The art is this fo
 	</widget>
 	<widget name="online/mp/host_label" type="text" left="0" top="0" width="160" height="18" font="online/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="online/lobby_text" string_index="1" />
 	<widget name="online/mp/network_row" width="344" height="18" bitmap="online/item" flags="pass_unhandled_to_focused_child">
-		<on event="a" open="online/network/screen" />
+		<on event="a" run="port host multiplayer" open="online/host/screen" />
 		<child widget="online/mp/host_label" />
 		<child widget="online/mp/network_status" />
 	</widget>
@@ -534,7 +534,7 @@ and the map's picture and description in a card at the right. The art is this fo
 	</widget>
 	<widget name="online/forge/host_label" type="text" left="0" top="0" width="160" height="18" font="online/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="online/lobby_text" string_index="1" />
 	<widget name="online/forge/network_row" width="344" height="18" bitmap="online/item" flags="pass_unhandled_to_focused_child">
-		<on event="a" open="online/network/screen" />
+		<on event="a" run="port host forge" open="online/host/screen" />
 		<child widget="online/forge/host_label" />
 		<child widget="online/forge/network_status" />
 	</widget>

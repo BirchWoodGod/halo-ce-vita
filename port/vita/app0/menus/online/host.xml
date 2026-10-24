@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Menu style Online: HOST SETTINGS, the page the three lobbies' HOST SETTINGS row opens (the
+multiplayer and Forge lobbies', menus/online/multiplayer.xml, and the campaign's,
+menus/online/campaign.xml; the row runs "port host multiplayer", "forge" or "campaign" first).
+Halo Online's server settings as a flow - a band with the title, the settings' rows with their
+values at the right in ice blue, the focused row's help below, the buttons at the foot - laid out
+with this folder's own art and the pickers' parts (online/pick/*). Every row is a setting the
+game has (menu_functions.c online_host_update): NETWORK opens the lobby's network picker, LOBBY
+NAME and PASSWORD are typed, the others step with A, right and left; the rows a lobby or its
+network does not use are left out, the others close up. -->
+<menus>
+	<strings name="online/host_text">
+		<string text="HOST SETTINGS"/>
+		<string text="Close"/>
+	</strings>
+	<strings name="online/host_labels">
+		<string text="NETWORK"/>
+		<string text="LOBBY NAME"/>
+		<string text="PRIVACY"/>
+		<string text="WHO CAN JOIN"/>
+		<string text="MAX PLAYERS"/>
+		<string text="PASSWORD"/>
+		<string text="ONLINE BOTS"/>
+		<string text="CO-OP PLAYERS"/>
+	</strings>
+	<widget name="online/host/title" type="text" left="2" top="36" width="400" height="34" font="online/font_header" color="#FFF2F6FA" text_y="1" string_list="online/host_text" string_index="0"/>
+	<widget name="online/host/subtitle" type="text" left="8" top="76" width="400" height="16" font="online/font_small" color="#FF9FB6CC" text_y="1"/>
+	<widget name="online/host/rule" left="6" top="93" width="480" height="1" bitmap="online/rule"/>
+	<widget name="online/host/value" type="text" left="270" top="0" width="200" height="18" align="center" font="online/font_item" color="#FFAFC4DE" text_y="2" text_flags="no_focus_test"/>
+	<widget name="online/host/arrow_left" left="266" top="1" width="8" height="16" bitmap="h3/arrow_left"/>
+	<widget name="online/host/arrow_right" left="466" top="1" width="8" height="16" bitmap="h3/arrow_right"/>
+
+	<widget name="online/host/network_label" type="text" left="0" top="0" width="260" height="18" font="online/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="online/host_labels" string_index="0"/>
+	<widget name="online/host/op_network" width="480" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a start" open="online/network/screen"/>
+		<child widget="online/host/network_label"/>
+		<child widget="online/host/value"/>
+	</widget>
+	<!-- (the campaign's: the co-op networks, halo3/campaign.xml's picker) -->
+	<widget name="online/host/op_campnet" width="480" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a start" open="h3/campnet/screen"/>
+		<child widget="online/host/network_label"/>
+		<child widget="online/host/value"/>
+	</widget>
+	<widget name="online/host/name_label" type="text" left="0" top="0" width="260" height="18" font="online/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="online/host_labels" string_index="1"/>
+	<widget name="online/host/op_name" width="480" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a start" run="port host edit"/>
+		<child widget="online/host/name_label"/>
+		<child widget="online/host/value"/>
+	</widget>
+	<widget name="online/host/privacy_label" type="text" left="0" top="0" width="260" height="18" font="online/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="online/host_labels" string_index="2"/>
+	<widget name="online/host/op_privacy" width="480" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a right stick_right" run="port host next"/>
+		<on event="left stick_left" run="port host previous"/>
+		<child widget="online/host/privacy_label"/>
+		<child widget="online/host/value"/>
+		<child widget="online/host/arrow_left"/>
+		<child widget="online/host/arrow_right"/>
+	</widget>
+	<widget name="online/host/who_label" type="text" left="0" top="0" width="260" height="18" font="online/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="online/host_labels" string_index="3"/>
+	<widget name="online/host/op_who" width="480" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a right stick_right" run="port host next"/>
+		<on event="left stick_left" run="port host previous"/>
+		<child widget="online/host/who_label"/>
+		<child widget="online/host/value"/>
+		<child widget="online/host/arrow_left"/>
+		<child widget="online/host/arrow_right"/>
+	</widget>
+	<widget name="online/host/max_label" type="text" left="0" top="0" width="260" height="18" font="online/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="online/host_labels" string_index="4"/>
+	<widget name="online/host/op_max" width="480" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a right stick_right" run="port host next"/>
+		<on event="left stick_left" run="port host previous"/>
+		<child widget="online/host/max_label"/>
+		<child widget="online/host/value"/>
+		<child widget="online/host/arrow_left"/>
+		<child widget="online/host/arrow_right"/>
+	</widget>
+	<!-- (the campaign's MAX PLAYERS: CO-OP PLAYERS, network.coop_players) -->
+	<widget name="online/host/coop_label" type="text" left="0" top="0" width="260" height="18" font="online/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="online/host_labels" string_index="7"/>
+	<widget name="online/host/op_coop" width="480" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a right stick_right" run="port host next"/>
+		<on event="left stick_left" run="port host previous"/>
+		<child widget="online/host/coop_label"/>
+		<child widget="online/host/value"/>
+		<child widget="online/host/arrow_left"/>
+		<child widget="online/host/arrow_right"/>
+	</widget>
+	<widget name="online/host/password_label" type="text" left="0" top="0" width="260" height="18" font="online/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="online/host_labels" string_index="5"/>
+	<widget name="online/host/op_password" width="480" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a start" run="port host edit"/>
+		<child widget="online/host/password_label"/>
+		<child widget="online/host/value"/>
+	</widget>
+	<widget name="online/host/bots_label" type="text" left="0" top="0" width="260" height="18" font="online/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="online/host_labels" string_index="6"/>
+	<widget name="online/host/op_bots" width="480" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a right stick_right" run="port host next"/>
+		<on event="left stick_left" run="port host previous"/>
+		<child widget="online/host/bots_label"/>
+		<child widget="online/host/value"/>
+		<child widget="online/host/arrow_left"/>
+		<child widget="online/host/arrow_right"/>
+	</widget>
+	<widget name="online/host/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port host"/>
+		<child widget="online/host/op_network" y="0"/>
+		<child widget="online/host/op_campnet" y="19"/>
+		<child widget="online/host/op_name" y="38"/>
+		<child widget="online/host/op_privacy" y="57"/>
+		<child widget="online/host/op_who" y="76"/>
+		<child widget="online/host/op_max" y="95"/>
+		<child widget="online/host/op_coop" y="114"/>
+		<child widget="online/host/op_password" y="133"/>
+		<child widget="online/host/op_bots" y="152"/>
+	</widget>
+	<widget name="online/host/band" left="6" top="262" width="480" height="1" bitmap="online/rule"/>
+	<widget name="online/host/status" type="text" left="8" top="266" width="480" height="16" font="online/font_small" color="#FF9FB6CC" text_y="1"/>
+	<widget name="online/host/help" type="text" left="8" top="284" width="620" height="40" font="online/font_small" color="#FFCFD9E3" text_y="1"/>
+	<widget name="online/host/close" type="text" left="116" top="329" width="70" height="18" font="online/font_item" color="#FFF0F4F8" text_y="1" string_list="online/host_text" string_index="1"/>
+	<widget name="online/host/screen" flags="pass_unhandled_to_focused_child">
+		<on event="b back" back="true"/>
+		<child widget="online/pick/dim"/>
+		<child widget="online/pick/header"/>
+		<child widget="online/pick/foot"/>
+		<child widget="online/host/title"/>
+		<child widget="online/host/subtitle"/>
+		<child widget="online/host/rule"/>
+		<child widget="online/host/band"/>
+		<child widget="online/host/status"/>
+		<child widget="online/host/help"/>
+		<child widget="online/pick/a_butn"/>
+		<child widget="online/pick/select"/>
+		<child widget="online/pick/b_butn"/>
+		<child widget="online/host/close"/>
+		<child widget="online/host/list" x="6" y="98"/>
+	</widget>
+</menus>

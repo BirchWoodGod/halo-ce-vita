@@ -2,8 +2,10 @@
 <!-- Menu style Online: the campaign lobby (halo3/campaign.xml's, its scene and its rows) with the
 lobbies' SWITCH LOBBY first (menus/online/multiplayer.xml's: CAMPAIGN, MULTIPLAYER, FORGE beside it,
 each its words at the right; menu_functions.c online_switch_update), so the rows are SWITCH LOBBY,
-NETWORK, MISSION, DIFFICULTY, START GAME; what is under them moved down a row. It stands for
-h3/campaign/screen in the Online style (menu_tags.c: online/ for h3/). -->
+HOST SETTINGS, MISSION, DIFFICULTY, START GAME; what is under them moved down a row. HOST SETTINGS
+(the other lobbies' row: menus/online/host.xml, its co-op rows) in NETWORK's place, the
+connection's status beside it as the other lobbies show it. It stands for h3/campaign/screen in
+the Online style (menu_tags.c: online/ for h3/). -->
 <menus>
 	<widget name="online/campaign/switch_0" type="text" width="176" height="18" bitmap="online/item" font="online/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="online/lobby_text" string_index="3">
 		<on event="a start" run="port online switch multiplayer"/>
@@ -19,6 +21,15 @@ h3/campaign/screen in the Online style (menu_tags.c: online/ for h3/). -->
 	<widget name="online/campaign/switch_row" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="online/lobby_text" string_index="0">
 		<on event="a start" run="port online switch open"/>
 	</widget>
+	<widget name="online/campaign/host_label" type="text" left="0" top="0" width="130" height="20" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="online/lobby_text" string_index="1"/>
+	<widget name="online/campaign/network_status" type="text" left="120" top="4" width="122" height="14" font="h3/font_small" color="#FF9FB6CC" align="right">
+		<data input="port h3 network status"/>
+	</widget>
+	<widget name="online/campaign/host_row" width="250" height="20" bitmap="h3/item" flags="pass_unhandled_to_focused_child">
+		<on event="a" run="port host campaign" open="online/host/screen"/>
+		<child widget="online/campaign/host_label"/>
+		<child widget="online/campaign/network_status"/>
+	</widget>
 	<widget name="online/campaign/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<on event="created" run="port h3 campaign focus"/>
 		<on event="y" open="h3/friends/screen"/>
@@ -27,15 +38,12 @@ h3/campaign/screen in the Online style (menu_tags.c: online/ for h3/). -->
 		<child widget="online/campaign/switch_0" x="250" y="20"/>
 		<child widget="online/campaign/switch_1" x="250" y="40"/>
 		<child widget="online/campaign/switch_row" x="0" y="0"/>
-		<child widget="h3/campaign/network_row" x="0" y="20"/>
-		<child widget="h3/campaign/mission_row" x="0" y="54"/>
-		<child widget="h3/campaign/difficulty_row" x="0" y="74"/>
-		<child widget="h3/campaign/start_row" x="0" y="94"/>
-		<child widget="h3/campaign/start_coop" x="0" y="94"/>
-		<child widget="h3/campaign/start_adhoc" x="0" y="94"/>
-	</widget>
-	<widget name="online/campaign/network_status" type="text" left="24" top="91" width="226" height="14" font="h3/font_small" color="#FF9FB6CC">
-		<data input="port h3 network status"/>
+		<child widget="online/campaign/host_row" x="0" y="20"/>
+		<child widget="h3/campaign/mission_row" x="0" y="40"/>
+		<child widget="h3/campaign/difficulty_row" x="0" y="60"/>
+		<child widget="h3/campaign/start_row" x="0" y="80"/>
+		<child widget="h3/campaign/start_coop" x="0" y="80"/>
+		<child widget="h3/campaign/start_adhoc" x="0" y="80"/>
 	</widget>
 	<widget name="online/campaign/rule2" left="8" top="166" width="250" height="2" bitmap="h3/rule"/>
 	<widget name="online/campaign/ready" type="text" left="16" top="171" width="240" height="18" font="h3/font_item" color="#FFE6ECF2" text_y="1" string_list="h3/campaign_text" string_index="3"/>
@@ -64,7 +72,6 @@ h3/campaign/screen in the Online style (menu_tags.c: online/ for h3/). -->
 		<child widget="h3/campaign/title"/>
 		<child widget="h3/campaign/rule1"/>
 		<child widget="online/campaign/rule2"/>
-		<child widget="online/campaign/network_status"/>
 		<child widget="online/campaign/ready"/>
 		<child widget="online/campaign/ready_sub"/>
 		<child widget="online/campaign/picture"/>

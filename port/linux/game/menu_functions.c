@@ -437,6 +437,13 @@ enum
 	_function_online_browser_network_previous,
 	_function_online_browser_filter_next,
 	_function_online_browser_filter_previous,
+	/* (Menu style Online: the lobbies' HOST SETTINGS, menus/online/host.xml) */
+	_function_online_host_multiplayer,
+	_function_online_host_forge,
+	_function_online_host_campaign,
+	_function_online_host_next,
+	_function_online_host_previous,
+	_function_online_host_edit,
 };
 
 /* in port_game_data_input_names' order */
@@ -509,6 +516,8 @@ enum
 	/* (Menu style Online: the lobbies' switcher and map card) */
 	_input_online_switch,
 	_input_online_lobby,
+	/* (Menu style Online: HOST SETTINGS' rows) */
+	_input_online_host,
 };
 
 /* what a line of typing is for */
@@ -3593,9 +3602,11 @@ static void h3_mp_lobby_update(struct widget_instance *widget)
 	/* (Halo 3's: "Slayer on Valhalla") */
 	snprintf(text, sizeof(text), T("%s on %s"), h3_mp_gametype_name(), h3_mp_map_name());
 	text_show(named(screen, "caption"), text);
-	/* ("1 Player (16 max)": the most players a game of that network takes) */
-	maximum = h3_mp.network == _h3_network_offline ? 4 : h3_mp.network != _h3_network_online ? 16 :
-		(int)PIN(atol(setting_get("HALO_NET_MAX_PLAYERS", "16")), 2, 16);
+	/* ("1 Player (16 max)": the most players a game of that network takes -
+	network.max_players on every network a game is hosted on, its 0 the
+	Xbox's 16: network_server_manager.c; HOST SETTINGS' MAX PLAYERS) */
+	maximum = (int)atol(setting_get("HALO_NET_MAX_PLAYERS", "16"));
+	maximum = h3_mp.network == _h3_network_offline ? 4 : maximum < 2 ? 16 : (int)PIN(maximum, 2, 16);
 	h3_party_players_text(text, (int)sizeof(text), maximum);
 	text_show(named(screen, "players"), text);
 	text_show(named(screen, "ready"), T("Ready"));
@@ -17972,6 +17983,510 @@ static void h3_dialog_port_update(void)
 	}
 }
 
+/* ---- HOST SETTINGS (Menu style Online: menus/online/host.xml, the owner
+Oct 24 2026): one page for the three lobbies' HOST SETTINGS row, Halo
+Online's server settings laid out our way. Each row is a setting the game
+already has and already applies, set as the settings panel, GAME OPTIONS
+and the FRIENDS screen set it (setting_set: on the Vita kept in
+settings.txt), nothing new on the wire:
+- NETWORK: the lobby's network picker (the multiplayer and Forge lobbies'
+  SELECT NETWORK, the campaign's co-op one), the connection switched live
+  as before.
+- LOBBY NAME (network.lobby_name) and PASSWORD (network.lobby_password,
+  typed in the system's text box as Server Setup types it, never logged).
+- PRIVACY: PUBLIC lists the game in the server browser (network.host_public;
+  co-op network.coop_public, as X on co-op's waiting screen sets it);
+  FRIENDS keeps it unlisted with Friends can join on (friends.join: a
+  friend joins from FRIENDS in one press); INVITE ONLY unlisted with it off.
+  The game's code and invites join it in all three, as before. The live
+  lobby on ONLINE takes it as the host's choice (h3_live_public_chosen).
+- WHO CAN JOIN (network.who_can_join; Forge Vitas only, forge_net.inc), as
+  GAME OPTIONS' (the live lobby hosted again on its wire by h3_live).
+- MAX PLAYERS (network.max_players, 2 to 16; Forge's 8 at most) or the
+  campaign's CO-OP PLAYERS (network.coop_players: 2 to 4 on the Vitas).
+- ONLINE BOTS (bots.online), the multiplayer lobby's on ONLINE.
+Rows a network does not use are left out: OFFLINE and LOCAL keep NETWORK
+alone; PRIVACY, WHO CAN JOIN, PASSWORD and ONLINE BOTS are ONLINE's. */
+
+enum
+{
+	_online_host_multiplayer,
+	_online_host_forge,
+	_online_host_campaign,
+};
+
+enum
+{
+	_online_host_row_network,
+	_online_host_row_campnet,
+	_online_host_row_name,
+	_online_host_row_privacy,
+	_online_host_row_who,
+	_online_host_row_max,
+	_online_host_row_coop,
+	_online_host_row_password,
+	_online_host_row_bots,
+	NUMBER_OF_ONLINE_HOST_ROWS
+};
+
+static char const *const online_host_rows[NUMBER_OF_ONLINE_HOST_ROWS] =
+{
+	"op_network", "op_campnet", "op_name", "op_privacy", "op_who", "op_max", "op_coop", "op_password", "op_bots",
+};
+
+enum
+{
+	_online_host_public,
+	_online_host_friends,
+	_online_host_invite,
+	NUMBER_OF_ONLINE_HOST_PRIVACIES
+};
+
+#define ONLINE_HOST_ROW_SPACING 19
+/* (Forge: a network Forge game takes 8 at most, network_server_manager.c) */
+#define ONLINE_HOST_FORGE_PLAYERS 8
+#if defined(HALO_VITA) || defined(HALO_NET_AS_VITA)
+/* (co-op: 2, 3 and 4 experimental on the Vitas, the settings panel's) */
+#define ONLINE_HOST_COOP_PLAYERS 4
+#else
+#define ONLINE_HOST_COOP_PLAYERS 16
+#endif
+
+static struct
+{
+	/* the lobby that opened the page (port host multiplayer, forge, campaign) */
+	short lobby;
+	/* the page as said last (the tests read it) */
+	char said[256];
+} online_host;
+
+static short online_host_row(struct widget_instance *widget)
+{
+	short row;
+
+	for (row = 0; widget && widget->name && row < NUMBER_OF_ONLINE_HOST_ROWS; row++)
+	{
+		if (!strcmp(widget->name, online_host_rows[row]))
+			return row;
+	}
+	return NONE;
+}
+
+/* the lobby's network now, as the lobby shows it (the co-op networks as
+the multiplayer ones: LOCAL as OFFLINE) */
+static short online_host_network(void)
+{
+	if (online_host.lobby == _online_host_campaign)
+	{
+		if (h3_campaign.network != _h3_campaign_local)
+			h3_campaign.network = h3_campaign_network_of_connection();
+		return h3_campaign.network == _h3_campaign_online ? _h3_network_online :
+			h3_campaign.network == _h3_campaign_adhoc ? _h3_network_adhoc :
+			h3_campaign.network == _h3_campaign_system_link ? _h3_network_system_link : _h3_network_offline;
+	}
+	if (!h3_mp.initialized)
+		h3_mp_initialize();
+	if (online_host.lobby == _online_host_forge)
+	{
+		if (h3_forge.network_set && h3_forge.network != _h3_network_offline)
+			h3_forge.network = h3_mp_network_of_connection();
+		return h3_forge.network_set ? h3_forge.network : _h3_network_offline;
+	}
+	if (h3_mp.network != _h3_network_offline)
+		h3_mp.network = h3_mp_network_of_connection();
+	return h3_mp.network;
+}
+
+/* whether the row is the page's for the lobby and its network */
+static boolean online_host_row_shown(short row, short network)
+{
+	boolean campaign = online_host.lobby == _online_host_campaign;
+
+	switch (row)
+	{
+	case _online_host_row_network:
+		return !campaign;
+	case _online_host_row_campnet:
+		return campaign;
+	case _online_host_row_name:
+		return network != _h3_network_offline;
+	case _online_host_row_max:
+		return network != _h3_network_offline && !campaign;
+	case _online_host_row_coop:
+		return network != _h3_network_offline && campaign;
+	case _online_host_row_privacy:
+	case _online_host_row_password:
+		return network == _h3_network_online;
+	case _online_host_row_who:
+		return network == _h3_network_online && !campaign;
+	case _online_host_row_bots:
+		return network == _h3_network_online && online_host.lobby == _online_host_multiplayer;
+	}
+	return FALSE;
+}
+
+/* (PRIVACY) the game listed in the server browser: co-op's own setting; the
+multiplayer and Forge lobbies' private on ONLINE until the host chooses
+(h3_live_private_by_default) */
+static boolean online_host_listed(void)
+{
+	if (online_host.lobby == _online_host_campaign)
+		return p2p_lobby_coop_public(NULL) != 0;
+	return h3_live.public_chosen && strcmp(setting_get("HALO_NET_HOST_PUBLIC", "true"), "false") != 0 &&
+		config_boolean("network.public_lobby");
+}
+
+static short online_host_privacy(void)
+{
+	if (online_host_listed())
+		return _online_host_public;
+	return config_boolean_live("friends.join", "HALO_FRIENDS_JOIN") ? _online_host_friends : _online_host_invite;
+}
+
+static void online_host_privacy_set(short privacy)
+{
+	boolean listed = privacy == _online_host_public;
+
+	setting_set("HALO_FRIENDS_JOIN", privacy == _online_host_invite ? "false" : "true");
+	if (online_host.lobby == _online_host_campaign)
+	{
+		/* (as X on co-op's waiting screen sets it: coop_menu.c) */
+		if (!halo_test_setting_hook || !halo_test_setting_hook("HALO_NET_COOP_PUBLIC", listed ? "true" : "false"))
+		{
+			if (!config_write_boolean("network.coop_public", listed))
+				platform_log("menus: host settings: could not write network.coop_public to config.toml");
+		}
+		p2p_lobby_set_coop_public(listed);
+	}
+	else
+	{
+		setting_set("HALO_NET_HOST_PUBLIC", listed ? "true" : "false");
+		/* (the live lobby's, or the one hosted next: the host's choice) */
+		h3_live_public_chosen();
+	}
+}
+
+/* the most players: the setting's, in the lobby's range */
+static int online_host_players_range(int *least)
+{
+	*least = 2;
+	return online_host.lobby == _online_host_campaign ? ONLINE_HOST_COOP_PLAYERS :
+		online_host.lobby == _online_host_forge ? ONLINE_HOST_FORGE_PLAYERS : 16;
+}
+
+static int online_host_players(void)
+{
+	int least, most = online_host_players_range(&least);
+	long value;
+
+	if (online_host.lobby == _online_host_campaign)
+	{
+		char const *setting = getenv("HALO_NET_COOP_PLAYERS");
+
+		value = setting && setting[0] ? atol(setting) : config_integer("network.coop_players");
+	}
+	else
+	{
+		/* (0: the Xbox's 16, network_server_manager.c) */
+		value = atol(setting_get("HALO_NET_MAX_PLAYERS", "16"));
+		if (value < 2)
+			value = 16;
+	}
+	return (int)PIN(value, least, most);
+}
+
+static void online_host_players_set(int players)
+{
+	char value[8];
+
+	snprintf(value, sizeof(value), "%d", players);
+	if (online_host.lobby == _online_host_campaign)
+	{
+		setting_set("HALO_NET_COOP_PLAYERS", value);
+		/* (read as co-op is hosted: network_server_manager.c) */
+		config_set_override("network.coop_players", value);
+	}
+	else
+		setting_set("HALO_NET_MAX_PLAYERS", value);
+}
+
+/* (WHO CAN JOIN) the choices: the PC build's from VITA PC; Forge's never
+EVERYONE (Forge is played on the Vitas' wire) */
+static int online_host_audience_last(void)
+{
+	return online_host.lobby == _online_host_forge ? NETWORK_AUDIENCE_EVERYONE - 1 : NUMBER_OF_NETWORK_AUDIENCES - 1;
+}
+
+static char const *online_host_audience_name(int audience)
+{
+	return audience == NETWORK_AUDIENCE_EVERYONE ? T("EVERYONE") : audience == NETWORK_AUDIENCE_VITA_PC ?
+		T("VITA PC") : T("VITA");
+}
+
+/* (port host multiplayer, forge, campaign: the lobby's HOST SETTINGS row) */
+static boolean online_host_open(short lobby)
+{
+	online_host.lobby = lobby;
+	online_host.said[0] = 0;
+	platform_log("menus: host settings: opened from the %s lobby", lobby == _online_host_campaign ? "campaign" :
+		lobby == _online_host_forge ? "Forge" : "multiplayer");
+	return TRUE;
+}
+
+/* (port host next and previous: A, right and left on a row of choices) */
+static boolean online_host_change(struct widget_instance *widget, int step)
+{
+	short row = online_host_row(widget);
+	char value[16];
+
+	switch (row)
+	{
+	case _online_host_row_privacy:
+	{
+		short privacy = online_host_privacy();
+
+		do
+			privacy = (short)h3_custom_step(privacy, NUMBER_OF_ONLINE_HOST_PRIVACIES, step);
+		while (privacy == _online_host_public && !config_boolean("network.public_lobby"));
+		online_host_privacy_set(privacy);
+		platform_log("menus: host settings: privacy %s", privacy == _online_host_public ? "public" :
+			privacy == _online_host_friends ? "friends" : "invite only");
+		return TRUE;
+	}
+	case _online_host_row_who:
+	{
+		int first = network_wire_audience_first(), last = online_host_audience_last();
+		int audience = PIN(network_wire_host_audience(), first, last);
+
+		audience = first + (int)h3_custom_step(audience - first, last - first + 1, step);
+		setting_set("HALO_NET_WHO_CAN_JOIN", network_wire_audience_value(audience));
+		platform_log("menus: host settings: who can join %s", network_wire_audience_value(audience));
+		return TRUE;
+	}
+	case _online_host_row_max:
+	case _online_host_row_coop:
+	{
+		int least, most = online_host_players_range(&least);
+		int players = least + (int)h3_custom_step(online_host_players() - least, most - least + 1, step);
+
+		online_host_players_set(players);
+		platform_log("menus: host settings: %s %d", online_host.lobby == _online_host_campaign ? "co-op players" :
+			"max players", players);
+		return TRUE;
+	}
+	case _online_host_row_bots:
+	{
+		short bots = (short)h3_custom_step(setup_bots_index(), (long)NUMBEROF(setup_bots_values), step);
+
+		snprintf(value, sizeof(value), "%s", setup_bots_values[bots]);
+		setting_set("HALO_BOTS_ONLINE", value);
+		platform_log("menus: host settings: online bots %s", value);
+		return TRUE;
+	}
+	}
+	return TRUE;
+}
+
+/* (port host edit: A on LOBBY NAME or PASSWORD) typed in the system's text
+box, as Server Setup types them */
+static boolean online_host_edit(struct widget_instance *widget)
+{
+	short row = online_host_row(widget);
+	char now[P2P_LOBBY_PASSWORD_SIZE];
+
+	if (row == _online_host_row_name)
+	{
+		sanitize(now, sizeof(now), setting_get("HALO_NET_LOBBY_NAME", ""));
+		typing_begin(_typing_lobby_name, T("Lobby name"), now, LOBBY_NAME_LENGTH, FALSE);
+	}
+	else if (row == _online_host_row_password)
+	{
+		sanitize(now, sizeof(now), setting_get("HALO_NET_LOBBY_PASSWORD", ""));
+		typing_begin(_typing_lobby_password, T("Password (empty: none)"), now, PASSWORD_LENGTH, TRUE);
+		memset(now, 0, sizeof(now));
+	}
+	return TRUE;
+}
+
+/* a row's value as shown */
+static void online_host_value(short row, short network, char *text, int size)
+{
+	char typed[P2P_LOBBY_PASSWORD_SIZE];
+
+	text[0] = 0;
+	switch (row)
+	{
+	case _online_host_row_network:
+		snprintf(text, (size_t)size, "%s", online_host.lobby == _online_host_forge && network == _h3_network_offline ?
+			T("LOCAL") : h3_network_name(network));
+		break;
+	case _online_host_row_campnet:
+		snprintf(text, (size_t)size, "%s", h3_campaign_network_name(h3_campaign.network));
+		break;
+	case _online_host_row_name:
+		sanitize(typed, sizeof(typed), setting_get("HALO_NET_LOBBY_NAME", ""));
+		snprintf(text, (size_t)size, "%s", typed[0] ? typed : T("YOUR PROFILE'S NAME"));
+		break;
+	case _online_host_row_privacy:
+	{
+		short privacy = online_host_privacy();
+
+		snprintf(text, (size_t)size, "%s", privacy == _online_host_public ? T("PUBLIC") :
+			privacy == _online_host_friends ? T("FRIENDS") : T("INVITE ONLY"));
+		break;
+	}
+	case _online_host_row_who:
+		snprintf(text, (size_t)size, "%s", online_host_audience_name(PIN(network_wire_host_audience(),
+			network_wire_audience_first(), online_host_audience_last())));
+		break;
+	case _online_host_row_max:
+	case _online_host_row_coop:
+		snprintf(text, (size_t)size, "%d", online_host_players());
+		break;
+	case _online_host_row_password:
+		/* (never the password itself: its stars) */
+		stars(typed, sizeof(typed), setting_get("HALO_NET_LOBBY_PASSWORD", ""));
+		snprintf(text, (size_t)size, "%s", typed[0] ? typed : T("NONE"));
+		break;
+	case _online_host_row_bots:
+		snprintf(text, (size_t)size, "%s", setup_bots_values[setup_bots_index()]);
+		h3_capitals(text);
+		break;
+	}
+	memset(typed, 0, sizeof(typed));
+}
+
+static char const *online_host_help(short row)
+{
+	boolean campaign = online_host.lobby == _online_host_campaign;
+
+	switch (row)
+	{
+	case _online_host_row_network:
+	case _online_host_row_campnet:
+		return campaign ? T("Where your co-op is hosted: LOCAL plays on this PS Vita alone; the co-op networks switch\n"
+			"the connection, as the settings panel's Connection does.") :
+			T("Where your game is hosted: ONLINE on the Internet, SYSTEM LINK for the PS Vitas on your\n"
+			"Wi-Fi, AD HOC for those near you, OFFLINE on this PS Vita alone.");
+	case _online_host_row_name:
+		return T("The name the server browser and the System Link list show for your games (15 letters).");
+	case _online_host_row_privacy:
+		return T("PUBLIC: listed in everyone's server browser. FRIENDS: not listed; your friends join from\n"
+			"FRIENDS in one press. INVITE ONLY: your invites alone. Your game's code always joins.");
+	case _online_host_row_who:
+		return online_host.lobby == _online_host_forge ?
+			T("VITA: PS Vitas only. VITA PC: PS Vitas and Halo CE Vita on PC. Forge is played on the\n"
+			"Vitas' own network, never with EVERYONE.") :
+			T("VITA: PS Vitas only. VITA PC: PS Vitas and Halo CE Vita on PC. EVERYONE: OpenCE players\n"
+			"on PC too, listed in both browsers. The lobby is hosted again as it changes.");
+	case _online_host_row_max:
+	case _online_host_row_coop:
+		return campaign ? T("The most players your co-op takes. You run the campaign for everyone: 3 and 4 are\n"
+			"experimental on a PS Vita.") : online_host.lobby == _online_host_forge ?
+			T("The most players your games take (Forge takes 8 at most).") :
+			T("The most players your games take, 2 to 16.");
+	case _online_host_row_password:
+		return T("Asked of those who join from the server browser or from FRIENDS; your invites and your\n"
+			"game's code need none. Empty: none.");
+	case _online_host_row_bots:
+		return T("FULL: bots fill every slot but one and leave as players join. OFF: none. Or the most bots.\n"
+			"None while EVERYONE can join.");
+	}
+	return "";
+}
+
+/* (port host: its list) the rows the lobby and its network take, one under
+another, their values, the focused one's arrows and help, the connection */
+static void online_host_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *child, *found;
+	short network = online_host_network();
+	short shown = 0, focused = NONE;
+	short base = 0;
+	char text[160], typed[P2P_LOBBY_PASSWORD_SIZE], said[256];
+
+	if (list->type != _ui_widget_type_column_list)
+		return;
+	/* (typed: LOBBY NAME, its first 15; PASSWORD, empty for none) */
+	if (typing_done(_typing_lobby_name, typed, sizeof(typed)) && typed[0])
+	{
+		snprintf(text, sizeof(text), "%.*s", LOBBY_NAME_LENGTH, typed);
+		setting_set("HALO_NET_LOBBY_NAME", text);
+		platform_log("menus: host settings: lobby name %s", text);
+	}
+	if (typing_done(_typing_lobby_password, typed, sizeof(typed)))
+	{
+		setting_set("HALO_NET_LOBBY_PASSWORD", typed);
+		platform_log("menus: host settings: password %s", typed[0] ? "set" : "none");
+	}
+	memset(typed, 0, sizeof(typed));
+	/* (the first row's place: the rows below it laid out from there) */
+	for (child = list->child; child; child = child->next)
+	{
+		if (child->vertical_offset < base || child == list->child)
+			base = child->vertical_offset;
+	}
+	if (list->focused_child && !online_host_row_shown(online_host_row(list->focused_child), network))
+	{
+		for (child = list->child; child; child = child->next)
+		{
+			if (online_host_row_shown(online_host_row(child), network))
+			{
+				ui_widget_port_give_focus(list, child);
+				break;
+			}
+		}
+	}
+	snprintf(said, sizeof(said), "%s", online_host.lobby == _online_host_campaign ? "campaign" :
+		online_host.lobby == _online_host_forge ? "forge" : "multiplayer");
+	for (child = list->child; child; child = child->next)
+	{
+		short row = online_host_row(child);
+		boolean visible = row != NONE && online_host_row_shown(row, network);
+		boolean has_focus = child == list->focused_child;
+		boolean choices = row == _online_host_row_privacy || row == _online_host_row_who || row == _online_host_row_max ||
+			row == _online_host_row_coop || row == _online_host_row_bots;
+
+		widget_instance_set_visibility_recursive(child, visible);
+		child->disabled = !visible;
+		if (!visible)
+			continue;
+		child->vertical_offset = (short)(base + shown++ * ONLINE_HOST_ROW_SPACING);
+		if (has_focus)
+			focused = row;
+		online_host_value(row, network, text, (int)sizeof(text));
+		text_show(named(child, "value"), text);
+		if ((found = named(child, "arrow_left")) != NULL)
+			widget_instance_set_visibility_recursive(found, has_focus && choices);
+		if ((found = named(child, "arrow_right")) != NULL)
+			widget_instance_set_visibility_recursive(found, has_focus && choices);
+		child->animation.current_frame_index = has_focus ? 1 : 0;
+		snprintf(said + strlen(said), sizeof(said) - strlen(said), ", %s %s", online_host_rows[row] + 3, text);
+	}
+	/* (the subtitle: the lobby's; the connection under the rows, as the
+	lobby's HOST SETTINGS row says it) */
+	text_show(named(screen, "subtitle"), online_host.lobby == _online_host_campaign ? T("CAMPAIGN LOBBY") :
+		online_host.lobby == _online_host_forge ? T("FORGE LOBBY") : T("MULTIPLAYER LOBBY"));
+	if (network != _h3_network_offline)
+		network_connection_status(text, (int)sizeof(text));
+	else
+		snprintf(text, sizeof(text), "%s", T("On this PS Vita only"));
+	{
+		char line[192];
+
+		snprintf(line, sizeof(line), "%s: %s", T("Connection"), text);
+		text_show(named(screen, "status"), line);
+	}
+	text_show(named(screen, "help"), focused != NONE ? online_host_help(focused) : "");
+	/* (said when it changes: the tests read it; the password as stars) */
+	if (strcmp(said, online_host.said))
+	{
+		snprintf(online_host.said, sizeof(online_host.said), "%s", said);
+		platform_log("menus: host settings: %s", said);
+	}
+}
+
 boolean pc_menu_event_function_invoke(
 	struct widget_instance *widget,
 	struct event_record *event,
@@ -18929,6 +19444,18 @@ boolean pc_menu_event_function_invoke(
 	case _function_online_browser_filter_previous:
 		online_browser_filter_step(function_index == _function_online_browser_filter_next ? 1 : -1);
 		return TRUE;
+	case _function_online_host_multiplayer:
+		return online_host_open(_online_host_multiplayer);
+	case _function_online_host_forge:
+		return online_host_open(_online_host_forge);
+	case _function_online_host_campaign:
+		return online_host_open(_online_host_campaign);
+	case _function_online_host_next:
+		return online_host_change(widget, 1);
+	case _function_online_host_previous:
+		return online_host_change(widget, -1);
+	case _function_online_host_edit:
+		return online_host_edit(widget);
 	case _function_online_exit:
 		platform_log("menus: online EXIT: the game closes");
 		exit(EXIT_SUCCESS);
@@ -19109,6 +19636,9 @@ void pc_menu_game_data_function_invoke(
 		break;
 	case _input_online_lobby:
 		online_lobby_update(screen_of(widget));
+		break;
+	case _input_online_host:
+		online_host_update(widget);
 		break;
 	case _input_h3_players:
 		if (widget->type == _ui_widget_type_column_list)
