@@ -228,6 +228,43 @@ def title():
     return Image.alpha_composite(glow, layer)
 
 
+def plate(colour):
+    # the party list's nameplate: a slim flat bar in the player's colour,
+    # kept dark enough under the white name, a light edge on top and a dark
+    # one under it (frame 0, no colour: a muted olive); flat, so stretching
+    # it to its widget blurs nothing
+    import colorsys
+    if colour is None:
+        rgb = (104, 116, 58)
+    else:
+        r, g, b = (((colour >> 16) & 0xFF) / 255, ((colour >> 8) & 0xFF) / 255, (colour & 0xFF) / 255)
+        h, sat, v = colorsys.rgb_to_hsv(r, g, b)
+        sat = min(sat, .78)
+        v = .30 if v < .2 else .56 if sat < .1 else min(v, .66)
+        rgb = tuple(round(c * 255) for c in colorsys.hsv_to_rgb(h, sat, v))
+    top = tuple(min(255, round(c + (255 - c) * .18)) for c in rgb)
+    bottom = tuple(round(c * .72) for c in rgb)
+    image = Image.new('RGBA', (4, 32), rgb + (alpha(.92),))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([0, 0, 3, 1], fill=top + (alpha(.95),))
+    draw.rectangle([0, 30, 3, 31], fill=bottom + (alpha(.95),))
+    return image
+
+
+def backing():
+    # the party list's header: a subtle dark strip
+    return horizontal_gradient((64, 4), [
+        (0.0, (4, 9, 22, 0)),
+        (0.25, (4, 9, 22, alpha(.55))),
+        (1.0, (4, 9, 22, alpha(.65))),
+    ])
+
+
+def dropdown():
+    # SWITCH LOBBY's list: a lighter see-through navy block
+    return flat_panel((54, 78, 118), (38, 60, 98), .90, lip=.03)
+
+
 ART = {
     'haze.png': haze,
     'haze_light.png': haze_light,
@@ -249,9 +286,13 @@ ART = {
     'colour_random.png': lambda: colour_tile(None),
     'name_bar.png': name_bar,
     'title.png': title,
+    'plate.png': lambda: plate(None),
+    'backing.png': backing,
+    'dropdown.png': dropdown,
 }
 for _index, _colour in enumerate(PLAYER_COLOURS):
     ART['colour_%02d.png' % _index] = (lambda colour: lambda: colour_tile(colour))(_colour)
+    ART['plate_%02d.png' % _index] = (lambda colour: lambda: plate(colour))(_colour)
 
 # the fonts: (face, size in units, tracking in units); each also drawn at the
 # displays' pixels per unit (file_<scale>.bin: <font sharp=...> lists them)

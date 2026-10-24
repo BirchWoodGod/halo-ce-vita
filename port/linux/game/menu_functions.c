@@ -419,6 +419,13 @@ enum
 	_function_online_custom_tab_previous,
 	/* (Menu style Online: the main menu's EXIT, after its question) */
 	_function_online_exit,
+	/* (Menu style Online: the lobbies' SWITCH LOBBY) */
+	_function_online_switch_open,
+	_function_online_switch_close,
+	_function_online_lobby_leave,
+	_function_online_switch_multiplayer,
+	_function_online_switch_forge,
+	_function_online_switch_campaign,
 };
 
 /* in port_game_data_input_names' order */
@@ -488,6 +495,9 @@ enum
 	/* (Menu style Online: the main menu's version, CUSTOMIZATION's tabs) */
 	_input_online_version,
 	_input_online_custom,
+	/* (Menu style Online: the lobbies' switcher and map card) */
+	_input_online_switch,
+	_input_online_lobby,
 };
 
 /* what a line of typing is for */
@@ -5111,6 +5121,9 @@ static struct
 {
 	boolean title_done;
 	boolean title_pending;
+	/* (SWITCH LOBBY: the lobby to open in the one up, the main menu behind
+	it, at the frame's update) */
+	char const *switch_to;
 } online_menus;
 
 /* (port online version: the main menu's) the version, the title screen
@@ -5139,6 +5152,24 @@ static void online_main_update(struct widget_instance *widget)
 
 static void online_menus_update(void)
 {
+	if (online_menus.switch_to)
+	{
+		long target = tag_loaded(UI_WIDGET_DEFINITION_TAG, online_menus.switch_to);
+		long main_menu = tag_loaded(UI_WIDGET_DEFINITION_TAG, "ui\\shell\\main_menu\\main_menu");
+		struct widget_instance *active = NULL;
+		long index;
+
+		for (index = 0; index < 4 && !active; index++)
+			active = ui_widget_port_active_screen((short)index);
+		if (target != NONE && active)
+		{
+			platform_log("menus: online switch lobby: %s in place of %s", online_menus.switch_to,
+				tag_get_name(active->definition_tag_index));
+			ui_widget_load_by_name_or_tag(NULL, target, NULL, active->local_player_index,
+				main_menu != NONE ? main_menu : active->definition_tag_index, NONE, NONE);
+		}
+		online_menus.switch_to = NULL;
+	}
 	if (online_menus.title_pending)
 	{
 		long title = tag_loaded(UI_WIDGET_DEFINITION_TAG, "pc\\online\\title\\screen");
@@ -5155,6 +5186,89 @@ static void online_menus_update(void)
 				NONE, NONE);
 		}
 	}
+}
+
+
+/* ---- Menu style Online's lobbies (menus/online/multiplayer.xml): SWITCH
+LOBBY opens a list beside it in the lobby itself (MULTIPLAYER, FORGE,
+CAMPAIGN, each its words at the right), which takes the screen's focus
+while open; its row replaces the lobby with the other, the party kept (the
+lobby it replaces goes back where it came from: the main menu). The map's
+card shows the map's description (ui.map's, as SELECT MAP does). */
+static struct
+{
+	boolean open;
+	short said;
+} online_switch;
+
+/* (port online switch: the lobby's list, whose first rows - switch_0 to
+switch_2, beside SWITCH LOBBY - are the switcher's) those shown while it is
+open, the focus kept on them then and off them otherwise; its words the
+focused row's */
+static void online_switch_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list), *child, *found, *first = NULL, *focus = NULL;
+	short index, focused = NONE;
+	char name[16];
+
+	if ((found = named(screen, "switch_panel")) != NULL)
+		widget_instance_set_visibility_recursive(found, online_switch.open);
+	if ((found = named(screen, "switch_text")) != NULL)
+		widget_instance_set_visibility_recursive(found, online_switch.open);
+	/* (HOST SETTINGS' status, under the switcher's rows) */
+	if ((found = named(screen, "network_status")) != NULL)
+		widget_instance_set_visibility_recursive(found, !online_switch.open);
+	for (index = 0; index < 3; index++)
+	{
+		snprintf(name, sizeof(name), "switch_%d", index);
+		if ((child = named(list, name)) == NULL)
+			continue;
+		widget_instance_set_visibility_recursive(child, online_switch.open);
+		child->disabled = !online_switch.open;
+		if (!first)
+			first = child;
+		if (child == list->focused_child)
+			focused = index;
+		child->animation.current_frame_index = online_switch.open && child == list->focused_child ? 1 : 0;
+	}
+	if (online_switch.open && focused == NONE && first)
+	{
+		/* (opened: on the lobby it is, MULTIPLAYER or FORGE) */
+		char const *screen_name = tag_get_name(screen->definition_tag_index);
+		short current = screen_name && strstr(screen_name, "\\forge\\") ? 1 : 0;
+
+		snprintf(name, sizeof(name), "switch_%d", current);
+		focus = named(list, name);
+		focused = current;
+		platform_log("menus: online switch lobby: open");
+	}
+	else if (!online_switch.open && focused != NONE)
+		focus = named(list, "switch_row");
+	if (focus && focus != list->focused_child)
+		ui_widget_port_give_focus(list, focus);
+	string_show(named(screen, "switch_text"), focused != NONE ? focused : 0);
+	if (online_switch.open && focused != online_switch.said)
+	{
+		online_switch.said = focused;
+		platform_log("menus: online switch lobby: row %d", focused);
+	}
+}
+
+/* (port online lobby: the lobby's screen) the map card's description: the
+picture's map's (the game's own maps; none for another) */
+static void online_lobby_update(struct widget_instance *screen)
+{
+	struct widget_instance *picture = named(screen, "map_picture"), *text = named(screen, "map_text");
+
+	if (!text)
+		return;
+	if (picture && h3_mp.initialized && h3_mp.map_index != NONE && named(screen, "game_row"))
+	{
+		widget_instance_set_visibility_recursive(text, TRUE);
+		string_show(text, picture->animation.current_frame_index);
+	}
+	else
+		widget_instance_set_visibility_recursive(text, FALSE);
 }
 
 /* (port online custom tab next and previous: R and L) */
@@ -17936,6 +18050,39 @@ boolean pc_menu_event_function_invoke(
 	case _function_online_custom_tab_previous:
 		online_custom_tab_step(-1);
 		return TRUE;
+	case _function_online_switch_open:
+		online_switch.open = TRUE;
+		online_switch.said = NONE;
+		return TRUE;
+	case _function_online_switch_close:
+		if (online_switch.open)
+			platform_log("menus: online switch lobby: closed");
+		online_switch.open = FALSE;
+		return TRUE;
+	/* (B on an Online lobby: the switcher closed when it is open - the
+	handler failing, so the lobby stays -, else the lobby left as the Halo
+	3 lobby's B leaves it) */
+	case _function_online_lobby_leave:
+		if (online_switch.open)
+		{
+			online_switch.open = FALSE;
+			platform_log("menus: online switch lobby: closed (B)");
+			return FALSE;
+		}
+		h3_live_close("the host left the lobby");
+		return TRUE;
+	/* (SWITCH LOBBY's rows: the lobby's live game closed - the party is
+	kept -, the other lobby opened in its place at the frame's update) */
+	case _function_online_switch_multiplayer:
+	case _function_online_switch_forge:
+	case _function_online_switch_campaign:
+		online_switch.open = FALSE;
+		h3_live_close("the host switched lobby");
+		online_menus.switch_to = function_index == _function_online_switch_multiplayer ?
+			"ui\\shell\\main_menu\\multiplayer_type_select\\multiplayer_type_select_screen" :
+			function_index == _function_online_switch_forge ? "pc\\h3\\forge\\lobby" :
+			"ui\\shell\\main_menu\\load_campaign_player_profile";
+		return TRUE;
 	case _function_online_exit:
 		platform_log("menus: online EXIT: the game closes");
 		exit(EXIT_SUCCESS);
@@ -18109,6 +18256,13 @@ void pc_menu_game_data_function_invoke(
 	case _input_online_custom:
 		if (widget->type == _ui_widget_type_column_list)
 			online_custom_update(widget);
+		break;
+	case _input_online_switch:
+		if (widget->type == _ui_widget_type_column_list)
+			online_switch_update(widget);
+		break;
+	case _input_online_lobby:
+		online_lobby_update(screen_of(widget));
 		break;
 	case _input_h3_players:
 		if (widget->type == _ui_widget_type_column_list)

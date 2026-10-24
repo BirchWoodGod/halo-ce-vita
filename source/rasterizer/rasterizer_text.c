@@ -102,11 +102,19 @@ the owner's photo of insider.10, Oct 18 2026) has more glyphs than 128 by
 the Vita the texture is read as it was at its first draw of a frame, and
 the glyphs written after it drew nothing: only the first row's name showed,
 each row below one column fewer. Every glyph a screen draws now stays in
-place, and the texture stops changing once they are all in (128 KB) */
+place, and the texture stops changing once they are all in (128 KB). The
+sharp fonts of Menu style Online (draw_string.c) hold their glyphs at the
+display's pixels, up to 3 times as many texels a side: 512 by 256 on the
+Vita (its 1.13, 256 KB), 1024 by 1024 on the desktop (2 MB) */
 enum
 {
-	HARDWARE_CHARACTER_CACHE_BITMAP_WIDTH = 256,
+#if defined(HALO_VITA) || defined(__vita__)
+	HARDWARE_CHARACTER_CACHE_BITMAP_WIDTH = 512,
 	HARDWARE_CHARACTER_CACHE_BITMAP_HEIGHT = 256,
+#else
+	HARDWARE_CHARACTER_CACHE_BITMAP_WIDTH = 1024,
+	HARDWARE_CHARACTER_CACHE_BITMAP_HEIGHT = 1024,
+#endif
 	MAXIMUM_HARDWARE_CHARACTERS = 1024,
 };
 #else

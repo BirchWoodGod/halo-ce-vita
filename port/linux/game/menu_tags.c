@@ -429,6 +429,8 @@ static char const *const port_function_names[] =
 	"port h3 scoreboard act", "port h3 scoreboard option", "port h3 scoreboard close", "port h3 scoreboard page up",
 	"port h3 scoreboard page down",
 	"port online custom tab next", "port online custom tab previous", "port online exit",
+	"port online switch open", "port online switch close", "port online lobby leave",
+	"port online switch multiplayer", "port online switch forge", "port online switch campaign",
 };
 
 /* the port's game data functions (menu_functions.c), from
@@ -459,7 +461,7 @@ static char const *const port_game_data_input_names[] =
 	"port h3 dialog",
 	"port ce lobby", "port ce profile",
 	"port h3 scoreboard", "port h3 scoreboard options",
-	"port online version", "port online custom",
+	"port online version", "port online custom", "port online switch", "port online lobby",
 };
 
 static struct

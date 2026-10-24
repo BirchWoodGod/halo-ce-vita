@@ -4,8 +4,8 @@
 what that one does, laid out the online way: the list low at the left in a see-through navy block
 with the orange bar, the version and the Settings button at its foot, the title large at the
 right over the live scene, a deeper blue cast over it. Every item of the Halo 3 main menu is here:
-SERVER BROWSER (the games browser, as the lobby's BROWSE GAMES), HOST MULTIPLAYER (the multiplayer
-lobby), HOST FORGE (the Forge lobby), CAMPAIGN, CUSTOMIZATION, FRIENDS, FILE SHARE, MOD MANAGER;
+SERVER BROWSER (the games browser, as the lobby's BROWSE GAMES), CAMPAIGN, HOST MULTIPLAYER (the
+multiplayer lobby), HOST FORGE (the Forge lobby), CUSTOMIZATION, FRIENDS, FILE SHARE, MOD MANAGER;
 Start the settings panel; the party's nameplates and the live servers at the top right. The art
 is this folder's own (tools/online_menu_art.py) and the Halo 3 set's (the title, the glyphs,
 the fonts). The left of the list sits in the wide screen's margin (x below 0 of the 640 columns:
@@ -85,9 +85,9 @@ the fonts). The left of the list sits in the wide screen's margin (x below 0 of 
 	</widget>
 	<widget name="online/main/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<child widget="online/main/browse" x="0" y="0"/>
-		<child widget="online/main/multiplayer" x="0" y="19"/>
-		<child widget="online/main/forge" x="0" y="38"/>
-		<child widget="online/main/campaign" x="0" y="57"/>
+		<child widget="online/main/campaign" x="0" y="19"/>
+		<child widget="online/main/multiplayer" x="0" y="38"/>
+		<child widget="online/main/forge" x="0" y="57"/>
 		<child widget="online/main/customization" x="0" y="76"/>
 		<child widget="online/main/friends" x="0" y="95"/>
 		<child widget="online/main/fileshare" x="0" y="114"/>
