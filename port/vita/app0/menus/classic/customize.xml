@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Menu style Classic+: CUSTOMIZATION (SETTINGS, a profile, MORE OPTIONS: classic/profile.xml) in the
+     original menus' look, in place of the Halo 3-style editor (cp/custom/screen stands for
+     h3/custom/screen while the style is Classic+: menu_tags.c menu_tags_online). The same rows and
+     functions as halo3/customize.xml (menu_functions.c "port h3 custom ...", the rows found by their
+     names): the profile's name, colour, player model, the Xbox profile's controller settings and the
+     tester's flaming helmet; Cross and right step a value on, left back, Circle saves. Laid out as
+     the Xbox's settings screens: the heading, the profile's name under it, the rows at the left on
+     Halo PC's list rows in ui.map's large font, their values in a column at the right (the colour's
+     swatch beside it), the focused row's help and the button key under them. The words of the rows
+     are halo3/customize.xml's (h3/custom_labels, h3/custom_help) -->
+<menus>
+	<bitmap name="cp/custom/header_art">
+		<frame png="classic/{lang}/header_customization.png" width="512" height="64"/>
+	</bitmap>
+	<widget name="cp/custom/header" left="35" top="11" width="512" height="64" bitmap="cp/custom/header_art"/>
+	<widget name="cp/custom/value" type="text" left="250" top="0" width="290" height="21" font="ui\large_ui" color="#FF2896FF" text_y="2" text_flags="no_focus_test"/>
+	<widget name="cp/custom/c/value" type="text" left="274" top="0" width="266" height="21" font="ui\large_ui" color="#FF2896FF" text_y="2" text_flags="no_focus_test"/>
+	<widget name="cp/custom/swatch" left="250" top="3" width="16" height="16" bitmap="h3/swatch"/>
+	<widget name="cp/custom/name_label" type="text" left="0" top="0" width="232" height="21" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="1" string_list="h3/custom_labels" string_index="0"/>
+	<widget name="cp/custom/op_name" width="540" height="21" flags="pass_unhandled_to_focused_child" bitmap="list_item_bkd">
+		<on event="a start" run="port h3 custom next"/>
+		<child widget="cp/custom/name_label"/>
+		<child widget="cp/custom/value"/>
+	</widget>
+	<widget name="cp/custom/color_label" type="text" left="0" top="0" width="232" height="21" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="1" string_list="h3/custom_labels" string_index="1"/>
+	<widget name="cp/custom/op_color" width="540" height="21" flags="pass_unhandled_to_focused_child" bitmap="list_item_bkd">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="cp/custom/color_label"/>
+		<child widget="cp/custom/swatch"/>
+		<child widget="cp/custom/c/value"/>
+	</widget>
+	<widget name="cp/custom/model_label" type="text" left="0" top="0" width="232" height="21" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="1" string_list="h3/custom_labels" string_index="9"/>
+	<widget name="cp/custom/op_model" width="540" height="21" flags="pass_unhandled_to_focused_child" bitmap="list_item_bkd">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="cp/custom/model_label"/>
+		<child widget="cp/custom/value"/>
+	</widget>
+	<widget name="cp/custom/stick_label" type="text" left="0" top="0" width="232" height="21" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="1" string_list="h3/custom_labels" string_index="2"/>
+	<widget name="cp/custom/op_stick" width="540" height="21" flags="pass_unhandled_to_focused_child" bitmap="list_item_bkd">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="cp/custom/stick_label"/>
+		<child widget="cp/custom/value"/>
+	</widget>
+	<widget name="cp/custom/buttons_label" type="text" left="0" top="0" width="232" height="21" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="1" string_list="h3/custom_labels" string_index="3"/>
+	<widget name="cp/custom/op_buttons" width="540" height="21" flags="pass_unhandled_to_focused_child" bitmap="list_item_bkd">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="cp/custom/buttons_label"/>
+		<child widget="cp/custom/value"/>
+	</widget>
+	<widget name="cp/custom/look_label" type="text" left="0" top="0" width="232" height="21" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="1" string_list="h3/custom_labels" string_index="4"/>
+	<widget name="cp/custom/op_look" width="540" height="21" flags="pass_unhandled_to_focused_child" bitmap="list_item_bkd">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="cp/custom/look_label"/>
+		<child widget="cp/custom/value"/>
+	</widget>
+	<widget name="cp/custom/invert_label" type="text" left="0" top="0" width="232" height="21" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="1" string_list="h3/custom_labels" string_index="5"/>
+	<widget name="cp/custom/op_invert" width="540" height="21" flags="pass_unhandled_to_focused_child" bitmap="list_item_bkd">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="cp/custom/invert_label"/>
+		<child widget="cp/custom/value"/>
+	</widget>
+	<widget name="cp/custom/flight_label" type="text" left="0" top="0" width="232" height="21" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="1" string_list="h3/custom_labels" string_index="6"/>
+	<widget name="cp/custom/op_flight" width="540" height="21" flags="pass_unhandled_to_focused_child" bitmap="list_item_bkd">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="cp/custom/flight_label"/>
+		<child widget="cp/custom/value"/>
+	</widget>
+	<widget name="cp/custom/autocenter_label" type="text" left="0" top="0" width="232" height="21" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="1" string_list="h3/custom_labels" string_index="7"/>
+	<widget name="cp/custom/op_autocenter" width="540" height="21" flags="pass_unhandled_to_focused_child" bitmap="list_item_bkd">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="cp/custom/autocenter_label"/>
+		<child widget="cp/custom/value"/>
+	</widget>
+	<widget name="cp/custom/vibration_label" type="text" left="0" top="0" width="232" height="21" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="1" string_list="h3/custom_labels" string_index="8"/>
+	<widget name="cp/custom/op_vibration" width="540" height="21" flags="pass_unhandled_to_focused_child" bitmap="list_item_bkd">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="cp/custom/vibration_label"/>
+		<child widget="cp/custom/value"/>
+	</widget>
+	<widget name="cp/custom/flame_label" type="text" left="0" top="0" width="232" height="21" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="1" string_list="h3/custom_labels" string_index="10"/>
+	<widget name="cp/custom/op_flame" width="540" height="21" flags="pass_unhandled_to_focused_child" bitmap="list_item_bkd">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="cp/custom/flame_label"/>
+		<child widget="cp/custom/value"/>
+	</widget>
+	<widget name="cp/custom/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port h3 custom"/>
+		<child widget="cp/custom/op_name" x="51" y="94"/>
+		<child widget="cp/custom/op_color" x="51" y="115"/>
+		<child widget="cp/custom/op_model" x="51" y="136"/>
+		<child widget="cp/custom/op_stick" x="51" y="157"/>
+		<child widget="cp/custom/op_buttons" x="51" y="178"/>
+		<child widget="cp/custom/op_look" x="51" y="199"/>
+		<child widget="cp/custom/op_invert" x="51" y="220"/>
+		<child widget="cp/custom/op_flight" x="51" y="241"/>
+		<child widget="cp/custom/op_autocenter" x="51" y="262"/>
+		<child widget="cp/custom/op_vibration" x="51" y="283"/>
+		<child widget="cp/custom/op_flame" x="51" y="304"/>
+	</widget>
+	<!-- (the profile's name under the heading; the help of the focused row - a row lower with the
+	     flaming helmet's, menu_functions.c -; what the panel's settings mean for it; under the
+	     colour's swatch, how a player model's pack is coming) -->
+	<widget name="cp/custom/profile_name" type="text" left="64" top="74" width="540" height="20" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="cp/custom/custom_help" type="text" left="64" top="324" width="527" height="64" font="ui\small_ui" color="#FF2896FF" string_list="h3/custom_help" text_flags="no_focus_test"/>
+	<widget name="cp/custom/status" type="text" left="64" top="388" width="527" height="18" font="ui\small_ui" color="#FFF0B070" text_flags="no_focus_test"/>
+	<widget name="cp/custom/preview_name" type="text" left="325" top="74" width="266" height="20" align="right" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="cp/custom/screen" flags="pass_unhandled_to_focused_child" bitmap="gradient">
+		<on event="b back" run="port h3 custom save" back="true"/>
+		<on event="deleted" run="port h3 custom close"/>
+		<child widget="cp/custom/header"/>
+		<child widget="cp/custom/profile_name"/>
+		<child widget="cp/custom/preview_name"/>
+		<child widget="cp/custom/custom_help"/>
+		<child widget="cp/custom/status"/>
+		<child widget="cp/custom/list"/>
+		<child widget="ui\shell\main_menu\button_key"/>
+	</widget>
+</menus>
