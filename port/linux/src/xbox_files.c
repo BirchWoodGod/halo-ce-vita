@@ -842,6 +842,8 @@ static void file_destroy(struct platform_handle *handle)
 	struct platform_file *file = handle->data;
 	unsigned long long started = file_call_started();
 
+	if (platform_file_trace_level() >= 2)
+		platform_file_trace("CloseHandle", file->descriptor, file->path, -1, 0);
 	close(file->descriptor);
 	file_call_done(started, "close", file->path, 0);
 	free(file);
@@ -885,6 +887,12 @@ static HANDLE create_file(LPCSTR file_name, DWORD desired_access, DWORD share_mo
 	/* (port: MCC's folder is only read) */
 	if (((desired_access & GENERIC_WRITE) || creation_disposition != OPEN_EXISTING) && mcc_write_refused(path))
 		return INVALID_HANDLE_VALUE;
+	if (((desired_access & GENERIC_WRITE) || creation_disposition != OPEN_EXISTING) &&
+		platform_host_path_write_protected(path))
+	{
+		SetLastError(ERROR_ACCESS_DENIED);
+		return INVALID_HANDLE_VALUE;
+	}
 	io_card_request(0);
 	existed = posix_stat(path, &information) == 0;
 
@@ -944,6 +952,9 @@ static HANDLE create_file(LPCSTR file_name, DWORD desired_access, DWORD share_mo
 	}
 	file->descriptor = descriptor;
 	snprintf(file->path, sizeof(file->path), "%s", path);
+	if (platform_file_trace_level() >= 2)
+		platform_file_trace((desired_access & GENERIC_WRITE) ? "CreateFile (write)" : "CreateFile (read)", descriptor, path,
+			-1, 0);
 
 	/* Win32 reports whether an OPEN_ALWAYS/CREATE_ALWAYS target existed */
 	SetLastError((existed && (creation_disposition == OPEN_ALWAYS || creation_disposition == CREATE_ALWAYS)) ?
@@ -1132,6 +1143,9 @@ static BOOL write_at(struct platform_file *file, LPCVOID buffer, DWORD count, LP
 {
 	DWORD total = 0;
 	unsigned long long started = file_call_started();
+
+	if (platform_file_trace_level() >= 2)
+		platform_file_trace("WriteFile", file->descriptor, file->path, positioned ? (long long)offset : -1, count);
 
 	while (total < count)
 	{
@@ -1565,8 +1579,10 @@ static BOOL delete_file(LPCSTR file_name)
 	char path[1024];
 
 	platform_translate_path(file_name, path, sizeof(path));
-	if (mcc_write_refused(path))
+	if (mcc_write_refused(path) || platform_host_path_write_protected(path))
 		return FALSE;
+	if (platform_file_trace_level() >= 2)
+		platform_file_trace("DeleteFile", -1, path, -1, 0);
 	if (unlink(path) != 0)
 	{
 		platform_set_last_error_from_errno(errno);
@@ -1599,8 +1615,11 @@ static BOOL move_file(LPCSTR existing_file_name, LPCSTR new_file_name)
 
 	platform_translate_path(existing_file_name, from, sizeof(from));
 	platform_translate_path(new_file_name, to, sizeof(to));
-	if (mcc_write_refused(from) || mcc_write_refused(to))
+	if (mcc_write_refused(from) || mcc_write_refused(to) || platform_host_path_write_protected(from) ||
+		platform_host_path_write_protected(to))
 		return FALSE;
+	if (platform_file_trace_level() >= 2)
+		platform_file_trace("MoveFile", -1, to, -1, 0);
 	if (posix_stat(to, &information) == 0)
 	{
 		SetLastError(ERROR_ALREADY_EXISTS);
@@ -1640,8 +1659,10 @@ static BOOL copy_file(LPCSTR existing_file_name, LPCSTR new_file_name, BOOL fail
 
 	platform_translate_path(existing_file_name, from, sizeof(from));
 	platform_translate_path(new_file_name, to, sizeof(to));
-	if (mcc_write_refused(to))
+	if (mcc_write_refused(to) || platform_host_path_write_protected(to))
 		return FALSE;
+	if (platform_file_trace_level() >= 2)
+		platform_file_trace("CopyFile", -1, to, -1, 0);
 	source = open(from, O_RDONLY | O_CLOEXEC);
 	if (source < 0)
 	{

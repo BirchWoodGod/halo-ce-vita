@@ -97,6 +97,14 @@ long platform_run_apcs(void);
 host path below the data root. Components are matched case-insensitively
 against what exists on disk, as the Xbox file system is case-insensitive. */
 void platform_translate_path(const char *xbox_path, char *host_path, unsigned long host_path_size);
+/* (debug) HALO_TRACE_FILES's level, and a file call said at level 2
+(msvc_crt.c) */
+int platform_file_trace_level(void);
+void platform_file_trace(const char *what, int descriptor, const char *path, long long offset, unsigned long bytes);
+/* (port) TRUE (said in the log) for a host path of the player's own game
+files in the maps folder - Halo PC's resource maps, ui.map, the campaign's
+levels - which nothing may write, truncate, move or delete */
+int platform_host_path_write_protected(const char *host_path);
 const char *platform_data_root(void);
 /* reads name, whole, from the folder that holds the Xbox directory
 xbox_directory (d:\ the data root, d:\maps the maps folder, wherever
