@@ -179,6 +179,14 @@ static const struct config_setting config_settings[] =
 	{ "paths.saves", _config_string, "\"\"", "HALO_SAVE_ROOT", _environment_value, _platform_desktop,
 		"Where saved games and profiles go; empty for the usual place\n"
 		"(~/.local/share/halo-linux, or %APPDATA%\\halo on Windows)." },
+	/* (port/linux/game/mcc_content.c, docs/mcc_cea_maps.md; the Vita's
+	settings panel's Halo content folder, Multiplayer > Modded maps) */
+	{ "paths.content", _config_string, "\"\"", "HALO_CONTENT_ROOT", _environment_value, _platform_all,
+		"The Halo content folder: your own Halo: The Master Chief Collection's\n"
+		"folder (the one holding halo1), whose maps are listed with the others\n"
+		"and played, each by the loader its file needs; empty finds it (Steam's\n"
+		"libraries; on the PS Vita ux0:data/haloce-vita/mcc). Without one, the\n"
+		"Xbox maps alone. Only read, never written." },
 
 	{ "network.address", _config_string, "\"\"", "HALO_NET_ADDRESS", _environment_value, _platform_all,
 		"This machine's IPv4 address for system link, for a machine on several\n"

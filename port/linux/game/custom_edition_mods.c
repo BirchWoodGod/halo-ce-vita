@@ -22,6 +22,15 @@ a Windows bitmap <map>.bmp beside the map takes the place of. A map its campaign
 list comes after those it does, in the stock levels' order and then the
 order of their names.
 
+(port) The Halo content folder (paths.content, mcc_content.h) adds MCC's
+own campaign as a mod of its own, first: key mcc, its maps MCC's
+halo1 folder's (d:\mcc\maps\a10.map ...: mcc_a10, mods\mcc_a10) in the
+campaign's order, titled as the stock levels, whatever MCC mods is. Nothing
+else of that folder is read (no campaign file, no picture), and the mod
+manager's survey never lists it: it is not in the mods folder, and nothing
+of it is ever deleted or written. A mods folder's mod keyed mcc is left
+out: that name is MCC's.
+
 None of it is looked at unless the player turned it on (game.mcc_mods,
 HALO_MCC_MODS: halo_mcc_mods_enabled, which needs PC maps on too). A mod
 the player turned off in the mod manager (HALO_MODS_DISABLED: mod keys,
@@ -47,6 +56,7 @@ MOD_CAMPAIGN_FILE_MAXIMUM_BYTES. Nothing in a mod is run.
 #include "custom_edition_cache.h"
 #include "custom_edition_mods.h"
 #include "mod_campaign_files.h"
+#include "mcc_content.h"
 #include "../src/lang.h"
 
 #include <stdio.h>
@@ -82,6 +92,9 @@ struct custom_edition_mod
 	short map_files;
 	short maps_valid;
 	char problem[MOD_PROBLEM_BYTES];
+	/* (port) the Halo content folder's campaign (mcc_content.h), not a
+	folder of the mods folder */
+	boolean mcc;
 };
 
 struct custom_edition_mod_map
@@ -491,6 +504,19 @@ static void mod_add(
 		}
 		return;
 	}
+	/* (port: the key of MCC's own files, mcc_content.h, whose maps' names
+	are MCC's alone) */
+	if (!csstrcmp(mod->key, MCC_CONTENT_MOD_KEY))
+	{
+		error(_error_silent, "mods: '%s' is not looked at: its name is kept for MCC's own files (the Halo content folder)", folder);
+		if (globals->survey)
+		{
+			mod_problem(mod, T("Its name is kept for MCC files: rename its folder"));
+			mod->key[0] = 0;
+			globals->mod_count++;
+		}
+		return;
+	}
 	for (index = 0; index < mod_index; index++)
 	{
 		if (globals->mods[index].key[0] && !csstrcmp(globals->mods[index].key, mod->key))
@@ -615,6 +641,73 @@ static void mod_add(
 	return;
 }
 
+/* (port) Adds MCC's own campaign (the Halo content folder, mcc_content.h)
+as the first mod: each of the ten levels whose map is in MCC's maps folder
+and is a Halo: CE Anniversary cache of a solo scenario
+(custom_edition_cache_mod_map_identify), in the campaign's order, titled
+as the stock level. */
+static void mcc_mod_add(
+	void)
+{
+	struct custom_edition_mods_globals *globals = &custom_edition_mods_globals;
+	struct custom_edition_mod *mod;
+	short mod_index;
+	short missing = 0;
+	int level;
+
+	if (globals->mod_count >= CUSTOM_EDITION_MODS_MAXIMUM)
+	{
+		return;
+	}
+	mod_index = globals->mod_count++;
+	mod = &globals->mods[mod_index];
+	csmemset(mod, 0, sizeof(*mod));
+	mod->mcc = TRUE;
+	mod->has_campaign_info = TRUE;
+	csstrcpy(mod->folder, MCC_CONTENT_MOD_KEY);
+	csstrcpy(mod->key, MCC_CONTENT_MOD_KEY);
+	csstrncpy(mod->title, T("Halo: The Master Chief Collection"), sizeof(mod->title) - 1);
+	for (level = 0; level < MCC_CONTENT_CAMPAIGN_LEVELS; level++)
+	{
+		char const *stem = mcc_content_campaign_stem(level);
+		struct custom_edition_mod_map *map;
+		char path[PATH_BYTES];
+		struct file_reference reference;
+
+		if (globals->map_count >= CUSTOM_EDITION_MODS_MAXIMUM_MAPS ||
+			!mcc_content_map_path(stem, path, sizeof(path)))
+		{
+			break;
+		}
+		if (!file_exists(file_reference_create_from_path(&reference, path, FALSE)))
+		{
+			missing++;
+			continue;
+		}
+		mod->map_files++;
+		/* (the loader its header asks for Halo CE's: mcc_content.h's table) */
+		if (custom_edition_cache_content_loader(path, NULL) != _content_library_loader_halo1 ||
+			!custom_edition_cache_mod_map_identify(path))
+		{
+			continue;
+		}
+		mod->maps_valid++;
+		map = &globals->maps[globals->map_count++];
+		csmemset(map, 0, sizeof(*map));
+		csprintf(map->name, "%s%s", MCC_CONTENT_NAME_PREFIX, stem);
+		csprintf(map->level_name, "%s%s", CUSTOM_EDITION_MODS_LEVEL_NAME_PREFIX, map->name);
+		csstrcpy(map->stem, stem);
+		map->mod_index = mod_index;
+		map->order = (short)level;
+		snprintf(map->title, sizeof(map->title), "%s (MCC)", mcc_content_title(stem));
+		csstrncpy(map->description, T("Your MCC files' own level. Sound effects only for now: the dialogue and music are in sound banks this version doesn't read."),
+			sizeof(map->description) - 1);
+	}
+	error(_error_silent, "mcc: %d campaign maps of the Halo content folder's halo1 (%d of the ten missing)", mod->maps_valid, missing);
+
+	return;
+}
+
 /* each mod's maps in their order, the mods in the order of their folders'
 names */
 static int mod_map_compare(
@@ -700,17 +793,23 @@ static short custom_edition_mods_find(
 	looked in, and no name finds a map there) */
 	return 0;
 #else
+	/* (port: MCC's own campaign first, with the Halo content folder; never
+	the survey's, which is the mods folder's alone) */
+	if (!survey && halo_content_library_found())
+	{
+		mcc_mod_add();
+	}
 	/* (experimental and off unless chosen: game.mcc_mods, with PC maps on;
 	off, the mods folder is not looked at, but by the survey) */
 	if (!survey && !halo_mcc_mods_enabled())
 	{
-		return 0;
+		return globals->map_count;
 	}
 #endif
 	find = FindFirstFileA(CUSTOM_EDITION_MODS_DIRECTORY "*", &data);
 	if (find == INVALID_HANDLE_VALUE)
 	{
-		return 0;
+		return globals->map_count;
 	}
 	do
 	{
@@ -936,9 +1035,16 @@ boolean custom_edition_mods_map_path(
 	char *path,
 	long path_size)
 {
-	struct custom_edition_mod_map const *map = halo_mcc_mods_enabled() ? mod_map_named(name) : NULL;
+	struct custom_edition_mod_map const *map =
+		halo_mcc_mods_enabled() || halo_content_library_found() ? mod_map_named(name) : NULL;
 
-	if (!map ||
+	/* (port: MCC's own, mcc_content.h: in MCC's maps folder, with Halo CE
+	content MCC files alone) */
+	if (map && custom_edition_mods_globals.mods[map->mod_index].mcc)
+	{
+		return halo_content_library_found() && mcc_content_map_path(map->stem, path, (unsigned long)path_size);
+	}
+	if (!map || !halo_mcc_mods_enabled() ||
 		snprintf(path, (size_t)path_size, "%s%s\\maps\\%s.map", CUSTOM_EDITION_MODS_DIRECTORY,
 			custom_edition_mods_globals.mods[map->mod_index].folder, map->stem) >= path_size)
 	{

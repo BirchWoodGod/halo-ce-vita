@@ -1053,6 +1053,64 @@ static char const *const h3_level_names[NUMBER_OF_SINGLE_PLAYER_LEVELS] =
 	"Assault on the Control Room", "343 Guilty Spark", "The Library", "Two Betrayals", "Keyes", "The Maw",
 };
 static char const *const h3_difficulty_names[4] = { "Easy", "Normal", "Heroic", "Legendary" };
+/* (port) with a Halo content folder (mcc_content.h), each mission whose map
+it has is MCC's own campaign map, as the mods' (custom_edition_mods.c),
+else the Xbox's: played on this machine alone, every one open (they keep
+no profile progress), saved in the custom campaign maps' save,
+savegame_custom.bin. Looked at as the lobby opens (h3_mcc_levels_find) */
+static char const *const h3_mcc_level_paths[NUMBER_OF_SINGLE_PLAYER_LEVELS] =
+{
+	"mods\\mcc_a10", "mods\\mcc_a30", "mods\\mcc_a50", "mods\\mcc_b30", "mods\\mcc_b40",
+	"mods\\mcc_c10", "mods\\mcc_c20", "mods\\mcc_c40", "mods\\mcc_d20", "mods\\mcc_d40",
+};
+boolean game_state_set_persistent_storage_custom(boolean custom);
+boolean custom_edition_cache_playable(char const *map_name);
+
+static boolean h3_mcc_levels[NUMBER_OF_SINGLE_PLAYER_LEVELS];
+static boolean h3_mcc_any;
+
+/* which missions the Halo content folder has (as the loader takes them) */
+static void h3_mcc_levels_find(void)
+{
+	short level;
+
+	h3_mcc_any = FALSE;
+	for (level = 0; level < NUMBER_OF_SINGLE_PLAYER_LEVELS; level++)
+	{
+		h3_mcc_levels[level] = halo_content_library_found() && custom_edition_cache_playable(h3_mcc_level_paths[level]);
+		h3_mcc_any |= h3_mcc_levels[level];
+	}
+	if (h3_mcc_any)
+		platform_log("menus: h3 campaign: the missions of the Halo content folder are MCC's");
+}
+
+static boolean h3_mcc_campaign(void)
+{
+	return h3_mcc_any;
+}
+
+static boolean h3_mcc_level(short level)
+{
+	return h3_mcc_levels[PIN(level, 0, NUMBER_OF_SINGLE_PLAYER_LEVELS - 1)];
+}
+
+/* the mission's level name: MCC's own, else the Xbox level's */
+static char const *h3_level_path(short level)
+{
+	level = (short)PIN(level, 0, NUMBER_OF_SINGLE_PLAYER_LEVELS - 1);
+	return h3_mcc_levels[level] ? h3_mcc_level_paths[level] : h3_level_paths[level];
+}
+
+/* whether the mission can be played (map_checks.c; MCC's own: found as the
+lobby opened), `why` not */
+static short h3_mission_check(short level, char *why, long why_size)
+{
+	if (!h3_mcc_level(level))
+		return map_check(h3_level_paths[level], why, why_size);
+	if (why && why_size > 0)
+		why[0] = 0;
+	return _map_check_playable;
+}
 
 /* ---- ad hoc play in the Halo 3 lobbies (the multiplayer lobby's AD HOC,
 the campaign lobby's AD HOC CO-OP). Choosing it switches the connection to
@@ -1252,6 +1310,9 @@ static short h3_campaign_unlocked(void)
 	struct player_profile profile;
 	short level = NONE, difficulty;
 
+	/* (MCC's own: all ten, which keep no profile progress) */
+	if (h3_mcc_campaign())
+		return NUMBER_OF_SINGLE_PLAYER_LEVELS;
 	if (h3_profile(&profile))
 		player_profile_get_highest_completed_solo_level(&profile, &level, &difficulty);
 	return (short)PIN(level + 2, 1, NUMBER_OF_SINGLE_PLAYER_LEVELS);
@@ -1316,7 +1377,7 @@ static void h3_mission_title_update(struct widget_instance *widget)
 	short level;
 
 	for (level = 0; level < NUMBER_OF_SINGLE_PLAYER_LEVELS && map; level++)
-		if (!_stricmp(map, h3_level_paths[level]))
+		if (!_stricmp(map, h3_level_paths[level]) || !_stricmp(map, h3_mcc_level_paths[level]))
 			name = T(h3_level_names[level]);
 	if (!name)
 	{
@@ -1333,7 +1394,10 @@ was chosen since, after */
 static void h3_campaign_initialize(void)
 {
 	struct player_profile profile;
-	short unlocked = h3_campaign_unlocked();
+	short unlocked;
+
+	h3_mcc_levels_find();
+	unlocked = h3_campaign_unlocked();
 
 	if (!h3_campaign.initialized || h3_campaign.profile_index != player_ui_get_active_player_profile_index(0))
 	{
@@ -1352,9 +1416,14 @@ static void h3_campaign_initialize(void)
 	{
 		boolean corrupted = FALSE;
 
+		/* (MCC's own: the custom campaign maps' save, which an MCC mission
+		on its difficulty resumes) */
+		boolean previous = game_state_set_persistent_storage_custom(h3_mcc_campaign());
+
 		h3_campaign.saved_map[0] = 0;
 		h3_campaign.saved = game_state_test_persistent_storage(h3_campaign.saved_map, &h3_campaign.saved_difficulty,
 			&corrupted) && !corrupted;
+		game_state_set_persistent_storage_custom(previous);
 		h3_campaign.damaged = corrupted;
 		if (corrupted)
 			platform_log("menus: h3 campaign: the saved game is damaged: it can't be loaded");
@@ -1411,7 +1480,7 @@ static void h3_missions_why(struct widget_instance *list)
 	}
 	if (focused < 0 || focused >= NUMBER_OF_SINGLE_PLAYER_LEVELS)
 		return;
-	playable = map_check(h3_level_paths[focused], why, sizeof(why)) == _map_check_playable;
+	playable = h3_mission_check(focused, why, sizeof(why)) == _map_check_playable;
 	if ((found = named(screen, "mission_text")) != NULL)
 		widget_instance_set_visibility_recursive(found, playable);
 	if ((found = named(screen, "mission_why")) != NULL)
@@ -1472,6 +1541,8 @@ static void h3_campaign_update(struct widget_instance *widget)
 		snprintf(text, sizeof(text), "%s", T("Co-op with the PS Vitas on your Wi-Fi."));
 	else if (h3_campaign.network == _h3_campaign_adhoc)
 		snprintf(text, sizeof(text), "%s", T("Co-op with the PS Vitas near you."));
+	else if (h3_mcc_level(h3_campaign.level))
+		snprintf(text, sizeof(text), "%s", T("MCC files, on this PS Vita alone. Sound effects only for now."));
 	else
 		snprintf(text, sizeof(text), "%s", T("This party is local to this PS Vita."));
 	/* (the mission's level cannot be played: why; START GAME then says it
@@ -1479,8 +1550,10 @@ static void h3_campaign_update(struct widget_instance *widget)
 	{
 		char why[160];
 
-		if (map_check(h3_level_paths[h3_campaign.level], why, sizeof(why)) != _map_check_playable)
+		if (h3_mission_check(h3_campaign.level, why, sizeof(why)) != _map_check_playable)
 			snprintf(text, sizeof(text), "%s", why);
+		else if (h3_mcc_level(h3_campaign.level) && h3_campaign.network != _h3_campaign_local)
+			snprintf(text, sizeof(text), "%s", T("MCC missions play on this machine alone: LOCAL."));
 	}
 	text_show(named(screen, "ready_sub"), text);
 	snprintf(text, sizeof(text), "%s: %s", T("MISSION"), T(h3_level_names[h3_campaign.level]));
@@ -1496,7 +1569,7 @@ static void h3_campaign_update(struct widget_instance *widget)
 		/* (co-op starts the level at its start, the saved game left as it is) */
 		boolean coop = h3_campaign.network != _h3_campaign_local;
 		boolean same_level = !coop && h3_campaign.saved &&
-			!_stricmp(h3_campaign.saved_map, h3_level_paths[h3_campaign.level]);
+			!_stricmp(h3_campaign.saved_map, h3_level_path(h3_campaign.level));
 		boolean resumes = same_level && h3_campaign.saved_difficulty == h3_campaign.difficulty;
 		struct widget_instance *warning = named(screen, "warning");
 
@@ -1598,6 +1671,12 @@ static boolean h3_campaign_host(struct widget_instance *widget, struct event_rec
 
 	if (h3_campaign.network == _h3_campaign_local)
 		return FALSE;
+	/* (MCC's own missions are never hosted, as no mod's map is) */
+	if (h3_mcc_level(h3_campaign.level))
+	{
+		platform_log("menus: h3 campaign: co-op not hosted: MCC missions play on this machine alone");
+		return FALSE;
+	}
 	platform_log("menus: h3 campaign: host co-op %s on %s (%s)", level, h3_difficulty_names[h3_campaign.difficulty],
 		h3_campaign.network == _h3_campaign_online ? "online" : h3_campaign.network == _h3_campaign_adhoc ? "ad hoc" :
 		"system link");
@@ -14703,7 +14782,7 @@ static short h3_pregame_level(char const *map_name)
 
 	for (index = 0; map_name && index < (short)NUMBEROF(h3_level_paths); index++)
 	{
-		if (!_stricmp(map_name, h3_level_paths[index]))
+		if (!_stricmp(map_name, h3_level_paths[index]) || !_stricmp(map_name, h3_mcc_level_paths[index]))
 			return index;
 	}
 	return NONE;
@@ -16836,7 +16915,7 @@ boolean pc_menu_event_function_invoke(
 		char why[160];
 
 		/* (a level that cannot be played: not chosen, its reason shown) */
-		if (map_check(h3_level_paths[level], why, sizeof(why)) != _map_check_playable)
+		if (h3_mission_check(level, why, sizeof(why)) != _map_check_playable)
 		{
 			platform_log("menus: h3 campaign: %s can't be chosen: %s", h3_level_names[level], why);
 			return FALSE;
@@ -16874,9 +16953,9 @@ boolean pc_menu_event_function_invoke(
 	case _function_h3_campaign_start:
 		/* (then the game's own "main menu switch to solo game", the next
 		handler, as the Xbox's difficulty list does after "set difficulty") */
-		main_set_map_name((char *)h3_level_paths[h3_campaign.level]);
+		main_set_map_name((char *)h3_level_path(h3_campaign.level));
 		main_set_difficulty((word)h3_campaign.difficulty);
-		platform_log("menus: h3 campaign: start %s on %s", h3_level_paths[h3_campaign.level],
+		platform_log("menus: h3 campaign: start %s on %s", h3_level_path(h3_campaign.level),
 			h3_difficulty_names[h3_campaign.difficulty]);
 		return TRUE;
 	case _function_forge_lobby_init:
