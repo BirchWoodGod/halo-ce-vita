@@ -150,6 +150,19 @@ FILE *halo_linux_fopen(const char *path, const char *mode)
 	return NULL;
 }
 
+/* (the game's fwrite and fclose, msvc_crt.c's in the game: HALO_TRACE_FILES) */
+#undef fwrite
+#undef fclose
+size_t halo_linux_fwrite(const void *buffer, size_t size, size_t count, FILE *stream)
+{
+	return fwrite(buffer, size, count, stream);
+}
+
+int halo_linux_fclose(FILE *stream)
+{
+	return fclose(stream);
+}
+
 int halo_linux_fprintf(FILE *file, const char *format, ...)
 {
 	(void)file;
