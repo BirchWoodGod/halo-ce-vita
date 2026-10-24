@@ -2452,7 +2452,10 @@ PY
 			HALO_NETWORK_TEST=local:bloodgulch:slayer HALO_BOTS=3 HALO_NETWORK_TEST_SCORES=4
 		profile_from=$HALO_TEST_PROFILE run h3scoreboard_ce "$menus_data" 50 "wait:150:1000" $sb_env HALO_MENU_STYLE=classic \
 			HALO_NETWORK_TEST=local:bloodgulch:slayer HALO_BOTS=3 HALO_NETWORK_TEST_SCORES=4
-		for name in h3scoreboard h3scoreboard_team h3scoreboard_16 h3scoreboard_touch h3scoreboard_split h3scoreboard_es h3scoreboard_classic h3scoreboard_ce; do
+		# (Menu style Halo CE with Halo 3's chosen for it: menus.classic_scoreboard halo3)
+		profile_from=$HALO_TEST_PROFILE run h3scoreboard_ce_h3 "$menus_data" 50 "wait:150:1000" $sb_env HALO_MENU_STYLE=classic \
+			HALO_CLASSIC_SCOREBOARD=halo3 HALO_NETWORK_TEST=local:bloodgulch:slayer HALO_BOTS=3 HALO_NETWORK_TEST_SCORES=4
+		for name in h3scoreboard h3scoreboard_team h3scoreboard_16 h3scoreboard_touch h3scoreboard_split h3scoreboard_es h3scoreboard_classic h3scoreboard_ce h3scoreboard_ce_h3; do
 			log=$out/$name/run.log
 			echo "--- $name"
 			grep -aE "menus: h3 scoreboard: (held|opened|options|rows [0-9]|a drag|Circle|closed)|test (tap|drag)" "$log" | head -12
@@ -2551,6 +2554,8 @@ PY
 			drawn=$(sed -n 's/.*network test: scoreboard held ([0-9]*; drawn in \([0-9]*\) frames so far).*/\1/p' "$log" | tail -1)
 			[ "${drawn:-0}" -gt 0 ] || fail h3scoreboard "$name: the game's own scores were never drawn"
 		done
+		grep -aq "menus: h3 scoreboard: held up" "$out/h3scoreboard_ce_h3/run.log" ||
+			fail h3scoreboard "Menu style Halo CE with menus.classic_scoreboard halo3: Halo 3's scoreboard was not held up"
 		if [ $gxm_null = 1 ]; then
 			echo "SKIP (h3scoreboard): the frames saved (a gxm-null harness: the GL build's check)"
 		else
@@ -2580,7 +2585,10 @@ PY
 			HALO_CARNAGE_REPORT=classic $carnage_env HALO_NETWORK_TEST=local:chillout:slayer HALO_NETWORK_TEST_END=30 HALO_BOTS=3
 		profile_from=$HALO_TEST_PROFILE run h3carnage_ce "$menus_data" 90 "wait:150:1000" HALO_MENU_STYLE=classic \
 			$carnage_env HALO_NETWORK_TEST=local:chillout:slayer HALO_NETWORK_TEST_END=30 HALO_BOTS=3
-		for name in h3carnage h3carnage_team h3carnage_ctf h3carnage_oddball h3carnage_classic h3carnage_ce; do
+		# (Menu style Halo CE with Halo 3's report chosen for it: menus.classic_carnage_report halo3)
+		profile_from=$HALO_TEST_PROFILE run h3carnage_ce_h3 "$menus_data" 90 "$carnage_pad" HALO_MENU_STYLE=classic \
+			HALO_CLASSIC_CARNAGE_REPORT=halo3 $carnage_env HALO_NETWORK_TEST=local:chillout:slayer HALO_NETWORK_TEST_SCORE=3 HALO_BOTS=3
+		for name in h3carnage h3carnage_team h3carnage_ctf h3carnage_oddball h3carnage_classic h3carnage_ce h3carnage_ce_h3; do
 			log=$out/$name/run.log
 			echo "--- $name"
 			grep -aE "carnage: |menus: h3 carnage" "$log" | head -14
@@ -2678,6 +2686,8 @@ PY
 			fail h3carnage "Oddball's report was not a free for all game's"
 		grep -aqE "carnage: row 1: .* score [0-9]+:[0-9][0-9] kills" "$out/h3carnage_oddball/run.log" ||
 			fail h3carnage "Oddball's score was not a time"
+		grep -aq "menus: h3 carnage: the carnage report opened" "$out/h3carnage_ce_h3/run.log" ||
+			fail h3carnage "Menu style Halo CE with menus.classic_carnage_report halo3: the Halo 3 report did not open"
 		for name in h3carnage_classic h3carnage_ce; do
 			log=$out/$name/run.log
 			grep -aq "menus: h3 carnage: the game is over: the game's own report" "$log" ||

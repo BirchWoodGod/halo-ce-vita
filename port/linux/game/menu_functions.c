@@ -12154,11 +12154,21 @@ static long h3_carnage_continue_seconds(void)
 static boolean h3_carnage_wanted(void)
 {
 	/* (its variable, live; else config.toml's) */
-	char const *report = getenv("HALO_CARNAGE_REPORT");
+	char const *report;
 
+	/* (Menu style Halo CE: the game's own unless menus.classic_carnage_report -
+	HALO_CLASSIC_CARNAGE_REPORT - is "halo3") */
+	if (!halo_menu_style_halo3())
+	{
+		report = getenv("HALO_CLASSIC_CARNAGE_REPORT");
+		if (!report)
+			report = config_string("menus.classic_carnage_report");
+		return !strcmp(report, "halo3");
+	}
+	report = getenv("HALO_CARNAGE_REPORT");
 	if (!report)
 		report = config_string("menus.carnage_report");
-	return halo_menu_style_halo3() && strcmp(report, "classic") != 0;
+	return strcmp(report, "classic") != 0;
 }
 
 /* this machine's network game, not split screen's (PLAYERS, LEAVE) */
@@ -12507,7 +12517,7 @@ static void h3_carnage_frame(boolean main_menu_loaded)
 		h3_carnage.end_said = TRUE;
 		platform_log("menus: h3 carnage: the game is over: %s", h3_carnage_wanted() ? "the Halo 3 carnage report" :
 			halo_menu_style_halo3() ? "the game's own report (menus.carnage_report classic)" :
-			"the game's own report (Menu style Halo CE)");
+			"the game's own report (Menu style Halo CE, menus.classic_carnage_report classic)");
 	}
 	if (h3_carnage.leave_pending)
 	{
@@ -12732,11 +12742,21 @@ static boolean h3_scoreboard_other_person(struct h3_scoreboard_row const *row);
 static boolean h3_scoreboard_wanted(void)
 {
 	/* (its variable, live; else config.toml's) */
-	char const *board = getenv("HALO_SCOREBOARD");
+	char const *board;
 
+	/* (Menu style Halo CE: the game's own unless menus.classic_scoreboard -
+	HALO_CLASSIC_SCOREBOARD - is "halo3") */
+	if (!halo_menu_style_halo3())
+	{
+		board = getenv("HALO_CLASSIC_SCOREBOARD");
+		if (!board)
+			board = config_string("menus.classic_scoreboard");
+		return !strcmp(board, "halo3");
+	}
+	board = getenv("HALO_SCOREBOARD");
 	if (!board)
 		board = config_string("menus.scoreboard");
-	return halo_menu_style_halo3() && strcmp(board, "classic") != 0;
+	return strcmp(board, "classic") != 0;
 }
 
 /* (tests, never in release builds) HALO_TEST_SCOREBOARD_PARTY and

@@ -578,16 +578,26 @@ static struct setting settings[] = {
 	/* (menu_functions.c h3_carnage_wanted, config.toml's menus.carnage_report:
 	a multiplayer game's end, Halo 3's CARNAGE REPORT or the game's own;
 	read when the scores come up: live. Shown with Menu style Halo 3 - Halo
-	CE always shows the game's own -: setting_shown. On this page, with
+	CE has its own two below -: setting_shown. On this page, with
 	Menu style, as the Game tab is a screen's height) */
 	{ "Carnage report", "HALO_CARNAGE_REPORT", 0, 2, { "classic", "halo3" }, { "Classic", "Halo 3" },
 		"A multiplayer game's end: Halo 3's report, or the original", 1, PAGE_MENUS },
 	/* (menu_functions.c h3_scoreboard_wanted, config.toml's menus.scoreboard:
 	the scores while Back is held in a multiplayer game, Halo 3's scoreboard
 	or the game's own; read each frame: live. Shown with Menu style Halo 3, as
-	Carnage report is - Halo CE always shows the game's own -: setting_shown) */
+	Carnage report is - Halo CE has its own two below -: setting_shown) */
 	{ "Scoreboard", "HALO_SCOREBOARD", 0, 2, { "classic", "halo3" }, { "Halo CE", "Halo 3" },
 		"Scores in a game: Halo 3's scoreboard, or the original", 1, PAGE_MENUS },
+	/* (the same two for Menu style Halo CE - the owner, Oct 24: the original
+	scores and report by default, Halo 3's as an option, so that the report's
+	DETAILS and the scoreboard's player options (mute, add friend, kick) are
+	reachable from the original menus too - menu_functions.c h3_carnage_wanted,
+	h3_scoreboard_wanted; menus.classic_carnage_report, menus.classic_scoreboard.
+	Shown with Menu style Halo CE: setting_shown. Live) */
+	{ "Carnage report", "HALO_CLASSIC_CARNAGE_REPORT", 0, 2, { "classic", "halo3" }, { "Classic", "Halo 3" },
+		"A multiplayer game's end: the original, or Halo 3's report", 0, PAGE_MENUS },
+	{ "Scoreboard", "HALO_CLASSIC_SCOREBOARD", 0, 2, { "classic", "halo3" }, { "Halo CE", "Halo 3" },
+		"Scores in a game: the original, or Halo 3's with player options", 0, PAGE_MENUS },
 	/* (Forge and File Share for the original menus - the owner: everything
 	in the overlay -: the Forge page, under Menus (Interface; it was Game's
 	last row, under Updates, insider.21), shown with Menu style Halo CE; the
@@ -1668,6 +1678,10 @@ static int setting_shown(const struct setting *setting)
 	if (setting->variable && (!strcmp(setting->variable, "HALO_CARNAGE_REPORT") ||
 		!strcmp(setting->variable, "HALO_SCOREBOARD")))
 		return !classic_panel();
+	/* (and Menu style Halo CE's own two) */
+	if (setting->variable && (!strcmp(setting->variable, "HALO_CLASSIC_CARNAGE_REPORT") ||
+		!strcmp(setting->variable, "HALO_CLASSIC_SCOREBOARD")))
+		return classic_panel();
 	if ((setting->variable && !strcmp(setting->variable, "HALO_ADHOC_ROOM")) || setting->action == ACTION_ADHOC_JOIN)
 		return network_is("adhoc");
 	if (setting->action == ACTION_PAGE && setting->opens == PAGE_CROSSPLAY)
