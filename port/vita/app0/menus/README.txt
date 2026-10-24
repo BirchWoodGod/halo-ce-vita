@@ -51,6 +51,13 @@ Menu style Halo CE's additions (classic/)
 - pregame.xml: the network game's lobby, Y PLAYERS and the right trigger's
   LOBBY OPTIONS (PLAYERS, INVITE FRIENDS, MAP VARIANT).
 - pause.xml (ingame.txt): the multiplayer pause's PLAYERS and PARTY.
+- friends.xml: FRIENDS, its ADD FRIEND, PARTY (with its options and QUICK
+  CHAT) and INVITE FRIENDS in the original menus' look: the Xbox
+  Multiplayer screens' gradient, list_item_bkd rows, the pregame's field and
+  the button key, ui.map's fonts (tag paths: the player's ui.map). A
+  classic/<name> screen opens in place of halo3/'s h3/<name> while the Menu
+  style is Halo CE (menu_tags.c's classic set), its parts ce/<screen>/...
+  named as the Halo 3 set's, so the same functions fill them.
 - OpenCE's Multiplayer screen's GAMETYPES PLUS (multiplayer.xml: the
   Halo 3 GAME TYPES, Infection's rules too) and Server Setup's BOTS
   (setup.xml) are theirs.

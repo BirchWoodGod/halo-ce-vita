@@ -690,6 +690,9 @@ static struct
 	boolean open_system_link;
 	/* (FRIENDS' PARTY row) the PARTY screen opened at the next frame */
 	boolean open_party;
+	/* (Menu style Halo CE: FRIENDS' ADD FRIEND row) its own screen opened at
+	the next frame (menus/classic/friends.xml classic/friends/add) */
+	boolean open_classic_add;
 	/* (the Halo 3 lobby's Square on ONLINE) GAME OPTIONS opened at the next
 	frame, over the lobby */
 	boolean open_game_options;
@@ -823,6 +826,27 @@ static struct widget_instance *screen_of(struct widget_instance *widget)
 port's text is (a translation's, lang.h, and the game list's), made the
 game's UTF-16 (halo_menus_utf16); at most 480 characters (Forge's controls
 are the longest) */
+static void h3_dialog_text_wrapped(struct widget_instance *widget, char const *text);
+
+/* (Menu style Halo CE's FRIENDS, PARTY, ADD FRIEND and INVITE FRIENDS:
+menus/classic/friends.xml, ce/<screen>/) whether a text box is one of
+theirs, whose text is broken into lines that fit its width - their field is
+narrower than the Halo 3 set's lines */
+static boolean classic_text_wraps(struct widget_instance *widget)
+{
+	static char const *const prefixes[] = { "pc\\ce\\friends\\", "pc\\ce\\party\\", "pc\\ce\\add\\",
+		"pc\\ce\\invite\\" };
+	char const *name = widget->definition_tag_index != NONE ? tag_get_name(widget->definition_tag_index) : NULL;
+	int index;
+
+	for (index = 0; name && index < (int)NUMBEROF(prefixes); index++)
+	{
+		if (!strncmp(name, prefixes[index], strlen(prefixes[index])))
+			return TRUE;
+	}
+	return FALSE;
+}
+
 static void text_show(struct widget_instance *widget, char const *text)
 {
 	unsigned short characters[481];
@@ -830,6 +854,11 @@ static void text_show(struct widget_instance *widget, char const *text)
 
 	if (!widget || widget->type != _ui_widget_type_text_box)
 		return;
+	if (classic_text_wraps(widget))
+	{
+		h3_dialog_text_wrapped(widget, text ? text : "");
+		return;
+	}
 	length = halo_menus_utf16(text ? text : "", characters, (long)NUMBEROF(characters));
 	widget->parameters.text_box.text = ui_widget_realloc(widget->parameters.text_box.text,
 		(word)(length * sizeof(wchar_t)), __FILE__, __LINE__);
@@ -12003,6 +12032,14 @@ static void h3_friends_act(struct widget_instance *widget)
 		switch (item)
 		{
 		case _h3_friends_row_add:
+			/* (Menu style Halo CE: the list's row opens ADD FRIEND's screen,
+			whose own row types the code) */
+			if (halo_menu_style_classic_plus() && screen_of(widget) && strcmp(screen_of(widget)->name, "add") &&
+				menu_tags_ingame_screen("classic/friends/add") != NONE)
+			{
+				menu_functions.open_classic_add = TRUE;
+				break;
+			}
 			typing_begin(_typing_friend_code, T("Friend code"), "", P2P_FRIEND_CODE_SIZE - 1, FALSE);
 			break;
 		case _h3_friends_row_offline:
@@ -12685,6 +12722,16 @@ static void h3_party_refresh(boolean now)
 		return;
 	h3_party.refreshed_time = time ? time : 1;
 	h3_party.member_count = p2p_party_members(h3_party.members, P2P_PARTY_MAXIMUM);
+#ifndef HALO_RELEASE
+	/* (the tests' made-up party on the PARTY screen too: its pictures) */
+	if (h3_party.member_count < 2 && getenv("HALO_TEST_PARTY_SCREEN"))
+	{
+		int fake = h3_party_plates_fake(h3_party.members, P2P_PARTY_MAXIMUM);
+
+		if (fake > 1)
+			h3_party.member_count = fake;
+	}
+#endif
 	h3_party.invite_count = p2p_party_invites(h3_party.invites, P2P_FRIEND_INVITES_MAXIMUM);
 	p2p_party_status(status, sizeof(status));
 	snprintf(line, sizeof(line), "%s", status);
@@ -20673,6 +20720,16 @@ void pc_menu_functions_update(
 		menu_functions.open_party = FALSE;
 		h3_party_open();
 	}
+	if (main_menu_loaded && menu_functions.open_classic_add)
+	{
+		long screen = menu_tags_ingame_screen("classic/friends/add");
+		struct widget_instance *active = ui_widget_port_active_screen(0);
+
+		menu_functions.open_classic_add = FALSE;
+		if (screen == NONE || !active || !ui_widget_load_by_name_or_tag(NULL, screen, NULL, active->local_player_index,
+			active->definition_tag_index, NONE, NONE))
+			platform_log("menus: the ADD FRIEND screen did not open");
+	}
 	/* (FRIEND CODE BACKUP's question, over FRIENDS) */
 	if (main_menu_loaded && menu_functions.open_friends_question)
 	{
@@ -20708,6 +20765,7 @@ void pc_menu_functions_update(
 	if (!main_menu_loaded)
 	{
 		menu_functions.open_party = FALSE;
+		menu_functions.open_classic_add = FALSE;
 		menu_functions.open_friends_question = FALSE;
 		menu_functions.open_game_options = FALSE;
 		menu_functions.open_system_link = FALSE;

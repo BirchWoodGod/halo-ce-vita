@@ -131,6 +131,9 @@ their pickers...) */
 /* (Menu style Online: the menus/online widgets that stand for a Halo 3 set's
 widget of the same name under h3/) */
 #define MAXIMUM_ONLINE_SCREENS 512
+/* (Menu style Halo CE: the menus/classic widgets classic/<name> that stand
+for a Halo 3 set's widget h3/<name> - FRIENDS, PARTY, INVITE FRIENDS in the
+original menus' look) */
 
 /* the layout of a bitmap tag and a string list tag held by a Custom Edition
 resource map (the item is the whole tag, its addresses counting from the
@@ -2768,9 +2771,11 @@ void menu_tags_loaded(
 		char h3_name[160];
 		long h3_widget;
 
-		if (!name || strncmp(name, "cp/", 3))
+		/* (cp/: Classic+'s Forge, Customization, File Share, Mod Manager;
+		classic/: its friends, party and invite screens - one set) */
+		if (!name || (strncmp(name, "cp/", 3) && strncmp(name, "classic/", 8)))
 			continue;
-		snprintf(h3_name, sizeof(h3_name), "h3/%s", name + 3);
+		snprintf(h3_name, sizeof(h3_name), "h3/%s", name + (name[0] == 'c' && name[1] == 'p' ? 3 : 8));
 		if ((h3_widget = widget_named(h3_name)) == NONE)
 			continue;
 		if (menu_tags.classic_set_count == MAXIMUM_ONLINE_SCREENS)

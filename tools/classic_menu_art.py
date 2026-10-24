@@ -17,7 +17,9 @@ tools/fonts/OFL.txt). The same bytes each run.
 - <lang>/header_lobby_options.png, header_file_share.png,
   header_mod_manager.png: LOBBY OPTIONS's, FILE SHARE's and MOD MANAGER's
   headings in the look of the Multiplayer screens' (512 x 64 at 35,11: blue
-  capitals 23 pixels high).
+  capitals 23 pixels high); header_friends, header_party, header_add_friend,
+  header_invite_friends the same for FRIENDS, PARTY, ADD FRIEND and INVITE
+  FRIENDS (classic/friends.xml).
 - In English (en/) and in each language of port/vita/app0/lang (es/), the
   words its file gives them; menu_tags.c picks the language's ({lang}).
 
@@ -39,7 +41,10 @@ HEADINGS = (('header_lobby_options', 'LOBBY OPTIONS'),
             ('header_forge', 'FORGE'), ('header_extra_objects', 'EXTRA OBJECTS'),
             ('header_customization', 'CUSTOMIZATION'),
             # (classic/fileshare.xml, mods.xml)
-            ('header_file_share', 'FILE SHARE'), ('header_mod_manager', 'MOD MANAGER'))
+            ('header_file_share', 'FILE SHARE'), ('header_mod_manager', 'MOD MANAGER'),
+            # (classic/friends.xml)
+            ('header_friends', 'FRIENDS'), ('header_party', 'PARTY'),
+            ('header_add_friend', 'ADD FRIEND'), ('header_invite_friends', 'INVITE FRIENDS'))
 
 # (the widget it is drawn into, fit="widget": 226 x 229; the PNG a power of
 # two, so drawn at that scale and stretched back by the game)
