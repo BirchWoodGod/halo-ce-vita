@@ -168,7 +168,7 @@ PYEOF
 			commands="$commands$tick:@sound $tag;"
 			tick=$((tick + 150))
 		done
-		init_line= run events 60 "$out/mcc" HALO_TICK_THREAD=1 HALO_NETWORK_TEST="local:mcc_bloodgulch:slayer" HALO_NETWORK_TEST_START=3 \
+		init_line= run events 60 "$out/mcc" HALO_TICK_THREAD=1 HALO_NETWORK_TEST="local:mcc_bloodgulch:slayer" HALO_NETWORK_TEST_START=3 HALO_BOTS=1 \
 			HALO_NETWORK_TEST_SCORE=500 HALO_SOUND_TRACE=1 HALO_AUDIO_PACKET_TRACE=1 "HALO_TEST_COMMANDS=$commands"
 		if ! python3 -I "$checker" events "$out/events/run.log" "$mcc/sound/pc" "${tags[@]}" > "$out/events/check.txt" 2>&1; then
 			cat "$out/events/check.txt"
