@@ -59,12 +59,14 @@
 	<widget name="ce/lobby/map_picture" left="290" top="92" width="140" height="114" bitmap="ui\shell\bitmaps\mp_map_grafix"/>
 	<widget name="ce/lobby/map_name" type="text" left="440" top="92" width="150" height="48" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test"/>
 	<widget name="ce/lobby/variant_value" type="text" left="440" top="140" width="150" height="66" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="ce/lobby/code_value" type="text" left="290" top="350" width="300" height="30" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
 	<widget name="ce/lobby/lobby_help" type="text" left="290" top="226" width="300" height="160" string_list="ce/lobby_help" font="ui\small_ui" color="#FF2896FF"/>
 	<widget name="ce/lobby/description" left="275" top="78" width="320" height="322" bitmap="list_field">
 		<child widget="ce/lobby/map_picture"/>
 		<child widget="ce/lobby/map_name"/>
 		<child widget="ce/lobby/variant_value"/>
 		<child widget="ce/lobby/lobby_help"/>
+		<child widget="ce/lobby/code_value"/>
 	</widget>
 	<widget name="ce/lobby/screen" flags="pass_unhandled_to_focused_child" bitmap="gradient">
 		<child widget="ce/lobby/header"/>

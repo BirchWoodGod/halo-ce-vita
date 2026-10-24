@@ -18029,6 +18029,24 @@ static void ce_lobby_update(struct widget_instance *list)
 	}
 	else
 		text_show(named(screen, "variant_value"), "");
+	/* (a game hosted online: its code and PUBLIC or PRIVATE, in the panel under the
+	words: its code only once the brokers have it, as the Halo 3 lobby's) */
+	text[0] = 0;
+	if (server && config_boolean("network.online") && p2p_running())
+	{
+		char code[32], reach[160];
+		int password = 0;
+
+		code[0] = 0;
+		p2p_hosting_code(code, (int)sizeof(code));
+		if (p2p_lobby_brokers_status(reach, (int)sizeof(reach)) != P2P_LOBBY_BROWSE_EMPTY ||
+			p2p_lobby_hosting_status(reach, (int)sizeof(reach)) == P2P_LOBBY_HOSTING_UNREACHABLE)
+			code[0] = 0;
+		if (code[0])
+			snprintf(text, sizeof(text), "%s %s  %s", T("CODE:"), code,
+				p2p_lobby_hosting_listed(&password) ? T("PUBLIC") : T("PRIVATE"));
+	}
+	text_show(named(screen, "code_value"), text);
 	for (child = list->child; child && child != list->focused_child; child = child->next)
 		index++;
 	string_show(named(screen, "lobby_help"), index);
