@@ -59,7 +59,7 @@ enum
 	SCENE_PACK_HEADER_SIZE = 128,
 	/* (a backdrop's: its structure bsp and scenario taken as this version
 	of the builder takes them; another is a pack made again) */
-	SCENE_PACK_BACKDROP_VERSION = 1,
+	SCENE_PACK_BACKDROP_VERSION = 2,
 
 	/* a recipe's most lines' worth */
 	SCENE_PACK_MAXIMUM_RECIPE_BYTES = 8 * 1024,

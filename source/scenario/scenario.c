@@ -1461,6 +1461,17 @@ void scenario_get_sound_environment(
 	{
 		fog_index = NONE;
 		player_index = local_player_get_player_index((short)local_player_index);
+#ifdef HALO_LINUX
+		/* port: the main menu's live backdrop (port/linux/game/
+		menu_backdrop.c): its camera's cluster's background sound and sound
+		environment, no player there */
+		{
+			int menu_backdrop_active(void);
+
+			if (player_index == NONE && local_player_index == 0 && menu_backdrop_active())
+				player_index = 0;
+		}
+#endif
 		if (player_index != NONE)
 		{
 			camera = observer_get_camera((short)local_player_index);

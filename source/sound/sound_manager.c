@@ -4106,6 +4106,10 @@ void sound_idle(
 	return;
 }
 
+#ifdef HALO_LINUX
+int menu_backdrop_active(void);
+#endif
+
 static void refresh_listener(
 	void)
 {
@@ -4124,7 +4128,14 @@ static void refresh_listener(
 	{
 		listener = listener_get(local_player_index);
 
-		if (local_player_get_player_index(local_player_index) != NONE)
+		if (local_player_get_player_index(local_player_index) != NONE
+#ifdef HALO_LINUX
+			/* port: the main menu's live backdrop (port/linux/game/
+			menu_backdrop.c): its camera the first listener, no player
+			there, so that the level's ambience is heard where it looks */
+			|| (local_player_index == 0 && menu_backdrop_active())
+#endif
+			)
 		{
 			struct observer_result const *camera =
 				observer_get_camera(local_player_index);

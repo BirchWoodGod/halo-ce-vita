@@ -396,6 +396,11 @@ static const struct config_setting config_settings[] =
 		"menu_backdrop.c), made once from the player's own a30.map into\n"
 		"t:\\packs; false (or no a30.map) keeps the ring. The Vita's settings\n"
 		"panel (Game, Menus, Live backdrop) sets it." },
+	{ "menus.backdrop_music", _config_string, "\"50\"", "HALO_MENU_MUSIC", _environment_value, _platform_all,
+		"With the live backdrop behind the menus (ElDewrito), the menu music's\n"
+		"level in percent (100, 70, 50, 25, 0), so that the level's own ambience -\n"
+		"its wind, birds, insects, the waterfall - comes through under it. The\n"
+		"Vita's settings panel (Sound, Menu music) sets it." },
 	{ "infection.players_per_zombie", _config_integer, "8", "HALO_INFECTION_ZOMBIES", _environment_value, _platform_all,
 		"Infection (port/linux/game/infection.c), the game's own Infection game\n"
 		"type as this machine hosts it: one first zombie for each this many\n"

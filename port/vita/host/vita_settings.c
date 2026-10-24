@@ -663,6 +663,11 @@ static struct setting settings[] = {
 		"Experimental: betas too. Stable: releases only", 1, TAB_GAME },
 	{ "Show dev settings", "HALO_DEV_SETTINGS", 0, 2, { "0", "1" }, { "Off", "On" },
 		"The Dev tab: switches for testers, Save report", 0, TAB_GAME },
+	/* (menu_backdrop.c, config.toml's menus.backdrop_music: the menu music's
+	level under the live backdrop - the level's ambience under it -; read
+	each frame: live. Shown with Menu style ElDewrito: setting_shown) */
+	{ "Menu music", "HALO_MENU_MUSIC", 0, 5, { "100", "70", "50", "25", "0" }, { "100%", "70%", "50%", "25%", "Off" },
+		"Under the ElDewrito menus' live backdrop: the level's ambience comes through", 2, TAB_AUDIO },
 	{ "Sound voices", "HALO_SOUND_CHANNELS", 1, 4, { "16", "24", "32", "0" },
 		{ "16", "24", "32", "Original" }, "Fewer is faster; the AI then differs (after a restart)", 3, TAB_AUDIO },
 	{ "Sound occlusion", "HALO_SOUND_OBSTRUCTION_TICKS", 0, 3, { "1", "3", "6" },
@@ -1699,6 +1704,9 @@ static int setting_shown(const struct setting *setting)
 		return !classic_panel();
 	/* (the live backdrop: the Online menus') */
 	if (setting->variable && !strcmp(setting->variable, "HALO_MENU_BACKDROP"))
+		return online_panel_style();
+	/* (the menu music's level under the live backdrop: ElDewrito's) */
+	if (setting->variable && !strcmp(setting->variable, "HALO_MENU_MUSIC"))
 		return online_panel_style();
 	if ((setting->variable && !strcmp(setting->variable, "HALO_ADHOC_ROOM")) || setting->action == ACTION_ADHOC_JOIN)
 		return network_is("adhoc");

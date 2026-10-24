@@ -125,6 +125,11 @@ enum
 	SCENARIO_SCENERY = 0x210,
 	SCENARIO_SCENERY_PALETTE = 0x21C,
 	SCENARIO_DETAIL_OBJECT_PALETTE = 0x3C0,
+	/* (object_types.c's sound_scenery_data_definition: its block, palette
+	and element) */
+	SCENARIO_SOUND_SCENERY = 0x2DC,
+	SCENARIO_SOUND_SCENERY_PALETTE = 0x2E8,
+	SCENARIO_SOUND_SCENERY_SIZE = 0x28,
 	SCENARIO_STRUCTURE_BSPS = 0x5A4,
 	SCENARIO_BSP_REFERENCE_SIZE = 0x20,
 	SCENARIO_SCENERY_SIZE = 0x48,
@@ -2857,7 +2862,8 @@ static void backdrop_prepare(struct build_state *state, unsigned char *bsp, unsi
 {
 	static unsigned long const kept_blocks[] =
 	{
-		SCENARIO_SKIES, SCENARIO_SCENERY, SCENARIO_SCENERY_PALETTE, SCENARIO_DETAIL_OBJECT_PALETTE
+		SCENARIO_SKIES, SCENARIO_SCENERY, SCENARIO_SCENERY_PALETTE, SCENARIO_DETAIL_OBJECT_PALETTE,
+		SCENARIO_SOUND_SCENERY, SCENARIO_SOUND_SCENERY_PALETTE
 	};
 	static unsigned long const references[] = { 0x00, 0x10, 0x20, 0x574, 0x584, 0x594 };
 	unsigned char trimmed[SCENARIO_ROOT_SIZE];
@@ -2908,6 +2914,20 @@ static void backdrop_prepare(struct build_state *state, unsigned char *bsp, unsi
 		{
 			scenery[element * SCENARIO_SCENERY_SIZE + SCENARIO_OBJECT_NAME_INDEX] = 0xFF;
 			scenery[element * SCENARIO_SCENERY_SIZE + SCENARIO_OBJECT_NAME_INDEX + 1] = 0xFF;
+		}
+	}
+	/* (its sound scenery - the waterfall's, the water's - named none too) */
+	{
+		long count = (long)read_u32(scenario + SCENARIO_SOUND_SCENERY);
+		unsigned char *sounds = count > 0 && count <= 0x8000 ?
+			source_at(state, read_u32(scenario + SCENARIO_SOUND_SCENERY + 4),
+				(unsigned long)count * SCENARIO_SOUND_SCENERY_SIZE) : NULL;
+		long element;
+
+		for (element = 0; sounds && element < count; element++)
+		{
+			sounds[element * SCENARIO_SOUND_SCENERY_SIZE + SCENARIO_OBJECT_NAME_INDEX] = 0xFF;
+			sounds[element * SCENARIO_SOUND_SCENERY_SIZE + SCENARIO_OBJECT_NAME_INDEX + 1] = 0xFF;
 		}
 	}
 }

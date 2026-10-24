@@ -88,6 +88,8 @@
 "Scoreboard" = "Marcador"
 "Scores in a game: Halo 3's scoreboard, or the original" = "Puntuaciones en partida: el marcador de Halo 3 o el original"
 "Live backdrop" = "Fondo en vivo"
+"Menu music" = "Música de los menús"
+"Under the ElDewrito menus' live backdrop: the level's ambience comes through" = "Bajo el fondo en vivo de los menús ElDewrito: se oye el ambiente del nivel"
 "ElDewrito menus: the level Halo behind them (your a30.map), or the ring" = "Menús ElDewrito: el nivel Halo detrás (tu a30.map), o el anillo"
 "First-person legs, smooth weapon motion" = "Piernas visibles, movimiento del arma"
 "Models, shadows, lights, effects, particles" = "Modelos, sombras, luces, efectos, partículas"
