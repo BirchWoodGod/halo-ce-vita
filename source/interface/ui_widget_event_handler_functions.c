@@ -1013,7 +1013,7 @@ struct event_handler_globals
 #pragma pack(pop)
 
 #ifdef HALO_VITA
-#include "../../port/linux/game/kevin_gametype_rules.h"
+#include "../../port/linux/game/pc_gametype_rules.h"
 #endif
 
 struct playlist_profile_item_options_prefix
@@ -4019,7 +4019,7 @@ static boolean playlist_profile_change_item_options(
         {
             int native;
             /* kaboggs: the regular gametype save retains custom flags. */
-            *(unsigned long *)(profile + 0x20) = kevin_vehicle_choice_set(*(unsigned long *)(profile + 0x20),
+            *(unsigned long *)(profile + 0x20) = pc_vehicle_choice_set(*(unsigned long *)(profile + 0x20),
                 option_spinner->data3C.selected_index, &native);
             *(long *)(profile + 0x48) = native;
         }
@@ -4048,7 +4048,7 @@ static boolean playlist_profile_change_item_options(
         {
             int native;
             /* kaboggs: the regular gametype save retains custom flags. */
-            *(unsigned long *)(profile + 0x20) = kevin_weapon_choice_set(*(unsigned long *)(profile + 0x20),
+            *(unsigned long *)(profile + 0x20) = pc_weapon_choice_set(*(unsigned long *)(profile + 0x20),
                 option_spinner->data3C.selected_index, &native);
             *(long *)(profile + 0x44) = native;
         }
@@ -5115,7 +5115,7 @@ static boolean playlist_profile_initialize_item_options(
 			option_spinner = option_spinner->next;
 		match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 3388, option_spinner, "expected 'vehicle set' option spinner list");
 		#ifdef HALO_VITA
-        option_spinner->data3C.selected_index = kevin_vehicle_choice_get(profile->flags, profile->vehicle_set);
+        option_spinner->data3C.selected_index = pc_vehicle_choice_get(profile->flags, profile->vehicle_set);
 #else
         switch (profile->vehicle_set)
 		{
@@ -5136,7 +5136,7 @@ static boolean playlist_profile_initialize_item_options(
 			option_spinner = option_spinner->next;
 		match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 3402, option_spinner, "expected 'weapon set' option spinner list");
 		#ifdef HALO_VITA
-        option_spinner->data3C.selected_index = kevin_weapon_choice_get(profile->flags, profile->weapon_set);
+        option_spinner->data3C.selected_index = pc_weapon_choice_get(profile->flags, profile->weapon_set);
 #else
         switch (profile->weapon_set)
 		{

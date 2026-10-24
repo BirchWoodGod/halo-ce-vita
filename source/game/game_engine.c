@@ -547,11 +547,11 @@ symbols in this file:
 #include "custom_edition_cache.h"
 #endif
 #ifdef HALO_VITA
-#include "kevin_bots.h"
-#include "kevin_content_game.h"
-#define KEVIN_PLAYER_NAME(player) kevin_bots_display_name(player)
+#include "local_bot_profiles.h"
+#include "pc_content_game.h"
+#define LOCAL_BOT_PLAYER_NAME(player) local_bot_profiles_display_name(player)
 #else
-#define KEVIN_PLAYER_NAME(player) ((player)->name)
+#define LOCAL_BOT_PLAYER_NAME(player) ((player)->name)
 #endif
 #include "game_engine_list.h"
 #include "game_engine_place.h"
@@ -1875,7 +1875,7 @@ static void game_engine_rasterize_in_game_score(
 				NUMBEROF(row_string),
 				L"\t%s\t%s\t%s",
 				place_string,
-				KEVIN_PLAYER_NAME(player),
+				LOCAL_BOT_PLAYER_NAME(player),
 				status_string);
 
 			if (has_teams)
@@ -2141,7 +2141,7 @@ void game_engine_post_rasterize_post_game(
 			draw_string_set_color(
 				&team_colors[PIN(team_index, 0, 1)]);
 		}
-		usnprintf(row_string, NUMBEROF(row_string), L" \t \t%s", KEVIN_PLAYER_NAME(player));
+		usnprintf(row_string, NUMBEROF(row_string), L" \t \t%s", LOCAL_BOT_PLAYER_NAME(player));
 		row_string[NUMBEROF(row_string) - 1] = 0;
 		drawline(row_string, draw_row, 0);
 		draw_string_set_color(&winner_color);
@@ -6734,7 +6734,7 @@ long game_engine_remap_vehicle(
 
 #ifdef HALO_VITA
 	/* kaboggs: a saved local gametype explicitly enables this real tag. */
-	if (kevin_gametype_vehicle_allowed(vehicle_definition_index))
+	if (pc_gametype_vehicle_allowed(vehicle_definition_index))
 		return vehicle_definition_index;
 #endif
 
@@ -6925,7 +6925,7 @@ long game_engine_remap_weapon(
 		weapon_definition_index_to_list_index(weapon_definition_index);
 
 #ifdef HALO_VITA
-	if (kevin_gametype_weapon_allowed(weapon_definition_index))
+	if (pc_gametype_weapon_allowed(weapon_definition_index))
 		return weapon_definition_index;
 #endif
 
@@ -6948,7 +6948,7 @@ long game_engine_remap_weapon(
 #ifdef HALO_VITA
 			&& !((game_connection() == _game_connection_local ||
 				(game_connection() == _game_connection_network_server && network_game_is_splitscreen_local())) &&
-				getenv("HALO_KEVIN_PC_WEAPONS") && atoi(getenv("HALO_KEVIN_PC_WEAPONS")) &&
+				getenv("HALO_PC_WEAPONS") && atoi(getenv("HALO_PC_WEAPONS")) &&
 				tag_loaded('weap', "weapons\\flamethrower\\flamethrower") != NONE)
 #endif
 			) ||

@@ -1213,7 +1213,7 @@ static void *widget_build(long widget_index)
 /* kaboggs: extend the actual Edit Gametypes / Item Options spinners.
  * Replace only the copied tag table's string-list definitions. The original
  * UI tags stay intact and menu_tags_release restores them before freeing us. */
-static void kevin_gametype_strings(struct cache_file_tag_instance *instances)
+static void pc_gametype_strings(struct cache_file_tag_instance *instances)
 {
 #ifdef HALO_VITA
     static char const *const paths[] = {
@@ -2011,7 +2011,7 @@ void menu_tags_loaded(
 	instances = build.failed ? NULL : instances_grow(total, &build.first_index, &build.first_salt);
 	if (!instances)
 		goto failed;
-	kevin_gametype_strings(instances);
+	pc_gametype_strings(instances);
 	/* each new tag's index */
 	for (index = 0; index < widget_count; index++)
 	{

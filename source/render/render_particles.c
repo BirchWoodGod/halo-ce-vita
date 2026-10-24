@@ -33,7 +33,7 @@ symbols in this file:
 #include "particle_budget.h"
 #include "render_epoch.h"
 #ifdef HALO_VITA
-#include "kevin_fx.h"
+#include "combat_fx_options.h"
 #endif
 #endif
 
@@ -443,7 +443,7 @@ void render_particles(
 							rendered_particle->definition_index);
 					short particle_count = group_particle_counts[group_index];
 #ifdef HALO_VITA
-					boolean preserve_combat=kevin_combat_fx_preserved(tag_get_name(rendered_particle->definition_index));
+					boolean preserve_combat=combat_fx_preserved(tag_get_name(rendered_particle->definition_index));
 #endif
 					real total_radius = 0.0f;
 					short built_particle_count = 0;

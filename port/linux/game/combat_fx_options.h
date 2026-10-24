@@ -1,13 +1,13 @@
-/* Vita combat effects additions by kaboggs, adapted from his New3DS integration.
+/* Vita combat effects additions by kaboggs.
  * These helpers change only local visual ribbons, never projectile motion/damage.
  */
-#ifndef KEVIN_FX_H
-#define KEVIN_FX_H
+#ifndef COMBAT_FX_OPTIONS_H
+#define COMBAT_FX_OPTIONS_H
 #include <stdlib.h>
 #include <string.h>
 
-/* kaboggs: kevin_combat_fx_name - preserve authored combat details under budgets. */
-static __inline int kevin_combat_fx_name(const char *name)
+/* kaboggs: combat_fx_name - preserve authored combat details under budgets. */
+static __inline int combat_fx_name(const char *name)
 {
     return name && (strstr(name,"weapons\\") || strstr(name,"grenade") ||
         strstr(name,"explosion") || strstr(name,"impact") || strstr(name,"shield") ||
@@ -15,22 +15,22 @@ static __inline int kevin_combat_fx_name(const char *name)
         strstr(name,"blood") || strstr(name,"spark") || strstr(name,"scorch") || strstr(name,"flame"));
 }
 
-/* kaboggs: kevin_combat_fx_preserved - independent of ambient particle density. */
-static __inline int kevin_combat_fx_preserved(const char *name)
+/* kaboggs: combat_fx_preserved - independent of ambient particle density. */
+static __inline int combat_fx_preserved(const char *name)
 {
-    const char *value=getenv("HALO_KEVIN_COMBAT_FX");
-    return (value && atoi(value)!=0) && kevin_combat_fx_name(name);
+    const char *value=getenv("HALO_COMBAT_FX");
+    return (value && atoi(value)!=0) && combat_fx_name(name);
 }
 
-/* kaboggs: kevin_tracers_enabled - original fidelity remains selectable. */
-static __inline int kevin_tracers_enabled(void)
+/* kaboggs: combat_tracers_enabled - original fidelity remains selectable. */
+static __inline int combat_tracers_enabled(void)
 {
-    const char *value=getenv("HALO_KEVIN_TRACERS");
+    const char *value=getenv("HALO_COMBAT_TRACERS");
     return value && atoi(value)!=0;
 }
 
-/* kaboggs: kevin_trace_kind - match authored rifle effects, not all contrails. */
-static __inline int kevin_trace_kind(const char *name)
+/* kaboggs: combat_trace_kind - match authored rifle effects, not all contrails. */
+static __inline int combat_trace_kind(const char *name)
 {
     if (!name) return 0;
     if (!strcmp(name,"weapons\\assault rifle\\bullet")) return 1;
@@ -38,8 +38,8 @@ static __inline int kevin_trace_kind(const char *name)
     return 0;
 }
 
-/* kaboggs: kevin_trace_width - bounded screen visibility at Vita resolution. */
-static __inline float kevin_trace_width(int kind, float authored, float distance)
+/* kaboggs: combat_trace_width - bounded screen visibility at Vita resolution. */
+static __inline float combat_trace_width(int kind, float authored, float distance)
 {
     float minimum=0.f;
     if (kind==1) {
@@ -53,8 +53,8 @@ static __inline float kevin_trace_width(int kind, float authored, float distance
     return authored<minimum?minimum:authored;
 }
 
-/* kaboggs: kevin_trace_step - keep a sub-tick rifle ribbon visible for three ticks. */
-static __inline float kevin_trace_step(float dt, float first_duration, float transition,
+/* kaboggs: combat_trace_step - keep a sub-tick rifle ribbon visible for three ticks. */
+static __inline float combat_trace_step(float dt, float first_duration, float transition,
     int state, int fresh, int transitioning)
 {
     if (state==0 && first_duration<=0.f && transition>0.f && transition<1.f/30.f) {

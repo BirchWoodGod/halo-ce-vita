@@ -215,7 +215,7 @@ symbols in this file:
 #define plane2d_from_points plane2d_from_points_inline
 #include "effects/decals.h"
 #ifdef HALO_VITA
-#include "kevin_fx.h"
+#include "combat_fx_options.h"
 #endif
 #ifdef HALO_LINUX
 #include "render_epoch.h"
@@ -2391,7 +2391,7 @@ static boolean decal_too_small_to_see(
 
 #ifdef HALO_VITA
 	/* kaboggs: blood, impact marks and scorches retain the authored detail. */
-	if (kevin_combat_fx_preserved(tag_get_name(decal_definition_index))) return FALSE;
+	if (combat_fx_preserved(tag_get_name(decal_definition_index))) return FALSE;
 #endif
 	if (minimum_pixels < 0 || settings_seen != halo_settings_generation)
 	{

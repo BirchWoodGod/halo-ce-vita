@@ -176,7 +176,7 @@ symbols in this file:
 #include "cutscene/cinematics.h"
 #include "particle_budget.h"
 #ifdef HALO_VITA
-#include "kevin_fx.h"
+#include "combat_fx_options.h"
 #endif
 #endif
 #undef real_local_random
@@ -1941,7 +1941,7 @@ static void effect_generate_particles(
 	/* (the particle budget: particle_budget.c) */
 	boolean thinned = effect_particles_thinned(effect);
 #ifdef HALO_VITA
-	if (kevin_combat_fx_preserved(tag_get_name(effect->definition_index))) thinned=FALSE;
+	if (combat_fx_preserved(tag_get_name(effect->definition_index))) thinned=FALSE;
 #endif
 #endif
 

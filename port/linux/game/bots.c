@@ -213,7 +213,7 @@ and left, the defenders' posts. The map's teleporters are logged once.
 
 #include "bots.h"
 #ifdef HALO_VITA
-#include "kevin_bots.h"
+#include "local_bot_profiles.h"
 #endif
 #include "bots_tactics.h"
 
@@ -6442,7 +6442,7 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 	tick.skill = &bots_skills[bots_globals.skill];
 #ifdef HALO_VITA
 	/* kaboggs: Chaotic's stronger aim and faster bursts use the real weapon simulation. */
-	if (kevin_bots_kind((int)bot_index)==1) {
+	if (local_bot_profiles_kind((int)bot_index)==1) {
 		ghost_skill=*tick.skill;
 		ghost_skill.aim_error_degrees=MIN(ghost_skill.aim_error_degrees,4.f);
 		ghost_skill.aim_settle_seconds=MIN(ghost_skill.aim_settle_seconds,.6f);
@@ -6489,7 +6489,7 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 #ifdef HALO_VITA
 		/* kaboggs: original Ghost profiles' independent per-spawn camouflage rolls. */
 		{
-			int kind=kevin_bots_kind((int)bot_index);
+			int kind=local_bot_profiles_kind((int)bot_index);
 			int chance=kind==2?25:kind==1?10:0;
 			if (chance && bots_random(bot)%100UL<(unsigned long)chance) {
 				player_handle_powerup_minor(bot->player_index,_player_powerup_active_camouflage,60*TICKS_PER_SECOND);

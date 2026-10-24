@@ -1,4 +1,48 @@
-# Retail PC content integration proposal
+# Superseded aggregate proposal: follow-up work
+
+The original #48 aggregate is retained as a review reference, not a merge
+candidate. The maintainer's review identified stock-map/network compatibility,
+campaign-save layout, and local bot-profile lifetime problems. The naming-only
+cleanup on this branch does not resolve those behavior problems. Do not ship
+the old aggregate or its replacement-map installer.
+
+## Prioritized independent PRs
+
+- #49: standalone Vita atomic runtime, with host concurrency checks and an
+  explicit on-device acceptance gate.
+- #50: isolated owner-input installer, preserving stock Xbox/CE staging and
+  naming retail maps `pc_*` in a separate profile. Retail upload/play remains
+  disabled until a reviewed offline runtime integration exists.
+- The maintainer is integrating the v7-only loader directly; no duplicate
+  loader PR is proposed.
+
+Both independent branches start from current upstream main. They contain no
+extra CI workflow or dependencies on this branch's gameplay additions.
+
+## Remaining work before any further gameplay PR
+
+1. Compare each feature with `next`; use its existing PC vehicles, banshees,
+   bots and gametype menus instead of proposing overlapping implementations.
+2. Retail content needs alias/resource/cache namespace routing and offline
+   guards for host, join, map sharing and playlist paths. Metadata alone is
+   insufficient. Preserve Xbox maps and standard CE resources.
+3. Rework campaign placement without changing checkpoint/game-state allocation
+   layout. Old campaign saves must load unchanged; restore/revert/BSP transitions
+   also need tests. Campaign additions remain withheld until this is proven.
+4. Any optional local profiles must be cleared at teardown and every nonlocal
+   transition, with regression coverage for local match -> hosted online match.
+5. Consider opt-in visual effects separately only after checking `next` for
+   overlap and measuring device rendering/performance regressions.
+
+The remaining module, symbol, test, action and environment-switch names now
+describe their purpose (`pc_content`, `pc_vehicle_fleet`, `local_bot_profiles`,
+`combat_fx_options`). Personal prefixes and the added CI workflow were removed.
+Private personal-build branches and existing device installations are untouched.
+
+## Historical implementation notes
+
+The notes below describe the original aggregate and its earlier tests. They
+are not current integration instructions or acceptance of its known blockers.
 
 This source-only series targets `BirchWoodGod/halo-ce-vita` main
 `61debf05e6e31c8583f172e0992c0a0c632a9e3a`. kaboggs adapted the local
@@ -13,7 +57,7 @@ No private development history or custom branding is part of this series.
 2. Sized/generic Vita atomic runtime and shared unaligned synchronization;
    fixes SDK linkage without unaligned ARM exclusive accesses.
 3. Opt-in local gameplay and menu changes, with portable scheduler/profile/FX
-   tests. `kevin_*` names identify the adaptation's small integration units.
+   tests. Module names now describe the integration units' purpose.
 4. Owner-input PC folder/ISO staging, separate CE menu resources, generated
    local previews, safe upload enumeration and synthetic installer tests.
 5. This handoff and a read-only CI job that tests the source and builds a VPK.

@@ -38,7 +38,7 @@ symbols in this file:
 #include "render.h"
 #include "tag_files/tag_files.h"
 #ifdef HALO_VITA
-#include "kevin_fx.h"
+#include "combat_fx_options.h"
 #endif
 
 /* ---------- constants */
@@ -138,7 +138,7 @@ void render_contrail(
 	long triangle_buffer_index;
 	long vertex_buffer_index;
 #ifdef HALO_VITA
-	int trace_kind=kevin_tracers_enabled()?kevin_trace_kind(tag_get_name(contrail->definition_index)):0;
+	int trace_kind=combat_tracers_enabled()?combat_trace_kind(tag_get_name(contrail->definition_index)):0;
 #endif
 
 	bitmap = bitmap_group_get_bitmap_from_sequence(
@@ -236,7 +236,7 @@ void render_contrail(
 				if (trace_kind) {
 					real_vector3d from_eye;
 					vector_from_points3d(&render.camera.position,&point->position,&from_eye);
-					width=kevin_trace_width(trace_kind,width,magnitude3d(&from_eye));
+					width=combat_trace_width(trace_kind,width,magnitude3d(&from_eye));
 				}
 #endif
 				half_width = width;
@@ -268,7 +268,7 @@ void render_contrail(
 						if (trace_kind) {
 							real_vector3d from_eye;
 							vector_from_points3d(&render.camera.position,&point->position,&from_eye);
-							next_width=kevin_trace_width(trace_kind,next_width,magnitude3d(&from_eye));
+							next_width=combat_trace_width(trace_kind,next_width,magnitude3d(&from_eye));
 						}
 #endif
 					next_color.alpha = (next_state->color_upper_bound.alpha - next_state->color_lower_bound.alpha) * next_color_scale + next_state->color_lower_bound.alpha;

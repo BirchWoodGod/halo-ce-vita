@@ -1,5 +1,4 @@
 /* Vita content integration additions by kaboggs.
- * Campaign pickup locations adapted from Kevin's New3DS integration.
  * Uses loaded authored tags, original object simulation and checkpoint state.
  */
 #include "cseries/cseries.h"
@@ -16,33 +15,33 @@
 #include "scenario/scenario.h"
 #include "saved games/game_state.h"
 #include "tag_files/tag_groups.h"
-#include "kevin_content.h"
-#include "kevin_content_game.h"
-#include "kevin_gametype_rules.h"
+#include "pc_content.h"
+#include "pc_content_game.h"
+#include "pc_gametype_rules.h"
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
 
-struct kevin_pickup { const char *map, *tag; real_point3d point; };
-static const struct kevin_pickup pickups[] = {
+struct pc_pickup { const char *map, *tag; real_point3d point; };
+static const struct pc_pickup pickups[] = {
     {"c20", "weapons\\flamethrower\\flamethrower", {22.54f,-38.67f,-4.45f}},
     {"c40", "weapons\\fuel rod gun\\fuel rod", {333.85f,-656.33f,80.45f}},
     {"d20", "weapons\\flamethrower\\flamethrower", {54.32f,-34.90f,-25.83f}},
     {"d20", "weapons\\fuel rod gun\\fuel rod", {31.14f,-49.65f,-22.86f}}
 };
-struct kevin_content_state { unsigned long placed; long objects[NUMBEROF(pickups)]; };
-static struct kevin_content_state *state;
+struct pc_content_state { unsigned long placed; long objects[NUMBEROF(pickups)]; };
+static struct pc_content_state *state;
 static volatile int requested, result;
 
-/* kaboggs: kevin_content_initialize - checkpoint-owned placement state. */
-void kevin_content_initialize(void)
+/* kaboggs: pc_content_initialize - checkpoint-owned placement state. */
+void pc_content_initialize(void)
 {
-    state = game_state_malloc("Kevin content", NULL, sizeof(*state));
-    kevin_content_new_map();
+    state = game_state_malloc("PC content", NULL, sizeof(*state));
+    pc_content_new_map();
 }
 
-/* kaboggs: kevin_content_new_map - do not carry object handles between maps. */
-void kevin_content_new_map(void)
+/* kaboggs: pc_content_new_map - do not carry object handles between maps. */
+void pc_content_new_map(void)
 {
     unsigned int i;
     if (state) {
@@ -51,20 +50,20 @@ void kevin_content_new_map(void)
     }
     __atomic_store_n(&requested, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&result, 0, __ATOMIC_RELEASE);
-    kevin_fleet_reset();
+    pc_vehicle_fleet_reset();
 }
 
-/* kaboggs: kevin_content_request - panel never modifies objects on its thread. */
-void kevin_content_request(int item)
+/* kaboggs: pc_content_request - panel never modifies objects on its thread. */
+void pc_content_request(int item)
 {
     if (item>=1 && item<=8) __atomic_store_n(&requested, item, __ATOMIC_RELEASE);
 }
 
-/* kaboggs: kevin_content_result - 1 success, negative reason, 0 no result yet. */
-int kevin_content_result(void) { return __atomic_load_n(&result, __ATOMIC_ACQUIRE); }
+/* kaboggs: pc_content_result - 1 success, negative reason, 0 no result yet. */
+int pc_content_result(void) { return __atomic_load_n(&result, __ATOMIC_ACQUIRE); }
 
 /* kaboggs: valid_placement - reject an unconnected/outside object immediately. */
-long kevin_content_place_team(long definition, const real_point3d *point, short team, real facing)
+long pc_content_place_team(long definition, const real_point3d *point, short team, real facing)
 {
     struct object_placement_data placement;
     struct object_datum *object;
@@ -91,11 +90,11 @@ long kevin_content_place_team(long definition, const real_point3d *point, short 
 
 static long place(long definition, const real_point3d *point)
 {
-    return kevin_content_place_team(definition,point,NONE,0.f);
+    return pc_content_place_team(definition,point,NONE,0.f);
 }
 
 /* kaboggs: ground_near_player - bounded ground and vehicle clearance search. */
-boolean kevin_content_ground_near(const real_point3d *anchor, boolean vehicle, real_point3d *point)
+boolean pc_content_ground_near(const real_point3d *anchor, boolean vehicle, real_point3d *point)
 {
     static const signed char offsets[][2]={{0,0},{6,0},{0,6},{-6,0},{0,-6},{8,8},{8,-8},{-8,8},{-8,-8}};
     static const signed char edges[][2]={{2,0},{-2,0},{0,2},{0,-2}};
@@ -169,12 +168,12 @@ static int manual_spawn(int item, const struct object_datum *player)
         if (definition==NONE) definition=tag_loaded('vehi',"vehicles\\c gun turret\\c gun turret"); break;
     }
     if (definition==NONE) return -2;
-    if (!kevin_content_ground_near(&player->object.position, vehicle, &point)) return -3;
+    if (!pc_content_ground_near(&player->object.position, vehicle, &point)) return -3;
     return place(definition,&point)==NONE?-4:1;
 }
 
-/* kaboggs: kevin_content_update - local tick-only additions, no network mutation. */
-void kevin_content_update(void)
+/* kaboggs: pc_content_update - local tick-only additions, no network mutation. */
+void pc_content_update(void)
 {
     const char *base, *option;
     struct player_datum *player;
@@ -200,15 +199,15 @@ void kevin_content_update(void)
     if (request) {
         int status=manual_spawn(request,unit);
         __atomic_store_n(&result,status,__ATOMIC_RELEASE);
-        error(_error_silent,"Kevin content: requested item %d result %d (1 placed, -2 missing tag, -3 no clear ground)",request,status);
+        error(_error_silent,"PC content: requested item %d result %d (1 placed, -2 missing tag, -3 no clear ground)",request,status);
     }
-    option=getenv("HALO_KEVIN_CAMPAIGN_EXTRAS");
+    option=getenv("HALO_PC_CAMPAIGN_EXTRAS");
     enabled=option && atoi(option)!=0;
-    base=kevin_content_map_base();
+    base=pc_content_map_base();
     if (!base) return;
-    kevin_fleet_update();
+    pc_vehicle_fleet_update();
     for (i=0; i<NUMBEROF(pickups); ++i) {
-        const struct kevin_pickup *pickup=&pickups[i];
+        const struct pc_pickup *pickup=&pickups[i];
         real dx,dy,dz;
         long definition, index;
         if (strcmp(base,pickup->map) || (state->placed & (1UL<<i))) continue;
@@ -222,7 +221,7 @@ void kevin_content_update(void)
         index=place(definition,&pickup->point);
         if (index!=NONE) {
             state->objects[i]=index; state->placed|=1UL<<i;
-            error(_error_silent,"Kevin campaign pickup: %s %s",base,pickup->tag);
+            error(_error_silent,"PC campaign pickup: %s %s",base,pickup->tag);
         }
     }
 }

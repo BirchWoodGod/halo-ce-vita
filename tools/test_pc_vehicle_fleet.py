@@ -47,8 +47,8 @@ enum {_error_silent=0};
 
 HARNESS = r'''
 #include "test_engine.h"
-#include "kevin_content_game.h"
-#include "kevin_gametype_rules.h"
+#include "pc_content_game.h"
+#include "pc_gametype_rules.h"
 #include <assert.h>
 #include <string.h>
 static struct game_variant variant;
@@ -88,10 +88,10 @@ struct object_datum *object_iterator_next(struct object_iterator *i){
  while(i->next<128){long n=i->next++;if(alive[n]&&(kinds[n]&i->mask)){i->index=n;return &objects[n];}}
  return NULL;
 }
-boolean kevin_content_ground_near(const real_point3d *anchor,boolean vehicle,real_point3d *out){
+boolean pc_content_ground_near(const real_point3d *anchor,boolean vehicle,real_point3d *out){
  (void)vehicle;++ground_calls;*out=*anchor;return !blocked;
 }
-long kevin_content_place_team(long definition,const real_point3d *point,short side,real facing){
+long pc_content_place_team(long definition,const real_point3d *point,short side,real facing){
  int i;(void)side;(void)facing;
  for(i=0;i<128;++i)if(!alive[i]){
   memset(&objects[i],0,sizeof(objects[i]));objects[i].definition_index=definition;
@@ -109,31 +109,31 @@ static void reset(unsigned mode){
  scenario.netgame_flags.count=2;scenario.netgame_flags.address=flags;
  scenario.vehicles.count=2;scenario.vehicles.address=vehicles;
  variant.universal_variant.flags=mode;tick=0;created=deleted=blocked=ground_calls=0;
- connection=2;local=1;missing=0;global_scenario_index=1;map="bloodgulch";kevin_fleet_reset();
+ connection=2;local=1;missing=0;global_scenario_index=1;map="bloodgulch";pc_vehicle_fleet_reset();
 }
 static void advance(int seconds){long end=tick+seconds*TICKS_PER_SECOND;
- for(;tick<end;++tick){int before=created;kevin_fleet_update();assert(created-before<=1);}}
+ for(;tick<end;++tick){int before=created;pc_vehicle_fleet_update();assert(created-before<=1);}}
 int main(void){
  real_point3d point;
  reset(1u<<24);
- point=flags[0].position;kevin_content_place_team(100,&point,0,0);
- point=flags[1].position;kevin_content_place_team(100,&point,1,0);
+ point=flags[0].position;pc_content_place_team(100,&point,0,0);
+ point=flags[1].position;pc_content_place_team(100,&point,1,0);
  advance(15);assert(created==12);advance(120);assert(created==12);
- assert(kevin_gametype_vehicle_allowed(104));assert(!kevin_gametype_vehicle_allowed(999));
+ assert(pc_gametype_vehicle_allowed(104));assert(!pc_gametype_vehicle_allowed(999));
  reset(2u<<24);advance(10);assert(created==2);
  objects[0].object.damage_flags=1u<<_object_dead_bit;
  advance(20);assert(created==2 && deleted==0);advance(25);assert(created==3 && deleted==1);
  reset(2u<<24);map="levels\\test\\bloodgulch\\bloodgulch";advance(10);
- assert(created==2 && kevin_gametype_vehicle_allowed(104));
+ assert(created==2 && pc_gametype_vehicle_allowed(104));
  reset(1u<<24);map="levels\\test\\deathisland\\deathisland";advance(15);
- assert(created==12 && kevin_gametype_vehicle_allowed(103));
+ assert(created==12 && pc_gametype_vehicle_allowed(103));
  reset(1u<<24);global_scenario_index=NONE;advance(10);assert(created==0);
- reset(1u<<24);missing=1u<<KEVIN_ROCKET_HOG;advance(30);assert(created==10);
+ reset(1u<<24);missing=1u<<PC_ROCKET_HOG;advance(30);assert(created==10);
  reset(1u<<24);blocked=1;advance(20);assert(created==0 && ground_calls<=40);
- reset(1u<<24);local=0;advance(20);assert(created==0 && !kevin_gametype_vehicle_allowed(104));
+ reset(1u<<24);local=0;advance(20);assert(created==0 && !pc_gametype_vehicle_allowed(104));
  reset(1u<<24);connection=3;advance(20);assert(created==0);
  reset(1u<<24);map="chillout";advance(20);assert(created==0);
- reset(1u<<26);map="chillout";advance(10);assert(created==4 && kevin_gametype_weapon_allowed(106));
+ reset(1u<<26);map="chillout";advance(10);assert(created==4 && pc_gametype_weapon_allowed(106));
  objects[0].object.parent_object_index=99;
  advance(20);assert(created==4);advance(25);assert(created==5);
  reset(0);advance(30);assert(created==0);
@@ -159,5 +159,5 @@ def test_real_fleet_scheduler(tmp_path):
     output = tmp_path / 'fleet_test.exe'
     subprocess.run([compiler, '-std=c99','-O1','-Wall','-Wextra','-Werror','-Wno-multichar',
                     '-I'+str(tmp_path),'-I'+str(ROOT/'port/linux/game'),
-                    str(ROOT/'port/linux/game/kevin_fleet.c'),str(harness),'-lm','-o',str(output)],check=True)
+                    str(ROOT/'port/linux/game/pc_vehicle_fleet.c'),str(harness),'-lm','-o',str(output)],check=True)
     subprocess.run([str(output)],check=True,timeout=10)

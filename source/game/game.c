@@ -184,7 +184,7 @@ struct game_options;
 /* (HALO_TICK_PROFILE) game_frame's steps (lines_profile.c) */
 #include "lines_profile.h"
 #ifdef HALO_VITA
-#include "kevin_content.h"
+#include "pc_content.h"
 #endif
 #endif
 #include "structures/structures.h"
@@ -404,7 +404,7 @@ void game_initialize(
 	csmemset(game_globals, 0, sizeof(*game_globals));
 	csmemset(&game_variant_global, 0, sizeof(game_variant_global));
 #ifdef HALO_VITA
-	kevin_content_initialize();
+	pc_content_initialize();
 #endif
 	real_math_reset_precision();
 	game_time_initialize();
@@ -622,7 +622,7 @@ void game_tick(
 #endif
 	players_update_after_game();
 #ifdef HALO_VITA
-	kevin_content_update();
+	pc_content_update();
 #endif
 #ifdef HALO_LINUX
 	tick_phase_end(10, "players_update_after_game");
@@ -1054,7 +1054,7 @@ void game_initialize_for_new_map(
 	rasterizer_initialize_for_new_map();
 	game_state_initialize_for_new_map();
 #ifdef HALO_VITA
-	kevin_content_new_map();
+	pc_content_new_map();
 #endif
 	game_time_initialize_for_new_map();
 	interface_initialize_for_new_map();

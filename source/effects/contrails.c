@@ -68,7 +68,7 @@ symbols in this file:
 
 #include "effects/contrails.h"
 #ifdef HALO_VITA
-#include "kevin_fx.h"
+#include "combat_fx_options.h"
 #endif
 
 #include "bitmaps/bitmap_group.h"
@@ -620,7 +620,7 @@ static void contrail_update_points(
 	long contrail_point_indices[MAXIMUM_CONTRAIL_POINTS];
 	short instance_index;
 #ifdef HALO_VITA
-	int trace_kind=kevin_tracers_enabled()?kevin_trace_kind(tag_get_name(contrail->definition_index)):0;
+	int trace_kind=combat_tracers_enabled()?combat_trace_kind(tag_get_name(contrail->definition_index)):0;
 #endif
 
 	for (instance_index = 0;
@@ -640,7 +640,7 @@ static void contrail_update_points(
 				real point_step=dt;
 				if (trace_kind==1 && definition->render_type==_contrail_render_type_viewer && definition->states.count>=2) {
 					const struct contrail_point_state *first=TAG_BLOCK_GET_ELEMENT(&definition->states,0,struct contrail_point_state);
-					point_step=kevin_trace_step(dt,first->duration_upper_bound,first->transition_duration_upper_bound,
+					point_step=combat_trace_step(dt,first->duration_upper_bound,first->transition_duration_upper_bound,
 						contrail_point->state_index,TEST_FLAG(contrail_point->flags,_contrail_point_new_bit),
 						TEST_FLAG(contrail_point->flags,_contrail_point_transitioning_bit));
 				}

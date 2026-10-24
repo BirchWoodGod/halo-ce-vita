@@ -1,15 +1,15 @@
 /* Vita bot profile checks by kaboggs. No game files or console required. */
 #include <assert.h>
-#include "../../linux/game/kevin_bot_profiles.h"
+#include "../../linux/game/local_bot_profile_rules.h"
 
 int main(void)
 {
-    struct kevin_bot_profiles p;
+    struct local_bot_profile_rules p;
     uint32_t seed;
     int a=0,b=0,both=0;
     for (seed=1;seed<=100000;++seed) {
         int i,j,star=0,kode=0;
-        kevin_profiles_make(&p,15,10,seed);
+        local_bot_profiles_make(&p,15,10,seed);
         for (i=0;i<15;++i) {
             if (p.kind[i]==1) {++star;assert(p.color[i]==6);}
             if (p.kind[i]==2) {++kode;assert(p.color[i]==12);}
@@ -26,9 +26,9 @@ int main(void)
     assert(a>9000 && a<11000 && b>9000 && b<11000);
     assert(both>700 && both<1300);
     for (seed=1;seed<=1000;++seed) {
-        kevin_profiles_make(&p,1,100,seed);
+        local_bot_profiles_make(&p,1,100,seed);
         assert(p.kind[0]==1 || p.kind[0]==2);
-        kevin_profiles_make(&p,15,0,seed);
+        local_bot_profiles_make(&p,15,0,seed);
         assert(p.kind[0]==0 && p.kind[14]==0);
     }
     return 0;
