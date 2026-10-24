@@ -7381,6 +7381,9 @@ static void browser_test_games(void)
 		snprintf(entry->gametype, sizeof(entry->gametype), "%s", gametypes[index % 4]);
 		entry->players = (int)(index * 7 % 16);
 		entry->maximum = 16;
+		/* (HALO_TEST_BROWSER_BOTS=N: N of each game's players are bots, as a dedicated server's listing says) */
+		if (getenv("HALO_TEST_BROWSER_BOTS") && atoi(getenv("HALO_TEST_BROWSER_BOTS")) > 0)
+			entry->bots = MIN(atoi(getenv("HALO_TEST_BROWSER_BOTS")), entry->players);
 		entry->open = entry->compatible = 1;
 		snprintf(entry->tag, sizeof(entry->tag), "%s", crossplay_guard_tag(CROSSPLAY_PLATFORM_VITA));
 		snprintf(entry->badge, sizeof(entry->badge), "%s", entry->tag);
@@ -7894,10 +7897,19 @@ static void browser_update(struct widget_instance *list)
 		the bots apart too, "6+5/16", in its narrow column) */
 		else if (entry->bots > 0 && entry->bots <= entry->players)
 		{
-			if (entry->maximum > 0)
-				snprintf(text, sizeof(text), "%d+%d/%d", entry->players - entry->bots, entry->bots, entry->maximum);
-			else
-				snprintf(text, sizeof(text), "%d+%d", entry->players - entry->bots, entry->bots);
+			char bots_text[24];
+
+			/* (said as "6+5 bots" while that fits the column, else "6+5/16": the Players line under
+			the list names them both) */
+			snprintf(bots_text, sizeof(bots_text), T("%d bots"), entry->bots);
+			snprintf(text, sizeof(text), "%d+%s", entry->players - entry->bots, bots_text);
+			if (row_column(child, "row_players", text))
+			{
+				if (entry->maximum > 0)
+					snprintf(text, sizeof(text), "%d+%d/%d", entry->players - entry->bots, entry->bots, entry->maximum);
+				else
+					snprintf(text, sizeof(text), "%d+%d", entry->players - entry->bots, entry->bots);
+			}
 		}
 		row_column(child, "row_players", text);
 #ifndef HALO_RELEASE
