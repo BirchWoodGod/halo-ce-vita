@@ -492,8 +492,9 @@ void menu_backdrop_pending_draw(void)
 	color.red = color.green = color.blue = 0.85f;
 	bounds.x0 = 0;
 	bounds.x1 = 640;
-	bounds.y0 = 440;
-	bounds.y1 = 470;
+	/* (above the title screen's notice and the menus' footer) */
+	bounds.y0 = 412;
+	bounds.y1 = 436;
 	draw_string_set_draw_mode(font_index, NONE, 2, 0, &color);
 	halo_menus_utf16(line, text, (long)(sizeof(text) / sizeof(text[0])));
 	rasterizer_draw_unicode_string(&bounds, NULL, NULL, 0, (wchar_t const *)text);
