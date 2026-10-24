@@ -28,6 +28,7 @@ folder's own (tools/halo3_menu_art.py). -->
 		<string text="MODEL"/>
 		<string text="FLAMING HELMET"/>
 		<string text="KEYBOARD &amp; MOUSE"/>
+		<string text="VISOR"/>
 	</strings>
 	<!-- (the rows' help, in their order: menu_functions.c h3_custom_update) -->
 	<strings name="h3/custom_help">
@@ -96,13 +97,13 @@ folder's own (tools/halo3_menu_art.py). -->
 	<widget name="h3/custom/arrow_right" left="326" top="2" width="8" height="16" bitmap="h3/arrow_right"/>
 	<widget name="h3/custom/swatch" left="110" top="2" width="16" height="16" bitmap="h3/swatch"/>
 	<widget name="h3/custom/name_label" type="text" left="0" top="0" width="160" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/custom_labels" string_index="0"/>
-	<widget name="h3/custom/op_name" width="336" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+	<widget name="h3/custom/op_name" width="336" height="18" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
 		<on event="a start" run="port h3 custom next"/>
 		<child widget="h3/custom/name_label"/>
 		<child widget="h3/custom/value"/>
 	</widget>
 	<widget name="h3/custom/color_label" type="text" left="0" top="0" width="104" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/custom_labels" string_index="1"/>
-	<widget name="h3/custom/op_color" width="336" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+	<widget name="h3/custom/op_color" width="336" height="18" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
 		<on event="a right stick_right" run="port h3 custom next"/>
 		<on event="left stick_left" run="port h3 custom previous"/>
 		<child widget="h3/custom/color_label"/>
@@ -111,8 +112,19 @@ folder's own (tools/halo3_menu_art.py). -->
 		<child widget="h3/custom/arrow_left"/>
 		<child widget="h3/custom/arrow_right"/>
 	</widget>
+	<!-- (port: the platform's visor colour, player_cosmetics.h; its own grid in Menu style Online's
+	COLORS) -->
+	<widget name="h3/custom/visor_label" type="text" left="0" top="0" width="104" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/custom_labels" string_index="12"/>
+	<widget name="h3/custom/op_visor" width="336" height="18" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="h3/custom/visor_label"/>
+		<child widget="h3/custom/value"/>
+		<child widget="h3/custom/arrow_left"/>
+		<child widget="h3/custom/arrow_right"/>
+	</widget>
 	<widget name="h3/custom/model_label" type="text" left="0" top="0" width="160" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/custom_labels" string_index="9"/>
-	<widget name="h3/custom/op_model" width="336" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+	<widget name="h3/custom/op_model" width="336" height="18" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
 		<on event="a right stick_right" run="port h3 custom next"/>
 		<on event="left stick_left" run="port h3 custom previous"/>
 		<child widget="h3/custom/model_label"/>
@@ -121,7 +133,7 @@ folder's own (tools/halo3_menu_art.py). -->
 		<child widget="h3/custom/arrow_right"/>
 	</widget>
 	<widget name="h3/custom/stick_label" type="text" left="0" top="0" width="160" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/custom_labels" string_index="2"/>
-	<widget name="h3/custom/op_stick" width="336" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+	<widget name="h3/custom/op_stick" width="336" height="18" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
 		<on event="a right stick_right" run="port h3 custom next"/>
 		<on event="left stick_left" run="port h3 custom previous"/>
 		<child widget="h3/custom/stick_label"/>
@@ -130,7 +142,7 @@ folder's own (tools/halo3_menu_art.py). -->
 		<child widget="h3/custom/arrow_right"/>
 	</widget>
 	<widget name="h3/custom/buttons_label" type="text" left="0" top="0" width="160" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/custom_labels" string_index="3"/>
-	<widget name="h3/custom/op_buttons" width="336" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+	<widget name="h3/custom/op_buttons" width="336" height="18" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
 		<on event="a right stick_right" run="port h3 custom next"/>
 		<on event="left stick_left" run="port h3 custom previous"/>
 		<child widget="h3/custom/buttons_label"/>
@@ -139,7 +151,7 @@ folder's own (tools/halo3_menu_art.py). -->
 		<child widget="h3/custom/arrow_right"/>
 	</widget>
 	<widget name="h3/custom/look_label" type="text" left="0" top="0" width="160" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/custom_labels" string_index="4"/>
-	<widget name="h3/custom/op_look" width="336" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+	<widget name="h3/custom/op_look" width="336" height="18" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
 		<on event="a right stick_right" run="port h3 custom next"/>
 		<on event="left stick_left" run="port h3 custom previous"/>
 		<child widget="h3/custom/look_label"/>
@@ -148,7 +160,7 @@ folder's own (tools/halo3_menu_art.py). -->
 		<child widget="h3/custom/arrow_right"/>
 	</widget>
 	<widget name="h3/custom/invert_label" type="text" left="0" top="0" width="160" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/custom_labels" string_index="5"/>
-	<widget name="h3/custom/op_invert" width="336" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+	<widget name="h3/custom/op_invert" width="336" height="18" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
 		<on event="a right stick_right" run="port h3 custom next"/>
 		<on event="left stick_left" run="port h3 custom previous"/>
 		<child widget="h3/custom/invert_label"/>
@@ -157,7 +169,7 @@ folder's own (tools/halo3_menu_art.py). -->
 		<child widget="h3/custom/arrow_right"/>
 	</widget>
 	<widget name="h3/custom/flight_label" type="text" left="0" top="0" width="160" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/custom_labels" string_index="6"/>
-	<widget name="h3/custom/op_flight" width="336" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+	<widget name="h3/custom/op_flight" width="336" height="18" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
 		<on event="a right stick_right" run="port h3 custom next"/>
 		<on event="left stick_left" run="port h3 custom previous"/>
 		<child widget="h3/custom/flight_label"/>
@@ -166,7 +178,7 @@ folder's own (tools/halo3_menu_art.py). -->
 		<child widget="h3/custom/arrow_right"/>
 	</widget>
 	<widget name="h3/custom/autocenter_label" type="text" left="0" top="0" width="160" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/custom_labels" string_index="7"/>
-	<widget name="h3/custom/op_autocenter" width="336" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+	<widget name="h3/custom/op_autocenter" width="336" height="18" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
 		<on event="a right stick_right" run="port h3 custom next"/>
 		<on event="left stick_left" run="port h3 custom previous"/>
 		<child widget="h3/custom/autocenter_label"/>
@@ -175,7 +187,7 @@ folder's own (tools/halo3_menu_art.py). -->
 		<child widget="h3/custom/arrow_right"/>
 	</widget>
 	<widget name="h3/custom/vibration_label" type="text" left="0" top="0" width="160" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/custom_labels" string_index="8"/>
-	<widget name="h3/custom/op_vibration" width="336" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+	<widget name="h3/custom/op_vibration" width="336" height="18" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
 		<on event="a right stick_right" run="port h3 custom next"/>
 		<on event="left stick_left" run="port h3 custom previous"/>
 		<child widget="h3/custom/vibration_label"/>
@@ -187,7 +199,7 @@ folder's own (tools/halo3_menu_art.py). -->
 	signed tester list, menu_functions.c h3_custom_update: p2p_flame_listed; the help moves down a row
 	for it) -->
 	<widget name="h3/custom/flame_label" type="text" left="0" top="0" width="160" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/custom_labels" string_index="10"/>
-	<widget name="h3/custom/op_flame" width="336" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+	<widget name="h3/custom/op_flame" width="336" height="18" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
 		<on event="a right stick_right" run="port h3 custom next"/>
 		<on event="left stick_left" run="port h3 custom previous"/>
 		<child widget="h3/custom/flame_label"/>
@@ -198,7 +210,7 @@ folder's own (tools/halo3_menu_art.py). -->
 	<!-- (KEYBOARD & MOUSE: the PC's keys, halo3/keys.xml; port keys entry hides it, and moves the
 	rows after it up, where there are none - the PS Vita) -->
 	<widget name="h3/custom/keys_label" type="text" left="0" top="0" width="336" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/custom_labels" string_index="11"/>
-	<widget name="h3/custom/op_keys" width="336" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+	<widget name="h3/custom/op_keys" width="336" height="18" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
 		<data input="port keys entry"/>
 		<on event="a start" open="h3/keys/screen"/>
 		<child widget="h3/custom/keys_label"/>
@@ -206,17 +218,18 @@ folder's own (tools/halo3_menu_art.py). -->
 	<widget name="h3/custom/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<data input="port h3 custom"/>
 		<child widget="h3/custom/op_name" x="52" y="102"/>
-		<child widget="h3/custom/op_color" x="52" y="122"/>
-		<child widget="h3/custom/op_model" x="52" y="142"/>
-		<child widget="h3/custom/op_stick" x="52" y="162"/>
-		<child widget="h3/custom/op_buttons" x="52" y="182"/>
-		<child widget="h3/custom/op_look" x="52" y="202"/>
-		<child widget="h3/custom/op_invert" x="52" y="222"/>
-		<child widget="h3/custom/op_flight" x="52" y="242"/>
-		<child widget="h3/custom/op_autocenter" x="52" y="262"/>
+		<child widget="h3/custom/op_color" x="52" y="120"/>
+		<child widget="h3/custom/op_visor" x="52" y="138"/>
+		<child widget="h3/custom/op_model" x="52" y="156"/>
+		<child widget="h3/custom/op_stick" x="52" y="174"/>
+		<child widget="h3/custom/op_buttons" x="52" y="192"/>
+		<child widget="h3/custom/op_look" x="52" y="210"/>
+		<child widget="h3/custom/op_invert" x="52" y="228"/>
+		<child widget="h3/custom/op_flight" x="52" y="246"/>
+		<child widget="h3/custom/op_autocenter" x="52" y="264"/>
 		<child widget="h3/custom/op_vibration" x="52" y="282"/>
-		<child widget="h3/custom/op_keys" x="52" y="302"/>
-		<child widget="h3/custom/op_flame" x="52" y="322"/>
+		<child widget="h3/custom/op_keys" x="52" y="300"/>
+		<child widget="h3/custom/op_flame" x="52" y="318"/>
 	</widget>
 
 	<!-- THE SPARTAN PREVIEW: at the right, in the editor panel's window (h3/custom/panel), the
