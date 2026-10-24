@@ -66,6 +66,7 @@ map loaded (a game started) lets it go with ui.map's tags
 #include "sound/sound_classes.h"
 #include "objects/objects.h"
 #include "objects/object_types.h"
+#include "devices/devices.h"
 
 #include "halo_menus.h"
 #include "scene_packs.h"
@@ -96,6 +97,8 @@ void sound_class_set_gain(char const *name, real gain, short interpolation_ticks
 #define MENU_BACKDROP_PACK "menu_backdrop"
 /* (a30's first bsp has 124: room for them) */
 #define MENU_BACKDROP_SOUNDS 192
+/* (a30's first bsp has one: its beam emitter) */
+#define MENU_BACKDROP_MACHINES 16
 
 enum
 {
@@ -114,6 +117,8 @@ enum
 typedef char menu_backdrop_detail_palette_offset[
 	offsetof(struct scenario, detail_object_collection_palette) == SCENARIO_DETAIL_OBJECT_PALETTE_OFFSET ? 1 : -1];
 typedef char menu_backdrop_scenery_offset[offsetof(struct scenario, scenery) == 0x210 ? 1 : -1];
+typedef char menu_backdrop_machines_offset[offsetof(struct scenario, machines) == 0x294 &&
+	offsetof(struct scenario, machine_palette) == 0x2A0 ? 1 : -1];
 typedef char menu_backdrop_sky_offset[offsetof(struct scenario, sky_references) == 0x30 ? 1 : -1];
 
 /* ---------- structures */
@@ -151,7 +156,7 @@ static struct
 	boolean active;
 	struct scenario *scenario;
 	struct tag_block kept_structure_bsps, kept_skies, kept_scenery, kept_scenery_palette, kept_detail_objects,
-		kept_decals, kept_sound_scenery, kept_sound_scenery_palette;
+		kept_decals, kept_sound_scenery, kept_sound_scenery_palette, kept_machines, kept_machine_palette;
 	/* the menu music's level set while it is behind them (the music
 	class's gain: 1 none) */
 	real music_gain;
@@ -160,6 +165,10 @@ static struct
 	on a bsp switch): let go with it */
 	long sounds[MENU_BACKDROP_SOUNDS];
 	short sound_count;
+	/* its machines made (the game places a level's at its start): let go
+	with it */
+	long machines[MENU_BACKDROP_MACHINES];
+	short machine_count;
 	/* ui.map's bsp reference, then the backdrop's */
 	struct scenario_structure_bsp_reference references[2];
 	struct backdrop_bsp_header header;
@@ -259,6 +268,8 @@ static void menu_backdrop_blocks_put_back(boolean references)
 	scenario->decals = menu_backdrop.kept_decals;
 	scenario->sound_scenery = menu_backdrop.kept_sound_scenery;
 	scenario->sound_scenery_palette = menu_backdrop.kept_sound_scenery_palette;
+	scenario->machines = menu_backdrop.kept_machines;
+	scenario->machine_palette = menu_backdrop.kept_machine_palette;
 	if (references)
 	{
 		scenario->structure_bsp_references = menu_backdrop.kept_structure_bsps;
@@ -291,6 +302,38 @@ static void menu_backdrop_sounds_make(struct scenario *scenario)
 	}
 }
 
+/* a30's machines made as the game makes a level's at its start (its beam
+emitter by the tower: its own looping beam, as in a30), each placed in the
+bsp, automatically placed */
+static void menu_backdrop_machines_make(struct scenario *scenario)
+{
+	long element_size = (long)object_type_definition_get(_object_type_machine)->placement_tag_block_element_size;
+	short index;
+
+	menu_backdrop.machine_count = 0;
+	for (index = 0; index < scenario->machines.count && menu_backdrop.machine_count < MENU_BACKDROP_MACHINES; index++)
+	{
+		struct scenario_object_datum *placement = (struct scenario_object_datum *)tag_block_get_element_with_size(
+			&scenario->machines, index, element_size);
+		long object_index;
+
+		if (TEST_FLAG(placement->placement_flags, _scenario_object_placement_not_automatic_bit) ||
+			scenario_leaf_index_from_point(&placement->position) == NONE)
+		{
+			continue;
+		}
+		object_index = object_new_from_scenario(placement, &scenario->machine_palette);
+		if (object_index == NONE)
+			continue;
+		menu_backdrop.machines[menu_backdrop.machine_count++] = object_index;
+		/* (a machine powered - a30's are by their device groups, which the
+		pack has not: its beam emitter, a looping machine, then runs its own
+		"device position" animation over and over as in a30, the blue beam
+		shot up into the sky from the tower's foot every few seconds) */
+		device_port_set_state(object_index, 1.f, FALSE, 0.f);
+	}
+}
+
 /* its sound scenery let go */
 static void menu_backdrop_sounds_delete(void)
 {
@@ -302,6 +345,12 @@ static void menu_backdrop_sounds_delete(void)
 			object_delete(menu_backdrop.sounds[index]);
 	}
 	menu_backdrop.sound_count = 0;
+	for (index = 0; index < menu_backdrop.machine_count; index++)
+	{
+		if (object_try_and_get(menu_backdrop.machines[index]))
+			object_delete(menu_backdrop.machines[index]);
+	}
+	menu_backdrop.machine_count = 0;
 }
 
 /* the menu music under the backdrop (menus.backdrop_music, the settings
@@ -363,6 +412,8 @@ static void menu_backdrop_activate(void)
 	menu_backdrop.kept_decals = scenario->decals;
 	menu_backdrop.kept_sound_scenery = scenario->sound_scenery;
 	menu_backdrop.kept_sound_scenery_palette = scenario->sound_scenery_palette;
+	menu_backdrop.kept_machines = scenario->machines;
+	menu_backdrop.kept_machine_palette = scenario->machine_palette;
 
 	memcpy(&menu_backdrop.references[0], TAG_BLOCK_GET_ELEMENT(&scenario->structure_bsp_references, 0,
 		struct scenario_structure_bsp_reference), sizeof(menu_backdrop.references[0]));
@@ -392,6 +443,9 @@ static void menu_backdrop_activate(void)
 	any level's, game_sound.c, where the camera is) */
 	scenario->sound_scenery = backdrop->sound_scenery;
 	scenario->sound_scenery_palette = backdrop->sound_scenery_palette;
+	/* (a30's machines: the beam emitter by the tower, firing as in a30) */
+	scenario->machines = backdrop->machines;
+	scenario->machine_palette = backdrop->machine_palette;
 
 	scenario_switch_structure_bsp(1);
 	if (global_structure_bsp_index_get() != 1)
@@ -406,6 +460,8 @@ static void menu_backdrop_activate(void)
 	menu_backdrop.active = TRUE;
 	menu_backdrop.activated_us = vita_host_time_us();
 	menu_backdrop_sounds_make(scenario);
+	menu_backdrop_machines_make(scenario);
+	platform_log("menu backdrop: %d of %ld machines made", menu_backdrop.machine_count, backdrop->machines.count);
 	platform_log("menu backdrop: a30's bsp %s behind the menus (%ld clusters, %ld skies, %ld scenery placed, %d of %ld "
 		"sound scenery made; %ld background sounds), switched in %.1f ms", tag_get_name(menu_backdrop.structure_bsp_index),
 		bsp->clusters.count, backdrop->sky_references.count, backdrop->scenery.count, menu_backdrop.sound_count,
@@ -533,7 +589,9 @@ void menu_backdrop_update(void)
 	}
 	/* (the menu music's level, changed in the settings panel: live) */
 	if (menu_backdrop.active)
+	{
 		menu_backdrop_music_level();
+	}
 	/* (tests: HALO_MENU_BACKDROP_TEST_OFF=<seconds>, the backdrop let go
 that long after it came, as the settings panel's Live backdrop Off lets
 it go; the ring's flight back) */

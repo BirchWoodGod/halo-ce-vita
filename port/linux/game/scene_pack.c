@@ -134,6 +134,13 @@ enum
 	SCENARIO_SOUND_SCENERY_PALETTE = 0x2E8,
 	SCENARIO_SOUND_SCENERY_SIZE = 0x28,
 	SCENARIO_STRUCTURE_BSPS = 0x5A4,
+	/* (scenario_machine_datum: the object's, its device's power and
+	position groups, its flags) */
+	SCENARIO_MACHINES = 0x294,
+	SCENARIO_MACHINE_PALETTE = 0x2A0,
+	SCENARIO_MACHINE_SIZE = 0x40,
+	SCENARIO_MACHINE_POWER_GROUP = 0x28,
+	SCENARIO_MACHINE_POSITION_GROUP = 0x2A,
 	SCENARIO_BSP_REFERENCE_SIZE = 0x20,
 	SCENARIO_SCENERY_SIZE = 0x48,
 	SCENARIO_OBJECT_NAME_INDEX = 2,
@@ -3149,7 +3156,7 @@ static void backdrop_prepare(struct build_state *state, unsigned char *bsp, unsi
 	static unsigned long const kept_blocks[] =
 	{
 		SCENARIO_SKIES, SCENARIO_SCENERY, SCENARIO_SCENERY_PALETTE, SCENARIO_DETAIL_OBJECT_PALETTE,
-		SCENARIO_SOUND_SCENERY, SCENARIO_SOUND_SCENERY_PALETTE
+		SCENARIO_SOUND_SCENERY, SCENARIO_SOUND_SCENERY_PALETTE, SCENARIO_MACHINES, SCENARIO_MACHINE_PALETTE
 	};
 	static unsigned long const references[] = { 0x00, 0x10, 0x20, 0x574, 0x584, 0x594 };
 	unsigned char trimmed[SCENARIO_ROOT_SIZE];
@@ -3200,6 +3207,23 @@ static void backdrop_prepare(struct build_state *state, unsigned char *bsp, unsi
 		{
 			scenery[element * SCENARIO_SCENERY_SIZE + SCENARIO_OBJECT_NAME_INDEX] = 0xFF;
 			scenery[element * SCENARIO_SCENERY_SIZE + SCENARIO_OBJECT_NAME_INDEX + 1] = 0xFF;
+		}
+	}
+	/* (its machines - the beam emitter by the tower - named none, in no
+	device group: the pack has no names and no groups, each runs alone) */
+	{
+		long count = (long)read_u32(scenario + SCENARIO_MACHINES);
+		unsigned char *machines = count > 0 && count <= 0x8000 ?
+			source_at(state, read_u32(scenario + SCENARIO_MACHINES + 4), (unsigned long)count * SCENARIO_MACHINE_SIZE) : NULL;
+		long element;
+
+		for (element = 0; machines && element < count; element++)
+		{
+			unsigned char *machine = machines + element * SCENARIO_MACHINE_SIZE;
+
+			machine[SCENARIO_OBJECT_NAME_INDEX] = machine[SCENARIO_OBJECT_NAME_INDEX + 1] = 0xFF;
+			machine[SCENARIO_MACHINE_POWER_GROUP] = machine[SCENARIO_MACHINE_POWER_GROUP + 1] = 0xFF;
+			machine[SCENARIO_MACHINE_POSITION_GROUP] = machine[SCENARIO_MACHINE_POSITION_GROUP + 1] = 0xFF;
 		}
 	}
 	/* (its sound scenery - the waterfall's, the water's - named none too) */
