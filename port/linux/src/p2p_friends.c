@@ -4669,6 +4669,75 @@ static void test_show(struct p2p_friend_entry *entries, int count)
 }
 #endif
 
+#ifndef HALO_RELEASE
+/* (the menus' pictures, HALO_TEST_FRIENDS_SHOW=fake: with no one on the
+list, a made-up one - a request, an invite, friends online and offline, a
+request sent, a blocked player - as the lists would show it; nothing is sent
+or heard, and acting on one finds no one) */
+static int test_fake(struct p2p_friend_entry *entries, int count, int maximum_count)
+{
+	static const struct { int kind, online, state, joinable; char const *name, *code; } fake[] =
+	{
+		{ P2P_FRIEND_KIND_REQUEST, 0, 0, 0, "Kestrel", "KQ7M-2RTX-9HVA" },
+		{ P2P_FRIEND_KIND_INVITE, 1, P2P_FRIEND_STATE_MULTIPLAYER, 1, "Bravo", "B4NC-8JWE-3LPQ" },
+		{ P2P_FRIEND_KIND_FRIEND, 1, P2P_FRIEND_STATE_MULTIPLAYER, 1, "Bravo", "B4NC-8JWE-3LPQ" },
+		{ P2P_FRIEND_KIND_FRIEND, 1, P2P_FRIEND_STATE_COOP, 0, "Juniper", "J2XD-6MFA-7TRC" },
+		{ P2P_FRIEND_KIND_FRIEND, 1, P2P_FRIEND_STATE_MENUS, 0, "Osprey", "O9GE-4KHN-1WZB" },
+		{ P2P_FRIEND_KIND_FRIEND, 0, P2P_FRIEND_STATE_OFFLINE, 0, "Marlin", "M3VT-5QYC-8DKE" },
+		{ P2P_FRIEND_KIND_OUTGOING, 0, 0, 0, "R7PA-1NXM-4GHL", "R7PA-1NXM-4GHL" },
+		{ P2P_FRIEND_KIND_BLOCKED, 0, 0, 0, "Grumble", "G6WL-3EZF-2CJU" },
+	};
+	const char *setting = getenv("HALO_TEST_FRIENDS_SHOW");
+	int index;
+
+	if (!setting || strcmp(setting, "fake") || count)
+		return count;
+	for (index = 0; index < (int)(sizeof(fake) / sizeof(fake[0])) && count < maximum_count; index++)
+	{
+		struct p2p_friend_entry *entry = &entries[count++];
+
+		memset(entry, 0, sizeof(*entry));
+		snprintf(entry->id, sizeof(entry->id), "fake-%d", index);
+		entry->kind = fake[index].kind;
+		entry->online = fake[index].online;
+		entry->state = fake[index].state;
+		entry->joinable = fake[index].joinable;
+		snprintf(entry->name, sizeof(entry->name), "%s", fake[index].name);
+		snprintf(entry->code, sizeof(entry->code), "%s", fake[index].code);
+		switch (entry->kind)
+		{
+		case P2P_FRIEND_KIND_REQUEST:
+			snprintf(entry->activity, sizeof(entry->activity), "%s", T("Wants to be your friend"));
+			break;
+		case P2P_FRIEND_KIND_OUTGOING:
+			snprintf(entry->activity, sizeof(entry->activity), "%s", T("Request sent"));
+			break;
+		case P2P_FRIEND_KIND_BLOCKED:
+			snprintf(entry->activity, sizeof(entry->activity), "%s", T("Blocked"));
+			break;
+		default:
+			if (entry->state == P2P_FRIEND_STATE_MULTIPLAYER)
+			{
+				entry->players = 5;
+				entry->maximum = 16;
+				p2p_friends_activity_text(entry->activity, sizeof(entry->activity), entry->state, "bloodgulch", "Slayer",
+					2, -1, 0);
+			}
+			else if (entry->state == P2P_FRIEND_STATE_COOP)
+			{
+				entry->players = 2;
+				entry->maximum = 4;
+				p2p_friends_activity_text(entry->activity, sizeof(entry->activity), entry->state, "a10", "", 0, 3, 0);
+			}
+			else
+				p2p_friends_activity_text(entry->activity, sizeof(entry->activity), entry->state, "", "", 0, -1, 0);
+			break;
+		}
+	}
+	return count;
+}
+#endif
+
 int p2p_friends_list(struct p2p_friend_entry *entries, int maximum_count)
 {
 	int count = 0, index, first_friend;
@@ -4745,6 +4814,7 @@ int p2p_friends_list(struct p2p_friend_entry *entries, int maximum_count)
 	pthread_mutex_unlock(&friends_lock);
 #ifndef HALO_RELEASE
 	test_show(entries, count);
+	count = test_fake(entries, count, maximum_count);
 #endif
 	return count;
 }

@@ -475,6 +475,22 @@ BOOL platform_screen_mode(long *width, long *height)
 	SDL_DisplayID display;
 	const SDL_DisplayMode *mode;
 
+#ifndef HALO_RELEASE
+	/* (debug: the menu harness's pictures at a desktop's resolution with no
+	display, HALO_TEST_SCREEN_MODE=1920x1080: drawn as fullscreen there) */
+	{
+		const char *setting = getenv("HALO_TEST_SCREEN_MODE");
+		long test_width, test_height;
+
+		if (setting && sscanf(setting, "%ldx%ld", &test_width, &test_height) == 2 && test_width >= 640 &&
+			test_height >= 480)
+		{
+			*width = test_width;
+			*height = test_height;
+			return TRUE;
+		}
+	}
+#endif
 	if (platform_window ? !(SDL_GetWindowFlags(platform_window) & SDL_WINDOW_FULLSCREEN) :
 		!platform_fullscreen_setting() || !platform_sdl_initialize())
 	{
