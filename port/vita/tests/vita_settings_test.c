@@ -3325,7 +3325,7 @@ static void test_tab_layouts(void)
 	const struct layout_row game[] = {
 		/* (Halo 3's menus as shipped from 1.1.1: the owner's) */
 		{ TAB_GAME, "Menus", NULL, NULL, 0, NULL, ACTION_PAGE, PAGE_MENUS },
-		{ PAGE_MENUS, "Menu style", "HALO_MENU_STYLE", "classic|halo3|online", 0, "halo3" },
+		{ PAGE_MENUS, "Menu style", "HALO_MENU_STYLE", "classic|halo3|online|original", 0, "halo3" },
 		/* (shown with Menu style Halo 3) */
 		{ PAGE_MENUS, "Carnage report", "HALO_CARNAGE_REPORT", "classic|halo3", 0, "halo3" },
 		{ PAGE_MENUS, "Scoreboard", "HALO_SCOREBOARD", "classic|halo3", 0, "halo3" },
@@ -4663,6 +4663,30 @@ static void test_menu_style_row(void)
 	press(VITA_BUTTON_CIRCLE);
 	check(menu_visible && strstr(menu, "\nMenus\x02  Halo 3  >\n"), "Circle: back to Game, Menus saying Halo 3");
 	press(VITA_BUTTON_CIRCLE);
+}
+
+/* Menu style Classic ("original", insider.25): the Xbox menus as they
+shipped - the panel the classic one, the game's own carnage report and
+scoreboard (their rows left out), and OpenCE's Multiplayer screen not shown,
+so the panel keeps its Direct Link (Join by code) and Friends; Classic+
+("classic", the Halo CE style before the split) as it was */
+static void test_menu_style_original(void)
+{
+	struct setting *report = setting_named("HALO_CLASSIC_CARNAGE_REPORT");
+	struct setting *board = setting_named("HALO_CLASSIC_SCOREBOARD");
+	int saved_state = halo_pc_menus_state;
+
+	vita_settings_set("HALO_MENU_STYLE", "original");
+	halo_pc_menus_state = 1;
+	check(original_style() && classic_panel() && !pc_menus_shown() && !online_panel_style(),
+		"Menu style Classic: the classic panel, the PC menus not shown");
+	check(report && board && !setting_shown(report) && !setting_shown(board),
+		"Menu style Classic: the game's own report and scoreboard, their rows left out");
+	vita_settings_set("HALO_MENU_STYLE", "classic");
+	check(!original_style() && classic_panel() && pc_menus_shown() && setting_shown(report) && setting_shown(board),
+		"Menu style Classic+ (a saved \"classic\"): as Halo CE was - its two rows, the PC menus");
+	vita_settings_set("HALO_MENU_STYLE", "halo3");
+	halo_pc_menus_state = saved_state;
 }
 
 /* the Carnage report row (Game > Menus, under Menu style; menu_functions.c
@@ -6337,6 +6361,7 @@ int main(void)
 	snprintf(update_version_value, sizeof(update_version_value), "1.1.0-beta.4");
 	test_languages();
 	test_menu_style_row();
+	test_menu_style_original();
 	test_carnage_report_row();
 	test_scoreboard_row();
 	test_restart_offer();

@@ -1811,7 +1811,9 @@ rows to: ours while Menu style is Halo CE, the map's own while it is Halo 3
 3 set's does) */
 static void classic_patches_apply(void)
 {
-	int classic = !halo_menu_style_halo3();
+	/* (Menu style Classic+ alone: Classic, "original", keeps the map's own
+	screens as they shipped) */
+	int classic = halo_menu_style_classic_plus();
 	struct cache_file_tag_instance *instances;
 	long count, index;
 
@@ -1828,7 +1830,8 @@ static void classic_patches_apply(void)
 			instances[absolute].base_address = classic ? menu_tags.classic_patched[index] : menu_tags.classic_original[index];
 	}
 	menu_tags.classic_applied = classic ? 1 : -1;
-	platform_log("menus: Menu style %s: the Xbox screens' %ld widgets %s", classic ? "Halo CE" : "Halo 3",
+	platform_log("menus: Menu style %s: the Xbox screens' %ld widgets %s", classic ? "Classic+" :
+		halo_menu_style_original() ? "Classic" : "Halo 3/ElDewrito",
 		menu_tags.classic_count, classic ? "with the port's rows" : "as the map has them");
 }
 
@@ -3002,6 +3005,10 @@ long menu_tags_screen(
 			return menu_tags_online(menu_tags.h3_to[index]);
 		}
 	}
+	/* (Menu style Classic: the Xbox's own screens, as they shipped - not
+	OpenCE's Multiplayer screen nor the screens its flows open) */
+	if (halo_menu_style_original())
+		return tag_index;
 	/* (a level's map has no Multiplayer screen: NONE) */
 	if (tag_index != NONE && tag_index == menu_tags.xbox_root_tag && menu_tags.art >= 0)
 	{

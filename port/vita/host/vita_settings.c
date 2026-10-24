@@ -588,12 +588,16 @@ static struct setting settings[] = {
 	ElDewrito (find_choice); HALO_MENU_HALO3=1 in env.txt still shows the
 	Halo 3 set for a test (menu_files.c)) */
 #ifndef VITA_SETTINGS_TEST_HALO3_STYLE
-	{ "Menu style", "HALO_MENU_STYLE", 0, 2, { "classic", "online" }, { "Halo CE", "ElDewrito" },
-		"ElDewrito: Halo Online-style menus. Halo CE: the original.", 1, PAGE_MENUS },
+	/* (Classic, "original": the Xbox menus as they shipped, the port's
+	features here alone; Classic+, "classic" - the Halo CE style before
+	insider.25, so a saved one keeps its rows -: the Xbox menus with the
+	port's rows and screens in their look. The owner, insider.25) */
+	{ "Menu style", "HALO_MENU_STYLE", 0, 3, { "original", "classic", "online" }, { "Classic", "Classic+", "ElDewrito" },
+		"ElDewrito: Halo Online style. Classic: as shipped. Classic+: with the new rows.", 2, PAGE_MENUS },
 #else
 	/* (vita_settings_test.c: the panel's every page as the hidden Halo 3
 	style lays it out - its checks were written for it) */
-	{ "Menu style", "HALO_MENU_STYLE", 0, 3, { "classic", "halo3", "online" }, { "Halo CE", "Halo 3", "ElDewrito" },
+	{ "Menu style", "HALO_MENU_STYLE", 0, 4, { "classic", "halo3", "online", "original" }, { "Halo CE", "Halo 3", "ElDewrito", "Classic" },
 		"ElDewrito: Halo Online style. Halo 3: the ring. Halo CE: the original.", 1, PAGE_MENUS },
 #endif
 	/* (menu_functions.c h3_carnage_wanted, config.toml's menus.carnage_report:
@@ -1715,6 +1719,8 @@ minimum while Render resolution is Dynamic (each keeps its value
 meanwhile) */
 static int classic_panel(void);
 static int online_panel_style(void);
+static int original_style(void);
+static int pc_menus_shown(void);
 
 static int setting_shown(const struct setting *setting)
 {
@@ -1735,7 +1741,7 @@ static int setting_shown(const struct setting *setting)
 	/* (and Menu style Halo CE's own two) */
 	if (setting->variable && (!strcmp(setting->variable, "HALO_CLASSIC_CARNAGE_REPORT") ||
 		!strcmp(setting->variable, "HALO_CLASSIC_SCOREBOARD")))
-		return classic_panel();
+		return classic_panel() && !original_style();
 	if ((setting->variable && !strcmp(setting->variable, "HALO_ADHOC_ROOM")) || setting->action == ACTION_ADHOC_JOIN)
 		return network_is("adhoc");
 	if (setting->action == ACTION_PAGE && setting->opens == PAGE_CROSSPLAY)
@@ -1764,13 +1770,13 @@ static int setting_shown(const struct setting *setting)
 	/* (a code typed in: online, on a Vita whose game has not got the PC
 	menus' Direct Link, menu_tags.c) */
 	if (setting->action == ACTION_JOIN_CODE)
-		return network_is("online") && halo_pc_menus_state != 1;
+		return network_is("online") && !pc_menus_shown();
 	/* (friends: their presence, joins and invites go through internet play;
 	in the code row's place, which the PC menus' Direct Link leaves out: the
 	tab is a screen's height, and a game with the PC menus is one whose
 	menus join friends' games. Online chosen and running) */
 	if (setting->action == ACTION_PAGE && setting->opens == PAGE_FRIENDS)
-		return !strcmp(running_network, "online") && !strcmp(chosen_network(), "online") && halo_pc_menus_state == 1;
+		return !strcmp(running_network, "online") && !strcmp(chosen_network(), "online") && (pc_menus_shown() || original_style());
 	if (setting->action == ACTION_BROWSE)
 		return network_is("online");
 	/* (a network Forge game hosted: never listed, its lobby's only - no
@@ -4694,7 +4700,24 @@ static int classic_panel(void)
 {
 	const struct setting *style = setting_named("HALO_MENU_STYLE");
 
-	return style && !strcmp(style->values[style->choice], "classic");
+	return style && (!strcmp(style->values[style->choice], "classic") || !strcmp(style->values[style->choice], "original"));
+}
+
+/* Menu style Classic ("original"): the Xbox menus as they shipped - no
+OpenCE Multiplayer screen, so its Direct Link and FRIENDS are not in the
+menus: the panel has them */
+static int original_style(void)
+{
+	const struct setting *style = setting_named("HALO_MENU_STYLE");
+
+	return style && !strcmp(style->values[style->choice], "original");
+}
+
+/* the PC menus (OpenCE's Multiplayer screen: menu_tags.c) are what the
+menus show: read, and not Menu style Classic */
+static int pc_menus_shown(void)
+{
+	return halo_pc_menus_state == 1 && !original_style();
 }
 
 /* the page's text, as vita_gxm.c menu_build draws it: the tab bar ('\t'),

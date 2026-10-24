@@ -418,7 +418,9 @@ static const struct config_setting config_settings[] =
 		"network.coop_players. The Vita's settings panel (Multiplayer, Play,\n"
 		"Max players) sets it." },
 	{ "menus.style", _config_string, "\"online\"", "HALO_MENU_STYLE", _environment_value, _platform_all,
-		"The menus: \"classic\" (Halo CE's own), \"halo3\" (Halo 3-style screens\n"
+		"The menus: \"original\" (Classic: Halo CE's own, as they shipped),\n"
+		"\"classic\" (Classic+: Halo CE's own with the port's rows and screens),\n"
+		"\"halo3\" (Halo 3-style screens\n"
 		"over the same animated Halo ring: port/vita/app0/menus/halo3) or \"online\"\n"
 		"(shown as ElDewrito: the Halo 3 screens' flows, port/vita/app0/menus/online's look\n"
 		"for the screens it has). Read each\n"

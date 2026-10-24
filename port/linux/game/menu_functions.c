@@ -13688,6 +13688,9 @@ static boolean h3_carnage_wanted(void)
 
 	/* (Menu style Halo CE: the game's own unless menus.classic_carnage_report -
 	HALO_CLASSIC_CARNAGE_REPORT - is "halo3") */
+	/* (Menu style Classic: the game's own, always - the owner, insider.25) */
+	if (halo_menu_style_original())
+		return FALSE;
 	if (!halo_menu_style_halo3())
 	{
 		report = getenv("HALO_CLASSIC_CARNAGE_REPORT");
@@ -14276,6 +14279,9 @@ static boolean h3_scoreboard_wanted(void)
 
 	/* (Menu style Halo CE: the game's own unless menus.classic_scoreboard -
 	HALO_CLASSIC_SCOREBOARD - is "halo3") */
+	/* (Menu style Classic: the game's own, always - the owner, insider.25) */
+	if (halo_menu_style_original())
+		return FALSE;
 	if (!halo_menu_style_halo3())
 	{
 		board = getenv("HALO_CLASSIC_SCOREBOARD");
@@ -20556,8 +20562,8 @@ static void menu_style_current(char *style, int size)
 {
 	char const *value = getenv("HALO_MENU_STYLE");
 
-	snprintf(style, (size_t)size, "%s", !halo_menu_style_halo3() ? "classic" : value && !strcmp(value, "online") ?
-		"online" : "halo3");
+	snprintf(style, (size_t)size, "%s", halo_menu_style_original() ? "original" : !halo_menu_style_halo3() ? "classic" :
+		value && !strcmp(value, "online") ? "online" : "halo3");
 }
 
 static void menu_style_update(boolean main_menu_loaded)

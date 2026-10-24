@@ -1144,12 +1144,31 @@ void halo_menus_preload(void)
 	pthread_mutex_unlock(&preload_lock);
 }
 
-/* (Halo 3 unless "classic": the default since 1.1.1, the owner's call) */
+/* (Halo 3 unless "classic" - Classic+ - or "original" - Classic: the
+default since 1.1.1, the owner's call) */
 int halo_menu_style_halo3(void)
 {
 	char const *style = getenv("HALO_MENU_STYLE");
 
-	return !style || strcmp(style, "classic") != 0;
+	return !style || (strcmp(style, "classic") != 0 && strcmp(style, "original") != 0);
+}
+
+/* (Menu style Classic+, "classic": the Xbox menus with the port's rows and
+screens - a settings.txt from before the split naming "classic" keeps its
+features. Classic, "original": the Xbox menus as they shipped, the port's
+features in the settings panel alone; owner, insider.25) */
+int halo_menu_style_classic_plus(void)
+{
+	char const *style = getenv("HALO_MENU_STYLE");
+
+	return style && strcmp(style, "classic") == 0;
+}
+
+int halo_menu_style_original(void)
+{
+	char const *style = getenv("HALO_MENU_STYLE");
+
+	return style && strcmp(style, "original") == 0;
 }
 
 /* (Menu style Online: the Halo 3 set's flows, menus/online's screens in

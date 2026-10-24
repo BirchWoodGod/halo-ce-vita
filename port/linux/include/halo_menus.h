@@ -222,6 +222,13 @@ int halo_menu_style_halo3(void);
 (halo_menu_style_halo3 is 1 for it too), with menus/online's screens - an
 online/<name> widget opens in place of h3/<name> - for those it has */
 int halo_menu_style_online(void);
+/* 1 for Menu style Classic+ (HALO_MENU_STYLE "classic"): the Xbox screens
+with the port's rows (menus/classic) and the port's screens in their look */
+int halo_menu_style_classic_plus(void);
+/* 1 for Menu style Classic (HALO_MENU_STYLE "original"): the Xbox screens
+as they shipped - no rows of the port's, the game's own carnage report and
+scoreboard, the Xbox Multiplayer screen; the settings panel has the rest */
+int halo_menu_style_original(void);
 /* (the renderer: d3d8_gl.c, d3d8_gxm.c) the display's pixels per unit of the
 640x480 interface, where the menus are drawn (the Vita's 960x544: 1.13) */
 float halo_ui_pixel_scale(void);
