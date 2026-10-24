@@ -907,6 +907,20 @@ static boolean director_update_controls(
 				controls->facing_delta.pitch =
 					(real)gamepad->sticks[_gamepad_stick_right].y *
 						director_globals.dtime * 0.0000196349538f;
+#ifdef HALO_LINUX
+				/* port: the keyboard's controller has no right stick; the
+				mouse turns the flying camera as it aims (xinput_sdl.c) */
+				{
+					extern int halo_linux_mouse_look(short gamepad_index, real *yaw, real *pitch);
+					real mouse_yaw, mouse_pitch;
+
+					if (halo_linux_mouse_look((short)player_index, &mouse_yaw, &mouse_pitch))
+					{
+						controls->facing_delta.yaw += mouse_yaw;
+						controls->facing_delta.pitch += mouse_pitch;
+					}
+				}
+#endif
 				controls->position_delta.i =
 					(real)gamepad->sticks[_gamepad_stick_left].y *
 						director->debug_input_scale * director_globals.dtime * 0.00005f;
