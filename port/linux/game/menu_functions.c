@@ -9032,6 +9032,11 @@ static void online_browser_network_step(int step)
 	menu_functions.status[0] = 0;
 	menu_functions.chosen_valid = FALSE;
 	menu_functions.lan_since = system_milliseconds();
+	/* (the network before's games gone at once - the list and the card -,
+	its late answers let go: "Searching..." until this one's come) */
+	network_game_client_forget_listed_games();
+	menu_functions.game_count = 0;
+	menu_functions.lan_online_count = 0;
 	browser_view_reset(&menu_functions.view);
 	p2p_lobby_browse(internet_play() ? 1 : 0);
 	if (internet_play())

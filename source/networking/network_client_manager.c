@@ -1884,6 +1884,11 @@ boolean network_game_client_game_settings_updated(
 	return FALSE;
 }
 
+#ifdef HALO_LINUX
+#define NETWORK_LISTED_LATE_MILLISECONDS 750
+static unsigned long client_listed_forgotten_at;
+#endif
+
 void network_game_client_new_advertised_game(
 	struct network_game_client *client,
 	struct message_server_game_advertise *message_packet)
@@ -1893,10 +1898,34 @@ void network_game_client_new_advertised_game(
 		0x2FC,
 		client && message_packet);
 
+#ifdef HALO_LINUX
+	/* port: the network just switched (network_game_client_forget_listed_
+	games): an advertisement still in flight from the one before let go */
+	if (client_listed_forgotten_at &&
+		(long)(system_milliseconds() - client_listed_forgotten_at) < NETWORK_LISTED_LATE_MILLISECONDS)
+	{
+		return;
+	}
+#endif
 	add_advertised_game(client->available_games, message_packet);
 
 	return;
 }
+
+#ifdef HALO_LINUX
+/* port (the server browser's network tabs): every game listed so far let
+go - another network's - and the late ones of it after */
+void network_game_client_forget_listed_games(void)
+{
+	struct network_game_client *client = global_network_game_client_get();
+
+	client_listed_forgotten_at = system_milliseconds();
+	if (!client_listed_forgotten_at)
+		client_listed_forgotten_at = 1;
+	if (client)
+		csmemset(client->available_games, 0, sizeof(client->available_games));
+}
+#endif
 
 boolean network_game_client_request_remove_player(
 	struct network_game_client *client,

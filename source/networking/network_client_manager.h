@@ -96,6 +96,11 @@ client searching */
 short network_game_client_listed_games(
 	struct network_listed_game *games,
 	short maximum);
+#ifdef HALO_LINUX
+/* (port: the server browser's network tabs) the games listed so far let go,
+and the advertisements arriving just after (the network before's) */
+void network_game_client_forget_listed_games(void);
+#endif
 /* the advertised game's tag (crossplay_guard.h: VITA, VITA+PC, OPENCE,
 CHUPA, PC) into badge, and whether the game lists show it
 (network.browser_filter) */
