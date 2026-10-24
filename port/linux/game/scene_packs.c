@@ -547,34 +547,40 @@ static unsigned char *tag_cache_room(unsigned char **room_end)
 /* the slot's pack file checked against its recipe and source map now (its
 header, scene_pack_open; its source map, the one it was built from, still
 one of the recipe's and of the same identity): TRUE if it may be loaded */
-static boolean pack_current(struct scene_pack_slot *slot)
+static boolean pack_current_into(struct scene_pack_slot const *slot, struct scene_pack_info *info, char *why,
+	long why_size)
 {
 	unsigned long long source_hash;
 	char map[SCENE_PACK_NAME_SIZE];
 
-	if (!scene_pack_open(slot->path, &slot->info, slot->why, sizeof(slot->why)))
+	if (!scene_pack_open(slot->path, info, why, why_size))
 		return FALSE;
-	if (slot->info.recipe_hash != slot->recipe->hash || slot->info.builder_version != SCENE_PACK_BUILDER_VERSION)
+	if (info->recipe_hash != slot->recipe->hash || info->builder_version != SCENE_PACK_BUILDER_VERSION)
 	{
-		snprintf(slot->why, sizeof(slot->why), "its recipe or builder changed");
+		snprintf(why, (size_t)why_size, "its recipe or builder changed");
 		return FALSE;
 	}
 	/* (an Xbox map's: any of the recipe's maps it was built from, as it was;
 	a Custom Edition map's: the first there of the identity it gives) */
 	if (slot->recipe->custom_edition_map_count ?
 		(!scene_pack_source_check(slot->recipe, cache_files_map_directory(), map, sizeof(map), &source_hash, NULL, 0) ||
-			strcmp(map, slot->info.source_map)) :
-		!scene_pack_source_identity(slot->recipe, cache_files_map_directory(), slot->info.source_map, &source_hash))
+			strcmp(map, info->source_map)) :
+		!scene_pack_source_identity(slot->recipe, cache_files_map_directory(), info->source_map, &source_hash))
 	{
-		snprintf(slot->why, sizeof(slot->why), "its source map changed");
+		snprintf(why, (size_t)why_size, "its source map changed");
 		return FALSE;
 	}
-	if (source_hash != slot->info.source_hash)
+	if (source_hash != info->source_hash)
 	{
-		snprintf(slot->why, sizeof(slot->why), "its source map changed");
+		snprintf(why, (size_t)why_size, "its source map changed");
 		return FALSE;
 	}
 	return TRUE;
+}
+
+static boolean pack_current(struct scene_pack_slot *slot)
+{
+	return pack_current_into(slot, &slot->info, slot->why, sizeof(slot->why));
 }
 
 static void stamp_remove(struct scene_pack_slot const *slot);
@@ -1863,6 +1869,24 @@ boolean scene_packs_recipe_covered(
 	if (recipe)
 		free(recipe);
 	return covered;
+}
+
+boolean scene_packs_file_current(
+	char const *name)
+{
+	struct scene_pack_slot *slot = name ? slot_find(name) : NULL;
+	struct scene_pack_info info;
+	char why[SCENE_PACK_WHY_SIZE];
+	short state;
+
+	if (!slot)
+		return FALSE;
+	state = state_get(slot);
+	if (state == _scene_pack_state_ready || state == _scene_pack_state_loaded)
+		return TRUE;
+	/* (the slot's own fields are the worker's while it checks or builds the
+	pack: its file read here into locals, and the recipe, read only) */
+	return pack_current_into(slot, &info, why, sizeof(why));
 }
 
 boolean scene_packs_load_now(
