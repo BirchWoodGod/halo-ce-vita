@@ -3063,13 +3063,28 @@ static void update_channel_for_looping_sound(
 
 		if (trace < 0)
 			trace = getenv("HALO_SOUND_TRACE") ? atoi(getenv("HALO_SOUND_TRACE")) : 0;
+		/* (every loop playing, once a second: the pass that opens the second) */
 		if (trace >= 2 && system_milliseconds() - said_at > 1000)
-		{
 			said_at = system_milliseconds();
+		if (trace >= 2 && system_milliseconds() - said_at < 3)
+		{
+			real distance = -1.f;
+
+			if (sound->source.spatialization_mode && sound->listener_index != NONE &&
+				listener_get(sound->listener_index)->valid)
+			{
+				real_point3d const *at = &listener_get(sound->listener_index)->matrix.position;
+				real x = at->x - sound->source.location.position.x;
+				real y = at->y - sound->source.location.position.y;
+				real z = at->z - sound->source.location.position.z;
+
+				distance = (real)sqrt(x * x + y * y + z * z);
+			}
 			platform_log("sound trace: loop %s class %d gain %.3f (class %.3f, nondialog %.3f, track %.3f, source %.3f, "
-				"fade %.3f, spatialization %d)", tag_get_name(sound->definition_index), definition->sound_class,
-				properties.gain, sound_class_get_gain(definition->sound_class), sound_manager_globals.nondialog_gain,
-				track->gain, sound->source.gain, fade, sound->source.spatialization_mode);
+				"fade %.3f, spatialization %d, distance %.1f, minimum %.1f)", tag_get_name(sound->definition_index),
+				definition->sound_class, properties.gain, sound_class_get_gain(definition->sound_class),
+				sound_manager_globals.nondialog_gain, track->gain, sound->source.gain, fade,
+				sound->source.spatialization_mode, distance, properties.minimum_distance);
 		}
 	}
 #endif

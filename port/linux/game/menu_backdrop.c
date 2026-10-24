@@ -292,13 +292,13 @@ static void menu_backdrop_sounds_delete(void)
 }
 
 /* the menu music under the backdrop (menus.backdrop_music, the settings
-panel's Sound, Menu music: a percentage of its level, 50 the default - so
+panel's Sound, Menu music: a percentage of its level, 30 the default - so
 the level's ambience comes through -, 100 as it was), the music class's gain
 eased to it over a second; read again while it is behind the menus: live */
 static void menu_backdrop_music_level(void)
 {
 	char const *setting = getenv("HALO_MENU_MUSIC");
-	long percent = setting && *setting ? atol(setting) : 50;
+	long percent = setting && *setting ? atol(setting) : 30;
 	real gain = (real)PIN(percent, 0, 100) / 100.f;
 
 	if (menu_backdrop.music_set && gain == menu_backdrop.music_gain)

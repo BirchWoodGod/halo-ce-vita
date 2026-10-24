@@ -676,8 +676,9 @@ static struct setting settings[] = {
 	/* (menu_backdrop.c, config.toml's menus.backdrop_music: the menu music's
 	level under the live backdrop - the level's ambience under it -; read
 	each frame: live. Shown with Menu style ElDewrito: setting_shown) */
-	{ "Menu music", "HALO_MENU_MUSIC", 0, 5, { "100", "70", "50", "25", "0" }, { "100%", "70%", "50%", "25%", "Off" },
-		"Under the ElDewrito menus' live backdrop: the level's ambience comes through", 2, TAB_AUDIO },
+	{ "Menu music", "HALO_MENU_MUSIC", 0, 7, { "100", "70", "50", "40", "30", "20", "0" },
+		{ "100%", "70%", "50%", "40%", "30%", "20%", "Off" },
+		"Under the ElDewrito menus' live backdrop: the level's ambience comes through", 4, TAB_AUDIO },
 	{ "Sound voices", "HALO_SOUND_CHANNELS", 1, 4, { "16", "24", "32", "0" },
 		{ "16", "24", "32", "Original" }, "Fewer is faster; the AI then differs (after a restart)", 3, TAB_AUDIO },
 	{ "Sound occlusion", "HALO_SOUND_OBSTRUCTION_TICKS", 0, 3, { "1", "3", "6" },
