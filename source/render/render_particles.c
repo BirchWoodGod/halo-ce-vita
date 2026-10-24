@@ -32,6 +32,9 @@ symbols in this file:
 #ifdef HALO_LINUX
 #include "particle_budget.h"
 #include "render_epoch.h"
+#ifdef HALO_VITA
+#include "combat_fx_options.h"
+#endif
 #endif
 
 /* ---------- constants */
@@ -439,6 +442,9 @@ void render_particles(
 						particle_definition_get(
 							rendered_particle->definition_index);
 					short particle_count = group_particle_counts[group_index];
+#ifdef HALO_VITA
+					boolean preserve_combat=combat_fx_preserved(tag_get_name(rendered_particle->definition_index));
+#endif
 					real total_radius = 0.0f;
 					short built_particle_count = 0;
 #ifdef HALO_LINUX
@@ -553,7 +559,11 @@ void render_particles(
 								last_rendered_frame_index) */
 								if (particle_divisor > 1 &&
 									DATUM_INDEX_TO_ABSOLUTE_INDEX(rendered_particle->particle_index) % particle_divisor != 0 &&
-									!rendered_particle->attached_to_first_person_weapon)
+									!rendered_particle->attached_to_first_person_weapon
+#ifdef HALO_VITA
+									&& !preserve_combat
+#endif
+								)
 								{
 									particle->last_rendered_frame_index = render.frame_index;
 									rendered_particle++;
