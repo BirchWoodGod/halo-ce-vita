@@ -2675,6 +2675,8 @@
 "Halo CE: %d MCC maps (no sound yet)" = "Halo CE: %d mapas de MCC (aún sin sonido)"
 "Content: the Xbox maps (no MCC folder)" = "Contenido: los mapas de Xbox (sin MCC)"
 "Halo: CE Anniversary maps play only from the mods folder, offline, or the Halo content folder" = "los mapas de Halo: CE Anniversary solo se juegan desde la carpeta mods, sin conexión, o la carpeta de contenido de Halo"
+"MCC's menu file" = "Archivo de menús de MCC"
+"This menu isn't supported with MCC's menu file yet." = "Este menú aún no es compatible con el archivo de menús de MCC."
 "The host is playing %s from its MCC files. To join, set the Halo content folder (Multiplayer > Modded maps) to your own copy of Halo: The Master Chief Collection's folder." = "El anfitrión juega %s de sus archivos de MCC. Para unirte, pon en Carpeta de contenido (Multijugador > Mapas modificados) tu propia copia de la carpeta de Halo: The Master Chief Collection."
 "ux0:data/mcc" = "ux0:data/mcc"
 "uma0:data/mcc" = "uma0:data/mcc"

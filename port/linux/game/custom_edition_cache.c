@@ -679,6 +679,68 @@ static boolean file_path_exists(
 	return file_exists(file_reference_create_from_path(&reference, path, FALSE));
 }
 
+/* ---------- the menus' map
+
+(port) The menus' map, the bare name "ui", is the Xbox's ui.map of the maps
+folder, or - with no Xbox ui.map, or with paths.menu_source "mcc" - MCC's own
+halo1\maps\ui.map (Halo PC's menus, a Halo: CE Anniversary cache of the same
+kind as MCC's other maps), a map of the Halo content folder like the rest
+(mcc_content_menu_source_choose says which). Chosen at each use from the
+files that are there; the choice is logged when it changes. */
+const char *config_string(char const *name);
+
+static boolean custom_edition_cache_menu_from_mcc(
+	void)
+{
+	static int logged = -1;
+	char path[MAP_PATH_SIZE];
+	char const *reason = "";
+	char const *setting = getenv("HALO_MENU_SOURCE");
+	boolean xbox_ui;
+	boolean mcc_ui = FALSE;
+	int source;
+
+	if (!setting)
+	{
+		setting = config_string("paths.menu_source");
+	}
+	snprintf(path, sizeof(path), "%sui.map", cache_files_map_directory());
+	xbox_ui = file_path_exists(path);
+	if (halo_content_library_found())
+	{
+		mcc_content_map_path("ui", path, sizeof(path));
+		mcc_ui = file_path_exists(path);
+	}
+	source = mcc_content_menu_source_choose(setting, xbox_ui, mcc_ui, &reason);
+	if (logged != source)
+	{
+		logged = source;
+		error(_error_silent, "menus: the menu map is %s (%s)",
+			source == _mcc_content_menu_source_mcc ? "MCC's halo1\\maps\\ui.map" : "the Xbox's ui.map", reason);
+	}
+
+	return source == _mcc_content_menu_source_mcc;
+}
+
+/* mcc_content_name_stem, and the menus' "ui" when MCC's is the menus' map */
+static int custom_edition_cache_name_stem(
+	char const *map_name,
+	char *stem)
+{
+	if (mcc_content_name_is_menu(map_name))
+	{
+		stem[0] = 0;
+		if (!custom_edition_cache_menu_from_mcc())
+		{
+			return _mcc_content_none;
+		}
+		snprintf(stem, MCC_CONTENT_STEM_BYTES, "ui");
+		return _mcc_content_menu;
+	}
+
+	return mcc_content_name_stem(map_name, stem);
+}
+
 /* <maps>\<name>.map, or the OpenSauce <maps>\<name>.yelo when there is no
 .map, in `path`: whether it is there */
 static boolean maps_folder_map_path(
@@ -933,7 +995,7 @@ static boolean custom_edition_map_path(
 	char const *name = tag_name_strip_path(map_name);
 	unsigned long version;
 	char mcc_stem[MCC_CONTENT_STEM_BYTES];
-	int mcc_kind = mcc_content_name_stem(map_name, mcc_stem);
+	int mcc_kind = custom_edition_cache_name_stem(map_name, mcc_stem);
 
 	if (from_mods)
 	{
@@ -997,6 +1059,8 @@ static boolean custom_edition_resource_map_path(
 	else
 	{
 		sprintf(path, "%s%s%s", directory, type_name, MAP_FILE_EXTENSION);
+		/* (port: or the Halo content folder's halo1\maps\custom_edition) */
+		platform_halo_pc_resource_map(directory, type_name, path, MAP_PATH_SIZE);
 	}
 
 	return TRUE;
@@ -1409,7 +1473,7 @@ static boolean custom_edition_cache_identify_file(
 	boolean rememberable = !resource_maps_used && strlen(name) < CACHE_FILE_STRING_BYTES;
 	short index;
 	char mcc_stem[MCC_CONTENT_STEM_BYTES];
-	int mcc_kind = mcc_content_name_stem(map_name, mcc_stem);
+	int mcc_kind = custom_edition_cache_name_stem(map_name, mcc_stem);
 
 	/* (port: a name of MCC's is no map with no Halo content folder,
 	whatever was found of it before) */
@@ -1444,7 +1508,9 @@ static boolean custom_edition_cache_identify_file(
 		/* (port: MCC's own multiplayer maps, Halo: CE Anniversary caches of
 		multiplayer scenarios, mcc_content.h) */
 		if (cache_file_identify(&file.source, identity) == _cache_file_status_ok &&
-			(mcc_kind == _mcc_content_multiplayer ?
+			(mcc_kind == _mcc_content_menu ?
+				identity->format == _cache_file_format_mcc_cea_cache :
+			mcc_kind == _mcc_content_multiplayer ?
 				identity->format == _cache_file_format_mcc_cea_cache && identity->scenario_type == _scenario_type_multiplayer :
 			from_mods ?
 				identity->format == _cache_file_format_mcc_cea_cache && identity->scenario_type == _scenario_type_solo :
@@ -1505,7 +1571,7 @@ static boolean custom_edition_cache_identify(
 
 	/* (port: or one of MCC's own multiplayer maps, with the Halo content
 	folder, whatever PC maps is) */
-	return (halo_custom_edition_enabled() || mcc_content_name_stem(map_name, mcc_stem) == _mcc_content_multiplayer) &&
+	return (halo_custom_edition_enabled() || custom_edition_cache_name_stem(map_name, mcc_stem) == _mcc_content_multiplayer) &&
 		custom_edition_cache_identify_file(map_name, identity, NULL, FALSE);
 }
 
@@ -1714,7 +1780,7 @@ boolean custom_edition_cache_playable(
 
 	/* (port: MCC's own maps, mcc_content.h, need the Halo content folder,
 	not PC maps: custom_edition_cache_identify_file) */
-	return (halo_custom_edition_enabled() || mcc_content_name_stem(map_name, mcc_stem) != _mcc_content_none) &&
+	return (halo_custom_edition_enabled() || custom_edition_cache_name_stem(map_name, mcc_stem) != _mcc_content_none) &&
 		custom_edition_cache_identify_file(map_name, &identity, NULL, game_connection() == _game_connection_local);
 }
 
@@ -1813,7 +1879,7 @@ boolean custom_edition_cache_is_custom_edition(
 	char mcc_stem[MCC_CONTENT_STEM_BYTES];
 
 	/* (port: MCC's own maps are not: custom_edition_cache_mcc_content) */
-	return mcc_content_name_stem(map_name, mcc_stem) == _mcc_content_none &&
+	return custom_edition_cache_name_stem(map_name, mcc_stem) == _mcc_content_none &&
 		custom_edition_cache_identify_file(map_name, &identity, NULL, FALSE);
 }
 
@@ -2157,7 +2223,7 @@ static struct cache_file_tag_header *custom_edition_cache_tags_load_private(
 	boolean mcc_cea;
 	/* (port) a map of the Halo content folder (mcc_content.h) */
 	char mcc_stem[MCC_CONTENT_STEM_BYTES];
-	int mcc_kind = mcc_content_name_stem(map_name, mcc_stem);
+	int mcc_kind = custom_edition_cache_name_stem(map_name, mcc_stem);
 
 	custom_edition_load_phase_mark(&phase);
 	assert(!globals->tags_loaded);
@@ -2201,6 +2267,7 @@ static struct cache_file_tag_header *custom_edition_cache_tags_load_private(
 	if ((mcc_cea || from_mods || mcc_kind != _mcc_content_none) &&
 		!(mcc_cea && from_mods && identity.scenario_type == _scenario_type_solo &&
 			game_connection() == _game_connection_local) &&
+		!(mcc_cea && mcc_kind == _mcc_content_menu && halo_content_library_found()) &&
 		!(mcc_cea && mcc_kind == _mcc_content_multiplayer && identity.scenario_type == _scenario_type_multiplayer &&
 			halo_content_library_found()))
 	{
@@ -2236,7 +2303,7 @@ static struct cache_file_tag_header *custom_edition_cache_tags_load_private(
 		sound\pc\*.fsb: the sound effects (IMA ADPCM) play from their bank,
 		mcc_sound.h; the CELT banks' dialogue and music do not yet) */
 		error(_error_silent, "mcc: '%s' is MCC's own %s map: its sounds are in MCC's FMOD banks, the sound effects played from sounds_adpcm.fsb and the dialogue and music silent in this version",
-			mcc_stem, mcc_kind == _mcc_content_campaign ? "campaign" : "multiplayer");
+			mcc_stem, mcc_kind == _mcc_content_campaign ? "campaign" : mcc_kind == _mcc_content_menu ? "menu" : "multiplayer");
 	}
 	globals->map_header_crc = cache_file_crc32_update(0, header, CACHE_FILE_HEADER_BYTES);
 	error(_error_silent, "custom edition: loading '%s' (build %s%s)",
@@ -2537,6 +2604,131 @@ void halo_map_load_refused(
 		reason = T("out of memory: restart the game");
 	}
 	custom_edition_cache_load_failure_reason(reason);
+
+	return;
+}
+
+/* (port) A campaign level the classic menus name as the Xbox's
+("levels\a10\a10") for a machine with no Xbox maps: MCC's own campaign map
+of the Halo content folder as a mod's ("mods\mcc_a10"), written into `out`;
+FALSE (nothing written) for any other name, for a level whose Xbox map is in
+the maps folder (the Xbox install keeps playing its own) and for one the
+content folder does not have. main_set_map_name's. */
+boolean custom_edition_cache_campaign_level_translate(
+	char const *level_name,
+	char *out,
+	long out_size)
+{
+	char stem[MCC_CONTENT_STEM_BYTES];
+	char path[MAP_PATH_SIZE];
+	char const *cursor;
+	long length;
+	static char const prefix[] = "levels\\";
+
+	if (!level_name || !halo_content_library_found())
+	{
+		return FALSE;
+	}
+	for (length = 0; length < (long)sizeof(prefix) - 1; length++)
+	{
+		char character = level_name[length];
+
+		if ((character >= 'A' && character <= 'Z' ? (char)(character - 'A' + 'a') : character) != prefix[length])
+		{
+			return FALSE;
+		}
+	}
+	/* levels\<x>\<x> */
+	cursor = level_name + 7;
+	for (length = 0; cursor[length] && cursor[length] != '\\' && length < MCC_CONTENT_STEM_BYTES - 1; length++)
+	{
+		stem[length] = cursor[length];
+	}
+	stem[length] = 0;
+	if (!length || cursor[length] != '\\' || csstrcasecmp(cursor + length + 1, stem) ||
+		mcc_content_stem_kind(stem) != _mcc_content_campaign)
+	{
+		return FALSE;
+	}
+	snprintf(path, sizeof(path), "%s%s.map", cache_files_map_directory(), stem);
+	if (file_path_exists(path) || !mcc_content_map_path(stem, path, sizeof(path)) || !file_path_exists(path))
+	{
+		return FALSE;
+	}
+	snprintf(out, (size_t)out_size, "mods\\%s%s", MCC_CONTENT_NAME_PREFIX, stem);
+	/* (main_set_map_name takes the stem as the content folder spells it) */
+	{
+		long index;
+
+		for (index = (long)strlen("mods\\") + (long)strlen(MCC_CONTENT_NAME_PREFIX); out[index]; index++)
+		{
+			if (out[index] >= 'A' && out[index] <= 'Z')
+			{
+				out[index] = (char)(out[index] - 'A' + 'a');
+			}
+		}
+	}
+
+	return TRUE;
+}
+
+/* the Xbox's event handler functions (ui_widget_event_handler_functions.c):
+Halo PC's own are numbered from here */
+#define MENU_XBOX_FUNCTION_COUNT 102
+
+/* (ui_widget.c) A handler of a menu widget ran a function that failed:
+with MCC's own ui.map as the menus' map, one of Halo PC's own functions (a
+number past the Xbox's, which this build has no mapping for yet) cancels the
+action as an Xbox function that fails does, and the player is told once in a
+while that the menu is not supported with MCC's menu file yet, the missing
+function logged once for each widget */
+void custom_edition_cache_menu_handler_failed(
+	long definition_tag_index,
+	long function_index)
+{
+	void platform_show_message(char const *title, char const *message);
+	struct custom_edition_cache_globals *globals = &custom_edition_cache_globals;
+	static struct
+	{
+		long tag_index;
+		long function_index;
+	} logged[64];
+	static long logged_count;
+	static unsigned long shown_at;
+	unsigned long now = system_milliseconds();
+	char const *name;
+	long index;
+
+	if (!globals->tags_loaded || !globals->map_from_mcc || csstrcmp(globals->map_mcc_stem, "ui"))
+	{
+		return;
+	}
+	for (index = 0; index < logged_count; index++)
+	{
+		if (logged[index].tag_index == definition_tag_index && logged[index].function_index == function_index)
+		{
+			break;
+		}
+	}
+	if (index == logged_count)
+	{
+		name = definition_tag_index != NONE ? tag_get_name(definition_tag_index) : NULL;
+		error(_error_silent, "menus: MCC's ui.map: widget '%s' ran function %ld, %s",
+			name ? name : "?", function_index,
+			function_index >= MENU_XBOX_FUNCTION_COUNT ?
+				"one of Halo PC's own that this build has no mapping for yet (the action is cancelled)" :
+				"which failed (the action is cancelled)");
+		if (logged_count < (long)NUMBEROF(logged))
+		{
+			logged[logged_count].tag_index = definition_tag_index;
+			logged[logged_count++].function_index = function_index;
+		}
+	}
+	if (function_index >= MENU_XBOX_FUNCTION_COUNT && (!shown_at || now - shown_at > 1500))
+	{
+		shown_at = now ? now : 1;
+		platform_show_message(T("MCC's menu file"), T("This menu isn't supported with MCC's menu file yet."));
+	}
 
 	return;
 }

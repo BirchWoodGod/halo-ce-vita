@@ -1276,7 +1276,8 @@ static int art_file_open(struct art_file *file, char const *name, int type)
 	DWORD size;
 
 	memset(file, 0, sizeof(*file));
-	snprintf(path, sizeof(path), "%s%s.map", art.plan.map_directory, name);
+	/* (the maps folder's, else the Halo content folder's custom_edition one) */
+	platform_halo_pc_resource_map(art.plan.map_directory, name, path, sizeof(path));
 	file->handle = CreateFileA(path, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
 	if (file->handle == INVALID_HANDLE_VALUE)
 		return 0;

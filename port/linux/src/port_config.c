@@ -188,6 +188,12 @@ static const struct config_setting config_settings[] =
 		"libraries; on the PS Vita ux0:data/haloce-vita/mcc). Without one, the\n"
 		"Xbox maps alone. Only read, never written." },
 
+	{ "paths.menu_source", _config_string, "\"\"", "HALO_MENU_SOURCE", _environment_value, _platform_all,
+		"Where the menus' map (ui.map) comes from: empty or \"auto\" uses the Xbox's\n"
+		"ui.map in the maps folder when there is one, else MCC's own\n"
+		"halo1/maps/ui.map from the Halo content folder (paths.content); \"xbox\"\n"
+		"only the Xbox's; \"mcc\" MCC's even when the Xbox's is there. MCC's menu\n"
+		"file is Halo PC's menus: some menu screens are not supported with it yet." },
 	{ "network.address", _config_string, "\"\"", "HALO_NET_ADDRESS", _environment_value, _platform_all,
 		"This machine's IPv4 address for system link, for a machine on several\n"
 		"networks; empty chooses one." },

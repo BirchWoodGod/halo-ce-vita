@@ -164,9 +164,45 @@ static void test_loaders(void)
 	CHECK(index >= 6 && content_library_game_get(-1) == NULL);
 }
 
+/* the menus' map: which of the Xbox's ui.map and MCC's is read, and the bare
+name "ui" */
+static void test_menu_source(void)
+{
+	char const *reason = NULL;
+	char path[64];
+	char stem[MCC_CONTENT_STEM_BYTES];
+
+	/* (no setting: the Xbox's when it is there, else MCC's, else the Xbox's error) */
+	CHECK(mcc_content_menu_source_choose(NULL, 1, 1, &reason) == _mcc_content_menu_source_xbox && reason);
+	CHECK(mcc_content_menu_source_choose("", 1, 0, NULL) == _mcc_content_menu_source_xbox);
+	CHECK(mcc_content_menu_source_choose("auto", 0, 1, &reason) == _mcc_content_menu_source_mcc && reason);
+	CHECK(mcc_content_menu_source_choose("AUTO", 1, 1, NULL) == _mcc_content_menu_source_xbox);
+	CHECK(mcc_content_menu_source_choose("", 0, 0, &reason) == _mcc_content_menu_source_xbox && reason);
+	/* (xbox: never MCC's; mcc: MCC's when it is there, even with the Xbox's) */
+	CHECK(mcc_content_menu_source_choose("xbox", 0, 1, NULL) == _mcc_content_menu_source_xbox);
+	CHECK(mcc_content_menu_source_choose("xbox", 1, 1, NULL) == _mcc_content_menu_source_xbox);
+	CHECK(mcc_content_menu_source_choose("mcc", 1, 1, NULL) == _mcc_content_menu_source_mcc);
+	CHECK(mcc_content_menu_source_choose("MCC", 0, 1, NULL) == _mcc_content_menu_source_mcc);
+	CHECK(mcc_content_menu_source_choose("mcc", 1, 0, &reason) == _mcc_content_menu_source_xbox && reason);
+	CHECK(mcc_content_menu_source_choose("mcc", 0, 0, NULL) == _mcc_content_menu_source_xbox);
+	/* (a setting that is nothing of these is auto) */
+	CHECK(mcc_content_menu_source_choose("what", 0, 1, NULL) == _mcc_content_menu_source_mcc);
+	CHECK(mcc_content_menu_source_choose("what", 1, 1, NULL) == _mcc_content_menu_source_xbox);
+	/* (the bare name) */
+	CHECK(mcc_content_name_is_menu("ui") && mcc_content_name_is_menu("UI") && mcc_content_name_is_menu("d:\\maps\\ui"));
+	CHECK(!mcc_content_name_is_menu("ui2") && !mcc_content_name_is_menu("mcc_ui") && !mcc_content_name_is_menu("") &&
+		!mcc_content_name_is_menu(NULL) && !mcc_content_name_is_menu("levels\\ui\\ui2"));
+	CHECK(mcc_content_map_path("ui", path, sizeof(path)) && !strcmp(path, "d:\\mcc\\halo1\\maps\\ui.map"));
+	CHECK(!mcc_content_map_path("ui", path, 10));
+	/* (the stem lookups do not know it: only the cache loader's own check does) */
+	CHECK(mcc_content_name_stem("ui", stem) == _mcc_content_none && !stem[0]);
+	CHECK(mcc_content_stem_kind("ui") == _mcc_content_none);
+}
+
 int main(void)
 {
 	test_names();
+	test_menu_source();
 	test_loaders();
 	test_library_folders();
 	printf("mcc_content_test: %d/%d checks passed\n", checks - failures, checks);

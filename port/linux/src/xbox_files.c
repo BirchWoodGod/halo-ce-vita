@@ -598,6 +598,48 @@ static int mcc_write_refused(const char *host_path)
 	return 1;
 }
 
+/* (port) The Halo PC files the Halo 3 and OpenCE menus and Custom Edition
+maps read (bitmaps.map, loc.map, sounds.map): the maps folder's <name>.map
+when it is there, else the Halo content folder's own copy,
+halo1\maps\custom_edition\<name>.map (NOT halo1\maps\bitmaps.map, which is
+another file of the same name: MCC's own maps' pixels). `maps_directory` is
+the Xbox-style maps folder ("d:\maps\"). Into `path` (Xbox-style, the
+maps folder's when neither is there); TRUE when a file is there. */
+int platform_halo_pc_resource_map(const char *maps_directory, const char *name, char *path, unsigned long path_size)
+{
+	char host[1024];
+	char content[256];
+	struct posix_file_information information;
+
+	if (!path || !path_size)
+		return 0;
+	snprintf(path, path_size, "%s%s.map", maps_directory ? maps_directory : "", name);
+	platform_translate_path(path, host, sizeof(host));
+	if (posix_stat(host, &information) == 0)
+		return 1;
+	if (!platform_mcc_root(NULL, 0))
+		return 0;
+	snprintf(content, sizeof(content), "d:\\mcc\\halo1\\maps\\custom_edition\\%s.map", name);
+	platform_translate_path(content, host, sizeof(host));
+	if (posix_stat(host, &information) != 0)
+		return 0;
+	snprintf(path, path_size, "%s", content);
+	{
+		/* (said once for each file) */
+		static char said[8][16];
+		int slot;
+
+		for (slot = 0; slot < 8 && said[slot][0] && strcmp(said[slot], name); slot++)
+			;
+		if (slot < 8 && !said[slot][0])
+		{
+			snprintf(said[slot], sizeof(said[slot]), "%s", name);
+			platform_log("content: Halo PC file %s.map: not in the maps folder, the Halo content folder's custom_edition one", name);
+		}
+	}
+	return 1;
+}
+
 int platform_xbox_path_write_refused(const char *xbox_path)
 {
 	char path[1024];
