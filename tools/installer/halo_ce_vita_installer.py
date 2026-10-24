@@ -1836,13 +1836,31 @@ def staged_uploads(staging: str) -> List[UploadItem]:
     """What the steps gathered in `staging`, with where each goes on the
     Vita (README.md's layout): default.xbe, maps/*.map (the game's, Halo PC's
     and any custom maps put there), movies/*.mp4."""
+    if os.path.lexists(os.path.join(staging, '.pc-content-incomplete')):
+        raise InstallerError("PC content staging is incomplete; finish staging before uploading.")
+    manifest = os.path.join(staging, 'pc-content-manifest.json')
+    if os.path.lexists(manifest) or os.path.lexists(os.path.join(staging, 'retail_pc')):
+        try:
+            if os.path.islink(manifest):
+                raise ValueError('manifest is a symbolic link')
+            with open(manifest, encoding='utf-8') as stream:
+                profile = json.load(stream)
+            if (not isinstance(profile, dict) or profile.get('format') != 2 or
+                    profile.get('offline_only') is not True or
+                    profile.get('retail_upload_enabled') is not False):
+                raise ValueError('unsupported or legacy retail layout')
+        except (OSError, ValueError) as error:
+            raise InstallerError("Retail PC staging has an unsafe or unsupported manifest; "
+                                 "stage again with the isolated layout.") from error
+    # retail_pc/ deliberately stays outside this list. Only standard files can
+    # be uploaded until a separate offline runtime integration is reviewed.
     items = []
-    xbe = os.path.join(staging, STAGING_XBE)
+    xbe = safe_join(staging, STAGING_XBE)
     if os.path.isfile(xbe):
         items.append(UploadItem(xbe, VITA_GAME_FOLDER, STAGING_XBE, os.path.getsize(xbe)))
     for folder, suffixes in ((STAGING_MAPS, (".map", ".yelo")), (STAGING_MOVIES, (".mp4",))):
-        directory = os.path.join(staging, folder)
-        if not os.path.isdir(directory):
+        directory = safe_join(staging, *folder.split('/'))
+        if not os.path.isdir(directory) or os.path.islink(directory):
             continue
         for name in sorted(os.listdir(directory)):
             full = os.path.join(directory, name)
