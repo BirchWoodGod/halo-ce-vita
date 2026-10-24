@@ -445,6 +445,8 @@ enum
 	_function_online_host_next,
 	_function_online_host_previous,
 	_function_online_host_edit,
+	/* (Menu style Online: CUSTOMIZATION's colour grid) */
+	_function_online_custom_grid,
 };
 
 /* in port_game_data_input_names' order */
@@ -5634,6 +5636,9 @@ static struct
 	/* (PROFILE's delete question up: the editor it replaced keeps editing,
 	and comes back on PROFILE) */
 	boolean deleting;
+	/* (COLORS: Cross on ARMOR PRIMARY) picking in the grid: left and right
+	a colour, up and down a row of three, Cross again done */
+	boolean grid;
 } online_custom;
 
 static struct
@@ -6128,6 +6133,22 @@ static void online_custom_update(struct widget_instance *list)
 			child->animation.current_frame_index = child == list->focused_child ? 1 : 0;
 		}
 	}
+	/* (the colour grid: up and down a row of three - the list stepped to
+	the row under or the last; the focus back on ARMOR PRIMARY) */
+	if (online_custom.tab != _online_custom_tab_colors)
+		online_custom.grid = FALSE;
+	else if (online_custom.grid && profile && list->focused_child && strcmp(list->focused_child->name, "op_color"))
+	{
+		short frame = h3_swatch_frame(profile->primary_color_index);
+		short step = !strcmp(list->focused_child->name, "na_secondary") ? ONLINE_CUSTOM_GRID_COLUMNS :
+			-ONLINE_CUSTOM_GRID_COLUMNS;
+
+		frame = (short)PIN(frame + step, 0, H3_SWATCH_FRAMES - 1);
+		profile->primary_color_index = (short)(frame ? frame - 1 : NONE);
+		if ((found = named(list, "op_color")) != NULL)
+			ui_widget_port_give_focus(list, found);
+		focused_row = online_custom_row_index("op_color");
+	}
 	/* (a new tab: its first row) */
 	if (online_custom.shown_tab != online_custom.tab || focused_row == NONE)
 	{
@@ -6198,7 +6219,8 @@ static void online_custom_update(struct widget_instance *list)
 		/* (the heading over the help: the colour's name on COLORS, else the
 		row's) */
 		if (online_custom.tab == _online_custom_tab_colors)
-			snprintf(text, sizeof(text), "%s", T(h3_color_names[frame]));
+			snprintf(text, sizeof(text), online_custom.grid ? T("%s - D-PAD PICKS, CROSS DONE") : "%s",
+				T(h3_color_names[frame]));
 		else
 			snprintf(text, sizeof(text), "%s", focused_row != NONE ? T(online_custom_rows[focused_row].label) : "");
 		text_show(named(screen, "colour_name"), text);
@@ -19688,6 +19710,10 @@ boolean pc_menu_event_function_invoke(
 	case _function_online_browser_network_next:
 	case _function_online_browser_network_previous:
 		online_browser_network_step(function_index == _function_online_browser_network_next ? 1 : -1);
+		return TRUE;
+	case _function_online_custom_grid:
+		online_custom.grid = !online_custom.grid;
+		platform_log("menus: online customize: the colour grid %s", online_custom.grid ? "picked in" : "left");
 		return TRUE;
 	case _function_online_browser_filter_next:
 	case _function_online_browser_filter_previous:

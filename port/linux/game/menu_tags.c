@@ -437,6 +437,7 @@ static char const *const port_function_names[] =
 	"port online browser filter next", "port online browser filter previous",
 	"port host multiplayer", "port host forge", "port host campaign", "port host next", "port host previous",
 	"port host edit",
+	"port online custom grid",
 };
 
 /* the port's game data functions (menu_functions.c), from
