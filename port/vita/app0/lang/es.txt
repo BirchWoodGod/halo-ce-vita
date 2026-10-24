@@ -2870,3 +2870,6 @@
 "Halo MCC not found" = "Halo MCC no encontrado"
 "Halo MCC not found: set its folder in\nconfig.toml, paths.content (\"none\": don't look)" = "No se encontró Halo MCC: pon su carpeta en\nconfig.toml, paths.content (\"none\": no buscar)"
 "%s - D-PAD PICKS, CROSS DONE" = "%s - LA CRUCETA ELIGE, CRUZ TERMINA"
+"VISOR" = "VISOR"
+"Your armor's color in multiplayer games. RANDOM:\nthe host gives you one nobody else has. Other\ngames see the nearest of the first eighteen." = "El color de tu armadura en multijugador. ALEATORIO:\nel anfitrión te da uno que nadie más tiene. Otros\njuegos ven el más cercano de los dieciocho primeros."
+"Your visor's color. Players on this game's PS Vita\nand PC builds see it; other games show the gold." = "El color de tu visor. Lo ven los jugadores de este\njuego en PS Vita y PC; otros juegos muestran el dorado."
