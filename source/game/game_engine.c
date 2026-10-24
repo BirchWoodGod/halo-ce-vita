@@ -1771,14 +1771,6 @@ static void game_engine_rasterize_in_game_score(
 
 #ifdef HALO_LINUX
 	game_engine_in_game_score_draws++;
-	/* port: Menu style ElDewrito's, Halo Online's (port/linux/game/
-	carnage_report.c) */
-	{
-		extern boolean carnage_report_draw_scoreboard(long player_index, float alpha);
-
-		if (carnage_report_draw_scoreboard(player_index, (float)alpha))
-			return;
-	}
 #endif
 	game_engine_generate_title_string(title_string, player_index);
 	/* port: not the players who quit (from OpenCE) */

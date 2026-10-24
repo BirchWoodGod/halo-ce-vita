@@ -42,8 +42,6 @@ struct carnage_report_row
 	boolean local;
 	boolean quit;
 	boolean won;
-	/* the player's (NONE: a team's row) */
-	long player_index;
 	/* UTF-8 */
 	char name[48];
 	/* the score as the game type shows it ("12", "1:05"), and its value
@@ -105,7 +103,4 @@ wait: a screen is up over them, or the press that closed one is still
 held */
 boolean carnage_report_holds_buttons(void);
 
-/* (game_engine.c, Menu style ElDewrito) the scoreboard a game shows with
-Back held, Halo Online's way: drawn in place of the game's own (TRUE) */
-boolean carnage_report_draw_scoreboard(long player_index, float alpha);
 #endif
