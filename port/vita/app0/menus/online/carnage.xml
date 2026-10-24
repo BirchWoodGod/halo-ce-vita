@@ -1,0 +1,286 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Menu style ElDewrito (online): the CARNAGE REPORT, Halo Online's way (our own art and layout): the
+header band the screen's whole width with the title and the game, SUMMARY | DETAILS as tabs (L and R),
+the result, the players ranked in full-width rows - a team's band over its players, each on a slim bar in
+their colour -, the hints in the foot. It stands for halo3/carnage.xml's h3/carnage/screen in the Online
+style (menu_tags.c: online/ for h3/), with the same functions ("port h3 carnage ...") and children by the
+same names, so the numbers, pages, scrolling, PLAYERS (Triangle) and LEAVE are those. Listed in
+ingame.txt after halo3/carnage.xml and online/forge.xml (their strings, pictures and fonts). -->
+<menus>
+	<bitmap name="online/cr_header">
+		<frame png="online/header.png" width="4" height="256"/>
+	</bitmap>
+	<bitmap name="online/cr_footer">
+		<frame png="online/footer.png" width="4" height="4"/>
+	</bitmap>
+	<bitmap name="online/cr_haze">
+		<frame png="online/haze_light.png" width="128" height="4"/>
+	</bitmap>
+	<bitmap name="online/cr_tab">
+		<frame png="online/tab_off.png" width="256" height="64"/>
+		<frame png="online/tab_on.png" width="256" height="64"/>
+	</bitmap>
+	<bitmap name="online/cr_row">
+		<frame png="online/item_off.png" width="4" height="4"/>
+		<frame png="online/row_dim_on.png" width="512" height="64"/>
+	</bitmap>
+	<bitmap name="online/cr_panel">
+		<frame png="online/panel.png" width="4" height="256"/>
+	</bitmap>
+	<bitmap name="online/cr_plate">
+		<frame png="online/plate.png" width="4" height="32"/>
+		<frame png="online/plate_00.png" width="4" height="32"/>
+		<frame png="online/plate_01.png" width="4" height="32"/>
+		<frame png="online/plate_02.png" width="4" height="32"/>
+		<frame png="online/plate_03.png" width="4" height="32"/>
+		<frame png="online/plate_04.png" width="4" height="32"/>
+		<frame png="online/plate_05.png" width="4" height="32"/>
+		<frame png="online/plate_06.png" width="4" height="32"/>
+		<frame png="online/plate_07.png" width="4" height="32"/>
+		<frame png="online/plate_08.png" width="4" height="32"/>
+		<frame png="online/plate_09.png" width="4" height="32"/>
+		<frame png="online/plate_10.png" width="4" height="32"/>
+		<frame png="online/plate_11.png" width="4" height="32"/>
+		<frame png="online/plate_12.png" width="4" height="32"/>
+		<frame png="online/plate_13.png" width="4" height="32"/>
+		<frame png="online/plate_14.png" width="4" height="32"/>
+		<frame png="online/plate_15.png" width="4" height="32"/>
+		<frame png="online/plate_16.png" width="4" height="32"/>
+		<frame png="online/plate_17.png" width="4" height="32"/>
+	</bitmap>
+
+	<widget name="online/carnage/haze" left="0" top="0" width="640" height="480" bitmap="online/cr_haze"/>
+	<widget name="online/carnage/strip" left="0" top="0" width="640" height="80" bitmap="online/cr_header"/>
+	<widget name="online/carnage/title" type="text" left="10" top="12" width="420" height="34" font="online/font_header" color="#FFF2F6FA" string_list="h3/carnage_text" string_index="0"/>
+	<widget name="online/carnage/game" type="text" left="300" top="22" width="330" height="18" align="right" font="online/font_small" color="#FF9FB6CC" text_y="1"/>
+	<widget name="online/carnage/tab_summary" type="text" left="4" top="52" width="118" height="24" bitmap="online/cr_tab" font="online/font_tab" color="#FFE8EEF6" text_x="8" text_y="4" string_list="h3/carnage_text" string_index="1"/>
+	<widget name="online/carnage/tab_details" type="text" left="122" top="52" width="118" height="24" bitmap="online/cr_tab" font="online/font_tab" color="#FFE8EEF6" text_x="8" text_y="4" string_list="h3/carnage_text" string_index="2"/>
+	<widget name="online/carnage/l_butn" left="246" top="56" width="16" height="16" bitmap="h3/glyph_l"/>
+	<widget name="online/carnage/r_butn" left="264" top="56" width="16" height="16" bitmap="h3/glyph_r"/>
+	<widget name="online/carnage/result" type="text" left="10" top="86" width="500" height="26" font="online/font_title" color="#FFF0B070" text_y="1"/>
+	<widget name="online/carnage/result_sub" type="text" left="10" top="112" width="620" height="18" font="online/font_small" color="#FFCFD9E3" text_y="1"/>
+	<widget name="online/carnage/panel" left="0" top="132" width="640" height="290" bitmap="online/cr_panel"/>
+	<widget name="online/carnage/header_place" type="text" left="12" top="136" width="44" height="16" font="online/font_small" color="#FF9FB6CC" string_list="h3/carnage_text" string_index="3"/>
+	<widget name="online/carnage/header_name" type="text" left="72" top="136" width="260" height="16" font="online/font_small" color="#FF9FB6CC" string_list="h3/carnage_text" string_index="4"/>
+	<widget name="online/carnage/header_1" type="text" left="340" top="136" width="58" height="16" align="center" font="online/font_small" color="#FF9FB6CC"/>
+	<widget name="online/carnage/header_2" type="text" left="398" top="136" width="58" height="16" align="center" font="online/font_small" color="#FF9FB6CC"/>
+	<widget name="online/carnage/header_3" type="text" left="456" top="136" width="58" height="16" align="center" font="online/font_small" color="#FF9FB6CC"/>
+	<widget name="online/carnage/header_4" type="text" left="514" top="136" width="58" height="16" align="center" font="online/font_small" color="#FF9FB6CC"/>
+	<widget name="online/carnage/header_5" type="text" left="572" top="136" width="58" height="16" align="center" font="online/font_small" color="#FF9FB6CC"/>
+
+	<widget name="online/carnage/row_place" type="text" left="4" top="1" width="40" height="16" font="online/font_small" color="#FFE6ECF2" text_y="1"/>
+	<widget name="online/carnage/row_won" left="44" top="1" width="16" height="16" bitmap="h3/carnage_won"/>
+	<widget name="online/carnage/row_name" type="text" left="64" top="1" width="250" height="16" bitmap="online/cr_plate" font="online/font_small" color="#FFF4F6F8" text_x="10" text_y="1"/>
+	<widget name="online/carnage/row_1" type="text" left="332" top="1" width="58" height="16" align="center" font="online/font_small" color="#FFE6ECF2" text_y="1"/>
+	<widget name="online/carnage/row_2" type="text" left="390" top="1" width="58" height="16" align="center" font="online/font_small" color="#FFE6ECF2" text_y="1"/>
+	<widget name="online/carnage/row_3" type="text" left="448" top="1" width="58" height="16" align="center" font="online/font_small" color="#FFE6ECF2" text_y="1"/>
+	<widget name="online/carnage/row_4" type="text" left="506" top="1" width="58" height="16" align="center" font="online/font_small" color="#FFE6ECF2" text_y="1"/>
+	<widget name="online/carnage/row_5" type="text" left="564" top="1" width="58" height="16" align="center" font="online/font_small" color="#FFE6ECF2" text_y="1"/>
+	<widget name="online/carnage/line_1" width="624" height="18" bitmap="online/cr_row">
+		<child widget="online/carnage/row_place"/>
+		<child widget="online/carnage/row_won"/>
+		<child widget="online/carnage/row_name"/>
+		<child widget="online/carnage/row_1"/>
+		<child widget="online/carnage/row_2"/>
+		<child widget="online/carnage/row_3"/>
+		<child widget="online/carnage/row_4"/>
+		<child widget="online/carnage/row_5"/>
+	</widget>
+	<widget name="online/carnage/line_2" width="624" height="18" bitmap="online/cr_row">
+		<child widget="online/carnage/row_place"/>
+		<child widget="online/carnage/row_won"/>
+		<child widget="online/carnage/row_name"/>
+		<child widget="online/carnage/row_1"/>
+		<child widget="online/carnage/row_2"/>
+		<child widget="online/carnage/row_3"/>
+		<child widget="online/carnage/row_4"/>
+		<child widget="online/carnage/row_5"/>
+	</widget>
+	<widget name="online/carnage/line_3" width="624" height="18" bitmap="online/cr_row">
+		<child widget="online/carnage/row_place"/>
+		<child widget="online/carnage/row_won"/>
+		<child widget="online/carnage/row_name"/>
+		<child widget="online/carnage/row_1"/>
+		<child widget="online/carnage/row_2"/>
+		<child widget="online/carnage/row_3"/>
+		<child widget="online/carnage/row_4"/>
+		<child widget="online/carnage/row_5"/>
+	</widget>
+	<widget name="online/carnage/line_4" width="624" height="18" bitmap="online/cr_row">
+		<child widget="online/carnage/row_place"/>
+		<child widget="online/carnage/row_won"/>
+		<child widget="online/carnage/row_name"/>
+		<child widget="online/carnage/row_1"/>
+		<child widget="online/carnage/row_2"/>
+		<child widget="online/carnage/row_3"/>
+		<child widget="online/carnage/row_4"/>
+		<child widget="online/carnage/row_5"/>
+	</widget>
+	<widget name="online/carnage/line_5" width="624" height="18" bitmap="online/cr_row">
+		<child widget="online/carnage/row_place"/>
+		<child widget="online/carnage/row_won"/>
+		<child widget="online/carnage/row_name"/>
+		<child widget="online/carnage/row_1"/>
+		<child widget="online/carnage/row_2"/>
+		<child widget="online/carnage/row_3"/>
+		<child widget="online/carnage/row_4"/>
+		<child widget="online/carnage/row_5"/>
+	</widget>
+	<widget name="online/carnage/line_6" width="624" height="18" bitmap="online/cr_row">
+		<child widget="online/carnage/row_place"/>
+		<child widget="online/carnage/row_won"/>
+		<child widget="online/carnage/row_name"/>
+		<child widget="online/carnage/row_1"/>
+		<child widget="online/carnage/row_2"/>
+		<child widget="online/carnage/row_3"/>
+		<child widget="online/carnage/row_4"/>
+		<child widget="online/carnage/row_5"/>
+	</widget>
+	<widget name="online/carnage/line_7" width="624" height="18" bitmap="online/cr_row">
+		<child widget="online/carnage/row_place"/>
+		<child widget="online/carnage/row_won"/>
+		<child widget="online/carnage/row_name"/>
+		<child widget="online/carnage/row_1"/>
+		<child widget="online/carnage/row_2"/>
+		<child widget="online/carnage/row_3"/>
+		<child widget="online/carnage/row_4"/>
+		<child widget="online/carnage/row_5"/>
+	</widget>
+	<widget name="online/carnage/line_8" width="624" height="18" bitmap="online/cr_row">
+		<child widget="online/carnage/row_place"/>
+		<child widget="online/carnage/row_won"/>
+		<child widget="online/carnage/row_name"/>
+		<child widget="online/carnage/row_1"/>
+		<child widget="online/carnage/row_2"/>
+		<child widget="online/carnage/row_3"/>
+		<child widget="online/carnage/row_4"/>
+		<child widget="online/carnage/row_5"/>
+	</widget>
+	<widget name="online/carnage/line_9" width="624" height="18" bitmap="online/cr_row">
+		<child widget="online/carnage/row_place"/>
+		<child widget="online/carnage/row_won"/>
+		<child widget="online/carnage/row_name"/>
+		<child widget="online/carnage/row_1"/>
+		<child widget="online/carnage/row_2"/>
+		<child widget="online/carnage/row_3"/>
+		<child widget="online/carnage/row_4"/>
+		<child widget="online/carnage/row_5"/>
+	</widget>
+	<widget name="online/carnage/line_10" width="624" height="18" bitmap="online/cr_row">
+		<child widget="online/carnage/row_place"/>
+		<child widget="online/carnage/row_won"/>
+		<child widget="online/carnage/row_name"/>
+		<child widget="online/carnage/row_1"/>
+		<child widget="online/carnage/row_2"/>
+		<child widget="online/carnage/row_3"/>
+		<child widget="online/carnage/row_4"/>
+		<child widget="online/carnage/row_5"/>
+	</widget>
+	<widget name="online/carnage/line_11" width="624" height="18" bitmap="online/cr_row">
+		<child widget="online/carnage/row_place"/>
+		<child widget="online/carnage/row_won"/>
+		<child widget="online/carnage/row_name"/>
+		<child widget="online/carnage/row_1"/>
+		<child widget="online/carnage/row_2"/>
+		<child widget="online/carnage/row_3"/>
+		<child widget="online/carnage/row_4"/>
+		<child widget="online/carnage/row_5"/>
+	</widget>
+	<widget name="online/carnage/line_12" width="624" height="18" bitmap="online/cr_row">
+		<child widget="online/carnage/row_place"/>
+		<child widget="online/carnage/row_won"/>
+		<child widget="online/carnage/row_name"/>
+		<child widget="online/carnage/row_1"/>
+		<child widget="online/carnage/row_2"/>
+		<child widget="online/carnage/row_3"/>
+		<child widget="online/carnage/row_4"/>
+		<child widget="online/carnage/row_5"/>
+	</widget>
+	<widget name="online/carnage/line_13" width="624" height="18" bitmap="online/cr_row">
+		<child widget="online/carnage/row_place"/>
+		<child widget="online/carnage/row_won"/>
+		<child widget="online/carnage/row_name"/>
+		<child widget="online/carnage/row_1"/>
+		<child widget="online/carnage/row_2"/>
+		<child widget="online/carnage/row_3"/>
+		<child widget="online/carnage/row_4"/>
+		<child widget="online/carnage/row_5"/>
+	</widget>
+	<widget name="online/carnage/line_14" width="624" height="18" bitmap="online/cr_row">
+		<child widget="online/carnage/row_place"/>
+		<child widget="online/carnage/row_won"/>
+		<child widget="online/carnage/row_name"/>
+		<child widget="online/carnage/row_1"/>
+		<child widget="online/carnage/row_2"/>
+		<child widget="online/carnage/row_3"/>
+		<child widget="online/carnage/row_4"/>
+		<child widget="online/carnage/row_5"/>
+	</widget>
+	<widget name="online/carnage/lines">
+		<data input="port h3 carnage"/>
+		<child widget="online/carnage/line_1" x="8" y="154"/>
+		<child widget="online/carnage/line_2" x="8" y="173"/>
+		<child widget="online/carnage/line_3" x="8" y="192"/>
+		<child widget="online/carnage/line_4" x="8" y="211"/>
+		<child widget="online/carnage/line_5" x="8" y="230"/>
+		<child widget="online/carnage/line_6" x="8" y="249"/>
+		<child widget="online/carnage/line_7" x="8" y="268"/>
+		<child widget="online/carnage/line_8" x="8" y="287"/>
+		<child widget="online/carnage/line_9" x="8" y="306"/>
+		<child widget="online/carnage/line_10" x="8" y="325"/>
+		<child widget="online/carnage/line_11" x="8" y="344"/>
+		<child widget="online/carnage/line_12" x="8" y="363"/>
+		<child widget="online/carnage/line_13" x="8" y="382"/>
+		<child widget="online/carnage/line_14" x="8" y="401"/>
+	</widget>
+	<widget name="online/carnage/scroll" type="text" left="10" top="424" width="330" height="18" font="online/font_small" color="#FF9FB6CC" text_y="1"/>
+	<widget name="online/carnage/message" type="text" left="330" top="424" width="300" height="18" align="right" font="online/font_small" color="#FFF0D090" text_y="1"/>
+
+	<widget name="online/carnage/buttons" left="0" top="446" width="640" height="34" bitmap="online/cr_footer"/>
+	<widget name="online/carnage/a_butn" left="10" top="452" width="16" height="16" bitmap="h3/glyph_cross"/>
+	<widget name="online/carnage/a_label" type="text" left="30" top="451" width="160" height="18" font="online/font_item" color="#FFF0F4F8" text_y="1"/>
+	<widget name="online/carnage/y_butn" left="190" top="452" width="16" height="16" bitmap="h3/carnage_glyph_triangle"/>
+	<widget name="online/carnage/y_label" type="text" left="210" top="451" width="90" height="18" font="online/font_item" color="#FFF0F4F8" text_y="1" string_list="h3/carnage_text" string_index="5"/>
+	<widget name="online/carnage/b_butn" left="300" top="452" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="online/carnage/b_label" type="text" left="320" top="451" width="90" height="18" font="online/font_item" color="#FFF0F4F8" text_y="1" string_list="h3/carnage_text" string_index="8"/>
+	<widget name="online/carnage/status" type="text" left="400" top="452" width="230" height="18" align="right" font="online/font_small" color="#FFCFD9E3" text_y="1"/>
+	<widget name="online/carnage/screen" flags="pass_unhandled_to_focused_child">
+		<on event="created" run="port h3 carnage init"/>
+		<on event="a start" run="port h3 carnage continue"/>
+		<on event="b back" run="port h3 carnage leave ask" open="h3/carnage/leave"/>
+		<on event="y" run="port h3 carnage players" open="h3/players/screen"/>
+		<on event="left_trigger left stick_left" run="port h3 carnage page"/>
+		<on event="right_trigger right stick_right" run="port h3 carnage page"/>
+		<on event="up stick_up" run="port h3 carnage up"/>
+		<on event="down stick_down" run="port h3 carnage down"/>
+		<child widget="online/carnage/haze"/>
+		<child widget="online/carnage/strip"/>
+		<child widget="online/carnage/title"/>
+		<child widget="online/carnage/game"/>
+		<child widget="online/carnage/result"/>
+		<child widget="online/carnage/result_sub"/>
+		<child widget="online/carnage/l_butn"/>
+		<child widget="online/carnage/tab_summary"/>
+		<child widget="online/carnage/tab_details"/>
+		<child widget="online/carnage/r_butn"/>
+		<child widget="online/carnage/panel"/>
+		<child widget="online/carnage/header_place"/>
+		<child widget="online/carnage/header_name"/>
+		<child widget="online/carnage/header_1"/>
+		<child widget="online/carnage/header_2"/>
+		<child widget="online/carnage/header_3"/>
+		<child widget="online/carnage/header_4"/>
+		<child widget="online/carnage/header_5"/>
+		<child widget="online/carnage/lines"/>
+		<child widget="online/carnage/scroll"/>
+		<child widget="online/carnage/message"/>
+		<child widget="online/carnage/buttons"/>
+		<child widget="online/carnage/a_butn"/>
+		<child widget="online/carnage/a_label"/>
+		<child widget="online/carnage/y_butn"/>
+		<child widget="online/carnage/y_label"/>
+		<child widget="online/carnage/b_butn"/>
+		<child widget="online/carnage/b_label"/>
+		<child widget="online/carnage/status"/>
+	</widget>
+</menus>

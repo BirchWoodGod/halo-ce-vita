@@ -15,3 +15,5 @@ halo3/dialog.xml
 halo3/dialog_ingame.xml
 # (Menu style Online: Forge's screens in the online look)
 online/forge.xml
+# (Menu style ElDewrito: the carnage report in its look; after halo3/carnage.xml)
+online/carnage.xml
