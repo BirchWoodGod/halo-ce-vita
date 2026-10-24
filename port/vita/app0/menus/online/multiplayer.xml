@@ -58,9 +58,9 @@ and the map's picture and description in a card at the right. The art is this fo
 		<string text="Leave" />
 	</strings>
 	<strings name="online/switch_text">
-		<string text="Take your party into a multiplayer&#10;game - Slayer, Capture the Flag,&#10;King of the Hill and the rest - on&#10;your network or online." />
-		<string text="Take your party into Forge: place,&#10;move and change the objects of a&#10;map together, then play it." />
-		<string text="Play the campaign with your party:&#10;co-op on your network or online." />
+		<string text="Take your party into a multiplayer\ngame - Slayer, Capture the Flag,\nKing of the Hill and the rest - on\nyour network or online." />
+		<string text="Take your party into Forge: place,\nmove and change the objects of a\nmap together, then play it." />
+		<string text="Play the campaign with your party:\nco-op on your network or online." />
 	</strings>
 	<widget name="online/lobby/backing" left="456" top="14" width="290" height="20" bitmap="online/backing" />
 	<widget name="online/mp/switch_0" type="text" width="176" height="18" bitmap="online/item" font="online/font_item" color="#FFF0F4F8" text_x="8" text_y="2" string_list="online/lobby_text" string_index="3">

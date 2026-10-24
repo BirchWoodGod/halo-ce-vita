@@ -585,7 +585,7 @@ static struct setting settings[] = {
 	/* (Online: the Halo 3 menus' flows in the online set's look,
 	port/vita/app0/menus/online - a prototype, menu_tags.c menu_tags_online) */
 	{ "Menu style", "HALO_MENU_STYLE", 0, 3, { "classic", "halo3", "online" }, { "Halo CE", "Halo 3", "ElDewrito" },
-		"ElDewrito: Halo Online-style menus. Halo 3: over the ring. Halo CE: the original.", 1, PAGE_MENUS },
+		"ElDewrito: Halo Online style. Halo 3: the ring. Halo CE: the original.", 1, PAGE_MENUS },
 	/* (menu_functions.c h3_carnage_wanted, config.toml's menus.carnage_report:
 	a multiplayer game's end, Halo 3's CARNAGE REPORT or the game's own;
 	read when the scores come up: live. Shown with Menu style Halo 3 - Halo
@@ -4910,7 +4910,7 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 			/* (the game's Multiplayer menu without OpenCE's screens) */
 			if (halo_pc_menus_state < 0 && length < size)
 				length += snprintf(text + length, (size_t)(size - length), "\n\x04%s",
-					T("ElDewrito menus need bitmaps.map, loc.map: README"));
+					T("Online menus need bitmaps.map, loc.map: README"));
 		}
 		game_line(status, sizeof(status));
 		if (length < size)

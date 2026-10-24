@@ -3385,6 +3385,8 @@ static void test_tab_layouts(void)
 		{ PAGE_GRAPHICS_PERFORMANCE, "Battery saver in menus", "HALO_CLOCK_GOVERNOR", "1|0", 0, "1" },
 	};
 	static const struct layout_row sound[] = {
+		/* (shown with Menu style ElDewrito) */
+		{ TAB_AUDIO, "Menu music", "HALO_MENU_MUSIC", "100|70|50|25|0", 0, "50" },
 		{ TAB_AUDIO, "Sound voices", "HALO_SOUND_CHANNELS", "16|24|32|0", 1, "0" },
 		{ TAB_AUDIO, "Sound occlusion", "HALO_SOUND_OBSTRUCTION_TICKS", "1|3|6", 0, "3" },
 		{ TAB_AUDIO, "Sound updates", "HALO_SOUND_MANAGER_DIVISOR", "1|2|3", 0, "2" },
@@ -3414,7 +3416,7 @@ static void test_tab_layouts(void)
 		"variable, values, default "
 		"and restart as before");
 	check(layout_is(TAB_AUDIO, 1, sound, (int)(sizeof(sound) / sizeof(sound[0]))),
-		"Sound: Sound voices*, Sound occlusion, Sound updates (Language on Game): as before");
+		"Sound: Menu music (ElDewrito), Sound voices*, Sound occlusion, Sound updates (Language on Game): as before");
 	{
 		/* (the Controls tab's pages: their rows only theirs) */
 		int buttons = 0, touch = 0, gyro = 0, other = 0;
@@ -3636,7 +3638,7 @@ static void test_variables_kept(void)
 		"HALO_INFECTION_ZOMBIES", "HALO_INFECTION_SPEED", "HALO_INFECTION_TIME", "HALO_INFECTION_RESPAWN",
 		"HALO_INFECTION_SHIELDS", "HALO_INFECTION_TOUGH",
 		"HALO_CARNAGE_REPORT", "HALO_FLAMING_HELMET", "HALO_FIELD_OF_VIEW", "HALO_CLOCK_GOVERNOR", "HALO_BATTERY_LOG",
-		"HALO_CHAT", "HALO_CHAT_FILTER", "HALO_BOTS_ONLINE", "HALO_SCOREBOARD", "HALO_MENU_BACKDROP",
+		"HALO_CHAT", "HALO_CHAT_FILTER", "HALO_BOTS_ONLINE", "HALO_SCOREBOARD", "HALO_MENU_BACKDROP", "HALO_MENU_MUSIC",
 	};
 	int index, all = 1, choices = 0;
 
@@ -4632,7 +4634,7 @@ static void test_menu_style_row(void)
 		strstr(menu, "\nMenus\x02  Halo 3  >\n") && !strstr(menu, "\nMenu style\x02"),
 		"Menus: Game's first row, under Interface, the menus chosen (Halo 3) as its value");
 	check(open_page("Menus") && strstr(menu, "\n\x03Game > Menus\n") && to_line("Menu style") &&
-		strstr(menu, "\n\x05" "Halo 3: the new menus over the Halo ring. Halo CE: the original menus.\n") && menu_fits() &&
+		strstr(menu, "\n\x05" "ElDewrito: Halo Online style. Halo 3: the ring. Halo CE: the original.\n") && menu_fits() &&
 		menu_height_fits(), "Menu style: the Menus page's first row, and its help");
 	check(!strcmp(getenv("HALO_MENU_STYLE"), "halo3") && strstr(menu, "\nMenu style\x02< Halo 3 >"),
 		"Menu style: Halo 3 (no settings.txt naming it), in the environment");
