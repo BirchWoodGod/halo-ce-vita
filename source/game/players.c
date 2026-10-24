@@ -1927,6 +1927,24 @@ static void players_compute_combined_pvs(
 					activating_cluster_index),
 				combined_pvs);
 		}
+
+		/* port: (the Online menus' live backdrop, menu_backdrop.c) no player,
+		and the menus' camera moves between its spots: every cluster of its
+		bsp potentially visible - the backdrop's looping effects (the crashed
+		lifepod's smoke, the debris' smoulder, the waterfalls' spray) run */
+		{
+			int menu_backdrop_active(void);
+
+			if (menu_backdrop_active())
+			{
+				for (cluster_index = 0;
+					cluster_index < (short)structure_bsp->clusters.count && cluster_index < 0x40 * 8;
+					cluster_index++)
+				{
+					BIT_VECTOR_SET_FLAG(combined_pvs, cluster_index, TRUE);
+				}
+			}
+		}
 	}
 	else
 	{
