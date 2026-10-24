@@ -11375,6 +11375,9 @@ static struct
 	struct p2p_friend_entry options_entry;
 	int options[3];
 	int option_count;
+	/* (the options' screen opened from the list: closing it opens the list's
+	screen again, whose init keeps the chosen row, not the top's) */
+	boolean options_returning;
 	char options_title[64];
 	char options_text[256];
 	/* the lobbies' panel: its own copy, refreshed each second */
@@ -11433,8 +11436,13 @@ static void h3_friends_initialize(void)
 	browser_view_reset(&h3_friends.view);
 	h3_friends.page = 0;
 	h3_friends.message[0] = 0;
-	h3_friends.chosen_item = 0;
-	h3_friends.chosen_id[0] = 0;
+	if (h3_friends.options_returning)
+		h3_friends.options_returning = FALSE;
+	else
+	{
+		h3_friends.chosen_item = 0;
+		h3_friends.chosen_id[0] = 0;
+	}
 	h3_friends_refresh(TRUE);
 	h3_friends_said();
 }
@@ -11593,6 +11601,7 @@ static void h3_backup_question(char const *title, char const *text, int first, i
 	h3_friends.options[1] = second;
 	h3_friends.option_count = 2;
 	h3_backup.question_time = 0;
+	h3_friends.options_returning = TRUE;
 	menu_functions.open_friends_question = TRUE;
 }
 
@@ -12162,6 +12171,7 @@ static boolean h3_friends_options_ask(void)
 		break;
 	}
 	platform_log("menus: h3 friends: options for %s %s", h3_friends_kind_name(entry->kind), entry->name);
+	h3_friends.options_returning = h3_friends.option_count > 0;
 	return h3_friends.option_count > 0;
 }
 
