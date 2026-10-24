@@ -477,6 +477,9 @@ symbols in this file:
 #include "map_share.h"
 #include "dedicated_server.h"
 #include "bots.h"
+#ifdef HALO_VITA
+#include "local_bot_profiles.h"
+#endif
 #include "network_wire.h"
 #endif
 
@@ -1290,11 +1293,28 @@ static boolean network_game_server_machine_may_add_player_ingame(
 
 /* ---------- public code */
 
+#ifdef HALO_VITA
+void network_game_server_clear_local_bot_profiles(struct network_game_server *server)
+{
+    long slot;
+    if (server) for (slot=0;slot<MAXIMUM_NETWORK_PLAYER_COUNT;++slot) {
+        struct network_player *player=&server->game.players[slot];
+        if (network_player_is_valid(player) && bots_machine_is_bot(player->machine_index))
+            local_bot_profiles_restore(player->machine_index-BOTS_FIRST_MACHINE,player);
+    }
+    local_bot_profiles_reset();
+}
+#endif
+
 struct network_game_server *network_game_server_create(
 	void)
 {
 	struct network_game_server *server =
 		&network_game_server_memory_do_not_use_directly;
+
+#ifdef HALO_VITA
+	local_bot_profiles_reset();
+#endif
 
 	match_assert(
 		NETWORK_SERVER_MANAGER_FILE,
@@ -1379,6 +1399,10 @@ void network_game_server_dispose(
 	struct network_game_server *server)
 {
 	match_assert(NETWORK_SERVER_MANAGER_FILE, 0x120, server);
+
+#ifdef HALO_VITA
+	network_game_server_clear_local_bot_profiles(server);
+#endif
 
 	/* port: its map uploads end with it (port/linux/game/map_share.c) */
 	map_share_server_dispose();
@@ -4256,6 +4280,24 @@ static void network_game_server_countdown_started(
 	struct network_game_server *server)
 {
 	(void)server;
+#ifdef HALO_VITA
+	unsigned int present=0;
+	long slot;
+	network_game_server_clear_local_bot_profiles(server);
+	if (network_game_is_splitscreen_local()) {
+		for (slot=0;slot<MAXIMUM_NETWORK_PLAYER_COUNT;++slot) {
+			struct network_player *player=&server->game.players[slot];
+			if (network_player_is_valid(player) && bots_machine_is_bot(player->machine_index))
+				present|=1u<<(player->machine_index-BOTS_FIRST_MACHINE);
+		}
+		local_bot_profiles_begin(present);
+		for (slot=0;slot<MAXIMUM_NETWORK_PLAYER_COUNT;++slot) {
+			struct network_player *player=&server->game.players[slot];
+			if (network_player_is_valid(player) && bots_machine_is_bot(player->machine_index))
+				local_bot_profiles_profile(player->machine_index-BOTS_FIRST_MACHINE,player);
+		}
+	}
+#endif
 	csmemset(network_game_server_countdown_slowed, 0, sizeof(network_game_server_countdown_slowed));
 }
 
@@ -5522,6 +5564,10 @@ boolean network_game_server_reset_to_pregame(
 	int i;
 
 	match_assert(NETWORK_SERVER_MANAGER_FILE, 0x324, server);
+
+#ifdef HALO_VITA
+	network_game_server_clear_local_bot_profiles(server);
+#endif
 
 #ifdef HALO_LINUX
 	/* port: from the scores of a local game with bots, the bots' playlist's
