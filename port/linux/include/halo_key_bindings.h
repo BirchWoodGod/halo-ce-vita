@@ -13,8 +13,7 @@ In play the actions held press the game's own controls
 controls presses the controller button the profile's button layout has
 that control on (input_abstraction.c game_control_to_xbox_buttons), so the
 profile's layout never moves a key; movement is the left stick, RELOAD and
-ACTION are told apart (player_control.c: the controller's X does both), and
-BOOST is Halo 2's vehicle boost. In the menus the keys keep their fixed
+ACTION are told apart (player_control.c: the controller's X does both). In the menus the keys keep their fixed
 layout (arrows, Enter, Escape ...), whatever is bound.
 
 key_bindings.c is plain C (no SDL): the names of keys come from SDL through
@@ -37,7 +36,6 @@ enum halo_bind_action
 	HALO_BIND_STRAFE_RIGHT,
 	HALO_BIND_JUMP,
 	HALO_BIND_CROUCH,
-	HALO_BIND_BOOST,
 	HALO_BIND_FIRE,
 	HALO_BIND_ZOOM,
 	HALO_BIND_THROW_GRENADE,

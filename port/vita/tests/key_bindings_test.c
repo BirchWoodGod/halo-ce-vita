@@ -86,7 +86,7 @@ static void test_defaults(void)
 	{
 		{ HALO_BIND_MOVE_FORWARD, "W" }, { HALO_BIND_MOVE_BACKWARD, "S" }, { HALO_BIND_STRAFE_LEFT, "A" },
 		{ HALO_BIND_STRAFE_RIGHT, "D" }, { HALO_BIND_JUMP, "Space" }, { HALO_BIND_CROUCH, "Left Ctrl, C" },
-		{ HALO_BIND_BOOST, "Left Shift" }, { HALO_BIND_FIRE, "Mouse Left" }, { HALO_BIND_ZOOM, "Mouse Right, Z" },
+		{ HALO_BIND_FIRE, "Mouse Left" }, { HALO_BIND_ZOOM, "Mouse Right, Z" },
 		{ HALO_BIND_THROW_GRENADE, "G" }, { HALO_BIND_MELEE, "F, Mouse 4" }, { HALO_BIND_RELOAD, "R" },
 		{ HALO_BIND_SWITCH_WEAPON, "Tab, Wheel" }, { HALO_BIND_SWITCH_GRENADE, "H, Mouse Middle" },
 		{ HALO_BIND_ACTION, "E" }, { HALO_BIND_FLASHLIGHT, "Q" }, { HALO_BIND_SCOREBOARD, "Backspace" },
@@ -210,7 +210,6 @@ static void test_migrate(void)
 	snprintf(texts[HALO_BIND_STRAFE_RIGHT], HALO_BIND_TEXT_SIZE, "D");
 	snprintf(texts[HALO_BIND_JUMP], HALO_BIND_TEXT_SIZE, "Space, Return");
 	snprintf(texts[HALO_BIND_CROUCH], HALO_BIND_TEXT_SIZE, "Left Ctrl, C");
-	snprintf(texts[HALO_BIND_BOOST], HALO_BIND_TEXT_SIZE, "Left Shift");
 	snprintf(texts[HALO_BIND_FIRE], HALO_BIND_TEXT_SIZE, "Mouse Left");
 	snprintf(texts[HALO_BIND_ZOOM], HALO_BIND_TEXT_SIZE, "z, mouse middle");
 	snprintf(texts[HALO_BIND_THROW_GRENADE], HALO_BIND_TEXT_SIZE, "Mouse Right, G");

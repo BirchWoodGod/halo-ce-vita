@@ -342,7 +342,9 @@ use (the keyboard's icons), and switch to the pad's buttons when you pick
 up a pad (`display.button_icons` in `config.toml`: `auto`, `keyboard`,
 `xbox` or `playstation`).
 
-The defaults are Halo: The Master Chief Collection's for Halo: CE on PC:
+The defaults are Halo: The Master Chief Collection's for Halo: CE on PC (the
+layout as [ChupathingyCE](https://github.com/ChupathingyCE/chupathingyce) set it
+out, with thanks):
 
 | Action | Keys (default) |
 | --- | --- |
@@ -358,7 +360,6 @@ The defaults are Halo: The Master Chief Collection's for Halo: CE on PC:
 | Flashlight | Q |
 | Jump | Space |
 | Crouch (walking too) | Left Ctrl, C |
-| Boost (Halo 2's Ghost) | Left Shift |
 | Scoreboard | Backspace |
 | Pause | Escape |
 | Fullscreen / free the mouse | F11 / F12 |

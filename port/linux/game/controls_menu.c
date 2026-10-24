@@ -138,7 +138,7 @@ static char const *const group_names[] = { N_("MOVEMENT"), N_("WEAPONS"), N_("AC
 static signed char const groups[][KEYS_ROWS] =
 {
 	{ HALO_BIND_MOVE_FORWARD, HALO_BIND_MOVE_BACKWARD, HALO_BIND_STRAFE_LEFT, HALO_BIND_STRAFE_RIGHT, HALO_BIND_JUMP,
-		HALO_BIND_CROUCH, HALO_BIND_BOOST },
+		HALO_BIND_CROUCH, -1 },
 	{ HALO_BIND_FIRE, HALO_BIND_ZOOM, HALO_BIND_THROW_GRENADE, HALO_BIND_MELEE, HALO_BIND_RELOAD, HALO_BIND_SWITCH_WEAPON,
 		HALO_BIND_SWITCH_GRENADE },
 	{ HALO_BIND_ACTION, HALO_BIND_FLASHLIGHT, HALO_BIND_SCOREBOARD, -1, -1, -1, -1 },
@@ -152,7 +152,7 @@ here so lang.h's word lists find them) */
 static char const *const action_labels[HALO_BIND_ACTION_COUNT] =
 {
 	N_("MOVE FORWARD"), N_("MOVE BACKWARD"), N_("STRAFE LEFT"), N_("STRAFE RIGHT"), N_("JUMP"), N_("CROUCH"),
-	N_("BOOST (HALO 2 VEHICLES)"), N_("FIRE"), N_("ZOOM"), N_("THROW GRENADE"), N_("MELEE"), N_("RELOAD"),
+	N_("FIRE"), N_("ZOOM"), N_("THROW GRENADE"), N_("MELEE"), N_("RELOAD"),
 	N_("SWITCH WEAPON"), N_("SWITCH GRENADE"), N_("ACTION"), N_("FLASHLIGHT"), N_("SCOREBOARD"),
 };
 
@@ -306,8 +306,6 @@ static void help_of(short row, char *text, size_t size)
 		help = T("Moving the mouse forward looks down.");
 	else if (action == ROW_RAW)
 		help = T("ON: the mouse's own movement. OFF: with the\nsystem's pointer speed and acceleration.");
-	else if (action == HALO_BIND_BOOST)
-		help = T("Held: Halo 2's vehicles (the Ghost) boost.\nA binds a key, left and right pick which.");
 	else if (action == HALO_BIND_ACTION)
 		help = T("Get in, pick up (held: swap weapons), use.\nIt never reloads: RELOAD does.");
 	else

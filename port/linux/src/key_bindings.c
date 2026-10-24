@@ -13,8 +13,8 @@ the owner asked ("like MCC"): the mouse fires (left) and zooms (right), G
 throws a grenade, F is melee, E the action (enter, pick up, hold to swap)
 and R reload - apart, as on PC, where the Xbox's X does both -, Q the
 flashlight, Tab and the wheel switch weapons, H (or the middle button)
-switches grenades, Ctrl crouches, Space jumps, Backspace shows the scores,
-Left Shift boosts a Halo 2 vehicle; Escape pauses (fixed, as the menus'
+switches grenades, Ctrl crouches, Space jumps, Backspace shows the scores;
+Escape pauses (fixed, as the menus'
 back).
 */
 
@@ -40,7 +40,6 @@ static const struct
 	{ "strafe_right", "STRAFE RIGHT", "D" },
 	{ "jump", "JUMP", "Space" },
 	{ "crouch", "CROUCH", "Left Ctrl, C" },
-	{ "boost", "BOOST (HALO 2 VEHICLES)", "Left Shift" },
 	{ "fire", "FIRE", "Mouse Left" },
 	{ "zoom", "ZOOM", "Mouse Right, Z" },
 	{ "throw_grenade", "THROW GRENADE", "G" },
@@ -60,7 +59,7 @@ A config.toml that has one of these was never the player's choice */
 static const char *const old_defaults[][HALO_BIND_ACTION_COUNT] =
 {
 	{
-		"W", "S", "A", "D", "Space, Return", "Left Ctrl, C", "Left Shift", "Mouse Left", "Z, Mouse Middle",
+		"W", "S", "A", "D", "Space, Return", "Left Ctrl, C", "Mouse Left", "Z, Mouse Middle",
 		"Mouse Right, G", "F, Backspace, Mouse 4", "E, R", "Tab, Wheel", "X", "E, R", "Q", "F1",
 	},
 };

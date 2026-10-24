@@ -169,8 +169,6 @@ static const struct config_setting config_settings[] =
 		"Jump." },
 	{ "controls.keyboard.crouch", _config_string, "\"Left Ctrl, C\"", "HALO_KEY_CROUCH", _environment_value,
 		_platform_desktop, "Crouch, held (walking too)." },
-	{ "controls.keyboard.boost", _config_string, "\"Left Shift\"", "HALO_KEY_BOOST", _environment_value,
-		_platform_desktop, "Boost the Halo 2 vehicle you drive (Halo 2 PC's Shift)." },
 	{ "controls.keyboard.fire", _config_string, "\"Mouse Left\"", "HALO_KEY_FIRE", _environment_value,
 		_platform_desktop, "Fire." },
 	{ "controls.keyboard.zoom", _config_string, "\"Mouse Right, Z\"", "HALO_KEY_ZOOM", _environment_value,

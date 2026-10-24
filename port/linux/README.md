@@ -173,7 +173,6 @@ moves a key.
 | `flashlight` | Q | white |
 | `jump` | space | A |
 | `crouch` | left ctrl, C | left stick click (also while walking) |
-| `boost` | left shift | left stick click while driving a Halo 2 vehicle |
 | `scoreboard` | backspace | back |
 | (pause) | escape | start |
 | (fixed) | arrow keys, F1, enter | D-pad, back, A (unless bound) |

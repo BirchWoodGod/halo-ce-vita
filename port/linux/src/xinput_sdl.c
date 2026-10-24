@@ -12,7 +12,7 @@ config.toml's [controls.keyboard]; Halo MCC's PC defaults: W A S D move, the
 mouse aims, left button fire, right button and Z zoom, G grenade, F and
 Mouse 4 melee, E action, R reload, Tab and the wheel switch weapons, H and
 the middle button switch grenades, Q flashlight, Space jump, Ctrl and C
-crouch, Backspace the scores, Left Shift a Halo 2 vehicle's boost); Escape
+crouch, Backspace the scores); Escape
 pauses, F1 is Back and the arrows the D-pad. In the menus a fixed layout
 (keyboard_menus, below). F12 releases or recaptures the mouse.
 
@@ -291,8 +291,7 @@ In play the player's actions are bound (port/linux/include/
 halo_key_bindings.h, config.toml's [controls.keyboard], Halo MCC's defaults):
 each action that is one of the game's controls presses the button the
 profile's button layout has it on (input_abstraction_port_control_button),
-movement is the left stick, SCOREBOARD Back, BOOST the crouch while a Halo 2
-vehicle is driven; RELOAD and ACTION are told to player_control.c apart
+movement is the left stick, SCOREBOARD Back; RELOAD and ACTION are told to player_control.c apart
 (halo_keyboard_reload_held, halo_keyboard_action_held). Escape is Start (the
 pause menu), F1 Back and the arrows the D-pad, unless bound. A key's part is
 the one it had when it went down, kept until it is let go, so Escape that
@@ -322,7 +321,7 @@ enum
 static const signed char action_game_controls[HALO_BIND_ACTION_COUNT] =
 {
 	-1, -1, -1, -1,
-	GAME_CONTROL_JUMP, GAME_CONTROL_CROUCH, -1, GAME_CONTROL_PRIMARY_TRIGGER, GAME_CONTROL_ZOOM, GAME_CONTROL_GRENADE,
+	GAME_CONTROL_JUMP, GAME_CONTROL_CROUCH, GAME_CONTROL_PRIMARY_TRIGGER, GAME_CONTROL_ZOOM, GAME_CONTROL_GRENADE,
 	GAME_CONTROL_MELEE, -1, GAME_CONTROL_SWITCH_WEAPONS, GAME_CONTROL_SWITCH_GRENADES, GAME_CONTROL_ACTION,
 	GAME_CONTROL_FLASHLIGHT, -1,
 };
@@ -620,14 +619,6 @@ int halo_keyboard_crouch_held(short gamepad_index)
 	return gamepad_index == 0 && (keyboard_actions_held & (1UL << HALO_BIND_CROUCH)) != 0;
 }
 
-/* (port/linux/game/h2_vehicle_boost.c, where it is built: Halo 2's Ghost
-boost) whether the first player drives a Halo 2 vehicle that boosts; none
-here without it */
-__attribute__((weak)) int h2_vehicle_boost_local_driving(void)
-{
-	return 0;
-}
-
 static void keyboard_play(XINPUT_GAMEPAD *pad)
 {
 	unsigned long held = 0;
@@ -665,9 +656,6 @@ static void keyboard_play(XINPUT_GAMEPAD *pad)
 	}
 	if (held & (1UL << HALO_BIND_SCOREBOARD))
 		pad->wButtons |= XINPUT_GAMEPAD_BACK;
-	/* (Halo 2's PC boost: the crouch a driver's boost is) */
-	if ((held & (1UL << HALO_BIND_BOOST)) && h2_vehicle_boost_local_driving())
-		press_game_button(pad, input_abstraction_port_control_button(0, GAME_CONTROL_CROUCH));
 
 	/* Forge's monitor keeps its own keys, as its help says them (menu_functions.c
 	h3_forge_controls_update): the right button holds its left trigger (rotate,
