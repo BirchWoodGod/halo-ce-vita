@@ -491,6 +491,13 @@ void interface_draw_fullscreen_overlays(
 	(port/linux/game/pc_text_entry_overlay.c) */
 	pc_text_entry_overlay_draw();
 #endif
+	/* port: the Online menus' fade between their backdrop's spots, over
+	everything (port/linux/game/menu_functions.c) */
+	{
+		extern void menu_functions_fade_draw(void);
+
+		menu_functions_fade_draw();
+	}
 #endif
 	main_framerate_render();
 	render_debug_profile();

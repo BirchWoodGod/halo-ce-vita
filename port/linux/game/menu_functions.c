@@ -1770,16 +1770,19 @@ static struct
 	insider.21) */
 	boolean ring_flown;
 	/* the live backdrop's camera shown now (shown_valid: one is), so that
-	a screen whose camera is elsewhere fades through black to it: the
-	backdrop faded out (the game's fade_out, black, under the menus) with
-	the old camera, the new one put in once it is black (fade_held, until
-	fade_until: vita_host_time_us), and faded in */
+	a screen whose camera is elsewhere fades through black to it: the whole
+	screen faded out (menu_functions_fade_draw, over the menus) with the old
+	camera, the new one put in once it is black (fade_held, until
+	fade_until: vita_host_time_us), and faded in (fade_phase, from
+	fade_start) */
 	boolean shown_valid;
 	char shown_point[32];
 	real shown_camera[5];
 	real shown_field_of_view;
 	boolean fade_held;
 	unsigned long long fade_until;
+	short fade_phase;
+	unsigned long long fade_start;
 } h3_scenes;
 
 static void h3_scene_keep_ring(void);
@@ -2163,14 +2166,24 @@ int menu_functions_prebuild_settled(void)
 	return TRUE;
 }
 
-/* the fade between two of the live backdrop's spots: out (black, under
-the menus: the game's screen fade, as a cinematic's) over
-H3_SCENE_FADE_OUT_TICKS, the new camera put in after H3_SCENE_FADE_OUT_US,
-then in over H3_SCENE_FADE_IN_TICKS; the screen's menus are there at once
-and take the pad all the while. HALO_MENU_FADE=0: cut at once, as before */
-#define H3_SCENE_FADE_OUT_TICKS 7
+/* the fade between two of the live backdrop's spots: the whole screen,
+the menus with the backdrop, out to black over H3_SCENE_FADE_OUT_US (the
+old camera behind), the new camera put in, then in over
+H3_SCENE_FADE_IN_US - each frame's black a full-screen quad over
+everything (menu_functions_fade_draw, interface.c's overlays: draw_quad,
+the letterbox's, no shader of its own), eased, at the frame rate, not the
+ticks'. The new screen's menus are there from the start (the screen is
+opened before its scene is asked for) and take the pad all the while.
+HALO_MENU_FADE=0: cut at once, as before */
 #define H3_SCENE_FADE_OUT_US 250000ULL
-#define H3_SCENE_FADE_IN_TICKS 10
+#define H3_SCENE_FADE_IN_US 350000ULL
+
+enum
+{
+	_h3_scene_fade_none,
+	_h3_scene_fade_out,
+	_h3_scene_fade_in,
+};
 
 static boolean h3_scene_fade_enabled(void)
 {
@@ -2202,6 +2215,58 @@ static boolean h3_scene_moves_backdrop(void)
 
 static void h3_scene_apply(void);
 
+/* how black the screen is now, 0 to 1 (eased: smoothstep) */
+real menu_functions_fade_alpha(void)
+{
+	unsigned long long now = vita_host_time_us();
+	real amount;
+
+	if (h3_scenes.fade_phase == _h3_scene_fade_none)
+		return 0.f;
+	if (!halo_main_menu_loaded())
+	{
+		h3_scenes.fade_phase = _h3_scene_fade_none;
+		return 0.f;
+	}
+	if (h3_scenes.fade_phase == _h3_scene_fade_out)
+	{
+		amount = now <= h3_scenes.fade_start ? 0.f : (real)(now - h3_scenes.fade_start) / (real)H3_SCENE_FADE_OUT_US;
+		amount = PIN(amount, 0.f, 1.f);
+	}
+	else
+	{
+		amount = now <= h3_scenes.fade_start ? 0.f : (real)(now - h3_scenes.fade_start) / (real)H3_SCENE_FADE_IN_US;
+		if (amount >= 1.f)
+		{
+			h3_scenes.fade_phase = _h3_scene_fade_none;
+			return 0.f;
+		}
+		amount = 1.f - PIN(amount, 0.f, 1.f);
+	}
+	return amount * amount * (3.f - 2.f * amount);
+}
+
+/* (interface.c's full-screen overlays, last: over the 3D and the menus)
+the fade's black */
+void menu_functions_fade_draw(void)
+{
+	void draw_quad(rectangle2d *rectangle, pixel32 color);
+	real alpha = menu_functions_fade_alpha();
+	rectangle2d bounds;
+	unsigned long level;
+
+	if (alpha <= 0.f)
+		return;
+	level = (unsigned long)(alpha * 255.f + 0.5f);
+	if (level > 255)
+		level = 255;
+	/* (well past the screen on every side: the interface's coordinates are
+	the 4:3 menus' on a wide screen, the display's edges outside them) */
+	bounds.x0 = bounds.y0 = -2048;
+	bounds.x1 = bounds.y1 = 4096;
+	draw_quad(&bounds, (pixel32)(level << 24));
+}
+
 void menu_functions_scenes_update(void)
 {
 	boolean taken;
@@ -2224,6 +2289,7 @@ void menu_functions_scenes_update(void)
 		if (!halo_main_menu_loaded())
 		{
 			h3_scenes.fade_held = FALSE;
+			h3_scenes.fade_phase = _h3_scene_fade_none;
 			h3_scenes.shown_valid = FALSE;
 			return;
 		}
@@ -2231,12 +2297,8 @@ void menu_functions_scenes_update(void)
 			return;
 		h3_scenes.fade_held = FALSE;
 		h3_scene_apply();
-		{
-			char command[48];
-
-			snprintf(command, sizeof(command), "(fade_in 0 0 0 %d)", H3_SCENE_FADE_IN_TICKS);
-			main_request_host_command_from(command, "menu scene");
-		}
+		h3_scenes.fade_phase = _h3_scene_fade_in;
+		h3_scenes.fade_start = vita_host_time_us();
 		return;
 	}
 	if (!taken)
@@ -2250,12 +2312,14 @@ void menu_functions_scenes_update(void)
 	}
 	if (h3_scene_moves_backdrop())
 	{
-		char command[48];
+		unsigned long long now = vita_host_time_us();
+		real black = menu_functions_fade_alpha();
 
-		snprintf(command, sizeof(command), "(fade_out 0 0 0 %d)", H3_SCENE_FADE_OUT_TICKS);
-		main_request_host_command_from(command, "menu scene");
+		/* (from the black there is: a fade in under way turned back) */
 		h3_scenes.fade_held = TRUE;
-		h3_scenes.fade_until = vita_host_time_us() + H3_SCENE_FADE_OUT_US;
+		h3_scenes.fade_phase = _h3_scene_fade_out;
+		h3_scenes.fade_start = now - (unsigned long long)(black * (real)H3_SCENE_FADE_OUT_US);
+		h3_scenes.fade_until = h3_scenes.fade_start + H3_SCENE_FADE_OUT_US;
 		platform_log("menus: h3 scene: %s: fading the backdrop out to its new spot", h3_scenes.screen);
 		return;
 	}
