@@ -83,10 +83,10 @@ the Online style (menu_tags.c: online/ for h3/). -->
 		<child widget="h3/campaign/select"/>
 		<child widget="h3/campaign/b_butn"/>
 		<child widget="h3/campaign/back"/>
-		<child widget="h3/main/players"/>
-		<child widget="h3/main/nameplate"/>
-		<child widget="h3/main/party_plates"/>
-		<child widget="h3/friends/lobby_panel"/>
+		<child widget="online/mp/players"/>
+		<child widget="online/lobby/main/nameplate"/>
+		<child widget="online/lobby/main/party_plates"/>
+		<child widget="online/lobby/friends/lobby_panel"/>
 		<child widget="online/campaign/switch_panel"/>
 		<child widget="online/campaign/switch_text"/>
 		<child widget="online/campaign/list" x="8" y="50"/>
