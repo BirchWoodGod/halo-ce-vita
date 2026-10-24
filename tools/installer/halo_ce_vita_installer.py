@@ -102,14 +102,21 @@ KNOWN_CE_RESOURCE_MAPS = {
 XBOX_REQUIRED_MAPS = ("ui.map", "a10.map", "a30.map", "a50.map", "b30.map", "b40.map",
                       "c10.map", "c20.map", "c40.map", "d20.map", "d40.map")
 
-# README.md's movie conversion (the first command: Baseline, 640 wide), and
-# the High profile one it gives as the better-quality choice
+# README.md's movie conversion: H.264 Constrained Baseline (x264's baseline
+# profile: no B-frames, no CABAC), 640 wide. Every choice must stay so: the
+# Vita plays High profile's B-frames as white frames. "better" is the same
+# profile at a higher quality (larger files, slower), its bit rate capped
+# for level 3.1.
 FFMPEG_MOVIE_ARGS = {
-    "baseline": ["-c:v", "libx264", "-profile:v", "baseline", "-level", "3.1", "-pix_fmt", "yuv420p",
-                 "-vf", "scale=640:-2", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart"],
-    "high": ["-c:v", "libx264", "-profile:v", "high", "-level", "4.0", "-crf", "20", "-pix_fmt", "yuv420p",
-             "-vf", "scale=640:-2", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart"],
+    "baseline": ["-c:v", "libx264", "-profile:v", "baseline", "-level", "3.1", "-bf", "0",
+                 "-pix_fmt", "yuv420p", "-vf", "scale=640:-2", "-c:a", "aac", "-b:a", "128k",
+                 "-movflags", "+faststart"],
+    "better": ["-c:v", "libx264", "-profile:v", "baseline", "-level", "3.1", "-bf", "0", "-preset", "slow",
+               "-crf", "18", "-maxrate", "6M", "-bufsize", "12M", "-pix_fmt", "yuv420p", "-vf", "scale=640:-2",
+               "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart"],
 }
+# (the old High profile choice's name: now the Vita-safe "better")
+MOVIE_QUALITY_ALIASES = {"high": "better", "standard": "baseline"}
 
 Progress = Callable[[str, int, int], None]
 
@@ -1475,11 +1482,13 @@ def convert_movies(source_path: str, staging: str, ffmpeg: Optional[str] = None,
                    progress: Progress = _no_progress, log: Callable[[str], None] = print,
                    cancel: Optional[threading.Event] = None) -> List[str]:
     """Step 2: every bink/*.bik converted to `staging`/movies/<name>.mp4 as
-    README.md's Movies section does (H.264, 640 wide, AAC)."""
+    README.md's Movies section does (H.264 Constrained Baseline, no B-frames,
+    640 wide, AAC). `quality` is "baseline" or "better" (both Vita-safe)."""
     ffmpeg_path = find_ffmpeg(ffmpeg)
     if not ffmpeg_path:
         raise InstallerError("ffmpeg was not found. The Windows program brings its own; otherwise install "
                              "ffmpeg (https://ffmpeg.org) or choose ffmpeg's program.")
+    quality = MOVIE_QUALITY_ALIASES.get(quality, quality)
     if quality not in FFMPEG_MOVIE_ARGS:
         raise InstallerError("unknown movie quality %r" % quality)
     source = XboxSource.open(source_path)
@@ -2092,7 +2101,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     step = commands.add_parser("movies", help="step 2: the disc's movies converted to MP4 with ffmpeg")
     step.add_argument("source", help="the Xbox disc image or the unpacked game folder")
     step.add_argument("--ffmpeg", help="ffmpeg's program (default: the bundled one, or on the PATH)")
-    step.add_argument("--quality", choices=sorted(FFMPEG_MOVIE_ARGS), default="baseline")
+    step.add_argument("--quality", choices=sorted(FFMPEG_MOVIE_ARGS) + sorted(MOVIE_QUALITY_ALIASES),
+                      default="baseline", help="baseline (as README.md) or better (the same Vita-safe profile at "
+                                               "a higher quality: larger, slower); high is better's old name")
     step = commands.add_parser("pc-files", help="step 3: Halo PC's bitmaps.map, sounds.map, loc.map")
     which = step.add_mutually_exclusive_group(required=True)
     which.add_argument("--mcc", nargs="?", const="", metavar="FOLDER",
@@ -3580,8 +3591,10 @@ class InstallerWindow:
         row.pack(anchor="w", pady=(px(2), 0))
         ttk.Radiobutton(row, text="Standard (H.264 Baseline, as README.md)", value="baseline",
                         variable=self.quality).pack(anchor="w")
-        ttk.Radiobutton(row, text="Better quality (H.264 High profile, same size)", value="high",
+        ttk.Radiobutton(row, text="Better quality (the same Baseline, larger files, slower)", value="better",
                         variable=self.quality).pack(anchor="w")
+        self.paragraph(self.body, "Both play on the Vita (H.264 Constrained Baseline, no B-frames: the Vita shows "
+                                  "High profile's B-frames as white frames).", "Hint.TLabel", pady=(px(3), 0))
         self.action("Convert the movies", self.do_movies)
         self.show_staged()
 

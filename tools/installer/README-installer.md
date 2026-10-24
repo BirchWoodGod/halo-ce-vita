@@ -60,8 +60,11 @@ Custom maps you put in that `maps` folder yourself are copied too.
    version's maps are not taken by mistake.
 2. **Movies (optional).** The disc's Bink movies (`bink/*.bik`) are
    converted with ffmpeg to H.264 MP4s, 640 wide, as the README's Movies
-   section does (Standard = its first command, Baseline profile; Better
-   quality = its High profile command). The game runs without them: each
+   section does. Both choices are H.264 Constrained Baseline with no
+   B-frames, the only kind the Vita plays cleanly (High profile's B-frames
+   show as white frames): Standard is the README's first command, Better
+   quality the same profile at a higher quality (`-crf 18 -preset slow`,
+   larger files, slower to convert). The game runs without them: each
    missing movie is skipped (no intro, no attract videos, no credits movie)
    and the main menu comes up ready to play. Skip the step with **Next** to
    save the few minutes it takes.
@@ -136,7 +139,7 @@ tray; no game artwork).
 
 ```
 python3 halo_ce_vita_installer.py [--out FOLDER] xbox "Halo.iso"
-python3 halo_ce_vita_installer.py [--out FOLDER] movies "Halo.iso" [--quality high] [--ffmpeg PATH]
+python3 halo_ce_vita_installer.py [--out FOLDER] movies "Halo.iso" [--quality better] [--ffmpeg PATH]
 python3 halo_ce_vita_installer.py [--out FOLDER] pc-files --mcc [FOLDER]
 python3 halo_ce_vita_installer.py [--out FOLDER] pc-files --installer "any name.exe"
 python3 halo_ce_vita_installer.py [--out FOLDER] pc-files --folder FOLDER

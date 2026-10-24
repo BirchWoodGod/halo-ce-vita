@@ -52,9 +52,36 @@ def test_convert_from_image(tmp_path, ffmpeg):
     assert (2000000, 2000000) in progress
     calls = (ffmpeg.parent / "ffmpeg.log").read_text().splitlines()
     assert len(calls) == 2
-    assert "'-profile:v', 'high'" in calls[0] and "'scale=640:-2'" in calls[0] and "'-f', 'mp4'" in calls[0]
+    # "high" is the old name of "better": the Vita-safe Baseline, never High profile
+    assert "'-profile:v', 'baseline'" in calls[0] and "'-crf', '18'" in calls[0]
+    assert "'high'" not in calls[0] and "'scale=640:-2'" in calls[0] and "'-f', 'mp4'" in calls[0]
     # the temporary copies of the movies are gone
     assert sorted(os.listdir(out)) == ["movies"]
+
+
+@pytest.mark.parametrize("quality", sorted(hcv.FFMPEG_MOVIE_ARGS))
+def test_every_movie_choice_is_vita_safe(quality):
+    """Every choice: H.264 Constrained Baseline (x264's baseline profile), no
+    B-frames, 4:2:0, at most level 3.1, 640 wide. The Vita shows High
+    profile's B-frames as white frames."""
+    arguments = hcv.FFMPEG_MOVIE_ARGS[quality]
+
+    def value(flag):
+        return arguments[arguments.index(flag) + 1]
+    assert value("-c:v") == "libx264"
+    assert value("-profile:v") == "baseline"
+    assert value("-bf") == "0"
+    assert value("-pix_fmt") == "yuv420p"
+    assert float(value("-level")) <= 3.1
+    assert value("-vf") == "scale=640:-2"
+    assert not any(word in ("high", "main", "high10", "high422", "high444") for word in arguments)
+    assert "-x264-params" not in arguments and "-x264opts" not in arguments
+
+
+def test_movie_quality_names(tmp_path, ffmpeg):
+    assert set(hcv.MOVIE_QUALITY_ALIASES.values()) <= set(hcv.FFMPEG_MOVIE_ARGS)
+    with pytest.raises(hcv.InstallerError, match="unknown movie quality"):
+        hcv.convert_movies(str(tmp_path), str(tmp_path / "out"), str(ffmpeg), "ultra", log=lambda message: None)
 
 
 def test_convert_failure(tmp_path, ffmpeg):
