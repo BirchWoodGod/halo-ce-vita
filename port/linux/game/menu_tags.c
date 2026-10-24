@@ -433,6 +433,8 @@ static char const *const port_function_names[] =
 	"port online switch multiplayer", "port online switch forge", "port online switch campaign",
 	"port h3 profile current",
 	"port online profile choose", "port online profile delete ask",
+	"port online browser network next", "port online browser network previous",
+	"port online browser filter next", "port online browser filter previous",
 };
 
 /* the port's game data functions (menu_functions.c), from

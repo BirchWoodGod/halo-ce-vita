@@ -432,6 +432,11 @@ enum
 	/* (Menu style Online: CUSTOMIZATION's PROFILE tab) */
 	_function_online_profile_choose,
 	_function_online_profile_delete_ask,
+	/* (Menu style Online: the SERVER BROWSER's network tabs and filters) */
+	_function_online_browser_network_next,
+	_function_online_browser_network_previous,
+	_function_online_browser_filter_next,
+	_function_online_browser_filter_previous,
 };
 
 /* in port_game_data_input_names' order */
@@ -8463,6 +8468,16 @@ static void browser_test_games(void)
 				entry->crossplay, 0, CROSSPLAY_GUARD_OK, network_wire_this_platform() == NETWORK_PLATFORM_VITA_PC);
 			entry->locked = index % 3 == 2 && (!menu_functions.lan || lan_with_online());
 		}
+		/* (HALO_TEST_BROWSER_SERVERS=1: every fourth one a dedicated
+		server's, some of its players bots: the SERVERS and BOTS filters) */
+		if (getenv("HALO_TEST_BROWSER_SERVERS") && atoi(getenv("HALO_TEST_BROWSER_SERVERS")) && index % 4 == 3)
+		{
+			entry->dedicated = 1;
+			entry->bots = (int)(index % 5) + 1;
+			if (entry->players < entry->bots)
+				entry->players = entry->bots + 2;
+			snprintf(entry->rules, sizeof(entry->rules), "%s on %s: under way (DEDICATED)", entry->gametype, entry->map);
+		}
 		/* (the filter's, as the real lists') */
 		if (!network_wire_browser_shows(crossplay_guard_vita_game(entry->platform, entry->marks)))
 			menu_functions.game_count--;
@@ -8753,6 +8768,197 @@ System Link list joins it (the game's checks; its lobby next, the browser
 deleted: *widget_deleted) */
 static boolean lan_join(struct widget_instance *widget, boolean *widget_deleted);
 
+/* ---- the SERVER BROWSER of Menu style Online (menus/online/browser.xml,
+standing for the LAN browser): the networks as tabs, L and R - the
+connection itself, as HOST SETTINGS and the settings panel's Connection
+choose it (network_connection_choose, h3_mp.network: one choice) -; the
+filters, the D-pad's left and right: ALL, VITA and PC the browsers' own
+(network.browser_filter, the settings panel's Browser shows), SERVERS a
+dedicated server's games, BOTS the games with bots in them; the chosen
+game's card at the right. (A Forge game is never listed, and the lists do
+not say a friend's game: no such filters.) */
+enum
+{
+	_online_browser_all,
+	_online_browser_vita,
+	_online_browser_pc,
+	_online_browser_servers,
+	_online_browser_bots,
+	NUMBER_OF_ONLINE_BROWSER_FILTERS
+};
+
+static struct
+{
+	short filter;
+	char said[96];
+} online_browser;
+
+static short const online_browser_networks[] = { _h3_network_online, _h3_network_system_link, _h3_network_adhoc };
+
+/* (L and R) the next network: the connection switched, the lists looked
+through again */
+static void online_browser_network_step(int step)
+{
+	short current = h3_mp_network_of_connection(), index, at = 0, count = (short)NUMBEROF(online_browser_networks);
+
+	for (index = 0; index < count; index++)
+	{
+		if (online_browser_networks[index] == current)
+			at = index;
+	}
+	at = (short)(((at + step) % count + count) % count);
+	/* (as the lobbies' NETWORK picker chooses one, h3_mp_network_set: a
+	party plays online alone; the connection switched live, the lobby's
+	network that one) */
+	if (h3_party_refuses(online_browser_networks[at] == _h3_network_online))
+		return;
+	if (online_browser_networks[at] != h3_mp.network)
+		h3_live_close("another network chosen");
+	h3_live_retry();
+	network_connection_choose(online_browser_networks[at] == _h3_network_online ? NETWORK_CONNECTION_ONLINE :
+		online_browser_networks[at] == _h3_network_adhoc ? NETWORK_CONNECTION_ADHOC : NETWORK_CONNECTION_WIFI);
+	h3_mp.network = online_browser_networks[at];
+	menu_functions.status[0] = 0;
+	menu_functions.chosen_valid = FALSE;
+	menu_functions.lan_since = system_milliseconds();
+	browser_view_reset(&menu_functions.view);
+	p2p_lobby_browse(internet_play() ? 1 : 0);
+	if (internet_play())
+		p2p_lobby_refresh();
+	platform_log("menus: online server browser: network %s", h3_network_name(online_browser_networks[at]));
+}
+
+/* (the D-pad) the next filter (ONLINE's alone: System Link and ad hoc list
+Vitas' games) */
+static void online_browser_filter_step(int step)
+{
+	static char const *const wire[] = { "all", "vita", "pc", "all", "all" };
+
+	if (h3_mp_network_of_connection() != _h3_network_online)
+		return;
+	online_browser.filter = (short)(((online_browser.filter + step) % NUMBER_OF_ONLINE_BROWSER_FILTERS +
+		NUMBER_OF_ONLINE_BROWSER_FILTERS) % NUMBER_OF_ONLINE_BROWSER_FILTERS);
+	setting_set("HALO_NET_BROWSER_FILTER", wire[online_browser.filter]);
+	menu_functions.chosen_valid = FALSE;
+	browser_view_reset(&menu_functions.view);
+	platform_log("menus: online server browser: filter %d", online_browser.filter);
+}
+
+/* the games SERVERS and BOTS keep (the browser's list before its groups) */
+static void online_browser_filter_games(void)
+{
+	long from, to = 0;
+
+	if (!halo_menu_style_online() || h3_mp_network_of_connection() != _h3_network_online ||
+		online_browser.filter < _online_browser_servers)
+	{
+		return;
+	}
+	for (from = 0; from < menu_functions.game_count; from++)
+	{
+		struct p2p_lobby_entry const *entry = &menu_functions.games[from];
+
+		if (online_browser.filter == _online_browser_servers ? !entry->dedicated : entry->bots <= 0)
+			continue;
+		if (to != from)
+			menu_functions.games[to] = *entry;
+		to++;
+	}
+	menu_functions.game_count = to;
+}
+
+/* the screen's parts of its own: the tabs, the filters, the chosen game's
+card (its map's picture, name, what it plays) */
+static void online_browser_screen_update(struct widget_instance *screen, long target)
+{
+	struct widget_instance *found;
+	short network = h3_mp_network_of_connection(), index;
+	boolean online = network == _h3_network_online;
+	char name[24], text[192];
+
+	if (!named(screen, "net_tab_0"))
+		return;
+	/* (the filter the settings panel set, when it is one of its own) */
+	if (online_browser.filter < _online_browser_servers)
+		online_browser.filter = (short)network_wire_browser_filter();
+	for (index = 0; index < (short)NUMBEROF(online_browser_networks); index++)
+	{
+		snprintf(name, sizeof(name), "net_tab_%d", index);
+		if ((found = named(screen, name)) != NULL)
+			found->animation.current_frame_index = online_browser_networks[index] == network ? 1 : 0;
+	}
+	for (index = 0; index < NUMBER_OF_ONLINE_BROWSER_FILTERS; index++)
+	{
+		snprintf(name, sizeof(name), "filter_%d", index);
+		if ((found = named(screen, name)) != NULL)
+		{
+			widget_instance_set_visibility_recursive(found, online);
+		}
+	}
+	/* (the chosen filter's own bar, its label's width) */
+	for (index = 0; index < NUMBER_OF_ONLINE_BROWSER_FILTERS; index++)
+	{
+		snprintf(name, sizeof(name), "filter_bar_%d", index);
+		if ((found = named(screen, name)) != NULL)
+		{
+			widget_instance_set_visibility_recursive(found, online && index == online_browser.filter);
+			found->animation.current_frame_index = 1;
+		}
+	}
+	if ((found = named(screen, "filter_butn")) != NULL)
+		widget_instance_set_visibility_recursive(found, online);
+	if ((found = named(screen, "filter_hint")) != NULL)
+		widget_instance_set_visibility_recursive(found, online);
+	/* the card */
+	{
+		boolean card = target != NONE && menu_functions.chosen_valid && !menu_functions.chosen.header;
+		static char const *const parts[] = { "map_picture", "card_name", "card_info", "ticker_players_label",
+			"ticker_players_value", "ticker_rules_label", "ticker_rules_value" };
+
+		for (index = 0; index < (short)NUMBEROF(parts); index++)
+		{
+			if ((found = named(screen, parts[index])) != NULL)
+				widget_instance_set_visibility_recursive(found, card);
+		}
+		if (!card)
+			return;
+		if ((found = named(screen, "map_picture")) != NULL)
+		{
+			short picture = H3_MAP_OTHER_PICTURE;
+
+			for (index = 0; index < H3_MAP_COUNT; index++)
+			{
+				if (!_stricmp(T(h3_map_names[index]), menu_functions.chosen.map) ||
+					!_stricmp(h3_map_names[index], menu_functions.chosen.map))
+				{
+					picture = index;
+				}
+			}
+			found->animation.current_frame_index = picture;
+		}
+		text_show(named(screen, "card_name"), menu_functions.chosen.name);
+		snprintf(text, sizeof(text), "%s%s%s\n%s%s%s", menu_functions.chosen.gametype[0] ? menu_functions.chosen.gametype :
+			(menu_functions.chosen.coop ? T("Co-op") : ""), menu_functions.chosen.map[0] ? T(" on ") : "",
+			menu_functions.chosen.map, menu_functions.chosen.tag, menu_functions.chosen.dedicated ? T(", dedicated server") : "",
+			menu_functions.chosen.locked ? T(", password") : "");
+		text_show(named(screen, "card_info"), text);
+		/* (a listing that names no players: their count) */
+		if (!menu_functions.chosen.players_line[0])
+		{
+			snprintf(text, sizeof(text), T("%d of %d"), menu_functions.chosen.players, menu_functions.chosen.maximum);
+			text_show(named(screen, "ticker_players_value"), text);
+		}
+	}
+	snprintf(text, sizeof(text), "%d %d %s", network, online_browser.filter,
+		menu_functions.chosen_valid ? menu_functions.chosen.name : "-");
+	if (strcmp(text, online_browser.said))
+	{
+		snprintf(online_browser.said, sizeof(online_browser.said), "%s", text);
+		platform_log("menus: online server browser: network %s, filter %d, chosen %s", h3_network_name(network),
+			online_browser.filter, menu_functions.chosen_valid ? menu_functions.chosen.name : "none");
+	}
+}
+
 static void browser_update(struct widget_instance *list)
 {
 	struct widget_instance *screen = screen_of(list);
@@ -8769,6 +8975,7 @@ static void browser_update(struct widget_instance *list)
 		menu_functions.game_count = p2p_lobby_entries(menu_functions.games, P2P_LOBBY_MAXIMUM_ENTRIES);
 	}
 	browser_test_games();
+	online_browser_filter_games();
 	browser_list_sort(menu_functions.games, (int)menu_functions.game_count, menu_functions.sort);
 	/* (the groups: VITA GAMES, then PC GAMES, each its header with its count) */
 	menu_functions.game_count = browser_list_group(menu_functions.games, (int)menu_functions.game_count,
@@ -9074,6 +9281,7 @@ static void browser_update(struct widget_instance *list)
 	}
 	text_show(named(screen, "browser_status"), line);
 	text_show(named(screen, "browser_message"), message);
+	online_browser_screen_update(screen, target);
 	/* (said in the log as it changes) */
 	if (strcmp(message, menu_functions.message_logged))
 	{
@@ -18713,6 +18921,14 @@ boolean pc_menu_event_function_invoke(
 		return online_profile_choose(widget);
 	case _function_online_profile_delete_ask:
 		return online_profile_delete_ask(widget);
+	case _function_online_browser_network_next:
+	case _function_online_browser_network_previous:
+		online_browser_network_step(function_index == _function_online_browser_network_next ? 1 : -1);
+		return TRUE;
+	case _function_online_browser_filter_next:
+	case _function_online_browser_filter_previous:
+		online_browser_filter_step(function_index == _function_online_browser_filter_next ? 1 : -1);
+		return TRUE;
 	case _function_online_exit:
 		platform_log("menus: online EXIT: the game closes");
 		exit(EXIT_SUCCESS);
