@@ -117,7 +117,7 @@ w('''
 	<widget name="online/custom/custom_help" type="text" left="%d" top="296" width="300" height="60" font="h3/font_small" color="#FFC4D2E2" text_x="7" string_list="h3/custom_help"/>
 	<widget name="online/custom/na_help" type="text" left="%d" top="296" width="300" height="60" font="h3/font_small" color="#FFC4D2E2" text_x="7"/>
 	<widget name="online/custom/status" type="text" left="%d" top="362" width="300" height="34" font="h3/font_small" color="#FFF0B070" text_x="7"/>
-	<widget name="online/custom/preview_name" type="text" left="430" top="440" width="200" height="18" align="center" font="h3/font_small" color="#FF9FB6CC"/>''' % (X, X, X, X, X))
+	<widget name="online/custom/preview_name" type="text" left="460" top="453" width="270" height="16" align="right" font="h3/font_small" color="#FF9FB6CC"/>''' % (X, X, X, X, X))
 GX, GY = 248, 112
 w('''
 	<!-- COLORS: the hex of the chosen colour in its box, then the grid (RANDOM, then the game's
@@ -145,6 +145,45 @@ w('''
 	<widget name="online/custom/l_butn" left="%d" top="452" width="16" height="16" bitmap="h3/glyph_l"/>
 	<widget name="online/custom/r_butn" left="%d" top="452" width="16" height="16" bitmap="h3/glyph_r"/>
 	<widget name="online/custom/tabs" type="text" left="%d" top="451" width="60" height="18" font="h3/font_item" color="#FFF0F4F8" text_y="1" string_list="online/custom_text" string_index="6"/>''' % (X, X + 20, X + 84, X + 104, X + 172, X + 190, X + 210))
+w('''
+	<!-- the profiles first (the Halo 3 SELECT PROFILE's widgets, profiles.xml), under the header
+	band: CUSTOMIZATION, the line saying to choose one -->
+	<widget name="online/custprof/title" type="text" left="%d" top="12" width="400" height="34" font="online/font_header" color="#FFF2F6FA" string_list="online/custom_text" string_index="0"/>
+	<widget name="online/custprof/subtitle" type="text" left="%d" top="56" width="500" height="16" font="h3/font_small" color="#FFC4D2E2" string_list="h3/profile_text" string_index="3"/>
+	<widget name="online/custprof/panel" left="40" top="86" width="560" height="330" bitmap="online/panel"/>
+	<widget name="online/custprof/screen" flags="pass_unhandled_to_focused_child" scene="multiplayer -40 -1.8 15.5 25 0">
+		<on event="created" run="port h3 profiles customize"/>
+		<on event="created" run="port h3 scene"/>
+		<on event="deleted" run="port h3 profiles close"/>
+		<on event="b back" back="true"/>
+		<on event="x" run="port h3 profile delete ask" open="h3/profdel/screen"/>
+		<on event="y" run="port h3 profile create"/>
+		<child widget="online/main/haze"/>
+		<child widget="online/custom/header"/>
+		<child widget="online/custprof/panel"/>
+		<child widget="online/custprof/title"/>
+		<child widget="online/custprof/subtitle"/>
+		<child widget="h3/profiles/info_swatch"/>
+		<child widget="h3/profiles/info_name"/>
+		<child widget="h3/profiles/info_level_label"/>
+		<child widget="h3/profiles/info_level"/>
+		<child widget="h3/profiles/info_skill_label"/>
+		<child widget="h3/profiles/info_skill"/>
+		<child widget="h3/profiles/info_controls_label"/>
+		<child widget="h3/profiles/info_controls"/>
+		<child widget="h3/profiles/info_text"/>
+		<child widget="h3/profiles/status"/>
+		<child widget="online/custom/foot"/>
+		<child widget="h3/pick/a_butn" x="%d" y="31"/>
+		<child widget="h3/pick/select" x="%d" y="31"/>
+		<child widget="h3/pick/b_butn" x="%d" y="31"/>
+		<child widget="h3/pick/back" x="%d" y="31"/>
+		<child widget="h3/profiles/x_butn" x="%d" y="31"/>
+		<child widget="h3/profiles/delete" x="%d" y="31"/>
+		<child widget="h3/profiles/y_butn" x="%d" y="31"/>
+		<child widget="h3/profiles/new" x="%d" y="31"/>
+		<child widget="h3/profiles/list"/>
+	</widget>''' % ((X, X) + (X - 52,) * 8))
 w('''
 	<!-- (scene: the Halo 3 editor's camera; the Spartan placed large at the right,
 	menu_functions.c ONLINE_CUSTOM_SPARTAN_PLACEMENT) -->

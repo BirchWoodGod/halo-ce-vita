@@ -37,8 +37,8 @@ def copy_tree(name, shift, made):
         if e.get('left') is not None:
             e.set('left', str(int(e.get('left')) + shift))
     return new
-OPENED = {'online/network/screen', 'online/map/screen', 'online/gametype/screen'}
-RENAME = ('h3/mp/', 'h3/map/', 'h3/gametype/', 'h3/network/')
+OPENED = {'online/network/screen', 'online/map/screen', 'online/gametype/screen', 'online/forge/maps/screen'}
+RENAME = ('h3/forge/', 'h3/mp/', 'h3/map/', 'h3/gametype/', 'h3/network/')
 
 def ren(name):
     for p in RENAME:
@@ -47,7 +47,7 @@ def ren(name):
     return name
 
 def take(name, **attrs):
-    w = copy.deepcopy(widgets[name])
+    w = copy.deepcopy(widgets[name] if name in widgets else ALL[name])
     w.set('name', ren(name))
     for k, v in attrs.items():
         k = k.rstrip('_')
@@ -176,6 +176,73 @@ for kind, rows, extra in [('network', ['item_%d' % i for i in range(4)], []),
         scr.insert(first + i, el('child', widget=w))
     add(scr)
 
+# ---- the Forge lobby (halo3/forge_lobby.xml), the same way: its column at the left, the players
+# and friends at the right; its map picker as the pickers above
+for n in ['network_row', 'map_row', 'packs_row', 'start_row', 'start_live']:
+    add(take('h3/forge/' + n, **ROW))
+lst = take('h3/forge/list')
+for c in lst.findall('child'):
+    leaf = c.get('widget').rsplit('/', 1)[1]
+    c.set('y', str({'network_row': 0, 'map_row': 36, 'packs_row': 55, 'start_row': 80, 'start_live': 80}[leaf]))
+add(lst)
+add(take('h3/forge/title', left=L - 2, top=12, width=400, height=34, font='online/font_header'))
+add(take('h3/forge/network_status', left=L + 12, top=74, width=280))
+add(take('h3/forge/ready', left=L + 4, top=234, width=290))
+add(take('h3/forge/ready_sub', left=L + 4, top=252, width=290))
+add(take('h3/forge/map_picture', left=L + 4, top=290))
+add(take('h3/forge/emblem', left=L + 10, top=296))
+add(take('h3/forge/caption', left=L + 4, top=408, width=290))
+add(take('h3/forge/note', left=L + 150, top=290, width=144, height=110))
+x = L + 4
+for n, w in [('a_butn', 16), ('select', 60), ('b_butn', 16), ('leave', 60)]:
+    if n.endswith('butn'):
+        add(take('h3/forge/' + n, left=x, top=453)); x += 20
+    else:
+        add(take('h3/forge/' + n, left=x, top=452, width=w)); x += w
+lobby = take('h3/forge/lobby')
+for c in list(lobby.findall('child')):
+    w = c.get('widget')
+    if w == 'h3/main/haze':
+        c.set('widget', 'online/main/haze')
+    elif w.startswith('h3/campaign/') or w == 'online/forge/rule2':
+        lobby.remove(c)
+    elif w.startswith('h3/pregame/row_'):
+        c.set('x', str(int(c.get('x')) + SHIFT))
+    elif w in ('h3/main/nameplate', 'h3/main/party_plates', 'h3/friends/lobby_panel'):
+        c.set('widget', copy_tree(w, SHIFT, MADE))
+    elif w in ('h3/mp/players', 'h3/mp/l_butn', 'h3/mp/invite'):
+        c.set('widget', ren(w))
+    elif w == 'online/forge/list':
+        c.set('x', str(L)); c.set('y', '54')
+first = [i for i, c in enumerate(lobby) if c.tag == 'child'][0]
+for i, w in enumerate(['online/mp/panel', 'online/mp/band', 'online/mp/foot']):
+    lobby.insert(first + 1 + i, el('child', widget=w))
+add(lobby)
+for i in range(13):
+    add(take('h3/forge/maps/item_%d' % i, **PROW))
+add(take('h3/forge/maps/list'))
+add(take('h3/forge/maps/title', left=P, top=14, width=400, height=34, font='online/font_header'))
+add(take('h3/forge/maps/maps_picture', left=330, top=84))
+add(take('h3/forge/maps/maps_text', left=330, top=208))
+add(take('h3/forge/maps/variant_name', left=330, top=208))
+add(take('h3/forge/maps/variant_text', left=330, top=230))
+scr = take('h3/forge/maps/screen')
+for c in list(scr.findall('child')):
+    w = c.get('widget')
+    if w == 'h3/main/haze':
+        c.set('widget', 'online/main/haze')
+    elif w.startswith('h3/pick/'):
+        if w.endswith(('/rule', '/strip')):
+            scr.remove(c)
+        else:
+            c.set('widget', 'online/pick/' + w.rsplit('/', 1)[1])
+    elif w.endswith('/list'):
+        c.set('x', str(P)); c.set('y', '80')
+first = [i for i, c in enumerate(scr) if c.tag == 'child'][1]
+for i, w in enumerate(['online/pick/header', 'online/pick/card', 'online/pick/foot']):
+    scr.insert(first + i, el('child', widget=w))
+add(scr)
+
 root = el('menus')
 root.text = '\n\t'
 for i, w in enumerate(items):
@@ -184,7 +251,7 @@ ET.indent(root, '\t')
 body = ET.tostring(root, encoding='unicode')
 head = '''<?xml version="1.0" encoding="UTF-8"?>
 <!-- Menu style Online (a preview): the multiplayer lobby and its pickers (SELECT NETWORK, SELECT MAP,
-SELECT GAME TYPE). They open in place of the Halo 3 lobby's (h3/mp/screen and the others:
+SELECT GAME TYPE), and the Forge lobby and its map picker (halo3/forge_lobby.xml's). They open in place of the Halo 3 lobby's (h3/mp/screen and the others:
 menu_tags.c menu_tags_online) and are the same widgets - every row, handler and data input of
 halo3/multiplayer.xml, the same names (made from it by a script) - laid out the online way: the
 title over a see-through navy column at the left (the rows, the network's status, Ready, the map's

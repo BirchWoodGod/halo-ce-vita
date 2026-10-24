@@ -129,7 +129,7 @@ their pickers...) */
 #define MAXIMUM_CLASSIC_PATCHES 32
 /* (Menu style Online: the menus/online widgets that stand for a Halo 3 set's
 widget of the same name under h3/) */
-#define MAXIMUM_ONLINE_SCREENS 128
+#define MAXIMUM_ONLINE_SCREENS 512
 
 /* the layout of a bitmap tag and a string list tag held by a Custom Edition
 resource map (the item is the whole tag, its addresses counting from the

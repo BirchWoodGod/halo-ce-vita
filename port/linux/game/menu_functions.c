@@ -4777,7 +4777,7 @@ top; kept whether the flame is on or off, so it never jumps) */
 #define H3_CUSTOM_SPARTAN_FLAME_PLACEMENT "1.75 0.645 -0.33 20"
 /* (Menu style Online: large at the right, as the online CUSTOMIZATION's,
 no window around it; online/customize.xml's camera) */
-#define ONLINE_CUSTOM_SPARTAN_PLACEMENT "1.25 0.62 -0.42 25"
+#define ONLINE_CUSTOM_SPARTAN_PLACEMENT "0.85 0.5 -0.42 20"
 
 /* (debug: HALO_ONLINE_SPARTAN_PLACEMENT="<distance> <right> <up> <facing>"
 in its place, to try others) */
@@ -5193,6 +5193,12 @@ static void online_custom_update(struct widget_instance *list)
 		if (!shown)
 			continue;
 		child->vertical_offset = (short)(slot++ * ONLINE_CUSTOM_ROW_HEIGHT);
+		/* (the arrows the focused row's alone, as h3_custom_update has them:
+		shown again above with the row) */
+		if ((found = named(child, "arrow_left")) != NULL)
+			widget_instance_set_visibility_recursive(found, child == list->focused_child);
+		if ((found = named(child, "arrow_right")) != NULL)
+			widget_instance_set_visibility_recursive(found, child == list->focused_child);
 		if (!first)
 			first = child;
 		if (child == list->focused_child)
