@@ -2355,6 +2355,22 @@ static void set_textbox_to_build_number(
 
 		if (update_check_menu_text((unsigned short *)update_text, NUMBEROF(update_text)))
 			shown = update_text;
+#if defined(HALO_PORT_VITA_NETWORK) && !defined(HALO_VITA) && !defined(HALO_DEDICATED_SERVER)
+		else
+		{
+			/* (port, PC) no Halo MCC found: "Halo MCC not found" every
+			other four seconds, in turn with the version
+			(port/linux/src/xbox_files.c) */
+			char const *platform_mcc_menu_notice(int short_form);
+			char const *notice = (system_milliseconds() / 4000) & 1 ? platform_mcc_menu_notice(TRUE) : NULL;
+
+			if (notice)
+			{
+				ascii_to_wide(notice, update_text, sizeof(update_text));
+				shown = update_text;
+			}
+		}
+#endif
 #endif
 		ustrncpy(
 			widget->parameters.text_box.text,

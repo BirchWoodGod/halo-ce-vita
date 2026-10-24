@@ -455,6 +455,7 @@ static char const *const port_game_data_input_names[] =
 	"port h3 dialog",
 	"port ce lobby", "port ce profile",
 	"port h3 scoreboard", "port h3 scoreboard options",
+	"port h3 content notice",
 };
 
 static struct
