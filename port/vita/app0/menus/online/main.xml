@@ -106,7 +106,7 @@ the fonts). The left of the list sits in the wide screen's margin (x below 0 of 
 	<widget name="online/main/settings" type="text" left="-38" top="450" width="150" height="18" font="online/font_item" color="#FFF0F4F8" text_y="1" string_list="online/main_items" string_index="8"/>
 	<!-- (the title large at the right, as the online menu has its logo: the owner's HALO CE VITA
 	logo, main.xml's h3/title, drawn whole into the widget) -->
-	<widget name="online/main/title" left="300" top="318" width="400" height="100" bitmap="online/title"/>
+	<widget name="online/main/title" left="171" top="40" width="270" height="68" bitmap="online/title"/>
 
 	<!-- (scene="ring": as the Halo 3 main menu, the ring's own flight behind) -->
 	<widget name="online/main/screen" flags="pass_unhandled_to_focused_child" scene="ring"
