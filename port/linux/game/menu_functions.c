@@ -1769,6 +1769,17 @@ static struct
 	none, which kept and cut back to left the main menu in the void,
 	insider.21) */
 	boolean ring_flown;
+	/* the live backdrop's camera shown now (shown_valid: one is), so that
+	a screen whose camera is elsewhere fades through black to it: the
+	backdrop faded out (the game's fade_out, black, under the menus) with
+	the old camera, the new one put in once it is black (fade_held, until
+	fade_until: vita_host_time_us), and faded in */
+	boolean shown_valid;
+	char shown_point[32];
+	real shown_camera[5];
+	real shown_field_of_view;
+	boolean fade_held;
+	unsigned long long fade_until;
 } h3_scenes;
 
 static void h3_scene_keep_ring(void);
@@ -1919,6 +1930,52 @@ void menu_functions_scenes_refresh(void)
 		active = ui_widget_port_active_screen(index);
 	if (active)
 		h3_scene_request(active);
+}
+
+/* a camera point's orientation for a camera looking along forward, up its
+up: camera_set reads a point's yaw, pitch and roll as the game's euler
+angles (matrix4x3_rotation_from_angles: its pitch turns about the world's
+y, not the camera's right, and its roll follows), not as a heading and an
+elevation: a scene's "yaw pitch" (heading, elevation above level, the
+camera saves' forward) written as they are looks level, and leaned, along
+the world's y (a camera at yaw 90 with pitch 25 looked level and rolled
+25 degrees); turned into the euler angles of that forward and a level up,
+the camera looks where the scene says (and where menu_scene_objects.c
+places its characters) */
+static void h3_scene_point_orient(struct scenario_cutscene_camera_point *point, real_vector3d const *forward,
+	real_vector3d const *up)
+{
+	/* (the matrix's rows forward, left (up x forward) and up:
+	matrix4x3_rotation_to_angles) */
+	real left_i = up->j * forward->k - up->k * forward->j;
+	real cosine_pitch;
+
+	point->orientation.pitch = (real)-asin(PIN(up->i, -1.f, 1.f));
+	cosine_pitch = (real)cos(point->orientation.pitch);
+	if (cosine_pitch > 0.0001f)
+	{
+		point->orientation.roll = (real)atan2(-up->j / cosine_pitch, up->k / cosine_pitch);
+		point->orientation.yaw = (real)atan2(-left_i / cosine_pitch, forward->i / cosine_pitch);
+	}
+	else
+	{
+		point->orientation.roll = 0.f;
+		point->orientation.yaw = (real)atan2(forward->j, forward->i);
+	}
+}
+
+/* the same for a heading and an elevation (radians), its up level */
+static void h3_scene_point_orient_angles(struct scenario_cutscene_camera_point *point, real yaw, real pitch)
+{
+	real_vector3d forward, up;
+
+	forward.i = (real)(cos(yaw) * cos(pitch));
+	forward.j = (real)(sin(yaw) * cos(pitch));
+	forward.k = (real)sin(pitch);
+	up.i = (real)(-sin(pitch) * cos(yaw));
+	up.j = (real)(-sin(pitch) * sin(yaw));
+	up.k = (real)cos(pitch);
+	h3_scene_point_orient(point, &forward, &up);
 }
 
 static struct scenario_cutscene_camera_point *h3_scene_point(char const *name)
@@ -2106,10 +2163,48 @@ int menu_functions_prebuild_settled(void)
 	return TRUE;
 }
 
+/* the fade between two of the live backdrop's spots: out (black, under
+the menus: the game's screen fade, as a cinematic's) over
+H3_SCENE_FADE_OUT_TICKS, the new camera put in after H3_SCENE_FADE_OUT_US,
+then in over H3_SCENE_FADE_IN_TICKS; the screen's menus are there at once
+and take the pad all the while. HALO_MENU_FADE=0: cut at once, as before */
+#define H3_SCENE_FADE_OUT_TICKS 7
+#define H3_SCENE_FADE_OUT_US 250000ULL
+#define H3_SCENE_FADE_IN_TICKS 10
+
+static boolean h3_scene_fade_enabled(void)
+{
+	char const *setting = getenv("HALO_MENU_FADE");
+
+	return !(setting && *setting && (!strcmp(setting, "0") || !_stricmp(setting, "false")));
+}
+
+/* whether the scene taken goes to another of the backdrop's spots than the
+one shown (then it fades) */
+static boolean h3_scene_moves_backdrop(void)
+{
+	short index;
+
+	if (!h3_scenes.shown_valid || h3_scenes.ring || !h3_scenes.has_camera || !menu_backdrop_active() ||
+		!h3_scene_fade_enabled())
+	{
+		return FALSE;
+	}
+	if (strcmp(h3_scenes.point, h3_scenes.shown_point) || h3_scenes.field_of_view != h3_scenes.shown_field_of_view)
+		return TRUE;
+	for (index = 0; index < 5; index++)
+	{
+		if (h3_scenes.camera[index] != h3_scenes.shown_camera[index])
+			return TRUE;
+	}
+	return FALSE;
+}
+
+static void h3_scene_apply(void);
+
 void menu_functions_scenes_update(void)
 {
-	struct scenario_cutscene_camera_point *point;
-	char command[96];
+	boolean taken;
 
 	h3_prebuild_update();
 
@@ -2121,12 +2216,60 @@ void menu_functions_scenes_update(void)
 		h3_scenes.ring_asleep = FALSE;
 		platform_log("menus: h3 scene: the scenes are off now: the ring's own flight");
 	}
-	if (!__atomic_exchange_n(&h3_scenes.pending, 0, __ATOMIC_ACQUIRE))
+	taken = __atomic_exchange_n(&h3_scenes.pending, 0, __ATOMIC_ACQUIRE);
+	/* (fading out: the new camera put in once black - the latest screen's,
+	one asked for meanwhile replacing it -, then faded in) */
+	if (h3_scenes.fade_held)
+	{
+		if (!halo_main_menu_loaded())
+		{
+			h3_scenes.fade_held = FALSE;
+			h3_scenes.shown_valid = FALSE;
+			return;
+		}
+		if (vita_host_time_us() < h3_scenes.fade_until)
+			return;
+		h3_scenes.fade_held = FALSE;
+		h3_scene_apply();
+		{
+			char command[48];
+
+			snprintf(command, sizeof(command), "(fade_in 0 0 0 %d)", H3_SCENE_FADE_IN_TICKS);
+			main_request_host_command_from(command, "menu scene");
+		}
+		return;
+	}
+	if (!taken)
 		return;
 	/* (the main menu gone meanwhile: a level loading, a network game's
 	map; a network game's lobby at the main menu keeps its scenes) */
 	if (!halo_main_menu_loaded())
+	{
+		h3_scenes.shown_valid = FALSE;
 		return;
+	}
+	if (h3_scene_moves_backdrop())
+	{
+		char command[48];
+
+		snprintf(command, sizeof(command), "(fade_out 0 0 0 %d)", H3_SCENE_FADE_OUT_TICKS);
+		main_request_host_command_from(command, "menu scene");
+		h3_scenes.fade_held = TRUE;
+		h3_scenes.fade_until = vita_host_time_us() + H3_SCENE_FADE_OUT_US;
+		platform_log("menus: h3 scene: %s: fading the backdrop out to its new spot", h3_scenes.screen);
+		return;
+	}
+	h3_scene_apply();
+}
+
+/* the scene taken put in: ui.map's ring flight, or its camera written into
+its point and cut to, with who stands there */
+static void h3_scene_apply(void)
+{
+	struct scenario_cutscene_camera_point *point;
+	char command[96];
+
+	h3_scenes.shown_valid = FALSE;
 	if (h3_scenes.ring)
 	{
 		if (h3_scenes.ring_asleep)
@@ -2153,9 +2296,8 @@ void menu_functions_scenes_update(void)
 		point->position.x = h3_scenes.camera[0];
 		point->position.y = h3_scenes.camera[1];
 		point->position.z = h3_scenes.camera[2];
-		point->orientation.yaw = h3_scenes.camera[3] * (real)(3.14159265358979 / 180.0);
-		point->orientation.pitch = h3_scenes.camera[4] * (real)(3.14159265358979 / 180.0);
-		point->orientation.roll = 0.f;
+		h3_scene_point_orient_angles(point, h3_scenes.camera[3] * (real)(3.14159265358979 / 180.0),
+			h3_scenes.camera[4] * (real)(3.14159265358979 / 180.0));
 		/* (camera_set reads it: 0 for the game's own) */
 		point->field_of_view = h3_scenes.field_of_view * (real)(3.14159265358979 / 180.0);
 	}
@@ -2164,11 +2306,33 @@ void menu_functions_scenes_update(void)
 		h3_scene_keep_ring();
 	/* (who stands there: menu_scene_objects.c, which makes them before the
 	tick) */
-	menu_scene_objects_want(h3_scenes.screen, h3_scenes.has_objects ? h3_scenes.objects : NULL, TRUE,
-		point->position.x, point->position.y, point->position.z, point->orientation.yaw, point->orientation.pitch);
+	{
+		/* (the characters in the camera's frame: its heading and elevation) */
+		real yaw = h3_scenes.camera[3] * (real)(3.14159265358979 / 180.0);
+		real pitch = h3_scenes.camera[4] * (real)(3.14159265358979 / 180.0);
+
+		if (!h3_scenes.has_camera)
+		{
+			real_vector3d forward, up;
+
+			vectors3d_from_euler_angles3d(&forward, &up, &point->orientation);
+			yaw = (real)atan2(forward.j, forward.i);
+			pitch = (real)atan2(forward.k, sqrt(forward.i * forward.i + forward.j * forward.j));
+		}
+		menu_scene_objects_want(h3_scenes.screen, h3_scenes.has_objects ? h3_scenes.objects : NULL, TRUE,
+			point->position.x, point->position.y, point->position.z, yaw, pitch);
+	}
 	main_request_host_command_from("(sleep -1 ring_loop)", "menu scene");
 	snprintf(command, sizeof(command), "(camera_set %s %ld)", h3_scenes.point, h3_scenes.ticks);
 	main_request_host_command_from(command, "menu scene");
+	/* (the backdrop's spot shown now: another screen's elsewhere fades) */
+	if (h3_scenes.has_camera && menu_backdrop_active())
+	{
+		h3_scenes.shown_valid = TRUE;
+		snprintf(h3_scenes.shown_point, sizeof(h3_scenes.shown_point), "%s", h3_scenes.point);
+		memcpy(h3_scenes.shown_camera, h3_scenes.camera, sizeof(h3_scenes.shown_camera));
+		h3_scenes.shown_field_of_view = h3_scenes.field_of_view;
+	}
 	h3_scenes.ring_asleep = TRUE;
 	{
 		char field_of_view[40] = "";
@@ -2177,8 +2341,9 @@ void menu_functions_scenes_update(void)
 			snprintf(field_of_view, sizeof(field_of_view), ", field of view %.0f", h3_scenes.field_of_view);
 		platform_log("menus: h3 scene: %s: camera point %s at %.2f %.2f %.2f, yaw %.1f pitch %.1f, over %ld ticks%s",
 			h3_scenes.screen, h3_scenes.point, point->position.x, point->position.y, point->position.z,
-			point->orientation.yaw * (real)(180.0 / 3.14159265358979),
-			point->orientation.pitch * (real)(180.0 / 3.14159265358979), h3_scenes.ticks, field_of_view);
+			h3_scenes.has_camera ? h3_scenes.camera[3] : point->orientation.yaw * (real)(180.0 / 3.14159265358979),
+			h3_scenes.has_camera ? h3_scenes.camera[4] : point->orientation.pitch * (real)(180.0 / 3.14159265358979),
+			h3_scenes.ticks, field_of_view);
 	}
 }
 
@@ -2188,7 +2353,6 @@ static void h3_scene_keep_ring(void)
 {
 	struct scenario_cutscene_camera_point *point = h3_scene_point("settings");
 	struct observer_result const *camera = observer_get_camera(0);
-	real horizontal;
 
 	h3_scenes.ring_kept = FALSE;
 	if (!point || !camera)
@@ -2207,11 +2371,8 @@ static void h3_scene_keep_ring(void)
 			camera->position.z);
 		return;
 	}
-	horizontal = (real)sqrt(camera->forward.i * camera->forward.i + camera->forward.j * camera->forward.j);
 	point->position = camera->position;
-	point->orientation.yaw = (real)atan2(camera->forward.j, camera->forward.i);
-	point->orientation.pitch = (real)atan2(camera->forward.k, horizontal);
-	point->orientation.roll = 0.f;
+	h3_scene_point_orient(point, &camera->forward, &camera->up);
 	h3_scenes.ring_kept = TRUE;
 }
 
