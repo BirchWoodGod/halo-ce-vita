@@ -110,7 +110,7 @@ the fonts). The left of the list sits in the wide screen's margin (x below 0 of 
 
 	<!-- (scene="ring": as the Halo 3 main menu, the ring's own flight behind) -->
 	<widget name="online/main/screen" flags="pass_unhandled_to_focused_child" scene="ring"
-		backdrop="load_campaign -42.161 26.236 68.472 10.53 15.13 0 70">
+		backdrop="load_campaign -46.0 25.5 69.0 34 6 0 70">
 		<on event="created" run="main menu intialize" label="ring_loop"/>
 		<on event="created" run="port h3 servers on"/>
 		<on event="created" run="port h3 scene"/>

@@ -42,7 +42,7 @@ set's title and glyphs). -->
 	<widget name="online/title/continue" type="text" left="322" top="300" width="140" height="20" font="online/font_item" color="#FFF0F4F8" text_y="1" string_list="online/title_text" string_index="5"/>
 	<widget name="online/title/legal" type="text" left="-90" top="452" width="700" height="14" font="online/font_small" color="#FF7C8CA2" string_list="online/title_text" string_index="6"/>
 	<widget name="online/title/screen" flags="pass_unhandled_to_focused_child" scene="ring"
-		backdrop="load_campaign -42.161 26.236 68.472 10.53 15.13 0 70">
+		backdrop="load_campaign -46.0 25.5 69.0 34 6 0 70">
 		<on event="a start" back="true"/>
 		<on event="b back" back="true"/>
 		<child widget="online/title/haze"/>
