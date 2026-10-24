@@ -52,6 +52,9 @@
 #              the host's minute-long wait for the machines' loads, and was dropped
 #              ("forcibly removing client ... timeout while loading"), the host's screen
 #              still meanwhile
+#   h3forgeskip  h3forgeslow with the host not holding its start (HALO_TEST_FORGE_NO_HOLD, as after
+#              the five minutes' limit): the friend, its packs not built, leaves them out and plays,
+#              building none as the map loads (it was dropped, insider.21, Oct 22 2026)
 #   h3variant  a saved map variant played in a multiplayer game (forge.c forge_play_*): the
 #              host saves one in a local Forge game of Blood Gulch (a Warthog and a boulder,
 #              the console's SAVE MAP VARIANT: "MP Gulch"), then opens MULTIPLAYER (Menu
@@ -643,7 +646,7 @@ forge_case() {
 		grep -aqE "forge net: the host's layout read: [1-9][0-9]* objects" "$jl3" ||
 			fail "the machine with the code was not given the layout"
 		;;
-	h3forgeslow)
+	h3forgeslow|h3forgeskip)
 		local menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 		if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
 			echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS) or no HALO_TEST_PROFILE"; return 0
@@ -658,8 +661,14 @@ forge_case() {
 		pad="$pad up:150:500 up:150:500 up:150:500 a:150:3000 wait:150:${HALO_TEST_INVITE_WAIT:-35000} @forge-slow-lobby:0:300"
 		pad="$pad lt wait:150:4000 a wait:150:3000 b wait:150:30000 @forge-slow-joined:0:300"
 		pad="$pad down:150:500 down:150:500 down:150:500 a:150:3000 @forge-slow-countdown:0:300"
+		# (h3forgeskip: the host does not hold its start for the friend's build, as one that
+		# has held it five minutes does not: the friend, its packs not built, plays without
+		# them - it built them as the map loaded, a Vita's minutes past the host's minute-long
+		# wait for the loads, and was dropped, "GAME ENDED", insider.21, Oct 22 2026)
+		local hold_env=HALO_TEST_FORGE_HOLD=1
+		[ "$mode" = h3forgeskip ] && hold_env=HALO_TEST_FORGE_NO_HOLD=1
 		HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
-			HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_NET_LOBBY_NAME=Alpha \
+			HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_NET_LOBBY_NAME=Alpha $hold_env \
 			"HALO_TEST_FRIENDS=code-file=$hc,add-file=$jc" "HALO_TEST_PAD=$pad"
 		host_pid=$last_pid
 		# (the friend's packs' reads, and their source maps', at 4 MB/s: b40's and b30's a
@@ -676,10 +685,34 @@ forge_case() {
 		grep -aq "system link: in another's lobby" "$jl" || fail "the friend did not land in the Forge lobby by the invite"
 		grep -aq "forge net: the host's packs still building here: said to the host" "$jl" ||
 			fail "the friend did not say it was still building the host's packs"
-		grep -aq "forge net: machine 1 builds the host's packs: the game's start waits for it" "$hl" ||
-			fail "the host did not hold the start for the friend's build"
-		grep -aq "menus: h3 pregame: Waiting for .* to build the extra objects" "$hl" || fail "the host's lobby did not say why it waits"
-		grep -aq "forge net: machine 1 has built the host's packs" "$hl" || fail "the host was not told the friend's packs were built"
+		if [ "$mode" = h3forgeskip ]; then
+			# (started without waiting for the build: the friend's packs not built are left out, none
+			# built as the map loads)
+			grep -aq "menus: h3 pregame: Waiting for .* to build the extra objects" "$hl" &&
+				fail "the host held its start (HALO_TEST_FORGE_NO_HOLD)"
+			grep -aq "forge: packs: .* left out: not built here yet" "$jl" ||
+				fail "the friend did not leave out the packs it had not built"
+			grep -aq "scene packs: .*: built from .* in [0-9.]* ms" <(sed -n '/forge: .* loaded for a Forge game/q;p' "$jl" |
+				sed -n '/forge: packs: /,$p') && fail "the friend built a pack as the map loaded"
+		else
+			grep -aq "forge net: machine 1 builds the host's packs: the game's start waits for it" "$hl" ||
+				fail "the host did not hold the start for the friend's build"
+			grep -aq "menus: h3 pregame: Waiting for .* to build the extra objects" "$hl" || fail "the host's lobby did not say why it waits"
+			grep -aq "forge net: machine 1 has built the host's packs" "$hl" || fail "the host was not told the friend's packs were built"
+			# (how far, all the packs together: never back, as the average of those under way was
+			# at each pack's end and next beginning)
+			local last=0 percent
+			for percent in $(grep -ao "Waiting for .* to build the extra objects ([0-9]*%)" "$hl" | grep -o "([0-9]*%)" | tr -d '(%)'); do
+				[ "$percent" -ge "$last" ] || fail "the host's wait went back from $last% to $percent%"
+				last=$percent
+			done
+			last=0
+			for percent in $(grep -ao "forge net: this machine builds the host's packs: [0-9]*%" "$jl" | grep -o "[0-9]*%" | tr -d '%'); do
+				[ "$percent" -ge "$last" ] || fail "the friend's build went back from $last% to $percent%"
+				last=$percent
+			done
+			[ "$last" -gt 0 ] || fail "the friend said nothing of how far it was in building the host's packs"
+		fi
 		grep -aq "forcibly removing client system .* due to timeout while loading" "$hd" &&
 			fail "the host dropped the friend while it loaded (its packs built at the map's load)"
 		grep -aq "forge: levels.test.bloodgulch.bloodgulch loaded for a Forge game" "$jl" || fail "the friend's Forge game did not start"

@@ -452,6 +452,10 @@ boolean forge_net_hosting(
 	void);
 boolean forge_net_client_session(
 	void);
+/* (the joiner's lobby screen) whether this machine is still building the
+host's packs, and how far (0 to 100) */
+boolean forge_net_client_building_status(
+	short *percent);
 /* (network_server_manager.c, the countdown at 0; the game's lobby) whether
 a joiner still building the host's packs holds the game's start: its
 machine's name and how far */

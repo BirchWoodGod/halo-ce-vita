@@ -15886,6 +15886,7 @@ static void h3_pregame_update(struct widget_instance *widget)
 	char text[192], code[32], line[384];
 	wchar_t wide[64];
 	long index, row = 0;
+	short build_percent = 0;
 
 	if (!game)
 		return;
@@ -15925,6 +15926,11 @@ static void h3_pregame_update(struct widget_instance *widget)
 		if (host && forge_net_server_holds_start(server, builder, (int)sizeof(builder), &percent))
 			snprintf(text, sizeof(text), T("Waiting for %s to build the extra objects (%d%%)"),
 				builder[0] ? builder : "?", (int)percent);
+		/* (a joiner: its own build, which the host waits for: it saw
+		"Starting..." for minutes, nothing said, and gave up) */
+		else if (!host && forge_net_client_building_status(&percent))
+			snprintf(text, sizeof(text), T("Building the extra objects (%d%%)"),
+				(int)percent);
 		else
 			snprintf(text, sizeof(text), "%s", T("Starting..."));
 	}
@@ -15933,6 +15939,8 @@ static void h3_pregame_update(struct widget_instance *widget)
 			T("Waiting for other players"));
 	else if (host)
 		snprintf(text, sizeof(text), "%s", h3_buttons(T("Ready: Cross starts the game")));
+	else if (forge_net_client_building_status(&build_percent))
+		snprintf(text, sizeof(text), T("Building the extra objects (%d%%)"), (int)build_percent);
 	else
 		snprintf(text, sizeof(text), "%s", T("Waiting for the host to start"));
 	text_show(named(screen, "status"), text);

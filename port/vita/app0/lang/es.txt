@@ -1794,6 +1794,7 @@
 "Starting in %d:%02d" = "Empieza en %d:%02d"
 "Starting..." = "Empezando..."
 "Waiting for %s to build the extra objects (%d%%)" = "Esperando a que %s cree los objetos extra (%d%%)"
+"Building the extra objects (%d%%)" = "Creando los objetos extra (%d%%)"
 "Ready: Cross starts the game" = "Listo: Cruz empieza la partida"
 "Waiting for the host to start" = "Esperando a que el anfitrión empiece"
 "Others join from MULTIPLAYER: BROWSE\nGAMES or JOIN WITH CODE." = "Los demás se unen en MULTIJUGADOR:\nBUSCAR PARTIDAS o UNIRSE CON CÓDIGO."

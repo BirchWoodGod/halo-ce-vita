@@ -3804,6 +3804,27 @@ static void forge_packs_load(
 			platform_log("forge: packs: %s: unavailable: %s", forge_packs[pack].name, why);
 			continue;
 		}
+		/* (a joiner of a network Forge game builds none as the map loads: a
+		build takes a Vita minutes, the game thread still all that while,
+		past the host's wait for the machines' loads (a minute): the joiner
+		was dropped, "GAME ENDED", Oct 22 2026. The host holds its start for
+		the builds the lobby began (forge_net.inc); a pack not built by then
+		is left out, as one the joiner has no recipe for) */
+		if (forge_net_client_session() && game_connection() == _game_connection_network_client)
+		{
+			scene_packs_prebuild(forge_packs[pack].name);
+			if (!scene_packs_file_current(forge_packs[pack].name))
+			{
+				scene_packs_status(forge_packs[pack].name, &progress, why, sizeof(why));
+				platform_log("forge: packs: %s left out: not built here yet (%ld%%), and the game does not wait for a "
+					"build", forge_packs[pack].name, progress);
+				if (length < (int)sizeof(forge_globals.packs_report))
+					length += snprintf(forge_globals.packs_report + length,
+						sizeof(forge_globals.packs_report) - (size_t)length, "%s%s", length ? ", " : "",
+						T(forge_packs[pack].label));
+				continue;
+			}
+		}
 		if (scene_packs_load_now(forge_packs[pack].name))
 		{
 			platform_log("forge: packs: %s loaded (%lu KB of the tag cache held by packs now)", forge_packs[pack].name,
