@@ -37,9 +37,21 @@ Where it looks (`port/linux/src/xbox_files.c`), first found wins:
 
 | | |
 | --- | --- |
-| the setting | `paths.content` in config.toml (`HALO_CONTENT_ROOT`); the PS Vita panel's **Multiplayer > Modded maps > Halo content folder** (Found by itself, `ux0:data/mcc`, `uma0:data/mcc`, `imc0:data/mcc`). A `halo1` folder named there stands for the folder holding it. |
-| PS Vita | `ux0:data/haloce-vita/mcc` |
-| PC | every Steam library (`libraryfolders.vdf` of `~/.local/share/Steam`, `~/.steam/steam`, `~/.steam/root`, Flatpak's Steam, and on Windows `Program Files (x86)\Steam`): `steamapps/common/Halo The Master Chief Collection` |
+| the setting | `paths.content` in config.toml (`HALO_CONTENT_ROOT`; `"auto"`, the default, or empty: look as below; `"none"`: no folder); the PS Vita panel's **Multiplayer > Modded maps > Halo content folder** (Found by itself, `ux0:data/mcc`, `uma0:data/mcc`, `imc0:data/mcc`). A `halo1` folder named there stands for the folder holding it; on a PC also `halo1/maps`, `halo1/maps/custom_edition` or a Steam library holding MCC, and a folder that is gone (or holds no MCC map) is said in the log and looked for as with `"auto"` (the PS Vita keeps it, none found). |
+| the data root | `mcc/` in it: the PS Vita's `ux0:data/haloce-vita/mcc` |
+| PC (Linux) | `~/.local/share/Steam`, `~/.steam/steam`, `~/.steam/root`, Flatpak's `~/.var/app/com.valvesoftware.Steam/.local/share/Steam`, Snap's `~/snap/steam/common/.local/share/Steam`: each library its `steamapps/libraryfolders.vdf` (or `config/`) names, then the Steam folder itself; in each `steamapps/common/Halo The Master Chief Collection` |
+| PC (Windows) | the registry's Steam (`HKCU\Software\Valve\Steam` SteamPath, `HKLM\SOFTWARE\WOW6432Node\Valve\Steam` and `HKLM\SOFTWARE\Valve\Steam` InstallPath), Program Files' Steam, each fixed drive's `SteamLibrary`, `Steam`, `Games\Steam` (their libraries as on Linux); then MCC's uninstall entry (`Steam App 976730`, InstallLocation) and the Xbox app's `<drive>:\XboxGames\Halo The Master Chief Collection\Content` (`port/windows/src/win32_mcc.c`, the PC install tool's places) |
+
+On a PC the folder found must have, in `halo1/maps`, one of Halo CE's stock
+maps with MCC's cache header (`head`, version 13; `port/linux/src/mcc_paths.c`),
+and the log's `content:` lines say each library read and the folder taken.
+A PC with MCC found and no Xbox `maps/` folder starts without asking for a
+disc image (the executable's folder the data root, an empty `maps/` made
+there); with none found (`"auto"`) the main menu says **Halo MCC not
+found** (the Halo 3 menu under the title, the original menu's corner in turn
+with the version). With both, the Xbox `maps/` folder's files come first
+(`ui.map`, the Halo PC files) and MCC's levels join the lists: the settings
+first, then the Xbox maps folder, then the MCC found.
 
 On the PS Vita, copy from MCC's folder on your PC (Steam: right-click
 the game, Manage, Browse local files) to the memory card:
@@ -235,8 +247,14 @@ b40, Blood Gulch with bots, no folder, a maps folder's
 `mcc_bloodgulch.map` left out; SKIP without one) and, in its `menu` part,
 the Halo PC files from `custom_edition`, which `ui.map` is the menus', MCC's
 menus with no Xbox file at all (six rows, the unsupported-function message,
-b30 and a10 started from them). The harness tests otherwise run with no
-content folder (`test_out.sh`).
+b30 and a10 started from them); its unit part also searches made-up
+Steam folders (a second library, Flatpak's Steam, a link, a map without
+MCC's header, `paths.content` forms), and its `auto` part runs the harness
+with `HOME` a made-up Steam whose second library links to your MCC: no Xbox
+file, MCC found by itself, Blood Gulch with bots 60 s; a gone
+`paths.content` falling back; no Steam saying "Halo MCC not found". The
+harness tests otherwise run with no content folder (`test_out.sh`:
+`HALO_CONTENT_ROOT=none`).
 
 ## Playing a mod natively
 

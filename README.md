@@ -290,7 +290,26 @@ game data and saves stay. The PC version doesn't update itself.
 
 ### PC game data
 
-No game files are included. You need:
+No game files are included. **If you have Halo: The Master Chief Collection
+on Steam, just run the game: it finds MCC by itself** and plays its Halo CE
+files (the campaign, the multiplayer maps, the menus and the Halo PC files
+in `halo1/maps/custom_edition`). Nothing is copied: MCC's folder is only
+read. The game looks in:
+
+- **Linux:** `~/.local/share/Steam`, `~/.steam/steam`, `~/.steam/root`, the
+  Flatpak's `~/.var/app/com.valvesoftware.Steam/.local/share/Steam` and the
+  Snap's Steam, and every library their `libraryfolders.vdf` lists.
+- **Windows:** the Steam folder the registry names, Program Files' Steam,
+  every library in its `libraryfolders.vdf`, `SteamLibrary` folders on your
+  other drives, MCC's own uninstall entry, and the Xbox app's
+  `XboxGames\Halo The Master Chief Collection\Content`.
+
+MCC somewhere else? Set `paths.content` in `config.toml` to its folder (the
+one with `halo1` in it). Not found, the main menu says **Halo MCC not
+found**; `paths.content = "none"` turns the search off. MCC's sound effects
+play; its music and dialogue are silent in this version.
+
+Or, the Xbox way:
 
 - **Your Xbox disc image** (`.iso` or `.xiso`) or its `maps/` folder, the
   same files as the Vita.
@@ -300,12 +319,18 @@ No game files are included. You need:
   Linux you can also drop the Custom Edition installer
   (`halocesetup*.exe`) next to `maps/` and the game takes them out itself.
 
+With both, the game uses both: the Xbox `maps/` folder's files come first
+(its menus, its levels), and MCC's levels are listed beside them. Which
+wins, from first to last: what you set in `config.toml` (`paths.data`,
+`paths.content`), then the Xbox `maps/` folder, then the MCC the game found.
+
 ### First start
 
-Start `build\windows\halo.exe` (Windows) or `./halo.sh` (Linux). With no
-game data it asks for your Xbox disc image: pick it and it copies `maps/`
-next to the game (a few minutes). Or put `maps/` there yourself first:
-`build\windows` on Windows; the unpacked folder or `build/linux` on Linux.
+Start `build\windows\halo.exe` (Windows) or `./halo.sh` (Linux). With MCC
+installed it starts right away. With no game data at all it asks for your
+Xbox disc image: pick it and it copies `maps/` next to the game (a few
+minutes). Or put `maps/` there yourself first: `build\windows` on Windows;
+the unpacked folder or `build/linux` on Linux.
 
 ### Keyboard and mouse
 
