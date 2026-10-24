@@ -493,6 +493,7 @@ short forge_spawn_location(
 	short pass;
 	short fitting = 0;
 	long now = game_time_get();
+	unsigned long spawn_seed;
 
 	if (!forge_globals.game_active || forge_globals.spawn_count <= 0 || player_index == NONE)
 		return _forge_spawn_location_map;
@@ -503,6 +504,14 @@ short forge_spawn_location(
 	game_bit = forge_spawn_game_bit();
 	teams = game_engine_running() && game_engine_has_teams();
 	first = !(forge_globals.spawns_spawned & (1UL << absolute));
+	/* (the draw's own seed, not the game's global one alone: that starts every
+	game the same (a host's network game has seed 0) and moves only with other
+	draws, so the same spawn came up each time. This is the global seed mixed
+	with the game time and the player - the same on every machine, so the pick
+	is as deterministic as before - and a respawn's time varies it) */
+	spawn_seed = *get_global_random_seed_address() ^ ((unsigned long)now * 2654435761UL) ^
+		((unsigned long)(absolute + 1) * 40503UL);
+	spawn_seed = spawn_seed * 1664525UL + 1013904223UL;
 	/* (a round's first spawn: its initial spawns, else its respawn points) */
 	for (pass = first ? 0 : 1; pass < 2; pass++)
 	{
@@ -533,7 +542,7 @@ short forge_spawn_location(
 			/* (the engine's rating, randomised as find_best_starting_location_
 			index does) */
 			rating = game_engine_get_starting_location_rating(player_index, &candidate) *
-				(real)pow((double)real_random_range(0.f, 1.f), 0.5);
+				(real)pow((double)real_seed_random_range(&spawn_seed, 0.f, 1.f), 0.5);
 			if (rating > best_rating)
 			{
 				best_rating = rating;
