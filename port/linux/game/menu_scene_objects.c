@@ -2260,3 +2260,21 @@ boolean menu_scene_objects_lighting(
 	}
 	return FALSE;
 }
+
+/* (render.c render_backdrop_frame_kept) whether a screen's scene stands in
+the menus now - its characters, weapons or the preview made: their poses
+move with every frame drawn */
+int menu_scene_objects_present(
+	void)
+{
+	short index;
+
+	if (!menu_scene_objects_initialized || menu_scene_objects.refused)
+		return FALSE;
+	for (index = 0; index < NUMBER_OF_MENU_SCENE_SLOTS; index++)
+	{
+		if (slot_object_valid(&menu_scene_objects.slots[index]))
+			return TRUE;
+	}
+	return FALSE;
+}

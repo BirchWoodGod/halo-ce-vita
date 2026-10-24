@@ -382,6 +382,79 @@ static boolean halo_sky_late_enabled(void)
 	}
 	return enabled > 0;
 }
+
+/* (port, insider.25 menu GPU work) HALO_MENU_BACKDROP_HZ, the live menu
+backdrop's (menu_backdrop.c) refresh rate: a30's 3D picture behind the
+Online menus is drawn that many times a second (default 15; 0 or 30 and
+up: every frame, as before), and the frames between keep the last one -
+the window begun without its clear, none of the 3D drawn - while the menus
+over it are drawn every frame. The Vita's Sharp interface scales the 3D
+picture up from the back buffer into its interface layer at the interface's
+start (vita_gxm.c vgxm_interface_begin) and draws the menus there, so the
+back buffer holds the last 3D picture untouched (halo_d3d_backdrop_reuse_
+supported: the Vita's device with the Sharp interface and the Online menus;
+the PC's draws every frame). Only while the menus' camera holds still:
+a camera's flight between screens, a frame that was not the backdrop's
+(a loading screen), or the backdrop just switched in draw in full. The
+backdrop's sky, water, trees and grass move at that rate; the menus,
+their cursor and text at the frame rate. Saves the 3D's CPU (visibility,
+objects, the structure's passes: ~15 ms a frame of the game thread's on
+the Vita) and its GPU work on the frames kept. A screen with its scene's
+characters standing in it (the lobbies, CUSTOMIZATION:
+menu_scene_objects.c) has its own rate, HALO_MENU_BACKDROP_SCENE_HZ (default
+30: every frame, their poses and the flag moving at the frame rate). */
+int halo_d3d_backdrop_reuse_supported(void);
+int menu_backdrop_active(void);
+int menu_scene_objects_present(void);
+static boolean render_backdrop_frame_kept(
+	short rasterizer_target,
+	const struct render_camera *camera)
+{
+	static int backdrop_hz = -1, scene_hz = -1;
+	static unsigned long settings_seen;
+	int hz;
+	static boolean have_last;
+	static long last_frame_index;
+	static unsigned long long last_full_us;
+	static struct render_camera last_camera;
+	extern volatile unsigned long halo_settings_generation;
+	unsigned long long now;
+	boolean continuous, same_camera, keep;
+
+	if (backdrop_hz < 0 || settings_seen != halo_settings_generation)
+	{
+		const char *setting = getenv("HALO_MENU_BACKDROP_HZ"), *scene = getenv("HALO_MENU_BACKDROP_SCENE_HZ");
+
+		settings_seen = halo_settings_generation;
+		backdrop_hz = setting && *setting ? atoi(setting) : 15;
+		scene_hz = scene && *scene ? atoi(scene) : 30;
+		if (backdrop_hz < 0)
+			backdrop_hz = 0;
+		if (scene_hz < 0)
+			scene_hz = 0;
+	}
+	hz = backdrop_hz;
+	if (hz > 0 && hz < 30 && menu_backdrop_active() && menu_scene_objects_present())
+		hz = scene_hz;
+	if (hz <= 0 || hz >= 30 || rasterizer_target != _render_target_primary || !menu_backdrop_active() ||
+		!halo_d3d_backdrop_reuse_supported())
+	{
+		have_last = FALSE;
+		return FALSE;
+	}
+	now = vita_host_time_us();
+	continuous = have_last && render.frame_index - last_frame_index == 1;
+	same_camera = have_last && !memcmp(&last_camera, camera, sizeof(last_camera));
+	keep = continuous && same_camera && now - last_full_us < 1000000ull / (unsigned)hz - 4000ull;
+	last_frame_index = render.frame_index;
+	if (!keep)
+	{
+		memcpy(&last_camera, camera, sizeof(last_camera));
+		last_full_us = now;
+	}
+	have_last = TRUE;
+	return keep;
+}
 const char *halo_render_phase_names[64];
 #define RENDER_PHASE_BEGIN() do { if (render_profile_enabled > 0) { render_phase_started = render_now(); \
 	halo_render_draw_counts(&render_phase_draws_started[0], &render_phase_draws_started[1]); } } while (0)
@@ -460,6 +533,9 @@ static void render_window(
 {
 	struct rasterizer_window_begin_parameters parameters;
 	short rendered_cluster_index;
+#ifdef HALO_LINUX
+	boolean backdrop_kept;
+#endif
 
 	profile_render_window_start(TRUE);
 #ifdef HALO_LINUX
@@ -479,9 +555,19 @@ static void render_window(
 	parameters.window_index = render.window_index;
 	parameters.fog = render.fog;
 
+#ifdef HALO_LINUX
+	/* (port) the menu backdrop's frame kept: none of the 3D drawn, the back
+	buffer not cleared (render_backdrop_frame_kept) */
+	backdrop_kept = !bink_playback_in_progress() && render_backdrop_frame_kept(rasterizer_target, rasterizer_camera);
+	if (backdrop_kept)
+		parameters.suppress_clear = TRUE;
+	else
+#endif
+	{
 	RENDER_PHASE_BEGIN_ID(0, "visibility");
 	structure_visibility_compute();
 	RENDER_PHASE_END(0, "visibility");
+	}
 	player_effect_get_screen_flash(local_player_index, &parameters.screen_flash);
 	RENDER_PHASE_BEGIN_ID(21, "window_begin");
 	rasterizer_window_begin(&parameters);
@@ -489,6 +575,17 @@ static void render_window(
 
 	if (!bink_playback_in_progress())
 	{
+#ifdef HALO_LINUX
+		if (backdrop_kept)
+		{
+			/* (the window's fog offset set for this frame, let go as the
+			structure's preprocess does) */
+			extern void structure_render_fog_offset_reset(void);
+
+			structure_render_fog_offset_reset();
+			goto backdrop_frame_kept;
+		}
+#endif
 #ifdef HALO_LINUX
 		/* (port) HALO_SKY_LATE (default on, 0 = off): the sky drawn after
 		the opaque scene - the objects and the structure's lightmap pass,
@@ -715,6 +812,7 @@ static void render_window(
 #ifdef HALO_LINUX
 		/* (port) and from here when it did not (no player: no HUD): the
 		screen flash covers the HUD, as before, and the menus over both */
+backdrop_frame_kept:
 		rasterizer_interface_begin();
 #endif
 		RENDER_PHASE_BEGIN_ID(31, "screen_flash");

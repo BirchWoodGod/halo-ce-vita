@@ -289,6 +289,11 @@ struct target
 	int scale_kind;
 	/* the serial of the last scene that drew into it (0: none yet) */
 	unsigned int written_serial;
+	/* the drawn rectangle as that scene had it (0: rect_width's): a
+	picture kept over frames (render.c's menu backdrop) is scaled up at the
+	size it was drawn at, whatever the dynamic resolution has since made
+	the rectangle (blit) */
+	unsigned int written_width, written_height;
 	struct block memory;
 	SceGxmColorSurface color;
 	SceGxmDepthStencilSurface depth_stencil;
@@ -3343,7 +3348,11 @@ static int scene_ensure(void)
 	if (gxm.wanted_color != gxm.presented_target)
 		gxm.texture_scene_since_wait = 1;
 	if (color)
+	{
 		color->written_serial = gxm.scene_serial;
+		color->written_width = color->rect_width;
+		color->written_height = color->rect_height;
+	}
 	if (depth)
 		depth->written_serial = gxm.scene_serial;
 	{
@@ -4125,8 +4134,10 @@ static void blit(struct target *source)
 	resolution's rectangle rounds its sides apart) */
 	unsigned int shape_width = source->asked_width ? source->asked_width : source->width;
 	unsigned int shape_height = source->asked_height ? source->asked_height : source->height;
-	unsigned int drawn_width = source->rect_width ? source->rect_width : source->width;
-	unsigned int drawn_height = source->rect_height ? source->rect_height : source->height;
+	unsigned int drawn_width = source->written_width ? source->written_width :
+		source->rect_width ? source->rect_width : source->width;
+	unsigned int drawn_height = source->written_height ? source->written_height :
+		source->rect_height ? source->rect_height : source->height;
 
 	height = (float)DISPLAY_HEIGHT;
 	width = height * (float)shape_width / (float)shape_height;

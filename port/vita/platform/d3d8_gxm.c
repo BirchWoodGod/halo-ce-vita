@@ -8818,6 +8818,17 @@ static int sharp_interface_enabled(void)
 	return enabled;
 }
 
+/* (render.c render_backdrop_frame_kept) whether the menu backdrop's 3D
+picture can be kept in the back buffer between frames: the Sharp interface
+draws the Online menus on its own layer (vita_gxm.c interface_full_scale
+splits there at any scale), never into the back buffer */
+int halo_menu_style_online(void);
+int halo_main_menu_loaded(void);
+int halo_d3d_backdrop_reuse_supported(void)
+{
+	return device.gpu_ready && sharp_interface_enabled() && halo_menu_style_online() && halo_main_menu_loaded();
+}
+
 /* (the frame the interface began in: once a frame) */
 static unsigned long interface_frame = (unsigned long)-1;
 

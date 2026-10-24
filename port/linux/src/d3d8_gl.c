@@ -3735,6 +3735,20 @@ int halo_d3d_sky_late_supported(void)
 	return 0;
 }
 
+/* (render.c render_backdrop_frame_kept) the menu backdrop kept between
+frames only in the Vita preview with its Sharp interface (the menus drawn
+into the picture's own target, the back buffer left as the 3D drew it, as
+the Vita's interface layer: the screenshots that check it); the desktop's
+menus are drawn into the back buffer, the backdrop every frame */
+int halo_d3d_backdrop_reuse_supported(void)
+{
+	extern int halo_menu_style_online(void);
+	extern int halo_main_menu_loaded(void);
+
+	return device.gl_ready && vita_preview_enabled() && vita_preview_sharp_interface() && halo_menu_style_online() &&
+		halo_main_menu_loaded();
+}
+
 void WINAPI D3DDevice_SetIndices(D3DIndexBuffer *index_data, UINT base_vertex_index)
 {
 	device.base_vertex_index = base_vertex_index;
