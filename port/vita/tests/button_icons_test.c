@@ -4,8 +4,10 @@ BUTTON_ICONS_TEST.C
 A desktop test of the desktop build's button icons (port/linux/src/
 button_glyphs.c, included whole; port/linux/include/halo_button_icons.h):
 the key or mouse button each of the game's buttons shows with the
-keyboard's icons, in play and in the menus (the bindings themselves are
-checked against xinput_sdl.c's keyboard_gamepad by run_button_icons_test.sh);
+keyboard's icons, in the menus (their fixed keys, checked against
+xinput_sdl.c's keyboard_menus by run_button_icons_test.sh) and in play (the
+player's bindings, halo_key_bindings.h, at the MCC defaults and rebound,
+through the profile's button layout);
 display.button_icons and HALO_BUTTON_ICONS (auto, keyboard, xbox,
 playstation, read each time), auto following the device used last (the
 keyboard before any, an Xbox pad's, a PlayStation pad's); the glyph
@@ -18,8 +20,10 @@ Run port/vita/tests/run_button_icons_test.sh.
 #define HALO_LINUX 1
 
 #include "../../linux/src/button_glyphs.c"
+#include "../../linux/src/key_bindings.c"
 
 #include <stdio.h>
+#include <strings.h>
 
 static int failures, checks;
 
@@ -46,6 +50,50 @@ int platform_input_device_last(void)
 	return test_device;
 }
 
+/* (xinput_sdl.c's: the bindings in force, the test's; SDL's names of a
+few keys, by scancode) */
+static struct halo_bindings test_bindings;
+
+static int test_scancode_from_name(const char *name)
+{
+	static const struct
+	{
+		int scancode;
+		const char *name;
+	} names[] =
+	{
+		{ 4, "A" }, { 6, "C" }, { 7, "D" }, { 8, "E" }, { 9, "F" }, { 10, "G" }, { 11, "H" }, { 20, "Q" }, { 21, "R" },
+		{ 22, "S" }, { 26, "W" }, { 29, "Z" }, { 42, "Backspace" }, { 43, "Tab" }, { 44, "Space" }, { 224, "Left Ctrl" },
+		{ 225, "Left Shift" }, { 25, "V" }, { 52, "'" },
+	};
+	size_t index;
+
+	for (index = 0; index < sizeof(names) / sizeof(names[0]); index++)
+	{
+		if (!strcasecmp(names[index].name, name))
+			return names[index].scancode;
+	}
+	return 0;
+}
+
+const struct halo_bindings *halo_key_bindings(void)
+{
+	return &test_bindings;
+}
+
+/* (input_abstraction.c's: the profile's button layout, the Xbox's
+default, or Green Thumb's - jump on B, melee on A, ...) */
+static int test_green_thumb;
+
+short input_abstraction_port_control_button(short controller_index, short control_index)
+{
+	static const short standard[12] = { 0, 4, 2, 3, 1, 5, 6, 7, 12, 13, 14, 15 };
+	static const short green_thumb[12] = { 1, 4, 2, 3, 0, 5, 6, 7, 12, 13, 14, 15 };
+
+	(void)controller_index;
+	return control_index >= 0 && control_index < 12 ? (test_green_thumb ? green_thumb : standard)[control_index] : -1;
+}
+
 /* the game's buttons (source/input/input.h) */
 enum
 {
@@ -65,20 +113,20 @@ static void test_keys(void)
 	{
 		{ A, HALO_KEY_SPACE, HALO_KEY_ENTER, "A: Space in play (jump), Enter in the menus" },
 		{ B, HALO_KEY_F, HALO_KEY_ESC, "B: F in play (melee), Escape in the menus (back; Backspace too)" },
-		{ X, HALO_KEY_E, HALO_KEY_E, "X: E (action, reload)" },
-		{ Y, HALO_KEY_TAB, HALO_KEY_TAB, "Y: Tab (change the weapon)" },
-		{ BLACK, HALO_KEY_X, HALO_KEY_X, "Black: X (change the grenade)" },
+		{ X, HALO_KEY_E, HALO_KEY_E, "X: E (the action; R reloads, apart)" },
+		{ Y, HALO_KEY_TAB, HALO_KEY_TAB, "Y: Tab (switch weapons)" },
+		{ BLACK, HALO_KEY_H, HALO_KEY_X, "Black: H in play (switch grenades), X in the menus" },
 		{ WHITE, HALO_KEY_Q, HALO_KEY_Q, "White: Q (flashlight)" },
-		{ LT, HALO_KEY_RMB, HALO_KEY_G, "left trigger: right mouse button in play, G in the menus (the mouse is the pointer)" },
+		{ LT, HALO_KEY_G, HALO_KEY_G, "left trigger: G (throw a grenade, as MCC)" },
 		{ RT, HALO_KEY_LMB, -1, "right trigger: left mouse button in play, none in the menus" },
 		{ UP, HALO_KEY_UP, HALO_KEY_UP, "D-pad up: the up arrow" },
 		{ DOWN, HALO_KEY_DOWN, HALO_KEY_DOWN, "D-pad down: the down arrow" },
 		{ LEFT, HALO_KEY_LEFT, HALO_KEY_LEFT, "D-pad left: the left arrow" },
 		{ RIGHT, HALO_KEY_RIGHT, HALO_KEY_RIGHT, "D-pad right: the right arrow" },
 		{ START, HALO_KEY_ESC, HALO_KEY_SPACE, "Start: Escape in play (the pause menu), Space in the menus" },
-		{ BACK, HALO_KEY_F1, HALO_KEY_F1, "Back: F1" },
+		{ BACK, HALO_KEY_BACKSPACE, HALO_KEY_F1, "Back: Backspace in play (the scores), F1 in the menus" },
 		{ LS, HALO_KEY_CTRL, HALO_KEY_CTRL, "left stick click: Ctrl (crouch)" },
-		{ RS, HALO_KEY_MMB, HALO_KEY_Z, "right stick click: the middle button in play (zoom), Z in the menus" },
+		{ RS, HALO_KEY_RMB, HALO_KEY_Z, "right stick click: the right button in play (zoom, as MCC), Z in the menus" },
 		{ LEFT_STICK, HALO_KEY_WASD, HALO_KEY_WASD, "the left stick: W A S D" },
 		{ RIGHT_STICK, HALO_KEY_MOUSE, -1, "the right stick: the mouse in play, none in the menus" },
 	};
@@ -90,6 +138,21 @@ static void test_keys(void)
 			halo_keyboard_button_key(expected[index].button, 1) == expected[index].menus, expected[index].what);
 	}
 	check(halo_keyboard_button_key(-1, 0) == -1 && halo_keyboard_button_key(18, 1) == -1, "no key past the buttons");
+
+	/* rebound: the grenade on V, melee on a key with no keycap first */
+	halo_bind_assign(&test_bindings, HALO_BIND_THROW_GRENADE, 0, 25, NULL);
+	check(halo_keyboard_button_key(LT, 0) == HALO_KEY_V && halo_keyboard_button_key(LT, 1) == HALO_KEY_G,
+		"rebound: the left trigger shows V in play, the menus' G still");
+	halo_bind_assign(&test_bindings, HALO_BIND_MELEE, 0, 52, NULL);
+	check(halo_keyboard_button_key(B, 0) == HALO_KEY_MOUSE4, "rebound: a key with no keycap skipped for the next one's");
+	halo_bind_clear(&test_bindings, HALO_BIND_MELEE, 1);
+	check(halo_keyboard_button_key(B, 0) == -1, "rebound: none with a keycap: the Xbox's icon");
+	/* the profile's button layout moves the buttons, not the keys */
+	halo_bind_defaults(&test_bindings);
+	test_green_thumb = 1;
+	check(halo_keyboard_button_key(B, 0) == HALO_KEY_SPACE && halo_keyboard_button_key(A, 0) == HALO_KEY_F,
+		"Green Thumb: B is jump's Space, A melee's F");
+	test_green_thumb = 0;
 }
 
 static void test_shown(void)
@@ -162,6 +225,8 @@ static void test_list(void)
 
 int main(void)
 {
+	halo_bind_set_key_names(test_scancode_from_name, NULL);
+	halo_bind_defaults(&test_bindings);
 	test_keys();
 	test_shown();
 	test_glyphs();

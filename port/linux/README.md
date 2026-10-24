@@ -149,26 +149,51 @@ The keyboard and the mouse operate controller 1. The game adds the input of
 the first gamepad to controller 1. The other gamepads operate controllers 2
 to 4.
 
-| Key | Controller | Function in the game |
+In play the keyboard and the mouse operate the player's actions
+(`src/key_bindings.c`, `include/halo_key_bindings.h`), each bound to keys,
+mouse buttons or the wheel in `config.toml`'s `[controls.keyboard]` (up to
+four each, names as SDL gives them: `"Left Ctrl"`, `"Mouse Right"`,
+`"Wheel Up"`). The defaults are Halo MCC's PC Halo: CE layout. An action
+that is one of the game's controls presses the controller button that the
+profile's button layout puts that control on, so a button layout never
+moves a key.
+
+| Action (`config.toml` key) | Default | Controller (standard layout) |
 | --- | --- | --- |
-| W, A, S, D | left stick | move |
-| mouse | (direct aim) | aim |
-| left mouse button | right trigger | fire |
-| right mouse button, G | left trigger | throw a grenade |
-| space, enter | A | jump, accept (in the menus space is start) |
-| F, backspace, mouse button 4 | B | melee, back |
-| E, R | X | action, reload |
-| tab, mouse wheel | Y | change the weapon |
-| Q | white | flashlight |
-| X | black | change the grenade |
-| left ctrl, C | left stick click | crouch |
-| Z, middle mouse button | right stick click | zoom |
-| arrow keys | D-pad | |
-| escape | start; B in the menus | pause menu; back in the menus |
-| F1 | back | |
+| `move_forward`, `move_backward`, `strafe_left`, `strafe_right` | W, S, A, D | left stick |
+| (aim) | mouse | (direct aim) |
+| `fire` | left mouse button | right trigger |
+| `zoom` | right mouse button, Z | right stick click |
+| `throw_grenade` | G | left trigger |
+| `melee` | F, mouse button 4 | B |
+| `action` | E | X (never reloads when there is nothing to act on) |
+| `reload` | R | (reload alone) |
+| `switch_weapon` | Tab, mouse wheel | Y |
+| `switch_grenade` | H, middle mouse button | black |
+| `flashlight` | Q | white |
+| `jump` | space | A |
+| `crouch` | left ctrl, C | left stick click (also while walking) |
+| `boost` | left shift | left stick click while driving a Halo 2 vehicle |
+| `scoreboard` | backspace | back |
+| (pause) | escape | start |
+| (fixed) | arrow keys, F1, enter | D-pad, back, A (unless bound) |
 | \` | | open the developer console |
 | F12 | | release or capture the mouse |
 | F11 | | change between fullscreen and window |
+
+The menus' **KEYBOARD & MOUSE** page (`game/controls_menu.c`; Halo 3
+menus: CUSTOMIZATION, a profile; Halo CE menus: SETTINGS, a profile;
+ElDewrito menus: CUSTOMIZATION's CONTROLS tab) lists the actions with their
+first and second keys, and the mouse's `input.mouse_sensitivity`,
+`input.invert_mouse` and `input.raw_mouse`. A (or a click) asks for the
+key: the next key or mouse button is bound (Escape cancels, Delete clears);
+a key that another action has is swapped with it, and the page says what
+the other action has now. X clears the chosen key, Y (or RESET TO MCC
+DEFAULTS) puts every key back. Each change is written to `config.toml` at
+once. A `config.toml` of an earlier version is migrated: an action at an
+earlier version's default (the fixed layout up to 1.1.1-insider.24) gets
+the MCC default; an action you set yourself is kept, and a default gives
+up a key that you bound to another action.
 
 One movement of the mouse wheel changes the weapon one time. A second
 movement after a short pause changes it again.
@@ -182,14 +207,16 @@ In the menus, the mouse moves a pointer:
 - A right click goes back.
 - The mouse wheel moves through the items.
 
-The keyboard also operates the menus: the arrow keys move, Enter accepts,
-Escape (or Backspace) goes back, and space is the controller's start. In
+The keyboard also operates the menus, with fixed keys: the arrow keys (or
+W A S D) move, Enter accepts, Escape (or Backspace, F) goes back, space is
+the controller's start, E is X, Tab Y, Q white, X black, G the left
+trigger, F1 back. In
 play, Escape opens the pause menu; Escape in the pause menu closes it.
 When the game continues, the mouse aims again. A mouse button that you hold from the menu does not fire until
 you push it again.
 
-The prompts and the menus show the keys and the mouse buttons of this table
-while you play with the keyboard and the mouse, and a gamepad's buttons
+The prompts and the menus show the keys and the mouse buttons bound (the
+first with a keycap) while you play with the keyboard and the mouse, and a gamepad's buttons
 once you use a gamepad (`display.button_icons` in "Settings").
 
 ### Typing
@@ -256,6 +283,8 @@ the setting for one start of the game. It has priority over the file.
 | `audio.volume` | `1.0` | `HALO_VOLUME` | The master volume. |
 | `input.mouse_sensitivity` | `1.0` | `HALO_MOUSE_SENSITIVITY` | The multiplier for the mouse aim. |
 | `input.invert_mouse` | `false` | `HALO_MOUSE_INVERT=1` sets `true` | `true`: the vertical mouse aim is inverted. |
+| `input.raw_mouse` | `true` | `HALO_MOUSE_RAW` | `true`: the mouse's own movement aims (raw input). `false`: with the system's pointer speed and acceleration (SDL's `SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE`). |
+| `controls.keyboard.<action>` | MCC's (see "Controls") | `HALO_KEY_<ACTION>` | The keys of each action, separated by commas ("Controls"). The KEYBOARD & MOUSE page writes them. |
 | `game.language` | `""` | `HALO_LANGUAGE` | The language of the menus: `ja`, `de`, `fr`, `es` or `it`. Empty: English. |
 | `paths.data` | `""` | `HALO_DATA_ROOT` | The data root. Refer to "Start the game". |
 | `paths.saves` | `""` | `HALO_SAVE_ROOT` | The save root. Refer to "Files and folders". |

@@ -342,20 +342,37 @@ use (the keyboard's icons), and switch to the pad's buttons when you pick
 up a pad (`display.button_icons` in `config.toml`: `auto`, `keyboard`,
 `xbox` or `playstation`).
 
-| Key | In game |
+The defaults are Halo: The Master Chief Collection's for Halo: CE on PC:
+
+| Action | Keys (default) |
 | --- | --- |
-| W A S D / mouse | move / aim |
-| Left click / right click or G | fire / grenade |
-| Space or Enter | jump, accept |
-| F, Backspace or mouse button 4 | melee, back |
-| E or R | action, reload |
-| Tab or mouse wheel | switch weapon |
-| Q / X | flashlight / switch grenade |
-| Left Ctrl or C | crouch |
-| Z or middle click | zoom |
-| Escape | pause |
-| F1 | scoreboard |
-| F11 / F12 | fullscreen / free the mouse |
+| Move / aim | W A S D / mouse |
+| Fire | Left click |
+| Zoom | Right click, Z |
+| Throw grenade | G |
+| Melee | F, mouse button 4 |
+| Action (get in, pick up; hold: swap weapons) | E |
+| Reload | R |
+| Switch weapon | Tab, mouse wheel |
+| Switch grenade | H, middle click |
+| Flashlight | Q |
+| Jump | Space |
+| Crouch (walking too) | Left Ctrl, C |
+| Boost (Halo 2's Ghost) | Left Shift |
+| Scoreboard | Backspace |
+| Pause | Escape |
+| Fullscreen / free the mouse | F11 / F12 |
+
+Rebind any of them in the menus: **KEYBOARD & MOUSE** (Halo 3 menus:
+CUSTOMIZATION, a profile, KEYBOARD & MOUSE; Halo CE menus: SETTINGS, a
+profile, KEYBOARD & MOUSE; ElDewrito menus: CUSTOMIZATION, CONTROLS). Pick
+an action, press A (or click) and then the key or mouse button; Escape
+cancels, Delete clears, X clears the chosen key, Y (or RESET TO MCC
+DEFAULTS) puts every key back. A key another action had is swapped with
+it, and the page says so. The same page has the mouse's sensitivity,
+invert and raw input. Or edit `config.toml`'s `[controls.keyboard]`
+(`throw_grenade = "G, Mouse Right"`: up to four keys each). A file from an
+earlier version gets the new defaults, except for keys you set yourself.
 
 In the menus the mouse moves a pointer: left click picks, right click goes
 back. The full list is in [port/linux/README.md](port/linux/README.md#controls).

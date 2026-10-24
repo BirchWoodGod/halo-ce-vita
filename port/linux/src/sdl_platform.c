@@ -35,6 +35,8 @@ static struct platform_input_state input_state;
 /* keys pressed since the last read, so a press and release between two
 reads still counts as a press (input injected on Android, or a slow frame) */
 static unsigned char keys_pressed[SDL_SCANCODE_COUNT];
+/* the same for the mouse's buttons (a click shorter than a frame fires) */
+static unsigned char mouse_pressed[PLATFORM_MOUSE_BUTTON_COUNT];
 #ifndef HALO_NOT_DESKTOP
 /* the menus' pointer (platform_ui_pointer_set_active), under input_lock */
 static struct platform_ui_pointer ui_pointer;
@@ -1296,8 +1298,18 @@ spaces:
 	clip:TEXT     the clipboard's text (%XX as text:)
 	wait:MS       a pause
 	@NAME         the next frame saved as NAME.bmp (HALO_SCREENSHOT_DIR)
+	until/TEXT    waits for a screen whose name has TEXT in it
+	asking        waits for the menus to ask for a key to bind
+	hold:NAME:MS  a key, mouse button ("Mouse%20Right") or wheel notch
+	              ("Wheel%20Up") held for MS milliseconds
 halo.log says each step as it is taken ("test keys: ..."). */
 #define TEST_KEYS_PAUSE_MS 250
+
+#ifndef HALO_NOT_DESKTOP
+/* (below: the menus' asking for a key, the tests' holds) */
+static int binding_capture_state;
+BOOL platform_test_input_hold(const char *name, int milliseconds);
+#endif
 
 BOOL platform_test_key(const char *name);
 
@@ -1351,6 +1363,20 @@ static void test_keys(void)
 			return;
 		if (!strcmp(step, "closed") && pc_text_entry_active())
 			return;
+#ifndef HALO_NOT_DESKTOP
+		/* ("until/TEXT": until the screen open is one whose name has TEXT in
+		it, as HALO_TEST_PAD's; "asking": until the menus ask for a key to
+		bind, controls_menu.c) */
+		if (!strncmp(step, "until/", 6))
+		{
+			char const *ui_widget_port_active_screen_name(void);
+
+			if (!strstr(ui_widget_port_active_screen_name(), step + 6))
+				return;
+		}
+		if (!strcmp(step, "asking") && binding_capture_state != 1)
+			return;
+#endif
 		platform_log("test keys: %s", step);
 		at = now + TEST_KEYS_PAUSE_MS;
 		if (!strncmp(step, "text:", 5))
@@ -1375,6 +1401,20 @@ static void test_keys(void)
 		}
 		else if (!strncmp(step, "wait:", 5))
 			at = now + (Uint64)atoi(step + 5);
+#ifndef HALO_NOT_DESKTOP
+		/* ("hold:NAME:MS": a key, mouse button or wheel notch held that
+		long: "hold:Mouse%20Right:200", %20 a space) */
+		else if (!strncmp(step, "hold:", 5))
+		{
+			char name[64];
+			char const *colon = strrchr(step + 5, ':');
+
+			test_keys_decode(name, sizeof(name), step + 5);
+			if (colon && strrchr(name, ':'))
+				*strrchr(name, ':') = 0;
+			platform_test_input_hold(name, colon ? atoi(colon + 1) : 150);
+		}
+#endif
 		else if (step[0] == '@' && step[1])
 		{
 			extern char halo_screenshot_name[64];
@@ -1388,6 +1428,212 @@ static void test_keys(void)
 	}
 }
 #endif
+#endif
+
+/* ---------- the menus' asking for a key to bind (halo_key_bindings.h) */
+
+#ifndef HALO_NOT_DESKTOP
+#include "../include/halo_key_bindings.h"
+
+/* (under input_lock) 0 none, 1 waiting for a key, 2 one taken (its result
+and input below, until polled) */
+static int binding_capture_state;
+static int binding_capture_result, binding_capture_input;
+/* the mouse's buttons the asking took, kept from the game until let go */
+static unsigned char mouse_taken[PLATFORM_MOUSE_BUTTON_COUNT];
+
+void platform_binding_capture_begin(void)
+{
+	pthread_mutex_lock(&input_lock);
+	binding_capture_state = 1;
+	binding_capture_result = 0;
+	pthread_mutex_unlock(&input_lock);
+	platform_log("controls: press a key to bind");
+}
+
+void platform_binding_capture_end(void)
+{
+	pthread_mutex_lock(&input_lock);
+	binding_capture_state = 0;
+	pthread_mutex_unlock(&input_lock);
+}
+
+int platform_binding_capturing(void)
+{
+	return binding_capture_state != 0;
+}
+
+int platform_binding_capture_poll(int *input)
+{
+	int result = 0;
+
+	pthread_mutex_lock(&input_lock);
+	if (binding_capture_state == 2)
+	{
+		result = binding_capture_result;
+		*input = binding_capture_input;
+		binding_capture_state = 0;
+	}
+	pthread_mutex_unlock(&input_lock);
+	return result;
+}
+
+/* (under input_lock, the event loop) an input taken by the asking: 1
+an input, 2 cancelled (Escape), 3 cleared (Delete) */
+static void binding_capture_take(int result, int input)
+{
+	char name[64];
+
+	binding_capture_state = 2;
+	binding_capture_result = result;
+	binding_capture_input = input;
+	halo_bind_input_name(input, name, sizeof(name));
+	platform_log("controls: %s", result == 2 ? "cancelled (Escape)" : result == 3 ? "cleared (Delete)" : name);
+}
+
+/* (the event loop) a key pressed while the menus ask for one: TRUE when
+taken (F11, F12 and the console's key stay theirs) */
+static BOOL binding_capture_key(const SDL_KeyboardEvent *key)
+{
+	if (binding_capture_state != 1 || !key->down || key->scancode >= SDL_SCANCODE_COUNT ||
+		key->scancode == SDL_SCANCODE_F11 || key->scancode == SDL_SCANCODE_F12 || key->scancode == SDL_SCANCODE_GRAVE)
+	{
+		return FALSE;
+	}
+	if (key->repeat)
+		return TRUE;
+	/* (kept from the game and the menus until let go: text_entry_key) */
+	keys_taken[key->scancode] = 1;
+	if (key->scancode == SDL_SCANCODE_ESCAPE)
+		binding_capture_take(2, -1);
+	else if (key->scancode == SDL_SCANCODE_DELETE)
+		binding_capture_take(3, -1);
+	else
+		binding_capture_take(1, (int)key->scancode);
+	return TRUE;
+}
+
+/* (the event loop) a mouse button or the wheel, likewise */
+static BOOL binding_capture_mouse(const SDL_Event *event)
+{
+	if (event->type == SDL_EVENT_MOUSE_BUTTON_UP && event->button.button < PLATFORM_MOUSE_BUTTON_COUNT &&
+		mouse_taken[event->button.button])
+	{
+		mouse_taken[event->button.button] = 0;
+		return TRUE;
+	}
+	if (binding_capture_state != 1)
+		return FALSE;
+	if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN)
+	{
+		if (event->button.button < PLATFORM_MOUSE_BUTTON_COUNT)
+			mouse_taken[event->button.button] = 1;
+		binding_capture_take(1, HALO_BIND_MOUSE + event->button.button);
+		return TRUE;
+	}
+	if (event->type == SDL_EVENT_MOUSE_WHEEL && event->wheel.y != 0.0f)
+	{
+		binding_capture_take(1, event->wheel.y > 0.0f ? HALO_BIND_WHEEL_UP : HALO_BIND_WHEEL_DOWN);
+		return TRUE;
+	}
+	return event->type == SDL_EVENT_MOUSE_BUTTON_UP;
+}
+#endif
+
+#if !defined(HALO_RELEASE) && !defined(HALO_NOT_DESKTOP)
+/* (tests only: main.c's "@hold NAME MS", HALO_TEST_KEYS's hold:NAME:MS) a
+key, a mouse button ("Mouse Left") or the wheel ("Wheel Up", "Wheel Down":
+a notch) pressed now and let go MS milliseconds later, through SDL's queue
+as the real ones arrive; FALSE for a name nothing has */
+static struct
+{
+	int input;
+	Uint64 up_at;
+} test_holds[16];
+
+static void test_input_event(int input, BOOL down)
+{
+	SDL_Event event;
+
+	memset(&event, 0, sizeof(event));
+	if (input >= HALO_BIND_WHEEL_UP)
+	{
+		if (!down)
+			return;
+		event.type = SDL_EVENT_MOUSE_WHEEL;
+		event.wheel.timestamp = SDL_GetTicksNS();
+		event.wheel.windowID = platform_window ? SDL_GetWindowID(platform_window) : 0;
+		event.wheel.y = input == HALO_BIND_WHEEL_DOWN ? -1.0f : 1.0f;
+		event.wheel.integer_y = input == HALO_BIND_WHEEL_DOWN ? -1 : 1;
+	}
+	else if (input >= HALO_BIND_MOUSE)
+	{
+		event.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
+		event.button.timestamp = SDL_GetTicksNS();
+		event.button.windowID = platform_window ? SDL_GetWindowID(platform_window) : 0;
+		event.button.button = (Uint8)(input - HALO_BIND_MOUSE);
+		event.button.down = down ? true : false;
+		event.button.clicks = 1;
+		event.button.x = 320.0f;
+		event.button.y = 240.0f;
+	}
+	else
+	{
+		event.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+		event.key.timestamp = SDL_GetTicksNS();
+		event.key.windowID = platform_window ? SDL_GetWindowID(platform_window) : 0;
+		event.key.scancode = (SDL_Scancode)input;
+		event.key.key = SDL_GetKeyFromScancode((SDL_Scancode)input, SDL_KMOD_NONE, false);
+		event.key.down = down ? true : false;
+	}
+	SDL_PushEvent(&event);
+}
+
+BOOL platform_test_input_hold(const char *name, int milliseconds)
+{
+	static int names_given;
+	int input, index;
+
+	if (!names_given)
+	{
+		names_given = 1;
+		halo_bind_set_key_names((int (*)(const char *))SDL_GetScancodeFromName,
+			(const char *(*)(int))SDL_GetScancodeName);
+	}
+	input = halo_bind_input_from_name(name);
+	if (input == HALO_BIND_NONE || input == HALO_BIND_WHEEL)
+	{
+		platform_log("test hold: no key or button \"%s\"", name);
+		return FALSE;
+	}
+	platform_log("test hold: %s for %d ms", name, milliseconds);
+	test_input_event(input, TRUE);
+	for (index = 0; index < 16; index++)
+	{
+		if (!test_holds[index].up_at)
+		{
+			test_holds[index].input = input;
+			test_holds[index].up_at = SDL_GetTicks() + (Uint64)(milliseconds > 0 ? milliseconds : 1);
+			break;
+		}
+	}
+	return TRUE;
+}
+
+/* (each pump) the holds whose time is up let go */
+static void test_holds_update(void)
+{
+	int index;
+
+	for (index = 0; index < 16; index++)
+	{
+		if (test_holds[index].up_at && SDL_GetTicks() >= test_holds[index].up_at)
+		{
+			test_holds[index].up_at = 0;
+			test_input_event(test_holds[index].input, FALSE);
+		}
+	}
+}
 #endif
 
 /* ---------- events */
@@ -1433,6 +1679,9 @@ void platform_pump_events(void)
 #endif
 	text_entry_input();
 #endif
+#if !defined(HALO_RELEASE) && !defined(HALO_NOT_DESKTOP)
+	test_holds_update();
+#endif
 	pthread_mutex_lock(&input_lock);
 	while (SDL_PollEvent(&event))
 	{
@@ -1452,6 +1701,14 @@ void platform_pump_events(void)
 			exit(EXIT_SUCCESS);
 		case SDL_EVENT_KEY_DOWN:
 		case SDL_EVENT_KEY_UP:
+#ifndef HALO_NOT_DESKTOP
+			/* (the menus asking for a key to bind: theirs alone) */
+			if (binding_capture_key(&event.key))
+			{
+				platform_input_device_used(_halo_input_device_keyboard);
+				break;
+			}
+#endif
 #ifndef HALO_VITA
 			/* (the text box open: its keys, none for the game) */
 			if (text_entry_key(&event.key))
@@ -1511,6 +1768,10 @@ void platform_pump_events(void)
 			break;
 		case SDL_EVENT_MOUSE_BUTTON_DOWN:
 		case SDL_EVENT_MOUSE_BUTTON_UP:
+#ifndef HALO_NOT_DESKTOP
+			if (binding_capture_mouse(&event))
+				break;
+#endif
 #ifndef HALO_VITA
 			/* (the text box open: no clicks for the menus behind it) */
 			if (event.button.down && pc_text_entry_active())
@@ -1538,11 +1799,19 @@ void platform_pump_events(void)
 			}
 #endif
 			if (event.button.button < PLATFORM_MOUSE_BUTTON_COUNT)
+			{
 				input_state.mouse_buttons[event.button.button] = event.button.down;
+				if (event.button.down)
+					mouse_pressed[event.button.button] = 1;
+			}
 			break;
 		case SDL_EVENT_MOUSE_WHEEL:
 #ifndef HALO_VITA
 			if (pc_text_entry_active())
+				break;
+#endif
+#ifndef HALO_NOT_DESKTOP
+			if (binding_capture_mouse(&event))
 				break;
 #endif
 #ifndef HALO_NOT_DESKTOP
@@ -1769,6 +2038,12 @@ void platform_input_read(struct platform_input_state *state, BOOL consume_motion
 		{
 			state->keys[scancode] |= keys_pressed[scancode];
 			keys_pressed[scancode] = 0;
+		}
+		for (scancode = 0; scancode < PLATFORM_MOUSE_BUTTON_COUNT; scancode++)
+		{
+			if (!state->ui_pointer)
+				state->mouse_buttons[scancode] |= mouse_pressed[scancode];
+			mouse_pressed[scancode] = 0;
 		}
 	}
 	if (consume_motion)

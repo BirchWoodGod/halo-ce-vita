@@ -19,10 +19,12 @@ reads the keys' labels and sizes from HALO_KEY_GLYPH_LIST below: our own
 art, no game's or icon pack's. None of it is the Vita's (HALO_VITA), which
 keeps its own icons (vita_pad.c).
 
-Which key each of the game's buttons is on is port/linux/src/xinput_sdl.c's
-fixed layout (keyboard_gamepad; port/linux/README.md "Controls"): the
-desktop build has no remapping. In the menus the mouse drives the pointer
-(its buttons never reach the controller), so a button shows its key there.
+Which key each of the game's buttons is on: in the menus port/linux/src/
+xinput_sdl.c's fixed keys (keyboard_menus); in play the player's binding of
+the action the button is (halo_key_bindings.h, config.toml's
+[controls.keyboard]; port/linux/README.md "Controls"). In the menus the mouse
+drives the pointer (its buttons never reach the controller), so a button
+shows its key there.
 */
 
 #ifndef HALO_BUTTON_ICONS_H
@@ -79,7 +81,14 @@ atlas's (tools/halo3_menu_art.py reads this list) */
 	K(MMB, "@mmb", "", 0) \
 	K(WHEEL, "@wheel", "", 0) \
 	K(MOUSE4, "@mouse4", "", 0) \
-	K(MOUSE, "@mouse", "", 0)
+	K(MOUSE, "@mouse", "", 0) \
+	K(H, "H", "", 0) \
+	K(V, "V", "", 0) \
+	K(T, "T", "", 0) \
+	K(B, "B", "", 0) \
+	K(N1, "1", "", 0) \
+	K(N2, "2", "", 0) \
+	K(N3, "3", "", 0)
 
 /* the wider keycaps' labels in Spanish (lang_current "es"), after the
 English ones in the atlas: K(name, wide, wide_width) */
@@ -138,6 +147,9 @@ click; 16 and 17 the left and right sticks themselves), in the menus or in
 play; -1 for none (the right trigger in the menus: the left button is the
 pointer's there) */
 int halo_keyboard_button_key(int gamepad_button, int menus);
+/* (button_glyphs.c) the keycap (a halo_key) an input of the bindings is
+drawn with (halo_key_bindings.h's inputs), -1 for one with none */
+int halo_key_of_input(int input);
 /* (sdl_platform.c) the device the player used last, and the input that
 says so (xinput_sdl.c: the tests' scripted pad is a gamepad's) */
 int platform_input_device_last(void);

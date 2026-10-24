@@ -109,6 +109,7 @@ editor's. The art is this folder's own (tools/online_menu_art.py) and the Halo 3
 		<string text="INVERT FLIGHT"/>
 		<string text="AUTO-CENTER"/>
 		<string text="VIBRATION"/>
+		<string text="KEYBOARD &amp; MOUSE"/>
 	</strings>
 	<strings name="online/custom_text">
 		<string text="CUSTOMIZATION"/>
@@ -267,6 +268,13 @@ editor's. The art is this folder's own (tools/online_menu_art.py) and the Halo 3
 		<child widget="online/custom/arrow_left"/>
 		<child widget="online/custom/arrow_right"/>
 	</widget>
+	<!-- (CONTROLS' KEYBOARD & MOUSE: the PC's keys - the page, online/keys.xml, standing for the Halo 3
+	one, h3/keys/screen -; menu_functions.c online_custom_update shows it on a PC alone) -->
+	<widget name="online/custom/op_keys_label" type="text" left="0" top="0" width="300" height="18" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/custom_labels" string_index="19"/>
+	<widget name="online/custom/op_keys" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a start" open="h3/keys/screen"/>
+		<child widget="online/custom/op_keys_label"/>
+	</widget>
 	<!-- PROFILE's rows (menu_functions.c online_profile_*): a profile's name (pr_label, set as it
 	shows) and CURRENT beside the one edited; CREATE NEW PROFILE last -->
 	<widget name="online/custom/pr_label" type="text" left="0" top="0" width="190" height="18" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" text_flags="no_focus_test"/>
@@ -351,6 +359,7 @@ editor's. The art is this folder's own (tools/online_menu_art.py) and the Halo 3
 		<child widget="online/custom/op_flight" x="0" y="0"/>
 		<child widget="online/custom/op_autocenter" x="0" y="0"/>
 		<child widget="online/custom/op_vibration" x="0" y="0"/>
+		<child widget="online/custom/op_keys" x="0" y="0"/>
 	</widget>
 
 	<!-- the header band (full width), CUSTOMIZATION and the tabs -->

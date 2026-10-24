@@ -50,6 +50,7 @@ is let go in scenario_tags_unload, before the next map's tags load.
 #include "memory/zlib/zlib.h"
 #include "cache_file_formats.h"
 
+#include "controls_menu.h"
 #include "halo_menus.h"
 #include "../src/lang.h"
 
@@ -720,6 +721,10 @@ static long function_index(char const *name, char const *file, long line)
 	index = name_index(name, port_function_names, NUMBEROF(port_function_names));
 	if (index != NONE)
 		return PC_MENU_FUNCTION_BASE + index;
+	/* (the KEYBOARD & MOUSE page's: controls_menu.c) */
+	index = controls_menu_function_index(name);
+	if (index != NONE)
+		return PC_MENU_FUNCTION_BASE + CONTROLS_MENU_FUNCTION_FIRST + index;
 	for (index = 0; (function_name = ui_widget_event_handler_function_name(index)) != NULL; index++)
 	{
 		if (!strcmp(name, function_name))
@@ -736,6 +741,9 @@ static long game_data_input_index(char const *name, char const *file, long line)
 	index = name_index(name, port_game_data_input_names, NUMBEROF(port_game_data_input_names));
 	if (index != NONE)
 		return PC_MENU_FUNCTION_BASE + index;
+	index = controls_menu_game_data_input_index(name);
+	if (index != NONE)
+		return PC_MENU_FUNCTION_BASE + CONTROLS_MENU_FUNCTION_FIRST + index;
 	index = name_index(name, game_data_input_names, NUMBEROF(game_data_input_names));
 	if (index != NONE)
 		return index;
@@ -3070,6 +3078,8 @@ boolean pc_menu_function_is_settings_panel(
 char const *pc_menu_function_name(
 	long function_index)
 {
+	if (function_index >= CONTROLS_MENU_FUNCTION_FIRST)
+		return controls_menu_function_name(function_index - CONTROLS_MENU_FUNCTION_FIRST);
 	return function_index >= 0 && function_index < (long)NUMBEROF(port_function_names) ?
 		port_function_names[function_index] : NULL;
 }
@@ -3077,6 +3087,8 @@ char const *pc_menu_function_name(
 char const *pc_menu_game_data_input_name(
 	long function_index)
 {
+	if (function_index >= CONTROLS_MENU_FUNCTION_FIRST)
+		return controls_menu_game_data_input_name(function_index - CONTROLS_MENU_FUNCTION_FIRST);
 	return function_index >= 0 && function_index < (long)NUMBEROF(port_game_data_input_names) ?
 		port_game_data_input_names[function_index] : NULL;
 }

@@ -272,6 +272,32 @@ void input_abstraction_update_local_player_preferences(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* port: the controller button (_gamepad_*_button_*) the controller's
+profile's button layout has one of the game's controls on, NONE for none:
+the keyboard's actions press it (port/linux/src/xinput_sdl.c), so the
+layout moves the controller's buttons, never a key */
+short input_abstraction_port_control_button(
+	short controller_index,
+	short control_index)
+{
+	if (controller_index < 0 || controller_index >= MAXIMUM_GAMEPADS || control_index < 0 ||
+		control_index >= NUMBER_OF_GAME_CONTROLS)
+	{
+		return NONE;
+	}
+	if (!input_abstraction_globals.initialized)
+	{
+		struct game_input_preferences defaults;
+
+		set_default_game_input_preferences(&defaults);
+		return defaults.game_control_to_xbox_buttons[control_index];
+	}
+	return input_abstraction_globals.player_control_preferences[controller_index].game_control_to_xbox_buttons[
+		control_index];
+}
+#endif
+
 struct game_input_state *input_abstraction_get_input_state(
 	short local_player_index)
 {

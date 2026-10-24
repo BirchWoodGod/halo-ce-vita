@@ -90,6 +90,7 @@ for a gamepad); a test build's HALO_TEST_TEXT_INPUT answers in its place,
 #include "saved games/saved_game_files.h"
 #include "tag_files/files.h"
 #include "cache/cache_files.h"
+#include "controls_menu.h"
 #include "halo_menus.h"
 #include "../src/lang.h"
 #include "../src/p2p.h"
@@ -4820,7 +4821,7 @@ static void ce_profile_description_update(struct widget_instance *widget)
 {
 	struct widget_instance *list = named(screen_of(widget), "profile_edit_select_list");
 	struct widget_instance *description, *child, *help;
-	boolean more;
+	boolean more, keys;
 	short index = 0;
 
 	if (!list || !list->focused_child || !(description = list->parameters.list.extended_description) ||
@@ -4830,17 +4831,20 @@ static void ce_profile_description_update(struct widget_instance *widget)
 	}
 	for (child = list->child; child && child != list->focused_child; child = child->next)
 	{
-		if (!child->name || strcmp(child->name, "more"))
+		if (!child->name || (strcmp(child->name, "more") && strcmp(child->name, "keys")))
 			index++;
 	}
-	/* (MORE OPTIONS: the panel, its own words in it - more_help -, not the
-	Xbox's picture and words) */
+	/* (MORE OPTIONS and KEYBOARD & MOUSE: the panel, their own words in it -
+	more_help, keys_help -, not the Xbox's picture and words) */
 	more = list->focused_child->name && !strcmp(list->focused_child->name, "more");
-	widget_instance_set_visibility_recursive(description, !more);
+	keys = list->focused_child->name && !strcmp(list->focused_child->name, "keys");
+	widget_instance_set_visibility_recursive(description, !more && !keys);
 	description->visible = TRUE;
 	if ((help = named(screen_of(widget), "more_help")) != NULL)
 		widget_instance_set_visibility_recursive(help, more);
-	if (more)
+	if ((help = named(screen_of(widget), "keys_help")) != NULL)
+		widget_instance_set_visibility_recursive(help, keys);
+	if (more || keys)
 		return;
 	description->child->parameters.text_box.string_list_index = index;
 	description->child->next->animation.current_frame_index = index;
@@ -5465,7 +5469,11 @@ static void h3_custom_update(struct widget_instance *list)
 			h3_custom.help_offset_kept = TRUE;
 			h3_custom.help_offset = found->vertical_offset;
 		}
-		found->vertical_offset = (short)(h3_custom.help_offset + (h3_custom.flame_listed ? 18 : 0));
+		/* (and a row lower for KEYBOARD & MOUSE, a PC's, in the Halo 3 editor:
+		controls_menu.c; Menu style Online's stacks its rows - its PROFILE
+		tab's pr_1 - and keeps its help where it is) */
+		found->vertical_offset = (short)(h3_custom.help_offset + (h3_custom.flame_listed ? 18 : 0) +
+			(controls_menu_available() && !named(list, "pr_1") ? 20 : 0));
 	}
 	for (row = 0; row < NUMBER_OF_H3_CUSTOM_ROWS; row++)
 	{
@@ -5521,7 +5529,9 @@ static void h3_custom_update(struct widget_instance *list)
 		}
 		text_show(named(screen, "preview_name"), line);
 	}
-	string_show(named(screen, "custom_help"), focused);
+	/* (KEYBOARD & MOUSE's help: the strings' after the rows') */
+	string_show(named(screen, "custom_help"), list->focused_child && list->focused_child->name &&
+		!strcmp(list->focused_child->name, "op_keys") ? NUMBER_OF_H3_CUSTOM_ROWS : focused);
 	/* (the settings panel's Invert look flips the stick again, on this
 	Vita: with both on, said) */
 	if (!h3_custom.status[0] && profile->controller_settings.invert_look && atoi(setting_get("XV_INVERT_Y", "0")))
@@ -5680,6 +5690,9 @@ static struct
 	{ "op_flight", 3, NULL, N_("INVERT FLIGHT") },
 	{ "op_autocenter", 3, NULL, N_("AUTO-CENTER") },
 	{ "op_vibration", 3, NULL, N_("VIBRATION") },
+	/* (a PC's: the keyboard and mouse's page, controls_menu.c; none on the
+	Vita) */
+	{ "op_keys", 3, NULL, N_("KEYBOARD & MOUSE") },
 };
 
 /* (the game's colours, profile_color_table's, as tools/halo3_menu_art.py
@@ -6111,6 +6124,9 @@ static void online_custom_update(struct widget_instance *list)
 
 		if (row != NONE && !strcmp(child->name, "op_flame"))
 			shown = shown && h3_custom.flame_listed;
+		/* (KEYBOARD & MOUSE: a PC's, controls_menu.c) */
+		if (row != NONE && !strcmp(child->name, "op_keys"))
+			shown = shown && controls_menu_available();
 		if (shown && !strncmp(child->name, "pr_", 3))
 			shown = online_profile_row_show(child);
 		widget_instance_set_visibility_recursive(child, shown);
@@ -18754,6 +18770,9 @@ boolean pc_menu_event_function_invoke(
 	long function_index,
 	boolean *widget_deleted)
 {
+	/* (the KEYBOARD & MOUSE page's: controls_menu.c) */
+	if (function_index >= CONTROLS_MENU_FUNCTION_FIRST)
+		return controls_menu_event(widget, event, function_index - CONTROLS_MENU_FUNCTION_FIRST, widget_deleted);
 	switch (function_index)
 	{
 	case _function_mp_screen_init:
@@ -19747,6 +19766,11 @@ void pc_menu_game_data_function_invoke(
 	struct widget_instance *widget,
 	long function)
 {
+	if (function >= CONTROLS_MENU_FUNCTION_FIRST)
+	{
+		controls_menu_game_data(widget, function - CONTROLS_MENU_FUNCTION_FIRST);
+		return;
+	}
 	switch (function)
 	{
 	case _input_mp_update_desc:

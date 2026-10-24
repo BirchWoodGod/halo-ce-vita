@@ -3042,7 +3042,7 @@ static wchar_t const *key_glyph_text(
 		N_(L"up arrow"), N_(L"down arrow"), N_(L"left arrow"), N_(L"right arrow"), N_(L"left and right arrows"),
 		L"E", L"F", L"R", L"Q", L"X", L"G", L"C", L"Z", L"W", L"A", L"S", L"D", L"WASD",
 		N_(L"left click"), N_(L"right click"), N_(L"middle click"), N_(L"mouse wheel"), N_(L"mouse button 4"),
-		N_(L"mouse"),
+		N_(L"mouse"), L"H", L"V", L"T", L"B", L"1", L"2", L"3",
 	};
 	static wchar_t const *const controller[HALO_GLYPH_XBOX_COUNT] =
 	{
