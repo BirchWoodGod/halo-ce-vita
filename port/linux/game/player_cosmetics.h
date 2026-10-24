@@ -75,4 +75,18 @@ boolean player_cosmetics_visor_tint(void const *shader_model, long reflection_cu
 profile's */
 void player_cosmetics_preview_visor(short visor);
 
+/* (the settings panel, port/vita/host/vita_settings.c: the first local
+player's profile's colour - 0 random, then colour + 1 - and visor, chosen
+from the panel's thread, taken at the game's frame: player_cosmetics_update,
+main.c) */
+int player_cosmetics_panel_color_count(void);
+char const *player_cosmetics_panel_color_name(int index);
+int player_cosmetics_panel_visor_count(void);
+char const *player_cosmetics_panel_visor_name(int index);
+int player_cosmetics_panel_color_chosen(void);
+int player_cosmetics_panel_visor_chosen(void);
+void player_cosmetics_panel_choose_color(int index);
+void player_cosmetics_panel_choose_visor(int index);
+void player_cosmetics_update(void);
+
 #endif

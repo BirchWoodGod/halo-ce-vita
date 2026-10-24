@@ -285,7 +285,7 @@ int network_wire_crossplay(void);
 #define SETTINGS_END "HALO_SETTINGS_END"
 /* where the system writes its crash dumps (psp2core-*.psp2dmp) */
 #define DUMP_DIRECTORY "ux0:data"
-#define MAXIMUM_CHOICES 24
+#define MAXIMUM_CHOICES 48
 /* the language files (lang.c): in the game's package */
 #define LANG_DIRECTORY "app0:lang"
 /* a code's characters as typed (p2p.h shows them ABCD-EFGH) */
@@ -661,6 +661,15 @@ static struct setting settings[] = {
 	choices. Shown while the maps folder has one) */
 	{ "Player model", "HALO_PLAYER_MODEL", 0, 1, { "0" }, { "Spartan" },
 		"Offline: you, or a Custom Edition map's player", 0, TAB_GAME },
+	/* (port/linux/game/player_cosmetics.c: the first local player's
+	profile's armour colour - the game's eighteen and the platform's own -
+	and visor colour, as CUSTOMIZATION's COLORS chooses them; kept in the
+	profile, never in settings.txt; the choices filled when the panel opens:
+	cosmetics_choices. On Game's Menus page: the Game tab has no room) */
+	{ "Armor color", "HALO_ARMOR_COLOR", 0, 1, { "0" }, { "RANDOM" },
+		"Other games see the nearest of the first eighteen", 0, PAGE_MENUS },
+	{ "Visor color", "HALO_VISOR_COLOR", 0, 1, { "0" }, { "GOLD" },
+		"Seen by this game's PS Vita and PC players; others see gold", 0, PAGE_MENUS },
 	/* (port/linux/src/p2p_flame.inc: the tester's blue flaming helmet,
 	shown only while this Vita's friend identity is on the owner's signed
 	tester list, p2p_flame_listed; CUSTOMIZATION has it too. The next game
@@ -1417,6 +1426,26 @@ void player_models_panel_choose(int index);
 static char player_model_values[MAXIMUM_CHOICES][4];
 static char player_model_names[MAXIMUM_CHOICES][48];
 
+/* ---------- the Armor color and Visor color rows
+(port/linux/game/player_cosmetics.c) */
+int player_cosmetics_panel_color_count(void);
+const char *player_cosmetics_panel_color_name(int index);
+int player_cosmetics_panel_visor_count(void);
+const char *player_cosmetics_panel_visor_name(int index);
+int player_cosmetics_panel_color_chosen(void);
+int player_cosmetics_panel_visor_chosen(void);
+void player_cosmetics_panel_choose_color(int index);
+void player_cosmetics_panel_choose_visor(int index);
+
+static char cosmetics_values[2][MAXIMUM_CHOICES][4];
+
+/* (the rows the profile keeps, not settings.txt) */
+static int profile_row(const char *variable)
+{
+	return variable && (!strcmp(variable, "HALO_PLAYER_MODEL") || !strcmp(variable, "HALO_ARMOR_COLOR") ||
+		!strcmp(variable, "HALO_VISOR_COLOR"));
+}
+
 /* ---------- Forge and File Share (the Forge page) */
 
 /* forge.c's maps (the lobby's: the Xbox's multiplayer maps), by index: how
@@ -1817,9 +1846,9 @@ static void apply_value(const struct setting *setting)
 {
 	const char *value = setting->values[setting->choice];
 
-	/* (the profile's, which the game keeps: player_models.c; changed only
-by a press, change) */
-	if (strcmp(setting->variable, "HALO_PLAYER_MODEL") == 0)
+	/* (the profile's, which the game keeps: player_models.c,
+player_cosmetics.c; changed only by a press, change) */
+	if (profile_row(setting->variable))
 		return;
 	if (strcmp(setting->variable, PERFORMANCE_LOG) == 0)
 	{
@@ -1981,7 +2010,7 @@ static void save_lines(struct save_output *output)
 	save_put(output, "HALO_SETTINGS_BUILD=%s\n", HALO_VITA_VERSION);
 	for (index = 0; index < SETTING_COUNT; index++)
 		if (settings[index].kind == KIND_CHOICE && !(settings[index].dev && settings[index].choice == 0) &&
-			strcmp(settings[index].variable, "HALO_PLAYER_MODEL"))
+			!profile_row(settings[index].variable))
 		{
 			save_put(output, "%s=%s\n", settings[index].variable, settings[index].values[settings[index].choice]);
 		}
@@ -5667,6 +5696,10 @@ static void change(struct setting *setting, int step)
 	apply_value(setting);
 	if (strcmp(setting->variable, "HALO_PLAYER_MODEL") == 0)
 		player_models_panel_choose(choice);
+	if (strcmp(setting->variable, "HALO_ARMOR_COLOR") == 0)
+		player_cosmetics_panel_choose_color(choice);
+	if (strcmp(setting->variable, "HALO_VISOR_COLOR") == 0)
+		player_cosmetics_panel_choose_visor(choice);
 	/* (a row that applies after a restart says so on its help line from
 	now on, and every line does for a few seconds) */
 	if (setting->restart)
@@ -7124,10 +7157,40 @@ static void player_models_choices(void)
 		setting->choice = 0;
 }
 
+/* the Armor color and Visor color rows' choices (the game's names) and the
+profile's choice among them */
+static void cosmetics_choices(void)
+{
+	static const char *const variables[2] = { "HALO_ARMOR_COLOR", "HALO_VISOR_COLOR" };
+	int row;
+
+	for (row = 0; row < 2; row++)
+	{
+		struct setting *setting = setting_named(variables[row]);
+		int index, count = row ? player_cosmetics_panel_visor_count() : player_cosmetics_panel_color_count();
+
+		if (!setting)
+			continue;
+		if (count > MAXIMUM_CHOICES)
+			count = MAXIMUM_CHOICES;
+		for (index = 0; index < count; index++)
+		{
+			snprintf(cosmetics_values[row][index], sizeof(cosmetics_values[row][index]), "%d", index);
+			setting->values[index] = cosmetics_values[row][index];
+			setting->names[index] = row ? player_cosmetics_panel_visor_name(index) : player_cosmetics_panel_color_name(index);
+		}
+		setting->count = count;
+		setting->choice = row ? player_cosmetics_panel_visor_chosen() : player_cosmetics_panel_color_chosen();
+		if (setting->choice < 0 || setting->choice >= count)
+			setting->choice = 0;
+	}
+}
+
 static void panel_begin(void)
 {
 	panel_open = 1;
 	player_models_choices();
+	cosmetics_choices();
 	/* (Dev hidden since: the first tab) */
 	if (!tab_shown(tab))
 		tab = page = TAB_GAME;

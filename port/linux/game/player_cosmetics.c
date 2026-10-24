@@ -368,3 +368,98 @@ boolean player_cosmetics_visor_tint(void const *shader_model, long reflection_cu
 	tint->blue = (rgb & 0xFF) / 255.f;
 	return TRUE;
 }
+
+/* ---------- the settings panel's rows (port/vita/host/vita_settings.c) */
+
+static struct
+{
+	/* the first local player's profile's choices (colour + 1, 0 random;
+	visor), as last read; a choice asked (-2: none), taken by the game's
+	frame (player_cosmetics_update) */
+	int volatile color_chosen;
+	int volatile visor_chosen;
+	int volatile color_request;
+	int volatile visor_request;
+} player_cosmetics_panel = { 0, 0, -2, -2 };
+
+int player_cosmetics_panel_color_count(void)
+{
+	return PLAYER_COSMETICS_COLORS + 1;
+}
+
+char const *player_cosmetics_panel_color_name(int index)
+{
+	return index <= 0 ? "RANDOM" : player_cosmetics_color_name((short)(index - 1));
+}
+
+int player_cosmetics_panel_visor_count(void)
+{
+	return PLAYER_COSMETICS_VISORS;
+}
+
+char const *player_cosmetics_panel_visor_name(int index)
+{
+	return player_cosmetics_visor_name((short)index);
+}
+
+int player_cosmetics_panel_color_chosen(void)
+{
+	return player_cosmetics_panel.color_chosen;
+}
+
+int player_cosmetics_panel_visor_chosen(void)
+{
+	return player_cosmetics_panel.visor_chosen;
+}
+
+void player_cosmetics_panel_choose_color(int index)
+{
+	player_cosmetics_panel.color_chosen = index;
+	player_cosmetics_panel.color_request = index;
+}
+
+void player_cosmetics_panel_choose_visor(int index)
+{
+	player_cosmetics_panel.visor_chosen = index;
+	player_cosmetics_panel.visor_request = index;
+}
+
+static long panel_profile(void)
+{
+	long profile_index = player_ui_get_active_player_profile_index(0);
+
+	return profile_index != NONE ? profile_index : player_ui_get_player1_last_used_profile_index();
+}
+
+void player_cosmetics_update(void)
+{
+	int color_request = player_cosmetics_panel.color_request;
+	int visor_request = player_cosmetics_panel.visor_request;
+	long profile_index = panel_profile();
+	struct player_profile profile;
+	short color, visor;
+
+	if (profile_index == NONE || !player_profile_get(profile_index, &profile))
+		return;
+	color = player_cosmetics_profile_color(profile_index, profile.primary_color_index);
+	visor = player_cosmetics_profile_visor(profile_index);
+	if (color_request != -2 || visor_request != -2)
+	{
+		player_cosmetics_panel.color_request = -2;
+		player_cosmetics_panel.visor_request = -2;
+		if (color_request != -2)
+			color = (short)(color_request - 1 >= 0 && color_request - 1 < PLAYER_COSMETICS_COLORS ? color_request - 1 : NONE);
+		if (visor_request != -2)
+			visor = (short)(visor_request >= 0 && visor_request < PLAYER_COSMETICS_VISORS ? visor_request : 0);
+		/* (the record's colour the nearest of the eighteen, the rest the
+		file's extension; the profile in use then the saved one) */
+		profile.primary_color_index = color == NONE ? NONE : player_cosmetics_nearest_classic(color);
+		player_profile_save(profile_index, &profile);
+		player_cosmetics_profile_save(profile_index, color, visor);
+		if (player_ui_get_active_player_profile_index(0) == profile_index)
+			player_ui_set_active_player_profile(0, profile_index, &profile);
+		platform_log("cosmetics: the settings panel chose colour %d, visor %d", color, visor);
+	}
+	player_cosmetics_panel.color_chosen = color + 1;
+	player_cosmetics_panel.visor_chosen = visor;
+}

@@ -5462,6 +5462,7 @@ void main_loop(
 			tag table grown, between frames: scene_packs.c) */
 			void scene_packs_update(void);
 			void player_models_update(void);
+			void player_cosmetics_update(void);
 			void forge_net_frame(void);
 			void game_rules_net_frame(void);
 
@@ -5476,6 +5477,9 @@ void main_loop(
 			looked through once, the settings panel's choice taken:
 			player_models.c) */
 			player_models_update();
+			/* (the settings panel's armour and visor colours taken:
+			player_cosmetics.c) */
+			player_cosmetics_update();
 		}
 		main_host_commands_update();
 		{

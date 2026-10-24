@@ -192,6 +192,16 @@ int player_models_panel_count(void) { return test_model_count; }
 const char *player_models_panel_name(int index) { return index >= 0 && index < 3 ? test_model_names[index] : "Spartan"; }
 int player_models_panel_chosen(void) { return test_model_chosen; }
 void player_models_panel_choose(int index) { test_model_choice = test_model_chosen = index; }
+/* (player_cosmetics.c's rows: the profile's colour and visor) */
+static int test_color_chosen, test_visor_chosen;
+int player_cosmetics_panel_color_count(void) { return 43; }
+const char *player_cosmetics_panel_color_name(int index) { return index ? "SKY" : "RANDOM"; }
+int player_cosmetics_panel_visor_count(void) { return 12; }
+const char *player_cosmetics_panel_visor_name(int index) { return index ? "BLUE" : "GOLD"; }
+int player_cosmetics_panel_color_chosen(void) { return test_color_chosen; }
+int player_cosmetics_panel_visor_chosen(void) { return test_visor_chosen; }
+void player_cosmetics_panel_choose_color(int index) { test_color_chosen = index; }
+void player_cosmetics_panel_choose_visor(int index) { test_visor_chosen = index; }
 int forge_panel_map_count(void) { return 3; }
 const char *forge_panel_map_name(int map_index) { return map_index >= 0 && map_index < 3 ? test_forge_maps[map_index][0] : ""; }
 const char *forge_panel_map_short(int map_index) { return map_index >= 0 && map_index < 3 ? test_forge_maps[map_index][1] : ""; }
@@ -3343,6 +3353,9 @@ static void test_tab_layouts(void)
 		{ TAB_GAME, "First-person legs", "HALO_FIRST_PERSON_LEGS", "0|1", 0, "1" },
 		/* (shown while the maps folder has a Custom Edition player model) */
 		{ TAB_GAME, "Player model", "HALO_PLAYER_MODEL", "0", 0, "0" },
+		/* (the profile's armour and visor colours: player_cosmetics.c, on Menus) */
+		{ PAGE_MENUS, "Armor color", "HALO_ARMOR_COLOR", "0", 0, "0" },
+		{ PAGE_MENUS, "Visor color", "HALO_VISOR_COLOR", "0", 0, "0" },
 		/* (shown to a listed tester alone: p2p_flame_listed) */
 		{ TAB_GAME, "Flaming helmet", "HALO_FLAMING_HELMET", "false|true", 0, "true" },
 		{ TAB_GAME, "Smooth weapon motion", "HALO_INTERPOLATE_FIRST_PERSON", "1|0", 0, "1" },
@@ -3639,7 +3652,8 @@ static void test_variables_kept(void)
 		"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR", "HALO_INTERPOLATION", "HALO_LATENCY_METER", "HALO_BOTS", "HALO_BOT_SKILL", "HALO_BOT_TEAMS",
 		"HALO_BOT_VEHICLES", "HALO_BOT_ROUTES", "HALO_BOT_PLAYLIST", "HALO_NET_COOP_PLAYERS", "HALO_NET_REMOTE_LOD",
 		"HALO_LANGUAGE", "HALO_UPDATE_CHANNEL", "HALO_PARTICLE_BUDGET", "HALO_FIRST_PERSON_LEGS", "HALO_RAGDOLLS",
-		"HALO_MCC_MODS", "HALO_CONTENT_ROOT", "HALO_PC_MAP_VEHICLES", "HALO_SHARP_UI", "HALO_PLAYER_MODEL", "HALO_FRIENDS_APPEAR_OFFLINE",
+		"HALO_MCC_MODS", "HALO_CONTENT_ROOT", "HALO_PC_MAP_VEHICLES", "HALO_SHARP_UI", "HALO_PLAYER_MODEL", "HALO_ARMOR_COLOR", "HALO_VISOR_COLOR",
+		"HALO_FRIENDS_APPEAR_OFFLINE",
 		"HALO_FRIENDS_JOIN", "HALO_NET_BLOCK_MOUSE_AIM_ASSIST", "HALO_NET_ANTICHEAT",
 		"HALO_INFECTION_ZOMBIES", "HALO_INFECTION_SPEED", "HALO_INFECTION_TIME", "HALO_INFECTION_RESPAWN",
 		"HALO_INFECTION_SHIELDS", "HALO_INFECTION_TOUGH",
@@ -4705,8 +4719,8 @@ static void test_carnage_report_row(void)
 	to_tab("Game");
 	check(open_page("Menus") && !strcmp(menu_line(2, line, sizeof(line)), "Menu style\x02< Halo 3 >") &&
 		!strcmp(menu_line(3, line, sizeof(line)), "Carnage report\x02< ElDewrito  ") &&
-		!strcmp(menu_line(4, line, sizeof(line)), "Scoreboard\x02< ElDewrito  ") && menu_rows() == 3 && menu_fits() &&
-		menu_height_fits(), "Game > Menus: Menu style, then Carnage report and Scoreboard (Halo 3)");
+		!strcmp(menu_line(4, line, sizeof(line)), "Scoreboard\x02< ElDewrito  ") && menu_rows() == 5 && menu_fits() &&
+		menu_height_fits(), "Game > Menus: Menu style, then Carnage report and Scoreboard (Halo 3), the armor and visor colors");
 	check(to_line("Carnage report") &&
 		strstr(menu, "\n\x05" "A multiplayer game's end: ElDewrito's report, or the original\n"), "Carnage report: its help");
 	press(VITA_BUTTON_LEFT);
@@ -4721,7 +4735,7 @@ static void test_carnage_report_row(void)
 	press(VITA_BUTTON_LEFT);
 	/* (Halo CE: its own two rows, the original by default; Halo 3's an option) */
 	check(strstr(menu, "\nCarnage report\x02  Original >") && strstr(menu, "\nScoreboard\x02  Original >") &&
-		menu_rows() == 3 && !strcmp(getenv("HALO_MENU_STYLE"), "classic") && menu_fits(),
+		menu_rows() == 5 && !strcmp(getenv("HALO_MENU_STYLE"), "classic") && menu_fits(),
 		"Menu style Halo CE: Carnage report and Scoreboard rows, the original (Classic, Halo CE) as shipped");
 	check(to_line("Carnage report") && strstr(menu, "\n\x05" "A multiplayer game's end: the original, or ElDewrito's report\n"),
 		"Halo CE's Carnage report: its help");
