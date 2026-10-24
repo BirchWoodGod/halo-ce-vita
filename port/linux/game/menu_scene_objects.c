@@ -42,6 +42,10 @@ to the picture's left). The options, each <name>=<value>:
 	                   positive turning to +y, as a camera's yaw), upright in
 	                   the world (as level=1); pitch= and roll= then lean it
 	                   from there (a Warthog's spot saved in the level)
+	slope=<l>,<w>      (with at= and ground=) a vehicle on uneven ground: the
+	                   ground found under its front and back (l units along
+	                   it) and its sides (w across), its nose and side leaned
+	                   to it and its middle ground= above their mean
 	ground=<offset>    stood on the level's ground under its place (the
 	                   structure found straight below it, or above it by up
 	                   to 2 units), its origin that many units above it: a
@@ -214,6 +218,10 @@ struct menu_scene_object
 	/* (ground=) stood on the structure below, its origin so high above it */
 	boolean grounded;
 	real ground_offset;
+	/* (slope=<half length>,<half width>, with at= and ground=) leaned to the
+	ground under its four sides (0: not) */
+	real slope_length;
+	real slope_width;
 	/* (at= yaw=) at that point of the world, its front along that heading
 	(radians) */
 	boolean world;
@@ -435,6 +443,19 @@ static boolean option_parse(char const *word, struct menu_scene_object *object)
 		object->world_yaw = number * MENU_SCENE_DEGREES;
 		return TRUE;
 	}
+	if (!strcmp(name, "slope"))
+	{
+		float length, width;
+
+		if (sscanf(value, "%f,%f%n", &length, &width, &used) != 2 || value[used] || !(length > 0.f && length < 5.f) ||
+			!(width > 0.f && width < 5.f))
+		{
+			return FALSE;
+		}
+		object->slope_length = length;
+		object->slope_width = width;
+		return TRUE;
+	}
 	if (!strcmp(name, "ground"))
 	{
 		if (sscanf(value, "%f%n", &number, &used) != 1 || value[used] || !real_in_range(number, 10.f))
@@ -513,6 +534,7 @@ static boolean entry_parse(char *text, struct menu_scene_object *object, short e
 	object->level = FALSE;
 	object->grounded = FALSE;
 	object->ground_offset = 0.f;
+	object->slope_length = object->slope_width = 0.f;
 	object->world = FALSE;
 	object->world_yaw = 0.f;
 	object->color_index = MENU_SCENE_COLOR_OWN;
@@ -695,7 +717,8 @@ static void object_place(struct menu_scene_object const *object, real_point3d *p
 	forward->j = base.j * cosine - right.j * sine;
 	forward->k = base.k * cosine - right.k * sine;
 	*up = frame.up;
-	/* (at= yaw=: along its heading, upright in the world) */
+	/* (at= yaw=: along its heading, upright in the world; with look=, its
+	front to what it looks at, level) */
 	if (object->world)
 	{
 		forward->i = (real)cos(object->world_yaw);
@@ -703,6 +726,74 @@ static void object_place(struct menu_scene_object const *object, real_point3d *p
 		forward->k = 0.f;
 		up->i = up->j = 0.f;
 		up->k = 1.f;
+		if (object->look_entry != NONE)
+		{
+			real_point3d target;
+			real length;
+
+			entry_position(&menu_scene_objects.slots[object->look_entry], &target);
+			length = (real)sqrt((target.x - position->x) * (target.x - position->x) +
+				(target.y - position->y) * (target.y - position->y));
+			if (length > 0.0001f)
+			{
+				forward->i = (target.x - position->x) / length;
+				forward->j = (target.y - position->y) / length;
+			}
+		}
+		/* (slope=: a vehicle's four wheels on the ground: the ground under
+		its front and back, left and right, its nose and side leaned to it
+		and its middle that high) */
+		if (object->slope_length > 0.f)
+		{
+			real_point3d probe;
+			real heights[4];
+			real_vector3d left = { -forward->j, forward->i, 0.f };
+			short index;
+			boolean found = TRUE;
+
+			for (index = 0; index < 4; index++)
+			{
+				struct collision_result collision;
+				real_vector3d down = { 0.f, 0.f, -12.f };
+				real along = index == 0 ? object->slope_length : index == 1 ? -object->slope_length : 0.f;
+				real side = index == 2 ? object->slope_width : index == 3 ? -object->slope_width : 0.f;
+
+				probe.x = position->x + forward->i * along + left.i * side;
+				probe.y = position->y + forward->j * along + left.j * side;
+				probe.z = object->world_position.z + 2.f;
+				if (!collision_test_vector(FLAG(_collision_test_structure_bit) |
+					FLAG(_collision_test_front_facing_surfaces_bit), &probe, &down, NONE, &collision))
+				{
+					found = FALSE;
+					break;
+				}
+				heights[index] = collision.point.z;
+			}
+			if (found)
+			{
+				real pitch = (real)atan2(heights[0] - heights[1], 2.f * object->slope_length);
+				real roll = (real)atan2(heights[3] - heights[2], 2.f * object->slope_width);
+				real c, s;
+				real_vector3d f = *forward, u = *up, right;
+
+				position->z = (heights[0] + heights[1] + heights[2] + heights[3]) * 0.25f + object->ground_offset;
+				c = (real)cos(pitch);
+				s = (real)sin(pitch);
+				forward->i = f.i * c + u.i * s;
+				forward->j = f.j * c + u.j * s;
+				forward->k = f.k * c + u.k * s;
+				up->i = u.i * c - f.i * s;
+				up->j = u.j * c - f.j * s;
+				up->k = u.k * c - f.k * s;
+				u = *up;
+				cross_product3d(forward, &u, &right);
+				c = (real)cos(roll);
+				s = (real)sin(roll);
+				up->i = u.i * c - right.i * s;
+				up->j = u.j * c - right.j * s;
+				up->k = u.k * c - right.k * s;
+			}
+		}
 	}
 	if (object->pitch != 0.f)
 	{
@@ -1696,6 +1787,8 @@ void menu_scene_objects_want(
 		object->level = parsed[index].level;
 		object->grounded = parsed[index].grounded;
 		object->ground_offset = parsed[index].ground_offset;
+		object->slope_length = parsed[index].slope_length;
+		object->slope_width = parsed[index].slope_width;
 		object->world = parsed[index].world;
 		object->world_position = parsed[index].world_position;
 		object->world_yaw = parsed[index].world_yaw;
