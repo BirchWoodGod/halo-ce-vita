@@ -4964,8 +4964,19 @@ static void main_test_commands_update(
 			struct tag_iterator iterator;
 			long tag_index;
 
-			name[0] = '\0';
-			sscanf(commands[index].command + 7, "%127s %ld", name, &wanted);
+			/* (the name is all of it but a trailing number, so a name with
+			spaces ("sound\sfx\weapons\assault rifle\fire") can be named) */
+			strncpy(name, commands[index].command + 7, sizeof(name) - 1);
+			name[sizeof(name) - 1] = '\0';
+			{
+				char *last_space = strrchr(name, ' ');
+				char *end;
+
+				if (last_space && last_space[1] && (wanted = strtol(last_space + 1, &end, 10), !*end))
+					*last_space = '\0';
+				else
+					wanted = 0;
+			}
 			tag_iterator_new(&iterator, 'snd!');
 			while ((tag_index = tag_iterator_next(&iterator)) != NONE)
 			{

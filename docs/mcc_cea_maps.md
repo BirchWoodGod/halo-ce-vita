@@ -23,6 +23,166 @@ Warthog, gun turrets, the fuel rod) convert too, for local games:
 [MCC's PC multiplayer maps](#mccs-pc-multiplayer-maps) (branch
 `feat/mcc-pc-maps`).
 
+## The Halo content folder: your own MCC
+
+Players who own Halo: The Master Chief Collection play its own Halo CE
+maps - the ten campaign levels and the nineteen multiplayer maps (the
+Xbox's thirteen and Halo PC's six: Danger Canyon, Death Island,
+Gephyrophobia, Ice Fields, Infinity, Timberland) - from their own files.
+There is no switch: the game looks for the **Halo content folder**, the
+folder of MCC that holds `halo1`, and lists what it finds beside the
+Xbox's levels. Without one it plays the Xbox maps alone, as before.
+
+Where it looks (`port/linux/src/xbox_files.c`), first found wins:
+
+| | |
+| --- | --- |
+| the setting | `paths.content` in config.toml (`HALO_CONTENT_ROOT`); the PS Vita panel's **Multiplayer > Modded maps > Halo content folder** (Found by itself, `ux0:data/mcc`, `uma0:data/mcc`, `imc0:data/mcc`). A `halo1` folder named there stands for the folder holding it. |
+| PS Vita | `ux0:data/haloce-vita/mcc` |
+| PC | every Steam library (`libraryfolders.vdf` of `~/.local/share/Steam`, `~/.steam/steam`, `~/.steam/root`, Flatpak's Steam, and on Windows `Program Files (x86)\Steam`): `steamapps/common/Halo The Master Chief Collection` |
+
+On the PS Vita, copy from MCC's folder on your PC (Steam: right-click
+the game, Manage, Browse local files) to the memory card:
+
+```
+ux0:data/haloce-vita/mcc/
+  halo1/
+    maps/
+      a10.map ... d40.map           the campaign (774 MB)
+      beavercreek.map ... wizard.map the multiplayer maps (about 300 MB)
+      bitmaps.map                   their pixels (186 MB): needed
+    sound/pc/
+      sounds_adpcm.fsb              the sound effects (88 MB): needed for them
+      lst/sounds_adpcm.lst.bin      which sounds they are (45 KB): needed for them
+      lst/sounds_dialogs.lst.bin, sounds_music.lst.bin,
+      lst/sounds_stream.lst.bin, sounds_debug.lst.bin
+                                    (186 KB; only to count what is still silent)
+```
+
+`ui.map`, `halo1/maps/custom_edition/`, the rest of `halo1/sound/`,
+`prebuild/` and the other games' folders are not needed in this version. The Xbox data
+(`ux0:data/haloce-vita/maps`, `default.xbe`) is still needed: the menus,
+fonts and the game's own files are the Xbox's.
+
+The folder is **only read**: every file call that writes, makes, moves or
+deletes refuses a path in it, and `..` stops at its root. Nothing of it
+goes in this repository, the VPK or a map share.
+
+**What it lists** (`port/linux/game/mcc_content.c`): each map file's
+loader is chosen by its own cache header (`'head'` and its version) from
+a small table, game folder to loader: `halo1` (version 13, Halo: CE
+Anniversary) is this build's; `halo2`, `halo3`, `halo3odst`,
+`haloreach` and `halo4` are found and said in debug.txt (`content: ...
+no loader in this build yet`) and get a row and a loader as theirs come.
+Halo CE's maps are listed under names that are the folder's alone:
+
+- the campaign as `mods\mcc_a10` ... `mods\mcc_d40` (MCC's own campaign is
+  the first "mod", key `mcc`; a mods folder mod keyed `mcc` is left out):
+  in the classic campaign list after the ten levels as "The Pillar of
+  Autumn (MCC)" ..., and in the Halo 3 campaign lobby each mission is
+  MCC's where the folder has it, else the Xbox's ("MCC files, on this PS
+  Vita alone. Sound effects only for now." under Ready). Every mission is open (they keep
+  no profile progress). Won, a level goes on to MCC's next one. Played
+  alone, offline; co-op is not hosted for them.
+- the multiplayer maps as `mcc_bloodgulch` ... (level
+  `levels\test\mcc_bloodgulch\mcc_bloodgulch`), first among the custom
+  maps, as "Blood Gulch (MCC)" with the Xbox level's picture: split
+  screen, offline with bots, and hosted or joined over the network.
+
+A `mcc_<stock map>` name is never looked for anywhere but the content
+folder: a maps folder file of that name is not listed nor played, and map
+sharing never sends or takes one (`map_share_name_valid`).
+
+**Saves**: an MCC campaign level saves as the custom campaign maps do
+(Custom Edition and mod campaign maps): Save and Quit writes
+`savegame_custom.bin` beside the profile's `savegame.bin`, which it never
+touches, and the same level started again on the same difficulty resumes
+from it. One slot for all custom campaign maps; no profile progress.
+
+**Network**: a network game on an MCC multiplayer map needs every machine
+to have the same file. The host sends its file's identity (the header's
+checksum and length, as for custom maps: `custom_edition_maps_network_identity`);
+a joiner must have its own content folder with that very file, else it is
+told why and stays out ("The host is playing mcc_bloodgulch from its MCC
+files..." or "...isn't the same as yours (another MCC version?)"). A
+joiner never asks for the map and a host never sends it; a host that
+names no identity for an MCC map is refused. Older builds see an unknown
+custom map and are refused by the host's map sharing. The dedicated
+server never plays them.
+
+**Sound** (`port/linux/game/mcc_sound.c`, `port/linux/src/fsb5.c`,
+`mcc_sound_list.c`): MCC keeps every sound of its stock maps in FMOD
+banks (`halo1/sound/pc/*.fsb`, FSB5), not in the maps, and says which
+streams of a bank each sound tag is in lists (`lst/sounds_*.lst.bin`).
+The maps name the Anniversary sounds (`sound\sfx\...`; most of their
+streams are CELT, in `sounds_debug.fsb`) and the classic ones of the same
+names (`sound\old_sfx\...`, which MCC plays in its classic mode) are IMA
+ADPCM in `sounds_adpcm.fsb`: this build plays those, for each sound the
+map names that the ADPCM bank has under `old_sfx`. IMA ADPCM in an FSB is
+the Xbox's own layout (36 bytes a channel for 64 samples, a stereo
+sound's channels' 4-byte groups interleaved), the format of Halo's own
+sound tags, so each permutation is pointed at its stream in the bank (the
+sounds slot of the combined offset space is the bank, as `sounds.map` is
+for a Custom Edition map) and read by the sound cache as it lies: nothing is decoded
+or kept in a cache file (a Custom Edition map's Ogg Vorbis sounds are,
+`custom_edition_sounds.c`; CELT will be). The sound's rate, channels and
+compression come from its streams, its pitch ranges, gains, classes and
+permutations' order from the tag.
+
+The lists: version 1, a count, then for each sound its tag path (a length
+with its zero, the path, backslashes, no extension), the bank's first stream
+and how many (consecutive, a pitch range after another), all little-endian
+32-bit (`mcc_sound_list.h`). A sound with several pitch ranges is one
+record with its path alone, or a record to each range named
+`<path>\<pitch range>` (a vehicle's engine). A stream is named
+`<permutation>_<pitch range>_<number in the record>`; a sound is mapped
+only when its number of permutations, the tag's permutations' names and
+these numbers all agree with its streams (else it stays silent and is
+counted), and its streams are of one rate (22050 or 44100 Hz) and channel
+count and fit the sound cache.
+
+Still silent: everything in the CELT banks: dialogue
+(`sounds_dialogs.fsb` and the other languages'), music, streamed ambience
+and foley (`sounds_music.fsb`, `sounds_stream.fsb`), and the few
+Anniversary-only sound effects the ADPCM bank has no classic twin of. One
+line says what each map got (`mcc sound: 468 of the map's 1438 sounds
+play from sounds_adpcm.fsb ...; still silent: 970 in the CELT banks ...`),
+and `HALO_MCC_SOUND_TRACE=1` logs each sound. Without the sound folder
+the maps play silent, as before (`mcc: no sound effects bank`); a bank or
+list that is damaged or of another version is refused, said, and the
+sounds stay silent.
+
+**CELT (dialogue, music, streams; not done)**: every stream of the other
+banks starts with FMOD's CELT frame header (a big-endian `0x17C30DF3`, a
+little-endian payload size, the payload; `fsb5_celt_frame_check`), 512
+samples a frame at 44100 Hz, constant bit rate (370 bytes a mono frame, 464 a
+stereo one; a 6-channel music stream is three stereo layers' frames one after
+another), and every stream's sample count is its frames times 512. That is
+libcelt 0.11.0 (bitstream 0x80000010) in FMOD's framing, with
+`celt_mode_create(44100, 512)` and the decoder's signalling switched off; the
+Opus library's CELT is not bitstream-compatible. libcelt 0.11 is BSD-licensed
+(Xiph.Org/CSIRO; Mumble keeps a copy, mumble-voip/celt-0.11.0), and a build of
+it decodes MCC's dialogue streams cleanly (no frame refused, speech-level RMS)
+at about 500 times real time on a desktop core. The plan is a decoder module
+beside `ogg_sound.c` and a transcoding beside Ogg Vorbis in
+`custom_edition_sounds.c` (decode, take 44.1 kHz mono to the 22 kHz the game
+plays, encode Xbox ADPCM, keep it in the `.sndcache` file), the music through
+the chains of links long Ogg sounds already use; the combined offset space
+will need a window for each bank (the music bank is 957 MB).
+
+Tests: `port/vita/tests/run_mcc_sound_test.sh` (the FSB5 reader and list
+parser on made-up files under AddressSanitizer and UBSan, a fuzz target,
+an audit of your own sound folder, and the harness with sound on: sounds
+played by name, each checked against its stream decoded independently
+(`mcc_sound_check.py`), the mixer's output heard).
+
+Tests: `port/vita/tests/run_mcc_content_test.sh` (the names, Steam's
+libraryfolders.vdf and the loaders' table with no MCC file; with your
+MCC folder, linked read only: b30 and d40 60 s each, b30 won goes on to
+b40, Blood Gulch with bots, no folder, a maps folder's
+`mcc_bloodgulch.map` left out; SKIP without one). The harness tests
+otherwise run with no content folder (`test_out.sh`).
+
 ## Playing a mod natively
 
 Copy the mod's whole folder (Steam keeps it in

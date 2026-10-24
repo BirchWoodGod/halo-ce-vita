@@ -34,6 +34,15 @@ descriptions their campaign files give; their level name is mods\<name>,
 and they are played alone, never hosted (custom_edition_maps_campaign_level
 does not take them) nor shared.
 
+(port) With the Halo content folder (mcc_content.h), the multiplayer maps
+of the Halo content folder come first among the multiplayer maps, named
+mcc_<map> (levels\test\mcc_bloodgulch\mcc_bloodgulch) and shown as
+"Blood Gulch (MCC)" with the Xbox level's picture, and MCC's campaign maps
+first among the mods' (custom_edition_mods.c). Neither is ever shared
+(custom_edition_maps_shareable); a network game on one needs every machine's
+own MCC file, the same as the host's (custom_edition_maps_host_copy_matches,
+network_client_manager.c).
+
 A map's picture is the Windows bitmap <name>.bmp beside it, when there is one
 (bmp_files.c): the middle of it with the shape of the menus' level pictures,
 in a texture of its own that is drawn over the whole picture widget. A map
@@ -48,6 +57,7 @@ in lines of about 20 characters.
 
 #include "cseries.h"
 #include "errors.h"
+#include "cseries_windows.h"
 #include "tag_files/files.h"
 #include "tag_files/tag_files.h"
 #include "bitmaps/bitmaps.h"
@@ -63,6 +73,7 @@ in lines of about 20 characters.
 #include "network_game_record.h"
 #include "cache_file_formats.h"
 #include "custom_edition_mods.h"
+#include "mcc_content.h"
 #include "text/unicode.h"
 #include "../src/lang.h"
 
@@ -159,13 +170,19 @@ struct custom_edition_map
 	boolean mod;
 	short mod_order;
 	char picture_path[MAXIMUM_FILENAME_LENGTH + 1];
+	/* (port) one of MCC's own maps (mcc_content.h): its stock map's picture
+	frame, -1 for none */
+	boolean mcc;
+	short mcc_frame;
 };
 
 struct custom_edition_maps_globals
 {
 	boolean looked_for;
-	/* (port) the PC maps setting when they were looked for */
+	/* (port) the PC maps setting when they were looked for, and Halo CE
+	content's */
 	boolean looked_for_custom_edition;
+	boolean looked_for_mcc_content;
 	/* the maps: the multiplayer ones, then the campaign ones */
 	short map_count;
 	short multiplayer_count;
@@ -559,6 +576,17 @@ static void custom_edition_map_add(
 	{
 		return;
 	}
+	/* (port: a name of MCC's own maps, mcc_content.h, is only ever MCC's
+	folder's: a file of the maps folder of that name is never played) */
+	{
+		char mcc_stem[MCC_CONTENT_STEM_BYTES];
+
+		if (mcc_content_name_stem(name, mcc_stem) != _mcc_content_none)
+		{
+			error(_error_silent, "custom edition: the maps folder's '%s' is not listed: that name is MCC's own map's", name);
+			return;
+		}
+	}
 	if (custom_edition_map_disabled(name))
 	{
 		error(_error_silent, "custom edition: the map '%s' is turned off (HALO_MAPS_DISABLED)", name);
@@ -662,6 +690,15 @@ static int custom_edition_map_compare(
 	if (first_map->campaign != second_map->campaign)
 	{
 		return first_map->campaign ? 1 : -1;
+	}
+	/* (port: MCC's own multiplayer maps first, in their order) */
+	if (!first_map->campaign && first_map->mcc != second_map->mcc)
+	{
+		return first_map->mcc ? -1 : 1;
+	}
+	if (!first_map->campaign && first_map->mcc)
+	{
+		return first_map->mod_order - second_map->mod_order;
 	}
 	/* (the mods' maps last, in their order) */
 	if (first_map->mod != second_map->mod)
@@ -770,6 +807,14 @@ static void custom_edition_mods_maps_add(
 		map->mod = TRUE;
 		map->mod_order = index;
 		csstrcpy(map->name, name);
+		/* (port: MCC's own campaign map, mcc_content.h: the stock level's
+		picture) */
+		{
+			char mcc_stem[MCC_CONTENT_STEM_BYTES];
+
+			map->mcc = mcc_content_name_stem(name, mcc_stem) == _mcc_content_campaign;
+			map->mcc_frame = (short)(map->mcc ? mcc_content_picture_frame(mcc_stem) : -1);
+		}
 		csprintf(map->level_name, "%s%s", CUSTOM_EDITION_MODS_LEVEL_NAME_PREFIX, name);
 		if (picture_path && csstrlen(picture_path) < (long)sizeof(map->picture_path))
 		{
@@ -803,6 +848,104 @@ static void custom_edition_mods_maps_add(
 	return;
 }
 
+/* (port) Adds the multiplayer maps of the Halo content folder (Halo CE
+content MCC files, mcc_content.h): each stock multiplayer map whose file
+there is a Halo: CE Anniversary cache of a multiplayer scenario, not turned
+off (HALO_MAPS_DISABLED), as mcc_<map>, "Blood Gulch (MCC)". */
+static void mcc_multiplayer_maps_add(
+	void)
+{
+	struct custom_edition_maps_globals *globals = &custom_edition_maps_globals;
+	short added = 0;
+	int index;
+	char const *stem;
+
+	for (index = 0; (stem = mcc_content_multiplayer_stem(index)) != NULL; index++)
+	{
+		struct custom_edition_map *map;
+		char name[MCC_CONTENT_NAME_BYTES];
+		char title[MAXIMUM_DISPLAY_NAME_LENGTH + 1];
+		short character;
+
+		csprintf(name, "%s%s", MCC_CONTENT_NAME_PREFIX, stem);
+		if (custom_edition_map_disabled(name))
+		{
+			error(_error_silent, "custom edition: the map '%s' is turned off (HALO_MAPS_DISABLED)", name);
+			continue;
+		}
+		if (globals->map_count == MAXIMUM_CUSTOM_EDITION_MAPS)
+		{
+			break;
+		}
+		/* (its file there: the loader its header asks for Halo CE's, and read
+		as that loader reads it: custom_edition_cache.c) */
+		{
+			char path[MAXIMUM_FILENAME_LENGTH + 1];
+
+			if (!mcc_content_map_path(stem, path, sizeof(path)) ||
+				custom_edition_cache_content_loader(path, NULL) != _content_library_loader_halo1 ||
+				!custom_edition_cache_multiplayer(name))
+			{
+				continue;
+			}
+		}
+		map = &globals->maps[globals->map_count++];
+		csmemset(map, 0, sizeof(*map));
+		map->mcc = TRUE;
+		map->mod_order = (short)index;
+		map->mcc_frame = (short)mcc_content_picture_frame(stem);
+		csstrcpy(map->name, name);
+		csprintf(map->level_name, LEVEL_NAME_FORMAT, name, name);
+		snprintf(title, sizeof(title), "%s (MCC)", mcc_content_title(stem));
+		for (character = 0; title[character]; character++)
+		{
+			map->display_name[character] = (wchar_t)(unsigned char)title[character];
+		}
+		map->display_name[character] = 0;
+		ustrncpy(map->description, TW(L"Your MCC files'\r\nown map. No sound\r\nyet in this version."),
+			MAXIMUM_DESCRIPTION_LENGTH);
+		map->description[MAXIMUM_DESCRIPTION_LENGTH] = 0;
+		added++;
+	}
+	error(_error_silent, "mcc: %d multiplayer maps of the Halo content folder's halo1", added);
+
+	return;
+}
+
+/* (port) Says what the Halo content folder holds, game by game (mcc_content.h's
+table): each game folder with maps, how many map files, and whether this
+build has their loader (those without one are not listed). */
+static void content_library_games_say(
+	void)
+{
+	int index;
+	struct content_library_game const *game;
+
+	for (index = 0; (game = content_library_game_get(index)) != NULL; index++)
+	{
+		char pattern[MAXIMUM_FILENAME_LENGTH + 1];
+		WIN32_FIND_DATAA data;
+		HANDLE find;
+		short files = 0;
+
+		csprintf(pattern, "%s%s\\maps\\*.map", MCC_CONTENT_ROOT, game->folder);
+		find = FindFirstFileA(pattern, &data);
+		if (find == INVALID_HANDLE_VALUE)
+		{
+			continue;
+		}
+		do
+		{
+			files++;
+		} while (FindNextFileA(find, &data));
+		CloseHandle(find);
+		error(_error_silent, "content: %s (%s): %d map files, %s", game->title, game->folder, files,
+			game->loader != _content_library_loader_none ? "played by this build" : "no loader in this build yet: not listed");
+	}
+
+	return;
+}
+
 static void custom_edition_maps_look_for(
 	void)
 {
@@ -818,6 +961,7 @@ static void custom_edition_maps_look_for(
 	custom_edition_maps_forget();
 	globals->looked_for = TRUE;
 	globals->looked_for_custom_edition = halo_custom_edition_enabled();
+	globals->looked_for_mcc_content = halo_content_library_found();
 
 	file_reference_create_from_path(&directory, cache_files_map_directory(), TRUE);
 	find_files_start(0, &directory);
@@ -879,8 +1023,15 @@ static void custom_edition_maps_look_for(
 			description_listed ? description_date : NULL);
 	}
 	/* (port: the mods' maps, Halo: CE Anniversary campaign maps, which PC
-	maps turns on too) */
-	if (halo_custom_edition_enabled())
+	maps turns on too; and MCC's own, which the Halo content folder does,
+	mcc_content.h) */
+	platform_mcc_root_forget();
+	if (halo_content_library_found())
+	{
+		content_library_games_say();
+		mcc_multiplayer_maps_add();
+	}
+	if (halo_custom_edition_enabled() || halo_content_library_found())
 	{
 		custom_edition_mods_maps_add();
 	}
@@ -1053,7 +1204,8 @@ char **custom_edition_maps_level_list(
 	unless the setting has changed or the maps were said to have: a map share
 	download, the mod manager, custom_edition_maps_look_again) */
 	if (!globals->looked_for || !cache_files_precache_in_progress() ||
-		globals->looked_for_custom_edition != halo_custom_edition_enabled())
+		globals->looked_for_custom_edition != halo_custom_edition_enabled() ||
+		globals->looked_for_mcc_content != halo_content_library_found())
 	{
 		custom_edition_maps_look_for();
 	}
@@ -1187,6 +1339,16 @@ struct bitmap_data *custom_edition_maps_picture(
 	{
 		return NULL;
 	}
+	/* (port: MCC's own map: its stock level's frame of the pictures of its
+	own kind, when it has one) */
+	if (map->mcc)
+	{
+		if (map->mcc_frame >= 0 && map->campaign == campaign_pictures)
+		{
+			*frame_index = map->mcc_frame;
+		}
+		return NULL;
+	}
 	if (!map->picture_read)
 	{
 		map->picture = custom_edition_map_picture_read(map);
@@ -1297,6 +1459,22 @@ short custom_edition_maps_loadable(
 	if (missing_size > 0)
 	{
 		missing[0] = 0;
+	}
+	/* (port: one of MCC's own maps, mcc_content.h: with the Halo content
+	folder, its file there, read as the loader reads it) */
+	{
+		char mcc_stem[MCC_CONTENT_STEM_BYTES];
+
+		if (mcc_content_name_stem(name, mcc_stem) != _mcc_content_none)
+		{
+			if (!custom_edition_cache_multiplayer(name))
+			{
+				error(_error_silent, "custom maps: '%s' is MCC's own map, which this machine cannot load (no Halo content "
+					"folder, or not in it)", name);
+				return _custom_edition_maps_not_loadable;
+			}
+			return _custom_edition_maps_loadable;
+		}
 	}
 	/* (an Xbox level's file: the Xbox map's, checked as it is precached,
 	custom_edition_maps_stock_problem; or a Halo PC map of that name, which
@@ -1437,8 +1615,10 @@ void custom_edition_maps_look_again(
 	void)
 {
 	custom_edition_maps_globals.looked_for = FALSE;
-	/* (and the Xbox levels' files looked at again: map_checks.c) */
+	/* (and the Xbox levels' files looked at again: map_checks.c; port: and
+	MCC's folder looked for again, when none was found) */
 	map_checks_forget();
+	platform_mcc_root_forget();
 
 	return;
 }
@@ -1547,6 +1727,7 @@ boolean custom_edition_maps_shareable(
 	char const *level_name)
 {
 	char const *name;
+	char mcc_stem[MCC_CONTENT_STEM_BYTES];
 
 	if (!level_name || !level_name[0])
 	{
@@ -1560,6 +1741,8 @@ boolean custom_edition_maps_shareable(
 	map_share_protocol.c) */
 	return !xbox_level_stock(name) &&
 		!custom_edition_mods_level_name(level_name) &&
+		/* (port: MCC's own maps never, mcc_content.h: the player's own files) */
+		mcc_content_name_stem(name, mcc_stem) == _mcc_content_none &&
 		(custom_edition_maps_display_index(level_name) == NONE ||
 			(!custom_edition_map_get(custom_edition_maps_display_index(level_name))->mod &&
 				!custom_edition_map_get(custom_edition_maps_display_index(level_name))->xbox_renamed)) &&

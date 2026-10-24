@@ -62,6 +62,15 @@ static char const *const stock_map_names[] =
 	"a10", "a30", "a50", "b30", "b40", "c10", "c20", "c40", "d20", "d40",
 };
 
+/* (port) Halo PC's multiplayer maps MCC has beside the Xbox's: with
+MCC_MAP_NAME_PREFIX, names of MCC's own maps (port/linux/game/mcc_content.h),
+which are never shared, sent or taken */
+static char const *const mcc_pc_map_names[] =
+{
+	"dangercanyon", "deathisland", "gephyrophobia", "icefields", "infinity", "timberland",
+};
+#define MCC_MAP_NAME_PREFIX "mcc_"
+
 /* names a shared map may not have: Custom Edition's resource maps, and the
 Xbox's user interface map */
 static char const *const reserved_map_names[] =
@@ -281,6 +290,29 @@ int map_share_name_valid(
 		}
 		stem[stem_length] = 0;
 		if (name_in(stem, device_names, sizeof(device_names) / sizeof(device_names[0])))
+		{
+			return 0;
+		}
+	}
+
+	/* (port) one of MCC's own maps' names (mcc_bloodgulch, mcc_a10): the
+	player's own MCC files, never shared */
+	{
+		unsigned prefix_length = sizeof(MCC_MAP_NAME_PREFIX) - 1;
+		unsigned index;
+
+		for (index = 0; index < prefix_length; index++)
+		{
+			char character = name[index];
+
+			if ((character >= 'A' && character <= 'Z' ? character - 'A' + 'a' : character) != MCC_MAP_NAME_PREFIX[index])
+			{
+				break;
+			}
+		}
+		if (index == prefix_length &&
+			(map_share_name_is_stock(name + prefix_length) ||
+				name_in(name + prefix_length, mcc_pc_map_names, sizeof(mcc_pc_map_names) / sizeof(mcc_pc_map_names[0]))))
 		{
 			return 0;
 		}

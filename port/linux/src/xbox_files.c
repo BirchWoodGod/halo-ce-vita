@@ -31,6 +31,7 @@ matched case-insensitively, like the Xbox's FATX volumes.
 #include "vita_host.h"
 #endif
 #include "load_profile.h"
+#include "mcc_paths.h"
 
 /* ---------- the file calls' time, and the memory card
 
@@ -400,11 +401,218 @@ const char *platform_save_root(void)
 	return root;
 }
 
+/* ---------- (port) the Halo content folder
+
+The Halo content folder (port/linux/game/mcc_content.c) is the player's own
+Halo: The Master Chief Collection folder, the one holding halo1 (halo2,
+halo3 ... beside it), which the game names d:\mcc\: paths.content
+(HALO_CONTENT_ROOT, the settings panel's, read anew when it changes; a
+halo1 folder named there stands for the folder holding it), else on the
+PS Vita the data root's mcc, else the first Steam library with MCC's
+folder (mcc_paths.c: each Steam's libraryfolders.vdf, and the Steam folder
+itself). It is the folder when it holds a game folder with maps in it (for
+now halo1). Looked for once, again when the setting changes or after
+platform_mcc_root_forget when none was found. Nothing in it is ever
+written: every call here that writes, makes, moves or deletes a file or
+folder refuses a path in it (platform_host_path_is_mcc). */
+
+static pthread_mutex_t mcc_root_lock = PTHREAD_MUTEX_INITIALIZER;
+static char mcc_root[MAX_PATH];
+/* 0 not looked for, 1 found, -1 not found; and the setting it was found for */
+static int mcc_root_state;
+static char mcc_root_setting[MAX_PATH];
+
+/* whether `path` is a content folder: a game folder of it has maps */
+static int mcc_root_valid(const char *path)
+{
+	char game[MAX_PATH + 16];
+
+	snprintf(game, sizeof(game), "%s/halo1", path);
+	return has_maps(game);
+}
+
+static int mcc_root_try(const char *path)
+{
+	if (!path || !path[0] || !mcc_root_valid(path))
+		return 0;
+	snprintf(mcc_root, sizeof(mcc_root), "%s", path);
+	trim_separators(mcc_root);
+	return 1;
+}
+
+#ifndef HALO_NOT_DESKTOP
+/* MCC's folder in a Steam folder's libraries, or in the folder itself */
+static int mcc_root_try_steam(const char *steam)
+{
+	char path[MCC_PATHS_BYTES + 64];
+	char halo1[MCC_PATHS_BYTES + 96];
+	static char folders[MCC_PATHS_MAXIMUM_LIBRARIES][MCC_PATHS_BYTES];
+	int count = 0, index;
+	FILE *stream;
+
+	if (!steam || !steam[0])
+		return 0;
+	snprintf(path, sizeof(path), "%s/steamapps/libraryfolders.vdf", steam);
+	stream = fopen(path, "rb");
+	if (stream)
+	{
+		static char text[65536];
+		size_t size = fread(text, 1, sizeof(text), stream);
+
+		fclose(stream);
+		count = mcc_paths_library_folders(text, (unsigned long)size, folders, MCC_PATHS_MAXIMUM_LIBRARIES);
+	}
+	for (index = 0; index <= count; index++)
+	{
+		if (mcc_paths_mcc(index < count ? folders[index] : steam, halo1, sizeof(halo1)) && mcc_root_try(halo1))
+			return 1;
+	}
+	return 0;
+}
+#endif
+
+static const char *mcc_root_setting_now(void)
+{
+	const char *setting = getenv("HALO_CONTENT_ROOT");
+
+	if (!setting)
+		setting = config_string("paths.content");
+	/* (the Vita panel's Found by itself) */
+	return setting && strcasecmp(setting, "auto") ? setting : "";
+}
+
+static void mcc_root_find(void)
+{
+	const char *setting = mcc_root_setting_now();
+	char path[MAX_PATH];
+
+	mcc_root[0] = 0;
+	snprintf(mcc_root_setting, sizeof(mcc_root_setting), "%s", setting ? setting : "");
+	if (setting && *setting)
+	{
+		const char *slash;
+
+		/* (the player's: taken as it is, found or not; its halo1 folder
+		named, the folder holding it) */
+		snprintf(mcc_root, sizeof(mcc_root), "%s", setting);
+		trim_separators(mcc_root);
+		slash = strrchr(mcc_root, '/');
+		if (!mcc_root_valid(mcc_root) && has_maps(mcc_root) && slash && !strcasecmp(slash + 1, "halo1"))
+			mcc_root[slash - mcc_root] = 0;
+		mcc_root_state = mcc_root_valid(mcc_root) ? 1 : -1;
+		platform_log("content: the Halo content folder (paths.content): %s%s", mcc_root,
+			mcc_root_state > 0 ? "" : " (no halo1/maps there)");
+		return;
+	}
+	snprintf(path, sizeof(path), "%s/mcc", platform_data_root());
+	if (mcc_root_try(path))
+		goto found;
+#ifndef HALO_NOT_DESKTOP
+	{
+		const char *home = getenv("HOME");
+		static const char *const steam_folders[] =
+		{
+			".local/share/Steam", ".steam/steam", ".steam/root", ".var/app/com.valvesoftware.Steam/.local/share/Steam",
+		};
+		unsigned index;
+
+		for (index = 0; home && *home && index < sizeof(steam_folders) / sizeof(steam_folders[0]); index++)
+		{
+			snprintf(path, sizeof(path), "%s/%s", home, steam_folders[index]);
+			if (mcc_root_try_steam(path))
+				goto found;
+		}
+#ifdef _WIN32
+		{
+			const char *program_files = getenv("ProgramFiles(x86)");
+
+			if (program_files && *program_files)
+			{
+				snprintf(path, sizeof(path), "%s/Steam", program_files);
+				if (mcc_root_try_steam(path))
+					goto found;
+			}
+			if (mcc_root_try_steam("C:/Program Files (x86)/Steam") || mcc_root_try_steam("C:/Program Files/Steam"))
+				goto found;
+		}
+#endif
+	}
+#endif
+	mcc_root_state = -1;
+	platform_log("content: no Halo content folder (paths.content; %s/mcc; Steam's libraries): the Xbox maps alone",
+		platform_data_root());
+	return;
+found:
+	mcc_root_state = 1;
+	platform_log("content: the Halo content folder: %s", mcc_root);
+}
+
+int platform_mcc_root(char *out, unsigned long out_size)
+{
+	int found;
+	const char *setting = mcc_root_setting_now();
+
+	pthread_mutex_lock(&mcc_root_lock);
+	if (!mcc_root_state || strcmp(setting ? setting : "", mcc_root_setting))
+		mcc_root_find();
+	found = mcc_root_state > 0;
+	if (out && out_size)
+		snprintf(out, out_size, "%s", found ? mcc_root : "");
+	pthread_mutex_unlock(&mcc_root_lock);
+	return found;
+}
+
+void platform_mcc_root_forget(void)
+{
+	pthread_mutex_lock(&mcc_root_lock);
+	if (mcc_root_state < 0)
+		mcc_root_state = 0;
+	pthread_mutex_unlock(&mcc_root_lock);
+}
+
+int platform_host_path_is_mcc(const char *host_path)
+{
+	char root[MAX_PATH];
+	unsigned long length;
+
+	/* (only once found: a folder not found was never read through d:\mcc\,
+	and a first write elsewhere looks for none) */
+	pthread_mutex_lock(&mcc_root_lock);
+	snprintf(root, sizeof(root), "%s", mcc_root_state > 0 ? mcc_root : "");
+	pthread_mutex_unlock(&mcc_root_lock);
+	if (!host_path || !root[0])
+		return 0;
+	length = strlen(root);
+	return !strncmp(host_path, root, length) && (host_path[length] == '/' || host_path[length] == '\\' || !host_path[length]);
+}
+
+/* (the calls that write) FALSE, and the error set, for a path in MCC's
+folder */
+static int mcc_write_refused(const char *host_path)
+{
+	if (!platform_host_path_is_mcc(host_path))
+		return 0;
+	platform_log("content: refused: a write to the Halo content folder (%s); it is only read", host_path);
+	SetLastError(ERROR_ACCESS_DENIED);
+	errno = EACCES;
+	return 1;
+}
+
+int platform_xbox_path_write_refused(const char *xbox_path)
+{
+	char path[1024];
+
+	platform_translate_path(xbox_path, path, sizeof(path));
+	return mcc_write_refused(path);
+}
+
 void platform_translate_path(const char *xbox_path, char *host_path, unsigned long host_path_size)
 {
 	char resolved[1024];
 	const char *cursor = xbox_path;
 	unsigned long length;
+	/* (port) where ".." stops: MCC's folder's end (d:\mcc\), else the root's */
+	unsigned long dot_dot_floor = 0;
 
 	halo_load_profile_path_lookup();
 
@@ -435,6 +643,23 @@ void platform_translate_path(const char *xbox_path, char *host_path, unsigned lo
 			if (maps_root && !*maps_root)
 				maps_root = NULL;
 		}
+		/* (port) d:\mcc\: the Halo content folder, wherever it is (above) */
+		if (!strcmp(resolved, platform_data_root()))
+		{
+			const char *name = cursor;
+
+			while (*name == '\\' || *name == '/')
+				name++;
+			if (!strncasecmp(name, "mcc", 3) && (name[3] == '\\' || name[3] == '/' || !name[3]))
+			{
+				if (!platform_mcc_root(resolved, sizeof(resolved)))
+					snprintf(resolved, sizeof(resolved), "%s/mcc", platform_data_root());
+				cursor = name + 3;
+				/* (and never above it: ".." stops there) */
+				dot_dot_floor = strlen(resolved);
+				goto components;
+			}
+		}
 		if (maps_root && !strcmp(resolved, platform_data_root()))
 		{
 			const char *name = cursor;
@@ -449,6 +674,7 @@ void platform_translate_path(const char *xbox_path, char *host_path, unsigned lo
 		}
 	}
 
+components:
 	while (*cursor)
 	{
 		char component[256];
@@ -470,7 +696,7 @@ void platform_translate_path(const char *xbox_path, char *host_path, unsigned lo
 			/* resolved here: the Vita's file system takes ".." as a name */
 			char *slash = strrchr(resolved, '/');
 
-			if (slash && slash != resolved && slash[-1] != ':')
+			if (slash && slash != resolved && slash[-1] != ':' && (unsigned long)(slash - resolved) >= dot_dot_floor)
 				*slash = '\0';
 			continue;
 		}
@@ -614,6 +840,9 @@ static HANDLE create_file(LPCSTR file_name, DWORD desired_access, DWORD share_mo
 	}
 
 	platform_translate_path(file_name, path, sizeof(path));
+	/* (port: MCC's folder is only read) */
+	if (((desired_access & GENERIC_WRITE) || creation_disposition != OPEN_EXISTING) && mcc_write_refused(path))
+		return INVALID_HANDLE_VALUE;
 	io_card_request(0);
 	existed = posix_stat(path, &information) == 0;
 
@@ -1256,6 +1485,8 @@ static BOOL set_file_attributes(LPCSTR file_name, DWORD attributes)
 	struct posix_file_information information;
 
 	platform_translate_path(file_name, path, sizeof(path));
+	if (mcc_write_refused(path))
+		return FALSE;
 	if (posix_stat(path, &information) != 0)
 	{
 		platform_set_last_error_from_errno(errno);
@@ -1292,6 +1523,8 @@ static BOOL delete_file(LPCSTR file_name)
 	char path[1024];
 
 	platform_translate_path(file_name, path, sizeof(path));
+	if (mcc_write_refused(path))
+		return FALSE;
 	if (unlink(path) != 0)
 	{
 		platform_set_last_error_from_errno(errno);
@@ -1324,6 +1557,8 @@ static BOOL move_file(LPCSTR existing_file_name, LPCSTR new_file_name)
 
 	platform_translate_path(existing_file_name, from, sizeof(from));
 	platform_translate_path(new_file_name, to, sizeof(to));
+	if (mcc_write_refused(from) || mcc_write_refused(to))
+		return FALSE;
 	if (posix_stat(to, &information) == 0)
 	{
 		SetLastError(ERROR_ALREADY_EXISTS);
@@ -1363,6 +1598,8 @@ static BOOL copy_file(LPCSTR existing_file_name, LPCSTR new_file_name, BOOL fail
 
 	platform_translate_path(existing_file_name, from, sizeof(from));
 	platform_translate_path(new_file_name, to, sizeof(to));
+	if (mcc_write_refused(to))
+		return FALSE;
 	source = open(from, O_RDONLY | O_CLOEXEC);
 	if (source < 0)
 	{
@@ -1426,6 +1663,8 @@ static BOOL create_directory(LPCSTR path_name, LPSECURITY_ATTRIBUTES security_at
 
 	(void)security_attributes;
 	platform_translate_path(path_name, path, sizeof(path));
+	if (mcc_write_refused(path))
+		return FALSE;
 	if (posix_make_directory(path) != 0)
 	{
 		platform_set_last_error_from_errno(errno);
@@ -1456,6 +1695,8 @@ static BOOL remove_directory(LPCSTR path_name)
 	char path[1024];
 
 	platform_translate_path(path_name, path, sizeof(path));
+	if (mcc_write_refused(path))
+		return FALSE;
 	if (rmdir(path) != 0)
 	{
 		platform_set_last_error_from_errno(errno);

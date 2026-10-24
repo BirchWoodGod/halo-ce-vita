@@ -3629,7 +3629,7 @@ static void test_variables_kept(void)
 		"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR", "HALO_INTERPOLATION", "HALO_LATENCY_METER", "HALO_BOTS", "HALO_BOT_SKILL", "HALO_BOT_TEAMS",
 		"HALO_BOT_VEHICLES", "HALO_BOT_ROUTES", "HALO_BOT_PLAYLIST", "HALO_NET_COOP_PLAYERS", "HALO_NET_REMOTE_LOD",
 		"HALO_LANGUAGE", "HALO_UPDATE_CHANNEL", "HALO_PARTICLE_BUDGET", "HALO_FIRST_PERSON_LEGS", "HALO_RAGDOLLS",
-		"HALO_MCC_MODS", "HALO_PC_MAP_VEHICLES", "HALO_SHARP_UI", "HALO_PLAYER_MODEL", "HALO_FRIENDS_APPEAR_OFFLINE",
+		"HALO_MCC_MODS", "HALO_CONTENT_ROOT", "HALO_PC_MAP_VEHICLES", "HALO_SHARP_UI", "HALO_PLAYER_MODEL", "HALO_FRIENDS_APPEAR_OFFLINE",
 		"HALO_FRIENDS_JOIN", "HALO_NET_BLOCK_MOUSE_AIM_ASSIST", "HALO_NET_ANTICHEAT",
 		"HALO_INFECTION_ZOMBIES", "HALO_INFECTION_SPEED", "HALO_INFECTION_TIME", "HALO_INFECTION_RESPAWN",
 		"HALO_INFECTION_SHIELDS", "HALO_INFECTION_TOUGH",
@@ -5545,16 +5545,34 @@ int main(void)
 	printf("%s\n--\n", menu);
 	check(!strcmp(menu_line(2, line, sizeof(line)), "Mod manager\x02  >") &&
 		!strncmp(menu_line(3, line, sizeof(line)), "PC maps\x02", 8) &&
-		!strcmp(menu_line(4, line, sizeof(line)), "Map downloads\x02  Ask >") && !menu_line(5, line, sizeof(line))[0] &&
-		!strcmp(menu_line(6, line, sizeof(line)), "!Missing: sounds.map loc.map") &&
-		!strcmp(menu_line(7, line, sizeof(line)), "!Copy them in, or the Halo CE installer") &&
-		!strcmp(menu_line(8, line, sizeof(line)), "!(halocesetup*.exe) to ux0:data/haloce-vita"),
-		"Mod manager, PC maps switch, Map downloads (Ask), a gap; a CE map without sounds.map/loc.map: the warning, "
-		"and that the installer does");
-	check(!strncmp(menu_line(9, line, sizeof(line)), "cemap\x02", 6) && !strncmp(menu_line(10, line, sizeof(line)), "cesolo\x02", 7) &&
-		!strncmp(menu_line(11, line, sizeof(line)), "inplay\x02", 7) &&
-		!strncmp(menu_line(12, line, sizeof(line)), "mygulch\x02", 8) && menu_line(13, line, sizeof(line))[0] == '\x05',
+		!strcmp(menu_line(4, line, sizeof(line)), "Halo content folder\x02  Found by itself >") &&
+		!strcmp(menu_line(5, line, sizeof(line)), "Map downloads\x02  Ask >") && !menu_line(6, line, sizeof(line))[0] &&
+		!strcmp(menu_line(7, line, sizeof(line)), "!Missing: sounds.map loc.map") &&
+		!strcmp(menu_line(8, line, sizeof(line)), "!Copy them in, or the Halo CE installer") &&
+		!strcmp(menu_line(9, line, sizeof(line)), "!(halocesetup*.exe) to ux0:data/haloce-vita") &&
+		!strcmp(menu_line(10, line, sizeof(line)), "\x04" "Content: the Xbox maps (no MCC folder)"),
+		"Mod manager, PC maps switch, Halo content folder (found by itself), Map downloads (Ask), a gap; a CE map "
+		"without sounds.map/loc.map: the warning, and that the installer does; no MCC folder: the Xbox maps");
+	check(!strncmp(menu_line(11, line, sizeof(line)), "cemap\x02", 6) && !strncmp(menu_line(12, line, sizeof(line)), "cesolo\x02", 7) &&
+		!strncmp(menu_line(13, line, sizeof(line)), "inplay\x02", 7) &&
+		!strncmp(menu_line(14, line, sizeof(line)), "mygulch\x02", 8) && menu_line(15, line, sizeof(line))[0] == '\x05',
 		"the custom maps listed in order, not the Xbox's or CE resource maps");
+	/* the Halo content folder (port/linux/game/mcc_content.c): found by
+	itself, or one of the memory cards' data/mcc; in the environment the game
+	reads, saved; no switch, the page says where the content is read from */
+	check(!getenv("HALO_CONTENT_ROOT") || !strcmp(getenv("HALO_CONTENT_ROOT"), "auto"),
+		"Halo content folder: found by itself by default");
+	to_line("Halo content folder");
+	check(strstr(menu, "\n\x05" "Your MCC folder with halo1 in it; only read. Default: haloce-vita/mcc\n") && menu_fits(),
+		"Halo content folder's help: what it is, read only, where by default");
+	press(VITA_BUTTON_RIGHT);
+	check(getenv("HALO_CONTENT_ROOT") && !strcmp(getenv("HALO_CONTENT_ROOT"), "ux0:data/mcc") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_CONTENT_ROOT=ux0:data/mcc\n") &&
+		strstr(menu, "\nHalo content folder\x02< ux0:data/mcc >\n"),
+		"right: ux0:data/mcc, in the environment and settings.txt");
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_CONTENT_ROOT"), "auto") && strstr(file_text(SETTINGS_FILE), "HALO_CONTENT_ROOT=auto\n"),
+		"left: found by itself again, saved");
 	/* Map downloads: Ask (the default: public games warn), Not public games,
 	Never; each with its own help, saved and in the environment the game
 	reads (map_share.c) */
@@ -5660,6 +5678,28 @@ int main(void)
 	press(VITA_BUTTON_CIRCLE);
 	rmdir("ux0:data/haloce-vita/mods/ruby");
 	rmdir("ux0:data/haloce-vita/mods");
+
+	/* the Halo content folder found (ux0:data/haloce-vita/mcc, halo1\maps in
+	it): the page says it is read from there, and how many Halo CE maps
+	(bitmaps.map and ui.map not counted) */
+	mkdir("ux0:data/haloce-vita/mcc", 0777);
+	mkdir("ux0:data/haloce-vita/mcc/halo1", 0777);
+	mkdir("ux0:data/haloce-vita/mcc/halo1/maps", 0777);
+	write_file("ux0:data/haloce-vita/mcc/halo1/maps/a10.map", "x", 1);
+	write_file("ux0:data/haloce-vita/mcc/halo1/maps/bloodgulch.map", "x", 1);
+	write_file("ux0:data/haloce-vita/mcc/halo1/maps/bitmaps.map", "x", 1);
+	write_file("ux0:data/haloce-vita/mcc/halo1/maps/ui.map", "x", 1);
+	open_page("Modded maps");
+	check(strstr(menu, "\n\x04" "Content: ux0:data/haloce-vita/mcc\n\x04" "Halo CE: 2 MCC maps (no sound yet)\n") &&
+		!strstr(menu, "Content: the Xbox maps") && menu_fits(), "an MCC folder: where the content is read from, its maps");
+	press(VITA_BUTTON_CIRCLE);
+	remove("ux0:data/haloce-vita/mcc/halo1/maps/a10.map");
+	remove("ux0:data/haloce-vita/mcc/halo1/maps/bloodgulch.map");
+	remove("ux0:data/haloce-vita/mcc/halo1/maps/bitmaps.map");
+	remove("ux0:data/haloce-vita/mcc/halo1/maps/ui.map");
+	rmdir("ux0:data/haloce-vita/mcc/halo1/maps");
+	rmdir("ux0:data/haloce-vita/mcc/halo1");
+	rmdir("ux0:data/haloce-vita/mcc");
 
 	/* PC map vehicles: no row while PC maps is off; with it on, Xbox, and
 	right PC, then Allowed (HALO_PC_MAP_VEHICLES, live); back to Xbox, and PC
