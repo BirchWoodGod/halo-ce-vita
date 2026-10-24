@@ -141,6 +141,13 @@ struct halo_menu_widget
 	the port adds; still the map's widget, it runs none of the port's
 	functions (ui_widget_function_denied): those go on widgets of ours */
 	char const *extends, *drop, *classic_patch;
+	/* (an Online screen) its camera when the live backdrop is behind the
+	menus (menu_backdrop.c): backdrop="<ui.map's camera point> x y z yaw
+	pitch [ticks [fov]]" in the backdrop level's world, as scene= says it;
+	and who stands there then, backdrop_object= as scene_object= (none
+	yet: the lobbies' characters are for later) */
+	char const *backdrop;
+	char const *backdrop_object;
 	long x, y, left, top, width, height, text_x, text_y, auto_close, auto_close_fade, string_index;
 	long has_width, has_height;
 	/* indices in their arrays, or HALO_MENU_NONE */

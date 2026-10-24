@@ -647,6 +647,7 @@ static void read_widget(struct reader *reader, const XML_Char **attributes, long
 		{ "header_bitmap", &widget.header_bitmap }, { "footer_bitmap", &widget.footer_bitmap },
 		{ "header_bounds", &widget.header_bounds }, { "footer_bounds", &widget.footer_bounds },
 		{ "scene", &widget.scene }, { "scene_object", &widget.scene_object },
+		{ "backdrop", &widget.backdrop }, { "backdrop_object", &widget.backdrop_object },
 		{ "child_controller", &child_controller }, { "strings_pc", &strings_pc },
 		{ "extends", &widget.extends }, { "drop", &widget.drop }, { "classic_patch", &widget.classic_patch },
 		{ "x", NULL, &widget.x }, { "y", NULL, &widget.y }, { "left", NULL, &widget.left },

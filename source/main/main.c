@@ -5425,6 +5425,14 @@ void main_loop(
 #ifdef HALO_LINUX
 		main_test_commands_update();
 		{
+			/* (the Online menus' live backdrop - a30's bsp, a scene pack's -
+			switched to or from here, between frames, before the menus'
+			cameras: menu_backdrop.c) */
+			void menu_backdrop_update(void);
+
+			menu_backdrop_update();
+		}
+		{
 			/* (the Halo 3 menus' camera behind the screen opened, its
 			point written here, between frames: menu_functions.c) */
 			void menu_functions_scenes_update(void);

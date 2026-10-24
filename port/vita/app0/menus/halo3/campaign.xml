@@ -146,6 +146,7 @@ ui.map's own, the rest this folder's art. -->
 	a Marine on its gun and one beside him; seen from its left, banked to its left so that the
 	Chief at the wheel shows) -->
 	<widget name="h3/campaign/screen" flags="pass_unhandled_to_focused_child" scene="load_campaign -15 5 0 -20 25 0 50"
+		backdrop="load_campaign -46.233 20.258 62.322 -17.46 14.24 0 70"
 		scene_object="menu_campaign:warthog 4.2 0.82 -0.42 268 pitch=22 roll=14;
 			menu_campaign:cyborg in=1 seat=driver;
 			menu_campaign:marine_armored in=1 seat=gunner;

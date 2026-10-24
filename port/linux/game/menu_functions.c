@@ -1782,8 +1782,13 @@ static boolean h3_scenes_enabled(void)
 	return config_boolean("menus.scenes");
 }
 
+int menu_backdrop_active(void);
+
 /* the scene= of the menus' widget this screen was built from (its tag is
-"pc\<name>", the name's '/' made '\'), NULL for none */
+"pc\<name>", the name's '/' made '\'), NULL for none; with the live
+backdrop behind the menus (menu_backdrop.c), its backdrop= (and
+backdrop_object=) instead, NULL for none: a screen with none keeps the
+camera where it is */
 static char const *h3_scene_of(struct widget_instance *screen, char *name, int size, char const **objects)
 {
 	struct halo_menus const *menus = halo_menus_load();
@@ -1798,13 +1803,19 @@ static char const *h3_scene_of(struct widget_instance *screen, char *name, int s
 		struct halo_menu_widget const *widget = &menus->widgets[index];
 		char const *a = widget->name, *b = tag_name;
 
-		if (!widget->scene || !a)
+		if ((!widget->scene && !widget->backdrop) || !a)
 			continue;
 		while (*a && *b && (*a == *b || (*a == '/' && *b == '\\')))
 			a++, b++;
 		if (!*a && !*b)
 		{
 			snprintf(name, size, "%s", widget->name);
+			if (menu_backdrop_active())
+			{
+				if (objects)
+					*objects = widget->backdrop_object;
+				return widget->backdrop;
+			}
 			if (objects)
 				*objects = widget->scene_object;
 			return widget->scene;
@@ -1871,6 +1882,15 @@ static void h3_scene_request(struct widget_instance *widget)
 		return;
 	char const *objects = NULL;
 
+	/* (the live backdrop, a lit level, not under the Online screens' deep
+	blue haze, which was made for ui.map's dark ring: menu_backdrop.c) */
+	{
+		struct widget_instance *haze = named(screen, "haze");
+
+		if (haze && (!strcmp(tag_get_name(haze->definition_tag_index), "pc\\online\\main\\haze") ||
+			!strcmp(tag_get_name(haze->definition_tag_index), "pc\\h3\\main\\haze")))
+			widget_instance_set_visibility_recursive(haze, !menu_backdrop_active());
+	}
 	scene = h3_scene_of(screen, name, sizeof(name), &objects);
 	if (!scene)
 		return;
@@ -1886,6 +1906,19 @@ static void h3_scene_request(struct widget_instance *widget)
 	h3_scenes.has_objects = objects && *objects;
 	snprintf(h3_scenes.objects, sizeof(h3_scenes.objects), "%s", h3_scenes.has_objects ? objects : "");
 	__atomic_store_n(&h3_scenes.pending, 1, __ATOMIC_RELEASE);
+}
+
+/* (menu_backdrop.c, as the live backdrop comes or goes) the screen open
+now asks for its scene again: the backdrop's camera, or ui.map's */
+void menu_functions_scenes_refresh(void)
+{
+	struct widget_instance *active = NULL;
+	short index;
+
+	for (index = 0; index < 4 && !active; index++)
+		active = ui_widget_port_active_screen(index);
+	if (active)
+		h3_scene_request(active);
 }
 
 static struct scenario_cutscene_camera_point *h3_scene_point(char const *name)
@@ -2049,6 +2082,28 @@ static void h3_prebuild_update(void)
 			}
 		}
 	}
+}
+
+/* (menu_backdrop.c) whether the lobbies' packs asked for at the main
+menu's rest are all loaded or given up (or none is asked for: the
+prebuild off), so that a pack wanted after them does not take their build's
+room in the tag cache */
+int menu_functions_prebuild_settled(void)
+{
+	unsigned long scene_packs_map_epoch(void);
+	char const *setting = getenv("HALO_MENU_PREBUILD");
+	short index;
+
+	if (setting && *setting && (!strcmp(setting, "0") || !_stricmp(setting, "false")))
+		return TRUE;
+	if (h3_prebuild.epoch != scene_packs_map_epoch() || !h3_prebuild.asked)
+		return FALSE;
+	for (index = 0; index < h3_prebuild.count; index++)
+	{
+		if (!h3_prebuild.preloaded[index])
+			return FALSE;
+	}
+	return TRUE;
 }
 
 void menu_functions_scenes_update(void)

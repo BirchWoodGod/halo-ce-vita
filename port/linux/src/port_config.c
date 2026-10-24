@@ -390,6 +390,12 @@ static const struct config_setting config_settings[] =
 		"campaign, multiplayer and Forge lobbies: their scene= in\n"
 		"port/vita/app0/menus/halo3), the main menu the ring's own flight;\n"
 		"false keeps the ring's flight behind every screen." },
+	{ "menus.backdrop", _config_boolean, "true", "HALO_MENU_BACKDROP", _environment_value, _platform_all,
+		"With Menu style Online, the campaign level Halo (a30) behind the menus,\n"
+		"a still camera at a spot of it for each screen (port/linux/game/\n"
+		"menu_backdrop.c), made once from the player's own a30.map into\n"
+		"t:\\packs; false (or no a30.map) keeps the ring. The Vita's settings\n"
+		"panel (Game, Menus, Live backdrop) sets it." },
 	{ "infection.players_per_zombie", _config_integer, "8", "HALO_INFECTION_ZOMBIES", _environment_value, _platform_all,
 		"Infection (port/linux/game/infection.c), the game's own Infection game\n"
 		"type as this machine hosts it: one first zombie for each this many\n"
