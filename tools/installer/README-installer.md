@@ -31,8 +31,7 @@ files.
   the same steps as commands (see below).
 
 The window walks through five steps, listed on its left with each one's
-state (done, skipped, or what it needs: required, optional, for online
-play). Each can be skipped (**Skip this step**) and run again: files already
+state (done, skipped, or what it needs: required, optional). Each can be skipped (**Skip this step**) and run again: files already
 in place are kept. A step's progress shows the file it is on; **Show
 details** opens the log. The last page sums up what was gathered and copied
 and what to do next on the Vita.
@@ -104,12 +103,21 @@ Custom maps you put in that `maps` folder yourself are copied too.
    missing movie is skipped (no intro, no attract videos, no credits movie)
    and the main menu comes up ready to play. Skip the step with **Next** to
    save the few minutes it takes.
-3. **Halo PC files** (for online play and Custom Edition maps):
-   `bitmaps.map`, `sounds.map` and `loc.map`, from one of:
+3. **Halo PC files (required).** Halo Custom Edition's `bitmaps.map`,
+   `sounds.map` and `loc.map` are required. The page says at the top
+   whether the output folder has all three, or which are missing and where
+   to get them; the Copy page says so too, and copying without them asks
+   first. They count as there when they are in the output folder's `maps`
+   or in the MCC files of step 1 (`mcc/halo1/maps/custom_edition`, which
+   the builds that play MCC's maps read when the `maps` folder has none: an
+   MCC-only install needs nothing more here). Builds before
+   1.1.1-insider.25 read them from `maps` only: this step puts them there.
+   They come from one of:
    - **Halo: The Master Chief Collection** on Steam: its
      `halo1/maps/custom_edition` folder, found by itself in your Steam
-     libraries (`libraryfolders.vdf`), or chosen with Folder... Not the maps
-     directly in `halo1/maps`: those are MCC's own and do not work.
+     libraries (`libraryfolders.vdf`, the registry), or chosen with
+     Folder... Not the maps directly in `halo1/maps`: those are MCC's own
+     and do not work.
    - **The Halo Custom Edition installer**
      ([halomaps.org](https://www.halomaps.org/hce/detail.cfm?fid=410)).
      Whatever its file name: it is recognised by what is in it. The English
@@ -119,7 +127,10 @@ Custom maps you put in that `maps` folder yourself are copied too.
      `loc.map` is taken as an installer too. The cabinet (LZX) is unpacked by
      the tool itself, in about 20 seconds, with nothing to install. Anything
      else is reported as "This isn't the Halo Custom Edition installer".
-   - **A folder** that has them, such as a Custom Edition install's `maps`.
+   - **A folder** that has them, such as a Custom Edition install's `maps`
+     (on Windows found by itself where its installer recorded it, the
+     registry's `Microsoft Games\Halo CE`, or in `Program Files`). A
+     `halocesetup*.exe` in your Downloads is picked up by itself too.
 
    Each map's header is checked (the right kind of resource map).
 4. **Copy to the Vita.** On the Vita, open VitaShell and press SELECT: it
@@ -181,10 +192,15 @@ python3 halo_ce_vita_installer.py [--out FOLDER] pc-files --mcc [FOLDER]
 python3 halo_ce_vita_installer.py [--out FOLDER] pc-files --installer "any name.exe"
 python3 halo_ce_vita_installer.py [--out FOLDER] pc-files --folder FOLDER
 python3 halo_ce_vita_installer.py check-installer "any name.exe"
+python3 halo_ce_vita_installer.py [--out FOLDER] check
 python3 halo_ce_vita_installer.py [--out FOLDER] upload 192.168.1.20 [--replace]
 python3 halo_ce_vita_installer.py vpk 192.168.1.20 [halo.vpk]
 python3 halo_ce_vita_installer.py selftest
 ```
+
+`check` says whether the output folder has the required Halo Custom
+Edition files (and, if not, which are missing and where to get them; exit
+code 1); `upload` warns the same way but copies the rest.
 
 (`HaloCEVitaInstaller.exe` takes the same commands, but as a windowed program
 it prints nothing; `selftest --report FILE` writes its results to a file.)

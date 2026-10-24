@@ -53,9 +53,9 @@ def stage(folder, xbox=True, pc=False, movies=0):
             with open(os.path.join(maps, name), "wb") as file:
                 file.write(bytes(64))
     if pc:
-        for name, _ in hcv.PC_RESOURCE_MAPS:
+        for name, kind in hcv.PC_RESOURCE_MAPS:
             with open(os.path.join(maps, name), "wb") as file:
-                file.write(bytes(64))
+                file.write(fakes.fake_resource_map(kind))
     if movies:
         os.makedirs(os.path.join(folder, "movies"), exist_ok=True)
         for index in range(movies):
@@ -150,6 +150,56 @@ def test_mcc_through_the_window(root, tmp_path, monkeypatch):
     window.mcc_root.set("")
     window.start(window.do_game)
     assert "Choose MCC's folder" in window.notice_text() and not window.busy()
+
+
+def test_required_pc_files_check(root, tmp_path, monkeypatch):
+    """Step 3 is required: its page and the copy page say what is missing
+    and where to get it; copying without them asks first; MCC's
+    custom_edition counts."""
+    from tkinter import messagebox
+    asked = []
+    answer = [False]
+    monkeypatch.setattr(messagebox, "askyesno", lambda title, text, **options: asked.append(text) or answer[0])
+    monkeypatch.setattr(messagebox, "showerror", lambda title, text, **options: None)
+    calls = []
+    monkeypatch.setattr(hcv, "upload_files", lambda *arguments, **options: calls.append(arguments) or
+                        {"copied": 1, "skipped": 0, "retries": 0})
+    out = tmp_path / "out"
+    stage(str(out), xbox=True)
+    window = hcv.InstallerWindow(root, str(out))
+    assert window.PAGES[3][1] == "Required"
+    assert window.step_rows[3][2].cget("text") == "Required"
+    window.show(3)
+    root.update()
+    labels = [widget.cget("text") for widget in all_widgets(window.body) if widget.winfo_class() == "TLabel"]
+    assert any(text.startswith("⚠ Required Halo Custom Edition files missing: bitmaps.map, sounds.map, loc.map")
+               for text in labels)
+    window.show(4)
+    window.host.set("192.168.1.20")
+    window.start(window.do_upload)
+    assert asked and "Copy the other files" in asked[0]
+    assert "Not copied" in window.notice_text() and not calls
+    answer[0] = True
+    window.start(window.do_upload)
+    assert pump(root, lambda: not window.worker.is_alive() and window.messages.empty())
+    assert len(calls) == 1
+    rows = {what: (done, how) for done, what, how in window.done_summary()}
+    assert rows["Halo PC files"] == (False, "MISSING bitmaps.map, sounds.map, loc.map: required (step 3)")
+    # from MCC's custom_edition: done, nothing asked
+    for name, kind in hcv.PC_RESOURCE_MAPS:
+        folder = out / "mcc" / "halo1" / "maps" / "custom_edition"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / name).write_bytes(fakes.fake_resource_map(kind))
+    asked.clear()
+    window.show(3)
+    root.update()
+    assert window.step_state_done(3)
+    labels = [widget.cget("text") for widget in all_widgets(window.body) if widget.winfo_class() == "TLabel"]
+    assert any(text.startswith("✓ bitmaps.map, sounds.map and loc.map") for text in labels)
+    window.show(4)
+    window.start(window.do_upload)
+    assert pump(root, lambda: not window.worker.is_alive() and window.messages.empty())
+    assert not asked and len(calls) == 2
 
 
 def test_a_failed_step_is_shown(root, tmp_path, monkeypatch):
