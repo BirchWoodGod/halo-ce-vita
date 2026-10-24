@@ -12,9 +12,12 @@ and copies them to the Vita over VitaShell's FTP mode.
 
 The steps, each one optional:
 
-1. Xbox game files: the maps folder and default.xbe out of the player's Xbox
+1. Game files: the maps folder and default.xbe out of the player's Xbox
    disc image (an XISO or a full disc image: read here, by a small XDVDFS
-   reader, nothing to install) or an already unpacked folder.
+   reader, nothing to install) or an already unpacked folder; or, the other
+   way, the Halo CE content of the player's own Halo: The Master Chief
+   Collection (Steam), copied as the game reads it into mcc/ (and, only when
+   asked, Halo 2's files for the Halo 2 test builds).
 2. Movies (optional: the game runs without them): the disc's Bink movies
    converted by ffmpeg to the H.264 MP4s the Vita plays (movies/<name>.mp4).
 3. Halo PC files: bitmaps.map, sounds.map and loc.map, which online play and
@@ -102,14 +105,21 @@ KNOWN_CE_RESOURCE_MAPS = {
 XBOX_REQUIRED_MAPS = ("ui.map", "a10.map", "a30.map", "a50.map", "b30.map", "b40.map",
                       "c10.map", "c20.map", "c40.map", "d20.map", "d40.map")
 
-# README.md's movie conversion (the first command: Baseline, 640 wide), and
-# the High profile one it gives as the better-quality choice
+# README.md's movie conversion: H.264 Constrained Baseline (x264's baseline
+# profile: no B-frames, no CABAC), 640 wide. Every choice must stay so: the
+# Vita plays High profile's B-frames as white frames. "better" is the same
+# profile at a higher quality (larger files, slower), its bit rate capped
+# for level 3.1.
 FFMPEG_MOVIE_ARGS = {
-    "baseline": ["-c:v", "libx264", "-profile:v", "baseline", "-level", "3.1", "-pix_fmt", "yuv420p",
-                 "-vf", "scale=640:-2", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart"],
-    "high": ["-c:v", "libx264", "-profile:v", "high", "-level", "4.0", "-crf", "20", "-pix_fmt", "yuv420p",
-             "-vf", "scale=640:-2", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart"],
+    "baseline": ["-c:v", "libx264", "-profile:v", "baseline", "-level", "3.1", "-bf", "0",
+                 "-pix_fmt", "yuv420p", "-vf", "scale=640:-2", "-c:a", "aac", "-b:a", "128k",
+                 "-movflags", "+faststart"],
+    "better": ["-c:v", "libx264", "-profile:v", "baseline", "-level", "3.1", "-bf", "0", "-preset", "slow",
+               "-crf", "18", "-maxrate", "6M", "-bufsize", "12M", "-pix_fmt", "yuv420p", "-vf", "scale=640:-2",
+               "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart"],
 }
+# (the old High profile choice's name: now the Vita-safe "better")
+MOVIE_QUALITY_ALIASES = {"high": "better", "standard": "baseline"}
 
 Progress = Callable[[str, int, int], None]
 
@@ -579,6 +589,12 @@ def find_mcc_custom_edition() -> List[str]:
         folder = os.path.join(library, *MCC_CUSTOM_EDITION)
         if all(os.path.isfile(os.path.join(folder, name)) for name, _ in PC_RESOURCE_MAPS):
             found.append(folder)
+    # (and MCC's folders found otherwise: the registry, the Xbox app's)
+    for root in find_mcc_folders():
+        folder = pc_maps_folder(root)
+        if folder and os.path.normcase(os.path.realpath(folder)) not in \
+                [os.path.normcase(os.path.realpath(seen)) for seen in found]:
+            found.append(folder)
     return found
 
 
@@ -621,6 +637,349 @@ def copy_pc_maps_from_folder(folder: str, staging: str, progress: Progress = _no
         written.append(destination)
         log("%s (%s) from %s" % (name, human_size(size), found))
     return written
+
+
+def find_ce_install_folders() -> List[str]:
+    """Halo Custom Edition installs' maps folders holding the three resource
+    maps: the folder its installer recorded (Windows registry: Microsoft
+    Games\\Halo CE, "EXE Path"), then the usual places."""
+    folders = []
+    if sys.platform == "win32":
+        try:
+            import winreg
+            for hive, key in ((winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Microsoft Games\Halo CE"),
+                              (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Microsoft Games\Halo CE"),
+                              (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Microsoft Games\Halo CE")):
+                try:
+                    with winreg.OpenKey(hive, key) as handle:
+                        folders.append(winreg.QueryValueEx(handle, "EXE Path")[0])
+                except OSError:
+                    pass
+        except ImportError:
+            pass
+        for variable in ("ProgramFiles(x86)", "ProgramFiles"):
+            if os.environ.get(variable):
+                folders.append(os.path.join(os.environ[variable], "Microsoft Games", "Halo Custom Edition"))
+    found = []
+    for folder in folders:
+        maps = pc_maps_folder(folder) if folder and os.path.isdir(folder) else None
+        if maps and maps not in found:
+            found.append(maps)
+    return found
+
+
+def find_ce_installers() -> List[str]:
+    """halocesetup*.exe in the player's Downloads, next to this tool or in
+    the current folder (any other name is chosen by hand: Choose file...)."""
+    places = [os.path.join(os.path.expanduser("~"), "Downloads"),
+              os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__)),
+              os.getcwd()]
+    found = []
+    for place in places:
+        try:
+            names = sorted(os.listdir(place))
+        except OSError:
+            continue
+        for name in names:
+            full = os.path.join(place, name)
+            if (name.lower().startswith("halocesetup") and name.lower().endswith(".exe") and
+                    os.path.isfile(full) and full not in found):
+                found.append(full)
+    return found
+
+
+# ---------------------------------------------------------------------------
+# step 1 (the other way): the player's own Halo: The Master Chief Collection
+#
+# What the game reads from the Halo content folder (docs/mcc_cea_maps.md,
+# port/linux/game/mcc_content.c, mcc_sound.c), the Vita's
+# ux0:data/haloce-vita/mcc: halo1/maps (the campaign, the multiplayer maps,
+# MCC's own bitmaps.map, ui.map for the menus when there is no Xbox ui.map),
+# halo1/maps/custom_edition (the Halo PC files), and for the classic sound
+# effects halo1/sound/pc/sounds_adpcm.fsb (88 MB) with its list
+# lst/sounds_adpcm.lst.bin (the other lists only count what stays silent).
+# Nothing else of MCC (dialogue and music banks, the other games) is needed.
+
+STAGING_MCC = "mcc"  # -> ux0:data/haloce-vita/mcc, the game's Halo content folder there
+# Halo PC's resource maps in MCC: the game takes them from here when the maps
+# folder has none (port/linux/src/xbox_files.c, platform_halo_pc_resource_map)
+MCC_CE_PARTS = ("halo1", "maps", "custom_edition")
+MCC_STEAM_APP_ID = "976730"
+MCC_FOLDER_NAME = "Halo The Master Chief Collection"
+MCC_CAMPAIGN_MAPS = ("a10", "a30", "a50", "b30", "b40", "c10", "c20", "c40", "d20", "d40")
+MCC_MULTIPLAYER_MAPS = ("beavercreek", "sidewinder", "damnation", "ratrace", "prisoner", "hangemhigh", "chillout",
+                        "carousel", "boardingaction", "bloodgulch", "wizard", "putput", "longest", "dangercanyon",
+                        "deathisland", "gephyrophobia", "icefields", "infinity", "timberland")
+MCC_SOUND_PARTS = ("halo1", "sound", "pc")
+MCC_SOUND_BANK = "sounds_adpcm.fsb"
+MCC_SOUND_LISTS = ("sounds_adpcm.lst.bin", "sounds_dialogs.lst.bin", "sounds_music.lst.bin",
+                   "sounds_stream.lst.bin", "sounds_debug.lst.bin")
+# Halo 2's files for the Halo 2 test builds (not public yet): to the maps folder
+H2_MCC_PARTS = ("halo2", "h2_maps_win64_dx11")
+H2_FILES = ("zanzibar.map", "shared.map", "textures.dat", "sounds_neutral.dat", "sounds_en.dat")
+MCC_FILE_MAXIMUM = 2 << 30
+
+
+@dataclass
+class MccFile:
+    source: str
+    parts: Tuple[str, ...]  # where in the output folder (and under ux0:data/haloce-vita)
+    size: int
+    kind: str  # "map", "resource", "bank", "list", "h2"
+
+
+def _cache_map_ok(path: str) -> bool:
+    """A Halo cache file of MCC's: 'head' (as it lies, "daeh") and version 13."""
+    try:
+        with open(path, "rb") as file:
+            header = file.read(8)
+    except OSError:
+        return False
+    return len(header) == 8 and header[:4] == b"daeh" and struct.unpack_from("<I", header, 4)[0] == 13
+
+
+def _mcc_file_ok(item: MccFile, path: Optional[str] = None) -> bool:
+    path = path or item.source
+    name = item.parts[-1]
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as file:
+            head = file.read(8)
+    except OSError:
+        return False
+    if size == 0 or size > MCC_FILE_MAXIMUM:
+        return False
+    if item.kind == "map":
+        return _cache_map_ok(path) if name != "bitmaps.map" else (len(head) >= 4 and head[:4] == b"\1\0\0\0")
+    if item.kind == "resource":
+        return resource_map_ok(path, name)
+    if item.kind == "bank":
+        return head[:4] == b"FSB5"
+    if item.kind == "list":
+        return len(head) >= 4 and struct.unpack_from("<I", head, 0)[0] == 1
+    if item.kind == "h2":
+        return _cache_map_ok(path) if name.endswith(".map") else True
+    return False
+
+
+def mcc_root_of(path: str) -> Optional[str]:
+    """MCC's folder (the one holding halo1) from what the player chose: that
+    folder, its halo1, halo1/maps or halo1/maps/custom_edition, a Steam
+    library, its steamapps or steamapps/common."""
+    if not path or not os.path.isdir(path):
+        return None
+    candidates = [path]
+    base = os.path.basename(os.path.normpath(path)).lower()
+    parent = os.path.dirname(os.path.normpath(path))
+    if base == "halo1":
+        candidates.append(parent)
+    elif base == "maps":
+        candidates.append(os.path.dirname(parent))
+    elif base == "custom_edition":
+        candidates.append(os.path.dirname(os.path.dirname(parent)))
+    for root in (path, os.path.join(path, "steamapps"), os.path.join(path, "steamapps", "common"),
+                 os.path.join(path, "common")):
+        child = _find_child(root, MCC_FOLDER_NAME)
+        if child:
+            candidates.append(child)
+    for candidate in candidates:
+        halo1 = _find_child(candidate, "halo1")
+        if halo1 and _find_child(_find_child(halo1, "maps"), "a10.map"):
+            return candidate
+    return None
+
+
+def find_mcc_folders() -> List[str]:
+    """MCC's folders on this computer: in each Steam library
+    (libraryfolders.vdf, the registry), where Steam's uninstall entry says it
+    is, and the Xbox app's XboxGames folders."""
+    candidates = [os.path.join(library, "steamapps", "common", MCC_FOLDER_NAME) for library in steam_library_folders()]
+    if sys.platform == "win32":
+        try:
+            import winreg
+            key = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Steam App " + MCC_STEAM_APP_ID
+            for hive, view in ((winreg.HKEY_LOCAL_MACHINE, getattr(winreg, "KEY_WOW64_64KEY", 0)),
+                               (winreg.HKEY_LOCAL_MACHINE, getattr(winreg, "KEY_WOW64_32KEY", 0))):
+                try:
+                    with winreg.OpenKey(hive, key, 0, winreg.KEY_READ | view) as handle:
+                        candidates.append(winreg.QueryValueEx(handle, "InstallLocation")[0])
+                except OSError:
+                    pass
+        except ImportError:
+            pass
+        for letter in "CDEFGHIJ":
+            candidates.append("%s:\\XboxGames\\%s\\Content" % (letter, MCC_FOLDER_NAME))
+    found = []
+    for candidate in candidates:
+        root = mcc_root_of(candidate) if candidate and os.path.isdir(candidate) else None
+        if root and os.path.normcase(os.path.realpath(root)) not in \
+                [os.path.normcase(os.path.realpath(seen)) for seen in found]:
+            found.append(root)
+    return found
+
+
+@dataclass
+class MccPlan:
+    root: str
+    files: List[MccFile]
+    missing: List[str]  # required files not there (relative to MCC's folder)
+    notes: List[str]  # optional ones not there, and what that means
+
+    @property
+    def size(self) -> int:
+        return sum(item.size for item in self.files)
+
+    def needed(self, staging: str) -> int:
+        """The bytes still to copy into `staging` (files there at their size
+        are kept)."""
+        needed = 0
+        for item in self.files:
+            path = os.path.join(staging, *item.parts)
+            if not (os.path.isfile(path) and os.path.getsize(path) == item.size):
+                needed += item.size
+        return needed
+
+
+def mcc_plan(path: str, halo2: bool = False) -> MccPlan:
+    """What would be copied from MCC's folder `path` (see above), and what of
+    it is missing. `halo2` adds the Halo 2 test builds' files."""
+    root = mcc_root_of(path)
+    if root is None:
+        raise InstallerError("No Halo: The Master Chief Collection in %s: choose MCC's folder (Steam: right-click "
+                             "the game, Manage, Browse local files), the one that has halo1." % path)
+    files: List[MccFile] = []
+    missing: List[str] = []
+    notes: List[str] = []
+
+    def take(folder_parts, name, parts, kind, required, note=""):
+        folder = root
+        for part in folder_parts:
+            folder = _find_child(folder, part)
+        source = _find_child(folder, name)
+        label = "/".join(folder_parts + (name,))
+        if source and os.path.isfile(source) and not os.path.islink(source):
+            files.append(MccFile(source, parts, os.path.getsize(source), kind))
+        elif required:
+            missing.append(label)
+        elif note:
+            notes.append("%s is not there: %s" % (label, note))
+
+    maps = (STAGING_MCC, "halo1", "maps")
+    for stem in MCC_CAMPAIGN_MAPS:
+        take(("halo1", "maps"), stem + ".map", maps + (stem + ".map",), "map", True)
+    take(("halo1", "maps"), "bitmaps.map", maps + ("bitmaps.map",), "map", True)
+    for stem in MCC_MULTIPLAYER_MAPS:
+        take(("halo1", "maps"), stem + ".map", maps + (stem + ".map",), "map", False,
+             "that multiplayer map is left out")
+    take(("halo1", "maps"), "ui.map", maps + ("ui.map",), "map", False,
+         "the menus need the Xbox ui.map then")
+    for name, _ in PC_RESOURCE_MAPS:
+        take(MCC_CE_PARTS, name, (STAGING_MCC,) + MCC_CE_PARTS + (name,), "resource", False,
+             "the Halo Custom Edition files come from step 3 then")
+    sound = (STAGING_MCC,) + MCC_SOUND_PARTS
+    take(MCC_SOUND_PARTS, MCC_SOUND_BANK, sound + (MCC_SOUND_BANK,), "bank", False,
+         "MCC's maps play without sound effects")
+    for name in MCC_SOUND_LISTS:
+        take(MCC_SOUND_PARTS + ("lst",), name, sound + ("lst", name), "list", False,
+             "MCC's maps play without sound effects" if name == MCC_SOUND_LISTS[0] else "")
+    if halo2:
+        for name in H2_FILES:
+            take(H2_MCC_PARTS, name, (STAGING_MAPS, name), "h2", True)
+    return MccPlan(root, files, missing, notes)
+
+
+def install_mcc_files(path: str, staging: str, halo2: bool = False, progress: Progress = _no_progress,
+                      log: Callable[[str], None] = print) -> MccPlan:
+    """Step 1, the other way: the Halo CE content of the player's own MCC
+    copied into `staging`/mcc/ as the Vita has it (ux0:data/haloce-vita/mcc),
+    and with `halo2` the Halo 2 test builds' files into `staging`/maps/.
+    Nothing is copied unless every required file is there; each file is
+    checked (its header) before and after."""
+    plan = mcc_plan(path, halo2)
+    if plan.missing:
+        raise InstallerError("MCC's folder %s lacks %s. Is Halo: Combat Evolved Anniversary%s installed in MCC "
+                             "(Steam: the game's Properties, DLC)?" % (
+                                 plan.root, ", ".join(plan.missing), " and Halo 2" if halo2 else ""))
+    for item in plan.files:
+        if not _mcc_file_ok(item):
+            raise InstallerError("%s is not the file this build reads (its header does not match): is the MCC "
+                                 "folder damaged? Steam's Verify integrity of game files mends it." % item.source)
+    for note in plan.notes:
+        log("Note: " + note)
+    os.makedirs(staging, exist_ok=True)
+    total = plan.size
+    done = 0
+    for item in plan.files:
+        folder = staging
+        for part in item.parts[:-1]:
+            folder = safe_join(folder, part)
+            os.makedirs(folder, exist_ok=True)
+        destination = safe_join(folder, item.parts[-1])
+        if os.path.isfile(destination) and os.path.getsize(destination) == item.size:
+            log("%s already there" % "/".join(item.parts))
+        else:
+            partial = destination + ".part"
+            try:
+                with open(item.source, "rb") as reader, open(partial, "wb") as writer:
+                    _copy_range(reader, writer, 0, item.size, progress, item.parts[-1], done, total)
+            except BaseException:
+                if os.path.exists(partial):
+                    os.remove(partial)
+                raise
+            if os.path.getsize(partial) != item.size or not _mcc_file_ok(item, partial):
+                os.remove(partial)
+                raise InstallerError("%s came out damaged" % item.parts[-1])
+            os.replace(partial, destination)
+            log("%s (%s)" % ("/".join(item.parts), human_size(item.size)))
+        done += item.size
+        progress(item.parts[-1], done, total)
+    return plan
+
+
+def mcc_staged(staging: str) -> bool:
+    """Whether the output folder has MCC's Halo CE content (its campaign and
+    bitmaps.map)."""
+    maps = os.path.join(staging, STAGING_MCC, "halo1", "maps")
+    return all(os.path.isfile(os.path.join(maps, name))
+               for name in [stem + ".map" for stem in MCC_CAMPAIGN_MAPS] + ["bitmaps.map"])
+
+
+# ---------------------------------------------------------------------------
+# the required Halo Custom Edition files: where they are in the output folder
+
+
+@dataclass
+class PcFilesStatus:
+    found: Dict[str, str]  # name -> where (the output folder's maps, or MCC's custom_edition)
+    missing: List[str]
+
+    @property
+    def complete(self) -> bool:
+        return not self.missing
+
+
+def pc_files_status(staging: str) -> PcFilesStatus:
+    """Which of bitmaps.map, sounds.map and loc.map the output folder has, in
+    maps/ or in MCC's halo1/maps/custom_edition/ (each header checked)."""
+    found = {}
+    missing = []
+    for name, _ in PC_RESOURCE_MAPS:
+        for where, parts in (("maps", (STAGING_MAPS,)), ("MCC's custom_edition", (STAGING_MCC,) + MCC_CE_PARTS)):
+            path = os.path.join(staging, *parts, name)
+            if os.path.isfile(path) and resource_map_ok(path, name):
+                found[name] = where
+                break
+        else:
+            missing.append(name)
+    return PcFilesStatus(found, missing)
+
+
+def pc_files_help(missing: Sequence[str]) -> str:
+    """What is missing and where to get it, for the player."""
+    return ("Required Halo Custom Edition files missing: %s. Get them from one of: your Halo: The Master Chief "
+            "Collection on Steam (its halo1/maps/custom_edition folder), the free Halo Custom Edition installer "
+            "(halocesetup_en_1.00.exe, %s), or a Halo Custom Edition install's maps folder. Step 3 takes them "
+            "from any of these." % (", ".join(missing), CE_INSTALLER_URL))
 
 
 # ---------------------------------------------------------------------------
@@ -1475,11 +1834,13 @@ def convert_movies(source_path: str, staging: str, ffmpeg: Optional[str] = None,
                    progress: Progress = _no_progress, log: Callable[[str], None] = print,
                    cancel: Optional[threading.Event] = None) -> List[str]:
     """Step 2: every bink/*.bik converted to `staging`/movies/<name>.mp4 as
-    README.md's Movies section does (H.264, 640 wide, AAC)."""
+    README.md's Movies section does (H.264 Constrained Baseline, no B-frames,
+    640 wide, AAC). `quality` is "baseline" or "better" (both Vita-safe)."""
     ffmpeg_path = find_ffmpeg(ffmpeg)
     if not ffmpeg_path:
         raise InstallerError("ffmpeg was not found. The Windows program brings its own; otherwise install "
                              "ffmpeg (https://ffmpeg.org) or choose ffmpeg's program.")
+    quality = MOVIE_QUALITY_ALIASES.get(quality, quality)
     if quality not in FFMPEG_MOVIE_ARGS:
         raise InstallerError("unknown movie quality %r" % quality)
     source = XboxSource.open(source_path)
@@ -1835,18 +2196,28 @@ class UploadItem:
 def staged_uploads(staging: str) -> List[UploadItem]:
     """What the steps gathered in `staging`, with where each goes on the
     Vita (README.md's layout): default.xbe, maps/*.map (the game's, Halo PC's
-    and any custom maps put there), movies/*.mp4."""
+    and any custom maps put there, and the Halo 2 test builds' files),
+    movies/*.mp4, and MCC's files under mcc/ (halo1/maps, its custom_edition,
+    halo1/sound/pc's bank and lists)."""
     items = []
     xbe = os.path.join(staging, STAGING_XBE)
     if os.path.isfile(xbe):
         items.append(UploadItem(xbe, VITA_GAME_FOLDER, STAGING_XBE, os.path.getsize(xbe)))
-    for folder, suffixes in ((STAGING_MAPS, (".map", ".yelo")), (STAGING_MOVIES, (".mp4",))):
-        directory = os.path.join(staging, folder)
-        if not os.path.isdir(directory):
+    mcc_maps = STAGING_MCC + "/halo1/maps"
+    mcc_sound = STAGING_MCC + "/" + "/".join(MCC_SOUND_PARTS[:])
+    for folder, suffixes in ((STAGING_MAPS, (".map", ".yelo") + tuple(name for name in H2_FILES
+                                                                     if name.endswith(".dat"))),
+                             (STAGING_MOVIES, (".mp4",)),
+                             (mcc_maps, (".map",)), (mcc_maps + "/custom_edition", (".map",)),
+                             (mcc_sound, (".fsb",)), (mcc_sound + "/lst", (".lst.bin",))):
+        directory = os.path.join(staging, *folder.split("/"))
+        if not os.path.isdir(directory) or os.path.islink(directory):
             continue
         for name in sorted(os.listdir(directory)):
             full = os.path.join(directory, name)
             if not name.lower().endswith(suffixes) or not os.path.isfile(full) or os.path.islink(full):
+                continue
+            if name.lower().endswith(".dat") and name.lower() not in H2_FILES:
                 continue
             try:
                 check_name(name)
@@ -2089,16 +2460,27 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     commands = parser.add_subparsers(dest="command")
     step = commands.add_parser("xbox", help="step 1: maps and default.xbe from your Xbox disc image or folder")
     step.add_argument("source", help="the Xbox disc image (.iso / .xiso) or the unpacked game folder")
+    step = commands.add_parser("mcc", help="step 1, the other way: MCC's Halo CE content from your own Halo: "
+                                           "The Master Chief Collection (Steam)")
+    step.add_argument("source", nargs="?", help="MCC's folder (default: found in your Steam libraries)")
+    step.add_argument("--halo2", action="store_true",
+                      help="also Halo 2's zanzibar.map, shared.map, textures.dat, sounds_neutral.dat and "
+                           "sounds_en.dat, for the Halo 2 test builds (not public yet; about 1.6 GB)")
     step = commands.add_parser("movies", help="step 2: the disc's movies converted to MP4 with ffmpeg")
     step.add_argument("source", help="the Xbox disc image or the unpacked game folder")
     step.add_argument("--ffmpeg", help="ffmpeg's program (default: the bundled one, or on the PATH)")
-    step.add_argument("--quality", choices=sorted(FFMPEG_MOVIE_ARGS), default="baseline")
-    step = commands.add_parser("pc-files", help="step 3: Halo PC's bitmaps.map, sounds.map, loc.map")
+    step.add_argument("--quality", choices=sorted(FFMPEG_MOVIE_ARGS) + sorted(MOVIE_QUALITY_ALIASES),
+                      default="baseline", help="baseline (as README.md) or better (the same Vita-safe profile at "
+                                               "a higher quality: larger, slower); high is better's old name")
+    step = commands.add_parser("pc-files", help="step 3 (required): Halo Custom Edition's bitmaps.map, sounds.map, "
+                                                "loc.map")
     which = step.add_mutually_exclusive_group(required=True)
     which.add_argument("--mcc", nargs="?", const="", metavar="FOLDER",
                        help="from Halo MCC on Steam (found by itself, or give its custom_edition folder)")
     which.add_argument("--installer", metavar="EXE", help="from the Halo Custom Edition installer (any name)")
     which.add_argument("--folder", help="from a folder that has them (a Custom Edition install's maps)")
+    commands.add_parser("check", help="check the output folder for the required Halo Custom Edition files "
+                                      "(bitmaps.map, sounds.map, loc.map)")
     step = commands.add_parser("check-installer", help="tell whether a file is the Halo Custom Edition installer")
     step.add_argument("exe")
     step = commands.add_parser("upload", help="step 4: copy the gathered files to the Vita (VitaShell FTP)")
@@ -2124,6 +2506,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             _check_space(out, xbox_files_size(arguments.source))
             written = extract_xbox_files(arguments.source, out, progress, _console_log)
             _console_log("Xbox files ready in %s (%d files)" % (out, len(written)))
+        elif arguments.command == "mcc":
+            folders = [arguments.source] if arguments.source else find_mcc_folders()
+            if not folders:
+                raise InstallerError("Halo: The Master Chief Collection was not found in your Steam libraries: "
+                                     "give its folder (mcc FOLDER)")
+            plan = mcc_plan(folders[0], arguments.halo2)
+            _check_space(out, plan.needed(out))
+            install_mcc_files(folders[0], out, arguments.halo2, progress, _console_log)
+            _console_log("MCC files ready in %s (%d files, %s)" % (out, len(plan.files), human_size(plan.size)))
         elif arguments.command == "movies":
             os.makedirs(out, exist_ok=True)
             convert_movies(arguments.source, out, arguments.ffmpeg, arguments.quality, progress, _console_log)
@@ -2134,11 +2525,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             elif arguments.folder:
                 copy_pc_maps_from_folder(arguments.folder, out, progress, _console_log)
             else:
-                folders = [arguments.mcc] if arguments.mcc else find_mcc_custom_edition()
+                folders = [pc_maps_folder(arguments.mcc) or arguments.mcc] if arguments.mcc else \
+                    find_mcc_custom_edition()
                 if not folders:
                     raise InstallerError("Halo MCC's halo1/maps/custom_edition was not found: give its folder "
                                          "(--mcc FOLDER)")
                 copy_pc_maps_from_folder(folders[0], out, progress, _console_log)
+        elif arguments.command == "check":
+            status = pc_files_status(out)
+            if not status.complete:
+                _console_log(pc_files_help(status.missing))
+                return 1
+            _console_log("bitmaps.map, sounds.map and loc.map: in place (%s)"
+                         % " and ".join(sorted(set(status.found.values()))))
         elif arguments.command == "check-installer":
             check = check_ce_installer(arguments.exe, progress)
             _console_log("SHA-256 %s" % check.sha256)
@@ -2151,6 +2550,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             items = staged_uploads(out)
             if not items:
                 raise InstallerError("Nothing to copy in %s: run the other steps first" % out)
+            status = pc_files_status(out)
+            if not status.complete:
+                _console_log("Warning: " + pc_files_help(status.missing))
             _console_log("Copying %d files (%s) to %s:%d. Keep the Vita awake." %
                          (len(items), human_size(sum(item.size for item in items)), arguments.host, arguments.port))
             result = upload_files(arguments.host, items, arguments.port, arguments.replace, progress, _console_log)
@@ -2512,22 +2914,22 @@ def _palette(theme: str) -> dict:
 
 
 class InstallerWindow:
-    STEPS = ("Welcome", "1. Xbox game files", "2. Movies", "3. Halo PC files", "4. Copy to the Vita",
+    STEPS = ("Welcome", "1. Game files", "2. Movies", "3. Halo PC files", "4. Copy to the Vita",
              "5. Install the VPK", "Done")
     # each page: the sidebar's name, what it needs, the header's title and its short description
     PAGES = (
         ("Welcome", "", "Welcome",
          "Gather your own Halo CE files in the layout the Vita needs, then copy them to the Vita over "
          "VitaShell's FTP. Five steps; each can be skipped and run again."),
-        ("Xbox game files", "Required", "Xbox game files",
-         "Choose your Xbox disc image (.iso) or the unpacked game folder: its maps and default.xbe are "
-         "taken out."),
+        ("Game files", "Required", "Game files",
+         "Choose your Xbox disc image (.iso) or the unpacked game folder, or your own Halo: The Master Chief "
+         "Collection on Steam: the files the Vita needs are taken out."),
         ("Movies", "Optional", "Movies",
          "The disc's intro, attract and credits movies, converted for the Vita with ffmpeg. The game runs "
          "without them."),
-        ("Halo PC files", "Required for online play", "Halo PC files",
-         "bitmaps.map, sounds.map and loc.map from your own copy of Halo PC, for online play and the "
-         "Custom Edition maps."),
+        ("Halo PC files", "Required", "Halo PC files",
+         "bitmaps.map, sounds.map and loc.map from Halo Custom Edition: required. From your own Halo MCC, "
+         "the free Halo Custom Edition installer, or a Custom Edition install."),
         ("Copy to the Vita", "Required", "Copy to the Vita",
          "Everything gathered goes to %s over VitaShell's FTP." % VITA_GAME_FOLDER),
         ("Install the VPK", "Required for a first install", "Install the VPK",
@@ -2536,7 +2938,7 @@ class InstallerWindow:
          "What was gathered and copied, and what to do next on the Vita."),
     )
     LAST_STEP = 5
-    SIDEBAR_NEEDS = {3: "For online play", 5: "For a first install"}  # (shorter, for the sidebar)
+    SIDEBAR_NEEDS = {5: "For a first install"}  # (shorter, for the sidebar)
 
     def __init__(self, root, out: str, theme: Optional[str] = None):
         import tkinter
@@ -2574,13 +2976,19 @@ class InstallerWindow:
 
         self.out = tkinter.StringVar(value=out)
         self.xbox_source = tkinter.StringVar()
+        self.game_mode = tkinter.StringVar(value="xbox")
+        self.mcc_root = tkinter.StringVar(value=(find_mcc_folders() or [""])[0])
+        self.mcc_halo2 = tkinter.BooleanVar(value=False)
         self.movie_source = tkinter.StringVar()
         self.ffmpeg = tkinter.StringVar(value=find_ffmpeg() or "")
         self.quality = tkinter.StringVar(value="baseline")
-        self.pc_mode = tkinter.StringVar(value="mcc")
         self.mcc_folder = tkinter.StringVar(value=(find_mcc_custom_edition() or [""])[0])
-        self.installer = tkinter.StringVar()
-        self.pc_folder = tkinter.StringVar()
+        self.installer = tkinter.StringVar(value=(find_ce_installers() or [""])[0])
+        self.pc_folder = tkinter.StringVar(value=(find_ce_install_folders() or [""])[0])
+        # (the way found by itself, MCC first)
+        self.pc_mode = tkinter.StringVar(value="installer" if self.installer.get() and not self.mcc_folder.get()
+                                         else "folder" if self.pc_folder.get() and not self.mcc_folder.get()
+                                         else "mcc")
         self.host = tkinter.StringVar()
         self.port = tkinter.StringVar(value=str(FTP_PORT))
         self.replace = tkinter.BooleanVar(value=False)
@@ -3151,12 +3559,18 @@ class InstallerWindow:
 
     def _staged_summary(self) -> dict:
         items = staged_uploads(self.out.get())
-        maps = [item for item in items if item.folder.endswith("/maps")]
+        maps = [item for item in items if item.folder == VITA_GAME_FOLDER + "/" + STAGING_MAPS]
         names = {item.name.lower() for item in maps}
         pc = [name for name, _ in PC_RESOURCE_MAPS if name in names]
+        mcc = [item for item in items if item.folder.startswith(VITA_GAME_FOLDER + "/" + STAGING_MCC + "/")]
         return {"items": items, "maps": maps, "movies": [item for item in items if item.folder.endswith("/movies")],
-                "pc": pc, "xbe": any(item.name == STAGING_XBE for item in items),
+                "pc": pc, "pc_status": pc_files_status(self.out.get()),
+                "xbe": any(item.name == STAGING_XBE for item in items),
                 "xbox_maps": all(name in names for name in XBOX_REQUIRED_MAPS),
+                "mcc": mcc if mcc_staged(self.out.get()) else [],
+                "mcc_maps": [item for item in mcc if item.folder.endswith("/halo1/maps") and
+                             item.name.lower()[:-4] in MCC_CAMPAIGN_MAPS + MCC_MULTIPLAYER_MAPS],
+                "h2": all(name in names for name in H2_FILES),
                 "size": sum(item.size for item in items)}
 
     def _staged_done(self) -> set:
@@ -3165,11 +3579,11 @@ class InstallerWindow:
         except OSError:
             return set()
         done = set()
-        if summary["xbe"] and summary["xbox_maps"]:
+        if summary["xbe"] and summary["xbox_maps"] or summary["mcc"]:
             done.add(1)
         if summary["movies"]:
             done.add(2)
-        if len(summary["pc"]) == len(PC_RESOURCE_MAPS):
+        if summary["pc_status"].complete:
             done.add(3)
         return done
 
@@ -3527,9 +3941,11 @@ class InstallerWindow:
                                   "your own Xbox copy of Halo: Combat Evolved. Files already in place are kept, "
                                   "so any step can be run again.", pady=(0, px(14)))
         ttk.Label(self.body, text="You will need", style="Field.TLabel").pack(anchor="w", pady=(0, px(6)))
-        self.bullet(self.body, "Your Xbox Halo disc image (.iso) or the unpacked game folder", "Required")
-        self.bullet(self.body, "Halo PC's files: Halo MCC on Steam, or the Halo Custom Edition installer",
-                    "For online play")
+        self.bullet(self.body, "Your Xbox Halo disc image (.iso) or the unpacked game folder, or your own Halo: "
+                               "The Master Chief Collection on Steam", "Required")
+        self.bullet(self.body, "Halo Custom Edition's bitmaps.map, sounds.map and loc.map: from Halo MCC on "
+                               "Steam, the free Halo Custom Edition installer, or a Custom Edition install",
+                    "Required")
         self.bullet(self.body, "On the Vita: HENkaku/Enso, VitaShell, and the shader compiler "
                                "ur0:data/libshacccg.suprx (ShaRKF00D extracts it). See README.md.", "Required")
         ttk.Frame(self.body, height=px(8)).pack(fill="x")
@@ -3539,14 +3955,60 @@ class InstallerWindow:
         self.link("The official downloads (releases)", RELEASES_URL)
         self.show_staged()
 
+    def option(self, value: str, text: str, variable):
+        """One of a page's ways (a radio button), with its fields below it."""
+        ttk, px = self.ttk, self.px
+        box = ttk.Frame(self.body)
+        box.pack(fill="x", pady=(0, px(4)))
+        ttk.Radiobutton(box, text=text, value=value, variable=variable,
+                        style="Option.TRadiobutton").pack(anchor="w")
+        inner = ttk.Frame(box, padding=(px(28), 0, 0, 0))
+        inner.pack(fill="x")
+        return inner
+
     def page_1(self):
+        ttk, px = self.ttk, self.px
+        ttk.Label(self.body, text="Pick one way (run the step again with the other to have both):",
+                  style="Muted.TLabel").pack(anchor="w", pady=(0, px(6)))
+        inner = self.option("xbox", "Your Xbox Halo disc image or game folder", self.game_mode)
         self.path_row("Xbox disc image or game folder", self.xbox_source, browse_file=True, browse_folder=True,
-                      filetypes=[("Xbox disc images", "*.iso *.xiso"), ("All files", "*")],
+                      filetypes=[("Xbox disc images", "*.iso *.xiso"), ("All files", "*")], parent=inner,
+                      picked=lambda: self.game_mode.set("xbox"),
                       hint="An .iso / .xiso (a full disc image works too) or an already unpacked game folder. "
                            "The maps folder and default.xbe are taken out of it. It must be the Xbox version: "
                            "the PC version's maps do not work.")
-        self.action("Get the Xbox files", self.do_xbox)
+        inner = self.option("mcc", "Halo: The Master Chief Collection on Steam", self.game_mode)
+        found = "Found in your Steam libraries. " if self.mcc_root.get() else \
+            "Not found by itself: choose MCC's folder (Steam: right-click the game, Manage, Browse local files). "
+        self.path_row("MCC folder", self.mcc_root, browse_folder=True, parent=inner,
+                      picked=lambda: self.game_mode.set("mcc"),
+                      hint=found + "Its Halo CE maps, the Halo PC files (custom_edition) and the sound effects "
+                                   "bank, about 1.4 GB, go to %s/mcc, for the builds that play MCC's maps "
+                                   "(1.1.1-insider.25 and later). Only your own copy is read." % VITA_GAME_FOLDER)
+        ttk.Checkbutton(inner, text="Also Halo 2's files, for the Halo 2 test builds only (not public yet; "
+                                    "about 1.6 GB more)", variable=self.mcc_halo2,
+                        command=lambda: self.game_mode.set("mcc")).pack(anchor="w", pady=(0, px(4)))
+        self.paragraph(inner, "Off unless you test those builds: zanzibar.map, shared.map, textures.dat, "
+                              "sounds_neutral.dat and sounds_en.dat from MCC's halo2 folder, to the maps folder.",
+                       "Hint.TLabel", pady=(0, px(6)))
+        self.action("Get the game files", self.do_game)
         self.show_staged()
+
+    def do_game(self):
+        return self.do_mcc() if self.game_mode.get() == "mcc" else self.do_xbox()
+
+    def do_mcc(self):
+        folder = self.mcc_root.get().strip()
+        if not folder:
+            raise InstallerError("Choose MCC's folder first (Choose folder...): the one that has halo1.")
+        out, halo2 = self.out.get(), bool(self.mcc_halo2.get())
+
+        def work():
+            plan = mcc_plan(folder, halo2)
+            _check_space(out, plan.needed(out))
+            install_mcc_files(folder, out, halo2, self.report, self.log)
+            return "MCC files ready in %s (%d files, %s)" % (out, len(plan.files), human_size(plan.size))
+        return work
 
     def do_xbox(self):
         source = self.xbox_source.get().strip()
@@ -3566,7 +4028,8 @@ class InstallerWindow:
         ttk, px = self.ttk, self.px
         self.paragraph(self.body, "The disc's Bink movies become the H.264 MP4s the Vita plays. Without them the "
                                   "game skips each movie and the main menu comes up ready to play. Converting takes "
-                                  "a few minutes; Skip this step leaves them out.", pady=(0, px(12)))
+                                  "a few minutes; Skip this step leaves them out. They come from the Xbox disc "
+                                  "only: with MCC's files alone, skip it.", pady=(0, px(12)))
         if not self.movie_source.get() and self.xbox_source.get():
             self.movie_source.set(self.xbox_source.get())
         self.path_row("Xbox disc image or game folder", self.movie_source, browse_file=True, browse_folder=True,
@@ -3580,8 +4043,10 @@ class InstallerWindow:
         row.pack(anchor="w", pady=(px(2), 0))
         ttk.Radiobutton(row, text="Standard (H.264 Baseline, as README.md)", value="baseline",
                         variable=self.quality).pack(anchor="w")
-        ttk.Radiobutton(row, text="Better quality (H.264 High profile, same size)", value="high",
+        ttk.Radiobutton(row, text="Better quality (the same Baseline, larger files, slower)", value="better",
                         variable=self.quality).pack(anchor="w")
+        self.paragraph(self.body, "Both play on the Vita (H.264 Constrained Baseline, no B-frames: the Vita shows "
+                                  "High profile's B-frames as white frames).", "Hint.TLabel", pady=(px(3), 0))
         self.action("Convert the movies", self.do_movies)
         self.show_staged()
 
@@ -3597,18 +4062,27 @@ class InstallerWindow:
             return "Movies ready"
         return work
 
+    def pc_files_line(self, parent=None, pady=(0, 0)):
+        """The required Halo Custom Edition files' check, as a line: what is
+        missing and where to get it, or that all three are in place."""
+        try:
+            status = pc_files_status(self.out.get())
+        except OSError:
+            return None
+        if status.complete:
+            places = sorted(set(status.found.values()))
+            return self.paragraph(parent or self.body, "✓ bitmaps.map, sounds.map and loc.map are in the output "
+                                                       "folder (%s)." % " and ".join(places), "Success.TLabel",
+                                  pady=pady)
+        return self.paragraph(parent or self.body, "⚠ " + pc_files_help(status.missing), "Warning.TLabel", pady=pady)
+
     def page_3(self):
         ttk, px = self.ttk, self.px
+        self.pc_files_line(pady=(0, px(10)))
         self.ttk.Label(self.body, text="Pick one way:", style="Muted.TLabel").pack(anchor="w", pady=(0, px(6)))
 
         def option(value, text):
-            box = ttk.Frame(self.body)
-            box.pack(fill="x", pady=(0, px(4)))
-            ttk.Radiobutton(box, text=text, value=value, variable=self.pc_mode,
-                            style="Option.TRadiobutton").pack(anchor="w")
-            inner = ttk.Frame(box, padding=(px(28), 0, 0, 0))
-            inner.pack(fill="x")
-            return inner
+            return self.option(value, text, self.pc_mode)
 
         inner = option("mcc", "Halo: The Master Chief Collection on Steam")
         self.path_row("custom_edition folder", self.mcc_folder, browse_folder=True, parent=inner,
@@ -3618,11 +4092,13 @@ class InstallerWindow:
         inner = option("installer", "The Halo Custom Edition installer (any file name)")
         box = self.path_row("Installer", self.installer, browse_file=True, parent=inner,
                             filetypes=[("Programs", "*.exe"), ("All files", "*")],
-                            picked=lambda: self.pc_mode.set("installer"))
+                            picked=lambda: self.pc_mode.set("installer"),
+                            hint="Found in your Downloads." if self.installer.get() else "")
         self.link("Where to get it: halomaps.org (Halo Custom Edition)", CE_INSTALLER_URL, parent=box)
         inner = option("folder", "A folder that has them (a Custom Edition install's maps)")
         self.path_row("Folder", self.pc_folder, browse_folder=True, parent=inner,
-                      picked=lambda: self.pc_mode.set("folder"))
+                      picked=lambda: self.pc_mode.set("folder"),
+                      hint="Your Halo Custom Edition install, found by itself." if self.pc_folder.get() else "")
         self.action("Get the Halo PC files", self.do_pc_files)
         self.show_staged()
 
@@ -3642,7 +4118,7 @@ class InstallerWindow:
                 extract_pc_maps_from_installer(installer, out, self.report, self.log)
             else:
                 copy_pc_maps_from_folder(folder, out, self.report, self.log)
-            return "Halo PC files ready"
+            return "Halo PC files ready: bitmaps.map, sounds.map and loc.map"
         return work
 
     def address_row(self, port: bool = True):
@@ -3675,6 +4151,8 @@ class InstallerWindow:
         self.paragraph(self.body, "Keep the Vita awake while it copies (touch the screen now and then, or turn off "
                                   "auto-standby): if it sleeps the copy stops; press Copy again and it goes on from "
                                   "where it stopped.", "Hint.TLabel", pady=(0, px(4)))
+        if items:
+            self.pc_files_line(pady=(px(4), px(4)))
         self.action("Copy to the Vita", self.do_upload)
 
     def _host_port(self) -> Tuple[str, int]:
@@ -3692,6 +4170,12 @@ class InstallerWindow:
         if not items:
             raise InstallerError("Nothing to copy yet: do the steps before this one (or check the output "
                                  "folder on the first page).")
+        status = pc_files_status(self.out.get())
+        if not status.complete:
+            from tkinter import messagebox
+            if not messagebox.askyesno("Halo CE for PS Vita", pc_files_help(status.missing) +
+                                       "\n\nCopy the other files to the Vita without them?", parent=self.root):
+                raise InstallerError("Not copied: get the required Halo Custom Edition files first (step 3).")
 
         def work():
             self.log("Copying %d files (%s) to %s:%d" % (len(items), human_size(sum(i.size for i in items)),
@@ -3727,17 +4211,30 @@ class InstallerWindow:
     def done_summary(self) -> List[Tuple[bool, str, str]]:
         """The Done page's list: (done, what, how it went)."""
         summary = self._staged_summary()
-        xbox = [item for item in summary["maps"] if item.name.lower() not in dict(PC_RESOURCE_MAPS)]
+        xbox = [item for item in summary["maps"] if item.name.lower() not in dict(PC_RESOURCE_MAPS)
+                and item.name.lower() not in H2_FILES]
         rows = []
         rows.append((summary["xbe"] and summary["xbox_maps"], "Xbox game files",
                      "default.xbe and %d maps" % len(xbox) if summary["xbe"] and summary["xbox_maps"]
+                     else "not gathered (MCC's files instead)" if summary["mcc"]
                      else "not gathered yet (step 1)"))
+        if summary["mcc"] or self.game_mode.get() == "mcc":
+            rows.append((bool(summary["mcc"]), "MCC files",
+                         "%d Halo CE maps%s, to %s/%s" % (
+                             len(summary["mcc_maps"]),
+                             " and the sound effects bank" if any(item.name == MCC_SOUND_BANK
+                                                                  for item in summary["mcc"]) else "",
+                             VITA_GAME_FOLDER, STAGING_MCC) if summary["mcc"] else "not gathered yet (step 1)"))
+        if summary["h2"]:
+            rows.append((True, "Halo 2 files (test builds)", ", ".join(H2_FILES)))
         rows.append((bool(summary["movies"]), "Movies",
                      "%d movies" % len(summary["movies"]) if summary["movies"]
                      else "skipped (the game runs without them)"))
-        complete = len(summary["pc"]) == len(PC_RESOURCE_MAPS)
-        rows.append((complete, "Halo PC files", ", ".join(name for name, _ in PC_RESOURCE_MAPS) if complete
-                     else "not gathered (only online play and Custom Edition maps need them)"))
+        status = summary["pc_status"]
+        rows.append((status.complete, "Halo PC files",
+                     "%s (%s)" % (", ".join(name for name, _ in PC_RESOURCE_MAPS),
+                                  " and ".join(sorted(set(status.found.values())))) if status.complete
+                     else "MISSING %s: required (step 3)" % ", ".join(status.missing)))
         copied = self.results.get(4, "").replace("On the Vita: ", "")
         rows.append((4 in self.results, "Copied to the Vita",
                      copied or "not copied in this session (%d files, %s gathered in %s)" % (
@@ -3804,12 +4301,20 @@ class InstallerWindow:
         opener.bind("<Button-1>", lambda event: self.open_output())
         chips = ttk.Frame(box)
         chips.pack(fill="x", pady=(px(6), 0))
-        xbox = len([item for item in summary["maps"] if item.name.lower() not in dict(PC_RESOURCE_MAPS)])
-        pc = len(summary["pc"]) == len(PC_RESOURCE_MAPS)
-        for good, text in ((summary["xbe"], "default.xbe" if summary["xbe"] else "no default.xbe"),
-                           (xbox > 0, "%d maps" % xbox),
-                           (pc, "with the Halo PC files" if pc else "no Halo PC files"),
-                           (bool(summary["movies"]), "%d movies" % len(summary["movies"]))):
+        xbox = len([item for item in summary["maps"] if item.name.lower() not in dict(PC_RESOURCE_MAPS)
+                    and item.name.lower() not in H2_FILES])
+        pc = summary["pc_status"].complete
+        shown = []
+        if summary["xbe"] or xbox or not summary["mcc"]:
+            shown += [(summary["xbe"], "default.xbe" if summary["xbe"] else "no default.xbe"),
+                      (xbox > 0, "%d maps" % xbox)]
+        if summary["mcc"]:
+            shown.append((True, "MCC files"))
+        if summary["h2"]:
+            shown.append((True, "Halo 2 files"))
+        shown += [(pc, "with the Halo PC files" if pc else "no Halo PC files"),
+                  (bool(summary["movies"]), "%d movies" % len(summary["movies"]))]
+        for good, text in shown:
             ttk.Label(chips, text=("✓ " if good else "") + text,
                       style="ChipOk.TLabel" if good else "Chip.TLabel").pack(side="left", padx=(0, px(6)))
 
