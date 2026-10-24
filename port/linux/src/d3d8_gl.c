@@ -135,6 +135,25 @@ static void vita_preview_picture(long width, int *left, int *top, int *picture_w
 	*top = (VITA_DISPLAY_HEIGHT - *picture_height) / 2;
 }
 
+/* (Menu style ElDewrito, port/linux/game: its screens laid out over 800
+columns - the 640 in the middle and 80 on each side, as a 16:9 display has
+them -) the narrowest the menus are drawn while they are up: a display
+narrower than that (4:3: 640) draws them that wide, letterboxed, so that
+nothing of them is off its edges; 640 otherwise */
+int halo_menus_minimum_width(void);
+
+static void screen_mode_minimum(long *width, float scale[2], long display_width, long display_height)
+{
+	long minimum = halo_menus_minimum_width();
+
+	if (*width >= minimum || display_width <= 0 || display_height <= 0)
+		return;
+	*width = minimum & ~1L;
+	scale[0] = (float)display_width / (float)*width;
+	scale[1] = (float)display_height / (float)SCREEN_HEIGHT;
+	scale[0] = scale[1] = scale[0] < scale[1] ? scale[0] : scale[1];
+}
+
 static void screen_mode_choose(long *width, float scale[2])
 {
 	if (vita_preview_enabled())
@@ -175,6 +194,7 @@ static void screen_mode_choose(long *width, float scale[2])
 		keeps its shape and the display blit letterboxes it */
 		if (*width != wanted && *width != (wanted & ~1L))
 			scale[0] = scale[1] = scale[0] < scale[1] ? scale[0] : scale[1];
+		screen_mode_minimum(width, scale, display_width, display_height);
 	}
 #endif
 }
