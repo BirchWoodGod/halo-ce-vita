@@ -20364,6 +20364,105 @@ static void h3_adhoc_go_on(void)
 
 /* (each frame, the main loop) the screens the functions asked for, opened
 outside the widgets' own events */
+/* ---- the mouse on the ElDewrito screens (source/interface/ui_widget.c's
+pointer: the rows are the d-pad's items already, clicked as A): the parts
+the screens pick themselves - CUSTOMIZATION's tabs and its colours' grid,
+the SERVER BROWSER's network tabs and filters, the L and R of the hints -
+and a focused row's value arrows */
+static short mouse_number_after(char const *name, char const *prefix)
+{
+	size_t length = strlen(prefix);
+
+	if (!name || strncmp(name, prefix, length) || name[length] < '0' || name[length] > '9')
+		return NONE;
+	return (short)atoi(name + length);
+}
+
+static boolean mouse_on_screen(struct widget_instance *widget, char const *screen_tag)
+{
+	struct widget_instance *screen = screen_of(widget);
+	char const *name = screen ? tag_get_name(screen->definition_tag_index) : NULL;
+
+	return name && !strcmp(name, screen_tag);
+}
+
+int menu_functions_mouse_kind(struct widget_instance *widget)
+{
+	char const *name = widget ? widget->name : NULL;
+
+	if (!name || !halo_menu_style_online())
+		return 0;
+	if (!strcmp(name, "arrow_left") || !strcmp(name, "arrow_right"))
+	{
+		/* (the focused row's: the arrows show on it alone) */
+		if (!widget->parent || !widget->parent->parent || widget->parent->parent->focused_child != widget->parent)
+			return 0;
+		return !strcmp(name, "arrow_left") ? 2 : 3;
+	}
+	if (mouse_on_screen(widget, "pc\\online\\custom\\screen"))
+	{
+		if (mouse_number_after(name, "tab_label_") != NONE || mouse_number_after(name, "tab_") != NONE ||
+			(mouse_number_after(name, "cell_") != NONE && online_custom.tab == _online_custom_tab_colors) ||
+			!strcmp(name, "l_butn") || !strcmp(name, "r_butn"))
+		{
+			return 1;
+		}
+	}
+	if (mouse_on_screen(widget, "pc\\online\\lan\\screen"))
+	{
+		if (mouse_number_after(name, "net_tab_") != NONE || mouse_number_after(name, "net_label_") != NONE ||
+			mouse_number_after(name, "filter_") != NONE || !strcmp(name, "l_butn") || !strcmp(name, "r_butn"))
+		{
+			return 1;
+		}
+	}
+	return 0;
+}
+
+void menu_functions_mouse_click(struct widget_instance *widget)
+{
+	char const *name = widget ? widget->name : NULL;
+	short number;
+
+	if (!name)
+		return;
+	if (mouse_on_screen(widget, "pc\\online\\custom\\screen"))
+	{
+		struct player_profile *profile = player_ui_get_edit_player_profile();
+
+		if ((number = mouse_number_after(name, "tab_label_")) != NONE || (number = mouse_number_after(name, "tab_")) != NONE)
+			online_custom_tab_step(number - online_custom.tab);
+		else if (!strcmp(name, "l_butn") || !strcmp(name, "r_butn"))
+			online_custom_tab_step(!strcmp(name, "l_butn") ? -1 : 1);
+		else if ((number = mouse_number_after(name, "cell_")) != NONE && profile && number < H3_SWATCH_FRAMES)
+		{
+			/* (a colour of the grid: cell_0 RANDOM, then the game's) */
+			profile->primary_color_index = (short)(number ? number - 1 : NONE);
+			platform_log("menus: online customize: colour %d from the grid", profile->primary_color_index);
+		}
+		return;
+	}
+	if (mouse_on_screen(widget, "pc\\online\\lan\\screen"))
+	{
+		short network = h3_mp_network_of_connection(), at = 0, index;
+
+		for (index = 0; index < (short)NUMBEROF(online_browser_networks); index++)
+		{
+			if (online_browser_networks[index] == network)
+				at = index;
+		}
+		if ((number = mouse_number_after(name, "net_label_")) != NONE || (number = mouse_number_after(name, "net_tab_")) != NONE)
+		{
+			if (number != at)
+				online_browser_network_step(number - at);
+		}
+		else if (!strcmp(name, "l_butn") || !strcmp(name, "r_butn"))
+			online_browser_network_step(!strcmp(name, "l_butn") ? -1 : 1);
+		else if ((number = mouse_number_after(name, "filter_")) != NONE && number != online_browser.filter)
+			online_browser_filter_step(number - online_browser.filter);
+	}
+}
+
 /* ---- the Menu style changed (the settings panel's Game, Menus, Menu style;
 config.toml's menus.style): live - at the main menu, the menus closed and
 the main menu opened again, in the new style (menu_tags.c reads the style

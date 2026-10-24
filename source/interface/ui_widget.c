@@ -6078,8 +6078,21 @@ enum ui_mouse_target_kind
 	list steps to it, and a click then presses A */
 	_ui_mouse_target_list_slot,
 	/* a button's icon and label in a screen's key: a click presses it */
-	_ui_mouse_target_button
+	_ui_mouse_target_button,
+	/* (port) a part of a screen the port's menus pick themselves - a tab, a
+	filter, a colour of a grid (menu_functions.c
+	menu_functions_mouse_kind): a click is theirs */
+	_ui_mouse_target_port,
+	/* (port) a focused row's value arrows: a click steps it left or right */
+	_ui_mouse_target_arrow_left,
+	_ui_mouse_target_arrow_right
 };
+
+/* (port/linux/game/menu_functions.c) what a widget the menus do not pick by
+themselves is to the mouse: 0 nothing, 1 the port's own (a click is
+menu_functions_mouse_click's), 2 and 3 a value's left and right arrows */
+int menu_functions_mouse_kind(struct widget_instance *widget);
+void menu_functions_mouse_click(struct widget_instance *widget);
 
 struct ui_mouse_target
 {
@@ -6293,7 +6306,11 @@ static void ui_mouse_note_target(
 	}
 	else
 	{
-		return;
+		short port = (short)menu_functions_mouse_kind(widget);
+
+		if (!port)
+			return;
+		kind = port == 1 ? _ui_mouse_target_port : port == 2 ? _ui_mouse_target_arrow_left : _ui_mouse_target_arrow_right;
 	}
 	target = &ui_mouse_targets[ui_mouse_target_count++];
 	target->widget = widget;
@@ -6597,6 +6614,17 @@ static void ui_widgets_process_mouse(
 					break;
 				case _ui_mouse_target_button:
 					ui_mouse_press(target->button_index);
+					break;
+				case _ui_mouse_target_port:
+					menu_functions_mouse_click(target->widget);
+					ui_play_audio_feedback_sound(_ui_audio_feedback_cursor);
+					break;
+				case _ui_mouse_target_arrow_left:
+				case _ui_mouse_target_arrow_right:
+					if (target->widget->parent)
+						ui_mouse_give_focus(target->widget->parent);
+					ui_mouse_press(target->kind == _ui_mouse_target_arrow_left ? _widget_event_dpad_left :
+						_widget_event_dpad_right);
 					break;
 				}
 			}
