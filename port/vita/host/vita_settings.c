@@ -563,6 +563,11 @@ static struct setting settings[] = {
 		"Team games: bots on both teams, or all against you", 0, TAB_MULTIPLAYER },
 	{ "  Bot vehicles", "HALO_BOT_VEHICLES", 0, 2, { "1", "0" }, { "On", "Off" },
 		"Bots drive and ride the map's vehicles", 0, TAB_MULTIPLAYER },
+	{ "  Ghost profiles", "HALO_LOCAL_BOT_GHOST_CHANCE", 0, 6, { "0", "5", "10", "25", "50", "100" },
+		{ "Off", "5%", "10%", "25%", "50%", "Always" },
+		"Split Screen only: chance per profile per match; 10% is rare", 0, TAB_MULTIPLAYER },
+	{ "  Profile colors", "HALO_LOCAL_BOT_COLORS", 0, 2, { "1", "0" }, { "Preferred", "Original" },
+		"Profile color preferences in non-team games; team colors still apply", 0, TAB_MULTIPLAYER },
 	/* (port/linux/game/bots_routes.c: Direct as before, everyone down the
 	middle; Lanes and Mixed spread the attackers over the map's side lanes.
 	Live: read each second) */
@@ -1131,7 +1136,8 @@ static int setting_shown(const struct setting *setting)
 		return maps_installer_state == 1;
 	if (setting->variable && (!strcmp(setting->variable, "HALO_BOT_SKILL") || !strcmp(setting->variable, "HALO_BOT_TEAMS") ||
 		!strcmp(setting->variable, "HALO_BOT_VEHICLES") || !strcmp(setting->variable, "HALO_BOT_ROUTES") ||
-		!strcmp(setting->variable, "HALO_BOT_PLAYLIST")))
+		!strcmp(setting->variable, "HALO_BOT_PLAYLIST") || !strcmp(setting->variable, "HALO_LOCAL_BOT_GHOST_CHANCE") ||
+		!strcmp(setting->variable, "HALO_LOCAL_BOT_COLORS")))
 		return choice_of("HALO_BOTS") != 0;
 	/* (a code typed in: online, on a Vita whose game has not got the PC
 	menus' Direct Link, menu_tags.c) */

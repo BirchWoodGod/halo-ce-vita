@@ -541,6 +541,12 @@ symbols in this file:
 #include "errors.h"
 #include "aim_assist.h"
 #include "game_engine.h"
+#ifdef HALO_VITA
+#include "local_bot_profiles.h"
+#define LOCAL_BOT_PLAYER_NAME(player) local_bot_profiles_display_name(player)
+#else
+#define LOCAL_BOT_PLAYER_NAME(player) ((player)->name)
+#endif
 #ifdef HALO_LINUX
 #include "network_game_record.h" /* (port) the wire */
 #include "network_wire.h" /* (port) network version 28's rules */
@@ -1867,7 +1873,7 @@ static void game_engine_rasterize_in_game_score(
 				NUMBEROF(row_string),
 				L"\t%s\t%s\t%s",
 				place_string,
-				player->name,
+				LOCAL_BOT_PLAYER_NAME(player),
 				status_string);
 
 			if (has_teams)
@@ -2133,7 +2139,7 @@ void game_engine_post_rasterize_post_game(
 			draw_string_set_color(
 				&team_colors[PIN(team_index, 0, 1)]);
 		}
-		usnprintf(row_string, NUMBEROF(row_string), L" \t \t%s", player->name);
+		usnprintf(row_string, NUMBEROF(row_string), L" \t \t%s", LOCAL_BOT_PLAYER_NAME(player));
 		row_string[NUMBEROF(row_string) - 1] = 0;
 		drawline(row_string, draw_row, 0);
 		draw_string_set_color(&winner_color);

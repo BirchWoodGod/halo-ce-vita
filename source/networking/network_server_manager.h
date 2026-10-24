@@ -27,6 +27,11 @@ boolean network_game_server_playing(
 struct network_game_server;
 struct game_variant;
 
+#ifdef HALO_VITA
+/* Restore optional local-only profile fields before any online transition. */
+void network_game_server_clear_local_bot_profiles(struct network_game_server *server);
+#endif
+
 struct network_game_server *network_game_server_create(
 	void);
 void network_game_server_dispose(

@@ -399,6 +399,10 @@ void p2p_set_game_accepts_remote(int accepts);
 void network_game_accept_remote_connections(
 	boolean accept_remote_connections)
 {
+#ifdef HALO_VITA
+	if (accept_remote_connections)
+		network_game_server_clear_local_bot_profiles(global_network_game_server);
+#endif
 	bss_004566dc.accept_remote_connections = accept_remote_connections;
 #ifdef HALO_LINUX
 	p2p_set_game_accepts_remote(accept_remote_connections != FALSE);
