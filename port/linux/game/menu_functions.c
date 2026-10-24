@@ -5128,7 +5128,7 @@ top; kept whether the flame is on or off, so it never jumps) */
 #define H3_CUSTOM_SPARTAN_FLAME_PLACEMENT "1.75 0.645 -0.33 20"
 /* (Menu style Online: large at the right, as the online CUSTOMIZATION's,
 no window around it; online/customize.xml's camera) */
-#define ONLINE_CUSTOM_SPARTAN_PLACEMENT "0.85 0.5 -0.42 20"
+#define ONLINE_CUSTOM_SPARTAN_PLACEMENT "0.85 0.42 -0.42 20"
 
 /* (debug: HALO_ONLINE_SPARTAN_PLACEMENT="<distance> <right> <up> <facing>"
 in its place, to try others) */
@@ -5660,7 +5660,7 @@ static void online_custom_update(struct widget_instance *list)
 			focused_row = row;
 		if (online_custom_rows[row].not_yet)
 		{
-			text_show(named(child, "value"), T("NOT YET"));
+			text_show(named(child, "value"), T("N/A"));
 			child->animation.current_frame_index = child == list->focused_child ? 1 : 0;
 		}
 	}
