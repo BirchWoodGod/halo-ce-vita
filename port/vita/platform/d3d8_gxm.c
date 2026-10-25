@@ -6185,14 +6185,14 @@ most, and a summary every 300 frames. */
 static struct
 {
 	volatile unsigned long generation;
-	int enabled, floor, force, cycle, log;
+	int enabled, floor, fight_floor, force, cycle, log;
 	float budget_ms, sim_ms;
 } dynres_config;
 
 static struct
 {
 	unsigned long generation;
-	int enabled, floor, force, cycle, log;
+	int enabled, floor, fight_floor, force, cycle, log;
 	float budget_ms, sim_ms;
 	struct dynres_controller controller;
 	/* the level the targets are drawn at now (32nds) */
@@ -6224,7 +6224,7 @@ static void dynres_configure(void)
 	const char *force = getenv("HALO_DYNRES_FORCE"), *cycle = getenv("HALO_DYNRES_CYCLE");
 	const char *sim = getenv("HALO_DYNRES_SIM"), *budget = getenv("HALO_DYNRES_BUDGET");
 	const char *cap = getenv("HALO_FRAME_CAP"), *timing = getenv("HALO_FRAME_TIMING");
-	int floor = minimum ? dynres_level_of((float)atof(minimum)) : DYNRES_UNITS / 2;
+	int floor = minimum ? dynres_level_of((float)atof(minimum)) : DYNRES_UNITS / 2, fight_floor;
 	int enabled, forced = force && atoi(force) > 0 ? dynres_level_of(atoi(force) / 100.0f) : 0;
 	float budget_ms = cap && atoi(cap) > 0 ? 1000.0f / (float)atoi(cap) : 1000.0f / 30.0f;
 
@@ -6241,18 +6241,34 @@ static void dynres_configure(void)
 	}
 	if (floor < DYNRES_UNITS / 2)
 		floor = DYNRES_UNITS / 2;
+	/* HALO_DYNAMIC_RES_FIGHT_MIN: the fight floor (dynamic_resolution.h) -
+	a fight the floor cannot hold 30 FPS in goes under it, as far as this,
+	until the GPU has room again: unset, a step of the panel's minimums
+	under the floor (Balanced's 63% -> 50%, Quality's 75% -> 63%; 50% has
+	none); 0 none, as before; else the scale (0.5 at least) */
+	{
+		const char *setting = getenv("HALO_DYNAMIC_RES_FIGHT_MIN");
+
+		fight_floor = !setting ? floor - DYNRES_UNITS / 8 : atof(setting) > 0.0 ? dynres_level_of((float)atof(setting)) : 0;
+		if (fight_floor && fight_floor < DYNRES_UNITS / 2)
+			fight_floor = DYNRES_UNITS / 2;
+		if (fight_floor >= floor)
+			fight_floor = 0;
+	}
 	if (forced && forced < DYNRES_UNITS / 2)
 		forced = DYNRES_UNITS / 2;
 	if (budget && atof(budget) > 1.0)
 		budget_ms = (float)atof(budget);
 	enabled = (scale && !strcmp(scale, "dynamic")) || forced || (cycle && atoi(cycle) > 0);
 	if (enabled != dynres_config.enabled || floor != dynres_config.floor || forced != dynres_config.force ||
-		(enabled && budget_ms != dynres_config.budget_ms))
-		platform_log("dynamic resolution: %s%s (floor %d%%, budget %.1f ms%s%s)", enabled ? "on" : "off",
-			forced ? ", held" : "", floor * 100 / DYNRES_UNITS, (double)budget_ms,
+		fight_floor != dynres_config.fight_floor || (enabled && budget_ms != dynres_config.budget_ms))
+		platform_log("dynamic resolution: %s%s (floor %d%%, fights %d%%, budget %.1f ms%s%s)", enabled ? "on" : "off",
+			forced ? ", held" : "", floor * 100 / DYNRES_UNITS, (fight_floor ? fight_floor : floor) * 100 / DYNRES_UNITS,
+			(double)budget_ms,
 			cycle && atoi(cycle) > 0 ? ", cycling" : "", sim && atof(sim) > 0.0 ? ", GPU simulated" : "");
 	dynres_config.enabled = enabled;
 	dynres_config.floor = floor;
+	dynres_config.fight_floor = fight_floor;
 	dynres_config.force = forced;
 	dynres_config.cycle = cycle && atoi(cycle) > 0 ? atoi(cycle) : 0;
 	dynres_config.sim_ms = sim && atof(sim) > 0.0 ? (float)atof(sim) : 0.0f;
@@ -6348,6 +6364,7 @@ static void dynres_frame_end(void)
 		dynres.generation = generation;
 		dynres.enabled = dynres_config.enabled;
 		dynres.floor = dynres_config.floor;
+		dynres.fight_floor = dynres_config.fight_floor;
 		dynres.force = dynres_config.force;
 		dynres.cycle = dynres_config.cycle;
 		dynres.sim_ms = dynres_config.sim_ms;
@@ -6368,6 +6385,8 @@ static void dynres_frame_end(void)
 	if (!dynres.level)
 		dynres.level = dynres_level_of(vgxm_render_rect());
 	dynres_controller_limits(&dynres.controller, dynres.floor, ceiling, dynres.budget_ms);
+	if (dynres.controller.fight_floor != dynres.fight_floor)
+		dynres_controller_fight_floor(&dynres.controller, dynres.fight_floor);
 	level = dynres.controller.level;
 	dynres.frames++;
 	/* (drained whether on or not: the overlay's GPU line; not measured

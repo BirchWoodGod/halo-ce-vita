@@ -15,7 +15,10 @@ of the budget (the GPU time taken as growing with the pixels, which
 overestimates the growth) for 1 s, a frame that does not fit taking back
 three times its time, and 5 s when that step is where the budget was last
 broken (in the last 20 s); then up to 3 steps at once, as many as fit by
-the smoothed GPU time. Frames measured at
+the smoothed GPU time. With a fight floor (under the floor), the frames at
+the floor kept over the budget for half a second let the scale go under
+the floor, as far as the fight floor; it rises as from any step down, and
+the floor holds again once it is back there. Frames measured at
 another scale than the current (the GPU runs behind) are not counted.
 */
 
@@ -44,6 +47,13 @@ struct dynres_controller
 	int smoothed_level;
 	/* changes made (for the log) */
 	unsigned long changes;
+	/* the fight floor (0: none): below the floor, at most to it, once
+	the frames at the floor have kept over the budget for DYNRES_FIGHT_MS
+	(dynres_controller_fight_floor); the time they have, and whether the
+	scale may be under the floor now (until it is back at the floor) */
+	int fight_floor;
+	float fight_ms;
+	int under_floor;
 };
 
 /* the fraction of the budget that is too slow, the one a step down aims
@@ -61,12 +71,21 @@ for, and the one a step up has to fit within */
 #define DYNRES_HOLD_FAILED_MS 5000.0f
 #define DYNRES_FAILED_MEMORY_MS 20000.0f
 
+/* the time the frames at the floor have to keep over the budget (frames
+that fit taking it back) before the scale goes under the floor, to the
+fight floor */
+#define DYNRES_FIGHT_MS 500.0f
+
 /* starts at the ceiling */
 void dynres_controller_init(struct dynres_controller *controller, int floor, int ceiling, float budget_ms);
 /* starts at level (within the range): switched on in a game, the scale
 drawn until then, from which it climbs as after a step down */
 void dynres_controller_start(struct dynres_controller *controller, int floor, int ceiling, float budget_ms,
 	int level);
+/* the fight floor, in 32nds: 0 none, else under the floor - a fight too
+heavy for the floor goes down to it, and comes back up as after any step
+down */
+void dynres_controller_fight_floor(struct dynres_controller *controller, int fight_floor);
 /* a new range or budget, keeping the level within it */
 void dynres_controller_limits(struct dynres_controller *controller, int floor, int ceiling, float budget_ms);
 /* one frame the GPU finished: its GPU time and tail (vita_gxm.h

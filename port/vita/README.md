@@ -853,6 +853,9 @@ Useful ones:
 | `HALO_FRAME_TIMING=300` | a timing line every 300 frames in `halo.log` |
 | `HALO_RENDER_PROFILE=1`, `HALO_TICK_PROFILE=1` | where the frame and the tick go |
 | `HALO_GPU_STATS=1` | draws, uniforms, ring use per frame |
+| `HALO_GPU_CENSUS=N` | (a measuring run: passes flicker) windows of N frames (30-600) take turns leaving out a group of render phases (fog, reflections, lights, decals, effects, objects...); a `gpu-census:` line a round in `halo.log` gives each group's GPU ms on the hardware |
+| `HALO_DYNAMIC_RES_FIGHT_MIN=0.5` | Dynamic resolution's fight floor: a fight the panel's minimum cannot hold 30 FPS in (half a second over the budget there) goes under it, as far as this; unset: one step of the panel's minimums under it (63% -> 50%, 75% -> 63%), `0` none |
+| `HALO_ALPHA_TEST_NEUTRAL=0` | alpha-tested blended draws that write no depth keep their discard (default: a select to the colour their blend leaves the target unchanged with - the same image, no discard: the fog pass) |
 | `HALO_SCREENSHOT_DIR=ux0:data/haloce-vita/shots`, `HALO_SCREENSHOT_EVERY=n` | a BMP every n frames (at 100% resolution) |
 | `HALO_HUD_LOG=1` | each HUD quad's bitmap and rectangle in `halo.log` the first time it is drawn there (`tests/run_hud_layout_test.sh`) |
 | `HALO_MODEL_LOD_LOG=1` | each model's detail level in `halo.log` the first time it draws at it, with the level the Xbox would have chosen (`tests/run_cryo_body_test.sh`) |
