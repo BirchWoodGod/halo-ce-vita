@@ -44,6 +44,20 @@ typedef struct __attribute__((aligned(8))) halo_cond
 #define HALO_COND_INITIALIZER { PTHREAD_COND_INITIALIZER, 0, -1 }
 #define HALO_COND_SLICE_US 100000UL
 
+#ifdef _WIN32
+/* (Windows: no semaphores of the Vita's - a weak symbol a header declares
+is a definition in each object on COFF, which the linker then finds twice -
+the condition variable alone) */
+static inline int vita_host_wake_create(const char *name) { (void)name; return -1; }
+static inline int vita_host_wake_wait(int id, unsigned long timeout_us) { (void)id; (void)timeout_us; return 1; }
+static inline void vita_host_wake_signal(int id) { (void)id; }
+static inline void vita_host_wake_delete(int id) { (void)id; }
+
+static inline int halo_cond_semaphores(void)
+{
+	return 0;
+}
+#else
 int vita_host_wake_create(const char *name) __attribute__((weak));
 int vita_host_wake_wait(int id, unsigned long timeout_us) __attribute__((weak));
 void vita_host_wake_signal(int id) __attribute__((weak));
@@ -54,6 +68,7 @@ static inline int halo_cond_semaphores(void)
 {
 	return vita_host_wake_create && vita_host_wake_wait && vita_host_wake_signal && vita_host_wake_delete;
 }
+#endif
 
 /* the semaphore, made once (two threads racing: one keeps its own) */
 static inline int halo_cond_wake(halo_cond_t *cond)

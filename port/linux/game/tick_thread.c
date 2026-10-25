@@ -107,9 +107,16 @@ static unsigned long tick_wake_publishes, tick_lost_wakes;
 /* the last publish's time (us), for the lost wake-ups' check */
 static volatile unsigned long long tick_published_us;
 
+#ifdef _WIN32
+/* (Windows: none - halo_cond.h's stubs, through platform.h - the condition
+variable alone) */
+#define TICK_WAKE_SEMAPHORES_POSSIBLE 0
+#else
 int vita_host_wake_create(const char *name) __attribute__((weak));
 int vita_host_wake_wait(int id, unsigned long timeout_us) __attribute__((weak));
 void vita_host_wake_signal(int id) __attribute__((weak));
+#define TICK_WAKE_SEMAPHORES_POSSIBLE (vita_host_wake_create && vita_host_wake_wait && vita_host_wake_signal)
+#endif
 
 /* the threads that sleep on a semaphore (the Vita's waits): the tick's
 thread and the game's thread, each published to by the other alone. Whether
@@ -382,7 +389,7 @@ int halo_tick_thread_enabled(void)
 
 			/* (the Vita's waits: semaphores, made before the thread; the
 			condition variable without them) */
-			if (vita_host_wake_create && vita_host_wake_wait && vita_host_wake_signal &&
+			if (TICK_WAKE_SEMAPHORES_POSSIBLE &&
 				!(getenv("HALO_TICK_WAKE_CONDITION") && atoi(getenv("HALO_TICK_WAKE_CONDITION"))))
 			{
 				tick_waiter_wake[TICK_WAITER] = vita_host_wake_create("halo tick wake");

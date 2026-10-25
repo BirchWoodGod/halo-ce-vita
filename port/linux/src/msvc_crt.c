@@ -609,73 +609,7 @@ int halo_linux_printf(const char *format, ...)
 
 /* ---------- files by Xbox path */
 
-/* (debug) HALO_TRACE_FILES: 1 every CreateFile logged (xbox_files.c); 2 also
-every file the game opens with fopen/open (its mode, the host path, its
-descriptor), every write (descriptor, path, thread, offset, bytes, the
-file's size before it), every close, rename and removal - on the Vita's I/O
-layer as on the PC's (insider.25: a player's loc.map was found rewritten
-with a scene pack's bytes) */
-int platform_file_trace_level(void)
-{
-	static int level = -1;
-
-	if (level < 0)
-		level = getenv("HALO_TRACE_FILES") ? atoi(getenv("HALO_TRACE_FILES")) : 0;
-	return level;
-}
-
 unsigned long vita_host_thread_id(void);
-
-void platform_file_trace(const char *what, int descriptor, const char *path, long long offset, unsigned long bytes)
-{
-	struct posix_file_information information;
-	long long size = -1;
-
-	if (platform_file_trace_level() < 2)
-		return;
-	if (descriptor >= 0 && posix_fstat(descriptor, &information) == 0)
-		size = (long long)(((unsigned long long)information.size_high << 32) | information.size_low);
-	platform_log("trace: %s fd %d thread %lx %s at %lld, %lu bytes (the file %lld bytes)", what, descriptor,
-		vita_host_thread_id(), path ? path : "?", offset, bytes, size);
-}
-
-/* (port) the player's own game files in the maps folder, which nothing in
-the game may write, truncate, move or delete: Halo PC's resource maps
-(bitmaps.map, loc.map, sounds.map), ui.map and the campaign's levels. A
-host path; TRUE (and said in the log) when it is one */
-int platform_host_path_write_protected(const char *host_path)
-{
-	static const char *const names[] =
-	{
-		"bitmaps.map", "loc.map", "sounds.map", "ui.map", "a10.map", "a30.map", "a50.map", "b30.map", "b40.map",
-		"c10.map", "c20.map", "c40.map", "d20.map", "d40.map",
-	};
-	const char *slash, *name;
-	size_t directory_length;
-	unsigned index;
-
-	if (!host_path)
-		return 0;
-	slash = strrchr(host_path, '/');
-	name = slash ? slash + 1 : host_path;
-	if (!slash)
-		return 0;
-	directory_length = (size_t)(slash - host_path);
-	/* (the maps folder: a folder named maps) */
-	if (directory_length < 4 || strncasecmp(slash - 4, "maps", 4) ||
-		(directory_length > 4 && slash[-5] != '/' && slash[-5] != ':'))
-		return 0;
-	for (index = 0; index < sizeof(names) / sizeof(names[0]); index++)
-	{
-		if (!strcasecmp(name, names[index]))
-		{
-			platform_log("files: refused: a write to the player's %s (%s) - the game never writes its maps", name,
-				host_path);
-			return 1;
-		}
-	}
-	return 0;
-}
 
 /* (HALO_TRACE_FILES=2) the paths of the FILEs open, for the writes' and
 closes' lines */
