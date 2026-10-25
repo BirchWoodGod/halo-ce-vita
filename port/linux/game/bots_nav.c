@@ -376,7 +376,7 @@ void bots_nav_set_biped(long biped_definition_index)
 	nav.safe_drop = harmful * 0.9f;
 	/* (a jump up kept a little short of the highest: the bot leaves the edge
 	running, and lands with its feet tucked) */
-	nav.up_maximum = PIN(nav.jump_height * 0.85f + nav.crouch_gain * 0.5f, 0.3f, 2.0f);
+	nav.up_maximum = PIN(nav.jump_height * 0.95f + nav.crouch_gain * 0.6f, 0.3f, 2.0f);
 	nav.minimum_normal_k = definition->biped.runtime_minimum_normal_k > 0.1f ? definition->biped.runtime_minimum_normal_k :
 		(real)cos(definition->biped.maximum_slope_angle);
 	if (nav.minimum_normal_k < 0.3f || nav.minimum_normal_k > 0.99f)
