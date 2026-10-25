@@ -105,6 +105,7 @@ WEAK int halo_linux_vprintf(const char *f, va_list a) { return vprintf(f, a); }
 WEAK int halo_linux_printf(const char *f, ...)
 { va_list a; int r; va_start(a, f); r = vprintf(f, a); va_end(a); return r; }
 WEAK FILE *halo_linux_fopen(const char *p, const char *m) { return fopen(p, m); }
+WEAK int halo_linux_fclose(FILE *s) { return fclose(s); }
 WEAK void *csmemset(void *b, long c, unsigned long n) { return memset(b, (int)c, n); }
 WEAK void *csmemcpy(void *d, const void *s, unsigned long n) { return memcpy(d, s, n); }
 WEAK long csmemcmp(const void *a, const void *b, unsigned long n) { return memcmp(a, b, n); }
@@ -173,7 +174,9 @@ class Builder:
 		if not obj.exists():
 			source = self.work / "libc_references.c"
 			source.write_text(LIBC_REFERENCES)
-			subprocess.run([self.cc, "-m32", "-c", str(source), "-o", str(obj)], check=True)
+			# (gnu11, as the probes are built: glibc's scanf names then match
+			# theirs, __isoc99_fscanf, not C23's __isoc23_fscanf)
+			subprocess.run([self.cc, "-m32", "-std=gnu11", "-c", str(source), "-o", str(obj)], check=True)
 		return str(obj)
 
 	def compile_run(self, tree, name, source, extra_sources=(), defines=(), arguments=(), syntax_only=False,

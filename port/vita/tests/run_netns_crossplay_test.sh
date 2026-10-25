@@ -255,6 +255,11 @@
 #   HALO_TEST_VITA     our Vita-path Linux build (build/linux/halo)
 #   HALO_TEST_DATA     a folder with the game's maps folder (Xbox NTSC maps,
 #                      ui.map and the multiplayer maps; default ../data2276)
+#   XPPC_PC_LEGACY_TABLE  a ChupathingyCE local legacy table (its docs/delta.md,
+#                      "Local override") every PC copy uses: {"delta_legacy": 1,
+#                      "serial": 1, "wires": {"chupa-38a": {"announce": 38,
+#                      "minimum": 11, "maximum": 39}}} plays a server announcing
+#                      38, as ChupathingyCE's [C] servers did on Oct 24 2026
 #   XPPC_OUR_ENV       more VAR=value settings for our client (the crossplay
 #                      wire's knobs as they land)
 #   XPPC_SECONDS       the longest a game runs (240); XPPC_SERVER_SECONDS a
@@ -632,6 +637,10 @@ run_copy() {
 		# (a copy of the binary of its own: config.toml is the binary's folder's)
 		cp "$binary" "$dir/bin/halo"
 		binary=$dir/bin/halo
+		# (ChupathingyCE's local legacy table, XPPC_PC_LEGACY_TABLE: the
+		# number its copies announce, as a [C] server announcing 38 has it;
+		# else none, the built-in numbers)
+		[ -n "${XPPC_PC_LEGACY_TABLE:-}" ] && cp "$XPPC_PC_LEGACY_TABLE" "$dir/no-legacy-table.json"
 		own="SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy
 			HALO_NULL_RENDERER=1 HALO_HIDDEN_WINDOW=1 HALO_NET_BROWSER=
 			HALO_NET_LIST_GAMES=false HALO_NET_REPORT_GAMES=false HALO_NET_REPORT_EVENTS=false

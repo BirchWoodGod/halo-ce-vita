@@ -5117,6 +5117,71 @@ static void distributed_handle_aim_assist_policy(
 	distributed_aim_assist_heard = TRUE;
 }
 
+/* (a client) the host's shield effects (OpenCE 36 and 38, as ChupathingyCE's
+network_rules_shield_effects_read takes them, 2d2ad1d8 and 251bba5c): only
+from the host, over its stream, in a crossplay game of 36 or later, exactly
+12 bytes of one entry, the effects 0 to 5 (6 from 38), the 16 bits after
+them 0; anything else ignored (logged at most once a second). Taken, it
+changes nothing: this build draws stock shields, which a stock host's game
+is exactly, and the others differ from only in their look */
+static void distributed_handle_shield_effects(
+	long machine_index,
+	word const *message,
+	word size)
+{
+	static char const *const reasons[] =
+	{
+		"from a client", "this machine is not a client", "not a game of network version 36 or later", "in a datagram",
+		"its size", "its header", "its count", "its value", "its reserved bytes",
+	};
+	static unsigned long logged_times[sizeof(reasons) / sizeof(reasons[0])];
+	static int said = -1;
+	byte const *bytes = (byte const *)message;
+	struct distributed_message_header header;
+	unsigned int effects = 0;
+	short why = NONE;
+
+	if (machine_index != NONE)
+		why = 0;
+	else if (game_connection() != _game_connection_network_client)
+		why = 1;
+	else if (!network_wire_v36_rules())
+		why = 2;
+	else if (distributed_handling_batch || network_connection_last_read_was_unreliable())
+		why = 3;
+	else if (size != DISTRIBUTED_SHIELD_EFFECTS_SIZE)
+		why = 4;
+	else
+	{
+		csmemcpy(&header, message, sizeof(header));
+		effects = (unsigned int)bytes[8] | (unsigned int)bytes[9] << 8;
+		if (GET_MESSAGE_TYPE(header.header) != 2 || GET_MESSAGE_SIZE(header.header) != DISTRIBUTED_SHIELD_EFFECTS_SIZE)
+			why = 5;
+		else if (header.count != 1)
+			why = 6;
+		else if (effects > (network_wire_version() >= 38 ? 6U : 5U))
+			why = 7;
+		else if (bytes[10] || bytes[11])
+			why = 8;
+	}
+	if (why != NONE)
+	{
+		unsigned long now = system_milliseconds();
+
+		if (!logged_times[why] || now - logged_times[why] >= 1000)
+		{
+			error(_error_silent, "shield effects ignored: %s", reasons[why]);
+			logged_times[why] = now ? now : 1;
+		}
+		return;
+	}
+	if (said != (int)effects)
+	{
+		error(_error_silent, "the host's shield effects are %u (drawn as stock)", effects);
+		said = (int)effects;
+	}
+}
+
 /* a message of the distributed kind; machine_index is the sender's on the
 host, NONE on a client */
 void network_distributed_handle_message(
@@ -5137,6 +5202,12 @@ void network_distributed_handle_message(
 	if (header.type == DISTRIBUTED_MESSAGE_AIM_ASSIST_POLICY)
 	{
 		distributed_handle_aim_assist_policy(machine_index, message, size);
+		return;
+	}
+	/* (OpenCE 36's shield effects: the same) */
+	if (header.type == DISTRIBUTED_MESSAGE_SHIELD_EFFECTS)
+	{
+		distributed_handle_shield_effects(machine_index, message, size);
 		return;
 	}
 	/* (the in-game chat's, OpenCE's kinds 87-89, on either wire:

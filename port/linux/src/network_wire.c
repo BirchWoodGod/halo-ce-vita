@@ -23,9 +23,12 @@ OpenCE's 6ec42856 (32). Exactly those: 26 and 27 play otherwise with no
 message to tell, 28 names a Custom Edition map and its version otherwise,
 30 and 31 were never released and play part of 32's rules alone;
 DamnationCE (7be58b2b) is still 26, and refused (docs/crossplay.md 5.1,
-10.9). In order, lowest first */
+10.9). And 38 (Oct 24 2026: OpenCE's and ChupathingyCE's servers, their
+rules network_wire.h's network_wire_v33_rules ...), not 33 to 37, which no
+release announces. In order, lowest first */
 static const unsigned short crossplay_accepted_versions[] =
-	{ HALO_PORT_CROSSPLAY_OLDER_NETWORK_VERSION, HALO_PORT_CROSSPLAY_NETWORK_VERSION };
+	{ HALO_PORT_CROSSPLAY_OLDER_NETWORK_VERSION, HALO_PORT_CROSSPLAY_NETWORK_VERSION,
+		HALO_PORT_CROSSPLAY_NEWEST_NETWORK_VERSION };
 
 /* the game's wire and whether its host is a Vita (the game's threads and
 the p2p thread read them; one writer at a time: the game's as it joins or
@@ -186,6 +189,26 @@ int network_wire_v31_rules(void)
 int network_wire_v32_rules(void)
 {
 	return game_crossplay_version() >= 32;
+}
+
+int network_wire_v33_rules(void)
+{
+	return game_crossplay_version() >= 33;
+}
+
+int network_wire_v34_rules(void)
+{
+	return game_crossplay_version() >= 34;
+}
+
+int network_wire_v35_rules(void)
+{
+	return game_crossplay_version() >= 35;
+}
+
+int network_wire_v36_rules(void)
+{
+	return game_crossplay_version() >= 36;
 }
 
 void network_wire_crossplay_versions_text(char *text, int size)

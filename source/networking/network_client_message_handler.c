@@ -210,6 +210,9 @@ symbols in this file:
 
 /* port/linux/game/network_distributed.c's */
 void network_distributed_handle_message(long machine_index, word const *message, word size);
+/* the platform layer's message box (a game the host's record plays that this
+build does not) */
+void platform_show_message(char const *title, char const *message);
 
 /* ---------- constants */
 
@@ -1038,7 +1041,9 @@ static boolean network_game_client_handle_message_server_machine_rejected(
 /* the game settings record as its pieces arrive, as the wire sends it (the
 legacy Vita wire's or the crossplay wire's: network_game_record.c); it is
 decoded and applied once the last piece is in */
-static byte network_game_client_settings_staging[HALO_PORT_NETWORK_GAME_SIZE];
+/* (room for a record of OpenCE's network version 35 on, 16 bytes longer:
+network_game_record_wire_size) */
+static byte network_game_client_settings_staging[HALO_PORT_NETWORK_GAME_SIZE + 16];
 static long network_game_client_settings_staging_size = 0;
 static struct network_game network_game_client_settings_record;
 
@@ -1047,7 +1052,10 @@ static boolean network_game_client_receive_game_settings_piece(
 	struct message_server_game_settings_update const *piece)
 {
 	boolean result = TRUE;
-	long record_size = network_game_record_size(network_game_record_format_current());
+	/* port: the record's size by the host's version (a crossplay host's 16
+	bytes longer from OpenCE's 35: network_game_record.c) */
+	unsigned int record_version = network_wire_version();
+	long record_size = network_game_record_wire_size(network_game_record_format_current(), record_version);
 
 	if (piece->total_size != record_size ||
 		piece->length > sizeof(piece->data) ||
@@ -1093,10 +1101,13 @@ static boolean network_game_client_receive_game_settings_piece(
 #endif
 				/* port: a record a host sent, checked (a PC host's options
 				and co-op switches on the crossplay wire) */
-				if (!network_game_record_decode(network_game_record_format_current(), network_game_client_settings_staging,
-					piece->total_size, &network_game_client_settings_record, &why))
+				if (!network_game_record_decode_version(network_game_record_format_current(), record_version,
+					network_game_client_settings_staging, piece->total_size, &network_game_client_settings_record, &why))
 				{
 					network_event("refused the host's game settings: %s", why ? why : "");
+					/* (one of OpenCE's own game types: the player told which) */
+					if (why && !strncmp(why, "OpenCE's ", 9) && strstr(why, "game type"))
+						platform_show_message("Can't join this game", why);
 					result = FALSE;
 				}
 				else

@@ -125,6 +125,14 @@ kinds (NUMBER_OF_DISTRIBUTED_MESSAGES: it has no slot in the tables indexed
 by kind), and handled before every other check (network_distributed.c) */
 #define DISTRIBUTED_MESSAGE_AIM_ASSIST_POLICY 90
 #define DISTRIBUTED_AIM_ASSIST_POLICY_SIZE 12
+/* OpenCE's network version 36 (38's seventh value): the host's shield
+effects (glow, light show, overshield; 6 each machine's own look), sent
+reliably to a client: the header, the effects as a 16-bit value and 16 bits
+of 0. As ChupathingyCE reads it (2d2ad1d8, 251bba5c, GPL: network_rules.h's
+NETWORK_RULES_SHIELD_EFFECTS_*, network_rules_shield_effects_read): checked
+and drawn as stock, this build having no other look */
+#define DISTRIBUTED_MESSAGE_SHIELD_EFFECTS 91
+#define DISTRIBUTED_SHIELD_EFFECTS_SIZE 12
 
 /* where a message goes */
 enum

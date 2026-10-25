@@ -413,6 +413,16 @@ struct p2p_listing
 	unsigned char locked;
 	unsigned char signing_key[P2P_KEY_SIZE];
 	unsigned char sealed_token[P2P_SEALED_TOKEN_SIZE];
+	/* the network version its listing announces; and whether it is one this
+	build does not join on its wire (p2p_lobby_other_entries: shown, never
+	joined - no invite, no token kept) */
+	unsigned short version;
+	unsigned char other_version;
+	/* (a crossplay listing of OpenCE's network version 37 on) the game's
+	kind, its stamp's first byte: an OpenCE game type's number in the low
+	seven bits (1 SWAT, 2 Infection, 3 Gun Game), Hardcore in bit 7; 0 a
+	stock game (ChupathingyCE 251bba5c, GPL) */
+	unsigned char kind;
 };
 
 /* a copy of the public games found, in the order shown (the most players

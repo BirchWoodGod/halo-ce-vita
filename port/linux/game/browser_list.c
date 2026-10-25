@@ -59,6 +59,14 @@ static int entry_order(
 	/* (the groups: the Vitas' games first) */
 	if (browser_list_vita(a) != browser_list_vita(b))
 		return browser_list_vita(b) - browser_list_vita(a);
+	/* (in each, the games this build joins before those of another network
+	version, greyed: p2p_lobby_other_entries) */
+	if ((a->compatible != 0) != (b->compatible != 0))
+		return (b->compatible != 0) - (a->compatible != 0);
+	/* (those by players: the newest version first - a host announcing one
+	server under many versions, ChupathingyCE's, shows its old ones last) */
+	if (!a->compatible && sort_chosen == _browser_sort_players && a->version != b->version)
+		return b->version - a->version;
 	switch (sort_chosen)
 	{
 	case _browser_sort_name:

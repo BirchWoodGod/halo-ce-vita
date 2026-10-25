@@ -1558,6 +1558,39 @@ sends is the same for a Vita and a PC.
 | `run_menus_test.sh h3vitapc h3createwho`: the tags and groups; WHO CAN JOIN's choices on a Vita and on the PC build | PASS (and h3create, h3mp, h3browser, h3lan, h3groups, h3oddrows, browserrows as before) |
 | `run_netns_online_test.sh code lan lobby`, `run_netns_crossplay_test.sh browserboth` | code, lan, lobby PASS; browserboth's Vita rows as before (`[VITA]`, `[VITA+PC]`, online and on the LAN), its OpenCE half not run: the OpenCE builds at hand announce 26 and 32, which the crossplay wire refuses |
 
+### 10.11 Network version 38 joined (Oct 24 2026)
+
+Branch fix/browser-pc-versions. On Oct 24 the public brokers held 74-87
+hosts our browser dropped: v38 about 40-50 (ChupathingyCE's [C] servers,
+which announce 38 by a local legacy table, and OpenCE's current builds:
+7fb941b0 defines 38), v26 about 15 (DamnationCE, old OpenCE), and v11 and
+v21-v36 one-offs (". SWAT pistols" lists itself under 14 versions). The PC
+tab showed 5-6 games. Our client now joins 29, 32 and 38 (not 33-37, which
+no release announces); our hosts still announce 32.
+
+What 33-38 change, as ChupathingyCE (GPL, 2d2ad1d8 and 251bba5c; its
+port/linux/include/delta.h DELTA_LEGACY_VERSIONS rows 33-38 and
+port/linux/game/network_rules.h) follows OpenCE's raises; OpenCE's own
+source past 4b09168e (AGPL) was not read. The code here is ported from
+ChupathingyCE's:
+
+| Version | Change | Here |
+|---|---|---|
+| 33 | co-op byte bit 1 (players' hits spare their AI allies), the host's rule | taken and dropped (network_game_record.c); bit 2 and up still refused |
+| 34 | shield-only scenery and devices are static targets: every machine runs their shields, a client reports no damage one deals, a host's event on a copy made during play finds the nearest within 2 units (+ an area effect's cutoff) | network_damage.c, damage.c (network_wire_v34_rules) |
+| 35 | gametype options 0x2C bytes (16 further before the local data), record 13,136 bytes; OpenCE's SWAT, Infection, Gun Game, Hardcore | network_game_record_decode_version: the size by the host's version; a mode past Gun Game, Hardcore past 1 or a non-zero reserved byte refused; a game of one of those types refused with the player told (this build plays none of them) |
+| 36 | message 91, the host's shield effects (12 bytes, value 0-5) | taken only from the host, over its stream, exactly as laid out; drawn as stock (network_distributed.c) |
+| 37 | a listed game's kind in the listing's stamp and the advertisement's fourth reserved byte | the browser greys a game of an OpenCE game type, saying which |
+| 38 | message 91's value 6 (each machine's own look) | accepted, drawn as stock |
+
+Tested (run_netns_crossplay_test.sh, our Vita-path debug build, no tick
+thread): opencelan and opencehost against OpenCE 7fb941b0 (38) passed join,
+settings, play, spawn, kills, client damage, score, end of game and rejoin
+(the host, a hand-linked build, crashed after its game ended, its own
+control too); chupaserver against ChupathingyCE d7fafc81's server announcing
+38 (XPPC_PC_LEGACY_TABLE) passed every step on a LAN. Unit: network_wire_test,
+wire_contract_record (v38_*), net_fuzz variant_options (38's record).
+
 ## 11. Licensing and credit
 
 **Licences:**
