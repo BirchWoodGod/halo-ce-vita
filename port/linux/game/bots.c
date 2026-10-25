@@ -177,6 +177,13 @@ What a bot does each tick, in a player's terms:
   enemy's motion led by its skill's lead, its aim error making it less true.
   Every skill jumps in a fight now (easy a little), more just hurt (a
   dodge). halo.log's items line has the grenades by why.
+- Fighting as a player (port): it strafes from side to side mostly (the
+  other way four times in five), the sooner the more skilled, now and then
+  a moment still or (heroic and up) crouched; its shields down and the
+  enemy's not, it backs off a few seconds to recharge, crouched behind a low
+  wall between them when there is one; the enemy's shields down, it pushes
+  in. halo.log's play line has the times it backed off, the seconds behind
+  cover and pushing.
 - Roles, routes and vantage points (port: bots_roles.c, bots_routes.c and
   bots_vantage.c, steering the bot through bots_tactics.h's hooks here: its
   goal, its searches' goal, its look and its fight). Each team's bots have
@@ -816,6 +823,15 @@ struct bots_bot
 	long plan_avoid_until_tick;
 	/* port: when it last changed weapons for the range (bots_weapon_for_range) */
 	long weapon_switch_tick;
+	/* port: fighting as a player: a moment still or crouched in its strafe;
+	backing off (to recharge its shields) until then, not again until then;
+	crouched behind a low wall meanwhile; pushing in on a weakened enemy */
+	boolean strafe_still;
+	boolean strafe_crouched;
+	long retreat_until_tick;
+	long retreat_rest_tick;
+	boolean cover_crouch;
+	boolean pushing;
 	/* port: a grenade it throws (bots_grenade_update): where at, which kind
 	(0 frag, 1 plasma), since when it turns to throw it (0 for none), when it
 	pressed the throw (0 before), and why (halo.log); when it next weighs
@@ -1026,6 +1042,11 @@ static struct
 		back for a teammate near where they would land */
 		long grenades_by_reason[8];
 		long grenades_held_back;
+		/* port: backing off to recharge, seconds crouched behind cover, and
+		seconds pushing in on a weakened enemy */
+		long retreats;
+		long cover_crouch_seconds;
+		long push_seconds;
 	} play;
 } bots_globals;
 
@@ -6276,6 +6297,24 @@ static void bots_bot_look(struct bots_bot *bot, struct bots_tick *tick)
 	}
 }
 
+/* port: whether a low wall stands between the bot and its enemy a step on
+(the way to it): a ray at its knees meets the level within a unit and a
+half, one at its eyes does not (crouched, it is hidden; standing, it sees
+over) */
+static boolean bots_low_cover(struct bots_tick *tick, real to_target)
+{
+	unsigned long flags = FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit) |
+		FLAG(_collision_test_objects_bit) | FLAG(_collision_test_objects_scenery_bit);
+	real_vector3d vector = { (real)cos(to_target) * 1.5f, (real)sin(to_target) * 1.5f, 0.0f };
+	struct collision_result collision;
+	real_point3d knee = tick->position, eye = tick->position;
+
+	knee.z += 0.2f;
+	eye.z += 0.62f;
+	return collision_test_vector(flags, &knee, &vector, tick->player->unit_index, &collision) &&
+		!collision_test_vector(flags, &eye, &vector, tick->player->unit_index, &collision);
+}
+
 /* fighting the target seen in the last half second: aim (turning at its
 speed, leading, an error that settles), fire, a grenade, a blow, strafing */
 static void bots_bot_fight(struct bots_bot *bot, struct bots_tick *tick)
@@ -6370,17 +6409,77 @@ static void bots_bot_fight(struct bots_bot *bot, struct bots_tick *tick)
 	}
 	/* (port: grenades are bots_grenade_update's, by the fight's situation) */
 	/* strafing, to a side for a while; nearer or further to keep its
-	weapon's distance; a jump now and then */
+	weapon's distance; a jump now and then. Port: as a player strafes - from
+	side to side mostly (the other way four times in five), the sooner the
+	more skilled, now and then a moment still or (heroic and up) crouched;
+	shields down and the enemy's not, back off a few seconds (to recharge,
+	out of its sight), crouched behind a low wall between when there is one;
+	the enemy's shields down, pushed in on */
 	if (now >= bot->strafe_until_tick)
 	{
-		bot->strafe_sign = bots_random_real(bot) < 0.5f ? -1.0f : 1.0f;
-		bot->strafe_until_tick = now + TICKS_PER_SECOND / 3 + (long)(bots_random(bot) % (TICKS_PER_SECOND));
+		static long const shortest[NUMBER_OF_BOTS_SKILLS] = { 15, 12, 9, 7 };
+		static long const spread[NUMBER_OF_BOTS_SKILLS] = { 21, 18, 15, 13 };
+		real roll = bots_random_real(bot);
+
+		bot->strafe_sign = roll < 0.8f ? -bot->strafe_sign : bot->strafe_sign;
+		if (bot->strafe_sign == 0.0f)
+			bot->strafe_sign = 1.0f;
+		bot->strafe_until_tick = now + shortest[bots_globals.skill] + (long)(bots_random(bot) % spread[bots_globals.skill]);
+		bot->strafe_still = bots_random_real(bot) < 0.08f;
+		bot->strafe_crouched = bots_globals.skill >= _bots_skill_heroic && bots_random_real(bot) < 0.12f;
+	}
+	{
+		struct object_datum *self = tick->object;
+		real target_shield = target_object->object.shield_vitality;
+
+		/* (shields down, the enemy's up: backing off; not again soon) */
+		if (now >= bot->retreat_until_tick && now >= bot->retreat_rest_tick && self->object.shield_vitality < 0.25f &&
+			now - bot->hurt_tick < TICKS_PER_SECOND && target_shield > 0.5f && !bot->held_objective &&
+			!infection_player_is_zombie(bot->player_index))
+		{
+			bot->retreat_until_tick = now + TICKS_PER_SECOND * 2 + (long)(bots_random(bot) % TICKS_PER_SECOND);
+			bot->retreat_rest_tick = bot->retreat_until_tick + TICKS_PER_SECOND * 6;
+			bots_globals.play.retreats++;
+		}
+		bot->pushing = target_shield < 0.15f && self->object.shield_vitality > 0.3f;
+		if (bot->pushing && (now % TICKS_PER_SECOND) == 0)
+			bots_globals.play.push_seconds++;
 	}
 	{
 		real to_target = (real)atan2(dy, dx);
 		real range = bots_weapon_range(tick->weapon_index);
 		real forward = tick->target_distance > range * 1.3f ? 0.8f : tick->target_distance < range * 0.6f ? -0.5f : 0.0f;
-		real side = bot->strafe_sign;
+		real side = bot->strafe_still ? 0.0f : bot->strafe_sign;
+
+		/* port: (backing off, aslant; pushing, straight in) */
+		if (now < bot->retreat_until_tick)
+		{
+			forward = -1.0f;
+			side *= 0.6f;
+			/* (a low wall between it and the enemy, a step on: crouched
+			behind it, still) */
+			if (!(now % 10))
+				bot->cover_crouch = bots_low_cover(tick, to_target);
+			if (bot->cover_crouch)
+			{
+				forward = 0.0f;
+				side = 0.0f;
+				tick->flags |= FLAG(_unit_control_crouch_modifier_bit);
+				if (!(now % TICKS_PER_SECOND))
+					bots_globals.play.cover_crouch_seconds++;
+			}
+		}
+		else
+		{
+			bot->cover_crouch = FALSE;
+			if (bot->pushing)
+			{
+				forward = 1.0f;
+				side *= 0.5f;
+			}
+			else if (bot->strafe_crouched && tick->target_distance > 4.0f)
+				tick->flags |= FLAG(_unit_control_crouch_modifier_bit);
+		}
 
 		/* port: an Infection zombie runs at its target, weaving a little */
 		if (infection_player_is_zombie(bot->player_index))
@@ -8638,13 +8737,15 @@ static void bots_report(void)
 	}
 	platform_log("bots: play at tick %ld: stuck fighting %ld, walking with no path %ld; grenades %ld; jumps fighting %ld, "
 		"moving %ld; weapons picked up %ld (power %ld); power weapon held %.1f%%, two weapons %.1f%% of the time; "
-		"goals with no way %ld, strafes blocked %ld, low walls jumped %ld, jump shortcuts %ld",
+		"goals with no way %ld, strafes blocked %ld, low walls jumped %ld, jump shortcuts %ld; backed off to recharge %ld, "
+		"crouched behind cover %ld s, pushed in on a weakened enemy %ld s",
 		now, bots_globals.play.stuck_fighting, bots_globals.play.stuck_pathless, bots_globals.play.grenades_thrown,
 		bots_globals.play.jumps_fighting, bots_globals.play.jumps_moving, bots_globals.play.weapon_pickups, bots_globals.play.power_pickups,
 		bots_globals.play.alive_ticks ? 100.0 * bots_globals.play.power_ticks / bots_globals.play.alive_ticks : 0.0,
 		bots_globals.play.alive_ticks ? 100.0 * bots_globals.play.two_weapon_ticks / bots_globals.play.alive_ticks : 0.0,
 		bots_globals.play.goals_unreachable, bots_globals.play.fight_blocks, bots_globals.play.walk_jumps,
-		bots_globals.play.jump_shortcuts);
+		bots_globals.play.jump_shortcuts, bots_globals.play.retreats, bots_globals.play.cover_crouch_seconds,
+		bots_globals.play.push_seconds);
 	platform_log("bots: items at tick %ld: spawns %ld; gone for/taken: power weapons %ld/%ld, weapons %ld/%ld, overshield %ld/%ld, "
 		"camouflage %ld/%ld, health %ld/%ld, grenades %ld/%ld; waited for the next %ld; weapons changed for the range %ld, "
 		"the one to drop chosen %ld; grenades: behind cover %ld, a group %ld, a vehicle %ld, a carrier %ld, a stick %ld, "
