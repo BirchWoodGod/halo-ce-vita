@@ -3387,6 +3387,7 @@ static void test_tab_layouts(void)
 		{ TAB_GRAPHICS, "Field of view", "HALO_FIELD_OF_VIEW", "70|75|80|85|90|95|100", 0, "70" },
 		{ TAB_GRAPHICS, "Upscale filter", "HALO_UPSCALE_FILTER", "0|1", 0, "0" },
 		{ TAB_GRAPHICS, "Sharp interface", "HALO_SHARP_UI", "1|0", 0, "1" },
+		{ TAB_GRAPHICS, "Brightness", "HALO_BRIGHTNESS", "0|1|2|3|4|5|6|7|8|9|10", 0, "5" },
 		{ TAB_GRAPHICS, "Detail", NULL, NULL, 0, NULL, ACTION_PAGE, PAGE_GRAPHICS_DETAIL },
 		{ TAB_GRAPHICS, "Performance", NULL, NULL, 0, NULL, ACTION_PAGE, PAGE_GRAPHICS_PERFORMANCE },
 		{ PAGE_GRAPHICS_DETAIL, "Model detail", "HALO_MODEL_LOD_SCALE", "1|0.75|0.5|0.35", 0, "0.75" },
@@ -3519,7 +3520,7 @@ static void test_headings(void)
 		{ "Controls", "=Look|Look sensitivity|Invert look|Stick deadzone|=Buttons|Crouch|Button layout|Reset controls|"
 			"=Gyro|Gyro aiming|Gyro settings|=Touch|Rear touch guard|Touch zones" },
 		{ "Video", "=Quality|Profile|Render resolution|Dynamic minimum|Frame limit|Frame interpolation|=Screen|"
-			"Aspect ratio|Field of view|Upscale filter|Sharp interface|=More|Detail|Performance" },
+			"Aspect ratio|Field of view|Upscale filter|Sharp interface|Brightness|Detail|Performance" },
 		{ "Sound", "Sound voices*|Sound occlusion|Sound updates" },
 		{ "Multiplayer", "=Network|Connection|Vita and PC|Join with a code|=Bots|Bots|=Games|Co-op players|"
 			"Unseen players|Modded maps|Latency meter" },
@@ -3541,8 +3542,8 @@ static void test_headings(void)
 			all = 0;
 		}
 	}
-	check(all && (int)(sizeof(headings) / sizeof(headings[0])) == 13,
-		"the headings: thirteen, each over one row of its tab (none on Sound, Dev or a page a row opens)");
+	check(all && (int)(sizeof(headings) / sizeof(headings[0])) == 12,
+		"the headings: twelve, each over one row of its tab (none on Sound, Dev or a page a row opens)");
 	/* each tab: its headings and rows in order, each heading a line of its
 	own, the page fitting the panel; down and up through it */
 	all = 1;
@@ -3659,7 +3660,7 @@ static void test_variables_kept(void)
 		"HALO_FRIENDS_JOIN", "HALO_NET_BLOCK_MOUSE_AIM_ASSIST", "HALO_NET_ANTICHEAT",
 		"HALO_INFECTION_ZOMBIES", "HALO_INFECTION_SPEED", "HALO_INFECTION_TIME", "HALO_INFECTION_RESPAWN",
 		"HALO_INFECTION_SHIELDS", "HALO_INFECTION_TOUGH",
-		"HALO_CARNAGE_REPORT", "HALO_FLAMING_HELMET", "HALO_FIELD_OF_VIEW", "HALO_CLOCK_GOVERNOR", "HALO_BATTERY_LOG",
+		"HALO_CARNAGE_REPORT", "HALO_FLAMING_HELMET", "HALO_FIELD_OF_VIEW", "HALO_BRIGHTNESS", "HALO_CLOCK_GOVERNOR", "HALO_BATTERY_LOG",
 		"HALO_CHAT", "HALO_CHAT_FILTER", "HALO_BOTS_ONLINE", "HALO_SCOREBOARD", "HALO_MENU_BACKDROP", "HALO_MENU_MUSIC", "HALO_MENU_BACKDROP_QUALITY",
 		"HALO_CLASSIC_CARNAGE_REPORT", "HALO_CLASSIC_SCOREBOARD",
 	};
@@ -4243,7 +4244,7 @@ static void test_languages(void)
 		} spanish[] = {
 			{ TAB_GAME, "Interfaz|Primera persona|Actualizaciones" },
 			{ TAB_CONTROLS, "Mirar|Botones|Giroscopio|Táctil" },
-			{ TAB_GRAPHICS, "Calidad|Pantalla|Más" },
+			{ TAB_GRAPHICS, "Calidad|Pantalla" },
 			{ TAB_AUDIO, "" },
 			{ TAB_MULTIPLAYER, "Red|Bots|Partidas" },
 		};
@@ -4263,7 +4264,7 @@ static void test_languages(void)
 			}
 		}
 		check(all, "Spanish headings: Interfaz, Primera persona, Actualizaciones; Mirar, Botones, Giroscopio, Táctil; "
-			"Calidad, Pantalla, Más; Red, Bots, Partidas (none on Sonido); each fits");
+			"Calidad, Pantalla; Red, Bots, Partidas (none on Sonido); each fits");
 	}
 	tab = page = TAB_GAME;
 	show();
@@ -5298,15 +5299,15 @@ int main(void)
 		!strcmp(menu_line(9, line, sizeof(line)), "Field of view\x02  70 (original) >") &&
 		!strcmp(menu_line(10, line, sizeof(line)), "Upscale filter\x02  Smooth >") &&
 		!strcmp(menu_line(11, line, sizeof(line)), "Sharp interface\x02  On >") &&
-		!strcmp(menu_line(12, line, sizeof(line)), "\x08More") &&
+		!strcmp(menu_line(12, line, sizeof(line)), "Brightness\x02< 5 >") &&
 		!strcmp(menu_line(13, line, sizeof(line)), "Detail\x02  >") &&
 		!strcmp(menu_line(14, line, sizeof(line)), "Performance\x02  >") &&
 		!strncmp(menu_line(15, line, sizeof(line)), "\x05Sets resolution", 16) &&
 		!strncmp(menu_line(16, line, sizeof(line)), "\x06L/R: tabs", 10) && menu_height_fits() && menu_selected == 2,
 		"Video: Quality (Profile, Render resolution, Dynamic minimum, Frame limit, Frame interpolation), Screen (Aspect "
-		"ratio 16:9, Field of view 70 (original), Upscale filter Smooth, Sharp interface On), More (Detail, "
-		"Performance); help, buttons; Profile chosen first");
-	check(menu_fits() && menu_rows() == 11, "Video: eleven rows with Dynamic minimum shown, each fits");
+		"ratio 16:9, Field of view 70 (original), Upscale filter Smooth, Sharp interface On, Brightness 5), Detail, "
+		"Performance; help, buttons; Profile chosen first");
+	check(menu_fits() && menu_rows() == 12, "Video: twelve rows with Dynamic minimum shown, each fits");
 	check(!strstr(menu, "FPS counter") && !strstr(menu, "First-person legs") && !strstr(menu, "Smooth weapon motion") &&
 		!strstr(menu, "Menu style") && !strstr(menu, "Model detail") && !strstr(menu, "\nParticles") &&
 		!strstr(menu, "Particle density") && !strstr(menu, "Scenery updates") && !strstr(menu, "AI think rate") &&
@@ -5337,7 +5338,7 @@ int main(void)
 		press(VITA_BUTTON_DOWN);
 		press(VITA_BUTTON_UP);
 		check(!strstr(menu, "Dynamic minimum") && !strncmp(menu_line(4, line, sizeof(line)), "Frame limit\x02", 12) &&
-			menu_rows() == 10, "not Dynamic: the Dynamic minimum row hidden");
+			menu_rows() == 11, "not Dynamic: the Dynamic minimum row hidden");
 		vita_settings_set("HALO_RENDER_SCALE", "0.3");
 		check(!strcmp(getenv("HALO_RENDER_SCALE"), "0.5"), "a scale off the list goes to the nearest number, not Dynamic");
 		vita_settings_set("HALO_RENDER_SCALE", "dynamic");
@@ -5345,7 +5346,7 @@ int main(void)
 			!strcmp(settings[0].names[settings[0].choice], "Balanced"), "Dynamic again (from 63%): Balanced again");
 		press(VITA_BUTTON_DOWN);
 		press(VITA_BUTTON_UP);
-		check(!strncmp(menu_line(4, line, sizeof(line)), "Dynamic minimum\x02", 16) && menu_rows() == 11 && menu_fits(),
+		check(!strncmp(menu_line(4, line, sizeof(line)), "Dynamic minimum\x02", 16) && menu_rows() == 12 && menu_fits(),
 			"Dynamic: the Dynamic minimum row shows, under it");
 		vita_settings_set("HALO_DYNAMIC_RES_MIN", "0.75");
 		check(!strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.75") &&
@@ -5421,8 +5422,31 @@ int main(void)
 				!strcmp(menu_line(11, line, sizeof(line)), "Sharp interface\x02  On >"), "Sharp interface On again: saved");
 		}
 		press(VITA_BUTTON_DOWN);
+		/* (Brightness, under Sharp interface: the 3D picture's curve in the
+		blit to the display, live; in no profile) */
+		check(menu_selected == 12 && !strcmp(menu_line(menu_selected, line, sizeof(line)), "Brightness\x02< 5 >") &&
+			!strcmp(getenv("HALO_BRIGHTNESS"), "5") && menu_fits(),
+			"down from Sharp interface: Brightness (5, in the environment), its help line fits");
+		{
+			unsigned long generation = halo_settings_generation;
+
+			press(VITA_BUTTON_RIGHT);
+			check(!strcmp(getenv("HALO_BRIGHTNESS"), "6") && strstr(file_text(SETTINGS_FILE), "HALO_BRIGHTNESS=6\n") &&
+				halo_settings_generation != generation &&
+				!strcmp(settings[0].names[settings[0].choice], "Balanced"),
+				"Brightness 6: saved, the readers told, the profile kept");
+			vita_settings_set("HALO_BRIGHTNESS", "0");
+			check(!strcmp(getenv("HALO_BRIGHTNESS"), "0"),
+				"Brightness 0: the lowest");
+			vita_settings_set("HALO_BRIGHTNESS", "11");
+			check(!strcmp(getenv("HALO_BRIGHTNESS"), "10"),
+				"Brightness off its list: the nearest");
+		}
+		press(VITA_BUTTON_DOWN);
 		check(menu_selected == 13 && !strcmp(menu_line(menu_selected, line, sizeof(line)), "Detail\x02  >"),
-			"down from Sharp interface: Detail (the More heading stepped over)");
+			"down from Brightness: Detail");
+		vita_settings_set("HALO_BRIGHTNESS", "5");
+		press(VITA_BUTTON_UP);
 		press(VITA_BUTTON_UP);
 		press(VITA_BUTTON_UP);
 		press(VITA_BUTTON_UP);
@@ -5517,9 +5541,9 @@ int main(void)
 	}
 	/* Video's Detail: the detail rows (most of them the profile's), the
 	particles made and drawn */
-	check(to_line("Detail") && !strcmp(menu_line(menu_selected - 1, line, sizeof(line)), "\x08More") &&
+	check(to_line("Detail") && !strcmp(menu_line(menu_selected - 1, line, sizeof(line)), "Brightness\x02< 5 >") &&
 		strstr(menu, "\n\x05" "Models, shadows, lights, effects, particles\n") && menu_fits(),
-		"Detail: under More, its help says what is there");
+		"Detail: under Brightness, its help says what is there");
 	check(open_page("Detail") && strstr(menu, "\n\x03Video > Detail\n") && !strchr(menu, '\x08') &&
 		!strcmp(menu_line(2, line, sizeof(line)), "Model detail\x02< Medium >") &&
 		!strcmp(menu_line(3, line, sizeof(line)), "Hide distant objects\x02< Small >") &&

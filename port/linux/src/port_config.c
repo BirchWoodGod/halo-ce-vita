@@ -114,6 +114,13 @@ static const struct config_setting config_settings[] =
 		"The field of view in Halo's degrees: 70 is the original view, larger\n"
 		"shows more at the sides (Halo PC's; 50 to 120). Zoomed views and the\n"
 		"first-person weapon stay as they were. Wider means more to draw." },
+	/* (halo_brightness_curve below; applied in the final pass that puts the
+	3D picture on the display: vita_gxm.c blit, d3d8_gl.c's present. The
+	Vita's settings panel's Brightness row, Video > Screen. Live) */
+	{ "display.brightness", _config_integer, "5", "HALO_BRIGHTNESS", _environment_value, _platform_all,
+		"Brightness of the 3D picture, 0 to 10: 5 is the picture as the game\n"
+		"draws it, higher lifts the darks and the midtones, lower deepens\n"
+		"them (the interface is not changed). Costs no frame time." },
 	/* (port/linux/game/ragdolls.c; the Vita's settings panel's Ragdolls
 	row, Graphics > Detail. Live) */
 	{ "display.ragdolls", _config_boolean, "true", "HALO_RAGDOLLS", _environment_value, _platform_all,
@@ -2002,6 +2009,33 @@ int config_boolean(const char *name)
 long config_integer(const char *name)
 {
 	return config_value(name, _config_integer)->integer;
+}
+
+/* The brightness setting (display.brightness, HALO_BRIGHTNESS; 0 to 10, 5 the
+picture as drawn) as the strength k of the curve the display's final pass
+applies to the 3D picture: c' = c + k * c * (1 - c), per colour channel.
+k is 0 at 5, -0.75 at 0 and +0.75 at 10; the curve is 0 at black and 1 at
+white and rising for any |k| < 1, so it lifts or deepens the darks and
+midtones and leaves the extremes. The environment first, as the field of
+view: the Vita's settings panel sets the variable, live. */
+float halo_brightness_curve(void)
+{
+	static float curve;
+	static int known;
+	static unsigned long seen;
+
+	if (!known || seen != halo_settings_generation)
+	{
+		const char *setting = getenv("HALO_BRIGHTNESS");
+		long value = setting && *setting ? strtol(setting, NULL, 10) : config_integer("display.brightness");
+
+		if (value < 0 || value > 10)
+			value = 5;
+		curve = (float)(value - 5) * 0.15f;
+		seen = halo_settings_generation;
+		known = 1;
+	}
+	return curve;
 }
 
 double config_real(const char *name)

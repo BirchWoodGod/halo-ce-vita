@@ -40,6 +40,9 @@ int config_write_real(const char *name, double value);
 /* a setting's default as text (a string's without its quotes); 1 if the
 setting exists */
 int config_default_text_of(const char *name, char *text, size_t size);
+/* the brightness setting as the strength of the display pass's curve
+(port_config.c); 0: the picture as drawn */
+float halo_brightness_curve(void);
 /* bumped whenever a setting changes mid-game (port_config.c) */
 extern volatile unsigned long halo_settings_generation;
 /* sets a setting for this run only (the file is left alone), from text as
