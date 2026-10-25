@@ -1173,6 +1173,8 @@ static struct
 	/* rays down to the ground and lines of sight: cast, and their time */
 	long below_rays;
 	long sight_rays;
+	/* port: the longest step of the regions and the jumps (bots_nav.c) */
+	unsigned long long nav_us_most;
 	unsigned long long below_us;
 	unsigned long long sight_us;
 } bots_profile = { -1 };
@@ -3313,6 +3315,7 @@ void bots_initialize_for_new_map(void)
 	bots_profile.sight_rays = 0;
 	bots_profile.below_us = 0;
 	bots_profile.sight_us = 0;
+	bots_profile.nav_us_most = 0;
 	/* (the first line a minute into the game) */
 	bots_globals.last_report_tick = 0;
 	bots_globals.vehicle_entries = 0;
@@ -8830,8 +8833,24 @@ void bots_update_actions(struct player_action *actions)
 			bots_tactics_update();
 			/* port: the regions and the jumps (a bounded step a tick), the
 			ramps opened to the searches */
-			bots_nav_update();
-			bots_paths_open_ramps();
+			{
+				unsigned long long nav_started = bots_profile.enabled > 0 ? vita_host_time_us() : 0;
+				short nav_phase = bots_nav_phase();
+
+				bots_nav_update();
+				bots_paths_open_ramps();
+				if (nav_started)
+				{
+					unsigned long long spent = vita_host_time_us() - nav_started;
+
+					if (spent > bots_profile.nav_us_most)
+					{
+						bots_profile.nav_us_most = spent;
+						platform_log("bots: nav's step at tick %ld (phase %d) took %llu us, the most so far", game_time_get(),
+							(int)nav_phase, spent);
+					}
+				}
+			}
 			bots_profile_part(_bots_part_scan, &scan_started);
 		}
 		bot_index = player->network_player_data.machine_index - BOTS_FIRST_MACHINE;

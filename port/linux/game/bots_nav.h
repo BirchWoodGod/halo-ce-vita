@@ -59,6 +59,8 @@ void bots_nav_set_biped(long biped_definition_index);
 tested (no step once done) */
 void bots_nav_update(void);
 boolean bots_nav_ready(void);
+/* (HALO_TICK_PROFILE) the step being made: 0 none yet ... 5 done */
+short bots_nav_phase(void);
 /* bots.c's teleporters and ladders, once its map is prepared: hops too */
 void bots_nav_add_teleporter(long teleporter_index, boolean ladder, real_point3d const *entrance,
 	long entrance_surface_index, real_point3d const *exit, long exit_surface_index);

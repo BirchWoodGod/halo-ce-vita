@@ -77,10 +77,10 @@ void platform_log(char const *format, ...);
 #define NAV_BUCKETS 4096
 /* the work of a tick: surfaces joined, put in the grid, whose edges are
 looked at; jumps tested (a few rays each) */
-#define NAV_REGIONS_A_TICK 2000
-#define NAV_GRID_A_TICK 400
-#define NAV_EDGES_A_TICK 60
-#define NAV_TESTS_A_TICK 3
+#define NAV_REGIONS_A_TICK 500
+#define NAV_GRID_A_TICK 50
+#define NAV_EDGES_A_TICK 30
+#define NAV_TESTS_A_TICK 2
 /* the jumps found, before they are tested: one a place this wide for each
 two regions and kind */
 #define NAV_CANDIDATES 3072
@@ -136,6 +136,9 @@ static struct
 	long buckets[NAV_BUCKETS];
 	long *entry_surface;
 	long *entry_next;
+	/* each surface's extent across (low x, low y, high x, high y), for the
+	grid's look-ups to pass over those not under a point at once */
+	real *extents;
 	long entry_count;
 	long entry_capacity;
 	/* the jumps found, those between regions first: a slot's candidate */
@@ -314,6 +317,8 @@ static void nav_free(void)
 		free(nav.entry_surface);
 	if (nav.entry_next)
 		free(nav.entry_next);
+	if (nav.extents)
+		free(nav.extents);
 	if (nav.candidates)
 		free(nav.candidates);
 	if (nav.slots)
@@ -331,6 +336,7 @@ static void nav_free(void)
 	nav.parent = NULL;
 	nav.entry_surface = NULL;
 	nav.entry_next = NULL;
+	nav.extents = NULL;
 	nav.candidates = NULL;
 	nav.slots = NULL;
 	nav.region_first_hop = NULL;
@@ -419,7 +425,8 @@ static boolean nav_begin(void)
 	nav.candidates = (struct nav_candidate *)malloc(sizeof(struct nav_candidate) * NAV_CANDIDATES);
 	nav.slots = (long *)malloc(sizeof(long) * NAV_CANDIDATE_SLOTS);
 	nav.ramp = (byte *)nav_zeroed((size_t)nav.surface_count, 1);
-	if (!nav.region || !nav.parent || !nav.entry_surface || !nav.entry_next || !nav.candidates || !nav.slots || !nav.ramp)
+	nav.extents = (real *)malloc(sizeof(real) * 4 * (size_t)nav.surface_count);
+	if (!nav.region || !nav.parent || !nav.entry_surface || !nav.entry_next || !nav.candidates || !nav.slots || !nav.ramp || !nav.extents)
 	{
 		platform_log("bots: nav: no memory for %ld surfaces", nav.surface_count);
 		nav_free();
@@ -475,7 +482,7 @@ static boolean nav_standable(long surface_index)
 		(nav.ramp[surface_index] == 1 || nav_walkable(surface_index));
 }
 
-#define NAV_ROOFS_A_TICK 64
+#define NAV_ROOFS_A_TICK 32
 static void nav_roof_test(struct collision_bsp const *bsp, long surface_index)
 {
 	real_point3d corners[NAV_CORNERS], middle = { 0.0f, 0.0f, 0.0f };
@@ -678,6 +685,10 @@ static boolean nav_grid_step(void)
 			high_x = MAX(high_x, corners[corner].x);
 			high_y = MAX(high_y, corners[corner].y);
 		}
+		nav.extents[nav.cursor * 4 + 0] = low_x;
+		nav.extents[nav.cursor * 4 + 1] = low_y;
+		nav.extents[nav.cursor * 4 + 2] = high_x;
+		nav.extents[nav.cursor * 4 + 3] = high_y;
 		/* (a surface over a great many cells - a level's whole floor - in
 		its cells all the same: at most 32 by 32) */
 		for (ix = nav_cell(low_x); ix <= nav_cell(high_x) && ix - nav_cell(low_x) < 32; ix++)
@@ -727,8 +738,11 @@ static long nav_ground_at(real x, real y, real z, real above, real below, long e
 		long count;
 		real height;
 
-		if (surface_index == except)
+		if (surface_index == except || x < nav.extents[surface_index * 4 + 0] || y < nav.extents[surface_index * 4 + 1] ||
+			x > nav.extents[surface_index * 4 + 2] || y > nav.extents[surface_index * 4 + 3])
+		{
 			continue;
+		}
 		count = nav_corners(bsp, surface_index, corners, NULL);
 		if (count < 3 || !nav_surface_height(corners, count, x, y, &height))
 			continue;
@@ -1146,6 +1160,8 @@ void bots_nav_update(void)
 			free(nav.slots);
 			free(nav.entry_surface);
 			free(nav.entry_next);
+			free(nav.extents);
+			nav.extents = NULL;
 			nav.candidates = NULL;
 			nav.slots = NULL;
 			nav.entry_surface = NULL;
@@ -1162,6 +1178,11 @@ void bots_nav_update(void)
 	default:
 		break;
 	}
+}
+
+short bots_nav_phase(void)
+{
+	return nav.phase;
 }
 
 boolean bots_nav_ready(void)
