@@ -642,7 +642,7 @@ static struct
 	chosen (its id stays its own as the list changes). The Vitas' games
 	first, then the PCs', a header row before each group (browser_list_group:
 	two more than the games) */
-	struct p2p_lobby_entry games[P2P_LOBBY_MAXIMUM_ENTRIES + 2];
+	struct p2p_lobby_entry games[P2P_LOBBY_MAXIMUM_ENTRIES + P2P_LOBBY_MAXIMUM_OTHER_ENTRIES + 2];
 	long game_count;
 	short sort;
 	short page;
@@ -8736,6 +8736,22 @@ static boolean row_column(struct widget_instance *row, char const *name, char co
 	return cut;
 }
 
+/* a browser row greyed (a game of another network version, never joined:
+p2p_lobby_other_entries) or not, as the scoreboard greys a dead player's row */
+static void row_dim(struct widget_instance *row, boolean dim)
+{
+	static char const *const parts[] = { "row_name", "row_map", "row_game", "row_players", "row_badge", "row_lock" };
+	short index;
+
+	for (index = 0; index < (short)NUMBEROF(parts); index++)
+	{
+		struct widget_instance *part = named(row, parts[index]);
+
+		if (part)
+			part->alpha_modifier = dim ? 0.45f : 1.0f;
+	}
+}
+
 /* (automated tests only, never in release builds) HALO_TEST_BROWSER_GAMES=N:
 N made-up games after those listed, for the browser's scrolling and sorts
 (run_netns_online_test.sh browserscroll); not joinable. With
@@ -9035,6 +9051,10 @@ static void lan_entries(void)
 		menu_functions.lan_online_count = p2p_lobby_entries(menu_functions.games + menu_functions.game_count,
 			P2P_LOBBY_MAXIMUM_ENTRIES - (int)menu_functions.game_count);
 		menu_functions.game_count += menu_functions.lan_online_count;
+		/* (and the public games of another network version, greyed: never
+		joined, their rules line saying why - the owner wants to see them) */
+		menu_functions.game_count += p2p_lobby_other_entries(menu_functions.games + menu_functions.game_count,
+			P2P_LOBBY_MAXIMUM_ENTRIES + P2P_LOBBY_MAXIMUM_OTHER_ENTRIES - (int)menu_functions.game_count);
 		/* (a game both System Link and online - an internet play peer's,
 		whose broadcasts reach the System Link search too: one row, its
 		online one) */
@@ -9302,10 +9322,18 @@ static void online_browser_screen_update(struct widget_instance *screen, long ta
 			found->animation.current_frame_index = picture;
 		}
 		text_show(named(screen, "card_name"), menu_functions.chosen.name);
-		snprintf(text, sizeof(text), "%s%s%s\n%s%s%s", menu_functions.chosen.gametype[0] ? menu_functions.chosen.gametype :
-			(menu_functions.chosen.coop ? T("Co-op") : ""), menu_functions.chosen.map[0] ? T(" on ") : "",
-			menu_functions.chosen.map, menu_functions.chosen.tag, menu_functions.chosen.dedicated ? T(", dedicated server") : "",
-			menu_functions.chosen.locked ? T(", password") : "");
+		{
+			char version[48] = "";
+
+			/* (a game of another network version: which, and that it is not joined) */
+			if (!menu_functions.chosen.compatible)
+				snprintf(version, sizeof(version), T(", network %d: can't join"), menu_functions.chosen.version);
+			snprintf(text, sizeof(text), "%s%s%s\n%s%s%s%s", menu_functions.chosen.gametype[0] ?
+				menu_functions.chosen.gametype : (menu_functions.chosen.coop ? T("Co-op") : ""),
+				menu_functions.chosen.map[0] ? T(" on ") : "", menu_functions.chosen.map, menu_functions.chosen.tag,
+				menu_functions.chosen.dedicated ? T(", dedicated server") : "",
+				menu_functions.chosen.locked ? T(", password") : "", version);
+		}
 		text_show(named(screen, "card_info"), text);
 		/* (a listing that names no players: their count) */
 		if (!menu_functions.chosen.players_line[0])
@@ -9338,6 +9366,9 @@ static void browser_update(struct widget_instance *list)
 		join_watch();
 		browser_large_watch();
 		menu_functions.game_count = p2p_lobby_entries(menu_functions.games, P2P_LOBBY_MAXIMUM_ENTRIES);
+		/* (the games of another network version after them, greyed) */
+		menu_functions.game_count += p2p_lobby_other_entries(menu_functions.games + menu_functions.game_count,
+			P2P_LOBBY_MAXIMUM_ENTRIES + P2P_LOBBY_MAXIMUM_OTHER_ENTRIES - (int)menu_functions.game_count);
 	}
 	browser_test_games();
 	online_browser_filter_games();
@@ -9389,6 +9420,9 @@ static void browser_update(struct widget_instance *list)
 		entry = &menu_functions.entries[index];
 		widget_instance_set_visibility_recursive(child, TRUE);
 		child->disabled = FALSE;
+		/* (a game of another network version: its row greyed, chosen and
+		shown but never joined - browser_join) */
+		row_dim(child, !entry->header && !entry->compatible);
 		/* (a group's header: its name and count alone, no badge, lock or
 		columns; never chosen, browser_view_follow_groups) */
 		if (entry->header)
@@ -9739,6 +9773,15 @@ static boolean browser_join(struct widget_instance *widget, boolean *widget_dele
 	menu_functions.chosen = *entry;
 	menu_functions.chosen_valid = TRUE;
 	menu_functions.status[0] = 0;
+	/* (a game of another network version: shown, never joined - its rules
+	line says why) */
+	if (!entry->compatible)
+	{
+		snprintf(menu_functions.status, sizeof(menu_functions.status), "%s", entry->rules);
+		platform_log("menus: the public game %s is of network version %d: not joined (%s)", entry->name, entry->version,
+			entry->rules);
+		return TRUE;
+	}
 	if (entry->own)
 	{
 		snprintf(menu_functions.status, sizeof(menu_functions.status), "%s", T("That is your own game"));

@@ -59,6 +59,10 @@ static int entry_order(
 	/* (the groups: the Vitas' games first) */
 	if (browser_list_vita(a) != browser_list_vita(b))
 		return browser_list_vita(b) - browser_list_vita(a);
+	/* (in each, the games this build joins before those of another network
+	version, greyed: p2p_lobby_other_entries) */
+	if ((a->compatible != 0) != (b->compatible != 0))
+		return (b->compatible != 0) - (a->compatible != 0);
 	switch (sort_chosen)
 	{
 	case _browser_sort_name:

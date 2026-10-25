@@ -93,6 +93,10 @@ int network_wire_version_accepted_on(int crossplay, unsigned int version)
 	return version == network_wire_version_of(crossplay) ||
 		(crossplay && version == HALO_PORT_CROSSPLAY_OLDER_NETWORK_VERSION);
 }
+void network_wire_crossplay_versions_text(char *text, int size)
+{
+	snprintf(text, (size_t)size, "%d and %d", HALO_PORT_CROSSPLAY_OLDER_NETWORK_VERSION, HALO_PORT_CROSSPLAY_NETWORK_VERSION);
+}
 int network_wire_host_pc_stand_in(void) { return test_pc_stand_in; }
 /* (this machine's platform and who can join its game: the listing's stamp,
 network_wire.h; a Vita for Vitas and Halo CE Vita PC unless a check says) */
@@ -809,6 +813,7 @@ static void status_checks(void)
 	static const unsigned char token[P2P_TOKEN_SIZE] = { 5, 5, 5 };
 	unsigned char bytes[P2P_MAXIMUM_LISTING_SIZE];
 	char text[128];
+	struct p2p_lobby_entry entry;
 	int size, state;
 
 	wait_for_keys();
@@ -919,17 +924,41 @@ static void status_checks(void)
 	pthread_mutex_unlock(&p2p_lock);
 	bytes[3] = (unsigned char)((HALO_PORT_NETWORK_VERSION - 1) >> 8);
 	bytes[4] = (unsigned char)(HALO_PORT_NETWORK_VERSION - 1);
-	hear(bytes, resign(bytes, size, SIGNATURE_LABEL), 0, NULL);
+	resign(bytes, size, SIGNATURE_LABEL);
+	/* (first a forged copy of it - its signature broken -: never shown, not
+	even greyed) */
+	bytes[size - 1] ^= 0x55;
+	hear(bytes, size, 0, NULL);
+	{
+		struct p2p_lobby_entry others[4];
+
+		check(p2p_lobby_other_entries(others, 4) == 0, "a forged listing of another version: not shown greyed either");
+	}
+	bytes[size - 1] ^= 0x55;
+	hear(bytes, size, 0, NULL);
 	state = p2p_lobby_browse_status(text, sizeof(text));
 	check(state == P2P_LOBBY_BROWSE_EMPTY && !strcmp(text, "No public games for this version (1 on another)"),
 		"a game of another version: said, not shown");
+	check(logged_line("of another version: network version 17 on the Vitas' wire (this build joins 18 there), "
+		"\"Status\""), "the log names its version, its wire and what it says, once");
+	{
+		struct p2p_lobby_entry others[4];
+		int count = p2p_lobby_other_entries(others, 4);
+
+		check(count == 1 && !others[0].compatible && others[0].version == 17 &&
+			!strcmp(others[0].rules, "Can't join: an older Halo CE for PS Vita (network 17) - its host needs to update") &&
+			strstr(others[0].badge, " v17") && !p2p_lobby_entry(0, &entry),
+			"a game of another version: shown greyed alone, its reason said, not among the games joined");
+		check(count == 1 && !p2p_lobby_join(others[0].id, NULL), "a game of another version is never joined");
+	}
 	/* the summary, once due: the counts and why (the first, settled after
 	opening, came with none, while the brokers were out of reach: the next
 	BROWSE_SUMMARY_INTERVAL after it, as listings come) */
 	clock_now += BROWSE_SUMMARY_INTERVAL;
 	lobby_update(NULL, 0, 0);
-	check(logged_line("browser (summary): 1 listing heard (0 retained, 0 again), 0 games shown") &&
-		logged_line("dropped 1 of another version (1 host)"), "the summary counts the listing and why it was dropped");
+	check(logged_line("browser (summary): 2 listings heard (0 retained, 0 again), 0 games shown") &&
+		logged_line("dropped 2 of another version (1 host: v17 x1 (Vitas'); 1 shown greyed)"),
+		"the summary counts the listings and why they were dropped, by version");
 	/* a game of this version: shown, its line logged (the key's hash only by
 	its start) */
 	pthread_mutex_lock(&p2p_lock);
@@ -938,6 +967,11 @@ static void status_checks(void)
 	hear(bytes, size, 1, NULL);
 	state = p2p_lobby_browse_status(text, sizeof(text));
 	check(state == P2P_LOBBY_BROWSE_GAMES && !strcmp(text, "1 public game"), "a game: one public game");
+	{
+		struct p2p_lobby_entry others[4];
+
+		check(p2p_lobby_other_entries(others, 4) == 0, "its host's game of this version in place of the greyed one");
+	}
 	check(logged_line("browser: new game \"Status\" (1/16 players, wizard, Slayer) from host "),
 		"the game's line names it, its players, map and gametype");
 	{

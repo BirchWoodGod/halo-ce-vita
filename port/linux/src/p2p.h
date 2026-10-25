@@ -221,7 +221,8 @@ enum
 	P2P_LOBBY_NAME_SIZE = 33,
 	P2P_LOBBY_MAP_SIZE = 33,
 	P2P_LOBBY_GAMETYPE_SIZE = 25,
-	P2P_LOBBY_RULES_SIZE = 48,
+	/* (96: a game of another version's says why it is not joined there) */
+	P2P_LOBBY_RULES_SIZE = 96,
 	P2P_LOBBY_PLAYERS_SIZE = 64,
 	/* a password's most characters (and a terminator) */
 	P2P_LOBBY_PASSWORD_SIZE = 33,
@@ -255,8 +256,11 @@ struct p2p_lobby_entry
 	/* of the players, a dedicated server's bots (sv_bots_fill; 0 from a
 	host or build that does not say) */
 	int bots;
-	/* (always: games of another network version are not listed) */
+	/* 0 for a game of a network version this build does not join
+	(p2p_lobby_other_entries: shown greyed, its rules line saying why; never
+	joined); its version */
 	int compatible;
+	int version;
 	/* this machine's own game */
 	int own;
 	/* it has a password (p2p_lobby_join needs it) */
@@ -365,8 +369,17 @@ list for all of them; P2P_LOBBY_MAXIMUM_ENTRIES at most): how many */
 enum
 {
 	P2P_LOBBY_MAXIMUM_ENTRIES = 64,
+	/* the games of another network version, at most (p2p_lobby_other_entries) */
+	P2P_LOBBY_MAXIMUM_OTHER_ENTRIES = 48,
 };
 int p2p_lobby_entries(struct p2p_lobby_entry *entries, int maximum_count);
+/* the games of a network version this build does not join (each its host's
+signed listing, checked as the others are: a newer or older OpenCE,
+ChupathingyCE or DamnationCE, a Vita of another build), for the browsers to
+show greyed after the rest: compatible 0, the rules line the reason ("Can't
+join: a newer PC version (network 38)..."), no invite kept. Up to
+maximum_count, the most players first; how many */
+int p2p_lobby_other_entries(struct p2p_lobby_entry *entries, int maximum_count);
 /* (automated tests, HALO_TEST_BROWSER_ODD=1; none in release builds) odd
 listings made into entries as the real ones are: how many */
 int p2p_lobby_test_entries(struct p2p_lobby_entry *entries, int maximum_count);
