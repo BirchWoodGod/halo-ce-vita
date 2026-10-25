@@ -2888,3 +2888,7 @@
 "Only in a game you host" = "Solo en una partida que alojas"
 "A bot joins" = "Entra un bot"
 "A bot leaves" = "Sale un bot"
+"Add a bot" = "Añadir un bot"
+"Drop a bot" = "Quitar un bot"
+"The game you host: a bot joins, mid-game too" = "La partida que alojas: entra un bot, también en juego"
+"The game you host: a bot leaves" = "La partida que alojas: sale un bot"
