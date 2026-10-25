@@ -10246,6 +10246,10 @@ short unit_update_animation(
 	struct unit_seat *seat;
 	real_vector3d exit_velocity;
 	real_matrix4x3 old_world_matrix;
+#ifdef HALO_LINUX
+	boolean scene_looped = FALSE;
+	extern boolean menu_scene_objects_loops(long object_index);
+#endif
 
 	unit = unit_get(unit_index);
 	unit_definition = unit_definition_get(unit->definition_index);
@@ -10466,6 +10470,23 @@ short unit_update_animation(
 				--unit->object.animation.state.frame_index;
 				break;
 
+#ifdef HALO_LINUX
+			case _unit_state_user_animation:
+				/* port: a menu scene's character (the lobbies' Spartans,
+				port/linux/game/menu_scene_objects.c) plays its animation
+				again from the start in this tick, at once: it was started
+				again by the menus' update once per frame, and a frame of
+				several ticks (a Vita frame that ran long) ran it to its end
+				first, the unit stood in its idle pose for that frame: it
+				twitched */
+				if (menu_scene_objects_loops(unit_index))
+				{
+					unit->object.animation.state.frame_index = 0;
+					scene_looped = TRUE;
+				}
+				break;
+#endif
+
 			case _unit_state_entering_seat:
 				parent_unit = unit_get(unit->object.parent_object_index);
 				parent_definition = unit_definition_get(parent_unit->definition_index);
@@ -10487,7 +10508,11 @@ short unit_update_animation(
 				break;
 			}
 
-			if (!unit_animation_state_loops(&unit->unit.animation))
+			if (!unit_animation_state_loops(&unit->unit.animation)
+#ifdef HALO_LINUX
+				&& !scene_looped
+#endif
+				)
 			{
 				apply_state = TRUE;
 			}

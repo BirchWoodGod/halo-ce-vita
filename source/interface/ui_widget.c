@@ -2626,6 +2626,24 @@ static void widget_instance_give_focus_directly(
 			focused_child = focused_child->focused_child;
 		}
 	}
+#ifdef HALO_LINUX
+	/* port: the clearing above walked the old focus's whole chain, so a row
+	that held the focus (a list row with its spinner: the Halo 3 GAME OPTIONS)
+	has lost the focused child it was made with, and left or right on it,
+	when it takes the focus again, reached nothing: the spinner is locked
+	until the screen is made again. The row's focused child is given again
+	as the widget's own start gives it (the last child that handles events) */
+	if (!new_focus->focused_child && new_focus->child)
+	{
+		struct widget_instance *inner;
+
+		for (inner = new_focus->child; inner; inner = inner->next)
+		{
+			if (widget_instance_can_handle_events(inner))
+				new_focus->focused_child = inner;
+		}
+	}
+#endif
 	while (new_focus->parent)
 	{
 		new_focus->parent->focused_child = new_focus;

@@ -1305,8 +1305,11 @@ static void object_animate(struct menu_scene_object *object, short slot, struct 
 			return;
 		animation = TAG_BLOCK_GET_ELEMENT(&graph->animations, unit->object.animation.state.index, struct animation);
 		frame_count = animation->frame_count;
-		if (unit->unit.animation.state != _unit_state_user_animation ||
-			(object->frame == NONE && unit->object.animation.state.frame_index + 2 >= frame_count))
+		/* (played again from the start as it ends by the tick itself,
+		menu_scene_objects_loops: the update runs once a frame, and a frame
+		of several ticks ran it past its end; restarted here only when it
+		is not playing at all) */
+		if (unit->unit.animation.state != _unit_state_user_animation)
 		{
 			char name[96];
 
@@ -2163,6 +2166,17 @@ boolean menu_scene_objects_posed(
 	long unit_index)
 {
 	return slot_of(unit_index) != NONE;
+}
+
+/* (units.c) whether a menu scene's character plays its animation round and
+round: its animation ending, the tick starts it again */
+boolean menu_scene_objects_loops(
+	long object_index)
+{
+	short slot = slot_of(object_index);
+
+	return slot != NONE && slot < MAXIMUM_MENU_SCENE_OBJECTS && menu_scene_objects.slots[slot].animation_started &&
+		menu_scene_objects.slots[slot].frame == NONE;
 }
 
 boolean menu_scene_objects_frozen(
