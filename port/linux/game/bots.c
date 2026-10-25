@@ -420,6 +420,14 @@ enum
 	NUMBER_OF_BOTS_POWERUPS,
 };
 
+/* port: where on its target a bot aims (bots_aim_spot) */
+enum
+{
+	_bots_aim_middle = 0,
+	_bots_aim_head,
+	_bots_aim_feet,
+};
+
 /* port: what an item spawn gives (bots_spawns) */
 enum
 {
@@ -835,6 +843,9 @@ struct bots_bot
 	long retreat_rest_tick;
 	boolean cover_crouch;
 	boolean pushing;
+	/* port: where on its target it aims (bots_aim_spot), until when */
+	short aim_spot;
+	long aim_spot_tick;
 	/* port: a grenade it throws (bots_grenade_update): where at, which kind
 	(0 frag, 1 plasma), since when it turns to throw it (0 for none), when it
 	pressed the throw (0 before), and why (halo.log); when it next weighs
@@ -1050,6 +1061,8 @@ static struct
 		long retreats;
 		long cover_crouch_seconds;
 		long push_seconds;
+		/* port: seconds of aim at the head, and at the feet */
+		long aim_spots[3];
 	} play;
 } bots_globals;
 
@@ -1839,6 +1852,9 @@ struct bots_weapon_kind
 	/* port: a power weapon (a rocket launcher, a sniper rifle, a shotgun, a
 	fuel rod gun: bots_weapon_power) */
 	boolean power;
+	/* port: its projectile bursts (the rocket launcher, the fuel rod gun,
+	a map's plasma cannon: by name, as their values are) */
+	boolean splash;
 	/* port: the distances it fights best at (bots_weapon_for_range) */
 	real band_near;
 	real band_far;
@@ -1887,6 +1903,7 @@ static struct bots_weapon_kind const *bots_weapon_kind(long definition_index)
 	{
 		char const *name = tag_get_name(definition_index);
 
+		kind->splash = name && (strstr(name, "rocket") || strstr(name, "fuel rod") || strstr(name, "plasma_cannon"));
 		kind->power = name && (strstr(name, "rocket") || strstr(name, "sniper") || strstr(name, "shotgun") ||
 			strstr(name, "fuel rod") || strstr(name, "plasma_cannon"));
 		/* (the distances it fights best at: a shotgun's and a flamethrower's
@@ -6352,6 +6369,68 @@ static boolean bots_low_cover(struct bots_tick *tick, real to_target)
 		!collision_test_vector(flags, &eye, &vector, tick->player->unit_index, &collision);
 }
 
+/* port: where on its target a bot aims, by its weapon, as a player does:
+with a precision weapon (the pistol, the sniper rifle) at the head once the
+target's shields are down; with a splash weapon (the rocket launcher, the
+fuel rod gun: a heavy projectile, bots_weapon_precision) at the ground at
+its feet, which a miss still hurts; else the middle as before. Chosen once a
+second, and only now and then at the lower skills (easy a seventh of the
+time at the head and a quarter at the feet, legendary three times in four
+and five in six): the bots were found too strong on Oct 17, and a head shot
+is a kill */
+static void bots_aim_spot(struct bots_bot *bot, struct bots_tick *tick, long target_unit_index, real_point3d *aim_point)
+{
+	static real const head_chances[NUMBER_OF_BOTS_SKILLS] = { 0.15f, 0.35f, 0.55f, 0.75f };
+	static real const feet_chances[NUMBER_OF_BOTS_SKILLS] = { 0.25f, 0.5f, 0.7f, 0.85f };
+	struct object_datum *target = object_get(target_unit_index);
+	short precision;
+
+	if (tick->weapon_index == NONE)
+		return;
+	if (tick->now >= bot->aim_spot_tick)
+	{
+		bot->aim_spot_tick = tick->now + TICKS_PER_SECOND;
+		bot->aim_spot = _bots_aim_middle;
+		precision = bots_weapon_precision(tick->weapon_index);
+		if ((precision == _bots_precision_mid || precision == _bots_precision_long) && target->object.shield_vitality <= 0.05f &&
+			bots_random_real(bot) < head_chances[bots_globals.skill])
+		{
+			bot->aim_spot = _bots_aim_head;
+		}
+		else if ((precision == _bots_precision_heavy || bots_weapon_kind(weapon_get(tick->weapon_index)->definition_index)->splash) &&
+			target->object.parent_object_index == NONE &&
+			tick->target_distance > 5.0f && bots_random_real(bot) < feet_chances[bots_globals.skill])
+		{
+			/* (its feet seen: a ray, once a second) */
+			real_point3d feet = target->object.position;
+
+			feet.z += 0.1f;
+			if (bots_line_of_sight(tick->player->unit_index, &tick->eye, &feet, target_unit_index))
+				bot->aim_spot = _bots_aim_feet;
+		}
+		if (bot->aim_spot != _bots_aim_middle)
+			bots_globals.play.aim_spots[bot->aim_spot]++;
+	}
+	if (bot->aim_spot == _bots_aim_head)
+	{
+		/* (the head's shields down and still so: else the middle again) */
+		if (target->object.shield_vitality > 0.05f)
+			bot->aim_spot = _bots_aim_middle;
+		else
+			unit_get_head_position(target_unit_index, aim_point);
+	}
+	else if (bot->aim_spot == _bots_aim_feet)
+	{
+		if (target->object.parent_object_index != NONE)
+			bot->aim_spot = _bots_aim_middle;
+		else
+		{
+			*aim_point = target->object.position;
+			aim_point->z += 0.05f;
+		}
+	}
+}
+
 /* fighting the target seen in the last half second: aim (turning at its
 speed, leading, an error that settles), fire, a grenade, a blow, strafing */
 static void bots_bot_fight(struct bots_bot *bot, struct bots_tick *tick)
@@ -6368,6 +6447,9 @@ static void bots_bot_fight(struct bots_bot *bot, struct bots_tick *tick)
 	tick->fighting = TRUE;
 	bots_tick_eye(tick);
 	tick->target_distance = bots_distance3d(&tick->eye, &aim_point);
+	/* port: where on the target it aims (bots_aim_spot): the head, the feet,
+	the middle */
+	bots_aim_spot(bot, tick, target_player->unit_index, &aim_point);
 	/* (leading a moving target by the projectile's flight) */
 	if (tick->weapon_index != NONE && skill->lead > 0.0f)
 	{
@@ -8775,14 +8857,14 @@ static void bots_report(void)
 	platform_log("bots: play at tick %ld: stuck fighting %ld, walking with no path %ld; grenades %ld; jumps fighting %ld, "
 		"moving %ld; weapons picked up %ld (power %ld); power weapon held %.1f%%, two weapons %.1f%% of the time; "
 		"goals with no way %ld, strafes blocked %ld, low walls jumped %ld, jump shortcuts %ld; backed off to recharge %ld, "
-		"crouched behind cover %ld s, pushed in on a weakened enemy %ld s",
+		"crouched behind cover %ld s, pushed in on a weakened enemy %ld s; aimed at the head %ld s, at the feet %ld s",
 		now, bots_globals.play.stuck_fighting, bots_globals.play.stuck_pathless, bots_globals.play.grenades_thrown,
 		bots_globals.play.jumps_fighting, bots_globals.play.jumps_moving, bots_globals.play.weapon_pickups, bots_globals.play.power_pickups,
 		bots_globals.play.alive_ticks ? 100.0 * bots_globals.play.power_ticks / bots_globals.play.alive_ticks : 0.0,
 		bots_globals.play.alive_ticks ? 100.0 * bots_globals.play.two_weapon_ticks / bots_globals.play.alive_ticks : 0.0,
 		bots_globals.play.goals_unreachable, bots_globals.play.fight_blocks, bots_globals.play.walk_jumps,
 		bots_globals.play.jump_shortcuts, bots_globals.play.retreats, bots_globals.play.cover_crouch_seconds,
-		bots_globals.play.push_seconds);
+		bots_globals.play.push_seconds, bots_globals.play.aim_spots[_bots_aim_head], bots_globals.play.aim_spots[_bots_aim_feet]);
 	platform_log("bots: items at tick %ld: spawns %ld; gone for/taken: power weapons %ld/%ld, weapons %ld/%ld, overshield %ld/%ld, "
 		"camouflage %ld/%ld, health %ld/%ld, grenades %ld/%ld; waited for the next %ld; weapons changed for the range %ld, "
 		"the one to drop chosen %ld; grenades: behind cover %ld, a group %ld, a vehicle %ld, a carrier %ld, a stick %ld, "
