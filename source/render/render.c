@@ -508,7 +508,8 @@ static int render_effects_quality(
 
 	if (quality < 0 || settings_seen != halo_settings_generation)
 	{
-		const char *setting = getenv("HALO_VITA_EFFECTS_QUALITY");
+		extern char const *menu_backdrop_render_setting(char const *variable); /* (the live backdrop's own quality: menu_backdrop.c) */
+		const char *setting = menu_backdrop_render_setting("HALO_VITA_EFFECTS_QUALITY");
 
 		settings_seen = halo_settings_generation;
 		quality = setting && *setting ? atoi(setting) : 2;

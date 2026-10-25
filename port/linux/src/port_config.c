@@ -459,6 +459,14 @@ static const struct config_setting config_settings[] =
 		"menu_backdrop.c), made once from the player's own a30.map into\n"
 		"t:\\packs; false (or no a30.map) keeps the ring. The Vita's settings\n"
 		"panel (Game, Menus, Live backdrop) sets it." },
+	{ "menus.backdrop_quality", _config_string, "\"high\"", "HALO_MENU_BACKDROP_QUALITY", _environment_value, _platform_all,
+		"With the live backdrop behind the menus, its detail: \"high\" (the\n"
+		"default) its best - models, distant objects, effects, the sun's flares,\n"
+		"particles - whatever the game's video settings are, theirs back once a\n"
+		"game loads; \"game\" the game's video settings. The render resolution\n"
+		"and dynamic resolution stay the player's (port/linux/game/\n"
+		"menu_backdrop.c). The Vita's settings panel (Game, Menus, Menu\n"
+		"background quality) sets it." },
 	{ "menus.backdrop_music", _config_string, "\"30\"", "HALO_MENU_MUSIC", _environment_value, _platform_all,
 		"With the live backdrop behind the menus (ElDewrito), the menu music's\n"
 		"level in percent (100, 70, 50, 40, 30, 20, 0; 30 the default), so that the level's own ambience -\n"
