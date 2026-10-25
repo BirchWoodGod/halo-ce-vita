@@ -67,6 +67,10 @@ enum
 	HALO_HOST_PLAYER_BAN_ALWAYS,
 	/* (the session's bans let go; no machine) */
 	HALO_HOST_PLAYER_CLEAR_BANS,
+	/* (port: a bot more, or fewer, in the game hosted: the host's add_bot
+	and drop_bot, network_server_manager.c; no machine) */
+	HALO_HOST_PLAYER_ADD_BOT,
+	HALO_HOST_PLAYER_DROP_BOT,
 };
 enum
 {

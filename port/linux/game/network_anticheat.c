@@ -613,13 +613,25 @@ void network_anticheat_panel_update(
 			network_anticheat_clear_session_bans();
 			done = TRUE;
 		}
+		else if (how == HALO_HOST_PLAYER_ADD_BOT || how == HALO_HOST_PLAYER_DROP_BOT)
+		{
+			boolean network_game_server_port_bots_command(char const *word, char const *arguments, char *answer,
+				long answer_size);
+			char answer[160];
+
+			answer[0] = 0;
+			network_game_server_port_bots_command(how == HALO_HOST_PLAYER_ADD_BOT ? "add_bot" : "drop_bot", NULL, answer,
+				sizeof(answer));
+			done = server != NULL && !network_game_is_splitscreen_local();
+		}
 		else
 		{
 			done = network_anticheat_drop(machine_index, how == HALO_HOST_PLAYER_KICK ? _anticheat_drop_kick :
 				how == HALO_HOST_PLAYER_BAN ? _anticheat_drop_session_ban : _anticheat_drop_ban, "the settings panel");
 		}
 		error(_error_log, "anticheat: the settings panel's %s of machine #%ld: %s",
-			how == HALO_HOST_PLAYER_KICK ? "kick" : how == HALO_HOST_PLAYER_CLEAR_BANS ? "clearing of the bans" : "ban",
+			how == HALO_HOST_PLAYER_KICK ? "kick" : how == HALO_HOST_PLAYER_CLEAR_BANS ? "clearing of the bans" :
+			how == HALO_HOST_PLAYER_ADD_BOT ? "bot added" : how == HALO_HOST_PLAYER_DROP_BOT ? "bot dropped" : "ban",
 			machine_index, done ? "done" : "not a player of the game");
 		__atomic_store_n(&halo_host_player_answer, done ? HALO_HOST_ANSWER_DONE : HALO_HOST_ANSWER_GONE,
 			__ATOMIC_RELEASE);

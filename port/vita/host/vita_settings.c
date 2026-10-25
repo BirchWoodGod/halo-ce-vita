@@ -440,6 +440,10 @@ enum
 	/* (the Players page) the machines this host banned for the session, and
 	those its anti-cheat dropped, let in again */
 	ACTION_CLEAR_BANS,
+	/* (the Players page) a bot more, or fewer, in the game this Vita hosts
+	(its add_bot and drop_bot: network_server_manager.c) */
+	ACTION_ADD_BOT,
+	ACTION_DROP_BOT,
 };
 
 struct setting
@@ -895,6 +899,12 @@ static struct setting settings[] = {
 		"On: cheaters are dropped from your games a while", 0, PAGE_PLAYERS },
 	{ "Clear bans", NULL, 0, 0, { NULL }, { NULL }, "Let banned and dropped players join again", 0,
 		PAGE_PLAYERS, KIND_ACTION, ACTION_CLEAR_BANS },
+	/* (bots in the game you host, mid-game too: a bot more or fewer than
+	Online bots fills it with, joining or leaving at once) */
+	{ "Add a bot", NULL, 0, 0, { NULL }, { NULL }, "The game you host: a bot joins, mid-game too", 0,
+		PAGE_PLAYERS, KIND_ACTION, ACTION_ADD_BOT },
+	{ "Drop a bot", NULL, 0, 0, { NULL }, { NULL }, "The game you host: a bot leaves", 0,
+		PAGE_PLAYERS, KIND_ACTION, ACTION_DROP_BOT },
 	/* (friends.appear_offline: nothing sent to friends; live) */
 	{ "Appear offline", "HALO_FRIENDS_APPEAR_OFFLINE", 0, 2, { "false", "true" }, { "Off", "On" },
 		"On: friends see you offline; you still see them", 0, PAGE_FRIENDS },
@@ -3744,6 +3754,9 @@ static void host_players_refresh(void)
 
 		if (host_player_asked == HALO_HOST_PLAYER_CLEAR_BANS)
 			set_notice("%s", T("Banned players can join again"));
+		else if (host_player_asked == HALO_HOST_PLAYER_ADD_BOT || host_player_asked == HALO_HOST_PLAYER_DROP_BOT)
+			set_notice("%s", answer != HALO_HOST_ANSWER_DONE ? T("Only in a game you host") :
+				host_player_asked == HALO_HOST_PLAYER_ADD_BOT ? T("A bot joins") : T("A bot leaves"));
 		else if (answer != HALO_HOST_ANSWER_DONE)
 			set_notice("%s", T("That player is not in the game"));
 		else if (host_player_asked == HALO_HOST_PLAYER_KICK)
@@ -6172,6 +6185,15 @@ static void act(const struct setting *setting)
 		{
 			party_message_pending = 1;
 			vgxm_menu_set(NULL, 0);
+		}
+		break;
+	case ACTION_ADD_BOT:
+	case ACTION_DROP_BOT:
+		if (!__atomic_load_n(&halo_host_player_request, __ATOMIC_ACQUIRE))
+		{
+			host_player_asked = setting->action == ACTION_ADD_BOT ? HALO_HOST_PLAYER_ADD_BOT : HALO_HOST_PLAYER_DROP_BOT;
+			__atomic_store_n(&halo_host_player_request, host_player_asked << 8, __ATOMIC_RELEASE);
+			vita_host_log(setting->action == ACTION_ADD_BOT ? "settings: players: a bot added" : "settings: players: a bot dropped");
 		}
 		break;
 	case ACTION_CLEAR_BANS:

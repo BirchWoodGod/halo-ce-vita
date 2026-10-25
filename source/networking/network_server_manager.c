@@ -5417,6 +5417,17 @@ teams, the bot that leaves is that team's */
 static long network_game_server_fill_last_person_team = NONE;
 /* the fill as last logged (the most bots; NONE: never) */
 static long network_game_server_fill_said = NONE;
+/* (port) the bots added and dropped by hand (add_bot, drop_bot...: the
+dedicated server's console, a host's settings panel, the console): the
+fill's bots more (or fewer) by this many; the teams the next to join and
+to leave are of (NONE: as the fill chooses), and whether a team was asked
+for (the fill then keeps the teams as they were asked, not even) */
+static long network_game_server_fill_extra;
+static long network_game_server_fill_join_teams[BOTS_MAXIMUM];
+static long network_game_server_fill_join_count;
+static long network_game_server_fill_leave_teams[BOTS_MAXIMUM];
+static long network_game_server_fill_leave_count;
+static boolean network_game_server_fill_teams_asked;
 
 /* the most bots the host fills its game with now (0: no fill) */
 static long network_game_server_fill_cap(
@@ -5714,6 +5725,17 @@ static boolean network_game_server_fill_bot_join(
 	network_game_server_fill_team_counts(server, team_counts, bot_team_counts);
 	team_index = team_counts[1] < team_counts[0] ? 1 : team_counts[0] < team_counts[1] ? 0 :
 		bot_team_counts[1] < bot_team_counts[0] ? 1 : 0;
+	/* (port: a team asked for by hand, add_bot_red / add_bot_blue) */
+	if (network_game_server_fill_join_count > 0)
+	{
+		long asked = network_game_server_fill_join_teams[0];
+
+		network_game_server_fill_join_count--;
+		csmemmove(network_game_server_fill_join_teams, network_game_server_fill_join_teams + 1,
+			sizeof(long) * (size_t)network_game_server_fill_join_count);
+		if (VALID_INDEX(asked, NUMBER_OF_MULTIPLAYER_TEAMS) && network_game_server_fill_teams(server))
+			team_index = asked;
+	}
 	/* (Infection: a human, as a bot joins the round under way: infection.c) */
 	if (infection_variant(&server->game.variant))
 		team_index = infection_network_join_team(FALSE);
@@ -5776,6 +5798,10 @@ static void network_game_server_fill_bots(
 	unsigned long now = system_milliseconds();
 	long bot_index;
 
+	/* (port: bots added by hand play without the fill too, up to the most
+	players less two on a dedicated server, less one on a host) */
+	if (cap <= 0 && network_game_server_fill_extra > 0)
+		cap = BOTS_MAXIMUM;
 	if ((cap <= 0 && bots == 0) || !network_game_server_fill_changeable(server))
 		return;
 	/* (Infection's lobby: everyone a human, on the humans' team, as the
@@ -5808,16 +5834,35 @@ static void network_game_server_fill_bots(
 	{
 		return;
 	}
-	if (cap > 0 && (people > 0 || network_game_server_fill_when_empty()))
+	if (cap > 0 && (people > 0 || network_game_server_fill_when_empty()) && network_game_server_fill_cap(server) > 0)
 		wanted = PIN(network_game_server_fill_total((long)server->game.maximum_players) - people, 0, cap);
+	/* (port: the bots added or dropped by hand: more or fewer than the
+	fill's, never more than the fill's total of players - with the fill, its
+	even total - nor fewer than none) */
+	if (network_game_server_fill_extra)
+	{
+		wanted = PIN(wanted + network_game_server_fill_extra, 0,
+			MIN(cap, network_game_server_fill_total((long)server->game.maximum_players) - people));
+		wanted = MAX(wanted, 0);
+	}
 	if (bots > wanted)
 	{
-		long slot = network_game_server_fill_bot_to_leave(server, slot_of_bot, NONE);
+		long team = NONE, slot;
+
+		/* (port: a team asked for by hand, drop_bot_red / drop_bot_blue) */
+		if (network_game_server_fill_leave_count > 0)
+		{
+			team = network_game_server_fill_leave_teams[0];
+			network_game_server_fill_leave_count--;
+			csmemmove(network_game_server_fill_leave_teams, network_game_server_fill_leave_teams + 1,
+				sizeof(long) * (size_t)network_game_server_fill_leave_count);
+		}
+		slot = network_game_server_fill_bot_to_leave(server, slot_of_bot, team);
 
 		if (slot != NONE)
 		{
-			network_game_server_fill_bot_leave(server, slot, cap <= 0 ? "no bot fill" : people > 0 ?
-				"a player's slot" : "nobody is in");
+			network_game_server_fill_bot_leave(server, slot, team != NONE || network_game_server_fill_extra < 0 ||
+				network_game_server_fill_cap(server) <= 0 ? "dropped by hand" : cap <= 0 ? "no bot fill" : people > 0 ? "a player's slot" : "nobody is in");
 		}
 		return;
 	}
@@ -5825,7 +5870,7 @@ static void network_game_server_fill_bots(
 	bot joining the smaller team when the fill wants one more, else one
 	leaving the larger: a person who left is made up for by a join, not a
 	bot leaving as well) */
-	if (bots > 0 && bots >= wanted && network_game_server_fill_teams(server))
+	if (bots > 0 && bots >= wanted && network_game_server_fill_teams(server) && !network_game_server_fill_teams_asked)
 	{
 		long team_counts[NUMBER_OF_MULTIPLAYER_TEAMS], bot_team_counts[NUMBER_OF_MULTIPLAYER_TEAMS];
 		long larger;
@@ -5861,6 +5906,105 @@ static void network_game_server_fill_bots(
 			return;
 		}
 	}
+}
+
+/* (port) the bots added or dropped by hand: add_bot [n], add_bot_red [n],
+add_bot_blue [n], drop_bot [n], drop_bot_red [n], drop_bot_blue [n] (and
+bots_reset: the fill's again) - the dedicated server's console and
+init.txt, a host's console and its settings panel (Players page). The fill
+then has more or fewer bots than it would (with sv_bots_fill, never more
+than its even total of players: two slots stay free; without it, bots
+added by hand play anyway, two slots free on a dedicated server, one on a
+host), the bots joining and leaving one at a time as the fill's do; a team
+asked for is the next bot's to join or leave (red the first team, blue the
+second), and the teams are then left as asked, not evened. Into `answer`
+what was done; FALSE for no such command */
+boolean network_game_server_port_bots_command(
+	char const *word,
+	char const *arguments,
+	char *answer,
+	long answer_size)
+{
+	long count = 1, team = NONE, index;
+	boolean add;
+	struct network_game_server *server = global_network_game_server_get();
+
+	if (!csstrcmp(word, "bots_reset") || !csstrcmp(word, "sv_bots_reset"))
+	{
+		network_game_server_fill_extra = 0;
+		network_game_server_fill_join_count = network_game_server_fill_leave_count = 0;
+		network_game_server_fill_teams_asked = FALSE;
+		snprintf(answer, (size_t)answer_size, "bots: the fill's own again");
+		return TRUE;
+	}
+	if (!strncmp(word, "sv_", 3))
+		word += 3;
+	if (!strncmp(word, "add_bot", 7))
+		add = TRUE;
+	else if (!strncmp(word, "drop_bot", 8))
+		add = FALSE;
+	else
+		return FALSE;
+	word += add ? 7 : 8;
+	if (!csstrcmp(word, "_red"))
+		team = 0;
+	else if (!csstrcmp(word, "_blue"))
+		team = 1;
+	else if (word[0])
+		return FALSE;
+	if (arguments)
+	{
+		while (*arguments == ' ' || *arguments == '\t')
+			arguments++;
+		if (*arguments >= '0' && *arguments <= '9')
+			count = PIN(atol(arguments), 1, BOTS_MAXIMUM);
+	}
+	if (!server || network_game_is_splitscreen_local())
+	{
+		snprintf(answer, (size_t)answer_size, "%s: only in a game this machine hosts", add ? "add_bot" : "drop_bot");
+		return TRUE;
+	}
+	/* (no more than there is room for - the fill's even total of players,
+	or without it the most less two on a dedicated server, less one on a
+	host - nor fewer than none) */
+	{
+		long slot_of_bot[BOTS_MAXIMUM];
+		long bots = network_game_server_fill_bot_slots(server, slot_of_bot);
+		long people = network_game_server_fill_people(server);
+		long room = network_game_server_fill_total((long)server->game.maximum_players) - people - bots;
+
+		if (add)
+			count = MIN(count, MIN(room, BOTS_MAXIMUM - bots));
+		else
+			count = MIN(count, bots);
+		if (count <= 0)
+		{
+			snprintf(answer, (size_t)answer_size, add ? "add_bot: no room (%ld bots and %ld people of %ld; two slots kept free)" :
+				"drop_bot: no bots in the game", bots, people, (long)server->game.maximum_players);
+			return TRUE;
+		}
+	}
+	for (index = 0; index < count; index++)
+	{
+		network_game_server_fill_extra += add ? 1 : -1;
+		if (team != NONE)
+		{
+			long *queue = add ? network_game_server_fill_join_teams : network_game_server_fill_leave_teams;
+			long *queued = add ? &network_game_server_fill_join_count : &network_game_server_fill_leave_count;
+
+			if (*queued < BOTS_MAXIMUM)
+				queue[(*queued)++] = team;
+			network_game_server_fill_teams_asked = TRUE;
+		}
+	}
+	network_game_server_fill_extra = PIN(network_game_server_fill_extra, -BOTS_MAXIMUM, BOTS_MAXIMUM);
+	if (!network_game_server_fill_extra)
+		network_game_server_fill_teams_asked = network_game_server_fill_join_count + network_game_server_fill_leave_count > 0;
+	snprintf(answer, (size_t)answer_size, "bots: %s %ld%s (by hand %+ld on the fill's; %ld in now)", add ? "adding" : "dropping",
+		count, team == 0 ? " of red" : team == 1 ? " of blue" : "", network_game_server_fill_extra,
+		network_game_server_dedicated_bot_count());
+	platform_log("server: %s", answer);
+	return TRUE;
 }
 #endif
 static boolean network_game_server_setup_game_from_playlist(

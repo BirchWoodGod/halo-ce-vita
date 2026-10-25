@@ -606,6 +606,10 @@ static void command_help(
 		"                                   always free, and leave as players join (0)",
 		"  sv_bots_when_empty <0|1>         the bots play while nobody is in too (1), or only with people (0)",
 		"  sv_bots_skill <easy|normal|heroic|legendary> the bots' skill (normal)",
+		"  add_bot [n], add_bot_red, add_bot_blue  a bot more (of that team), joining at once; with",
+		"                                   sv_bots_fill, never past its even total",
+		"  drop_bot [n], drop_bot_red, drop_bot_blue  a bot fewer (of that team)",
+		"  bots_reset                       the bots added or dropped by hand forgotten: the fill's again",
 		"  sv_port <port>                   internet play's UDP port (init.txt only; -port)",
 		"  sv_game_port <port>              the game's ports on this machine, <port> and the next",
 		"                                   (init.txt only; -gameport; default 5150 for sv_port 2302,",
@@ -1411,6 +1415,20 @@ static void command(
 			say("sv_say: give the text");
 		else if (!network_distributed_say(text))
 			say("sv_say: only in a game (the lobby's players hear nothing of it)");
+	}
+	/* port: the bots added and dropped by hand (network_server_manager.c) */
+	else if (!strncmp(name, "add_bot", 7) || !strncmp(name, "drop_bot", 8) || !strncmp(name, "sv_add_bot", 10) ||
+		!strncmp(name, "sv_drop_bot", 11) || !csstrcmp(name, "bots_reset") || !csstrcmp(name, "sv_bots_reset"))
+	{
+		boolean network_game_server_port_bots_command(char const *word, char const *arguments, char *answer,
+			long answer_size);
+		char answer[160];
+
+		answer[0] = 0;
+		if (!network_game_server_port_bots_command(name, argument, answer, sizeof(answer)))
+			say("%s: not a command (help lists them)", name);
+		else
+			say("%s", answer);
 	}
 	else if (!csstrcmp(name, "sv_rcon_password") || !csstrcmp(name, "rcon") || !csstrcmp(name, "sv_rcon"))
 		say("%s: there is no remote console; commands are typed here, on the server's machine", name);
