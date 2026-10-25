@@ -623,15 +623,6 @@ static struct setting settings[] = {
 	Online: setting_shown) */
 	{ "Menu background", "HALO_MENU_BACKDROP", 0, 2, { "0", "1" }, { "Ring", "Halo (live)" },
 		"ElDewrito menus: the level Halo behind them (your a30.map), or the ring", 1, PAGE_MENUS },
-	/* (menu_backdrop.c menu_backdrop_render_setting, config.toml's
-	menus.backdrop_quality: High, the live background drawn at its best
-	detail - models, distant objects, effects, the sun, particles - whatever
-	the Graphics tab's are, the player's own back once a game loads; Same as
-	game, the Graphics tab's. Render resolution and Dynamic stay the
-	player's. Shown with Menu style ElDewrito and Menu background Halo
-	(live): setting_shown. Live) */
-	{ "Menu background quality", "HALO_MENU_BACKDROP_QUALITY", 0, 2, { "high", "game" }, { "High", "Same as game" },
-		"The live background's detail: its best, or your Graphics settings'", 0, PAGE_MENUS },
 	/* (the same two for Menu style Halo CE - the owner, Oct 24: the original
 	scores and report by default, Halo 3's as an option, so that the report's
 	DETAILS and the scoreboard's player options (mute, add friend, kick) are
@@ -1783,9 +1774,6 @@ static int setting_shown(const struct setting *setting)
 	/* (the live backdrop: the Online menus') */
 	if (setting->variable && !strcmp(setting->variable, "HALO_MENU_BACKDROP"))
 		return online_panel_style();
-	/* (its quality: with the live background chosen) */
-	if (setting->variable && !strcmp(setting->variable, "HALO_MENU_BACKDROP_QUALITY"))
-		return online_panel_style() && choice_of("HALO_MENU_BACKDROP") == 1;
 	/* (the menu music's level under the live backdrop: ElDewrito's) */
 	if (setting->variable && !strcmp(setting->variable, "HALO_MENU_MUSIC"))
 		return online_panel_style();
