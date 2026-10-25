@@ -183,7 +183,6 @@ static struct
 
 static void menu_backdrop_sounds_quiet(void);
 static void menu_backdrop_sounds_rise(boolean at_once);
-static void menu_backdrop_quality_update(void);
 
 static boolean menu_backdrop_enabled(void)
 {
@@ -612,81 +611,6 @@ void menu_backdrop_pending_draw(void)
 	menu_backdrop_line_draw(line, 1.f);
 }
 
-/* ---------- its own quality (insider.25: Menu background quality)
-
-The game's video settings chosen low for play made the live background
-look poor. While it is up (and the menus' Menu background quality is High,
-HALO_MENU_BACKDROP_QUALITY, menus.backdrop_quality - the default; "game":
-Same as game) the detail rows its scene shows are read at their best: models'
-detail, distant objects kept, effects (the grass, specular, the water's
-reflections), the sun's flares, particles and their budget. They are the
-cheap ones at the menu - a still camera, no fights, the 3D redrawn at
-HALO_MENU_BACKDROP_HZ (menu_functions.c) - and the frame's size is left to
-the player's Render resolution and Dynamic minimum, so dynamic resolution
-still answers for the GPU. The readers take them as they take the player's
-(menu_backdrop_render_setting in place of getenv, read again on
-halo_settings_generation); the player's own come back the moment a game is
-loaded (menu_backdrop_unloaded) or the background goes. */
-static struct
-{
-	char const *variable;
-	char const *value;
-} const menu_backdrop_quality_settings[] = {
-	{ "HALO_MODEL_LOD_SCALE", "1" },
-	{ "HALO_MIN_OBJECT_PIXELS", "0" },
-	{ "HALO_VITA_EFFECTS_QUALITY", "2" },
-	{ "HALO_SUN_RAYS", "1" },
-	{ "HALO_VITA_SHADOWS", "2" },
-	{ "HALO_PARTICLE_BUDGET", "full" },
-	{ "HALO_PARTICLE_RENDER_DIVISOR", "1" },
-	{ "HALO_DECAL_MIN_PIXELS", "0" },
-};
-
-static volatile int menu_backdrop_quality_on;
-
-static boolean menu_backdrop_quality_high_chosen(void)
-{
-	char const *setting = getenv("HALO_MENU_BACKDROP_QUALITY");
-
-	return !(setting && !_stricmp(setting, "game"));
-}
-
-static void menu_backdrop_quality_set(int on)
-{
-	extern volatile unsigned long halo_settings_generation;
-
-	if (menu_backdrop_quality_on == on)
-		return;
-	menu_backdrop_quality_on = on;
-	__atomic_add_fetch(&halo_settings_generation, 1, __ATOMIC_RELEASE);
-	platform_log("menu backdrop: %s", on ? "its own quality (Menu background quality High)" :
-		"the game's video settings again");
-}
-
-static void menu_backdrop_quality_update(void)
-{
-	menu_backdrop_quality_set(menu_backdrop.active && halo_main_menu_loaded() && menu_backdrop_quality_high_chosen());
-}
-
-/* (the detail settings' readers: models.c, render.c, render_objects.c,
-render_particles.c, rasterizer_lights.c, decals.c, particle_budget.c) a
-video setting's value: the background's own while it is up, else the
-player's (getenv) */
-char const *menu_backdrop_render_setting(char const *variable)
-{
-	if (menu_backdrop_quality_on)
-	{
-		size_t index;
-
-		for (index = 0; index < sizeof(menu_backdrop_quality_settings) / sizeof(menu_backdrop_quality_settings[0]); index++)
-		{
-			if (!strcmp(menu_backdrop_quality_settings[index].variable, variable))
-				return menu_backdrop_quality_settings[index].value;
-		}
-	}
-	return getenv(variable);
-}
-
 /* ---------- the way in and out (insider.25: the owner, Cass)
 
 With the live background chosen the ring is never shown, and the menus
@@ -976,12 +900,10 @@ void menu_backdrop_update(void)
 	{
 		if (menu_backdrop_fade.phase != _backdrop_fade_leaving)
 			menu_backdrop_fade.phase = _backdrop_fade_none;
-		menu_backdrop_quality_update();
 		return;
 	}
 	wanted_here = halo_main_menu_loaded() && menu_backdrop_live_chosen();
 	menu_backdrop.pending = wanted_here && !menu_backdrop.active && !menu_backdrop.test_off;
-	menu_backdrop_quality_update();
 	if (!wanted_here)
 	{
 		menu_backdrop_fade_update(FALSE, FALSE);
@@ -1109,8 +1031,6 @@ void menu_backdrop_unloaded(void)
 	}
 	menu_backdrop_blocks_put_back(TRUE);
 	menu_backdrop.active = FALSE;
-	/* (the game's video settings for the game loaded; its classes' levels
-	are the new map's) */
-	menu_backdrop_quality_set(FALSE);
+	/* (its classes' levels are the new map's) */
 	menu_backdrop_fade.sound_quiet_since = 0;
 }

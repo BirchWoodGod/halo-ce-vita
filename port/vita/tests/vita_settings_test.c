@@ -3341,8 +3341,6 @@ static void test_tab_layouts(void)
 		{ PAGE_MENUS, "Scoreboard", "HALO_SCOREBOARD", "classic|halo3", 0, "halo3" },
 		/* (shown with Menu style Online) */
 		{ PAGE_MENUS, "Menu background", "HALO_MENU_BACKDROP", "0|1", 0, "1" },
-		/* (shown with Menu background Halo (live)) */
-		{ PAGE_MENUS, "Menu background quality", "HALO_MENU_BACKDROP_QUALITY", "high|game", 0, "high" },
 		/* (shown with Menu style Halo CE: the original by default) */
 		{ PAGE_MENUS, "Carnage report", "HALO_CLASSIC_CARNAGE_REPORT", "classic|halo3", 0, "classic" },
 		{ PAGE_MENUS, "Scoreboard", "HALO_CLASSIC_SCOREBOARD", "classic|halo3", 0, "classic" },
@@ -3660,7 +3658,7 @@ static void test_variables_kept(void)
 		"HALO_INFECTION_ZOMBIES", "HALO_INFECTION_SPEED", "HALO_INFECTION_TIME", "HALO_INFECTION_RESPAWN",
 		"HALO_INFECTION_SHIELDS", "HALO_INFECTION_TOUGH",
 		"HALO_CARNAGE_REPORT", "HALO_FLAMING_HELMET", "HALO_FIELD_OF_VIEW", "HALO_CLOCK_GOVERNOR", "HALO_BATTERY_LOG",
-		"HALO_CHAT", "HALO_CHAT_FILTER", "HALO_BOTS_ONLINE", "HALO_SCOREBOARD", "HALO_MENU_BACKDROP", "HALO_MENU_MUSIC", "HALO_MENU_BACKDROP_QUALITY",
+		"HALO_CHAT", "HALO_CHAT_FILTER", "HALO_BOTS_ONLINE", "HALO_SCOREBOARD", "HALO_MENU_BACKDROP", "HALO_MENU_MUSIC",
 		"HALO_CLASSIC_CARNAGE_REPORT", "HALO_CLASSIC_SCOREBOARD",
 	};
 	int index, all = 1, choices = 0;

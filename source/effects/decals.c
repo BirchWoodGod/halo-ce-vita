@@ -2388,8 +2388,7 @@ static boolean decal_too_small_to_see(
 
 	if (minimum_pixels < 0 || settings_seen != halo_settings_generation)
 	{
-		extern char const *menu_backdrop_render_setting(char const *variable); /* (the live backdrop's own quality: menu_backdrop.c) */
-		const char *setting = menu_backdrop_render_setting("HALO_DECAL_MIN_PIXELS");
+		const char *setting = getenv("HALO_DECAL_MIN_PIXELS");
 
 		settings_seen = halo_settings_generation;
 		minimum_pixels = setting ? atol(setting) : 0;

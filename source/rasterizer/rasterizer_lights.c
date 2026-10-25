@@ -1106,8 +1106,7 @@ static boolean sun_rays_enabled(
 
 	if (enabled < 0 || settings_seen != halo_settings_generation)
 	{
-		extern char const *menu_backdrop_render_setting(char const *variable); /* (the live backdrop's own quality: menu_backdrop.c) */
-		const char *setting = menu_backdrop_render_setting("HALO_SUN_RAYS");
+		const char *setting = getenv("HALO_SUN_RAYS");
 
 		settings_seen = halo_settings_generation;
 		enabled = !setting || atoi(setting) != 0;
