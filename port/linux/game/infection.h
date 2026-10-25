@@ -16,6 +16,7 @@ void infection_settings_configured(
 	struct infection_settings *settings);
 
 /* whether a zombie has shields (the settings') */
+boolean infection_melee_kills(long damaging_player_index, long damaged_player_index);
 boolean infection_zombie_shields(
 	void);
 

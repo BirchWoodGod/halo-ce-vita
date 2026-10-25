@@ -747,6 +747,8 @@ void game_show_score_extended(
 	long score,
 	long team_index);
 long game_engine_remap_weapon(long weapon_definition_index);
+/* port: Infection's shotgun or pistol (game_engine.c) */
+long game_engine_infection_weapon(boolean shotgun, long fallback_definition_index);
 /* port: the dedicated server's one-weapon games (game_engine.c) */
 enum
 {
