@@ -366,7 +366,11 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
 
     # the Vita side, with the SDK's ABI
     host_cflags = " ".join(HOST_FLAGS + [f"-I{platform_dir}", f"-I{vita_include}", f"-I{generator_header.parent}",
-                                         f"-I{TLSF_DIR}"] + test_defines)
+                                         f"-I{TLSF_DIR}"] + test_defines +
+                            # (--vita-version reaches the host side too: the
+                            # updater, the settings panel and halo.log say
+                            # the version the game says, not vita_version.h's)
+                            version_defines(sln))
     # (the updater's checks: Monocypher's Ed25519 and SHA-512, built above)
     updater_cflags = " ".join([host_cflags, f"-I{MONOCYPHER_DIR}"])
     for source in sorted((VITA_DIR / "host").glob("*.c")):
