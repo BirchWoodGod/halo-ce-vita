@@ -5178,6 +5178,23 @@ static void test_settings_load_safe(void)
 		check(!strcmp(getenv("HALO_RENDER_SCALE"), "0.75") &&
 			strstr(log_text, "settings.txt has no settings in it: read from settings.txt.bak"),
 			"safe load: settings.txt damaged on the card: settings.txt.bak");
+		/* (zeroed by the card, then a save: the damaged file is kept as .bad
+		and the last good copy stays .bak, not overwritten by it) */
+		{
+			static char zeros[64];
+
+			settings_file_delete();
+			write_file(SETTINGS_FILE, zeros, sizeof(zeros));
+			write_file(SETTINGS_FILE ".bak", older, sizeof(older) - 1);
+			unlink(SETTINGS_FILE ".bad");
+			rows_fresh();
+			vita_settings_load();
+			vita_settings_set("HALO_FRAME_CAP", "30");
+			vita_settings_save_wait();
+			check(strstr(file_text(SETTINGS_FILE ".bak"), "HALO_RENDER_SCALE=0.75\n") &&
+				access(SETTINGS_FILE ".bad", F_OK) == 0 && strstr(file_text(SETTINGS_FILE), SETTINGS_END "=1\n"),
+				"safe load: a zeroed settings.txt is kept as .bad on the next save; the good .bak stays");
+		}
 		/* (an older build's settings.txt, no last line: read, not the copy) */
 		settings_file_delete();
 		write_file(SETTINGS_FILE, "HALO_RENDER_SCALE=0.875\n", 24);

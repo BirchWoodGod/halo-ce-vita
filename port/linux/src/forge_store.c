@@ -12,8 +12,9 @@ over), take a byte of a file before the validator has passed all of it
 (forge_file_decode, its folder's map expected), or leave a file half
 written. A save writes <name>.hmv.tmp, checks the write (every byte, the
 close), reads it back through the validator, and only then puts it in
-place: the old file renamed <name>.hmv.old, the new one renamed in, the old
-one deleted (a file system that does not rename over a file - the Vita's -
+place: the old file, if it passes the validator, renamed <name>.hmv.prev (the
+last good copy, which a load and a list fall back to when the file fails its
+checks; a failing one is kept as .bad), the new one renamed in (a file system that does not rename over a file - the Vita's -
 is served the same way). Whatever fails, the temporary file is deleted and
 the old one is where it was. Before writing, the card must have the file's
 size and FORGE_STORE_SPACE_MARGIN free.
@@ -37,7 +38,8 @@ write stops half way, as on a full card (run_forge_test.sh).
 #define FORGE_STORE_PATH_SIZE 512
 #define FORGE_STORE_SPACE_MARGIN (256 * 1024)
 #define FORGE_STORE_TEMPORARY_EXTENSION ".tmp"
-#define FORGE_STORE_OLD_EXTENSION ".old"
+#define FORGE_STORE_OLD_EXTENSION ".prev"
+#define FORGE_STORE_BAD_EXTENSION ".bad"
 /* the most map folders looked in */
 #define FORGE_STORE_MAXIMUM_MAPS 64
 /* a save under a title's name: the most numbers tried after it */
@@ -148,6 +150,23 @@ static int forge_store_write(
 	return written;
 }
 
+/* (a file that failed its checks: whether its .prev, the last good copy,
+passes; layout is then filled from it) */
+static int forge_store_prev_good(char const *map_name, char const *name, unsigned char *bytes,
+	struct forge_file_layout *layout)
+{
+	char prev[FORGE_STORE_PATH_SIZE];
+	int size;
+
+	if (!forge_store_file_path(map_name, name, FORGE_STORE_OLD_EXTENSION, prev, sizeof(prev)))
+		return 0;
+	size = forge_store_read(prev, bytes, FORGE_FILE_MAXIMUM_SIZE + 1);
+	if (size < 0 || forge_file_decode(bytes, size, map_name, layout, NULL, 0) != _forge_file_ok)
+		return 0;
+	platform_log("forge store: %s/%s restored from the last good copy", map_name, name);
+	return 1;
+}
+
 static void forge_store_entry_fill(
 	struct forge_store_entry *entry,
 	char const *map_name,
@@ -218,7 +237,8 @@ static int forge_store_list_map(
 		size = forge_store_read(path, bytes, FORGE_FILE_MAXIMUM_SIZE + 1);
 		if (size < 0)
 			continue;
-		if (forge_file_decode(bytes, size, map_name, layout, why, sizeof(why)) != _forge_file_ok)
+		if (forge_file_decode(bytes, size, map_name, layout, why, sizeof(why)) != _forge_file_ok &&
+			!forge_store_prev_good(map_name, name, bytes, layout))
 		{
 			platform_log("forge store: %s/%s refused: %s", map_name, name, why);
 			forge_store_entry_fill(&entries[count++], map_name, name, NULL, (unsigned long)size);
@@ -373,6 +393,8 @@ int forge_store_load(
 		return 0;
 	}
 	result = forge_file_decode(bytes, size, map_name, layout, reason, sizeof(reason));
+	if (result != _forge_file_ok && result != _forge_file_wrong_map && forge_store_prev_good(map_name, file_name, bytes, layout))
+		result = _forge_file_ok;
 	free(bytes);
 	if (result != _forge_file_ok)
 	{
@@ -491,14 +513,42 @@ int forge_store_save(
 	free(check);
 	if (forge_store_file_exists(path))
 	{
-		remove(old);
-		if (rename(path, old) != 0)
+		/* (only a good file becomes the last good copy; else it is kept as .bad) */
+		unsigned char *current = malloc(FORGE_FILE_MAXIMUM_SIZE + 1);
+		struct forge_file_layout *current_layout = malloc(sizeof(*current_layout));
+		int good = 0;
+
+		if (current && current_layout)
 		{
-			remove(temporary);
-			forge_store_why(why, why_size, T("The old map variant couldn't be replaced.\nNothing was saved."));
-			return 0;
+			int current_size = forge_store_read(path, current, FORGE_FILE_MAXIMUM_SIZE + 1);
+
+			good = current_size >= 0 &&
+				forge_file_decode(current, current_size, layout->map_name, current_layout, NULL, 0) == _forge_file_ok;
 		}
-		replaced = 1;
+		free(current);
+		free(current_layout);
+		if (!good)
+		{
+			char bad[FORGE_STORE_PATH_SIZE];
+
+			if (forge_store_file_path(layout->map_name, name, FORGE_STORE_BAD_EXTENSION, bad, sizeof(bad)))
+			{
+				remove(bad);
+				rename(path, bad);
+			}
+			remove(path);
+		}
+		else
+		{
+			remove(old);
+			if (rename(path, old) != 0)
+		{
+				remove(temporary);
+				forge_store_why(why, why_size, T("The old map variant couldn't be replaced.\nNothing was saved."));
+				return 0;
+			}
+			replaced = 1;
+		}
 	}
 	if (rename(temporary, path) != 0)
 	{
@@ -508,8 +558,6 @@ int forge_store_save(
 		forge_store_why(why, why_size, T("The map variant couldn't be put in place.\nNothing was saved."));
 		return 0;
 	}
-	if (replaced)
-		remove(old);
 	if (saved_name && saved_size > 0)
 		snprintf(saved_name, (size_t)saved_size, "%s", name);
 	platform_log("forge store: %s/%s written: \"%s\", %d objects, %d bytes%s", layout->map_name, name, layout->title,
@@ -523,8 +571,13 @@ int forge_store_delete(
 {
 	char path[FORGE_STORE_PATH_SIZE];
 
+	char prev[FORGE_STORE_PATH_SIZE];
+
 	if (!forge_store_file_path(map_name, file_name, NULL, path, sizeof(path)) || remove(path) != 0)
 		return 0;
+	/* (its last good copy too: a deleted variant must not come back) */
+	if (forge_store_file_path(map_name, file_name, FORGE_STORE_OLD_EXTENSION, prev, sizeof(prev)))
+		remove(prev);
 	platform_log("forge store: %s/%s deleted", map_name, file_name);
 	return 1;
 }

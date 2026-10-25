@@ -2033,6 +2033,17 @@ longer old file after a shorter new one; the Vita's rename does not write
 over a file). Whenever the game stops - a crash, the battery, the power
 button held - one of the three is whole (settings_source reads the one
 that is); nonzero if it was put in place */
+/* what a settings file is (settings_source_kind) */
+enum
+{
+	SETTINGS_SOURCE_NONE,
+	SETTINGS_SOURCE_GARBAGE,
+	SETTINGS_SOURCE_PARTIAL,
+	SETTINGS_SOURCE_WHOLE
+};
+
+static int settings_source_kind(const char *path);
+
 static int save_file(const char *text)
 {
 	FILE *file;
@@ -2060,8 +2071,22 @@ static int save_file(const char *text)
 		remove(SETTINGS_FILE ".new");
 		return 0;
 	}
-	remove(SETTINGS_FILE ".bak");
-	kept = rename(SETTINGS_FILE, SETTINGS_FILE ".bak") == 0;
+	/* (only a whole file becomes the last good copy: a damaged one, the real
+	case after a power loss, is kept as .bad and the .bak stays) */
+	kept = 0;
+	if (settings_source_kind(SETTINGS_FILE) == SETTINGS_SOURCE_NONE)
+		kept = 0;
+	else if (settings_source_kind(SETTINGS_FILE) == SETTINGS_SOURCE_WHOLE ||
+		settings_source_kind(SETTINGS_FILE ".bak") != SETTINGS_SOURCE_WHOLE)
+	{
+		remove(SETTINGS_FILE ".bak");
+		kept = rename(SETTINGS_FILE, SETTINGS_FILE ".bak") == 0;
+	}
+	else
+	{
+		remove(SETTINGS_FILE ".bad");
+		rename(SETTINGS_FILE, SETTINGS_FILE ".bad");
+	}
 	if (!kept)
 		remove(SETTINGS_FILE);
 	ok = rename(SETTINGS_FILE ".new", SETTINGS_FILE) == 0;
@@ -2305,14 +2330,6 @@ the rest is the defaults, said in halo.log. */
 /* what a file of settings is: none, there but no line of settings in it
 (garbage, empty), lines but not the last (an older build's - before
 insider.21 none had it - or one cut short), or whole */
-enum
-{
-	SETTINGS_SOURCE_NONE,
-	SETTINGS_SOURCE_GARBAGE,
-	SETTINGS_SOURCE_PARTIAL,
-	SETTINGS_SOURCE_WHOLE
-};
-
 /* whether line (NAME=value, its end trimmed) is one a build of this game
 could have written: a name of capitals, digits and '_' */
 static int settings_line_named(const char *line)

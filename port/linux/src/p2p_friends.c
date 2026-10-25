@@ -38,6 +38,7 @@ steps, comma-separated (test_steps below); everything is logged as
 #include "port_config.h"
 #include "p2p_internal.h"
 #include "p2p_friends.h"
+#include <unistd.h>
 #include "p2p_party.h"
 #include "lang.h"
 #include "halo_port_limits.h"
@@ -1065,6 +1066,8 @@ static int file_read(const char *path, unsigned char *bytes, int capacity)
 	return (int)count;
 }
 
+/* (the libc's own fileno, not the Xbox shim's _fileno) */
+#undef fileno
 static int file_write(const char *path, const unsigned char *bytes, int size)
 {
 	FILE *file = fopen(path, "wb");
@@ -1073,6 +1076,9 @@ static int file_write(const char *path, const unsigned char *bytes, int size)
 	if (!file)
 		return 0;
 	written = fwrite(bytes, 1, (size_t)size, file) == (size_t)size;
+	/* (on the card before the old file is moved aside) */
+	if (written && fflush(file) == 0)
+		fsync(fileno(file));
 	if (fclose(file) != 0)
 		written = 0;
 	if (!written)
@@ -1091,9 +1097,10 @@ static int file_exists(const char *path)
 }
 
 /* bytes written to <name>: a .tmp written, read back and compared, the old
-file renamed .old, the new one renamed in, the old one deleted (a file
-system that does not rename over a file - the Vita's - is served the same
-way). Whatever fails, the old file is where it was. Under
+file renamed .prev (the last good copy, kept: a file that was read back
+whole or passed its checks at load; a load falls back to it), the new one
+renamed in (a file system that does not rename over a file - the Vita's - is
+served the same way). Whatever fails, the old file is where it was. Under
 friends_file_lock */
 static int file_put(const char *name, const unsigned char *bytes, int size)
 {
@@ -1102,7 +1109,7 @@ static int file_put(const char *name, const unsigned char *bytes, int size)
 	int replaced = 0, result;
 
 	if (!friends_folder(folder, sizeof(folder)) || !file_path(name, "", path, sizeof(path)) ||
-		!file_path(name, ".tmp", temporary, sizeof(temporary)) || !file_path(name, ".old", old, sizeof(old)))
+		!file_path(name, ".tmp", temporary, sizeof(temporary)) || !file_path(name, ".prev", old, sizeof(old)))
 	{
 		return 0;
 	}
@@ -1143,8 +1150,6 @@ static int file_put(const char *name, const unsigned char *bytes, int size)
 			rename(old, path);
 		return 0;
 	}
-	if (replaced)
-		remove(old);
 	return 1;
 }
 
@@ -1624,15 +1629,21 @@ static int marks_decode(const unsigned char *bytes, int size)
 	return 1;
 }
 
-/* a file's bytes, the file itself or (a write cut short between its
-renames) its .old; -1 if neither */
-static int file_take(const char *name, unsigned char *bytes, int capacity, int old)
+/* a file's bytes: source 0 the file itself, 1 its .prev (the last good copy),
+2 an older build's .old (a write cut short between renames); -1 if absent */
+static int file_take(const char *name, unsigned char *bytes, int capacity, int source)
 {
 	char path[PATH_SIZE];
 
-	if (!file_path(name, old ? ".old" : "", path, sizeof(path)))
+	if (!file_path(name, source == 0 ? "" : source == 1 ? ".prev" : ".old", path, sizeof(path)))
 		return -1;
 	return file_read(path, bytes, capacity);
+}
+
+static void file_restored(const char *name, int source)
+{
+	if (source > 0)
+		platform_log("friends: %s restored from the last good copy (%s)", name, source == 1 ? ".prev" : ".old");
 }
 
 /* keeps a file that failed its checks as <name>.bad, for a report */
@@ -1680,13 +1691,15 @@ static void load(void)
 		return;
 	friends->loaded = 1;
 	pthread_mutex_lock(&friends_file_lock);
-	for (old = 0; old < 2 && !taken; old++)
+	for (old = 0; old < 3 && !taken; old++)
 	{
 		size = file_take("identity.dat", bytes, IDENTITY_SIZE + 1, old);
 		if (size >= 0)
 		{
 			taken = identity_decode(bytes, size, friends->seed, &friends->epoch);
-			if (!taken && !old)
+			if (taken)
+				file_restored("identity.dat", old);
+			else if (!old)
 				file_set_aside("identity.dat");
 		}
 	}
@@ -1706,25 +1719,29 @@ static void load(void)
 		platform_log("friends: the identity could not be written; friends will see this run's messages, not keep it");
 	tester_id_write();
 	taken = 0;
-	for (old = 0; old < 2 && !taken; old++)
+	for (old = 0; old < 3 && !taken; old++)
 	{
 		size = file_take("friends.dat", bytes, sizeof(bytes), old);
 		if (size >= 0)
 		{
 			taken = list_decode(bytes, size);
-			if (!taken && !old)
+			if (taken)
+				file_restored("friends.dat", old);
+			else if (!old)
 				file_set_aside("friends.dat");
 		}
 	}
 	/* (the marks: none, a file an older build left, read as none) */
 	taken = 0;
-	for (old = 0; old < 2 && !taken; old++)
+	for (old = 0; old < 3 && !taken; old++)
 	{
 		size = file_take("marks.dat", bytes, MAXIMUM_MARKS_SIZE + 1, old);
 		if (size >= 0)
 		{
 			taken = marks_decode(bytes, size);
-			if (!taken && !old)
+			if (taken)
+				file_restored("marks.dat", old);
+			else if (!old)
 				file_set_aside("marks.dat");
 		}
 	}
