@@ -711,6 +711,9 @@ struct bots_bot
 	long kills_seen;
 	/* (debug: HALO_BOT_TRACE) its path searches */
 	long searches;
+	/* port: the weapons' definitions it held last tick (halo.log's play
+	line: the weapons picked up) */
+	long held_definitions[MAXIMUM_WEAPONS_PER_UNIT];
 };
 
 /* ---------- globals */
@@ -857,6 +860,24 @@ static struct
 	once a second, a walk of the vehicles), in the objects' order */
 	long turret_count;
 	long turret_indices[BOTS_MAXIMUM_TURRETS];
+	/* port: the bots' play (halo.log's play line, each minute): the times
+	stuck while fighting and while walking with no path; grenades thrown,
+	jumps (fighting, and otherwise: getting unstuck, a ledge, a ladder);
+	weapons picked up, and of them power weapons (bots_weapon_power); the
+	bot-ticks alive, holding a power weapon, and holding two weapons */
+	struct
+	{
+		long stuck_fighting;
+		long stuck_pathless;
+		long grenades_thrown;
+		long jumps_fighting;
+		long jumps_moving;
+		long weapon_pickups;
+		long power_pickups;
+		long alive_ticks;
+		long power_ticks;
+		long two_weapon_ticks;
+	} play;
 } bots_globals;
 
 /* port: the powerups lying on the map - health packs, overshields, active
@@ -1585,6 +1606,9 @@ struct bots_weapon_kind
 	short charge_ticks;
 	/* port: what kind of a precision weapon (bots_tactics.h) */
 	short precision;
+	/* port: a power weapon (a rocket launcher, a sniper rifle, a shotgun, a
+	fuel rod gun: bots_weapon_power) */
+	boolean power;
 };
 
 static struct
@@ -1628,6 +1652,12 @@ static struct bots_weapon_kind const *bots_weapon_kind(long definition_index)
 			"heavy (a vantage point)");
 	kind->charge_ticks = 0;
 	{
+		char const *name = tag_get_name(definition_index);
+
+		kind->power = name && (strstr(name, "rocket") || strstr(name, "sniper") || strstr(name, "shotgun") ||
+			strstr(name, "fuel rod") || strstr(name, "plasma_cannon"));
+	}
+	{
 		struct weapon_definition *definition = weapon_definition_get(definition_index);
 
 		if (definition->weapon.triggers.count > 0)
@@ -1658,6 +1688,13 @@ static short bots_weapon_tap_ticks(long weapon_index)
 static real bots_weapon_range(long weapon_index)
 {
 	return weapon_index != NONE ? bots_weapon_kind(weapon_get(weapon_index)->definition_index)->range : 6.0f;
+}
+
+/* port: whether a weapon definition is a power weapon (one players go for:
+the rocket launcher, the sniper rifle, the shotgun, the fuel rod gun) */
+static boolean bots_weapon_power(long definition_index)
+{
+	return bots_weapon_kind(definition_index)->power;
 }
 
 /* port: (bots_tactics.h) */
@@ -2780,6 +2817,7 @@ void bots_initialize_for_new_map(void)
 	bots_globals.turret_kills = 0;
 	bots_globals.turret_fire_ticks = 0;
 	bots_globals.turret_count = 0;
+	csmemset(&bots_globals.play, 0, sizeof(bots_globals.play));
 	bots_powerups.count = 0;
 	bots_powerups.found_tick = NONE;
 	for (index = 0; index < BOTS_MAXIMUM; index++)
@@ -5409,6 +5447,10 @@ static void bots_bot_unstick(struct bots_bot *bot, struct bots_tick *tick)
 			short obstacle = bots_stuck_obstacle(bot, tick);
 
 			bots_globals.stuck_events++;
+			if (tick->fighting)
+				bots_globals.play.stuck_fighting++;
+			else if (!bot->path.valid)
+				bots_globals.play.stuck_pathless++;
 			if (obstacle == _bots_obstacle_low)
 				bots_globals.stuck_low++;
 			else if (obstacle == _bots_obstacle_tall)
@@ -6590,6 +6632,62 @@ static void bots_shortcut_update(struct bots_bot *bot, struct bots_tick *tick)
 		bots_shortcut_fail(bot, "not come to in time", tick->now);
 }
 
+/* port: the bot's play this tick counted (halo.log's play line): the
+grenade and the jump pressed, the weapons it holds - one it did not hold
+last tick picked up (not as it spawns: what it spawns with) - and whether
+one is a power weapon, and two held */
+static void bots_play_count(struct bots_bot *bot, struct bots_tick *tick)
+{
+	short slot, held = 0;
+	boolean power = FALSE;
+
+	if (TEST_FLAG(tick->flags, _unit_control_throw_grenade_bit))
+		bots_globals.play.grenades_thrown++;
+	if (TEST_FLAG(tick->flags, _unit_control_jump_bit))
+	{
+		if (tick->fighting)
+			bots_globals.play.jumps_fighting++;
+		else
+			bots_globals.play.jumps_moving++;
+	}
+	bots_globals.play.alive_ticks++;
+	for (slot = 0; slot < MAXIMUM_WEAPONS_PER_UNIT; slot++)
+	{
+		long weapon_index = tick->unit->unit.weapon_object_indices[slot];
+		long definition_index = weapon_index != NONE ? object_get(weapon_index)->definition_index : NONE;
+		short other;
+
+		if (definition_index == NONE)
+			continue;
+		held++;
+		if (bots_weapon_value(definition_index) >= 0 && bots_weapon_power(definition_index))
+			power = TRUE;
+		if (tick->now == bot->spawn_tick)
+			continue;
+		for (other = 0; other < MAXIMUM_WEAPONS_PER_UNIT; other++)
+		{
+			if (bot->held_definitions[other] == definition_index)
+				break;
+		}
+		if (other >= MAXIMUM_WEAPONS_PER_UNIT && bots_weapon_value(definition_index) >= 0)
+		{
+			bots_globals.play.weapon_pickups++;
+			if (bots_weapon_power(definition_index))
+				bots_globals.play.power_pickups++;
+		}
+	}
+	for (slot = 0; slot < MAXIMUM_WEAPONS_PER_UNIT; slot++)
+	{
+		long weapon_index = tick->unit->unit.weapon_object_indices[slot];
+
+		bot->held_definitions[slot] = weapon_index != NONE ? object_get(weapon_index)->definition_index : NONE;
+	}
+	if (power)
+		bots_globals.play.power_ticks++;
+	if (held >= 2)
+		bots_globals.play.two_weapon_ticks++;
+}
+
 static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_action *action)
 {
 	struct bots_tick tick;
@@ -6842,6 +6940,7 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 	}
 	action->control_flags = tick.flags;
 	action->primary_trigger = TEST_FLAG(tick.flags, _unit_control_weapon_primary_trigger_bit) ? 1.0f : 0.0f;
+	bots_play_count(bot, &tick);
 	bots_bot_trace(bot, bot_index, &tick);
 	bots_profile_part(_bots_part_rest, &started);
 }
@@ -6921,6 +7020,12 @@ static void bots_report(void)
 			}
 		}
 	}
+	platform_log("bots: play at tick %ld: stuck fighting %ld, walking with no path %ld; grenades %ld; jumps fighting %ld, "
+		"moving %ld; weapons picked up %ld (power %ld); power weapon held %.1f%%, two weapons %.1f%% of the time",
+		now, bots_globals.play.stuck_fighting, bots_globals.play.stuck_pathless, bots_globals.play.grenades_thrown,
+		bots_globals.play.jumps_fighting, bots_globals.play.jumps_moving, bots_globals.play.weapon_pickups, bots_globals.play.power_pickups,
+		bots_globals.play.alive_ticks ? 100.0 * bots_globals.play.power_ticks / bots_globals.play.alive_ticks : 0.0,
+		bots_globals.play.alive_ticks ? 100.0 * bots_globals.play.two_weapon_ticks / bots_globals.play.alive_ticks : 0.0);
 	/* port: (the lanes, vantage points and posts: bots_tactics.h) */
 	bots_tactics_report(now);
 	if (bots_profile.enabled > 0)
