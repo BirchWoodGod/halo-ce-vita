@@ -157,9 +157,12 @@ What a bot does each tick, in a player's terms:
   there at every multiple of its period, taken or not: known to the tick),
   and go for them as players do: a power weapon (the rocket launcher, the
   sniper rifle, the shotgun), an overshield or camouflage from across the
-  map in Slayer (25 units in a game with an objective, 12 for a defender),
-  a better weapon near; a power weapon or powerup due within a few seconds
-  of the walk there is gone to and waited for. One bot of a team a spawn
+  map in Slayer, a better weapon near; in Slayer a power weapon or powerup
+  due within a few seconds of the walk there is gone to and waited for. In
+  a game with an objective the attackers go for it alone (with the spawns,
+  the bots that stopped at the weapons by their base took Blood Gulch's
+  flag half as often), the others for a power weapon or powerup they lack
+  near (10 units, a defender 6). One bot of a team a spawn
   (two in a free-for-all), the nearer; the other team's contest it. A spawn
   given up three times and never taken is left be two minutes. With both
   hands full a bot changes to the weapon it keeps the less before the swap
@@ -1640,6 +1643,8 @@ static long bots_current_weapon(struct unit_datum *unit)
 	return unit->unit.weapon_object_indices[unit->unit.current_weapon_index];
 }
 
+static short bots_weapon_value(long definition_index);
+
 /* whether a weapon has no rounds left (one with magazines) */
 static boolean bots_weapon_empty(long weapon_index)
 {
@@ -1648,7 +1653,10 @@ static boolean bots_weapon_empty(long weapon_index)
 
 	/* port: (a battery's - the plasma pistol, the plasma rifle, whose
 	magazine holds no rounds: spent with its age; such a weapon was taken
-	for empty, and never changed to) */
+	for empty, and never changed to. Never the game's flag or ball, which
+	has neither and is never put away) */
+	if (weapon_is_flag(weapon_index) || bots_weapon_value(weapon->definition_index) < 0)
+		return FALSE;
 	if (definition->weapon.magazines.count <= 0 ||
 		TAG_BLOCK_GET_ELEMENT(&definition->weapon.magazines, 0, struct weapon_magazine_definition)->rounds_loaded_maximum <= 0)
 	{
@@ -5505,10 +5513,11 @@ static real bots_spawn_worth(struct bots_bot *bot, struct unit_datum *unit, long
 sniper rifle, the shotgun), an overshield or camouflage gone for across the
 map, a better weapon near, the spawn's next item timed - gone to when it
 comes (game_engine_update_item_spawn's period: known to the tick) and
-waited at - one bot of a team to a spawn (the nearer; two in a game without
-teams), contested by the other team's as players do. Weighed once a second,
-not while the bot carries the flag or the ball; in a game with an objective
-only near (25 units; a defender 12), in Slayer from across the map; the
+waited at (Slayer alone) - one bot of a team to a spawn (the nearer; two in
+a game without teams), contested by the other team's as players do. Weighed
+once a second, not while the bot carries the flag or the ball; in a game
+with an objective not by the attackers, and by the others only near (10
+units; a defender 6), in Slayer from across the map; the
 walk there straight, a quarter longer, at a run. TRUE when the bot goes for
 one (its goal set: the item, or the spawn's ground to wait at) */
 #define BOTS_SPAWN_RUN 2.2f
@@ -5553,6 +5562,18 @@ static boolean bots_spawn_goal(struct bots_bot *bot, struct unit_datum *unit, re
 			}
 			bot->plan_spawn = NONE;
 		}
+		else if (object_index != NONE && bot->goal_kind == _bots_goal_item && bot->item_index == object_index &&
+			bot->item_first_press_tick >= bot->goal_tick && now - bot->item_first_press_tick > TICKS_PER_SECOND * 3)
+		{
+			/* (pressed for three seconds at it and not got: left be, as the
+			bots' look about for a weapon leaves one) */
+			bots_item_set_unreachable(bot, object_index);
+			bot->plan_avoid_spawn = spawn_index;
+			bot->plan_avoid_until_tick = now + TICKS_PER_SECOND * 30;
+			bot->plan_spawn = NONE;
+			bot->goal_kind = _bots_goal_none;
+			return FALSE;
+		}
 		else if (object_index != NONE)
 		{
 			if (bot->goal_kind != _bots_goal_item || bot->item_index != object_index)
@@ -5595,7 +5616,14 @@ static boolean bots_spawn_goal(struct bots_bot *bot, struct unit_datum *unit, re
 	if (now < bot->plan_check_tick)
 		return FALSE;
 	bot->plan_check_tick = now + TICKS_PER_SECOND + (bot_index % 5);
-	reach = objective_game ? (bots_tactics_bots[bot_index].role == _bots_role_defender ? 12.0f : 25.0f) : 70.0f;
+	/* (an attacker in a game with an objective goes for it: with one, the
+	bots that stopped for the weapons by their base took Blood Gulch's flag
+	half as often) */
+	if (objective_game && bots_tactics_bots[bot_index].role == _bots_role_attacker)
+		return FALSE;
+	/* (a game with an objective: one near alone, a power weapon or a
+	powerup it lacks, not waited for) */
+	reach = objective_game ? (bots_tactics_bots[bot_index].role == _bots_role_defender ? 6.0f : 10.0f) : 70.0f;
 	if (fighting)
 		reach = MIN(reach, 10.0f);
 	start_surface_index = bots_surface_below(position, NULL);
@@ -5611,14 +5639,20 @@ static boolean bots_spawn_goal(struct bots_bot *bot, struct unit_datum *unit, re
 		/* (by a goal given up a while ago) */
 		if (now < bot->avoid_until_tick && bots_distance3d(&bots_spawns.spawns[spawn].ground, &bot->avoid_point) < 3.0f)
 			continue;
-		/* (a better weapon of no power, a health pack, grenades: near) */
+		/* (a better weapon of no power, a health pack, grenades: near; in a
+		game with an objective none - the bots' old look about for a better
+		weapon has them - and a power weapon only when it holds none) */
 		if (kind == _bots_spawn_weapon || kind == _bots_spawn_health || kind == _bots_spawn_grenades)
+		{
+			if (objective_game)
+				continue;
 			spawn_reach = MIN(spawn_reach, 15.0f);
+		}
 		distance = bots_distance3d(&bots_spawns.spawns[spawn].ground, position);
 		if (distance > spawn_reach)
 			continue;
 		worth = bots_spawn_worth(bot, unit, spawn);
-		if (worth <= 0.5f)
+		if (worth <= (objective_game ? 3.0f : 0.5f))
 			continue;
 		if (present && bots_item_unreachable(bot, bots_spawns.spawns[spawn].object_index))
 			continue;
@@ -5629,7 +5663,7 @@ static boolean bots_spawn_goal(struct bots_bot *bot, struct unit_datum *unit, re
 			would have waited more than a few seconds there) */
 			wait = (real)(bots_spawn_next_tick(spawn, now) - now) / TICKS_PER_SECOND - eta;
 			if ((kind != _bots_spawn_power && kind != _bots_spawn_overshield && kind != _bots_spawn_camouflage) || wait > 6.0f ||
-				fighting)
+				fighting || objective_game)
 			{
 				continue;
 			}
