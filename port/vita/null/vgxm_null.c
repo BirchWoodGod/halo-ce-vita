@@ -717,11 +717,55 @@ void vgxm_frame_submit_begin(void)
 {
 }
 
+/* (no GPU to time: d3d8_gxm.c's HALO_DYNRES_SIM stands in for the dynamic
+resolution) HALO_NULL_GPU_US_PER_DRAW=n: a stand-in GPU time of n us a draw
+for each presented frame, numbered as the Vita's, for the GPU census's test
+(HALO_GPU_CENSUS) */
+static struct
+{
+	int us_per_draw;
+	unsigned long frame_draws, tag;
+	unsigned int written, read;
+	struct vgxm_gpu_frame frames[16];
+} null_gpu = { -1 };
+
+static void null_gpu_present(void)
+{
+	if (null_gpu.us_per_draw < 0)
+	{
+		const char *setting = getenv("HALO_NULL_GPU_US_PER_DRAW");
+
+		null_gpu.us_per_draw = setting && atoi(setting) > 0 ? atoi(setting) : 0;
+	}
+	if (null_gpu.us_per_draw)
+	{
+		struct vgxm_gpu_frame *frame = &null_gpu.frames[null_gpu.written % 16];
+
+		memset(frame, 0, sizeof(*frame));
+		frame->frame = (unsigned int)null.presents + 1;
+		frame->gpu_ms = (float)null_gpu.frame_draws * (float)null_gpu.us_per_draw / 1000.0f;
+		frame->tail_ms = frame->gpu_ms;
+		frame->interval_ms = 33.3f;
+		frame->scale = 1.0f;
+		frame->tag = null_gpu.tag;
+		null_gpu.written++;
+		if (null_gpu.written - null_gpu.read > 16)
+			null_gpu.read = null_gpu.written - 16;
+	}
+	null_gpu.frame_draws = 0;
+}
+
+void vgxm_frame_tag(unsigned long tag)
+{
+	null_gpu.tag = tag;
+}
+
 int vgxm_gpu_frame_next(struct vgxm_gpu_frame *frame)
 {
-	/* (no GPU to time: d3d8_gxm.c's HALO_DYNRES_SIM stands in) */
-	(void)frame;
-	return 0;
+	if (null_gpu.read == null_gpu.written)
+		return 0;
+	*frame = null_gpu.frames[null_gpu.read++ % 16];
+	return 1;
 }
 
 void vgxm_overlay_dynamic(int dynamic)
@@ -1629,6 +1673,7 @@ void vgxm_draw(const struct vgxm_draw *draw)
 		return;
 	null.draws++;
 	null.scene_draws++;
+	null_gpu.frame_draws++;
 	scene_ensure();
 	if (draw_hash_enabled() && !draw_writes_nothing(draw))
 		draw_hash_add(draw);
@@ -1772,6 +1817,7 @@ void vgxm_present(unsigned long color_target, unsigned long width, unsigned long
 		draw_hash = 1469598103934665603ull;
 		draw_hash_draws = 0;
 	}
+	null_gpu_present();
 	null.presents++;
 	null.scene_draws = 0;
 	null_worker_index = (null_worker_index + 1) % RING_COUNT;

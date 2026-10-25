@@ -332,13 +332,17 @@ first, 1 while there is one. gpu_ms is from the later of the submission's
 start and the previous frame's finish to the frame's finish, tail_ms from
 the later of its last scene's submission and that finish (most of gpu_ms
 when the GPU is the wall), interval_ms from the previous frame's finish;
-scale is the render rectangle it was drawn at. None on the null renderer */
+scale is the render rectangle it was drawn at, tag what vgxm_frame_tag
+said before its present (the GPU census's window: d3d8_gxm.c). None on the
+null renderer (but HALO_NULL_GPU_US_PER_DRAW's stand-in) */
 struct vgxm_gpu_frame
 {
 	unsigned long frame;
 	float gpu_ms, tail_ms, interval_ms, scale;
+	unsigned long tag;
 };
 void vgxm_frame_submit_begin(void);
+void vgxm_frame_tag(unsigned long tag);
 int vgxm_gpu_frame_next(struct vgxm_gpu_frame *frame);
 
 /* a line of the renderer's cache sizes (shaders, linked programs,

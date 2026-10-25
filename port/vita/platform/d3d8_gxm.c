@@ -4052,6 +4052,176 @@ static void blend_plan_note(const struct vgxm_draw *draw, const struct blend_pla
 		plan->exact ? "" : " (GXM's factors cannot make it: an approximation)");
 }
 
+/* ---------- the GPU census (a measuring tool, never for play)
+
+HALO_GPU_CENSUS=N: the GPU's time of each group of render phases, on the
+hardware. Windows of N frames (30 to 600; 1 = 90) take turns: one with
+every draw, then one with a group's draws left out (the worker skips the
+records of its phases), the next group after the next full window, round
+and round. Each skipping window's mean GPU time (vgxm_gpu_frame_next, the
+dynamic resolution's measure; its first 4 frames left out, the GPU being
+behind) is set against the full window just before it; every full round a
+"gpu-census:" line in halo.log gives each group's saving in ms and as a
+share of the full frame's time. The picture flickers - passes vanish a
+window at a time - so it is for a test run only, with the camera still or
+in a steady fight, the dynamic resolution held (HALO_DYNRES_FORCE) so the
+scale does not move under it. The lightmaps (the depth every later pass
+tests against) are never left out. */
+#define CENSUS_GROUPS 11
+static const char *const census_group_names[CENSUS_GROUPS] = {
+	"all", "fog", "reflections", "structure_diffuse", "lights", "decals", "effects", "transparents", "objects",
+	"sky+weather+detail", "hud+flash" };
+static struct
+{
+	int every;
+	/* (worker) the group skipped in the frame being recorded; each
+	presented frame's group by its number */
+	int active;
+	unsigned long presents;
+	/* the window being summed and its sums; the last full window's mean */
+	unsigned long window;
+	int window_group;
+	double window_sum;
+	unsigned long window_count, window_seen;
+	double baseline_mean;
+	/* the last skipping window, waiting for the full one after it */
+	int pending_group;
+	double pending_mean, pending_before;
+	/* per group: the savings summed, windows, and the baselines */
+	double saving_sum[CENSUS_GROUPS], baseline_sum[CENSUS_GROUPS];
+	unsigned long windows[CENSUS_GROUPS];
+	unsigned long rounds;
+} census = { -1 };
+
+static int census_group_of_phase(int phase)
+{
+	switch (phase)
+	{
+	case 13: return 1;
+	case 33: case 11: return 2;
+	case 8: return 3;
+	case 7: case 9: case 10: case 36: return 4;
+	case 37: case 38: case 39: case 40: return 5;
+	case 15: case 16: case 17: case 42: case 53: return 6;
+	case 3: case 6: return 8;
+	case 1: case 14: case 19: return 9;
+	case 20: case 22: case 29: case 30: case 31: return 10;
+	default:
+		if (phase == 12 || phase == 18 || phase == 35 || (phase >= 41 && phase <= 62))
+			return 7;
+		return 0;
+	}
+}
+
+static int census_skips(int phase)
+{
+	return census.active && census_group_of_phase(phase) == census.active;
+}
+
+static void census_window_done(void)
+{
+	double mean, before;
+	int group;
+
+	if (census.window_count < 4)
+		return;
+	mean = census.window_sum / (double)census.window_count;
+	if (getenv("HALO_GPU_CENSUS_LOG"))
+		platform_log("gpu-census window %lu: %s %.2f ms over %lu frames", census.window,
+			census_group_names[census.window_group], mean, census.window_count);
+	if (census.window_group)
+	{
+		/* (set against the full windows on both sides of it, when the one
+		after is done: the scene's drift cancels) */
+		census.pending_group = census.window_group;
+		census.pending_mean = mean;
+		census.pending_before = census.baseline_mean;
+		return;
+	}
+	group = census.pending_group;
+	census.pending_group = 0;
+	before = census.pending_before;
+	census.baseline_mean = mean;
+	if (!group || before <= 0.0)
+		return;
+	census.saving_sum[group] += (before + mean) / 2.0 - census.pending_mean;
+	census.baseline_sum[group] += (before + mean) / 2.0;
+	census.windows[group]++;
+	if (group == CENSUS_GROUPS - 1)
+	{
+		char line[1024];
+		int length = 0;
+		double baseline = 0.0;
+		unsigned long baselines = 0;
+
+		census.rounds++;
+		for (group = 1; group < CENSUS_GROUPS; group++)
+		{
+			baseline += census.baseline_sum[group];
+			baselines += census.windows[group];
+		}
+		baseline = baselines ? baseline / (double)baselines : 0.0;
+		for (group = 1; group < CENSUS_GROUPS && length < (int)sizeof(line) - 64; group++)
+		{
+			double saving = census.windows[group] ? census.saving_sum[group] / (double)census.windows[group] : 0.0;
+
+			length += snprintf(line + length, sizeof(line) - length, " | %s %.1f ms (%.0f%%)", census_group_names[group],
+				saving, baseline > 0.0 ? 100.0 * saving / baseline : 0.0);
+		}
+		platform_log("gpu-census (%d frames a window, %lu rounds, scale %.0f%%): all drawn %.1f ms%s", census.every,
+			census.rounds, (double)vgxm_render_rect() * 100.0, baseline, line);
+	}
+}
+
+/* (worker) a frame the GPU has finished, by its tag: the window (above 4
+bits) and the group it left out */
+static void census_measured(unsigned long tag, float gpu_ms)
+{
+	unsigned long window = tag >> 4;
+
+	if (census.every <= 0 || gpu_ms <= 0.0f || gpu_ms > 250.0f)
+		return;
+	if (window != census.window)
+	{
+		census_window_done();
+		census.window = window;
+		census.window_group = (int)(tag & 15);
+		census.window_sum = 0.0;
+		census.window_count = 0;
+		census.window_seen = 0;
+	}
+	/* (the window's first frames: the GPU still on the one before) */
+	if (++census.window_seen > 4)
+	{
+		census.window_sum += gpu_ms;
+		census.window_count++;
+	}
+}
+
+/* (worker, after each present) the group the next frame leaves out, and
+its tag */
+static void census_frame_end(void)
+{
+	unsigned long window;
+
+	if (census.every < 0)
+	{
+		const char *setting = getenv("HALO_GPU_CENSUS");
+		int every = setting ? atoi(setting) : 0;
+
+		census.every = every == 1 ? 90 : every < 30 ? 0 : every > 600 ? 600 : every;
+		if (census.every)
+			platform_log("gpu-census: on, %d frames a window: passes left out a window at a time (a measuring run)",
+				census.every);
+	}
+	if (!census.every)
+		return;
+	census.presents++;
+	window = census.presents / (unsigned long)census.every;
+	census.active = (window & 1) ? (int)((window / 2) % (CENSUS_GROUPS - 1)) + 1 : 0;
+	vgxm_frame_tag(window << 4 | (unsigned long)census.active);
+}
+
 static void execute_draw(struct render_command *command)
 {
 	struct vgxm_draw *draw = &command->draw;
@@ -4065,6 +4235,8 @@ static void execute_draw(struct render_command *command)
 
 	unsigned long long profile_from;
 
+	if (census.active && census_skips(command->phase))
+		return;
 	worker_sampled = draw_profile_on() && ++worker_counter % (unsigned long)draw_profile == 0;
 	if (worker_sampled)
 		worker_profile_draws++;
@@ -4343,6 +4515,7 @@ static void write_screenshot(struct render_target_entry *target);
 static void write_display_screenshot(unsigned long frame);
 int halo_trace_active(void);
 static void dynres_frame_end(void);
+static void census_frame_end(void);
 
 /* a draw record as the render_command execute_draw runs (worker-local,
 hot): the record's parts, and a full record's own */
@@ -4474,6 +4647,8 @@ static void execute_command(struct render_record *command)
 			platform_log("trace: worker presented %lu", command->present.frame);
 		/* (the next frame's render scale, between the two) */
 		dynres_frame_end();
+		if (back_buffer)
+			census_frame_end();
 		render_target_atlas_frame_end();
 		{
 			/* (the census during play: cdram_census) */
@@ -6207,8 +6382,14 @@ static void dynres_frame_end(void)
 			lowered = 1;
 		}
 		while (vgxm_gpu_frame_next(&frame))
-			if (!dynres.sim_ms && !lowered)
+		{
+			/* (the GPU census holds the scale: its windows' times are
+			compared) */
+			if (!dynres.sim_ms && !lowered && census.every <= 0)
 				level = dynres_measured(frame.gpu_ms, frame.tail_ms, dynres_level_of(frame.scale), frame.interval_ms);
+			if (!lowered)
+				census_measured(frame.tag, frame.gpu_ms);
+		}
 	}
 	if (dynres.sim_ms)
 	{

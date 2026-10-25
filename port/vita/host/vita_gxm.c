@@ -250,7 +250,10 @@ static struct
 	unsigned int begin_us, end_us;
 	volatile unsigned int done_us;
 	float scale;
+	unsigned long tag;
 } frame_timing[FRAME_TIMING_SLOTS];
+/* (vgxm_frame_tag: the next present's) */
+static unsigned long frame_tag_next;
 /* the newest frame the callback has stamped, the newest measured, and
 the start of the submission under way (0: the last present's end) */
 static volatile unsigned int frame_timing_done;
@@ -5917,6 +5920,11 @@ void vgxm_frame_submit_begin(void)
 compiled), not its work: the overlay's average leaves it out */
 #define GPU_FRAME_STALL_US 250000u
 
+void vgxm_frame_tag(unsigned long tag)
+{
+	frame_tag_next = tag;
+}
+
 int vgxm_gpu_frame_next(struct vgxm_gpu_frame *frame)
 {
 	unsigned int done = __atomic_load_n(&frame_timing_done, __ATOMIC_ACQUIRE), next, previous_done, start, end;
@@ -5944,6 +5952,7 @@ int vgxm_gpu_frame_next(struct vgxm_gpu_frame *frame)
 	frame->tail_ms = (int)(done - end) > 0 ? (done - end) / 1000.0f : 0.0f;
 	frame->interval_ms = previous_done && (int)(done - previous_done) > 0 ? (done - previous_done) / 1000.0f : 0.0f;
 	frame->scale = frame_timing[next % FRAME_TIMING_SLOTS].scale;
+	frame->tag = frame_timing[next % FRAME_TIMING_SLOTS].tag;
 	if (frame->gpu_ms * 1000.0f < GPU_FRAME_STALL_US)
 		gpu_ms_average = gpu_ms_average > 0.0f ? gpu_ms_average * 0.9f + frame->gpu_ms * 0.1f : frame->gpu_ms;
 	return 1;
@@ -6268,6 +6277,7 @@ void vgxm_present(unsigned long color_target, unsigned long width, unsigned long
 		frame_timing[slot].end_us = now;
 		frame_timing[slot].done_us = 0;
 		frame_timing[slot].scale = render_rect_get();
+		frame_timing[slot].tag = frame_tag_next;
 		frame_last_end_us = now;
 		frame_submit_begun = 0;
 	}
