@@ -125,7 +125,12 @@ struct nv2a_pixel_shader_key
 	mode: the program returns the border colour, D3DCOLOR, outside the
 	texture) */
 	unsigned char border_mask;
-	unsigned char border_pad[3];
+	/* (Vita) the alpha test without a discard: a fragment failing it
+	returns a colour the draw's blend leaves the target unchanged with -
+	1 zero (ONE or INVSRCALPHA or INVSRCCOLOR destination factor),
+	2 one (a plain multiply) - d3d8_gxm.c alpha_test_neutral; 0 discard */
+	unsigned char alpha_test_neutral;
+	unsigned char border_pad[2];
 	DWORD border_color[4];
 };
 

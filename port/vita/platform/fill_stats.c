@@ -52,6 +52,11 @@ struct fill_phase
 	double draws, triangles, covered, passed, blended, hidden_draws, offscreen_draws;
 };
 static struct fill_phase phases[FILL_PHASES][2];
+/* the main target's samples shaded by draws whose fragment program keeps a
+discard (set by d3d8_gxm.c for each draw: the tile renderer's early
+visibility lost for the draw) */
+int halo_fill_stats_discard;
+static double discard_samples;
 
 /* particles' triangles by size (pixels): count and pixels */
 #define SIZE_BINS 7
@@ -669,6 +674,8 @@ void halo_fill_stats_draw(const struct vgxm_draw *draw, const DWORD *instruction
 		stats->passed += raster.passed;
 		if (draw->blend)
 			stats->blended += raster.passed;
+		if (halo_fill_stats_discard && main_target)
+			discard_samples += raster.passed;
 	}
 	if (!raster.covered)
 		stats->offscreen_draws++;
@@ -695,6 +702,7 @@ void halo_fill_stats_present(unsigned long color_id, unsigned long width, unsign
 		/* the presented target is the main one: (re)start the counts */
 		main_color_id = color_id;
 		main_area = (double)width * height;
+		discard_samples = 0;
 		memset(phases, 0, sizeof(phases));
 		memset(size_bin_count, 0, sizeof(size_bin_count));
 		memset(alpha_bin_pixels, 0, sizeof(alpha_bin_pixels));
@@ -716,9 +724,9 @@ void halo_fill_stats_present(unsigned long color_id, unsigned long width, unsign
 			total[3] += phases[phase][1].passed;
 		}
 		platform_log("fill-stats (%lu frames, main target %.0fx%.0f px, in screens/frame): covered %.2f shaded %.2f "
-			"blended %.2f | other targets shaded %.2f screens",
+			"blended %.2f | other targets shaded %.2f screens | with a discard %.2f",
 			fill_sampled_frames, (double)width, (double)height, total[0] / samples_per_screen, total[1] / samples_per_screen,
-			total[2] / samples_per_screen, total[3] / samples_per_screen);
+			total[2] / samples_per_screen, total[3] / samples_per_screen, discard_samples / samples_per_screen);
 		for (target = 0; target < 2; target++)
 		{
 			length = 0;
@@ -750,6 +758,7 @@ void halo_fill_stats_present(unsigned long color_id, unsigned long width, unsign
 		platform_log("fill-sky-order: %.0f samples a frame coloured at the cleared depth without covering it before the late sky",
 			sky_order_samples / fill_sampled_frames);
 		sky_order_samples = 0;
+		discard_samples = 0;
 		memset(alpha_bin_pixels, 0, sizeof(alpha_bin_pixels));
 		memset(phases, 0, sizeof(phases));
 		memset(size_bin_count, 0, sizeof(size_bin_count));

@@ -633,7 +633,8 @@ static struct gxm_device device;
 
 static struct
 {
-	unsigned long draws, immediate_draws, clears, presents, self_sampled, computed_draws, alpha_tested_draws, dropped_alpha_tests;
+	unsigned long draws, immediate_draws, clears, presents, self_sampled, computed_draws, alpha_tested_draws, dropped_alpha_tests,
+		neutral_alpha_tests;
 	/* blended draws left out for sampling a texture still loading (draw_samples_stand_in) */
 	unsigned long stand_in_draws_left_out;
 	/* draws whose state (key, textures, samplers, render states) equals the previous draw's: what a delta record could skip */
@@ -3711,6 +3712,78 @@ static void worker_build_frame_end(void)
 	worker_build.fragment_valid = FALSE;
 }
 
+/* HALO_ALPHA_TEST_NEUTRAL (default 1; 0 = every kept alpha test a
+discard, as before): an alpha-tested draw that writes neither depth nor
+stencil and counts for no visibility test, whose blend leaves the target as
+it was for some source colour, has its test made a select in place of a
+discard - a failing fragment returns that colour (zero for a blend whose
+destination factor is ONE, INVSRCALPHA or INVSRCCOLOR, as the source's
+factor times zero adds nothing; one for a plain multiply, ZERO/SRCCOLOR or
+DESTCOLOR/ZERO). The image is the same: the discarded fragment changed
+nothing either. A discard costs the tile renderer the whole draw's early
+visibility; the draws this keeps from one are the atmospheric fog's pass
+over the whole structure (ONE/INVSRCALPHA with the test at 0, the fog's
+colour scaled by its density), which the source-alpha rule
+(record_draw) cannot drop, and the like. The constant blend factors
+(blend_constant.h) keep their discard. Returns the key's
+alpha_test_neutral: 0, 1 (zero) or 2 (one). */
+static unsigned char alpha_test_neutral(const struct render_command *command, const struct vgxm_draw *draw)
+{
+	static int enabled = -1;
+	unsigned long source = draw->blend_source, destination = draw->blend_destination;
+	unsigned short segment;
+
+	if (enabled < 0)
+	{
+		const char *setting = getenv("HALO_ALPHA_TEST_NEUTRAL");
+
+		enabled = !(setting && atoi(setting) == 0);
+	}
+	if (!enabled || !command->key.alpha_test_function || command->key.blend_fold || !draw->blend ||
+		draw->depth_write || command->key.count_samples)
+		return 0;
+	if (draw->stencil_test && (draw->stencil_write_mask & 0xff) && (draw->stencil_pass != D3DSTENCILOP_KEEP ||
+		draw->stencil_fail != D3DSTENCILOP_KEEP || draw->stencil_depth_fail != D3DSTENCILOP_KEEP))
+		return 0;
+	if (draw->visibility_index)
+		return 0;
+	for (segment = 0; segment < command->segment_count; segment++)
+	{
+		if (command->segments && command->segments[segment].visibility_index)
+			return 0;
+	}
+	/* (a source factor that is not a constant's) */
+	switch (source)
+	{
+	case D3DBLEND_ZERO:
+	case D3DBLEND_ONE:
+	case D3DBLEND_SRCCOLOR:
+	case D3DBLEND_INVSRCCOLOR:
+	case D3DBLEND_SRCALPHA:
+	case D3DBLEND_INVSRCALPHA:
+	case D3DBLEND_DESTALPHA:
+	case D3DBLEND_INVDESTALPHA:
+	case D3DBLEND_DESTCOLOR:
+	case D3DBLEND_INVDESTCOLOR:
+	case D3DBLEND_SRCALPHASAT:
+		break;
+	default:
+		return 0;
+	}
+	if ((destination == D3DBLEND_ONE || destination == D3DBLEND_INVSRCALPHA || destination == D3DBLEND_INVSRCCOLOR) &&
+		(draw->blend_operation == D3DBLENDOP_ADD || draw->blend_operation == D3DBLENDOP_REVSUBTRACT ||
+			draw->blend_operation == D3DBLENDOP_MAX))
+	{
+		/* (dst * 1 +- src * f with src zero; max(zero, dst)) */
+		return 1;
+	}
+	if (draw->blend_operation == D3DBLENDOP_ADD &&
+		((source == D3DBLEND_ZERO && destination == D3DBLEND_SRCCOLOR) ||
+			(source == D3DBLEND_DESTCOLOR && destination == D3DBLEND_ZERO)))
+		return 2;
+	return 0;
+}
+
 static BOOL worker_build_record(struct render_command *command)
 {
 	const struct record_state *state = command->state;
@@ -3893,6 +3966,17 @@ static BOOL worker_build_record(struct render_command *command)
 
 static void fill_stats_draw(const struct render_command *command, const struct vgxm_draw *draw)
 {
+	extern int halo_fill_stats_discard;
+	int stage;
+
+	/* (the draws whose fragment program keeps a discard: the alpha test's,
+	or a stage's alpha kill) */
+	halo_fill_stats_discard = command->key.alpha_test_function && !command->key.alpha_test_neutral;
+	for (stage = 0; stage < 4; stage++)
+	{
+		if (command->key.alpha_kill[stage])
+			halo_fill_stats_discard = 1;
+	}
 	halo_fill_stats_draw(draw, command->program->instructions, command->program->instruction_count,
 		command->program->input_mask, command->immediate ? 0 : command->packed_mask,
 		command->immediate ? 0 : command->color_mask, command->phase,
@@ -4026,6 +4110,8 @@ static void execute_draw(struct render_command *command)
 			memcpy(copy[VITA_FU_TEXTURE_SCALE - VITA_FU_A_COUNT + stage], texture_scale[stage], sizeof(float) * 4);
 		draw->fragment_uniforms[1] = copy;
 	}
+	if ((command->key.alpha_test_neutral = alpha_test_neutral(command, draw)) != 0)
+		stats.neutral_alpha_tests++;
 	if (draw->blend)
 		blend_passes = blend_constant_plan(draw->blend_source, draw->blend_destination, draw->blend_operation,
 			draw->color_write, draw->blend_color, &blend_plan);
@@ -9229,7 +9315,7 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 	{
 		platform_log("frame %lu: %lu draws, %lu immediate, %lu clears, %lu target changes; skipped %lu no program, "
 			"%lu no target, %lu shader; %lu same-state; %lu KB copied (streams %lu, immediate %lu, indices %lu) + %lu KB uniforms, %lu KB direct, %lu KB textures; record %.3f ms/frame, "
-			"worker %.3f ms/frame (draw %.2f clear %.2f present %.2f), wait at present %.2f ms/frame; %lu vertex + %lu fragment uniform snapshots/frame; %s; %lu self-sampled draws/frame, %lu computed-coordinate draws/frame, alpha tests kept %lu dropped %lu per frame",
+			"worker %.3f ms/frame (draw %.2f clear %.2f present %.2f), wait at present %.2f ms/frame; %lu vertex + %lu fragment uniform snapshots/frame; %s; %lu self-sampled draws/frame, %lu computed-coordinate draws/frame, alpha tests kept %lu dropped %lu per frame (%lu kept without a discard)",
 			device.frame, stats.draws / stats.presents, stats.immediate_draws / stats.presents,
 			stats.clears / stats.presents, stats.target_changes / stats.presents, stats.skipped_no_program,
 			stats.skipped_no_target, stats.skipped_shader, stats.same_state_draws / stats.presents,
@@ -9243,7 +9329,8 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 			present_wait_time / 1000.0 / stats.presents,
 			stats.vertex_snapshots / stats.presents, stats.fragment_snapshots / stats.presents, vgxm_counts(),
 			stats.self_sampled / stats.presents, stats.computed_draws / stats.presents,
-			stats.alpha_tested_draws / stats.presents, stats.dropped_alpha_tests / stats.presents);
+			stats.alpha_tested_draws / stats.presents, stats.dropped_alpha_tests / stats.presents,
+			stats.neutral_alpha_tests / stats.presents);
 		{
 			char line[256];
 			int n = 0, source, destination;

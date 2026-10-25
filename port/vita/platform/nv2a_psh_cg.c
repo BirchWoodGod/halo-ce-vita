@@ -762,7 +762,16 @@ char *nv2a_pixel_shader_to_cg(const struct nv2a_pixel_shader_key *key)
 	{
 		const char *comparison = comparison_operator(key->alpha_test_function);
 
-		if (!comparison)
+		if (key->alpha_test_neutral && comparison && *comparison && !key->blend_fold)
+		{
+			/* (no discard - it costs the tile renderer the whole draw's
+			early visibility: d3d8_gxm.c alpha_test_neutral) a failing
+			fragment returns what its blend leaves the target unchanged
+			with */
+			xgpu_text_append(&text, "\tif (!(floor(saturate((float)result.a) * 255.0 + 0.5) %s %s.x)) result = %s(%s);\n",
+				comparison, fu(VITA_FU_MISCELLANEOUS), H4, key->alpha_test_neutral == 2 ? "1.0" : "0.0");
+		}
+		else if (!comparison)
 			xgpu_text_append(&text, "\tdiscard;\n");
 		else if (*comparison)
 			xgpu_text_append(&text, "\tif (!(floor(saturate((float)result.a) * 255.0 + 0.5) %s %s.x)) discard;\n",
