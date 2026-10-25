@@ -98,19 +98,40 @@ int vita_host_thread_start_priority(const char *name, void (*function)(void *), 
 }
 
 /* (vita_host.h) the Vita's kernel semaphores as POSIX ones */
-#define WAKE_COUNT 16
+#define WAKE_COUNT 1024
 #define WAKE_MAXIMUM 8
 static sem_t wakes[WAKE_COUNT];
-static int wake_count;
+/* the slots taken (halo_cond.h's come and go with the Xbox handles) */
+static unsigned char wake_used[WAKE_COUNT];
+static pthread_mutex_t wake_slots = PTHREAD_MUTEX_INITIALIZER;
 
 int vita_host_wake_create(const char *name)
 {
-	int id = __atomic_fetch_add(&wake_count, 1, __ATOMIC_ACQ_REL);
+	int id;
 
 	(void)name;
-	if (id >= WAKE_COUNT || sem_init(&wakes[id], 0, 0) != 0)
-		return -1;
+	pthread_mutex_lock(&wake_slots);
+	for (id = 0; id < WAKE_COUNT && wake_used[id]; id++)
+		;
+	if (id < WAKE_COUNT && sem_init(&wakes[id], 0, 0) == 0)
+		wake_used[id] = 1;
+	else
+		id = -1;
+	pthread_mutex_unlock(&wake_slots);
 	return id;
+}
+
+void vita_host_wake_delete(int id)
+{
+	if (id < 0 || id >= WAKE_COUNT)
+		return;
+	pthread_mutex_lock(&wake_slots);
+	if (wake_used[id])
+	{
+		sem_destroy(&wakes[id]);
+		wake_used[id] = 0;
+	}
+	pthread_mutex_unlock(&wake_slots);
 }
 
 int vita_host_wake_wait(int id, unsigned long timeout_us)

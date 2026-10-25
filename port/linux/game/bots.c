@@ -292,6 +292,7 @@ and left, the defenders' posts. The map's teleporters are logged once.
 
 #include <math.h>
 #include <pthread.h>
+#include "halo_cond.h"
 #include <stdio.h>
 #include <sched.h>
 #include <stdlib.h>
@@ -1169,11 +1170,11 @@ static struct
 	boolean synchronous;
 	pthread_t thread;
 	pthread_mutex_t lock;
-	pthread_cond_t wake;
+	halo_cond_t wake;
 	volatile long pending;
 	volatile long generation;
 	volatile unsigned long long helper_us;
-} bots_helper = { FALSE, FALSE, 0, PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, 0, 0, 0 };
+} bots_helper = { FALSE, FALSE, 0, PTHREAD_MUTEX_INITIALIZER, HALO_COND_INITIALIZER, 0, 0, 0 };
 
 /* (HALO_TICK_PROFILE) the bots' tick by part, and the rays they cast, for
 halo.log's bots line */
@@ -3498,7 +3499,7 @@ static void *bots_helper_main(void *argument)
 
 		pthread_mutex_lock(&bots_helper.lock);
 		while (!bots_helper.pending)
-			pthread_cond_wait(&bots_helper.wake, &bots_helper.lock);
+			halo_cond_wait(&bots_helper.wake, &bots_helper.lock);
 		bots_helper.pending = 0;
 		pthread_mutex_unlock(&bots_helper.lock);
 		for (index = 0; index < BOTS_SEARCH_SLOTS; index++)
@@ -3743,7 +3744,7 @@ static void bots_search_ask(struct bots_bot *bot, long unit_index)
 	pthread_mutex_lock(&bots_helper.lock);
 	search->state = _bots_search_waiting;
 	bots_helper.pending = 1;
-	pthread_cond_signal(&bots_helper.wake);
+	halo_cond_signal(&bots_helper.wake);
 	pthread_mutex_unlock(&bots_helper.lock);
 }
 

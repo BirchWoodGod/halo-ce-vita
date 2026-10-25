@@ -5,6 +5,8 @@ Win32/XAPI kernel services for the Linux build: handles, events, mutexes,
 threads, asynchronous procedure calls, time, memory and debug output.
 */
 
+/* (halo_cond_timedwait: WaitForSingleObjectEx) */
+#define HALO_COND_TIMED
 #include "platform.h"
 
 #include <errno.h>
@@ -139,7 +141,7 @@ struct platform_handle *platform_handle_new(long type, void *data,
 	pthread_mutexattr_init(&attributes);
 	pthread_mutex_init(&handle->lock, &attributes);
 	pthread_mutexattr_destroy(&attributes);
-	pthread_cond_init(&handle->condition, NULL);
+	halo_cond_init(&handle->condition);
 	return handle;
 }
 
@@ -163,7 +165,7 @@ void platform_handle_signal(struct platform_handle *handle)
 {
 	pthread_mutex_lock(&handle->lock);
 	handle->signaled = TRUE;
-	pthread_cond_broadcast(&handle->condition);
+	halo_cond_broadcast(&handle->condition);
 	pthread_mutex_unlock(&handle->lock);
 }
 
@@ -183,7 +185,7 @@ BOOL WINAPI CloseHandle(HANDLE object)
 	if (handle->destroy)
 		handle->destroy(handle);
 	handle->signature = 0;
-	pthread_cond_destroy(&handle->condition);
+	halo_cond_destroy(&handle->condition);
 	pthread_mutex_destroy(&handle->lock);
 	free(handle);
 	return TRUE;
@@ -302,9 +304,9 @@ DWORD WINAPI WaitForSingleObjectEx(HANDLE object, DWORD milliseconds, BOOL alert
 		}
 		if (milliseconds == INFINITE)
 		{
-			pthread_cond_wait(&handle->condition, &handle->lock);
+			halo_cond_wait(&handle->condition, &handle->lock);
 		}
-		else if (pthread_cond_timedwait(&handle->condition, &handle->lock, &deadline) == ETIMEDOUT)
+		else if (halo_cond_timedwait(&handle->condition, &handle->lock, &deadline) == ETIMEDOUT)
 		{
 			if (!handle_try_acquire(handle))
 				result = WAIT_TIMEOUT;
@@ -394,7 +396,7 @@ BOOL WINAPI ReleaseMutex(HANDLE mutex)
 	if (handle->recursion > 0 && pthread_equal(handle->owner, pthread_self()))
 	{
 		if (--handle->recursion == 0)
-			pthread_cond_broadcast(&handle->condition);
+			halo_cond_broadcast(&handle->condition);
 		result = TRUE;
 	}
 	else
@@ -511,7 +513,7 @@ static void thread_release(struct platform_handle *handle)
 	{
 		handle->signature = 0;
 		free(thread);
-		pthread_cond_destroy(&handle->condition);
+		halo_cond_destroy(&handle->condition);
 		pthread_mutex_destroy(&handle->lock);
 		free(handle);
 	}
@@ -526,7 +528,7 @@ static void *thread_main(void *context)
 
 	pthread_mutex_lock(&handle->lock);
 	while (thread->suspended)
-		pthread_cond_wait(&handle->condition, &handle->lock);
+		halo_cond_wait(&handle->condition, &handle->lock);
 	pthread_mutex_unlock(&handle->lock);
 
 	exit_code = thread->start(thread->parameter);
@@ -535,14 +537,14 @@ static void *thread_main(void *context)
 	thread->exit_code = exit_code;
 	thread->finished = TRUE;
 	handle->signaled = TRUE;
-	pthread_cond_broadcast(&handle->condition);
+	halo_cond_broadcast(&handle->condition);
 	free_now = thread->closed;
 	pthread_mutex_unlock(&handle->lock);
 	if (free_now)
 	{
 		handle->signature = 0;
 		free(thread);
-		pthread_cond_destroy(&handle->condition);
+		halo_cond_destroy(&handle->condition);
 		pthread_mutex_destroy(&handle->lock);
 		free(handle);
 	}
@@ -606,7 +608,7 @@ DWORD WINAPI ResumeThread(HANDLE object)
 	pthread_mutex_lock(&handle->lock);
 	previous = thread->suspended ? 1 : 0;
 	thread->suspended = FALSE;
-	pthread_cond_broadcast(&handle->condition);
+	halo_cond_broadcast(&handle->condition);
 	pthread_mutex_unlock(&handle->lock);
 	return previous;
 }

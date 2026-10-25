@@ -62,6 +62,7 @@ each one, and their vertices read from the file as they load
 #include "memory/zlib/zlib.h"
 
 #include <pthread.h>
+#include "halo_cond.h"
 #include <stdlib.h>
 
 /* ---------- constants */
@@ -295,13 +296,13 @@ enum
 static struct
 {
 	pthread_mutex_t lock;
-	pthread_cond_t wake;
+	halo_cond_t wake;
 	boolean started;
 	boolean failed;
 	struct custom_edition_read_job *queue[LOAD_READ_QUEUE_LENGTH];
 	short head;
 	short count;
-} load_reader = { PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER };
+} load_reader = { PTHREAD_MUTEX_INITIALIZER, HALO_COND_INITIALIZER };
 
 /* the model data's pieces whose CRC-32 (from 0) the reader took, in order,
 none touching another (model_checksum_take); only the reader writes them
@@ -475,7 +476,7 @@ static void *load_reader_thread(
 
 		while (!load_reader.count)
 		{
-			pthread_cond_wait(&load_reader.wake, &load_reader.lock);
+			halo_cond_wait(&load_reader.wake, &load_reader.lock);
 		}
 		job = load_reader.queue[load_reader.head];
 		load_reader.head = (short)((load_reader.head + 1) % LOAD_READ_QUEUE_LENGTH);
@@ -539,7 +540,7 @@ void custom_edition_read_job_submit(
 		{
 			load_reader.queue[(load_reader.head + load_reader.count) % LOAD_READ_QUEUE_LENGTH] = job;
 			load_reader.count++;
-			pthread_cond_signal(&load_reader.wake);
+			halo_cond_signal(&load_reader.wake);
 			pthread_mutex_unlock(&load_reader.lock);
 			return;
 		}

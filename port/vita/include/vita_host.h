@@ -93,6 +93,8 @@ int vita_host_wake_poll(int id);
 /* one signal given (none past the semaphore's most, 8: a waiter is woken
 by any) */
 void vita_host_wake_signal(int id);
+/* the semaphore deleted (halo_cond.h's, as a condition variable goes) */
+void vita_host_wake_delete(int id);
 
 /* ---------- the clocks (port/vita/host/vita_clocks.c) */
 

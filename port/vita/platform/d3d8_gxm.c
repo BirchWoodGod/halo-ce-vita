@@ -19,6 +19,7 @@ the game gave their surface, as in the OpenGL device.
 #include "dynamic_resolution.h"
 #include "blend_constant.h"
 #include "sdl_platform.h"
+#include "halo_cond.h"
 #include "halo_ui_pointer.h"
 #include "port_config.h"
 
@@ -853,7 +854,7 @@ static void *ring_copy(const void *data, unsigned long size)
 #define VERTICAL_BLANK_NANOSECONDS (1000000000L / 60)
 
 static pthread_mutex_t vertical_blank_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t vertical_blank_condition = PTHREAD_COND_INITIALIZER;
+static halo_cond_t vertical_blank_condition = HALO_COND_INITIALIZER;
 static D3DCALLBACK vertical_blank_callback;
 static unsigned long vertical_blank_count;
 static volatile unsigned int flip_count;
@@ -886,7 +887,7 @@ static void *vertical_blank_thread(void *unused)
 			flip_count++;
 		}
 		callback = vertical_blank_callback;
-		pthread_cond_broadcast(&vertical_blank_condition);
+		halo_cond_broadcast(&vertical_blank_condition);
 		pthread_mutex_unlock(&vertical_blank_lock);
 
 		if (callback)
@@ -936,7 +937,7 @@ void WINAPI D3DDevice_BlockUntilVerticalBlank(void)
 	pthread_mutex_lock(&vertical_blank_lock);
 	count = vertical_blank_count;
 	while (vertical_blank_count == count)
-		pthread_cond_wait(&vertical_blank_condition, &vertical_blank_lock);
+		halo_cond_wait(&vertical_blank_condition, &vertical_blank_lock);
 	pthread_mutex_unlock(&vertical_blank_lock);
 }
 
@@ -2965,15 +2966,23 @@ publisher between its publish and its signal: `woken_at`, the publish a
 signal was given for, says which) - counted and logged, none is expected.
 Without a semaphore (none could be made) the waits sleep 50 us at a time,
 as before. */
-struct worker_waiter
+/* (the fields the two threads' atomics share are of explicitly aligned
+types, and the structure too: under -fmax-type-align=1 a plain one,
+reached through the waiter's pointer, made __atomic_exchange_n a call to
+vita_stubs.c's generic lock, not atomic with the inline __atomic_add_fetch
+on the same word - a sleeper counted and then cleared unseen, its wake-up
+lost to the 100 ms timeout) */
+typedef volatile int waiter_aligned_int __attribute__((aligned(4)));
+typedef volatile unsigned long waiter_aligned_ulong __attribute__((aligned(4)));
+struct __attribute__((aligned(4))) worker_waiter
 {
-	volatile int sleepers;
+	waiter_aligned_int sleepers;
 	int wake;
 	const char *name;
 	/* the publishes it waits on, counted (command_head, frames_presented),
 	and the count the last signal was given at */
 	unsigned long (*published)(void);
-	volatile unsigned long woken_at;
+	waiter_aligned_ulong woken_at;
 	/* sleeps, the ones that ran out of time, the signals that came after
 	the time ran out, the lost wake-ups */
 	unsigned long sleeps, timeouts, late, lost;
@@ -9322,7 +9331,7 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 	vertical_blank_start();
 	pthread_mutex_lock(&vertical_blank_lock);
 	while (pending_flips >= 2)
-		pthread_cond_wait(&vertical_blank_condition, &vertical_blank_lock);
+		halo_cond_wait(&vertical_blank_condition, &vertical_blank_lock);
 	pending_flips++;
 	pthread_mutex_unlock(&vertical_blank_lock);
 }
