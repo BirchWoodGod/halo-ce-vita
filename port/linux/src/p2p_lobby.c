@@ -1711,7 +1711,10 @@ static void other_take(const struct queued *queued, const struct listing *listin
 	}
 	if (!other)
 	{
-		/* (the room of one gone longest, if there is none free) */
+		/* (with none free, the room of the oldest version's, the one heard
+		longest ago of those: the public lists hold more than OTHER_GAMES,
+		ChupathingyCE's servers each under a dozen old versions; none if this
+		one's version is older still) */
 		for (index = 0; index < OTHER_GAMES && lobby.others[index].used; index++)
 			;
 		if (index == OTHER_GAMES)
@@ -1720,9 +1723,16 @@ static void other_take(const struct queued *queued, const struct listing *listin
 
 			for (index = 1; index < OTHER_GAMES; index++)
 			{
-				if ((long)(lobby.others[index].heard_time - lobby.others[oldest].heard_time) < 0)
+				const struct other_game *at = &lobby.others[index], *was = &lobby.others[oldest];
+
+				if (at->listing.version < was->listing.version || (at->listing.version == was->listing.version &&
+					(long)(at->heard_time - was->heard_time) < 0))
+				{
 					oldest = index;
+				}
 			}
+			if (listing->version < lobby.others[oldest].listing.version)
+				return;
 			index = oldest;
 		}
 		other = &lobby.others[index];

@@ -63,6 +63,10 @@ static int entry_order(
 	version, greyed: p2p_lobby_other_entries) */
 	if ((a->compatible != 0) != (b->compatible != 0))
 		return (b->compatible != 0) - (a->compatible != 0);
+	/* (those by players: the newest version first - a host announcing one
+	server under many versions, ChupathingyCE's, shows its old ones last) */
+	if (!a->compatible && sort_chosen == _browser_sort_players && a->version != b->version)
+		return b->version - a->version;
 	switch (sort_chosen)
 	{
 	case _browser_sort_name:
