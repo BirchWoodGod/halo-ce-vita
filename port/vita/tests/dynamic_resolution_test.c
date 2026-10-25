@@ -267,6 +267,49 @@ int main(void)
 		100.0f * run.over_budget / run.frames);
 	check(100.0f * run.over_budget / run.frames < 5.0f, "a fight coming and going: under 5% of frames over the budget");
 
+	/* ---------- the fight floor (Balanced: floor 63%, fights 50%): the
+	Pillar of Autumn's fights on the owner's Vita, Oct 25 2026 - at the 63%
+	floor still 36-45 ms of GPU (as fixed 8 + pixels 80 x scale^2) */
+	dynres_controller_init(&controller, 20, 32, budget);
+	dynres_controller_fight_floor(&controller, 16);
+	run_reset(&run, &controller);
+	simulate(&controller, &run, 30 * 2, 8.0f, 80.0f, 0.05f, 0.8f, 20.0f);
+	check(controller.level < 20 && controller.level >= 16, "a fight the floor cannot hold: under the floor within 2 s");
+	run_reset(&run, &controller);
+	simulate(&controller, &run, 30 * 30, 8.0f, 80.0f, 0.05f, 0.8f, 20.0f);
+	printf("  under the floor, 30 s: levels %d..%d, %d changes, GPU mean %.1f ms, %.1f%% frames over the budget\n",
+		run.minimum, run.maximum, run.changes, run.gpu_sum / run.frames, 100.0f * run.over_budget / run.frames);
+	check(run.minimum >= 16 && run.gpu_sum / run.frames < budget && run.changes <= 8,
+		"under the floor: never under the fight floor, the GPU within the budget, steady");
+	run_reset(&run, &controller);
+	simulate(&controller, &run, 30 * 10, 0.0f, 20.0f, 0.05f, 0.8f, 20.0f);
+	check(controller.level >= 26, "the fight over: back above the floor within 10 s");
+	run_reset(&run, &controller);
+	simulate(&controller, &run, 30 * 10, 0.0f, 150.0f, 0.0f, 0.8f, 20.0f);
+	check(controller.level == 16, "an impossible scene: held at the fight floor");
+	/* (a fight the floor holds: never under it) */
+	dynres_controller_init(&controller, 20, 32, budget);
+	dynres_controller_fight_floor(&controller, 16);
+	run_reset(&run, &controller);
+	simulate(&controller, &run, 30 * 30, 0.0f, 70.0f, 0.05f, 0.8f, 20.0f);
+	check(run.minimum >= 20, "a fight the floor holds (27 ms there): never under the floor");
+	/* (a spike now and then at the floor: not under it) */
+	dynres_controller_init(&controller, 20, 32, budget);
+	dynres_controller_fight_floor(&controller, 16);
+	run_reset(&run, &controller);
+	for (frame = 0; frame < 20; frame++)
+	{
+		simulate(&controller, &run, 3, 8.0f, 120.0f, 0.0f, 0.8f, 20.0f);
+		simulate(&controller, &run, 27, 0.0f, 70.0f, 0.0f, 0.8f, 20.0f);
+	}
+	check(run.minimum >= 20, "a spike of 3 frames a second at the floor: never under it");
+	/* (none: the floor as before) */
+	dynres_controller_init(&controller, 20, 32, budget);
+	dynres_controller_fight_floor(&controller, 0);
+	run_reset(&run, &controller);
+	simulate(&controller, &run, 30 * 10, 8.0f, 80.0f, 0.05f, 0.8f, 20.0f);
+	check(run.minimum == 20, "no fight floor: held at the floor");
+
 	printf("-- %d of %d checks failed\n", failures, checks);
 	return failures != 0;
 }

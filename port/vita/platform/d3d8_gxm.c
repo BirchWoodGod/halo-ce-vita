@@ -634,7 +634,8 @@ static struct gxm_device device;
 
 static struct
 {
-	unsigned long draws, immediate_draws, clears, presents, self_sampled, computed_draws, alpha_tested_draws, dropped_alpha_tests;
+	unsigned long draws, immediate_draws, clears, presents, self_sampled, computed_draws, alpha_tested_draws, dropped_alpha_tests,
+		neutral_alpha_tests;
 	/* blended draws left out for sampling a texture still loading (draw_samples_stand_in) */
 	unsigned long stand_in_draws_left_out;
 	/* draws whose state (key, textures, samplers, render states) equals the previous draw's: what a delta record could skip */
@@ -3720,6 +3721,78 @@ static void worker_build_frame_end(void)
 	worker_build.fragment_valid = FALSE;
 }
 
+/* HALO_ALPHA_TEST_NEUTRAL (default 1; 0 = every kept alpha test a
+discard, as before): an alpha-tested draw that writes neither depth nor
+stencil and counts for no visibility test, whose blend leaves the target as
+it was for some source colour, has its test made a select in place of a
+discard - a failing fragment returns that colour (zero for a blend whose
+destination factor is ONE, INVSRCALPHA or INVSRCCOLOR, as the source's
+factor times zero adds nothing; one for a plain multiply, ZERO/SRCCOLOR or
+DESTCOLOR/ZERO). The image is the same: the discarded fragment changed
+nothing either. A discard costs the tile renderer the whole draw's early
+visibility; the draws this keeps from one are the atmospheric fog's pass
+over the whole structure (ONE/INVSRCALPHA with the test at 0, the fog's
+colour scaled by its density), which the source-alpha rule
+(record_draw) cannot drop, and the like. The constant blend factors
+(blend_constant.h) keep their discard. Returns the key's
+alpha_test_neutral: 0, 1 (zero) or 2 (one). */
+static unsigned char alpha_test_neutral(const struct render_command *command, const struct vgxm_draw *draw)
+{
+	static int enabled = -1;
+	unsigned long source = draw->blend_source, destination = draw->blend_destination;
+	unsigned short segment;
+
+	if (enabled < 0)
+	{
+		const char *setting = getenv("HALO_ALPHA_TEST_NEUTRAL");
+
+		enabled = !(setting && atoi(setting) == 0);
+	}
+	if (!enabled || !command->key.alpha_test_function || command->key.blend_fold || !draw->blend ||
+		draw->depth_write || command->key.count_samples)
+		return 0;
+	if (draw->stencil_test && (draw->stencil_write_mask & 0xff) && (draw->stencil_pass != D3DSTENCILOP_KEEP ||
+		draw->stencil_fail != D3DSTENCILOP_KEEP || draw->stencil_depth_fail != D3DSTENCILOP_KEEP))
+		return 0;
+	if (draw->visibility_index)
+		return 0;
+	for (segment = 0; segment < command->segment_count; segment++)
+	{
+		if (command->segments && command->segments[segment].visibility_index)
+			return 0;
+	}
+	/* (a source factor that is not a constant's) */
+	switch (source)
+	{
+	case D3DBLEND_ZERO:
+	case D3DBLEND_ONE:
+	case D3DBLEND_SRCCOLOR:
+	case D3DBLEND_INVSRCCOLOR:
+	case D3DBLEND_SRCALPHA:
+	case D3DBLEND_INVSRCALPHA:
+	case D3DBLEND_DESTALPHA:
+	case D3DBLEND_INVDESTALPHA:
+	case D3DBLEND_DESTCOLOR:
+	case D3DBLEND_INVDESTCOLOR:
+	case D3DBLEND_SRCALPHASAT:
+		break;
+	default:
+		return 0;
+	}
+	if ((destination == D3DBLEND_ONE || destination == D3DBLEND_INVSRCALPHA || destination == D3DBLEND_INVSRCCOLOR) &&
+		(draw->blend_operation == D3DBLENDOP_ADD || draw->blend_operation == D3DBLENDOP_REVSUBTRACT ||
+			draw->blend_operation == D3DBLENDOP_MAX))
+	{
+		/* (dst * 1 +- src * f with src zero; max(zero, dst)) */
+		return 1;
+	}
+	if (draw->blend_operation == D3DBLENDOP_ADD &&
+		((source == D3DBLEND_ZERO && destination == D3DBLEND_SRCCOLOR) ||
+			(source == D3DBLEND_DESTCOLOR && destination == D3DBLEND_ZERO)))
+		return 2;
+	return 0;
+}
+
 static BOOL worker_build_record(struct render_command *command)
 {
 	const struct record_state *state = command->state;
@@ -3902,6 +3975,17 @@ static BOOL worker_build_record(struct render_command *command)
 
 static void fill_stats_draw(const struct render_command *command, const struct vgxm_draw *draw)
 {
+	extern int halo_fill_stats_discard;
+	int stage;
+
+	/* (the draws whose fragment program keeps a discard: the alpha test's,
+	or a stage's alpha kill) */
+	halo_fill_stats_discard = command->key.alpha_test_function && !command->key.alpha_test_neutral;
+	for (stage = 0; stage < 4; stage++)
+	{
+		if (command->key.alpha_kill[stage])
+			halo_fill_stats_discard = 1;
+	}
 	halo_fill_stats_draw(draw, command->program->instructions, command->program->instruction_count,
 		command->program->input_mask, command->immediate ? 0 : command->packed_mask,
 		command->immediate ? 0 : command->color_mask, command->phase,
@@ -3977,6 +4061,176 @@ static void blend_plan_note(const struct vgxm_draw *draw, const struct blend_pla
 		plan->exact ? "" : " (GXM's factors cannot make it: an approximation)");
 }
 
+/* ---------- the GPU census (a measuring tool, never for play)
+
+HALO_GPU_CENSUS=N: the GPU's time of each group of render phases, on the
+hardware. Windows of N frames (30 to 600; 1 = 90) take turns: one with
+every draw, then one with a group's draws left out (the worker skips the
+records of its phases), the next group after the next full window, round
+and round. Each skipping window's mean GPU time (vgxm_gpu_frame_next, the
+dynamic resolution's measure; its first 4 frames left out, the GPU being
+behind) is set against the full window just before it; every full round a
+"gpu-census:" line in halo.log gives each group's saving in ms and as a
+share of the full frame's time. The picture flickers - passes vanish a
+window at a time - so it is for a test run only, with the camera still or
+in a steady fight, the dynamic resolution held (HALO_DYNRES_FORCE) so the
+scale does not move under it. The lightmaps (the depth every later pass
+tests against) are never left out. */
+#define CENSUS_GROUPS 11
+static const char *const census_group_names[CENSUS_GROUPS] = {
+	"all", "fog", "reflections", "structure_diffuse", "lights", "decals", "effects", "transparents", "objects",
+	"sky+weather+detail", "hud+flash" };
+static struct
+{
+	int every;
+	/* (worker) the group skipped in the frame being recorded; each
+	presented frame's group by its number */
+	int active;
+	unsigned long presents;
+	/* the window being summed and its sums; the last full window's mean */
+	unsigned long window;
+	int window_group;
+	double window_sum;
+	unsigned long window_count, window_seen;
+	double baseline_mean;
+	/* the last skipping window, waiting for the full one after it */
+	int pending_group;
+	double pending_mean, pending_before;
+	/* per group: the savings summed, windows, and the baselines */
+	double saving_sum[CENSUS_GROUPS], baseline_sum[CENSUS_GROUPS];
+	unsigned long windows[CENSUS_GROUPS];
+	unsigned long rounds;
+} census = { -1 };
+
+static int census_group_of_phase(int phase)
+{
+	switch (phase)
+	{
+	case 13: return 1;
+	case 33: case 11: return 2;
+	case 8: return 3;
+	case 7: case 9: case 10: case 36: return 4;
+	case 37: case 38: case 39: case 40: return 5;
+	case 15: case 16: case 17: case 42: case 53: return 6;
+	case 3: case 6: return 8;
+	case 1: case 14: case 19: return 9;
+	case 20: case 22: case 29: case 30: case 31: return 10;
+	default:
+		if (phase == 12 || phase == 18 || phase == 35 || (phase >= 41 && phase <= 62))
+			return 7;
+		return 0;
+	}
+}
+
+static int census_skips(int phase)
+{
+	return census.active && census_group_of_phase(phase) == census.active;
+}
+
+static void census_window_done(void)
+{
+	double mean, before;
+	int group;
+
+	if (census.window_count < 4)
+		return;
+	mean = census.window_sum / (double)census.window_count;
+	if (getenv("HALO_GPU_CENSUS_LOG"))
+		platform_log("gpu-census window %lu: %s %.2f ms over %lu frames", census.window,
+			census_group_names[census.window_group], mean, census.window_count);
+	if (census.window_group)
+	{
+		/* (set against the full windows on both sides of it, when the one
+		after is done: the scene's drift cancels) */
+		census.pending_group = census.window_group;
+		census.pending_mean = mean;
+		census.pending_before = census.baseline_mean;
+		return;
+	}
+	group = census.pending_group;
+	census.pending_group = 0;
+	before = census.pending_before;
+	census.baseline_mean = mean;
+	if (!group || before <= 0.0)
+		return;
+	census.saving_sum[group] += (before + mean) / 2.0 - census.pending_mean;
+	census.baseline_sum[group] += (before + mean) / 2.0;
+	census.windows[group]++;
+	if (group == CENSUS_GROUPS - 1)
+	{
+		char line[1024];
+		int length = 0;
+		double baseline = 0.0;
+		unsigned long baselines = 0;
+
+		census.rounds++;
+		for (group = 1; group < CENSUS_GROUPS; group++)
+		{
+			baseline += census.baseline_sum[group];
+			baselines += census.windows[group];
+		}
+		baseline = baselines ? baseline / (double)baselines : 0.0;
+		for (group = 1; group < CENSUS_GROUPS && length < (int)sizeof(line) - 64; group++)
+		{
+			double saving = census.windows[group] ? census.saving_sum[group] / (double)census.windows[group] : 0.0;
+
+			length += snprintf(line + length, sizeof(line) - length, " | %s %.1f ms (%.0f%%)", census_group_names[group],
+				saving, baseline > 0.0 ? 100.0 * saving / baseline : 0.0);
+		}
+		platform_log("gpu-census (%d frames a window, %lu rounds, scale %.0f%%): all drawn %.1f ms%s", census.every,
+			census.rounds, (double)vgxm_render_rect() * 100.0, baseline, line);
+	}
+}
+
+/* (worker) a frame the GPU has finished, by its tag: the window (above 4
+bits) and the group it left out */
+static void census_measured(unsigned long tag, float gpu_ms)
+{
+	unsigned long window = tag >> 4;
+
+	if (census.every <= 0 || gpu_ms <= 0.0f || gpu_ms > 250.0f)
+		return;
+	if (window != census.window)
+	{
+		census_window_done();
+		census.window = window;
+		census.window_group = (int)(tag & 15);
+		census.window_sum = 0.0;
+		census.window_count = 0;
+		census.window_seen = 0;
+	}
+	/* (the window's first frames: the GPU still on the one before) */
+	if (++census.window_seen > 4)
+	{
+		census.window_sum += gpu_ms;
+		census.window_count++;
+	}
+}
+
+/* (worker, after each present) the group the next frame leaves out, and
+its tag */
+static void census_frame_end(void)
+{
+	unsigned long window;
+
+	if (census.every < 0)
+	{
+		const char *setting = getenv("HALO_GPU_CENSUS");
+		int every = setting ? atoi(setting) : 0;
+
+		census.every = every == 1 ? 90 : every < 30 ? 0 : every > 600 ? 600 : every;
+		if (census.every)
+			platform_log("gpu-census: on, %d frames a window: passes left out a window at a time (a measuring run)",
+				census.every);
+	}
+	if (!census.every)
+		return;
+	census.presents++;
+	window = census.presents / (unsigned long)census.every;
+	census.active = (window & 1) ? (int)((window / 2) % (CENSUS_GROUPS - 1)) + 1 : 0;
+	vgxm_frame_tag(window << 4 | (unsigned long)census.active);
+}
+
 static void execute_draw(struct render_command *command)
 {
 	struct vgxm_draw *draw = &command->draw;
@@ -3990,6 +4244,8 @@ static void execute_draw(struct render_command *command)
 
 	unsigned long long profile_from;
 
+	if (census.active && census_skips(command->phase))
+		return;
 	worker_sampled = draw_profile_on() && ++worker_counter % (unsigned long)draw_profile == 0;
 	if (worker_sampled)
 		worker_profile_draws++;
@@ -4035,6 +4291,8 @@ static void execute_draw(struct render_command *command)
 			memcpy(copy[VITA_FU_TEXTURE_SCALE - VITA_FU_A_COUNT + stage], texture_scale[stage], sizeof(float) * 4);
 		draw->fragment_uniforms[1] = copy;
 	}
+	if ((command->key.alpha_test_neutral = alpha_test_neutral(command, draw)) != 0)
+		stats.neutral_alpha_tests++;
 	if (draw->blend)
 		blend_passes = blend_constant_plan(draw->blend_source, draw->blend_destination, draw->blend_operation,
 			draw->color_write, draw->blend_color, &blend_plan);
@@ -4266,6 +4524,7 @@ static void write_screenshot(struct render_target_entry *target);
 static void write_display_screenshot(unsigned long frame);
 int halo_trace_active(void);
 static void dynres_frame_end(void);
+static void census_frame_end(void);
 
 /* a draw record as the render_command execute_draw runs (worker-local,
 hot): the record's parts, and a full record's own */
@@ -4397,6 +4656,8 @@ static void execute_command(struct render_record *command)
 			platform_log("trace: worker presented %lu", command->present.frame);
 		/* (the next frame's render scale, between the two) */
 		dynres_frame_end();
+		if (back_buffer)
+			census_frame_end();
 		render_target_atlas_frame_end();
 		{
 			/* (the census during play: cdram_census) */
@@ -5933,14 +6194,14 @@ most, and a summary every 300 frames. */
 static struct
 {
 	volatile unsigned long generation;
-	int enabled, floor, force, cycle, log;
+	int enabled, floor, fight_floor, force, cycle, log;
 	float budget_ms, sim_ms;
 } dynres_config;
 
 static struct
 {
 	unsigned long generation;
-	int enabled, floor, force, cycle, log;
+	int enabled, floor, fight_floor, force, cycle, log;
 	float budget_ms, sim_ms;
 	struct dynres_controller controller;
 	/* the level the targets are drawn at now (32nds) */
@@ -5972,7 +6233,7 @@ static void dynres_configure(void)
 	const char *force = getenv("HALO_DYNRES_FORCE"), *cycle = getenv("HALO_DYNRES_CYCLE");
 	const char *sim = getenv("HALO_DYNRES_SIM"), *budget = getenv("HALO_DYNRES_BUDGET");
 	const char *cap = getenv("HALO_FRAME_CAP"), *timing = getenv("HALO_FRAME_TIMING");
-	int floor = minimum ? dynres_level_of((float)atof(minimum)) : DYNRES_UNITS / 2;
+	int floor = minimum ? dynres_level_of((float)atof(minimum)) : DYNRES_UNITS / 2, fight_floor;
 	int enabled, forced = force && atoi(force) > 0 ? dynres_level_of(atoi(force) / 100.0f) : 0;
 	float budget_ms = cap && atoi(cap) > 0 ? 1000.0f / (float)atoi(cap) : 1000.0f / 30.0f;
 
@@ -5989,18 +6250,34 @@ static void dynres_configure(void)
 	}
 	if (floor < DYNRES_UNITS / 2)
 		floor = DYNRES_UNITS / 2;
+	/* HALO_DYNAMIC_RES_FIGHT_MIN: the fight floor (dynamic_resolution.h) -
+	a fight the floor cannot hold 30 FPS in goes under it, as far as this,
+	until the GPU has room again: unset, a step of the panel's minimums
+	under the floor (Balanced's 63% -> 50%, Quality's 75% -> 63%; 50% has
+	none); 0 none, as before; else the scale (0.5 at least) */
+	{
+		const char *setting = getenv("HALO_DYNAMIC_RES_FIGHT_MIN");
+
+		fight_floor = !setting ? floor - DYNRES_UNITS / 8 : atof(setting) > 0.0 ? dynres_level_of((float)atof(setting)) : 0;
+		if (fight_floor && fight_floor < DYNRES_UNITS / 2)
+			fight_floor = DYNRES_UNITS / 2;
+		if (fight_floor >= floor)
+			fight_floor = 0;
+	}
 	if (forced && forced < DYNRES_UNITS / 2)
 		forced = DYNRES_UNITS / 2;
 	if (budget && atof(budget) > 1.0)
 		budget_ms = (float)atof(budget);
 	enabled = (scale && !strcmp(scale, "dynamic")) || forced || (cycle && atoi(cycle) > 0);
 	if (enabled != dynres_config.enabled || floor != dynres_config.floor || forced != dynres_config.force ||
-		(enabled && budget_ms != dynres_config.budget_ms))
-		platform_log("dynamic resolution: %s%s (floor %d%%, budget %.1f ms%s%s)", enabled ? "on" : "off",
-			forced ? ", held" : "", floor * 100 / DYNRES_UNITS, (double)budget_ms,
+		fight_floor != dynres_config.fight_floor || (enabled && budget_ms != dynres_config.budget_ms))
+		platform_log("dynamic resolution: %s%s (floor %d%%, fights %d%%, budget %.1f ms%s%s)", enabled ? "on" : "off",
+			forced ? ", held" : "", floor * 100 / DYNRES_UNITS, (fight_floor ? fight_floor : floor) * 100 / DYNRES_UNITS,
+			(double)budget_ms,
 			cycle && atoi(cycle) > 0 ? ", cycling" : "", sim && atof(sim) > 0.0 ? ", GPU simulated" : "");
 	dynres_config.enabled = enabled;
 	dynres_config.floor = floor;
+	dynres_config.fight_floor = fight_floor;
 	dynres_config.force = forced;
 	dynres_config.cycle = cycle && atoi(cycle) > 0 ? atoi(cycle) : 0;
 	dynres_config.sim_ms = sim && atof(sim) > 0.0 ? (float)atof(sim) : 0.0f;
@@ -6096,6 +6373,7 @@ static void dynres_frame_end(void)
 		dynres.generation = generation;
 		dynres.enabled = dynres_config.enabled;
 		dynres.floor = dynres_config.floor;
+		dynres.fight_floor = dynres_config.fight_floor;
 		dynres.force = dynres_config.force;
 		dynres.cycle = dynres_config.cycle;
 		dynres.sim_ms = dynres_config.sim_ms;
@@ -6116,6 +6394,8 @@ static void dynres_frame_end(void)
 	if (!dynres.level)
 		dynres.level = dynres_level_of(vgxm_render_rect());
 	dynres_controller_limits(&dynres.controller, dynres.floor, ceiling, dynres.budget_ms);
+	if (dynres.controller.fight_floor != dynres.fight_floor)
+		dynres_controller_fight_floor(&dynres.controller, dynres.fight_floor);
 	level = dynres.controller.level;
 	dynres.frames++;
 	/* (drained whether on or not: the overlay's GPU line; not measured
@@ -6130,8 +6410,14 @@ static void dynres_frame_end(void)
 			lowered = 1;
 		}
 		while (vgxm_gpu_frame_next(&frame))
-			if (!dynres.sim_ms && !lowered)
+		{
+			/* (the GPU census holds the scale: its windows' times are
+			compared) */
+			if (!dynres.sim_ms && !lowered && census.every <= 0)
 				level = dynres_measured(frame.gpu_ms, frame.tail_ms, dynres_level_of(frame.scale), frame.interval_ms);
+			if (!lowered)
+				census_measured(frame.tag, frame.gpu_ms);
+		}
 	}
 	if (dynres.sim_ms)
 	{
@@ -9238,7 +9524,7 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 	{
 		platform_log("frame %lu: %lu draws, %lu immediate, %lu clears, %lu target changes; skipped %lu no program, "
 			"%lu no target, %lu shader; %lu same-state; %lu KB copied (streams %lu, immediate %lu, indices %lu) + %lu KB uniforms, %lu KB direct, %lu KB textures; record %.3f ms/frame, "
-			"worker %.3f ms/frame (draw %.2f clear %.2f present %.2f), wait at present %.2f ms/frame; %lu vertex + %lu fragment uniform snapshots/frame; %s; %lu self-sampled draws/frame, %lu computed-coordinate draws/frame, alpha tests kept %lu dropped %lu per frame",
+			"worker %.3f ms/frame (draw %.2f clear %.2f present %.2f), wait at present %.2f ms/frame; %lu vertex + %lu fragment uniform snapshots/frame; %s; %lu self-sampled draws/frame, %lu computed-coordinate draws/frame, alpha tests kept %lu dropped %lu per frame (%lu kept without a discard)",
 			device.frame, stats.draws / stats.presents, stats.immediate_draws / stats.presents,
 			stats.clears / stats.presents, stats.target_changes / stats.presents, stats.skipped_no_program,
 			stats.skipped_no_target, stats.skipped_shader, stats.same_state_draws / stats.presents,
@@ -9252,7 +9538,8 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 			present_wait_time / 1000.0 / stats.presents,
 			stats.vertex_snapshots / stats.presents, stats.fragment_snapshots / stats.presents, vgxm_counts(),
 			stats.self_sampled / stats.presents, stats.computed_draws / stats.presents,
-			stats.alpha_tested_draws / stats.presents, stats.dropped_alpha_tests / stats.presents);
+			stats.alpha_tested_draws / stats.presents, stats.dropped_alpha_tests / stats.presents,
+			stats.neutral_alpha_tests / stats.presents);
 		{
 			char line[256];
 			int n = 0, source, destination;
