@@ -2876,3 +2876,15 @@
 "VISOR" = "VISOR"
 "Your armor's color in multiplayer games. RANDOM:\nthe host gives you one nobody else has. Other\ngames see the nearest of the first eighteen." = "El color de tu armadura en multijugador. ALEATORIO:\nel anfitrión te da uno que nadie más tiene. Otros\njuegos ven el más cercano de los dieciocho primeros."
 "Your visor's color. Players on this game's PS Vita\nand PC builds see it; other games show the gold." = "El color de tu visor. Lo ven los jugadores de este\njuego en PS Vita y PC; otros juegos muestran el dorado."
+
+# ---------- insider.26: the PC versions a game is joined with, adding and dropping bots
+", network %d: can't join" = ", red %d: no se puede unir"
+"Can't join: OpenCE's %s game type, which this build does not play" = "No se puede unir: el tipo de juego %s de OpenCE, que esta versión no juega"
+"Can't join: a newer Halo CE for PS Vita (network %u) - update to join" = "No se puede unir: un Halo CE para PS Vita más nuevo (red %u) - actualiza para unirte"
+"Can't join: an older Halo CE for PS Vita (network %u) - its host needs to update" = "No se puede unir: un Halo CE para PS Vita más antiguo (red %u) - su anfitrión debe actualizar"
+"Can't join: a newer PC version (network %u); this build joins %s" = "No se puede unir: una versión de PC más nueva (red %u); esta versión se une a %s"
+"Can't join: an older PC version (network %u); this build joins %s" = "No se puede unir: una versión de PC más antigua (red %u); esta versión se une a %s"
+"Can't join: another PC version (network %u); this build joins %s" = "No se puede unir: otra versión de PC (red %u); esta versión se une a %s"
+"Only in a game you host" = "Solo en una partida que alojas"
+"A bot joins" = "Entra un bot"
+"A bot leaves" = "Sale un bot"
