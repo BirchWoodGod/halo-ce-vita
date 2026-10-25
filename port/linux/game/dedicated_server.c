@@ -181,11 +181,11 @@ static struct
 	/* sv_starting_weapons generic: every gametype's players start with the
 	generic weapons (an assault rifle and a pistol), never the map's own */
 	boolean generic_starting_weapons;
-	/* sv_bots_fill: bots fill the game to its most players less one while
-	anyone is in (network_server_manager.c) */
+	/* sv_bots_fill: bots fill the game to its most players less two (an
+	even total, 14 of 16) while anyone is in (network_server_manager.c) */
 	boolean bots_fill;
 	/* sv_bots_when_empty: ... and while nobody is in (the server plays its
-	cycle with bots alone, one slot free all the time: it never looks
+	cycle with bots alone, two slots free all the time: it never looks
 	empty); 0, only while people are in */
 	boolean bots_when_empty;
 	struct join_address joins[MAXIMUM_JOIN_ADDRESSES];
@@ -602,8 +602,8 @@ static void command_help(
 		"                                   or the map's own (the default); from the next game",
 		"  sv_coop <level> [difficulty 0-3] co-op on a campaign level (a10...) instead of the cycle",
 		"  sv_map_download <0|1>            joiners may download the cycle's custom maps (0)",
-		"  sv_bots_fill <0|1>               bots fill the game to its most players less one, a slot always",
-		"                                   free, and leave as players join (0)",
+		"  sv_bots_fill <0|1>               bots fill the game to its most players less two (even), two slots",
+		"                                   always free, and leave as players join (0)",
 		"  sv_bots_when_empty <0|1>         the bots play while nobody is in too (1), or only with people (0)",
 		"  sv_bots_skill <easy|normal|heroic|legendary> the bots' skill (normal)",
 		"  sv_port <port>                   internet play's UDP port (init.txt only; -port)",
@@ -1341,7 +1341,7 @@ static void command(
 		if (integer_argument(name, argument, 0, 1, &value))
 		{
 			dedicated.bots_fill = (boolean)value;
-			say(value ? "bots fill the game to its most players less one" : "no bots");
+			say(value ? "bots fill the game to its most players less two, an even total" : "no bots");
 		}
 	}
 	else if (!csstrcmp(name, "sv_bots_when_empty"))

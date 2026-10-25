@@ -3993,8 +3993,8 @@ TEAMS
 			"HALO_NETWORK_TEST_PUBLIC_NAME=Netns Bots" HALO_NETWORK_TEST_JOIN_FILE=never-made HALO_EXIT_AFTER=40
 		sleep 45
 		grep -a 'network test: the public games list "Netns Bots"' "$out/browser/run.log" | head -1
-		grep -aqE "network test: the public games list \"Netns Bots\".*$((most - 1)) of $most: 0 players, $((most - 1)) bots" \
-			"$out/browser/run.log" || fail "the empty server was not listed one short of full with bots alone"
+		grep -aqE "network test: the public games list \"Netns Bots\".*$((most - 2)) of $most: 0 players, $((most - 2)) bots" \
+			"$out/browser/run.log" || fail "the empty server was not listed two short of full with bots alone"
 		run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$code \
 			HALO_NET_PLAYER_NAME=Vita1 HALO_EXIT_AFTER=$((seconds - 10)) HALO_TEST_INPUT=bot:2 HALO_NETWORK_TEST_SHOOT=2
 		join_pids="$join_pids $last_pid"
@@ -4028,8 +4028,8 @@ TEAMS
 		grep -aq "server: bots: a bot joined" "$sl" || fail "no bot joined"
 		grep -aqE "server: bots: a bot left \((a player's slot|room for a player)" "$sl" || fail "no bot left for a person"
 		# (once settled - 20 s after each person came or went - every count one
-		# short of the most: people + bots = most - 1, people never refused)
-		python3 - "$sl" "$most" <<'CHECK' || fail "the bots did not keep the game one slot short of full"
+		# short of the most: people + bots = most - 2, people never refused)
+		python3 - "$sl" "$most" <<'CHECK' || fail "the bots did not keep the game two slots short of full"
 import re, sys
 log, most = sys.argv[1], int(sys.argv[2])
 lines = open(log, errors="replace").read().splitlines()
@@ -4039,10 +4039,10 @@ for line in lines:
     if m:
         status.append((int(m.group(1)), int(m.group(3))))
 settled = [s for s in status if s[0] > s[1]]
-full = [s for s in settled if s[0] == most - 1]
-print("sv_status in a game with people: %d; one short of full: %d; counts (players, bots): %s" % (
+full = [s for s in settled if s[0] == most - 2]
+print("sv_status in a game with people: %d; two short of full: %d; counts (players, bots): %s" % (
     len(settled), len(full), sorted(set(settled))))
-over = [s for s in settled if s[0] > most - 1 and s[1] > 0]
+over = [s for s in settled if s[0] > most - 2 and s[1] > 0]
 if over:
     print("full with bots in it: %s" % over); sys.exit(1)
 if len(settled) < 10 or len(full) < len(settled) * 0.7:

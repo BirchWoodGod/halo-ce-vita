@@ -33,7 +33,7 @@ short dedicated_server_sole_weapon(void);
 /* (main.c) frames a second: fewer while no one is connected */
 long dedicated_server_frame_cap(void);
 /* (network_server_manager.c) bots fill the game to its most players less
-one (sv_bots_fill) */
+two, an even total (sv_bots_fill) */
 boolean dedicated_server_bots_fill(void);
 /* ... and while nobody is in (sv_bots_when_empty, 1 by default): the server
 plays its cycle with bots alone */
