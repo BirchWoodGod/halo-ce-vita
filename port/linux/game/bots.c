@@ -1159,6 +1159,7 @@ static struct
 	biped walks on that the AI's walkable surfaces leave out), and how many */
 	boolean ramps_opened;
 	long ramps_open_count;
+	long ramps_cursor;
 } bots_paths;
 
 /* the helper thread */
@@ -1197,6 +1198,9 @@ static struct
 	long sight_rays;
 	/* port: the longest step of the regions and the jumps (bots_nav.c) */
 	unsigned long long nav_us_most;
+	long nav_steps;
+	long nav_steps_over_100;
+	long nav_steps_over_200;
 	unsigned long long below_us;
 	unsigned long long sight_us;
 } bots_profile = { -1 };
@@ -2422,6 +2426,7 @@ static void bots_paths_release(void)
 	bots_paths.vehicle_closed_count = 0;
 	bots_paths.ramps_opened = FALSE;
 	bots_paths.ramps_open_count = 0;
+	bots_paths.ramps_cursor = 0;
 }
 
 /* port: the ramps a biped walks up (bots_nav.c), opened to the bots'
@@ -2438,9 +2443,10 @@ static void bots_paths_open_ramps(void)
 
 	if (bots_paths.ramps_opened || !bots_nav_ready() || !bots_paths_copy())
 		return;
-	bots_paths.ramps_opened = TRUE;
 	count = bots_paths.structure.pathfinding_surfaces.count;
-	for (surface_index = 0; surface_index < count; surface_index++)
+	/* (500 surfaces a tick) */
+	for (surface_index = bots_paths.ramps_cursor; surface_index < count && surface_index < bots_paths.ramps_cursor + 500;
+		surface_index++)
 	{
 		if (bots_nav_ramp(surface_index) && bots_nav_region(surface_index) != NONE &&
 			!TEST_FLAG(bots_paths.walkable[surface_index], BOTS_PATHFINDING_WALKABLE_BIT))
@@ -2449,6 +2455,10 @@ static void bots_paths_open_ramps(void)
 			bots_paths.ramps_open_count++;
 		}
 	}
+	bots_paths.ramps_cursor = surface_index;
+	if (surface_index < count)
+		return;
+	bots_paths.ramps_opened = TRUE;
 	if (bots_paths.ramps_open_count)
 	{
 		path_pathfinding_surfaces_generation++;
@@ -3347,6 +3357,7 @@ void bots_initialize_for_new_map(void)
 	bots_profile.below_us = 0;
 	bots_profile.sight_us = 0;
 	bots_profile.nav_us_most = 0;
+	bots_profile.nav_steps = bots_profile.nav_steps_over_100 = bots_profile.nav_steps_over_200 = 0;
 	/* (the first line a minute into the game) */
 	bots_globals.last_report_tick = 0;
 	bots_globals.vehicle_entries = 0;
@@ -9063,6 +9074,16 @@ void bots_update_actions(struct player_action *actions)
 				{
 					unsigned long long spent = vita_host_time_us() - nav_started;
 
+					if (nav_phase < 5)
+					{
+						bots_profile.nav_steps++;
+						bots_profile.nav_steps_over_100 += spent > 100;
+						bots_profile.nav_steps_over_200 += spent > 200;
+						if (bots_nav_phase() >= 5)
+							platform_log("bots: nav's steps: %ld ticks, %ld over 100 us, %ld over 200 us, the longest %llu us",
+								bots_profile.nav_steps, bots_profile.nav_steps_over_100, bots_profile.nav_steps_over_200,
+								MAX(spent, bots_profile.nav_us_most));
+					}
 					if (spent > bots_profile.nav_us_most)
 					{
 						bots_profile.nav_us_most = spent;

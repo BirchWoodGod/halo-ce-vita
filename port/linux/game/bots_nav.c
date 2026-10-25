@@ -74,13 +74,17 @@ void platform_log(char const *format, ...);
 #define NAV_CORNERS 16
 /* the walkable surfaces' grid: cells this wide, hashed into these buckets */
 #define NAV_CELL 2.0f
-#define NAV_BUCKETS 4096
+#define NAV_BUCKETS 16384
 /* the work of a tick: surfaces joined, put in the grid, whose edges are
 looked at; jumps tested (a few rays each) */
-#define NAV_REGIONS_A_TICK 500
+#define NAV_REGIONS_A_TICK 250
 #define NAV_GRID_A_TICK 50
+/* (and the work of a tick, whatever the surfaces: the grid's cells filled,
+the edges' look-ups; for the Vita's host, its step ~20 times the PC's) */
+#define NAV_GRID_WORK_A_TICK 300
+#define NAV_EDGES_WORK_A_TICK 600
 #define NAV_EDGES_A_TICK 30
-#define NAV_TESTS_A_TICK 2
+#define NAV_TESTS_A_TICK 1
 /* the jumps found, before they are tested: one a place this wide for each
 two regions and kind */
 #define NAV_CANDIDATES 3072
@@ -187,6 +191,11 @@ static struct
 	long hop_generation;
 	long started_tick;
 	long made_tick;
+	/* the work of the tick's step so far (NAV_*_WORK_A_TICK), and the
+	surface's edge the edges' step goes on from */
+	long work;
+	long edge_cursor;
+
 	/* halo.log's line */
 	long routes_asked;
 	long routes_found;
@@ -419,14 +428,10 @@ static boolean nav_begin(void)
 		return FALSE;
 	nav.region = (long *)malloc(sizeof(long) * (size_t)nav.surface_count);
 	nav.parent = (long *)malloc(sizeof(long) * (size_t)nav.surface_count);
-	nav.entry_capacity = nav.surface_count * 4 + 64;
-	nav.entry_surface = (long *)malloc(sizeof(long) * (size_t)nav.entry_capacity);
-	nav.entry_next = (long *)malloc(sizeof(long) * (size_t)nav.entry_capacity);
-	nav.candidates = (struct nav_candidate *)malloc(sizeof(struct nav_candidate) * NAV_CANDIDATES);
-	nav.slots = (long *)malloc(sizeof(long) * NAV_CANDIDATE_SLOTS);
 	nav.ramp = (byte *)nav_zeroed((size_t)nav.surface_count, 1);
-	nav.extents = (real *)malloc(sizeof(real) * 4 * (size_t)nav.surface_count);
-	if (!nav.region || !nav.parent || !nav.entry_surface || !nav.entry_next || !nav.candidates || !nav.slots || !nav.ramp || !nav.extents)
+	/* (the grid's and the jumps' memory taken as their steps begin, each a
+	tick of its own: all at once was the making's longest tick) */
+	if (!nav.region || !nav.parent || !nav.ramp)
 	{
 		platform_log("bots: nav: no memory for %ld surfaces", nav.surface_count);
 		nav_free();
@@ -437,11 +442,36 @@ static boolean nav_begin(void)
 		nav.parent[index] = index;
 		nav.region[index] = NONE;
 	}
+	nav.cursor = 0;
+	return TRUE;
+}
+
+/* the grid's memory (its first step), the jumps' (theirs): FALSE for none */
+static boolean nav_grid_begin(void)
+{
+	long index;
+
+	nav.entry_capacity = nav.surface_count * 10 + 64;
+	nav.entry_surface = (long *)malloc(sizeof(long) * (size_t)nav.entry_capacity);
+	nav.entry_next = (long *)malloc(sizeof(long) * (size_t)nav.entry_capacity);
+	nav.extents = (real *)malloc(sizeof(real) * 4 * (size_t)nav.surface_count);
+	if (!nav.entry_surface || !nav.entry_next || !nav.extents)
+		return FALSE;
 	for (index = 0; index < NAV_BUCKETS; index++)
 		nav.buckets[index] = NONE;
+	return TRUE;
+}
+
+static boolean nav_edges_begin(void)
+{
+	long index;
+
+	nav.candidates = (struct nav_candidate *)malloc(sizeof(struct nav_candidate) * NAV_CANDIDATES);
+	nav.slots = (long *)malloc(sizeof(long) * NAV_CANDIDATE_SLOTS);
+	if (!nav.candidates || !nav.slots)
+		return FALSE;
 	for (index = 0; index < NAV_CANDIDATE_SLOTS; index++)
 		nav.slots[index] = NONE;
-	nav.cursor = 0;
 	return TRUE;
 }
 
@@ -482,7 +512,7 @@ static boolean nav_standable(long surface_index)
 		(nav.ramp[surface_index] == 1 || nav_walkable(surface_index));
 }
 
-#define NAV_ROOFS_A_TICK 32
+#define NAV_ROOFS_A_TICK 16
 static void nav_roof_test(struct collision_bsp const *bsp, long surface_index)
 {
 	real_point3d corners[NAV_CORNERS], middle = { 0.0f, 0.0f, 0.0f };
@@ -667,7 +697,7 @@ static boolean nav_grid_step(void)
 	struct collision_bsp const *bsp = nav_bsp();
 	long last = MIN(nav.cursor + NAV_GRID_A_TICK, nav.surface_count);
 
-	for (; nav.cursor < last; nav.cursor++)
+	for (; nav.cursor < last && nav.work < NAV_GRID_WORK_A_TICK; nav.cursor++)
 	{
 		real_point3d corners[NAV_CORNERS];
 		long count, corner, ix, iy;
@@ -710,6 +740,7 @@ static boolean nav_grid_step(void)
 					nav.entry_next = nexts;
 					nav.entry_capacity = capacity;
 				}
+				nav.work++;
 				nav.entry_surface[nav.entry_count] = nav.cursor;
 				nav.entry_next[nav.entry_count] = nav.buckets[bucket];
 				nav.buckets[bucket] = nav.entry_count++;
@@ -734,6 +765,8 @@ static long nav_ground_at(real x, real y, real z, real above, real below, long e
 	for (entry = nav.buckets[bucket]; entry != NONE; entry = nav.entry_next[entry])
 	{
 		long surface_index = nav.entry_surface[entry];
+
+		nav.work++;
 		real_point3d corners[NAV_CORNERS];
 		long count;
 		real height;
@@ -805,7 +838,10 @@ static boolean nav_edges_step(void)
 	struct collision_bsp const *bsp = nav_bsp();
 	long last = MIN(nav.cursor + NAV_EDGES_A_TICK, nav.surface_count);
 
-	for (; nav.cursor < last; nav.cursor++)
+	if (nav.work >= NAV_EDGES_WORK_A_TICK)
+		return FALSE;
+
+	for (; nav.cursor < last && nav.work < NAV_EDGES_WORK_A_TICK; nav.cursor++, nav.edge_cursor = 0)
 	{
 		real_point3d corners[NAV_CORNERS], middle = { 0.0f, 0.0f, 0.0f };
 		long neighbours[NAV_CORNERS];
@@ -822,12 +858,20 @@ static boolean nav_edges_step(void)
 			middle.y += corners[corner].y / (real)count;
 			middle.z += corners[corner].z / (real)count;
 		}
-		for (corner = 0; corner < count; corner++)
+		/* (an edge at a time, the tick's work allowing: a surface of many
+		long open edges over a crowded grid, Sidewinder's, took a ms) */
+		for (corner = nav.edge_cursor; corner < count; corner++)
 		{
 			real_point3d const *a = &corners[corner], *b = &corners[(corner + 1) % count];
 			real dx = b->x - a->x, dy = b->y - a->y, length = (real)sqrt(dx * dx + dy * dy);
 			real_vector3d out;
 			long samples, sample;
+
+			if (nav.work >= NAV_EDGES_WORK_A_TICK)
+			{
+				nav.edge_cursor = corner;
+				return FALSE;
+			}
 
 			/* (an edge to another walkable surface, or a ramp, is walked
 			across) */
@@ -1120,6 +1164,7 @@ void bots_nav_update(void)
 {
 	long now = game_time_get();
 
+	nav.work = 0;
 	switch (nav.phase)
 	{
 	case _nav_phase_idle:
@@ -1141,10 +1186,28 @@ void bots_nav_update(void)
 		}
 		break;
 	case _nav_phase_grid:
+		if (!nav.entry_surface)
+		{
+			if (!nav_grid_begin())
+			{
+				platform_log("bots: nav: no memory for the grid");
+				nav.phase = _nav_phase_none;
+			}
+			break;
+		}
 		if (nav_grid_step())
 			nav.phase = _nav_phase_edges;
 		break;
 	case _nav_phase_edges:
+		if (!nav.candidates)
+		{
+			if (!nav_edges_begin())
+			{
+				platform_log("bots: nav: no memory for the jumps");
+				nav.phase = _nav_phase_none;
+			}
+			break;
+		}
 		/* (the jumps wait for the biped's) */
 		if (nav.biped_known && nav_edges_step())
 			nav.phase = _nav_phase_tests;
