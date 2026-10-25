@@ -290,14 +290,13 @@ editor's. The art is this folder's own (tools/online_menu_art.py) and the Halo 3
 	</widget>
 	<widget name="online/custom/op_color_label" type="text" left="0" top="0" width="150" height="18" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/custom_labels" string_index="8"/>
 	<widget name="online/custom/op_color" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
-		<!-- (Cross: the grid picked in - up and down a row of six -, again done) -->
+		<!-- (Cross: the grid picked in - up and down a row of six -, again done; picked in the grid
+		alone, as ARMOR VISOR: left and right step only in it, no arrows - the owner) -->
 		<on event="a" run="port online custom grid"/>
 		<on event="right stick_right" run="port h3 custom next"/>
 		<on event="left stick_left" run="port h3 custom previous"/>
 		<child widget="online/custom/op_color_label"/>
 		<child widget="online/custom/value"/>
-		<child widget="online/custom/arrow_left"/>
-		<child widget="online/custom/arrow_right"/>
 	</widget>
 	<widget name="online/custom/na_secondary_label" type="text" left="0" top="0" width="150" height="18" font="online/font_item" color="#FF7E8EA4" text_x="7" text_y="2" string_list="online/custom_labels" string_index="9"/>
 	<widget name="online/custom/na_secondary" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/row_dim">
@@ -312,8 +311,6 @@ editor's. The art is this folder's own (tools/online_menu_art.py) and the Halo 3
 		<on event="left stick_left" run="port h3 custom previous"/>
 		<child widget="online/custom/op_visor_label"/>
 		<child widget="online/custom/value"/>
-		<child widget="online/custom/arrow_left"/>
-		<child widget="online/custom/arrow_right"/>
 	</widget>
 	<widget name="online/custom/na_lights_label" type="text" left="0" top="0" width="150" height="18" font="online/font_item" color="#FF7E8EA4" text_x="7" text_y="2" string_list="online/custom_labels" string_index="11"/>
 	<widget name="online/custom/na_lights" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/row_dim">

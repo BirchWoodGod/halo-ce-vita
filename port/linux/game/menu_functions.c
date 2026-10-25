@@ -19493,9 +19493,16 @@ boolean pc_menu_event_function_invoke(
 		h3_profiles.page = 1;
 		return TRUE;
 	case _function_h3_custom_next:
-		return h3_custom_change(widget, 1);
 	case _function_h3_custom_previous:
-		return h3_custom_change(widget, -1);
+		/* (ElDewrito's COLORS: ARMOR PRIMARY and ARMOR VISOR picked in
+		their swatch grids alone - left and right step only while one is
+		picked in, Cross; the owner) */
+		if (halo_menu_style_online() && online_custom.tab == _online_custom_tab_colors && !online_custom.grid &&
+			widget && widget->name && (!strcmp(widget->name, "op_color") || !strcmp(widget->name, "op_visor")))
+		{
+			return TRUE;
+		}
+		return h3_custom_change(widget, function_index == _function_h3_custom_next ? 1 : -1);
 	case _function_h3_custom_save:
 		h3_custom_save();
 		return TRUE;
