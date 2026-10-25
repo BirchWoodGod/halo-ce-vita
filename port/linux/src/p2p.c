@@ -4643,18 +4643,28 @@ static void poll_invite_file(void)
 	snprintf(path, sizeof(path), "%s/join_link.txt", platform_data_root());
 	snprintf(taken, sizeof(taken), "%s/join_link.taken", platform_data_root());
 #endif
+	/* (the file calls without the lock: on the Vita the memory card serves
+	one request at a time, and a call can wait seconds behind another
+	thread's long write - insider.25's backdrop build wrote 9 MB at once,
+	this remove waited behind it holding the lock, and the game thread,
+	which takes the lock every frame (p2p_take_clipboard_text), presented
+	nothing for over 8 s: the watchdog) */
+	pthread_mutex_unlock(&p2p_lock);
 	/* (taken first: a link the launcher writes while this reads is left for
 	the next look, not removed unread; a .taken left by a run that stopped
 	in between would make the rename fail on some file systems) */
 	remove(taken);
-	if (rename(path, taken) != 0)
+	file = rename(path, taken) == 0 ? fopen(taken, "rb") : NULL;
+	size = 0;
+	if (file)
+	{
+		size = fread(text, 1, sizeof(text) - 1, file);
+		fclose(file);
+		remove(taken);
+	}
+	pthread_mutex_lock(&p2p_lock);
+	if (!file || p2p.stopping)
 		return;
-	file = fopen(taken, "rb");
-	if (!file)
-		return;
-	size = fread(text, 1, sizeof(text) - 1, file);
-	fclose(file);
-	remove(taken);
 	text[size] = 0;
 	p2p_invite_received(text);
 }
