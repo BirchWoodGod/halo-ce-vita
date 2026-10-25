@@ -22,7 +22,7 @@ files for it.
 
 /* (a test may build as another version: run_vita_settings_test.sh) */
 #ifndef HALO_VITA_VERSION
-#define HALO_VITA_VERSION "1.1.1-insider.26"
+#define HALO_VITA_VERSION "1.1.1"
 #endif
 #define HALO_VITA_APP_VER "01.11"
 
