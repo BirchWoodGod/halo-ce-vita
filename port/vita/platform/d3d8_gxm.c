@@ -2965,15 +2965,23 @@ publisher between its publish and its signal: `woken_at`, the publish a
 signal was given for, says which) - counted and logged, none is expected.
 Without a semaphore (none could be made) the waits sleep 50 us at a time,
 as before. */
-struct worker_waiter
+/* (the fields the two threads' atomics share are of explicitly aligned
+types, and the structure too: under -fmax-type-align=1 a plain one,
+reached through the waiter's pointer, made __atomic_exchange_n a call to
+vita_stubs.c's generic lock, not atomic with the inline __atomic_add_fetch
+on the same word - a sleeper counted and then cleared unseen, its wake-up
+lost to the 100 ms timeout) */
+typedef volatile int waiter_aligned_int __attribute__((aligned(4)));
+typedef volatile unsigned long waiter_aligned_ulong __attribute__((aligned(4)));
+struct __attribute__((aligned(4))) worker_waiter
 {
-	volatile int sleepers;
+	waiter_aligned_int sleepers;
 	int wake;
 	const char *name;
 	/* the publishes it waits on, counted (command_head, frames_presented),
 	and the count the last signal was given at */
 	unsigned long (*published)(void);
-	volatile unsigned long woken_at;
+	waiter_aligned_ulong woken_at;
 	/* sleeps, the ones that ran out of time, the signals that came after
 	the time ran out, the lost wake-ups */
 	unsigned long sleeps, timeouts, late, lost;
