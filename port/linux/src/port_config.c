@@ -483,8 +483,9 @@ static const struct config_setting config_settings[] =
 		"Infection: minutes until the humans left win (0 for none, to 30)." },
 	{ "infection.zombie_respawn", _config_integer, "3", "HALO_INFECTION_RESPAWN", _environment_value, _platform_all,
 		"Infection: seconds before a dead zombie comes back (3 to 15)." },
-	{ "infection.zombie_shields", _config_integer, "1", "HALO_INFECTION_SHIELDS", _environment_value, _platform_all,
-		"Infection: 1, the zombies have shields as players do; 0, none." },
+	{ "infection.zombie_shields", _config_integer, "0", "HALO_INFECTION_SHIELDS", _environment_value, _platform_all,
+		"Infection: 1, the zombies have shields as players do; 0, none (the\n"
+		"default)." },
 	{ "infection.zombie_tough", _config_integer, "0", "HALO_INFECTION_TOUGH", _environment_value, _platform_all,
 		"Infection: 1, the zombies take half the damage a player does; 0, as a\n"
 		"player." },

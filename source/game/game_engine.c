@@ -607,6 +607,7 @@ real_argb_color *hud_get_text_color(real_argb_color *color);
 
 /* network_game_globals.c's */
 boolean network_game_distributed_client(void);
+void platform_log(char const *format, ...);
 /* port/linux/game/network_distributed.c's */
 void network_distributed_player_killed(long *killing_player_index, long *killing_object_index,
 	long dead_player_index, boolean *friendly_fire);
@@ -7071,6 +7072,32 @@ void game_engine_variant_set_generic_starting_equipment(
 }
 #endif
 
+/* port: Infection's shotgun (shotgun TRUE) or pistol, the map's own tags
+from the game's weapon list; if the map has no shotgun the pistol, if no
+pistol the weapon asked about (logged once) */
+long game_engine_infection_weapon(
+	boolean shotgun,
+	long fallback_definition_index)
+{
+	static boolean reported[2];
+	long result = list_index_to_weapon_definition_index(shotgun ? _weapon_list_shotgun : _weapon_list_pistol);
+
+	if (result == NONE)
+	{
+		if (!reported[shotgun ? 1 : 0])
+		{
+			reported[shotgun ? 1 : 0] = TRUE;
+			platform_log("infection: this map's weapon list has no %s: %s instead",
+				shotgun ? "shotgun" : "pistol", shotgun ? "the pistol" : "the weapon as it is");
+		}
+		if (shotgun)
+			result = list_index_to_weapon_definition_index(_weapon_list_pistol);
+		if (result == NONE)
+			result = fallback_definition_index;
+	}
+	return result;
+}
+
 long game_engine_remap_weapon(
 	long weapon_definition_index)
 {
@@ -7078,11 +7105,22 @@ long game_engine_remap_weapon(
 		weapon_definition_index_to_list_index(weapon_definition_index);
 
 	if (weapon_list_index == _weapon_list_ball ||
-		weapon_list_index == _weapon_list_flag ||
-		weapon_list_index == NONE)
+		weapon_list_index == _weapon_list_flag)
 	{
 		return weapon_definition_index;
 	}
+
+	/* port: Infection's humans have shotguns and pistols alone, every
+	weapon the game makes (the map's, a starting one) one of them */
+	if (infection_active() && !network_game_distributed_client() &&
+		weapon_definition_index != get_ball_definition_index())
+	{
+		return game_engine_infection_weapon(weapon_list_index == _weapon_list_pistol ||
+			weapon_list_index == _weapon_list_plasma_pistol ? FALSE : TRUE, weapon_definition_index);
+	}
+
+	if (weapon_list_index == NONE)
+		return weapon_definition_index;
 
 	/* port: the dedicated server's SWAT and Snipers: every weapon the one */
 	if (game_engine_sole_weapon_list_index() != NONE)

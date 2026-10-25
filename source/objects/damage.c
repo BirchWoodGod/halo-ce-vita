@@ -1536,6 +1536,18 @@ void object_cause_damage(
 			get_player_index_from_object_or_parents(damage->owner_object_index),
 			get_player_index_from_object_or_parents(object_index));
 	}
+	/* port: Infection's zombie melee kills a human in one blow, shields
+	and overshield or not */
+	if (game_engine_running() && damage_definition->category == _damage_category_melee &&
+		infection_melee_kills(get_player_index_from_object_or_parents(damage->owner_object_index),
+			get_player_index_from_object_or_parents(object_index)))
+	{
+		if (getenv("HALO_INFECTION_TRACE"))
+			platform_log("infection: trace: zombie melee kills player %ld (shield %.2f)",
+				(long)get_player_index_from_object_or_parents(object_index),
+				object_get(object_index)->object.shield_vitality);
+		SET_FLAG(damage->flags, _damage_kill_instantly_bit, TRUE);
+	}
 	else if (damage->owner_team_index != NONE &&
 		game_team_is_enemy(damage->owner_team_index, _game_team_player))
 	{

@@ -7,8 +7,9 @@ players_per_first_zombie (8) is chosen at random to be a zombie, the rest
 are humans; a human killed, by anyone or anything, comes back a zombie; a
 player joining the game in progress is a zombie. The zombies hold the
 skull alone (the Oddball ball: a blow, nothing fired, no grenades, nothing
-picked up) and run faster (zombie_speed_percent); the humans keep their
-loadouts. The last humans standing win when the time runs out
+picked up) and run faster (zombie_speed_percent), without shields, and their blow kills a
+human at once; the humans have a shotgun and a pistol, the only weapons in the
+game (game_engine_remap_weapon), and keep their shields. The last humans standing win when the time runs out
 (time_limit_minutes), the zombies when no human is left. Zombies are the
 red team in green, humans the blue team.
 
@@ -50,6 +51,7 @@ they take it. A client's own word decides nothing.
 #include "../src/lang.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 /* ---------- the platform's and the game's */
 
@@ -131,7 +133,7 @@ void infection_settings_default(
 	settings->time_limit_minutes = 6;
 	settings->zombie_weapon = _infection_zombie_weapon_skull;
 	settings->zombie_respawn_seconds = 3;
-	settings->zombie_shields = TRUE;
+	settings->zombie_shields = FALSE;
 	settings->zombie_tough = FALSE;
 }
 
@@ -171,7 +173,7 @@ void infection_settings_configured(
 	settings->time_limit_minutes = (byte)PIN(infection_setting("HALO_INFECTION_TIME", "infection.time_limit", 6), 0, 255);
 	settings->zombie_respawn_seconds = (byte)PIN(infection_setting("HALO_INFECTION_RESPAWN", "infection.zombie_respawn",
 		3), 0, 255);
-	settings->zombie_shields = infection_setting("HALO_INFECTION_SHIELDS", "infection.zombie_shields", 1) != 0;
+	settings->zombie_shields = infection_setting("HALO_INFECTION_SHIELDS", "infection.zombie_shields", 0) != 0;
 	settings->zombie_tough = infection_setting("HALO_INFECTION_TOUGH", "infection.zombie_tough", 0) != 0;
 	infection_settings_clamp(settings);
 }
@@ -769,6 +771,48 @@ static void infection_update(void)
 			}
 		}
 	}
+	/* (the test census: every weapon in the game by tag, and the humans' hands) */
+	if (game_time_get() % (10 * TICKS_PER_SECOND) == 5 * TICKS_PER_SECOND && getenv("HALO_INFECTION_TRACE"))
+	{
+		struct object_iterator objects;
+		char names[8][64];
+		long counts[8], kinds = 0, other = 0, i;
+
+		object_iterator_new(&objects, _object_mask_weapon, 0);
+		while (object_iterator_next(&objects))
+		{
+			char const *name = tag_get_name(weapon_get(objects.index)->definition_index);
+
+			for (i = 0; i < kinds && strcmp(names[i], name); i++)
+				;
+			if (i < kinds)
+				counts[i]++;
+			else if (kinds < 8)
+				strncpy(names[kinds], name, 63), names[kinds][63] = 0, counts[kinds++] = 1;
+			else
+				other++;
+		}
+		for (i = 0; i < kinds; i++)
+			platform_log("infection: census: weapon %s x%ld", names[i], counts[i]);
+		platform_log("infection: census: %ld weapons of other kinds", other);
+		data_iterator_new(&iterator, player_data);
+		while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+		{
+			struct unit_datum *unit;
+			short slot;
+
+			if (player->unit_index == NONE)
+				continue;
+			unit = unit_get(player->unit_index);
+			for (slot = 0; slot < MAXIMUM_WEAPONS_PER_UNIT; slot++)
+				if (unit->unit.weapon_object_indices[slot] != NONE)
+					platform_log("infection: census: player %ld (%s) holds %s shield %.2f grenades %d/%d",
+						(long)infection_absolute(iterator.datum_index),
+						infection_side(iterator.datum_index) == _infection_side_zombie ? "zombie" : "human",
+						tag_get_name(object_get(unit->unit.weapon_object_indices[slot])->definition_index),
+						unit->object.shield_vitality, unit->unit.grenade_counts[0], unit->unit.grenade_counts[1]);
+		}
+	}
 	/* (no zombie left - they all quit - with humans to play: one chosen
 	again; its unit dies, and it comes back a zombie) */
 	infection_count(&humans, &zombies);
@@ -928,6 +972,71 @@ struct game_engine *infection_engine_get(
 
 /* ---------- game_engine.c's hooks */
 
+/* the host: a human's loadout, a shotgun and a pistol (the map's own tags;
+whatever else the spawn gave, the game type's weapon set or the map's
+starting equipment, is made one of them already, game_engine_remap_weapon:
+this makes sure of both, in the game's weapon list order) */
+static void infection_equip_human(long player_index)
+{
+	struct player_datum *player = player_get(player_index);
+	struct unit_datum *unit;
+	long wanted[2];
+	boolean have[2] = { FALSE, FALSE };
+	short slot, i;
+
+	if (player->unit_index == NONE)
+		return;
+	unit = unit_get(player->unit_index);
+	wanted[0] = game_engine_infection_weapon(TRUE, NONE);
+	wanted[1] = game_engine_infection_weapon(FALSE, NONE);
+	for (slot = 0; slot < MAXIMUM_WEAPONS_PER_UNIT; slot++)
+	{
+		long weapon_index = unit->unit.weapon_object_indices[slot];
+		struct weapon_datum *weapon = weapon_index != NONE ?
+			(struct weapon_datum *)object_try_and_get_and_verify_type(weapon_index, _object_mask_weapon) : NULL;
+		boolean keep = FALSE;
+
+		if (!weapon)
+			continue;
+		for (i = 0; i < 2; i++)
+			if (weapon->definition_index == wanted[i] && !have[i])
+				have[i] = keep = TRUE;
+		if (!keep)
+		{
+			unit_network_forget_weapon(player->unit_index, slot);
+			object_delete(weapon_index);
+		}
+	}
+	for (i = 0; i < 2; i++)
+	{
+		struct object_placement_data placement;
+		long weapon_index;
+
+		if (have[i] || wanted[i] == NONE || (i == 1 && wanted[1] == wanted[0]))
+			continue;
+		object_placement_data_new(&placement, wanted[i], NONE);
+		placement.position = unit->object.position;
+		weapon_index = object_new(&placement);
+		if (weapon_index == NONE)
+			continue;
+		if (!unit_add_weapon_to_inventory(player->unit_index, weapon_index, i == 0 ? _unit_add_weapon_starting : 0))
+			object_delete(weapon_index);
+	}
+	if (getenv("HALO_INFECTION_TRACE"))
+		platform_log("infection: trace: human %ld loadout shotgun %d pistol %d", (long)infection_absolute(player_index),
+			(int)have[0], (int)have[1]);
+}
+
+/* a zombie's blow kills a human outright, shields or none (object_cause_damage) */
+boolean infection_melee_kills(
+	long damaging_player_index,
+	long damaged_player_index)
+{
+	return infection_active() && damaging_player_index != NONE && damaged_player_index != NONE &&
+		infection_side(damaging_player_index) == _infection_side_zombie &&
+		infection_side(damaged_player_index) == _infection_side_human;
+}
+
 void infection_postspawn_player_update(
 	long player_index)
 {
@@ -936,6 +1045,8 @@ void infection_postspawn_player_update(
 	infection_apply_side(player_index);
 	if (infection_side(player_index) == _infection_side_zombie)
 		infection_arm_zombie(player_index);
+	else if (infection_side(player_index) == _infection_side_human)
+		infection_equip_human(player_index);
 }
 
 boolean infection_should_end_game(
