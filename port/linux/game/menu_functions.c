@@ -6181,13 +6181,29 @@ static void online_profile_card(struct widget_instance *screen, short focused_ro
 	}
 }
 
+/* (a grid's cell one row down or up, in its column: past the last row it
+wraps to the first, and past the first to the column's last cell - the last
+row can be short) */
+static short online_custom_grid_step(short at, short cells, boolean down)
+{
+	short column = (short)(at % ONLINE_CUSTOM_GRID_COLUMNS);
+
+	if (down)
+		return (short)(at + ONLINE_CUSTOM_GRID_COLUMNS < cells ? at + ONLINE_CUSTOM_GRID_COLUMNS : column);
+	if (at >= ONLINE_CUSTOM_GRID_COLUMNS)
+		return (short)(at - ONLINE_CUSTOM_GRID_COLUMNS);
+	while (column + ONLINE_CUSTOM_GRID_COLUMNS < cells)
+		column = (short)(column + ONLINE_CUSTOM_GRID_COLUMNS);
+	return column;
+}
+
 /* (port online custom: the editor's list, after port h3 custom) */
 static void online_custom_update(struct widget_instance *list)
 {
 	struct widget_instance *screen = screen_of(list);
 	struct player_profile *profile = player_ui_get_edit_player_profile();
 	struct widget_instance *child, *first = NULL, *found;
-	short slot = 0, focused_row = NONE, index;
+	short slot = 0, focused_row = NONE, index, grid_slot = NONE, focused_slot = NONE;
 	char text[64];
 
 	if (list != online_custom.list)
@@ -6224,6 +6240,13 @@ static void online_custom_update(struct widget_instance *list)
 		child->disabled = !shown;
 		if (!shown)
 			continue;
+		if (online_custom.grid && !strcmp(child->name, online_custom.grid == _online_custom_grid_visors ?
+			"op_visor" : "op_color"))
+		{
+			grid_slot = slot;
+		}
+		if (child == list->focused_child)
+			focused_slot = slot;
 		child->vertical_offset = (short)(slot++ * ONLINE_CUSTOM_ROW_HEIGHT);
 		/* (the arrows the focused row's alone, as h3_custom_update has them:
 		shown again above with the row) */
@@ -6251,16 +6274,22 @@ under or above; the focus back on the grid's row) */
 		char const *grid_row = visors ? "op_visor" : "op_color";
 		short focused = online_custom_row_index(list->focused_child->name);
 
-		if (strcmp(list->focused_child->name, grid_row) && focused != NONE)
+		if (strcmp(list->focused_child->name, grid_row) && focused != NONE && grid_slot != NONE && focused_slot != NONE)
 		{
-			short step = focused > online_custom_row_index(grid_row) ? ONLINE_CUSTOM_GRID_COLUMNS :
-				-ONLINE_CUSTOM_GRID_COLUMNS;
+			/* (up or down by where the list put the focus among the shown
+			rows, wrapping: Up from the first row lands on the last, which
+			is a row up, not down) */
+			boolean down = (focused_slot - grid_slot + slot) % slot == 1;
+			short cells = visors ? PLAYER_COSMETICS_VISORS : ONLINE_CUSTOM_GRID_CELLS;
+			short at = visors ? h3_custom.visor : (short)(h3_custom_color_of(profile) + 1);
 
+			at = online_custom_grid_step(at, cells, down);
 			if (visors)
-				h3_custom.visor = (short)PIN(h3_custom.visor + step, 0, PLAYER_COSMETICS_VISORS - 1);
+				h3_custom.visor = at;
 			else
-				h3_custom_set_color(profile, (short)(PIN(h3_custom_color_of(profile) + 1 + step, 0,
-					ONLINE_CUSTOM_GRID_CELLS - 1) - 1));
+				h3_custom_set_color(profile, (short)(at - 1));
+			platform_log("menus: online customize: %s grid %s to cell %d", visors ? "visor" : "colour", down ? "down" : "up",
+				at);
 			if ((found = named(list, grid_row)) != NULL)
 				ui_widget_port_give_focus(list, found);
 			focused_row = online_custom_row_index(grid_row);
