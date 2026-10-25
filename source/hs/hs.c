@@ -16228,6 +16228,31 @@ spike, port/linux/game/forge.c), which are no script's */
 			return player_models_command(text);
 		}
 	}
+	/* port: the host's bots added and dropped by hand (add_bot [n],
+	add_bot_red, add_bot_blue, drop_bot [n], drop_bot_red, drop_bot_blue,
+	bots_reset: network_server_manager.c), which are no script's */
+	{
+		static char const *const words[] = { "add_bot", "add_bot_red", "add_bot_blue", "drop_bot", "drop_bot_red",
+			"drop_bot_blue", "bots_reset" };
+		long word;
+
+		for (word = 0; word < (long)NUMBEROF(words); word++)
+		{
+			char const *text = hs_host_player_command(expression, words[word]);
+
+			if (text)
+			{
+				boolean network_game_server_port_bots_command(char const *word, char const *arguments, char *answer,
+					long answer_size);
+				char answer[160];
+
+				answer[0] = 0;
+				network_game_server_port_bots_command(words[word], text, answer, sizeof(answer));
+				console_printf(FALSE, "%s", answer);
+				return TRUE;
+			}
+		}
+	}
 	/* port: the host's ban and kick commands ("ban <player name>", "kick
 	<player name>", or the name's start: Tab completes it), which are no
 	script's */

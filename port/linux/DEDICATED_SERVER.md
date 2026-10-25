@@ -246,6 +246,9 @@ These commands work in `init.txt` and on the console. The names are
 | `sv_bots_fill <0\|1>` | 1: bots fill the game to its most players less two, rounded down to an even total (16 most: 14), so two slots are always free and the teams come out equal, and leave as players join (see "Bots"). 0 (the default): no bots. |
 | `sv_bots_when_empty <0\|1>` | With `sv_bots_fill 1`: 1 (the default), the bots play while nobody is in too (the server plays its cycle with them and never looks empty); 0, only while people are in. |
 | `sv_bots_skill <easy\|normal\|heroic\|legendary>` | The bots' skill (default normal). |
+| `add_bot [n]`, `add_bot_red [n]`, `add_bot_blue [n]` | A bot more (of that team: red the first, blue the second), joining at once, mid-game too. With `sv_bots_fill 1` never past its even total (two slots stay free: a full fill says no room); without the fill, bots added this way play anyway. `sv_` in front works too. |
+| `drop_bot [n]`, `drop_bot_red [n]`, `drop_bot_blue [n]` | A bot fewer (of that team). A team asked for in either is left as asked, not evened. |
+| `bots_reset` | The bots added or dropped by hand forgotten: the fill's own again. |
 | `sv_map_download <0\|1>` | 1: Vitas without a custom map of the cycle may download it from the server, in the lobby or before they join a game in progress (then at most 256 KB/s for all of them together: `HALO_MAP_SHARE_INGAME_RATE_KB` in the server's environment changes it). 0 (the default): no downloads. |
 | `sv_port <port>` | Internet play's UDP port (default 2302). `init.txt` only. |
 | `sv_game_port <port>` | The game's own ports on this machine: this one (the host's) and the next (its client's). The default is 5150 for `sv_port` 2302, 5152 for 2303, 5154 for 2304 and so on up to 2401 (5150 past that), so servers on 2302, 2303... never take each other's. Only a server on 5150 is found on its LAN (see "Several servers on one VPS"). Not 5149 or 5151. `init.txt` only. |
