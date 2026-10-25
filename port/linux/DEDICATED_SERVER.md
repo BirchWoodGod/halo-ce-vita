@@ -243,7 +243,7 @@ These commands work in `init.txt` and on the console. The names are
 | `sv_starting_weapons <generic\|map>` | The players' first weapons in every gametype: `generic`, an assault rifle and a pistol; `map` (the default), the gametype's own (most maps' own: see "Starting weapons"). From the next game. |
 | `sv_end_empty <seconds>` | A game that nobody is in ends after this (default 30; 0: never). |
 | `sv_coop <level> [difficulty]` | Co-op on a campaign level (`a10`, `a30`...; difficulty 0 to 3, default 1) instead of the cycle; the server runs the AI and the scripts. `init.txt` only. |
-| `sv_bots_fill <0\|1>` | 1: bots fill the game to its most players less one, so a slot is always free, and leave as players join (see "Bots"). 0 (the default): no bots. |
+| `sv_bots_fill <0\|1>` | 1: bots fill the game to its most players less two, rounded down to an even total (16 most: 14), so two slots are always free and the teams come out equal, and leave as players join (see "Bots"). 0 (the default): no bots. |
 | `sv_bots_when_empty <0\|1>` | With `sv_bots_fill 1`: 1 (the default), the bots play while nobody is in too (the server plays its cycle with them and never looks empty); 0, only while people are in. |
 | `sv_bots_skill <easy\|normal\|heroic\|legendary>` | The bots' skill (default normal). |
 | `sv_map_download <0\|1>` | 1: Vitas without a custom map of the cycle may download it from the server, in the lobby or before they join a game in progress (then at most 256 KB/s for all of them together: `HALO_MAP_SHARE_INGAME_RATE_KB` in the server's environment changes it). 0 (the default): no downloads. |
@@ -351,11 +351,13 @@ refuses it, as before. `sv_mapcycle_add prisoner infection`.
 
 `sv_bots_fill 1` fills the game with bots (the game's offline bots,
 `port/linux/game/bots.c`, played by the server alone) up to its most
-players less one, so that a slot is always free:
+players less two, rounded down to an even total (16 most: 14 players,
+so 2 people play with 12 bots, 3 with 11), so that two slots are always
+free and a team game's teams come out equal:
 
 - While nobody is in, the bots play the cycle alone (`sv_bots_when_empty
-  1`, the default): the server is listed one short of full ("15 of 16: 0
-  players, 15 bots") and never ends a game for being empty. With
+  1`, the default): the server is listed two short of full ("14 of 16: 0
+  players, 14 bots") and never ends a game for being empty. With
   `sv_bots_when_empty 0` an empty server has no bots, stays idle and is
   listed with no players.
 - A player joining takes the free slot and a bot leaves to free another;
@@ -372,8 +374,8 @@ players less one, so that a slot is always free:
   team, leaves the larger, and the teams are kept within one of each other.
   A person is never moved. A party bigger than half the game can leave the
   teams uneven (people are not moved to even them). In Infection the bots
-  are humans and zombies as the players are; free for all just keeps the
-  most players less one.
+  are humans and zombies as the players are; free for all keeps the same
+  total.
 - `sv_minplayers` counts people, not bots (with the bots playing an empty
   server, they start its games themselves).
 - Older builds (the public 1.1.0) see every bot as a player. In Infection

@@ -5396,7 +5396,11 @@ so every build, 1.1.0's too, sees bots as other players.
   joins the smaller team, leaves the larger (on a tie, the team of the
   person who joined last), and the teams are kept within one of each other
   by a bot leaving the larger and another joining the smaller. Infection's
-  sides are its own (infection.c). Free for all: the most less one alone.
+  sides are its own (infection.c). Free for all: the same total.
+  A dedicated server fills to the most players less two, rounded down to
+  an even number (16 most: 14 players, so 2 people play with 12 bots), so
+  two slots stay free and the teams come out equal; a host's Online bots
+  keep the most less one.
 - In the game in progress, a bot joins at most every
   BOTS_INGAME_JOIN_INTERVAL; not while it ends or is loading. */
 
@@ -5435,10 +5439,27 @@ static long network_game_server_fill_cap(
 	if (cap != network_game_server_fill_said)
 	{
 		network_game_server_fill_said = cap;
-		platform_log("server: bots: %s", cap > 0 ? "the game is filled with bots to its most players less one" :
+		platform_log("server: bots: %s", cap > 0 ? "the game is filled with bots (two slots free on a dedicated server, one on a host)" :
 			"no bot fill");
 	}
 	return cap;
+}
+
+/* the players (people and bots) the fill makes the game: a dedicated server
+leaves two slots free and keeps the total even (16 most: 14, so 2 people
+play with 12 bots; an odd most takes the even number below), so that the
+teams of a team game come out equal; a host's Online bots keep one slot
+free (the most less one) */
+static long network_game_server_fill_total(
+	long maximum_players)
+{
+#ifdef HALO_DEDICATED_SERVER
+	long total = maximum_players - 2;
+
+	return total > 0 ? total & ~1L : 0;
+#else
+	return maximum_players - 1;
+#endif
 }
 
 /* whether the bots play while nobody is in (the dedicated server's
@@ -5788,7 +5809,7 @@ static void network_game_server_fill_bots(
 		return;
 	}
 	if (cap > 0 && (people > 0 || network_game_server_fill_when_empty()))
-		wanted = PIN((long)server->game.maximum_players - 1 - people, 0, cap);
+		wanted = PIN(network_game_server_fill_total((long)server->game.maximum_players) - people, 0, cap);
 	if (bots > wanted)
 	{
 		long slot = network_game_server_fill_bot_to_leave(server, slot_of_bot, NONE);
