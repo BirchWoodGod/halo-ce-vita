@@ -151,6 +151,21 @@ What a bot does each tick, in a player's terms:
   goal dropped). halo.log's play line has the goals with no way, the
   strafes blocked, the walls jumped and the shortcuts; the nav line the
   routes asked and the hops taken and failed.
+- Item spawns and weapons (port: bots_spawn_goal). The bots know the map's
+  item spawns in the gametype (its netgame equipment: what each gives, from
+  its item collection) and when each next gives an item (the game puts one
+  there at every multiple of its period, taken or not: known to the tick),
+  and go for them as players do: a power weapon (the rocket launcher, the
+  sniper rifle, the shotgun), an overshield or camouflage from across the
+  map in Slayer (25 units in a game with an objective, 12 for a defender),
+  a better weapon near; a power weapon or powerup due within a few seconds
+  of the walk there is gone to and waited for. One bot of a team a spawn
+  (two in a free-for-all), the nearer; the other team's contest it. A spawn
+  given up three times and never taken is left be two minutes. With both
+  hands full a bot changes to the weapon it keeps the less before the swap
+  drops it, and in a fight changes to the one of its two whose range suits
+  the distance (a shotgun close, a sniper rifle far, rockets not close up).
+  halo.log's items line has the spawns gone for and taken by kind.
 - Roles, routes and vantage points (port: bots_roles.c, bots_routes.c and
   bots_vantage.c, steering the bot through bots_tactics.h's hooks here: its
   goal, its searches' goal, its look and its fight). Each team's bots have
@@ -224,6 +239,7 @@ and left, the defenders' posts. The map's teleporters are logged once.
 #include "units/vehicles.h"
 #include "units/vehicle_definitions.h"
 #include "items/items.h"
+#include "items/item_definitions.h"
 #include "items/weapons.h"
 #include "items/weapon_definitions.h"
 #include "items/projectile_definitions.h"
@@ -378,6 +394,19 @@ enum
 	_bots_powerup_overshield,
 	_bots_powerup_camouflage,
 	NUMBER_OF_BOTS_POWERUPS,
+};
+
+/* port: what an item spawn gives (bots_spawns) */
+enum
+{
+	_bots_spawn_none = 0,
+	_bots_spawn_weapon,
+	_bots_spawn_power,
+	_bots_spawn_overshield,
+	_bots_spawn_camouflage,
+	_bots_spawn_health,
+	_bots_spawn_grenades,
+	NUMBER_OF_BOTS_SPAWNS,
 };
 
 /* a vehicle's seat, as a bot takes it */
@@ -758,6 +787,17 @@ struct bots_bot
 	long hop_via;
 	/* port: the goal it last weighed the jumps and drops for, as shortcuts */
 	long jump_weighed_serial;
+	/* port: the item spawn it goes for (bots_spawn_goal), NONE for none: for
+	which goal (its serial), given up then; when it next weighs them; a spawn
+	it gave up on, left be until then */
+	long plan_spawn;
+	long plan_serial;
+	long plan_deadline_tick;
+	long plan_check_tick;
+	long plan_avoid_spawn;
+	long plan_avoid_until_tick;
+	/* port: when it last changed weapons for the range (bots_weapon_for_range) */
+	long weapon_switch_tick;
 	/* port: a goal it found no way to (the hops' regions: none joins them),
 	not gone for again until then: an enemy's place, a roaming place (nor
 	any near it) */
@@ -944,6 +984,14 @@ static struct
 		long walk_jumps;
 		/* port: jumps and drops taken as shortcuts (bots_jump_shortcut) */
 		long jump_shortcuts;
+		/* port: item spawns gone for (by kind), waited at for the next
+		item, and taken; weapons switched for the range, and the weapon
+		dropped chosen at a swap */
+		long spawns_sought[NUMBER_OF_BOTS_SPAWNS];
+		long spawns_taken[NUMBER_OF_BOTS_SPAWNS];
+		long spawn_waits;
+		long range_switches;
+		long drop_choices;
 	} play;
 } bots_globals;
 
@@ -968,6 +1016,43 @@ static struct
 		long surface_index;
 	} items[BOTS_MAXIMUM_POWERUPS];
 } bots_powerups;
+
+/* port: the map's item spawns (its netgame equipment in this gametype):
+where, what (a power weapon, another weapon, an overshield, camouflage, a
+health pack, grenades: from its item collection), how often the game puts
+an item there (game_engine.c's game_engine_update_item_spawn: at every
+multiple of the period, whether the last was taken or not - so the next is
+known to the tick, as a player who counts knows it) and the item lying
+there now, found once a second with the powerups; and the bots going for
+each (bots_spawn_goal) */
+#define BOTS_MAXIMUM_SPAWNS 64
+#define BOTS_SPAWN_DEFINITIONS 4
+static struct
+{
+	unsigned long map_generation;
+	boolean prepared;
+	long count;
+	struct
+	{
+		real_point3d position;
+		real_point3d ground;
+		long surface_index;
+		long period_ticks;
+		short kind;
+		long definitions[BOTS_SPAWN_DEFINITIONS];
+		long definition_count;
+		/* the item lying there (NONE for none), and since when */
+		long object_index;
+		long present_tick;
+		/* the times bots went for it and took it (halo.log); port: and gave
+		it up (no way there, stuck, too long): one given up three times and
+		never taken is left be by every bot two minutes */
+		long sought;
+		long taken;
+		long failures;
+		long rest_until_tick;
+	} spawns[BOTS_MAXIMUM_SPAWNS];
+} bots_spawns;
 
 /* the walkable surfaces the bots' searches read: a copy of the structure's
 pathfinding surfaces, less those learnt to be in the way (scenery and
@@ -1504,8 +1589,14 @@ static boolean bots_weapon_empty(long weapon_index)
 	struct weapon_datum *weapon = weapon_get(weapon_index);
 	struct weapon_definition *definition = weapon_definition_get(weapon->definition_index);
 
-	if (definition->weapon.magazines.count <= 0)
-		return FALSE;
+	/* port: (a battery's - the plasma pistol, the plasma rifle, whose
+	magazine holds no rounds: spent with its age; such a weapon was taken
+	for empty, and never changed to) */
+	if (definition->weapon.magazines.count <= 0 ||
+		TAG_BLOCK_GET_ELEMENT(&definition->weapon.magazines, 0, struct weapon_magazine_definition)->rounds_loaded_maximum <= 0)
+	{
+		return weapon->weapon.age >= 0.999f;
+	}
 	return weapon->weapon.magazines[0].rounds_loaded + weapon->weapon.magazines[0].rounds_total <= 0;
 }
 
@@ -1555,7 +1646,7 @@ static short bots_weapon_value_compute(long definition_index)
 		short value;
 	} const values[] =
 	{
-		{ "rocket", 9 }, { "sniper", 8 }, { "shotgun", 8 }, { "fuel rod", 7 }, { "plasma_cannon", 7 },
+		{ "grenade", 0 }, { "rocket", 9 }, { "sniper", 8 }, { "shotgun", 8 }, { "fuel rod", 7 }, { "plasma_cannon", 7 },
 		{ "plasma pistol", 3 }, { "pistol", 7 }, { "assault rifle", 6 }, { "needler", 5 }, { "plasma rifle", 5 },
 		{ "flamethrower", 4 }, { "flag", -1 }, { "ball", -1 }, { "skull", -1 },
 	};
@@ -1683,6 +1774,9 @@ struct bots_weapon_kind
 	/* port: a power weapon (a rocket launcher, a sniper rifle, a shotgun, a
 	fuel rod gun: bots_weapon_power) */
 	boolean power;
+	/* port: the distances it fights best at (bots_weapon_for_range) */
+	real band_near;
+	real band_far;
 };
 
 static struct
@@ -1730,6 +1824,30 @@ static struct bots_weapon_kind const *bots_weapon_kind(long definition_index)
 
 		kind->power = name && (strstr(name, "rocket") || strstr(name, "sniper") || strstr(name, "shotgun") ||
 			strstr(name, "fuel rod") || strstr(name, "plasma_cannon"));
+		/* (the distances it fights best at: a shotgun's and a flamethrower's
+		close, a sniper rifle's far, a rocket's not close up; by its
+		precision for a map's own) */
+		kind->band_near = 0.0f;
+		kind->band_far = 14.0f;
+		if (name && (strstr(name, "shotgun") || strstr(name, "flamethrower")))
+			kind->band_far = 5.0f;
+		else if (kind->precision == _bots_precision_long)
+		{
+			kind->band_near = 8.0f;
+			kind->band_far = 80.0f;
+		}
+		else if (kind->precision == _bots_precision_heavy || (name && strstr(name, "fuel rod")))
+		{
+			kind->band_near = 5.0f;
+			kind->band_far = 30.0f;
+		}
+		else if (kind->precision == _bots_precision_mid)
+		{
+			kind->band_near = 3.0f;
+			kind->band_far = 30.0f;
+		}
+		else if (name && (strstr(name, "plasma pistol") || strstr(name, "needler")))
+			kind->band_far = 11.0f;
 	}
 	{
 		struct weapon_definition *definition = weapon_definition_get(definition_index);
@@ -1769,6 +1887,22 @@ the rocket launcher, the sniper rifle, the shotgun, the fuel rod gun) */
 static boolean bots_weapon_power(long definition_index)
 {
 	return bots_weapon_kind(definition_index)->power;
+}
+
+/* port: how much the bot keeps a weapon it holds (its value, a power
+weapon's the more; an empty one nothing) */
+static real bots_weapon_keep(long weapon_index)
+{
+	struct weapon_datum *weapon;
+
+	if (weapon_index == NONE)
+		return -10.0f;
+	weapon = weapon_get(weapon_index);
+	if (bots_weapon_value(weapon->definition_index) < 0)
+		return 100.0f;
+	if (bots_weapon_empty(weapon_index))
+		return -5.0f;
+	return (real)bots_weapon_value(weapon->definition_index) + (bots_weapon_power(weapon->definition_index) ? 3.0f : 0.0f);
 }
 
 /* port: (bots_tactics.h) */
@@ -1827,8 +1961,22 @@ static long bots_find_item(struct bots_bot *bot, struct unit_datum *unit, real_p
 	struct object_iterator iterator;
 	long best_index = NONE;
 	real best_score = REAL_MAX;
-	long current = bots_current_weapon(unit);
-	short current_value = current != NONE ? bots_weapon_value(weapon_get(current)->definition_index) : 0;
+	/* port: (against the weapon it would drop: the worse it holds, or none
+	with a hand free; a power weapon the more wanted) */
+	real current_value = REAL_MAX;
+	long held_count = 0;
+	short held_slot;
+
+	for (held_slot = 0; held_slot < MAXIMUM_WEAPONS_PER_UNIT; held_slot++)
+	{
+		if (unit->unit.weapon_object_indices[held_slot] != NONE)
+		{
+			held_count++;
+			current_value = MIN(current_value, bots_weapon_keep(unit->unit.weapon_object_indices[held_slot]));
+		}
+	}
+	if (held_count < 2)
+		current_value = MIN(current_value, 4.0f);
 
 	object_iterator_new(&iterator, _object_mask_weapon, 0);
 	while (object_iterator_next(&iterator))
@@ -1849,7 +1997,7 @@ static long bots_find_item(struct bots_bot *bot, struct unit_datum *unit, real_p
 		distance = bots_distance3d(&item->object.position, position);
 		if (distance > maximum_distance)
 			continue;
-		value = bots_weapon_value(item->definition_index);
+		value = bots_weapon_value(item->definition_index) + (bots_weapon_power(item->definition_index) ? 3 : 0);
 		/* (one it holds already: only its ammunition, which walking over
 		takes) */
 		for (slot = 0; slot < MAXIMUM_WEAPONS_PER_UNIT; slot++)
@@ -1859,9 +2007,9 @@ static long bots_find_item(struct bots_bot *bot, struct unit_datum *unit, real_p
 			if (other != NONE && weapon_get(other)->definition_index == item->definition_index)
 				held = TRUE;
 		}
-		if (held || value <= current_value)
+		if (held || (real)value <= current_value + 0.5f)
 			continue;
-		score = distance - (real)(value - current_value) * 3.0f;
+		score = distance - ((real)value - current_value) * 3.0f;
 		if (score < best_score)
 		{
 			best_score = score;
@@ -1887,6 +2035,198 @@ static short bots_powerup_kind(long definition_index)
 /* port: the powerups lying on the map found again, and the turrets, once a
 second (at a bots' tick's start, from the game state alone: the same in two
 runs) */
+/* port: the map's item spawns in this gametype (once a map, as the bots'
+first tick runs) */
+static void bots_spawns_prepare(void)
+{
+	struct scenario *scenario = global_scenario_get();
+	long index;
+
+	bots_spawns.map_generation = halo_map_generation;
+	bots_spawns.prepared = TRUE;
+	bots_spawns.count = 0;
+	if (!scenario)
+		return;
+	for (index = 0; index < scenario->netgame_equipment.count && bots_spawns.count < BOTS_MAXIMUM_SPAWNS; index++)
+	{
+		struct scenario_netgame_equipment *equipment =
+			TAG_BLOCK_GET_ELEMENT(&scenario->netgame_equipment, index, struct scenario_netgame_equipment);
+		struct item_collection_definition *collection;
+		long spawn = bots_spawns.count, permutation;
+		short respawn_time = equipment->spawn_time;
+		short kind = _bots_spawn_none;
+
+		if (equipment->item_collection.index == NONE ||
+			!match_game_type(game_engine_get_variant()->game_engine_index, NUMBEROF(equipment->game_type), equipment->game_type))
+		{
+			continue;
+		}
+		collection = (struct item_collection_definition *)tag_get(ITEM_COLLECTION_DEFINITION_TAG, equipment->item_collection.index);
+		csmemset(&bots_spawns.spawns[spawn], 0, sizeof(bots_spawns.spawns[spawn]));
+		for (permutation = 0; permutation < collection->permutations.count; permutation++)
+		{
+			struct item_permutation_definition *item =
+				TAG_BLOCK_GET_ELEMENT(&collection->permutations, permutation, struct item_permutation_definition);
+			short item_kind = _bots_spawn_none;
+
+			if (item->item.index == NONE || item->weight <= 0.0f)
+				continue;
+			if (item->item.group_tag == WEAPON_DEFINITION_TAG)
+			{
+				char const *name = tag_get_name(item->item.index);
+
+				if (bots_weapon_value(item->item.index) < 0)
+					continue;
+				/* (a grenade lying is a weapon tag, walked over for grenades) */
+				item_kind = name && strstr(name, "grenade") ? _bots_spawn_grenades :
+					bots_weapon_power(item->item.index) ? _bots_spawn_power : _bots_spawn_weapon;
+			}
+			else if (item->item.group_tag == EQUIPMENT_DEFINITION_TAG)
+			{
+				switch (equipment_definition_get(item->item.index)->equipment.powerup_type)
+				{
+				case _equipment_powerup_overshield: item_kind = _bots_spawn_overshield; break;
+				case _equipment_powerup_active_camouflage: item_kind = _bots_spawn_camouflage; break;
+				case _equipment_powerup_health: item_kind = _bots_spawn_health; break;
+				case _equipment_powerup_grenade: item_kind = _bots_spawn_grenades; break;
+				default: break;
+				}
+			}
+			if (item_kind == _bots_spawn_none)
+				continue;
+			/* (a collection of several: its best) */
+			if (item_kind == _bots_spawn_power || item_kind == _bots_spawn_overshield ||
+				(kind != _bots_spawn_power && kind != _bots_spawn_overshield && item_kind > kind))
+			{
+				kind = item_kind;
+			}
+			if (bots_spawns.spawns[spawn].definition_count < BOTS_SPAWN_DEFINITIONS)
+				bots_spawns.spawns[spawn].definitions[bots_spawns.spawns[spawn].definition_count++] = item->item.index;
+		}
+		if (kind == _bots_spawn_none)
+			continue;
+		if (respawn_time == 0)
+			respawn_time = collection->spawn_time;
+		bots_spawns.spawns[spawn].period_ticks = (respawn_time > 0 ? respawn_time : 30) * TICKS_PER_SECOND;
+		bots_spawns.spawns[spawn].position = equipment->position;
+		bots_spawns.spawns[spawn].kind = kind;
+		bots_spawns.spawns[spawn].object_index = NONE;
+		bots_spawns.spawns[spawn].surface_index = bots_surface_below(&equipment->position, &bots_spawns.spawns[spawn].ground);
+		/* (one lying on something that is not the level - scenery, a
+		walkway the level's surfaces do not have, Rat Race's overshield over
+		the lower way - is on ground no bot walks to) */
+		if (bots_spawns.spawns[spawn].surface_index == NONE ||
+			equipment->position.z - bots_spawns.spawns[spawn].ground.z > 0.6f)
+		{
+			platform_log("bots: spawn of %s at (%.1f %.1f %.1f) on no ground of the level: left out",
+				tag_get_name(bots_spawns.spawns[spawn].definitions[0]), equipment->position.x, equipment->position.y,
+				equipment->position.z);
+			continue;
+		}
+		bots_spawns.count++;
+		if (getenv("HALO_BOT_NAV_LOG"))
+		{
+			struct collision_result collision;
+			real_point3d from = bots_spawns.spawns[spawn].ground;
+			real_vector3d up = { 0.0f, 0.0f, 2.0f };
+			long surface_index = bots_spawns.spawns[spawn].surface_index;
+
+			from.z += 0.05f;
+			platform_log("bots: spawn at (%.2f %.2f %.2f) ground z %.2f surface %ld walkable %d region %ld, room above %.2f",
+				equipment->position.x, equipment->position.y, equipment->position.z, bots_spawns.spawns[spawn].ground.z,
+				surface_index, surface_index < global_structure_bsp_get()->pathfinding_surfaces.count ?
+					(int)TEST_FLAG(((byte *)global_structure_bsp_get()->pathfinding_surfaces.address)[surface_index], BOTS_PATHFINDING_WALKABLE_BIT) : -1,
+				bots_nav_region(surface_index),
+				collision_test_vector(FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit) |
+					FLAG(_collision_test_back_facing_surfaces_bit), &from, &up, NONE, &collision) ? collision.point.z - from.z : 2.0f);
+		}
+		platform_log("bots: spawn %ld: %s%s at (%.1f %.1f %.1f) every %ld s", spawn + 1,
+			tag_get_name(bots_spawns.spawns[spawn].definitions[0]), bots_spawns.spawns[spawn].definition_count > 1 ? " (and others)" : "",
+			equipment->position.x, equipment->position.y, equipment->position.z,
+			bots_spawns.spawns[spawn].period_ticks / TICKS_PER_SECOND);
+	}
+}
+
+/* port: the item lying at each spawn found again (once a second, with the
+powerups): one of its collection's, on the map (no one's), within a unit */
+static void bots_spawns_find(void)
+{
+	struct object_iterator iterator;
+	long spawn, now = game_time_get();
+
+	if (!bots_spawns.prepared || bots_spawns.map_generation != halo_map_generation)
+		bots_spawns_prepare();
+	for (spawn = 0; spawn < bots_spawns.count; spawn++)
+	{
+		long object_index = bots_spawns.spawns[spawn].object_index;
+		struct object_datum *object = object_index != NONE ?
+			object_try_and_get_and_verify_type(object_index, _object_mask_weapon | _object_mask_equipment) : NULL;
+
+		if (!object || object->object.parent_object_index != NONE ||
+			bots_distance3d(&object->object.position, &bots_spawns.spawns[spawn].position) > 1.0f)
+		{
+			bots_spawns.spawns[spawn].object_index = NONE;
+		}
+	}
+	object_iterator_new(&iterator, _object_mask_weapon | _object_mask_equipment, 0);
+	while (object_iterator_next(&iterator))
+	{
+		struct item_datum *item = item_get(iterator.index);
+
+		if (item->object.parent_object_index != NONE || TEST_FLAG(item->item.flags, _item_attached_to_unit_bit))
+			continue;
+		for (spawn = 0; spawn < bots_spawns.count; spawn++)
+		{
+			long definition;
+
+			if (bots_spawns.spawns[spawn].object_index != NONE ||
+				bots_distance3d(&item->object.position, &bots_spawns.spawns[spawn].position) > 1.0f)
+			{
+				continue;
+			}
+			for (definition = 0; definition < bots_spawns.spawns[spawn].definition_count; definition++)
+			{
+				if (bots_spawns.spawns[spawn].definitions[definition] == item->definition_index)
+					break;
+			}
+			if (definition < bots_spawns.spawns[spawn].definition_count)
+			{
+				bots_spawns.spawns[spawn].object_index = iterator.index;
+				bots_spawns.spawns[spawn].present_tick = now;
+				break;
+			}
+		}
+	}
+}
+
+/* port: the item lying at a spawn now (the one found this second, still
+there: no one's, not moved off; NONE for none) */
+static long bots_spawn_object(long spawn)
+{
+	long object_index = bots_spawns.spawns[spawn].object_index;
+	struct object_datum *object;
+
+	if (object_index == NONE)
+		return NONE;
+	object = object_try_and_get_and_verify_type(object_index, _object_mask_weapon | _object_mask_equipment);
+	if (!object || object->object.parent_object_index != NONE ||
+		bots_distance3d(&object->object.position, &bots_spawns.spawns[spawn].position) > 1.0f)
+	{
+		bots_spawns.spawns[spawn].object_index = NONE;
+		return NONE;
+	}
+	return object_index;
+}
+
+/* port: the tick a spawn's next item comes (game_engine_update_item_spawn:
+the next multiple of its period) */
+static long bots_spawn_next_tick(long spawn, long now)
+{
+	long period = bots_spawns.spawns[spawn].period_ticks;
+
+	return (now / period + 1) * period;
+}
+
 static void bots_powerups_find(void)
 {
 	struct object_iterator iterator;
@@ -2960,6 +3300,8 @@ void bots_initialize_for_new_map(void)
 	csmemset(&bots_globals.play, 0, sizeof(bots_globals.play));
 	bots_powerups.count = 0;
 	bots_powerups.found_tick = NONE;
+	bots_spawns.prepared = FALSE;
+	bots_spawns.count = 0;
 	for (index = 0; index < BOTS_MAXIMUM; index++)
 	{
 		bots_globals.bots[index].vehicle_index = NONE;
@@ -4932,6 +5274,11 @@ static boolean bots_powerup_goal(struct bots_bot *bot, struct unit_datum *unit, 
 		}
 		distance = bots_distance3d(&item->object.position, position);
 		bot->item_last_distance = distance;
+		if (getenv("HALO_BOT_POWERUP_LOG") && distance < 2.5f && !(now % 5))
+			platform_log("bots: powerup bot %ld kind %d at (%.2f %.2f %.2f) item (%.2f %.2f %.2f) %.2f away, goal %d path %d %d/%d",
+				(long)(bot - bots_globals.bots) + 1, (int)bot->item_powerup, position->x, position->y, position->z,
+				item->object.position.x, item->object.position.y, item->object.position.z, distance, (int)bot->goal_kind,
+				(int)bot->path.valid, (int)bot->path.step_index, (int)bot->path.step_count);
 		if (distance < 0.8f && !bot->item_arrived_tick)
 			bot->item_arrived_tick = now;
 		if (now < bot->item_deadline_tick && (!bot->item_arrived_tick || now - bot->item_arrived_tick < TICKS_PER_SECOND * 2) &&
@@ -4996,6 +5343,10 @@ static boolean bots_powerup_goal(struct bots_bot *bot, struct unit_datum *unit, 
 		}
 		else
 		{
+			/* port: (an overshield or camouflage at a spawn: the spawns' to
+			go for, bots_spawn_goal) */
+			if (bots_spawns.count > 0)
+				continue;
 			reach = fighting ? 10.0f : objective_game ? MIN(skill->powerup_reach, 12.0f) : skill->powerup_reach;
 			if (holding)
 				reach = MIN(reach, 6.0f);
@@ -5042,6 +5393,249 @@ static boolean bots_powerup_goal(struct bots_bot *bot, struct unit_datum *unit, 
 	return TRUE;
 }
 
+/* port: what an item spawn's item is worth to the bot now (0: nothing): a
+weapon it does not hold, by how much better it is than the one it would
+drop (or none, a free hand); one it holds, its ammunition when low; an
+overshield or camouflage it has not on; a health pack hurt; grenades when
+it has none */
+static real bots_spawn_worth(struct bots_bot *bot, struct unit_datum *unit, long spawn)
+{
+	short kind = bots_spawns.spawns[spawn].kind;
+	long object_index = bots_spawn_object(spawn);
+	long definition = object_index != NONE ? object_get(object_index)->definition_index : bots_spawns.spawns[spawn].definitions[0];
+	short slot;
+
+	(void)bot;
+	switch (kind)
+	{
+	case _bots_spawn_overshield:
+		return unit->object.shield_vitality > 1.05f ? 0.0f : 10.0f;
+	case _bots_spawn_camouflage:
+		return TEST_FLAG(unit->unit.flags, _unit_active_camouflaged_bit) ? 0.0f : 7.0f;
+	case _bots_spawn_health:
+		return unit->object.body_vitality < 0.6f ? 6.0f * (1.0f - unit->object.body_vitality) : 0.0f;
+	case _bots_spawn_grenades:
+		return unit->unit.grenade_counts[0] + unit->unit.grenade_counts[1] <= 0 ? 2.0f : 0.0f;
+	case _bots_spawn_weapon:
+	case _bots_spawn_power:
+	{
+		real worst = REAL_MAX, value;
+		long held = 0;
+
+		for (slot = 0; slot < MAXIMUM_WEAPONS_PER_UNIT; slot++)
+		{
+			long weapon_index = unit->unit.weapon_object_indices[slot];
+
+			if (weapon_index == NONE)
+				continue;
+			held++;
+			if (weapon_get(weapon_index)->definition_index == definition)
+				return bots_weapon_loaded(weapon_index) < 0.5f && kind == _bots_spawn_power ? 2.0f : 0.0f;
+			worst = MIN(worst, bots_weapon_keep(weapon_index));
+		}
+		value = (real)bots_weapon_value(definition) + (kind == _bots_spawn_power ? 3.0f : 0.0f);
+		/* (a free hand: the weapon over none) */
+		if (held < 2)
+			worst = MIN(worst, 4.0f);
+		return MAX(0.0f, value - worst);
+	}
+	}
+	return 0.0f;
+}
+
+/* port: the item spawns as players play them: a power weapon (rockets, the
+sniper rifle, the shotgun), an overshield or camouflage gone for across the
+map, a better weapon near, the spawn's next item timed - gone to when it
+comes (game_engine_update_item_spawn's period: known to the tick) and
+waited at - one bot of a team to a spawn (the nearer; two in a game without
+teams), contested by the other team's as players do. Weighed once a second,
+not while the bot carries the flag or the ball; in a game with an objective
+only near (25 units; a defender 12), in Slayer from across the map; the
+walk there straight, a quarter longer, at a run. TRUE when the bot goes for
+one (its goal set: the item, or the spawn's ground to wait at) */
+#define BOTS_SPAWN_RUN 2.2f
+static boolean bots_spawn_goal(struct bots_bot *bot, struct unit_datum *unit, real_point3d const *position, boolean fighting)
+{
+	long now = game_time_get(), spawn, best = NONE;
+	long bot_index = (long)(bot - bots_globals.bots);
+	struct player_datum *player = player_get(bot->player_index);
+	boolean teams = game_engine_has_teams();
+	boolean objective_game = game_engine_get_variant()->game_engine_index != game_engine_slayer;
+	real best_score = 0.0f, reach;
+	long start_surface_index;
+
+	if (bot->held_objective || !bots_spawns.count)
+	{
+		bot->plan_spawn = NONE;
+		return FALSE;
+	}
+	/* (the spawn it goes for: the item come, gone for; not yet, its ground,
+	waited at; taken, by it or another, done) */
+	if (bot->plan_spawn != NONE)
+	{
+		long spawn_index = bot->plan_spawn;
+		long object_index = bots_spawn_object(spawn_index);
+
+		/* (its goal given up meanwhile - no way there, stuck, an item it
+		finds no way to - or another goal: the plan dropped; given up, the
+		spawn left be a while) */
+		if (bot->goal_serial != bot->plan_serial || now > bot->plan_deadline_tick || bot->goal_kind == _bots_goal_none ||
+			(object_index != NONE && bots_item_unreachable(bot, object_index)))
+		{
+			if (now > bot->plan_deadline_tick || bot->goal_kind == _bots_goal_none ||
+				(object_index != NONE && bots_item_unreachable(bot, object_index)))
+			{
+				bot->plan_avoid_spawn = spawn_index;
+				bot->plan_avoid_until_tick = now + TICKS_PER_SECOND * 30;
+				if (++bots_spawns.spawns[spawn_index].failures >= 3 && !bots_spawns.spawns[spawn_index].taken)
+				{
+					bots_spawns.spawns[spawn_index].failures = 0;
+					bots_spawns.spawns[spawn_index].rest_until_tick = now + TICKS_PER_SECOND * 120;
+				}
+			}
+			bot->plan_spawn = NONE;
+		}
+		else if (object_index != NONE)
+		{
+			if (bot->goal_kind != _bots_goal_item || bot->item_index != object_index)
+			{
+				bots_set_goal(bot, _bots_goal_item, &bots_spawns.spawns[spawn_index].ground, bots_spawns.spawns[spawn_index].surface_index);
+				bot->item_index = object_index;
+				bot->plan_serial = bot->goal_serial;
+			}
+			return TRUE;
+		}
+		else if (bot->goal_kind == _bots_goal_item && bots_distance3d(&bots_spawns.spawns[spawn_index].ground, position) < 1.5f)
+		{
+			/* (gone as the bot stood at it: taken) */
+			bots_spawns.spawns[spawn_index].taken++;
+			bots_globals.play.spawns_taken[bots_spawns.spawns[spawn_index].kind]++;
+			if (bots_spawns.spawns[spawn_index].kind == _bots_spawn_overshield)
+				bots_globals.powerups_taken[_bots_powerup_overshield]++;
+			else if (bots_spawns.spawns[spawn_index].kind == _bots_spawn_camouflage)
+				bots_globals.powerups_taken[_bots_powerup_camouflage]++;
+			bot->plan_spawn = NONE;
+			bot->goal_kind = _bots_goal_none;
+			return FALSE;
+		}
+		else if (bot->goal_kind == _bots_goal_item)
+		{
+			/* (taken by another before it came: done) */
+			bot->plan_spawn = NONE;
+			bot->goal_kind = _bots_goal_none;
+			return FALSE;
+		}
+		else
+		{
+			/* (waiting: at the spawn's ground until the next comes) */
+			if (bot->goal_kind != _bots_goal_roam)
+				bot->plan_spawn = NONE;
+			else
+				return TRUE;
+		}
+	}
+	if (now < bot->plan_check_tick)
+		return FALSE;
+	bot->plan_check_tick = now + TICKS_PER_SECOND + (bot_index % 5);
+	reach = objective_game ? (bots_tactics_bots[bot_index].role == _bots_role_defender ? 12.0f : 25.0f) : 70.0f;
+	if (fighting)
+		reach = MIN(reach, 10.0f);
+	start_surface_index = bots_surface_below(position, NULL);
+	for (spawn = 0; spawn < bots_spawns.count; spawn++)
+	{
+		real worth, distance, eta, wait = 0.0f, score, spawn_reach = reach;
+		boolean present = bots_spawn_object(spawn) != NONE;
+		short kind = bots_spawns.spawns[spawn].kind;
+		long other_index;
+
+		if ((spawn == bot->plan_avoid_spawn && now < bot->plan_avoid_until_tick) || now < bots_spawns.spawns[spawn].rest_until_tick)
+			continue;
+		/* (by a goal given up a while ago) */
+		if (now < bot->avoid_until_tick && bots_distance3d(&bots_spawns.spawns[spawn].ground, &bot->avoid_point) < 3.0f)
+			continue;
+		/* (a better weapon of no power, a health pack, grenades: near) */
+		if (kind == _bots_spawn_weapon || kind == _bots_spawn_health || kind == _bots_spawn_grenades)
+			spawn_reach = MIN(spawn_reach, 15.0f);
+		distance = bots_distance3d(&bots_spawns.spawns[spawn].ground, position);
+		if (distance > spawn_reach)
+			continue;
+		worth = bots_spawn_worth(bot, unit, spawn);
+		if (worth <= 0.5f)
+			continue;
+		if (present && bots_item_unreachable(bot, bots_spawns.spawns[spawn].object_index))
+			continue;
+		eta = distance * 1.25f / BOTS_SPAWN_RUN;
+		if (!present)
+		{
+			/* (timed: power weapons and powerups alone, coming before the bot
+			would have waited more than a few seconds there) */
+			wait = (real)(bots_spawn_next_tick(spawn, now) - now) / TICKS_PER_SECOND - eta;
+			if ((kind != _bots_spawn_power && kind != _bots_spawn_overshield && kind != _bots_spawn_camouflage) || wait > 6.0f ||
+				fighting)
+			{
+				continue;
+			}
+			wait = MAX(wait, 0.0f);
+		}
+		score = worth * 4.0f - eta - wait * 0.7f;
+		if (score <= best_score)
+			continue;
+		if (!bots_nav_reachable(start_surface_index, bots_spawns.spawns[spawn].surface_index, now))
+			continue;
+		/* (one of a team a spawn, the nearer; two in a free-for-all) */
+		{
+			long others = 0;
+
+			for (other_index = 0; other_index < BOTS_MAXIMUM; other_index++)
+			{
+				struct bots_bot const *other = &bots_globals.bots[other_index];
+				struct player_datum *other_player;
+
+				if (other == bot || other->player_index == NONE || other->plan_spawn != spawn || other->unit_index == NONE)
+					continue;
+				other_player = player_try_and_get(other->player_index);
+				if (!other_player || (teams && other_player->team_index != player->team_index))
+					continue;
+				if (teams && bots_distance3d(&object_get(other->unit_index)->object.position, &bots_spawns.spawns[spawn].ground) < distance)
+					break;
+				others++;
+			}
+			if (other_index < BOTS_MAXIMUM || others >= (teams ? 1 : 2))
+				continue;
+		}
+		best_score = score;
+		best = spawn;
+	}
+	if (best == NONE)
+		return FALSE;
+	if (bots_spawn_object(best) != NONE)
+	{
+		bots_set_goal(bot, _bots_goal_item, &bots_spawns.spawns[best].ground, bots_spawns.spawns[best].surface_index);
+		bot->item_index = bots_spawns.spawns[best].object_index;
+	}
+	else
+	{
+		bots_set_goal(bot, _bots_goal_roam, &bots_spawns.spawns[best].ground, bots_spawns.spawns[best].surface_index);
+		bots_globals.play.spawn_waits++;
+	}
+	bot->plan_spawn = best;
+	bot->plan_serial = bot->goal_serial;
+	bot->plan_deadline_tick = now + TICKS_PER_SECOND * 12 +
+		(long)(bots_distance3d(&bots_spawns.spawns[best].ground, position) * 1.25f / BOTS_SPAWN_RUN * TICKS_PER_SECOND) +
+		(bots_spawns.spawns[best].object_index == NONE ? bots_spawn_next_tick(best, now) - now : 0);
+	bots_spawns.spawns[best].sought++;
+	bots_globals.play.spawns_sought[bots_spawns.spawns[best].kind]++;
+	if (bots_spawns.spawns[best].kind == _bots_spawn_overshield)
+		bots_globals.powerups_sought[_bots_powerup_overshield]++;
+	else if (bots_spawns.spawns[best].kind == _bots_spawn_camouflage)
+		bots_globals.powerups_sought[_bots_powerup_camouflage]++;
+	if (getenv("HALO_BOT_TRACE"))
+		platform_log("bots: trace bot %ld goes for spawn %ld (%s)%s, %.1f away, score %.1f", bot_index + 1, best + 1,
+			tag_get_name(bots_spawns.spawns[best].definitions[0]), bots_spawns.spawns[best].object_index == NONE ? ", to wait" : "",
+			(double)bots_distance3d(&bots_spawns.spawns[best].ground, position), (double)best_score);
+	return TRUE;
+}
+
 /* where the bot goes: the game's nav points for it, the enemy last seen, or
 about the map (port: or a vehicle it goes for, or a powerup) */
 static void bots_choose_goal(struct bots_bot *bot, long player_index, real_point3d const *position, boolean fighting)
@@ -5083,6 +5677,13 @@ static void bots_choose_goal(struct bots_bot *bot, long player_index, real_point
 	the game's goals, but for the flag or the ball it carries */
 	if (!bot->held_objective && bots_powerup_goal(bot, unit_get(player_get(player_index)->unit_index), position, fighting))
 		return;
+	/* port: the map's item spawns: a power weapon, an overshield, camouflage
+	(across the map in Slayer), a better weapon near; their next items timed */
+	if (!infection_player_is_zombie(player_index) &&
+		bots_spawn_goal(bot, unit_get(player_get(player_index)->unit_index), position, fighting))
+	{
+		return;
+	}
 	/* (a while from the game's goals, which it found no way to) */
 	if (now < bot->objective_rest_until_tick)
 		goal_count = 0;
@@ -5539,6 +6140,8 @@ static void bots_bot_reset(struct bots_bot *bot, long player_index, long bot_ind
 	bot->powerup_index = NONE;
 	bot->hop_index = NONE;
 	bot->hop_via = NONE;
+	bot->plan_spawn = NONE;
+	bot->plan_avoid_spawn = NONE;
 	bots_tactics_bot_reset(bot_index, player_index);
 }
 
@@ -5786,7 +6389,8 @@ static void bots_bot_walk(struct bots_bot *bot, struct bots_tick *tick)
 	else
 	{
 		bot->yaw += 2.0f * BOTS_DEGREES;
-		if (bot->goal_kind == _bots_goal_roam || bot->goal_kind == _bots_goal_enemy)
+		/* (port: not at a spawn it waits at for its next item) */
+		if ((bot->goal_kind == _bots_goal_roam && bot->plan_spawn == NONE) || bot->goal_kind == _bots_goal_enemy)
 			bot->goal_kind = _bots_goal_none;
 		/* (on to a spot that must be stood on) */
 		if (bot->goal_kind == _bots_goal_objective && bot->goal_exact &&
@@ -5859,12 +6463,41 @@ static void bots_bot_yield(struct bots_bot *bot, long bot_index, struct bots_tic
 	}
 }
 
+/* port: how well a weapon suits a fight at this distance: its value (a
+power weapon's the more), less the further the distance is out of the band
+it fights best in (a shotgun's within 5, a sniper rifle's from 8, a
+rocket's from 5: close up it hurts its holder); an empty one none */
+static real bots_weapon_for_range(long weapon_index, real distance)
+{
+	struct bots_weapon_kind const *kind;
+	real fit = 1.0f;
+
+	if (weapon_index == NONE || bots_weapon_empty(weapon_index))
+		return -10.0f;
+	kind = bots_weapon_kind(weapon_get(weapon_index)->definition_index);
+	if (kind->value < 0)
+		return -10.0f;
+	if (distance < kind->band_near)
+		fit -= MIN((kind->band_near - distance) / 3.0f, 2.0f);
+	else if (distance > kind->band_far)
+		fit -= MIN((distance - kind->band_far) / 6.0f, 2.0f);
+	return (real)kind->value * 0.1f + (kind->power ? 0.3f : 0.0f) + fit;
+}
+
 /* weapons: the other one when this one is empty; at the weapon it fetches,
 the action button (X) held, as a player holds it to swap a weapon (the swap:
 players_update_before_game's player_handle_weapon_swap), let go now and
-then, so that a second swap can follow a first */
+then, so that a second swap can follow a first. Port: in a fight, the one
+of its two that suits the distance (a shotgun close, a sniper rifle far, the
+rocket launcher not close up), a second and a half at least between changes;
+at a weapon to pick up with both hands full, the one it keeps the less in
+hand first, so that the swap drops it (a player drops the assault rifle, not
+the rocket launcher) */
 static void bots_bot_weapons(struct bots_bot *bot, struct bots_tick *tick)
 {
+	short current_slot = tick->unit->unit.current_weapon_index;
+	boolean switching = FALSE;
+
 	if (tick->weapon_index != NONE && bots_weapon_empty(tick->weapon_index))
 	{
 		short slot;
@@ -5873,14 +6506,52 @@ static void bots_bot_weapons(struct bots_bot *bot, struct bots_tick *tick)
 		{
 			long other = tick->unit->unit.weapon_object_indices[slot];
 
-			if (slot != tick->unit->unit.current_weapon_index && other != NONE && !bots_weapon_empty(other))
+			if (slot != current_slot && other != NONE && !bots_weapon_empty(other))
 			{
 				tick->action->desired_weapon_index = slot;
+				switching = TRUE;
 				break;
 			}
 		}
 	}
-	if (bot->goal_kind == _bots_goal_item)
+	/* port: (the weapon for the range; not the game's flag or ball, which
+	it does not put away) */
+	else if (tick->fighting && tick->weapon_index != NONE && tick->now - bot->weapon_switch_tick > TICKS_PER_SECOND * 3 / 2 &&
+		bots_weapon_value(weapon_get(tick->weapon_index)->definition_index) >= 0 && tick->now >= bot->burst_until_tick)
+	{
+		real here = bots_weapon_for_range(tick->weapon_index, tick->target_distance);
+		short slot, best_slot = NONE;
+		real best = here + 0.3f;
+
+		for (slot = 0; slot < MAXIMUM_WEAPONS_PER_UNIT; slot++)
+		{
+			long other = tick->unit->unit.weapon_object_indices[slot];
+			real suit;
+
+			if (slot == current_slot || other == NONE)
+				continue;
+			suit = bots_weapon_for_range(other, tick->target_distance);
+			if (suit > best)
+			{
+				best = suit;
+				best_slot = slot;
+			}
+		}
+		if (getenv("HALO_BOT_WEAPON_LOG") && !(tick->now % 15))
+			platform_log("bots: weapon bot %ld dist %.1f current %s %.2f other %s best %d", (long)(bot - bots_globals.bots) + 1,
+				tick->target_distance, tag_get_name(weapon_get(tick->weapon_index)->definition_index), here,
+				tick->unit->unit.weapon_object_indices[!current_slot] != NONE ?
+					tag_get_name(object_get(tick->unit->unit.weapon_object_indices[!current_slot])->definition_index) : "none",
+				(int)best_slot);
+		if (best_slot != NONE)
+		{
+			tick->action->desired_weapon_index = best_slot;
+			bot->weapon_switch_tick = tick->now;
+			bots_globals.play.range_switches++;
+			switching = TRUE;
+		}
+	}
+	if (bot->goal_kind == _bots_goal_item && !switching)
 	{
 		struct object_datum *item = object_try_and_get_and_verify_type(bot->item_index, _object_mask_weapon);
 
@@ -5888,6 +6559,33 @@ static void bots_bot_weapons(struct bots_bot *bot, struct bots_tick *tick)
 			bots_distance2d(&item->object.position, &tick->position) < 0.8f &&
 			fabs(item->object.position.z - tick->position.z) < 1.2f)
 		{
+			short slot, held = 0, drop_slot = NONE;
+			real drop_keep = REAL_MAX;
+
+			/* port: (both hands full: the one kept the less in hand first) */
+			for (slot = 0; slot < MAXIMUM_WEAPONS_PER_UNIT; slot++)
+			{
+				long weapon_index = tick->unit->unit.weapon_object_indices[slot];
+
+				if (weapon_index == NONE)
+					continue;
+				held++;
+				if (bots_weapon_keep(weapon_index) < drop_keep)
+				{
+					drop_keep = bots_weapon_keep(weapon_index);
+					drop_slot = slot;
+				}
+			}
+			if (held >= 2 && drop_slot != NONE && drop_slot != current_slot)
+			{
+				tick->action->desired_weapon_index = drop_slot;
+				if (bot->item_press_tick != -1)
+					bots_globals.play.drop_choices++;
+				bot->item_press_tick = -1;
+				return;
+			}
+			if (bot->item_press_tick == -1)
+				bot->item_press_tick = 0;
 			if (tick->now - bot->item_press_tick > TICKS_PER_SECOND)
 				bot->item_press_tick = tick->now;
 			if (bot->item_first_press_tick < bot->goal_tick)
@@ -7381,6 +8079,7 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 		bot->hop_index = NONE;
 		bot->hop_via = NONE;
 		bot->slow_ticks = 0;
+		bot->plan_spawn = NONE;
 		bot->vehicle_check_tick = 0;
 		bot->last_body_vitality = tick.object->object.body_vitality;
 		bot->item_powerup = _bots_powerup_none;
@@ -7686,6 +8385,16 @@ static void bots_report(void)
 		bots_globals.play.alive_ticks ? 100.0 * bots_globals.play.two_weapon_ticks / bots_globals.play.alive_ticks : 0.0,
 		bots_globals.play.goals_unreachable, bots_globals.play.fight_blocks, bots_globals.play.walk_jumps,
 		bots_globals.play.jump_shortcuts);
+	platform_log("bots: items at tick %ld: spawns %ld; gone for/taken: power weapons %ld/%ld, weapons %ld/%ld, overshield %ld/%ld, "
+		"camouflage %ld/%ld, health %ld/%ld, grenades %ld/%ld; waited for the next %ld; weapons changed for the range %ld, "
+		"the one to drop chosen %ld", now, bots_spawns.count,
+		bots_globals.play.spawns_sought[_bots_spawn_power], bots_globals.play.spawns_taken[_bots_spawn_power],
+		bots_globals.play.spawns_sought[_bots_spawn_weapon], bots_globals.play.spawns_taken[_bots_spawn_weapon],
+		bots_globals.play.spawns_sought[_bots_spawn_overshield], bots_globals.play.spawns_taken[_bots_spawn_overshield],
+		bots_globals.play.spawns_sought[_bots_spawn_camouflage], bots_globals.play.spawns_taken[_bots_spawn_camouflage],
+		bots_globals.play.spawns_sought[_bots_spawn_health], bots_globals.play.spawns_taken[_bots_spawn_health],
+		bots_globals.play.spawns_sought[_bots_spawn_grenades], bots_globals.play.spawns_taken[_bots_spawn_grenades],
+		bots_globals.play.spawn_waits, bots_globals.play.range_switches, bots_globals.play.drop_choices);
 	bots_nav_report(now);
 	/* port: (the lanes, vantage points and posts: bots_tactics.h) */
 	bots_tactics_report(now);
@@ -7746,6 +8455,9 @@ void bots_update_actions(struct player_action *actions)
 
 			bots_ground_memo_begin();
 			bots_powerups_find();
+			/* port: (once a second too: the found tick is the powerups') */
+			if (bots_powerups.found_tick == game_time_get())
+				bots_spawns_find();
 			bots_paths_scan();
 			/* port: the map's lanes and vantage points (a bounded step a
 			tick), the roles (bots_tactics.h) */
