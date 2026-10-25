@@ -1607,6 +1607,7 @@ static void listing_fill(struct p2p_listing *shown, const unsigned char *key_has
 	shown->ping = -1;
 	shown->version = (unsigned short)listing->version;
 	shown->other_version = (unsigned char)!joinable;
+	shown->kind = (unsigned char)(listing->crossplay && listing->version >= 37 ? listing->stamp : 0);
 }
 
 /* a queued listing, its signature checked: taken or not */
@@ -2738,6 +2739,23 @@ void p2p_lobby_friends_view(struct p2p_friends_host *host)
 	host->maximum = lobby.maximum_player_count;
 }
 
+/* a listed game's kind's name (version 37's byte, p2p_listing's kind), or
+NULL for a stock game, as ChupathingyCE's network_rules_kind_name names it
+(251bba5c, GPL): the mode only on the Slayer engine (2), Hardcore on any of
+the five */
+static const char *kind_name(int kind, int engine)
+{
+	static const char *const modes[][2] = { { "SWAT", "HARDCORE SWAT" }, { "INFECTION", "HARDCORE INFECTION" },
+		{ "GUN GAME", "HARDCORE GUN GAME" } };
+	int mode = kind & 0x7F, hardcore = (kind & 0x80) != 0;
+
+	if (engine == 2 && mode >= 1 && mode <= 3)
+		return modes[mode - 1][hardcore];
+	if (hardcore && engine >= 1 && engine <= 5)
+		return "HARDCORE";
+	return NULL;
+}
+
 static void entry_from_listing(const struct p2p_listing *listing, struct p2p_lobby_entry *entry)
 {
 	/* (in the language chosen, lang.c; the maps' and gametypes' names are
@@ -2776,6 +2794,7 @@ static void entry_from_listing(const struct p2p_listing *listing, struct p2p_lob
 	entry->maximum = listing->maximum_player_count;
 	entry->score_limit = listing->score_limit;
 	entry->compatible = 1;
+	entry->version = listing->version;
 	p2p_key_hash(p2p_public_key(), own);
 	entry->own = !memcmp(own, listing->key_hash, P2P_KEY_HASH_SIZE);
 	entry->locked = listing->locked;
@@ -2802,6 +2821,24 @@ static void entry_from_listing(const struct p2p_listing *listing, struct p2p_lob
 		crossplay_guard_host_badge(entry->badge, (int)sizeof(entry->badge), listing->platform, listing->marks,
 			listing->crossplay, listing->dedicated, verdict,
 			network_wire_this_platform() == NETWORK_PLATFORM_VITA_PC);
+	}
+	/* (OpenCE's own game types, which this build does not play: shown, its
+	rules line saying so, never joined - the host's game record says the
+	same, network_game_record.c, and is refused) */
+	{
+		const char *kind = kind_name(listing->kind, listing->engine_type);
+
+		if (kind)
+		{
+			int badge_length = (int)strlen(entry->badge);
+
+			entry->compatible = 0;
+			if (badge_length < (int)sizeof(entry->badge))
+				snprintf(entry->badge + badge_length, sizeof(entry->badge) - (size_t)badge_length, " %s", kind);
+			snprintf(entry->rules, sizeof(entry->rules), T("Can't join: OpenCE's %s game type, which this build "
+				"does not play"), kind);
+			goto players_line;
+		}
 	}
 	/* the Rules line: "Slayer to 50 on Wizard", "Co-op: Halo, Heroic" */
 	if (listing->coop)
@@ -2830,6 +2867,7 @@ static void entry_from_listing(const struct p2p_listing *listing, struct p2p_lob
 	length = length < (int)sizeof(entry->rules) ? length : (int)sizeof(entry->rules) - 1;
 	if (listing->dedicated)
 		snprintf(entry->rules + length, sizeof(entry->rules) - (size_t)length, "%s", T(" (DEDICATED)"));
+players_line:
 	/* the Players line: "5 of 16: name, name... +3 more" (the names that
 fit, with room left for the end) */
 	if (entry->bots > 0)
@@ -2977,7 +3015,7 @@ static void other_version_reason(int crossplay, unsigned int version, char *text
 		return;
 	}
 	network_wire_crossplay_versions_text(joined, (int)sizeof(joined));
-	if (version > HALO_PORT_CROSSPLAY_NETWORK_VERSION)
+	if (version > HALO_PORT_CROSSPLAY_NEWEST_NETWORK_VERSION)
 		snprintf(text, (size_t)size, T("Can't join: a newer PC version (network %u); this build joins %s"), version, joined);
 	else if (version < HALO_PORT_CROSSPLAY_OLDER_NETWORK_VERSION)
 		snprintf(text, (size_t)size, T("Can't join: an older PC version (network %u); this build joins %s"), version, joined);

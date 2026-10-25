@@ -83,22 +83,32 @@ static void check(int good, const char *what)
 	printf("%s %s\n", good ? "PASS" : "FAIL", what);
 }
 
-static int versions_only(int crossplay, unsigned int version, unsigned int other)
+static int versions_only3(int crossplay, unsigned int version, unsigned int other, unsigned int third)
 {
-	static const unsigned int tried[] = { 0, 4, 17, 18, 19, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 0xFFFF };
+	static const unsigned int tried[] = { 0, 4, 17, 18, 19, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
+		0xFFFF };
 	size_t index;
 
 	for (index = 0; index < sizeof(tried) / sizeof(tried[0]); index++)
 	{
-		if (network_wire_version_accepted_on(crossplay, tried[index]) != (tried[index] == version || tried[index] == other))
+		if (network_wire_version_accepted_on(crossplay, tried[index]) !=
+			(tried[index] == version || tried[index] == other || tried[index] == third))
+		{
 			return 0;
+		}
 	}
 	return 1;
 }
 
+static int versions_only(int crossplay, unsigned int version, unsigned int other)
+{
+	return versions_only3(crossplay, version, other, other);
+}
+
 static int no_rules_past_28(void)
 {
-	return !network_wire_v30_rules() && !network_wire_v31_rules() && !network_wire_v32_rules();
+	return !network_wire_v30_rules() && !network_wire_v31_rules() && !network_wire_v32_rules() && !network_wire_v33_rules() &&
+		!network_wire_v34_rules() && !network_wire_v35_rules() && !network_wire_v36_rules();
 }
 
 int main(void)
@@ -179,28 +189,37 @@ int main(void)
 	return failures != 0;
 #else
 	check(network_wire_crossplay_available(), "a Vita: the crossplay wire available");
-	check(versions_only(1, 29, 32), "the crossplay wire joins 29 and 32 alone (not 26-28, 30, 31, 33 and up)");
-	check(network_wire_of_version(29) == 1 && network_wire_of_version(32) == 1 && network_wire_of_version(28) == -1 &&
-		network_wire_of_version(30) == -1 && network_wire_of_version(31) == -1 && network_wire_of_version(33) == -1 &&
-		network_wire_of_version(26) == -1, "29 and 32 play the crossplay wire; 26, 28, 30, 31, 33 neither wire");
+	check(versions_only3(1, 29, 32, 38), "the crossplay wire joins 29, 32 and 38 alone (not 26-28, 30, 31, 33-37, 39 and up)");
+	check(network_wire_of_version(29) == 1 && network_wire_of_version(32) == 1 && network_wire_of_version(38) == 1 &&
+		network_wire_of_version(28) == -1 && network_wire_of_version(30) == -1 && network_wire_of_version(31) == -1 &&
+		network_wire_of_version(33) == -1 && network_wire_of_version(37) == -1 && network_wire_of_version(39) == -1 &&
+		network_wire_of_version(26) == -1, "29, 32 and 38 play the crossplay wire; 26, 28, 30, 31, 33-37, 39 neither wire");
 	check(network_wire_version_of(1) == 32 && network_wire_host_version() == 32 && network_wire_version_of(0) == 18,
 		"the versions each wire announces: a host for Vitas and PC, 32");
 	{
 		char text[32];
 
 		network_wire_crossplay_versions_text(text, (int)sizeof(text));
-		check(!strcmp(text, "29 and 32"), "the versions joined, for the log: 29 and 32");
+		check(!strcmp(text, "29, 32 and 38"), "the versions joined, for the log: 29, 32 and 38");
 	}
 	check(network_wire_crossplay_version_near(26) == 29 && network_wire_crossplay_version_near(28) == 29 &&
 		network_wire_crossplay_version_near(30) == 32 && network_wire_crossplay_version_near(31) == 32 &&
-		network_wire_crossplay_version_near(33) == 32 && network_wire_crossplay_version_near(0xFFFF) == 32,
-		"the version to look for instead: 29 for 26-28, 32 for 30, 31 and newer");
+		network_wire_crossplay_version_near(33) == 38 && network_wire_crossplay_version_near(37) == 38 &&
+		network_wire_crossplay_version_near(0xFFFF) == 38,
+		"the version to look for instead: 29 for 26-28, 32 for 30-31, 38 for 33-37 and newer");
 
 	/* a game joined on the crossplay wire: a PC's of 32, of 29, then a Vita's */
 	network_wire_choose_version(32, 2, "a PC host's game of 32");
 	check(network_wire_crossplay() && network_wire_version() == 32 && network_wire_v28_rules() && network_wire_v30_rules() &&
 		network_wire_v31_rules() && network_wire_v32_rules() && !network_wire_host_vita() && network_wire_host_platform() == 2,
 		"a PC's game of 32 joined: the crossplay wire, 32, the rules of 28 to 32, its host a PC's");
+	check(!network_wire_v33_rules() && !network_wire_v34_rules() && !network_wire_v35_rules() && !network_wire_v36_rules(),
+		"... and none of 33-36's");
+	network_wire_choose_version(38, 3, "a ChupathingyCE server's game of 38");
+	check(network_wire_crossplay() && network_wire_version() == 38 && network_wire_v32_rules() && network_wire_v33_rules() &&
+		network_wire_v34_rules() && network_wire_v35_rules() && network_wire_v36_rules() && network_wire_host_platform() == 3,
+		"a PC's game of 38 joined: the crossplay wire, 38, the rules of 28 to 36");
+	network_wire_choose_version(32, 2, "a PC host's game of 32");
 	check(network_wire_version_accepted(29) && network_wire_version_accepted(32) && !network_wire_version_accepted(18),
 		"on that wire 29 and 32 are joined, 18 not");
 	network_wire_choose_version(29, 3, "a ChupathingyCE host's game of 29");

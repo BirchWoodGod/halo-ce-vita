@@ -242,6 +242,86 @@ int main(int argc, char **argv)
 		REFUSE("cooperative_flags", g->cooperative_flags = 0x02);
 	}
 
+	/* OpenCE's network version 35 on (38's: ChupathingyCE 2d2ad1d8's
+	network_rules.h): the same record with 16 further option bytes before its
+	last 4, the local data; the co-op byte's bit 1 the host's own from 33 */
+	if (opence_size == (long)sizeof(mutated))
+	{
+		static unsigned char extended[HALO_PORT_NETWORK_GAME_SIZE + 16];
+		long local = HALO_PORT_NETWORK_GAME_LOCAL_DATA_OFFSET;
+		long extended_size = opence_size + 16;
+		struct network_game *g = &mutated;
+
+#define EXTEND(further_statement) \
+		do \
+		{ \
+			unsigned char *further = extended + local; \
+			memcpy(extended, &mutated, (size_t)local); \
+			memset(further, 0, 16); \
+			further_statement; \
+			memcpy(further + 16, (unsigned char const *)&mutated + local, (size_t)(opence_size - local)); \
+		} while (0)
+
+		check("v38_size", network_game_record_wire_size(_network_game_record_crossplay, 38) == extended_size &&
+			network_game_record_wire_size(_network_game_record_crossplay, 34) == opence_size &&
+			network_game_record_wire_size(_network_game_record_legacy, 38) == network_game_record_size(_network_game_record_legacy),
+			NULL);
+		memcpy(&mutated, opence, sizeof(mutated));
+		EXTEND((void)0);
+		why = NULL;
+		memset(&decoded, 0xEE, sizeof(decoded));
+		check("v38_decode", network_game_record_decode_version(_network_game_record_crossplay, 38, extended, extended_size,
+			&decoded, &why) && !memcmp(&decoded, opence, sizeof(decoded)), why);
+		check("v38_refuse_v32_size", !network_game_record_decode_version(_network_game_record_crossplay, 38, opence,
+			opence_size, &decoded, NULL) && !network_game_record_decode_version(_network_game_record_crossplay, 32, extended,
+			extended_size, &decoded, NULL), NULL);
+		/* (Infection, Gun Game, SWAT and Hardcore: OpenCE's own, refused on the
+		engines they play on) */
+		g->variant.game_engine_index = game_engine_slayer;
+		g->variant.universal_variant.teams = TRUE;
+		EXTEND(further[0] = 1);
+		why = NULL;
+		check("v38_refuse_swat", !network_game_record_decode_version(_network_game_record_crossplay, 38, extended,
+			extended_size, &decoded, &why) && why && strstr(why, "SWAT"), why);
+		EXTEND(further[0] = 2);
+		check("v38_refuse_infection", !network_game_record_decode_version(_network_game_record_crossplay, 38, extended,
+			extended_size, &decoded, NULL), NULL);
+		EXTEND(further[1] = 1);
+		check("v38_refuse_hardcore", !network_game_record_decode_version(_network_game_record_crossplay, 38, extended,
+			extended_size, &decoded, NULL), NULL);
+		EXTEND(further[0] = 4);
+		check("v38_refuse_mode_unknown", !network_game_record_decode_version(_network_game_record_crossplay, 38, extended,
+			extended_size, &decoded, NULL), NULL);
+		EXTEND(further[1] = 2);
+		check("v38_refuse_hardcore_value", !network_game_record_decode_version(_network_game_record_crossplay, 38,
+			extended, extended_size, &decoded, NULL), NULL);
+		EXTEND(further[15] = 1);
+		check("v38_refuse_reserved", !network_game_record_decode_version(_network_game_record_crossplay, 38, extended,
+			extended_size, &decoded, NULL), NULL);
+		/* (Gun Game with teams, Infection free for all: no such game, played
+		as Slayer, as OpenCE and ChupathingyCE take them) */
+		EXTEND(further[0] = 3);
+		check("v38_gun_game_teams_slayer", network_game_record_decode_version(_network_game_record_crossplay, 38, extended,
+			extended_size, &decoded, NULL), NULL);
+		/* (an out-of-range option of the stock record still refused) */
+		g->variant_options.loadout = NUMBER_OF_LOADOUTS;
+		EXTEND((void)0);
+		check("v38_refuse_options", !network_game_record_decode_version(_network_game_record_crossplay, 38, extended,
+			extended_size, &decoded, NULL), NULL);
+		/* (the co-op byte: bit 1 the host's own from 33, taken and dropped;
+		bit 2 never) */
+		memcpy(&mutated, opence, sizeof(mutated));
+		g->cooperative_flags = 0x03;
+		EXTEND((void)0);
+		check("v38_cooperative_bit1", network_game_record_decode_version(_network_game_record_crossplay, 38, extended,
+			extended_size, &decoded, NULL) && decoded.cooperative_flags == 0x01, NULL);
+		g->cooperative_flags = 0x04;
+		EXTEND((void)0);
+		check("v38_refuse_cooperative_bit2", !network_game_record_decode_version(_network_game_record_crossplay, 38,
+			extended, extended_size, &decoded, NULL), NULL);
+#undef EXTEND
+	}
+
 	printf("%s record checks\n", failures ? "FAIL" : "PASS");
 	return failures ? 1 : 0;
 }

@@ -66,6 +66,9 @@ older one its clients still join, OpenCE's at 8102e711 (build-206),
 ChupathingyCE's since a501871f (0.7.5a) */
 #define HALO_PORT_CROSSPLAY_NETWORK_VERSION 32
 #define HALO_PORT_CROSSPLAY_OLDER_NETWORK_VERSION 29
+/* ... and the newest one its clients join, OpenCE's and ChupathingyCE's
+servers' since Oct 23 2026 (network_wire_v33_rules ...) */
+#define HALO_PORT_CROSSPLAY_NEWEST_NETWORK_VERSION 38
 
 /* a Vita's game on the crossplay wire says it is a Vita's: this bit in its
 advertisement's flags (HALO_PORT_ADVERTISED_FLAGS_OFFSET; OpenCE's 0x01 and
@@ -116,9 +119,9 @@ unsigned int network_wire_host_version(void);
 version (the host's, joined or hosted) on the crossplay wire */
 unsigned int network_wire_version(void);
 /* whether a host announcing the version can be joined on that wire:
-legacy, exactly 18; crossplay, the accepted list (29 and 32) */
+legacy, exactly 18; crossplay, the accepted list (29, 32 and 38) */
 int network_wire_version_accepted_on(int crossplay, unsigned int version);
-/* the crossplay versions joined, for a log line or a message ("29 and 32") */
+/* the crossplay versions joined, for a log line or a message ("29, 32 and 38") */
 void network_wire_crossplay_versions_text(char *text, int size);
 /* the crossplay version a player should look for instead of a host's
 version not joined: the lowest joined above it, else the highest joined
@@ -155,6 +158,30 @@ int network_wire_v31_rules(void);
 /* ... version 32's (spec 7): the host's mouse aim assist policy (distributed
 kind 90) sent by a host, taken by a client */
 int network_wire_v32_rules(void);
+/* ... versions 33 to 36's, which 38 keeps (a crossplay game of 38; Oct 24
+2026, ported from ChupathingyCE 2d2ad1d8 and 251bba5c, GPL, which follow
+OpenCE's raises; its port/linux/include/delta.h DELTA_LEGACY_VERSIONS rows
+33-38 and port/linux/game/network_rules.h say what each changed):
+- 33: co-op's second switch (bit 1 of the settings' co-op byte: the
+  players' hits spare their AI allies), the host's rule alone: a client
+  takes it and does nothing with it;
+- 34: scenery and devices that are a shield alone are static targets too:
+  every machine runs their shields, a client reports no damage one of them
+  deals (a tripmine's going off: the host deals it), and a host's event on
+  a copy of one made during play finds the nearest here (network_damage.c);
+- 35: the gametype's options 0x2C bytes, the settings record 16 bytes
+  longer (13,136: network_game_record.c), OpenCE's own game types (SWAT,
+  Infection, Gun Game, Hardcore) in them: a game of one is refused, as this
+  build does not play them;
+- 36: the host's shield effects, a new message (kind 91), taken checked and
+  drawn as stock (network_distributed.c);
+- 37: a listed game's kind in a byte that was zero (the listing's stamp, the
+  advertisement's fourth reserved byte): read for the browser alone;
+- 38: the shield effects' seventh value (6). */
+int network_wire_v33_rules(void);
+int network_wire_v34_rules(void);
+int network_wire_v35_rules(void);
+int network_wire_v36_rules(void);
 
 /* hosting: whether the next game this machine hosts takes OpenCE's PC
 players too (network_wire_host_audience: everyone), on the crossplay wire;

@@ -418,6 +418,11 @@ struct p2p_listing
 	joined - no invite, no token kept) */
 	unsigned short version;
 	unsigned char other_version;
+	/* (a crossplay listing of OpenCE's network version 37 on) the game's
+	kind, its stamp's first byte: an OpenCE game type's number in the low
+	seven bits (1 SWAT, 2 Infection, 3 Gun Game), Hardcore in bit 7; 0 a
+	stock game (ChupathingyCE 251bba5c, GPL) */
+	unsigned char kind;
 };
 
 /* a copy of the public games found, in the order shown (the most players
