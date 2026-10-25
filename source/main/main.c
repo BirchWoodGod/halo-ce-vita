@@ -5547,6 +5547,13 @@ void main_loop(
 
 			if (main_globals.want_to_be_at_main_menu)
 			{
+#ifdef HALO_LINUX
+				/* port: a game left with the menus' live background chosen
+				fades to black first (port/linux/game/menu_backdrop.c) */
+				int menu_backdrop_leave_hold(void);
+
+				if (!menu_backdrop_leave_hold())
+#endif
 				main_menu_load();
 			}
 

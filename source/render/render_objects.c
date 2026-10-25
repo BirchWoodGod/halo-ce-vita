@@ -551,7 +551,8 @@ static int render_object_shadow_quality(
 
 	if (quality < 0 || settings_seen != halo_settings_generation)
 	{
-		const char *setting = getenv("HALO_VITA_SHADOWS");
+		extern char const *menu_backdrop_render_setting(char const *variable); /* (the live backdrop's own quality: menu_backdrop.c) */
+		const char *setting = menu_backdrop_render_setting("HALO_VITA_SHADOWS");
 
 		settings_seen = halo_settings_generation;
 		quality = setting && *setting ? atoi(setting) : 2;
@@ -900,7 +901,8 @@ static real render_object_minimum_pixels(
 
 	if (minimum_pixels < 0.0f || settings_seen != halo_settings_generation)
 	{
-		const char *setting = getenv("HALO_MIN_OBJECT_PIXELS");
+		extern char const *menu_backdrop_render_setting(char const *variable); /* (the live backdrop's own quality: menu_backdrop.c) */
+		const char *setting = menu_backdrop_render_setting("HALO_MIN_OBJECT_PIXELS");
 
 		settings_seen = halo_settings_generation;
 		minimum_pixels = setting ? (real)atof(setting) : 0.0f;

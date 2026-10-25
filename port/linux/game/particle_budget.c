@@ -118,7 +118,8 @@ short particle_budget_level(
 
 	if (level == NONE || settings_seen != halo_settings_generation)
 	{
-		char const *setting = getenv("HALO_PARTICLE_BUDGET");
+		extern char const *menu_backdrop_render_setting(char const *variable); /* (the live backdrop's own quality: menu_backdrop.c) */
+		char const *setting = menu_backdrop_render_setting("HALO_PARTICLE_BUDGET");
 
 		settings_seen = halo_settings_generation;
 		if (!setting || !*setting)

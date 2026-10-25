@@ -187,7 +187,8 @@ int halo_particle_render_divisor(
 
 	if (divisor < 0 || settings_seen != halo_settings_generation)
 	{
-		const char *setting = getenv("HALO_PARTICLE_RENDER_DIVISOR");
+		extern char const *menu_backdrop_render_setting(char const *variable); /* (the live backdrop's own quality: menu_backdrop.c) */
+		const char *setting = menu_backdrop_render_setting("HALO_PARTICLE_RENDER_DIVISOR");
 
 		settings_seen = halo_settings_generation;
 		divisor = setting && *setting ? atoi(setting) : 1;

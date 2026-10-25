@@ -2016,18 +2016,38 @@ boolean scene_packs_load_now(
 	return state_get(slot) == _scene_pack_state_loaded;
 }
 
-boolean scene_packs_textures_ready(
-	char const *name)
+/* (scene_packs_textures_ready) the bytes of a pack's pixels whose reads may be
+under way at once. Each texture cache block taken for a read evicts the
+least recently used ones, and a block still being read is evicted only once
+its read is done - under the cache lock (texture_cache_delete_block_proc). The
+live backdrop's 14 MB of pictures, all asked for in one frame, filled the
+whole cache with reads under way: each later frame's asks evicted the
+blocks begun the frame before and waited for the memory card, the menus at
+4 to 10 frames a second for five seconds (insider.25, Cass, the return
+from a multiplayer game). A few at a time, the blocks evicted are old ones
+whose reads are done, and the game thread never waits for the card */
+#define SCENE_PACK_TEXTURE_READS_BYTES (1536 * 1024)
+/* (xbox_texture_cache.c's _bitmap_cached_bit: a bitmap the texture cache
+reads; one without it has its pixels in place) */
+#define SCENE_PACK_BITMAP_CACHED_BIT 7
+#define SCENE_PACK_BITMAP_BEGUN(data) \
+	(!TEST_FLAG((data)->flags, SCENE_PACK_BITMAP_CACHED_BIT) || (data)->cache_block_index != NONE)
+
+/* each of a loaded pack's bitmaps: in, its read under way, or begun now while
+SCENE_PACK_TEXTURE_READS_BYTES allow; the bytes in and in all */
+static boolean scene_packs_textures_step(
+	struct scene_pack_slot *slot,
+	long *in_bytes,
+	long *total_bytes)
 {
 	void *_texture_cache_bitmap_get_hardware_format(struct bitmap_data *bitmap, boolean block, boolean load);
-	struct scene_pack_slot *slot = name ? slot_find(name) : NULL;
 	unsigned char *instances;
-	long count, index;
+	long count, index, reading = 0;
 	boolean ready = TRUE;
 
-	if (!slot || state_get(slot) != _scene_pack_state_loaded)
-		return FALSE;
+	*in_bytes = *total_bytes = 0;
 	instances = scene_pack_instances(slot->tags, &count);
+	/* (those under way first: the room left for new ones) */
 	for (index = 0; index < count; index++)
 	{
 		unsigned char const *instance = instances + index * TAG_INSTANCE_BYTES;
@@ -2037,17 +2057,106 @@ boolean scene_packs_textures_ready(
 			struct bitmap_group *group = bitmap_group_get((long)*(unsigned long const *)(instance + 12));
 			long bitmap;
 
-			/* (each one's read begun, if it was not: none waited for) */
 			for (bitmap = 0; bitmap < group->bitmaps.count; bitmap++)
 			{
 				struct bitmap_data *data = TAG_BLOCK_GET_ELEMENT(&group->bitmaps, bitmap, struct bitmap_data);
 
-				if (data->pixels_size > 0 && !_texture_cache_bitmap_get_hardware_format(data, FALSE, TRUE))
+				if (data->pixels_size <= 0)
+					continue;
+				*total_bytes += data->pixels_size;
+				/* (begun before - its block taken: in, or read now; the
+				lookup touches it, so it is not the next evicted) */
+				if (SCENE_PACK_BITMAP_BEGUN(data))
+				{
+					if (_texture_cache_bitmap_get_hardware_format(data, FALSE, FALSE))
+						*in_bytes += data->pixels_size;
+					else
+					{
+						reading += data->pixels_size;
+						ready = FALSE;
+					}
+				}
+				else
 					ready = FALSE;
 			}
 		}
 	}
-	return ready;
+	if (ready)
+		return TRUE;
+	for (index = 0; index < count && reading < SCENE_PACK_TEXTURE_READS_BYTES; index++)
+	{
+		unsigned char const *instance = instances + index * TAG_INSTANCE_BYTES;
+
+		if (*(unsigned long const *)instance == BITMAP_GROUP_TAG)
+		{
+			struct bitmap_group *group = bitmap_group_get((long)*(unsigned long const *)(instance + 12));
+			long bitmap;
+
+			for (bitmap = 0; bitmap < group->bitmaps.count && reading < SCENE_PACK_TEXTURE_READS_BYTES; bitmap++)
+			{
+				struct bitmap_data *data = TAG_BLOCK_GET_ELEMENT(&group->bitmaps, bitmap, struct bitmap_data);
+
+				if (data->pixels_size <= 0 || SCENE_PACK_BITMAP_BEGUN(data))
+					continue;
+				/* (its read begun, none waited for; in at once if it was
+				read in place) */
+				if (_texture_cache_bitmap_get_hardware_format(data, FALSE, TRUE))
+					*in_bytes += data->pixels_size;
+				/* (one the cache would not take - none begun - counts for
+				nothing) */
+				else if (data->cache_block_index != NONE)
+					reading += data->pixels_size;
+			}
+		}
+	}
+	return FALSE;
+}
+
+boolean scene_packs_textures_ready(
+	char const *name)
+{
+	struct scene_pack_slot *slot = name ? slot_find(name) : NULL;
+	long in_bytes, total_bytes;
+
+	if (!slot || state_get(slot) != _scene_pack_state_loaded)
+		return FALSE;
+	return scene_packs_textures_step(slot, &in_bytes, &total_bytes);
+}
+
+long scene_packs_textures_percent(
+	char const *name)
+{
+	struct scene_pack_slot *slot = name ? slot_find(name) : NULL;
+	unsigned char *instances;
+	long count, index;
+	long long in_bytes = 0, total_bytes = 0;
+
+	if (!slot || state_get(slot) != _scene_pack_state_loaded)
+		return -1;
+	instances = scene_pack_instances(slot->tags, &count);
+	for (index = 0; index < count; index++)
+	{
+		unsigned char const *instance = instances + index * TAG_INSTANCE_BYTES;
+
+		if (*(unsigned long const *)instance == BITMAP_GROUP_TAG)
+		{
+			void *_texture_cache_bitmap_get_hardware_format(struct bitmap_data *bitmap, boolean block, boolean load);
+			struct bitmap_group *group = bitmap_group_get((long)*(unsigned long const *)(instance + 12));
+			long bitmap;
+
+			for (bitmap = 0; bitmap < group->bitmaps.count; bitmap++)
+			{
+				struct bitmap_data *data = TAG_BLOCK_GET_ELEMENT(&group->bitmaps, bitmap, struct bitmap_data);
+
+				if (data->pixels_size <= 0)
+					continue;
+				total_bytes += data->pixels_size;
+				if (SCENE_PACK_BITMAP_BEGUN(data) && _texture_cache_bitmap_get_hardware_format(data, FALSE, FALSE))
+					in_bytes += data->pixels_size;
+			}
+		}
+	}
+	return total_bytes ? (long)(in_bytes * 100 / total_bytes) : 100;
 }
 
 long scene_packs_tag(

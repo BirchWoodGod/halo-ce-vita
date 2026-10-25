@@ -2320,7 +2320,10 @@ int menu_functions_screen_back_deferred(long tag_index, short local_player_index
 /* (ui_widget.c's events) the pad let go while a screen opens at black */
 int menu_functions_fade_input_held(void)
 {
-	return h3_scenes.open_pending || h3_scenes.loading;
+	/* (the live background's way in: menu_backdrop.c) */
+	int menu_backdrop_input_held(void);
+
+	return h3_scenes.open_pending || h3_scenes.loading || menu_backdrop_input_held();
 }
 
 int menu_functions_screen_open_deferred(long tag_index, short local_player_index, long invoking_widget_tag,
@@ -2424,7 +2427,11 @@ the fade's black */
 void menu_functions_fade_draw(void)
 {
 	void draw_quad(rectangle2d *rectangle, pixel32 color);
-	real alpha = menu_functions_fade_alpha();
+	/* (and the live background's way in and out, a game left, the
+	main menu held black till it is up: menu_backdrop.c) */
+	real menu_backdrop_fade_alpha(void);
+	void menu_backdrop_fade_line_draw(void);
+	real alpha = MAX(menu_functions_fade_alpha(), menu_backdrop_fade_alpha());
 	rectangle2d bounds;
 	unsigned long level;
 
@@ -2438,6 +2445,7 @@ void menu_functions_fade_draw(void)
 	bounds.x0 = bounds.y0 = -2048;
 	bounds.x1 = bounds.y1 = 4096;
 	draw_quad(&bounds, (pixel32)(level << 24));
+	menu_backdrop_fade_line_draw();
 }
 
 void menu_functions_scenes_update(void)

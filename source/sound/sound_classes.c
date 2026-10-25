@@ -464,4 +464,26 @@ void sound_class_set_gain(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port: menu_backdrop.c) the classes whose names have name in them at gain
+now, no easing (the live backdrop's ambience silent as it is made) */
+void sound_class_set_gain_now(
+	char const *name,
+	real gain)
+{
+	short class_index;
+
+	for (class_index = 0; class_index < NUMBER_OF_SOUND_CLASSES; class_index++)
+	{
+		if (sound_class_names[class_index][0] && strstr(sound_class_names[class_index], name))
+		{
+			struct sound_class_runtime *sound_class = sound_class_datum_get(class_index);
+
+			sound_class->current_gain = sound_class->target_gain = PIN(gain, 0.f, 1.f);
+			sound_class->interpolation_ticks = 0;
+		}
+	}
+}
+#endif
+
 /* ---------- private code */

@@ -137,6 +137,12 @@ not the stand-ins (FALSE if it is not loaded) */
 boolean scene_packs_textures_ready(
 	char const *name);
 
+/* (the same, its reads begun as scene_packs_textures_ready begins them) how
+much of a loaded pack's bitmaps' pixels are in, 0 to 100 (-1 if it is not
+loaded) */
+long scene_packs_textures_percent(
+	char const *name);
+
 /* a loaded pack's tag (group, path), as the game's tag index, or NONE */
 long scene_packs_tag(
 	char const *name,

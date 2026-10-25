@@ -743,6 +743,9 @@ static void texture_cache_delete_block_proc(
 		for the loads before they take the cache lock (below); a wait here
 		holds the lock, so a long one is named */
 		unsigned long wait_started = 0, reported = 0;
+		/* (the wait timed for the frame-hitch line's "texture cache wait",
+		as a blocking load's is: insider.25, a stall that named none) */
+		unsigned long long profile_started = 0;
 
 		do
 		{
@@ -752,7 +755,10 @@ static void texture_cache_delete_block_proc(
 			if (cache_entry->loaded)
 				break;
 			if (!wait_started)
+			{
 				wait_started = reported = system_milliseconds();
+				profile_started = halo_load_profile_now();
+			}
 			else if (system_milliseconds() - reported > 3000)
 			{
 				reported = system_milliseconds();
@@ -763,6 +769,8 @@ static void texture_cache_delete_block_proc(
 			SwitchToThread();
 		}
 		while (TRUE);
+		if (profile_started)
+			halo_load_profile_add(_halo_load_texture_cache_wait, profile_started, 0);
 	}
 #else
 	do

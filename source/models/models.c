@@ -1549,7 +1549,8 @@ void render_model(
 			if (lod_scale < 0.0f || settings_seen != halo_settings_generation)
 			{
 				settings_seen = halo_settings_generation;
-				const char *setting = getenv("HALO_MODEL_LOD_SCALE");
+				extern char const *menu_backdrop_render_setting(char const *variable); /* (the live backdrop's own quality: menu_backdrop.c) */
+				const char *setting = menu_backdrop_render_setting("HALO_MODEL_LOD_SCALE");
 				lod_scale = setting && atof(setting) > 0.0 ? (float)atof(setting) : 1.0f;
 			}
 			if (lod_scale != 1.0f)

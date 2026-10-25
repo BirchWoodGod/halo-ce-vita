@@ -67,6 +67,7 @@ map loaded (a game started) lets it go with ui.map's tags
 #include "objects/objects.h"
 #include "objects/object_types.h"
 #include "devices/devices.h"
+#include "game/game.h"
 
 #include "halo_menus.h"
 #include "scene_packs.h"
@@ -149,6 +150,8 @@ static struct
 	boolean test_off;
 	/* (its build's) the progress shown */
 	long progress_shown;
+	/* (its pictures' reads) the progress shown */
+	long textures_shown;
 	char failure[160];
 	/* the main menu at rest since */
 	unsigned long long rest_since;
@@ -177,6 +180,10 @@ static struct
 } menu_backdrop;
 
 /* ---------- private code */
+
+static void menu_backdrop_sounds_quiet(void);
+static void menu_backdrop_sounds_rise(boolean at_once);
+static void menu_backdrop_quality_update(void);
 
 static boolean menu_backdrop_enabled(void)
 {
@@ -329,7 +336,9 @@ static void menu_backdrop_machines_make(struct scenario *scenario)
 		/* (a machine powered - a30's are by their device groups, which the
 		pack has not: its beam emitter, a looping machine, then runs its own
 		"device position" animation over and over as in a30, the blue beam
-		shot up into the sky from the tower's foot every few seconds) */
+		shot up into the sky from the tower's foot every few seconds). Its
+		first shot is fired as it is made, its sound (bluebeacon3) kept
+		silent with the ambience then: menu_backdrop_sounds_quiet */
 		device_port_set_state(object_index, 1.f, FALSE, 0.f);
 	}
 }
@@ -447,6 +456,8 @@ static void menu_backdrop_activate(void)
 	scenario->machines = backdrop->machines;
 	scenario->machine_palette = backdrop->machine_palette;
 
+	/* (its ambience and machines silent as they are made, then up) */
+	menu_backdrop_sounds_quiet();
 	scenario_switch_structure_bsp(1);
 	if (global_structure_bsp_index_get() != 1)
 	{
@@ -454,6 +465,7 @@ static void menu_backdrop_activate(void)
 		menu_backdrop_blocks_put_back(TRUE);
 		if (global_structure_bsp_index_get() != 0)
 			scenario_switch_structure_bsp(0);
+		menu_backdrop_sounds_rise(TRUE);
 		menu_backdrop_fail("the game refused its bsp");
 		return;
 	}
@@ -480,6 +492,7 @@ static void menu_backdrop_deactivate(char const *why)
 	halo_tick_wait_for_render();
 	menu_backdrop.active = FALSE;
 	menu_backdrop_sounds_delete();
+	menu_backdrop_sounds_rise(TRUE);
 	/* (its scenery and skies first: the switch places ui.map's own; its
 	bsp references after, which the switch reads the backdrop's from) */
 	menu_backdrop_blocks_put_back(FALSE);
@@ -504,27 +517,15 @@ int menu_backdrop_active(void)
 	return menu_backdrop.active;
 }
 
-/* (render.c, under the menus) the live background chosen and not up: a
-plain dark screen in place of the ring, and a line saying what it waits for
-- "Preparing the live background... N%" while its pack is built or read -
-or why it cannot come */
-void menu_backdrop_pending_draw(void)
+/* what the live background waits for, said on its dark screen and on the
+black of a return (menu_backdrop_fade_draw): "Preparing the live
+background... N%" while its pack is built (the build's progress) or its
+pictures read (theirs), else moving dots - or why it cannot come */
+static void menu_backdrop_pending_line(char *line, size_t size)
 {
-	void draw_quad(rectangle2d *rectangle, pixel32 color);
-	rectangle2d bounds;
-	long font_index;
-	char line[200];
-	unsigned short text[200];
-	real_argb_color color;
-
-	if (!menu_backdrop.pending || !halo_main_menu_loaded())
-		return;
-	bounds.x0 = bounds.y0 = -2048;
-	bounds.x1 = bounds.y1 = 4096;
-	draw_quad(&bounds, (pixel32)0xFF05070A);
 	if (menu_backdrop.failed)
 	{
-		snprintf(line, sizeof(line), "%s", strstr(menu_backdrop.failure, "a30") ?
+		snprintf(line, size, "%s", strstr(menu_backdrop.failure, "a30") ?
 			T("The live background needs a30.map: Settings > Game > Menus") :
 			T("The live background could not be made: Settings > Game > Menus"));
 	}
@@ -540,19 +541,32 @@ void menu_backdrop_pending_draw(void)
 		else if (menu_backdrop.wanted && menu_backdrop.progress_shown && state != _scene_pack_state_failed)
 			menu_backdrop.progress_shown = 99;
 		if (menu_backdrop.progress_shown)
-			snprintf(line, sizeof(line), T("Preparing the live background... %ld%%"), menu_backdrop.progress_shown);
+			snprintf(line, size, T("Preparing the live background... %ld%%"), menu_backdrop.progress_shown);
+		/* (its pictures read into the texture cache, a few at a time:
+		scene_packs_textures_ready) */
+		else if (menu_backdrop.textures_shown > 0)
+			snprintf(line, size, T("Preparing the live background... %ld%%"), menu_backdrop.textures_shown);
 		else
 		{
 			static char const *const dots[] = { ".", "..", "..." };
 
-			snprintf(line, sizeof(line), "%s%s", T("Preparing the live background"),
+			snprintf(line, size, "%s%s", T("Preparing the live background"),
 				dots[(vita_host_time_us() / 400000ull) % 3]);
 		}
 	}
+}
+
+static void menu_backdrop_line_draw(char const *line, real alpha)
+{
+	rectangle2d bounds;
+	long font_index;
+	unsigned short text[200];
+	real_argb_color color;
+
 	font_index = tag_loaded('font', "pc\\h3\\font_small");
-	if (font_index == NONE)
+	if (font_index == NONE || alpha <= 0.f)
 		return;
-	color.alpha = 0.8f;
+	color.alpha = 0.8f * alpha;
 	color.red = color.green = color.blue = 0.85f;
 	bounds.x0 = 0;
 	bounds.x1 = 640;
@@ -562,6 +576,380 @@ void menu_backdrop_pending_draw(void)
 	draw_string_set_draw_mode(font_index, NONE, 2, 0, &color);
 	halo_menus_utf16(line, text, (long)(sizeof(text) / sizeof(text[0])));
 	rasterizer_draw_unicode_string(&bounds, NULL, NULL, 0, (wchar_t const *)text);
+}
+
+/* whether the live background is the one chosen for the menus loaded now
+(Menu style ElDewrito, the scenes on, Menu background Halo (live)) */
+static boolean menu_backdrop_live_chosen(void)
+{
+	return halo_menu_style_online() && menu_backdrop_scenes_enabled() && menu_backdrop_enabled();
+}
+
+/* (render.c, under the menus) the live background chosen and not up: a
+plain dark screen in place of the ring, and a line saying what it waits for
+- "Preparing the live background... N%" while its pack is built or read -
+or why it cannot come. Also on the first frame of a load of ui.map, drawn
+before menu_backdrop_update has seen it (the load comes after it in the
+main loop): that frame showed the ring (insider.25, leaving a game) */
+void menu_backdrop_pending_draw(void)
+{
+	void draw_quad(rectangle2d *rectangle, pixel32 color);
+	rectangle2d bounds;
+	char line[200];
+	boolean fresh_load;
+
+	if (!halo_main_menu_loaded())
+		return;
+	fresh_load = menu_backdrop.epoch != scene_packs_map_epoch();
+	if (!menu_backdrop.pending && !(fresh_load && menu_backdrop_live_chosen()))
+		return;
+	bounds.x0 = bounds.y0 = -2048;
+	bounds.x1 = bounds.y1 = 4096;
+	draw_quad(&bounds, (pixel32)0xFF05070A);
+	if (fresh_load)
+		return;
+	menu_backdrop_pending_line(line, sizeof(line));
+	menu_backdrop_line_draw(line, 1.f);
+}
+
+/* ---------- its own quality (insider.25: Menu background quality)
+
+The game's video settings chosen low for play made the live background
+look poor. While it is up (and the menus' Menu background quality is High,
+HALO_MENU_BACKDROP_QUALITY, menus.backdrop_quality - the default; "game":
+Same as game) the detail rows its scene shows are read at their best: models'
+detail, distant objects kept, effects (the grass, specular, the water's
+reflections), the sun's flares, particles and their budget. They are the
+cheap ones at the menu - a still camera, no fights, the 3D redrawn at
+HALO_MENU_BACKDROP_HZ (menu_functions.c) - and the frame's size is left to
+the player's Render resolution and Dynamic minimum, so dynamic resolution
+still answers for the GPU. The readers take them as they take the player's
+(menu_backdrop_render_setting in place of getenv, read again on
+halo_settings_generation); the player's own come back the moment a game is
+loaded (menu_backdrop_unloaded) or the background goes. */
+static struct
+{
+	char const *variable;
+	char const *value;
+} const menu_backdrop_quality_settings[] = {
+	{ "HALO_MODEL_LOD_SCALE", "1" },
+	{ "HALO_MIN_OBJECT_PIXELS", "0" },
+	{ "HALO_VITA_EFFECTS_QUALITY", "2" },
+	{ "HALO_SUN_RAYS", "1" },
+	{ "HALO_VITA_SHADOWS", "2" },
+	{ "HALO_PARTICLE_BUDGET", "full" },
+	{ "HALO_PARTICLE_RENDER_DIVISOR", "1" },
+	{ "HALO_DECAL_MIN_PIXELS", "0" },
+};
+
+static volatile int menu_backdrop_quality_on;
+
+static boolean menu_backdrop_quality_high_chosen(void)
+{
+	char const *setting = getenv("HALO_MENU_BACKDROP_QUALITY");
+
+	return !(setting && !_stricmp(setting, "game"));
+}
+
+static void menu_backdrop_quality_set(int on)
+{
+	extern volatile unsigned long halo_settings_generation;
+
+	if (menu_backdrop_quality_on == on)
+		return;
+	menu_backdrop_quality_on = on;
+	__atomic_add_fetch(&halo_settings_generation, 1, __ATOMIC_RELEASE);
+	platform_log("menu backdrop: %s", on ? "its own quality (Menu background quality High)" :
+		"the game's video settings again");
+}
+
+static void menu_backdrop_quality_update(void)
+{
+	menu_backdrop_quality_set(menu_backdrop.active && halo_main_menu_loaded() && menu_backdrop_quality_high_chosen());
+}
+
+/* (the detail settings' readers: models.c, render.c, render_objects.c,
+render_particles.c, rasterizer_lights.c, decals.c, particle_budget.c) a
+video setting's value: the background's own while it is up, else the
+player's (getenv) */
+char const *menu_backdrop_render_setting(char const *variable)
+{
+	if (menu_backdrop_quality_on)
+	{
+		size_t index;
+
+		for (index = 0; index < sizeof(menu_backdrop_quality_settings) / sizeof(menu_backdrop_quality_settings[0]); index++)
+		{
+			if (!strcmp(menu_backdrop_quality_settings[index].variable, variable))
+				return menu_backdrop_quality_settings[index].value;
+		}
+	}
+	return getenv(variable);
+}
+
+/* ---------- the way in and out (insider.25: the owner, Cass)
+
+With the live background chosen the ring is never shown, and the menus
+come and go as their screens do (menu_functions.c's fade): a game left
+fades to black before the main menu's load (menu_backdrop_leave_hold, the
+main loop's), the main menu is opened at black and held there - "Preparing
+the live background..." on it - till the background is up, then faded in.
+If it is long in coming (its pack built or read, its pictures read from the
+memory card: seconds on the Vita) the menus are faded in over its dark
+screen after MENU_BACKDROP_HOLD_MOST_US, usable meanwhile, and when it is
+ready they fade out, it is switched to at black, and they fade back in. The
+pad is let go while the screen is black. HALO_MENU_FADE=0: no fades (the
+black and the dark screen stay: the ring is not shown). */
+#define MENU_BACKDROP_FADE_OUT_US 250000ull
+#define MENU_BACKDROP_FADE_IN_US 350000ull
+/* (a game left: at least this many of its frames in its fade) */
+#define MENU_BACKDROP_LEAVE_FRAMES 6
+#define MENU_BACKDROP_HOLD_MOST_US 2500000ull
+/* (the line on the black: once it has lasted this long) */
+#define MENU_BACKDROP_HOLD_LINE_US 400000ull
+/* (the ambience and machines silent this long after the switch, then up
+over MENU_BACKDROP_SOUND_RISE_TICKS) */
+#define MENU_BACKDROP_SOUND_QUIET_US 1500000ull
+#define MENU_BACKDROP_SOUND_RISE_TICKS 60
+
+enum
+{
+	_backdrop_fade_none,
+	/* a game left: its last frames fading to black */
+	_backdrop_fade_leaving,
+	/* the main menu loaded at black, the background awaited */
+	_backdrop_fade_hold,
+	/* the menus over the dark screen, fading out for the background */
+	_backdrop_fade_swap_out,
+	_backdrop_fade_in,
+};
+
+static struct
+{
+	short phase;
+	unsigned long long start;
+	/* (the hold's: the menus to be faded in over the dark screen, not at
+	the background) */
+	boolean gave_up;
+	/* (leaving: the game's frames drawn meanwhile - a save's hitch left
+	no frame of its fade) */
+	short frames;
+	/* the ambience's level held at 0 since (0 none) */
+	unsigned long long sound_quiet_since;
+} menu_backdrop_fade;
+
+static boolean menu_backdrop_fade_enabled(void)
+{
+	char const *setting = getenv("HALO_MENU_FADE");
+
+	return !(setting && *setting && (!strcmp(setting, "0") || !_stricmp(setting, "false")));
+}
+
+static void menu_backdrop_fade_set(short phase)
+{
+	menu_backdrop_fade.phase = phase;
+	menu_backdrop_fade.start = vita_host_time_us();
+}
+
+/* (sound_classes.c) a class's level now, no easing */
+void sound_class_set_gain_now(char const *name, real gain);
+
+/* the backdrop's machines (the beam) and ambience silent as it comes, then
+up: the beam emitter made fires its first shot at once (a30's
+bluebeacon3), heard as a blast the moment the background came back
+(insider.25, Cass) */
+static void menu_backdrop_sounds_quiet(void)
+{
+	sound_class_set_gain_now("device_machinery", 0.f);
+	sound_class_set_gain_now("ambient", 0.f);
+	menu_backdrop_fade.sound_quiet_since = vita_host_time_us();
+}
+
+static void menu_backdrop_sounds_rise(boolean at_once)
+{
+	if (!menu_backdrop_fade.sound_quiet_since)
+		return;
+	if (at_once)
+	{
+		sound_class_set_gain_now("device_machinery", 1.f);
+		sound_class_set_gain_now("ambient", 1.f);
+	}
+	else
+	{
+		sound_class_set_gain("device_machinery", 1.f, MENU_BACKDROP_SOUND_RISE_TICKS);
+		sound_class_set_gain("ambient", 1.f, MENU_BACKDROP_SOUND_RISE_TICKS);
+	}
+	menu_backdrop_fade.sound_quiet_since = 0;
+}
+
+/* how black the screen is for the background's way in and out, 0 to 1
+(eased as menu_functions_fade_alpha) */
+static real menu_backdrop_fade_amount(void)
+{
+	unsigned long long now = vita_host_time_us();
+	real amount;
+
+	switch (menu_backdrop_fade.phase)
+	{
+	case _backdrop_fade_leaving:
+		/* (a game's frames: the main menu not loaded yet) */
+		if (halo_main_menu_loaded())
+			return 1.f;
+		amount = MIN((real)(now - menu_backdrop_fade.start) / (real)MENU_BACKDROP_FADE_OUT_US,
+			(real)menu_backdrop_fade.frames / (real)MENU_BACKDROP_LEAVE_FRAMES);
+		break;
+	case _backdrop_fade_hold:
+		return halo_main_menu_loaded() ? 1.f : 0.f;
+	case _backdrop_fade_swap_out:
+		amount = (real)(now - menu_backdrop_fade.start) / (real)MENU_BACKDROP_FADE_OUT_US;
+		break;
+	case _backdrop_fade_in:
+		amount = 1.f - (real)(now - menu_backdrop_fade.start) / (real)MENU_BACKDROP_FADE_IN_US;
+		break;
+	default:
+		/* (ui.map just loaded, the background chosen, its first frame
+		drawn before menu_backdrop_update saw it: black, as the hold) */
+		if (halo_main_menu_loaded() && menu_backdrop.epoch != scene_packs_map_epoch() &&
+			menu_backdrop_live_chosen())
+		{
+			return 1.f;
+		}
+		return 0.f;
+	}
+	if (!menu_backdrop_fade_enabled())
+		return menu_backdrop_fade.phase == _backdrop_fade_in ? 0.f : 1.f;
+	amount = PIN(amount, 0.f, 1.f);
+	return amount * amount * (3.f - 2.f * amount);
+}
+
+/* (menu_functions_fade_draw, over everything) the black of the way in and
+out, and on the hold's black what it waits for */
+real menu_backdrop_fade_alpha(void)
+{
+	return menu_backdrop_fade_amount();
+}
+
+void menu_backdrop_fade_line_draw(void)
+{
+	char line[200];
+	unsigned long long held;
+
+	if (menu_backdrop_fade.phase != _backdrop_fade_hold || !halo_main_menu_loaded() ||
+		menu_backdrop.epoch != scene_packs_map_epoch())
+	{
+		return;
+	}
+	held = vita_host_time_us() - menu_backdrop_fade.start;
+	if (held < MENU_BACKDROP_HOLD_LINE_US)
+		return;
+	menu_backdrop_pending_line(line, sizeof(line));
+	menu_backdrop_line_draw(line, PIN((real)(held - MENU_BACKDROP_HOLD_LINE_US) / 300000.f, 0.f, 1.f));
+}
+
+/* (ui_widget.c's events, through menu_functions_fade_input_held) the pad
+let go while the menus are black or going */
+int menu_backdrop_input_held(void)
+{
+	return halo_main_menu_loaded() && (menu_backdrop_fade.phase == _backdrop_fade_hold ||
+		menu_backdrop_fade.phase == _backdrop_fade_swap_out);
+}
+
+/* (main.c, before the main menu's load) a game left with the live
+background chosen: its last frames fade to black first. TRUE while the load
+waits */
+int menu_backdrop_leave_hold(void)
+{
+	if (halo_main_menu_loaded() || !game_in_progress() || !menu_backdrop_live_chosen())
+	{
+		if (menu_backdrop_fade.phase == _backdrop_fade_leaving)
+			menu_backdrop_fade_set(_backdrop_fade_hold);
+		return FALSE;
+	}
+	if (menu_backdrop_fade.phase != _backdrop_fade_leaving)
+	{
+		menu_backdrop_fade_set(_backdrop_fade_leaving);
+		menu_backdrop_fade.frames = 0;
+		platform_log("menu backdrop: the game left fades to black before the main menu");
+	}
+	else if (menu_backdrop_fade.frames < SHORT_MAX)
+		menu_backdrop_fade.frames++;
+	if (menu_backdrop_fade_enabled() && (vita_host_time_us() - menu_backdrop_fade.start < MENU_BACKDROP_FADE_OUT_US ||
+		menu_backdrop_fade.frames < MENU_BACKDROP_LEAVE_FRAMES))
+	{
+		return TRUE;
+	}
+	/* (black now: the main menu loaded, held black) */
+	menu_backdrop_fade_set(_backdrop_fade_hold);
+	menu_backdrop_fade.gave_up = FALSE;
+	return FALSE;
+}
+
+/* (menu_backdrop_update, the main menu's) the fade's turns: TRUE when the
+background may be switched to now (black) */
+static boolean menu_backdrop_fade_update(boolean wanted_here, boolean ready)
+{
+	unsigned long long now = vita_host_time_us();
+	boolean fading = menu_backdrop_fade_enabled();
+
+	if (menu_backdrop_fade.sound_quiet_since && now - menu_backdrop_fade.sound_quiet_since > MENU_BACKDROP_SOUND_QUIET_US)
+		menu_backdrop_sounds_rise(FALSE);
+	if (!wanted_here)
+	{
+		/* (the ring chosen, or another style: nothing held) */
+		if (menu_backdrop_fade.phase != _backdrop_fade_none && menu_backdrop_fade.phase != _backdrop_fade_in)
+			menu_backdrop_fade_set(fading ? _backdrop_fade_in : _backdrop_fade_none);
+		return FALSE;
+	}
+	switch (menu_backdrop_fade.phase)
+	{
+	case _backdrop_fade_leaving:
+		/* (loaded without the leave's end seen: held) */
+		menu_backdrop_fade_set(_backdrop_fade_hold);
+		menu_backdrop_fade.gave_up = FALSE;
+		return FALSE;
+	case _backdrop_fade_hold:
+		if (ready)
+			return TRUE;
+		if (menu_backdrop.failed || now - menu_backdrop_fade.start > MENU_BACKDROP_HOLD_MOST_US)
+		{
+			/* (long in coming, or it cannot come: the menus over its
+			dark screen, usable) */
+			menu_backdrop_fade.gave_up = TRUE;
+			platform_log("menu backdrop: the menus faded in over the dark screen (%s)",
+				menu_backdrop.failed ? "it cannot come" : "still preparing");
+			menu_backdrop_fade_set(fading ? _backdrop_fade_in : _backdrop_fade_none);
+		}
+		return FALSE;
+	case _backdrop_fade_swap_out:
+		if (!ready)
+		{
+			menu_backdrop_fade_set(fading ? _backdrop_fade_in : _backdrop_fade_none);
+			return FALSE;
+		}
+		return !fading || now - menu_backdrop_fade.start >= MENU_BACKDROP_FADE_OUT_US;
+	case _backdrop_fade_in:
+		if (!fading || now - menu_backdrop_fade.start >= MENU_BACKDROP_FADE_IN_US)
+			menu_backdrop_fade.phase = _backdrop_fade_none;
+		else if (ready)
+		{
+			/* (ready while the menus come in over the dark screen: out
+			again from where it is) */
+			real black = menu_backdrop_fade_amount();
+
+			menu_backdrop_fade.phase = _backdrop_fade_swap_out;
+			menu_backdrop_fade.start = now - (unsigned long long)(black * (real)MENU_BACKDROP_FADE_OUT_US);
+			return FALSE;
+		}
+		return FALSE;
+	default:
+		if (!ready)
+			return FALSE;
+		if (!fading)
+			return TRUE;
+		/* (the menus shown over the dark screen: out to black first) */
+		menu_backdrop_fade_set(_backdrop_fade_swap_out);
+		return FALSE;
+	}
 }
 
 /* (main.c, the top of the main loop, before the menus' scenes) */
@@ -576,12 +964,27 @@ void menu_backdrop_update(void)
 		its tags, menu_backdrop_unloaded) */
 		memset(&menu_backdrop, 0, sizeof(menu_backdrop));
 		menu_backdrop.epoch = scene_packs_map_epoch();
+		/* (the main menu loaded with the background chosen, a game's leave
+		or not - the start's -: at black till it is up) */
+		if (halo_main_menu_loaded() && menu_backdrop_live_chosen())
+		{
+			menu_backdrop_fade_set(_backdrop_fade_hold);
+			menu_backdrop_fade.gave_up = FALSE;
+		}
 	}
-	wanted_here = halo_main_menu_loaded() && halo_menu_style_online() && menu_backdrop_scenes_enabled() &&
-		menu_backdrop_enabled();
+	if (!halo_main_menu_loaded())
+	{
+		if (menu_backdrop_fade.phase != _backdrop_fade_leaving)
+			menu_backdrop_fade.phase = _backdrop_fade_none;
+		menu_backdrop_quality_update();
+		return;
+	}
+	wanted_here = halo_main_menu_loaded() && menu_backdrop_live_chosen();
 	menu_backdrop.pending = wanted_here && !menu_backdrop.active && !menu_backdrop.test_off;
+	menu_backdrop_quality_update();
 	if (!wanted_here)
 	{
+		menu_backdrop_fade_update(FALSE, FALSE);
 		if (menu_backdrop.active && halo_main_menu_loaded())
 			menu_backdrop_deactivate(halo_menu_style_online() ? "the backdrop turned off" : "another menu style");
 		menu_backdrop.rest_since = 0;
@@ -604,7 +1007,14 @@ it go; the ring's flight back) */
 		return;
 	}
 	if (menu_backdrop.active || menu_backdrop.failed)
+	{
+		/* (up - the menus fading in at it -, or given up: the hold's end) */
+		if (menu_backdrop.active && menu_backdrop_fade.phase == _backdrop_fade_hold)
+			menu_backdrop_fade_set(menu_backdrop_fade_enabled() ? _backdrop_fade_in : _backdrop_fade_none);
+		else
+			menu_backdrop_fade_update(TRUE, FALSE);
 		return;
+	}
 	if (!menu_backdrop.wanted)
 	{
 		char why[160];
@@ -612,6 +1022,7 @@ it go; the ring's flight back) */
 
 		/* (asked for once the main menu has rested and the lobbies' packs
 		are in: its build takes the tag cache's free room as theirs do) */
+		menu_backdrop_fade_update(TRUE, FALSE);
 		if (!halo_main_menu_idle())
 		{
 			menu_backdrop.rest_since = 0;
@@ -619,7 +1030,10 @@ it go; the ring's flight back) */
 		}
 		if (!menu_backdrop.rest_since)
 			menu_backdrop.rest_since = now;
-		if (now - menu_backdrop.rest_since < 1000000ull || !menu_functions_prebuild_settled())
+		/* (no rest asked while the main menu is held black for it: a game
+		left, the start) */
+		if ((menu_backdrop_fade.phase != _backdrop_fade_hold && now - menu_backdrop.rest_since < 1000000ull) ||
+			!menu_functions_prebuild_settled())
 			return;
 		if (!scene_packs_recipe_available(MENU_BACKDROP_PACK, why, sizeof(why)))
 		{
@@ -641,9 +1055,29 @@ it go; the ring's flight back) */
 		menu_backdrop_fail(why[0] ? why : "its pack was not loaded");
 		return;
 	}
-	if (state != _scene_pack_state_loaded || !scene_packs_textures_ready(MENU_BACKDROP_PACK))
+	if (state != _scene_pack_state_loaded)
+	{
+		menu_backdrop_fade_update(TRUE, FALSE);
 		return;
+	}
+	/* (its pictures read a few at a time: scene_packs_textures_ready) */
+	{
+		boolean textures_ready = scene_packs_textures_ready(MENU_BACKDROP_PACK);
+		long percent = scene_packs_textures_percent(MENU_BACKDROP_PACK);
+
+		if (percent > 0)
+			menu_backdrop.textures_shown = MAX(menu_backdrop.textures_shown, PIN(percent, 1, 99));
+		/* (switched to at black: the hold's, or the menus faded out) */
+		if (!menu_backdrop_fade_update(TRUE, textures_ready))
+			return;
+	}
 	menu_backdrop_activate();
+	if (menu_backdrop.active)
+	{
+		/* (the menus faded in at it: its camera put in by the activation) */
+		menu_backdrop_fade_set(menu_backdrop_fade_enabled() ? _backdrop_fade_in : _backdrop_fade_none);
+		platform_log("menu backdrop: up at black, the menus fading in");
+	}
 }
 
 /* (cache_files.c, scenario_structure_bsp_load's first question) whether
@@ -675,4 +1109,8 @@ void menu_backdrop_unloaded(void)
 	}
 	menu_backdrop_blocks_put_back(TRUE);
 	menu_backdrop.active = FALSE;
+	/* (the game's video settings for the game loaded; its classes' levels
+	are the new map's) */
+	menu_backdrop_quality_set(FALSE);
+	menu_backdrop_fade.sound_quiet_since = 0;
 }
