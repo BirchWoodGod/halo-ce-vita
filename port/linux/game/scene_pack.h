@@ -263,9 +263,9 @@ struct scene_pack_copy_source
 
 /* (scene_packs.c) called by a build and a load after each of their reads
 and writes, with its bytes (source: a read of the source map, else of a
-pack): the build's thread pauses and paces itself there. NULL (the tools):
-nothing */
-extern void (*scene_pack_io_hook)(unsigned long bytes, boolean source);
+pack; write: a write of a pack): the build's thread pauses and paces itself
+there. NULL (the tools): nothing */
+extern void (*scene_pack_io_hook)(unsigned long bytes, boolean source, boolean write);
 /* (tools/scene_pack_test.c, NULL in the game) a recipe with blocks: the
 source's tag data as the build has read it, before the blocks are made
 from it (and the rest of the pack taken from it): the tool damages it */
@@ -444,6 +444,15 @@ alloc may give NULL (then the C heap). Zeroed memory is not assumed.
 Thread-local: only that thread's builds use them. */
 extern __thread void *(*scene_pack_big_alloc)(unsigned long size);
 extern __thread void (*scene_pack_big_free)(void *data, unsigned long size);
+/* (the same) a big block of scene_pack_big_alloc's grown in place to
+new_size bytes, its first size bytes kept (moved to the start it gives):
+NULL if it cannot be (then a new block, the bytes copied to it). NULL: none */
+extern __thread void *(*scene_pack_big_grow)(void *data, unsigned long size, unsigned long new_size);
+/* (the same) TRUE: a big buffer - the blob, a backdrop's structure bsp, the
+source's tag data when the scratch is too small - the hooks' alone, never
+the C heap's: none from them is the build's failure ("no room in the memory
+window"), not a C heap the system's libraries share run dry (the Vita) */
+extern __thread boolean scene_pack_big_only;
 /* (the packs' worker, scene_packs.c) where a build's copy of its source
 map's tag data comes from when the scratch it was given is too small for it
 (the menus' backdrop loaded beside the menus takes 8.7 MB of the tag cache's
