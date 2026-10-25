@@ -698,30 +698,101 @@ its structure bsp, the pack it makes - in the memory window (the physical
 memory the game's caches come from), which has room at the main menu, not
 the C heap the system's libraries share, which on the Vita has not: NULL
 (then the C heap) for a small one or when the window has no room */
+/* The build's part of the window is bounded: a block is given only if
+PACK_WINDOW_RESERVE stays free beside it in one piece, for the game's own
+blocks meanwhile (insider.25: a tester's build from an a30.map read in
+place took the window to 114368 KB of 114688, its structure bsp's 6 MB and
+its tags' blob of 6 MB and 8 MB at once - the blob is grown in place now,
+pack_window_grow). A build refused its room fails ("no room in the memory
+window": the backdrop's dark screen says it cannot come), never the C
+heap's (scene_pack_big_only) */
 enum
 {
 	PACK_WINDOW_MINIMUM = 256 * 1024,
-	PACK_WINDOW_PAGE = 4096
+	PACK_WINDOW_PAGE = 4096,
+	PACK_WINDOW_RESERVE = 2 * 1024 * 1024
 };
 
 void *platform_contiguous_alloc(unsigned long size, unsigned long alignment, unsigned long physical_address, DWORD protect);
 void platform_contiguous_free(void *address);
 BOOL platform_is_contiguous(const void *address);
+unsigned long platform_contiguous_largest_free(void);
+void *platform_contiguous_grow_down(void *address, unsigned long size);
+
+/* whether the window has room for more bytes of the build's, the reserve
+left (the first time it has not said in the log) */
+static boolean pack_window_room(unsigned long more)
+{
+	static __thread boolean said;
+	unsigned long largest = platform_contiguous_largest_free();
+
+	if (largest >= more && largest - more >= PACK_WINDOW_RESERVE)
+		return TRUE;
+	if (!said)
+		platform_log("scene packs: the memory window has %lu KB free in one piece: %lu KB more for a build would leave "
+			"less than %lu KB", largest / 1024, more / 1024, (unsigned long)PACK_WINDOW_RESERVE / 1024);
+	said = TRUE;
+	return FALSE;
+}
+
+/* (the worker's) the build's blocks: their bytes now, their most at once,
+and the least the window had free in one piece meanwhile - said at the
+build's end (packs_prepare) */
+static unsigned long pack_window_held, pack_window_held_most, pack_window_free_least;
+
+static unsigned long pack_window_rounded(unsigned long size)
+{
+	return (size + PACK_WINDOW_PAGE - 1) & ~(unsigned long)(PACK_WINDOW_PAGE - 1);
+}
+
+static void pack_window_note(long change)
+{
+	unsigned long largest = platform_contiguous_largest_free();
+
+	pack_window_held += (unsigned long)change;
+	pack_window_held_most = MAX(pack_window_held_most, pack_window_held);
+	pack_window_free_least = MIN(pack_window_free_least, largest);
+}
 
 static void *pack_window_alloc(unsigned long size)
 {
+	void *data;
+
 	if (size < PACK_WINDOW_MINIMUM)
 		return NULL;
-	size = (size + PACK_WINDOW_PAGE - 1) & ~(unsigned long)(PACK_WINDOW_PAGE - 1);
+	size = pack_window_rounded(size);
+	if (!pack_window_room(size))
+		return NULL;
 	/* (0xFFFFFFFF: anywhere; 4: PAGE_READWRITE) */
-	return platform_contiguous_alloc(size, PACK_WINDOW_PAGE, 0xFFFFFFFFUL, 4);
+	data = platform_contiguous_alloc(size, PACK_WINDOW_PAGE, 0xFFFFFFFFUL, 4);
+	if (data)
+		pack_window_note((long)size);
+	return data;
+}
+
+/* (scene_pack_big_grow) a block of pack_window_alloc's grown down into the
+free pages below it, its bytes moved to its new start */
+static void *pack_window_grow(void *data, unsigned long size, unsigned long new_size)
+{
+	unsigned char *grown;
+
+	if (!platform_is_contiguous(data) || new_size <= size || !pack_window_room(new_size - size))
+		return NULL;
+	grown = platform_contiguous_grow_down(data, new_size);
+	if (grown && grown != data)
+		memmove(grown, data, size);
+	if (grown)
+		pack_window_note((long)(pack_window_rounded(new_size) - pack_window_rounded(size)));
+	return grown;
 }
 
 static void pack_window_free(void *data, unsigned long size)
 {
-	(void)size;
 	if (data && platform_is_contiguous(data))
+	{
 		platform_contiguous_free(data);
+		pack_window_note(-(long)pack_window_rounded(size));
+	}
 	else
 		free(data);
 }
@@ -820,18 +891,29 @@ static void packs_prepare(struct scene_pack_slot **slots, short count, unsigned 
 		{
 			scene_pack_big_alloc = pack_window_alloc;
 			scene_pack_big_free = pack_window_free;
+			scene_pack_big_grow = pack_window_grow;
+			scene_pack_big_only = TRUE;
 		}
 		/* (a source map's tag data larger than the tag cache's free room -
 the menus' backdrop loaded beside the menus takes 8.7 MB of it - read into
 the memory window, not the C heap) */
 		scene_pack_scratch_alloc = pack_window_alloc;
 		scene_pack_scratch_free = pack_window_free;
+		pack_window_held = pack_window_held_most = 0;
+		pack_window_free_least = platform_contiguous_largest_free();
 		built = scene_pack_build_many(recipes, group_count, map, cache_files_map_directory(), paths, scratch, scratch_size,
 			&scene_packs.cancel, scene_packs_build_results);
+		if (pack_window_held_most)
+		{
+			platform_log("scene packs: %s's build: %lu KB of the memory window at most at once, %lu KB of it free in one "
+				"piece at the least", group[0]->name, pack_window_held_most / 1024, pack_window_free_least / 1024);
+		}
 		scene_pack_scratch_alloc = NULL;
 		scene_pack_scratch_free = NULL;
 		scene_pack_big_alloc = NULL;
 		scene_pack_big_free = NULL;
+		scene_pack_big_grow = NULL;
+		scene_pack_big_only = FALSE;
 		(void)built;
 		for (index = 0; index < group_count; index++)
 		{
@@ -1129,16 +1211,39 @@ static void *worker_thread(void *context)
 }
 
 /* (scene_pack_io_hook) a build's or a load's read or write done: paced in
-the tests (slow_io_pace); on the worker, paused while the game wants it to
-(a map copied to the cache partition, a network game; a prebuild also
-while the game's own reads are waiting), and a prebuild's spaced out, as
-is a build wanted now that shares the card with a map's copy */
-static void worker_io(unsigned long bytes, boolean source)
+the tests (slow_io_pace; the harness's card, HALO_IO_THROTTLE_KBPS, held for
+it as for the game's own calls); on the worker, paused while the game wants
+it to (a map copied to the cache partition, a network game; a prebuild also
+while the game's own reads are waiting), and every build's and load's reads
+and writes on the worker given the card's turns: after each GIVE_WAY_BYTES
+read or GIVE_WAY_WRITE_BYTES written a pause, then a wait while another
+thread's file call is under way or just ended
+(platform_file_foreground_busy, as a map copy's pieces wait: xbox_files.c),
+up to GIVE_WAY_WAIT_MS. The memory card serves one request at a time:
+insider.25's backdrop build from an a30.map read in place, at the card's
+full speed, held the game thread's file calls (117 looks at the maps'
+attributes, 1200 ms in one frame) and then, in one 9 MB write of its tags,
+the network thread's (which held its lock, the game thread waiting on it)
+for over 8 s - the watchdog. Each pause also counts as progress for the
+watchdog (halo_progress_heartbeat): a build moving */
+enum
 {
-	static __thread unsigned long since_yield;
+	GIVE_WAY_BYTES = 64 * 1024,
+	GIVE_WAY_WRITE_BYTES = 16 * 1024,
+	GIVE_WAY_PAUSE_MS = 2,
+	GIVE_WAY_WAIT_MS = 40
+};
+
+void platform_file_card_hold(unsigned long long bytes, int write);
+int platform_file_foreground_busy(void);
+
+static void worker_io(unsigned long bytes, boolean source, boolean write)
+{
+	static __thread unsigned long since_yield, since_give_way;
 	int cache_files_reads_pending(void);
 
 	slow_io_pace(bytes, source);
+	platform_file_card_hold(bytes, write);
 	/* (a pack read on the game thread - scene_packs_load_now at a map's
 	load - is progress, not a hang: the Vita's watchdog) */
 	if (!scene_packs_on_worker)
@@ -1157,6 +1262,22 @@ static void worker_io(unsigned long bytes, boolean source)
 		Sleep(20);
 	}
 	__atomic_store_n(&scene_packs.held, 0, __ATOMIC_RELEASE);
+	/* (every build's and load's on the worker: the card's turns - a
+	write's sooner, the card's writes as slow as 750 KB/s) */
+	since_give_way += write ? bytes * (GIVE_WAY_BYTES / GIVE_WAY_WRITE_BYTES) : bytes;
+	if (since_give_way >= GIVE_WAY_BYTES)
+	{
+		long waited = 0;
+
+		since_give_way = 0;
+		halo_progress_heartbeat();
+		Sleep(GIVE_WAY_PAUSE_MS);
+		while (!scene_packs.cancel && waited < GIVE_WAY_WAIT_MS && platform_file_foreground_busy())
+		{
+			Sleep(1);
+			waited++;
+		}
+	}
 	if (scene_packs.job.low || __atomic_load_n(&scene_packs.card_shared, __ATOMIC_ACQUIRE))
 	{
 		since_yield += bytes;
@@ -2209,6 +2330,31 @@ void scene_packs_update(
 	}
 	scene_packs_update_internal();
 	game_thread_time("the frame's update", NULL, started);
+#if !defined(HALO_VITA) && !defined(HALO_RELEASE)
+	/* (tests, the harness: HALO_TEST_BUILD_FILE_PROBE=n) while a pack is
+	built, the game thread looks at a map's attributes n times a frame, as
+	insider.25's settings panel did (117 looks in one frame): with the card
+	made like the Vita's (HALO_IO_THROTTLE_KBPS), the frame-hitch and
+	frame-timing lines say how long the build's reads and writes kept it */
+	{
+		static long probes = -1;
+		short index;
+
+		if (probes < 0)
+			probes = getenv("HALO_TEST_BUILD_FILE_PROBE") ? atol(getenv("HALO_TEST_BUILD_FILE_PROBE")) : 0;
+		for (index = 0; probes > 0 && index < scene_packs.pack_count; index++)
+		{
+			if (state_get(&scene_packs.packs[index]) == _scene_pack_state_building)
+			{
+				long probe;
+
+				for (probe = 0; probe < probes; probe++)
+					GetFileAttributesA("d:\\maps\\wizard.map");
+				break;
+			}
+		}
+	}
+#endif
 }
 
 /* (the game thread) the worker's pauses: a map copied to the cache

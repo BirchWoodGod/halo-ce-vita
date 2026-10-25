@@ -230,6 +230,30 @@ static void io_card_request(unsigned long long bytes)
 	io_card_request_write(bytes, 0);
 }
 
+/* (scene_packs.c) a call made outside these - a scene pack's build reads
+and writes with stdio - given to the harness's card (HALO_IO_THROTTLE_KBPS)
+after it is made: the card held for as long as it would have taken, every
+thread's calls behind it; nothing without the setting, nor on the Vita */
+void platform_file_card_hold(unsigned long long bytes, int write)
+{
+#ifndef HALO_VITA
+	io_card_request_write(bytes, write);
+#else
+	(void)bytes;
+	(void)write;
+#endif
+}
+
+/* (scene_packs.c) whether another thread's file call here is under way or
+ended in the last BACKGROUND_GAP_US - the game thread's come in bursts: a
+long build's reads and writes give the card way to them, as a map copy's
+pieces do (io_background_piece) */
+int platform_file_foreground_busy(void)
+{
+	return __atomic_load_n(&io_foreground_calls, __ATOMIC_RELAXED) > 0 ||
+		vita_host_time_us() - __atomic_load_n(&io_foreground_last_us, __ATOMIC_RELAXED) < BACKGROUND_GAP_US;
+}
+
 /* (every call's start, paired with its file_call_done: never 0, so that
 each call's end is reached; 1 when the load profile is off) */
 static unsigned long long file_call_started(void)

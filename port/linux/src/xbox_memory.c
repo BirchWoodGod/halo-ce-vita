@@ -423,6 +423,25 @@ static unsigned long window_floor_page(void)
 #endif
 }
 
+/* (under arena_lock) a block laid out at first, count pages: the lowest
+page ever handed out (blocks come top-down) said when it is lower - on the
+Vita, and in the harness made like it (HALO_WINDOW_FLOOR_KB) */
+static void window_lowest_note(unsigned long first, unsigned long count)
+{
+	static unsigned long lowest = CONTIGUOUS_PAGE_COUNT;
+
+#ifndef HALO_VITA
+	if (!window_floor_page())
+		return;
+#endif
+	if (first < lowest && count >= 256)
+	{
+		lowest = first;
+		platform_log("memory window: %lu KB block, %lu KB of %lu KB in use at most", count * 4,
+			(CONTIGUOUS_PAGE_COUNT - lowest) * 4, CONTIGUOUS_PAGE_COUNT * 4);
+	}
+}
+
 void *platform_contiguous_alloc(unsigned long size, unsigned long alignment,
 	unsigned long physical_address, DWORD protect)
 {
@@ -503,21 +522,81 @@ void *platform_contiguous_alloc(unsigned long size, unsigned long alignment,
 	for (page = first; page < first + count; page++)
 		page_protection[page] = protect;
 	block_page_count[first] = count;
-#ifdef HALO_VITA
-	{
-		/* the lowest page ever handed out: blocks come top-down */
-		static unsigned long lowest = CONTIGUOUS_PAGE_COUNT;
-
-		if (first < lowest && count >= 256)
-		{
-			lowest = first;
-			platform_log("memory window: %lu KB block, %lu KB of %lu KB in use at most", count * 4,
-				(CONTIGUOUS_PAGE_COUNT - lowest) * 4, CONTIGUOUS_PAGE_COUNT * 4);
-		}
-	}
-#endif
+	window_lowest_note(first, count);
 	pthread_mutex_unlock(&arena_lock);
 	return address;
+}
+
+/* (scene_packs.c, under nothing) the largest run of free pages a block
+could be laid out in now, in bytes: what a big allocation may take without
+leaving the game's caches none */
+unsigned long platform_contiguous_largest_free(void)
+{
+#ifdef HALO_VITA
+	unsigned long top = layout_top_page;
+#else
+	unsigned long top = CONTIGUOUS_PAGE_COUNT;
+#endif
+	unsigned long page, run = 0, largest = 0;
+
+	pthread_mutex_lock(&arena_lock);
+	for (page = window_floor_page(); arena_reserved && page < top; page++)
+	{
+		run = page_protection[page] ? 0 : run + 1;
+		if (run > largest)
+			largest = run;
+	}
+	pthread_mutex_unlock(&arena_lock);
+	return largest * PAGE_SIZE_BYTES;
+}
+
+/* (scene_packs.c) a block of platform_contiguous_alloc's made size bytes
+long by taking the free pages just below it (blocks come top-down: the
+next block's place), its bytes where they were - the caller moves them
+down to the new start it is given. NULL (the block as it was) if those
+pages are not free. A block grown so needs no second block beside it: a
+pack's tags growing to 9 MB took 6 MB and 8 MB at once (insider.25) */
+void *platform_contiguous_grow_down(void *address, unsigned long size)
+{
+	unsigned long first, count, wanted, extra, page;
+	void *grown;
+
+	if (!platform_is_contiguous(address))
+		return NULL;
+	first = ((unsigned long)address - PLATFORM_CONTIGUOUS_BASE) / PAGE_SIZE_BYTES;
+	wanted = (size + PAGE_SIZE_BYTES - 1) / PAGE_SIZE_BYTES;
+	pthread_mutex_lock(&arena_lock);
+	count = block_page_count[first];
+	if (!count || wanted <= count)
+	{
+		pthread_mutex_unlock(&arena_lock);
+		return count ? address : NULL;
+	}
+	extra = wanted - count;
+	if (first < extra || first - extra < window_floor_page() || !pages_free(first - extra, extra))
+	{
+		pthread_mutex_unlock(&arena_lock);
+		return NULL;
+	}
+	grown = (void *)(PLATFORM_CONTIGUOUS_BASE + (first - extra) * PAGE_SIZE_BYTES);
+	memory_watch_forget(grown, extra * PAGE_SIZE_BYTES);
+#ifdef HALO_VITA
+	memset(grown, 0, extra * PAGE_SIZE_BYTES);
+#else
+	if (mmap(grown, extra * PAGE_SIZE_BYTES, protection_to_host(page_protection[first]),
+		MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0) != grown)
+	{
+		pthread_mutex_unlock(&arena_lock);
+		return NULL;
+	}
+#endif
+	for (page = first - extra; page < first; page++)
+		page_protection[page] = page_protection[first];
+	block_page_count[first] = 0;
+	block_page_count[first - extra] = wanted;
+	window_lowest_note(first - extra, wanted);
+	pthread_mutex_unlock(&arena_lock);
+	return grown;
 }
 
 void platform_contiguous_free(void *address)

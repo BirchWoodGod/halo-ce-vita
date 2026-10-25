@@ -147,6 +147,9 @@ enum
 
 	/* the reads' and writes' bounce */
 	BOUNCE_SIZE = 64 * 1024,
+	/* a pack's writes' pieces (pack_write): 43 ms of a slow card's at most,
+	a map copy's pieces' size (xbox_files.c) */
+	WRITE_PIECE_SIZE = 32 * 1024,
 	/* (a compressed map's) the inflate's input, read from the card in
 	pieces this large, and the C library's buffer of the map's file */
 	INPUT_SIZE = 256 * 1024,
@@ -433,7 +436,7 @@ struct build_state
 
 /* ---------- globals */
 
-void (*scene_pack_io_hook)(unsigned long bytes, boolean source) = NULL;
+void (*scene_pack_io_hook)(unsigned long bytes, boolean source, boolean write) = NULL;
 void (*scene_pack_blocks_source_hook)(unsigned char *tags, unsigned long size, unsigned long address,
 	unsigned long instances, long count) = NULL;
 struct scene_pack_copy_source const *scene_pack_copy_source = NULL;
@@ -525,14 +528,45 @@ scene_pack_io_hook) */
 static void io_done(unsigned long bytes)
 {
 	if (scene_pack_io_hook)
-		scene_pack_io_hook(bytes, FALSE);
+		scene_pack_io_hook(bytes, FALSE, FALSE);
 }
 
 /* (the same, of the source map) */
 static void io_done_source(unsigned long bytes)
 {
 	if (scene_pack_io_hook)
-		scene_pack_io_hook(bytes, TRUE);
+		scene_pack_io_hook(bytes, TRUE, FALSE);
+}
+
+/* (the same, a write of a pack) */
+static void io_done_write(unsigned long bytes)
+{
+	if (scene_pack_io_hook)
+		scene_pack_io_hook(bytes, FALSE, TRUE);
+}
+
+/* size bytes written to file in pieces of WRITE_PIECE_SIZE, each one's
+pause after it (scene_pack_io_hook): the memory card serves one request at
+a time, and one write of a backdrop's 9 MB of tags held it for 11 s on a
+tester's card (750 KB/s) - every other thread's file call behind it, the
+game thread's frame with them (insider.25). FALSE if a write failed */
+static boolean pack_write(FILE *file, void const *data, unsigned long size)
+{
+	unsigned char const *bytes = (unsigned char const *)data;
+	unsigned long done = 0;
+
+	while (done < size)
+	{
+		unsigned long chunk = size - done > WRITE_PIECE_SIZE ? WRITE_PIECE_SIZE : size - done;
+
+		/* (a piece larger than stdio's buffer is written as it is: one
+		request of the card's; a smaller one waits in the buffer for more) */
+		if (fwrite(bytes + done, 1, chunk, file) != chunk)
+			return FALSE;
+		done += chunk;
+		io_done_write(chunk);
+	}
+	return TRUE;
 }
 
 /* the build's progress, value of 100, given to every pack of its read (the
@@ -1451,14 +1485,15 @@ static void source_index_save(struct source_reader const *reader, char const *pa
 	for (index = 0; good && index < reader->point_count; index++)
 	{
 		crc = crc_bytes(crc, reader->points[index].window, SOURCE_POINT_WINDOW);
-		good = fwrite(reader->points[index].window, 1, SOURCE_POINT_WINDOW, file) == SOURCE_POINT_WINDOW;
+		/* (2 MB in all: each window its own request, its pause after it) */
+		good = pack_write(file, reader->points[index].window, SOURCE_POINT_WINDOW);
 	}
 	write_u32(entry, crc);
 	good = good && fwrite(entry, 1, 4, file) == 4;
 	good = !fclose(file) && good;
 	if (good)
 	{
-		io_done((unsigned long)SOURCE_INDEX_FIXED + (unsigned long)reader->point_count * (12 + SOURCE_POINT_WINDOW));
+		io_done_write((unsigned long)SOURCE_INDEX_FIXED + (unsigned long)reader->point_count * 12);
 		remove(path);
 		good = !rename(temporary, path);
 	}
@@ -1705,6 +1740,8 @@ static void build_fail(struct build_state *state, char const *format, char const
 scene_packs.c - the menus' backdrop's - while other threads build theirs) */
 __thread void *(*scene_pack_big_alloc)(unsigned long size);
 __thread void (*scene_pack_big_free)(void *data, unsigned long size);
+__thread void *(*scene_pack_big_grow)(void *data, unsigned long size, unsigned long new_size);
+__thread boolean scene_pack_big_only;
 __thread void *(*scene_pack_scratch_alloc)(unsigned long size);
 __thread void (*scene_pack_scratch_free)(void *data, unsigned long size);
 
@@ -1735,19 +1772,35 @@ static unsigned long blob_alloc(struct build_state *state, unsigned long size)
 		unsigned char *grown;
 
 		/* (doubling to 4 MB, then a quarter more: a backdrop's 8.7 MB of tags
-		takes 11 MB of the memory window as it is built, not 16) */
+		takes 11 MB of the memory window as it is built, not 16; grown in
+		place, a megabyte more at a time - its bytes moved, never two blocks
+		of it at once) */
+		boolean in_place = state->blob_big && scene_pack_big_grow != NULL;
+
 		while (capacity < end)
-			capacity = capacity < 4 * 1024 * 1024 ? capacity * 2 : capacity + capacity / 4;
+		{
+			capacity = capacity < 4 * 1024 * 1024 ? capacity * 2 :
+				in_place ? capacity + 1024 * 1024 : capacity + capacity / 4;
+		}
 		if (capacity > SCENE_PACK_MAXIMUM_TAG_BYTES)
 			capacity = SCENE_PACK_MAXIMUM_TAG_BYTES;
-		grown = scene_pack_big_alloc ? scene_pack_big_alloc(capacity) : NULL;
+		grown = in_place ? scene_pack_big_grow(state->blob, state->blob_capacity, capacity) : NULL;
 		if (grown)
+		{
+			/* (the same block, longer, its bytes at its new start) */
+		}
+		else if ((grown = scene_pack_big_alloc ? scene_pack_big_alloc(capacity) : NULL) != NULL)
 		{
 			if (state->blob)
 				memcpy(grown, state->blob, state->blob_capacity);
 			blob_release(state);
 			state->blob_big = TRUE;
 			state->blob_free = scene_pack_big_free;
+		}
+		else if (scene_pack_big_only)
+		{
+			build_fail(state, "there is no room for the pack's build in the memory window%s", NULL);
+			return 0;
 		}
 		else if (state->blob_big)
 		{
@@ -3926,7 +3979,7 @@ static boolean scene_pack_build_custom_edition(
 		file = fopen(temporary, "wb");
 		header_write(pack_header, &state, tags_crc, data_size, data_crc, source_hash, result->map);
 		if (!file || fwrite(pack_header, 1, sizeof(pack_header), file) != sizeof(pack_header) ||
-			fwrite(state.blob, 1, state.blob_size, file) != state.blob_size || fflush(data) || fseek(data, 0, SEEK_SET))
+			!pack_write(file, state.blob, state.blob_size) || fflush(data) || fseek(data, 0, SEEK_SET))
 		{
 			build_fail(&state, "the pack cannot be written%s", NULL);
 		}
@@ -3939,7 +3992,7 @@ static boolean scene_pack_build_custom_edition(
 			{
 				unsigned long chunk = data_size - done > BOUNCE_SIZE ? BOUNCE_SIZE : data_size - done;
 
-				if (fread(bounce, 1, chunk, data) != chunk || fwrite(bounce, 1, chunk, file) != chunk)
+				if (fread(bounce, 1, chunk, data) != chunk || !pack_write(file, bounce, chunk))
 					build_fail(&state, "the pack cannot be written%s", NULL);
 				done += chunk;
 			}
@@ -4132,12 +4185,13 @@ static boolean build_many_once(
 			platform_log("scene packs: %s's %lu KB of tag data read beside the tag cache (its free room %lu KB)", map,
 				tags_size / 1024, scratch ? scratch_size / 1024 : 0);
 		}
-		if (!tags)
+		if (!tags && !scene_pack_big_only)
 			tags = malloc(tags_size);
 		reader.phase_total = tags_size;
 		reader.progress_length = read_u32(header + 16) + tags_size;
 		if (!tags)
-			failure = "there is no memory to build the pack";
+			failure = scene_pack_big_only ? "there is no room for the pack's build in the memory window" :
+				"there is no memory to build the pack";
 		else if (!source_read(&reader, read_u32(header + 16), tags_size, tags))
 			failure = cancel && *cancel ? "it was stopped" : "the map's tag data cannot be read";
 		else if (!source_copy_unchanged(&reader))
@@ -4204,11 +4258,12 @@ static boolean build_many_once(
 			{
 				bsp_bytes = scene_pack_big_alloc ? scene_pack_big_alloc(bsp_size) : NULL;
 				bsp_big = bsp_bytes != NULL;
-				if (!bsp_bytes)
+				if (!bsp_bytes && !scene_pack_big_only)
 					bsp_bytes = malloc(bsp_size);
 				bsp_bytes_size = bsp_size;
 				if (!bsp_bytes)
-					build_fail(state, "there is no memory for the structure bsp%s", NULL);
+					build_fail(state, scene_pack_big_only ? "there is no room for the pack's build in the memory window%s" :
+						"there is no memory for the structure bsp%s", NULL);
 				else if (!source_rewind(&reader) || !source_read(&reader, bsp_offset, bsp_size, bsp_bytes))
 					build_fail(state, "%s", cancel && *cancel ? "it was stopped" : "the map's structure bsp cannot be read");
 				else
@@ -4244,13 +4299,9 @@ static boolean build_many_once(
 			job->file = fopen(job->temporary, "wb");
 			memset(placeholder, 0, sizeof(placeholder));
 			if (!job->file || fwrite(placeholder, 1, sizeof(placeholder), job->file) != sizeof(placeholder) ||
-				fwrite(state->blob, 1, state->blob_size, job->file) != state->blob_size)
+				!pack_write(job->file, state->blob, state->blob_size))
 			{
 				build_fail(state, "the pack cannot be written%s", NULL);
-			}
-			else
-			{
-				io_done(state->blob_size);
 			}
 		}
 		/* (its working memory let go before the next one's) */
@@ -4353,12 +4404,11 @@ static boolean build_many_once(
 
 					if (from >= position + chunk)
 						break;
-					if (from < position || fwrite(reader.bounce + (from - position), 1, to - from, job->file) != to - from)
+					if (from < position || !pack_write(job->file, reader.bounce + (from - position), to - from))
 					{
 						build_fail(&job->state, "the pack cannot be written%s", NULL);
 						break;
 					}
-					io_done(to - from);
 					job->data_crc = crc_bytes(job->data_crc, reader.bounce + (from - position), to - from);
 					job->piece_done += to - from;
 					if (job->piece_done >= piece->size)
