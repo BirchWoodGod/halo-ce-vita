@@ -166,6 +166,17 @@ What a bot does each tick, in a player's terms:
   drops it, and in a fight changes to the one of its two whose range suits
   the distance (a shotgun close, a sniper rifle far, rockets not close up).
   halo.log's items line has the spawns gone for and taken by kind.
+- Grenades and jumps in a fight (port: bots_grenade_update). A grenade is
+  thrown by the fight's situation, weighed every half second, a few seconds
+  apart by skill: at an enemy just gone behind cover or round a corner
+  (where it was last seen), at a group, at one in a vehicle or carrying the
+  flag or the ball, a plasma grenade stuck on one close up, and now and then
+  at middle range. Never where a teammate would be caught, nor close enough
+  to catch the bot itself; the bot turns to it first, its aim raised for the
+  throw's arc (the unit's grenade velocity, the projectile's gravity), the
+  enemy's motion led by its skill's lead, its aim error making it less true.
+  Every skill jumps in a fight now (easy a little), more just hurt (a
+  dodge). halo.log's items line has the grenades by why.
 - Roles, routes and vantage points (port: bots_roles.c, bots_routes.c and
   bots_vantage.c, steering the bot through bots_tactics.h's hooks here: its
   goal, its searches' goal, its look and its fight). Each team's bots have
@@ -238,6 +249,9 @@ and left, the defenders' posts. The map's teleporters are logged once.
 #include "units/bipeds.h"
 #include "units/vehicles.h"
 #include "units/vehicle_definitions.h"
+#include "units/unit_definitions.h"
+#include "game/game_globals.h"
+#include "physics/physics.h"
 #include "items/items.h"
 #include "items/item_definitions.h"
 #include "items/weapons.h"
@@ -521,16 +535,20 @@ struct bots_skill_definition
 	real powerup_reach;
 };
 
-/* (port: toned down Oct 17 2026, the owner finding them too strong: each
+/* (port, Oct 25 2026: jumps in a fight at every skill, a few a minute at
+easy - none before - and three times as often just hurt, a dodge; the
+grenades' chance is now the middle-range throw's alone, the situations'
+bots_grenade_update's. Aim and reactions as on Oct 17.)
+(port: toned down Oct 17 2026, the owner finding them too strong: each
 reacts later, its aim further off and slower to settle, leads less, fires
 looser, shorter bursts; easy, normal, heroic, legendary were 0.75/0.45/
 0.30/0.18 s, 12/7/4/2.2 degrees settling in 1.4/0.9/0.6/0.35 s) */
 static struct bots_skill_definition const bots_skills[NUMBER_OF_BOTS_SKILLS] =
 {
-	{ "easy", 0.90f, 20.0f, 100.0f, 14.0f, 1.8f, 7.0f, 2.4f, 0.2f, 0.03f, 0.00f, 5, 16, 0.35f, 0.00f, 15.0f },
-	{ "normal", 0.60f, 30.0f, 110.0f, 9.5f, 1.3f, 11.0f, 2.0f, 0.5f, 0.08f, 0.05f, 7, 12, 0.50f, 0.25f, 25.0f },
-	{ "heroic", 0.42f, 38.0f, 130.0f, 6.0f, 0.9f, 16.0f, 1.7f, 0.65f, 0.12f, 0.12f, 9, 9, 0.65f, 0.35f, 30.0f },
-	{ "legendary", 0.28f, 48.0f, 150.0f, 3.5f, 0.6f, 24.0f, 1.4f, 0.85f, 0.18f, 0.20f, 12, 6, 0.80f, 0.45f, 40.0f },
+	{ "easy", 0.90f, 20.0f, 100.0f, 14.0f, 1.8f, 7.0f, 2.4f, 0.2f, 0.03f, 0.04f, 5, 16, 0.35f, 0.00f, 15.0f },
+	{ "normal", 0.60f, 30.0f, 110.0f, 9.5f, 1.3f, 11.0f, 2.0f, 0.5f, 0.08f, 0.12f, 7, 12, 0.50f, 0.25f, 25.0f },
+	{ "heroic", 0.42f, 38.0f, 130.0f, 6.0f, 0.9f, 16.0f, 1.7f, 0.65f, 0.12f, 0.18f, 9, 9, 0.65f, 0.35f, 30.0f },
+	{ "legendary", 0.28f, 48.0f, 150.0f, 3.5f, 0.6f, 24.0f, 1.4f, 0.85f, 0.18f, 0.25f, 12, 6, 0.80f, 0.45f, 40.0f },
 };
 
 /* the vehicle tag's fields a bot drives by (vehicle_definitions.h keeps the
@@ -798,6 +816,18 @@ struct bots_bot
 	long plan_avoid_until_tick;
 	/* port: when it last changed weapons for the range (bots_weapon_for_range) */
 	long weapon_switch_tick;
+	/* port: a grenade it throws (bots_grenade_update): where at, which kind
+	(0 frag, 1 plasma), since when it turns to throw it (0 for none), when it
+	pressed the throw (0 before), and why (halo.log); when it next weighs
+	one */
+	real_point3d grenade_point;
+	short grenade_type;
+	long grenade_aim_tick;
+	long grenade_press_tick;
+	short grenade_reason;
+	long grenade_check_tick;
+	real grenade_yaw;
+	real grenade_pitch;
 	/* port: a goal it found no way to (the hops' regions: none joins them),
 	not gone for again until then: an enemy's place, a roaming place (nor
 	any near it) */
@@ -992,6 +1022,10 @@ static struct
 		long spawn_waits;
 		long range_switches;
 		long drop_choices;
+		/* port: grenades thrown by why (bots_grenade_update), and those held
+		back for a teammate near where they would land */
+		long grenades_by_reason[8];
+		long grenades_held_back;
 	} play;
 } bots_globals;
 
@@ -5839,6 +5873,11 @@ static void bots_hop_begin(struct bots_bot *bot, long now)
 	}
 	bot->hop_take_tick = now;
 	bot->hop_jump_tick = 0;
+	if (getenv("HALO_BOT_TRACE"))
+		platform_log("bots: trace bot %ld takes hop %ld (kind %d%s) at tick %ld from (%.2f %.2f %.2f) over (%.2f %.2f %.2f) to (%.2f %.2f %.2f)",
+			(long)(bot - bots_globals.bots) + 1, bot->hop_index, (int)hop->kind, hop->needs_jump ? ", jumped" : "", now,
+			hop->entrance.x, hop->entrance.y, hop->entrance.z, hop->edge.x, hop->edge.y, hop->edge.z, hop->exit.x, hop->exit.y,
+			hop->exit.z);
 }
 
 /* port: the hop ended: where the bot came out told (its region the hop's
@@ -5848,8 +5887,12 @@ static void bots_hop_end(struct bots_bot *bot, long hop_index, long unit_index, 
 	struct bots_nav_hop const *hop = bots_nav_hop_get(hop_index);
 	real_point3d ground;
 	long surface_index = bots_unit_surface(unit_index, &ground);
+	/* (into the landing's region; a drop or a jump within one, at the
+	landing's height near it) */
 	boolean taken = hop && bots_nav_region(surface_index) != NONE &&
-		bots_nav_region(surface_index) == bots_nav_region(hop->exit_surface_index);
+		bots_nav_region(surface_index) == bots_nav_region(hop->exit_surface_index) &&
+		(bots_nav_region(hop->entrance_surface_index) != bots_nav_region(hop->exit_surface_index) ||
+			(fabs(ground.z - hop->exit.z) < 0.6f && bots_distance2d(&ground, &hop->exit) < 2.0f));
 
 	bots_nav_hop_result(hop_index, taken, now);
 	if (getenv("HALO_BOT_TRACE") && hop)
@@ -6132,6 +6175,10 @@ static void bots_bot_reset(struct bots_bot *bot, long player_index, long bot_ind
 	bot->goal_surface_index = NONE;
 	bot->goal_serial = serial + 1;
 	bot->random = 0x2545F491UL * (unsigned long)(bot_index + 1) ^ (unsigned long)network_game_get_random_seed();
+	/* port: (debug) HALO_BOT_SEED=<n>: the bots' numbers otherwise, for runs
+	of the same input that differ (their statistics' spread) */
+	if (getenv("HALO_BOT_SEED"))
+		bot->random ^= (unsigned long)atol(getenv("HALO_BOT_SEED")) * 0x9E3779B9UL;
 	bot->strafe_sign = 1.0f;
 	bot->vehicle_index = NONE;
 	bot->vehicle_seat_index = NONE;
@@ -6321,19 +6368,7 @@ static void bots_bot_fight(struct bots_bot *bot, struct bots_tick *tick)
 		tick->flags |= FLAG(_unit_control_use_equipment_bit);
 		bot->melee_tick = now + TICKS_PER_SECOND;
 	}
-	/* a grenade at middle range, now and then */
-	if (tick->target_distance > 6.0f && tick->target_distance < 22.0f && now >= bot->grenade_tick &&
-		(tick->unit->unit.grenade_counts[0] > 0 || tick->unit->unit.grenade_counts[1] > 0) &&
-		bots_random_real(bot) < skill->grenade_chance / TICKS_PER_SECOND * 3.0f &&
-		now - bot->target_first_seen_tick >= reaction_ticks)
-	{
-		tick->flags |= FLAG(_unit_control_throw_grenade_bit);
-		/* (no grenade readied: NONE, -1, not an index) */
-		if (tick->unit->unit.current_grenade_index < 0 || tick->unit->unit.current_grenade_index > 1 ||
-			tick->unit->unit.grenade_counts[(long)tick->unit->unit.current_grenade_index] <= 0)
-			tick->action->desired_grenade_index = tick->unit->unit.grenade_counts[0] > 0 ? 0 : 1;
-		bot->grenade_tick = now + TICKS_PER_SECOND * 4;
-	}
+	/* (port: grenades are bots_grenade_update's, by the fight's situation) */
 	/* strafing, to a side for a while; nearer or further to keep its
 	weapon's distance; a jump now and then */
 	if (now >= bot->strafe_until_tick)
@@ -6359,8 +6394,230 @@ static void bots_bot_fight(struct bots_bot *bot, struct bots_tick *tick)
 		tick->moving = TRUE;
 		tick->throttle_scale = 1.0f;
 	}
-	if (bots_random_real(bot) < skill->jump_chance / TICKS_PER_SECOND)
+	if (bots_random_real(bot) < skill->jump_chance * (now - bot->hurt_tick < 10 ? 3.0f : 1.0f) / TICKS_PER_SECOND)
 		tick->flags |= FLAG(_unit_control_jump_bit);
+}
+
+/* ---------- port: grenades
+
+A grenade thrown as a player throws one, by the fight's situation (weighed
+every half second, a few seconds apart by skill): at an enemy just gone
+behind cover or round a corner, where it was last seen; at a group of them;
+at one in a vehicle or carrying the flag or the ball; a plasma grenade stuck
+on one close up; and now and then at middle range, as before. Never where a
+teammate would be caught (within four units of where it lands, or near the
+throw), nor close enough to catch itself. The bot turns to it first, its aim
+raised for the throw's arc (the unit's grenade velocity against the
+projectile's gravity, the target's motion led by the skill's lead), held
+through the wind-up to the release; its skill's aim error makes it less
+true. */
+
+enum
+{
+	_bots_grenade_reason_cover = 0,
+	_bots_grenade_reason_group,
+	_bots_grenade_reason_vehicle,
+	_bots_grenade_reason_carrier,
+	_bots_grenade_reason_stick,
+	_bots_grenade_reason_range,
+	NUMBER_OF_BOTS_GRENADE_REASONS,
+};
+
+/* the aim for a grenade from a point to another: its pitch for the lower of
+the two arcs that reach it (the highest throw, 45 degrees, for one out of
+reach) */
+static real bots_grenade_pitch(long unit_index, short grenade_type, real_point3d const *from, real_point3d const *to)
+{
+	struct game_globals *globals = scenario_get_game_globals();
+	struct unit_datum *unit = unit_get(unit_index);
+	real speed, gravity = global_gravity, distance, rise, root;
+
+	speed = unit_definition_get(unit->definition_index)->unit.grenade_velocity / TICKS_PER_SECOND;
+	if (globals && grenade_type >= 0 && grenade_type < globals->grenades.count)
+	{
+		struct game_globals_grenade *grenade = TAG_BLOCK_GET_ELEMENT(&globals->grenades, grenade_type, struct game_globals_grenade);
+
+		if (grenade->projectile.index != NONE)
+			gravity *= projectile_definition_get(grenade->projectile.index)->projectile.air_gravity_scale;
+	}
+	distance = bots_distance2d(from, to);
+	rise = to->z - from->z;
+	if (speed <= 0.0f || gravity <= 0.0f || distance < 0.1f)
+		return (real)atan2(rise, MAX(distance, 0.1f));
+	root = speed * speed * speed * speed - gravity * (gravity * distance * distance + 2.0f * rise * speed * speed);
+	if (root < 0.0f)
+		return BOTS_PI * 0.25f;
+	return (real)atan((speed * speed - (real)sqrt(root)) / (gravity * distance));
+}
+
+/* whether a teammate would be caught: within four units of where it lands,
+or within two of the throw's first four units */
+static boolean bots_grenade_friendly(struct player_datum *player, real_point3d const *eye, real_point3d const *point)
+{
+	struct data_iterator iterator;
+	struct player_datum *other;
+
+	if (!game_engine_has_teams())
+		return FALSE;
+	data_iterator_new(&iterator, player_data);
+	while ((other = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+	{
+		struct object_datum *object;
+		real_vector3d to, along;
+		real length, t;
+
+		if (other == player || other->unit_index == NONE || other->team_index != player->team_index)
+			continue;
+		object = object_get(other->unit_index);
+		if (bots_distance3d(&object->object.position, point) < 4.0f)
+			return TRUE;
+		to.i = point->x - eye->x;
+		to.j = point->y - eye->y;
+		to.k = 0.0f;
+		length = (real)sqrt(to.i * to.i + to.j * to.j);
+		if (length < 0.1f)
+			continue;
+		along.i = object->object.position.x - eye->x;
+		along.j = object->object.position.y - eye->y;
+		t = (along.i * to.i + along.j * to.j) / length;
+		if (t > 0.0f && t < 4.0f && (real)fabs(along.i * to.j - along.j * to.i) / length < 2.0f)
+			return TRUE;
+	}
+	return FALSE;
+}
+
+/* the enemies within this distance of a point, but one */
+static long bots_enemies_near(struct player_datum *player, long except_player_index, real_point3d const *point, real distance)
+{
+	struct data_iterator iterator;
+	struct player_datum *other;
+	long count = 0;
+
+	data_iterator_new(&iterator, player_data);
+	while ((other = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+	{
+		if (iterator.datum_index == except_player_index || !bots_is_enemy(player, other) || other->unit_index == NONE)
+			continue;
+		if (bots_distance3d(&object_get(other->unit_index)->object.position, point) < distance)
+			count++;
+	}
+	return count;
+}
+
+/* a grenade weighed (every half second) and, decided, thrown: turned to,
+the throw pressed once aimed, the aim held to the release */
+static void bots_grenade_update(struct bots_bot *bot, struct bots_tick *tick)
+{
+	static real const chances[NUMBER_OF_BOTS_SKILLS] = { 0.45f, 0.55f, 0.65f, 0.75f };
+	static long const rests[NUMBER_OF_BOTS_SKILLS] = { 5, 5, 4, 4 };
+	long now = tick->now;
+	struct unit_datum *unit = tick->unit;
+	boolean frags = unit->unit.grenade_counts[0] > 0, plasmas = unit->unit.grenade_counts[1] > 0;
+
+	/* (throwing: turned to it, pressed once aimed, held to the release) */
+	if (bot->grenade_aim_tick)
+	{
+		real turn = tick->skill->turn_degrees_per_tick * BOTS_DEGREES;
+		real yaw_off = bots_angle_difference(bot->grenade_yaw, bot->yaw), pitch_off = bot->grenade_pitch - bot->pitch;
+
+		bot->yaw += PIN(yaw_off, -turn, turn);
+		bot->pitch += PIN(pitch_off, -turn, turn);
+		tick->action->desired_grenade_index = bot->grenade_type;
+		/* (no firing meanwhile: the aim is the throw's) */
+		tick->flags &= ~FLAG(_unit_control_weapon_primary_trigger_bit);
+		if (!bot->grenade_press_tick && fabs(yaw_off) < 5.0f * BOTS_DEGREES && fabs(pitch_off) < 5.0f * BOTS_DEGREES &&
+			now - bot->grenade_aim_tick >= 3)
+		{
+			tick->flags |= FLAG(_unit_control_throw_grenade_bit);
+			bot->grenade_press_tick = now;
+			bots_globals.play.grenades_by_reason[bot->grenade_reason]++;
+			if (getenv("HALO_BOT_TRACE"))
+				platform_log("bots: trace bot %ld throws a grenade (%d, why %d) at tick %ld from (%.2f %.2f %.2f) to (%.2f %.2f %.2f) "
+					"pitch %.0f", (long)(bot - bots_globals.bots) + 1, (int)bot->grenade_type, (int)bot->grenade_reason, now,
+					tick->position.x, tick->position.y, tick->position.z, bot->grenade_point.x, bot->grenade_point.y,
+					bot->grenade_point.z, bot->grenade_pitch / BOTS_DEGREES);
+		}
+		if ((bot->grenade_press_tick && now - bot->grenade_press_tick > 14) || now - bot->grenade_aim_tick > TICKS_PER_SECOND * 3 / 2)
+			bot->grenade_aim_tick = 0;
+		return;
+	}
+	if (now < bot->grenade_check_tick || now < bot->grenade_tick || (!frags && !plasmas) || bot->held_objective ||
+		bot->target_player_index == NONE || infection_player_is_zombie(bot->player_index))
+	{
+		return;
+	}
+	bot->grenade_check_tick = now + TICKS_PER_SECOND / 2;
+	{
+		struct player_datum *target = player_try_and_get(bot->target_player_index);
+		struct object_datum *target_object;
+		boolean visible = now - bot->target_seen_tick <= 3;
+		real_point3d point, const *eye;
+		real distance;
+		short reason = NONE, type;
+		long target_weapon;
+
+		if (!target || target->unit_index == NONE || now - bot->target_seen_tick > TICKS_PER_SECOND * 5 / 2 ||
+			now - bot->target_first_seen_tick < (long)(tick->skill->reaction_seconds * TICKS_PER_SECOND))
+		{
+			return;
+		}
+		target_object = object_get(target->unit_index);
+		point = visible ? target_object->object.position : bot->target_last_position;
+		eye = bots_tick_eye(tick);
+		distance = bots_distance3d(eye, &point);
+		target_weapon = bots_current_weapon(unit_get(target->unit_index));
+		if (!visible && distance > 5.0f && distance < 18.0f)
+			reason = _bots_grenade_reason_cover;
+		else if (!visible)
+			return;
+		else if (target_object->object.parent_object_index != NONE && distance > 4.0f && distance < 22.0f)
+			reason = _bots_grenade_reason_vehicle;
+		else if (target_weapon != NONE && (weapon_is_flag(target_weapon) ||
+			bots_weapon_value(weapon_get(target_weapon)->definition_index) < 0) && distance > 5.0f && distance < 20.0f)
+		{
+			reason = _bots_grenade_reason_carrier;
+		}
+		else if (distance > 6.0f && distance < 22.0f &&
+			bots_enemies_near(tick->player, bot->target_player_index, &point, 3.5f) >= 1)
+		{
+			reason = _bots_grenade_reason_group;
+		}
+		else if (plasmas && distance > 3.0f && distance < 8.0f)
+			reason = _bots_grenade_reason_stick;
+		else if (distance > 7.0f && distance < 20.0f && bots_random_real(bot) < tick->skill->grenade_chance * 1.5f)
+			reason = _bots_grenade_reason_range;
+		if (reason == NONE)
+			return;
+		if (reason != _bots_grenade_reason_range && bots_random_real(bot) >= chances[bots_globals.skill])
+			return;
+		/* (a plasma for a stick and at a vehicle, else a frag first) */
+		type = (reason == _bots_grenade_reason_stick || reason == _bots_grenade_reason_vehicle) ?
+			(plasmas ? 1 : 0) : (frags ? 0 : 1);
+		if (bots_grenade_friendly(tick->player, eye, &point))
+		{
+			bots_globals.play.grenades_held_back++;
+			return;
+		}
+		/* (the target's motion led, by the skill's lead, over the flight) */
+		if (visible)
+		{
+			real flight = MIN(distance / 0.6f, 45.0f) * tick->skill->lead;
+
+			point.x += target_object->object.translational_velocity.i * flight;
+			point.y += target_object->object.translational_velocity.j * flight;
+		}
+		point.z += 0.2f;
+		bot->grenade_point = point;
+		bot->grenade_type = type;
+		bot->grenade_reason = reason;
+		bot->grenade_aim_tick = now;
+		bot->grenade_press_tick = 0;
+		bot->grenade_yaw = (real)atan2(point.y - eye->y, point.x - eye->x) +
+			bots_random_signed(bot) * tick->skill->aim_error_degrees * 0.4f * BOTS_DEGREES;
+		bot->grenade_pitch = bots_grenade_pitch(tick->player->unit_index, type, eye, &point) +
+			bots_random_signed(bot) * tick->skill->aim_error_degrees * 0.3f * BOTS_DEGREES;
+		bot->grenade_tick = now + TICKS_PER_SECOND * rests[bots_globals.skill];
+	}
 }
 
 /* walking to the goal, looking where it goes; there, a look about (and the
@@ -8255,6 +8512,9 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 	action->desired_facing.yaw = bot->yaw;
 	action->desired_facing.pitch = bot->pitch;
 
+	/* port: grenades, by the fight's situation (on foot) */
+	if (vehicle_index == NONE)
+		bots_grenade_update(bot, &tick);
 	/* port: a hop's jump, and the feet tucked in the air (a crouch jump: a
 	hop's, or over a low wall); a teleporter or ladder hop come to its end,
 	told (bots_nav.c) */
@@ -8387,14 +8647,19 @@ static void bots_report(void)
 		bots_globals.play.jump_shortcuts);
 	platform_log("bots: items at tick %ld: spawns %ld; gone for/taken: power weapons %ld/%ld, weapons %ld/%ld, overshield %ld/%ld, "
 		"camouflage %ld/%ld, health %ld/%ld, grenades %ld/%ld; waited for the next %ld; weapons changed for the range %ld, "
-		"the one to drop chosen %ld", now, bots_spawns.count,
+		"the one to drop chosen %ld; grenades: behind cover %ld, a group %ld, a vehicle %ld, a carrier %ld, a stick %ld, "
+		"middle range %ld, held back for a teammate %ld", now, bots_spawns.count,
 		bots_globals.play.spawns_sought[_bots_spawn_power], bots_globals.play.spawns_taken[_bots_spawn_power],
 		bots_globals.play.spawns_sought[_bots_spawn_weapon], bots_globals.play.spawns_taken[_bots_spawn_weapon],
 		bots_globals.play.spawns_sought[_bots_spawn_overshield], bots_globals.play.spawns_taken[_bots_spawn_overshield],
 		bots_globals.play.spawns_sought[_bots_spawn_camouflage], bots_globals.play.spawns_taken[_bots_spawn_camouflage],
 		bots_globals.play.spawns_sought[_bots_spawn_health], bots_globals.play.spawns_taken[_bots_spawn_health],
 		bots_globals.play.spawns_sought[_bots_spawn_grenades], bots_globals.play.spawns_taken[_bots_spawn_grenades],
-		bots_globals.play.spawn_waits, bots_globals.play.range_switches, bots_globals.play.drop_choices);
+		bots_globals.play.spawn_waits, bots_globals.play.range_switches, bots_globals.play.drop_choices,
+		bots_globals.play.grenades_by_reason[_bots_grenade_reason_cover], bots_globals.play.grenades_by_reason[_bots_grenade_reason_group],
+		bots_globals.play.grenades_by_reason[_bots_grenade_reason_vehicle], bots_globals.play.grenades_by_reason[_bots_grenade_reason_carrier],
+		bots_globals.play.grenades_by_reason[_bots_grenade_reason_stick], bots_globals.play.grenades_by_reason[_bots_grenade_reason_range],
+		bots_globals.play.grenades_held_back);
 	bots_nav_report(now);
 	/* port: (the lanes, vantage points and posts: bots_tactics.h) */
 	bots_tactics_report(now);
