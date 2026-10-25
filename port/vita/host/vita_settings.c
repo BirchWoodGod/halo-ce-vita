@@ -391,7 +391,6 @@ static const struct
 	{ TAB_CONTROLS, "Rear touch guard", N_("Touch") },
 	{ TAB_GRAPHICS, "Profile", N_("Quality") },
 	{ TAB_GRAPHICS, "Aspect ratio", N_("Screen") },
-	{ TAB_GRAPHICS, "Detail", N_("More") },
 	{ TAB_MULTIPLAYER, "Connection", N_("Network") },
 	{ TAB_MULTIPLAYER, "Bots", N_("Bots") },
 	{ TAB_MULTIPLAYER, "Co-op players", N_("Games") },
@@ -512,6 +511,13 @@ static struct setting settings[] = {
 	at the render resolution. On by default, in no profile. Live) */
 	{ "Sharp interface", "HALO_SHARP_UI", 0, 2, { "1", "0" }, { "On", "Off" },
 		"HUD, menus and text at full resolution", 0, TAB_GRAPHICS },
+	/* (port_config.c halo_brightness_curve: a curve on the 3D picture in the
+	blit that puts it on the display (vita_gxm.c blit), no pass of its own;
+	the interface layer is not changed. 5: as the game draws it. In no
+	profile. Live) */
+	{ "Brightness", "HALO_BRIGHTNESS", 0, 11, { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10" },
+		{ "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10" },
+		"Lifts or deepens the 3D picture; 5 is as drawn", 5, TAB_GRAPHICS },
 	PAGE_ROW("Detail", "Models, shadows, lights, effects, particles", TAB_GRAPHICS, PAGE_GRAPHICS_DETAIL),
 	PAGE_ROW("Performance", "Update rates, AI think rate, fourth core helpers", TAB_GRAPHICS,
 		PAGE_GRAPHICS_PERFORMANCE),

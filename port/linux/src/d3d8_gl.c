@@ -4030,16 +4030,165 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
 	xgpu_gl_state_invalidate();
 }
 
+/* ---------- the brightness curve
+
+The display's final pass puts the 3D picture on the screen: a framebuffer
+blit. With the brightness setting at its default (HALO_BRIGHTNESS 5) it is
+that blit, as before. Otherwise the same pass is drawn as a triangle
+sampling the picture, with the curve c + k * c * (1 - c) per channel
+(halo_brightness_curve, port_config.c; vita_gxm.c's blit program has it
+too): the same one pass, no other. */
+
+static struct
+{
+	GLuint program, vertex_array, linear, nearest;
+	GLint curve, flip;
+	BOOL failed;
+} brightness_pass;
+
+static BOOL brightness_pass_ready(void)
+{
+	static const char *vertex =
+		"out vec2 texcoord;\n"
+		"void main()\n"
+		"{\n"
+		"	vec2 corner = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));\n"
+		"	texcoord = corner;\n"
+		"	gl_Position = vec4(corner * 2.0 - 1.0, 0.0, 1.0);\n"
+		"}\n";
+	static const char *fragment =
+		"precision highp float;\n"
+		"in vec2 texcoord;\n"
+		"uniform sampler2D picture;\n"
+		"uniform float curve;\n"
+		"uniform float flip;\n"
+		"out vec4 color;\n"
+		"void main()\n"
+		"{\n"
+		"	vec2 at = vec2(texcoord.x, flip > 0.5 ? 1.0 - texcoord.y : texcoord.y);\n"
+		"	vec3 c = texture(picture, at).rgb;\n"
+		"	color = vec4(c + curve * c * (1.0 - c), 1.0);\n"
+		"}\n";
+
+#ifdef HALO_ANDROID
+	const char *version = xgpu_capabilities.shading_language;
+#else
+	const char *version = "450 core";
+#endif
+
+	if (brightness_pass.program)
+		return TRUE;
+	if (brightness_pass.failed)
+		return FALSE;
+	{
+		char vertex_text[1024], fragment_text[1024];
+		GLuint vertex_shader, fragment_shader;
+		GLint linked = 0;
+
+		snprintf(vertex_text, sizeof(vertex_text), "#version %s\n%s", version, vertex);
+		snprintf(fragment_text, sizeof(fragment_text), "#version %s\n%s", version, fragment);
+		vertex_shader = compile_shader(GL_VERTEX_SHADER, vertex_text, "brightness vertex");
+		fragment_shader = compile_shader(GL_FRAGMENT_SHADER, fragment_text, "brightness fragment");
+		if (vertex_shader && fragment_shader)
+		{
+			brightness_pass.program = glCreateProgram();
+			glAttachShader(brightness_pass.program, vertex_shader);
+			glAttachShader(brightness_pass.program, fragment_shader);
+			glLinkProgram(brightness_pass.program);
+			glGetProgramiv(brightness_pass.program, GL_LINK_STATUS, &linked);
+			if (!linked)
+				brightness_pass.program = 0;
+		}
+		if (vertex_shader)
+			glDeleteShader(vertex_shader);
+		if (fragment_shader)
+			glDeleteShader(fragment_shader);
+	}
+	if (!brightness_pass.program)
+	{
+		brightness_pass.failed = TRUE;
+		return FALSE;
+	}
+	brightness_pass.curve = glGetUniformLocation(brightness_pass.program, "curve");
+	brightness_pass.flip = glGetUniformLocation(brightness_pass.program, "flip");
+	glGenVertexArrays(1, &brightness_pass.vertex_array);
+	glGenSamplers(1, &brightness_pass.linear);
+	glGenSamplers(1, &brightness_pass.nearest);
+	glSamplerParameteri(brightness_pass.linear, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glSamplerParameteri(brightness_pass.linear, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glSamplerParameteri(brightness_pass.nearest, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glSamplerParameteri(brightness_pass.nearest, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glSamplerParameteri(brightness_pass.linear, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glSamplerParameteri(brightness_pass.linear, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glSamplerParameteri(brightness_pass.nearest, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glSamplerParameteri(brightness_pass.nearest, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	return TRUE;
+}
+
+/* The final pass: the texture's whole picture onto the rectangle dx0,dy0 to
+dx1,dy1 of the framebuffer drawn to (bound by the caller), the rectangle's
+y running down when dy1 < dy0 (the window's flip), as glBlitFramebuffer
+takes it. The read framebuffer is the texture's (bound by the caller, for
+the plain blit). */
+static void final_blit(GLuint texture, GLint width, GLint height, GLint dx0, GLint dy0, GLint dx1, GLint dy1,
+	GLenum filter)
+{
+	float curve = halo_brightness_curve();
+
+	if (curve == 0.0f || !brightness_pass_ready())
+	{
+		glBlitFramebuffer(0, 0, width, height, dx0, dy0, dx1, dy1, GL_COLOR_BUFFER_BIT, filter);
+		return;
+	}
+	glDisable(GL_SCISSOR_TEST);
+	glDisable(GL_DEPTH_TEST);
+	glDisable(GL_STENCIL_TEST);
+	glDisable(GL_BLEND);
+	glDisable(GL_CULL_FACE);
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	glViewport(dx1 < dx0 ? dx1 : dx0, dy1 < dy0 ? dy1 : dy0, dx1 < dx0 ? dx0 - dx1 : dx1 - dx0,
+		dy1 < dy0 ? dy0 - dy1 : dy1 - dy0);
+	glUseProgram(brightness_pass.program);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, texture);
+	glBindSampler(0, filter == GL_NEAREST ? brightness_pass.nearest : brightness_pass.linear);
+	glUniform1f(brightness_pass.curve, curve);
+	/* (the render targets' row 0 is the picture's top: at the top of the
+	viewport when the rectangle runs down, the window's; at the bottom of
+	the texture's v otherwise, a GL framebuffer's own rows) */
+	glUniform1f(brightness_pass.flip, dy1 < dy0 ? 0.0f : 1.0f);
+	glBindVertexArray(brightness_pass.vertex_array);
+	glDrawArrays(GL_TRIANGLES, 0, 3);
+	glBindVertexArray(device.vertex_array);
+	glBindSampler(0, 0);
+	xgpu_gl_state_invalidate();
+}
+
 /* ---------- presentation */
 
 /* (main.c, HALO_TEST_COMMANDS @shot) the next frame's screenshot name */
 extern char halo_screenshot_name[64];
 
+static void write_screenshot_pixels(unsigned char *pixels, unsigned long width, unsigned long height);
+
 static void write_screenshot_texture(GLuint texture, unsigned long width, unsigned long height)
+{
+	unsigned char *pixels;
+
+	if (!*config_string("debug.screenshot_directory"))
+		return;
+	pixels = malloc(width * height * 4);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer_get(texture, 0));
+	glReadPixels(0, 0, (GLsizei)width, (GLsizei)height, GL_BGRA, GL_UNSIGNED_BYTE, pixels);
+	write_screenshot_pixels(pixels, width, height);
+	free(pixels);
+}
+
+/* (the pixels as read, rows from the top; freed by the caller) */
+static void write_screenshot_pixels(unsigned char *pixels, unsigned long width, unsigned long height)
 {
 	const char *directory = *config_string("debug.screenshot_directory") ?
 		config_string("debug.screenshot_directory") : NULL;
-	unsigned char *pixels;
 	char path[512];
 	FILE *file;
 	unsigned long row;
@@ -4048,9 +4197,6 @@ static void write_screenshot_texture(GLuint texture, unsigned long width, unsign
 
 	if (!directory)
 		return;
-	pixels = malloc(image_size);
-	glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer_get(texture, 0));
-	glReadPixels(0, 0, (GLsizei)width, (GLsizei)height, GL_BGRA, GL_UNSIGNED_BYTE, pixels);
 	/* the display ignores destination alpha, which the game uses as scratch;
 	image viewers would show it as transparency */
 	for (row = 0; row < width * height; row++)
@@ -4084,7 +4230,6 @@ static void write_screenshot_texture(GLuint texture, unsigned long width, unsign
 			fwrite(pixels + row * width * 4, 1, width * 4, file);
 		fclose(file);
 	}
-	free(pixels);
 }
 
 static void write_screenshot(struct render_target_entry *target)
@@ -4117,15 +4262,16 @@ static GLuint vita_preview_display(struct render_target_entry *back_buffer)
 	if (vita_interface.active)
 	{
 		glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer_get(vita_interface.color, 0));
-		glBlitFramebuffer(0, 0, vita_interface.width, vita_interface.height, left, top, left + width, top + height,
-			GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		final_blit(vita_interface.color, vita_interface.width, vita_interface.height, left, top, left + width,
+			top + height, GL_NEAREST);
 	}
 	else
 	{
 		glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer_get(back_buffer->target.texture, 0));
-		glBlitFramebuffer(0, 0, (GLint)back_buffer->target.gl_width, (GLint)back_buffer->target.gl_height, left, top,
-			left + width, top + height, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+		final_blit(back_buffer->target.texture, (GLint)back_buffer->target.gl_width,
+			(GLint)back_buffer->target.gl_height, left, top, left + width, top + height, GL_LINEAR);
 	}
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 	xgpu_gl_state_invalidate();
 	return display;
 }
@@ -4146,6 +4292,7 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 	{
 		struct render_target_entry *back_buffer = render_target_get(&device.back_buffer);
 		int window_width, window_height, width, height, x, y;
+		BOOL brightness_shot = FALSE;
 
 		if (trace_frame())
 			platform_log("present back buffer %08lx texture %u", (unsigned long)device.back_buffer.Data,
@@ -4176,7 +4323,12 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 				GL_COLOR_BUFFER_BIT, GL_LINEAR);
 			goto presented;
 		}
-		if ((screenshot_every > 0 && device.frame % (unsigned long)screenshot_every == 0) || halo_screenshot_name[0])
+		/* (with a brightness set, the screenshot is the window's picture, the
+		curve in it: read below; else the back buffer, as the game drew it) */
+		brightness_shot = ((screenshot_every > 0 && device.frame % (unsigned long)screenshot_every == 0) ||
+			halo_screenshot_name[0]) && halo_brightness_curve() != 0.0f;
+		if (!brightness_shot && ((screenshot_every > 0 && device.frame % (unsigned long)screenshot_every == 0) ||
+			halo_screenshot_name[0]))
 			write_screenshot(back_buffer);
 
 		platform_video_drawable_size(&window_width, &window_height);
@@ -4197,8 +4349,23 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 		glClear(GL_COLOR_BUFFER_BIT);
 		glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer_get(back_buffer->target.texture, 0));
 		/* row 0 of the render target is the top of the picture */
-		glBlitFramebuffer(0, 0, (GLint)back_buffer->target.gl_width, (GLint)back_buffer->target.gl_height,
-			x, y + height, x + width, y, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+		final_blit(back_buffer->target.texture, (GLint)back_buffer->target.gl_width,
+			(GLint)back_buffer->target.gl_height, x, y + height, x + width, y, GL_LINEAR);
+		if (brightness_shot)
+		{
+			unsigned char *pixels = malloc((size_t)width * (size_t)height * 4);
+			unsigned char *flipped = malloc((size_t)width * (size_t)height * 4);
+			int row;
+
+			glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+			glReadPixels(x, y, width, height, GL_BGRA, GL_UNSIGNED_BYTE, pixels);
+			for (row = 0; row < height; row++)
+				memcpy(flipped + (size_t)row * width * 4, pixels + (size_t)(height - 1 - row) * width * 4,
+					(size_t)width * 4);
+			write_screenshot_pixels(flipped, (unsigned long)width, (unsigned long)height);
+			free(pixels);
+			free(flipped);
+		}
 	presented:
 		platform_video_swap();
 		xgpu_gl_state_invalidate();

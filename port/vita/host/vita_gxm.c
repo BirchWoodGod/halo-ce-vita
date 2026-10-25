@@ -584,11 +584,19 @@ static const char blit_vertex_source[] =
 	"	out_texcoord = texcoord;\n"
 	"}\n";
 
+/* (the brightness curve, c + k * c * (1 - c): halo_brightness_curve,
+port_config.c. k is the first of the uniform buffer 0, 0 for the blits that
+are not the 3D picture. Part of the blit that is made anyway: no pass) */
 static const char blit_fragment_source[] =
-	"float4 main(float2 texcoord : TEXCOORD0, uniform sampler2D source) : COLOR\n"
+	"float4 main(float2 texcoord : TEXCOORD0, uniform sampler2D source, uniform float4 grade[1] : BUFFER[0]) : COLOR\n"
 	"{\n"
-	"	return float4(tex2D(source, texcoord).rgb, 1.0);\n"
+	"	float3 c = tex2D(source, texcoord).rgb;\n"
+	"	return float4(c + grade[0].x * c * (1.0 - c), 1.0);\n"
 	"}\n";
+
+float halo_brightness_curve(void);
+/* the curve the next blit_texture applies (0: none) */
+static float blit_curve;
 
 int vgxm_initialize(void *arena, unsigned long arena_size)
 {
@@ -4079,7 +4087,7 @@ static void blit_texture(const SceGxmTexture *texture, float left, float top, fl
 {
 	SceGxmVertexProgram *vertex_program = blit_vertex_program();
 	SceGxmFragmentProgram *fragment_program;
-	float *vertices;
+	float *vertices, *uniforms;
 	unsigned short *indices;
 	float x0, x1, y0, y1;
 
@@ -4088,8 +4096,11 @@ static void blit_texture(const SceGxmTexture *texture, float left, float top, fl
 	fragment_program = fragment_program_get(gxm.blit_fragment, gxm.blit_vertex, NULL);
 	vertices = vgxm_worker_alloc(4 * 4 * sizeof(float), 16);
 	indices = vgxm_worker_alloc(4 * sizeof(unsigned short), 16);
-	if (!fragment_program || !vertices || !indices)
+	uniforms = vgxm_worker_alloc(4 * sizeof(float), 16);
+	if (!fragment_program || !vertices || !indices || !uniforms)
 		return;
+	uniforms[0] = blit_curve;
+	uniforms[1] = uniforms[2] = uniforms[3] = 0.0f;
 	x0 = 2.0f * left / DISPLAY_WIDTH - 1.0f;
 	x1 = 2.0f * (left + width) / DISPLAY_WIDTH - 1.0f;
 	y0 = 1.0f - 2.0f * top / DISPLAY_HEIGHT;
@@ -4108,6 +4119,7 @@ static void blit_texture(const SceGxmTexture *texture, float left, float top, fl
 	sceGxmSetFragmentProgram(gxm.context, fragment_program);
 	sceGxmSetVertexStream(gxm.context, 0, vertices);
 	sceGxmSetFragmentTexture(gxm.context, 0, texture);
+	sceGxmSetFragmentUniformBuffer(gxm.context, 0, uniforms);
 	sceGxmSetFrontDepthFunc(gxm.context, SCE_GXM_DEPTH_FUNC_ALWAYS);
 	sceGxmSetFrontDepthWriteEnable(gxm.context, SCE_GXM_DEPTH_WRITE_DISABLED);
 	sceGxmSetFrontStencilFunc(gxm.context, SCE_GXM_STENCIL_FUNC_ALWAYS, SCE_GXM_STENCIL_OP_KEEP,
@@ -4164,7 +4176,11 @@ static void blit(struct target *source)
 		sceGxmTextureSetMinFilter(&texture, filter);
 		sceGxmTextureSetMagFilter(&texture, filter);
 	}
+	/* (the 3D picture, and the interface in it when it is not on its own
+	layer: the display's brightness setting) */
+	blit_curve = halo_brightness_curve();
 	blit_texture(&texture, gxm.picture_left, gxm.picture_top, gxm.picture_width, gxm.picture_height);
+	blit_curve = 0.0f;
 }
 
 /* ---------- the movie (d3d8_gxm.c halo_d3d_movie_*)

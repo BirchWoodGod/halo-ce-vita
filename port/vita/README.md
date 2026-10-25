@@ -256,6 +256,7 @@ Graphics, **Screen**:
 | --- | --- | --- |
 | Aspect ratio | 16:9 | 4:3: the Xbox's framing, with black bars (applies at once) |
 | Upscale filter | Smooth | Sharp: crisp pixels |
+| Brightness | 5 | 0 to 10 (HALO_BRIGHTNESS, display.brightness in config.toml): 5 is the picture as the game draws it, higher lifts the darks and midtones, lower deepens them; a curve on the 3D picture in the blit to the display, no pass of its own (applies at once) |
 
 Graphics, **First person**:
 
