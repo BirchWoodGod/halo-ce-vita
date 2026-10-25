@@ -19,6 +19,7 @@ the game gave their surface, as in the OpenGL device.
 #include "dynamic_resolution.h"
 #include "blend_constant.h"
 #include "sdl_platform.h"
+#include "halo_cond.h"
 #include "halo_ui_pointer.h"
 #include "port_config.h"
 
@@ -853,7 +854,7 @@ static void *ring_copy(const void *data, unsigned long size)
 #define VERTICAL_BLANK_NANOSECONDS (1000000000L / 60)
 
 static pthread_mutex_t vertical_blank_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t vertical_blank_condition = PTHREAD_COND_INITIALIZER;
+static halo_cond_t vertical_blank_condition = HALO_COND_INITIALIZER;
 static D3DCALLBACK vertical_blank_callback;
 static unsigned long vertical_blank_count;
 static volatile unsigned int flip_count;
@@ -886,7 +887,7 @@ static void *vertical_blank_thread(void *unused)
 			flip_count++;
 		}
 		callback = vertical_blank_callback;
-		pthread_cond_broadcast(&vertical_blank_condition);
+		halo_cond_broadcast(&vertical_blank_condition);
 		pthread_mutex_unlock(&vertical_blank_lock);
 
 		if (callback)
@@ -936,7 +937,7 @@ void WINAPI D3DDevice_BlockUntilVerticalBlank(void)
 	pthread_mutex_lock(&vertical_blank_lock);
 	count = vertical_blank_count;
 	while (vertical_blank_count == count)
-		pthread_cond_wait(&vertical_blank_condition, &vertical_blank_lock);
+		halo_cond_wait(&vertical_blank_condition, &vertical_blank_lock);
 	pthread_mutex_unlock(&vertical_blank_lock);
 }
 
@@ -9330,7 +9331,7 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 	vertical_blank_start();
 	pthread_mutex_lock(&vertical_blank_lock);
 	while (pending_flips >= 2)
-		pthread_cond_wait(&vertical_blank_condition, &vertical_blank_lock);
+		halo_cond_wait(&vertical_blank_condition, &vertical_blank_lock);
 	pending_flips++;
 	pthread_mutex_unlock(&vertical_blank_lock);
 }

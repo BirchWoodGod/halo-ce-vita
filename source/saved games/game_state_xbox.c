@@ -318,6 +318,7 @@ finish before it overwrites the copy, and anything that reads or closes
 the file waits for the write too. Without the memory for the copy, the
 file is written and read as on the Xbox. */
 #include <pthread.h>
+#include "halo_cond.h"
 #include <stdlib.h>
 #ifdef HALO_VITA
 #include <psp2/kernel/sysmem.h>
@@ -340,7 +341,7 @@ static struct
 	boolean write_pending;
 	boolean writing;
 	pthread_mutex_t lock;
-	pthread_cond_t changed;
+	halo_cond_t changed;
 	pthread_t thread;
 	unsigned long writes;
 } game_state_writer;
@@ -374,7 +375,7 @@ static void *game_state_writer_thread(
 
 		pthread_mutex_lock(&game_state_writer.lock);
 		while (!game_state_writer.write_pending)
-			pthread_cond_wait(&game_state_writer.changed, &game_state_writer.lock);
+			halo_cond_wait(&game_state_writer.changed, &game_state_writer.lock);
 		game_state_writer.write_pending = FALSE;
 		game_state_writer.writing = TRUE;
 		pthread_mutex_unlock(&game_state_writer.lock);
@@ -410,7 +411,7 @@ static void *game_state_writer_thread(
 
 		pthread_mutex_lock(&game_state_writer.lock);
 		game_state_writer.writing = FALSE;
-		pthread_cond_broadcast(&game_state_writer.changed);
+		halo_cond_broadcast(&game_state_writer.changed);
 		pthread_mutex_unlock(&game_state_writer.lock);
 	}
 	return NULL;
@@ -445,7 +446,7 @@ static boolean game_state_writer_ready(
 		return FALSE;
 	}
 	pthread_mutex_init(&game_state_writer.lock, NULL);
-	pthread_cond_init(&game_state_writer.changed, NULL);
+	halo_cond_init(&game_state_writer.changed);
 	{
 		pthread_attr_t attributes;
 		int created;
@@ -475,7 +476,7 @@ static void game_state_writer_wait(
 		return;
 	pthread_mutex_lock(&game_state_writer.lock);
 	while (game_state_writer.write_pending || game_state_writer.writing)
-		pthread_cond_wait(&game_state_writer.changed, &game_state_writer.lock);
+		halo_cond_wait(&game_state_writer.changed, &game_state_writer.lock);
 	pthread_mutex_unlock(&game_state_writer.lock);
 }
 #endif
@@ -636,7 +637,7 @@ boolean game_state_write_to_file(
 		xbox_game_state_globals.file_valid_for_read = TRUE;
 		pthread_mutex_lock(&game_state_writer.lock);
 		game_state_writer.write_pending = TRUE;
-		pthread_cond_broadcast(&game_state_writer.changed);
+		halo_cond_broadcast(&game_state_writer.changed);
 		pthread_mutex_unlock(&game_state_writer.lock);
 
 		return TRUE;

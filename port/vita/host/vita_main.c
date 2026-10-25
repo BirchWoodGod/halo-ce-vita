@@ -134,6 +134,12 @@ int vita_host_wake_poll(int id)
 	return sceKernelPollSema(id, 1) < 0;
 }
 
+void vita_host_wake_delete(int id)
+{
+	if (id >= 0)
+		sceKernelDeleteSema(id);
+}
+
 void vita_host_wake_signal(int id)
 {
 	/* (past the most it refuses: the waiter has a signal already) */

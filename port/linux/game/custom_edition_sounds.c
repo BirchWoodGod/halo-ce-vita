@@ -145,6 +145,7 @@ as silence.
 #include "../src/port_config.h"
 
 #include <pthread.h>
+#include "halo_cond.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -365,8 +366,8 @@ void vita_host_thread_priority_set(int priority);
 static struct
 {
 	pthread_mutex_t lock;
-	pthread_cond_t wake;
-	pthread_cond_t done;
+	halo_cond_t wake;
+	halo_cond_t done;
 	boolean thread_started;
 	boolean thread_failed;
 
@@ -442,7 +443,7 @@ static struct
 	unsigned long long background_microseconds;
 	unsigned long held_at_open;
 	unsigned long entries_refused;
-} custom_edition_sounds_globals = { PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, PTHREAD_COND_INITIALIZER };
+} custom_edition_sounds_globals = { PTHREAD_MUTEX_INITIALIZER, HALO_COND_INITIALIZER, HALO_COND_INITIALIZER };
 
 static boolean failure_reported[MAXIMUM_WAITING_SOUNDS];
 /* (the decoding thread's: a piece of 16-bit PCM, or of a stream; and the
@@ -1588,14 +1589,14 @@ static void *decoder_thread(void *parameter)
 			sound_cache_file_open();
 			pthread_mutex_lock(&custom_edition_sounds_globals.lock);
 			custom_edition_sounds_globals.running = FALSE;
-			pthread_cond_broadcast(&custom_edition_sounds_globals.done);
+			halo_cond_broadcast(&custom_edition_sounds_globals.done);
 			continue;
 		}
 		if (custom_edition_sounds_globals.waiting_count == 0)
 		{
 			if (!background_next(&sound))
 			{
-				pthread_cond_wait(&custom_edition_sounds_globals.wake, &custom_edition_sounds_globals.lock);
+				halo_cond_wait(&custom_edition_sounds_globals.wake, &custom_edition_sounds_globals.lock);
 				continue;
 			}
 			background = TRUE;
@@ -1641,7 +1642,7 @@ static void *decoder_thread(void *parameter)
 			__atomic_store_n(sound.loaded, TRUE, __ATOMIC_RELEASE);
 		custom_edition_sounds_globals.running = FALSE;
 		custom_edition_sounds_globals.running_loaded = NULL;
-		pthread_cond_broadcast(&custom_edition_sounds_globals.done);
+		halo_cond_broadcast(&custom_edition_sounds_globals.done);
 	}
 	return NULL;
 }
@@ -1877,7 +1878,7 @@ static void sound_cache_map_loaded(
 	}
 	custom_edition_sounds_globals.cache_state = _sound_cache_opening;
 	if (decoder_thread_start())
-		pthread_cond_signal(&custom_edition_sounds_globals.wake);
+		halo_cond_signal(&custom_edition_sounds_globals.wake);
 	else
 		custom_edition_sounds_globals.cache_state = _sound_cache_failed;
 	pthread_mutex_unlock(&custom_edition_sounds_globals.lock);
@@ -2274,7 +2275,7 @@ boolean custom_edition_sound_load(
 		without the lock) */
 		__atomic_store_n(&custom_edition_sounds_globals.waiting_count, custom_edition_sounds_globals.waiting_count + 1,
 			__ATOMIC_RELEASE);
-		pthread_cond_signal(&custom_edition_sounds_globals.wake);
+		halo_cond_signal(&custom_edition_sounds_globals.wake);
 	}
 	pthread_mutex_unlock(&custom_edition_sounds_globals.lock);
 	if (!queued)
@@ -2324,7 +2325,7 @@ void custom_edition_sounds_stop(
 	{
 		custom_edition_sounds_globals.running_cancelled = TRUE;
 		while (custom_edition_sounds_globals.running)
-			pthread_cond_wait(&custom_edition_sounds_globals.done, &custom_edition_sounds_globals.lock);
+			halo_cond_wait(&custom_edition_sounds_globals.done, &custom_edition_sounds_globals.lock);
 	}
 	for (index = 0; index < custom_edition_sounds_globals.entry_count; index++)
 	{

@@ -15,6 +15,7 @@ against the SDK prototype it replaces.
 types (select, fd_set, timeval, ...) are then moved out of glibc's way while
 the SDK headers are read, exactly as game code sees them. */
 #include <pthread.h>
+#include "halo_cond.h"
 #include <stdlib.h>
 #include <sys/select.h>
 #include <sys/time.h>
@@ -65,7 +66,7 @@ struct platform_handle
 	unsigned long signature;
 	long type;
 	pthread_mutex_t lock;
-	pthread_cond_t condition;
+	halo_cond_t condition;
 	BOOL signaled;
 	BOOL manual_reset;
 	/* mutexes */
