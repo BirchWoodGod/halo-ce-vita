@@ -3202,10 +3202,10 @@ PY
 		grep -aq "pause menu: restart at checkpoint" "$log" && fail msgboxes "campaign, Halo CE: Circle reverted" ;;
 	ceplusmain)
 		# (the main menu's rows under SETTINGS: down three to FORGE, four to FRIENDS, five to FILE
-		# SHARE, six to MOD MANAGER; A, then B back)
+		# SHARE, six to MOD MANAGER - each in the original look; A, then B back)
 		d="down:150:500"
-		for row in "3 forge pc.cp.forge.lobby" "4 friends pc.h3.friends.screen" "5 fileshare pc.h3.fileshare.screen" \
-			"6 mods pc.h3.mods.screen"; do
+		for row in "3 forge pc.cp.forge.lobby" "4 friends pc.classic.friends.screen" "5 fileshare pc.ce.fileshare.screen" \
+			"6 mods pc.ce.mods.screen"; do
 			set -- $row
 			downs=""
 			for i in $(seq "$1"); do downs="$downs $d"; done
