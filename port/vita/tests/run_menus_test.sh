@@ -99,6 +99,9 @@
 #            byte for byte; with Menu style Halo CE, the Xbox's screen
 #   h3proftouch  taps: CAMPAIGN, SELECT PROFILE's New Profile (its icon and
 #            label): Rookie made, the lobby; the lobby's Back: SELECT PROFILE
+#   onlinegridnav  Menu style Online's CUSTOMIZATION > COLORS (HALO_TEST_PROFILE's profile): Cross
+#            on ARMOR PRIMARY, Up and Down (D-pad and left stick) in the colour grid step a row each
+#            way, wrapping through the short last row; the visor grid's two rows wrap likewise
 #   h3customize  CUSTOMIZATION (menus/halo3/customize.xml), with
 #            HALO_TEST_PROFILE's profile: its list's card shows the profile's
 #            Spartan (as SELECT PROFILE's); the name typed, the colour, the stick
@@ -477,7 +480,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-all_cases="fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendsbackup h3friendspanel h3partyplates h3party h3partyonline browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3hostbots h3livelobby h3groups browserreopen h3nonet h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes h3offline h3offlineend msgboxes ceplusmain ceplusmp ceplusprofile cepluspregame cepluspause ceplusforge h3scoreboard"
+all_cases="fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows onlinegridnav h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendsbackup h3friendspanel h3partyplates h3party h3partyonline browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3hostbots h3livelobby h3groups browserreopen h3nonet h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes h3offline h3offlineend msgboxes ceplusmain ceplusmp ceplusprofile cepluspregame cepluspause ceplusforge h3scoreboard"
 # (the PC build's own, asked for by name: not in the default list)
 pc_cases="pctext pcclassic pcnoadhoc"
 cases=${*:-$all_cases}
@@ -1558,6 +1561,52 @@ for case in $cases; do
 			echo "$name: models' pixel shaders new while the rows were walked: ${changed:-none}"
 			[ -z "$changed" ] || fail $name "the preview's Spartan was drawn with another pixel shader on a row"
 		done ;;
+	onlinegridnav)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+			echo "--- onlinegridnav"; echo "SKIP: no HALO_TEST_PROFILE"; continue
+		fi
+		# (Menu style Online: CUSTOMIZATION, COLORS (RT), Cross on ARMOR PRIMARY: the colour grid
+		# (43 cells, six a row, its last row of one). Up eight times: a row up each (from the top row
+		# the column's last cell), then Down eight times, the same cells back. The left stick up and
+		# down likewise. Then ARMOR VISOR (two rows of six): Cross, Up, Up, Down, Down: row 0, 1, 0, 1
+		# wrapping. Each press logs the cell it lands on)
+		u="up:150:500"; d="down:150:500"
+		grid_pad="wait:150:2000 a:150:2500 $d $d $d $d a:150:3000 a:150:3000 rt:150:1500 a:150:800"
+		grid_pad="$grid_pad $u $u $u $u $u $u $u $u $d $d $d $d $d $d $d $d lup:150:500 ldown:150:500 a:150:800 $d $d a:150:800"
+		grid_pad="$grid_pad $u $u $d $d @gridnav:0:300 a:150:800 b wait:150:2000 b wait:150:2500"
+		profile_from=$HALO_TEST_PROFILE run onlinegridnav "$menus_data" 60 "$grid_pad" HALO_MENU_STYLE=online
+		log=$out/onlinegridnav/run.log
+		echo "--- onlinegridnav"
+		grep -a "online customize: .* grid" "$log" | head -40
+		[ "$(cat "$out/onlinegridnav/exit")" = 0 ] || fail onlinegridnav "exit $(cat "$out/onlinegridnav/exit")"
+		grep -aqiE "assert|exception|halt_and_catch_fire" "$log" && fail onlinegridnav "an assertion, exception or halt"
+		grep -aq "online customize: the colour grid picked in" "$log" || fail onlinegridnav "the colour grid was not picked in"
+		# (the colour grid's moves in order: ups first, each a row up or the column's last cell from the top row)
+		moves=$(grep -a "online customize: colour grid " "$log" | sed 's/.*grid \(up\|down\) to cell \([0-9]*\)/\1 \2/')
+		echo "$moves" | awk '
+			BEGIN { bad = 0 }
+			{ dir[NR] = $1; cell[NR] = $2 }
+			END {
+				if (NR < 18) { print "too few colour grid moves: " NR; exit 1 }
+				for (i = 1; i <= 8; i++) {
+					if (dir[i] != "up") { print "move " i " not up"; exit 1 }
+					prev = (i == 1) ? -1 : cell[i - 1]
+					if (i > 1 && !(cell[i] == prev - 6 || (prev < 6 && cell[i] >= 37 && cell[i] <= 42 && cell[i] % 6 == prev))) {
+						print "up " i ": " prev " -> " cell[i]; exit 1
+					}
+				}
+				for (i = 9; i <= 16; i++) {
+					if (dir[i] != "down") { print "move " i " not down"; exit 1 }
+					if (i < 16 && cell[i] != cell[16 - i]) { print "down " i " did not retrace: " cell[i] " vs " cell[16 - i]; exit 1 }
+				}
+				if (dir[17] != "up" || dir[18] != "down" || cell[18] != cell[16]) { print "left stick moves wrong"; exit 1 }
+			}' || fail onlinegridnav "the colour grid's Up or Down moved the wrong way ($moves)"
+		# (the visor grid: up, up, down, down over two rows: 6, 0, 6, 0 - or 0, 6, 0, 6)
+		vmoves=$(grep -a "online customize: visor grid " "$log" | sed 's/.*grid \(up\|down\) to cell \([0-9]*\)/\2/' | tr '\n' ' ')
+		case "$vmoves" in
+			"6 0 6 0 "|"0 6 0 6 "|"6 0 6 0 6 0 "|"0 6 0 6 0 6 ") ;;
+			*) echo "visor cells: $vmoves"; fail onlinegridnav "the visor grid's Up or Down did not wrap over its two rows" ;;
+		esac ;;
 	h3nameplate)
 		if [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
 			echo "--- h3nameplate"; echo "SKIP: no HALO_TEST_PROFILE"; continue
