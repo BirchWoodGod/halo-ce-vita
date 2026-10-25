@@ -9180,6 +9180,8 @@ static struct
 {
 	short filter;
 	char said[96];
+	/* a network tab switched, its search not started yet: since when */
+	unsigned long restart_since;
 } online_browser;
 
 static short const online_browser_networks[] = { _h3_network_online, _h3_network_system_link, _h3_network_adhoc };
@@ -9216,10 +9218,69 @@ static void online_browser_network_step(int step)
 	menu_functions.game_count = 0;
 	menu_functions.lan_online_count = 0;
 	browser_view_reset(&menu_functions.view);
-	p2p_lobby_browse(internet_play() ? 1 : 0);
-	if (internet_play())
-		p2p_lobby_refresh();
+	/* the connection switches only with no network game open (network_
+	connection.c connection_safe) - the browser's own search client one: it
+	is let go, the connection switched on the next frames (the Vita's ad hoc
+	group joined by the host's thread, the brokers reached), and the search
+	started again on the new network (online_browser_network_poll); the
+	previous network's online listing stopped now */
+	p2p_lobby_browse(0);
+	dispose_global_network_game_client();
+	dispose_global_network_game_server();
+	online_browser.restart_since = system_milliseconds();
+	if (!online_browser.restart_since)
+		online_browser.restart_since = 1;
 	platform_log("menus: online server browser: network %s", h3_network_name(online_browser_networks[at]));
+}
+
+/* (each frame, the browser's) a network tab's search started once the
+connection is the new one's: the System Link search client made again (the
+game's own "initialize net game server list": it listens for, and asks
+for, the games on that network), the online listing browsed. Ad hoc: once
+the group is joined, given up after a minute (Square starts the search);
+any other: given up after ten seconds */
+static void online_browser_network_poll(void)
+{
+	short wanted = network_connection_wanted();
+	boolean adhoc = wanted == NETWORK_CONNECTION_ADHOC;
+	unsigned long waited;
+
+	if (!online_browser.restart_since)
+		return;
+	waited = system_milliseconds() - online_browser.restart_since;
+	/* (a client made meanwhile - Square's refresh - would keep the
+	connection from switching) */
+	if (network_connection_running() != wanted && (global_network_game_client_get() || global_network_game_server_get()))
+	{
+		dispose_global_network_game_client();
+		dispose_global_network_game_server();
+	}
+	if (network_connection_running() == wanted && (!adhoc ||
+		__atomic_load_n(&halo_adhoc_group, __ATOMIC_ACQUIRE) == HALO_ADHOC_GROUP_IN))
+	{
+		dispose_global_network_game_client();
+		dispose_global_network_game_server();
+		if (create_global_network_game_client())
+			game_connection_set(1);
+		else
+			platform_log("menus: online server browser: the search client was not made");
+		p2p_lobby_browse(internet_play() ? 1 : 0);
+		if (internet_play())
+			p2p_lobby_refresh();
+		/* (looking from now: the answers come after this) */
+		menu_functions.lan_since = system_milliseconds();
+		online_browser.restart_since = 0;
+		platform_log("menus: online server browser: %s search started after %lu ms", adhoc ? "ad hoc" :
+			internet_play() ? "online" : "system link", waited);
+	}
+	else if (waited > (adhoc ? 60000UL : 10000UL))
+	{
+		online_browser.restart_since = 0;
+		platform_log("menus: online server browser: the %s search not started (the connection is %d, wanted %d)",
+			adhoc ? "ad hoc" : "other network's", network_connection_running(), wanted);
+	}
+	else
+		menu_functions.lan_since = system_milliseconds();
 }
 
 /* (the D-pad) the next filter (ONLINE's alone: System Link and ad hoc list
@@ -9622,6 +9683,8 @@ static void browser_update(struct widget_instance *list)
 	list's own space (the browser_message line): the brokers out of reach,
 	or reached with no public games (p2p_lobby_browse_status) */
 	message[0] = 0;
+	if (menu_functions.lan)
+		online_browser_network_poll();
 	if (menu_functions.lan)
 		lan_status(screen, line, (int)sizeof(line), message, (int)sizeof(message));
 	else if (menu_functions.status[0])
