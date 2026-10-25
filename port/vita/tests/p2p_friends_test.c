@@ -971,7 +971,13 @@ static void test_files(void)
 		p2p_sha256(forged, forged_size, forged + forged_size);
 		check(!list_decode(forged, forged_size + P2P_SHA256_SIZE), "a name's length past its room refused");
 	}
-	/* a damaged file on disk: the next run sets it aside and starts empty */
+	/* a damaged file on disk, no last good copy: the next run sets it aside and starts empty */
+	{
+		char prev[600];
+
+		snprintf(prev, sizeof(prev), "%s.prev", path);
+		remove(prev);
+	}
 	bytes[5] = (unsigned char)friends_before;
 	bytes[20] ^= 0xFF;
 	file_write(path, bytes, size);
@@ -986,6 +992,84 @@ static void test_files(void)
 
 		snprintf(bad, sizeof(bad), "%s.bad", path);
 		check(access(bad, F_OK) == 0, "a damaged list kept as .bad");
+	}
+	/* the last good copy: a damaged, zeroed or cut main file (the card after
+	a power loss) loads from .prev, kept as .bad; both bad is the empty list */
+	{
+		char prev[600], bad[600];
+		unsigned char zeros[512];
+		int mode;
+
+		snprintf(prev, sizeof(prev), "%s.prev", path);
+		snprintf(bad, sizeof(bad), "%s.bad", path);
+		for (mode = 0; mode < 4; mode++)
+		{
+			machines[0] = copy;
+			machines[0].loaded = 1;
+			use(0);
+			machines[0].dirty = 1;
+			save(1);
+			machines[0].dirty = 1;
+			save(1);
+			check(access(prev, F_OK) == 0, "a save keeps the last good copy as .prev");
+			size = file_read(path, bytes, sizeof(bytes));
+			remove(bad);
+			if (mode == 0)
+				bytes[20] ^= 0xFF;
+			else if (mode == 1)
+				memset(bytes, 0, (size_t)size);
+			else if (mode == 2)
+				size = 0;
+			else
+				size = size / 2;
+			file_write(path, bytes, size);
+			memset(&machines[0], 0, sizeof(machines[0]));
+			use(0);
+			quiet = 1;
+			code_of(0, code_after);
+			quiet = 0;
+			check(machines[0].friend_count == friends_before, "a damaged, zeroed, empty or cut list: the .prev one loads");
+			check(access(bad, F_OK) == 0, "... and the damaged file kept as .bad");
+		}
+		/* (both bad: today's behaviour, an empty list, the identity untouched) */
+		memset(zeros, 0, sizeof(zeros));
+		file_write(path, zeros, sizeof(zeros));
+		file_write(prev, zeros, sizeof(zeros));
+		memset(&machines[0], 0, sizeof(machines[0]));
+		use(0);
+		quiet = 1;
+		code_of(0, code_after);
+		quiet = 0;
+		check(machines[0].friend_count == 0 && !strcmp(code_before, code_after), "both copies bad: an empty list, same code");
+		/* the identity: zeroed main -> .prev, the same friend code */
+		{
+			char id_path[600], id_prev[600];
+			unsigned char id[IDENTITY_SIZE];
+			char bytes_code[P2P_FRIEND_CODE_SIZE];
+
+			machines[0] = copy;
+			machines[0].loaded = 1;
+			use(0);
+			machines[0].dirty = 1;
+			save(1);
+			memset(&machines[0], 0, sizeof(machines[0]));
+			use(0);
+			code_of(0, code_after);
+			memset(&machines[0], 0, sizeof(machines[0]));
+			use(0);
+			code_of(0, code_after);
+			snprintf(id_path, sizeof(id_path), "%s/friends/identity.dat", roots[0]);
+			snprintf(id_prev, sizeof(id_prev), "%s.prev", id_path);
+			check(access(id_prev, F_OK) == 0, "the identity keeps a .prev");
+			memset(id, 0, sizeof(id));
+			file_write(id_path, id, sizeof(id));
+			memset(&machines[0], 0, sizeof(machines[0]));
+			use(0);
+			quiet = 1;
+			code_of(0, bytes_code);
+			quiet = 0;
+			check(!strcmp(code_after, bytes_code), "a zeroed identity.dat: the same friend code from .prev");
+		}
 	}
 	/* a write cut short between its renames: the .old one taken */
 	machines[0] = copy;
