@@ -33,6 +33,13 @@ RUNTIME_WEAK_REFERENCES = {
     # asan_globals section, which the linker itself defines
     "__start_asan_globals",
     "__stop_asan_globals",
+    # the Vita's (and the gxm-null harness's) wake semaphores, weak on
+    # purpose: halo_cond.h and tick_thread.c use them when they are there and
+    # a condition variable when they resolve to 0, as on the PC build
+    "vita_host_wake_create",
+    "vita_host_wake_delete",
+    "vita_host_wake_signal",
+    "vita_host_wake_wait",
 }
 
 
