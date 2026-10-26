@@ -434,15 +434,16 @@ EOF
 		fi
 		data_saved=$data
 		data=$out/cedata
-		# (the scan; a choice made by the console: the Extinction Spartan, kept)
+		# (the scan; a choice made by the console: the Extinction Spartan, kept. The player models
+		# are off by default in 1.1.1: HALO_PLAYER_MODELS=1 turns them on for the case)
 		rm -rf "$out/cemodels-save"
 		mkdir -p "$out/cemodels-save/u/UDATA/869079979327"
 		cp "$profile" "$out/cemodels-save/u/UDATA/869079979327/blam.sav"
 		[ -r "$(dirname "$profile")/SaveMeta.xbx" ] && cp "$(dirname "$profile")/SaveMeta.xbx" "$out/cemodels-save/u/UDATA/869079979327/"
-		run cemodels-choose 10 "60:models list;70:models choose 0;80:models list" "" HALO_SAVE_ROOT="$out/cemodels-save"
+		run cemodels-choose 10 "60:models list;70:models choose 0;80:models list" "" HALO_SAVE_ROOT="$out/cemodels-save" HALO_PLAYER_MODELS=1
 		# (pm_b494505f: the Extinction Spartan's pack, by its map's name and identity: player_models.c)
 		FRESH=1 run cemodels 40 "L300:forge off;L330:pack spawn pm_b494505f 0;L345:forge on;L347:forge camera 104.5 -163 1.5 140 -8;L400:@shot 00-model" "" \
-			HALO_SAVE_ROOT="$out/cemodels-save" HALO_MENU_STYLE=classic HALO_SYSTEM_LINK_TEST=forge:9
+			HALO_SAVE_ROOT="$out/cemodels-save" HALO_MENU_STYLE=classic HALO_SYSTEM_LINK_TEST=forge:9 HALO_PLAYER_MODELS=1
 		data=$data_saved
 		if checked cemodels-choose && checked cemodels; then
 			expect cemodels-choose "the Extinction Spartan found" "player models: [0-9]+: Spartan \(Extinction\) - characters.spartan.spartan_mp of extinction.map"

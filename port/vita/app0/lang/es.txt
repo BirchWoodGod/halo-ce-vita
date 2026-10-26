@@ -62,6 +62,7 @@
 "Visor color" = "Color del visor"
 "Appearance" = "Apariencia"
 "Your player model, armor and visor colors" = "Tu modelo de jugador y los colores de armadura y visor"
+"Your armor and visor colors" = "Tus colores de armadura y visor"
 "Players on older versions see the closest standard color" = "Quien tenga una versión anterior ve el color estándar más parecido"
 "Players on older versions see the standard gold" = "Quien tenga una versión anterior ve el dorado estándar"
 "GOLD" = "DORADO"
@@ -2690,6 +2691,7 @@
 "Your friends online: invite them into\nthis game." = "Tus amigos conectados: invítalos a\nesta partida."
 "Play one of your Forge map variants of\nthis map (FORGE, then FILE SHARE): each\n%a-button the next, then NONE." = "Juega una de tus variantes de Forja de\neste mapa (FORJA, luego ARCHIVOS\nCOMPARTIDOS): cada %a-button la siguiente."
 "Your player model, the flaming helmet,\nlook sensitivity, invert flight and the\nrest of this profile's settings." = "Tu modelo de jugador, el casco en llamas,\nla sensibilidad, el vuelo invertido y el\nresto de ajustes de este perfil."
+"Look sensitivity, invert flight, the\nflaming helmet and the rest of this\nprofile's settings." = "La sensibilidad, el vuelo invertido, el\ncasco en llamas y el resto de ajustes\nde este perfil."
 
 # ---------- the Halo 3 SCOREBOARD (halo3/scoreboard.xml, menu_functions.c "port h3 scoreboard"):
 # its columns' names are one or two letters (K: kills, D: deaths, A: assists)
@@ -2792,6 +2794,7 @@
 "A service tag beside your name. Not in this version yet." = "Una etiqueta junto a tu nombre. Aún no en esta versión."
 "HELMET" = "CASCO"
 "Helmets need armor models Halo CE does not have.\nNot in this version yet: MODEL picks who you\nplay as." = "Los cascos necesitan modelos que Halo CE no tiene.\nAún no en esta versión: MODELO elige con\nquién juegas."
+"Helmets need armor models Halo CE does not have.\nNot in this version yet." = "Los cascos necesitan modelos que Halo CE no tiene.\nAún no en esta versión."
 "RIGHT SHOULDER" = "HOMBRO DERECHO"
 "LEFT SHOULDER" = "HOMBRO IZQUIERDO"
 "Shoulder pieces need armor models Halo CE does\nnot have. Not in this version yet." = "Las hombreras necesitan modelos que Halo CE\nno tiene. Aún no en esta versión."

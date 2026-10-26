@@ -5525,6 +5525,26 @@ static void h3_custom_update(struct widget_instance *list)
 		else
 			platform_log("menus: h3 customize: the name \"%s\" was refused: %s", text, h3_custom.status);
 	}
+	/* (MODEL, the player models' row: off in 1.1.1 (player_models_enabled),
+	hidden and the rows after it moved up into its place, as port keys
+	entry does it: once for each opening of the list) */
+	if (!player_models_enabled() && (found = named(list, h3_custom_rows[_h3_custom_model])) != NULL && !found->disabled)
+	{
+		struct widget_instance *after;
+		short height = 0;
+
+		widget_instance_set_visibility_recursive(found, FALSE);
+		found->disabled = TRUE;
+		if (found->next)
+			height = (short)(found->next->vertical_offset - found->vertical_offset);
+		else if (found->previous)
+			height = (short)(found->vertical_offset - found->previous->vertical_offset);
+		for (after = found->next; after && height > 0; after = after->next)
+			after->vertical_offset = (short)(after->vertical_offset - height);
+		if (list->focused_child == found && found->next)
+			list->focused_child = found->next;
+		platform_log("menus: h3 customize: MODEL row hidden (player models off)");
+	}
 	/* (the flaming helmet's row: a listed tester's alone; the help a row
 	lower for it) */
 	if (!h3_custom.flame_asked)
@@ -5774,7 +5794,7 @@ static struct
 	{ "op_name", 1, NULL, N_("PLAYER NAME") },
 	{ "na_tag", 1, N_("A service tag beside your name. Not in this version yet."), N_("SERVICE TAG") },
 	{ "op_model", 1, NULL, N_("MODEL") },
-	{ "na_helmet", 1, N_("Helmets need armor models Halo CE does not have.\nNot in this version yet: MODEL picks who you\nplay as."), N_("HELMET") },
+	{ "na_helmet", 1, N_("Helmets need armor models Halo CE does not have.\nNot in this version yet."), N_("HELMET") },
 	{ "na_rshoulder", 1, N_("Shoulder pieces need armor models Halo CE does\nnot have. Not in this version yet."), N_("RIGHT SHOULDER") },
 	{ "na_lshoulder", 1, N_("Shoulder pieces need armor models Halo CE does\nnot have. Not in this version yet."), N_("LEFT SHOULDER") },
 	{ "na_chest", 1, N_("Chest pieces need armor models Halo CE does not\nhave. Not in this version yet."), N_("CHEST") },
@@ -6240,6 +6260,18 @@ static void online_custom_update(struct widget_instance *list)
 
 		if (row != NONE && !strcmp(child->name, "op_flame"))
 			shown = shown && h3_custom.flame_listed;
+		/* (MODEL: the player models', off in 1.1.1: player_models_enabled) */
+		if (row != NONE && !strcmp(child->name, "op_model") && !player_models_enabled())
+		{
+			static struct widget_instance *said_list;
+
+			shown = FALSE;
+			if (said_list != list)
+			{
+				said_list = list;
+				platform_log("menus: online customize: MODEL row hidden (player models off)");
+			}
+		}
 		/* (KEYBOARD & MOUSE: a PC's, controls_menu.c) */
 		if (row != NONE && !strcmp(child->name, "op_keys"))
 			shown = shown && controls_menu_available();

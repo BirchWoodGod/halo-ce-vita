@@ -466,6 +466,10 @@ static const struct config_setting config_settings[] =
 		"menu_backdrop.c), made once from the player's own a30.map into\n"
 		"t:\\packs; false (or no a30.map) keeps the ring. The Vita's settings\n"
 		"panel (Game, Menus, Live backdrop) sets it." },
+	{ "menus.player_models", _config_boolean, "false", "HALO_PLAYER_MODELS", _environment_value, _platform_all,
+		"Player models from your Halo Custom Edition maps (CUSTOMIZATION's\n"
+		"MODEL, port/linux/game/player_models.c). Off in 1.1.1 until Halo 2's\n"
+		"models come: every player is the Spartan; true turns them on (testing)." },
 	{ "menus.backdrop_music", _config_string, "\"30\"", "HALO_MENU_MUSIC", _environment_value, _platform_all,
 		"With the live backdrop behind the menus (ElDewrito), the menu music's\n"
 		"level in percent (100, 70, 50, 40, 30, 20, 0; 30 the default), so that the level's own ambience -\n"

@@ -677,12 +677,14 @@ static struct setting settings[] = {
 	owner, RC2, "Why is the armor color and visor color there?" of the
 	colours on Game's Menus page; the tab is a screen's height, so one row
 	opens them all) */
-	PAGE_ROW("Appearance", "Your player model, armor and visor colors", TAB_GAME, PAGE_APPEARANCE),
+	PAGE_ROW("Appearance", "Your armor and visor colors", TAB_GAME, PAGE_APPEARANCE),
 	/* (port/linux/game/player_models.c: the first local player's profile's
 	player model, from the player's Halo Custom Edition maps, as
 	CUSTOMIZATION's MODEL chooses it - kept by the game for the profile, never
 	in settings.txt; the choices filled when the panel opens: player_models_
-	choices. Shown while the maps folder has one) */
+	choices. Shown while the maps folder has one: never while the models are
+	off, 1.1.1's default - menus.player_models, HALO_PLAYER_MODELS -, as the
+	game then lists the Spartan alone) */
 	{ "Player model", "HALO_PLAYER_MODEL", 0, 1, { "0" }, { "Spartan" },
 		"Offline: you, or a Custom Edition map's player", 0, PAGE_APPEARANCE },
 	/* (port/linux/game/player_cosmetics.c: the first local player's

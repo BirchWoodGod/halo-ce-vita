@@ -3109,7 +3109,7 @@ static void test_appearance_page(void)
 	test_color_chosen = test_visor_chosen = 0;
 	open_panel();
 	check(to_tab("Game") && strstr(menu, "\nAppearance\x02  RANDOM  >\n") && to_line("Appearance") &&
-		strstr(menu, "\n\x05Your player model, armor and visor colors\n") && menu_fits(),
+		strstr(menu, "\n\x05Your armor and visor colors\n") && menu_fits(),
 		"Game: Appearance, the armor color beside it, its help");
 	check(open_page("Appearance") && strstr(menu, "\n\x03" "Game > Appearance\n") &&
 		!strcmp(menu_line(menu_selected, line, sizeof(line)), "Armor color\x02  RANDOM >") &&
