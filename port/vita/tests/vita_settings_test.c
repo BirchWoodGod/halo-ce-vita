@@ -3055,10 +3055,10 @@ static void test_forge_page(void)
 	check(!menu_visible, "closed");
 }
 
-/* Game's Player model (port/linux/game/player_models.c): shown while the
-maps folder's Custom Edition maps have a player model, the Spartan first,
-the profile's choice; changed with left and right, for the game to keep for
-the profile, never in settings.txt; the tab still fits, the Forge row too */
+/* Game > Appearance's Player model (port/linux/game/player_models.c): shown
+while the maps folder's Custom Edition maps have a player model, the Spartan
+first, the profile's choice; changed with left and right, for the game to
+keep for the profile, never in settings.txt; the page fits */
 static void test_player_model_row(void)
 {
 	char line[128];
@@ -3067,14 +3067,16 @@ static void test_player_model_row(void)
 		open_panel();
 	test_model_count = 1;
 	open_panel();
-	check(to_tab("Game") && !strstr(menu, "\nPlayer model"), "no player model found: no Player model row");
+	check(to_tab("Game") && open_page("Appearance") && !strstr(menu, "\nPlayer model"),
+		"no player model found: no Player model row");
 	open_panel();
 	test_model_count = 3;
 	test_model_chosen = 2;
 	test_model_choice = -2;
 	open_panel();
-	check(to_tab("Game") && strstr(menu, "\nPlayer model\x02< Covenant V Marines Beta 5  \n") && menu_height_fits(),
-		"two found: Player model, the profile's choice (the last), its map's own name; the tab fits");
+	check(to_tab("Game") && open_page("Appearance") && strstr(menu, "\nPlayer model\x02< Covenant V Marines Beta 5  \n") &&
+		menu_height_fits(),
+		"two found: Player model, the profile's choice (the last), its map's own name; the page fits");
 	check(to_line("Player model"), "the row is chosen");
 	press(VITA_BUTTON_LEFT);
 	check(test_model_choice == 1 && strstr(menu, "\nPlayer model\x02< Spartan (Extinction) >\n"),
@@ -3090,6 +3092,47 @@ static void test_player_model_row(void)
 	(void)line;
 	test_model_count = 1;
 	test_model_chosen = 0;
+}
+
+/* Game > Appearance (RC2, the owner: "Why is the armor color and visor
+color there?" of the two rows on Game's Menus page): the profile's armour
+and visor colours (player_cosmetics.c) on a page of their own, the player's
+look, its help in plain words; changed with left and right, for the game to
+keep in the profile, never in settings.txt; the Game tab's row shows the
+armour colour */
+static void test_appearance_page(void)
+{
+	char line[128];
+
+	if (menu_visible)
+		open_panel();
+	test_color_chosen = test_visor_chosen = 0;
+	open_panel();
+	check(to_tab("Game") && strstr(menu, "\nAppearance\x02  RANDOM  >\n") && to_line("Appearance") &&
+		strstr(menu, "\n\x05Your player model, armor and visor colors\n") && menu_fits(),
+		"Game: Appearance, the armor color beside it, its help");
+	check(open_page("Appearance") && strstr(menu, "\n\x03" "Game > Appearance\n") &&
+		!strcmp(menu_line(menu_selected, line, sizeof(line)), "Armor color\x02  RANDOM >") &&
+		strstr(menu, "\nVisor color\x02  GOLD >\n") &&
+		strstr(menu, "\n\x05Players on older versions see the closest standard color\n") && menu_fits() &&
+		menu_height_fits(), "Appearance: Armor color (chosen first) and Visor color, the help in plain words");
+	press(VITA_BUTTON_RIGHT);
+	check(test_color_chosen == 1 && strstr(menu, "\nArmor color\x02< SKY >\n"), "Armor color right: given to the game");
+	press(VITA_BUTTON_DOWN);
+	check(strstr(menu, "\n\x05Players on older versions see the standard gold\n") != NULL, "Visor color: its help");
+	press(VITA_BUTTON_RIGHT);
+	check(test_visor_chosen == 1 && strstr(menu, "\nVisor color\x02< BLUE >\n"), "Visor color right: given to the game");
+	press(VITA_BUTTON_CIRCLE);
+	check(strstr(menu, "\t*Game|") && strstr(menu, "\nAppearance\x02  SKY  >\n") &&
+		!strcmp(menu_line(menu_selected, line, sizeof(line)), "Appearance\x02  SKY  >"),
+		"circle: back on Game, on Appearance, the new armor color beside it");
+	check(!strstr(file_text(SETTINGS_FILE), "HALO_ARMOR_COLOR") && !strstr(file_text(SETTINGS_FILE), "HALO_VISOR_COLOR"),
+		"the colors are the profile's: never in settings.txt");
+	to_tab("Game");
+	check(open_page("Menus") && !strstr(menu, "Armor color") && !strstr(menu, "Visor color"), "Menus: no colors");
+	press(VITA_BUTTON_CIRCLE);
+	test_color_chosen = test_visor_chosen = 0;
+	open_panel();
 }
 
 static void test_crossplay_browser(void)
@@ -3351,14 +3394,17 @@ static void test_tab_layouts(void)
 		{ TAB_GAME, "Language", "HALO_LANGUAGE", languages, 0, "auto" },
 		{ TAB_GAME, "FPS counter", "HALO_FRAMERATE_COUNTER", "0|1", 0, "0" },
 		{ TAB_GAME, "First-person legs", "HALO_FIRST_PERSON_LEGS", "0|1", 0, "1" },
-		/* (shown while the maps folder has a Custom Edition player model) */
-		{ TAB_GAME, "Player model", "HALO_PLAYER_MODEL", "0", 0, "0" },
-		/* (the profile's armour and visor colours: player_cosmetics.c, on Menus) */
-		{ PAGE_MENUS, "Armor color", "HALO_ARMOR_COLOR", "0", 0, "0" },
-		{ PAGE_MENUS, "Visor color", "HALO_VISOR_COLOR", "0", 0, "0" },
-		/* (shown to a listed tester alone: p2p_flame_listed) */
-		{ TAB_GAME, "Flaming helmet", "HALO_FLAMING_HELMET", "false|true", 0, "true" },
 		{ TAB_GAME, "Smooth weapon motion", "HALO_INTERPOLATE_FIRST_PERSON", "1|0", 0, "1" },
+		/* (the player's look on a page of its own - RC2: the colours were on
+		Menus -: the model, shown while the maps folder has a Custom Edition
+		player model; the profile's armour and visor colours,
+		player_cosmetics.c; the flame, shown to a listed tester alone:
+		p2p_flame_listed) */
+		{ TAB_GAME, "Appearance", NULL, NULL, 0, NULL, ACTION_PAGE, PAGE_APPEARANCE },
+		{ PAGE_APPEARANCE, "Player model", "HALO_PLAYER_MODEL", "0", 0, "0" },
+		{ PAGE_APPEARANCE, "Armor color", "HALO_ARMOR_COLOR", "0", 0, "0" },
+		{ PAGE_APPEARANCE, "Visor color", "HALO_VISOR_COLOR", "0", 0, "0" },
+		{ PAGE_APPEARANCE, "Flaming helmet", "HALO_FLAMING_HELMET", "false|true", 0, "true" },
 		{ TAB_GAME, "Check for updates", NULL, NULL, 0, NULL, ACTION_UPDATE_CHECK },
 		{ TAB_GAME, "Update channel", "HALO_UPDATE_CHANNEL", "experimental|stable", 0, channel },
 		{ TAB_GAME, "Show dev settings", "HALO_DEV_SETTINGS", "0|1", 0, "0" },
@@ -3424,8 +3470,8 @@ static void test_tab_layouts(void)
 		!strcmp(pages[TAB_DEV].name, "Dev"), "the tabs in order: Game, Controls, Video, Sound, Multiplayer, Dev");
 	check(layout_is(TAB_GAME, 1, game, (int)(sizeof(game) / sizeof(game[0]))),
 		"Game: Menus (Menu style, Carnage report, Scoreboard), Button icons, Language, FPS counter; First-person legs, Smooth weapon "
-		"motion; Check for updates, Update channel, Show dev settings: each row's variable, values, default and restart "
-		"as before; no page of its own");
+		"motion, Appearance (Player model, Armor color, Visor color, Flaming helmet); Check for updates, Update channel, "
+		"Show dev settings: each row's variable, values, default and restart as before");
 	check(layout_is(TAB_CONTROLS, 0, controls, (int)(sizeof(controls) / sizeof(controls[0]))),
 		"Controls: Look sensitivity, Invert look, Stick deadzone; Crouch, Button layout, Reset controls; Gyro aiming, "
 		"Gyro settings; Rear touch guard, Touch zones: each row's variable, values, default and restart as before");
@@ -3462,7 +3508,7 @@ static void test_tab_layouts(void)
 			old |= !strcmp(pages[index].name, "Screen") || !strcmp(pages[index].name, "First person") ||
 				!strcmp(pages[index].name, "Advanced") || !strcmp(pages[index].name, "General") ||
 				!strcmp(pages[index].name, "Graphics") || !strcmp(pages[index].name, "Audio");
-		check(!old && PAGE_GRAPHICS_DETAIL == TAB_COUNT && PAGE_COUNT == TAB_COUNT + 17 &&
+		check(!old && PAGE_GRAPHICS_DETAIL == TAB_COUNT && PAGE_COUNT == TAB_COUNT + 18 &&
 			!strcmp(pages[PAGE_GRAPHICS_DETAIL].name, "Detail") && !strcmp(pages[PAGE_GRAPHICS_PERFORMANCE].name, "Performance") &&
 			!strcmp(pages[PAGE_BUTTONS].name, "Button layout") && !strcmp(pages[PAGE_TOUCH].name, "Touch zones") &&
 			!strcmp(pages[PAGE_GYRO].name, "Gyro settings") && !strcmp(pages[PAGE_PLAY].name, "Play") &&
@@ -3471,10 +3517,11 @@ static void test_tab_layouts(void)
 			!strcmp(pages[PAGE_FRIENDS].name, "Friends") && !strcmp(pages[PAGE_PARTY].name, "Party") &&
 			!strcmp(pages[PAGE_CROSSPLAY].name, "Vita and PC") && !strcmp(pages[PAGE_PLAYERS].name, "Players") &&
 			!strcmp(pages[PAGE_INFECTION].name, "Infection") && !strcmp(pages[PAGE_MENUS].name, "Menus") &&
-			!strcmp(pages[PAGE_CHAT].name, "Chat"),
+			!strcmp(pages[PAGE_CHAT].name, "Chat") && !strcmp(pages[PAGE_APPEARANCE].name, "Appearance") &&
+			pages[PAGE_APPEARANCE].tab == TAB_GAME,
 			"the pages rows open: Detail, Performance, Button layout, Touch zones, Gyro settings, Play, Modded maps, Vita and PC, A/B "
-			"switches, Forge and File Share, Mod manager, Friends, Party, Players, Infection, Menus, Chat (no Screen, First person or Advanced "
-			"page; no General, Graphics or Audio tab)");
+			"switches, Forge and File Share, Mod manager, Friends, Party, Players, Infection, Menus, Chat, Appearance (Game's; no "
+			"Screen, First person or Advanced page; no General, Graphics or Audio tab)");
 	}
 	{
 		/* (Infection's page: its six rows, on it alone, each default the
@@ -3514,7 +3561,7 @@ static void test_headings(void)
 		const char *tab, *outline;
 	} tabs[] = {
 		{ "Game", "=Interface|Menus|Button icons|Language|FPS counter|=First person|First-person legs|"
-			"Smooth weapon motion|=Updates|Check for updates|Update channel|Show dev settings" },
+			"Smooth weapon motion|Appearance|=Updates|Check for updates|Update channel|Show dev settings" },
 		{ "Controls", "=Look|Look sensitivity|Invert look|Stick deadzone|=Buttons|Crouch|Button layout|Reset controls|"
 			"=Gyro|Gyro aiming|Gyro settings|=Touch|Rear touch guard|Touch zones" },
 		{ "Video", "=Quality|Profile|Render resolution|Dynamic minimum|Frame limit|Frame interpolation|=Screen|"
@@ -3576,21 +3623,26 @@ static void test_headings(void)
 	check(marked, "a heading: '\\n\\x08' and its name, a line of its own with no value, a row right under it");
 	check(fits, "each tab with its headings: every line fits, and the page the panel's height");
 	check(steps, "down and up through each tab: every row chosen once each way, never a heading");
-	/* (the tester's flaming helmet: a listed tester's Game tab has it, under
-	First-person legs; the page still fits, down and up still step over it) */
+	/* (the tester's flaming helmet: a listed tester's Appearance page has it,
+	under the colours; the Game tab is as anyone's, Appearance opening it) */
 	test_flame_listed = 1;
 	check(to_tab("Game") && !strcmp(outline_of(outline, sizeof(outline), 0), "=Interface|Menus|Button icons|Language|"
-		"FPS counter|=First person|First-person legs|Flaming helmet|Smooth weapon motion|=Updates|Check for updates|"
-		"Update channel|Show dev settings") && menu_fits() && menu_height_fits() && steps_skip_headings(),
-		"a listed tester: Flaming helmet under First-person legs (On), the page still fitting");
-	check(strstr(menu, "\nFlaming helmet\x02< On  ") || strstr(menu, "\nFlaming helmet\x02  On >") ||
-		strstr(menu, "\nFlaming helmet\x02< On >"), "Flaming helmet On by default");
+		"FPS counter|=First person|First-person legs|Smooth weapon motion|Appearance|=Updates|Check for updates|"
+		"Update channel|Show dev settings") && menu_fits() && menu_height_fits() && steps_skip_headings() &&
+		!strstr(menu, "Flaming helmet"), "a listed tester: the Game tab as anyone's (no Flaming helmet row on it)");
+	check(open_page("Appearance") && !strcmp(outline_of(outline, sizeof(outline), 0), "Armor color|Visor color|Flaming helmet") &&
+		(strstr(menu, "\nFlaming helmet\x02< On  ") || strstr(menu, "\nFlaming helmet\x02  On >") ||
+		strstr(menu, "\nFlaming helmet\x02< On >")) && menu_fits() && menu_height_fits(),
+		"a listed tester: Flaming helmet on Appearance, under the colours, On by default");
+	press(VITA_BUTTON_CIRCLE);
 	test_flame_listed = 0;
-	check(to_tab("Controls") && to_tab("Game") && !strstr(menu, "Flaming helmet"), "not a listed tester: no Flaming helmet row");
+	check(to_tab("Controls") && to_tab("Game") && open_page("Appearance") && !strstr(menu, "Flaming helmet"),
+		"not a listed tester: no Flaming helmet row");
+	press(VITA_BUTTON_CIRCLE);
 	to_tab("Game");
 	check(strstr(menu, "\t*Game|") && strstr(menu, "\n\x08Interface\nMenus\x02") &&
 		strstr(menu, "\nFPS counter\x02  Off >\n\x08" "First person\nFirst-person legs\x02") &&
-		strstr(menu, "\nSmooth weapon motion\x02  On >\n\x08Updates\nCheck for updates\x02"),
+		strstr(menu, "\nSmooth weapon motion\x02  On >\nAppearance\x02  RANDOM  >\n\x08Updates\nCheck for updates\x02"),
 		"Game's text: Interface, First person and Updates each on a line of its own, marked '\\x08', over its rows");
 	{
 		/* (the lines a page has: a heading's passive, right before its row) */
@@ -4292,10 +4344,10 @@ static void test_languages(void)
 		{
 			update_status_value = statuses[index];
 			show();
-			/* (on the classic panel: Interfaz giving way when the lines run
-			to three) */
-			if (!menu_fits() || !menu_height_fits() || menu_rows() != 10 ||
-				!strstr(menu, "\n\x08" "Actualizaciones\nBuscar actualizaciones\x02  >\n\x04Versión "))
+			/* (on the classic panel: the headings giving way, Interfaz first,
+			when the lines run to three) */
+			if (!menu_fits() || !menu_height_fits() || menu_rows() != 11 ||
+				!strstr(menu, "Buscar actualizaciones\x02  >\n\x04Versión "))
 			{
 				printf("(update status %d)\n%s\n--\n", statuses[index], menu);
 				fits = 0;
@@ -4305,8 +4357,8 @@ static void test_languages(void)
 		}
 		check(fits && update_status_value == UPDATE_STATUS_FAILED &&
 			strstr(menu, "No se pudo comprobar ahora\nCanal de actualización\x02"),
-			"Spanish: Juego with each answer of the update check fits, Buscar actualizaciones under Actualizaciones, "
-			"Canal de actualización under its lines");
+			"Spanish: Juego with each answer of the update check fits (Apariencia's row too), Buscar actualizaciones over "
+			"its lines, Canal de actualización under them");
 		update_status_value = UPDATE_STATUS_UP_TO_DATE;
 		show();
 		check(strstr(menu, "\n\x04Versión " HALO_VITA_VERSION " - Actualizado\n") != NULL,
@@ -4523,8 +4575,8 @@ static void test_updates(void)
 		!strncmp(menu_line(14, line, sizeof(line)), "Show dev settings\x02", 18),
 		"no look yet: the version alone under it, then Update channel and Show dev settings (no gap)");
 	press(VITA_BUTTON_UP);
-	check(menu_selected == 9 && !strncmp(menu_line(menu_selected, line, sizeof(line)), "Smooth weapon motion\x02", 21),
-		"up from Check for updates: Smooth weapon motion (the Updates heading stepped over)");
+	check(menu_selected == 9 && !strncmp(menu_line(menu_selected, line, sizeof(line)), "Appearance\x02", 11),
+		"up from Check for updates: Appearance (the Updates heading stepped over)");
 	press(VITA_BUTTON_DOWN);
 	check(menu_selected == 11, "... and down: Check for updates again");
 	press(VITA_BUTTON_CROSS);
@@ -4535,21 +4587,21 @@ static void test_updates(void)
 	snprintf(update_version_value, sizeof(update_version_value), "1.1.0-beta.4");
 	redraw();
 	printf("%s\n--\n", menu);
-	check(strstr(menu, "\n\x08Updates\nCheck for updates\x02  >\n\x04" "Version " HALO_VITA_VERSION "\n"
+	check(strstr(menu, "\nCheck for updates\x02  >\n\x04" "Version " HALO_VITA_VERSION "\n"
 		"!Update available: 1.1.0-beta.4\n!github.com/BirchWoodGod/halo-ce-vita/releases\nUpdate channel\x02") &&
-		menu_fits() && menu_height_fits() && menu_rows() == 10,
-		"an update: under the version, in amber, the new version and where to get it; all of the tab still fits (ten "
+		menu_fits() && menu_height_fits() && menu_rows() == 11,
+		"an update: under the version, in amber, the new version and where to get it; all of the tab still fits (eleven "
 		"rows on the classic panel: Forge and File Share's too)");
 	check(!strstr(menu, "Interface") && !strncmp(menu_line(1, line, sizeof(line)), "Menus\x02", 6) &&
-		!strstr(menu, "\n\x08" "First person\n") && strstr(menu, "\n\x08Updates\n") && menu_selected == 9,
-		"the classic panel, short of room: the first headings, Interface and First person, give way (the tab bar over "
-		"Menu style); Updates stays, Check for updates still chosen");
+		!strstr(menu, "\n\x08" "First person\n") && !strstr(menu, "\n\x08Updates\n") && menu_selected == 9,
+		"the classic panel, short of room: the headings, Interface, First person and Updates, give way (the tab bar over "
+		"Menu style); Check for updates still chosen");
 	vita_settings_set("HALO_MENU_STYLE", "halo3");
 	redraw();
 	/* (the chosen line is the page's line number: Forge and File Share,
 	the classic panel's under Menus, gone above it, so chosen again) */
 	check(strstr(menu, "\n\x08Interface\nMenus\x02") && strstr(menu, "\n\x08Updates\nCheck for updates\x02") &&
-		to_line("Check for updates") && menu_selected == 10, "the Halo 3 panel (its rows fitted to its height): every heading kept");
+		to_line("Check for updates") && menu_selected == 11, "the Halo 3 panel (its rows fitted to its height): every heading kept");
 	vita_settings_set("HALO_MENU_STYLE", "classic");
 	redraw();
 	/* (a build with the update key: the next press downloads it) */
@@ -4565,7 +4617,7 @@ static void test_updates(void)
 	redraw();
 	printf("%s\n--\n", menu);
 	check(strstr(menu, "\n!VitaShell: ux0:data/haloce-vita/update/\n!halo-1.1.0-beta.4.vpk (verified, to install)\n"
-		"Update channel\x02") && menu_fits() && menu_height_fits() && menu_rows() == 10,
+		"Update channel\x02") && menu_fits() && menu_height_fits() && menu_rows() == 11,
 		"downloaded: where the VPK is, for VitaShell; all of the tab still fits");
 	update_status_value = UPDATE_STATUS_NONE;
 	redraw();
@@ -4598,8 +4650,9 @@ static void test_updates(void)
 	update_status_value = UPDATE_STATUS_NONE;
 	redraw();
 	check(!strstr(menu, "Couldn't") && !strstr(menu, "Checking"), "no look yet: no line");
-	check(strstr(menu, "\n\x08Interface\nMenus\x02") && menu_height_fits(),
-		"room again (the version alone): Interface back");
+	check(!strstr(menu, "Interface") && strstr(menu, "\n\x08" "First person\n") && strstr(menu, "\n\x08Updates\n") &&
+		menu_height_fits(), "room again (the version alone): First person and Updates back (Interface gives way while "
+		"Forge's row is on the classic panel)");
 	press(VITA_BUTTON_CIRCLE);
 	check(!menu_visible, "circle on Game closes the panel");
 	vita_settings_set("HALO_MENU_STYLE", "halo3");
@@ -4720,8 +4773,9 @@ static void test_carnage_report_row(void)
 	to_tab("Game");
 	check(open_page("Menus") && !strcmp(menu_line(2, line, sizeof(line)), "Menu style\x02< Halo 3 >") &&
 		!strcmp(menu_line(3, line, sizeof(line)), "Carnage report\x02< ElDewrito  ") &&
-		!strcmp(menu_line(4, line, sizeof(line)), "Scoreboard\x02< ElDewrito  ") && menu_rows() == 5 && menu_fits() &&
-		menu_height_fits(), "Game > Menus: Menu style, then Carnage report and Scoreboard (Halo 3), the armor and visor colors");
+		!strcmp(menu_line(4, line, sizeof(line)), "Scoreboard\x02< ElDewrito  ") && menu_rows() == 3 && menu_fits() &&
+		menu_height_fits() && !strstr(menu, "Armor color") && !strstr(menu, "Visor color"),
+		"Game > Menus: Menu style, then Carnage report and Scoreboard (Halo 3); the armor and visor colors on Appearance");
 	check(to_line("Carnage report") &&
 		strstr(menu, "\n\x05" "A multiplayer game's end: ElDewrito's report, or the original\n"), "Carnage report: its help");
 	press(VITA_BUTTON_LEFT);
@@ -4736,7 +4790,7 @@ static void test_carnage_report_row(void)
 	press(VITA_BUTTON_LEFT);
 	/* (Halo CE: its own two rows, the original by default; Halo 3's an option) */
 	check(strstr(menu, "\nCarnage report\x02  Original >") && strstr(menu, "\nScoreboard\x02  Original >") &&
-		menu_rows() == 5 && !strcmp(getenv("HALO_MENU_STYLE"), "classic") && menu_fits(),
+		menu_rows() == 3 && !strcmp(getenv("HALO_MENU_STYLE"), "classic") && menu_fits(),
 		"Menu style Halo CE: Carnage report and Scoreboard rows, the original (Classic, Halo CE) as shipped");
 	check(to_line("Carnage report") && strstr(menu, "\n\x05" "A multiplayer game's end: the original, or ElDewrito's report\n"),
 		"Halo CE's Carnage report: its help");
@@ -5264,17 +5318,19 @@ int main(void)
 		!strcmp(menu_line(6, line, sizeof(line)), "\x08" "First person") &&
 		!strcmp(menu_line(7, line, sizeof(line)), "First-person legs\x02< On  ") &&
 		!strcmp(menu_line(8, line, sizeof(line)), "Smooth weapon motion\x02  On >") &&
-		!strcmp(menu_line(9, line, sizeof(line)), "\x08Updates") &&
-		!strcmp(menu_line(10, line, sizeof(line)), "Check for updates\x02  >") &&
-		!strcmp(menu_line(11, line, sizeof(line)), "\x04" "Version " HALO_VITA_VERSION) &&
-		!strncmp(menu_line(12, line, sizeof(line)), "Update channel\x02", 15) &&
-		!strcmp(menu_line(13, line, sizeof(line)), "Show dev settings\x02  Off >") &&
-		!strcmp(menu_line(14, line, sizeof(line)), "\x05" "Menu style, the carnage report and scoreboard") &&
-		!strncmp(menu_line(15, line, sizeof(line)), "\x06L/R: tabs", 10) && menu_height_fits(),
+		!strcmp(menu_line(9, line, sizeof(line)), "Appearance\x02  RANDOM  >") &&
+		!strcmp(menu_line(10, line, sizeof(line)), "\x08Updates") &&
+		!strcmp(menu_line(11, line, sizeof(line)), "Check for updates\x02  >") &&
+		!strcmp(menu_line(12, line, sizeof(line)), "\x04" "Version " HALO_VITA_VERSION) &&
+		!strncmp(menu_line(13, line, sizeof(line)), "Update channel\x02", 15) &&
+		!strcmp(menu_line(14, line, sizeof(line)), "Show dev settings\x02  Off >") &&
+		!strcmp(menu_line(15, line, sizeof(line)), "\x05" "Menu style, the carnage report and scoreboard") &&
+		!strncmp(menu_line(16, line, sizeof(line)), "\x06L/R: tabs", 10) && menu_height_fits(),
 		"Game: Interface (Menus: Halo 3, Button icons, Language, FPS counter), First person (First-person legs, "
-		"Smooth weapon motion), Updates (Check for updates and the version, Update channel, Show dev settings); help, buttons");
-	check(menu_selected == 2 && menu_fits() && menu_rows() == 9 && !strstr(menu, "*\x02"),
-		"Game: Menus chosen first (not the heading over it); nine rows, each fits, all live (no *)");
+		"Smooth weapon motion, Appearance: the armor color), Updates (Check for updates and the version, Update channel, "
+		"Show dev settings); help, buttons");
+	check(menu_selected == 2 && menu_fits() && menu_rows() == 10 && !strstr(menu, "*\x02"),
+		"Game: Menus chosen first (not the heading over it); ten rows, each fits, all live (no *)");
 	check(!strstr(menu, "Profile") && !strstr(menu, "Aspect ratio") && !strstr(menu, "Look sensitivity") &&
 		!strstr(menu, "Stick deadzone") && !strstr(menu, "Sound voices") && !strstr(menu, "\nScreen\x02") &&
 		!strstr(menu, "\nFirst person\x02") && !strstr(menu, "\nAdvanced\x02"),
@@ -5637,6 +5693,7 @@ int main(void)
 
 	test_forge_page();
 	test_player_model_row();
+	test_appearance_page();
 
 	/* ---------- Multiplayer's Modded maps page */
 	write_map("ux0:data/haloce-vita/maps/mygulch.map", 5, 250000);
@@ -5844,7 +5901,7 @@ int main(void)
 	/* ---------- Dev, behind its switch */
 	press(VITA_BUTTON_R);
 	check(strstr(menu, "\t*Game|") != NULL, "R from Multiplayer: Game (Dev hidden)");
-	check(to_line("Show dev settings") && menu_selected == 13 && strstr(menu, "\n\x05The Dev tab: switches for testers, Save report\n"),
+	check(to_line("Show dev settings") && menu_selected == 14 && strstr(menu, "\n\x05The Dev tab: switches for testers, Save report\n"),
 		"Show dev settings: Game's last row, under Updates, its help");
 	press(VITA_BUTTON_RIGHT);
 	check(strstr(menu, "\t*Game|Controls|Video|Sound|Multiplayer|Dev\n") && menu_fits() && tab_bar_fits() &&
