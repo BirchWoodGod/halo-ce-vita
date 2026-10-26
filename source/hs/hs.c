@@ -2810,6 +2810,10 @@ symbols in this file:
 #include "coop_scripts.h" /* port: port/linux/game/coop_scripts.c */
 #include "game/game_engine.h" /* port: game_engine_running */
 #include "network_wire.h" /* port: network version 28's rules */
+/* port: the console's warning (main/console.c), variadic - called below with
+no prototype in scope it was an implicit int f(): on the Vita's hard-float
+ABI a variadic call made unprototyped (tools/vita_abi_check.py) */
+void console_warning(const char *format, ...);
 
 /* ---------- constants */
 
