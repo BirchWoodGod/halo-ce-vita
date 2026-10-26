@@ -154,6 +154,7 @@ for a gamepad); a test build's HALO_TEST_TEXT_INPUT answers in its place,
 void platform_log(char const *format, ...);
 int setenv(const char *name, const char *value, int overwrite);
 unsigned long system_milliseconds(void);
+unsigned long long vita_host_time_us(void);
 void platform_show_message(char const *title, char const *message);
 void platform_ask_question(char const *title, char const *text);
 int platform_question_answer(void);
