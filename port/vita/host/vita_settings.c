@@ -341,6 +341,11 @@ enum
 	/* (Multiplayer > Friends > Chat: the in-game chat, its filter, the
 	players muted: port/linux/game/game_chat.c, game_chat_share.h) */
 	PAGE_CHAT,
+	/* (Game's Appearance: the player's look - Player model, the profile's
+	armour and visor colours (player_cosmetics.c), the tester's Flaming
+	helmet; the colours were on Game's Menus page until RC2, the owner: "Why
+	is the armor color and visor color there?") */
+	PAGE_APPEARANCE,
 	PAGE_COUNT
 };
 
@@ -373,6 +378,7 @@ static const struct
 	{ "Infection", TAB_MULTIPLAYER },
 	{ "Menus", TAB_GAME },
 	{ "Chat", TAB_MULTIPLAYER },
+	{ "Appearance", TAB_GAME },
 };
 /* the headings over a tab's rows, as Halo Online's settings have them
 (HUD, Interface...): each above the row it names, when that row is shown */
@@ -664,30 +670,36 @@ static struct setting settings[] = {
 	foot. On by default and in every profile. Live) */
 	{ "First-person legs", "HALO_FIRST_PERSON_LEGS", 0, 2, { "0", "1" }, { "Off", "On" },
 		"Your legs when you look down, as others see them", 1, TAB_GAME },
+	{ "Smooth weapon motion", "HALO_INTERPOLATE_FIRST_PERSON", 0, 2, { "1", "0" }, { "On", "Off" },
+		"The weapon's animation blended between game ticks", 0, TAB_GAME },
+	/* (the player's look - model, armour and visor colours, the tester's
+	flame - on a page of their own, the First person group's last row: the
+	owner, RC2, "Why is the armor color and visor color there?" of the
+	colours on Game's Menus page; the tab is a screen's height, so one row
+	opens them all) */
+	PAGE_ROW("Appearance", "Your player model, armor and visor colors", TAB_GAME, PAGE_APPEARANCE),
 	/* (port/linux/game/player_models.c: the first local player's profile's
 	player model, from the player's Halo Custom Edition maps, as
 	CUSTOMIZATION's MODEL chooses it - kept by the game for the profile, never
 	in settings.txt; the choices filled when the panel opens: player_models_
 	choices. Shown while the maps folder has one) */
 	{ "Player model", "HALO_PLAYER_MODEL", 0, 1, { "0" }, { "Spartan" },
-		"Offline: you, or a Custom Edition map's player", 0, TAB_GAME },
+		"Offline: you, or a Custom Edition map's player", 0, PAGE_APPEARANCE },
 	/* (port/linux/game/player_cosmetics.c: the first local player's
 	profile's armour colour - the game's eighteen and the platform's own -
 	and visor colour, as CUSTOMIZATION's COLORS chooses them; kept in the
 	profile, never in settings.txt; the choices filled when the panel opens:
-	cosmetics_choices. On Game's Menus page: the Game tab has no room) */
+	cosmetics_choices) */
 	{ "Armor color", "HALO_ARMOR_COLOR", 0, 1, { "0" }, { "RANDOM" },
-		"Other games see the nearest of the first eighteen", 0, PAGE_MENUS },
+		"Players on older versions see the closest standard color", 0, PAGE_APPEARANCE },
 	{ "Visor color", "HALO_VISOR_COLOR", 0, 1, { "0" }, { "GOLD" },
-		"Seen by this game's PS Vita and PC players; others see gold", 0, PAGE_MENUS },
+		"Players on older versions see the standard gold", 0, PAGE_APPEARANCE },
 	/* (port/linux/src/p2p_flame.inc: the tester's blue flaming helmet,
 	shown only while this Vita's friend identity is on the owner's signed
 	tester list, p2p_flame_listed; CUSTOMIZATION has it too. The next game
 	joined) */
 	{ "Flaming helmet", "HALO_FLAMING_HELMET", 0, 2, { "false", "true" }, { "Off", "On" },
-		"Testers: your blue flame; other players' games check it's yours", 1, TAB_GAME },
-	{ "Smooth weapon motion", "HALO_INTERPOLATE_FIRST_PERSON", 0, 2, { "1", "0" }, { "On", "Off" },
-		"The weapon's animation blended between game ticks", 0, TAB_GAME },
+		"Testers: your blue flame; other players' games check it's yours", 1, PAGE_APPEARANCE },
 
 	/* (Game, Updates: the update check, update_check.h - nothing asked of
 	the network until Check for updates is pressed, nothing downloaded
@@ -4658,6 +4670,14 @@ static void page_summary(char *text, int size, const struct setting *setting)
 		const struct setting *style = setting_named("HALO_MENU_STYLE");
 
 		snprintf(text, (size_t)size, "%s", style ? T(style->names[style->choice]) : "");
+		break;
+	}
+	case PAGE_APPEARANCE:
+	{
+		/* (the armour colour chosen) */
+		const struct setting *armor = setting_named("HALO_ARMOR_COLOR");
+
+		snprintf(text, (size_t)size, "%s", armor && armor->choice < armor->count ? armor->names[armor->choice] : "");
 		break;
 	}
 	case PAGE_TOUCH:

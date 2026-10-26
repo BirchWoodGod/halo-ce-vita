@@ -452,6 +452,20 @@
 #            report; the host goes on by itself (HALO_TEST_CARNAGE_SECONDS, 25) and
 #            both are back in the game's lobby. HALO_TEST_SHOTS: the copies'
 #            screenshots at the Vita's 960x544, one of the report each
+#   carnageold a joiner of this build, Menu style ElDewrito with ElDewrito's carnage
+#            report, joins an older build's game by its code (HALO_TEST_VITA_OLD, default
+#            ../wt-v110client's build/linux/halo: public v1.1.0, which has no Halo 3 report
+#            of its own); Team Slayer on HALO_TEST_CARNAGE_MAP (bloodgulch; a Custom
+#            Edition one, z_sanctuary_h2_pb2 from HALO_TEST_DATA_MENUS, with both copies'
+#            PC maps on), the host's player killing the joiner's every 20 s, the old host
+#            pressing A at its own scores to go on. At the end the joiner must show
+#            ElDewrito's report, never the game's own (the RC2 report, Oct 25 2026: a
+#            joiner of a 1.1.0 host's game got the game's own), its rows the host's
+#            numbers (its own three deaths), R its DETAILS, and be back in its lobby when
+#            the old host goes on. A Custom Edition map needs --release builds of both
+#            (HALO_TEST_VITA, HALO_TEST_VITA_OLD): a non-release one halts on such a map's
+#            unit HUD reference (hud_play_unit_sounds' verify_tag_reference, 1.1.0 too);
+#            a release one has no test pad, so only the report's opening is checked then
 #   h3adhoc  the same over an emulated ad hoc group (adhoc's link, HALO_NET_ADHOC,
 #            HALO_NET_ADHOC_EMULATE): both lobbies open on AD HOC, in the group
 #            from the start (no system's dialog to join it), the LAN browser's
@@ -871,6 +885,7 @@ fi
 [ "$mode" = h3pickjoin ] && seconds=${HALO_TEST_SECONDS:-240}
 [ "$mode" = h3mppause ] && seconds=${HALO_TEST_SECONDS:-150}
 [ "$mode" = carnage ] && seconds=${HALO_TEST_SECONDS:-200}
+[ "$mode" = carnageold ] && seconds=${HALO_TEST_SECONDS:-300}
 [ "$mode" = h3scoreboard ] && seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = h3live ] && seconds=${HALO_TEST_SECONDS:-150}
 [ "$mode" = h3liveleave ] && seconds=${HALO_TEST_SECONDS:-100}
@@ -3209,6 +3224,51 @@ carnage)
 		grep -aq "menus: h3 carnage: closed with the game" "$out/$side/run.log" ||
 			fail "the $side did not leave the report for the lobby"
 	done
+	;;
+carnageold)
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	old=${HALO_TEST_VITA_OLD:-$root/../wt-v110client/build/linux/halo}
+	map=${HALO_TEST_CARNAGE_MAP:-bloodgulch}
+	if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "$menus_data/maps/$map.map" ] || [ ! -x "$old" ]; then
+		echo "SKIP: no Halo PC files or $map.map in $menus_data/maps (HALO_TEST_DATA_MENUS), or no older build ($old: HALO_TEST_VITA_OLD)"; exit 0
+	fi
+	# (a Custom Edition map: both copies with PC maps on)
+	ce_env=
+	[ "$map" = bloodgulch ] || ce_env=HALO_CUSTOM_EDITION=1
+	# (the old host: Menu style ElDewrito too; past the game's end, A at its own scores
+	# goes on - its pad has no "carnage" step - every 4 s from 80 s on, a jump meanwhile)
+	old_pad="wait:150:80000$(for i in $(seq 40); do printf ' a:150:4000'; done)"
+	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$old" "$cpu_a" HALO_NET_ONLINE=true HALO_UI_LOG=1 \
+		HALO_MENU_STYLE=online $ce_env HALO_NETWORK_TEST=host:$map:team_slayer HALO_NETWORK_TEST_START=20 \
+		HALO_NETWORK_TEST_SCORE=3 HALO_NETWORK_TEST_KILL=20 "HALO_TEST_PAD=$old_pad" \
+		; host_pid=$last_pid
+	code=$(wait_code)
+	[ -n "$code" ] || { fail "the old host never showed a code"; tail -20 "$out/host/run.log"; exit 1; }
+	echo "old host's code: $code ($old)"
+	# (the joiner: ElDewrito's menus and report, chosen as the settings panel saves them;
+	# once the report is up, R: DETAILS)
+	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_UI_LOG=1 \
+		HALO_MENU_STYLE=online HALO_CARNAGE_REPORT=halo3 $ce_env HALO_NETWORK_TEST=join-code:$code \
+		"HALO_TEST_PAD=wait:150:1000 carnage:150:3000 rt:150:2000 lt:150:2000" \
+		; join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	jl=$out/joiner/run.log
+	echo "--- joiner"; grep -aE "menus: (h3 carnage|the in-game screens)|carnage: |ui: screen pc.h3.(carnage|pregame)" "$jl" | head -20
+	grep -aq "menus: the in-game screens: .* added to $map.map" "$jl" || fail "the joiner's $map.map had no in-game screens"
+	grep -aq "menus: h3 carnage: the game is over: the Halo 3 carnage report" "$jl" ||
+		fail "the joiner did not want ElDewrito's report at the game's end"
+	grep -aqE "menus: h3 carnage: (not in this map's menus|the screen did not open)" "$jl" &&
+		fail "the joiner fell back to the game's own report"
+	grep -aq "menus: h3 carnage: the carnage report opened (joined)" "$jl" || fail "the joiner's ElDewrito report did not open"
+	[ "$(grep -ac "carnage: row " "$jl")" -ge 4 ] || fail "the joiner's report had fewer than four rows"
+	grep -aq "carnage: the report (the host's numbers): type 2, teams, 2 players" "$jl" ||
+		fail "the joiner's report was not the old host's team game of two players"
+	grep -aq "carnage: row .* score 0 kills 0 deaths 3 .*\[this machine\]" "$jl" ||
+		fail "the joiner's report did not show its own three deaths"
+	grep -aq "menus: h3 carnage: page 1, .*joined" "$jl" || fail "R did not show the joiner DETAILS"
+	grep -aq "menus: h3 carnage: closed with the game" "$jl" || fail "the joiner did not leave the report when the old host went on"
+	grep -av "render assertion skipped" "$jl" | grep -aqiE "assert|exception|halt_and_catch_fire|segmentation" &&
+		fail "the joiner: an assertion, exception or crash"
 	;;
 h3liveonline)
 	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
@@ -5868,7 +5928,7 @@ forge|forge3|forgemp|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forge
 	forge_case
 	;;
 *)
-	echo "usage: $0 code|infection|infectionold|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|carnage|h3scoreboard|h3live|h3liveleave|h3liveagain|h3liveonline|h3liveinvite|h3liveprivate|h3online|h3onlinelan|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedbots|dedicatedcompat|partyserver|hostbots|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|friendsbackup|party|partyfollow|chat|friendsprivate|friendsprivatepw|forge|forge3|forgemp|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|h3forgeskip|h3variant|vitapc|vitaonly|hostfuzz|hostfuzzforge|hostfuzzmap" >&2
+	echo "usage: $0 code|infection|infectionold|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|carnage|carnageold|h3scoreboard|h3live|h3liveleave|h3liveagain|h3liveonline|h3liveinvite|h3liveprivate|h3online|h3onlinelan|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedbots|dedicatedcompat|partyserver|hostbots|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|friendsbackup|party|partyfollow|chat|friendsprivate|friendsprivatepw|forge|forge3|forgemp|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|h3forgeskip|h3variant|vitapc|vitaonly|hostfuzz|hostfuzzforge|hostfuzzmap" >&2
 	exit 2
 	;;
 esac
