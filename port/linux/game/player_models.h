@@ -36,6 +36,13 @@ struct player_model
 	char name[PLAYER_MODEL_NAME_SIZE];
 };
 
+/* the feature on (config.toml's menus.player_models, HALO_PLAYER_MODELS=1;
+off by default in 1.1.1, until Halo 2's models come): off, no maps folder
+scan, no model, no pack, no MODEL rows, a saved choice ignored (its file
+kept) and every player the stock Spartan */
+boolean player_models_enabled(
+	void);
+
 /* the maps folder looked through (again, if again; else once a session):
 the game's thread's, at the top of a frame or in the menus */
 void player_models_scan(

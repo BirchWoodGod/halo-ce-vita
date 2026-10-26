@@ -1462,7 +1462,9 @@ for case in $cases; do
 		# past VISOR and MODEL; STICK LAYOUT, right: SOUTHPAW; down two to LOOK SENSITIVITY, right twice; INVERT
 		# LOOK, Cross: YES; Circle: saved; Circle)
 		custom_pad="$h3pad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000 a wait:150:2000"
-		custom_pad="$custom_pad down:150:600 right:150:500 right:150:500 right:150:500 down:150:600 down:150:600 down:150:600 right:150:600"
+		# (COLOR, then down past ARMOR VISOR to STICK LAYOUT: two rows, the MODEL row hidden with the
+		# player models off, 1.1.1's default)
+		custom_pad="$custom_pad down:150:600 right:150:500 right:150:500 right:150:500 down:150:600 down:150:600 right:150:600"
 		custom_pad="$custom_pad down:150:600 down:150:600 right:150:500 right:150:500 down:150:600 a wait:150:1500 b wait:150:3000 b wait:150:3000"
 		profile_from=$HALO_TEST_PROFILE run h3customize "$menus_data" 45 "$custom_pad" HALO_MENU_STYLE=halo3 \
 			"HALO_TEST_TEXT_INPUT=Vita Chief"
@@ -1581,6 +1583,9 @@ for case in $cases; do
 		[ "$(cat "$out/onlinegridnav/exit")" = 0 ] || fail onlinegridnav "exit $(cat "$out/onlinegridnav/exit")"
 		grep -aqiE "assert|exception|halt_and_catch_fire" "$log" && fail onlinegridnav "an assertion, exception or halt"
 		grep -aq "online customize: the colour grid picked in" "$log" || fail onlinegridnav "the colour grid was not picked in"
+		# (the player models off, 1.1.1's default: ARMORY without its MODEL row)
+		grep -aq "menus: online customize: MODEL row hidden (player models off)" "$log" ||
+			fail onlinegridnav "ARMORY's MODEL row was not hidden (player models off)"
 		# (the colour grid's moves in order: ups first, each a row up or the column's last cell from the top row)
 		moves=$(grep -a "online customize: colour grid " "$log" | sed 's/.*grid \(up\|down\) to cell \([0-9]*\)/\1 \2/')
 		echo "$moves" | awk '
@@ -1675,7 +1680,7 @@ for case in $cases; do
 				heap=60000 floor=${HALO_TEST_SWITCH_FLOOR_KB:-30720}
 			fi
 			profile_from=$HALO_TEST_PROFILE run $name "$out/switch_data" $((40 + models * 40)) "$switch_pad" \
-				HALO_MENU_STYLE=online HALO_MENU_BACKDROP=1 HALO_HEAP_LIMIT_KB=$heap HALO_WINDOW_FLOOR_KB=$floor
+				HALO_MENU_STYLE=online HALO_MENU_BACKDROP=1 HALO_HEAP_LIMIT_KB=$heap HALO_WINDOW_FLOOR_KB=$floor HALO_PLAYER_MODELS=1
 			log=$out/$name/run.log
 			echo "--- $name"
 			grep -aE "h3 customize: model |scene packs: pm_.*(built|loaded|refused|again)|h3 scene object 6: (the pack .* is|.*made)" \
@@ -1729,7 +1734,7 @@ for case in $cases; do
 		models_pad="$h3pad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000"
 		models_pad="$models_pad down:150:600 down:150:600 down:150:600 right:150:500 wait:150:8000 right:150:500 wait:150:8000"
 		models_pad="$models_pad left:150:500 wait:150:4000 b wait:150:3000 b wait:150:3000"
-		profile_from=$HALO_TEST_PROFILE run h3models "$out/models_data" 55 "$models_pad" HALO_MENU_STYLE=halo3
+		profile_from=$HALO_TEST_PROFILE run h3models "$out/models_data" 55 "$models_pad" HALO_MENU_STYLE=halo3 HALO_PLAYER_MODELS=1
 		check_h3 h3models halo3
 		log=$out/h3models/run.log
 		grep -aq "menus: h3 customize: 2 player models in the maps folder's Custom Edition maps; this profile's: -1" "$log" ||
@@ -1751,9 +1756,28 @@ for case in $cases; do
 		cp -r "$out/h3models/save" "$out/h3models_saved"
 		save_from=$out/h3models_saved run h3models_again "$out/models_data" 25 \
 			"$h3pad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:5000 b wait:150:3000" \
-			HALO_MENU_STYLE=halo3
+			HALO_MENU_STYLE=halo3 HALO_PLAYER_MODELS=1
 		grep -aq "menus: h3 customize: 2 player models in the maps folder's Custom Edition maps; this profile's: 0" \
 			"$out/h3models_again/run.log" || fail h3models "started again, the editor did not show the choice"
+		# (h3models_off: the same maps folder and the choice saved, the player models off as 1.1.1
+		# ships them - no HALO_PLAYER_MODELS, menus.player_models false: the maps folder not looked
+		# through for models, no MODEL row (hidden, the rows after it moved up), no model pack built,
+		# the saved choice ignored and t:\player_models.txt left as it was)
+		save_from=$out/h3models_saved run h3models_off "$out/models_data" 30 \
+			"$h3pad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000 down:150:600 down:150:600 down:150:600 wait:150:3000 b wait:150:3000 b wait:150:3000" \
+			HALO_MENU_STYLE=halo3
+		log=$out/h3models_off/run.log
+		echo "--- h3models_off"
+		grep -aE "player models: |h3 customize: (MODEL|model|[0-9]+ player models)|scene packs: pm_" "$log" | cut -c1-160 | head -12
+		[ "$(cat "$out/h3models_off/exit")" = 0 ] || fail h3models_off "exit $(cat "$out/h3models_off/exit")"
+		grep -aq "player models: off" "$log" || fail h3models_off "the player models were not off by default"
+		grep -aq "menus: h3 customize: MODEL row hidden (player models off)" "$log" || fail h3models_off "the MODEL row was not hidden"
+		grep -aq "menus: h3 customize: 0 player models in the maps folder's Custom Edition maps; this profile's: -1" "$log" ||
+			fail h3models_off "the editor listed models, or the saved choice"
+		grep -aqE "player models: [0-9]+ found|scene packs: pm_|h3 customize: model " "$log" &&
+			fail h3models_off "the maps folder was looked through, a model pack made or a model chosen"
+		cmp -s "$out/h3models_saved/t/player_models.txt" "$out/h3models_off/save/t/player_models.txt" ||
+			fail h3models_off "t:\\player_models.txt was changed"
 		;;
 	h3modelsmany)
 		if [ ! -r "${HALO_TEST_PROFILE:-}" ] || [ ! -r "$ce_maps/extinction.map" ] || [ ! -r "$menus_data/maps/sounds.map" ]; then
@@ -1776,7 +1800,7 @@ for case in $cases; do
 		many_pad="$many_pad down:150:600 down:150:600 down:150:600"
 		for index in 01 02 03 04 05 06 07 08 09 10 11 12 13 14; do many_pad="$many_pad right:150:3500"; done
 		many_pad="$many_pad left:80:80 left:80:80 left:80:80 left:80:80 left:80:80 left:80:80 left:80:80 left:80:4000 b wait:150:3000"
-		profile_from=$HALO_TEST_PROFILE run h3modelsmany "$out/manymodels_data" 85 "$many_pad" HALO_MENU_STYLE=halo3
+		profile_from=$HALO_TEST_PROFILE run h3modelsmany "$out/manymodels_data" 85 "$many_pad" HALO_MENU_STYLE=halo3 HALO_PLAYER_MODELS=1
 		check_h3 h3modelsmany halo3
 		log=$out/h3modelsmany/run.log
 		grep -aE "scene packs: pm_.*(loaded|let go|refused|waits)|h3 customize: model .*: (loaded|failed)" "$log" | cut -c1-160

@@ -9,7 +9,7 @@
 		<string text="KEYBOARD &amp; MOUSE"/>
 	</strings>
 	<strings name="ce/profile_help">
-		<string text="Your player model, the flaming helmet,\nlook sensitivity, invert flight and the\nrest of this profile's settings."/>
+		<string text="Look sensitivity, invert flight, the\nflaming helmet and the rest of this\nprofile's settings."/>
 		<string text="This PC's keys and mouse buttons for\neach action, the mouse's sensitivity\nand the rest (every profile)."/>
 	</strings>
 	<widget name="ce/profile/more" extends="ui\shell\main_menu\settings_select\player_setup\player_profile_edit\color_profile_item" drop="handlers" string_list="ce/profile_items" string_index="0">

@@ -70,6 +70,7 @@ is left out: its maps have no tag cache to spare for a pack (Forge design,
 
 void platform_log(char const *format, ...);
 void platform_translate_path(const char *xbox_path, char *host_path, unsigned long host_path_size);
+int config_boolean(const char *name);
 
 /* ---------- constants */
 
@@ -386,6 +387,25 @@ static boolean choices_write(void)
 
 /* ---------- public code */
 
+boolean player_models_enabled(
+	void)
+{
+	static int enabled = -1;
+
+	if (enabled < 0)
+	{
+		char const *setting = getenv("HALO_PLAYER_MODELS");
+
+		if (setting && *setting)
+			enabled = strcmp(setting, "0") && _stricmp(setting, "false");
+		else
+			enabled = config_boolean("menus.player_models") ? 1 : 0;
+		platform_log("player models: %s", enabled ? "on (menus.player_models, HALO_PLAYER_MODELS)" :
+			"off (1.1.1: every player the Spartan; menus.player_models or HALO_PLAYER_MODELS=1 turns them on)");
+	}
+	return enabled ? TRUE : FALSE;
+}
+
 void player_models_scan(
 	boolean again)
 {
@@ -396,6 +416,13 @@ void player_models_scan(
 	void *directory;
 	short count = 0;
 
+	if (!player_models_enabled())
+	{
+		/* (off: no maps folder looked through, no model, no pack) */
+		player_models.scanned = TRUE;
+		player_models.count = 0;
+		return;
+	}
 	if (player_models.scanned && !again)
 		return;
 	player_models.scanned = TRUE;
@@ -526,7 +553,8 @@ short player_models_profile_choice(
 	char key[PROFILE_KEY_SIZE];
 	short index, model;
 
-	if (!profile_key(profile_index, key, sizeof(key)))
+	/* (off: a saved choice ignored, its file left as it is) */
+	if (!player_models_enabled() || !profile_key(profile_index, key, sizeof(key)))
 		return NONE;
 	choices_read();
 	for (index = 0; index < player_models.choice_count; index++)
@@ -557,7 +585,8 @@ boolean player_models_profile_choose(
 	char key[PROFILE_KEY_SIZE];
 	short index;
 
-	if (!profile_key(profile_index, key, sizeof(key)))
+	/* (off: nothing written) */
+	if (!player_models_enabled() || !profile_key(profile_index, key, sizeof(key)))
 		return FALSE;
 	choices_read();
 	for (index = 0; index < player_models.choice_count && strcmp(player_models.choices[index].profile, key); index++)
@@ -608,7 +637,7 @@ void player_models_map_loaded(
 	char why[SCENE_PACK_WHY_SIZE];
 
 	player_models.unit_tag_index = NONE;
-	if (!scenario || scenario->type != SCENARIO_TYPE_MULTIPLAYER || game_connection() != _game_connection_local)
+	if (!player_models_enabled() || !scenario || scenario->type != SCENARIO_TYPE_MULTIPLAYER || game_connection() != _game_connection_local)
 		return;
 	player_models_scan(FALSE);
 	model_index = player_models_profile_choice(first_player_profile());
@@ -648,7 +677,7 @@ long player_models_unit(
 {
 	struct player_datum *player = player_index != NONE ? player_get(player_index) : NULL;
 
-	if (player_models.unit_tag_index == NONE || !player || player->local_player_index != 0 ||
+	if (!player_models_enabled() || player_models.unit_tag_index == NONE || !player || player->local_player_index != 0 ||
 		game_connection() != _game_connection_local || !scene_packs_owner(player_models.unit_tag_index))
 	{
 		return unit_definition_index;
@@ -695,6 +724,12 @@ void player_models_update(
 {
 	int request = player_models.panel_request;
 
+	if (!player_models_enabled())
+	{
+		player_models.panel_request = -2;
+		player_models.panel_chosen = 0;
+		return;
+	}
 	if (!player_models.scanned)
 	{
 		player_models_scan(FALSE);
@@ -716,6 +751,11 @@ boolean player_models_command(
 	word[0] = 0;
 	if (sscanf(arguments, "%15s %d", word, &index) < 1)
 		return FALSE;
+	if (!player_models_enabled() && (!strcmp(word, "scan") || !strcmp(word, "list") || !strcmp(word, "choose")))
+	{
+		platform_log("player models: off (menus.player_models, HALO_PLAYER_MODELS=1)");
+		return TRUE;
+	}
 	if (!strcmp(word, "scan"))
 	{
 		player_models_scan(TRUE);
