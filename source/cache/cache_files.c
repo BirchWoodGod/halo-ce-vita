@@ -1578,12 +1578,20 @@ long scenario_tags_load(
 			decoding thread: custom_edition_sounds.c) */
 			custom_edition_sounds_map_loaded();
 			/* (port: MCC's own ui.map as the menus' map: the PC menus' XML
-			screens are built into its tags as an Xbox ui.map's are) */
-			if (!csstrcasecmp(stripped_scenario_name, "ui"))
+			screens are built into its tags as an Xbox ui.map's are. A
+			multiplayer map - the header's type 1 - gets the in-game set as
+			an Xbox level does: the ElDewrito carnage report and scoreboard,
+			the Halo 3 pause. Without it a game on a Custom Edition map, a
+			host's of any version, ended on the game's own report whatever
+			the player chose - RC2, Oct 25 2026. A campaign map keeps the
+			game's own screens) */
 			{
 				extern void menu_tags_loaded(char const *map_name);
+				short map_type;
 
-				menu_tags_loaded(stripped_scenario_name);
+				csmemcpy(&map_type, cache_file_globals.header.reserved60, sizeof(map_type));
+				if (!csstrcasecmp(stripped_scenario_name, "ui") || map_type == 1)
+					menu_tags_loaded(stripped_scenario_name);
 			}
 		}
 		else
