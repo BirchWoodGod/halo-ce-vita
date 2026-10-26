@@ -104,8 +104,14 @@ void system_free(void *pointer)
 	__builtin_free(pointer);
 }
 
+/* (realloc_refused: a larger block refused, as newlib's realloc refuses one
+the Vita's C heap has no room for, the old block left as it was) */
+static volatile int realloc_refused;
+
 void *system_realloc(void *pointer, long size)
 {
+	if (realloc_refused && pointer && size)
+		return NULL;
 	return __builtin_realloc(pointer, size);
 }
 
@@ -313,6 +319,42 @@ int main(int argc, char **argv)
 		return 2;
 	}
 	debug_memory_manager_initialize();
+	/* a realloc refused (1.1.1 RC2: a model pack's blob that could not grow,
+	scene_pack.c blob_alloc, then freed by its build's failure): the old
+	block still the caller's and on the list - its free, and the frees of
+	blocks around it, must find the list whole. It had been taken off and
+	marked disposed; its free unlinked it again through stale links */
+	{
+		void *before = debug_malloc(64, FALSE, "debug_memory_threads_test.c", __LINE__);
+		void *block = debug_malloc(256, FALSE, "debug_memory_threads_test.c", __LINE__);
+		void *after;
+
+		memset(block, 0x5A, 256);
+		realloc_refused = 1;
+		if (debug_realloc(block, 1 << 20, "debug_memory_threads_test.c", __LINE__) != NULL)
+		{
+			printf("FAIL: the refused realloc gave a block\n");
+			return 1;
+		}
+		realloc_refused = 0;
+		after = debug_malloc(64, FALSE, "debug_memory_threads_test.c", __LINE__);
+		debug_check_memory("debug_memory_threads_test.c", __LINE__);
+		if (((unsigned char *)block)[255] != 0x5A || debug_memory_globals.current_heap_size != 64 + 256 + 64)
+		{
+			printf("FAIL: the refused realloc changed the old block or the heap's size (%ld)\n",
+				debug_memory_globals.current_heap_size);
+			return 1;
+		}
+		debug_free(block, "debug_memory_threads_test.c", __LINE__);
+		debug_free(after, "debug_memory_threads_test.c", __LINE__);
+		debug_free(before, "debug_memory_threads_test.c", __LINE__);
+		debug_check_memory("debug_memory_threads_test.c", __LINE__);
+		if (debug_memory_globals.first_pointer || debug_memory_globals.current_heap_size)
+		{
+			printf("FAIL: after a refused realloc the list did not end empty\n");
+			return 1;
+		}
+	}
 	for (index = 0; index < thread_count; index++)
 	{
 		workers[index].index = index;
