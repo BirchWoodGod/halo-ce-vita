@@ -480,7 +480,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-all_cases="fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows onlinegridnav h3models h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendsbackup h3friendspanel h3partyplates h3party h3partyonline browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3hostbots h3livelobby h3groups browserreopen h3nonet h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes h3offline h3offlineend msgboxes ceplusmain ceplusmp ceplusprofile cepluspregame cepluspause ceplusforge h3scoreboard"
+all_cases="fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows onlinegridnav h3models h3modelswitch h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendsbackup h3friendspanel h3partyplates h3party h3partyonline browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3hostbots h3livelobby h3groups browserreopen h3nonet h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes h3offline h3offlineend msgboxes ceplusmain ceplusmp ceplusprofile cepluspregame cepluspause ceplusforge h3scoreboard"
 # (the PC build's own, asked for by name: not in the default list)
 pc_cases="pctext pcclassic pcnoadhoc"
 cases=${*:-$all_cases}
@@ -1639,6 +1639,77 @@ for case in $cases; do
 		grep -a "ui: screen" "$log" | tail -1 | grep -q 'pc.h3.main.screen' || fail h3nameplate "not back at the main menu"
 		[ -n "${HALO_TEST_SHOTS:-}" ] && mkdir -p "$HALO_TEST_SHOTS/h3nameplate" &&
 			cp "$out"/h3nameplate_shots/*.bmp "$HALO_TEST_SHOTS/h3nameplate/" 2>/dev/null ;;
+	h3modelswitch)
+		if [ ! -r "${HALO_TEST_PROFILE:-}" ] || [ ! -r "$ce_maps/extinction.map" ] || [ ! -r "$menus_data/maps/sounds.map" ]; then
+			echo "--- h3modelswitch"; echo "SKIP: no HALO_TEST_PROFILE, extinction.map (HALO_TEST_CE_MAPS) or sounds.map"; continue
+		fi
+		# (1.1.1 RC2, the owner: "Switching the different models crashed my game", and "the model
+		# switcher doesn't seem to be working with my modded maps". Menu style Online with the live
+		# backdrop behind it, the maps folder's Custom Edition maps - extinction, Covenant V Marines
+		# and the menus data's own z_sanctuary_h2_pb2 -, the C heap as short as the Vita's at the
+		# main menu (HALO_HEAP_LIMIT_KB: this harness holds ~20 MB more than the Vita's 35 MB of 48
+		# there) and the memory window no larger (HALO_WINDOW_FLOOR_KB): MODEL stepped through every
+		# model and around again, each resting, then pressed on while a pack builds, then back.
+		# Every model built in the memory window and shown. Then the same with the C heap shorter
+		# still (h3modelswitch_short: 4 MB of it left, too little for the packs' pixels and samples):
+		# every pack fails for want of memory, and each says so with the menu Spartan kept in its place, built
+		# again when chosen again - never the crash of a refused realloc's block freed twice
+		# (debug_memory.c), never an empty preview)
+		rm -rf "$out/switch_data"
+		mkdir -p "$out/switch_data/maps"
+		for file in "$(cd "$menus_data" && pwd)"/maps/*.map; do ln -sfn "$file" "$out/switch_data/maps/"; done
+		for file in extinction Covenant_V_Marines_Beta_5; do
+			[ -r "$ce_maps/$file.map" ] && ln -sfn "$(cd "$ce_maps" && pwd)/$file.map" "$out/switch_data/maps/$file.map"
+		done
+		models=$(ls "$out/switch_data/maps" | grep -cE '^(extinction|Covenant_V_Marines_Beta_5|z_sanctuary_h2_pb2)\.map$')
+		d="down:150:500"
+		switch_pad="wait:150:2000 a:150:2500 $d $d $d $d a:150:3000 a:150:3000 $d $d"
+		for index in $(seq 1 $((models * 2))); do switch_pad="$switch_pad right:150:9000"; done
+		switch_pad="$switch_pad right:150:900 right:150:900 left:150:900 right:150:900 right:150:9000"
+		for index in $(seq 1 $models); do switch_pad="$switch_pad left:150:9000"; done
+		switch_pad="$switch_pad b wait:150:3000 b wait:150:3000"
+		for name in h3modelswitch h3modelswitch_short; do
+			if [ $name = h3modelswitch ]; then
+				heap=${HALO_TEST_SWITCH_HEAP_KB:-69500} floor=${HALO_TEST_SWITCH_FLOOR_KB:-30720}
+			else
+				heap=60000 floor=${HALO_TEST_SWITCH_FLOOR_KB:-30720}
+			fi
+			profile_from=$HALO_TEST_PROFILE run $name "$out/switch_data" $((40 + models * 40)) "$switch_pad" \
+				HALO_MENU_STYLE=online HALO_MENU_BACKDROP=1 HALO_HEAP_LIMIT_KB=$heap HALO_WINDOW_FLOOR_KB=$floor
+			log=$out/$name/run.log
+			echo "--- $name"
+			grep -aE "h3 customize: model |scene packs: pm_.*(built|loaded|refused|again)|h3 scene object 6: (the pack .* is|.*made)" \
+				"$log" | sed 's/ at .* made in .*/ made/' | cut -c1-160
+			[ "$(cat "$out/$name/exit")" = 0 ] || fail $name "exit $(cat "$out/$name/exit")"
+			# (the render thread's particle walk beside the preview's object deleted on the game thread:
+			# a count read mid-change, render_epoch.c's "torn read?" - logged, not a failure, and not
+			# this case's: it comes with the backdrop's particles, whatever the model)
+			grep -aiE "assert|exception|halt_and_catch_fire|segmentation" "$log" |
+				grep -avq "render assertion skipped (torn read?): particle data array .* is bad or not allocated" &&
+				fail $name "an assertion, exception or crash"
+			grep -aq "player models: $models found in the maps folder's Custom Edition maps" "$log" ||
+				fail $name "the $models models were not found"
+			grep -aq "h3 scene object 6: the pack .* has no tag" "$log" && fail $name "the preview was made from no pack"
+			grep -aq "scene packs: menu_backdrop: loaded" "$log" || fail $name "the live backdrop was not behind the menus"
+			packs=$(grep -a "^halo-linux: player models: [0-9]*: " "$log" | sed 's/.* pack //' | sort -u)
+			for pack in $packs; do
+				if [ $name = h3modelswitch ]; then
+					grep -aq "scene packs: $pack's build: [0-9]* KB of the memory window" "$log" ||
+						fail $name "$pack was not built in the memory window"
+					grep -aq "h3 scene object 6: .* ($pack) at .* made" "$log" || fail $name "$pack's model was not shown"
+				else
+					grep -aq "scene packs: $pack: not built: there is no memory" "$log" ||
+						fail $name "$pack did not fail for want of memory (the case's memory is not short enough)"
+					grep -aq "h3 scene object 6: the pack $pack is failed: the menu Spartan in its place" "$log" ||
+						fail $name "$pack failed without the menu Spartan in its place"
+					grep -aq "scene packs: $pack: building it again" "$log" || fail $name "$pack was not built again when chosen again"
+				fi
+			done
+			if [ $name = h3modelswitch_short ]; then
+				[ "$(grep -ac 'h3 scene object 6: characters.cyborg_mp.cyborg_mp (menu_spartan) at .* made' "$log")" -gt $((models * 2)) ] ||
+					fail $name "the menu Spartan was not made in the failed models' place"
+			fi
+		done ;;
 	h3models)
 		if [ ! -r "${HALO_TEST_PROFILE:-}" ] || [ ! -r "$ce_maps/extinction.map" ] || [ ! -r "$menus_data/maps/sounds.map" ]; then
 			echo "--- h3models"; echo "SKIP: no HALO_TEST_PROFILE, extinction.map (HALO_TEST_CE_MAPS) or sounds.map"; continue
@@ -1646,14 +1717,17 @@ for case in $cases; do
 		# (a maps folder of the data's and the Custom Edition maps, links)
 		rm -rf "$out/models_data"
 		mkdir -p "$out/models_data/maps"
-		for file in "$(cd "$menus_data" && pwd)"/maps/*.map; do ln -sfn "$file" "$out/models_data/maps/"; done
+		# (the data's own Custom Edition map, z_sanctuary_h2_pb2, left out: the models are the case's)
+		for file in "$(cd "$menus_data" && pwd)"/maps/*.map; do
+			[ "${file##*/}" = z_sanctuary_h2_pb2.map ] || ln -sfn "$file" "$out/models_data/maps/"
+		done
 		for file in extinction Covenant_V_Marines_Beta_5; do
 			[ -r "$ce_maps/$file.map" ] && ln -sfn "$(cd "$ce_maps" && pwd)/$file.map" "$out/models_data/maps/$file.map"
 		done
-		# (CUSTOMIZATION: the profile, Cross; down two to MODEL; right: the Extinction Spartan, built and
+		# (CUSTOMIZATION: the profile, Cross; down three to MODEL, past VISOR; right: the Extinction Spartan, built and
 		# shown; right: the protected map's; left: the Spartan (Extinction) again; Circle; Circle)
 		models_pad="$h3pad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000"
-		models_pad="$models_pad down:150:600 down:150:600 right:150:500 wait:150:8000 right:150:500 wait:150:8000"
+		models_pad="$models_pad down:150:600 down:150:600 down:150:600 right:150:500 wait:150:8000 right:150:500 wait:150:8000"
 		models_pad="$models_pad left:150:500 wait:150:4000 b wait:150:3000 b wait:150:3000"
 		profile_from=$HALO_TEST_PROFILE run h3models "$out/models_data" 55 "$models_pad" HALO_MENU_STYLE=halo3
 		check_h3 h3models halo3
@@ -1689,14 +1763,17 @@ for case in $cases; do
 		# fourteen models, each a pack of its own)
 		rm -rf "$out/manymodels_data"
 		mkdir -p "$out/manymodels_data/maps"
-		for file in "$(cd "$menus_data" && pwd)"/maps/*.map; do ln -sfn "$file" "$out/manymodels_data/maps/"; done
+		# (the data's own Custom Edition map, z_sanctuary_h2_pb2, left out: the models are the case's)
+		for file in "$(cd "$menus_data" && pwd)"/maps/*.map; do
+			[ "${file##*/}" = z_sanctuary_h2_pb2.map ] || ln -sfn "$file" "$out/manymodels_data/maps/"
+		done
 		for index in 01 02 03 04 05 06 07 08 09 10 11 12 13 14; do
 			ln -sfn "$(cd "$ce_maps" && pwd)/extinction.map" "$out/manymodels_data/maps/model$index.map"
 		done
-		# (CUSTOMIZATION: the profile, Cross; down two to MODEL; right fourteen times, each model left to
+		# (CUSTOMIZATION: the profile, Cross; down three to MODEL, past VISOR; right fourteen times, each model left to
 		# rest and show; then right eight times quickly, and a rest)
 		many_pad="$h3pad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000"
-		many_pad="$many_pad down:150:600 down:150:600"
+		many_pad="$many_pad down:150:600 down:150:600 down:150:600"
 		for index in 01 02 03 04 05 06 07 08 09 10 11 12 13 14; do many_pad="$many_pad right:150:3500"; done
 		many_pad="$many_pad left:80:80 left:80:80 left:80:80 left:80:80 left:80:80 left:80:80 left:80:80 left:80:4000 b wait:150:3000"
 		profile_from=$HALO_TEST_PROFILE run h3modelsmany "$out/manymodels_data" 85 "$many_pad" HALO_MENU_STYLE=halo3
