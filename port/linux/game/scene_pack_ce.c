@@ -196,6 +196,9 @@ struct scene_pack_ce
 	unsigned char *tags;
 	unsigned long tags_room;
 	boolean tags_owned;
+	/* (an owned block of scene_pack_scratch_alloc's: its free, its size) */
+	void (*tags_free)(void *data, unsigned long size);
+	unsigned long tags_size;
 	unsigned long loaded_bytes;
 	long tag_count;
 	unsigned long model_data_offset;
@@ -581,7 +584,17 @@ struct scene_pack_ce *scene_pack_ce_open(
 	}
 	else
 	{
-		ce->tags = malloc(room);
+		/* (the memory window's when the build has it, scene_packs.c: a
+		Custom Edition map's tags and their room are 10 MB and more, which
+		the Vita's C heap at the main menu has not in one piece) */
+		if (scene_pack_scratch_alloc && scene_pack_scratch_free &&
+			(ce->tags = scene_pack_scratch_alloc(room)) != NULL)
+		{
+			ce->tags_free = scene_pack_scratch_free;
+			ce->tags_size = room;
+		}
+		else
+			ce->tags = malloc(room);
 		ce->tags_room = room & ~15UL;
 		ce->tags_owned = TRUE;
 	}
@@ -691,7 +704,9 @@ void scene_pack_ce_close(
 	ce_file_close(&ce->map);
 	for (type = 0; type < NUMBER_OF_RESOURCE_MAP_TYPES; type++)
 		ce_file_close(&ce->resources[type]);
-	if (ce->tags_owned && ce->tags)
+	if (ce->tags_owned && ce->tags && ce->tags_free)
+		ce->tags_free(ce->tags, ce->tags_size);
+	else if (ce->tags_owned && ce->tags)
 		free(ce->tags);
 	if (ce->parts)
 		free(ce->parts);

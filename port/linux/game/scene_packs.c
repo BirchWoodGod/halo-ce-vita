@@ -162,6 +162,10 @@ struct scene_pack_slot
 	short state;
 	/* (a load that failed is built once more) */
 	boolean rebuilt;
+	/* (the worker's) its build failed for want of memory: built again when
+	it is next wanted after being let go (a player model chosen again),
+	the memory then perhaps there */
+	boolean build_short;
 	boolean wanted_now;
 	char name[SCENE_PACK_NAME_SIZE];
 	char path[96];
@@ -597,6 +601,7 @@ static boolean pack_built(struct scene_pack_slot *slot, struct scene_pack_build_
 	{
 		snprintf(slot->why, sizeof(slot->why), "%s", result->why[0] ? result->why : "it could not be built");
 		platform_log("scene packs: %s: not built: %s", slot->name, slot->why);
+		slot->build_short = strstr(slot->why, "no memory") != NULL || strstr(slot->why, "no room") != NULL;
 		return FALSE;
 	}
 	slot->built = TRUE;
@@ -841,8 +846,32 @@ static void packs_prepare(struct scene_pack_slot **slots, short count, unsigned 
 			need[lead] = NULL;
 			platform_log("scene packs: %s: building it (%s)", slot->name, slot->why);
 			slot->progress = &scene_packs_build_results[0].progress;
+			/* (its map's tags - 6 to 8 MB, and 4 MB of room past them - and
+			the pack's blob in the memory window, as the backdrop's build
+			has them, the C heap only when the window has no room: behind
+			the live backdrop the tag cache has 9 MB free and the Vita's C
+			heap 14 MB, in pieces - 1.1.1 RC2's model packs "not built:
+			there is no memory for the pack", or for the map's tags) */
+			scene_pack_big_alloc = pack_window_alloc;
+			scene_pack_big_free = pack_window_free;
+			scene_pack_big_grow = pack_window_grow;
+			scene_pack_big_only = FALSE;
+			scene_pack_scratch_alloc = pack_window_alloc;
+			scene_pack_scratch_free = pack_window_free;
+			pack_window_held = pack_window_held_most = 0;
+			pack_window_free_least = platform_contiguous_largest_free();
 			built = scene_pack_build(slot->recipe, cache_files_map_directory(), slot->path, scratch, scratch_size,
 				&scene_packs.cancel, &scene_packs_build_results[0]);
+			if (pack_window_held_most)
+			{
+				platform_log("scene packs: %s's build: %lu KB of the memory window at most at once, %lu KB of it free "
+					"in one piece at the least", slot->name, pack_window_held_most / 1024, pack_window_free_least / 1024);
+			}
+			scene_pack_scratch_alloc = NULL;
+			scene_pack_scratch_free = NULL;
+			scene_pack_big_alloc = NULL;
+			scene_pack_big_free = NULL;
+			scene_pack_big_grow = NULL;
 			state_set(slot, pack_built(slot, &scene_packs_build_results[0], built, 0) ? _scene_pack_state_ready :
 				_scene_pack_state_failed);
 			if (only_first)
@@ -1808,6 +1837,21 @@ short scene_packs_want(
 		if (!slot)
 			return _scene_pack_state_failed;
 		build_thread_start();
+	}
+	/* (one whose build had no memory, let go and wanted again: built
+	again - the memory may be there now; once a want, never in a loop) */
+	if (!slot_wanted_loaded(slot) && slot->build_short && state_get(slot) == _scene_pack_state_failed)
+	{
+		slot->build_short = FALSE;
+		platform_log("scene packs: %s: building it again (before: %s)", name, slot->why);
+		snprintf(slot->why, sizeof(slot->why), "its build had no memory before");
+		slot->progress = NULL;
+		state_set(slot, _scene_pack_state_building);
+		slot->build_only = FALSE;
+		slot->release_wanted = FALSE;
+		slot->wanted_us = vita_host_time_us();
+		build_thread_start();
+		return state_get(slot);
 	}
 	/* (one built only, wanted now: loaded as any; one asked to go kept) */
 	if (!slot_wanted_loaded(slot) || !slot->wanted_us)

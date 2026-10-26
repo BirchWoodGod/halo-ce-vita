@@ -245,6 +245,10 @@ struct menu_scene_object
 	unsigned long epoch;
 	short made_color_index;
 	boolean refused;
+	/* (the preview's) its pack failed - a player model's that could not be
+	built, for want of memory or else -: the menu Spartan made in its place,
+	the pack still the one asked for (Customization says why it cannot be) */
+	boolean stand_in;
 	/* the animation found and started (or given up), the tries */
 	boolean animation_started;
 	boolean animation_given_up;
@@ -966,6 +970,12 @@ static boolean slot_object_valid(struct menu_scene_object const *object)
 		object_try_and_get(object->object_index) != NULL;
 }
 
+/* the pack the object is made from: the menu Spartan's for a stand-in */
+static char const *object_pack_shown(struct menu_scene_object const *object)
+{
+	return object->stand_in ? MENU_SCENE_PREVIEW_PACK : object->pack;
+}
+
 static void object_forget(struct menu_scene_object *object, boolean delete_it)
 {
 	if (delete_it && slot_object_valid(object))
@@ -1434,7 +1444,7 @@ static boolean packs_textures_wait(unsigned long long *since, boolean preview)
 
 		if (!object->wanted || !object->pack[0])
 			continue;
-		if (!scene_packs_textures_ready(object->pack))
+		if (!scene_packs_textures_ready(object_pack_shown(object)))
 			ready = FALSE;
 		if (object->weapon_pack[0] && !scene_packs_textures_ready(object->weapon_pack))
 			ready = FALSE;
@@ -1674,6 +1684,7 @@ static void preview_model_take(boolean at_once)
 		snprintf(previous, sizeof(previous), "%s", object->pack);
 		snprintf(object->pack, sizeof(object->pack), "%s", wanted);
 		object->refused = FALSE;
+		object->stand_in = FALSE;
 		if (object->object_index != NONE)
 		{
 			platform_log("menus: h3 scene object %d: deleted (the model changed)", MENU_SCENE_PREVIEW);
@@ -1707,27 +1718,52 @@ static void preview_update(void)
 	}
 	if (object->object_index == NONE && !object->refused)
 	{
-		short state = scene_packs_want(object->pack);
+		char const *pack = object_pack_shown(object);
+		short state = scene_packs_want(pack);
 		long roots[1] = { NONE };
 
-		if (state == _scene_pack_state_failed || state == _scene_pack_state_none)
+		/* (a player model's pack failed: the menu Spartan in its place,
+		Customization saying why the model cannot be - not an empty
+		preview; 1.1.1 RC2, the owner: "the model switcher doesn't seem to
+		be working with my modded maps") */
+		if ((state == _scene_pack_state_failed || state == _scene_pack_state_none) && !object->stand_in &&
+			strcmp(object->pack, MENU_SCENE_PREVIEW_PACK))
+		{
+			object->stand_in = TRUE;
+			platform_log("menus: h3 scene object %d: the pack %s is %s: the menu Spartan in its place", MENU_SCENE_PREVIEW,
+				object->pack, scene_packs_state_name(state));
+		}
+		else if (state == _scene_pack_state_failed || state == _scene_pack_state_none)
 		{
 			object->refused = TRUE;
-			platform_log("menus: h3 scene object %d: the pack %s is %s: no character", MENU_SCENE_PREVIEW, object->pack,
+			platform_log("menus: h3 scene object %d: the pack %s is %s: no character", MENU_SCENE_PREVIEW, pack,
 				scene_packs_state_name(state));
 		}
 		else if (state == _scene_pack_state_loaded && packs_textures_wait(&menu_scene_objects.preview_textures_since, TRUE))
 		{
-			if (!scene_packs_roots(object->pack, roots, 1) || roots[0] == NONE || tag_get_group_tag(roots[0]) != 'bipd')
+			if (!scene_packs_roots(pack, roots, 1) || roots[0] == NONE || tag_get_group_tag(roots[0]) != 'bipd')
 			{
 				object->refused = TRUE;
 				platform_log("menus: h3 scene object %d: the pack %s's first tag is not a biped: no character",
-					MENU_SCENE_PREVIEW, object->pack);
+					MENU_SCENE_PREVIEW, pack);
 			}
-			else if (!object_make(object, MENU_SCENE_PREVIEW))
+			else
 			{
-				object_forget(object, TRUE);
-				object->refused = TRUE;
+				char asked[sizeof(object->pack)];
+				boolean made;
+
+				/* (a stand-in made from the menu Spartan's pack, the
+				asked-for one kept) */
+				snprintf(asked, sizeof(asked), "%s", object->pack);
+				if (object->stand_in)
+					snprintf(object->pack, sizeof(object->pack), "%s", MENU_SCENE_PREVIEW_PACK);
+				made = object_make(object, MENU_SCENE_PREVIEW);
+				snprintf(object->pack, sizeof(object->pack), "%s", asked);
+				if (!made)
+				{
+					object_forget(object, TRUE);
+					object->refused = TRUE;
+				}
 			}
 		}
 	}
@@ -2012,6 +2048,7 @@ int menu_scene_spartan_show(
 	object->color_index = color_index >= 0 && color_index < NUMBER_OF_MENU_SCENE_COLORS ? color_index :
 		MENU_SCENE_COLOR_PROFILE;
 	object->refused = FALSE;
+	object->stand_in = FALSE;
 	object->wanted = TRUE;
 	return TRUE;
 }
