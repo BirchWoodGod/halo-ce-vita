@@ -188,6 +188,10 @@
 #            (the codes through files), who accepts at the menus and lands in the lobby; START
 #            GAME: the two play; the lobby and its game never listed; END GAME: the joiner told
 #            "The online game has closed down."
+#   h3livebots  (RC6, Cass) the host alone with its Bots online (full): its live lobby on
+#            ONLINE, GAME Infection (HALO_TEST_LIVEBOTS_GAME=infection, the picker's last; slayer:
+#            the lobby's own); START GAME, the bots in, Cross: the countdown and the game started,
+#            the bots its only company (Infection's lobby has everyone on the humans' team)
 #   h3liveprivate  the live lobby private by default: the host's lobby on ONLINE with the
 #            settings panel's Visibility Public (the shipped default) is not listed; its
 #            friend joins it from presence in one press, no code; GAME OPTIONS (Square) and its
@@ -915,6 +919,7 @@ fi
 [ "$mode" = h3liveonline ] && seconds=${HALO_TEST_SECONDS:-110}
 # (h3liveinvite: a game and its END GAME after the invite; h3liveagain: two games)
 [ "$mode" = h3liveinvite ] && seconds=${HALO_TEST_SECONDS:-240}
+[ "$mode" = h3livebots ] && seconds=${HALO_TEST_SECONDS:-110}
 [ "$mode" = h3liveagain ] && seconds=${HALO_TEST_SECONDS:-280}
 # (network Forge: netns_forge_cases.sh)
 case $mode in forge) seconds=${HALO_TEST_SECONDS:-110} ;; forge3) seconds=${HALO_TEST_SECONDS:-125} ;; forgeold|forgeleave) seconds=${HALO_TEST_SECONDS:-80} ;; forgemp) seconds=${HALO_TEST_SECONDS:-150} ;; h3forge|h3forgeadhoc|forgepanel) seconds=${HALO_TEST_SECONDS:-130} ;; h3forgeonline) seconds=${HALO_TEST_SECONDS:-230} ;; h3variant) seconds=${HALO_TEST_SECONDS:-150} ;; h3forgeslow|h3forgeskip) seconds=${HALO_TEST_SECONDS:-330} ;; esac
@@ -2919,6 +2924,51 @@ h3liveinvite)
 	grep -aq "ui: screen pc.h3.mppause.end_screen" "$hl" || fail "the host's END GAME did not ask"
 	grep -aq "menus: the host's game closed: said for online play" "$jl" ||
 		fail "the joiner was not told the online game closed (its network named)"
+	;;
+h3livebots)
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS) or no HALO_TEST_PROFILE"; exit 0
+	fi
+	# (RC6, Cass: a host alone with its Bots online, Infection: "Ready: Cross starts the game" and
+	# nothing - the game's lobby waited for players before the countdown. The host - its profile,
+	# Menu style Halo 3 - opens MULTIPLAYER, NETWORK up to ONLINE: live once the broker is reached,
+	# the bots in; infection: GAME (down, A), the right trigger three times (the picker's last,
+	# Infection), A; START GAME (down two, A); slayer: START GAME (down three, A): the game's lobby;
+	# Cross: the countdown, the game started)
+	livebots_game=${HALO_TEST_LIVEBOTS_GAME:-infection}
+	mkdir -p "$out/host/save/u/UDATA/869079979327"
+	cp "$HALO_TEST_PROFILE" "$out/host/save/u/UDATA/869079979327/blam.sav"
+	[ -r "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" ] &&
+		cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$out/host/save/u/UDATA/869079979327/"
+	d="down:150:500"
+	livebots_pad="wait:150:3000 down:150:700 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:20000"
+	if [ "$livebots_game" = infection ]; then
+		livebots_pad="$livebots_pad $d a wait:150:2500 rt:150:500 rt:150:500 rt:150:500 a wait:150:4000 $d $d a"
+	else
+		livebots_pad="$livebots_pad $d $d $d a"
+	fi
+	# (the game's lobby: a while for the bots - START GAME on a lobby not hosted yet hosts it now,
+	# its bots coming in after -, then Cross, "Ready: Cross starts the game")
+	livebots_pad="$livebots_pad wait:150:12000 a wait:150:$((seconds * 1000))"
+	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
+		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:1 HALO_NET_HOST_PUBLIC=false \
+		HALO_NET_LOBBY_NAME=Alpha HALO_BOTS_ONLINE=full "HALO_TEST_PAD=$livebots_pad"; host_pid=$last_pid
+	wait $host_pid 2>/dev/null
+	hl=$out/host/run.log
+	echo "--- host ($livebots_game)"
+	grep -aE "menus: h3 (live lobby|mp: game type)|server: bots: a bot joined|menus: h3 pregame: " "$hl" | tail -10 | cut -c1-220
+	# (a render's "assertion skipped (torn read?)" is the threaded render's, as the other tests take it)
+	grep -av "render assertion skipped" "$hl" | grep -aqiE "assert|exception|halt_and_catch_fire|segmentation" &&
+		fail "the host: an assertion, exception or crash"
+	grep -aq "menus: h3 live lobby: open on ONLINE" "$hl" || fail "the host's lobby did not open live on ONLINE"
+	grep -aq "server: bots: a bot joined" "$hl" || fail "no bot joined the host's lobby"
+	[ "$livebots_game" = infection ] && { grep -aq "menus: h3 mp: game type Infection" "$hl" || fail "GAME was not set to Infection"; }
+	grep -aq "menus: h3 live lobby: START GAME: the game's lobby" "$hl" || fail "START GAME did not open the game's lobby"
+	grep -aq "menus: h3 pregame: Ready: " "$hl" || fail "the game's lobby was never ready for the host to start"
+	grep -aq "menus: h3 pregame: Starting (the countdown)" "$hl" || fail "neither START GAME nor Cross began the countdown"
+	grep -aq "all machines have successfully loaded" "$out/host/data/debug.txt" ||
+		fail "the host alone with its bots did not start the game"
 	;;
 h3liveprivate)
 	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
@@ -6056,7 +6106,7 @@ forge|forge3|forgemp|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forge
 	forge_case
 	;;
 *)
-	echo "usage: $0 code|infection|infectionold|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|menusjoinpress|onlinebrowser|onlinebrowserded|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|carnage|carnageold|h3scoreboard|h3live|h3liveleave|h3liveagain|h3liveonline|h3liveinvite|h3liveprivate|h3online|h3onlinelan|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedbots|dedicatedcompat|partyserver|hostbots|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|friendsbackup|party|partyfollow|chat|friendsprivate|friendsprivatepw|forge|forge3|forgemp|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|h3forgeskip|h3variant|vitapc|vitaonly|hostfuzz|hostfuzzforge|hostfuzzmap|hostfuzzjoin" >&2
+	echo "usage: $0 code|infection|infectionold|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|menusjoinpress|onlinebrowser|onlinebrowserded|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|carnage|carnageold|h3scoreboard|h3live|h3liveleave|h3liveagain|h3liveonline|h3liveinvite|h3livebots|h3liveprivate|h3online|h3onlinelan|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedbots|dedicatedcompat|partyserver|hostbots|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|friendsbackup|party|partyfollow|chat|friendsprivate|friendsprivatepw|forge|forge3|forgemp|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|h3forgeskip|h3variant|vitapc|vitaonly|hostfuzz|hostfuzzforge|hostfuzzmap|hostfuzzjoin" >&2
 	exit 2
 	;;
 esac

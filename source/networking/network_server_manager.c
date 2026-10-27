@@ -3702,6 +3702,13 @@ boolean server_needs_more_teams(
 	as Halo PC's does: the others join it in progress */
 	return FALSE;
 #endif
+	/* (port) Infection's sides are the round's own (infection.c picks the
+	first zombies as it begins): its lobby has everyone on the humans' team
+	once the host fills it with bots (network_game_server_fill_bots), so a
+	second team is never there to wait for - RC6, Cass: a host alone with
+	its bots, or with people and bots, could never start Infection */
+	if (infection_variant(&server->game.variant))
+		return FALSE;
 	if (server->game.variant.universal_variant.teams)
 	{
 		short player_count_by_team[NUMBER_OF_MULTIPLAYER_TEAMS] = { 0, 0 };
