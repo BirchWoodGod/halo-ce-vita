@@ -293,6 +293,21 @@ static void item_adjust_for_angular_velocity_change(
 	struct item_datum *item = item_get(item_index);
 	real angular_velocity_magnitude = magnitude3d(&item->object.angular_velocity);
 
+#ifdef HALO_LINUX
+	/* port: a spin too small to divide by (a denormal: its axis infinite,
+	the item's rotation NaN, an assertion's halt - a host's message, fuzzed:
+	run_netns_online_test.sh hostfuzzh2), or not finite, is none */
+	if (!(angular_velocity_magnitude > 1.0e-6f && angular_velocity_magnitude < 1.0e6f))
+	{
+		if (angular_velocity_magnitude != 0.f)
+		{
+			item->object.angular_velocity.i = 0.f;
+			item->object.angular_velocity.j = 0.f;
+			item->object.angular_velocity.k = 0.f;
+		}
+		angular_velocity_magnitude = 0.f;
+	}
+#endif
 	if (angular_velocity_magnitude != 0.f)
 	{
 		item->item.flags |= FLAG(_item_has_nonzero_angular_velocity_bit);

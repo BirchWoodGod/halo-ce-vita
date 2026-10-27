@@ -5877,6 +5877,12 @@ boolean unit_update(
 			real angle = angle_between_vectors3d(&unit->unit.aiming_vector, &last_aiming_vector);
 			real change = angle / (unit_definition->unit.aiming_velocity_maximum/TICKS_PER_SECOND);
 				
+#ifdef HALO_LINUX
+			/* port: a unit with no aiming speed (a Halo 2 unit's, as made:
+			0/0) or a NaN aim changes nothing - the byte's cast was undefined */
+			if (!(change >= 0.f))
+				change = 0.f;
+#endif
 			unit->unit.aiming_change = (byte)(PIN(change, 0.f, 1.f) * 255.f);
 		}
 
