@@ -81,7 +81,10 @@ struct network_listed_game
 	boolean crossplay;
 	short platform;
 	boolean pc_coop;
-	byte pad[3];
+	/* its advertisement says a dedicated server hosts it (OpenCE 39's 0x04:
+	crossplay_guard_advertised_dedicated; a label alone) */
+	boolean dedicated;
+	byte pad[2];
 	/* this project's marks of its host (crossplay_guard.h's
 	CROSSPLAY_HOST_*: the PC build; Vitas only) */
 	short marks;

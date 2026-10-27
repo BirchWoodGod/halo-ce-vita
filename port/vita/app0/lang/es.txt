@@ -786,6 +786,7 @@
 "The host is playing the custom map %s, but your copy isn't a multiplayer map this game can load." = "El anfitrión está jugando el mapa personalizado %s, pero tu copia no es un mapa multijugador que este juego pueda cargar."
 "Halo: cannot join this game" = "Halo: no se puede unir a esta partida"
 "The game is full: it has as many players as its host allows. Try another game." = "La partida está llena: tiene tantos jugadores como permite el anfitrión. Prueba otra partida."
+"The host refused your player name. Change it in your profile and try again." = "El anfitrión rechazó tu nombre de jugador. Cámbialo en tu perfil y vuelve a intentarlo."
 "This host is not a PlayStation Vita.\n\nOnline play on the Vita is Vita-only: join a game hosted on another Vita." = "Este anfitrión no es una PlayStation Vita.\n\nEl juego en línea en la Vita es solo entre Vitas: únete a una partida creada en otra Vita."
 "This host is a PlayStation Vita.\n\nOnline play on the Vita is Vita-only: PCs cannot join Vita games." = "Este anfitrión es una PlayStation Vita.\n\nEl juego en línea en la Vita es solo entre Vitas: las PC no pueden unirse a partidas de Vita."
 "The host is using the lockstep network code, which this version no longer has.\n\nAsk the host to update the game." = "El anfitrión usa el código de red lockstep, que esta versión ya no tiene.\n\nPídele al anfitrión que actualice el juego."

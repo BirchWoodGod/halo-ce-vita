@@ -149,6 +149,11 @@ enum
 	with no player of its own. Browsers before it ignore the bit (the
 	listing reads as before), and show the game as any other */
 	_listing_dedicated = 128,
+	/* (format 1 from a host of 39 on) OpenCE's dedicated server, the bit
+	format 2 uses for a Halo PC map (docs/opence-net39-spec.md 2.2): a label
+	alone, the host's word, as OpenCE's own browsers take it */
+	_listing_opence_dedicated = 32,
+	LISTING_OPENCE_DEDICATED_VERSION = 39,
 	STAMP_SIZE = 8,
 	LISTED_PLAYERS = P2P_LISTING_PLAYERS,
 	LISTED_PLAYER_NAME_SIZE = P2P_LISTING_PLAYER_NAME_SIZE,
@@ -716,7 +721,8 @@ static int p2p_lobby_listing_read(int crossplay, const unsigned char *bytes, int
 	build's Halo PC map and co-op) */
 	if (crossplay)
 		listing->flags &= _listing_open | _listing_in_progress | _listing_has_teams | _listing_closed |
-			_listing_password | _listing_dedicated | _listing_vita_host;
+			_listing_password | _listing_dedicated | _listing_vita_host |
+			(listing->version >= LISTING_OPENCE_DEDICATED_VERSION ? _listing_opence_dedicated : 0);
 	listing->sequence = get_long(bytes + offset);
 	offset += 4;
 	listing->time = get_long(bytes + offset);
@@ -1576,7 +1582,11 @@ static void listing_fill(struct p2p_listing *shown, const unsigned char *key_has
 		(listing->flags & _listing_coop) != 0;
 	shown->dedicated = (listing->flags & _listing_dedicated) != 0;
 	shown->platform = (unsigned char)crossplay_guard_platform_of_listing(listing->crossplay, shown->vita_host,
-		shown->dedicated);
+		shown->dedicated, listing->crossplay && !shown->vita_host && (listing->flags & _listing_opence_dedicated));
+	/* (OpenCE 39's dedicated server shown as one too: SERVER, the browser's
+	servers filter) */
+	if (listing->crossplay && !shown->vita_host && (listing->flags & _listing_opence_dedicated))
+		shown->dedicated = 1;
 	/* (this project's marks, from the stamp: a Vita's game's alone) */
 	shown->marks = (unsigned char)(!shown->vita_host ? 0 :
 		((listing->stamp & NETWORK_WIRE_STAMP_PC_HOST) ? CROSSPLAY_HOST_PC_BUILD : 0) |
@@ -1862,7 +1872,7 @@ static void other_version_heard(int crossplay, const unsigned char *key_hash, co
 		"(this build joins %s there), \"%s\" (%s%s%s, %d/%d players%s%s%s%s), not yet checked", hash, version,
 		crossplay ? "crossplay" : "Vitas'", joined, listing.name, listing.map, listing.gametype[0] ? ", " : "",
 		listing.gametype, listing.player_count, listing.maximum_player_count,
-		(listing.flags & _listing_dedicated) ? ", dedicated" : "",
+		(listing.flags & (_listing_dedicated | (crossplay ? _listing_opence_dedicated : 0))) ? ", dedicated" : "",
 		crossplay && (listing.flags & _listing_vita_host) ? ", a Vita's" : "",
 		(listing.flags & _listing_password) ? ", password" : "", (listing.flags & _listing_closed) ? ", closed" : "");
 }

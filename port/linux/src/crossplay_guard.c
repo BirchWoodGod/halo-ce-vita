@@ -194,24 +194,37 @@ enum
 {
 	ADVERTISED_VITA_HOST_FLAG = 0x40,
 	ADVERTISED_DELTA_FLAG = 0x04,
+	/* (OpenCE's dedicated server, the same bit from a host of 39 on:
+	docs/opence-net39-spec.md 2.1) */
+	ADVERTISED_DEDICATED = 0x04,
+	ADVERTISED_DEDICATED_VERSION = 39,
 };
 
-int crossplay_guard_platform_of_advertisement(int crossplay, int other_version, int flags)
+int crossplay_guard_platform_of_advertisement(int crossplay, int other_version, unsigned int version, int flags)
 {
 	if (other_version)
 		return CROSSPLAY_PLATFORM_PC;
 	if (!crossplay || (flags & ADVERTISED_VITA_HOST_FLAG))
 		return CROSSPLAY_PLATFORM_VITA;
-	if (flags & ADVERTISED_DELTA_FLAG)
+	/* (from 39 the bit is OpenCE's dedicated server: ADVERTISED_DEDICATED) */
+	if ((flags & ADVERTISED_DELTA_FLAG) && version < ADVERTISED_DEDICATED_VERSION)
 		return CROSSPLAY_PLATFORM_CHUPA;
 	return CROSSPLAY_PLATFORM_OPENCE;
 }
 
-int crossplay_guard_platform_of_listing(int crossplay, int vita_host, int dedicated)
+int crossplay_guard_advertised_dedicated(int crossplay, unsigned int version, int flags)
+{
+	return crossplay && version >= ADVERTISED_DEDICATED_VERSION && !(flags & ADVERTISED_VITA_HOST_FLAG) &&
+		(flags & ADVERTISED_DEDICATED) != 0;
+}
+
+int crossplay_guard_platform_of_listing(int crossplay, int vita_host, int dedicated, int opence_dedicated)
 {
 	if (!crossplay || vita_host)
 		return CROSSPLAY_PLATFORM_VITA;
-	return dedicated ? CROSSPLAY_PLATFORM_CHUPA : CROSSPLAY_PLATFORM_PC;
+	if (dedicated)
+		return CROSSPLAY_PLATFORM_CHUPA;
+	return opence_dedicated ? CROSSPLAY_PLATFORM_OPENCE : CROSSPLAY_PLATFORM_PC;
 }
 
 const char *crossplay_guard_tag(int platform)

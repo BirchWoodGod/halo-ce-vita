@@ -66,9 +66,13 @@ older one its clients still join, OpenCE's at 8102e711 (build-206),
 ChupathingyCE's since a501871f (0.7.5a) */
 #define HALO_PORT_CROSSPLAY_NETWORK_VERSION 32
 #define HALO_PORT_CROSSPLAY_OLDER_NETWORK_VERSION 29
-/* ... and the newest one its clients join, OpenCE's and ChupathingyCE's
-servers' since Oct 23 2026 (network_wire_v33_rules ...) */
-#define HALO_PORT_CROSSPLAY_NEWEST_NETWORK_VERSION 38
+/* ... 38, OpenCE's and ChupathingyCE's servers' since Oct 23 2026
+(network_wire_v33_rules ...), still ChupathingyCE's [C] servers' */
+#define HALO_PORT_CROSSPLAY_38_NETWORK_VERSION 38
+/* ... and the newest one its clients join, OpenCE's since 815d3a0c (Oct 25
+2026: its dedicated server; docs/opence-net39-spec.md), played by 38's rules
+with 39's two meanings (network_wire_v39_rules) */
+#define HALO_PORT_CROSSPLAY_NEWEST_NETWORK_VERSION 39
 
 /* a Vita's game on the crossplay wire says it is a Vita's: this bit in its
 advertisement's flags (HALO_PORT_ADVERTISED_FLAGS_OFFSET; OpenCE's 0x01 and
@@ -119,9 +123,9 @@ unsigned int network_wire_host_version(void);
 version (the host's, joined or hosted) on the crossplay wire */
 unsigned int network_wire_version(void);
 /* whether a host announcing the version can be joined on that wire:
-legacy, exactly 18; crossplay, the accepted list (29, 32 and 38) */
+legacy, exactly 18; crossplay, the accepted list (29, 32, 38 and 39) */
 int network_wire_version_accepted_on(int crossplay, unsigned int version);
-/* the crossplay versions joined, for a log line or a message ("29, 32 and 38") */
+/* the crossplay versions joined, for a log line or a message ("29, 32, 38 and 39") */
 void network_wire_crossplay_versions_text(char *text, int size);
 /* the crossplay version a player should look for instead of a host's
 version not joined: the lowest joined above it, else the highest joined
@@ -182,6 +186,25 @@ int network_wire_v33_rules(void);
 int network_wire_v34_rules(void);
 int network_wire_v35_rules(void);
 int network_wire_v36_rules(void);
+/* ... version 39's (a crossplay game of 39; Oct 27 2026, clean-room from
+docs/opence-net39-spec.md: OpenCE is AGPL past 4b09168e, its source not
+read here). 39 marks OpenCE's dedicated server and changes nothing a game
+plays: its rules are 38's. Two values mean something new from a host of 39:
+- the advertisement's flags bit 0x04 is "a dedicated server" (a host with no
+  player of its own), no longer ChupathingyCE's Delta bit
+  (crossplay_guard_platform_of_advertisement), and the listing's flags bit
+  0x20 is the same (p2p_lobby.c): both labels alone, nothing trusts them;
+- a refusal's code 7 is "your player name was refused" (a dedicated
+  server's word filter) on the crossplay wire, not this project's "Vitas
+  only", which only a Vita's host on the legacy wire sends
+  (network_wire_rejection_is_name_refused).
+A client's build report (kind 92) goes from a client to its host alone and
+a host that does not know it drops it: ours never sends it. */
+int network_wire_v39_rules(void);
+/* nonzero when a host's refusal of this machine's join with this code
+means its player name was refused (OpenCE 39's code 7: a crossplay game
+whose host is not a Vita), rather than this project's "Vitas only" */
+int network_wire_rejection_is_name_refused(int code);
 
 /* hosting: whether the next game this machine hosts takes OpenCE's PC
 players too (network_wire_host_audience: everyone), on the crossplay wire;

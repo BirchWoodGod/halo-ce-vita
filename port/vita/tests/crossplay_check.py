@@ -280,7 +280,8 @@ def check_direction(host, clients, score_to_win, rejoin):
     # (internet play: an invite opened, or a listing joined, reaches the host
     # through the brokers' signalling, then the tunnel connects)
     asked = any("Internet play: joining" in line for line in first.out)
-    connected = any(re.search(r"Internet play: connected to host", line) for line in first.out)
+    connected = any(re.search(r"Internet play: connected to host|Internet play: joining .*, reached already", line)
+                    for line in first.out)
     steps["signal"] = step(not asked or connected, "no internet play" if not asked else
         "the tunnel to the host connected" if connected else
         "the client asked to join through the brokers and never reached the host")
@@ -437,7 +438,11 @@ def check_server(server, clients):
         f"{subject.name} heard the server (and refused it: below)" if "version" in diag else
         f"{subject.name} never found the server")
     asked = any("Internet play: joining" in line for line in subject.out)
-    connected = any("Internet play: connected to host" in line for line in subject.out)
+    # (or "reached already": OpenCE's browser of 39 pings a listed game, its
+    # tunnel up before the join asks: docs/opence-net39-spec.md, crossplay.md
+    # 10.12)
+    connected = any("Internet play: connected to host" in line or
+                    re.search(r"Internet play: joining .*, reached already", line) for line in subject.out)
     steps["signal"] = step(not asked or connected, "no internet play" if not asked else
         "the tunnel to the server connected" if connected else
         f"{subject.name} asked to join through the brokers and never reached the server")

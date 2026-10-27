@@ -110,13 +110,19 @@ enum crossplay_guard_platform
 
 /* the platform of an advertised game: on the crossplay wire (crossplay:
 the version is one it joins) by its flags (flags: the advertisement's flags
-byte); a PC host of a version neither wire joins (other_version: an older or
-newer PC build) is PC */
-int crossplay_guard_platform_of_advertisement(int crossplay, int other_version, int flags);
+byte; 0x04 is ChupathingyCE's Delta bit from a host of up to 38, OpenCE's
+dedicated server from one of 39 on: version, docs/opence-net39-spec.md 2.1);
+a PC host of a version neither wire joins (other_version: an older or newer
+PC build) is PC */
+int crossplay_guard_platform_of_advertisement(int crossplay, int other_version, unsigned int version, int flags);
+/* whether an advertised crossplay game of that version says it is a
+dedicated server's (OpenCE 39's 0x04): a label alone, the host's word */
+int crossplay_guard_advertised_dedicated(int crossplay, unsigned int version, int flags);
 /* ... of a listed game: the legacy wire's listings are the Vitas'; on the
-crossplay wire a Vita's says so (vita_host), a dedicated server's is
-ChupathingyCE's (above), the rest PC */
-int crossplay_guard_platform_of_listing(int crossplay, int vita_host, int dedicated);
+crossplay wire a Vita's says so (vita_host), a dedicated server's by
+ChupathingyCE's bit (128) is ChupathingyCE's (above), one by OpenCE 39's
+(0x20: opence_dedicated) OpenCE's, the rest PC */
+int crossplay_guard_platform_of_listing(int crossplay, int vita_host, int dedicated, int opence_dedicated);
 /* the tag a browser row shows for a platform (short, printable ASCII, the
 same in every language: names): VITA, PC, OPENCE, CHUPA, DAMNATION */
 const char *crossplay_guard_tag(int platform);

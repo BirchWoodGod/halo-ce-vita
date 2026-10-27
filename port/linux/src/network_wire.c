@@ -25,10 +25,12 @@ message to tell, 28 names a Custom Edition map and its version otherwise,
 DamnationCE (7be58b2b) is still 26, and refused (docs/crossplay.md 5.1,
 10.9). And 38 (Oct 24 2026: OpenCE's and ChupathingyCE's servers, their
 rules network_wire.h's network_wire_v33_rules ...), not 33 to 37, which no
-release announces. In order, lowest first */
+release announces. And 39 (Oct 27 2026: OpenCE's since its dedicated
+server, 815d3a0c; 38's rules, docs/opence-net39-spec.md). In order, lowest
+first */
 static const unsigned short crossplay_accepted_versions[] =
 	{ HALO_PORT_CROSSPLAY_OLDER_NETWORK_VERSION, HALO_PORT_CROSSPLAY_NETWORK_VERSION,
-		HALO_PORT_CROSSPLAY_NEWEST_NETWORK_VERSION };
+		HALO_PORT_CROSSPLAY_38_NETWORK_VERSION, HALO_PORT_CROSSPLAY_NEWEST_NETWORK_VERSION };
 
 /* the game's wire and whether its host is a Vita (the game's threads and
 the p2p thread read them; one writer at a time: the game's as it joins or
@@ -209,6 +211,20 @@ int network_wire_v35_rules(void)
 int network_wire_v36_rules(void)
 {
 	return game_crossplay_version() >= 36;
+}
+
+int network_wire_v39_rules(void)
+{
+	return game_crossplay_version() >= 39;
+}
+
+int network_wire_rejection_is_name_refused(int code)
+{
+	/* (OpenCE 39's _rejection_code 7, the same number as this project's
+	Vitas only: a Vita's host sends that on the legacy wire alone, so a PC
+	host's 7 on the crossplay wire is OpenCE's. Not by the version: a PC
+	host of 38 sends no 7 at all, and its 7 would mean nothing else) */
+	return code == 7 && network_wire_crossplay() && !network_wire_host_vita();
 }
 
 void network_wire_crossplay_versions_text(char *text, int size)

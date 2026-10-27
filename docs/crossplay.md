@@ -1591,6 +1591,105 @@ control too); chupaserver against ChupathingyCE d7fafc81's server announcing
 38 (XPPC_PC_LEGACY_TABLE) passed every step on a LAN. Unit: network_wire_test,
 wire_contract_record (v38_*), net_fuzz variant_options (38's record).
 
+### 10.12 Network version 39 joined (Oct 27 2026), and how we keep up
+
+Branch feat/xp-v39 (from release-1.1.1 RC4, for RC5). On Oct 25-26 OpenCE
+raised its version to 39 with its dedicated server (`halo --server`,
+815d3a0c) and the public PC servers followed within a day; the owner's RC4
+log greyed 173 listings of 39 ("this build joins 29, 32 and 38 there").
+
+**Source: clean-room.** ChupathingyCE has no 39 (main d7fafc81, Oct 24; its
+signed table widens `chupa-38a` to 39 with no layout, a speculative maximum
+we do not copy). OpenCE is AGPL past 4b09168e, so a separate agent read OpenCE
+7fb941b0..337b05cf and wrote `docs/opence-net39-spec.md` (facts, layouts and
+run instructions, no code); the code here is ours from that document. No
+OpenCE source past 4b09168e was opened by the implementer; OpenCE 337b05cf
+(build-294) ran only as a black box, built by build_pc_crossplay.sh with no
+patch. The pinned wire point is 09123e99 (337b05cf has the same wire).
+
+**What 39 changed** (spec 0): nothing a game plays. The settings record
+(13,136 bytes), every message, the tick windows and the join are 38's, so a
+game of 39 plays 38's rules (`network_wire_v33_rules` ... test `>= n`).
+Three values mean something new, all handled by `network_wire_v39_rules` and
+`crossplay_guard.c`:
+
+| What | 39's meaning | Here |
+|---|---|---|
+| version | 39 (an exact match, as before) | joined: 29, 32, 38 and 39 (`HALO_PORT_CROSSPLAY_38_NETWORK_VERSION`, `_NEWEST_` = 39); hosts still announce 32 |
+| advertisement flags 0x04 | OpenCE's dedicated server (was ChupathingyCE's Delta bit) | read by version: from 39 OPENCE SERVER, before CHUPA (`crossplay_guard_platform_of_advertisement`, `crossplay_guard_advertised_dedicated`); the System Link list badges it SERVER |
+| listing flags 0x20 (format 1) | dedicated server | from 39: SERVER, OPENCE, the servers filter; format 2's 0x20 (Halo PC map) untouched |
+| rejection code 7 | the host refused the player's name (a server's word filter) | on the crossplay wire from a PC host: "The host refused your player name" (`network_wire_rejection_is_name_refused`); a Vita host's 7 on the legacy wire is still Vitas only |
+| kind 92 | a client's build report, client to host, optional | never sent; a host of ours drops it as an unknown kind (as before) |
+
+All three labels are the other machine's word and nothing trusts them. No
+new message is read, so the input a v39 host can send is exactly what a 38
+host could, through the same checks (record size by version, kinds 90/91
+from the host's stream only, and the rest of 10.9 and 10.11).
+
+**Not done** (spec 7, owner decisions): OpenCE's public dedicated servers
+list on its HTTPS master servers (`master.opencommunityedition.com`) and on
+the MQTT brokers only when the operator sets `server.list_on_brokers`; our
+browser reads the brokers, so those servers show only if listed there (on
+Oct 27 most were: the RC4 log's 39s came from the brokers). Reading the
+masters needs HTTPS + JSON + Ed25519 on the Vita (a third-party service).
+Hosting at 39 (our hosts announce 32) needs the host side of 33-38 first.
+A ChupathingyCE-family server announcing 39 that keeps 0x04 as its Delta
+bit is tagged OPENCE SERVER on a LAN (the listing's 128 still says CHUPA):
+seen live on Oct 27 ("TeamSlayer": CHUPA SERVER in the browser, OPENCE
+SERVER in the System Link list), a label only.
+
+**Tests** (OpenCE 337b05cf of 39, OpenCE 7fb941b0 of 38, ChupathingyCE
+d7fafc81 server announcing 38 by `XPPC_PC_LEGACY_TABLE`; ours the
+`--linux-net-vita --linux-d3d gxm-null` debug build, as the PC build and with
+`HALO_TEST_PLATFORM=vita`):
+
+| Test | Result |
+|---|---|
+| `opencelan` (39 player host, LAN), PC build and Vita identity | PASS every step (join, settings, play, spawn, kills, client damage, score, end, rejoin, stability); our client logs "network version 39's rules", lists `[OPENCE]` |
+| `opencehost` (39, browser and invite) | our client PASS both; the invite join is tested at last (39's host logs its whole invite); the control's signal step failed on OpenCE's "reached already" (its browser's ping session), fixed in crossplay_check.py and passing on re-check |
+| `openceserver` (new: OpenCE's dedicated server of 39, no host player, LAN and broker-listed internet), PC build and Vita identity | PASS: both games of its rotation (Slayer, then Team Slayer after `sv_end_game` on its console FIFO) on every copy, the MOTD and "Next game in" notices shown, `[OPENCE SERVER]` on the LAN; no assumption of a host player tripped |
+| regressions: `opencelan` with OpenCE 38, `chupaserver` (38, LAN and internet) | our client PASS every game step on both; OpenCE 7fb941b0's own postgame fault (host and its clients, as in 10.11) is the only stability line |
+| `run_netns_online_test.sh vitaonly code lan lobby` (legacy wire, code 7 as Vitas only) | PASS |
+| `crossfuzzclient` (new; an ASan + UBSan `HALO_NET_FUZZ_TWIN` build, our client twinning 1 in 2-3 of what 39 hosts send) | three runs against 39 (and one against OpenCE 38's player host): the server's games 1024, 2048 and 2048 twins on a LAN, 256 and 1024 over the internet (the third run's internet copy never joined); the player host's distributed messages 1024-2048 twins per staying copy (256 on 38): no AddressSanitizer memory error. One debug assertion halt, not reproduced in two further runs and not a v39 path: objects.c #958 (`object_disconnect_from_map` on a biped not connected to the map, from twinned object updates in a client's first seconds); release builds skip the check. Handed to the RC5 net-hardening work |
+| libFuzzer (`run_net_fuzz_test.sh`, 300 s each): lobby (listings of 39 now), variant_options (39's record), messages, signal | PASS, no crash (1.0M, 75.9M, 18.3M, 1.0M runs) |
+| unit: network_wire_test (all builds), crossplay_guard_test, p2p_lobby, browser_list, lang, chat; wire contract against 8102e711 | PASS |
+| a real public server of 39 ("TeamSlayer", dedicated, 0/8), read only | joined its lobby from the browser over the internet (direct tunnel), its settings record of 39 taken ("1 players on 2 machines": the server has none), left at once (75 s run) |
+| tools/vita_abi_check.py; Vita `--lto off --pgo off --portable --release`, `ninja vita` | 0 unsafe declarations; eboot.bin and halo.vpk built |
+
+Interop with 1.1.0 and earlier 1.1.1 builds is unchanged: our hosts announce
+32 and the legacy wire is untouched; only what our client joins widened.
+
+**How long it took.** The bump was noticed in the RC4 log on Oct 26-27;
+the spec (one agent, about 10 minutes of reading), the code (about 40 lines
+of logic) and the full test pass took one session of about 2 hours. Most of
+the time went to the test harness (a dedicated-server mode, the "reached
+already" log change), not the wire.
+
+**Checklist for the next bump** (OpenCE 40, or ChupathingyCE following):
+1. Read the browser's log of a current build ("network version N on the
+   crossplay wire ... not yet checked") to see what the PCs moved to, and
+   how many.
+2. ChupathingyCE first (GPL: port with credit): its `delta.h`
+   `DELTA_LEGACY_VERSIONS` and `network_rules.h`, and its `delta-table`
+   branch's `legacy.json` layouts. A row that only widens a maximum is a
+   guess, not a spec.
+3. Else clean-room: a separate agent reads OpenCE's commits from our last
+   pinned wire point and writes `docs/opence-netN-spec.md` (facts only); the
+   implementer reads only that. Pin the last wire-changing commit.
+4. Build the PC copy with `build_pc_crossplay.sh` (no patch), write its
+   `NETWORK_VERSION` file beside BUILD_INFO (never read its tree).
+5. Code: the version in `network_wire.h`/`network_wire.c`'s list, a
+   `network_wire_vN_rules` for anything new, new kinds behind the host-only,
+   stream-only, exact-size checks of 90/91; reused values (flags, codes) read
+   by version.
+6. Tests: network_wire_test, crossplay_guard_test, wire_contract,
+   `opencelan`, `opencehost`, `openceserver`, `chupaserver` (regression),
+   `crossfuzzclient` with an ASan twin build, the libFuzzer targets with the
+   new version's seeds, `run_netns_online_test.sh vitaonly code lan lobby`,
+   vita_abi_check, a Vita release build.
+7. docs/crossplay.md: a 10.x section with the table above; note what the
+   owner must decide (hosting at N, new discovery paths).
+
 ## 11. Licensing and credit
 
 **Licences:**

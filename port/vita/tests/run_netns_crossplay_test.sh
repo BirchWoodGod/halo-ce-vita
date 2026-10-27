@@ -76,6 +76,12 @@
 #   damnserver  DamnationCE's dedicated server (its game binary with
 #               HALO_DEDICATED), an OpenCE client and ours, on a LAN and over
 #               the internet (by its invite: it lists only on its game list)
+#   openceserver  OpenCE's dedicated server (network version 39, its game
+#               binary with --server; docs/opence-net39-spec.md): a host with
+#               no player of its own, its rotation (XPPC_SERVER_ROTATION,
+#               Slayer then Team Slayer on Blood Gulch), an OpenCE client and
+#               ours, on a LAN and over the internet (listed on the test's
+#               broker, HALO_SERVER_LIST_ON_BROKERS; masters off)
 #   crosschat   the in-game chat with OpenCE's text chat (kinds 87-89): an
 #               OpenCE host and our client, our host for Vitas and PC and an
 #               OpenCE client, each side's lines, team lines, notices, mutes
@@ -209,6 +215,11 @@
 #               (XPPC_OPENCE29, an OpenCE of 29): our client on its LAN
 #               host, and our host announcing 29 (HALO_TEST_CROSSPLAY_HOST_VERSION)
 #               with its clients; played by 29's rules
+#   crossfuzzclient  our client's side fuzzed in OpenCE games of 39 (not in
+#               all; HALO_TEST_VITA an ASan HALO_NET_FUZZ_TWIN build): one in
+#               XPPC_FUZZ_RATE (2) of what an OpenCE player host and its
+#               dedicated server send twinned, on a LAN and over the internet;
+#               no sanitizer memory error, no crash
 #   crossfuzzhost  the host side fuzzed (not in all; HALO_TEST_VITA an ASan
 #               HALO_NET_FUZZ_TWIN build): our host for Vitas and PC twins one
 #               in XPPC_FUZZ_RATE (2) of its OpenCE clients' messages and
@@ -306,7 +317,7 @@ expected_fail=${XPPC_EXPECTED_FAIL:-}
 mode=${1:-}
 
 case $mode in
-pcself|chupaopence|opencelan|opencehost|crosstls|chupahost|chupaserver|damnserver|crossrefuse|crossbig|crossmixed|crosscoop|crossctf) ;;
+pcself|chupaopence|opencelan|opencehost|crosstls|chupahost|chupaserver|damnserver|openceserver|crossrefuse|crossbig|crossmixed|crosscoop|crossctf) ;;
 pcjoinsvita|pccap|browserboth|crosspassword|crosscoophost|net32|crosschat) ;;
 net29)
 	[ -n "${XPPC_OPENCE29:-}" ] && [ -x "$XPPC_OPENCE29" ] ||
@@ -330,6 +341,9 @@ crosscoopcensus) ;;
 crosscoopfuzz)
 	grep -aq "net fuzz twin: one message in" "${HALO_TEST_VITA:-$root/build/linux/halo}" 2>/dev/null ||
 		{ echo "SKIP (crosscoopfuzz): HALO_TEST_VITA is not a HALO_NET_FUZZ_TWIN build (AddressSanitizer)"; exit 0; } ;;
+crossfuzzclient)
+	grep -aq "net fuzz twin: one message in" "${HALO_TEST_VITA:-$root/build/linux/halo}" 2>/dev/null ||
+		{ echo "SKIP (crossfuzzclient): HALO_TEST_VITA is not a HALO_NET_FUZZ_TWIN build (AddressSanitizer)"; exit 0; } ;;
 crossmaps)
 	ce_map=${XPPC_CE_MAP:-${HALO_TEST_CE_MAP:-}}
 	ce_resources=${XPPC_CE_RESOURCES:-}
@@ -416,11 +430,15 @@ pc_version() { # pc_version BINARY
 # host's), "29 and 32" as our client logs them; the one our host announces
 our_version=$(sed -n 's/^#define HALO_PORT_CROSSPLAY_NETWORK_VERSION \([0-9]*\).*/\1/p' "$root/port/linux/include/network_wire.h")
 our_older_version=$(sed -n 's/^#define HALO_PORT_CROSSPLAY_OLDER_NETWORK_VERSION \([0-9]*\).*/\1/p' "$root/port/linux/include/network_wire.h")
-our_versions="${our_older_version:+$our_older_version and }$our_version"
+# (and since Oct 24 and 27 2026 38 and 39: every version the wire joins,
+# "29, 32, 38 and 39" as network_wire_crossplay_versions_text says it)
+our_joined_versions=$(sed -n 's/^#define HALO_PORT_CROSSPLAY_[A-Z0-9]*_NETWORK_VERSION \([0-9]*\).*/\1/p;
+	s/^#define HALO_PORT_CROSSPLAY_NETWORK_VERSION \([0-9]*\).*/\1/p' "$root/port/linux/include/network_wire.h" | sort -nu)
+our_versions=$(echo $our_joined_versions | awk '{ for (i = 1; i <= NF; i++) printf "%s%s", i == 1 ? "" : i == NF ? " and " : ", ", $i }')
 plays_ours() { # plays_ours BINARY NAME: 0 if the build's version is one ours joins (or not known); else says so
 	local version
 	version=$(pc_version "$1")
-	[ -z "$version" ] || [ "$version" = "$our_version" ] || [ "$version" = "$our_older_version" ] && return 0
+	[ -z "$version" ] || echo " $our_joined_versions " | tr '\n' ' ' | grep -q " $version " && return 0
 	echo "--- $2 left out: the build announces network version $version, the crossplay wire joins $our_versions (crossold: refused)"
 	return 1
 }
@@ -633,6 +651,7 @@ run_copy() {
 		opence29) binary=$opence29 ;;
 		chupaserver) binary=$chupa_server ;;
 		damnation) binary=$damnation ;;
+		openceserver) binary=$opence ;;
 		esac
 		# (a copy of the binary of its own: config.toml is the binary's folder's)
 		cp "$binary" "$dir/bin/halo"
@@ -644,9 +663,12 @@ run_copy() {
 		own="SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy
 			HALO_NULL_RENDERER=1 HALO_HIDDEN_WINDOW=1 HALO_NET_BROWSER=
 			HALO_NET_LIST_GAMES=false HALO_NET_REPORT_GAMES=false HALO_NET_REPORT_EVENTS=false
-			HALO_LEGACY_TABLE=$dir/no-legacy-table.json HALO_DEDICATED_LINK=false HALO_DEDICATED_CONSOLE=false" ;;
+			HALO_LEGACY_TABLE=$dir/no-legacy-table.json HALO_DEDICATED_LINK=false HALO_DEDICATED_CONSOLE=false
+			HALO_NET_LISTINGS=brokers" ;;
 	esac
-	(cd "$dir/data" && exec nsenter -t "$ns" -n env -u DISPLAY -u WAYLAND_DISPLAY -u XAUTHORITY $common $own "$@" \
+	# (copy_stdin: a FIFO the copy reads its console from - OpenCE's
+	# dedicated server's commands; the harness holds it open for writing)
+	(cd "$dir/data" && { [ -z "${copy_stdin:-}" ] || exec < "$copy_stdin"; } && exec nsenter -t "$ns" -n env -u DISPLAY -u WAYLAND_DISPLAY -u XAUTHORITY $common $own "$@" \
 		taskset -c "$cpus" timeout -k 5 "$run_seconds" "$binary" ${copy_args:-} > "$dir/run.log" 2>&1) &
 	last_pid=$!
 }
@@ -659,6 +681,16 @@ host_env() {
 	chupaserver|damnation-server)
 		echo "HALO_NET_ONLINE=$online HALO_NET_HOST_PUBLIC=$public HALO_DEDICATED=xp-playlist.txt
 			HALO_DEDICATED_NAME=XpServer HALO_DEDICATED_MINIMUM_PLAYERS=1 HALO_DEDICATED_PUBLIC=$public" ;;
+	openceserver)
+		# (OpenCE's dedicated server of 39, halo --server: docs/opence-net39-spec.md
+		# 9; listed on the test's broker, never on a master server; no web
+		# admin page; a short lobby and postgame, the rotation's games in turn)
+		echo "HALO_NET_ONLINE=$online HALO_NET_PUBLIC_LOBBY=$public HALO_SERVER_PUBLIC=$public
+			HALO_SERVER_LIST_ON_BROKERS=$public HALO_SERVER_MASTER_PUBLISH=false HALO_SERVER_WEB_PORT=0
+			HALO_SERVER_NAME=XpServer HALO_NET_LOBBY_NAME=XpServer HALO_SERVER_MIN_PLAYERS=1
+			HALO_SERVER_LOBBY_SECONDS=5 HALO_SERVER_POSTGAME_SECONDS=5
+			HALO_SERVER_ROTATION=${XPPC_SERVER_ROTATION:-bloodgulch:slayer+score=$score_to_win,bloodgulch:team_slayer}
+			HALO_SERVER_MOTD=xp-motd-line ${server_extra:-}" ;;
 	*)
 		echo "HALO_NET_ONLINE=$online HALO_NET_HOST_PUBLIC=$public HALO_NETWORK_TEST_PUBLIC=$public
 			HALO_NETWORK_TEST=host:${host_game:-bloodgulch}:${host_variants:-slayer,ctf}
@@ -834,10 +866,19 @@ pair_server() { # pair_server NAME TRANSPORT SERVERKIND SECONDCLIENTKIND [CLIENT
 	(
 		run_seconds=$server_seconds
 		trap 'kill $mine 2>/dev/null; wait 2>/dev/null; exit 0' TERM
-		local kind=$serverkind
-		[ "$serverkind" = damnserver ] && kind=damnation
-		run_copy "$name/host" "$server_ns" "$kind" "$server_ip" "$broker_address" \
-			$(host_env "$([ "$serverkind" = damnserver ] && echo damnation-server || echo chupaserver)" "$transport")
+		local kind=$serverkind server_kind=chupaserver
+		[ "$serverkind" = damnserver ] && kind=damnation server_kind=damnation-server
+		local console=
+		if [ "$serverkind" = openceserver ]; then
+			# (its console on a FIFO, held open here for writing, so that the
+			# harness ends its first game: the rotation's next comes after its
+			# postgame and lobby)
+			server_kind=openceserver console=$out/$name/console
+			mkfifo "$console"
+			exec 3<> "$console"
+		fi
+		copy_stdin=$console copy_args=$([ "$serverkind" = openceserver ] && echo --server) \
+			run_copy "$name/host" "$server_ns" "$kind" "$server_ip" "$broker_address" $(host_env "$server_kind" "$transport")
 		mine=$last_pid
 		sleep 6
 		invite=
@@ -855,6 +896,15 @@ pair_server() { # pair_server NAME TRANSPORT SERVERKIND SECONDCLIENTKIND [CLIENT
 		copy_args=$invite run_copy "$name/client2" "$c2_ns" "$clientkind" "$c2_ip" "$broker_address" \
 			$(client_env "$clientkind" "$transport" $((43 + pairs))) $extra
 		mine="$mine $last_pid"
+		if [ -n "$console" ]; then
+			# (openceserver: the first game ended XPPC_SERVER_END_AT (70) s
+			# after the server started, on its console: its scores, the next
+			# game's notice, the next game)
+			sleep $(( ${XPPC_SERVER_END_AT:-70} - 10 ))
+			echo "sv_status" >&3
+			echo "sv_end_game" >&3
+			echo "$name: the server's first game ended on its console ($SECONDS s)" >> "$out/$name/commands.log"
+		fi
 		wait
 	) > "$out/$name/pair.log" 2>&1 &
 	pids="$pids $!"
@@ -1155,7 +1205,7 @@ chupahost)
 	run_our_modes
 	echo "--- the brokers' topics"; broker_topics
 	;;
-chupaserver|damnserver)
+chupaserver|damnserver|openceserver)
 	kind=$mode
 	if [ "$mode" = damnserver ] && ! plays_ours "$damnation" "DamnationCE's server"; then
 		echo "SKIP ($mode): DamnationCE's build is of network version $(pc_version "$damnation"), not $our_versions"
@@ -1178,6 +1228,36 @@ chupaserver|damnserver)
 		pair_server "lan-$mode-ours-probe" lan "$kind" ours "$cross_line"; : > "$out/lan-$mode-ours-probe/server"
 	fi
 	run_our_modes
+	if [ "$mode" = openceserver ]; then
+		# (OpenCE's server has no player of its own, and plays its rotation:
+		# every copy in its second game, ours shown the next game's notice
+		# and the MOTD; the server's list tag OPENCE SERVER on a LAN)
+		for name in $control_names $test_names; do
+			rotation_ok=1
+			for copy in client client2; do
+				log=$out/$name/$copy/run.log
+				[ -f "$log" ] || continue
+				games=$(games_played "$log")
+				echo "  $name $copy: $games games played (the network test's ticks)"
+				[ "$games" -ge 2 ] || rotation_ok=0
+			done
+			if [ "$(cat "$out/$name/client2/kind" 2>/dev/null)" = ours ]; then
+				debug=$out/$name/client2/data/debug.txt
+				grep -aq "Next game in" "$debug" 2>/dev/null && echo "  $name ours: the next game's notice shown" ||
+					{ echo "  $name ours: no next game notice"; rotation_ok=0; }
+				grep -aq "xp-motd-line" "$debug" 2>/dev/null && echo "  $name ours: the MOTD shown" ||
+					{ echo "  $name ours: no MOTD"; rotation_ok=0; }
+				case $name in
+				lan-*) grep -aq 'the System Link list: .*\[OPENCE SERVER\] "XpServer"' "$out/$name/client2/run.log" &&
+					echo "  $name ours: listed [OPENCE SERVER]" || { echo "  $name ours: not tagged OPENCE SERVER"; rotation_ok=0; } ;;
+				esac
+			fi
+			if [ $rotation_ok = 0 ]; then
+				case " $control_names " in *" $name "*) controls_ok=0; echo "BROKEN ($mode): $name's rotation" ;;
+				*) our_results="$our_results $name:rotation" ;; esac
+			fi
+		done
+	fi
 	echo "--- the brokers' topics"; broker_topics
 	;;
 crosschat)
@@ -2223,6 +2303,51 @@ crosscoopfuzz)
 			result=too-few-twins-${twins:-0}-or-co-op-seconds-${ticks:-0}
 		fi
 		our_results="$our_results $name:$result"
+	done
+	;;
+crossfuzzclient)
+	# our client's side fuzzed in a PC game of the newest version the wire
+	# joins (39 since Oct 27 2026: docs/opence-net39-spec.md): one in
+	# XPPC_FUZZ_RATE (2) of everything an OpenCE host (a player's game and
+	# its dedicated server, XPPC_OPENCE of 39) sends our client twinned
+	# (net_fuzz_twin.h: the game's messages, the distributed netcode's, the
+	# settings record, map sharing's), on a LAN and, the server's, over the
+	# internet: no sanitizer memory error, no crash, our client to its end
+	rate=${XPPC_FUZZ_RATE:-2}
+	fuzz_env() { echo "HALO_NET_FUZZ_RATE=$1 HALO_NET_FUZZ_SEED=$2 HALO_NET_FUZZ_DUMP=fuzzdump.txt"; }
+	# (the player host's game starting once the sanitizer build is up:
+	# XPPC_FUZZ_START seconds, 40; its distributed messages alone twinned, 1-255:
+	# a twinned settings record in its lobby is refused and our client
+	# leaves, rightly, before any game - the servers' games twin everything)
+	start_delay=${XPPC_FUZZ_START:-40} pair fuzz-opence-ours lan opence ours "$(fuzz_env "$rate" 21) HALO_NET_FUZZ_KINDS=1-255"
+	pair_server fuzz-openceserver-ours lan openceserver ours "$(fuzz_env "$rate" 22)"; : > "$out/fuzz-openceserver-ours/server"
+	pair_server fuzznet-openceserver-ours net openceserver ours "$(fuzz_env 3 23)"; : > "$out/fuzznet-openceserver-ours/server"
+	wait_pairs
+	for name in fuzz-opence-ours fuzz-openceserver-ours fuzznet-openceserver-ours; do
+		for copy in client client2 late back; do
+			[ "$(cat "$out/$name/$copy/kind" 2>/dev/null)" = ours ] || continue
+			log=$out/$name/$copy/run.log debug=$out/$name/$copy/data/debug.txt
+			twins=$(grep -ahoE "net fuzz twin: [0-9]+ twins" "$log" 2>/dev/null | tail -1 | grep -oE "[0-9]+")
+			asan=$(grep -ac "ERROR: AddressSanitizer" "$log" 2>/dev/null)
+			ubsan=$(grep -aE "runtime error" "$log" 2>/dev/null | sed 's/^.*\/\(source\|port\)/\1/; s/: runtime error.*//' |
+				sort | uniq -c | tr '\n' ';')
+			ticks=$(grep -ac "network test: tick" "$log" 2>/dev/null)
+			crashed=$(cat "$log" "$debug" 2>/dev/null | grep -acE "egmentation fault|SIGSEGV|SIGABRT|stack trace|Aborted|EXCEPTION halt")
+			echo "--- $name $copy: twins ${twins:-0}; seconds in a game ${ticks:-0}; AddressSanitizer errors ${asan:-0};" \
+				"crash lines ${crashed:-0}; UBSan: ${ubsan:-none}"
+			result=pass
+			if [ "${asan:-0}" != 0 ]; then
+				result=addresssanitizer
+				grep -a -A12 "ERROR: AddressSanitizer" "$log" | head -16 | sed 's/^/  /'
+			elif [ "${crashed:-0}" != 0 ]; then
+				result=crashed
+			elif { [ "${twins:-0}" -lt 16 ] || [ "${ticks:-0}" -lt 30 ]; } && [ "$copy" != client ]; then
+				# (a player host's first client leaves 11 s into the game, by
+				# the plan: its sanitizer and crash checks alone)
+				result=too-few-twins-${twins:-0}-or-seconds-${ticks:-0}
+			fi
+			our_results="$our_results $name-$copy:$result"
+		done
 	done
 	;;
 crossctf)
