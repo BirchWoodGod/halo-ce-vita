@@ -133,6 +133,19 @@
 #            the host's game joined by itself (HALO_TEST_PAD)
 #   menuspw  the same with a password (HALO_TEST_LOBBY_PASSWORD), typed on
 #            the password screen (HALO_TEST_TEXT_INPUT)
+#   menusjoinpress  menus, Cross pressed again at once and a second on (as the
+#            Vita's large PC game question's answer reached the game, Neff,
+#            1.1.1 RC6): the System Link list the join opens, empty until the
+#            host is reached, must host nothing (it hosted and published a
+#            game of the joiner's own, and the join was lost); run it with a
+#            slow host link (HALO_TEST_NETEM="delay 400ms 50ms") to have the
+#            presses land before the host's game is listed
+#   onlinebrowser  the Menu style ElDewrito (online) SERVER BROWSER: the
+#            joiner's main menu SERVER BROWSER, A on the host's row (a
+#            Vita's public game) and Cross again twice; joined from the games
+#            browser once its host is reached, nothing hosted or published
+#   onlinebrowserded  the same with a dedicated server's game, a player in it
+#            first (HALO_TEST_OB_PLAYER=0: none)
 #   browserscroll  the server browser's scrolling and sorts, its game joined by itself
 #            (browser_list.h): 20 made-up games beside the host's
 #            (HALO_TEST_BROWSER_GAMES, test builds only); down past the twelve
@@ -999,7 +1012,8 @@ side join 10.10.2 192.168.2
 	[ "$mode" = partyserver ] ||
 	[ "$mode" = hostbots ] || [ "$mode" = h3scoreboard ] ||
 	[ "$mode" = friendsbackup ] ||
-	[ "$mode" = h3forgeonline ] || [ "$mode" = vitapc ] || [ "$mode" = vitaonly ]; } &&
+	[ "$mode" = h3forgeonline ] || [ "$mode" = vitapc ] || [ "$mode" = vitaonly ] ||
+	[ "$mode" = onlinebrowser ] || [ "$mode" = onlinebrowserded ]; } &&
 	side join2 10.10.3 192.168.3
 { [ "$mode" = splitscreen ] || [ "$mode" = vitapc ] || [ "$mode" = partyfollow ]; } && side join3 10.10.4 192.168.4
 # (lobbytls: the broker's TLS port too, with a certificate from an
@@ -1422,7 +1436,7 @@ code|lobby|lobbytls|lobbypw|relay|latency|infection|infectionold)
 		fi
 	fi
 	;;
-menus|menuspw)
+menus|menuspw|menusjoinpress)
 	password=${HALO_TEST_LOBBY_PASSWORD:-hunter2}
 	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 	extra="HALO_NET_HOST_PUBLIC=true"
@@ -1440,6 +1454,11 @@ menus|menuspw)
 	pad="wait:150:3000 down a wait:150:2000 a wait:150:2000 a wait:150:2000 a wait:150:2000 a"
 	pad="$pad wait:150:${HALO_TEST_MENUS_LIST_WAIT:-12000} a"
 	[ "$mode" = menuspw ] && pad="$pad wait:150:3000 a wait:150:1500 down a"
+	# (menusjoinpress: Cross again at once, and again a second on - the press that answered the
+	# Vita's large PC game question reached the game after its box closed (Neff, RC6): the
+	# System Link list opened for the join, still empty, took it as its own A, hosted this
+	# machine's game and published it; nothing may be hosted while the join goes on)
+	[ "$mode" = menusjoinpress ] && pad="$pad wait:150:250 a wait:150:1000 a wait:150:1000 a"
 	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" \
 		HALO_NET_ONLINE=true HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_TEST_INPUT=bot:2 "HALO_TEST_PAD=$pad" \
 		"HALO_TEST_TEXT_INPUT=$password"; join_pid=$last_pid
@@ -1454,6 +1473,13 @@ menus|menuspw)
 	grep -aq "menus: joining the public game VitaHost" "$jl" || fail "the joiner did not join the host's game from the browser"
 	grep -aq "menus: the public game's invite handed on; the System Link list next (the profile chosen)" "$jl" ||
 		fail "the profile was asked again after the browser"
+	if [ "$mode" = menusjoinpress ]; then
+		grep -aE "system link: (hosting|looking)|Internet play: (hosting|the game is public)|menus: not hosting" "$jl" | head -8
+		grep -aqE "system link: hosting|Internet play: hosting" "$jl" &&
+			fail "a press on the System Link list during the browser's join hosted the joiner's own game"
+		grep -aq "Internet play: the game is public" "$jl" &&
+			fail "the joiner published a listing of a game of its own while joining"
+	fi
 	if [ "$mode" = menuspw ]; then
 		grep -aq "ui: screen pc.join.password.screen" "$jl" || fail "the password screen did not open"
 		grep -aq "menus: joining the public game VitaHost with its password" "$jl" || fail "the password was not given"
@@ -1504,6 +1530,66 @@ browserscroll)
 	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
 	echo "joiner's seconds with two players playing: $two"
 	[ "$two" -ge 30 ] || fail "the joiner played the host's game for $two s with two players (30 wanted)"
+	;;
+onlinebrowser|onlinebrowserded)
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	if [ $mode = onlinebrowserded ]; then
+		server=${HALO_TEST_SERVER:-$root/build/linux/halo-server}
+		[ -x "$server" ] || { echo "$mode needs the dedicated server (ninja linux-server, HALO_TEST_SERVER)"; exit 2; }
+		in_ns "$host_router" iptables -t nat -A PREROUTING -i w_host -p udp --dport 2302 -j DNAT --to-destination 192.168.1.2:2302
+		mkdir -p "$out/server/data"
+		printf '%s\n' 'sv_name "Netns Browser"' 'sv_maxplayers 8' 'sv_public 1' 'sv_mapcycle_add bloodgulch slayer' \
+			'sv_timelimit 5' 'sv_start_delay 5' 'sv_postgame 5' 'sv_port 2302' > "$out/server/data/init.txt"
+		ln -sfn "$(cd "$data" && pwd)/maps" "$out/server/data/maps"
+		(cd "$out/server" && exec nsenter -t "$host_machine" -n env HALO_EXIT_AFTER="$seconds" HALO_UPDATE_AUTO=false \
+			HALO_NET_ALLOW_UPNP=false HALO_NET_BROKERS=198.51.100.1:1883 HALO_NET_STUN=198.51.100.1:3478 \
+			HALO_NET_RELAYS=198.51.100.1:47320 ${HALO_TEST_SERVER_ENV:-} \
+			taskset -c "$cpu_a" timeout -k 5 $((seconds + 60)) "$server" -path "$out/server/data" \
+			< /dev/null > "$out/server/run.log" 2>&1) &
+		pids="$pids $!"; host_pid=$!
+		for i in $(seq 1 90); do
+			code=$(sed -n 's/.*Vitas join with the code \([A-Z0-9]\{4\}-[A-Z0-9]\{4\}\).*/\1/p' "$out/server/run.log" 2>/dev/null | tail -1)
+			[ -n "$code" ] && break
+			sleep 1
+		done
+	else
+	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env HALO_NETWORK_TEST_START=${HALO_TEST_MENUS_START:-90} \
+		HALO_NET_LOBBY_NAME=VitaHost HALO_NET_HOST_PUBLIC=true; host_pid=$last_pid
+	code=$(wait_code)
+	fi
+	[ -n "$code" ] || { fail "the host never showed a code"; tail -20 "$out/host/run.log" "$out/server/run.log" 2>/dev/null; exit 1; }
+	echo "host's code: $code"
+	# (a player in the game before the browser's joiner: HALO_TEST_OB_PLAYER=1, onlinebrowserded's
+	# default - Neff's join failed only on a game with players in it)
+	ob_player=${HALO_TEST_OB_PLAYER:-0}
+	[ $mode = onlinebrowserded ] && ob_player=${HALO_TEST_OB_PLAYER:-1}
+	if [ "$ob_player" = 1 ]; then
+		run_copy joiner2 "$join2_machine" "$vita" "$cpu_c" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$code \
+			HALO_TEST_INPUT=bot:3 HALO_NET_LOBBY_NAME=Second
+		sleep ${HALO_TEST_OB_PLAYER_WAIT:-30}
+	fi
+	# (the title screen: A; the main menu's SERVER BROWSER: A - the profile chosen before, the
+	# games browser at once -; a while for the listing, A on the game's row, then Cross again
+	# at once and a second on, as a player pressing on while the host is reached: nothing hosted)
+	pad=${HALO_TEST_OB_PAD:-"wait:150:3000 a wait:150:4000 a wait:150:${HALO_TEST_MENUS_LIST_WAIT:-10000} a wait:150:250 a wait:150:1000 a"}
+	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" \
+		HALO_NET_ONLINE=true HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=online HALO_TEST_INPUT=bot:2 \
+		"HALO_TEST_PAD=$pad"; join_pid=$last_pid
+	wait $join_pid 2>/dev/null
+	jl=$out/joiner/run.log
+	echo "--- joiner"; grep -aE "ui: screen|menus: (joining|the public|the games browser|not hosting)|system link: (hosting|joining|in |the joined)|Internet play: (joining|connected to host|hosting|the game is public)" "$jl" | head -30
+	grep -aq "ui: screen pc.online.lan.screen" "$jl" || fail "the ElDewrito menus' server browser did not open"
+	name=VitaHost
+	[ $mode = onlinebrowserded ] && name="Netns Browser"
+	grep -aq "menus: joining the public game $name" "$jl" || fail "A on the game's row did not join it"
+	grep -aq "menus: the games browser joins the joined host's game" "$jl" ||
+		fail "the game was not joined from the games browser once its host was reached"
+	grep -aqE "system link: hosting|Internet play: hosting" "$jl" && fail "the joiner hosted a game of its own while joining"
+	grep -aq "Internet play: the game is public" "$jl" && fail "the joiner published a listing of a game of its own"
+	grep -aq "system link: in a network game" "$jl" || fail "the joiner did not get into the game"
+	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+	echo "joiner's seconds with two players or more playing: $two"
+	[ "$two" -ge 20 ] || fail "the joiner played the game for $two s with others (20 wanted)"
 	;;
 menushost|pickjoin)
 	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
@@ -5970,7 +6056,7 @@ forge|forge3|forgemp|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forge
 	forge_case
 	;;
 *)
-	echo "usage: $0 code|infection|infectionold|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|carnage|carnageold|h3scoreboard|h3live|h3liveleave|h3liveagain|h3liveonline|h3liveinvite|h3liveprivate|h3online|h3onlinelan|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedbots|dedicatedcompat|partyserver|hostbots|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|friendsbackup|party|partyfollow|chat|friendsprivate|friendsprivatepw|forge|forge3|forgemp|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|h3forgeskip|h3variant|vitapc|vitaonly|hostfuzz|hostfuzzforge|hostfuzzmap|hostfuzzjoin" >&2
+	echo "usage: $0 code|infection|infectionold|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|menusjoinpress|onlinebrowser|onlinebrowserded|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|carnage|carnageold|h3scoreboard|h3live|h3liveleave|h3liveagain|h3liveonline|h3liveinvite|h3liveprivate|h3online|h3onlinelan|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedbots|dedicatedcompat|partyserver|hostbots|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|friendsbackup|party|partyfollow|chat|friendsprivate|friendsprivatepw|forge|forge3|forgemp|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|h3forgeskip|h3variant|vitapc|vitaonly|hostfuzz|hostfuzzforge|hostfuzzmap|hostfuzzjoin" >&2
 	exit 2
 	;;
 esac

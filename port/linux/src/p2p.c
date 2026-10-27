@@ -2681,6 +2681,19 @@ int p2p_joined_host(unsigned char *identifier, int take)
 	return result;
 }
 
+int p2p_join_under_way(void)
+{
+	int result;
+
+	if (!p2p.running)
+		return 0;
+	pthread_mutex_lock(&p2p_lock);
+	result = p2p.join_requested || p2p.joining ||
+		(p2p.join_reached && !elapsed(p2p.join_reached_time, P2P_JOINED_HOST_MILLISECONDS));
+	pthread_mutex_unlock(&p2p_lock);
+	return result;
+}
+
 int p2p_peer_address(const unsigned char *peer_identifier, unsigned long *address)
 {
 	struct peer *peer;
