@@ -2341,8 +2341,12 @@ as it is) */
 		}
 	}
 	object_set_garbage(object_index, FALSE);
-	/* (in a unit's inventory: the next inventories put it there) */
+	/* (in a unit's inventory: the next inventories put it there. An item
+	alone, as the host sends it (distributed_change_from_object): a biped
+	taken from the map went on moving, and object_translate asserted on it,
+	objects.c #958 - a mutated change, the v39 client fuzz) */
 	if (TEST_FLAG(change->flags, _distributed_object_carried_bit) &&
+		TEST_FLAG(_object_mask_item, object->object.type) &&
 		TEST_FLAG(object->object.flags, _object_connected_to_map_bit) &&
 		object->object.parent_object_index == NONE)
 	{
