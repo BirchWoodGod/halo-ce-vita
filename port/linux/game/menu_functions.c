@@ -4508,6 +4508,8 @@ static struct
 	short model;
 	short model_saved;
 	char model_said[160];
+	/* (the list the MODEL row was last said N/A for, player models off) */
+	struct widget_instance *model_off_said;
 	/* (port) the flaming helmet's row shown (a listed tester: p2p_flame_listed,
 	asked as the editor opens), the help's place without it */
 	boolean flame_listed;
@@ -5278,7 +5280,10 @@ static void h3_custom_value(short row, struct player_profile const *profile, cha
 	{
 		struct player_model model;
 
-		if (player_models_get(h3_custom.model, &model))
+		/* (off in 1.1.1: player_models_enabled) */
+		if (!player_models_enabled())
+			snprintf(text, size, "%s", T("N/A"));
+		else if (player_models_get(h3_custom.model, &model))
 			snprintf(text, size, "%s", model.name);
 		else
 			snprintf(text, size, "%s", T("SPARTAN"));
@@ -5362,6 +5367,13 @@ static boolean h3_custom_change(struct widget_instance *widget, int step)
 		h3_custom.visor = (short)h3_custom_step(h3_custom.visor, PLAYER_COSMETICS_VISORS, step);
 		break;
 	case _h3_custom_model:
+		/* (off in 1.1.1: N/A, not changed - the refusal's sound) */
+		if (!player_models_enabled())
+		{
+			ui_play_audio_feedback_sound(4);
+			platform_log("menus: h3 customize: MODEL N/A, not changed (player models off)");
+			return TRUE;
+		}
 		/* (the Spartan, then each model found: index + 1) */
 		h3_custom.model = (short)(h3_custom_step(h3_custom.model + 1, player_models_count() + 1, step) - 1);
 		h3_custom.model_said[0] = 0;
@@ -5526,24 +5538,14 @@ static void h3_custom_update(struct widget_instance *list)
 			platform_log("menus: h3 customize: the name \"%s\" was refused: %s", text, h3_custom.status);
 	}
 	/* (MODEL, the player models' row: off in 1.1.1 (player_models_enabled),
-	hidden and the rows after it moved up into its place, as port keys
-	entry does it: once for each opening of the list) */
-	if (!player_models_enabled() && (found = named(list, h3_custom_rows[_h3_custom_model])) != NULL && !found->disabled)
+	shown as N/A and not changed - h3_custom_value, h3_custom_change; the
+	owner, RC4: the row kept, not hidden. Said once for each opening of the
+	list) */
+	if (!player_models_enabled() && (found = named(list, h3_custom_rows[_h3_custom_model])) != NULL &&
+		h3_custom.model_off_said != list)
 	{
-		struct widget_instance *after;
-		short height = 0;
-
-		widget_instance_set_visibility_recursive(found, FALSE);
-		found->disabled = TRUE;
-		if (found->next)
-			height = (short)(found->next->vertical_offset - found->vertical_offset);
-		else if (found->previous)
-			height = (short)(found->vertical_offset - found->previous->vertical_offset);
-		for (after = found->next; after && height > 0; after = after->next)
-			after->vertical_offset = (short)(after->vertical_offset - height);
-		if (list->focused_child == found && found->next)
-			list->focused_child = found->next;
-		platform_log("menus: h3 customize: MODEL row hidden (player models off)");
+		h3_custom.model_off_said = list;
+		platform_log("menus: h3 customize: MODEL row N/A (player models off)");
 	}
 	/* (the flaming helmet's row: a listed tester's alone; the help a row
 	lower for it) */
@@ -6260,16 +6262,16 @@ static void online_custom_update(struct widget_instance *list)
 
 		if (row != NONE && !strcmp(child->name, "op_flame"))
 			shown = shown && h3_custom.flame_listed;
-		/* (MODEL: the player models', off in 1.1.1: player_models_enabled) */
-		if (row != NONE && !strcmp(child->name, "op_model") && !player_models_enabled())
+		/* (MODEL: the player models', off in 1.1.1 (player_models_enabled):
+		shown as N/A, not changed - h3_custom_value, h3_custom_change) */
+		if (shown && !strcmp(child->name, "op_model") && !player_models_enabled())
 		{
 			static struct widget_instance *said_list;
 
-			shown = FALSE;
 			if (said_list != list)
 			{
 				said_list = list;
-				platform_log("menus: online customize: MODEL row hidden (player models off)");
+				platform_log("menus: online customize: MODEL row N/A (player models off)");
 			}
 		}
 		/* (KEYBOARD & MOUSE: a PC's, controls_menu.c) */

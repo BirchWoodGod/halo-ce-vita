@@ -1462,9 +1462,9 @@ for case in $cases; do
 		# past VISOR and MODEL; STICK LAYOUT, right: SOUTHPAW; down two to LOOK SENSITIVITY, right twice; INVERT
 		# LOOK, Cross: YES; Circle: saved; Circle)
 		custom_pad="$h3pad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000 a wait:150:2000"
-		# (COLOR, then down past ARMOR VISOR to STICK LAYOUT: two rows, the MODEL row hidden with the
-		# player models off, 1.1.1's default)
-		custom_pad="$custom_pad down:150:600 right:150:500 right:150:500 right:150:500 down:150:600 down:150:600 right:150:600"
+		# (COLOR, then down past ARMOR VISOR and MODEL - shown as N/A with the player models off - to
+		# STICK LAYOUT: three rows)
+		custom_pad="$custom_pad down:150:600 right:150:500 right:150:500 right:150:500 down:150:600 down:150:600 down:150:600 right:150:600"
 		custom_pad="$custom_pad down:150:600 down:150:600 right:150:500 right:150:500 down:150:600 a wait:150:1500 b wait:150:3000 b wait:150:3000"
 		profile_from=$HALO_TEST_PROFILE run h3customize "$menus_data" 45 "$custom_pad" HALO_MENU_STYLE=halo3 \
 			"HALO_TEST_TEXT_INPUT=Vita Chief"
@@ -1583,9 +1583,9 @@ for case in $cases; do
 		[ "$(cat "$out/onlinegridnav/exit")" = 0 ] || fail onlinegridnav "exit $(cat "$out/onlinegridnav/exit")"
 		grep -aqiE "assert|exception|halt_and_catch_fire" "$log" && fail onlinegridnav "an assertion, exception or halt"
 		grep -aq "online customize: the colour grid picked in" "$log" || fail onlinegridnav "the colour grid was not picked in"
-		# (the player models off, 1.1.1's default: ARMORY without its MODEL row)
-		grep -aq "menus: online customize: MODEL row hidden (player models off)" "$log" ||
-			fail onlinegridnav "ARMORY's MODEL row was not hidden (player models off)"
+		# (the player models off, 1.1.1's default: ARMORY's MODEL row shown as N/A)
+		grep -aq "menus: online customize: MODEL row N/A (player models off)" "$log" ||
+			fail onlinegridnav "ARMORY's MODEL row was not N/A (player models off)"
 		# (the colour grid's moves in order: ups first, each a row up or the column's last cell from the top row)
 		moves=$(grep -a "online customize: colour grid " "$log" | sed 's/.*grid \(up\|down\) to cell \([0-9]*\)/\1 \2/')
 		echo "$moves" | awk '
@@ -1761,17 +1761,19 @@ for case in $cases; do
 			"$out/h3models_again/run.log" || fail h3models "started again, the editor did not show the choice"
 		# (h3models_off: the same maps folder and the choice saved, the player models off as 1.1.1
 		# ships them - no HALO_PLAYER_MODELS, menus.player_models false: the maps folder not looked
-		# through for models, no MODEL row (hidden, the rows after it moved up), no model pack built,
-		# the saved choice ignored and t:\player_models.txt left as it was)
+		# through for models, the MODEL row shown as N/A and right on it changing nothing, no model
+		# pack built, the saved choice ignored and t:\player_models.txt left as it was)
 		save_from=$out/h3models_saved run h3models_off "$out/models_data" 30 \
-			"$h3pad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000 down:150:600 down:150:600 down:150:600 wait:150:3000 b wait:150:3000 b wait:150:3000" \
+			"$h3pad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000 down:150:600 down:150:600 down:150:600 right:150:600 wait:150:3000 b wait:150:3000 b wait:150:3000" \
 			HALO_MENU_STYLE=halo3
 		log=$out/h3models_off/run.log
 		echo "--- h3models_off"
 		grep -aE "player models: |h3 customize: (MODEL|model|[0-9]+ player models)|scene packs: pm_" "$log" | cut -c1-160 | head -12
 		[ "$(cat "$out/h3models_off/exit")" = 0 ] || fail h3models_off "exit $(cat "$out/h3models_off/exit")"
 		grep -aq "player models: off" "$log" || fail h3models_off "the player models were not off by default"
-		grep -aq "menus: h3 customize: MODEL row hidden (player models off)" "$log" || fail h3models_off "the MODEL row was not hidden"
+		grep -aq "menus: h3 customize: MODEL row N/A (player models off)" "$log" || fail h3models_off "the MODEL row was not N/A"
+		grep -aq "menus: h3 customize: MODEL N/A, not changed (player models off)" "$log" ||
+			fail h3models_off "right on the MODEL row was not refused"
 		grep -aq "menus: h3 customize: 0 player models in the maps folder's Custom Edition maps; this profile's: -1" "$log" ||
 			fail h3models_off "the editor listed models, or the saved choice"
 		grep -aqE "player models: [0-9]+ found|scene packs: pm_|h3 customize: model " "$log" &&

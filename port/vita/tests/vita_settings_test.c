@@ -192,6 +192,9 @@ int player_models_panel_count(void) { return test_model_count; }
 const char *player_models_panel_name(int index) { return index >= 0 && index < 3 ? test_model_names[index] : "Spartan"; }
 int player_models_panel_chosen(void) { return test_model_chosen; }
 void player_models_panel_choose(int index) { test_model_choice = test_model_chosen = index; }
+/* (the models on: off, 1.1.1's default, the row shows N/A) */
+static int test_models_enabled = 1;
+int player_models_panel_enabled(void) { return test_models_enabled; }
 /* (player_cosmetics.c's rows: the profile's colour and visor) */
 static int test_color_chosen, test_visor_chosen;
 int player_cosmetics_panel_color_count(void) { return 43; }
@@ -3069,6 +3072,24 @@ static void test_player_model_row(void)
 	open_panel();
 	check(to_tab("Game") && open_page("Appearance") && !strstr(menu, "\nPlayer model"),
 		"no player model found: no Player model row");
+	/* (the models off, 1.1.1's default - the owner, RC4: the row kept, N/A,
+	not changed) */
+	open_panel();
+	test_models_enabled = 0;
+	test_model_choice = -2;
+	open_panel();
+	{
+		char const *row;
+
+		check(to_tab("Game") && open_page("Appearance") && (row = strstr(menu, "\nPlayer model\x02")) != NULL &&
+			strstr(row, "N/A") && strstr(row, "N/A") < strchr(row + 1, '\n'),
+			"the models off: the Player model row shown, N/A");
+	}
+	check(to_line("Player model"), "the N/A row is chosen");
+	press(VITA_BUTTON_LEFT);
+	press(VITA_BUTTON_RIGHT);
+	check(test_model_choice == -2, "the models off: left and right change nothing");
+	test_models_enabled = 1;
 	open_panel();
 	test_model_count = 3;
 	test_model_chosen = 2;

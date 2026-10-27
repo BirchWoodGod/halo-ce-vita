@@ -88,6 +88,8 @@ at the top of a frame) */
 int player_models_panel_count(void);
 const char *player_models_panel_name(int index);
 int player_models_panel_chosen(void);
+/* (the settings panel: the models on; off, its row shows N/A) */
+int player_models_panel_enabled(void);
 void player_models_panel_choose(int index);
 
 /* (main.c, the top of a frame: scene_packs_update) the scan made and the

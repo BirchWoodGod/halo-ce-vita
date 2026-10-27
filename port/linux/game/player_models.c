@@ -708,6 +708,11 @@ const char *player_models_panel_name(int index)
 	return name;
 }
 
+int player_models_panel_enabled(void)
+{
+	return player_models_enabled() ? 1 : 0;
+}
+
 int player_models_panel_chosen(void)
 {
 	return player_models.panel_chosen;

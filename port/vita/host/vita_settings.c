@@ -682,9 +682,8 @@ static struct setting settings[] = {
 	player model, from the player's Halo Custom Edition maps, as
 	CUSTOMIZATION's MODEL chooses it - kept by the game for the profile, never
 	in settings.txt; the choices filled when the panel opens: player_models_
-	choices. Shown while the maps folder has one: never while the models are
-	off, 1.1.1's default - menus.player_models, HALO_PLAYER_MODELS -, as the
-	game then lists the Spartan alone) */
+	choices. Shown while the maps folder has one, and as N/A while the models
+	are off - 1.1.1's default, menus.player_models, HALO_PLAYER_MODELS) */
 	{ "Player model", "HALO_PLAYER_MODEL", 0, 1, { "0" }, { "Spartan" },
 		"Offline: you, or a Custom Edition map's player", 0, PAGE_APPEARANCE },
 	/* (port/linux/game/player_cosmetics.c: the first local player's
@@ -1452,6 +1451,7 @@ int player_models_panel_count(void);
 const char *player_models_panel_name(int index);
 int player_models_panel_chosen(void);
 void player_models_panel_choose(int index);
+int player_models_panel_enabled(void);
 
 static char player_model_values[MAXIMUM_CHOICES][4];
 static char player_model_names[MAXIMUM_CHOICES][48];
@@ -1811,8 +1811,10 @@ static int setting_shown(const struct setting *setting)
 		return maps_mods_present || choice_of("HALO_MCC_MODS");
 	if (setting->variable && !strcmp(setting->variable, "HALO_PC_MAP_VEHICLES"))
 		return choice_of("HALO_CUSTOM_EDITION") || choice_of("HALO_PC_MAP_VEHICLES");
+	/* (off, 1.1.1's default: shown as N/A, the Spartan alone to choose -
+	the owner, RC4: the row kept, not hidden) */
 	if (setting->variable && !strcmp(setting->variable, "HALO_PLAYER_MODEL"))
-		return setting->count > 1;
+		return setting->count > 1 || !player_models_panel_enabled();
 	/* (the tester's flaming helmet: a listed tester's alone) */
 	if (setting->variable && !strcmp(setting->variable, "HALO_FLAMING_HELMET"))
 		return p2p_flame_listed();
@@ -4427,6 +4429,8 @@ static const char *setting_value_name(const struct setting *setting)
 		return T(xbox_actions[setting->choice]);
 	if (setting->variable && !strcmp(setting->variable, "HALO_LANGUAGE") && setting->choice > 0)
 		return setting->names[setting->choice];
+	if (setting->variable && !strcmp(setting->variable, "HALO_PLAYER_MODEL") && !player_models_panel_enabled())
+		return T("N/A");
 	/* (a player model's name is its map's own) */
 	if (setting->variable && !strcmp(setting->variable, "HALO_PLAYER_MODEL") && setting->choice > 0)
 		return setting->names[setting->choice];
