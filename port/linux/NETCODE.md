@@ -502,7 +502,14 @@ a pregame keep-alive every five seconds from the host
      players' ammunition and grenade counts from the host only once a
      round trip has passed since it last fired, reloaded or threw (what
      the host says before then is from before). How old what a unit
-     carries is travels in 16 bits.
+     carries is travels in 16 bits. A change of weapons or grenades goes
+     the tick it happens (not at the next tenth of a second) and once more
+     a fifth of a second later, and a client keeps what the host says a
+     unit carries when the unit or a weapon in it has not come yet (the
+     objects come over the host's stream, what they carry in a datagram,
+     read first when both come at once: a spawned player's gun came a
+     second after it, at the host's next refresh) and applies it as soon
+     as they come.
    - Players take the units the host spawns them with, seats are the
      host's (a client's own player's once it has ridden otherwise for
      longer than a round trip), and the CTF flags and oddballs are the same
@@ -788,7 +795,11 @@ swap the bots' wandering does not reach (`debug.network_test_pickup_weapon`
 picks the weapon: the first whose tag name has it in it, as "sniper"), and `debug.network_test_score`
 shortens the game, to test the next (`host:<map>:<variant>,<variant>...`
 plays the variants in turn, the next once a game is over, as the host's
-button on the scores does). `debug.network_latency` and
+button on the scores does). `HALO_NETWORK_TEST_SPAWN_TRACE=1` logs, each
+frame they change, every player's unit, first weapon and weapon in hand (and
+this machine's first player's first-person weapon), with how many ticks and
+milliseconds since the unit came: how long a spawned player waits for its
+gun. `debug.network_latency` and
 `debug.network_loss` hold back what a machine receives and drop some of its
 datagrams, to test as over the internet.
 
