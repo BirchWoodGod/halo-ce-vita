@@ -161,6 +161,10 @@ static void screen_mode_choose(long *width, float scale[2])
 		const char *display = getenv("HALO_DISPLAY_WIDTH");
 
 		*width = display && atol(display) == 640 ? 640 : 848;
+		/* the Vita widens a 4:3 screen for ElDewrito's menus
+		(d3d8_gxm.c screen_width_wanted) */
+		if (*width < halo_menus_minimum_width())
+			*width = 848;
 		scale[0] = scale[1] = vita_preview_scale;
 		return;
 	}

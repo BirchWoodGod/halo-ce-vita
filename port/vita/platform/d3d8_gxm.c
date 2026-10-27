@@ -63,6 +63,16 @@ static long ui_offset;
 /* the widest the back buffer's memory holds (CreateDevice) */
 static unsigned long screen_allocated_width;
 
+/* (menu_functions.c) the narrowest the screen is drawn while Menu style
+ElDewrito's screens are up: they are laid out over 800 columns (80 each
+side of the 640, as a 16:9 display shows them), and at 4:3 (640) their
+left parts were off the edge; 640 otherwise (a game, the other styles) */
+int halo_menus_minimum_width(void);
+
+/* the columns the menus are drawn when the screen is narrower than they are
+laid out for: the default 16:9's, which they are then exactly as in it */
+#define SCREEN_MENUS_WIDTH 848
+
 static long screen_width_wanted(void)
 {
 	const char *display = getenv("HALO_DISPLAY_WIDTH");
@@ -74,7 +84,10 @@ static long screen_width_wanted(void)
 		width = 640;
 	if (width > 1024)
 		width = 1024;
-	return width & ~1L;
+	width &= ~1L;
+	if (width < halo_menus_minimum_width())
+		width = SCREEN_MENUS_WIDTH;
+	return width;
 }
 
 long halo_screen_width(void)
@@ -240,6 +253,9 @@ long halo_screen_commit(void)
 	extern volatile unsigned long halo_settings_generation;
 	static unsigned long settings_seen;
 	static int dynres_configured;
+	/* (a width that could not be made is not asked for again at every frame) */
+	static long width_tried;
+	long wanted;
 	unsigned long generation = __atomic_load_n(&halo_settings_generation, __ATOMIC_ACQUIRE);
 
 	if (!screen_width)
@@ -249,8 +265,12 @@ long halo_screen_commit(void)
 		dynres_configured = 1;
 		dynres_configure();
 	}
-	if (generation != settings_seen || screen_scale_retry)
+	/* (the menus come up, or go: the 4:3 screen widens for ElDewrito's
+	screens and narrows again for a game) */
+	wanted = screen_width_wanted();
+	if (generation != settings_seen || screen_scale_retry || (wanted != screen_width && wanted != width_tried))
 	{
+		width_tried = wanted;
 		settings_seen = generation;
 		screen_settings_apply();
 		dynres_configure();
