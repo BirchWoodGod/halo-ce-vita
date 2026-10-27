@@ -231,6 +231,16 @@
 #            moves, deletes and undoes objects, and sends volleys of malformed,
 #            replayed and too many requests; its Forge answer (38) and requests
 #            twinned too (not in all)
+#   hostfuzzjoin  hostfuzz, and the joiner a fuzz build too
+#            (HALO_TEST_FUZZ_JOINER, the host's by default; build/linux/
+#            halo-fuzz-ub, UBSan alone, loads quicker) twinning one in
+#            HALO_TEST_FUZZ_JOIN_RATE (4) of what its host sends it
+#            (HALO_TEST_FUZZ_JOIN_KINDS, 0-255: the game's messages, the
+#            distributed netcode's objects, units, seats and weapons), on
+#            HALO_TEST_FUZZ_GAME (host:bloodgulch:slayer;
+#            host:sidewinder:team_slayer+vehicles for vehicles): neither may
+#            have a sanitizer memory error, crash or assertion, and the joiner
+#            must play on (not in all)
 #   hostfuzz the host's side fuzzed on the Vitas' own wire (not in all): the
 #            host HALO_TEST_FUZZ_HOST, an AddressSanitizer + UBSan
 #            HALO_NET_FUZZ_TWIN build, twins one in HALO_TEST_FUZZ_RATE (2) of
@@ -1959,7 +1969,7 @@ PY
 	case $verdict in *removed=None*) fail "the host's slot was not emptied at the switch" ;; esac
 	case $verdict in *late=0) ;; *) fail "the host listed something after its slot was emptied" ;; esac
 	;;
-hostfuzz|hostfuzzforge|hostfuzzmap)
+hostfuzz|hostfuzzforge|hostfuzzmap|hostfuzzjoin)
 	fuzz_host=${HALO_TEST_FUZZ_HOST:-}
 	[ -x "$fuzz_host" ] || { echo "SKIP ($mode): HALO_TEST_FUZZ_HOST is not an ASan HALO_NET_FUZZ_TWIN build"; exit 0; }
 	# (hostfuzzforge: a network Forge game, the joiner editing - every edit a
@@ -1990,6 +2000,12 @@ hostfuzz|hostfuzzforge|hostfuzzmap)
 		fuzz_host_env=HALO_CUSTOM_EDITION=1
 		fuzz_join_env="HALO_CUSTOM_EDITION=1 HALO_MAP_SHARE_ANSWER=yes"
 	fi
+	# (hostfuzzjoin: the joiner the fuzz build too, twinning its host's
+	# messages)
+	if [ "$mode" = hostfuzzjoin ]; then
+		fuzz_game=${HALO_TEST_FUZZ_GAME:-host:bloodgulch:slayer}
+		fuzz_joiner=${HALO_TEST_FUZZ_JOINER:-$fuzz_host}
+	fi
 	if [ "$mode" = hostfuzzforge ]; then
 		fuzz_game=host:bloodgulch:forge
 		fuzz_join="HALO_TEST_COMMANDS=L900:forge net;L910:forge camera 60 -100 1.6 150 0;L920:forge spawn teleporter base"
@@ -2010,6 +2026,13 @@ hostfuzz|hostfuzzforge|hostfuzzmap)
 	if [ "$mode" = hostfuzzmap ]; then
 		run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
 			HALO_NETWORK_TEST=join-code:$code HALO_TEST_INPUT=bot:2 HALO_NETWORK_TEST_RETRY=5 $fuzz_join_env
+	elif [ "$mode" = hostfuzzjoin ]; then
+		run_copy joiner "$join_machine" "$fuzz_joiner" "$cpu_b" HALO_NET_ONLINE=true \
+			HALO_NETWORK_TEST=join-code:$code HALO_TEST_INPUT=bot:2 HALO_NETWORK_TEST_AIM=1 HALO_NETWORK_TEST_SHOOT=3 \
+			HALO_NETWORK_TEST_RETRY=5 HALO_NET_ANTICHEAT=false \
+			HALO_NET_FUZZ_RATE=${HALO_TEST_FUZZ_JOIN_RATE:-4} HALO_NET_FUZZ_KINDS=${HALO_TEST_FUZZ_JOIN_KINDS:-0-255} \
+			HALO_NET_FUZZ_DUMP=fuzz-dump.bin \
+			ASAN_OPTIONS=detect_leaks=0:halt_on_error=0:log_path=asan UBSAN_OPTIONS=print_stacktrace=1:log_path=ubsan
 	elif [ -n "$fuzz_join" ]; then
 		run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
 			HALO_NETWORK_TEST=join-code:$code HALO_TEST_INPUT=bot:2 HALO_NETWORK_TEST_RETRY=5 "$fuzz_join"
@@ -2058,6 +2081,25 @@ hostfuzz|hostfuzzforge|hostfuzzmap)
 	[ "${crash:-0}" = 0 ] || fail "the host crashed"
 	[ "${ticks:-0}" -ge 60 ] || fail "the host played ${ticks:-0} s (60 wanted)"
 	[ -n "$twins" ] || fail "no twins made (not a HALO_NET_FUZZ_TWIN build?)"
+	if [ "$mode" = hostfuzzjoin ]; then
+		jtwins=$(grep -ahoE "net fuzz twin: [0-9]+ twins" "$out/joiner/run.log" "$out/joiner/data/debug.txt" 2>/dev/null | tail -1)
+		jreached=$(grep -ahoE "net fuzz twin: .*messages .*" "$out/joiner/run.log" 2>/dev/null | tail -1)
+		jasan=$(cat "$out/joiner"/asan* "$out/joiner/data"/asan* 2>/dev/null | grep -ac "ERROR: AddressSanitizer")
+		jcrash=$(grep -aEc "egmentation fault|SIGSEGV|SIGABRT|EXCEPTION halt|stack trace" "$out/joiner/run.log" 2>/dev/null)
+		# (an assertion the render thread skips is one the tick's would
+		# halt on, and a read past its block on a build without them)
+		jskip=$(grep -a "render assertion skipped" "$out/joiner/run.log" "$out/joiner/data/debug.txt" 2>/dev/null |
+			sed 's/^[^:]*://' | sort -u)
+		jub=$(cat "$out/joiner"/ubsan* "$out/joiner/data"/ubsan* 2>/dev/null | grep -a "runtime error" | sed 's/:[0-9]*:[0-9]*:/:/' |
+			sort | uniq -c | sort -rn | head -8)
+		echo "--- the joiner: ${jtwins:-no twin count}; reached: ${jreached:-nothing logged}; AddressSanitizer errors ${jasan:-0}; crashes ${jcrash:-0}"
+		[ -n "$jub" ] && echo "$jub" | sed 's/^/  UBSan (joiner): /'
+		[ -n "$jskip" ] && echo "$jskip" | sed 's/^/  (joiner) /'
+		[ "${jasan:-0}" = 0 ] || fail "the joiner: AddressSanitizer: $jasan errors"
+		[ "${jcrash:-0}" = 0 ] || fail "the joiner crashed"
+		[ -z "$jskip" ] || fail "the joiner's render thread skipped assertions"
+		[ -n "$jtwins" ] || fail "the joiner made no twins"
+	fi
 	;;
 anticheat|anticheatlag)
 	# (one long game; the host lands its shots too, and brings the players
@@ -5928,7 +5970,7 @@ forge|forge3|forgemp|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forge
 	forge_case
 	;;
 *)
-	echo "usage: $0 code|infection|infectionold|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|carnage|carnageold|h3scoreboard|h3live|h3liveleave|h3liveagain|h3liveonline|h3liveinvite|h3liveprivate|h3online|h3onlinelan|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedbots|dedicatedcompat|partyserver|hostbots|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|friendsbackup|party|partyfollow|chat|friendsprivate|friendsprivatepw|forge|forge3|forgemp|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|h3forgeskip|h3variant|vitapc|vitaonly|hostfuzz|hostfuzzforge|hostfuzzmap" >&2
+	echo "usage: $0 code|infection|infectionold|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|carnage|carnageold|h3scoreboard|h3live|h3liveleave|h3liveagain|h3liveonline|h3liveinvite|h3liveprivate|h3online|h3onlinelan|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedbots|dedicatedcompat|partyserver|hostbots|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|friendsbackup|party|partyfollow|chat|friendsprivate|friendsprivatepw|forge|forge3|forgemp|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|h3forgeskip|h3variant|vitapc|vitaonly|hostfuzz|hostfuzzforge|hostfuzzmap|hostfuzzjoin" >&2
 	exit 2
 	;;
 esac

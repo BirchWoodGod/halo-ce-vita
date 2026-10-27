@@ -129,6 +129,15 @@ parser.add_argument(
     "(port/linux/include/halo_port_limits.h)",
 )
 parser.add_argument(
+    "--linux-fuzz",
+    action="store_true",
+    help="TEST builds only, never a release: `ninja linux-fuzz` also builds the network fuzz builds - "
+    "build/linux/halo-fuzz (AddressSanitizer + UBSan) and build/linux/halo-fuzz-ub (UBSan alone, quicker: "
+    "a joiner that must load a level in time) - with HALO_NET_FUZZ_TWIN (port/linux/game/net_fuzz_twin.h), "
+    "as run_netns_online_test.sh hostfuzz* and run_netns_crossplay_test.sh's fuzz modes take them "
+    "(HALO_TEST_FUZZ_HOST, HALO_TEST_FUZZ_JOINER)",
+)
+parser.add_argument(
     "--vita-aligned",
     choices=["hot", "none"],
     default="none",
@@ -243,6 +252,7 @@ sln.ml_path = args.ml
 sln.linux_cc = args.linux_cc
 sln.linux_d3d = args.linux_d3d
 sln.linux_net_vita = args.linux_net_vita
+sln.linux_fuzz = args.linux_fuzz
 sln.compiler_launcher = args.compiler_launcher
 sln.port_release = args.release
 sln.port_lto = args.lto

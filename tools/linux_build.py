@@ -705,6 +705,24 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
     emit(obj_dir, output, cflags, ldflags, [profile] if profile else [], validator)
     n.build(outputs="linux", rule="phony", inputs=[output, validator, build_dir / "scene_pack_test"])
 
+    # (--linux-fuzz, test builds) the network fuzz builds: the game with
+    # HALO_NET_FUZZ_TWIN (port/linux/game/net_fuzz_twin.h) under
+    # AddressSanitizer + UBSan (halo-fuzz: the fuzzed host's) and UBSan alone
+    # (halo-fuzz-ub: a fuzzed joiner, which must make and load a Halo 2 level
+    # before its host stops waiting), each in objects of its own, without
+    # LTO or a profile: `ninja linux-fuzz` (run_netns_online_test.sh
+    # hostfuzz*). pointer-overflow is left out: musl-math's __rem_pio2_large
+    # does not compile with it on i686
+    if getattr(sln, "linux_fuzz", False):
+        fuzz_outputs = []
+        for name, sanitizers in (("halo-fuzz", "address,undefined"), ("halo-fuzz-ub", "undefined")):
+            fuzz_output = build_dir / name
+            emit(build_dir / "fuzz" / name / "obj", fuzz_output,
+                 [f"-fsanitize={sanitizers}", "-fno-sanitize=pointer-overflow", "-fno-omit-frame-pointer",
+                  "-DHALO_NET_FUZZ_TWIN=1"], [f"-fsanitize={sanitizers}"], [])
+            fuzz_outputs.append(fuzz_output)
+        n.build(outputs="linux-fuzz", rule="phony", inputs=fuzz_outputs)
+
     # The dedicated server (ninja linux-server: port/linux/DEDICATED_SERVER.md):
     # the same game compiled once more as a headless host on the Vitas' side
     # of the Vita-only line (HALO_NET_AS_VITA) that can do nothing else
