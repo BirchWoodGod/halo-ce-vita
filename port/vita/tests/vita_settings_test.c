@@ -4709,6 +4709,38 @@ static void test_updates(void)
 	press(VITA_BUTTON_CIRCLE);
 }
 
+/* the Cross (or Circle) that answers a question over the game, or closes a
+message, is not the game's while it is held: the game has it only once let
+go (Neff, 1.1.1 RC6: the Cross that answered Join anyway? on a large PC game
+reached the System Link list the join opened next - empty yet - as its own
+A, which hosted a game of the Vita's own and published it) */
+static void test_answer_press_held(void)
+{
+	vita_settings_question("Halo: large PC game", "Large PC game: more than 16 players can make the Vita lag. Join anyway?");
+	frame(0);
+	check(menu_visible && strstr(menu, "Join anyway?") != NULL, "the large PC game's question over the game");
+	check(frame(VITA_BUTTON_CROSS) != 0, "Cross answers it (the panel's press)");
+	check(vita_settings_question_answer() == 1, "the answer: yes");
+	check(!menu_visible, "the question closed");
+	check(frame(VITA_BUTTON_CROSS) != 0 && frame(VITA_BUTTON_CROSS) != 0,
+		"the answer's Cross, still held, is not the game's (no A for the screen the join opens)");
+	check(frame(0) == 0, "let go: the buttons the game's again");
+	check(frame(VITA_BUTTON_CROSS) == 0, "a new Cross is the game's");
+	frame(0);
+	vita_settings_question("Halo: large PC game", "Join anyway?");
+	frame(0);
+	check(frame(VITA_BUTTON_CIRCLE) != 0 && vita_settings_question_answer() == 0, "Circle answers no");
+	check(frame(VITA_BUTTON_CIRCLE) != 0, "the answer's Circle, still held, is not the game's (no B)");
+	check(frame(0) == 0, "let go: the game's again");
+	vita_settings_message("Halo: cannot join this game", "The game is full.");
+	frame(0);
+	check(menu_visible && strstr(menu, "The game is full.") != NULL, "a message over the game");
+	check(frame(VITA_BUTTON_CROSS) != 0 && !menu_visible, "Cross closes it");
+	check(frame(VITA_BUTTON_CROSS) != 0, "the Cross that closed it, still held, is not the game's");
+	check(frame(0) == 0 && frame(VITA_BUTTON_CROSS) == 0, "let go: a new Cross is the game's");
+	frame(0);
+}
+
 /* ---------- the restart offer: a change that applies after a restart,
 the panel closed at the main menu (close_panel) */
 
@@ -6494,6 +6526,7 @@ int main(void)
 	snprintf(update_version_value, sizeof(update_version_value), "1.1.0-beta.4");
 	test_languages();
 	test_menu_style_row();
+	test_answer_press_held();
 	test_menu_style_original();
 	test_carnage_report_row();
 	test_scoreboard_row();

@@ -1174,8 +1174,12 @@ static const char *const fixed_defaults[][2] = {
 static int panel_open;
 static unsigned long long both_since, last_move, last_shown;
 static unsigned long previous_buttons;
-/* the buttons down when the panel closed: the game has them only once
-they are let go (the cross that opened System Link is not the game's A) */
+/* the buttons down when the panel closed, or when a question or message
+over the game was answered or closed: the game has them only once they are
+let go (the cross that opened System Link is not the game's A, nor the
+cross that answered Join anyway? on a large PC game: the System Link list
+the join opened next took it as its own A on no game, and hosted - Neff,
+1.1.1 RC6) */
 static unsigned long held_after_close;
 static int restart_pending;
 /* port: the offer to restart at once (close_panel): 0 none made since the
@@ -6113,6 +6117,8 @@ static int question_progress_input(unsigned long pressed)
             question_result = (pressed & VITA_BUTTON_CROSS) ? 1 : 0;
             question_visible = 0;
             vgxm_menu_set(NULL, 0);
+            /* (the answer's button, still down, is not the game's) */
+            held_after_close = previous_buttons;
             if (restart_offered == 2)
             {
                 restart_offered = 1;
@@ -7390,6 +7396,8 @@ int vita_settings_input(const struct vita_host_pad *pad)
         {
             message_visible = 0;
             vgxm_menu_set(NULL, 0);
+            /* (the button that closed it, still down, is not the game's) */
+            held_after_close = previous_buttons;
             /* (what the message covered comes back) */
             pthread_mutex_lock(&message_lock);
             if (question_visible)
