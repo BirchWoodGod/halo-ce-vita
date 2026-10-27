@@ -42,6 +42,9 @@ pixels as they arrive, and samples them in this build's order
 
 #include <stdlib.h>
 
+/* (cache_files.c) */
+boolean tag_index_is_group(long tag_index, long group_tag);
+
 /* ---------- constants */
 
 enum
@@ -824,6 +827,15 @@ void custom_edition_bitmap_pixels_arrived(
 		sizeof(*group));
 	long bitmap_index;
 
+	/* (the map's tag table grown since it loaded - the in-game screens'
+	tags after the map's, menu_tags.c - is no longer in the tag cache: the
+	game's table, which has the map's tags and the copies of its bitmaps
+	after them. Without it no bitmap of the map was rebuilt: every texture
+	garbled, RC4 on snowcast) */
+	if (!group && tag_index_is_group(tag_index, BITMAP_GROUP_TAG))
+	{
+		group = (struct bitmap_group *)tag_get(BITMAP_GROUP_TAG, tag_index);
+	}
 	if (!group)
 	{
 		return;
