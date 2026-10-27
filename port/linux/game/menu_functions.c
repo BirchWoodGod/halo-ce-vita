@@ -978,7 +978,8 @@ static void h3_nameplate_read(void)
 		if (!h3_plate.name[0])
 			continue;
 		h3_plate.shown = candidates[index];
-		h3_plate.color = profile.primary_color_index;
+		/* (the armour's own colour: one of the platform's too) */
+		h3_plate.color = player_cosmetics_profile_color(candidates[index], profile.primary_color_index);
 		break;
 	}
 }
@@ -1005,6 +1006,8 @@ static void h3_player_name(char *name, int size)
 			getenv("HALO_NET_PLAYER_NAME") : "Player");
 }
 
+static short h3_swatch_frame(short color);
+
 static void h3_nameplate_update(struct widget_instance *widget)
 {
 	char name[64];
@@ -1012,9 +1015,9 @@ static void h3_nameplate_update(struct widget_instance *widget)
 	short frame;
 
 	h3_player_name(name, sizeof(name));
-	/* (the bar's frame: 0 Halo 3's green for none, then the game's colours
-	in its order, as the swatches) */
-	frame = (short)(h3_plate.color < 0 || h3_plate.color >= 18 ? 0 : h3_plate.color + 1);
+	/* (the bar's frame: 0 Halo 3's green for none, then the colours in
+	their order, as the swatches) */
+	frame = h3_swatch_frame(h3_plate.color);
 	text_show(widget, name);
 	if (widget)
 		widget->animation.current_frame_index = frame;
@@ -4578,10 +4581,12 @@ static void h3_profile_name(char *out, int size, struct player_profile const *pr
 	h3_utf8(out, size, name);
 }
 
-/* the swatch frame of a profile's colour (0: none) */
+/* the frame of a profile's or player's colour in the swatches, nameplates
+and scoreboard emblems (0: none): the game's eighteen, then the platform's
+own (player_cosmetics.h; the owner, RC4: a nameplate in the armour's colour) */
 static short h3_swatch_frame(short color)
 {
-	return (short)(color < 0 || color >= H3_SWATCH_FRAMES - 1 ? 0 : color + 1);
+	return (short)(color < 0 || color >= PLAYER_COSMETICS_COLORS ? 0 : color + 1);
 }
 
 /* the profiles, read again (the Xbox's list initialize), the item chosen on
@@ -5067,7 +5072,8 @@ static void h3_profiles_update(struct widget_instance *list)
 		{
 			widget_instance_set_visibility_recursive(found, profile);
 			if (profile)
-				found->animation.current_frame_index = h3_swatch_frame(h3_profiles.profiles[item].primary_color_index);
+				found->animation.current_frame_index = h3_swatch_frame(player_cosmetics_profile_color(h3_profiles.indices[item],
+					h3_profiles.profiles[item].primary_color_index));
 		}
 		if (index == h3_profiles.view.row)
 			focus = child;
@@ -5104,7 +5110,8 @@ static void h3_profiles_update(struct widget_instance *list)
 			if ((found = named(screen, "info_swatch")) != NULL)
 			{
 				widget_instance_set_visibility_recursive(found, TRUE);
-				found->animation.current_frame_index = h3_swatch_frame(profile->primary_color_index);
+				found->animation.current_frame_index = h3_swatch_frame(player_cosmetics_profile_color(h3_profiles.indices[target],
+					profile->primary_color_index));
 			}
 			player_profile_get_highest_completed_solo_level((struct player_profile *)profile, &level, &difficulty);
 			level = (short)MIN(level + 1, NUMBER_OF_SINGLE_PLAYER_LEVELS - 1);
@@ -5595,9 +5602,9 @@ static void h3_custom_update(struct widget_instance *list)
 	h3_capitals(text);
 	text_show(named(screen, "profile_name"), text);
 	if ((found = named(screen, "swatch")) != NULL)
-		found->animation.current_frame_index = h3_swatch_frame(profile->primary_color_index);
+		found->animation.current_frame_index = h3_swatch_frame(h3_custom_color_of(profile));
 	if ((found = named(screen, "preview_swatch")) != NULL)
-		found->animation.current_frame_index = h3_swatch_frame(profile->primary_color_index);
+		found->animation.current_frame_index = h3_swatch_frame(h3_custom_color_of(profile));
 	h3_custom_spartan_preview(screen, h3_custom_color_of(profile));
 	player_cosmetics_preview_visor(h3_custom.visor);
 	/* (under the preview: the colour's name, or how the model's pack is
@@ -14276,7 +14283,7 @@ static void h3_carnage_update(struct widget_instance *lines)
 		snprintf(text, sizeof(text), "%s%s", row->name, row->quit ? T(" (left)") : "");
 		row_column(child, "row_name", text);
 		if ((found = named(child, "row_name")) != NULL)
-			found->animation.current_frame_index = (short)(row->color < 0 || row->color >= 18 ? 0 : row->color + 1);
+			found->animation.current_frame_index = h3_swatch_frame(row->color);
 		for (column = 0; column < H3_CARNAGE_COLUMNS; column++)
 		{
 			char value[32];
@@ -14977,7 +14984,7 @@ static void h3_scoreboard_fill_row(struct widget_instance *child, struct h3_scor
 	if ((found = named(child, "row_tint_n")) != NULL)
 		found->animation.current_frame_index = (short)(teams ? PIN(row->team, 0, 7) : 8);
 	if ((found = named(child, "row_emblem")) != NULL)
-		found->animation.current_frame_index = (short)(row->color < 0 || row->color >= 18 ? 0 : row->color + 1);
+		found->animation.current_frame_index = h3_swatch_frame(row->color);
 	if ((found = named(child, "row_ping")) != NULL)
 		found->animation.current_frame_index = (short)PIN(row->ping_bars, 0, 4);
 	text_show(named(child, "row_name"), row->name);
@@ -15042,8 +15049,7 @@ static void h3_scoreboard_selector_update(struct widget_instance *screen, boolea
 	{
 		widget_instance_set_visibility_recursive(emblem, chosen >= 0);
 		if (chosen >= 0)
-			emblem->animation.current_frame_index = (short)(h3_scoreboard.rows[chosen].color < 0 ||
-				h3_scoreboard.rows[chosen].color >= 18 ? 0 : h3_scoreboard.rows[chosen].color + 1);
+			emblem->animation.current_frame_index = h3_swatch_frame(h3_scoreboard.rows[chosen].color);
 	}
 }
 
@@ -15968,7 +15974,8 @@ static void h3_join_update(struct widget_instance *widget)
 			if (player_profile_get(h3_join.profiles[plate][h3_join.cursor[plate]], &profile))
 			{
 				h3_join_profile_name(&profile, name, (int)sizeof(name));
-				color = profile.primary_color_index;
+				color = player_cosmetics_profile_color(h3_join.profiles[plate][h3_join.cursor[plate]],
+					profile.primary_color_index);
 			}
 			if (!name[0])
 				snprintf(name, sizeof(name), "%s", T("Default profile"));
@@ -17137,7 +17144,13 @@ static long h3_roster_show(struct widget_instance *screen, struct network_game c
 		widget_instance_set_visibility_recursive(row_widget, TRUE);
 		text_show(named(row_widget, "row_name"), name);
 		if ((found = named(row_widget, "row_swatch")) != NULL)
-			found->animation.current_frame_index = h3_swatch_frame(player->primary_color_index);
+		{
+			/* (the platform's colour its machine sent, else the record's:
+			a crossplay player's is the nearest classic) */
+			short color = player_cosmetics_icon_color(player->icon_index);
+
+			found->animation.current_frame_index = h3_swatch_frame(color != NONE ? color : player->primary_color_index);
+		}
 		note[0] = 0;
 		if (game->variant.universal_variant.teams)
 			snprintf(note, sizeof(note), "%s", player->team_index == 0 ? T("RED") : player->team_index == 1 ? T("BLUE") : "");

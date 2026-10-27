@@ -17,6 +17,7 @@ every machine shows the host's numbers, and nothing a client counts itself.
 #include "game/game_engine.h"
 #include "game/players.h"
 #include "input/input.h"
+#include "player_cosmetics.h"
 #include "carnage_report.h"
 #include "../src/lang.h"
 
@@ -121,7 +122,11 @@ static void carnage_player_row(struct carnage_report_row *row, long player_index
 	row->machine = (short)player->network_player_data.machine_index;
 	row->local_player_index = player->local_player_index;
 	row->team = (short)player->team_index;
-	row->color = player->network_player_data.primary_color_index;
+	/* (the armour's own colour - one of the platform's too, its machine's
+	word for another's: the nameplate as the armour, the owner, RC4) */
+	row->color = player_cosmetics_player_color(player_index);
+	if (row->color == NONE)
+		row->color = player->network_player_data.primary_color_index;
 	row->place = place;
 	row->tied = tied;
 	row->local = player->local_player_index != NONE;

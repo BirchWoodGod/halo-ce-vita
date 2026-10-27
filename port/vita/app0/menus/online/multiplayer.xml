@@ -45,6 +45,30 @@ and the map's picture and description in a card at the right. The art is this fo
 		<frame png="online/plate_15.png" width="4" height="32" />
 		<frame png="online/plate_16.png" width="4" height="32" />
 		<frame png="online/plate_17.png" width="4" height="32" />
+		<frame png="online/plate_18.png" width="4" height="32" />
+		<frame png="online/plate_19.png" width="4" height="32" />
+		<frame png="online/plate_20.png" width="4" height="32" />
+		<frame png="online/plate_21.png" width="4" height="32" />
+		<frame png="online/plate_22.png" width="4" height="32" />
+		<frame png="online/plate_23.png" width="4" height="32" />
+		<frame png="online/plate_24.png" width="4" height="32" />
+		<frame png="online/plate_25.png" width="4" height="32" />
+		<frame png="online/plate_26.png" width="4" height="32" />
+		<frame png="online/plate_27.png" width="4" height="32" />
+		<frame png="online/plate_28.png" width="4" height="32" />
+		<frame png="online/plate_29.png" width="4" height="32" />
+		<frame png="online/plate_30.png" width="4" height="32" />
+		<frame png="online/plate_31.png" width="4" height="32" />
+		<frame png="online/plate_32.png" width="4" height="32" />
+		<frame png="online/plate_33.png" width="4" height="32" />
+		<frame png="online/plate_34.png" width="4" height="32" />
+		<frame png="online/plate_35.png" width="4" height="32" />
+		<frame png="online/plate_36.png" width="4" height="32" />
+		<frame png="online/plate_37.png" width="4" height="32" />
+		<frame png="online/plate_38.png" width="4" height="32" />
+		<frame png="online/plate_39.png" width="4" height="32" />
+		<frame png="online/plate_40.png" width="4" height="32" />
+		<frame png="online/plate_41.png" width="4" height="32" />
 	</bitmap>
 	<strings name="online/lobby_text">
 		<string text="SWITCH LOBBY" />

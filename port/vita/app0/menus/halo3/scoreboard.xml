@@ -79,6 +79,30 @@ art is this folder's own (tools/halo3_menu_art.py). -->
 		<frame png="halo3/scoreboard_emblem_15.png" width="16" height="16"/>
 		<frame png="halo3/scoreboard_emblem_16.png" width="16" height="16"/>
 		<frame png="halo3/scoreboard_emblem_17.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_18.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_19.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_20.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_21.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_22.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_23.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_24.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_25.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_26.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_27.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_28.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_29.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_30.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_31.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_32.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_33.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_34.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_35.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_36.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_37.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_38.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_39.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_40.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_41.png" width="16" height="16"/>
 	</bitmap>
 	<bitmap name="h3/scoreboard_selector">
 		<frame png="halo3/scoreboard_selector.png" width="256" height="16"/>

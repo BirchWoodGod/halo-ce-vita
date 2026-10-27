@@ -93,7 +93,8 @@ for name, png in (('online/panel', 'panel'), ('online/card', 'card'), ('online/b
     add(b)
 plate = el('bitmap', name='online/plate')
 plate.append(el('frame', png='online/plate.png', width=4, height=32))
-for i in range(18):
+# (the game's eighteen colours, then the platform's own 24: player_cosmetics.h)
+for i in range(42):
     plate.append(el('frame', png='online/plate_%02d.png' % i, width=4, height=32))
 add(plate)
 add(el('strings', name='online/lobby_text'))

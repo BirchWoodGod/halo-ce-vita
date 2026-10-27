@@ -34,6 +34,30 @@ swatches are the game's colours). -->
 		<frame png="halo3/swatch_15.png" width="16" height="16"/>
 		<frame png="halo3/swatch_16.png" width="16" height="16"/>
 		<frame png="halo3/swatch_17.png" width="16" height="16"/>
+		<frame png="halo3/swatch_18.png" width="16" height="16"/>
+		<frame png="halo3/swatch_19.png" width="16" height="16"/>
+		<frame png="halo3/swatch_20.png" width="16" height="16"/>
+		<frame png="halo3/swatch_21.png" width="16" height="16"/>
+		<frame png="halo3/swatch_22.png" width="16" height="16"/>
+		<frame png="halo3/swatch_23.png" width="16" height="16"/>
+		<frame png="halo3/swatch_24.png" width="16" height="16"/>
+		<frame png="halo3/swatch_25.png" width="16" height="16"/>
+		<frame png="halo3/swatch_26.png" width="16" height="16"/>
+		<frame png="halo3/swatch_27.png" width="16" height="16"/>
+		<frame png="halo3/swatch_28.png" width="16" height="16"/>
+		<frame png="halo3/swatch_29.png" width="16" height="16"/>
+		<frame png="halo3/swatch_30.png" width="16" height="16"/>
+		<frame png="halo3/swatch_31.png" width="16" height="16"/>
+		<frame png="halo3/swatch_32.png" width="16" height="16"/>
+		<frame png="halo3/swatch_33.png" width="16" height="16"/>
+		<frame png="halo3/swatch_34.png" width="16" height="16"/>
+		<frame png="halo3/swatch_35.png" width="16" height="16"/>
+		<frame png="halo3/swatch_36.png" width="16" height="16"/>
+		<frame png="halo3/swatch_37.png" width="16" height="16"/>
+		<frame png="halo3/swatch_38.png" width="16" height="16"/>
+		<frame png="halo3/swatch_39.png" width="16" height="16"/>
+		<frame png="halo3/swatch_40.png" width="16" height="16"/>
+		<frame png="halo3/swatch_41.png" width="16" height="16"/>
 	</bitmap>
 	<!-- the panel, with a window at the card's lower right where the focused profile's Spartan
 	stands (tools/halo3_menu_art.py) -->

@@ -321,6 +321,8 @@ def visor_tile(colour):
 
 for _index, _colour in enumerate(EXTENDED_COLOURS):
     ART['colour_%02d.png' % (len(PLAYER_COLOURS) + _index)] = (lambda colour: lambda: colour_tile(colour))(_colour)
+    # (the party list's nameplate in the armour's own colour: a profile's colour 18 and up)
+    ART['plate_%02d.png' % (len(PLAYER_COLOURS) + _index)] = (lambda colour: lambda: plate(colour))(_colour)
 for _index, _colour in enumerate(VISOR_COLOURS):
     ART['visor_%02d.png' % _index] = (lambda colour: lambda: visor_tile(colour))(_colour)
 

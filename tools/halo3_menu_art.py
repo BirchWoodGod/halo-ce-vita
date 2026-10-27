@@ -1072,6 +1072,20 @@ for _index, _colour in enumerate(PLAYER_COLOURS):
     ART['nameplate_%02d.png' % _index] = (lambda colour: lambda: nameplate_colour(colour))(_colour)
     ART['scoreboard_emblem_%02d.png' % _index] = (lambda colour: lambda: scoreboard_emblem(((colour >> 16) & 0xFF, (colour >> 8) & 0xFF, colour & 0xFF)))(_colour)
 
+# the platform's own armour colours after the game's eighteen (frames 19 on:
+# a profile's colour 18 and up, port/linux/game/player_cosmetics.c's table and
+# tools/online_menu_art.py's EXTENDED_COLOURS - keep them alike): the
+# nameplates, swatches and scoreboard emblems in the armour's own colour
+EXTENDED_COLOURS = [
+    0x4A5560, 0x8A96A0, 0x2B2D30, 0xC0C4C8, 0x1B2A5C, 0x2E2A7A, 0x6FB7E8, 0xBFE6F2,
+    0x0F5E5E, 0x8FE3B5, 0x3E5B2A, 0x5B6324, 0x9BD13A, 0xD8C79A, 0xC9A43A, 0xE0A21A,
+    0xA4441C, 0x4A3020, 0xB0182A, 0x5E1224, 0xD46A8C, 0x5E2A62, 0x6A3FB8, 0xA897D8,
+]
+for _index, _colour in enumerate(EXTENDED_COLOURS, len(PLAYER_COLOURS)):
+    ART['swatch_%02d.png' % _index] = (lambda colour: lambda: swatch(colour))(_colour)
+    ART['nameplate_%02d.png' % _index] = (lambda colour: lambda: nameplate_colour(colour))(_colour)
+    ART['scoreboard_emblem_%02d.png' % _index] = (lambda colour: lambda: scoreboard_emblem(((colour >> 16) & 0xFF, (colour >> 8) & 0xFF, colour & 0xFF)))(_colour)
+
 
 def main(folder):
     os.makedirs(folder, exist_ok=True)
