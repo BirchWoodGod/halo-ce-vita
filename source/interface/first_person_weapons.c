@@ -2456,6 +2456,23 @@ static void model_remap_node_matrices_to_match_animation_graph(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* port: the network test's spawn trace (port/linux/game/network_test.c):
+the local player's first-person weapon, its state and whether it shows */
+void first_person_weapon_trace_state(
+	short local_player_index,
+	long *weapon_index,
+	short *state,
+	boolean *visible)
+{
+	struct first_person_weapon const *first_person_weapon= &first_person_weapons[local_player_index];
+
+	*weapon_index= first_person_weapon->weapon_index;
+	*state= first_person_weapon->state;
+	*visible= first_person_weapon->visible;
+}
+#endif
+
 static struct first_person_weapon *first_person_weapon_get(
 	short local_player_index)
 {
