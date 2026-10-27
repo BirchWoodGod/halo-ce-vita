@@ -2068,6 +2068,10 @@ static boolean network_game_server_handle_message_client_join_game_request(
 	boolean result = TRUE;
 	/* (or a distributed game in progress: network_game_server_accepts_late_joins) */
 	boolean late_join = network_game_server_accepts_late_joins(server);
+#ifdef HALO_LINUX
+	/* (a free slot, or a bot that would leave for this machine) */
+	boolean bots_make_room = FALSE;
+#endif
 
 #ifdef HALO_LINUX
 	/* port: the dedicated server's game going back to its lobby (over, or
@@ -2083,11 +2087,15 @@ static boolean network_game_server_handle_message_client_join_game_request(
 #ifdef HALO_LINUX
 	/* port: a game the host's bots fill (a dedicated server's sv_bots_fill,
 	a host's Bots online) has room for a machine joining: a bot's slot, if it
-	has no other */
+	has no other. The bot leaves only once the join is checked and about to
+	be accepted (network_game_server_port_join_make_room): a join refused
+	(a bad token, banned, the wrong build...) or a flood of them takes no
+	bot out of the game */
 	if (!network_game_server_client_machine_is_joined_to_game(server, server_client_machine))
 	{
-		network_game_server_port_bots_make_room(server);
-		late_join = network_game_server_accepts_late_joins(server);
+		bots_make_room = network_game_server_port_bots_could_make_room(server);
+		late_join = network_game_server_get_state(server, NULL) == _network_game_server_state_ingame &&
+			network_game_server_game_is_open(server) && bots_make_room;
 	}
 #endif
 	if (network_game_server_get_state(server, NULL) == _network_game_server_state_pregame || late_join)
@@ -2123,6 +2131,10 @@ static boolean network_game_server_handle_message_client_join_game_request(
 			the countdown for ever */
 			boolean full = network_game_server_get_state(server, NULL) == _network_game_server_state_pregame &&
 				!network_game_has_free_player_slot(network_game_server_get_game(server));
+#ifdef HALO_LINUX
+			/* (or a bot's slot to take) */
+			full = full && !bots_make_room;
+#endif
 
 			/* port: its hardware id, as it tells it: hex only (anything else
 			left out), no more than its field; the host logs it, and refuses
@@ -2161,7 +2173,11 @@ static boolean network_game_server_handle_message_client_join_game_request(
 					/* (the Xbox game refused a machine not named in the
 					development kit's d:\hosts.txt: a stray file of that name
 					on a PC refused machines) */
-					if (!vitas_only && network_game_server_accept_client_machine_into_game(server, server_client_machine))
+					if (!vitas_only &&
+#ifdef HALO_LINUX
+						network_game_server_port_join_make_room(server, server_client_machine) &&
+#endif
+						network_game_server_accept_client_machine_into_game(server, server_client_machine))
 					{
 						struct message_server_machine_accepted acceptance;
 						struct network_message *reply;

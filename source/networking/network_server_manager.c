@@ -2348,20 +2348,15 @@ short network_game_server_last_refusal_code(
 	return network_game_server_refusal_code;
 }
 
-boolean network_game_server_accept_client_machine_into_game(
+/* port: whether the machine is refused, whatever room the game has (its
+address dropped for cheating, banned, kept out, or with its share of the
+game's players): network_game_server_last_refusal_code says why */
+static boolean network_game_server_machine_refused(
 	struct network_game_server *server,
 	struct network_game_server_client_machine *machine)
 {
-	boolean success = FALSE;
-	long machine_index;
+	long machine_index = machine->machine_index;
 
-	match_assert(NETWORK_SERVER_MANAGER_FILE, 0x3DA, server);
-	match_assert(NETWORK_SERVER_MANAGER_FILE, 0x3DB, machine);
-
-	/* port: into its own slot (network_game_server_add_new_client numbered
-	it by it), not the first free one: another connection's slot gave two
-	machines one index */
-	machine_index = machine->machine_index;
 	network_game_server_refusal_code = _rejection_code_game_is_closed;
 	/* port: not a machine of an address dropped for cheating */
 	{
@@ -2376,7 +2371,7 @@ boolean network_game_server_accept_client_machine_into_game(
 				network_event("refusing a machine @ %s: dropped from this game for cheating",
 					transport_address_to_string(&address));
 				network_game_server_refusal_code = _rejection_code_blacklisted_machine;
-				return FALSE;
+				return TRUE;
 			}
 		}
 		/* (and not one the host banned: its address or hardware id in
@@ -2390,7 +2385,7 @@ boolean network_game_server_accept_client_machine_into_game(
 		{
 			network_event("refusing a machine @ %s: banned (bans.txt)", transport_address_to_string(&address));
 			network_game_server_refusal_code = _rejection_code_blacklisted_machine;
-			return FALSE;
+			return TRUE;
 		}
 		/* (nor one banned for the session, or dropped by the anti-cheat
 		limit a while ago: by its real address, an internet play peer's
@@ -2405,7 +2400,7 @@ boolean network_game_server_accept_client_machine_into_game(
 			network_event("refusing a machine @ %s: kept out by the host (its ban for the session, or its anti-cheat "
 				"limit)", transport_address_to_string(&address));
 			network_game_server_refusal_code = _rejection_code_blacklisted_machine;
-			return FALSE;
+			return TRUE;
 		}
 		/* (nor one more machine of a person whose machines have their share
 		of the game's players, F-11) */
@@ -2415,9 +2410,28 @@ boolean network_game_server_accept_client_machine_into_game(
 			network_event("refusing a machine @ %s: its address has its share of this game's players",
 				transport_address_to_string(&address));
 			network_game_server_refusal_code = _rejection_code_game_is_full;
-			return FALSE;
+			return TRUE;
 		}
 	}
+	return FALSE;
+}
+
+boolean network_game_server_accept_client_machine_into_game(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *machine)
+{
+	boolean success = FALSE;
+	long machine_index;
+
+	match_assert(NETWORK_SERVER_MANAGER_FILE, 0x3DA, server);
+	match_assert(NETWORK_SERVER_MANAGER_FILE, 0x3DB, machine);
+
+	/* port: into its own slot (network_game_server_add_new_client numbered
+	it by it), not the first free one: another connection's slot gave two
+	machines one index */
+	machine_index = machine->machine_index;
+	if (network_game_server_machine_refused(server, machine))
+		return FALSE;
 	/* (a kick asked for the slot's machine before is not this one's) */
 	if (VALID_INDEX(machine_index, MAXIMUM_NETWORK_MACHINE_COUNT))
 	{
@@ -5387,7 +5401,10 @@ so every build, 1.1.0's too, sees bots as other players.
 - People first: a person's player that finds the game full takes a bot's
   slot at once (network_game_server_port_bots_make_room), and a machine
   joining a full lobby too, so a party's machines, joining together, are
-  never refused for bots. A person is never removed for a bot.
+  never refused for bots. A person is never removed for a bot. A machine's
+  bot leaves once its join is checked, as it is accepted
+  (network_game_server_port_join_make_room): a join refused (its token,
+  build, ban...) or a flood of join requests takes no bot out.
 - Teams (team games but Infection): a person joins the team of a party
   member in the game (party_net.h), else the team with fewer people, then
   the one with fewer players; the bot that leaves for them is of that team.
@@ -5784,6 +5801,44 @@ boolean network_game_server_port_bots_make_room(
 	struct network_game_server *server)
 {
 	return network_game_server_port_bots_make_room_on_team(server, NONE);
+}
+
+/* whether the game has a free slot, or a bot that could leave to make one
+(nothing changed) */
+boolean network_game_server_port_bots_could_make_room(
+	struct network_game_server *server)
+{
+	long slot_of_bot[BOTS_MAXIMUM];
+
+	if (!server)
+		return FALSE;
+	if (network_game_has_free_player_slot(&server->game))
+		return TRUE;
+	if (network_game_is_splitscreen_local() || !network_game_server_fill_changeable(server) ||
+		!network_game_server_fill_bot_slots(server, slot_of_bot))
+	{
+		return FALSE;
+	}
+	return network_game_server_fill_bot_to_leave(server, slot_of_bot, NONE) != NONE;
+}
+
+/* a machine about to be accepted into the game (its join checked): a bot's
+slot for it, if the game has no other; never for one that would be refused
+(banned, kept out, its address with its share), which takes no bot's place.
+FALSE (network_game_server_last_refusal_code saying why) if it cannot join */
+boolean network_game_server_port_join_make_room(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *machine)
+{
+	if (network_game_server_machine_refused(server, machine))
+		return FALSE;
+	if (!network_game_server_port_bots_make_room(server))
+	{
+		network_game_server_refusal_code = _rejection_code_game_is_full;
+		return FALSE;
+	}
+	network_game_server_refusal_code = _rejection_code_game_is_closed;
+	return TRUE;
 }
 
 /* each frame: the bots the fill wants, joined or gone (one change a frame) */

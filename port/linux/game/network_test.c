@@ -1794,6 +1794,83 @@ static boolean network_test_watch_short_game(void)
 		global_network_game_server_get() != NULL;
 }
 
+void first_person_weapon_trace_state(short local_player_index, long *weapon_index, short *state, boolean *visible);
+unsigned long system_milliseconds(void);
+
+/* HALO_NETWORK_TEST_SPAWN_TRACE=1: each frame a player's unit, its first
+weapon, the weapon in hand (and for this machine's first player its
+first-person weapon) changes, the tick and the time: how long after a spawn
+the weapon is in the player's hands, here and on the host */
+static void network_test_trace_spawns(
+	void)
+{
+	static int enabled = -1;
+	static struct
+	{
+		long unit_index, weapon_index, current, desired, first_person_weapon;
+		short first_person_state;
+		boolean first_person_visible;
+		unsigned long spawn_time;
+		long spawn_tick;
+	} last[64];
+	struct data_iterator iterator;
+	struct player_datum *player;
+	long local_player_index = local_player_get_player_index(0);
+
+	if (enabled < 0)
+	{
+		enabled = getenv("HALO_NETWORK_TEST_SPAWN_TRACE") && !strcmp(getenv("HALO_NETWORK_TEST_SPAWN_TRACE"), "1");
+		csmemset(last, 0xFF, sizeof(last));
+	}
+	if (!enabled)
+		return;
+	data_iterator_new(&iterator, player_data);
+	while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+	{
+		long absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.datum_index);
+		struct unit_datum *unit = player->unit_index != NONE ? (struct unit_datum *)object_try_and_get_and_verify_type(player->unit_index, _object_mask_unit) : NULL;
+		long weapon_index = unit ? unit->unit.weapon_object_indices[0] : NONE;
+		long current = unit ? unit->unit.current_weapon_index : NONE;
+		long desired = unit ? unit->unit.desired_weapon_index : NONE;
+		long first_person_weapon = NONE;
+		short first_person_state = NONE;
+		boolean first_person_visible = FALSE;
+		boolean local = iterator.datum_index == local_player_index;
+
+		if (absolute_index < 0 || absolute_index >= 64)
+			continue;
+		if (local)
+			first_person_weapon_trace_state(0, &first_person_weapon, &first_person_state, &first_person_visible);
+		if (last[absolute_index].unit_index == (unit ? player->unit_index : NONE) &&
+			last[absolute_index].weapon_index == weapon_index && last[absolute_index].current == current &&
+			last[absolute_index].desired == desired && last[absolute_index].first_person_weapon == first_person_weapon &&
+			last[absolute_index].first_person_state == first_person_state &&
+			(last[absolute_index].first_person_visible ? TRUE : FALSE) == (first_person_visible ? TRUE : FALSE))
+		{
+			continue;
+		}
+		if (unit && last[absolute_index].unit_index != player->unit_index)
+		{
+			last[absolute_index].spawn_time = system_milliseconds();
+			last[absolute_index].spawn_tick = game_time_get();
+		}
+		last[absolute_index].unit_index = unit ? player->unit_index : NONE;
+		last[absolute_index].weapon_index = weapon_index;
+		last[absolute_index].current = current;
+		last[absolute_index].desired = desired;
+		last[absolute_index].first_person_weapon = first_person_weapon;
+		last[absolute_index].first_person_state = first_person_state;
+		last[absolute_index].first_person_visible = first_person_visible;
+		platform_log("spawn trace: tick %ld ms %lu player %ld%s unit %lx weapon %lx current %ld desired %ld"
+			" fp %lx state %d visible %d | %ld ticks %lu ms since its unit",
+			game_time_get(), system_milliseconds(), absolute_index, local ? " (local)" : "",
+			unit ? player->unit_index : NONE, weapon_index, current, desired,
+			first_person_weapon, (int)first_person_state, first_person_visible ? 1 : 0,
+			unit ? game_time_get() - last[absolute_index].spawn_tick : -1L,
+			unit ? system_milliseconds() - last[absolute_index].spawn_time : 0UL);
+	}
+}
+
 void network_test_update(
 	boolean main_menu_loaded,
 	real seconds)
@@ -1807,6 +1884,8 @@ void network_test_update(
 	game's time starts over) */
 	if (game_in_progress() && game_time_get() < network_test.logged_time)
 		network_test.logged_time = 0;
+	if (game_in_progress() && !main_menu_loaded)
+		network_test_trace_spawns();
 #ifndef HALO_RELEASE
 	if (game_in_progress() && !main_menu_loaded)
 	{
