@@ -149,16 +149,19 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	case 2:
 		/* (with bit 2 of the kind: a record of OpenCE's 38, 16 bytes longer;
 		taken, the record before its further options and its local data
-		again as the client keeps them, the co-op byte's bit 1 dropped) */
+		again as the client keeps them, the co-op byte's bit 1 dropped;
+		with bit 3 too, of 39's, the same record) */
 		if (kind & 4)
 		{
 			long local = HALO_PORT_NETWORK_GAME_LOCAL_DATA_OFFSET;
+			unsigned int version = (kind & 8) ? 39 : 38;
 
-			record_size = network_game_record_wire_size(_network_game_record_crossplay, 38);
+			record_size = network_game_record_wire_size(_network_game_record_crossplay, version);
 			memset(fuzz_record, 0, sizeof(fuzz_record));
 			memcpy(fuzz_record, data, size < (size_t)record_size ? size : (size_t)record_size);
 			why = NULL;
-			if (network_game_record_decode_version(_network_game_record_crossplay, 38, fuzz_record, record_size, game, &why))
+			if (network_game_record_decode_version(_network_game_record_crossplay, version, fuzz_record, record_size, game,
+				&why))
 			{
 				if (why || !fuzz_options_in_range(&game->variant_options) ||
 					!network_game_cooperative_flags_valid(game->cooperative_flags))

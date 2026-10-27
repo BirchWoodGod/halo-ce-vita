@@ -122,7 +122,11 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 
 			payload[0] = 'H';
 			payload[1] = 'L';
-			unsigned int version = test_crossplay ? HALO_PORT_CROSSPLAY_NETWORK_VERSION : HALO_PORT_NETWORK_VERSION;
+			/* (on the crossplay wire half of them a listing of OpenCE's 39,
+			whose flags' 0x20 is its dedicated server: by the first byte's
+			lowest bit, which the tag then overwrites) */
+			unsigned int version = !test_crossplay ? HALO_PORT_NETWORK_VERSION :
+				(data[0] & 1) ? HALO_PORT_CROSSPLAY_NEWEST_NETWORK_VERSION : HALO_PORT_CROSSPLAY_NETWORK_VERSION;
 
 			payload[2] = test_crossplay ? LISTING_FORMAT_CROSSPLAY : LISTING_FORMAT;
 			payload[3] = (unsigned char)(version >> 8);

@@ -215,6 +215,11 @@
 #               (XPPC_OPENCE29, an OpenCE of 29): our client on its LAN
 #               host, and our host announcing 29 (HALO_TEST_CROSSPLAY_HOST_VERSION)
 #               with its clients; played by 29's rules
+#   crossfuzzclient  our client's side fuzzed in OpenCE games of 39 (not in
+#               all; HALO_TEST_VITA an ASan HALO_NET_FUZZ_TWIN build): one in
+#               XPPC_FUZZ_RATE (2) of what an OpenCE player host and its
+#               dedicated server send twinned, on a LAN and over the internet;
+#               no sanitizer memory error, no crash
 #   crossfuzzhost  the host side fuzzed (not in all; HALO_TEST_VITA an ASan
 #               HALO_NET_FUZZ_TWIN build): our host for Vitas and PC twins one
 #               in XPPC_FUZZ_RATE (2) of its OpenCE clients' messages and
@@ -336,6 +341,9 @@ crosscoopcensus) ;;
 crosscoopfuzz)
 	grep -aq "net fuzz twin: one message in" "${HALO_TEST_VITA:-$root/build/linux/halo}" 2>/dev/null ||
 		{ echo "SKIP (crosscoopfuzz): HALO_TEST_VITA is not a HALO_NET_FUZZ_TWIN build (AddressSanitizer)"; exit 0; } ;;
+crossfuzzclient)
+	grep -aq "net fuzz twin: one message in" "${HALO_TEST_VITA:-$root/build/linux/halo}" 2>/dev/null ||
+		{ echo "SKIP (crossfuzzclient): HALO_TEST_VITA is not a HALO_NET_FUZZ_TWIN build (AddressSanitizer)"; exit 0; } ;;
 crossmaps)
 	ce_map=${XPPC_CE_MAP:-${HALO_TEST_CE_MAP:-}}
 	ce_resources=${XPPC_CE_RESOURCES:-}
@@ -2295,6 +2303,51 @@ crosscoopfuzz)
 			result=too-few-twins-${twins:-0}-or-co-op-seconds-${ticks:-0}
 		fi
 		our_results="$our_results $name:$result"
+	done
+	;;
+crossfuzzclient)
+	# our client's side fuzzed in a PC game of the newest version the wire
+	# joins (39 since Oct 27 2026: docs/opence-net39-spec.md): one in
+	# XPPC_FUZZ_RATE (2) of everything an OpenCE host (a player's game and
+	# its dedicated server, XPPC_OPENCE of 39) sends our client twinned
+	# (net_fuzz_twin.h: the game's messages, the distributed netcode's, the
+	# settings record, map sharing's), on a LAN and, the server's, over the
+	# internet: no sanitizer memory error, no crash, our client to its end
+	rate=${XPPC_FUZZ_RATE:-2}
+	fuzz_env() { echo "HALO_NET_FUZZ_RATE=$1 HALO_NET_FUZZ_SEED=$2 HALO_NET_FUZZ_DUMP=fuzzdump.txt"; }
+	# (the player host's game starting once the sanitizer build is up:
+	# XPPC_FUZZ_START seconds, 40; its distributed messages alone twinned, 1-255:
+	# a twinned settings record in its lobby is refused and our client
+	# leaves, rightly, before any game - the servers' games twin everything)
+	start_delay=${XPPC_FUZZ_START:-40} pair fuzz-opence-ours lan opence ours "$(fuzz_env "$rate" 21) HALO_NET_FUZZ_KINDS=1-255"
+	pair_server fuzz-openceserver-ours lan openceserver ours "$(fuzz_env "$rate" 22)"; : > "$out/fuzz-openceserver-ours/server"
+	pair_server fuzznet-openceserver-ours net openceserver ours "$(fuzz_env 3 23)"; : > "$out/fuzznet-openceserver-ours/server"
+	wait_pairs
+	for name in fuzz-opence-ours fuzz-openceserver-ours fuzznet-openceserver-ours; do
+		for copy in client client2 late back; do
+			[ "$(cat "$out/$name/$copy/kind" 2>/dev/null)" = ours ] || continue
+			log=$out/$name/$copy/run.log debug=$out/$name/$copy/data/debug.txt
+			twins=$(grep -ahoE "net fuzz twin: [0-9]+ twins" "$log" 2>/dev/null | tail -1 | grep -oE "[0-9]+")
+			asan=$(grep -ac "ERROR: AddressSanitizer" "$log" 2>/dev/null)
+			ubsan=$(grep -aE "runtime error" "$log" 2>/dev/null | sed 's/^.*\/\(source\|port\)/\1/; s/: runtime error.*//' |
+				sort | uniq -c | tr '\n' ';')
+			ticks=$(grep -ac "network test: tick" "$log" 2>/dev/null)
+			crashed=$(cat "$log" "$debug" 2>/dev/null | grep -acE "egmentation fault|SIGSEGV|SIGABRT|stack trace|Aborted|EXCEPTION halt")
+			echo "--- $name $copy: twins ${twins:-0}; seconds in a game ${ticks:-0}; AddressSanitizer errors ${asan:-0};" \
+				"crash lines ${crashed:-0}; UBSan: ${ubsan:-none}"
+			result=pass
+			if [ "${asan:-0}" != 0 ]; then
+				result=addresssanitizer
+				grep -a -A12 "ERROR: AddressSanitizer" "$log" | head -16 | sed 's/^/  /'
+			elif [ "${crashed:-0}" != 0 ]; then
+				result=crashed
+			elif { [ "${twins:-0}" -lt 16 ] || [ "${ticks:-0}" -lt 30 ]; } && [ "$copy" != client ]; then
+				# (a player host's first client leaves 11 s into the game, by
+				# the plan: its sanitizer and crash checks alone)
+				result=too-few-twins-${twins:-0}-or-seconds-${ticks:-0}
+			fi
+			our_results="$our_results $name-$copy:$result"
+		done
 	done
 	;;
 crossctf)
