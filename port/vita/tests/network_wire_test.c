@@ -83,16 +83,17 @@ static void check(int good, const char *what)
 	printf("%s %s\n", good ? "PASS" : "FAIL", what);
 }
 
-static int versions_only3(int crossplay, unsigned int version, unsigned int other, unsigned int third)
+static int versions_only4(int crossplay, unsigned int version, unsigned int other, unsigned int third,
+	unsigned int fourth)
 {
 	static const unsigned int tried[] = { 0, 4, 17, 18, 19, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
-		0xFFFF };
+		40, 41, 0xFFFF };
 	size_t index;
 
 	for (index = 0; index < sizeof(tried) / sizeof(tried[0]); index++)
 	{
 		if (network_wire_version_accepted_on(crossplay, tried[index]) !=
-			(tried[index] == version || tried[index] == other || tried[index] == third))
+			(tried[index] == version || tried[index] == other || tried[index] == third || tried[index] == fourth))
 		{
 			return 0;
 		}
@@ -102,13 +103,13 @@ static int versions_only3(int crossplay, unsigned int version, unsigned int othe
 
 static int versions_only(int crossplay, unsigned int version, unsigned int other)
 {
-	return versions_only3(crossplay, version, other, other);
+	return versions_only4(crossplay, version, other, other, other);
 }
 
 static int no_rules_past_28(void)
 {
 	return !network_wire_v30_rules() && !network_wire_v31_rules() && !network_wire_v32_rules() && !network_wire_v33_rules() &&
-		!network_wire_v34_rules() && !network_wire_v35_rules() && !network_wire_v36_rules();
+		!network_wire_v34_rules() && !network_wire_v35_rules() && !network_wire_v36_rules() && !network_wire_v39_rules();
 }
 
 int main(void)
@@ -189,24 +190,26 @@ int main(void)
 	return failures != 0;
 #else
 	check(network_wire_crossplay_available(), "a Vita: the crossplay wire available");
-	check(versions_only3(1, 29, 32, 38), "the crossplay wire joins 29, 32 and 38 alone (not 26-28, 30, 31, 33-37, 39 and up)");
+	check(versions_only4(1, 29, 32, 38, 39),
+		"the crossplay wire joins 29, 32, 38 and 39 alone (not 26-28, 30, 31, 33-37, 40 and up)");
 	check(network_wire_of_version(29) == 1 && network_wire_of_version(32) == 1 && network_wire_of_version(38) == 1 &&
-		network_wire_of_version(28) == -1 && network_wire_of_version(30) == -1 && network_wire_of_version(31) == -1 &&
-		network_wire_of_version(33) == -1 && network_wire_of_version(37) == -1 && network_wire_of_version(39) == -1 &&
-		network_wire_of_version(26) == -1, "29, 32 and 38 play the crossplay wire; 26, 28, 30, 31, 33-37, 39 neither wire");
+		network_wire_of_version(39) == 1 && network_wire_of_version(28) == -1 && network_wire_of_version(30) == -1 &&
+		network_wire_of_version(31) == -1 && network_wire_of_version(33) == -1 && network_wire_of_version(37) == -1 &&
+		network_wire_of_version(40) == -1 && network_wire_of_version(26) == -1,
+		"29, 32, 38 and 39 play the crossplay wire; 26, 28, 30, 31, 33-37, 40 neither wire");
 	check(network_wire_version_of(1) == 32 && network_wire_host_version() == 32 && network_wire_version_of(0) == 18,
 		"the versions each wire announces: a host for Vitas and PC, 32");
 	{
 		char text[32];
 
 		network_wire_crossplay_versions_text(text, (int)sizeof(text));
-		check(!strcmp(text, "29, 32 and 38"), "the versions joined, for the log: 29, 32 and 38");
+		check(!strcmp(text, "29, 32, 38 and 39"), "the versions joined, for the log: 29, 32, 38 and 39");
 	}
 	check(network_wire_crossplay_version_near(26) == 29 && network_wire_crossplay_version_near(28) == 29 &&
 		network_wire_crossplay_version_near(30) == 32 && network_wire_crossplay_version_near(31) == 32 &&
 		network_wire_crossplay_version_near(33) == 38 && network_wire_crossplay_version_near(37) == 38 &&
-		network_wire_crossplay_version_near(0xFFFF) == 38,
-		"the version to look for instead: 29 for 26-28, 32 for 30-31, 38 for 33-37 and newer");
+		network_wire_crossplay_version_near(40) == 39 && network_wire_crossplay_version_near(0xFFFF) == 39,
+		"the version to look for instead: 29 for 26-28, 32 for 30-31, 38 for 33-37, 39 for newer");
 
 	/* a game joined on the crossplay wire: a PC's of 32, of 29, then a Vita's */
 	network_wire_choose_version(32, 2, "a PC host's game of 32");
@@ -219,6 +222,13 @@ int main(void)
 	check(network_wire_crossplay() && network_wire_version() == 38 && network_wire_v32_rules() && network_wire_v33_rules() &&
 		network_wire_v34_rules() && network_wire_v35_rules() && network_wire_v36_rules() && network_wire_host_platform() == 3,
 		"a PC's game of 38 joined: the crossplay wire, 38, the rules of 28 to 36");
+	check(!network_wire_v39_rules() && network_wire_rejection_is_name_refused(7) &&
+		!network_wire_rejection_is_name_refused(6), "... none of 39's; a PC host's code 7: the player's name refused");
+	network_wire_choose_version(39, 2, "an OpenCE dedicated server's game of 39");
+	check(network_wire_crossplay() && network_wire_version() == 39 && network_wire_v32_rules() && network_wire_v33_rules() &&
+		network_wire_v34_rules() && network_wire_v35_rules() && network_wire_v36_rules() && network_wire_v39_rules() &&
+		network_wire_host_platform() == 2 && network_wire_rejection_is_name_refused(7),
+		"a PC's game of 39 joined: the crossplay wire, 39, 38's rules and 39's meanings, code 7 the name refused");
 	network_wire_choose_version(32, 2, "a PC host's game of 32");
 	check(network_wire_version_accepted(29) && network_wire_version_accepted(32) && !network_wire_version_accepted(18),
 		"on that wire 29 and 32 are joined, 18 not");
@@ -231,9 +241,12 @@ int main(void)
 		"a version the wire does not join (31): never played, the legacy wire");
 	network_wire_choose_version(18, 2, "a Vita's game");
 	check(!network_wire_crossplay() && network_wire_host_vita() && network_wire_version() == 18, "18: the legacy wire");
+	check(!network_wire_v39_rules() && !network_wire_rejection_is_name_refused(7),
+		"... where code 7 is still Vitas only, and no 39 meanings");
 	network_wire_choose(1, 0, "a Vita's game for Vitas and PC");
 	check(network_wire_crossplay() && network_wire_host_vita() && network_wire_version() == 32 && network_wire_v32_rules(),
 		"a Vita's crossplay game (hosted): its host a Vita, 32 and its rules");
+	check(!network_wire_rejection_is_name_refused(7), "... and a Vita host's code 7 still Vitas only");
 	setenv("HALO_TEST_CROSSPLAY_HOST_VERSION", "29", 1);
 #ifdef HALO_RELEASE
 	check(network_wire_host_version() == 32, "a release build: HALO_TEST_CROSSPLAY_HOST_VERSION changes nothing");

@@ -40,6 +40,29 @@ int main(void)
 	int index;
 
 	/* the verdict */
+	/* the platform of an advertised or listed game: 0x04 ChupathingyCE's
+	Delta bit up to 38, OpenCE's dedicated server from 39
+	(docs/opence-net39-spec.md 2) */
+	check(crossplay_guard_platform_of_advertisement(1, 0, 38, 0x05) == CROSSPLAY_PLATFORM_CHUPA &&
+		crossplay_guard_platform_of_advertisement(1, 0, 32, 0x05) == CROSSPLAY_PLATFORM_CHUPA,
+		"an advertisement of 32 or 38 with 0x04: ChupathingyCE's");
+	check(crossplay_guard_platform_of_advertisement(1, 0, 39, 0x05) == CROSSPLAY_PLATFORM_OPENCE &&
+		crossplay_guard_platform_of_advertisement(1, 0, 39, 0x01) == CROSSPLAY_PLATFORM_OPENCE,
+		"... of 39 with or without it: OpenCE's");
+	check(crossplay_guard_advertised_dedicated(1, 39, 0x05) && !crossplay_guard_advertised_dedicated(1, 38, 0x05) &&
+		!crossplay_guard_advertised_dedicated(0, 39, 0x05) && !crossplay_guard_advertised_dedicated(1, 39, 0x45) &&
+		!crossplay_guard_advertised_dedicated(1, 39, 0x03),
+		"a dedicated server's: 39's 0x04 on the crossplay wire alone, never a Vita's");
+	check(crossplay_guard_platform_of_advertisement(1, 0, 39, 0x45) == CROSSPLAY_PLATFORM_VITA &&
+		crossplay_guard_platform_of_advertisement(0, 0, 18, 0x04) == CROSSPLAY_PLATFORM_VITA &&
+		crossplay_guard_platform_of_advertisement(0, 1, 40, 0x04) == CROSSPLAY_PLATFORM_PC,
+		"a Vita's game whatever its 0x04; another version's a PC's");
+	check(crossplay_guard_platform_of_listing(1, 0, 1, 0) == CROSSPLAY_PLATFORM_CHUPA &&
+		crossplay_guard_platform_of_listing(1, 0, 0, 1) == CROSSPLAY_PLATFORM_OPENCE &&
+		crossplay_guard_platform_of_listing(1, 0, 1, 1) == CROSSPLAY_PLATFORM_CHUPA &&
+		crossplay_guard_platform_of_listing(1, 0, 0, 0) == CROSSPLAY_PLATFORM_PC &&
+		crossplay_guard_platform_of_listing(1, 1, 0, 1) == CROSSPLAY_PLATFORM_VITA,
+		"a listing: 128 ChupathingyCE's server, 39's 0x20 OpenCE's, neither a PC's, a Vita's a Vita's");
 	check(crossplay_guard_judge(0, 16, 16) == CROSSPLAY_GUARD_OK, "16 of 16: an ordinary game");
 	check(crossplay_guard_judge(0, 1, 17) == CROSSPLAY_GUARD_LARGE, "a maximum of 17: large");
 	check(crossplay_guard_judge(0, 17, 16) == CROSSPLAY_GUARD_LARGE, "17 players (past its own maximum): large");

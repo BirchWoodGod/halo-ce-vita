@@ -9084,6 +9084,7 @@ static void lan_entries(void)
 #endif
 		if (game->pc_coop)
 			entry->coop = TRUE;
+		entry->dedicated = game->dedicated;
 		{
 			int verdict = entry->platform == CROSSPLAY_PLATFORM_VITA ? CROSSPLAY_GUARD_OK :
 				crossplay_guard_judge(entry->coop, entry->players, entry->maximum);
@@ -9091,7 +9092,7 @@ static void lan_entries(void)
 			entry->experimental = verdict != CROSSPLAY_GUARD_OK;
 			snprintf(entry->tag, sizeof(entry->tag), "%s", crossplay_guard_host_tag(entry->platform, entry->marks));
 			crossplay_guard_host_badge(entry->badge, (int)sizeof(entry->badge), entry->platform, entry->marks,
-				entry->crossplay, 0, verdict, network_wire_this_platform() == NETWORK_PLATFORM_VITA_PC);
+				entry->crossplay, entry->dedicated, verdict, network_wire_this_platform() == NETWORK_PLATFORM_VITA_PC);
 		}
 		/* the Rules line, as the online browser's: "Slayer on Blood Gulch",
 		"Co-op: The Pillar of Autumn, Heroic", ": full or starting" */

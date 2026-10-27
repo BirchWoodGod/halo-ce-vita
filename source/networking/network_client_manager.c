@@ -872,7 +872,7 @@ static long network_game_client_advertised_wire(
 	game_wire = network_wire_of_version(version);
 	if (platform)
 		*platform = crossplay_guard_platform_of_advertisement(game_wire == 1, game_wire < 0 &&
-			version != HALO_PORT_NETWORK_VERSION, flags);
+			version != HALO_PORT_NETWORK_VERSION, version, flags);
 	return game_wire;
 }
 
@@ -3005,7 +3005,9 @@ void network_game_client_rejected_by_game(
 		break;
 
 	case _rejection_code_vitas_only:
-		reason = "_rejection_code_vitas_only";
+		/* (port: OpenCE 39's code 7 from a PC host: network_wire.h) */
+		reason = network_wire_rejection_is_name_refused(rejection_code) ? "name refused (OpenCE 39)" :
+			"_rejection_code_vitas_only";
 		break;
 	}
 
@@ -3022,7 +3024,12 @@ void network_game_client_rejected_by_game(
 			T("The game is full: it has as many players as its host allows. Try another game."));
 	}
 	/* (a host for Vitas only refused the PC build: network_wire.h) */
-	if (rejection_code == _rejection_code_vitas_only)
+	if (rejection_code == _rejection_code_vitas_only && network_wire_rejection_is_name_refused(rejection_code))
+	{
+		platform_show_message(T("Halo: cannot join this game"),
+			T("The host refused your player name. Change it in your profile and try again."));
+	}
+	else if (rejection_code == _rejection_code_vitas_only)
 		platform_show_message(T("Halo: cannot join this game"), crossplay_guard_vitas_only_text());
 #endif
 	/* port: the join went to the pregame screen at once (and a machine
@@ -4290,6 +4297,11 @@ short network_game_client_listed_games(
 				of the Xbox's multiplayer ones, as OpenCE hosts it) */
 				listed->pc_coop = platform != CROSSPLAY_PLATFORM_VITA && network_crossplay_guard_coop_game(game->map.name,
 					(long)sizeof(game->map.name), game->engine_type);
+#ifdef HALO_PORT_VITA_NETWORK
+				listed->dedicated = crossplay_guard_advertised_dedicated(listed->crossplay,
+					network_game_client_advertised_versions[game_index].version,
+					network_game_client_advertised_versions[game_index].flags) != 0;
+#endif
 			}
 			csmemcpy(listed->host, ((XNADDR const *)&game->xnaddr)->abEnet, sizeof(listed->host));
 			/* (the browsers' filter, network.browser_filter) */

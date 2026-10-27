@@ -542,7 +542,7 @@ static void network_test_log_listed(
 		char badge[48];
 
 		crossplay_guard_host_badge(badge, (int)sizeof(badge), listed[index].platform, listed[index].marks,
-			listed[index].crossplay, 0, CROSSPLAY_GUARD_OK, network_wire_this_platform() == NETWORK_PLATFORM_VITA_PC);
+			listed[index].crossplay, listed[index].dedicated, CROSSPLAY_GUARD_OK, network_wire_this_platform() == NETWORK_PLATFORM_VITA_PC);
 		length += snprintf(line + length, sizeof(line) - (size_t)length, "%s[%s] \"%s\"", index ? ", " : "", badge,
 			listed[index].name);
 	}
