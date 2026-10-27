@@ -3060,6 +3060,27 @@ static boolean start_network_game_if_no_advertised_servers(
 
 	match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 4593,
 		widget->type == 3, "expected a column list for server list");
+#ifdef HALO_LINUX
+	/* port: not while a join of another's game is under way (an invite, a
+	code, the server browser: p2p_join_under_way). The System Link list
+	opens for that join and is empty until its host is reached and its game
+	listed; A on it then - a press meant for the game being joined, or the
+	one that answered the large PC game's question on the Vita - hosted a
+	game of this machine's own instead, public, its listing published, and
+	the join was lost (Neff, 1.1.1 RC6) */
+	{
+		extern int p2p_join_under_way(void);
+		void platform_log(char const *format, ...);
+
+		if (p2p_join_under_way())
+		{
+			platform_log("menus: not hosting from the System Link list: a join is under way (its host's game "
+				"joined once listed)");
+			ui_play_audio_feedback_sound(4);
+			return FALSE;
+		}
+	}
+#endif
 	if (widget->generated_count == 0)
 	{
 		client = global_network_game_client_get();

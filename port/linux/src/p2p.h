@@ -52,6 +52,12 @@ is joined by itself when listed (network_game_client_join_invited_game);
 take: forgotten (joined, or given up) */
 enum { P2P_JOINED_HOST_MILLISECONDS = 60000 };
 int p2p_joined_host(unsigned char *identifier, int take);
+/* nonzero while a join of another's game (an invite, a code, the server
+browser) is under way: its host asked for or being reached, or reached and
+its game not yet joined (p2p_joined_host, not taken). The System Link
+list hosts nothing meanwhile (A on it with no game listed yet: the Xbox's
+"start network game if no advertised servers") */
+int p2p_join_under_way(void);
 
 /* a destination the game sends to or connects to (stream: a TCP socket;
 socket: the game's UDP socket connected to it, else -1): 1 if it is a peer's
