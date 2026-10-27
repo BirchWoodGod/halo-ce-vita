@@ -1009,6 +1009,10 @@ void particle_new(
 		data->dont_draw_first_person);
 	SET_FLAG(particle->flags, _particle_datum_dont_draw_third_person_bit,
 		data->dont_draw_third_person);
+#ifdef HALO_LINUX
+	/* port: the menus' scene's own (the CUSTOMIZATION preview's flaming helmet) */
+	SET_FLAG(particle->flags, _particle_datum_menu_scene_bit, particles_new_ignore_players_pvs);
+#endif
 	SET_FLAG(particle->flags, _particle_datum_attached_to_local_player_bit,
 		data->attached_to_local_player);
 
