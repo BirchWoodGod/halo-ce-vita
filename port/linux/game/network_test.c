@@ -1266,7 +1266,10 @@ static void network_test_aim_and_cheat(
 			facing.i = to.x - from.x;
 			facing.j = to.y - from.y;
 			facing.k = to.z - from.z;
-			if (normalize3d(&facing) > 0.0f)
+			/* (not straight up or down: player_control.c's pitch ends at
+			85.5 degrees, and one past it asserted at the next look - a
+			target under the player, hostfuzzjoin) */
+			if (normalize3d(&facing) > 0.0f && facing.k < 0.99f && facing.k > -0.99f)
 				player_control_set_facing(player->local_player_index, &facing);
 			/* (the ammo cheat's trigger: pressed for its shots alone, below,
 			so that a weapon that fires once a press fires each, and the

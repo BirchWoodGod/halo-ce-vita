@@ -152,9 +152,11 @@ tick, drawn as it goes; further, it is put there, drawn gliding
 #define HOST_VEHICLE_BLEND_DISTANCE 0.5f
 #define REMOTE_BLEND_DISTANCE 1.0f
 /* world units: how far a remote unit may be from where the host says
-before it is put there, and how far from the origin a unit can be */
+before it is put there, and how far from the origin a unit can be (the
+world's, as the camera that follows it has it: observer.c's
+valid_world_real) */
 #define REMOTE_CORRECTION_TOLERANCE 0.05f
-#define UNIT_WORLD_BOUND 32768.0f
+#define UNIT_WORLD_BOUND 5000.0f
 #define REMOTE_VEHICLE_BLEND_DISTANCE 2.0f
 
 enum

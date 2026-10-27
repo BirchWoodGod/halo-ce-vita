@@ -211,8 +211,10 @@ at rest to wake, world units */
 /* (the host takes further than a client puts right: between the two they
 would disagree for good) */
 #define HOST_VEHICLE_ACCEPT_TOLERANCE 5.0f
-/* how far from the origin an object is (world units) */
-#define OBJECT_WORLD_BOUND 32768.0f
+/* how far from the origin an object is (world units): the world's, as the
+camera that follows it has it (observer.c's valid_world_real: a host's
+object or rider further out halted the client's camera) */
+#define OBJECT_WORLD_BOUND 5000.0f
 /* how fast a client's own player's vehicle moves (world units, radians a
 tick) */
 #define MAXIMUM_PREDICTED_VEHICLE_SPEED 3.0f
@@ -623,9 +625,25 @@ static boolean distributed_vector_valid(
 	return distributed_real_valid(vector->i) && distributed_real_valid(vector->j) && distributed_real_valid(vector->k);
 }
 
+/* (a message's velocities: past these no object of an honest host moves -
+a projectile's 1200 wu/s at most, a spin of a few turns a tick; a finite but
+huge one overflowed an item's spin, its rotation NaN: an assertion halted
+the client, run_netns_online_test.sh hostfuzzjoin) */
+#define DISTRIBUTED_VELOCITY_BOUND 10000.0f
+#define DISTRIBUTED_ANGULAR_VELOCITY_BOUND 1000.0f
+
+/* whether every component is finite and no more than bound either way */
+static boolean distributed_vector_bounded(
+	real_vector3d const *vector,
+	real bound)
+{
+	return distributed_vector_valid(vector) && vector->i >= -bound && vector->i <= bound && vector->j >= -bound &&
+		vector->j <= bound && vector->k >= -bound && vector->k <= bound;
+}
+
 /* whether a message's transform can be: the position finite and within the
 world, the axes a rotation (made exactly one in valid_forward, valid_up),
-the velocities finite */
+the velocities finite and bounded */
 static boolean distributed_transform_valid(
 	real_point3d const *position,
 	real_vector3d const *forward,
@@ -636,8 +654,8 @@ static boolean distributed_transform_valid(
 	real_vector3d *valid_up)
 {
 	if (!position || !forward || !up || !distributed_point_valid(position, OBJECT_WORLD_BOUND) ||
-		(velocity && !distributed_vector_valid(velocity)) ||
-		(angular_velocity && !distributed_vector_valid(angular_velocity)))
+		(velocity && !distributed_vector_bounded(velocity, DISTRIBUTED_VELOCITY_BOUND)) ||
+		(angular_velocity && !distributed_vector_bounded(angular_velocity, DISTRIBUTED_ANGULAR_VELOCITY_BOUND)))
 	{
 		return FALSE;
 	}

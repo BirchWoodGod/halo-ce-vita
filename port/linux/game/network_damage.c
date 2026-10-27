@@ -269,6 +269,9 @@ largest damage scale a client's hit has: a melee blow's, airborne
 (unit_update_melee), anything else's all of it */
 #define REPORT_WORLD_BOUND 32768.0f
 #define REPORT_MAXIMUM_MELEE_SCALE 1.5f
+/* the parts of a unit a blow lands on (model_animations.c's
+NUMBER_OF_DAMAGE_PARTS): the aftermath's ping animation is chosen by one */
+#define DAMAGE_PART_COUNT 11
 /* a modified client's hits (network_anticheat.c): what a shot hits is
 seen from where the host had the shooter's eyes (through no more of the
 map than the tolerance before the point: a corner the point is on, the
@@ -2607,8 +2610,10 @@ void network_damage_handle_events(
 			break;
 		}
 		case _damage_event_aftermath:
+			/* (a part a unit has, or none: build_damage_animation_index's) */
 			if (network_objects_client_has(event->object_index) &&
-				object_try_and_get_and_verify_type(event->object_index, _object_mask_unit))
+				object_try_and_get_and_verify_type(event->object_index, _object_mask_unit) &&
+				(event->body_part == NONE || (event->body_part >= 0 && event->body_part < DAMAGE_PART_COUNT)))
 			{
 				/* (what harm it did the units' states bring: no death from here) */
 				damage_replay_aftermath(event->object_index, &damage,
