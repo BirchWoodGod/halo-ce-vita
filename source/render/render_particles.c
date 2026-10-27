@@ -545,13 +545,16 @@ void render_particles(
 
 #ifdef HALO_LINUX
 								/* (HALO_PARTICLE_RENDER_DIVISOR, above: the
-								first-person weapon's are all drawn. A particle
+								first-person weapon's and the menus' scene's own
+								(the CUSTOMIZATION preview's flame) are all
+								drawn. A particle
 								thinned out is passed over only here, as drawn
 								for the game: the orphan's delete above is the
 								game's, and the game deletes a particle not
 								drawn for a while - particles.c's
 								last_rendered_frame_index) */
 								if (particle_divisor > 1 &&
+									!TEST_FLAG(particle->flags, _particle_datum_menu_scene_bit) &&
 									DATUM_INDEX_TO_ABSOLUTE_INDEX(rendered_particle->particle_index) % particle_divisor != 0 &&
 									!rendered_particle->attached_to_first_person_weapon)
 								{

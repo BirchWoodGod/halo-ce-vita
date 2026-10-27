@@ -26,6 +26,9 @@ enum particle_flags
 	_particle_datum_dont_draw_first_person_bit,
 	_particle_datum_dont_draw_third_person_bit,
 	_particle_datum_attached_to_local_player_bit,
+	/* (port) made for the menus' scene (particles_new_ignore_players_pvs): drawn
+	whatever the player's particle render divisor (HALO_PARTICLE_RENDER_DIVISOR) */
+	_particle_datum_menu_scene_bit,
 	NUMBER_OF_PARTICLE_FLAGS,
 };
 
