@@ -61,6 +61,14 @@ struct network_player;
 boolean network_game_server_port_bots_make_room(struct network_game_server *server);
 /* ... a bot of that team's, when it has one (a person joining it) */
 boolean network_game_server_port_bots_make_room_on_team(struct network_game_server *server, long team);
+/* ... whether the game has a free slot or a bot could leave for one (nothing
+changed: a join is checked before a bot leaves for it) */
+boolean network_game_server_port_bots_could_make_room(struct network_game_server *server);
+/* ... a machine about to be accepted: a bot's slot for it, unless it would be
+refused (banned...): FALSE then, or with no room */
+struct network_game_server_client_machine;
+boolean network_game_server_port_join_make_room(struct network_game_server *server,
+	struct network_game_server_client_machine *machine);
 /* (any host's bot fill: a dedicated server's, a 1.1.1 host's Bots online)
 the team of a person's player joining a team game it fills: its party's
 (party_net.h), else the team with fewer people, then fewer players; NONE
