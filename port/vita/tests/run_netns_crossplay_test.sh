@@ -237,7 +237,9 @@
 #               joined once (one join for the one press), and played; after
 #               a Vita game's lobby and B, the PC game joined; a Vita game on
 #               a Custom Edition map our client lacks (XPPC_CE_MAP), the
-#               download refused: the games browser again, not the main menu
+#               download refused: the games browser again, not the main menu;
+#               Menu style ElDewrito's SERVER BROWSER, the large game's
+#               question answered YES in the game's own dialog: joined at once
 #   crosscoophost  co-op hosted by our Vita for Vitas and PC (experimental):
 #               an OpenCE client and one of ours beside the host's player
 #   all         every mode above, one after the other (expected failures as
@@ -1865,9 +1867,15 @@ h3pcjoin)
 	#   mixed    the Vita game and the OpenCE one listed together (VITA GAMES, PC GAMES), the OpenCE
 	#            one picked first with one down from the Vita game (BlazeRed, insider.21: on "Vita
 	#            and PC" a click on a PC lobby only refreshed the list): joined once, and played
+	#   eldewrito  Menu style ElDewrito (online), the main menu's SERVER BROWSER: A on the OpenCE
+	#            game's row, the large game's question asked in the game's own dialog (no test
+	#            answer: HALO_TEST_DIALOGS), YES: joined at once, and played (Neff, 1.1.1 RC6 and
+	#            RC7: "it says it's not available", the game picked a second time joined - the
+	#            dialog had closed the browser, and the listings with it)
 	# Neither may fill the widgets' memory
 	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
-	h3join() { # h3join NAME VITA_HOST(0, 1) PAD_AFTER_THE_BROWSER
+	h3join() { # h3join NAME VITA_HOST(0, 1) PAD_AFTER_THE_BROWSER [WHOLE_PAD] (h3_style: the Menu style, halo3;
+		# h3_client_env: the client's own settings)
 		local name=$1 vita_host=$2 after=$3 n host_ns client_ns client_ip vita_ns pids_here
 		subnet=$((subnet + 1)); n=$subnet
 		side "$n"; host_ns=$side_machine
@@ -1888,14 +1896,15 @@ h3pcjoin)
 		done
 		local pad="wait:150:3000 down:150:700 a wait:150:3000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500"
 		pad="$pad a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:12000 $after"
+		[ -n "${4:-}" ] && pad=$4
 		copy_maps=$menus_data/maps run_copy "$name/client" "$client_ns" ours "$client_ip" "$broker_address" HALO_NET_ONLINE=true \
-			HALO_NET_HOST_PUBLIC=false HALO_MENU_STYLE=halo3 HALO_UI_LOG=1 HALO_NETWORK_TEST=watch HALO_TEST_INPUT=bot:1 \
-			"HALO_TEST_PAD=$pad"
+			HALO_NET_HOST_PUBLIC=false HALO_MENU_STYLE=${h3_style:-halo3} HALO_UI_LOG=1 HALO_NETWORK_TEST=watch HALO_TEST_INPUT=bot:1 \
+			"HALO_TEST_PAD=$pad" ${h3_client_env:-}
 		pids_here="$pids_here $last_pid"
 		wait $pids_here 2>/dev/null
 		local clientlog=$out/$name/client/run.log
 		echo "--- $name: our client"
-		grep -aE "menus: (joining the public game|the (large|co-op) PC game|the games browser joins|the public game's invite|the public game .*: joining already)|system link: (the joined host|joining|in another|looking)|Internet play: connected to host|ui: screen pc.h3.(lan|pregame)" \
+		grep -aE "menus: (joining the public game|the (large|co-op) PC game|the games browser joins|the public game's invite|the public game .*: (joining already|is no longer listed)|h3 dialog: (pc|question))|system link: (the joined host|joining|in another|looking)|Internet play: connected to host|ui: screen pc.(h3|online).(lan|pregame)" \
 			"$clientlog" | head -24
 		local joins pc ticks result=pass
 		joins=$(grep -ac "menus: joining the public game" "$clientlog")
@@ -1916,6 +1925,17 @@ h3pcjoin)
 			result=reached-not-joined
 		elif [ "${ticks:-0}" -lt 15 ]; then
 			result=played-${ticks:-0}
+		fi
+		# (the question asked in the game's dialog: asked once, answered yes there, and the game it
+		# was asked of joined, never "no longer listed")
+		if [ "$result" = pass ] && [ -n "${h3_client_env:-}" ]; then
+			if [ "$(grep -ac "menus: the large PC game .*: asking the player" "$clientlog")" != 1 ]; then
+				result=asked-$(grep -ac "menus: the large PC game .*: asking the player" "$clientlog")-times
+			elif ! grep -aq "menus: h3 dialog: question answered yes" "$clientlog"; then
+				result=not-answered-in-the-dialog
+			elif grep -aq "menus: the public game .* is no longer listed" "$clientlog"; then
+				result=said-no-longer-listed
+			fi
 		fi
 		cat "$out/$name"/*/run.log "$out/$name"/*/data/debug.txt 2>/dev/null |
 			grep -aqE "egmentation fault|SIGSEGV|SIGABRT|EXCEPTION halt" && result=crash
@@ -1967,11 +1987,15 @@ h3pcjoin)
 		cat "$out/$name"/*/run.log 2>/dev/null | grep -aqE "egmentation fault|SIGSEGV|SIGABRT|EXCEPTION halt" && result=crash
 		our_results="$our_results $name:$result"
 	}
-	# (XPPC_H3JOIN_ONLY: the cases to run, by their last word, direct aftervita mixed mapmissing)
-	h3want() { case " ${XPPC_H3JOIN_ONLY:-direct aftervita mixed mapmissing} " in *" $1 "*) return 0 ;; esac; return 1; }
+	# (XPPC_H3JOIN_ONLY: the cases to run, by their last word, direct aftervita mixed eldewrito mapmissing)
+	h3want() { case " ${XPPC_H3JOIN_ONLY:-direct aftervita mixed eldewrito mapmissing} " in *" $1 "*) return 0 ;; esac; return 1; }
 	h3want direct && h3join h3pcjoin-direct 0 "a:150:50 a wait:150:40000"
 	h3want aftervita && h3join h3pcjoin-aftervita 1 "a wait:150:10000 b wait:150:5000 down:150:800 a wait:150:40000"
 	h3want mixed && mixed_pick=1 h3join h3pcjoin-mixed 1 "${XPPC_H3JOIN_MIXED_PAD:-down:150:500 a wait:150:40000}"
+	# (eldewrito: the title's A, the main menu's SERVER BROWSER - the profile chosen before -, a
+	# while for the listing, A on the OpenCE game's row; the question's dialog, NO first: down, A)
+	h3want eldewrito && h3_style=online h3_client_env="HALO_CROSSPLAY_LARGE_ANSWER= HALO_TEST_DIALOGS=1" \
+		h3join h3pcjoin-eldewrito 0 "" "wait:150:3000 a wait:150:4000 a wait:150:12000 a wait:150:3000 down:150:800 a wait:150:40000"
 	h3want mapmissing && h3mapjoin h3pcjoin-mapmissing
 	;;
 crosscoophost)
