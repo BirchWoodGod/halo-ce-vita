@@ -1345,6 +1345,18 @@ void main_menu_ensure_player_queues_exist(
 	update_server_delete();
 	update_server_new();
 	update_server_start();
+#ifdef HALO_LINUX
+	/* port: the new queues number their updates from 0, but the main menu's
+	clock keeps its time when the menus let a network client go (the SERVER
+	BROWSER, its network switched or left): the local ticks then ran only
+	once the queues' count had caught up with the clock - tens of seconds
+	to minutes of a frozen main menu (no ticks: the backdrop's camera, the
+	lobbies' characters and the ring's script stood still, a30's campaign
+	spot not shown). The queues start from the clock's time, as a game's
+	start does */
+	if (game_in_progress() && game_time_get() > 0)
+		update_queues_reset_and_fill_with_lies();
+#endif
 	return;
 }
 
