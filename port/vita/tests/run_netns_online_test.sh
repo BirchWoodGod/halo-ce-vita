@@ -146,6 +146,12 @@
 #            browser once its host is reached, nothing hosted or published
 #   onlinebrowserded  the same with a dedicated server's game, a player in it
 #            first (HALO_TEST_OB_PLAYER=0: none)
+#   onlinebrowsertab  onlinebrowser, the browser's network switched first (R:
+#            SYSTEM LINK, AD HOC, ONLINE again) and A pressed once: joined
+#            at once (1.1.1 RC8: the main menu ticked under the new search
+#            client, whose connection a client tick's message to no host
+#            closed, so the first join's request was never sent: CONNECTION
+#            LOST; picked again, it joined)
 #   browserscroll  the server browser's scrolling and sorts, its game joined by itself
 #            (browser_list.h): 20 made-up games beside the host's
 #            (HALO_TEST_BROWSER_GAMES, test builds only); down past the twelve
@@ -1018,7 +1024,7 @@ side join 10.10.2 192.168.2
 	[ "$mode" = hostbots ] || [ "$mode" = h3scoreboard ] ||
 	[ "$mode" = friendsbackup ] ||
 	[ "$mode" = h3forgeonline ] || [ "$mode" = vitapc ] || [ "$mode" = vitaonly ] ||
-	[ "$mode" = onlinebrowser ] || [ "$mode" = onlinebrowserded ]; } &&
+	[ "$mode" = onlinebrowser ] || [ "$mode" = onlinebrowserded ] || [ "$mode" = onlinebrowsertab ]; } &&
 	side join2 10.10.3 192.168.3
 { [ "$mode" = splitscreen ] || [ "$mode" = vitapc ] || [ "$mode" = partyfollow ]; } && side join3 10.10.4 192.168.4
 # (lobbytls: the broker's TLS port too, with a certificate from an
@@ -1536,7 +1542,7 @@ browserscroll)
 	echo "joiner's seconds with two players playing: $two"
 	[ "$two" -ge 30 ] || fail "the joiner played the host's game for $two s with two players (30 wanted)"
 	;;
-onlinebrowser|onlinebrowserded)
+onlinebrowser|onlinebrowserded|onlinebrowsertab)
 	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 	if [ $mode = onlinebrowserded ]; then
 		server=${HALO_TEST_SERVER:-$root/build/linux/halo-server}
@@ -1577,9 +1583,15 @@ onlinebrowser|onlinebrowserded)
 	# games browser at once -; a while for the listing, A on the game's row, then Cross again
 	# at once and a second on, as a player pressing on while the host is reached: nothing hosted)
 	pad=${HALO_TEST_OB_PAD:-"wait:150:3000 a wait:150:4000 a wait:150:${HALO_TEST_MENUS_LIST_WAIT:-10000} a wait:150:250 a wait:150:1000 a"}
+	# (onlinebrowsertab: R three times - SYSTEM LINK, AD HOC, ONLINE again -, a while for the
+	# listing, and A once: the first press must join; as the Vita runs it,
+	# the Vita's picture, the menus' live backdrop with it - its objects in the ticks)
+	ob_env=
+	[ $mode = onlinebrowsertab ] && pad=${HALO_TEST_OB_PAD:-"wait:150:3000 a wait:150:4000 a wait:150:6000 rt wait:150:3000 rt wait:150:3000 rt wait:150:12000 a"} &&
+		ob_env="HALO_GL_VITA_DISPLAY=1 HALO_TEST_PLATFORM=vita HALO_RENDER_SCALE=1"
 	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" \
 		HALO_NET_ONLINE=true HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=online HALO_TEST_INPUT=bot:2 \
-		"HALO_TEST_PAD=$pad"; join_pid=$last_pid
+		"HALO_TEST_PAD=$pad" $ob_env; join_pid=$last_pid
 	wait $join_pid 2>/dev/null
 	jl=$out/joiner/run.log
 	echo "--- joiner"; grep -aE "ui: screen|menus: (joining|the public|the games browser|not hosting)|system link: (hosting|joining|in |the joined)|Internet play: (joining|connected to host|hosting|the game is public)" "$jl" | head -30
@@ -6106,7 +6118,7 @@ forge|forge3|forgemp|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forge
 	forge_case
 	;;
 *)
-	echo "usage: $0 code|infection|infectionold|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|menusjoinpress|onlinebrowser|onlinebrowserded|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|carnage|carnageold|h3scoreboard|h3live|h3liveleave|h3liveagain|h3liveonline|h3liveinvite|h3livebots|h3liveprivate|h3online|h3onlinelan|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedbots|dedicatedcompat|partyserver|hostbots|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|friendsbackup|party|partyfollow|chat|friendsprivate|friendsprivatepw|forge|forge3|forgemp|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|h3forgeskip|h3variant|vitapc|vitaonly|hostfuzz|hostfuzzforge|hostfuzzmap|hostfuzzjoin" >&2
+	echo "usage: $0 code|infection|infectionold|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|menusjoinpress|onlinebrowser|onlinebrowserded|onlinebrowsertab|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|carnage|carnageold|h3scoreboard|h3live|h3liveleave|h3liveagain|h3liveonline|h3liveinvite|h3livebots|h3liveprivate|h3online|h3onlinelan|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedbots|dedicatedcompat|partyserver|hostbots|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|friendsbackup|party|partyfollow|chat|friendsprivate|friendsprivatepw|forge|forge3|forgemp|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|h3forgeskip|h3variant|vitapc|vitaonly|hostfuzz|hostfuzzforge|hostfuzzmap|hostfuzzjoin" >&2
 	exit 2
 	;;
 esac
