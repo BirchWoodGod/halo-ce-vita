@@ -568,6 +568,9 @@ boolean network_game_client_start_frame(
 		reaches */
 		game_connection_set(0);
 		main_menu_ensure_player_queues_exist();
+#ifdef HALO_LINUX
+		main_menu_player_queues_from_clock();
+#endif
 		result = TRUE;
 	}
 	else
@@ -641,6 +644,9 @@ boolean network_game_client_end_frame(
 	{
 		game_connection_set(0);
 		main_menu_ensure_player_queues_exist();
+#ifdef HALO_LINUX
+		main_menu_player_queues_from_clock();
+#endif
 	}
 	else if (network_game_client_get_state(global_network_game_client, NULL) == _network_game_client_state_ingame)
 	{

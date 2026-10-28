@@ -102,6 +102,11 @@ void main_menu_unload(
 void main_menu_ensure_player_queues_exist(
 	void);
 
+#ifdef HALO_LINUX
+void main_menu_player_queues_from_clock(
+	void);
+#endif
+
 boolean main_menu_fade_active(
 	void);
 

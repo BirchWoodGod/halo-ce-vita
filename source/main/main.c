@@ -1345,20 +1345,29 @@ void main_menu_ensure_player_queues_exist(
 	update_server_delete();
 	update_server_new();
 	update_server_start();
-#ifdef HALO_LINUX
-	/* port: the new queues number their updates from 0, but the main menu's
-	clock keeps its time when the menus let a network client go (the SERVER
-	BROWSER, its network switched or left): the local ticks then ran only
-	once the queues' count had caught up with the clock - tens of seconds
-	to minutes of a frozen main menu (no ticks: the backdrop's camera, the
-	lobbies' characters and the ring's script stood still, a30's campaign
-	spot not shown). The queues start from the clock's time, as a game's
-	start does */
-	if (game_in_progress() && game_time_get() > 0)
-		update_queues_reset_and_fill_with_lies();
-#endif
 	return;
 }
+
+#ifdef HALO_LINUX
+/* port: (network_game_globals.c, after main_menu_ensure_player_queues_exist
+as the menus let a network client go: the SERVER BROWSER, its network
+switched or left) the new queues number their updates from 0, but the main
+menu's clock keeps its time there: the local ticks then ran only once the
+queues' count had caught up with the clock - tens of seconds to minutes of
+a frozen main menu (no ticks: the backdrop's camera, the lobbies' characters
+and the ring's script stood still, a30's campaign spot not shown). The
+queues start from the clock's time, as a game's start does. Not where the
+clock itself starts again from 0 after the queues are made (a screen that
+paused the game time closing at the main menu, ui_widget.c): queues filled
+to the old time there left the next tick's update missing, and the host's
+lobby halted in players_update_before_game */
+void main_menu_player_queues_from_clock(
+	void)
+{
+	if (game_in_progress() && game_time_get() > 0)
+		update_queues_reset_and_fill_with_lies();
+}
+#endif
 
 boolean main_menu_fade_active(
 	void)
