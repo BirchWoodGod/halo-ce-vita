@@ -274,6 +274,25 @@ struct player_action_collection_definition player_action_collection_definition =
 
 /* ---------- public code */
 
+/* whether this machine's client is in a host's game (loading it, playing it,
+or at its end): the distributed netcode's client side runs and sends only
+then. A client searching for games (the server browser's, the System Link
+list's) or joining one has no host to send to: the main menu ticks under it
+(main_menu_ensure_player_queues_exist), and a reliable message written there
+closed the client's connection, so that the join made next on it never sent
+its request and failed ("connection lost": the server browser's first join
+after its network was switched, 1.1.1 RC8) */
+boolean network_distributed_client_in_game(
+	void)
+{
+	short state;
+
+	if (!global_network_game_client)
+		return FALSE;
+	state = network_game_client_get_state(global_network_game_client, NULL);
+	return state == _network_game_client_state_ingame || state == _network_game_client_state_postgame;
+}
+
 /* the distributed netcode's per-tick state (port/linux/game/network_distributed.c),
 unreliably to the host, as the game update is */
 boolean network_distributed_client_send(
@@ -282,7 +301,7 @@ boolean network_distributed_client_send(
 {
 	byte buffer[0x1000];
 
-	if (!global_network_game_client || size > sizeof(buffer))
+	if (!network_distributed_client_in_game() || size > sizeof(buffer))
 		return FALSE;
 	/* (the write swaps the header in place) */
 	csmemcpy(buffer, message, size);
@@ -299,7 +318,7 @@ boolean network_distributed_client_send_reliably(
 {
 	byte buffer[0x1000];
 
-	if (!global_network_game_client || size > sizeof(buffer))
+	if (!network_distributed_client_in_game() || size > sizeof(buffer))
 		return FALSE;
 	/* (the write swaps the header in place) */
 	csmemcpy(buffer, message, size);

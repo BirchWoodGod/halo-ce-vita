@@ -109,6 +109,7 @@ void halo_net_tick_report(void);
 /* network_game_globals.c's and network_server_message_handler.c's */
 boolean network_distributed_client_send(void *message, word size);
 boolean network_distributed_client_send_reliably(void *message, word size);
+boolean network_distributed_client_in_game(void);
 boolean network_distributed_server_send_to_all_reliably(void *message, word size);
 boolean network_distributed_server_send_to_machine(long machine_index, void *message, word size);
 boolean network_distributed_server_send_to_machine_reliably(long machine_index, void *message, word size);
@@ -4274,7 +4275,10 @@ void network_distributed_tick(
 		}
 		network_anticheat_tick();
 	}
-	else if (connection == _game_connection_network_client)
+	/* (a client in a host's game: a search client's - the server browser's
+	at the main menu, which ticks - has no host to send to,
+	network_distributed_client_in_game) */
+	else if (connection == _game_connection_network_client && network_distributed_client_in_game())
 	{
 		distributed_note_own_positions();
 		if (game_time_get() % PING_REFRESH_TICKS == 0)
