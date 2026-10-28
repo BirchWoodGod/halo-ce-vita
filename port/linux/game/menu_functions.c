@@ -18105,6 +18105,25 @@ void platform_question_answered(int yes);
 void platform_show_message_box(const char *title, const char *message);
 void platform_ask_question_box(const char *title, const char *text);
 
+/* (the server browser's or the games browser's dispose) whether the screen
+going is going for the large or co-op PC game's question, in the game's own
+dialog (Menu style ElDewrito and Halo 3: the dialog opens in the browser's
+place, and the browser again once it is answered): the online listings are
+kept, which the answer's join needs - stopped with them, the game the player
+said yes to was "no longer listed" and had to be picked a second time (Neff,
+1.1.1 RC6 and RC7) */
+static boolean browser_question_in_dialog(void)
+{
+	boolean asked;
+
+	if (!menu_functions.large_asked)
+		return FALSE;
+	pthread_mutex_lock(&h3_dialog.lock);
+	asked = h3_dialog.question_asked;
+	pthread_mutex_unlock(&h3_dialog.lock);
+	return asked;
+}
+
 /* a text box's own text, as text_show, longer (a map download's question) */
 static void h3_dialog_text(struct widget_instance *widget, char const *text)
 {
@@ -19140,9 +19159,10 @@ boolean pc_menu_event_function_invoke(
 		p2p_lobby_browse(1);
 		return TRUE;
 	case _function_browser_dispose:
-		/* (a locked game's password screen next: its listing is kept, which
-		the join needs) */
-		if (!menu_functions.open_password)
+		/* (a locked game's password screen next, or the large PC game's
+		question in the game's dialog: its listing is kept, which the join
+		needs) */
+		if (!menu_functions.open_password && !browser_question_in_dialog())
 			p2p_lobby_browse(0);
 		return TRUE;
 	case _function_browser_refresh:
@@ -19872,9 +19892,10 @@ boolean pc_menu_event_function_invoke(
 		return TRUE;
 	case _function_h3_lan_dispose:
 		menu_functions.lan = FALSE;
-		/* (a locked online game's password screen next: its listing kept,
+		/* (a locked online game's password screen next, or the large PC
+		game's question in the game's dialog in its place: its listing kept,
 		which the join needs; the server browser's rule) */
-		if (!menu_functions.open_password)
+		if (!menu_functions.open_password && !browser_question_in_dialog())
 			p2p_lobby_browse(0);
 		return TRUE;
 	case _function_h3_lan_refresh:
