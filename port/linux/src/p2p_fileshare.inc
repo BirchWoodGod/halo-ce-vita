@@ -944,7 +944,13 @@ static void fileshare_chunk_heard(struct friend_record *record, const struct mes
 	if (download->state != FILES_PULLING || !p2p_equal(download->key, record->key, P2P_KEY_SIZE) ||
 		!p2p_equal(download->id, message->files_id, FILES_ID_LENGTH))
 	{
-		friends->dropped_forged++;
+		/* (a chunk pulled twice, come once the file was whole: nothing; any
+		other is no transfer's) */
+		if (!(download->state == FILES_SAVING && p2p_equal(download->key, record->key, P2P_KEY_SIZE) &&
+			p2p_equal(download->id, message->files_id, FILES_ID_LENGTH)))
+		{
+			friends->dropped_forged++;
+		}
 		return;
 	}
 	if (index >= download->chunk_count || message->files_data_size != fileshare_chunk_size(download->size, index))
