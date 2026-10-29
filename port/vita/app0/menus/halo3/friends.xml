@@ -9,7 +9,8 @@ requests, invites,
 friends (online first, what each is doing, JOIN when their game can be joined), the requests sent
 and the blocked players, the chosen one's facts under the list, the buttons in the strip at the
 foot. Cross does the row's first thing (Accept, Join, type a code), Square its second (Decline,
-Invite, Ignore, Cancel), Triangle opens its options (Remove, Block, Unblock) after Halo 3's question.
+Invite, Ignore, Cancel), Triangle opens its options (File Share - a friend online's shared files,
+fileshare_friends.xml -, Remove, Block, Unblock) after Halo 3's question.
 The settings panel's Multiplayer > Friends does the same. The art is this folder's own
 (tools/halo3_menu_art.py). -->
 <menus>
@@ -172,6 +173,9 @@ The settings panel's Multiplayer > Friends does the same. The art is this folder
 	<widget name="h3/friends/option_3" type="text" width="376" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
 		<on event="a" run="port h3 friends option" back="true"/>
 	</widget>
+	<widget name="h3/friends/option_4" type="text" width="376" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2">
+		<on event="a" run="port h3 friends option" back="true"/>
+	</widget>
 	<widget name="h3/friends/option_back" type="text" width="376" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/friends_text" string_index="5">
 		<on event="a" back="true"/>
 	</widget>
@@ -181,6 +185,7 @@ The settings panel's Multiplayer > Friends does the same. The art is this folder
 		<child widget="h3/friends/option_1" y="20"/>
 		<child widget="h3/friends/option_2" y="40"/>
 		<child widget="h3/friends/option_3" y="60"/>
+		<child widget="h3/friends/option_4" y="80"/>
 	</widget>
 	<widget name="h3/friends/options_strip" left="120" top="330" width="400" height="20" bitmap="h3/strip"/>
 	<widget name="h3/friends/options_a_butn" left="132" top="332" width="16" height="16" bitmap="h3/glyph_cross"/>

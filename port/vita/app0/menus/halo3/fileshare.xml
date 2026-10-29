@@ -5,8 +5,9 @@ list at the left (each file's name and its map; twelve rows that scroll, the tri
 the one chosen's details at the right (its map's picture, name, map, objects, author, date). On a
 map variant (port/linux/src/forge_store.c): A opens the Forge lobby on its map with it chosen,
 Square renames it (the system's keyboard), Triangle deletes it (asked first). Game variants (the
-Xbox's game types, as MULTIPLAYER's GAME lists them) are listed only. Sharing with friends comes
-with the lobbies (docs/superpowers/specs/2026-10-18-forge-design.md). The maps' pictures are
+Xbox's game types, as MULTIPLAYER's GAME lists them) are listed only. Start on a map variant or a
+game variant of the player's opens SHARING (fileshare_friends.xml: shared with friends or not, send
+to a friend; docs/fileshare-friends.md). The maps' pictures are
 ui.map's own, the rest this folder's art. -->
 <menus>
 	<bitmap name="h3/glyph_l">
@@ -23,6 +24,7 @@ ui.map's own, the rest this folder's art. -->
 		<string text="Kind"/>
 		<string text="DELETE MAP VARIANT?"/>
 		<string text="Delete"/>
+		<string text="Share"/>
 	</strings>
 
 	<!-- the list: its rows (a name, a map), written by port fileshare -->
@@ -96,6 +98,7 @@ ui.map's own, the rest this folder's art. -->
 		<on event="right" run="port fileshare kind"/>
 		<on event="x" run="port fileshare rename"/>
 		<on event="y" open="h3/fileshare/delete/screen" run="port fileshare ask delete"/>
+		<on event="start" open="h3/fileshare/share/screen" run="port fileshare share ask"/>
 		<data input="port fileshare"/>
 		<child widget="h3/fileshare/row_0" x="0" y="0"/>
 		<child widget="h3/fileshare/row_1" x="0" y="19"/>
@@ -125,9 +128,11 @@ ui.map's own, the rest this folder's art. -->
 	<widget name="h3/fileshare/delete" type="text" left="294" top="421" width="62" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/fileshare_text" string_index="3"/>
 	<widget name="h3/fileshare/b_butn" left="360" top="422" width="16" height="16" bitmap="h3/glyph_circle"/>
 	<widget name="h3/fileshare/back" type="text" left="380" top="421" width="62" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/main_items" string_index="10"/>
-	<widget name="h3/fileshare/l_butn" left="500" top="422" width="16" height="16" bitmap="h3/glyph_l"/>
-	<widget name="h3/fileshare/r_butn" left="517" top="422" width="16" height="16" bitmap="h3/glyph_r"/>
-	<widget name="h3/fileshare/kind_label" type="text" left="536" top="421" width="56" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/fileshare_text" string_index="4"/>
+	<widget name="h3/fileshare/start_butn" left="446" top="422" width="16" height="16" bitmap="h3/glyph_start"/>
+	<widget name="h3/fileshare/share" type="text" left="466" top="421" width="40" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/fileshare_text" string_index="7"/>
+	<widget name="h3/fileshare/l_butn" left="508" top="422" width="16" height="16" bitmap="h3/glyph_l"/>
+	<widget name="h3/fileshare/r_butn" left="525" top="422" width="16" height="16" bitmap="h3/glyph_r"/>
+	<widget name="h3/fileshare/kind_label" type="text" left="544" top="421" width="56" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/fileshare_text" string_index="4"/>
 	<widget name="h3/fileshare/screen" flags="pass_unhandled_to_focused_child">
 		<on event="created" run="port fileshare init"/>
 		<on event="b back" back="true"/>
@@ -150,6 +155,8 @@ ui.map's own, the rest this folder's art. -->
 		<child widget="h3/fileshare/delete"/>
 		<child widget="h3/fileshare/b_butn"/>
 		<child widget="h3/fileshare/back"/>
+		<child widget="h3/fileshare/start_butn"/>
+		<child widget="h3/fileshare/share"/>
 		<child widget="h3/fileshare/l_butn"/>
 		<child widget="h3/fileshare/r_butn"/>
 		<child widget="h3/fileshare/kind_label"/>

@@ -162,6 +162,9 @@
 	<widget name="ce/friends/option_3" type="text" width="232" height="32" bitmap="ui\shell\bitmaps\list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5">
 		<on event="a" run="port h3 friends option" back="true"/>
 	</widget>
+	<widget name="ce/friends/option_4" type="text" width="232" height="32" bitmap="ui\shell\bitmaps\list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5">
+		<on event="a" run="port h3 friends option" back="true"/>
+	</widget>
 	<widget name="ce/friends/option_back" type="text" width="232" height="32" bitmap="ui\shell\bitmaps\list_item_bkd_top" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="ce/back_text" string_index="0">
 		<on event="a" back="true"/>
 	</widget>
@@ -171,6 +174,7 @@
 		<child widget="ce/friends/option_1" y="32"/>
 		<child widget="ce/friends/option_2" y="64"/>
 		<child widget="ce/friends/option_3" y="96"/>
+		<child widget="ce/friends/option_4" y="128"/>
 	</widget>
 	<widget name="ce/friends/options_a_butn" left="471" top="414" width="21" height="26" bitmap="ui\shell\bitmaps\a_butn"/>
 	<widget name="ce/friends/options_select" type="text" left="492" top="414" width="120" height="24" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="ce/friends_text" string_index="3"/>
