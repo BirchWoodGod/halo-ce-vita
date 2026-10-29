@@ -386,6 +386,13 @@ crossplay wire (section 8), and the "19" number is never released.
 
 ### 5.2 The signed crossplay table (phase 2, used by servers from phase 1)
 
+**Built (Oct 29 2026, for 1.1.1's hotfix): section 10.13.** The design the
+owner agreed then is narrower than this plan: one key (the release key), a
+strict text table (`netversions.txt` and `.sig`) on a GitHub release of its
+own, rows that only point a version at rules already built in or refuse
+one; no announce change, no limits block. The plan below is kept for its
+reasoning.
+
 **Floor.** The table is built in as the floor: announce 32, accept exactly 29
 and 32 (not 30 or 31), each game by its host's version's rules (since Oct 19
 2026: 10.9; 29 and 29..29 before that) for
@@ -998,7 +1005,8 @@ first failing stage, next to an OpenCE-client control that passes.
 | `damnserver` | XFAIL | LAN: version; internet by invite: signal |
 | `crossrefuse` | XFAIL | no right refusal message yet (T11); refused for the network version instead |
 | `crossmaps` (T3) | XFAIL | version (OpenCE hosts on Blood Gulch and on `custom_maps\pcgulch`, had and lacked; the OpenCE controls pass). The map check itself runs today against our build standing in for a PC host: `run_crossplay_maps_test.sh` |
-| `crossmixed`, `crossversion` | SKIP | wait for T4 and T10 |
+| `crossmixed` | SKIP | wait for T4 |
+| `crossversion` | built (10.13) | a test table, a test key |
 
 **Findings for the wire tasks:**
 - **G2 seen live.** Our client reads OpenCE's 0x02 "in progress" flag as
@@ -1689,6 +1697,86 @@ already" log change), not the wire.
    vita_abi_check, a Vita release build.
 7. docs/crossplay.md: a 10.x section with the table above; note what the
    owner must decide (hosting at N, new discovery paths).
+
+**Since 10.13:** when the spec (step 3) says N changes nothing a game plays
+beyond one of our built-in versions (as 39 was 38 plus labels), the tests
+of step 6 can run against the new PC build with no code change (our copies
+join it once a test table says `join N rules M`), and the owner signs a
+table row instead of a release: every 1.1.1 and later build joins N within
+a day. Code (steps 5, 7) is only needed when N changes a message, the
+record, or a value's meaning.
+
+### 10.13 The signed crossplay version table (Oct 29 2026)
+
+Branch fix/111-netversion-table (from release-1.1.1, v1.1.1). The owner's
+goal: when OpenCE or ChupathingyCE bump their network version, Vitas join
+without a game update. Design agreed with the owner:
+
+- **What it says.** `netversions.txt`, strict text read by length
+  (`port/linux/src/netversion_table.h`): `halo-ce-vita-netversions 1`, a
+  `version` that only goes up, then rows in order of network version:
+  `join <N> rules <M>` (N is joined and played by the built-in rules of M:
+  29, 32, 38 or 39 in 1.1.1) and `refuse <N> <reason>` (N is not joined;
+  the browser shows the reason). At most 64 rows, about 5 KB.
+- **What it can't do.** Select anything but behaviour already built in: no
+  code, no message formats, no new rules. A built-in version keeps its own
+  rules whatever a row says (a row may refuse it: a kill switch). 18 (the
+  Vitas' wire) is never the table's. Hosting is unchanged: our hosts still
+  announce 32. With no table, or one equal to the built-in list, behaviour
+  is exactly 1.1.1's.
+- **Forward rows.** A join row whose rules this build lacks (a newer
+  build's wire) is not joined and the browser says "needs a newer Halo CE
+  for PS Vita - update to join"; one table serves every build.
+- **Trust.** Ed25519 with the release key (the update manifest's and
+  testers.txt's), the signature in `netversions.txt.sig` beside it, checked
+  before a byte of the table is parsed. The magic line keeps a table from
+  ever reading as a manifest or tester list and vice versa. A replayed
+  older table is refused (its version is not higher than the one in effect
+  and kept). Test builds alone can take another key
+  (`configure.py --netversions-test-key`, refused with `--release`).
+- **Where.** A pre-release (never Latest) of BirchWoodGod/halo-ce-vita
+  tagged `crossplay-table`; the game asks
+  `github.com/.../releases/download/crossplay-table/netversions.txt` and
+  `.sig` with `posix_https_download`: the updater's TLS, GitHub's pinned
+  authorities, a redirect only to `release-assets.githubusercontent.com` /
+  `objects.githubusercontent.com`, 5 KB and 130 bytes at most, a fixed
+  User-Agent, no token, no cookie. No new TLS root, host or port.
+- **When.** At start (WSAStartup) the kept table is read
+  (`ux0:data/haloce-vita/netversions.txt` and `.sig`; a PC's save folder);
+  a small thread then fetches at once and once a day (30 min after a
+  failure to reach GitHub), only while allowed: `network.crossplay_updates`
+  (the Vita panel's Vita and PC > PC versions list: Auto / Built-in),
+  internet play on (`network.online`: the Vita's Connection Online), not ad
+  hoc, an address, and on a PC `update.auto`; never on a dedicated server
+  or a build without the crossplay wire. Every outcome is one
+  `netversions:` line in halo.log (taken with each row and the list joined,
+  not newer, refused and why, not fetching and why).
+- **What uses it.** `network_wire.c`: `network_wire_version_accepted_on`,
+  `network_wire_of_version`, the joined list's text and "nearest" version
+  (browser rows, the LAN join refusal), and `network_wire_choose_version`:
+  a game of N joined by M's rules sets the game's crossplay version to M,
+  so every rule test (`network_wire_v30_rules` ... `_v39_rules`, the
+  record size, effects' count) and every flag meaning read by version
+  (`network_wire_rules_version`: the listing's dedicated bit, its kind
+  byte, the advertisement's 0x04) are M's. Greyed rows say the table's
+  reason (`Can't join: <reason> (network N)`).
+
+**Tool:** `tools/release/sign_netversions.py` (like `sign_testers.py`; the
+owner's commands: tools/release/README.md, "Crossplay version table").
+
+**Tests** (a throwaway key; ours the `--linux-net-vita --linux-d3d
+gxm-null` debug build with `--netversions-test-key`):
+
+| Test | Result |
+|---|---|
+| `run_netversion_table_test.sh`: the tool (make, show, remove, refusals) and the C reader with ASan + UBSan (signature, 44 malformed forms, size, the newest winning) | PASS (84 checks) |
+| `run_network_wire_test.sh`: a table's rows in every build (Vita, PC, release, server, non-Vita) | PASS |
+| `run_net_fuzz_test.sh` target `netversions` (as fetched and as signed, then the wire's answers), libFuzzer 300 s | PASS: 435,015 runs, no crash (a first run's one finding was the target's own check: a `refuse 18` row, which the wire rightly ignores; kept as case `refuse-18`) |
+| `run_netversion_fetch_harness_test.sh` (18 cases: none, good, kept, newer, older, badsig, otherkey, garbage, unknownwire, big, chunked, redirect, elsewhere, keptbad, off, offline, autooff, daily) | PASS |
+| regressions against OpenCE 337b05cf (39), no table: `opencelan`, `opencehost`, `browserboth`, `h3pcjoin`; `run_netns_online_test.sh code` | PASS each |
+| `run_vita_settings_test.sh` (the new row, Spanish too), `run_lang_test.sh`, `run_p2p_lobby_test.sh`, `run_p2p_friends_test.sh`, `run_vita_p2p_test.sh`, `run_crossplay_guard_test.sh`, `run_browser_list_test.sh`, `run_tester_list_test.sh`, `run_update_check_test.sh`; `run_menus_test.sh` | PASS; menus all but h3friendsbackup, h3mods and h3profiles, which fail the same (more) on release-1.1.1's own build here |
+| `tools/vita_abi_check.py` (release configuration); `ninja vita` (`--lto off --pgo off --portable --release`); a `--release` Linux build; Blood Gulch 60 s (release and debug builds, 3 bots, internet play on: the fetch tried GitHub and found no name server in the namespace) | 0 unsafe declarations; eboot.bin and halo.vpk built (the release key, no test hook); 0 asserts |
+| `run_netns_crossplay_test.sh crossversion`: OpenCE 337b05cf (39) read as 40 by our copies (`HALO_TEST_VERSION_HEARD=39:40`), with a table `join 40 rules 39` kept beside our client | PASS: LAN and server browser, every step (discover ... stability; "network version 40, played by 39's rules (the crossplay version table 1)"); without the table refused on the LAN ("a newer PC build") and listed as another version online, never joined; no packet left the test's network |
 
 ## 11. Licensing and credit
 
