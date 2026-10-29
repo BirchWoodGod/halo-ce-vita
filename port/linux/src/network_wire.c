@@ -8,8 +8,10 @@ game, as it is joined or hosted.
 #include "port_config.h"
 #include "halo_port_limits.h"
 #include "network_wire.h"
+#include "netversion_table.h"
 #include "lang.h"
 
+#include <pthread.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,8 +41,11 @@ static volatile int wire;
 /* (crossplay_guard.h's CROSSPLAY_PLATFORM_*: 0 a Vita) */
 static volatile int host_platform;
 /* the game's crossplay version (one of crossplay_accepted_versions) while
-wire is set: whose rules it plays */
+wire is set: whose rules it plays; and the version its host announces (the
+same, or one the crossplay version table plays by a built-in version's
+rules) */
 static volatile unsigned int crossplay_version;
+static volatile unsigned int crossplay_announced;
 
 int network_wire_crossplay_available(void)
 {
@@ -68,7 +73,8 @@ int network_wire_host_vita(void)
 	return network_wire_host_platform() == 0;
 }
 
-static int crossplay_version_listed(unsigned int version)
+/* whether a version is one built in (each with rules of its own) */
+static int crossplay_version_built_in(unsigned int version)
 {
 	size_t index;
 
@@ -80,16 +86,171 @@ static int crossplay_version_listed(unsigned int version)
 	return 0;
 }
 
+/* ---------- the signed crossplay version table (netversion_table.h)
+
+The rows of the newest table that checked (netversion_fetch.c), none until
+one does: the built-in list alone. A version is joined on the crossplay wire
+when it is built in and not refused by a row, or a join row names it with
+the rules of a built-in version; it plays the rules of that version (its
+own, when built in: a row never remaps one). Read by the game's threads and
+the p2p thread, written by the fetch's: under table_lock, never long */
+static pthread_mutex_t table_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct netversion_table table;
+
+void network_wire_table_set(const struct netversion_table *taken)
+{
+	pthread_mutex_lock(&table_lock);
+	if (taken)
+		memcpy(&table, taken, sizeof(table));
+	else
+		memset(&table, 0, sizeof(table));
+	if (table.count < 0 || table.count > NETVERSION_TABLE_MAXIMUM_ROWS)
+		table.count = 0;
+	pthread_mutex_unlock(&table_lock);
+}
+
+unsigned long network_wire_table_version(void)
+{
+	unsigned long version;
+
+	pthread_mutex_lock(&table_lock);
+	version = table.version;
+	pthread_mutex_unlock(&table_lock);
+	return version;
+}
+
+int network_wire_rules_built_in(unsigned int rules)
+{
+	return rules != HALO_PORT_NETWORK_VERSION && crossplay_version_built_in(rules);
+}
+
+/* (table_lock held) the table's row of a version, or NULL (netversion_table_find's,
+here so that this file needs no other) */
+static const struct netversion_row *table_row_locked(unsigned int version)
+{
+	int index;
+
+	for (index = 0; index < table.count && index < NETVERSION_TABLE_MAXIMUM_ROWS; index++)
+	{
+		if (table.rows[index].version == version)
+			return &table.rows[index];
+	}
+	return NULL;
+}
+
+/* (table_lock held) the crossplay rules a version plays: a built-in
+version, else 0 (not joined); why not in reason (if not NULL), when the
+table says */
+static unsigned int crossplay_rules_locked(unsigned int version, char *reason, int size)
+{
+	const struct netversion_row *row;
+
+	if (reason && size > 0)
+		reason[0] = 0;
+	if (!version || version == HALO_PORT_NETWORK_VERSION || version > 0xFFFF)
+		return 0;
+	row = table_row_locked(version);
+	if (row && row->kind == NETVERSION_ROW_REFUSE)
+	{
+		if (reason && size > 0)
+			snprintf(reason, (size_t)size, "%s", row->reason);
+		return 0;
+	}
+	if (crossplay_version_built_in(version))
+		return version;
+	if (row && row->kind == NETVERSION_ROW_JOIN)
+	{
+		if (network_wire_rules_built_in(row->rules))
+			return row->rules;
+		/* (a newer build's rules) */
+		if (reason && size > 0)
+			snprintf(reason, (size_t)size, "%s", T("needs a newer Halo CE for PS Vita - update to join"));
+	}
+	return 0;
+}
+
+static unsigned int crossplay_rules(unsigned int version, char *reason, int size)
+{
+	unsigned int rules;
+
+	pthread_mutex_lock(&table_lock);
+	rules = crossplay_rules_locked(version, reason, size);
+	pthread_mutex_unlock(&table_lock);
+	return rules;
+}
+
+static int crossplay_version_listed(unsigned int version)
+{
+	return crossplay_rules(version, NULL, 0) != 0;
+}
+
+unsigned int network_wire_rules_version(unsigned int version)
+{
+	unsigned int rules = crossplay_rules(version, NULL, 0);
+
+	return rules ? rules : version;
+}
+
+int network_wire_crossplay_refusal(unsigned int version, char *reason, int size)
+{
+	char why[NETVERSION_TABLE_REASON_SIZE + 64];
+
+	if (reason && size > 0)
+		reason[0] = 0;
+	if (crossplay_rules(version, why, (int)sizeof(why)) || !why[0])
+		return 0;
+	if (reason && size > 0)
+		snprintf(reason, (size_t)size, "%s", why);
+	return 1;
+}
+
+/* the crossplay versions joined, lowest first, at most maximum: their count */
+static int crossplay_joined_versions(unsigned short *versions, int maximum)
+{
+	size_t index, built_in = sizeof(crossplay_accepted_versions) / sizeof(crossplay_accepted_versions[0]);
+	int count = 0, row;
+
+	pthread_mutex_lock(&table_lock);
+	/* (both lists are in order: merged) */
+	index = 0;
+	row = 0;
+	while ((index < built_in || row < table.count) && count < maximum)
+	{
+		unsigned int version;
+
+		if (row >= table.count ||
+			(index < built_in && crossplay_accepted_versions[index] <= table.rows[row].version))
+		{
+			version = crossplay_accepted_versions[index++];
+			if (row < table.count && table.rows[row].version == version)
+				row++;
+		}
+		else
+			version = table.rows[row++].version;
+		if (crossplay_rules_locked(version, NULL, 0))
+			versions[count++] = (unsigned short)version;
+	}
+	pthread_mutex_unlock(&table_lock);
+	return count;
+}
+
 void network_wire_choose_version(unsigned int version, int platform, const char *why)
 {
-	int crossplay = version != HALO_PORT_NETWORK_VERSION && crossplay_version_listed(version) &&
-		network_wire_crossplay_available();
+	unsigned int rules = version != HALO_PORT_NETWORK_VERSION && network_wire_crossplay_available() ?
+		crossplay_rules(version, NULL, 0) : 0;
+	int crossplay = rules != 0;
 
 	platform = crossplay ? platform : 0;
-	version = crossplay ? version : 0;
-	if (crossplay != wire || platform != host_platform || version != crossplay_version)
+	if (crossplay != wire || platform != host_platform || rules != crossplay_version ||
+		(crossplay && version != crossplay_announced))
 	{
-		if (crossplay)
+		if (crossplay && rules != version)
+		{
+			platform_log("network: the crossplay wire (%s%s), network version %u, played by %u's rules "
+				"(the crossplay version table %lu)", why ? why : "a game", platform ? ", a PC's game" : ", a Vita's game",
+				version, rules, network_wire_table_version());
+		}
+		else if (crossplay)
 		{
 			platform_log("network: the crossplay wire (%s%s), network version %u's rules", why ? why : "a game",
 				platform ? ", a PC's game" : ", a Vita's game", version);
@@ -99,7 +260,8 @@ void network_wire_choose_version(unsigned int version, int platform, const char 
 	}
 	/* (the version before the wire: a reader seeing the wire set sees its
 	rules) */
-	crossplay_version = version;
+	crossplay_version = rules;
+	crossplay_announced = crossplay ? version : 0;
 	wire = crossplay;
 	host_platform = platform;
 }
@@ -114,6 +276,7 @@ void network_wire_reset(void)
 	wire = 0;
 	host_platform = 0;
 	crossplay_version = 0;
+	crossplay_announced = 0;
 }
 
 unsigned int network_wire_host_version(void)
@@ -128,11 +291,33 @@ unsigned int network_wire_host_version(void)
 		char *end;
 		unsigned long version = strtoul(value, &end, 10);
 
-		if (!*end && version <= 0xFFFF && crossplay_version_listed((unsigned int)version))
+		if (!*end && version <= 0xFFFF && network_wire_rules_built_in((unsigned int)version))
 			return (unsigned int)version;
 	}
 #endif
 	return HALO_PORT_CROSSPLAY_NETWORK_VERSION;
+}
+
+unsigned int network_wire_version_heard(unsigned int version)
+{
+#ifndef HALO_RELEASE
+	/* (automated tests only: HALO_TEST_VERSION_HEARD=from:to) */
+	const char *value = getenv("HALO_TEST_VERSION_HEARD");
+
+	if (value && value[0])
+	{
+		char *end;
+		unsigned long from = strtoul(value, &end, 10), to;
+
+		if (*end == ':')
+		{
+			to = strtoul(end + 1, &end, 10);
+			if (!*end && from == version && to > 0 && to <= 0xFFFF)
+				return (unsigned int)to;
+		}
+	}
+#endif
+	return version;
 }
 
 unsigned int network_wire_announced_version(int crossplay)
@@ -229,29 +414,38 @@ int network_wire_rejection_is_name_refused(int code)
 
 void network_wire_crossplay_versions_text(char *text, int size)
 {
-	size_t index, count = sizeof(crossplay_accepted_versions) / sizeof(crossplay_accepted_versions[0]);
+	unsigned short versions[NETVERSION_TABLE_MAXIMUM_ROWS + 8];
+	int index, count = crossplay_joined_versions(versions, (int)(sizeof(versions) / sizeof(versions[0])));
 	int length = 0;
 
 	if (!text || size <= 0)
 		return;
 	text[0] = 0;
+	if (!count)
+	{
+		snprintf(text, (size_t)size, "%s", T("none"));
+		return;
+	}
 	for (index = 0; index < count && length >= 0 && length < size; index++)
 	{
 		length += snprintf(text + length, (size_t)(size - length), "%s%u",
-			!index ? "" : index + 1 == count ? " and " : ", ", (unsigned int)crossplay_accepted_versions[index]);
+			!index ? "" : index + 1 == count ? " and " : ", ", (unsigned int)versions[index]);
 	}
 }
 
 unsigned int network_wire_crossplay_version_near(unsigned int version)
 {
-	size_t index, count = sizeof(crossplay_accepted_versions) / sizeof(crossplay_accepted_versions[0]);
+	unsigned short versions[NETVERSION_TABLE_MAXIMUM_ROWS + 8];
+	int index, count = crossplay_joined_versions(versions, (int)(sizeof(versions) / sizeof(versions[0])));
 
+	if (!count)
+		return HALO_PORT_CROSSPLAY_NETWORK_VERSION;
 	for (index = 0; index < count; index++)
 	{
-		if (crossplay_accepted_versions[index] > version)
-			return crossplay_accepted_versions[index];
+		if (versions[index] > version)
+			return versions[index];
 	}
-	return crossplay_accepted_versions[count - 1];
+	return versions[count - 1];
 }
 
 int network_wire_version_accepted_on(int crossplay, unsigned int version)
