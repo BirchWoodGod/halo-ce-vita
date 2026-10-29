@@ -2065,6 +2065,9 @@
 "PC mouse aim assist" = "Ayuda ratón PC"
 "Their choice" = "Cada uno"
 "Everyone games: Off turns off OpenCE players' mouse aim assist" = "Partidas para Todos: No quita la ayuda con ratón a OpenCE"
+"PC versions list" = "Lista versiones PC"
+"Built-in" = "Integrada"
+"Auto: gets the signed list of PC versions you can join" = "Auto: descarga la lista firmada de versiones de PC a las que entrar"
 "Which games the browser lists; who joins yours" = "Qué partidas lista el navegador; quién entra en las tuyas"
 # (friends join a private game too, Oct 19 2026)
 "Their game has a password: type it" = "Su partida tiene contraseña: escríbela"

@@ -49,6 +49,7 @@ alone peers reach.
 #include "posix.h"
 #include "port_config.h"
 #include "p2p.h"
+#include "netversion_fetch.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -462,6 +463,9 @@ int WSAAPI WSAStartup(WORD version_requested, LPWSADATA data)
 	/* here, before the game's network threads start */
 	net_settings_read();
 	delayed_enabled();
+	/* (the crossplay version table kept, then kept up to date:
+	netversion_fetch.h) */
+	netversion_fetch_start();
 	p2p_initialize(local_address_setting(&local) ? local : loopback_address());
 	if (data)
 	{
@@ -481,6 +485,8 @@ void xnet_internet_play_start(void)
 {
 	unsigned long local;
 
+	/* (the table kept up to date from now: netversion_fetch.h) */
+	netversion_fetch_start();
 	p2p_initialize(local_address_setting(&local) ? local : loopback_address());
 }
 

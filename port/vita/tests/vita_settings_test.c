@@ -2867,6 +2867,16 @@ static void test_multiplayer_tab(void)
 		!strcmp(getenv("HALO_NET_BLOCK_MOUSE_AIM_ASSIST"), "true"), "PC mouse aim assist Off: HALO_NET_BLOCK_MOUSE_AIM_ASSIST true");
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_NET_BLOCK_MOUSE_AIM_ASSIST"), "false"), "PC mouse aim assist their choice again: false");
+	/* (network.crossplay_updates: the signed crossplay version table's
+	fetch, netversion_fetch.h; read as each fetch is due) */
+	to_line("PC versions list");
+	check(strstr(menu, "\nPC versions list\x02  Auto >") && !setting_named("HALO_NET_CROSSPLAY_UPDATES")->restart,
+		"PC versions list: Auto as shipped, live");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nPC versions list\x02< Built-in  ") && getenv("HALO_NET_CROSSPLAY_UPDATES") &&
+		!strcmp(getenv("HALO_NET_CROSSPLAY_UPDATES"), "false"), "PC versions list Built-in: HALO_NET_CROSSPLAY_UPDATES false");
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_NET_CROSSPLAY_UPDATES"), "true"), "PC versions list Auto again: true");
 	/* (bots.online: on this page with the other rows of the games hosted
 	online, not on the tab - the tab is a screen's height; while it fills,
 	the bots' skill, vehicles and routes under it, the tab's own rows) */
@@ -3702,8 +3712,8 @@ the Campaign screen) and Online games (now Visibility, by OpenCE's name);
 and the rows added since (Sun rays, Button icons, Map downloads, Max
 players, Visibility, Fourth core helpers, Latency meter, Particles,
 First-person legs, MCC mods, PC map vehicles, Sharp interface, Player model,
-PC mouse aim assist, Carnage report, Field of view, Chat, Chat filter, Online
-bots, Scoreboard; the Play page's two texts) */
+PC mouse aim assist, PC versions list, Carnage report, Field of view, Chat,
+Chat filter, Online bots, Scoreboard; the Play page's two texts) */
 static void test_variables_kept(void)
 {
 	static const char *const variables[] = {
@@ -3728,7 +3738,7 @@ static void test_variables_kept(void)
 		"HALO_LANGUAGE", "HALO_UPDATE_CHANNEL", "HALO_PARTICLE_BUDGET", "HALO_FIRST_PERSON_LEGS", "HALO_RAGDOLLS",
 		"HALO_MCC_MODS", "HALO_CONTENT_ROOT", "HALO_PC_MAP_VEHICLES", "HALO_SHARP_UI", "HALO_PLAYER_MODEL", "HALO_ARMOR_COLOR", "HALO_VISOR_COLOR",
 		"HALO_FRIENDS_APPEAR_OFFLINE",
-		"HALO_FRIENDS_JOIN", "HALO_NET_BLOCK_MOUSE_AIM_ASSIST", "HALO_NET_ANTICHEAT",
+		"HALO_FRIENDS_JOIN", "HALO_NET_BLOCK_MOUSE_AIM_ASSIST", "HALO_NET_CROSSPLAY_UPDATES", "HALO_NET_ANTICHEAT",
 		"HALO_INFECTION_ZOMBIES", "HALO_INFECTION_SPEED", "HALO_INFECTION_TIME", "HALO_INFECTION_RESPAWN",
 		"HALO_INFECTION_SHIELDS", "HALO_INFECTION_TOUGH",
 		"HALO_CARNAGE_REPORT", "HALO_FLAMING_HELMET", "HALO_FIELD_OF_VIEW", "HALO_BRIGHTNESS", "HALO_CLOCK_GOVERNOR", "HALO_BATTERY_LOG",

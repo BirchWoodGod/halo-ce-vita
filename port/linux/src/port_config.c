@@ -560,6 +560,14 @@ static const struct config_setting config_settings[] =
 		"offers no Vita, and takes \"vita\" as Vita PC). Taken as a game is\n"
 		"hosted; never everyone in ad hoc play. Best effort: a modified\n"
 		"client can say it is a Vita (docs/crossplay.md)." },
+	{ "network.crossplay_updates", _config_boolean, "true", "HALO_NET_CROSSPLAY_UPDATES", _environment_value,
+		_platform_all,
+		"Keep the list of OpenCE's network versions this game can join up to\n"
+		"date: at start, and once a day while internet play is on, it fetches\n"
+		"the owner's signed crossplay version table from GitHub (a few hundred\n"
+		"bytes, never code; kept beside the saves). false uses the list this\n"
+		"version was released with, and the last table kept. On a PC,\n"
+		"update.auto = false turns it off too." },
 	{ "network.host_crossplay", _config_boolean, "false", "HALO_NET_HOST_CROSSPLAY", _environment_value, _platform_all,
 		"Retired (Oct 20 2026) for network.who_can_join: read only when that\n"
 		"is empty, true as \"everyone\" (what was \"Vitas and PC\")." },
