@@ -247,9 +247,12 @@ struct files_state
 	int test_parsed;
 	char test_key_file[PATH_SIZE];
 	char test_stranger_file[PATH_SIZE];
-	long test_stranger_at, test_bad_at, test_sharing_off_at;
-	char test_bad[16];
-	int test_stranger_done, test_bad_done, test_sharing_off_done;
+	long test_stranger_at, test_sharing_off_at;
+	int test_stranger_done, test_sharing_off_done;
+	/* (bad=S:WHAT, up to four) */
+	long test_bad_at[4];
+	char test_bad[4][16];
+	int test_bad_count, test_bads_done;
 };
 
 /* a friend's file-share bookkeeping (in their friend_record) */

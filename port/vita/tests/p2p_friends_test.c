@@ -4304,10 +4304,11 @@ static void test_fileshare(void)
 
 			use(ALPHA);
 			snprintf(saved_test, sizeof(saved_test), "%s", kinds[index]);
-			snprintf(machines[ALPHA].files.test_bad, sizeof(machines[ALPHA].files.test_bad), "%s", kinds[index]);
+			snprintf(machines[ALPHA].files.test_bad[0], sizeof(machines[ALPHA].files.test_bad[0]), "%s", kinds[index]);
 			machines[ALPHA].files.test_parsed = 1;
-			machines[ALPHA].files.test_bad_at = 0;
-			machines[ALPHA].files.test_bad_done = 0;
+			machines[ALPHA].files.test_bad_at[0] = 0;
+			machines[ALPHA].files.test_bad_count = 1;
+			machines[ALPHA].files.test_bads_done = 0;
 			machines[ALPHA].started_time = clock_now - 1000;
 			fs_pass(3);
 			use(BRAVO);
@@ -4323,7 +4324,7 @@ static void test_fileshare(void)
 				check(ends >= 1 && !machines[BRAVO].files.download.state,
 					"file share: the oversized offer refused (told), nothing pulled");
 			}
-			machines[ALPHA].files.test_bad_at = -1;
+			machines[ALPHA].files.test_bad_count = 0;
 			fs_pass(32);
 		}
 		check(machines[BRAVO].dropped_forged + machines[BRAVO].total_forged >= 2,

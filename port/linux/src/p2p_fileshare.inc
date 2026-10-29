@@ -1113,7 +1113,7 @@ static void fileshare_pair_heard(struct friend_record *record, const struct mess
 key-file=PATH (this machine's friend key written there, hex),
 stranger-ask=S:PATH (S seconds in, a FILES_ASK sealed and signed as if this
 machine were the friend of the key in PATH: a stranger's, or a blocked
-player's), bad=S:WHAT (S seconds in, to the first friend online: oversize, an
+player's), bad=S:WHAT (up to four; S seconds in, to the first friend online: oversize, an
 offer of a map variant past the cap; forged, an offer sealed for the pair but
 signed by another key; sender, one signed by another key that names itself
 the sender), sharing-off-at=S (Share with friends turned off) */
@@ -1125,7 +1125,7 @@ static void fileshare_test_parse(void)
 	struct files_state *files = &friends->files;
 
 	files->test_parsed = 1;
-	files->test_stranger_at = files->test_bad_at = files->test_sharing_off_at = -1;
+	files->test_stranger_at = files->test_sharing_off_at = -1;
 	if (!setting || !setting[0])
 		return;
 	snprintf(copy, sizeof(copy), "%s", setting);
@@ -1138,10 +1138,11 @@ static void fileshare_test_parse(void)
 			files->test_stranger_at = atol(step + 13);
 			snprintf(files->test_stranger_file, sizeof(files->test_stranger_file), "%s", strchr(step, ':') + 1);
 		}
-		else if (!strncmp(step, "bad=", 4) && strchr(step, ':'))
+		else if (!strncmp(step, "bad=", 4) && strchr(step, ':') && files->test_bad_count < 4)
 		{
-			files->test_bad_at = atol(step + 4);
-			snprintf(files->test_bad, sizeof(files->test_bad), "%s", strchr(step, ':') + 1);
+			files->test_bad_at[files->test_bad_count] = atol(step + 4);
+			snprintf(files->test_bad[files->test_bad_count], sizeof(files->test_bad[0]), "%s", strchr(step, ':') + 1);
+			files->test_bad_count++;
 		}
 		else if (!strncmp(step, "sharing-off-at=", 15))
 			files->test_sharing_off_at = atol(step + 15);
@@ -1217,9 +1218,10 @@ static void fileshare_test_steps(void)
 				fileshare_send(&record, &message, id) ? "queued" : "not queued");
 		}
 	}
-	if (test_due(files->test_bad_at) && !files->test_bad_done)
+	if (files->test_bads_done < files->test_bad_count && test_due(files->test_bad_at[files->test_bads_done]))
 	{
 		struct friend_record *record = NULL;
+		const char *bad = files->test_bad[files->test_bads_done];
 
 		for (index = 0; index < friends->friend_count && !record; index++)
 			if (friends->friends[index].presence.online && friend_keys(&friends->friends[index]))
@@ -1232,16 +1234,16 @@ static void fileshare_test_steps(void)
 			char topic[TOPIC_LENGTH];
 			int size;
 
-			files->test_bad_done = 1;
+			files->test_bads_done++;
 			message_start(&message, TYPE_FILES_OFFER, record->key);
 			posix_random_bytes(message.files_id, FILES_ID_LENGTH);
 			message.files_flags = FILES_OFFER_UNASKED;
 			message.files_kind = P2P_FILESHARE_KIND_MAP_VARIANT;
-			message.files_size = !strcmp(files->test_bad, "oversize") ? 70000 : 4096;
+			message.files_size = !strcmp(bad, "oversize") ? 70000 : 4096;
 			posix_random_bytes(message.files_digest, P2P_SHA256_SIZE);
 			snprintf(message.files_map, sizeof(message.files_map), "bloodgulch");
-			snprintf(message.files_title, sizeof(message.files_title), "Bad %s", files->test_bad);
-			if (!strcmp(files->test_bad, "oversize"))
+			snprintf(message.files_title, sizeof(message.files_title), "Bad %s", bad);
+			if (!strcmp(bad, "oversize"))
 				fileshare_send(record, &message, message.files_id);
 			else
 			{
@@ -1250,7 +1252,7 @@ static void fileshare_test_steps(void)
 				memcpy(saved_seed, friends->seed, sizeof(saved_seed));
 				memcpy(saved_key, friends->key, sizeof(saved_key));
 				posix_random_bytes(friends->seed, sizeof(friends->seed));
-				if (!strcmp(files->test_bad, "sender"))
+				if (!strcmp(bad, "sender"))
 					p2p_ed25519_public(friends->seed, friends->key, NULL);
 				size = plain_encode(&message, plain);
 				memcpy(friends->seed, saved_seed, sizeof(saved_seed));
@@ -1259,7 +1261,7 @@ static void fileshare_test_steps(void)
 				mailbox_topic(record->key, topic);
 				outbound_add(topic, payload, size, 0, NULL);
 			}
-			platform_log("fileshare: test: a bad offer (%s) sent to %s", files->test_bad, record->name);
+			platform_log("fileshare: test: a bad offer (%s) sent to %s", bad, record->name);
 		}
 	}
 }
@@ -1971,8 +1973,9 @@ void p2p_fileshare_job_saved(int serial, int saved, const char *text)
 
 		fileshare_send_end(record, download->id, saved ? FILES_END_SAVED : FILES_END_REFUSED);
 		if (saved)
-			fileshare_status(T("Saved \"%s\" from %s to your File Share"), text && text[0] ? text : download->title,
-				download->friend_name);
+			fileshare_status(download->kind == P2P_FILESHARE_KIND_GAME_VARIANT ?
+				T("Saved \"%s\" from %s to your game types") : T("Saved \"%s\" from %s to your File Share"),
+				text && text[0] ? text : download->title, download->friend_name);
 		else
 			fileshare_status(T("\"%s\" from %s was refused: %s"), download->title, download->friend_name,
 				text && text[0] ? text : T("it didn't pass the checks"));

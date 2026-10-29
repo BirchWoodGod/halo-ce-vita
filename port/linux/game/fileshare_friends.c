@@ -86,16 +86,17 @@ static struct
 	char asking_title[P2P_FILESHARE_TITLE_SIZE];
 	/* (the tests' steps) */
 	boolean test_parsed;
-	boolean test_share_all, test_shared, test_corrupt;
+	boolean test_share_all, test_corrupt;
+	int test_shared_count;
 	char test_make_gametype[16];
 	boolean test_made;
 	long test_browse_at[FILESHARE_TEST_BROWSES];
 	int test_browse_count, test_browses_done;
 	int test_download;
 	int test_downloaded;
-	long test_send_at;
-	int test_send_kind;
-	boolean test_sent;
+	long test_send_at[FILESHARE_TEST_BROWSES];
+	int test_send_kind[FILESHARE_TEST_BROWSES];
+	int test_send_count, test_sends_done;
 	unsigned long test_started;
 	int test_last_state;
 	unsigned long test_download_time;
@@ -190,6 +191,9 @@ static boolean fileshare_game_variant_folder(long profile_index, char *folder, i
 
 	if (!saved_game_file_get_path_to_enclosing_directory(profile_index, full))
 		return FALSE;
+	/* (the folder's path ends with its separator: u:\UDATA\<folder>\) */
+	for (index = (int)strlen(full); index > 0 && (full[index - 1] == '\\' || full[index - 1] == '/'); index--)
+		full[index - 1] = 0;
 	last = strrchr(full, '\\');
 	if (!last)
 		last = strrchr(full, '/');
@@ -525,8 +529,8 @@ Slayer's rules, made once at the menus), browse-at=S[:S...] (S seconds after
 friends went online, the first friend online browsed), download=first|all
 (each file listed downloaded, the question answered yes), send-at=S[:game]
 (the first map variant - or game variant - sent to the first friend
-online), corrupt (a file sent damaged: the receiver's validator must refuse
-it) */
+online; each send-at another send), corrupt (a file sent damaged: the
+receiver's validator must refuse it) */
 static void fileshare_friends_test_parse(void)
 {
 	char const *setting = getenv("HALO_TEST_FILESHARE");
@@ -534,7 +538,6 @@ static void fileshare_friends_test_parse(void)
 	char *step, *save_pointer = NULL;
 
 	fileshare_friends.test_parsed = TRUE;
-	fileshare_friends.test_send_at = -1;
 	if (!setting || !setting[0])
 		return;
 	snprintf(copy, sizeof(copy), "%s", setting);
@@ -561,11 +564,11 @@ static void fileshare_friends_test_parse(void)
 			fileshare_friends.test_download = 1;
 		else if (!strcmp(step, "download=all"))
 			fileshare_friends.test_download = 2;
-		else if (!strncmp(step, "send-at=", 8))
+		else if (!strncmp(step, "send-at=", 8) && fileshare_friends.test_send_count < FILESHARE_TEST_BROWSES)
 		{
-			fileshare_friends.test_send_at = atol(step + 8);
-			fileshare_friends.test_send_kind = strstr(step, ":game") ? P2P_FILESHARE_KIND_GAME_VARIANT :
-				P2P_FILESHARE_KIND_MAP_VARIANT;
+			fileshare_friends.test_send_at[fileshare_friends.test_send_count] = atol(step + 8);
+			fileshare_friends.test_send_kind[fileshare_friends.test_send_count++] = strstr(step, ":game") ?
+				P2P_FILESHARE_KIND_GAME_VARIANT : P2P_FILESHARE_KIND_MAP_VARIANT;
 		}
 	}
 	platform_log("fileshare: test steps: %s", setting);
@@ -640,14 +643,16 @@ static void fileshare_friends_test_steps(boolean main_menu_loaded)
 	}
 	if (!fileshare_friends.test_started)
 		fileshare_friends.test_started = now ? now : 1;
-	if (fileshare_friends.test_share_all && !fileshare_friends.test_shared)
+	/* (every file of the list, each time the list holds another count: the
+	game type made meanwhile too) */
+	if (fileshare_friends.test_share_all)
 	{
 		static struct p2p_fileshare_local entries[P2P_FILESHARE_LOCAL_MAXIMUM];
 		int count = p2p_fileshare_local(entries, P2P_FILESHARE_LOCAL_MAXIMUM), index, marked = 0;
 
-		if (count)
+		if (count && count != fileshare_friends.test_shared_count)
 		{
-			fileshare_friends.test_shared = TRUE;
+			fileshare_friends.test_shared_count = count;
 			for (index = 0; index < count; index++)
 				if (!entries[index].damaged &&
 					p2p_fileshare_mark(entries[index].kind, entries[index].map, entries[index].file, 1) == P2P_FILESHARE_DONE)
@@ -702,15 +707,15 @@ static void fileshare_friends_test_steps(boolean main_menu_loaded)
 				fileshare_friends.test_downloaded++;
 		}
 	}
-	if (fileshare_friends.test_send_at >= 0 && !fileshare_friends.test_sent &&
-		now - fileshare_friends.test_started >= (unsigned long)fileshare_friends.test_send_at * 1000UL)
+	if (fileshare_friends.test_sends_done < fileshare_friends.test_send_count && now - fileshare_friends.test_started >=
+		(unsigned long)fileshare_friends.test_send_at[fileshare_friends.test_sends_done] * 1000UL)
 	{
 		static struct p2p_fileshare_local entries[P2P_FILESHARE_LOCAL_MAXIMUM];
 		int count = p2p_fileshare_local(entries, P2P_FILESHARE_LOCAL_MAXIMUM), index;
+		int kind = fileshare_friends.test_send_kind[fileshare_friends.test_sends_done++];
 
-		fileshare_friends.test_sent = TRUE;
 		for (index = 0; index < count; index++)
-			if (entries[index].kind == fileshare_friends.test_send_kind && !entries[index].damaged)
+			if (entries[index].kind == kind && !entries[index].damaged)
 				break;
 		if (index >= count)
 			platform_log("fileshare: test: nothing of that kind to send");
